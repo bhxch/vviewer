@@ -3,5 +3,10 @@
   "version": "0.1.0",
   "type": "module",
   "main": "src/image.ts",
+  "types": "src/image.ts",
+  "exports": {
+    ".": "./src/image.ts",
+    "./av": "./src/av.ts"
+  },
   "dependencies": { "@vviewer/core": "workspace:*" }
 }
