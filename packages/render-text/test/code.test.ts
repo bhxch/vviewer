@@ -77,26 +77,73 @@ describe('assignIntervalsToLines（区间 → 行分配）', () => {
     ]);
   });
 
-  it('重叠区间已覆盖跳过（父区间吞并子区间）', () => {
+  it('嵌套区间内层优先（父区间不再吞并子区间）', () => {
     const intervals: HighlightInterval[] = [
       { start: 0, end: 5, capture: 'parent' },
-      { start: 1, end: 3, capture: 'child' }, // 完全被覆盖 → 跳过
+      { start: 1, end: 3, capture: 'child' }, // 完全落在 parent 内 → 内层可见
     ];
     const out = assignIntervalsToLines(intervals, offsets);
-    expect(out).toEqual([{ line: 0, segs: [{ start: 0, end: 2, capture: 'parent' }] }, { line: 1, segs: [{ start: 0, end: 2, capture: 'parent' }] }]);
+    expect(out).toEqual([
+      { line: 0, segs: [
+        { start: 0, end: 1, capture: 'parent' },
+        { start: 1, end: 2, capture: 'child' },
+      ] },
+      { line: 1, segs: [{ start: 0, end: 2, capture: 'parent' }] },
+    ]);
   });
 
-  it('部分重叠被裁剪（从前沿接续）', () => {
+  it('rust 转义形态：外层 @string 内的 @constant.character.escape 保留', () => {
+    // 单行 offsets=[0]；"a\nb" 字符串整体 @string，转义序列 \n 内层 @constant.character.escape
+    const offsets1 = [0];
+    const out = assignIntervalsToLines(
+      [
+        { start: 0, end: 14, capture: 'string' },
+        { start: 4, end: 6, capture: 'constant.character.escape' },
+      ],
+      offsets1
+    );
+    expect(out).toEqual([
+      { line: 0, segs: [
+        { start: 0, end: 4, capture: 'string' },
+        { start: 4, end: 6, capture: 'constant.character.escape' },
+        { start: 6, end: 14, capture: 'string' },
+      ] },
+    ]);
+  });
+
+  it('注入场景（markdown fence 形态）：外层 literal 罩整块、内层 token 逐段可见', () => {
+    // 模拟 fenced code block：@text.literal 覆盖整块，注入语言的 keyword 散布其中
+    const offsets1 = [0];
+    const out = assignIntervalsToLines(
+      [
+        { start: 0, end: 20, capture: 'text.literal' },
+        { start: 2, end: 5, capture: 'keyword' },
+        { start: 10, end: 13, capture: 'keyword' },
+      ],
+      offsets1
+    );
+    expect(out).toEqual([
+      { line: 0, segs: [
+        { start: 0, end: 2, capture: 'text.literal' },
+        { start: 2, end: 5, capture: 'keyword' },
+        { start: 5, end: 10, capture: 'text.literal' },
+        { start: 10, end: 13, capture: 'keyword' },
+        { start: 13, end: 20, capture: 'text.literal' },
+      ] },
+    ]);
+  });
+
+  it('兄弟部分重叠无嵌套时先到者优先（tie 确定性）', () => {
     const intervals: HighlightInterval[] = [
       { start: 0, end: 4, capture: 'a' },
-      { start: 2, end: 6, capture: 'b' }, // [2,4) 已被 a 覆盖，只出 [4,6)
+      { start: 2, end: 6, capture: 'b' }, // 与 a 重叠且互不包含 → 段 [2,4) tie 按字典序归 'a'
     ];
     const out = assignIntervalsToLines(intervals, offsets);
     expect(out).toEqual([
       { line: 0, segs: [{ start: 0, end: 2, capture: 'a' }] },
       { line: 1, segs: [
         { start: 0, end: 1, capture: 'a' }, // 偏移 [3,4)：行 1 的 "c"
-        { start: 1, end: 2, capture: 'b' }, // 偏移 [4,6) 裁剪后：行 1 的 "d"
+        { start: 1, end: 2, capture: 'b' }, // 偏移 [4,6)：行 1 的 "d"
       ] },
     ]);
   });
@@ -157,6 +204,52 @@ describe('renderCode（tree-sitter 主路径，fake client）', () => {
     });
     expect(host.querySelector('.ts-keyword')?.textContent).toBe('let');
     expect(handle.getScrollHost().className).toContain('vv-code-pre'); // virtualScroller 会加 vv-virtual
+    handle.destroy();
+  });
+
+  it('嵌套区间渲染：外层 @string 内的转义序列保留内层样式（rust 形态）', async () => {
+    stubResizeObserver();
+    // 文本 `let x = "a\nb"`（\n 为字面反斜杠+n 两字符）：字符串 [8,14)，转义 [10,12)
+    const text = 'let x = "a\\nb"';
+    attachHighlightClient({
+      highlight: async () => [
+        { start: 8, end: 14, capture: 'string' },
+        { start: 10, end: 12, capture: 'constant.character.escape' },
+      ],
+    });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(new TextEncoder().encode(text), host, { ext: 'rs', lang: 'rust' });
+    await vi.waitFor(() => {
+      expect(host.querySelector('.ts-constant-character-escape')).not.toBeNull();
+    });
+    expect(host.querySelector('.ts-constant-character-escape')?.textContent).toBe('\\n');
+    // 内层两侧的间隙仍由外层 @string 着色
+    expect(host.querySelector('.ts-string')?.textContent).toBe('"a');
+    handle.destroy();
+  });
+
+  it('注入场景渲染：外层 literal 罩整块时内层 keyword span 可见（markdown fence 形态）', async () => {
+    stubResizeObserver();
+    const text = 'AB keyword CD keyword EF'; // 三段：外层覆盖全文，keyword 散布其中
+    const k1 = text.indexOf('keyword');
+    const k2 = text.lastIndexOf('keyword');
+    attachHighlightClient({
+      highlight: async () => [
+        { start: 0, end: text.length, capture: 'text.literal' },
+        { start: k1, end: k1 + 7, capture: 'keyword' },
+        { start: k2, end: k2 + 7, capture: 'keyword' },
+      ],
+    });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(new TextEncoder().encode(text), host, { ext: 'md', lang: 'markdown' });
+    await vi.waitFor(() => {
+      expect(host.querySelectorAll('.ts-keyword').length).toBe(2);
+    });
+    // 内层完整可见，外层只覆盖间隙
+    expect([...host.querySelectorAll('.ts-keyword')].map((el) => el.textContent)).toEqual(['keyword', 'keyword']);
+    expect(host.querySelector('.ts-text-literal')?.textContent).toBe('AB ');
     handle.destroy();
   });
 

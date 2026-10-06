@@ -120,7 +120,7 @@ export class TreeSitterEngine {
 
   /**
    * 高亮文本：展开查询 → 加载语言（缓存）→ 编译查询（缓存）→ 解析 → 区间 → 注入递归。
-   * 区间按 (start asc, end desc) 排序，不去重叠（渲染端"已覆盖跳过"）。
+   * 区间按 (start asc, end desc) 排序，不去重叠（渲染端按"内层优先"展平——嵌套区间内层可见）。
    * depth 为当前注入深度；depth ≥ maxInjectionDepth 不再递归注入。
    * lang 可传 manifest 别名（js/sh/py 等），内部先规范化为清单键名。
    */

@@ -103,20 +103,84 @@ function lineOf(lineOffsets: number[], pos: number): number {
   return ans;
 }
 
+/** 候选中更"内"的 tie 裁决：区间更短者优先（更局部的捕获更具体），再按 capture 字典序保证确定性 */
+function innerTie(a: HighlightInterval, b: HighlightInterval): boolean {
+  const la = a.end - a.start;
+  const lb = b.end - b.start;
+  if (la !== lb) return la < lb;
+  return a.capture < b.capture;
+}
+
+/** 原子段内最内层 capture：被 active 中其他区间包含数（嵌套深度）最大者优先 */
+function innermostOf(active: readonly HighlightInterval[]): HighlightInterval {
+  let best = active[0]!;
+  let bestDepth = -1;
+  for (const iv of active) {
+    let depth = 0;
+    for (const other of active) {
+      if (other.start <= iv.start && iv.end <= other.end) depth++;
+    }
+    if (depth > bestDepth || (depth === bestDepth && innerTie(iv, best))) {
+      best = iv;
+      bestDepth = depth;
+    }
+  }
+  return best;
+}
+
 /**
- * 区间 → 行分配（纯函数）：区间按 (start asc, end desc) 排序后逐个消费，
- * 全局"已覆盖前沿"去重叠——完全被覆盖的跳过、部分重叠从前沿裁剪。
- * 输出的 segs 相对行首（便于直接 slice 行文本）。
+ * 嵌套区间展平为互不重叠的"内层优先"区间（纯函数）：
+ * 扫描线在全部区间端点处切成原子段，每段取覆盖它的区间中最内层者。
+ * 与 helix/neovim 的内层优先惯例一致——injection（markdown 代码块、rust 转义序列、
+ * html script 内嵌 js）的内层样式不被外层 capture 罩住；内层之间的间隙回落外层。
+ * 输出按 start 升序，相邻同 capture 段已合并。
+ */
+export function flattenIntervals(intervals: HighlightInterval[]): HighlightInterval[] {
+  const sorted = [...intervals].sort((a, b) => a.start - b.start || b.end - a.end);
+  const bounds = new Set<number>();
+  for (const iv of sorted) {
+    if (iv.end > iv.start) {
+      bounds.add(iv.start);
+      bounds.add(iv.end);
+    }
+  }
+  const points = [...bounds].sort((a, b) => a - b);
+  const active: HighlightInterval[] = [];
+  const out: HighlightInterval[] = [];
+  let ptr = 0;
+  for (let bi = 0; bi < points.length; bi++) {
+    const pos = points[bi]!;
+    const next = bi + 1 < points.length ? points[bi + 1]! : pos;
+    for (let j = active.length - 1; j >= 0; j--) {
+      if (active[j]!.end <= pos) active.splice(j, 1);
+    }
+    while (ptr < sorted.length && sorted[ptr]!.start <= pos) {
+      const iv = sorted[ptr]!;
+      if (iv.end > pos) active.push(iv);
+      ptr++;
+    }
+    if (next === pos || active.length === 0) continue;
+    const pick = innermostOf(active);
+    const last = out[out.length - 1];
+    if (last && last.capture === pick.capture && last.end === pos) last.end = next;
+    else out.push({ start: pos, end: next, capture: pick.capture });
+  }
+  return out;
+}
+
+/**
+ * 区间 → 行分配（纯函数）：先 flattenIntervals 内层优先展平（互不重叠、start 升序），
+ * 再逐段切到行。输出的 segs 相对行首（便于直接 slice 行文本）且互不重叠、起点升序。
  */
 export function assignIntervalsToLines(
   intervals: HighlightInterval[],
   lineOffsets: number[]
 ): LineAssignment[] {
   if (intervals.length === 0 || lineOffsets.length === 0) return [];
-  const sorted = [...intervals].sort((a, b) => a.start - b.start || b.end - a.end);
+  const flat = flattenIntervals(intervals);
   const byLine = new Map<number, LineSeg[]>();
-  let covered = 0;
-  for (const iv of sorted) {
+  let covered = 0; // 防御：flat 理论上互不重叠
+  for (const iv of flat) {
     if (iv.end <= iv.start || iv.end <= covered) continue;
     const from = Math.max(iv.start, covered);
     covered = iv.end;
