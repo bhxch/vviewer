@@ -18,6 +18,7 @@ describe('detect chain', () => {
     const zip = new Uint8Array([0x50,0x4b,0x03,0x04,0,0]);
     const d = detect({ name: 'notes.txt', head: zip });
     expect(d.signature).toBe('zip');
+    expect(d.binary).toBe(false); // 文本类扩展名：签名只留作派发器纠偏，不判二进制
   });
   it('gb18030 text detected non-utf8 but not binary', () => {
     const d = detect({ name: 'old.txt', head: new Uint8Array([0xd6,0xd0,0xce,0xc4]) });
