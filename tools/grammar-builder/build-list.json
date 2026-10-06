@@ -1,0 +1,1670 @@
+[
+  {
+    "name": "ada",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "ada"
+  },
+  {
+    "name": "adl",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "adl"
+  },
+  {
+    "name": "agda",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "agda"
+  },
+  {
+    "name": "alloy",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "alloy"
+  },
+  {
+    "name": "amber",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "amber"
+  },
+  {
+    "name": "astro",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "astro"
+  },
+  {
+    "name": "awk",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "awk"
+  },
+  {
+    "name": "bash",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "bash"
+  },
+  {
+    "name": "basic",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "basic"
+  },
+  {
+    "name": "bass",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "bass"
+  },
+  {
+    "name": "beancount",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "beancount"
+  },
+  {
+    "name": "bibtex",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "bibtex"
+  },
+  {
+    "name": "bicep",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "bicep"
+  },
+  {
+    "name": "bitbake",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "bitbake"
+  },
+  {
+    "name": "blade",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "blade"
+  },
+  {
+    "name": "blueprint",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "blueprint"
+  },
+  {
+    "name": "c",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "c"
+  },
+  {
+    "name": "c-sharp",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "c-sharp"
+  },
+  {
+    "name": "c3",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "c3"
+  },
+  {
+    "name": "caddyfile",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "caddyfile"
+  },
+  {
+    "name": "cairo",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "cairo"
+  },
+  {
+    "name": "capnp",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "capnp"
+  },
+  {
+    "name": "cel",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "cel"
+  },
+  {
+    "name": "chuck",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "chuck"
+  },
+  {
+    "name": "clarity",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "clarity"
+  },
+  {
+    "name": "clojure",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "clojure"
+  },
+  {
+    "name": "cmake",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "cmake"
+  },
+  {
+    "name": "comment",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "comment"
+  },
+  {
+    "name": "cpon",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "cpon"
+  },
+  {
+    "name": "cpp",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "cpp"
+  },
+  {
+    "name": "crystal",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "crystal"
+  },
+  {
+    "name": "css",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "css"
+  },
+  {
+    "name": "csv",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "csv"
+  },
+  {
+    "name": "cue",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "cue"
+  },
+  {
+    "name": "cylc",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "cylc"
+  },
+  {
+    "name": "cython",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "cython"
+  },
+  {
+    "name": "d",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "d"
+  },
+  {
+    "name": "dart",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "dart"
+  },
+  {
+    "name": "dbml",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "dbml"
+  },
+  {
+    "name": "debian",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "debian"
+  },
+  {
+    "name": "devicetree",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "devicetree"
+  },
+  {
+    "name": "dhall",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "dhall"
+  },
+  {
+    "name": "diff",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "diff"
+  },
+  {
+    "name": "djot",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "djot"
+  },
+  {
+    "name": "dockerfile",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "dockerfile"
+  },
+  {
+    "name": "dot",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "dot"
+  },
+  {
+    "name": "doxyfile",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "doxyfile"
+  },
+  {
+    "name": "dtd",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "dtd"
+  },
+  {
+    "name": "dunstrc",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "dunstrc"
+  },
+  {
+    "name": "earthfile",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "earthfile"
+  },
+  {
+    "name": "edoc",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "edoc"
+  },
+  {
+    "name": "eex",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "eex"
+  },
+  {
+    "name": "eiffel",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "eiffel"
+  },
+  {
+    "name": "elisp",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "elisp"
+  },
+  {
+    "name": "elixir",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "elixir"
+  },
+  {
+    "name": "elm",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "elm"
+  },
+  {
+    "name": "elvish",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "elvish"
+  },
+  {
+    "name": "embedded-template",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
+    "name": "erlang",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "erlang"
+  },
+  {
+    "name": "fennel",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "fennel"
+  },
+  {
+    "name": "fga",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "fga"
+  },
+  {
+    "name": "fidl",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "fidl"
+  },
+  {
+    "name": "fish",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "fish"
+  },
+  {
+    "name": "flatbuffers",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "flatbuffers"
+  },
+  {
+    "name": "forth",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "forth"
+  },
+  {
+    "name": "fortran",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "fortran"
+  },
+  {
+    "name": "freebasic",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "freebasic"
+  },
+  {
+    "name": "fsharp",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "fsharp"
+  },
+  {
+    "name": "gas",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "gas"
+  },
+  {
+    "name": "gdscript",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "gdscript"
+  },
+  {
+    "name": "gherkin",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "gherkin"
+  },
+  {
+    "name": "ghostty",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "ghostty"
+  },
+  {
+    "name": "git-config",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "git-config"
+  },
+  {
+    "name": "git-rebase",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "git-rebase"
+  },
+  {
+    "name": "gitattributes",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
+    "name": "gitcommit",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
+    "name": "gitignore",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
+    "name": "gleam",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "gleam"
+  },
+  {
+    "name": "glimmer",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "glimmer"
+  },
+  {
+    "name": "glimmer-javascript",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
+    "name": "glimmer-typescript",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
+    "name": "glsl",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "glsl"
+  },
+  {
+    "name": "gn",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "gn"
+  },
+  {
+    "name": "gnuplot",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "gnuplot"
+  },
+  {
+    "name": "go",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "go"
+  },
+  {
+    "name": "go-format-string",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "go-format-string"
+  },
+  {
+    "name": "godot-resource",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "godot-resource"
+  },
+  {
+    "name": "gomod",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "gomod"
+  },
+  {
+    "name": "gotmpl",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "gotmpl"
+  },
+  {
+    "name": "gowork",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "gowork"
+  },
+  {
+    "name": "gpr",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "gpr"
+  },
+  {
+    "name": "graphql",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "graphql"
+  },
+  {
+    "name": "gren",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "gren"
+  },
+  {
+    "name": "groovy",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "groovy"
+  },
+  {
+    "name": "hare",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "hare"
+  },
+  {
+    "name": "haskell",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "haskell"
+  },
+  {
+    "name": "haskell-literate",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "haskell-literate"
+  },
+  {
+    "name": "haskell-persistent",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "haskell-persistent"
+  },
+  {
+    "name": "haxe",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "haxe"
+  },
+  {
+    "name": "hcl",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "hcl"
+  },
+  {
+    "name": "hdl",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "hdl"
+  },
+  {
+    "name": "heex",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "heex"
+  },
+  {
+    "name": "hocon",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "hocon"
+  },
+  {
+    "name": "hoon",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "hoon"
+  },
+  {
+    "name": "hosts",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "hosts"
+  },
+  {
+    "name": "html",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "html"
+  },
+  {
+    "name": "htmldjango",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "htmldjango"
+  },
+  {
+    "name": "hurl",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "hurl"
+  },
+  {
+    "name": "hyprlang",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "hyprlang"
+  },
+  {
+    "name": "iex",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "iex"
+  },
+  {
+    "name": "ini",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "ini"
+  },
+  {
+    "name": "ink",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "ink"
+  },
+  {
+    "name": "inko",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "inko"
+  },
+  {
+    "name": "janet-simple",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
+    "name": "java",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "java"
+  },
+  {
+    "name": "javascript",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "javascript"
+  },
+  {
+    "name": "jinja2",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
+    "name": "jjdescription",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "jjdescription"
+  },
+  {
+    "name": "jjrevset",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "jjrevset"
+  },
+  {
+    "name": "jjtemplate",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "jjtemplate"
+  },
+  {
+    "name": "jq",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "jq"
+  },
+  {
+    "name": "jsdoc",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "jsdoc"
+  },
+  {
+    "name": "json",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "json"
+  },
+  {
+    "name": "json5",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "json5"
+  },
+  {
+    "name": "jsonnet",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "jsonnet"
+  },
+  {
+    "name": "julia",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "julia"
+  },
+  {
+    "name": "just",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "just"
+  },
+  {
+    "name": "kcl",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "kcl"
+  },
+  {
+    "name": "kconfig",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "kconfig"
+  },
+  {
+    "name": "kdl",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "kdl"
+  },
+  {
+    "name": "klog",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "klog"
+  },
+  {
+    "name": "koka",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "koka"
+  },
+  {
+    "name": "kotlin",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "kotlin"
+  },
+  {
+    "name": "koto",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "koto"
+  },
+  {
+    "name": "latex",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "latex"
+  },
+  {
+    "name": "ld",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "ld"
+  },
+  {
+    "name": "ldif",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "ldif"
+  },
+  {
+    "name": "lean",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "lean"
+  },
+  {
+    "name": "ledger",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "ledger"
+  },
+  {
+    "name": "less",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "less"
+  },
+  {
+    "name": "llvm",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "llvm"
+  },
+  {
+    "name": "llvm-mir",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "llvm-mir"
+  },
+  {
+    "name": "log",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "log"
+  },
+  {
+    "name": "lpf",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "lpf"
+  },
+  {
+    "name": "lua",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "lua"
+  },
+  {
+    "name": "lua-format-string",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "lua-format-string"
+  },
+  {
+    "name": "luap",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "luap"
+  },
+  {
+    "name": "luau",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "luau"
+  },
+  {
+    "name": "mail",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "mail"
+  },
+  {
+    "name": "make",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "make"
+  },
+  {
+    "name": "markdoc",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "markdoc"
+  },
+  {
+    "name": "markdown",
+    "subpath": "tree-sitter-markdown",
+    "parserCExists": true,
+    "helixLang": "markdown"
+  },
+  {
+    "name": "markdown_inline",
+    "subpath": "tree-sitter-markdown-inline",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
+    "name": "matlab",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "matlab"
+  },
+  {
+    "name": "mermaid",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "mermaid"
+  },
+  {
+    "name": "meson",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "meson"
+  },
+  {
+    "name": "mojo",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "mojo"
+  },
+  {
+    "name": "move",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "move"
+  },
+  {
+    "name": "nasm",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "nasm"
+  },
+  {
+    "name": "nearley",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "nearley"
+  },
+  {
+    "name": "nginx",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "nginx"
+  },
+  {
+    "name": "nickel",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "nickel"
+  },
+  {
+    "name": "nim",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "nim"
+  },
+  {
+    "name": "nix",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "nix"
+  },
+  {
+    "name": "nu",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "nu"
+  },
+  {
+    "name": "ocaml",
+    "subpath": "ocaml",
+    "parserCExists": true,
+    "helixLang": "ocaml"
+  },
+  {
+    "name": "ocaml-interface",
+    "subpath": "interface",
+    "parserCExists": true,
+    "helixLang": "ocaml-interface"
+  },
+  {
+    "name": "odin",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "odin"
+  },
+  {
+    "name": "ohm",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "ohm"
+  },
+  {
+    "name": "opencl",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "opencl"
+  },
+  {
+    "name": "openscad",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "openscad"
+  },
+  {
+    "name": "org",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "org"
+  },
+  {
+    "name": "pascal",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "pascal"
+  },
+  {
+    "name": "passwd",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "passwd"
+  },
+  {
+    "name": "pem",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "pem"
+  },
+  {
+    "name": "penrose",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "penrose"
+  },
+  {
+    "name": "perl",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "perl"
+  },
+  {
+    "name": "pest",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "pest"
+  },
+  {
+    "name": "php-only",
+    "subpath": "php_only",
+    "parserCExists": true,
+    "helixLang": "php-only"
+  },
+  {
+    "name": "picat",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "picat"
+  },
+  {
+    "name": "pkl",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "pkl"
+  },
+  {
+    "name": "po",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "po"
+  },
+  {
+    "name": "pod",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "pod"
+  },
+  {
+    "name": "ponylang",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "ponylang"
+  },
+  {
+    "name": "powershell",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "powershell"
+  },
+  {
+    "name": "prisma",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "prisma"
+  },
+  {
+    "name": "prolog",
+    "subpath": "grammars/prolog",
+    "parserCExists": true,
+    "helixLang": "prolog"
+  },
+  {
+    "name": "properties",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "properties"
+  },
+  {
+    "name": "proto",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
+    "name": "prql",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "prql"
+  },
+  {
+    "name": "pug",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "pug"
+  },
+  {
+    "name": "purescript",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "purescript"
+  },
+  {
+    "name": "python",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "python"
+  },
+  {
+    "name": "ql",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
+    "name": "qmljs",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
+    "name": "query",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
+    "name": "quint",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "quint"
+  },
+  {
+    "name": "r",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "r"
+  },
+  {
+    "name": "regex",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "regex"
+  },
+  {
+    "name": "rego",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "rego"
+  },
+  {
+    "name": "requirements",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
+    "name": "rescript",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "rescript"
+  },
+  {
+    "name": "robot",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "robot"
+  },
+  {
+    "name": "robots",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
+    "name": "ron",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "ron"
+  },
+  {
+    "name": "rshtml",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "rshtml"
+  },
+  {
+    "name": "rst",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "rst"
+  },
+  {
+    "name": "ruby",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "ruby"
+  },
+  {
+    "name": "rust",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "rust"
+  },
+  {
+    "name": "rust-format-args",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "rust-format-args"
+  },
+  {
+    "name": "scala",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "scala"
+  },
+  {
+    "name": "scfg",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "scfg"
+  },
+  {
+    "name": "scheme",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "scheme"
+  },
+  {
+    "name": "scss",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "scss"
+  },
+  {
+    "name": "shellcheckrc",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "shellcheckrc"
+  },
+  {
+    "name": "slang",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "slang"
+  },
+  {
+    "name": "slint",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "slint"
+  },
+  {
+    "name": "slisp",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "slisp"
+  },
+  {
+    "name": "smali",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "smali"
+  },
+  {
+    "name": "smithy",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "smithy"
+  },
+  {
+    "name": "sml",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "sml"
+  },
+  {
+    "name": "snakemake",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "snakemake"
+  },
+  {
+    "name": "solidity",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "solidity"
+  },
+  {
+    "name": "sourcepawn",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "sourcepawn"
+  },
+  {
+    "name": "spade",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "spade"
+  },
+  {
+    "name": "spicedb",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "spicedb"
+  },
+  {
+    "name": "sql",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "sql"
+  },
+  {
+    "name": "sshclientconfig",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "sshclientconfig"
+  },
+  {
+    "name": "strace",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "strace"
+  },
+  {
+    "name": "strictdoc",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "strictdoc"
+  },
+  {
+    "name": "supercollider",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "supercollider"
+  },
+  {
+    "name": "svelte",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "svelte"
+  },
+  {
+    "name": "sway",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "sway"
+  },
+  {
+    "name": "swift",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "swift"
+  },
+  {
+    "name": "systemverilog",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "systemverilog"
+  },
+  {
+    "name": "t32",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "t32"
+  },
+  {
+    "name": "tablegen",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "tablegen"
+  },
+  {
+    "name": "tact",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "tact"
+  },
+  {
+    "name": "task",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "task"
+  },
+  {
+    "name": "tcl",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "tcl"
+  },
+  {
+    "name": "teal",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "teal"
+  },
+  {
+    "name": "templ",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "templ"
+  },
+  {
+    "name": "tera",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "tera"
+  },
+  {
+    "name": "textproto",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "textproto"
+  },
+  {
+    "name": "thrift",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "thrift"
+  },
+  {
+    "name": "tlaplus",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "tlaplus"
+  },
+  {
+    "name": "todotxt",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "todotxt"
+  },
+  {
+    "name": "toml",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "toml"
+  },
+  {
+    "name": "tsx",
+    "subpath": "tsx",
+    "parserCExists": true,
+    "helixLang": "tsx"
+  },
+  {
+    "name": "twig",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "twig"
+  },
+  {
+    "name": "typescript",
+    "subpath": "typescript",
+    "parserCExists": true,
+    "helixLang": "typescript"
+  },
+  {
+    "name": "typespec",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "typespec"
+  },
+  {
+    "name": "typst",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "typst"
+  },
+  {
+    "name": "ungrammar",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "ungrammar"
+  },
+  {
+    "name": "unison",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "unison"
+  },
+  {
+    "name": "uxntal",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "uxntal"
+  },
+  {
+    "name": "v",
+    "subpath": "tree_sitter_v",
+    "parserCExists": true,
+    "helixLang": "v"
+  },
+  {
+    "name": "vala",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "vala"
+  },
+  {
+    "name": "vento",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "vento"
+  },
+  {
+    "name": "verilog",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "verilog"
+  },
+  {
+    "name": "vhdl",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "vhdl"
+  },
+  {
+    "name": "vhs",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "vhs"
+  },
+  {
+    "name": "vim",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "vim"
+  },
+  {
+    "name": "vue",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "vue"
+  },
+  {
+    "name": "wast",
+    "subpath": "wast",
+    "parserCExists": true,
+    "helixLang": "wast"
+  },
+  {
+    "name": "wat",
+    "subpath": "wat",
+    "parserCExists": true,
+    "helixLang": "wat"
+  },
+  {
+    "name": "werk",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "werk"
+  },
+  {
+    "name": "wesl",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "wesl"
+  },
+  {
+    "name": "wgsl",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "wgsl"
+  },
+  {
+    "name": "wikitext",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "wikitext"
+  },
+  {
+    "name": "wit",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "wit"
+  },
+  {
+    "name": "xit",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "xit"
+  },
+  {
+    "name": "xml",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "xml"
+  },
+  {
+    "name": "xtc",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "xtc"
+  },
+  {
+    "name": "yaml",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "yaml"
+  },
+  {
+    "name": "yara",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "yara"
+  },
+  {
+    "name": "yuck",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "yuck"
+  },
+  {
+    "name": "zig",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "zig"
+  }
+]

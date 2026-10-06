@@ -1,0 +1,12 @@
+{
+  "name": "@vviewer/grammar-builder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build-list": "node build-list.mjs",
+    "build": "node build.mjs --from-wasms",
+    "self-build": "node build.mjs --self-build",
+    "test": "vitest run"
+  }
+}
