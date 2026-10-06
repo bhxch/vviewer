@@ -5,3 +5,5 @@ export * from './registry/registry';
 export * from './dispatch/dispatcher';
 export * from './dispatch/errorRenderer';
 export * from './tree/singleFile';
+export * from './tree/localFs';
+export * from './tree/localFiles';
