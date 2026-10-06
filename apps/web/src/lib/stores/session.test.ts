@@ -8,7 +8,7 @@ import { loadSettings, saveSettings } from './settings';
 
 describe('session store', () => {
   it('saves and loads tabs', async () => {
-    const tabs = [{ id: 't1', storeId: 's1', storeLabel: 'x', path: 'a.txt', name: 'a.txt', kind: 'restorable', scrollTop: 42, active: true }];
+    const tabs = [{ id: 't1', storeId: 's1', storeLabel: 'x', path: 'a.txt', name: 'a.txt', kind: 'restorable' as const, scrollTop: 42, active: true }];
     await saveTabs(tabs);
     const { tabs: loaded } = await loadSession();
     expect(loaded).toEqual(tabs);

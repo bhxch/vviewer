@@ -33,9 +33,11 @@ async function kvGet<T>(key: string): Promise<T | null> {
 async function kvPut(key: string, value: unknown): Promise<void> {
   const d = await db();
   return new Promise((resolve, reject) => {
-    const tx = d.transaction(STORE, 'readwrite').objectStore(STORE).put(value, key);
-    tx.onsuccess = () => resolve();
+    const tx = d.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(value, key);
+    tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'));
   });
 }
 
