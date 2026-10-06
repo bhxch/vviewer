@@ -60,6 +60,8 @@ importers:
 
   packages/core: {}
 
+  packages/highlight: {}
+
   packages/render-media:
     dependencies:
       '@vviewer/core':
