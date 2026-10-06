@@ -4,12 +4,15 @@
   import type { Tab } from './openFlow.svelte';
   import { persistScroll } from './openFlow.svelte';
   import { dispatcher } from './viewer';
+  import { cancelHighlight } from './highlightClient';
 
   let { tab }: { tab: Tab | null } = $props();
 
   let host = $state<HTMLElement | null>(null);
   let instance: RenderedInstance | null = null;
   let rafId = 0;
+  /** code 渲染器的内部滚动容器（.vv-code-pre）；其余渲染器为 null（滚动在外层 .vv-viewer-scroll） */
+  let scrollHost: HTMLElement | null = null;
 
   $effect(() => {
     if (!host || !tab || tab.source.path === '') return;
@@ -27,12 +30,21 @@
           return;
         }
         instance = res.instance;
-        // 滚动恢复：目录树切换回该 tab 时回到上次位置（外层滚动容器）
-        const scroller = host.closest('.vv-viewer-scroll') as HTMLElement | null;
-        if (scroller && current.scrollTop > 0) {
+        // 滚动恢复：目录树切换回该 tab 时回到上次位置。
+        // code 渲染器滚动在内部 .vv-code-pre（外层不滚动），接 getScrollHost()；其余维持外层容器。
+        const inner =
+          'getScrollHost' in res.instance
+            ? (res.instance as RenderedInstance & { getScrollHost(): HTMLElement }).getScrollHost()
+            : null;
+        if (inner) {
+          scrollHost = inner;
+          inner.addEventListener('scroll', onScroll);
+        }
+        const target: HTMLElement | null = inner ?? (host.closest('.vv-viewer-scroll') as HTMLElement | null);
+        if (target && current.scrollTop > 0) {
           rafId = requestAnimationFrame(() => {
             if (cancelled) return;
-            scroller.scrollTop = current.scrollTop;
+            target.scrollTop = current.scrollTop;
           });
         }
       } catch (err) {
@@ -45,6 +57,9 @@
     return () => {
       cancelled = true;
       cancelAnimationFrame(rafId);
+      scrollHost?.removeEventListener('scroll', onScroll);
+      scrollHost = null;
+      cancelHighlight(); // 取消未完成的 tree-sitter 高亮请求（Worker 不做无用功）
       instance?.destroy();
       instance = null;
     };

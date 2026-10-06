@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { expandQuery, type QueryAssets } from '../src/queries';
+import { expandQuery, expandQueryAsync, type QueryAssets } from '../src/queries';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -82,5 +82,40 @@ describe('expandQuery（查询继承展开器）', () => {
       ['diamond', { highlights: '; inherits: left, right\nD' }],
     ]);
     expect(expandQuery(assets, 'diamond')?.highlights).toBe('R\nL\nR\nRt\nD');
+  });
+});
+
+describe('expandQueryAsync（fetch 版查询来源）', () => {
+  /** Map 形态的异步来源（模拟 Worker 端 fetch：未知语言返回 null） */
+  function asyncSource(assets: QueryAssets) {
+    return async (lang: string) => assets.get(lang) ?? null;
+  }
+
+  it('继承链展开结果与同步版一致', async () => {
+    const assets: QueryAssets = new Map([
+      ['ecma', { highlights: 'E', injections: 'EI' }],
+      ['typescript', { highlights: '; inherits: ecma\nTS', injections: '; inherits: ecma\nTI' }],
+    ]);
+    const out = await expandQueryAsync(asyncSource(assets), 'typescript');
+    expect(out).toEqual({ highlights: 'E\nTS', injections: 'EI\nTI' });
+  });
+
+  it('环继承抛 Error("循环继承")', async () => {
+    const assets: QueryAssets = new Map([
+      ['a', { highlights: '; inherits: b\nA' }],
+      ['b', { highlights: '; inherits: a\nB' }],
+    ]);
+    await expect(expandQueryAsync(asyncSource(assets), 'a')).rejects.toThrowError('循环继承');
+  });
+
+  it('缺父记 warn 并跳过；语言无查询文件返回 null', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const assets: QueryAssets = new Map([
+      ['child', { highlights: '; inherits: ghost\nCHILD' }],
+    ]);
+    const out = await expandQueryAsync(asyncSource(assets), 'child');
+    expect(out?.highlights).toBe('CHILD');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(await expandQueryAsync(asyncSource(assets), 'nope')).toBeNull();
   });
 });

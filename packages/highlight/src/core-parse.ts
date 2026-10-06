@@ -1,5 +1,5 @@
 import { Parser, Language, Query, type Tree } from 'web-tree-sitter';
-import { expandQuery, type QueryAssets, type QueryFile } from './queries';
+import { expandQuery, expandQueryAsync, type AsyncQuerySource, type ExpandedQuery, type QueryAssets, type QueryFile } from './queries';
 import type { HighlightInterval } from './types';
 
 /**
@@ -22,6 +22,8 @@ export type HighlightResult =
 export interface EngineOptions {
   /** 查询来源：assets/queries 目录路径（Node，自动扫描子目录）或虚拟映射。 */
   queriesDir?: string | VirtualQueries;
+  /** 查询按需加载基础 URL（如 '/queries/'，目录布局同 assets/queries）——Worker 端 fetch 加载；queriesDir/queries 未给时生效。 */
+  queriesBase?: string;
   /** grammar wasm 目录（含 manifest.json），Node 文件系统路径。 */
   grammarsDir?: string;
   /** 直接给 grammar 清单（浏览器端跳过 manifest 读取）。 */
@@ -73,6 +75,7 @@ let initPromise: Promise<void> | null = null;
 export class TreeSitterEngine {
   private readonly parser: Parser;
   private readonly assets: QueryAssets;
+  private readonly remoteQueries: AsyncQuerySource | null;
   private readonly grammarTable: GrammarTable;
   private readonly grammarsBase: string;
   private readonly aliasToLang: Map<string, string>;
@@ -82,6 +85,7 @@ export class TreeSitterEngine {
 
   private constructor(assets: QueryAssets, grammarTable: GrammarTable, opts: EngineOptions) {
     this.assets = assets;
+    this.remoteQueries = opts.queriesBase ? remoteQueryLoader(opts.queriesBase) : null;
     this.grammarTable = grammarTable;
     this.grammarsBase = opts.grammarsBase ?? opts.grammarsDir ?? '';
     this.aliasToLang = buildAliasTable(grammarTable);
@@ -179,7 +183,12 @@ export class TreeSitterEngine {
   }
 
   private async doPrepare(lang: string): Promise<PreparedLanguage | null> {
-    const expanded = expandQuery(this.assets, lang);
+    let expanded: ExpandedQuery | null;
+    if (this.remoteQueries) {
+      expanded = await expandQueryAsync(this.remoteQueries, lang);
+    } else {
+      expanded = expandQuery(this.assets, lang);
+    }
     if (!expanded) return null;
     const file = this.resolveGrammar(lang);
     if (!file) return null;
@@ -252,9 +261,35 @@ function shebangLanguage(text: string): string | null {
   return name.replace(/[-.]?\d+(\.\d+)*$/, '') || null;
 }
 
+/**
+ * fetch 版查询来源（浏览器 Worker 端）：按需请求 `${base}${lang}/highlights.scm` 与 `injections.scm`。
+ * 目录布局与 assets/queries 一致；请求结果（含 404 的 null）按语言缓存，语言不变则只请求一次。
+ */
+function remoteQueryLoader(base: string): AsyncQuerySource {
+  const cache = new Map<string, Promise<QueryFile | null>>();
+  return (lang) => {
+    let p = cache.get(lang);
+    if (!p) {
+      const dir = joinPath(base, lang);
+      const read = async (name: string): Promise<string | undefined> => {
+        try {
+          const res = await fetch(`${dir}/${name}`);
+          return res.ok ? await res.text() : undefined;
+        } catch {
+          return undefined;
+        }
+      };
+      p = Promise.all([read('highlights.scm'), read('injections.scm')]).then(([highlights, injections]) =>
+        highlights === undefined && injections === undefined ? null : { highlights, injections },
+      );
+      cache.set(lang, p);
+    }
+    return p;
+  };
+}
+
 /** 目录扫描构建查询资产：子目录名即语言名，读 highlights.scm / injections.scm（Node 专用）。 */
-async function loadQueriesFromDir(dir: string): Promise<QueryAssets> {
-  const fs = await getFs();
+async function loadQueriesFromDir(dir: string): Promise<QueryAssets> {  const fs = await getFs();
   const assets: QueryAssets = new Map();
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;

@@ -1,9 +1,12 @@
 export {
   expandQuery,
+  expandQueryAsync,
+  type AsyncQuerySource,
   type ExpandedQuery,
   type QueryAssets,
   type QueryFile,
 } from './queries';
+export { detectLanguage } from './langdetect';
 export {
   captureToCssVar,
   resolveCapture,

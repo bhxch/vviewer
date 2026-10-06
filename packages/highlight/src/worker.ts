@@ -2,10 +2,11 @@ import { TreeSitterEngine, type GrammarTable } from './core-parse';
 import type { QueryFile } from './queries';
 import type { HighlightRequest, HighlightResponse } from './types';
 
-/** Worker 初始化参数：核心引擎的全部配置（Node 传目录路径，浏览器可传虚拟映射/清单）。 */
+/** Worker 初始化参数：核心引擎的全部配置（Node 传目录路径，浏览器可传 fetch 基础路径/虚拟映射/清单）。 */
 export interface WorkerInit {
   queriesDir?: string;
   queries?: Record<string, QueryFile>;
+  queriesBase?: string;
   grammarsDir?: string;
   grammars?: GrammarTable;
   grammarsBase?: string;

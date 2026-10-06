@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@vviewer/core": "workspace:*",
+    "@vviewer/highlight": "workspace:*",
     "@vviewer/render-media": "workspace:*",
     "@vviewer/render-text": "workspace:*"
   },

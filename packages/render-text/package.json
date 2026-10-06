@@ -3,5 +3,5 @@
   "version": "0.1.0",
   "type": "module",
   "main": "src/code.ts",
-  "dependencies": { "@vviewer/core": "workspace:*", "highlight.js": "^11.12.0" }
+  "dependencies": { "@vviewer/core": "workspace:*", "@vviewer/highlight": "workspace:*", "highlight.js": "^11.12.0" }
 }
