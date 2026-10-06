@@ -1,0 +1,7 @@
+{
+  "name": "@vviewer/render-media",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/image.ts",
+  "dependencies": { "@vviewer/core": "workspace:*" }
+}

@@ -38,6 +38,12 @@ importers:
 
   packages/core: {}
 
+  packages/render-media:
+    dependencies:
+      '@vviewer/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/render-text:
     dependencies:
       '@vviewer/core':
