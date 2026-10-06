@@ -1,8 +1,12 @@
-import path from 'node:path';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { Parser, Language, Query, type Tree } from 'web-tree-sitter';
 import { expandQuery, type QueryAssets, type QueryFile } from './queries';
 import type { HighlightInterval } from './types';
+
+/**
+ * 浏览器可打包：本模块零顶层 node 内建 import。
+ * fs 仅在传入目录字符串路径（Node 场景）时经变量化动态 import 惰性加载；
+ * 浏览器端应传 VirtualQueries（查询）与 grammars（grammar 清单）。
+ */
 
 /** 虚拟查询来源：与目录布局同形的映射（lang → 查询文件），供浏览器端打包使用。 */
 export type VirtualQueries = Map<string, QueryFile> | Record<string, QueryFile>;
@@ -24,7 +28,7 @@ export interface EngineOptions {
   grammars?: GrammarTable;
   /** grammar wasm 加载基础路径，默认 grammarsDir。 */
   grammarsBase?: string;
-  /** web-tree-sitter runtime（tree-sitter.wasm）所在目录，默认 grammarsBase。 */
+  /** web-tree-sitter runtime（tree-sitter.wasm）所在目录/URL 前缀，默认 grammarsBase。 */
   runtimeDir?: string;
   /** 注入递归最大深度，默认 3。 */
   maxInjectionDepth?: number;
@@ -35,6 +39,29 @@ interface PreparedLanguage {
   language: Language;
   highlights: Query | null;
   injections: Query | null;
+}
+
+/** Node fs 的最小结构类型（避免依赖 @types/node；运行时经变量化动态 import 获取）。 */
+interface FsLike {
+  existsSync(path: string): boolean;
+  readFileSync(path: string, encoding: 'utf8'): string;
+  readdirSync(path: string, options: { withFileTypes: true }): Array<{ name: string; isDirectory(): boolean }>;
+}
+
+let fsPromise: Promise<FsLike> | null = null;
+
+/** 惰性加载 node:fs：变量化 import 路径避免打包器静态解析，仅 Node 分支被触发时调用。 */
+async function getFs(): Promise<FsLike> {
+  if (!fsPromise) {
+    const spec = 'node:fs';
+    fsPromise = import(/* @vite-ignore */ spec) as Promise<FsLike>;
+  }
+  return fsPromise;
+}
+
+/** POSIX 路径/URL 拼接（Node 与浏览器通用，不依赖 node:path）。 */
+function joinPath(base: string, name: string): string {
+  return base === '' ? name : `${base.replace(/\/+$/, '')}/${name}`;
 }
 
 let initPromise: Promise<void> | null = null;
@@ -50,40 +77,48 @@ export class TreeSitterEngine {
   private readonly grammarsBase: string;
   private readonly aliasToLang: Map<string, string>;
   private readonly maxInjectionDepth: number;
+  /** 按规范语言名键控的缓存（别名请求复用同一份加载结果）。 */
   private readonly prepared = new Map<string, Promise<PreparedLanguage | null>>();
 
-  private constructor(assets: QueryAssets, opts: EngineOptions) {
+  private constructor(assets: QueryAssets, grammarTable: GrammarTable, opts: EngineOptions) {
     this.assets = assets;
-    this.grammarTable = opts.grammars ?? this.readManifest(opts.grammarsDir);
+    this.grammarTable = grammarTable;
     this.grammarsBase = opts.grammarsBase ?? opts.grammarsDir ?? '';
-    this.aliasToLang = buildAliasTable(this.grammarTable);
+    this.aliasToLang = buildAliasTable(grammarTable);
     this.maxInjectionDepth = opts.maxInjectionDepth ?? 3;
     this.parser = new Parser();
   }
 
-  /** 初始化 runtime（Parser.init 幂等）并构建引擎。 */
+  /** 初始化 runtime（Parser.init 幂等，失败可重试）并构建引擎。 */
   static async create(opts: EngineOptions): Promise<TreeSitterEngine> {
     const runtimeDir = opts.runtimeDir ?? opts.grammarsBase ?? opts.grammarsDir ?? '';
     if (!initPromise) {
-      initPromise = Parser.init({ locateFile: (file: string) => path.join(runtimeDir, file) }).catch((e) => {
+      initPromise = Parser.init({ locateFile: (file: string) => joinPath(runtimeDir, file) }).catch((e) => {
         initPromise = null; // 失败可重试（下次 create 用正确的 runtimeDir）
         throw e;
       });
     }
     await initPromise;
+
+    let grammarTable = opts.grammars;
+    if (!grammarTable) {
+      if (!opts.grammarsDir) throw new Error('需要 grammarsDir 或 grammars 选项');
+      grammarTable = await readManifest(opts.grammarsDir);
+    }
     const assets: QueryAssets =
       typeof opts.queriesDir === 'string'
-        ? loadQueriesFromDir(opts.queriesDir)
+        ? await loadQueriesFromDir(opts.queriesDir)
         : opts.queriesDir === undefined
           ? new Map<never, never>()
           : normalizeVirtualQueries(opts.queriesDir);
-    return new TreeSitterEngine(assets, opts);
+    return new TreeSitterEngine(assets, grammarTable, opts);
   }
 
   /**
    * 高亮文本：展开查询 → 加载语言（缓存）→ 编译查询（缓存）→ 解析 → 区间 → 注入递归。
    * 区间按 (start asc, end desc) 排序，不去重叠（渲染端"已覆盖跳过"）。
    * depth 为当前注入深度；depth ≥ maxInjectionDepth 不再递归注入。
+   * lang 可传 manifest 别名（js/sh/py 等），内部先规范化为清单键名。
    */
   async highlight(text: string, lang: string, depth = 0): Promise<HighlightResult> {
     try {
@@ -127,8 +162,14 @@ export class TreeSitterEngine {
     this.parser.delete();
   }
 
-  /** 惰性准备单语言：grammar 加载 + 查询编译，全部按 lang 缓存（含失败，避免重复报错刷屏）。 */
-  private prepare(lang: string): Promise<PreparedLanguage | null> {
+  /** 别名 → 规范语言名（不在清单键与别名中时原样返回）。 */
+  private canonicalLang(lang: string): string {
+    return this.grammarTable[lang] !== undefined ? lang : (this.aliasToLang.get(lang) ?? lang);
+  }
+
+  /** 惰性准备单语言：别名规范化 → grammar 加载 + 查询编译，按规范名缓存。 */
+  private prepare(rawLang: string): Promise<PreparedLanguage | null> {
+    const lang = this.canonicalLang(rawLang);
     let p = this.prepared.get(lang);
     if (!p) {
       p = this.doPrepare(lang).catch(() => null);
@@ -142,7 +183,7 @@ export class TreeSitterEngine {
     if (!expanded) return null;
     const file = this.resolveGrammar(lang);
     if (!file) return null;
-    const language = await Language.load(path.join(this.grammarsBase, file));
+    const language = await Language.load(joinPath(this.grammarsBase, file));
     const toQuery = (scm: string): Query | null => {
       if (scm.trim() === '') return null;
       return new Query(language, scm);
@@ -155,13 +196,6 @@ export class TreeSitterEngine {
     const direct = this.grammarTable[lang];
     if (direct) return direct.file;
     return this.aliasToLang.get(lang) ?? null;
-  }
-
-  private readManifest(grammarsDir: string | undefined): GrammarTable {
-    if (!grammarsDir) throw new Error('需要 grammarsDir 或 grammars 选项');
-    const manifestPath = path.join(grammarsDir, 'manifest.json');
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { grammars: GrammarTable };
-    return manifest.grammars;
   }
 }
 
@@ -218,18 +252,27 @@ function shebangLanguage(text: string): string | null {
   return name.replace(/[-.]?\d+(\.\d+)*$/, '') || null;
 }
 
-/** 目录扫描构建查询资产：子目录名即语言名，读 highlights.scm / injections.scm。 */
-function loadQueriesFromDir(dir: string): QueryAssets {
+/** 目录扫描构建查询资产：子目录名即语言名，读 highlights.scm / injections.scm（Node 专用）。 */
+async function loadQueriesFromDir(dir: string): Promise<QueryAssets> {
+  const fs = await getFs();
   const assets: QueryAssets = new Map();
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const read = (name: string): string | undefined => {
-      const p = path.join(dir, entry.name, name);
-      return existsSync(p) ? readFileSync(p, 'utf8') : undefined;
+      const p = joinPath(joinPath(dir, entry.name), name);
+      return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : undefined;
     };
     assets.set(entry.name, { highlights: read('highlights.scm'), injections: read('injections.scm') });
   }
   return assets;
+}
+
+/** 读 grammar 目录的 manifest.json（Node 专用；浏览器端请直接传 grammars 表）。 */
+async function readManifest(grammarsDir: string): Promise<GrammarTable> {
+  const fs = await getFs();
+  const manifestPath = joinPath(grammarsDir, 'manifest.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { grammars: GrammarTable };
+  return manifest.grammars;
 }
 
 function normalizeVirtualQueries(v: VirtualQueries): QueryAssets {

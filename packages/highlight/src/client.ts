@@ -1,4 +1,5 @@
 import type { HighlightInterval, HighlightRequest, HighlightResponse } from './types';
+import type { InitMessage, WorkerInit } from './worker';
 
 /** 取消的请求 reject 此错误（name 为 HighlightCanceled）。 */
 export class HighlightCanceledError extends Error {
@@ -24,7 +25,7 @@ export class HighlightClient {
   private nextId = 1;
   private disposed = false;
 
-  constructor(worker: Worker) {
+  constructor(worker: Worker, init?: WorkerInit) {
     this.worker = worker;
     this.worker.onmessage = (ev: MessageEvent<HighlightResponse>) => {
       const res = ev.data;
@@ -37,6 +38,9 @@ export class HighlightClient {
       if (res.ok) p.resolve(res.intervals ?? []);
       else p.reject(new Error(res.error ?? 'highlight 失败'));
     };
+    // 握手：首条 init 消息携带引擎配置（serveWorker 排队等待 init 后才处理请求）
+    const handshake: InitMessage = { kind: 'init', ...init };
+    this.worker.postMessage(handshake);
   }
 
   /** 高亮文本。同 lang 有未完成请求时取消它（其 Promise 以 HighlightCanceledError reject）。 */

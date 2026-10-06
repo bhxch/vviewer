@@ -22,7 +22,7 @@ tools/grammar-builder/out/
 !tools/grammar-builder/fixtures/*.wasm
 # M2 决定：static/grammars 的 wasm 与 manifest 入库（纯前端版开箱可用；单文件 ≤8MB、总量 ≤80MB）
 !apps/web/static/grammars/*.wasm
-# web-tree-sitter runtime（web-tree-sitter@0.25 的 tree-sitter.wasm，Parser.init locateFile 指向 static）
+# web-tree-sitter runtime（锁 ~0.25.10：0.27 要求 wasm 含 dylink.0 节，与 tree-sitter-wasms 0.1.13 预编译产物不兼容（实测），0.25 起可用）
 !apps/web/static/tree-sitter.wasm
 
 # 系统

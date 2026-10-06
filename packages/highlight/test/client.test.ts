@@ -8,20 +8,26 @@ const interval = (start: number, end: number, capture: string): HighlightInterva
   capture,
 });
 
-/** 可脚本化回包的假 Worker：postMessage → 异步回发响应。 */
+/** 可脚本化回包的假 Worker：postMessage → 异步回发响应（init 握手单独记录）。 */
 class FakeWorker {
   onmessage: ((ev: { data: HighlightResponse }) => void) | null = null;
   terminated = false;
   requests: HighlightRequest[] = [];
+  inits: Array<{ kind: 'init' }> = [];
   /** 下一批响应脚本：收到请求时依次调用。 */
   responder: (req: HighlightRequest, reply: (res: Omit<HighlightResponse, 'id'>) => void) => void =
     (req, reply) => reply({ ok: true, intervals: [interval(0, req.text.length, 'x')], engine: 'tree-sitter' });
 
-  postMessage(msg: HighlightRequest): void {
-    this.requests.push(msg);
+  postMessage(msg: HighlightRequest | { kind: 'init' }): void {
+    if ((msg as { kind?: string }).kind === 'init') {
+      this.inits.push(msg as { kind: 'init' });
+      return;
+    }
+    const req = msg as HighlightRequest;
+    this.requests.push(req);
     queueMicrotask(() => {
       if (this.terminated) return;
-      this.responder(msg, (res) => this.onmessage?.({ data: { ...res, id: msg.id } }));
+      this.responder(req, (res) => this.onmessage?.({ data: { ...res, id: req.id } }));
     });
   }
   terminate(): void {
@@ -40,6 +46,22 @@ describe('HighlightClient', () => {
     const { client } = fake();
     const out = await client.highlight('echo hi', 'bash');
     expect(out).toEqual([interval(0, 7, 'x')]);
+  });
+
+  it('构造时发送 init 握手（携带 WorkerInit），且先于任何请求', async () => {
+    const worker = new FakeWorker();
+    const client = new HighlightClient(worker as unknown as Worker, {
+      grammarsDir: '/x',
+      maxInjectionDepth: 2,
+    });
+    try {
+      await client.highlight('echo hi', 'bash');
+      expect(worker.inits).toHaveLength(1);
+      expect(worker.inits[0]).toMatchObject({ kind: 'init', grammarsDir: '/x', maxInjectionDepth: 2 });
+      expect(worker.requests).toHaveLength(1);
+    } finally {
+      client.dispose();
+    }
   });
 
   it('同 lang 连续请求：前一个未完成请求被取消（reject Canceled），后一个成功', async () => {

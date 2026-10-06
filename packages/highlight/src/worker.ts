@@ -38,6 +38,11 @@ type WorkerCtx = {
   postMessage: (msg: HighlightResponse) => void;
 };
 
+/** client → worker 的首条握手消息（与 serveWorker 协议对齐）。 */
+export interface InitMessage extends WorkerInit {
+  kind: 'init';
+}
+
 function workerCtx(): WorkerCtx | null {
   return (globalThis as { self?: WorkerCtx }).self ?? null;
 }
@@ -47,29 +52,51 @@ function inWorker(): boolean {
   return typeof (globalThis as { WorkerGlobalScope?: unknown }).WorkerGlobalScope !== 'undefined';
 }
 
-/** 真实 Worker 环境：首条消息 `{ kind: 'init', ...WorkerInit }`，后续消息为 HighlightRequest。 */
+/**
+ * 真实 Worker 环境：首条消息为 `{ kind: 'init', ...WorkerInit }`（HighlightClient 构造时发送），
+ * 后续消息为 HighlightRequest。init 先于请求处理；请求先于 init 到达时排队，init 完成后按序派发。
+ */
 export function serveWorker(): void {
   const ctx = workerCtx();
   if (!ctx) return;
   let handler: Promise<RequestHandler> | null = null;
+  const queued: HighlightRequest[] = [];
+
+  const postError = (req: HighlightRequest, e: unknown): void => {
+    ctx.postMessage({
+      id: req.id,
+      ok: false,
+      error: e instanceof Error ? e.message : String(e),
+      engine: 'tree-sitter',
+    });
+  };
+  const dispatch = async (req: HighlightRequest, h: RequestHandler): Promise<void> => {
+    try {
+      ctx.postMessage(await h(req));
+    } catch (e) {
+      postError(req, e);
+    }
+  };
+
   ctx.onmessage = (ev: MessageEvent) => {
     const data = ev.data as { kind?: string } & HighlightRequest & WorkerInit;
     if (data.kind === 'init') {
-      handler = initWorker(data);
+      if (handler) return; // 忽略重复 init
+      handler = initWorker(data)
+        .then((h) => {
+          for (const req of queued.splice(0)) void dispatch(req, h);
+          return h;
+        })
+        .catch((e: unknown) => {
+          // init 失败：排队请求逐个报错，后续请求同样失败
+          for (const req of queued.splice(0)) postError(req, e);
+          throw e;
+        });
       return;
     }
     const req = data as HighlightRequest;
-    (handler ?? Promise.reject(new Error('worker 未初始化（缺少 init 消息）')))
-      .then((h) => h(req))
-      .then((res) => ctx.postMessage(res))
-      .catch((e: unknown) =>
-        ctx.postMessage({
-          id: req.id,
-          ok: false,
-          error: e instanceof Error ? e.message : String(e),
-          engine: 'tree-sitter',
-        }),
-      );
+    if (handler) void handler.then((h) => dispatch(req, h)).catch((e: unknown) => postError(req, e));
+    else queued.push(req);
   };
 }
 

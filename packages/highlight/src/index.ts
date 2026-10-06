@@ -20,4 +20,4 @@ export {
   type VirtualQueries,
 } from './core-parse';
 export { HighlightClient, HighlightCanceledError } from './client';
-export { createHandler, initWorker, serveWorker, type WorkerInit } from './worker';
+export { createHandler, initWorker, serveWorker, type InitMessage, type WorkerInit } from './worker';

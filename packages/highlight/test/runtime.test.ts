@@ -59,6 +59,15 @@ describe('TreeSitterEngine（真实 wasm + 真实 helix 查询）', () => {
     expect(r.intervals.some((i) => i.capture === 'property' && src.slice(i.start, i.end) === 'color')).toBe(true);
   }, 30_000);
 
+  it('别名请求：highlight(text, "js") 规范化为 javascript 并成功', async () => {
+    const src = 'var x = 1;';
+    const r = await engine.highlight(src, 'js');
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.intervals.some((i) => i.capture === 'keyword' && src.slice(i.start, i.end) === 'var')).toBe(true);
+    expect(r.intervals.some((i) => i.capture === 'number' && src.slice(i.start, i.end) === '1')).toBe(true);
+  }, 30_000);
+
   it('未知语言返回 ok:false 与错误信息', async () => {
     const r = await engine.highlight('int main(){}', 'no-such-language');
     expect(r.ok).toBe(false);
