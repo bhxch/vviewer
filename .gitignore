@@ -1,0 +1,23 @@
+# 临时与工具
+.temp/
+.zcode/
+
+# Node / 前端
+node_modules/
+apps/web/.svelte-kit/
+apps/web/build/
+apps/web/dist/
+packages/*/dist/
+*.tsbuildinfo
+
+# Rust
+server/target/
+
+# grammar 构建产物（源清单 languages.toml 入库，下载的 grammar 源码与编译产物不入库）
+tools/grammar-builder/grammars/
+tools/grammar-builder/out/
+*.wasm
+!tools/grammar-builder/fixtures/*.wasm
+
+# 系统
+.DS_Store
