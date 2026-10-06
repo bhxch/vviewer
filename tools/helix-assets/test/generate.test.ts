@@ -1,19 +1,13 @@
-import { describe, expect, it } from 'vitest';
-import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { describe, expect, it, vi, afterEach } from 'vitest';
+import { readFileSync, readdirSync, existsSync, statSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseLanguages, parseTheme } from '../generate.mjs';
+import { BUILTIN_PALETTE, collectThemes, parseLanguages, parseTheme } from '../generate.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../..');
 const assetsDir = path.join(repoRoot, 'packages/highlight/assets');
-
-/** 读取带生成头注释的 JSON 产物（首行为 `// ...` 注释，需剥离后解析）。 */
-function readHeaderJson(file: string): Record<string, unknown> {
-  const text = readFileSync(path.join(assetsDir, file), 'utf8');
-  expect(text.split('\n')[0]).toContain('Generated from');
-  return JSON.parse(text.slice(text.indexOf('\n') + 1)) as Record<string, unknown>;
-}
 
 describe('parseLanguages（languages.toml 纯解析）', () => {
   const sample = `
@@ -56,11 +50,12 @@ source = { git = "https://github.com/tree-sitter/tree-sitter-rust", rev = "abc" 
   });
 });
 
-describe('parseTheme（主题 TOML 解析，palette 内联）', () => {
+describe('parseTheme（主题解析，palette 按 helix 语义解析）', () => {
   const sample = `
 "comment" = { fg = "grey2", modifiers = ["italic"] }
 "function" = "green"
 "ui.background" = { bg = "bg0" }
+"punctuation" = "white"
 
 [palette]
 grey2 = "#646669"
@@ -69,20 +64,56 @@ bg0 = "#323437"
 `;
 
   it('字符串色值解析为 { fg }，palette 引用内联为实际色值', () => {
-    const theme = parseTheme(sample);
-    expect(theme['function']).toEqual({ fg: '#bcd5a8' });
+    const { styles } = parseTheme(sample);
+    expect(styles['function']).toEqual({ fg: '#bcd5a8' });
   });
 
   it('表值解析 fg/bg/modifiers 并内联 palette', () => {
-    const theme = parseTheme(sample);
-    expect(theme['comment']).toEqual({ fg: '#646669', modifiers: ['italic'] });
-    expect(theme['ui.background']).toEqual({ bg: '#323437' });
+    const { styles } = parseTheme(sample);
+    expect(styles['comment']).toEqual({ fg: '#646669', modifiers: ['italic'] });
+    expect(styles['ui.background']).toEqual({ bg: '#323437' });
+  });
+
+  it('本主题 palette 未命中时回退内置 palette（helix ThemePalette::default）', () => {
+    const { styles } = parseTheme(sample);
+    expect(styles['punctuation']).toEqual({ fg: BUILTIN_PALETTE['white'] });
+  });
+
+  it('palette 引用彻底未命中的字段按 helix 语义丢弃并记入 misses', () => {
+    const { styles, misses } = parseTheme('"keyword" = "nope-missing"\n');
+    expect(styles['keyword']).toBeUndefined();
+    expect(misses).toEqual(['nope-missing']);
+  });
+
+  it('BUILTIN_PALETTE 覆盖 helix 内置 ANSI 色名且均为 #hex', () => {
+    expect(Object.keys(BUILTIN_PALETTE).sort()).toEqual(
+      [
+        'black', 'blue', 'cyan', 'gray', 'green', 'light-blue', 'light-cyan',
+        'light-gray', 'light-green', 'light-magenta', 'light-red', 'light-yellow',
+        'magenta', 'red', 'white', 'yellow',
+      ],
+    );
+    for (const hex of Object.values(BUILTIN_PALETTE)) expect(hex).toMatch(/^#[0-9a-fA-F]{6}$/);
+  });
+});
+
+describe('collectThemes（主题目录解析，inherits 链上 palette 递归合并）', () => {
+  it('子主题引用父主题 palette 定义的名字可解析', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'vv-themes-'));
+    writeFileSync(
+      path.join(dir, 'parent.toml'),
+      '"keyword" = "fg"\n\n[palette]\nfg = "#abcdef"\n',
+    );
+    writeFileSync(path.join(dir, 'child.toml'), 'inherits = "parent"\n"function" = "fg"\n');
+    const themes = collectThemes(dir);
+    expect(themes['parent']?.['keyword']).toEqual({ fg: '#abcdef' });
+    expect(themes['child']?.['function']).toEqual({ fg: '#abcdef' });
   });
 });
 
 describe('生成产物（packages/highlight/assets）', () => {
-  it('languages.json 含 rust，fileTypes 含 rs 且 grammar 字段存在', () => {
-    const langs = readHeaderJson('languages.json');
+  it('languages.json 为纯 JSON（可直接 import），含 rust 契约', () => {
+    const langs = JSON.parse(readFileSync(path.join(assetsDir, 'languages.json'), 'utf8'));
     const rust = langs['rust'] as Record<string, unknown> | undefined;
     expect(rust).toBeDefined();
     expect(rust?.['scope']).toBe('source.rust');
@@ -90,11 +121,29 @@ describe('生成产物（packages/highlight/assets）', () => {
     expect(rust?.['fileTypes']).toContain('rs');
   });
 
-  it('themes.json 含 serika-dark，且含 comment 键（palette 已内联）', () => {
-    const themes = readHeaderJson('themes.json');
-    const serika = themes['serika-dark'] as Record<string, unknown> | undefined;
+  it('themes.json 为纯 JSON，含 serika-dark 且 comment 已内联', () => {
+    const themes = JSON.parse(readFileSync(path.join(assetsDir, 'themes.json'), 'utf8'));
+    const serika = themes['serika-dark'] as Record<string, Record<string, unknown>> | undefined;
     expect(serika).toBeDefined();
-    expect(serika?.['comment']).toBeDefined();
+    expect(serika?.['comment']).toEqual({ fg: '#646669', modifiers: ['italic'] });
+  });
+
+  it('防回归：所有主题的 fg/bg 均为 #hex（palette 全解析）', () => {
+    const themes = JSON.parse(readFileSync(path.join(assetsDir, 'themes.json'), 'utf8')) as Record<
+      string,
+      Record<string, Record<string, unknown>>
+    >;
+    const bad: string[] = [];
+    for (const [name, theme] of Object.entries(themes)) {
+      for (const [capture, style] of Object.entries(theme)) {
+        for (const key of ['fg', 'bg'] as const) {
+          const value = style[key];
+          if (value !== undefined && !/^#[0-9a-fA-F]{6}$/.test(String(value)))
+            bad.push(`${name}.${capture}.${key}=${String(value)}`);
+        }
+      }
+    }
+    expect(bad).toEqual([]);
   });
 
   it('queries/ 目录数 ≥ 280，ecma/highlights.scm 存在，typescript 头部声明继承 ecma', () => {
@@ -111,5 +160,16 @@ describe('生成产物（packages/highlight/assets）', () => {
     // ecma 是继承根（首行为普通注释）；其子 typescript 在头部注释区声明 inherits
     const tsHead = readFileSync(path.join(queriesDir, 'typescript/highlights.scm'), 'utf8').split('\n', 5);
     expect(tsHead.some((l) => l.trim().startsWith(';') && l.includes('inherits:'))).toBe(true);
+  });
+});
+
+describe('确定性', () => {
+  it('主题目录枚举已排序（跨机幂等）', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const dir = mkdtempSync(path.join(tmpdir(), 'vv-themes-'));
+    writeFileSync(path.join(dir, 'b.toml'), '"a" = "white"\n');
+    writeFileSync(path.join(dir, 'a.toml'), '"b" = "black"\n');
+    const names = Object.keys(collectThemes(dir));
+    expect(names).toEqual(['a', 'b']);
   });
 });

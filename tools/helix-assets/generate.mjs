@@ -1,14 +1,11 @@
 #!/usr/bin/env node
 // helix 资产生成器：从本机 helix-editor/helix 与 markpad-aio 源资产生成
-// packages/highlight/assets/{languages.json,themes.json,queries/}。
+// packages/highlight/assets/{languages.json,themes.json,queries/}（溯源见 tools/helix-assets/README.md）。
 // 用法：node tools/helix-assets/generate.mjs（可重复执行，产物幂等）
 import { parse } from 'smol-toml';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-export const HEADER_COMMENT =
-  '// Generated from helix-editor/helix (MPL-2.0) & markpad-aio queries — do not edit';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../..');
@@ -25,6 +22,28 @@ export const SOURCES = {
     '/share/rw/repo/github/helix-editor/helix/runtime/themes',
   outDir: process.env.VV_ASSETS_OUT ?? path.join(repoRoot, 'packages/highlight/assets'),
 };
+
+// helix 内置 palette（helix-view/src/theme.rs ThemePalette::default）的兜底色名。
+// helix 中为 ANSI Color 枚举（由终端解释），此处落为经典 xterm 默认调色板 hex；
+// "default"（Color::Reset，继承终端前景/背景）无固定 hex，未收录。
+export const BUILTIN_PALETTE = Object.freeze({
+  black: '#000000',
+  red: '#cd0000',
+  green: '#00cd00',
+  yellow: '#cdcd00',
+  blue: '#0000ee',
+  magenta: '#cd00cd',
+  cyan: '#00cdcd',
+  gray: '#e5e5e5',
+  'light-red': '#ff0000',
+  'light-green': '#00ff00',
+  'light-yellow': '#ffff00',
+  'light-blue': '#5c5cff',
+  'light-magenta': '#ff00ff',
+  'light-cyan': '#00ffff',
+  'light-gray': '#7f7f7f',
+  white: '#ffffff',
+});
 
 /**
  * 解析 languages.toml（[[language]] + [[grammar]]）为：
@@ -60,86 +79,125 @@ export function parseLanguages(tomlText) {
   return result;
 }
 
-/** 解析主题内单一色值：'#hex' 直取；palette 命名引用内联为实际色值；缺失原样保留。 */
-function resolveColor(value, palette) {
-  if (typeof value !== 'string') return undefined;
-  if (value.startsWith('#')) return value;
-  const hit = palette[value];
-  if (typeof hit === 'string') return hit;
-  console.warn(`[helix-assets] palette 引用未命中: ${value}`);
-  return value;
+/** '#RGB'/'#RRGGBB' → 统一 6 位小写 '#rrggbb'（对应 Color::from_hex 的两种格式）。 */
+function normalizeHex(value) {
+  if (typeof value !== 'string' || !value.startsWith('#')) return value;
+  const hex = value.slice(1);
+  return hex.length === 3 ? `#${[...hex].map((c) => c + c).join('')}` : `#${hex.toLowerCase()}`;
 }
 
-/** 解析单个主题 TOML 为 Record<capture, { fg?, bg?, modifiers? }>（palette 内联）。 */
-export function parseTheme(tomlText) {
-  const doc = parse(tomlText);
-  const palette = doc.palette ?? {};
-  const theme = {};
+/** palette 表值统一归一化。 */
+function normalizePalette(palette) {
+  const out = {};
+  for (const [name, value] of Object.entries(palette)) out[name] = normalizeHex(value);
+  return out;
+}
+
+/**
+ * 按有效 palette 解析单个主题 doc 为 Record<capture, { fg?, bg?, modifiers? }>。
+ * 色值查找顺序遵循 helix 语义（ThemePalette::new + merge_themes）：
+ * 内置表 → 父主题 palette（递归）→ 本主题 palette。
+ * 未命中的 fg/bg 字段按 helix 行为丢弃，色名记入 misses（由调用方按主题聚合告警）。
+ */
+function stylesFromDoc(doc, palette) {
+  const misses = new Set();
+  const resolveColor = (value) => {
+    if (typeof value !== 'string') return undefined;
+    if (value.startsWith('#')) return normalizeHex(value);
+    const hit = palette[value];
+    if (typeof hit === 'string') return hit;
+    misses.add(value);
+    return undefined;
+  };
+
+  const styles = {};
   for (const [capture, value] of Object.entries(doc)) {
     if (capture === 'palette' || capture === 'inherits') continue;
     if (typeof value === 'string') {
-      const fg = resolveColor(value, palette);
-      if (fg !== undefined) theme[capture] = { fg };
+      const fg = resolveColor(value);
+      if (fg !== undefined) styles[capture] = { fg };
       continue;
     }
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       const style = {};
-      const fg = resolveColor(value.fg, palette);
-      const bg = resolveColor(value.bg, palette);
+      const fg = resolveColor(value.fg);
+      const bg = resolveColor(value.bg);
       if (fg !== undefined) style.fg = fg;
       if (bg !== undefined) style.bg = bg;
       if (Array.isArray(value.modifiers))
         style.modifiers = value.modifiers.filter((m) => typeof m === 'string');
-      if (Object.keys(style).length > 0) theme[capture] = style;
+      if (Object.keys(style).length > 0) styles[capture] = style;
     }
   }
-  return theme;
+  return { styles, misses: [...misses] };
 }
 
-/** 读取主题目录（跳过 theme.toml 与 base16_*.toml），解析 inherits 链（父样式在前，子按捕获覆盖）。 */
+/**
+ * 解析单个主题 TOML 为 { styles, misses }。
+ * palette 按 helix 语义组合：内置表 → extraPalette（父主题 palette，调用方负责递归合并）→ 本主题 palette。
+ */
+export function parseTheme(tomlText, extraPalette = {}) {
+  const doc = parse(tomlText);
+  const palette = normalizePalette({ ...BUILTIN_PALETTE, ...extraPalette, ...(doc.palette ?? {}) });
+  return stylesFromDoc(doc, palette);
+}
+
+/**
+ * 读取主题目录（跳过 theme.toml 与 base16_*.toml，枚举已排序保证跨机幂等），
+ * 按 inherits 链解析：父主题样式与 palette 先合并（多父按声明顺序），子按捕获覆盖。
+ */
 export function collectThemes(themesDir) {
-  const raw = new Map(); // name -> { inherits, theme }
-  for (const file of fs.readdirSync(themesDir)) {
+  const raw = new Map(); // name -> { inherits, palette, doc }
+  for (const file of fs.readdirSync(themesDir).sort()) {
     if (!file.endsWith('.toml')) continue;
     if (file === 'theme.toml' || file.startsWith('base16_')) continue;
     const name = file.slice(0, -'.toml'.length);
-    const text = fs.readFileSync(path.join(themesDir, file), 'utf8');
-    const doc = parse(text);
+    const doc = parse(fs.readFileSync(path.join(themesDir, file), 'utf8'));
     raw.set(name, {
       inherits: typeof doc.inherits === 'string' ? doc.inherits : '',
-      theme: parseTheme(text),
+      palette: doc.palette ?? {},
+      doc,
     });
   }
 
-  const merged = new Map();
+  const resolved = new Map();
+  // 返回 { styles, palette }：palette 为有效 palette（builtin + 父链 + 自身）
   const resolveTheme = (name, onPath) => {
-    const cached = merged.get(name);
+    const cached = resolved.get(name);
     if (cached) return cached;
     const entry = raw.get(name);
-    if (!entry) return {};
+    if (!entry) return { styles: {}, palette: { ...BUILTIN_PALETTE } };
     if (onPath.has(name)) {
       console.warn(`[helix-assets] 主题 inherits 环: ${[...onPath, name].join(' -> ')}`);
-      return entry.theme;
+      return { styles: {}, palette: { ...BUILTIN_PALETTE, ...entry.palette } };
     }
     onPath.add(name);
-    let base = {};
+    let parentStyles = {};
+    let parentPalette = { ...BUILTIN_PALETTE };
     if (entry.inherits) {
       for (const parent of entry.inherits.split(',').map((s) => s.trim()).filter(Boolean)) {
         if (!raw.has(parent)) {
           console.warn(`[helix-assets] 主题 ${name} inherits 的父主题缺失: ${parent}`);
           continue;
         }
-        base = { ...base, ...resolveTheme(parent, onPath) };
+        const ancestor = resolveTheme(parent, onPath);
+        parentStyles = { ...parentStyles, ...ancestor.styles };
+        parentPalette = { ...parentPalette, ...ancestor.palette };
       }
     }
     onPath.delete(name);
-    const result = { ...base, ...entry.theme };
-    merged.set(name, result);
+
+    const palette = normalizePalette({ ...parentPalette, ...entry.palette });
+    const { styles, misses } = stylesFromDoc(entry.doc, palette);
+    if (misses.length > 0)
+      console.warn(`[helix-assets] 主题 ${name} palette 未命中(对应字段已丢弃): ${misses.join(', ')}`);
+    const result = { styles: { ...parentStyles, ...styles }, palette };
+    resolved.set(name, result);
     return result;
   };
 
   const themes = {};
-  for (const name of raw.keys()) themes[name] = resolveTheme(name, new Set());
+  for (const name of raw.keys()) themes[name] = resolveTheme(name, new Set()).styles;
   return themes;
 }
 
@@ -151,8 +209,8 @@ function copyQueries(srcDir, outDir) {
   return fs.readdirSync(dest).filter((d) => fs.statSync(path.join(dest, d)).isDirectory()).length;
 }
 
-function writeHeaderJson(file, value) {
-  fs.writeFileSync(file, `${HEADER_COMMENT}\n${JSON.stringify(value, null, 2)}\n`);
+function writeJson(file, value) {
+  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 export function generateAll({
@@ -164,10 +222,10 @@ export function generateAll({
   fs.mkdirSync(outDir, { recursive: true });
 
   const languages = parseLanguages(fs.readFileSync(languagesToml, 'utf8'));
-  writeHeaderJson(path.join(outDir, 'languages.json'), languages);
+  writeJson(path.join(outDir, 'languages.json'), languages);
 
   const themes = collectThemes(themesDir);
-  writeHeaderJson(path.join(outDir, 'themes.json'), themes);
+  writeJson(path.join(outDir, 'themes.json'), themes);
 
   const queryDirCount = copyQueries(queriesDir, outDir);
 
