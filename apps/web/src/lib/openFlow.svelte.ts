@@ -133,8 +133,18 @@ export async function openDirectoryViaPicker(): Promise<void> {
 }
 
 export function openDirectoryViaInput(files: FileList | File[]): void {
-  const label = files[0]?.webkitRelativePath.split('/', 1)[0] ?? 'folder';
-  addDirStoreTab(createLocalFilesStore(files, label));
+  const all = Array.from(files);
+  const firstPath = all.find((f) => f.webkitRelativePath !== '')?.webkitRelativePath;
+  const label = (firstPath ? firstPath.split('/', 1)[0] : undefined) ?? 'folder';
+  // webkitdirectory 真实 input 的 File 必带 webkitRelativePath；
+  // 其他通道缺失时用 `<label>/文件名` 兜底，避免空路径文件在 store 里变成僵尸条目
+  const normalized = all.map((f) => {
+    if (f.webkitRelativePath !== '') return f;
+    const copy = new File([f], f.name, { type: f.type, lastModified: f.lastModified });
+    Object.defineProperty(copy, 'webkitRelativePath', { value: `${label}/${f.name}`, configurable: true });
+    return copy;
+  });
+  addDirStoreTab(createLocalFilesStore(normalized, label));
 }
 
 function openDirectoryViaInputFallback(): void {
@@ -149,6 +159,11 @@ function openDirectoryViaInputFallback(): void {
 
 /** 目录来源以一个"目录 tab"表达：path=''，ViewerPane 显示引导提示，文件树渲染在左栏 */
 function addDirStoreTab(store: TreeStore): void {
+  // spec 不做多根工作区，采用替换语义：添加新目录 tab 前先关闭既有目录 tab，
+  // 避免连续打开第二个文件夹后文件树仍钉在第一个目录
+  for (const t of [...tabStore.list]) {
+    if (t.source.path === '') tabStore.close(t.id);
+  }
   addTab(store, '', store.displayName());
 }
 
@@ -166,7 +181,7 @@ export function openUrl(url: string): void {
   } catch {
     // 非法百分号编码：保留原样作为显示名
   }
-  addTab(createUrlStore(url), name, url);
+  addTab(createUrlStore(url), name, name);
 }
 
 // E2E 调试钩子：webkitdirectory input 与 FS Access 均无法被 Playwright 自动化，

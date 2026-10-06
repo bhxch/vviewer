@@ -13,12 +13,10 @@
   let dirStore = $state<TreeStore | null>(null);
   let drawerOpen = $state(false);
 
-  // 左栏文件树跟随目录 tab（优先 localfs 来源；会话占位不充当目录来源）
+  // 左栏文件树跟随目录 tab（目录 tab 由 addDirStoreTab 替换语义保证至多一个）
   $effect(() => {
     const list = tabStore.list;
-    const dirTab = list.find((t) => t.source.path === '' && !t.unrestorable && t.source.storeId.startsWith('localfs:'))
-      ?? list.find((t) => t.source.path === '' && !t.unrestorable);
-    dirStore = dirTab?.source.store ?? null;
+    dirStore = list.find((t) => t.source.path === '' && !t.unrestorable)?.source.store ?? null;
   });
 
   onMount(() => {
@@ -27,35 +25,37 @@
   });
 
   async function restore(): Promise<void> {
-    const { tabs: saved, lastDirHandle } = await loadSession();
-    let dirStoreAtRestore: TreeStore | null = null;
-    if (lastDirHandle) {
-      const ok = await tryRestoreDirectory(lastDirHandle);
-      if (!ok) {
-        await saveDirHandle(null); // 权限被拒：清除失效句柄，避免下次启动反复弹权限
-      } else {
-        dirStoreAtRestore = currentDirStore();
+    // 恢复失败（IndexedDB 异常、快照损坏等）不得阻断应用启动：降级为空会话
+    try {
+      const { tabs: saved, lastDirHandle } = await loadSession();
+      let dirStoreAtRestore: TreeStore | null = null;
+      if (lastDirHandle) {
+        const ok = await tryRestoreDirectory(lastDirHandle);
+        if (!ok) {
+          await saveDirHandle(null); // 权限被拒：清除失效句柄，避免下次启动反复弹权限
+        } else {
+          dirStoreAtRestore = currentDirStore();
+        }
       }
-    }
-    for (const t of saved) {
-      // 目录来源已由 tryRestoreDirectory 重建为目录 tab；快照中的目录条目
-      // （path===''）若再恢复会每次启动累积一个，故跳过
-      if (t.path === '') continue;
-      if (t.kind === 'restorable' && dirStoreAtRestore) {
-        const tab = addTab(dirStoreAtRestore, t.path, t.name);
-        tab.scrollTop = t.scrollTop;
-      } else {
-        addPlaceholderTab(t);
+      for (const t of saved) {
+        // 目录来源已由 tryRestoreDirectory 重建为目录 tab；快照中的目录条目
+        // （path===''）若再恢复会每次启动累积一个，故跳过
+        if (t.path === '') continue;
+        if (t.kind === 'restorable' && dirStoreAtRestore) {
+          const tab = addTab(dirStoreAtRestore, t.path, t.name);
+          tab.scrollTop = t.scrollTop;
+        } else {
+          addPlaceholderTab(t);
+        }
       }
+      alignActive(saved);
+    } catch (err) {
+      console.error('会话恢复失败，已降级为空会话', err);
     }
-    alignActive(saved);
   }
 
   function currentDirStore(): TreeStore | null {
-    const list = tabStore.list;
-    const dirTab = list.find((t) => t.source.path === '' && !t.unrestorable && t.source.storeId.startsWith('localfs:'))
-      ?? list.find((t) => t.source.path === '' && !t.unrestorable);
-    return dirTab?.source.store ?? null;
+    return tabStore.list.find((t) => t.source.path === '' && !t.unrestorable)?.source.store ?? null;
   }
 
   function addPlaceholderTab(t: TabSnapshot): void {
