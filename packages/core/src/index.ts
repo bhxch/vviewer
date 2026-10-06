@@ -4,3 +4,4 @@ export * from './detect';
 export * from './registry/registry';
 export * from './dispatch/dispatcher';
 export * from './dispatch/errorRenderer';
+export * from './tree/singleFile';
