@@ -14,8 +14,14 @@ describe('session store', () => {
     expect(loaded).toEqual(tabs);
   });
   it('settings round-trip with defaults', () => {
-    expect(loadSettings()).toEqual({ themeMode: 'system', excludedPatterns: [], autoRefresh: true });
-    saveSettings({ themeMode: 'dark', excludedPatterns: ['node_modules'], autoRefresh: false });
+    expect(loadSettings()).toEqual({
+      themeMode: 'system',
+      codeThemeLight: 'onelight',
+      codeThemeDark: 'serika-dark',
+      excludedPatterns: [],
+      autoRefresh: true
+    });
+    saveSettings({ themeMode: 'dark', codeThemeLight: 'onelight', codeThemeDark: 'serika-dark', excludedPatterns: ['node_modules'], autoRefresh: false });
     expect(loadSettings().themeMode).toBe('dark');
   });
   it('dir handle round trip stores the handle object', async () => {
