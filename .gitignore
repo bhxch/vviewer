@@ -7,6 +7,8 @@ node_modules/
 apps/web/.svelte-kit/
 apps/web/build/
 apps/web/dist/
+apps/web/test-results/
+apps/web/playwright-report/
 packages/*/dist/
 *.tsbuildinfo
 

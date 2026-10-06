@@ -168,3 +168,11 @@ export function openUrl(url: string): void {
   }
   addTab(createUrlStore(url), name, url);
 }
+
+// E2E 调试钩子：webkitdirectory input 与 FS Access 均无法被 Playwright 自动化，
+// 测试在 page.evaluate 内构造带 webkitRelativePath 的 File 数组后经此注入，
+// 走与真实 input change 完全相同的 openDirectoryViaInput 通道。生产环境无调用方，无害。
+if (typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).__vvOpenDirImpl = (files: FileList | File[]) =>
+    openDirectoryViaInput(files);
+}
