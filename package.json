@@ -1,0 +1,14 @@
+{
+  "name": "vviewer",
+  "private": true,
+  "packageManager": "pnpm@10.28.2",
+  "scripts": {
+    "test": "vitest run",
+    "build": "pnpm --filter web build",
+    "typecheck": "tsc -b packages/*/tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}
