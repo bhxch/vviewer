@@ -38,6 +38,9 @@
       }
     }
     for (const t of saved) {
+      // 目录来源已由 tryRestoreDirectory 重建为目录 tab；快照中的目录条目
+      // （path===''）若再恢复会每次启动累积一个，故跳过
+      if (t.path === '') continue;
       if (t.kind === 'restorable' && dirStoreAtRestore) {
         const tab = addTab(dirStoreAtRestore, t.path, t.name);
         tab.scrollTop = t.scrollTop;
@@ -73,7 +76,11 @@
   function alignActive(saved: TabSnapshot[]): void {
     const want = saved.find((t) => t.active);
     if (!want) return;
-    const match = tabStore.list.find((t) => t.source.storeId === want.storeId && t.source.path === want.path);
+    // rename-only 占位的 storeId 为 placeholder:${快照 storeId}，需一并匹配
+    const match = tabStore.list.find(
+      (t) => t.source.path === want.path
+        && (t.source.storeId === want.storeId || t.source.storeId === `placeholder:${want.storeId}`)
+    );
     if (match) activateTab(match.id);
   }
 

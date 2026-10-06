@@ -9,6 +9,7 @@
 
   let host = $state<HTMLElement | null>(null);
   let instance: RenderedInstance | null = null;
+  let rafId = 0;
 
   $effect(() => {
     if (!host || !tab || tab.source.path === '') return;
@@ -29,7 +30,8 @@
         // 滚动恢复：目录树切换回该 tab 时回到上次位置（外层滚动容器）
         const scroller = host.closest('.vv-viewer-scroll') as HTMLElement | null;
         if (scroller && current.scrollTop > 0) {
-          requestAnimationFrame(() => {
+          rafId = requestAnimationFrame(() => {
+            if (cancelled) return;
             scroller.scrollTop = current.scrollTop;
           });
         }
@@ -42,6 +44,7 @@
     })();
     return () => {
       cancelled = true;
+      cancelAnimationFrame(rafId);
       instance?.destroy();
       instance = null;
     };

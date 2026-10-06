@@ -24,8 +24,13 @@
     }
     expanded = !expanded;
     if (expanded && children === null) {
-      const list = await store.listChildren(node.path);
-      children = list.filter((n) => !excluded(n.name));
+      try {
+        const list = await store.listChildren(node.path);
+        children = list.filter((n) => !excluded(n.name));
+      } catch (err) {
+        console.error(`加载目录 ${node.path} 失败`, err);
+        expanded = false; // 加载失败回滚展开态，避免出现空子树
+      }
     }
   }
 </script>

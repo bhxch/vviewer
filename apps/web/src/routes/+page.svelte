@@ -31,7 +31,7 @@
     if (dirEntry) {
       const files: File[] = [];
       await collectFiles(dirEntry, dirEntry.name, files);
-      if (files.length) openDirectoryViaInput(files as unknown as FileList);
+      if (files.length) openDirectoryViaInput(files);
       return;
     }
     const dropped = e.dataTransfer?.files;

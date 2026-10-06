@@ -132,7 +132,7 @@ export async function openDirectoryViaPicker(): Promise<void> {
   addDirStoreTab(createLocalFsStore(handle));
 }
 
-export function openDirectoryViaInput(files: FileList): void {
+export function openDirectoryViaInput(files: FileList | File[]): void {
   const label = files[0]?.webkitRelativePath.split('/', 1)[0] ?? 'folder';
   addDirStoreTab(createLocalFilesStore(files, label));
 }
