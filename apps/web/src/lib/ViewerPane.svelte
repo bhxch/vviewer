@@ -80,6 +80,8 @@
     color: var(--ui-fg-muted);
   }
   .vv-viewer-host {
-    min-height: 100%;
+    /* 必须定高：父级 .vv-viewer-scroll 是 flex 定高滚动容器，
+       min-height:100% 会让 .vv-code-pre 的 height:100% 解析为 0（overflow 裁剪成视觉空白） */
+    height: 100%;
   }
 </style>

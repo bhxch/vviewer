@@ -46,32 +46,8 @@ export function splitHighlightedLines(html: string, lineCount: number): string[]
   return out;
 }
 
-const STYLE_ID = 'vv-render-text-style';
-const CODE_CSS = `
-.vv-virtual { position: relative; overflow: auto; }
-.vv-virtual-spacer { position: absolute; top: 0; left: 0; width: 1px; }
-.vv-virtual-viewport { position: absolute; top: 0; left: 0; right: 0; will-change: transform; }
-.vv-code-pre { position: relative; overflow: auto; height: 100%; }
-.vv-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
-  font-size: 13px;
-  line-height: ${LINE_HEIGHT}px;
-}
-.vv-code-line { display: flex; white-space: pre; }
-.vv-code-gutter { flex: none; min-width: 3em; padding-right: 12px; text-align: right; user-select: none; }
-.vv-code-body { flex: 1 1 auto; min-width: 0; }
-`;
-let stylesInjected = false;
-function ensureStyles(): void {
-  if (stylesInjected) return;
-  if (!document.getElementById(STYLE_ID)) {
-    const el = document.createElement('style');
-    el.id = STYLE_ID;
-    el.textContent = CODE_CSS;
-    document.head.append(el);
-  }
-  stylesInjected = true;
-}
+// 样式说明：虚拟滚动与代码面板的样式统一由 apps/web/src/app.css 提供（单一来源），
+// 本模块不再运行时注入 CSS，避免双份定义漂移。
 
 export interface RenderCodeHandle {
   destroy(): void;
@@ -84,7 +60,6 @@ export function renderCode(
   target: HTMLElement,
   opts: { encoding?: Encoding; highlight?: boolean } = {}
 ): RenderCodeHandle {
-  ensureStyles();
   const enc = DECODERS[opts.encoding ?? 'utf-8'];
   const text = new TextDecoder(enc, { fatal: false }).decode(buffer);
   const lines = buildLineIndex(text);

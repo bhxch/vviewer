@@ -12,7 +12,7 @@ const PAYLOADS = [
 
 /**
  * M1 E2E 通道：Playwright 的 setInputFiles 构造的 File 无 webkitRelativePath，
- * 无法走 webkitdirectory input。改为在页面内 new File + Object.assign 注入相对路径，
+ * 无法走 webkitdirectory input。改为在页面内 new File + Object.defineProperty 注入相对路径，
  * 调用应用暴露的调试钩子 __vvOpenDirImpl（与真实 input change 同走 openDirectoryViaInput）。
  */
 async function openSampleDir(page: Page): Promise<void> {
@@ -49,6 +49,12 @@ test('open folder, render code with hljs and image, restore session after reload
   await expect(page.locator('.vv-code-pre [class*="hljs-"]').first()).toBeVisible();
   await expect(page.locator('.vv-tab.active', { hasText: 'hello.js' })).toBeVisible();
 
+  // 防回归：.vv-code-pre 必须有确定高度——宿主高度链断裂时它会解析为 0 高，
+  // 内容被 overflow 裁剪成“视觉空白”（虚拟滚动仍渲染但不可见）
+  const preBox = await page.locator('.vv-code-pre').boundingBox();
+  expect(preBox).not.toBeNull();
+  expect(preBox!.height).toBeGreaterThan(0);
+
   // 图片 tab
   await page.locator('.vv-tree-row', { hasText: 'pixel.png' }).click();
   await expect(page.locator('.vv-image img')).toBeVisible();
@@ -58,8 +64,35 @@ test('open folder, render code with hljs and image, restore session after reload
   await page.locator('.vv-tab', { hasText: 'hello.js' }).locator('.vv-tab-close').click();
   await expect(page.locator('.vv-tab', { hasText: 'hello.js' })).toHaveCount(0);
 
-  // 等待 IndexedDB 会话落盘（add/close 即时持久化）后再刷新
-  await page.waitForTimeout(300);
+  // 确定性等待 IndexedDB 会话落盘：close 触发的持久化是异步写，轮询 'vviewer' 库
+  // kv store 的 tabs 记录不含 hello.js 后再刷新（固定 sleep 是 flake 向量）
+  await page.waitForFunction(
+    () =>
+      new Promise<boolean>((resolve) => {
+        const open = indexedDB.open('vviewer', 1);
+        open.onsuccess = () => {
+          const db = open.result;
+          try {
+            const get = db.transaction('kv', 'readonly').objectStore('kv').get('tabs');
+            get.onsuccess = () => {
+              const tabs = get.result as { name: string }[] | undefined;
+              resolve(Array.isArray(tabs) && !tabs.some((t) => t.name === 'hello.js'));
+              db.close();
+            };
+            get.onerror = () => {
+              resolve(false);
+              db.close();
+            };
+          } catch {
+            resolve(false);
+            db.close();
+          }
+        };
+        open.onerror = () => resolve(false);
+      }),
+    undefined,
+    { polling: 50 }
+  );
 
   // 会话恢复：webkitdirectory 通道为 rename-only，刷新后恢复为占位 tab → 错误卡/空态
   await page.reload();
