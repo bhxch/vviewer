@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { captureToCssVar, resolveCapture, themeToCssVars, type ThemeTable } from '../src/theme';
+import { captureToCssClass, captureToCssVar, resolveCapture, themeToCssVars, type ThemeTable } from '../src/theme';
 
 const theme: ThemeTable = {
   function: { fg: '#00ff00' },
@@ -19,6 +19,20 @@ describe('resolveCapture（最长前缀回退）', () => {
 
   it('完全未命中返回空对象', () => {
     expect(resolveCapture(theme, 'nonexistent.capture.path')).toEqual({});
+  });
+});
+
+describe('captureToCssClass（点转 -，无前缀类片段——与 captureToCssVar 同一转义来源）', () => {
+  it('转换 capture 名为无前缀类片段', () => {
+    expect(captureToCssClass('function.builtin')).toBe('function-builtin');
+    expect(captureToCssClass('keyword')).toBe('keyword');
+    expect(captureToCssClass('constant.character.escape')).toBe('constant-character-escape');
+  });
+
+  it('与 captureToCssVar 去掉前缀后一致（两端统一唯一来源）', () => {
+    for (const c of ['keyword', 'string.special', 'variable.builtin', 'ui.background']) {
+      expect(captureToCssClass(c)).toBe(captureToCssVar(c).slice('--vv-ts-'.length));
+    }
   });
 });
 

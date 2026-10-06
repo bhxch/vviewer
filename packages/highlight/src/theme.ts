@@ -23,9 +23,18 @@ export function resolveCapture(theme: ThemeTable, capture: string): ThemeStyle {
   }
 }
 
+/**
+ * capture 名转无前缀 CSS 类片段：点转 `-`。'string.special' → 'string-special'。
+ * 渲染 span 的类名（`ts-${captureToCssClass(c)}`）与 CSS 变量（captureToCssVar）
+ * 共用此转义——两端统一唯一来源。
+ */
+export function captureToCssClass(capture: string): string {
+  return capture.replace(/\./g, '-');
+}
+
 /** capture 名转 CSS 变量名：点转 `-`，统一前缀 `--vv-ts-`（前端唯一来源）。 */
 export function captureToCssVar(capture: string): string {
-  return `--vv-ts-${capture.replace(/\./g, '-')}`;
+  return `--vv-ts-${captureToCssClass(capture)}`;
 }
 
 /**

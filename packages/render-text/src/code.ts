@@ -1,5 +1,5 @@
 import type { Renderer, Encoding, Detection, FileSource, RenderedInstance } from '@vviewer/core';
-import { detectLanguage, HighlightCanceledError, type HighlightInterval } from '@vviewer/highlight';
+import { detectLanguage, HighlightCanceledError, captureToCssClass, type HighlightInterval } from '@vviewer/highlight';
 
 export type { HighlightInterval };
 /** hljs 动态导入的默认导出类型（HLJSApi） */
@@ -210,12 +210,8 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** capture 名 → CSS 类名（点等非常规字符转 '-'）：'string.special' → 'ts-string-special' */
-function captureClass(capture: string): string {
-  return `ts-${capture.replace(/[^A-Za-z0-9_-]/g, '-')}`;
-}
-
-/** 行文本 + 段落 → 转义后的行 HTML（段落包 `<span class="ts-<capture>">`，纯函数可测） */
+/** 行文本 + 段落 → 转义后的行 HTML（段落包 `<span class="ts-<capture>">`，纯函数可测）。
+ * 类名转义统一来自 @vviewer/highlight 的 captureToCssClass（与主题 CSS 变量同一唯一来源） */
 export function renderLineHtml(text: string, segs: readonly LineSeg[] | undefined): string {
   if (!segs || segs.length === 0) return escapeHtml(text);
   let out = '';
@@ -225,7 +221,7 @@ export function renderLineHtml(text: string, segs: readonly LineSeg[] | undefine
     const end = Math.min(seg.end, text.length);
     if (end <= pos) continue;
     if (start > pos) out += escapeHtml(text.slice(pos, start));
-    out += `<span class="${captureClass(seg.capture)}">${escapeHtml(text.slice(Math.max(start, pos), end))}</span>`;
+    out += `<span class="ts-${captureToCssClass(seg.capture)}">${escapeHtml(text.slice(Math.max(start, pos), end))}</span>`;
     pos = end;
   }
   if (pos < text.length) out += escapeHtml(text.slice(pos));

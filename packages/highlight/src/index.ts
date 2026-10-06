@@ -8,6 +8,7 @@ export {
 } from './queries';
 export { detectLanguage } from './langdetect';
 export {
+  captureToCssClass,
   captureToCssVar,
   resolveCapture,
   themeToCssVars,
