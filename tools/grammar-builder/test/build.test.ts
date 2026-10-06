@@ -33,14 +33,16 @@ const languages = JSON.parse(
 ) as Record<string, unknown>;
 
 describe('aliases.json（helix 语言名 → tree-sitter-wasms 文件名映射）', () => {
-  it('覆盖 ≥25 个 helix 语言（tree-sitter-wasms 0.1.13 实测 36 个 wasm，与 languages.json 交集 32）', () => {
-    expect(Object.keys(aliases).length).toBeGreaterThanOrEqual(25);
+  it('覆盖全部 36 个 tree-sitter-wasms 预编译 wasm（8MB 上限下全量纳入）', () => {
+    expect(Object.keys(aliases).length).toBe(36);
   });
 
-  it('每个键都是 languages.json 的语言名；每个 wasm 在 tree-sitter-wasms/out 实际存在', () => {
+  it('helix 键对 languages.json 对齐；其余 4 键（objc/ql/systemrdl/embedded-template）为 wasm 语言标识', () => {
     for (const [lang, entry] of Object.entries(aliases)) {
-      expect(languages[lang], `语言 ${lang} 应在 languages.json`).toBeDefined();
       expect(existsSync(path.join(wasmsDir, `${entry.wasm}.wasm`)), `${entry.wasm}.wasm 应存在`).toBe(true);
+      if (!languages[lang]) {
+        expect(['objc', 'ql', 'systemrdl', 'embedded-template']).toContain(lang);
+      }
     }
   });
 
@@ -95,10 +97,12 @@ describe('manifest.json（--from-wasms 产物，入库）', () => {
     expect(new Date(manifest.generatedAt).toISOString()).toBe(manifest.generatedAt);
   });
 
-  it('覆盖 ≥25 语言且与 languages.json 键对齐', () => {
+  it('覆盖全部 36 语言；32 个 helix 键与 languages.json 对齐', () => {
     const langs = Object.keys(manifest.grammars);
-    expect(langs.length).toBeGreaterThanOrEqual(25);
-    for (const lang of langs) expect(languages[lang]).toBeDefined();
+    expect(langs.length).toBe(36);
+    for (const lang of langs) {
+      if (!languages[lang]) expect(['objc', 'ql', 'systemrdl', 'embedded-template']).toContain(lang);
+    }
   });
 
   it('每条目：abi 为 null（tree-sitter-wasms 未声明，运行时 web-tree-sitter 校验兜底）、sha256 为 64 位 hex、aliases 为数组', () => {

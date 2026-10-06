@@ -15,19 +15,23 @@ grammar wasm 资产管线：为 M2 语法高亮产出 `apps/web/static/grammars/
 - `out/` 共 **36 个** wasm，命名 `tree-sitter-<grammar 仓库名>.wasm`（如 `tree-sitter-c_sharp.wasm`、`tree-sitter-tlaplus.wasm`）。
 - typescript 与 tsx 是**两个独立 wasm**（`tree-sitter-typescript.wasm` / `tree-sitter-tsx.wasm`）；`tree-sitter-ocaml.wasm` 导出符号仅 `tree_sitter_ocaml`（不含 ocaml-interface）。
 - 每个文件导出唯一 `tree_sitter_<ident>` 符号，语言标识无歧义（可用 `WebAssembly.Module.exports` 验证）。
-- 与 helix `languages.json`（325 键）交集 **32 个语言**，即 `aliases.json` 全量映射；任务书期望的 ≥60 语言交集不存在（上游只发 36 个）。
+- 与 helix `languages.json`（325 键）交集 **32 个语言**；连同 objc/ql/systemrdl/embedded-template 四个无 helix 键的 wasm，`aliases.json` 共映射 **36 个**，即预编译集全量。
 
 ## aliases.json
 
 `{ helixLangName: { wasm: "tree-sitter-wasms 文件名（不含扩展名）", aliases: [...] } }`。
 **键序 = 高频优先**（javascript → typescript → tsx → python → …），是总量截断的依据。别名覆盖 js/ts/py/rs/sh/c++/golang/yml/rb 等 34 条。
 
-## 资产约束（M2 决定）
+## 资产约束（M2 裁定）
 
-- 单文件 ≤ **3MB**：超限跳过（实测跳过 ocaml / c-sharp / kotlin / swift / tlaplus / cpp 共 6 个），记录到 `out/from-wasms-skipped.json`。
-- 入库总量 ≤ **80MB**：按 `aliases.json` 键序截断。实测 26 个语言共 **16.9MB**，远低于上限。
+- 单文件 ≤ **8MB**（M2 裁定由 3MB 放宽）：实测 36 个预编译 wasm 全部达标（最大 objc 7.4MB），无跳过；若超限则记录到 `out/from-wasms-skipped.json`。
+- 入库总量 ≤ **80MB**：按 `aliases.json` 键序截断。实测 36 个语言共 **49.4MB**，远低于上限。
 - `manifest.json`：`{ generatedAt, source: 'tree-sitter-wasms', grammars: Record<lang, { file, abi, sha256, aliases }> }`。`abi` 为 `null`——tree-sitter-wasms 未声明 ABI 版本，运行时由 web-tree-sitter 加载校验兜底。
 - wasm 虽为构建产物，M2 决定入库（`.gitignore` 白名单 `!apps/web/static/grammars/*.wasm`）保证纯前端版开箱可用。
+
+## 覆盖范围说明
+
+入库的 **36 语言是 tree-sitter-wasms 的预编译子集**；目标 ≥264 语言的完整覆盖由 `--self-build` 路径在含 emcc 的 CI 环境产出（当前环境无 emcc，`out/failure-list.json` 278 条为输入清单）。36 键中 32 个与 helix `languages.json` 键对齐；objc/ql/systemrdl/embedded-template 四键直接采用 wasm 语言标识（helix languages.json 无对应键）。
 
 ## 环境变量覆盖
 

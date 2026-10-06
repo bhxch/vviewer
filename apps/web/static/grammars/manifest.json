@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-06T21:04:57.801Z",
+  "generatedAt": "2026-10-06T21:09:48.625Z",
   "source": "tree-sitter-wasms",
   "grammars": {
     "javascript": {
@@ -169,6 +169,40 @@
       "sha256": "6244521bb3fb60f34ce5f677f2af81facb2c38691193985ca5fa85e1b6f29250",
       "aliases": []
     },
+    "ocaml": {
+      "file": "ocaml.wasm",
+      "abi": null,
+      "sha256": "60849b6320ee956233d77b017c65c45660e507d03ae70aa1bd5783458e2e9e18",
+      "aliases": [
+        "ml",
+        "mli"
+      ]
+    },
+    "c-sharp": {
+      "file": "c-sharp.wasm",
+      "abi": null,
+      "sha256": "6266a7e32d68a3459104d994dc848df15d5672b0ea8e86d327274b694f8e6991",
+      "aliases": [
+        "csharp",
+        "cs",
+        "c#"
+      ]
+    },
+    "kotlin": {
+      "file": "kotlin.wasm",
+      "abi": null,
+      "sha256": "b5cb00c8d06ed0f10f1dbe497205b437809d7e87db1f638721a8cfb30e044449",
+      "aliases": [
+        "kt",
+        "kts"
+      ]
+    },
+    "swift": {
+      "file": "swift.wasm",
+      "abi": null,
+      "sha256": "41c4fdb2249a3aa6d87eed0d383081ff09725c2248b4977043a43825980ffcc7",
+      "aliases": []
+    },
     "elm": {
       "file": "elm.wasm",
       "abi": null,
@@ -199,6 +233,59 @@
       "sha256": "160745e470f234cae903a9ba445d19e758d0b02e1197401fc765976c6254d2b6",
       "aliases": [
         "sol"
+      ]
+    },
+    "tlaplus": {
+      "file": "tlaplus.wasm",
+      "abi": null,
+      "sha256": "72a07f94b0bc88b9123a6e41058e37ab9ca70d84a03b79511b25af7f435129b5",
+      "aliases": [
+        "tla",
+        "pluscal"
+      ]
+    },
+    "cpp": {
+      "file": "cpp.wasm",
+      "abi": null,
+      "sha256": "f6afdf53bfd6de76557bb7edb624a3a3869e14d9a83b78433f93617ecee42527",
+      "aliases": [
+        "c++",
+        "cc",
+        "hpp"
+      ]
+    },
+    "objc": {
+      "file": "objc.wasm",
+      "abi": null,
+      "sha256": "7c1b5bfdca7e64b6c63b6040bb7ba0afc347df116f9030ca32f8535d7377f6ff",
+      "aliases": [
+        "obj-c",
+        "objective-c"
+      ]
+    },
+    "ql": {
+      "file": "ql.wasm",
+      "abi": null,
+      "sha256": "836b2a51f6b2b4605ef7bfa908b978fed0fe838afb4eabaa9451552f12e953c1",
+      "aliases": [
+        "codeql"
+      ]
+    },
+    "systemrdl": {
+      "file": "systemrdl.wasm",
+      "abi": null,
+      "sha256": "09129542bbea6d19aa33b54f93bae2b41128144970be13ce09af6697146c4527",
+      "aliases": [
+        "rdl"
+      ]
+    },
+    "embedded-template": {
+      "file": "embedded-template.wasm",
+      "abi": null,
+      "sha256": "68584527f712dbf2cc39776c56980c08516991f184a4a17bb67c2f436f0fc373",
+      "aliases": [
+        "erb",
+        "ejs"
       ]
     }
   }

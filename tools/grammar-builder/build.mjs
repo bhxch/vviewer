@@ -32,8 +32,9 @@ export const PATHS = {
     process.env.VV_GRAMMARS_DIR ?? '/share/rw/repo/markpad-aio/Markpad/src-tauri/grammars',
 };
 
-// 资产约束（M2 决定）：单文件上限 3MB（超限跳过），入库总量上限 80MB（按高频优先截断）
-export const MAX_FILE_BYTES = 3 * 1024 * 1024;
+// 资产约束（M2 裁定）：单文件上限 8MB（超限跳过），入库总量上限 80MB（按高频优先截断）。
+// 8MB 使 tree-sitter-wasms 全部 36 个预编译 wasm 均可入库（最大 objc 7.4MB）。
+export const MAX_FILE_BYTES = 8 * 1024 * 1024;
 export const MAX_TOTAL_BYTES = 80 * 1024 * 1024;
 
 export function loadAliases() {

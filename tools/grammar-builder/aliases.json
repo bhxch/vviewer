@@ -30,5 +30,9 @@
   "elisp": { "wasm": "tree-sitter-elisp", "aliases": ["emacs-lisp", "el"] },
   "solidity": { "wasm": "tree-sitter-solidity", "aliases": ["sol"] },
   "tlaplus": { "wasm": "tree-sitter-tlaplus", "aliases": ["tla", "pluscal"] },
-  "cpp": { "wasm": "tree-sitter-cpp", "aliases": ["c++", "cc", "hpp"] }
+  "cpp": { "wasm": "tree-sitter-cpp", "aliases": ["c++", "cc", "hpp"] },
+  "objc": { "wasm": "tree-sitter-objc", "aliases": ["obj-c", "objective-c"] },
+  "ql": { "wasm": "tree-sitter-ql", "aliases": ["codeql"] },
+  "systemrdl": { "wasm": "tree-sitter-systemrdl", "aliases": ["rdl"] },
+  "embedded-template": { "wasm": "tree-sitter-embedded_template", "aliases": ["erb", "ejs"] }
 }

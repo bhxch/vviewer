@@ -20,7 +20,7 @@ tools/grammar-builder/grammars/
 tools/grammar-builder/out/
 *.wasm
 !tools/grammar-builder/fixtures/*.wasm
-# M2 决定：static/grammars 的 wasm 与 manifest 入库（纯前端版开箱可用；单文件 ≤3MB、总量 ≤80MB）
+# M2 决定：static/grammars 的 wasm 与 manifest 入库（纯前端版开箱可用；单文件 ≤8MB、总量 ≤80MB）
 !apps/web/static/grammars/*.wasm
 
 # 系统
