@@ -11,6 +11,7 @@ import {
 } from '@vviewer/core';
 import { ARCHIVE_OPEN_EVENT } from '@vviewer/render-archive';
 import { saveDirHandle, saveTabs, type TabSnapshot } from './stores/session';
+import { releaseStoreIfLast } from './storeRelease';
 
 export interface Tab {
   id: string;
@@ -87,13 +88,10 @@ class TabCollection {
   /**
    * worker 型 store 的释放接线（M4 T7）：被关 tab 持有的 store 若实现了 close()
    * （libarchive：终止 worker + 释放 wasm 堆）且已无其他 tab 持有同一实例，则关闭之。
-   * 以对象身份比较而非 storeId——同名归档会产生 id 相同的不同实例；
-   * zip/localfiles 等 store 无 close，可选调用为 no-op。
+   * 判定逻辑在 storeRelease.ts（纯函数，可独立单测）。
    */
   private releaseStoreIfLast(store: TreeStore): void {
-    if (typeof store.close !== 'function') return;
-    if (this.list.some((t) => t.source.store === store)) return;
-    store.close();
+    releaseStoreIfLast(this.list, store);
   }
 
   activate(id: string): void {

@@ -59,6 +59,21 @@ describe('TreeSitterEngine（真实 wasm + 真实 helix 查询）', () => {
     expect(r.intervals.some((i) => i.capture === 'property' && src.slice(i.start, i.end) === 'color')).toBe(true);
   }, 30_000);
 
+  it('javascript：标签模板 @injection.language capture 形态按 tag 名注入（html`…`）', async () => {
+    // javascript/injections.scm 的 tagged template pattern：function identifier
+    // 捕获为 @injection.language、template_string 捕获为 @injection.content——
+    // 与 #set! injection.language 属性形态（markdown 围栏）不同的注入语言来源
+    const src = 'const t = html`<b>hi</b>`;';
+    const r = await engine.highlight(src, 'javascript');
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // 子语言 html 的 tag_name 捕获偏移回原文正确位置
+    const tag = r.intervals.find((i) => i.capture === 'tag');
+    expect(tag).toBeDefined();
+    expect(src.slice(tag!.start, tag!.end)).toBe('b');
+    expect(tag!.start).toBeGreaterThan(src.indexOf('html`'));
+  }, 30_000);
+
   it('别名请求：highlight(text, "js") 规范化为 javascript 并成功', async () => {
     const src = 'var x = 1;';
     const r = await engine.highlight(src, 'js');

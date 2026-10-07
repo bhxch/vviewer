@@ -53,3 +53,5 @@ tree-sitter-css = "0.25"
 [dev-dependencies]
 tempfile = "3"
 http-body-util = "0.1"
+# start_paused（挂钟暂停）：高亮 504 超时测试的确定性触发
+tokio = { version = "1", features = ["test-util"] }

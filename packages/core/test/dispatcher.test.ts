@@ -26,16 +26,26 @@ describe('dispatcher', () => {
       sniff: () => { zipCalls++; return 'archive'; }
     }));
     let archiveCalls = 0;
+    let archiveRendered = false;
     reg.install(mk('archive', ['zip'], {
-      sniff: () => { archiveCalls++; return 'text'; }, // 即使再要求重定向也不再发生
-      render: async () => { return { destroy() {} }; }
+      // 二次 sniff 返回已注册的 'text'：若派发器错误地二次改派，rendererId 会漂到 text——
+      // 该用例钉住「第二次 sniff 可解析但不改派」（M1 deferred minor）
+      sniff: () => { archiveCalls++; return 'text'; },
+      render: async () => { archiveRendered = true; return { destroy() {} }; }
+    }));
+    let textRendered = false;
+    reg.install(mk('text', ['log'], {
+      render: async () => { textRendered = true; return { destroy() {} }; }
     }));
     const target = document.createElement('div');
     const { rendererId } = await createDispatcher(reg).dispatch(
       { storeId: 's', storeLabel: 's', path: 'a.txt', name: 'a.txt', store: {} as never },
       new TextEncoder().encode('hi'), target);
     expect(rendererId).toBe('archive');
+    expect(archiveRendered).toBe(true);
+    expect(textRendered).toBe(false);
     expect(zipCalls).toBe(1);
+    // 恰一次：redirect 后为最终 renderer 补充 sniff 元数据的调用，返回值被忽略
     expect(archiveCalls).toBe(1);
   });
   it('falls back to error renderer for unknown ext', async () => {

@@ -261,6 +261,33 @@ fn too_large(what: &str) -> Response {
         .into_response()
 }
 
+/// 解析任务的响应侧超时包装：deadline 内未完成 → 504（解析线程不中断，见模块注释）。
+/// 独立函数便于测试注入永不完成的任务做确定性 504 断言。
+async fn parse_with_timeout(
+    timeout: Duration,
+    handle: tokio::task::JoinHandle<Result<HighlightResponse, AppError>>,
+) -> Result<HighlightResponse, Response> {
+    match tokio::time::timeout(timeout, handle).await {
+        Ok(Ok(Ok(resp))) => Ok(resp),
+        Ok(Ok(Err(e))) => Err(e.into_response()),
+        Ok(Err(join_err)) => Err(
+            AppError::internal(format!("highlight task panicked: {join_err}")).into_response()
+        ),
+        Err(_) => Err(
+            (
+                StatusCode::GATEWAY_TIMEOUT,
+                Json(serde_json::json!({
+                    "error": format!(
+                        "highlight timed out after {}ms (parsing thread finishes in background)",
+                        timeout.as_millis()
+                    )
+                })),
+            )
+                .into_response(),
+        ),
+    }
+}
+
 /// mtime → epoch 毫秒（取不到则 0，仍参与键区分大小/路径）。
 fn mtime_ms(meta: &std::fs::Metadata) -> u64 {
     meta.modified()
@@ -274,6 +301,16 @@ fn mtime_ms(meta: &std::fs::Metadata) -> u64 {
 /// text/path 超 20MB → 413；区间数超 [`MAX_INTERVALS`] → 413；未知语言 → 400；
 /// 解析超 10s → 504。path 模式区间数超 [`CACHE_MAX_INTERVALS`] 的响应不进缓存。
 pub async fn highlight(State(state): State<AppState>, Json(req): Json<HighlightRequest>) -> Response {
+    highlight_with_timeout(state, req, HIGHLIGHT_TIMEOUT).await
+}
+
+/// [`highlight`] 的可注入超时形态（504 自动化测试注入短 deadline；生产走
+/// [`HIGHLIGHT_TIMEOUT`]）。响应侧保护语义见模块注释：不中断已进入同步解析的线程。
+pub(crate) async fn highlight_with_timeout(
+    state: AppState,
+    req: HighlightRequest,
+    timeout: Duration,
+) -> Response {
     let Some(lang) = req.lang.as_deref().filter(|l| !l.is_empty()) else {
         return AppError::bad_request("missing lang").into_response();
     };
@@ -325,24 +362,12 @@ pub async fn highlight(State(state): State<AppState>, Json(req): Json<HighlightR
         return AppError::bad_request("path or text is required").into_response();
     };
 
-    // 同步解析：阻塞线程执行，10s 响应侧超时（无法中断线程本身，见模块注释）
+    // 同步解析：阻塞线程执行，响应侧超时（无法中断线程本身，见模块注释）
     let lang_owned = lang.to_string();
     let handle = tokio::task::spawn_blocking(move || run_highlight(&lang_owned, &text));
-    let result = match tokio::time::timeout(HIGHLIGHT_TIMEOUT, handle).await {
-        Ok(Ok(Ok(resp))) => resp,
-        Ok(Ok(Err(e))) => return e.into_response(),
-        Ok(Err(join_err)) => {
-            return AppError::internal(format!("highlight task panicked: {join_err}")).into_response()
-        }
-        Err(_) => {
-            return (
-                StatusCode::GATEWAY_TIMEOUT,
-                Json(serde_json::json!({
-                    "error": "highlight timed out after 10s (parsing thread finishes in background)"
-                })),
-            )
-                .into_response()
-        }
+    let result = match parse_with_timeout(timeout, handle).await {
+        Ok(resp) => resp,
+        Err(response) => return response,
     };
 
     if let Some(key) = cache_key {
@@ -562,5 +587,24 @@ fn main() {
         assert_eq!(*CACHE.get(&rust_key).unwrap(), rust_resp, "rust 键仍是 rust 响应");
         assert_eq!(*CACHE.get(&py_key).unwrap(), py_resp, "python 键是 python 响应");
         cache_reset();
+    }
+    /// 504 自动化（终审 M6：超时路径此前无测试）：注入永不完成的解析任务 + 200ms
+    /// deadline + 挂钟暂停——advance 越过 deadline 后超时分支确定触发，不依赖
+    /// 真实解析耗时（直接 2.6MB 解析与 advance 的真实调度窗口存在竞态，不可靠）；
+    /// 同时锁定报错文案携带真实 deadline（动态化后的格式回归）。
+    #[tokio::test(start_paused = true)]
+    async fn parse_timeout_returns_504_with_injected_deadline() {
+        let handle =
+            tokio::spawn(std::future::pending::<Result<HighlightResponse, AppError>>());
+        let task = tokio::spawn(parse_with_timeout(Duration::from_millis(200), handle));
+        tokio::time::advance(Duration::from_secs(1)).await; // 虚拟时钟越过 200ms deadline
+        let err = task.await.unwrap().unwrap_err();
+        assert_eq!(err.status(), StatusCode::GATEWAY_TIMEOUT);
+        let bytes = axum::body::to_bytes(err.into_body(), usize::MAX).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(
+            v["error"].as_str().unwrap().contains("timed out after 200ms"),
+            "报错应携带注入的 deadline: {v}"
+        );
     }
 }
