@@ -10,7 +10,14 @@ const fail = (msg) => {
   process.exit(1);
 };
 
-for (const f of ['sw.js', 'manifest.webmanifest', 'icons/pwa-192.png', 'icons/pwa-512.png']) {
+for (const f of [
+  'sw.js',
+  'manifest.webmanifest',
+  'icons/pwa-192.png',
+  'icons/pwa-512.png',
+  'icons/pwa-maskable-192.png',
+  'icons/pwa-maskable-512.png'
+]) {
   if (!existsSync(`${build}/${f}`)) fail(`缺少产物 ${f}`);
 }
 
@@ -18,8 +25,14 @@ const manifest = JSON.parse(readFileSync(`${build}/manifest.webmanifest`, 'utf8'
 if (manifest.name !== 'vviewer') fail(`manifest.name 应为 vviewer，实际 ${manifest.name}`);
 if (manifest.display !== 'standalone') fail('manifest.display 应为 standalone');
 const icons = manifest.icons ?? [];
-if (icons.length !== 2 || !icons.some((i) => i.sizes === '192x192') || !icons.some((i) => i.sizes === '512x512')) {
-  fail(`manifest.icons 应含 192/512 两项，实际 ${JSON.stringify(icons)}`);
+if (
+  icons.length !== 4
+  || !icons.some((i) => i.sizes === '192x192' && i.purpose === 'any')
+  || !icons.some((i) => i.sizes === '512x512' && i.purpose === 'any')
+  || !icons.some((i) => i.sizes === '192x192' && i.purpose === 'maskable')
+  || !icons.some((i) => i.sizes === '512x512' && i.purpose === 'maskable')
+) {
+  fail(`manifest.icons 应含 192/512 的 any+maskable 四项，实际 ${JSON.stringify(icons)}`);
 }
 
 const sw = readFileSync(`${build}/sw.js`, 'utf8');

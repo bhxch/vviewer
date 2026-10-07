@@ -8,6 +8,7 @@
 | highlight.js | BSD-3-Clause | 代码高亮兜底 | M2 |
 | katex | MIT | LaTeX 数学公式渲染 | M3 |
 | markdown-it | MIT | markdown 解析 | M3 |
+| markdown-it-footnote | MIT | markdown 脚注（与 comrak 服务端 GFM 能力对齐；本地引擎，M3 挂账终审补齐） | C 批 |
 | markdown-it-task-lists | ISC | markdown 任务列表 | M3 |
 | mermaid | MIT | mermaid 图表渲染 | M3 |
 | yaml | ISC | front-matter 解析 | M3 |

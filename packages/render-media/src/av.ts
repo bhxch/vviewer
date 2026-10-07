@@ -15,15 +15,18 @@ import type Artplayer from 'artplayer';
 import type { Detection, FileSource, RenderedInstance, Renderer } from '@vviewer/core';
 
 /** 扩展名 → blob MIME（流媒体清单/原始流同样标注，供 blob 元数据可读） */
+// mov（QuickTime 容器，H.264 轨道主流浏览器可播）与 aac（ADTS 裸流）为浏览器
+// 可播子集的补充（终审 M3）；不保证所有编码可解码——不可解时 video/audio 元素
+// 报 error，与 mp4 同语义。
 const MIME: Record<string, string> = {
-  mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', ogg: 'video/ogg',
+  mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', ogg: 'video/ogg',
   m3u8: 'application/vnd.apple.mpegurl', flv: 'video/x-flv', ts: 'video/mp2t',
-  mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', m4a: 'audio/mp4',
+  mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', m4a: 'audio/mp4', aac: 'audio/aac',
   oga: 'audio/ogg', opus: 'audio/ogg'
 };
 
 /** 视频形态扩展名（含流媒体；其余注册扩展名走原生音频） */
-const VIDEO_EXTS = new Set(['mp4', 'm4v', 'webm', 'ogg', 'm3u8', 'flv']);
+const VIDEO_EXTS = new Set(['mp4', 'm4v', 'mov', 'webm', 'ogg', 'm3u8', 'flv']);
 
 /** 类型分派纯函数：ext → 'video'（ArtPlayer）| 'audio'（原生 <audio>） */
 export function playerKindOf(ext: string): 'video' | 'audio' {
@@ -117,7 +120,7 @@ const ART_THEME = 'var(--ui-accent, #0969da)';
 export const avRenderer: Renderer = {
   id: 'av',
   label: '音视频',
-  extensions: ['mp4', 'm4v', 'webm', 'ogg', 'm3u8', 'flv', 'mp3', 'wav', 'flac', 'm4a', 'oga', 'opus'],
+  extensions: ['mp4', 'm4v', 'mov', 'webm', 'ogg', 'm3u8', 'flv', 'mp3', 'wav', 'flac', 'm4a', 'aac', 'oga', 'opus'],
   // 注意：不注册 'ts'——codeRenderer（TypeScript）先占该扩展名，registry 重复注册会抛错；
   // mpegts 的 .ts 分派仅在 customType 层保留（archive 包内 ts 条目未来改路由时可用）
   async render(buffer: Uint8Array, target: HTMLElement, _source: FileSource, det: Detection): Promise<RenderedInstance> {

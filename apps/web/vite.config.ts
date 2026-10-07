@@ -89,7 +89,11 @@ export default defineConfig({
         theme_color: '#ffffff',
         icons: [
           { src: 'icons/pwa-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-          { src: 'icons/pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' }
+          { src: 'icons/pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          // maskable 变体（gen-icons 生成，内容缩到 80% 安全区）：Android 自适应
+          // 圆形/圆角遮罩不裁笔画（终审 M7）
+          { src: 'icons/pwa-maskable-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+          { src: 'icons/pwa-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
         ]
       },
       workbox: {
