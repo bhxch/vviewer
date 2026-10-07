@@ -15,6 +15,12 @@ export interface TreeStore {
   displayName(): string;
   listChildren(path: string): Promise<TreeNode[]>;
   read(path: string, opts?: { range?: ByteRange }): Promise<Uint8Array>;
+  /**
+   * 可选：释放 store 持有的底层资源（libarchive worker/wasm 堆等）。
+   * 由引用计数接线调用（openFlow：最后一个持有该实例的 tab 关闭时）；
+   * 无底层资源的 store（zip/localfiles 等）不实现，调用方以 `store.close?.()` 触达。
+   */
+  close?(): void;
 }
 
 export type Encoding = 'utf-8' | 'utf-16le' | 'utf-16be' | 'gb18030';

@@ -5,7 +5,8 @@
 // 与 zipStore 同构：目录聚合 + naturalCompare（listTreeChildren 共用）、parentChain 深度链
 // （前导 'zip'/'libarchive' 段计数，depth ≥ MAX_ARCHIVE_DEPTH 仅拒内嵌归档展开）、
 // 加密/不支持格式抛中文错误（dispatcher 兜底错误卡）。worker 生命周期：extract 懒取需
-// worker 存活，故 store 暴露可选 close()，由内层 tab 关闭时接线（T7），destroy 不自动关闭。
+// worker 存活，故 store 暴露可选 close()；T7 已接线——从未点开条目的 store 随 archive
+// 实例 destroy 关闭，点开过条目的 store 由 openFlow 在最后一个持有 tab 关闭时关闭。
 import type { TreeStore } from '@vviewer/core';
 import { MAX_ARCHIVE_DEPTH, MAX_ZIP_INPUT_BYTES, isArchiveEntry, listTreeChildren } from './zipStore';
 
@@ -125,7 +126,8 @@ function isCompressedFile(v: unknown): v is CompressedFileLike {
  * zip 建议走 createZipStore）。懒提取：构造只列条目，read 时经 worker 解压单条目。
  * 目录条目 read 抛错；加密归档构造即抛；深度语义与 zipStore 一致（parentChain 为
  * archiveChainOf 提取的前导归档段链，depth ≥ MAX_ARCHIVE_DEPTH 拒展内嵌归档）。
- * 可选 close() 终止 worker——内层 tab 关闭时由 web 侧接线（T7），不在 destroy 自动调用。
+ * 可选 close() 终止 worker——T7 已接线：从未点开过条目的 store 在 archiveRenderer 实例
+ * destroy 时关闭；点开过条目的 store 由 openFlow 在最后一个持有它的 tab 关闭时关闭。
  */
 export async function createLibarchiveStore(
   buffer: Uint8Array,

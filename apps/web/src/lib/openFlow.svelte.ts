@@ -63,7 +63,8 @@ class TabCollection {
   close(id: string): void {
     const i = this.list.findIndex((t) => t.id === id);
     if (i >= 0) {
-      const wasActive = this.list[i]!.active;
+      const closed = this.list[i]!;
+      const wasActive = closed.active;
       this.list.splice(i, 1);
       if (wasActive) {
         // 关闭活动 tab 时激活相邻 tab，避免出现无活动 tab 的空窗
@@ -71,7 +72,20 @@ class TabCollection {
         if (next) next.active = true;
       }
       void persist();
+      this.releaseStoreIfLast(closed.source.store);
     }
+  }
+
+  /**
+   * worker 型 store 的释放接线（M4 T7）：被关 tab 持有的 store 若实现了 close()
+   * （libarchive：终止 worker + 释放 wasm 堆）且已无其他 tab 持有同一实例，则关闭之。
+   * 以对象身份比较而非 storeId——同名归档会产生 id 相同的不同实例；
+   * zip/localfiles 等 store 无 close，可选调用为 no-op。
+   */
+  private releaseStoreIfLast(store: TreeStore): void {
+    if (typeof store.close !== 'function') return;
+    if (this.list.some((t) => t.source.store === store)) return;
+    store.close();
   }
 
   activate(id: string): void {

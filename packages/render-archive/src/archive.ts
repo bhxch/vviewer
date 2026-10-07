@@ -106,16 +106,21 @@ export const archiveRenderer: Renderer = {
     const store = isZipMagic(buffer)
       ? await createZipStore(buffer, parentChain || undefined, source.name)
       : await createLibarchiveStore(buffer, parentChain || undefined, source.name);
+    // 本 store 实例是否派发过包内条目点击：派发过的实例由内层 tab 持有（懒读），
+    // 其释放接线在 openFlow 的 tab 关闭路径；未派发过的实例无任何人引用，destroy 即关闭
+    let entryOpened = false;
     const tree = mountArchiveTree(target, store, (path, name) => {
+      entryOpened = true;
       // 解耦通道：包内文件点击 → 窗口事件；apps/web openFlow.bindArchiveOpenEvents 监听后 addTab，
       // 派发器按扩展名自然路由（txt→code、png→image、zip→递归…）
       window.dispatchEvent(new CustomEvent<ArchiveOpenDetail>(ARCHIVE_OPEN_EVENT, { detail: { store, path, name } }));
     });
     return {
       destroy() {
-        // 不在此关闭 libarchive worker：包内条目 tab 仍持有 store 引用懒读，
-        // close 由内层 tab 关闭时接线（T7）；zip store 无 worker，无需处理
         tree.destroy();
+        // worker 释放收口（T7）：没有内层 tab 持有（从未点开过条目）的 libarchive store
+        // 在实例 destroy 时立即 close（终止 worker）；zip store 无 close，可选调用为 no-op
+        if (!entryOpened) store.close?.();
       }
     };
   }
