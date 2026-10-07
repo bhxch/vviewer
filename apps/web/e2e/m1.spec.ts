@@ -41,12 +41,11 @@ test('open folder, render code with hljs and image, restore session after reload
   await expect(page.locator('.vv-tree-row', { hasText: 'hello.js' })).toBeVisible();
   await expect(page.locator('.vv-tree-row', { hasText: 'notes.md' })).toBeVisible();
 
-  // 代码 tab：hljs 高亮 span 可见，tab 处于激活态。
-  // 不断言具体 hljs-keyword：highlightAuto 对超短文本可能误判语言
-  //（2 行 hello.js 被判为 arcade，产出 hljs-function/hljs-string 等），
-  // 这里验证的是高亮管线本身（异步加载 hljs → 按行切分 → 虚拟滚动渲染）
+  // 代码 tab：高亮 span 可见，tab 处于激活态。
+  // M2 后 hello.js 走 tree-sitter 主路径产出 ts-* 类 span（解析失败才降级 hljs 整文件
+  // 产出 hljs-* 类），两种类名都是高亮管线生效的证据（异步加载 → 按行切分 → 虚拟滚动渲染）
   await page.locator('.vv-tree-row', { hasText: 'hello.js' }).click();
-  await expect(page.locator('.vv-code-pre [class*="hljs-"]').first()).toBeVisible();
+  await expect(page.locator('.vv-code-pre [class^="ts-"], .vv-code-pre [class^="hljs-"]').first()).toBeVisible();
   await expect(page.locator('.vv-tab.active', { hasText: 'hello.js' })).toBeVisible();
 
   // 防回归：.vv-code-pre 必须有确定高度——宿主高度链断裂时它会解析为 0 高，
