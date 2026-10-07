@@ -51,6 +51,24 @@ async fn req(
     (status, headers, bytes)
 }
 
+/// 只取状态码、立即丢弃 body：/api/events 是无限 SSE 流，不能收完。
+async fn req_status(
+    app: axum::Router,
+    method: &str,
+    uri: &str,
+    authorization: Option<&str>,
+) -> StatusCode {
+    let mut builder = Request::builder().method(method).uri(uri);
+    if let Some(auth) = authorization {
+        builder = builder.header("authorization", auth);
+    }
+    let res = app
+        .oneshot(builder.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    res.status()
+}
+
 fn json(bytes: &[u8]) -> serde_json::Value {
     serde_json::from_slice(bytes).unwrap()
 }
@@ -143,11 +161,11 @@ async fn ticket_flow_issue_consume_once_and_expiry() {
     assert!(ticket.chars().all(|c| c.is_ascii_hexdigit()));
 
     // 无 ticket → 401
-    let (status, _, _) = req(app.clone(), "GET", "/api/events", None).await;
+    let status = req_status(app.clone(), "GET", "/api/events", None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    // 有效 ticket → 通过校验
-    let (status, _, _) = req(
+    // 有效 ticket → 通过校验（升级 SSE 流；只看状态码，body 不收）
+    let status = req_status(
         app.clone(),
         "GET",
         &format!("/api/events?ticket={ticket}"),
@@ -157,7 +175,7 @@ async fn ticket_flow_issue_consume_once_and_expiry() {
     assert_eq!(status, StatusCode::OK);
 
     // 一次性：同一 ticket 二次使用 → 401
-    let (status, _, _) = req(
+    let status = req_status(
         app.clone(),
         "GET",
         &format!("/api/events?ticket={ticket}"),
@@ -170,13 +188,7 @@ async fn ticket_flow_issue_consume_once_and_expiry() {
     state
         .tickets
         .insert_raw("expired-tok".into(), Instant::now() - Duration::from_secs(1));
-    let (status, _, _) = req(
-        app,
-        "GET",
-        "/api/events?ticket=expired-tok",
-        None,
-    )
-    .await;
+    let status = req_status(app, "GET", "/api/events?ticket=expired-tok", None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 

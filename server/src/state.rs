@@ -60,6 +60,8 @@ pub struct AppState {
     pub cors_origin: Option<String>,
     /// 一次性 ticket 表（SSE 升级用）。
     pub tickets: TicketStore,
+    /// root 变更广播中心（启动时创建一次，共享 watcher + debounce 聚合）。
+    pub changes: Arc<crate::watch::ChangeHub>,
 }
 
 impl AppState {
@@ -74,12 +76,13 @@ impl AppState {
         let root_canonical: PathBuf = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
         Self {
             root,
-            root_canonical,
+            root_canonical: root_canonical.clone(),
             web_dist,
             token,
             hidden,
             cors_origin,
             tickets: TicketStore::default(),
+            changes: crate::watch::ChangeHub::spawn(&root_canonical),
         }
     }
 }

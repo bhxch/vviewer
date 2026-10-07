@@ -1076,6 +1076,8 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "clap",
+ "futures-core",
+ "http-body-util",
  "notify",
  "once_cell",
  "rand",

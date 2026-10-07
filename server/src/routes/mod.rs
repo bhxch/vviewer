@@ -1,5 +1,6 @@
 //! HTTP 路由。
 
+pub mod events;
 pub mod file;
 pub mod health;
 pub mod ticket;
@@ -28,7 +29,7 @@ pub fn api_router(state: crate::state::AppState) -> Router {
 
     Router::new()
         .route("/health", get(health::health))
-        .route("/events", get(ticket::events))
+        .route("/events", get(events::events))
         .merge(protected)
         .fallback(crate::api_not_found)
         .with_state(state)
