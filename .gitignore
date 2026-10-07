@@ -31,5 +31,8 @@ apps/web/static/libarchive/
 
 # 系统
 .DS_Store
+# E2E 大文件兜底：m6.spec 已把 BIG_FILE 写到 os.tmpdir() fixture（不碰 tracked 树），
+# 此条防旧运行残留/回归时把 ≈1.5MB 生成文件带进 tracked 树
+samples/m6/e2e-big.js
 # PWA 图标（构建期由 tools/gen-icons.mjs 生成，不入库）
 apps/web/static/icons/

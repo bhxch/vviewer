@@ -1,8 +1,11 @@
-import { execSync, spawn, type ChildProcess } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import type { ChildProcess } from 'node:child_process';
+import { cp, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, expect } from '@playwright/test';
+import { assertPortFree, startVviewerServer, stopServer, waitHealthy } from './serverHarness';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 
 /**
@@ -11,9 +14,11 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * → code tab 高亮 → SSE 变更推送驱动 tab 自动刷新（外部 fs 追加 → ≤3s 出现新文本）
  * → 错误 token 连接被拒（表单内错误提示）。
  *
- * server 生命周期：webServer 配置无法起 cargo，在 beforeAll 里先 `cargo build`
- * （复用增量编译），再直接 spawn 预编译二进制 target/debug/vviewer（cargo run 每次
- * 都有编译检查开销且首次编译慢），轮询 /api/health 就绪，afterAll kill。
+ * server 生命周期：webServer 配置无法起 cargo，在 beforeAll 里经共享 harness
+ * （serverHarness.ts）先 `cargo build` 再 spawn 预编译二进制，轮询 /api/health
+ * 就绪，afterAll SIGTERM→SIGKILL 兜底停止。
+ * fixture：root 指向 os.tmpdir() 独立目录（samples/m5 拷贝过去）——不污染 tracked
+ * 工作树，也消除双 project/双 spec 并发下的 fixture 竞态（终审 M2/M7）。
  * 前端走 preview server（:4173），与 server（:8399）跨源 → 必须带
  * --cors-origin http://127.0.0.1:4173（精确 origin + authorization 头放行）。
  */
@@ -29,56 +34,35 @@ const TOKEN = 'e2etoken';
 const PREVIEW_ORIGIN = 'http://127.0.0.1:4173';
 
 let server: ChildProcess | null = null;
-let sampleOriginal: Buffer | null = null;
-
-async function waitHealthy(url: string, timeoutMs = 30_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`${url}/api/health`);
-      if (res.ok) return;
-    } catch {
-      // 尚未就绪：继续轮询
-    }
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  throw new Error(`vviewer server 未在 ${timeoutMs}ms 内就绪: ${url}`);
-}
+/** 临时 fixture 根目录（samples/m5 的拷贝），afterAll 清理 */
+let fixtureRoot: string | null = null;
 
 test.beforeAll(async () => {
   if (test.info().project.name === 'mobile') {
     PORT = 8449;
     BASE = `http://127.0.0.1:${PORT}`;
   }
-  sampleOriginal = await readFile(`${samplesDir}/sample.js`);
-  // 预编译（增量；fresh clone 首次会全量编译，耗时计入 beforeAll）
-  execSync('cargo build --manifest-path server/Cargo.toml', { cwd: repoRoot, stdio: 'inherit' });
-  server = spawn(
+  // 端口预检：遗留进程占口时 fail-fast 带明确信息（否则 spawn 后才 bind 失败）
+  await assertPortFree(BASE);
+  // fixture 拷到 tmpdir：测试向 sample.js 追加 marker，不触碰 tracked 树
+  fixtureRoot = await mkdtemp(join(tmpdir(), 'vviewer-e2e-m5-'));
+  await cp(samplesDir, fixtureRoot, { recursive: true });
+  server = startVviewerServer({
+    repoRoot,
     binPath,
-    [
-      'serve',
-      '--root', samplesDir,
-      '--web-dist', `${repoRoot}/apps/web/build`,
-      '--port', String(PORT),
-      '--token', TOKEN,
-      '--cors-origin', PREVIEW_ORIGIN
-    ],
-    { stdio: 'inherit' }
-  );
-  server.on('exit', (code) => {
-    if (code !== null && code !== 0) console.error(`[m5] server 提前退出: code=${code}`);
+    root: fixtureRoot,
+    webDist: `${repoRoot}/apps/web/build`,
+    port: PORT,
+    token: TOKEN,
+    corsOrigin: PREVIEW_ORIGIN,
+    tag: 'm5'
   });
   await waitHealthy(BASE);
 });
 
 test.afterAll(async () => {
-  // 样例文件还原（测试向 sample.js 追加过 marker）
-  if (sampleOriginal !== null) await writeFile(`${samplesDir}/sample.js`, sampleOriginal);
-  if (server !== null && server.exitCode === null) {
-    const exited = new Promise<void>((resolve) => server!.once('exit', () => resolve()));
-    server.kill('SIGTERM');
-    await Promise.race([exited, new Promise((r) => setTimeout(r, 5_000))]);
-  }
+  await stopServer(server, 'm5');
+  if (fixtureRoot !== null) await rm(fixtureRoot, { recursive: true, force: true });
 });
 
 /** 展开 TopBar 连接表单并提交（每次测试用新 page，sessionStorage 互不影响） */
@@ -114,7 +98,7 @@ test('连接 → 目录树 → 打开 sample.js 高亮 → 修改文件 SSE 自�
   // SSE 自动刷新：外部 fs 追加注释行 → 服务端 500ms debounce 推 changed → tab 重读重渲染。
   // 断言窗口 3s：debounce 500ms + fetch + 小文件重渲染，余量充足
   const marker = `// e2e-m5-marker-${Date.now()}`;
-  appendFileSync(`${samplesDir}/sample.js`, `\n${marker}\n`);
+  appendFileSync(`${fixtureRoot}/sample.js`, `\n${marker}\n`);
   await expect(code).toContainText(marker, { timeout: 3_000 });
 });
 
