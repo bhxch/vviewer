@@ -8,7 +8,8 @@
 //!   响应前经 [`Utf16Index`]（按行增量表 + 二分定位 + 行内小步修正）转换；
 //! - path 模式走 [`crate::guard`]（canonicalize 越界校验）并按
 //!   `(canonical_path, mtime_ms, size)` 缓存响应（64 条 LRU 简易淘汰）；
-//! - 解析是同步 CPU 工作：`spawn_blocking` + 10s `tokio::time::timeout`。
+//! - 解析是同步 CPU 工作：`spawn_blocking` + 响应侧 `tokio::time::timeout`
+//!   （生产 [`HIGHLIGHT_TIMEOUT`]，封装于 [`parse_with_timeout`]，测试可注入短时限）。
 //!   超时无法中断已进入同步解析的线程（无取消点），只能放弃其结果返回 504，
 //!   线程会在解析自然完成后释放回阻塞线程池——故超时仅是响应侧保护，
 //!   不是解析取消。
