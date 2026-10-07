@@ -228,15 +228,16 @@ pub(crate) async fn pump(
             if frame.get("type").and_then(Value::as_str) != Some("match") {
                 continue; // 简化：只发 match 帧 + 终帧（begin/end 丢弃）
             }
+            let Some(payload) = match_frame(&frame, &root_canonical) else {
+                continue; // 二进制文件（lines.bytes）等无文本帧：跳过，不参与截断判定
+            };
             if sent >= MAX_MATCHES {
-                // 恰好 1000 时不能立即判截断（可能 rg 已无更多命中），
-                // 继续读到出现第 1001 个 match 才算 truncated
+                // 恰好 1000 时不能立即判截断（可能 rg 已无更多命中）；
+                // 继续读到出现第 1001 个「可下发」match 才算 truncated
+                //（判定放在 payload 提取之后：二进制帧不计入，避免误报截断）
                 truncated = true;
                 break;
             }
-            let Some(payload) = match_frame(&frame, &root_canonical) else {
-                continue; // 二进制文件（lines.bytes）等无文本帧：跳过
-            };
             if tx.send(Ok(payload)).await.is_err() {
                 // 客户端断连（响应 body 被 drop）：杀子进程，不再发终帧
                 let _ = child.kill().await;
@@ -307,10 +308,11 @@ fn match_frame(frame: &Value, root_canonical: &Path) -> Option<String> {
     let rel = abs.strip_prefix(root_canonical).unwrap_or(abs);
     let rel = rel.to_string_lossy().replace('\\', "/");
 
-    // rg 的 submatch start 是行内字节偏移：换算 1 起「字符」列（多字节安全）
+    // rg 的 submatch start 是行内字节偏移：换算 1 起 UTF-16 码元列（与前端 JS
+    // 字符串索引同一约定；BMP 内与字符数一致，增补平面字符按 2 计）
     let col = line_text
         .get(..start.min(line_text.len()))
-        .map(|prefix| prefix.chars().count() + 1)
+        .map(|prefix| prefix.encode_utf16().count() + 1)
         .unwrap_or(1);
 
     let text = line_text.trim_end_matches(['\n', '\r']);
@@ -415,13 +417,17 @@ mod tests {
     }
 
     #[test]
-    fn match_frame_col_counts_chars_not_bytes() {
+    fn match_frame_col_counts_utf16_units() {
         let root = Path::new("/tmp/root");
-        // "中文needle"：n 的字节偏移 6，字符列 3
+        // BMP 中文："中文needle" 的 n 字节偏移 6，UTF-16 码元列 3（与字符数一致）
         let frame = sample_match("/tmp/root/zh.txt", 1, "中文needle\n", 6);
         let out: Value = serde_json::from_str(&match_frame(&frame, root).unwrap()).unwrap();
         assert_eq!(out["col"], 3);
         assert_eq!(out["text"], "中文needle");
+        // 增补平面（😀 = 4 字节 / 1 字符 / 2 UTF-16 码元）：字符计会得 2，UTF-16 计得 3
+        let frame = sample_match("/tmp/root/emoji.txt", 1, "\u{1F600}needle\n", 4);
+        let out: Value = serde_json::from_str(&match_frame(&frame, root).unwrap()).unwrap();
+        assert_eq!(out["col"], 3);
     }
 
     #[test]
@@ -606,6 +612,66 @@ mod tests {
         assert!(!outcome.truncated);
         let hits = frames[..frames.len() - 1].len();
         assert_eq!(hits, 1000);
+        let done: Value = serde_json::from_str(frames.last().unwrap()).unwrap();
+        assert_eq!(done["truncated"], false);
+    }
+
+    /// 1000 个文本命中之后再遇到二进制文件的 match 帧（lines.bytes）：
+    /// 二进制帧不下发也不得计入截断判定（判定在 payload 提取之后），
+    /// 恰 1000 个可下发命中依旧不算截断。
+    #[tokio::test]
+    async fn pump_binary_match_after_1000_does_not_report_truncated() {
+        let Some(rg) = probe_rg() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        // 20 文件 × 50 行 = 恰好 1000 个文本命中（--max-count 50）
+        for i in 0..20 {
+            let content: String = "needle line\n".repeat(50);
+            std::fs::write(dir.path().join(format!("f{i:02}.txt")), content).unwrap();
+        }
+        // 二进制文件（含 NUL）：rg 以 lines.bytes 回显命中，match_frame 提取不到文本
+        std::fs::write(dir.path().join("bin.dat"), b"needle\x00tail\n").unwrap();
+        let mut child = Command::new(&rg)
+            .args([
+                "--json",
+                "--max-count",
+                "50",
+                "--sort",
+                "path",
+                "--no-ignore",
+                "--no-messages",
+                "-e",
+                "needle",
+            ])
+            .arg(dir.path())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
+
+        let (tx, mut rx) = mpsc::channel::<Result<String, std::io::Error>>(256);
+        let handle = tokio::spawn(pump(
+            child,
+            stdout,
+            stderr,
+            dir.path().to_path_buf(),
+            tx,
+            std::time::Duration::from_secs(60),
+        ));
+
+        let mut frames = Vec::new();
+        while let Some(Ok(line)) = rx.recv().await {
+            frames.push(line);
+        }
+        let outcome = handle.await.unwrap();
+        assert!(!outcome.truncated, "二进制帧不应计入截断判定");
+        let hits = frames[..frames.len() - 1].len();
+        assert_eq!(hits, 1000, "二进制命中帧不应下发");
         let done: Value = serde_json::from_str(frames.last().unwrap()).unwrap();
         assert_eq!(done["truncated"], false);
     }

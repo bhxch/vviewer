@@ -155,6 +155,38 @@ describe('grepStoreLocal', () => {
     expect(progress[progress.length - 1]).toBeGreaterThanOrEqual(1);
   });
 
+  it('命中数恰达上限不误报截断；出现第 maxMatches+1 个才置 truncated', async () => {
+    const exact = memStore({
+      'a.ts': 'findMe 1\nfindMe 2\n',
+      'b.ts': 'findMe 3\n'
+    });
+    const ok = await grepStoreLocal(exact, 'findMe', { maxMatches: 3 });
+    expect(ok.matches.length).toBe(3);
+    expect(ok.truncated).toBe(false); // 恰好 3 个：与服务端「读到第 N+1 个才置位」对齐
+
+    const over = memStore({
+      'a.ts': 'findMe 1\nfindMe 2\nfindMe 3\n',
+      'b.ts': 'findMe 4\n'
+    });
+    const cut = await grepStoreLocal(over, 'findMe', { maxMatches: 3 });
+    expect(cut.matches.length).toBe(3); // 第 4 个命中被丢弃，只保留前 3 条
+    expect(cut.truncated).toBe(true);
+  });
+
+  it('col 按 UTF-16 码元计（中文/增补平面字符各按其实际码元数占位）', async () => {
+    const store = memStore({
+      // "中文needle"：n 在 JS 字符串索引 2 → col 3（BMP 内与字符数一致）
+      'zh.ts': '中文needle\n',
+      // "😀needle"：😀 占 2 个 UTF-16 码元 → n 在索引 2 → col 3
+      'emoji.ts': '😀needle\n'
+    });
+    const { matches } = await grepStoreLocal(store, 'needle');
+    const zh = matches.find((m) => m.path === 'zh.ts')!;
+    const emoji = matches.find((m) => m.path === 'emoji.ts')!;
+    expect(zh.col).toBe(3);
+    expect(emoji.col).toBe(3); // 字符计数会得 2：锁定 UTF-16 码元约定
+  });
+
   it('canceled 回调为真时立即中止（返回已累计结果）', async () => {
     const store = memStore({ 'a.ts': 'findMe\n', 'b.ts': 'findMe\n' });
     const { matches, truncated } = await grepStoreLocal(store, 'findMe', {

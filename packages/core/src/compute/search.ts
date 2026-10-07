@@ -10,9 +10,9 @@
  *   error 字段可选）→ 展开为 GrepMatch[]。非 2xx / done.error 抛错，由
  *   ComputeRouter 的 auto 策略回退本地（remote 策略如实报错）。
  *
- * 行列约定与服务端一致：line/col 均为 1 起；col 按 UTF-16 码元计；
- * preview 为命中行文本、超长截 200 字符。glob 仅服务端支持（rg -g），
- * 本地实现忽略（无 UI 入口，P2）。
+ * 行列约定与服务端一致：line/col 均为 1 起；col 按 UTF-16 码元计（服务端由 rg 的
+ * 字节偏移经 encode_utf16 换算，增补平面字符按 2 计）；preview 为命中行文本、
+ * 超长截 200 字符。glob 仅服务端支持（rg -g），本地实现忽略（无 UI 入口，P2）。
  */
 
 import type { TreeStore } from '../types';
@@ -41,7 +41,7 @@ export interface GrepLocalOptions {
   maxFileBytes?: number;
   /** 目录递归深度上限（根 = 0 层，默认 5） */
   maxDepth?: number;
-  /** 命中数上限（默认 1000，与服务端截断一致） */
+  /** 命中数上限（默认 1000，与服务端截断一致；恰达上限不算截断，见 grepStoreLocal） */
   maxMatches?: number;
   /** 取消探测：返回 true 时尽快中止（结果作废由调用方代际防护裁决） */
   canceled?: () => boolean;
@@ -177,8 +177,11 @@ export async function grepStoreLocal(
             preview: truncatePreview(line)
           });
         }
-        if (matches.length >= maxMatches) {
-          truncated = true; // 命中上限即停（保守：后续可能仍有命中）
+        if (matches.length > maxMatches) {
+          // 读到第 maxMatches+1 个命中才证实截断（与服务端语义一致）：
+          // 恰好 maxMatches 个不算截断；超出者丢弃，只保留前 maxMatches 条
+          matches.pop();
+          truncated = true;
           break walk;
         }
       }
