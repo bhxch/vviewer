@@ -61,32 +61,70 @@ describe('aliases.json（helix 语言名 → tree-sitter-wasms 文件名映射�
 });
 
 describe('build-list（markpad grammar 源判据 src/parser.c）', () => {
-  it('入选（parserCExists）≥ 250（markpad 语法源实测 292 可建，随上游漂移只升不降则断言兜底）', () => {
-    const entries = buildList(SOURCES) as BuildListEntry[];
-    const buildable = entries.filter((e) => e.parserCExists);
-    expect(buildable.length).toBeGreaterThanOrEqual(250);
-  });
+  // 数据源在仓库外（markpad grammars，随上游漂移且 fresh clone 必然缺失）：
+  // 断言只依赖稳定部分——入库快照断结构、live 计算断幂等与 wiring、判据逻辑用合成
+  // fixture 验证。快照与 live 源的严格一致不属测试契约（再生成由 build-list.mjs 手动跑）。
+  const markpadAvailable = existsSync(SOURCES.grammarInfoJson) && existsSync(SOURCES.grammarsDir);
 
-  it('入库的 build-list.json 与重新计算一致（幂等、按 name 排序）', () => {
+  it('入库 build-list.json 结构稳定：按 name 排序、条目形状正确、可建数 ≥250（生成时点快照）', () => {
     const onDisk = JSON.parse(
       readFileSync(path.join(repoRoot, 'tools/grammar-builder/build-list.json'), 'utf8'),
     ) as BuildListEntry[];
-    const fresh = buildList(SOURCES) as BuildListEntry[];
-    expect(onDisk).toEqual(fresh);
+    expect(onDisk.length).toBeGreaterThanOrEqual(250);
     const names = onDisk.map((e) => e.name);
     expect(names).toEqual([...names].sort());
+    for (const e of onDisk) {
+      expect(typeof e.name).toBe('string');
+      expect(typeof e.subpath).toBe('string');
+      expect(typeof e.parserCExists).toBe('boolean');
+      expect(e.helixLang === null || typeof e.helixLang === 'string').toBe(true);
+    }
+    expect(onDisk.filter((e) => e.parserCExists).length).toBeGreaterThanOrEqual(250);
   });
 
-  it('subpath 条目按子目录判定 parser.c（tsx → grammars/tsx/tsx；顶层无 src 时仅 subpath 命中）', () => {
-    const entries = buildList(SOURCES) as BuildListEntry[];
-    const tsx = entries.find((e) => e.name === 'tsx');
-    expect(tsx?.subpath).toBe('tsx');
-    expect(tsx?.parserCExists).toBe(true);
-    // 抽样：subpath 非空的条目全部以子目录判据通过
-    const withSub = entries.filter((e) => e.subpath !== '');
-    expect(withSub.length).toBeGreaterThan(0);
-    for (const e of withSub) {
-      expect(detectParserC(SOURCES.grammarsDir, e.name, e.subpath)).toBe(true);
+  it.skipIf(!markpadAvailable)(
+    'buildList 对当前源幂等且结构正确（与入库快照解耦，上游漂移不致失败）',
+    () => {
+      const first = buildList(SOURCES) as BuildListEntry[];
+      const second = buildList(SOURCES) as BuildListEntry[];
+      expect(second).toEqual(first); // 幂等：同源两次计算一致
+      const names = first.map((e) => e.name);
+      expect(names).toEqual([...names].sort());
+      // 条目覆盖 grammar_info 全部键；flag 与判据函数一致（wiring 正确，不预设源文件存在与否）
+      const grammarInfo = JSON.parse(readFileSync(SOURCES.grammarInfoJson, 'utf8')) as Record<
+        string,
+        unknown
+      >;
+      expect(first.length).toBe(Object.keys(grammarInfo).length);
+      for (const e of first) {
+        expect(e.helixLang === null || typeof e.helixLang === 'string').toBe(true);
+        expect(e.parserCExists).toBe(detectParserC(SOURCES.grammarsDir, e.name, e.subpath));
+      }
+    },
+  );
+
+  it('subpath 判据用合成 fixture 验证：顶层 src 命中、subpath 指向子目录命中、无 src 不命中', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'vv-gb-bl-'));
+    const grammars = path.join(dir, 'grammars');
+    // tsx：markpad 形态——顶层目录无 src，仅子目录 grammars/tsx/tsx/src 有 parser.c
+    mkdirSync(path.join(grammars, 'tsx', 'tsx', 'src'), { recursive: true });
+    writeFileSync(path.join(grammars, 'tsx', 'tsx', 'src', 'parser.c'), 'int main(void){return 0;}');
+    mkdirSync(path.join(grammars, 'top', 'src'), { recursive: true });
+    writeFileSync(path.join(grammars, 'top', 'src', 'parser.c'), 'int main(void){return 0;}');
+    mkdirSync(path.join(grammars, 'bare')); // 无 src → 不命中
+    const grammarInfoJson = path.join(dir, 'grammar_info.json');
+    writeFileSync(grammarInfoJson, JSON.stringify({ tsx: { subpath: 'tsx' }, top: {}, bare: {} }));
+    const entries = buildList({
+      languagesJson: SOURCES.languagesJson,
+      grammarInfoJson,
+      grammarsDir: grammars,
+    }) as BuildListEntry[];
+    const byName = new Map(entries.map((e) => [e.name, e]));
+    expect(byName.get('tsx')).toMatchObject({ subpath: 'tsx', parserCExists: true });
+    expect(byName.get('top')).toMatchObject({ subpath: '', parserCExists: true });
+    expect(byName.get('bare')).toMatchObject({ subpath: '', parserCExists: false });
+    for (const e of entries) {
+      expect(e.parserCExists).toBe(detectParserC(grammars, e.name, e.subpath));
     }
   });
 });

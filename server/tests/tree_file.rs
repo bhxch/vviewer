@@ -223,6 +223,34 @@ async fn file_range_bytes_a_b() {
 }
 
 #[tokio::test]
+async fn file_range_edge_zero_and_last_byte() {
+    let f = fixture(false);
+    // 0-0：单字节首字节（RFC 9110 首=尾时长度 1）
+    let (status, headers, body) = get_with(
+        vviewer::build_router(f.state.clone()),
+        "/api/file?path=digits.bin",
+        |b| b.header("range", "bytes=0-0"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(body.as_ref(), b"0");
+    assert_eq!(headers["content-range"], "bytes 0-0/10");
+    assert_eq!(headers["content-length"], "1");
+
+    // 末字节 9-9（size-1 到 size-1）
+    let (status, headers, body) = get_with(
+        vviewer::build_router(f.state),
+        "/api/file?path=digits.bin",
+        |b| b.header("range", "bytes=9-9"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(body.as_ref(), b"9");
+    assert_eq!(headers["content-range"], "bytes 9-9/10");
+    assert_eq!(headers["content-length"], "1");
+}
+
+#[tokio::test]
 async fn file_range_open_ended() {
     let f = fixture(false);
     let (status, headers, body) = get_with(

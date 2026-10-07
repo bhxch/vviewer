@@ -11,6 +11,17 @@ export interface RemoteMeta {
 }
 
 /**
+ * RemoteStore 扩展面：SSE 变更订阅与资源释放。
+ * watch 由 openFlow 在连接成功后调用；close 由引用计数接线（最后一个持有 tab 关闭时）触发。
+ */
+export interface RemoteStore extends TreeStore {
+  /** 订阅服务器变更推送（`changed` 事件的相对路径列表）；返回解绑函数。 */
+  watch(listener: (paths: string[]) => void): () => void;
+  /** 关闭 SSE 连接并停止重连；之后 store 仍可正常 read/listChildren。 */
+  close(): void;
+}
+
+/**
  * 模块级 meta 表：key `${store.id}:${path}`，RemoteStore.read 时写入。
  * code renderer 渲染前查表（getRemoteMeta），用服务端检测纠偏本地启发式。
  */
@@ -49,8 +60,11 @@ function asEncoding(v: string | null): Encoding | undefined {
  * listChildren → GET /api/tree?path=，read → GET /api/file?path=（全量读，
  * Range 由服务端支持但前端暂不使用）；每次 read 把 X-VV-* 检测头写入 remoteMeta。
  * id 由 base+label 哈希派生；base 登记在 remoteBaseById（会话快照 storeBase，M7 恢复）。
+ * watch() 订阅 SSE 变更推送：POST /api/ticket（Bearer）换一次性票 →
+ * GET /api/events?ticket=（EventSource 无法自带头）；断线手动重连接（ticket 一次性，
+ * EventSource 原生自动重连会复用已消费的 ticket 永远 401，必须关掉重开）。
  */
-export function createRemoteStore(baseUrl: string, token: string | null, dirLabel: string): TreeStore {
+export function createRemoteStore(baseUrl: string, token: string | null, dirLabel: string): RemoteStore {
   const base = normalizeServerBase(baseUrl);
   const id = `remote:${hash8(`${base}:${dirLabel}`)}`;
   remoteBaseById.set(id, base);
@@ -71,6 +85,101 @@ export function createRemoteStore(baseUrl: string, token: string | null, dirLabe
       throw new Error(`服务器请求失败: HTTP ${res.status}${detail}`);
     }
     return res;
+  }
+
+  // ---------- SSE 变更推送订阅 ----------
+  type ChangeListener = (paths: string[]) => void;
+  const changeListeners = new Set<ChangeListener>();
+  let eventSource: EventSource | null = null;
+  let opening = false;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectDelay = 1000;
+  let watchClosed = false;
+
+  /** SSE 数据帧：`{"type":"changed","paths":[..]}` 或降级帧 `{"type":"watch-error"}`。 */
+  function onChangedFrame(data: string): void {
+    let body: { type?: string; paths?: unknown };
+    try {
+      body = JSON.parse(data) as { type?: string; paths?: unknown };
+    } catch {
+      return; // 非 JSON 帧：忽略
+    }
+    if (body.type === 'watch-error') {
+      // 服务端 watcher 建立失败（降级后不再有数据帧）：断开且不重连
+      eventSource?.close();
+      eventSource = null;
+      return;
+    }
+    if (body.type !== 'changed' || !Array.isArray(body.paths)) return;
+    reconnectDelay = 1000; // 有正常帧说明链路健康，重置退避
+    const paths = body.paths.filter((p): p is string => typeof p === 'string');
+    for (const listener of changeListeners) listener(paths);
+  }
+
+  async function openEvents(): Promise<void> {
+    if (watchClosed || eventSource !== null || opening) return;
+    opening = true;
+    try {
+      // 换一次性 ticket（EventSource 无法自带 Authorization 头）
+      let ticket: string | null = null;
+      try {
+        const res = await fetch(`${base}/api/ticket`, {
+          method: 'POST',
+          headers: token ? { authorization: `Bearer ${token}` } : {}
+        });
+        if (res.ok) {
+          const body = (await res.json()) as { ticket?: unknown };
+          if (typeof body.ticket === 'string') ticket = body.ticket;
+        }
+      } catch {
+        // 网络错误或非 JSON：走下方退避重连
+      }
+      if (watchClosed) return;
+      if (ticket === null) {
+        scheduleReconnect();
+        return;
+      }
+      const es = new EventSource(`${base}/api/events?ticket=${encodeURIComponent(ticket)}`);
+      eventSource = es;
+      es.onmessage = (ev) => onChangedFrame(ev.data);
+      es.onerror = () => {
+        // 手动关闭重开：ticket 一次性，原生自动重连复用同一 URL 会永远 401
+        es.close();
+        if (eventSource === es) eventSource = null;
+        scheduleReconnect();
+      };
+    } finally {
+      opening = false;
+    }
+  }
+
+  function scheduleReconnect(): void {
+    if (watchClosed || reconnectTimer !== null) return;
+    const delay = reconnectDelay;
+    reconnectDelay = Math.min(reconnectDelay * 2, 15_000);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      void openEvents();
+    }, delay);
+  }
+
+  function watch(listener: (paths: string[]) => void): () => void {
+    changeListeners.add(listener);
+    void openEvents();
+    return () => {
+      changeListeners.delete(listener);
+    };
+  }
+
+  function close(): void {
+    watchClosed = true;
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    eventSource?.close();
+    eventSource = null;
+    changeListeners.clear();
   }
 
   return {
@@ -103,6 +212,8 @@ export function createRemoteStore(baseUrl: string, token: string | null, dirLabe
         remoteMeta.delete(key); // 文件变更后检测头可能消失：清掉旧记录
       }
       return new Uint8Array(await res.arrayBuffer());
-    }
+    },
+    watch,
+    close
   };
 }

@@ -19,6 +19,8 @@ export interface Tab {
   active: boolean;
   /** 会话恢复的占位 tab：内容无法自动还原，需用户重新打开 */
   unrestorable?: boolean;
+  /** 渲染代数：SSE 变更刷新自增（ViewerPane 渲染 effect 依赖它重跑）；不进会话快照 */
+  rev?: number;
 }
 
 let seq = 0;
@@ -97,6 +99,18 @@ class TabCollection {
   activate(id: string): void {
     for (const t of this.list) t.active = t.id === id;
     void persist();
+  }
+
+  /**
+   * SSE 变更刷新（M5）：重读并重渲染命中 store+path 的 tab。
+   * rev 自增使 ViewerPane 的渲染 effect（依赖 tab 代理）重跑；内容不在会话快照内，无需 persist。
+   */
+  refreshPaths(storeId: string, paths: string[]): void {
+    for (const t of this.list) {
+      if (t.source.storeId !== storeId) continue;
+      if (paths.length > 0 && !paths.includes(t.source.path)) continue;
+      t.rev = (t.rev ?? 0) + 1;
+    }
   }
 
   /** 滚动位置即时写入内存，saveTabs 落盘走 300ms 尾随防抖 */
@@ -199,8 +213,9 @@ function serverLabel(base: string): string {
 
 /**
  * 连接 vviewer 文件服务器：GET /api/health 校验（capabilities 须含 file-server）
- * → createRemoteStore → addDirStoreTab（目录 tab 替换语义）→ 记入 sessionStorage。
- * 失败抛错给 UI 展示；连接句柄不可持久化，重连本期需手动（M7 恢复）。
+ * → POST /api/ticket 鉴权预检（health 免认证，需受保护端点实际验 token）
+ * → createRemoteStore（watch 订阅 SSE 变更）→ addDirStoreTab（目录 tab 替换语义）
+ * → 记入 sessionStorage。失败抛错给 UI 展示；连接句柄不可持久化，重连本期需手动（M7 恢复）。
  */
 export async function connectServer(baseUrl: string, token: string | null): Promise<void> {
   const base = normalizeServerBase(baseUrl); // 缺 scheme 补 http://、去尾部斜杠
@@ -225,7 +240,25 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
     throw new Error('目标不是 vviewer 文件服务器（缺少 file-server 能力）');
   }
 
-  addDirStoreTab(createRemoteStore(base, tok, serverLabel(base)));
+  // 鉴权预检：health 免认证，错误 token 也能过能力校验——用 Bearer 保护的
+  // ticket 端点实际验证令牌，避免"假连接成功后所有数据请求 401、目录树全空"
+  let authRes: Response;
+  try {
+    authRes = await fetch(`${base}/api/ticket`, { method: 'POST', headers });
+  } catch {
+    throw new Error(`无法连接 ${base}：网络错误或地址不可达`);
+  }
+  if (!authRes.ok) {
+    throw new Error(
+      authRes.status === 401 ? '鉴权失败：令牌缺失或错误（HTTP 401）' : `服务器响应异常: HTTP ${authRes.status}`
+    );
+  }
+
+  const store = createRemoteStore(base, tok, serverLabel(base));
+  // SSE 变更订阅：服务端推送 changed → 命中 path 的 tab 重读重渲染；
+  // store 关闭（最后一个持有 tab 关闭 / 被新连接替换）由引用计数接线调 close() 停流
+  store.watch((paths) => tabStore.refreshPaths(store.id, paths));
+  addDirStoreTab(store);
   try {
     sessionStorage.setItem(
       LAST_SERVER_KEY,

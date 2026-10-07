@@ -147,3 +147,154 @@ describe('normalizeServerBase', () => {
     expect(normalizeServerBase('https://example.com')).toBe('https://example.com');
   });
 });
+
+/** EventSource 桩：记录实例与 URL，测试内手动 emit/fail 驱动回调 */
+class FakeEventSource {
+  static instances: FakeEventSource[] = [];
+  static reset(): void {
+    FakeEventSource.instances = [];
+  }
+  url: string;
+  onmessage: ((ev: { data: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  closed = false;
+  constructor(url: string) {
+    this.url = url;
+    FakeEventSource.instances.push(this);
+  }
+  close(): void {
+    this.closed = true;
+  }
+  emit(data: string): void {
+    if (!this.closed) this.onmessage?.({ data });
+  }
+  fail(): void {
+    if (!this.closed) this.onerror?.();
+  }
+}
+
+/** ticket 响应桩：区分 /api/ticket 与其他请求 */
+function ticketFetch(ticket: string | null): typeof fetch {
+  return (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/api/ticket')) {
+      if (ticket === null) return { ok: false, status: 500, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => ({ ticket }) };
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  }) as unknown as typeof fetch;
+}
+
+/** 刷新微任务队列（ticket fetch 桩立即 resolve，两轮宏任务足够开流） */
+const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+describe('createRemoteStore watch/close（M5 SSE 变更订阅）', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('watch 换票（带 Bearer）后开 /api/events 流，changed 帧通知监听器', async () => {
+    const fetchMock = vi.fn(ticketFetch('tk-1'));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('EventSource', FakeEventSource);
+    FakeEventSource.reset();
+    const store = createRemoteStore('http://127.0.0.1:8399', 'e2etoken', 'srv');
+    const seen: string[][] = [];
+    store.watch((paths) => seen.push(paths));
+    await flush();
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8399/api/ticket', {
+      method: 'POST',
+      headers: { authorization: 'Bearer e2etoken' }
+    });
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0]!.url).toBe('http://127.0.0.1:8399/api/events?ticket=tk-1');
+    FakeEventSource.instances[0]!.emit('{"type":"changed","paths":["sample.js","sub/inner.txt"]}');
+    expect(seen).toEqual([['sample.js', 'sub/inner.txt']]);
+    store.close();
+  });
+
+  it('无 token 时换票请求不带 authorization 头', async () => {
+    const fetchMock = vi.fn(ticketFetch('tk-0'));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('EventSource', FakeEventSource);
+    FakeEventSource.reset();
+    const store = createRemoteStore('http://127.0.0.1:8399', null, 'srv');
+    store.watch(() => {});
+    await flush();
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8399/api/ticket', {
+      method: 'POST',
+      headers: {}
+    });
+    store.close();
+  });
+
+  it('换票失败退避重试；错误帧后手动重开并换新票（ticket 一次性，原生重连会永远 401）', async () => {
+    vi.useFakeTimers();
+    // 首次换票失败，之后每次发新票
+    const tickets: (string | null)[] = [null, 'tk-2', 'tk-3'];
+    const fetchMock = vi.fn((async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/ticket')) {
+        const t = tickets.length > 0 ? tickets.shift()! : 'tk-late'; // 注意 ?? 会把队列里的 null 也吃掉
+        if (t === null) return { ok: false, status: 500, json: async () => ({}) };
+        return { ok: true, status: 200, json: async () => ({ ticket: t }) };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }) as unknown as typeof fetch);
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('EventSource', FakeEventSource);
+    FakeEventSource.reset();
+    const store = createRemoteStore('http://127.0.0.1:8399', null, 'srv');
+    store.watch(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(FakeEventSource.instances).toHaveLength(0); // 首次换票失败：不开流
+    await vi.advanceTimersByTimeAsync(1000); // 1s 退避后重试，这次成功
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(FakeEventSource.instances).toHaveLength(1);
+    const first = FakeEventSource.instances[0]!;
+    expect(first.url).toBe('http://127.0.0.1:8399/api/events?ticket=tk-2');
+    first.emit('{"type":"changed","paths":["a.txt"]}');
+    first.fail(); // 连接断开：应关掉并重新换票开新流
+    expect(first.closed).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(FakeEventSource.instances).toHaveLength(2); // 新票新流
+    expect(FakeEventSource.instances[1]!.url).toBe('http://127.0.0.1:8399/api/events?ticket=tk-3');
+    store.close();
+  });
+
+  it('watch-error 帧（服务端 watch 降级）断流且不再重连', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(ticketFetch('tk-w')));
+    vi.stubGlobal('EventSource', FakeEventSource);
+    FakeEventSource.reset();
+    const store = createRemoteStore('http://127.0.0.1:8399', null, 'srv');
+    store.watch(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    const es = FakeEventSource.instances[0]!;
+    es.emit('{"type":"watch-error"}');
+    expect(es.closed).toBe(true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(FakeEventSource.instances).toHaveLength(1); // 无重连
+    store.close();
+  });
+
+  it('解绑后不再通知；close() 关流且阻断重连', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(ticketFetch('tk-c')));
+    vi.stubGlobal('EventSource', FakeEventSource);
+    FakeEventSource.reset();
+    const store = createRemoteStore('http://127.0.0.1:8399', null, 'srv');
+    const seen: string[][] = [];
+    const un = store.watch((paths) => seen.push(paths));
+    await vi.advanceTimersByTimeAsync(0);
+    const es = FakeEventSource.instances[0]!;
+    un();
+    es.emit('{"type":"changed","paths":["x.txt"]}');
+    expect(seen).toEqual([]);
+    store.close();
+    expect(es.closed).toBe(true);
+    es.fail(); // close 后连接错误也不得重连
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(FakeEventSource.instances).toHaveLength(1);
+  });
+});
