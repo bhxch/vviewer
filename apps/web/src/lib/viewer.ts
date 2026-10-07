@@ -1,13 +1,17 @@
 import { createRegistry, createDispatcher, type Dispatcher, type Registry } from '@vviewer/core';
 import { codeRenderer } from '@vviewer/render-text';
+import { markdownRenderer } from '@vviewer/render-text/markdown/markdownRenderer';
+import { htmlRenderer } from '@vviewer/render-text/html';
 import { imageRenderer } from '@vviewer/render-media';
 import { avRenderer } from '@vviewer/render-media/av';
 import { browser } from '$app/environment';
 import { ensureHighlightClient } from './highlightClient';
 
-/** M1 渲染器注册表：代码/文本、图片（含消毒后的 SVG）、音视频 */
+/** M1 渲染器注册表：代码/文本、markdown、html 沙箱预览、图片（含消毒后的 SVG）、音视频 */
 export const registry: Registry = createRegistry();
 registry.install(codeRenderer);
+registry.install(markdownRenderer);
+registry.install(htmlRenderer);
 registry.install(imageRenderer);
 registry.install(avRenderer);
 

@@ -92,7 +92,7 @@ test('sample.ts 走 tree-sitter 主路径（ts-* span），切换代码主题零
   expect(after.sameNode).toBe(true); // 同一 DOM 节点：零重解析
 });
 
-test('sample.rs（查询失配）与 sample.md（不在 wasm 清单）自动降级 hljs 整文件', async ({ page }) => {
+test('sample.rs（查询失配）自动降级 hljs 整文件', async ({ page }) => {
   await page.goto('/');
   await openDir(page, SAMPLES);
 
@@ -102,13 +102,7 @@ test('sample.rs（查询失配）与 sample.md（不在 wasm 清单）自动降�
   await expect(hljsSpans.first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.vv-code-pre span[class^="ts-"]')).toHaveCount(0);
   await expect(page.locator('.vv-statusbar')).toHaveText('高亮: hljs 兜底', { timeout: 20_000 });
-
-  // markdown 不在 36 个 grammar wasm 清单内 → 同样 hljs 兜底
-  await openFile(page, 'sample.md');
-  await expect(page.locator('.vv-code-pre .vv-code-line').first()).toBeVisible();
-  await expect(page.locator('.vv-code-pre span[class^="hljs-"]').first()).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator('.vv-code-pre span[class^="ts-"]')).toHaveCount(0);
-  await expect(page.locator('.vv-statusbar')).toHaveText('高亮: hljs 兜底', { timeout: 20_000 });
+  // M3 起 sample.md 归 markdownRenderer（markdown 渲染断言在 m3.spec.ts），不再是 code 降级链的载体
 });
 
 test('6MB 文本按降级链走 hljs 分块，不发起 tree-sitter 高亮', async ({ page }) => {

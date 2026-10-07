@@ -1,10 +1,11 @@
-import type { Renderer, Encoding, Detection, FileSource, RenderedInstance } from '@vviewer/core';
+import type { Renderer, Encoding, Detection, FileSource, RenderedInstance, SearchMatch } from '@vviewer/core';
 import { detectLanguage, HighlightCanceledError, captureToCssClass, type HighlightInterval } from '@vviewer/highlight';
 
 export type { HighlightInterval };
 /** hljs 动态导入的默认导出类型（HLJSApi） */
 type HLJS = (typeof import('highlight.js'))['default'];
 import { virtualScroller, type VirtualScrollerHandle } from './virtualScroller';
+import { searchCode } from './search';
 
 /**
  * hljs 别名桥接：helix 语言名 → hljs 语言 id（仅收录 hljs.getLanguage 直查失败的键；
@@ -53,6 +54,10 @@ export function resolveHljsLang(hljs: HLJS, lang: string | null): string | null 
  * 据 spec 5.11 预算校准，worker 取消传播落地后可再上调。 */
 export const TREE_SITTER_MAX_BYTES = 2 * 1024 * 1024;
 export const HLJS_MAX_BYTES = 20 * 1024 * 1024;
+/** markdown/html 富文本渲染输入上限（与 hljs 阈值同源 20MB）：净化与 DOM 遍历
+ * 管线无分块，超大输入会长时间阻塞主线程；超限跳过富文本管线，降级为代码/纯
+ * 文本视图（renderDegradedCode）。 */
+export const MARKUP_MAX_BYTES = 20 * 1024 * 1024;
 export const LINE_HEIGHT = 20;
 
 export type HighlightStrategy = 'tree-sitter' | 'hljs-block' | 'plain';
@@ -64,7 +69,8 @@ export function resolveStrategy(size: number): HighlightStrategy {
   return 'plain';
 }
 
-const DECODERS: Record<Encoding, string> = {
+/** Encoding → TextDecoder 标签（code/markdown/html 渲染器共用；导出避免重复表） */
+export const DECODERS: Record<Encoding, string> = {
   'utf-8': 'utf-8',
   'utf-16le': 'utf-16le',
   'utf-16be': 'utf-16be',
@@ -297,6 +303,11 @@ export function attachHighlightClient(client: CodeHighlightClient | null): void 
   attachedClient = client;
 }
 
+/** 读取已注入的高亮客户端单例（markdownRenderer 的围栏高亮复用同一注入，无需二次接线） */
+export function getHighlightClient(): CodeHighlightClient | null {
+  return attachedClient;
+}
+
 // 样式说明：虚拟滚动与代码面板的样式统一由 apps/web/src/app.css 提供（单一来源），
 // 本模块不再运行时注入 CSS，避免双份定义漂移。
 
@@ -311,6 +322,10 @@ export interface RenderCodeHandle {
   getScrollHost(): HTMLElement;
   /** 当前生效的高亮引擎（实时；状态栏指示器用） */
   getEngine(): CodeEngine;
+  /** 文件内搜索：行数组扫描（缓存上次 query），空 query 返回 []（退出搜索语义） */
+  search(query: string): Promise<SearchMatch[]>;
+  /** 跳到第 index 个命中：滚动到该行 + 行级临时高亮（1.5s 或直到下一次跳转） */
+  gotoMatch(index: number): void;
 }
 
 export function renderCode(
@@ -336,6 +351,29 @@ export function renderCode(
   let destroyed = false;
   // 引擎实时值：tree-sitter 主路径在区间到达前为 pending；hljs-block/plain 策略即终值
   let engine: CodeEngine = strategy === 'tree-sitter' ? 'pending' : strategy;
+  // 文件内搜索状态：上次 query 结果缓存 + 当前行级高亮
+  let lastQuery: string | null = null;
+  let lastMatches: SearchMatch[] = [];
+  let hitLine = -1;
+  let hitTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** 把行级命中高亮类同步到已渲染的行 DOM（虚拟滚动重绘后由 fillRows 的 hitLine 分支保持） */
+  function applyHitClass(): void {
+    const prev = pre.querySelector('.vv-code-line.vv-search-hit-line');
+    if (prev) prev.classList.remove('vv-search-hit-line');
+    if (hitLine >= 0) {
+      pre.querySelector(`[data-line="${hitLine}"]`)?.classList.add('vv-search-hit-line');
+    }
+  }
+
+  function clearHit(): void {
+    if (hitTimer !== null) {
+      clearTimeout(hitTimer);
+      hitTimer = null;
+    }
+    hitLine = -1;
+    applyHitClass(); // 直接改 DOM，无需重绘可视范围
+  }
 
   function fillRows(first: number, last: number, viewport: HTMLElement): void {
     const frag = document.createDocumentFragment();
@@ -343,6 +381,8 @@ export function renderCode(
       const row = document.createElement('div');
       row.className = 'vv-code-line';
       row.style.height = `${LINE_HEIGHT}px`;
+      row.dataset.line = String(i); // 搜索跳转按行号定位行 DOM
+      if (i === hitLine) row.classList.add('vv-search-hit-line');
       const gutter = document.createElement('span');
       gutter.className = 'vv-code-gutter';
       gutter.textContent = String(i + 1);
@@ -438,6 +478,7 @@ export function renderCode(
   return {
     destroy() {
       destroyed = true;
+      if (hitTimer !== null) clearTimeout(hitTimer);
       scroller?.destroy();
       scroller = null;
       blockCache.clear();
@@ -452,17 +493,40 @@ export function renderCode(
     getScrollHost() {
       return pre;
     },
-    getEngine: () => engine
+    getEngine: () => engine,
+    search(query) {
+      if (query === lastQuery) return Promise.resolve(lastMatches);
+      lastQuery = query;
+      lastMatches = query === '' ? [] : searchCode(lines, query);
+      if (query === '') clearHit(); // 空查询 = 退出搜索：行级高亮立即消退（不等 1.5s 计时）
+      return Promise.resolve(lastMatches);
+    },
+    gotoMatch(index) {
+      const match = lastMatches[index];
+      if (!match) return;
+      if (hitTimer !== null) clearTimeout(hitTimer);
+      hitLine = match.line;
+      // 目标行滚到视口中部（clientHeight 为 0（jsdom/未布局）时回落贴顶）
+      const center = match.line * LINE_HEIGHT - pre.clientHeight / 2 + LINE_HEIGHT / 2;
+      pre.scrollTop = Math.max(0, center);
+      scroller?.refresh(); // 按新 scrollTop 重算可视范围（范围未变则行 DOM 已在，applyHitClass 兜底）
+      applyHitClass();
+      hitTimer = setTimeout(() => {
+        hitTimer = null;
+        clearHit();
+      }, 1500);
+    }
   };
 }
 
 export const codeRenderer: Renderer = {
   id: 'code',
   label: '代码/文本',
-  // 注：不含 'svg'——svg 归 @vviewer/render-media 的 imageRenderer（消毒预览），registry 拒绝重复注册
+  // 注 1：不含 'svg'——svg 归 @vviewer/render-media 的 imageRenderer（消毒预览），registry 拒绝重复注册
+  // 注 2：不含 'md'/'markdown'/'html'/'htm'——M3 起归 markdownRenderer/htmlRenderer（M1-M2 期间暂由 code 承接）
   extensions: [
-    'txt', 'md', 'markdown', 'log', 'json', 'jsonc', 'yaml', 'yml', 'toml', 'ini', 'conf', 'cfg', 'env', 'csv',
-    'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'css', 'scss', 'html', 'htm', 'xml',
+    'txt', 'log', 'json', 'jsonc', 'yaml', 'yml', 'toml', 'ini', 'conf', 'cfg', 'env', 'csv',
+    'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'css', 'scss', 'xml',
     'py', 'rb', 'go', 'rs', 'java', 'kt', 'c', 'h', 'cpp', 'hpp', 'cc', 'sh', 'bash', 'zsh', 'fish', 'sql',
     'lua', 'php', 'pl', 'swift', 'dart', 'vue', 'svelte', 'gradle', 'cmake', 'properties', 'gitignore',
     'license', 'makefile', 'diff', 'patch'
@@ -470,9 +534,14 @@ export const codeRenderer: Renderer = {
   async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection) {
     void source;
     const inst = renderCode(buffer, target, { encoding: det.encoding, highlight: true, ext: det.ext });
-    // getScrollHost/getEngine 供 ViewerPane 接滚动持久化与引擎指示器
-    // （结构化扩展 RenderedInstance，不动 core）
-    const instance: RenderedInstance & { getScrollHost(): HTMLElement; getEngine(): CodeEngine } = {
+    // getScrollHost/getEngine 供 ViewerPane 接滚动持久化与引擎指示器；
+    // search/gotoMatch 供 SearchPanel（Task 6）。结构化扩展 RenderedInstance，不动 core。
+    const instance: RenderedInstance & {
+      getScrollHost(): HTMLElement;
+      getEngine(): CodeEngine;
+      search(query: string): Promise<SearchMatch[]>;
+      gotoMatch(index: number): void;
+    } = {
       destroy() {
         inst.destroy();
       },
@@ -481,8 +550,51 @@ export const codeRenderer: Renderer = {
       },
       getEngine() {
         return inst.getEngine();
+      },
+      search(query) {
+        return inst.search(query);
+      },
+      gotoMatch(index) {
+        inst.gotoMatch(index);
       }
     };
     return instance;
   }
 };
+
+// ---------- 超大输入降级（markdown/html 富文本渲染器共用） ----------
+
+/**
+ * 超大文件降级视图：提示卡 + 代码视图纵向排布，替代富文本渲染管线。
+ * markdown/html 的净化/DOM 遍历管线对超大输入无分块能力，> MARKUP_MAX_BYTES 时
+ * 调用方跳过富文本管线走这里：markdown 降级纯文本（highlight: false），html 降级
+ * 源码视图——降级而非拒绝，查看器语义下内容仍可读。错误卡复用 core showErrorCard
+ * 的 .vv-error-* 结构语义；.vv-degraded* 样式由 apps/web/src/app.css 提供。
+ */
+export function renderDegradedCode(
+  buffer: Uint8Array,
+  target: HTMLElement,
+  opts: { name: string; mode: string; encoding?: Encoding; ext?: string; highlight?: boolean }
+): RenderCodeHandle {
+  target.classList.add('vv-degraded');
+  const card = document.createElement('div');
+  card.className = 'vv-error-card vv-oversize-card';
+  const title = document.createElement('div');
+  title.className = 'vv-error-title';
+  title.textContent = '文件过大，已降级显示';
+  const detail = document.createElement('div');
+  detail.className = 'vv-error-detail';
+  detail.textContent = `文件超过 ${MARKUP_MAX_BYTES / 1024 / 1024}MB，富文本渲染已跳过（避免长时间阻塞），已降级为${opts.mode}视图（代码视图/纯文本查看）。`;
+  const meta = document.createElement('div');
+  meta.className = 'vv-error-meta';
+  meta.textContent = opts.name;
+  card.append(title, detail, meta);
+  const content = document.createElement('div');
+  content.className = 'vv-degraded-content';
+  target.replaceChildren(card, content);
+  return renderCode(buffer, content, {
+    encoding: opts.encoding,
+    highlight: opts.highlight,
+    ext: opts.ext
+  });
+}

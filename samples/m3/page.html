@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>M3 沙箱样例</title>
+</head>
+<body>
+  <h1>沙箱样例页面</h1>
+  <p>本页含内联脚本：若脚本被执行，<code>window.__executed</code> 将为 true。
+     E2E 断言它必须不存在（sandbox 无 allow-scripts + DOMPurify 剥除双保险）。</p>
+  <p style="color: crimson;">行内样式（style 属性）应保留，CSP 允许 style-src 'unsafe-inline'。</p>
+  <ul>
+    <li>iframe sandbox 只含 allow-same-origin：文档内脚本一律不执行</li>
+    <li>allow-same-origin 让父页面可读 contentWindow / contentDocument（E2E 断言通道）</li>
+  </ul>
+  <script>
+    window.__executed = true;
+    document.body.setAttribute('data-script-ran', '1');
+  </script>
+</body>
+</html>
