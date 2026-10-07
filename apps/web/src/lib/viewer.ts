@@ -6,11 +6,12 @@ import { imageRenderer } from '@vviewer/render-media';
 import { avRenderer } from '@vviewer/render-media/av';
 import { pdfRenderer } from '@vviewer/render-doc';
 import { hexRenderer } from '@vviewer/render-binary';
+import { archiveRenderer } from '@vviewer/render-archive';
 import { browser } from '$app/environment';
 import { ensureHighlightClient } from './highlightClient';
 
 /** M1 渲染器注册表：代码/文本、markdown、html 沙箱预览、图片（含消毒后的 SVG）、音视频。
- * M4 追加：PDF（render-doc）、hex/结构树（render-binary）。 */
+ * M4 追加：PDF（render-doc）、hex/结构树（render-binary）、zip 压缩包（render-archive）。 */
 export const registry: Registry = createRegistry();
 registry.install(codeRenderer);
 registry.install(markdownRenderer);
@@ -19,6 +20,7 @@ registry.install(imageRenderer);
 registry.install(avRenderer);
 registry.install(pdfRenderer);
 registry.install(hexRenderer);
+registry.install(archiveRenderer);
 
 export const dispatcher: Dispatcher = createDispatcher(registry);
 

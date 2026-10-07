@@ -147,6 +147,12 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .vv-hex-struct summary { cursor: pointer; list-style: revert; font-weight: 600; }
 .vv-hex-children { padding-left: 1.2em; }
 .vv-hex-node-value { color: var(--ui-fg-muted); }
+/* zip 包内树（render-archive archiveRenderer）：主区内的 .vv-tree 容器 */
+.vv-archive { padding: .75rem 1rem; overflow: auto; }
+.vv-archive .vv-tree-row { padding: 2px 4px; border-radius: 4px; }
+.vv-archive summary.vv-tree-row { cursor: pointer; list-style: none; }
+.vv-archive summary.vv-tree-row::-webkit-details-marker { display: none; }
+.vv-archive details[open] > summary .vv-tree-caret { display: inline-block; transform: rotate(90deg); }
 /* 超大文件降级视图（renderDegradedCode：markdown 纯文本 / html 源码）：提示卡 + 代码区 */
 .vv-degraded { display: flex; flex-direction: column; height: 100%; }
 .vv-degraded .vv-oversize-card { flex: none; padding: 1rem 1.5rem; border-bottom: 1px solid var(--ui-border); }

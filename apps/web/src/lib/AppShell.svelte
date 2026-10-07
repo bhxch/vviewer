@@ -7,7 +7,7 @@
   import Toc from './Toc.svelte';
   import MetaPanel from './MetaPanel.svelte';
   import type { TreeStore, TocEntry } from '@vviewer/core';
-  import { tabStore, addTab, activateTab, tryRestoreDirectory } from './openFlow.svelte';
+  import { tabStore, addTab, activateTab, tryRestoreDirectory, bindArchiveOpenEvents } from './openFlow.svelte';
   import { loadSession, saveDirHandle, type TabSnapshot } from './stores/session';
   import { loadSettings } from './stores/settings';
 
@@ -25,7 +25,10 @@
 
   onMount(() => {
     document.documentElement.dataset.themeMode = settings.themeMode;
+    // render-archive 包内树点击 → addTab（递归预览通道）
+    const unbindArchive = bindArchiveOpenEvents();
     void restore();
+    return unbindArchive;
   });
 
   async function restore(): Promise<void> {

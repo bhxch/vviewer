@@ -184,6 +184,20 @@ export function openUrl(url: string): void {
   addTab(createUrlStore(url), name, name);
 }
 
+/**
+ * 监听 render-archive 的包内文件点击事件（'vv-open-entry'）→ addTab 派发器自然路由。
+ * AppShell onMount 调用一次；返回解绑函数（HMR/卸载用）。
+ */
+export function bindArchiveOpenEvents(): () => void {
+  const handler = (ev: Event): void => {
+    const detail = (ev as CustomEvent<{ store: TreeStore; path: string; name: string }>).detail;
+    if (!detail || typeof detail.path !== 'string') return;
+    addTab(detail.store, detail.path, detail.name);
+  };
+  window.addEventListener('vv-open-entry', handler);
+  return () => window.removeEventListener('vv-open-entry', handler);
+}
+
 // E2E 调试钩子：webkitdirectory input 与 FS Access 均无法被 Playwright 自动化，
 // 测试在 page.evaluate 内构造带 webkitRelativePath 的 File 数组后经此注入，
 // 走与真实 input change 完全相同的 openDirectoryViaInput 通道。生产环境无调用方，无害。
