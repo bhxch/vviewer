@@ -1,6 +1,8 @@
 //! vviewer server 库：路由构建与静态资产服务（供集成测试复用）。
 
+pub mod detect;
 pub mod error;
+pub mod guard;
 pub mod routes;
 pub mod state;
 
