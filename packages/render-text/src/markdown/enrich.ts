@@ -165,8 +165,23 @@ function convertCallouts(root: Document): void {
   }
 }
 
+/**
+ * 任务列表类名归一化：直接产 HTML 的引擎（远程 comrak tasklist）不给 li 加类，
+ * 而 markdown-it-task-lists 输出 li.task-list-item——补齐保证两引擎样式一致。
+ * 幂等：已有类的 li（本地路径）不重复添加。
+ */
+function normalizeTaskLists(root: Document): void {
+  for (const li of Array.from(root.querySelectorAll('li'))) {
+    const direct = Array.from(li.children).find((c) => c.tagName === 'INPUT');
+    if (direct?.getAttribute('type') === 'checkbox' && !li.classList.contains('task-list-item')) {
+      li.classList.add('task-list-item');
+    }
+  }
+}
+
 /** 净化后 DOM 的展示性增强入口（幂等：callout/媒体替换后原元素已不复存在）。 */
 export function enrichMarkdownDom(root: Document): void {
   convertMediaElements(root);
   convertCallouts(root);
+  normalizeTaskLists(root);
 }

@@ -3,6 +3,7 @@ import { appendFileSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { test, expect } from '@playwright/test';
+import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 
 /**
  * M5 E2E 验收（Task 6）：server 模式全链路——
@@ -19,8 +20,11 @@ import { test, expect } from '@playwright/test';
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
 const samplesDir = `${repoRoot}/samples/m5`;
 const binPath = `${repoRoot}/server/target/debug/vviewer`;
-const PORT = 8399;
-const BASE = `http://127.0.0.1:${PORT}`;
+// 双 project（chromium/mobile）下同一 spec 文件在两个 worker 并发跑，
+// 各 project 错开监听端口避免 beforeAll spawn 时 bind 冲突（os error 98）；
+// test.info() 仅测试期可用，故 project 分派在 beforeAll 内完成
+let PORT = 8399;
+let BASE = `http://127.0.0.1:${PORT}`;
 const TOKEN = 'e2etoken';
 const PREVIEW_ORIGIN = 'http://127.0.0.1:4173';
 
@@ -42,6 +46,10 @@ async function waitHealthy(url: string, timeoutMs = 30_000): Promise<void> {
 }
 
 test.beforeAll(async () => {
+  if (test.info().project.name === 'mobile') {
+    PORT = 8449;
+    BASE = `http://127.0.0.1:${PORT}`;
+  }
   sampleOriginal = await readFile(`${samplesDir}/sample.js`);
   // 预编译（增量；fresh clone 首次会全量编译，耗时计入 beforeAll）
   execSync('cargo build --manifest-path server/Cargo.toml', { cwd: repoRoot, stdio: 'inherit' });
@@ -92,7 +100,10 @@ test('连接 → 目录树 → 打开 sample.js 高亮 → 修改文件 SSE 自�
   await expect(tree.locator('.vv-tree-row', { hasText: 'sub' })).toBeVisible();
 
   // 点击 sample.js → code tab 渲染 + 高亮 span（tree-sitter ts-* 或 hljs 兜底 hljs-*）
+  // 移动视口：远程目录树同样在抽屉内，开抽屉点击后关闭（drawer.ts）
+  const drawer = await openDrawerIfNarrow(page);
   await tree.locator('.vv-tree-row', { hasText: 'sample.js' }).click();
+  await closeDrawerIfOpened(page, drawer);
   await expect(page.locator('.vv-tab.active', { hasText: 'sample.js' })).toBeVisible();
   const code = page.locator('.vv-code-pre');
   await expect(code).toContainText('fib', { timeout: 20_000 });

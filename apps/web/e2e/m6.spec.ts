@@ -2,6 +2,7 @@ import { execSync, spawn, type ChildProcess } from 'node:child_process';
 import { rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
+import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 
 /**
  * M6 E2E 验收（Task 5）：compute 模式全链路——
@@ -20,8 +21,11 @@ import { test, expect, type Page } from '@playwright/test';
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
 const samplesDir = `${repoRoot}/samples`;
 const binPath = `${repoRoot}/server/target/debug/vviewer`;
-const PORT = 8401;
-const BASE = `http://127.0.0.1:${PORT}`;
+// 双 project（chromium/mobile）下同一 spec 文件在两个 worker 并发跑，
+// 各 project 错开监听端口避免 beforeAll spawn 时 bind 冲突（os error 98）；
+// test.info() 仅测试期可用，故 project 分派在 beforeAll 内完成
+let PORT = 8401;
+let BASE = `http://127.0.0.1:${PORT}`;
 const TOKEN = 'e2etoken6';
 const PREVIEW_ORIGIN = 'http://127.0.0.1:4173';
 
@@ -47,6 +51,10 @@ async function waitHealthy(url: string, timeoutMs = 30_000): Promise<void> {
 }
 
 test.beforeAll(async () => {
+  if (test.info().project.name === 'mobile') {
+    PORT = 8451;
+    BASE = `http://127.0.0.1:${PORT}`;
+  }
   // 钩子默认 30s 不够 cargo 增量编译（fresh clone 全量编译更久），扩到 5 分钟
   test.setTimeout(300_000);
   await writeFile(BIG_FILE, BIG_LINE.repeat(BIG_REPS));
@@ -104,10 +112,13 @@ async function expandDir(page: Page, name: string): Promise<void> {
   await page.locator('.vv-tree-row', { hasText: name }).first().click();
 }
 
-/** 展开目录并打开其中的文件（文件行出现在目录行的子树内） */
+/** 展开目录并打开其中的文件（文件行出现在目录行的子树内）。
+ * 移动视口：目录树在抽屉内，展开+点击全程开抽屉，点完关闭（drawer.ts） */
 async function openFile(page: Page, dir: string, name: string): Promise<void> {
+  const drawer = await openDrawerIfNarrow(page);
   await expandDir(page, dir);
   await page.locator('.vv-tree-row', { hasText: name }).click();
+  await closeDrawerIfOpened(page, drawer);
   await expect(page.locator('.vv-tab.active', { hasText: name })).toBeVisible({ timeout: 10_000 });
 }
 
@@ -143,14 +154,16 @@ test('policy=remote：打开 sample.js 高亮走服务端，状态栏显示执�
 });
 
 test('policy=remote：大文件（≈1.5MB）高亮执行位置同为「远程」', async ({ page }) => {
-  test.setTimeout(90_000);
+  // 1.5MB 远程高亮在双 project 全量并发（tree-sitter wasm 多 worker 抢 CPU）下
+  // 可能超过 60s，放宽到 120s（实测常态 ~45s，纯防抖不改变通过门槛）
+  test.setTimeout(150_000);
   await gotoWithPolicy(page, 'remote');
   await connect(page, TOKEN);
   await openFile(page, 'm6', 'e2e-big.js');
 
   const statusbar = page.locator('.vv-statusbar');
-  await expect(statusbar).toContainText('高亮: tree-sitter', { timeout: 60_000 });
-  await expect(statusbar).toContainText('执行: 远程', { timeout: 60_000 });
+  await expect(statusbar).toContainText('高亮: tree-sitter', { timeout: 120_000 });
+  await expect(statusbar).toContainText('执行: 远程', { timeout: 120_000 });
 });
 
 test('Ctrl+Shift+F 全局搜索 "inner"：远程 ripgrep 命中 sub/inner.txt，点击打开该文件', async ({ page }) => {
@@ -185,7 +198,12 @@ test('markdown：表格与任务列表渲染，comrak 端点 GFM 直连断言', 
   await connect(page, TOKEN);
   await openFile(page, 'm6', 'sample-gfm.md');
 
-  // 前端引擎渲染：GFM 表格（表头 + 2 数据行，中文单元格）与任务列表复选框
+  // M7 起 auto 策略对远程文件路由远程 comrak（markdown 接入 compute 路由）；
+  // comrak 的任务列表 li 无类，由前端 enrich 归一化补 task-list-item（双引擎样式一致）
+  const statusbar = page.locator('.vv-statusbar');
+  await expect(statusbar).toContainText('渲染: 远程', { timeout: 20_000 });
+
+  // 远程渲染结果：GFM 表格（表头 + 2 数据行，中文单元格）与任务列表复选框
   const md = page.locator('.vv-markdown');
   await expect(md).toBeVisible({ timeout: 20_000 });
   await expect(md.locator('table')).toBeVisible();
@@ -193,7 +211,7 @@ test('markdown：表格与任务列表渲染，comrak 端点 GFM 直连断言', 
   await expect(md.locator('table')).toContainText('传感器 A');
   await expect(md.locator('li.task-list-item input[type="checkbox"]')).toHaveCount(2);
 
-  // comrak 服务端渲染直连断言（UI markdown 不路由远程——T1-T4 范围如此，见任务报告偏差说明）：
+  // comrak 服务端渲染直连断言（同一端点独立验证）：
   // 表格 / 任务列表 / 脚注 / wikilinks 全扩展一次覆盖
   const res = await fetch(`${BASE}/api/compute/markdown`, {
     method: 'POST',
@@ -210,6 +228,22 @@ test('markdown：表格与任务列表渲染，comrak 端点 GFM 直连断言', 
   expect(html).toContain('checkbox');
   expect(html).toContain('footnote-ref');
   expect(html).toContain('vv-wikilink');
+});
+
+test('policy=remote：markdown 正文走服务端 comrak，状态栏显示「渲染: 远程」', async ({ page }) => {
+  test.setTimeout(60_000);
+  await gotoWithPolicy(page, 'remote');
+  await connect(page, TOKEN);
+  await openFile(page, 'm6', 'sample-gfm.md');
+
+  // 显式 remote：markdown 正文引擎=远程 comrak（状态栏），GFM 内容完整渲染
+  const statusbar = page.locator('.vv-statusbar');
+  await expect(statusbar).toContainText('渲染: 远程', { timeout: 20_000 });
+  await expect(statusbar).not.toContainText('渲染: 本地');
+  const md = page.locator('.vv-markdown');
+  await expect(md).toBeVisible({ timeout: 20_000 });
+  await expect(md.locator('table')).toContainText('传感器 A');
+  await expect(md.locator('li.task-list-item')).toHaveCount(2);
 });
 
 test('policy=local（TopBar UI 切换）：高亮回退本地，状态栏显示「本地」', async ({ page }) => {

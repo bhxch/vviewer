@@ -5,7 +5,7 @@
  * themes.json（~1.1MB）经动态 import 惰性加载为独立 chunk，不进主包；
  * 各 API 变 async，内部缓存同一份加载 promise（并发调用只请求一次）。
  */
-import { themeToCssVars, type ThemeTable } from '@vviewer/highlight';
+import { themeToCssVars, resolveCapture, type ThemeTable } from '@vviewer/highlight';
 import type { Settings } from './stores/settings';
 
 /** themes.json 全量表（键为 helix 主题名）。 */
@@ -106,6 +106,37 @@ export async function listThemes(): Promise<string[]> {
   return Object.keys(await loadTables()).sort();
 }
 
+/**
+ * hljs 兜底近似映射（M7 Task 3）：helix 主题 capture → hljs CSS 变量。
+ * 近似同名语义映射（非精确对应，注释声明近似）：hljs 兜底路径（tree-sitter
+ * 不可用/超限降级）的着色由 app.css 的 .hljs-* 规则消费这些变量，Q11 的
+ * "独立双主题"升级为"近似跟随当前代码主题"。
+ */
+export const HLJS_CAPTURE_TO_VAR: readonly (readonly [string, string])[] = [
+  ['keyword', '--hljs-keyword'],
+  ['string', '--hljs-string'],
+  ['comment', '--hljs-comment'],
+  ['constant.numeric', '--hljs-number'],
+  ['function', '--hljs-title'],
+  ['type', '--hljs-type'],
+  ['variable', '--hljs-variable'],
+  ['tag', '--hljs-tag'],
+  ['attribute', '--hljs-attr']
+];
+
+/**
+ * 生成 hljs 变量覆盖文本：各 capture 取 resolveCapture 最长前缀回退的 fg；
+ * 未命中（无 fg）不输出——保持 app.css 亮/暗双主题默认值。
+ */
+function hljsThemeVars(theme: ThemeTable): string {
+  return HLJS_CAPTURE_TO_VAR.map(([capture, cssVar]) => {
+    const fg = resolveCapture(theme, capture).fg;
+    return fg ? `${cssVar}: ${fg};` : null;
+  })
+    .filter((s): s is string => s !== null)
+    .join('\n');
+}
+
 /** 取单个主题表；不存在返回 null。 */
 export async function getTheme(name: string): Promise<ThemeTable | null> {
   return (await loadTables())[name] ?? null;
@@ -125,6 +156,17 @@ export async function themeOptions(): Promise<{ group: '精选' | '全部'; them
 }
 
 /**
+ * 注入规则的选择器（review fix：暗色级联提权）。
+ * app.css 的暗色块 `:root[data-theme-mode="dark"]` 与 `@media (prefers-color-scheme:
+ * dark) :root[data-theme-mode="system"]` 的 specificity 是 (0,2,0)，裸 `:root`（0,1,0）
+ * 注入的 --hljs-*（及 --vv-ts-*）在暗色/系统深色下会被打回 GitHub-dark 默认值。
+ * 选择器列出全部四种 root 形态：暗色形态拿到同等 (0,2,0)，本 style 节点运行时
+ * append、文档序更后 → 稳定胜出；亮色形态维持 (0,1,0) 靠文档序胜出。
+ */
+export const THEME_ROOT_SELECTOR =
+  ':root, :root[data-theme-mode="light"], :root[data-theme-mode="dark"], :root[data-theme-mode="system"]';
+
+/**
  * 应用代码主题：生成常用捕获集的 CSS 变量并注入/替换 style#vv-code-theme（单节点幂等）。
  * 主题名不存在 → console.warn 并保持现状（不动已有 style）。
  */
@@ -140,8 +182,9 @@ export async function applyCodeTheme(name: string, mode: 'light' | 'dark'): Prom
     el.id = STYLE_ID;
     document.head.append(el);
   }
-  // 整体替换 textContent（非追加）：切换主题零残留；span 类名不变 → 零重解析
-  el.textContent = `/* vviewer 代码主题：${name}（${mode}）——只换 CSS 变量，不重解析 */\n:root {\n${themeToCssVars(theme, [...CODE_CAPTURES])}\n}`;
+  // 整体替换 textContent（非追加）：切换主题零残留；span 类名不变 → 零重解析。
+  // 同一节点内追加 --hljs-* 近似映射（M7）：hljs 兜底着色跟随当前代码主题
+  el.textContent = `/* vviewer 代码主题：${name}（${mode}）——只换 CSS 变量，不重解析 */\n${THEME_ROOT_SELECTOR} {\n${themeToCssVars(theme, [...CODE_CAPTURES])}\n${hljsThemeVars(theme)}\n}`;
   el.dataset.mode = mode;
 }
 

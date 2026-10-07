@@ -219,5 +219,12 @@
       bottom: 8px;
       z-index: 20;
     }
+    /* 手机宽度（≤600px）双栏必然重叠（2×300px > 视口宽），右栏（目录/属性）退出抽屉，
+       抽屉仅保留主导航文件树；平板（601-900px）两栏恰好不重叠可并存 */
+    @media (max-width: 600px) {
+      .vv-right {
+        display: none;
+      }
+    }
   }
 </style>

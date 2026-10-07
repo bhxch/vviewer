@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
+import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 
 /**
  * M4 E2E 验收（Task 7）：二进制与媒体收口——
@@ -46,7 +47,10 @@ async function openDir(page: Page): Promise<void> {
 }
 
 async function openFile(page: Page, name: string): Promise<void> {
+  // 移动视口：树行在抽屉内，开抽屉点击后关闭（drawer.ts）；包内树行在主区不受影响
+  const drawer = await openDrawerIfNarrow(page);
   await page.locator('.vv-tree-row', { hasText: name }).click();
+  await closeDrawerIfOpened(page, drawer);
   await expect(page.locator('.vv-tab.active', { hasText: name })).toBeVisible();
 }
 

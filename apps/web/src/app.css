@@ -46,6 +46,10 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .hljs-comment { color: var(--hljs-comment); font-style: italic; } .hljs-number { color: var(--hljs-number); }
 .hljs-title { color: var(--hljs-title); } .hljs-built_in { color: var(--hljs-built_in); }
 .hljs-attr { color: var(--hljs-attr); } .hljs-params { color: var(--hljs-title); }
+/* M7：以下变量默认未定义（→ unset 继承默认前景），仅当代码主题映射命中时生效
+   （theme.ts HLJS_CAPTURE_TO_VAR 输出 --hljs-type/--hljs-variable/--hljs-tag） */
+.hljs-type { color: var(--hljs-type); } .hljs-variable { color: var(--hljs-variable); }
+.hljs-tag { color: var(--hljs-tag); }
 /* tree-sitter 捕获样式：颜色取自 JS 注入的 style#vv-code-theme（--vv-ts-*，见 src/lib/theme.ts），
    变量缺失时回落继承——切主题零重解析。清单与 theme.ts 的 CODE_CAPTURES 一一对齐（theme.test.ts 校验） */
 .ts-attribute { color: var(--vv-ts-attribute, inherit); } .ts-comment { color: var(--vv-ts-comment, inherit); }

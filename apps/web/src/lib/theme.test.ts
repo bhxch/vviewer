@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { captureToCssClass, themeToCssVars } from '@vviewer/highlight';
+import { captureToCssClass, resolveCapture, themeToCssVars } from '@vviewer/highlight';
 import { renderLineHtml } from '@vviewer/render-text';
 import {
   applyCodeTheme,
@@ -10,7 +10,9 @@ import {
   DEFAULT_CODE_THEME,
   effectiveMode,
   getTheme,
-  listThemes
+  HLJS_CAPTURE_TO_VAR,
+  listThemes,
+  THEME_ROOT_SELECTOR
 } from './theme';
 import { loadSettings } from './stores/settings';
 
@@ -18,6 +20,17 @@ const STYLE_ID = 'vv-code-theme';
 
 function styleEl(): HTMLStyleElement | null {
   return document.getElementById(STYLE_ID) as HTMLStyleElement | null;
+}
+
+/** 测试侧复算 hljs 近似映射期望输出（与 theme.ts 同一规则：命中取 fg，未命中跳过） */
+function hljsVarsOf(theme: NonNullable<Awaited<ReturnType<typeof getTheme>>>): string {
+  return HLJS_CAPTURE_TO_VAR
+    .map(([capture, cssVar]) => {
+      const fg = resolveCapture(theme, capture).fg;
+      return fg ? `${cssVar}: ${fg};` : null;
+    })
+    .filter((s): s is string => s !== null)
+    .join('\n');
 }
 
 afterEach(() => {
@@ -44,7 +57,7 @@ describe('applyCodeTheme（注入 style#vv-code-theme）', () => {
     expect(styleEl()?.textContent).not.toContain('#e29da7');
   });
 
-  it('两主题切换 style 内容变化（与 themeToCssVars 输出一致）', async () => {
+  it('两主题切换 style 内容变化（与 themeToCssVars + hljs 映射输出一致）', async () => {
     await applyCodeTheme('serika-dark', 'dark');
     const before = styleEl()?.textContent;
     await applyCodeTheme('gruvbox', 'dark');
@@ -53,7 +66,7 @@ describe('applyCodeTheme（注入 style#vv-code-theme）', () => {
     const gruvbox = await getTheme('gruvbox');
     expect(gruvbox).not.toBeNull();
     expect(after).toBe(
-      `/* vviewer 代码主题：gruvbox（dark）——只换 CSS 变量，不重解析 */\n:root {\n${themeToCssVars(gruvbox!, CODE_CAPTURES)}\n}`
+      `/* vviewer 代码主题：gruvbox（dark）——只换 CSS 变量，不重解析 */\n${THEME_ROOT_SELECTOR} {\n${themeToCssVars(gruvbox!, CODE_CAPTURES)}\n${hljsVarsOf(gruvbox!)}\n}`
     );
   });
 
@@ -65,6 +78,72 @@ describe('applyCodeTheme（注入 style#vv-code-theme）', () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(document.querySelectorAll(`#${STYLE_ID}`).length).toBe(1);
     expect(styleEl()?.textContent).toBe(before);
+  });
+});
+
+describe('hljs 兜底近似映射（M7 Task 3：--hljs-* 跟随代码主题）', () => {
+  it('映射表恰为契约 9 条（capture → --hljs-* 变量）', () => {
+    expect(HLJS_CAPTURE_TO_VAR).toEqual([
+      ['keyword', '--hljs-keyword'],
+      ['string', '--hljs-string'],
+      ['comment', '--hljs-comment'],
+      ['constant.numeric', '--hljs-number'],
+      ['function', '--hljs-title'],
+      ['type', '--hljs-type'],
+      ['variable', '--hljs-variable'],
+      ['tag', '--hljs-tag'],
+      ['attribute', '--hljs-attr']
+    ]);
+  });
+
+  it('applyCodeTheme 后 --hljs-* 有主题色值（resolveCapture 最长前缀回退），未命中不覆盖', async () => {
+    await applyCodeTheme('gruvbox', 'dark');
+    const theme = (await getTheme('gruvbox'))!;
+    const text = styleEl()?.textContent ?? '';
+    for (const [capture, cssVar] of HLJS_CAPTURE_TO_VAR) {
+      const fg = resolveCapture(theme, capture).fg;
+      if (fg) expect(text, `${cssVar} 应取 ${capture} 的 fg`).toContain(`${cssVar}: ${fg};`);
+      else expect(text, `${capture} 无 fg 时不应输出 ${cssVar}`).not.toContain(`${cssVar}:`);
+    }
+  });
+
+  it('切主题后 --hljs-* 变化（hljs 兜底着色跟随当前代码主题）', async () => {
+    await applyCodeTheme('serika-dark', 'dark');
+    const before = styleEl()?.textContent?.match(/--hljs-keyword: ([^;]+);/)?.[1];
+    await applyCodeTheme('onelight', 'light');
+    const after = styleEl()?.textContent?.match(/--hljs-keyword: ([^;]+);/)?.[1];
+    expect(before).toBeTruthy();
+    expect(after).toBeTruthy();
+    expect(after).not.toBe(before);
+  });
+
+  it('--hljs-* 与 --vv-ts-* 同在 style#vv-code-theme 单节点内（同一节点追加，不另开 style）', async () => {
+    await applyCodeTheme('gruvbox', 'dark');
+    expect(document.querySelectorAll(`#${STYLE_ID}`).length).toBe(1);
+    const text = styleEl()?.textContent ?? '';
+    expect(text).toContain('--vv-ts-keyword:');
+    expect(text).toContain('--hljs-keyword:');
+  });
+
+  it('注入选择器包含全部四种 root 形态（暗色级联提权防回归）', async () => {
+    // jsdom 不做真实 cascade：这里只锁注入文本的形态——app.css 暗色块
+    // `:root[data-theme-mode="dark"]` 与 `@media dark :root[data-theme-mode="system"]`
+    // specificity (0,2,0)，裸 `:root` 注入会被覆盖（暗色下 --hljs-* 回退默认值）；
+    // 四形态列表使暗色形态拿到同等 specificity 靠文档序胜出。
+    // 真实级联的最终裁决由 e2e/m7.spec.ts 的 computed style 抽查覆盖。
+    await applyCodeTheme('gruvbox', 'dark');
+    const text = styleEl()?.textContent ?? '';
+    expect(text).toContain('/* vviewer 代码主题');
+    expect(text).toContain('*/\n:root, :root[data-theme-mode="light"], :root[data-theme-mode="dark"], :root[data-theme-mode="system"] {');
+    for (const form of [
+      ':root,',
+      ':root[data-theme-mode="light"],',
+      ':root[data-theme-mode="dark"],',
+      ':root[data-theme-mode="system"] {'
+    ]) {
+      expect(text, `注入规则缺少 root 形态 ${form}`).toContain(form);
+    }
+    expect(text).toContain('\n:root,'); // 变量体挂在提权选择器后（非裸 :root 单独成块）
   });
 });
 
