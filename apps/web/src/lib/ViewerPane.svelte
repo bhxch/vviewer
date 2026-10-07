@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { RenderedInstance } from '@vviewer/core';
   import { showErrorCard } from '@vviewer/core';
+  import type { CodeEngine } from '@vviewer/render-text';
   import type { Tab } from './openFlow.svelte';
   import { persistScroll } from './openFlow.svelte';
   import { dispatcher } from './viewer';
@@ -8,11 +9,41 @@
 
   let { tab }: { tab: Tab | null } = $props();
 
+  /** 引擎指示器文案（F4 状态栏） */
+  const ENGINE_LABELS: Record<CodeEngine, string> = {
+    pending: '高亮: 解析中…',
+    'tree-sitter': '高亮: tree-sitter',
+    hljs: '高亮: hljs 兜底',
+    'hljs-block': '高亮: hljs 分块',
+    plain: '纯文本'
+  };
+
   let host = $state<HTMLElement | null>(null);
   let instance: RenderedInstance | null = null;
   let rafId = 0;
+  /** 当前 tab 的高亮引擎文案（仅 code 渲染器非空；其余渲染器不显示状态条） */
+  let engineLabel = $state('');
   /** code 渲染器的内部滚动容器（.vv-code-pre）；其余渲染器为 null（滚动在外层 .vv-viewer-scroll） */
   let scrollHost: HTMLElement | null = null;
+  /** 引擎轮询句柄：高亮结果异步到达（pending→tree-sitter/hljs），轻量轮询反映最新值 */
+  let engineTimer: ReturnType<typeof setInterval> | null = null;
+
+  function watchEngine(inst: RenderedInstance): void {
+    if (!('getEngine' in inst)) return;
+    const read = (): void => {
+      engineLabel = ENGINE_LABELS[(inst as { getEngine(): CodeEngine }).getEngine()];
+    };
+    read();
+    engineTimer = setInterval(read, 250);
+  }
+
+  function stopWatchEngine(): void {
+    if (engineTimer !== null) {
+      clearInterval(engineTimer);
+      engineTimer = null;
+    }
+    engineLabel = '';
+  }
 
   $effect(() => {
     if (!host || !tab || tab.source.path === '') return;
@@ -40,6 +71,7 @@
           scrollHost = inner;
           inner.addEventListener('scroll', onScroll);
         }
+        watchEngine(res.instance); // 引擎状态条（仅 code 实例有 getEngine）
         const target: HTMLElement | null = inner ?? (host.closest('.vv-viewer-scroll') as HTMLElement | null);
         if (target && current.scrollTop > 0) {
           rafId = requestAnimationFrame(() => {
@@ -57,6 +89,7 @@
     return () => {
       cancelled = true;
       cancelAnimationFrame(rafId);
+      stopWatchEngine();
       scrollHost?.removeEventListener('scroll', onScroll);
       scrollHost = null;
       cancelHighlight(); // 取消未完成的 tree-sitter 高亮请求（Worker 不做无用功）
@@ -72,19 +105,31 @@
   }
 </script>
 
-<div class="vv-viewer-scroll" onscroll={onScroll}>
-  {#if !tab}
-    <div class="vv-empty">拖入文件/文件夹，或使用顶栏打开</div>
-  {:else if tab.unrestorable && tab.source.path === ''}
-    <div class="vv-empty">此来源无法自动恢复，请重新打开文件夹</div>
-  {:else if tab.source.path === ''}
-    <div class="vv-empty">目录来源：文件在左侧树中打开</div>
-  {:else}
-    <div class="vv-viewer-host" bind:this={host}></div>
+<div class="vv-viewer-pane">
+  <div class="vv-viewer-scroll" onscroll={onScroll}>
+    {#if !tab}
+      <div class="vv-empty">拖入文件/文件夹，或使用顶栏打开</div>
+    {:else if tab.unrestorable && tab.source.path === ''}
+      <div class="vv-empty">此来源无法自动恢复，请重新打开文件夹</div>
+    {:else if tab.source.path === ''}
+      <div class="vv-empty">目录来源：文件在左侧树中打开</div>
+    {:else}
+      <div class="vv-viewer-host" bind:this={host}></div>
+    {/if}
+  </div>
+  {#if engineLabel}
+    <div class="vv-statusbar" role="status">{engineLabel}</div>
   {/if}
 </div>
 
 <style>
+  .vv-viewer-pane {
+    /* 占满 .vv-main 的定高列：滚动区在上，引擎状态条固定底部 */
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
   .vv-viewer-scroll {
     flex: 1;
     overflow: auto;

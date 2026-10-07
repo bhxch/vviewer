@@ -84,6 +84,9 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .vv-error-detail { color: var(--ui-fg-muted); white-space: pre-wrap; }
 /* 树 / tabs */
 .vv-topbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--ui-border); }
+/* 引擎状态条（ViewerPane 底部，code 渲染器专用） */
+.vv-statusbar { flex: none; padding: 2px 10px; font-size: 12px; color: var(--ui-fg-muted);
+  border-top: 1px solid var(--ui-border); background: var(--ui-tab-bg); user-select: none; }
 .vv-brand { font-weight: 700; margin-right: 8px; }
 .vv-tabbar { display: flex; overflow-x: auto; background: var(--ui-tab-bg); border-bottom: 1px solid var(--ui-border); }
 .vv-tab { display: inline-flex; align-items: center; gap: 6px; border: none; border-right: 1px solid var(--ui-border);

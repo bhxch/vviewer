@@ -56,6 +56,8 @@ test('sample.ts 走 tree-sitter 主路径（ts-* span），切换代码主题零
   const tsSpans = page.locator('.vv-code-pre span[class^="ts-"]');
   await expect(tsSpans.first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.vv-code-pre span[class^="ts-keyword"]').first()).toBeVisible();
+  // 引擎状态条实时反映当前引擎（getEngine 透传）
+  await expect(page.locator('.vv-statusbar')).toHaveText('高亮: tree-sitter', { timeout: 20_000 });
 
   const before = await page.evaluate(() => ({
     count: document.querySelectorAll('.vv-code-pre span[class^="ts-"]').length,
@@ -99,37 +101,41 @@ test('sample.rs（查询失配）与 sample.md（不在 wasm 清单）自动降�
   const hljsSpans = page.locator('.vv-code-pre span[class^="hljs-"]');
   await expect(hljsSpans.first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.vv-code-pre span[class^="ts-"]')).toHaveCount(0);
+  await expect(page.locator('.vv-statusbar')).toHaveText('高亮: hljs 兜底', { timeout: 20_000 });
 
   // markdown 不在 36 个 grammar wasm 清单内 → 同样 hljs 兜底
   await openFile(page, 'sample.md');
   await expect(page.locator('.vv-code-pre .vv-code-line').first()).toBeVisible();
   await expect(page.locator('.vv-code-pre span[class^="hljs-"]').first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.vv-code-pre span[class^="ts-"]')).toHaveCount(0);
+  await expect(page.locator('.vv-statusbar')).toHaveText('高亮: hljs 兜底', { timeout: 20_000 });
 });
 
 test('6MB 文本按降级链走 hljs 分块，不发起 tree-sitter 高亮', async ({ page }) => {
   await page.goto('/');
-  // 19B × 320000 = 6.08MB ∈ (5MB, 20MB] → resolveStrategy = 'hljs-block'
+  // 19B × 320000 = 6.08MB ∈ (2MB, 20MB] → resolveStrategy = 'hljs-block'
   await openDir(page, [{ name: 'big.js', type: 'text/javascript', content: 'const vv = 1; // c\n'.repeat(320000) }]);
   await openFile(page, 'big.js');
 
   await expect(page.locator('.vv-code-pre .vv-code-line').first()).toBeVisible();
   await expect(page.locator('.vv-code-pre span[class^="hljs-"]').first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.vv-code-pre span[class^="ts-"]')).toHaveCount(0);
+  await expect(page.locator('.vv-statusbar')).toHaveText('高亮: hljs 分块', { timeout: 20_000 });
   // 本页面从未发起过 tree-sitter 高亮请求（__vvLastHighlight* 未被写入）
   const lang = await page.evaluate(() => (window as unknown as { __vvLastHighlightLang?: string }).__vvLastHighlightLang);
   expect(lang).toBeUndefined();
 });
 
-test('5MB 文本 tree-sitter 高亮性能计时（__vvLastHighlightMs，目标 <2s）', async ({ page }) => {
+test('1.9MB 文本 tree-sitter 高亮性能计时（__vvLastHighlightMs，目标 <2s）', async ({ page }) => {
   test.setTimeout(120_000);
   await page.goto('/');
-  // 19B × 266000 = 5.054MB ≤ TREE_SITTER_MAX_BYTES(5MB) → tree-sitter 主路径
-  await openDir(page, [{ name: 'big5.ts', type: 'text/plain', content: 'const vv = 1; // c\n'.repeat(266000) }]);
-  await openFile(page, 'big5.ts');
+  // 19B × 100000 = 1.9MB ≤ TREE_SITTER_MAX_BYTES(2MB) → tree-sitter 主路径
+  await openDir(page, [{ name: 'big2m.ts', type: 'text/plain', content: 'const vv = 1; // c\n'.repeat(100000) }]);
+  await openFile(page, 'big2m.ts');
 
   const tsSpans = page.locator('.vv-code-pre span[class^="ts-"]');
   await expect(tsSpans.first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator('.vv-statusbar')).toHaveText('高亮: tree-sitter', { timeout: 20_000 });
 
   const ms = await page.evaluate(() => ({
     ms: (window as unknown as { __vvLastHighlightMs?: number }).__vvLastHighlightMs,
@@ -138,5 +144,5 @@ test('5MB 文本 tree-sitter 高亮性能计时（__vvLastHighlightMs，目标 <
   expect(ms.lang).toBe('typescript');
   expect(ms.ms).toBeGreaterThan(0);
   // 性能数值仅记录不阻塞（验收门槛：超标写入报告）
-  console.log(`[perf] 5MB tree-sitter 高亮耗时（含 worker 往返）: ${Math.round(ms.ms ?? -1)}ms`);
+  console.log(`[perf] 1.9MB tree-sitter 高亮耗时（含 worker 往返）: ${Math.round(ms.ms ?? -1)}ms`);
 });

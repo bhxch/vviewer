@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import hljs from 'highlight.js';
 import { HighlightCanceledError } from '@vviewer/highlight';
 import {
   buildLineIndex,
@@ -9,6 +10,10 @@ import {
   renderLineHtml,
   renderCode,
   attachHighlightClient,
+  evictOldestEntries,
+  resolveHljsLang,
+  HLJS_ALIASES,
+  BLOCK_CACHE_MAX_ROWS,
   TREE_SITTER_MAX_BYTES,
   HLJS_MAX_BYTES,
   type HighlightInterval,
@@ -38,17 +43,52 @@ describe('splitHighlightedLines', () => {
 });
 
 describe('resolveStrategy（降级链阈值）', () => {
-  it('≤5MB → tree-sitter', () => {
+  it('≤2MB → tree-sitter（实测 ~2.1-2.4s/MB，阈值据 spec 5.11 预算校准）', () => {
     expect(resolveStrategy(0)).toBe('tree-sitter');
     expect(resolveStrategy(1024)).toBe('tree-sitter');
     expect(resolveStrategy(TREE_SITTER_MAX_BYTES)).toBe('tree-sitter');
+    expect(TREE_SITTER_MAX_BYTES).toBe(2 * 1024 * 1024);
   });
-  it('5MB–20MB → hljs-block', () => {
+  it('2MB–20MB → hljs-block', () => {
     expect(resolveStrategy(TREE_SITTER_MAX_BYTES + 1)).toBe('hljs-block');
     expect(resolveStrategy(HLJS_MAX_BYTES)).toBe('hljs-block');
   });
   it('>20MB → plain', () => {
     expect(resolveStrategy(HLJS_MAX_BYTES + 1)).toBe('plain');
+  });
+});
+
+describe('resolveHljsLang / HLJS_ALIASES（hljs 别名桥接）', () => {
+  it('桥接表全部键直查失败、全部值经 hljs.getLanguage 命中（表即"真实差异"全集）', () => {
+    expect(Object.keys(HLJS_ALIASES).length).toBeGreaterThanOrEqual(15);
+    for (const [helixName, hljsId] of Object.entries(HLJS_ALIASES)) {
+      expect(hljs.getLanguage(helixName), `${helixName} 应直查失败才需要桥接`).toBeUndefined();
+      expect(hljs.getLanguage(hljsId), `${helixName} → ${hljsId} 应在 hljs 命中`).toBeTruthy();
+    }
+  });
+
+  it('直查命中原样返回；桥接命中返回 hljs id；未知返回 null', () => {
+    expect(resolveHljsLang(hljs, 'rust')).toBe('rust'); // hljs 直查命中
+    expect(resolveHljsLang(hljs, 'c-sharp')).toBe('csharp');
+    expect(resolveHljsLang(hljs, 'objective-c')).toBe('objectivec');
+    expect(resolveHljsLang(hljs, 'shell')).toBe('shell'); // hljs 自带别名（不在桥接表）
+    expect(resolveHljsLang(hljs, 'zig')).toBeNull(); // hljs 无对应语言
+    expect(resolveHljsLang(hljs, null)).toBeNull();
+  });
+});
+
+describe('evictOldestEntries（blockCache 淘汰）', () => {
+  it('超出上限按插入序淘汰最早条目', () => {
+    const m = new Map<number, string>([[1, 'a'], [2, 'b'], [3, 'c']]);
+    evictOldestEntries(m, 2);
+    expect([...m.keys()]).toEqual([2, 3]);
+    evictOldestEntries(m, 0);
+    expect(m.size).toBe(0);
+  });
+  it('未超上限不动', () => {
+    const m = new Map<number, string>([[1, 'a'], [2, 'b']]);
+    evictOldestEntries(m, BLOCK_CACHE_MAX_ROWS);
+    expect(m.size).toBe(2);
   });
 });
 
@@ -295,6 +335,36 @@ describe('renderCode（tree-sitter 主路径，fake client）', () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(spy).not.toHaveBeenCalled();
     expect(host.querySelector('.vv-code-body')?.textContent).toBe('let x');
+    expect(handle.getEngine()).toBe('plain');
+    handle.destroy();
+  });
+
+  it('getEngine 实时反映引擎：pending → tree-sitter', async () => {
+    stubResizeObserver();
+    let resolveHighlight!: (v: HighlightInterval[]) => void;
+    attachHighlightClient({
+      highlight: () => new Promise<HighlightInterval[]>((res) => { resolveHighlight = res; }),
+    });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(new TextEncoder().encode('let x'), host, { ext: 'rs', lang: 'rust' });
+    expect(handle.getEngine()).toBe('pending');
+    resolveHighlight([{ start: 0, end: 3, capture: 'keyword' }]);
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('tree-sitter'));
+    handle.destroy();
+  });
+
+  it('getEngine：client 失败降级 hljs 整文件后为 hljs', async () => {
+    stubResizeObserver();
+    attachHighlightClient({
+      highlight: async () => {
+        throw new Error('boom');
+      },
+    });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(new TextEncoder().encode('const a = 1'), host, { ext: 'js', lang: 'javascript' });
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('hljs'));
     handle.destroy();
   });
 });

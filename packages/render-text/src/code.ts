@@ -6,14 +6,58 @@ export type { HighlightInterval };
 type HLJS = (typeof import('highlight.js'))['default'];
 import { virtualScroller, type VirtualScrollerHandle } from './virtualScroller';
 
-/** 降级链阈值：≤5MB tree-sitter；≤20MB hljs 按可视块；更大纯文本 */
-export const TREE_SITTER_MAX_BYTES = 5 * 1024 * 1024;
+/**
+ * hljs 别名桥接：helix 语言名 → hljs 语言 id（仅收录 hljs.getLanguage 直查失败的键；
+ * sh/shell/zsh/golang/rb/md/yml/c++ 等 hljs 自带别名已直查命中，不在此列）。
+ * 目标 id 全部经 hljs.getLanguage 实测命中；hljs 无对应语言的键（zig/wgsl 等）不收录，
+ * 回落 highlightAuto。
+ */
+export const HLJS_ALIASES: Readonly<Record<string, string>> = {
+  'c-sharp': 'csharp',
+  'objective-c': 'objectivec',
+  'fish': 'bash', // fish 语法近似 POSIX shell
+  'htmldjango': 'django',
+  'ocaml-interface': 'ocaml',
+  'textproto': 'protobuf',
+  'docker-compose': 'yaml', // compose 文件即 YAML 语法
+  'vue': 'xml', // SFC 模板为 XML 形态（hljs 11 无 vue 语言）
+  'svelte': 'html',
+  'astro': 'html',
+  'markdown.inline': 'markdown',
+  'markdown-rustdoc': 'markdown',
+  'common-lisp': 'lisp',
+  'elisp': 'lisp',
+  'fennel': 'lisp',
+  'racket': 'scheme',
+  'purescript': 'haskell',
+  'env': 'ini',
+  'gdscript': 'python',
+  'starlark': 'python', // starlark 为 Python 方言
+  'gomod': 'go',
+  'gotmpl': 'jinja' // 模板语法近似
+};
+
+/**
+ * helix 语言名 → hljs 可用语言 id：直查命中原样返回，否则查桥接表；
+ * 都无返回 null（调用方回落 highlightAuto）。
+ */
+export function resolveHljsLang(hljs: HLJS, lang: string | null): string | null {
+  if (lang === null) return null;
+  if (hljs.getLanguage(lang)) return lang;
+  const mapped = HLJS_ALIASES[lang];
+  return mapped !== undefined && hljs.getLanguage(mapped) ? mapped : null;
+}
+
+/** 降级链阈值：≤2MB tree-sitter；≤20MB hljs 按可视块；更大纯文本。
+ * tree-sitter 阈值 2MB 的依据：实测 ~2.1-2.4s/MB，2MB≈4-5s，与移动端预算同量级；
+ * 据 spec 5.11 预算校准，worker 取消传播落地后可再上调。 */
+export const TREE_SITTER_MAX_BYTES = 2 * 1024 * 1024;
 export const HLJS_MAX_BYTES = 20 * 1024 * 1024;
 export const LINE_HEIGHT = 20;
 
 export type HighlightStrategy = 'tree-sitter' | 'hljs-block' | 'plain';
 
-/** 降级链（按字节大小）：≤5MB tree-sitter（失败→hljs 整文件）；5–20MB hljs 分块；>20MB 纯文本 */
+/** 降级链（按字节大小）：≤2MB tree-sitter（失败→hljs 整文件）；2–20MB hljs 分块；>20MB 纯文本 */
 export function resolveStrategy(size: number): HighlightStrategy {
   if (size <= TREE_SITTER_MAX_BYTES) return 'tree-sitter';
   if (size <= HLJS_MAX_BYTES) return 'hljs-block';
@@ -26,6 +70,19 @@ const DECODERS: Record<Encoding, string> = {
   'utf-16be': 'utf-16be',
   'gb18030': 'gb18030'
 };
+
+/** hljs 分块缓存行数上限：超出最早淘汰（被逐出的行滚动回来时按需重算） */
+export const BLOCK_CACHE_MAX_ROWS = 5000;
+
+/** Map 插入序淘汰：把 m 裁到 ≤max 条（最早写入的先删） */
+export function evictOldestEntries<K, V>(m: Map<K, V>, max: number): void {
+  let excess = m.size - max;
+  while (excess-- > 0) {
+    const oldest = m.keys().next();
+    if (oldest.done) return;
+    m.delete(oldest.value);
+  }
+}
 
 export function buildLineIndex(text: string): string[] {
   return text.split('\n');
@@ -243,12 +300,17 @@ export function attachHighlightClient(client: CodeHighlightClient | null): void 
 // 样式说明：虚拟滚动与代码面板的样式统一由 apps/web/src/app.css 提供（单一来源），
 // 本模块不再运行时注入 CSS，避免双份定义漂移。
 
+/** 代码高亮引擎实时值：pending = tree-sitter 主路径已启动但结果未到达（或已取消） */
+export type CodeEngine = 'tree-sitter' | 'hljs' | 'hljs-block' | 'plain' | 'pending';
+
 export interface RenderCodeHandle {
   destroy(): void;
   setScrollTop(top: number): void;
   scrollTop(): number;
   /** 内部滚动容器（.vv-code-pre）：code tab 的滚动持久化接这里而非外层容器 */
   getScrollHost(): HTMLElement;
+  /** 当前生效的高亮引擎（实时；状态栏指示器用） */
+  getEngine(): CodeEngine;
 }
 
 export function renderCode(
@@ -272,6 +334,8 @@ export function renderCode(
   let hljsLang: string | null = null;
   let scroller: VirtualScrollerHandle | null = null;
   let destroyed = false;
+  // 引擎实时值：tree-sitter 主路径在区间到达前为 pending；hljs-block/plain 策略即终值
+  let engine: CodeEngine = strategy === 'tree-sitter' ? 'pending' : strategy;
 
   function fillRows(first: number, last: number, viewport: HTMLElement): void {
     const frag = document.createDocumentFragment();
@@ -307,6 +371,7 @@ export function renderCode(
         : hljs.highlightAuto(chunk).value;
       const parts = splitHighlightedLines(value, last - first + 1);
       for (let k = 0; k < parts.length; k++) blockCache.set(first + k, parts[k] ?? '');
+      evictOldestEntries(blockCache, BLOCK_CACHE_MAX_ROWS); // 超上限淘汰最早条目（滚动按需重算）
       return; // 一次处理整个可见范围
     }
   }
@@ -319,12 +384,21 @@ export function renderCode(
     });
   }
 
-  /** hljs 整文件兜底（M1 路径）：tree-sitter 不可用/失败时使用（仅 ≤5MB 会被调度到此） */
-  async function hljsWholeFile(): Promise<void> {
+/** hljs 整文件兜底（M1 路径）：tree-sitter 不可用/失败时使用（仅 ≤2MB 会被调度到此） */
+  async function hljsWholeFile(lang: string | null): Promise<void> {
     hljs ??= (await import('highlight.js')).default;
     if (destroyed) return;
-    const { value } = hljs.highlightAuto(text);
+    const language = resolveHljsLang(hljs, lang); // 别名桥接（如 c-sharp→csharp）；查不到回落 auto
+    let value: string;
+    try {
+      value = language
+        ? hljs.highlight(text, { language, ignoreIllegals: true }).value
+        : hljs.highlightAuto(text).value;
+    } catch {
+      value = hljs.highlightAuto(text).value; // 指定语言高亮异常（罕见）仍兜住
+    }
     if (destroyed) return;
+    engine = 'hljs';
     hlLines = splitHighlightedLines(value, lines.length);
     scroller?.refresh(true);
   }
@@ -334,7 +408,7 @@ export function renderCode(
     if (strategy === 'hljs-block') {
       hljs = (await import('highlight.js')).default;
       if (destroyed) return;
-      hljsLang = lang !== null && hljs.getLanguage(lang) ? lang : null;
+      hljsLang = resolveHljsLang(hljs, lang); // 别名桥接；null → 可视块 highlightAuto
       mount(); // onRange 内按可视块同步高亮
       return;
     }
@@ -342,17 +416,18 @@ export function renderCode(
       mount(); // 先渲染纯文本立即可见，区间到达后刷新
       const client = attachedClient;
       if (!client || lang === null) {
-        await hljsWholeFile();
+        await hljsWholeFile(lang);
         return;
       }
       try {
         const intervals = await client.highlight(text, lang);
         if (destroyed) return;
+        engine = 'tree-sitter';
         lineSegs = new Map(assignIntervalsToLines(intervals, lineOffsets).map((a) => [a.line, a.segs]));
         scroller?.refresh(true);
       } catch (err) {
         if (destroyed || err instanceof HighlightCanceledError) return; // tab 已切换：静默
-        await hljsWholeFile(); // 解析失败 → hljs 整文件兜底
+        await hljsWholeFile(lang); // 解析失败 → hljs 整文件兜底
       }
       return;
     }
@@ -376,7 +451,8 @@ export function renderCode(
     },
     getScrollHost() {
       return pre;
-    }
+    },
+    getEngine: () => engine
   };
 }
 
@@ -394,13 +470,17 @@ export const codeRenderer: Renderer = {
   async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection) {
     void source;
     const inst = renderCode(buffer, target, { encoding: det.encoding, highlight: true, ext: det.ext });
-    // getScrollHost 供 ViewerPane 把滚动持久化接进 .vv-code-pre（结构化扩展 RenderedInstance，不动 core）
-    const instance: RenderedInstance & { getScrollHost(): HTMLElement } = {
+    // getScrollHost/getEngine 供 ViewerPane 接滚动持久化与引擎指示器
+    // （结构化扩展 RenderedInstance，不动 core）
+    const instance: RenderedInstance & { getScrollHost(): HTMLElement; getEngine(): CodeEngine } = {
       destroy() {
         inst.destroy();
       },
       getScrollHost() {
         return inst.getScrollHost();
+      },
+      getEngine() {
+        return inst.getEngine();
       }
     };
     return instance;
