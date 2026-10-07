@@ -28,14 +28,18 @@ const precacheUrls = [...sw.matchAll(/url:"([^"]+)"/g)].map((m) => m[1]);
 if (precacheUrls.length <= 10) {
   fail(`工作箱 precache 条目应 > 10，实际 ${precacheUrls.length}`);
 }
+// cacheName 拼构建修订号（vite.config BUILD_REVISION，构建期确定）：断言前缀即可，
+// 修订号每次构建刷新，sw.js 内形如 cacheName:"vv-grammars-0.1.0-xxx"
 for (const [name, pattern] of [
   ['vv-grammars', /\/grammars\/.*\.wasm$/],
   ['vv-queries', /\/queries\//]
 ]) {
-  if (!sw.includes(`cacheName:"${name}"`)) fail(`sw.js 缺少运行时缓存 ${name}`);
+  if (!sw.includes(`cacheName:"${name}-`)) fail(`sw.js 缺少运行时缓存 ${name}-<revision>`);
 }
 if (!sw.includes('registerRoute')) fail('sw.js 缺少 registerRoute（运行时缓存未生成）');
+const revision = sw.match(/cacheName:"vv-grammars-([^"]+)"/)?.[1];
+if (!revision) fail('sw.js 运行时缓存 cacheName 缺少构建修订号');
 
 console.log(
-  `[check-pwa-build] ✓ sw.js + manifest.webmanifest + icons 齐全，precache ${precacheUrls.length} 条，运行时缓存 vv-grammars/vv-queries 就位`
+  `[check-pwa-build] ✓ sw.js + manifest.webmanifest + icons 齐全，precache ${precacheUrls.length} 条，运行时缓存 vv-grammars/vv-queries@${revision} 就位`
 );

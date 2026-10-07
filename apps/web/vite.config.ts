@@ -1,13 +1,22 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig, type Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
-import { cpSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
 const QUERIES_SRC = fileURLToPath(new URL('../../packages/highlight/assets/queries', import.meta.url));
 const QUERIES_DEST = fileURLToPath(new URL('./static/queries', import.meta.url));
+
+// 构建修订号（final review A4）：package.json version + 启动分钟级时间戳（36 进制截断），
+// 构建期确定、每次构建刷新。workbox runtimeCaching 的 cacheName 是静态字符串，
+// generateRevision 不适用于运行时缓存——可行法即 cacheName 模板拼入该修订号：
+// 新版本部署后 sw.js 携带新 cacheName，旧 CacheFirst 缓存（旧名）不再命中、随
+// expiration 清理，修复语法 wasm/查询跨版本陈旧。同时经 define 注入
+// __BUILD_REVISION__ 供运行时（调试/诊断）读取。
+const pkg = JSON.parse(readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf8')) as { version: string };
+const BUILD_REVISION = `${pkg.version}-${Math.floor(Date.now() / 60_000).toString(36)}`;
 
 /**
  * tree-sitter 查询静态资产：Worker 端按需 fetch /queries/{lang}/*.scm，
@@ -90,21 +99,22 @@ export default defineConfig({
         navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
           {
-            // tree-sitter 语法 wasm（~8MB 总量）：不变内容，缓存优先
+            // tree-sitter 语法 wasm（~8MB 总量）：不变内容，缓存优先；
+            // cacheName 拼构建修订号——新版本部署后旧缓存不再命中（跨版本陈旧修复）
             urlPattern: /\/grammars\/.*\.wasm$/,
             handler: 'CacheFirst',
             options: {
-              cacheName: 'vv-grammars',
+              cacheName: `vv-grammars-${BUILD_REVISION}`,
               expiration: { maxEntries: 300, purgeOnQuotaError: true },
               cacheableResponse: { statuses: [200] }
             }
           },
           {
-            // tree-sitter 查询 .scm（构建期静态拷贝，路径随版本不变）
+            // tree-sitter 查询 .scm（构建期静态拷贝，路径随版本不变）；修订号同上
             urlPattern: /\/queries\//,
             handler: 'CacheFirst',
             options: {
-              cacheName: 'vv-queries',
+              cacheName: `vv-queries-${BUILD_REVISION}`,
               expiration: { maxEntries: 300, purgeOnQuotaError: true },
               cacheableResponse: { statuses: [200] }
             }
@@ -117,5 +127,9 @@ export default defineConfig({
   // ts-worker 依赖 web-tree-sitter（内部含动态 import），必须以 ES module worker 打包（iife 不支持 code-splitting）
   worker: {
     format: 'es'
+  },
+  define: {
+    // 构建修订号注入运行时（与 SW cacheName 同源；诊断/关于页可读）
+    __BUILD_REVISION__: JSON.stringify(BUILD_REVISION)
   }
 });
