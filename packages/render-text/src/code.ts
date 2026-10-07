@@ -494,6 +494,7 @@ export function renderCode(
       if (query === lastQuery) return Promise.resolve(lastMatches);
       lastQuery = query;
       lastMatches = query === '' ? [] : searchCode(lines, query);
+      if (query === '') clearHit(); // 空查询 = 退出搜索：行级高亮立即消退（不等 1.5s 计时）
       return Promise.resolve(lastMatches);
     },
     gotoMatch(index) {

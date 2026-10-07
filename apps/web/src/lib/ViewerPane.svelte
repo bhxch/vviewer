@@ -146,7 +146,11 @@
     {:else if tab.source.path === ''}
       <div class="vv-empty">目录来源：文件在左侧树中打开</div>
     {:else}
-      <div class="vv-viewer-host" bind:this={host}></div>
+      <div
+        class="vv-viewer-host"
+        bind:this={host}
+        tabindex="-1"
+      ></div>
     {/if}
   </div>
   {#if searchOpen && instance}

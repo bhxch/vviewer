@@ -110,6 +110,19 @@ describe('renderCode 实例 search/gotoMatch', () => {
     handle.destroy();
   });
 
+  it("search('') 立即清除行级高亮（退出搜索语义，不等 1.5s 计时）", async () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(new TextEncoder().encode('beta one\nplain\n'), host, { highlight: false });
+    await handle.search('beta');
+    handle.gotoMatch(0);
+    expect(host.querySelector('.vv-search-hit-line')).not.toBeNull();
+    await handle.search('');
+    expect(host.querySelector('.vv-search-hit-line')).toBeNull();
+    handle.destroy();
+  });
+
   it('gotoMatch 越界/未搜索时不抛错也不高亮', async () => {
     stubResizeObserver();
     const host = document.createElement('div');

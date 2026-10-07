@@ -52,22 +52,38 @@
   }
 
   function close(): void {
-    void instance?.search?.(''); // 退出搜索语义：markdown 还原 mark / code 清缓存与高亮
+    // 关闭前记录焦点：面板卸载后还原，键盘交互不中断；焦点元素随面板移除则回落查看器宿主
+    const prev = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    void instance?.search?.(''); // 退出搜索语义：markdown 还原 mark / code 清缓存与行级高亮
     onclose();
+    // Svelte 卸载 flush 在微任务，setTimeout 回调必然落在卸载之后
+    setTimeout(() => {
+      if (prev !== null && prev.isConnected) {
+        prev.focus();
+        return;
+      }
+      document.querySelector<HTMLElement>('.vv-viewer-host')?.focus();
+    }, 0);
   }
 
-  function onkeydown(e: KeyboardEvent): void {
+  /** Esc 在面板内任意焦点（输入框/↑↓/✕ 按钮）均可关闭：keydown 绑容器，随冒泡覆盖全部子元素 */
+  function onpanelkeydown(e: KeyboardEvent): void {
     if (e.key === 'Escape') {
       e.preventDefault();
       close();
-    } else if (e.key === 'Enter') {
+    }
+  }
+
+  /** Enter/Shift+Enter 仅输入框语义（下一个/上一个）；按钮持焦时 Enter 保留其默认点击 */
+  function oninputkeydown(e: KeyboardEvent): void {
+    if (e.key === 'Enter') {
       e.preventDefault();
       step(e.shiftKey ? -1 : 1);
     }
   }
 </script>
 
-<div class="vv-search-panel" role="search" aria-label="文件内搜索">
+<div class="vv-search-panel" role="search" aria-label="文件内搜索" onkeydown={onpanelkeydown}>
   <input
     bind:this={inputEl}
     bind:value={query}
@@ -76,7 +92,7 @@
     placeholder="搜索（Enter 下一个）"
     aria-label="搜索内容"
     oninput={oninput}
-    onkeydown={onkeydown}
+    onkeydown={oninputkeydown}
   />
   <span class="vv-search-count">
     {#if !instance?.search}
