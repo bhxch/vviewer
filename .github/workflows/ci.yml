@@ -1,0 +1,63 @@
+# 最小 CI（final review A2）：typecheck + vitest + web 构建 + cargo test + E2E。
+# 后置项：tree-sitter grammar 门禁（构建产物校验）与 release 发布 workflow——待 M8。
+# E2E 依赖 Playwright 浏览器下载：用 actions/cache 按 lockfile 哈希缓存 ms-playwright 目录。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: web（typecheck + 单测 + 构建）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # pnpm 版本读 package.json 的 packageManager 字段（pnpm@10）
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm vitest run
+      - run: pnpm --filter web build
+
+  rust:
+    name: rust（cargo test）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - run: cargo test --manifest-path server/Cargo.toml
+
+  e2e:
+    name: e2e（Playwright chromium）
+    runs-on: ubuntu-latest
+    needs: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Playwright 浏览器缓存（chromium ~150MB，按 lockfile 哈希失效）
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm --filter web build
+      - run: pnpm --filter web exec playwright install --with-deps chromium
+      # playwright.config 的 webServer 在 CI 下自行启动 vite preview（CI 环境变量内置）
+      - run: pnpm --filter web exec playwright test
