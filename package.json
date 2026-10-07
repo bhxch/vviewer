@@ -5,6 +5,7 @@
   "scripts": {
     "test": "vitest run",
     "build": "pnpm --filter web build",
+    "build:all": "pnpm build && cargo build --release --manifest-path server/Cargo.toml",
     "typecheck": "tsc -b packages/*/tsconfig.json --noEmit",
     "server:dev": "cargo run --manifest-path server/Cargo.toml -- serve --root . --port 8321"
   },
