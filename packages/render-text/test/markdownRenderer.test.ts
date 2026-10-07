@@ -5,7 +5,11 @@ import {
   markdownRenderer,
   fenceToHtml,
   slugifyHeading,
-  assignHeadingIds
+  assignHeadingIds,
+  setMarkdownBackend,
+  getMarkdownBackend,
+  renderMarkdownBody,
+  type MarkdownEngineState
 } from '../src/markdown/markdownRenderer';
 import { LIGHTBOX_OVERLAY_ID } from '../src/markdown/pipeline';
 import { attachHighlightClient, type CodeHighlightClient } from '../src/code';
@@ -39,6 +43,7 @@ function tocOf(instance: RenderedInstance): { level: number; text: string; id: s
 
 afterEach(() => {
   attachHighlightClient(null);
+  setMarkdownBackend(null);
   document.body.innerHTML = '';
 });
 
@@ -201,5 +206,98 @@ describe('fenceToHtml——highlightFence 接线（依赖倒置）', () => {
     await vi.waitFor(() => {
       expect(target.querySelector('pre code span[class^="hljs-"]')).not.toBeNull();
     });
+  });
+});
+
+describe('markdownRenderer——后端注入（M7 远程引擎，M6 遗留）', () => {
+  function engineOf(instance: RenderedInstance): MarkdownEngineState {
+    const fn = (instance as { getEngine?: () => MarkdownEngineState }).getEngine;
+    if (!fn) throw new Error('markdown 实例应提供 getEngine');
+    return fn();
+  }
+
+  it('注入 backend 时优先调用之，本地引擎不参与；getEngine 落 backend 返回的 where', async () => {
+    const calls: string[] = [];
+    setMarkdownBackend(async ({ text }) => {
+      calls.push(text);
+      return { html: '<h2 id="remote-h">远程标题</h2><p>来自 comrak</p>', where: 'remote' };
+    });
+    const { target, instance } = await renderMd('# 本地标题\n');
+    expect(calls).toEqual(['# 本地标题\n']); // 原文交给 backend（路由在调用方）
+    expect(target.querySelector('h2#remote-h')).not.toBeNull();
+    expect(target.querySelector('p')?.textContent).toBe('来自 comrak');
+    expect(target.querySelector('h1')).toBeNull(); // 本地 markdown-it 未渲染
+    expect(engineOf(instance)).toBe('remote');
+    instance.destroy();
+  });
+
+  it('backend 报 where=local 时 getEngine 为 local（auto 回退本地后如实标注）', async () => {
+    setMarkdownBackend(async () => ({ html: '<p>回退渲染</p>', where: 'local' }));
+    const { instance } = await renderMd('x\n');
+    expect(engineOf(instance)).toBe('local');
+  });
+
+  it('comrak unsafe 输出必经净化：script/事件属性/javascript: href 全剥除', async () => {
+    setMarkdownBackend(async () => ({
+      html:
+        '<p onclick="alert(1)">x</p><script>alert(1)</script>' +
+        '<a href="javascript:alert(1)">y</a><img src="a.png" onerror="alert(1)">',
+      where: 'remote'
+    }));
+    const { target } = await renderMd('dirty\n');
+    expect(target.querySelector('script')).toBeNull();
+    expect(target.querySelector('p')?.hasAttribute('onclick')).toBe(false);
+    const a = target.querySelector('a');
+    expect(a?.hasAttribute('href')).toBe(false); // javascript: 连属性一起剥
+    expect(target.querySelector('img')?.hasAttribute('onerror')).toBe(false);
+    expect(target.querySelector('img')?.getAttribute('src')).toBe('a.png'); // 正常属性保留
+  });
+
+  it('返回的 HTML 仍走 enrich+pipeline 全管线：comrak 任务列表补 task-list-item 类、TOC 可提取', async () => {
+    setMarkdownBackend(async () => ({
+      // comrak tasklist 输出形态：li 无类（markdown-it-task-lists 会加 task-list-item）
+      html: '<h2>设备</h2><ul><li><input type="checkbox" checked="" disabled="" /> done</li></ul>',
+      where: 'remote'
+    }));
+    const { target, instance } = await renderMd('x\n');
+    expect(target.querySelector('li.task-list-item input[type="checkbox"]')).not.toBeNull();
+    expect(tocOf(instance).map((t) => t.text)).toEqual(['设备']);
+  });
+
+  it('remote 显式失败语义：backend 抛错 → render 拒绝（错误卡片由调用方渲染）', async () => {
+    setMarkdownBackend(async () => {
+      throw new Error('远程 markdown 渲染失败: HTTP 413');
+    });
+    await expect(renderMd('# x\n')).rejects.toThrow('HTTP 413');
+  });
+
+  it('backend 收到的是剥掉 front matter 的 body（comrak 不识别 front matter）', async () => {
+    const calls: string[] = [];
+    setMarkdownBackend(async ({ text }) => {
+      calls.push(text);
+      return { html: '<p>ok</p>', where: 'remote' };
+    });
+    await renderMd('---\ntitle: x\n---\n\n正文\n');
+    expect(calls).toEqual(['正文\n']);
+  });
+
+  it('未注入 backend：本地 markdown-it 渲染，getEngine 为 local（现状不回归）', async () => {
+    const { target, instance } = await renderMd('# 本地\n');
+    expect(target.querySelector('h1')?.textContent).toBe('本地');
+    expect(engineOf(instance)).toBe('local');
+  });
+
+  it('getMarkdownBackend 返回最近注入的 fn；传 null 解绑', () => {
+    expect(getMarkdownBackend()).toBeNull();
+    const fn = async (): Promise<{ html: string; where: 'local' }> => ({ html: '', where: 'local' });
+    setMarkdownBackend(fn);
+    expect(getMarkdownBackend()).toBe(fn);
+    setMarkdownBackend(null);
+    expect(getMarkdownBackend()).toBeNull();
+  });
+
+  it('renderMarkdownBody：直接渲染 body（不再剥 front matter），apps/web 本地回退用', () => {
+    expect(renderMarkdownBody('# t\n')).toContain('<h1>t</h1>');
+    expect(renderMarkdownBody('| a |\n|---|\n| 1 |\n')).toContain('<table>');
   });
 });

@@ -49,8 +49,9 @@ interface HighlightDebug {
   __vvLastHighlightOk?: boolean;
 }
 
-/** 应用侧 compute 路由单例：能力/策略/远程端点实时读取（连接与设置变化即时生效）。 */
-const computeRouter: ComputeRouter = createComputeRouter({
+/** 应用侧 compute 路由单例：能力/策略/远程端点实时读取（连接与设置变化即时生效）。
+ * M7 起同时供 viewer.ts 的 markdown 后端注入使用（highlight/markdown 共用同一裁决）。 */
+export const computeRouter: ComputeRouter = createComputeRouter({
   hasCompute: () => loadCapabilities().includes('compute'),
   policy: () => loadSettings().computePolicy,
   remote: {

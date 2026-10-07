@@ -1,10 +1,16 @@
 // markdownRenderer.ts — markdown 渲染器（Task 4）：T1-T3 五步管线的 Renderer 装配。
-// render 链：renderMarkdownToHtml → sanitizeHtml → DOMParser 解析 → enrichMarkdownDom
-// → runPipeline（highlightFence 注入）→ 挂载 target → heading 赋 id → TOC 提取。
+// render 链：markdown 引擎（注入后端或本地 markdown-it）→ sanitizeHtml → DOMParser
+// 解析 → enrichMarkdownDom → runPipeline（highlightFence 注入）→ 挂载 target
+// → heading 赋 id → TOC 提取。
 // 依赖倒置：围栏高亮复用 code.ts 的 HighlightClient 全局单例（apps/web 启动时经
 // attachHighlightClient 注入，本模块无需 viewer.ts 额外接线）；client 不可用/失败
 // 时 fenceToHtml 返回 null，管线内回落 hljs。
-import type { Renderer, RenderedInstance, Detection, FileSource, TocEntry } from '@vviewer/core';
+// M7（Task 2）：markdown 正文引擎同样走模块级注入（setMarkdownBackend，沿用
+// highlightFence 模式）——renderer 只认注入的 fn，不感知路由策略；fn 内部
+// （apps/web 侧）做 compute 路由与回退。backend 返回的 HTML（远程 comrak unsafe
+// 输出）一律仍走 sanitize+enrich+pipeline 全管线，与本地引擎同权。
+import type { Renderer, RenderedInstance, Detection, FileSource, TocEntry, ComputeSource, ComputeWhere } from '@vviewer/core';
+import { getRemoteBase } from '@vviewer/core';
 import {
   DECODERS,
   MARKUP_MAX_BYTES,
@@ -18,7 +24,8 @@ import {
   type RenderCodeHandle
 } from '../code';
 import { makePreview, type SearchMatchWithPreview } from '../search';
-import { renderMarkdownToHtml } from './engine';
+import { createMarkdownEngine, renderMarkdownToHtml } from './engine';
+import { parseFrontMatter } from './frontMatter';
 import { sanitizeHtml } from './sanitize';
 import { enrichMarkdownDom } from './enrich';
 import { runPipeline, removeLightboxOverlay, LIGHTBOX_OVERLAY_ID } from './pipeline';
@@ -42,6 +49,46 @@ export async function fenceToHtml(code: string, lang: string): Promise<string | 
   } catch {
     return null;
   }
+}
+
+// ---------- 正文引擎注入（M7 Task 2：markdown 接 compute 路由） ----------
+
+/** markdown 正文引擎状态：pending = 已启动等待结果；渲染完成后落 local/remote。 */
+export type MarkdownEngineState = 'pending' | 'local' | 'remote';
+
+/** 交给注入后端的一次渲染调用：text 为剥掉 front matter 的正文，src 为计算来源。 */
+export interface MarkdownBackendCall {
+  /** 剥掉 front matter 后的 markdown 正文（远程 comrak 不识别 front matter） */
+  text: string;
+  /** 计算来源：远程 store 文件带服务端 path（auto 策略据此路由远程）；本地文件缺省 */
+  src?: ComputeSource;
+}
+
+/**
+ * 注入后端的最小接口：apps/web 侧组装（compute 路由 + 远程 comrak 端点 + 回退），
+ * 失败直接 reject（显式 remote 的错误卡片语义由调用方兜底）。
+ */
+export type MarkdownBackend = (call: MarkdownBackendCall) => Promise<{ html: string; where: ComputeWhere }>;
+
+let markdownBackend: MarkdownBackend | null = null;
+
+/** 应用侧注入 markdown 正文引擎（apps/web 启动时调用；传 null 解绑回本地引擎）。 */
+export function setMarkdownBackend(fn: MarkdownBackend | null): void {
+  markdownBackend = fn;
+}
+
+/** 读取已注入的 markdown 正文引擎（测试断言用）。 */
+export function getMarkdownBackend(): MarkdownBackend | null {
+  return markdownBackend;
+}
+
+/**
+ * 本地 markdown-it 直渲染 body（不再剥 front matter）：apps/web 注入后端的
+ * auto 回退路径用——backend 收到的 text 已剥过 front matter，二次解析会把
+ * 以 `---` 开头的正文误判为 front matter。
+ */
+export function renderMarkdownBody(body: string): string {
+  return createMarkdownEngine().render(body);
 }
 
 /**
@@ -242,14 +289,13 @@ export const markdownRenderer: Renderer = {
   id: 'markdown',
   label: 'Markdown',
   extensions: ['md', 'markdown'],
-  async render(buffer: Uint8Array, target: HTMLElement, _source: FileSource, det: Detection) {
-    void _source;
+  async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection) {
     // 超大输入守卫：markdown 管线（净化/DOM 遍历/katex/mermaid）无分块能力，
     // >20MB 会长时间阻塞主线程。降级为纯文本代码视图（降级而非拒绝，内容仍可读）。
     if (buffer.byteLength > MARKUP_MAX_BYTES) {
       return degradedInstance(
         renderDegradedCode(buffer, target, {
-          name: _source.name,
+          name: source.name,
           mode: '纯文本',
           encoding: det.encoding,
           ext: det.ext,
@@ -258,10 +304,29 @@ export const markdownRenderer: Renderer = {
         target
       );
     }
-    // 管线含动态 import（mermaid/katex/hljs），期间 tab 可能已切换：destroyed 后不再挂载
+    // 管线含动态 import（mermaid/katex/hljs）与注入后端的异步往返，期间 tab 可能
+    // 已切换：destroyed 后不再挂载
     let destroyed = false;
     const text = new TextDecoder(DECODERS[det.encoding ?? 'utf-8'], { fatal: false }).decode(buffer);
-    const { html } = renderMarkdownToHtml(text);
+    // M7 正文引擎裁决：注入后端优先（路由策略与回退全在 apps/web 侧的 fn 内），
+    // 未注入走本地 markdown-it（现状）。远程 comrak 不识别 front matter——交给
+    // 后端前先剥掉；本地路径保持 renderMarkdownToHtml 原语义（内部解析 front matter）。
+    const backend = getMarkdownBackend();
+    let html: string;
+    let engine: MarkdownEngineState = 'local';
+    if (backend) {
+      const computeSrc: ComputeSource | undefined =
+        getRemoteBase(source.storeId) !== undefined
+          ? { path: source.path, storeId: source.storeId }
+          : undefined;
+      engine = 'pending';
+      const res = await backend({ text: parseFrontMatter(text).body, src: computeSrc });
+      html = res.html;
+      engine = res.where;
+    } else {
+      html = renderMarkdownToHtml(text).html;
+    }
+    // 引擎输出（含远程 comrak unsafe 结果）必经净化后才能入 DOM
     const doc = new DOMParser().parseFromString(sanitizeHtml(html), 'text/html');
     enrichMarkdownDom(doc);
     await runPipeline(doc, { highlightFence: fenceToHtml });
@@ -273,7 +338,8 @@ export const markdownRenderer: Renderer = {
     const toc = extractToc(target);
     // 渲染视图搜索（Task 6）：root 即挂载后的 target；destroyed 闭包供防御
     const domSearch = createDomSearcher(target, () => destroyed);
-    const instance: RenderedInstance = {
+    // getEngine 供 ViewerPane 状态栏显示正文引擎（M7：渲染: 本地/远程），复用 code 实例的轮询模式
+    const instance: RenderedInstance & { getEngine(): MarkdownEngineState } = {
       destroy() {
         destroyed = true;
         domSearch.restore(); // 还原搜索 mark，避免把包裹态节点留在 DOM（虽随即清空，保持对称）
@@ -284,7 +350,8 @@ export const markdownRenderer: Renderer = {
       },
       getToc: () => toc,
       search: domSearch.search,
-      gotoMatch: domSearch.gotoMatch
+      gotoMatch: domSearch.gotoMatch,
+      getEngine: () => engine
     };
     return instance;
   }

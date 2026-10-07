@@ -185,7 +185,12 @@ test('markdown：表格与任务列表渲染，comrak 端点 GFM 直连断言', 
   await connect(page, TOKEN);
   await openFile(page, 'm6', 'sample-gfm.md');
 
-  // 前端引擎渲染：GFM 表格（表头 + 2 数据行，中文单元格）与任务列表复选框
+  // M7 起 auto 策略对远程文件路由远程 comrak（markdown 接入 compute 路由）；
+  // comrak 的任务列表 li 无类，由前端 enrich 归一化补 task-list-item（双引擎样式一致）
+  const statusbar = page.locator('.vv-statusbar');
+  await expect(statusbar).toContainText('渲染: 远程', { timeout: 20_000 });
+
+  // 远程渲染结果：GFM 表格（表头 + 2 数据行，中文单元格）与任务列表复选框
   const md = page.locator('.vv-markdown');
   await expect(md).toBeVisible({ timeout: 20_000 });
   await expect(md.locator('table')).toBeVisible();
@@ -193,7 +198,7 @@ test('markdown：表格与任务列表渲染，comrak 端点 GFM 直连断言', 
   await expect(md.locator('table')).toContainText('传感器 A');
   await expect(md.locator('li.task-list-item input[type="checkbox"]')).toHaveCount(2);
 
-  // comrak 服务端渲染直连断言（UI markdown 不路由远程——T1-T4 范围如此，见任务报告偏差说明）：
+  // comrak 服务端渲染直连断言（同一端点独立验证）：
   // 表格 / 任务列表 / 脚注 / wikilinks 全扩展一次覆盖
   const res = await fetch(`${BASE}/api/compute/markdown`, {
     method: 'POST',
@@ -210,6 +215,22 @@ test('markdown：表格与任务列表渲染，comrak 端点 GFM 直连断言', 
   expect(html).toContain('checkbox');
   expect(html).toContain('footnote-ref');
   expect(html).toContain('vv-wikilink');
+});
+
+test('policy=remote：markdown 正文走服务端 comrak，状态栏显示「渲染: 远程」', async ({ page }) => {
+  test.setTimeout(60_000);
+  await gotoWithPolicy(page, 'remote');
+  await connect(page, TOKEN);
+  await openFile(page, 'm6', 'sample-gfm.md');
+
+  // 显式 remote：markdown 正文引擎=远程 comrak（状态栏），GFM 内容完整渲染
+  const statusbar = page.locator('.vv-statusbar');
+  await expect(statusbar).toContainText('渲染: 远程', { timeout: 20_000 });
+  await expect(statusbar).not.toContainText('渲染: 本地');
+  const md = page.locator('.vv-markdown');
+  await expect(md).toBeVisible({ timeout: 20_000 });
+  await expect(md.locator('table')).toContainText('传感器 A');
+  await expect(md.locator('li.task-list-item')).toHaveCount(2);
 });
 
 test('policy=local（TopBar UI 切换）：高亮回退本地，状态栏显示「本地」', async ({ page }) => {

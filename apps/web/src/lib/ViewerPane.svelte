@@ -2,6 +2,7 @@
   import type { RenderedInstance, TocEntry, ComputeWhere } from '@vviewer/core';
   import { showErrorCard } from '@vviewer/core';
   import type { CodeEngine } from '@vviewer/render-text';
+  import type { MarkdownEngineState } from '@vviewer/render-text/markdown/markdownRenderer';
   import type { Tab } from './openFlow.svelte';
   import { persistScroll } from './openFlow.svelte';
   import { dispatcher } from './viewer';
@@ -17,6 +18,13 @@
     hljs: '高亮: hljs 兜底',
     'hljs-block': '高亮: hljs 分块',
     plain: '纯文本'
+  };
+
+  /** markdown 正文引擎文案（M7：local/remote 即执行位置，同一状态栏复用） */
+  const MARKDOWN_ENGINE_LABELS: Record<MarkdownEngineState, string> = {
+    pending: '渲染: 解析中…',
+    local: '渲染: 本地',
+    remote: '渲染: 远程'
   };
 
   let host = $state<HTMLElement | null>(null);
@@ -55,14 +63,23 @@
 
   function watchEngine(inst: RenderedInstance): void {
     if (!('getEngine' in inst)) return;
-    const engine = (inst as { getEngine(): CodeEngine }).getEngine;
-    // M6：code 实例另带 getComputeWhere（高亮计算执行位置），随同一轮询刷新
-    const where =
-      'getComputeWhere' in inst ? (inst as { getComputeWhere(): ComputeWhere | null }).getComputeWhere : null;
+    // code 实例带 getComputeWhere（高亮引擎 + 计算执行位置，M6）；
+    // markdown 实例（M7）只有 getEngine，local/remote 即正文引擎与执行位置。
+    if ('getComputeWhere' in inst) {
+      const engine = (inst as { getEngine(): CodeEngine }).getEngine;
+      const where = (inst as { getComputeWhere(): ComputeWhere | null }).getComputeWhere;
+      const read = (): void => {
+        engineLabel = ENGINE_LABELS[engine()];
+        const w = where();
+        computeWhereLabel = w === 'remote' ? '远程' : w === 'local' ? '本地' : '';
+      };
+      read();
+      engineTimer = setInterval(read, 250);
+      return;
+    }
+    const engine = (inst as { getEngine(): MarkdownEngineState }).getEngine;
     const read = (): void => {
-      engineLabel = ENGINE_LABELS[engine()];
-      const w = where?.() ?? null;
-      computeWhereLabel = w === 'remote' ? '远程' : w === 'local' ? '本地' : '';
+      engineLabel = MARKDOWN_ENGINE_LABELS[engine()];
     };
     read();
     engineTimer = setInterval(read, 250);
