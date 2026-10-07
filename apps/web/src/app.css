@@ -121,6 +121,21 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .vv-html-toolbar button.active { color: var(--ui-accent); border-color: var(--ui-accent); }
 .vv-html-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .vv-html-frame { flex: 1; width: 100%; border: 0; background: #fff; }
+/* PDF 渲染（render-doc pdfRenderer）：顶部工具条（页码/缩放）+ 滚动页列表 */
+.vv-pdf { display: flex; flex-direction: column; height: 100%; }
+.vv-pdf-toolbar { display: flex; align-items: center; gap: 8px; padding: 4px 10px;
+  border-bottom: 1px solid var(--ui-border); flex: none; }
+.vv-pdf-toolbar button { min-width: 1.8em; }
+.vv-pdf-toolbar button:disabled { opacity: .4; cursor: default; }
+.vv-pdf-zoom-label { min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; }
+.vv-pdf-page-indicator { margin-left: auto; color: var(--ui-fg-muted); font-size: 12px; }
+.vv-pdf-pages { flex: 1; overflow: auto; display: flex; flex-direction: column; align-items: center;
+  gap: 12px; padding: 12px; }
+.vv-pdf-page { position: relative; flex: none; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 30%); }
+.vv-pdf-page canvas { display: block; }
+.vv-pdf-page-label { position: absolute; right: 6px; bottom: 6px; font-size: 11px; color: #666;
+  background: rgb(255 255 255 / 80%); border-radius: 3px; padding: 0 4px; }
+.vv-pdf-page-hit { outline: 3px solid var(--ui-accent); outline-offset: -3px; }
 /* 超大文件降级视图（renderDegradedCode：markdown 纯文本 / html 源码）：提示卡 + 代码区 */
 .vv-degraded { display: flex; flex-direction: column; height: 100%; }
 .vv-degraded .vv-oversize-card { flex: none; padding: 1rem 1.5rem; border-bottom: 1px solid var(--ui-border); }

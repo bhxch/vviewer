@@ -1,0 +1,14 @@
+{
+  "name": "@vviewer/render-doc",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/pdf.ts",
+  "types": "src/pdf.ts",
+  "exports": {
+    ".": "./src/pdf.ts"
+  },
+  "dependencies": {
+    "@vviewer/core": "workspace:*",
+    "pdfjs-dist": "^5.0.0"
+  }
+}
