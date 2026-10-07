@@ -1,7 +1,9 @@
 #!/usr/bin/env node
-// gen-samples.mjs — 生成 M4 samples（zip/tar 样例；pdf 样例见 gen-sample-pdf.mjs）。
-// 运行：node tools/gen-samples.mjs   （写入 samples/m4/sample.zip 与 samples/m4/sample.tar）
-// tar 为纯 node 手写 USTAR 头（512B header + 内容 512 对齐 + 两个结束零块），不依赖系统 tar。
+// gen-samples.mjs — 生成 M4 samples（zip/tar/mp4 样例；pdf 样例见 gen-sample-pdf.mjs）。
+// 运行：node tools/gen-samples.mjs   （写入 samples/m4/sample.zip、sample.tar、sample.mp4）
+// tar 为纯 node 手写 USTAR 头（512B header + 内容 512 对齐 + 两个结束零块），不依赖系统 tar；
+// mp4 为内嵌 base64 的最小合法 H.264 Baseline 视频（921B，ffmpeg+libopenh264 生成，moov 前置），
+// 环境无关可复现。
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +13,10 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 // jszip 依赖声明在 render-archive 包内（pnpm 严格布局），从该包目录解析
 const require = createRequire(join(root, 'packages', 'render-archive', 'package.json'));
 const JSZip = require('jszip');
+
+/** 最小合法 mp4（64x64 黑帧 x4，h264 baseline，faststart；ffmpeg -f lavfi -i color=... 生成） */
+const SAMPLE_MP4_B64 =
+  'AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMpbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAAKAAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAlN0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAAKAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAEAAAABAAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAACgAAAAAAABAAAAAAHLbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAyAAAACABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABdm1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAATZzdGJsAAAArnN0c2QAAAAAAAAAAQAAAJ5hdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAEAAQABIAAAASAAAAAAAAAABGUxhdmM2Mi4yOC4xMDIgbGlib3BlbmgyNjQAAAAAAAAAGP//AAAAJGF2Y0MBQsAU/+EADWdCwBSMaEJMBAeEQjUBAARozjyAAAAAEHBhc3AAAAABAAAAAQAAABRidHJ0AAAAAAAADIAAAAyAAAAAGHN0dHMAAAAAAAAAAQAAAAQAAAIAAAAAFHN0c3MAAAAAAAAAAQAAAAEAAAAcc3RzYwAAAAAAAAABAAAAAQAAAAQAAAABAAAAJHN0c3oAAAAAAAAAAAAAAAQAAAAcAAAADAAAAAwAAAAMAAAAFHN0Y28AAAAAAAAAAQAAA1kAAABidWR0YQAAAFptZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAAC1pbHN0AAAAJal0b28AAAAdZGF0YQAAAAEAAAAATGF2ZjYyLjEyLjEwMgAAAAhmcmVlAAAASG1kYXQAAAAYZbgABAnkxQABGfk5OTrrrrrrrrqSuuvAAAAACGHgAH5AnhGAAAAACGHgAL5A/hGAAAAACGHgAP5AV4Rg';
 
 /** 手写 USTAR（posix tar）header：512B，chksum 以空格占位求和后回填 */
 function tarHeader(path, size, typeflag) {
@@ -88,6 +94,9 @@ async function main() {
       { path: 'nested/inner.txt', content: 'inner content\n' }
     ])
   );
+
+  // mp4 样例（ArtPlayer 视频路径；最小合法 H.264 Baseline）
+  write(join(root, 'samples', 'm4', 'sample.mp4'), Uint8Array.from(atob(SAMPLE_MP4_B64), (c) => c.charCodeAt(0)));
 }
 
 await main();

@@ -79,6 +79,8 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .vv-image { height: 100%; overflow: auto; display: flex; align-items: flex-start; }
 .vv-image img { transform-origin: 0 0; max-width: none; }
 .vv-av { max-width: 100%; }
+/* ArtPlayer 容器（av.ts 视频分支）：ArtPlayer 需有尺寸的挂载块，16:9 黑底与播放器一致 */
+.vv-artplayer { width: 100%; aspect-ratio: 16 / 9; background: #000; }
 .vv-error-card { padding: 2rem; display: flex; flex-direction: column; gap: .5rem; }
 .vv-error-title { font-weight: 600; }
 .vv-error-detail { color: var(--ui-fg-muted); white-space: pre-wrap; }
