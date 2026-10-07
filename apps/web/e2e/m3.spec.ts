@@ -84,9 +84,15 @@ test('markdown 全要素：表格/任务列表/围栏高亮/callout/katex/mermai
 
 test('TOC 侧栏：项数 = demo.md h1-h4 数，点击项滚动位置变化', async ({ page }) => {
   test.setTimeout(60_000);
-  // 期望项数从样例源码推导（ATX 标题 /^#{1,4} /），样例增删标题时断言自适配
-  const src = readFileSync(`${samples}/demo.md`, 'utf-8');
-  const headingCount = src.split('\n').filter((l) => /^#{1,4} /.test(l)).length;
+  // 期望项数从样例源码推导（ATX 标题 /^#{1,4} /），样例增删标题时断言自适配；
+  // 先剥除 ```/~~~ 围栏段再数，防未来围栏内容（如 bash 注释 #）虚增计数
+  let inFence = false;
+  const headingCount = readFileSync(`${samples}/demo.md`, 'utf-8')
+    .split('\n')
+    .filter((l) => {
+      if (/^(```|~~~)/.test(l)) inFence = !inFence;
+      return !inFence && /^#{1,4} /.test(l);
+    }).length;
   expect(headingCount).toBe(9); // 样例自检：1×h1 + 6×h2 + 1×h3 + 1×h4
 
   await openDemo(page);
@@ -138,19 +144,33 @@ test('html 沙箱预览：iframe 无 allow-scripts、脚本未执行、源码/�
   await expect(frame).toBeVisible();
 });
 
-test('lightbox：图片点击开 overlay，切 tab 触发 destroy 清理', async ({ page }) => {
+test('lightbox：开-关-复开（单例复用）-切 tab destroy 清理', async ({ page }) => {
   test.setTimeout(60_000);
   await openDemo(page);
   const img = page.locator('.vv-markdown img[data-md-lightbox]');
   await expect(img).toHaveCount(1);
+  const overlay = page.locator('#md-lightbox-overlay');
+
+  // 开：点击图片 → body 级 overlay（渲染节点之外，单例 id 固定）
   await img.click();
-  // overlay 挂在 body（渲染节点之外），单例 id 固定
-  await expect(page.locator('#md-lightbox-overlay')).toBeVisible();
+  await expect(overlay).toBeVisible();
+
+  // 关：点击 overlay 自身移除（openLightbox 的 click 监听；点中克隆图也冒泡到此监听）
+  await overlay.click();
+  await expect(overlay).toHaveCount(0);
+
+  // 复开：img 监听仍存活可再开；此时再触发另一张"图"点击，overlay 仍为 1
+  // （body 级单例复用，不叠加）。overlay 开着时底层 img 真实指针不可达（全屏层拦截），
+  // 故单例检查经 dispatchEvent 触发 img 自身的 click 监听（监听就绑在 img 上，事件直生效）
+  await img.click();
+  await expect(overlay).toBeVisible();
+  await img.dispatchEvent('click');
+  await expect(overlay).toHaveCount(1);
 
   // 切 tab：markdown 实例 destroy → removeLightboxOverlay 清理 body 级 overlay。
   // overlay 是 fixed inset:0 的全屏层会拦截指针，真实用户先点击 overlay 关闭再操作；
   // 本断言目标是 destroy 清理链路，故经 dispatchEvent 直接触发树行 click（绕过命中测试）
   await page.locator('.vv-tree-row', { hasText: 'page.html' }).dispatchEvent('click');
   await expect(page.locator('.vv-html-frame')).toBeVisible();
-  await expect(page.locator('#md-lightbox-overlay')).toHaveCount(0);
+  await expect(overlay).toHaveCount(0);
 });
