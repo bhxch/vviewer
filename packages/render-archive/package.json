@@ -1,6 +1,7 @@
 {
   "name": "@vviewer/render-archive",
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "main": "src/archive.ts",
   "types": "src/archive.ts",
@@ -13,5 +14,6 @@
     "@vviewer/core": "workspace:*",
     "jszip": "^3.10.1",
     "libarchive.js": "^2.0.2"
-  }
+  },
+  "license": "Apache-2.0"
 }

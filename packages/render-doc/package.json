@@ -1,6 +1,7 @@
 {
   "name": "@vviewer/render-doc",
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "main": "src/pdf.ts",
   "types": "src/pdf.ts",
@@ -17,5 +18,6 @@
     "mammoth": "^1.13.0",
     "pdfjs-dist": "^5.0.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
-  }
+  },
+  "license": "Apache-2.0"
 }

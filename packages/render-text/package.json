@@ -1,6 +1,7 @@
 {
   "name": "@vviewer/render-text",
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "main": "src/code.ts",
   "dependencies": {
@@ -19,5 +20,6 @@
     "./markdown/markdownRenderer": "./src/markdown/markdownRenderer.ts",
     "./html": "./src/html.ts",
     "./sanitize": "./src/markdown/sanitize.ts"
-  }
+  },
+  "license": "Apache-2.0"
 }
