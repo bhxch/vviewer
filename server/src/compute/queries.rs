@@ -47,7 +47,7 @@ static ENTRIES: Lazy<Vec<LanguageEntry>> = Lazy::new(|| {
         LanguageEntry { name: "cpp", language: tree_sitter_cpp::LANGUAGE, highlights: query!("cpp") },
         LanguageEntry { name: "javascript", language: tree_sitter_javascript::LANGUAGE, highlights: query!("javascript") },
         LanguageEntry { name: "typescript", language: tree_sitter_typescript::LANGUAGE_TYPESCRIPT, highlights: query!("typescript") },
-        LanguageEntry { name: "tsx", language: tree_sitter_typescript::LANGUAGE_TSX, highlights: query!("typescript") },
+        LanguageEntry { name: "tsx", language: tree_sitter_typescript::LANGUAGE_TSX, highlights: query!("tsx") },
         LanguageEntry { name: "yaml", language: tree_sitter_yaml::LANGUAGE, highlights: query!("yaml") },
         LanguageEntry { name: "toml", language: tree_sitter_toml_ng::LANGUAGE, highlights: query!("toml") },
         LanguageEntry { name: "html", language: tree_sitter_html::LANGUAGE, highlights: query!("html") },
@@ -225,6 +225,14 @@ mod tests {
         assert!(ts.contains("(identifier) @variable"), "ecma 在前");
         assert!(ts.contains("ambient_declaration"), "_typescript 自身在后期拼接: {ts}");
         assert!(!ts.contains("; inherits:"));
+
+        // tsx 专属查询（review fix 2）：inherits 三父展开，含 jsx 节点模式
+        let tsx = expand_asset("tsx", &mut HashSet::new()).unwrap();
+        assert!(tsx.contains("ambient_declaration"), "_typescript 父");
+        assert!(tsx.contains("jsx_self_closing_element"), "_jsx 父: {tsx}");
+        assert!(!tsx.contains("; inherits:"));
+        // tsx 与 typescript 展开结果不同（tsx 额外带 jsx 模式）
+        assert!(tsx.len() > ts.len(), "tsx 应为 typescript 展开的超集");
 
         // 父目录资产不可直接作为语言请求
         assert!(ENTRIES.iter().all(|e| e.name != "ecma"));

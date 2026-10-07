@@ -157,7 +157,9 @@ pub fn run_highlight(lang: &str, text: &str) -> Result<HighlightResponse, AppErr
 
 // ---------- path 模式响应缓存 ----------
 
-type CacheKey = (PathBuf, u64, u64);
+/// 缓存键必须含 lang：同 (path,mtime,size) 换语言请求结果不同，
+/// 缺 lang 会让不同语言互命中错误区间（review fix 1）。
+type CacheKey = (PathBuf, u64, u64, String);
 
 /// (path, mtime_ms, size) → 响应；HashMap + 访问序 VecDeque 的简易 LRU（64 条）。
 struct CacheInner {
@@ -282,7 +284,7 @@ pub async fn highlight(State(state): State<AppState>, Json(req): Json<HighlightR
         if meta.len() > HIGHLIGHT_MAX_BYTES as u64 {
             return too_large("file");
         }
-        let key = (canonical.clone(), mtime_ms(&meta), meta.len());
+        let key = (canonical.clone(), mtime_ms(&meta), meta.len(), lang.to_string());
         if let Some(cached) = CACHE.get(&key) {
             return Json(HighlightResponse::clone(&cached)).into_response();
         }
@@ -455,23 +457,54 @@ fn main() {
     fn cache_hit_miss_and_lru_eviction() {
         let _g = serial_lock();
         cache_reset();
-        let key: CacheKey = (PathBuf::from("/tmp/a.rs"), 1, 2);
+        let key: CacheKey = (PathBuf::from("/tmp/a.rs"), 1, 2, "rust".into());
         assert!(CACHE.get(&key).is_none(), "未插入时 miss");
         for i in 0..(CACHE_CAP as u64) {
-            CACHE.insert((PathBuf::from(format!("/tmp/k{i}")), 0, i), HighlightResponse { intervals: vec![], captures: vec![] });
+            CACHE.insert(
+                (PathBuf::from(format!("/tmp/k{i}")), 0, i, "rust".into()),
+                HighlightResponse { intervals: vec![], captures: vec![] },
+            );
         }
         assert_eq!(CACHE.len(), CACHE_CAP);
         // 命中 0 号把它移到队尾，插入新条目淘汰的应是 1 号而非 0 号
-        let hit0 = CACHE.get(&(PathBuf::from("/tmp/k0"), 0, 0)).is_some();
+        let hit0 = CACHE.get(&(PathBuf::from("/tmp/k0"), 0, 0, "rust".into())).is_some();
         assert!(hit0);
-        CACHE.insert((PathBuf::from("/tmp/new"), 0, 9), HighlightResponse { intervals: vec![], captures: vec![] });
+        CACHE.insert(
+            (PathBuf::from("/tmp/new"), 0, 9, "rust".into()),
+            HighlightResponse { intervals: vec![], captures: vec![] },
+        );
         assert_eq!(CACHE.len(), CACHE_CAP, "上限 64");
-        assert!(CACHE.get(&(PathBuf::from("/tmp/k0"), 0, 0)).is_some(), "LRU touch 后 0 号保留");
-        assert!(CACHE.get(&(PathBuf::from("/tmp/k1"), 0, 1)).is_none(), "最久未用的 1 号被淘汰");
+        assert!(
+            CACHE.get(&(PathBuf::from("/tmp/k0"), 0, 0, "rust".into())).is_some(),
+            "LRU touch 后 0 号保留"
+        );
+        assert!(
+            CACHE.get(&(PathBuf::from("/tmp/k1"), 0, 1, "rust".into())).is_none(),
+            "最久未用的 1 号被淘汰"
+        );
         let (hits, misses) = cache_stats();
         assert!(hits >= 2 && misses >= 2, "计数观测: hits={hits} misses={misses}");
         cache_reset();
         assert_eq!(cache_stats(), (0, 0));
         assert_eq!(CACHE.len(), 0);
+    }
+
+    #[test]
+    fn cache_key_includes_lang_same_path_no_cross_hit() {
+        let _g = serial_lock();
+        cache_reset();
+        let path = PathBuf::from("/tmp/poly.gl");
+        let rust_key: CacheKey = (path.clone(), 7, 100, "rust".into());
+        let py_key: CacheKey = (path.clone(), 7, 100, "python".into());
+        let rust_resp =
+            HighlightResponse { intervals: vec![[0, 1, 0]], captures: vec!["keyword".into()] };
+        let py_resp = HighlightResponse { intervals: vec![[0, 2, 0]], captures: vec!["string".into()] };
+        CACHE.insert(rust_key.clone(), rust_resp.clone());
+        // 同 (path,mtime,size) 换 lang：必须 miss，不命中 rust 的响应
+        assert!(CACHE.get(&py_key).is_none(), "异 lang 不得互命中");
+        CACHE.insert(py_key.clone(), py_resp.clone());
+        assert_eq!(*CACHE.get(&rust_key).unwrap(), rust_resp, "rust 键仍是 rust 响应");
+        assert_eq!(*CACHE.get(&py_key).unwrap(), py_resp, "python 键是 python 响应");
+        cache_reset();
     }
 }
