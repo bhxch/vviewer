@@ -4,6 +4,7 @@ import {
   createUrlStore,
   createLocalFsStore,
   createLocalFilesStore,
+  createRemoteStore,
   ensurePermission
 } from '@vviewer/core';
 import { ARCHIVE_OPEN_EVENT } from '@vviewer/render-archive';
@@ -170,6 +171,77 @@ function openDirectoryViaInputFallback(): void {
     if (input.files) openDirectoryViaInput(input.files);
   };
   input.click();
+}
+
+// ---------- 服务器连接（M5） ----------
+
+/** 会话内上次成功连接的服务器（sessionStorage，不做持久）。 */
+export interface LastServer {
+  baseUrl: string;
+  token: string | null;
+}
+
+const LAST_SERVER_KEY = 'vviewer-last-server';
+
+/** 目录 tab 显示名：取地址 host（解析失败退回原串）。 */
+function serverLabel(base: string): string {
+  try {
+    return new URL(base).host;
+  } catch {
+    return base;
+  }
+}
+
+/**
+ * 连接 vviewer 文件服务器：GET /api/health 校验（capabilities 须含 file-server）
+ * → createRemoteStore → addDirStoreTab（目录 tab 替换语义）→ 记入 sessionStorage。
+ * 失败抛错给 UI 展示；连接句柄不可持久化，重连本期需手动（M7 恢复）。
+ */
+export async function connectServer(baseUrl: string, token: string | null): Promise<void> {
+  const base = baseUrl.trim().replace(/\/+$/, '');
+  const tok = token?.trim() ? token.trim() : null;
+
+  const headers: Record<string, string> = {};
+  if (tok) headers.authorization = `Bearer ${tok}`;
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/health`, { headers });
+  } catch {
+    throw new Error(`无法连接 ${base}：网络错误或地址不可达`);
+  }
+  if (!res.ok) throw new Error(`服务器响应异常: HTTP ${res.status}`);
+  let caps: { capabilities?: unknown };
+  try {
+    caps = (await res.json()) as { capabilities?: unknown };
+  } catch {
+    throw new Error('health 响应不是有效 JSON');
+  }
+  if (!Array.isArray(caps.capabilities) || !caps.capabilities.includes('file-server')) {
+    throw new Error('目标不是 vviewer 文件服务器（缺少 file-server 能力）');
+  }
+
+  addDirStoreTab(createRemoteStore(base, tok, serverLabel(base)));
+  try {
+    sessionStorage.setItem(
+      LAST_SERVER_KEY,
+      JSON.stringify({ baseUrl: base, token: tok } satisfies LastServer)
+    );
+  } catch {
+    // 存储不可用（隐私模式等）：连接本身不受影响
+  }
+}
+
+/** 读取会话内上次成功连接的服务器（供连接表单预填；无记录/损坏返回 null）。 */
+export function loadLastServer(): LastServer | null {
+  try {
+    const raw = sessionStorage.getItem(LAST_SERVER_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as Partial<LastServer>;
+    if (typeof v.baseUrl !== 'string' || v.baseUrl === '') return null;
+    return { baseUrl: v.baseUrl, token: typeof v.token === 'string' && v.token !== '' ? v.token : null };
+  } catch {
+    return null;
+  }
 }
 
 /** 目录来源以一个"目录 tab"表达：path=''，ViewerPane 显示引导提示，文件树渲染在左栏 */

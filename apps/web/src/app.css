@@ -209,7 +209,12 @@ mark.vv-search-hit { background: rgb(255 213 0 / 45%); color: inherit; }
 mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-code-line.vv-search-hit-line { background: rgb(255 213 0 / 18%); }
 /* 树 / tabs */
-.vv-topbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--ui-border); }
+.vv-topbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--ui-border); flex-wrap: wrap; }
+/* 连接服务器内联表单（TopBar 展开行）：地址/token/连接/错误 */
+.vv-server-form { display: flex; gap: 6px; align-items: center; }
+.vv-server-form input:first-child { width: 220px; }
+.vv-server-form input[type='password'] { width: 150px; }
+.vv-server-error { color: var(--ui-danger, #d33); font-size: 12px; max-width: 320px; }
 /* 引擎状态条（ViewerPane 底部，code 渲染器专用） */
 .vv-statusbar { flex: none; padding: 2px 10px; font-size: 12px; color: var(--ui-fg-muted);
   border-top: 1px solid var(--ui-border); background: var(--ui-tab-bg); user-select: none; }
