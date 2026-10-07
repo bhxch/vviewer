@@ -3,7 +3,7 @@
   // 输入防抖 150ms 调实例 search，n/N 计数，上/下一个（Enter/Shift+Enter 同通道），
   // Esc 关闭（关闭时 search('') 通知实例退出搜索：markdown 还原 mark，code 清高亮）。
   // 实例不带 search（如图片/音视频渲染器）时显示"此视图不支持搜索"。
-  import type { RenderedInstance } from '@vviewer/core';
+  import type { RenderedInstance, SearchMatch } from '@vviewer/core';
 
   let { instance, onclose }: { instance: RenderedInstance | null; onclose(): void } = $props();
 
@@ -27,7 +27,17 @@
 
   async function runSearch(q: string): Promise<void> {
     const seq = ++searchSeq;
-    const matches = instance?.search ? await instance.search(q) : [];
+    let matches: SearchMatch[] = [];
+    try {
+      matches = instance?.search ? await instance.search(q) : [];
+    } catch {
+      // tab 已销毁（如 PDF destroy 竞态）会使 search reject，属正常关闭时序：静默置零
+      if (!closed && seq === searchSeq) {
+        total = 0;
+        current = 0;
+      }
+      return;
+    }
     if (closed || seq !== searchSeq) return;
     total = matches.length;
     if (total > 0) {

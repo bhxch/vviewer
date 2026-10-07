@@ -3,7 +3,7 @@
 // 不做 ZIP 签名早失败（与 docx/pptx 不同），非法输入由 read 抛错 → 错误卡。
 // 每个 sheet 手动构建 <table>（SDD 裁决允许 sheet_to_html 或手动 row/cell 构建，
 // 取后者：单元格经 textContent 写入，无 HTML 注入面，天然免净化），大 sheet 截断：
-// 仅读前 200 行（按 !ref 范围直接寻址，不物化全部行）+ 提示条；多 sheet 页签切换。
+// 仅读前 200 行 × 前 200 列（按 !ref 范围直接寻址，不物化全部行）+ 提示条；多 sheet 页签切换。
 import type { Detection, FileSource, RenderedInstance, Renderer } from '@vviewer/core';
 import { sniffOoxml } from './ooxml';
 
@@ -11,6 +11,8 @@ type XlsxModule = typeof import('xlsx');
 
 /** 每 sheet 最大渲染行数（超出截断 + 提示条） */
 export const MAX_ROWS_PER_SHEET = 200;
+/** 每 sheet 最大渲染列数（超出截断 + 提示条，与行截断同构） */
+export const MAX_COLS_PER_SHEET = 200;
 
 /** xlsx 类型面的最小切片（避免整包 any 蔓延） */
 interface CellObject {
@@ -50,11 +52,13 @@ function buildSheetDom(sheet: WorkSheet, XLSX: XlsxModule): DocumentFragment {
     return frag;
   }
   const range = XLSX.utils.decode_range(ref) as Range;
-  const total = range.e.r - range.s.r + 1;
+  const totalRows = range.e.r - range.s.r + 1;
+  const totalCols = range.e.c - range.s.c + 1;
   const endRow = Math.min(range.e.r, range.s.r + MAX_ROWS_PER_SHEET - 1);
+  const endCol = Math.min(range.e.c, range.s.c + MAX_COLS_PER_SHEET - 1);
   for (let r = range.s.r; r <= endRow; r++) {
     const tr = document.createElement('tr');
-    for (let c = range.s.c; c <= range.e.c; c++) {
+    for (let c = range.s.c; c <= endCol; c++) {
       const td = document.createElement('td');
       td.textContent = cellText(sheet, r, c, XLSX);
       tr.append(td);
@@ -62,10 +66,18 @@ function buildSheetDom(sheet: WorkSheet, XLSX: XlsxModule): DocumentFragment {
     table.append(tr);
   }
   frag.append(table);
-  if (total > MAX_ROWS_PER_SHEET) {
+  if (totalRows > MAX_ROWS_PER_SHEET || totalCols > MAX_COLS_PER_SHEET) {
+    // 行/列超限合并为一条提示（同构措辞，实际触发哪项显示哪项）
+    const parts: string[] = [];
+    if (totalRows > MAX_ROWS_PER_SHEET) {
+      parts.push(`共 ${totalRows} 行，仅显示前 ${MAX_ROWS_PER_SHEET} 行`);
+    }
+    if (totalCols > MAX_COLS_PER_SHEET) {
+      parts.push(`共 ${totalCols} 列，仅显示前 ${MAX_COLS_PER_SHEET} 列`);
+    }
     const note = document.createElement('div');
     note.className = 'vv-xlsx-truncated';
-    note.textContent = `内容较长：共 ${total} 行，仅显示前 ${MAX_ROWS_PER_SHEET} 行`;
+    note.textContent = `内容较长：${parts.join('；')}`;
     frag.append(note);
   }
   return frag;

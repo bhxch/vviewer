@@ -160,8 +160,25 @@ describe('xlsxRenderer', () => {
     expect(note?.textContent).toContain('200');
   });
 
+  it('宽 sheet 截断为前 200 列并显示提示条（与行截断同构）', async () => {
+    const row: unknown[] = [];
+    for (let i = 0; i < 249; i++) row.push(`c${i}`);
+    const buf = buildWorkbook({ 宽表: [row] });
+    const target = await renderInto(xlsxRenderer, buf);
+    const table = target.querySelector('.vv-xlsx-sheet table') as HTMLTableElement;
+    expect(table.rows).toHaveLength(1);
+    expect(table.rows[0]!.cells).toHaveLength(200);
+    expect(table.rows[0]!.cells[0]!.textContent).toBe('c0');
+    expect(table.rows[0]!.cells[199]!.textContent).toBe('c199');
+    const note = target.querySelector('.vv-xlsx-truncated');
+    expect(note?.textContent).toContain('249');
+    expect(note?.textContent).toContain('200');
+    // 未超行时不应出现行截断措辞
+    expect(note?.textContent).not.toContain('行');
+  });
+
   it('垃圾输入不抛错（SheetJS 宽容解析，最坏渲染空表不崩溃）', async () => {
-    // 实测 xlsx@0.18.5 对任意/空输入均不抛错（宽容解析，可能得到近乎空的
+    // 实测 SheetJS xlsx（0.20.3 官方源，经 pnpm override）对任意/空输入均不抛错（宽容解析，可能得到近乎空的
     // workbook）；错误卡语义仅来自 docx/pptx 的 ZIP 早失败。此处固化宽容行为，
     // 防回归为崩溃。
     const garbage = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
