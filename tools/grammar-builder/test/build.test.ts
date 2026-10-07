@@ -61,7 +61,7 @@ describe('aliases.json（helix 语言名 → tree-sitter-wasms 文件名映射�
 });
 
 describe('build-list（markpad grammar 源判据 src/parser.c）', () => {
-  it('入选（parserCExists）≥ 250（markpad 278 个语法源实测 278 可建）', () => {
+  it('入选（parserCExists）≥ 250（markpad 语法源实测 292 可建，随上游漂移只升不降则断言兜底）', () => {
     const entries = buildList(SOURCES) as BuildListEntry[];
     const buildable = entries.filter((e) => e.parserCExists);
     expect(buildable.length).toBeGreaterThanOrEqual(250);

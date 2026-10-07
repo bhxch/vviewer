@@ -60,6 +60,12 @@
     "helixLang": "bass"
   },
   {
+    "name": "batch",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
     "name": "beancount",
     "subpath": "",
     "parserCExists": true,
@@ -144,6 +150,12 @@
     "helixLang": "chuck"
   },
   {
+    "name": "circom",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "circom"
+  },
+  {
     "name": "clarity",
     "subpath": "",
     "parserCExists": true,
@@ -166,6 +178,18 @@
     "subpath": "",
     "parserCExists": true,
     "helixLang": "comment"
+  },
+  {
+    "name": "commonlisp",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
+    "name": "concerto",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
   },
   {
     "name": "cpon",
@@ -282,6 +306,12 @@
     "helixLang": "doxyfile"
   },
   {
+    "name": "drools",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
     "name": "dtd",
     "subpath": "",
     "parserCExists": true,
@@ -298,6 +328,12 @@
     "subpath": "",
     "parserCExists": true,
     "helixLang": "earthfile"
+  },
+  {
+    "name": "ebnf",
+    "subpath": "crates/tree-sitter-ebnf",
+    "parserCExists": true,
+    "helixLang": null
   },
   {
     "name": "edoc",
@@ -342,6 +378,12 @@
     "helixLang": "elvish"
   },
   {
+    "name": "embedded-perl",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
     "name": "embedded-template",
     "subpath": "",
     "parserCExists": true,
@@ -352,6 +394,12 @@
     "subpath": "",
     "parserCExists": true,
     "helixLang": "erlang"
+  },
+  {
+    "name": "esdl",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "esdl"
   },
   {
     "name": "fennel",
@@ -390,12 +438,6 @@
     "helixLang": "forth"
   },
   {
-    "name": "fortran",
-    "subpath": "",
-    "parserCExists": true,
-    "helixLang": "fortran"
-  },
-  {
     "name": "freebasic",
     "subpath": "",
     "parserCExists": true,
@@ -403,7 +445,7 @@
   },
   {
     "name": "fsharp",
-    "subpath": "",
+    "subpath": "fsharp",
     "parserCExists": true,
     "helixLang": "fsharp"
   },
@@ -804,12 +846,6 @@
     "helixLang": "koto"
   },
   {
-    "name": "latex",
-    "subpath": "",
-    "parserCExists": true,
-    "helixLang": "latex"
-  },
-  {
     "name": "ld",
     "subpath": "",
     "parserCExists": true,
@@ -936,10 +972,22 @@
     "helixLang": "meson"
   },
   {
+    "name": "metamath",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
     "name": "mojo",
     "subpath": "",
     "parserCExists": true,
     "helixLang": "mojo"
+  },
+  {
+    "name": "moonbit",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
   },
   {
     "name": "move",
@@ -991,13 +1039,13 @@
   },
   {
     "name": "ocaml",
-    "subpath": "ocaml",
+    "subpath": "grammars/ocaml",
     "parserCExists": true,
     "helixLang": "ocaml"
   },
   {
     "name": "ocaml-interface",
-    "subpath": "interface",
+    "subpath": "grammars/interface",
     "parserCExists": true,
     "helixLang": "ocaml-interface"
   },
@@ -1032,6 +1080,12 @@
     "helixLang": "org"
   },
   {
+    "name": "p",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
     "name": "pascal",
     "subpath": "",
     "parserCExists": true,
@@ -1056,16 +1110,16 @@
     "helixLang": "penrose"
   },
   {
-    "name": "perl",
-    "subpath": "",
-    "parserCExists": true,
-    "helixLang": "perl"
-  },
-  {
     "name": "pest",
     "subpath": "",
     "parserCExists": true,
     "helixLang": "pest"
+  },
+  {
+    "name": "php",
+    "subpath": "php",
+    "parserCExists": true,
+    "helixLang": "php"
   },
   {
     "name": "php-only",
@@ -1090,12 +1144,6 @@
     "subpath": "",
     "parserCExists": true,
     "helixLang": "po"
-  },
-  {
-    "name": "pod",
-    "subpath": "",
-    "parserCExists": true,
-    "helixLang": "pod"
   },
   {
     "name": "ponylang",
@@ -1134,16 +1182,34 @@
     "helixLang": null
   },
   {
+    "name": "proverif",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
     "name": "prql",
     "subpath": "",
     "parserCExists": true,
     "helixLang": "prql"
   },
   {
+    "name": "ptx",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
     "name": "pug",
     "subpath": "",
     "parserCExists": true,
     "helixLang": "pug"
+  },
+  {
+    "name": "puppet",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
   },
   {
     "name": "purescript",
@@ -1174,12 +1240,6 @@
     "subpath": "",
     "parserCExists": true,
     "helixLang": null
-  },
-  {
-    "name": "quint",
-    "subpath": "",
-    "parserCExists": true,
-    "helixLang": "quint"
   },
   {
     "name": "r",
@@ -1218,7 +1278,7 @@
     "helixLang": "robot"
   },
   {
-    "name": "robots",
+    "name": "robots-txt",
     "subpath": "",
     "parserCExists": true,
     "helixLang": null
@@ -1282,6 +1342,12 @@
     "subpath": "",
     "parserCExists": true,
     "helixLang": "scss"
+  },
+  {
+    "name": "sgf",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
   },
   {
     "name": "shellcheckrc",
@@ -1356,16 +1422,10 @@
     "helixLang": "spicedb"
   },
   {
-    "name": "sql",
+    "name": "ssh_client_config",
     "subpath": "",
     "parserCExists": true,
-    "helixLang": "sql"
-  },
-  {
-    "name": "sshclientconfig",
-    "subpath": "",
-    "parserCExists": true,
-    "helixLang": "sshclientconfig"
+    "helixLang": null
   },
   {
     "name": "strace",
@@ -1380,6 +1440,12 @@
     "helixLang": "strictdoc"
   },
   {
+    "name": "styx",
+    "subpath": "crates/tree-sitter-styx",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
     "name": "supercollider",
     "subpath": "",
     "parserCExists": true,
@@ -1387,7 +1453,7 @@
   },
   {
     "name": "svelte",
-    "subpath": "",
+    "subpath": "crates/tree-sitter-svelte",
     "parserCExists": true,
     "helixLang": "svelte"
   },
@@ -1396,12 +1462,6 @@
     "subpath": "",
     "parserCExists": true,
     "helixLang": "sway"
-  },
-  {
-    "name": "swift",
-    "subpath": "",
-    "parserCExists": true,
-    "helixLang": "swift"
   },
   {
     "name": "systemverilog",
@@ -1482,10 +1542,22 @@
     "helixLang": "todotxt"
   },
   {
+    "name": "tolk",
+    "subpath": "server/src/languages/tolk/tree-sitter-tolk",
+    "parserCExists": true,
+    "helixLang": null
+  },
+  {
     "name": "toml",
     "subpath": "",
     "parserCExists": true,
     "helixLang": "toml"
+  },
+  {
+    "name": "tql",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
   },
   {
     "name": "tsx",
@@ -1546,6 +1618,12 @@
     "subpath": "",
     "parserCExists": true,
     "helixLang": "vala"
+  },
+  {
+    "name": "varlink",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
   },
   {
     "name": "vento",
@@ -1642,6 +1720,12 @@
     "subpath": "",
     "parserCExists": true,
     "helixLang": "xtc"
+  },
+  {
+    "name": "xwiki",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": null
   },
   {
     "name": "yaml",
