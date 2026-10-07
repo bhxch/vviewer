@@ -66,6 +66,16 @@ function joinPath(base: string, name: string): string {
   return base === '' ? name : `${base.replace(/\/+$/, '')}/${name}`;
 }
 
+/**
+ * 单次查询执行的 wasm 侧时间预算（μs）：病态查询（如根级无锚兄弟 pattern 触发
+ * O(n²) 兄弟配对扫描）的护栏——超时返回部分结果而非挂起 worker（promise 永不 settle）。
+ * 预算随文本长度线性放宽（20μs/字符），下限 50ms、上限 3s；
+ * 实测合法 5MB typescript captures 约 0.6s，余量充足。
+ */
+function queryBudget(text: string): number {
+  return Math.min(3_000_000, Math.max(50_000, text.length * 20));
+}
+
 let initPromise: Promise<void> | null = null;
 
 /**
@@ -82,6 +92,8 @@ export class TreeSitterEngine {
   private readonly maxInjectionDepth: number;
   /** 按规范语言名键控的缓存（别名请求复用同一份加载结果）。 */
   private readonly prepared = new Map<string, Promise<PreparedLanguage | null>>();
+  /** 已告警过"不可用注入语言"（每语言仅告警一次，避免逐注释刷屏）。 */
+  private readonly warnedInjections = new Set<string>();
 
   private constructor(assets: QueryAssets, grammarTable: GrammarTable, opts: EngineOptions) {
     this.assets = assets;
@@ -137,12 +149,12 @@ export class TreeSitterEngine {
       try {
         const intervals: HighlightInterval[] = [];
         if (prepared.highlights) {
-          for (const c of prepared.highlights.captures(tree.rootNode)) {
+          for (const c of prepared.highlights.captures(tree.rootNode, { timeoutMicros: queryBudget(text) })) {
             intervals.push({ start: c.node.startIndex, end: c.node.endIndex, capture: c.name });
           }
         }
         if (prepared.injections && depth < this.maxInjectionDepth) {
-          await collectInjections(this, prepared.injections, tree, intervals, depth);
+          await this.collectInjections(prepared.injections, tree, intervals, depth, queryBudget(text));
         }
         intervals.sort((a, b) => a.start - b.start || b.end - a.end);
         return { ok: true, intervals };
@@ -152,6 +164,46 @@ export class TreeSitterEngine {
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
+  }
+
+  /**
+   * 注入递归：injections 查询匹配 → 解析子语言 → 子文本递归高亮 → 偏移合并。
+   * 未知语言前置短路（warn 每语言一次）：缺失 grammar 的注入目标（如 comment/jsdoc/graphql）
+   * 在真实文件里逐注释出现，递归失败路径的逐次告警会刷屏。
+   */
+  private async collectInjections(
+    injQuery: Query,
+    tree: Tree,
+    intervals: HighlightInterval[],
+    depth: number,
+    budgetMicros: number,
+  ): Promise<void> {
+    for (const match of injQuery.matches(tree.rootNode, { timeoutMicros: budgetMicros })) {
+      const content = match.captures.find((c) => c.name === 'injection.content');
+      if (!content) continue;
+      const subLang = resolveInjectionLanguage(match);
+      if (!subLang) continue;
+      if (!this.hasLanguage(subLang)) {
+        if (!this.warnedInjections.has(subLang)) {
+          this.warnedInjections.add(subLang);
+          console.warn(`[highlight] 注入语言 ${subLang} 不可用，已跳过（语言 ${subLang} 无可用 grammar 或查询）`);
+        }
+        continue;
+      }
+      // 递归会复用 parser 重新 parse，先取出子树文本与偏移再 await
+      const subText = content.node.text;
+      const offset = content.node.startIndex;
+      const sub = await this.highlight(subText, subLang, depth + 1);
+      if (!sub.ok) continue;
+      for (const i of sub.intervals) {
+        intervals.push({ start: i.start + offset, end: i.end + offset, capture: i.capture });
+      }
+    }
+  }
+
+  /** 语言是否可解析（grammar 清单键命中；别名先规范化）：注入递归的前置短路检查。 */
+  hasLanguage(rawLang: string): boolean {
+    return this.grammarTable[this.canonicalLang(rawLang)] !== undefined;
   }
 
   /** 释放 wasm 资源：查询 delete、缓存清空、parser delete。 */
@@ -205,33 +257,6 @@ export class TreeSitterEngine {
     const direct = this.grammarTable[lang];
     if (direct) return direct.file;
     return this.aliasToLang.get(lang) ?? null;
-  }
-}
-
-/** 注入递归：injections 查询匹配 → 解析子语言 → 子文本递归高亮 → 偏移合并。 */
-async function collectInjections(
-  engine: TreeSitterEngine,
-  injQuery: Query,
-  tree: Tree,
-  intervals: HighlightInterval[],
-  depth: number,
-): Promise<void> {
-  for (const match of injQuery.matches(tree.rootNode)) {
-    const content = match.captures.find((c) => c.name === 'injection.content');
-    if (!content) continue;
-    const subLang = resolveInjectionLanguage(match);
-    if (!subLang) continue;
-    // 递归会复用 parser 重新 parse，先取出子树文本与偏移再 await
-    const subText = content.node.text;
-    const offset = content.node.startIndex;
-    const sub = await engine.highlight(subText, subLang, depth + 1);
-    if (!sub.ok) {
-      console.warn(`[highlight] 注入语言 ${subLang} 不可用，已跳过（${sub.error}）`);
-      continue;
-    }
-    for (const i of sub.intervals) {
-      intervals.push({ start: i.start + offset, end: i.end + offset, capture: i.capture });
-    }
   }
 }
 

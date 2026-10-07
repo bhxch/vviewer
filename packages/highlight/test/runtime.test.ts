@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TreeSitterEngine, type VirtualQueries } from '../src/core-parse';
@@ -117,4 +117,71 @@ describe('TreeSitterEngine.create 选项', () => {
       e.dispose();
     }
   }, 60_000);
+});
+
+describe('大文件护栏（web-tree-sitter 病态查询挂起的防御）', () => {
+  it('hasLanguage：清单键与别名命中，未知语言 false', async () => {
+    const engine = await TreeSitterEngine.create({ queriesDir, grammarsDir, runtimeDir: staticDir });
+    try {
+      expect(engine.hasLanguage('typescript')).toBe(true);
+      expect(engine.hasLanguage('js')).toBe(true); // 别名
+      expect(engine.hasLanguage('no-such-language')).toBe(false);
+    } finally {
+      engine.dispose();
+    }
+  }, 60_000);
+
+  it('缺失 grammar 的注入语言前置短路：不递归、每语言仅 warn 一次，主区间不受影响', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const engine = await TreeSitterEngine.create({ queriesDir, grammarsDir, runtimeDir: staticDir });
+    try {
+      // 'comment' 不在 grammar 清单：ecma 系 injections.scm 逐注释命中该注入目标
+      const src = 'const a = 1; // one\nconst b = 2; // two\nconst c = 3; // three\n';
+      const r = await engine.highlight(src, 'typescript');
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      expect(r.intervals.some((i) => src.slice(i.start, i.end) === 'const')).toBe(true);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('comment');
+      // 第二次调用不再重复告警
+      await engine.highlight(src, 'typescript');
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      engine.dispose();
+      warn.mockRestore();
+    }
+  }, 60_000);
+
+  it('查询执行超时预算：病态注入查询返回部分区间而非挂起（有预算 ≤5s，无预算实测 40s+）', async () => {
+    // ecma/injections.scm 原始 graphql pattern 的病态形态：根级双兄弟、无锚点，
+    // 触发 O(n²) 兄弟配对扫描。这里用 VirtualQueries 注入同形态 pattern 复现。
+    const pathological: VirtualQueries = new Map([
+      [
+        'typescript',
+        {
+          highlights: '(identifier) @variable',
+          injections: `(
+  ((comment) @_c [
+    (string (string_fragment) @injection.content)
+    (template_string (string_fragment) @injection.content)
+  ])
+  (#eq? @_c "/* GraphQL */")
+  (#set! injection.language "graphql")
+)`,
+        },
+      ],
+    ]);
+    const engine = await TreeSitterEngine.create({ queriesDir: pathological, grammarsDir, runtimeDir: staticDir });
+    try {
+      const src = 'const vv = 1; // c\n'.repeat(2000); // ≈38KB，无预算时注入匹配 >40s
+      const t0 = Date.now();
+      const r = await engine.highlight(src, 'typescript');
+      const elapsed = Date.now() - t0;
+      expect(elapsed).toBeLessThan(5000); // 预算护栏生效（挂起形态下此处 >40s）
+      if (!r.ok) return;
+      expect(r.intervals.some((i) => src.slice(i.start, i.end) === 'vv')).toBe(true); // 主高亮完整
+    } finally {
+      engine.dispose();
+    }
+  }, 30_000);
 });

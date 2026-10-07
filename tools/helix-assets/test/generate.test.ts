@@ -3,7 +3,7 @@ import { readFileSync, readdirSync, existsSync, statSync, mkdtempSync, writeFile
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BUILTIN_PALETTE, collectThemes, parseLanguages, parseTheme } from '../generate.mjs';
+import { BUILTIN_PALETTE, collectThemes, parseLanguages, parseTheme, QUERY_PATCHES, applyQueryPatches } from '../generate.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../..');
@@ -160,6 +160,30 @@ describe('生成产物（packages/highlight/assets）', () => {
     // ecma 是继承根（首行为普通注释）；其子 typescript 在头部注释区声明 inherits
     const tsHead = readFileSync(path.join(queriesDir, 'typescript/highlights.scm'), 'utf8').split('\n', 5);
     expect(tsHead.some((l) => l.trim().startsWith(';') && l.includes('inherits:'))).toBe(true);
+  });
+});
+
+describe('QUERY_PATCHES（原样拷贝后的针对性查询修正）', () => {
+  it('补丁已应用：入库资产 ecma/injections.scm 含 graphql 注入的 `.` 锚点（防 O(n²) 挂起回归）', () => {
+    const text = readFileSync(path.join(assetsDir, 'queries/ecma/injections.scm'), 'utf8');
+    for (const patch of QUERY_PATCHES) {
+      expect(text).toContain(patch.replace);
+      expect(text).not.toContain(patch.find);
+    }
+  });
+
+  it('applyQueryPatches：命中唯一时替换，失配（0 次或多次）报错', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'vv-qpatch-'));
+    writeFileSync(path.join(dir, 'a.scm'), 'x = [\ny = [\nz = [\n');
+    applyQueryPatches(dir, [{ file: 'a.scm', reason: '测试', find: 'x = [\n', replace: 'x . [\n' }]);
+    expect(readFileSync(path.join(dir, 'a.scm'), 'utf8')).toBe('x . [\ny = [\nz = [\n');
+
+    expect(() =>
+      applyQueryPatches(dir, [{ file: 'a.scm', reason: '零命中', find: 'missing', replace: 'y' }]),
+    ).toThrow(/命中 0 次/);
+    expect(() =>
+      applyQueryPatches(dir, [{ file: 'a.scm', reason: '多命中', find: '[\n', replace: ']' }]),
+    ).toThrow(/命中 3 次/);
   });
 });
 

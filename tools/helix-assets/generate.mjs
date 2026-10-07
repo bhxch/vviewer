@@ -201,11 +201,42 @@ export function collectThemes(themesDir) {
   return themes;
 }
 
-/** 复制 markpad queries/ 全量目录（原样拷贝，不改内容）。 */
+/**
+ * 查询补丁：markpad queries 原样拷贝后的针对性修正（源更新导致 find 失配时 copyQueries
+ * 报错退出、提醒人工复核，不静默跳过）。每项 { file, reason, find, replace }，find 须唯一命中。
+ */
+export const QUERY_PATCHES = [
+  {
+    file: 'ecma/injections.scm',
+    // web-tree-sitter 0.25 查询游标对"根级双兄弟、无锚点"pattern（comment 与 [string|template_string]
+    // 并列）做 O(n²) 兄弟配对扫描：19KB JS 文件注入匹配即 40s+ 不返回（worker 挂起，promise 永不 settle）。
+    // 插入 `.` 锚点要求 comment 与字符串相邻，复杂度回落线性（实测 19KB 40s → 2ms），
+    // 语义收紧为"紧邻 comment 的字符串"——与上游注释声明的本意（graphql 字符串的注释引导）一致。
+    reason: '根级无锚兄弟 pattern 触发 O(n²) 兄弟配对扫描，大文件注入匹配挂起',
+    find: '  ((comment) @_ecma_comment [\n',
+    replace: '  ((comment) @_ecma_comment . [\n',
+  },
+];
+
+/** 应用查询补丁到已拷贝的 queries 目录（导出供测试）。 */
+export function applyQueryPatches(destDir, patches) {
+  for (const { file, reason, find, replace } of patches) {
+    const p = path.join(destDir, file);
+    const text = fs.readFileSync(p, 'utf8');
+    const hits = text.split(find).length - 1;
+    if (hits !== 1) {
+      throw new Error(`查询补丁失配（命中 ${hits} 次，期望 1 次）: ${file} — ${reason}，请人工复核 QUERY_PATCHES`);
+    }
+    fs.writeFileSync(p, text.replace(find, replace));
+  }
+}
+
+/** 复制 markpad queries/ 全量目录（原样拷贝 + QUERY_PATCHES 针对性修正）。 */
 function copyQueries(srcDir, outDir) {
   const dest = path.join(outDir, 'queries');
   fs.rmSync(dest, { recursive: true, force: true });
   fs.cpSync(srcDir, dest, { recursive: true });
+  applyQueryPatches(dest, QUERY_PATCHES);
   return fs.readdirSync(dest).filter((d) => fs.statSync(path.join(dest, d)).isDirectory()).length;
 }
 

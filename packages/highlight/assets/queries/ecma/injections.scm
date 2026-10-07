@@ -57,8 +57,11 @@
 )
 
 ; Parse the contents of strings and tagged template literals with leading ECMAScript comments '/* GraphQL */'
+; vviewer 补丁：`.` 锚点要求 comment 与字符串相邻。原样（根级双兄弟、无锚点）会让
+; web-tree-sitter 查询游标做 O(n²) 兄弟配对扫描——19KB JS 文件的注入匹配即挂起 worker
+; （实测 40s+ 不返回）；加锚点后线性（2ms）。同步维护于 tools/helix-assets/generate.mjs 的 QUERY_PATCHES。
 (
-  ((comment) @_ecma_comment [
+  ((comment) @_ecma_comment . [
     (string (string_fragment) @injection.content)
     (template_string (string_fragment) @injection.content)
   ])
