@@ -1,0 +1,10 @@
+{
+  "name": "@vviewer/helix-assets",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node generate.mjs",
+    "test": "vitest run"
+  }
+}

@@ -1,6 +1,7 @@
 export interface VirtualScrollerHandle {
   destroy(): void;
-  refresh(): void;
+  /** force=true 时即使可视行范围未变也强制重绘（异步高亮结果到达后刷新用） */
+  refresh(force?: boolean): void;
 }
 
 /**
@@ -25,27 +26,28 @@ export function virtualScroller(
   container.replaceChildren(spacer, viewport);
   let first = -1;
   let last = -1;
-  function update(): void {
+  function update(force = false): void {
     const scrollTop = container.scrollTop;
     const visible = Math.ceil(container.clientHeight / lineHeight);
     const f = Math.min(rowCount - 1, Math.max(0, Math.floor(scrollTop / lineHeight) - overscan));
     const l = Math.min(rowCount - 1, f + visible + overscan * 2);
-    if (f !== first || l !== last) {
+    if (force || f !== first || l !== last) {
       first = f;
       last = l;
       viewport.style.transform = `translateY(${f * lineHeight}px)`;
       onRange(f, l, viewport);
     }
   }
-  container.addEventListener('scroll', update, { passive: true });
-  const ro = new ResizeObserver(update);
+  const onUpdate = (): void => update();
+  container.addEventListener('scroll', onUpdate, { passive: true });
+  const ro = new ResizeObserver(onUpdate);
   ro.observe(container);
   update();
   return {
     destroy() {
       ro.disconnect();
-      container.removeEventListener('scroll', update);
+      container.removeEventListener('scroll', onUpdate);
     },
-    refresh: update
+    refresh: (force = false) => update(force)
   };
 }

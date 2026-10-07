@@ -29,6 +29,7 @@
 body { margin: 0; background: var(--ui-bg); color: var(--ui-fg); font-family: system-ui, -apple-system, sans-serif; }
 button { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid var(--ui-border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
 input { background: var(--ui-bg); color: var(--ui-fg); border: 1px solid var(--ui-border); border-radius: 6px; padding: 4px 8px; }
+select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid var(--ui-border); border-radius: 6px; padding: 4px 6px; }
 
 /* 虚拟滚动 */
 .vv-virtual { position: relative; overflow: auto; }
@@ -45,6 +46,35 @@ input { background: var(--ui-bg); color: var(--ui-fg); border: 1px solid var(--u
 .hljs-comment { color: var(--hljs-comment); font-style: italic; } .hljs-number { color: var(--hljs-number); }
 .hljs-title { color: var(--hljs-title); } .hljs-built_in { color: var(--hljs-built_in); }
 .hljs-attr { color: var(--hljs-attr); } .hljs-params { color: var(--hljs-title); }
+/* tree-sitter 捕获样式：颜色取自 JS 注入的 style#vv-code-theme（--vv-ts-*，见 src/lib/theme.ts），
+   变量缺失时回落继承——切主题零重解析。清单与 theme.ts 的 CODE_CAPTURES 一一对齐（theme.test.ts 校验） */
+.ts-attribute { color: var(--vv-ts-attribute, inherit); } .ts-comment { color: var(--vv-ts-comment, inherit); }
+.ts-comment-line { color: var(--vv-ts-comment-line, inherit); } .ts-comment-block { color: var(--vv-ts-comment-block, inherit); }
+.ts-constant { color: var(--vv-ts-constant, inherit); } .ts-constant-builtin { color: var(--vv-ts-constant-builtin, inherit); }
+.ts-constant-character { color: var(--vv-ts-constant-character, inherit); } .ts-constant-character-escape { color: var(--vv-ts-constant-character-escape, inherit); }
+.ts-constant-numeric { color: var(--vv-ts-constant-numeric, inherit); } .ts-constructor { color: var(--vv-ts-constructor, inherit); }
+.ts-function { color: var(--vv-ts-function, inherit); } .ts-function-builtin { color: var(--vv-ts-function-builtin, inherit); }
+.ts-function-call { color: var(--vv-ts-function-call, inherit); } .ts-function-macro { color: var(--vv-ts-function-macro, inherit); }
+.ts-function-method { color: var(--vv-ts-function-method, inherit); } .ts-keyword { color: var(--vv-ts-keyword, inherit); }
+.ts-keyword-control { color: var(--vv-ts-keyword-control, inherit); } .ts-keyword-control-conditional { color: var(--vv-ts-keyword-control-conditional, inherit); }
+.ts-keyword-control-import { color: var(--vv-ts-keyword-control-import, inherit); } .ts-keyword-control-repeat { color: var(--vv-ts-keyword-control-repeat, inherit); }
+.ts-keyword-directive { color: var(--vv-ts-keyword-directive, inherit); } .ts-keyword-function { color: var(--vv-ts-keyword-function, inherit); }
+.ts-keyword-operator { color: var(--vv-ts-keyword-operator, inherit); } .ts-label { color: var(--vv-ts-label, inherit); }
+.ts-markup-bold { color: var(--vv-ts-markup-bold, inherit); } .ts-markup-heading { color: var(--vv-ts-markup-heading, inherit); }
+.ts-markup-italic { color: var(--vv-ts-markup-italic, inherit); } .ts-markup-link { color: var(--vv-ts-markup-link, inherit); }
+.ts-markup-list { color: var(--vv-ts-markup-list, inherit); } .ts-markup-raw { color: var(--vv-ts-markup-raw, inherit); }
+.ts-module { color: var(--vv-ts-module, inherit); } .ts-namespace { color: var(--vv-ts-namespace, inherit); }
+.ts-number { color: var(--vv-ts-number, inherit); } .ts-operator { color: var(--vv-ts-operator, inherit); }
+.ts-property { color: var(--vv-ts-property, inherit); } .ts-punctuation { color: var(--vv-ts-punctuation, inherit); }
+.ts-punctuation-bracket { color: var(--vv-ts-punctuation-bracket, inherit); } .ts-punctuation-delimiter { color: var(--vv-ts-punctuation-delimiter, inherit); }
+.ts-punctuation-special { color: var(--vv-ts-punctuation-special, inherit); } .ts-special { color: var(--vv-ts-special, inherit); }
+.ts-string { color: var(--vv-ts-string, inherit); } .ts-string-escape { color: var(--vv-ts-string-escape, inherit); }
+.ts-string-special { color: var(--vv-ts-string-special, inherit); } .ts-tag { color: var(--vv-ts-tag, inherit); }
+.ts-type { color: var(--vv-ts-type, inherit); } .ts-type-builtin { color: var(--vv-ts-type-builtin, inherit); }
+.ts-type-enum-variant { color: var(--vv-ts-type-enum-variant, inherit); } .ts-variable { color: var(--vv-ts-variable, inherit); }
+.ts-variable-builtin { color: var(--vv-ts-variable-builtin, inherit); } .ts-variable-parameter { color: var(--vv-ts-variable-parameter, inherit); }
+.ts-diff-delta { color: var(--vv-ts-diff-delta, inherit); } .ts-diff-minus { color: var(--vv-ts-diff-minus, inherit); }
+.ts-diff-plus { color: var(--vv-ts-diff-plus, inherit); }
 /* 图片 / 音视频 / 错误卡 */
 .vv-image { height: 100%; overflow: auto; display: flex; align-items: flex-start; }
 .vv-image img { transform-origin: 0 0; max-width: none; }
@@ -54,6 +84,9 @@ input { background: var(--ui-bg); color: var(--ui-fg); border: 1px solid var(--u
 .vv-error-detail { color: var(--ui-fg-muted); white-space: pre-wrap; }
 /* 树 / tabs */
 .vv-topbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--ui-border); }
+/* 引擎状态条（ViewerPane 底部，code 渲染器专用） */
+.vv-statusbar { flex: none; padding: 2px 10px; font-size: 12px; color: var(--ui-fg-muted);
+  border-top: 1px solid var(--ui-border); background: var(--ui-tab-bg); user-select: none; }
 .vv-brand { font-weight: 700; margin-right: 8px; }
 .vv-tabbar { display: flex; overflow-x: auto; background: var(--ui-tab-bg); border-bottom: 1px solid var(--ui-border); }
 .vv-tab { display: inline-flex; align-items: center; gap: 6px; border: none; border-right: 1px solid var(--ui-border);

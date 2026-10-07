@@ -1,0 +1,3655 @@
+{
+  "rust": {
+    "scope": "source.rust",
+    "injections": "rs|rust",
+    "fileTypes": [
+      "rs"
+    ],
+    "shebangs": [
+      "rust-script",
+      "cargo"
+    ],
+    "grammar": "rust"
+  },
+  "sway": {
+    "scope": "source.sway",
+    "injections": "sway",
+    "fileTypes": [
+      "sw"
+    ],
+    "shebangs": [],
+    "grammar": "sway"
+  },
+  "toml": {
+    "scope": "source.toml",
+    "injections": "toml",
+    "fileTypes": [
+      "toml"
+    ],
+    "globFileTypes": [
+      "pdm.lock",
+      "poetry.lock",
+      "Cargo.lock",
+      "uv.lock",
+      "containers.conf",
+      "containers.conf.d/*.conf",
+      "containers.conf.modules/*.conf",
+      "mounts.conf",
+      "policy.conf",
+      "registries.conf",
+      "storage.conf"
+    ],
+    "shebangs": [],
+    "grammar": "toml"
+  },
+  "awk": {
+    "scope": "source.awk",
+    "injections": "awk",
+    "fileTypes": [
+      "awk",
+      "gawk",
+      "nawk",
+      "mawk"
+    ],
+    "shebangs": [],
+    "grammar": "awk"
+  },
+  "protobuf": {
+    "scope": "source.proto",
+    "injections": "proto",
+    "fileTypes": [
+      "proto"
+    ],
+    "shebangs": [],
+    "grammar": "proto"
+  },
+  "textproto": {
+    "scope": "source.textproto",
+    "fileTypes": [
+      "txtpb",
+      "textpb",
+      "textproto"
+    ],
+    "shebangs": [],
+    "grammar": "textproto"
+  },
+  "eiffel": {
+    "scope": "source.eiffel",
+    "fileTypes": [
+      "e"
+    ],
+    "shebangs": [],
+    "grammar": "eiffel"
+  },
+  "elixir": {
+    "scope": "source.elixir",
+    "injections": "(elixir|ex)",
+    "fileTypes": [
+      "ex",
+      "exs"
+    ],
+    "globFileTypes": [
+      "mix.lock"
+    ],
+    "shebangs": [
+      "elixir"
+    ],
+    "grammar": "elixir"
+  },
+  "fennel": {
+    "scope": "source.fennel",
+    "fileTypes": [
+      "fnl",
+      "fnlm"
+    ],
+    "shebangs": [
+      "fennel"
+    ],
+    "grammar": "fennel"
+  },
+  "fish": {
+    "scope": "source.fish",
+    "injections": "fish",
+    "fileTypes": [
+      "fish"
+    ],
+    "shebangs": [
+      "fish"
+    ],
+    "grammar": "fish"
+  },
+  "flatbuffers": {
+    "scope": "source.flatbuffers",
+    "injections": "(flatbuffers?|fbs)",
+    "fileTypes": [
+      "fbs"
+    ],
+    "shebangs": [],
+    "grammar": "flatbuffers"
+  },
+  "mint": {
+    "scope": "source.mint",
+    "injections": "mint",
+    "fileTypes": [
+      "mint"
+    ],
+    "shebangs": [],
+    "grammar": "mint"
+  },
+  "mojo": {
+    "scope": "source.mojo",
+    "injections": "mojo",
+    "fileTypes": [
+      "mojo",
+      "🔥"
+    ],
+    "shebangs": [],
+    "grammar": "mojo"
+  },
+  "janet": {
+    "scope": "source.janet",
+    "injections": "janet",
+    "fileTypes": [
+      "cgen",
+      "janet",
+      "jdn"
+    ],
+    "shebangs": [
+      "janet"
+    ],
+    "grammar": "janet-simple"
+  },
+  "json": {
+    "scope": "source.json",
+    "injections": "json",
+    "fileTypes": [
+      "json",
+      "arb",
+      "ipynb",
+      "geojson",
+      "gltf",
+      "webmanifest",
+      "js.map",
+      "ts.map",
+      "css.map",
+      "jsonl",
+      "avsc",
+      "ldtk",
+      "ldtkl",
+      "sublime-build",
+      "sublime-color-scheme",
+      "sublime-commands",
+      "sublime-completions",
+      "sublime-keymap",
+      "sublime-macro",
+      "sublime-menu",
+      "sublime-mousemap",
+      "sublime-project",
+      "sublime-settings",
+      "sublime-theme",
+      "sublime-workspace",
+      "code-workspace"
+    ],
+    "globFileTypes": [
+      "flake.lock",
+      ".babelrc",
+      ".bowerrc",
+      ".jscrc",
+      ".jslintrc",
+      ".vuerc",
+      "composer.lock",
+      ".watchmanconfig",
+      ".swift-format",
+      ".pytest_cache/v/cache/*",
+      "devenv.lock",
+      "devbox.lock",
+      "manifest.lock",
+      "deno.lock"
+    ],
+    "shebangs": [],
+    "grammar": "json"
+  },
+  "jsonc": {
+    "scope": "source.json",
+    "injections": "jsonc",
+    "fileTypes": [
+      "jsonc"
+    ],
+    "globFileTypes": [
+      "{t,j}sconfig.json",
+      "bun.lock",
+      ".devcontainer.json",
+      "devcontainer.json",
+      ".vscode/*.json"
+    ],
+    "shebangs": [],
+    "grammar": "json"
+  },
+  "json-ld": {
+    "scope": "source.json-ld",
+    "injections": "json-ld",
+    "fileTypes": [
+      "jsonld"
+    ],
+    "shebangs": [],
+    "grammar": "json"
+  },
+  "json5": {
+    "scope": "source.json5",
+    "injections": "json5",
+    "fileTypes": [
+      "json5"
+    ],
+    "shebangs": [],
+    "grammar": "json5"
+  },
+  "c": {
+    "scope": "source.c",
+    "injections": "c",
+    "fileTypes": [
+      "c"
+    ],
+    "shebangs": [],
+    "grammar": "c"
+  },
+  "cpp": {
+    "scope": "source.cpp",
+    "injections": "cpp",
+    "fileTypes": [
+      "cc",
+      "hh",
+      "c++",
+      "cpp",
+      "hpp",
+      "h",
+      "ipp",
+      "tpp",
+      "cxx",
+      "hxx",
+      "ixx",
+      "txx",
+      "ino",
+      "C",
+      "H",
+      "cu",
+      "cuh",
+      "cppm",
+      "h++",
+      "ii",
+      "inl"
+    ],
+    "globFileTypes": [
+      ".hpp.in",
+      ".h.in"
+    ],
+    "shebangs": [],
+    "grammar": "cpp"
+  },
+  "crystal": {
+    "scope": "source.cr",
+    "fileTypes": [
+      "cr"
+    ],
+    "shebangs": [],
+    "grammar": "crystal"
+  },
+  "c-sharp": {
+    "scope": "source.csharp",
+    "injections": "c-?sharp",
+    "fileTypes": [
+      "cs",
+      "csx",
+      "cake"
+    ],
+    "shebangs": [],
+    "grammar": "c-sharp"
+  },
+  "c3": {
+    "scope": "source.c3",
+    "injections": "c3",
+    "fileTypes": [
+      "c3",
+      "c3i",
+      "c3t"
+    ],
+    "shebangs": [],
+    "grammar": "c3"
+  },
+  "cel": {
+    "scope": "source.cel",
+    "injections": "cel",
+    "fileTypes": [
+      "cel"
+    ],
+    "shebangs": [],
+    "grammar": "cel"
+  },
+  "spicedb": {
+    "scope": "source.zed",
+    "injections": "spicedb",
+    "fileTypes": [
+      "zed"
+    ],
+    "shebangs": [],
+    "grammar": "spicedb"
+  },
+  "go": {
+    "scope": "source.go",
+    "injections": "go",
+    "fileTypes": [
+      "go"
+    ],
+    "shebangs": [],
+    "grammar": "go"
+  },
+  "gomod": {
+    "scope": "source.gomod",
+    "injections": "gomod",
+    "fileTypes": [],
+    "globFileTypes": [
+      "go.mod"
+    ],
+    "shebangs": [],
+    "grammar": "gomod"
+  },
+  "gotmpl": {
+    "scope": "source.gotmpl",
+    "injections": "gotmpl",
+    "fileTypes": [
+      "gotmpl"
+    ],
+    "shebangs": [],
+    "grammar": "gotmpl"
+  },
+  "gowork": {
+    "scope": "source.gowork",
+    "injections": "gowork",
+    "fileTypes": [],
+    "globFileTypes": [
+      "go.work"
+    ],
+    "shebangs": [],
+    "grammar": "gowork"
+  },
+  "go-format-string": {
+    "scope": "source.go-format-string",
+    "injections": "go-format-string",
+    "fileTypes": [],
+    "shebangs": [],
+    "grammar": "go-format-string"
+  },
+  "javascript": {
+    "scope": "source.js",
+    "injections": "(js|javascript)",
+    "fileTypes": [
+      "js",
+      "mjs",
+      "cjs",
+      "rules",
+      "es6",
+      "pac",
+      "gs"
+    ],
+    "globFileTypes": [
+      ".node_repl_history",
+      "jakefile"
+    ],
+    "shebangs": [
+      "node"
+    ],
+    "grammar": "javascript"
+  },
+  "jsx": {
+    "scope": "source.jsx",
+    "injections": "jsx",
+    "fileTypes": [
+      "jsx"
+    ],
+    "shebangs": [],
+    "grammar": "javascript"
+  },
+  "typescript": {
+    "scope": "source.ts",
+    "injections": "(ts|typescript)",
+    "fileTypes": [
+      "ts",
+      "mts",
+      "cts"
+    ],
+    "shebangs": [
+      "deno",
+      "bun",
+      "ts-node"
+    ],
+    "grammar": "typescript"
+  },
+  "typespec": {
+    "scope": "source.typespec",
+    "injections": "(tsp|typespec)",
+    "fileTypes": [
+      "tsp"
+    ],
+    "shebangs": [],
+    "grammar": "typespec"
+  },
+  "tsx": {
+    "scope": "source.tsx",
+    "injections": "(tsx)",
+    "fileTypes": [
+      "tsx"
+    ],
+    "shebangs": [],
+    "grammar": "tsx"
+  },
+  "css": {
+    "scope": "source.css",
+    "injections": "css",
+    "fileTypes": [
+      "css"
+    ],
+    "shebangs": [],
+    "grammar": "css"
+  },
+  "scss": {
+    "scope": "source.scss",
+    "injections": "scss",
+    "fileTypes": [
+      "scss"
+    ],
+    "shebangs": [],
+    "grammar": "scss"
+  },
+  "less": {
+    "scope": "source.less",
+    "injections": "less",
+    "fileTypes": [
+      "less"
+    ],
+    "shebangs": [],
+    "grammar": "less"
+  },
+  "html": {
+    "scope": "text.html.basic",
+    "injections": "html",
+    "fileTypes": [
+      "html",
+      "htm",
+      "shtml",
+      "xhtml",
+      "xht",
+      "jsp",
+      "asp",
+      "aspx",
+      "jshtm",
+      "volt",
+      "rhtml",
+      "cshtml"
+    ],
+    "shebangs": [],
+    "grammar": "html"
+  },
+  "htmldjango": {
+    "scope": "source.htmldjango",
+    "injections": "htmldjango",
+    "fileTypes": [],
+    "shebangs": [],
+    "grammar": "htmldjango"
+  },
+  "python": {
+    "scope": "source.python",
+    "injections": "py(thon)?",
+    "fileTypes": [
+      "py",
+      "pyi",
+      "py3",
+      "pyw",
+      "ptl",
+      "rpy",
+      "cpy",
+      "ipy",
+      "pyt"
+    ],
+    "globFileTypes": [
+      ".python_history",
+      ".pythonstartup",
+      ".pythonrc",
+      "*SConstruct",
+      "*SConscript",
+      "*sconstruct"
+    ],
+    "shebangs": [
+      "python",
+      "uv"
+    ],
+    "grammar": "python"
+  },
+  "nickel": {
+    "scope": "source.nickel",
+    "injections": "nickel",
+    "fileTypes": [
+      "ncl"
+    ],
+    "shebangs": [],
+    "grammar": "nickel"
+  },
+  "nix": {
+    "scope": "source.nix",
+    "injections": "nix",
+    "fileTypes": [
+      "nix"
+    ],
+    "shebangs": [],
+    "grammar": "nix"
+  },
+  "ruby": {
+    "scope": "source.ruby",
+    "injections": "ruby",
+    "fileTypes": [
+      "rb",
+      "rake",
+      "irb",
+      "gemspec",
+      "rabl",
+      "jbuilder",
+      "jb",
+      "podspec",
+      "rjs",
+      "rbi",
+      "rbs"
+    ],
+    "globFileTypes": [
+      "rakefile",
+      "gemfile",
+      "Rakefile",
+      "Gemfile",
+      "Podfile",
+      "Vagrantfile",
+      "Brewfile",
+      "*.Brewfile",
+      "Guardfile",
+      "Capfile",
+      "Cheffile",
+      "Hobofile",
+      "Appraisals",
+      "Rantfile",
+      "Berksfile",
+      "Berksfile.lock",
+      "Thorfile",
+      "Puppetfile",
+      "Fastfile",
+      "Appfile",
+      "Deliverfile",
+      "Matchfile",
+      "Scanfile",
+      "Snapfile",
+      "Gymfile",
+      ".irbrc"
+    ],
+    "shebangs": [
+      "ruby"
+    ],
+    "grammar": "ruby"
+  },
+  "rshtml": {
+    "scope": "source.rshtml",
+    "fileTypes": [],
+    "globFileTypes": [
+      "*.rs.html"
+    ],
+    "shebangs": [],
+    "grammar": "rshtml"
+  },
+  "bash": {
+    "scope": "source.bash",
+    "injections": "(shell|bash|zsh|sh)",
+    "fileTypes": [
+      "sh",
+      "bash",
+      "ash",
+      "dash",
+      "ksh",
+      "mksh",
+      "zsh",
+      "zshenv",
+      "zlogin",
+      "zlogout",
+      "zprofile",
+      "zshrc",
+      "eclass",
+      "ebuild",
+      "bazelrc",
+      "Renviron",
+      "zsh-theme",
+      "cshrc",
+      "tcshrc",
+      "bashrc_Apple_Terminal",
+      "zshrc_Apple_Terminal"
+    ],
+    "globFileTypes": [
+      "i3/config",
+      "sway/config",
+      ".tmux.conf",
+      "tmux.conf",
+      ".sh_history",
+      ".bash_history",
+      ".bash_login",
+      ".bash_logout",
+      ".bash_profile",
+      ".bashrc",
+      ".profile",
+      ".zshenv",
+      ".zlogin",
+      ".zlogout",
+      ".zprofile",
+      ".zshrc",
+      ".zimrc",
+      "APKBUILD",
+      ".bash_aliases",
+      "bash_completion",
+      "bash-completion/completions/*",
+      "bash_completion.d/*",
+      ".Renviron",
+      ".xprofile",
+      ".xsession",
+      ".xsessionrc",
+      ".yashrc",
+      ".yash_profile",
+      ".hushlogin",
+      ".xinitrc",
+      "xinitrc",
+      ".xserverrc",
+      "xserverrc",
+      "direnvrc"
+    ],
+    "shebangs": [
+      "sh",
+      "bash",
+      "dash",
+      "zsh"
+    ],
+    "grammar": "bash"
+  },
+  "php": {
+    "scope": "source.php",
+    "injections": "php",
+    "fileTypes": [
+      "php",
+      "inc",
+      "php4",
+      "php5",
+      "phtml",
+      "ctp"
+    ],
+    "shebangs": [
+      "php"
+    ],
+    "grammar": "php"
+  },
+  "php-only": {
+    "scope": "source.php-only",
+    "injections": "php-only",
+    "fileTypes": [],
+    "shebangs": [],
+    "grammar": "php-only"
+  },
+  "blade": {
+    "scope": "source.blade.php",
+    "injections": "blade",
+    "fileTypes": [
+      "blade"
+    ],
+    "globFileTypes": [
+      "*.blade.php"
+    ],
+    "shebangs": [],
+    "grammar": "blade"
+  },
+  "twig": {
+    "scope": "source.twig",
+    "injections": "twig",
+    "fileTypes": [
+      "twig"
+    ],
+    "shebangs": [],
+    "grammar": "twig"
+  },
+  "latex": {
+    "scope": "source.tex",
+    "injections": "tex",
+    "fileTypes": [
+      "tex",
+      "sty",
+      "cls",
+      "Rd",
+      "bbx",
+      "cbx"
+    ],
+    "shebangs": [],
+    "grammar": "latex"
+  },
+  "bibtex": {
+    "scope": "source.bib",
+    "injections": "bib",
+    "fileTypes": [
+      "bib"
+    ],
+    "shebangs": [],
+    "grammar": "bibtex"
+  },
+  "lean": {
+    "scope": "source.lean",
+    "injections": "lean",
+    "fileTypes": [
+      "lean"
+    ],
+    "shebangs": [],
+    "grammar": "lean"
+  },
+  "lpf": {
+    "scope": "source.lpf",
+    "fileTypes": [
+      "lpf"
+    ],
+    "shebangs": [],
+    "grammar": "lpf"
+  },
+  "julia": {
+    "scope": "source.julia",
+    "injections": "julia",
+    "fileTypes": [
+      "jl"
+    ],
+    "shebangs": [
+      "julia"
+    ],
+    "grammar": "julia"
+  },
+  "java": {
+    "scope": "source.java",
+    "injections": "java",
+    "fileTypes": [
+      "java",
+      "jav",
+      "pde"
+    ],
+    "shebangs": [],
+    "grammar": "java"
+  },
+  "smali": {
+    "scope": "source.smali",
+    "injections": "smali",
+    "fileTypes": [
+      "smali"
+    ],
+    "shebangs": [],
+    "grammar": "smali"
+  },
+  "ledger": {
+    "scope": "source.ledger",
+    "injections": "ledger",
+    "fileTypes": [
+      "ldg",
+      "ledger",
+      "journal"
+    ],
+    "shebangs": [],
+    "grammar": "ledger"
+  },
+  "beancount": {
+    "scope": "source.beancount",
+    "injections": "beancount",
+    "fileTypes": [
+      "beancount",
+      "bean"
+    ],
+    "shebangs": [],
+    "grammar": "beancount"
+  },
+  "ocaml": {
+    "scope": "source.ocaml",
+    "injections": "ocaml",
+    "fileTypes": [
+      "ml"
+    ],
+    "shebangs": [
+      "ocaml",
+      "ocamlrun",
+      "ocamlscript"
+    ],
+    "grammar": "ocaml"
+  },
+  "ocaml-interface": {
+    "scope": "source.ocaml.interface",
+    "fileTypes": [
+      "mli"
+    ],
+    "shebangs": [],
+    "grammar": "ocaml-interface"
+  },
+  "dune": {
+    "scope": "source.dune",
+    "fileTypes": [],
+    "globFileTypes": [
+      "dune-project",
+      "dune"
+    ],
+    "shebangs": [],
+    "grammar": "scheme"
+  },
+  "lua": {
+    "scope": "source.lua",
+    "injections": "lua",
+    "fileTypes": [
+      "lua",
+      "rockspec"
+    ],
+    "shebangs": [
+      "lua",
+      "luajit"
+    ],
+    "grammar": "lua"
+  },
+  "luap": {
+    "scope": "source.luap",
+    "injections": "luap",
+    "fileTypes": [],
+    "shebangs": [],
+    "grammar": "luap"
+  },
+  "lua-format-string": {
+    "scope": "source.lua-format-string",
+    "injections": "lua-format-string",
+    "fileTypes": [],
+    "shebangs": [],
+    "grammar": "lua-format-string"
+  },
+  "teal": {
+    "scope": "source.tl",
+    "injections": "teal",
+    "fileTypes": [
+      "tl"
+    ],
+    "shebangs": [],
+    "grammar": "teal"
+  },
+  "svelte": {
+    "scope": "source.svelte",
+    "injections": "svelte",
+    "fileTypes": [
+      "svelte"
+    ],
+    "shebangs": [],
+    "grammar": "svelte"
+  },
+  "vue": {
+    "scope": "source.vue",
+    "injections": "vue",
+    "fileTypes": [
+      "vue"
+    ],
+    "shebangs": [],
+    "grammar": "vue"
+  },
+  "yaml": {
+    "scope": "source.yaml",
+    "injections": "yml|yaml",
+    "fileTypes": [
+      "yml",
+      "yaml",
+      "sublime-syntax",
+      "bu"
+    ],
+    "globFileTypes": [
+      ".prettierrc",
+      ".clangd",
+      ".clang-format",
+      ".clang-tidy",
+      ".gem/credentials",
+      ".kube/config",
+      ".kube/kuberc",
+      "yarn.lock",
+      ".stylelintrc",
+      ".puppeteerrc"
+    ],
+    "shebangs": [],
+    "grammar": "yaml"
+  },
+  "nestedtext": {
+    "scope": "text.nested",
+    "injections": "nestedtext",
+    "fileTypes": [
+      "nt"
+    ],
+    "shebangs": [],
+    "grammar": "yaml"
+  },
+  "haskell": {
+    "scope": "source.haskell",
+    "injections": "hs|haskell",
+    "fileTypes": [
+      "hs",
+      "hs-boot",
+      "hsc"
+    ],
+    "shebangs": [
+      "runhaskell",
+      "stack"
+    ],
+    "grammar": "haskell"
+  },
+  "haskell-persistent": {
+    "scope": "source.persistentmodels",
+    "fileTypes": [
+      "persistentmodels"
+    ],
+    "shebangs": [],
+    "grammar": "haskell-persistent"
+  },
+  "haskell-literate": {
+    "scope": "source.haskell-literate",
+    "injections": "lhs",
+    "fileTypes": [
+      "lhs"
+    ],
+    "shebangs": [
+      "runhaskell",
+      "stack"
+    ],
+    "grammar": "haskell-literate"
+  },
+  "purescript": {
+    "scope": "source.purescript",
+    "injections": "purescript",
+    "fileTypes": [
+      "purs"
+    ],
+    "shebangs": [],
+    "grammar": "purescript"
+  },
+  "zig": {
+    "scope": "source.zig",
+    "injections": "zig",
+    "fileTypes": [
+      "zig",
+      "zon"
+    ],
+    "shebangs": [],
+    "grammar": "zig"
+  },
+  "picat": {
+    "scope": "source.picat",
+    "injections": "(pi|picat)",
+    "fileTypes": [
+      "pi",
+      "picat"
+    ],
+    "shebangs": [
+      "picat"
+    ],
+    "grammar": "picat"
+  },
+  "prolog": {
+    "scope": "source.prolog",
+    "fileTypes": [
+      "pl",
+      "prolog"
+    ],
+    "shebangs": [
+      "swipl"
+    ],
+    "grammar": "prolog"
+  },
+  "tsq": {
+    "scope": "source.tsq",
+    "injections": "tsq",
+    "fileTypes": [],
+    "globFileTypes": [
+      "queries/*.scm",
+      "injections.scm",
+      "highlights.scm",
+      "indents.scm",
+      "textobjects.scm",
+      "locals.scm",
+      "tags.scm"
+    ],
+    "shebangs": [],
+    "grammar": "query"
+  },
+  "cmake": {
+    "scope": "source.cmake",
+    "injections": "cmake",
+    "fileTypes": [
+      "cmake"
+    ],
+    "globFileTypes": [
+      "CMakeLists.txt"
+    ],
+    "shebangs": [],
+    "grammar": "cmake"
+  },
+  "make": {
+    "scope": "source.make",
+    "injections": "(make|makefile|Makefile|mk)",
+    "fileTypes": [
+      "make",
+      "mk",
+      "mak"
+    ],
+    "globFileTypes": [
+      "Makefile",
+      "makefile",
+      "GNUmakefile",
+      "OCamlMakefile"
+    ],
+    "shebangs": [
+      "make",
+      "gmake"
+    ],
+    "grammar": "make"
+  },
+  "glsl": {
+    "scope": "source.glsl",
+    "injections": "glsl",
+    "fileTypes": [
+      "glsl",
+      "vert",
+      "tesc",
+      "tese",
+      "geom",
+      "frag",
+      "comp"
+    ],
+    "shebangs": [],
+    "grammar": "glsl"
+  },
+  "penrose": {
+    "scope": "source.penrose",
+    "fileTypes": [
+      "substance",
+      "style",
+      "domain"
+    ],
+    "shebangs": [],
+    "grammar": "penrose"
+  },
+  "perl": {
+    "scope": "source.perl",
+    "fileTypes": [
+      "pl",
+      "pm",
+      "t",
+      "psgi",
+      "raku",
+      "rakumod",
+      "rakutest",
+      "rakudoc",
+      "nqp",
+      "p6",
+      "pl6",
+      "pm6"
+    ],
+    "globFileTypes": [
+      "latexmkrc",
+      ".latexmkrc"
+    ],
+    "shebangs": [
+      "perl"
+    ],
+    "grammar": "perl"
+  },
+  "pod": {
+    "scope": "source.pod",
+    "injections": "pod",
+    "fileTypes": [
+      "pod"
+    ],
+    "shebangs": [],
+    "grammar": "pod"
+  },
+  "racket": {
+    "scope": "source.racket",
+    "fileTypes": [
+      "rkt",
+      "rktd",
+      "rktl",
+      "scrbl",
+      "zuo"
+    ],
+    "shebangs": [
+      "racket",
+      "zuo"
+    ],
+    "grammar": "scheme"
+  },
+  "common-lisp": {
+    "scope": "source.lisp",
+    "fileTypes": [
+      "lisp",
+      "asd",
+      "cl",
+      "l",
+      "lsp",
+      "ny",
+      "podsl",
+      "ros",
+      "sexp"
+    ],
+    "shebangs": [
+      "lisp",
+      "sbcl",
+      "ccl",
+      "clisp",
+      "ecl"
+    ],
+    "grammar": "scheme"
+  },
+  "comment": {
+    "scope": "scope.comment",
+    "injections": "comment",
+    "fileTypes": [],
+    "shebangs": [],
+    "grammar": "comment"
+  },
+  "wesl": {
+    "scope": "source.wesl",
+    "fileTypes": [
+      "wesl"
+    ],
+    "shebangs": [],
+    "grammar": "wesl"
+  },
+  "wgsl": {
+    "scope": "source.wgsl",
+    "fileTypes": [
+      "wgsl"
+    ],
+    "shebangs": [],
+    "grammar": "wgsl"
+  },
+  "llvm": {
+    "scope": "source.llvm",
+    "injections": "llvm",
+    "fileTypes": [
+      "ll"
+    ],
+    "shebangs": [],
+    "grammar": "llvm"
+  },
+  "llvm-mir": {
+    "scope": "source.llvm_mir",
+    "injections": "mir",
+    "fileTypes": [],
+    "shebangs": [],
+    "grammar": "llvm-mir"
+  },
+  "llvm-mir-yaml": {
+    "scope": "source.yaml",
+    "fileTypes": [
+      "mir"
+    ],
+    "shebangs": [],
+    "grammar": "llvm-mir-yaml"
+  },
+  "tablegen": {
+    "scope": "source.tablegen",
+    "injections": "tablegen",
+    "fileTypes": [
+      "td"
+    ],
+    "shebangs": [],
+    "grammar": "tablegen"
+  },
+  "mail": {
+    "scope": "text.mail",
+    "injections": "mail|eml|email",
+    "fileTypes": [
+      "eml"
+    ],
+    "shebangs": [],
+    "grammar": "mail"
+  },
+  "markdown": {
+    "scope": "source.md",
+    "injections": "md|markdown",
+    "fileTypes": [
+      "md",
+      "livemd",
+      "markdown",
+      "mdx",
+      "mkd",
+      "mkdn",
+      "mdwn",
+      "mdown",
+      "markdn",
+      "mdtxt",
+      "mdtext",
+      "workbook"
+    ],
+    "globFileTypes": [
+      "PULLREQ_EDITMSG"
+    ],
+    "shebangs": [],
+    "grammar": "markdown"
+  },
+  "markdown-rustdoc": {
+    "scope": "source.markdown-rustdoc",
+    "injections": "markdown-rustdoc",
+    "fileTypes": [],
+    "shebangs": [],
+    "grammar": "markdown"
+  },
+  "markdown.inline": {
+    "scope": "source.markdown.inline",
+    "injections": "markdown\\.inline",
+    "fileTypes": [],
+    "shebangs": [],
+    "grammar": "markdown_inline"
+  },
+  "djot": {
+    "scope": "source.djot",
+    "injections": "dj|djot",
+    "fileTypes": [
+      "dj",
+      "djot"
+    ],
+    "shebangs": [],
+    "grammar": "djot"
+  },
+  "dart": {
+    "scope": "source.dart",
+    "fileTypes": [
+      "dart"
+    ],
+    "shebangs": [],
+    "grammar": "dart"
+  },
+  "scala": {
+    "scope": "source.scala",
+    "fileTypes": [
+      "scala",
+      "sbt",
+      "sc"
+    ],
+    "shebangs": [],
+    "grammar": "scala"
+  },
+  "dockerfile": {
+    "scope": "source.dockerfile",
+    "injections": "docker|dockerfile",
+    "fileTypes": [
+      "Dockerfile",
+      "dockerfile",
+      "Containerfile",
+      "containerfile"
+    ],
+    "globFileTypes": [
+      "Dockerfile",
+      "Dockerfile.*",
+      "dockerfile",
+      "dockerfile.*",
+      "Containerfile",
+      "Containerfile.*",
+      "containerfile",
+      "containerfile.*"
+    ],
+    "shebangs": [],
+    "grammar": "dockerfile"
+  },
+  "docker-compose": {
+    "scope": "source.yaml.docker-compose",
+    "fileTypes": [],
+    "globFileTypes": [
+      "docker-compose.yaml",
+      "docker-compose.yml",
+      "compose.yaml",
+      "compose.yml"
+    ],
+    "shebangs": [],
+    "grammar": "yaml"
+  },
+  "git-commit": {
+    "scope": "git.commitmsg",
+    "fileTypes": [],
+    "globFileTypes": [
+      "COMMIT_EDITMSG",
+      "MERGE_MSG",
+      "TAG_EDITMSG"
+    ],
+    "shebangs": [],
+    "grammar": "gitcommit"
+  },
+  "git-notes": {
+    "scope": "git.notesmsg",
+    "fileTypes": [],
+    "globFileTypes": [
+      "NOTES_EDITMSG",
+      "EDIT_DESCRIPTION"
+    ],
+    "shebangs": [],
+    "grammar": "gitcommit"
+  },
+  "github-action": {
+    "scope": "source.yaml.github-action",
+    "fileTypes": [],
+    "globFileTypes": [
+      ".github/workflows/*.yaml",
+      ".github/workflows/*.yml"
+    ],
+    "shebangs": [],
+    "grammar": "yaml"
+  },
+  "diff": {
+    "scope": "source.diff",
+    "injections": "diff",
+    "fileTypes": [
+      "diff",
+      "patch",
+      "rej"
+    ],
+    "shebangs": [],
+    "grammar": "diff"
+  },
+  "git-rebase": {
+    "scope": "source.gitrebase",
+    "injections": "git-rebase",
+    "fileTypes": [],
+    "globFileTypes": [
+      "git-rebase-todo"
+    ],
+    "shebangs": [],
+    "grammar": "git-rebase"
+  },
+  "regex": {
+    "scope": "source.regex",
+    "injections": "regex",
+    "fileTypes": [
+      "regex"
+    ],
+    "globFileTypes": [
+      ".Rbuildignore"
+    ],
+    "shebangs": [],
+    "grammar": "regex"
+  },
+  "git-config": {
+    "scope": "source.gitconfig",
+    "injections": "git-config",
+    "fileTypes": [
+      "gitconfig"
+    ],
+    "globFileTypes": [
+      ".gitmodules",
+      "gitconfig",
+      ".gitconfig",
+      ".git/config",
+      ".config/git/config",
+      ".git/modules/*/config",
+      "config.worktree"
+    ],
+    "shebangs": [],
+    "grammar": "git-config"
+  },
+  "git-attributes": {
+    "scope": "source.gitattributes",
+    "injections": "git-attributes",
+    "fileTypes": [],
+    "globFileTypes": [
+      ".gitattributes",
+      ".config/git/attributes"
+    ],
+    "shebangs": [],
+    "grammar": "gitattributes"
+  },
+  "git-ignore": {
+    "scope": "source.gitignore",
+    "injections": "git-ignore",
+    "fileTypes": [],
+    "globFileTypes": [
+      ".gitignore_global",
+      "git/ignore",
+      ".git/info/exclude",
+      ".ignore",
+      "CODEOWNERS",
+      ".config/helix/ignore",
+      ".helix/ignore",
+      ".*ignore",
+      ".git-blame-ignore-revs"
+    ],
+    "shebangs": [],
+    "grammar": "gitignore"
+  },
+  "graphql": {
+    "scope": "source.graphql",
+    "injections": "graphql",
+    "fileTypes": [
+      "gql",
+      "graphql",
+      "graphqls"
+    ],
+    "shebangs": [],
+    "grammar": "graphql"
+  },
+  "elm": {
+    "scope": "source.elm",
+    "injections": "elm",
+    "fileTypes": [
+      "elm"
+    ],
+    "shebangs": [],
+    "grammar": "elm"
+  },
+  "iex": {
+    "scope": "source.iex",
+    "injections": "iex",
+    "fileTypes": [
+      "iex"
+    ],
+    "shebangs": [],
+    "grammar": "iex"
+  },
+  "rescript": {
+    "scope": "source.rescript",
+    "injections": "rescript",
+    "fileTypes": [
+      "res"
+    ],
+    "shebangs": [],
+    "grammar": "rescript"
+  },
+  "erlang": {
+    "scope": "source.erlang",
+    "injections": "erl(ang)?",
+    "fileTypes": [
+      "erl",
+      "hrl",
+      "app"
+    ],
+    "globFileTypes": [
+      "rebar.config",
+      "rebar.lock",
+      "*.app.src"
+    ],
+    "shebangs": [
+      "escript"
+    ],
+    "grammar": "erlang"
+  },
+  "kotlin": {
+    "scope": "source.kotlin",
+    "fileTypes": [
+      "kt",
+      "kts"
+    ],
+    "shebangs": [],
+    "grammar": "kotlin"
+  },
+  "hcl": {
+    "scope": "source.hcl",
+    "injections": "(hcl|tf|nomad)",
+    "fileTypes": [
+      "hcl",
+      "tf",
+      "nomad"
+    ],
+    "shebangs": [],
+    "grammar": "hcl"
+  },
+  "tfvars": {
+    "scope": "source.tfvars",
+    "fileTypes": [
+      "tfvars"
+    ],
+    "shebangs": [],
+    "grammar": "hcl"
+  },
+  "org": {
+    "scope": "source.org",
+    "injections": "org",
+    "fileTypes": [
+      "org"
+    ],
+    "shebangs": [],
+    "grammar": "org"
+  },
+  "solidity": {
+    "scope": "source.sol",
+    "injections": "(sol|solidity)",
+    "fileTypes": [
+      "sol"
+    ],
+    "shebangs": [],
+    "grammar": "solidity"
+  },
+  "gleam": {
+    "scope": "source.gleam",
+    "injections": "gleam",
+    "fileTypes": [
+      "gleam"
+    ],
+    "shebangs": [],
+    "grammar": "gleam"
+  },
+  "quarto": {
+    "scope": "source.qmd",
+    "injections": "qmd",
+    "fileTypes": [
+      "qmd"
+    ],
+    "shebangs": [],
+    "grammar": "markdown"
+  },
+  "ron": {
+    "scope": "source.ron",
+    "injections": "ron",
+    "fileTypes": [
+      "ron"
+    ],
+    "shebangs": [],
+    "grammar": "ron"
+  },
+  "robot": {
+    "scope": "source.robot",
+    "injections": "robot",
+    "fileTypes": [
+      "robot",
+      "resource"
+    ],
+    "shebangs": [],
+    "grammar": "robot"
+  },
+  "r": {
+    "scope": "source.r",
+    "injections": "(r|R)",
+    "fileTypes": [
+      "r",
+      "R"
+    ],
+    "globFileTypes": [
+      ".Rprofile",
+      "Rprofile.site",
+      ".RHistory"
+    ],
+    "shebangs": [
+      "r",
+      "R"
+    ],
+    "grammar": "r"
+  },
+  "rmarkdown": {
+    "scope": "source.rmd",
+    "injections": "(r|R)md",
+    "fileTypes": [
+      "rmd",
+      "Rmd"
+    ],
+    "shebangs": [],
+    "grammar": "markdown"
+  },
+  "swift": {
+    "scope": "source.swift",
+    "injections": "swift",
+    "fileTypes": [
+      "swift",
+      "swiftinterface"
+    ],
+    "shebangs": [],
+    "grammar": "swift"
+  },
+  "erb": {
+    "scope": "text.html.erb",
+    "injections": "erb",
+    "fileTypes": [
+      "erb"
+    ],
+    "shebangs": [],
+    "grammar": "embedded-template"
+  },
+  "ejs": {
+    "scope": "text.html.ejs",
+    "injections": "ejs",
+    "fileTypes": [
+      "ejs"
+    ],
+    "shebangs": [],
+    "grammar": "embedded-template"
+  },
+  "eex": {
+    "scope": "source.eex",
+    "injections": "eex",
+    "fileTypes": [
+      "eex"
+    ],
+    "shebangs": [],
+    "grammar": "eex"
+  },
+  "heex": {
+    "scope": "source.heex",
+    "injections": "heex",
+    "fileTypes": [
+      "heex"
+    ],
+    "shebangs": [],
+    "grammar": "heex"
+  },
+  "sql": {
+    "scope": "source.sql",
+    "injections": "sql",
+    "fileTypes": [
+      "sql",
+      "dsql"
+    ],
+    "shebangs": [],
+    "grammar": "sql"
+  },
+  "gdscript": {
+    "scope": "source.gdscript",
+    "injections": "gdscript",
+    "fileTypes": [
+      "gd"
+    ],
+    "shebangs": [],
+    "grammar": "gdscript"
+  },
+  "godot-resource": {
+    "scope": "source.tscn",
+    "injections": "godot",
+    "fileTypes": [
+      "tscn",
+      "tres",
+      "godot",
+      "gdextension"
+    ],
+    "shebangs": [],
+    "grammar": "godot-resource"
+  },
+  "nu": {
+    "scope": "source.nu",
+    "injections": "nu",
+    "fileTypes": [
+      "nu",
+      "nuon"
+    ],
+    "shebangs": [
+      "nu"
+    ],
+    "grammar": "nu"
+  },
+  "vala": {
+    "scope": "source.vala",
+    "injections": "vala",
+    "fileTypes": [
+      "vala",
+      "vapi"
+    ],
+    "shebangs": [],
+    "grammar": "vala"
+  },
+  "hare": {
+    "scope": "source.hare",
+    "injections": "hare",
+    "fileTypes": [
+      "ha"
+    ],
+    "shebangs": [],
+    "grammar": "hare"
+  },
+  "devicetree": {
+    "scope": "source.devicetree",
+    "injections": "(dtsi?|devicetree|fdt)",
+    "fileTypes": [
+      "dts",
+      "dtsi"
+    ],
+    "shebangs": [],
+    "grammar": "devicetree"
+  },
+  "cairo": {
+    "scope": "source.cairo",
+    "injections": "cairo",
+    "fileTypes": [
+      "cairo"
+    ],
+    "shebangs": [],
+    "grammar": "cairo"
+  },
+  "cpon": {
+    "scope": "scope.cpon",
+    "injections": "cpon",
+    "fileTypes": [
+      "cpon",
+      "cp"
+    ],
+    "shebangs": [],
+    "grammar": "cpon"
+  },
+  "odin": {
+    "scope": "source.odin",
+    "fileTypes": [
+      "odin"
+    ],
+    "shebangs": [],
+    "grammar": "odin"
+  },
+  "meson": {
+    "scope": "source.meson",
+    "injections": "meson",
+    "fileTypes": [],
+    "globFileTypes": [
+      "meson.build",
+      "meson.options",
+      "meson_options.txt"
+    ],
+    "shebangs": [],
+    "grammar": "meson"
+  },
+  "sshclientconfig": {
+    "scope": "source.sshclientconfig",
+    "fileTypes": [],
+    "globFileTypes": [
+      ".ssh/config",
+      "/etc/ssh/ssh_config",
+      "ssh_config.d/*.conf"
+    ],
+    "shebangs": [],
+    "grammar": "sshclientconfig"
+  },
+  "scheme": {
+    "scope": "source.scheme",
+    "injections": "scheme",
+    "fileTypes": [
+      "ss",
+      "scm",
+      "sld"
+    ],
+    "shebangs": [
+      "scheme",
+      "guile",
+      "chicken"
+    ],
+    "grammar": "scheme"
+  },
+  "v": {
+    "scope": "source.v",
+    "fileTypes": [
+      "v",
+      "vv",
+      "vsh"
+    ],
+    "shebangs": [
+      "v run"
+    ],
+    "grammar": "v"
+  },
+  "verilog": {
+    "scope": "source.verilog",
+    "injections": "verilog",
+    "fileTypes": [
+      "v",
+      "vh"
+    ],
+    "shebangs": [],
+    "grammar": "verilog"
+  },
+  "systemverilog": {
+    "scope": "source.systemverilog",
+    "fileTypes": [
+      "sv",
+      "svh"
+    ],
+    "shebangs": [],
+    "grammar": "systemverilog"
+  },
+  "edoc": {
+    "scope": "source.edoc",
+    "injections": "edoc",
+    "fileTypes": [
+      "edoc",
+      "edoc.in"
+    ],
+    "shebangs": [],
+    "grammar": "edoc"
+  },
+  "jsdoc": {
+    "scope": "source.jsdoc",
+    "injections": "jsdoc",
+    "fileTypes": [
+      "jsdoc"
+    ],
+    "shebangs": [],
+    "grammar": "jsdoc"
+  },
+  "openscad": {
+    "scope": "source.openscad",
+    "injections": "openscad",
+    "fileTypes": [
+      "scad"
+    ],
+    "shebangs": [],
+    "grammar": "openscad"
+  },
+  "prisma": {
+    "scope": "source.prisma",
+    "injections": "prisma",
+    "fileTypes": [
+      "prisma"
+    ],
+    "shebangs": [],
+    "grammar": "prisma"
+  },
+  "clojure": {
+    "scope": "source.clojure",
+    "injections": "(clojure|clj|edn|boot)",
+    "fileTypes": [
+      "clj",
+      "cljs",
+      "cljc",
+      "clje",
+      "cljr",
+      "cljx",
+      "edn",
+      "boot"
+    ],
+    "shebangs": [],
+    "grammar": "clojure"
+  },
+  "starlark": {
+    "scope": "source.starlark",
+    "injections": "(starlark|bzl|bazel|buck)",
+    "fileTypes": [
+      "bzl",
+      "bazel",
+      "star"
+    ],
+    "globFileTypes": [
+      "BUILD",
+      "BUCK",
+      "BUILD.*",
+      "WORKSPACE",
+      "WORKSPACE.bzlmod",
+      "PACKAGE"
+    ],
+    "shebangs": [],
+    "grammar": "python"
+  },
+  "elvish": {
+    "scope": "source.elvish",
+    "fileTypes": [
+      "elv"
+    ],
+    "shebangs": [
+      "elvish"
+    ],
+    "grammar": "elvish"
+  },
+  "idris": {
+    "scope": "source.idr",
+    "injections": "idr",
+    "fileTypes": [
+      "idr"
+    ],
+    "shebangs": [],
+    "grammar": "idris"
+  },
+  "fortran": {
+    "scope": "source.fortran",
+    "injections": "fortran",
+    "fileTypes": [
+      "f",
+      "for",
+      "f90",
+      "f95",
+      "f03",
+      "F",
+      "F90",
+      "F95",
+      "F03"
+    ],
+    "shebangs": [],
+    "grammar": "fortran"
+  },
+  "ungrammar": {
+    "scope": "source.ungrammar",
+    "injections": "ungrammar",
+    "fileTypes": [
+      "ungram",
+      "ungrammar"
+    ],
+    "shebangs": [],
+    "grammar": "ungrammar"
+  },
+  "dot": {
+    "scope": "source.dot",
+    "injections": "dot",
+    "fileTypes": [
+      "dot"
+    ],
+    "shebangs": [],
+    "grammar": "dot"
+  },
+  "cue": {
+    "scope": "source.cue",
+    "injections": "cue",
+    "fileTypes": [
+      "cue"
+    ],
+    "shebangs": [],
+    "grammar": "cue"
+  },
+  "slang": {
+    "scope": "source.lang",
+    "injections": "slang",
+    "fileTypes": [
+      "slang"
+    ],
+    "shebangs": [],
+    "grammar": "slang"
+  },
+  "slint": {
+    "scope": "source.slint",
+    "injections": "slint",
+    "fileTypes": [
+      "slint"
+    ],
+    "shebangs": [],
+    "grammar": "slint"
+  },
+  "task": {
+    "scope": "source.task",
+    "injections": "task",
+    "fileTypes": [
+      "task"
+    ],
+    "shebangs": [],
+    "grammar": "task"
+  },
+  "xit": {
+    "scope": "source.xit",
+    "injections": "xit",
+    "fileTypes": [
+      "xit"
+    ],
+    "shebangs": [],
+    "grammar": "xit"
+  },
+  "esdl": {
+    "scope": "source.esdl",
+    "injections": "esdl",
+    "fileTypes": [
+      "esdl"
+    ],
+    "shebangs": [],
+    "grammar": "esdl"
+  },
+  "pascal": {
+    "scope": "source.pascal",
+    "injections": "pascal",
+    "fileTypes": [
+      "pas",
+      "pp",
+      "inc",
+      "lpr",
+      "lfm"
+    ],
+    "shebangs": [],
+    "grammar": "pascal"
+  },
+  "sml": {
+    "scope": "source.sml",
+    "injections": "sml",
+    "fileTypes": [
+      "sml"
+    ],
+    "shebangs": [],
+    "grammar": "sml"
+  },
+  "jsonnet": {
+    "scope": "source.jsonnet",
+    "fileTypes": [
+      "libsonnet",
+      "jsonnet"
+    ],
+    "shebangs": [],
+    "grammar": "jsonnet"
+  },
+  "ada": {
+    "scope": "source.ada",
+    "injections": "ada",
+    "fileTypes": [
+      "adb",
+      "ads"
+    ],
+    "shebangs": [],
+    "grammar": "ada"
+  },
+  "astro": {
+    "scope": "source.astro",
+    "injections": "astro",
+    "fileTypes": [
+      "astro"
+    ],
+    "shebangs": [],
+    "grammar": "astro"
+  },
+  "bass": {
+    "scope": "source.bass",
+    "injections": "bass",
+    "fileTypes": [
+      "bass"
+    ],
+    "shebangs": [],
+    "grammar": "bass"
+  },
+  "wat": {
+    "scope": "source.wat",
+    "fileTypes": [
+      "wat"
+    ],
+    "shebangs": [],
+    "grammar": "wat"
+  },
+  "wast": {
+    "scope": "source.wast",
+    "fileTypes": [
+      "wast"
+    ],
+    "shebangs": [],
+    "grammar": "wast"
+  },
+  "d": {
+    "scope": "source.d",
+    "injections": "d",
+    "fileTypes": [
+      "d",
+      "dd"
+    ],
+    "shebangs": [],
+    "grammar": "d"
+  },
+  "vhs": {
+    "scope": "source.vhs",
+    "fileTypes": [
+      "tape"
+    ],
+    "shebangs": [],
+    "grammar": "vhs"
+  },
+  "kdl": {
+    "scope": "source.kdl",
+    "injections": "kdl",
+    "fileTypes": [
+      "kdl"
+    ],
+    "shebangs": [],
+    "grammar": "kdl"
+  },
+  "xml": {
+    "scope": "source.xml",
+    "injections": "xml",
+    "fileTypes": [
+      "ascx",
+      "atom",
+      "axaml",
+      "axml",
+      "bpmn",
+      "checkstyle",
+      "cpt",
+      "csl",
+      "csproj.user",
+      "dita",
+      "ditamap",
+      "dtml",
+      "fods",
+      "fodt",
+      "fxml",
+      "gir",
+      "glif",
+      "gml",
+      "gpx",
+      "iml",
+      "isml",
+      "itermcolors",
+      "jmx",
+      "kml",
+      "launch",
+      "menu",
+      "mobileconfig",
+      "mpd",
+      "musicxml",
+      "mxml",
+      "ncx",
+      "nuspec",
+      "opml",
+      "osc",
+      "osm",
+      "plist",
+      "policy",
+      "pt",
+      "publishsettings",
+      "pubxml",
+      "pubxml.user",
+      "rbxlx",
+      "rbxmx",
+      "resx",
+      "rng",
+      "rss",
+      "shproj",
+      "smil",
+      "storyboard",
+      "sublime-snippet",
+      "svg",
+      "terminal",
+      "tld",
+      "tmx",
+      "ui",
+      "vbproj.user",
+      "vcxproj",
+      "vcxproj.filters",
+      "wixproj",
+      "wsdl",
+      "wxi",
+      "wxs",
+      "xaml",
+      "xbl",
+      "xib",
+      "xlf",
+      "xliff",
+      "xml",
+      "xmp",
+      "xoml",
+      "xpdl",
+      "xrc",
+      "xsd",
+      "xsl",
+      "xul"
+    ],
+    "globFileTypes": [
+      "*.tm[Ll]anguage",
+      "*.tm[Pp]references",
+      "*.tm[Tt]heme"
+    ],
+    "shebangs": [],
+    "grammar": "xml"
+  },
+  "dtd": {
+    "scope": "source.dtd",
+    "injections": "dtd",
+    "fileTypes": [
+      "dtd",
+      "ent"
+    ],
+    "shebangs": [],
+    "grammar": "dtd"
+  },
+  "wit": {
+    "scope": "source.wit",
+    "injections": "wit",
+    "fileTypes": [
+      "wit"
+    ],
+    "shebangs": [],
+    "grammar": "wit"
+  },
+  "env": {
+    "scope": "source.env",
+    "injections": "env",
+    "fileTypes": [],
+    "globFileTypes": [
+      ".env",
+      ".env.*",
+      ".envrc",
+      ".envrc.*",
+      "_environment",
+      "_environment-*",
+      "_environment.local",
+      "_environment.required",
+      ".bazeliskrc"
+    ],
+    "shebangs": [],
+    "grammar": "bash"
+  },
+  "systemd": {
+    "scope": "source.ini",
+    "injections": "systemd",
+    "fileTypes": [
+      "service",
+      "automount",
+      "device",
+      "mount",
+      "nspawn",
+      "path",
+      "scope",
+      "slice",
+      "socket",
+      "swap",
+      "target",
+      "timer"
+    ],
+    "globFileTypes": [
+      "systemd/**/*.conf"
+    ],
+    "shebangs": [],
+    "grammar": "ini"
+  },
+  "ini": {
+    "scope": "source.ini",
+    "injections": "ini",
+    "fileTypes": [
+      "ini",
+      "desktop",
+      "container",
+      "volume",
+      "kube",
+      "network",
+      "properties",
+      "cfg",
+      "directory"
+    ],
+    "globFileTypes": [
+      "mimeapps.list",
+      ".editorconfig",
+      ".npmrc",
+      "hgrc",
+      "npmrc",
+      "rclone.conf",
+      ".aws/config",
+      ".wslconfig"
+    ],
+    "shebangs": [],
+    "grammar": "ini"
+  },
+  "inko": {
+    "scope": "source.inko",
+    "injections": "inko",
+    "fileTypes": [
+      "inko"
+    ],
+    "shebangs": [],
+    "grammar": "inko"
+  },
+  "bicep": {
+    "scope": "source.bicep",
+    "fileTypes": [
+      "bicep",
+      "bicepparam"
+    ],
+    "shebangs": [],
+    "grammar": "bicep"
+  },
+  "qml": {
+    "scope": "source.qml",
+    "fileTypes": [
+      "qml"
+    ],
+    "shebangs": [],
+    "grammar": "qmljs"
+  },
+  "mermaid": {
+    "scope": "source.mermaid",
+    "injections": "mermaid",
+    "fileTypes": [
+      "mermaid",
+      "mmd"
+    ],
+    "shebangs": [],
+    "grammar": "mermaid"
+  },
+  "matlab": {
+    "scope": "source.m",
+    "fileTypes": [
+      "m"
+    ],
+    "shebangs": [
+      "octave-cli",
+      "matlab"
+    ],
+    "grammar": "matlab"
+  },
+  "ponylang": {
+    "scope": "source.pony",
+    "injections": "pony",
+    "fileTypes": [
+      "pony"
+    ],
+    "shebangs": [],
+    "grammar": "ponylang"
+  },
+  "dhall": {
+    "scope": "source.dhall",
+    "injections": "dhall",
+    "fileTypes": [
+      "dhall"
+    ],
+    "shebangs": [],
+    "grammar": "dhall"
+  },
+  "sage": {
+    "scope": "source.sage",
+    "injections": "sage",
+    "fileTypes": [
+      "sage"
+    ],
+    "shebangs": [],
+    "grammar": "python"
+  },
+  "msbuild": {
+    "scope": "source.msbuild",
+    "injections": "msbuild",
+    "fileTypes": [
+      "proj",
+      "vbproj",
+      "csproj",
+      "fsproj",
+      "targets",
+      "props"
+    ],
+    "shebangs": [],
+    "grammar": "xml"
+  },
+  "pem": {
+    "scope": "source.pem",
+    "injections": "pem",
+    "fileTypes": [
+      "pem",
+      "cert",
+      "crt"
+    ],
+    "shebangs": [],
+    "grammar": "pem"
+  },
+  "passwd": {
+    "scope": "source.passwd",
+    "fileTypes": [],
+    "globFileTypes": [
+      "passwd"
+    ],
+    "shebangs": [],
+    "grammar": "passwd"
+  },
+  "hosts": {
+    "scope": "source.hosts",
+    "fileTypes": [],
+    "globFileTypes": [
+      "hosts"
+    ],
+    "shebangs": [],
+    "grammar": "hosts"
+  },
+  "uxntal": {
+    "scope": "source.tal",
+    "injections": "tal",
+    "fileTypes": [
+      "tal"
+    ],
+    "shebangs": [],
+    "grammar": "uxntal"
+  },
+  "yuck": {
+    "scope": "source.yuck",
+    "injections": "yuck",
+    "fileTypes": [
+      "yuck"
+    ],
+    "shebangs": [],
+    "grammar": "yuck"
+  },
+  "prql": {
+    "scope": "source.prql",
+    "injections": "prql",
+    "fileTypes": [
+      "prql"
+    ],
+    "shebangs": [],
+    "grammar": "prql"
+  },
+  "po": {
+    "scope": "source.po",
+    "fileTypes": [
+      "po",
+      "pot"
+    ],
+    "shebangs": [],
+    "grammar": "po"
+  },
+  "nasm": {
+    "scope": "source.nasm",
+    "injections": "n?asm",
+    "fileTypes": [
+      "asm",
+      "S",
+      "nasm"
+    ],
+    "shebangs": [],
+    "grammar": "nasm"
+  },
+  "gas": {
+    "scope": "source.gas",
+    "injections": "gas",
+    "fileTypes": [
+      "s"
+    ],
+    "shebangs": [],
+    "grammar": "gas"
+  },
+  "rst": {
+    "scope": "source.rst",
+    "fileTypes": [
+      "rst"
+    ],
+    "shebangs": [],
+    "grammar": "rst"
+  },
+  "capnp": {
+    "scope": "source.capnp",
+    "injections": "capnp",
+    "fileTypes": [
+      "capnp"
+    ],
+    "shebangs": [],
+    "grammar": "capnp"
+  },
+  "smithy": {
+    "scope": "source.smithy",
+    "injections": "smithy",
+    "fileTypes": [
+      "smithy"
+    ],
+    "shebangs": [],
+    "grammar": "smithy"
+  },
+  "hdl": {
+    "scope": "source.hdl",
+    "injections": "hdl",
+    "fileTypes": [
+      "hdl"
+    ],
+    "shebangs": [],
+    "grammar": "hdl"
+  },
+  "vhdl": {
+    "scope": "source.vhdl",
+    "injections": "vhdl",
+    "fileTypes": [
+      "vhd",
+      "vhdl"
+    ],
+    "shebangs": [],
+    "grammar": "vhdl"
+  },
+  "rego": {
+    "scope": "source.rego",
+    "injections": "rego",
+    "fileTypes": [
+      "rego"
+    ],
+    "shebangs": [],
+    "grammar": "rego"
+  },
+  "nim": {
+    "scope": "source.nim",
+    "injections": "nim",
+    "fileTypes": [
+      "nim",
+      "nims",
+      "nimble"
+    ],
+    "shebangs": [],
+    "grammar": "nim"
+  },
+  "cabal": {
+    "scope": "source.cabal",
+    "fileTypes": [
+      "cabal"
+    ],
+    "shebangs": [],
+    "grammar": "cabal"
+  },
+  "hurl": {
+    "scope": "source.hurl",
+    "injections": "hurl",
+    "fileTypes": [
+      "hurl"
+    ],
+    "shebangs": [],
+    "grammar": "hurl"
+  },
+  "markdoc": {
+    "scope": "text.markdoc",
+    "fileTypes": [
+      "mdoc"
+    ],
+    "shebangs": [],
+    "grammar": "markdoc"
+  },
+  "opencl": {
+    "scope": "source.cl",
+    "injections": "(cl|opencl)",
+    "fileTypes": [
+      "cl"
+    ],
+    "shebangs": [],
+    "grammar": "opencl"
+  },
+  "just": {
+    "scope": "source.just",
+    "injections": "just",
+    "fileTypes": [
+      "just"
+    ],
+    "globFileTypes": [
+      "justfile",
+      "Justfile",
+      ".justfile",
+      ".Justfile"
+    ],
+    "shebangs": [],
+    "grammar": "just"
+  },
+  "gn": {
+    "scope": "source.gn",
+    "injections": "gn",
+    "fileTypes": [
+      "gn",
+      "gni"
+    ],
+    "shebangs": [],
+    "grammar": "gn"
+  },
+  "blueprint": {
+    "scope": "source.blueprint",
+    "injections": "blueprint",
+    "fileTypes": [
+      "blp"
+    ],
+    "shebangs": [],
+    "grammar": "blueprint"
+  },
+  "forth": {
+    "scope": "source.forth",
+    "injections": "forth",
+    "fileTypes": [
+      "fs",
+      "forth",
+      "fth",
+      "4th"
+    ],
+    "shebangs": [],
+    "grammar": "forth"
+  },
+  "fsharp": {
+    "scope": "source.fs",
+    "injections": "fsharp",
+    "fileTypes": [
+      "fs",
+      "fsx",
+      "fsi",
+      "fsscript"
+    ],
+    "shebangs": [],
+    "grammar": "fsharp"
+  },
+  "t32": {
+    "scope": "source.t32",
+    "injections": "t32",
+    "fileTypes": [
+      "cmm",
+      "t32"
+    ],
+    "shebangs": [],
+    "grammar": "t32"
+  },
+  "webc": {
+    "scope": "text.html.webc",
+    "injections": "webc",
+    "fileTypes": [
+      "webc"
+    ],
+    "shebangs": [],
+    "grammar": "html"
+  },
+  "typst": {
+    "scope": "source.typst",
+    "injections": "typ(st)?",
+    "fileTypes": [
+      "typst",
+      "typ"
+    ],
+    "shebangs": [],
+    "grammar": "typst"
+  },
+  "nunjucks": {
+    "scope": "text.html.nunjucks",
+    "injections": "nunjucks",
+    "fileTypes": [
+      "njk"
+    ],
+    "shebangs": [],
+    "grammar": "jinja2"
+  },
+  "jinja": {
+    "scope": "text.html.jinja",
+    "injections": "jinja",
+    "fileTypes": [
+      "jinja",
+      "jinja2",
+      "j2"
+    ],
+    "shebangs": [],
+    "grammar": "jinja2"
+  },
+  "jjconfig": {
+    "scope": "source.jjconfig",
+    "injections": "jjconfig",
+    "fileTypes": [],
+    "globFileTypes": [
+      "jj/config.toml",
+      "jj/**/*.toml",
+      ".jj/repo/*.toml"
+    ],
+    "shebangs": [],
+    "grammar": "toml"
+  },
+  "jjdescription": {
+    "scope": "jj.description",
+    "fileTypes": [],
+    "globFileTypes": [
+      "*.jjdescription"
+    ],
+    "shebangs": [],
+    "grammar": "jjdescription"
+  },
+  "jjrevset": {
+    "scope": "jj.revset",
+    "fileTypes": [
+      "jjrevset"
+    ],
+    "shebangs": [],
+    "grammar": "jjrevset"
+  },
+  "jjtemplate": {
+    "scope": "jj.template",
+    "fileTypes": [
+      "jjtemplate"
+    ],
+    "shebangs": [],
+    "grammar": "jjtemplate"
+  },
+  "miseconfig": {
+    "scope": "source.miseconfig",
+    "injections": "miseconfig",
+    "fileTypes": [],
+    "globFileTypes": [
+      "mise.toml",
+      ".mise.toml",
+      "mise.*.toml",
+      ".mise.*.toml",
+      "mise/config.toml",
+      ".mise/config.toml",
+      ".config/mise.toml",
+      ".config/mise/conf.d/*.toml"
+    ],
+    "shebangs": [],
+    "grammar": "toml"
+  },
+  "jq": {
+    "scope": "source.jq",
+    "injections": "jq",
+    "fileTypes": [
+      "jq"
+    ],
+    "shebangs": [],
+    "grammar": "jq"
+  },
+  "wren": {
+    "scope": "source.wren",
+    "injections": "wren",
+    "fileTypes": [
+      "wren"
+    ],
+    "shebangs": [],
+    "grammar": "wren"
+  },
+  "unison": {
+    "scope": "source.unison",
+    "injections": "unison",
+    "fileTypes": [
+      "u"
+    ],
+    "shebangs": [],
+    "grammar": "unison"
+  },
+  "todotxt": {
+    "scope": "text.todotxt",
+    "fileTypes": [
+      "todotxt"
+    ],
+    "globFileTypes": [
+      "*.todo.txt"
+    ],
+    "shebangs": [],
+    "grammar": "todotxt"
+  },
+  "strace": {
+    "scope": "source.strace",
+    "fileTypes": [
+      "strace"
+    ],
+    "shebangs": [],
+    "grammar": "strace"
+  },
+  "gemini": {
+    "scope": "source.gmi",
+    "fileTypes": [
+      "gmi"
+    ],
+    "shebangs": [],
+    "grammar": "gemini"
+  },
+  "agda": {
+    "scope": "source.agda",
+    "injections": "agda",
+    "fileTypes": [
+      "agda"
+    ],
+    "shebangs": [],
+    "grammar": "agda"
+  },
+  "templ": {
+    "scope": "source.templ",
+    "fileTypes": [
+      "templ"
+    ],
+    "shebangs": [],
+    "grammar": "templ"
+  },
+  "dbml": {
+    "scope": "source.dbml",
+    "injections": "dbml",
+    "fileTypes": [
+      "dbml"
+    ],
+    "shebangs": [],
+    "grammar": "dbml"
+  },
+  "bitbake": {
+    "scope": "source.bitbake",
+    "fileTypes": [
+      "bb",
+      "bbappend",
+      "bbclass"
+    ],
+    "globFileTypes": [
+      "conf/*.conf",
+      "conf/*/*.{inc,conf}",
+      "recipe-*/*/*.inc"
+    ],
+    "shebangs": [],
+    "grammar": "bitbake"
+  },
+  "log": {
+    "scope": "source.log",
+    "fileTypes": [
+      "log"
+    ],
+    "shebangs": [],
+    "grammar": "log"
+  },
+  "hoon": {
+    "scope": "source.hoon",
+    "injections": "hoon",
+    "fileTypes": [
+      "hoon"
+    ],
+    "shebangs": [],
+    "grammar": "hoon"
+  },
+  "hocon": {
+    "scope": "source.conf",
+    "fileTypes": [],
+    "globFileTypes": [
+      "**/src/*/resources/**/*.conf",
+      "*scalafmt*.conf",
+      "*scalafix*.conf"
+    ],
+    "shebangs": [],
+    "grammar": "hocon"
+  },
+  "koka": {
+    "scope": "source.koka",
+    "injections": "koka",
+    "fileTypes": [
+      "kk"
+    ],
+    "shebangs": [],
+    "grammar": "koka"
+  },
+  "tact": {
+    "scope": "source.tact",
+    "injections": "tact",
+    "fileTypes": [
+      "tact"
+    ],
+    "shebangs": [],
+    "grammar": "tact"
+  },
+  "pkl": {
+    "scope": "source.pkl",
+    "injections": "pkl",
+    "fileTypes": [
+      "pkl",
+      "pcf"
+    ],
+    "shebangs": [],
+    "grammar": "pkl"
+  },
+  "groovy": {
+    "scope": "source.groovy",
+    "fileTypes": [
+      "gradle",
+      "groovy",
+      "jenkinsfile"
+    ],
+    "globFileTypes": [
+      "Jenkinsfile",
+      "Jenkinsfile.*"
+    ],
+    "shebangs": [
+      "groovy"
+    ],
+    "grammar": "groovy"
+  },
+  "fidl": {
+    "scope": "source.fidl",
+    "injections": "fidl",
+    "fileTypes": [
+      "fidl"
+    ],
+    "shebangs": [],
+    "grammar": "fidl"
+  },
+  "powershell": {
+    "scope": "source.powershell",
+    "injections": "(pwsh|powershell)",
+    "fileTypes": [
+      "ps1",
+      "psm1",
+      "psd1",
+      "pscc",
+      "psrc"
+    ],
+    "shebangs": [
+      "pwsh",
+      "powershell"
+    ],
+    "grammar": "powershell"
+  },
+  "ld": {
+    "scope": "source.ld",
+    "injections": "ld",
+    "fileTypes": [
+      "ld"
+    ],
+    "shebangs": [],
+    "grammar": "ld"
+  },
+  "hy": {
+    "scope": "source.hy",
+    "fileTypes": [
+      "hy"
+    ],
+    "shebangs": [],
+    "grammar": "scheme"
+  },
+  "hyprlang": {
+    "scope": "source.hyprlang",
+    "fileTypes": [],
+    "globFileTypes": [
+      "hypr/*.conf"
+    ],
+    "shebangs": [],
+    "grammar": "hyprlang"
+  },
+  "tcl": {
+    "scope": "source.tcl",
+    "injections": "tcl",
+    "fileTypes": [
+      "tcl"
+    ],
+    "shebangs": [
+      "tclsh",
+      "tclish",
+      "jimsh",
+      "wish"
+    ],
+    "grammar": "tcl"
+  },
+  "supercollider": {
+    "scope": "source.supercollider",
+    "injections": "supercollider",
+    "fileTypes": [
+      "scd",
+      "sc",
+      "quark"
+    ],
+    "shebangs": [],
+    "grammar": "supercollider"
+  },
+  "rpmspec": {
+    "scope": "source.rpmspec",
+    "fileTypes": [
+      "spec"
+    ],
+    "shebangs": [],
+    "grammar": "rpmspec"
+  },
+  "pkgbuild": {
+    "scope": "source.bash",
+    "fileTypes": [],
+    "globFileTypes": [
+      "PKGBUILD"
+    ],
+    "shebangs": [],
+    "grammar": "bash"
+  },
+  "helm": {
+    "scope": "source.helm",
+    "fileTypes": [],
+    "globFileTypes": [
+      "templates/*.yaml",
+      "templates/*.yml",
+      "templates/_*.tpl",
+      "templates/NOTES.txt"
+    ],
+    "shebangs": [],
+    "grammar": "gotmpl"
+  },
+  "glimmer": {
+    "scope": "source.glimmer",
+    "injections": "hbs",
+    "fileTypes": [],
+    "globFileTypes": [
+      "{app,addon}/{components,templates}/*.hbs"
+    ],
+    "shebangs": [],
+    "grammar": "glimmer"
+  },
+  "ohm": {
+    "scope": "source.ohm",
+    "injections": "ohm",
+    "fileTypes": [
+      "ohm"
+    ],
+    "shebangs": [],
+    "grammar": "ohm"
+  },
+  "earthfile": {
+    "scope": "source.earthfile",
+    "injections": "earthfile",
+    "fileTypes": [],
+    "globFileTypes": [
+      "Earthfile"
+    ],
+    "shebangs": [],
+    "grammar": "earthfile"
+  },
+  "adl": {
+    "scope": "source.adl",
+    "injections": "adl",
+    "fileTypes": [
+      "adl"
+    ],
+    "shebangs": [],
+    "grammar": "adl"
+  },
+  "ldif": {
+    "scope": "source.ldif",
+    "injections": "ldif",
+    "fileTypes": [
+      "ldif"
+    ],
+    "shebangs": [],
+    "grammar": "ldif"
+  },
+  "xtc": {
+    "scope": "source.xtc",
+    "fileTypes": [
+      "xtc",
+      "xpc",
+      "xoa"
+    ],
+    "shebangs": [],
+    "grammar": "xtc"
+  },
+  "move": {
+    "scope": "source.move",
+    "injections": "move",
+    "fileTypes": [
+      "move"
+    ],
+    "shebangs": [],
+    "grammar": "move"
+  },
+  "pest": {
+    "scope": "source.pest",
+    "injections": "pest",
+    "fileTypes": [
+      "pest"
+    ],
+    "shebangs": [],
+    "grammar": "pest"
+  },
+  "elisp": {
+    "scope": "source.elisp",
+    "fileTypes": [
+      "el"
+    ],
+    "shebangs": [],
+    "grammar": "elisp"
+  },
+  "gjs": {
+    "scope": "source.gjs",
+    "fileTypes": [
+      "gjs"
+    ],
+    "shebangs": [],
+    "grammar": "glimmer-javascript"
+  },
+  "gts": {
+    "scope": "source.gts",
+    "fileTypes": [
+      "gts"
+    ],
+    "shebangs": [],
+    "grammar": "glimmer-typescript"
+  },
+  "gherkin": {
+    "scope": "source.feature",
+    "fileTypes": [
+      "feature"
+    ],
+    "shebangs": [],
+    "grammar": "gherkin"
+  },
+  "thrift": {
+    "scope": "source.thrift",
+    "fileTypes": [
+      "thrift"
+    ],
+    "shebangs": [],
+    "grammar": "thrift"
+  },
+  "circom": {
+    "scope": "source.circom",
+    "injections": "circom",
+    "fileTypes": [
+      "circom"
+    ],
+    "shebangs": [],
+    "grammar": "circom"
+  },
+  "snakemake": {
+    "scope": "source.snakemake",
+    "fileTypes": [
+      "smk"
+    ],
+    "globFileTypes": [
+      "Snakefile"
+    ],
+    "shebangs": [],
+    "grammar": "snakemake"
+  },
+  "cylc": {
+    "scope": "source.cylc",
+    "injections": "cylc",
+    "fileTypes": [
+      "cylc"
+    ],
+    "globFileTypes": [
+      "suite.rc"
+    ],
+    "shebangs": [],
+    "grammar": "cylc"
+  },
+  "quint": {
+    "scope": "source.quint",
+    "fileTypes": [
+      "qnt"
+    ],
+    "shebangs": [],
+    "grammar": "quint"
+  },
+  "spade": {
+    "scope": "source.spade",
+    "injections": "spade",
+    "fileTypes": [
+      "spade"
+    ],
+    "shebangs": [],
+    "grammar": "spade"
+  },
+  "amber": {
+    "scope": "source.ab",
+    "fileTypes": [
+      "ab"
+    ],
+    "shebangs": [],
+    "grammar": "amber"
+  },
+  "koto": {
+    "scope": "source.koto",
+    "injections": "koto",
+    "fileTypes": [
+      "koto"
+    ],
+    "shebangs": [],
+    "grammar": "koto"
+  },
+  "gpr": {
+    "scope": "source.gpr",
+    "injections": "gpr",
+    "fileTypes": [
+      "gpr"
+    ],
+    "shebangs": [],
+    "grammar": "gpr"
+  },
+  "vento": {
+    "scope": "text.html.vto",
+    "fileTypes": [
+      "vto"
+    ],
+    "shebangs": [],
+    "grammar": "vento"
+  },
+  "nginx": {
+    "scope": "source.nginx",
+    "injections": "nginx",
+    "fileTypes": [],
+    "globFileTypes": [
+      "sites-available/*.conf",
+      "sites-enabled/*.conf",
+      "nginx.conf",
+      "conf.d/*.conf"
+    ],
+    "shebangs": [],
+    "grammar": "nginx"
+  },
+  "codeql": {
+    "scope": "source.ql",
+    "injections": "codeql",
+    "fileTypes": [
+      "ql",
+      "qll"
+    ],
+    "shebangs": [],
+    "grammar": "ql"
+  },
+  "gren": {
+    "scope": "source.gren",
+    "injections": "gren",
+    "fileTypes": [
+      "gren"
+    ],
+    "shebangs": [],
+    "grammar": "gren"
+  },
+  "ghostty": {
+    "scope": "source.ghostty",
+    "fileTypes": [
+      "ghostty"
+    ],
+    "globFileTypes": [
+      "ghostty/config"
+    ],
+    "shebangs": [],
+    "grammar": "ghostty"
+  },
+  "tera": {
+    "scope": "source.tera",
+    "fileTypes": [
+      "tera"
+    ],
+    "shebangs": [],
+    "grammar": "tera"
+  },
+  "fga": {
+    "scope": "source.fga",
+    "injections": "fga",
+    "fileTypes": [
+      "fga"
+    ],
+    "shebangs": [],
+    "grammar": "fga"
+  },
+  "csv": {
+    "scope": "source.csv",
+    "fileTypes": [
+      "csv"
+    ],
+    "shebangs": [],
+    "grammar": "csv"
+  },
+  "yara": {
+    "scope": "source.yara",
+    "fileTypes": [
+      "yara",
+      "yar"
+    ],
+    "shebangs": [],
+    "grammar": "yara"
+  },
+  "ink": {
+    "scope": "source.ink",
+    "injections": "ink",
+    "fileTypes": [
+      "ink"
+    ],
+    "shebangs": [],
+    "grammar": "ink"
+  },
+  "sourcepawn": {
+    "scope": "source.sourcepawn",
+    "fileTypes": [
+      "sp",
+      "inc"
+    ],
+    "shebangs": [],
+    "grammar": "sourcepawn"
+  },
+  "vim": {
+    "scope": "source.vim",
+    "injections": "vim",
+    "fileTypes": [
+      "vim"
+    ],
+    "globFileTypes": [
+      ".vimrc",
+      ".nvimrc",
+      ".exrc"
+    ],
+    "shebangs": [],
+    "grammar": "vim"
+  },
+  "tlaplus": {
+    "scope": "scope.tlaplus",
+    "injections": "tla",
+    "fileTypes": [
+      "tla"
+    ],
+    "shebangs": [],
+    "grammar": "tlaplus"
+  },
+  "werk": {
+    "scope": "source.werk",
+    "fileTypes": [
+      "werk"
+    ],
+    "globFileTypes": [
+      "Werkfile"
+    ],
+    "shebangs": [],
+    "grammar": "werk"
+  },
+  "debian": {
+    "scope": "text.debian",
+    "fileTypes": [
+      "dsc",
+      "changes"
+    ],
+    "globFileTypes": [
+      "debian/**/control",
+      "etc/apt/sources.list.d/*.sources"
+    ],
+    "shebangs": [],
+    "grammar": "debian"
+  },
+  "pug": {
+    "scope": "source.pug",
+    "fileTypes": [
+      "pug"
+    ],
+    "shebangs": [],
+    "grammar": "pug"
+  },
+  "dunstrc": {
+    "scope": "source.dunstrc",
+    "fileTypes": [],
+    "globFileTypes": [
+      "dunst/dunstrc"
+    ],
+    "shebangs": [],
+    "grammar": "dunstrc"
+  },
+  "rust-format-args": {
+    "scope": "source.rust-format-args",
+    "injections": "rust-format-args",
+    "fileTypes": [],
+    "shebangs": [],
+    "grammar": "rust-format-args"
+  },
+  "rust-format-args-macro": {
+    "scope": "source.rust-format-args-macro",
+    "fileTypes": [],
+    "shebangs": [],
+    "grammar": "rust"
+  },
+  "clarity": {
+    "scope": "source.clar",
+    "injections": "clarity",
+    "fileTypes": [
+      "clar"
+    ],
+    "shebangs": [],
+    "grammar": "clarity"
+  },
+  "alloy": {
+    "scope": "source.alloy",
+    "injections": "alloy",
+    "fileTypes": [
+      "alloy"
+    ],
+    "shebangs": [],
+    "grammar": "alloy"
+  },
+  "luau": {
+    "scope": "source.luau",
+    "injections": "^luau$",
+    "fileTypes": [
+      "luau"
+    ],
+    "shebangs": [],
+    "grammar": "luau"
+  },
+  "caddyfile": {
+    "scope": "source.caddyfile",
+    "injections": "caddyfile",
+    "fileTypes": [
+      "Caddyfile",
+      "caddyfile"
+    ],
+    "globFileTypes": [
+      "Caddyfile",
+      "Caddyfile.*",
+      "caddyfile",
+      "caddyfile.*"
+    ],
+    "shebangs": [],
+    "grammar": "caddyfile"
+  },
+  "properties": {
+    "scope": "source.properties",
+    "injections": "properties",
+    "fileTypes": [
+      "properties",
+      "prefs"
+    ],
+    "shebangs": [],
+    "grammar": "properties"
+  },
+  "robots.txt": {
+    "scope": "source.robots.txt",
+    "injections": "robots[\\.-]txt",
+    "fileTypes": [],
+    "globFileTypes": [
+      "robots.txt"
+    ],
+    "shebangs": [],
+    "grammar": "robots"
+  },
+  "pip-requirements": {
+    "scope": "source.pip-requirements",
+    "injections": "(pip-)?requirements(\\.txt)?",
+    "fileTypes": [],
+    "globFileTypes": [
+      "requirements.txt",
+      "constraints.txt"
+    ],
+    "shebangs": [],
+    "grammar": "requirements"
+  },
+  "kconfig": {
+    "scope": "source.kconfig",
+    "fileTypes": [
+      "kconfig"
+    ],
+    "globFileTypes": [
+      "kconfig.*"
+    ],
+    "shebangs": [],
+    "grammar": "kconfig"
+  },
+  "doxyfile": {
+    "scope": "source.doxyfile",
+    "injections": "[Dd]oxyfile",
+    "fileTypes": [],
+    "globFileTypes": [
+      "Doxyfile"
+    ],
+    "shebangs": [],
+    "grammar": "doxyfile"
+  },
+  "cross-config": {
+    "scope": "source.cross-config",
+    "injections": "cross(-config)",
+    "fileTypes": [],
+    "globFileTypes": [
+      "Cross.toml"
+    ],
+    "shebangs": [],
+    "grammar": "toml"
+  },
+  "git-cliff-config": {
+    "scope": "source.git-cliff-config",
+    "injections": "git-cliff(-config)",
+    "fileTypes": [],
+    "globFileTypes": [
+      "cliff.toml"
+    ],
+    "shebangs": [],
+    "grammar": "toml"
+  },
+  "cython": {
+    "scope": "source.cython",
+    "fileTypes": [
+      "pxd",
+      "pxi",
+      "pyx"
+    ],
+    "shebangs": [],
+    "grammar": "cython"
+  },
+  "shellcheckrc": {
+    "scope": "source.shellcheckrc",
+    "injections": "shellcheck(rc)?",
+    "fileTypes": [],
+    "globFileTypes": [
+      "shellcheckrc",
+      ".shellcheckrc"
+    ],
+    "shebangs": [],
+    "grammar": "shellcheckrc"
+  },
+  "strictdoc": {
+    "scope": "source.strictdoc",
+    "injections": "strictdoc",
+    "fileTypes": [
+      "sdoc",
+      "sgra"
+    ],
+    "shebangs": [],
+    "grammar": "strictdoc"
+  },
+  "docker-bake": {
+    "scope": "source.docker-bake",
+    "injections": "docker-bake",
+    "fileTypes": [],
+    "globFileTypes": [
+      "docker-bake.hcl",
+      "docker-bake.override.hcl"
+    ],
+    "shebangs": [],
+    "grammar": "hcl"
+  },
+  "gitlab-ci": {
+    "scope": "source.gitlab-ci",
+    "injections": "^gitlab-ci$",
+    "fileTypes": [],
+    "globFileTypes": [
+      ".gitlab-ci.yml"
+    ],
+    "shebangs": [],
+    "grammar": "yaml"
+  },
+  "wikitext": {
+    "scope": "source.wikitext",
+    "fileTypes": [
+      "wikimedia",
+      "mediawiki",
+      "wikitext"
+    ],
+    "shebangs": [],
+    "grammar": "wikitext"
+  },
+  "slisp": {
+    "scope": "source.sl",
+    "injections": "sl",
+    "fileTypes": [
+      "sl"
+    ],
+    "shebangs": [],
+    "grammar": "slisp"
+  },
+  "nearley": {
+    "scope": "source.nearley",
+    "fileTypes": [
+      "ne"
+    ],
+    "shebangs": [],
+    "grammar": "nearley"
+  },
+  "kcl": {
+    "scope": "source.kcl",
+    "injections": "kcl",
+    "fileTypes": [
+      "kcl"
+    ],
+    "shebangs": [],
+    "grammar": "kcl"
+  },
+  "bovex": {
+    "scope": "source.bovex",
+    "fileTypes": [
+      "bovex",
+      "bibvex"
+    ],
+    "shebangs": [],
+    "grammar": "bovex"
+  },
+  "haxe": {
+    "scope": "source.haxe",
+    "injections": "hx|haxe",
+    "fileTypes": [
+      "hx"
+    ],
+    "shebangs": [],
+    "grammar": "haxe"
+  },
+  "basic": {
+    "scope": "source.basic",
+    "injections": "basic",
+    "fileTypes": [
+      "bas"
+    ],
+    "shebangs": [],
+    "grammar": "basic"
+  },
+  "freebasic": {
+    "scope": "source.freebasic",
+    "injections": "freebasic",
+    "fileTypes": [
+      "bas",
+      "bi"
+    ],
+    "shebangs": [],
+    "grammar": "freebasic"
+  },
+  "scfg": {
+    "scope": "source.scfg",
+    "fileTypes": [],
+    "globFileTypes": [
+      "kanshi/config"
+    ],
+    "shebangs": [],
+    "grammar": "scfg"
+  },
+  "ripple": {
+    "scope": "source.ripple",
+    "fileTypes": [
+      "ripple"
+    ],
+    "shebangs": [],
+    "grammar": "ripple"
+  },
+  "woodpecker-ci": {
+    "scope": "source.woodpecker-ci",
+    "injections": "^woodpecker-ci$",
+    "fileTypes": [],
+    "globFileTypes": [
+      ".woodpecker.yaml",
+      ".woodpecker/*.yaml",
+      ".woodpecker/*.yml"
+    ],
+    "shebangs": [],
+    "grammar": "yaml"
+  },
+  "chuck": {
+    "scope": "source.ck",
+    "injections": "^chuck$|^ck$",
+    "fileTypes": [],
+    "globFileTypes": [
+      "*.ck"
+    ],
+    "shebangs": [],
+    "grammar": "chuck"
+  },
+  "qmv": {
+    "scope": "source.qmv",
+    "fileTypes": [],
+    "globFileTypes": [
+      "/tmp/qmv*"
+    ],
+    "shebangs": [],
+    "grammar": "qmv"
+  },
+  "klog": {
+    "scope": "source.klg",
+    "injections": "klg",
+    "fileTypes": [
+      "klg"
+    ],
+    "shebangs": [],
+    "grammar": "klog"
+  },
+  "tilt": {
+    "scope": "source.tilt",
+    "injections": "[Tt]ilt(file)?",
+    "fileTypes": [
+      "tiltfile"
+    ],
+    "globFileTypes": [
+      "Tiltfile"
+    ],
+    "shebangs": [],
+    "grammar": "python"
+  },
+  "gnuplot": {
+    "scope": "source.gnuplot",
+    "injections": "gnuplot",
+    "fileTypes": [
+      "gnuplot",
+      "plot",
+      "plt"
+    ],
+    "shebangs": [],
+    "grammar": "gnuplot"
+  }
+}

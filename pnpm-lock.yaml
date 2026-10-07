@@ -14,6 +14,12 @@ importers:
       jsdom:
         specifier: ^30.1.2
         version: 30.1.2
+      smol-toml:
+        specifier: ^1.9.0
+        version: 1.9.0
+      tree-sitter-wasms:
+        specifier: ^0.1.13
+        version: 0.1.13
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
@@ -26,6 +32,9 @@ importers:
       '@vviewer/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@vviewer/highlight':
+        specifier: workspace:*
+        version: link:../../packages/highlight
       '@vviewer/render-media':
         specifier: workspace:*
         version: link:../../packages/render-media
@@ -57,6 +66,12 @@ importers:
 
   packages/core: {}
 
+  packages/highlight:
+    dependencies:
+      web-tree-sitter:
+        specifier: ~0.25.10
+        version: 0.25.10
+
   packages/render-media:
     dependencies:
       '@vviewer/core':
@@ -68,6 +83,9 @@ importers:
       '@vviewer/core':
         specifier: workspace:*
         version: link:../core
+      '@vviewer/highlight':
+        specifier: workspace:*
+        version: link:../highlight
       highlight.js:
         specifier: ^11.12.0
         version: 11.12.0
@@ -779,6 +797,10 @@ packages:
     resolution: {integrity: sha512-2wcC/oGxHis/BoHkkPwldgiPSYcpZK3JU28WoMVv55yHJgcZ8rlXvuG9iZggz+sU1d4bRgIGASwyWqjxu3FM0g==}
     engines: {node: '>=18'}
 
+  smol-toml@1.9.0:
+    resolution: {integrity: sha512-hpd+HLON7HdZXqYchMM/+LaTTbdK0AU3NngIJ4KVyWbY9bfQqdL9cD+4yf6dUoU2Ap4VsU0JkQi6FxAI1B2mXQ==}
+    engines: {node: '>= 18'}
+
   source-map-js@1.2.2:
     resolution: {integrity: sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==}
     engines: {node: '>=0.10.0'}
@@ -836,6 +858,9 @@ packages:
   tr46@7.0.0:
     resolution: {integrity: sha512-BcDSDW+SIGWVOns1Zm6Yg91q9AEj7eaID0QDY9oIqJD1A8dscNwMcl9Sms2DeuWCNov1X0/oXanHGYQBSLwZsg==}
     engines: {node: ^22.14.0 || >=24.0.0}
+
+  tree-sitter-wasms@0.1.13:
+    resolution: {integrity: sha512-wT+cR6DwaIz80/vho3AvSF0N4txuNx/5bcRKoXouOfClpxh/qqrF4URNLQXbbt8MaAxeksZcZd1j8gcGjc+QxQ==}
 
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
@@ -933,6 +958,14 @@ packages:
   w3c-xmlserializer@6.0.0:
     resolution: {integrity: sha512-4Nsy8K5Tr6SPDH9jhKJOHf7ChDrc1zufZTVSF7x72hwuEXBqxqk9G6cK+K2NRUtB3iELRJqjXb4JPDMBjMTl2Q==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
+
+  web-tree-sitter@0.25.10:
+    resolution: {integrity: sha512-Y09sF44/13XvgVKgO2cNDw5rGk6s26MgoZPXLESvMXeefBf7i6/73eFurre0IsTW6E14Y0ArIzhUMmjoc7xyzA==}
+    peerDependencies:
+      '@types/emscripten': ^1.40.0
+    peerDependenciesMeta:
+      '@types/emscripten':
+        optional: true
 
   webidl-conversions@8.0.1:
     resolution: {integrity: sha512-BMhLD/Sw+GbJC21C/UgyaZX41nPt8bUTg+jWyDeg7e7YN4xOM05YPSIXceACnXVtqyEw/LMClUQMtMZ+PGGpqQ==}
@@ -1539,6 +1572,8 @@ snapshots:
       mrmime: 2.0.1
       totalist: 3.0.1
 
+  smol-toml@1.9.0: {}
+
   source-map-js@1.2.2: {}
 
   stackback@0.0.2: {}
@@ -1599,6 +1634,8 @@ snapshots:
   tr46@7.0.0:
     dependencies:
       punycode: 2.3.1
+
+  tree-sitter-wasms@0.1.13: {}
 
   typescript@5.9.3: {}
 
@@ -1688,6 +1725,8 @@ snapshots:
   w3c-xmlserializer@6.0.0:
     dependencies:
       xml-name-validator: 5.0.0
+
+  web-tree-sitter@0.25.10: {}
 
   webidl-conversions@8.0.1: {}
 
