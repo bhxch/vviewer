@@ -17,6 +17,10 @@ impl AppError {
         Self(StatusCode::BAD_REQUEST, msg.into())
     }
 
+    pub fn payload_too_large(msg: impl Into<String>) -> Self {
+        Self(StatusCode::PAYLOAD_TOO_LARGE, msg.into())
+    }
+
     pub fn forbidden(msg: impl Into<String>) -> Self {
         Self(StatusCode::FORBIDDEN, msg.into())
     }

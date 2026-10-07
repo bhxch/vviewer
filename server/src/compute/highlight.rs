@@ -37,6 +37,14 @@ use crate::state::AppState;
 /// text/path 输入上限（UTF-8 字节）：超限 413。
 pub const HIGHLIGHT_MAX_BYTES: usize = 20 * 1024 * 1024;
 
+/// 区间数上限：超过即 413（防御病态输入——UTF-16 转换与 JSON 序列化都是
+/// O(intervals)，2M 区间远超正常源文件的必要精度，放行会拖垮内存与响应）。
+pub const MAX_INTERVALS: usize = 2_000_000;
+
+/// 缓存准入上限：区间数超过它的响应不进缓存（单条数十 MB，会迅速挤掉
+/// 64 条 LRU 里的全部常规条目，命中率归零）。
+pub const CACHE_MAX_INTERVALS: usize = 500_000;
+
 /// 同步解析的响应侧超时：超限放弃等待返回 504（见模块注释：不中断线程）。
 pub const HIGHLIGHT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -139,6 +147,12 @@ pub fn run_highlight(lang: &str, text: &str) -> Result<HighlightResponse, AppErr
                 if end <= start {
                     continue;
                 }
+                // 区间数上限：超限即断（惰性迭代器在此停止消费，解析不再推进）
+                if intervals.len() >= MAX_INTERVALS {
+                    return Err(AppError::payload_too_large(format!(
+                        "highlight intervals exceed {MAX_INTERVALS}"
+                    )));
+                }
                 let ci = match captures.iter().position(|n| n == name) {
                     Some(i) => i,
                     None => {
@@ -199,6 +213,10 @@ impl HighlightCache {
     }
 
     fn insert(&self, key: CacheKey, resp: HighlightResponse) {
+        // 超大响应跳过缓存（请求仍正常返回）：见 CACHE_MAX_INTERVALS 注释
+        if resp.intervals.len() > CACHE_MAX_INTERVALS {
+            return;
+        }
         let mut inner = self.inner.lock().unwrap();
         if inner.entries.insert(key.clone(), Arc::new(resp)).is_none() {
             inner.order.push_back(key);
@@ -253,7 +271,8 @@ fn mtime_ms(meta: &std::fs::Metadata) -> u64 {
 }
 
 /// body `{path?, text?, lang}` → `{intervals, captures}`。
-/// text/path 超 20MB → 413；未知语言 → 400；解析超 10s → 504。
+/// text/path 超 20MB → 413；区间数超 [`MAX_INTERVALS`] → 413；未知语言 → 400；
+/// 解析超 10s → 504。path 模式区间数超 [`CACHE_MAX_INTERVALS`] 的响应不进缓存。
 pub async fn highlight(State(state): State<AppState>, Json(req): Json<HighlightRequest>) -> Response {
     let Some(lang) = req.lang.as_deref().filter(|l| !l.is_empty()) else {
         return AppError::bad_request("missing lang").into_response();
@@ -451,6 +470,43 @@ fn main() {
         let err = run_highlight("nope", "x").unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
         assert!(err.1.contains("unsupported language"));
+    }
+
+    #[test]
+    fn intervals_over_limit_returns_413() {
+        // 重复行快速膨胀区间：先量 100 行的区间数（同构行区间数恒定），
+        // 按比例放大到刚过 MAX_INTERVALS，避免盲目构造超大输入拖慢测试。
+        let line = "let v = 1;\n";
+        let per100 = run_highlight("rust", &line.repeat(100))
+            .expect("样例高亮应成功")
+            .intervals
+            .len();
+        assert!(per100 > 0, "样例行应产出区间");
+        let big = line.repeat((MAX_INTERVALS / per100 + 2) * 100);
+        let err = run_highlight("rust", &big).unwrap_err();
+        assert_eq!(err.0, StatusCode::PAYLOAD_TOO_LARGE, "超限语义 413: {err}");
+        assert!(err.1.contains("intervals"), "错误指明区间超限: {err}");
+    }
+
+    #[test]
+    fn cache_skips_responses_over_interval_cap() {
+        let _g = serial_lock();
+        cache_reset();
+        let key: CacheKey = (PathBuf::from("/tmp/huge.rs"), 1, 1, "rust".into());
+        // 超限响应：insert 静默跳过（请求侧仍正常返回，只是不占缓存）
+        CACHE.insert(
+            key.clone(),
+            HighlightResponse { intervals: vec![[0, 1, 0]; CACHE_MAX_INTERVALS + 1], captures: vec![] },
+        );
+        assert_eq!(CACHE.len(), 0, "超 50 万区间的响应不进缓存");
+        // 未超限：正常入缓存
+        CACHE.insert(
+            key.clone(),
+            HighlightResponse { intervals: vec![[0, 1, 0]; CACHE_MAX_INTERVALS], captures: vec![] },
+        );
+        assert_eq!(CACHE.len(), 1, "阈值内正常缓存");
+        assert!(CACHE.get(&key).is_some());
+        cache_reset();
     }
 
     #[test]
