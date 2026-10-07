@@ -78,6 +78,37 @@ describe('sanitizeHtml——净化策略', () => {
     expect(out).not.toContain('vbscript:');
   });
 
+  it('data: 仅放行 src/srcset：a[href] 上的 data:image 剥除（导航至 SVG data URL 可执行脚本）', () => {
+    const out = sanitizeHtml('<a href="data:image/svg+xml,%3Csvg onload=alert(1)%3E">x</a><a href="#d">y</a>');
+    expect(out).toContain('y');
+    expect(out).not.toContain('data:image');
+    expect(out).not.toContain('href="data:');
+  });
+
+  it('data: 仅放行 src/srcset：img 的 src/srcset data:image 保留（内嵌图片）', () => {
+    const out = sanitizeHtml(
+      '<img src="data:image/png;base64,iVBOR" srcset="data:image/png;base64,iVBOR 2x" alt="嵌入图">'
+    );
+    expect(out).toContain('src="data:image/png;base64,iVBOR"');
+    expect(out).toContain('srcset="data:image/png;base64,iVBOR 2x"');
+  });
+
+  it('data: 仅放行 src/srcset：action/formaction 等其余 URI 属性一并剥除', () => {
+    const out = sanitizeHtml(
+      '<form action="data:image/svg+xml,x"><button formaction="data:image/svg+xml,y">go</button></form>'
+    );
+    expect(out).not.toContain('action=');
+    expect(out).not.toContain('formaction=');
+  });
+
+  it('meta 标签显式禁用（防 DOMPurify 上游默认变化）', () => {
+    const out = sanitizeHtml(
+      '<meta http-equiv="refresh" content="0;url=https://evil.example"><p>x</p>'
+    );
+    expect(out).not.toContain('<meta');
+    expect(out).not.toContain('evil.example');
+  });
+
   it('接受 Document 输入，返回净化字符串', () => {
     const doc = docOf('<p>a</p><script>b</script>');
     const out = sanitizeHtml(doc);
@@ -121,9 +152,16 @@ describe('enrichMarkdownDom——callout 转换', () => {
     expect(doc.querySelector('.markdown-alert')).toBeNull();
   });
 
-  it('代码/嵌套引用中的 [!note] 字样不触发转换', () => {
+  it('嵌套引用：内层 [!note] 转换为卡片，外层不触发保持块引用', () => {
     const doc = renderEnriched('> > [!note]\n> > 嵌套\n');
-    expect(doc.querySelectorAll('blockquote').length).toBeGreaterThan(0);
+    // 外层首子元素是 blockquote 而非段落 → 外层不转换；内层按规则转卡片
+    const outer = doc.querySelector('blockquote');
+    expect(outer).not.toBeNull();
+    expect(doc.querySelectorAll('blockquote')).toHaveLength(1); // 仅剩外层
+    const card = doc.querySelector('.markdown-alert.markdown-alert-note');
+    expect(card).not.toBeNull();
+    expect(outer!.contains(card!)).toBe(true); // 卡片留在外层引用内
+    expect(card!.querySelector('.markdown-alert-title')!.textContent).toBe('Note');
   });
 });
 

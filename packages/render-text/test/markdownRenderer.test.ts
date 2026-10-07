@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { Detection, FileSource, RenderedInstance } from '@vviewer/core';
 import type { HighlightInterval } from '@vviewer/highlight';
-import { markdownRenderer, fenceToHtml, slugifyHeading } from '../src/markdown/markdownRenderer';
+import {
+  markdownRenderer,
+  fenceToHtml,
+  slugifyHeading,
+  assignHeadingIds
+} from '../src/markdown/markdownRenderer';
+import { LIGHTBOX_OVERLAY_ID } from '../src/markdown/pipeline';
 import { attachHighlightClient, type CodeHighlightClient } from '../src/code';
 
 const SOURCE: FileSource = {
@@ -89,6 +95,63 @@ describe('markdownRenderer——渲染与 TOC', () => {
     instance.destroy();
     expect(target.innerHTML).toBe('');
     expect(tocOf(instance)).toEqual(toc);
+  });
+});
+
+describe('markdownRenderer——heading id 与灯箱 overlay id 共存（F4）', () => {
+  it('assignHeadingIds：标题 slug 恰为灯箱 overlay id 时自动加 -2 后缀（overlay id 预占）', () => {
+    const doc = new DOMParser().parseFromString(
+      `<h1>${LIGHTBOX_OVERLAY_ID}</h1><div id="${LIGHTBOX_OVERLAY_ID}"></div>`,
+      'text/html'
+    );
+    assignHeadingIds(doc);
+    // overlay id 不被标题占用（openLightbox 按 id 单例查找、removeLightboxOverlay 按 id 清理）
+    expect(doc.querySelector('h1')!.id).toBe(`${LIGHTBOX_OVERLAY_ID}-2`);
+    expect(doc.getElementById(LIGHTBOX_OVERLAY_ID)!.tagName).toBe('DIV');
+  });
+
+  it('正文标题恰为 md-lightbox-overlay：标题加后缀，点击图片灯箱仍正常打开', async () => {
+    const { target, instance } = await renderMd(`# ${LIGHTBOX_OVERLAY_ID}\n\n![图](a.png)\n`);
+    const h1 = target.querySelector('h1')!;
+    expect(h1.id).toBe(`${LIGHTBOX_OVERLAY_ID}-2`);
+    // 灯箱仍正常：点击图片 → body 上出现唯一 overlay 且展示图片
+    (target.querySelector('img') as HTMLImageElement).click();
+    const overlay = document.getElementById(LIGHTBOX_OVERLAY_ID);
+    expect(overlay).not.toBeNull();
+    expect(overlay!.querySelector('img')?.getAttribute('src')).toBe('a.png');
+    expect(document.querySelectorAll(`#${LIGHTBOX_OVERLAY_ID}`)).toHaveLength(1);
+    instance.destroy(); // destroy 清理 body 级 overlay
+    expect(document.getElementById(LIGHTBOX_OVERLAY_ID)).toBeNull();
+  });
+});
+
+describe('markdownRenderer——超大输入降级（F2）', () => {
+  /** jsdom 无 ResizeObserver，降级路径的 virtualScroller 需要（照 htmlRenderer.test 的 stub） */
+  function stubResizeObserver(): void {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      }
+    );
+  }
+
+  it('>20MB：降级为纯文本代码视图 + 提示卡，不走富文本管线', async () => {
+    stubResizeObserver();
+    const big = new Uint8Array(20 * 1024 * 1024 + 1); // 内容任意：守卫只看 byteLength
+    const target = document.createElement('div');
+    const instance = await markdownRenderer.render(big, target, SOURCE, DET);
+    expect(target.querySelector('.vv-error-card')).not.toBeNull();
+    expect(target.textContent).toContain('文件过大');
+    expect(target.querySelector('.vv-code-pre')).not.toBeNull(); // 代码/纯文本视图承接
+    expect(target.classList.contains('vv-markdown')).toBe(false); // 富文本管线未走
+    expect(target.classList.contains('vv-degraded')).toBe(true);
+    expect(tocOf(instance)).toEqual([]); // 降级视图无标题结构
+    instance.destroy();
+    expect(target.innerHTML).toBe('');
+    expect(target.classList.contains('vv-degraded')).toBe(false);
   });
 });
 

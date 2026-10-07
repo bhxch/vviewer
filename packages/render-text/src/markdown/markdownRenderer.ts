@@ -7,17 +7,21 @@
 import type { Renderer, RenderedInstance, Detection, FileSource, TocEntry } from '@vviewer/core';
 import {
   DECODERS,
+  MARKUP_MAX_BYTES,
   getHighlightClient,
   buildLineIndex,
   buildLineOffsets,
   assignIntervalsToLines,
-  renderLineHtml
+  renderLineHtml,
+  renderCode,
+  renderDegradedCode,
+  type RenderCodeHandle
 } from '../code';
 import { makePreview, type SearchMatchWithPreview } from '../search';
 import { renderMarkdownToHtml } from './engine';
 import { sanitizeHtml } from './sanitize';
 import { enrichMarkdownDom } from './enrich';
-import { runPipeline, removeLightboxOverlay } from './pipeline';
+import { runPipeline, removeLightboxOverlay, LIGHTBOX_OVERLAY_ID } from './pipeline';
 
 /**
  * 围栏代码高亮回调（pipeline 的 highlightFence 实现）：HighlightClient 区间
@@ -57,9 +61,12 @@ export function slugifyHeading(text: string): string {
  * 为 h1-h4 确保元素 id：无 id 生成 slug；与文档内其他元素 id（含作者 HTML 的
  * id）冲突时追加 -2/-3 后缀。幂等：有 id 的 heading 保留原值（预填排除
  * heading 自身，否则会被自己的 id 判为冲突而改名）。
+ * used 预置灯箱 overlay id：正文标题恰为 md-lightbox-overlay 时 slug 会撞车，
+ * 而灯箱 overlay 后挂在 body 上（openLightbox 按 LIGHTBOX_OVERLAY_ID 单例查找，
+ * 重名 heading 会先占文档 id），预占后标题自动追加 -2 后缀，灯箱不受影响。
  */
 export function assignHeadingIds(root: Document): void {
-  const used = new Set<string>();
+  const used = new Set<string>([LIGHTBOX_OVERLAY_ID]);
   for (const el of Array.from(root.querySelectorAll('[id]'))) {
     if (!el.matches('h1, h2, h3, h4')) used.add(el.id);
   }
@@ -217,12 +224,40 @@ function createDomSearcher(target: HTMLElement, isDestroyed: () => boolean) {
   return { search, gotoMatch, restore };
 }
 
+/** 超大文件降级实例：代码视图句柄 → RenderedInstance（无 TOC，搜索走 code 实现） */
+function degradedInstance(code: RenderCodeHandle, target: HTMLElement): RenderedInstance {
+  return {
+    destroy() {
+      code.destroy();
+      target.replaceChildren();
+      target.classList.remove('vv-degraded');
+    },
+    getToc: () => [], // 降级视图无标题结构
+    search: (query) => code.search(query),
+    gotoMatch: (index) => code.gotoMatch(index)
+  };
+}
+
 export const markdownRenderer: Renderer = {
   id: 'markdown',
   label: 'Markdown',
   extensions: ['md', 'markdown'],
   async render(buffer: Uint8Array, target: HTMLElement, _source: FileSource, det: Detection) {
     void _source;
+    // 超大输入守卫：markdown 管线（净化/DOM 遍历/katex/mermaid）无分块能力，
+    // >20MB 会长时间阻塞主线程。降级为纯文本代码视图（降级而非拒绝，内容仍可读）。
+    if (buffer.byteLength > MARKUP_MAX_BYTES) {
+      return degradedInstance(
+        renderDegradedCode(buffer, target, {
+          name: _source.name,
+          mode: '纯文本',
+          encoding: det.encoding,
+          ext: det.ext,
+          highlight: false
+        }),
+        target
+      );
+    }
     // 管线含动态 import（mermaid/katex/hljs），期间 tab 可能已切换：destroyed 后不再挂载
     let destroyed = false;
     const text = new TextDecoder(DECODERS[det.encoding ?? 'utf-8'], { fatal: false }).decode(buffer);

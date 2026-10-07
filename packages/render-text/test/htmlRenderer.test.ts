@@ -52,6 +52,28 @@ describe('buildSandboxedSrcdoc——双层防御', () => {
     expect(links[1]?.getAttribute('href')).toBe('/rel.html');
   });
 
+  it('属性二次清洗：href 上的 data:* 一律剥除（data: 仅放行 src/srcset，与共享策略同规则）', () => {
+    const srcdoc = buildSandboxedSrcdoc(
+      '<a href="data:image/svg+xml,x">bad</a><img src="data:image/png;base64,iVBOR" alt="ok"><a href="/ok.html">ok</a>'
+    );
+    const doc = parseSrcdoc(srcdoc);
+    const links = doc.querySelectorAll('a');
+    expect(links[0]?.hasAttribute('href')).toBe(false);
+    expect(links[1]?.getAttribute('href')).toBe('/ok.html');
+    expect(doc.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,iVBOR');
+  });
+
+  it('meta 标签显式禁用：作者 meta 不进 srcdoc，仅剩注入的 CSP meta', () => {
+    const srcdoc = buildSandboxedSrcdoc(
+      '<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=https://evil.example"></head><body><p>x</p></body></html>'
+    );
+    const doc = parseSrcdoc(srcdoc);
+    const metas = doc.querySelectorAll('meta');
+    expect(metas).toHaveLength(1); // 仅净化后注入的 CSP meta
+    expect(metas[0]?.getAttribute('http-equiv')).toBe('Content-Security-Policy');
+    expect(srcdoc).not.toContain('evil.example');
+  });
+
   it('CSP meta 注入（注入于净化之后，必然存活）', () => {
     const srcdoc = buildSandboxedSrcdoc('<p>x</p>');
     expect(srcdoc).toContain('http-equiv="Content-Security-Policy"');
@@ -126,6 +148,26 @@ describe('htmlRenderer——sandbox iframe 与视图切换', () => {
     const { target, instance } = await renderHtml('<p>hi</p>');
     instance.destroy();
     expect(target.innerHTML).toBe('');
+  });
+
+  it('>20MB：降级为源码视图 + 提示卡（无 iframe、无工具栏，切换为空操作）', async () => {
+    stubResizeObserver();
+    const big = new Uint8Array(20 * 1024 * 1024 + 1);
+    const target = document.createElement('div');
+    document.body.append(target);
+    const instance = await htmlRenderer.render(big, target, SOURCE, DET);
+    expect(target.querySelector('.vv-error-card')).not.toBeNull();
+    expect(target.textContent).toContain('文件过大');
+    expect(target.querySelector('iframe')).toBeNull(); // 不构建 srcdoc
+    expect(target.querySelector('.vv-html-toolbar')).toBeNull(); // 无渲染视图可切
+    expect(target.querySelector('.vv-code-pre')).not.toBeNull(); // 源码视图承接
+    const toggle = instance as RenderedInstance & { toggleView(): void };
+    toggle.toggleView();
+    expect(target.querySelector('iframe')).toBeNull();
+    instance.destroy();
+    expect(target.innerHTML).toBe('');
+    expect(target.classList.contains('vv-html')).toBe(false);
+    expect(target.classList.contains('vv-degraded')).toBe(false);
   });
 
   it('search/gotoMatch：源码视图继承 code 实现，渲染视图返回空结果', async () => {

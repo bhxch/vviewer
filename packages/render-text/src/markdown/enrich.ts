@@ -72,8 +72,10 @@ function convertMediaElements(root: Document): void {
 
 /**
  * callout 转换：块引用首段以 `[!type]` 开头（Obsidian/GitHub 语法）时替换为
- * div.markdown-alert.markdown-alert-{type} 卡片（标题 + 内容）。代码与嵌套引用中
- * 的 `[!type]` 字样是正文，不触发。
+ * div.markdown-alert.markdown-alert-{type} 卡片（标题 + 内容）。代码 fence 中的
+ * `[!type]` 字样是正文，不触发；嵌套引用（`> > [!type]`）只转换内层——外层
+ * 的首子元素是 blockquote 而非段落，不匹配标记，保持块引用（转换出的卡片
+ * 留在外层引用内）。
  */
 function convertCallouts(root: Document): void {
   for (const bq of Array.from(root.querySelectorAll('blockquote'))) {

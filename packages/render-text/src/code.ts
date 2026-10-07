@@ -54,6 +54,10 @@ export function resolveHljsLang(hljs: HLJS, lang: string | null): string | null 
  * 据 spec 5.11 预算校准，worker 取消传播落地后可再上调。 */
 export const TREE_SITTER_MAX_BYTES = 2 * 1024 * 1024;
 export const HLJS_MAX_BYTES = 20 * 1024 * 1024;
+/** markdown/html 富文本渲染输入上限（与 hljs 阈值同源 20MB）：净化与 DOM 遍历
+ * 管线无分块，超大输入会长时间阻塞主线程；超限跳过富文本管线，降级为代码/纯
+ * 文本视图（renderDegradedCode）。 */
+export const MARKUP_MAX_BYTES = 20 * 1024 * 1024;
 export const LINE_HEIGHT = 20;
 
 export type HighlightStrategy = 'tree-sitter' | 'hljs-block' | 'plain';
@@ -557,3 +561,40 @@ export const codeRenderer: Renderer = {
     return instance;
   }
 };
+
+// ---------- 超大输入降级（markdown/html 富文本渲染器共用） ----------
+
+/**
+ * 超大文件降级视图：提示卡 + 代码视图纵向排布，替代富文本渲染管线。
+ * markdown/html 的净化/DOM 遍历管线对超大输入无分块能力，> MARKUP_MAX_BYTES 时
+ * 调用方跳过富文本管线走这里：markdown 降级纯文本（highlight: false），html 降级
+ * 源码视图——降级而非拒绝，查看器语义下内容仍可读。错误卡复用 core showErrorCard
+ * 的 .vv-error-* 结构语义；.vv-degraded* 样式由 apps/web/src/app.css 提供。
+ */
+export function renderDegradedCode(
+  buffer: Uint8Array,
+  target: HTMLElement,
+  opts: { name: string; mode: string; encoding?: Encoding; ext?: string; highlight?: boolean }
+): RenderCodeHandle {
+  target.classList.add('vv-degraded');
+  const card = document.createElement('div');
+  card.className = 'vv-error-card vv-oversize-card';
+  const title = document.createElement('div');
+  title.className = 'vv-error-title';
+  title.textContent = '文件过大，已降级显示';
+  const detail = document.createElement('div');
+  detail.className = 'vv-error-detail';
+  detail.textContent = `文件超过 ${MARKUP_MAX_BYTES / 1024 / 1024}MB，富文本渲染已跳过（避免长时间阻塞），已降级为${opts.mode}视图（代码视图/纯文本查看）。`;
+  const meta = document.createElement('div');
+  meta.className = 'vv-error-meta';
+  meta.textContent = opts.name;
+  card.append(title, detail, meta);
+  const content = document.createElement('div');
+  content.className = 'vv-degraded-content';
+  target.replaceChildren(card, content);
+  return renderCode(buffer, content, {
+    encoding: opts.encoding,
+    highlight: opts.highlight,
+    ext: opts.ext
+  });
+}

@@ -1,6 +1,7 @@
 // html.ts — html/htm 渲染器（Task 4）：沙箱双层防御预览。
 // 第一层：DOMPurify WHOLE_DOCUMENT 净化（复用 markdown 的共享净化策略）；
-// 第二层：净化后 DOM 的属性二次清洗（on* 全剥、src/href 白名单复核）——两层
+// 第二层：净化后 DOM 的属性二次清洗（on* 全剥、src/href 白名单复核、href 的
+// data:* 一律剥除——data: 仅限 src/srcset，与共享策略钩子同规则）——两层
 // 独立生效，任一层单独失效仍安全。随后注入 CSP meta（净化之后注入，必然存活）
 // 并经 <iframe sandbox srcdoc> 呈现。
 // sandbox 裁决：只给 allow-same-origin、不给 allow-scripts——文档内脚本一律不
@@ -8,9 +9,17 @@
 // 未执行用）；CSP default-src 'none' 为第三道纵深。
 // 源码/渲染视图切换：默认渲染视图；源码视图复用 code.ts 的 renderCode（同一
 // 高亮降级链）。样式统一由 apps/web/src/app.css 提供（单一来源，同 code.ts）。
+// 超大输入（>20MB）：净化/DOM 遍历无分块能力，跳过沙箱管线降级为源码视图
+// + 提示卡（renderDegradedCode；降级而非拒绝）。
 import type { Renderer, RenderedInstance, Detection, FileSource } from '@vviewer/core';
 import { ALLOWED_URI_REGEXP, sanitizeHtml } from './markdown/sanitize';
-import { DECODERS, renderCode, type RenderCodeHandle } from './code';
+import {
+  DECODERS,
+  MARKUP_MAX_BYTES,
+  renderCode,
+  renderDegradedCode,
+  type RenderCodeHandle
+} from './code';
 
 /** srcdoc 文档的 CSP：脚本面已被 sandbox 封死，CSP 管资源加载纵深（作者文档可含图片/行内样式） */
 const CSP_CONTENT =
@@ -23,7 +32,8 @@ function uriAllowed(value: string): boolean {
 
 /**
  * 不可信 HTML → 沙箱化 srcdoc 字符串：WHOLE_DOCUMENT 净化 → 属性二次清洗
- * （on* 全剥；src/href 白名单）→ CSP meta 注入。纯字符串进出，便于单测。
+ * （on* 全剥；src/href 白名单，href 的 data:* 一律剥）→ CSP meta 注入。
+ * 纯字符串进出，便于单测。
  */
 export function buildSandboxedSrcdoc(raw: string): string {
   const clean = sanitizeHtml(raw, { wholeDocument: true });
@@ -33,6 +43,10 @@ export function buildSandboxedSrcdoc(raw: string): string {
     for (const attr of Array.from(el.attributes)) {
       const name = attr.name.toLowerCase();
       if (name.startsWith('on')) {
+        el.removeAttribute(attr.name);
+      } else if (name === 'href' && /^\s*data:/i.test(attr.value)) {
+        // data: 仅放行 src/srcset（共享策略钩子同规则）：href 上的 data:image
+        // 过白名单正则，但导航至 SVG data URL 可执行其脚本，一律剥除
         el.removeAttribute(attr.name);
       } else if ((name === 'src' || name === 'href') && !uriAllowed(attr.value)) {
         el.removeAttribute(attr.name);
@@ -53,6 +67,32 @@ export const htmlRenderer: Renderer = {
   label: 'HTML 预览',
   extensions: ['html', 'htm'],
   async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection) {
+    // 超大输入守卫：沙箱管线（净化/DOM 遍历/序列化）无分块能力，>20MB 会长时间
+    // 阻塞主线程。降级为源码视图 + 提示卡（不建 toolbar，渲染视图本档不提供）。
+    if (buffer.byteLength > MARKUP_MAX_BYTES) {
+      target.classList.add('vv-html'); // 撑满宿主高度（同正常路径），降级内容纵向排布
+      const code = renderDegradedCode(buffer, target, {
+        name: source.name,
+        mode: '源码',
+        encoding: det.encoding,
+        ext: det.ext,
+        highlight: true
+      });
+      const instance: RenderedInstance & { toggleView(): void } = {
+        destroy() {
+          code.destroy();
+          target.replaceChildren();
+          target.classList.remove('vv-html', 'vv-degraded');
+        },
+        toggleView() {
+          // 降级视图无渲染视图可切：保持接口形状，操作为空
+        },
+        search: (query) => code.search(query),
+        gotoMatch: (index) => code.gotoMatch(index)
+      };
+      return instance;
+    }
+
     let destroyed = false;
     let view: HtmlView = 'rendered';
     let codeInst: RenderCodeHandle | null = null;
