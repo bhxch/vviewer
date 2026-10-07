@@ -197,7 +197,8 @@ function ndjsonResponse(chunks: string[], status = 200): unknown {
           read: async () =>
             i < chunks.length
               ? { done: false, value: encoder.encode(chunks[i++]) }
-              : { done: true, value: undefined }
+              : { done: true, value: undefined },
+          cancel: async () => {}
         };
       }
     }
@@ -236,16 +237,33 @@ describe('grepRemote', () => {
     );
   });
 
-  it('done 帧带 error 时抛错（如 rg 非法正则）', async () => {
+  it('done 帧带 error 时抛错（如 rg 非法正则），并释放底层流', async () => {
+    let canceled = 0;
+    const encoder = new TextEncoder();
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        ndjsonResponse(['{"done":true,"truncated":false,"error":"regex parse error"}\n'])
-      )
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        body: {
+          getReader() {
+            return {
+              read: async () => ({
+                done: false,
+                value: encoder.encode('{"done":true,"truncated":false,"error":"regex parse error"}\n')
+              }),
+              cancel: async () => {
+                canceled += 1;
+              }
+            };
+          }
+        }
+      }))
     );
     await expect(grepRemote(endpoint, { pattern: '[' }, { storeId: 'r' })).rejects.toThrow(
       'regex parse error'
     );
+    expect(canceled).toBe(1);
   });
 
   it('透传 AbortSignal 与可选请求字段', async () => {

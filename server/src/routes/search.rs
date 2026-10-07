@@ -15,6 +15,7 @@
 
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::extract::State;
@@ -41,6 +42,9 @@ pub const PREVIEW_MAX_CHARS: usize = 200;
 const RG_MAX_COUNT: &str = "50";
 /// 跳过的文件大小上限（--max-filesize；rg 的 M = MiB）。
 const RG_MAX_FILESIZE: &str = "2M";
+/// rg 搜索总墙钟上限：防子进程挂起导致 pump 永久 await（进程+任务泄漏），
+/// 也给断连 kill 的延迟设上界。生产 60s；单测以 200ms 注入验证超时路径。
+const SEARCH_TIMEOUT: Duration = Duration::from_secs(60);
 /// channel 缓冲： rg 产出快于客户端消费时的背压水位。
 const FRAME_CHANNEL: usize = 64;
 
@@ -160,7 +164,8 @@ pub async fn search(State(state): State<AppState>, Json(req): Json<SearchRequest
     let stderr: ChildStderr = child.stderr.take().expect("rg stderr must be piped");
 
     let (tx, rx) = mpsc::channel::<Result<String, std::io::Error>>(FRAME_CHANNEL);
-    let pump_handle = tokio::spawn(pump(child, stdout, stderr, state.root_canonical.clone(), tx));
+    let pump_handle =
+        tokio::spawn(pump(child, stdout, stderr, state.root_canonical.clone(), tx, SEARCH_TIMEOUT));
     // 结局观测（tracing debug 级）：读取 outcome 字段同时消除 test-only 字段告警
     tokio::spawn(async move {
         if let Ok(outcome) = pump_handle.await {
@@ -187,13 +192,15 @@ pub(crate) struct PumpOutcome {
     pub rg_error: Option<String>,
 }
 
-/// 读取 rg --json 输出并下发 NDJSON 帧；客户端断连 / 截断时 kill 子进程。
+/// 读取 rg --json 输出并下发 NDJSON 帧；客户端断连 / 截断 / 墙钟超时均 kill 子进程。
+/// `timeout` 为整个读循环的总 deadline（生产 SEARCH_TIMEOUT，测试注入短时限）。
 pub(crate) async fn pump(
     mut child: Child,
     stdout: ChildStdout,
     stderr: ChildStderr,
     root_canonical: PathBuf,
     tx: mpsc::Sender<Result<String, std::io::Error>>,
+    timeout: Duration,
 ) -> PumpOutcome {
     // stderr 转后台收集（rg 写完即退出，不会阻塞 stdout 解析）
     let stderr_task = tokio::spawn(async move {
@@ -207,29 +214,58 @@ pub(crate) async fn pump(
     let mut sent = 0usize;
     let mut truncated = false;
 
-    while let Ok(Some(line)) = lines.next_line().await {
-        let Ok(frame) = serde_json::from_str::<Value>(&line) else {
-            continue; // 非 JSON 行（理论上没有）：跳过
-        };
-        if frame.get("type").and_then(Value::as_str) != Some("match") {
-            continue; // 简化：只发 match 帧 + 终帧（begin/end 丢弃）
+    // 整个读循环包总 deadline：rg 挂起（stdout 永不关闭）时 kill 而非永久 await，
+    // 客户端断连的 kill 延迟随之有界（--sort path 串行输出下尤其重要）
+    enum LoopExit {
+        StreamEnd,
+        ClientGone,
+    }
+    let exited = tokio::time::timeout(timeout, async {
+        while let Ok(Some(line)) = lines.next_line().await {
+            let Ok(frame) = serde_json::from_str::<Value>(&line) else {
+                continue; // 非 JSON 行（理论上没有）：跳过
+            };
+            if frame.get("type").and_then(Value::as_str) != Some("match") {
+                continue; // 简化：只发 match 帧 + 终帧（begin/end 丢弃）
+            }
+            if sent >= MAX_MATCHES {
+                // 恰好 1000 时不能立即判截断（可能 rg 已无更多命中），
+                // 继续读到出现第 1001 个 match 才算 truncated
+                truncated = true;
+                break;
+            }
+            let Some(payload) = match_frame(&frame, &root_canonical) else {
+                continue; // 二进制文件（lines.bytes）等无文本帧：跳过
+            };
+            if tx.send(Ok(payload)).await.is_err() {
+                // 客户端断连（响应 body 被 drop）：杀子进程，不再发终帧
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                return LoopExit::ClientGone;
+            }
+            sent += 1;
         }
-        if sent >= MAX_MATCHES {
-            // 恰好 1000 时不能立即判截断（可能 rg 已无更多命中），
-            // 继续读到出现第 1001 个 match 才算 truncated
-            truncated = true;
-            break;
-        }
-        let Some(payload) = match_frame(&frame, &root_canonical) else {
-            continue; // 二进制文件（lines.bytes）等无文本帧：跳过
-        };
-        if tx.send(Ok(payload)).await.is_err() {
-            // 客户端断连（响应 body 被 drop）：杀子进程，不再发终帧
+        LoopExit::StreamEnd
+    })
+    .await;
+
+    match exited {
+        Err(_) => {
+            // 墙钟超时：kill 子进程并下发 error 终帧（消费端可见的超时语义）
             let _ = child.kill().await;
             let _ = child.wait().await;
+            let done = json!({ "done": true, "truncated": false, "error": "search timeout" });
+            let _ = tx.send(Ok(format!("{}\n", done))).await;
+            return PumpOutcome {
+                client_gone: false,
+                truncated: false,
+                rg_error: Some("search timeout".to_string()),
+            };
+        }
+        Ok(LoopExit::ClientGone) => {
             return PumpOutcome { client_gone: true, truncated: false, rg_error: None };
         }
-        sent += 1;
+        Ok(LoopExit::StreamEnd) => {}
     }
 
     let rg_error = if truncated {
@@ -447,7 +483,14 @@ mod tests {
         let stderr = child.stderr.take().unwrap();
 
         let (tx, mut rx) = mpsc::channel::<Result<String, std::io::Error>>(4);
-        let handle = tokio::spawn(pump(child, stdout, stderr, dir.path().to_path_buf(), tx));
+        let handle = tokio::spawn(pump(
+            child,
+            stdout,
+            stderr,
+            dir.path().to_path_buf(),
+            tx,
+            std::time::Duration::from_secs(60),
+        ));
 
         // 收 2 帧后丢弃接收端（模拟客户端断连）→ pump 应杀子进程收尾
         let mut got = 0;
@@ -462,6 +505,52 @@ mod tests {
         drop(rx);
         let outcome = handle.await.unwrap();
         assert!(outcome.client_gone, "断连后 pump 应报告 client_gone（即已 kill）");
+    }
+
+    // ---------- 墙钟超时：kill 挂起子进程 + error 终帧 ----------
+
+    /// 真 rg 挂起难以稳定模拟：以 `sh -c "exec sleep 30"` 充当假 rg
+    /// （stdout 挂起不关闭，exec 使 kill 直接命中进程），deadline 注入 200ms。
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pump_timeout_kills_child_and_emits_error_frame() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut child = Command::new("sh")
+            .args(["-c", "exec sleep 30"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
+
+        let (tx, mut rx) = mpsc::channel::<Result<String, std::io::Error>>(4);
+        let started = std::time::Instant::now();
+        let handle = tokio::spawn(pump(
+            child,
+            stdout,
+            stderr,
+            dir.path().to_path_buf(),
+            tx,
+            std::time::Duration::from_millis(200),
+        ));
+
+        let outcome = handle.await.unwrap();
+        assert_eq!(outcome.rg_error.as_deref(), Some("search timeout"));
+        assert!(!outcome.truncated);
+        assert!(!outcome.client_gone);
+        // 在 deadline 附近收尾（远小于 sleep 30），子进程已被 kill
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        // 终帧携带 error 字段，消费端可见超时语义
+        let done = rx.recv().await.expect("超时终帧必须发出").unwrap();
+        let v: Value = serde_json::from_str(done.trim()).unwrap();
+        assert_eq!(v["done"], true);
+        assert_eq!(v["truncated"], false);
+        assert_eq!(v["error"], "search timeout");
+        // 终帧之后流结束
+        assert!(rx.recv().await.is_none());
     }
 
     // ---------- 截断：恰好 1000 命中不算截断 ----------
@@ -500,7 +589,14 @@ mod tests {
         let stderr = child.stderr.take().unwrap();
 
         let (tx, mut rx) = mpsc::channel::<Result<String, std::io::Error>>(256);
-        let handle = tokio::spawn(pump(child, stdout, stderr, dir.path().to_path_buf(), tx));
+        let handle = tokio::spawn(pump(
+            child,
+            stdout,
+            stderr,
+            dir.path().to_path_buf(),
+            tx,
+            std::time::Duration::from_secs(60),
+        ));
 
         let mut frames = Vec::new();
         while let Some(Ok(line)) = rx.recv().await {

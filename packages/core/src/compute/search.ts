@@ -284,11 +284,17 @@ export async function grepRemote(
     }
   };
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    consume(decoder.decode(value, { stream: true }));
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      consume(decoder.decode(value, { stream: true }));
+    }
+    consume(decoder.decode()); // 冲出残余多字节序列与最后无换行帧
+  } catch (err) {
+    // 错误路径（abort / 终帧 error 等）：主动释放底层流，不留悬挂连接
+    void reader.cancel().catch(() => {});
+    throw err;
   }
-  consume(decoder.decode()); // 冲出残余多字节序列与最后无换行帧
   return { matches, truncated };
 }
