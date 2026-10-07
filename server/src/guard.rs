@@ -38,6 +38,7 @@ pub async fn resolve(state: &AppState, raw: Option<&str>) -> Result<PathBuf, App
 
     if !canonical.starts_with(&state.root_canonical) {
         // symlink 等手段越出 root（含 root 自身之外的一切目标）
+        // TOCTOU：canonicalize 与后续 fs 操作之间的 symlink 竞态窗口为已知已接受风险。
         return Err(AppError::forbidden("path escapes root"));
     }
     Ok(canonical)
