@@ -23,9 +23,11 @@ struct LangInfo {
 
 /// 扩展名（小写）→ 语言名 反查索引。fileTypes 中混有 glob 形态
 /// （如 `containers.conf.d/*.conf`），只收纯扩展名条目；同名扩展先到先得。
+/// 用 BTreeMap 按语言名排序迭代：跨语言重复扩展（pl/cl/v/inc/fs/sc/bas/properties
+/// 等）的胜者确定为字典序最小语言名，避免 HashMap 随机序导致重启间翻转。
 static LANG_BY_EXT: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
-    let langs: HashMap<String, LangInfo> = serde_json::from_str(LANGUAGES_JSON)
-        .expect("embedded languages.json must be valid");
+    let langs: std::collections::BTreeMap<String, LangInfo> =
+        serde_json::from_str(LANGUAGES_JSON).expect("embedded languages.json must be valid");
     let mut map = HashMap::new();
     for (name, info) in langs {
         // 一次性初始化：leak 进 'static 表，量级为语言数（数百），可接受
@@ -81,5 +83,32 @@ fn is_probable_utf8(head: &[u8]) -> bool {
             // 截断的不完整序列：仅采样边界才容错
             None => sampled,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duplicate_ext_winner_is_deterministic() {
+        // 跨语言重复扩展：胜者必须是字典序最小语言名（BTreeMap 排序迭代 + 先到先得），
+        // 不随 HashMap 随机迭代序在重启间翻转
+        assert_eq!(lang_for_ext("pl"), Some("perl")); // perl < prolog
+        assert_eq!(lang_for_ext("v"), Some("v")); // v < verilog
+        assert_eq!(lang_for_ext("fs"), Some("forth")); // forth < fsharp
+        assert_eq!(lang_for_ext("bas"), Some("basic")); // basic < freebasic
+        assert_eq!(lang_for_ext("properties"), Some("ini")); // ini < properties
+        assert_eq!(lang_for_ext("cl"), Some("common-lisp"));
+        assert_eq!(lang_for_ext("sc"), Some("scala"));
+    }
+
+    #[test]
+    fn encoding_detection_matches_frontend_semantics() {
+        assert_eq!(detect_encoding(&[0xEF, 0xBB, 0xBF, b'a']), "utf-8");
+        assert_eq!(detect_encoding(&[0xFF, 0xFE, b'a', 0]), "utf-16le");
+        assert_eq!(detect_encoding(&[0xFE, 0xFF, 0, b'a']), "utf-16be");
+        assert_eq!(detect_encoding("hello 世界".as_bytes()), "utf-8");
+        assert_eq!(detect_encoding(&[0xD6, 0xD0, 0xCE, 0xC4]), "gb18030");
     }
 }

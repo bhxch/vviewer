@@ -93,6 +93,11 @@ fn serve(args: ServeArgs) -> Result<(), i32> {
         args.token
     };
 
+    if token.as_deref().is_some_and(str::is_empty) {
+        eprintln!("error: --token must not be empty");
+        return Err(2);
+    }
+
     if args.allow_lan && token.is_none() {
         eprintln!("error: --allow-lan exposes the server to your network and requires --token or --token-gen");
         return Err(2);
@@ -163,4 +168,28 @@ fn serve(args: ServeArgs) -> Result<(), i32> {
             2
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(token: Option<String>) -> ServeArgs {
+        ServeArgs {
+            root: PathBuf::from("/nonexistent-root-for-test"),
+            web_dist: None,
+            port: 8321,
+            token,
+            token_gen: false,
+            allow_lan: false,
+            hidden: false,
+            cors_origin: None,
+        }
+    }
+
+    #[test]
+    fn empty_token_is_rejected() {
+        // 空 token 启动即拒（exit 2），先于 root 校验（root 故意指向不存在路径）
+        assert_eq!(serve(args(Some(String::new()))), Err(2));
+    }
 }
