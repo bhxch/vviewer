@@ -6,6 +6,7 @@
   "dependencies": {
     "@vviewer/core": "workspace:*",
     "@vviewer/highlight": "workspace:*",
+    "dompurify": "^3.4.16",
     "highlight.js": "^11.12.0",
     "markdown-it": "^15.0.2",
     "markdown-it-task-lists": "^2.1.1",
