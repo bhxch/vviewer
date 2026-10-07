@@ -68,7 +68,9 @@ function joinPath(base: string, name: string): string {
 
 /**
  * 单次查询执行的 wasm 侧时间预算（μs）：病态查询（如根级无锚兄弟 pattern 触发
- * O(n²) 兄弟配对扫描）的护栏——超时返回部分结果而非挂起 worker（promise 永不 settle）。
+ * O(n²) 兄弟配对扫描）的护栏——超预算时 web-tree-sitter 提前停止执行，不至挂起 worker。
+ * 注意 0.25 的 timeoutMicros 语义是"丢弃已收集结果、返回空数组"，并非部分结果；
+ * 因此"空区间 + 耗尽预算"由 highlight() 显式转为失败，以接通调用方的 hljs 兜底。
  * 预算随文本长度线性放宽（20μs/字符），下限 50ms、上限 3s；
  * 实测合法 5MB typescript captures 约 0.6s，余量充足。
  */
@@ -141,6 +143,8 @@ export class TreeSitterEngine {
       const prepared = await this.prepare(lang);
       if (!prepared) return { ok: false, error: `语言 ${lang} 无可用 grammar 或查询` };
 
+      const budgetMicros = queryBudget(text);
+      const startedAt = performance.now();
       const parser = this.parser;
       parser.setLanguage(prepared.language);
       const tree = parser.parse(text);
@@ -149,14 +153,21 @@ export class TreeSitterEngine {
       try {
         const intervals: HighlightInterval[] = [];
         if (prepared.highlights) {
-          for (const c of prepared.highlights.captures(tree.rootNode, { timeoutMicros: queryBudget(text) })) {
+          for (const c of prepared.highlights.captures(tree.rootNode, { timeoutMicros: budgetMicros })) {
             intervals.push({ start: c.node.startIndex, end: c.node.endIndex, capture: c.name });
           }
         }
         if (prepared.injections && depth < this.maxInjectionDepth) {
-          await this.collectInjections(prepared.injections, tree, intervals, depth, queryBudget(text));
+          await this.collectInjections(prepared.injections, tree, intervals, depth, budgetMicros);
         }
         intervals.sort((a, b) => a.start - b.start || b.end - a.end);
+        // web-tree-sitter 0.25 超时语义：丢弃已收集结果、返回空数组。若不转失败，
+        // 调用方会拿到 ok:true + 空区间而静默无高亮、不走 hljs 兜底。
+        // 判据取"空区间 + 墙钟 ≥ 90% 预算"——真实零捕获的文本不会恰好贴着预算完成，误伤即
+        // 便发生也只是多走一次 hljs 兜底，代价可接受。
+        if (intervals.length === 0 && (performance.now() - startedAt) * 1000 >= budgetMicros * 0.9) {
+          return { ok: false, error: `查询执行超时（预算 ${Math.round(budgetMicros / 1000)}ms），已丢弃空结果以转兜底` };
+        }
         return { ok: true, intervals };
       } finally {
         tree.delete();

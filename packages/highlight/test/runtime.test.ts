@@ -152,9 +152,10 @@ describe('大文件护栏（web-tree-sitter 病态查询挂起的防御）', () 
     }
   }, 60_000);
 
-  it('查询执行超时预算：病态注入查询返回部分区间而非挂起（有预算 ≤5s，无预算实测 40s+）', async () => {
+  it('查询执行超时预算：病态注入查询快速返回而非挂起（护栏 ≤5s，无预算实测 40s+）', async () => {
     // ecma/injections.scm 原始 graphql pattern 的病态形态：根级双兄弟、无锚点，
     // 触发 O(n²) 兄弟配对扫描。这里用 VirtualQueries 注入同形态 pattern 复现。
+    // 注入查询超时被丢弃（返回空 matches），主高亮（线性查询）不受影响。
     const pathological: VirtualQueries = new Map([
       [
         'typescript',
@@ -180,6 +181,40 @@ describe('大文件护栏（web-tree-sitter 病态查询挂起的防御）', () 
       expect(elapsed).toBeLessThan(5000); // 预算护栏生效（挂起形态下此处 >40s）
       if (!r.ok) return;
       expect(r.intervals.some((i) => src.slice(i.start, i.end) === 'vv')).toBe(true); // 主高亮完整
+    } finally {
+      engine.dispose();
+    }
+  }, 30_000);
+
+  it('超时显式转失败：空区间 + 耗尽预算 → ok:false 接通 hljs 兜底（修复前 ok:true 空区间静默无高亮）', async () => {
+    // web-tree-sitter 0.25 的 timeoutMicros 语义是"丢弃已收集结果、返回空数组"，
+    // 不是部分结果——空结果若仍返回 ok:true，render-text 会静默无高亮且不走 hljs 兜底。
+    // 这里把病态形态（O(n²) 兄弟配对扫描）作为主高亮查询，断言引擎将其转为失败。
+    const pathological: VirtualQueries = new Map([
+      [
+        'typescript',
+        {
+          highlights: `(
+  (comment) @comment
+  [
+    (string (string_fragment) @string)
+    (template_string (string_fragment) @string)
+  ]
+)`,
+          injections: '',
+        },
+      ],
+    ]);
+    const engine = await TreeSitterEngine.create({ queriesDir: pathological, grammarsDir, runtimeDir: staticDir });
+    try {
+      const src = 'const vv = 1; // c\n'.repeat(2000); // ≈38KB → 预算 ≈760ms，病态扫描需 >40s
+      const t0 = Date.now();
+      const r = await engine.highlight(src, 'typescript');
+      const elapsed = Date.now() - t0;
+      expect(elapsed).toBeLessThan(5000); // 快速失败而非挂起（无预算时 >40s）
+      expect(r.ok).toBe(false); // 空区间 + 耗尽预算 → 显式失败
+      if (r.ok) return;
+      expect(r.error).toContain('超时');
     } finally {
       engine.dispose();
     }
