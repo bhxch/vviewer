@@ -9,6 +9,8 @@
 // highlightFence 模式）——renderer 只认注入的 fn，不感知路由策略；fn 内部
 // （apps/web 侧）做 compute 路由与回退。backend 返回的 HTML（远程 comrak unsafe
 // 输出）一律仍走 sanitize+enrich+pipeline 全管线，与本地引擎同权。
+// 终审 C（相对图片 404）：`<img src="相对路径">` 经 setMarkdownImageResolver 注入的
+// 解析器换为同 store 文件的 URL；未注入或找不到保留原 src。
 import type { Renderer, RenderedInstance, Detection, FileSource, TocEntry, ComputeSource, ComputeWhere } from '@vviewer/core';
 import { getRemoteBase } from '@vviewer/core';
 import { HighlightCanceledError, type HighlightInterval } from '@vviewer/highlight';
@@ -84,6 +86,59 @@ export function setMarkdownBackend(fn: MarkdownBackend | null): void {
 /** 读取已注入的 markdown 正文引擎（测试断言用）。 */
 export function getMarkdownBackend(): MarkdownBackend | null {
   return markdownBackend;
+}
+
+// ---------- 相对图片解析注入（终审 M3：相对图片 404） ----------
+
+/**
+ * 相对图片解析器：img 的相对 src + 当前文件来源 → 可用 URL（如同 store 文件的
+ * blob URL）；找不到返回 null（保留原 src，维持 404 现状）。抛错视同找不到。
+ * store 读取能力在 apps/web 侧组装（复用 setMarkdownBackend 注入模式：renderer
+ * 不感知 store 具体实现）；本包单测以桩函数注入。
+ */
+export type MarkdownImageResolver = (src: string, source: FileSource) => Promise<string | null>;
+
+let markdownImageResolver: MarkdownImageResolver | null = null;
+
+/** 应用侧注入相对图片解析器（apps/web 启动时调用；传 null 解绑恢复 404 现状）。 */
+export function setMarkdownImageResolver(fn: MarkdownImageResolver | null): void {
+  markdownImageResolver = fn;
+}
+
+/** 读取已注入的相对图片解析器（测试断言用）。 */
+export function getMarkdownImageResolver(): MarkdownImageResolver | null {
+  return markdownImageResolver;
+}
+
+/** 绝对地址形态：scheme（http:/data:/blob:）、根相对（/…、//host）、页内片段（#…）不进 resolver。 */
+function isAbsoluteSrc(src: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith('/') || src.startsWith('#');
+}
+
+/**
+ * 渲染前解析文档内相对图片：命中 resolver → src 换为返回的 URL（blob: URL 登记，
+ * destroy 时 revoke，与渲染实例生命周期对齐）；未命中/抛错保留原 src。
+ * resolve 发生在 enrich/管线之后：av 扩展名的 img 已被替换为 media 元素不重复
+ * 处理；灯箱点击时读 attr 自然拿到已解析的 src。
+ */
+async function resolveRelativeImages(scope: ParentNode, source: FileSource): Promise<string[]> {
+  const resolver = markdownImageResolver;
+  if (!resolver) return [];
+  const created: string[] = [];
+  for (const img of Array.from(scope.querySelectorAll('img'))) {
+    const raw = img.getAttribute('src');
+    if (!raw || isAbsoluteSrc(raw)) continue;
+    try {
+      const url = await resolver(raw, source);
+      if (url) {
+        img.setAttribute('src', url);
+        created.push(url);
+      }
+    } catch {
+      // resolver 抛错（store 读失败等）视同找不到：保留原 src
+    }
+  }
+  return created;
 }
 
 /**
@@ -335,6 +390,14 @@ export const markdownRenderer: Renderer = {
     enrichMarkdownDom(doc);
     await runPipeline(doc, { highlightFence: fenceToHtml });
     if (destroyed) return { destroy() {} };
+    // 相对图片 → 同 store 文件 URL（未注入 resolver 时原样保留，404 现状）
+    const resolvedUrls = await resolveRelativeImages(doc, source);
+    if (destroyed) {
+      for (const url of resolvedUrls) {
+        if (typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(url);
+      }
+      return { destroy() {} };
+    }
     target.classList.add('vv-markdown');
     assignHeadingIds(doc); // TOC 点击按 id 定位，id 必须先于挂载/提取存在（挂载后节点已离开 doc）
     // 解析文档 → 挂载（节点被主文档收养，管线加的复制按钮/灯箱监听随节点保留）
@@ -347,6 +410,10 @@ export const markdownRenderer: Renderer = {
       destroy() {
         destroyed = true;
         domSearch.restore(); // 还原搜索 mark，避免把包裹态节点留在 DOM（虽随即清空，保持对称）
+        // 相对图片解析产出的 blob: URL 随实例释放（渲染重跑会重新解析，不复用旧 URL）
+        for (const url of resolvedUrls) {
+          if (typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(url);
+        }
         // 灯箱 overlay 挂在 body（img 点击时 target 已在主文档），不随渲染节点销毁：显式清理
         removeLightboxOverlay(target.ownerDocument);
         target.replaceChildren();

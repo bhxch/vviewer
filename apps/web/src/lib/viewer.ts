@@ -3,6 +3,7 @@ import { codeRenderer } from '@vviewer/render-text';
 import {
   markdownRenderer,
   setMarkdownBackend,
+  setMarkdownImageResolver,
   renderMarkdownBody
 } from '@vviewer/render-text/markdown/markdownRenderer';
 import { htmlRenderer } from '@vviewer/render-text/html';
@@ -89,5 +90,47 @@ if (browser) {
     );
     if (!res.ok) throw new Error(res.error ?? 'markdown 渲染失败');
     return { html: res.data ?? '', where: res.where };
+  });
+}
+
+// ---------- markdown 相对图片解析（终审 M3：相对图片 404） ----------
+
+/** 图片扩展名 → blob MIME（与 render-media image.ts 的可播子集一致；未知给空串由浏览器嗅探） */
+const IMAGE_MIME: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp', ico: 'image/x-icon',
+  svg: 'image/svg+xml'
+};
+
+/**
+ * 相对 src → store 内路径：以当前文件目录为基，逐段规范 `.`/`..`；
+ * 越出 store 根（`..` 弹空）返回 null。目录树路径以 `/` 分隔（RemoteStore/本地
+ * store 一致），src 不做百分号解码——树内路径是原始名，与 img src 的字面量对齐。
+ */
+function resolveInStorePath(sourcePath: string, src: string): string | null {
+  const dir = sourcePath.includes('/') ? sourcePath.slice(0, sourcePath.lastIndexOf('/')) : '';
+  const out: string[] = [];
+  for (const seg of `${dir}/${src}`.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') {
+      if (out.length === 0) return null;
+      out.pop();
+      continue;
+    }
+    out.push(seg);
+  }
+  return out.join('/');
+}
+
+if (browser) {
+  // 相对图片 → 同 store 文件 blob URL：store 读失败（不存在/无权限）抛错由 renderer
+  // 捕获后保留原 src（404 现状）；URL 随渲染实例 destroy 释放（renderer 侧 revoke）。
+  setMarkdownImageResolver(async (src, source) => {
+    const path = resolveInStorePath(source.path, src);
+    if (path === null || path === '') return null;
+    const bytes = await source.store.read(path);
+    const ext = path.includes('.') ? (path.split('.').pop() ?? '').toLowerCase() : '';
+    const blob = new Blob([bytes], { type: IMAGE_MIME[ext] ?? '' });
+    return URL.createObjectURL(blob);
   });
 }
