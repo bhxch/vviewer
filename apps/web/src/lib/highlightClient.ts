@@ -1,6 +1,6 @@
 import { browser } from '$app/environment';
 import { HighlightClient } from '@vviewer/highlight';
-import { attachHighlightClient } from '@vviewer/render-text';
+import { attachHighlightClient, type CodeHighlightClient } from '@vviewer/render-text';
 
 /**
  * 应用级 HighlightClient 单例：随首个调用方惰性创建（viewer.ts 启动时预热），
@@ -23,6 +23,44 @@ export function cancelHighlight(): void {
   void clientPromise.then((c) => c.cancelAll()).catch(() => {});
 }
 
+/** E2E 观测用的最近一次高亮计时记录（__vv 前缀调试约定，生产无读取方）。 */
+interface HighlightDebug {
+  __vvHighlightClient?: HighlightClient;
+  __vvLastHighlightMs?: number;
+  __vvLastHighlightLang?: string;
+  __vvLastHighlightOk?: boolean;
+}
+
+/**
+ * 给注入渲染端的 client 包一层计时：每次 highlight 完成（成功/失败）后把耗时
+ * 写入 window.__vvLastHighlight*（E2E 性能断言读它；含 Worker 往返与解析全程）。
+ * 原始实例经 window.__vvHighlightClient 暴露（E2E 语言可用性探测用）。
+ */
+function withDebug(client: HighlightClient): CodeHighlightClient {
+  const dbg = window as unknown as HighlightDebug;
+  dbg.__vvHighlightClient = client;
+  return {
+    highlight(text, lang) {
+      const t0 = performance.now();
+      const record = (ok: boolean): void => {
+        dbg.__vvLastHighlightMs = performance.now() - t0;
+        dbg.__vvLastHighlightLang = lang;
+        dbg.__vvLastHighlightOk = ok;
+      };
+      return client.highlight(text, lang).then(
+        (intervals) => {
+          record(true);
+          return intervals;
+        },
+        (err: unknown) => {
+          record(false);
+          throw err;
+        }
+      );
+    }
+  };
+}
+
 async function create(): Promise<HighlightClient> {
   const res = await fetch('/grammars/manifest.json');
   if (!res.ok) throw new Error(`grammar manifest 加载失败: HTTP ${res.status}`);
@@ -36,6 +74,6 @@ async function create(): Promise<HighlightClient> {
     queriesBase: '/queries/', // vite 启动时从 packages/highlight/assets/queries 拷贝到 static/queries
     runtimeDir: '/' // web-tree-sitter runtime 位于 static/tree-sitter.wasm
   });
-  attachHighlightClient(client);
+  attachHighlightClient(withDebug(client));
   return client;
 }
