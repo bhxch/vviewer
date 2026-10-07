@@ -10,24 +10,28 @@ import { naturalCompare } from '@vviewer/core';
 
 /** 递归预览允许的最大嵌套层数（顶层 depth=0；depth ≥3 的 store 内不能再展开压缩包） */
 export const MAX_ARCHIVE_DEPTH = 3;
-/** zip 输入大小上限（全内存解析） */
+/** 归档输入大小上限（全内存解析） */
 export const MAX_ZIP_INPUT_BYTES = 200 * 1024 * 1024;
-/** 视为"内嵌压缩包"需拒展的扩展名（T4 扩展 tar 等） */
-const ARCHIVE_EXTS = new Set(['zip']);
+/** 视为"内嵌压缩包"需拒展的扩展名（T4 起 tar 系/7z/rar 与 zip 同语义） */
+export const ARCHIVE_EXTS = new Set(['zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar']);
 
-/** 由 store id 提取内层压缩包应传的父链（= id 的前导 'zip' 段：'zip:a.zip' → 'zip'，
- * 'zip:zip:inner.zip' → 'zip:zip'，非 zip 来源 → ''）。archiveRenderer 由此接线递归深度。 */
-export function zipChainOf(storeId: string): string {
+/** 由 store id 提取内层压缩包应传的父链（= id 的前导归档段：'zip:a.zip' → 'zip'，
+ * 'libarchive:inner.tar' → 'libarchive'，'zip:libarchive:mixed' → 'zip:libarchive'，
+ * 非归档来源 → ''）。archiveRenderer 由此接线递归深度。 */
+export function archiveChainOf(storeId: string): string {
   const segs = storeId.split(':');
   const chain: string[] = [];
   for (const s of segs) {
-    if (s !== 'zip') break;
+    if (s !== 'zip' && s !== 'libarchive') break;
     chain.push(s);
   }
   return chain.join(':');
 }
 
-function isArchiveEntry(path: string): boolean {
+/** zip 旧名兼容别名（T4 前 API；语义已泛化为归档链） */
+export const zipChainOf = archiveChainOf;
+
+export function isArchiveEntry(path: string): boolean {
   const ext = path.split('.').pop()?.toLowerCase() ?? '';
   return ARCHIVE_EXTS.has(ext);
 }
@@ -43,6 +47,31 @@ export function normalizeZipError(err: unknown): unknown {
 
 function truncateName(name: string): string {
   return name.length > 24 ? `${name.slice(0, 24)}…` : name;
+}
+
+/** 全量条目快照（路径 → 大小，目录为 -1 哨兵）下的直接子项列举：虚拟目录聚合，
+ * 目录优先 + naturalCompare 自然排序。zip/libarchive 两个 store 共用。 */
+export function listTreeChildren(sizes: Map<string, number>, path: string): TreeNode[] {
+  const prefix = path === '' ? '' : `${path}/`;
+  const dirs = new Set<string>();
+  const files: TreeNode[] = [];
+  for (const [p, size] of sizes) {
+    if (!p.startsWith(prefix)) continue;
+    const rest = p.slice(prefix.length);
+    if (rest === '') continue;
+    const slash = rest.indexOf('/');
+    if (slash === -1) {
+      if (size < 0) dirs.add(rest);
+      else files.push({ name: rest, path: p, kind: 'file', size });
+    } else {
+      dirs.add(rest.slice(0, slash));
+    }
+  }
+  const out: TreeNode[] = [];
+  for (const d of dirs) out.push({ name: d, path: prefix + d, kind: 'dir' });
+  out.push(...files);
+  out.sort((a, b) => (a.kind === b.kind ? naturalCompare(a.name, b.name) : a.kind === 'dir' ? -1 : 1));
+  return out;
 }
 
 /** jszip 的最窄使用面（export = 的 CJS 包，ESM 互操作下类挂在 default，避免与其类型纠缠） */
@@ -90,26 +119,7 @@ export async function createZipStore(
     id: `zip${':zip'.repeat(parentChain ? parentChain.split(':').length : 0)}:${truncateName(name ?? 'archive')}`,
     displayName: () => name ?? 'archive',
     async listChildren(path) {
-      const prefix = path === '' ? '' : `${path}/`;
-      const dirs = new Set<string>();
-      const files: TreeNode[] = [];
-      for (const [p, size] of sizes) {
-        if (!p.startsWith(prefix)) continue;
-        const rest = p.slice(prefix.length);
-        if (rest === '') continue;
-        const slash = rest.indexOf('/');
-        if (slash === -1) {
-          if (size < 0) dirs.add(rest);
-          else files.push({ name: rest, path: p, kind: 'file', size });
-        } else {
-          dirs.add(rest.slice(0, slash));
-        }
-      }
-      const out: TreeNode[] = [];
-      for (const d of dirs) out.push({ name: d, path: prefix + d, kind: 'dir' });
-      out.push(...files);
-      out.sort((a, b) => (a.kind === b.kind ? naturalCompare(a.name, b.name) : a.kind === 'dir' ? -1 : 1));
-      return out;
+      return listTreeChildren(sizes, path);
     },
     async read(path) {
       const depth = parentChain ? parentChain.split(':').length : 0;

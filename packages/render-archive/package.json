@@ -6,10 +6,12 @@
   "types": "src/archive.ts",
   "exports": {
     ".": "./src/archive.ts",
-    "./zipStore": "./src/zipStore.ts"
+    "./zipStore": "./src/zipStore.ts",
+    "./libarchiveStore": "./src/libarchiveStore.ts"
   },
   "dependencies": {
     "@vviewer/core": "workspace:*",
-    "jszip": "^3.10.1"
+    "jszip": "^3.10.1",
+    "libarchive.js": "^2.0.2"
   }
 }

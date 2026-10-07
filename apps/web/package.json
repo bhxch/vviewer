@@ -15,7 +15,8 @@
     "@vviewer/render-binary": "workspace:*",
     "@vviewer/render-doc": "workspace:*",
     "@vviewer/render-media": "workspace:*",
-    "@vviewer/render-text": "workspace:*"
+    "@vviewer/render-text": "workspace:*",
+    "libarchive.js": "^2.0.2"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

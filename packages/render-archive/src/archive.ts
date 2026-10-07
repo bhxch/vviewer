@@ -1,9 +1,13 @@
-// archive.ts — zip 包内树渲染器（M4 Task 3）。
-// render 内部 createZipStore + 自带简单树 UI（<details> 懒展开），点击文件条目派发
-// 'vv-open-entry' CustomEvent（apps/web 的 openFlow.bindArchiveOpenEvents 监听并 addTab），
-// 不改 Renderer 接口、不与 web 包耦合；mountArchiveTree 独立导出供 web 侧复用。
+// archive.ts — 压缩包树渲染器（M4 Task 3 zip / Task 4 tar·7z·rar）。
+// render 内按 magic 分派：PK 头走 jszip（createZipStore），其余走 libarchive.js wasm
+// （createLibarchiveStore，支持 tar/tar.gz/tgz/tbz2/xz/7z/rar）。自带简单树 UI（<details>
+// 懒展开），点击文件条目派发 'vv-open-entry' CustomEvent（apps/web 的
+// openFlow.bindArchiveOpenEvents 监听并 addTab），不改 Renderer 接口、不与 web 包耦合；
+// mountArchiveTree 独立导出供 web 侧复用。构造失败（加密/无法识别）抛中文错误，
+// 由 dispatcher 的错误卡兜底。
 import type { FileSource, Detection, RenderedInstance, Renderer, TreeStore, TreeNode } from '@vviewer/core';
-import { createZipStore, zipChainOf } from './zipStore';
+import { createZipStore, archiveChainOf } from './zipStore';
+import { createLibarchiveStore } from './libarchiveStore';
 
 /** 点击包内文件条目时派发的窗口事件名 */
 export const ARCHIVE_OPEN_EVENT = 'vv-open-entry';
@@ -13,6 +17,16 @@ export interface ArchiveOpenDetail {
   store: TreeStore;
   path: string;
   name: string;
+}
+
+/** zip magic：'PK' + 03/05/07（普通/空/分卷 zip）；其余格式交给 libarchive 识别 */
+function isZipMagic(buffer: Uint8Array): boolean {
+  return (
+    buffer.length >= 4 &&
+    buffer[0] === 0x50 &&
+    buffer[1] === 0x4b &&
+    (buffer[2] === 0x03 || buffer[2] === 0x05 || buffer[2] === 0x07)
+  );
 }
 
 /**
@@ -84,12 +98,14 @@ export function mountArchiveTree(
 export const archiveRenderer: Renderer = {
   id: 'archive',
   label: '压缩包',
-  extensions: ['zip'], // tar 等由 T4 扩展
+  extensions: ['zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar'],
   async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, _det: Detection): Promise<RenderedInstance> {
-    // 递归深度接线：由来源 store id 的前导 'zip' 段推导父链（顶层 zip 的 store 是
-    // localfiles/single 等非 zip 来源 → 链空 → depth 0；包内第 n 层 zip → depth n-1）
-    const parentChain = zipChainOf(source.storeId);
-    const store = await createZipStore(buffer, parentChain || undefined, source.name);
+    // 递归深度接线：由来源 store id 的前导归档段（zip/libarchive）推导父链（顶层归档的
+    // store 是 localfiles/single 等非归档来源 → 链空 → depth 0；包内第 n 层归档 → depth n-1）
+    const parentChain = archiveChainOf(source.storeId);
+    const store = isZipMagic(buffer)
+      ? await createZipStore(buffer, parentChain || undefined, source.name)
+      : await createLibarchiveStore(buffer, parentChain || undefined, source.name);
     const tree = mountArchiveTree(target, store, (path, name) => {
       // 解耦通道：包内文件点击 → 窗口事件；apps/web openFlow.bindArchiveOpenEvents 监听后 addTab，
       // 派发器按扩展名自然路由（txt→code、png→image、zip→递归…）
@@ -97,6 +113,8 @@ export const archiveRenderer: Renderer = {
     });
     return {
       destroy() {
+        // 不在此关闭 libarchive worker：包内条目 tab 仍持有 store 引用懒读，
+        // close 由内层 tab 关闭时接线（T7）；zip store 无 worker，无需处理
         tree.destroy();
       }
     };

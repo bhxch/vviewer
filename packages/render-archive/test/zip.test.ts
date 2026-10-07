@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Detection, FileSource, TreeNode } from '@vviewer/core';
 import { archiveRenderer } from '../src/archive';
 import { ARCHIVE_OPEN_EVENT, type ArchiveOpenDetail } from '../src/archive';
-import { createZipStore, normalizeZipError, zipChainOf } from '../src/zipStore';
+import { createZipStore, normalizeZipError, archiveChainOf } from '../src/zipStore';
 
 async function makeZip(): Promise<Uint8Array> {
   const JSZip = (await import('jszip')).default;
@@ -68,12 +68,12 @@ describe('createZipStore', () => {
     expect(deepest.id).toMatch(/^zip:zip:zip:/);
   });
 
-  it('zipChainOf：由 store id 前导 zip 段推导内层父链', () => {
-    expect(zipChainOf('zip:outer.zip')).toBe('zip');
-    expect(zipChainOf('zip:zip:inner.zip')).toBe('zip:zip');
-    expect(zipChainOf('zip:zip:zip:deep.zip')).toBe('zip:zip:zip');
-    expect(zipChainOf('localfiles:samples')).toBe('');
-    expect(zipChainOf('single:foo.zip')).toBe('');
+  it('archiveChainOf：由 store id 前导归档段推导内层父链', () => {
+    expect(archiveChainOf('zip:outer.zip')).toBe('zip');
+    expect(archiveChainOf('zip:zip:inner.zip')).toBe('zip:zip');
+    expect(archiveChainOf('zip:zip:zip:deep.zip')).toBe('zip:zip:zip');
+    expect(archiveChainOf('localfiles:samples')).toBe('');
+    expect(archiveChainOf('single:foo.zip')).toBe('');
   });
 
   it('depth ≥3 的 store：内嵌 zip 条目 read 抛"嵌套层数超限"，普通条目放行', async () => {
