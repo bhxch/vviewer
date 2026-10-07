@@ -6,6 +6,7 @@ import {
   createLocalFilesStore,
   ensurePermission
 } from '@vviewer/core';
+import { ARCHIVE_OPEN_EVENT } from '@vviewer/render-archive';
 import { saveDirHandle, saveTabs, type TabSnapshot } from './stores/session';
 
 export interface Tab {
@@ -185,7 +186,7 @@ export function openUrl(url: string): void {
 }
 
 /**
- * 监听 render-archive 的包内文件点击事件（'vv-open-entry'）→ addTab 派发器自然路由。
+ * 监听 render-archive 的包内文件点击事件（ARCHIVE_OPEN_EVENT）→ addTab 派发器自然路由。
  * AppShell onMount 调用一次；返回解绑函数（HMR/卸载用）。
  */
 export function bindArchiveOpenEvents(): () => void {
@@ -194,8 +195,8 @@ export function bindArchiveOpenEvents(): () => void {
     if (!detail || typeof detail.path !== 'string') return;
     addTab(detail.store, detail.path, detail.name);
   };
-  window.addEventListener('vv-open-entry', handler);
-  return () => window.removeEventListener('vv-open-entry', handler);
+  window.addEventListener(ARCHIVE_OPEN_EVENT, handler);
+  return () => window.removeEventListener(ARCHIVE_OPEN_EVENT, handler);
 }
 
 // E2E 调试钩子：webkitdirectory input 与 FS Access 均无法被 Playwright 自动化，

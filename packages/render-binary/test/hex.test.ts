@@ -38,3 +38,45 @@ describe('renderHexBytes', () => {
     expect(renderHexBytes(new Uint8Array(0), 0)).toEqual([]);
   });
 });
+
+// ---- renderHex DOM 渲染：worker 不可用/出错时的主线程降级（jsdom 下直测 DOM 结构）----
+import { renderHex } from '../src/hex';
+
+const PNG_BYTES = (() => {
+  const b = new Uint8Array(64);
+  b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+  b.set([0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52], 8);
+  return b;
+})();
+
+describe('renderHex：worker 降级', () => {
+  it('createWorker 返回 null 时降级主线程解析，结构树照常渲染', async () => {
+    const target = document.createElement('div');
+    document.body.append(target);
+    const inst = renderHex(PNG_BYTES, target, { createWorker: () => null });
+    await inst.structReady;
+    expect(target.querySelector('.vv-hex-status')?.textContent).toContain('PNG');
+    expect(target.querySelector('.vv-hex-struct')).not.toBeNull();
+    inst.destroy();
+    target.remove();
+  });
+
+  it('worker 响应错误时降级主线程解析（结果同构）', async () => {
+    const target = document.createElement('div');
+    document.body.append(target);
+    // fake worker：postMessage 即回错误响应 → BinaryClient reject → fallback
+    const bad = {
+      onmessage: null as ((ev: MessageEvent) => void) | null,
+      postMessage(req: { id: number }): void {
+        bad.onmessage?.({ data: { id: req.id, ok: false, error: 'worker boom' } } as MessageEvent);
+      },
+      terminate(): void {}
+    };
+    const inst = renderHex(PNG_BYTES, target, { createWorker: () => bad as unknown as Worker });
+    await inst.structReady;
+    expect(target.querySelector('.vv-hex-status')?.textContent).toContain('PNG');
+    expect(target.querySelector('.vv-hex-struct')).not.toBeNull();
+    inst.destroy();
+    target.remove();
+  });
+});

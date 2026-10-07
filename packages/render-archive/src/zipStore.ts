@@ -1,17 +1,22 @@
 // zipStore.ts — zip 的 TreeStore 实现（M4 Task 3）。
 // jszip 动态 import（重依赖不进主包）；条目路径分段聚合为目录树，
 // 目录优先 + naturalCompare 自然排序（core 公用）。递归预览深度以 parentChain 表达：
-// 顶层 createZipStore(buf) → id 'zip:<name>'；内层传父链（如 'zip'）→ id 'zip:zip:<name>'；
-// depth ≥3 的 store read 一律抛"嵌套层数超限"。加密条目在 read 时捕获 jszip 错误转中文提示。
+// 顶层 createZipStore(buf) → id 'zip:<name>'；内层传父链（由 source.storeId 的前导
+// 'zip' 段经 zipChainOf 推导）→ id 'zip:zip:<name>'。
+// depth ≥ MAX_ARCHIVE_DEPTH 的 store 仅拒绝再展开内嵌压缩包条目（read 抛"嵌套层数超限"），
+// 普通条目照常可读。加密条目在 read 时捕获 jszip 错误转中文提示。
 import type { TreeStore, TreeNode } from '@vviewer/core';
 import { naturalCompare } from '@vviewer/core';
 
-/** 递归预览允许的最大嵌套层数（顶层 depth=0，depth ≥3 拒绝再读） */
+/** 递归预览允许的最大嵌套层数（顶层 depth=0；depth ≥3 的 store 内不能再展开压缩包） */
 export const MAX_ARCHIVE_DEPTH = 3;
 /** zip 输入大小上限（全内存解析） */
 export const MAX_ZIP_INPUT_BYTES = 200 * 1024 * 1024;
+/** 视为"内嵌压缩包"需拒展的扩展名（T4 扩展 tar 等） */
+const ARCHIVE_EXTS = new Set(['zip']);
 
-/** 由 store id 提取父级 zip 嵌套链（'zip:a.zip' → ''；'zip:zip:inner.zip' → 'zip'） */
+/** 由 store id 提取内层压缩包应传的父链（= id 的前导 'zip' 段：'zip:a.zip' → 'zip'，
+ * 'zip:zip:inner.zip' → 'zip:zip'，非 zip 来源 → ''）。archiveRenderer 由此接线递归深度。 */
 export function zipChainOf(storeId: string): string {
   const segs = storeId.split(':');
   const chain: string[] = [];
@@ -19,7 +24,12 @@ export function zipChainOf(storeId: string): string {
     if (s !== 'zip') break;
     chain.push(s);
   }
-  return chain.slice(0, -1).join(':'); // id 尾段是名字，自身的那段 zip 不算父链
+  return chain.join(':');
+}
+
+function isArchiveEntry(path: string): boolean {
+  const ext = path.split('.').pop()?.toLowerCase() ?? '';
+  return ARCHIVE_EXTS.has(ext);
 }
 
 /** jszip read 错误 → 用户可读值（加密条目转换中文 Error，其余透传） */
@@ -103,10 +113,11 @@ export async function createZipStore(
     },
     async read(path) {
       const depth = parentChain ? parentChain.split(':').length : 0;
-      if (depth >= MAX_ARCHIVE_DEPTH) {
+      if (sizes.get(path) === -1) throw new Error(`目录条目无法读取: ${path}`);
+      // 深度限制只拦"再展开内嵌压缩包"：depth 届满的 store 里普通条目照常可读
+      if (depth >= MAX_ARCHIVE_DEPTH && isArchiveEntry(path)) {
         throw new Error(`嵌套层数超限：递归预览最多 ${MAX_ARCHIVE_DEPTH} 层`);
       }
-      if (sizes.get(path) === -1) throw new Error(`目录条目无法读取: ${path}`);
       const entry = zip.file(path);
       if (!entry) throw new Error(`未知路径: ${path}`);
       try {

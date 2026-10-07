@@ -213,7 +213,6 @@ export function parseStruct(head: Uint8Array, opts: ParseOptions = {}): ParseRes
         });
       }
     }
-    if (outOfBudget()) return { root: { name: 'ZIP', offset: 0, size: 30, value: 'zip archive', children }, truncated };
     return { root: { name: 'ZIP', offset: 0, size: 30, value: 'zip archive', children }, truncated };
   }
 

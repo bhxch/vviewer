@@ -3,7 +3,7 @@
 // 'vv-open-entry' CustomEvent（apps/web 的 openFlow.bindArchiveOpenEvents 监听并 addTab），
 // 不改 Renderer 接口、不与 web 包耦合；mountArchiveTree 独立导出供 web 侧复用。
 import type { FileSource, Detection, RenderedInstance, Renderer, TreeStore, TreeNode } from '@vviewer/core';
-import { createZipStore } from './zipStore';
+import { createZipStore, zipChainOf } from './zipStore';
 
 /** 点击包内文件条目时派发的窗口事件名 */
 export const ARCHIVE_OPEN_EVENT = 'vv-open-entry';
@@ -86,7 +86,10 @@ export const archiveRenderer: Renderer = {
   label: '压缩包',
   extensions: ['zip'], // tar 等由 T4 扩展
   async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, _det: Detection): Promise<RenderedInstance> {
-    const store = await createZipStore(buffer, undefined, source.name);
+    // 递归深度接线：由来源 store id 的前导 'zip' 段推导父链（顶层 zip 的 store 是
+    // localfiles/single 等非 zip 来源 → 链空 → depth 0；包内第 n 层 zip → depth n-1）
+    const parentChain = zipChainOf(source.storeId);
+    const store = await createZipStore(buffer, parentChain || undefined, source.name);
     const tree = mountArchiveTree(target, store, (path, name) => {
       // 解耦通道：包内文件点击 → 窗口事件；apps/web openFlow.bindArchiveOpenEvents 监听后 addTab，
       // 派发器按扩展名自然路由（txt→code、png→image、zip→递归…）

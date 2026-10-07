@@ -21,7 +21,7 @@ function nodeToDetails(node: StructNode, open: boolean): HTMLDetailsElement {
   const details = document.createElement('details');
   details.open = open;
   const summary = document.createElement('summary');
-  summary.textContent = node.size > 0 ? `${node.name}` : node.name;
+  summary.textContent = node.name;
   const value = document.createElement('span');
   value.className = 'vv-hex-node-value';
   value.textContent = ` = ${node.value}`;
@@ -95,26 +95,31 @@ export function renderHex(
 
   renderPage();
 
-  // ---- 结构树（Worker 化）----
+  // ---- 结构树（Worker 化，失败降级主线程）----
   let worker: Worker | null = null;
   const structReady = (async (): Promise<void> => {
     try {
       const head = buffer.slice(0, STRUCT_HEAD_BYTES);
+      const fallbackParse = async (): Promise<ParseResult> => {
+        const { parseStruct } = await import('./struct');
+        return parseStruct(head);
+      };
       let result: ParseResult;
-      if (opts.createWorker) {
-        worker = opts.createWorker();
-        if (!worker) return;
+      const w = opts.createWorker?.();
+      if (w) {
+        worker = w;
         // 动态 import 避免把 client 静态拖进依赖图（同 highlight 薄壳模式）
         const { BinaryClient } = await import('./client');
-        const client = new BinaryClient(worker);
+        const client = new BinaryClient(w);
         try {
           result = await client.parseStruct(head);
+        } catch {
+          result = await fallbackParse(); // worker 出错/无响应：主线程同构兜底
         } finally {
           client.dispose();
         }
       } else {
-        const { parseStruct } = await import('./struct');
-        result = parseStruct(head);
+        result = await fallbackParse(); // 无 Worker 可用（环境不支持/创建失败）
       }
       if (!root.isConnected) return;
       if (result.root) {
