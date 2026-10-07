@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { captureToCssClass, themeToCssVars } from '@vviewer/highlight';
+import { captureToCssClass, resolveCapture, themeToCssVars } from '@vviewer/highlight';
 import { renderLineHtml } from '@vviewer/render-text';
 import {
   applyCodeTheme,
@@ -10,6 +10,7 @@ import {
   DEFAULT_CODE_THEME,
   effectiveMode,
   getTheme,
+  HLJS_CAPTURE_TO_VAR,
   listThemes
 } from './theme';
 import { loadSettings } from './stores/settings';
@@ -18,6 +19,17 @@ const STYLE_ID = 'vv-code-theme';
 
 function styleEl(): HTMLStyleElement | null {
   return document.getElementById(STYLE_ID) as HTMLStyleElement | null;
+}
+
+/** 测试侧复算 hljs 近似映射期望输出（与 theme.ts 同一规则：命中取 fg，未命中跳过） */
+function hljsVarsOf(theme: NonNullable<Awaited<ReturnType<typeof getTheme>>>): string {
+  return HLJS_CAPTURE_TO_VAR
+    .map(([capture, cssVar]) => {
+      const fg = resolveCapture(theme, capture).fg;
+      return fg ? `${cssVar}: ${fg};` : null;
+    })
+    .filter((s): s is string => s !== null)
+    .join('\n');
 }
 
 afterEach(() => {
@@ -44,7 +56,7 @@ describe('applyCodeTheme（注入 style#vv-code-theme）', () => {
     expect(styleEl()?.textContent).not.toContain('#e29da7');
   });
 
-  it('两主题切换 style 内容变化（与 themeToCssVars 输出一致）', async () => {
+  it('两主题切换 style 内容变化（与 themeToCssVars + hljs 映射输出一致）', async () => {
     await applyCodeTheme('serika-dark', 'dark');
     const before = styleEl()?.textContent;
     await applyCodeTheme('gruvbox', 'dark');
@@ -53,7 +65,7 @@ describe('applyCodeTheme（注入 style#vv-code-theme）', () => {
     const gruvbox = await getTheme('gruvbox');
     expect(gruvbox).not.toBeNull();
     expect(after).toBe(
-      `/* vviewer 代码主题：gruvbox（dark）——只换 CSS 变量，不重解析 */\n:root {\n${themeToCssVars(gruvbox!, CODE_CAPTURES)}\n}`
+      `/* vviewer 代码主题：gruvbox（dark）——只换 CSS 变量，不重解析 */\n:root {\n${themeToCssVars(gruvbox!, CODE_CAPTURES)}\n${hljsVarsOf(gruvbox!)}\n}`
     );
   });
 
@@ -65,6 +77,51 @@ describe('applyCodeTheme（注入 style#vv-code-theme）', () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(document.querySelectorAll(`#${STYLE_ID}`).length).toBe(1);
     expect(styleEl()?.textContent).toBe(before);
+  });
+});
+
+describe('hljs 兜底近似映射（M7 Task 3：--hljs-* 跟随代码主题）', () => {
+  it('映射表恰为契约 9 条（capture → --hljs-* 变量）', () => {
+    expect(HLJS_CAPTURE_TO_VAR).toEqual([
+      ['keyword', '--hljs-keyword'],
+      ['string', '--hljs-string'],
+      ['comment', '--hljs-comment'],
+      ['constant.numeric', '--hljs-number'],
+      ['function', '--hljs-title'],
+      ['type', '--hljs-type'],
+      ['variable', '--hljs-variable'],
+      ['tag', '--hljs-tag'],
+      ['attribute', '--hljs-attr']
+    ]);
+  });
+
+  it('applyCodeTheme 后 --hljs-* 有主题色值（resolveCapture 最长前缀回退），未命中不覆盖', async () => {
+    await applyCodeTheme('gruvbox', 'dark');
+    const theme = (await getTheme('gruvbox'))!;
+    const text = styleEl()?.textContent ?? '';
+    for (const [capture, cssVar] of HLJS_CAPTURE_TO_VAR) {
+      const fg = resolveCapture(theme, capture).fg;
+      if (fg) expect(text, `${cssVar} 应取 ${capture} 的 fg`).toContain(`${cssVar}: ${fg};`);
+      else expect(text, `${capture} 无 fg 时不应输出 ${cssVar}`).not.toContain(`${cssVar}:`);
+    }
+  });
+
+  it('切主题后 --hljs-* 变化（hljs 兜底着色跟随当前代码主题）', async () => {
+    await applyCodeTheme('serika-dark', 'dark');
+    const before = styleEl()?.textContent?.match(/--hljs-keyword: ([^;]+);/)?.[1];
+    await applyCodeTheme('onelight', 'light');
+    const after = styleEl()?.textContent?.match(/--hljs-keyword: ([^;]+);/)?.[1];
+    expect(before).toBeTruthy();
+    expect(after).toBeTruthy();
+    expect(after).not.toBe(before);
+  });
+
+  it('--hljs-* 与 --vv-ts-* 同在 style#vv-code-theme 单节点内（同一节点追加，不另开 style）', async () => {
+    await applyCodeTheme('gruvbox', 'dark');
+    expect(document.querySelectorAll(`#${STYLE_ID}`).length).toBe(1);
+    const text = styleEl()?.textContent ?? '';
+    expect(text).toContain('--vv-ts-keyword:');
+    expect(text).toContain('--hljs-keyword:');
   });
 });
 
