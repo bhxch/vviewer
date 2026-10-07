@@ -20,7 +20,7 @@ grammar wasm 资产管线：为 M2 语法高亮产出 `apps/web/static/grammars/
 ## aliases.json
 
 `{ helixLangName: { wasm: "tree-sitter-wasms 文件名（不含扩展名）", aliases: [...] } }`。
-**键序 = 高频优先**（javascript → typescript → tsx → python → …），是总量截断的依据。别名覆盖 js/ts/py/rs/sh/c++/golang/yml/rb 等 34 条。
+**键序 = 高频优先**（javascript → typescript → tsx → python → …），是总量截断的依据。别名覆盖 js/ts/py/rs/sh/c++/golang/yml/rb 等 44 条。
 
 ## 资产约束（M2 裁定）
 
@@ -32,6 +32,12 @@ grammar wasm 资产管线：为 M2 语法高亮产出 `apps/web/static/grammars/
 ## 覆盖范围说明
 
 入库的 **36 语言是 tree-sitter-wasms 的预编译子集**；目标 ≥264 语言的完整覆盖由 `--self-build` 路径在含 emcc 的 CI 环境产出（当前环境无 emcc，`out/failure-list.json` 278 条为输入清单）。36 键中 32 个与 helix `languages.json` 键对齐；objc/ql/systemrdl/embedded-template 四键直接采用 wasm 语言标识（helix languages.json 无对应键）。
+
+## 数字口径（对账）
+
+- **278 = 263 + 15**：`build-list.json` 共 278 个可构建语法 = 与 helix `languages.json`（325 键）键对齐的 **263** + 采用 wasm/上游语言标识的非 helix 键 **15**。
+- **manifest 预编译 36**：`--from-wasms` 产出的 manifest 键数为 tree-sitter-wasms 预编译集全量（36），是 278 的子集。
+- **≥264 目标由 self-build 承接**：M2 验收口径为 self-build 可构建数（278 ≥ 264）；当前开发环境无 emcc，`out/failure-list.json` 记录全部 278 条待 CI 环境执行。
 
 ## 环境变量覆盖
 

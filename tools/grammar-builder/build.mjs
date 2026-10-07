@@ -2,7 +2,7 @@
 // grammar wasm 资产构建器，两种模式：
 //   --from-wasms   主路径：从 node_modules/tree-sitter-wasms/out 按 aliases.json 映射拷贝到
 //                  apps/web/static/grammars/{helixLangName}.wasm，计算 sha256 并写 manifest.json。
-//                  单文件 >3MB 跳过；总入库量上限 80MB（aliases.json 顺序 = 高频优先，超限截断）。
+//                  单文件 >8MB 跳过；总入库量上限 80MB（aliases.json 顺序 = 高频优先，超限截断）。
 //   --self-build   备用路径：对 build-list.json 逐个 `tree-sitter build --wasm`。
 //                  emcc 缺失时整批不执行，写 out/failure-list.json（reason: emcc not available）并 exit 0。
 // 用法：node tools/grammar-builder/build.mjs [--from-wasms|--self-build]
@@ -57,7 +57,7 @@ export function detectEmcc() {
 /**
  * --from-wasms 主路径。
  * 返回 { manifest, skipped, truncated }：
- * - skipped: [{ lang, wasm, bytes, reason }]（>3MB 或文件缺失）
+ * - skipped: [{ lang, wasm, bytes, reason }]（>8MB 或文件缺失）
  * - truncated: 总量超 80MB 被截断时的高频优先截断说明
  */
 export function buildFromWasms({
