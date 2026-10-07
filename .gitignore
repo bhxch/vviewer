@@ -31,3 +31,5 @@ apps/web/static/libarchive/
 
 # 系统
 .DS_Store
+# PWA 图标（构建期由 tools/gen-icons.mjs 生成，不入库）
+apps/web/static/icons/
