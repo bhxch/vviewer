@@ -363,6 +363,13 @@ pub(crate) async fn highlight_with_timeout(
         return AppError::bad_request("path or text is required").into_response();
     };
 
+    // CRLF/CR → LF 归一化（final re-review 修复）：path 模式原样读文件、text 模式
+    // 原样收文本，Utf16Index 会在含 \r 的原文上换算——\r 计入前一行长度，CRLF 文件
+    // 的区间相对客户端（renderCode 解码后即归一化，apps/web highlightClient 只发
+    // {path, lang}）整体右移。两模式统一在解析前归一，与客户端口径三方一致；
+    // (canonical_path, mtime, size) 缓存键指向原文件元数据，不受归一化影响。
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+
     // 同步解析：阻塞线程执行，响应侧超时（无法中断线程本身，见模块注释）
     let lang_owned = lang.to_string();
     let handle = tokio::task::spawn_blocking(move || run_highlight(&lang_owned, &text));

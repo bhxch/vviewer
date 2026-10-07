@@ -17,6 +17,13 @@ struct Fixture {
     app: axum::Router,
 }
 
+/// 全局响应缓存是进程级静态：依赖 cache_reset/计数的用例必须串行，
+/// 否则并发用例的 reset 会让对方的 miss/hit 计数快照失效（与单测模块同约定）。
+fn serial_lock() -> std::sync::MutexGuard<'static, ()> {
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    SERIAL.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 fn fixture(compute: bool, token: Option<&str>) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let state =
@@ -152,6 +159,7 @@ async fn highlight_over_20mb_text_413() {
 
 #[tokio::test]
 async fn highlight_path_mode_parses_and_second_call_hits_cache() {
+    let _serial = serial_lock();
     let f = fixture(true, None);
     let dir = f._dir.path();
     std::fs::write(dir.join("main.rs"), RUST_SAMPLE).unwrap();
@@ -253,6 +261,47 @@ async fn highlight_path_mode_directory_400_and_overlarge_file_413() {
     )
     .await;
     assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{body}");
+}
+
+// ---------- path 模式 CRLF 归一化（与客户端 renderCode 口径一致） ----------
+
+#[tokio::test]
+async fn highlight_path_mode_crlf_intervals_on_normalized_text() {
+    let _serial = serial_lock();
+    let f = fixture(true, None);
+    let dir = f._dir.path();
+    // CRLF 文件：客户端按归一化（LF）文本渲染行，服务端若在含 \r 原文上换算
+    // Utf16Index，第二行起区间整体右移（每个前导 \r +1）
+    let crlf = "fn main() {\r\n    let x = 1;\r\n}\r\n";
+    std::fs::write(dir.join("crlf.rs"), crlf).unwrap();
+    cache_reset();
+
+    let (status, body) = post_json(
+        f.app,
+        "/api/compute/highlight",
+        None,
+        json!({ "path": "crlf.rs", "lang": "rust" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // 归一化文本中第二行 "let" 的 UTF-16 起点应为 16；若未归一化会是 17（\r 入账）
+    let normalized = crlf.replace("\r\n", "\n");
+    let let_start = normalized.find("let x").unwrap() as u64;
+    assert_eq!(let_start, 16, "归一化后 let 起点（防用例自身漂移）");
+    let captures: Vec<&str> =
+        body["captures"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+    let intervals = body["intervals"].as_array().unwrap();
+    let has_let_keyword = intervals.iter().any(|iv| {
+        let t = iv.as_array().unwrap();
+        let (s, e, ci) = (t[0].as_u64().unwrap(), t[1].as_u64().unwrap(), t[2].as_u64().unwrap() as usize);
+        s == let_start && e == let_start + 3 && (captures[ci] == "keyword" || captures[ci].starts_with("keyword."))
+    });
+    assert!(
+        has_let_keyword,
+        "\"let\" 应有起点恰在归一化位置 {let_start} 的 keyword 区间: {intervals:?}"
+    );
+    cache_reset();
 }
 
 // ---------- 开关与鉴权 ----------
