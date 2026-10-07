@@ -3,6 +3,7 @@ export * from './types';
 export * from './compute/types';
 export * from './compute/router';
 export * from './compute/remote';
+export * from './compute/search';
 export * from './detect';
 export * from './registry/registry';
 export * from './dispatch/dispatcher';

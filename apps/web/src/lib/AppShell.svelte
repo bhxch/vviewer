@@ -6,6 +6,7 @@
   import FileTree from './FileTree.svelte';
   import Toc from './Toc.svelte';
   import MetaPanel from './MetaPanel.svelte';
+  import GlobalSearchPanel from './GlobalSearchPanel.svelte';
   import type { TreeStore, TocEntry } from '@vviewer/core';
   import { tabStore, addTab, activateTab, tryRestoreDirectory, bindArchiveOpenEvents } from './openFlow.svelte';
   import { loadSession, saveDirHandle, type TabSnapshot } from './stores/session';
@@ -16,6 +17,8 @@
   let drawerOpen = $state(false);
   /** 活动渲染实例的目录（ViewerPane ontoc 回调上行；markdown tab 有数据，其余为空） */
   let tocEntries = $state<TocEntry[]>([]);
+  /** 全局搜索面板开关（M6 T4）：Ctrl+Shift+F 打开，Esc 面板内关闭 */
+  let globalSearchOpen = $state(false);
 
   // 左栏文件树跟随目录 tab（目录 tab 由 addDirStoreTab 替换语义保证至多一个）
   $effect(() => {
@@ -94,6 +97,22 @@
   function onTreeOpen(e: { path: string; name: string }): void {
     if (dirStore) addTab(dirStore, e.path, e.name);
   }
+
+  // Ctrl+Shift+F 切换全局搜索（非输入焦点时才接管——复用 M3 '/' 的 inField 判定）
+  $effect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f')) return;
+      const t = e.target as HTMLElement | null;
+      const inField =
+        t !== null &&
+        (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+      if (inField) return;
+      e.preventDefault();
+      globalSearchOpen = !globalSearchOpen;
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
 </script>
 
 <div class="vv-shell" class:drawer={drawerOpen}>
@@ -121,6 +140,9 @@
     </aside>
   </div>
   <button class="vv-drawer-toggle" aria-label="切换侧栏" onclick={() => (drawerOpen = !drawerOpen)}>☰</button>
+  {#if globalSearchOpen}
+    <GlobalSearchPanel store={dirStore} onclose={() => (globalSearchOpen = false)} />
+  {/if}
 </div>
 
 <style>

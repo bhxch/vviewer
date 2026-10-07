@@ -12,7 +12,6 @@
  * 调用侧组装（便于单测注入 mock，也让网络策略留在应用层）。
  */
 
-import type { SearchMatch } from '../types';
 import type {
   ComputePolicy,
   ComputeResult,
@@ -52,12 +51,16 @@ export interface ComputeRouter {
     localFn: () => Promise<string>,
     remoteFn?: RemoteFn<string, [text: string, options: MarkdownComputeOptions | undefined]>
   ): Promise<ComputeResult<string>>;
-  routeSearch(
+  /**
+   * 跨文件/文件内搜索共用裁决：泛型数据形状（文件内 SearchMatch、跨文件
+   * GrepMatch 等任意命中数组），router 只负责 policy × 能力 × 来源裁决与回退。
+   */
+  routeSearch<T>(
     src: ComputeSource,
     query: string,
-    localFn: () => Promise<SearchMatch[]>,
-    remoteFn?: RemoteFn<SearchMatch[], [src: ComputeSource, query: string]>
-  ): Promise<ComputeResult<SearchMatch[]>>;
+    localFn: () => Promise<T[]>,
+    remoteFn?: RemoteFn<T[], [src: ComputeSource, query: string]>
+  ): Promise<ComputeResult<T[]>>;
   /** 组装远程请求的 URL 与鉴权头；未连接服务器（base 为 null）返回 null。 */
   remoteCall(apiPath: string): RemoteComputeCall | null;
 }
@@ -127,7 +130,7 @@ export function createComputeRouter(opts: ComputeRouterOptions): ComputeRouter {
         remoteFn ? () => remoteFn(text, options) : undefined
       );
     },
-    routeSearch(src, query, localFn, remoteFn) {
+    routeSearch<T>(src: ComputeSource, query: string, localFn: () => Promise<T[]>, remoteFn?: RemoteFn<T[], [src: ComputeSource, query: string]>) {
       const decision = decisionFor(hasServerPath(src), remoteFn !== undefined);
       return runRouted(decision, opts.policy, localFn, remoteFn ? () => remoteFn(src, query) : undefined);
     },
