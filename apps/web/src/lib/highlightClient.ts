@@ -1,7 +1,15 @@
 import { browser } from '$app/environment';
-import { HighlightClient } from '@vviewer/highlight';
+import { HighlightClient, HighlightCanceledError } from '@vviewer/highlight';
 import { attachHighlightClient, type CodeHighlightClient, type HighlightCallContext } from '@vviewer/render-text';
-import { createComputeRouter, type ComputeRouter, type ComputeSource, type HighlightInterval } from '@vviewer/core';
+import {
+  createComputeRouter,
+  decodeHighlightResponse,
+  encodeCanceled,
+  isCanceledMessage,
+  type ComputeRouter,
+  type ComputeSource,
+  type HighlightInterval
+} from '@vviewer/core';
 import { loadCapabilities, loadLastServer } from './openFlow.svelte';
 import { loadSettings } from './stores/settings';
 
@@ -49,9 +57,11 @@ const computeRouter: ComputeRouter = createComputeRouter({
 });
 
 /**
- * 远程高亮：POST /api/compute/highlight（Bearer），响应 { intervals }。
- * 未连接服务器（无 base）抛错——router 的 auto 会回退本地，remote 策略如实报错。
- * （服务端 highlight 端点在 M6 后续任务实现；本批该请求 404 时 auto 回退本地。）
+ * 远程高亮：POST /api/compute/highlight（Bearer），body {path, lang}。
+ * 响应为紧凑编码 {intervals: [[s,e,ci]...], captures: [name...]}，
+ * 经 decodeHighlightResponse 展开为 HighlightInterval[]。
+ * 未连接服务器或无服务端 path 抛错——router 的 auto 会回退本地，
+ * remote 策略如实报错（不静默回退）。
  */
 async function remoteHighlight(
   src: ComputeSource,
@@ -59,15 +69,14 @@ async function remoteHighlight(
 ): Promise<HighlightInterval[]> {
   const call = computeRouter.remoteCall('/api/compute/highlight');
   if (!call) throw new Error('未连接服务器，无法远程高亮');
+  if (!src.path) throw new Error('远程高亮需要文件的服务端 path');
   const res = await fetch(call.url, {
     method: 'POST',
     headers: { ...call.headers, 'content-type': 'application/json' },
-    body: JSON.stringify({ src: { path: src.path, storeId: src.storeId }, lang })
+    body: JSON.stringify({ path: src.path, lang })
   });
   if (!res.ok) throw new Error(`远程高亮失败: HTTP ${res.status}`);
-  const body = (await res.json()) as { intervals?: unknown };
-  if (!Array.isArray(body.intervals)) throw new Error('远程高亮响应缺少 intervals');
-  return body.intervals as HighlightInterval[];
+  return decodeHighlightResponse(await res.json());
 }
 
 /**
@@ -87,18 +96,25 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
         dbg.__vvLastHighlightOk = ok;
       };
       const src = ctx?.src;
-      // runRouted 从不 reject（失败折叠为 ok:false），onFulfilled 内统一回调
+      // runRouted 从不 reject（失败折叠为 ok:false），onFulfilled 内统一回调；
+      // 取消（tab 切换）身份经 message 前缀穿过折叠，重建 HighlightCanceledError
+      // 抛出（render-text 以该类型静默丢弃，不再降级 hljs）。
       return computeRouter
         .routeHighlight(
           src ? { ...src, text } : { text },
           lang,
-          () => client.highlight(text, lang),
+          () =>
+            client.highlight(text, lang).catch((err: unknown) => {
+              if (err instanceof Error && err.name === 'HighlightCanceled') throw encodeCanceled(err);
+              throw err;
+            }),
           src ? (s, l) => remoteHighlight(s, l) : undefined
         )
         .then((res) => {
           ctx?.onWhere?.(res.where);
           record(res.ok);
           if (res.ok && res.data) return res.data;
+          if (isCanceledMessage(res.error)) throw new HighlightCanceledError();
           throw new Error(res.error ?? '高亮失败');
         });
     }
