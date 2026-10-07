@@ -10,7 +10,7 @@ import {
   normalizeServerBase
 } from '@vviewer/core';
 import { ARCHIVE_OPEN_EVENT } from '@vviewer/render-archive';
-import { saveDirHandle, saveTabs, type TabSnapshot } from './stores/session';
+import { saveDirHandle, saveTabs, maxTabSeqOf, type TabSnapshot } from './stores/session';
 import { releaseStoreIfLast } from './storeRelease';
 
 export interface Tab {
@@ -152,6 +152,16 @@ export async function persistScroll(id: string, top: number): Promise<void> {
 
 export function openFiles(files: File[]): void {
   for (const f of files) addTab(createSingleFileStore(f), f.name, f.name);
+}
+
+/**
+ * 以会话快照的最大 tab id 为基推进 seq（终审 M7：占位 tab 防线）。
+ * 恢复的占位 tab 保留快照旧 id（如 t5），seq 若从 0 重新计数，新 tab 的 t1/t2
+ * 会与占位 id 撞车（activate/close 按 id 找首个匹配即错乱）。AppShell.restore
+ * 在恢复循环前调用；id 解析（tabSeqOf/maxTabSeqOf）在 stores/session 可单测。
+ */
+export function seedSeqFromSnapshots(snaps: ReadonlyArray<TabSnapshot>): void {
+  seq = Math.max(seq, maxTabSeqOf(snaps.map((s) => s.id)));
 }
 
 export async function openDirectoryViaPicker(): Promise<void> {

@@ -8,7 +8,7 @@
   import MetaPanel from './MetaPanel.svelte';
   import GlobalSearchPanel from './GlobalSearchPanel.svelte';
   import type { TreeStore, TocEntry } from '@vviewer/core';
-  import { tabStore, addTab, activateTab, tryRestoreDirectory, bindArchiveOpenEvents } from './openFlow.svelte';
+  import { tabStore, addTab, activateTab, tryRestoreDirectory, bindArchiveOpenEvents, seedSeqFromSnapshots } from './openFlow.svelte';
   import { loadSession, saveDirHandle, type TabSnapshot } from './stores/session';
   import { loadSettings } from './stores/settings';
 
@@ -42,6 +42,8 @@
     // 恢复失败（IndexedDB 异常、快照损坏等）不得阻断应用启动：降级为空会话
     try {
       const { tabs: saved, lastDirHandle } = await loadSession();
+      // 新 tab id 以快照最大序号为基：占位 tab 保留快照旧 id，seq 从 0 重计数会撞车
+      seedSeqFromSnapshots(saved);
       let dirStoreAtRestore: TreeStore | null = null;
       if (lastDirHandle) {
         const ok = await tryRestoreDirectory(lastDirHandle);
