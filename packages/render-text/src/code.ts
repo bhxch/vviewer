@@ -1,5 +1,5 @@
-import type { Renderer, Encoding, Detection, FileSource, RenderedInstance, SearchMatch } from '@vviewer/core';
-import { getRemoteMeta } from '@vviewer/core';
+import type { Renderer, Encoding, Detection, FileSource, RenderedInstance, SearchMatch, ComputeSource, ComputeWhere } from '@vviewer/core';
+import { getRemoteBase, getRemoteMeta } from '@vviewer/core';
 import { detectLanguage, HighlightCanceledError, captureToCssClass, type HighlightInterval } from '@vviewer/highlight';
 
 export type { HighlightInterval };
@@ -292,9 +292,17 @@ export function renderLineHtml(text: string, segs: readonly LineSeg[] | undefine
   return out;
 }
 
+/** 单次高亮调用的路由上下文（M6 compute 路由；不参与渲染结果本身） */
+export interface HighlightCallContext {
+  /** 计算来源：远程 store 的文件带服务端 path（auto 策略据此走远程），本地文件缺省 */
+  src?: ComputeSource;
+  /** 执行位置回调：路由结果（local/remote）到达后调用（状态栏执行位置指示） */
+  onWhere?: (where: ComputeWhere) => void;
+}
+
 /** tree-sitter 高亮客户端最小接口（HighlightClient 结构兼容；测试可注 fake） */
 export interface CodeHighlightClient {
-  highlight(text: string, lang: string): Promise<HighlightInterval[]>;
+  highlight(text: string, lang: string, ctx?: HighlightCallContext): Promise<HighlightInterval[]>;
 }
 
 let attachedClient: CodeHighlightClient | null = null;
@@ -323,6 +331,8 @@ export interface RenderCodeHandle {
   getScrollHost(): HTMLElement;
   /** 当前生效的高亮引擎（实时；状态栏指示器用） */
   getEngine(): CodeEngine;
+  /** 高亮计算执行位置（M6：'local'|'remote'；null = 未发生计算路由，如纯文本）。状态栏指示器用 */
+  getComputeWhere(): ComputeWhere | null;
   /** 文件内搜索：行数组扫描（缓存上次 query），空 query 返回 []（退出搜索语义） */
   search(query: string): Promise<SearchMatch[]>;
   /** 跳到第 index 个命中：滚动到该行 + 行级临时高亮（1.5s 或直到下一次跳转） */
@@ -332,7 +342,7 @@ export interface RenderCodeHandle {
 export function renderCode(
   buffer: Uint8Array,
   target: HTMLElement,
-  opts: { encoding?: Encoding; highlight?: boolean; ext?: string; lang?: string } = {}
+  opts: { encoding?: Encoding; highlight?: boolean; ext?: string; lang?: string; computeSrc?: ComputeSource } = {}
 ): RenderCodeHandle {
   const enc = DECODERS[opts.encoding ?? 'utf-8'];
   const text = new TextDecoder(enc, { fatal: false }).decode(buffer);
@@ -352,6 +362,9 @@ export function renderCode(
   let destroyed = false;
   // 引擎实时值：tree-sitter 主路径在区间到达前为 pending；hljs-block/plain 策略即终值
   let engine: CodeEngine = strategy === 'tree-sitter' ? 'pending' : strategy;
+  // 高亮计算执行位置（M6）：null = 未发生计算路由（纯文本）；tree-sitter 主路径
+  // 等路由结果回填；hljs-block/hljs 兜底是本地引擎，置 'local'。状态栏指示读这里。
+  let computeWhere: ComputeWhere | null = strategy === 'hljs-block' ? 'local' : null;
   // 文件内搜索状态：上次 query 结果缓存 + 当前行级高亮
   let lastQuery: string | null = null;
   let lastMatches: SearchMatch[] = [];
@@ -440,6 +453,7 @@ export function renderCode(
     }
     if (destroyed) return;
     engine = 'hljs';
+    computeWhere = 'local'; // hljs 兜底是本地引擎：执行位置随之回本地
     hlLines = splitHighlightedLines(value, lines.length);
     scroller?.refresh(true);
   }
@@ -461,7 +475,12 @@ export function renderCode(
         return;
       }
       try {
-        const intervals = await client.highlight(text, lang);
+        const intervals = await client.highlight(text, lang, {
+          src: opts.computeSrc,
+          onWhere: (w) => {
+            computeWhere = w;
+          }
+        });
         if (destroyed) return;
         engine = 'tree-sitter';
         lineSegs = new Map(assignIntervalsToLines(intervals, lineOffsets).map((a) => [a.line, a.segs]));
@@ -495,6 +514,7 @@ export function renderCode(
       return pre;
     },
     getEngine: () => engine,
+    getComputeWhere: () => computeWhere,
     search(query) {
       if (query === lastQuery) return Promise.resolve(lastMatches);
       lastQuery = query;
@@ -537,17 +557,23 @@ export const codeRenderer: Renderer = {
     // 与 languages.json 同源，比本地扩展名表/编码启发式更准（无扩展名脚本等）。
     // opts.lang 有值时 renderCode 直接采用、跳过 detectLanguage（一处 if 的裁决）。
     const meta = getRemoteMeta(source.storeId, source.path);
+    // M6 compute 路由：只有远程 store 的文件带服务端 path（auto 策略据此走远程高亮）
+    const computeSrc: ComputeSource | undefined =
+      getRemoteBase(source.storeId) !== undefined ? { path: source.path, storeId: source.storeId } : undefined;
     const inst = renderCode(buffer, target, {
       encoding: meta?.encoding ?? det.encoding,
       highlight: true,
       ext: det.ext,
-      lang: meta?.lang ?? undefined
+      lang: meta?.lang ?? undefined,
+      computeSrc
     });
     // getScrollHost/getEngine 供 ViewerPane 接滚动持久化与引擎指示器；
-    // search/gotoMatch 供 SearchPanel（Task 6）。结构化扩展 RenderedInstance，不动 core。
+    // getComputeWhere 供状态栏执行位置指示（M6）；search/gotoMatch 供 SearchPanel（Task 6）。
+    // 结构化扩展 RenderedInstance，不动 core。
     const instance: RenderedInstance & {
       getScrollHost(): HTMLElement;
       getEngine(): CodeEngine;
+      getComputeWhere(): ComputeWhere | null;
       search(query: string): Promise<SearchMatch[]>;
       gotoMatch(index: number): void;
     } = {
@@ -559,6 +585,9 @@ export const codeRenderer: Renderer = {
       },
       getEngine() {
         return inst.getEngine();
+      },
+      getComputeWhere() {
+        return inst.getComputeWhere();
       },
       search(query) {
         return inst.search(query);

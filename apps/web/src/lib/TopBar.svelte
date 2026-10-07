@@ -48,6 +48,13 @@
     void applyCodeTheme(name, mode);
   }
 
+  /** 计算策略三态（M6）：下次高亮/渲染调用即生效（router 每次实时读 settings） */
+  function onComputePolicyChange(e: Event): void {
+    const v = (e.currentTarget as HTMLSelectElement).value;
+    if (v === 'auto' || v === 'local' || v === 'remote') settings.computePolicy = v;
+    saveSettings(settings);
+  }
+
   function onPick(e: Event): void {
     const input = e.currentTarget as HTMLInputElement;
     if (input.files) openFiles([...input.files]);
@@ -131,6 +138,16 @@
   <button onclick={cycleTheme}>
     主题：{settings.themeMode === 'system' ? '跟随系统' : settings.themeMode === 'light' ? '亮' : '暗'}
   </button>
+  <select
+    value={settings.computePolicy}
+    onchange={onComputePolicyChange}
+    aria-label="计算策略"
+    title="计算策略：决定高亮等计算在本地还是服务器执行"
+  >
+    <option value="auto">计算: 自动</option>
+    <option value="local">计算: 本地</option>
+    <option value="remote">计算: 远程</option>
+  </select>
   <select value={currentCodeTheme} onchange={onCodeThemeChange} aria-label="代码主题" title="代码主题">
     {#each codeThemeOptions as { group, themes } (group)}
       <optgroup label={group}>
