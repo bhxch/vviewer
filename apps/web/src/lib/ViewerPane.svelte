@@ -71,6 +71,7 @@
   $effect(() => {
     if (!host || !tab || tab.source.path === '') return;
     const current = tab;
+    void current.rev; // SSE 变更刷新：读入 rev 使 effect 依赖它，自增即重跑（重读+重渲染）
     let cancelled = false;
     void (async () => {
       live?.destroy();

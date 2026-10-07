@@ -4,7 +4,10 @@ import {
   createUrlStore,
   createLocalFsStore,
   createLocalFilesStore,
-  ensurePermission
+  createRemoteStore,
+  ensurePermission,
+  getRemoteBase,
+  normalizeServerBase
 } from '@vviewer/core';
 import { ARCHIVE_OPEN_EVENT } from '@vviewer/render-archive';
 import { saveDirHandle, saveTabs, type TabSnapshot } from './stores/session';
@@ -16,6 +19,8 @@ export interface Tab {
   active: boolean;
   /** 会话恢复的占位 tab：内容无法自动还原，需用户重新打开 */
   unrestorable?: boolean;
+  /** 渲染代数：SSE 变更刷新自增（ViewerPane 渲染 effect 依赖它重跑）；不进会话快照 */
+  rev?: number;
 }
 
 let seq = 0;
@@ -23,10 +28,13 @@ let seq = 0;
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
 function snapshot(t: Tab): TabSnapshot {
+  // remote tab 额外记服务端 base（显示名仍为 host）：M7 重连恢复需要 scheme+host+port
+  const storeBase = getRemoteBase(t.source.storeId);
   return {
     id: t.id,
     storeId: t.source.storeId,
     storeLabel: t.source.storeLabel,
+    ...(storeBase !== undefined ? { storeBase } : {}),
     path: t.source.path,
     name: t.source.name,
     kind: t.source.storeId.startsWith('localfs:') ? 'restorable' : 'rename-only',
@@ -91,6 +99,18 @@ class TabCollection {
   activate(id: string): void {
     for (const t of this.list) t.active = t.id === id;
     void persist();
+  }
+
+  /**
+   * SSE 变更刷新（M5）：重读并重渲染命中 store+path 的 tab。
+   * rev 自增使 ViewerPane 的渲染 effect（依赖 tab 代理）重跑；内容不在会话快照内，无需 persist。
+   */
+  refreshPaths(storeId: string, paths: string[]): void {
+    for (const t of this.list) {
+      if (t.source.storeId !== storeId) continue;
+      if (paths.length > 0 && !paths.includes(t.source.path)) continue;
+      t.rev = (t.rev ?? 0) + 1;
+    }
   }
 
   /** 滚动位置即时写入内存，saveTabs 落盘走 300ms 尾随防抖 */
@@ -170,6 +190,96 @@ function openDirectoryViaInputFallback(): void {
     if (input.files) openDirectoryViaInput(input.files);
   };
   input.click();
+}
+
+// ---------- 服务器连接（M5） ----------
+
+/** 会话内上次成功连接的服务器（sessionStorage，不做持久）。 */
+export interface LastServer {
+  baseUrl: string;
+  token: string | null;
+}
+
+const LAST_SERVER_KEY = 'vviewer-last-server';
+
+/** 目录 tab 显示名：取地址 host（解析失败退回原串）。 */
+function serverLabel(base: string): string {
+  try {
+    return new URL(base).host;
+  } catch {
+    return base;
+  }
+}
+
+/**
+ * 连接 vviewer 文件服务器：GET /api/health 校验（capabilities 须含 file-server）
+ * → POST /api/ticket 鉴权预检（health 免认证，需受保护端点实际验 token）
+ * → createRemoteStore（watch 订阅 SSE 变更）→ addDirStoreTab（目录 tab 替换语义）
+ * → 记入 sessionStorage。失败抛错给 UI 展示；连接句柄不可持久化，重连本期需手动（M7 恢复）。
+ */
+export async function connectServer(baseUrl: string, token: string | null): Promise<void> {
+  const base = normalizeServerBase(baseUrl); // 缺 scheme 补 http://、去尾部斜杠
+  const tok = token?.trim() ? token.trim() : null;
+
+  const headers: Record<string, string> = {};
+  if (tok) headers.authorization = `Bearer ${tok}`;
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/health`, { headers });
+  } catch {
+    throw new Error(`无法连接 ${base}：网络错误或地址不可达`);
+  }
+  if (!res.ok) throw new Error(`服务器响应异常: HTTP ${res.status}`);
+  let caps: { capabilities?: unknown };
+  try {
+    caps = (await res.json()) as { capabilities?: unknown };
+  } catch {
+    throw new Error('health 响应不是有效 JSON');
+  }
+  if (!Array.isArray(caps.capabilities) || !caps.capabilities.includes('file-server')) {
+    throw new Error('目标不是 vviewer 文件服务器（缺少 file-server 能力）');
+  }
+
+  // 鉴权预检：health 免认证，错误 token 也能过能力校验——用 Bearer 保护的
+  // ticket 端点实际验证令牌，避免"假连接成功后所有数据请求 401、目录树全空"
+  let authRes: Response;
+  try {
+    authRes = await fetch(`${base}/api/ticket`, { method: 'POST', headers });
+  } catch {
+    throw new Error(`无法连接 ${base}：网络错误或地址不可达`);
+  }
+  if (!authRes.ok) {
+    throw new Error(
+      authRes.status === 401 ? '鉴权失败：令牌缺失或错误（HTTP 401）' : `服务器响应异常: HTTP ${authRes.status}`
+    );
+  }
+
+  const store = createRemoteStore(base, tok, serverLabel(base));
+  // SSE 变更订阅：服务端推送 changed → 命中 path 的 tab 重读重渲染；
+  // store 关闭（最后一个持有 tab 关闭 / 被新连接替换）由引用计数接线调 close() 停流
+  store.watch((paths) => tabStore.refreshPaths(store.id, paths));
+  addDirStoreTab(store);
+  try {
+    sessionStorage.setItem(
+      LAST_SERVER_KEY,
+      JSON.stringify({ baseUrl: base, token: tok } satisfies LastServer)
+    );
+  } catch {
+    // 存储不可用（隐私模式等）：连接本身不受影响
+  }
+}
+
+/** 读取会话内上次成功连接的服务器（供连接表单预填；无记录/损坏返回 null）。 */
+export function loadLastServer(): LastServer | null {
+  try {
+    const raw = sessionStorage.getItem(LAST_SERVER_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as Partial<LastServer>;
+    if (typeof v.baseUrl !== 'string' || v.baseUrl === '') return null;
+    return { baseUrl: v.baseUrl, token: typeof v.token === 'string' && v.token !== '' ? v.token : null };
+  } catch {
+    return null;
+  }
 }
 
 /** 目录来源以一个"目录 tab"表达：path=''，ViewerPane 显示引导提示，文件树渲染在左栏 */

@@ -2,6 +2,8 @@ export interface TabSnapshot {
   id: string;
   storeId: string;
   storeLabel: string;
+  /** RemoteStore 的服务端 base（scheme+host+port）；仅 remote tab 携带，M7 重连恢复用。 */
+  storeBase?: string;
   path: string;
   name: string;
   kind: 'restorable' | 'rename-only';

@@ -13,6 +13,13 @@ describe('session store', () => {
     const { tabs: loaded } = await loadSession();
     expect(loaded).toEqual(tabs);
   });
+  it('round-trips optional storeBase on remote tab snapshots', async () => {
+    const tabs = [{ id: 't2', storeId: 'remote:abcd1234', storeLabel: '127.0.0.1:8321', storeBase: 'http://127.0.0.1:8321', path: '', name: 'srv', kind: 'rename-only' as const, scrollTop: 0, active: true }];
+    await saveTabs(tabs);
+    const { tabs: loaded } = await loadSession();
+    expect(loaded).toEqual(tabs);
+    expect(loaded[0]?.storeBase).toBe('http://127.0.0.1:8321');
+  });
   it('settings round-trip with defaults', () => {
     expect(loadSettings()).toEqual({
       themeMode: 'system',

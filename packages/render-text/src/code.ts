@@ -1,4 +1,5 @@
 import type { Renderer, Encoding, Detection, FileSource, RenderedInstance, SearchMatch } from '@vviewer/core';
+import { getRemoteMeta } from '@vviewer/core';
 import { detectLanguage, HighlightCanceledError, captureToCssClass, type HighlightInterval } from '@vviewer/highlight';
 
 export type { HighlightInterval };
@@ -532,8 +533,16 @@ export const codeRenderer: Renderer = {
     'license', 'makefile', 'diff', 'patch'
   ],
   async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection) {
-    void source;
-    const inst = renderCode(buffer, target, { encoding: det.encoding, highlight: true, ext: det.ext });
+    // 远端文件（M5 RemoteStore）的服务端检测头纠偏：X-VV-Lang/X-VV-Encoding
+    // 与 languages.json 同源，比本地扩展名表/编码启发式更准（无扩展名脚本等）。
+    // opts.lang 有值时 renderCode 直接采用、跳过 detectLanguage（一处 if 的裁决）。
+    const meta = getRemoteMeta(source.storeId, source.path);
+    const inst = renderCode(buffer, target, {
+      encoding: meta?.encoding ?? det.encoding,
+      highlight: true,
+      ext: det.ext,
+      lang: meta?.lang ?? undefined
+    });
     // getScrollHost/getEngine 供 ViewerPane 接滚动持久化与引擎指示器；
     // search/gotoMatch 供 SearchPanel（Task 6）。结构化扩展 RenderedInstance，不动 core。
     const instance: RenderedInstance & {
