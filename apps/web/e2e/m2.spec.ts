@@ -57,7 +57,7 @@ test('sample.ts 走 tree-sitter 主路径（ts-* span），切换代码主题零
   await expect(tsSpans.first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.vv-code-pre span[class^="ts-keyword"]').first()).toBeVisible();
   // 引擎状态条实时反映当前引擎（getEngine 透传）
-  await expect(page.locator('.vv-statusbar')).toHaveText('高亮: tree-sitter', { timeout: 20_000 });
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 20_000 }); // M6 状态栏追加执行位置后缀，改含文本断言
 
   const before = await page.evaluate(() => ({
     count: document.querySelectorAll('.vv-code-pre span[class^="ts-"]').length,
@@ -101,7 +101,7 @@ test('sample.rs（查询失配）自动降级 hljs 整文件', async ({ page }) 
   const hljsSpans = page.locator('.vv-code-pre span[class^="hljs-"]');
   await expect(hljsSpans.first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.vv-code-pre span[class^="ts-"]')).toHaveCount(0);
-  await expect(page.locator('.vv-statusbar')).toHaveText('高亮: hljs 兜底', { timeout: 20_000 });
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: hljs 兜底', { timeout: 20_000 });
   // M3 起 sample.md 归 markdownRenderer（markdown 渲染断言在 m3.spec.ts），不再是 code 降级链的载体
 });
 
@@ -114,7 +114,7 @@ test('6MB 文本按降级链走 hljs 分块，不发起 tree-sitter 高亮', asy
   await expect(page.locator('.vv-code-pre .vv-code-line').first()).toBeVisible();
   await expect(page.locator('.vv-code-pre span[class^="hljs-"]').first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.vv-code-pre span[class^="ts-"]')).toHaveCount(0);
-  await expect(page.locator('.vv-statusbar')).toHaveText('高亮: hljs 分块', { timeout: 20_000 });
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: hljs 分块', { timeout: 20_000 });
   // 本页面从未发起过 tree-sitter 高亮请求（__vvLastHighlight* 未被写入）
   const lang = await page.evaluate(() => (window as unknown as { __vvLastHighlightLang?: string }).__vvLastHighlightLang);
   expect(lang).toBeUndefined();
@@ -129,7 +129,7 @@ test('1.9MB 文本 tree-sitter 高亮性能计时（__vvLastHighlightMs，预算
 
   const tsSpans = page.locator('.vv-code-pre span[class^="ts-"]');
   await expect(tsSpans.first()).toBeVisible({ timeout: 60_000 });
-  await expect(page.locator('.vv-statusbar')).toHaveText('高亮: tree-sitter', { timeout: 20_000 });
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 20_000 }); // M6 状态栏追加执行位置后缀，改含文本断言
 
   const ms = await page.evaluate(() => ({
     ms: (window as unknown as { __vvLastHighlightMs?: number }).__vvLastHighlightMs,

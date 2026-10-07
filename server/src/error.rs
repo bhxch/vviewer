@@ -17,6 +17,10 @@ impl AppError {
         Self(StatusCode::BAD_REQUEST, msg.into())
     }
 
+    pub fn payload_too_large(msg: impl Into<String>) -> Self {
+        Self(StatusCode::PAYLOAD_TOO_LARGE, msg.into())
+    }
+
     pub fn forbidden(msg: impl Into<String>) -> Self {
         Self(StatusCode::FORBIDDEN, msg.into())
     }
@@ -27,6 +31,10 @@ impl AppError {
 
     pub fn internal(msg: impl Into<String>) -> Self {
         Self(StatusCode::INTERNAL_SERVER_ERROR, msg.into())
+    }
+
+    pub fn not_implemented(msg: impl Into<String>) -> Self {
+        Self(StatusCode::NOT_IMPLEMENTED, msg.into())
     }
 }
 

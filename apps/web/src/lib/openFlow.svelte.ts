@@ -202,6 +202,20 @@ export interface LastServer {
 
 const LAST_SERVER_KEY = 'vviewer-last-server';
 
+/** 连接时 health capabilities 的会话缓存键（M6 compute 路由的能力判定来源）。 */
+const CAPABILITIES_KEY = 'vv:capabilities';
+
+/** 读取会话能力缓存（无记录/损坏/非浏览器环境返回 []）。 */
+export function loadCapabilities(): string[] {
+  try {
+    const raw = sessionStorage.getItem(CAPABILITIES_KEY);
+    const v: unknown = raw ? JSON.parse(raw) : null;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 /** 目录 tab 显示名：取地址 host（解析失败退回原串）。 */
 function serverLabel(base: string): string {
   try {
@@ -238,6 +252,15 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
   }
   if (!Array.isArray(caps.capabilities) || !caps.capabilities.includes('file-server')) {
     throw new Error('目标不是 vviewer 文件服务器（缺少 file-server 能力）');
+  }
+  // 能力缓存（M6 compute 路由判定用）：compute 端点是否可用以连接时 health 为准
+  try {
+    sessionStorage.setItem(
+      CAPABILITIES_KEY,
+      JSON.stringify(caps.capabilities.filter((c): c is string => typeof c === 'string'))
+    );
+  } catch {
+    // 存储不可用：连接本身不受影响，compute 路由回落本地
   }
 
   // 鉴权预检：health 免认证，错误 token 也能过能力校验——用 Bearer 保护的

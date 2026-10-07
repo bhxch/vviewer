@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { RenderedInstance, TocEntry } from '@vviewer/core';
+  import type { RenderedInstance, TocEntry, ComputeWhere } from '@vviewer/core';
   import { showErrorCard } from '@vviewer/core';
   import type { CodeEngine } from '@vviewer/render-text';
   import type { Tab } from './openFlow.svelte';
@@ -28,6 +28,8 @@
   let rafId = 0;
   /** 当前 tab 的高亮引擎文案（仅 code 渲染器非空；其余渲染器不显示状态条） */
   let engineLabel = $state('');
+  /** 高亮计算执行位置（M6）：'远程'/'本地'/''（'' = 未发生计算路由或非 code 实例） */
+  let computeWhereLabel = $state('');
   /** code 渲染器的内部滚动容器（.vv-code-pre）；其余渲染器为 null（滚动在外层 .vv-viewer-scroll） */
   let scrollHost: HTMLElement | null = null;
   /** 引擎轮询句柄：高亮结果异步到达（pending→tree-sitter/hljs），轻量轮询反映最新值 */
@@ -53,8 +55,14 @@
 
   function watchEngine(inst: RenderedInstance): void {
     if (!('getEngine' in inst)) return;
+    const engine = (inst as { getEngine(): CodeEngine }).getEngine;
+    // M6：code 实例另带 getComputeWhere（高亮计算执行位置），随同一轮询刷新
+    const where =
+      'getComputeWhere' in inst ? (inst as { getComputeWhere(): ComputeWhere | null }).getComputeWhere : null;
     const read = (): void => {
-      engineLabel = ENGINE_LABELS[(inst as { getEngine(): CodeEngine }).getEngine()];
+      engineLabel = ENGINE_LABELS[engine()];
+      const w = where?.() ?? null;
+      computeWhereLabel = w === 'remote' ? '远程' : w === 'local' ? '本地' : '';
     };
     read();
     engineTimer = setInterval(read, 250);
@@ -66,6 +74,7 @@
       engineTimer = null;
     }
     engineLabel = '';
+    computeWhereLabel = '';
   }
 
   $effect(() => {
@@ -163,7 +172,9 @@
     />
   {/if}
   {#if engineLabel}
-    <div class="vv-statusbar" role="status">{engineLabel}</div>
+    <div class="vv-statusbar" role="status">
+      {engineLabel}{#if computeWhereLabel}&nbsp;· 执行: {computeWhereLabel}{/if}
+    </div>
   {/if}
 </div>
 

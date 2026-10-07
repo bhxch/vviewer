@@ -40,6 +40,9 @@ enum Command {
         /// 允许来自该精确 origin 的跨域 API 访问
         #[arg(long)]
         cors_origin: Option<String>,
+        /// 启用服务端计算端点（/api/compute/*，health 能力追加 "compute"）
+        #[arg(long)]
+        compute: bool,
     },
 }
 
@@ -55,6 +58,7 @@ fn main() {
             allow_lan,
             hidden,
             cors_origin,
+            compute,
         } => {
             if let Err(code) = serve(ServeArgs {
                 root,
@@ -65,6 +69,7 @@ fn main() {
                 allow_lan,
                 hidden,
                 cors_origin,
+                compute,
             }) {
                 std::process::exit(code);
             }
@@ -81,6 +86,7 @@ pub struct ServeArgs {
     pub allow_lan: bool,
     pub hidden: bool,
     pub cors_origin: Option<String>,
+    pub compute: bool,
 }
 
 /// 启动服务；配置错误返回 exit code（不 panic）。
@@ -138,7 +144,8 @@ fn serve(args: ServeArgs) -> Result<(), i32> {
         token,
         args.hidden,
         args.cors_origin,
-    );
+    )
+    .with_compute(args.compute);
     let app = vviewer::build_router(state.clone());
     let tickets = state.tickets;
 
@@ -184,6 +191,7 @@ mod tests {
             allow_lan: false,
             hidden: false,
             cors_origin: None,
+            compute: false,
         }
     }
 

@@ -26,10 +26,18 @@ describe('session store', () => {
       codeThemeLight: 'onelight',
       codeThemeDark: 'serika-dark',
       excludedPatterns: [],
-      autoRefresh: true
+      autoRefresh: true,
+      computePolicy: 'auto'
     });
-    saveSettings({ themeMode: 'dark', codeThemeLight: 'onelight', codeThemeDark: 'serika-dark', excludedPatterns: ['node_modules'], autoRefresh: false });
+    saveSettings({ themeMode: 'dark', codeThemeLight: 'onelight', codeThemeDark: 'serika-dark', excludedPatterns: ['node_modules'], autoRefresh: false, computePolicy: 'remote' });
     expect(loadSettings().themeMode).toBe('dark');
+    expect(loadSettings().computePolicy).toBe('remote');
+  });
+  it('settings computePolicy falls back to default on invalid value', () => {
+    localStorage.setItem('vviewer:settings', JSON.stringify({ computePolicy: 'bogus' }));
+    expect(loadSettings().computePolicy).toBe('auto');
+    localStorage.setItem('vviewer:settings', 'not-json');
+    expect(loadSettings().computePolicy).toBe('auto');
   });
   it('dir handle round trip stores the handle object', async () => {
     const fake = { name: 'proj', kind: 'directory' } as unknown as FileSystemDirectoryHandle;

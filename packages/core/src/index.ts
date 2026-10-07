@@ -1,5 +1,9 @@
 export const CORE_VERSION = '0.1.0';
 export * from './types';
+export * from './compute/types';
+export * from './compute/router';
+export * from './compute/remote';
+export * from './compute/search';
 export * from './detect';
 export * from './registry/registry';
 export * from './dispatch/dispatcher';
