@@ -64,7 +64,8 @@ export function resolveStrategy(size: number): HighlightStrategy {
   return 'plain';
 }
 
-const DECODERS: Record<Encoding, string> = {
+/** Encoding → TextDecoder 标签（code/markdown/html 渲染器共用；导出避免重复表） */
+export const DECODERS: Record<Encoding, string> = {
   'utf-8': 'utf-8',
   'utf-16le': 'utf-16le',
   'utf-16be': 'utf-16be',
@@ -297,6 +298,11 @@ export function attachHighlightClient(client: CodeHighlightClient | null): void 
   attachedClient = client;
 }
 
+/** 读取已注入的高亮客户端单例（markdownRenderer 的围栏高亮复用同一注入，无需二次接线） */
+export function getHighlightClient(): CodeHighlightClient | null {
+  return attachedClient;
+}
+
 // 样式说明：虚拟滚动与代码面板的样式统一由 apps/web/src/app.css 提供（单一来源），
 // 本模块不再运行时注入 CSS，避免双份定义漂移。
 
@@ -459,10 +465,11 @@ export function renderCode(
 export const codeRenderer: Renderer = {
   id: 'code',
   label: '代码/文本',
-  // 注：不含 'svg'——svg 归 @vviewer/render-media 的 imageRenderer（消毒预览），registry 拒绝重复注册
+  // 注 1：不含 'svg'——svg 归 @vviewer/render-media 的 imageRenderer（消毒预览），registry 拒绝重复注册
+  // 注 2：不含 'md'/'markdown'/'html'/'htm'——M3 起归 markdownRenderer/htmlRenderer（M1-M2 期间暂由 code 承接）
   extensions: [
-    'txt', 'md', 'markdown', 'log', 'json', 'jsonc', 'yaml', 'yml', 'toml', 'ini', 'conf', 'cfg', 'env', 'csv',
-    'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'css', 'scss', 'html', 'htm', 'xml',
+    'txt', 'log', 'json', 'jsonc', 'yaml', 'yml', 'toml', 'ini', 'conf', 'cfg', 'env', 'csv',
+    'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'css', 'scss', 'xml',
     'py', 'rb', 'go', 'rs', 'java', 'kt', 'c', 'h', 'cpp', 'hpp', 'cc', 'sh', 'bash', 'zsh', 'fish', 'sql',
     'lua', 'php', 'pl', 'swift', 'dart', 'vue', 'svelte', 'gradle', 'cmake', 'properties', 'gitignore',
     'license', 'makefile', 'diff', 'patch'

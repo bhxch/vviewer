@@ -82,6 +82,45 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .vv-error-card { padding: 2rem; display: flex; flex-direction: column; gap: .5rem; }
 .vv-error-title { font-weight: 600; }
 .vv-error-detail { color: var(--ui-fg-muted); white-space: pre-wrap; }
+/* markdown 渲染（.vv-markdown 由 markdownRenderer 挂载；管线产物类名 md-copy-btn/md-mermaid/md-lightbox） */
+.vv-markdown { max-width: 60rem; padding: 1rem 1.5rem; line-height: 1.6; overflow-wrap: break-word; }
+.vv-markdown h1, .vv-markdown h2, .vv-markdown h3, .vv-markdown h4 { line-height: 1.3; margin: 1.5em 0 .5em; scroll-margin-top: .5rem; }
+.vv-markdown h1 { font-size: 1.6em; border-bottom: 1px solid var(--ui-border); padding-bottom: .3em; }
+.vv-markdown h2 { font-size: 1.35em; border-bottom: 1px solid var(--ui-border); padding-bottom: .2em; }
+.vv-markdown h3 { font-size: 1.15em; }
+.vv-markdown pre { position: relative; background: var(--code-bg); border: 1px solid var(--ui-border);
+  border-radius: 6px; padding: .75rem 1rem; overflow: auto; }
+.vv-markdown code { font-family: var(--vv-code-font); font-size: .9em; background: var(--ui-side-bg);
+  border-radius: 4px; padding: .1em .35em; }
+.vv-markdown pre code { background: none; padding: 0; }
+.vv-markdown blockquote { margin: .8rem 0; padding: .1rem 1rem; color: var(--ui-fg-muted);
+  border-left: 4px solid var(--ui-border); }
+.vv-markdown table { border-collapse: collapse; margin: .8rem 0; }
+.vv-markdown th, .vv-markdown td { border: 1px solid var(--ui-border); padding: .3rem .65rem; }
+.vv-markdown img, .vv-markdown video, .vv-markdown audio { max-width: 100%; }
+.vv-markdown .md-copy-btn { position: absolute; top: .4rem; right: .4rem; font-size: 12px; padding: 1px 8px; opacity: 0; }
+.vv-markdown pre:hover .md-copy-btn { opacity: 1; }
+.vv-markdown .md-mermaid { display: flex; justify-content: center; margin: .8rem 0; }
+.vv-markdown .md-mermaid-error { display: block; white-space: pre-wrap; color: var(--ui-fg-muted);
+  border: 1px dashed var(--ui-border); border-radius: 6px; padding: .75rem 1rem; }
+.md-lightbox-overlay { position: fixed; inset: 0; z-index: 100; background: rgb(0 0 0 / 70%);
+  display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
+.md-lightbox { max-width: 92vw; max-height: 92vh; }
+.markdown-alert { border: 1px solid var(--ui-border); border-left-width: 4px; border-radius: 6px;
+  padding: .5rem 1rem; margin: .8rem 0; }
+.markdown-alert-title { display: flex; align-items: center; gap: .4rem; font-weight: 600; margin: .2rem 0; }
+.markdown-alert-note, .markdown-alert-info, .markdown-alert-faq, .markdown-alert-question { border-left-color: #0969da; }
+.markdown-alert-tip { border-left-color: #1a7f37; }
+.markdown-alert-important, .markdown-alert-example { border-left-color: #8250df; }
+.markdown-alert-warning { border-left-color: #9a6700; }
+.markdown-alert-caution { border-left-color: #cf222e; }
+.markdown-alert-todo { border-left-color: #57606a; }
+/* html 沙箱预览（htmlRenderer）：顶部视图按钮组 + iframe/源码内容区 */
+.vv-html { display: flex; flex-direction: column; height: 100%; }
+.vv-html-toolbar { display: flex; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--ui-border); flex: none; }
+.vv-html-toolbar button.active { color: var(--ui-accent); border-color: var(--ui-accent); }
+.vv-html-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.vv-html-frame { flex: 1; width: 100%; border: 0; background: #fff; }
 /* 树 / tabs */
 .vv-topbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--ui-border); }
 /* 引擎状态条（ViewerPane 底部，code 渲染器专用） */

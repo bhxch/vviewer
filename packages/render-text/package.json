@@ -13,5 +13,10 @@
     "markdown-it-task-lists": "^2.1.1",
     "mermaid": "^12.1.0",
     "yaml": "^2.9.1"
+  },
+  "exports": {
+    ".": "./src/code.ts",
+    "./markdown/markdownRenderer": "./src/markdown/markdownRenderer.ts",
+    "./html": "./src/html.ts"
   }
 }

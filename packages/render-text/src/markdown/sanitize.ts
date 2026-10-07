@@ -21,14 +21,24 @@ export const MARKDOWN_SANITIZE_CONFIG: Config = {
   ALLOW_DATA_ATTR: true,
 };
 
+/** sanitizeHtml 可选项 */
+export interface SanitizeOptions {
+  /** true 时净化整份 HTML 文档（含 html/head/body 与其中的 meta/title），html 渲染器 srcdoc 用 */
+  wholeDocument?: boolean;
+}
+
 /**
  * 不可信渲染 HTML 过唯一共享策略。string 与 Document 输入统一返回字符串
  * （SDD Ruling：T3 管线以字符串为统一出口，自行 innerHTML 成 DOM）。
  * Document 输入取 body 内容净化（DOMPurify 无法导入文档节点本身；本管线
- * 的 Document 均为 body 级片段容器）。
+ * 的 Document 均为 body 级片段容器）。wholeDocument 时输入必须是完整文档
+ * 字符串（Document 输入会丢 head，此时应直接传原始字符串）。
  */
-export function sanitizeHtml(dirty: string | Document): string {
+export function sanitizeHtml(dirty: string | Document, opts: SanitizeOptions = {}): string {
   const html = typeof dirty === 'string' ? dirty : dirty.body.innerHTML;
+  const config: Config = opts.wholeDocument
+    ? { ...MARKDOWN_SANITIZE_CONFIG, WHOLE_DOCUMENT: true }
+    : MARKDOWN_SANITIZE_CONFIG;
   // 无 RETURN_DOM/RETURN_DOM_FRAGMENT 的重载返回 string
-  return DOMPurify.sanitize(html, MARKDOWN_SANITIZE_CONFIG) as string;
+  return DOMPurify.sanitize(html, config) as string;
 }
