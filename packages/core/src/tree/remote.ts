@@ -15,9 +15,16 @@ export interface RemoteMeta {
  * watch 由 openFlow 在连接成功后调用；close 由引用计数接线（最后一个持有 tab 关闭时）触发。
  */
 export interface RemoteStore extends TreeStore {
-  /** 订阅服务器变更推送（`changed` 事件的相对路径列表）；返回解绑函数。 */
-  watch(listener: (paths: string[]) => void): () => void;
-  /** 关闭 SSE 连接并停止重连；之后 store 仍可正常 read/listChildren。 */
+  /**
+   * 订阅服务器变更推送（`changed` 事件的相对路径列表；onError 为降级通知：
+   * 服务端 watcher 故障收到 `watch-error` 帧后不再有数据帧）；返回解绑函数。
+   */
+  watch(listener: (paths: string[]) => void, onError?: () => void): () => void;
+  /**
+   * 关闭 SSE 连接并停止重连，同时清理该 store 登记的资源表
+   * （remoteMeta 按 id 前缀、remoteBaseById 单条）；之后 store 仍可正常
+   * read/listChildren（检测元数据按需重建）。
+   */
   close(): void;
 }
 
@@ -43,10 +50,15 @@ export function getRemoteBase(storeId: string): string | undefined {
 /**
  * 连接地址归一：trim、去尾部斜杠；缺 scheme 补 `http://`
  * （"127.0.0.1:8321" → "http://127.0.0.1:8321"，避免落成同源相对路径误导排障）。
+ * 常见误粘贴把 API 端点当服务器地址（"http://host:8321/api"）：剥掉唯一已知的
+ * API 前缀 `/api`；其他 path（如反向代理前缀）保留原样——由请求失败时的错误
+ * 信息提示排查（见 request 的 baseHasPath 提示）。
  */
 export function normalizeServerBase(input: string): string {
   const trimmed = input.trim().replace(/\/+$/, '');
-  return /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  // 仅剥「authority 后紧跟的 /api」：host 恰为 "api"（http://api）不受影响
+  return withScheme.replace(/^([a-z][a-z0-9+.-]*:\/\/[^/]+)\/api$/i, '$1');
 }
 
 const ENCODINGS: readonly string[] = ['utf-8', 'utf-16le', 'utf-16be', 'gb18030'];
@@ -68,12 +80,33 @@ export function createRemoteStore(baseUrl: string, token: string | null, dirLabe
   const base = normalizeServerBase(baseUrl);
   const id = `remote:${hash8(`${base}:${dirLabel}`)}`;
   remoteBaseById.set(id, base);
+  // base 带非根 path（归一化后仍保留，可能是反向代理前缀）：请求失败时在错误信息提示
+  let baseHasPath = false;
+  try {
+    baseHasPath = new URL(base).pathname !== '/';
+  } catch {
+    // base 非法（极端）：不提示，交由 fetch 报错
+  }
 
-  /** 带 Bearer 头的 GET；非 2xx 抛含状态码的 Error（server 错误体若为 JSON 则附 detail）。 */
+  /**
+   * 带 Bearer 头的 GET；非 2xx 抛含状态码的 Error（server 错误体若为 JSON 则附 detail；
+   * base 带 path 时附误粘贴提示）。挂 30s 超时：服务器失联时请求有界失败而非永久悬挂。
+   */
   async function request(apiPath: string, path: string): Promise<Response> {
     const headers: Record<string, string> = {};
     if (token) headers.authorization = `Bearer ${token}`;
-    const res = await fetch(`${base}${apiPath}?path=${encodeURIComponent(path)}`, { headers });
+    let res: Response;
+    try {
+      res = await fetch(`${base}${apiPath}?path=${encodeURIComponent(path)}`, {
+        headers,
+        signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(30_000) : undefined
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === 'TimeoutError') {
+        throw new Error(`服务器请求超时（30s）: ${base}${apiPath}`);
+      }
+      throw err;
+    }
     if (!res.ok) {
       let detail = '';
       try {
@@ -82,7 +115,8 @@ export function createRemoteStore(baseUrl: string, token: string | null, dirLabe
       } catch {
         // 非 JSON 错误体：只用状态码
       }
-      throw new Error(`服务器请求失败: HTTP ${res.status}${detail}`);
+      const pathHint = baseHasPath ? '（服务地址带有路径后缀，请确认未把 API 端点误粘贴为地址）' : '';
+      throw new Error(`服务器请求失败: HTTP ${res.status}${detail}${pathHint}`);
     }
     return res;
   }
@@ -90,6 +124,7 @@ export function createRemoteStore(baseUrl: string, token: string | null, dirLabe
   // ---------- SSE 变更推送订阅 ----------
   type ChangeListener = (paths: string[]) => void;
   const changeListeners = new Set<ChangeListener>();
+  const errorListeners = new Set<() => void>();
   let eventSource: EventSource | null = null;
   let opening = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -105,9 +140,11 @@ export function createRemoteStore(baseUrl: string, token: string | null, dirLabe
       return; // 非 JSON 帧：忽略
     }
     if (body.type === 'watch-error') {
-      // 服务端 watcher 建立失败（降级后不再有数据帧）：断开且不重连
+      // 服务端 watcher 故障（启动失败或运行期出错，降级后不再有数据帧）：
+      // 断开且不重连；onError 透传给 UI（状态栏一次性提示自动刷新不可用）
       eventSource?.close();
       eventSource = null;
+      for (const listener of errorListeners) listener();
       return;
     }
     if (body.type !== 'changed' || !Array.isArray(body.paths)) return;
@@ -163,11 +200,13 @@ export function createRemoteStore(baseUrl: string, token: string | null, dirLabe
     }, delay);
   }
 
-  function watch(listener: (paths: string[]) => void): () => void {
+  function watch(listener: (paths: string[]) => void, onError?: () => void): () => void {
     changeListeners.add(listener);
+    if (onError) errorListeners.add(onError);
     void openEvents();
     return () => {
       changeListeners.delete(listener);
+      if (onError) errorListeners.delete(onError);
     };
   }
 
@@ -180,6 +219,14 @@ export function createRemoteStore(baseUrl: string, token: string | null, dirLabe
     eventSource?.close();
     eventSource = null;
     changeListeners.clear();
+    errorListeners.clear();
+    // 资源表清理：该 store 的检测元数据（按 id 前缀）与服务端 base 登记。
+    // 同 base 重连时新旧 store 同 id：openFlow 先关旧 tab（触发本 close）再建
+    // 新 store，新 store 重新登记，顺序保证无悬挂。
+    for (const key of [...remoteMeta.keys()]) {
+      if (key.startsWith(`${id}:`)) remoteMeta.delete(key);
+    }
+    remoteBaseById.delete(id);
   }
 
   return {

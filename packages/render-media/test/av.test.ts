@@ -14,10 +14,10 @@ vi.mock('artplayer', () => ({
 
 describe('playerKindOf：扩展名 → 播放器形态', () => {
   it('视频类（含流媒体 m3u8/flv）→ video，音频类 → audio', () => {
-    for (const ext of ['mp4', 'm4v', 'webm', 'ogg', 'm3u8', 'flv']) {
+    for (const ext of ['mp4', 'm4v', 'mov', 'webm', 'ogg', 'm3u8', 'flv']) {
       expect(playerKindOf(ext)).toBe('video');
     }
-    for (const ext of ['mp3', 'wav', 'flac', 'm4a', 'oga', 'opus']) {
+    for (const ext of ['mp3', 'wav', 'flac', 'm4a', 'aac', 'oga', 'opus']) {
       expect(playerKindOf(ext)).toBe('audio');
     }
   });
@@ -63,8 +63,8 @@ describe('avRenderer', () => {
     };
   }
 
-  it('extensions：新增 m3u8/flv，仍含既有音视频；不注册 ts（codeRenderer 先占，重复注册会被 registry 拒绝）', () => {
-    for (const ext of ['mp4', 'm4v', 'webm', 'ogg', 'mp3', 'wav', 'flac', 'm4a', 'oga', 'opus']) {
+  it('extensions：新增 m3u8/flv 与 mov/aac，仍含既有音视频；不注册 ts（codeRenderer 先占，重复注册会被 registry 拒绝）', () => {
+    for (const ext of ['mp4', 'm4v', 'mov', 'webm', 'ogg', 'mp3', 'wav', 'flac', 'm4a', 'aac', 'oga', 'opus']) {
       expect(avRenderer.extensions).toContain(ext);
     }
     expect(avRenderer.extensions).toContain('m3u8');
@@ -93,7 +93,9 @@ describe('avRenderer', () => {
 
   it('blob MIME 按扩展名标注（视频/音频/流媒体清单）', () => {
     expect(mediaMimeOf('mp4')).toBe('video/mp4');
+    expect(mediaMimeOf('mov')).toBe('video/quicktime');
     expect(mediaMimeOf('webm')).toBe('video/webm');
+    expect(mediaMimeOf('aac')).toBe('audio/aac');
     expect(mediaMimeOf('mp3')).toBe('audio/mpeg');
     expect(mediaMimeOf('m3u8')).toBe('application/vnd.apple.mpegurl');
     expect(mediaMimeOf('flv')).toBe('video/x-flv');

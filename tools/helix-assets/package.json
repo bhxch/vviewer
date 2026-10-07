@@ -6,5 +6,6 @@
   "scripts": {
     "generate": "node generate.mjs",
     "test": "vitest run"
-  }
+  },
+  "license": "Apache-2.0"
 }

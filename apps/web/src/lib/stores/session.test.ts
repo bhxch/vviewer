@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 // fake-indexeddb 提供 IDB 实现
 import 'fake-indexeddb/auto';
-import { loadSession, saveTabs, saveDirHandle } from './session';
+import { loadSession, saveTabs, saveDirHandle, maxTabSeqOf, tabSeqOf } from './session';
 import { loadSettings, saveSettings } from './settings';
 
 describe('session store', () => {
@@ -44,5 +44,18 @@ describe('session store', () => {
     await saveDirHandle(fake);
     const { lastDirHandle } = await loadSession();
     expect(lastDirHandle?.name).toBe('proj');
+  });
+});
+
+describe('tab id 序号解析（openFlow seq 快照基线）', () => {
+  it('tabSeqOf：t 形态取数字，损坏/非 tab id 回 0', () => {
+    expect(tabSeqOf('t12')).toBe(12);
+    expect(tabSeqOf('t0')).toBe(0);
+    expect(tabSeqOf('placeholder:remote:abc')).toBe(0);
+    expect(tabSeqOf('')).toBe(0);
+  });
+  it('maxTabSeqOf：空列表 0、混入损坏 id 不影响最大值', () => {
+    expect(maxTabSeqOf([])).toBe(0);
+    expect(maxTabSeqOf(['t3', 't17', 'bogus'])).toBe(17);
   });
 });

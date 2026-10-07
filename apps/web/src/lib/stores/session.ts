@@ -50,3 +50,14 @@ export async function loadSession(): Promise<{ tabs: TabSnapshot[]; lastDirHandl
   const [tabs, lastDirHandle] = await Promise.all([kvGet<TabSnapshot[]>('tabs'), kvGet<FileSystemDirectoryHandle>('dirHandle')]);
   return { tabs: tabs ?? [], lastDirHandle: lastDirHandle ?? null };
 }
+
+/** tab id（`t<序号>`）→ 序号；不匹配形态为 0（快照损坏时按最小基线处理）。 */
+export function tabSeqOf(id: string): number {
+  const m = /^t(\d+)$/.exec(id);
+  return m ? Number(m[1]) : 0;
+}
+
+/** 快照 id 列表中的最大序号（空列表为 0）：openFlow 以此为基推进新 tab 序号。 */
+export function maxTabSeqOf(ids: ReadonlyArray<string>): number {
+  return ids.reduce((max, id) => Math.max(max, tabSeqOf(id)), 0);
+}

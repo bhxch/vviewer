@@ -103,3 +103,26 @@ test('code 视图：行级命中高亮，关闭（search(\'\')）后高亮立即
   await expect(page.locator('.vv-code-line.vv-search-hit-line')).toHaveCount(0);
   await page.waitForFunction(() => document.activeElement?.classList.contains('vv-viewer-host'));
 });
+
+test('关闭后重开：搜索面板 closed 标志复位，重新搜索计数恢复（终审 M6）', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto('/');
+  await openDir(page);
+  await openFile(page, 'sample.md');
+  await expect(page.locator('.vv-markdown')).toBeVisible();
+
+  // 第一轮：搜索出结果 → Esc 关闭（effect cleanup 置 closed=true）
+  await openPanelAndSearch(page, '围栏');
+  await expect(page.locator('.vv-search-count')).toContainText(/\d+\/\d+/);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.vv-search-panel')).toHaveCount(0);
+
+  // 第二轮：重开再搜。若组件 effect 重跑后未复位 closed，所有结果被丢弃、计数停 0——
+  // 此断言钉住「closed 复位」（组件级 vitest 不可行：无 svelte 测试装配，走 E2E）
+  await page.keyboard.press('/');
+  await expect(page.locator('.vv-search-panel')).toBeVisible();
+  await expect(page.locator('.vv-search-input')).toBeFocused();
+  await page.keyboard.insertText('围栏');
+  await expect(page.locator('.vv-search-count')).toContainText(/\d+\/\d+/, { timeout: 5_000 });
+  await expect(page.locator('mark.vv-search-hit').first()).toBeVisible();
+});

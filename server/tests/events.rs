@@ -97,6 +97,7 @@ async fn ticket_upgrades_to_sse_stream() {
         "text/event-stream",
         "SSE 响应头"
     );
+    assert_eq!(headers["cache-control"], "no-cache", "SSE 流禁缓存");
     // 连接保持打开：短窗口内无文件变更 → 无 data 帧
     let frames = collect_data_frames(&mut body, Duration::from_millis(800)).await;
     assert!(frames.is_empty(), "未变更时不应有 data 帧: {frames:?}");

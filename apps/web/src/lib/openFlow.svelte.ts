@@ -10,7 +10,8 @@ import {
   normalizeServerBase
 } from '@vviewer/core';
 import { ARCHIVE_OPEN_EVENT } from '@vviewer/render-archive';
-import { saveDirHandle, saveTabs, type TabSnapshot } from './stores/session';
+import { saveDirHandle, saveTabs, maxTabSeqOf, type TabSnapshot } from './stores/session';
+import { releaseStoreIfLast } from './storeRelease';
 
 export interface Tab {
   id: string;
@@ -87,13 +88,10 @@ class TabCollection {
   /**
    * worker 型 store 的释放接线（M4 T7）：被关 tab 持有的 store 若实现了 close()
    * （libarchive：终止 worker + 释放 wasm 堆）且已无其他 tab 持有同一实例，则关闭之。
-   * 以对象身份比较而非 storeId——同名归档会产生 id 相同的不同实例；
-   * zip/localfiles 等 store 无 close，可选调用为 no-op。
+   * 判定逻辑在 storeRelease.ts（纯函数，可独立单测）。
    */
   private releaseStoreIfLast(store: TreeStore): void {
-    if (typeof store.close !== 'function') return;
-    if (this.list.some((t) => t.source.store === store)) return;
-    store.close();
+    releaseStoreIfLast(this.list, store);
   }
 
   activate(id: string): void {
@@ -104,11 +102,13 @@ class TabCollection {
   /**
    * SSE 变更刷新（M5）：重读并重渲染命中 store+path 的 tab。
    * rev 自增使 ViewerPane 的渲染 effect（依赖 tab 代理）重跑；内容不在会话快照内，无需 persist。
+   * 目录 tab（path=''）不在 paths 内：任何 changed 都视为树可能变化，一并自增——
+   * AppShell 以目录 tab 的 rev 为 key 重建左栏 FileTree。
    */
   refreshPaths(storeId: string, paths: string[]): void {
     for (const t of this.list) {
       if (t.source.storeId !== storeId) continue;
-      if (paths.length > 0 && !paths.includes(t.source.path)) continue;
+      if (t.source.path !== '' && paths.length > 0 && !paths.includes(t.source.path)) continue;
       t.rev = (t.rev ?? 0) + 1;
     }
   }
@@ -128,6 +128,12 @@ class TabCollection {
 
 export const tabStore = new TabCollection();
 
+/**
+ * SSE 变更推送健康状态（终审 B2）：服务端 watch-error（watcher 启动失败或运行期
+ * 故障降级）到达即置位——状态栏一次性提示"自动刷新不可用"；下次连接成功复位。
+ */
+export const watchHealth = $state({ degraded: false });
+
 export function addTab(store: TreeStore, path: string, name: string): Tab {
   return tabStore.add(store, path, name);
 }
@@ -146,6 +152,16 @@ export async function persistScroll(id: string, top: number): Promise<void> {
 
 export function openFiles(files: File[]): void {
   for (const f of files) addTab(createSingleFileStore(f), f.name, f.name);
+}
+
+/**
+ * 以会话快照的最大 tab id 为基推进 seq（终审 M7：占位 tab 防线）。
+ * 恢复的占位 tab 保留快照旧 id（如 t5），seq 若从 0 重新计数，新 tab 的 t1/t2
+ * 会与占位 id 撞车（activate/close 按 id 找首个匹配即错乱）。AppShell.restore
+ * 在恢复循环前调用；id 解析（tabSeqOf/maxTabSeqOf）在 stores/session 可单测。
+ */
+export function seedSeqFromSnapshots(snaps: ReadonlyArray<TabSnapshot>): void {
+  seq = Math.max(seq, maxTabSeqOf(snaps.map((s) => s.id)));
 }
 
 export async function openDirectoryViaPicker(): Promise<void> {
@@ -277,10 +293,25 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
     );
   }
 
+  // 同 base 重连：先关闭同 base 的旧 remote tab（目录 + 文件）。旧 store 无 tab
+  // 持有后经引用计数接线 close()（停 SSE + 清资源表），避免新旧两条事件流并行；
+  // 其余目录 tab（本地文件夹）仍由 addDirStoreTab 的替换语义关闭
+  for (const t of [...tabStore.list]) {
+    if (getRemoteBase(t.source.storeId) === base) tabStore.close(t.id);
+  }
+
   const store = createRemoteStore(base, tok, serverLabel(base));
-  // SSE 变更订阅：服务端推送 changed → 命中 path 的 tab 重读重渲染；
+  // SSE 变更订阅：服务端推送 changed → 命中 path 的 tab 重读重渲染 + 目录 tab 自增
+  //（左栏树重建）；watch-error（watcher 降级）→ 状态栏一次性提示自动刷新不可用。
   // store 关闭（最后一个持有 tab 关闭 / 被新连接替换）由引用计数接线调 close() 停流
-  store.watch((paths) => tabStore.refreshPaths(store.id, paths));
+  watchHealth.degraded = false; // 新连接重置降级指示（上一次连接的降级不复用）
+  store.watch(
+    (paths) => tabStore.refreshPaths(store.id, paths),
+    () => {
+      watchHealth.degraded = true;
+      console.warn('[vviewer] 服务器变更推送不可用，自动刷新已停用');
+    }
+  );
   addDirStoreTab(store);
   try {
     sessionStorage.setItem(

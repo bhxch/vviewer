@@ -10,7 +10,8 @@
 export interface PipelineCtx {
   /**
    * 围栏代码高亮回调：返回 span HTML（如 HighlightClient 区间 + captureToCssClass
-   * 生成），插入 code 元素；返回 null 时管线内 hljs 兜底。
+   * 生成），插入 code 元素；返回 null 时管线内 hljs 兜底；抛错（取消：tab 切换后
+   * 请求作废）时静默跳过该块、不 hljs 兜底（结果即将随文档丢弃）。
    */
   highlightFence: (code: string, lang: string) => Promise<string | null>;
   /** 主题类前缀：管线生成元素（复制按钮/mermaid 容器/灯箱）的类名前缀，供主题作用域样式。 */
@@ -48,7 +49,14 @@ async function runHighlight(root: Document, ctx: PipelineCtx): Promise<void> {
     const lang = langClass ? langClass.slice('language-'.length) : '';
     // 围栏内容自带格式性尾换行（markdown-it 原样保留），高亮/复制均不应带上
     const raw = (code.textContent ?? '').replace(/\n$/, '');
-    const spanHtml = await ctx.highlightFence(raw, lang);
+    // 回调抛错（如取消：tab 切换后请求作废）→ 静默跳过该块，不走 hljs 兜底
+    //（结果即将随整个文档被丢弃）；返回 null（普通失败）才回落 hljs
+    let spanHtml: string | null;
+    try {
+      spanHtml = await ctx.highlightFence(raw, lang);
+    } catch {
+      continue;
+    }
     if (spanHtml) {
       code.innerHTML = spanHtml;
       continue;
@@ -212,9 +220,21 @@ async function runCopyCode(root: Document, ctx: PipelineCtx): Promise<void> {
     btn.type = 'button';
     btn.className = cls(ctx, 'copyBtn');
     btn.textContent = '复制';
+    // 复制反馈：成功/失败改 1.5s 文案（连点时重置计时，避免旧计时提前还原）
+    let revertTimer: ReturnType<typeof setTimeout> | null = null;
+    const feedback = (label: string): void => {
+      btn.textContent = label;
+      if (revertTimer !== null) clearTimeout(revertTimer);
+      revertTimer = setTimeout(() => {
+        revertTimer = null;
+        btn.textContent = '复制';
+      }, 1500);
+    };
     btn.addEventListener('click', () => {
       const text = (pre.querySelector('code')?.textContent ?? '').replace(/\n$/, '');
-      void navigator.clipboard?.writeText(text).catch(() => {});
+      const p = navigator.clipboard?.writeText(text);
+      if (p) void p.then(() => feedback('已复制'), () => feedback('复制失败'));
+      else feedback('复制失败'); // 无剪贴板权限（非安全上下文等）
     });
     pre.appendChild(btn);
   }
@@ -225,9 +245,18 @@ async function runCopyCode(root: Document, ctx: PipelineCtx): Promise<void> {
 /** body 级灯箱 overlay 的元素 id（openLightbox 创建；markdownRenderer destroy 时清理防泄漏） */
 export const LIGHTBOX_OVERLAY_ID = 'md-lightbox-overlay';
 
+/** overlay → 其 document 级 Esc 监听（removeLightboxOverlay / 点击关闭时随之摘除，防监听器累积） */
+const escHandlers = new WeakMap<HTMLElement, (ev: KeyboardEvent) => void>();
+
 /** 从文档移除灯箱 overlay（markdownRenderer destroy 调用；overlay 挂在 body，不随渲染节点销毁） */
 export function removeLightboxOverlay(doc: Document): void {
-  doc.getElementById(LIGHTBOX_OVERLAY_ID)?.remove();
+  const overlay = doc.getElementById(LIGHTBOX_OVERLAY_ID);
+  if (overlay) {
+    const onKey = escHandlers.get(overlay);
+    if (onKey) doc.removeEventListener('keydown', onKey);
+    escHandlers.delete(overlay);
+  }
+  overlay?.remove();
 }
 
 function openLightbox(img: HTMLImageElement, ctx: PipelineCtx): void {
@@ -241,7 +270,12 @@ function openLightbox(img: HTMLImageElement, ctx: PipelineCtx): void {
     const clone = doc.createElement('img');
     clone.className = cls(ctx, 'lightbox');
     overlay.appendChild(clone);
-    overlay.addEventListener('click', () => overlay!.remove());
+    const onKey = (ev: KeyboardEvent): void => {
+      if (ev.key === 'Escape') removeLightboxOverlay(doc);
+    };
+    escHandlers.set(overlay, onKey);
+    doc.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', () => removeLightboxOverlay(doc));
     (doc.body ?? doc.documentElement).appendChild(overlay);
   }
   const clone = overlay.querySelector('img');

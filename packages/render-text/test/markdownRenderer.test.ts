@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import type { Detection, FileSource, RenderedInstance } from '@vviewer/core';
-import type { HighlightInterval } from '@vviewer/highlight';
+import type { Detection, FileSource, RenderedInstance, TreeStore } from '@vviewer/core';
+import { HighlightCanceledError, type HighlightInterval } from '@vviewer/highlight';
 import {
   markdownRenderer,
   fenceToHtml,
@@ -8,6 +8,8 @@ import {
   assignHeadingIds,
   setMarkdownBackend,
   getMarkdownBackend,
+  setMarkdownImageResolver,
+  getMarkdownImageResolver,
   renderMarkdownBody,
   type MarkdownEngineState
 } from '../src/markdown/markdownRenderer';
@@ -44,6 +46,7 @@ function tocOf(instance: RenderedInstance): { level: number; text: string; id: s
 afterEach(() => {
   attachHighlightClient(null);
   setMarkdownBackend(null);
+  setMarkdownImageResolver(null);
   document.body.innerHTML = '';
 });
 
@@ -186,6 +189,22 @@ describe('fenceToHtml——highlightFence 接线（依赖倒置）', () => {
     expect(await fenceToHtml('x', 'js')).toBeNull();
   });
 
+  it('client 取消（HighlightCanceledError）→ 重抛给管线跳过该块，不 hljs 兜底', async () => {
+    attachHighlightClient({
+      highlight: async () => {
+        throw new HighlightCanceledError();
+      }
+    });
+    await expect(fenceToHtml('x', 'js')).rejects.toThrow(HighlightCanceledError);
+    // 管线集成：取消后该块保持原文（无 hljs-* span，也无 ts-* span）
+    const { target } = await renderMd('```js\nconst a = 1;\n```\n');
+    await vi.waitFor(() => {
+      expect(target.querySelector('pre code span[class^="hljs-"]')).toBeNull();
+      expect(target.querySelector('pre code .ts-keyword')).toBeNull();
+      expect(target.querySelector('pre code')?.textContent).toBe('const a = 1;\n');
+    });
+  });
+
   it('渲染集成：注入 fake 后围栏代码块内出现 ts-* span', async () => {
     attachHighlightClient({
       highlight: async (): Promise<HighlightInterval[]> => [{ start: 0, end: 5, capture: 'keyword' }]
@@ -299,5 +318,114 @@ describe('markdownRenderer——后端注入（M7 远程引擎，M6 遗留）', 
   it('renderMarkdownBody：直接渲染 body（不再剥 front matter），apps/web 本地回退用', () => {
     expect(renderMarkdownBody('# t\n')).toContain('<h1>t</h1>');
     expect(renderMarkdownBody('| a |\n|---|\n| 1 |\n')).toContain('<table>');
+  });
+});
+
+describe('markdownRenderer——相对图片经 store 解析（终审 M3：404 现状的补齐）', () => {
+  /** store 桩：files 为「store 内路径 → 字节」的映射，read 未命中抛错（同真实 store 语义） */
+  function storeStub(files: Record<string, Uint8Array>): TreeStore {
+    return {
+      id: 'stub',
+      displayName: () => 'stub',
+      listChildren: async () => [],
+      read: async (path: string) => {
+        const hit = files[path];
+        if (!hit) throw new Error(`no such file: ${path}`);
+        return hit;
+      }
+    };
+  }
+
+  function sourceWith(store: TreeStore, path: string): FileSource {
+    return { storeId: 'stub', storeLabel: 'stub', path, name: path.split('/').pop() ?? path, store };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    // 挂掉本组补上的 revoke 桩（jsdom 无该 API，renderer 有 typeof 守卫）
+    const anyUrl = URL as unknown as { revokeObjectURL?: unknown };
+    delete anyUrl.revokeObjectURL;
+  });
+
+  it('命中 resolver：img src 换为同 store 文件的 URL，resolver 收到（src, source）', async () => {
+    const store = storeStub({ 'docs/img/a.png': new Uint8Array([1]) });
+    const source = sourceWith(store, 'docs/readme.md');
+    const seen: Array<[string, string]> = [];
+    setMarkdownImageResolver(async (src, s) => {
+      seen.push([src, s.path]);
+      // 模拟 apps/web 实现：按目录解析路径后读 store，返回 blob URL 形态字符串
+      return src === 'img/a.png' ? 'blob:stub-1' : null;
+    });
+    const target = document.createElement('div');
+    const instance = await markdownRenderer.render(
+      new TextEncoder().encode('![图](img/a.png)\n'), target, source, DET
+    );
+    expect(seen).toEqual([['img/a.png', 'docs/readme.md']]);
+    expect(target.querySelector('img')?.getAttribute('src')).toBe('blob:stub-1');
+    instance.destroy();
+  });
+
+  it('未命中（null）/resolver 抛错：保留原 src', async () => {
+    const store = storeStub({});
+    const source = sourceWith(store, 'readme.md');
+    setMarkdownImageResolver(async (src) => (src === 'ok.png' ? 'blob:stub-ok' : null));
+    const target = document.createElement('div');
+    const instance = await markdownRenderer.render(
+      new TextEncoder().encode('![](ok.png)\n![](missing.png)\n'), target, source, DET
+    );
+    const imgs = target.querySelectorAll('img');
+    expect(imgs[0]?.getAttribute('src')).toBe('blob:stub-ok');
+    expect(imgs[1]?.getAttribute('src')).toBe('missing.png'); // 404 现状
+
+    setMarkdownImageResolver(async () => {
+      throw new Error('store read boom');
+    });
+    const target2 = document.createElement('div');
+    const instance2 = await markdownRenderer.render(
+      new TextEncoder().encode('![](x.png)\n'), target2, source, DET
+    );
+    expect(target2.querySelector('img')?.getAttribute('src')).toBe('x.png');
+    instance.destroy();
+    instance2.destroy();
+  });
+
+  it('绝对地址（scheme/根相对/片段）不进 resolver', async () => {
+    const store = storeStub({});
+    const source = sourceWith(store, 'readme.md');
+    const seen: string[] = [];
+    setMarkdownImageResolver(async (src) => {
+      seen.push(src);
+      return null;
+    });
+    const md = '![](https://e.com/x.png)\n![](data:image/png;base64,AA)\n![](/root.png)\n![](https://x.com#[a](b))\n![](local.png)\n';
+    const target = document.createElement('div');
+    const instance = await markdownRenderer.render(new TextEncoder().encode(md), target, source, DET);
+    expect(seen).toEqual(['local.png']);
+    instance.destroy();
+  });
+
+  it('destroy 时 revoke 解析产出的 URL（实例生命周期对齐，渲染不泄漏 blob）', async () => {
+    const revoke = vi.fn();
+    // jsdom 无 URL.revokeObjectURL：renderer 的 typeof 守卫下补桩观察调用
+    Object.defineProperty(URL, 'revokeObjectURL', { value: revoke, configurable: true, writable: true });
+    const store = storeStub({});
+    const source = sourceWith(store, 'readme.md');
+    setMarkdownImageResolver(async () => 'blob:stub-revoke');
+    const target = document.createElement('div');
+    const instance = await markdownRenderer.render(
+      new TextEncoder().encode('![](a.png)\n'), target, source, DET
+    );
+    expect(revoke).not.toHaveBeenCalled();
+    instance.destroy();
+    expect(revoke).toHaveBeenCalledWith('blob:stub-revoke');
+  });
+
+  it('getMarkdownImageResolver 返回最近注入的 fn；传 null 解绑（404 现状）', () => {
+    expect(getMarkdownImageResolver()).toBeNull();
+    const fn = async (): Promise<string | null> => null;
+    setMarkdownImageResolver(fn);
+    expect(getMarkdownImageResolver()).toBe(fn);
+    setMarkdownImageResolver(null);
+    expect(getMarkdownImageResolver()).toBeNull();
   });
 });

@@ -12,6 +12,21 @@ import { createLibarchiveStore } from './libarchiveStore';
 /** 点击包内文件条目时派发的窗口事件名 */
 export const ARCHIVE_OPEN_EVENT = 'vv-open-entry';
 
+/**
+ * 归档 store 轻量缓存：以 buffer 对象身份为键（WeakMap，不阻止 GC）。
+ * 同一 buffer 引用再次 render（同 tab 重挂载等）时复用已解析 store，免
+ * worker/wasm 重解析。entryOpened 随缓存条目走（而非随渲染实例）：复用同一
+ * store 的多个实例共享"是否派发过条目"的状态，destroy 的释放接线语义与 M4
+ * 一致——从未派发过才 close（并弃掉缓存条目，防复用已关闭的 store）。
+ * 现状 ViewerPane 每次渲染重读文件（新 buffer 身份），命中主要来自同一对象的
+ * 复用路径（测试/未来滚动恢复重挂载）；buffer 可回收时 WeakMap 条目随之消失。
+ */
+interface CachedArchive {
+  store: TreeStore;
+  entryOpened: boolean;
+}
+const storeCache = new WeakMap<Uint8Array, CachedArchive>();
+
 /** ARCHIVE_OPEN_EVENT 的 detail 形状 */
 export interface ArchiveOpenDetail {
   store: TreeStore;
@@ -103,24 +118,43 @@ export const archiveRenderer: Renderer = {
     // 递归深度接线：由来源 store id 的前导归档段（zip/libarchive）推导父链（顶层归档的
     // store 是 localfiles/single 等非归档来源 → 链空 → depth 0；包内第 n 层归档 → depth n-1）
     const parentChain = archiveChainOf(source.storeId);
-    const store = isZipMagic(buffer)
-      ? await createZipStore(buffer, parentChain || undefined, source.name)
-      : await createLibarchiveStore(buffer, parentChain || undefined, source.name);
-    // 本 store 实例是否派发过包内条目点击：派发过的实例由内层 tab 持有（懒读），
+    let cached = storeCache.get(buffer);
+    if (!cached) {
+      const store = isZipMagic(buffer)
+        ? await createZipStore(buffer, parentChain || undefined, source.name)
+        : await createLibarchiveStore(buffer, parentChain || undefined, source.name);
+      cached = { store, entryOpened: false };
+      storeCache.set(buffer, cached);
+    }
+    const { store } = cached;
+    // 本 buffer 的 store 是否派发过包内条目点击：派发过的由内层 tab 持有（懒读），
     // 其释放接线在 openFlow 的 tab 关闭路径；未派发过的实例无任何人引用，destroy 即关闭
-    let entryOpened = false;
-    const tree = mountArchiveTree(target, store, (path, name) => {
-      entryOpened = true;
-      // 解耦通道：包内文件点击 → 窗口事件；apps/web openFlow.bindArchiveOpenEvents 监听后 addTab，
-      // 派发器按扩展名自然路由（txt→code、png→image、zip→递归…）
-      window.dispatchEvent(new CustomEvent<ArchiveOpenDetail>(ARCHIVE_OPEN_EVENT, { detail: { store, path, name } }));
-    });
+    // mount 抛错（极端 DOM 异常）时同步释放：未派发过的 store 不留悬挂 worker
+    let tree: { destroy(): void };
+    try {
+      tree = mountArchiveTree(target, store, (path, name) => {
+        cached!.entryOpened = true;
+        // 解耦通道：包内文件点击 → 窗口事件；apps/web openFlow.bindArchiveOpenEvents 监听后 addTab，
+        // 派发器按扩展名自然路由（txt→code、png→image、zip→递归…）
+        window.dispatchEvent(new CustomEvent<ArchiveOpenDetail>(ARCHIVE_OPEN_EVENT, { detail: { store, path, name } }));
+      });
+    } catch (err) {
+      if (!cached.entryOpened) {
+        storeCache.delete(buffer);
+        store.close?.();
+      }
+      throw err;
+    }
     return {
       destroy() {
         tree.destroy();
         // worker 释放收口（T7）：没有内层 tab 持有（从未点开过条目）的 libarchive store
-        // 在实例 destroy 时立即 close（终止 worker）；zip store 无 close，可选调用为 no-op
-        if (!entryOpened) store.close?.();
+        // 在实例 destroy 时立即 close（终止 worker），并弃掉缓存条目防复用已关闭 store；
+        // zip store 无 close，可选调用为 no-op
+        if (!cached.entryOpened) {
+          storeCache.delete(buffer);
+          store.close?.();
+        }
       }
     };
   }

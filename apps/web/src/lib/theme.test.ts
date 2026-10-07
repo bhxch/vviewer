@@ -12,6 +12,7 @@ import {
   getTheme,
   HLJS_CAPTURE_TO_VAR,
   listThemes,
+  onSystemModeChange,
   THEME_ROOT_SELECTOR
 } from './theme';
 import { loadSettings } from './stores/settings';
@@ -70,14 +71,37 @@ describe('applyCodeTheme（注入 style#vv-code-theme）', () => {
     );
   });
 
-  it('未知主题：console.warn 且保持现有 style 不变', async () => {
+  it('未知主题（残留下架名）：console.warn 并回退该亮暗槽位的默认主题', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    await applyCodeTheme('serika-dark', 'dark');
-    const before = styleEl()?.textContent;
     await applyCodeTheme('no-such-theme', 'dark');
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(document.querySelectorAll(`#${STYLE_ID}`).length).toBe(1);
-    expect(styleEl()?.textContent).toBe(before);
+    const fallback = await getTheme(DEFAULT_CODE_THEME.dark);
+    expect(fallback).not.toBeNull();
+    // 回退后生效的是默认主题（serika-dark），而非保持无 style / 旧主题
+    expect(styleEl()?.textContent).toBe(
+      `/* vviewer 代码主题：${DEFAULT_CODE_THEME.dark}（dark）——只换 CSS 变量，不重解析 */\n${THEME_ROOT_SELECTOR} {\n${themeToCssVars(fallback!, CODE_CAPTURES)}\n${hljsVarsOf(fallback!)}\n}`
+    );
+  });
+
+  it('onSystemModeChange：matchMedia 变化触发回调，解绑后不再触发', async () => {
+    const listeners: Array<(e: MediaQueryListEvent) => void> = [];
+    const fakeMq = {
+      addEventListener: vi.fn((_t: string, cb: (e: MediaQueryListEvent) => void) => listeners.push(cb)),
+      removeEventListener: vi.fn()
+    } as unknown as MediaQueryList;
+    const mm = vi.fn().mockReturnValue(fakeMq);
+    vi.stubGlobal('matchMedia', mm);
+    const seen: string[] = [];
+    const off = onSystemModeChange((m) => seen.push(m));
+    expect(mm).toHaveBeenCalledWith('(prefers-color-scheme: dark)');
+    // 模拟亮/暗两次变化
+    const ev = (matches: boolean) => ({ matches }) as unknown as MediaQueryListEvent;
+    listeners[0]!(ev(true));
+    listeners[0]!(ev(false));
+    expect(seen).toEqual(['dark', 'light']);
+    off();
+    expect(fakeMq.removeEventListener).toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });
 

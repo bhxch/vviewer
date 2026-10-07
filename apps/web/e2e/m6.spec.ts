@@ -1,25 +1,29 @@
-import { execSync, spawn, type ChildProcess } from 'node:child_process';
-import { rm, writeFile } from 'node:fs/promises';
+import type { ChildProcess } from 'node:child_process';
+import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
+import { assertPortFree, startVviewerServer, stopServer, waitHealthy } from './serverHarness';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 
 /**
  * M6 E2E 验收（Task 5）：compute 模式全链路——
- * server 带 --compute 起服（root=整个 samples/，m5 与 m6 样例同根）→ health 能力
- * 含 compute 且前端连接后缓存进 sessionStorage → policy=remote（localStorage 注入
- * settings JSON）下打开远程文件，状态栏出现执行位置「远程」（小文件与大文件各一）→
- * Ctrl+Shift+F 全局搜索 "inner" 命中 m5/sub/inner.txt（远程 ripgrep 路径），点击结果
- * 打开该文件 → markdown 表格/任务列表渲染 + comrak 端点直连断言 → policy=local
- * （TopBar UI 切换）回退状态栏「本地」。
+ * server 带 --compute 起服（root=tmpdir fixture：samples/m5+m6 拷贝，m5 与 m6
+ * 样例同根）→ health 能力含 compute 且前端连接后缓存进 sessionStorage →
+ * policy=remote（localStorage 注入 settings JSON）下打开远程文件，状态栏出现
+ * 执行位置「远程」（小文件与大文件各一）→ Ctrl+Shift+F 全局搜索 "inner" 命中
+ * m5/sub/inner.txt（远程 ripgrep 路径），点击结果打开该文件 → markdown 表格/
+ * 任务列表渲染 + comrak 端点直连断言 → policy=local（TopBar UI 切换）回退状态栏「本地」。
  *
- * server 生命周期：复用 m5.spec 的模式——beforeAll `cargo build`（增量）+ spawn
- * 预编译二进制 + /api/health 轮询就绪，afterAll kill + 临时大文件清理。
+ * server 生命周期：复用共享 harness（serverHarness.ts）——cargo build（增量）+
+ * spawn 预编译二进制 + /api/health 轮询就绪 + 端口预检 + SIGTERM→SIGKILL 兜底停止。
+ * fixture 与 BIG_FILE 均在 os.tmpdir() 独立目录（终审 M2/M7：不写 tracked 工作树，
+ * 双 project/双 spec 并发无共享路径竞态），afterAll 整目录清理。
  * 端口用 8401（m5 用 8399）：playwright 默认多 worker 并行跑不同 spec 文件，错开避免端口冲突。
  * 前端仍走 preview server（:4173），跨源需 --cors-origin http://127.0.0.1:4173。
  */
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
-const samplesDir = `${repoRoot}/samples`;
 const binPath = `${repoRoot}/server/target/debug/vviewer`;
 // 双 project（chromium/mobile）下同一 spec 文件在两个 worker 并发跑，
 // 各 project 错开监听端口避免 beforeAll spawn 时 bind 冲突（os error 98）；
@@ -29,26 +33,13 @@ let BASE = `http://127.0.0.1:${PORT}`;
 const TOKEN = 'e2etoken6';
 const PREVIEW_ORIGIN = 'http://127.0.0.1:4173';
 
-/** 临时大文件（≈1.5MB，tree-sitter 主路径阈值 2MB 之内），afterAll 清理 */
-const BIG_FILE = `${samplesDir}/m6/e2e-big.js`;
+/** 临时大文件（≈1.5MB，tree-sitter 主路径阈值 2MB 之内），随 fixtureRoot 一起清理 */
 const BIG_LINE = 'const vv = 1; // c\n';
 const BIG_REPS = 80_000;
 
 let server: ChildProcess | null = null;
-
-async function waitHealthy(url: string, timeoutMs = 30_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`${url}/api/health`);
-      if (res.ok) return;
-    } catch {
-      // 尚未就绪：继续轮询
-    }
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  throw new Error(`vviewer server 未在 ${timeoutMs}ms 内就绪: ${url}`);
-}
+/** 临时 fixture 根目录（samples/m5 + samples/m6 拷贝），afterAll 清理 */
+let fixtureRoot: string | null = null;
 
 test.beforeAll(async () => {
   if (test.info().project.name === 'mobile') {
@@ -57,35 +48,29 @@ test.beforeAll(async () => {
   }
   // 钩子默认 30s 不够 cargo 增量编译（fresh clone 全量编译更久），扩到 5 分钟
   test.setTimeout(300_000);
-  await writeFile(BIG_FILE, BIG_LINE.repeat(BIG_REPS));
-  // 预编译（增量；fresh clone 首次会全量编译，耗时计入 beforeAll）
-  execSync('cargo build --manifest-path server/Cargo.toml', { cwd: repoRoot, stdio: 'inherit' });
-  server = spawn(
+  // 端口预检：遗留进程占口时 fail-fast 带明确信息（否则 spawn 后才 bind 失败）
+  await assertPortFree(BASE);
+  fixtureRoot = await mkdtemp(join(tmpdir(), 'vviewer-e2e-m6-'));
+  await cp(`${repoRoot}/samples/m5`, `${fixtureRoot}/m5`, { recursive: true });
+  await cp(`${repoRoot}/samples/m6`, `${fixtureRoot}/m6`, { recursive: true });
+  await writeFile(`${fixtureRoot}/m6/e2e-big.js`, BIG_LINE.repeat(BIG_REPS));
+  server = startVviewerServer({
+    repoRoot,
     binPath,
-    [
-      'serve',
-      '--root', samplesDir,
-      '--web-dist', `${repoRoot}/apps/web/build`,
-      '--port', String(PORT),
-      '--token', TOKEN,
-      '--cors-origin', PREVIEW_ORIGIN,
-      '--compute'
-    ],
-    { stdio: 'inherit' }
-  );
-  server.on('exit', (code) => {
-    if (code !== null && code !== 0) console.error(`[m6] server 提前退出: code=${code}`);
+    root: fixtureRoot,
+    webDist: `${repoRoot}/apps/web/build`,
+    port: PORT,
+    token: TOKEN,
+    corsOrigin: PREVIEW_ORIGIN,
+    compute: true,
+    tag: 'm6'
   });
   await waitHealthy(BASE);
 });
 
 test.afterAll(async () => {
-  if (server !== null && server.exitCode === null) {
-    const exited = new Promise<void>((resolve) => server!.once('exit', () => resolve()));
-    server.kill('SIGTERM');
-    await Promise.race([exited, new Promise((r) => setTimeout(r, 5_000))]);
-  }
-  await rm(BIG_FILE, { force: true });
+  await stopServer(server, 'm6');
+  if (fixtureRoot !== null) await rm(fixtureRoot, { recursive: true, force: true });
 });
 
 /** 展开 TopBar 连接表单并提交（同 m5：每次测试用新 page，存储互不影响） */

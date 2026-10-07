@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { openFiles, openDirectoryViaPicker, openUrl, connectServer, loadLastServer } from './openFlow.svelte';
   import { loadSettings, saveSettings, type Settings } from './stores/settings';
-  import { applyCodeTheme, effectiveMode, themeOptions } from './theme';
+  import { applyCodeTheme, effectiveMode, onSystemModeChange, themeOptions } from './theme';
 
   let settings = $state<Settings>(loadSettings());
   let urlValue = $state('');
@@ -28,6 +28,12 @@
   onMount(() => {
     void themeOptions().then((opts) => (codeThemeOptions = opts));
     applyCurrentCodeTheme();
+    // themeMode=system：OS 亮暗切换时按新槽位重应用代码主题（UI 配色由
+    // prefers-color-scheme 媒体查询自动跟随，JS 注入的代码主题变量需要这一步）
+    return onSystemModeChange((sysMode) => {
+      if (settings.themeMode !== 'system') return;
+      void applyCodeTheme(sysMode === 'dark' ? settings.codeThemeDark : settings.codeThemeLight, sysMode);
+    });
   });
 
   function cycleTheme(): void {

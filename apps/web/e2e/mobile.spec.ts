@@ -8,7 +8,8 @@ import { test, expect, type CDPSession, type Page } from '@playwright/test';
  * 2. 文件夹打开 → 树 → 打开 md → 渲染（经抽屉内树行点击的移动端真实路径）；
  * 3. 触摸滚动：CDP Input.dispatchTouchEvent 滑动 markdown 正文，scrollTop 前移；
  * 4. 主题切换：TopBar 主题按钮三态循环，html data-theme-mode 随之变化；
- * 5. 视频播放页不崩：ArtPlayer 容器挂载、video 无 error（headless codec 宽松断言）。
+ * 5. 视频播放页不崩：ArtPlayer 容器挂载、video 无 error（headless codec 宽松断言）；
+ * 6. 手机右栏入口：ℹ toggle 开合 TOC/属性抽屉（≤600px 断点，终审 M7 补入口）。
  *
  * 通道同 m1-m4：页面内构造 File + webkitRelativePath 经 __vvOpenDirImpl 注入
  * （真实 webkitdirectory input 在移动仿真下同样无法被 Playwright 驱动）。
@@ -157,4 +158,33 @@ test('视频播放页不崩：ArtPlayer 容器挂载，video 无 error', async (
   await expect(video).toHaveCount(1);
   const errCode = await video.evaluate((v) => v.error?.code ?? 0);
   expect(errCode).toBe(0);
+});
+
+test('手机右栏入口：ℹ toggle 开合 TOC/属性抽屉（终审 M7：TOC 不可达）', async ({ page }) => {
+  await page.goto('/');
+  await openBigMd(page); // markdown 打开后右栏 TOC 有数据（属性面板恒有占位内容）
+  const toggle = page.locator('.vv-right-toggle');
+  const right = page.locator('.vv-right');
+  await expect(toggle).toBeVisible();
+
+  // 初始关闭：右栏抽屉在视口右侧之外（±1px 容差：deviceScaleFactor/滚动条的亚像素取整）
+  const closedBox = await right.boundingBox();
+  expect(closedBox).not.toBeNull();
+  expect(closedBox!.x).toBeGreaterThanOrEqual(370);
+
+  // 开：滑入视口（宽 min(80vw, 300px) = 300 → x ≈ 75），TOC 与属性面板可见
+  await toggle.click();
+  await expect(page.locator('.vv-shell.rightopen')).toHaveCount(1);
+  await expect
+    .poll(async () => (await right.boundingBox())?.x ?? 999, { timeout: 3_000 })
+    .toBeLessThan(187); // 滑入即越过视口中线（实测 74-75，关闭态为 370+）
+  await expect(right.locator('nav.toc')).toBeVisible();
+  await expect(right.locator('.meta-title')).toBeVisible();
+
+  // 关：滑回视口外
+  await toggle.click();
+  await expect(page.locator('.vv-shell.rightopen')).toHaveCount(0);
+  await expect
+    .poll(async () => (await right.boundingBox())?.x ?? 0, { timeout: 3_000 })
+    .toBeGreaterThanOrEqual(370);
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { HighlightClient } from '../src/client';
 import type { HighlightInterval, HighlightRequest, HighlightResponse } from '../src/types';
 
@@ -110,5 +110,43 @@ describe('HighlightClient', () => {
     expect(worker.terminated).toBe(true);
     // dispose 后再调用直接 reject
     await expect(client.highlight('a=1', 'bash')).rejects.toThrow();
+  });
+
+  describe('初始化看门狗（终审 B3：worker 静默 15s → reject 接通 hljs 兜底）', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('worker 从不回包：15s 后在途请求以普通 Error reject（hljs 兜底），后续请求短路', async () => {
+      vi.useFakeTimers();
+      const { worker, client } = fake();
+      worker.responder = () => {}; // 全部挂起（worker 静默）
+      const p = client.highlight('a=1', 'bash');
+      const assertion = expect(p).rejects.toThrow('初始化超时');
+      await vi.advanceTimersByTimeAsync(15_000);
+      await assertion;
+      // 短路：后续请求不进 worker、立即失败（普通 Error，非 Canceled）
+      await expect(client.highlight('b=2', 'bash')).rejects.toThrow('初始化超时');
+      expect(worker.requests).toHaveLength(1);
+      client.dispose();
+    });
+
+    it('worker 回过任意消息（含 ok:false 报错）后看门狗解除，静默请求不被超时拒绝', async () => {
+      const { client, worker } = fake();
+      // 先来一次失败回包（真实微任务）：证明 worker 存活
+      worker.responder = (_req, reply) => reply({ ok: false, error: 'boom' });
+      await expect(client.highlight('x', 'zzz')).rejects.toThrow('boom');
+      // 之后挂起 15s（假计时）：不触发初始化超时，仍安静等待（取消归 cancelAll/dispose）
+      vi.useFakeTimers();
+      worker.responder = () => {};
+      let rejectReason: unknown = 'unset';
+      void client.highlight('a=1', 'bash').catch((e: unknown) => {
+        rejectReason = e;
+      });
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(rejectReason).toBe('unset');
+      client.dispose(); // 收尾：挂起请求以 Canceled reject，worker 终止
+      vi.useRealTimers();
+    });
   });
 });

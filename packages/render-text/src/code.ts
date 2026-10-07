@@ -1,5 +1,5 @@
 import type { Renderer, Encoding, Detection, FileSource, RenderedInstance, SearchMatch, ComputeSource, ComputeWhere } from '@vviewer/core';
-import { getRemoteBase, getRemoteMeta } from '@vviewer/core';
+import { getRemoteBase, getRemoteMeta, RemoteComputeError, showErrorCard } from '@vviewer/core';
 import { detectLanguage, HighlightCanceledError, captureToCssClass, type HighlightInterval } from '@vviewer/highlight';
 
 export type { HighlightInterval };
@@ -345,7 +345,10 @@ export function renderCode(
   opts: { encoding?: Encoding; highlight?: boolean; ext?: string; lang?: string; computeSrc?: ComputeSource } = {}
 ): RenderCodeHandle {
   const enc = DECODERS[opts.encoding ?? 'utf-8'];
-  const text = new TextDecoder(enc, { fatal: false }).decode(buffer);
+  // CRLF/CR → LF 归一化：行索引（buildLineIndex/lineOffsets）、高亮区间偏移、搜索
+  // 全部在归一化文本上计算——解码后、一切索引前做一次，保证偏移一致性（否则
+  // \r 计入前一行长度，区间错位一行；tree-sitter/hljs 的输出同样按归一化文本对齐）
+  const text = new TextDecoder(enc, { fatal: false }).decode(buffer).replace(/\r\n?/g, '\n');
   const lines = buildLineIndex(text);
   const lineOffsets = buildLineOffsets(lines);
   const strategy = opts.highlight === false ? 'plain' : resolveStrategy(buffer.byteLength);
@@ -487,6 +490,12 @@ export function renderCode(
         scroller?.refresh(true);
       } catch (err) {
         if (destroyed || err instanceof HighlightCanceledError) return; // tab 已切换：静默
+        if (err instanceof RemoteComputeError) {
+          // 显式 remote 失败（remote 策略，router 不回退）：真实错误如实展示错误卡，
+          // 不静默降级 hljs——静默回退会掩盖服务端故障并造成"高亮结果与策略不符"的错觉
+          showErrorCard(target, err.message, { name: opts.ext ? `.${opts.ext}` : '代码' });
+          return;
+        }
         await hljsWholeFile(lang); // 解析失败 → hljs 整文件兜底
       }
       return;

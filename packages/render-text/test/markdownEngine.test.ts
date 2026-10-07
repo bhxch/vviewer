@@ -27,6 +27,24 @@ describe('renderMarkdownToHtml——GFM 全家', () => {
     expect(html).toContain('<a href="https://example.com"');
   });
 
+  it('脚注渲染 footnote-ref 与回链（与 comrak 服务端能力对齐，样例文本同 samples/m6/sample-gfm.md）', () => {
+    // 与 samples/m6/sample-gfm.md「脚注」节同构：正文引用 + 脚注定义
+    const { html } = renderMarkdownToHtml(
+      'vviewer 是一个本地文件查看器[^1]。\n\n[^1]: 本样例用于 M6 E2E 验收。\n'
+    );
+    // 引用侧：sup.footnote-ref 内锚点指向脚注条目
+    expect(html).toContain('footnote-ref');
+    expect(html).toMatch(/<a href="#fn1" id="fnref1">/);
+    // 定义侧：脚注条目 + 回到引用的 backlink（sanitize 白名单保留 id/href/#）
+    expect(html).toContain('footnote-backref');
+    expect(html).toContain('本样例用于 M6 E2E 验收');
+  });
+
+  it('无定义的脚注引用保持字面文本（不吞内容）', () => {
+    const { html } = renderMarkdownToHtml('孤儿引用[^nope] 不应消失');
+    expect(html).toContain('[^nope]');
+  });
+
   it('围栏代码保留 language- 类（供管线高亮步定位）', () => {
     const { html } = renderMarkdownToHtml('```ts\nconst a = 1;\n```\n');
     expect(html).toContain('<pre><code class="language-ts">');

@@ -8,13 +8,17 @@
   import MetaPanel from './MetaPanel.svelte';
   import GlobalSearchPanel from './GlobalSearchPanel.svelte';
   import type { TreeStore, TocEntry } from '@vviewer/core';
-  import { tabStore, addTab, activateTab, tryRestoreDirectory, bindArchiveOpenEvents } from './openFlow.svelte';
+  import { tabStore, addTab, activateTab, tryRestoreDirectory, bindArchiveOpenEvents, seedSeqFromSnapshots } from './openFlow.svelte';
   import { loadSession, saveDirHandle, type TabSnapshot } from './stores/session';
   import { loadSettings } from './stores/settings';
 
   const settings = loadSettings();
   let dirStore = $state<TreeStore | null>(null);
+  /** 目录 tab 的 rev（SSE changed 自增）：作 FileTree 的重建 key（左栏树刷新） */
+  let dirRev = $state(0);
   let drawerOpen = $state(false);
+  /** 右栏（MetaPanel/TOC）抽屉开关：仅 ≤600px 断点生效（见样式媒体查询） */
+  let rightOpen = $state(false);
   /** 活动渲染实例的目录（ViewerPane ontoc 回调上行；markdown tab 有数据，其余为空） */
   let tocEntries = $state<TocEntry[]>([]);
   /** 全局搜索面板开关（M6 T4）：Ctrl+Shift+F 打开，Esc 面板内关闭 */
@@ -23,7 +27,9 @@
   // 左栏文件树跟随目录 tab（目录 tab 由 addDirStoreTab 替换语义保证至多一个）
   $effect(() => {
     const list = tabStore.list;
-    dirStore = list.find((t) => t.source.path === '' && !t.unrestorable)?.source.store ?? null;
+    const dirTab = list.find((t) => t.source.path === '' && !t.unrestorable);
+    dirStore = dirTab?.source.store ?? null;
+    dirRev = dirTab?.rev ?? 0;
   });
 
   onMount(() => {
@@ -38,6 +44,8 @@
     // 恢复失败（IndexedDB 异常、快照损坏等）不得阻断应用启动：降级为空会话
     try {
       const { tabs: saved, lastDirHandle } = await loadSession();
+      // 新 tab id 以快照最大序号为基：占位 tab 保留快照旧 id，seq 从 0 重计数会撞车
+      seedSeqFromSnapshots(saved);
       let dirStoreAtRestore: TreeStore | null = null;
       if (lastDirHandle) {
         const ok = await tryRestoreDirectory(lastDirHandle);
@@ -115,13 +123,15 @@
   });
 </script>
 
-<div class="vv-shell" class:drawer={drawerOpen}>
+<div class="vv-shell" class:drawer={drawerOpen} class:rightopen={rightOpen}>
   <TopBar />
   <TabBar tabs={tabStore.list} />
   <div class="vv-body">
     <aside class="vv-side">
       {#if dirStore}
-        <FileTree store={dirStore} excludedPatterns={settings.excludedPatterns} onopen={onTreeOpen} />
+        {#key dirRev}
+          <FileTree store={dirStore} excludedPatterns={settings.excludedPatterns} onopen={onTreeOpen} />
+        {/key}
       {:else}
         <div class="vv-side-empty">未打开文件夹</div>
       {/if}
@@ -140,6 +150,7 @@
     </aside>
   </div>
   <button class="vv-drawer-toggle" aria-label="切换侧栏" onclick={() => (drawerOpen = !drawerOpen)}>☰</button>
+  <button class="vv-right-toggle" aria-label="切换目录与属性面板" onclick={() => (rightOpen = !rightOpen)}>ℹ</button>
   {#if globalSearchOpen}
     <GlobalSearchPanel store={dirStore} onclose={() => (globalSearchOpen = false)} />
   {/if}
@@ -181,7 +192,8 @@
     padding: 2rem;
     color: var(--ui-fg-muted);
   }
-  .vv-drawer-toggle {
+  .vv-drawer-toggle,
+  .vv-right-toggle {
     display: none;
   }
   @media (max-width: 900px) {
@@ -195,21 +207,7 @@
       background: var(--ui-bg);
       box-shadow: 0 0 12px rgb(0 0 0 / 25%);
     }
-    /* 窄屏右栏并入同一抽屉（左侧文件树 + 右侧目录/属性从两端滑入） */
-    .vv-right {
-      position: fixed;
-      inset: 0 0 0 auto;
-      width: min(80vw, 300px);
-      transform: translateX(100%);
-      transition: transform 0.2s;
-      z-index: 10;
-      background: var(--ui-bg);
-      box-shadow: 0 0 12px rgb(0 0 0 / 25%);
-    }
     .vv-shell.drawer .vv-side {
-      transform: none;
-    }
-    .vv-shell.drawer .vv-right {
       transform: none;
     }
     .vv-drawer-toggle {
@@ -219,11 +217,31 @@
       bottom: 8px;
       z-index: 20;
     }
-    /* 手机宽度（≤600px）双栏必然重叠（2×300px > 视口宽），右栏（目录/属性）退出抽屉，
-       抽屉仅保留主导航文件树；平板（601-900px）两栏恰好不重叠可并存 */
+    /* 平板段（601-900px）只把文件树收进抽屉：右栏（230px 固定宽）保留在主区
+       流式布局内——原先两栏同时滑入抽屉、单按钮同开同关，600px 档两栏合计
+       600px 几乎盖满视口（终审 M7「双栏并存遮挡」）。 */
+    /* 手机宽度（≤600px）：主区放不下 230px 右栏，MetaPanel/TOC 收进右侧抽屉，
+       独立 toggle 入口（终审 M7「手机无右栏入口、TOC 不可达」） */
     @media (max-width: 600px) {
       .vv-right {
-        display: none;
+        position: fixed;
+        inset: 0 0 0 auto;
+        width: min(80vw, 300px);
+        transform: translateX(100%);
+        transition: transform 0.2s;
+        z-index: 10;
+        background: var(--ui-bg);
+        box-shadow: 0 0 12px rgb(0 0 0 / 25%);
+      }
+      .vv-shell.rightopen .vv-right {
+        transform: none;
+      }
+      .vv-right-toggle {
+        display: block;
+        position: fixed;
+        right: 8px;
+        bottom: 8px;
+        z-index: 20;
       }
     }
   }

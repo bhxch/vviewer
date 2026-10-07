@@ -19,12 +19,15 @@ export function createRegistry(): Registry {
   return {
     install(r) {
       if (byId.has(r.id)) throw new Error(`Renderer id "${r.id}" 已存在`);
-      for (const ext of r.extensions) {
+      // 扩展名归一为小写再登记/查冲突：byExtension 查询侧已小写化，注册侧同步归一，
+      // 否则 ".TS" 与 ".ts" 会各占一键、冲突检测漏报
+      const exts = r.extensions.map((e) => e.toLowerCase());
+      for (const ext of exts) {
         const owner = byExt.get(ext);
         if (owner && owner.id !== r.id) throw new RegistryError(ext, owner.id, r.id);
       }
       byId.set(r.id, r);
-      for (const ext of r.extensions) byExt.set(ext, r);
+      for (const ext of exts) byExt.set(ext, r);
     },
     byExtension: (ext) => byExt.get(ext.toLowerCase()),
     byId: (id) => byId.get(id),

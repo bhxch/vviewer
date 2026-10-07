@@ -15,15 +15,18 @@ import type Artplayer from 'artplayer';
 import type { Detection, FileSource, RenderedInstance, Renderer } from '@vviewer/core';
 
 /** 扩展名 → blob MIME（流媒体清单/原始流同样标注，供 blob 元数据可读） */
+// mov（QuickTime 容器，H.264 轨道主流浏览器可播）与 aac（ADTS 裸流）为浏览器
+// 可播子集的补充（终审 M3）；不保证所有编码可解码——不可解时 video/audio 元素
+// 报 error，与 mp4 同语义。
 const MIME: Record<string, string> = {
-  mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', ogg: 'video/ogg',
+  mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', ogg: 'video/ogg',
   m3u8: 'application/vnd.apple.mpegurl', flv: 'video/x-flv', ts: 'video/mp2t',
-  mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', m4a: 'audio/mp4',
+  mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', m4a: 'audio/mp4', aac: 'audio/aac',
   oga: 'audio/ogg', opus: 'audio/ogg'
 };
 
 /** 视频形态扩展名（含流媒体；其余注册扩展名走原生音频） */
-const VIDEO_EXTS = new Set(['mp4', 'm4v', 'webm', 'ogg', 'm3u8', 'flv']);
+const VIDEO_EXTS = new Set(['mp4', 'm4v', 'mov', 'webm', 'ogg', 'm3u8', 'flv']);
 
 /** 类型分派纯函数：ext → 'video'（ArtPlayer）| 'audio'（原生 <audio>） */
 export function playerKindOf(ext: string): 'video' | 'audio' {
@@ -104,15 +107,20 @@ async function makeMpegtsLoader(ext: string, cleanups: Cleanup[]): Promise<ArtLo
   };
 }
 
-/** 读主题强调色（app.css 的 --ui-accent，随明暗主题切换）；读不到回落 M1 蓝值 */
-function readAccent(target: HTMLElement): string {
-  return getComputedStyle(target).getPropertyValue('--ui-accent').trim() || '#0969da';
-}
+/**
+ * ArtPlayer 主题色（终审 B3 裁决：CSS 变量驱动，零 JS 跟随）。
+ * ArtPlayer 5.x 把 option.theme 写进容器内联自定义属性 `--art-theme`，全部主题色
+ * 消费点（进度条/音量/选中态等）都是 `var(--art-theme)`——而 CSS 自定义属性的值
+ * 允许引用其他变量，故直接传 `var(--ui-accent, <fallback>)`：明暗主题切换（含
+ * system 模式的 OS 级切换）时播放器 UI 即时跟随，无需重建播放器或监听事件。
+ * （原 render 时 getComputedStyle 读一次 --ui-accent 的做法在主题切换后残留旧色。）
+ */
+const ART_THEME = 'var(--ui-accent, #0969da)';
 
 export const avRenderer: Renderer = {
   id: 'av',
   label: '音视频',
-  extensions: ['mp4', 'm4v', 'webm', 'ogg', 'm3u8', 'flv', 'mp3', 'wav', 'flac', 'm4a', 'oga', 'opus'],
+  extensions: ['mp4', 'm4v', 'mov', 'webm', 'ogg', 'm3u8', 'flv', 'mp3', 'wav', 'flac', 'm4a', 'aac', 'oga', 'opus'],
   // 注意：不注册 'ts'——codeRenderer（TypeScript）先占该扩展名，registry 重复注册会抛错；
   // mpegts 的 .ts 分派仅在 customType 层保留（archive 包内 ts 条目未来改路由时可用）
   async render(buffer: Uint8Array, target: HTMLElement, _source: FileSource, det: Detection): Promise<RenderedInstance> {
@@ -153,7 +161,8 @@ export const avRenderer: Renderer = {
     const url = URL.createObjectURL(makeBlob());
     let art: InstanceType<typeof Artplayer>;
     try {
-      art = new Artplayer({ ...buildArtConfig(container, url, det.ext, readAccent(target)), customType });
+      // 主题色传 CSS 变量引用（见 ART_THEME 注释）：随主题切换自动跟随
+      art = new Artplayer({ ...buildArtConfig(container, url, det.ext, ART_THEME), customType });
     } catch (err) {
       URL.revokeObjectURL(url);
       throw err;

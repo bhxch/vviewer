@@ -71,12 +71,27 @@ impl ChangeHub {
 }
 
 /// 聚合主循环：首个事件开窗，窗口内事件全部合并为一条 changed 帧。
+/// notify 运行期错误（如 root 被删除/权限丢失）透传一条 `{"type":"watch-error"}`
+/// 后保持静默（不再广播 changed），与 watcher 启动失败的 SSE 降级语义一致。
 fn debounce_loop(
     rx: std::sync::mpsc::Receiver<Result<NotifyEvent, NotifyError>>,
     tx: broadcast::Sender<String>,
     root: PathBuf,
 ) {
+    let mut errored = false;
     while let Ok(first) = rx.recv() {
+        if first.is_err() {
+            // 一次性透传（防错误风暴刷屏）；此后丢弃一切事件（watcher 已不可信）
+            if !errored {
+                errored = true;
+                let payload = json!({ "type": "watch-error" });
+                let _ = tx.send(payload.to_string());
+            }
+            continue;
+        }
+        if errored {
+            continue;
+        }
         let mut paths = BTreeSet::new();
         collect_paths(&first, &root, &mut paths);
 
@@ -165,5 +180,31 @@ mod tests {
             &mut out,
         );
         assert_eq!(out, BTreeSet::from(["sub/b.txt".to_string()]));
+    }
+
+    /// notify 运行期错误（如 root 被删）：透传一条 watch-error 后保持静默，
+    /// 后续正常事件不再广播 changed（与启动失败降级一致）。
+    #[tokio::test]
+    async fn notify_error_broadcasts_watch_error_once_then_stays_silent() {
+        let (tx, mut subscriber) = broadcast::channel(8);
+        let (raw_tx, raw_rx) = std::sync::mpsc::channel::<Result<NotifyEvent, NotifyError>>();
+        let handle = std::thread::spawn(move || debounce_loop(raw_rx, tx, PathBuf::from("/srv/root")));
+        raw_tx
+            .send(Err(NotifyError::io(std::io::Error::other("root deleted"))))
+            .unwrap();
+        // 已降级：正常事件不再广播
+        raw_tx
+            .send(ev(
+                EventKind::Create(CreateKind::File),
+                &["/srv/root/a.txt"],
+            ))
+            .unwrap();
+        drop(raw_tx); // 关闭通道：聚合线程自然退出
+        handle.join().unwrap();
+
+        let frame = subscriber.recv().await.expect("应收到 watch-error 帧");
+        assert!(frame.contains("watch-error"), "帧内容: {frame}");
+        // 静默：此后再无任何广播（sender 全部 drop → Closed）
+        assert!(subscriber.recv().await.is_err(), "降级后不应再有帧");
     }
 }

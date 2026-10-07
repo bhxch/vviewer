@@ -168,13 +168,17 @@ export const THEME_ROOT_SELECTOR =
 
 /**
  * 应用代码主题：生成常用捕获集的 CSS 变量并注入/替换 style#vv-code-theme（单节点幂等）。
- * 主题名不存在 → console.warn 并保持现状（不动已有 style）。
+ * 主题名不存在（残留下架主题等）→ console.warn 并回退该亮暗槽位的默认主题，
+ * 不再"保持现状"——保持现状会让 UI 下拉与实际生效主题不一致。
  */
 export async function applyCodeTheme(name: string, mode: 'light' | 'dark'): Promise<void> {
-  const theme = (await loadTables())[name];
+  const tables = await loadTables();
+  let theme = tables[name];
   if (!theme) {
-    console.warn(`未知代码主题：${name}，保持当前代码主题不变`);
-    return;
+    const fallback = DEFAULT_CODE_THEME[mode];
+    console.warn(`未知代码主题：${name}，回退默认代码主题 ${fallback}`);
+    if (fallback !== name && tables[fallback]) return applyCodeTheme(fallback, mode);
+    return; // 默认主题也不在表内（themes.json 异常）：保持现状
   }
   let el = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
   if (!el) {
@@ -186,6 +190,20 @@ export async function applyCodeTheme(name: string, mode: 'light' | 'dark'): Prom
   // 同一节点内追加 --hljs-* 近似映射（M7）：hljs 兜底着色跟随当前代码主题
   el.textContent = `/* vviewer 代码主题：${name}（${mode}）——只换 CSS 变量，不重解析 */\n${THEME_ROOT_SELECTOR} {\n${themeToCssVars(theme, [...CODE_CAPTURES])}\n${hljsThemeVars(theme)}\n}`;
   el.dataset.mode = mode;
+}
+
+/**
+ * 订阅系统亮暗变化（themeMode=system 时重应用代码主题用）。
+ * UI 配色由 app.css 的 prefers-color-scheme 媒体查询自动跟随；代码主题 CSS 变量
+ * 是 JS 注入的，需要监听后按新亮暗槽位重应用。无 matchMedia 环境（jsdom/SSR）
+ * 返回 no-op 解绑函数。
+ */
+export function onSystemModeChange(cb: (mode: 'light' | 'dark') => void): () => void {
+  if (typeof matchMedia === 'undefined') return () => {};
+  const mq = matchMedia('(prefers-color-scheme: dark)');
+  const on = (e: MediaQueryListEvent): void => cb(e.matches ? 'dark' : 'light');
+  mq.addEventListener('change', on);
+  return () => mq.removeEventListener('change', on);
 }
 
 /** themeMode 的 system 解析为具体亮暗（无 matchMedia 环境，如 jsdom，回落 light）。 */

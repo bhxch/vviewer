@@ -1,6 +1,7 @@
 {
   "name": "@vviewer/render-media",
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "main": "src/image.ts",
   "types": "src/image.ts",
@@ -13,5 +14,6 @@
     "artplayer": "^5.4.0",
     "hls.js": "^1.7.3",
     "mpegts.js": "^1.8.2"
-  }
+  },
+  "license": "Apache-2.0"
 }
