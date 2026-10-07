@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { Detection, FileSource, RenderedInstance } from '@vviewer/core';
-import type { HighlightInterval } from '@vviewer/highlight';
+import { HighlightCanceledError, type HighlightInterval } from '@vviewer/highlight';
 import {
   markdownRenderer,
   fenceToHtml,
@@ -184,6 +184,22 @@ describe('fenceToHtml——highlightFence 接线（依赖倒置）', () => {
     expect(await fenceToHtml('x', 'js')).toBeNull();
     attachHighlightClient(null);
     expect(await fenceToHtml('x', 'js')).toBeNull();
+  });
+
+  it('client 取消（HighlightCanceledError）→ 重抛给管线跳过该块，不 hljs 兜底', async () => {
+    attachHighlightClient({
+      highlight: async () => {
+        throw new HighlightCanceledError();
+      }
+    });
+    await expect(fenceToHtml('x', 'js')).rejects.toThrow(HighlightCanceledError);
+    // 管线集成：取消后该块保持原文（无 hljs-* span，也无 ts-* span）
+    const { target } = await renderMd('```js\nconst a = 1;\n```\n');
+    await vi.waitFor(() => {
+      expect(target.querySelector('pre code span[class^="hljs-"]')).toBeNull();
+      expect(target.querySelector('pre code .ts-keyword')).toBeNull();
+      expect(target.querySelector('pre code')?.textContent).toBe('const a = 1;\n');
+    });
   });
 
   it('渲染集成：注入 fake 后围栏代码块内出现 ts-* span', async () => {

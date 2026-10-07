@@ -11,6 +11,7 @@
 // 输出）一律仍走 sanitize+enrich+pipeline 全管线，与本地引擎同权。
 import type { Renderer, RenderedInstance, Detection, FileSource, TocEntry, ComputeSource, ComputeWhere } from '@vviewer/core';
 import { getRemoteBase } from '@vviewer/core';
+import { HighlightCanceledError, type HighlightInterval } from '@vviewer/highlight';
 import {
   DECODERS,
   MARKUP_MAX_BYTES,
@@ -33,22 +34,25 @@ import { runPipeline, removeLightboxOverlay, LIGHTBOX_OVERLAY_ID } from './pipel
 /**
  * 围栏代码高亮回调（pipeline 的 highlightFence 实现）：HighlightClient 区间
  * → 行分配 → span HTML（类名经 captureToCssClass，与 code 渲染器同一来源）。
- * client 未注入、语言不在 grammar 清单、请求被取消（tab 切换）等一切失败
- * 返回 null → 管线内 hljs 兜底。
+ * client 未注入、语言不在 grammar 清单等失败返回 null → 管线内 hljs 兜底；
+ * 请求被取消（tab 切换）时重抛 HighlightCanceledError → 管线静默跳过该块、
+ * 不再跑 hljs 兜底（结果即将随 tab 丢弃，整篇兜底纯属空转）。
  */
 export async function fenceToHtml(code: string, lang: string): Promise<string | null> {
   const client = getHighlightClient();
   if (!client) return null;
+  let intervals: HighlightInterval[];
   try {
-    const intervals = await client.highlight(code, lang);
-    const lines = buildLineIndex(code);
-    const byLine = new Map(
-      assignIntervalsToLines(intervals, buildLineOffsets(lines)).map((a) => [a.line, a.segs])
-    );
-    return lines.map((line, i) => renderLineHtml(line, byLine.get(i))).join('\n');
-  } catch {
-    return null;
+    intervals = await client.highlight(code, lang);
+  } catch (err) {
+    if (err instanceof HighlightCanceledError) throw err; // 取消：管线跳过，不 hljs 兜底
+    return null; // 其余失败：管线内 hljs 兜底
   }
+  const lines = buildLineIndex(code);
+  const byLine = new Map(
+    assignIntervalsToLines(intervals, buildLineOffsets(lines)).map((a) => [a.line, a.segs])
+  );
+  return lines.map((line, i) => renderLineHtml(line, byLine.get(i))).join('\n');
 }
 
 // ---------- 正文引擎注入（M7 Task 2：markdown 接 compute 路由） ----------

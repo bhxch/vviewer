@@ -79,6 +79,15 @@ describe('highlight 步', () => {
     await runPipeline(doc, ctx);
     expect(ctx.highlightFence).not.toHaveBeenCalled();
   });
+
+  it('highlightFence 抛错（取消）→ 静默跳过该块，不触发 hljs 兜底', async () => {
+    const doc = docOf('```js\nconst a = 1;\n```\n');
+    await runPipeline(doc, noopCtx({ highlightFence: vi.fn().mockRejectedValue(new Error('canceled')) }));
+    const code = doc.querySelector('pre code')!;
+    expect(code.classList.contains('hljs')).toBe(false);
+    expect(code.querySelector('.hljs-keyword')).toBeNull();
+    expect(code.textContent).toBe('const a = 1;\n');
+  });
 });
 
 describe('diagrams 步（mermaid）', () => {
@@ -169,6 +178,30 @@ describe('copyCode 步', () => {
     await runPipeline(doc, ctx);
     expect(doc.querySelectorAll('button.md-copy-btn').length).toBe(1);
   });
+
+  it('复制成功/失败反馈：文案变化 1.5s 后还原', async () => {
+    vi.useFakeTimers();
+    try {
+      const doc = docOf('```js\nconst a = 1;\n```\n');
+      await runPipeline(doc, noopCtx());
+      const btn = doc.querySelector<HTMLElement>('button.md-copy-btn')!;
+      // 成功路径
+      btn.click();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(btn.textContent).toBe('已复制');
+      await vi.advanceTimersByTime(1500);
+      expect(btn.textContent).toBe('复制');
+      // 失败路径
+      (navigator.clipboard.writeText as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('denied'));
+      btn.click();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(btn.textContent).toBe('复制失败');
+      await vi.advanceTimersByTime(1500);
+      expect(btn.textContent).toBe('复制');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('lightbox 步', () => {
@@ -192,6 +225,28 @@ describe('lightbox 步', () => {
     imgs[0]!.click();
     imgs[1]!.click();
     expect(doc.querySelectorAll('#md-lightbox-overlay').length).toBe(1);
+  });
+
+  it('Esc 关闭 overlay；关闭后 document 级监听一并摘除（再触发无残留）', async () => {
+    const doc = docOf('![图](photo.png)\n');
+    await runPipeline(doc, noopCtx());
+    doc.querySelector('img')!.click();
+    expect(doc.getElementById('md-lightbox-overlay')).not.toBeNull();
+    doc.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(doc.getElementById('md-lightbox-overlay')).toBeNull();
+    // 关闭后同一 keydown 监听不得残留：重建 overlay 再 Esc 仍只关一次
+    doc.querySelector('img')!.click();
+    expect(doc.getElementById('md-lightbox-overlay')).not.toBeNull();
+    doc.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(doc.getElementById('md-lightbox-overlay')).toBeNull();
+  });
+
+  it('非 Escape 键不关闭 overlay', async () => {
+    const doc = docOf('![图](photo.png)\n');
+    await runPipeline(doc, noopCtx());
+    doc.querySelector('img')!.click();
+    doc.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(doc.getElementById('md-lightbox-overlay')).not.toBeNull();
   });
 });
 
