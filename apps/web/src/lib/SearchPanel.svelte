@@ -18,6 +18,9 @@
   let closed = false;
 
   $effect(() => {
+    // 同 GlobalSearchPanel：effect 读取 inputEl（bind:this）可能重跑，cleanup 置
+    // closed 后必须复位，否则重跑后所有搜索结果被丢弃（计数停 0）。
+    closed = false;
     inputEl?.focus();
     return () => {
       closed = true;

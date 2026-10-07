@@ -47,15 +47,20 @@ const searchRouter: ComputeRouter = createComputeRouter({
   }
 });
 
+/**
+ * 远程 ripgrep：返回命中数组（routeSearch 的 remoteFn 契约是 T[]，与 localFn
+ * 同构）；truncated 不在契约内，经闭包变量透传给调用方（与 local 路径同模式）。
+ */
 async function remoteGrep(
   store: TreeStore,
   query: string,
   opts: GlobalSearchOptions,
+  onTruncated: (t: boolean) => void,
   signal: AbortSignal
-): Promise<{ matches: GrepMatch[]; truncated: boolean }> {
+): Promise<GrepMatch[]> {
   const call = searchRouter.remoteCall('/api/search');
   if (!call) throw new Error('未连接服务器，无法远程搜索');
-  return grepRemote(
+  const r = await grepRemote(
     call,
     {
       pattern: query,
@@ -64,6 +69,8 @@ async function remoteGrep(
     },
     { storeId: store.id, signal }
   );
+  onTruncated(r.truncated);
+  return r.matches;
 }
 
 /**
@@ -97,7 +104,9 @@ export async function runGlobalSearch(
       truncated = r.truncated;
       return r.matches;
     },
-    remote ? () => remoteGrep(store, query, opts, signal) : undefined
+    remote
+      ? () => remoteGrep(store, query, opts, (t) => (truncated = t), signal)
+      : undefined
   );
   if (!res.ok) throw new Error(res.error ?? '搜索失败');
   return {

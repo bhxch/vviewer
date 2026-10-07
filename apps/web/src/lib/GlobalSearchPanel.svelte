@@ -32,6 +32,10 @@
   const MAX_ROWS = 200;
 
   $effect(() => {
+    // 本 effect 读取 inputEl（bind:this），而 bind:this 赋值可能晚于首轮 effect——
+    // 重跑时 cleanup 会把 closed 置真并 gen++，body 必须复位，否则所有搜索结果
+    // 被代际防护永久丢弃（状态条停在"搜索中…"）。
+    closed = false;
     inputEl?.focus();
     return () => {
       closed = true;
