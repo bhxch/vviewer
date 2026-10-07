@@ -1,7 +1,16 @@
 // av.test.ts — avRenderer ArtPlayer 升级单测：jsdom 无法真渲染 ArtPlayer（真实播放 E2E 留 T7），
 // 这里直测类型分派/流协议映射/配置构造/MIME 映射纯函数 + 音频原生 <audio> 路径（blob 生命周期不变）。
+// 末例以 vi.mock 令 ArtPlayer 构造抛错，验证 T7 修复：构造失败路径 revoke blob URL 后 rethrow。
 import { describe, expect, it, vi } from 'vitest';
 import { avRenderer, buildArtConfig, mediaMimeOf, playerKindOf, streamProtocolOf } from '../src/av';
+
+vi.mock('artplayer', () => ({
+  default: class {
+    constructor() {
+      throw new Error('artplayer 构造失败（测试注入）');
+    }
+  }
+}));
 
 describe('playerKindOf：扩展名 → 播放器形态', () => {
   it('视频类（含流媒体 m3u8/flv）→ video，音频类 → audio', () => {
@@ -90,5 +99,22 @@ describe('avRenderer', () => {
     expect(mediaMimeOf('flv')).toBe('video/x-flv');
     expect(mediaMimeOf('ts')).toBe('video/mp2t');
     expect(mediaMimeOf('nope')).toBe('');
+  });
+
+  it('T7 回归：ArtPlayer 构造失败时 blob URL 不泄漏（revoke 后 rethrow，destroy 永不执行的路径）', async () => {
+    const create = vi.fn(() => 'blob:mock-fail');
+    const revoke = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { value: create, configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: revoke, configurable: true });
+    const target = document.createElement('div');
+    document.body.append(target);
+    // 文件头 vi.mock 注入构造抛错 → render 必然 reject
+    await expect(
+      avRenderer.render(new Uint8Array(8), target, fakeSource('clip.mp4'), { ext: 'mp4' } as never)
+    ).rejects.toThrow('artplayer 构造失败');
+    // 失败前已 create 的 URL 必须被 revoke（次数成对，destroy 之外的失败路径不漏）
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(revoke).toHaveBeenCalledTimes(1);
+    target.remove();
   });
 });

@@ -3,9 +3,13 @@
 // 音频保持原生 <audio controls>（spec 决策不变）。流协议按扩展名分派：
 // .m3u8 → 动态 import hls.js 的 loader；.flv/.ts → 动态 import mpegts.js 的 loader
 // （hls.js/mpegts.js 为可选依赖，仅扩展名匹配时才加载）。blob URL 生命周期与 M1 一致：
-// render 时 create，destroy 时 revoke；destroy 另调 art.destroy(removeHtml=true) 并释放
-// 流播放器（hls/mpegts 实例）。类型分派/协议映射/配置构造为纯函数导出（单测直测；
-// jsdom 无法真渲染 ArtPlayer，真实播放 E2E 留 T7）。
+// render 时 create，destroy 时 revoke；视频路径的 createObjectURL 推迟到 ArtPlayer
+// 构造前一刻——动态 import/构造失败时不创建，构造抛错则 revoke 后 rethrow，绝不泄漏。
+// destroy 另调 art.destroy(removeHtml=true) 并释放流播放器（hls/mpegts 实例）。
+// 流 loader（hls.js/mpegts.js 动态 import + 播放器装配）整体 try/catch：失败转
+// ArtPlayer notice 提示并吞掉异常（否则黑屏 + unhandled rejection）。
+// 类型分派/协议映射/配置构造为纯函数导出（单测直测；jsdom 无法真渲染 ArtPlayer，
+// 真实播放 E2E 留 T7）。
 import type { Option } from 'artplayer';
 import type Artplayer from 'artplayer';
 import type { Detection, FileSource, RenderedInstance, Renderer } from '@vviewer/core';
@@ -59,26 +63,44 @@ type Cleanup = () => void;
 /** 与 ArtPlayer customType loader 签名对齐（省略第三参 art，未使用） */
 type ArtLoader = (this: Artplayer, video: HTMLVideoElement, url: string) => unknown | Promise<unknown>;
 
-/** hls.js loader：仅在 .m3u8 时动态 import（可选依赖不进主包） */
+/** loader 失败 → ArtPlayer 顶部 notice 提示（用户可见，不黑屏）；notice 不可用时静默 */
+function notifyLoaderFailure(art: Artplayer, err: unknown): void {
+  const message = err instanceof Error ? err.message : String(err);
+  try {
+    art.notice.show = `流播放器加载失败：${message}`;
+  } catch {
+    // 容器已卸载等极端场景下 notice 不存在，放弃提示即可
+  }
+}
+
+/** hls.js loader：仅在 .m3u8 时动态 import（可选依赖不进主包）；失败 notice 提示并吞异常 */
 async function makeHlsLoader(cleanups: Cleanup[]): Promise<ArtLoader> {
-  return async (_video, url) => {
-    const Hls = (await import('hls.js')).default;
-    if (!Hls.isSupported()) throw new Error('当前浏览器不支持 MSE，无法播放 HLS 流');
-    const hls = new Hls();
-    hls.loadSource(url);
-    hls.attachMedia(_video);
-    cleanups.push(() => hls.destroy());
+  return async function (this: Artplayer, video, url) {
+    try {
+      const Hls = (await import('hls.js')).default;
+      if (!Hls.isSupported()) throw new Error('当前浏览器不支持 MSE，无法播放 HLS 流');
+      const hls = new Hls();
+      hls.loadSource(url);
+      hls.attachMedia(video);
+      cleanups.push(() => hls.destroy());
+    } catch (err) {
+      notifyLoaderFailure(this, err);
+    }
   };
 }
 
-/** mpegts.js loader：.flv → 'flv'、.ts → 'mpegts' 容器类型（仅匹配时动态 import） */
+/** mpegts.js loader：.flv → 'flv'、.ts → 'mpegts' 容器类型（仅匹配时动态 import）；失败 notice 提示并吞异常 */
 async function makeMpegtsLoader(ext: string, cleanups: Cleanup[]): Promise<ArtLoader> {
-  return async (_video, url) => {
-    const mpegts = (await import('mpegts.js')).default;
-    const player = mpegts.createPlayer({ type: ext === 'flv' ? 'flv' : 'mpegts', url, isLive: false });
-    player.attachMediaElement(_video);
-    player.load();
-    cleanups.push(() => player.destroy());
+  return async function (this: Artplayer, video, url) {
+    try {
+      const mpegts = (await import('mpegts.js')).default;
+      const player = mpegts.createPlayer({ type: ext === 'flv' ? 'flv' : 'mpegts', url, isLive: false });
+      player.attachMediaElement(video);
+      player.load();
+      cleanups.push(() => player.destroy());
+    } catch (err) {
+      notifyLoaderFailure(this, err);
+    }
   };
 }
 
@@ -95,9 +117,10 @@ export const avRenderer: Renderer = {
   // mpegts 的 .ts 分派仅在 customType 层保留（archive 包内 ts 条目未来改路由时可用）
   async render(buffer: Uint8Array, target: HTMLElement, _source: FileSource, det: Detection): Promise<RenderedInstance> {
     // buffer 实际由普通 ArrayBuffer 支持；断言绕开 TS 5.9 BlobPart 的 ArrayBuffer 泛型收窄，避免大文件复制
-    const url = URL.createObjectURL(new Blob([buffer as Uint8Array<ArrayBuffer>], { type: mediaMimeOf(det.ext) }));
+    const makeBlob = (): Blob => new Blob([buffer as Uint8Array<ArrayBuffer>], { type: mediaMimeOf(det.ext) });
 
     if (playerKindOf(det.ext) === 'audio') {
+      const url = URL.createObjectURL(makeBlob());
       const el = document.createElement('audio');
       el.setAttribute('controls', '');
       el.src = url;
@@ -112,6 +135,8 @@ export const avRenderer: Renderer = {
       };
     }
 
+    // blob URL 推迟到 ArtPlayer 构造前一刻创建：动态 import 与 customType 装配失败时
+    // 尚未创建（零泄漏）；构造抛错则 revoke 后 rethrow（destroy 永不执行的失败路径不再漏）
     const Artplayer = (await import('artplayer')).default;
     const cleanups: Cleanup[] = [];
     const customType: NonNullable<Option['customType']> = {};
@@ -125,7 +150,14 @@ export const avRenderer: Renderer = {
     const container = document.createElement('div');
     container.className = 'vv-av vv-artplayer';
     target.replaceChildren(container);
-    const art = new Artplayer({ ...buildArtConfig(container, url, det.ext, readAccent(target)), customType });
+    const url = URL.createObjectURL(makeBlob());
+    let art: InstanceType<typeof Artplayer>;
+    try {
+      art = new Artplayer({ ...buildArtConfig(container, url, det.ext, readAccent(target)), customType });
+    } catch (err) {
+      URL.revokeObjectURL(url);
+      throw err;
+    }
     return {
       destroy() {
         for (const cleanup of cleanups) cleanup();
