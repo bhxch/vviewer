@@ -104,10 +104,15 @@ async function makeMpegtsLoader(ext: string, cleanups: Cleanup[]): Promise<ArtLo
   };
 }
 
-/** 读主题强调色（app.css 的 --ui-accent，随明暗主题切换）；读不到回落 M1 蓝值 */
-function readAccent(target: HTMLElement): string {
-  return getComputedStyle(target).getPropertyValue('--ui-accent').trim() || '#0969da';
-}
+/**
+ * ArtPlayer 主题色（终审 B3 裁决：CSS 变量驱动，零 JS 跟随）。
+ * ArtPlayer 5.x 把 option.theme 写进容器内联自定义属性 `--art-theme`，全部主题色
+ * 消费点（进度条/音量/选中态等）都是 `var(--art-theme)`——而 CSS 自定义属性的值
+ * 允许引用其他变量，故直接传 `var(--ui-accent, <fallback>)`：明暗主题切换（含
+ * system 模式的 OS 级切换）时播放器 UI 即时跟随，无需重建播放器或监听事件。
+ * （原 render 时 getComputedStyle 读一次 --ui-accent 的做法在主题切换后残留旧色。）
+ */
+const ART_THEME = 'var(--ui-accent, #0969da)';
 
 export const avRenderer: Renderer = {
   id: 'av',
@@ -153,7 +158,8 @@ export const avRenderer: Renderer = {
     const url = URL.createObjectURL(makeBlob());
     let art: InstanceType<typeof Artplayer>;
     try {
-      art = new Artplayer({ ...buildArtConfig(container, url, det.ext, readAccent(target)), customType });
+      // 主题色传 CSS 变量引用（见 ART_THEME 注释）：随主题切换自动跟随
+      art = new Artplayer({ ...buildArtConfig(container, url, det.ext, ART_THEME), customType });
     } catch (err) {
       URL.revokeObjectURL(url);
       throw err;
