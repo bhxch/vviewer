@@ -20,6 +20,30 @@ import type {
   MarkdownComputeOptions
 } from './types';
 
+/**
+ * 服务端 14 语言中带 injections.scm 者（实测 packages/highlight/assets/queries/
+ * {rust,c,cpp,go,html,javascript}/injections.scm 存在；css/typescript/tsx 等无）。
+ * 服务端 v1 无 injection（M6 计划级裁决）：对这些语言远程高亮会丢注入区间
+ * （markdown 围栏、HTML 内嵌脚本等），auto 策略应留在本地 worker。
+ */
+export const INJECTION_LANGS: ReadonlySet<string> = new Set([
+  'rust',
+  'c',
+  'cpp',
+  'go',
+  'html',
+  'javascript'
+]);
+
+/**
+ * highlightClient 装配 highlight remoteFn 的路由规则：auto 下注入语言不远程
+ * （服务端 v1 无 injection，本地高亮保注入完整，可用性优先）；显式 remote
+ * 是用户选择，仍装配（丢注入由该显式选择自担）。
+ */
+export function highlightRemoteEligible(policy: ComputePolicy, lang: string): boolean {
+  return !(policy === 'auto' && INJECTION_LANGS.has(lang));
+}
+
 export interface ComputeRouterOptions {
   /** 连接缓存里是否含 "compute" 能力（capabilities 来自连接时 /api/health）。 */
   hasCompute: () => boolean;

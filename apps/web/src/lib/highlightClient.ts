@@ -5,6 +5,7 @@ import {
   createComputeRouter,
   decodeHighlightResponse,
   encodeCanceled,
+  highlightRemoteEligible,
   isCanceledMessage,
   type ComputeRouter,
   type ComputeSource,
@@ -21,6 +22,8 @@ import { loadSettings } from './stores/settings';
  * M6：注入前经 compute router 路由——远程 store 文件（有服务端 path 语义）在
  * auto/remote 策略且服务器宣告 compute 能力时走 POST /api/compute/highlight，
  * 其余走本地 tree-sitter worker；结果统一带执行位置回调（状态栏指示）。
+ * 注入语言路由：auto 下 INJECTION_LANGS（服务端带 injections.scm 的语言）不装配
+ * remoteFn——服务端 v1 无 injection，本地高亮保注入完整；显式 remote 仍远程。
  */
 
 let clientPromise: Promise<HighlightClient> | null = null;
@@ -108,7 +111,11 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
               if (err instanceof Error && err.name === 'HighlightCanceled') throw encodeCanceled(err);
               throw err;
             }),
-          src ? (s, l) => remoteHighlight(s, l) : undefined
+          // 注入语言路由（INJECTION_LANGS）：auto 下服务端 v1 无 injection，
+          // 远程高亮会丢注入区间——不装配 remoteFn 留在本地；显式 remote 仍远程。
+          src && highlightRemoteEligible(loadSettings().computePolicy, lang)
+            ? (s, l) => remoteHighlight(s, l)
+            : undefined
         )
         .then((res) => {
           ctx?.onWhere?.(res.where);

@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createComputeRouter } from '../src/compute/router';
+import {
+  createComputeRouter,
+  highlightRemoteEligible,
+  INJECTION_LANGS
+} from '../src/compute/router';
 import type { ComputePolicy, ComputeSource, HighlightInterval } from '../src/compute/types';
 
 function iv(start: number, end: number, capture = 'keyword'): HighlightInterval {
@@ -217,6 +221,47 @@ describe('routeSearch 路由占位（T4 实现远程）', () => {
       throw new Error('HTTP 404');
     });
     expect(fallback).toEqual({ where: 'local', ok: true, data: [{ line: 0, start: 0, end: 3 }] });
+  });
+});
+
+describe('INJECTION_LANGS 注入语言路由（服务端 v1 无 injection）', () => {
+  it('auto + 注入语言：highlightClient 不装配 remoteFn → 走本地', async () => {
+    // highlightClient 按 highlightRemoteEligible 决定 remoteFn 有无：
+    // auto 下注入语言（如 html，含内嵌脚本/样式注入）留在本地保注入完整
+    expect(highlightRemoteEligible('auto', 'html')).toBe(false);
+    const remoteFn = vi.fn(async () => [iv(0, 4)]);
+    const res = await makeRouter({ policy: 'auto', compute: true, base: 'http://s' }).routeHighlight(
+      remotePath('page.html'),
+      'html',
+      async () => [iv(0, 2)],
+      highlightRemoteEligible('auto', 'html') ? remoteFn : undefined
+    );
+    expect(res).toEqual({ where: 'local', ok: true, data: [iv(0, 2)] });
+    expect(remoteFn).not.toHaveBeenCalled();
+  });
+
+  it('remote + 注入语言：显式策略仍装配 remoteFn → 走远程', async () => {
+    // 远程是用户的显式选择：注入语言也不拦截（丢注入由该选择自担）
+    expect(highlightRemoteEligible('remote', 'rust')).toBe(true);
+    const localFn = vi.fn(async () => [iv(0, 2)]);
+    const res = await makeRouter({ policy: 'remote', compute: true, base: 'http://s' }).routeHighlight(
+      remotePath('a.rs'),
+      'rust',
+      localFn,
+      highlightRemoteEligible('remote', 'rust') ? async () => [iv(0, 4)] : undefined
+    );
+    expect(res).toEqual({ where: 'remote', ok: true, data: [iv(0, 4)] });
+    expect(localFn).not.toHaveBeenCalled();
+  });
+
+  it('INJECTION_LANGS 清单与 assets 实测一致（带 injections.scm 的服务端语言）', () => {
+    for (const lang of ['rust', 'c', 'cpp', 'go', 'html', 'javascript']) {
+      expect(INJECTION_LANGS.has(lang), lang).toBe(true);
+    }
+    // 服务端 14 语言中无 injections.scm 者
+    for (const lang of ['python', 'bash', 'json', 'yaml', 'toml', 'css', 'typescript', 'tsx']) {
+      expect(INJECTION_LANGS.has(lang), lang).toBe(false);
+    }
   });
 });
 
