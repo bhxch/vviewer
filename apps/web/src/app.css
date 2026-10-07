@@ -136,6 +136,17 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .vv-pdf-page-label { position: absolute; right: 6px; bottom: 6px; font-size: 11px; color: #666;
   background: rgb(255 255 255 / 80%); border-radius: 3px; padding: 0 4px; }
 .vv-pdf-page-hit { outline: 3px solid var(--ui-accent); outline-offset: -3px; }
+/* hex 渲染（render-binary hexRenderer）：状态行 + 三列 dump + 可折叠结构树 */
+.vv-hex { display: flex; flex-direction: column; height: 100%; }
+.vv-hex-status { flex: none; padding: 4px 10px; border-bottom: 1px solid var(--ui-border);
+  color: var(--ui-fg-muted); font-size: 12px; }
+.vv-hex-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; padding: 8px 10px; }
+.vv-hex-dump { font-family: var(--vv-code-font); font-size: 12px; line-height: 1.5; white-space: pre; }
+.vv-hex-more { margin: 8px auto; display: block; }
+.vv-hex-struct { margin: 12px 0; font-size: 13px; }
+.vv-hex-struct summary { cursor: pointer; list-style: revert; font-weight: 600; }
+.vv-hex-children { padding-left: 1.2em; }
+.vv-hex-node-value { color: var(--ui-fg-muted); }
 /* 超大文件降级视图（renderDegradedCode：markdown 纯文本 / html 源码）：提示卡 + 代码区 */
 .vv-degraded { display: flex; flex-direction: column; height: 100%; }
 .vv-degraded .vv-oversize-card { flex: none; padding: 1rem 1.5rem; border-bottom: 1px solid var(--ui-border); }

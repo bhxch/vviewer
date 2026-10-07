@@ -1,0 +1,15 @@
+{
+  "name": "@vviewer/render-binary",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/hex.ts",
+  "types": "src/hex.ts",
+  "exports": {
+    ".": "./src/hex.ts",
+    "./struct": "./src/struct.ts",
+    "./client": "./src/client.ts"
+  },
+  "dependencies": {
+    "@vviewer/core": "workspace:*"
+  }
+}

@@ -35,6 +35,9 @@ importers:
       '@vviewer/highlight':
         specifier: workspace:*
         version: link:../../packages/highlight
+      '@vviewer/render-binary':
+        specifier: workspace:*
+        version: link:../../packages/render-binary
       '@vviewer/render-doc':
         specifier: workspace:*
         version: link:../../packages/render-doc
@@ -74,6 +77,12 @@ importers:
       web-tree-sitter:
         specifier: ~0.25.10
         version: 0.25.10
+
+  packages/render-binary:
+    dependencies:
+      '@vviewer/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/render-doc:
     dependencies:
