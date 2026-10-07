@@ -4,7 +4,9 @@
   import TabBar from './TabBar.svelte';
   import ViewerPane from './ViewerPane.svelte';
   import FileTree from './FileTree.svelte';
-  import type { TreeStore } from '@vviewer/core';
+  import Toc from './Toc.svelte';
+  import MetaPanel from './MetaPanel.svelte';
+  import type { TreeStore, TocEntry } from '@vviewer/core';
   import { tabStore, addTab, activateTab, tryRestoreDirectory } from './openFlow.svelte';
   import { loadSession, saveDirHandle, type TabSnapshot } from './stores/session';
   import { loadSettings } from './stores/settings';
@@ -12,6 +14,8 @@
   const settings = loadSettings();
   let dirStore = $state<TreeStore | null>(null);
   let drawerOpen = $state(false);
+  /** 活动渲染实例的目录（ViewerPane ontoc 回调上行；markdown tab 有数据，其余为空） */
+  let tocEntries = $state<TocEntry[]>([]);
 
   // 左栏文件树跟随目录 tab（目录 tab 由 addDirStoreTab 替换语义保证至多一个）
   $effect(() => {
@@ -101,10 +105,19 @@
       {/if}
     </aside>
     <main class="vv-main">
-      <ViewerPane tab={tabStore.list.find((t) => t.active) ?? null} />
+      <ViewerPane
+        tab={tabStore.list.find((t) => t.active) ?? null}
+        ontoc={(entries) => (tocEntries = entries)}
+      />
     </main>
+    <aside class="vv-right">
+      <MetaPanel />
+      {#if tocEntries.length > 0}
+        <Toc entries={tocEntries} />
+      {/if}
+    </aside>
   </div>
-  <button class="vv-drawer-toggle" aria-label="切换文件树" onclick={() => (drawerOpen = !drawerOpen)}>☰</button>
+  <button class="vv-drawer-toggle" aria-label="切换侧栏" onclick={() => (drawerOpen = !drawerOpen)}>☰</button>
 </div>
 
 <style>
@@ -130,6 +143,15 @@
     display: flex;
     flex-direction: column;
   }
+  .vv-right {
+    width: 230px;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+    border-left: 1px solid var(--ui-border);
+    background: var(--ui-side-bg);
+  }
   .vv-side-empty {
     padding: 2rem;
     color: var(--ui-fg-muted);
@@ -148,7 +170,21 @@
       background: var(--ui-bg);
       box-shadow: 0 0 12px rgb(0 0 0 / 25%);
     }
+    /* 窄屏右栏并入同一抽屉（左侧文件树 + 右侧目录/属性从两端滑入） */
+    .vv-right {
+      position: fixed;
+      inset: 0 0 0 auto;
+      width: min(80vw, 300px);
+      transform: translateX(100%);
+      transition: transform 0.2s;
+      z-index: 10;
+      background: var(--ui-bg);
+      box-shadow: 0 0 12px rgb(0 0 0 / 25%);
+    }
     .vv-shell.drawer .vv-side {
+      transform: none;
+    }
+    .vv-shell.drawer .vv-right {
       transform: none;
     }
     .vv-drawer-toggle {

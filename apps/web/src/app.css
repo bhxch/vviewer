@@ -140,3 +140,19 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .vv-tree-row:hover { background: var(--ui-side-bg); }
 .vv-tree-caret { width: 1em; flex: none; }
 .vv-tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 右栏（目录 + 元数据面板）：MetaPanel 空壳在顶，TOC 占剩余高度滚动 */
+.meta-panel { padding: .65rem .75rem; border-bottom: 1px solid var(--ui-border); flex: none; }
+.meta-title { margin: 0 0 .3rem; font-size: 11px; font-weight: 600; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--ui-fg-muted); }
+.meta-empty { margin: 0; font-size: 12px; color: var(--ui-fg-muted); }
+.toc { flex: 1; min-height: 0; overflow: auto; padding: .65rem .5rem; }
+.toc ul { list-style: none; margin: 0; padding: 0; }
+.toc button { display: block; width: 100%; text-align: left; background: none; border: none;
+  padding: 3px 6px; border-radius: 4px; color: var(--ui-fg-muted); font-size: 13px; line-height: 1.4;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.toc button:hover { color: var(--ui-fg); background: var(--ui-tab-bg); }
+.toc button.active { color: var(--ui-accent); background: var(--ui-tab-bg); }
+.toc .level-1 button { color: var(--ui-fg); font-weight: 600; }
+.toc .level-3 { padding-left: 12px; }
+.toc .level-4 { padding-left: 24px; }
+.toc-empty { margin: 0; padding: .25rem .5rem; font-size: 12px; color: var(--ui-fg-muted); }

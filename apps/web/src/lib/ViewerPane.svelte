@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { RenderedInstance } from '@vviewer/core';
+  import type { RenderedInstance, TocEntry } from '@vviewer/core';
   import { showErrorCard } from '@vviewer/core';
   import type { CodeEngine } from '@vviewer/render-text';
   import type { Tab } from './openFlow.svelte';
@@ -7,7 +7,7 @@
   import { dispatcher } from './viewer';
   import { cancelHighlight } from './highlightClient';
 
-  let { tab }: { tab: Tab | null } = $props();
+  let { tab, ontoc }: { tab: Tab | null; ontoc?: (entries: TocEntry[]) => void } = $props();
 
   /** 引擎指示器文案（F4 状态栏） */
   const ENGINE_LABELS: Record<CodeEngine, string> = {
@@ -61,6 +61,9 @@
           return;
         }
         instance = res.instance;
+        // TOC 数据上行（Task 5）：markdown 实例提供 getToc，其余渲染器清空右栏目录
+        const readToc = 'getToc' in res.instance ? res.instance.getToc : null;
+        ontoc?.(readToc?.() ?? []);
         // 滚动恢复：目录树切换回该 tab 时回到上次位置。
         // code 渲染器滚动在内部 .vv-code-pre（外层不滚动），接 getScrollHost()；其余维持外层容器。
         const inner =
@@ -90,6 +93,7 @@
       cancelled = true;
       cancelAnimationFrame(rafId);
       stopWatchEngine();
+      ontoc?.([]); // tab 切换/销毁：右栏目录随之清空
       scrollHost?.removeEventListener('scroll', onScroll);
       scrollHost = null;
       cancelHighlight(); // 取消未完成的 tree-sitter 高亮请求（Worker 不做无用功）
