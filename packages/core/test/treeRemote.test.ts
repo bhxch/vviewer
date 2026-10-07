@@ -58,7 +58,8 @@ describe('createRemoteStore', () => {
     const store = createRemoteStore('http://127.0.0.1:8321', 'tok-1', 'srv');
     const nodes = await store.listChildren('sub');
     expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8321/api/tree?path=sub', {
-      headers: { authorization: 'Bearer tok-1' }
+      headers: { authorization: 'Bearer tok-1' },
+      signal: expect.anything() // request() 挂 30s AbortSignal.timeout
     });
     expect(nodes).toEqual([
       { name: 'sample.js', path: 'sub/sample.js', kind: 'file', size: 3, mtime: 123 },
@@ -72,7 +73,8 @@ describe('createRemoteStore', () => {
     const store = createRemoteStore('http://127.0.0.1:8321', null, 'srv');
     await store.listChildren('');
     expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8321/api/tree?path=', {
-      headers: {}
+      headers: {},
+      signal: expect.anything()
     });
   });
 
@@ -83,7 +85,7 @@ describe('createRemoteStore', () => {
     await store.listChildren('a b/中文.txt');
     expect(fetchMock).toHaveBeenCalledWith(
       `http://127.0.0.1:8321/api/tree?path=${encodeURIComponent('a b/中文.txt')}`,
-      { headers: {} }
+      { headers: {}, signal: expect.anything() }
     );
   });
 
@@ -101,7 +103,8 @@ describe('createRemoteStore', () => {
     const store = createRemoteStore('http://127.0.0.1:8321', 'tok', 'meta-srv');
     const bytes = await store.read('a.py');
     expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8321/api/file?path=a.py', {
-      headers: { authorization: 'Bearer tok' }
+      headers: { authorization: 'Bearer tok' },
+      signal: expect.anything()
     });
     expect(bytes).toEqual(new Uint8Array([1, 2, 3]));
     expect(getRemoteMeta(store.id, 'a.py')).toEqual({ lang: 'python', encoding: 'gb18030' });
@@ -145,6 +148,16 @@ describe('normalizeServerBase', () => {
     expect(normalizeServerBase('localhost:8321/')).toBe('http://localhost:8321');
     expect(normalizeServerBase(' http://a.b:80/ ')).toBe('http://a.b:80');
     expect(normalizeServerBase('https://example.com')).toBe('https://example.com');
+  });
+
+  it('strips the known /api suffix (mistaken paste of an API endpoint)', () => {
+    expect(normalizeServerBase('http://127.0.0.1:8321/api')).toBe('http://127.0.0.1:8321');
+    expect(normalizeServerBase('127.0.0.1:8321/api/')).toBe('http://127.0.0.1:8321');
+    // host 恰为 "api" 不是路径后缀：保留
+    expect(normalizeServerBase('http://api')).toBe('http://api');
+    // 其他 path（反向代理前缀等）保留原样，交由请求错误信息提示
+    expect(normalizeServerBase('http://a.b:80/proxy/api')).toBe('http://a.b:80/proxy/api');
+    expect(normalizeServerBase('http://a.b:80/vv')).toBe('http://a.b:80/vv');
   });
 });
 
@@ -296,5 +309,56 @@ describe('createRemoteStore watch/close（M5 SSE 变更订阅）', () => {
     es.fail(); // close 后连接错误也不得重连
     await vi.advanceTimersByTimeAsync(60_000);
     expect(FakeEventSource.instances).toHaveLength(1);
+  });
+});
+
+describe('RemoteStore 资源生命周期与错误提示（终审批次 B）', () => {
+  it('close() 清理 remoteMeta（按 id 前缀）与 remoteBaseById', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      fileResponse(new Uint8Array([1]), { 'x-vv-lang': 'rust' })
+    ));
+    const store = createRemoteStore('http://127.0.0.1:8321', null, 'close-srv');
+    await store.read('a.rs');
+    expect(getRemoteMeta(store.id, 'a.rs')).toEqual({ lang: 'rust' });
+    expect(getRemoteBase(store.id)).toBe('http://127.0.0.1:8321');
+    store.close();
+    expect(getRemoteMeta(store.id, 'a.rs')).toBeUndefined();
+    expect(getRemoteBase(store.id)).toBeUndefined();
+  });
+
+  it('watch-error 帧触发 onError（一次性降级通知）且不再有数据帧', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(ticketFetch('tk-e')));
+    vi.stubGlobal('EventSource', FakeEventSource);
+    FakeEventSource.reset();
+    const store = createRemoteStore('http://127.0.0.1:8399', null, 'srv');
+    const errors: number[] = [];
+    store.watch(() => {}, () => errors.push(1));
+    await vi.advanceTimersByTimeAsync(0);
+    FakeEventSource.instances[0]!.emit('{"type":"watch-error"}');
+    expect(errors).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(errors).toHaveLength(1); // 保持静默：不重复通知
+    store.close();
+  });
+
+  it('request 30s 超时：TimeoutError 转译为有界失败的中文错误', async () => {
+    const timeoutErr = new Error('The operation was aborted due to timeout');
+    timeoutErr.name = 'TimeoutError';
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw timeoutErr;
+    }));
+    const store = createRemoteStore('http://127.0.0.1:8321', null, 'slow-srv');
+    await expect(store.read('a.txt')).rejects.toThrow('服务器请求超时（30s）');
+  });
+
+  it('base 带非根 path 时 HTTP 失败附加误粘贴提示', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => treeResponse({ error: 'nope' }, 404)));
+    const store = createRemoteStore('http://127.0.0.1:8321/proxy', null, 'path-srv');
+    await expect(store.listChildren('')).rejects.toThrow('误粘贴');
+    // 无 path 的 base 不带提示
+    vi.stubGlobal('fetch', vi.fn(async () => treeResponse({ error: 'nope' }, 404)));
+    const plain = createRemoteStore('http://127.0.0.1:8321', null, 'plain-srv');
+    await expect(plain.listChildren('')).rejects.toThrow(/HTTP 404(?!.*误粘贴)/);
   });
 });
