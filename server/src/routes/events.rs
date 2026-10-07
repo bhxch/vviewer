@@ -11,17 +11,22 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use axum::extract::{Query, State};
+use axum::http::HeaderValue;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use futures_core::Stream;
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::Receiver;
 
 use crate::error::AppError;
 
 /// 心跳间隔。
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
+
+/// 每连接 frame channel 深度：该连接消费跟不上且积压满时 send 失败 →
+/// 驱动任务退出（连接即断，客户端重连自愈），不无界积压内存。
+const FRAME_CHANNEL: usize = 256;
 
 #[derive(Deserialize)]
 pub struct EventsQuery {
@@ -45,11 +50,11 @@ pub async fn events(
     let mut rx = state.changes.subscribe();
 
     // 每连接一个驱动任务：broadcast → SSE 帧（事件 + 心跳），body drop 即退出
-    let (frame_tx, frame_rx) = tokio::sync::mpsc::unbounded_channel::<Result<Event, Infallible>>();
+    let (frame_tx, frame_rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(FRAME_CHANNEL);
     tokio::spawn(async move {
         if !watch_ok {
             // 降级：一条 watch-error 后保持连接（仅心跳），不再有数据帧
-            let _ = frame_tx.send(Ok(Event::default().data(r#"{"type":"watch-error"}"#)));
+            let _ = frame_tx.send(Ok(Event::default().data(r#"{"type":"watch-error"}"#))).await;
         }
         let mut ticker = tokio::time::interval(HEARTBEAT_INTERVAL);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -57,15 +62,15 @@ pub async fn events(
             tokio::select! {
                 _ = ticker.tick() => {
                     // SSE 注释行，EventSource 客户端忽略；充当代心跳
-                    if frame_tx.send(Ok(Event::default().comment("ping"))).is_err() {
+                    if frame_tx.send(Ok(Event::default().comment("ping"))).await.is_err() {
                         break;
                     }
                 }
                 res = rx.recv() => {
                     match res {
                         Ok(payload) => {
-                            if frame_tx.send(Ok(Event::default().data(payload))).is_err() {
-                                break; // 客户端断开（body 已 drop）
+                            if frame_tx.send(Ok(Event::default().data(payload))).await.is_err() {
+                                break; // 客户端断开（body 已 drop）或积压满（连接跟不上）
                             }
                         }
                         Err(RecvError::Lagged(_)) => continue, // 慢连接丢帧：跳过
@@ -76,13 +81,18 @@ pub async fn events(
         }
     });
 
-    Ok(Sse::new(ReceiverStream { rx: frame_rx }).into_response())
+    let mut response = Sse::new(ReceiverStream { rx: frame_rx }).into_response();
+    // SSE 流不允许缓存：显式 no-cache，防中间层缓存握手响应导致收不到推送
+    response
+        .headers_mut()
+        .insert("cache-control", HeaderValue::from_static("no-cache"));
+    Ok(response)
 }
 
-/// `UnboundedReceiver` → `Stream` 适配（tokio mpsc 的 `poll_recv` 是公开 API，
+/// mpsc Receiver → Stream 适配（tokio mpsc 的 `poll_recv` 是公开 API，
 /// 无需引入 tokio-stream 依赖）。
 struct ReceiverStream {
-    rx: UnboundedReceiver<Result<Event, Infallible>>,
+    rx: Receiver<Result<Event, Infallible>>,
 }
 
 impl Stream for ReceiverStream {
