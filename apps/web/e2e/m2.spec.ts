@@ -126,7 +126,7 @@ test('6MB 文本按降级链走 hljs 分块，不发起 tree-sitter 高亮', asy
   expect(lang).toBeUndefined();
 });
 
-test('1.9MB 文本 tree-sitter 高亮性能计时（__vvLastHighlightMs，目标 <2s）', async ({ page }) => {
+test('1.9MB 文本 tree-sitter 高亮性能计时（__vvLastHighlightMs，预算 ≤5s=2MB×2.4s/MB，仅记录）', async ({ page }) => {
   test.setTimeout(120_000);
   await page.goto('/');
   // 19B × 100000 = 1.9MB ≤ TREE_SITTER_MAX_BYTES(2MB) → tree-sitter 主路径
