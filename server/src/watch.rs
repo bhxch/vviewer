@@ -118,8 +118,52 @@ fn collect_paths(
         return;
     }
     for p in &ev.paths {
-        let rel = p.strip_prefix(root).unwrap_or(p);
+        // root 外路径不进 changed 帧（防止绝对路径泄露给客户端）：直接跳过
+        let Ok(rel) = p.strip_prefix(root) else { continue };
         // Windows 分隔符统一为 '/'，与 /api/tree、/api/file 的 path 参数一致
         out.insert(rel.to_string_lossy().replace('\\', "/"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use notify::event::{AccessKind, AccessMode, CreateKind, EventKind};
+
+    /// 构造带路径的 notify 事件（测试 collect_paths 的过滤语义）。
+    fn ev(kind: EventKind, paths: &[&str]) -> Result<NotifyEvent, NotifyError> {
+        let mut e = NotifyEvent::new(kind);
+        for p in paths {
+            e = e.add_path(PathBuf::from(p));
+        }
+        Ok(e)
+    }
+
+    #[test]
+    fn access_events_and_out_of_root_paths_are_dropped() {
+        let root = PathBuf::from("/srv/root");
+        let mut out = BTreeSet::new();
+
+        // Access 事件（如 watcher 自身初始扫描 / 客户端读文件）不构成变更
+        collect_paths(
+            &ev(
+                EventKind::Access(AccessKind::Open(AccessMode::Any)),
+                &["/srv/root/a.txt"],
+            ),
+            &root,
+            &mut out,
+        );
+        assert!(out.is_empty(), "Access 事件应被过滤");
+
+        // root 内路径转相对；root 外绝对路径跳过（不泄露给客户端）
+        collect_paths(
+            &ev(
+                EventKind::Create(CreateKind::File),
+                &["/srv/root/sub/b.txt", "/etc/passwd"],
+            ),
+            &root,
+            &mut out,
+        );
+        assert_eq!(out, BTreeSet::from(["sub/b.txt".to_string()]));
     }
 }

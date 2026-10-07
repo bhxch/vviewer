@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRemoteStore, getRemoteMeta } from '../src/tree/remote';
+import { createRemoteStore, getRemoteBase, getRemoteMeta, normalizeServerBase } from '../src/tree/remote';
 
 /** fetch 响应桩（tree 响应）：仅含 store 用到的 ok/status/json/headers.get */
 function treeResponse(
@@ -37,6 +37,12 @@ describe('createRemoteStore', () => {
     const store = createRemoteStore('http://127.0.0.1:8321/', null, '样例');
     expect(store.id).toMatch(/^remote:[0-9a-f]{8}$/);
     expect(store.displayName()).toBe('样例');
+  });
+
+  it('records the server base for the created store (M7 reconnect recovery)', () => {
+    const store = createRemoteStore('http://127.0.0.1:8321/', null, 'srv');
+    expect(getRemoteBase(store.id)).toBe('http://127.0.0.1:8321');
+    expect(getRemoteBase('localfs:nope')).toBeUndefined();
   });
 
   it('listChildren GETs /api/tree with Bearer and maps nodes', async () => {
@@ -130,5 +136,14 @@ describe('createRemoteStore', () => {
     );
     const store = createRemoteStore('http://127.0.0.1:8321', null, 'err-srv');
     await expect(store.read('missing.txt')).rejects.toThrow('HTTP 404');
+  });
+});
+
+describe('normalizeServerBase', () => {
+  it('prepends http:// when scheme missing and strips trailing slashes', () => {
+    expect(normalizeServerBase('127.0.0.1:8321')).toBe('http://127.0.0.1:8321');
+    expect(normalizeServerBase('localhost:8321/')).toBe('http://localhost:8321');
+    expect(normalizeServerBase(' http://a.b:80/ ')).toBe('http://a.b:80');
+    expect(normalizeServerBase('https://example.com')).toBe('https://example.com');
   });
 });

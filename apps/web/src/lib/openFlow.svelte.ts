@@ -5,7 +5,9 @@ import {
   createLocalFsStore,
   createLocalFilesStore,
   createRemoteStore,
-  ensurePermission
+  ensurePermission,
+  getRemoteBase,
+  normalizeServerBase
 } from '@vviewer/core';
 import { ARCHIVE_OPEN_EVENT } from '@vviewer/render-archive';
 import { saveDirHandle, saveTabs, type TabSnapshot } from './stores/session';
@@ -24,10 +26,13 @@ let seq = 0;
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
 function snapshot(t: Tab): TabSnapshot {
+  // remote tab 额外记服务端 base（显示名仍为 host）：M7 重连恢复需要 scheme+host+port
+  const storeBase = getRemoteBase(t.source.storeId);
   return {
     id: t.id,
     storeId: t.source.storeId,
     storeLabel: t.source.storeLabel,
+    ...(storeBase !== undefined ? { storeBase } : {}),
     path: t.source.path,
     name: t.source.name,
     kind: t.source.storeId.startsWith('localfs:') ? 'restorable' : 'rename-only',
@@ -198,7 +203,7 @@ function serverLabel(base: string): string {
  * 失败抛错给 UI 展示；连接句柄不可持久化，重连本期需手动（M7 恢复）。
  */
 export async function connectServer(baseUrl: string, token: string | null): Promise<void> {
-  const base = baseUrl.trim().replace(/\/+$/, '');
+  const base = normalizeServerBase(baseUrl); // 缺 scheme 补 http://、去尾部斜杠
   const tok = token?.trim() ? token.trim() : null;
 
   const headers: Record<string, string> = {};

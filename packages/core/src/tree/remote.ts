@@ -21,6 +21,23 @@ export function getRemoteMeta(storeId: string, path: string): RemoteMeta | undef
   return remoteMeta.get(`${storeId}:${path}`);
 }
 
+/** storeId → 服务端 base（scheme+host+port）：会话快照 storeBase 的来源，M7 重连恢复用。 */
+const remoteBaseById = new Map<string, string>();
+
+/** 读取某 remote store 的服务端 base；非 remote store 返回 undefined。 */
+export function getRemoteBase(storeId: string): string | undefined {
+  return remoteBaseById.get(storeId);
+}
+
+/**
+ * 连接地址归一：trim、去尾部斜杠；缺 scheme 补 `http://`
+ * （"127.0.0.1:8321" → "http://127.0.0.1:8321"，避免落成同源相对路径误导排障）。
+ */
+export function normalizeServerBase(input: string): string {
+  const trimmed = input.trim().replace(/\/+$/, '');
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+}
+
 const ENCODINGS: readonly string[] = ['utf-8', 'utf-16le', 'utf-16be', 'gb18030'];
 
 function asEncoding(v: string | null): Encoding | undefined {
@@ -31,11 +48,12 @@ function asEncoding(v: string | null): Encoding | undefined {
  * 远端 vviewer 文件服务器的 TreeStore（M5）：
  * listChildren → GET /api/tree?path=，read → GET /api/file?path=（全量读，
  * Range 由服务端支持但前端暂不使用）；每次 read 把 X-VV-* 检测头写入 remoteMeta。
- * id 由 base+label 哈希派生，会话快照只记 storeLabel（重连恢复属 M7）。
+ * id 由 base+label 哈希派生；base 登记在 remoteBaseById（会话快照 storeBase，M7 恢复）。
  */
 export function createRemoteStore(baseUrl: string, token: string | null, dirLabel: string): TreeStore {
-  const base = baseUrl.replace(/\/+$/, ''); // 尾部斜杠归一，避免 //api/...
+  const base = normalizeServerBase(baseUrl);
   const id = `remote:${hash8(`${base}:${dirLabel}`)}`;
+  remoteBaseById.set(id, base);
 
   /** 带 Bearer 头的 GET；非 2xx 抛含状态码的 Error（server 错误体若为 JSON 则附 detail）。 */
   async function request(apiPath: string, path: string): Promise<Response> {
