@@ -58,6 +58,8 @@ pub struct AppState {
     pub hidden: bool,
     /// `--cors-origin` 精确 origin；None = 不加 CORS 层。
     pub cors_origin: Option<String>,
+    /// `--compute`：启用服务端计算端点（/api/compute/*；health 能力追加 "compute"）。
+    pub compute: bool,
     /// 一次性 ticket 表（SSE 升级用）。
     pub tickets: TicketStore,
     /// root 变更广播中心（启动时创建一次，共享 watcher + debounce 聚合）。
@@ -81,9 +83,16 @@ impl AppState {
             token,
             hidden,
             cors_origin,
+            compute: false,
             tickets: TicketStore::default(),
             changes: crate::watch::ChangeHub::spawn(&root_canonical),
         }
+    }
+
+    /// builder：`--compute` 启用服务端计算端点（new 默认 false，既有测试零改动）。
+    pub fn with_compute(mut self, compute: bool) -> Self {
+        self.compute = compute;
+        self
     }
 }
 

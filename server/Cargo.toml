@@ -17,6 +17,8 @@ axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["io"] }
 clap = { version = "4", features = ["derive"] }
+# 仅库渲染：禁默认（cli/syntect-onig 语法高亮用不到）；shortcodes 为 GFM emoji 短码
+comrak = { version = "0.56.0", default-features = false, features = ["shortcodes"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tower = { version = "0.5", features = ["util"] }
