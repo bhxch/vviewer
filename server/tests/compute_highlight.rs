@@ -1,0 +1,293 @@
+//! Task 3 集成测试：POST /api/compute/highlight（tree-sitter 服务端高亮）。
+//!
+//! 覆盖：text 模式区间语义、未知语言 400、20MB 上限 413、path 模式 + 缓存
+//! 命中（计数观测钩子）、path 穿越 403、鉴权与 --compute 开关。
+
+use std::os::unix::fs::symlink;
+
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use serde_json::{json, Value};
+use tower::ServiceExt;
+use vviewer::compute::highlight::{cache_reset, cache_stats};
+use vviewer::state::AppState;
+
+struct Fixture {
+    _dir: tempfile::TempDir,
+    app: axum::Router,
+}
+
+fn fixture(compute: bool, token: Option<&str>) -> Fixture {
+    let dir = tempfile::tempdir().unwrap();
+    let state =
+        AppState::new(dir.path().to_path_buf(), None, token.map(str::to_string), false, None)
+            .with_compute(compute);
+    let app = vviewer::build_router(state);
+    Fixture { _dir: dir, app }
+}
+
+async fn post_json(
+    app: axum::Router,
+    uri: &str,
+    authorization: Option<&str>,
+    body: Value,
+) -> (StatusCode, Value) {
+    let mut builder = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("content-type", "application/json");
+    if let Some(auth) = authorization {
+        builder = builder.header("authorization", auth);
+    }
+    let res = app
+        .oneshot(builder.body(Body::from(body.to_string())).unwrap())
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    (status, body)
+}
+
+const RUST_SAMPLE: &str = r#"//! 示例源码：中文注释与 emoji 😀 混排
+fn main() {
+    let msg = "你好 world";
+    println!("{msg}");
+}
+"#;
+
+// ---------- text 模式 ----------
+
+#[tokio::test]
+async fn highlight_rust_text_yields_intervals_with_keyword_capture() {
+    let f = fixture(true, None);
+    let (status, body) = post_json(
+        f.app,
+        "/api/compute/highlight",
+        None,
+        json!({ "text": RUST_SAMPLE, "lang": "rust" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let intervals = body["intervals"].as_array().expect("intervals 数组");
+    assert!(!intervals.is_empty(), "区间非空");
+    // 三元组形状
+    for iv in intervals {
+        let t = iv.as_array().unwrap();
+        assert_eq!(t.len(), 3, "三元组: {iv}");
+        assert!(t[0].is_u64() && t[1].is_u64() && t[2].is_u64(), "{iv}");
+    }
+    let captures: Vec<&str> =
+        body["captures"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+    assert!(
+        captures.iter().any(|c| *c == "keyword" || c.starts_with("keyword.")),
+        "应含 keyword 类捕获: {captures:?}"
+    );
+    // UTF-16 偏移不越界（样本含 CJK/emoji，若按字节算必超 UTF-16 长度）
+    let utf16_len = RUST_SAMPLE.encode_utf16().count();
+    for iv in intervals {
+        let t = iv.as_array().unwrap();
+        assert!(t[1].as_u64().unwrap() <= utf16_len as u64, "区间在 UTF-16 长度内: {iv}");
+    }
+}
+
+#[tokio::test]
+async fn highlight_empty_text_ok() {
+    let f = fixture(true, None);
+    let (status, body) =
+        post_json(f.app, "/api/compute/highlight", None, json!({ "text": "", "lang": "rust" }))
+            .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["intervals"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn highlight_unknown_lang_400() {
+    let f = fixture(true, None);
+    let (status, body) = post_json(
+        f.app,
+        "/api/compute/highlight",
+        None,
+        json!({ "text": "x", "lang": "brainfuck" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap().contains("unsupported language"), "{body}");
+}
+
+#[tokio::test]
+async fn highlight_missing_lang_400() {
+    let f = fixture(true, None);
+    let (status, body) =
+        post_json(f.app, "/api/compute/highlight", None, json!({ "text": "x" })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].is_string(), "{body}");
+}
+
+#[tokio::test]
+async fn highlight_missing_path_and_text_400() {
+    let f = fixture(true, None);
+    let (status, body) =
+        post_json(f.app, "/api/compute/highlight", None, json!({ "lang": "rust" })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap().contains("path or text"), "{body}");
+}
+
+#[tokio::test]
+async fn highlight_over_20mb_text_413() {
+    let f = fixture(true, None);
+    let big = "a".repeat(20 * 1024 * 1024 + 1);
+    let (status, body) = post_json(
+        f.app,
+        "/api/compute/highlight",
+        None,
+        json!({ "text": big, "lang": "rust" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert!(body["error"].is_string(), "413 应有 JSON error: {body}");
+}
+
+// ---------- path 模式 + 缓存 ----------
+
+#[tokio::test]
+async fn highlight_path_mode_parses_and_second_call_hits_cache() {
+    let f = fixture(true, None);
+    let dir = f._dir.path();
+    std::fs::write(dir.join("main.rs"), RUST_SAMPLE).unwrap();
+    cache_reset();
+    let before = cache_stats();
+
+    let (status, body) = post_json(
+        f.app.clone(),
+        "/api/compute/highlight",
+        None,
+        json!({ "path": "main.rs", "lang": "rust" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(!body["intervals"].as_array().unwrap().is_empty());
+    let after_first = cache_stats();
+    assert!(
+        after_first.1 > before.1,
+        "首次未命中（miss 计数增加）: {before:?} → {after_first:?}"
+    );
+
+    // mtime/size 不变：第二次应命中缓存（响应一致 + hits 计数增加）
+    let (status2, body2) = post_json(
+        f.app,
+        "/api/compute/highlight",
+        None,
+        json!({ "path": "main.rs", "lang": "rust" }),
+    )
+    .await;
+    assert_eq!(status2, StatusCode::OK);
+    assert_eq!(body, body2, "缓存响应与首次一致");
+    let after_second = cache_stats();
+    assert!(after_second.0 > after_first.0, "命中计数增加: {after_first:?} → {after_second:?}");
+    cache_reset();
+}
+
+#[tokio::test]
+async fn highlight_path_mode_404_when_missing() {
+    let f = fixture(true, None);
+    let (status, body) = post_json(
+        f.app,
+        "/api/compute/highlight",
+        None,
+        json!({ "path": "no/such.rs", "lang": "rust" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+}
+
+#[tokio::test]
+async fn highlight_path_mode_traversal_rejected() {
+    let f = fixture(true, None);
+    let dir = f._dir.path();
+    // `..` 段：清洗即拒（400）
+    let (status, _) = post_json(
+        f.app.clone(),
+        "/api/compute/highlight",
+        None,
+        json!({ "path": "../outside.rs", "lang": "rust" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "`..` 段应 400");
+
+    // symlink 指向 root 外：canonicalize 越界（403）
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("secret.rs"), "fn f() {}\n").unwrap();
+    symlink(outside.path().join("secret.rs"), dir.join("leak.rs")).unwrap();
+    let (status, body) = post_json(
+        f.app,
+        "/api/compute/highlight",
+        None,
+        json!({ "path": "leak.rs", "lang": "rust" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "symlink 越界应 403: {body}");
+}
+
+#[tokio::test]
+async fn highlight_path_mode_directory_400_and_overlarge_file_413() {
+    let f = fixture(true, None);
+    let dir = f._dir.path();
+    std::fs::create_dir(dir.join("sub")).unwrap();
+    let (status, _) = post_json(
+        f.app.clone(),
+        "/api/compute/highlight",
+        None,
+        json!({ "path": "sub", "lang": "rust" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "目录不是文件");
+
+    let big = "x".repeat(20 * 1024 * 1024 + 1);
+    std::fs::write(dir.join("big.rs"), &big).unwrap();
+    let (status, body) = post_json(
+        f.app,
+        "/api/compute/highlight",
+        None,
+        json!({ "path": "big.rs", "lang": "rust" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{body}");
+}
+
+// ---------- 开关与鉴权 ----------
+
+#[tokio::test]
+async fn highlight_404_without_compute_flag() {
+    let f = fixture(false, None);
+    let (status, body) = post_json(
+        f.app,
+        "/api/compute/highlight",
+        None,
+        json!({ "text": "x", "lang": "rust" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(body["error"].is_string());
+}
+
+#[tokio::test]
+async fn highlight_requires_bearer_when_token_configured() {
+    let f = fixture(true, Some("tok-1"));
+    let (status, _) = post_json(
+        f.app.clone(),
+        "/api/compute/highlight",
+        None,
+        json!({ "text": "fn f() {}\n", "lang": "rust" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, body) = post_json(
+        f.app,
+        "/api/compute/highlight",
+        Some("Bearer tok-1"),
+        json!({ "text": "fn f() {}\n", "lang": "rust" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
