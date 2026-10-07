@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-import { openFiles, openDirectoryViaPicker, openUrl, connectServer, loadLastServer } from './openFlow.svelte';
-import { loadSettings, saveSettings, type Settings } from './stores/settings';
-import { applyCodeTheme, effectiveMode, onSystemModeChange, themeOptions } from './theme';
+  import { openFiles, openDirectoryViaPicker, openUrl, connectServer, loadLastServer } from './openFlow.svelte';
+  import { loadSettings, saveSettings, type Settings } from './stores/settings';
+  import { applyCodeTheme, effectiveMode, onSystemModeChange, themeOptions } from './theme';
 
   let settings = $state<Settings>(loadSettings());
   let urlValue = $state('');

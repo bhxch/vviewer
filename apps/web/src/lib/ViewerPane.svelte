@@ -5,9 +5,9 @@
   import type { MarkdownEngineState } from '@vviewer/render-text/markdown/markdownRenderer';
   import type { Tab } from './openFlow.svelte';
   import { persistScroll } from './openFlow.svelte';
-import { dispatcher } from './viewer';
-import { cancelHighlight } from './highlightClient';
-import { watchHealth } from './openFlow.svelte';
+  import { dispatcher } from './viewer';
+  import { cancelHighlight } from './highlightClient';
+  import { watchHealth } from './openFlow.svelte';
 import SearchPanel from './SearchPanel.svelte';
 
   let { tab, ontoc }: { tab: Tab | null; ontoc?: (entries: TocEntry[]) => void } = $props();
