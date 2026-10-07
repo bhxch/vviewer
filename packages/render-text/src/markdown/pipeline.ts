@@ -222,13 +222,21 @@ async function runCopyCode(root: Document, ctx: PipelineCtx): Promise<void> {
 
 // ---------- lightbox 步 ----------
 
+/** body 级灯箱 overlay 的元素 id（openLightbox 创建；markdownRenderer destroy 时清理防泄漏） */
+export const LIGHTBOX_OVERLAY_ID = 'md-lightbox-overlay';
+
+/** 从文档移除灯箱 overlay（markdownRenderer destroy 调用；overlay 挂在 body，不随渲染节点销毁） */
+export function removeLightboxOverlay(doc: Document): void {
+  doc.getElementById(LIGHTBOX_OVERLAY_ID)?.remove();
+}
+
 function openLightbox(img: HTMLImageElement, ctx: PipelineCtx): void {
   const doc = img.ownerDocument;
   // body 级单例：首次点击创建，之后所有图共用
-  let overlay = doc.getElementById('md-lightbox-overlay');
+  let overlay = doc.getElementById(LIGHTBOX_OVERLAY_ID);
   if (!overlay) {
     overlay = doc.createElement('div');
-    overlay.id = 'md-lightbox-overlay';
+    overlay.id = LIGHTBOX_OVERLAY_ID;
     overlay.className = cls(ctx, 'lightboxOverlay');
     const clone = doc.createElement('img');
     clone.className = cls(ctx, 'lightbox');

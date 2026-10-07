@@ -127,4 +127,17 @@ describe('htmlRenderer——sandbox iframe 与视图切换', () => {
     instance.destroy();
     expect(target.innerHTML).toBe('');
   });
+
+  it('search/gotoMatch：源码视图继承 code 实现，渲染视图返回空结果', async () => {
+    const { target, instance } = await renderHtml('<p>hi</p>');
+    // 渲染视图：沙箱 iframe 不做跨文档搜索
+    await expect(instance.search!('hi')).resolves.toEqual([]);
+    const sourceBtn = target.querySelector<HTMLButtonElement>('.vv-html-btn-source')!;
+    sourceBtn.click();
+    const matches = await instance.search!('hi');
+    expect(matches.map((m) => m.line)).toEqual([0]); // 源码视图 = code 行扫描
+    instance.gotoMatch!(0);
+    expect(target.querySelector('[data-line="0"]')?.classList.contains('vv-search-hit-line')).toBe(true);
+    instance.destroy();
+  });
 });

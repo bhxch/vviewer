@@ -123,6 +123,14 @@ export const htmlRenderer: Renderer = {
       },
       toggleView() {
         setView(view === 'rendered' ? 'source' : 'rendered');
+      },
+      // 文件内搜索（Task 6）：源码视图复用 code 实现；渲染视图是沙箱 iframe
+      // （allow-same-origin 但内容不可信），不做跨文档搜索，返回空结果。
+      search(query) {
+        return view === 'source' && codeInst ? codeInst.search(query) : Promise.resolve([]);
+      },
+      gotoMatch(index) {
+        if (view === 'source') codeInst?.gotoMatch(index);
       }
     };
     return instance;

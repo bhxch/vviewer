@@ -1,10 +1,11 @@
-import type { Renderer, Encoding, Detection, FileSource, RenderedInstance } from '@vviewer/core';
+import type { Renderer, Encoding, Detection, FileSource, RenderedInstance, SearchMatch } from '@vviewer/core';
 import { detectLanguage, HighlightCanceledError, captureToCssClass, type HighlightInterval } from '@vviewer/highlight';
 
 export type { HighlightInterval };
 /** hljs 动态导入的默认导出类型（HLJSApi） */
 type HLJS = (typeof import('highlight.js'))['default'];
 import { virtualScroller, type VirtualScrollerHandle } from './virtualScroller';
+import { searchCode } from './search';
 
 /**
  * hljs 别名桥接：helix 语言名 → hljs 语言 id（仅收录 hljs.getLanguage 直查失败的键；
@@ -317,6 +318,10 @@ export interface RenderCodeHandle {
   getScrollHost(): HTMLElement;
   /** 当前生效的高亮引擎（实时；状态栏指示器用） */
   getEngine(): CodeEngine;
+  /** 文件内搜索：行数组扫描（缓存上次 query），空 query 返回 []（退出搜索语义） */
+  search(query: string): Promise<SearchMatch[]>;
+  /** 跳到第 index 个命中：滚动到该行 + 行级临时高亮（1.5s 或直到下一次跳转） */
+  gotoMatch(index: number): void;
 }
 
 export function renderCode(
@@ -342,6 +347,29 @@ export function renderCode(
   let destroyed = false;
   // 引擎实时值：tree-sitter 主路径在区间到达前为 pending；hljs-block/plain 策略即终值
   let engine: CodeEngine = strategy === 'tree-sitter' ? 'pending' : strategy;
+  // 文件内搜索状态：上次 query 结果缓存 + 当前行级高亮
+  let lastQuery: string | null = null;
+  let lastMatches: SearchMatch[] = [];
+  let hitLine = -1;
+  let hitTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** 把行级命中高亮类同步到已渲染的行 DOM（虚拟滚动重绘后由 fillRows 的 hitLine 分支保持） */
+  function applyHitClass(): void {
+    const prev = pre.querySelector('.vv-code-line.vv-search-hit-line');
+    if (prev) prev.classList.remove('vv-search-hit-line');
+    if (hitLine >= 0) {
+      pre.querySelector(`[data-line="${hitLine}"]`)?.classList.add('vv-search-hit-line');
+    }
+  }
+
+  function clearHit(): void {
+    if (hitTimer !== null) {
+      clearTimeout(hitTimer);
+      hitTimer = null;
+    }
+    hitLine = -1;
+    applyHitClass(); // 直接改 DOM，无需重绘可视范围
+  }
 
   function fillRows(first: number, last: number, viewport: HTMLElement): void {
     const frag = document.createDocumentFragment();
@@ -349,6 +377,8 @@ export function renderCode(
       const row = document.createElement('div');
       row.className = 'vv-code-line';
       row.style.height = `${LINE_HEIGHT}px`;
+      row.dataset.line = String(i); // 搜索跳转按行号定位行 DOM
+      if (i === hitLine) row.classList.add('vv-search-hit-line');
       const gutter = document.createElement('span');
       gutter.className = 'vv-code-gutter';
       gutter.textContent = String(i + 1);
@@ -444,6 +474,7 @@ export function renderCode(
   return {
     destroy() {
       destroyed = true;
+      if (hitTimer !== null) clearTimeout(hitTimer);
       scroller?.destroy();
       scroller = null;
       blockCache.clear();
@@ -458,7 +489,28 @@ export function renderCode(
     getScrollHost() {
       return pre;
     },
-    getEngine: () => engine
+    getEngine: () => engine,
+    search(query) {
+      if (query === lastQuery) return Promise.resolve(lastMatches);
+      lastQuery = query;
+      lastMatches = query === '' ? [] : searchCode(lines, query);
+      return Promise.resolve(lastMatches);
+    },
+    gotoMatch(index) {
+      const match = lastMatches[index];
+      if (!match) return;
+      if (hitTimer !== null) clearTimeout(hitTimer);
+      hitLine = match.line;
+      // 目标行滚到视口中部（clientHeight 为 0（jsdom/未布局）时回落贴顶）
+      const center = match.line * LINE_HEIGHT - pre.clientHeight / 2 + LINE_HEIGHT / 2;
+      pre.scrollTop = Math.max(0, center);
+      scroller?.refresh(); // 按新 scrollTop 重算可视范围（范围未变则行 DOM 已在，applyHitClass 兜底）
+      applyHitClass();
+      hitTimer = setTimeout(() => {
+        hitTimer = null;
+        clearHit();
+      }, 1500);
+    }
   };
 }
 
@@ -477,9 +529,14 @@ export const codeRenderer: Renderer = {
   async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection) {
     void source;
     const inst = renderCode(buffer, target, { encoding: det.encoding, highlight: true, ext: det.ext });
-    // getScrollHost/getEngine 供 ViewerPane 接滚动持久化与引擎指示器
-    // （结构化扩展 RenderedInstance，不动 core）
-    const instance: RenderedInstance & { getScrollHost(): HTMLElement; getEngine(): CodeEngine } = {
+    // getScrollHost/getEngine 供 ViewerPane 接滚动持久化与引擎指示器；
+    // search/gotoMatch 供 SearchPanel（Task 6）。结构化扩展 RenderedInstance，不动 core。
+    const instance: RenderedInstance & {
+      getScrollHost(): HTMLElement;
+      getEngine(): CodeEngine;
+      search(query: string): Promise<SearchMatch[]>;
+      gotoMatch(index: number): void;
+    } = {
       destroy() {
         inst.destroy();
       },
@@ -488,6 +545,12 @@ export const codeRenderer: Renderer = {
       },
       getEngine() {
         return inst.getEngine();
+      },
+      search(query) {
+        return inst.search(query);
+      },
+      gotoMatch(index) {
+        inst.gotoMatch(index);
       }
     };
     return instance;
