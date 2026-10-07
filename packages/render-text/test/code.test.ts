@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import hljs from 'highlight.js';
 import { HighlightCanceledError } from '@vviewer/highlight';
+import { RemoteComputeError } from '@vviewer/core';
 import {
   buildLineIndex,
   buildLineOffsets,
@@ -365,6 +366,65 @@ describe('renderCode（tree-sitter 主路径，fake client）', () => {
     document.body.append(host);
     const handle = renderCode(new TextEncoder().encode('const a = 1'), host, { ext: 'js', lang: 'javascript' });
     await vi.waitFor(() => expect(handle.getEngine()).toBe('hljs'));
+    handle.destroy();
+  });
+
+  it('显式 remote 失败（RemoteComputeError）→ 错误卡而非静默降级 hljs', async () => {
+    stubResizeObserver();
+    // withDebug 在 routeHighlight 返回 {where:'remote', ok:false} 时抛 RemoteComputeError
+    //（routeMock remote 500 的下游身份）；此处直接模拟该类型化错误穿过到渲染端
+    attachHighlightClient({
+      highlight: async () => {
+        throw new RemoteComputeError('远程高亮失败: HTTP 500');
+      },
+    });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(new TextEncoder().encode('fn main() {}'), host, {
+      ext: 'rs',
+      lang: 'rust',
+      computeSrc: { path: 'src/main.rs' },
+    });
+    await vi.waitFor(() => {
+      expect(host.querySelector('.vv-error-card')).not.toBeNull();
+    });
+    expect(host.querySelector('.vv-error-card')?.textContent).toContain('HTTP 500');
+    expect(host.innerHTML).not.toContain('hljs-'); // 未静默降级 hljs 整文件
+    expect(host.querySelector('[class*="ts-"]')).toBeNull();
+    handle.destroy();
+  });
+
+  it('CRLF/CR 文本：行索引与高亮区间在归一化（LF）文本上计算', async () => {
+    stubResizeObserver();
+    // 'let x\r\nlet y\r\n' 归一化为 'let x\nlet y\n'：第二行起点 6，'y' 偏移 [10,11)。
+    // 若不归一化，\r 计入第一行长度（起点 7），区间会命中 'e' 而非 'y'
+    attachHighlightClient({
+      highlight: async () => [{ start: 10, end: 11, capture: 'keyword' }],
+    });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(new TextEncoder().encode('let x\r\nlet y\r\n'), host, { ext: 'rs', lang: 'rust' });
+    await vi.waitFor(() => {
+      const row = host.querySelector('[data-line="1"] .vv-code-body');
+      expect(row?.innerHTML).toContain('<span class="ts-keyword">y</span>');
+    });
+    handle.destroy();
+  });
+
+  it('buildLineIndex 之外的 CRLF 归一化发生在 renderCode 内（行数按 LF 计）', async () => {
+    stubResizeObserver();
+    attachHighlightClient({
+      highlight: async () => [],
+    });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(new TextEncoder().encode('a\r\nb\rc\nd'), host, { ext: 'rs', lang: 'rust' });
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('tree-sitter'));
+    // 4 行：a/b/c/d（\r\n 与孤 \r 都算一个换行）
+    for (const [i, ch] of ['a', 'b', 'c', 'd'].entries()) {
+      expect(host.querySelector(`[data-line="${i}"] .vv-code-body`)?.textContent).toBe(ch);
+    }
+    expect(host.querySelector('[data-line="4"]')).toBeNull();
     handle.destroy();
   });
 });

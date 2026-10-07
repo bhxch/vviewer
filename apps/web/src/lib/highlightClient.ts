@@ -6,11 +6,11 @@ import {
   decodeHighlightResponse,
   encodeCanceled,
   highlightRemoteEligible,
-  isCanceledMessage,
   type ComputeRouter,
   type ComputeSource,
   type HighlightInterval
 } from '@vviewer/core';
+import { resolveHighlightResult } from './computeResult';
 import { loadCapabilities, loadLastServer } from './openFlow.svelte';
 import { loadSettings } from './stores/settings';
 
@@ -100,9 +100,15 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
         dbg.__vvLastHighlightOk = ok;
       };
       const src = ctx?.src;
+      const policy = loadSettings().computePolicy;
+      // 装配 remoteFn 即"本调用尝试过远程"（policy 非 local 且 auto 下非注入语言）；
+      // auto 回退本地时 where 为 local，据此在状态栏之外补一条 console.warn 留痕
+      const remoteAttempted =
+        !!src && policy !== 'local' && highlightRemoteEligible(policy, lang);
       // runRouted 从不 reject（失败折叠为 ok:false），onFulfilled 内统一回调；
-      // 取消（tab 切换）身份经 message 前缀穿过折叠，重建 HighlightCanceledError
-      // 抛出（render-text 以该类型静默丢弃，不再降级 hljs）。
+      // 结果身份收敛进 resolveHighlightResult：取消重建 HighlightCanceledError
+      //（render-text 以该类型静默丢弃），显式 remote 失败抛 RemoteComputeError
+      //（render-text 以该类型显示错误卡，不降级 hljs）。
       return computeRouter
         .routeHighlight(
           src ? { ...src, text } : { text },
@@ -114,16 +120,17 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
             }),
           // 注入语言路由（INJECTION_LANGS）：auto 下服务端 v1 无 injection，
           // 远程高亮会丢注入区间——不装配 remoteFn 留在本地；显式 remote 仍远程。
-          src && highlightRemoteEligible(loadSettings().computePolicy, lang)
-            ? (s, l) => remoteHighlight(s, l)
-            : undefined
+          remoteAttempted ? (s, l) => remoteHighlight(s, l) : undefined
         )
         .then((res) => {
           ctx?.onWhere?.(res.where);
           record(res.ok);
-          if (res.ok && res.data) return res.data;
-          if (isCanceledMessage(res.error)) throw new HighlightCanceledError();
-          throw new Error(res.error ?? '高亮失败');
+          if (remoteAttempted && res.where === 'local') {
+            // auto 回退：远程失败已由 router 折叠，本地高亮兜住可用性；
+            // 状态栏 where 已回 local，这里补可观测痕迹（one-off 提示最小实现）
+            console.warn(`[vviewer] 远程高亮失败，已回退本地高亮：${res.error ?? '未知原因'}`);
+          }
+          return resolveHighlightResult(res);
         });
     }
   };

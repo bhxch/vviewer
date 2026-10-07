@@ -32,6 +32,20 @@ export function stripCanceledPrefix(error: string): string {
   return error.slice(COMPUTE_CANCELED_PREFIX.length);
 }
 
+/**
+ * 显式 remote 计算失败的类型化错误（name 为 RemoteComputeFailed）。
+ * ComputeResult 折叠只保留 message 字符串，类型身份会丢——调用侧（highlightClient
+ * 的 withDebug）在 where==='remote' 且 !ok 时抛出本错误，渲染端（render-text code）
+ * 以 instanceof 识别：显式 remote 是用户选择，失败如实显示错误卡，不静默降级 hljs
+ * （与 router"显式 remote 不回退"的裁决一致；auto 的回退路径 where 为 local，不受影响）。
+ */
+export class RemoteComputeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RemoteComputeFailed';
+  }
+}
+
 /** 服务端紧凑高亮响应形状。 */
 export interface CompactHighlightResponse {
   intervals: unknown;
