@@ -35,7 +35,7 @@ fn fixture(hidden: bool) -> Fixture {
     std::fs::write(root.join("lone.bin"), [0xE4u8, 0xBD]).unwrap();
 
     Fixture {
-        state: AppState::new(root.to_path_buf(), None, None, hidden),
+        state: AppState::new(root.to_path_buf(), None, None, hidden, None),
         _dir: dir,
     }
 }

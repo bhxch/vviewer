@@ -1,4 +1,4 @@
-//! path 参数安全解析（Task 2：清洗；Task 3 追加 canonicalize 越界校验）。
+//! path 参数安全解析：清洗（绝对路径/`..` 段拒绝）+ canonicalize 越界校验。
 
 use std::path::PathBuf;
 
@@ -26,8 +26,19 @@ pub fn clean_relative(root: &std::path::Path, raw: Option<&str>) -> Result<PathB
     Ok(out)
 }
 
-/// handler 入口用的异步解析占位：Task 3 在此追加 `tokio::fs::canonicalize` +
-/// `starts_with(root_canonical)` 越界校验（symlink 等）。
+/// 完整解析：清洗 → canonicalize（不存在 → 404）→ 越出 root → 403。
+/// 返回 canonical 路径，handler 后续 fs 操作都基于它。
 pub async fn resolve(state: &AppState, raw: Option<&str>) -> Result<PathBuf, AppError> {
-    clean_relative(&state.root, raw)
+    let joined = clean_relative(&state.root, raw)?;
+
+    let canonical = tokio::fs::canonicalize(&joined).await.map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => AppError::not_found("path not found"),
+        _ => AppError::internal(e.to_string()),
+    })?;
+
+    if !canonical.starts_with(&state.root_canonical) {
+        // symlink 等手段越出 root（含 root 自身之外的一切目标）
+        return Err(AppError::forbidden("path escapes root"));
+    }
+    Ok(canonical)
 }

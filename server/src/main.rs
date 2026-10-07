@@ -4,14 +4,6 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use rand::RngCore;
-
-/// 生成 32 字节随机 hex 令牌（CLI `--token-gen` 与 ticket 共用格式）。
-pub fn generate_token() -> String {
-    let mut buf = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut buf);
-    buf.iter().map(|b| format!("{b:02x}")).collect()
-}
 
 #[derive(Parser)]
 #[command(name = "vviewer", version, about = "vviewer local viewer server")]
@@ -45,7 +37,7 @@ enum Command {
         /// 目录列表隐藏 dot 开头条目
         #[arg(long)]
         hidden: bool,
-        /// 允许来自该精确 origin 的跨域 API 访问（Task 3 生效）
+        /// 允许来自该精确 origin 的跨域 API 访问
         #[arg(long)]
         cors_origin: Option<String>,
     },
@@ -62,7 +54,7 @@ fn main() {
             token_gen,
             allow_lan,
             hidden,
-            cors_origin: _cors_origin, // Task 3 接线
+            cors_origin,
         } => {
             if let Err(code) = serve(ServeArgs {
                 root,
@@ -72,6 +64,7 @@ fn main() {
                 token_gen,
                 allow_lan,
                 hidden,
+                cors_origin,
             }) {
                 std::process::exit(code);
             }
@@ -87,12 +80,13 @@ pub struct ServeArgs {
     pub token_gen: bool,
     pub allow_lan: bool,
     pub hidden: bool,
+    pub cors_origin: Option<String>,
 }
 
 /// 启动服务；配置错误返回 exit code（不 panic）。
 fn serve(args: ServeArgs) -> Result<(), i32> {
     let token = if args.token_gen {
-        let t = generate_token();
+        let t = vviewer::generate_token();
         println!("{t}");
         Some(t)
     } else {
@@ -133,14 +127,30 @@ fn serve(args: ServeArgs) -> Result<(), i32> {
     };
     let sock = SocketAddr::new(ip, args.port);
 
-    let state = vviewer::state::AppState::new(root, args.web_dist, token, args.hidden);
-    let app = vviewer::build_router(state);
+    let state = vviewer::state::AppState::new(
+        root,
+        args.web_dist,
+        token,
+        args.hidden,
+        args.cors_origin,
+    );
+    let app = vviewer::build_router(state.clone());
+    let tickets = state.tickets;
 
     let runtime = tokio::runtime::Runtime::new().map_err(|e| {
         eprintln!("error: failed to start tokio runtime: {e}");
         2
     })?;
     runtime.block_on(async move {
+        // ticket 过期定期清理（签发时另有惰性清理兜底）
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(vviewer::TICKET_SWEEP_INTERVAL);
+            loop {
+                interval.tick().await;
+                tickets.sweep();
+            }
+        });
+
         let listener = tokio::net::TcpListener::bind(sock)
             .await
             .map_err(|e| {

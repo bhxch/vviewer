@@ -1,19 +1,34 @@
 //! vviewer server 库：路由构建与静态资产服务（供集成测试复用）。
 
+pub mod auth;
 pub mod detect;
 pub mod error;
 pub mod guard;
 pub mod routes;
 pub mod state;
 
+use std::time::Duration;
+
 use axum::extract::State;
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use rand::RngCore;
 use state::AppState;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
+
+/// 生成 32 字节随机 hex（CLI `--token-gen` 与 ticket 共用格式）。
+pub fn generate_token() -> String {
+    let mut buf = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut buf);
+    buf.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// ticket 定期清理周期。
+pub const TICKET_SWEEP_INTERVAL: Duration = Duration::from_secs(15);
 
 /// `/api` 未匹配路径的统一 JSON 404。
 pub async fn api_not_found() -> Response {
@@ -76,5 +91,22 @@ pub fn build_router(state: AppState) -> Router {
     };
 
     // 两个分支的 Router 均已无状态化（api/serve_index 已绑定 state）
-    app.layer(TraceLayer::new_for_http())
+    let app = app.layer(TraceLayer::new_for_http());
+
+    // CORS：--cors-origin 时精确 origin + GET/POST + authorization/content-type；否则不加层。
+    // 用 list 而非 Const(exact)：仅当请求 Origin 匹配才回显该值（Const 会无条件回显常量）
+    let cors = state
+        .cors_origin
+        .as_deref()
+        .and_then(|o| HeaderValue::from_str(o).ok())
+        .map(|origin| {
+            CorsLayer::new()
+                .allow_origin(AllowOrigin::list([origin]))
+                .allow_methods([Method::GET, Method::POST])
+                .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+        });
+    match cors {
+        Some(layer) => app.layer(layer),
+        None => app,
+    }
 }

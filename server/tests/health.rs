@@ -6,7 +6,7 @@ use tower::ServiceExt;
 use vviewer::state::AppState;
 
 fn test_state(root: std::path::PathBuf, web_dist: Option<std::path::PathBuf>) -> AppState {
-    AppState::new(root, web_dist, None, false)
+    AppState::new(root, web_dist, None, false, None)
 }
 
 async fn get_body(
