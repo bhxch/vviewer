@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
+import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 
 const samples = fileURLToPath(new URL('../../../samples/m1', import.meta.url));
 
@@ -44,7 +45,10 @@ test('open folder, render code with hljs and image, restore session after reload
   // 代码 tab：高亮 span 可见，tab 处于激活态。
   // M2 后 hello.js 走 tree-sitter 主路径产出 ts-* 类 span（解析失败才降级 hljs 整文件
   // 产出 hljs-* 类），两种类名都是高亮管线生效的证据（异步加载 → 按行切分 → 虚拟滚动渲染）
+  // 移动视口：树行在抽屉内，开抽屉点击后关闭（drawer.ts）
+  const drawer1 = await openDrawerIfNarrow(page);
   await page.locator('.vv-tree-row', { hasText: 'hello.js' }).click();
+  await closeDrawerIfOpened(page, drawer1);
   await expect(page.locator('.vv-code-pre [class^="ts-"], .vv-code-pre [class^="hljs-"]').first()).toBeVisible();
   await expect(page.locator('.vv-tab.active', { hasText: 'hello.js' })).toBeVisible();
 
@@ -55,7 +59,9 @@ test('open folder, render code with hljs and image, restore session after reload
   expect(preBox!.height).toBeGreaterThan(0);
 
   // 图片 tab
+  const drawer2 = await openDrawerIfNarrow(page);
   await page.locator('.vv-tree-row', { hasText: 'pixel.png' }).click();
+  await closeDrawerIfOpened(page, drawer2);
   await expect(page.locator('.vv-image img')).toBeVisible();
   await expect(page.locator('.vv-tab.active', { hasText: 'pixel.png' })).toBeVisible();
 

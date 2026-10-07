@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
+import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 
 /**
  * M3 E2E 验收（Task 7）：markdown 全要素管线、TOC 侧栏、html 沙箱预览、灯箱清理。
@@ -32,7 +33,10 @@ async function openDir(page: Page): Promise<void> {
 }
 
 async function openFile(page: Page, name: string): Promise<void> {
+  // 移动视口：树行在抽屉内，开抽屉点击后关闭（drawer.ts）
+  const drawer = await openDrawerIfNarrow(page);
   await page.locator('.vv-tree-row', { hasText: name }).click();
+  await closeDrawerIfOpened(page, drawer);
   await expect(page.locator('.vv-tab.active', { hasText: name })).toBeVisible();
 }
 
@@ -82,8 +86,12 @@ test('markdown 全要素：表格/任务列表/围栏高亮/callout/katex/mermai
   }
 });
 
-test('TOC 侧栏：项数 = demo.md h1-h4 数，点击项滚动位置变化', async ({ page }) => {
+test('TOC 侧栏：项数 = demo.md h1-h4 数，点击项滚动位置变化', async ({ page }, testInfo) => {
   test.setTimeout(60_000);
+  // 手机宽度（≤600px）下右栏（TOC 所在）退出抽屉（AppShell 响应式：2×300px 双栏必重叠），
+  // TOC 为桌面/平板专属入口 → mobile project 跳过本断言
+  const vp = page.viewportSize();
+  testInfo.skip(vp !== null && vp.width <= 600, '手机宽度抽屉不含右栏，TOC 无入口');
   // 期望项数从样例源码推导（ATX 标题 /^#{1,4} /），样例增删标题时断言自适配；
   // 先剥除 ```/~~~ 围栏段再数，防未来围栏内容（如 bash 注释 #）虚增计数
   let inFence = false;
