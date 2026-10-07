@@ -49,7 +49,7 @@ vviewer 是一个**网页版只读文件查看器**，支持代码、Markdown、
 
 | 事实 | 依据 |
 |---|---|
-| web-tree-sitter 0.27.0（2026-08-30），grammar ABI 支持 **13–15**；CLI 生成默认 ABI 14、`--abi 15` 可对齐；`tree-sitter-wasms` 0.1.13 可作预编译参考 | npm registry + tree-sitter v0.27 README |
+| web-tree-sitter **锁 ~0.25.10**（0.27 要求 wasm 含 dylink.0 节，与 tree-sitter-wasms 0.1.13 预编译产物不兼容，实测；0.25 起 ABI 13–15 可用）；CLI 生成默认 ABI 14、`--abi 15` 可对齐；`tree-sitter-wasms` 0.1.13 实测仅 36 个 wasm（M2 实况） | npm registry + 实测（M2） |
 | highlight.js 11.12.0（2026-08）活跃维护；核心 199 语言定义；258 个 CSS 主题 | npm + 仓库实测 |
 | FS Access API（`showDirectoryPicker`）**仅桌面 Chromium**（全球支持率约 30%）；Firefox/Safari 无本地目录 API（OPFS 仅沙箱内存储，不解决打开本地目录） | caniuse + MDN BCD |
 | `webkitdirectory` 于 2025-08 达成 Baseline：桌面全支持；**iOS Safari 18.4+（2025-03）、Android Chrome 132+**——移动端文件夹打开的唯一跨浏览器路径 | MDN BCD |
@@ -141,7 +141,7 @@ vviewer/
 
 | 路线 | 引擎 | 覆盖 | 使用场景 |
 |---|---|---|---|
-| 前端 wasm | web-tree-sitter 0.27（grammar 按需 fetch `/grammars/{lang}.wasm`，ABI 13–15） | 清单 286（helix 上游），目标编译 ≥264 + 补齐 markpad 丢弃的 14 个 | 纯前端版默认 |
+| 前端 wasm | web-tree-sitter ~0.25.10（grammar 按需 fetch `/grammars/{lang}.wasm`，ABI 13–15） | **M2 实况：预编译集 36 语言（22 个查询可用，14 个查询/ABI 失配自动降 hljs）；self-build buildable 278（=263 helix 对齐 + 15 非对齐），全量 ≥264 目标由 CI self-build（需 emcc）承接** | 纯前端版默认 |
 | 前端 hljs | highlight.js 11.12 | 199 核心语言 | wasm 失败/无查询/超阈值的兜底 |
 | 服务端原生 | tree-sitter 0.25+ + tree-sitter-highlight + 静态链接全部 grammar（markpad build.rs 骨架） | 同一清单 286 | 档 2 高亮卸载 |
 
@@ -150,15 +150,16 @@ vviewer/
 - 输入：`languages.toml`（git+rev+subpath）+ subpath 表；以下载后 `parser.c` 实际存在为判据生成构建清单。
 - C 标准固定 `-std=gnu11`；C++ scanner `-std=gnu++17 -fPIC`（wasm 侧对应 clang `-std` 固定）；C++ scanner 单独编译合并；符号名 override 表；生成期用 `nm` 校验实际导出符号。
 - ABI 策略：wasm 以 web-tree-sitter 的兼容窗口（13–15）为闸，超窗语法换用上游 release rev 重新生成并记录。
-- 产物：`/grammars/{lang}.{contenthash}.wasm` + **可枚举资产清单**（语言名、别名、ABI、哈希、查询文件 sha——service worker 预缓存与 lite 集的输入）；构建失败进失败清单（CI 门禁：失败数只许减少）；增量构建。
-- 体积预估 60–120MB（gzip 后），按语言按需 fetch；另出 `lite` 精简集（top 30 语言）供 GitHub Pages 等受限托管；全量资产随 GitHub Releases 分发，纯前端版支持自定义资产 URL（自托管）。
+- 产物：`/grammars/{lang}.wasm` + **可枚举资产清单** manifest（语言名、别名、sha256——service worker 预缓存与 lite 集的输入）；构建失败进失败清单（CI 门禁：失败数只许减少）；增量构建。**M2 实况：tree-sitter-wasms 预编译 36 语言入库（22 个查询可用，14 个查询/ABI 失配自动降 hljs）；`nm` 符号校验属 self-build/CI 路径门禁，wasm 主路径未做。**
+- 体积实测 49.4MB（预编译子集，gzip 前原值入库）；lite 精简集（top 30）未做，归属 M7/CI；全量资产随 GitHub Releases 分发，纯前端版支持自定义资产 URL（自托管）。
 
 **运行期（前端）**
 
 - Worker 内 parser 池，wasm 模块按语言缓存；主线程只收区间数组渲染 span；支持取消（切换文件即取消）。
 - 查询加载：vendored `queries/` + `; inherits:` 递归展开（父在前）。
 - **injection 二级高亮**：解析 `@injection.language` capture 与 `#set! injection.language` 属性，递归派发对应 grammar（html 内 js/css、markdown 围栏代码块）；helix 扩展 predicate（`injection.include-unnamed-children`、`@injection.shebang`）做 shim；递归深度限 3。
-- 主题：构建期把 helix 220 个主题 TOML 转 JSON；运行时"最长前缀回退"解析 capture → CSS 变量（`--ts-*`，与 markpad `CAPTURE_TO_CSS` 类名体系一致）；**主题切换零重解析**。
+- **已知限制（M2 实况）**：`injection.combined` 未实现（assets 中 31 处，单 fence 场景近似正确）；注入超时丢弃子结果（主高亮不受影响）；查询超时显式转失败以接通 hljs 兜底。
+- 主题：构建期把 helix 214 个主题 TOML 转 JSON（M2 实测 218 个 toml − 4 个 base16；palette 按 helix 语义含内置 ANSI 表与父主题递归合并）；运行时"最长前缀回退"解析 capture → CSS 变量（`--ts-*`，与 markpad `CAPTURE_TO_CSS` 类名体系一致）；**主题切换零重解析**。
 
 **服务端高亮（档 2）**
 
@@ -289,7 +290,7 @@ interface InspectBackend   { inspect(ref: FileRef, kind: string): Promise<Struct
 - 布局：左栏文件树（TreeStore）+ 中央标签页查看区 + 右栏 TOC/元数据面板（按格式显隐）；状态栏（编码/语言/大小/行列）。
 - **响应式与移动端（决策 Q3c）**：窄屏单视图（查看区全屏）+ 抽屉式文件树/面板；触屏手势：双指缩放图片、滑动切换 tab、视频原生全屏；虚拟滚动适配触控滚动与惯性。
 - 顶栏：打开文件/文件夹/URL、连接服务器、暗亮切换（跟随系统可选）。
-- **主题三层**：UI 外壳主题 × 文档主题（基于 markpad `styles.css` CSS 变量体系，首期 GitHub Light/Dark + markpad 默认等 3–5 套）× 代码主题（helix 220 主题全量 + 精选置顶）。两个下拉独立选择；markdown 内代码块颜色跟随代码主题，切换零重解析。
+- **主题三层**：UI 外壳主题 × 文档主题（基于 markpad `styles.css` CSS 变量体系，首期 GitHub Light/Dark + markpad 默认等 3–5 套）× 代码主题（helix 214 主题全量 + 精选置顶，M2 已上线；53 常用捕获子集着色，其余走最长前缀回退）。两个下拉独立选择；markdown 内代码块颜色跟随代码主题，切换零重解析。
 - VSCode 主题导入（markpad `themes/vscode.rs` 的 `TEXTMATE_TO_CAPTURE` 映射 + 最长前缀匹配）列为 P2。
 - 键盘：j/k 滚动、gg/G、`/` 文件内搜索、`Ctrl+Shift+F` 全局搜索、`Ctrl+P` 快速打开、tab 管理。
 - i18n：首期中文（zh-CN），预留 locales 目录。
@@ -300,7 +301,7 @@ interface InspectBackend   { inspect(ref: FileRef, kind: string): Promise<Struct
 |---|---|---|
 | lite 版首屏可交互 | < 2s | < 4s |
 | 切换文件到首帧（本地 ≤10MB） | < 300ms | < 800ms |
-| 5MB 代码 tree-sitter 高亮完成 | < 2s | < 5s |
+| 2MB 代码 tree-sitter 高亮完成（M2 实测 ~1.7-2.4s/MB，阈值已按此校准） | < 5s | < 5s |
 | hex 首屏 1MB 解析 | < 200ms | < 500ms |
 | `--compute` 5MB 高亮 P95（本地回环） | < 800ms | — |
 | 媒体起播（本地 blob / 服务器 Range） | < 1s | < 1.5s |
@@ -341,7 +342,7 @@ interface InspectBackend   { inspect(ref: FileRef, kind: string): Promise<Struct
 | 里程碑 | 内容 | 验收 |
 |---|---|---|
 | M1 骨架 | monorepo 脚手架；core 检测派发；前端外壳（三来源、TreeStore、FS Access + webkitdirectory 双通道）；code(hljs 先行)/图片/音视频（原生）；CSS 变量主题框架；**响应式布局与移动端基础**；会话持久化 schema（IndexedDB） | 拖拽/选择打开文件夹可浏览 hljs 高亮代码与图片；桌面刷新后会话恢复 |
-| M2 高亮 | grammar-builder 全量管线；highlight 包（Worker/继承展开/injection/主题）；虚拟滚动与降级链；languages.json 检测；**文件内搜索（代码）**；内容哈希资产清单 | ≥264 语言 tree-sitter 高亮；主题切换零重解析；大文件搜索可用 |
+| M2 高亮（已完成） | grammar-builder 管线（预编译 36 + self-build 路径）；highlight 包（Worker/继承展开/injection/主题）；虚拟滚动与降级链（阈值 2MB 实测校准）；languages.json 检测；内容哈希资产清单；**文件内搜索顺延 M3** | 36 语言 wasm（22 查询可用）+ hljs 全量兜底；主题切换零重解析；引擎指示器（已上线） |
 | M3 文档 | markdown-it + markpad 管线移植；TOC；front matter；HTML 沙箱；**markdown 渲染视图搜索** | samples 全部 md/html 渲染通过；净化测试全绿 |
 | M4 二进制与媒体 | PDF（含搜索）；hex/结构树；压缩包（含包内递归预览）；Office；**ArtPlayer 集成**与流媒体 loader | 全格式 E2E 矩阵通过；移动端媒体起播达标 |
 | M5 后端档 1 | axum health/tree/file+detect/Range；**token/ticket 鉴权**；**SSE watch 与自动刷新**；目录树接 TreeStore；路径安全；单二进制打包 | 静态托管前端连后端浏览服务器目录；文件变更自动刷新 |
@@ -353,7 +354,7 @@ interface InspectBackend   { inspect(ref: FileRef, kind: string): Promise<Struct
 | 风险 | 对策 |
 |---|---|
 | 全量 grammar 构建成功率；个别语法 ABI 超出 web-tree-sitter 兼容窗（13–15） | 增量构建 + 失败清单门禁；超窗语法换上游 release rev 重生成并记录；hljs 兜底保证可用；runtime 升级做全量回归 |
-| wasm 资产体积（60–120MB） | 按语言按需 fetch + 内容哈希永久缓存（PWA）；lite 精简集；后端版资产可选内嵌 |
+| wasm 资产体积（实测 49.4MB 预编译子集） | 按语言按需 fetch + 内容哈希永久缓存（PWA）；lite 精简集；后端版资产可选内嵌 |
 | 查询兼容（inherits 展开、helix 扩展 predicate） | 搬 markpad 已验证的查询集与合并算法；专项单测 |
 | injection 递归解析的性能与环 | 深度限 3；子解析独立取消；按需懒加载子 grammar |
 | 双高亮路线（wasm/原生）结果不一致 | 同一份 queries + 同一 capture 中间表示；快照测试双跑比对 |
