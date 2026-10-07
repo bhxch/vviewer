@@ -104,11 +104,13 @@ class TabCollection {
   /**
    * SSE 变更刷新（M5）：重读并重渲染命中 store+path 的 tab。
    * rev 自增使 ViewerPane 的渲染 effect（依赖 tab 代理）重跑；内容不在会话快照内，无需 persist。
+   * 目录 tab（path=''）不在 paths 内：任何 changed 都视为树可能变化，一并自增——
+   * AppShell 以目录 tab 的 rev 为 key 重建左栏 FileTree。
    */
   refreshPaths(storeId: string, paths: string[]): void {
     for (const t of this.list) {
       if (t.source.storeId !== storeId) continue;
-      if (paths.length > 0 && !paths.includes(t.source.path)) continue;
+      if (t.source.path !== '' && paths.length > 0 && !paths.includes(t.source.path)) continue;
       t.rev = (t.rev ?? 0) + 1;
     }
   }
@@ -127,6 +129,12 @@ class TabCollection {
 }
 
 export const tabStore = new TabCollection();
+
+/**
+ * SSE 变更推送健康状态（终审 B2）：服务端 watch-error（watcher 启动失败或运行期
+ * 故障降级）到达即置位——状态栏一次性提示"自动刷新不可用"；下次连接成功复位。
+ */
+export const watchHealth = $state({ degraded: false });
 
 export function addTab(store: TreeStore, path: string, name: string): Tab {
   return tabStore.add(store, path, name);
@@ -277,10 +285,25 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
     );
   }
 
+  // 同 base 重连：先关闭同 base 的旧 remote tab（目录 + 文件）。旧 store 无 tab
+  // 持有后经引用计数接线 close()（停 SSE + 清资源表），避免新旧两条事件流并行；
+  // 其余目录 tab（本地文件夹）仍由 addDirStoreTab 的替换语义关闭
+  for (const t of [...tabStore.list]) {
+    if (getRemoteBase(t.source.storeId) === base) tabStore.close(t.id);
+  }
+
   const store = createRemoteStore(base, tok, serverLabel(base));
-  // SSE 变更订阅：服务端推送 changed → 命中 path 的 tab 重读重渲染；
+  // SSE 变更订阅：服务端推送 changed → 命中 path 的 tab 重读重渲染 + 目录 tab 自增
+  //（左栏树重建）；watch-error（watcher 降级）→ 状态栏一次性提示自动刷新不可用。
   // store 关闭（最后一个持有 tab 关闭 / 被新连接替换）由引用计数接线调 close() 停流
-  store.watch((paths) => tabStore.refreshPaths(store.id, paths));
+  watchHealth.degraded = false; // 新连接重置降级指示（上一次连接的降级不复用）
+  store.watch(
+    (paths) => tabStore.refreshPaths(store.id, paths),
+    () => {
+      watchHealth.degraded = true;
+      console.warn('[vviewer] 服务器变更推送不可用，自动刷新已停用');
+    }
+  );
   addDirStoreTab(store);
   try {
     sessionStorage.setItem(

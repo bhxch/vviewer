@@ -14,6 +14,8 @@
 
   const settings = loadSettings();
   let dirStore = $state<TreeStore | null>(null);
+  /** 目录 tab 的 rev（SSE changed 自增）：作 FileTree 的重建 key（左栏树刷新） */
+  let dirRev = $state(0);
   let drawerOpen = $state(false);
   /** 活动渲染实例的目录（ViewerPane ontoc 回调上行；markdown tab 有数据，其余为空） */
   let tocEntries = $state<TocEntry[]>([]);
@@ -23,7 +25,9 @@
   // 左栏文件树跟随目录 tab（目录 tab 由 addDirStoreTab 替换语义保证至多一个）
   $effect(() => {
     const list = tabStore.list;
-    dirStore = list.find((t) => t.source.path === '' && !t.unrestorable)?.source.store ?? null;
+    const dirTab = list.find((t) => t.source.path === '' && !t.unrestorable);
+    dirStore = dirTab?.source.store ?? null;
+    dirRev = dirTab?.rev ?? 0;
   });
 
   onMount(() => {
@@ -121,7 +125,9 @@
   <div class="vv-body">
     <aside class="vv-side">
       {#if dirStore}
-        <FileTree store={dirStore} excludedPatterns={settings.excludedPatterns} onopen={onTreeOpen} />
+        {#key dirRev}
+          <FileTree store={dirStore} excludedPatterns={settings.excludedPatterns} onopen={onTreeOpen} />
+        {/key}
       {:else}
         <div class="vv-side-empty">未打开文件夹</div>
       {/if}

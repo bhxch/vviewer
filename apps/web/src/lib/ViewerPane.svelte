@@ -5,9 +5,10 @@
   import type { MarkdownEngineState } from '@vviewer/render-text/markdown/markdownRenderer';
   import type { Tab } from './openFlow.svelte';
   import { persistScroll } from './openFlow.svelte';
-  import { dispatcher } from './viewer';
-  import { cancelHighlight } from './highlightClient';
-  import SearchPanel from './SearchPanel.svelte';
+import { dispatcher } from './viewer';
+import { cancelHighlight } from './highlightClient';
+import { watchHealth } from './openFlow.svelte';
+import SearchPanel from './SearchPanel.svelte';
 
   let { tab, ontoc }: { tab: Tab | null; ontoc?: (entries: TocEntry[]) => void } = $props();
 
@@ -188,9 +189,9 @@
       }}
     />
   {/if}
-  {#if engineLabel}
+  {#if engineLabel || watchHealth.degraded}
     <div class="vv-statusbar" role="status">
-      {engineLabel}{#if computeWhereLabel}&nbsp;· 执行: {computeWhereLabel}{/if}
+      {#if engineLabel}{engineLabel}{#if computeWhereLabel}&nbsp;· 执行: {computeWhereLabel}{/if}{/if}{#if watchHealth.degraded}{#if engineLabel}&nbsp;·{/if} 自动刷新不可用{/if}
     </div>
   {/if}
 </div>
