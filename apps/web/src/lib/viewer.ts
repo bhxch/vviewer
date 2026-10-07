@@ -4,16 +4,38 @@ import { markdownRenderer } from '@vviewer/render-text/markdown/markdownRenderer
 import { htmlRenderer } from '@vviewer/render-text/html';
 import { imageRenderer } from '@vviewer/render-media';
 import { avRenderer } from '@vviewer/render-media/av';
+import { pdfRenderer } from '@vviewer/render-doc';
+import { docxRenderer } from '@vviewer/render-doc/docx';
+import { xlsxRenderer } from '@vviewer/render-doc/xlsx';
+import { pptxRenderer } from '@vviewer/render-doc/pptx';
+import { hexRenderer } from '@vviewer/render-binary';
+import { archiveRenderer } from '@vviewer/render-archive';
+import { configureLibarchive } from '@vviewer/render-archive/libarchiveStore';
 import { browser } from '$app/environment';
 import { ensureHighlightClient } from './highlightClient';
 
-/** M1 渲染器注册表：代码/文本、markdown、html 沙箱预览、图片（含消毒后的 SVG）、音视频 */
+/** M1 渲染器注册表：代码/文本、markdown、html 沙箱预览、图片（含消毒后的 SVG）、音视频。
+ * M4 追加：PDF（render-doc）、hex/结构树（render-binary）、压缩包 zip/tar/7z/rar
+ * （render-archive，libarchive worker 走静态拷贝的 /libarchive/worker-bundle.js）、
+ * Office 三件套 docx/xlsx/pptx（render-doc，pptx 为文本提纲降级路径）。 */
 export const registry: Registry = createRegistry();
 registry.install(codeRenderer);
 registry.install(markdownRenderer);
 registry.install(htmlRenderer);
 registry.install(imageRenderer);
 registry.install(avRenderer);
+registry.install(pdfRenderer);
+registry.install(docxRenderer);
+registry.install(xlsxRenderer);
+registry.install(pptxRenderer);
+registry.install(hexRenderer);
+registry.install(archiveRenderer);
+
+// libarchive worker 路径：worker bundle + wasm 由 vite 插件拷到 static/libarchive/
+// （见 vite.config.ts copyLibarchiveAssets），仅存 URL 字符串，首次解包时才起 worker
+if (browser) {
+  configureLibarchive({ workerUrl: `${import.meta.env.BASE_URL}libarchive/worker-bundle.js` });
+}
 
 export const dispatcher: Dispatcher = createDispatcher(registry);
 

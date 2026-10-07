@@ -1,0 +1,17 @@
+{
+  "name": "@vviewer/render-archive",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/archive.ts",
+  "types": "src/archive.ts",
+  "exports": {
+    ".": "./src/archive.ts",
+    "./zipStore": "./src/zipStore.ts",
+    "./libarchiveStore": "./src/libarchiveStore.ts"
+  },
+  "dependencies": {
+    "@vviewer/core": "workspace:*",
+    "jszip": "^3.10.1",
+    "libarchive.js": "^2.0.2"
+  }
+}

@@ -24,6 +24,8 @@ tools/grammar-builder/out/
 !apps/web/static/grammars/*.wasm
 # tree-sitter 查询静态资产（构建期由 vite 插件从 packages/highlight/assets/queries 拷贝，不入库）
 apps/web/static/queries/
+# libarchive.js worker bundle 与 wasm（构建期由 vite 插件从 node_modules 拷贝，不入库）
+apps/web/static/libarchive/
 # web-tree-sitter runtime（锁 ~0.25.10：0.27 要求 wasm 含 dylink.0 节，与 tree-sitter-wasms 0.1.13 预编译产物不兼容（实测），0.25 起可用）
 !apps/web/static/tree-sitter.wasm
 
