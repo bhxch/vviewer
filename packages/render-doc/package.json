@@ -5,10 +5,17 @@
   "main": "src/pdf.ts",
   "types": "src/pdf.ts",
   "exports": {
-    ".": "./src/pdf.ts"
+    ".": "./src/pdf.ts",
+    "./docx": "./src/docx.ts",
+    "./xlsx": "./src/xlsx.ts",
+    "./pptx": "./src/pptx.ts"
   },
   "dependencies": {
     "@vviewer/core": "workspace:*",
-    "pdfjs-dist": "^5.0.0"
+    "@vviewer/render-text": "workspace:*",
+    "jszip": "^3.10.2",
+    "mammoth": "^1.13.0",
+    "pdfjs-dist": "^5.0.0",
+    "xlsx": "^0.18.5"
   }
 }

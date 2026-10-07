@@ -17,6 +17,7 @@
   "exports": {
     ".": "./src/code.ts",
     "./markdown/markdownRenderer": "./src/markdown/markdownRenderer.ts",
-    "./html": "./src/html.ts"
+    "./html": "./src/html.ts",
+    "./sanitize": "./src/markdown/sanitize.ts"
   }
 }
