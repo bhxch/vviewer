@@ -28,6 +28,9 @@ import { loadSettings } from './stores/settings';
 
 let clientPromise: Promise<HighlightClient> | null = null;
 
+/** 在途远程高亮的中止控制器（cancelHighlight 随 tab 切换一并 abort，不等无主响应）。 */
+let remoteAbort: AbortController | null = null;
+
 /** 惰性创建/获取单例；SSR 下返回 null（Worker 仅存在于浏览器端）。 */
 export function ensureHighlightClient(): Promise<HighlightClient> | null {
   if (!browser) return null;
@@ -37,6 +40,8 @@ export function ensureHighlightClient(): Promise<HighlightClient> | null {
 
 /** tab 切换时取消全部未完成高亮请求（client 尚未创建则无事可做）。 */
 export function cancelHighlight(): void {
+  remoteAbort?.abort(); // 在途远程高亮一并中止（router 按 remote 失败折叠，auto 回退本地）
+  remoteAbort = null;
   if (!clientPromise) return;
   void clientPromise.then((c) => c.cancelAll()).catch(() => {});
 }
@@ -74,13 +79,21 @@ async function remoteHighlight(
   const call = computeRouter.remoteCall('/api/compute/highlight');
   if (!call) throw new Error('未连接服务器，无法远程高亮');
   if (!src.path) throw new Error('远程高亮需要文件的服务端 path');
-  const res = await fetch(call.url, {
-    method: 'POST',
-    headers: { ...call.headers, 'content-type': 'application/json' },
-    body: JSON.stringify({ path: src.path, lang })
-  });
-  if (!res.ok) throw new Error(`远程高亮失败: HTTP ${res.status}`);
-  return decodeHighlightResponse(await res.json());
+  // 挂 tab 级 abort：cancelHighlight（tab 切换）时中止在途请求，不留无主连接
+  const ac = new AbortController();
+  remoteAbort = ac;
+  try {
+    const res = await fetch(call.url, {
+      method: 'POST',
+      headers: { ...call.headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ path: src.path, lang }),
+      signal: ac.signal
+    });
+    if (!res.ok) throw new Error(`远程高亮失败: HTTP ${res.status}`);
+    return decodeHighlightResponse(await res.json());
+  } finally {
+    if (remoteAbort === ac) remoteAbort = null;
+  }
 }
 
 /**
