@@ -7,17 +7,21 @@
   let settings = $state<Settings>(loadSettings());
   let urlValue = $state('');
   let fileInput = $state<HTMLInputElement | null>(null);
-  const codeThemeOptions = themeOptions();
+  // 主题表经动态 import 惰性加载（不进主 chunk），下拉选项挂载后异步填充
+  let codeThemeOptions = $state<Awaited<ReturnType<typeof themeOptions>>>([]);
 
   /** 当前生效亮暗（system 按 prefers-color-scheme 解析），决定下拉读写哪个记忆槽 */
   let mode = $derived(effectiveMode(settings.themeMode));
   let currentCodeTheme = $derived(mode === 'dark' ? settings.codeThemeDark : settings.codeThemeLight);
 
   function applyCurrentCodeTheme(): void {
-    applyCodeTheme(currentCodeTheme, mode);
+    void applyCodeTheme(currentCodeTheme, mode);
   }
 
-  onMount(applyCurrentCodeTheme);
+  onMount(() => {
+    void themeOptions().then((opts) => (codeThemeOptions = opts));
+    applyCurrentCodeTheme();
+  });
 
   function cycleTheme(): void {
     const order: Settings['themeMode'][] = ['system', 'light', 'dark'];
@@ -34,7 +38,7 @@
     if (mode === 'dark') settings.codeThemeDark = name;
     else settings.codeThemeLight = name;
     saveSettings(settings);
-    applyCodeTheme(name, mode);
+    void applyCodeTheme(name, mode);
   }
 
   function onPick(e: Event): void {

@@ -27,41 +27,41 @@ afterEach(() => {
 });
 
 describe('applyCodeTheme（注入 style#vv-code-theme）', () => {
-  it('注入含 --vv-ts-* 变量的单节点 style', () => {
-    applyCodeTheme('serika-dark', 'dark');
+  it('注入含 --vv-ts-* 变量的单节点 style', async () => {
+    await applyCodeTheme('serika-dark', 'dark');
     const el = styleEl();
     expect(el).not.toBeNull();
     expect(el?.textContent).toContain('--vv-ts-keyword: #e29da7;');
     expect(el?.dataset.mode).toBe('dark');
   });
 
-  it('单节点幂等：两次 apply 不叠加 style 节点，内容整体替换', () => {
-    applyCodeTheme('serika-dark', 'dark');
-    applyCodeTheme('onelight', 'light');
+  it('单节点幂等：两次 apply 不叠加 style 节点，内容整体替换', async () => {
+    await applyCodeTheme('serika-dark', 'dark');
+    await applyCodeTheme('onelight', 'light');
     const els = document.querySelectorAll(`#${STYLE_ID}`);
     expect(els.length).toBe(1);
     expect(styleEl()?.textContent).toContain('--vv-ts-keyword: #b500a9;');
     expect(styleEl()?.textContent).not.toContain('#e29da7');
   });
 
-  it('两主题切换 style 内容变化（与 themeToCssVars 输出一致）', () => {
-    applyCodeTheme('serika-dark', 'dark');
+  it('两主题切换 style 内容变化（与 themeToCssVars 输出一致）', async () => {
+    await applyCodeTheme('serika-dark', 'dark');
     const before = styleEl()?.textContent;
-    applyCodeTheme('gruvbox', 'dark');
+    await applyCodeTheme('gruvbox', 'dark');
     const after = styleEl()?.textContent;
     expect(before).not.toBe(after);
-    const gruvbox = getTheme('gruvbox');
+    const gruvbox = await getTheme('gruvbox');
     expect(gruvbox).not.toBeNull();
     expect(after).toBe(
       `/* vviewer 代码主题：gruvbox（dark）——只换 CSS 变量，不重解析 */\n:root {\n${themeToCssVars(gruvbox!, CODE_CAPTURES)}\n}`
     );
   });
 
-  it('未知主题：console.warn 且保持现有 style 不变', () => {
+  it('未知主题：console.warn 且保持现有 style 不变', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    applyCodeTheme('serika-dark', 'dark');
+    await applyCodeTheme('serika-dark', 'dark');
     const before = styleEl()?.textContent;
-    applyCodeTheme('no-such-theme', 'dark');
+    await applyCodeTheme('no-such-theme', 'dark');
     expect(warn).toHaveBeenCalledTimes(1);
     expect(document.querySelectorAll(`#${STYLE_ID}`).length).toBe(1);
     expect(styleEl()?.textContent).toBe(before);
@@ -100,8 +100,8 @@ describe('app.css 与 CODE_CAPTURES 对齐（.ts-* 规则双向覆盖）', () =>
 });
 
 describe('主题清单与默认值', () => {
-  it('listThemes 按字母排序且含精选与默认主题', () => {
-    const themes = listThemes();
+  it('listThemes 按字母排序且含精选与默认主题', async () => {
+    const themes = await listThemes();
     expect(themes.length).toBeGreaterThan(200);
     expect([...themes].sort()).toEqual(themes);
     for (const t of [...CURATED_CODE_THEMES, DEFAULT_CODE_THEME.light, DEFAULT_CODE_THEME.dark]) {
@@ -109,17 +109,18 @@ describe('主题清单与默认值', () => {
     }
   });
 
-  it('settings 默认代码主题真实存在于 themes.json', () => {
+  it('settings 默认代码主题真实存在于 themes.json', async () => {
     const s = loadSettings();
-    expect(listThemes()).toContain(s.codeThemeLight);
-    expect(listThemes()).toContain(s.codeThemeDark);
+    const themes = await listThemes();
+    expect(themes).toContain(s.codeThemeLight);
+    expect(themes).toContain(s.codeThemeDark);
     expect(s.codeThemeLight).toBe(DEFAULT_CODE_THEME.light);
     expect(s.codeThemeDark).toBe(DEFAULT_CODE_THEME.dark);
   });
 
-  it('精选主题无重复且都存在于全量清单', () => {
+  it('精选主题无重复且都存在于全量清单', async () => {
     expect(new Set(CURATED_CODE_THEMES).size).toBe(CURATED_CODE_THEMES.length);
-    const themes = new Set(listThemes());
+    const themes = new Set(await listThemes());
     expect(CURATED_CODE_THEMES.every((t) => themes.has(t))).toBe(true);
   });
 });

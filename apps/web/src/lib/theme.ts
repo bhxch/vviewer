@@ -2,13 +2,22 @@
  * 代码主题（helix 全量 themes.json）状态与注入。
  * 零重解析契约：切主题只整体替换 style#vv-code-theme 里的 CSS 变量（--vv-ts-*），
  * DOM span 的类名（ts-<capture>）不触碰——已渲染文本即时换色。
+ * themes.json（~1.1MB）经动态 import 惰性加载为独立 chunk，不进主包；
+ * 各 API 变 async，内部缓存同一份加载 promise（并发调用只请求一次）。
  */
-import themes from '@vviewer/highlight/assets/themes.json';
 import { themeToCssVars, type ThemeTable } from '@vviewer/highlight';
 import type { Settings } from './stores/settings';
 
 /** themes.json 全量表（键为 helix 主题名）。 */
-const TABLES = themes as unknown as Record<string, ThemeTable>;
+type ThemeTables = Record<string, ThemeTable>;
+
+let tablesPromise: Promise<ThemeTables> | null = null;
+
+/** 惰性动态加载 themes.json（结果按模块缓存）。 */
+function loadTables(): Promise<ThemeTables> {
+  tablesPromise ??= import('@vviewer/highlight/assets/themes.json').then((m) => m.default as ThemeTables);
+  return tablesPromise;
+}
 
 const STYLE_ID = 'vv-code-theme';
 
@@ -93,19 +102,22 @@ export const CODE_CAPTURES: readonly string[] = [
 ];
 
 /** 全量主题名，按字母排序。 */
-export function listThemes(): string[] {
-  return Object.keys(TABLES).sort();
+export async function listThemes(): Promise<string[]> {
+  return Object.keys(await loadTables()).sort();
 }
 
 /** 取单个主题表；不存在返回 null。 */
-export function getTheme(name: string): ThemeTable | null {
-  return TABLES[name] ?? null;
+export async function getTheme(name: string): Promise<ThemeTable | null> {
+  return (await loadTables())[name] ?? null;
 }
 
 /** 下拉选项：精选置顶，其余按字母排序。 */
-export function themeOptions(): { group: '精选' | '全部'; themes: string[] }[] {
-  const curated = CURATED_CODE_THEMES.filter((t) => t in TABLES);
-  const rest = listThemes().filter((t) => !(CURATED_CODE_THEMES as readonly string[]).includes(t));
+export async function themeOptions(): Promise<{ group: '精选' | '全部'; themes: string[] }[]> {
+  const tables = await loadTables();
+  const curated = CURATED_CODE_THEMES.filter((t) => t in tables);
+  const rest = Object.keys(tables)
+    .filter((t) => !(CURATED_CODE_THEMES as readonly string[]).includes(t))
+    .sort();
   return [
     { group: '精选', themes: [...curated] },
     { group: '全部', themes: rest }
@@ -116,8 +128,8 @@ export function themeOptions(): { group: '精选' | '全部'; themes: string[] }
  * 应用代码主题：生成常用捕获集的 CSS 变量并注入/替换 style#vv-code-theme（单节点幂等）。
  * 主题名不存在 → console.warn 并保持现状（不动已有 style）。
  */
-export function applyCodeTheme(name: string, mode: 'light' | 'dark'): void {
-  const theme = TABLES[name];
+export async function applyCodeTheme(name: string, mode: 'light' | 'dark'): Promise<void> {
+  const theme = (await loadTables())[name];
   if (!theme) {
     console.warn(`未知代码主题：${name}，保持当前代码主题不变`);
     return;
