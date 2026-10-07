@@ -11,7 +11,8 @@ import {
   effectiveMode,
   getTheme,
   HLJS_CAPTURE_TO_VAR,
-  listThemes
+  listThemes,
+  THEME_ROOT_SELECTOR
 } from './theme';
 import { loadSettings } from './stores/settings';
 
@@ -65,7 +66,7 @@ describe('applyCodeTheme（注入 style#vv-code-theme）', () => {
     const gruvbox = await getTheme('gruvbox');
     expect(gruvbox).not.toBeNull();
     expect(after).toBe(
-      `/* vviewer 代码主题：gruvbox（dark）——只换 CSS 变量，不重解析 */\n:root {\n${themeToCssVars(gruvbox!, CODE_CAPTURES)}\n${hljsVarsOf(gruvbox!)}\n}`
+      `/* vviewer 代码主题：gruvbox（dark）——只换 CSS 变量，不重解析 */\n${THEME_ROOT_SELECTOR} {\n${themeToCssVars(gruvbox!, CODE_CAPTURES)}\n${hljsVarsOf(gruvbox!)}\n}`
     );
   });
 
@@ -122,6 +123,27 @@ describe('hljs 兜底近似映射（M7 Task 3：--hljs-* 跟随代码主题）',
     const text = styleEl()?.textContent ?? '';
     expect(text).toContain('--vv-ts-keyword:');
     expect(text).toContain('--hljs-keyword:');
+  });
+
+  it('注入选择器包含全部四种 root 形态（暗色级联提权防回归）', async () => {
+    // jsdom 不做真实 cascade：这里只锁注入文本的形态——app.css 暗色块
+    // `:root[data-theme-mode="dark"]` 与 `@media dark :root[data-theme-mode="system"]`
+    // specificity (0,2,0)，裸 `:root` 注入会被覆盖（暗色下 --hljs-* 回退默认值）；
+    // 四形态列表使暗色形态拿到同等 specificity 靠文档序胜出。
+    // 真实级联的最终裁决由 e2e/m7.spec.ts 的 computed style 抽查覆盖。
+    await applyCodeTheme('gruvbox', 'dark');
+    const text = styleEl()?.textContent ?? '';
+    expect(text).toContain('/* vviewer 代码主题');
+    expect(text).toContain('*/\n:root, :root[data-theme-mode="light"], :root[data-theme-mode="dark"], :root[data-theme-mode="system"] {');
+    for (const form of [
+      ':root,',
+      ':root[data-theme-mode="light"],',
+      ':root[data-theme-mode="dark"],',
+      ':root[data-theme-mode="system"] {'
+    ]) {
+      expect(text, `注入规则缺少 root 形态 ${form}`).toContain(form);
+    }
+    expect(text).toContain('\n:root,'); // 变量体挂在提权选择器后（非裸 :root 单独成块）
   });
 });
 
