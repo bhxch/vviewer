@@ -93,6 +93,9 @@ export function serveWorker(): void {
           for (const req of queued.splice(0)) postError(req, e);
           throw e;
         });
+      // handler 保持 rejected 供后续请求走 postError 分支；此处 no-op 消费
+      // 防止"init 失败且队列空"时 rejected promise 无消费者 → unhandledrejection
+      void handler.catch(() => {});
       return;
     }
     const req = data as HighlightRequest;
