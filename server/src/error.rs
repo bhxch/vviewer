@@ -28,6 +28,10 @@ impl AppError {
     pub fn internal(msg: impl Into<String>) -> Self {
         Self(StatusCode::INTERNAL_SERVER_ERROR, msg.into())
     }
+
+    pub fn not_implemented(msg: impl Into<String>) -> Self {
+        Self(StatusCode::NOT_IMPLEMENTED, msg.into())
+    }
 }
 
 impl IntoResponse for AppError {

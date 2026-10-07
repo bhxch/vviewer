@@ -4,6 +4,7 @@ pub mod compute;
 pub mod events;
 pub mod file;
 pub mod health;
+pub mod search;
 pub mod ticket;
 pub mod tree;
 
@@ -31,7 +32,9 @@ pub fn api_router(state: crate::state::AppState) -> Router {
     let mut protected = Router::new()
         .route("/tree", get(tree::tree))
         .route("/file", get(file::file))
-        .route("/ticket", post(ticket::issue_ticket));
+        .route("/ticket", post(ticket::issue_ticket))
+        // 跨文件搜索：file-server 基础能力（不要求 --compute；rg 缺失时 501）
+        .route("/search", post(search::search));
     // --compute 才暴露计算端点；未启用时路径不存在（统一 JSON 404）
     if state.compute {
         protected = protected
