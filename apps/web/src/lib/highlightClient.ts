@@ -31,10 +31,50 @@ let clientPromise: Promise<HighlightClient> | null = null;
 /** 在途远程高亮的中止控制器（cancelHighlight 随 tab 切换一并 abort，不等无主响应）。 */
 let remoteAbort: AbortController | null = null;
 
+/** grammar manifest（create() 一次加载后缓存）：主线程预热 grammar wasm 查文件名用。 */
+let grammarManifest: Record<string, { file: string; aliases?: string[] }> | null = null;
+
+/** 已预热资产 URL：同一资产仅首个调用触发预热（控制权交接前监听/定时器不随调用累积） */
+const warmedUrls = new Set<string>();
+
+/**
+ * 主线程预热高亮 wasm 资产（BUG-06 离线闭环的主通道）：grammar/runtime wasm 由
+ * worker 内 fetch，Chrome 对 module worker 的控制语义实测不经页面 SW（路由已注册、
+ * 主线程 fetch 即建缓存，worker fetch 则绕过）——主线程 fetch 是资产进入
+ * vv-grammars 与 vv-runtime 运行时 CacheFirst 缓存的唯一通道，离线重开依赖此缓存。
+ * 按 URL 幂等（warmedUrls）：稳定期 controller 在位直接 fetch 命中 CacheFirst。
+ * 等待条件是 controller 就位而非 ready：实测 ready（SW active）resolve 时
+ * clientsClaim 的控制权尚未传播到本页（controller 仍 null），此刻 fetch 不经 SW；
+ * controllerchange 后才真正受控。10s 兜底防 claim 缺失时永不预热（fetch 至多有
+ * 浏览器 HTTP 缓存收益）。无 SW 注册时 ready 永挂，预热自然不执行。
+ */
+function warmHighlightAsset(url: string): void {
+  if (!('serviceWorker' in navigator) || warmedUrls.has(url)) return;
+  warmedUrls.add(url);
+  void navigator.serviceWorker.ready
+    .then(
+      () =>
+        new Promise<void>((resolve) => {
+          if (navigator.serviceWorker.controller) return resolve();
+          navigator.serviceWorker.addEventListener('controllerchange', () => resolve(), { once: true });
+          setTimeout(resolve, 10_000);
+        })
+    )
+    .then(() => fetch(url))
+    .catch(() => {});
+}
+
 /** 惰性创建/获取单例；SSR 下返回 null（Worker 仅存在于浏览器端）。 */
 export function ensureHighlightClient(): Promise<HighlightClient> | null {
   if (!browser) return null;
-  if (!clientPromise) clientPromise = create();
+  if (!clientPromise) {
+    clientPromise = create().catch((e: unknown) => {
+      // BUG-06 可观测：创建期失败（manifest 404 / new Worker 抛错）同样显式上报，
+      // 不再零提示静默降级 hljs；rethrow 保持既有 rejected 语义（不重试）
+      console.error(`[vviewer] tree-sitter worker 加载失败：${e instanceof Error ? e.message : String(e)}`);
+      throw e;
+    });
+  }
   return clientPromise;
 }
 
@@ -107,6 +147,10 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
   return {
     highlight(text, lang, ctx?: HighlightCallContext) {
       const t0 = performance.now();
+      // 首次调用某语言时主线程预热其 grammar wasm（进 vv-grammars-* CacheFirst）；
+      // warmHighlightAsset 按 URL 幂等，同语言重复调用为 no-op
+      const g = grammarManifest?.[lang];
+      if (g) warmHighlightAsset(`/grammars/${g.file}`);
       const record = (ok: boolean): void => {
         dbg.__vvLastHighlightMs = performance.now() - t0;
         dbg.__vvLastHighlightLang = lang;
@@ -155,13 +199,25 @@ async function create(): Promise<HighlightClient> {
   const manifest = (await res.json()) as {
     grammars: Record<string, { file: string; aliases?: string[] }>;
   };
+  grammarManifest = manifest.grammars;
   const worker = new Worker(new URL('./ts-worker.ts', import.meta.url), { type: 'module' });
-  const client = new HighlightClient(worker, {
-    grammars: manifest.grammars,
-    grammarsBase: '/grammars/',
-    queriesBase: '/queries/', // vite 启动时从 packages/highlight/assets/queries 拷贝到 static/queries
-    runtimeDir: '/' // web-tree-sitter runtime 位于 static/tree-sitter.wasm
-  });
+  const client = new HighlightClient(
+    worker,
+    {
+      grammars: manifest.grammars,
+      grammarsBase: '/grammars/',
+      queriesBase: '/queries/', // vite 启动时从 packages/highlight/assets/queries 拷贝到 static/queries
+      runtimeDir: '/' // web-tree-sitter runtime 位于 static/tree-sitter.wasm
+    },
+    // BUG-06 可观测：worker 脚本/消息错误经显式标签上报——此前该类失败零提示
+    // 静默降级 hljs，是「本地 tree-sitter 全链失效却无任何痕迹」的主要观测障碍
+    (reason) => {
+      console.error(`[vviewer] tree-sitter worker 加载失败：${reason}`);
+    }
+  );
   attachHighlightClient(withDebug(client));
+  // 预热 runtime wasm：同上，worker 内 fetch 不经 SW，主线程预热使其进 vv-runtime-*
+  // CacheFirst（离线重开代码文件的 runtime 来源）
+  warmHighlightAsset('/tree-sitter.wasm');
   return client;
 }

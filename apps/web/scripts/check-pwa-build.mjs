@@ -45,11 +45,29 @@ const precacheUrls = [...sw.matchAll(/url:"([^"]+)"/g)].map((m) => m[1]);
 if (precacheUrls.length <= 10) {
   fail(`工作箱 precache 条目应 > 10，实际 ${precacheUrls.length}`);
 }
+// BUG-15 硬断言：index.html 必须在 precache（NavigationRoute 的
+// createHandlerBoundToURL 要求），否则 sw.js 求值期抛 non-precached-url，
+// 导航兜底与运行时缓存路由全部静默丢失（离线 reload 落 chrome-error 的根因）
+if (!precacheUrls.includes('index.html')) {
+  fail('precache 清单缺少 index.html（导航兜底将失效，离线不可用）');
+}
+// index.html 只有 additionalManifestEntries 单一来源（vite.config globPatterns
+// 已排除 html）：恰出现 1 次。glob 回归抓到它会形成同 URL 双 revision 条目，
+// workbox 不去重 → SW 求值期 add-to-cache-list-conflicting-entries → 完全死 SW
+const indexEntries = precacheUrls.filter((u) => u === 'index.html').length;
+if (indexEntries !== 1) {
+  fail(`precache 中 index.html 应恰好出现 1 次，实际 ${indexEntries}（重复条目将触发 add-to-cache-list-conflicting-entries 死 SW）`);
+}
+// NavigationRoute 须真实注册（压缩产物形如 registerRoute(new e.NavigationRoute(...)）
+if (!/registerRoute\(new [a-zA-Z]+\.NavigationRoute\(/.test(sw)) {
+  fail('sw.js 缺少 NavigationRoute 注册（离线导航兜底未生成）');
+}
 // cacheName 拼构建修订号（vite.config BUILD_REVISION，构建期确定）：断言前缀即可，
 // 修订号每次构建刷新，sw.js 内形如 cacheName:"vv-grammars-0.1.0-xxx"
-for (const [name, pattern] of [
-  ['vv-grammars', /\/grammars\/.*\.wasm$/],
-  ['vv-queries', /\/queries\//]
+for (const [name] of [
+  ['vv-grammars'],
+  ['vv-queries'],
+  ['vv-runtime'] // BUG-06 配套：/tree-sitter.wasm 的 CacheFirst（主线程预热通道）
 ]) {
   if (!sw.includes(`cacheName:"${name}-`)) fail(`sw.js 缺少运行时缓存 ${name}-<revision>`);
 }

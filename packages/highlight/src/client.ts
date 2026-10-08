@@ -20,6 +20,8 @@ export const INIT_TIMEOUT_MS = 15_000;
 /**
  * Worker 客户端：请求去重（同 lang 连续请求取消前一个未完成者）、批量取消、释放。
  * highlight 返回区间数组；worker 报错或请求被取消时 Promise reject。
+ * BUG-06 可观测：worker.onerror/onmessageerror 经 onWorkerError 上报应用层，
+ * 在途请求统一 reject（不悬挂），后续请求短路——此前两类失败零提示静默降级 hljs。
  */
 export class HighlightClient {
   private readonly worker: Worker;
@@ -32,9 +34,14 @@ export class HighlightClient {
   private initTimer: ReturnType<typeof setTimeout> | null = null;
   /** 看门狗触发：worker 从未回包（脚本加载失败/wasm 卡死等），后续请求直接失败 */
   private initFailed = false;
+  /** 首个致命失败原因（看门狗超时或 worker 错误），短路后续请求时如实转述 */
+  private initFailureReason = '';
+  /** 应用层错误上报回调（状态栏一次性提示或 console 显式标签） */
+  private readonly onWorkerError?: (reason: string) => void;
 
-  constructor(worker: Worker, init?: WorkerInit) {
+  constructor(worker: Worker, init?: WorkerInit, onWorkerError?: (reason: string) => void) {
     this.worker = worker;
+    this.onWorkerError = onWorkerError;
     this.worker.onmessage = (ev: MessageEvent<HighlightResponse>) => {
       this.markWorkerAlive();
       const res = ev.data;
@@ -47,6 +54,17 @@ export class HighlightClient {
       if (res.ok) p.resolve(res.intervals ?? []);
       else p.reject(new Error(res.error ?? 'highlight 失败'));
     };
+    // worker 脚本 404/MIME 异常/运行期崩溃：onerror 触发后 worker 不会再回包，
+    // 与看门狗同语义收敛到 failWorker（reject 在途 + 上报 + 短路后续请求）
+    this.worker.onerror = (ev: ErrorEvent) => {
+      const detail = ev.message || '脚本加载失败';
+      const file = ev.filename ? `（${ev.filename}）` : '';
+      this.failWorker(`worker 错误：${detail}${file}`);
+    };
+    // 消息无法反序列化：协议已坏，同样按致命失败处理
+    this.worker.onmessageerror = () => {
+      this.failWorker('worker 消息反序列化失败（onmessageerror）');
+    };
     // 握手：首条 init 消息携带引擎配置（serveWorker 排队等待 init 后才处理请求）
     const handshake: InitMessage = { kind: 'init', ...init };
     this.worker.postMessage(handshake);
@@ -56,11 +74,9 @@ export class HighlightClient {
     this.initTimer = setTimeout(() => {
       this.initTimer = null;
       if (this.workerAlive || this.disposed) return;
-      this.initFailed = true;
-      const err = new Error(`highlight worker 初始化超时（${INIT_TIMEOUT_MS / 1000}s 无响应）`);
-      for (const [, p] of [...this.pending]) p.reject(err);
-      this.pending.clear();
-      this.pendingByLang.clear();
+      this.failWorker(
+        `初始化超时（${INIT_TIMEOUT_MS / 1000}s 无响应）·排查 worker chunk 是否 404/MIME 异常`
+      );
     }, INIT_TIMEOUT_MS);
     // Node/vitest 下不因看门狗计时器吊住进程退出
     (this.initTimer as unknown as { unref?: () => void }).unref?.();
@@ -75,11 +91,36 @@ export class HighlightClient {
     }
   }
 
+  /**
+   * worker 致命失败（onerror/onmessageerror/看门狗超时）统一收敛：
+   * 上报应用层 → 短路后续请求 → reject 全部在途请求（普通 Error，渲染端接 hljs 兜底）。
+   * 幂等：首次失败即清看门狗，避免超时与错误双报。
+   * 取舍（评审 R1 知情备案）：onerror 一律致命短路偏保守——带 message 的运行期
+   * 未捕获错误下 worker 常仍可服务，理论上可仅上报不短路；但正常请求路径已被
+   * serveWorker 的 try/catch 全包裹（dispatch/init），该场景罕见，宁可全会话降级
+   * hljs 也不冒险反复打到病态 worker。如需精确区分（message 空 = 脚本加载失败
+   * 必然短路；带 message = 仅上报），属后续增强非缺陷。
+   */
+  private failWorker(reason: string): void {
+    if (this.disposed) return;
+    this.initFailed = true;
+    this.initFailureReason = reason;
+    this.onWorkerError?.(reason);
+    if (this.initTimer !== null) {
+      clearTimeout(this.initTimer);
+      this.initTimer = null;
+    }
+    const err = new Error(`highlight worker 失败：${reason}`);
+    for (const [, p] of [...this.pending]) p.reject(err);
+    this.pending.clear();
+    this.pendingByLang.clear();
+  }
+
   /** 高亮文本。同 lang 有未完成请求时取消它（其 Promise 以 HighlightCanceledError reject）。 */
   highlight(text: string, lang: string): Promise<HighlightInterval[]> {
     if (this.disposed) return Promise.reject(new HighlightCanceledError());
     if (this.initFailed) {
-      return Promise.reject(new Error(`highlight worker 初始化超时（${INIT_TIMEOUT_MS / 1000}s 无响应）`));
+      return Promise.reject(new Error(`highlight worker 不可用：${this.initFailureReason}`));
     }
     const prevId = this.pendingByLang.get(lang);
     if (prevId !== undefined) this.cancel(prevId);

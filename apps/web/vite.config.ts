@@ -1,7 +1,7 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig, type Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
-import { cpSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -64,8 +64,39 @@ function copyLibarchiveAssets(): Plugin {
   };
 }
 
+// BUG-15 配套（仅 vite preview 生效）：SvelteKit 的 preview 中间件只认 kit 路由，
+// /index.html 直接 404——而 workbox precache 安装期会按清单条目请求
+// index.html?__WB_REVISION__=…，任一条目失败即 SW 安装整体失败（caches 永远
+// 建不起来，e2e 的 SW 用例全挂）。生产部署（vviewer serve --web-dist build）的
+// ServeDir 天然服务 /index.html，无此问题；这里仅在 preview 期把它直连到
+// adapter 产物。必须先于 sveltekit() 注册（中间件按插件顺序 use）。
+function serveIndexHtmlInPreview(): Plugin {
+  return {
+    name: 'serve-index-html-preview',
+    configurePreviewServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
+        if (pathname !== '/index.html') return next();
+        const file = fileURLToPath(new URL('./build/index.html', import.meta.url));
+        if (!existsSync(file)) {
+          res.statusCode = 404;
+          return res.end('build/index.html not found');
+        }
+        res.setHeader('content-type', 'text/html; charset=utf-8');
+        const stream = createReadStream(file);
+        stream.on('error', () => {
+          if (!res.headersSent) res.statusCode = 500;
+          res.end();
+        });
+        stream.pipe(res);
+      });
+    }
+  };
+}
+
 export default defineConfig({
   plugins: [
+    serveIndexHtmlInPreview(),
     sveltekit(),
     copyTsQueries(),
     copyLibarchiveAssets(),
@@ -97,10 +128,28 @@ export default defineConfig({
         ]
       },
       workbox: {
-        // 应用壳：打包产物 js/css/html + 字体；图标与 wasm 资产走静态拷贝不进预缓存
-        globPatterns: ['**/*.{js,css,html,woff2}'],
+        // 应用壳：打包产物 js/css + 字体；图标与 wasm 资产走静态拷贝不进预缓存。
+        // html 不入 glob：index.html 只有 additionalManifestEntries 单一来源
+        //（build/ 下无其他 html，已核实）——workbox-build 对 additional 条目不去重
+        //（direct push），若 glob 也抓到 index.html 会产生同 URL 双 revision 条目，
+        // SW 求值期抛 add-to-cache-list-conflicting-entries → 完全死 SW。
+        globPatterns: ['**/*.{js,css,woff2}'],
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/^\/api\//],
+        // BUG-15：vite-plugin-pwa 生成 precache manifest 的时点早于 SvelteKit
+        // adapter-static 写出 build/index.html（构建时序竞态，实测产物 102 条
+        // precache 零 html），导致 sw.js 求值期 createHandlerBoundToURL('index.html')
+        // 抛 non-precached-url——NavigationRoute 与 grammars/queries 运行时路由
+        // 全部静默丢失（残缺 SW，离线 reload 落 chrome-error）。index.html 经此
+        // 唯一通道显式注入；revision 用 BUILD_REVISION 同源：每次构建刷新，部署
+        // 新版后 index.html 随 SW 更新重新预缓存，不陈旧。
+        //
+        // 偏离备案（评审 R1）：spec BUG-15 方案 2 的「运行时路由先于 NavigationRoute
+        // 注册」与 sw.js 顶层 error/unhandledrejection 上报在 generateSW 模板内
+        // 不可配置（需 injectManifest 自定义 SW；计划 §4 明示仅实测 generateSW
+        // 无法消除单点异常时立项）。单点异常根因已由 precache 修复消除，残余
+        // 静默风险由构建期 NavigationRoute 断言与 e2e 的运行期 SW 断言兜底。
+        additionalManifestEntries: [{ url: 'index.html', revision: BUILD_REVISION }],
         runtimeCaching: [
           {
             // tree-sitter 语法 wasm（~8MB 总量）：不变内容，缓存优先；
@@ -110,6 +159,19 @@ export default defineConfig({
             options: {
               cacheName: `vv-grammars-${BUILD_REVISION}`,
               expiration: { maxEntries: 300, purgeOnQuotaError: true },
+              cacheableResponse: { statuses: [200] }
+            }
+          },
+          {
+            // BUG-06 配套：web-tree-sitter runtime wasm（static/ 固定路径）此前不匹配
+            // 任何缓存策略——离线重开代码文件时 runtime 即缺失。CacheFirst 同上。
+            // 注意：该 wasm 由 worker 内 fetch，Chrome 对 module worker 的控制语义
+            // 实测不经页面 SW——需主线程预热（highlightClient.ts create()）才进缓存。
+            urlPattern: /\/tree-sitter\.wasm$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: `vv-runtime-${BUILD_REVISION}`,
+              expiration: { maxEntries: 4, purgeOnQuotaError: true },
               cacheableResponse: { statuses: [200] }
             }
           },
