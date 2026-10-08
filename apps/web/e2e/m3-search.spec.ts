@@ -85,7 +85,7 @@ test('Esc 焦点态与焦点还原：✕/↓ 按钮持焦按 Esc 可关闭，焦
   await page.waitForFunction(() => document.activeElement?.classList.contains('vv-viewer-host'));
 });
 
-test('code 视图：行级命中高亮，关闭（search(\'\')）后高亮立即消退且焦点还原', async ({ page }) => {
+test('code 视图：词级+行级命中高亮，关闭（search(\'\')）后高亮立即消退且焦点还原', async ({ page }) => {
   test.setTimeout(60_000);
   await page.goto('/');
   await openDir(page);
@@ -94,13 +94,18 @@ test('code 视图：行级命中高亮，关闭（search(\'\')）后高亮立即
 
   await openPanelAndSearch(page, 'export');
   await expect(page.locator('.vv-code-line.vv-search-hit-line')).toHaveCount(1);
-  await expect(page.locator('mark.vv-search-hit')).toHaveCount(0); // code 视图无 DOM mark
+  // BUG-18 词级高亮：code 视图命中段包 <mark class="vv-search-hit">（code.ts overlaySearchHits），
+  // mark 数量=命中总数——M3 时代的「code 视图无 DOM mark」断言已随 BUG-18 落地作废
+  const total = Number((await page.locator('.vv-search-count').textContent())!.trim().split('/')[1]);
+  expect(total).toBeGreaterThan(0);
+  await expect(page.locator('mark.vv-search-hit')).toHaveCount(total);
 
-  // 聚焦 ✕ 按钮关闭：退出搜索走 search('')，行级高亮立即消退（不等 1.5s 计时）
+  // 聚焦 ✕ 按钮关闭：退出搜索走 search('')，词级 mark 与行级高亮立即消退（不等 1.5s 计时）
   await page.locator('.vv-search-btn[aria-label="关闭搜索"]').focus();
   await page.keyboard.press('Escape');
   await expect(page.locator('.vv-search-panel')).toHaveCount(0);
   await expect(page.locator('.vv-code-line.vv-search-hit-line')).toHaveCount(0);
+  await expect(page.locator('mark.vv-search-hit')).toHaveCount(0);
   await page.waitForFunction(() => document.activeElement?.classList.contains('vv-viewer-host'));
 });
 

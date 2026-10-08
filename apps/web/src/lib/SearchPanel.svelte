@@ -2,12 +2,20 @@
   // SearchPanel.svelte — 文件内搜索面板（Task 6）。ViewerPane 右上浮层：
   // 输入防抖 150ms 调实例 search，n/N 计数，上/下一个（Enter/Shift+Enter 同通道），
   // Esc 关闭（关闭时 search('') 通知实例退出搜索：markdown 还原 mark，code 清高亮）。
-  // 实例不带 search（如图片/音视频渲染器）时显示"此视图不支持搜索"。
+  // Aa 开关（BUG-23）：caseSensitive 透传实例 search，切换即重搜（跳过防抖，对齐
+  // 全局面板 toggleOption 惯例）。实例不带 search（如图片/音视频渲染器）时显示
+  // "此视图不支持搜索"。
   import type { RenderedInstance, SearchMatch } from '@vviewer/core';
 
-  let { instance, onclose }: { instance: RenderedInstance | null; onclose(): void } = $props();
+  /** search 契约的 caseSensitive 扩展（BUG-23；结构化收窄，不动 core 类型） */
+  type SearchableInstance = RenderedInstance & {
+    search?(query: string, opts?: { caseSensitive?: boolean }): Promise<SearchMatch[]>;
+  };
+
+  let { instance, onclose }: { instance: SearchableInstance | null; onclose(): void } = $props();
 
   let query = $state('');
+  let caseSensitive = $state(false);
   let total = $state(0);
   /** 当前命中（1 起；0 = 无命中） */
   let current = $state(0);
@@ -52,7 +60,7 @@
     const seq = ++searchSeq;
     let matches: SearchMatch[] = [];
     try {
-      matches = instance?.search ? await instance.search(q) : [];
+      matches = instance?.search ? await instance.search(q, { caseSensitive }) : [];
     } catch {
       // tab 已销毁（如 PDF destroy 竞态）会使 search reject，属正常关闭时序：静默置零
       if (!closed && seq === searchSeq) {
@@ -76,6 +84,13 @@
     debounceTimer = setTimeout(() => void runSearch(query), 150);
   }
 
+  /** Aa 开关切换即重搜（跳过防抖，对齐全局面板 toggleOption 惯例） */
+  function toggleCase(): void {
+    caseSensitive = !caseSensitive;
+    if (debounceTimer !== null) clearTimeout(debounceTimer);
+    void runSearch(query);
+  }
+
   /** 上/下一个命中（环绕）；delta 为 +1/-1 */
   function step(delta: number): void {
     if (total === 0 || !instance?.gotoMatch) return;
@@ -91,6 +106,9 @@
     onclose();
     // Svelte 卸载 flush 在微任务，setTimeout 回调必然落在卸载之后
     setTimeout(() => {
+      // 重开竞态防护：回调触发前面板已重新挂载（快速 Esc→/），新实例的 mount effect
+      // 自会聚焦其输入框，旧实例的兜底还原不得把焦点抢到 viewer-host
+      if (document.querySelector('.vv-search-panel') !== null) return;
       if (prev !== null && prev.isConnected) {
         prev.focus();
         return;
@@ -127,6 +145,14 @@
     oninput={oninput}
     onkeydown={oninputkeydown}
   />
+  <button
+    type="button"
+    class="vv-search-btn"
+    class:active={caseSensitive}
+    aria-pressed={caseSensitive}
+    title="区分大小写"
+    onclick={toggleCase}>Aa</button
+  >
   <span class="vv-search-count">
     {#if !instance?.search}
       此视图不支持搜索

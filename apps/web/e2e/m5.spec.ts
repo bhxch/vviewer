@@ -42,6 +42,9 @@ test.beforeAll(async () => {
     PORT = 8449;
     BASE = `http://127.0.0.1:${PORT}`;
   }
+  // 钩子默认 30s 不够 cargo 增量编译（多 worker/并行 cargo 争用 target 锁时更久），
+  // 扩到 5 分钟——与 m6.spec.ts 同惯例（全量回归曾因锁排队超时误报 m5 双 project 失败）
+  test.setTimeout(300_000);
   // 端口预检：遗留进程占口时 fail-fast 带明确信息（否则 spawn 后才 bind 失败）
   await assertPortFree(BASE);
   // fixture 拷到 tmpdir：测试向 sample.js 追加 marker，不触碰 tracked 树
