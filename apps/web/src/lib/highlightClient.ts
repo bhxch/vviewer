@@ -6,12 +6,13 @@ import {
   decodeHighlightResponse,
   encodeCanceled,
   highlightRemoteEligible,
+  remoteLanguageAdvertised,
   type ComputeRouter,
   type ComputeSource,
   type HighlightInterval
 } from '@vviewer/core';
 import { resolveHighlightResult } from './computeResult';
-import { loadCapabilities, loadLastServer } from './openFlow.svelte';
+import { loadCapabilities, loadComputeLanguages, loadLastServer } from './openFlow.svelte';
 import { loadSettings } from './stores/settings';
 
 /**
@@ -158,10 +159,14 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
       };
       const src = ctx?.src;
       const policy = loadSettings().computePolicy;
-      // 装配 remoteFn 即"本调用尝试过远程"（policy 非 local 且 auto 下非注入语言）；
+      // 装配 remoteFn 即"本调用尝试过远程"（policy 非 local 且 auto 下非注入语言，
+      // 且 BUG-06c：语言在服务端宣告集合内——集合未知（旧服务端）保持先试远程）；
       // auto 回退本地时 where 为 local，据此在状态栏之外补一条 console.warn 留痕
       const remoteAttempted =
-        !!src && policy !== 'local' && highlightRemoteEligible(policy, lang);
+        !!src &&
+        policy !== 'local' &&
+        highlightRemoteEligible(policy, lang) &&
+        remoteLanguageAdvertised(lang, new Set(loadComputeLanguages()));
       // runRouted 从不 reject（失败折叠为 ok:false），onFulfilled 内统一回调；
       // 结果身份收敛进 resolveHighlightResult：取消重建 HighlightCanceledError
       //（render-text 以该类型静默丢弃），显式 remote 失败抛 RemoteComputeError

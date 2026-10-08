@@ -255,6 +255,21 @@ const LAST_SERVER_KEY = SESSION_LAST_SERVER_KEY;
 /** 连接时 health capabilities 的会话缓存键（M6 compute 路由的能力判定来源）。 */
 const CAPABILITIES_KEY = 'vv:capabilities';
 
+/** 连接时 health computeLanguages 的会话缓存键（BUG-06c：auto 策略远程路由的
+ * 服务端语言集合依据；空/缺失 = 未知，路由保持既有先试远程行为）。 */
+const COMPUTE_LANGUAGES_KEY = 'vv:compute-languages';
+
+/** 读取会话级服务端高亮语言集合（BUG-06c；无记录/损坏/非数组返回 [] 表示未知）。 */
+export function loadComputeLanguages(): string[] {
+  try {
+    const raw = sessionStorage.getItem(COMPUTE_LANGUAGES_KEY);
+    const v: unknown = raw ? JSON.parse(raw) : null;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 /** 读取会话能力缓存（无记录/损坏/非浏览器环境返回 []）。 */
 export function loadCapabilities(): string[] {
   try {
@@ -294,9 +309,9 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
     throw new Error(`无法连接 ${base}：网络错误或地址不可达`);
   }
   if (!res.ok) throw new Error(`服务器响应异常: HTTP ${res.status}`);
-  let caps: { capabilities?: unknown };
+  let caps: { capabilities?: unknown; computeLanguages?: unknown };
   try {
-    caps = (await res.json()) as { capabilities?: unknown };
+    caps = (await res.json()) as { capabilities?: unknown; computeLanguages?: unknown };
   } catch {
     throw new Error('health 响应不是有效 JSON');
   }
@@ -311,6 +326,20 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
     );
   } catch {
     // 存储不可用：连接本身不受影响，compute 路由回落本地
+  }
+  // 服务端高亮语言集合缓存（BUG-06c）：compute 宣告则缓存，未宣告（旧服务端）
+  // 清除旧缓存表示未知，路由保持既有先试远程行为
+  try {
+    if (Array.isArray(caps.computeLanguages)) {
+      sessionStorage.setItem(
+        COMPUTE_LANGUAGES_KEY,
+        JSON.stringify(caps.computeLanguages.filter((x): x is string => typeof x === 'string'))
+      );
+    } else {
+      sessionStorage.removeItem(COMPUTE_LANGUAGES_KEY);
+    }
+  } catch {
+    // 存储不可用：路由回落既有行为，连接不受影响
   }
 
   // 鉴权预检：health 免认证，错误 token 也能过能力校验——用 Bearer 保护的

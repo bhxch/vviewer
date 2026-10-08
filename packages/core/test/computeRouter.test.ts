@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createComputeRouter,
   highlightRemoteEligible,
+  remoteLanguageAdvertised,
   INJECTION_LANGS
 } from '../src/compute/router';
 import type { ComputePolicy, ComputeSource, HighlightInterval } from '../src/compute/types';
@@ -285,5 +286,19 @@ describe('remoteCall（apps/web 构造远程请求用）', () => {
       url: 'http://s/api/compute/highlight',
       headers: {}
     });
+  });
+});
+
+describe('remoteLanguageAdvertised 服务端语言集合对齐（BUG-06c）', () => {
+  const advertised = new Set(['bash', 'c', 'cpp', 'go', 'javascript', 'json', 'python', 'rust', 'typescript']);
+
+  it('auto 下宣告集合外的语言（java）不再尝试远程', () => {
+    expect(remoteLanguageAdvertised('java', advertised)).toBe(false);
+    expect(remoteLanguageAdvertised('python', advertised)).toBe(true);
+  });
+
+  it('集合未知（空集=旧服务端/缓存缺失）保持先试远程的既有行为', () => {
+    expect(remoteLanguageAdvertised('java', new Set())).toBe(true);
+    expect(remoteLanguageAdvertised('python', new Set())).toBe(true);
   });
 });

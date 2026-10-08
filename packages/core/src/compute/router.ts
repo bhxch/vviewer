@@ -44,6 +44,16 @@ export function highlightRemoteEligible(policy: ComputePolicy, lang: string): bo
   return !(policy === 'auto' && INJECTION_LANGS.has(lang));
 }
 
+/**
+ * BUG-06c 语言集合对齐：auto 策略仅对服务端宣告支持的语言尝试远程——清单外
+ * 语言（如服务端无 java）此前会白发 400 再折叠回本地。advertised 为空 = 集合
+ * 未知（旧服务端无 computeLanguages 宣告/缓存缺失），保持既有先试远程行为
+ * （失败由 auto 回退兜底），不做激进收窄。
+ */
+export function remoteLanguageAdvertised(lang: string, advertised: ReadonlySet<string>): boolean {
+  return advertised.size === 0 || advertised.has(lang);
+}
+
 export interface ComputeRouterOptions {
   /** 连接缓存里是否含 "compute" 能力（capabilities 来自连接时 /api/health）。 */
   hasCompute: () => boolean;
