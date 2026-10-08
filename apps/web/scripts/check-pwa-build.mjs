@@ -1,6 +1,10 @@
 // check-pwa-build.mjs —— PWA build 产物断言（Task 1，M7）：sw.js / manifest.webmanifest
 // 存在、图标齐全、工作箱 precache 条目 > 10、运行时缓存策略就位。
 // 由 apps/web 的 build 脚本在 vite build 之后自动执行，产物缺失即 build 失败。
+// 脆弱性（遗留 T2）：sw.js 断言按"压缩后的 workbox generateSW 输出"逐字匹配
+// （url:"…" 键不带引号、cacheName:"vv-grammars-…"）——workbox 升级若改输出格式，
+// 本脚本会误报失败（fail-safe 方向：断言变严不会漏放坏产物）。m7.spec 的
+// caches 断言（precache 名 + 条目数，走真实 Cache API）作运行期兜底。
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 

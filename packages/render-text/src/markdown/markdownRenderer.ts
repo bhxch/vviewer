@@ -59,8 +59,12 @@ export async function fenceToHtml(code: string, lang: string): Promise<string | 
 
 // ---------- 正文引擎注入（M7 Task 2：markdown 接 compute 路由） ----------
 
-/** markdown 正文引擎状态：pending = 已启动等待结果；渲染完成后落 local/remote。 */
-export type MarkdownEngineState = 'pending' | 'local' | 'remote';
+/**
+ * markdown 正文引擎状态（getEngine 契约值，遗留 T1）：local/remote 即执行位置。
+ * 无 'pending'——实例只在 render 完成后创建并返回，getEngine 无观察窗口，
+ * await 期间的中间态不可达（ViewerPane 状态栏轮询从实例创建后才开始）。
+ */
+export type MarkdownEngineState = 'local' | 'remote';
 
 /** 交给注入后端的一次渲染调用：text 为剥掉 front matter 的正文，src 为计算来源。 */
 export interface MarkdownBackendCall {
@@ -241,6 +245,9 @@ interface SearchEdit {
 /**
  * markdown 渲染视图的文件内搜索：TreeWalker 收集文本节点，大小写不敏感找 query，
  * 命中处拆分文本节点并包 `<mark class="vv-search-hit">`（文档序）。
+ * 已知局限（遗留 T5）：逐文本节点扫描，跨内联元素边界的 query 不命中——
+ * 如 `foo<b>bar</b>` 搜 "foobar"（"foo" 与 "bar" 分属两个文本节点），
+ * 这是 DOM 逐节点包裹的固有局限（与 code 视图逐行扫描同构，不在行/节点间拼匹配）。
  * 返回命中的 render-text 扩展形状：渲染视图无行概念，line 复用为命中序号
  * （gotoMatch 按同序定位），start/end 恒 0，preview 为命中文本节点上下文。
  * 空 query 还原上一次包裹并返回 []（退出搜索语义）。
@@ -383,7 +390,6 @@ export const markdownRenderer: Renderer = {
         getRemoteBase(source.storeId) !== undefined
           ? { path: source.path, storeId: source.storeId }
           : undefined;
-      engine = 'pending';
       const res = await backend({ text: parseFrontMatter(text).body, src: computeSrc });
       html = res.html;
       engine = res.where;

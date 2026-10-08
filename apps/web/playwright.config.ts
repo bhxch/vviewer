@@ -18,7 +18,7 @@ export default defineConfig({
     {
       // M7 Task 4：移动视口冒烟（375×667 + 触摸 + Pixel 7 UA）。
       // 既有 m1-m7 spec 也在该 project 下跑：≤900px 断点下文件树/右栏收进抽屉，
-      // spec 内树行点击经 e2e/mobile-helpers.ts 的 openDrawerIfNarrow 适配
+      // spec 内树行点击经 e2e/drawer.ts 的 openDrawerIfNarrow 适配
       name: 'mobile',
       use: {
         browserName: 'chromium',

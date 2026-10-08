@@ -21,9 +21,9 @@ import SearchPanel from './SearchPanel.svelte';
     plain: '纯文本'
   };
 
-  /** markdown 正文引擎文案（M7：local/remote 即执行位置，同一状态栏复用） */
+  /** markdown 正文引擎文案（M7：local/remote 即执行位置，同一状态栏复用）。
+   * 无 pending：markdown 实例仅在渲染完成后创建，getEngine 无观察窗口（遗留 T1） */
   const MARKDOWN_ENGINE_LABELS: Record<MarkdownEngineState, string> = {
-    pending: '渲染: 解析中…',
     local: '渲染: 本地',
     remote: '渲染: 远程'
   };
