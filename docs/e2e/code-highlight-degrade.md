@@ -139,3 +139,47 @@ grammar wasm 资产不入库、构建期生成：测试前必须先执行 `pnpm 
 3. **编码验证口径**：gb18030.txt 的 file(1) 会误报 ISO-8859（GB18030 常见现象），须用 python `decode('gb18030')` 回读验证内容；编码对照以服务端 `x-vv-encoding` 响应头为准（报告偏差 #3：仅下发 X-VV-Lang 与 X-VV-Encoding，无 X-VV-Type 头）。
 4. **>20MB 阈值**：20MB 为纯文本降级虚拟滚动的上限阈值，big-20mb.txt（21,027,496B）为贴合阈值的对照件，big-25mb.txt 为降级链压力件。
 5. **远程策略依赖 compute**：HL-10 远程对照依赖 `--compute` 实例与 POST /api/compute/highlight；无 compute 时该对照不可执行。
+
+## 5. BUG-06 干净 profile 复测裁决记录（2026-10-09）
+
+> 依据 spec `docs/superpowers/specs/2026-10-08-e2e-fixes.md` §2 BUG-06 方案 2（复测裁决）与 PWA-03 复测子问题执行。原始证据（逐语言 JSON、console 捕获、server 日志）存 `.temp/bug06-retest/`（result.json / probe2.json / server.log，gitignore 内不入库）。
+
+**环境与方法**：工作区当前构建（`pnpm --filter web build`，含本批全部修复；`check-pwa-build` 硬断言过：precache 103 条含 index.html）+ `server/target/release/vviewer serve --root .temp/e2e-data --web-dist apps/web/build --port 8477 --compute`（数据根 btrfs，与报告 8391 同型）；playwright-core 1.63 chromium 全新实例（launch 默认临时 user-data-dir，无历史 SW，即「干净 profile」）；upload 通道经 `__vvOpenDirImpl`（与真实 input change 同通道）。
+
+### 5.1 HL-01 主路径判定：通过（报告缺陷态不复现，定性「陈旧 SW/环境状态」成立）
+
+- `samples/m2/sample.rs` 本地策略：状态栏「高亮: tree-sitter · 执行: 本地」、`ts-*` span=100、hljs-*=0；network 出现 `/tree-sitter.wasm`、`/grammars/rust.wasm`、`/queries/rust/*.scm`。
+- auto 策略同文件亦 tree-sitter（走本地 worker）；`caches.keys()` 出现 `vv-grammars-0.1.0-hryok`（11 条）与 `vv-queries-*`（12 条）——sw.js 运行时缓存路由真实创建（BUG-15 修复后）。
+- 报告的「自动/本地均 hljs 兜底、零 .wasm 请求」在干净 profile 下**不可复现**；结合 BUG-15 根因（残缺 SW 静默吞全部路由），报告主体定性为陈旧 SW/环境状态。
+
+### 5.2 PWA-03 子问题 1：在线逐语言覆盖矩阵（12 语言，报告口径为 9 语言 4/9）
+
+| 文件 | 状态栏高亮段 | ts-*/hljs-* span | 判定 |
+| --- | --- | --- | --- |
+| hello.py | tree-sitter · 远程 | 35/0 | ✓（compute 路由） |
+| lib.rs | tree-sitter · 本地 | 53/0 | ✓ |
+| main.go | tree-sitter · 本地 | 8/0 | ✓ |
+| app.js | tree-sitter · 本地 | 48/0 | ✓ |
+| app.ts | tree-sitter · 远程 | 33/0 | ✓ |
+| app.toml | tree-sitter · 远程 | 25/0 | ✓ |
+| config.yaml | tree-sitter · 远程 | 17/0 | ✓ |
+| deploy.sh | tree-sitter · 远程 | 23/0 | ✓ |
+| main.c | tree-sitter · 本地 | 21/0 | ✓ |
+| main.cpp | tree-sitter · 本地 | 33/0 | ✓ |
+| query.sql | hljs 兜底 · 本地 | 0/20 | 合法兜底（34 项 manifest 无 sql grammar） |
+| Main.java | hljs 兜底 · 本地 | 0/9 | **真实缺口**（见 5.4） |
+
+「在线仅 4/9」不再存在：10/12 真 tree-sitter；排除无 grammar 的 sql 后为 10/11，唯一缺口是 java。
+
+### 5.3 PWA-03 子问题 2：upload 通道与离线
+
+- upload（本地 store，auto 策略）：`lib.rs` → tree-sitter 本地（ts=19）✓；`hello.py` → **hljs 兜底（ts=0）**——python.wasm 与 queries/python/*.scm 均 HTTP 200 拉取成功后仍静默回退（~450ms，无 console 错误），对照同会话 `tiny.c` → tree-sitter 本地 ✓。**upload 缺口仍在（python）**。
+- 离线（SW activated + 缓存预热后断网，打开未开过的本地文件）：`cold.rs` → tree-sitter 本地（ts=15）✓，离线高亮承诺对 rust 成立；`probe_offline.py` → hljs 兜底——与 python 本地路径缺口同源，非离线/缓存问题。
+
+### 5.4 裁决与后续
+
+1. **BUG-06 不据此整体关闭**（spec 明文）：真实 grammar/queries 覆盖缺口仍在，另行立项，范围——
+   - 客户端本地 worker 对 python/java 的 grammar 加载静默失败（资产 200 仍回退 hljs，且无错误上报——BUG-06 可观测性修复只覆盖 worker 脚本加载失败，未覆盖单 grammar 加载失败路径，需一并补上报）；
+   - 服务端 compute 内嵌语言集 14 种（`server/src/compute/queries.rs:41-54`，无 java）与客户端 34 项 manifest 不对齐：java 在线走 compute 得 HTTP 400「无可用 grammar 或查询」如实回退本地，而本地路径同样不可用 → java 无任何 tree-sitter 路径。
+2. 报告「主路径整链失效」主体（sample.rs 零 wasm/全兜底、vv-grammars 缓存永不创建）按环境定性收口：根因为 BUG-15 残缺 SW，两修复已落地并以 `apps/web/e2e/fix-pwa.spec.ts` 护栏。
+3. `docs/deploy.md` 已按 spec 注记「升级部署后需硬刷新/清站点数据」（残缺 SW 的用户侧成因与对策）。

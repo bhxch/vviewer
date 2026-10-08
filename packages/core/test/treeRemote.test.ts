@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRemoteStore, getRemoteBase, getRemoteMeta, normalizeServerBase } from '../src/tree/remote';
+import {
+  createRemoteStore,
+  getRemoteBase,
+  getRemoteMeta,
+  normalizeServerBase,
+  SESSION_LAST_SERVER_KEY,
+  type LastServerRecord
+} from '../src/tree/remote';
 
 /** fetch 响应桩（tree 响应）：仅含 store 用到的 ok/status/json/headers.get */
 function treeResponse(
@@ -360,5 +367,22 @@ describe('RemoteStore 资源生命周期与错误提示（终审批次 B）', ()
     vi.stubGlobal('fetch', vi.fn(async () => treeResponse({ error: 'nope' }, 404)));
     const plain = createRemoteStore('http://127.0.0.1:8321', null, 'plain-srv');
     await expect(plain.listChildren('')).rejects.toThrow(/HTTP 404(?!.*误粘贴)/);
+  });
+});
+
+describe('SESSION_LAST_SERVER_KEY 跨包存储契约', () => {
+  // 字面量锚：该值是 sessionStorage 持久化格式（写入侧 apps/web openFlow.svelte.ts，
+  // 读取侧 render-media av.ts 的 HLS 直连鉴权），改名即令既有会话记录静默失配
+  it('键名恒为 vviewer-last-server（改值属破坏性变更，需迁移评估）', () => {
+    expect(SESSION_LAST_SERVER_KEY).toBe('vviewer-last-server');
+  });
+
+  it('LastServerRecord 形状：{ baseUrl, token }，token 空串按无 token 口径归一', () => {
+    // 写入侧（openFlow connectServer）与读取侧（openFlow loadLastServer /
+    // av readSessionToken）共同遵守的形状——空串 token 与缺失字段等价
+    const written = JSON.stringify({ baseUrl: 'http://127.0.0.1:8321', token: null } satisfies LastServerRecord);
+    const v = JSON.parse(written) as Partial<LastServerRecord>;
+    expect(v.baseUrl).toBe('http://127.0.0.1:8321');
+    expect(v.token ?? null).toBeNull();
   });
 });

@@ -47,6 +47,22 @@ export function getRemoteBase(storeId: string): string | undefined {
   return remoteBaseById.get(storeId);
 }
 
+// ---------- 会话内上次连接的服务器（跨包存储契约） ----------
+
+/**
+ * sessionStorage 键「会话内上次成功连接的服务器」的唯一权威定义。写入侧
+ * apps/web openFlow.svelte.ts（connectServer），读取侧 render-media av.ts
+ * （hls.js 分片 XHR 无法走统一请求通道注入头，token 只能读会话存储）——
+ * 此前键名/值形状仅靠注释约定同源，任一侧单改即静默丢 Bearer，故收敛单点导出。
+ */
+export const SESSION_LAST_SERVER_KEY = 'vviewer-last-server';
+
+/** SESSION_LAST_SERVER_KEY 的值形状（JSON 序列化存储）。 */
+export interface LastServerRecord {
+  baseUrl: string;
+  token: string | null;
+}
+
 /**
  * 连接地址归一：trim、去尾部斜杠；缺 scheme 补 `http://`
  * （"127.0.0.1:8321" → "http://127.0.0.1:8321"，避免落成同源相对路径误导排障）。

@@ -80,7 +80,15 @@ JSON）；跨设备访问检查防火墙放行端口。地址不带 scheme 会�
 
 **文件改了但页面没自动刷新**
 自动刷新依赖 inotify（Linux）。网络文件系统（NFS/SMB 挂载目录）上 watcher 收不到事件，
-刷新需手动重开 tab；root 目录本身被删后 watcher 失效，重启服务恢复。
+刷新需手动重开 tab；root 目录本身被删后 watcher 失效，重启服务恢复。watcher 故障期间
+服务器会推送 `watch-degraded` 降级帧（PollWatcher 轮询续推 changed）、恢复后推
+`watch-recovered`，不再使用旧 `watch-error` 帧。
+
+**升级/重新部署后高亮或离线行为异常（白屏、高亮全走 hljs、无 .wasm 请求）**
+浏览器可能残留旧版本 Service Worker：旧 SW 与新构建产物失配时会静默吞掉全部运行时
+路由（precache 有 html 键缺失的历史版本尤其如此）。**升级部署后请对站点做一次硬刷新
+（Ctrl+Shift+R），异常仍存则在 DevTools → Application → Storage 清除站点数据后重开**。
+干净环境下本地 tree-sitter 主路径已验证正常（复测记录见 docs/e2e/code-highlight-degrade.md §5）。
 
 **Windows 上路径带 `\` 会怎样**
 路径校验按 `/` 分段，`\` 不是分隔符：`..\` 穿越形态经 canonicalize 越界校验一律 403；

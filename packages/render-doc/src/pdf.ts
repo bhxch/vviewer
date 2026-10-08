@@ -53,6 +53,9 @@ export const pdfRenderer: Renderer = {
   extensions: ['pdf'],
   async render(buffer: Uint8Array, target: HTMLElement, _source: FileSource, _det: Detection) {
     const pdfjs = await loadPdfjs();
+    // BUG-04 握手点 2 代工：size 须在 getDocument 前捕获——pdfjs 会 transfer 该 buffer
+    // 到 worker（detach），detach 后 byteLength 归零，getMeta 再读就是 0
+    const size = buffer.length;
     // pdfjs 会 transfer 该 buffer 到 worker（detach）：调用方每次 dispatch 前重新 read，无复用问题
     const doc: PDFDocumentProxy = await pdfjs.getDocument({ data: buffer }).promise;
 
@@ -256,14 +259,19 @@ export const pdfRenderer: Renderer = {
       return out;
     }
 
-    const instance: RenderedInstance = {
-      async search(query: string): Promise<PdfSearchMatch[]> {
+    const instance: RenderedInstance & { getMeta(): { size: number } } = {
+      // BUG-04 握手点 2 代工：PDF 实例暴露大小（ViewerPane 'getMeta' in inst 探测自动消费，
+      // 状态栏/MetaPanel 得以显示「大小」段）
+      getMeta: () => ({ size }),
+      // BUG-23：caseSensitive 透传（searchPdfPages 纯函数本就支持）；多传 opts 对
+      // 旧调用方向后兼容，SearchPanel 的 Aa 开关对 PDF 视图同等生效
+      async search(query: string, opts?: { caseSensitive?: boolean }): Promise<PdfSearchMatch[]> {
         if (query === '') {
           lastMatches = [];
           return [];
         }
         const texts = await ensurePageTexts();
-        lastMatches = searchPdfPages(texts, query);
+        lastMatches = searchPdfPages(texts, query, opts);
         return lastMatches;
       },
       gotoMatch(index: number): void {

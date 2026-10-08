@@ -50,6 +50,7 @@
   4. 回归不破坏：PWA-01 的 SW 注册与 precache、PWA-04 的 `/api/*` 严格网络优先行为均不变（离线壳不因新增运行时缓存回退为缓存优先）；
   5. 根因侧配合项（报告 §7.2 建议 2）：manifest 34 项 abi 全 null 与本地引擎零请求的因果关系需读源码定位后修复。
   - 注：HL-01/HL-10 主体场景（本地主路径高亮、远程矩阵）的完整验收在 code-highlight-degrade 域文档。
+  - **复测裁决（2026-10-09，干净 profile，详录 code-highlight-degrade.md §5）**：PWA-03 验收 1/2 达成（vv-grammars-* 缓存创建、断网 wasm 命中缓存、离线 cold.rs tree-sitter ts=15）；「在线仅 4/9」不复现（10/11，sql 无 grammar 属合法兜底）；**upload 通道缺口部分仍在**（rust ✓、python 资产 200 后仍静默兜底）——按 spec BUG-06 裁决规则，python/java 本地路径与服务端 compute 语言集（无 java）缺口另行立项，BUG-06 不据此整体关闭。
 
 ### BUG-15【medium · verified】离线（断网）reload 落到 chrome-error 浏览器错误页，仅重新导航才能打开离线应用壳
 

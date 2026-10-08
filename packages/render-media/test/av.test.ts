@@ -3,7 +3,7 @@
 // + 音频原生 <audio> 路径（blob 生命周期不变 + getMeta 代工）+ 本地 m3u8 明确报错。
 // 末例以 vi.mock 令 ArtPlayer 构造抛错，验证 T7 修复：构造失败路径 revoke blob URL 后 rethrow。
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { createRemoteStore } from '@vviewer/core';
+import { createRemoteStore, SESSION_LAST_SERVER_KEY } from '@vviewer/core';
 import type { RenderedInstance } from '@vviewer/core';
 import {
   absolutizeHlsUri,
@@ -70,7 +70,13 @@ describe('buildArtConfig：ArtPlayer 配置构造（契约项逐项断言）', (
 
 describe('resolveHlsDirect / buildHlsConfig：HLS 直连（BUG-01）', () => {
   afterEach(() => {
-    sessionStorage.removeItem('vviewer-last-server');
+    sessionStorage.removeItem(SESSION_LAST_SERVER_KEY);
+  });
+
+  // 跨包契约锚（审查意见）：token 读取走 core 单点常量——字面量即持久化格式，
+  // 擅改会导致老会话 sessionStorage 里的记录全部失配、xhrSetup 静默丢 Bearer
+  it('SESSION_LAST_SERVER_KEY 锚定：值为 vviewer-last-server（与 apps/web openFlow 写入侧同源）', () => {
+    expect(SESSION_LAST_SERVER_KEY).toBe('vviewer-last-server');
   });
 
   it('remote store → /api/file 直连 URL（分片按真实 URL 解析，非 blob:）', () => {
@@ -90,7 +96,8 @@ describe('resolveHlsDirect / buildHlsConfig：HLS 直连（BUG-01）', () => {
   });
 
   it('token 从会话存储读取；缺失/无记录 → null（xhrSetup 不附加）', () => {
-    sessionStorage.setItem('vviewer-last-server', JSON.stringify({ baseUrl: 'http://x:1', token: 'sess-tkn' }));
+    // 值形状 = core LastServerRecord（apps/web openFlow connectServer 的 satisfies 写入形）
+    sessionStorage.setItem(SESSION_LAST_SERVER_KEY, JSON.stringify({ baseUrl: 'http://x:1', token: 'sess-tkn' }));
     const localSource: FileSource = {
       storeId: 'remote:whatever', storeLabel: 'l', path: 'a.m3u8', name: 'a.m3u8',
       store: { id: 'remote:whatever', displayName: () => 'l', listChildren: async () => [], read: async () => new Uint8Array() }
@@ -107,7 +114,7 @@ describe('resolveHlsDirect / buildHlsConfig：HLS 直连（BUG-01）', () => {
       store.close();
     }
 
-    sessionStorage.removeItem('vviewer-last-server');
+    sessionStorage.removeItem(SESSION_LAST_SERVER_KEY);
     const store2 = createRemoteStore('http://127.0.0.1:8323', null, 'data');
     try {
       const direct = resolveHlsDirect({

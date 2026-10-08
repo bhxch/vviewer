@@ -7,10 +7,13 @@ import {
   createRemoteStore,
   ensurePermission,
   getRemoteBase,
-  normalizeServerBase
+  normalizeServerBase,
+  SESSION_LAST_SERVER_KEY,
+  type LastServerRecord
 } from '@vviewer/core';
 import { ARCHIVE_OPEN_EVENT } from '@vviewer/render-archive';
 import { saveDirHandle, saveTabs, maxTabSeqOf, type TabSnapshot } from './stores/session';
+import { loadSettings } from './stores/settings';
 import { releaseStoreIfLast } from './storeRelease';
 
 export interface Tab {
@@ -194,7 +197,11 @@ export async function openDirectoryViaPicker(): Promise<void> {
   try {
     handle = await w.showDirectoryPicker({ mode: 'read' });
   } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') return; // 用户取消选择
+    // BUG-19：用户取消（headless/自动化下立即取消）此前零反馈——接入状态栏一次性提示
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      showStatusNotice('已取消选择文件夹');
+      return;
+    }
     throw err;
   }
   await saveDirHandle(handle);
@@ -229,18 +236,21 @@ function openDirectoryViaInputFallback(): void {
   input.onchange = () => {
     if (input.files) openDirectoryViaInput(input.files);
   };
+  // BUG-19：webkitdirectory 回退通道的用户取消此前零反馈——cancel 事件接同一文案
+  input.oncancel = () => showStatusNotice('已取消选择文件夹');
   input.click();
 }
 
 // ---------- 服务器连接（M5） ----------
 
-/** 会话内上次成功连接的服务器（sessionStorage，不做持久）。 */
-export interface LastServer {
-  baseUrl: string;
-  token: string | null;
-}
+/**
+ * 会话内上次成功连接的服务器（sessionStorage，不做持久）。
+ * 键名与值形状的权威定义在 @vviewer/core（SESSION_LAST_SERVER_KEY/LastServerRecord）：
+ * render-media av.ts 的 HLS 直连 XHR 鉴权读同一键，形状改动须走 core 单点。
+ */
+export type LastServer = LastServerRecord;
 
-const LAST_SERVER_KEY = 'vviewer-last-server';
+const LAST_SERVER_KEY = SESSION_LAST_SERVER_KEY;
 
 /** 连接时 health capabilities 的会话缓存键（M6 compute 路由的能力判定来源）。 */
 const CAPABILITIES_KEY = 'vv:capabilities';
@@ -330,7 +340,12 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
   // store 关闭（最后一个持有 tab 关闭 / 被新连接替换）由引用计数接线调 close() 停流
   watchHealth.degraded = false; // 新连接重置降级指示（上一次连接的降级不复用）
   store.watch(
-    (paths) => tabStore.refreshPaths(store.id, paths),
+    (paths) => {
+      // BUG-05：设置面板 autoRefresh 关闭时停用目录树/文件的自动重读
+      //（手动刷新 ↻ 不受影响）；实时读 settings，面板开关即时生效
+      if (!loadSettings().autoRefresh) return;
+      tabStore.refreshPaths(store.id, paths);
+    },
     () => {
       watchHealth.degraded = true;
       console.warn('[vviewer] 服务器变更推送不可用，自动刷新已停用');

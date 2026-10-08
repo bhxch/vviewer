@@ -17,7 +17,7 @@
 // 重试/降级成功产出的新实例由本渲染闭包级联托管（本实例 destroy 时级联释放，不泄漏）。
 // 类型分派/协议映射/配置构造/HLS 直连解析/清单改写/fatal 决策为纯函数导出（单测直测；
 // jsdom 无法真渲染 ArtPlayer，真实播放 E2E 留 T7）。
-import { getHexFallbackRenderer, getRemoteBase, showErrorCard } from '@vviewer/core';
+import { getHexFallbackRenderer, getRemoteBase, SESSION_LAST_SERVER_KEY, showErrorCard } from '@vviewer/core';
 import type { ErrorCardAction } from '@vviewer/core';
 import type { Option } from 'artplayer';
 import type Artplayer from 'artplayer';
@@ -89,13 +89,12 @@ function notifyLoaderFailure(art: Artplayer, err: unknown): void {
 
 // ---------- HLS 直连（BUG-01：m3u8 不再包 blob，分片按真实 URL 解析） ----------
 
-/** 会话内上次连接的鉴权存储键（与 apps/web openFlow.svelte.ts 的 LAST_SERVER_KEY 同源：
- * hls.js 的分片 XHR 无法走 store.request 统一注入头，token 只能读会话存储；缺失则不带）。 */
-const LAST_SERVER_KEY = 'vviewer-last-server';
-
+/** 会话内上次连接的鉴权存储：键名/值形状的唯一权威定义在 @vviewer/core
+ * （SESSION_LAST_SERVER_KEY/LastServerRecord，写入侧 apps/web openFlow.svelte.ts）——
+ * hls.js 的分片 XHR 无法走 store.request 统一注入头，token 只能读会话存储；缺失则不带。 */
 function readSessionToken(): string | null {
   try {
-    const raw = sessionStorage.getItem(LAST_SERVER_KEY);
+    const raw = sessionStorage.getItem(SESSION_LAST_SERVER_KEY);
     if (!raw) return null;
     const v = JSON.parse(raw) as { token?: unknown };
     return typeof v.token === 'string' && v.token !== '' ? v.token : null;
