@@ -16,6 +16,7 @@ interface FilePayload {
 const SAMPLES: FilePayload[] = [
   { name: 'sample.ts', type: 'text/plain' },
   { name: 'sample.rs', type: 'text/plain' },
+  { name: 'sample.pl', type: 'text/plain' },
   { name: 'sample.md', type: 'text/markdown' }
 ].map((f) => ({ ...f, b64: readFileSync(`${samples}/${f.name}`).toString('base64') }));
 
@@ -96,12 +97,13 @@ test('sample.ts 走 tree-sitter 主路径（ts-* span），切换代码主题零
   expect(after.sameNode).toBe(true); // 同一 DOM 节点：零重解析
 });
 
-test('sample.rs（查询失配）自动降级 hljs 整文件', async ({ page }) => {
+test('sample.pl（lite 集未内嵌 grammar）自动降级 hljs 整文件', async ({ page }) => {
   await page.goto('/');
   await openDir(page, SAMPLES);
 
-  // rust 在 14 失败清单内（查询引用预编译 grammar 没有的节点）→ 引擎报错 → hljs 兜底
-  await openFile(page, 'sample.rs');
+  // perl 有 helix 查询但不在内嵌集（grammars 由 gen:grammars 按需生成，CI 最小集不含 perl）
+  // → 引擎无 grammar 报错 → hljs 兜底
+  await openFile(page, 'sample.pl');
   const hljsSpans = page.locator('.vv-code-pre span[class^="hljs-"]');
   await expect(hljsSpans.first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.vv-code-pre span[class^="ts-"]')).toHaveCount(0);

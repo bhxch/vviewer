@@ -1,5 +1,6 @@
-// M2 样例：简单 Rust 代码（rust 查询与预编译 wasm ABI 失配时自动降级 hljs，
-// 见 task-5-report 的 14 失败清单——本文件同时覆盖降级链的真实路径）
+// M2 样例：简单 Rust 代码。grammars 自建（gen:grammars）后与 helix 查询版本对齐，
+// 走 tree-sitter 主路径；历史上的"预编译 wasm 与查询 ABI 失配 → 降级 hljs"路径
+// 由 sample.pl（lite 集未内嵌 grammar）承接。
 use std::collections::HashMap;
 
 /// 词频统计示例

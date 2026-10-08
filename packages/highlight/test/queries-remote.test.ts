@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import http from 'node:http';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TreeSitterEngine, type GrammarTable } from '../src/core-parse';
@@ -10,6 +10,10 @@ const staticDir = path.join(here, '../../../apps/web/static');
 // queries 走入库资产（packages/highlight/assets/queries）保证 hermetic——
 // apps/web/static/queries 是 vite 构建期拷贝产物（gitignore），fresh clone 不存在
 const queriesAssetDir = path.join(here, '../assets/queries');
+// grammar 资产（manifest + 运行时 wasm）由 `pnpm gen:grammars` 生成（不入库），fresh clone 跳过
+const grammarAssetsReady =
+  existsSync(path.join(staticDir, 'grammars', 'manifest.json')) &&
+  existsSync(path.join(staticDir, 'tree-sitter.wasm'));
 
 /**
  * queriesBase fetch 链路集成测试（浏览器 Worker 端的同款查询加载代码）：
@@ -18,7 +22,7 @@ const queriesAssetDir = path.join(here, '../assets/queries');
  * expandQueryAsync 继承展开；grammar wasm 仍走本地路径
  * （Node 端 web-tree-sitter 的 Language.load 只支持文件路径，URL 加载属浏览器行为，由 T7 E2E 覆盖）。
  */
-describe('TreeSitterEngine（queriesBase fetch 版查询来源）', () => {
+describe.skipIf(!grammarAssetsReady)('TreeSitterEngine（queriesBase fetch 版查询来源）', () => {
   let server: http.Server;
   let engine: TreeSitterEngine;
 

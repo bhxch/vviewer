@@ -15,19 +15,21 @@ packages/*/dist/
 # Rust
 server/target/
 
-# grammar 构建产物（源清单 languages.toml 入库，下载的 grammar 源码与编译产物不入库）
+# grammar wasm 资产（构建产物，不入库）：源清单 languages.toml、aliases.json、build-list.json
+# 与构建器入库；产物由 `pnpm gen:grammars` 生成（tree-sitter-cli 自建，vendored 例外见
+# tools/grammar-builder/fixtures/）。tools/grammar-builder/grammars 与 out 为源缓存/失败清单。
 tools/grammar-builder/grammars/
 tools/grammar-builder/out/
 *.wasm
 !tools/grammar-builder/fixtures/*.wasm
-# M2 决定：static/grammars 的 wasm 与 manifest 入库（纯前端版开箱可用；单文件 ≤8MB、总量 ≤80MB）
-!apps/web/static/grammars/*.wasm
+# static/grammars 整目录（*.wasm 与生成的 manifest.json，构建产物）
+apps/web/static/grammars/
 # tree-sitter 查询静态资产（构建期由 vite 插件从 packages/highlight/assets/queries 拷贝，不入库）
 apps/web/static/queries/
 # libarchive.js worker bundle 与 wasm（构建期由 vite 插件从 node_modules 拷贝，不入库）
 apps/web/static/libarchive/
-# web-tree-sitter runtime（锁 ~0.25.10：0.27 要求 wasm 含 dylink.0 节，与 tree-sitter-wasms 0.1.13 预编译产物不兼容（实测），0.25 起可用）
-!apps/web/static/tree-sitter.wasm
+# web-tree-sitter runtime wasm（构建期由 gen:grammars 从 node_modules 拷贝，不入库；版本随 packages/highlight 的 lockfile 锁定）
+apps/web/static/tree-sitter.wasm
 
 # 系统
 .DS_Store

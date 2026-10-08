@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { TreeSitterEngine, type VirtualQueries } from '../src/core-parse';
 
@@ -7,6 +8,11 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const queriesDir = path.join(here, '../assets/queries');
 const staticDir = path.join(here, '../../../apps/web/static');
 const grammarsDir = path.join(staticDir, 'grammars');
+// grammar 资产（manifest + 运行时 wasm + 各语言 wasm）由 `pnpm gen:grammars` 生成
+// （不入库），fresh clone 缺资产时整组跳过（CI 在 vitest 前先跑生成步骤）
+const grammarAssetsReady =
+  existsSync(path.join(grammarsDir, 'manifest.json')) &&
+  existsSync(path.join(staticDir, 'tree-sitter.wasm'));
 
 /** 断言区间按 (start asc, end desc) 排序。 */
 function expectSorted(intervals: { start: number; end: number }[]): void {
@@ -18,7 +24,7 @@ function expectSorted(intervals: { start: number; end: number }[]): void {
   }
 }
 
-describe('TreeSitterEngine（真实 wasm + 真实 helix 查询）', () => {
+describe.skipIf(!grammarAssetsReady)('TreeSitterEngine（真实 wasm + 真实 helix 查询）', () => {
   let engine: TreeSitterEngine;
   beforeAll(async () => {
     engine = await TreeSitterEngine.create({ queriesDir, grammarsDir, runtimeDir: staticDir });
@@ -114,7 +120,7 @@ describe('TreeSitterEngine（真实 wasm + 真实 helix 查询）', () => {
   }, 30_000);
 });
 
-describe('TreeSitterEngine.create 选项', () => {
+describe.skipIf(!grammarAssetsReady)('TreeSitterEngine.create 选项', () => {
   it('maxInjectionDepth=0 时 html 不递归注入 js', async () => {
     const e = await TreeSitterEngine.create({
       queriesDir,
@@ -134,7 +140,7 @@ describe('TreeSitterEngine.create 选项', () => {
   }, 60_000);
 });
 
-describe('大文件护栏（web-tree-sitter 病态查询挂起的防御）', () => {
+describe.skipIf(!grammarAssetsReady)('大文件护栏（web-tree-sitter 病态查询挂起的防御）', () => {
   it('hasLanguage：清单键与别名命中，未知语言 false', async () => {
     const engine = await TreeSitterEngine.create({ queriesDir, grammarsDir, runtimeDir: staticDir });
     try {
