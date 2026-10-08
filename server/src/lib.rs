@@ -11,8 +11,9 @@ pub mod watch;
 
 use std::time::Duration;
 
-use axum::extract::State;
+use axum::extract::{Request, State};
 use axum::http::{header, HeaderValue, Method, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -57,17 +58,37 @@ async fn serve_index(State(state): State<AppState>) -> Response {
         return placeholder_page().await.into_response();
     };
     match tokio::fs::read(dist.join("index.html")).await {
-        Ok(bytes) => (
-            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-            bytes,
-        )
-            .into_response(),
+        Ok(bytes) => {
+            let mut res = (
+                [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                bytes,
+            )
+                .into_response();
+            // index.html 禁缓存（BUG-15 server 子项）：磁盘缓存启发式命中会让
+            // 「离线 reload 落 chrome-error」的 SW 缺陷被新鲜窗口掩盖
+            res.headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+            res
+        }
         Err(_) => (
             StatusCode::NOT_FOUND,
             "index.html not found in --web-dist",
         )
             .into_response(),
     }
+}
+
+/// index.html 响应禁缓存中间件（BUG-15 server 子项）：ServeDir 直接命中 `/` 与
+/// `*/index.html` 的成功响应同样下发 `cache-control: no-cache`；其余路径（API、
+/// 带 hash 的静态资产）不受影响。
+async fn no_cache_index(req: Request, next: Next) -> Response {
+    let is_index = req.uri().path() == "/" || req.uri().path().ends_with("/index.html");
+    let mut res = next.run(req).await;
+    if is_index && res.status().is_success() {
+        res.headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    }
+    res
 }
 
 /// 组装完整应用路由（不含 CORS/鉴权层的动态部分，鉴权在 Task 3 引入）。
@@ -86,6 +107,8 @@ pub fn build_router(state: AppState) -> Router {
             Router::new()
                 .nest("/api", api)
                 .fallback_service(static_svc)
+                // index.html（直接命中与 SPA fallback）禁缓存；/api 路径不命中条件
+                .layer(middleware::from_fn(no_cache_index))
         }
         None => Router::new()
             .nest("/api", api)
