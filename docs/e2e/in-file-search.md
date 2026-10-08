@@ -1,6 +1,6 @@
 # 文件内搜索（M3/M4） — e2e 场景
 
-> 来源：`docs/e2e-test-report-2026-10-08.md`（被测版本 `main` @ `a47148114dd4962b1b32bcf3fe190702356fb3c8`）。本档为该报告 in-file-search 域内容的忠实转写，不引入报告之外的行为声明。
+> 来源：`docs/report/e2e/e2e-test-report-2026-10-08.md`（被测版本 `main` @ `a47148114dd4962b1b32bcf3fe190702356fb3c8`）。本档为该报告 in-file-search 域内容的忠实转写，不引入报告之外的行为声明。
 > 证据目录：`.temp/e2e-artifacts/in-file-search/`（14 张截图，报告 §3.1）；复核截图在 `.temp/e2e-artifacts/verify/`（复核会话 `vv-verify-in-file-search-FSEARCH-03`）。
 
 ## 1. 域描述与覆盖范围

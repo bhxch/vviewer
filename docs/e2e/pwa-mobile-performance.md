@@ -1,6 +1,6 @@
 # PWA、移动端与性能预算（M7） — e2e 场景
 
-> 转写自：`docs/e2e-test-report-2026-10-08.md`（被测版本 `main` @ `a4714811`，2026-10-08）。
+> 转写自：`docs/report/e2e/e2e-test-report-2026-10-08.md`（被测版本 `main` @ `a4714811`，2026-10-08）。
 > 本文将该报告「PWA、移动端与性能预算（pwa-mobile-performance，M7）」域的黑盒测试内容转写为可独立执行的场景文档；只收录报告中有依据的内容，不补充报告之外的 spec 行为。各场景括注报告原始结果（pass / partial / fail）。
 
 ## 1. 域描述与覆盖范围

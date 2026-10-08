@@ -1,6 +1,6 @@
 # 主题三层与外观（M2/M7） — e2e 场景
 
-> 转写来源：`docs/e2e-test-report-2026-10-08.md`「theme-system」域——第 1.3 节执行摘要、第 2 节环境与数据、第 3.3 节环境限制、第 4 节矩阵该域行、第 5 节 BUG-06、第 6 节交叉验证、第 8.3 节逐点明细。被测版本 `main @ a471481`，与报告一致。证据截图 `.temp/e2e-artifacts/theme-system/`（8 张，THEME01~07 系列文件已确认在盘）。
+> 转写来源：`docs/report/e2e/e2e-test-report-2026-10-08.md`「theme-system」域——第 1.3 节执行摘要、第 2 节环境与数据、第 3.3 节环境限制、第 4 节矩阵该域行、第 5 节 BUG-06、第 6 节交叉验证、第 8.3 节逐点明细。被测版本 `main @ a471481`，与报告一致。证据截图 `.temp/e2e-artifacts/theme-system/`（8 张，THEME01~07 系列文件已确认在盘）。
 
 ## 1. 域描述与覆盖范围
 
