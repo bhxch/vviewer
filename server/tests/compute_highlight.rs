@@ -340,3 +340,55 @@ async fn highlight_requires_bearer_when_token_configured() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
 }
+
+/// BUG-10 收尾：highlight 响应按 Accept-Encoding: gzip 协商压缩（intervals 可达
+/// 十余 MB，浏览器默认携带该头）。仅断言协商生效（header + gzip magic），
+/// 压缩本体由 tower-http CompressionLayer 保证。
+#[tokio::test]
+async fn highlight_response_gzip_when_requested() {
+    let _guard = serial_lock();
+    cache_reset();
+    let f = fixture(true, None);
+    let res = f
+        .app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/compute/highlight")
+                .header("content-type", "application/json")
+                .header("accept-encoding", "gzip")
+                .body(Body::from(json!({ "text": RUST_SAMPLE, "lang": "rust" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers().get("content-encoding").unwrap(), "gzip");
+    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    // gzip magic：1f 8b
+    assert_eq!(&bytes[0..2], &[0x1f, 0x8b]);
+}
+
+/// 对照：不带 Accept-Encoding: gzip 时响应不压缩（原样 JSON）。
+#[tokio::test]
+async fn highlight_response_identity_without_gzip_accept() {
+    let _guard = serial_lock();
+    cache_reset();
+    let f = fixture(true, None);
+    let res = f
+        .app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/compute/highlight")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "text": RUST_SAMPLE, "lang": "rust" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(res.headers().get("content-encoding").is_none());
+    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(&bytes[0..1], b"{");
+}

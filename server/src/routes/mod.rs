@@ -12,6 +12,7 @@ use axum::extract::DefaultBodyLimit;
 use axum::middleware;
 use axum::routing::{get, post};
 use axum::Router;
+use tower_http::compression::CompressionLayer;
 
 use crate::auth;
 
@@ -35,7 +36,10 @@ pub fn api_router(state: crate::state::AppState) -> Router {
         .route("/ticket", post(ticket::issue_ticket))
         // 跨文件搜索：file-server 基础能力（不要求 --compute；rg 缺失时 501）
         .route("/search", post(search::search));
-    // --compute 才暴露计算端点；未启用时路径不存在（统一 JSON 404）
+    // --compute 才暴露计算端点；未启用时路径不存在（统一 JSON 404）。
+    // CompressionLayer（BUG-10 收尾）：highlight intervals 响应可达十余 MB，
+    // gzip 按 Accept-Encoding 协商压缩（浏览器默认携带）；仅作用于 compute 端点，
+    // 不入 file 路由——Range 流被压缩会破坏字节区间语义。
     if state.compute {
         protected = protected
             .route(
@@ -46,7 +50,8 @@ pub fn api_router(state: crate::state::AppState) -> Router {
                 "/compute/highlight",
                 post(crate::compute::highlight::highlight)
                     .layer(DefaultBodyLimit::max(COMPUTE_HIGHLIGHT_BODY_LIMIT)),
-            );
+            )
+            .layer(CompressionLayer::new());
     }
     let protected = protected
         .layer(middleware::from_fn_with_state(

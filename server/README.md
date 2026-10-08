@@ -37,13 +37,19 @@ cargo build --release --manifest-path server/Cargo.toml
 
 | 端点 | 鉴权 | 说明 |
 |---|---|---|
-| `GET /api/health` | 免 | 能力发现：`{"name":"vviewer","version":"…","capabilities":["file-server"]}` |
+| `GET /api/health` | 免 | 能力发现：`{"name":"vviewer","version":"…","capabilities":["file-server"]}`；`--compute` 时 capabilities 追加 `"compute"` 并宣告 `computeLanguages`（服务端高亮支持的 canonical 语言排序清单，客户端 auto 策略据此路由） |
 | `GET /api/tree?path=` | Bearer | 单层目录列表 `{entries:[{name,kind,size?,mtime?}]}`；目录优先 + 名称自然排序 |
 | `GET /api/file?path=` | Bearer | 文件内容（支持 `Range: bytes=a-b`，206/416）；响应头 `X-VV-Lang`（helix 语言名）/`X-VV-Encoding`（utf-8/utf-16le/utf-16be/gb18030）为服务端检测结果 |
 | `POST /api/ticket` | Bearer | 签发一次性 SSE 票据（30s 过期），供 EventSource 无法自带请求头时走 `?ticket=` 升级 |
 | `GET /api/events?ticket=` | ticket | SSE 变更推送：`data: {"type":"changed","paths":[…]}`（相对 root，500ms debounce 聚合）；15s 心跳；watcher 建立失败降级为一条 `{"type":"watch-error"}` |
 
+## 响应压缩
+
+`/api/compute/*` 响应按 `Accept-Encoding` 协商 gzip（`CompressionLayer`，BUG-10：highlight
+intervals 可达十余 MB）；file/tree 等 Range 流端点不压缩——压缩会破坏字节区间语义。
+
 ## 安全注意事项
+
 
 - **token**：无 token 配置时全部放行——仅在接受「本机其他用户可读」时使用（默认绑定
   127.0.0.1）。对外暴露必须配 `--token` 或 `--token-gen`；`--allow-lan` 无 token 会拒绝启动。

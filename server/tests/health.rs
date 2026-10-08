@@ -88,3 +88,33 @@ async fn web_dist_serves_assets_and_spa_fallback() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_ref(), b"<html>spa-shell</html>");
 }
+
+#[tokio::test]
+async fn compute_health_advertises_sorted_language_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = test_state(dir.path().to_path_buf(), None).with_compute(true);
+    let app = vviewer::build_router(state);
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let caps = json["capabilities"].as_array().unwrap();
+    assert!(caps.iter().any(|c| c == "compute"));
+    // BUG-06c：语言集合宣告（排序 canonical 名，java 不在集合——客户端 auto 据此不远程路由）
+    let langs = json["computeLanguages"].as_array().expect("computeLanguages 应宣告");
+    let names: Vec<&str> = langs.iter().map(|x| x.as_str().unwrap()).collect();
+    let mut sorted = names.clone();
+    sorted.sort_unstable();
+    assert_eq!(names, sorted);
+    assert!(names.contains(&"rust") && names.contains(&"python"));
+    assert!(!names.contains(&"java"));
+}
