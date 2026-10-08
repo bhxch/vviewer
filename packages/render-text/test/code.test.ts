@@ -11,8 +11,11 @@ import {
   renderLineHtml,
   renderCode,
   attachHighlightClient,
+  attachHighlightRouter,
   evictOldestEntries,
   resolveHljsLang,
+  overlaySearchHits,
+  renderDegradedCode,
   HLJS_ALIASES,
   BLOCK_CACHE_MAX_ROWS,
   TREE_SITTER_MAX_BYTES,
@@ -220,6 +223,7 @@ describe('renderLineHtml（行 HTML 渲染）', () => {
 describe('renderCode（tree-sitter 主路径，fake client）', () => {
   afterEach(() => {
     attachHighlightClient(null);
+    attachHighlightRouter(null);
     document.body.innerHTML = '';
   });
 
@@ -425,6 +429,391 @@ describe('renderCode（tree-sitter 主路径，fake client）', () => {
       expect(host.querySelector(`[data-line="${i}"] .vv-code-body`)?.textContent).toBe(ch);
     }
     expect(host.querySelector('[data-line="4"]')).toBeNull();
+    handle.destroy();
+  });
+});
+
+// ---------- BUG-04：getMeta 元数据快照 ----------
+
+describe('renderCode getMeta（BUG-04：状态栏/属性面板元数据）', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+    vi.unstubAllGlobals();
+  });
+
+  function stubResizeObserver(): void {
+    vi.stubGlobal('ResizeObserver', class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    });
+  }
+
+  it('行数为内容行数口径：以 \\n 结尾的 301 行文件报 301（非 split 产物的 302）', () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const trailing = renderCode(new TextEncoder().encode('a\nb\n'), host, { highlight: false });
+    expect(trailing.getMeta().lines).toBe(2); // split 产出 3 元素（末尾空串），报 2
+    trailing.destroy();
+
+    const noTrailing = renderCode(new TextEncoder().encode('a\nb'), host, { highlight: false });
+    expect(noTrailing.getMeta().lines).toBe(2);
+    noTrailing.destroy();
+
+    const empty = renderCode(new TextEncoder().encode(''), host, { highlight: false });
+    expect(empty.getMeta().lines).toBe(0); // 空文件 0 行（与 wc -l 一致）
+    empty.destroy();
+
+    const wc301 = renderCode(new TextEncoder().encode('line\n'.repeat(301)), host, { highlight: false });
+    expect(wc301.getMeta().lines).toBe(301); // SHELL-12 验收口径：302 即不通过
+    wc301.destroy();
+  });
+
+  it('encoding/lang/size 按 opts 透传（服务端检测头/编码链路的消费端）', () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const buf = new TextEncoder().encode('x = 1');
+    const handle = renderCode(buf, host, { encoding: 'gb18030', lang: 'python', highlight: false });
+    expect(handle.getMeta()).toEqual({ encoding: 'gb18030', lang: 'python', size: 5, lines: 1 });
+    handle.destroy();
+    // 缺省：utf-8 + lang null
+    const plain = renderCode(buf, host, { highlight: false });
+    expect(plain.getMeta()).toEqual({ encoding: 'utf-8', lang: null, size: 5, lines: 1 });
+    plain.destroy();
+  });
+
+  it('lang 与实际高亮语言同源：opts.lang 缺失时按 ext 的 detectLanguage 推导（评审③）', () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    // 本地 .js（无服务端 x-vv-lang）：按扩展名检测出 javascript，语言段与引擎一致
+    const js = renderCode(new TextEncoder().encode('let x = 1;\n'), host, { ext: 'js', highlight: false });
+    expect(js.getMeta().lang).toBe('javascript');
+    js.destroy();
+    // 无 ext 且无 lang：null（不虚构）
+    const noExt = renderCode(new TextEncoder().encode('text\n'), host, { highlight: false });
+    expect(noExt.getMeta().lang).toBeNull();
+    noExt.destroy();
+  });
+});
+
+// ---------- BUG-20：>20MB 纯文本超限提示条 ----------
+
+describe('renderCode >20MB 超限提示条（BUG-20）', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+    vi.unstubAllGlobals();
+  });
+
+  function stubResizeObserver(): void {
+    vi.stubGlobal('ResizeObserver', class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    });
+  }
+
+  /** 目标字节数的多行 js 文本（小行：hljs 分块只高亮可视行，单行巨文本会拖死 hljs） */
+  function bytesOfJs(targetBytes: number): Uint8Array {
+    return new TextEncoder().encode('const a = 1;\n'.repeat(Math.ceil(targetBytes / 13)));
+  }
+
+  it('>HLJS_MAX_BYTES 且自然 plain 路径：pre 外的兄弟节点插入提示条（含 20MB 字样）', () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(bytesOfJs(HLJS_MAX_BYTES + 1), host, { ext: 'txt' });
+    const card = host.querySelector('.vv-oversize-card');
+    expect(card).not.toBeNull();
+    expect(card?.textContent).toContain('20MB');
+    expect(host.querySelector('.vv-code-pre')).not.toBeNull();
+    // 提示条在滚动容器之外（virtualScroller replaceChildren 不得清掉它）
+    expect(card!.contains(host.querySelector('.vv-code-pre'))).toBe(false);
+    expect(handle.getEngine()).toBe('plain');
+    handle.destroy();
+  });
+
+  it('<20MB 与 renderDegradedCode 降级路径不出现第二张卡', () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    // hljs-block（3MB）无提示条
+    const mid = renderCode(bytesOfJs(TREE_SITTER_MAX_BYTES + 1), host, { ext: 'js', lang: 'javascript' });
+    expect(host.querySelector('.vv-oversize-card')).toBeNull();
+    mid.destroy();
+    host.replaceChildren();
+    // renderDegradedCode（markdown 降级）自带降级卡：content 内不再叠加超限卡
+    const degraded = renderDegradedCode(bytesOfJs(HLJS_MAX_BYTES + 1), host, {
+      name: 'big.md',
+      mode: '纯文本',
+      highlight: false
+    });
+    expect(host.querySelectorAll('.vv-oversize-card')).toHaveLength(1); // 仅降级卡自身
+    degraded.destroy();
+  });
+});
+
+// ---------- BUG-18/23：词级 mark + 全命中行级背景 + caseSensitive ----------
+
+describe('overlaySearchHits（BUG-18 词级 mark 纯函数）', () => {
+  it('无命中原样返回', () => {
+    expect(overlaySearchHits('<span class="ts-keyword">let</span>', [])).toBe(
+      '<span class="ts-keyword">let</span>'
+    );
+  });
+
+  it('纯文本行：命中段包 mark，其余转义输出', () => {
+    expect(overlaySearchHits('alpha beta', [{ start: 6, end: 10 }])).toBe(
+      'alpha <mark class="vv-search-hit">beta</mark>'
+    );
+  });
+
+  it('命中段切开语法 span：span 在命中边界闭合、命中后按原序重开', () => {
+    const base = renderLineHtml('abcd', [{ start: 0, end: 4, capture: 'keyword' }]);
+    expect(base).toBe('<span class="ts-keyword">abcd</span>');
+    expect(overlaySearchHits(base, [{ start: 1, end: 3 }])).toBe(
+      '<span class="ts-keyword">a</span><mark class="vv-search-hit">bc</mark><span class="ts-keyword">d</span>'
+    );
+  });
+
+  it('实体按显示字符切分：命中 &amp; 的 & 时 mark 内仍是合法转义', () => {
+    // 'a & b' → 转义 'a &amp; b'；& 在显示偏移 [2,3)
+    expect(overlaySearchHits('a &amp; b', [{ start: 2, end: 3 }])).toBe(
+      'a <mark class="vv-search-hit">&amp;</mark> b'
+    );
+  });
+
+  it('同 span 内多命中逐段 mark、段间恢复原 span', () => {
+    expect(overlaySearchHits('xaxax', [{ start: 1, end: 2 }, { start: 3, end: 4 }])).toBe(
+      'x<mark class="vv-search-hit">a</mark>x<mark class="vv-search-hit">a</mark>x'
+    );
+  });
+});
+
+describe('renderCode search（BUG-18 词级/行级 + BUG-23 caseSensitive）', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+    vi.unstubAllGlobals();
+  });
+
+  function stubResizeObserver(): void {
+    vi.stubGlobal('ResizeObserver', class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    });
+  }
+
+  it('全部命中行有行级背景 + 命中文本包 mark.vv-search-hit；非命中行无', async () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(
+      new TextEncoder().encode('alpha beta\nbeta alpha\nplain line\n'),
+      host,
+      { highlight: false }
+    );
+    await handle.search('beta');
+    expect(host.querySelector('[data-line="0"]')?.classList.contains('vv-search-hit-line')).toBe(true);
+    expect(host.querySelector('[data-line="1"]')?.classList.contains('vv-search-hit-line')).toBe(true);
+    expect(host.querySelector('[data-line="2"]')?.classList.contains('vv-search-hit-line')).toBe(false);
+    const mark = host.querySelector('[data-line="0"] mark.vv-search-hit');
+    expect(mark?.textContent).toBe('beta'); // 词级命中可见文本正确
+    handle.destroy();
+  });
+
+  it('tree-sitter 路径叠加：命中段为 mark，非命中段保留 ts-* span', async () => {
+    stubResizeObserver();
+    attachHighlightClient({
+      highlight: async () => [{ start: 0, end: 5, capture: 'keyword' }], // 整行 'alpha'
+    });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(new TextEncoder().encode('alpha beta\n'), host, { ext: 'rs', lang: 'rust' });
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('tree-sitter'));
+    await handle.search('beta');
+    const body = host.querySelector('[data-line="0"] .vv-code-body')!;
+    const mark = body.querySelector('mark.vv-search-hit');
+    expect(mark?.textContent).toBe('beta');
+    expect(body.querySelector('span.ts-keyword')?.textContent).toBe('alpha'); // 语法段保留
+    handle.destroy();
+  });
+
+  it("search('') 清空词级 mark 与全部命中行背景（退出搜索语义）", async () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(new TextEncoder().encode('beta one\nplain\n'), host, { highlight: false });
+    await handle.search('beta');
+    expect(host.querySelector('mark.vv-search-hit')).not.toBeNull();
+    await handle.search('');
+    expect(host.querySelector('mark.vv-search-hit')).toBeNull();
+    expect(host.querySelector('.vv-search-hit-line')).toBeNull();
+    handle.destroy();
+  });
+
+  it('caseSensitive 透传：默认不敏感 vs 严格敏感命中数不同，缓存按 query×case 双键', async () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(
+      new TextEncoder().encode('Alpha alpha ALPHA\n'),
+      host,
+      { highlight: false }
+    );
+    expect((await handle.search('alpha')).length).toBe(3);
+    expect((await handle.search('alpha', { caseSensitive: true })).map((m) => m.start)).toEqual([6]);
+    expect((await handle.search('alpha')).length).toBe(3); // 切回不敏感：不复用敏感缓存
+    handle.destroy();
+  });
+});
+
+// ---------- BUG-09：revealLine（全局搜索跳转定位） ----------
+
+describe('renderCode revealLine（BUG-09）', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  function stubResizeObserver(): void {
+    vi.stubGlobal('ResizeObserver', class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    });
+  }
+
+  it('跳到目标行：滚至视口中部（未布局回落贴顶）+ 行级 active 高亮，无需先 search', async () => {
+    vi.useFakeTimers();
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(
+      new TextEncoder().encode('l0\nl1\nl2\nl3\nl4\n'),
+      host,
+      { highlight: false }
+    );
+    handle.revealLine(3, 1); // col 参数预留，不参与
+    expect(handle.getScrollHost().scrollTop).toBe(3 * 20 - 0 + 10); // clientHeight=0 → 贴顶
+    const row = host.querySelector('[data-line="3"]');
+    expect(row?.classList.contains('vv-search-hit-line-active')).toBe(true);
+    expect(row?.classList.contains('vv-search-hit-line')).toBe(true);
+    // 1.5s 超时后 active 消退（非搜索命中行：行级背景一并消退）
+    vi.advanceTimersByTime(1500);
+    expect(host.querySelector('.vv-search-hit-line-active')).toBeNull();
+    expect(host.querySelector('[data-line="3"]')?.classList.contains('vv-search-hit-line')).toBe(false);
+    handle.destroy();
+  });
+
+  it('越界/非整数行号静默无副作用', () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(new TextEncoder().encode('a\nb\n'), host, { highlight: false });
+    expect(() => handle.revealLine(99)).not.toThrow();
+    expect(() => handle.revealLine(-1)).not.toThrow();
+    expect(() => handle.revealLine(1.5)).not.toThrow();
+    expect(host.querySelector('.vv-search-hit-line')).toBeNull();
+    handle.destroy();
+  });
+});
+
+// ---------- BUG-10：显式 remote 策略下 >2MB 文件问路由 ----------
+
+describe('renderCode hljs-block 分支的远程路由（BUG-10）', () => {
+  afterEach(() => {
+    attachHighlightRouter(null);
+    document.body.innerHTML = '';
+    vi.unstubAllGlobals();
+  });
+
+  function stubResizeObserver(): void {
+    vi.stubGlobal('ResizeObserver', class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    });
+  }
+
+  /** 2MB+1 的 js 文本（hljs-block 策略区间），带服务端 path；多行小行防 hljs 拖死 */
+  function bigJsSource(): { buffer: Uint8Array; opts: Parameters<typeof renderCode>[2] } {
+    const line = 'const a = 1;\n';
+    const buffer = new TextEncoder().encode(line.repeat(Math.ceil((TREE_SITTER_MAX_BYTES + 1) / line.length)));
+    return {
+      buffer,
+      opts: { ext: 'js', lang: 'javascript', computeSrc: { path: 'big.js' } }
+    };
+  }
+
+  it('router 返回 intervals：engine=tree-sitter、where=remote，按区间渲染', async () => {
+    stubResizeObserver();
+    const router = vi.fn(async () => [{ start: 0, end: 3, capture: 'keyword' } as HighlightInterval]);
+    attachHighlightRouter(router);
+    const host = document.createElement('div');
+    document.body.append(host);
+    const { buffer, opts } = bigJsSource();
+    const handle = renderCode(buffer, host, opts);
+    await vi.waitFor(() => {
+      expect(handle.getEngine()).toBe('tree-sitter');
+      expect(handle.getComputeWhere()).toBe('remote');
+    });
+    expect(router).toHaveBeenCalledWith({ path: 'big.js' }, 'javascript');
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-line="0"] .ts-keyword')?.textContent).toBe('con'); // 行首 [0,3)
+    });
+    handle.destroy();
+  });
+
+  it('router 返回 null：留在本地 hljs 分块（where=local），策略裁决后的本地位不回退', async () => {
+    stubResizeObserver();
+    attachHighlightRouter(async () => null);
+    const host = document.createElement('div');
+    document.body.append(host);
+    const { buffer, opts } = bigJsSource();
+    const handle = renderCode(buffer, host, opts);
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('hljs-block'));
+    expect(handle.getComputeWhere()).toBe('local');
+    handle.destroy();
+  });
+
+  it('router 抛错（显式 remote 失败）：错误卡片，不静默降级本地 hljs', async () => {
+    stubResizeObserver();
+    attachHighlightRouter(async () => {
+      throw new Error('远程高亮失败: HTTP 500');
+    });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const { buffer, opts } = bigJsSource();
+    const handle = renderCode(buffer, host, opts);
+    await vi.waitFor(() => expect(host.querySelector('.vv-error-card')).not.toBeNull());
+    expect(host.querySelector('.vv-error-card')?.textContent).toContain('HTTP 500');
+    expect(host.innerHTML).not.toContain('hljs-');
+    // engine 置非 pending 终值：状态栏不停留「解析中…」（评审④）
+    expect(handle.getEngine()).toBe('plain');
+    expect(handle.getComputeWhere()).toBeNull();
+    handle.destroy();
+  });
+
+  it('无 router（未注入）/lang 未知：维持现状本地 hljs 分块，不问路由', async () => {
+    stubResizeObserver();
+    const router = vi.fn(async () => null as HighlightInterval[] | null);
+    attachHighlightRouter(router);
+    const host = document.createElement('div');
+    document.body.append(host);
+    // lang 为 null（ext 未知且无 lang）：远程高亮无语言不可行，直接本地
+    const line = 'const a = 1;\n';
+    const buffer = new TextEncoder().encode(line.repeat(Math.ceil((TREE_SITTER_MAX_BYTES + 1) / line.length)));
+    const handle = renderCode(buffer, host, {
+      ext: 'unknownext',
+      computeSrc: { path: 'big.unknownext' }
+    });
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('hljs-block'));
+    expect(router).not.toHaveBeenCalled();
+    expect(handle.getComputeWhere()).toBe('local');
     handle.destroy();
   });
 });

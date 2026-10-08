@@ -1,4 +1,4 @@
-import type { Renderer } from '@vviewer/core';
+import type { Encoding, RenderedInstance, Renderer } from '@vviewer/core';
 
 /** SVG 只读消毒：去除 script、on* 事件属性、javascript: 与外部 href|src|xlink */
 export function sanitizeSvg(svgText: string): string {
@@ -71,6 +71,16 @@ export const imageRenderer: Renderer = {
     wrap.append(img);
     target.replaceChildren(wrap);
     const detach = attachZoom(wrap, img);
-    return { destroy() { detach(); URL.revokeObjectURL(url); wrap.remove(); } };
+    // BUG-04（SHELL-12 验收）：图片状态栏/属性面板至少含大小与编码——det.encoding
+    // 为服务端 x-vv-encoding 或本地启发式的检测结果，ViewerPane 按 'getMeta' in 探测
+    const instance: RenderedInstance & { getMeta(): { size: number; encoding?: Encoding } } = {
+      getMeta: () => ({ size: buffer.length, encoding: det.encoding }),
+      destroy() {
+        detach();
+        URL.revokeObjectURL(url);
+        wrap.remove();
+      }
+    };
+    return instance;
   }
 };

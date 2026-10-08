@@ -274,6 +274,75 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+/** 行 HTML 文本段的已知实体（renderLineHtml 与 hljs 的 escapeHTML 均只转 & < >） */
+function decodeHtmlEntities(text: string): string {
+  return text.replace(/&(?:amp|lt|gt);/g, (s) => (s === '&amp;' ? '&' : s === '&lt;' ? '<' : '>'));
+}
+
+/**
+ * 把搜索命中区间叠加到行 HTML 上（BUG-18 词级高亮，纯函数）：
+ * 命中段包 `<mark class="vv-search-hit">`（不套语法 span，样式以 mark 为主），
+ * 非命中段保持原 HTML 语义——span 在命中边界处闭合、命中后按原序重开
+ * （与 splitHighlightedLines 的跨行重开同一惯例）。
+ * baseHtml 必须只含 <span …> 标签与已转义文本（renderLineHtml/hljs 输出均满足）；
+ * 文本实体（&amp;/&lt;/&gt;）解码后按显示字符切分，输出统一重新转义。
+ * hits 须按 start 升序且互不重叠（searchCode 产出保证）。
+ */
+export function overlaySearchHits(
+  html: string,
+  hits: ReadonlyArray<{ start: number; end: number }>
+): string {
+  if (hits.length === 0) return html;
+  const tokenRe = /<[^>]+>|[^<]+/g;
+  const out: string[] = [];
+  const stack: string[] = []; // 打开的 <span …> 原文（命中处临时闭合、之后按序重开）
+  let inMark = false;
+  let pos = 0; // 已消费的显示字符数（UTF-16）
+  let hitIdx = 0;
+  const inHit = (g: number): boolean => {
+    while (hitIdx < hits.length && hits[hitIdx]!.end <= g) hitIdx++;
+    const h = hits[hitIdx];
+    return h !== undefined && h.start <= g && g < h.end;
+  };
+  const closeSpans = (): void => {
+    if (stack.length > 0) out.push('</span>'.repeat(stack.length));
+  };
+  let m: RegExpExecArray | null;
+  while ((m = tokenRe.exec(html)) !== null) {
+    const tok = m[0]!;
+    if (tok.startsWith('<')) {
+      if (tok.startsWith('</span')) stack.pop();
+      else if (tok.startsWith('<span')) stack.push(tok);
+      out.push(tok); // 非约定标签不预期出现，原样透传
+      continue;
+    }
+    const text = decodeHtmlEntities(tok);
+    let tPos = 0;
+    while (tPos < text.length) {
+      const hit = inHit(pos + tPos);
+      let len = 1;
+      while (tPos + len < text.length && inHit(pos + tPos + len) === hit) len++;
+      if (hit && !inMark) {
+        closeSpans();
+        out.push('<mark class="vv-search-hit">');
+        inMark = true;
+      } else if (!hit && inMark) {
+        out.push('</mark>');
+        inMark = false;
+        for (const tag of stack) out.push(tag);
+      }
+      out.push(escapeHtml(text.slice(tPos, tPos + len)));
+      tPos += len;
+    }
+    pos += text.length;
+  }
+  if (inMark) {
+    out.push('</mark>');
+    for (const tag of stack) out.push(tag);
+  }
+  return out.join('');
+}
+
 /** 行文本 + 段落 → 转义后的行 HTML（段落包 `<span class="ts-<capture>">`，纯函数可测）。
  * 类名转义统一来自 @vviewer/highlight 的 captureToCssClass（与主题 CSS 变量同一唯一来源） */
 export function renderLineHtml(text: string, segs: readonly LineSeg[] | undefined): string {
@@ -317,11 +386,39 @@ export function getHighlightClient(): CodeHighlightClient | null {
   return attachedClient;
 }
 
+/**
+ * 大文件远程高亮路由（BUG-10）：>2MB 文件在显式 remote 策略下改走远程 intervals。
+ * 契约：非 null = 远程高亮区间（按 tree-sitter 路径渲染，执行位置 remote）；
+ * null = 留在本地 hljs 分块（注入侧硬护栏：auto/local 策略恒 null——3MB 文件在
+ * auto 下不产生 POST，维持本地默认体验）；抛错 = 显式 remote 失败（渲染端错误
+ * 卡片，不静默回退，与 tree-sitter 分支的 RemoteComputeError 同语义）。
+ */
+export type HighlightRouterFn = (
+  src: ComputeSource,
+  lang: string
+) => Promise<HighlightInterval[] | null>;
+
+let attachedRouter: HighlightRouterFn | null = null;
+
+/** 应用侧注入大文件路由回调（apps/web 启动时调用；传 null 解绑） */
+export function attachHighlightRouter(fn: HighlightRouterFn | null): void {
+  attachedRouter = fn;
+}
+
 // 样式说明：虚拟滚动与代码面板的样式统一由 apps/web/src/app.css 提供（单一来源），
 // 本模块不再运行时注入 CSS，避免双份定义漂移。
 
 /** 代码高亮引擎实时值：pending = tree-sitter 主路径已启动但结果未到达（或已取消） */
 export type CodeEngine = 'tree-sitter' | 'hljs' | 'hljs-block' | 'plain' | 'pending';
+
+/** 渲染实例元数据快照（BUG-04：状态栏/属性面板单一来源） */
+export interface CodeFileMeta {
+  encoding?: Encoding;
+  lang?: string | null;
+  size: number;
+  /** 内容行数（与 wc -l 同口径）：以 \n 结尾的 301 行文件报 301，非 split 产物的 302 */
+  lines: number;
+}
 
 export interface RenderCodeHandle {
   destroy(): void;
@@ -333,16 +430,29 @@ export interface RenderCodeHandle {
   getEngine(): CodeEngine;
   /** 高亮计算执行位置（M6：'local'|'remote'；null = 未发生计算路由，如纯文本）。状态栏指示器用 */
   getComputeWhere(): ComputeWhere | null;
-  /** 文件内搜索：行数组扫描（缓存上次 query），空 query 返回 []（退出搜索语义） */
-  search(query: string): Promise<SearchMatch[]>;
+  /** 元数据快照（BUG-04）：编码/语言/大小/内容行数（渲染期静态值） */
+  getMeta(): CodeFileMeta;
+  /** 文件内搜索：行数组扫描（缓存 query×caseSensitive），空 query 返回 []（退出搜索语义） */
+  search(query: string, opts?: { caseSensitive?: boolean }): Promise<SearchMatch[]>;
   /** 跳到第 index 个命中：滚动到该行 + 行级临时高亮（1.5s 或直到下一次跳转） */
   gotoMatch(index: number): void;
+  /** 跳到指定行（0 起）并滚动至视口中部 + 行级临时高亮（BUG-09 全局搜索跳转；独立于搜索结果） */
+  revealLine(line: number, col?: number): void;
 }
 
 export function renderCode(
   buffer: Uint8Array,
   target: HTMLElement,
-  opts: { encoding?: Encoding; highlight?: boolean; ext?: string; lang?: string; computeSrc?: ComputeSource } = {}
+  opts: {
+    encoding?: Encoding;
+    highlight?: boolean;
+    ext?: string;
+    lang?: string;
+    computeSrc?: ComputeSource;
+    /** >20MB 纯文本降级的超限提示条开关（BUG-20）；缺省跟随 highlight。
+     * renderDegradedCode 传 false：降级卡已存在，不重复提示。 */
+    oversizeNotice?: boolean;
+  } = {}
 ): RenderCodeHandle {
   const enc = DECODERS[opts.encoding ?? 'utf-8'];
   // CRLF/CR → LF 归一化：行索引（buildLineIndex/lineOffsets）、高亮区间偏移、搜索
@@ -351,11 +461,33 @@ export function renderCode(
   const text = new TextDecoder(enc, { fatal: false }).decode(buffer).replace(/\r\n?/g, '\n');
   const lines = buildLineIndex(text);
   const lineOffsets = buildLineOffsets(lines);
+  // 实际生效的高亮语言（与 start() 同一表达式、同步可预算）：getMeta 的 lang 取此
+  // 单源——本地扩展名文件（无服务端 x-vv-lang、det.lang 为空）按 detectLanguage
+  // 高亮后，状态栏/属性面板的语言段与实际引擎一致（评审③）
+  const lang = opts.lang ?? (opts.ext ? detectLanguage(opts.ext, text) : null);
   const strategy = opts.highlight === false ? 'plain' : resolveStrategy(buffer.byteLength);
   target.classList.add('vv-code');
   const pre = document.createElement('div');
   pre.className = 'vv-code-pre'; // 即 virtualScroller 的滚动容器
-  target.replaceChildren(pre);
+  // BUG-20：>20MB 纯文本虚拟滚动无语法高亮，顶部插一次性提示条（不阻断滚动/搜索）。
+  // 提示条是 pre 的兄弟节点而非子节点——virtualScroller 会 replaceChildren 滚动容器，
+  // 提示条放里面会被清掉且 spacer 定位被顶偏。
+  if (
+    strategy === 'plain' &&
+    (opts.oversizeNotice ?? opts.highlight !== false) &&
+    buffer.byteLength > HLJS_MAX_BYTES
+  ) {
+    const bar = document.createElement('div');
+    bar.className = 'vv-error-card vv-oversize-card vv-code-oversize-card';
+    const title = document.createElement('div');
+    title.className = 'vv-error-title';
+    title.textContent = `文件超过 ${HLJS_MAX_BYTES / 1024 / 1024}MB，已按纯文本虚拟滚动显示（不做语法高亮）`;
+    bar.append(title);
+    target.classList.add('vv-code-oversize');
+    target.replaceChildren(bar, pre);
+  } else {
+    target.replaceChildren(pre);
+  }
   let hlLines: string[] | null = null; // hljs 整文件路径的行 HTML
   let lineSegs: Map<number, LineSeg[]> | null = null; // tree-sitter 路径的行段落
   const blockCache = new Map<number, string>(); // hljs-block 路径：行号 → 行 HTML
@@ -368,18 +500,27 @@ export function renderCode(
   // 高亮计算执行位置（M6）：null = 未发生计算路由（纯文本）；tree-sitter 主路径
   // 等路由结果回填；hljs-block/hljs 兜底是本地引擎，置 'local'。状态栏指示读这里。
   let computeWhere: ComputeWhere | null = strategy === 'hljs-block' ? 'local' : null;
-  // 文件内搜索状态：上次 query 结果缓存 + 当前行级高亮
+  // 文件内搜索状态（BUG-18/23）：query×caseSensitive 双键缓存 + 行→命中偏移索引
+  //（fillRows 据此渲染词级 mark 与全部命中行的行级背景，虚拟滚动重绘天然保持）
   let lastQuery: string | null = null;
+  let lastCaseSensitive = false;
   let lastMatches: SearchMatch[] = [];
+  let searchHitsByLine = new Map<number, Array<{ start: number; end: number }>>();
   let hitLine = -1;
   let hitTimer: ReturnType<typeof setTimeout> | null = null;
 
-  /** 把行级命中高亮类同步到已渲染的行 DOM（虚拟滚动重绘后由 fillRows 的 hitLine 分支保持） */
+  /**
+   * 把 hitLine 的行级类同步到已渲染行 DOM（refresh 范围未变时 fillRows 不重跑，
+   * 手动兜底）。类语义（BUG-18/09）：vv-search-hit-line = 命中行/跳转目标行的行级
+   * 背景；vv-search-hit-line-active = 当前命中（加深，1.5s 后消退）。
+   */
   function applyHitClass(): void {
-    const prev = pre.querySelector('.vv-code-line.vv-search-hit-line');
-    if (prev) prev.classList.remove('vv-search-hit-line');
+    for (const el of pre.querySelectorAll('.vv-code-line.vv-search-hit-line-active')) {
+      el.classList.remove('vv-search-hit-line-active');
+    }
     if (hitLine >= 0) {
-      pre.querySelector(`[data-line="${hitLine}"]`)?.classList.add('vv-search-hit-line');
+      const el = pre.querySelector(`[data-line="${hitLine}"]`);
+      if (el) el.classList.add('vv-search-hit-line', 'vv-search-hit-line-active');
     }
   }
 
@@ -388,8 +529,12 @@ export function renderCode(
       clearTimeout(hitTimer);
       hitTimer = null;
     }
+    const prev = hitLine;
     hitLine = -1;
-    applyHitClass(); // 直接改 DOM，无需重绘可视范围
+    applyHitClass(); // active 行级高亮立即消退（直接改 DOM）
+    // 仅因 hitLine 加了 vv-search-hit-line 的行（非搜索命中）随重绘消退；
+    // 搜索命中行的背景由 searchState 驱动保持，不受 1.5s 计时影响
+    if (prev >= 0 && !searchHitsByLine.has(prev)) scroller?.refresh(true);
   }
 
   function fillRows(first: number, last: number, viewport: HTMLElement): void {
@@ -399,7 +544,11 @@ export function renderCode(
       row.className = 'vv-code-line';
       row.style.height = `${LINE_HEIGHT}px`;
       row.dataset.line = String(i); // 搜索跳转按行号定位行 DOM
-      if (i === hitLine) row.classList.add('vv-search-hit-line');
+      const hits = searchHitsByLine.get(i);
+      // BUG-18：全部命中行都有行级背景（可见范围内，由 searchState 驱动）；
+      // 当前命中/跳转行额外叠 active（BUG-09 revealLine 在无搜索时也走这条）
+      if (hits !== undefined || i === hitLine) row.classList.add('vv-search-hit-line');
+      if (i === hitLine) row.classList.add('vv-search-hit-line-active');
       const gutter = document.createElement('span');
       gutter.className = 'vv-code-gutter';
       gutter.textContent = String(i + 1);
@@ -407,7 +556,18 @@ export function renderCode(
       body.className = 'vv-code-body';
       const segs = lineSegs?.get(i);
       const cached = blockCache.get(i);
-      if (segs) body.innerHTML = renderLineHtml(lines[i] ?? '', segs);
+      if (hits !== undefined) {
+        // BUG-18 词级 mark：命中段包 mark（overlaySearchHits 内语法 span 在命中
+        // 边界闭合/重开），非命中段保持原语法高亮 HTML
+        const baseHtml = segs
+          ? renderLineHtml(lines[i] ?? '', segs)
+          : cached !== undefined
+            ? cached
+            : hlLines
+              ? (hlLines[i] ?? '')
+              : escapeHtml(lines[i] ?? '');
+        body.innerHTML = overlaySearchHits(baseHtml, hits);
+      } else if (segs) body.innerHTML = renderLineHtml(lines[i] ?? '', segs);
       else if (cached !== undefined) body.innerHTML = cached;
       else if (hlLines) body.innerHTML = hlLines[i] ?? '';
       else body.textContent = lines[i] ?? '';
@@ -462,12 +622,46 @@ export function renderCode(
   }
 
   async function start(): Promise<void> {
-    const lang = opts.lang ?? (opts.ext ? detectLanguage(opts.ext, text) : null);
     if (strategy === 'hljs-block') {
+      mount(); // 先渲染纯文本立即可见；hljs 到位（或远程区间到达）后 refresh 重绘
+      // BUG-10：显式 remote 策略下 >2MB 文件也问路由。仅当注入了 router 且有服务端
+      // path 与可识别语言时发起；**auto 策略在注入侧（apps/web highlightRouter）被
+      // 硬护栏拦为 null——3MB 文件在 auto 下保持本地 hljs 分块、零 POST**（避免远程
+      // 大文件拖慢默认体验的既定裁决，勿改为渲染端问路由）。
+      const router = attachedRouter;
+      if (router && lang !== null && opts.computeSrc?.path) {
+        engine = 'pending';
+        computeWhere = null;
+        try {
+          const intervals = await router(opts.computeSrc, lang);
+          if (destroyed) return;
+          if (intervals !== null) {
+            // 远程区间：按 tree-sitter 路径渲染，执行位置如实标 remote
+            engine = 'tree-sitter';
+            computeWhere = 'remote';
+            lineSegs = new Map(assignIntervalsToLines(intervals, lineOffsets).map((a) => [a.line, a.segs]));
+            scroller?.refresh(true);
+            return;
+          }
+        } catch (err) {
+          if (destroyed || err instanceof HighlightCanceledError) return; // tab 已切换：静默
+          // 显式 remote 失败：如实错误卡片，不静默降级本地分块（掩盖服务端故障）。
+          // engine 置非 pending 终值：错误卡片已替换内容，状态栏不得停留「解析中…」
+          //（'plain' = 无高亮引擎产出，最贴近错误卡片视图的终值）
+          engine = 'plain';
+          computeWhere = null;
+          showErrorCard(target, err instanceof Error ? err.message : String(err), {
+            name: opts.ext ? `.${opts.ext}` : '代码'
+          });
+          return;
+        }
+        engine = 'hljs-block'; // router 返回 null：留在本地 hljs 分块
+        computeWhere = 'local';
+      }
       hljs = (await import('highlight.js')).default;
       if (destroyed) return;
       hljsLang = resolveHljsLang(hljs, lang); // 别名桥接；null → 可视块 highlightAuto
-      mount(); // onRange 内按可视块同步高亮
+      scroller?.refresh(true); // mount 已渲染纯文本，hljs 到位后重绘带高亮
       return;
     }
     if (strategy === 'tree-sitter') {
@@ -512,6 +706,8 @@ export function renderCode(
       scroller = null;
       blockCache.clear();
       pre.remove();
+      // BUG-20 提示条与 flex 布局类随实例销毁清理（host 复用时不得残留）
+      target.classList.remove('vv-code-oversize');
     },
     setScrollTop(top) {
       pre.scrollTop = top;
@@ -524,29 +720,75 @@ export function renderCode(
     },
     getEngine: () => engine,
     getComputeWhere: () => computeWhere,
-    search(query) {
-      if (query === lastQuery) return Promise.resolve(lastMatches);
+    // BUG-04：渲染期静态的元数据快照。lines 为内容行数口径：buildLineIndex 对以
+    // \n 结尾的文本产出末尾空串元素（301 行 → 302 元素），末元素为空时减 1，
+    // 与 wc -l 一致（空文件 '' → [''] → 0 行）
+    getMeta() {
+      const lastLine = lines[lines.length - 1] ?? '';
+      return {
+        encoding: opts.encoding ?? 'utf-8',
+        lang, // 与 start() 实际高亮语言同源（评审③：本地 .js 也显示「语言: javascript」）
+        size: buffer.byteLength,
+        lines: lastLine === '' ? lines.length - 1 : lines.length
+      };
+    },
+    search(query, opts?: { caseSensitive?: boolean }) {
+      const caseSensitive = opts?.caseSensitive === true;
+      if (query === lastQuery && caseSensitive === lastCaseSensitive) {
+        return Promise.resolve(lastMatches);
+      }
       lastQuery = query;
-      lastMatches = query === '' ? [] : searchCode(lines, query);
-      if (query === '') clearHit(); // 空查询 = 退出搜索：行级高亮立即消退（不等 1.5s 计时）
+      lastCaseSensitive = caseSensitive;
+      searchHitsByLine = new Map();
+      lastMatches = query === '' ? [] : searchCode(lines, query, { caseSensitive });
+      for (const m of lastMatches) {
+        const arr = searchHitsByLine.get(m.line);
+        if (arr) arr.push({ start: m.start, end: m.end });
+        else searchHitsByLine.set(m.line, [{ start: m.start, end: m.end }]);
+      }
+      if (query === '') {
+        clearHit(); // 空查询 = 退出搜索：active 与全部行级背景立即消退
+      } else {
+        // 新查询：旧 hitLine 的行号不再可靠，重置后重绘使已渲染行立即带上
+        // 词级 mark 与命中行背景（虚拟滚动重绘由 searchState 驱动，天然保持）
+        if (hitTimer !== null) {
+          clearTimeout(hitTimer);
+          hitTimer = null;
+        }
+        hitLine = -1;
+      }
+      // 词级 mark 在行 innerHTML 里：已渲染行必须重绘（force）才能更新/清除
+      scroller?.refresh(true);
       return Promise.resolve(lastMatches);
     },
     gotoMatch(index) {
       const match = lastMatches[index];
       if (!match) return;
-      if (hitTimer !== null) clearTimeout(hitTimer);
-      hitLine = match.line;
-      // 目标行滚到视口中部（clientHeight 为 0（jsdom/未布局）时回落贴顶）
-      const center = match.line * LINE_HEIGHT - pre.clientHeight / 2 + LINE_HEIGHT / 2;
-      pre.scrollTop = Math.max(0, center);
-      scroller?.refresh(); // 按新 scrollTop 重算可视范围（范围未变则行 DOM 已在，applyHitClass 兜底）
-      applyHitClass();
-      hitTimer = setTimeout(() => {
-        hitTimer = null;
-        clearHit();
-      }, 1500);
+      jumpToLine(match.line);
+    },
+    // BUG-09：全局搜索跳转——复用 gotoMatch 的滚动 + 行级高亮机制，但不依赖
+    // 搜索结果（col 参数预留行内定位，当前无水平滚动消费方）
+    revealLine(line, col) {
+      void col;
+      if (!Number.isInteger(line) || line < 0 || line >= lines.length) return;
+      jumpToLine(line);
     }
   };
+
+  /** 跳转共用体：目标行滚至视口中部 + 行级临时高亮（1.5s 或直到下一次跳转） */
+  function jumpToLine(line: number): void {
+    if (hitTimer !== null) clearTimeout(hitTimer);
+    hitLine = line;
+    // 目标行滚到视口中部（clientHeight 为 0（jsdom/未布局）时回落贴顶）
+    const center = line * LINE_HEIGHT - pre.clientHeight / 2 + LINE_HEIGHT / 2;
+    pre.scrollTop = Math.max(0, center);
+    scroller?.refresh(); // 按新 scrollTop 重算可视范围（范围未变则行 DOM 已在，applyHitClass 兜底）
+    applyHitClass();
+    hitTimer = setTimeout(() => {
+      hitTimer = null;
+      clearHit();
+    }, 1500);
+  }
 }
 
 export const codeRenderer: Renderer = {
@@ -564,7 +806,8 @@ export const codeRenderer: Renderer = {
   async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection) {
     // 远端文件（M5 RemoteStore）的服务端检测头纠偏：X-VV-Lang/X-VV-Encoding
     // 与 languages.json 同源，比本地扩展名表/编码启发式更准（无扩展名脚本等）。
-    // opts.lang 有值时 renderCode 直接采用、跳过 detectLanguage（一处 if 的裁决）。
+    // opts.lang 有值时 renderCode 直接采用、跳过 detectLanguage；服务端无检测头时
+    // 回落 det.lang（dispatcher 的 extless 回退链写入的 shebang 语言，握手点 1）。
     const meta = getRemoteMeta(source.storeId, source.path);
     // M6 compute 路由：只有远程 store 的文件带服务端 path（auto 策略据此走远程高亮）
     const computeSrc: ComputeSource | undefined =
@@ -573,18 +816,21 @@ export const codeRenderer: Renderer = {
       encoding: meta?.encoding ?? det.encoding,
       highlight: true,
       ext: det.ext,
-      lang: meta?.lang ?? undefined,
+      lang: meta?.lang ?? det.lang ?? undefined,
       computeSrc
     });
     // getScrollHost/getEngine 供 ViewerPane 接滚动持久化与引擎指示器；
-    // getComputeWhere 供状态栏执行位置指示（M6）；search/gotoMatch 供 SearchPanel（Task 6）。
-    // 结构化扩展 RenderedInstance，不动 core。
-    const instance: RenderedInstance & {
+    // getComputeWhere 供状态栏执行位置指示（M6）；search/gotoMatch 供 SearchPanel（Task 6）；
+    // getMeta 供状态栏/属性面板元数据（BUG-04）；revealLine 供全局搜索跳转（BUG-09）。
+    // 结构化扩展 RenderedInstance（Omit 去旧 search 签名避免交叉双签名冲突），不动 core。
+    const instance: Omit<RenderedInstance, 'search'> & {
       getScrollHost(): HTMLElement;
       getEngine(): CodeEngine;
       getComputeWhere(): ComputeWhere | null;
-      search(query: string): Promise<SearchMatch[]>;
+      getMeta(): CodeFileMeta;
+      search(query: string, opts?: { caseSensitive?: boolean }): Promise<SearchMatch[]>;
       gotoMatch(index: number): void;
+      revealLine(line: number, col?: number): void;
     } = {
       destroy() {
         inst.destroy();
@@ -598,11 +844,17 @@ export const codeRenderer: Renderer = {
       getComputeWhere() {
         return inst.getComputeWhere();
       },
-      search(query) {
-        return inst.search(query);
+      getMeta() {
+        return inst.getMeta();
+      },
+      search(query, opts) {
+        return inst.search(query, opts);
       },
       gotoMatch(index) {
         inst.gotoMatch(index);
+      },
+      revealLine(line, col) {
+        inst.revealLine(line, col);
       }
     };
     return instance;
@@ -642,6 +894,7 @@ export function renderDegradedCode(
   return renderCode(buffer, content, {
     encoding: opts.encoding,
     highlight: opts.highlight,
-    ext: opts.ext
+    ext: opts.ext,
+    oversizeNotice: false // 降级卡已存在：不再叠加 >20MB 纯文本提示条（BUG-20 防重复）
   });
 }

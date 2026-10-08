@@ -211,3 +211,69 @@ describe('enrichMarkdownDom——媒体链接转换', () => {
     expect(video.getAttribute('aria-label')).toBe('演示视频');
   });
 });
+
+describe('sanitizeHtml——外域图片拦截（BUG-17 跟踪像素防线）', () => {
+  it('img 的 http(s) src 移除并打 data-vv-blocked-external 标记，title 保留域名', () => {
+    const out = sanitizeHtml(
+      '<img src="https://tracker.example.com/track.png" alt="x"><img src="http://evil.example/p.gif">'
+    );
+    expect(out).not.toContain('src="https://tracker.example.com');
+    expect(out).not.toContain('src="http://evil.example');
+    expect(out).toContain('data-vv-blocked-external="1"');
+    expect(out).toContain('已拦截外部图片：tracker.example.com');
+    expect(out).toContain('已拦截外部图片：evil.example');
+    expect(out).toContain('alt="x"'); // 其余属性不受影响
+  });
+
+  it('协议相对（//host/…）同样拦截', () => {
+    const out = sanitizeHtml('<img src="//tracker.example.net/p.png">');
+    expect(out).not.toContain('src="//');
+    expect(out).toContain('data-vv-blocked-external="1"');
+    expect(out).toContain('已拦截外部图片：tracker.example.net');
+  });
+
+  it('相对路径 / data:image 不拦截（markdown 相对图片解析与内嵌图不受损）', () => {
+    // 注：blob: 不在 DOMPurify 既有白名单内（markdown 相对图片解析为 blob URL
+    // 发生在净化之后、不经本管线），不在此用例范围
+    const out = sanitizeHtml(
+      '<img src="photo.png"><img src="./a/b.jpg"><img src="data:image/png;base64,iVBOR">'
+    );
+    expect(out).toContain('src="photo.png"');
+    expect(out).toContain('src="./a/b.jpg"');
+    expect(out).toContain('src="data:image/png;base64,iVBOR"');
+    expect(out).not.toContain('data-vv-blocked-external');
+  });
+
+  it('srcset 外域候选同样拦截：无 src 时整体移除并置标记（无 src 浏览器按 srcset 加载）', () => {
+    const out = sanitizeHtml('<img srcset="https://t.example/b.png 1x, /local-c.png 2x">');
+    expect(out).not.toContain('t.example');
+    expect(out).toContain('srcset="/local-c.png 2x"'); // 非外域候选保留
+    expect(out).not.toContain('data-vv-blocked-external'); // 仍有本地候选可用，不置标记
+  });
+
+  it('srcset 全部候选外域且无 src：移除 srcset 并置拦截标记', () => {
+    const out = sanitizeHtml('<img srcset="https://t.example/b.png 1x, //t.example/c.png 2x">');
+    expect(out).not.toContain('srcset=');
+    expect(out).toContain('data-vv-blocked-external="1"');
+    expect(out).toContain('已拦截外部图片：t.example');
+  });
+
+  it('src 配合外域 srcset：src 被拦 + srcset 外域候选全滤（data:image 候选保留）', () => {
+    const out = sanitizeHtml(
+      '<img src="https://t.example/a.png" srcset="https://t.example/b.png 1x, data:image/png;base64,iVBOR 2x">'
+    );
+    expect(out).not.toContain('src="https://t.example');
+    // 注：DOMPurify 序列化时对 srcset 候选做规范化（base64 逗号后补空格），按子串断言
+    expect(out).toContain('srcset="data:image/png;base64');
+    // 外域 URL 形态不得残留在加载属性中（title 里的被拦域名属预期提示）
+    expect(out).not.toContain('t.example/');
+    expect(out).not.toContain('src="https://t.example');
+    expect(out).toContain('data-vv-blocked-external="1"'); // src 已拦，标记已置
+  });
+
+  it('链接 <a href> 外链不拦（用户主动导航，与图片的被动加载区分）', () => {
+    const out = sanitizeHtml('<a href="https://external.example/x">外链</a>');
+    expect(out).toContain('href="https://external.example/x"');
+    expect(out).not.toContain('data-vv-blocked-external');
+  });
+});

@@ -63,6 +63,7 @@
   2. 同文件关标签重开，二次打开可观测地更快（报告期望缓存键 (path,mtime,size)；现状响应体无缓存相关字段、二次仅快 7.6~8% 且有波动）；
   3. 回归不破坏：<2MB 文件 remote 表现（sample.js「tree-sitter · 执行: 远程」，已 ✓）与 >2MB 文件本地 hljs 分块的着色完整性（现状无损失）不得退化；
   4. 修复不要求本地 wasm 主路径恢复（那是 BUG-06 的范围），两缺陷验收互不替代。
+- **实现裁决记录（2026-10-09 修复批次）**：路由注入采用 `attachHighlightRouter` 独立回调（spec 方案 2 中「新增独立注入回调」的备选档，非「扩展 CodeHighlightClient」前者）——与 `attachHighlightClient` 命名对称，且零改动 `apps/web/src/lib/highlightClient.ts`（该文件归属高亮可观测/SW 修复包，跨包改动需握手）；policy 硬护栏（非 remote 恒返回 null → 本地 hljs 分块，auto 下 3MB 零 POST 的回归护栏）落在注入侧 `apps/web/src/lib/highlightRouter.ts`（单测覆盖）。上方验收 2 的服务端 intervals 缓存与 gzip 本轮不做（spec 未决 #6），「二次打开更快」项随该未决顺延；路由失败的错误卡片路径 engine 置 'plain' 终值（状态栏不停留「解析中…」）。
 
 ### BUG-11【medium · verified】纯前端搜索超 2000 文件上限只提示「结果不完整，已达上限」，无 spec 要求的「建议改用服务器模式」引导
 
@@ -73,6 +74,7 @@
   2. 终态提示增加「建议改用服务器模式」类引导（spec L257）；
   3. 附带发现的回归点：新一轮搜索开始后状态栏不再携带上轮遗留的「（结果不完整，已达上限）」（扫描进度阶段如「已扫描 2 个文件…」时不应出现截断字样）；
   4. 回归不破坏：2000 文件上限本身、命中清单止点与 truncated 终态（已 ✓ 部分）。
+- **实现裁决记录（2026-10-09 修复批次）**：引导文案裁决抽为纯函数 `serverSearchHint`（`apps/web/src/lib/globalSearch.ts`）——仅非远程 store 返回引导（CMP-08 远程截断不引导的回归护栏），单测覆盖本地/远程/null 三态（`globalSearch.test.ts`）；truncated/degraded 于 run() 起点与 status 同点复位（验收 3），进度阶段断言即本条 3 的 e2e 口径。
 
 ### BUG-21【low · verified】全局搜索 glob 限定无任何 UI 入口（前缀语法均按字面量处理），仅 API 层支持
 

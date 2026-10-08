@@ -38,6 +38,20 @@ export function isRemoteStore(store: TreeStore): boolean {
   return typeof (store as Partial<RemoteStore>).watch === 'function';
 }
 
+/** 纯前端搜索触达文件扫描上限时的服务器模式引导文案（BUG-11/CMP-11）。 */
+export const SERVER_SEARCH_HINT =
+  '已达 2000 文件扫描上限，建议在顶栏连接服务器后使用服务器端搜索';
+
+/**
+ * 截断时的引导文案裁决（BUG-11，纯函数可单测）：仅纯前端（非远程）store 在终态
+ * truncated 时引导服务器模式；远程 store 已是服务器模式（CMP-08 截断）不引导；
+ * store 缺失（未打开目录）不引导。面板层仅负责「truncated && hint 非空」的显示时机。
+ */
+export function serverSearchHint(store: TreeStore | null): string | null {
+  if (!store || isRemoteStore(store)) return null;
+  return SERVER_SEARCH_HINT;
+}
+
 const searchRouter: ComputeRouter = createComputeRouter({
   hasCompute: () => true,
   policy: () => loadSettings().computePolicy,

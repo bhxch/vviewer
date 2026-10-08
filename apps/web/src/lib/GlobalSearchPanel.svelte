@@ -7,7 +7,7 @@
   import type { GrepMatch, TreeStore } from '@vviewer/core';
   import { matchRanges } from '@vviewer/core';
   import { addTab } from './openFlow.svelte';
-  import { runGlobalSearch } from './globalSearch';
+  import { runGlobalSearch, serverSearchHint } from './globalSearch';
 
   let { store, onclose }: { store: TreeStore | null; onclose(): void } = $props();
 
@@ -102,6 +102,10 @@
     abort = ac;
     const canceled = (): boolean => closed || my !== gen || ac.signal.aborted;
     running = true;
+    // BUG-11：truncated/degraded 与 status 同点赋值——上一轮的截断标记不得残留到
+    // 本轮进度文案（「已扫描 N 个文件…」阶段不出现「已达上限」字样）
+    truncated = false;
+    degraded = false;
     status = '搜索中…';
     try {
       const res = await runGlobalSearch(
@@ -139,8 +143,11 @@
 
   function open(m: GrepMatch): void {
     if (!store) return;
-    // 打开后滚动定位到命中行（P2）：addTab 激活 tab 即可
-    addTab(store, m.path, m.path.split('/').pop() ?? m.path);
+    // BUG-09：打开后定位到命中行——addTab 返回 tab 写一次性 pendingLine（对象扩展
+    // 字段，不进 Tab 接口与会话快照），ViewerPane 渲染完成后消费（revealLine）；
+    // 无 revealLine 的实例（markdown/HTML 渲染视图等）静默跳过，不阻塞打开
+    const tab = addTab(store, m.path, m.path.split('/').pop() ?? m.path);
+    Object.assign(tab, { pendingLine: m.line }); // m.line 为 1 起行号，消费端换算 0 起
   }
 
   /** 预览行按当前 query 切段（hit 段渲染 <mark>）；非法正则等异常降级纯文本 */
@@ -217,6 +224,14 @@
     <span class:running>
       {status}{truncated ? '（结果不完整，已达上限）' : ''}
     </span>
+    {#if truncated}
+      {@const hint = serverSearchHint(store)}
+      {#if hint}
+        <!-- BUG-11：纯前端搜索触达扫描上限时引导服务器模式（裁决见 serverSearchHint：
+             远程 store 已是服务器模式，不引导）；文案与裁决单测锚定 globalSearch.test.ts -->
+        <span class="vv-gsearch-hint">{hint}</span>
+      {/if}
+    {/if}
     {#if degraded}
       <span class="vv-gsearch-hint">服务器 ripgrep 不可用，已改用浏览器内搜索（可能较慢）</span>
     {/if}

@@ -24,6 +24,29 @@ export const ALLOWED_URI_REGEXP =
 // 默认导出是未绑定 window 的工厂（无 addHook/sanitize），顶层调用会让 SvelteKit
 // SSR 求值直接 500。
 const DATA_URI_ATTRS = new Set(['src', 'srcset']);
+
+/**
+ * 外域图片判定（BUG-17 跟踪像素防线）：绝对 http(s) 与协议相对（//host/…）都会向
+ * 第三方发起 GET（可回传 IP/会话）；相对路径、data:image、blob: 不在此列。
+ */
+function isExternalImageSrc(src: string): boolean {
+  return /^https?:/i.test(src) || src.startsWith('//');
+}
+
+/** URL 的 host（解析失败回落原串做提示） */
+function hostOf(url: string): string {
+  try {
+    return new URL(url, 'https://vviewer.invalid').host;
+  } catch {
+    return url;
+  }
+}
+
+function markBlockedExternal(el: Element, host: string): void {
+  el.setAttribute('data-vv-blocked-external', '1');
+  el.setAttribute('title', `已拦截外部图片：${host}`);
+}
+
 let dataUriHookRegistered = false;
 function registerDataUriHook(): void {
   if (dataUriHookRegistered) return;
@@ -32,6 +55,44 @@ function registerDataUriHook(): void {
     for (const attr of Array.from(node.attributes)) {
       if (DATA_URI_ATTRS.has(attr.name.toLowerCase())) continue;
       if (/^\s*data:/i.test(attr.value)) node.removeAttribute(attr.name);
+    }
+    // BUG-17：img 的 http(s)/协议相对 src 一律移除并打拦截标记——渲染视图中不再
+    // 向外域发起网络请求（跟踪像素拿不到 IP）；title 保留域名供占位悬停提示。
+    // 相对路径与 data:/blob: 不受影响（markdown 相对图片解析为 blob 的链路发生在
+    // 净化之后，同样不受影响）；链接 <a href> 外链不拦（用户主动导航型外泄）。
+    if (node.nodeType === 1 && (node as Element).tagName === 'IMG') {
+      const el = node as Element;
+      const src = el.getAttribute('src');
+      const srcExternal = src !== null && isExternalImageSrc(src.trim());
+      if (srcExternal) {
+        el.removeAttribute('src');
+        markBlockedExternal(el, hostOf(src!.trim()));
+      }
+      // srcset 是同等的图片加载源（无 src 时浏览器按 srcset 加载；markdown 渲染
+      // 视图把净化后 DOM 挂主文档、无 CSP 兜底）：逐候选过滤——srcset 语法上逗号
+      // 不出现在 URL 内，候选首段（首个空白前）即其 URL。外域候选移除、其余保留；
+      // 过滤后无任何可用加载源（src 缺失或同为外域已拦）时补拦截标记。
+      const srcset = el.getAttribute('srcset');
+      if (srcset !== null) {
+        const candidates = srcset.split(',').map((c) => c.trim()).filter((c) => c !== '');
+        const kept: string[] = [];
+        let firstBlockedHost = srcExternal ? hostOf(src!.trim()) : '';
+        for (const c of candidates) {
+          const url = (c.split(/\s+/)[0] ?? '').trim();
+          if (isExternalImageSrc(url)) {
+            if (firstBlockedHost === '') firstBlockedHost = hostOf(url);
+            continue;
+          }
+          kept.push(c);
+        }
+        if (kept.length !== candidates.length) {
+          if (kept.length === 0) el.removeAttribute('srcset');
+          else el.setAttribute('srcset', kept.join(', '));
+          if (kept.length === 0 && (src === null || srcExternal)) {
+            markBlockedExternal(el, firstBlockedHost);
+          }
+        }
+      }
     }
   });
 }
