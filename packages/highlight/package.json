@@ -5,7 +5,7 @@
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
-  "//": "web-tree-sitter 锁 ~0.25.10：0.27 要求 wasm 含 dylink.0 节，与 tree-sitter-wasms 0.1.13 预编译产物不兼容（实测），0.25 起可用",
+  "//": "web-tree-sitter 运行时锁 ~0.25.10：grammar wasm 已改为 tree-sitter-cli 0.27 自建（产物含 dylink.0 节，实测 0.25 运行时可加载解析）；0.27 运行时强制要求 dylink.0 且运行时文件更名 web-tree-sitter.wasm，升级另行评估",
   "scripts": {
     "test": "vitest run"
   },

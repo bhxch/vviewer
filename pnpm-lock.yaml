@@ -21,11 +21,8 @@ importers:
         specifier: ^1.9.0
         version: 1.9.0
       tree-sitter-cli:
-        specifier: ~0.25.10
-        version: 0.25.10
-      tree-sitter-wasms:
-        specifier: 0.1.13
-        version: 0.1.13
+        specifier: ~0.27.0
+        version: 0.27.0
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
@@ -2781,13 +2778,10 @@ packages:
     resolution: {integrity: sha512-BcDSDW+SIGWVOns1Zm6Yg91q9AEj7eaID0QDY9oIqJD1A8dscNwMcl9Sms2DeuWCNov1X0/oXanHGYQBSLwZsg==}
     engines: {node: ^22.14.0 || >=24.0.0}
 
-  tree-sitter-cli@0.25.10:
-    resolution: {integrity: sha512-KoebQguKMCIghisEOdA372TIbrUl0kdnfZ9YQIBRAeOvNSKe85XbU4LuFW7hduRUwJj0rAG7pX5wo9sZhbBF1g==}
+  tree-sitter-cli@0.27.0:
+    resolution: {integrity: sha512-E42kR0og1mFlZBxPj7K4fBXCTjxPTGe19U9RXGWNq0FQKzXOxIp8bhCYFMKhddiVZUsJwW35MYGU9Q1oVYtpbA==}
     engines: {node: '>=12.0.0'}
     hasBin: true
-
-  tree-sitter-wasms@0.1.13:
-    resolution: {integrity: sha512-wT+cR6DwaIz80/vho3AvSF0N4txuNx/5bcRKoXouOfClpxh/qqrF4URNLQXbbt8MaAxeksZcZd1j8gcGjc+QxQ==}
 
   ts-dedent@2.3.0:
     resolution: {integrity: sha512-JfJeIHke7y2egdGGgRAvpCwYFUsHlM2gPcrVOxFkznt/4uzQ7HFmvE63iFHVLBJNDuyDOQgijDK/tXH/f6Msjg==}
@@ -5892,9 +5886,7 @@ snapshots:
     dependencies:
       punycode: 2.3.1
 
-  tree-sitter-cli@0.25.10: {}
-
-  tree-sitter-wasms@0.1.13: {}
+  tree-sitter-cli@0.27.0: {}
 
   ts-dedent@2.3.0: {}
 

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build-list": "node build-list.mjs",
-    "build": "node build.mjs --from-wasms",
+    "fetch": "node build.mjs --fetch --lite",
     "self-build": "node build.mjs --self-build",
     "test": "vitest run"
   }
