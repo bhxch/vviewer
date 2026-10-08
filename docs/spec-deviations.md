@@ -97,3 +97,20 @@
   （emoji）有区分性用例锁定。
 - **回补条件**：引入真实行内列定位 UI（P2 行号定位）时若需改用字形簇（grapheme）
   口径，两端同步换算并更新本条。
+
+## 10. grammar wasm 从"入库资产"改为"构建期生成"
+
+- **偏差**：M2 裁定 `apps/web/static/grammars/*.wasm` 入库保证纯前端开箱可用（spec L153-154
+  的 lite 集入库口径）；实现改为产物一律不入库（`.gitignore`），由 `pnpm gen:grammars`
+  与 CI composite action 构建期生成，release web 包继续内置 lite 集、全量集随
+  `grammar-wasm.tar.zst` 分发（开箱可用语义不变）。
+- **理由**：tree-sitter-wasms 0.1.13 上游停滞一年，预编译产物是唯一不受控环节；cli 0.27
+  免 emcc 自建使产物可从锁定的源清单（vendored `languages.toml` pinned rev）再生，入库
+  只剩 50MB 历史 object 成本与升级时的全量 diff。lite 集 36 → 34：objc/systemrdl 无查询
+  资产（原预编译集死产物）剔除；yaml/vue 因 cli wasm 工具链不支持 C++ 外置 scanner 以
+  vendored 遗留产物保留（`tools/grammar-builder/fixtures/`，manifest 标 `vendored`）。
+- **连带变化**：web-tree-sitter 运行时锁 ~0.25.10 的理由消失（cli 0.27 产物含 dylink.0，
+  实测 0.25 可加载），维持 0.25 为 API 稳定性选择；历史 commit 中的 wasm blob 经
+  filter-repo 移除（体积回收）。
+- **回补条件**：tree-sitter-wasms 或其他预编译分发源恢复活跃且覆盖 ≥264 语言时，可重评
+  "预编译产物直接分发"方案；cli 支持 C++ scanner 后删除 fixtures 恢复全自建。
