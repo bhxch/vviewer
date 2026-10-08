@@ -135,3 +135,15 @@
 ---
 
 *本报告全部数字出处：26/23/3 与严重度分布=spec §1/§3；提交与 diff=`git log 8604495..HEAD` 逐提交核对；BUG-06 复测=code-highlight-degrade.md §5；171/15 与 24/24 记录=9315351 提交信息；§5.2/§5.3=报告撰写时实跑。除本文件外未改动任何文件。*
+
+## 7. 收尾补记（2026-10-09，编排层复核后落盘）
+
+§6.1 的两项最高优先遗留已闭环，全部门禁在最终 HEAD 复跑验证：
+
+- **补提交**：包 2/3/5 滞留工作区的 31 个文件按工作包原子落盘——3c5ae01（app-shell：BUG-03/05/08/19/24）、4aa4cfe（viewer：BUG-04/09/10/11/17/18/20/22/23）、c24eb78（highlight-pwa：BUG-06/15/16，含 fix-pwa.spec.ts 与 docs/e2e/binary-hex-archive.md 的 BUG-16 后口径更新）。
+- **类型错误**：96f72ad 修复 4 个 b-* spec 的 5 处 TS 错误（索引可选链、Uint8Array→BlobPart 收窄、setInterval 返回类型），`pnpm run typecheck` 转绿。
+- **virtualScroller shim**：d9f3560 按 core 头注释承诺的形态恢复 render-text 一行 re-export（工作流提交阶段该文件被文件清单遗漏、滞留工作区后又经编排层重放历史时丢失，按既定意图重建；typecheck + vitest 613/613 验证）。
+- **提交信息修正**：原 cf32307 的污染信息（子代理把「建议 message」填进了编排层提交字段）经历史重写改为 ba62e1c，内容不变、仅 message 改写。
+- **最终 HEAD 复跑**：typecheck 绿；vitest 613/613（53 文件）；cargo test 11 个测试目标全部通过；`pnpm --filter web build` + check-pwa-build 通过；playwright 默认套件 170 passed + 1 flaky（mobile MEDIA-11 计时型，重试通过）+ 15 skipped（既定 fixme 占位）；服务端套件 34 passed + 1 skipped。工作区干净（仅 .zcodeignore，先于本批存在）——HEAD 现可独立复现本报告全部结论。
+
+§6 其余各项（BUG-01 残留子项、BUG-06 覆盖缺口立项、BUG-16 spec 口径实测、BUG-02 成因定论、真机补测专项、过程改进）维持不变，作为后续批次的输入。
