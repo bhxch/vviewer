@@ -390,7 +390,7 @@ test('BUG-19/25/SHELL-01/08：打开文件夹两通道均有可见反馈（取�
           const inputs = (
             (window as unknown as { __vvFileInputs?: HTMLInputElement[] }).__vvFileInputs ?? []
           ).filter((i) => i.type === 'file');
-          return inputs.length > 0 && inputs[inputs.length - 1].webkitdirectory === true;
+          return inputs.length > 0 && inputs[inputs.length - 1]?.webkitdirectory === true;
         }),
       { timeout: 10_000 }
     )

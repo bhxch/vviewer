@@ -51,7 +51,7 @@ async function openDir(page: Page, files: Array<{ name: string; type: string; by
   );
   await page.evaluate((list) => {
     const fs = list.map(({ name, type, bytes }) => {
-      const f = new File([bytes], name, { type });
+      const f = new File([bytes as unknown as BlobPart], name, { type });
       Object.defineProperty(f, 'webkitRelativePath', { value: `bbin/${name}` });
       return f;
     });

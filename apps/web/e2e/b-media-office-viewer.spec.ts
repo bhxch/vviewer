@@ -135,7 +135,7 @@ async function openDir(page: Page, files: SpecFile[]): Promise<void> {
   );
   await page.evaluate((list) => {
     const fs = list.map(({ name, type, bytes }) => {
-      const f = new File([bytes], name, { type });
+      const f = new File([bytes as unknown as BlobPart], name, { type });
       Object.defineProperty(f, 'webkitRelativePath', { value: `bmedia/${name}` });
       return f;
     });

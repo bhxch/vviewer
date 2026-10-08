@@ -23,7 +23,7 @@ async function injectDir(page: Page, label: string, build: string): Promise<void
   await page.evaluate(
     ({ label, build }) => {
       const make = (name: string, content: string | Uint8Array): File => {
-        const f = new File([content], name, { type: 'text/plain' });
+        const f = new File([content as unknown as BlobPart], name, { type: 'text/plain' });
         Object.defineProperty(f, 'webkitRelativePath', { value: `${label}/${name}` });
         return f;
       };
@@ -116,7 +116,7 @@ test('CMP-11/BUG-11：2050 文件触达 2000 上限——止点正确、出现�
   //    的「（结果不完整，已达上限）」。2050 个小文件扫描窗口仅百毫秒级——在页内装
   //    5ms 间隔采样器（避免 evaluate 往返漏采），换无命中查询保持全程扫描宽度
   await page.evaluate(() => {
-    const w = window as unknown as { __vvStatusSamples?: string[]; __vvStatusTimer?: number };
+    const w = window as unknown as { __vvStatusSamples?: string[]; __vvStatusTimer?: ReturnType<typeof setInterval> };
     w.__vvStatusSamples = [];
     w.__vvStatusTimer = setInterval(() => {
       const text = document.querySelector('.vv-gsearch-status')?.textContent ?? '';
@@ -126,7 +126,7 @@ test('CMP-11/BUG-11：2050 文件触达 2000 上限——止点正确、出现�
   await page.getByLabel('全局搜索内容').fill('zzz-no-such-hit');
   await expect(status).toContainText('无结果（结果不完整，已达上限）', { timeout: 60_000 });
   const progressSamples = await page.evaluate(() => {
-    const w = window as unknown as { __vvStatusSamples?: string[]; __vvStatusTimer?: number };
+    const w = window as unknown as { __vvStatusSamples?: string[]; __vvStatusTimer?: ReturnType<typeof setInterval> };
     clearInterval(w.__vvStatusTimer);
     return (w.__vvStatusSamples ?? []).filter((t) => t.includes('已扫描'));
   });
