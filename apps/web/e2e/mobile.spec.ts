@@ -156,7 +156,7 @@ test('视频播放页不崩：ArtPlayer 容器挂载，video 无 error', async (
   await expect(page.locator('.vv-artplayer')).toBeVisible({ timeout: 20_000 });
   const video = page.locator('.vv-artplayer video');
   await expect(video).toHaveCount(1);
-  const errCode = await video.evaluate((v) => v.error?.code ?? 0);
+  const errCode = await video.evaluate((v) => (v as HTMLMediaElement).error?.code ?? 0);
   expect(errCode).toBe(0);
 });
 

@@ -231,14 +231,19 @@ test('artplayer：mp4 → .artplayer 容器 + video 就绪（loadedmetadata 或�
   await expect
     .poll(
       async () => {
-        const s = await video.evaluate((v) => ({ rs: v.readyState, err: v.error?.code ?? 0 }));
+        // locator 'video' 元素类型按 Playwright 契约为 HTMLElement | SVGElement：
+        // 收窄为 HTMLMediaElement 后访问 readyState/error
+        const s = await video.evaluate((v) => {
+          const media = v as HTMLMediaElement;
+          return { rs: media.readyState, err: media.error?.code ?? 0 };
+        });
         return s.rs >= 1 || s.err > 0 ? 'settled' : 'pending';
       },
       { timeout: 15_000, intervals: [250, 500, 1_000] }
     )
     .toBe('settled');
-  const errCode = await video.evaluate((v) => v.error?.code ?? 0);
-  const readyState = await video.evaluate((v) => v.readyState);
+  const errCode = await video.evaluate((v) => (v as HTMLMediaElement).error?.code ?? 0);
+  const readyState = await video.evaluate((v) => (v as HTMLMediaElement).readyState);
   console.log(`[m4] video 状态：readyState=${readyState}${errCode ? ` error.code=${errCode}` : ' 无 error'}`);
   expect(errCode).toBe(0);
 });
