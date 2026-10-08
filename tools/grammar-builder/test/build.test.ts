@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, existsSync, mkdtempSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { execFile as execFileCb } from 'node:child_process';
+import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildList, detectParserC, SOURCES } from '../build-list.mjs';
 import { buildFromWasms, selfBuild, MAX_FILE_BYTES, MAX_TOTAL_BYTES } from '../build.mjs';
+
+const exec = promisify(execFileCb);
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../..');
@@ -238,5 +242,160 @@ describe('selfBuild（--self-build 备用路径）', () => {
     const { detectEmcc } = await import('../build.mjs');
     const emcc = detectEmcc();
     expect(emcc === null || typeof emcc === 'string').toBe(true);
+  });
+});
+
+// ---------- --fetch / --merge-manifest（L1：CI self-build 门禁的输入与产物合并） ----------
+import {
+  parseGrammarSources,
+  planFetch,
+  fetchGrammarSources,
+  mergeManifest,
+  PATHS
+} from '../build.mjs';
+
+describe('parseGrammarSources / planFetch（vendored languages.toml 与 build-list 的 join）', () => {
+  it('vendored languages.toml：[[grammar]] 解析出 git/rev/subpath', () => {
+    const sources = parseGrammarSources(readFileSync(PATHS.languagesToml, 'utf8'));
+    const ts = sources.get('typescript');
+    expect(ts?.git).toBe('https://github.com/tree-sitter/tree-sitter-typescript');
+    expect(ts?.rev).toMatch(/^[0-9a-f]{40}$/);
+    expect(ts?.subpath).toBe('typescript');
+    const rust = sources.get('rust');
+    expect(rust?.subpath ?? '').toBe('');
+  });
+
+  it('planFetch：build-list 全部可建条目都能在 vendored toml 找到源（CI fetch 输入完整性契约）', () => {
+    const sources = parseGrammarSources(readFileSync(PATHS.languagesToml, 'utf8'));
+    const buildList = JSON.parse(
+      readFileSync(path.join(repoRoot, 'tools/grammar-builder/build-list.json'), 'utf8'),
+    ) as { name: string; subpath: string; parserCExists: boolean }[];
+    const { plan, missing } = planFetch(buildList.filter((e) => e.parserCExists), sources);
+    expect(missing).toEqual([]);
+    expect(plan.length).toBeGreaterThanOrEqual(250);
+    for (const p of plan) {
+      expect(p.git).toMatch(/^https:\/\//);
+      expect(p.rev).toMatch(/^[0-9a-f]{40}$/);
+      expect(typeof p.subpath).toBe('string');
+    }
+  });
+
+  it('planFetch：toml 缺源的条目记入 missing（fetch 前即知）', () => {
+    const { plan, missing } = planFetch(
+      [{ name: 'known', subpath: '', parserCExists: true, helixLang: null }],
+      new Map([['known', { git: 'https://x/y', rev: 'a'.repeat(40), subpath: '' }]]),
+    );
+    expect(plan).toHaveLength(1);
+    expect(missing).toEqual([]);
+    const { missing: missing2 } = planFetch(
+      [{ name: 'unknown', subpath: '', parserCExists: true, helixLang: null }],
+      new Map(),
+    );
+    expect(missing2[0]?.name).toBe('unknown');
+  });
+});
+
+describe('fetchGrammarSources（本地 git fixture 验证 clone/copy 逻辑，不依赖网络）', () => {
+  it('浅取源仓并按 subpath 同构落盘：顶层与子目录两形态 + parser.c 判据 + 失败清单继续', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'vv-gb-fetch-'));
+    // fixture 仓库：顶层 src/parser.c 的 top 与子目录 tsx/src/parser.c 的 tsx 同仓两形态
+    const repoA = path.join(dir, 'repoA');
+    const repoB = path.join(dir, 'repoB');
+    for (const [repo, layout] of [
+      [repoA, 'top'],
+      [repoB, 'tsx'],
+    ] as const) {
+      const base = layout === 'top' ? path.join(repo, 'src') : path.join(repo, 'tsx', 'src');
+      mkdirSync(base, { recursive: true });
+      writeFileSync(path.join(base, 'parser.c'), 'int main(void){return 0;}');
+      writeFileSync(path.join(repo, '.gitignore'), '');
+      await exec('git', ['init', '-q', repo]);
+      await exec('git', ['-C', repo, 'add', '-A']);
+      await exec('git', ['-C', repo, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init']);
+    }
+    const revA = (await exec('git', ['-C', repoA, 'rev-parse', 'HEAD'])).stdout.trim();
+    const plan = [
+      { name: 'top', subpath: '', git: repoA, rev: revA },
+      { name: 'tsx', subpath: 'tsx', git: repoB, rev: (await exec('git', ['-C', repoB, 'rev-parse', 'HEAD'])).stdout.trim() },
+      { name: 'nope', subpath: '', git: repoA, rev: 'f'.repeat(40) }, // 仓库无此 rev → 失败继续
+    ];
+    const outDir = path.join(dir, 'grammars');
+    const { fetched, failures } = await fetchGrammarSources({
+      plan,
+      outDir,
+      failuresOut: path.join(dir, 'fetch-failures.json'),
+      concurrency: 2,
+    });
+    expect(fetched).toBe(2);
+    expect(failures.map((f) => f.name)).toEqual(['nope']);
+    // 同构源树：outDir/<name>/<subpath>/src/parser.c（--self-build 的探测路径）
+    expect(existsSync(path.join(outDir, 'top', 'src', 'parser.c'))).toBe(true);
+    expect(existsSync(path.join(outDir, 'tsx', 'tsx', 'src', 'parser.c'))).toBe(true);
+    // .git 不随拷贝
+    expect(existsSync(path.join(outDir, 'top', '.git'))).toBe(false);
+    // 失败清单落盘
+    const recorded = JSON.parse(readFileSync(path.join(dir, 'fetch-failures.json'), 'utf8')) as { name: string }[];
+    expect(recorded.map((f) => f.name)).toEqual(['nope']);
+    // 幂等重跑：已就位的源树跳过
+    const second = await fetchGrammarSources({
+      plan,
+      outDir,
+      failuresOut: path.join(dir, 'fetch-failures.json'),
+      concurrency: 2,
+    });
+    expect(second.fetched).toBe(0);
+    expect(second.skipped).toBe(2);
+  }, 30_000);
+});
+
+describe('mergeManifest（self-build 产物与预编译集合并）', () => {
+  it('同名键覆盖 + source 标 self-built + sha256 重算；超 8MB 上限跳过', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'vv-gb-mm-'));
+    const selfDir = path.join(dir, 'self');
+    const outDir = path.join(dir, 'out');
+    mkdirSync(selfDir);
+    mkdirSync(outDir);
+    // 既有预编译集合：javascript（将被 self-build 覆盖）与 python（保留）
+    writeFileSync(path.join(outDir, 'javascript.wasm'), Buffer.alloc(8, 1));
+    writeFileSync(path.join(outDir, 'python.wasm'), Buffer.alloc(4, 2));
+    const manifestOut = path.join(outDir, 'manifest.json');
+    writeFileSync(
+      manifestOut,
+      JSON.stringify({
+        generatedAt: new Date().toISOString(),
+        source: 'tree-sitter-wasms',
+        grammars: {
+          javascript: { file: 'javascript.wasm', abi: null, sha256: '0'.repeat(64), aliases: ['js'] },
+          python: { file: 'python.wasm', abi: null, sha256: '1'.repeat(64), aliases: ['py'] }
+        }
+      }),
+    );
+    // self-build 产物：javascript（覆盖，10B < 12B 上限）+ racket（新键，aliases 从 aliases.json 兜底）+ huge（超限跳过）
+    writeFileSync(path.join(selfDir, 'javascript.wasm'), Buffer.alloc(10, 3));
+    writeFileSync(path.join(selfDir, 'racket.wasm'), Buffer.alloc(8, 4));
+    writeFileSync(path.join(selfDir, 'huge.wasm'), Buffer.alloc(16, 5));
+
+    const { manifest, merged, skipped } = mergeManifest({
+      selfDir,
+      outDir,
+      manifestOut,
+      aliases: { racket: { wasm: 'tree-sitter-racket', aliases: ['rkt'] } },
+      maxFileBytes: 12,
+    });
+    expect(manifest.source).toBe('tree-sitter-wasms+self-built');
+    expect(merged.sort()).toEqual(['javascript', 'racket']);
+    expect(skipped.map((s) => s.lang)).toEqual(['huge']);
+    // 覆盖键：内容与 sha256 刷新为 self-build 产物，aliases 沿用既有登记
+    expect(manifest.grammars.javascript!.aliases).toEqual(['js']);
+    expect(manifest.grammars.javascript!.source).toBe('self-built');
+    expect(manifest.grammars.javascript!.sha256).not.toBe('0'.repeat(64));
+    // 保留键不动（source 字段缺省 = 预编译集）
+    expect(manifest.grammars.python!.sha256).toBe('1'.repeat(64));
+    expect(manifest.grammars.python!.source).toBeUndefined();
+    // 新键：aliases 从 aliases.json 兜底
+    expect(manifest.grammars.racket!.aliases).toEqual(['rkt']);
+    // 覆盖拷贝真实发生
+    expect(readFileSync(path.join(outDir, 'javascript.wasm')).length).toBe(10);
+    expect(existsSync(path.join(outDir, 'huge.wasm'))).toBe(false);
   });
 });

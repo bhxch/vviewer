@@ -7,7 +7,11 @@ grammar wasm 资产管线：为 M2 语法高亮产出 `apps/web/static/grammars/
 | 模式 | 命令 | 说明 |
 | --- | --- | --- |
 | `--from-wasms`（M2 主路径） | `node build.mjs --from-wasms` | 从 `node_modules/tree-sitter-wasms/out` 按 `aliases.json` 映射拷贝，计算 sha256，写 manifest |
-| `--self-build`（备用） | `node build.mjs --self-build` | 对 `build-list.json` 逐个 `tree-sitter build --wasm`；`emcc` 缺失时整批不执行，写 `out/failure-list.json` 并 exit 0 |
+| `--self-build`（备用） | `node build.mjs --self-build` | 对 `build-list.json` 逐个 `tree-sitter build --wasm`，wasm 写 `out/wasm-self/`（传 `VV_GRAMMARS_OUT` 可直写目标目录）；`emcc` 缺失时整批不执行，写 `out/failure-list.json` 并 exit 0 |
+| `--fetch`（CI 源获取） | `node build.mjs --fetch` | `build-list.json` ∩ vendored `languages.toml`（`[[grammar]]` git+rev+subpath）逐个浅取源仓（`git fetch --depth 1 <rev>`，并发 8，单仓失败记 `out/fetch-failures.json` 继续），拷贝 `<subpath>/` 树（判据 `src/parser.c`）到 `out/grammars/<name>/<subpath>/`——与 markpad 目录同构，作 `--self-build` 的 `VV_GRAMMARS_DIR` 输入 |
+| `--merge-manifest` | `node build.mjs --merge-manifest` | 把 `out/wasm-self/*.wasm` 覆盖拷入 `apps/web/static/grammars/`（同名键覆盖），manifest 条目标 `source: 'self-built'`，总 source 标 `tree-sitter-wasms+self-built`；超 8MB 单文件上限跳过 |
+
+CI 全量 self-build 流（`.github/workflows/grammar.yml`）：`pnpm install` → emsdk → `--fetch` → `--from-wasms` → `VV_GRAMMARS_DIR=tools/grammar-builder/out/grammars --self-build` → `--merge-manifest` → 上传 artifact。
 | 自建清单 | `node build-list.mjs` | 汇总 markpad `grammar_info.json`（subpath 表）+ 278 个语法源，判据 `src/parser.c` 存在 → `build-list.json` |
 
 ## tree-sitter-wasms 实测（0.1.13）
