@@ -4,7 +4,9 @@
 #   server：cargo build --release（targets：x86_64-unknown-linux-gnu 起步；
 #           后续扩平台在下方 server job 注释的 matrix 上展开）
 # 聚合 job 以 gh CLI 建 GitHub Release 并上传：vviewer 二进制、web dist zip、
-# grammar-wasm.tar.zst。发布写权限仅授予聚合 job（grammar/web/server 均只读）。
+# grammar-wasm.tar.zst。发布写权限仅授予聚合 release job（job 级 contents: write）；
+# 顶层 contents: read 兜底，web/server job 级再显式声明 read（grammar 由被调
+# workflow 自身的 contents: read 约束）——与实现一一对应，勿只改注释不改权限。
 name: Release
 
 on:
@@ -12,7 +14,7 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -26,6 +28,8 @@ jobs:
   web:
     name: web dist 构建
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -47,6 +51,8 @@ jobs:
   server:
     name: server 单二进制（x86_64-unknown-linux-gnu）
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     # 平台扩展预留（matrix 展开即可，每项需对应 runner 与 target）：
     # strategy:
     #   matrix:
@@ -73,6 +79,9 @@ jobs:
     name: 聚合发布 GitHub Release
     runs-on: ubuntu-latest
     needs: [grammar, web, server]
+    # 全工作流唯一写权限点：建 Release + 上传产物（job 级显式覆盖顶层 read 兜底）
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
