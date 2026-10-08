@@ -18,6 +18,7 @@ import { archiveRenderer } from '@vviewer/render-archive';
 import { configureLibarchive } from '@vviewer/render-archive/libarchiveStore';
 import { browser } from '$app/environment';
 import { ensureHighlightClient, computeRouter } from './highlightClient';
+import { resolveImageBlobUrl } from './markdownImages';
 
 /** M1 渲染器注册表：代码/文本、markdown、html 沙箱预览、图片（含消毒后的 SVG）、音视频。
  * M4 追加：PDF（render-doc）、hex/结构树（render-binary）、压缩包 zip/tar/7z/rar
@@ -54,23 +55,41 @@ if (browser) {
 
 // ---------- markdown 正文引擎接入 compute 路由（M7 Task 2，M6 遗留） ----------
 
+/** 在途远程 markdown 渲染的中止控制器（cancelMarkdownRemote 随 tab 切换一并 abort，对齐 highlight 的 remoteAbort 模式）。 */
+let markdownRemoteAbort: AbortController | null = null;
+
+/** tab 切换/重渲染时取消在途远程 markdown 请求（不留无主连接）。 */
+export function cancelMarkdownRemote(): void {
+  markdownRemoteAbort?.abort();
+  markdownRemoteAbort = null;
+}
+
 /**
  * 远程 markdown：POST /api/compute/markdown（Bearer），body {text, options}。
  * 未连接服务器抛错——router 的 auto 会回退本地 markdown-it；显式 remote 如实
  * 报错不静默回退（与远程高亮同一语义）。wikilinks 不开启：与本地引擎能力对齐
  * （markdown-it 无 wikilinks，开启会让 auto 回退前后渲染结果不一致）。
+ * abort 抛错经 router 折叠：auto 回退本地、remote 走错误卡片（既有路径）。
  */
 async function remoteMarkdown(text: string): Promise<string> {
   const call = computeRouter.remoteCall('/api/compute/markdown');
   if (!call) throw new Error('未连接服务器，无法远程渲染 markdown');
-  const res = await fetch(call.url, {
-    method: 'POST',
-    headers: { ...call.headers, 'content-type': 'application/json' },
-    body: JSON.stringify({ text, options: undefined })
-  });
-  if (!res.ok) throw new Error(`远程 markdown 渲染失败: HTTP ${res.status}`);
-  const data = (await res.json()) as { html: string };
-  return data.html;
+  // 挂 tab 级 abort：cancelMarkdownRemote（tab 切换/重渲染）时中止在途请求
+  const ac = new AbortController();
+  markdownRemoteAbort = ac;
+  try {
+    const res = await fetch(call.url, {
+      method: 'POST',
+      headers: { ...call.headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ text, options: undefined }),
+      signal: ac.signal
+    });
+    if (!res.ok) throw new Error(`远程 markdown 渲染失败: HTTP ${res.status}`);
+    const data = (await res.json()) as { html: string };
+    return data.html;
+  } finally {
+    if (markdownRemoteAbort === ac) markdownRemoteAbort = null;
+  }
 }
 
 /**
@@ -93,44 +112,21 @@ if (browser) {
   });
 }
 
-// ---------- markdown 相对图片解析（终审 M3：相对图片 404） ----------
-
-/** 图片扩展名 → blob MIME（与 render-media image.ts 的可播子集一致；未知给空串由浏览器嗅探） */
-const IMAGE_MIME: Record<string, string> = {
-  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
-  webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp', ico: 'image/x-icon',
-  svg: 'image/svg+xml'
-};
-
-/**
- * 相对 src → store 内路径：以当前文件目录为基，逐段规范 `.`/`..`；
- * 越出 store 根（`..` 弹空）返回 null。目录树路径以 `/` 分隔（RemoteStore/本地
- * store 一致），src 不做百分号解码——树内路径是原始名，与 img src 的字面量对齐。
- */
-function resolveInStorePath(sourcePath: string, src: string): string | null {
-  const dir = sourcePath.includes('/') ? sourcePath.slice(0, sourcePath.lastIndexOf('/')) : '';
-  const out: string[] = [];
-  for (const seg of `${dir}/${src}`.split('/')) {
-    if (seg === '' || seg === '.') continue;
-    if (seg === '..') {
-      if (out.length === 0) return null;
-      out.pop();
-      continue;
-    }
-    out.push(seg);
-  }
-  return out.join('/');
-}
+// ---------- markdown 相对图片解析（终审 M3：相对图片 404；L4 大小上限） ----------
 
 if (browser) {
   // 相对图片 → 同 store 文件 blob URL：store 读失败（不存在/无权限）抛错由 renderer
   // 捕获后保留原 src（404 现状）；URL 随渲染实例 destroy 释放（renderer 侧 revoke）。
-  setMarkdownImageResolver(async (src, source) => {
-    const path = resolveInStorePath(source.path, src);
-    if (path === null || path === '') return null;
-    const bytes = await source.store.read(path);
-    const ext = path.includes('.') ? (path.split('.').pop() ?? '').toLowerCase() : '';
-    const blob = new Blob([bytes], { type: IMAGE_MIME[ext] ?? '' });
-    return URL.createObjectURL(blob);
-  });
+  // 解析逻辑（路径规范 + 大小上限）抽在 markdownImages.ts（无 $app 依赖，可单测）。
+  setMarkdownImageResolver(async (src, source) =>
+    resolveImageBlobUrl(source.store, source.path, src)
+  );
+}
+
+// dev-only HMR 防线（遗留 T14）：本模块是装配单例来源（registry、libarchive worker
+// 配置、markdown backend/图片 resolver 注入），Vite 局部热替换会重跑装配——重复
+// install 与新旧模块状态并存。decline 使变更冒泡为整页刷新，杜绝半新半旧状态；
+// 生产构建 import.meta.hot 恒为 undefined，分支不存在。
+if (import.meta.hot) {
+  import.meta.hot.accept.decline();
 }

@@ -21,6 +21,7 @@
   let status = $state('');
   let running = $state(false);
   let inputEl = $state<HTMLInputElement | null>(null);
+  let panelEl = $state<HTMLElement | null>(null);
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   /** 代际防护：新输入/关闭使旧请求结果作废 */
@@ -43,6 +44,24 @@
       abort?.abort();
       if (debounceTimer !== null) clearTimeout(debounceTimer);
     };
+  });
+
+  $effect(() => {
+    // Esc 全局化补全（与文件内 SearchPanel 同模式，遗留 U6）：容器级 keydown 只覆盖
+    // 面板内焦点；焦点已落到面板外（body/查看区）时 Esc 也应关闭。window 级兜底只
+    // 处理目标在面板外的事件（同一事件只有一个 target，不会双触发）；卸载即摘监听。
+    const onWinKey = (e: KeyboardEvent): void => {
+      if (
+        e.key === 'Escape' &&
+        panelEl !== null &&
+        (e.target instanceof Node ? !panelEl.contains(e.target) : true)
+      ) {
+        e.preventDefault();
+        close();
+      }
+    };
+    window.addEventListener('keydown', onWinKey);
+    return () => window.removeEventListener('keydown', onWinKey);
   });
 
   /** 展示行（保持命中顺序；文件首行带 header 标记），截到 MAX_ROWS */
@@ -165,7 +184,7 @@
   }
 </script>
 
-<div class="vv-gsearch" role="search" aria-label="全局搜索" onkeydown={onpanelkeydown}>
+<div class="vv-gsearch" role="search" aria-label="全局搜索" bind:this={panelEl} onkeydown={onpanelkeydown}>
   <div class="vv-gsearch-bar">
     <input
       bind:this={inputEl}

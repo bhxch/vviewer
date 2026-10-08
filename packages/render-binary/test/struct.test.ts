@@ -110,6 +110,32 @@ describe('parseStruct: ZIP', () => {
     expect(find(root, 'entries')?.value).toBe('3');
     expect(find(root, 'centralDirectorySize')?.value).toBe('4660');
   });
+
+  it('>8KB 归档：EOCD 在尾窗（tail）上扫描，entries 与绝对偏移正确', async () => {
+    // 真实 zip（jszip STORE）：20KB 条目使 EOCD 落在 8KB head 之外——
+    // 回归遗留项：旧实现只吃 head，entries 字段失效
+    const JSZip = (await import('jszip')).default;
+    const bytes = await new JSZip()
+      .file('a.txt', new Uint8Array(20 * 1024).fill(0x61))
+      .file('b.txt', 'hello')
+      .generateAsync({ type: 'uint8array', compression: 'STORE' });
+    expect(bytes.length).toBeGreaterThan(8192);
+    const head = bytes.slice(0, 8192);
+    const tail = bytes.slice(Math.max(0, bytes.length - (22 + 65535)));
+    const { root } = parseStruct(head, { tail, totalSize: bytes.length });
+    expect(root?.name).toBe('ZIP');
+    expect(find(root, 'entries')?.value).toBe('2');
+    // 无 tail 时维持旧行为：head 扫不到 EOCD，字段缺失但不报错
+    const { root: headOnly } = parseStruct(head);
+    expect(find(headOnly, 'entries')).toBeUndefined();
+    // EOCD 节点偏移换算为文件绝对偏移（EOCD 签名真实位置）
+    const eocdNode = find(root, 'EOCD');
+    expect(eocdNode).toBeDefined();
+    expect(bytes[eocdNode!.offset]).toBe(0x50);
+    expect(bytes[eocdNode!.offset + 1]).toBe(0x4b);
+    expect(bytes[eocdNode!.offset + 2]).toBe(0x05);
+    expect(bytes[eocdNode!.offset + 3]).toBe(0x06);
+  });
 });
 
 describe('parseStruct: 其余 magic', () => {

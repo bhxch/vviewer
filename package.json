@@ -7,13 +7,14 @@
     "test": "vitest run",
     "build": "pnpm --filter web build",
     "build:all": "pnpm build && cargo build --release --manifest-path server/Cargo.toml",
-    "typecheck": "tsc -b packages/*/tsconfig.json --noEmit",
+    "typecheck": "tsc -b packages/*/tsconfig.json apps/web/tsconfig.e2e.json --noEmit",
     "server:dev": "cargo run --manifest-path server/Cargo.toml -- serve --root . --port 8321"
   },
   "devDependencies": {
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^30.1.2",
     "smol-toml": "^1.9.0",
+    "tree-sitter-cli": "~0.25.10",
     "tree-sitter-wasms": "0.1.13",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"
@@ -21,6 +22,9 @@
   "pnpm": {
     "overrides": {
       "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
-    }
+    },
+    "onlyBuiltDependencies": [
+      "tree-sitter-cli"
+    ]
   }
 }

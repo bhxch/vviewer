@@ -25,13 +25,28 @@ export class BinaryClient {
     };
   }
 
-  /** 解析文件头结构（head 会被 transfer 到 worker，调用后不可再读） */
-  parseStruct(head: Uint8Array, budgetMs?: number): Promise<ParseResult> {
+  /**
+   * 解析文件头结构。head 会被 transfer 到 worker（调用后不可再读）；opts.tail
+   * （EOCD 尾窗）同样 transfer——两段 slice 各自持有独立 ArrayBuffer，可同批转移。
+   */
+  parseStruct(
+    head: Uint8Array,
+    opts?: { budgetMs?: number; tail?: Uint8Array; totalSize?: number }
+  ): Promise<ParseResult> {
     const id = this.nextId++;
-    const req: BinaryRequest = { id, kind: 'parse-struct', head, budgetMs };
+    const req: BinaryRequest = {
+      id,
+      kind: 'parse-struct',
+      head,
+      budgetMs: opts?.budgetMs,
+      tail: opts?.tail,
+      totalSize: opts?.totalSize
+    };
+    const transfer: ArrayBuffer[] = [head.buffer as ArrayBuffer];
+    if (opts?.tail) transfer.push(opts.tail.buffer as ArrayBuffer);
     return new Promise<ParseResult>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.worker.postMessage(req, [head.buffer]);
+      this.worker.postMessage(req, transfer);
     });
   }
 

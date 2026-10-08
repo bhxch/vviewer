@@ -5,9 +5,9 @@
   import type { MarkdownEngineState } from '@vviewer/render-text/markdown/markdownRenderer';
   import type { Tab } from './openFlow.svelte';
   import { persistScroll } from './openFlow.svelte';
-  import { dispatcher } from './viewer';
+  import { dispatcher, cancelMarkdownRemote } from './viewer';
   import { cancelHighlight } from './highlightClient';
-  import { watchHealth } from './openFlow.svelte';
+  import { watchHealth, statusNotice } from './openFlow.svelte';
 import SearchPanel from './SearchPanel.svelte';
 
   let { tab, ontoc }: { tab: Tab | null; ontoc?: (entries: TocEntry[]) => void } = $props();
@@ -21,9 +21,9 @@ import SearchPanel from './SearchPanel.svelte';
     plain: '纯文本'
   };
 
-  /** markdown 正文引擎文案（M7：local/remote 即执行位置，同一状态栏复用） */
+  /** markdown 正文引擎文案（M7：local/remote 即执行位置，同一状态栏复用）。
+   * 无 pending：markdown 实例仅在渲染完成后创建，getEngine 无观察窗口（遗留 T1） */
   const MARKDOWN_ENGINE_LABELS: Record<MarkdownEngineState, string> = {
-    pending: '渲染: 解析中…',
     local: '渲染: 本地',
     remote: '渲染: 远程'
   };
@@ -151,6 +151,7 @@ import SearchPanel from './SearchPanel.svelte';
       scrollHost?.removeEventListener('scroll', onScroll);
       scrollHost = null;
       cancelHighlight(); // 取消未完成的 tree-sitter 高亮请求（Worker 不做无用功）
+      cancelMarkdownRemote(); // 取消在途远程 markdown 渲染（auto 已回退本地/remote 走错误路径，不留无主连接）
       searchOpen = false; // 实例随 tab 销毁：面板状态一并复位（markdown 的 mark 在 destroy 内还原）
       live?.destroy();
       live = null;
@@ -189,9 +190,9 @@ import SearchPanel from './SearchPanel.svelte';
       }}
     />
   {/if}
-  {#if engineLabel || watchHealth.degraded}
+  {#if engineLabel || watchHealth.degraded || statusNotice.text}
     <div class="vv-statusbar" role="status">
-      {#if engineLabel}{engineLabel}{#if computeWhereLabel}&nbsp;· 执行: {computeWhereLabel}{/if}{/if}{#if watchHealth.degraded}{#if engineLabel}&nbsp;·{/if} 自动刷新不可用{/if}
+      {#if engineLabel}{engineLabel}{#if computeWhereLabel}&nbsp;· 执行: {computeWhereLabel}{/if}{/if}{#if watchHealth.degraded}{#if engineLabel}&nbsp;·{/if} 自动刷新不可用{/if}{#if statusNotice.text}{#if engineLabel || watchHealth.degraded}&nbsp;·{/if} {statusNotice.text}{/if}
     </div>
   {/if}
 </div>

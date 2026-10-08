@@ -18,7 +18,7 @@ import { test, expect, type Page } from '@playwright/test';
  * evaluate 会命中未就绪的 document（`caches is not defined` / 返回 undefined）——
  * 一律折叠为 null 让外层 expect.poll 重试，不对瞬态做断言。
  */
-async function safeEval<T>(page: Page, fn: () => Promise<T>): Promise<T | null> {
+async function safeEval<T>(page: Page, fn: () => T | Promise<T>): Promise<T | null> {
   try {
     const v = await page.evaluate(fn);
     return (v ?? null) as T | null;

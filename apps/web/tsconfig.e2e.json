@@ -1,0 +1,19 @@
+{
+	// e2e 与 playwright.config.ts 的独立类型检查工程（遗留 T13）：随根 `pnpm typecheck`
+	// 一并跑（tsc -b 追加本文件）。不 extends .svelte-kit/tsconfig.json——那会把 src
+	// 一并拉进 plain tsc（.svelte 文件需 svelte-check，超出本工程职责）。
+	// playwright types 走 @playwright/test 自带类型（devDeps），node 内建走 @types/node。
+	"compilerOptions": {
+		"target": "esnext",
+		"module": "esnext",
+		"moduleResolution": "bundler",
+		"lib": ["esnext", "DOM", "DOM.Iterable"],
+		"types": ["node"],
+		"strict": true,
+		"noUncheckedIndexedAccess": true,
+		"verbatimModuleSyntax": true,
+		"skipLibCheck": true,
+		"noEmit": true
+	},
+	"include": ["e2e/**/*.ts", "playwright.config.ts"]
+}

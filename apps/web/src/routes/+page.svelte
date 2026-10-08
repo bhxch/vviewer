@@ -8,7 +8,8 @@
     // webkitGetAsEntry 的同步调用约束由 collectDirectoryFiles 内部的 getFileSystemEntries 保证
     const files = await collectDirectoryFiles(e.dataTransfer);
     if (files) {
-      if (files.length) openDirectoryViaInput(files);
+      // 空数组也走统一通道：openDirectoryViaInput 内给"所选文件夹为空"的一次性提示
+      openDirectoryViaInput(files);
       return;
     }
     const dropped = e.dataTransfer?.files;

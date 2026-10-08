@@ -28,6 +28,8 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm vitest run
       - run: pnpm --filter web build
+      # 第三方声明完整性辅助检查（warning-only，恒 exit 0；新依赖忘登记时在日志可见）
+      - run: node tools/check-notices/check-notices.mjs
 
   rust:
     name: rust（cargo test）

@@ -16,6 +16,13 @@ export interface PipelineCtx {
   highlightFence: (code: string, lang: string) => Promise<string | null>;
   /** 主题类前缀：管线生成元素（复制按钮/mermaid 容器/灯箱）的类名前缀，供主题作用域样式。 */
   themeClassPrefix?: string;
+  /**
+   * 灯箱归属实例代币（遗留 U3）：body 级 overlay 是跨渲染实例的单例，markdownRenderer
+   * 每次 render 生成唯一值传入；openLightbox 把"最后打开者"记在 overlay 上，
+   * removeLightboxOverlay 只许 owner 随自身 destroy 摘除——多 markdown 实例（多 tab）
+   * 共存时，B 实例的 destroy 不得互删 A 正开着的灯箱。
+   */
+  lightboxOwner?: string;
 }
 
 export interface PipelineStep {
@@ -245,18 +252,26 @@ async function runCopyCode(root: Document, ctx: PipelineCtx): Promise<void> {
 /** body 级灯箱 overlay 的元素 id（openLightbox 创建；markdownRenderer destroy 时清理防泄漏） */
 export const LIGHTBOX_OVERLAY_ID = 'md-lightbox-overlay';
 
+/** overlay 上的打开者代币属性（openLightbox 写入、removeLightboxOverlay 校验，遗留 U3） */
+export const LIGHTBOX_OWNER_ATTR = 'data-md-lightbox-owner';
+
 /** overlay → 其 document 级 Esc 监听（removeLightboxOverlay / 点击关闭时随之摘除，防监听器累积） */
 const escHandlers = new WeakMap<HTMLElement, (ev: KeyboardEvent) => void>();
 
-/** 从文档移除灯箱 overlay（markdownRenderer destroy 调用；overlay 挂在 body，不随渲染节点销毁） */
-export function removeLightboxOverlay(doc: Document): void {
+/**
+ * 从文档移除灯箱 overlay（markdownRenderer destroy 调用；overlay 挂在 body，不随渲染节点销毁）。
+ * ownerId 传时校验打开者代币：非当前 owner 的 destroy 直接跳过（多 markdown 实例
+ * 共存时互删对方正开着的灯箱，遗留 U3）；不传（Esc / overlay 点击等自有关场景）
+ * 行为不变，无条件移除。
+ */
+export function removeLightboxOverlay(doc: Document, ownerId?: string): void {
   const overlay = doc.getElementById(LIGHTBOX_OVERLAY_ID);
-  if (overlay) {
-    const onKey = escHandlers.get(overlay);
-    if (onKey) doc.removeEventListener('keydown', onKey);
-    escHandlers.delete(overlay);
-  }
-  overlay?.remove();
+  if (!overlay) return;
+  if (ownerId !== undefined && overlay.getAttribute(LIGHTBOX_OWNER_ATTR) !== ownerId) return;
+  const onKey = escHandlers.get(overlay);
+  if (onKey) doc.removeEventListener('keydown', onKey);
+  escHandlers.delete(overlay);
+  overlay.remove();
 }
 
 function openLightbox(img: HTMLImageElement, ctx: PipelineCtx): void {
@@ -283,6 +298,8 @@ function openLightbox(img: HTMLImageElement, ctx: PipelineCtx): void {
     clone.setAttribute('src', img.getAttribute('src') ?? '');
     clone.setAttribute('alt', img.getAttribute('alt') ?? '');
   }
+  // 最后打开者即 owner（覆盖旧记号）：其后仅 owner 的 destroy 可随生命周期摘除（U3）
+  overlay.setAttribute(LIGHTBOX_OWNER_ATTR, ctx.lightboxOwner ?? '');
 }
 
 async function runLightbox(root: Document, ctx: PipelineCtx): Promise<void> {

@@ -21,8 +21,8 @@ describe('BinaryClient', () => {
   it('请求 id 递增配对响应', async () => {
     const { worker, requests } = fakeWorker();
     const client = new BinaryClient(worker as unknown as Worker);
-    const p1 = client.parseStruct(new Uint8Array([0x89, 0x50]), 100);
-    const p2 = client.parseStruct(new Uint8Array([0x7f, 0x45]), 200);
+    const p1 = client.parseStruct(new Uint8Array([0x89, 0x50]), { budgetMs: 100 });
+    const p2 = client.parseStruct(new Uint8Array([0x7f, 0x45]), { budgetMs: 200 });
     expect(requests.map((r) => r.id)).toEqual([1, 2]);
     expect(requests[1]!.budgetMs).toBe(200);
     worker.respond({ id: 2, ok: true, root: { name: 'ELF', offset: 0, size: 4, value: '' }, truncated: false });

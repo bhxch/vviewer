@@ -224,10 +224,14 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
   border-top: 1px solid var(--ui-border); background: var(--ui-tab-bg); user-select: none; }
 .vv-brand { font-weight: 700; margin-right: 8px; }
 .vv-tabbar { display: flex; overflow-x: auto; background: var(--ui-tab-bg); border-bottom: 1px solid var(--ui-border); }
+/* .vv-tab 为 div[role=tab]（U2：激活区与关闭钮拆为兄弟节点，button 内不再嵌交互元素）；
+   cursor 需自带（原先由全局 button 规则提供）。 */
 .vv-tab { display: inline-flex; align-items: center; gap: 6px; border: none; border-right: 1px solid var(--ui-border);
-  background: var(--ui-tab-bg); padding: 6px 10px; border-radius: 0; }
+  background: var(--ui-tab-bg); padding: 6px 10px; border-radius: 0; cursor: pointer; }
 .vv-tab.active { background: var(--ui-tab-active-bg); color: var(--ui-accent); }
-.vv-tab-close { opacity: .6; padding: 0 2px; }
+/* 关闭钮改真实 button（U2）：重置全局 button 规则的背景/边框/圆角，还原原 span 观感 */
+.vv-tab-close { background: none; border: none; border-radius: 0; color: inherit; font: inherit;
+  opacity: .6; padding: 0 2px; }
 .vv-tab-close:hover { opacity: 1; }
 .vv-tree { list-style: none; margin: 0; padding: 0; }
 .vv-tree .vv-tree { padding-left: 14px; }

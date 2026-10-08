@@ -429,3 +429,35 @@ describe('markdownRenderer——相对图片经 store 解析（终审 M3：404 �
     expect(getMarkdownImageResolver()).toBeNull();
   });
 });
+
+describe('markdownRenderer——灯箱 overlay 归属（遗留 U3：多实例互删防线）', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  function overlay(): HTMLElement | null {
+    return document.getElementById('md-lightbox-overlay');
+  }
+
+  it('A 打开灯箱后 B destroy：overlay 保留；owner（A）destroy 才移除', async () => {
+    const a = await renderMd('![图](photo.png)\n');
+    const b = await renderMd('![图](other.png)\n');
+    a.target.querySelector('img')!.click(); // A 打开 body 级共享 overlay
+    expect(overlay()).not.toBeNull();
+    b.instance.destroy(); // B 非打开者：不得互删 A 正开着的灯箱
+    expect(overlay()).not.toBeNull();
+    a.instance.destroy(); // owner 销毁：随生命周期移除
+    expect(overlay()).toBeNull();
+  });
+
+  it('overlay 被后打开者接管（B 点图）：A destroy 不再能摘，B destroy 摘除', async () => {
+    const a = await renderMd('![a](a.png)\n');
+    const b = await renderMd('![b](b.png)\n');
+    a.target.querySelector('img')!.click();
+    b.target.querySelector('img')!.click(); // 最后打开者即 owner
+    a.instance.destroy();
+    expect(overlay()).not.toBeNull();
+    b.instance.destroy();
+    expect(overlay()).toBeNull();
+  });
+});

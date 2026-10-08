@@ -134,6 +134,24 @@ export const tabStore = new TabCollection();
  */
 export const watchHealth = $state({ degraded: false });
 
+/**
+ * 状态栏一次性提示（遗留 U1）：空目录拖入等无法归属到单个 tab 的轻量异常。
+ * 文本非空时 ViewerPane 状态栏显示，数秒后自动清除；与 watchHealth 同为模块级
+ * runes 状态，openFlow 写入、UI 只读。
+ */
+export const statusNotice = $state({ text: '' });
+let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 显示一条临时状态栏提示（duration 后自动清除；连发时重置计时） */
+export function showStatusNotice(text: string, duration = 4000): void {
+  statusNotice.text = text;
+  if (noticeTimer !== null) clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => {
+    noticeTimer = null;
+    statusNotice.text = '';
+  }, duration);
+}
+
 export function addTab(store: TreeStore, path: string, name: string): Tab {
   return tabStore.add(store, path, name);
 }
@@ -185,6 +203,12 @@ export async function openDirectoryViaPicker(): Promise<void> {
 
 export function openDirectoryViaInput(files: FileList | File[]): void {
   const all = Array.from(files);
+  if (all.length === 0) {
+    // 空目录（input webkitdirectory 选空文件夹 / 拖入空目录）：此前静默无反馈，
+    // 状态栏一次性提示说明原因（遗留 U1）
+    showStatusNotice('所选文件夹为空');
+    return;
+  }
   const firstPath = all.find((f) => f.webkitRelativePath !== '')?.webkitRelativePath;
   const label = (firstPath ? firstPath.split('/', 1)[0] : undefined) ?? 'folder';
   // webkitdirectory 真实 input 的 File 必带 webkitRelativePath；

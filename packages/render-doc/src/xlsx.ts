@@ -86,6 +86,8 @@ function buildSheetDom(sheet: WorkSheet, XLSX: XlsxModule): DocumentFragment {
 export const xlsxRenderer: Renderer = {
   id: 'xlsx',
   label: 'Excel 表格',
+  // 'xls'（旧版 OLE/BIFF 二进制格式）是 spec 外的有意 scope 扩展（遗留 T10）：
+  // SheetJS community 可直接解析 OLE/BIFF，与 OOXML 同一 read 通道零额外成本
   extensions: ['xlsx', 'xlsm', 'xls'],
   sniff: sniffOoxml,
   async render(buffer: Uint8Array, target: HTMLElement, _source: FileSource, _det: Detection) {

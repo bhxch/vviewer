@@ -28,7 +28,9 @@ export function decodeXmlEntities(s: string): string {
 /**
  * 从 slideN.xml 提取文本行：一个 <a:p> 段落为一行，段内 <a:t> 文本 run 直接拼接
  * （a:br 换行 run 不产生新行——提纲视图不还原段落内换行）。a:p/a:t 均不嵌套自身，
- * 非贪婪匹配安全；表格/图表内文本同为 a:t，自然纳入提纲。
+ * 非贪婪匹配安全。表格文本在 slide XML 内（a:tbl 中的 a:p/a:t）自然纳入提纲；
+ * 图表文本在独立 chart 部件（ppt/charts/chartN.xml），本实现只读 slide 部件、
+ * 不提取图表内文本（遗留 T9 措辞修正：原注释误称"表格/图表内文本同为 a:t"）。
  */
 export function extractSlideLines(slideXml: string): string[] {
   const lines: string[] = [];
