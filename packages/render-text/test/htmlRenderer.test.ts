@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import type { Detection, FileSource, RenderedInstance } from '@vviewer/core';
+import type { Detection, FileSource, RenderedInstance, SearchMatch } from '@vviewer/core';
 import { htmlRenderer, buildSandboxedSrcdoc } from '../src/html';
 
 const SOURCE: FileSource = {
@@ -180,6 +180,75 @@ describe('htmlRenderer——sandbox iframe 与视图切换', () => {
     expect(matches.map((m) => m.line)).toEqual([0]); // 源码视图 = code 行扫描
     instance.gotoMatch!(0);
     expect(target.querySelector('[data-line="0"]')?.classList.contains('vv-search-hit-line')).toBe(true);
+    instance.destroy();
+  });
+});
+
+describe('htmlRenderer——BUG-17 外域图片拦截 + CSP 收紧 / BUG-22 getEngine', () => {
+  it('CSP 收紧：img-src/media-src 仅 data: blob:，不再放行 http: https:', () => {
+    const srcdoc = buildSandboxedSrcdoc('<p>x</p>');
+    expect(srcdoc).toContain('img-src data: blob:');
+    expect(srcdoc).toContain('media-src data: blob:');
+    expect(srcdoc).not.toContain('img-src data: blob: http:');
+    expect(srcdoc).not.toContain('https:;');
+  });
+
+  it('外域 img：净化移除 src + 拦截标记 + title；srcdoc 内带占位行内样式（iframe 内 app.css 不作用）', () => {
+    const srcdoc = buildSandboxedSrcdoc(
+      '<p>ok</p><img src="http://external.example.com/track.png" alt="t"><img src="/local.png">'
+    );
+    const doc = parseSrcdoc(srcdoc);
+    const blocked = doc.querySelector('img[data-vv-blocked-external]');
+    expect(blocked).not.toBeNull();
+    expect(blocked!.hasAttribute('src')).toBe(false);
+    expect(blocked!.getAttribute('title')).toContain('已拦截外部图片：external.example.com');
+    expect(blocked!.getAttribute('style')).toContain('border');
+    expect(doc.querySelector('img[src="/local.png"]')).not.toBeNull(); // 相对图不受影响
+  });
+
+  it('getEngine 恒 local（BUG-22：渲染/源码两视图状态栏均出「渲染: 本地」段）', async () => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      }
+    );
+    const target = document.createElement('div');
+    document.body.append(target);
+    const instance = await htmlRenderer.render(new TextEncoder().encode('<p>hi</p>'), target, SOURCE, DET);
+    const engine = (instance as RenderedInstance & { getEngine?(): 'local' }).getEngine;
+    expect(typeof engine).toBe('function');
+    expect(engine!.call(instance)).toBe('local');
+    instance.destroy();
+  });
+
+  it('源码视图 search 透传 caseSensitive（BUG-23）', async () => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      }
+    );
+    const target = document.createElement('div');
+    document.body.append(target);
+    const instance = await htmlRenderer.render(
+      new TextEncoder().encode('<p>Alpha alpha</p>'),
+      target,
+      SOURCE,
+      DET
+    );
+    target.querySelector<HTMLButtonElement>('.vv-html-btn-source')!.click();
+    const search = instance.search!.bind(instance) as (
+      q: string,
+      opts?: { caseSensitive?: boolean }
+    ) => Promise<SearchMatch[]>;
+    expect((await search('alpha')).length).toBe(2);
+    // 源码视图搜索的是 HTML 源文本：'<p>Alpha alpha</p>' 中小写 'alpha' 起于偏移 9
+    expect((await search('alpha', { caseSensitive: true })).map((m) => m.start)).toEqual([9]);
     instance.destroy();
   });
 });

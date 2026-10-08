@@ -11,7 +11,7 @@
 // 高亮降级链）。样式统一由 apps/web/src/app.css 提供（单一来源，同 code.ts）。
 // 超大输入（>20MB）：净化/DOM 遍历无分块能力，跳过沙箱管线降级为源码视图
 // + 提示卡（renderDegradedCode；降级而非拒绝）。
-import type { Renderer, RenderedInstance, Detection, FileSource } from '@vviewer/core';
+import type { Renderer, RenderedInstance, Detection, FileSource, SearchMatch } from '@vviewer/core';
 import { ALLOWED_URI_REGEXP, sanitizeHtml } from './markdown/sanitize';
 import {
   DECODERS,
@@ -21,9 +21,11 @@ import {
   type RenderCodeHandle
 } from './code';
 
-/** srcdoc 文档的 CSP：脚本面已被 sandbox 封死，CSP 管资源加载纵深（作者文档可含图片/行内样式） */
+/** srcdoc 文档的 CSP：脚本面已被 sandbox 封死，CSP 管资源加载纵深（作者文档可含
+ * 行内样式）。BUG-17：img-src/media-src 移除 http: https:——外域图片/媒体在沙箱内
+ * 被浏览器拦截且不发请求（外域 img 另经共享净化策略移除 src，双保险）。 */
 const CSP_CONTENT =
-  "default-src 'none'; img-src data: blob: http: https:; media-src data: blob: http: https:; style-src 'unsafe-inline'; font-src data:";
+  "default-src 'none'; img-src data: blob:; media-src data: blob:; style-src 'unsafe-inline'; font-src data:";
 
 /** URI 属性白名单复核（与共享净化策略同一正则；不匹配即剥属性） */
 function uriAllowed(value: string): boolean {
@@ -52,6 +54,16 @@ export function buildSandboxedSrcdoc(raw: string): string {
         el.removeAttribute(attr.name);
       }
     }
+  }
+  // BUG-17：被共享净化策略拦截的外域 img（无 src、带 data-vv-blocked-external +
+  // title）以占位样式呈现——srcdoc 是独立文档，父页 app.css 不作用；CSP
+  // style-src 'unsafe-inline' 允许行内样式。无 src 的 img 在上方二次清洗中
+  // 天然跳过（无 src 属性可复核）。
+  for (const img of Array.from(doc.querySelectorAll('img[data-vv-blocked-external]'))) {
+    img.setAttribute(
+      'style',
+      'display:inline-block;min-width:96px;min-height:40px;border:1px dashed #b58900;border-radius:4px;background:rgba(181,137,0,.08)'
+    );
   }
   const meta = doc.createElement('meta');
   meta.setAttribute('http-equiv', 'Content-Security-Policy');
@@ -87,7 +99,7 @@ export const htmlRenderer: Renderer = {
         toggleView() {
           // 降级视图无渲染视图可切：保持接口形状，操作为空
         },
-        search: (query) => code.search(query),
+        search: (query: string, opts?: { caseSensitive?: boolean }) => code.search(query, opts),
         gotoMatch: (index) => code.gotoMatch(index)
       };
       return instance;
@@ -154,7 +166,11 @@ export const htmlRenderer: Renderer = {
     sourceBtn.addEventListener('click', () => setView('source'));
     mountRendered();
 
-    const instance: RenderedInstance & { toggleView(): void } = {
+    const instance: Omit<RenderedInstance, 'search'> & {
+      toggleView(): void;
+      getEngine(): 'local';
+      search(query: string, opts?: { caseSensitive?: boolean }): Promise<SearchMatch[]>;
+    } = {
       destroy() {
         destroyed = true;
         unmount();
@@ -166,12 +182,15 @@ export const htmlRenderer: Renderer = {
       },
       // 文件内搜索（Task 6）：源码视图复用 code 实现；渲染视图是沙箱 iframe
       // （allow-same-origin 但内容不可信），不做跨文档搜索，返回空结果。
-      search(query) {
-        return view === 'source' && codeInst ? codeInst.search(query) : Promise.resolve([]);
+      search(query, opts?) {
+        return view === 'source' && codeInst ? codeInst.search(query, opts) : Promise.resolve([]);
       },
       gotoMatch(index) {
         if (view === 'source') codeInst?.gotoMatch(index);
-      }
+      },
+      // BUG-22：html 渲染恒本地（沙箱 srcdoc 不参与 compute 路由），渲染/源码两
+      // 视图状态栏均显示「渲染: 本地」（ViewerPane 复用 markdown 引擎文案分支）
+      getEngine: () => 'local'
     };
     return instance;
   }

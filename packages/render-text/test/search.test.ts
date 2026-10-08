@@ -95,7 +95,7 @@ describe('renderCode 实例 search/gotoMatch', () => {
     handle.destroy();
   });
 
-  it('gotoMatch 滚动到对应行并加行级临时高亮；切换命中时旧高亮移除', async () => {
+  it('gotoMatch：当前命中行叠 active（1.5s 语义），全部命中行保持 vv-search-hit-line 背景（BUG-18）', async () => {
     stubResizeObserver();
     const host = document.createElement('div');
     document.body.append(host);
@@ -103,10 +103,16 @@ describe('renderCode 实例 search/gotoMatch', () => {
     await handle.search('beta');
     handle.gotoMatch(0);
     const row1 = host.querySelector('[data-line="1"]');
+    // 行级背景由 searchState 驱动：两个命中行都有；当前命中行额外叠 active
     expect(row1?.classList.contains('vv-search-hit-line')).toBe(true);
-    handle.gotoMatch(1);
-    expect(row1?.classList.contains('vv-search-hit-line')).toBe(false);
+    expect(row1?.classList.contains('vv-search-hit-line-active')).toBe(true);
     expect(host.querySelector('[data-line="3"]')?.classList.contains('vv-search-hit-line')).toBe(true);
+    handle.gotoMatch(1);
+    // 切换命中：旧当前行的 active 移除（命中行背景保持），新当前行叠 active
+    expect(row1?.classList.contains('vv-search-hit-line-active')).toBe(false);
+    expect(row1?.classList.contains('vv-search-hit-line')).toBe(true);
+    const row3 = host.querySelector('[data-line="3"]');
+    expect(row3?.classList.contains('vv-search-hit-line-active')).toBe(true);
     handle.destroy();
   });
 
@@ -123,7 +129,7 @@ describe('renderCode 实例 search/gotoMatch', () => {
     handle.destroy();
   });
 
-  it('gotoMatch 越界/未搜索时不抛错也不高亮', async () => {
+  it('gotoMatch 越界/未搜索时不抛错也不置 active（命中行背景仍随 searchState）', async () => {
     stubResizeObserver();
     const host = document.createElement('div');
     document.body.append(host);
@@ -131,7 +137,9 @@ describe('renderCode 实例 search/gotoMatch', () => {
     expect(() => handle.gotoMatch(0)).not.toThrow(); // 尚未 search
     await handle.search('a');
     expect(() => handle.gotoMatch(99)).not.toThrow();
-    expect(host.querySelector('.vv-search-hit-line')).toBeNull();
+    // 无当前命中 → 无 active；行 0 是搜索命中行，仍有 searchState 驱动的行级背景
+    expect(host.querySelector('.vv-search-hit-line-active')).toBeNull();
+    expect(host.querySelector('[data-line="0"]')?.classList.contains('vv-search-hit-line')).toBe(true);
     handle.destroy();
   });
 });
@@ -159,13 +167,14 @@ async function renderMd(md: string): Promise<{ target: HTMLElement; instance: Re
   return { target, instance };
 }
 
-/** markdownRenderer 实例必带 search/gotoMatch（Task 6 契约） */
+/** markdownRenderer 实例必带 search/gotoMatch（Task 6 契约；search 带 BUG-23 的 opts） */
 function searchOf(instance: RenderedInstance): {
-  search(q: string): Promise<SearchMatch[]>;
+  search(q: string, opts?: { caseSensitive?: boolean }): Promise<SearchMatch[]>;
   gotoMatch(i: number): void;
 } {
   if (!instance.search || !instance.gotoMatch) throw new Error('markdown 实例应提供 search/gotoMatch');
-  return { search: instance.search.bind(instance), gotoMatch: instance.gotoMatch.bind(instance) };
+  const s = instance.search as (q: string, opts?: { caseSensitive?: boolean }) => Promise<SearchMatch[]>;
+  return { search: s.bind(instance), gotoMatch: instance.gotoMatch.bind(instance) };
 }
 
 describe('markdown 实例 search/gotoMatch（DOM TreeWalker + mark 包裹）', () => {
@@ -256,5 +265,28 @@ describe('markdown 实例 search/gotoMatch（DOM TreeWalker + mark 包裹）', (
     const { search } = searchOf(instance);
     instance.destroy();
     await expect(search('文')).resolves.toEqual([]);
+  });
+
+  it('caseSensitive 透传（BUG-23）：默认不敏感 2 命中，敏感 1 命中', async () => {
+    const { target, instance } = await renderMd('Keyword keyword\n');
+    const { search } = searchOf(instance);
+    expect((await search('keyword')).length).toBe(2);
+    const sensitive = await search('keyword', { caseSensitive: true });
+    expect(sensitive).toHaveLength(1);
+    expect(target.querySelectorAll('mark.vv-search-hit')).toHaveLength(1);
+    expect(target.querySelector('mark.vv-search-hit')?.textContent).toBe('keyword');
+  });
+
+  it('getMeta（BUG-04）：encoding/size 按 det/buffer 透传，无 lines（渲染视图无行概念）', async () => {
+    const { instance } = await renderMd('# 标题\n');
+    const meta = (instance as RenderedInstance & {
+      getMeta?(): { encoding?: string; size: number; lines?: number };
+    }).getMeta;
+    expect(typeof meta).toBe('function');
+    const m = meta!.call(instance);
+    expect(m.encoding).toBe('utf-8');
+    expect(m.size).toBe(new TextEncoder().encode('# 标题\n').byteLength);
+    expect(m.lines).toBeUndefined();
+    instance.destroy();
   });
 });

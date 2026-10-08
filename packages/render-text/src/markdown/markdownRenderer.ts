@@ -11,7 +11,7 @@
 // 输出）一律仍走 sanitize+enrich+pipeline 全管线，与本地引擎同权。
 // 终审 C（相对图片 404）：`<img src="相对路径">` 经 setMarkdownImageResolver 注入的
 // 解析器换为同 store 文件的 URL；未注入或找不到保留原 src。
-import type { Renderer, RenderedInstance, Detection, FileSource, TocEntry, ComputeSource, ComputeWhere } from '@vviewer/core';
+import type { Renderer, RenderedInstance, Detection, FileSource, TocEntry, ComputeSource, ComputeWhere, Encoding } from '@vviewer/core';
 import { getRemoteBase } from '@vviewer/core';
 import { HighlightCanceledError, type HighlightInterval } from '@vviewer/highlight';
 import {
@@ -27,6 +27,7 @@ import {
   type RenderCodeHandle
 } from '../code';
 import { makePreview, type SearchMatchWithPreview } from '../search';
+import type { SearchMatch } from '@vviewer/core';
 import { createMarkdownEngine, renderMarkdownToHtml } from './engine';
 import { parseFrontMatter } from './frontMatter';
 import { sanitizeHtml } from './sanitize';
@@ -272,15 +273,19 @@ function createDomSearcher(target: HTMLElement, isDestroyed: () => boolean) {
     activeIndex = -1;
   }
 
-  async function search(query: string): Promise<SearchMatchWithPreview[]> {
+  async function search(
+    query: string,
+    opts?: { caseSensitive?: boolean }
+  ): Promise<SearchMatchWithPreview[]> {
     restore(); // 上一次的 mark 先还原，避免嵌套
     if (isDestroyed() || query === '') return [];
-    const needle = query.toLowerCase();
+    const caseSensitive = opts?.caseSensitive === true;
+    const needle = caseSensitive ? query : query.toLowerCase();
     const doc = target.ownerDocument;
     const results: SearchMatchWithPreview[] = [];
     for (const node of collectTextNodes(target)) {
       const text = node.nodeValue ?? '';
-      const lower = text.toLowerCase();
+      const lower = caseSensitive ? text : text.toLowerCase();
       const positions: number[] = [];
       let from = 0;
       for (;;) {
@@ -340,8 +345,22 @@ function createDomSearcher(target: HTMLElement, isDestroyed: () => boolean) {
 /** 灯箱 owner 代币序号（U3）：每次 render 唯一，destroy 时凭它校验 overlay 归属 */
 let lightboxOwnerSeq = 0;
 
+/** 渲染实例元数据快照（BUG-04）：markdown 无行概念（行列仅 code 渲染器有意义） */
+export interface MarkdownFileMeta {
+  encoding?: Encoding;
+  size: number;
+}
+
 /** 超大文件降级实例：代码视图句柄 → RenderedInstance（无 TOC，搜索走 code 实现） */
-function degradedInstance(code: RenderCodeHandle, target: HTMLElement): RenderedInstance {
+function degradedInstance(
+  code: RenderCodeHandle,
+  target: HTMLElement,
+  meta: MarkdownFileMeta
+): Omit<RenderedInstance, 'search'> & {
+  getToc(): never[];
+  search(query: string, opts?: { caseSensitive?: boolean }): Promise<SearchMatch[]>;
+  getMeta(): MarkdownFileMeta;
+} {
   return {
     destroy() {
       code.destroy();
@@ -349,8 +368,9 @@ function degradedInstance(code: RenderCodeHandle, target: HTMLElement): Rendered
       target.classList.remove('vv-degraded');
     },
     getToc: () => [], // 降级视图无标题结构
-    search: (query) => code.search(query),
-    gotoMatch: (index) => code.gotoMatch(index)
+    search: (query: string, opts?: { caseSensitive?: boolean }) => code.search(query, opts),
+    gotoMatch: (index) => code.gotoMatch(index),
+    getMeta: () => meta
   };
 }
 
@@ -370,7 +390,8 @@ export const markdownRenderer: Renderer = {
           ext: det.ext,
           highlight: false
         }),
-        target
+        target,
+        { encoding: det.encoding, size: buffer.byteLength }
       );
     }
     // 管线含动态 import（mermaid/katex/hljs）与注入后端的异步往返，期间 tab 可能
@@ -416,8 +437,13 @@ export const markdownRenderer: Renderer = {
     const toc = extractToc(target);
     // 渲染视图搜索（Task 6）：root 即挂载后的 target；destroyed 闭包供防御
     const domSearch = createDomSearcher(target, () => destroyed);
-    // getEngine 供 ViewerPane 状态栏显示正文引擎（M7：渲染: 本地/远程），复用 code 实例的轮询模式
-    const instance: RenderedInstance & { getEngine(): MarkdownEngineState } = {
+    // getEngine 供 ViewerPane 状态栏显示正文引擎（M7：渲染: 本地/远程），复用 code 实例的轮询模式；
+    // getMeta 供状态栏/属性面板元数据（BUG-04；markdown 渲染视图无行概念，不报 lines）
+    const instance: Omit<RenderedInstance, 'search'> & {
+      getEngine(): MarkdownEngineState;
+      getMeta(): MarkdownFileMeta;
+      search(query: string, opts?: { caseSensitive?: boolean }): Promise<SearchMatch[]>;
+    } = {
       destroy() {
         destroyed = true;
         domSearch.restore(); // 还原搜索 mark，避免把包裹态节点留在 DOM（虽随即清空，保持对称）
@@ -434,7 +460,8 @@ export const markdownRenderer: Renderer = {
       getToc: () => toc,
       search: domSearch.search,
       gotoMatch: domSearch.gotoMatch,
-      getEngine: () => engine
+      getEngine: () => engine,
+      getMeta: () => ({ encoding: det.encoding, size: buffer.byteLength })
     };
     return instance;
   }

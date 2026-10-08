@@ -1,13 +1,14 @@
 <script lang="ts">
   import type { RenderedInstance, TocEntry, ComputeWhere } from '@vviewer/core';
   import { showErrorCard } from '@vviewer/core';
-  import type { CodeEngine } from '@vviewer/render-text';
+  import type { CodeEngine, CodeFileMeta } from '@vviewer/render-text';
   import type { MarkdownEngineState } from '@vviewer/render-text/markdown/markdownRenderer';
   import type { Tab } from './openFlow.svelte';
   import { persistScroll } from './openFlow.svelte';
   import { dispatcher, cancelMarkdownRemote } from './viewer';
   import { cancelHighlight } from './highlightClient';
   import { watchHealth, statusNotice } from './openFlow.svelte';
+  import { setFileMeta } from './metaStore.svelte';
 import SearchPanel from './SearchPanel.svelte';
 
   let { tab, ontoc }: { tab: Tab | null; ontoc?: (entries: TocEntry[]) => void } = $props();
@@ -39,6 +40,9 @@ import SearchPanel from './SearchPanel.svelte';
   let engineLabel = $state('');
   /** 高亮计算执行位置（M6）：'远程'/'本地'/''（'' = 未发生计算路由或非 code 实例） */
   let computeWhereLabel = $state('');
+  /** 状态栏元数据段（BUG-04）：「编码: … · 语言: … · 大小: … · 行: …」（实例 getMeta
+   * 一次性读取——渲染期静态值，无需轮询；错误卡片/无 meta 实例为空段） */
+  let metaLabel = $state('');
   /** code 渲染器的内部滚动容器（.vv-code-pre）；其余渲染器为 null（滚动在外层 .vv-viewer-scroll） */
   let scrollHost: HTMLElement | null = null;
   /** 引擎轮询句柄：高亮结果异步到达（pending→tree-sitter/hljs），轻量轮询反映最新值 */
@@ -93,6 +97,34 @@ import SearchPanel from './SearchPanel.svelte';
     }
     engineLabel = '';
     computeWhereLabel = '';
+    metaLabel = '';
+  }
+
+  /** 实例元数据 → 状态栏段 + 属性面板（BUG-04；'getMeta' in inst 探测，不动 core 类型） */
+  function readInstanceMeta(inst: RenderedInstance, tabName: string, sourceLabel: string): void {
+    const readMeta = (inst as { getMeta?: () => CodeFileMeta }).getMeta;
+    if (typeof readMeta !== 'function') {
+      metaLabel = '';
+      setFileMeta({ name: tabName, sourceLabel });
+      return;
+    }
+    const m = readMeta.call(inst);
+    // 段序对齐 spec SHELL-12 验收文本：「语言 · 编码 · 大小 · 行」
+    const parts: string[] = [];
+    if (m.lang) parts.push(`语言: ${m.lang}`);
+    if (m.encoding) parts.push(`编码: ${m.encoding}`);
+    if (m.size !== undefined) parts.push(`大小: ${m.size}`);
+    // 行段仅 code 实例提供（markdown/html 渲染视图无行概念）
+    if (m.lines !== undefined) parts.push(`行: ${m.lines}`);
+    metaLabel = parts.join(' · ');
+    setFileMeta({
+      name: tabName,
+      sourceLabel,
+      encoding: m.encoding,
+      lang: m.lang ?? '',
+      size: m.size,
+      lines: m.lines
+    });
   }
 
   $effect(() => {
@@ -114,6 +146,17 @@ import SearchPanel from './SearchPanel.svelte';
         }
         live = res.instance;
         instance = res.instance;
+        // BUG-04：实例元数据 → 状态栏「编码/语言/大小/行」段 + 右栏属性面板
+        readInstanceMeta(res.instance, current.source.name, current.source.storeLabel);
+        // BUG-09：全局搜索跳转——渲染完成后定位到命中行（消费即清，tab 切换不误触发；
+        // revealLine 仅 code 实例实现，markdown/HTML 等静默跳过不阻塞打开）。
+        // GrepMatch.line 为 1 起，code 行号 0 起。
+        const pending = (current as { pendingLine?: unknown }).pendingLine;
+        (current as { pendingLine?: unknown }).pendingLine = undefined;
+        if (typeof pending === 'number' && Number.isFinite(pending)) {
+          const reveal = (res.instance as { revealLine?: (line: number) => void }).revealLine;
+          if (typeof reveal === 'function') reveal.call(res.instance, Math.max(0, pending - 1));
+        }
         // TOC 数据上行（Task 5）：markdown 实例提供 getToc，其余渲染器清空右栏目录
         const readToc = 'getToc' in res.instance ? res.instance.getToc : null;
         ontoc?.(readToc?.() ?? []);
@@ -141,12 +184,16 @@ import SearchPanel from './SearchPanel.svelte';
         const message = err instanceof Error ? err.message : String(err);
         live = showErrorCard(host, message, current.source);
         instance = live;
+        // 错误卡片实例无 meta：状态栏元数据段清空，属性面板保留名称/来源占位
+        metaLabel = '';
+        setFileMeta({ name: current.source.name, sourceLabel: current.source.storeLabel });
       }
     })();
     return () => {
       cancelled = true;
       cancelAnimationFrame(rafId);
       stopWatchEngine();
+      setFileMeta(null); // tab 切换/销毁：属性面板随之清空
       ontoc?.([]); // tab 切换/销毁：右栏目录随之清空
       scrollHost?.removeEventListener('scroll', onScroll);
       scrollHost = null;
@@ -190,9 +237,9 @@ import SearchPanel from './SearchPanel.svelte';
       }}
     />
   {/if}
-  {#if engineLabel || watchHealth.degraded || statusNotice.text}
+  {#if engineLabel || metaLabel || watchHealth.degraded || statusNotice.text}
     <div class="vv-statusbar" role="status">
-      {#if engineLabel}{engineLabel}{#if computeWhereLabel}&nbsp;· 执行: {computeWhereLabel}{/if}{/if}{#if watchHealth.degraded}{#if engineLabel}&nbsp;·{/if} 自动刷新不可用{/if}{#if statusNotice.text}{#if engineLabel || watchHealth.degraded}&nbsp;·{/if} {statusNotice.text}{/if}
+      {#if engineLabel}{engineLabel}{#if computeWhereLabel}&nbsp;· 执行: {computeWhereLabel}{/if}{/if}{#if metaLabel}{#if engineLabel}&nbsp;·&nbsp;{/if}{metaLabel}{/if}{#if watchHealth.degraded}{#if engineLabel || metaLabel}&nbsp;·{/if} 自动刷新不可用{/if}{#if statusNotice.text}{#if engineLabel || metaLabel || watchHealth.degraded}&nbsp;·{/if} {statusNotice.text}{/if}
     </div>
   {/if}
 </div>

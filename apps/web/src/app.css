@@ -202,6 +202,13 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .vv-degraded { display: flex; flex-direction: column; height: 100%; }
 .vv-degraded .vv-oversize-card { flex: none; padding: 1rem 1.5rem; border-bottom: 1px solid var(--ui-border); }
 .vv-degraded-content { flex: 1; min-height: 0; }
+/* BUG-20：>20MB 纯文本代码视图的超限提示条（code.ts 直接挂 target，pre 之上） */
+.vv-code-oversize { display: flex; flex-direction: column; height: 100%; }
+.vv-code-oversize .vv-oversize-card { flex: none; padding: 1rem 1.5rem; border-bottom: 1px solid var(--ui-border); }
+.vv-code-oversize .vv-code-pre { flex: 1; min-height: 0; height: auto; }
+/* BUG-17：被拦截的外域图片占位（markdown 渲染视图；html 沙箱内由 srcdoc 行内样式承担） */
+.vv-markdown img[data-vv-blocked-external] { display: inline-block; min-width: 96px; min-height: 40px;
+  border: 1px dashed #b58900; border-radius: 4px; background: rgb(181 137 0 / 8%); }
 /* 文件内搜索（Task 6）：ViewerPane 右上浮层面板 + code/markdown 命中高亮 */
 .vv-search-panel { position: absolute; top: 8px; right: 16px; z-index: 60; display: flex; gap: 6px;
   align-items: center; background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 6px;
@@ -212,6 +219,10 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 mark.vv-search-hit { background: rgb(255 213 0 / 45%); color: inherit; }
 mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-code-line.vv-search-hit-line { background: rgb(255 213 0 / 18%); }
+/* BUG-18/09：当前命中/跳转行在命中行背景之上加深区分（1.5s 后消退） */
+.vv-code-line.vv-search-hit-line-active { background: rgb(255 160 0 / 35%); }
+/* BUG-23：文件内搜索面板的 Aa 开关激活态（对齐全局面板按钮） */
+.vv-search-btn.active { color: var(--ui-accent); border-color: var(--ui-accent); }
 /* 树 / tabs */
 .vv-topbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--ui-border); flex-wrap: wrap; }
 /* 连接服务器内联表单（TopBar 展开行）：地址/token/连接/错误 */

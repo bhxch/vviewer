@@ -1,5 +1,5 @@
 import { createRegistry, createDispatcher, type Dispatcher, type Registry } from '@vviewer/core';
-import { codeRenderer } from '@vviewer/render-text';
+import { codeRenderer, attachHighlightRouter } from '@vviewer/render-text';
 import {
   markdownRenderer,
   setMarkdownBackend,
@@ -18,7 +18,9 @@ import { archiveRenderer } from '@vviewer/render-archive';
 import { configureLibarchive } from '@vviewer/render-archive/libarchiveStore';
 import { browser } from '$app/environment';
 import { ensureHighlightClient, computeRouter } from './highlightClient';
+import { routeLargeFileHighlight } from './highlightRouter';
 import { resolveImageBlobUrl } from './markdownImages';
+import { loadSettings } from './stores/settings';
 
 /** M1 渲染器注册表：代码/文本、markdown、html 沙箱预览、图片（含消毒后的 SVG）、音视频。
  * M4 追加：PDF（render-doc）、hex/结构树（render-binary）、压缩包 zip/tar/7z/rar
@@ -51,6 +53,9 @@ if (browser) {
   ensureHighlightClient()?.catch((e: unknown) => {
     console.warn('[highlight] client 初始化失败，代码高亮降级 hljs', e);
   });
+  // BUG-10：>2MB 文件在显式 remote 策略下问路由（auto/local 在注入侧硬拦为本地，
+  // 3MB auto 保持本地 hljs 分块零 POST——裁决注释见 highlightRouter.ts）
+  attachHighlightRouter(routeLargeFileHighlight);
 }
 
 // ---------- markdown 正文引擎接入 compute 路由（M7 Task 2，M6 遗留） ----------
@@ -100,12 +105,19 @@ async function remoteMarkdown(text: string): Promise<string> {
  */
 if (browser) {
   setMarkdownBackend(async ({ text, src }) => {
+    // BUG-22：auto 下含 fenced code block 的 markdown 留本地——围栏二级高亮仍由
+    // 本地 hljs 完成（markdownRenderer fenceToHtml），「远程 comrak 正文 + 本地 hljs
+    // 围栏」的组合会让「渲染: 远程」指示与实际语义割裂，且违背偏差 #5 的裁决精神
+    // （带注入语言的内容留本地）。行首 ≤3 空格的 ```/~~~ 启发式检测（代码块内的
+    // 假围栏会误判为有围栏，门控只损失远程机会、不损正确性）；显式 remote 仍远程。
+    const policy = loadSettings().computePolicy;
+    const localOnly = policy === 'auto' && /^[ \t]{0,3}(?:```|~~~)/m.test(text);
     const res = await computeRouter.routeMarkdown(
       src,
       text,
       undefined,
       () => Promise.resolve(renderMarkdownBody(text)),
-      src ? (t) => remoteMarkdown(t) : undefined
+      src && !localOnly ? (t) => remoteMarkdown(t) : undefined
     );
     if (!res.ok) throw new Error(res.error ?? 'markdown 渲染失败');
     return { html: res.data ?? '', where: res.where };
