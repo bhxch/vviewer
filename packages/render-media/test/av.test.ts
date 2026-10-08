@@ -144,6 +144,15 @@ describe('resolveHlsDirect / buildHlsConfig：HLS 直连（BUG-01）', () => {
     buildHlsConfig(null).xhrSetup(xhr, 'http://x/api/file');
     expect(calls).toEqual([]);
   });
+
+  it('buildHlsConfig：清单/层级/分片网络重试上限收紧（BUG-01 残留——404 分片快速升级 fatal）', () => {
+    const cfg = buildHlsConfig(null);
+    for (const kind of ['manifest', 'level', 'frag'] as const) {
+      expect(cfg[`${kind}LoadingMaxRetry`]).toBe(2);
+      expect(cfg[`${kind}LoadingRetryDelay`]).toBe(500);
+      expect(cfg[`${kind}LoadingMaxRetryTimeout`]).toBe(2000);
+    }
+  });
 });
 
 describe('rewriteHlsManifest / manifestPathOf：清单相对分片改写（BUG-01 审查修复）', () => {

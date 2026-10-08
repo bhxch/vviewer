@@ -218,12 +218,38 @@ function makeRewritingPlaylistLoader(Hls: typeof import('hls.js').default, baseU
   };
 }
 
-/** hls.js 配置：xhrSetup 为全部分片/清单 XHR 附加 Bearer（token 缺失不附加） */
-export function buildHlsConfig(token: string | null): { xhrSetup: (xhr: XMLHttpRequest, url: string) => void } {
+/**
+ * hls.js 配置：xhrSetup 为全部分片/清单 XHR 附加 Bearer（token 缺失不附加）。
+ * 网络类加载（清单/层级/分片）重试上限收紧为 2 次、短退避——hls.js 默认 6 次
+ * 指数退避且对 404 分片不自主升级 fatal（BUG-01 残留：readyState 恒 0、约
+ * 1 次/秒静默重试永不终止），收紧后快速升级 fatal，走 hlsFatalDecision 的
+ * 重试上限 → 错误卡片链，杜绝静默挂起。
+ */
+export function buildHlsConfig(token: string | null): {
+  xhrSetup: (xhr: XMLHttpRequest, url: string) => void;
+  manifestLoadingMaxRetry: number;
+  manifestLoadingRetryDelay: number;
+  manifestLoadingMaxRetryTimeout: number;
+  levelLoadingMaxRetry: number;
+  levelLoadingRetryDelay: number;
+  levelLoadingMaxRetryTimeout: number;
+  fragLoadingMaxRetry: number;
+  fragLoadingRetryDelay: number;
+  fragLoadingMaxRetryTimeout: number;
+} {
   return {
     xhrSetup: (xhr) => {
       if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-    }
+    },
+    manifestLoadingMaxRetry: 2,
+    manifestLoadingRetryDelay: 500,
+    manifestLoadingMaxRetryTimeout: 2000,
+    levelLoadingMaxRetry: 2,
+    levelLoadingRetryDelay: 500,
+    levelLoadingMaxRetryTimeout: 2000,
+    fragLoadingMaxRetry: 2,
+    fragLoadingRetryDelay: 500,
+    fragLoadingMaxRetryTimeout: 2000
   };
 }
 

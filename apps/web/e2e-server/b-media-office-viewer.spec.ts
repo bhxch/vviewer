@@ -164,15 +164,15 @@ test('MEDIA-04/BUG-01：HLS 起播可达分片、ts 走 mpegts、flv 回归、/a
 });
 
 /**
- * 【已知残留缺陷，暂缓启用】missing-seg.m3u8「分片不可达给出错误提示、不静默挂起」
- * （域文档 §3 BUG-01 验收第 3 条）。实测（2026-10-09，本探针两轮复现）：清单改写与
- * blob: 伪 URL 修复均已生效（分片正确请求 /api/file?path=seg_missing.ts 且服务端 404），
- * 但 hls.js 对 404 分片不升级 fatal——ERROR 事件到不了 av 渲染器的 fatal 决策层，
- * 表现为无错误卡片、readyState 恒 0、约 1 次/秒持续重试（观察窗 60s，15+ 次请求），
- * 与报告缺陷态「missing-seg.m3u8 静默挂起」一致。修复后放开本用例：
+ * MEDIA-04/BUG-01 残留子项回归：missing-seg.m3u8「分片不可达给出错误提示、
+ * 不静默挂起」（域文档 §3 BUG-01 验收第 3 条）。清单改写与 blob: 伪 URL 修复
+ * 生效后分片正确请求 /api/file?path=seg_missing.ts 且服务端 404；hls.js 默认
+ * 对 404 分片 6 次指数退避重试且不升级 fatal（静默挂起 ~1 次/秒）——av.ts
+ * buildHlsConfig 已把清单/分片网络重试上限收紧为 2 次、短退避，404 分片在
+ * 数秒内升级 fatal 走 hlsFatalDecision（一次 startLoad 重试后）出错误卡片。
  * 预期 .vv-error-card 含「HLS 流错误」与「重试」按钮、.vv-artplayer 被卡片替换。
  */
-test.fixme('MEDIA-04/BUG-01：missing-seg.m3u8 分片不可达时出错误卡片（不静默挂起）', async ({ page }) => {
+test('MEDIA-04/BUG-01：missing-seg.m3u8 分片不可达时出错误卡片（不静默挂起）', async ({ page }) => {
   test.setTimeout(180_000);
   await page.goto('/');
   await connect(page);
