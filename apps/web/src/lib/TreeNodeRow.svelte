@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { TreeStore, TreeNode } from '@vviewer/core';
+  import { showStatusNotice } from './openFlow.svelte';
   import Self from './TreeNodeRow.svelte';
 
   let { store, excludedPatterns = [], node, depth, onopen }: {
@@ -29,6 +30,10 @@
         children = list.filter((n) => !excluded(n.name));
       } catch (err) {
         console.error(`加载目录 ${node.path} 失败`, err);
+        // BUG-24：断网/服务器异常下展开未加载目录此前静默失败——复用既有状态栏
+        // 一次性提示通道（与文件打开失败的错误卡片对照），保留 expanded 回滚
+        const message = err instanceof Error ? err.message : String(err);
+        showStatusNotice(`目录 ${node.name} 加载失败：${message}`);
         expanded = false; // 加载失败回滚展开态，避免出现空子树
       }
     }

@@ -42,4 +42,26 @@ export function loadSettings(): Settings {
 
 export function saveSettings(s: Settings): void {
   localStorage.setItem(KEY, JSON.stringify(s));
+  notify(s);
+}
+
+// ---------- 变更订阅（BUG-05 前置基建） ----------
+// 普通 .ts 不能用 runes（计划已核实文件后缀），以回调集合实现发布订阅：
+// saveSettings 落盘后同步通知；AppShell 等订阅方据此刷新响应式副本。
+
+type SettingsListener = (s: Settings) => void;
+
+const listeners = new Set<SettingsListener>();
+
+/**
+ * 订阅设置变更（saveSettings 触发）；返回退订函数。
+ * 回调收到的是深一层的副本（excludedPatterns 数组拷贝），订阅方改动不回灌。
+ */
+export function onSettingsChanged(cb: SettingsListener): () => void {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+}
+
+function notify(s: Settings): void {
+  for (const cb of listeners) cb({ ...s, excludedPatterns: [...s.excludedPatterns] });
 }

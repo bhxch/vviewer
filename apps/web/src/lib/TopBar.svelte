@@ -1,12 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { openFiles, openDirectoryViaPicker, openUrl, connectServer, loadLastServer } from './openFlow.svelte';
-  import { loadSettings, saveSettings, type Settings } from './stores/settings';
+  import SettingsPanel from './SettingsPanel.svelte';
+  import { openFiles, openDirectoryViaPicker, openUrl, connectServer, loadLastServer, tabStore } from './openFlow.svelte';
+  import { loadSettings, saveSettings, onSettingsChanged, type Settings } from './stores/settings';
   import { applyCodeTheme, effectiveMode, onSystemModeChange, themeOptions } from './theme';
 
   let settings = $state<Settings>(loadSettings());
   let urlValue = $state('');
   let fileInput = $state<HTMLInputElement | null>(null);
+  // 设置面板浮层开关（BUG-05）：⚙ 按钮挂载，Ctrl+comma 切换
+  let settingsOpen = $state(false);
   // 主题表经动态 import 惰性加载（不进主 chunk），下拉选项挂载后异步填充
   let codeThemeOptions = $state<Awaited<ReturnType<typeof themeOptions>>>([]);
 
@@ -28,12 +31,20 @@
   onMount(() => {
     void themeOptions().then((opts) => (codeThemeOptions = opts));
     applyCurrentCodeTheme();
+    // 订阅设置变更保持本副本最新：设置面板（SettingsPanel）改的排除/自动刷新，
+    // 以及合并保存的其余字段，都同步回来——本组件后续 saveSettings(settings)
+    // 写完整对象时不会把面板刚改的值写回旧值
+    const offSettings = onSettingsChanged((s) => (settings = s));
     // themeMode=system：OS 亮暗切换时按新槽位重应用代码主题（UI 配色由
     // prefers-color-scheme 媒体查询自动跟随，JS 注入的代码主题变量需要这一步）
-    return onSystemModeChange((sysMode) => {
+    const offSystem = onSystemModeChange((sysMode) => {
       if (settings.themeMode !== 'system') return;
       void applyCodeTheme(sysMode === 'dark' ? settings.codeThemeDark : settings.codeThemeLight, sysMode);
     });
+    return () => {
+      offSettings();
+      offSystem();
+    };
   });
 
   function cycleTheme(): void {
@@ -66,6 +77,35 @@
     if (input.files) openFiles([...input.files]);
     input.value = '';
   }
+
+  /**
+   * 手动刷新（BUG-05，SRV-07）：复用 SSE 的 refreshPaths 通道（rev++ 驱动重读）。
+   * 活动为文件 tab 时 [path] 同时刷新该文件与目录树（refreshPaths 对目录 tab
+   * 恒自增）；活动为目录 tab 时空 paths 刷新整个 store。不受 autoRefresh 开关
+   * 限制（开关只过滤 SSE 推送，手动刷新语义即用户显式要求）。
+   */
+  function manualRefresh(): void {
+    const t = tabStore.list.find((x) => x.active);
+    if (!t) return;
+    tabStore.refreshPaths(t.source.storeId, t.source.path === '' ? [] : [t.source.path]);
+  }
+
+  // Ctrl+comma 切换设置面板（BUG-05）：非输入焦点时才接管——与 Ctrl+Shift+F 的
+  // inField 判定同惯例
+  $effect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === ',')) return;
+      const t = e.target as HTMLElement | null;
+      const inField =
+        t !== null &&
+        (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+      if (inField) return;
+      e.preventDefault();
+      settingsOpen = !settingsOpen;
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
 
   function submit(e: SubmitEvent): void {
     e.preventDefault();
@@ -121,6 +161,7 @@
     <input placeholder="粘贴文件 URL" bind:value={urlValue} aria-label="文件 URL" />
   </form>
   <button onclick={toggleServerPanel}>连接服务器</button>
+  <button onclick={manualRefresh} aria-label="刷新当前文件" title="手动刷新当前文件与目录树（快捷键 Ctrl+, 打开设置可关自动刷新）">↻</button>
   {#if serverOpen}
     <form class="vv-server-form" onsubmit={connect}>
       <input
@@ -163,4 +204,10 @@
       </optgroup>
     {/each}
   </select>
+  <button onclick={() => (settingsOpen = !settingsOpen)} aria-label="设置" title="设置（Ctrl+,）：排除规则 / 自动刷新">
+    ⚙
+  </button>
 </header>
+{#if settingsOpen}
+  <SettingsPanel onclose={() => (settingsOpen = false)} />
+{/if}
