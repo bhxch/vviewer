@@ -99,11 +99,12 @@ export interface LibarchiveStoreOptions {
   allowEncryptedEntries?: boolean;
 }
 
-/** libarchive 错误 → 用户可读值（加密/格式/已关闭/ wasm 崩溃转中文，其余透传） */
+/** libarchive 错误 → 用户可读值（加密/格式/已关闭/ wasm 崩溃转中文，其余透传）。
+ * 加密文案含「加密不支持预览」段（与 zipStore 及 BIN-08 e2e 断言子串口径一致） */
 export function normalizeLibarchiveError(err: unknown): unknown {
   if (err instanceof Error) {
     const m = err.message;
-    if (/encrypt/i.test(m)) return new Error('该条目已加密，无法解密预览');
+    if (/encrypt/i.test(m)) return new Error('加密不支持预览：该条目已加密');
     if (/already closed/i.test(m)) return new Error('压缩包已关闭，无法再读取条目');
     if (
       /unrecognized|unknown format|format not|corrupt|invalid/i.test(m) ||

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createRegistry } from '../src/registry/registry';
 import { createDispatcher, signatureRouteOf } from '../src/dispatch/dispatcher';
 import type { Renderer } from '../src/types';
@@ -205,21 +205,22 @@ describe('dispatcher 无扩展名回退链（BUG-07）', () => {
 });
 
 describe('dispatcher 错误卡片 actions（BUG-14）', () => {
-  it('render 失败的卡片带「重试」「降级查看」按钮；重试成功即恢复渲染', async () => {
+  it('render 失败的卡片带「重试」「降级查看」按钮；重试成功即恢复渲染且新实例被级联托管', async () => {
     const reg = createRegistry();
     let attempts = 0;
+    const retryDestroyed = vi.fn();
     reg.install(mk('flaky', ['txt'], {
       render: async (_b, t) => {
         attempts++;
         if (attempts === 1) throw new Error('boom');
         t.replaceChildren('rendered'); // 模拟真实渲染器挂载内容
-        return { destroy() {} };
+        return { destroy: retryDestroyed };
       }
     }));
     reg.install(mk('hex', ['bin']));
     const target = document.createElement('div');
     document.body.append(target);
-    const { rendererId } = await createDispatcher(reg).dispatch(
+    const { instance: cardInstance, rendererId } = await createDispatcher(reg).dispatch(
       source('a.txt'), new TextEncoder().encode('hi'), target);
     expect(rendererId).toBe('error');
     const buttons = [...target.querySelectorAll<HTMLButtonElement>('button.vv-error-action')];
@@ -231,6 +232,34 @@ describe('dispatcher 错误卡片 actions（BUG-14）', () => {
     // 重试成功后卡片被渲染实例替换（无按钮残留）
     expect(target.querySelector('.vv-error-card')).toBeNull();
     expect(target.textContent).toContain('rendered');
+    // 级联托管：销毁 dispatch 返回的卡片实例（调用方持有的 live）→ 重试产出的新实例被释放
+    cardInstance.destroy();
+    expect(retryDestroyed).toHaveBeenCalledTimes(1);
+    target.remove();
+  });
+
+  it('降级查看成功的 hex 实例同样被级联托管', async () => {
+    const reg = createRegistry();
+    reg.install(mk('boom', ['txt'], { render: async () => { throw new Error('boom'); } }));
+    const hexDestroyed = vi.fn();
+    reg.install(mk('hex', ['bin'], {
+      render: async (_b, t) => {
+        t.replaceChildren('hexdump');
+        return { destroy: hexDestroyed };
+      }
+    }));
+    const target = document.createElement('div');
+    document.body.append(target);
+    const { instance: cardInstance } = await createDispatcher(reg).dispatch(
+      source('a.txt'), new TextEncoder().encode('hi'), target);
+    const buttons = [...target.querySelectorAll<HTMLButtonElement>('button.vv-error-action')];
+    expect(buttons.map((b) => b.textContent)).toEqual(['重试', '降级查看']);
+    buttons[1]!.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(target.textContent).toContain('hexdump');
+    cardInstance.destroy();
+    expect(hexDestroyed).toHaveBeenCalledTimes(1);
     target.remove();
   });
   it('重试仍失败保留错误详情；registry 无 hex 时无降级按钮', async () => {

@@ -46,22 +46,26 @@ export function signatureRouteOf(signature: Detection['signature']): SignatureRo
  * 错误卡片兜底，语义正确；与 ooxml 渲染器「sniff 永不改派」的既有裁决同向）。 */
 const TEXTUAL_RENDERER_IDS = new Set<RendererId>(['code', 'markdown', 'html']);
 
-/** 渲染阶段失败错误卡片的动作（BUG-14）：重试 = 重跑本渲染器 render；降级 = hex 渲染原始字节 */
+/** 渲染阶段失败错误卡片的动作（BUG-14）：重试 = 重跑本渲染器 render；降级 = hex 渲染原始字节。
+ * onRendered 接收重试/降级成功产出的实例，由调用方（dispatch catch）级联托管 */
 function buildRenderErrorActions(
   renderer: Renderer,
   buffer: Uint8Array,
   source: FileSource,
   det: Detection,
-  target: HTMLElement
+  target: HTMLElement,
+  onRendered: (instance: RenderedInstance) => void
 ): ErrorCardAction[] {
   const retry = (): void => {
-    void renderer.render(buffer, target, source, det).catch((err: unknown) => {
-      // 重试仍失败：保留错误详情，按钮随之重建（可继续重试/降级）
-      const message = err instanceof Error ? err.message : String(err);
-      showErrorCard(target, message, source, {
-        actions: buildRenderErrorActions(renderer, buffer, source, det, target)
+    renderer.render(buffer, target, source, det)
+      .then(onRendered)
+      .catch((err: unknown) => {
+        // 重试仍失败：保留错误详情，按钮随之重建（可继续重试/降级）
+        const message = err instanceof Error ? err.message : String(err);
+        showErrorCard(target, message, source, {
+          actions: buildRenderErrorActions(renderer, buffer, source, det, target, onRendered)
+        });
       });
-    });
   };
   const actions: ErrorCardAction[] = [{ label: '重试', onClick: retry }];
   const hex = getHexFallbackRenderer();
@@ -69,10 +73,12 @@ function buildRenderErrorActions(
     actions.push({
       label: '降级查看',
       onClick: () => {
-        void hex.render(buffer, target, source, det).catch((err: unknown) => {
-          const message = err instanceof Error ? err.message : String(err);
-          showErrorCard(target, message, source);
-        });
+        Promise.resolve(hex.render(buffer, target, source, det))
+          .then(onRendered)
+          .catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : String(err);
+            showErrorCard(target, message, source);
+          });
       }
     });
   }
@@ -159,12 +165,28 @@ export function createDispatcher(registry: Registry): Dispatcher {
         return { instance, rendererId: renderer.id, det };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        // 仅 render 阶段失败提供重试/降级（选路失败重试同一路径无意义，保持纯错误卡片）
+        // 仅 render 阶段失败提供重试/降级（选路失败重试同一路径无意义，保持纯错误卡片）。
+        // 重试/降级成功产出的真实实例由 liveChild 级联托管：调用方（ViewerPane）持有的
+        // live 仍是本卡片实例，其 destroy（tab 关闭/重渲染）时级联释放，杜绝资源泄漏
+        let liveChild: RenderedInstance | null = null;
+        const takeOver = (instance: RenderedInstance): void => {
+          liveChild?.destroy(); // 同一插槽先释放上一个成功实例（重试/降级互斥替换语义）
+          liveChild = instance;
+        };
         const actions = renderer
-          ? { actions: buildRenderErrorActions(renderer, buffer, source, det, target) }
+          ? { actions: buildRenderErrorActions(renderer, buffer, source, det, target, takeOver) }
           : undefined;
-        const instance = showErrorCard(target, message, source, actions);
-        return { instance, rendererId: errorRenderer.id, det };
+        const card = showErrorCard(target, message, source, actions);
+        return {
+          instance: {
+            destroy() {
+              liveChild?.destroy();
+              card.destroy();
+            }
+          },
+          rendererId: errorRenderer.id,
+          det
+        };
       }
     }
   };

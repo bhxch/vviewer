@@ -97,10 +97,10 @@ describe('createZipStore', () => {
 });
 
 describe('normalizeZipError', () => {
-  it('加密条目错误转换为中文提示', () => {
+  it('加密条目错误转换为中文提示（含 BIN-08 断言子串「加密不支持预览」）', () => {
     const converted = normalizeZipError(new Error('Encrypted ZIP: file is encrypted with unsupported algorithm'));
     expect(converted).toBeInstanceOf(Error);
-    expect((converted as Error).message).toBe('该条目已加密，无法解密预览');
+    expect((converted as Error).message).toBe('加密不支持预览：该条目已加密');
   });
 
   it('其他错误原样透传', () => {
@@ -186,6 +186,42 @@ describe('parseZipCentralDirectory（BUG-12 中心目录自解析）', () => {
     eocd.set([0xff, 0xff], 18);
     expect(() => parseZipCentralDirectory(eocd)).toThrow('ZIP64');
   });
+
+  /** 手工最小 zip（1 个 CDH + EOCD）：name 以 latin1 直射字节写入，flags 可编程。
+   * 用于 bit11（EFS）分流的边界断言——jszip 总是置 bit11，造不出遗留编码样本。 */
+  function tinyZip(name: string, flags: number): Uint8Array {
+    const nameBytes = Uint8Array.from([...name].map((c) => c.charCodeAt(0) & 0xff));
+    const cdh = new Uint8Array(46 + nameBytes.length);
+    cdh.set([0x50, 0x4b, 0x01, 0x02], 0);
+    cdh[8] = flags & 0xff; // 通用标志低字节（bit0 加密）
+    cdh[9] = (flags >> 8) & 0xff; // 通用标志高字节（bit11 EFS）
+    cdh[24] = 5; // uncompSize = 5
+    cdh[28] = nameBytes.length & 0xff;
+    cdh[29] = nameBytes.length >> 8;
+    cdh.set(nameBytes, 46);
+    const eocd = new Uint8Array(22);
+    eocd.set([0x50, 0x4b, 0x05, 0x06], 0);
+    eocd[10] = 1; // total entries = 1（cdOffset@16 = 0 → CDH 位于缓冲区首）
+    const buf = new Uint8Array(cdh.length + eocd.length);
+    buf.set(cdh, 0);
+    buf.set(eocd, cdh.length);
+    return buf;
+  }
+
+  it('bit11=0（遗留编码）按 latin1 兜底解码；bit11=1 按 UTF-8 解码（已知边界：与 libarchive 侧名可能不一致）', () => {
+    // 'clé.txt' 的 latin1 字节：é=0xE9；bit11=0、bit0=1（加密）
+    const legacy = parseZipCentralDirectory(tinyZip('clé.txt', 0x0001));
+    expect([...legacy.sizes.keys()]).toEqual(['clé.txt']);
+    expect(legacy.sizes.get('clé.txt')).toBe(5);
+    expect([...legacy.encryptedPaths]).toEqual(['clé.txt']);
+    // 同一字节流若错误地按 UTF-8 强解会得到乱码名——bit11=1 时按 UTF-8 解码 UTF-8 字节
+    const utf8Name = new TextEncoder().encode('clé.txt');
+    const modern = parseZipCentralDirectory(
+      tinyZip([...utf8Name].map((b) => String.fromCharCode(b)).join(''), 0x0801)
+    );
+    expect([...modern.sizes.keys()]).toEqual(['clé.txt']);
+    expect([...modern.encryptedPaths]).toEqual(['clé.txt']);
+  });
 });
 
 describe('createZipStore 混合加密包（BUG-12：不整包拒绝，明文可读、加密逐条拦截）', () => {
@@ -208,7 +244,7 @@ describe('createZipStore 混合加密包（BUG-12：不整包拒绝，明文可�
     );
     const open = await store.read('plain/open.txt');
     expect(new TextDecoder().decode(open)).toBe('open content');
-    await expect(store.read('secret/locked.txt')).rejects.toThrow('该条目已加密，无法解密预览');
+    await expect(store.read('secret/locked.txt')).rejects.toThrow('加密不支持预览：该条目已加密');
     await expect(store.read('nope.txt')).rejects.toThrow('未知路径');
   });
 
@@ -219,7 +255,7 @@ describe('createZipStore 混合加密包（BUG-12：不整包拒绝，明文可�
     const kids = await store.listChildren('');
     expect(kids).toHaveLength(2);
     expect(kids.every((n: TreeNode) => n.encrypted === true)).toBe(true);
-    await expect(store.read('a.txt')).rejects.toThrow('该条目已加密');
+    await expect(store.read('a.txt')).rejects.toThrow('加密不支持预览');
   });
 
   it('id 与嵌套链同构（zip:zip:…），depth 届满对内嵌归档条目同样拒展', async () => {
@@ -235,7 +271,7 @@ describe('createZipStore 混合加密包（BUG-12：不整包拒绝，明文可�
     expect(store.id).toMatch(/^zip:zip:zip:zip:/);
     await expect(store.read('plain.txt')).resolves.toBeInstanceOf(Uint8Array);
     await expect(store.read('too-deep.zip')).rejects.toThrow('嵌套层数超限');
-    await expect(store.read('secret/locked.txt')).rejects.toThrow('该条目已加密');
+    await expect(store.read('secret/locked.txt')).rejects.toThrow('加密不支持预览');
     // worker 资源：混合包 store 有 close（接线语义与 libarchive store 一致）
     store.close?.();
   });

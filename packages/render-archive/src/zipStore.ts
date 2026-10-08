@@ -41,10 +41,11 @@ export function isArchiveEntry(path: string): boolean {
   return ARCHIVE_EXTS.has(ext);
 }
 
-/** jszip read 错误 → 用户可读值（加密条目转换中文 Error，其余透传） */
+/** jszip read 错误 → 用户可读值（加密条目转换中文 Error，其余透传）。
+ * 文案含「加密不支持预览」段（与 BIN-08 e2e 断言子串口径一致） */
 export function normalizeZipError(err: unknown): unknown {
   if (err instanceof Error) {
-    if (/encrypt/i.test(err.message)) return new Error('该条目已加密，无法解密预览');
+    if (/encrypt/i.test(err.message)) return new Error('加密不支持预览：该条目已加密');
     return err;
   }
   return err;
@@ -100,6 +101,18 @@ function readU32(b: Uint8Array, off: number): number {
   return (b[off]! | (b[off + 1]! << 8) | (b[off + 2]! << 16) | (b[off + 3]! << 24)) >>> 0;
 }
 
+/**
+ * 条目名解码：通用标志 bit11（EFS）置位按 UTF-8；未置位按 latin1 兜底（CP437 的
+ * ASCII 区间与 latin1 一致、扩展区近似可读，优于强制 UTF-8 的乱码）。已知边界：
+ * 遗留编码名与 libarchive worker 侧列出的条目名可能不一致（libarchive 对非 UTF-8
+ * zip 名的解码独立实现），此时混合包 read 转发 libStore.read 可能报未知路径——
+ * 主流 ASCII 名与 UTF-8 名（bit11=1）不受影响。
+ */
+function decodeEntryName(bytes: Uint8Array, flags: number): string {
+  if ((flags & 0x800) !== 0) return new TextDecoder().decode(bytes);
+  return new TextDecoder('latin1').decode(bytes);
+}
+
 /** 从尾部扫描 EOCD 签名（PK\x05\x06）：固定 22 字节 + 注释（≤65535），注释可能含任意字节，从后向前找 */
 function findEocdOffset(b: Uint8Array): number | null {
   const min = Math.max(0, b.length - 22 - 65535);
@@ -135,7 +148,7 @@ export function parseZipCentralDirectory(buffer: Uint8Array): ZipDirectory {
     const extraLen = readU16(buffer, off + 30);
     const commentLen = readU16(buffer, off + 32);
     if (uncompSize === 0xffffffff) throw new Error('ZIP64 格式的加密 zip 暂不支持');
-    const name = new TextDecoder().decode(buffer.subarray(off + 46, off + 46 + nameLen));
+    const name = decodeEntryName(buffer.subarray(off + 46, off + 46 + nameLen), flags);
     const isDir = name.endsWith('/');
     const path = isDir ? name.replace(/\/+$/, '') : name;
     if (path !== '') {
@@ -265,7 +278,7 @@ async function createEncryptedZipStore(
       if (depth >= MAX_ARCHIVE_DEPTH && isArchiveEntry(path)) {
         throw new Error(`嵌套层数超限：递归预览最多 ${MAX_ARCHIVE_DEPTH} 层`);
       }
-      if (dir.encryptedPaths.has(path)) throw new Error('该条目已加密，无法解密预览');
+      if (dir.encryptedPaths.has(path)) throw new Error('加密不支持预览：该条目已加密');
       return libStore.read(path);
     },
     close() {

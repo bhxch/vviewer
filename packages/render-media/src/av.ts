@@ -1,23 +1,27 @@
 // av.ts — 音视频渲染器（M4 Task 6 ArtPlayer 升级 + e2e 修复批次）。
 // 视频（mp4/m4v/webm/ogg/ts + 流媒体 m3u8/flv）改 ArtPlayer（动态 import，不进主包）；
 // 音频保持原生 <audio controls>（spec 决策不变）。流协议按扩展名分派：
-// .m3u8 → 动态 import hls.js 的 loader（仅 remote store 直连，本地 store 明确报错）；
+// .m3u8 → 动态 import hls.js（仅 remote store 直连 + pLoader 清单改写，本地 store 明确报错）；
 // .flv/.ts → 动态 import mpegts.js 的 loader（hls.js/mpegts.js 为可选依赖，仅扩展名匹配时才加载）。
-// blob URL 生命周期与 M1 一致：render 时 create，destroy 时 revoke；视频路径的
-// createObjectURL 推迟到 ArtPlayer 构造前一刻——动态 import/构造失败时不创建，
-// 构造抛错则 revoke 后 rethrow，绝不泄漏；HLS 直连（remote store）不建 blob，无 revoke 面。
+// HLS 直连（BUG-01）：清单走 /api/file?path= 直连 URL，pLoader 在响应期把清单文本中的
+// 相对分片/URI 属性改写为 /api/file 绝对地址（rewriteHlsManifest；相对分片不能依赖
+// base 合并——url-toolkit 的 query 不继承，不改写会 404），分片请求直达服务端且经
+// xhrSetup 附加 Bearer。blob URL 生命周期与 M1 一致：render 时 create，destroy 时
+// revoke；视频路径的 createObjectURL 推迟到 ArtPlayer 构造前一刻——动态 import/构造
+// 失败时不创建，构造抛错则 revoke 后 rethrow，绝不泄漏；HLS 直连不建 blob，无 revoke 面。
 // destroy 另调 art.destroy(removeHtml=true) 并释放流播放器（hls/mpegts 实例）。
 // 流 loader（hls.js/mpegts.js 动态 import + 播放器装配）整体 try/catch：装配失败转
 // ArtPlayer notice 提示并吞掉异常；运行期 fatal 错误（Hls.Events.ERROR / mpegts ERROR /
 // video error）升级为统一错误卡片（BUG-01 消除静默无限重试、BUG-14 替换黑屏+瞬时
-// Reconnect 计数），卡片带「重试」（重跑本渲染器 render）与「降级查看」（hex 兜底）按钮。
-// 类型分派/协议映射/配置构造/HLS 直连解析/fatal 决策为纯函数导出（单测直测；
+// Reconnect 计数），卡片带「重试」（重跑本渲染器 render）与「降级查看」（hex 兜底）按钮，
+// 重试/降级成功产出的新实例由本渲染闭包级联托管（本实例 destroy 时级联释放，不泄漏）。
+// 类型分派/协议映射/配置构造/HLS 直连解析/清单改写/fatal 决策为纯函数导出（单测直测；
 // jsdom 无法真渲染 ArtPlayer，真实播放 E2E 留 T7）。
 import { getHexFallbackRenderer, getRemoteBase, showErrorCard } from '@vviewer/core';
 import type { ErrorCardAction } from '@vviewer/core';
 import type { Option } from 'artplayer';
 import type Artplayer from 'artplayer';
-import type { Detection, FileSource, RenderedInstance, Renderer } from '@vviewer/core';
+import type { Detection, Encoding, FileSource, RenderedInstance, Renderer } from '@vviewer/core';
 
 /** 扩展名 → blob MIME（流媒体清单/原始流同样标注，供 blob 元数据可读） */
 // mov（QuickTime 容器，H.264 轨道主流浏览器可播）与 aac（ADTS 裸流）为浏览器
@@ -100,23 +104,118 @@ function readSessionToken(): string | null {
   }
 }
 
-/** HLS 直连源：真实 URL + 鉴权 token（可空） */
+/** HLS 直连源：服务端 base（含可能的反代前缀，归一化无尾斜杠）+ 直连 URL + 鉴权 token（可空） */
 export interface HlsDirectSource {
+  base: string;
   url: string;
   token: string | null;
 }
 
 /**
- * m3u8 直连源解析（BUG-01）：仅 remote store（有服务端 base）支持——分片相对路径
- * 由 hls.js 按真实 URL 解析（此前 blob base 导致 blob:.../seg0.ts 永不可达）。
- * 本地 store（localfiles/zip 内嵌等）返回 null，由 render 抛明确错误（spec 允许的收窄档）。
+ * m3u8 直连源解析（BUG-01）：仅 remote store（有服务端 base）支持——清单经直连 URL
+ * 交给 hls.js，清单/分片文本由 pLoader 改写为 /api/file 绝对地址（见 rewriteHlsManifest，
+ * 相对分片不能依赖 base 合并：url-toolkit 合并时 query 不继承，/api/file?path= 的
+ * base 会让 seg0.ts 落到不存在的 /api/seg0.ts）。本地 store（localfiles/zip 内嵌等）
+ * 返回 null，由 render 抛明确错误（spec 允许的收窄档）。
  */
 export function resolveHlsDirect(source: FileSource): HlsDirectSource | null {
   const base = getRemoteBase(source.storeId);
   if (!base) return null;
   return {
+    base,
     url: `${base}/api/file?path=${encodeURIComponent(source.path)}`,
     token: readSessionToken()
+  };
+}
+
+/** hls.js 清单 URL → 清单 store 内 path：直连/改写后的 URL 形如 `<base>/api/file?path=<enc>`；
+ * 其他形态（blob: 等）返回 null（清单文本原样通过，不改写） */
+export function manifestPathOf(url: string): string | null {
+  try {
+    const u = new URL(url);
+    if (!u.pathname.endsWith('/api/file')) return null;
+    return u.searchParams.get('path');
+  } catch {
+    return null;
+  }
+}
+
+/** 相对 URI → `<base>/api/file?path=<相对清单目录解析后的 store 路径>`；
+ * 带 scheme 的绝对 URI（http/https/data 等）原样返回；根相对（/ 开头）按 store 根解析 */
+export function absolutizeHlsUri(baseUrl: string, manifestDir: string, uri: string): string {
+  if (/^[a-z][a-z0-9+.-]*:/i.test(uri)) return uri;
+  const raw = uri.startsWith('/') ? uri.slice(1) : manifestDir ? `${manifestDir}/${uri}` : uri;
+  return `${baseUrl}/api/file?path=${encodeURIComponent(raw)}`;
+}
+
+/**
+ * 清单改写（BUG-01 核心，纯函数）：把分片行与 URI="..." 属性中的相对地址改写为
+ * /api/file 绝对地址（相对各自清单 path 的目录解析）。hls.js 的 base 合并不继承
+ * query，直连 ?path= URL 必须改写后分片才可达；多层清单（master→子清单）场景下
+ * pLoader 对每份清单文本（含子清单）都执行本函数，子清单内部分片同样正确改写。
+ */
+export function rewriteHlsManifest(text: string, baseUrl: string, manifestPath: string): string {
+  const dir = manifestPath.includes('/') ? manifestPath.slice(0, manifestPath.lastIndexOf('/')) : '';
+  return text
+    .split('\n')
+    .map((line) => {
+      const trimmed = line.trim();
+      if (trimmed !== '' && !trimmed.startsWith('#')) return absolutizeHlsUri(baseUrl, dir, trimmed);
+      if (!line.includes('URI="')) return line; // 普通标签（#EXTM3U/#EXTINF 等）原样
+      return line.replace(/URI="([^"]*)"/g, (whole, uri: string) =>
+        uri === '' ? whole : `URI="${absolutizeHlsUri(baseUrl, dir, uri)}"`);
+    })
+    .join('\n');
+}
+
+/**
+ * hls.js 清单 loader（pLoader 位）：默认 loader 的薄包装，在响应回调里对清单文本执行
+ * rewriteHlsManifest（清单自身 path 从 context.url 的 ?path= 提取）。分片走默认 loader
+ * （清单内 URI 已被改写为绝对地址），token 鉴权仍由全局 xhrSetup 附加。
+ */
+function makeRewritingPlaylistLoader(Hls: typeof import('hls.js').default, baseUrl: string): unknown {
+  interface InnerLoader {
+    load(context: unknown, config: unknown, callbacks: unknown): void;
+    abort(): void;
+    destroy(): void;
+  }
+  interface LoaderCallbacksLike {
+    onSuccess(response: { data: unknown }, stats: unknown, ctx: { url?: string }, networkDetails?: unknown): void;
+    onError(...args: unknown[]): void;
+    onTimeout(...args: unknown[]): void;
+  }
+  const DefaultLoader = Hls.DefaultConfig.loader;
+  return class RewritingPlaylistLoader {
+    private inner: InnerLoader;
+    constructor(config: unknown) {
+      this.inner = new DefaultLoader(config as never) as unknown as InnerLoader;
+    }
+    load(context: { url?: string }, config: unknown, callbacks: LoaderCallbacksLike): void {
+      const wrapped: LoaderCallbacksLike = {
+        onSuccess: (response: { data: unknown }, stats: unknown, ctx: { url?: string }, networkDetails?: unknown) => {
+          const manifestPath = manifestPathOf(ctx?.url ?? '');
+          if (typeof response?.data === 'string' && manifestPath !== null) {
+            callbacks.onSuccess(
+              { ...response, data: rewriteHlsManifest(response.data, baseUrl, manifestPath) },
+              stats,
+              ctx,
+              networkDetails
+            );
+          } else {
+            callbacks.onSuccess(response, stats, ctx, networkDetails);
+          }
+        },
+        onError: (...args: unknown[]) => callbacks.onError(...args),
+        onTimeout: (...args: unknown[]) => callbacks.onTimeout(...args)
+      };
+      this.inner.load(context, config, wrapped);
+    }
+    abort(): void {
+      this.inner.abort();
+    }
+    destroy(): void {
+      this.inner.destroy();
+    }
   };
 }
 
@@ -154,7 +253,8 @@ export function videoErrorMessage(code: number | null | undefined): string {
 }
 
 /** hls.js loader：仅在 .m3u8 时动态 import（可选依赖不进主包）；装配失败 notice 提示并吞异常，
- * 运行期 fatal 按 hlsFatalDecision 决策（重试上限），终态经 onFatal 升级错误卡片 */
+ * 运行期 fatal 按 hlsFatalDecision 决策（重试上限），终态经 onFatal 升级错误卡片。
+ * pLoader 为改写 loader：清单/子清单文本中的相对分片在响应期改写为 /api/file 绝对地址 */
 async function makeHlsLoader(
   direct: HlsDirectSource,
   cleanups: Cleanup[],
@@ -164,7 +264,12 @@ async function makeHlsLoader(
     try {
       const Hls = (await import('hls.js')).default;
       if (!Hls.isSupported()) throw new Error('当前浏览器不支持 MSE，无法播放 HLS 流');
-      const hls = new Hls(buildHlsConfig(direct.token));
+      const hls = new Hls({
+        ...buildHlsConfig(direct.token),
+        // 结构上兼容 hls.js 的 PlaylistLoaderConstructor（load/abort/destroy + 构造器），
+        //但其类型带泛型装载细节，断言注入（运行时协议由 makeRewritingPlaylistLoader 保证）
+        pLoader: makeRewritingPlaylistLoader(Hls, direct.base) as never
+      });
       let fatals = 0;
       hls.on(Hls.Events.ERROR, (_evt, data) => {
         if (!data.fatal) return;
@@ -241,9 +346,9 @@ export const avRenderer: Renderer = {
       el.src = url;
       el.className = 'vv-av';
       target.replaceChildren(el);
-      const instance: RenderedInstance & { getMeta(): { size: number } } = {
-        // BUG-04 握手点 2 代工：av 实例暴露大小
-        getMeta: () => ({ size: buffer.length }),
+      const instance: RenderedInstance & { getMeta(): { size: number; encoding?: Encoding } } = {
+        // BUG-04 握手点 2 代工：av 实例暴露大小与编码（SHELL-12 验收要求媒体至少大小+编码）
+        getMeta: () => ({ size: buffer.length, encoding: det.encoding }),
         destroy() {
           el.pause();
           URL.revokeObjectURL(url);
@@ -295,16 +400,26 @@ export const avRenderer: Renderer = {
       if (!hlsDirect) URL.revokeObjectURL(url);
     };
     let cardShown = false;
+    // 重试/降级成功产出的新实例由本渲染闭包级联托管：ViewerPane 持有的 live 仍是本卡片
+    // 实例（旧播放器实例），tab 关闭/重渲染时 destroy 走级联释放——重试产出的新播放器
+    // /hex 实例不会成为无人持有的泄漏源（spec BUG-14 风险节「新实例归属」问题的自持解法）
+    let liveChild: RenderedInstance | null = null;
+    const takeOver = (instance: RenderedInstance): void => {
+      liveChild?.destroy(); // 同一插槽先释放上一个成功实例（重试→降级为互斥替换语义）
+      liveChild = instance;
+    };
     const buildActions = (): ErrorCardAction[] => {
       const actions: ErrorCardAction[] = [
         {
           label: '重试',
           onClick: () => {
             // 重跑本渲染器 render（自持闭包）；再失败转新错误卡片（按钮随重建，信息不丢）
-            avRenderer.render(buffer, target, source, det).catch((err: unknown) => {
-              const message = err instanceof Error ? err.message : String(err);
-              showErrorCard(target, message, source, { actions: buildActions() });
-            });
+            avRenderer.render(buffer, target, source, det)
+              .then(takeOver)
+              .catch((err: unknown) => {
+                const message = err instanceof Error ? err.message : String(err);
+                showErrorCard(target, message, source, { actions: buildActions() });
+              });
           }
         }
       ];
@@ -314,10 +429,12 @@ export const avRenderer: Renderer = {
           label: '降级查看',
           onClick: () => {
             release(); // 先释放播放器资源（blob/worker），再以 hex 渲染原始字节（当前为原始字节视图）
-            Promise.resolve(hex.render(buffer, target, source, det)).catch((err: unknown) => {
-              const message = err instanceof Error ? err.message : String(err);
-              showErrorCard(target, message, source);
-            });
+            Promise.resolve(hex.render(buffer, target, source, det))
+              .then(takeOver) // hex 实例同样级联托管（tab 关闭时随本实例销毁）
+              .catch((err: unknown) => {
+                const message = err instanceof Error ? err.message : String(err);
+                showErrorCard(target, message, source);
+              });
           }
         });
       }
@@ -336,11 +453,12 @@ export const avRenderer: Renderer = {
       showMediaError(videoErrorMessage(mediaErr?.code));
     });
 
-    const instance: RenderedInstance & { getMeta(): { size: number } } = {
-      // BUG-04 握手点 2 代工：av 实例暴露大小（编码/语言对媒体无意义，ViewerPane 按 in 探测）
-      getMeta: () => ({ size: buffer.length }),
+    const instance: RenderedInstance & { getMeta(): { size: number; encoding?: Encoding } } = {
+      // BUG-04 握手点 2 代工：av 实例暴露大小与编码（SHELL-12 验收要求媒体至少大小+编码）
+      getMeta: () => ({ size: buffer.length, encoding: det.encoding }),
       destroy() {
         release(); // 幂等：错误卡片 release 后 destroy 为 no-op
+        liveChild?.destroy(); // 级联：销毁重试/降级托管的成功实例
       }
     };
     return instance;

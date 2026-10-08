@@ -6,13 +6,16 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import { createRemoteStore } from '@vviewer/core';
 import type { RenderedInstance } from '@vviewer/core';
 import {
+  absolutizeHlsUri,
   avRenderer,
   buildArtConfig,
   buildHlsConfig,
   hlsFatalDecision,
+  manifestPathOf,
   mediaMimeOf,
   playerKindOf,
   resolveHlsDirect,
+  rewriteHlsManifest,
   streamProtocolOf,
   videoErrorMessage
 } from '../src/av';
@@ -78,6 +81,7 @@ describe('resolveHlsDirect / buildHlsConfig：HLS 直连（BUG-01）', () => {
       };
       const direct = resolveHlsDirect(source);
       expect(direct).not.toBeNull();
+      expect(direct!.base).toBe('http://127.0.0.1:8321');
       expect(direct!.url).toBe('http://127.0.0.1:8321/api/file?path=media%2Fvideo.m3u8');
       expect(direct!.url.startsWith('blob:')).toBe(false);
     } finally {
@@ -135,6 +139,49 @@ describe('resolveHlsDirect / buildHlsConfig：HLS 直连（BUG-01）', () => {
   });
 });
 
+describe('rewriteHlsManifest / manifestPathOf：清单相对分片改写（BUG-01 审查修复）', () => {
+  const base = 'http://h:8321';
+
+  it('分片行与 URI 属性改写为 /api/file 绝对地址（相对清单目录解析）；标签行/绝对 URL 原样', () => {
+    const manifest = [
+      '#EXTM3U',
+      '#EXT-X-VERSION:3',
+      '#EXT-X-TARGETDURATION:6',
+      '#EXTINF:2.000,',
+      'seg0.ts',
+      'sub/seg1.ts',
+      '/root.ts',
+      'https://cdn.example.com/abs.ts',
+      '#EXT-X-KEY:METHOD=AES-128,URI="enc.key",IV=0x1',
+      '#EXT-X-ENDLIST'
+    ].join('\n');
+    const out = rewriteHlsManifest(manifest, base, 'media/video.m3u8').split('\n');
+    expect(out[0]).toBe('#EXTM3U');
+    expect(out[3]).toBe('#EXTINF:2.000,'); // 非 URI 标签不动
+    expect(out[4]).toBe('http://h:8321/api/file?path=media%2Fseg0.ts');
+    expect(out[5]).toBe('http://h:8321/api/file?path=media%2Fsub%2Fseg1.ts');
+    expect(out[6]).toBe('http://h:8321/api/file?path=root.ts'); // 根相对按 store 根解析
+    expect(out[7]).toBe('https://cdn.example.com/abs.ts'); // 绝对 scheme 不动
+    expect(out[8]).toBe('#EXT-X-KEY:METHOD=AES-128,URI="http://h:8321/api/file?path=media%2Fenc.key",IV=0x1');
+    expect(out[9]).toBe('#EXT-X-ENDLIST');
+  });
+
+  it('根目录清单（无目录）与 URI="" 空属性；反代前缀 base 正确拼接', () => {
+    expect(rewriteHlsManifest('seg0.ts', base, 'video.m3u8')).toBe(`${base}/api/file?path=seg0.ts`);
+    expect(rewriteHlsManifest('#EXT-X-MAP:URI=""', base, 'media/v.m3u8')).toBe('#EXT-X-MAP:URI=""');
+    expect(absolutizeHlsUri('http://h:8321/proxy', 'media', 'seg0.ts')).toBe(
+      'http://h:8321/proxy/api/file?path=media%2Fseg0.ts'
+    );
+  });
+
+  it('manifestPathOf：从直连/改写后 URL 提取清单 path；blob: 与非 /api/file 返回 null', () => {
+    expect(manifestPathOf('http://h:8321/api/file?path=media%2Fv.m3u8')).toBe('media/v.m3u8');
+    expect(manifestPathOf('blob:http://h/xyz')).toBeNull();
+    expect(manifestPathOf('http://h:8321/api/tree?path=x')).toBeNull();
+    expect(manifestPathOf('not a url')).toBeNull();
+  });
+});
+
 describe('hlsFatalDecision：fatal 错误决策（重试上限，杜绝无限重试）', () => {
   it('网络 fatal 首次重试、媒体 fatal 首次 recover、第二次 fatal 或其他类型转错误卡片', () => {
     expect(hlsFatalDecision(1, 'networkError')).toBe('retry');
@@ -188,7 +235,10 @@ describe('avRenderer', () => {
     expect(el?.getAttribute('controls')).toBe('');
     expect(el?.src).toBe('blob:mock');
     expect(target.querySelector('.art-video-player')).toBeNull(); // 不走 ArtPlayer
-    expect((instance as RenderedInstance & { getMeta(): { size: number } }).getMeta().size).toBe(8);
+    expect((instance as RenderedInstance & { getMeta(): { size: number; encoding?: string } }).getMeta()).toEqual({
+      size: 8,
+      encoding: undefined // fakeSource 未给 det.encoding（SHELL-12 服务端路径会带 x-vv-encoding）
+    });
     instance.destroy();
     expect(revoke).toHaveBeenCalledTimes(1);
     target.remove();
