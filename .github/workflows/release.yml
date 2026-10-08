@@ -38,6 +38,10 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # 产物不入库：web 包内置 lite 集（aliases.json 34 键）需构建期生成
+      - uses: ./.github/actions/setup-grammars
+        with:
+          languages: lite
       - run: pnpm --filter web build
       # adapter-static 产物在 apps/web/build；zip 内容平铺（解包即站点根），落仓库根供上传
       - run: zip -qr "$GITHUB_WORKSPACE/vviewer-web-dist.zip" .
@@ -86,7 +90,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      # grammar 包：全量 wasm + manifest（self-built 与预编译合并后的集合）
+      # grammar 包：全量 wasm + manifest（cli 自建 + vendored 遗留集，见 grammar.yml）
       - run: tar --zstd -cf grammar-wasm.tar.zst -C artifacts/grammar-wasm .
       # 先建 Release 附产物；重跑（release 已存在）时降级为 upload --clobber 覆盖
       - run: |

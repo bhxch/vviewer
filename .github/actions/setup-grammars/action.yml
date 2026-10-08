@@ -1,0 +1,43 @@
+# grammar wasm 资产生成（产物不入库，构建期生成）：
+#   --fetch（vendored languages.toml 浅取 pinned rev → tools/grammar-builder/out/grammars）
+#   → --self-build（tree-sitter-cli 免 emcc 自建，写 apps/web/static/grammars + manifest，
+#     运行时 tree-sitter.wasm 一并就位）。
+# languages 输入：all = 全量 build-list（Grammar 门禁 / release）；lite = aliases.json 34 键
+# （release web 包）；逗号分隔名 = 显式集合（CI 单测/e2e 的最小集）。
+# 缓存三层：wasi-sdk/binaryen 工具链（~/.cache/tree-sitter）、浅取源树、生成产物——
+# 命中时 self-build 全部 skip(cached)，秒级完成。
+name: 'Setup grammar 资产'
+description: '浅取 grammar 源并用 tree-sitter-cli 自建 wasm 到 apps/web/static（构建期生成，不入库）'
+inputs:
+  languages:
+    description: '语言选择面：all | lite | 逗号分隔语言名'
+    required: false
+    default: 'lite'
+runs:
+  using: 'composite'
+  steps:
+    - name: 缓存 grammar 工具链/源树/产物
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/tree-sitter
+          tools/grammar-builder/out/grammars
+          apps/web/static/grammars
+          apps/web/static/tree-sitter.wasm
+        key: grammars-${{ runner.os }}-${{ inputs.languages }}-${{ hashFiles('pnpm-lock.yaml', 'tools/grammar-builder/languages.toml', 'tools/grammar-builder/build-list.json') }}
+    - name: fetch + self-build
+      shell: bash
+      run: |
+        echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
+        if [ "${{ inputs.languages }}" = "all" ]; then
+          FETCH_ARGS=""
+          BUILD_ARGS="--all"
+        elif [ "${{ inputs.languages }}" = "lite" ]; then
+          FETCH_ARGS="--lite"
+          BUILD_ARGS=""
+        else
+          FETCH_ARGS="--languages ${{ inputs.languages }}"
+          BUILD_ARGS="--languages ${{ inputs.languages }}"
+        fi
+        node tools/grammar-builder/build.mjs --fetch $FETCH_ARGS
+        node tools/grammar-builder/build.mjs --self-build $BUILD_ARGS

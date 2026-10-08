@@ -1,9 +1,11 @@
-# Grammar self-build 门禁与产物（L1，补齐 spec 承诺的 ≥264 语言覆盖路径）：
-# --fetch（vendored languages.toml 浅取 pinned rev）→ emsdk + tree-sitter CLI 全量
-# self-build → --merge-manifest 与预编译集合并 → artifact。
-# 门禁语义：workflow_dispatch 手动触发（PR 可选跑，默认不跑——约 290 次浅取 + emcc
-# 编译太重）；push tag v* 时必跑，并经 workflow_call 供 release.yml 复用为 release 输入。
-# 门禁阈值：合并后 manifest 键数 ≥ 264（spec 验收口径），不足即 fail（失败清单随日志输出）。
+# Grammar self-build 门禁与产物（spec 承诺的 ≥264 语言覆盖路径）：
+# --fetch（vendored languages.toml 浅取 pinned rev）→ tree-sitter-cli 全量 self-build
+# （免 emcc，工具链自动下载并经 composite action 缓存）→ artifact。
+# 门禁语义：workflow_dispatch 手动触发（PR 可选跑，默认不跑——约 290 次浅取 + 全量编译
+# 太重）；push tag v* 时必跑，并经 workflow_call 供 release.yml 复用为 release 输入。
+# 门禁阈值：manifest 键数 ≥ 264（spec 验收口径），不足即 fail（失败清单随日志输出）。
+# 产物不入库：wasm/manifest 仅存在于 artifact（release 的 grammar-wasm.tar.zst 与 web
+# 包的 lite 集由各 job 自行生成）。
 name: Grammar
 
 on:
@@ -21,7 +23,7 @@ concurrency:
 
 jobs:
   self-build:
-    name: grammar（fetch + emsdk self-build + manifest 合并）
+    name: grammar（fetch + cli self-build + manifest）
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -32,22 +34,9 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # tree-sitter CLI（root devDep，pnpm 10 经 onlyBuiltDependencies 批准 postinstall）；
-      # build.mjs 以裸命令 spawn，根 node_modules/.bin 显式入 PATH
-      - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
-      # emsdk（emcc，tree-sitter build --wasm 依赖）：action 为 MIT；
-      # @v14 为其 README 主流用法（上游已迁移 emscripten-core 组织，最新 tag v16，升级时再评估）
-      - uses: mymindstorm/setup-emsdk@v14
+      - uses: ./.github/actions/setup-grammars
         with:
-          version: latest
-      - name: fetch grammar 源（build-list ∩ languages.toml，浅取 pinned rev）
-        run: node tools/grammar-builder/build.mjs --fetch
-      - name: from-wasms（预编译集为合并基线）
-        run: node tools/grammar-builder/build.mjs --from-wasms
-      - name: self-build（全量 tree-sitter build --wasm，wasm 写 out/wasm-self）
-        run: VV_GRAMMARS_DIR=tools/grammar-builder/out/grammars node tools/grammar-builder/build.mjs --self-build
-      - name: merge manifest（self-built 覆盖同名键，source 标 self-built）
-        run: node tools/grammar-builder/build.mjs --merge-manifest
+          languages: all
       - name: 门禁摘要与 ≥264 断言（fetch/self-build 失败清单入日志）
         run: |
           node -e "

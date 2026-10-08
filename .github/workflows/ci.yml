@@ -1,5 +1,6 @@
 # 最小 CI（final review A2）：typecheck + vitest + web 构建 + cargo test + E2E。
-# 后置项：tree-sitter grammar 门禁（构建产物校验）与 release 发布 workflow——待 M8。
+# grammar wasm 不入库：单测/e2e 前经 composite action 生成最小语言集（tree-sitter-cli
+# 自建，免 emcc；工具链/源树/产物三层缓存）。全量门禁在 grammar.yml（tag 时）。
 # E2E 依赖 Playwright 浏览器下载：用 actions/cache 按 lockfile 哈希缓存 ms-playwright 目录。
 name: CI
 
@@ -25,6 +26,10 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # highlight 单测用真实 wasm（bash/html/css/javascript/typescript）
+      - uses: ./.github/actions/setup-grammars
+        with:
+          languages: javascript,typescript,bash,html,css,json,python,rust
       - run: pnpm typecheck
       - run: pnpm vitest run
       - run: pnpm --filter web build
@@ -59,6 +64,10 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      # e2e 高亮断言依赖真实 wasm（m1 js / m2 ts+rs / m3 围栏 ts+bash）
+      - uses: ./.github/actions/setup-grammars
+        with:
+          languages: javascript,typescript,bash,html,css,json,python,rust
       - run: pnpm --filter web build
       - run: pnpm --filter web exec playwright install --with-deps chromium
       # playwright.config 的 webServer 在 CI 下自行启动 vite preview（CI 环境变量内置）
