@@ -6,6 +6,11 @@ export interface TreeNode {
   kind: Kind;
   size?: number;
   mtime?: number;         // epoch ms
+  /**
+   * 该条目已加密（zip 中心目录通用标志 bit0 检出）：树 UI 显示锁形标记；
+   * read 该条目将抛"加密不支持预览"。仅 zip 混合包（明文+加密条目）路径产出。
+   */
+  encrypted?: boolean;
 }
 
 export interface ByteRange { start: number; end: number; } // end 含
@@ -26,11 +31,16 @@ export interface TreeStore {
 export type Encoding = 'utf-8' | 'utf-16le' | 'utf-16be' | 'gb18030';
 
 export interface Detection {
-  ext: string;            // 小写无点；无扩展名为 ''
-  lang?: string;          // 代码语言（helix 名，M2 接入 languages.json）
+  ext: string;            // 小写无点；无扩展名为 ''（签名纠偏后为规范扩展名）
+  lang?: string;          // 代码语言（helix 名，M2 接入 languages.json；无扩展名回退链写入 shebang 语言）
   encoding?: Encoding;
   binary?: boolean;       // magic 或编码检测判定
-  signature?: 'zip' | 'ole' | 'png' | 'jpeg' | 'gif' | 'pdf' | null;
+  /**
+   * 无扩展名回退链命中标记（BUG-07）：ext 为空、经文本性探测交 code 渲染器时置位；
+   * 此后 ext 可能已被签名纠偏为规范扩展名，本标记保留"原始无扩展名"事实。
+   */
+  extless?: boolean;
+  signature?: 'zip' | 'ole' | 'png' | 'jpeg' | 'gif' | 'pdf' | 'mpegts' | null;
 }
 
 export type RendererId = string;

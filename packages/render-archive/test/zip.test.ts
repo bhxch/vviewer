@@ -1,11 +1,13 @@
 // zip.test.ts — zipStore/archiveRenderer 单测：jszip 造内存 zip，断言目录聚合/自然排序/read/
 // 真实递归深度接线（经 source.storeId 推导，非手工传参）/深度限制放宽语义/错误转换。
-// jszip 不支持生成加密 zip：加密错误路径以导出的 normalizeZipError 纯函数直接断言。
+// jszip 不支持生成加密 zip：加密错误路径以导出的 normalizeZipError 纯函数直接断言；
+// BUG-12 混合加密包以「jszip 生成 + 翻转通用标志 bit0」模拟（加密条目数据不变——
+// store 层逐条拦截不解密；明文条目经 libarchive worker 真实读取验证兜底管线）。
 import { describe, expect, it, vi } from 'vitest';
 import type { Detection, FileSource, TreeNode } from '@vviewer/core';
 import { archiveRenderer } from '../src/archive';
 import { ARCHIVE_OPEN_EVENT, type ArchiveOpenDetail } from '../src/archive';
-import { createZipStore, normalizeZipError, archiveChainOf } from '../src/zipStore';
+import { createZipStore, normalizeZipError, archiveChainOf, parseZipCentralDirectory } from '../src/zipStore';
 
 async function makeZip(): Promise<Uint8Array> {
   const JSZip = (await import('jszip')).default;
@@ -105,6 +107,168 @@ describe('normalizeZipError', () => {
     const err = new Error('corrupt zip');
     expect(normalizeZipError(err)).toBe(err);
     expect(normalizeZipError('boom')).toBe('boom');
+  });
+});
+
+// ---------- BUG-12：混合加密包（中心目录自解析 + 逐条加密标记 + 明文兜底读取） ----------
+
+const u16 = (b: Uint8Array, o: number): number => b[o]! | (b[o + 1]! << 8);
+const u32 = (b: Uint8Array, o: number): number =>
+  (b[o]! | (b[o + 1]! << 8) | (b[o + 2]! << 16) | (b[o + 3]! << 24)) >>> 0;
+const setU16 = (b: Uint8Array, o: number, v: number): void => {
+  b[o] = v & 0xff;
+  b[o + 1] = (v >> 8) & 0xff;
+};
+
+/** jszip 生成 zip 后按名翻转通用标志 bit0（local header + central directory 同步），
+ * 模拟 ZipCrypto 混合包（加密条目数据保持原样——store 层拦截不解密，仅供树/标记断言） */
+async function makeMixedZip(
+  files: Record<string, string | Uint8Array>,
+  encryptedNames: string[]
+): Promise<Uint8Array> {
+  const JSZip = (await import('jszip')).default;
+  const zip = new JSZip();
+  for (const [n, c] of Object.entries(files)) zip.file(n, c);
+  const bytes = await zip.generateAsync({ type: 'uint8array' });
+  const enc = new Set(encryptedNames);
+  const decode = (o: number, len: number): string => new TextDecoder().decode(bytes.subarray(o, o + len));
+  // local headers：PK\x03\x04（flag@6，nameLen@26，extraLen@28，name@30，后随 data；
+  // data 长度 = compressedSize，uncompressedSize 不占空间）
+  let off = 0;
+  while (off + 4 <= bytes.length && bytes[off] === 0x50 && bytes[off + 1] === 0x4b && bytes[off + 2] === 0x03) {
+    const nameLen = u16(bytes, off + 26);
+    const extraLen = u16(bytes, off + 28);
+    if (enc.has(decode(off + 30, nameLen))) setU16(bytes, off + 6, u16(bytes, off + 6) | 1);
+    off += 30 + nameLen + extraLen + u32(bytes, off + 18);
+  }
+  // central directories：PK\x01\x02（flag@8，nameLen@28，extraLen@30，commentLen@32，name@46）
+  while (off + 4 <= bytes.length && bytes[off] === 0x50 && bytes[off + 1] === 0x4b && bytes[off + 2] === 0x01) {
+    const nameLen = u16(bytes, off + 28);
+    const extraLen = u16(bytes, off + 30);
+    const commentLen = u16(bytes, off + 32);
+    if (enc.has(decode(off + 46, nameLen))) setU16(bytes, off + 8, u16(bytes, off + 8) | 1);
+    off += 46 + nameLen + extraLen + commentLen;
+  }
+  return bytes;
+}
+
+describe('parseZipCentralDirectory（BUG-12 中心目录自解析）', () => {
+  it('产出条目大小表与加密路径集；目录条目不参与加密标记', async () => {
+    const buffer = await makeMixedZip(
+      { 'plain/open.txt': 'open content', 'secret/locked.txt': 'locked', 'empty-dir/': '' },
+      ['secret/locked.txt']
+    );
+    const dir = parseZipCentralDirectory(buffer);
+    expect(dir.sizes.get('plain/open.txt')).toBe('open content'.length);
+    expect(dir.sizes.get('secret/locked.txt')).toBe('locked'.length);
+    expect(dir.sizes.get('empty-dir')).toBe(-1);
+    expect(dir.encryptedPaths).toEqual(new Set(['secret/locked.txt']));
+  });
+
+  it('带注释的 zip：EOCD 从尾部向前扫描命中（注释可含任意字节）', async () => {
+    const JSZip = (await import('jszip')).default;
+    const zip = new JSZip();
+    zip.file('a.txt', 'aaa');
+    const buffer = await zip.generateAsync({ type: 'uint8array', comment: 'PK\x03\x04 fake sig inside comment' });
+    const dir = parseZipCentralDirectory(buffer);
+    expect(dir.sizes.get('a.txt')).toBe(3);
+    expect(dir.encryptedPaths.size).toBe(0);
+  });
+
+  it('EOCD 缺失抛「无法定位 zip 中心目录」；ZIP64 哨兵抛「ZIP64 暂不支持」', () => {
+    expect(() => parseZipCentralDirectory(new TextEncoder().encode('not a zip at all...........'))).toThrow(
+      '无法定位 zip 中心目录'
+    );
+    // 手工构造 EOCD（cdOffset=0xFFFFFFFF 哨兵）
+    const eocd = new Uint8Array(22);
+    eocd.set([0x50, 0x4b, 0x05, 0x06], 0);
+    eocd.set([0xff, 0xff], 16); // cdOffset 低 16 位
+    eocd.set([0xff, 0xff], 18);
+    expect(() => parseZipCentralDirectory(eocd)).toThrow('ZIP64');
+  });
+});
+
+describe('createZipStore 混合加密包（BUG-12：不整包拒绝，明文可读、加密逐条拦截）', () => {
+  it('条目树完整 + encrypted 逐条标记（plain/ 与 secret/ 均在树中）', async () => {
+    const store = await createZipStore(
+      await makeMixedZip({ 'plain/open.txt': 'open content', 'secret/locked.txt': 'locked' }, ['secret/locked.txt'])
+    );
+    const kids = await store.listChildren('');
+    expect(kids.map((n: TreeNode) => `${n.kind}:${n.name}`)).toEqual(['dir:plain', 'dir:secret']);
+    const plain = await store.listChildren('plain');
+    expect(plain[0]).toMatchObject({ name: 'open.txt', kind: 'file' });
+    expect(plain[0]!.encrypted).toBeUndefined();
+    const secret = await store.listChildren('secret');
+    expect(secret[0]).toMatchObject({ name: 'locked.txt', kind: 'file', encrypted: true });
+  });
+
+  it('明文条目经 libarchive 兜底读取返回原始内容；加密条目 read 抛「加密不支持预览」', async () => {
+    const store = await createZipStore(
+      await makeMixedZip({ 'plain/open.txt': 'open content', 'secret/locked.txt': 'locked' }, ['secret/locked.txt'])
+    );
+    const open = await store.read('plain/open.txt');
+    expect(new TextDecoder().decode(open)).toBe('open content');
+    await expect(store.read('secret/locked.txt')).rejects.toThrow('该条目已加密，无法解密预览');
+    await expect(store.read('nope.txt')).rejects.toThrow('未知路径');
+  });
+
+  it('全加密包：整包不拒绝、树完整、条目全部标记并拒绝读取', async () => {
+    const store = await createZipStore(
+      await makeMixedZip({ 'a.txt': 'aaa', 'b.txt': 'bb' }, ['a.txt', 'b.txt'])
+    );
+    const kids = await store.listChildren('');
+    expect(kids).toHaveLength(2);
+    expect(kids.every((n: TreeNode) => n.encrypted === true)).toBe(true);
+    await expect(store.read('a.txt')).rejects.toThrow('该条目已加密');
+  });
+
+  it('id 与嵌套链同构（zip:zip:…），depth 届满对内嵌归档条目同样拒展', async () => {
+    const JSZip = (await import('jszip')).default;
+    const inner = new JSZip();
+    inner.file('x.txt', 'x');
+    const innerBytes = await inner.generateAsync({ type: 'uint8array' });
+    const mixed = await makeMixedZip(
+      { 'plain.txt': 'readable', 'too-deep.zip': innerBytes, 'secret/locked.txt': 'locked' },
+      ['secret/locked.txt']
+    );
+    const store = await createZipStore(mixed, 'zip:zip:zip');
+    expect(store.id).toMatch(/^zip:zip:zip:zip:/);
+    await expect(store.read('plain.txt')).resolves.toBeInstanceOf(Uint8Array);
+    await expect(store.read('too-deep.zip')).rejects.toThrow('嵌套层数超限');
+    await expect(store.read('secret/locked.txt')).rejects.toThrow('该条目已加密');
+    // worker 资源：混合包 store 有 close（接线语义与 libarchive store 一致）
+    store.close?.();
+  });
+
+  it('树 UI 对加密条目显示 🔒 锁形标记', async () => {
+    const buffer = await makeMixedZip(
+      { 'plain/open.txt': 'open content', 'secret/locked.txt': 'locked' },
+      ['secret/locked.txt']
+    );
+    const target = document.createElement('div');
+    document.body.append(target);
+    const source: FileSource = {
+      storeId: 'localfiles:samples', storeLabel: 'samples', path: 'mixed.zip', name: 'mixed.zip',
+      store: { id: 'localfiles:samples', displayName: () => 'samples', listChildren: async () => [], read: async () => buffer }
+    };
+    const instance = await archiveRenderer.render(buffer, target, source, { ext: 'zip' } as Detection);
+    try {
+      // 展开 secret/ 目录后断言 🔒（懒展开：details toggle；plain/ 无标记为对照）
+      await vi.waitFor(async () => {
+        const details = [...target.querySelectorAll('details')].find((d) => d.textContent?.includes('secret'));
+        if (!details) throw new Error('secret 目录未渲染');
+        details.open = true;
+        await new Promise((r) => setTimeout(r, 0));
+        const lockedRow = [...target.querySelectorAll('button.vv-tree-row')].find((b) =>
+          b.textContent?.includes('locked.txt')
+        );
+        if (!lockedRow) throw new Error('locked.txt 未渲染');
+        expect(lockedRow.textContent).toContain('🔒');
+      });
+    } finally {
+      instance.destroy();
+      target.remove();
+    }
   });
 });
 

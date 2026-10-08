@@ -95,7 +95,9 @@ export function mountArchiveTree(
     caret.className = 'vv-tree-caret';
     const name = document.createElement('span');
     name.className = 'vv-tree-name';
-    name.textContent = node.size !== undefined ? `${node.name}（${node.size} B）` : node.name;
+    const label = node.size !== undefined ? `${node.name}（${node.size} B）` : node.name;
+    // 加密条目锁形标记（BUG-12）：点击后 read 抛「加密不支持预览」，由错误卡片呈现
+    name.textContent = node.encrypted ? `🔒 ${label}` : label;
     row.append(caret, name);
     row.onclick = () => onopen(node.path, node.name);
     return row;
@@ -145,17 +147,20 @@ export const archiveRenderer: Renderer = {
       }
       throw err;
     }
-    return {
+    const instance: RenderedInstance & { getMeta(): { size: number } } = {
+      // BUG-04 握手点 2 代工：archive 实例暴露大小（状态栏「大小」段）
+      getMeta: () => ({ size: buffer.length }),
       destroy() {
         tree.destroy();
         // worker 释放收口（T7）：没有内层 tab 持有（从未点开过条目）的 libarchive store
         // 在实例 destroy 时立即 close（终止 worker），并弃掉缓存条目防复用已关闭 store；
-        // zip store 无 close，可选调用为 no-op
+        // zip store 无 close，可选调用为 no-op（加密 zip 混合包的 store 有 close，同语义）
         if (!cached.entryOpened) {
           storeCache.delete(buffer);
           store.close?.();
         }
       }
     };
+    return instance;
   }
 };

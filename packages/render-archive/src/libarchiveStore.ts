@@ -89,6 +89,16 @@ function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> 
 const OPEN_TIMEOUT_MS = 20_000;
 const LIST_TIMEOUT_MS = 60_000;
 
+/** createLibarchiveStore 行为选项 */
+export interface LibarchiveStoreOptions {
+  /**
+   * 构造期不因「任一加密条目」整包拒绝（BUG-12：zip 混合包专用——逐条加密标记由
+   * zipStore 的中心目录解析提供，明文条目可读、加密条目在 zipStore.read 拦截）。
+   * 7z/rar 等非 zip 容器不开启，维持「已加密整包拒绝」现行为。
+   */
+  allowEncryptedEntries?: boolean;
+}
+
 /** libarchive 错误 → 用户可读值（加密/格式/已关闭/ wasm 崩溃转中文，其余透传） */
 export function normalizeLibarchiveError(err: unknown): unknown {
   if (err instanceof Error) {
@@ -125,9 +135,10 @@ function isCompressedFile(v: unknown): v is CompressedFileLike {
 }
 
 /**
- * 从归档字节构造 TreeStore（libarchive.js wasm 解析，支持 tar/tgz/tar.gz/tbz2/xz/7z/rar；
+ * 从归档字节构造 TreeStore（libarchive.js wasm 解析，支持 tar/tar.gz/tgz/tbz2/xz/7z/rar；
  * zip 建议走 createZipStore）。懒提取：构造只列条目，read 时经 worker 解压单条目。
- * 目录条目 read 抛错；加密归档构造即抛；深度语义与 zipStore 一致（parentChain 为
+ * 目录条目 read 抛错；加密归档默认构造即抛（allowEncryptedEntries 放宽，见
+ * LibarchiveStoreOptions）；深度语义与 zipStore 一致（parentChain 为
  * archiveChainOf 提取的前导归档段链，depth ≥ MAX_ARCHIVE_DEPTH 拒展内嵌归档）。
  * 可选 close() 终止 worker——T7 已接线：从未点开过条目的 store 在 archiveRenderer 实例
  * destroy 时关闭；点开过条目的 store 由 openFlow 在最后一个持有它的 tab 关闭时关闭。
@@ -140,7 +151,9 @@ export async function createLibarchiveStore(
    */
   parentChain?: string,
   /** 归档显示名（displayName 与 id 尾段）；默认 'archive' */
-  name?: string
+  name?: string,
+  /** 行为选项（BUG-12：zip 混合加密包路径传 allowEncryptedEntries 放宽整包拒绝） */
+  opts?: LibarchiveStoreOptions
 ): Promise<TreeStore & { close?(): void }> {
   if (buffer.length > MAX_ZIP_INPUT_BYTES) {
     throw new Error(`归档超过 200MB 上限（当前 ${(buffer.length / (1024 * 1024)).toFixed(0)}MB），不进行内存解析`);
@@ -160,7 +173,9 @@ export async function createLibarchiveStore(
 
   try {
     const encrypted = await withTimeout(reader.hasEncryptedData(), LIST_TIMEOUT_MS, '加密检测超时');
-    if (encrypted === true) {
+    // 整包拒绝仅默认路径维持（7z/rar 加密等）；zip 混合包经 allowEncryptedEntries 放宽：
+    // 加密条目的逐条标记与 read 拦截由 zipStore 的中心目录解析负责（BUG-12）
+    if (encrypted === true && !opts?.allowEncryptedEntries) {
       void reader.close();
       throw new Error('该压缩包已加密，无法预览（请先解密解压）');
     }
