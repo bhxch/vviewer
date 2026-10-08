@@ -239,7 +239,13 @@ export class TreeSitterEngine {
     const lang = this.canonicalLang(rawLang);
     let p = this.prepared.get(lang);
     if (!p) {
-      p = this.doPrepare(lang).catch(() => null);
+      p = this.doPrepare(lang).catch((e: unknown) => {
+        // BUG-06a 可观测：单 grammar 加载/查询编译失败显性化——此前静默吞为 null，
+        // 该语言永远回退 hljs 且零痕迹（worker 脚本级失败另有 onerror 通道，此处
+        // 补的是 per-language 通道）。返回 null 语义不变：该语言回退兜底。
+        console.warn(`[highlight] 语言 ${lang} 的 grammar/查询准备失败，已回退兜底:`, e);
+        return null;
+      });
       this.prepared.set(lang, p);
     }
     return p;
