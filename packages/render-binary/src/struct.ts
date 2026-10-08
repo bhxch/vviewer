@@ -12,7 +12,18 @@ export interface StructNode {
 export interface ParseOptions {
   /** 时间预算（ms），超时返回已构建部分 + truncated；默认 2000 */
   budgetMs?: number;
+  /**
+   * 文件末尾 min(EOCD 窗口, size) 字节（head 之外的尾窗）。ZIP 分支的 EOCD
+   * 反向扫描改在其上进行（EOCD 位于文件尾，>8KB 归档的 head 覆盖不到）；
+   * 其余 magic 解析仍用 head。缺省回退 head（向后兼容）。
+   */
+  tail?: Uint8Array;
+  /** 文件总字节数（与 tail 同时提供，用于把 tail 内偏移换算为文件绝对偏移） */
+  totalSize?: number;
 }
+
+/** EOCD 扫描尾窗字节数：固定 22 + 注释上限 65535 */
+export const STRUCT_TAIL_BYTES = 22 + 65535;
 
 export interface ParseResult {
   root: StructNode | null;
@@ -103,17 +114,17 @@ const MACHO_TYPES: Record<number, string> = {
 };
 
 function parseEofScan(
-  head: Uint8Array,
+  buf: Uint8Array,
   outOfBudget: () => boolean
 ): { entries: number; cdSize: number; offset: number } | null {
   // EOCD 最短 22 字节 + 最长 65535 注释：从尾部窗口反向找 PK\5\6
   const sig = [0x50, 0x4b, 0x05, 0x06];
-  const minStart = Math.max(0, head.length - 22 - 65535);
-  for (let i = head.length - 22; i >= minStart; i--) {
+  const minStart = Math.max(0, buf.length - 22 - 65535);
+  for (let i = buf.length - 22; i >= minStart; i--) {
     if ((i & 0x3ff) === 0 && outOfBudget()) return null;
-    if (head[i] === sig[0] && head[i + 1] === sig[1] && head[i + 2] === sig[2] && head[i + 3] === sig[3]) {
-      const entries = u16(head, i + 10, true);
-      const cdSize = u32(head, i + 12, true);
+    if (buf[i] === sig[0] && buf[i + 1] === sig[1] && buf[i + 2] === sig[2] && buf[i + 3] === sig[3]) {
+      const entries = u16(buf, i + 10, true);
+      const cdSize = u32(buf, i + 12, true);
       if (entries !== null && cdSize !== null) return { entries, cdSize, offset: i };
       return null;
     }
@@ -199,16 +210,23 @@ export function parseStruct(head: Uint8Array, opts: ParseOptions = {}): ParseRes
       field('method', 8, 2, method === 0 ? 'stored' : method === 8 ? 'deflate' : String(method ?? ''))
     ];
     if (!outOfBudget()) {
-      const eocd = parseEofScan(head, outOfBudget);
+      // EOCD 反向扫描优先在尾窗（tail）上进行：EOCD 恒在文件尾，>8KB 归档的
+      // head 覆盖不到；节点偏移按 totalSize 换算回文件绝对偏移。无 tail 回退 head。
+      const tail = opts.tail;
+      const scanBuf = tail ?? head;
+      const scanBase = tail
+        ? Math.max(0, (opts.totalSize ?? tail.length) - tail.length)
+        : 0;
+      const eocd = parseEofScan(scanBuf, outOfBudget);
       if (eocd) {
         children.push({
           name: 'EOCD',
-          offset: eocd.offset,
+          offset: scanBase + eocd.offset,
           size: 22,
           value: 'end of central directory',
           children: [
-            field('entries', eocd.offset + 10, 2, String(eocd.entries)),
-            field('centralDirectorySize', eocd.offset + 12, 4, String(eocd.cdSize))
+            field('entries', scanBase + eocd.offset + 10, 2, String(eocd.entries)),
+            field('centralDirectorySize', scanBase + eocd.offset + 12, 4, String(eocd.cdSize))
           ]
         });
       }

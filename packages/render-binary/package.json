@@ -13,5 +13,8 @@
   "dependencies": {
     "@vviewer/core": "workspace:*"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "jszip": "^3.10.2"
+  }
 }

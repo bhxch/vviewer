@@ -3,7 +3,7 @@
 // 结构树走 binary.worker（BinaryClient），状态行展示大小/识别类型。
 import type { Detection, FileSource, RenderedInstance, Renderer } from '@vviewer/core';
 import { renderHexBytes, HEX_ROW_BYTES } from './hexBytes';
-import type { ParseResult, StructNode } from './struct';
+import { STRUCT_TAIL_BYTES, type ParseResult, type StructNode } from './struct';
 
 /** hex dump 单页字节数（前 1MB 立即渲染，加载更多每次追加同量） */
 export const HEX_PAGE_BYTES = 1 << 20;
@@ -99,10 +99,17 @@ export function renderHex(
   let worker: Worker | null = null;
   const structReady = (async (): Promise<void> => {
     try {
-      const head = buffer.slice(0, STRUCT_HEAD_BYTES);
+      // head 供 magic 识别；tail（EOCD 尾窗，≤64KB+22）供 ZIP 分支扫描——本地来源
+      // buffer 全量在手，同步 slice 即可，无 IO 改动。两段 slice 各自独立可 transfer；
+      // 交给 worker 的副本会被 transfer 脱离原 buffer，兜底路径重新 slice（同旧版
+      // head 被转移后兜底失效的坑，这里一并规避）。
+      const tailLen = Math.min(STRUCT_TAIL_BYTES, buffer.length);
       const fallbackParse = async (): Promise<ParseResult> => {
         const { parseStruct } = await import('./struct');
-        return parseStruct(head);
+        return parseStruct(buffer.slice(0, STRUCT_HEAD_BYTES), {
+          tail: buffer.slice(buffer.length - tailLen),
+          totalSize: buffer.length
+        });
       };
       let result: ParseResult;
       const w = opts.createWorker?.();
@@ -112,7 +119,10 @@ export function renderHex(
         const { BinaryClient } = await import('./client');
         const client = new BinaryClient(w);
         try {
-          result = await client.parseStruct(head);
+          result = await client.parseStruct(
+            buffer.slice(0, STRUCT_HEAD_BYTES),
+            { tail: buffer.slice(buffer.length - tailLen), totalSize: buffer.length }
+          );
         } catch {
           result = await fallbackParse(); // worker 出错/无响应：主线程同构兜底
         } finally {

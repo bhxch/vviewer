@@ -7,6 +7,10 @@ export interface ParseStructRequest {
   kind: 'parse-struct';
   head: Uint8Array;
   budgetMs?: number;
+  /** 文件尾窗（EOCD 扫描用，>8KB 归档的 entries 字段依赖它） */
+  tail?: Uint8Array;
+  /** 文件总字节数（tail 内偏移 → 文件绝对偏移的换算基准） */
+  totalSize?: number;
 }
 
 export type BinaryRequest = ParseStructRequest;
@@ -29,7 +33,11 @@ export type BinaryResponse = ParseStructResponse | ErrorResponse;
 /** 请求处理器（Worker 与测试共用） */
 export function handleRequest(req: BinaryRequest): BinaryResponse {
   try {
-    const { root, truncated } = parseStruct(req.head, { budgetMs: req.budgetMs });
+    const { root, truncated } = parseStruct(req.head, {
+      budgetMs: req.budgetMs,
+      tail: req.tail,
+      totalSize: req.totalSize
+    });
     return { id: req.id, ok: true, root, truncated };
   } catch (e) {
     return { id: req.id, ok: false, error: e instanceof Error ? e.message : String(e) };
