@@ -12,6 +12,7 @@
   /** 当前命中（1 起；0 = 无命中） */
   let current = $state(0);
   let inputEl = $state<HTMLInputElement | null>(null);
+  let panelEl = $state<HTMLElement | null>(null);
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   /** 竞态防护：慢的旧 search 响应不得覆盖新结果；面板关闭后不再写状态 */
   let searchSeq = 0;
@@ -26,6 +27,25 @@
       closed = true;
       if (debounceTimer !== null) clearTimeout(debounceTimer);
     };
+  });
+
+  $effect(() => {
+    // Esc 全局化补全（遗留 U6）：容器级 keydown 只覆盖面板内焦点；焦点已落到面板外
+    // （body/查看区点击后）时 Esc 也应关闭。window 级兜底只处理目标在面板外的事件，
+    // 面板内由 onpanelkeydown 处理（同一事件只有一个 target，不会双触发）。
+    // effect 读 panelEl（bind:this）可能重跑，cleanup 摘除监听后重建即幂等。
+    const onWinKey = (e: KeyboardEvent): void => {
+      if (
+        e.key === 'Escape' &&
+        panelEl !== null &&
+        (e.target instanceof Node ? !panelEl.contains(e.target) : true)
+      ) {
+        e.preventDefault();
+        close();
+      }
+    };
+    window.addEventListener('keydown', onWinKey);
+    return () => window.removeEventListener('keydown', onWinKey);
   });
 
   async function runSearch(q: string): Promise<void> {
@@ -96,7 +116,7 @@
   }
 </script>
 
-<div class="vv-search-panel" role="search" aria-label="文件内搜索" onkeydown={onpanelkeydown}>
+<div class="vv-search-panel" role="search" aria-label="文件内搜索" bind:this={panelEl} onkeydown={onpanelkeydown}>
   <input
     bind:this={inputEl}
     bind:value={query}

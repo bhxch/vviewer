@@ -7,7 +7,7 @@
   import { persistScroll } from './openFlow.svelte';
   import { dispatcher, cancelMarkdownRemote } from './viewer';
   import { cancelHighlight } from './highlightClient';
-  import { watchHealth } from './openFlow.svelte';
+  import { watchHealth, statusNotice } from './openFlow.svelte';
 import SearchPanel from './SearchPanel.svelte';
 
   let { tab, ontoc }: { tab: Tab | null; ontoc?: (entries: TocEntry[]) => void } = $props();
@@ -190,9 +190,9 @@ import SearchPanel from './SearchPanel.svelte';
       }}
     />
   {/if}
-  {#if engineLabel || watchHealth.degraded}
+  {#if engineLabel || watchHealth.degraded || statusNotice.text}
     <div class="vv-statusbar" role="status">
-      {#if engineLabel}{engineLabel}{#if computeWhereLabel}&nbsp;· 执行: {computeWhereLabel}{/if}{/if}{#if watchHealth.degraded}{#if engineLabel}&nbsp;·{/if} 自动刷新不可用{/if}
+      {#if engineLabel}{engineLabel}{#if computeWhereLabel}&nbsp;· 执行: {computeWhereLabel}{/if}{/if}{#if watchHealth.degraded}{#if engineLabel}&nbsp;·{/if} 自动刷新不可用{/if}{#if statusNotice.text}{#if engineLabel || watchHealth.degraded}&nbsp;·{/if} {statusNotice.text}{/if}
     </div>
   {/if}
 </div>

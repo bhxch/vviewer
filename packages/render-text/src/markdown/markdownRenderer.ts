@@ -330,6 +330,9 @@ function createDomSearcher(target: HTMLElement, isDestroyed: () => boolean) {
   return { search, gotoMatch, restore };
 }
 
+/** 灯箱 owner 代币序号（U3）：每次 render 唯一，destroy 时凭它校验 overlay 归属 */
+let lightboxOwnerSeq = 0;
+
 /** 超大文件降级实例：代码视图句柄 → RenderedInstance（无 TOC，搜索走 code 实现） */
 function degradedInstance(code: RenderCodeHandle, target: HTMLElement): RenderedInstance {
   return {
@@ -366,6 +369,8 @@ export const markdownRenderer: Renderer = {
     // 管线含动态 import（mermaid/katex/hljs）与注入后端的异步往返，期间 tab 可能
     // 已切换：destroyed 后不再挂载
     let destroyed = false;
+    // U3：灯箱 owner 代币——destroy 只摘自己实例打开的 body 级 overlay
+    const lightboxOwner = `md-render-${++lightboxOwnerSeq}`;
     const text = new TextDecoder(DECODERS[det.encoding ?? 'utf-8'], { fatal: false }).decode(buffer);
     // M7 正文引擎裁决：注入后端优先（路由策略与回退全在 apps/web 侧的 fn 内），
     // 未注入走本地 markdown-it（现状）。远程 comrak 不识别 front matter——交给
@@ -388,7 +393,7 @@ export const markdownRenderer: Renderer = {
     // 引擎输出（含远程 comrak unsafe 结果）必经净化后才能入 DOM
     const doc = new DOMParser().parseFromString(sanitizeHtml(html), 'text/html');
     enrichMarkdownDom(doc);
-    await runPipeline(doc, { highlightFence: fenceToHtml });
+    await runPipeline(doc, { highlightFence: fenceToHtml, lightboxOwner });
     if (destroyed) return { destroy() {} };
     // 相对图片 → 同 store 文件 URL（未注入 resolver 时原样保留，404 现状）
     const resolvedUrls = await resolveRelativeImages(doc, source);
@@ -414,8 +419,9 @@ export const markdownRenderer: Renderer = {
         for (const url of resolvedUrls) {
           if (typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(url);
         }
-        // 灯箱 overlay 挂在 body（img 点击时 target 已在主文档），不随渲染节点销毁：显式清理
-        removeLightboxOverlay(target.ownerDocument);
+        // 灯箱 overlay 挂在 body（img 点击时 target 已在主文档），不随渲染节点销毁：显式清理。
+        // 非 owner 时管线内跳过——多 markdown 实例共存不得互删对方正开着的灯箱（U3）
+        removeLightboxOverlay(target.ownerDocument, lightboxOwner);
         target.replaceChildren();
         target.classList.remove('vv-markdown');
       },
