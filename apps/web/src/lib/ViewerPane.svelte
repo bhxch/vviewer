@@ -5,7 +5,7 @@
   import type { MarkdownEngineState } from '@vviewer/render-text/markdown/markdownRenderer';
   import type { Tab } from './openFlow.svelte';
   import { persistScroll } from './openFlow.svelte';
-  import { dispatcher } from './viewer';
+  import { dispatcher, cancelMarkdownRemote } from './viewer';
   import { cancelHighlight } from './highlightClient';
   import { watchHealth } from './openFlow.svelte';
 import SearchPanel from './SearchPanel.svelte';
@@ -151,6 +151,7 @@ import SearchPanel from './SearchPanel.svelte';
       scrollHost?.removeEventListener('scroll', onScroll);
       scrollHost = null;
       cancelHighlight(); // 取消未完成的 tree-sitter 高亮请求（Worker 不做无用功）
+      cancelMarkdownRemote(); // 取消在途远程 markdown 渲染（auto 已回退本地/remote 走错误路径，不留无主连接）
       searchOpen = false; // 实例随 tab 销毁：面板状态一并复位（markdown 的 mark 在 destroy 内还原）
       live?.destroy();
       live = null;

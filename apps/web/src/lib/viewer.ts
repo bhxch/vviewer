@@ -54,23 +54,41 @@ if (browser) {
 
 // ---------- markdown 正文引擎接入 compute 路由（M7 Task 2，M6 遗留） ----------
 
+/** 在途远程 markdown 渲染的中止控制器（cancelMarkdownRemote 随 tab 切换一并 abort，对齐 highlight 的 remoteAbort 模式）。 */
+let markdownRemoteAbort: AbortController | null = null;
+
+/** tab 切换/重渲染时取消在途远程 markdown 请求（不留无主连接）。 */
+export function cancelMarkdownRemote(): void {
+  markdownRemoteAbort?.abort();
+  markdownRemoteAbort = null;
+}
+
 /**
  * 远程 markdown：POST /api/compute/markdown（Bearer），body {text, options}。
  * 未连接服务器抛错——router 的 auto 会回退本地 markdown-it；显式 remote 如实
  * 报错不静默回退（与远程高亮同一语义）。wikilinks 不开启：与本地引擎能力对齐
  * （markdown-it 无 wikilinks，开启会让 auto 回退前后渲染结果不一致）。
+ * abort 抛错经 router 折叠：auto 回退本地、remote 走错误卡片（既有路径）。
  */
 async function remoteMarkdown(text: string): Promise<string> {
   const call = computeRouter.remoteCall('/api/compute/markdown');
   if (!call) throw new Error('未连接服务器，无法远程渲染 markdown');
-  const res = await fetch(call.url, {
-    method: 'POST',
-    headers: { ...call.headers, 'content-type': 'application/json' },
-    body: JSON.stringify({ text, options: undefined })
-  });
-  if (!res.ok) throw new Error(`远程 markdown 渲染失败: HTTP ${res.status}`);
-  const data = (await res.json()) as { html: string };
-  return data.html;
+  // 挂 tab 级 abort：cancelMarkdownRemote（tab 切换/重渲染）时中止在途请求
+  const ac = new AbortController();
+  markdownRemoteAbort = ac;
+  try {
+    const res = await fetch(call.url, {
+      method: 'POST',
+      headers: { ...call.headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ text, options: undefined }),
+      signal: ac.signal
+    });
+    if (!res.ok) throw new Error(`远程 markdown 渲染失败: HTTP ${res.status}`);
+    const data = (await res.json()) as { html: string };
+    return data.html;
+  } finally {
+    if (markdownRemoteAbort === ac) markdownRemoteAbort = null;
+  }
 }
 
 /**
