@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import type { RenderedInstance, SearchMatch } from '@vviewer/core';
 import { searchCode } from '../src/search';
 import { renderCode } from '../src/code';
@@ -169,9 +169,18 @@ function searchOf(instance: RenderedInstance): {
 }
 
 describe('markdown 实例 search/gotoMatch（DOM TreeWalker + mark 包裹）', () => {
+  beforeEach(() => {
+    // jsdom 无 scrollIntoView（原型上本无此方法，vi.spyOn 无从 spy）：先注入替身再
+    // spyOn 跟踪调用。遗留 T6 测试卫生——原直赋 vi.fn() 不还原会泄漏到其他用例；
+    // afterEach 先 restoreAllMocks 复位 spy、再删自有属性彻底还原原型
+    Element.prototype.scrollIntoView ??= ((): void => {}) as typeof Element.prototype.scrollIntoView;
+    vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+  });
+
   afterEach(() => {
     document.body.innerHTML = '';
     vi.restoreAllMocks();
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
   });
 
   it('命中包 mark.vv-search-hit（大小写不敏感），整段文本无损', async () => {
@@ -195,8 +204,6 @@ describe('markdown 实例 search/gotoMatch（DOM TreeWalker + mark 包裹）', (
   });
 
   it('gotoMatch 加 vv-search-hit-active 并滚动；切换时旧 active 移除', async () => {
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
     const { target, instance } = await renderMd('甲乙 甲乙\n');
     const { search, gotoMatch } = searchOf(instance);
     await search('甲乙');
@@ -204,14 +211,13 @@ describe('markdown 实例 search/gotoMatch（DOM TreeWalker + mark 包裹）', (
     gotoMatch(1);
     expect(marks[0]?.classList.contains('vv-search-hit-active')).toBe(false);
     expect(marks[1]?.classList.contains('vv-search-hit-active')).toBe(true);
-    expect(scrollIntoView).toHaveBeenCalled();
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
     gotoMatch(0);
     expect(marks[1]?.classList.contains('vv-search-hit-active')).toBe(false);
     expect(marks[0]?.classList.contains('vv-search-hit-active')).toBe(true);
   });
 
   it('gotoMatch 越界不抛错、保持当前 active 不变', async () => {
-    Element.prototype.scrollIntoView = vi.fn();
     const { target, instance } = await renderMd('甲乙\n');
     const { search, gotoMatch } = searchOf(instance);
     await search('甲乙');

@@ -122,3 +122,11 @@ if (browser) {
     resolveImageBlobUrl(source.store, source.path, src)
   );
 }
+
+// dev-only HMR 防线（遗留 T14）：本模块是装配单例来源（registry、libarchive worker
+// 配置、markdown backend/图片 resolver 注入），Vite 局部热替换会重跑装配——重复
+// install 与新旧模块状态并存。decline 使变更冒泡为整页刷新，杜绝半新半旧状态；
+// 生产构建 import.meta.hot 恒为 undefined，分支不存在。
+if (import.meta.hot) {
+  import.meta.hot.accept.decline();
+}

@@ -100,7 +100,10 @@ export function normalizeLibarchiveError(err: unknown): unknown {
       err.name === 'RuntimeError' ||
       /table index|memory access|out of bounds|unreachable|abort/i.test(m)
     ) {
-      // wasm 对垃圾输入可能直接 RuntimeError 崩溃，统一按格式错误呈现
+      // wasm 对垃圾输入可能直接 RuntimeError 崩溃，统一按格式错误呈现（遗留 T8）：
+      // 呈现归一，但原始 message 打 console.warn 留排查线索（wasm 报错信息常含
+      // 具体格式/内存地址，折叠后无处可查）
+      console.warn('[libarchive] 归一为格式错误前的原始 message:', m);
       return new Error('无法识别的压缩包格式（支持 zip/tar/tar.gz/tgz/tbz2/xz/7z/rar）');
     }
     return err;
@@ -190,6 +193,9 @@ export async function createLibarchiveStore(
     }
 
     const depth = parentChain ? parentChain.split(':').length : 0;
+    // close 幂等防线（遗留 T12，M4 终审 Minor）：引用计数接线（openFlow）与 archive
+    // 实例 destroy 可能双调 close()——reader.close 重复调用行为未定义，这里挡住
+    let closed = false;
     return {
       id: `libarchive${parentChain ? `:${parentChain}` : ''}:${truncateName(name ?? 'archive')}`,
       displayName: () => name ?? 'archive',
@@ -216,6 +222,8 @@ export async function createLibarchiveStore(
         }
       },
       close() {
+        if (closed) return;
+        closed = true;
         void reader.close();
       }
     };

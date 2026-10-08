@@ -73,8 +73,17 @@ pub async fn events(
                                 break; // 客户端断开（body 已 drop）或积压满（连接跟不上）
                             }
                         }
-                        Err(RecvError::Lagged(_)) => continue, // 慢连接丢帧：跳过
-                        Err(RecvError::Closed) => break,      // hub 已销毁
+                        Err(RecvError::Lagged(n)) => {
+                            // 慢连接丢帧：补发一条 resync 帧（遗留 T7）。前端 SSE handler
+                            // 只认 changed/watch-error，未知 type 忽略——天然安全，此处
+                            // 留作诊断线索与未来客户端按需全量刷新的挂点。
+                            let _ = frame_tx
+                                .send(Ok(Event::default().data(format!(
+                                    r#"{{"type":"resync","missed":{n}}}"#
+                                ))))
+                                .await;
+                        }
+                        Err(RecvError::Closed) => break, // hub 已销毁
                     }
                 }
             }
