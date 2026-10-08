@@ -73,4 +73,22 @@ describe('serveWorker init 失败路径', () => {
       { id: 2, ok: false }
     ]);
   });
+
+  it('init 失败首错升级 console.error（BUG-06 可观测：显式标签 + 资产排查提示）', async () => {
+    const errors: unknown[][] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args);
+    });
+    try {
+      const { ctx } = installServeWorker();
+      ctx.onmessage?.({ data: { kind: 'init' } });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(errors).toHaveLength(1);
+      const line = errors[0]!.join(' ');
+      expect(line).toContain('tree-sitter worker init 失败');
+      expect(line).toContain('404/MIME');
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });

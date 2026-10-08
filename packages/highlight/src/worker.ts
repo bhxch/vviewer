@@ -89,6 +89,13 @@ export function serveWorker(): void {
           return h;
         })
         .catch((e: unknown) => {
+          // BUG-06 可观测：init 失败首错升级 console.error——僵尸 worker 的静默性
+          // 是「零 wasm 请求、零用户可见错误」报告现象的主要观测障碍；
+          // 附资产排查提示（runtime/grammar wasm 404 或 MIME 不当为最常见成因）。
+          console.error(
+            '[vviewer] tree-sitter worker init 失败（排查 /tree-sitter.wasm、/grammars/*.wasm 是否 404/MIME 异常）:',
+            e
+          );
           // init 失败：排队请求逐个报错，后续请求同样失败
           for (const req of queued.splice(0)) postError(req, e);
           throw e;

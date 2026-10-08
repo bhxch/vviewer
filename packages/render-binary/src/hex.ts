@@ -1,12 +1,15 @@
-// hex.ts — hex 渲染器（M4 Task 2）。经典三列 dump（等宽行字符串，列对齐由空格保证），
-// 前 1MB 立即渲染 + "加载更多"每次追加 1MB（单页 DocumentFragment 一次插入，不做虚拟滚动）。
+// hex.ts — hex 渲染器（M4 Task 2）。经典三列 dump（等宽行字符串，列对齐由空格保证）。
+// BUG-16：1MB 全量一次性渲染（~6.5 万 DOM 行）首屏 1.4~1.8s，改行虚拟滚动——
+// buffer 全量已在参数内，可视行经 renderHexBytes 即时格式化，行高固定 18px
+// 与 render-text 的 virtualScroller（上移后由 @vviewer/core 提供）共用。
+// 原分页「加载更多」语义随之取消：滚动到底即达数据末偏移，无续读步骤。
 // 结构树走 binary.worker（BinaryClient），状态行展示大小/识别类型。
-import type { Detection, FileSource, RenderedInstance, Renderer } from '@vviewer/core';
+import { virtualScroller, type VirtualScrollerHandle, type Detection, type FileSource, type RenderedInstance, type Renderer } from '@vviewer/core';
 import { renderHexBytes, HEX_ROW_BYTES } from './hexBytes';
 import { STRUCT_TAIL_BYTES, type ParseResult, type StructNode } from './struct';
 
-/** hex dump 单页字节数（前 1MB 立即渲染，加载更多每次追加同量） */
-export const HEX_PAGE_BYTES = 1 << 20;
+/** hex 行高（px）：字号 12px × 1.5 行距，与 app.css .vv-hex-dump 一致；行内样式显式锁定 */
+export const HEX_LINE_HEIGHT = 18;
 /** 结构树解析取头部字节数 */
 const STRUCT_HEAD_BYTES = 8192;
 
@@ -37,7 +40,6 @@ function nodeToDetails(node: StructNode, open: boolean): HTMLDetailsElement {
 }
 
 export interface HexDomOptions {
-  pageBytes?: number;
   /** 注入 worker 创建器（测试/无 Worker 环境可替换）；默认 new Worker(binary.worker) */
   createWorker?: () => Worker | null;
 }
@@ -51,7 +53,6 @@ export function renderHex(
   target: HTMLElement,
   opts: HexDomOptions = {}
 ): { destroy(): void; structReady: Promise<void> } {
-  const pageBytes = opts.pageBytes ?? HEX_PAGE_BYTES;
   const root = document.createElement('div');
   root.className = 'vv-hex';
   const status = document.createElement('div');
@@ -61,39 +62,37 @@ export function renderHex(
   body.className = 'vv-hex-body';
   const dump = document.createElement('div');
   dump.className = 'vv-hex-dump';
+  // dump 即虚拟滚动容器（.vv-virtual 由 virtualScroller 加）：自身滚动、占满 body
+  // 剩余空间，结构树出现在其后不需滚过全部行。字号/行距行内锁定（行高常量
+  // HEX_LINE_HEIGHT 依赖此值），不依赖 app.css 到位。
+  dump.style.cssText =
+    'flex:1 1 auto; min-height:0; overflow:auto;' +
+    'font-family:var(--vv-code-font, monospace); font-size:12px; line-height:1.5; white-space:pre;';
   body.append(dump);
   root.append(status, body);
   target.replaceChildren(root);
 
-  // ---- 分页 dump ----
-  let rendered = 0;
-  let loadMore: HTMLButtonElement | null = null;
-
-  function renderPage(): void {
-    const end = Math.min(buffer.length, rendered + pageBytes);
-    const frag = document.createDocumentFragment();
-    for (const row of renderHexBytes(buffer.subarray(rendered, end), rendered)) {
-      const el = document.createElement('div');
-      el.className = 'vv-hex-row';
-      el.textContent = row;
-      frag.append(el);
+  // ---- 虚拟滚动 dump：总行数 = ceil(大小/16)，可视行即时格式化 ----
+  const rowCount = Math.ceil(buffer.length / HEX_ROW_BYTES);
+  const scroller: VirtualScrollerHandle = virtualScroller(
+    dump,
+    rowCount,
+    HEX_LINE_HEIGHT,
+    (first, last, viewport) => {
+      const start = first * HEX_ROW_BYTES;
+      const end = Math.min(buffer.length, (last + 1) * HEX_ROW_BYTES);
+      const frag = document.createDocumentFragment();
+      if (start < end) {
+        for (const row of renderHexBytes(buffer.subarray(start, end), start)) {
+          const el = document.createElement('div');
+          el.className = 'vv-hex-row';
+          el.textContent = row;
+          frag.append(el);
+        }
+      }
+      viewport.replaceChildren(frag);
     }
-    if (loadMore !== null) loadMore.remove();
-    dump.append(frag);
-    rendered = end;
-    if (rendered < buffer.length) {
-      loadMore = document.createElement('button');
-      loadMore.type = 'button';
-      loadMore.className = 'vv-hex-more';
-      loadMore.textContent = `加载更多（已显示 ${formatSize(rendered)} / ${formatSize(buffer.length)}）`;
-      loadMore.onclick = () => renderPage();
-      dump.append(loadMore);
-    } else {
-      loadMore = null;
-    }
-  }
-
-  renderPage();
+  );
 
   // ---- 结构树（Worker 化，失败降级主线程）----
   let worker: Worker | null = null;
@@ -150,6 +149,7 @@ export function renderHex(
 
   return {
     destroy() {
+      scroller.destroy();
       worker?.terminate();
       root.remove();
     },

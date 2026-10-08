@@ -11,6 +11,8 @@ const interval = (start: number, end: number, capture: string): HighlightInterva
 /** 可脚本化回包的假 Worker：postMessage → 异步回发响应（init 握手单独记录）。 */
 class FakeWorker {
   onmessage: ((ev: { data: HighlightResponse }) => void) | null = null;
+  onerror: ((ev: ErrorEvent) => void) | null = null;
+  onmessageerror: (() => void) | null = null;
   terminated = false;
   requests: HighlightRequest[] = [];
   inits: Array<{ kind: 'init' }> = [];
@@ -147,6 +149,61 @@ describe('HighlightClient', () => {
       expect(rejectReason).toBe('unset');
       client.dispose(); // 收尾：挂起请求以 Canceled reject，worker 终止
       vi.useRealTimers();
+    });
+  });
+
+  describe('worker 错误可观测（BUG-06：onerror/onmessageerror → 上报 + reject 在途 + 短路）', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('worker.onerror：onWorkerError 收到带 filename 的原因，在途请求 reject，后续请求短路', async () => {
+      const worker = new FakeWorker();
+      worker.responder = () => {}; // 请求挂起
+      const reported: string[] = [];
+      const client = new HighlightClient(worker as unknown as Worker, undefined, (r) => reported.push(r));
+      const p = client.highlight('a=1', 'bash');
+      await vi.waitFor(() => expect(worker.requests).toHaveLength(1));
+      worker.onerror?.({
+        message: 'worker 脚本崩溃',
+        filename: '/_app/immutable/workers/ts-worker-x.js',
+      } as ErrorEvent);
+      await expect(p).rejects.toThrow('worker 脚本崩溃');
+      expect(reported).toHaveLength(1);
+      expect(reported[0]).toContain('worker 脚本崩溃');
+      expect(reported[0]).toContain('ts-worker-x.js');
+      // 短路：worker 已死，后续请求不再发往 worker
+      await expect(client.highlight('b=2', 'bash')).rejects.toThrow();
+      expect(worker.requests).toHaveLength(1);
+      client.dispose();
+    });
+
+    it('worker.onmessageerror：在途请求 reject 且原因含 onmessageerror，上报一次', async () => {
+      const worker = new FakeWorker();
+      worker.responder = () => {};
+      const reported: string[] = [];
+      const client = new HighlightClient(worker as unknown as Worker, undefined, (r) => reported.push(r));
+      const p = client.highlight('a=1', 'bash');
+      await vi.waitFor(() => expect(worker.requests).toHaveLength(1));
+      worker.onmessageerror?.();
+      await expect(p).rejects.toThrow('onmessageerror');
+      expect(reported).toHaveLength(1);
+      client.dispose();
+    });
+
+    it('onerror 后看门狗解除：15s 到点不重复上报、不重复 reject', async () => {
+      vi.useFakeTimers();
+      const worker = new FakeWorker();
+      worker.responder = () => {};
+      const reported: string[] = [];
+      const client = new HighlightClient(worker as unknown as Worker, undefined, (r) => reported.push(r));
+      const p = client.highlight('a=1', 'bash');
+      await vi.advanceTimersByTimeAsync(0); // 冲刷微任务让请求入列
+      worker.onerror?.({ message: 'script 404' } as ErrorEvent);
+      await expect(p).rejects.toThrow('script 404');
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(reported).toHaveLength(1); // 看门狗已被首错清除，无双报
+      client.dispose();
     });
   });
 });

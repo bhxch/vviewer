@@ -1,6 +1,21 @@
-// hex.test.ts — hex dump 行格式纯函数单测（renderHexBytes）。
-import { describe, expect, it } from 'vitest';
-import { renderHexBytes } from '../src/hexBytes';
+// hex.test.ts — hex dump 行格式纯函数单测（renderHexBytes）+ 虚拟滚动 DOM 渲染（renderHex）。
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { renderHexBytes, HEX_ROW_BYTES } from '../src/hexBytes';
+
+// jsdom 无 ResizeObserver（虚拟滚动依赖），全文件 stub（照 render-text code.test.ts 惯例）
+beforeEach(() => {
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    }
+  );
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('renderHexBytes', () => {
   it('经典三列：8 位偏移 + 16 字节十六进制 + ASCII', () => {
@@ -76,6 +91,68 @@ describe('renderHex：worker 降级', () => {
     await inst.structReady;
     expect(target.querySelector('.vv-hex-status')?.textContent).toContain('PNG');
     expect(target.querySelector('.vv-hex-struct')).not.toBeNull();
+    inst.destroy();
+    target.remove();
+  });
+});
+
+// ---- BUG-16：hex 行虚拟滚动（jsdom 直测 DOM 结构与可视行填充）----
+
+describe('renderHex：行虚拟滚动', () => {
+  it('初始只渲染可视窗口行（≤ overscan 余量），不一次性渲染全部行（1MB 不再 6.5 万 DOM）', () => {
+    const bytes = new Uint8Array(1 << 20); // 1MB → 65,536 行
+    const target = document.createElement('div');
+    document.body.append(target);
+    const inst = renderHex(bytes, target, { createWorker: () => null });
+    const dump = target.querySelector('.vv-hex-dump') as HTMLElement;
+    expect(dump.classList.contains('vv-virtual')).toBe(true);
+    const domRows = dump.querySelectorAll('.vv-hex-row').length;
+    expect(domRows).toBeGreaterThan(0);
+    expect(domRows).toBeLessThan(64); // 初始窗口 = 0 可视 + 2×10 overscan，jsdom 高度 0
+    expect(dump.querySelector('.vv-hex-more')).toBeNull(); // 分页按钮语义移除
+    inst.destroy();
+    target.remove();
+  });
+
+  it('滚动到底：末行覆盖至 0xfffff 与 1MB 吻合（行首偏移 0xffff0 + 末字节），无白屏', () => {
+    const bytes = new Uint8Array(1 << 20);
+    bytes[bytes.length - 1] = 0x5a;
+    const target = document.createElement('div');
+    document.body.append(target);
+    const inst = renderHex(bytes, target, { createWorker: () => null });
+    const dump = target.querySelector('.vv-hex-dump') as HTMLElement;
+    const rowCount = Math.ceil(bytes.length / HEX_ROW_BYTES);
+    // jsdom 无布局：直接写 scrollTop 并派发 scroll 事件驱动 update()
+    dump.scrollTop = (rowCount - 1) * 18;
+    dump.dispatchEvent(new Event('scroll'));
+    const rows = [...dump.querySelectorAll('.vv-hex-row')];
+    expect(rows.length).toBeGreaterThan(0);
+    const lastRow = rows[rows.length - 1] as HTMLElement;
+    expect(lastRow.textContent!.slice(0, 8)).toBe('000ffff0'); // 末行起始偏移（1MB-16）
+    expect(lastRow.textContent!.endsWith('|...............Z|')).toBe(true); // 末字节偏移 0xfffff = 0x5a（ASCII 列末位）
+    inst.destroy();
+    target.remove();
+  });
+
+  it('小文件（< 一屏）：首行偏移 0、行数即总行数', () => {
+    const bytes = new Uint8Array(40); // 2.5 行 → 3 行
+    const target = document.createElement('div');
+    document.body.append(target);
+    const inst = renderHex(bytes, target, { createWorker: () => null });
+    const rows = [...target.querySelectorAll('.vv-hex-row')];
+    expect(rows).toHaveLength(3);
+    expect(rows[0]!.textContent!.slice(0, 8)).toBe('00000000');
+    expect(rows[2]!.textContent!.slice(0, 8)).toBe('00000020'); // 尾行偏移 0x20（补齐渲染）
+    inst.destroy();
+    target.remove();
+  });
+
+  it('空 buffer：0 行、状态行显示 0 B，不抛错', () => {
+    const target = document.createElement('div');
+    document.body.append(target);
+    const inst = renderHex(new Uint8Array(0), target, { createWorker: () => null });
+    expect(target.querySelectorAll('.vv-hex-row')).toHaveLength(0);
+    expect(target.querySelector('.vv-hex-status')?.textContent).toContain('0 B');
     inst.destroy();
     target.remove();
   });

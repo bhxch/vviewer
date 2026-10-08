@@ -12,3 +12,4 @@ export * from './tree/singleFile';
 export * from './tree/localFs';
 export * from './tree/localFiles';
 export * from './tree/remote';
+export * from './virtualScroller';
