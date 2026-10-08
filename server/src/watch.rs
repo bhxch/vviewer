@@ -7,9 +7,12 @@
 //!
 //! 自愈（BUG-02）：启动失败保留 Err 写 stderr 日志（含 OS 错误码与 root 路径）
 //! 并在后台线程退避重试，连续失败降级 `PollWatcher`（轮询，跨文件系统可用）继续
-//! 广播 changed；运行期错误丢弃当前 watcher 重建，恢复实时监听后广播
-//! `{"type":"watch-recovered"}`。健康状态 `Ok / Recovering / Degraded` 经
-//! `ChangeHub::health` 暴露，SSE 建连按快照发对应降级帧（见 `snapshot_frame`）。
+//! 广播 changed，之后周期性探试 recommended（暂时性故障解除后回归实时）；运行期
+//! 错误丢弃当前 watcher 重建，恢复实时监听后广播 `{"type":"watch-recovered"}`。
+//! 健康状态 `Ok / Recovering / Degraded` 经 `ChangeHub::health` 暴露，SSE 建连
+//! 按快照发降级帧（非 Ok 统一 `watch-degraded`——`watch-error` 在前端是终态
+//! 语义，见 `snapshot_frame`；运行期错误同样不广播它，自愈经状态帧与恢复的
+//! changed 表达）。
 //!
 //! 全同步实现（聚合走 std 线程 + `recv_timeout`，watcher 重建同在聚合线程内）：
 //! `AppState::new` 无需 tokio runtime 也可构造（main 在进入 runtime 前构造
@@ -58,14 +61,16 @@ impl WatchHealth {
         }
     }
 
-    /// SSE 建连快照帧 type：Ok 无帧；Recovering → `watch-error`（沿用既有降级帧，
-    /// 前端显示「自动刷新不可用」）；Degraded → `watch-degraded`（前端未知 type
-    /// 天然忽略，留作诊断线索与未来客户端展示降级轮询的挂点）。
+    /// SSE 建连快照帧 type：Ok 无帧；Recovering/Degraded 均发 `watch-degraded`。
+    /// 不可用 `watch-error`：前端 remote.ts 对其按终态处理（断开且不重连），
+    /// 会令 Recovering 窗口内建连的 tab 永久失联、服务端随后的
+    /// watch-recovered/changed 全部无效。`watch-degraded` 是前端未知 type，
+    /// 天然忽略、连接保持：服务端自愈后 changed 自然恢复流动，同时留作
+    /// 诊断线索与未来客户端展示降级/恢复提示的挂点。
     pub fn snapshot_frame(self) -> Option<&'static str> {
         match self {
             WatchHealth::Ok => None,
-            WatchHealth::Recovering => Some("watch-error"),
-            WatchHealth::Degraded => Some("watch-degraded"),
+            WatchHealth::Recovering | WatchHealth::Degraded => Some("watch-degraded"),
         }
     }
 }
@@ -200,14 +205,22 @@ impl Default for RetryPolicy {
     }
 }
 
-/// watcher 建立工厂：recommended 退避重试 → PollWatcher 降级（并记忆偏好）→
-/// 兜底无限重试（root 暂时不可达时，条件移除后自愈）。opener 可注入（测试用
-/// mock 会话替换真实 notify 构建）。
+/// 降级后每隔 N 次 PollWatcher 重建探试一次 recommended：暂时性故障（如 inotify
+/// ENOSPC）解除后可回归实时监听，避免永久停留在 2s 轮询。
+const POLL_PROBE_EVERY: u32 = 5;
+
+/// watcher 建立工厂：recommended 退避重试 → PollWatcher 降级（并记忆偏好，
+/// 每 POLL_PROBE_EVERY 次重建探试一次 recommended）→ 兜底无限重试（root 暂时
+/// 不可达时，条件移除后自愈）。opener 可注入（测试用 mock 会话替换真实 notify
+/// 构建）。
 struct RetryFactory {
     root: PathBuf,
     policy: RetryPolicy,
-    /// 上次降级成功后优先重试 PollWatcher，避免每次重建空耗 recommended 重试窗口。
+    /// 上次降级成功后优先重试 PollWatcher，避免每次重建空耗 recommended 重试窗口；
+    /// 探试周期见 `POLL_PROBE_EVERY`。
     prefer_poll: bool,
+    /// prefer_poll 生效期间经历的重建次数（探试计数）。
+    poll_rebuilds: u32,
     open_recommended: Opener,
     open_poll: Opener,
 }
@@ -222,6 +235,7 @@ impl RetryFactory {
             root,
             policy,
             prefer_poll: false,
+            poll_rebuilds: 0,
             open_recommended: Box::new(move || {
                 let (w, rx) = open_recommended(&rec_root)?;
                 let backend = backend_name(&w);
@@ -237,6 +251,28 @@ impl RetryFactory {
     /// 阻塞直到成功建立会话或 stop 置位（返回 None）。每次尝试失败写 stderr 日志。
     fn build(&mut self, stop: &AtomicBool) -> Option<WatchSession> {
         if self.prefer_poll {
+            if stop.load(Ordering::SeqCst) {
+                return None;
+            }
+            self.poll_rebuilds = self.poll_rebuilds.saturating_add(1);
+            if self.poll_rebuilds % POLL_PROBE_EVERY == 0 {
+                match (self.open_recommended)() {
+                    Ok((keep, rx, backend)) => {
+                        self.prefer_poll = false;
+                        eprintln!(
+                            "[watch] recommended probe succeeded, restored realtime watcher backend={backend} root={}",
+                            self.root.display()
+                        );
+                        return Some(WatchSession::new(keep, rx, backend, false));
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[watch] recommended probe failed (next probe in {POLL_PROBE_EVERY} rebuilds) root={} err={e:?}",
+                            self.root.display()
+                        );
+                    }
+                }
+            }
             match (self.open_poll)() {
                 Ok((keep, rx, backend)) => return Some(WatchSession::new(keep, rx, backend, true)),
                 Err(e) => {
@@ -269,10 +305,11 @@ impl RetryFactory {
                 }
             }
         }
-        // 降级 PollWatcher（轮询，跨文件系统可用）
+        // 降级 PollWatcher（轮询，跨文件系统可用）；探试计数从降级时点重新计
         match (self.open_poll)() {
             Ok((keep, rx, backend)) => {
                 self.prefer_poll = true;
+                self.poll_rebuilds = 0;
                 eprintln!(
                     "[watch] degraded to PollWatcher (interval {:?}) root={}",
                     self.policy.poll_interval,
@@ -319,9 +356,11 @@ impl RetryFactory {
 }
 
 /// 聚合与自愈主循环：建立会话 → 聚合事件直到错误/停止 → 重建。状态转换时
-/// 广播对应帧（各一次）：会话异常进入 Recovering 发 `watch-error`；降级发
-/// `watch-degraded`；恢复实时发 `watch-recovered`；changed 帧照常。帧不重复：
-/// 会话错误与重建成功天然交替，重建重试循环（build 内）不发帧。
+/// 广播对应帧（各一次）：降级发 `watch-degraded`、恢复实时发 `watch-recovered`，
+/// changed 帧照常。会话异常只把健康置为 Recovering、不广播帧——`watch-error`
+/// 在前端是终态语义（断开不重连），广播会令全部存量活跃连接永久失联、自愈
+/// 帧到不了任何存活客户端；自愈表达为恢复后的 watch-recovered/watch-degraded
+/// 与 changed 恢复流动。重建重试循环（build 内）不发帧。
 fn run_loop(
     initial: Option<WatchSession>,
     mut factory: RetryFactory,
@@ -362,11 +401,12 @@ fn run_loop(
         if !errored || stop.load(Ordering::SeqCst) {
             return; // 优雅退出（stop / watcher 句柄被丢弃）
         }
-        // 运行期错误：进入 Recovering 并广播一条 watch-error（下次重建成功时
-        // 再发 watch-recovered/watch-degraded）
+        // 运行期错误：进入 Recovering。不广播 "watch-error"——前端对其按终态
+        // 处理（断开不重连），广播会令全部存量活跃连接永久失联、自愈后的
+        // watch-recovered/changed 到不了任何存活客户端；状态经 health 快照
+        // （新连接 watch-degraded 帧）与恢复后的状态帧表达
         prev = WatchHealth::Recovering;
         health.store(WatchHealth::Recovering.to_u8(), Ordering::SeqCst);
-        let _ = tx.send(json!({ "type": "watch-error" }).to_string());
     }
 }
 
@@ -473,9 +513,9 @@ fn fs_type_of(path: &Path) -> Option<String> {
     let mut best: Option<(usize, String)> = None;
     for line in mounts.lines() {
         let mut fields = line.split_whitespace();
-        fields.next()?; // 设备
-        let mount_point = unescape_mount(fields.next()?)?;
-        let fstype = fields.next()?;
+        let Some(_device) = fields.next() else { continue };
+        let Some(mount_point) = fields.next().and_then(unescape_mount) else { continue };
+        let Some(fstype) = fields.next() else { continue };
         if target.starts_with(&mount_point) {
             let len = mount_point.as_os_str().len();
             if best.as_ref().map_or(true, |(l, _)| len > *l) {
@@ -492,26 +532,31 @@ fn fs_type_of(_path: &Path) -> Option<String> {
 }
 
 /// /proc/self/mounts 的挂载点含八进制转义（\040 空格等），解码为原始路径。
+/// 内核输出的是 UTF-8 字节序列转义（如 é 为 \303\251 两个字节），故按字节
+/// 累积、行结束后整体按 UTF-8 还原（非 UTF-8 字节经 lossy 替换，仅诊断用途）。
 #[cfg(target_os = "linux")]
 fn unescape_mount(s: &str) -> Option<PathBuf> {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            let oct: String = chars.by_ref().take(3).collect();
-            if oct.len() == 3 {
-                if let Ok(v) = u8::from_str_radix(&oct, 8) {
-                    out.push(v as char);
-                    continue;
-                }
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        // \NNN 三位八进制转义；预检后续 3 字节均为 ASCII 数字（保证 str 切片
+        // 边界安全），from_str_radix 拒绝 8/9 时按字面量回退
+        if bytes[i] == b'\\'
+            && i + 4 <= bytes.len()
+            && bytes[i + 1..i + 4].iter().all(u8::is_ascii_digit)
+        {
+            let oct = &s[i + 1..i + 4];
+            if let Ok(v) = u8::from_str_radix(oct, 8) {
+                out.push(v);
+                i += 4;
+                continue;
             }
-            out.push('\\');
-            out.push_str(&oct);
-        } else {
-            out.push(c);
         }
+        out.push(bytes[i]);
+        i += 1;
     }
-    Some(PathBuf::from(out))
+    Some(PathBuf::from(String::from_utf8_lossy(&out).into_owned()))
 }
 
 /// notify 事件（成功态）→ 相对 root 的路径集合（'/' 分隔，排序去重由 BTreeSet 保证）。
@@ -584,7 +629,9 @@ mod tests {
     #[test]
     fn snapshot_frame_matches_health_semantics() {
         assert_eq!(WatchHealth::Ok.snapshot_frame(), None);
-        assert_eq!(WatchHealth::Recovering.snapshot_frame(), Some("watch-error"));
+        // Recovering/Degraded 统一发 watch-degraded：watch-error 在前端是终态
+        // 语义（断开不重连），不得用于建连快照
+        assert_eq!(WatchHealth::Recovering.snapshot_frame(), Some("watch-degraded"));
         assert_eq!(WatchHealth::Degraded.snapshot_frame(), Some("watch-degraded"));
     }
 
@@ -626,6 +673,7 @@ mod tests {
             root: PathBuf::from("/srv/root"),
             policy: fast_policy(),
             prefer_poll: false,
+            poll_rebuilds: 0,
             open_recommended,
             open_poll,
         }
@@ -638,7 +686,36 @@ mod tests {
             .expect("broadcast 接收失败")
     }
 
-    /// 运行期错误 → 一条 watch-error → 重建成功 → watch-recovered → changed 照常。
+    /// 每次调用都成功的 opener：每次新建事件通道（测试无需消费会话事件）。
+    fn endless_ok_opener(backend: &'static str) -> Opener {
+        Box::new(move || {
+            let (tx, rx) = std::sync::mpsc::channel();
+            Ok((Box::new(tx) as Box<dyn Send>, rx, backend.to_string()))
+        })
+    }
+
+    /// 前 `n` 次调用失败并计数，之后返回预置 mock 会话（探试成功路径用）。
+    fn fail_n_then_ok_opener(
+        n: usize,
+        keep: Sender<RawEvent>,
+        rx: Receiver<RawEvent>,
+        backend: &'static str,
+        fails: Arc<AtomicUsize>,
+    ) -> Opener {
+        let mut rx = Some(rx);
+        Box::new(move || {
+            if fails.fetch_add(1, Ordering::SeqCst) < n {
+                return Err(NotifyError::io(std::io::Error::other("mock not ready yet")));
+            }
+            let Some(rx) = rx.take() else {
+                return Err(NotifyError::io(std::io::Error::other("mock session exhausted")));
+            };
+            Ok((Box::new(keep.clone()) as Box<dyn Send>, rx, backend.to_string()))
+        })
+    }
+
+    /// 运行期错误 → 重建成功 → watch-recovered → changed 照常。不广播
+    /// watch-error（前端终态语义，会令存量连接永久断开）。
     #[tokio::test]
     async fn runtime_error_recovers_via_rebuilt_watcher() {
         let (tx1, rx1) = std::sync::mpsc::channel();
@@ -655,27 +732,27 @@ mod tests {
         let mut sub = hub.subscribe();
 
         tx1.send(Err(NotifyError::io(std::io::Error::other("watch removed")))).unwrap();
-        let f1 = next_frame(&mut sub).await;
-        assert!(f1.contains("watch-error"), "应先收 watch-error: {f1}");
-        // 注：health 的 Recovering 中间态窗口极短（mock 重建毫秒级完成），
-        // 不在此断言——稳定停留 Recovering 的语义由持续失败用例覆盖。
 
-        // 重建（mock-b）成功 → recovered（携带后端名）→ 健康回 Ok
-        let f2 = next_frame(&mut sub).await;
-        assert!(f2.contains("watch-recovered"), "应收到恢复帧: {f2}");
-        assert!(f2.contains("mock-b"), "恢复帧应携带新后端名: {f2}");
+        // 会话错误不发帧（连接保持）；重建（mock-b）成功 → recovered（携带
+        // 后端名）→ 健康回 Ok。health 的 Recovering 中间态窗口极短（mock 重建
+        // 毫秒级完成），不在此断言——稳定停留 Recovering 由持续失败用例覆盖。
+        let f1 = next_frame(&mut sub).await;
+        assert!(f1.contains("watch-recovered"), "应收到恢复帧: {f1}");
+        assert!(!f1.contains("watch-error"), "不得广播前端终态的 watch-error: {f1}");
+        assert!(f1.contains("mock-b"), "恢复帧应携带新后端名: {f1}");
         assert_eq!(hub.health(), WatchHealth::Ok);
 
         // 恢复后 changed 照常广播（自愈不是降级）
         tx2.send(ev(EventKind::Create(CreateKind::File), &["/srv/root/a.txt"])).unwrap();
-        let f3 = next_frame(&mut sub).await;
-        assert!(f3.contains("changed") && f3.contains("a.txt"), "恢复后应照常 changed: {f3}");
+        let f2 = next_frame(&mut sub).await;
+        assert!(f2.contains("changed") && f2.contains("a.txt"), "恢复后应照常 changed: {f2}");
     }
 
-    /// 重建持续失败：watch-error 只发一次（重试期间不重复），健康停留 Recovering，
-    /// recommended 重试与 PollWatcher 降级尝试确有发生。
+    /// 重建持续失败：不广播任何帧（watch-error 前端终态语义；Recovering 经
+    /// health 快照表达），健康停留 Recovering，recommended 重试与 PollWatcher
+    /// 降级尝试确有发生。
     #[tokio::test]
-    async fn repeated_build_failures_emit_watch_error_once() {
+    async fn repeated_build_failures_stay_silent_in_recovering() {
         let (tx1, rx1) = std::sync::mpsc::channel();
         let rec_fails = Arc::new(AtomicUsize::new(0));
         let poll_fails = Arc::new(AtomicUsize::new(0));
@@ -688,12 +765,11 @@ mod tests {
         let mut sub = hub.subscribe();
 
         tx1.send(Err(NotifyError::io(std::io::Error::other("watch removed")))).unwrap();
-        let f1 = next_frame(&mut sub).await;
-        assert!(f1.contains("watch-error"), "应收到 watch-error: {f1}");
 
-        // 300ms 内（fast_policy 兜底循环 2ms 一轮，重试几十次）无重复帧
+        // 300ms 内（fast_policy 兜底循环 2ms 一轮，重试几十次）连接保持静默：
+        // 存量连接不断开，服务端恢复后 changed 自然恢复流动
         tokio::time::sleep(Duration::from_millis(300)).await;
-        assert!(sub.try_recv().is_err(), "重试期间不应重复发 watch-error");
+        assert!(sub.try_recv().is_err(), "Recovering 期间不应广播任何帧");
         assert_eq!(hub.health(), WatchHealth::Recovering);
         assert!(
             rec_fails.load(Ordering::SeqCst) >= 3,
@@ -701,6 +777,53 @@ mod tests {
             rec_fails.load(Ordering::SeqCst)
         );
         assert!(poll_fails.load(Ordering::SeqCst) >= 1, "应尝试过 PollWatcher 降级");
+    }
+
+    /// 降级后每 POLL_PROBE_EVERY 次重建探试一次 recommended：探试失败回落
+    /// PollWatcher，暂时性故障解除后探试成功即回归实时（不再永久降级）。
+    #[test]
+    fn prefer_poll_probes_recommended_periodically() {
+        let stop = AtomicBool::new(false);
+        let rec_fails = Arc::new(AtomicUsize::new(0));
+        // 探试失败路径：recommended 恒败
+        let mut f = factory(
+            scripted_opener(vec![], rec_fails.clone()),
+            endless_ok_opener("mock-poll"),
+        );
+        // build#1：recommended 3 连败 → poll 降级（prefer_poll=true, 计数清零）
+        let s1 = f.build(&stop).unwrap();
+        assert!(s1.degraded, "首次降级应为 poll 会话");
+        // build#2..#6：prefer 分支计数到 5（POLL_PROBE_EVERY）时触发探试
+        // （recommended 恒败 → 回落 poll）
+        for i in 1..=5 {
+            let s = f.build(&stop).unwrap();
+            assert!(s.degraded, "探试失败应回落 poll 会话（build #{})", i + 1);
+        }
+        assert_eq!(
+            rec_fails.load(Ordering::SeqCst),
+            3 + 1,
+            "recommended 应被调用 3（首次重试）+1（探试）次"
+        );
+        assert!(f.prefer_poll, "探试失败应维持降级偏好");
+
+        // 探试成功路径：recommended 第 4 次调用起成功（build#1 耗 3 次，
+        // build#7 探试即第 4 次调用成功 → 回归实时）
+        let (tx, rx) = std::sync::mpsc::channel();
+        let rec_fails2 = Arc::new(AtomicUsize::new(0));
+        let mut f2 = factory(
+            fail_n_then_ok_opener(3, tx.clone(), rx, "mock-rec", rec_fails2.clone()),
+            endless_ok_opener("mock-poll"),
+        );
+        let s = f2.build(&stop).unwrap(); // #1: rec x3 失败 → poll 降级
+        assert!(s.degraded);
+        for _ in 0..4 {
+            assert!(f2.build(&stop).unwrap().degraded, "#2..#5 应为 poll 会话");
+        }
+        let s = f2.build(&stop).unwrap(); // #6: 探试（rec 第 4 次调用）成功
+        assert!(!s.degraded, "探试成功应回归实时会话: degraded={}", s.degraded);
+        assert_eq!(s.backend, "mock-rec");
+        assert!(!f2.prefer_poll, "探试成功应清除降级偏好");
+        // 此后重建走 recommended 正常分支（与 build#1 同一代码路径，不再断言）
     }
 
     /// recommended 持续失败 → 降级 PollWatcher：健康 Degraded、发 watch-degraded 帧、

@@ -156,11 +156,14 @@ async fn rapid_writes_aggregate_into_single_frame() {
     }
 }
 
-// ---------- watcher 建立失败降级 ----------
+// ---------- watcher 建立失败的健康快照 ----------
 
+/// root 不可 watch → 健康停留 Recovering：建连快照发单条 `watch-degraded`
+/// （前端未知 type 天然忽略、连接保持，不用前端终态语义的 `watch-error`）；
+/// 该 root 永不恢复故之后无更多帧。恢复后帧照常流动的行为由 src/watch.rs
+/// 单测覆盖（runtime_error_recovers_via_rebuilt_watcher 等）。
 #[tokio::test]
-async fn watcher_failure_degrades_to_watch_error_then_silent() {
-    // root 不存在 → watch() 失败 → 连接后一条 watch-error，之后保持静默
+async fn recovering_snapshot_emits_single_degraded_frame() {
     let state = AppState::new(
         PathBuf::from("/nonexistent-vviewer-watch-root"),
         None,
@@ -173,7 +176,7 @@ async fn watcher_failure_degrades_to_watch_error_then_silent() {
     assert_eq!(status, StatusCode::OK);
 
     let frames = collect_data_frames(&mut body, Duration::from_millis(1200)).await;
-    assert_eq!(frames.len(), 1, "降级流只发一条 watch-error: {frames:?}");
+    assert_eq!(frames.len(), 1, "Recovering 快照只发一条降级帧: {frames:?}");
     let v = parse(&frames).remove(0);
-    assert_eq!(v["type"], "watch-error");
+    assert_eq!(v["type"], "watch-degraded");
 }

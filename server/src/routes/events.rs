@@ -3,9 +3,10 @@
 //! 一次性 ticket 校验通过后升级为 `text/event-stream`：每连接一个驱动任务把
 //! ChangeHub 广播的聚合变更翻译成 `data:` 帧，另以 15s 心跳注释 `: ping` 保活；
 //! 客户端断开时发送端 `send` 失败（或 Receiver drop）即结束任务，无需额外清理。
-//! watcher 建连快照：健康状态非 Ok 时先发一条对应降级帧（Recovering →
-//! `watch-error`、Degraded → `watch-degraded`）；watcher 自愈的
-//! `watch-recovered` 帧与 changed 帧照常经广播流过本连接。
+//! watcher 建连快照：健康状态非 Ok（Recovering/Degraded）时先发一条
+//! `watch-degraded` 帧——前端未知 type 天然忽略、连接保持（不可用 `watch-error`：
+//! 前端按终态处理断开不重连，会令 Recovering 窗口建连的 tab 永久失联）；
+//! watcher 自愈的 `watch-recovered` 帧与 changed 帧照常经广播流过本连接。
 
 use std::convert::Infallible;
 use std::pin::Pin;
@@ -54,7 +55,8 @@ pub async fn events(
     // 每连接一个驱动任务：broadcast → SSE 帧（事件 + 心跳），body drop 即退出
     let (frame_tx, frame_rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(FRAME_CHANNEL);
     tokio::spawn(async move {
-        // 建连快照：watcher 非 Ok 即发对应降级帧（此后自愈状态帧/changed 照常流动）
+        // 建连快照：watcher 非 Ok（Recovering/Degraded）发一条 watch-degraded
+        // （前端忽略、连接保持）；此后自愈状态帧/changed 照常流动
         if let Some(t) = watch_health.snapshot_frame() {
             let _ = frame_tx
                 .send(Ok(Event::default().data(serde_json::json!({ "type": t }).to_string())))
