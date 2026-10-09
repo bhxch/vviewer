@@ -62,10 +62,11 @@ jobs:
             echo "path=/$repo" >> "$GITHUB_OUTPUT"
           fi
       # 第 3 层 CDN base 构建期烙入：版本归一（去 v 前缀）与 release.yml web/publish
-      # job 同法同值；main 触发时 ref_name 无 v 前缀，原样取用。scope 未配置
-      # （repo variable）则不注入 env——第 3 层整体缺席，而非注入畸形 URL
-      - name: 计算 CDN 资产 base（NPM_SCOPE 已配置时）
-        if: vars.NPM_SCOPE != ''
+      # job 同法同值。仅 tag ref 触发时注入——pages 由 push main 触发，ref_name 无
+      # 版本语义，注入 `@main` 在 npm 恒 404（每次访问白打一发失败请求）；scope 未
+      # 配置（repo variable）或不属 tag 构建则不注入 env，第 3 层整体缺席
+      - name: 计算 CDN 资产 base（tag 构建且 NPM_SCOPE 已配置时）
+        if: vars.NPM_SCOPE != '' && github.ref_type == 'tags'
         env:
           NPM_SCOPE: ${{ vars.NPM_SCOPE }}
         run: |
