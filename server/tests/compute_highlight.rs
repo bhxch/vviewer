@@ -808,3 +808,33 @@ async fn highlight_range_oversize_cumulative_lines_413() {
     assert!(body["error"].as_str().unwrap().contains("exceeds"), "{body}");
     cache_reset();
 }
+
+/// 修复轮 2（字节上限只约束产出窗口，不约束跳行距离）：~26MB 大文件（>20MB
+/// 服务端上限，行小而多）深处小窗口正常 200 且 baseLine 正确——这正是
+/// 「>20MB 文件懒高亮」的目标行为；对照：同文件无 range 走整文件路径仍 413。
+#[tokio::test]
+async fn highlight_range_deep_window_on_oversize_file_200() {
+    let _serial = serial_lock();
+    cache_reset();
+    let f = fixture(true, None);
+    let line = "let a = 1; let b = 2; let c = 3; let d = 4;\n"; // 44 字节/行
+    let total_lines = 600_000u64; // ~26.4MB
+    std::fs::write(f._dir.path().join("deep.rs"), line.repeat(total_lines as usize)).unwrap();
+    let (status, body) = post_json(
+        f.app.clone(),
+        "/api/compute/highlight",
+        None,
+        json!({
+            "path": "deep.rs", "lang": "rust",
+            "range": { "startLine": 500_000u64, "lineCount": 10 }
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "深窗口不得因跳行距离被拒: {body}");
+    assert_eq!(body["baseLine"].as_u64(), Some(500_000), "{body}");
+    assert!(!body["intervals"].as_array().unwrap().is_empty(), "区间非空: {body}");
+    // 对照：无 range 走整文件路径，文件 > 20MB 仍 413（range 是超限文件唯一服务路径）
+    let (status, _) = post_json(f.app, "/api/compute/highlight", None, json!({ "path": "deep.rs", "lang": "rust" })).await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    cache_reset();
+}

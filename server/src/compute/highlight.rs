@@ -356,24 +356,23 @@ async fn read_line_chunk(
     use tokio::io::AsyncBufReadExt;
     let file = tokio::fs::File::open(path).await?;
     let mut lines = tokio::io::BufReader::new(file).lines();
-    // chunk 字节预算（含 \n 分隔/行尾，按归一化后口径）：跳行与取行两阶段都计，
-    // 每行读入后立即检查——超限即断（review fix：range 窗口不得无声超限；
-    // 不截断——截断会让窗口无声缩水）。最小改动实现点：在 next_line 产出
-    // String 后计数中断，不做 fill_buf 预检（单次超长行的分配不可避免）。
-    let mut bytes: u64 = 0;
+    // 跳行阶段不累计字节（re-review 修正）：字节上限只约束产出窗口，不约束
+    // 跳行距离——深窗口（如 100MB 文件 startLine=90000 的 10 行小窗口）若把
+    // 跳行也计入会被 413 全拒，废掉「>20MB 文件懒高亮」的阶段目标。逐行
+    // String 为瞬时分配，上界=单行字节长（磁盘现实约束），可接受；真正的
+    // 资源约束是产出 chunk（取行阶段累计 + 413）。
     let mut skipped: u64 = 0;
     while skipped < start_line {
         match lines.next_line().await? {
-            Some(l) => {
-                bytes += l.len() as u64 + 1;
-                skipped += 1;
-                if bytes > HIGHLIGHT_MAX_BYTES as u64 {
-                    return Ok(ChunkRead::TooLarge);
-                }
-            }
+            Some(_) => skipped += 1,
             None => return Ok(ChunkRead::StartBeyondEof { total: skipped }),
         }
     }
+    // chunk 字节预算（含 \n 分隔/行尾，按归一化后口径）：仅取行阶段累计，每行
+    // 读入后立即检查——超限即断（handler 回 413，不截断：截断会让窗口无声
+    // 缩水）。最小改动实现点：在 next_line 产出 String 后计数中断，不做
+    // fill_buf 预检（单次超长行的分配不可避免）。
+    let mut bytes: u64 = 0;
     let mut chunk: Vec<String> = Vec::new();
     while (chunk.len() as u64) < line_count {
         match lines.next_line().await? {
