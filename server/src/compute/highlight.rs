@@ -328,43 +328,70 @@ fn mtime_ms(meta: &std::fs::Metadata) -> u64 {
         .unwrap_or(0)
 }
 
+/// [`read_line_chunk`] 的结果：`Ok` 为 chunk 文本与实际行数（可少于请求，自然
+/// 截断）；`StartBeyondEof` 携带文件实际行数（start_line ≥ 实际行数，含空文件）；
+/// `TooLarge` 为 chunk 字节超 [`HIGHLIGHT_MAX_BYTES`]（handler 回 413，不截断）。
+#[derive(Debug, PartialEq, Eq)]
+enum ChunkRead {
+    Ok { chunk: String, lines: u64 },
+    StartBeyondEof { total: u64 },
+    TooLarge,
+}
+
 /// 流式扫行（path+range 模式）：跳过 start_line 行后读至多 line_count 行，
 /// `\n` join 为 chunk 文本——全程不整读文件，内存有界（range 模式因此不设
-/// [`HIGHLIGHT_MAX_BYTES`] 文件大小上限）。
+/// [`HIGHLIGHT_MAX_BYTES`] 文件大小上限，仅对产出 chunk 设同一上限）。
 /// 行语义与 wc -l 同口径（以 `\n` 结尾的文件不计末尾空行），行号 0 起；末尾
 /// 空行不参与 range 寻址（客户端 meta 行数同口径）。tokio `next_line` 剥离
 /// `\r\n` 行尾，残留 `\r`（CR-only 文件、行内孤立 `\r`）由调用方对 chunk 文本
 /// 沿用整文件路径的 `replace` 归一——两模式同源语义。
-/// 返回：`Ok(Ok((chunk, 实际行数)))`（实际行数可少于 line_count，自然截断）；
-/// `Ok(Err(实际行数))` = start_line ≥ 实际行数（越过文件尾，含空文件 0 行）；
+/// 返回：[`ChunkRead::Ok`]；[`ChunkRead::StartBeyondEof`] = start_line ≥ 实际
+/// 行数；[`ChunkRead::TooLarge`] = chunk 超 [`HIGHLIGHT_MAX_BYTES`]；
 /// `Err(io)` = 读文件失败（含非 UTF-8：`lines()` 产 InvalidData）。
 async fn read_line_chunk(
     path: &std::path::Path,
     start_line: u64,
     line_count: u64,
-) -> std::io::Result<Result<(String, u64), u64>> {
+) -> std::io::Result<ChunkRead> {
     use tokio::io::AsyncBufReadExt;
     let file = tokio::fs::File::open(path).await?;
     let mut lines = tokio::io::BufReader::new(file).lines();
+    // chunk 字节预算（含 \n 分隔/行尾，按归一化后口径）：跳行与取行两阶段都计，
+    // 每行读入后立即检查——超限即断（review fix：range 窗口不得无声超限；
+    // 不截断——截断会让窗口无声缩水）。最小改动实现点：在 next_line 产出
+    // String 后计数中断，不做 fill_buf 预检（单次超长行的分配不可避免）。
+    let mut bytes: u64 = 0;
     let mut skipped: u64 = 0;
     while skipped < start_line {
         match lines.next_line().await? {
-            Some(_) => skipped += 1,
-            None => return Ok(Err(skipped)),
+            Some(l) => {
+                bytes += l.len() as u64 + 1;
+                skipped += 1;
+                if bytes > HIGHLIGHT_MAX_BYTES as u64 {
+                    return Ok(ChunkRead::TooLarge);
+                }
+            }
+            None => return Ok(ChunkRead::StartBeyondEof { total: skipped }),
         }
     }
     let mut chunk: Vec<String> = Vec::new();
     while (chunk.len() as u64) < line_count {
         match lines.next_line().await? {
-            Some(l) => chunk.push(l),
+            Some(l) => {
+                bytes += l.len() as u64 + 1;
+                chunk.push(l);
+                if bytes > HIGHLIGHT_MAX_BYTES as u64 {
+                    return Ok(ChunkRead::TooLarge);
+                }
+            }
             None => break, // 不足 line_count：越过文件尾，自然截断（200）
         }
     }
     if chunk.is_empty() {
         // line_count 已校验 ≥ 1：跳行成功但一行未得 = start_line 恰为总行数
-        return Ok(Err(start_line));
+        return Ok(ChunkRead::StartBeyondEof { total: start_line });
     }
-    Ok(Ok((chunk.join("\n"), chunk.len() as u64)))
+    Ok(ChunkRead::Ok { chunk: chunk.join("\n"), lines: chunk.len() as u64 })
 }
 
 /// body `{path?, text?, lang, range?}` → `{intervals, captures, baseLine}`。
@@ -444,15 +471,17 @@ pub(crate) async fn highlight_with_timeout(
             }
             let file_text: String = match req.range {
                 Some(r) => match read_line_chunk(&canonical, r.start_line, r.line_count).await {
-                    Ok(Ok((chunk, _))) => chunk,
+                    Ok(ChunkRead::Ok { chunk, .. }) => chunk,
                     // startLine ≥ 实际行数（含空文件）：400 携带实际行数
-                    Ok(Err(total)) => {
+                    Ok(ChunkRead::StartBeyondEof { total }) => {
                         return AppError::bad_request(format!(
                             "range.startLine {} is beyond end of file: {} lines",
                             r.start_line, total
                         ))
                         .into_response()
                     }
+                    // chunk 超 20MB（单行超长或多行累计）：413，与整文件路径同限
+                    Ok(ChunkRead::TooLarge) => return too_large("chunk"),
                     Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
                         return AppError::bad_request("file is not valid UTF-8").into_response()
                     }
@@ -759,29 +788,41 @@ fn main() {
     }
 
     /// 流式扫行（Task 1）：中段取行、越过文件尾自然截断、start_line == 总行数
-    /// 与空文件返回 Err(实际行数)、tokio next_line 剥离 \r\n 行尾。
+    /// 与空文件返回 StartBeyondEof(实际行数)、tokio next_line 剥离 \r\n 行尾。
     #[tokio::test]
     async fn read_line_chunk_skip_truncate_and_beyond_eof() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("chunk.txt");
         std::fs::write(&p, "l0\nl1\nl2\nl3\n").unwrap();
         // 中段：跳 1 取 2
-        let chunk = read_line_chunk(&p, 1, 2).await.unwrap().unwrap();
-        assert_eq!(chunk, ("l1\nl2".to_string(), 2));
+        let ChunkRead::Ok { chunk, lines } = read_line_chunk(&p, 1, 2).await.unwrap() else {
+            panic!("应为 Ok");
+        };
+        assert_eq!((chunk, lines), ("l1\nl2".to_string(), 2));
         // 越过文件尾：截断为实际行数
-        let chunk = read_line_chunk(&p, 2, 10).await.unwrap().unwrap();
-        assert_eq!(chunk, ("l2\nl3".to_string(), 2));
-        // start_line == 总行数（4）→ Err(4)；空文件 → Err(0)
-        assert_eq!(read_line_chunk(&p, 4, 1).await.unwrap().unwrap_err(), 4);
+        let ChunkRead::Ok { chunk, lines } = read_line_chunk(&p, 2, 10).await.unwrap() else {
+            panic!("应为 Ok");
+        };
+        assert_eq!((chunk, lines), ("l2\nl3".to_string(), 2));
+        // start_line == 总行数（4）→ StartBeyondEof(4)；空文件 → StartBeyondEof(0)
+        assert_eq!(
+            read_line_chunk(&p, 4, 1).await.unwrap(),
+            ChunkRead::StartBeyondEof { total: 4 }
+        );
         let empty = dir.path().join("empty.txt");
         std::fs::write(&empty, "").unwrap();
-        assert_eq!(read_line_chunk(&empty, 0, 3).await.unwrap().unwrap_err(), 0);
+        assert_eq!(
+            read_line_chunk(&empty, 0, 3).await.unwrap(),
+            ChunkRead::StartBeyondEof { total: 0 }
+        );
         // \r\n 行尾在扫描期剥离：chunk 与 LF 版本逐字节一致（孤立 \r 由调用方
         // replace 兜底，与整文件路径同源）
         let crlf = dir.path().join("crlf.txt");
         std::fs::write(&crlf, "a\r\nb\r\n").unwrap();
-        let chunk = read_line_chunk(&crlf, 0, 5).await.unwrap().unwrap();
-        assert_eq!(chunk, ("a\nb".to_string(), 2));
+        let ChunkRead::Ok { chunk, lines } = read_line_chunk(&crlf, 0, 5).await.unwrap() else {
+            panic!("应为 Ok");
+        };
+        assert_eq!((chunk, lines), ("a\nb".to_string(), 2));
     }
     /// 504 自动化（终审 M6：超时路径此前无测试）：注入永不完成的解析任务 + 200ms
     /// deadline + 挂钟暂停——advance 越过 deadline 后超时分支确定触发，不依赖

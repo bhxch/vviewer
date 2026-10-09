@@ -766,3 +766,45 @@ async fn highlight_range_invalid_utf8_400() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
 }
+
+/// 修复轮 1（chunk 字节上限）：minified 单行即超 20MB + range → 413
+/// （输入合法但产出过大，不截断——截断会让窗口无声缩水）。
+#[tokio::test]
+async fn highlight_range_oversize_single_line_413() {
+    let _serial = serial_lock();
+    cache_reset();
+    let f = fixture(true, None);
+    let big = "let x=1;".repeat(20 * 1024 * 1024 / 8 + 1); // 一行 ~20MB+8B，无换行
+    std::fs::write(f._dir.path().join("min.rs"), &big).unwrap();
+    let (status, body) = post_json(
+        f.app,
+        "/api/compute/highlight",
+        None,
+        json!({ "path": "min.rs", "lang": "rust", "range": { "startLine": 0, "lineCount": 1 } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("exceeds"), "{body}");
+    cache_reset();
+}
+
+/// 修复轮 1（chunk 字节上限）：多行单行合规、累计超 20MB → 413
+/// （5015 字节/行 × 5000 行 ≈ 24MB；lineCount=5000 在合法区间内）。
+#[tokio::test]
+async fn highlight_range_oversize_cumulative_lines_413() {
+    let _serial = serial_lock();
+    cache_reset();
+    let f = fixture(true, None);
+    let line = format!("let s = \"{}\";\n", "x".repeat(5000)); // 5015 字节/行
+    std::fs::write(f._dir.path().join("fat.rs"), line.repeat(5000)).unwrap();
+    let (status, body) = post_json(
+        f.app,
+        "/api/compute/highlight",
+        None,
+        json!({ "path": "fat.rs", "lang": "rust", "range": { "startLine": 0, "lineCount": 5000 } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("exceeds"), "{body}");
+    cache_reset();
+}
