@@ -17,7 +17,7 @@ use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use rand::RngCore;
+use rand::Rng;
 use state::AppState;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::ServeDir;
@@ -26,7 +26,7 @@ use tower_http::trace::TraceLayer;
 /// 生成 32 字节随机 hex（CLI `--token-gen` 与 ticket 共用格式）。
 pub fn generate_token() -> String {
     let mut buf = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut buf);
+    rand::rng().fill_bytes(&mut buf);
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 

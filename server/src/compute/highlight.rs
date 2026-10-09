@@ -123,9 +123,15 @@ pub fn run_highlight(lang: &str, text: &str) -> Result<HighlightResponse, AppErr
 
     let mut highlighter = Highlighter::new();
     let events = highlighter
-        .highlight(&config, text.as_bytes(), None, |_: &str| {
-            None::<&HighlightConfiguration> // v1 无 injection（模块注释）
-        })
+        .highlight(
+            &config,
+            text.as_bytes(),
+            None, // encoding：UTF-8 默认（0.27 新增参数，UTF-16LE/BE 显式传入才需要）
+            None, // cancellation flag：响应侧超时即放弃结果（模块注释），无需协作取消
+            |_: &str| {
+                None::<&HighlightConfiguration> // v1 无 injection（模块注释）
+            },
+        )
         .map_err(|e| AppError::internal(format!("highlight query 执行失败: {e}")))?;
 
     let names = &*HIGHLIGHT_NAMES;
