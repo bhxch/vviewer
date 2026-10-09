@@ -5,7 +5,7 @@ import { browser } from '$app/env';
 // 「<base>/」前缀（base='' 时为 '/'，子路径托管时为 '/<base>/'），静态资产
 // URL（grammars/queries/runtime wasm）由它拼接，语义与 kit2 的 `${base}/...` 一致。
 const baseUrl = resolve('/');
-import { HighlightClient, HighlightCanceledError } from '@vviewer/highlight';
+import { HighlightClient, HighlightCanceledError, type GrammarTable } from '@vviewer/highlight';
 import { attachHighlightClient, type CodeHighlightClient, type HighlightCallContext } from '@vviewer/render-text';
 import {
   createComputeRouter,
@@ -18,19 +18,26 @@ import {
   type HighlightInterval
 } from '@vviewer/core';
 import { resolveHighlightResult } from './computeResult';
+import { assembleGrammarLayers } from './grammarLayers';
 import { loadCapabilities, loadComputeLanguages, loadLastServer } from './openFlow.svelte';
 import { loadSettings } from './stores/settings';
 
 /**
  * 应用级 HighlightClient 单例：随首个调用方惰性创建（viewer.ts 启动时预热），
  * 注入 render-text 的 codeRenderer；tab 切换经 cancelHighlight() 取消未完成请求。
- * 失败（如 manifest 加载失败）保持 rejected，不重试——渲染端自行降级 hljs。
+ * 失败（如 worker 创建失败）保持 rejected，不重试——渲染端自行降级 hljs；
+ * manifest 各层加载失败经 grammarLayers 跳层折叠，不再导致整体 rejected。
  *
  * M6：注入前经 compute router 路由——远程 store 文件（有服务端 path 语义）在
  * auto/remote 策略且服务器宣告 compute 能力时走 POST /api/compute/highlight，
  * 其余走本地 tree-sitter worker；结果统一带执行位置回调（状态栏指示）。
  * 注入语言路由：auto 下 INJECTION_LANGS（服务端带 injections.scm 的语言）不装配
  * remoteFn——服务端 v1 无 injection，本地高亮保注入完整；显式 remote 仍远程。
+ *
+ * P2 资产三层解析链（spec §3）：grammar manifest 按同源 → 服务端 → CDN 逐层
+ * fetch 并 first-wins 合并（grammarLayers.ts），条目 base 标明 wasm 来源层。
+ * 服务端层为连接时快照——create() 随首次调用只跑一次，会话中新连接的服务器
+ * 不会进入资产链，需刷新页面生效（compute 路由则实时读取，与此不同）。
  */
 
 let clientPromise: Promise<HighlightClient> | null = null;
@@ -38,8 +45,8 @@ let clientPromise: Promise<HighlightClient> | null = null;
 /** 在途远程高亮的中止控制器（cancelHighlight 随 tab 切换一并 abort，不等无主响应）。 */
 let remoteAbort: AbortController | null = null;
 
-/** grammar manifest（create() 一次加载后缓存）：主线程预热 grammar wasm 查文件名用。 */
-let grammarManifest: Record<string, { file: string; aliases?: string[] }> | null = null;
+/** grammar manifest（create() 三层合并后缓存）：主线程预热 grammar wasm 查条目用（base 标来源层）。 */
+let grammarManifest: GrammarTable | null = null;
 
 /** 已预热资产 URL：同一资产仅首个调用触发预热（控制权交接前监听/定时器不随调用累积） */
 const warmedUrls = new Set<string>();
@@ -157,7 +164,7 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
       // 首次调用某语言时主线程预热其 grammar wasm（进 vv-grammars-* CacheFirst）；
       // warmHighlightAsset 按 URL 幂等，同语言重复调用为 no-op
       const g = grammarManifest?.[lang];
-      if (g) warmHighlightAsset(`${baseUrl}grammars/${g.file}`);
+      if (g) warmHighlightAsset(`${g.base}grammars/${g.file}`);
       const record = (ok: boolean): void => {
         dbg.__vvLastHighlightMs = performance.now() - t0;
         dbg.__vvLastHighlightLang = lang;
@@ -206,18 +213,23 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
 }
 
 async function create(): Promise<HighlightClient> {
-  const res = await fetch(`${baseUrl}grammars/manifest.json`);
-  if (!res.ok) throw new Error(`grammar manifest 加载失败: HTTP ${res.status}`);
-  const manifest = (await res.json()) as {
-    grammars: Record<string, { file: string; aliases?: string[] }>;
-  };
-  grammarManifest = manifest.grammars;
+  // 三层资产解析链（spec §3）：同源 → 服务端（连接时快照，会话中新连接需刷新
+  // 页面才进入资产链）→ CDN。各层失败跳层不阻塞；同名语言 first-wins 归更近层。
+  // 环境变量经 vite define 静态替换，构建时定型。
+  const cdnBase = (import.meta.env.VV_GRAMMAR_CDN as string | undefined) || null;
+  const serverBase = loadLastServer()?.baseUrl ?? null;
+  const { grammars } = await assembleGrammarLayers({
+    sameOriginBase: `${baseUrl}grammars/`,
+    serverBase,
+    cdnBase
+  });
+  grammarManifest = grammars;
   const worker = new Worker(new URL('./ts-worker.ts', import.meta.url), { type: 'module' });
   const client = new HighlightClient(
     worker,
     {
-      grammars: manifest.grammars,
-      grammarsBase: `${baseUrl}grammars/`,
+      grammars,
+      grammarsBase: `${baseUrl}grammars/`, // 第 1 层缺省 base；合并表每条已带 base，实际不再回落
       queriesBase: `${baseUrl}queries/`, // vite 启动时从 packages/highlight/assets/queries 拷贝到 static/queries
       // runtime 随 base：子路径托管（Pages）下 worker 内 Parser.init 按
       // locateFile(joinPath(runtimeDir, file)) 取 /<base>/tree-sitter.wasm，
