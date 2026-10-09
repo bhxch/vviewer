@@ -53,8 +53,8 @@ if (browser) {
   ensureHighlightClient()?.catch((e: unknown) => {
     console.warn('[highlight] client 初始化失败，代码高亮降级 hljs', e);
   });
-  // BUG-10：>2MB 文件在显式 remote 策略下问路由（auto/local 在注入侧硬拦为本地，
-  // 3MB auto 保持本地 hljs 分块零 POST——裁决注释见 highlightRouter.ts）
+  // BUG-10：>2MB 文件问路由（local/无 path/auto 门在注入侧硬拦为本地——server-served
+  // auto 不限大小走服务端，本地来源恒 hljs 分块零 POST；裁决注释见 highlightRouter.ts）
   attachHighlightRouter(routeLargeFileHighlight);
 }
 

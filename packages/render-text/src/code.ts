@@ -387,10 +387,11 @@ export function getHighlightClient(): CodeHighlightClient | null {
 }
 
 /**
- * 大文件远程高亮路由（BUG-10）：>2MB 文件在显式 remote 策略下改走远程 intervals。
+ * 大文件远程高亮路由（BUG-10）：>2MB 文件按策略问路由（阶段 3 起 auto 的
+ * server-served 文件不限大小也问，裁决在注入侧 apps/web highlightRouter）。
  * 契约：非 null = 远程高亮区间（按 tree-sitter 路径渲染，执行位置 remote）；
- * null = 留在本地 hljs 分块（注入侧硬护栏：auto/local 策略恒 null——3MB 文件在
- * auto 下不产生 POST，维持本地默认体验）；抛错 = 显式 remote 失败（渲染端错误
+ * null = 留在本地 hljs 分块（注入侧硬护栏：local、本地来源、auto 服务端不可
+ * 服务门均拦为 null——本地来源恒零 POST）；抛错 = 显式 remote 失败（渲染端错误
  * 卡片，不静默回退，与 tree-sitter 分支的 RemoteComputeError 同语义）。
  */
 export type HighlightRouterFn = (
