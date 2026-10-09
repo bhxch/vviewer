@@ -169,3 +169,34 @@ vviewer 现状：客户端 wasm 内嵌 lite 集 34 语言，服务端 compute �
   挂起（15s 看门狗兜底 hljs；同字节 route 回放或独立延迟创建的 worker 探针正常，
   vite preview 与 release 二进制伺服均复现）——与资产链语义无关的底层传输问题，两套
   分层 e2e 以 mock/回放规避（对齐 b-grammar-layers 惯例），留待单独排查。
+
+### 7.3 阶段 3 实测结果回写（2026-10-10 收口）
+
+- **路由语义落地**：`INJECTION_LANGS` 退役（commit 01f7a54，`decideComputeRoute`
+  auto 判定 = `hasCompute && remoteFn && hasServerPath`，不再看大小、不再豁免注入
+  语言）；大文件硬护栏按来源区分（commit 68b5ea8，`highlightRouter`：local 恒 null /
+  无服务端 path 恒 null 零 POST / remote 恒远程 / auto server-served 不限大小走服务端）；
+  Task 2 评审承接（commit f98038f）——auto 门补齐服务端可服务判定（capabilities 含
+  compute 且语言已宣告或宣告集合未知，与 ≤2MB 常规链路 BUG-06c 门对齐；file-only
+  服务器 auto 大文件恢复零请求），remoteCall 判空移入 try：auto 未连接 warn+null 回退
+  本地分块、remote 未连接如实错误卡片。
+- **双护栏 e2e 实测**（`e2e-server/b-compute-global-search-server.spec.ts`，release
+  二进制 :4174/:4178/:4179 拓扑，本机 2026-10-10）：10 passed——CMP-02 双护栏各自
+  转绿（① server-served 3MB + auto：POST `/api/compute/highlight` ≥1 + 状态栏
+  「高亮: tree-sitter · 执行: 远程」；② 本地添加 3MB（`__vvOpenDirImpl` 单文件通道、
+  已连 --compute 实例）+ auto：恒「高亮: hljs 分块」零 POST）、「remote 3MB POST」
+  原用例保持绿。
+- **CMP-04 集外 400 的落地口径修正**：spec 原拟「换 301 集外语言名（如 brainfuck）」
+  在阶段 1 后不可直接构造——前端语言表与 code 渲染器扩展名白名单识别出的语言已与
+  服务端 301 集完全对齐（php 亦进入集内），能进渲染管线的扩展名全部映射集内语言，
+  不存在天然集外语料可打开。实测改为：php 正例对照（auto 200 远程成功）+
+  `page.route` 把 POST body lang 改写为 brainfuck（server 单测同款集外名）触发真实
+  400（非 mock 响应）——断言不变：auto warn 回退本地可读、remote 错误卡片
+  「远程高亮失败: HTTP 400」。宣告门的零请求语义由 `highlightRouter.test.ts` 单测
+  矩阵锁定（无 compute 零 fetch / 语言未宣告零 fetch / 宣告空集先试远程 / 未连接
+  warn+null）。
+- **关联排查**：`m6.spec.ts`（policy=remote 1.5MB 远程、小文件远程）与
+  `b-code-highlight-degrade.spec.ts`（HL 系列，本地通道）无旧契约断言，实测全绿
+  ——m6 14 passed、degrade 12 passed（双 project），无波及。
+- **门禁（本地 2026-10-10）**：`pnpm vitest run` 658/658（57 文件）；`pnpm typecheck`
+  通过；上述三套 playwright（cg 10 / degrade 12 / m6 14）全绿。

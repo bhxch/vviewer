@@ -55,6 +55,11 @@
   在 auto 策略下把 6 种带 injection 的语言留在本地，显式 remote 的丢注入由用户选择自担。
 - **回补条件**：服务端装载 injections.scm 并在响应中标注 injection 覆盖范围后，前端按
   语言从 `INJECTION_LANGS` 撤出。
+- **状态（2026-10-10，阶段 3 已解除）**：回补条件已满足——阶段 1 服务端语法源同步至
+  301 集并接线 injections/locals（`queries.rs` 不再传空串），`INJECTION_LANGS` 豁免
+  已整体退役（commit 01f7a54），auto 下注入语言随宣告集合正常路由远程；显式 remote
+  的丢注入自担语义随 injections 接线一并消失。上文「偏差/理由/回补条件」保留为
+  M6 时期的历史记录，不再描述现状。
 
 ## 6. comrak 数学扩展/数学掩码不做
 

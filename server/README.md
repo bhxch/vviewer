@@ -37,7 +37,7 @@ cargo build --release --manifest-path server/Cargo.toml
 
 | 端点 | 鉴权 | 说明 |
 |---|---|---|
-| `GET /api/health` | 免 | 能力发现：`{"name":"vviewer","version":"…","capabilities":["file-server"]}`；`--compute` 时 capabilities 追加 `"compute"` 并宣告 `computeLanguages`（服务端高亮支持的 canonical 语言排序清单，客户端 auto 策略据此路由） |
+| `GET /api/health` | 免 | 能力发现：`{"name":"vviewer","version":"…","capabilities":["file-server"]}`；`--compute` 时 capabilities 追加 `"compute"` 并宣告 `computeLanguages`（服务端高亮支持的 canonical 语言排序清单，客户端 auto 策略据此路由：server-served 文件不限大小走服务端高亮、本地来源 >2MB 恒本地分块，语言未在宣告集合内时 auto 零请求直落本地；显式 remote 不做集合门控） |
 | `GET /api/tree?path=` | Bearer | 单层目录列表 `{entries:[{name,kind,size?,mtime?}]}`；目录优先 + 名称自然排序 |
 | `GET /api/file?path=` | Bearer | 文件内容（支持 `Range: bytes=a-b`，206/416）；响应头 `X-VV-Lang`（helix 语言名）/`X-VV-Encoding`（utf-8/utf-16le/utf-16be/gb18030）为服务端检测结果 |
 | `POST /api/ticket` | Bearer | 签发一次性 SSE 票据（30s 过期），供 EventSource 无法自带请求头时走 `?ticket=` 升级 |

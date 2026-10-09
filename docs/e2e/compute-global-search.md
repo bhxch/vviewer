@@ -64,6 +64,7 @@
   3. 回归不破坏：<2MB 文件 remote 表现（sample.js「tree-sitter · 执行: 远程」，已 ✓）与 >2MB 文件本地 hljs 分块的着色完整性（现状无损失）不得退化；
   4. 修复不要求本地 wasm 主路径恢复（那是 BUG-06 的范围），两缺陷验收互不替代。
 - **实现裁决记录（2026-10-09 修复批次）**：路由注入采用 `attachHighlightRouter` 独立回调（spec 方案 2 中「新增独立注入回调」的备选档，非「扩展 CodeHighlightClient」前者）——与 `attachHighlightClient` 命名对称，且零改动 `apps/web/src/lib/highlightClient.ts`（该文件归属高亮可观测/SW 修复包，跨包改动需握手）；policy 硬护栏（非 remote 恒返回 null → 本地 hljs 分块，auto 下 3MB 零 POST 的回归护栏）落在注入侧 `apps/web/src/lib/highlightRouter.ts`（单测覆盖）。上方验收 2 的服务端 intervals 缓存与 gzip 本轮不做（spec 未决 #6），「二次打开更快」项随该未决顺延；路由失败的错误卡片路径 engine 置 'plain' 终值（状态栏不停留「解析中…」）。
+- **路由语义更新（2026-10-10，阶段 3，上方裁决记录中的「auto 下 3MB 零 POST」回归护栏已被语义反转作废）**：`highlightRouter` 现行契约——local 恒 null；无服务端 path（本地添加文件/文件夹）恒 null、零 POST；显式 remote 恒走远程（失败错误卡片）；**auto：server-served 文件不限大小走服务端（失败 warn+null 回退本地 hljs 分块），本地来源 >2MB 恒 hljs 分块，且须过服务端可服务门（capabilities 含 compute + 语言已宣告，与 ≤2MB 常规链路 BUG-06c 门对齐；file-only 服务器 auto 大文件恢复零请求）**；注入语言不再豁免（阶段 1 已接线 injections，偏差 #5 解除）。e2e 相应改写为双护栏：`b-compute-global-search-server.spec.ts` 中 auto server-served 3MB 断言 POST ≥1 + tree-sitter 渲染，本地添加 3MB（`__vvOpenDirImpl` 单文件通道）断言零 POST 恒 hljs 分块。CMP-04 的 400 场景改经 `page.route` 把 POST body 的 lang 改写为 brainfuck（server 单测同款集外名）触发真实 400——阶段 1 后前端语言表与 code 渲染白名单识别出的语言已与服务端 301 集完全对齐（php 亦随同步进入集内，原「php 400」前提消失，且能进渲染管线的扩展名全部映射集内语言），不存在天然集外语料可打开；用例新增 php 正例对照（auto 200 远程），断言保持「auto 回退本地可读、remote 错误卡片」不变。
 
 ### BUG-11【medium · verified】纯前端搜索超 2000 文件上限只提示「结果不完整，已达上限」，无 spec 要求的「建议改用服务器模式」引导
 
@@ -127,8 +128,8 @@
 ### 4.3 边界与环境限制（报告 §2.4、§3.1、§5、§6、§7.1）
 
 1. **rg 可用性决定搜索分支**：主实例 rg 在 PATH（/usr/sbin/rg）走远程搜索；无 rg 分支（501+前端降级）须以剔除 rg 的 PATH 单独起实例（本轮 8394）。CMP-09 仅在该分支验证。
-2. **2MB 阈值是 remote 策略与本地分块的现役分界**（BUG-10）：>2MB 文件即使显式「计算: 远程」也被压制为本地 hljs 分块，<2MB 才走远程 tree-sitter；布置 CMP-02 数据与验收时按此口径。
-3. **偏差 #5（服务端高亮无 injection）**：带注入的 6 种语言在 auto 策略下留在本地执行；仓库 Playwright 套件运行期间 WebServer 日志反复出现 `GET /queries/typescript/injections.scm`、`/queries/_typescript/injections.scm`、`/queries/prolog/injections.scm` 404——前端对带 injection 语言的 queries 资产探测落空，与该偏差背景一致（报告 §6 仅记录现象，未进一步定性）。
+2. **2MB 阈值是 remote 策略与本地分块的现役分界**（BUG-10）：>2MB 文件即使显式「计算: 远程」也被压制为本地 hljs 分块，<2MB 才走远程 tree-sitter；布置 CMP-02 数据与验收时按此口径。——**阶段 3 已反转（2026-10-10）**：remote 恒远程；auto 下 server-served 文件不限大小走服务端、本地来源恒本地分块（见 BUG-10 路由语义更新），布置 CMP-02 数据按「来源 × 策略」双护栏口径。
+3. **偏差 #5（服务端高亮无 injection）**：带注入的 6 种语言在 auto 策略下留在本地执行；仓库 Playwright 套件运行期间 WebServer 日志反复出现 `GET /queries/typescript/injections.scm`、`/queries/_typescript/injections.scm`、`/queries/prolog/injections.scm` 404——前端对带 injection 语言的 queries 资产探测落空，与该偏差背景一致（报告 §6 仅记录现象，未进一步定性）。——**阶段 1 已解除（2026-10-10）**：服务端接线 injections、`INJECTION_LANGS` 退役，auto 下注入语言随宣告正常路由远程（详见 `docs/spec-deviations.md` §5 状态注记）。
 4. **偏差 #6（comrak 无数学扩展、无数学掩码）**：数学内容远程渲染与本地 KaTeX 可能不一致，属已裁决偏差；CMP-05 对照样例应避开数学内容（本轮即如此）。
 5. **偏差 #9（col 口径）**：跨文件搜索结果列号（col）两端统一为 UTF-16 码元（实现约定记录）；涉及列号断言的场景按此口径。
 6. **虚拟渲染容器判据**：`.vv-viewer-scroll` 为虚拟渲染容器，scrollHeight==clientHeight（实测均 473）、scrollTop 恒 0，不构成滚动/定位证据；CMP-06/BUG-09 验收须以「视口显示哪些行」判定（BUG-09 复核要点）。
