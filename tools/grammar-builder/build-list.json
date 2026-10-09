@@ -438,6 +438,12 @@
     "helixLang": "forth"
   },
   {
+    "name": "fortran",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "fortran"
+  },
+  {
     "name": "freebasic",
     "subpath": "",
     "parserCExists": true,
@@ -846,6 +852,12 @@
     "helixLang": "koto"
   },
   {
+    "name": "latex",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "latex"
+  },
+  {
     "name": "ld",
     "subpath": "",
     "parserCExists": true,
@@ -1110,6 +1122,12 @@
     "helixLang": "penrose"
   },
   {
+    "name": "perl",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "perl"
+  },
+  {
     "name": "pest",
     "subpath": "",
     "parserCExists": true,
@@ -1144,6 +1162,12 @@
     "subpath": "",
     "parserCExists": true,
     "helixLang": "po"
+  },
+  {
+    "name": "pod",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "pod"
   },
   {
     "name": "ponylang",
@@ -1242,6 +1266,12 @@
     "helixLang": null
   },
   {
+    "name": "quint",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "quint"
+  },
+  {
     "name": "r",
     "subpath": "",
     "parserCExists": true,
@@ -1272,6 +1302,12 @@
     "helixLang": "rescript"
   },
   {
+    "name": "ripple",
+    "subpath": "packages/tree-sitter",
+    "parserCExists": true,
+    "helixLang": "ripple"
+  },
+  {
     "name": "robot",
     "subpath": "",
     "parserCExists": true,
@@ -1288,6 +1324,12 @@
     "subpath": "",
     "parserCExists": true,
     "helixLang": "ron"
+  },
+  {
+    "name": "rpmspec",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "rpmspec"
   },
   {
     "name": "rshtml",
@@ -1422,6 +1464,12 @@
     "helixLang": "spicedb"
   },
   {
+    "name": "sql",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "sql"
+  },
+  {
     "name": "ssh_client_config",
     "subpath": "",
     "parserCExists": true,
@@ -1462,6 +1510,12 @@
     "subpath": "",
     "parserCExists": true,
     "helixLang": "sway"
+  },
+  {
+    "name": "swift",
+    "subpath": "",
+    "parserCExists": true,
+    "helixLang": "swift"
   },
   {
     "name": "systemverilog",
