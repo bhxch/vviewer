@@ -1,4 +1,4 @@
-import type { HighlightInterval, HighlightRequest, HighlightResponse } from './types';
+import type { HighlightContext, HighlightInterval, HighlightRequest, HighlightResponse } from './types';
 import type { InitMessage, WorkerInit } from './worker';
 
 /** 取消的请求 reject 此错误（name 为 HighlightCanceled）。 */
@@ -116,8 +116,12 @@ export class HighlightClient {
     this.pendingByLang.clear();
   }
 
-  /** 高亮文本。同 lang 有未完成请求时取消它（其 Promise 以 HighlightCanceledError reject）。 */
-  highlight(text: string, lang: string): Promise<HighlightInterval[]> {
+  /**
+   * 高亮文本。同 lang 有未完成请求时取消它（其 Promise 以 HighlightCanceledError reject）。
+   * ctx.chunk（可选）为子文本窗口语义标注：调用方保证 text 即该窗口子文本，worker/engine
+   * 不感知行号、不做切分（spec §5.1 子文本 parse 裁决），返回区间相对 text；行号平移归调用侧。
+   */
+  highlight(text: string, lang: string, ctx?: HighlightContext): Promise<HighlightInterval[]> {
     if (this.disposed) return Promise.reject(new HighlightCanceledError());
     if (this.initFailed) {
       return Promise.reject(new Error(`highlight worker 不可用：${this.initFailureReason}`));
@@ -129,6 +133,7 @@ export class HighlightClient {
     return new Promise<HighlightInterval[]>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       const req: HighlightRequest = { id, text, lang };
+      if (ctx?.chunk) req.chunk = ctx.chunk;
       this.worker.postMessage(req);
     });
   }

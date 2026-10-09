@@ -92,6 +92,69 @@ describe.skipIf(!grammarAssetsReady)('TreeSitterEngine（真实 wasm + 真实 he
     expect(r.intervals.some((i) => i.capture === 'constant.numeric' && src.slice(i.start, i.end) === '1')).toBe(true);
   }, 30_000);
 
+  it('chunk 子文本 parse：整文本窗口区间与子文本区间一致（相对偏移），ctx.chunk 仅语义标注不改变结果', async () => {
+    // 10 行 json，行 6-8（0 起）自成合法子文档——懒高亮可视区窗口的现实形态是完整子结构，
+    // 保证整文本 parse 与子文本 parse 在窗口内同构，简报 Step 1 的对比命题才有确定性。
+    // 命题：子文本进出的区间相对子文本本身；行号平移归调用侧（Task 4 渲染层）。
+    const doc = [
+      '{',
+      '  "first":',
+      '  {',
+      '    "id": 1',
+      '  },',
+      '  "second":',
+      '  {',
+      '    "id": 2',
+      '  }',
+      '}',
+    ].join('\n');
+    const lines = doc.split('\n');
+    const startLine = 6;
+    const lineCount = 3;
+    const sub = lines.slice(startLine, startLine + lineCount).join('\n');
+    // 窗口首字符在整文本中的偏移：窗口前行拼接长度 + 其后那个换行
+    const chunkStart = lines.slice(0, startLine).join('\n').length + 1;
+    const chunkEnd = chunkStart + sub.length;
+
+    // 规范序比较（区间集语义相等，不依赖同 span 捕获的迭代顺序）
+    const canonical = (list: { start: number; end: number; capture: string }[]) =>
+      [...list].sort((a, b) => a.start - b.start || a.end - b.end || a.capture.localeCompare(b.capture));
+
+    // 引擎 A：整文本高亮 → 窗口内区间集合 S1（平移到窗口相对偏移）
+    const whole = await engine.highlight(doc, 'json');
+    expect(whole.ok).toBe(true);
+    if (!whole.ok) return;
+    const s1 = canonical(
+      whole.intervals
+        .filter((i) => i.start >= chunkStart && i.end <= chunkEnd)
+        .map((i) => ({ ...i, start: i.start - chunkStart, end: i.end - chunkStart })),
+    );
+    expect(s1.length).toBeGreaterThan(0);
+
+    // 引擎 B：子文本高亮（chunk 标注）→ 区间集合 S2
+    const chunked = await engine.highlight(sub, 'json', 0, { startLine, lineCount });
+    expect(chunked.ok).toBe(true);
+    if (!chunked.ok) return;
+    const s2 = canonical(chunked.intervals);
+    // 区间与子文本对齐（抽样：数字与花括号）
+    expect(s2.find((i) => sub.slice(i.start, i.end) === '2')?.capture).toBe('constant.numeric');
+    expect(s2.find((i) => sub.slice(i.start, i.end) === '{')?.capture).toBe('punctuation.bracket');
+    // S2 与 S1 逐条一致
+    expect(s2).toEqual(s1);
+    // 窗口首行（简报「行 3」的对应面）：行内相对偏移一致
+    const firstLineLen = lines[startLine]!.length;
+    expect(canonical(s2.filter((i) => i.end <= firstLineLen))).toEqual(
+      canonical(s1.filter((i) => i.end <= firstLineLen)),
+    );
+    // ctx.chunk 不改变结果：同子文本带/不带标注（乃至不同标注值）结果全等
+    const plain = await engine.highlight(sub, 'json');
+    const other = await engine.highlight(sub, 'json', 0, { startLine: 0, lineCount: 1 });
+    expect(plain.ok && other.ok).toBe(true);
+    if (!plain.ok || !other.ok) return;
+    expect(canonical(chunked.intervals)).toEqual(canonical(plain.intervals));
+    expect(canonical(other.intervals)).toEqual(canonical(plain.intervals));
+  }, 30_000);
+
   it('未知语言返回 ok:false 与错误信息', async () => {
     const r = await engine.highlight('int main(){}', 'no-such-language');
     expect(r.ok).toBe(false);

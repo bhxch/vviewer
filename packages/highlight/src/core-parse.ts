@@ -1,6 +1,6 @@
 import { Parser, Language, Query, type Tree } from 'web-tree-sitter';
 import { expandQuery, expandQueryAsync, type AsyncQuerySource, type ExpandedQuery, type QueryAssets, type QueryFile } from './queries';
-import type { HighlightInterval } from './types';
+import type { HighlightChunk, HighlightInterval } from './types';
 
 /**
  * 浏览器可打包：本模块零顶层 node 内建 import。
@@ -141,8 +141,14 @@ export class TreeSitterEngine {
    * 区间按 (start asc, end desc) 排序，不去重叠（渲染端按"内层优先"展平——嵌套区间内层可见）。
    * depth 为当前注入深度；depth ≥ maxInjectionDepth 不再递归注入。
    * lang 可传 manifest 别名（js/sh/py 等），内部先规范化为清单键名。
+   *
+   * chunk（可选）为子文本窗口语义标注（spec §5.1 子文本 parse 裁决），**不改变任何行为**：
+   * chunk 模式下调用方已把可视区窗口子文本作为 text 传入——engine 不感知行号、不做切分
+   * （不引入 includedRanges）；queryBudget(text) 按子文本长度计（预算天然不放大，无需
+   * 整文本口径）；返回区间相对子文本，行号平移由调用侧（渲染层）负责。保留形参仅使
+   * client → worker → engine 链路显式携带窗口语义（自文档化），实现零分支。
    */
-  async highlight(text: string, lang: string, depth = 0): Promise<HighlightResult> {
+  async highlight(text: string, lang: string, depth = 0, chunk?: HighlightChunk): Promise<HighlightResult> {
     try {
       const prepared = await this.prepare(lang);
       if (!prepared) return { ok: false, error: `语言 ${lang} 无可用 grammar 或查询` };

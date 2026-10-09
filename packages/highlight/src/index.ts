@@ -15,7 +15,13 @@ export {
   type ThemeStyle,
   type ThemeTable,
 } from './theme';
-export type { HighlightInterval, HighlightRequest, HighlightResponse } from './types';
+export type {
+  HighlightChunk,
+  HighlightContext,
+  HighlightInterval,
+  HighlightRequest,
+  HighlightResponse,
+} from './types';
 export {
   TreeSitterEngine,
   type EngineOptions,

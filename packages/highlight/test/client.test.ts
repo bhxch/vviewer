@@ -66,6 +66,14 @@ describe('HighlightClient', () => {
     }
   });
 
+  it('第三参 ctx.chunk 透传请求载荷；缺省请求不带 chunk 字段', async () => {
+    const { worker, client } = fake();
+    await client.highlight('a=1', 'json', { chunk: { startLine: 3, lineCount: 2 } });
+    await client.highlight('b=2', 'json');
+    expect(worker.requests.map((r) => r.chunk)).toEqual([{ startLine: 3, lineCount: 2 }, undefined]);
+    client.dispose();
+  });
+
   it('同 lang 连续请求：前一个未完成请求被取消（reject Canceled），后一个成功', async () => {
     const { worker, client } = fake();
     // 第一次请求挂起：responder 永不回包

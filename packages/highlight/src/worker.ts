@@ -20,7 +20,7 @@ export type RequestHandler = (req: HighlightRequest) => Promise<HighlightRespons
 /** 由引擎配置构造请求处理器（Worker 与测试共用）。 */
 export async function createHandler(engine: TreeSitterEngine): Promise<RequestHandler> {
   return async (req) => {
-    const r = await engine.highlight(req.text, req.lang, req.injectionsDepth ?? 0);
+    const r = await engine.highlight(req.text, req.lang, req.injectionsDepth ?? 0, req.chunk);
     return r.ok
       ? { id: req.id, ok: true, intervals: r.intervals, engine: 'tree-sitter' }
       : { id: req.id, ok: false, error: r.error, engine: 'tree-sitter' };

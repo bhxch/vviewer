@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { serveWorker } from '../src/worker';
+import { createHandler, serveWorker } from '../src/worker';
+import type { TreeSitterEngine } from '../src/core-parse';
 import type { HighlightRequest, HighlightResponse } from '../src/types';
 
 /**
@@ -38,6 +39,17 @@ const req = (id: number): HighlightRequest => ({ id, text: 'a=1', lang: 'bash' }
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe('createHandler chunk 透传', () => {
+  it('req.chunk 作为第 4 参透传 engine.highlight（depth 缺省 0；无 chunk 时透传 undefined）', async () => {
+    const highlight = vi.fn(async () => ({ ok: true as const, intervals: [] }));
+    const handler = await createHandler({ highlight } as unknown as TreeSitterEngine);
+    await handler({ id: 1, text: 'sub', lang: 'json', chunk: { startLine: 6, lineCount: 3 } });
+    expect(highlight).toHaveBeenCalledWith('sub', 'json', 0, { startLine: 6, lineCount: 3 });
+    await handler({ id: 2, text: 'x', lang: 'json' });
+    expect(highlight).toHaveBeenLastCalledWith('x', 'json', 0, undefined);
+  });
 });
 
 describe('serveWorker init 失败路径', () => {

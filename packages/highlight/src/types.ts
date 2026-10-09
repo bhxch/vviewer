@@ -6,12 +6,27 @@ export interface HighlightInterval {
   capture: string;
 }
 
-/** Worker 请求。injectionsDepth 为当前注入深度（默认 0，≤3 层内递归）。 */
+/**
+ * chunk 语义标注：text 为文件自 startLine（0 起）行起共 lineCount 行的子文本
+ * （懒高亮可视区窗口，spec §5.1 子文本 parse 裁决）。
+ */
+export interface HighlightChunk {
+  startLine: number;
+  lineCount: number;
+}
+
+/** highlight 调用上下文：字段均为语义标注，不改变引擎行为（返回区间相对 text 本身）。 */
+export interface HighlightContext {
+  chunk?: HighlightChunk;
+}
+
+/** Worker 请求。injectionsDepth 为当前注入深度（默认 0，≤3 层内递归）；chunk 为子文本窗口语义标注（透传 engine）。 */
 export interface HighlightRequest {
   id: number;
   text: string;
   lang: string;
   injectionsDepth?: number;
+  chunk?: HighlightChunk;
 }
 
 /** Worker 响应。ok:false 时 error 有值，由上层决定降级 hljs。 */
