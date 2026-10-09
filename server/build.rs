@@ -80,7 +80,11 @@ fn copy_queries(out_dir: &Path) {
         fs::create_dir_all(&dest).unwrap();
         for kind in ["highlights.scm", "injections.scm", "locals.scm"] {
             let src = dir.join(kind);
-            println!("cargo:rerun-if-changed={}", src.display());
+            if src.exists() {
+                // 仅对存在的文件发指令：cargo 把不存在的路径视为永远变化，
+                // 无守卫会导致 build script 每次构建重跑、全部 grammar 重编。
+                println!("cargo:rerun-if-changed={}", src.display());
+            }
             let text = fs::read_to_string(&src).unwrap_or_default();
             fs::write(dest.join(kind), text).unwrap();
         }
