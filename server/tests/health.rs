@@ -109,12 +109,13 @@ async fn compute_health_advertises_sorted_language_list() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let caps = json["capabilities"].as_array().unwrap();
     assert!(caps.iter().any(|c| c == "compute"));
-    // BUG-06c：语言集合宣告（排序 canonical 名，java 不在集合——客户端 auto 据此不远程路由）
+    // 语言集合宣告（排序 canonical 名）。注册表生成式（server Task 5）：集合来自
+    // grammars-manifest.json 可编译源，不再豁免特定语言（原「java 不在场」随
+    // 硬编码子集退役，客户端路由豁免的前提已解除）
     let langs = json["computeLanguages"].as_array().expect("computeLanguages 应宣告");
     let names: Vec<&str> = langs.iter().map(|x| x.as_str().unwrap()).collect();
     let mut sorted = names.clone();
     sorted.sort_unstable();
     assert_eq!(names, sorted);
     assert!(names.contains(&"rust") && names.contains(&"python"));
-    assert!(!names.contains(&"java"));
 }

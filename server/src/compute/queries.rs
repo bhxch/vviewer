@@ -1,13 +1,13 @@
-//! 语言注册表（Task 3）：tree-sitter grammar 子集 + helix 风格 highlights.scm。
+//! 语言注册表（生成式）：全部语言来自 grammars-manifest.json，grammar 由
+//! server/build.rs 源码编译，查询三件套（highlights/injections/locals）由其
+//! 生成物 grammar_entries.rs 经 include! 并入本模块（OUT_DIR），与前端 worker
+//! 共用同一份 vendored helix 查询。`; inherits: a,b` 头在构建
+//! HighlightConfiguration 前按文件类别递归展开（父在前、子在后，visited 防环）。
 //!
-//! 查询资产经 `include_str!` 编译期嵌入（`../../..` 自 `server/src/compute/`
-//! 回到仓库根，指向 packages/highlight/assets/queries/——与前端 worker 共用
-//! 同一份 vendored helix 查询，无需构建脚本拷贝）。`; inherits: a,b` 头在
-//! 构建 HighlightConfiguration 时递归展开（父在前、子在后，visited 防环）。
-//!
-//! M6 裁剪（计划级裁决）：服务端 v1 无 injection——只加载 highlights.scm，
-//! injections/locals 查询传空串，请求时 injection_callback 恒 None。
-//! markdown 围栏等注入场景由前端本地高亮兜底（policy=local）。
+//! sanitize 逐文件降级（spec §2.2）：highlights.scm 编译失败剔除整个语言
+//! （请求侧表现为 400 unsupported language）；injections/locals 编译失败置空
+//! 保底。注入已接线（阶段 1，spec §2.2）：Highlighter 的 injection_callback
+//! 经 [`config_ref`] 从全局注册表解析注入语言配置。
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -17,53 +17,46 @@ use tree_sitter::Language;
 use tree_sitter_highlight::HighlightConfiguration;
 use tree_sitter_language::LanguageFn;
 
-/// 语法 + 查询三件套之一：语言名、grammar 的 LanguageFn、highlights.scm 全文。
+/// 语法 + 查询三件套（injections/locals 已接线）。
 struct LanguageEntry {
     name: &'static str,
     language: LanguageFn,
     highlights: &'static str,
+    injections: &'static str,
+    locals: &'static str,
 }
 
-macro_rules! query {
-    ($lang:literal) => {
-        include_str!(concat!(
-            "../../../packages/highlight/assets/queries/",
-            $lang,
-            "/highlights.scm"
-        ))
-    };
-}
+include!(concat!(env!("OUT_DIR"), "/grammar_entries.rs"));
 
-/// 实装 grammar 子集（13 个，crates.io 官方/可用 crate 实测全装上；
-/// typescript crate 同时携带 tsx grammar，按 helix 查询目录名暴露 typescript）。
+/// sanitize 逐文件降级（spec §2.2）：highlights 失败才剔除语言，
+/// injections/locals 失败置空保底（用 tree_sitter::Query 预编译校验）。
 static ENTRIES: Lazy<Vec<LanguageEntry>> = Lazy::new(|| {
-    vec![
-        LanguageEntry { name: "rust", language: tree_sitter_rust::LANGUAGE, highlights: query!("rust") },
-        LanguageEntry { name: "python", language: tree_sitter_python::LANGUAGE, highlights: query!("python") },
-        LanguageEntry { name: "bash", language: tree_sitter_bash::LANGUAGE, highlights: query!("bash") },
-        LanguageEntry { name: "json", language: tree_sitter_json::LANGUAGE, highlights: query!("json") },
-        LanguageEntry { name: "go", language: tree_sitter_go::LANGUAGE, highlights: query!("go") },
-        LanguageEntry { name: "c", language: tree_sitter_c::LANGUAGE, highlights: query!("c") },
-        LanguageEntry { name: "cpp", language: tree_sitter_cpp::LANGUAGE, highlights: query!("cpp") },
-        LanguageEntry { name: "javascript", language: tree_sitter_javascript::LANGUAGE, highlights: query!("javascript") },
-        LanguageEntry { name: "typescript", language: tree_sitter_typescript::LANGUAGE_TYPESCRIPT, highlights: query!("typescript") },
-        LanguageEntry { name: "tsx", language: tree_sitter_typescript::LANGUAGE_TSX, highlights: query!("tsx") },
-        LanguageEntry { name: "yaml", language: tree_sitter_yaml::LANGUAGE, highlights: query!("yaml") },
-        LanguageEntry { name: "toml", language: tree_sitter_toml_ng::LANGUAGE, highlights: query!("toml") },
-        LanguageEntry { name: "html", language: tree_sitter_html::LANGUAGE, highlights: query!("html") },
-        LanguageEntry { name: "css", language: tree_sitter_css::LANGUAGE, highlights: query!("css") },
-    ]
+    let mut entries = Vec::new();
+    for (name, language, highlights, injections, locals) in generated_entries() {
+        let lang = Language::from(language);
+        let compile = |text: &'static str| matches!(tree_sitter::Query::new(&lang, text), Ok(_));
+        if !compile(highlights) {
+            tracing::warn!("language {name} highlights.scm 编译失败，剔除");
+            continue;
+        }
+        let injections = if compile(injections) { injections } else {
+            tracing::warn!("language {name} injections.scm 编译失败，置空保底");
+            ""
+        };
+        let locals = if compile(locals) { locals } else {
+            tracing::warn!("language {name} locals.scm 编译失败，置空保底");
+            ""
+        };
+        entries.push(LanguageEntry { name, language, highlights, injections, locals });
+    }
+    entries
 });
 
-/// 仅作 inherits 父目录的查询资产（本身不是可请求的语言名）：
-/// `; inherits: ecma,_typescript` 的展开目标，均已在 assets 顶层 vendored。
-static PARENT_ASSETS: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
-    HashMap::from([
-        ("ecma", query!("ecma")),
-        ("_typescript", query!("_typescript")),
-        ("_jsx", query!("_jsx")),
-    ])
-});
+/// 非语言的查询目录（`; inherits` 展开目标；build.rs 扫描 assets 顶层生成）：
+/// 仅贡献 highlights——expand_asset 按 Kind 先查 ENTRIES，语言条目优先；
+/// partial 构建下会含缺源语言目录（固有语义，全量时收敛为真父目录）。
+static PARENT_ASSETS: Lazy<HashMap<&'static str, &'static str>> =
+    Lazy::new(|| generated_parents().into_iter().collect());
 
 /// 从查询头部解析 `; inherits: a,b`（仅扫描首个非注释/非空行之前）。
 fn parse_inherits(content: &str) -> Vec<&str> {
@@ -95,20 +88,36 @@ fn strip_inherits_line(content: &str) -> String {
     out
 }
 
-/// 递归展开某语言/父目录的 highlights.scm：父查询在前、自身在后。
+/// 查询文件类别：`; inherits` 链按类别独立展开（highlights/injections/locals
+/// 的父目录引用互不混淆）。
+#[derive(Clone, Copy)]
+enum Kind {
+    Highlights,
+    Injections,
+    Locals,
+}
+
+/// 递归展开某语言/父目录的指定类别查询：父查询在前、自身在后。
 /// `visited` 防环（静态资产本无环，防御性保留）；找不到返回 None。
-fn expand_asset(name: &str, visited: &mut HashSet<String>) -> Option<String> {
+fn expand_asset(name: &str, kind: Kind, visited: &mut HashSet<String>) -> Option<String> {
     if !visited.insert(name.to_string()) {
         return Some(String::new()); // 环：不再重复展开
     }
-    let own = ENTRIES
-        .iter()
-        .find(|e| e.name == name)
-        .map(|e| e.highlights)
-        .or_else(|| PARENT_ASSETS.get(name).copied())?;
+    let own = match kind {
+        Kind::Highlights => ENTRIES.iter().find(|e| e.name == name).map(|e| e.highlights),
+        Kind::Injections => ENTRIES.iter().find(|e| e.name == name).map(|e| e.injections),
+        Kind::Locals => ENTRIES.iter().find(|e| e.name == name).map(|e| e.locals),
+    }
+    .or_else(|| match kind {
+        Kind::Highlights => PARENT_ASSETS.get(name).copied(),
+        // 父目录仅贡献 highlights（generated_parents 结构上只嵌入 highlights.scm；
+        // ecma/_typescript 等目录的 injections/locals 未嵌入，父链注入模式缺失为
+        // 已知裁剪，全量补齐需 build.rs 扩展生成三件套）
+        _ => None,
+    })?;
     let mut merged = String::new();
     for parent in parse_inherits(own) {
-        if let Some(expanded) = expand_asset(parent, visited) {
+        if let Some(expanded) = expand_asset(parent, kind, visited) {
             merged.push_str(&expanded);
         }
     }
@@ -144,28 +153,32 @@ fn collect_capture_names(query_text: &str, out: &mut Vec<String>) {
 pub static HIGHLIGHT_NAMES: Lazy<Vec<String>> = Lazy::new(|| {
     let mut names = Vec::new();
     for entry in ENTRIES.iter() {
-        let expanded = expand_asset(entry.name, &mut HashSet::new()).unwrap_or_default();
+        let expanded = expand_asset(entry.name, Kind::Highlights, &mut HashSet::new()).unwrap_or_default();
         collect_capture_names(&expanded, &mut names);
     }
     names.sort();
     names
 });
 
-/// 语言名 → 编译好的高亮配置；查询与 grammar 节点类型不匹配的语言在构建期
-/// 剔除（请求侧表现为 400 unsupported language），并输出 warn 日志。
+/// 语言名 → 编译好的高亮配置（三件套传入，injections/locals 生效）；展开合并
+/// 后查询仍与 grammar 节点类型不匹配的语言在构建期剔除（请求侧表现为 400
+/// unsupported language），并输出 warn 日志。
 static CONFIGS: Lazy<HashMap<&'static str, Arc<HighlightConfiguration>>> = Lazy::new(|| {
     let names = Lazy::force(&HIGHLIGHT_NAMES);
     let mut map = HashMap::new();
     for entry in ENTRIES.iter() {
-        let Some(expanded) = expand_asset(entry.name, &mut HashSet::new()) else {
+        let Some(expanded) = expand_asset(entry.name, Kind::Highlights, &mut HashSet::new()) else {
             continue;
         };
+        // injections/locals 也走各自的 inherits 链（父目录不参与，见 PARENT_ASSETS 注释）
+        let injections = expand_asset(entry.name, Kind::Injections, &mut HashSet::new()).unwrap_or_default();
+        let locals = expand_asset(entry.name, Kind::Locals, &mut HashSet::new()).unwrap_or_default();
         match HighlightConfiguration::new(
             Language::from(entry.language),
             entry.name,
             &expanded,
-            "", // injections：v1 无注入（见模块注释）
-            "", // locals：tree-sitter-highlight 不消费 helix locals 语义
+            &injections,
+            &locals,
         ) {
             Ok(mut config) => {
                 config.configure(names);
@@ -184,9 +197,14 @@ pub fn is_supported(lang: &str) -> bool {
     CONFIGS.contains_key(lang)
 }
 
-/// 取语言配置（handler 在 spawn_blocking 内调用）。
-pub fn config(lang: &str) -> Option<Arc<HighlightConfiguration>> {
-    CONFIGS.get(lang).cloned()
+/// 注入回调与 handler 共用的 'static 配置引用（Arc 存于全局 static，引用恒活）。
+pub fn config_ref(lang: &str) -> Option<&'static HighlightConfiguration> {
+    CONFIGS.get(lang).map(|c| &**c)
+}
+
+/// build.rs 生成 grammar 计数（partial 诊断与全量门禁测试用）。
+pub fn generated_count() -> usize {
+    GENERATED_COUNT
 }
 
 /// 支持的语言名列表（错误信息与调试用）。
@@ -217,17 +235,17 @@ mod tests {
 
     #[test]
     fn cpp_inherits_c_and_typescript_inherits_ecma_and_typescript_base() {
-        let cpp = expand_asset("cpp", &mut HashSet::new()).unwrap();
+        let cpp = expand_asset("cpp", Kind::Highlights, &mut HashSet::new()).unwrap();
         assert!(cpp.contains("(identifier) @variable"), "c 父查询在前: {cpp}");
         assert!(!cpp.contains("; inherits:"), "指令行已剥离");
 
-        let ts = expand_asset("typescript", &mut HashSet::new()).unwrap();
+        let ts = expand_asset("typescript", Kind::Highlights, &mut HashSet::new()).unwrap();
         assert!(ts.contains("(identifier) @variable"), "ecma 在前");
         assert!(ts.contains("ambient_declaration"), "_typescript 自身在后期拼接: {ts}");
         assert!(!ts.contains("; inherits:"));
 
         // tsx 专属查询（review fix 2）：inherits 三父展开，含 jsx 节点模式
-        let tsx = expand_asset("tsx", &mut HashSet::new()).unwrap();
+        let tsx = expand_asset("tsx", Kind::Highlights, &mut HashSet::new()).unwrap();
         assert!(tsx.contains("ambient_declaration"), "_typescript 父");
         assert!(tsx.contains("jsx_self_closing_element"), "_jsx 父: {tsx}");
         assert!(!tsx.contains("; inherits:"));
@@ -236,15 +254,41 @@ mod tests {
 
         // 父目录资产不可直接作为语言请求
         assert!(ENTRIES.iter().all(|e| e.name != "ecma"));
-        assert!(expand_asset("no-such-lang", &mut HashSet::new()).is_none());
+        assert!(expand_asset("no-such-lang", Kind::Highlights, &mut HashSet::new()).is_none());
     }
 
     #[test]
     fn all_entries_compile_and_register() {
         let langs = supported_languages();
         assert_eq!(langs.len(), ENTRIES.len(), "全部语言查询应编译通过: {langs:?}");
-        for expected in ["rust", "python", "bash", "json", "go", "c", "cpp", "javascript", "typescript", "tsx", "yaml", "toml", "html", "css"] {
+        for expected in ["rust", "python", "bash", "json", "go", "c", "cpp", "javascript", "typescript", "tsx", "yaml", "toml", "html", "css", "java"] {
             assert!(langs.contains(&expected), "缺少 {expected}: {langs:?}");
+        }
+    }
+
+    /// CI 全量门禁（grammar.yml 全源环境断言；partial 本地构建跳过）。
+    #[test]
+    fn full_registry_count_is_301() {
+        if generated_count() < 301 {
+            eprintln!("partial 构建（{}/301），跳过全量门禁", generated_count());
+            return;
+        }
+        assert_eq!(supported_languages().len(), 301);
+        assert_eq!(generated_count(), 301);
+    }
+
+    #[test]
+    fn html_injections_wired_for_script() {
+        let html = ENTRIES.iter().find(|e| e.name == "html").expect("html entry");
+        assert!(html.injections.contains("script"), "html injections 应含 script 注入规则");
+        assert!(config_ref("javascript").is_some(), "注入子语言配置应可解析");
+    }
+
+    #[test]
+    fn parents_include_all_inherit_targets() {
+        let parents = Lazy::force(&PARENT_ASSETS);
+        for p in ["ecma", "_typescript", "_jsx", "_javascript"] {
+            assert!(parents.contains_key(p), "缺父目录 {p}: {:?}", parents.keys());
         }
     }
 

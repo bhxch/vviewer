@@ -1,7 +1,7 @@
 //! `POST /api/compute/highlight`（Task 3）：tree-sitter 服务端主语法高亮。
 //!
-//! 裁剪（M6 计划级裁决）：服务端 v1 无 injection——只做主语法高亮，injection
-//! 回调恒 None；markdown 围栏等注入场景由前端本地高亮兜底（policy=local）。
+//! injections 已接线（阶段 1，spec §2.2）：injection_callback 经
+//! `queries::config_ref` 从全局注册表解析注入语言的 HighlightConfiguration。
 //!
 //! 关键点：
 //! - tree-sitter 节点偏移是 UTF-8 字节偏移，前端区间是 UTF-16 代码单元偏移，
@@ -29,7 +29,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
+use tree_sitter_highlight::{HighlightEvent, Highlighter};
 
 use crate::compute::queries::{self, HIGHLIGHT_NAMES};
 use crate::error::AppError;
@@ -114,7 +114,7 @@ impl Utf16Index {
 
 /// 对文本执行主语法高亮并产出紧凑响应（阻塞，调用方放 spawn_blocking）。
 pub fn run_highlight(lang: &str, text: &str) -> Result<HighlightResponse, AppError> {
-    let config: Arc<HighlightConfiguration> = queries::config(lang).ok_or_else(|| {
+    let config = queries::config_ref(lang).ok_or_else(|| {
         AppError::bad_request(format!(
             "unsupported language: {lang} (supported: {:?})",
             queries::supported_languages()
@@ -128,9 +128,7 @@ pub fn run_highlight(lang: &str, text: &str) -> Result<HighlightResponse, AppErr
             text.as_bytes(),
             None, // encoding：UTF-8 默认（0.27 新增参数，UTF-16LE/BE 显式传入才需要）
             None, // cancellation flag：响应侧超时即放弃结果（模块注释），无需协作取消
-            |_: &str| {
-                None::<&HighlightConfiguration> // v1 无 injection（模块注释）
-            },
+            |injected: &str| queries::config_ref(injected),
         )
         .map_err(|e| AppError::internal(format!("highlight query 执行失败: {e}")))?;
 

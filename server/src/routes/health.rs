@@ -59,7 +59,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn compute_advertises_sorted_languages_without_java() {
+    async fn compute_advertises_sorted_languages() {
         let v = health_json(true).await;
         assert!(v["capabilities"].as_array().unwrap().contains(&serde_json::json!("compute")));
         let langs = v["computeLanguages"].as_array().expect("computeLanguages 数组");
@@ -70,7 +70,7 @@ mod tests {
             sorted
         });
         assert!(names.contains(&"rust") && names.contains(&"python"));
-        // 对齐缺口的核心断言：java 不在服务端集合，客户端 auto 据此不再远程路由 java
-        assert!(!names.contains(&"java"));
+        // 注册表生成式（Task 5）：服务端集合来自 grammars-manifest.json 可编译源，
+        // 不再豁免特定语言（原「java 不在场」断言随硬编码子集一并退役）
     }
 }
