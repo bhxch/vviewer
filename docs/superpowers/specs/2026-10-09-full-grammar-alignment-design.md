@@ -40,6 +40,8 @@ vviewer 现状：客户端 wasm 内嵌 lite 集 34 语言，服务端 compute �
 - queries 资产同步刷新：`packages/highlight/assets/queries` 286 目录 / 752 scm → ~301 语言目录 + 继承父目录（`_javascript` 等）/ ~950 scm。vviewer 的 queries vendored 入库，**同步即 pin**——比 Markpad（helix master 未 pin）更强的版本纪律，保持。
 - 已知约束（写入 manifest 与文档）：wasm 侧受 cli wasm 工具链限制（`get_scanner_path` 只认 `scanner.c`），带 C++ 外置 scanner 的语言（已知 yaml/vue，plan 阶段全量排查）在 wasm 集继续 vendored（`tools/grammar-builder/fixtures/`）或剔除；**Rust 服务端无此限制（cc 可编 scanner.cc），恰为 301**。两侧集合差如实记录。
 
+- 已实测（阶段 1 收口）：solidity 查询含 0.27 组尾锚点适配（commit 5f63941），pkl/supercollider/yuck locals 空降级。
+
 ### 2.2 服务端全量编译（Markpad 模式移植）
 
 - `server/build.rs`：静态表 `(name, dir, subpath, c_symbol)` 由脚本从 §2.1 同步源生成；cc 编译 `parser.c` + `scanner.c`；关键工程点：
@@ -115,3 +117,21 @@ vviewer 现状：客户端 wasm 内嵌 lite 集 34 语言，服务端 compute �
 | 2 | npm 单包 + 发布管线 + 三层资产解析链 + SW 适配 | pages + CDN 全量高亮可用；离线/降级路径符合 §3 验收 |
 | 3 | auto 路由语义修订 + 硬护栏按来源区分 + e2e 改写 | 路由矩阵与双护栏 e2e 全绿；无 compute 服务器回归不变 |
 | 4 | range 协议（本地+服务端）+ chunkCache 重构 + 阈值放宽 | §5.4 测试全绿；>20MB 性能锚点达标 |
+
+### 7.1 阶段 1 实测结果回写（2026-10-09 收口）
+
+- **服务端集 = 301**：`GENERATED_COUNT=301`（build.rs 生成，`full_registry_count_is_301`
+  门禁绿）；语法源 fetch 301/301（`fetch-failures.json` 为空，源树 301 目录）；health
+  `computeLanguages` 宣告 301。
+- **wasm 集 ≤301**（解析法差集，全量自建未在本地实跑）：fetch 源树带 C++ 外置 scanner
+  共 6 个——yaml/vue 命中 vendored 计入，astro / haskell-persistent / lean / org 为
+  自建缺口，理论口径 301 − 4 = 297（含 vendored）；**wasm 集实测数待 CI `grammar.yml`
+  首跑回填**。查询方法见 `tools/grammar-builder/README.md`「wasm 集与服务端集的口径差」。
+- **查询兼容实测**：solidity 查询含 0.27 组尾锚点适配（commit 5f63941）；pkl /
+  supercollider / yuck locals 空降级。
+- **门禁三命令（本地 2026-10-09）**：`cargo test` 133 项全绿（52 lib + 81 集成；
+  `full_registry_count_is_301` 门禁绿）；`pnpm vitest run` 626/627——1 失败为
+  `tools/helix-assets` QUERY_PATCHES 守门断言（978b177 queries 镜像替换后补丁串未随
+  上游形态更新：上游 2026-10-07 已自带等价锚点 `((comment) @_ecma_comment) . [`，
+  防 O(n²) 目标仍达成，属阶段 1 遗留的补丁列表过时，修复涉及 generate.mjs/测试，
+  超出文档收口任务文件范围，遗留单独处理）；`pnpm typecheck` 通过。

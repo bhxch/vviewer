@@ -33,6 +33,29 @@ cli ≥0.26 的 wasi-sdk wasm 工具链不支持 **C++ 外置 scanner**（`get_s
 单 `!tools/grammar-builder/fixtures/*.wasm`）：命中选择面时短路拷贝，manifest 条目标
 `source: 'vendored'`。上游工具链支持 `.cc` 后删除对应 fixture 即恢复自建。
 
+## wasm 集与服务端集的口径差
+
+阶段 1 起两侧语言集合不同源，口径如下（2026-10-09 实测）：
+
+- **服务端集 = 301**：`server/build.rs` 源码编译（cc 编 C，C++ 外置 scanner 手动
+  g++/ar/objcopy），无 wasm 工具链限制，全量无缺口。清单 = 入库的
+  `server/grammars-manifest.json`（由 build-list 静态表生成），与 `build-list.json`
+  的 301 条一一对应。
+- **wasm 集 ≤301**：受 cli wasm 工具链限制（`get_scanner_path` 只认 `scanner.c`，
+  见上文 vendored 例外），带 C++ 外置 scanner 的语言无法自建。对 fetch 源树全量排查：
+  `find out/grammars -name scanner.cc | sort` 命中 6 个——yaml/vue 命中 vendored
+  短路计入，**astro / haskell-persistent / lean / org** 为 wasm 集自建缺口（解析法
+  理论口径 301 − 4 = 297，含 vendored；全量自建未在本地实跑，实测数待 CI
+  `grammar.yml` 首跑回填）。
+- **集合对比查询**（manifest ↔ build-list 差集核查）：
+
+  ```bash
+  # 源树中带 C++ 外置 scanner 的语言（wasm 自建缺口 + vendored）
+  find tools/grammar-builder/out/grammars -name scanner.cc | sort
+  # 集合规模与双向差集
+  node -e "const bl=require('./tools/grammar-builder/build-list.json'),m=require('./server/grammars-manifest.json');const b=new Set(bl.map(e=>e.name)),s=new Set(m.grammars.map(e=>e.name));console.log('build-list',b.size,'server',s.size);console.log('仅 build-list:',[...b].filter(n=>!s.has(n)));console.log('仅 server:',[...s].filter(n=>!b.has(n)))"
+  ```
+
 ## 构建要点（实测结论）
 
 - **tree-sitter.json shim**：cli 0.27 只在有 `tree-sitter.json` 时编译链接外置 scanner，

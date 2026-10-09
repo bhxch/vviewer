@@ -74,6 +74,22 @@ vviewer serve --root /srv/data --cors-origin https://viewer.example.com --token-
   放行方法 GET/POST 与 `Authorization`/`Content-Type` 头。
 - 反之，前端与 server 同源部署（`--web-dist` 模式直接访问）时无需任何 CORS 配置。
 
+## 构建前置（grammar 源树）
+
+`cargo build` / `cargo test` 在构建期以源码编译全部 grammar（build.rs + cc/FFI，非
+crates.io 预编 crate），需要先备好语法源树（一次性：全量 301 仓浅取，约 3-4GB 磁盘）：
+
+```bash
+node tools/grammar-builder/build.mjs --fetch
+```
+
+- 源树落在 `tools/grammar-builder/out/grammars/`（build.rs 默认读取位置）；源已存在时
+  增量跳过，CI 由 `.github/actions/setup-grammars` 三层缓存覆盖。
+- 源树位置可用环境变量 `VV_GRAMMAR_SOURCES` 覆盖（绝对路径或相对 server crate 路径）。
+- **partial 构建语义**：源缺失的语言跳过编译、不阻塞构建（本地开发友好），但对应语言
+  运行时 `/api/compute/*` 请求返回 400 unsupported language；CI 全源环境以
+  `GENERATED_COUNT==301` 门禁收口（`full_registry_count_is_301`）。
+
 ## 构建说明
 
 - `cargo build --release --manifest-path server/Cargo.toml` → 单二进制
