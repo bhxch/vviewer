@@ -1,0 +1,1812 @@
+{
+  "note": "由 Markpad build.rs 静态表生成（node tools/grammar-builder/gen-server-manifest.mjs）；server/build.rs 的编译与 FFI 输入，语言集合 = 服务端 301 验收口径",
+  "generatedAt": "2026-10-09T13:06:46.824Z",
+  "grammars": [
+    {
+      "name": "ada",
+      "dir": "ada",
+      "subpath": "",
+      "cSymbol": "tree_sitter_ada"
+    },
+    {
+      "name": "adl",
+      "dir": "adl",
+      "subpath": "",
+      "cSymbol": "tree_sitter_adl"
+    },
+    {
+      "name": "agda",
+      "dir": "agda",
+      "subpath": "",
+      "cSymbol": "tree_sitter_agda"
+    },
+    {
+      "name": "alloy",
+      "dir": "alloy",
+      "subpath": "",
+      "cSymbol": "tree_sitter_alloy"
+    },
+    {
+      "name": "amber",
+      "dir": "amber",
+      "subpath": "",
+      "cSymbol": "tree_sitter_amber"
+    },
+    {
+      "name": "astro",
+      "dir": "astro",
+      "subpath": "",
+      "cSymbol": "tree_sitter_astro"
+    },
+    {
+      "name": "awk",
+      "dir": "awk",
+      "subpath": "",
+      "cSymbol": "tree_sitter_awk"
+    },
+    {
+      "name": "bash",
+      "dir": "bash",
+      "subpath": "",
+      "cSymbol": "tree_sitter_bash"
+    },
+    {
+      "name": "basic",
+      "dir": "basic",
+      "subpath": "",
+      "cSymbol": "tree_sitter_basic"
+    },
+    {
+      "name": "bass",
+      "dir": "bass",
+      "subpath": "",
+      "cSymbol": "tree_sitter_bass"
+    },
+    {
+      "name": "batch",
+      "dir": "batch",
+      "subpath": "",
+      "cSymbol": "tree_sitter_batch"
+    },
+    {
+      "name": "beancount",
+      "dir": "beancount",
+      "subpath": "",
+      "cSymbol": "tree_sitter_beancount"
+    },
+    {
+      "name": "bibtex",
+      "dir": "bibtex",
+      "subpath": "",
+      "cSymbol": "tree_sitter_bibtex"
+    },
+    {
+      "name": "bicep",
+      "dir": "bicep",
+      "subpath": "",
+      "cSymbol": "tree_sitter_bicep"
+    },
+    {
+      "name": "bitbake",
+      "dir": "bitbake",
+      "subpath": "",
+      "cSymbol": "tree_sitter_bitbake"
+    },
+    {
+      "name": "blade",
+      "dir": "blade",
+      "subpath": "",
+      "cSymbol": "tree_sitter_blade"
+    },
+    {
+      "name": "blueprint",
+      "dir": "blueprint",
+      "subpath": "",
+      "cSymbol": "tree_sitter_blueprint"
+    },
+    {
+      "name": "c",
+      "dir": "c",
+      "subpath": "",
+      "cSymbol": "tree_sitter_c"
+    },
+    {
+      "name": "c-sharp",
+      "dir": "c-sharp",
+      "subpath": "",
+      "cSymbol": "tree_sitter_c_sharp"
+    },
+    {
+      "name": "c3",
+      "dir": "c3",
+      "subpath": "",
+      "cSymbol": "tree_sitter_c3"
+    },
+    {
+      "name": "caddyfile",
+      "dir": "caddyfile",
+      "subpath": "",
+      "cSymbol": "tree_sitter_caddyfile"
+    },
+    {
+      "name": "cairo",
+      "dir": "cairo",
+      "subpath": "",
+      "cSymbol": "tree_sitter_cairo"
+    },
+    {
+      "name": "capnp",
+      "dir": "capnp",
+      "subpath": "",
+      "cSymbol": "tree_sitter_capnp"
+    },
+    {
+      "name": "cel",
+      "dir": "cel",
+      "subpath": "",
+      "cSymbol": "tree_sitter_cel"
+    },
+    {
+      "name": "chuck",
+      "dir": "chuck",
+      "subpath": "",
+      "cSymbol": "tree_sitter_chuck"
+    },
+    {
+      "name": "circom",
+      "dir": "circom",
+      "subpath": "",
+      "cSymbol": "tree_sitter_circom"
+    },
+    {
+      "name": "clarity",
+      "dir": "clarity",
+      "subpath": "",
+      "cSymbol": "tree_sitter_clarity"
+    },
+    {
+      "name": "clojure",
+      "dir": "clojure",
+      "subpath": "",
+      "cSymbol": "tree_sitter_clojure"
+    },
+    {
+      "name": "cmake",
+      "dir": "cmake",
+      "subpath": "",
+      "cSymbol": "tree_sitter_cmake"
+    },
+    {
+      "name": "comment",
+      "dir": "comment",
+      "subpath": "",
+      "cSymbol": "tree_sitter_comment"
+    },
+    {
+      "name": "commonlisp",
+      "dir": "commonlisp",
+      "subpath": "",
+      "cSymbol": "tree_sitter_commonlisp"
+    },
+    {
+      "name": "concerto",
+      "dir": "concerto",
+      "subpath": "",
+      "cSymbol": "tree_sitter_concerto"
+    },
+    {
+      "name": "cpon",
+      "dir": "cpon",
+      "subpath": "",
+      "cSymbol": "tree_sitter_cpon"
+    },
+    {
+      "name": "cpp",
+      "dir": "cpp",
+      "subpath": "",
+      "cSymbol": "tree_sitter_cpp"
+    },
+    {
+      "name": "crystal",
+      "dir": "crystal",
+      "subpath": "",
+      "cSymbol": "tree_sitter_crystal"
+    },
+    {
+      "name": "css",
+      "dir": "css",
+      "subpath": "",
+      "cSymbol": "tree_sitter_css"
+    },
+    {
+      "name": "csv",
+      "dir": "csv",
+      "subpath": "",
+      "cSymbol": "tree_sitter_csv"
+    },
+    {
+      "name": "cue",
+      "dir": "cue",
+      "subpath": "",
+      "cSymbol": "tree_sitter_cue"
+    },
+    {
+      "name": "cylc",
+      "dir": "cylc",
+      "subpath": "",
+      "cSymbol": "tree_sitter_cylc"
+    },
+    {
+      "name": "cython",
+      "dir": "cython",
+      "subpath": "",
+      "cSymbol": "tree_sitter_cython"
+    },
+    {
+      "name": "d",
+      "dir": "d",
+      "subpath": "",
+      "cSymbol": "tree_sitter_d"
+    },
+    {
+      "name": "dart",
+      "dir": "dart",
+      "subpath": "",
+      "cSymbol": "tree_sitter_dart"
+    },
+    {
+      "name": "dbml",
+      "dir": "dbml",
+      "subpath": "",
+      "cSymbol": "tree_sitter_dbml"
+    },
+    {
+      "name": "debian",
+      "dir": "debian",
+      "subpath": "",
+      "cSymbol": "tree_sitter_debian"
+    },
+    {
+      "name": "devicetree",
+      "dir": "devicetree",
+      "subpath": "",
+      "cSymbol": "tree_sitter_devicetree"
+    },
+    {
+      "name": "dhall",
+      "dir": "dhall",
+      "subpath": "",
+      "cSymbol": "tree_sitter_dhall"
+    },
+    {
+      "name": "diff",
+      "dir": "diff",
+      "subpath": "",
+      "cSymbol": "tree_sitter_diff"
+    },
+    {
+      "name": "djot",
+      "dir": "djot",
+      "subpath": "",
+      "cSymbol": "tree_sitter_djot"
+    },
+    {
+      "name": "dockerfile",
+      "dir": "dockerfile",
+      "subpath": "",
+      "cSymbol": "tree_sitter_dockerfile"
+    },
+    {
+      "name": "dot",
+      "dir": "dot",
+      "subpath": "",
+      "cSymbol": "tree_sitter_dot"
+    },
+    {
+      "name": "doxyfile",
+      "dir": "doxyfile",
+      "subpath": "",
+      "cSymbol": "tree_sitter_doxyfile"
+    },
+    {
+      "name": "drools",
+      "dir": "drools",
+      "subpath": "",
+      "cSymbol": "tree_sitter_drools"
+    },
+    {
+      "name": "dtd",
+      "dir": "dtd",
+      "subpath": "",
+      "cSymbol": "tree_sitter_dtd"
+    },
+    {
+      "name": "dunstrc",
+      "dir": "dunstrc",
+      "subpath": "",
+      "cSymbol": "tree_sitter_dunstrc"
+    },
+    {
+      "name": "earthfile",
+      "dir": "earthfile",
+      "subpath": "",
+      "cSymbol": "tree_sitter_earthfile"
+    },
+    {
+      "name": "ebnf",
+      "dir": "ebnf",
+      "subpath": "crates/tree-sitter-ebnf",
+      "cSymbol": "tree_sitter_ebnf"
+    },
+    {
+      "name": "edoc",
+      "dir": "edoc",
+      "subpath": "",
+      "cSymbol": "tree_sitter_edoc"
+    },
+    {
+      "name": "eex",
+      "dir": "eex",
+      "subpath": "",
+      "cSymbol": "tree_sitter_eex"
+    },
+    {
+      "name": "eiffel",
+      "dir": "eiffel",
+      "subpath": "",
+      "cSymbol": "tree_sitter_eiffel"
+    },
+    {
+      "name": "elisp",
+      "dir": "elisp",
+      "subpath": "",
+      "cSymbol": "tree_sitter_elisp"
+    },
+    {
+      "name": "elixir",
+      "dir": "elixir",
+      "subpath": "",
+      "cSymbol": "tree_sitter_elixir"
+    },
+    {
+      "name": "elm",
+      "dir": "elm",
+      "subpath": "",
+      "cSymbol": "tree_sitter_elm"
+    },
+    {
+      "name": "elvish",
+      "dir": "elvish",
+      "subpath": "",
+      "cSymbol": "tree_sitter_elvish"
+    },
+    {
+      "name": "embedded-perl",
+      "dir": "embedded-perl",
+      "subpath": "",
+      "cSymbol": "tree_sitter_embedded_perl"
+    },
+    {
+      "name": "embedded-template",
+      "dir": "embedded-template",
+      "subpath": "",
+      "cSymbol": "tree_sitter_embedded_template"
+    },
+    {
+      "name": "erlang",
+      "dir": "erlang",
+      "subpath": "",
+      "cSymbol": "tree_sitter_erlang"
+    },
+    {
+      "name": "esdl",
+      "dir": "esdl",
+      "subpath": "",
+      "cSymbol": "tree_sitter_esdl"
+    },
+    {
+      "name": "fennel",
+      "dir": "fennel",
+      "subpath": "",
+      "cSymbol": "tree_sitter_fennel"
+    },
+    {
+      "name": "fga",
+      "dir": "fga",
+      "subpath": "",
+      "cSymbol": "tree_sitter_fga"
+    },
+    {
+      "name": "fidl",
+      "dir": "fidl",
+      "subpath": "",
+      "cSymbol": "tree_sitter_fidl"
+    },
+    {
+      "name": "fish",
+      "dir": "fish",
+      "subpath": "",
+      "cSymbol": "tree_sitter_fish"
+    },
+    {
+      "name": "flatbuffers",
+      "dir": "flatbuffers",
+      "subpath": "",
+      "cSymbol": "tree_sitter_flatbuffers"
+    },
+    {
+      "name": "forth",
+      "dir": "forth",
+      "subpath": "",
+      "cSymbol": "tree_sitter_forth"
+    },
+    {
+      "name": "fortran",
+      "dir": "fortran",
+      "subpath": "",
+      "cSymbol": "tree_sitter_fortran"
+    },
+    {
+      "name": "freebasic",
+      "dir": "freebasic",
+      "subpath": "",
+      "cSymbol": "tree_sitter_freebasic"
+    },
+    {
+      "name": "fsharp",
+      "dir": "fsharp",
+      "subpath": "fsharp",
+      "cSymbol": "tree_sitter_fsharp"
+    },
+    {
+      "name": "gas",
+      "dir": "gas",
+      "subpath": "",
+      "cSymbol": "tree_sitter_gas"
+    },
+    {
+      "name": "gdscript",
+      "dir": "gdscript",
+      "subpath": "",
+      "cSymbol": "tree_sitter_gdscript"
+    },
+    {
+      "name": "gherkin",
+      "dir": "gherkin",
+      "subpath": "",
+      "cSymbol": "tree_sitter_gherkin"
+    },
+    {
+      "name": "ghostty",
+      "dir": "ghostty",
+      "subpath": "",
+      "cSymbol": "tree_sitter_ghostty"
+    },
+    {
+      "name": "git-config",
+      "dir": "git-config",
+      "subpath": "",
+      "cSymbol": "tree_sitter_git_config"
+    },
+    {
+      "name": "git-rebase",
+      "dir": "git-rebase",
+      "subpath": "",
+      "cSymbol": "tree_sitter_git_rebase"
+    },
+    {
+      "name": "gitattributes",
+      "dir": "gitattributes",
+      "subpath": "",
+      "cSymbol": "tree_sitter_gitattributes"
+    },
+    {
+      "name": "gitcommit",
+      "dir": "gitcommit",
+      "subpath": "",
+      "cSymbol": "tree_sitter_gitcommit"
+    },
+    {
+      "name": "gitignore",
+      "dir": "gitignore",
+      "subpath": "",
+      "cSymbol": "tree_sitter_gitignore"
+    },
+    {
+      "name": "gleam",
+      "dir": "gleam",
+      "subpath": "",
+      "cSymbol": "tree_sitter_gleam"
+    },
+    {
+      "name": "glimmer",
+      "dir": "glimmer",
+      "subpath": "",
+      "cSymbol": "tree_sitter_glimmer"
+    },
+    {
+      "name": "glimmer-javascript",
+      "dir": "glimmer-javascript",
+      "subpath": "",
+      "cSymbol": "tree_sitter_glimmer_javascript"
+    },
+    {
+      "name": "glimmer-typescript",
+      "dir": "glimmer-typescript",
+      "subpath": "",
+      "cSymbol": "tree_sitter_glimmer_typescript"
+    },
+    {
+      "name": "glsl",
+      "dir": "glsl",
+      "subpath": "",
+      "cSymbol": "tree_sitter_glsl"
+    },
+    {
+      "name": "gn",
+      "dir": "gn",
+      "subpath": "",
+      "cSymbol": "tree_sitter_gn"
+    },
+    {
+      "name": "gnuplot",
+      "dir": "gnuplot",
+      "subpath": "",
+      "cSymbol": "tree_sitter_gnuplot"
+    },
+    {
+      "name": "go",
+      "dir": "go",
+      "subpath": "",
+      "cSymbol": "tree_sitter_go"
+    },
+    {
+      "name": "go-format-string",
+      "dir": "go-format-string",
+      "subpath": "",
+      "cSymbol": "tree_sitter_go_format_string"
+    },
+    {
+      "name": "godot-resource",
+      "dir": "godot-resource",
+      "subpath": "",
+      "cSymbol": "tree_sitter_godot_resource"
+    },
+    {
+      "name": "gomod",
+      "dir": "gomod",
+      "subpath": "",
+      "cSymbol": "tree_sitter_gomod"
+    },
+    {
+      "name": "gotmpl",
+      "dir": "gotmpl",
+      "subpath": "",
+      "cSymbol": "tree_sitter_gotmpl"
+    },
+    {
+      "name": "gowork",
+      "dir": "gowork",
+      "subpath": "",
+      "cSymbol": "tree_sitter_gowork"
+    },
+    {
+      "name": "gpr",
+      "dir": "gpr",
+      "subpath": "",
+      "cSymbol": "tree_sitter_gpr"
+    },
+    {
+      "name": "graphql",
+      "dir": "graphql",
+      "subpath": "",
+      "cSymbol": "tree_sitter_graphql"
+    },
+    {
+      "name": "gren",
+      "dir": "gren",
+      "subpath": "",
+      "cSymbol": "tree_sitter_gren"
+    },
+    {
+      "name": "groovy",
+      "dir": "groovy",
+      "subpath": "",
+      "cSymbol": "tree_sitter_groovy"
+    },
+    {
+      "name": "hare",
+      "dir": "hare",
+      "subpath": "",
+      "cSymbol": "tree_sitter_hare"
+    },
+    {
+      "name": "haskell",
+      "dir": "haskell",
+      "subpath": "",
+      "cSymbol": "tree_sitter_haskell"
+    },
+    {
+      "name": "haskell-literate",
+      "dir": "haskell-literate",
+      "subpath": "",
+      "cSymbol": "tree_sitter_haskell_literate"
+    },
+    {
+      "name": "haskell-persistent",
+      "dir": "haskell-persistent",
+      "subpath": "",
+      "cSymbol": "tree_sitter_haskell_persistent"
+    },
+    {
+      "name": "haxe",
+      "dir": "haxe",
+      "subpath": "",
+      "cSymbol": "tree_sitter_haxe"
+    },
+    {
+      "name": "hcl",
+      "dir": "hcl",
+      "subpath": "",
+      "cSymbol": "tree_sitter_hcl"
+    },
+    {
+      "name": "hdl",
+      "dir": "hdl",
+      "subpath": "",
+      "cSymbol": "tree_sitter_hdl"
+    },
+    {
+      "name": "heex",
+      "dir": "heex",
+      "subpath": "",
+      "cSymbol": "tree_sitter_heex"
+    },
+    {
+      "name": "hocon",
+      "dir": "hocon",
+      "subpath": "",
+      "cSymbol": "tree_sitter_hocon"
+    },
+    {
+      "name": "hoon",
+      "dir": "hoon",
+      "subpath": "",
+      "cSymbol": "tree_sitter_hoon"
+    },
+    {
+      "name": "hosts",
+      "dir": "hosts",
+      "subpath": "",
+      "cSymbol": "tree_sitter_hosts"
+    },
+    {
+      "name": "html",
+      "dir": "html",
+      "subpath": "",
+      "cSymbol": "tree_sitter_html"
+    },
+    {
+      "name": "htmldjango",
+      "dir": "htmldjango",
+      "subpath": "",
+      "cSymbol": "tree_sitter_htmldjango"
+    },
+    {
+      "name": "hurl",
+      "dir": "hurl",
+      "subpath": "",
+      "cSymbol": "tree_sitter_hurl"
+    },
+    {
+      "name": "hyprlang",
+      "dir": "hyprlang",
+      "subpath": "",
+      "cSymbol": "tree_sitter_hyprlang"
+    },
+    {
+      "name": "iex",
+      "dir": "iex",
+      "subpath": "",
+      "cSymbol": "tree_sitter_iex"
+    },
+    {
+      "name": "ini",
+      "dir": "ini",
+      "subpath": "",
+      "cSymbol": "tree_sitter_ini"
+    },
+    {
+      "name": "ink",
+      "dir": "ink",
+      "subpath": "",
+      "cSymbol": "tree_sitter_ink"
+    },
+    {
+      "name": "inko",
+      "dir": "inko",
+      "subpath": "",
+      "cSymbol": "tree_sitter_inko"
+    },
+    {
+      "name": "janet-simple",
+      "dir": "janet-simple",
+      "subpath": "",
+      "cSymbol": "tree_sitter_janet_simple"
+    },
+    {
+      "name": "java",
+      "dir": "java",
+      "subpath": "",
+      "cSymbol": "tree_sitter_java"
+    },
+    {
+      "name": "javascript",
+      "dir": "javascript",
+      "subpath": "",
+      "cSymbol": "tree_sitter_javascript"
+    },
+    {
+      "name": "jinja2",
+      "dir": "jinja2",
+      "subpath": "",
+      "cSymbol": "tree_sitter_jinja2"
+    },
+    {
+      "name": "jjdescription",
+      "dir": "jjdescription",
+      "subpath": "",
+      "cSymbol": "tree_sitter_jjdescription"
+    },
+    {
+      "name": "jjrevset",
+      "dir": "jjrevset",
+      "subpath": "",
+      "cSymbol": "tree_sitter_jjrevset"
+    },
+    {
+      "name": "jjtemplate",
+      "dir": "jjtemplate",
+      "subpath": "",
+      "cSymbol": "tree_sitter_jjtemplate"
+    },
+    {
+      "name": "jq",
+      "dir": "jq",
+      "subpath": "",
+      "cSymbol": "tree_sitter_jq"
+    },
+    {
+      "name": "jsdoc",
+      "dir": "jsdoc",
+      "subpath": "",
+      "cSymbol": "tree_sitter_jsdoc"
+    },
+    {
+      "name": "json",
+      "dir": "json",
+      "subpath": "",
+      "cSymbol": "tree_sitter_json"
+    },
+    {
+      "name": "json5",
+      "dir": "json5",
+      "subpath": "",
+      "cSymbol": "tree_sitter_json5"
+    },
+    {
+      "name": "jsonnet",
+      "dir": "jsonnet",
+      "subpath": "",
+      "cSymbol": "tree_sitter_jsonnet"
+    },
+    {
+      "name": "julia",
+      "dir": "julia",
+      "subpath": "",
+      "cSymbol": "tree_sitter_julia"
+    },
+    {
+      "name": "just",
+      "dir": "just",
+      "subpath": "",
+      "cSymbol": "tree_sitter_just"
+    },
+    {
+      "name": "kcl",
+      "dir": "kcl",
+      "subpath": "",
+      "cSymbol": "tree_sitter_kcl"
+    },
+    {
+      "name": "kconfig",
+      "dir": "kconfig",
+      "subpath": "",
+      "cSymbol": "tree_sitter_kconfig"
+    },
+    {
+      "name": "kdl",
+      "dir": "kdl",
+      "subpath": "",
+      "cSymbol": "tree_sitter_kdl"
+    },
+    {
+      "name": "klog",
+      "dir": "klog",
+      "subpath": "",
+      "cSymbol": "tree_sitter_klog"
+    },
+    {
+      "name": "koka",
+      "dir": "koka",
+      "subpath": "",
+      "cSymbol": "tree_sitter_koka"
+    },
+    {
+      "name": "kotlin",
+      "dir": "kotlin",
+      "subpath": "",
+      "cSymbol": "tree_sitter_kotlin"
+    },
+    {
+      "name": "koto",
+      "dir": "koto",
+      "subpath": "",
+      "cSymbol": "tree_sitter_koto"
+    },
+    {
+      "name": "latex",
+      "dir": "latex",
+      "subpath": "",
+      "cSymbol": "tree_sitter_latex"
+    },
+    {
+      "name": "ld",
+      "dir": "ld",
+      "subpath": "",
+      "cSymbol": "tree_sitter_ld"
+    },
+    {
+      "name": "ldif",
+      "dir": "ldif",
+      "subpath": "",
+      "cSymbol": "tree_sitter_ldif"
+    },
+    {
+      "name": "lean",
+      "dir": "lean",
+      "subpath": "",
+      "cSymbol": "tree_sitter_lean"
+    },
+    {
+      "name": "ledger",
+      "dir": "ledger",
+      "subpath": "",
+      "cSymbol": "tree_sitter_ledger"
+    },
+    {
+      "name": "less",
+      "dir": "less",
+      "subpath": "",
+      "cSymbol": "tree_sitter_less"
+    },
+    {
+      "name": "llvm",
+      "dir": "llvm",
+      "subpath": "",
+      "cSymbol": "tree_sitter_llvm"
+    },
+    {
+      "name": "llvm-mir",
+      "dir": "llvm-mir",
+      "subpath": "",
+      "cSymbol": "tree_sitter_llvm_mir"
+    },
+    {
+      "name": "log",
+      "dir": "log",
+      "subpath": "",
+      "cSymbol": "tree_sitter_log"
+    },
+    {
+      "name": "lpf",
+      "dir": "lpf",
+      "subpath": "",
+      "cSymbol": "tree_sitter_lpf"
+    },
+    {
+      "name": "lua",
+      "dir": "lua",
+      "subpath": "",
+      "cSymbol": "tree_sitter_lua"
+    },
+    {
+      "name": "lua-format-string",
+      "dir": "lua-format-string",
+      "subpath": "",
+      "cSymbol": "tree_sitter_lua_format_string"
+    },
+    {
+      "name": "luap",
+      "dir": "luap",
+      "subpath": "",
+      "cSymbol": "tree_sitter_luap"
+    },
+    {
+      "name": "luau",
+      "dir": "luau",
+      "subpath": "",
+      "cSymbol": "tree_sitter_luau"
+    },
+    {
+      "name": "mail",
+      "dir": "mail",
+      "subpath": "",
+      "cSymbol": "tree_sitter_mail"
+    },
+    {
+      "name": "make",
+      "dir": "make",
+      "subpath": "",
+      "cSymbol": "tree_sitter_make"
+    },
+    {
+      "name": "markdoc",
+      "dir": "markdoc",
+      "subpath": "",
+      "cSymbol": "tree_sitter_markdoc"
+    },
+    {
+      "name": "markdown",
+      "dir": "markdown",
+      "subpath": "tree-sitter-markdown",
+      "cSymbol": "tree_sitter_markdown"
+    },
+    {
+      "name": "markdown_inline",
+      "dir": "markdown_inline",
+      "subpath": "tree-sitter-markdown-inline",
+      "cSymbol": "tree_sitter_markdown_inline"
+    },
+    {
+      "name": "matlab",
+      "dir": "matlab",
+      "subpath": "",
+      "cSymbol": "tree_sitter_matlab"
+    },
+    {
+      "name": "mermaid",
+      "dir": "mermaid",
+      "subpath": "",
+      "cSymbol": "tree_sitter_mermaid"
+    },
+    {
+      "name": "meson",
+      "dir": "meson",
+      "subpath": "",
+      "cSymbol": "tree_sitter_meson"
+    },
+    {
+      "name": "metamath",
+      "dir": "metamath",
+      "subpath": "",
+      "cSymbol": "tree_sitter_metamath"
+    },
+    {
+      "name": "mojo",
+      "dir": "mojo",
+      "subpath": "",
+      "cSymbol": "tree_sitter_mojo"
+    },
+    {
+      "name": "moonbit",
+      "dir": "moonbit",
+      "subpath": "",
+      "cSymbol": "tree_sitter_moonbit"
+    },
+    {
+      "name": "move",
+      "dir": "move",
+      "subpath": "",
+      "cSymbol": "tree_sitter_move"
+    },
+    {
+      "name": "nasm",
+      "dir": "nasm",
+      "subpath": "",
+      "cSymbol": "tree_sitter_nasm"
+    },
+    {
+      "name": "nearley",
+      "dir": "nearley",
+      "subpath": "",
+      "cSymbol": "tree_sitter_nearley"
+    },
+    {
+      "name": "nginx",
+      "dir": "nginx",
+      "subpath": "",
+      "cSymbol": "tree_sitter_nginx"
+    },
+    {
+      "name": "nickel",
+      "dir": "nickel",
+      "subpath": "",
+      "cSymbol": "tree_sitter_nickel"
+    },
+    {
+      "name": "nim",
+      "dir": "nim",
+      "subpath": "",
+      "cSymbol": "tree_sitter_nim"
+    },
+    {
+      "name": "nix",
+      "dir": "nix",
+      "subpath": "",
+      "cSymbol": "tree_sitter_nix"
+    },
+    {
+      "name": "nu",
+      "dir": "nu",
+      "subpath": "",
+      "cSymbol": "tree_sitter_nu"
+    },
+    {
+      "name": "ocaml",
+      "dir": "ocaml",
+      "subpath": "grammars/ocaml",
+      "cSymbol": "tree_sitter_ocaml"
+    },
+    {
+      "name": "ocaml-interface",
+      "dir": "ocaml-interface",
+      "subpath": "grammars/interface",
+      "cSymbol": "tree_sitter_ocaml_interface"
+    },
+    {
+      "name": "odin",
+      "dir": "odin",
+      "subpath": "",
+      "cSymbol": "tree_sitter_odin"
+    },
+    {
+      "name": "ohm",
+      "dir": "ohm",
+      "subpath": "",
+      "cSymbol": "tree_sitter_ohm"
+    },
+    {
+      "name": "opencl",
+      "dir": "opencl",
+      "subpath": "",
+      "cSymbol": "tree_sitter_opencl"
+    },
+    {
+      "name": "openscad",
+      "dir": "openscad",
+      "subpath": "",
+      "cSymbol": "tree_sitter_openscad"
+    },
+    {
+      "name": "org",
+      "dir": "org",
+      "subpath": "",
+      "cSymbol": "tree_sitter_org"
+    },
+    {
+      "name": "p",
+      "dir": "p",
+      "subpath": "",
+      "cSymbol": "tree_sitter_p"
+    },
+    {
+      "name": "pascal",
+      "dir": "pascal",
+      "subpath": "",
+      "cSymbol": "tree_sitter_pascal"
+    },
+    {
+      "name": "passwd",
+      "dir": "passwd",
+      "subpath": "",
+      "cSymbol": "tree_sitter_passwd"
+    },
+    {
+      "name": "pem",
+      "dir": "pem",
+      "subpath": "",
+      "cSymbol": "tree_sitter_pem"
+    },
+    {
+      "name": "penrose",
+      "dir": "penrose",
+      "subpath": "",
+      "cSymbol": "tree_sitter_penrose"
+    },
+    {
+      "name": "perl",
+      "dir": "perl",
+      "subpath": "",
+      "cSymbol": "tree_sitter_perl"
+    },
+    {
+      "name": "pest",
+      "dir": "pest",
+      "subpath": "",
+      "cSymbol": "tree_sitter_pest"
+    },
+    {
+      "name": "php",
+      "dir": "php",
+      "subpath": "php",
+      "cSymbol": "tree_sitter_php"
+    },
+    {
+      "name": "php-only",
+      "dir": "php-only",
+      "subpath": "php_only",
+      "cSymbol": "tree_sitter_php_only"
+    },
+    {
+      "name": "picat",
+      "dir": "picat",
+      "subpath": "",
+      "cSymbol": "tree_sitter_picat"
+    },
+    {
+      "name": "pkl",
+      "dir": "pkl",
+      "subpath": "",
+      "cSymbol": "tree_sitter_pkl"
+    },
+    {
+      "name": "po",
+      "dir": "po",
+      "subpath": "",
+      "cSymbol": "tree_sitter_po"
+    },
+    {
+      "name": "pod",
+      "dir": "pod",
+      "subpath": "",
+      "cSymbol": "tree_sitter_pod"
+    },
+    {
+      "name": "ponylang",
+      "dir": "ponylang",
+      "subpath": "",
+      "cSymbol": "tree_sitter_ponylang"
+    },
+    {
+      "name": "powershell",
+      "dir": "powershell",
+      "subpath": "",
+      "cSymbol": "tree_sitter_powershell"
+    },
+    {
+      "name": "prisma",
+      "dir": "prisma",
+      "subpath": "",
+      "cSymbol": "tree_sitter_prisma"
+    },
+    {
+      "name": "prolog",
+      "dir": "prolog",
+      "subpath": "grammars/prolog",
+      "cSymbol": "tree_sitter_prolog"
+    },
+    {
+      "name": "properties",
+      "dir": "properties",
+      "subpath": "",
+      "cSymbol": "tree_sitter_properties"
+    },
+    {
+      "name": "proto",
+      "dir": "proto",
+      "subpath": "",
+      "cSymbol": "tree_sitter_proto"
+    },
+    {
+      "name": "proverif",
+      "dir": "proverif",
+      "subpath": "",
+      "cSymbol": "tree_sitter_proverif"
+    },
+    {
+      "name": "prql",
+      "dir": "prql",
+      "subpath": "",
+      "cSymbol": "tree_sitter_prql"
+    },
+    {
+      "name": "ptx",
+      "dir": "ptx",
+      "subpath": "",
+      "cSymbol": "tree_sitter_ptx"
+    },
+    {
+      "name": "pug",
+      "dir": "pug",
+      "subpath": "",
+      "cSymbol": "tree_sitter_pug"
+    },
+    {
+      "name": "puppet",
+      "dir": "puppet",
+      "subpath": "",
+      "cSymbol": "tree_sitter_puppet"
+    },
+    {
+      "name": "purescript",
+      "dir": "purescript",
+      "subpath": "",
+      "cSymbol": "tree_sitter_purescript"
+    },
+    {
+      "name": "python",
+      "dir": "python",
+      "subpath": "",
+      "cSymbol": "tree_sitter_python"
+    },
+    {
+      "name": "ql",
+      "dir": "ql",
+      "subpath": "",
+      "cSymbol": "tree_sitter_ql"
+    },
+    {
+      "name": "qmljs",
+      "dir": "qmljs",
+      "subpath": "",
+      "cSymbol": "tree_sitter_qmljs"
+    },
+    {
+      "name": "query",
+      "dir": "query",
+      "subpath": "",
+      "cSymbol": "tree_sitter_query"
+    },
+    {
+      "name": "quint",
+      "dir": "quint",
+      "subpath": "",
+      "cSymbol": "tree_sitter_quint"
+    },
+    {
+      "name": "r",
+      "dir": "r",
+      "subpath": "",
+      "cSymbol": "tree_sitter_r"
+    },
+    {
+      "name": "regex",
+      "dir": "regex",
+      "subpath": "",
+      "cSymbol": "tree_sitter_regex"
+    },
+    {
+      "name": "rego",
+      "dir": "rego",
+      "subpath": "",
+      "cSymbol": "tree_sitter_rego"
+    },
+    {
+      "name": "requirements",
+      "dir": "requirements",
+      "subpath": "",
+      "cSymbol": "tree_sitter_requirements"
+    },
+    {
+      "name": "rescript",
+      "dir": "rescript",
+      "subpath": "",
+      "cSymbol": "tree_sitter_rescript"
+    },
+    {
+      "name": "ripple",
+      "dir": "ripple",
+      "subpath": "packages/tree-sitter",
+      "cSymbol": "tree_sitter_ripple"
+    },
+    {
+      "name": "robot",
+      "dir": "robot",
+      "subpath": "",
+      "cSymbol": "tree_sitter_robot"
+    },
+    {
+      "name": "robots-txt",
+      "dir": "robots-txt",
+      "subpath": "",
+      "cSymbol": "tree_sitter_robots_txt"
+    },
+    {
+      "name": "ron",
+      "dir": "ron",
+      "subpath": "",
+      "cSymbol": "tree_sitter_ron"
+    },
+    {
+      "name": "rpmspec",
+      "dir": "rpmspec",
+      "subpath": "",
+      "cSymbol": "tree_sitter_rpmspec"
+    },
+    {
+      "name": "rshtml",
+      "dir": "rshtml",
+      "subpath": "",
+      "cSymbol": "tree_sitter_rshtml"
+    },
+    {
+      "name": "rst",
+      "dir": "rst",
+      "subpath": "",
+      "cSymbol": "tree_sitter_rst"
+    },
+    {
+      "name": "ruby",
+      "dir": "ruby",
+      "subpath": "",
+      "cSymbol": "tree_sitter_ruby"
+    },
+    {
+      "name": "rust",
+      "dir": "rust",
+      "subpath": "",
+      "cSymbol": "tree_sitter_rust"
+    },
+    {
+      "name": "rust-format-args",
+      "dir": "rust-format-args",
+      "subpath": "",
+      "cSymbol": "tree_sitter_rust_format_args"
+    },
+    {
+      "name": "scala",
+      "dir": "scala",
+      "subpath": "",
+      "cSymbol": "tree_sitter_scala"
+    },
+    {
+      "name": "scfg",
+      "dir": "scfg",
+      "subpath": "",
+      "cSymbol": "tree_sitter_scfg"
+    },
+    {
+      "name": "scheme",
+      "dir": "scheme",
+      "subpath": "",
+      "cSymbol": "tree_sitter_scheme"
+    },
+    {
+      "name": "scss",
+      "dir": "scss",
+      "subpath": "",
+      "cSymbol": "tree_sitter_scss"
+    },
+    {
+      "name": "sgf",
+      "dir": "sgf",
+      "subpath": "",
+      "cSymbol": "tree_sitter_sgf"
+    },
+    {
+      "name": "shellcheckrc",
+      "dir": "shellcheckrc",
+      "subpath": "",
+      "cSymbol": "tree_sitter_shellcheckrc"
+    },
+    {
+      "name": "slang",
+      "dir": "slang",
+      "subpath": "",
+      "cSymbol": "tree_sitter_slang"
+    },
+    {
+      "name": "slint",
+      "dir": "slint",
+      "subpath": "",
+      "cSymbol": "tree_sitter_slint"
+    },
+    {
+      "name": "slisp",
+      "dir": "slisp",
+      "subpath": "",
+      "cSymbol": "tree_sitter_slisp"
+    },
+    {
+      "name": "smali",
+      "dir": "smali",
+      "subpath": "",
+      "cSymbol": "tree_sitter_smali"
+    },
+    {
+      "name": "smithy",
+      "dir": "smithy",
+      "subpath": "",
+      "cSymbol": "tree_sitter_smithy"
+    },
+    {
+      "name": "sml",
+      "dir": "sml",
+      "subpath": "",
+      "cSymbol": "tree_sitter_sml"
+    },
+    {
+      "name": "snakemake",
+      "dir": "snakemake",
+      "subpath": "",
+      "cSymbol": "tree_sitter_snakemake"
+    },
+    {
+      "name": "solidity",
+      "dir": "solidity",
+      "subpath": "",
+      "cSymbol": "tree_sitter_solidity"
+    },
+    {
+      "name": "sourcepawn",
+      "dir": "sourcepawn",
+      "subpath": "",
+      "cSymbol": "tree_sitter_sourcepawn"
+    },
+    {
+      "name": "spade",
+      "dir": "spade",
+      "subpath": "",
+      "cSymbol": "tree_sitter_spade"
+    },
+    {
+      "name": "spicedb",
+      "dir": "spicedb",
+      "subpath": "",
+      "cSymbol": "tree_sitter_spicedb"
+    },
+    {
+      "name": "sql",
+      "dir": "sql",
+      "subpath": "",
+      "cSymbol": "tree_sitter_sql"
+    },
+    {
+      "name": "ssh_client_config",
+      "dir": "ssh_client_config",
+      "subpath": "",
+      "cSymbol": "tree_sitter_ssh_client_config"
+    },
+    {
+      "name": "strace",
+      "dir": "strace",
+      "subpath": "",
+      "cSymbol": "tree_sitter_strace"
+    },
+    {
+      "name": "strictdoc",
+      "dir": "strictdoc",
+      "subpath": "",
+      "cSymbol": "tree_sitter_strictdoc"
+    },
+    {
+      "name": "styx",
+      "dir": "styx",
+      "subpath": "crates/tree-sitter-styx",
+      "cSymbol": "tree_sitter_styx"
+    },
+    {
+      "name": "supercollider",
+      "dir": "supercollider",
+      "subpath": "",
+      "cSymbol": "tree_sitter_supercollider"
+    },
+    {
+      "name": "svelte",
+      "dir": "svelte",
+      "subpath": "crates/tree-sitter-svelte",
+      "cSymbol": "tree_sitter_svelte"
+    },
+    {
+      "name": "sway",
+      "dir": "sway",
+      "subpath": "",
+      "cSymbol": "tree_sitter_sway"
+    },
+    {
+      "name": "swift",
+      "dir": "swift",
+      "subpath": "",
+      "cSymbol": "tree_sitter_swift"
+    },
+    {
+      "name": "systemverilog",
+      "dir": "systemverilog",
+      "subpath": "",
+      "cSymbol": "tree_sitter_systemverilog"
+    },
+    {
+      "name": "t32",
+      "dir": "t32",
+      "subpath": "",
+      "cSymbol": "tree_sitter_t32"
+    },
+    {
+      "name": "tablegen",
+      "dir": "tablegen",
+      "subpath": "",
+      "cSymbol": "tree_sitter_tablegen"
+    },
+    {
+      "name": "tact",
+      "dir": "tact",
+      "subpath": "",
+      "cSymbol": "tree_sitter_tact"
+    },
+    {
+      "name": "task",
+      "dir": "task",
+      "subpath": "",
+      "cSymbol": "tree_sitter_task"
+    },
+    {
+      "name": "tcl",
+      "dir": "tcl",
+      "subpath": "",
+      "cSymbol": "tree_sitter_tcl"
+    },
+    {
+      "name": "teal",
+      "dir": "teal",
+      "subpath": "",
+      "cSymbol": "tree_sitter_teal"
+    },
+    {
+      "name": "templ",
+      "dir": "templ",
+      "subpath": "",
+      "cSymbol": "tree_sitter_templ"
+    },
+    {
+      "name": "tera",
+      "dir": "tera",
+      "subpath": "",
+      "cSymbol": "tree_sitter_tera"
+    },
+    {
+      "name": "textproto",
+      "dir": "textproto",
+      "subpath": "",
+      "cSymbol": "tree_sitter_textproto"
+    },
+    {
+      "name": "thrift",
+      "dir": "thrift",
+      "subpath": "",
+      "cSymbol": "tree_sitter_thrift"
+    },
+    {
+      "name": "tlaplus",
+      "dir": "tlaplus",
+      "subpath": "",
+      "cSymbol": "tree_sitter_tlaplus"
+    },
+    {
+      "name": "todotxt",
+      "dir": "todotxt",
+      "subpath": "",
+      "cSymbol": "tree_sitter_todotxt"
+    },
+    {
+      "name": "tolk",
+      "dir": "tolk",
+      "subpath": "server/src/languages/tolk/tree-sitter-tolk",
+      "cSymbol": "tree_sitter_tolk"
+    },
+    {
+      "name": "toml",
+      "dir": "toml",
+      "subpath": "",
+      "cSymbol": "tree_sitter_toml"
+    },
+    {
+      "name": "tql",
+      "dir": "tql",
+      "subpath": "",
+      "cSymbol": "tree_sitter_tql"
+    },
+    {
+      "name": "tsx",
+      "dir": "tsx",
+      "subpath": "tsx",
+      "cSymbol": "tree_sitter_tsx"
+    },
+    {
+      "name": "twig",
+      "dir": "twig",
+      "subpath": "",
+      "cSymbol": "tree_sitter_twig"
+    },
+    {
+      "name": "typescript",
+      "dir": "typescript",
+      "subpath": "typescript",
+      "cSymbol": "tree_sitter_typescript"
+    },
+    {
+      "name": "typespec",
+      "dir": "typespec",
+      "subpath": "",
+      "cSymbol": "tree_sitter_typespec"
+    },
+    {
+      "name": "typst",
+      "dir": "typst",
+      "subpath": "",
+      "cSymbol": "tree_sitter_typst"
+    },
+    {
+      "name": "ungrammar",
+      "dir": "ungrammar",
+      "subpath": "",
+      "cSymbol": "tree_sitter_ungrammar"
+    },
+    {
+      "name": "unison",
+      "dir": "unison",
+      "subpath": "",
+      "cSymbol": "tree_sitter_unison"
+    },
+    {
+      "name": "uxntal",
+      "dir": "uxntal",
+      "subpath": "",
+      "cSymbol": "tree_sitter_uxntal"
+    },
+    {
+      "name": "v",
+      "dir": "v",
+      "subpath": "tree_sitter_v",
+      "cSymbol": "tree_sitter_v"
+    },
+    {
+      "name": "vala",
+      "dir": "vala",
+      "subpath": "",
+      "cSymbol": "tree_sitter_vala"
+    },
+    {
+      "name": "varlink",
+      "dir": "varlink",
+      "subpath": "",
+      "cSymbol": "tree_sitter_varlink"
+    },
+    {
+      "name": "vento",
+      "dir": "vento",
+      "subpath": "",
+      "cSymbol": "tree_sitter_vento"
+    },
+    {
+      "name": "verilog",
+      "dir": "verilog",
+      "subpath": "",
+      "cSymbol": "tree_sitter_verilog"
+    },
+    {
+      "name": "vhdl",
+      "dir": "vhdl",
+      "subpath": "",
+      "cSymbol": "tree_sitter_vhdl"
+    },
+    {
+      "name": "vhs",
+      "dir": "vhs",
+      "subpath": "",
+      "cSymbol": "tree_sitter_vhs"
+    },
+    {
+      "name": "vim",
+      "dir": "vim",
+      "subpath": "",
+      "cSymbol": "tree_sitter_vim"
+    },
+    {
+      "name": "vue",
+      "dir": "vue",
+      "subpath": "",
+      "cSymbol": "tree_sitter_vue"
+    },
+    {
+      "name": "wast",
+      "dir": "wast",
+      "subpath": "wast",
+      "cSymbol": "tree_sitter_wast"
+    },
+    {
+      "name": "wat",
+      "dir": "wat",
+      "subpath": "wat",
+      "cSymbol": "tree_sitter_wat"
+    },
+    {
+      "name": "werk",
+      "dir": "werk",
+      "subpath": "",
+      "cSymbol": "tree_sitter_werk"
+    },
+    {
+      "name": "wesl",
+      "dir": "wesl",
+      "subpath": "",
+      "cSymbol": "tree_sitter_wesl"
+    },
+    {
+      "name": "wgsl",
+      "dir": "wgsl",
+      "subpath": "",
+      "cSymbol": "tree_sitter_wgsl"
+    },
+    {
+      "name": "wikitext",
+      "dir": "wikitext",
+      "subpath": "",
+      "cSymbol": "tree_sitter_wikitext"
+    },
+    {
+      "name": "wit",
+      "dir": "wit",
+      "subpath": "",
+      "cSymbol": "tree_sitter_wit"
+    },
+    {
+      "name": "xit",
+      "dir": "xit",
+      "subpath": "",
+      "cSymbol": "tree_sitter_xit"
+    },
+    {
+      "name": "xml",
+      "dir": "xml",
+      "subpath": "",
+      "cSymbol": "tree_sitter_xml"
+    },
+    {
+      "name": "xtc",
+      "dir": "xtc",
+      "subpath": "",
+      "cSymbol": "tree_sitter_xtc"
+    },
+    {
+      "name": "xwiki",
+      "dir": "xwiki",
+      "subpath": "",
+      "cSymbol": "tree_sitter_xwiki"
+    },
+    {
+      "name": "yaml",
+      "dir": "yaml",
+      "subpath": "",
+      "cSymbol": "tree_sitter_yaml"
+    },
+    {
+      "name": "yara",
+      "dir": "yara",
+      "subpath": "",
+      "cSymbol": "tree_sitter_yara"
+    },
+    {
+      "name": "yuck",
+      "dir": "yuck",
+      "subpath": "",
+      "cSymbol": "tree_sitter_yuck"
+    },
+    {
+      "name": "zig",
+      "dir": "zig",
+      "subpath": "",
+      "cSymbol": "tree_sitter_zig"
+    }
+  ]
+}
