@@ -45,7 +45,9 @@ mod tests {
     async fn health_json(compute: bool) -> serde_json::Value {
         let state = AppState::new(PathBuf::from("."), None, None, false, None).with_compute(compute);
         let res = health(State(state)).await;
-        let bytes = to_bytes(res.into_response(), 64 * 1024).await.expect("body");
+        let bytes = to_bytes(res.into_response().into_body(), 64 * 1024)
+            .await
+            .expect("body");
         serde_json::from_slice(&bytes).expect("json")
     }
 
