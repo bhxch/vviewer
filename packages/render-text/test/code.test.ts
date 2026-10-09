@@ -13,11 +13,16 @@ import {
   attachHighlightClient,
   attachHighlightRouter,
   evictOldestEntries,
+  evictChunksByLines,
+  chunkRangeFor,
+  mergeChunkLines,
   resolveHljsLang,
   overlaySearchHits,
   renderDegradedCode,
   HLJS_ALIASES,
-  BLOCK_CACHE_MAX_ROWS,
+  CHUNK_LINES,
+  CHUNK_CACHE_MAX_LINES,
+  PLAIN_MAX_BYTES,
   TREE_SITTER_MAX_BYTES,
   HLJS_MAX_BYTES,
   type HighlightInterval,
@@ -53,12 +58,79 @@ describe('resolveStrategy（降级链阈值）', () => {
     expect(resolveStrategy(TREE_SITTER_MAX_BYTES)).toBe('tree-sitter');
     expect(TREE_SITTER_MAX_BYTES).toBe(2 * 1024 * 1024);
   });
-  it('2MB–20MB → hljs-block', () => {
-    expect(resolveStrategy(TREE_SITTER_MAX_BYTES + 1)).toBe('hljs-block');
-    expect(resolveStrategy(HLJS_MAX_BYTES)).toBe('hljs-block');
+  it('2MB–200MB → lazy（可视区 chunk 懒高亮；PLAIN_MAX_BYTES 参数化 200MB）', () => {
+    expect(resolveStrategy(TREE_SITTER_MAX_BYTES + 1)).toBe('lazy');
+    expect(resolveStrategy(HLJS_MAX_BYTES)).toBe('lazy');
+    expect(resolveStrategy(PLAIN_MAX_BYTES)).toBe('lazy');
+    expect(PLAIN_MAX_BYTES).toBe(200 * 1024 * 1024);
   });
-  it('>20MB → plain', () => {
-    expect(resolveStrategy(HLJS_MAX_BYTES + 1)).toBe('plain');
+  it('>200MB → plain（lazy 后无整文件解析，上限只防解码文本内存失控）', () => {
+    expect(resolveStrategy(PLAIN_MAX_BYTES + 1)).toBe('plain');
+  });
+});
+
+describe('chunkRangeFor（可视区 → 200 行对齐 chunk 区间，纯函数）', () => {
+  it('窗口落在单 chunk 内：按 CHUNK_LINES 对齐返回整个 chunk', () => {
+    expect(CHUNK_LINES).toBe(200);
+    expect(chunkRangeFor(100, 130, 10000)).toEqual({ startLine: 0, lineCount: 200 });
+  });
+  it('跨 chunk 边界：两侧 chunk 都进区间（overscan+2 重叠防边界行漏高亮）', () => {
+    expect(chunkRangeFor(190, 210, 10000)).toEqual({ startLine: 0, lineCount: 400 });
+  });
+  it('视口恰在边界后：前侧重叠仍覆盖上一 chunk 尾部', () => {
+    expect(chunkRangeFor(201, 230, 10000)).toEqual({ startLine: 0, lineCount: 400 });
+  });
+  it('尾部夹边界：lineCount 不越过文件末行', () => {
+    expect(chunkRangeFor(950, 990, 1000)).toEqual({ startLine: 800, lineCount: 200 });
+    expect(chunkRangeFor(995, 999, 1000)).toEqual({ startLine: 800, lineCount: 200 });
+  });
+  it('空文件（虚拟滚动对 0 行传 -1,-1）：lineCount 0', () => {
+    expect(chunkRangeFor(-1, -1, 0)).toEqual({ startLine: 0, lineCount: 0 });
+  });
+});
+
+describe('mergeChunkLines（chunk 相对区间 → 绝对行平移，纯函数）', () => {
+  const offsets = [0, 3, 6]; // 子文本 'ab\ncd\ne' 的行偏移表
+
+  it('相对行 + startLine 平移到绝对行', () => {
+    const m = mergeChunkLines([{ start: 0, end: 2, capture: 'keyword' }], offsets, 200);
+    expect([...m.keys()]).toEqual([200]);
+    expect(m.get(200)).toEqual([{ start: 0, end: 2, capture: 'keyword' }]);
+  });
+
+  it('跨行区间拆行后逐行平移（嵌套展平沿用 assignIntervalsToLines）', () => {
+    const m = mergeChunkLines([{ start: 1, end: 5, capture: 'string' }], offsets, 400);
+    expect(m.get(400)).toEqual([{ start: 1, end: 2, capture: 'string' }]);
+    expect(m.get(401)).toEqual([{ start: 0, end: 2, capture: 'string' }]);
+  });
+
+  it('空区间 → 空 Map（chunk 已缓存标记，行回落纯文本）', () => {
+    expect(mergeChunkLines([], offsets, 0).size).toBe(0);
+  });
+});
+
+describe('evictChunksByLines（chunk 粒度逐出，5000 行等价）', () => {
+  function chunkOf(entries: Array<[number, string]>): Map<number, string> {
+    return new Map(entries);
+  }
+
+  it('超限按插入序整 chunk 淘汰，直到总行数 ≤ 上限', () => {
+    const m = new Map<number, Map<number, string>>([
+      [0, chunkOf([[0, 'a'], [1, 'b']])],
+      [200, chunkOf([[200, 'c'], [201, 'd']])],
+      [400, chunkOf([[400, 'e']])]
+    ]);
+    evictChunksByLines(m, 4); // 总 5 行 → 删最早 chunk(0)（2 行）→ 剩 3 行
+    expect([...m.keys()]).toEqual([200, 400]);
+    evictChunksByLines(m, 0);
+    expect(m.size).toBe(0);
+  });
+
+  it('未超上限不动；上限常量为 5000（原 blockCache 行数等价）', () => {
+    const m = new Map([[0, chunkOf([[0, 'a']])]]);
+    evictChunksByLines(m, CHUNK_CACHE_MAX_LINES);
+    expect(m.size).toBe(1);
+    expect(CHUNK_CACHE_MAX_LINES).toBe(5000);
   });
 });
 
@@ -81,7 +153,7 @@ describe('resolveHljsLang / HLJS_ALIASES（hljs 别名桥接）', () => {
   });
 });
 
-describe('evictOldestEntries（blockCache 淘汰）', () => {
+describe('evictOldestEntries（Map 插入序淘汰原语）', () => {
   it('超出上限按插入序淘汰最早条目', () => {
     const m = new Map<number, string>([[1, 'a'], [2, 'b'], [3, 'c']]);
     evictOldestEntries(m, 2);
@@ -91,7 +163,7 @@ describe('evictOldestEntries（blockCache 淘汰）', () => {
   });
   it('未超上限不动', () => {
     const m = new Map<number, string>([[1, 'a'], [2, 'b']]);
-    evictOldestEntries(m, BLOCK_CACHE_MAX_ROWS);
+    evictOldestEntries(m, CHUNK_CACHE_MAX_LINES);
     expect(m.size).toBe(2);
   });
 });
@@ -499,9 +571,9 @@ describe('renderCode getMeta（BUG-04：状态栏/属性面板元数据）', () 
   });
 });
 
-// ---------- BUG-20：>20MB 纯文本超限提示条 ----------
+// ---------- BUG-20：超限提示条（plain >200MB / lazy >20MB 懒高亮提示） ----------
 
-describe('renderCode >20MB 超限提示条（BUG-20）', () => {
+describe('renderCode 超限提示条（BUG-20）', () => {
   afterEach(() => {
     document.body.innerHTML = '';
     vi.unstubAllGlobals();
@@ -520,14 +592,18 @@ describe('renderCode >20MB 超限提示条（BUG-20）', () => {
     return new TextEncoder().encode('const a = 1;\n'.repeat(Math.ceil(targetBytes / 13)));
   }
 
-  it('>HLJS_MAX_BYTES 且自然 plain 路径：pre 外的兄弟节点插入提示条（含 20MB 字样）', () => {
+  it('>PLAIN_MAX_BYTES 且自然 plain 路径：pre 外的兄弟节点插入提示条（含 200MB 字样）', () => {
     stubResizeObserver();
     const host = document.createElement('div');
     document.body.append(host);
-    const handle = renderCode(bytesOfJs(HLJS_MAX_BYTES + 1), host, { ext: 'txt' });
+    // byteLength 仅参与 strategy/提示阈值/meta.size 判定：stub 到 200MB+1，
+    // 避免测试真建 200MB 缓冲（解码仍用真实数据）
+    const small = new TextEncoder().encode('let x = 1;\n');
+    Object.defineProperty(small, 'byteLength', { value: PLAIN_MAX_BYTES + 1 });
+    const handle = renderCode(small, host, { ext: 'txt' });
     const card = host.querySelector('.vv-oversize-card');
     expect(card).not.toBeNull();
-    expect(card?.textContent).toContain('20MB');
+    expect(card?.textContent).toContain('200MB');
     expect(host.querySelector('.vv-code-pre')).not.toBeNull();
     // 提示条在滚动容器之外（virtualScroller replaceChildren 不得清掉它）
     expect(card!.contains(host.querySelector('.vv-code-pre'))).toBe(false);
@@ -535,11 +611,25 @@ describe('renderCode >20MB 超限提示条（BUG-20）', () => {
     handle.destroy();
   });
 
-  it('<20MB 与 renderDegradedCode 降级路径不出现第二张卡', () => {
+  it('>20MB lazy 文件：一次性「懒高亮」提示条（含 20MB 字样，不阻断滚动）', () => {
     stubResizeObserver();
     const host = document.createElement('div');
     document.body.append(host);
-    // hljs-block（3MB）无提示条
+    const handle = renderCode(bytesOfJs(HLJS_MAX_BYTES + 1), host, { ext: 'js', lang: 'javascript' });
+    const card = host.querySelector('.vv-oversize-card');
+    expect(card).not.toBeNull();
+    expect(card?.textContent).toContain('20MB');
+    expect(card?.textContent).toContain('懒');
+    expect(host.querySelector('.vv-code-pre')).not.toBeNull();
+    expect(handle.getEngine()).toBe('pending'); // lazy：首 chunk 到达前置 pending
+    handle.destroy();
+  });
+
+  it('≤20MB lazy 与 renderDegradedCode 降级路径不出现提示卡', () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    // lazy（2MB+1，≤20MB）无提示条
     const mid = renderCode(bytesOfJs(TREE_SITTER_MAX_BYTES + 1), host, { ext: 'js', lang: 'javascript' });
     expect(host.querySelector('.vv-oversize-card')).toBeNull();
     mid.destroy();
@@ -722,10 +812,11 @@ describe('renderCode revealLine（BUG-09）', () => {
   });
 });
 
-// ---------- BUG-10：显式 remote 策略下 >2MB 文件问路由 ----------
+// ---------- 阶段 4：lazy 路径（>2MB 可视区 chunk 懒高亮） ----------
 
-describe('renderCode hljs-block 分支的远程路由（BUG-10）', () => {
+describe('renderCode lazy 本地 chunk 管线', () => {
   afterEach(() => {
+    attachHighlightClient(null);
     attachHighlightRouter(null);
     document.body.innerHTML = '';
     vi.unstubAllGlobals();
@@ -739,79 +830,233 @@ describe('renderCode hljs-block 分支的远程路由（BUG-10）', () => {
     });
   }
 
-  /** 2MB+1 的 js 文本（hljs-block 策略区间），带服务端 path；多行小行防 hljs 拖死 */
-  function bigJsSource(): { buffer: Uint8Array; opts: Parameters<typeof renderCode>[2] } {
+  /** >2MB（lazy 策略区间）的多行 js 文本：13B/行，约 16 万行 */
+  function lazyJsBuffer(): Uint8Array {
     const line = 'const a = 1;\n';
-    const buffer = new TextEncoder().encode(line.repeat(Math.ceil((TREE_SITTER_MAX_BYTES + 1) / line.length)));
-    return {
-      buffer,
-      opts: { ext: 'js', lang: 'javascript', computeSrc: { path: 'big.js' } }
-    };
+    return new TextEncoder().encode(line.repeat(Math.ceil((TREE_SITTER_MAX_BYTES + 1) / line.length)));
   }
 
-  it('router 返回 intervals：engine=tree-sitter、where=remote，按区间渲染', async () => {
+  it('本地 worker chunk：按 200 行对齐请求（ctx.chunk 标注），区间相对子文本平移到绝对行', async () => {
     stubResizeObserver();
-    const router = vi.fn(async () => [{ start: 0, end: 3, capture: 'keyword' } as HighlightInterval]);
-    attachHighlightRouter(router);
+    const calls: Array<{ chunk?: { startLine: number; lineCount: number } }> = [];
+    attachHighlightClient({
+      highlight: async (_text, _lang, ctx) => {
+        calls.push({ chunk: ctx?.chunk });
+        return [{ start: 0, end: 5, capture: 'keyword' }]; // chunk 内行 0 的 'const'
+      }
+    });
     const host = document.createElement('div');
     document.body.append(host);
-    const { buffer, opts } = bigJsSource();
-    const handle = renderCode(buffer, host, opts);
+    const handle = renderCode(lazyJsBuffer(), host, { ext: 'js', lang: 'javascript' });
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('tree-sitter'));
+    expect(handle.getComputeWhere()).toBe('local');
+    // 初始可视窗口（jsdom 高度 0 → ~30 行）落在 chunk 0：只请求这一个 chunk
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.chunk).toEqual({ startLine: 0, lineCount: 200 });
     await vi.waitFor(() => {
-      expect(handle.getEngine()).toBe('tree-sitter');
-      expect(handle.getComputeWhere()).toBe('remote');
-    });
-    expect(router).toHaveBeenCalledWith({ path: 'big.js' }, 'javascript');
-    await vi.waitFor(() => {
-      expect(host.querySelector('[data-line="0"] .ts-keyword')?.textContent).toBe('con'); // 行首 [0,3)
+      expect(host.querySelector('[data-line="0"] .ts-keyword')?.textContent).toBe('const');
     });
     handle.destroy();
   });
 
-  it('router 返回 null：留在本地 hljs 分块（where=local），策略裁决后的本地位不回退', async () => {
+  it('engine 实时值：lazy 渲染即 pending，首 chunk 到达置 tree-sitter', async () => {
+    stubResizeObserver();
+    let resolveChunk!: (v: HighlightInterval[]) => void;
+    attachHighlightClient({
+      highlight: () => new Promise<HighlightInterval[]>((res) => { resolveChunk = res; })
+    });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(lazyJsBuffer(), host, { ext: 'js', lang: 'javascript' });
+    expect(handle.getEngine()).toBe('pending');
+    resolveChunk([{ start: 0, end: 5, capture: 'keyword' }]);
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('tree-sitter'));
+    handle.destroy();
+  });
+
+  it('滚动连发串行化：单在-flight（同语言 pendingByLang 去重的渲染侧防线），最新窗口优先', async () => {
+    stubResizeObserver();
+    let active = 0;
+    let maxActive = 0;
+    const chunkStarts: number[] = [];
+    attachHighlightClient({
+      highlight: async (_text, _lang, ctx) => {
+        active++;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((r) => setTimeout(r, 5));
+        active--;
+        chunkStarts.push(ctx?.chunk?.startLine ?? -1);
+        return [];
+      }
+    });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(lazyJsBuffer(), host, { ext: 'js', lang: 'javascript' });
+    handle.revealLine(5000);
+    handle.revealLine(12000);
+    handle.revealLine(80000);
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('tree-sitter'));
+    await new Promise((r) => setTimeout(r, 80)); // 队列排空
+    expect(maxActive).toBe(1); // 串行：任一时刻至多 1 个在-flight chunk
+    // 全部按 200 行对齐；过期窗口（5000/12000 处）被裁剪，只补最新窗口（80000 附近）
+    expect(chunkStarts.every((s) => s % 200 === 0 && s >= 0)).toBe(true);
+    expect(chunkStarts[chunkStarts.length - 1]).toBeGreaterThanOrEqual(79800);
+    handle.destroy();
+  });
+
+  it('chunk 失败（非取消）→ 该 chunk 行级 hljs 兜底写 hljsChunkCache，engine=hljs', async () => {
+    stubResizeObserver();
+    attachHighlightClient({
+      highlight: async () => {
+        throw new Error('wasm boom');
+      }
+    });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(lazyJsBuffer(), host, { ext: 'js', lang: 'javascript' });
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('hljs'));
+    expect(handle.getComputeWhere()).toBe('local');
+    expect(host.querySelector('[data-line="0"] [class*="hljs-"]')).not.toBeNull();
+    handle.destroy();
+  });
+
+  it('chunk 取消（HighlightCanceledError）→ 只逐出在-flight，不写 hljs 兜底、不自续（取消≠失败）', async () => {
+    stubResizeObserver();
+    let calls = 0;
+    attachHighlightClient({
+      highlight: async () => {
+        calls++;
+        throw new HighlightCanceledError(); // HL-09 tab 切换 cancelAll 的下游形态
+      }
+    });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(lazyJsBuffer(), host, { ext: 'js', lang: 'javascript' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls).toBe(1); // 无重试风暴：取消后等下次 onRange 再发
+    expect(host.innerHTML).not.toContain('hljs-'); // hljs 兜底不得首写（否则永久遮蔽 tree-sitter 质量）
+    expect(handle.getEngine()).toBe('pending');
+    handle.destroy();
+  });
+
+  it('搜索叠加兼容：词级 mark 与 chunk 语法 span 共存（经 lineHtml 统一入口）', async () => {
+    stubResizeObserver();
+    attachHighlightClient({
+      highlight: async () => [{ start: 0, end: 5, capture: 'keyword' }]
+    });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(lazyJsBuffer(), host, { ext: 'js', lang: 'javascript' });
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('tree-sitter'));
+    await handle.search('a = 1');
+    const body = host.querySelector('[data-line="0"] .vv-code-body')!;
+    expect(body.querySelector('mark.vv-search-hit')?.textContent).toBe('a = 1');
+    expect(body.querySelector('span.ts-keyword')?.textContent).toBe('const');
+    handle.destroy();
+  });
+});
+
+describe('renderCode lazy 服务端 range 路由（阶段 4 契约，接替 BUG-10 整文件路由）', () => {
+  afterEach(() => {
+    attachHighlightClient(null);
+    attachHighlightRouter(null);
+    document.body.innerHTML = '';
+    vi.unstubAllGlobals();
+  });
+
+  function stubResizeObserver(): void {
+    vi.stubGlobal('ResizeObserver', class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    });
+  }
+
+  function lazyJsBuffer(): Uint8Array {
+    const line = 'const a = 1;\n';
+    return new TextEncoder().encode(line.repeat(Math.ceil((TREE_SITTER_MAX_BYTES + 1) / line.length)));
+  }
+
+  it('server-served：router 收到 (src, lang, range)，{intervals, baseLine} 平移到绝对行（where=remote），本地 worker 不被问', async () => {
+    stubResizeObserver();
+    // 每 chunk 返回「chunk 内行 40（偏移 520）的 'const'」区间，baseLine 回显请求 startLine
+    const router = vi.fn(async (_src, _lang, range?: { startLine: number; lineCount: number }) => ({
+      intervals: [{ start: 520, end: 525, capture: 'keyword' } as HighlightInterval],
+      baseLine: range?.startLine ?? 0
+    }));
+    attachHighlightRouter(router);
+    const clientSpy = vi.fn(async () => [] as HighlightInterval[]);
+    attachHighlightClient({ highlight: clientSpy });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(lazyJsBuffer(), host, {
+      ext: 'js',
+      lang: 'javascript',
+      computeSrc: { path: 'big.js' }
+    });
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('tree-sitter'));
+    expect(handle.getComputeWhere()).toBe('remote');
+    expect(router).toHaveBeenCalledWith({ path: 'big.js' }, 'javascript', { startLine: 0, lineCount: 200 });
+    // 滚到 chunk 200：请求 range {200,200}，区间按 baseLine=200 平移到绝对行 240
+    handle.revealLine(250);
+    await vi.waitFor(() => {
+      expect(router).toHaveBeenCalledWith({ path: 'big.js' }, 'javascript', { startLine: 200, lineCount: 200 });
+      expect(host.querySelector('[data-line="240"] .ts-keyword')?.textContent).toBe('const');
+    });
+    expect(clientSpy).not.toHaveBeenCalled(); // server-served chunk 失败才落 hljs，不落本地 wasm
+    handle.destroy();
+  });
+
+  it('router null（auto warn+null 回退门）：该 chunk 行级 hljs，不回落本地 wasm', async () => {
     stubResizeObserver();
     attachHighlightRouter(async () => null);
+    const clientSpy = vi.fn(async () => [] as HighlightInterval[]);
+    attachHighlightClient({ highlight: clientSpy });
     const host = document.createElement('div');
     document.body.append(host);
-    const { buffer, opts } = bigJsSource();
-    const handle = renderCode(buffer, host, opts);
-    await vi.waitFor(() => expect(handle.getEngine()).toBe('hljs-block'));
+    const handle = renderCode(lazyJsBuffer(), host, {
+      ext: 'js',
+      lang: 'javascript',
+      computeSrc: { path: 'big.js' }
+    });
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('hljs'));
     expect(handle.getComputeWhere()).toBe('local');
+    expect(host.querySelector('[data-line="0"] [class*="hljs-"]')).not.toBeNull();
+    expect(clientSpy).not.toHaveBeenCalled();
     handle.destroy();
   });
 
-  it('router 抛错（显式 remote 失败）：错误卡片，不静默降级本地 hljs', async () => {
+  it('router 抛错（显式 remote 失败）：错误卡片，不静默降级，engine 置非 pending 终值', async () => {
     stubResizeObserver();
     attachHighlightRouter(async () => {
       throw new Error('远程高亮失败: HTTP 500');
     });
     const host = document.createElement('div');
     document.body.append(host);
-    const { buffer, opts } = bigJsSource();
-    const handle = renderCode(buffer, host, opts);
+    const handle = renderCode(lazyJsBuffer(), host, {
+      ext: 'js',
+      lang: 'javascript',
+      computeSrc: { path: 'big.js' }
+    });
     await vi.waitFor(() => expect(host.querySelector('.vv-error-card')).not.toBeNull());
     expect(host.querySelector('.vv-error-card')?.textContent).toContain('HTTP 500');
     expect(host.innerHTML).not.toContain('hljs-');
-    // engine 置非 pending 终值：状态栏不停留「解析中…」（评审④）
     expect(handle.getEngine()).toBe('plain');
     expect(handle.getComputeWhere()).toBeNull();
     handle.destroy();
   });
 
-  it('无 router（未注入）/lang 未知：维持现状本地 hljs 分块，不问路由', async () => {
+  it('lang 未知：不问路由，行级 hljs（highlightAuto）chunk', async () => {
     stubResizeObserver();
-    const router = vi.fn(async () => null as HighlightInterval[] | null);
+    const router = vi.fn(async () => null as never);
     attachHighlightRouter(router);
     const host = document.createElement('div');
     document.body.append(host);
-    // lang 为 null（ext 未知且无 lang）：远程高亮无语言不可行，直接本地
-    const line = 'const a = 1;\n';
-    const buffer = new TextEncoder().encode(line.repeat(Math.ceil((TREE_SITTER_MAX_BYTES + 1) / line.length)));
-    const handle = renderCode(buffer, host, {
+    const handle = renderCode(lazyJsBuffer(), host, {
       ext: 'unknownext',
       computeSrc: { path: 'big.unknownext' }
     });
-    await vi.waitFor(() => expect(handle.getEngine()).toBe('hljs-block'));
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('hljs'));
     expect(router).not.toHaveBeenCalled();
     expect(handle.getComputeWhere()).toBe('local');
     handle.destroy();

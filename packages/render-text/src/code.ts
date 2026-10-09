@@ -1,6 +1,6 @@
 import type { Renderer, Encoding, Detection, FileSource, RenderedInstance, SearchMatch, ComputeSource, ComputeWhere } from '@vviewer/core';
 import { getRemoteBase, getRemoteMeta, RemoteComputeError, showErrorCard } from '@vviewer/core';
-import { detectLanguage, HighlightCanceledError, captureToCssClass, type HighlightInterval } from '@vviewer/highlight';
+import { detectLanguage, HighlightCanceledError, captureToCssClass, type HighlightChunk, type HighlightInterval } from '@vviewer/highlight';
 
 export type { HighlightInterval };
 /** hljs 动态导入的默认导出类型（HLJSApi） */
@@ -50,23 +50,27 @@ export function resolveHljsLang(hljs: HLJS, lang: string | null): string | null 
   return mapped !== undefined && hljs.getLanguage(mapped) ? mapped : null;
 }
 
-/** 降级链阈值：≤2MB tree-sitter；≤20MB hljs 按可视块；更大纯文本。
- * tree-sitter 阈值 2MB 的依据：实测 ~2.1-2.4s/MB，2MB≈4-5s，与移动端预算同量级；
- * 据 spec 5.11 预算校准，worker 取消传播落地后可再上调。 */
+/** 降级链阈值：≤2MB tree-sitter 整文件；≤200MB lazy（可视区 chunk 懒高亮）；更大纯文本。
+ * tree-sitter 阈值 2MB 的依据：实测 ~2.1-2.4s/MB，2MB≈4-5s，与移动端预算同量级，
+ * 据 spec 5.11 预算校准。plain 上限 200MB：lazy 化后不再有整文件解析成本，上限只防
+ * 解码文本的内存失控（Uint8Array+string ≈ 字节数的 3-4 倍持有）。 */
 export const TREE_SITTER_MAX_BYTES = 2 * 1024 * 1024;
 export const HLJS_MAX_BYTES = 20 * 1024 * 1024;
+/** 纯文本降级上限（参数化，spec §5.2）：>此值不做任何语法高亮 */
+export const PLAIN_MAX_BYTES = 200 * 1024 * 1024;
 /** markdown/html 富文本渲染输入上限（与 hljs 阈值同源 20MB）：净化与 DOM 遍历
  * 管线无分块，超大输入会长时间阻塞主线程；超限跳过富文本管线，降级为代码/纯
  * 文本视图（renderDegradedCode）。 */
 export const MARKUP_MAX_BYTES = 20 * 1024 * 1024;
 export const LINE_HEIGHT = 20;
 
-export type HighlightStrategy = 'tree-sitter' | 'hljs-block' | 'plain';
+export type HighlightStrategy = 'tree-sitter' | 'lazy' | 'plain';
 
-/** 降级链（按字节大小）：≤2MB tree-sitter（失败→hljs 整文件）；2–20MB hljs 分块；>20MB 纯文本 */
+/** 降级链（按字节大小）：≤2MB tree-sitter（失败→hljs 整文件）；2MB–200MB lazy
+ * （可视区驱动 chunk，tree-sitter 质量、chunk 失败行级 hljs 兜底）；>200MB 纯文本 */
 export function resolveStrategy(size: number): HighlightStrategy {
   if (size <= TREE_SITTER_MAX_BYTES) return 'tree-sitter';
-  if (size <= HLJS_MAX_BYTES) return 'hljs-block';
+  if (size <= PLAIN_MAX_BYTES) return 'lazy';
   return 'plain';
 }
 
@@ -78,8 +82,34 @@ export const DECODERS: Record<Encoding, string> = {
   'gb18030': 'gb18030'
 };
 
-/** hljs 分块缓存行数上限：超出最早淘汰（被逐出的行滚动回来时按需重算） */
-export const BLOCK_CACHE_MAX_ROWS = 5000;
+/** lazy chunk 缓存总行数上限（chunk 粒度逐出，原 hljs-block blockCache 的 5000 行等价）：
+ * 超出按插入序整 chunk 淘汰，被逐出的行滚动回来时按需重算 */
+export const CHUNK_CACHE_MAX_LINES = 5000;
+/** lazy chunk 行粒度：chunk 边界按 200 行对齐，减少窗口移动的重复解析（spec §5.2） */
+export const CHUNK_LINES = 200;
+/** chunk 请求的额外裕量：virtualScroller 的 overscan(10) + 重叠 2 行——滚动连发时
+ * 「请求发出→chunk 完成」间隙内越过的边界行仍落在已请求/已缓存区间 */
+export const CHUNK_OVERSCAN_LINES = 10;
+export const CHUNK_OVERLAP_LINES = 2;
+
+/**
+ * 可视区 [first,last] → 200 行对齐的 chunk 区间（纯函数）：先外扩 overscan+2 行裕量
+ * 并夹到文件边界，再按 CHUNK_LINES 对齐（下界向下取整、上界向上取整），chunkKey=startLine。
+ * 空文件（虚拟滚动对 0 行传 -1,-1）返回 lineCount 0。
+ */
+export function chunkRangeFor(
+  first: number,
+  last: number,
+  totalLines: number
+): { startLine: number; lineCount: number } {
+  if (totalLines <= 0) return { startLine: 0, lineCount: 0 };
+  const lo = Math.max(0, Math.min(first, last) - CHUNK_OVERSCAN_LINES - CHUNK_OVERLAP_LINES);
+  const hi = Math.min(totalLines - 1, Math.max(first, last) + CHUNK_OVERSCAN_LINES + CHUNK_OVERLAP_LINES);
+  if (hi < lo) return { startLine: 0, lineCount: 0 };
+  const startLine = Math.floor(lo / CHUNK_LINES) * CHUNK_LINES;
+  const endLine = Math.min(totalLines - 1, (Math.floor(hi / CHUNK_LINES) + 1) * CHUNK_LINES - 1);
+  return { startLine, lineCount: endLine - startLine + 1 };
+}
 
 /** Map 插入序淘汰：把 m 裁到 ≤max 条（最早写入的先删） */
 export function evictOldestEntries<K, V>(m: Map<K, V>, max: number): void {
@@ -87,6 +117,22 @@ export function evictOldestEntries<K, V>(m: Map<K, V>, max: number): void {
   while (excess-- > 0) {
     const oldest = m.keys().next();
     if (oldest.done) return;
+    m.delete(oldest.value);
+  }
+}
+
+/**
+ * chunk 粒度逐出（纯函数）：把 chunk 缓存（startLine → 行 map）总行数裁到 ≤maxLines，
+ * 超出版的最早 chunk 整个删除（行级半删会让 chunkKey 缓存标记失真——hasChunkData 按
+ * 键判断「已处理」，整删才能保证被逐出的 chunk 下次完整重算）。
+ */
+export function evictChunksByLines<V>(m: Map<number, Map<number, V>>, maxLines: number): void {
+  let total = 0;
+  for (const chunk of m.values()) total += chunk.size;
+  while (total > maxLines) {
+    const oldest = m.keys().next();
+    if (oldest.done) return;
+    total -= m.get(oldest.value)?.size ?? 0;
     m.delete(oldest.value);
   }
 }
@@ -270,6 +316,23 @@ export function assignIntervalsToLines(
     .map(([line, segs]) => ({ line, segs }));
 }
 
+/**
+ * chunk 区间 → 绝对行行段 Map（纯函数）：intervals 相对 chunk 子文本，先按子文本行
+ * 偏移表分配到相对行，再统一 +shift 平移到全文件行号（本地 chunk shift=startLine；
+ * 服务端 range chunk shift=响应 baseLine）。空区间返回空 Map（chunk 已处理标记）。
+ */
+export function mergeChunkLines(
+  intervals: HighlightInterval[],
+  chunkOffsets: number[],
+  shift: number
+): Map<number, LineSeg[]> {
+  const byLine = new Map<number, LineSeg[]>();
+  for (const a of assignIntervalsToLines(intervals, chunkOffsets)) {
+    byLine.set(a.line + shift, a.segs);
+  }
+  return byLine;
+}
+
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -361,12 +424,15 @@ export function renderLineHtml(text: string, segs: readonly LineSeg[] | undefine
   return out;
 }
 
-/** 单次高亮调用的路由上下文（M6 compute 路由；不参与渲染结果本身） */
+/** 单次高亮调用的路由上下文（M6 compute 路由 + 阶段 4 chunk 标注；不参与渲染结果本身） */
 export interface HighlightCallContext {
   /** 计算来源：远程 store 的文件带服务端 path（auto 策略据此走远程），本地文件缺省 */
   src?: ComputeSource;
   /** 执行位置回调：路由结果（local/remote）到达后调用（状态栏执行位置指示） */
   onWhere?: (where: ComputeWhere) => void;
+  /** chunk 子文本窗口语义标注（spec §5.1）：text 即该窗口子文本，返回区间相对 text；
+   * 行号平移归渲染侧（mergeChunkLines）。仅 lazy 本地 chunk 路径携带 */
+  chunk?: HighlightChunk;
 }
 
 /** tree-sitter 高亮客户端最小接口（HighlightClient 结构兼容；测试可注 fake） */
@@ -387,17 +453,25 @@ export function getHighlightClient(): CodeHighlightClient | null {
 }
 
 /**
- * 大文件远程高亮路由（BUG-10）：>2MB 文件按策略问路由（阶段 3 起 auto 的
- * server-served 文件不限大小也问，裁决在注入侧 apps/web highlightRouter）。
- * 契约：非 null = 远程高亮区间（按 tree-sitter 路径渲染，执行位置 remote）；
- * null = 留在本地 hljs 分块（注入侧硬护栏：local、本地来源、auto 服务端不可
- * 服务门均拦为 null——本地来源恒零 POST）；抛错 = 显式 remote 失败（渲染端错误
- * 卡片，不静默回退，与 tree-sitter 分支的 RemoteComputeError 同语义）。
+ * 大文件远程高亮路由（BUG-10 → 阶段 4 range 契约）：>2MB lazy 文件按可视区 chunk
+ * 问路由（裁决在注入侧 apps/web highlightRouter）。契约：非 null = 该 chunk 的远程
+ * 高亮区间（intervals 相对 chunk 首行，baseLine 平移到绝对行；执行位置 remote）；
+ * null = 留在该 chunk 的行级 hljs 兜底（注入侧硬护栏：local、本地来源、auto 服务端
+ * 不可服务门均拦为 null）；抛错 = 显式 remote 失败（渲染端错误卡片，不静默回退，
+ * 与 tree-sitter 分支的 RemoteComputeError 同语义）。
  */
+/** 大文件路由 chunk 级结果（spec §5.1）：intervals 相对 chunk 首行；baseLine 为该
+ * 首行的全文件 0 基行号（旧服务端响应无此字段时兜 0，此时按全文件区间解释） */
+export interface LargeFileHighlightChunk {
+  intervals: HighlightInterval[];
+  baseLine: number;
+}
+
 export type HighlightRouterFn = (
   src: ComputeSource,
-  lang: string
-) => Promise<HighlightInterval[] | null>;
+  lang: string,
+  range?: { startLine: number; lineCount: number }
+) => Promise<LargeFileHighlightChunk | null>;
 
 let attachedRouter: HighlightRouterFn | null = null;
 
@@ -409,7 +483,8 @@ export function attachHighlightRouter(fn: HighlightRouterFn | null): void {
 // 样式说明：虚拟滚动与代码面板的样式统一由 apps/web/src/app.css 提供（单一来源），
 // 本模块不再运行时注入 CSS，避免双份定义漂移。
 
-/** 代码高亮引擎实时值：pending = tree-sitter 主路径已启动但结果未到达（或已取消） */
+/** 代码高亮引擎实时值：pending = tree-sitter 主路径（整文件或 lazy chunk）已启动但
+ * 首个产出未到达（或已取消）；'hljs-block' 类型值保留（历史状态栏兼容）但不再产生 */
 export type CodeEngine = 'tree-sitter' | 'hljs' | 'hljs-block' | 'plain' | 'pending';
 
 /** 渲染实例元数据快照（BUG-04：状态栏/属性面板单一来源） */
@@ -470,37 +545,45 @@ export function renderCode(
   target.classList.add('vv-code');
   const pre = document.createElement('div');
   pre.className = 'vv-code-pre'; // 即 virtualScroller 的滚动容器
-  // BUG-20：>20MB 纯文本虚拟滚动无语法高亮，顶部插一次性提示条（不阻断滚动/搜索）。
-  // 提示条是 pre 的兄弟节点而非子节点——virtualScroller 会 replaceChildren 滚动容器，
-  // 提示条放里面会被清掉且 spacer 定位被顶偏。
-  if (
-    strategy === 'plain' &&
-    (opts.oversizeNotice ?? opts.highlight !== false) &&
-    buffer.byteLength > HLJS_MAX_BYTES
-  ) {
+  // 超限提示条（BUG-20 模式）：plain（>PLAIN_MAX_BYTES）与 lazy（>HLJS_MAX_BYTES）
+  // 各一条一次性提示，顶部插入、不阻断滚动/搜索。提示条是 pre 的兄弟节点而非子
+  // 节点——virtualScroller 会 replaceChildren 滚动容器，提示条放里面会被清掉且
+  // spacer 定位被顶偏。
+  const noticeEnabled = opts.oversizeNotice ?? opts.highlight !== false;
+  let noticeText: string | null = null;
+  if (noticeEnabled && strategy === 'plain' && buffer.byteLength > PLAIN_MAX_BYTES) {
+    noticeText = `文件超过 ${PLAIN_MAX_BYTES / 1024 / 1024}MB，已按纯文本虚拟滚动显示（不做语法高亮）`;
+  } else if (noticeEnabled && strategy === 'lazy' && buffer.byteLength > HLJS_MAX_BYTES) {
+    noticeText = `文件超过 ${HLJS_MAX_BYTES / 1024 / 1024}MB，已按可视区懒高亮显示（滚动到即增量解析，稍候即着色）`;
+  }
+  if (noticeText !== null) {
     const bar = document.createElement('div');
     bar.className = 'vv-error-card vv-oversize-card vv-code-oversize-card';
     const title = document.createElement('div');
     title.className = 'vv-error-title';
-    title.textContent = `文件超过 ${HLJS_MAX_BYTES / 1024 / 1024}MB，已按纯文本虚拟滚动显示（不做语法高亮）`;
+    title.textContent = noticeText;
     bar.append(title);
     target.classList.add('vv-code-oversize');
     target.replaceChildren(bar, pre);
   } else {
     target.replaceChildren(pre);
   }
-  let hlLines: string[] | null = null; // hljs 整文件路径的行 HTML
-  let lineSegs: Map<number, LineSeg[]> | null = null; // tree-sitter 路径的行段落
-  const blockCache = new Map<number, string>(); // hljs-block 路径：行号 → 行 HTML
+  let hlLines: string[] | null = null; // hljs 整文件路径的行 HTML（≤2MB tree-sitter 失败兜底）
+  let lineSegs: Map<number, LineSeg[]> | null = null; // tree-sitter 整文件路径的行段落
+  // lazy 路径双缓存（chunkKey=startLine → 行 map）：tree-sitter 成功写 chunkCache，
+  // chunk 失败/无 client 的行级 hljs 兜底写 hljsChunkCache（互斥，hasChunkData 视为已处理）
+  const chunkCache = new Map<number, Map<number, LineSeg[]>>();
+  const hljsChunkCache = new Map<number, Map<number, string>>();
   let hljs: HLJS | null = null;
   let hljsLang: string | null = null;
   let scroller: VirtualScrollerHandle | null = null;
   let destroyed = false;
-  // 引擎实时值：tree-sitter 主路径在区间到达前为 pending；hljs-block/plain 策略即终值
-  let engine: CodeEngine = strategy === 'tree-sitter' ? 'pending' : strategy;
-  // 高亮计算执行位置（M6）：null = 未发生计算路由（纯文本）；tree-sitter 主路径
-  // 等路由结果回填；hljs-block/hljs 兜底是本地引擎，置 'local'。状态栏指示读这里。
-  let computeWhere: ComputeWhere | null = strategy === 'hljs-block' ? 'local' : null;
+  // 引擎实时值：tree-sitter/lazy 主路径在首个产出到达前为 pending；plain 策略即终值。
+  // lazy 的 chunk 全走行级 hljs 兜底时置 'hljs'（首个 tree-sitter chunk 产出后保持主导引擎）
+  let engine: CodeEngine = strategy === 'plain' ? 'plain' : 'pending';
+  // 高亮计算执行位置（M6）：null = 未发生计算路由（纯文本/lazy 首 chunk 前）；
+  // tree-sitter 主路径等路由结果回填；lazy 按 chunk 来源回填 remote/local。状态栏指示读这里。
+  let computeWhere: ComputeWhere | null = null;
   // 文件内搜索状态（BUG-18/23）：query×caseSensitive 双键缓存 + 行→命中偏移索引
   //（fillRows 据此渲染词级 mark 与全部命中行的行级背景，虚拟滚动重绘天然保持）
   let lastQuery: string | null = null;
@@ -538,6 +621,22 @@ export function renderCode(
     if (prev >= 0 && !searchHitsByLine.has(prev)) scroller?.refresh(true);
   }
 
+  /**
+   * 行级读值统一入口：tree-sitter（整文件段落 → chunk 段落）→ hljs（整文件行 →
+   * chunk 行）→ null（无高亮产出，调用方回落纯文本转义）。fillRows 与搜索 overlay
+   * 都经此取行 HTML，lazy 双缓存/整文件多路来源对渲染逻辑透明。
+   */
+  function lineHtml(i: number): string | null {
+    const segs = lineSegs?.get(i);
+    if (segs) return renderLineHtml(lines[i] ?? '', segs);
+    if (hlLines) return hlLines[i] ?? '';
+    const chunkKey = Math.floor(i / CHUNK_LINES) * CHUNK_LINES;
+    const chunkSegs = chunkCache.get(chunkKey)?.get(i);
+    if (chunkSegs) return renderLineHtml(lines[i] ?? '', chunkSegs);
+    const cached = hljsChunkCache.get(chunkKey)?.get(i);
+    return cached !== undefined ? cached : null;
+  }
+
   function fillRows(first: number, last: number, viewport: HTMLElement): void {
     const frag = document.createDocumentFragment();
     for (let i = first; i <= last; i++) {
@@ -555,22 +654,12 @@ export function renderCode(
       gutter.textContent = String(i + 1);
       const body = document.createElement('span');
       body.className = 'vv-code-body';
-      const segs = lineSegs?.get(i);
-      const cached = blockCache.get(i);
+      const html = lineHtml(i);
       if (hits !== undefined) {
         // BUG-18 词级 mark：命中段包 mark（overlaySearchHits 内语法 span 在命中
         // 边界闭合/重开），非命中段保持原语法高亮 HTML
-        const baseHtml = segs
-          ? renderLineHtml(lines[i] ?? '', segs)
-          : cached !== undefined
-            ? cached
-            : hlLines
-              ? (hlLines[i] ?? '')
-              : escapeHtml(lines[i] ?? '');
-        body.innerHTML = overlaySearchHits(baseHtml, hits);
-      } else if (segs) body.innerHTML = renderLineHtml(lines[i] ?? '', segs);
-      else if (cached !== undefined) body.innerHTML = cached;
-      else if (hlLines) body.innerHTML = hlLines[i] ?? '';
+        body.innerHTML = overlaySearchHits(html ?? escapeHtml(lines[i] ?? ''), hits);
+      } else if (html !== null) body.innerHTML = html;
       else body.textContent = lines[i] ?? '';
       row.append(gutter, body);
       frag.append(row);
@@ -578,26 +667,10 @@ export function renderCode(
     viewport.replaceChildren(frag);
   }
 
-  /** hljs-block 路径：可见范围整段高亮一次并入缓存（可见行段的滚动按需计算） */
-  function fillBlockCache(first: number, last: number): void {
-    if (!hljs) return;
-    for (let i = first; i <= last; i++) {
-      if (blockCache.has(i)) continue;
-      const chunk = lines.slice(first, last + 1).join('\n');
-      const value = hljsLang
-        ? hljs.highlight(chunk, { language: hljsLang, ignoreIllegals: true }).value
-        : hljs.highlightAuto(chunk).value;
-      const parts = splitHighlightedLines(value, last - first + 1);
-      for (let k = 0; k < parts.length; k++) blockCache.set(first + k, parts[k] ?? '');
-      evictOldestEntries(blockCache, BLOCK_CACHE_MAX_ROWS); // 超上限淘汰最早条目（滚动按需重算）
-      return; // 一次处理整个可见范围
-    }
-  }
-
   function mount(): void {
     if (scroller || destroyed) return;
     scroller = virtualScroller(pre, lines.length, LINE_HEIGHT, (first, last, viewport) => {
-      if (strategy === 'hljs-block') fillBlockCache(first, last);
+      if (strategy === 'lazy') scheduleChunks(first, last); // 可视区驱动 chunk 请求
       fillRows(first, last, viewport);
     });
   }
@@ -622,49 +695,172 @@ export function renderCode(
     scroller?.refresh(true);
   }
 
-  async function start(): Promise<void> {
-    if (strategy === 'hljs-block') {
-      mount(); // 先渲染纯文本立即可见；hljs 到位（或远程区间到达）后 refresh 重绘
-      // BUG-10：remote 策略下 >2MB 文件问路由；auto 下 server-served 文件（有服务
-      // 端 path）阶段 3 起不限大小也问路由，失败由注入侧 warn+null 回退本地 hljs
-      // 分块（显式 remote 失败抛错→错误卡片）。仅当注入了 router 且有服务端 path
-      // 与可识别语言时发起；**local 与本地添加文件（无 path）在注入侧
-      // （apps/web highlightRouter）被硬护栏拦为 null——恒本地 hljs 分块、零
-      // POST**，勿改为渲染端问路由。
-      const router = attachedRouter;
-      if (router && lang !== null && opts.computeSrc?.path) {
-        engine = 'pending';
-        computeWhere = null;
-        try {
-          const intervals = await router(opts.computeSrc, lang);
-          if (destroyed) return;
-          if (intervals !== null) {
-            // 远程区间：按 tree-sitter 路径渲染，执行位置如实标 remote
-            engine = 'tree-sitter';
-            computeWhere = 'remote';
-            lineSegs = new Map(assignIntervalsToLines(intervals, lineOffsets).map((a) => [a.line, a.segs]));
-            scroller?.refresh(true);
-            return;
-          }
-        } catch (err) {
-          if (destroyed || err instanceof HighlightCanceledError) return; // tab 已切换：静默
-          // 显式 remote 失败：如实错误卡片，不静默降级本地分块（掩盖服务端故障）。
-          // engine 置非 pending 终值：错误卡片已替换内容，状态栏不得停留「解析中…」
-          //（'plain' = 无高亮引擎产出，最贴近错误卡片视图的终值）
-          engine = 'plain';
-          computeWhere = null;
-          showErrorCard(target, err instanceof Error ? err.message : String(err), {
-            name: opts.ext ? `.${opts.ext}` : '代码'
-          });
+  // ---------- lazy 路径：可视区 chunk 懒高亮（spec §5.2，接替 hljs-block 可视块） ----------
+  /**
+   * 待请求的 chunk 键（startLine，200 行对齐），近视口中心优先。每次 onRange 整表
+   * 重算 = 过期裁剪：滚走的窗口自然出队，最新窗口优先；在-flight 单请求由 chunkBusy
+   * 保证。**必须串行化**：本地 chunk 共用 highlight client，其 pendingByLang 按 lang
+   * 级去重——并发连发会让后发 chunk 取消先发（半屏静默丢失），故渲染侧单在-flight
+   * 逐个泵出（评审裁决，勿改并发）。
+   */
+  let wantedChunks: number[] = [];
+  let chunkBusy = false;
+  /** HL-09/取消语义：本 chunk 以 HighlightCanceledError 结束（tab 切换 cancelAll）——
+   * 只逐出在-flight，不写 hljs 兜底（hljs 首写会永久遮蔽该行的 tree-sitter 质量）、
+   * 不自续队列（避免 cancel 风暴），等下次 onRange 重发。 */
+  let chunkCanceled = false;
+  /** 显式 remote 失败停机闩：错误卡片已替换内容，管线永久停机——否则 refresh 的
+   * onRange 会把未缓存的 chunk 反复入队，每次都再抛错（风暴）。 */
+  let chunkPipelineStopped = false;
+
+  function hasChunkData(startLine: number): boolean {
+    return chunkCache.has(startLine) || hljsChunkCache.has(startLine);
+  }
+
+  /** 可视区 → 未缓存的 chunk 键（对齐、去重），近视口中心者优先 */
+  function wantedChunkKeys(first: number, last: number): number[] {
+    const { startLine, lineCount } = chunkRangeFor(first, last, lines.length);
+    const keys: number[] = [];
+    for (let s = startLine; s < startLine + lineCount; s += CHUNK_LINES) {
+      if (!hasChunkData(s)) keys.push(s);
+    }
+    const mid = (first + last) / 2;
+    return keys.sort(
+      (a, b) => Math.abs(a + CHUNK_LINES / 2 - mid) - Math.abs(b + CHUNK_LINES / 2 - mid)
+    );
+  }
+
+  function scheduleChunks(first: number, last: number): void {
+    if (chunkPipelineStopped) return;
+    wantedChunks = wantedChunkKeys(first, last);
+    void pumpChunk();
+  }
+
+  /** 队列泵：单在-flight，逐个消化最新窗口的 chunk（见 wantedChunks 注释的串行化裁决） */
+  async function pumpChunk(): Promise<void> {
+    if (chunkBusy || destroyed || chunkPipelineStopped) return;
+    const startLine = wantedChunks.find((s) => !hasChunkData(s));
+    if (startLine === undefined) return;
+    chunkBusy = true;
+    chunkCanceled = false;
+    try {
+      await highlightChunk(startLine);
+    } finally {
+      chunkBusy = false;
+    }
+    if (destroyed || chunkCanceled) return;
+    scroller?.refresh(true); // 新 chunk 到达：重绘可视行（fillRows 经 lineHtml 读到）
+    void pumpChunk(); // 下一个（队列已被本次 refresh 的 onRange 重算裁剪过）
+  }
+
+  /** 单 chunk 高亮：来源选择——服务端 range 路由 → 本地 worker chunk → 行级 hljs 兜底 */
+  async function highlightChunk(startLine: number): Promise<void> {
+    const lineCount = Math.min(CHUNK_LINES, lines.length - startLine);
+    if (lineCount <= 0) return;
+    const subLines = lines.slice(startLine, startLine + lineCount);
+    const chunkText = subLines.join('\n');
+    const chunkOffsets = buildLineOffsets(subLines);
+    const router = attachedRouter;
+    if (router && lang !== null && opts.computeSrc?.path) {
+      let res: LargeFileHighlightChunk | null;
+      try {
+        res = await router(opts.computeSrc, lang, { startLine, lineCount });
+      } catch (err) {
+        if (destroyed || err instanceof HighlightCanceledError) {
+          chunkCanceled = true; // 取消≠失败：仅逐出在-flight
           return;
         }
-        engine = 'hljs-block'; // router 返回 null：留在本地 hljs 分块
-        computeWhere = 'local';
+        // 显式 remote 失败：如实错误卡片，不静默降级（掩盖服务端故障）。
+        // engine 置非 pending 终值；管线停机闩落下（否则 onRange 反复入队反复抛错）
+        chunkPipelineStopped = true;
+        wantedChunks = [];
+        engine = 'plain';
+        computeWhere = null;
+        showErrorCard(target, err instanceof Error ? err.message : String(err), {
+          name: opts.ext ? `.${opts.ext}` : '代码'
+        });
+        return;
       }
-      hljs = (await import('highlight.js')).default;
       if (destroyed) return;
-      hljsLang = resolveHljsLang(hljs, lang); // 别名桥接；null → 可视块 highlightAuto
-      scroller?.refresh(true); // mount 已渲染纯文本，hljs 到位后重绘带高亮
+      if (res !== null) {
+        // 区间相对 chunk 首行：按 baseLine 平移到绝对行。旧服务端无 range 支持
+        //（baseLine=0 与请求 startLine 不符，或区间越出 chunk 长度）时按全文件
+        // 偏移表解释（baseLine 即全文件首行）
+        const maxEnd = res.intervals.reduce((m, iv) => Math.max(m, iv.end), 0);
+        const wholeFile = res.baseLine !== startLine || maxEnd > chunkText.length;
+        chunkCache.set(
+          startLine,
+          mergeChunkLines(res.intervals, wholeFile ? lineOffsets : chunkOffsets, wholeFile ? 0 : res.baseLine)
+        );
+        evictChunksByLines(chunkCache, CHUNK_CACHE_MAX_LINES);
+        engine = 'tree-sitter';
+        computeWhere = 'remote';
+        return;
+      }
+      // router null（auto 门/失败回退，注入侧已 warn）：该 chunk 行级 hljs——
+      // 不回落本地 wasm：server-served 大文件连发本地 chunk 会持续占用 worker
+      //（简报裁决；可用性与 ≤2MB 整文件链路的 BUG-10 null 语义一致）
+      await hljsChunk(startLine, lineCount, subLines);
+      return;
+    }
+    const client = attachedClient;
+    if (client && lang !== null) {
+      try {
+        // 本地 worker chunk：区间相对子文本，mergeChunkLines 平移 +startLine
+        const intervals = await client.highlight(chunkText, lang, {
+          chunk: { startLine, lineCount }
+        });
+        if (destroyed) return;
+        chunkCache.set(startLine, mergeChunkLines(intervals, chunkOffsets, startLine));
+        evictChunksByLines(chunkCache, CHUNK_CACHE_MAX_LINES);
+        engine = 'tree-sitter';
+        computeWhere = 'local';
+        return;
+      } catch (err) {
+        if (destroyed || err instanceof HighlightCanceledError) {
+          chunkCanceled = true; // 取消≠失败：仅逐出在-flight，不落 hljs 兜底
+          return;
+        }
+        // chunk 失败（413/网络/超时/解析错误）→ 该 chunk 行级 hljs 兜底
+        await hljsChunk(startLine, lineCount, subLines);
+        return;
+      }
+    }
+    await hljsChunk(startLine, lineCount, subLines); // 无 client/lang：hljs highlightAuto chunk
+  }
+
+  /** 行级 hljs 兜底：单 chunk 主线程高亮（200 行，与原 hljs-block 可视块同量级）写 hljsChunkCache */
+  async function hljsChunk(startLine: number, lineCount: number, subLines: string[]): Promise<void> {
+    hljs ??= (await import('highlight.js')).default;
+    if (destroyed) return;
+    hljsLang = hljsLang ?? resolveHljsLang(hljs, lang); // 别名桥接；null → highlightAuto
+    const chunkText = subLines.join('\n');
+    let value: string;
+    try {
+      value = hljsLang
+        ? hljs.highlight(chunkText, { language: hljsLang, ignoreIllegals: true }).value
+        : hljs.highlightAuto(chunkText).value;
+    } catch {
+      value = hljs.highlightAuto(chunkText).value; // 指定语言高亮异常（罕见）仍兜住
+    }
+    if (destroyed) return;
+    const parts = splitHighlightedLines(value, lineCount);
+    const byLine = new Map<number, string>();
+    for (let k = 0; k < parts.length; k++) byLine.set(startLine + k, parts[k] ?? '');
+    hljsChunkCache.set(startLine, byLine);
+    evictChunksByLines(hljsChunkCache, CHUNK_CACHE_MAX_LINES);
+    if (engine !== 'tree-sitter') {
+      // 产出仍是 hljs（首个 chunk 即兜底/无 client）→ engine=hljs 本地；
+      // 已有 tree-sitter chunk 产出则保持主导引擎不变（混合 chunk 不回退指示）
+      engine = 'hljs';
+      computeWhere = 'local';
+    }
+  }
+
+  async function start(): Promise<void> {
+    if (strategy === 'lazy') {
+      mount(); // 首个 onRange 即发起可视区 chunk 请求；chunk 到达后 refresh 重绘
+      if (lines.length === 0) engine = 'plain'; // 空文件无 chunk 可请求，不留「解析中」
       return;
     }
     if (strategy === 'tree-sitter') {
@@ -705,9 +901,11 @@ export function renderCode(
     destroy() {
       destroyed = true;
       if (hitTimer !== null) clearTimeout(hitTimer);
+      wantedChunks = []; // 队列作废；在-flight chunk 的回写在各 await 点被 destroyed 拦截
       scroller?.destroy();
       scroller = null;
-      blockCache.clear();
+      chunkCache.clear();
+      hljsChunkCache.clear();
       pre.remove();
       // BUG-20 提示条与 flex 布局类随实例销毁清理（host 复用时不得残留）
       target.classList.remove('vv-code-oversize');

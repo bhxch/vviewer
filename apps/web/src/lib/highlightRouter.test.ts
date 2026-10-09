@@ -64,8 +64,10 @@ describe('routeLargeFileHighlight（阶段 3+4 契约矩阵）', () => {
       headers: { authorization: 'Bearer t' }
     });
     // ENCODED 无 baseLine 字段 = 旧服务端（--compute 301 部署新二进制前）响应形状
-    const fetchMock = vi.fn(async () =>
-      new Response(JSON.stringify(ENCODED), { status: 200 })
+    // mock 按 fetch 签名类型化：mock.calls 元组带 init，避免无参 vi.fn 的 [] 元组索引
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> =>
+        new Response(JSON.stringify(ENCODED), { status: 200 })
     );
     vi.stubGlobal('fetch', fetchMock);
     const result = await routeLargeFileHighlight(SRC, 'javascript');
@@ -80,7 +82,7 @@ describe('routeLargeFileHighlight（阶段 3+4 契约矩阵）', () => {
     // 严格 toEqual：不传 range 时 body 不含 range 字段（旧请求语义，服务端按
     // 全文件 text 模式应答 baseLine=0）
     const body = JSON.parse(
-      (fetchMock.mock.calls[0]![1] as { body: string }).body
+      String(fetchMock.mock.calls[0]![1]?.body)
     ) as { path: string; lang: string };
     expect(body).toEqual({ path: 'big.js', lang: 'javascript' });
   });
@@ -88,11 +90,12 @@ describe('routeLargeFileHighlight（阶段 3+4 契约矩阵）', () => {
   it('remote + range：body 带 range {startLine, lineCount}，响应 baseLine 透传（区间相对 chunk，渲染侧平移）', async () => {
     loadSettingsMock.mockReturnValue({ computePolicy: 'remote' });
     remoteCallMock.mockReturnValue({ url: 'http://s:8321/api/compute/highlight', headers: {} });
-    const fetchMock = vi.fn(async () =>
-      new Response(
-        JSON.stringify({ ...ENCODED, baseLine: 5 }),
-        { status: 200 }
-      )
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> =>
+        new Response(
+          JSON.stringify({ ...ENCODED, baseLine: 5 }),
+          { status: 200 }
+        )
     );
     vi.stubGlobal('fetch', fetchMock);
     const result = await routeLargeFileHighlight(SRC, 'javascript', {
@@ -101,7 +104,7 @@ describe('routeLargeFileHighlight（阶段 3+4 契约矩阵）', () => {
     });
     expect(result).toEqual({ intervals: DECODED, baseLine: 5 });
     const body = JSON.parse(
-      (fetchMock.mock.calls[0]![1] as { body: string }).body
+      String(fetchMock.mock.calls[0]![1]?.body)
     ) as { path: string; lang: string; range: { startLine: number; lineCount: number } };
     expect(body).toEqual({
       path: 'big.js',
