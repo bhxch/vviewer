@@ -75,11 +75,16 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-      # e2e 高亮断言依赖真实 wasm（m1 js / m2 ts+rs / m3 围栏 ts+bash）
+      # e2e 高亮断言依赖真实 wasm（m1 js / m2 ts+rs / m3 围栏 ts+bash）；
+      # java 供 b-grammar-layers 分层链用例（同源缺失 → CDN 层兜底）的资产来源
       - uses: ./.github/actions/setup-grammars
         with:
-          languages: javascript,typescript,bash,html,css,json,python,rust
+          languages: javascript,typescript,bash,html,css,json,python,rust,java
+      # b-grammar-layers 用例要求构建期注入 CDN 层 base（mock CDN，不依赖外网）；
+      # 与 spec 内 mock 的路由前缀严格一致（base 同时容纳 manifest.json 与 *.wasm）
       - run: pnpm --filter web build
+        env:
+          VV_GRAMMAR_CDN: https://cdn.grammars.test/grammars/
       - run: pnpm --filter web exec playwright install --with-deps chromium
       # playwright.config 的 webServer 在 CI 下自行启动 vite preview（CI 环境变量内置）
       - run: pnpm --filter web exec playwright test

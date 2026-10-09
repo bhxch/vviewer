@@ -175,7 +175,9 @@ export default defineConfig({
             handler: 'CacheFirst',
             options: {
               cacheName: `vv-grammars-${BUILD_REVISION}`,
-              expiration: { maxEntries: 300, purgeOnQuotaError: true },
+              // maxEntries 500：全量 grammar 集 ~299 个 wasm（grammar.yml 门禁构建），
+              // 300 会在全量集下提前逐出仍被使用的条目；跨版本陈旧由 cacheName 修订号兜底
+              expiration: { maxEntries: 500, purgeOnQuotaError: true },
               cacheableResponse: { statuses: [200] }
             }
           },
@@ -213,6 +215,10 @@ export default defineConfig({
   },
   define: {
     // 构建修订号注入运行时（与 SW cacheName 同源；诊断/关于页可读）
-    __BUILD_REVISION__: JSON.stringify(BUILD_REVISION)
+    __BUILD_REVISION__: JSON.stringify(BUILD_REVISION),
+    // P2 资产三层解析链：CDN 层 base（grammar 资产目录前缀，以 / 结尾；空 = 不启用）。
+    // highlightClient.ts 读 import.meta.env.VV_GRAMMAR_CDN——vite 默认不注入任意
+    // 自定义 env，需在此显式静态替换（构建期定型，e2e/CI 以同名 env 控制）。
+    'import.meta.env.VV_GRAMMAR_CDN': JSON.stringify(process.env.VV_GRAMMAR_CDN ?? '')
   }
 });
