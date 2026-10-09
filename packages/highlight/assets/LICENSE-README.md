@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | `themes.json` | helix `runtime/themes/*.toml`（214 主题；跳过 `theme.toml` 与 `base16_*.toml`） | 格式转换修改：TOML → 扁平 JSON（`Record<themeName, Record<capture, { fg?, bg?, modifiers? }>>`）；色名引用按 helix 语义解析为 6 位 `#rrggbb`；`inherits` 继承已展开 |
 | `languages.json` | helix `languages.toml`（经 markpad 同源副本，grammar 清单带验证过的 rev/subpath） | 格式转换修改：TOML → JSON（`Record<langName, { scope, injections?, fileTypes, globFileTypes?, shebangs, grammar, aliases? }>`）；file-types 字符串为后缀、`{glob}` 归入 `globFileTypes` |
-| `queries/` | helix `runtime/queries/` | vendored 原样拷贝（286 目录，含继承父目录如 `_typescript`），未修改内容 |
+| `queries/` | helix `runtime/queries/` | vendored 原样拷贝（目录数随上游 pin 点变化，含继承父目录如 `_typescript`、`ecma`、`_javascript`），未修改内容 |
 
 ## MPL-2.0 声明保留说明
 

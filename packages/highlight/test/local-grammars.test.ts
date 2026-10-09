@@ -35,7 +35,9 @@ describe.skipIf(!grammarAssetsReady)('本地 tree-sitter 引擎：python/java �
       expect(`${lang}:${r.ok ? `ok(${r.intervals.length})` : `FAIL:${r.error}`}`).toMatch(new RegExp(`^${lang}:ok\\(\\d+\\)$`));
       if (!r.ok) return;
       expect(r.intervals.length).toBeGreaterThan(0);
-      const kw = r.intervals.find((i) => i.capture === 'keyword');
+      // 层级捕获词法（上游查询同步伴生变化）：python def→keyword.function、java class→keyword。
+      // 断言意图是「keyword 系捕获产出」，用前缀匹配——与 theme.ts 最长前缀回退同构
+      const kw = r.intervals.find((i) => i.capture.startsWith('keyword'));
       expect(kw).toBeDefined();
     }, 30_000);
   }

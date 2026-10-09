@@ -49,8 +49,8 @@ describe.skipIf(!grammarAssetsReady)('TreeSitterEngine（真实 wasm + 真实 he
     const r = await engine.highlight(src, 'html');
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    // js 的 `var` 被捕获为 keyword，且落在 script 内容区间内
-    const kw = r.intervals.find((i) => i.capture === 'keyword');
+    // js 的 `var` 被捕获为 keyword.storage.type（层级捕获词法），且落在 script 内容区间内
+    const kw = r.intervals.find((i) => i.capture === 'keyword.storage.type');
     expect(kw).toBeDefined();
     expect(src.slice(kw!.start, kw!.end)).toBe('var');
     expect(kw!.start).toBeGreaterThan(src.indexOf('<script>'));
@@ -61,8 +61,10 @@ describe.skipIf(!grammarAssetsReady)('TreeSitterEngine（真实 wasm + 真实 he
     const r = await engine.highlight(src, 'html');
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    // css 中选择器与声明值都可能捕获为 property，断言存在切片为 color 的那个
-    expect(r.intervals.some((i) => i.capture === 'property' && src.slice(i.start, i.end) === 'color')).toBe(true);
+    // 层级捕获词法：css property_name 捕获为 variable.other.member，断言存在切片为 color 的那个
+    expect(
+      r.intervals.some((i) => i.capture === 'variable.other.member' && src.slice(i.start, i.end) === 'color'),
+    ).toBe(true);
   }, 30_000);
 
   it('javascript：标签模板 @injection.language capture 形态按 tag 名注入（html`…`）', async () => {
@@ -85,8 +87,8 @@ describe.skipIf(!grammarAssetsReady)('TreeSitterEngine（真实 wasm + 真实 he
     const r = await engine.highlight(src, 'js');
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.intervals.some((i) => i.capture === 'keyword' && src.slice(i.start, i.end) === 'var')).toBe(true);
-    expect(r.intervals.some((i) => i.capture === 'number' && src.slice(i.start, i.end) === '1')).toBe(true);
+    expect(r.intervals.some((i) => i.capture === 'keyword.storage.type' && src.slice(i.start, i.end) === 'var')).toBe(true);
+    expect(r.intervals.some((i) => i.capture === 'constant.numeric' && src.slice(i.start, i.end) === '1')).toBe(true);
   }, 30_000);
 
   it('未知语言返回 ok:false 与错误信息', async () => {
