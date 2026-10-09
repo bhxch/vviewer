@@ -1,4 +1,5 @@
 // enrich.ts — 净化后 DOM 的展示性增强：callout 卡片与音视频媒体占位。
+import { hostOf, isExternalMediaSrc } from './sanitize';
 // 移植自 markpad src/lib/utils/markdown.ts 的 processMarkdownHtml（callout 块引用
 // pass 与 img/a 媒体替换 pass），剥离 Tauri invoke/convertFileSrc、fold 状态、
 // sourcepos 携带与 YouTube 替换（不在 vviewer M3 契约内）。
@@ -16,6 +17,17 @@ const CALLOUT_ICONS: Readonly<Record<string, string>> = {
   question: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>',
   example: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></svg>',
 };
+
+// BUG-17/MD-13：enrich 在 sanitize 之后执行——img/a 转出的媒体元素不在净化
+// 覆盖内。外域 http(s) 媒体与 sanitize 层同口径：强制 preload="none" 并去
+// autoplay（不点不发请求；点播放=主动行为，与 <a href> 外链不拦一致），
+// title 留域名悬停提示。
+function applyExternalMediaGuard(media: Element, url: string): void {
+  if (!isExternalMediaSrc(url)) return;
+  media.setAttribute('preload', 'none');
+  media.removeAttribute('autoplay');
+  media.setAttribute('title', `外域媒体：${hostOf(url)}（点击播放才发起请求）`);
+}
 
 // ASCII 空白才算空（与 markpad 一致：U+00A0 是作者有意输入，不当作空）。
 function isBlank(text: string | null | undefined): boolean {
@@ -47,6 +59,7 @@ function convertMediaElements(root: Document): void {
     media.setAttribute('controls', '');
     media.setAttribute('src', src);
     media.style.maxWidth = '100%';
+    applyExternalMediaGuard(media, src);
     if (img.hasAttribute('width')) media.setAttribute('width', img.getAttribute('width')!);
     if (img.hasAttribute('height')) media.setAttribute('height', img.getAttribute('height')!);
     if (img.hasAttribute('alt')) media.setAttribute('aria-label', img.getAttribute('alt')!);
@@ -64,6 +77,7 @@ function convertMediaElements(root: Document): void {
     media.setAttribute('controls', '');
     media.setAttribute('src', href);
     media.style.maxWidth = '100%';
+    applyExternalMediaGuard(media, href);
     const label = a.textContent?.trim();
     if (label) media.setAttribute('aria-label', label);
     a.replaceWith(media);

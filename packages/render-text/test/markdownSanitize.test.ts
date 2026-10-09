@@ -277,3 +277,59 @@ describe('sanitizeHtml——外域图片拦截（BUG-17 跟踪像素防线）', 
     expect(out).not.toContain('data-vv-blocked-external');
   });
 });
+
+describe('外域媒体自动加载防线（BUG-17/MD-13 延伸）', () => {
+  it('裸 HTML video/audio：外域 src 保留但强制 preload=none 并去 autoplay', () => {
+    const html = sanitizeHtml(
+      '<video controls autoplay src="https://evil.example.com/clip.mp4"></video>' +
+        '<audio controls src="https://evil.example.com/a.mp3"></audio>'
+    );
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    const video = div.querySelector('video')!;
+    expect(video.getAttribute('src')).toBe('https://evil.example.com/clip.mp4');
+    expect(video.getAttribute('preload')).toBe('none');
+    expect(video.hasAttribute('autoplay')).toBe(false);
+    expect(div.querySelector('audio')!.getAttribute('preload')).toBe('none');
+  });
+
+  it('内部相对 src 的 video 不受影响（preload 不被强改）', () => {
+    const html = sanitizeHtml('<video controls src="sample.mp4"></video>');
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    const video = div.querySelector('video')!;
+    expect(video.getAttribute('src')).toBe('sample.mp4');
+    expect(video.hasAttribute('preload')).toBe(false);
+  });
+
+  it('source 外域候选剥除 src；内部候选保留', () => {
+    const html = sanitizeHtml(
+      '<video controls><source src="https://evil.example.com/a.mp4"><source src="local.mp4"></video>'
+    );
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    const sources = Array.from(div.querySelectorAll('source'));
+    expect(sources).toHaveLength(2);
+    expect(sources[0]!.getAttribute('src')).toBeNull();
+    expect(sources[1]!.getAttribute('src')).toBe('local.mp4');
+  });
+});
+
+describe('enrich 媒体替换的外域守卫（a/img → video/audio，MD-13）', () => {
+  it('a 链接外域 mp4 → video 带 preload=none 与域名 title 提示', () => {
+    const doc = docOf('<p><a href="https://evil.example.com/clip.mp4">视频</a></p>');
+    enrichMarkdownDom(doc);
+    const v = doc.querySelector('video')!;
+    expect(v.getAttribute('src')).toBe('https://evil.example.com/clip.mp4');
+    expect(v.getAttribute('preload')).toBe('none');
+    expect(v.getAttribute('title')).toContain('evil.example.com');
+  });
+
+  it('img 内域 mp4 → 正常 video，无 preload 强改', () => {
+    const doc = docOf('<p><img src="sample.mp4" alt="clip"></p>');
+    enrichMarkdownDom(doc);
+    const v = doc.querySelector('video')!;
+    expect(v.getAttribute('src')).toBe('sample.mp4');
+    expect(v.hasAttribute('preload')).toBe(false);
+  });
+});

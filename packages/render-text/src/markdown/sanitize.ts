@@ -29,12 +29,12 @@ const DATA_URI_ATTRS = new Set(['src', 'srcset']);
  * 外域图片判定（BUG-17 跟踪像素防线）：绝对 http(s) 与协议相对（//host/…）都会向
  * 第三方发起 GET（可回传 IP/会话）；相对路径、data:image、blob: 不在此列。
  */
-function isExternalImageSrc(src: string): boolean {
+export function isExternalMediaSrc(src: string): boolean {
   return /^https?:/i.test(src) || src.startsWith('//');
 }
 
 /** URL 的 host（解析失败回落原串做提示） */
-function hostOf(url: string): string {
+export function hostOf(url: string): string {
   try {
     return new URL(url, 'https://vviewer.invalid').host;
   } catch {
@@ -60,10 +60,12 @@ function registerDataUriHook(): void {
     // 向外域发起网络请求（跟踪像素拿不到 IP）；title 保留域名供占位悬停提示。
     // 相对路径与 data:/blob: 不受影响（markdown 相对图片解析为 blob 的链路发生在
     // 净化之后，同样不受影响）；链接 <a href> 外链不拦（用户主动导航型外泄）。
-    if (node.nodeType === 1 && (node as Element).tagName === 'IMG') {
+    if (node.nodeType === 1) {
       const el = node as Element;
-      const src = el.getAttribute('src');
-      const srcExternal = src !== null && isExternalImageSrc(src.trim());
+      const tag = el.tagName;
+      if (tag === 'IMG') {
+        const src = el.getAttribute('src');
+      const srcExternal = src !== null && isExternalMediaSrc(src.trim());
       if (srcExternal) {
         el.removeAttribute('src');
         markBlockedExternal(el, hostOf(src!.trim()));
@@ -79,7 +81,7 @@ function registerDataUriHook(): void {
         let firstBlockedHost = srcExternal ? hostOf(src!.trim()) : '';
         for (const c of candidates) {
           const url = (c.split(/\s+/)[0] ?? '').trim();
-          if (isExternalImageSrc(url)) {
+          if (isExternalMediaSrc(url)) {
             if (firstBlockedHost === '') firstBlockedHost = hostOf(url);
             continue;
           }
@@ -94,6 +96,23 @@ function registerDataUriHook(): void {
         }
       }
     }
+    // BUG-17/MD-13 延伸：video/audio/source 的外域 src 同样会自动加载（Chrome
+    // 默认 preload=metadata 即对外域 GET 首块数据，可回传 IP）。与 img 不同：
+    // 不剥 src——用户点播放属主动行为（与 <a href> 外链不拦同口径），改强制
+    // preload="none" 并去 autoplay，保证不点不发请求；<source> 是候选列表语义
+    // 无法延迟加载，外域候选直接剥除 src。
+    else if (tag === 'VIDEO' || tag === 'AUDIO' || tag === 'SOURCE') {
+      const src = el.getAttribute('src');
+      if (src !== null && isExternalMediaSrc(src.trim())) {
+        if (tag === 'SOURCE') {
+          el.removeAttribute('src');
+        } else {
+          el.setAttribute('preload', 'none');
+          el.removeAttribute('autoplay');
+        }
+      }
+    }
+  }
   });
 }
 
