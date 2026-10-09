@@ -28,6 +28,7 @@ describe('serverSearchHint（BUG-11 截断引导裁决）', () => {
     expect(serverSearchHint(makeStore('localfs:x', false))).toBe(SERVER_SEARCH_HINT);
     expect(SERVER_SEARCH_HINT).toContain('建议在顶栏连接服务器');
     expect(SERVER_SEARCH_HINT).toContain('2000');
+    expect(SERVER_SEARCH_HINT).toContain('200MB');
   });
 
   it('远程 store（带 watch）：null——已是服务器模式，CMP-08 截断不引导（回归护栏）', () => {

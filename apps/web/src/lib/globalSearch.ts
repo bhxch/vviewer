@@ -38,9 +38,13 @@ export function isRemoteStore(store: TreeStore): boolean {
   return typeof (store as Partial<RemoteStore>).watch === 'function';
 }
 
-/** 纯前端搜索触达文件扫描上限时的服务器模式引导文案（BUG-11/CMP-11）。 */
+/**
+ * 纯前端搜索触达扫描上限时的服务器模式引导文案（BUG-11/CMP-11）。
+ * 文案覆盖两类上限（2000 文件 / 200MB 累计，GREP_MAX_BYTES）：截断路径共用
+ * 本提示，措辞不指认具体触因（200MB 触发时旧文案「已达 2000 文件」与事实不符）。
+ */
 export const SERVER_SEARCH_HINT =
-  '已达 2000 文件扫描上限，建议在顶栏连接服务器后使用服务器端搜索';
+  '已触达扫描上限（2000 文件 / 200MB 累计），建议在顶栏连接服务器后使用服务器端搜索';
 
 /**
  * 截断时的引导文案裁决（BUG-11，纯函数可单测）：仅纯前端（非远程）store 在终态
