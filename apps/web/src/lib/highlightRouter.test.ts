@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // highlightRouter.test.ts — 大文件路由的 policy × path × 服务端可服务性契约矩阵
-//（spec §4 阶段 3 + BUG-06c 同源 auto 门）。highlightRouter 依赖 highlightClient
-//（$app/env，vitest 不可用）、loadSettings（localStorage）与 openFlow.svelte（svelte
-// runes，vitest 无插件不可编译），三者均以 vi.mock 隔离：本测试只验证「策略 → 是否
-// 发起远程请求 → 失败分流（remote 抛错错误卡片 / auto warn+null 回退本地分块）」
-// 的裁决，decodeHighlightResponse 为 core 纯函数真跑。
+//（spec §4 阶段 3 + BUG-06c 同源 auto 门；阶段 4 升级 range 契约）。highlightRouter
+// 依赖 highlightClient（$app/env，vitest 不可用）、loadSettings（localStorage）与
+// openFlow.svelte（svelte runes，vitest 无插件不可编译），三者均以 vi.mock 隔离：
+// 本测试只验证「策略 → 是否发起远程请求 → body 形状（range 随参透传）→ 响应解码
+//（{intervals, baseLine}，旧服务端缺 baseLine 兜 0）→ 失败分流（remote 抛错错误
+// 卡片 / auto warn+null 回退本地分块）」的裁决，decodeHighlightResponse 为 core
+// 纯函数真跑。
 
 const loadSettingsMock = vi.hoisted(() => vi.fn());
 const remoteCallMock = vi.hoisted(() => vi.fn());
@@ -32,7 +34,7 @@ const LOCAL_SRC = { path: '', storeId: 'localfs:x' } as const;
 const ENCODED = { intervals: [[0, 3, 0]], captures: ['keyword'] };
 const DECODED = [{ start: 0, end: 3, capture: 'keyword' }];
 
-describe('routeLargeFileHighlight（阶段 3 契约矩阵）', () => {
+describe('routeLargeFileHighlight（阶段 3+4 契约矩阵）', () => {
   beforeEach(() => {
     remoteCallMock.mockReset();
     loadSettingsMock.mockReset();
@@ -55,18 +57,19 @@ describe('routeLargeFileHighlight（阶段 3 契约矩阵）', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('remote + 有 path：fetch POST /api/compute/highlight（Bearer 头），200 解码为 intervals', async () => {
+  it('remote + 有 path：fetch POST /api/compute/highlight（Bearer 头），200 解码为 { intervals, baseLine }（缺 baseLine 兜 0，兼容旧服务端）', async () => {
     loadSettingsMock.mockReturnValue({ computePolicy: 'remote' });
     remoteCallMock.mockReturnValue({
       url: 'http://s:8321/api/compute/highlight',
       headers: { authorization: 'Bearer t' }
     });
+    // ENCODED 无 baseLine 字段 = 旧服务端（--compute 301 部署新二进制前）响应形状
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify(ENCODED), { status: 200 })
     );
     vi.stubGlobal('fetch', fetchMock);
-    const intervals = await routeLargeFileHighlight(SRC, 'javascript');
-    expect(intervals).toEqual(DECODED);
+    const result = await routeLargeFileHighlight(SRC, 'javascript');
+    expect(result).toEqual({ intervals: DECODED, baseLine: 0 });
     expect(fetchMock).toHaveBeenCalledWith(
       'http://s:8321/api/compute/highlight',
       expect.objectContaining({
@@ -74,10 +77,37 @@ describe('routeLargeFileHighlight（阶段 3 契约矩阵）', () => {
         headers: expect.objectContaining({ authorization: 'Bearer t' })
       })
     );
+    // 严格 toEqual：不传 range 时 body 不含 range 字段（旧请求语义，服务端按
+    // 全文件 text 模式应答 baseLine=0）
     const body = JSON.parse(
       (fetchMock.mock.calls[0]![1] as { body: string }).body
     ) as { path: string; lang: string };
     expect(body).toEqual({ path: 'big.js', lang: 'javascript' });
+  });
+
+  it('remote + range：body 带 range {startLine, lineCount}，响应 baseLine 透传（区间相对 chunk，渲染侧平移）', async () => {
+    loadSettingsMock.mockReturnValue({ computePolicy: 'remote' });
+    remoteCallMock.mockReturnValue({ url: 'http://s:8321/api/compute/highlight', headers: {} });
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({ ...ENCODED, baseLine: 5 }),
+        { status: 200 }
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await routeLargeFileHighlight(SRC, 'javascript', {
+      startLine: 5,
+      lineCount: 3
+    });
+    expect(result).toEqual({ intervals: DECODED, baseLine: 5 });
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]![1] as { body: string }).body
+    ) as { path: string; lang: string; range: { startLine: number; lineCount: number } };
+    expect(body).toEqual({
+      path: 'big.js',
+      lang: 'javascript',
+      range: { startLine: 5, lineCount: 3 }
+    });
   });
 
   it('remote + 未连接服务器（remoteCall null）：抛错（渲染端错误卡片，不静默本地）', async () => {
@@ -93,14 +123,17 @@ describe('routeLargeFileHighlight（阶段 3 契约矩阵）', () => {
     await expect(routeLargeFileHighlight(SRC, 'javascript')).rejects.toThrow('HTTP 500');
   });
 
-  it('auto + 有 path（compute 能力 + 语言已宣告）：fetch POST，200 → intervals（server-served 不限大小走服务端）', async () => {
+  it('auto + 有 path（compute 能力 + 语言已宣告）：fetch POST，200 → { intervals, baseLine }（server-served 不限大小走服务端）', async () => {
     loadSettingsMock.mockReturnValue({ computePolicy: 'auto' });
     remoteCallMock.mockReturnValue({ url: 'http://s:8321/api/compute/highlight', headers: {} });
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify(ENCODED), { status: 200 })
     );
     vi.stubGlobal('fetch', fetchMock);
-    await expect(routeLargeFileHighlight(SRC, 'javascript')).resolves.toEqual(DECODED);
+    await expect(routeLargeFileHighlight(SRC, 'javascript')).resolves.toEqual({
+      intervals: DECODED,
+      baseLine: 0
+    });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -132,7 +165,10 @@ describe('routeLargeFileHighlight（阶段 3 契约矩阵）', () => {
       new Response(JSON.stringify(ENCODED), { status: 200 })
     );
     vi.stubGlobal('fetch', fetchMock);
-    await expect(routeLargeFileHighlight(SRC, 'javascript')).resolves.toEqual(DECODED);
+    await expect(routeLargeFileHighlight(SRC, 'javascript')).resolves.toEqual({
+      intervals: DECODED,
+      baseLine: 0
+    });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 

@@ -18,14 +18,28 @@ import { loadCapabilities, loadComputeLanguages } from './openFlow.svelte';
 import { loadSettings } from './stores/settings';
 
 /**
- * code.ts hljs-block 分支的大文件路由契约（spec §4 阶段 3）：
- * 返回 null = 留在本地 hljs 分块；非 null = 远程 intervals（tree-sitter 路径渲染）；
- * 抛错 = 显式 remote 失败（渲染端如实错误卡片，不静默回退）。
+ * 大文件路由的 chunk 级结果（阶段 4 range 契约，spec §5.1）：
+ * intervals 相对 chunk 首行（服务端已按 range 截取），渲染侧以 baseLine 平移
+ * 到全文件行号——与本地 chunk 路径（client.highlight 子文本）对称，本路由不平移。
+ */
+export interface LargeFileHighlightChunk {
+  intervals: HighlightInterval[];
+  /** chunk 首行的全文件 0 基行号；旧服务端响应无此字段（serde rename 前部署）兜 0 */
+  baseLine: number;
+}
+
+/**
+ * code.ts hljs-block 分支的大文件路由契约（spec §4 阶段 3 + §5.1 阶段 4 range）：
+ * 返回 null = 留在本地 hljs 分块；非 null = 远程 chunk {intervals, baseLine}
+ *（tree-sitter 路径渲染，区间相对 baseLine）；抛错 = 显式 remote 失败（渲染端
+ * 如实错误卡片，不静默回退）。range 缺省 = 全文件请求（body 不带 range 字段，
+ * 旧请求语义）；渲染层（Task 4）对 server-served 大文件按可视区传 chunk。
  */
 export async function routeLargeFileHighlight(
   src: ComputeSource,
-  lang: string
-): Promise<HighlightInterval[] | null> {
+  lang: string,
+  range?: { startLine: number; lineCount: number }
+): Promise<LargeFileHighlightChunk | null> {
   const policy = loadSettings().computePolicy;
   // 硬护栏：local 恒本地。置于注入侧而非渲染端，是既定裁决——渲染端只认回调
   // 结果，不重复实现策略。
@@ -55,14 +69,28 @@ export async function routeLargeFileHighlight(
     const res = await fetch(call.url, {
       method: 'POST',
       headers: { ...call.headers, 'content-type': 'application/json' },
-      body: JSON.stringify({ path: src.path, lang })
+      // range 随参透传（驼峰即服务端 serde rename 后的形状，Task 1）；缺省不带
+      // range 字段——旧请求语义，服务端按全文件 text 模式应答 baseLine=0
+      body: JSON.stringify(
+        range ? { path: src.path, lang, range } : { path: src.path, lang }
+      )
     });
     if (!res.ok) throw new Error(`远程高亮失败: HTTP ${res.status}`);
-    return decodeHighlightResponse(await res.json());
+    // json 单次消费：decode 与 baseLine 同源读取；baseLine 缺失 = 旧服务端，兜 0
+    const json: unknown = await res.json();
+    const rawBaseLine = (json as { baseLine?: unknown }).baseLine;
+    return {
+      intervals: decodeHighlightResponse(json),
+      baseLine:
+        typeof rawBaseLine === 'number' && Number.isFinite(rawBaseLine)
+          ? rawBaseLine
+          : 0
+    };
   } catch (err) {
     // 失败分流（!res.ok 与 fetch 网络异常同进 catch）：显式 remote 抛错如实错误
     // 卡片（静默回退会掩盖服务端故障）；auto 可用性优先，warn 留痕后回退本地
-    // hljs 分块（>20MB 服务端 413 亦落此回退，阶段 4 解除）
+    // hljs 分块（阶段 4 range 分块后请求不再超 20MB 上限；chunk 内单行超长等
+    // 413 仍落此回退）
     if (policy === 'auto') {
       console.warn(
         `[vviewer] 大文件远程高亮失败，回退本地分块：${err instanceof Error ? err.message : String(err)}`
