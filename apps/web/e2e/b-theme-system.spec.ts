@@ -75,10 +75,18 @@ test('THEME-02：system 模式 prefers-color-scheme 双向跟随（壳层配色 
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'system');
   const themeBtn = page.getByRole('button', { name: /主题：/ });
   await expect(themeBtn).toHaveText('主题：跟随系统');
+  // vite8 起默认 CSS 压缩器由 esbuild 换为 Lightning CSS：#ffffff 被等价缩短为 #fff
+  // （产物实测 --ui-bg:#fff）。自定义属性 getPropertyValue 取的是原始声明值（浏览器
+  // 不做颜色归一化），断言前先把 3 位 hex 展开为 6 位再比较——断言语义不变，且不
+  // 绑定压缩器输出格式；暗色 #0d1117 无 3 位等价形式，不受影响
   const uiBg = () =>
-    page.evaluate(() =>
-      getComputedStyle(document.documentElement).getPropertyValue('--ui-bg').trim()
-    );
+    page.evaluate(() => {
+      const v = getComputedStyle(document.documentElement).getPropertyValue('--ui-bg').trim();
+      const m = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(v);
+      return m && m[1] && m[2] && m[3]
+        ? `#${m[1]}${m[1]}${m[2]}${m[2]}${m[3]}${m[3]}`.toLowerCase()
+        : v;
+    });
   await expect.poll(uiBg).toBe('#ffffff'); // 亮色壳层
   await expect.poll(() => themeComment(page)).toContain('onelight');
 
