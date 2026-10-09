@@ -37,9 +37,10 @@
 
 [ "@" ] @operator
 (control) @function.macro
-(float) @float
-(integer) @number
-(comment) @comment @spell
-[(path) (string) (json)] @string
-(time) @symbol
-(boolean) @boolean
+(float) @constant.numeric.float
+(integer) @constant.numeric.integer
+(comment) @comment
+[(string) (json)] @string.special.path
+(path) @string.special.path
+(time) @string.special.symbol
+(boolean) @constant.builtin.boolean

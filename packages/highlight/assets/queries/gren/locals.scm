@@ -1,4 +1,3 @@
-
 (value_declaration) @local.scope
 (type_alias_declaration) @local.scope
 (type_declaration) @local.scope
@@ -7,8 +6,8 @@
 (infix_declaration) @local.scope
 (let_in_expr) @local.scope
 
-(function_declaration_left (lower_pattern (lower_case_identifier)) @local.definition)
-(function_declaration_left (lower_case_identifier) @local.definition)
+(function_declaration_left (lower_pattern (lower_case_identifier)) @local.definition.variable.parameter)
+(function_declaration_left (lower_case_identifier) @local.definition.function)
 
 (value_expr(value_qid(upper_case_identifier)) @local.reference)
 (value_expr(value_qid(lower_case_identifier)) @local.reference)

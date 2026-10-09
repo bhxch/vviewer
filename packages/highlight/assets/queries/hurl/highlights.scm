@@ -1,139 +1,141 @@
-; highlights.scm
+[
+  "[QueryStringParams]"
+  "[Query]"
+  "[FormParams]"
+  "[Form]"
+  "[MultipartFormData]"
+  "[Multipart]"
+  "[Cookies]"
+  "[Captures]"
+  "[Asserts]"
+  "[Options]"
+  "[BasicAuth]"
+] @attribute
 
-"[Query]" @property
-"[QueryStringParams]" @property
-"[Form]" @property
-"[FormParams]" @property
-"[Multipart]" @property
-"[MultipartFormData]" @property
-"[Cookies]" @property
-"[Captures]" @property
-"[Asserts]" @property
-"[Options]" @property
-"[BasicAuth]" @property
+(comment) @comment
 
-(comment) @comment @spell
-
-(key_string) @property
-(json_key_string) @property
-
+[
+  (key_string)
+  (json_key_string)
+] @variable.other.member
+ 
 (value_string) @string
 (quoted_string) @string
 (json_string) @string
-(file_value) @string.special
-(regex) @string.regex
+(file_value) @string.special.path
+(regex) @string.regexp
 
-"\\" @string.escape
-(regex_escaped_char) @string.escape
-(quoted_string_escaped_char) @string.escape
-(key_string_escaped_char) @string.escape
-(value_string_escaped_char) @string.escape
-(oneline_string_escaped_char) @string.escape
-(multiline_string_escaped_char) @string.escape
-(filename_escaped_char) @string.escape
-(json_string_escaped_char) @string.escape
+[
+  "\\"
+  (regex_escaped_char)
+  (quoted_string_escaped_char)
+  (key_string_escaped_char)
+  (value_string_escaped_char)
+  (oneline_string_escaped_char)
+  (multiline_string_escaped_char)
+  (filename_escaped_char)
+  (json_string_escaped_char)
+] @constant.character.escape
 
 (method) @type.builtin
 (multiline_string_type) @type
 
-"status" @function.builtin
-"url" @function.builtin
-"header" @function.builtin
-"cookie" @function.builtin
-"body" @function.builtin
-"xpath" @function.builtin
-"jsonpath" @function.builtin
-"regex" @function.builtin
-"variable" @function.builtin
-"duration" @function.builtin
-"sha256" @function.builtin
-"md5" @function.builtin
-"bytes" @function.builtin
-"daysAfterNow" @function.builtin
-"daysBeforeNow" @function.builtin
-"htmlEscape" @function.builtin
-"htmlUnescape" @function.builtin
-"decode" @function.builtin
-"format" @function.builtin
-"nth" @function.builtin
-"replace" @function.builtin
-"split" @function.builtin
-"toDate" @function.builtin
-"toInt" @function.builtin
-"urlEncode" @function.builtin
-"urlDecode" @function.builtin
-"count" @function.builtin
+[
+  "status"
+  "url"
+  "header"
+  "cookie"
+  "body"
+  "xpath"
+  "jsonpath"
+  "regex"
+  "variable"
+  "duration"
+  "sha256"
+  "md5"
+  "bytes"
+  "daysAfterNow"
+  "daysBeforeNow"
+  "htmlEscape"
+  "htmlUnescape"
+  "decode"
+  "format"
+  "nth"
+  "replace"
+  "split"
+  "toDate"
+  "toInt"
+  "urlEncode"
+  "urlDecode"
+  "count"
+] @function.builtin
 
 (filter) @attribute
 
 (version) @string.special
-
 "null" @constant.builtin
-"cacert" @constant.builtin
-"compressed" @constant.builtin
-"location" @constant.builtin
-"insecure" @constant.builtin
-"path-as-is" @constant.builtin
-"proxy" @constant.builtin
-"max-redirs" @constant.builtin
-"retry" @constant.builtin
-"retry-interval" @constant.builtin
-"retry-max-count" @constant.builtin
-(variable_option "variable") @constant.builtin
-"verbose" @constant.builtin
-"very-verbose" @constant.builtin
 
-(boolean) @boolean
+; Option keys (location, max-time, retry, cert, user, … and the many added in
+; newer hurl): the grammar generalised per-option nodes into boolean/integer/
+; string/duration options with an `option_key` field — capture that field so
+; every option key is covered uniformly instead of listing each by name.
+(_ option_key: _ @constant.builtin)
+
+(boolean) @constant.builtin.boolean
 
 (variable_name) @variable
 
-"not" @keyword.operator
-"equals" @keyword.operator
-"==" @operator
-"notEquals" @keyword.operator
-"!=" @operator
-"greaterThan" @keyword.operator
-">" @operator
-"greaterThanOrEquals" @keyword.operator
-">=" @operator
-"lessThan" @keyword.operator
-"<" @operator
-"lessThanOrEquals" @keyword.operator
-"<=" @operator
-"startsWith" @keyword.operator
-"endsWith" @keyword.operator
-"contains" @keyword.operator
-"matches" @keyword.operator
-"exists" @keyword.operator
-"includes" @keyword.operator
-"isInteger" @keyword.operator
-"isFloat" @keyword.operator
-"isBoolean" @keyword.operator
-"isString" @keyword.operator
-"isCollection" @keyword.operator
-"isNumber" @keyword.operator
-"isIsoDate" @keyword.operator
-"isEmpty" @keyword.operator
-"isIpv4" @keyword.operator
-"isIpv6" @keyword.operator
-"isUuid" @keyword.operator
+[
+  "not"
+  "equals"
+  "=="
+  "notEquals"
+  "!="
+  "greaterThan"
+  ">"
+  "greaterThanOrEquals"
+  ">="
+  "lessThan"
+  "<"
+  "lessThanOrEquals"
+  "<="
+  "startsWith"
+  "endsWith"
+  "contains"
+  "matches"
+  "exists"
+  "includes"
+  "isInteger"
+  "isFloat"
+  "isBoolean"
+  "isString"
+  "isCollection"
+  "isNumber"
+  "isIsoDate"
+  "isEmpty"
+] @keyword.operator
 
+(integer) @constant.numeric.integer
+(float) @constant.numeric.float
+(status) @constant.numeric
+(json_number) @constant.numeric.float
 
-(integer) @number
-(float) @float
-(status) @number
-(json_number) @float
+[
+  ":"
+  ","
+] @punctuation.delimiter
 
-":" @punctuation.delimiter
-"," @punctuation.delimiter
+[
+  "["
+  "]"
+  "{"
+  "}"
+  "{{"
+  "}}"
+] @punctuation.special
 
-"[" @punctuation.bracket
-"]" @punctuation.bracket
-"{" @punctuation.bracket
-"}" @punctuation.bracket
-"{{" @punctuation.special
-"}}" @punctuation.special
-
-"base64," @string.special
-"file," @string.special
-"hex," @string.special
+[
+  "base64,"
+  "file,"
+  "hex,"
+] @string.special

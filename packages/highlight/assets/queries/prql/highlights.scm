@@ -22,21 +22,20 @@
   (keyword_loop)
 ] @keyword
 
-[
- (literal_string)
- (f_string)
- (s_string)
-] @string
+(literal) @string
 
 (assignment
-  alias: (field) @field)
+  alias: (field) @variable.other.member)
 
-alias: (identifier) @field
+alias: (identifier) @variable.other.member
 
-(comment) @comment @spell
+(f_string) @string.special
+(s_string) @string.special
+
+(comment) @comment
 
 (function_call
-  (identifier) @function.call)
+  (identifier) @function)
 
 [
   "+"
@@ -50,16 +49,16 @@ alias: (identifier) @field
   "!="
   ">="
   ">"
-  "||"
   "&&"
+  "||"
+  "//"
+  "~="
   (bang)
 ] @operator
 
 [
   "("
   ")"
-  ; "["
-  ; "]"
   "{"
   "}"
 ] @punctuation.bracket
@@ -71,9 +70,15 @@ alias: (identifier) @field
   "->"
 ] @punctuation.delimiter
 
-(integer) @number
+(literal
+  (integer) @constant.numeric.integer)
 
-(decimal_number) @float
+(integer) @constant.numeric.integer
+
+(literal
+  (decimal_number) @constant.numeric.float)
+
+(decimal_number) @constant.numeric.float
 
 [
   (keyword_min)
@@ -98,13 +103,11 @@ alias: (identifier) @field
 
 [
  (keyword_side)
- (keyword_format)
-] @attribute
-
-[
  (keyword_version)
  (keyword_target)
-] @type.qualifier
+ (keyword_null)
+ (keyword_format)
+] @attribute
 
 (target) @function.builtin
 
@@ -121,29 +124,20 @@ alias: (identifier) @field
   (keyword_full)
   (keyword_csv)
   (keyword_json)
-] @method.call
+] @function.method
 
 [
   (keyword_true)
   (keyword_false)
-] @boolean
-
-[
- (keyword_in)
-] @keyword.operator
+] @constant.builtin.boolean
 
 (function_definition
   (keyword_let)
   name: (identifier) @function)
 
 (parameter
-  (identifier) @parameter)
+  (identifier) @variable.parameter)
 
 (variable
   (keyword_let)
   name: (identifier) @constant)
-
-
- (keyword_null) @constant.builtin
-
-

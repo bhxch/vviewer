@@ -3,7 +3,7 @@
   "osource"
   "rsource"
   "orsource"
-] @include
+] @keyword.control.import
 
 [
   "mainmenu"
@@ -30,7 +30,7 @@
   "select"
   "imply"
   "visible if"
-] @conditional
+] @keyword.control.conditional
 
 [
   "def_bool"
@@ -75,14 +75,12 @@
 (choice name: (name (symbol) @constant))
 
 ((symbol) @constant
-  (#lua-match? @constant "[A-Z0-9]+"))
+  (#match? @constant "[A-Z0-9]+"))
 
-(mainmenu name: (string) @text.title)
-(comment_entry name: (string) @text.title)
-(menu name: (string) @text.title)
+(mainmenu name: (string) @markup.heading)
+(comment_entry name: (string) @markup.heading)
+(menu name: (string) @markup.heading)
 
-(source (string) @text.uri @string.special)
+(source (string) @string.special.url @string.special)
 
 (comment) @comment
-
-(ERROR) @error

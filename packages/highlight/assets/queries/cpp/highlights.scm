@@ -9,12 +9,23 @@
 
 (using_declaration ("using" "namespace" (identifier) @namespace))
 (using_declaration ("using" "namespace" (qualified_identifier name: (identifier) @namespace)))
-(qualified_identifier name: (identifier) @type.enum.variant)
-
+; Only a Capitalised qualified leaf (`Color::Red`) is an enum variant; a
+; lowercase one (`std::cout`) is a value/member and falls through to @variable.
+((qualified_identifier name: (identifier) @type.enum.variant)
+ (#match? @type.enum.variant "^[A-Z]"))
+; C colours enumerator definitions @constant (see c/highlights.scm); C++ resolves
+; enum values through the qualified path above as @type.enum.variant, so keep the
+; definition matching that.
+(enumerator name: (identifier) @type.enum.variant)
 (namespace_definition name: (namespace_identifier) @namespace)
 (namespace_identifier) @namespace
 
+; Type-introducing declarations
+(concept_definition name: (identifier) @type.definition)
+(alias_declaration name: (type_identifier) @type.definition)
+
 (auto) @type.builtin
+
 (ref_qualifier ["&" "&&"] @type.builtin)
 (reference_declarator ["&" "&&"] @type.builtin)
 (abstract_reference_declarator ["&" "&&"] @type.builtin)
@@ -22,7 +33,6 @@
 ; -------
 ; Functions
 ; -------
-
 ; Support up to 4 levels of nesting of qualifiers
 ; i.e. a::b::c::d::func();
 (call_expression
@@ -70,22 +80,24 @@
       name: (qualified_identifier
         name: (qualified_identifier
           name: (identifier) @function)))))
+
 (function_declarator
   declarator: (field_identifier) @function)
 
 ; Constructors
+
 (class_specifier
   (type_identifier) @type
   (field_declaration_list
     (function_definition
       (function_declarator
         (identifier) @constructor)))
-  (#eq? @type @constructor))
-
+        (#eq? @type @constructor)) 
 (destructor_name "~" @constructor
   (identifier) @constructor)
 
 ; Parameters
+
 (parameter_declaration
   declarator: (reference_declarator (identifier) @variable.parameter))
 (optional_parameter_declaration
@@ -93,16 +105,22 @@
 
 ; Keywords
 
-(template_argument_list ["<" ">"] @punctuation.bracket)
-(template_parameter_list ["<" ">"] @punctuation.bracket)
+(template_argument_list (["<" ">"] @punctuation.bracket))
+(template_parameter_list (["<" ">"] @punctuation.bracket))
 (default_method_clause "default" @keyword)
+
 "static_assert" @function.special
 
 [
   "<=>"
   "[]"
   "()"
+  "^^" ; C++26 reflection operator (reflect_expression)
 ] @operator
+
+; C++26 splice brackets `[: reflection :]` (splice_specifier / splice_type_specifier).
+(splice_specifier ["[:" ":]"] @punctuation.bracket)
+
 
 ; These casts are parsed as function calls, but are not.
 ((identifier) @keyword (#eq? @keyword "static_cast"))
@@ -129,6 +147,7 @@
   "try"
 ] @keyword.control.exception
 
+
 [
   "and"
   "and_eq"
@@ -143,7 +162,7 @@
 ] @keyword.operator
 
 [
-  "class"
+  "class"  
   "namespace"
   "typename"
   "template"

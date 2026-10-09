@@ -1,19 +1,16 @@
-(comment) @comment @spell
+(comment) @comment
 
 (atom) @constant
 
-((atom) @boolean
-  (#eq? @boolean "true"))
-
-((atom) @boolean
-  (#eq? @boolean "false"))
+((atom) @constant.builtin.boolean
+  (#any-of? @constant.builtin.boolean "true" "false"))
 
 (functional_notation
-  function: (atom) @function.call)
+  function: (atom) @function)
 
-(integer) @number
+(integer) @constant.numeric.integer
 
-(float_number) @number.float
+(float_number) @constant.numeric.float
 
 (directive_head) @operator
 

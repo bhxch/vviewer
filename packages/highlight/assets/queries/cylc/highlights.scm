@@ -1,24 +1,45 @@
-(ERROR) @emphasis.strong
+[
+  (jinja2_expression)
+  (jinja2_statement)
+  (jinja2_comment)
+  (jinja2_shebang)
+] @special
 
-(include_statement) @embedded
+(include_statement
+  directive: _ @keyword.directive
+  path: _ @string.special.path)
 
-(comment) @comment
-
-(_
-  brackets_open: _ @operator
-  name: _? @title
-  brackets_close: _ @operator)
+(comment) @comment.line
 
 (graph_section
-  name: _? @property)
+  name: _? @label)
 
 (task_section
-  name: _? @emphasis)
+  name: (_
+    (task_name) @namespace))
 
+(top_section
+  brackets_open: _ @punctuation.bracket
+  name: _? @label
+  brackets_close: _ @punctuation.bracket)
 
+(sub_section_1
+  brackets_open: _ @punctuation.bracket
+  name: _? @label
+  brackets_close: _ @punctuation.bracket)
+
+(sub_section_2
+  brackets_open: _ @punctuation.bracket
+  name: _? @label
+  brackets_close: _ @punctuation.bracket)
+
+(runtime_section
+  brackets_open: _ @punctuation.bracket
+  name: _? @label
+  brackets_close: _ @punctuation.bracket)
 
 (graph_setting
-  key: (_) @number
+  key: (_) @constant.numeric.integer
   operator: (_)? @operator)
 
 (quoted_graph_string
@@ -30,33 +51,38 @@
   quotes_close: _ @string)
 
 [
-  (graph_logical) 
+  (graph_logical)
   (graph_arrow)
   (graph_parenthesis)
 ] @operator
 
 (intercycle_annotation
-  (recurrence) @number)
+  (recurrence) @constant.numeric.integer)
 
 (graph_task
-  xtrigger: _? @property
-  suicide: _? @property
-  name: _ @emphasis)
+  xtrigger: _? @operator
+  suicide: _? @operator
+  name: _ @namespace)
 
 (task_parameter
-  "<" @punctuation
-  (nametag)? @text.literal
-  ">" @punctuation)
+  "<" @tag
+  name: (_)? @special
+  ","? @tag
+  "="? @tag
+  selection: (_)? @special
+  ">" @tag)
 
 (intercycle_annotation
-  "[" @punctuation
-  (recurrence)? @number
-  "]" @punctuation)
+  "[" @tag
+  (recurrence)? @constant.numeric.integer
+  "]" @tag)
 
 (task_output
-    ":" @punctuation
-    (nametag) @variable
-    "?"? @punctuation)
+  ":" @tag
+  (nametag) @variable.other)
+
+(task_output
+  "?"? @tag)
 
 (setting
   key: (key) @variable
@@ -65,15 +91,8 @@
     (unquoted_string) @string
     (quoted_string) @string
     (multiline_string) @string
-    (boolean) @boolean
-    (integer) @number
+    (boolean) @constant.builtin.boolean
+    (integer) @constant.numeric.integer
   ]?)
 
-(datetime) @number
-
-[
-  (jinja2_expression)
-  (jinja2_statement)
-  (jinja2_comment)
-  (jinja2_shebang)
-] @text.literal
+(datetime) @constant.numeric.float

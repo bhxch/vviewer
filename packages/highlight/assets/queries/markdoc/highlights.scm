@@ -1,18 +1,16 @@
-; highlights.scm
-
 tag_name: (identifier) @tag
-(tag_self_closing "/" @tag.delimiter)
-(tag_close "/" @tag.delimiter)
-([(tag_start) (tag_end) "="] @tag.delimiter)
-(attribute [key : (identifier)] @tag.attribute)
-(attribute [shorthand : (identifier)]  @property)
+(tag_self_closing "/" @tag)
+(tag_close "/" @tag)
+([(tag_start) (tag_end) "="] @tag)
+(attribute [key : (identifier)] @attribute)
+(attribute [shorthand : (identifier)]  @attribute)
 (variable [variable : (identifier) (variable_sigil)] @variable)
-(variable_tail property : (identifier) @property)
+(variable_tail property : (identifier) @variable.other.member)
 (function function_name : (identifier) @function)
-(function_parameter_named parameter : (identifier) @parameter)
+(function_parameter_named parameter : (identifier) @variable.parameter)
 
-(hash_key key: (identifier) @field)
+(hash_key key: (identifier) @variable.other.member)
 (string) @string
-(number) @number
-(boolean) @boolean
-(null) @keyword
+(number) @constant.numeric
+(boolean) @constant.builtin.boolean
+(null) @constant.builtin

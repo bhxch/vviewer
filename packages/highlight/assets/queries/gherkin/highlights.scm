@@ -11,7 +11,7 @@
   (asterisk_keyword)
 ] @keyword
 
-(tag) @tag
+(tag) @function
 (doc_string) @string
 (data_table) @special
 (comment) @comment

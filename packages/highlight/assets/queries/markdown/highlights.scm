@@ -1,46 +1,48 @@
-;From nvim-treesitter/nvim-treesitter
-(atx_heading (inline) @text.title)
-(setext_heading (paragraph) @text.title)
+
+(setext_heading (paragraph) @markup.heading.1 (setext_h1_underline) @markup.heading.marker)
+(setext_heading (paragraph) @markup.heading.2 (setext_h2_underline) @markup.heading.marker)
+
+(atx_heading (atx_h1_marker) @markup.heading.marker) @markup.heading.1
+(atx_heading (atx_h2_marker) @markup.heading.marker) @markup.heading.2
+(atx_heading (atx_h3_marker) @markup.heading.marker) @markup.heading.3
+(atx_heading (atx_h4_marker) @markup.heading.marker) @markup.heading.4
+(atx_heading (atx_h5_marker) @markup.heading.marker) @markup.heading.5
+(atx_heading (atx_h6_marker) @markup.heading.marker) @markup.heading.6
 
 [
-  (atx_h1_marker)
-  (atx_h2_marker)
-  (atx_h3_marker)
-  (atx_h4_marker)
-  (atx_h5_marker)
-  (atx_h6_marker)
-  (setext_h1_underline)
-  (setext_h2_underline)
-] @punctuation.special
-
-[
-  (link_title)
   (indented_code_block)
   (fenced_code_block)
-] @text.literal
+] @markup.raw.block
+
+(info_string) @label
 
 [
   (fenced_code_block_delimiter)
-] @punctuation.delimiter
-
-(code_fence_content) @none
+] @punctuation.bracket
 
 [
   (link_destination)
-] @text.uri
+] @markup.link.url
 
 [
   (link_label)
-] @text.reference
+] @markup.link.label
 
 [
   (list_marker_plus)
   (list_marker_minus)
   (list_marker_star)
+] @markup.list.unnumbered
+
+[
   (list_marker_dot)
   (list_marker_parenthesis)
-  (thematic_break)
-] @punctuation.special
+] @markup.list.numbered
+
+(task_list_marker_checked) @markup.list.checked
+(task_list_marker_unchecked) @markup.list.unchecked
+
+(thematic_break) @punctuation.special
 
 [
   (block_continuation)
@@ -50,3 +52,11 @@
 [
   (backslash_escape)
 ] @string.escape
+
+(block_quote) @markup.quote
+
+(pipe_table_row
+  "|" @punctuation.special)
+(pipe_table_header
+  "|" @punctuation.special)
+(pipe_table_delimiter_row) @punctuation.special

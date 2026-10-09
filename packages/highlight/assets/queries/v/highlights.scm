@@ -1,87 +1,179 @@
-(ERROR) @error
+[(line_comment) (block_comment)] @comment
 
-[
- (line_comment)
- (block_comment)
- (shebang)
-] @comment
+(module_clause
+ (identifier) @namespace)
 
-(identifier) @variable
-(import_path) @variable
+(import_path
+ (import_name) @namespace)
+
+(import_alias
+ (import_name) @namespace)
+
+(enum_fetch
+ (reference_expression) @constant)
+
+(enum_field_definition
+ (identifier) @constant)
+
+(global_var_definition
+ (identifier) @constant)
+
+(compile_time_if_expression
+ condition: (reference_expression) @constant)
+
+(compile_time_if_expression
+ condition: (binary_expression
+              left: (reference_expression) @constant
+              right: (reference_expression) @constant))
+
+(compile_time_if_expression
+ condition: (binary_expression
+              left: (reference_expression) @constant
+              right: (unary_expression (reference_expression) @constant)))
+
+(label_reference) @label
 
 (parameter_declaration
-  name: (identifier) @parameter)
+ name: (identifier) @variable.parameter)
+(receiver
+ name: (identifier) @variable.parameter)
 (function_declaration
-  name: (identifier) @function)
+ name: (identifier) @function)
 (function_declaration
-  receiver: (receiver)
-  name: (identifier) @method)
+ receiver: (receiver)
+ name: (identifier) @function.method)
+(interface_method_definition
+ name: (identifier) @function.method)
 
-(short_lambda
-  (reference_expression) @parameter)
-(call_expression
-  name: (selector_expression
-    field: (reference_expression) @method))
-
-(type_reference_expression) @type
-(pointer_type) @type
-(array_type) @type
-
-(field_name) @property
+; Member access. Placed before the call rules below so a method call
+; `o.m()` is reclaimed as @function.method, while a plain `o.field`
+; access stays a member.
+(field_name) @variable.other.member
 (selector_expression
-  field: (reference_expression) @property)
+ field: (reference_expression) @variable.other.member)
 
-(int_literal) @number
-(interpreted_string_literal) @string
-(rune_literal) @string
-(escape_sequence) @string.escape
+(call_expression
+ name: (selector_expression
+  field: (reference_expression) @function.method))
+
+(call_expression
+ name: (reference_expression) @function)
+
+(struct_declaration
+ name: (identifier) @type)
+
+(enum_declaration
+ name: (identifier) @type)
+
+(interface_declaration
+ name: (identifier) @type)
+
+(type_declaration
+ name: (identifier) @type)
+
+(struct_field_declaration
+ name: (identifier) @variable.other.member)
+
+(int_literal) @constant.numeric.integer
+(escape_sequence) @constant.character.escape
 
 [
- "as"
- "asm"
- "assert"
- ;"atomic"
- "break"
- "const"
- "continue"
- "defer"
- "else"
- "enum"
- "fn"
- "for"
- "$for"
- "go"
- "spawn"
- "goto"
- "if"
- "$if"
- "import"
- "in"
- "!in"
- "interface"
- "is"
- "!is"
- "lock"
- "match"
- "module"
- "mut"
- "or"
- "pub"
- "return"
- "rlock"
- "select"
- "shared"
- "static"
- "struct"
- "type"
- "union"
- "unsafe"
-] @keyword
+ (c_string_literal)
+ (raw_string_literal)
+ (interpreted_string_literal)
+ (string_interpolation)
+ (rune_literal)
+] @string
+
+(string_interpolation
+ (interpolation_opening) @punctuation.bracket
+ (interpolation_expression) @embedded
+ (interpolation_closing) @punctuation.bracket)
+
+(attribute) @attribute
+
+[
+ (type_reference_expression)
+ ] @type
 
 [
  (true)
  (false)
-] @boolean
+] @constant.builtin.boolean
+(nil) @constant.builtin
+
+[
+  "pub"
+  "assert"
+  "asm"
+  "defer"
+  "unsafe"
+  "sql"
+  (none)
+] @keyword
+
+[
+  "interface"
+  "enum"
+  "type"
+  "union"
+  "struct"
+  "module"
+] @keyword.storage.type
+
+[
+  "static"
+  "const"
+  "__global"
+] @keyword.storage.modifier
+
+[
+  "mut"
+] @keyword.storage.modifier.mut
+
+[
+  "shared"
+  "lock"
+  "rlock"
+  "spawn"
+  "break"
+  "continue"
+  "go"
+] @keyword.control
+
+[
+  "if"
+  "$if"
+  "select"
+  "else"
+  "$else"
+  "match"
+] @keyword.control.conditional
+
+[
+  "for"
+] @keyword.control.repeat
+
+[
+  "goto"
+  "return"
+] @keyword.control.return
+
+[
+  "fn"
+] @keyword.function
+
+
+[
+  "import"
+] @keyword.control.import
+
+[
+  "as"
+  "in"
+  "is"
+  "or"
+] @keyword.operator
 
 [
  "."

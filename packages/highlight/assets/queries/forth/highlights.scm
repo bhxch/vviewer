@@ -31,7 +31,7 @@
 ; Comments - different types
 (line_comment) @comment.line
 (block_comment) @comment.block
-(stack_effect) @comment.documentation
+(stack_effect) @comment.block.documentation
 
 ; User-defined words
 (word) @function

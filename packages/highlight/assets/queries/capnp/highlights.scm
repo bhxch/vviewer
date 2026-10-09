@@ -1,7 +1,9 @@
 ; Preproc
 
-(unique_id) @preproc
-(top_level_annotation_body) @preproc
+[
+  (unique_id)
+  (top_level_annotation_body)
+] @keyword.directive
 
 ; Includes
 
@@ -9,7 +11,8 @@
   "import"
   "$import"
   "embed"
-] @include
+  "using"
+] @keyword.control.import
 
 (import_path) @string
 
@@ -22,7 +25,7 @@
 
 ; Typedefs
 
-(type_definition) @type.definition
+(type_definition) @type
 
 ; Labels (@number, @number!)
 
@@ -30,33 +33,33 @@
 
 ; Methods
 
-(annotation_definition_identifier) @method
-(method_identifier) @method
+(annotation_definition_identifier) @function.method
+(method_identifier) @function.method
 
 ; Fields
 
-(field_identifier) @field
+(field_identifier) @variable.other.member
 
 ; Properties
 
-(property) @property
+(property) @label
 
 ; Parameters
 
-(param_identifier) @parameter
-(return_identifier) @parameter
+(param_identifier) @variable.parameter
+(return_identifier) @variable.parameter
 
 ; Constants
 
-(const_identifier) @constant
+(const_identifier) @variable
 (local_const) @constant
-(enum_member) @constant
+(enum_member) @type.enum.variant
 
 (void) @constant.builtin
 
 ; Types
 
-(enum_identifier) @type
+(enum_identifier) @type.enum
 (extend_type) @type
 (type_identifier) @type
 
@@ -82,14 +85,14 @@
   "interface"
   "struct"
   "union"
-] @keyword
+] @keyword.storage.type
+
+"extends" @keyword
 
 [
-  "extends"
   "namespace"
-  "using"
   (annotation_target)
-] @keyword
+] @special
 
 ; Literals
 
@@ -100,27 +103,27 @@
   (namespace)
 ] @string
 
-(escape_sequence) @string.escape
+(escape_sequence) @constant.character.escape
 
 (data_string) @string.special
 
-(number) @number
+(number) @constant.numeric.integer
 
-(float) @float
+(float) @constant.numeric.float
 
-(boolean) @boolean
+(boolean) @constant.builtin.boolean
 
 ; Misc
 
 [
   "const"
-] @type.qualifier
+] @keyword.storage.modifier
 
 [
   "*"
   "$"
   ":"
-] @punctuation.special
+] @string.special.symbol
 
 ["{" "}"] @punctuation.bracket
 
@@ -134,8 +137,8 @@
   "->"
 ] @punctuation.delimiter
 
-(data_hex) @symbol
+(data_hex) @constant
 
 ; Comments
 
-(comment) @comment @spell
+(comment) @comment.line

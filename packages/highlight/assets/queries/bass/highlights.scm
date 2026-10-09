@@ -38,19 +38,30 @@
 (subpath (slash) @function)
 
 
+;;; generic highlighting for all forms
+
+; first symbol in a list form is a combiner call
+(list . (symbol) @function)
+
+; highlight symbols as vars only when they're clearly vars
+(cons (symbol) @variable)
+(scope (symbol) @variable)
+(path form: (symbol) @variable)
+(symbind form: (symbol) @variable)
+
 
 ;;; specific highlighting for builtins & special forms
 
 ;; symbol classification based highlighting
 
-(list . (symbol) @conditional (#match? @conditional "^(if|case|cond|when)$"))
-(cons . (symbol) @conditional (#match? @conditional "^(if|case|cond|when)$"))
+(list . (symbol) @keyword.control.conditional (#match? @keyword.control.conditional "^(if|case|cond|when)$"))
+(cons . (symbol) @keyword.control.conditional (#match? @keyword.control.conditional "^(if|case|cond|when)$"))
 
-(list . (symbol) @repeat (#match? @repeat "^(each)$"))
-(cons . (symbol) @repeat (#match? @repeat "^(each)$"))
+(list . (symbol) @keyword.control.repeat (#match? @keyword.control.repeat "^(each)$"))
+(cons . (symbol) @keyword.control.repeat (#match? @keyword.control.repeat "^(each)$"))
 
-(list . (symbol) @define (#match? @define "^(def|defop|defn)$"))
-(cons . (symbol) @define (#match? @define "^(def|defop|defn)$"))
+(list . (symbol) @label (#match? @label "^(def|defop|defn)$"))
+(cons . (symbol) @label (#match? @label "^(def|defop|defn)$"))
 
 (list . (symbol) @function.builtin (#match? @function.builtin "^(dump|mkfs|json|log|error|now|cons|wrap|unwrap|eval|make-scope|bind|meta|with-meta|null\\?|ignore\\?|boolean\\?|number\\?|string\\?|symbol\\?|scope\\?|sink\\?|source\\?|list\\?|pair\\?|applicative\\?|operative\\?|combiner\\?|path\\?|empty\\?|thunk\\?|\\+|\\*|quot|-|max|min|=|>|>=|<|<=|list->source|across|emit|next|reduce-kv|assoc|symbol->string|string->symbol|str|substring|trim|scope->list|string->fs-path|string->cmd-path|string->dir|subpath|path-name|path-stem|with-image|with-dir|with-args|with-cmd|with-stdin|with-env|with-insecure|with-label|with-port|with-tls|with-mount|thunk-cmd|thunk-args|resolve|start|addr|wait|read|cache-dir|binds\\?|recall-memo|store-memo|mask|list|list\\*|first|rest|length|second|third|map|map-pairs|foldr|foldl|append|filter|conj|list->scope|merge|apply|id|always|vals|keys|memo|succeeds\\?|run|last|take|take-all|insecure!|from|cd|wrap-cmd|mkfile|path-base|not)$"))
 (cons . (symbol) @function.builtin (#match? @function.builtin "^(dump|mkfs|json|log|error|now|cons|wrap|unwrap|eval|make-scope|bind|meta|with-meta|null\\?|ignore\\?|boolean\\?|number\\?|string\\?|symbol\\?|scope\\?|sink\\?|source\\?|list\\?|pair\\?|applicative\\?|operative\\?|combiner\\?|path\\?|empty\\?|thunk\\?|\\+|\\*|quot|-|max|min|=|>|>=|<|<=|list->source|across|emit|next|reduce-kv|assoc|symbol->string|string->symbol|str|substring|trim|scope->list|string->fs-path|string->cmd-path|string->dir|subpath|path-name|path-stem|with-image|with-dir|with-args|with-cmd|with-stdin|with-env|with-insecure|with-label|with-port|with-tls|with-mount|thunk-cmd|thunk-args|resolve|start|addr|wait|read|cache-dir|binds\\?|recall-memo|store-memo|mask|list|list\\*|first|rest|length|second|third|map|map-pairs|foldr|foldl|append|filter|conj|list->scope|merge|apply|id|always|vals|keys|memo|succeeds\\?|run|last|take|take-all|insecure!|from|cd|wrap-cmd|mkfile|path-base|not)$"))
@@ -58,11 +69,11 @@
 (list . (symbol) @function.macro (#match? @function.macro "^(op|fn|current-scope|quote|let|provide|module|or|and|->|curryfn|for|\\$|linux)$"))
 (cons . (symbol) @function.macro (#match? @function.macro "^(op|fn|current-scope|quote|let|provide|module|or|and|->|curryfn|for|\\$|linux)$"))
 
-(list . (symbol) @keyword.builtin (#match? @keyword.builtin "^(do|doc)$"))
-(cons . (symbol) @keyword.builtin (#match? @keyword.builtin "^(do|doc)$"))
+(list . (symbol) @keyword (#match? @keyword "^(do|doc)$"))
+(cons . (symbol) @keyword (#match? @keyword "^(do|doc)$"))
 
-(list . (symbol) @include (#match? @include "^(use|import|load)$"))
-(cons . (symbol) @include (#match? @include "^(use|import|load)$"))
+(list . (symbol) @keyword.control.import (#match? @keyword.control.import "^(use|import|load)$"))
+(cons . (symbol) @keyword.control.import (#match? @keyword.control.import "^(use|import|load)$"))
 
 
 ;; special cases
@@ -88,14 +99,3 @@
   .
   (_)
   (symbol) @function)
-
-;;; generic highlighting for all forms
-
-; first symbol in a list form is a combiner call
-(list . (symbol) @function)
-
-; highlight symbols as vars only when they're clearly vars
-(cons (symbol) @variable)
-(scope (symbol) @variable)
-(path form: (symbol) @variable)
-(symbind form: (symbol) @variable)

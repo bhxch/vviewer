@@ -1,13 +1,37 @@
 ; highlights.scm
 
+(identifier) @variable
+
+; Member access: the name after `$`/`@` (`obj$field`, `s4@slot`).
+(extract_operator rhs: (identifier) @variable.other.member)
+
 ; Literals
 
-(integer) @number
-(float) @number
-(complex) @number
+[
+  (integer)
+  (complex)
+] @constant.numeric.integer
+
+[
+  (float)
+  (nan)
+  (inf)
+] @constant.numeric.float
+
+[
+  (true)
+  (false)
+] @constant.builtin.boolean
+
+[
+  (na)
+  (null)
+  (dots)
+  (dot_dot_i)
+] @constant.builtin
 
 (string) @string
-(string (string_content (escape_sequence) @string.escape))
+(string (string_content (escape_sequence) @constant.character.escape))
 
 ; Comments
 
@@ -16,97 +40,69 @@
 ; Operators
 
 [
-  "?" ":=" "=" "<-" "<<-" "->" "->>"
-  "~" "|>" "||" "|" "&&" "&"
-  "<" "<=" ">" ">=" "==" "!="
-  "+" "-" "*" "/" "::" ":::"
-  "**" "^" "$" "@" ":" "!"
-  "special"
+  "!" "!=" "$" "&" "&&" "*" "**" "+" "-" "->" "->>" "/" ":" ":::" ":::" ":=" "<"
+  "<-" "<<-" "<=" "=" "==" ">" ">=" "?" "@" "^" "special" "|" "|>" "||" "~"
 ] @operator
+
+(function_definition name: "\\" @operator)
 
 ; Punctuation
 
 [
-  "("  ")"
-  "{"  "}"
-  "["  "]"
+  "(" ")"
+  "[" "]"
+  "{" "}"
   "[[" "]]"
 ] @punctuation.bracket
 
 (comma) @punctuation.delimiter
 
-; Variables
-
-(identifier) @variable
-
 ; Functions
 
 (binary_operator
-    lhs: (identifier) @function
-    operator: "<-"
-    rhs: (function_definition)
-)
+  lhs: (identifier) @function
+  operator: "<-"
+  rhs: (function_definition))
 
 (binary_operator
-    lhs: (identifier) @function
-    operator: "="
-    rhs: (function_definition)
-)
+  lhs: (identifier) @function
+  operator: "="
+  rhs: (function_definition))
 
 ; Calls
 
 (call function: (identifier) @function)
+(call function: (namespace_operator rhs: (identifier) @function))
 
 ; Parameters
 
 (parameters (parameter name: (identifier) @variable.parameter))
 (arguments (argument name: (identifier) @variable.parameter))
 
-; Namespace
+; Namespaces
 
 (namespace_operator lhs: (identifier) @namespace)
 
-(call
-    function: (namespace_operator rhs: (identifier) @function)
-)
-
 ; Keywords
-
-(function_definition name: "function" @keyword.function)
-(function_definition name: "\\" @operator)
 
 [
   "in"
-  (return)
   (next)
   (break)
 ] @keyword
 
+(return) @keyword.control.return
+
 [
   "if"
   "else"
-] @conditional
+] @keyword.control.conditional
 
 [
   "while"
   "repeat"
   "for"
-] @repeat
+] @keyword.control.repeat
 
-[
-  (true)
-  (false)
-] @boolean
+"function" @keyword.function
 
-[
-  (null)
-  (inf)
-  (nan)
-  (na)
-  (dots)
-  (dot_dot_i)
-] @constant.builtin
-
-; Error
-
-(ERROR) @error

@@ -1,50 +1,97 @@
 (comment) @comment
 
-(tag_name) @constant
 (
-  (tag_name) @constant.builtin
-  ; https://www.script-example.com/html-tag-liste
-  (#any-of? @constant.builtin
-   "head" "title" "base" "link" "meta" "style"
-   "body" "article" "section" "nav" "aside" "h1" "h2" "h3" "h4" "h5" "h6" "hgroup" "header" "footer" "address"
-   "p" "hr" "pre" "blockquote" "ol" "ul" "menu" "li" "dl" "dt" "dd" "figure" "figcaption" "main" "div"
-   "a" "em" "strong" "small" "s" "cite" "q" "dfn" "abbr" "ruby" "rt" "rp" "data" "time" "code" "var" "samp" "kbd" "sub" "sup" "i" "b" "u" "mark" "bdi" "bdo" "span" "br" "wbr"
-   "ins" "del"
-   "picture" "source" "img" "iframe" "embed" "object" "param" "video" "audio" "track" "map" "area"
-   "table" "caption" "colgroup" "col" "tbody" "thead" "tfoot" "tr" "td" "th"
-   "form" "label" "input" "button" "select" "datalist" "optgroup" "option" "textarea" "output" "progress" "meter" "fieldset" "legend"
-   "details" "summary" "dialog"
-   "script" "noscript" "template" "slot" "canvas")
+  doctype
+  (("doctype") @keyword.storage.type)
+  ((doctype_name) @type.enum.variant)
 )
 
-(content) @none
+(tag_name) @constant
 
+; Attributes
 (id) @attribute
 (class) @attribute
+(attribute_name) @attribute
 
 (quoted_attribute_value) @string
-(attribute_name) @symbol
+
+; Controls
 (
-  (attribute_name) @keyword
-  (#match? @keyword "^(\\(.*\\)|\\[.*\\]|\\*.*)$")
-) @keyword
+  conditional
+  ((keyword) @keyword.control.conditional)
+)
+(
+  case
+  ((keyword) @keyword.control)
+  (
+    when
+    ((keyword) @keyword.control)
+  )
+)
+(
+  each
+  ((keyword) @keyword.control.repeat)
+)
+(
+  else
+  ((keyword) @keyword.control.conditional)
+)
+(
+  while
+  ((keyword) @keyword.control.repeat)
+)
 
-[
-  ":"
-  "{{"
-  "}}"
-  "+"
-  "|"
-] @punctuation.delimiter
+; Mixins
+(
+  mixin_definition
+  ((keyword) @keyword.function)
+  ((mixin_name) @function.method)
+)
+(
+  mixin_use
+  (("+") @operator)
+  ((mixin_name) @function.method)
+)
 
-(keyword) @keyword
-((keyword) @include (#eq? @include "include"))
-((keyword) @repeat (#any-of? @repeat "for" "each" "of" "in" "while"))
-((keyword) @conditional (#any-of? @conditional "if" "else" "else if" "unless"))
-((keyword) @keyword.function (#any-of? @keyword.function "block" "mixin"))
+; Includes
+(
+  include
+  ((keyword) @keyword.directive)
+  ((filename) @string.special.path)
+)
 
-(filter_name) @method.call
+; Inheritance
+(
+  extends
+  ((keyword) @keyword.directive)
+  ((filename) @string.special.path)
+)
+(
+  block_definition
+  ((keyword) @keyword.directive)
+  ((block_name) @function.method)
+)
+(
+  block_append
+  ((keyword) @keyword.directive)
+  ((block_name) @function.method)
+)
+(
+  block_prepend
+  ((keyword) @keyword.directive)
+  ((block_name) @function.method)
+)
 
-(mixin_use (mixin_name) @method.call)
-(mixin_definition (mixin_name) @function)
+; Filters
+(
+  filter
+  (":" @function.macro)
+  ((filter_name) @function.macro)
+  ((content) @special)
+)
 
+; Inline JavaScript
+(
+  unbuffered_code
+  (("-") @special)
+)

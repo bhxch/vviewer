@@ -1,5 +1,3 @@
-; Variables
-
 (identifier) @variable
 
 ; Methods
@@ -8,7 +6,7 @@
   name: (identifier) @function.method)
 (method_invocation
   name: (identifier) @function.method)
-(super) @function.builtin
+(super) @variable.builtin
 
 ; Annotations
 
@@ -17,15 +15,13 @@
 (marker_annotation
   name: (identifier) @attribute)
 
-"@" @operator
-
 ; Types
-
-(type_identifier) @type
 
 (interface_declaration
   name: (identifier) @type)
 (class_declaration
+  name: (identifier) @type)
+(record_declaration
   name: (identifier) @type)
 (enum_declaration
   name: (identifier) @type)
@@ -36,15 +32,13 @@
 ((scoped_identifier
   scope: (identifier) @type)
  (#match? @type "^[A-Z]"))
-((method_invocation
-  object: (identifier) @type)
- (#match? @type "^[A-Z]"))
-((method_reference
-  . (identifier) @type)
- (#match? @type "^[A-Z]"))
 
 (constructor_declaration
   name: (identifier) @type)
+(compact_constructor_declaration
+  name: (identifier) @type)
+
+(type_identifier) @type
 
 [
   (boolean_type)
@@ -54,12 +48,32 @@
   (void_type)
 ] @type.builtin
 
-; Constants
+(type_arguments
+  (wildcard "?" @type.builtin))
+
+; Patterns (Java 21+): the record type name would otherwise be a @variable.
+(record_pattern . (identifier) @type)
+; `when` is contextual — only a guard inside a switch label, never a keyword
+; elsewhere — so scope it to the guard rather than the flat keyword list.
+(guard "when" @keyword.control.conditional)
+
+; Member access. `field_access` is a distinct node from `method_invocation`, so
+; this leaves method calls alone; placed before the SCREAMING @constant rule
+; below so `Type.CONST` stays a constant.
+(field_access
+  field: (identifier) @variable.other.member)
+
+; Variables
 
 ((identifier) @constant
  (#match? @constant "^_*[A-Z][A-Z\\d_]+$"))
 
-; Builtins
+; Unnamed variable / pattern `_` (Java 22) — dim as unused, like the discard in
+; other languages. It is an (underscore_pattern) in `var _ = …` and a plain
+; identifier in record components / `case _`.
+(underscore_pattern) @comment.unused
+((identifier) @comment.unused
+ (#eq? @comment.unused "_"))
 
 (this) @variable.builtin
 
@@ -69,26 +83,109 @@
   (hex_integer_literal)
   (decimal_integer_literal)
   (octal_integer_literal)
-  (decimal_floating_point_literal)
-  (hex_floating_point_literal)
-] @number
+  (binary_integer_literal)
+] @constant.numeric.integer
 
 [
-  (character_literal)
-  (string_literal)
-] @string
-(escape_sequence) @string.escape
+  (decimal_floating_point_literal)
+  (hex_floating_point_literal)
+] @constant.numeric.float
+
+(character_literal) @constant.character
+
+; `string_literal` now also covers text blocks (`"""…"""`) and its fragments.
+(string_literal) @string
+(escape_sequence) @constant.character.escape
+; Interpolated expressions in string templates (a withdrawn preview) shouldn't
+; render as string; reset them rather than colour the whole literal.
+(string_interpolation) @none
 
 [
   (true)
   (false)
-  (null_literal)
-] @constant.builtin
+] @constant.builtin.boolean
+(null_literal) @constant.builtin
+
+(line_comment) @comment
+(block_comment) @comment
+
+; Punctuation
 
 [
-  (line_comment)
-  (block_comment)
-] @comment
+  "::"
+  "."
+  ";"
+  ","
+] @punctuation.delimiter
+
+[
+  "@"
+  "..."
+] @punctuation.special
+
+[
+  "("
+  ")"
+  "["
+  "]"
+  "{"
+  "}"
+] @punctuation.bracket
+
+(type_arguments
+  [
+    "<"
+    ">"
+  ] @punctuation.bracket)
+
+(type_parameters
+  [
+    "<"
+    ">"
+  ] @punctuation.bracket)
+
+; Operators
+
+[
+  "="
+  ">"
+  "<"
+  "!"
+  "~"
+  "?"
+  ":"
+  "->"
+  "=="
+  ">="
+  "<="
+  "!="
+  "&&"
+  "||"
+  "++"
+  "--"
+  "+"
+  "-"
+  "*"
+  "/"
+  "&"
+  "|"
+  "^"
+  "%"
+  "<<"
+  ">>"
+  ">>>"
+  "+="
+  "-="
+  "*="
+  "/="
+  "&="
+  "|="
+  "^="
+  "%="
+  "<<="
+  ">>="
+  ">>>="
+] @operator
 
 ; Keywords
 
@@ -108,7 +205,6 @@
   "extends"
   "final"
   "finally"
-  "for"
   "if"
   "implements"
   "import"
@@ -142,8 +238,11 @@
   "try"
   "uses"
   "volatile"
-  "when"
-  "while"
   "with"
   "yield"
 ] @keyword
+
+[
+  "while"
+  "for"
+] @keyword.control.repeat

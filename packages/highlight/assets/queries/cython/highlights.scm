@@ -1,3 +1,11 @@
+; Punctuation
+
+["," "." ":" ";" (ellipsis)] @punctuation.delimiter
+["(" ")" "[" "]" "{" "}"] @punctuation.bracket
+(interpolation
+  "{" @punctuation.special
+  "}" @punctuation.special)
+
 ; Identifier naming conventions
 
 (identifier) @variable
@@ -7,6 +15,11 @@
 
 ((identifier) @constant
  (#match? @constant "^[A-Z][A-Z_]*$"))
+
+; Member access. Placed before the call rules below so a method call
+; `obj.m()` is reclaimed as @function.method, while a plain `obj.attr`
+; access stays a member.
+(attribute attribute: (identifier) @variable.other.member)
 
 ; Function calls
 
@@ -21,9 +34,9 @@
 
 ((call
   function: (identifier) @function.builtin)
- (#match?
+ (#any-of?
    @function.builtin
-   "^(abs|all|any|ascii|bin|bool|breakpoint|bytearray|bytes|callable|chr|classmethod|compile|complex|delattr|dict|dir|divmod|enumerate|eval|exec|filter|float|format|frozenset|getattr|globals|hasattr|hash|help|hex|id|input|int|isinstance|issubclass|iter|len|list|locals|map|max|memoryview|min|next|object|oct|open|ord|pow|print|property|range|repr|reversed|round|set|setattr|slice|sorted|staticmethod|str|sum|super|tuple|type|vars|zip|__import__)$"))
+   "abs" "all" "any" "ascii" "bin" "bool" "breakpoint" "bytearray" "bytes" "callable" "chr" "classmethod" "compile" "complex" "delattr" "dict" "dir" "divmod" "enumerate" "eval" "exec" "filter" "float" "format" "frozenset" "getattr" "globals" "hasattr" "hash" "help" "hex" "id" "input" "int" "isinstance" "issubclass" "iter" "len" "list" "locals" "map" "max" "memoryview" "min" "next" "object" "oct" "open" "ord" "pow" "print" "property" "range" "repr" "reversed" "round" "set" "setattr" "slice" "sorted" "staticmethod" "str" "sum" "super" "tuple" "type" "vars" "zip" "__import__"))
 
 ; Types
 
@@ -61,8 +74,6 @@
     ((identifier) @function))
   (c_function_definition))
 
-(attribute attribute: (identifier) @property)
-
 ; Literals
 
 [
@@ -72,16 +83,14 @@
 [
   (true)
   (false)
-] @boolean
+] @constant.builtin.boolean
 
-[
-  (integer)
-  (float)
-] @number
+(integer) @constant.numeric.integer
+(float) @constant.numeric.float
 
 (comment) @comment
 (string) @string
-(escape_sequence) @escape
+(escape_sequence) @constant.character.escape
 
 (interpolation
   "{" @punctuation.special
@@ -184,4 +193,10 @@
   "namespace"
   "cppclass"
   "const"
-] @keyword
+] @keyword.control
+
+(dotted_name
+  (identifier)* @namespace)
+
+(aliased_import
+  alias: (identifier) @namespace)

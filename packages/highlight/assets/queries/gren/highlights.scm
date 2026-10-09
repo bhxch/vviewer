@@ -1,72 +1,111 @@
-; Keywords
 [
-    "if"
-    "then"
-    "else"
-    "let"
-    "in"
- ] @keyword.control.gren
-(when) @keyword.control.gren
-(is) @keyword.control.gren
+  (module)
+  (as)
+  (exposing)
+  (backslash)
+] @keyword
 
-(colon) @keyword.other.gren
-(backslash) @keyword.other.gren
-(as) @keyword.other.gren
-(port) @keyword.other.gren
-(exposing) @keyword.other.gren
-(alias) @keyword.other.gren
-(infix) @keyword.other.gren
+(import) @keyword.control.import
 
-(arrow) @keyword.operator.arrow.gren
+[
+  "if"
+  "then"
+  "else"
+  (when)
+  (is)
+] @keyword.control.conditional
 
-(port) @keyword.other.port.gren
+[
+  (type)
+  (alias)
+  (infix)
+  (port)
+  "let"
+  "in"
+] @keyword.storage.type
 
-(type_annotation(lower_case_identifier) @function.gren)
-(port_annotation(lower_case_identifier) @function.gren)
-(function_declaration_left(lower_case_identifier) @function.gren)
-(function_call_expr target: (value_expr) @function.gren)
+(dot) @operator
 
-(field_access_expr(value_expr(value_qid)) @local.function.gren)
-(lower_pattern) @local.function.gren
-(record_base_identifier) @local.function.gren
+[
+  (colon)
+  (arrow)
+  (eq)
+  (operator_identifier)
+  "|"
+] @keyword.operator
 
+[
+  "("
+  ")"
+  "["
+  "]"
+  "{"
+  "}"
+] @punctuation.bracket
 
-(operator_identifier) @keyword.operator.gren
-(eq) @keyword.operator.assignment.gren
+"," @punctuation.delimiter
 
+; modules
 
-"(" @punctuation.section.braces
-")" @punctuation.section.braces
+(module_declaration(upper_case_qid) @namespace)
+(import_clause(upper_case_qid) @namespace)
+(import_clause(as_clause(upper_case_identifier) @namespace))
+(exposing_list(exposed_type(upper_case_identifier) @type))
+(exposing_list(exposed_value) @variable)
 
-"|" @keyword.other.gren
-"," @punctuation.separator.comma.gren
+; functions
 
-(import) @meta.import.gren
-(module) @keyword.other.gren
+(type_annotation(lower_case_identifier) @function)
+(port_annotation(lower_case_identifier) @function)
+(file (value_declaration (function_declaration_left(lower_case_identifier) @function)))
 
-(number_constant_expr) @constant.numeric.gren
+; types
 
+(field name: (lower_case_identifier) @variable.other.member)
+(field_type name: (lower_case_identifier) @variable.other.member)
+(field_access_expr(lower_case_identifier) @variable.other.member)
 
-(type) @keyword.type.gren
+(type_declaration(upper_case_identifier) @type)
+(type_declaration typeName: (lower_type_name) @type.parameter)
 
-(type_declaration(upper_case_identifier) @storage.type.gren)
-(type_ref) @storage.type.gren
-(type_alias_declaration name: (upper_case_identifier) @storage.type.gren)
+(type_alias_declaration name: (upper_case_identifier) @type)
+(type_alias_declaration typeVariable: (lower_type_name) @type.parameter)
 
-(union_variant(upper_case_identifier) @union.gren)
-(union_pattern) @union.gren
-(value_expr(upper_case_qid(upper_case_identifier)) @union.gren)
+(type_ref(upper_case_qid) @type)
+(type_ref(upper_case_qid(upper_case_identifier) @namespace (dot) (upper_case_identifier) @type))
+
+(type_variable(lower_case_identifier) @type.parameter)
+
+; variables
+
+(union_pattern constructor: (upper_case_qid (upper_case_identifier) @namespace (dot) (upper_case_identifier) @constructor)) 
+(union_pattern constructor: (upper_case_qid (upper_case_identifier) @constructor)) 
+
+(union_variant(upper_case_identifier) @constructor)
+
+(value_expr name: (value_qid (upper_case_identifier) @namespace))
+(value_expr(upper_case_qid(upper_case_identifier) @namespace (dot) (upper_case_identifier) @constructor))
+(value_expr(upper_case_qid(upper_case_identifier)) @constructor)
+
+(value_expr(value_qid(upper_case_identifier) @namespace (dot) (lower_case_identifier) @variable))
+(value_expr(value_qid(lower_case_identifier) @variable))
+
+(let_in_expr(value_declaration(function_declaration_left(lower_case_identifier) @variable)))
+
+(function_declaration_left(lower_pattern(lower_case_identifier) @variable.parameter))
 
 ; comments
-(line_comment) @comment.gren
-(block_comment) @comment.gren
+
+(line_comment) @comment
+(block_comment) @comment
+
+; numbers
+
+(number_constant_expr) @constant.numeric
 
 ; strings
-(string_escape) @character.escape.gren
 
-(open_quote) @string.gren
-(close_quote) @string.gren
-(regular_string_part) @string.gren
+(string_escape) @constant.character.escape
 
-(open_char) @char.gren
-(close_char) @char.gren
+(string_constant_expr) @string
+(char_constant_expr) @constant.character

@@ -13,12 +13,12 @@
   "shell"
 ] @keyword
 
-[
-  "="
-  "-"
-] @operator
+"=" @operator
 
-"," @punctuation.delimiter
+[
+  ","
+  "-"
+] @punctuation.delimiter
 
 "SC" @special
 
@@ -42,7 +42,7 @@
 
 (enable_directive
   (identifier) @diagnostic.error
-  (#any-of? @diagnostic.error
+  (#not-any-of? @diagnostic.error
     "add-default-case"
     "avoid-nullary-conditions"
     "check-extra-masked-returns"

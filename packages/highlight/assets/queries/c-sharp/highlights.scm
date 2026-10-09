@@ -12,10 +12,10 @@
 (enum_declaration name: (identifier) @type)
 (struct_declaration (identifier) @type)
 (record_declaration (identifier) @type)
-(namespace_declaration name: (identifier) @module)
+(namespace_declaration name: (identifier) @namespace)
 
 (generic_name (identifier) @type)
-(type_parameter (identifier) @property.definition)
+(type_parameter (identifier) @type.parameter)
 (parameter type: (identifier) @type)
 (type_argument_list (identifier) @type)
 (as_expression right: (identifier) @type)
@@ -31,17 +31,15 @@
 (predefined_type) @type.builtin
 
 ;; Enum
-(enum_member_declaration (identifier) @property.definition)
+(enum_member_declaration (identifier) @type.enum.variant)
 
 ;; Literals
 
-[
-  (real_literal)
-  (integer_literal)
-] @number
+(real_literal) @constant.numeric.float
+(integer_literal) @constant.numeric.integer
+(character_literal) @constant.character
 
 [
-  (character_literal)
   (string_literal)
   (raw_string_literal)
   (verbatim_string_literal)
@@ -50,12 +48,10 @@
   (interpolation_quote)
  ] @string
 
-(escape_sequence) @string.escape
+(escape_sequence) @constant.character.escape
 
-[
-  (boolean_literal)
-  (null_literal)
-] @constant.builtin
+(boolean_literal) @constant.builtin.boolean
+(null_literal) @constant.builtin
 
 ;; Comments
 
@@ -110,6 +106,7 @@
   "%"
   "%="
   ":"
+  ".." ; range, and C# 12 collection-expression spread (`..rest`)
 ] @operator
 
 [
@@ -136,7 +133,6 @@
   "as"
   "base"
   "break"
-  "case"
   "catch"
   "checked"
   "class"
@@ -144,7 +140,6 @@
   "default"
   "delegate"
   "do"
-  "else"
   "enum"
   "event"
   "explicit"
@@ -154,7 +149,6 @@
   "foreach"
   "global"
   "goto"
-  "if"
   "implicit"
   "interface"
   "is"
@@ -169,7 +163,6 @@
   "stackalloc"
   "static"
   "struct"
-  "switch"
   "throw"
   "try"
   "typeof"
@@ -192,11 +185,57 @@
   "init"
   "with"
   "let"
+  ;; LINQ query clauses
+  "group"
+  "by"
+  "into"
+  "join"
+  "on"
+  "equals"
+  "orderby"
+  "ascending"
+  "descending"
 ] @keyword
+
+[
+  "case"
+  "else"
+  "if"
+  "switch"
+  "when"
+] @keyword.control.conditional
+
+;; Pattern matching combinators (`x is not null`, `> 0 and < 10`)
+
+[
+  "and"
+  "or"
+  "not"
+] @keyword.operator
+
+;; Preprocessor directives
+
+[
+  "#define"
+  "#undef"
+  "#if"
+  "#elif"
+  "#else"
+  "#endif"
+  "#region"
+  "#endregion"
+  "#error"
+  "#warning"
+  "#line"
+  "#nullable"
+  "#pragma"
+] @keyword.directive
 
 ;; Attribute
 
 (attribute name: (identifier) @attribute)
+; Named attribute argument `[Attr(Name = value)]`.
+(attribute_argument name: (identifier) @variable.other.member)
 
 ;; Parameters
 
@@ -205,8 +244,14 @@
 
 ;; Type constraints
 
-(type_parameter_constraints_clause (identifier) @property.definition)
+(type_parameter_constraints_clause (identifier) @type.parameter)
+
+;; Member access. Before the method-call rules below so `obj.Method()` reclaims
+;; @function, while a plain `obj.field` stays a member.
+(member_access_expression name: (identifier) @variable.other.member)
 
 ;; Method calls
 
 (invocation_expression (member_access_expression name: (identifier) @function))
+; Bare calls (`Method()` without a receiver)
+(invocation_expression function: (identifier) @function)

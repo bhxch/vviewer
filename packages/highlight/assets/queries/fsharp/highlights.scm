@@ -1,13 +1,11 @@
 ;; ----------------------------------------------------------------------------
 ;; Literals and comments
 
-[
-  (line_comment)
-  (block_comment)
-] @comment @spell
+(line_comment) @comment.line
 
-((line_comment) @comment.documentation @spell
- (#not-match? @comment.documentation "^///"))
+(block_comment) @comment.block
+
+(xml_doc) @comment.block.documentation
 
 (const
   [
@@ -17,43 +15,46 @@
 
 (primary_constr_args (_) @variable.parameter)
 
-(class_as_reference
-  (_) @variable.parameter.builtin)
+((identifier_pattern (long_identifier_or_op (identifier) @special))
+ (#match? @special "^\_.*"))
 
-
-((argument_patterns (long_identifier (identifier) @character.special))
- (#match? @character.special "^\_.*"))
+((long_identifier
+  (identifier)+
+  .
+  (identifier) @variable.other.member))
 
 ;; ----------------------------------------------------------------------------
 ;; Punctuation
 
-(type_name type_name: (_) @type.definition)
-(exception_definition exception_name: (_) @type.definition)
+(wildcard_pattern) @string.special
 
+(type_name type_name: (_) @type)
+
+; The generic `type` node was split into concrete type nodes; colour named
+; type references (simple_type) and the head of a generic application.
 [
- (_type)
+ (simple_type)
  (atomic_type)
 ] @type
+(generic_type (long_identifier) @type)
 
 (member_signature
   .
-  (identifier) @function.member
+  (identifier) @function.method
   (curried_spec
     (arguments_spec
       "*"* @operator
       (argument_spec
         (argument_name_spec
-          "?"? @character.special
+          "?"? @special
           name: (_) @variable.parameter)))))
 
-(union_type_case (identifier) @constant)
+(union_type_case) @constant
 
 (rules
   (rule
     pattern: (_) @constant
     block: (_)))
-
-(wildcard_pattern) @character.special
 
 (identifier_pattern
   .
@@ -61,64 +62,62 @@
   .
   (_) @variable)
 
-(optional_pattern
-  "?" @character.special)
+(fsi_directive_decl . (string) @namespace)
 
-(fsi_directive_decl . (string) @module)
-
-(import_decl . (_) @module)
+(import_decl . (_) @namespace)
 (named_module
-  name: (_) @module)
+  name: (_) @namespace)
 (namespace
-  name: (_) @module)
+  name: (_) @namespace)
 (module_defn
   .
-  (_) @module)
+  (_) @namespace)
 
 (ce_expression
   .
-  (_) @constant.macro)
+  (_) @function.macro)
 
 (field_initializer
-  field: (_) @property)
+  field: (_) @variable.other.member)
 
 (record_fields
   (record_field
     .
-    (identifier) @property))
+    (identifier) @variable.other.member))
+
+(dot_expression
+  base: (_) @namespace
+  field: (_) @variable.other.member)
 
 (value_declaration_left . (_) @variable)
 
 (function_declaration_left
-  . (_) @function)
-
-(argument_patterns) @variable.parameter
-(typed_pattern
-  (_pattern) @variable.parameter
-  (_type) @type)
+  . (_) @function
+  [
+    (argument_patterns)
+    (argument_patterns (long_identifier (identifier)))
+  ] @variable.parameter)
 
 (member_defn
   (method_or_prop_defn
     [
       (property_or_ident) @function
       (property_or_ident
-        instance: (identifier) @variable.parameter.builtin
+        instance: (identifier) @variable.builtin
         method: (identifier) @function.method)
     ]
     args: (_)* @variable.parameter))
 
-
-(dot_expression
-  .
-  (_) @variable.member
-  .
-  (_))
-
 (application_expression
   .
-  (_) @function.call
-  .
-  (_) @variable)
+  [
+    (long_identifier_or_op [
+      (long_identifier (identifier)* (identifier) @function)
+      (identifier) @function
+    ])
+    (typed_expression . (long_identifier_or_op (long_identifier (identifier)* . (identifier) @function)))
+    (dot_expression base: (_) @variable.other.member field: (_) @function)
+  ] @function)
 
 ((infix_expression
   .
@@ -126,14 +125,14 @@
   .
   (infix_op) @operator
   .
-  (_) @function.call
+  (_) @function
   )
  (#eq? @operator "|>")
  )
 
 ((infix_expression
   .
-  (_) @function.call
+  (_) @function
   .
   (infix_op) @operator
   .
@@ -153,32 +152,27 @@
   (uint64)
   (nativeint)
   (unativeint)
-] @number
+] @constant.numeric.integer
 
 [
   (ieee32)
   (ieee64)
   (float)
   (decimal)
-] @number.float
+] @constant.numeric.float
 
-(bool) @boolean
+(bool) @constant.builtin.boolean
 
 ([
   (string)
   (triple_quoted_string)
   (verbatim_string)
   (char)
-] @spell @string)
+] @string)
 
 (compiler_directive_decl) @keyword.directive
 
-(preproc_line
-  "#line" @keyword.directive)
-
-(attribute
-  target: (identifier)? @keyword
-  (_type) @attribute)
+(attribute) @attribute
 
 [
   "("
@@ -191,12 +185,9 @@
   "|]"
   "{|"
   "|}"
-] @punctuation.bracket
-
-[
   "[<"
   ">]"
-] @punctuation.special
+] @punctuation.bracket
 
 (format_string_eval
   [
@@ -207,8 +198,6 @@
 [
   ","
   ";"
-  ":"
-  "."
 ] @punctuation.delimiter
 
 [
@@ -220,23 +209,13 @@
   "~"
   "->"
   "<-"
-  "&"
   "&&"
-  "|"
   "||"
   ":>"
   ":?>"
-  ".."
   (infix_op)
   (prefix_op)
-  (op_identifier)
 ] @operator
-
-(generic_type
-  [
-   "<"
-   ">"
-  ] @punctuation.bracket)
 
 [
   "if"
@@ -246,7 +225,7 @@
   "when"
   "match"
   "match!"
-] @keyword.conditional
+] @keyword.control.conditional
 
 [
   "and"
@@ -261,21 +240,21 @@
   "return!"
   "yield"
   "yield!"
-] @keyword.return
+] @keyword.control.return
 
 [
   "for"
   "while"
   "downto"
   "to"
-] @keyword.repeat
+] @keyword.control.repeat
 
 
 [
   "open"
   "#r"
   "#load"
-] @keyword.import
+] @keyword.control.import
 
 [
   "abstract"
@@ -287,7 +266,7 @@
   "rec"
   "global"
   (access_modifier)
-] @keyword.modifier
+] @keyword.storage.modifier
 
 [
   "let"
@@ -300,16 +279,19 @@
 [
   "enum"
   "type"
-  "exception"
   "inherit"
   "interface"
-  "and"
-  "class"
-  "struct"
-] @keyword.type
+] @keyword.storage.type
 
-((identifier) @keyword.exception
- (#any-of? @keyword.exception "failwith" "failwithf" "raise" "reraise"))
+(try_expression
+  [
+    "try"
+    "with"
+    "finally"
+  ] @keyword.control.exception)
+
+((identifier) @keyword.control.exception
+ (#any-of? @keyword.control.exception "failwith" "failwithf" "raise" "reraise"))
 
 [
   "as"
@@ -339,19 +321,10 @@
   "null"
 ] @constant.builtin
 
-(match_expression "with" @keyword.conditional)
+(match_expression "with" @keyword.control.conditional)
 
-(try_expression
-  [
-    "try"
-    "with"
-    "finally"
-  ] @keyword.exception)
-
-((_type
- (simple_type
-    (long_identifier
-      (identifier) @type.builtin)))
+((simple_type
+  (long_identifier (identifier) @type.builtin))
  (#any-of? @type.builtin "bool" "byte" "sbyte" "int16" "uint16" "int" "uint" "int64" "uint64" "nativeint" "unativeint" "decimal" "float" "double" "float32" "single" "char" "string" "unit"))
 
 (preproc_if
@@ -365,22 +338,12 @@
   "#else" @keyword.directive)
 
 ((long_identifier
-  (identifier)+ @variable.member
+  (identifier)+ @namespace
   .
   (identifier)))
 
-((identifier) @module.builtin
- (#any-of? @module.builtin "Array" "Async" "Directory" "File" "List" "Option" "Path" "Map" "Set" "Lazy" "Seq" "Task" "String" "Result" ))
+(long_identifier_or_op
+  (op_identifier) @operator)
 
-((value_declaration
-   (attributes
-     (attribute
-       (_type
-         (simple_type
-          (long_identifier
-            (identifier) @attribute)))))
-   (function_or_value_defn
-     (value_declaration_left
-       .
-       (_) @constant)))
- (#eq? @attribute "Literal"))
+((identifier) @namespace
+ (#any-of? @namespace "Array" "Async" "Directory" "File" "List" "Option" "Path" "Map" "Set" "Lazy" "Seq" "Task" "String" "Result" ))

@@ -1,18 +1,35 @@
+; Scopes
+
 [
   (function_definition)
-  (alias_declaration)
-  (enum_struct_method)
-  (methodmap_method)
-  (methodmap_method_constructor)
-  (methodmap_method_destructor)
-  (methodmap_property_method)
+  (function_declaration)
+  (block)
 ] @local.scope
 
 ; Definitions
-(variable_declaration 
-  name: (identifier) @local.definition)
+
+(parameter_declaration
+  name: (identifier) @local.definition.variable.parameter)
+
+(variable_declaration
+  name: (identifier) @local.definition.variable)
 (old_variable_declaration
-  name: (identifier) @local.definition)
+  name: (identifier) @local.definition.variable)
 
 ; References
+
 (identifier) @local.reference
+
+; Member/field names are not variable references.
+(field_access
+  field: (identifier) @_)
+(scope_access
+  field: (identifier) @_)
+
+; Function names in call position are not variable references.
+(call_expression
+  function: (identifier) @_)
+
+; Named argument labels are not variable references.
+(named_arg
+  arg_name: (identifier) @_)

@@ -45,12 +45,12 @@
 
 (string_literal) @string
 
-(numeric_literal) @number
+(numeric_literal) @constant.numeric
 
 [
   (true)
   (false)
-] @boolean
+] @constant.builtin.boolean
 
 (comment) @comment
 

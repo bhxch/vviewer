@@ -1,8 +1,10 @@
+; Copied from https://github.com/tymbalodeon/tree-sitter-chuck/blob/trunk/queries/highlights.scm
+
 "@doc" @special
 "do" @keyword.control.repeat
 "fun" @keyword.function
 "function" @keyword.function
-"if" @keyword.control.conditionl
+"if" @keyword.control.conditional
 "repeat" @keyword.control.repeat
 "return" @keyword.control.return
 "spork" @function.builtin

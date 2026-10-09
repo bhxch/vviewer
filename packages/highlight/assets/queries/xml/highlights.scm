@@ -1,5 +1,3 @@
-; highlights.scm
-
 (comment) @comment
 
 [
@@ -22,8 +20,8 @@
     "PUBLIC"
 ] @constant
 
-(doctype) @module
-(element_name) @module
+(doctype) @variable
+(element_name) @variable
 
 "xml" @tag
 (tag_name) @tag
@@ -40,5 +38,5 @@
 (attribute_value) @string
 
 [
-    "<" ">" "</" "/>" "<?" "?>" "<!" "<![" "[" "]]>"
+    "<" ">" "</" "/>" "<?" "?>" "<!"
 ] @punctuation.bracket

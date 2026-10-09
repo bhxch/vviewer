@@ -1,3 +1,4 @@
+; https://github.com/connorlay/tree-sitter-heex/blob/592e22292a367312c35e13de7fdb888f029981d6/queries/injections.scm
 ; directives are standalone tags like '<%= @x %>'
 ;
 ; partial_expression_values are elixir code that is part of an expression that
@@ -6,10 +7,10 @@
 ;       <p>hello, tree-sitter!</p>
 ;     <% end %>
 ((directive
-  [
-    (partial_expression_value)
-    (ending_expression_value)
-  ] @injection.content)
+    [
+      (partial_expression_value)
+      (ending_expression_value)
+    ] @injection.content)
  (#set! injection.language "elixir")
  (#set! injection.include-children)
  (#set! injection.combined))
@@ -22,3 +23,6 @@
 ;     <link href={ Routes.static_path(..) } />
 ((expression (expression_value) @injection.content)
  (#set! injection.language "elixir"))
+
+((comment) @injection.content 
+ (#set! injection.language "comment"))

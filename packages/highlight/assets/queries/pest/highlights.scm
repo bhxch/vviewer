@@ -10,10 +10,8 @@
   "}"
 ] @punctuation.bracket
 
-
-
 ((identifier) @variable)
-((builtin) @type)
+((builtin) @type.builtin)
 ((const) @constant)
 
 [
@@ -22,28 +20,23 @@
 ] @string
 
 [
-    "~"
-    "|"
-] @function
+  "_"
+  "@"
+  "$"
+]@keyword.storage.modifier
 
 [
+  "~"
+  "|"
   "="
   "+"
   "*"
   "&"
-  "_"
   "^"
-  "@"
-  "$"
   "!"
   "?"
   ".."
 ] @operator
-
-[
-  (string)
-  (character)
-] @string
 
 [
   "ANY"
@@ -57,19 +50,3 @@
   "PUSH"
   "SOI"
 ] @keyword
-
-[
-  "~"
-  "|"
-  "="
-  "+"
-  "*"
-  "&"
-  "_"
-  "^"
-  "@"
-  "$"
-  "!"
-  "?"
-  ".."
-] @operator

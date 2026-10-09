@@ -3,47 +3,44 @@
 
 (comment) @comment
 
-(if "if" @conditional)
-(if (elif "elif" @conditional))
-(if (else "else" @conditional))
+(if "if" @keyword.control.conditional)
+(if (elif "elif" @keyword.control.conditional))
+(if (else "else" @keyword.control.conditional))
 
-(while "while" @repeat)
-(while (else "else" @repeat))
-(for "for" @repeat)
-(for (else "else" @repeat))
+(while "while" @keyword.control.repeat)
+(while (else "else" @keyword.control.repeat))
+(for "for" @keyword.control.repeat)
+(for (else "else" @keyword.control.repeat))
 
-(try "try" @exception)
-(try (catch "catch" @exception))
-(try (else "else" @exception))
-(try (finally "finally" @exception))
+(try "try" @keyword.control.exception)
+(try (catch "catch" @keyword.control.exception))
+(try (else "else" @keyword.control.exception))
+(try (finally "finally" @keyword.control.exception))
 
-(import "use" @include)
+(import "use" @keyword.control.import)
 (import (bareword) @string.special)
 
 (wildcard ["*" "**" "?"] @string.special)
 
-(command argument: (bareword) @parameter)
+(command argument: (bareword) @variable.parameter)
 (command head: (identifier) @function)
-((command head: (identifier) @keyword.return)
- (#eq? @keyword.return "return"))
+((command head: (identifier) @keyword.control.return)
+ (#eq? @keyword.control.return "return"))
 ((command (identifier) @keyword.operator)
- (#any-of? @keyword.operator "and" "or" "coalesce"))
+ (#match? @keyword.operator "(and|or|coalesce)"))
 ((command head: _ @function)
- (#any-of? @function
-  "+" "-" "*" "/" "%" "<" "<=""==" "!=" ">"
-  ">=" "<s" "<=s" "==s" "!=s" ">s" ">=s"
-))
+ (#match? @function "([+]|[-]|[*]|[/]|[%]|[<]|[<][=]|[=][=]|[!][=]|[>]|[>][=]|[<][s]|[<][=][s]|[=][=][s]|[!][=][s]|[>][s]|[>][=][s])"))
 
 (pipeline "|" @operator)
 (redirection [">" "<" ">>" "<>"] @operator)
 
-(io_port) @number
+(io_port) @constant.numeric
 
 (function_definition
   "fn" @keyword.function
   (identifier) @function)
 
-(parameter_list) @parameter
+(parameter_list) @variable.parameter
 (parameter_list "|" @punctuation.bracket)
 
 (variable_declaration
@@ -63,19 +60,16 @@
   (identifier) @variable)
 
 
-(number) @number
+(number) @constant.numeric
 (string) @string
 
 (variable (identifier) @variable)
 ((variable (identifier) @function)
   (#match? @function ".+\\~$"))
-((variable (identifier) @boolean)
- (#any-of? @boolean "true" "false"))
+((variable (identifier) @constant.builtin.boolean)
+ (#match? @constant.builtin.boolean "(true|false)"))
 ((variable (identifier) @constant.builtin)
- (#any-of? @constant.builtin
-  "_" "after-chdir" "args" "before-chdir" "buildinfo" "nil"
-  "notify-bg-job-success" "num-bg-jobs" "ok" "paths" "pid"
-  "pwd" "value-out-indicator" "version"))
+ (#match? @constant.builtin "(_|after-chdir|args|before-chdir|buildinfo|nil|notify-bg-job-success|num-bg-jobs|ok|paths|pid|pwd|value-out-indicator|version)"))
 
 ["$" "@"] @punctuation.special
 ["(" ")" "[" "]" "{" "}"] @punctuation.bracket

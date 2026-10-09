@@ -1,19 +1,16 @@
+; Queries are taken from: https://github.com/indoorvivants/tree-sitter-smithy/blob/main/queries/highlights.scm
 ; Preproc
-
-(control_key) @preproc
+(control_key) @keyword.directive
 
 ; Namespace
-
 (namespace) @namespace
 
 ; Includes
-
 [
   "use"
-] @include
+] @keyword.control.import
 
 ; Builtins
-
 (primitive) @type.builtin
 [
   "enum"
@@ -24,35 +21,30 @@
 ] @type.builtin
 
 ; Fields (Members)
+; (field) @variable.other.member
 
-; (field) @field
-
-(key_identifier) @field
+(key_identifier) @variable.other.member
 (shape_member
-  (field) @field)
-(operation_field) @field
-(operation_error_field) @field
+  (field) @variable.other.member)
+(operation_field) @variable.other.member
+(operation_error_field) @variable.other.member
 
 ; Constants
-
 (enum_member
-  (enum_field) @constant)
+  (enum_field) @type.enum)
 
 ; Types
-
 (identifier) @type
 (structure_resource
   (shape_id) @type)
 
 ; Attributes
-
 (mixins
   (shape_id) @attribute)
 (trait_statement
-  (shape_id (#set! "priority" 105)) @attribute)
+  (shape_id) @attribute)
 
 ; Operators
-
 [
   "@"
   "-"
@@ -61,7 +53,6 @@
 ] @operator
 
 ; Keywords
-
 [
   "namespace"
   "service"
@@ -76,20 +67,18 @@
 ] @keyword
 
 ; Literals
-
 (string) @string
-(escape_sequence) @string.escape
+(escape_sequence) @constant.character.escape
 
-(number) @number
+(number) @constant.numeric
 
-(float) @float
+(float) @constant.numeric.float
 
-(boolean) @boolean
+(boolean) @constant.builtin.boolean
 
 (null) @constant.builtin
 
 ; Misc
-
 [
   "$"
   "#"
@@ -107,8 +96,7 @@
 ] @punctuation.delimiter
 
 ; Comments
-
 [
   (comment)
   (documentation_comment)
-] @comment @spell
+] @comment

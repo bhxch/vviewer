@@ -1,7 +1,7 @@
 (section_name
-  (text) @type) ; consistency with toml
+  (text) @type)
 
-(comment) @comment @spell
+(comment) @comment
 
 [
   "["
@@ -11,6 +11,5 @@
 "=" @operator
 
 (setting
-  (setting_name) @property)
-
-; (setting_value) @none ; grammar does not support subtypes
+  (setting_name) @variable.other.member
+  ((setting_value) @string)?)

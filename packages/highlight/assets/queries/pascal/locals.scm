@@ -1,26 +1,26 @@
+; Scopes
 
-(root)                                   @local.scope
+[
+  (declProc)
+  (block)
+] @local.scope
 
-(defProc)                                @local.scope
-(lambda)                                 @local.scope
-(interface   (declProc)                  @local.scope)
-(declSection (declProc)                  @local.scope)
-(declClass   (declProc)                  @local.scope)
-(declHelper  (declProc)                  @local.scope)
-(declProcRef)                            @local.scope
+; Definitions
 
-(exceptionHandler)                       @local.scope
-(exceptionHandler variable: (identifier) @local.definition)
+(declArg
+  name: (identifier) @local.definition.variable.parameter)
 
-(declArg          name: (identifier)     @local.definition)
-(declVar          name: (identifier)     @local.definition)
-(declConst        name: (identifier)     @local.definition)
-(declLabel        name: (identifier)     @local.definition)
-(genericArg       name: (identifier)     @local.definition)
-(declEnumValue    name: (identifier)     @local.definition)
-(declType         name: (identifier)     @local.definition)
-(declType         name: (genericTpl entity: (identifier)     @local.definition))
+(declVar
+  name: (identifier) @local.definition.variable)
 
-(declProc         name: (identifier)     @local.definition)
+; References
 
-(identifier)                             @local.reference
+(identifier) @local.reference
+
+; The rhs of `a.b` is a member access, not a variable reference.
+(exprDot
+  rhs: (identifier) @_)
+
+; Procedure/function names in call position are not variable references.
+(exprCall
+  entity: (identifier) @_)

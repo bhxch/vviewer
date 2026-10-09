@@ -1,8 +1,14 @@
-; injections.scm
-(json_value) @json
-(xml) @xml
+((comment) @injection.content
+ (#set! injection.language "comment"))
 
-(multiline_string
-  (multiline_string_type) @language
-  (multiline_string_content) @content @include-children @combined)
+((json_value) @injection.content
+  (#set! injection.language "json"))
 
+((xml) @injection.content
+  (#set! injection.language "xml"))
+
+((multiline_string
+  (multiline_string_type) @injection.language
+  (multiline_string_content) @injection.content)
+  (#set! injection.include-children)
+  (#set! injection.combined))

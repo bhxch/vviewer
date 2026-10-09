@@ -28,6 +28,9 @@
 (line_comment) @comment.line
 (block_comment) @comment.block
 
+; Base catch-all: every specific identifier rule below overrides it.
+(identifier) @variable
+
 ; imports (WESL extension)
 
 (import_item (identifier) @type
@@ -106,8 +109,6 @@
 (named_component_expression
   component: (_) @variable.other.member)
 
-(identifier) @variable
-
 ; literals
 
 (bool_literal) @constant.builtin.boolean
@@ -120,29 +121,37 @@
 [
   "if"
   "else"
+] @keyword.control.conditional
+[
   "loop"
   "for"
   "while"
+  "break"
+  "continue"
+] @keyword.control.repeat
+[
+  "return"
+] @keyword.control.return
+[
   "switch"
   "case"
   "default"
-  "break"
-  "continue"
-  "return"
   "discard"
 ] @keyword.control
-
 [ ; WESL import extension
   "import"
   "as"
 ] @keyword.control.import
-
+[
+  "fn"
+] @keyword.function
 [
   "var"
   "let"
   "const"
-  "fn"
   "struct"
+] @keyword.storage.type
+[
   "alias"
   "virtual" ; Bevy / naga_oil extension
   "override" ; Bevy / naga_oil extension

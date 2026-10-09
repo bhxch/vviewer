@@ -22,15 +22,9 @@
 "in"
 ] @keyword
 
-; Function calls
-
-(call_expression
-  function: (identifier) @function)
-
-(member_call_expression
-  function: (identifier) @function)
-
 ; Identifiers
+
+(identifier) @variable.other.member
 
 (select_expression
   operand: (identifier) @type)
@@ -39,7 +33,13 @@
   operand: (select_expression
     member: (identifier) @type))
 
-(identifier) @property
+; Function calls
+
+(call_expression
+  function: (identifier) @function)
+
+(member_call_expression
+  function: (identifier) @function)
 
 ; Literals
 
@@ -53,13 +53,14 @@
 [
   (int_literal)
   (uint_literal)
-  (float_literal)
-] @number
+] @constant.numeric.integer
+(float_literal) @constant.numeric.float
 
 [
   (true)
   (false)
-  (null)
-] @constant.builtin
+] @constant.builtin.boolean
+
+(null) @constant.builtin
 
 (comment) @comment

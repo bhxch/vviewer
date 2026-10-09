@@ -32,6 +32,10 @@
 ; -----------
 ; (call_expression name: (identifier) @variable.parameter)
 
+; Member access. Before the call rule below so a method call `o.m()` reclaims
+; @function, while a plain `o.field` stays a member.
+(member_expression member: (identifier) @variable.other.member)
+
 ; TODO: Figure out how to determined when "nested member call" is last ident.
 ; apparently this is a known issue https://github.com/tree-sitter/tree-sitter/issues/880
 (call_expression object: [
@@ -48,14 +52,15 @@
 ; [(keyword) (null)] @keyword
 ; (type) @type
 (type_name) @type
-(package_name) @module
+(package_name) @namespace
 (type (identifier) !built_in) @type
 (type built_in: (identifier)) @type.builtin
-[(integer) (float)] @number
+(integer) @constant.numeric.integer
+(float) @constant.numeric.float
 (string) @string
-(bool) @boolean
+(bool) @constant.builtin.boolean
 (operator) @operator
-(escape_sequence) @punctuation
+(escape_sequence) @constant.character.escape
 (null) @constant.builtin
 (access_identifiers "null" @keyword)
 

@@ -1,53 +1,95 @@
-(comment) @comment
+[(comment) (single_line_comment)] @comment
+
+[
+ "~"
+ ">"
+ "+"
+ "-"
+ "*"
+ "/"
+ "="
+ "^="
+ "|="
+ "~="
+ "$="
+ "*="
+] @operator
+
+[
+  "in"
+  "and"
+  "or"
+  "not"
+  "only"
+] @operator.control
+
+[
+  "@apply"
+  "@at-root"
+  "@charset"
+  "@debug"
+  "@error"
+  "@extend"
+  "@keyframes"
+  "@media"
+  "@mixin"
+  "@supports"
+  "@warn"
+] @constant.builtin
+
+[
+  "@import"
+  "@include"
+  "@forward"
+  "@use"
+] @keyword.control.import
+
+[
+  "@if"
+  "@else"
+] @keyword.control.conditional
+
+[
+  "@each"
+  "@for"
+  "@while"
+] @keyword.control.repeat
+
+"@return" @keyword.control.return
+
+"@function" @function.method
+"@namespace" @namespace
+
+(property_name) @variable.other.member
+
+((property_name) @variable
+ (#match? @variable "^--"))
+((plain_value) @variable
+ (#match? @variable "^--"))
 
 (tag_name) @tag
-(nesting_selector) @tag
 (universal_selector) @tag
-
-"~" @operator
-">" @operator
-"+" @operator
-"-" @operator
-"*" @operator
-"/" @operator
-"=" @operator
-"^=" @operator
-"|=" @operator
-"~=" @operator
-"$=" @operator
-"*=" @operator
-
-"and" @operator
-"or" @operator
-"not" @operator
-"only" @operator
-
 (attribute_selector (plain_value) @string)
-(pseudo_element_selector (tag_name) @attribute)
-(pseudo_class_selector (class_name) @attribute)
+(nesting_selector) @variable.other.member
+(pseudo_element_selector) @attribute
+(pseudo_class_selector) @attribute
 
-(class_name) @property
-(id_name) @property
-(namespace_name) @property
-(property_name) @property
-(feature_name) @property
+(identifier) @variable
+(class_name) @label
+(id_name) @label
+(namespace_name) @namespace
+
+(feature_name) @variable.other.member
+(variable) @variable
+(variable_name) @variable.other.member
+(variable_value) @variable.other.member
+(argument_name) @variable.parameter
+(selectors) @variable.other.member
 
 (attribute_name) @attribute
 
 (function_name) @function
 
-((property_name) @variable
- (match? @variable "^--"))
-((plain_value) @variable
- (match? @variable "^--"))
-
-"@media" @keyword
-"@import" @keyword
-"@charset" @keyword
-"@namespace" @keyword
-"@supports" @keyword
-"@keyframes" @keyword
-(at_keyword) @keyword
 (to) @keyword
 (from) @keyword
 (important) @keyword
@@ -55,8 +97,8 @@
 (string_value) @string
 (color_value) @string.special
 
-(integer_value) @number
-(float_value) @number
+(integer_value) @constant.numeric.integer
+(float_value) @constant.numeric.float
 (unit) @type
 
 "#" @punctuation.delimiter

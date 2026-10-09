@@ -1,12 +1,3 @@
-(signature
-  name: (variable)) @local.definition
-
-(function
-  name: (variable)) @local.definition
-
-(pat_name
-  (variable)) @local.definition
-
-(exp_name
-  (variable)) @local.reference
-
+(signature name: (variable) @local.definition.function)
+(function name: (variable) @local.definition.function)
+(exp_name (variable)) @local.reference

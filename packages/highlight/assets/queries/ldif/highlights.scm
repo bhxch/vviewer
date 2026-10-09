@@ -1,28 +1,20 @@
 (comment) @comment
 
-; (AttributeDescription) @comment
-
-; (attributeType) @type
+(attributeType) @type.parameter
 
 ((distinguishedName
   (name
     (name_componet
       (attributeTypeAndValue
         (attributeType) @comment
-        (string) @type
+        (string) @type.parameter
           )))) @comment)
 
-(pair) @escape
 
-(mod_spec
-  (AttributeDescription
-    (attributeType
-      ))) @comment
+(dn_spec) @constant
+(changerecord) @constant
+(mod_spec) @constant
 
-    (mod_spec
-      (attrval_spec
-        (AttributeDescription
-          (attributeType)))) @type
+(change_modify) @string
 
-
-(ERROR) @error
+(value_spec) @keyword

@@ -10,11 +10,13 @@
   (test_case_setting)
 ] @keyword
 
-(variable_definition (variable_name) @variable)
+(scalar_variable (variable_name) @variable)
+(list_variable (variable_name) @variable)
+(dictionary_variable (variable_name) @variable)
 (keyword_definition (name) @function)
 (test_case_definition (name) @function)
 
-(keyword_invocation (keyword) @function.call)
+(keyword_invocation (keyword) @function)
 (ellipses) @punctuation.delimiter
 
 (text_chunk) @string
@@ -27,6 +29,8 @@
 
 ; Control structures
 
+"RETURN" @keyword.control.return
+
 [
   "FOR"
   "IN"
@@ -35,23 +39,23 @@
   "IN ZIP"
   (break_statement)
   (continue_statement)
-] @repeat
-(for_statement "END" @repeat)
+] @keyword.control.repeat
+(for_statement "END" @keyword.control.repeat)
 
-"WHILE" @repeat
-(while_statement "END" @repeat)
+"WHILE" @keyword.control.repeat
+(while_statement "END" @keyword.control.repeat)
 
 [
   "IF"
   "ELSE IF"
-] @conditional
-(if_statement "END" @conditional)
-(if_statement (else_statement "ELSE" @conditional))
+] @keyword.control.conditional
+(if_statement "END" @keyword.control.conditional)
+(if_statement (else_statement "ELSE" @keyword.control.conditional))
 
 [
   "TRY"
   "EXCEPT"
   "FINALLY"
-] @exception
-(try_statement "END" @exception)
-(try_statement (else_statement "ELSE" @exception))
+] @keyword.control.exception
+(try_statement "END" @keyword.control.exception)
+(try_statement (else_statement "ELSE" @keyword.control.exception))

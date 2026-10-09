@@ -7,8 +7,9 @@
 [
   (network_address)
   (ip_address_or_cidr)
-  (path)
-] @type
+] @string.special.url
+
+(path) @string.special.path
 
 [
   (snippet_name)
@@ -16,7 +17,7 @@
   (site_address)
 ] @keyword
 
-(directive (directive_name) @property)
+(directive (directive_name) @variable.other.member)
 
 ; declaration of a named matcher
 (named_matcher (matcher_identifier (matcher_name)) @function.macro)
@@ -36,14 +37,37 @@
   (heredoc)
   (cel_expression)
 ] @string
-(escape_sequence) @escape
+(escape_sequence) @constant.character.escape
 
 [
   (duration_literal)
   (int_literal)
-] @number
+  (status_code_fallback)
+] @constant.numeric
 
 [
   "{"
   "}"
 ] @punctuation.bracket
+
+(global_options
+  (directive) @keyword.directive)
+
+(directive
+  name: (directive_name)
+  (argument) @type)
+
+; matches directive arguments that looks like an absolute path
+; e.g.
+; log {
+;     output file /var/log/caddy.log
+; }
+(directive
+  (argument) @string.special.path
+  (#match? @string.special.path "^/"))
+
+((argument) @constant.builtin.boolean
+  (#any-of? @constant.builtin.boolean "on" "off"))
+
+((argument) @type.enum.variant
+  (#any-of? @type.enum.variant "tcp" "udp" "ipv4" "ipv6"))

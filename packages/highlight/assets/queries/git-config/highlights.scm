@@ -1,27 +1,29 @@
-((section_name) @function.builtin
- (#eq? @function.builtin "include"))
+(section_name) @markup.heading
+
+((section_name) @keyword.directive
+ (#eq? @keyword.directive "include"))
 
 ((section_header
-   (section_name) @function.builtin
+   (section_name) @keyword.directive
    (subsection_name))
- (#eq? @function.builtin "includeIf"))
+ (#eq? @keyword.directive "includeIf"))
 
-(section_name) @tag
-(variable (name) @property)
-[(true) (false)] @constant.builtin
-(integer) @number
+(variable (name) @variable.other.member)
+[(true) (false)] @constant.builtin.boolean
+(integer) @constant.numeric.integer
+
+[(string) (subsection_name)] @string
 
 ((string) @string.special.path
  (#match? @string.special.path "^(~|./|/)"))
 
-[(string) (subsection_name)] @string
-
 [
   "["
   "]"
-  "\""
 ] @punctuation.bracket
 
-"=" @punctuation.delimiter
+["=" "\\"] @punctuation.delimiter
+
+(escape_sequence) @constant.character.escape
 
 (comment) @comment

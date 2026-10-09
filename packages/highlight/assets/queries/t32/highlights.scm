@@ -1,8 +1,28 @@
-;;; SPDX-FileCopyrightText: 2022 Christoph Sax <c_sax@mailbox.org>
-;;;
-;;; SPDX-License-Identifier: MIT
+; Operators in command and conditional HLL expressions
+(hll_comma_expression
+  "," @operator)
+
+(hll_conditional_expression
+  [
+   "?"
+   ":"
+] @operator)
+
 
 ; Keywords, punctuation and operators
+[
+  "enum"
+  "struct"
+  "union"
+] @keyword.storage.type
+
+"sizeof" @keyword.operator
+
+[
+  "const"
+  "volatile"
+] @keyword.storage.modifier
+
 [
   "="
   "^^"
@@ -61,28 +81,10 @@
   "."
 ] @punctuation.delimiter
 
-[
-  "enum"
-  "struct"
-  "union"
-] @keyword
+; HLL variables
+(identifier) @variable
+(hll_field_identifier) @variable.other.member
 
-"sizeof" @keyword.operator
-
-[
-  "const"
-  "volatile"
-] @type.qualifier
-
-; Operators in command and conditional HLL expressions
-(hll_comma_expression
-  "," @operator)
-
-(hll_conditional_expression
-  [
-   "?"
-   ":"
-] @conditional.ternary)
 
 ; Strings and others literal types
 (access_class) @constant.builtin
@@ -93,28 +95,30 @@
   (file_handle)
   (integer)
   (hll_number_literal)
-] @number
+] @constant.numeric.integer
 
 [
   (float)
   (frequency)
   (percentage)
   (time)
-] @float
+] @constant.numeric.float
 
 [
   (string)
   (hll_string_literal)
 ] @string
 
-(hll_escape_sequence) @string.escape
+(hll_escape_sequence) @constant.character.escape
 
-(path) @string.special
+(path) @string.special.path
+(symbol) @string.special.symbol
 
 [
   (character)
   (hll_char_literal)
-] @character
+] @constant.character
+
 
 ; Types in HLL expressions
 [
@@ -122,68 +126,59 @@
   (hll_type_descriptor)
 ] @type
 
-(hll_type_qualifier) @type.qualifier
+(hll_type_qualifier) @keyword.storage.modifier
 
 (hll_primitive_type) @type.builtin
 
-; HLL variables
-(identifier) @variable
-(hll_field_identifier) @field
 
 ; HLL call expressions
 (hll_call_expression
-  function: (identifier) @function.call)
+  function: (hll_field_expression
+    field: (hll_field_identifier) @function))
 
 (hll_call_expression
-  function: (hll_field_expression
-    field: (hll_field_identifier) @function.call))
+  function: (identifier) @function)
 
-; Commands
-(command_expression command: (identifier) @keyword)
-(macro_definition command: (identifier) @keyword)
-
-(call_expression
-  function: (identifier) @function.builtin)
 
 ; Returns
 (
   (command_expression
-    command: (identifier) @keyword.return)
-  (#match? @keyword.return "^[eE][nN][dD]([dD][oO])?$")
+    command: (identifier) @keyword.control.return)
+  (#match? @keyword.control.return "^[eE][nN][dD]([dD][oO])?$")
 )
 (
   (command_expression
-    command: (identifier) @keyword.return)
-  (#match? @keyword.return "^[rR][eE][tT][uU][rR][nN]$")
+    command: (identifier) @keyword.control.return)
+  (#match? @keyword.control.return "^[rR][eE][tT][uU][rR][nN]$")
 )
+
 
 ; Subroutine calls
 (subroutine_call_expression
   command: (identifier) @keyword
-  subroutine: (identifier) @function.call)
+  subroutine: (identifier) @function)
+
+
+; Subroutine blocks
+(subroutine_block
+  command: (identifier) @keyword
+  subroutine: (identifier) @function)
+
+(labeled_expression
+  label: (identifier) @function
+  (block))
+
+
+; Parameter declarations
+(parameter_declaration
+  command: (identifier) @keyword
+  (identifier)? @constant.builtin
+  macro: (macro) @variable.parameter)
+
 
 ; Variables, constants and labels
 (macro) @variable.builtin
-
-(symbol) @variable
-
-(argument_list
-  (identifier) @constant.builtin)
-
-(
-  (argument_list (identifier) @constant.builtin)
-  (#match? @constant.builtin "^[%/][a-zA-Z][a-zA-Z0-9.]*$")
-)
-
-(
-  (symbol) @constant
-  (#match? @constant "^\\\\\\\\\\\\[^\\\\]*(\\\\\\\\[^\\\\]*)?(\\\\[^\\\\]*)?$")
-)
-
-(
-  (symbol) @constant
-  (#match? @constant "^\\\\\\\\[^\\\\]*(\\\\[^\\\\]*)?$")
-)
+(trace32_hll_variable) @variable.builtin
 
 (
   (command_expression
@@ -191,7 +186,6 @@
     arguments: (argument_list . (identifier) @label))
   (#match? @keyword "^[gG][oO][tT][oO]$")
 )
-
 (labeled_expression
   label: (identifier) @label)
 
@@ -201,32 +195,33 @@
 (format_expression
   (identifier) @constant.builtin)
 
-; Subroutine blocks
-(subroutine_block
-  command: (identifier) @keyword.function
-  subroutine: (identifier) @function)
+(
+  (argument_list (identifier) @constant.builtin)
+  (#match? @constant.builtin "^[%/][a-zA-Z][a-zA-Z0-9.]*$")
+)
+(argument_list
+  (identifier) @constant.builtin)
 
-(labeled_expression
-  label: (identifier) @function
-  (block))
 
-; Parameter declarations
-(parameter_declaration
-  command: (identifier) @keyword
-  (identifier)? @constant.builtin
-  macro: (macro) @variable.parameter)
+; Commands
+(command_expression command: (identifier) @keyword)
+(macro_definition command: (identifier) @keyword)
+
+(call_expression
+  function: (identifier) @function.builtin)
+
 
 ; Control flow
 (if_block
-  command: (identifier) @conditional)
-(elif_block
-  command: (identifier) @conditional)
+  command: (identifier) @keyword.control.conditional)
 (else_block
-  command: (identifier) @conditional)
+  command: (identifier) @keyword.control.conditional)
 
 (while_block
-  command: (identifier) @repeat)
+  command: (identifier) @keyword.control.repeat)
 (repeat_block
-  command: (identifier) @repeat)
+  command: (identifier) @keyword.control.repeat)
+
+
 
 (comment) @comment

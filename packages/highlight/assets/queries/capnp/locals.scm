@@ -1,3 +1,5 @@
+; Scopes
+
 [
   (message)
   (annotation_targets)
@@ -12,79 +14,23 @@
   (struct)
   (struct_shorthand)
   (union)
-] @scope
+] @local.scope
+
+; References
 
 [
   (extend_type)
   (field_type)
-] @reference
-(custom_type (type_identifier) @reference)
+] @local.reference
+(custom_type (type_identifier) @local.reference)
 (custom_type
   (generics
     (generic_parameters 
-      (generic_identifier) @reference)))
+      (generic_identifier) @local.reference)))
 
-(annotation_definition_identifier) @definition
-
-(const_identifier) @definition.constant
-
-(enum (enum_identifier) @definition.enum)
-
-[
-  (enum_member)
-  (field_identifier)
-] @definition.field
-
-(method_identifier) @definition.method
-
-(namespace) @definition.namespace
+; Definitions
 
 [
   (param_identifier)
   (return_identifier)
-] @definition.parameter
-
-(group (type_identifier) @definition.type)
-
-(struct (type_identifier) @definition.type)
-
-(union (type_identifier) @definition.type)
-
-(interface (type_identifier) @definition.type)
-
-; Generics Related (don't know how to combine these)
-
-(struct
-  (generics
-    (generic_parameters
-      (generic_identifier) @definition.parameter)))
-
-(interface
-  (generics
-    (generic_parameters
-      (generic_identifier) @definition.parameter)))
-
-(method
-  (implicit_generics
-    (implicit_generic_parameters
-      (generic_identifier) @definition.parameter)))
-
-(method
-  (generics
-    (generic_parameters
-      (generic_identifier) @definition.parameter)))
-
-(annotation
-  (generics
-    (generic_parameters
-      (generic_identifier) @definition.type)))
-
-(replace_using
-  (generics
-    (generic_parameters
-      (generic_identifier) @definition.type)))
-
-(return_type
-  (generics
-    (generic_parameters
-      (generic_identifier) @definition.type)))
+] @local.definition.variable.parameter

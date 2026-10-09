@@ -2,25 +2,47 @@
 
 [(pod_command)
  (command)
- (cut_command)
- (begin_command)
- (end_command)
- (for_command)] @keyword
+ (cut_command)] @keyword
 
 (command_paragraph
   (command) @keyword
-  (#match? @keyword "^=head")
-  (content) @text.title)
+  (#eq? @keyword "=head1")
+  (content) @markup.heading.1)
+
+(command_paragraph
+  (command) @keyword
+  (#eq? @keyword "=head2")
+  (content) @markup.heading.2)
+
+(command_paragraph
+  (command) @keyword
+  (#eq? @keyword "=head3")
+  (content) @markup.heading.3)
+
+(command_paragraph
+  (command) @keyword
+  (#eq? @keyword "=head4")
+  (content) @markup.heading.4)
+
+(command_paragraph
+  (command) @keyword
+  (#eq? @keyword "=head5")
+  (content) @markup.heading.5)
+
+(command_paragraph
+  (command) @keyword
+  (#eq? @keyword "=head6")
+  (content) @markup.heading.6)
 
 (command_paragraph
   (command) @keyword
   (#match? @keyword "^=over")
-  (content) @number)
+  (content) @constant.numeric)
 
 (command_paragraph
   (command) @keyword
   (#match? @keyword "^=item")
-  (content) @text)
+  (content) @markup)
 
 (command_paragraph
   (command) @keyword
@@ -32,48 +54,44 @@
   (#not-match? @keyword "^=(head|over|item|encoding)")
   (content) @string)
 
-(verbatim_paragraph (content) @text.literal)
-
-(begin_paragraph (format_name) @string.special)
-(for_paragraph (format_name) @string.special)
-(begin_paragraph (data) @text.literal)
+(verbatim_paragraph (content) @markup.raw)
 
 (interior_sequence
-  (sequence_letter) @character
+  (sequence_letter) @constant.character
   ["<" ">"] @punctuation.delimiter
 )
 
 (interior_sequence
   (sequence_letter) @character
   (#eq? @character "B")
-  (content) @text.strong)
+  (content) @markup.bold)
 
 (interior_sequence
   (sequence_letter) @character
   (#eq? @character "C")
-  (content) @text.literal)
+  (content) @markup.literal)
 
 (interior_sequence
   (sequence_letter) @character
   (#eq? @character "F")
-  (content) @text.underline @string.special)
+  (content) @markup.underline @string.special)
 
 (interior_sequence
   (sequence_letter) @character
   (#eq? @character "I")
-  (content) @text.emphasis)
+  (content) @markup.bold)
 
 (interior_sequence
   (sequence_letter) @character
   (#eq? @character "L")
-  (content) @text.uri)
+  (content) @markup.link.url)
 
 (interior_sequence
   (sequence_letter) @character
   (#eq? @character "X")
-  (content) @text.reference)
+  (content) @markup.reference)
 
-(interior_sequence
+(escape_sequence
   (sequence_letter) @character
-  (#eq? @character "E")
-  (content) @string.escape)
+  ["<" ">"] @punctuation.delimiter
+  (content) @string.special.escape)

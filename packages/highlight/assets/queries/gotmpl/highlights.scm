@@ -1,9 +1,9 @@
 ; Identifiers
 
 [
-    (field)
-    (field_identifier)
-] @property
+  (field)
+  (field_identifier)
+] @variable.other.member
 
 (variable) @variable
 
@@ -19,6 +19,7 @@
 ; Operators
 
 "|" @operator
+"=" @operator
 ":=" @operator
 
 ; Builtin functions
@@ -38,16 +39,43 @@
 ")" @punctuation.bracket
 "(" @punctuation.bracket
 
-; Keywords
+; Actions
 
-"else" @keyword
-"if" @keyword
-"range" @keyword
-"with" @keyword
-"end" @keyword
-"template" @keyword
-"define" @keyword
-"block" @keyword
+(if_action
+  [
+    "if"
+    "else"
+    "end"
+  ] @keyword.control.conditional)
+
+(range_action
+  [
+    "range"
+    "else"
+    "end"
+  ] @keyword.control.conditional)
+
+(template_action
+  "template" @function.builtin)
+
+(block_action
+  [
+    "block"
+    "end"
+  ] @keyword.directive)
+
+(define_action
+  [
+    "define"
+    "end"
+  ] @keyword.directive)
+
+(with_action
+  [
+    "with"
+    "else"
+    "end"
+  ] @keyword.control.conditional)
 
 ; Literals
 
@@ -61,15 +89,16 @@
 
 [
   (int_literal)
-  (float_literal)
   (imaginary_literal)
-] @number
+] @constant.numeric.integer
+
+(float_literal) @constant.numeric.float
 
 [
   (true)
   (false)
-  (nil)
-] @constant.builtin
+] @constant.builtin.boolean
+
+(nil) @constant.builtin
 
 (comment) @comment
-(ERROR) @error

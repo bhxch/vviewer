@@ -2,51 +2,31 @@
 ;
 ; Highlighting queries for D code for use by Tree-Sitter.
 ;
-; Copyright 2024 Garrett D'Amore
+; Copyright 2022 Garrett D'Amore
 ;
 ; Distributed under the MIT License.
 ; (See accompanying file LICENSE.txt or https://opensource.org/licenses/MIT)
 ; SPDX-License-Identifier: MIT
 
-(string_literal) @string
-(int_literal) @number
-(float_literal) @number
-(char_literal) @number
 (identifier) @variable
-(at_attribute) @property
-(htmlentity) @string.special
-(escape_sequence) @string.escape
 
-[
-	(lazy)
-	(align)
-	(extern)
-	(static)
-	(abstract)
-	(final)
-	(override)
-	(synchronized)
-	(auto)
-	(scope)
-	(gshared)
-	(ref)
-	(deprecated)
-	(nothrow)
-	(pure)
-	(type_ctor)
-] @keyword.storage
+; these are listed first, because they override keyword queries
+(identity_expression (in) @operator)
+(identity_expression (is) @operator)
 
-(parameter_attribute (return) @keyword.storage)
-(parameter_attribute (in) @keyword.storage)
-(parameter_attribute (out) @keyword.storage)
+(storage_class) @keyword.storage
 
 (function_declaration (identifier) @function)
 
 (call_expression (identifier) @function)
-(call_expression (type (template_instance (identifier) @function)))
-(template_arguments (identifier) @variable.parameter)
+(call_expression (type (identifier) @function))
 
-(named_argument (identifier) @variable.parameter)
+; Member access `o.field`: the trailing identifier of a property expression
+; (anchored so the receiver isn't captured). Method calls parse as a
+; call_expression and keep @function above.
+(property_expression (identifier) @variable.other.member .)
+
+(module_fqn) @namespace
 
 [
     (abstract)
@@ -56,22 +36,16 @@
     (assert)
     (auto)
     (cast)
-    (class)
     (const)
     (debug)
-    (delegate)
     (delete)
     (deprecated)
-    (enum)
     (export)
     (extern)
     (final)
-    (function)
     (immutable)
-    (import)
     (in)
     (inout)
-    (interface)
     (invariant)
     (is)
     (lazy)
@@ -92,7 +66,6 @@
     (scope)
     (shared)
     (static)
-    (struct)
     (super)
     (synchronized)
     (template)
@@ -100,7 +73,6 @@
     (throw)
     (typeid)
     (typeof)
-    (union)
     (unittest)
     (version)
     (with)
@@ -111,6 +83,16 @@
 ] @keyword
 
 [
+    (class)
+    (struct)
+    (interface)
+    (union)
+    (enum)
+    (function)
+    (delegate)
+] @keyword.storage.type
+
+[
     (break)
     (case)
     (catch)
@@ -119,16 +101,22 @@
     (default)
     (finally)
     (else)
-    (for)
-    (foreach)
-    (foreach_reverse)
     (goto)
     (if)
     (switch)
     (try)
-    (return)
-    (while)
 ] @keyword.control
+
+(return) @keyword.control.return
+
+(import) @keyword.control.import
+
+[
+    (for)
+    (foreach)
+    (foreach_reverse)
+    (while)
+] @keyword.control.repeat
 
 [
     (not_in)
@@ -180,6 +168,13 @@
 ] @operator
 
 [
+    "("
+    ")"
+    "["
+    "]"
+] @punctuation.bracket
+
+[
     ";"
     "."
     ":"
@@ -187,21 +182,13 @@
 ] @punctuation.delimiter
 
 [
-    "("
-    ")"
-    "["
-    "["
-    "{"
-    "}"
-] @punctuation.bracket
-
-[
-    (null)
     (true)
     (false)
-] @constant.language
+] @constant.builtin.boolean
 
-(special_keyword) @constant.language
+(null) @constant.builtin
+
+(special_keyword) @constant.builtin
 
 (directive) @keyword.directive
 (shebang) @keyword.directive
@@ -224,13 +211,9 @@
     (ulong)
     (real)
     (double)
-    (float)
+    (noreturn)
     (size_t)
     (ptrdiff_t)
-    (string)
-    (cstring)
-    (wstring)
-    (noreturn)
 ] @type.builtin
 
 [
@@ -242,18 +225,24 @@
     (creal)
     (double)
     (cfloat)
-] @type.deprecated
+] @warning ; these types are deprecated
+
+; Named arguments `foo(name: value)` (D named-args proposal).
+(named_argument
+  (identifier) @variable.parameter)
 
 (label (identifier) @label)
-(goto_statement (goto) @keyword.control (identifier) @label)
+(goto_statement (goto) @keyword (identifier) @label)
 
-; this covers other cases where the identifier can only
-; be a type (such as in an is-expression on a constraint)
-(type (identifier) @type)
-
-; these are listed last, because they override keyword queries
-(identity_expression (in) @operator)
-(identity_expression (is) @operator)
+(string_literal) @string
+(escape_sequence) @constant.character.escape
+; Interpolated strings `i"…$(expr)…"`: reset the embedded expression so it isn't
+; coloured as part of the string.
+(interpolation_expression) @none
+(int_literal) @constant.numeric.integer
+(float_literal) @constant.numeric.float
+(char_literal) @constant.character
+(at_attribute) @attribute
 
 ; everything after __EOF_ is plain text
-(end_file) @text
+(end_file) @ui.text

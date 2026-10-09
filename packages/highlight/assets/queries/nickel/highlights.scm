@@ -1,84 +1,72 @@
-(comment) @comment @spell
-(annot_atom doc: (static_string) @spell)
-
-[
-  "forall"
-  "in"
-  "let"
-  "default"
-  "doc"
-  "rec"
-  "optional"
-  "priority"
-  "force"
-  "not_exported"
-] @keyword
-
-"fun" @keyword.function
-
-"import" @include
-
-[ "if" "then" "else" ] @conditional
-"match" @conditional
-
 (types) @type
+(type_builtin) @type.builtin
 "Array" @type.builtin
 
-; BUILTIN Constants
-(bool) @boolean
+(enum_tag) @constructor
+
 "null" @constant.builtin
-(enum_tag) @constant
+(bool) @constant.builtin.boolean
+(str_esc_char) @constant.character.escape
+(num_literal) @constant.numeric
 
-(num_literal) @number
+(str_chunks) @string
 
-(infix_op) @operator
+; NOTE: Nickel has no block comments
+(comment) @comment.line
+; Nickel doesn't use comments for documentation, ideally this would be
+; `@documentation` or something similar
+(annot_atom
+  doc: (static_string) @comment.block.documentation
+)
 
-(type_atom) @type
+(record_operand (atom (ident) @variable))
+(let_in_block
+  "let" @keyword
+  "rec"? @keyword
+  "in" @keyword
+)
 
-(chunk_literal_single) @string
-(chunk_literal_multi) @string
+(let_binding
+  pat: (pattern
+    (ident) @variable
+  )
+)
 
-(str_esc_char) @string.escape
+(fun_expr
+  "fun" @keyword.function
+  pats:
+    (pattern_fun (ident) @variable.parameter)+
+  "=>" @operator
+)
+(record_field) @variable.other.member
+; Field access `o.field`: the id of a record operation chain.
+(record_operation_chain id: (ident) @variable.other.member)
 
 [
- "{" "}"
- "(" ")"
- "[|" "|]"
-] @punctuation.bracket
-
-[
- ","
- "."
- ":"
- "="
- "|"
- "->"
- "+"
- "-"
- "*"
+  "."
 ] @punctuation.delimiter
-
+[
+  "{" "}"
+  "(" ")"
+  "[|" "|]"
+  "[" "]"
+] @punctuation.bracket
 (multstr_start) @punctuation.bracket
 (multstr_end) @punctuation.bracket
 (interpolation_start) @punctuation.bracket
 (interpolation_end) @punctuation.bracket
 
-(record_field) @field
+["forall" "default" "doc"] @keyword
+["if" "then" "else" "match"] @keyword.control.conditional
+"import" @keyword.control.import
 
-(builtin) @function.builtin
+(infix_expr
+  op: (_) @operator
+)
 
-(fun_expr pats:
-  (pattern_fun
-    (ident) @parameter
+(applicative
+  t1: (applicative
+    (record_operand) @function
   )
 )
-
-; application where the head terms is an identifier: function arg1 arg2 arg3
-(applicative t1:
-  (applicative (record_operand (atom (ident))) @function)
-)
-
-; application where the head terms is a record field path: foo.bar.function arg1 arg2 arg3
-(applicative t1:
-  (applicative (record_operand (record_operation_chain)) @function)
-)
+(builtin) @function.builtin

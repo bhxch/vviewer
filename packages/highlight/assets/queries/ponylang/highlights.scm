@@ -1,41 +1,33 @@
-; names to assign: 
-; - attribute
-; - comment
-; - constant
-; - constant.builtin
-; - constructor
-; - embedded
-; - keyword
-; - function
-; - function.builtin
-; - module
-; - number
-; - operator
-; - punctuation.bracket
-; - punctuation.delimiter
-; - property
-; - string
-; - string.special
-; - tag
-; - type
-; - type.builtin
-; - variable
-; - variable.parameter,
-
-;; Comments
 [
- (line_comment)
- (block_comment)
+  (line_comment)
+  (block_comment)
 ] @comment
+
+(bool) @constant.builtin.boolean
+(integer) @constant.numeric.integer
+(float) @constant.numeric.float
+(character) @constant.character
+
+;; strings and docstring
+(string) @string
+(source_file docstring: (string) @string.special)
+(entity docstring: (string) @string.special)
+(method docstring: (string) @string.special) ; docstring for methods without body
+(behavior docstring: (string) @string.special) ; docstring for methods without body
+(constructor docstring: (string) @string.special) ; docstring for methods without body
+(method body: (block . (string) @string.special)) ; docstring for methods with body
+(behavior body: (block . (string) @string.special))
+(constructor body: (block . (string) @string.special))
+(field docstring: (string) @string.special)
 
 ;; Punctuation
 [
- "("
- ")"
- "{"
- "}"
- "["
- "]"
+  "("
+  ")"
+  "{"
+  "}"
+  "["
+  "]"
 ] @punctuation.bracket
 [
   ";"
@@ -43,107 +35,142 @@
   ","
 ] @punctuation.delimiter
 
-;; keywords
-(cap) @keyword
-(entity_type) @keyword
+(this) @variable.builtin
+
+(field name: (identifier) @variable.other.member)
+
+"use" @keyword.control.import
+[
+  "for"
+  "in"
+  "while"
+  "do"
+  "repeat"
+  "until"
+] @keyword.control.repeat
 [
  "if"
  "ifdef"
+ "iftype"
  "then"
- "else"
  "elseif"
- "end"
- "try"
- "while"
- "for"
- "use"
- "as"
- "var"
- "let"
- "embed"
- "fun"
- "be"
- "new"
+ "else"
+ "match"
+] @keyword.control.conditional
+[
+  "break"
+  "continue"
+  "return"
+  "error"
+  "compile_error"
+  "compile_intrinsic"
+] @keyword.control.return
+[
+  "recover"
+  "consume"
+  "end"
+  "try"
+  "with"
+] @keyword.control
+
+[
+  "as"
+  "is"
+  "isnt"
+  "not"
+  "and"
+  "or"
+  "xor"
+  "digestof"
+  "addressof"
+  (location)
+] @keyword.operator
+
+(entity_type) @keyword.storage.type
+
+[
+  "var"
+  "let"
+  "embed"
+] @keyword.storage
+
+[
+  "fun"
+  "be"
+  "new"
+] @keyword.function
+
+[
+  (cap)
+  (gencap)
+  "where"
 ] @keyword
 
-;; Operators
 [
- (partial)
- "=>"
+  (partial)
+  "=>"
+  "~"
+  ".>"
+  "+"
+  "-"
+  "*"
+  "/"
+  "%"
+  "%%"
+  "+~"
+  "-~"
+  "/~"
+  "*~"
+  "%~"
+  "%%~"
 
- "~"
- ".>"
+  ">>"
+  "<<"
+  ">>~"
+  "<<~"
 
- "+"
- "-"
- "*"
- "/"
- "%"
- "%%"
- "+~"
- "-~"
- "/~"
- "*~"
- "%~"
- "%%~"
-
- ">>"
- "<<"
- ">>~"
- "<<~"
-
- "=="
- "!="
- ">"
- "<"
- ">="
- "<="
-
- "and"
- "or"
- "xor"
- "is"
- "isnt"
- "not"
+  "=="
+  "!="
+  ">"
+  "<"
+  ">="
+  "<="
 ] @operator
 
-;; literals
-(bool) @constant.builtin
-[
-  (integer)
-  (float)
-] @number
-
-;; strings/docstrings
-(source_file docstring: (string) @string.special)
-(entity docstring: (string) @string.special)
-(constructor docstring: (string) @string.special)
-(method docstring: (string) @string.special)
-(behavior docstring: (string) @string.special)
-(constructor body: (block . (string) @string.special))
-(method body: (block . (string) @string.special))
-(behavior body: (block . (string) @string.special))
-(field docstring: (string) @string.special)
-(string) @string
-
-;; fields/params and other non-variable identifiers
-(field name: (identifier) @property)
-(param (identifier) @variable.parameter)
-(lambdaparam (identifier) @variable.parameter)
+;; variables
+;; references to upper case things are considered constructors
+(identifier) @variable
+(
+  (identifier) @constructor
+  (#match? @constructor "^[A-Z]")
+)
 
 ;; Types
 (entity name: (identifier) @type)
 (nominal_type name: (identifier) @type)
 (typeparams (typeparam name: (identifier) @type))
-;(type) @type
 
-
-
-; constructors / methods / behaviours names
+;; constructors / methods / behaviors
 (constructor name: (identifier) @constructor)
 (method name: (identifier) @function.method)
 (behavior name: (identifier) @function.method)
 
-;; variables
-(local name: (identifier) @variable)
-(identifier) @variable
+;; method calls
+; TODO: be more specific about what is the actual function reference
+(call callee: (field_access field: (identifier) @function.method))
+(call callee: (_) @function.method)
+(ffi_call name: (_) @function)
+(partial_application function: (identifier) @function.method)
+(chain function: (identifier) @function.method)
+
+;; fields and params
+(field name: (identifier) @variable.other.member)
+(param (identifier) @variable.parameter)
+(lambdaparam (identifier) @variable.parameter)
+
+;; this.field is considered a member access
+(field_access base: (this) field: (identifier) @variable.other.member)
+
+;; annotations
+(annotations (identifier) @attribute)
+

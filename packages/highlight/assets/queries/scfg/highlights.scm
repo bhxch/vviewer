@@ -4,6 +4,6 @@
  ] @punctuation.bracket
 
 
-(comment) @comment @spell
+(comment) @comment
 (directive_name) @type
 (directive_params) @parameter

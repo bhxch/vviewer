@@ -23,7 +23,7 @@
 [
   "true"
   "false"
-] @boolean
+] @constant.builtin.boolean
 
 "null" @constant.builtin
 
@@ -37,24 +37,24 @@
 ; 1) Member
 (field_expr
   field: (access_ident
-    (ident) @variable.member))
+    (ident) @variable.other.member))
 
 (struct_member_declaration
-  (ident) @variable.member)
+  (ident) @variable.other.member)
 
 (struct_member_declaration
   (identifier_list
-    (ident) @variable.member))
+    (ident) @variable.other.member))
 
 (bitstruct_member_declaration
-  (ident) @variable.member)
+  (ident) @variable.other.member)
 
 (initializer_list
   (initializer_element
     (param_path
       (param_path_element
         (access_ident
-          (ident) @variable.member)))))
+          (ident) @variable.other.member)))))
 
 ; 2) Parameter
 (param
@@ -129,12 +129,12 @@
 
 "macro" @keyword.function
 
-"return" @keyword.return
+"return" @keyword.control.return
 
 [
   "import"
   "module"
-] @keyword.import
+] @keyword.control.import
 
 [
   "bitstruct"
@@ -144,7 +144,7 @@
   "struct"
   "typedef"
   "union"
-] @keyword.type
+] @keyword.storage.type
 
 [
   "case"
@@ -153,7 +153,7 @@
   "if"
   "nextcase"
   "switch"
-] @keyword.conditional
+] @keyword.control.conditional
 
 [
   "break"
@@ -163,7 +163,7 @@
   "foreach"
   "foreach_r"
   "while"
-] @keyword.repeat
+] @keyword.control.repeat
 
 [
   "const"
@@ -171,7 +171,7 @@
   "inline"
   "static"
   "tlocal"
-] @keyword.modifier
+] @keyword.storage.modifier
 
 ; Operator (from `c3c --list-operators`)
 [
@@ -237,22 +237,22 @@
     "?"
     "???"
     ":"
-  ] @keyword.conditional.ternary)
+  ] @keyword.control.conditional.ternary)
 
 (elvis_orelse_expr
   [
     "?:"
     "??"
-  ] @keyword.conditional.ternary)
+  ] @keyword.control.conditional.ternary)
 
 ; Literal
-(integer_literal) @number
+(integer_literal) @constant.numeric.integer
 
-(real_literal) @number.float
+(real_literal) @constant.numeric.float
 
-(char_literal) @character
+(char_literal) @constant.character
 
-(bytes_literal) @number
+(bytes_literal) @constant.numeric
 
 ; String
 (string_literal) @string
@@ -260,7 +260,7 @@
 (raw_string_literal) @string
 
 ; Escape Sequence
-(escape_sequence) @string.escape
+(escape_sequence) @constant.character.escape
 
 ; Builtin (constants)
 (builtin_const) @constant.builtin
@@ -276,22 +276,23 @@
       "tagof" "has_tagof" "values" "typeid")))
 
 ; Label
-[
-  (label)
-  (label_target)
-] @label
+(label
+  (const_ident) @label)
+
+(label_target
+  (const_ident) @label)
 
 ; Module
 (module_resolution
-  (ident) @module)
+  (ident) @namespace)
 
 (module_declaration
   (path_ident
-    (ident) @module))
+    (ident) @namespace))
 
 (import_path
   (path_ident
-    (ident) @module))
+    (ident) @namespace))
 
 ; Attribute
 (attribute
@@ -337,7 +338,7 @@
     [
       (ident)
       (at_ident)
-    ] @function.call))
+    ] @function))
 
 (call_expr
   function: (trailing_generic_expr
@@ -345,7 +346,7 @@
       [
         (ident)
         (at_ident)
-      ] @function.call)))
+      ] @function)))
 
 ; Method call
 (call_expr
@@ -354,7 +355,7 @@
       [
         (ident)
         (at_ident)
-      ] @function.method.call)))
+      ] @function)))
 
 ; Method on type
 (call_expr
@@ -363,7 +364,7 @@
       [
         (ident)
         (at_ident)
-      ] @function.method.call)))
+      ] @function)))
 
 ; Builtin call
 (call_expr
@@ -383,14 +384,9 @@
   ] @variable.builtin)
 
 ; Comment
-[
-  (line_comment)
-  (block_comment)
-] @comment @spell
-
-(doc_comment) @comment.documentation
-
-(doc_comment_text) @spell
+(line_comment) @comment.line
+(block_comment) @comment.block
+(doc_comment) @comment.block.documentation
 
 (doc_comment_contract
   name: (_) @attribute)
@@ -400,16 +396,17 @@
     (ident)
     (ct_ident)
     (hash_ident)
-  ] @variable.parameter
-  (#set! priority 110))
+  ] @variable.parameter)
 
 (doc_comment_contract
   [
     ":"
     "?"
-  ] @comment.documentation
-  (#set! priority 110))
+  ] @comment.block.documentation)
 
 (doc_comment_contract
-  description: (_) @comment.documentation
-  (#set! priority 110))
+  description: (string_expr
+    [
+      (string_literal)
+      (raw_string_literal)
+    ] @comment.block.documentation))

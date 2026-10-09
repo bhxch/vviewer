@@ -1,7 +1,7 @@
 [
   (symbol)
   (string)
-] @reference
+] @local.reference
 
 [
   (config)
@@ -10,8 +10,8 @@
   (comment_entry)
   (menu)
   (if)
-] @scope
+] @local.scope
 
-(type_definition (string) @definition.var)
-(type_definition (input_prompt (string) @definition.var))
-(type_definition_default (expression (string) @definition.var))
+(type_definition (string) @local.definition.type)
+(type_definition (input_prompt (string) @local.definition.type))
+(type_definition_default (expression (string) @local.definition.type))

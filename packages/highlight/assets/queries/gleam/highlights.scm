@@ -1,57 +1,33 @@
-; Punctuation
-[
-  "("
-  ")"
-  "["
-  "]"
-  "{"
-  "}"
-  "<<"
-  ">>"
-] @punctuation.bracket
-[
-  "."
-  ","
-  ;; Controversial -- maybe some are operators?
-  ":"
-  "#"
-  "="
-  "->"
-  ".."
-  "-"
-  "<-"
-] @punctuation.delimiter
-
 ; Variables
 (identifier) @variable
-(discard) @comment.unused
+(discard) @comment.unused ; `_` pattern
+(hole) @comment.unused ; `_`, `_foo` unused variable
 
 ; Comments
-(module_comment) @comment
-(statement_comment) @comment
-(comment) @comment
+(module_comment) @comment.line.documentation
+(statement_comment) @comment.line.documentation
+(comment) @comment.line
 
 ; Constants
 (constant
   name: (identifier) @constant)
 
-; "Properties"
-; Assumed to be intended to refer to a name for a field; something that comes
-; before ":" or after "."
-; e.g. record field names, tuple indices, names for named arguments, etc
-(label) @property
-(tuple_access
-  index: (integer) @property)
-
 ; Modules
-(module) @module
-(import alias: (identifier) @module)
+(module) @namespace
+(import alias: (identifier) @namespace)
 (remote_type_identifier
-  module: (identifier) @module)
+  module: (identifier) @namespace)
 (remote_constructor_name
-  module: (identifier) @module)
+  module: (identifier) @namespace)
+((field_access
+  record: (identifier) @namespace
+  field: (label) @function)
+ (#is-not? local))
 
+; =========
 ; Functions
+; =========
+
 (unqualified_import (identifier) @function)
 (unqualified_import "type" (type_identifier) @type)
 (unqualified_import (type_identifier) @constructor)
@@ -64,20 +40,23 @@
 ((function_call
    function: (identifier) @function)
  (#is-not? local))
+; highlights `a` in `|> a` as function
 ((binary_expression
    operator: "|>"
    right: (identifier) @function)
  (#is-not? local))
 
-; TODO: `#is-not? local` applies to entire patterns but ideally it would accept
-; a capture to check as a local. This needs to be suggested upstream. Until this
-; is a part of the CLI's highlighter we can't distinguish between function calls
-; on modules and accesses of record fields.
-(function_call function: (field_access field: (label) @function)) ; Ideally this pattern would be removed,
-((field_access
-  record: (identifier) @module)
-  ; field: (label) @function)                                     ; this line would be uncommented,
- (#is-not? local))                                                ; and this line would be `(#is-not? local @module)`.
+; =========
+; Misc
+; =========
+
+; "Properties"
+; Assumed to be intended to refer to a name for a field; something that comes
+; before ":" or after "."
+; e.g. record field names, tuple indices, names for named arguments, etc
+(label) @variable.other.member
+(tuple_access
+  index: (integer) @variable.other.member)
 
 ; Attributes
 (attribute
@@ -86,30 +65,55 @@
 
 (attribute_value (identifier) @constant)
 
+; =========
+; Types
+; =========
+
+(type_hole) @comment.unused
+
 ; Type names
 (remote_type_identifier) @type
 (type_identifier) @type
 
+; Generic types
+[
+  ; in `pub type Dict(key, value)` this is `key` and `value`
+  (type_parameter)
+  ; in `pub fn size(dict: Dict(key, value)) -> Int` this is `key` and `value`
+  (type_var)
+] @type
+
 ; Data constructors
 (constructor_name) @constructor
 
+; built-ins
+((constructor_name) @constant.builtin
+  (#any-of? @constant.builtin "False" "True"))
+((constructor_name) @constant.builtin
+  (#any-of? @constant.builtin "Nil"))
+((constructor_name) @type.enum.variant.builtin
+  (#any-of? @type.enum.variant.builtin "Ok" "Error" "Some" "None"))
+
+; =========
 ; Literals
+; =========
+
 (string) @string
-(escape_sequence) @string.escape
+(escape_sequence) @constant.character.escape
 ((escape_sequence) @warning
- ; Deprecated in v0.33.0-rc2:
- (#eq? @warning "\\e"))
-(bit_string_segment_option) @function.builtin
-(integer) @number
-(float) @number
+ (#eq? @warning "\\e")) ; deprecated escape sequence
+(bit_array_segment_option) @function.builtin
+(integer) @constant.numeric.integer
+(float) @constant.numeric.float
 
 ; Reserved identifiers
-; TODO: when tree-sitter supports `#any-of?` in the Rust bindings,
-; refactor this to use `#any-of?` rather than `#match?`
 ((identifier) @error
  (#any-of? @error "auto" "delegate" "derive" "else" "implement" "macro" "test"))
 
+; =========
 ; Keywords
+; =========
+
 [
   (visibility_modifier) ; "pub"
   (opacity_modifier) ; "opaque"
@@ -117,7 +121,6 @@
   "assert"
   "case"
   "const"
-  "echo"
   ; DEPRECATED: 'external' was removed in v0.30.
   "external"
   "fn"
@@ -128,10 +131,66 @@
   "todo"
   "type"
   "use"
+  "echo"
 ] @keyword
 
+; =========
 ; Operators
+; =========
+
 (binary_expression
   operator: _ @operator)
 (boolean_negation "!" @operator)
 (integer_negation "-" @operator)
+
+[
+  "->"
+  "-"
+  "="
+  ".."
+  "<-"
+  ; OR clause in patterns
+  "|"
+] @operator
+
+; ==========
+; Punctuation
+; ==========
+
+[
+  "("
+  ")"
+  "["
+  "]"
+  "{"
+  "}"
+  "<<"
+  ">>"
+] @punctuation.bracket
+
+(tuple_type "#" @punctuation.bracket)
+(tuple "#" @punctuation.bracket)
+(tuple_pattern "#" @punctuation.bracket)
+
+[
+  ","
+  ":"
+] @punctuation.delimiter
+
+; the `/` in `import gleam/list`
+(import (module "/" @punctuation.delimiter))
+
+[
+  "."
+] @punctuation
+
+; affects e.g. `replace` in `string.replace("+", "-")`
+; without this, it would be highlighted as a field instead of function
+(function_call (field_access (label) @function))
+
+; highlights `floor` in `|> float.floor` as function
+(binary_expression
+  left: (_) "|>"
+  right: (field_access
+    record: (identifier) "."
+    field: (label) @function))

@@ -1,11 +1,10 @@
-
 ; Literals
 ; --------
 
-(boolean) @boolean
+(boolean) @constant.builtin.boolean
 (comment) @comment
 (string) @string
-(number) @constant.number
+(number) @constant.numeric
 (null) @constant.builtin
 
 ; Punctuation

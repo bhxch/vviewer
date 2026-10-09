@@ -1,6 +1,8 @@
+(identifier) @variable
+
 (keyword) @keyword
 (string_literal) @string
-(number_literal) @number
+(number_literal) @constant.numeric
 
 [
   (edgeop)
@@ -29,18 +31,10 @@
 (attribute
   name: (id
     (identifier) @type)
-)
-
-(attribute
   value: (id
     (identifier) @constant)
 )
 
-[
-(comment)
-(preproc)
-] @comment
+(comment) @comment
 
-(ERROR) @error
-
-(identifier) @variable
+(preproc) @keyword.directive
