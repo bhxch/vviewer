@@ -155,6 +155,37 @@ async fn highlight_over_20mb_text_413() {
     assert!(body["error"].is_string(), "413 应有 JSON error: {body}");
 }
 
+// ---------- java 与 html→js 注入（阶段 1 收口，Highlighter 端到端） ----------
+
+#[tokio::test]
+async fn highlight_java_ok() {
+    let f = fixture(true, None);
+    let (status, body) = post_json(
+        f.app,
+        "/api/compute/highlight",
+        None,
+        json!({ "text": "class A { int x = 1; }", "lang": "java" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!body["intervals"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn highlight_html_injects_javascript() {
+    let f = fixture(true, None);
+    let with_js = "<html><body><script>let x = 1;</script></body></html>";
+    let without_js = "<html><body><p>plain</p></body></html>";
+    let (s1, b1) = post_json(f.app.clone(), "/api/compute/highlight", None,
+        json!({ "text": with_js, "lang": "html" })).await;
+    let (s2, b2) = post_json(f.app, "/api/compute/highlight", None,
+        json!({ "text": without_js, "lang": "html" })).await;
+    assert_eq!((s1, s2), (StatusCode::OK, StatusCode::OK));
+    let n1 = b1["intervals"].as_array().unwrap().len();
+    let n2 = b2["intervals"].as_array().unwrap().len();
+    assert!(n1 > n2, "注入 JS 后区间应更多: {n1} vs {n2}");
+}
+
 // ---------- path 模式 + 缓存 ----------
 
 #[tokio::test]

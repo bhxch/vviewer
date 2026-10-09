@@ -59,7 +59,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn compute_advertises_sorted_languages() {
+    async fn compute_advertises_sorted_full_registry() {
         let v = health_json(true).await;
         assert!(v["capabilities"].as_array().unwrap().contains(&serde_json::json!("compute")));
         let langs = v["computeLanguages"].as_array().expect("computeLanguages 数组");
@@ -70,7 +70,7 @@ mod tests {
             sorted
         });
         assert!(names.contains(&"rust") && names.contains(&"python"));
-        // 注册表生成式（Task 5）：服务端集合来自 grammars-manifest.json 可编译源，
-        // 不再豁免特定语言（原「java 不在场」断言随硬编码子集一并退役）
+        // 阶段 1 收口：java 已进服务端集合（BUG-06c 时代的缺席断言翻转）
+        assert!(names.contains(&"java"));
     }
 }
