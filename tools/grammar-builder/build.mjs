@@ -266,6 +266,10 @@ export function writeManifest(outDir, manifestOut, aliases = loadAliases(), vend
     };
   }
   const manifest = {
+    // abi 字段语义注记（e2e 误读消除，2026-10-09）：null 不代表「ABI 未知故禁用」——
+    // 加载侧从不按 abi 门控；cli 0.27 自建产物按各 grammar 自身 LANGUAGE_VERSION 定
+    // ABI，web-tree-sitter 运行时加载时自行校验兜底。本字段仅为构建元数据占位。
+    note: 'abi 字段为构建元数据占位（恒 null）；加载侧无 ABI 门控，兼容性由 web-tree-sitter 运行时加载校验兜底',
     generatedAt: new Date().toISOString(),
     source: 'self-built',
     grammars,
