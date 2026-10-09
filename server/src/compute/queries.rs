@@ -53,10 +53,14 @@ static ENTRIES: Lazy<Vec<LanguageEntry>> = Lazy::new(|| {
 });
 
 /// 非语言的查询目录（`; inherits` 展开目标；build.rs 扫描 assets 顶层生成）：
-/// 仅贡献 highlights——expand_asset 按 Kind 先查 ENTRIES，语言条目优先；
-/// partial 构建下会含缺源语言目录（固有语义，全量时收敛为真父目录）。
-static PARENT_ASSETS: Lazy<HashMap<&'static str, &'static str>> =
-    Lazy::new(|| generated_parents().into_iter().collect());
+/// 三件套按 [Highlights, Injections, Locals]（`Kind::slot`）下标存放，三类别
+/// 各自回退；partial 构建下会含缺源语言目录（固有语义，全量时收敛为真父目录）。
+static PARENT_ASSETS: Lazy<HashMap<&'static str, [&'static str; 3]>> = Lazy::new(|| {
+    generated_parents()
+        .into_iter()
+        .map(|(name, highlights, injections, locals)| (name, [highlights, injections, locals]))
+        .collect()
+});
 
 /// 从查询头部解析 `; inherits: a,b`（仅扫描首个非注释/非空行之前）。
 fn parse_inherits(content: &str) -> Vec<&str> {
@@ -97,24 +101,32 @@ enum Kind {
     Locals,
 }
 
+impl Kind {
+    /// ENTRIES 字段选择与 PARENT_ASSETS 数组下标的统一映射。
+    fn slot(self) -> usize {
+        match self {
+            Kind::Highlights => 0,
+            Kind::Injections => 1,
+            Kind::Locals => 2,
+        }
+    }
+}
+
 /// 递归展开某语言/父目录的指定类别查询：父查询在前、自身在后。
 /// `visited` 防环（静态资产本无环，防御性保留）；找不到返回 None。
 fn expand_asset(name: &str, kind: Kind, visited: &mut HashSet<String>) -> Option<String> {
     if !visited.insert(name.to_string()) {
         return Some(String::new()); // 环：不再重复展开
     }
-    let own = match kind {
-        Kind::Highlights => ENTRIES.iter().find(|e| e.name == name).map(|e| e.highlights),
-        Kind::Injections => ENTRIES.iter().find(|e| e.name == name).map(|e| e.injections),
-        Kind::Locals => ENTRIES.iter().find(|e| e.name == name).map(|e| e.locals),
-    }
-    .or_else(|| match kind {
-        Kind::Highlights => PARENT_ASSETS.get(name).copied(),
-        // 父目录仅贡献 highlights（generated_parents 结构上只嵌入 highlights.scm；
-        // ecma/_typescript 等目录的 injections/locals 未嵌入，父链注入模式缺失为
-        // 已知裁剪，全量补齐需 build.rs 扩展生成三件套）
-        _ => None,
-    })?;
+    let own = ENTRIES
+        .iter()
+        .find(|e| e.name == name)
+        .map(|e| match kind {
+            Kind::Highlights => e.highlights,
+            Kind::Injections => e.injections,
+            Kind::Locals => e.locals,
+        })
+        .or_else(|| PARENT_ASSETS.get(name).map(|a| a[kind.slot()]))?;
     let mut merged = String::new();
     for parent in parse_inherits(own) {
         if let Some(expanded) = expand_asset(parent, kind, visited) {
@@ -170,7 +182,7 @@ static CONFIGS: Lazy<HashMap<&'static str, Arc<HighlightConfiguration>>> = Lazy:
         let Some(expanded) = expand_asset(entry.name, Kind::Highlights, &mut HashSet::new()) else {
             continue;
         };
-        // injections/locals 也走各自的 inherits 链（父目录不参与，见 PARENT_ASSETS 注释）
+        // injections/locals 同样经各自的 inherits 链展开（父目录按 Kind 回退）
         let injections = expand_asset(entry.name, Kind::Injections, &mut HashSet::new()).unwrap_or_default();
         let locals = expand_asset(entry.name, Kind::Locals, &mut HashSet::new()).unwrap_or_default();
         match HighlightConfiguration::new(
@@ -290,6 +302,38 @@ mod tests {
         for p in ["ecma", "_typescript", "_jsx", "_javascript"] {
             assert!(parents.contains_key(p), "缺父目录 {p}: {:?}", parents.keys());
         }
+        // 修复轮 1：父目录嵌入三件套——ecma injections 资产非空且可取用
+        let ecma = parents.get("ecma").unwrap();
+        let lens: Vec<usize> = ecma.iter().map(|s| s.len()).collect();
+        assert!(!ecma[Kind::Injections.slot()].is_empty(), "ecma injections 应已嵌入: {lens:?}");
+    }
+
+    /// js 族 injections/locals 的父链展开（修复轮 1）：ecma/_typescript/_javascript
+    /// 的 injections/locals 嵌入后，`; inherits` 指向父目录的规则不再丢失。
+    #[test]
+    fn js_family_injections_locals_expand_parent_chain() {
+        // ecma/injections.scm 的稳定特征行（tagged template 注入规则谓词）
+        const ECMA_INJ: &str = r#"(#any-of? @injection.language "html" "css" "json" "sql" "js" "ts" "bash")"#;
+        let js = expand_asset("javascript", Kind::Injections, &mut HashSet::new()).unwrap();
+        assert!(js.contains(ECMA_INJ), "javascript injections 应含 ecma 父模式: {js}");
+        assert!(!js.contains("; inherits:"), "指令行已剥离");
+
+        // tsx injections 头 `; inherits: _jsx,_typescript,ecma`——_jsx/_typescript 无
+        // injections 资产（物化空串），可观察内容来自 ecma 父
+        let tsx_inj = expand_asset("tsx", Kind::Injections, &mut HashSet::new()).unwrap();
+        assert!(tsx_inj.contains(ECMA_INJ), "tsx injections 应含 ecma 父模式: {tsx_inj}");
+        assert!(!tsx_inj.contains("; inherits:"));
+
+        // tsx locals 同头三父：_typescript 与 ecma 均有实体 locals，应一并展开
+        let tsx_loc = expand_asset("tsx", Kind::Locals, &mut HashSet::new()).unwrap();
+        assert!(tsx_loc.contains("(type_alias_declaration)"), "_typescript locals 父: {tsx_loc}");
+        assert!(tsx_loc.contains("(for_in_statement)"), "ecma locals 父: {tsx_loc}");
+        assert!(!tsx_loc.contains("; inherits:"));
+
+        // javascript locals 头 `; inherits: _javascript,ecma`——_javascript locals 实体展开
+        let js_loc = expand_asset("javascript", Kind::Locals, &mut HashSet::new()).unwrap();
+        assert!(js_loc.contains("@local.definition.variable.parameter"), "_javascript locals 父: {js_loc}");
+        assert!(js_loc.contains("(for_in_statement)"), "ecma locals 父: {js_loc}");
     }
 
     #[test]

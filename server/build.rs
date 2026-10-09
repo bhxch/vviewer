@@ -188,8 +188,8 @@ fn generate_entries(out_dir: &Path, built: &[&GrammarEntry]) {
             d = dir.display(),
         ));
     }
-    s.push_str("    ]\n}\n\n/// 非语言的查询目录（; inherits 展开目标）。\n");
-    s.push_str("pub fn generated_parents() -> Vec<(&'static str, &'static str)> {\n    vec![\n");
+    s.push_str("    ]\n}\n\n/// 非语言的查询目录（; inherits 展开目标）：三件套（资产缺失的文件由 copy_queries 物化为空串）。\n");
+    s.push_str("pub fn generated_parents() -> Vec<(&'static str, &'static str, &'static str, &'static str)> {\n    vec![\n");
     for dir in fs::read_dir(&q).unwrap() {
         let dir = dir.unwrap().path();
         let name = dir.file_name().unwrap().to_str().unwrap().to_string();
@@ -197,7 +197,7 @@ fn generate_entries(out_dir: &Path, built: &[&GrammarEntry]) {
             continue;
         }
         s.push_str(&format!(
-            "        (\"{name}\", include_str!(r#\"{d}/highlights.scm\"#)),\n",
+            "        (\"{name}\", include_str!(r#\"{d}/highlights.scm\"#), include_str!(r#\"{d}/injections.scm\"#), include_str!(r#\"{d}/locals.scm\"#)),\n",
             name = name,
             d = dir.display(),
         ));
