@@ -6,15 +6,27 @@ import type { GrammarTable } from '@vviewer/highlight';
  * 每个条目写全 `base`（wasm 目录前缀），worker 端 doPrepare 按 entry.base 加载；
  * 单层 fetch 失败（非 2xx / 网络错）仅 console.warn 并跳过该层，绝不阻塞其余层
  * （可用性优先于完整性：合并结果缺某语言时，该语言高亮降级，其余语言不受影响）。
+ *
+ * base 契约：同时容纳 manifest.json 与 *.wasm 的目录前缀（以 / 结尾），三层同构
+ * ——同源 static/grammars/、服务端 <origin>/grammars/、CDN <pkg>@<ver>/grammars/
+ * （pack 布局的修正由 Task 4 承接）；wasm URL = `${base}${file}`，不得再插中间段。
  */
 export interface GrammarLayer {
   base: string;
   table: GrammarTable;
 }
 
+/** 合并产物：每条目 base 恒存在（「每条注记来源」契约的类型化表达）。 */
+export type MergedGrammarTable = Record<string, { file: string; aliases?: string[]; base: string }>;
+
+/** 条目 → wasm 预热 URL：base 已含目录段，直接拼文件名（joinPath 同语义，不翻倍）。 */
+export function grammarWarmUrl(entry: { base: string; file: string }): string {
+  return `${entry.base}${entry.file}`;
+}
+
 /** 依序合并各层（first-wins）：每条目写全 base，别名表随条目原样并入。 */
-export function mergeGrammarLayers(layers: GrammarLayer[]): GrammarTable {
-  const out: GrammarTable = {};
+export function mergeGrammarLayers(layers: GrammarLayer[]): MergedGrammarTable {
+  const out: MergedGrammarTable = {};
   for (const layer of layers) {
     for (const [lang, entry] of Object.entries(layer.table)) {
       if (out[lang]) continue; // first-wins
@@ -49,7 +61,7 @@ export async function assembleGrammarLayers(opts: {
   sameOriginBase: string;
   serverBase?: string | null;
   cdnBase?: string | null;
-}): Promise<{ grammars: GrammarTable; layers: string[] }> {
+}): Promise<{ grammars: MergedGrammarTable; layers: string[] }> {
   const candidates: Array<{ name: string; base: string }> = [
     { name: 'same-origin', base: opts.sameOriginBase }
   ];

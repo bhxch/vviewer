@@ -1,12 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GrammarTable } from '@vviewer/highlight';
-import { assembleGrammarLayers, fetchGrammarManifest, mergeGrammarLayers } from './grammarLayers';
+import {
+  assembleGrammarLayers,
+  fetchGrammarManifest,
+  grammarWarmUrl,
+  mergeGrammarLayers
+} from './grammarLayers';
 
 /**
  * 三层 grammar manifest 合并链（同源 → 服务端 → CDN）的单元测试：
  * 纯函数 mergeGrammarLayers 的 first-wins 与逐条 base 注记契约；
  * fetchGrammarManifest 的失败折叠（非 2xx / 网络错 → null + warn，不阻塞后续层）；
- * assembleGrammarLayers 的候选层编排（null 层跳过、失败层跳过、layers 如实回报）。
+ * assembleGrammarLayers 的候选层编排（null 层跳过、失败层跳过、layers 如实回报）；
+ * grammarWarmUrl 的 wasm URL 拼接（base 已含目录段，防 grammars/ 双拼回归）。
  * fetch 经 vi.stubGlobal 逐 URL 编排，无真实网络。
  */
 
@@ -163,5 +169,31 @@ describe('assembleGrammarLayers（三层编排）', () => {
       'https://cdn.example.com/g/manifest.json'
     ]);
     expect(layers).toEqual([]); // 全部 404 → 无命中层
+  });
+});
+
+describe('grammarWarmUrl（wasm 预热 URL 拼接，防 grammars/ 双拼回归）', () => {
+  it('同源层条目：<base><file> 直拼，不出现 grammars/grammars 双拼', () => {
+    const url = grammarWarmUrl({ base: '/grammars/', file: 'tree-sitter-rust.wasm' });
+    expect(url).toBe('/grammars/tree-sitter-rust.wasm');
+    expect(url).not.toContain('grammars/grammars');
+  });
+
+  it('server/cdn 层条目同理：base 已含目录段，仅拼文件名', () => {
+    expect(grammarWarmUrl({ base: 'http://srv:8321/grammars/', file: 'tree-sitter-go.wasm' })).toBe(
+      'http://srv:8321/grammars/tree-sitter-go.wasm'
+    );
+    expect(
+      grammarWarmUrl({ base: 'https://cdn.example.com/g/grammars/', file: 'tree-sitter-zig.wasm' })
+    ).toBe('https://cdn.example.com/g/grammars/tree-sitter-zig.wasm');
+  });
+
+  it('端到端：mergeGrammarLayers 产出的条目直接喂 grammarWarmUrl 得 <层base><file>', () => {
+    const merged = mergeGrammarLayers([
+      { base: '/grammars/', table: table({ rust: { file: 'tree-sitter-rust.wasm' } }) },
+      { base: 'https://cdn.example.com/g/grammars/', table: table({ zig: { file: 'tree-sitter-zig.wasm' } }) }
+    ]);
+    expect(grammarWarmUrl(merged.rust!)).toBe('/grammars/tree-sitter-rust.wasm');
+    expect(grammarWarmUrl(merged.zig!)).toBe('https://cdn.example.com/g/grammars/tree-sitter-zig.wasm');
   });
 });

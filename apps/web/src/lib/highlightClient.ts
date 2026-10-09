@@ -5,7 +5,7 @@ import { browser } from '$app/env';
 // 「<base>/」前缀（base='' 时为 '/'，子路径托管时为 '/<base>/'），静态资产
 // URL（grammars/queries/runtime wasm）由它拼接，语义与 kit2 的 `${base}/...` 一致。
 const baseUrl = resolve('/');
-import { HighlightClient, HighlightCanceledError, type GrammarTable } from '@vviewer/highlight';
+import { HighlightClient, HighlightCanceledError } from '@vviewer/highlight';
 import { attachHighlightClient, type CodeHighlightClient, type HighlightCallContext } from '@vviewer/render-text';
 import {
   createComputeRouter,
@@ -18,7 +18,11 @@ import {
   type HighlightInterval
 } from '@vviewer/core';
 import { resolveHighlightResult } from './computeResult';
-import { assembleGrammarLayers } from './grammarLayers';
+import {
+  assembleGrammarLayers,
+  grammarWarmUrl,
+  type MergedGrammarTable
+} from './grammarLayers';
 import { loadCapabilities, loadComputeLanguages, loadLastServer } from './openFlow.svelte';
 import { loadSettings } from './stores/settings';
 
@@ -46,7 +50,7 @@ let clientPromise: Promise<HighlightClient> | null = null;
 let remoteAbort: AbortController | null = null;
 
 /** grammar manifest（create() 三层合并后缓存）：主线程预热 grammar wasm 查条目用（base 标来源层）。 */
-let grammarManifest: GrammarTable | null = null;
+let grammarManifest: MergedGrammarTable | null = null;
 
 /** 已预热资产 URL：同一资产仅首个调用触发预热（控制权交接前监听/定时器不随调用累积） */
 const warmedUrls = new Set<string>();
@@ -83,8 +87,9 @@ export function ensureHighlightClient(): Promise<HighlightClient> | null {
   if (!browser) return null;
   if (!clientPromise) {
     clientPromise = create().catch((e: unknown) => {
-      // BUG-06 可观测：创建期失败（manifest 404 / new Worker 抛错）同样显式上报，
-      // 不再零提示静默降级 hljs；rethrow 保持既有 rejected 语义（不重试）
+      // BUG-06 可观测：创建期失败（worker 创建等；manifest 各层失败已在 grammarLayers
+      // 跳层折叠，不再走到这里）同样显式上报，不再零提示静默降级 hljs；
+      // rethrow 保持既有 rejected 语义（不重试）
       console.error(`[vviewer] tree-sitter worker 加载失败：${e instanceof Error ? e.message : String(e)}`);
       throw e;
     });
@@ -164,7 +169,7 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
       // 首次调用某语言时主线程预热其 grammar wasm（进 vv-grammars-* CacheFirst）；
       // warmHighlightAsset 按 URL 幂等，同语言重复调用为 no-op
       const g = grammarManifest?.[lang];
-      if (g) warmHighlightAsset(`${g.base}grammars/${g.file}`);
+      if (g) warmHighlightAsset(grammarWarmUrl(g));
       const record = (ok: boolean): void => {
         dbg.__vvLastHighlightMs = performance.now() - t0;
         dbg.__vvLastHighlightLang = lang;
@@ -218,11 +223,16 @@ async function create(): Promise<HighlightClient> {
   // 环境变量经 vite define 静态替换，构建时定型。
   const cdnBase = (import.meta.env.VV_GRAMMAR_CDN as string | undefined) || null;
   const serverBase = loadLastServer()?.baseUrl ?? null;
-  const { grammars } = await assembleGrammarLayers({
+  const { grammars, layers } = await assembleGrammarLayers({
     sameOriginBase: `${baseUrl}grammars/`,
     serverBase,
     cdnBase
   });
+  if (layers.length === 0) {
+    // BUG-06 可观测：三层全部失败时本地 tree-sitter 必然全链不可用，显式留痕
+    // （create 单例只跑一次，此 error 天然一次性；不 reject——hljs 降级仍可用）
+    console.error('[vviewer] grammar 资产三层全部加载失败（同源/服务端/CDN），本地高亮将降级 hljs');
+  }
   grammarManifest = grammars;
   const worker = new Worker(new URL('./ts-worker.ts', import.meta.url), { type: 'module' });
   const client = new HighlightClient(
