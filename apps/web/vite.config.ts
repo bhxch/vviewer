@@ -113,8 +113,10 @@ export default defineConfig({
         short_name: 'vviewer',
         description: '本地文件查看器：代码/Markdown/Office/压缩包/媒体一体的纯前端预览',
         lang: 'zh-CN',
-        start_url: '/',
-        scope: '/',
+        // 子路径托管（VV_BASE_PATH，与 svelte.config.js 的 paths.base 同源）：
+        // Pages 项目站点部署在 /<repo>/ 下时 start_url/scope 必须带前缀
+        start_url: `${process.env.VV_BASE_PATH ?? ''}/`,
+        scope: `${process.env.VV_BASE_PATH ?? ''}/`,
         display: 'standalone',
         background_color: '#ffffff',
         theme_color: '#ffffff',

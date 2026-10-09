@@ -1,3 +1,4 @@
+import { base } from '$app/paths';
 import { browser } from '$app/environment';
 import { HighlightClient, HighlightCanceledError } from '@vviewer/highlight';
 import { attachHighlightClient, type CodeHighlightClient, type HighlightCallContext } from '@vviewer/render-text';
@@ -151,7 +152,7 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
       // 首次调用某语言时主线程预热其 grammar wasm（进 vv-grammars-* CacheFirst）；
       // warmHighlightAsset 按 URL 幂等，同语言重复调用为 no-op
       const g = grammarManifest?.[lang];
-      if (g) warmHighlightAsset(`/grammars/${g.file}`);
+      if (g) warmHighlightAsset(`${base}/grammars/${g.file}`);
       const record = (ok: boolean): void => {
         dbg.__vvLastHighlightMs = performance.now() - t0;
         dbg.__vvLastHighlightLang = lang;
@@ -200,7 +201,7 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
 }
 
 async function create(): Promise<HighlightClient> {
-  const res = await fetch('/grammars/manifest.json');
+  const res = await fetch(`${base}/grammars/manifest.json`);
   if (!res.ok) throw new Error(`grammar manifest 加载失败: HTTP ${res.status}`);
   const manifest = (await res.json()) as {
     grammars: Record<string, { file: string; aliases?: string[] }>;
@@ -211,9 +212,12 @@ async function create(): Promise<HighlightClient> {
     worker,
     {
       grammars: manifest.grammars,
-      grammarsBase: '/grammars/',
-      queriesBase: '/queries/', // vite 启动时从 packages/highlight/assets/queries 拷贝到 static/queries
-      runtimeDir: '/' // web-tree-sitter runtime 位于 static/tree-sitter.wasm
+      grammarsBase: `${base}/grammars/`,
+      queriesBase: `${base}/queries/`, // vite 启动时从 packages/highlight/assets/queries 拷贝到 static/queries
+      // runtime 随 base：子路径托管（Pages）下 worker 内 Parser.init 按
+      // locateFile(joinPath(runtimeDir, file)) 取 /<base>/tree-sitter.wasm，
+      // 根绝对 '/' 在子路径下 404 → init 失败 → 全部高亮静默回退 hljs
+      runtimeDir: `${base}/` // web-tree-sitter runtime 位于 static/tree-sitter.wasm（base='' 时即 '/'）
     },
     // BUG-06 可观测：worker 脚本/消息错误经显式标签上报——此前该类失败零提示
     // 静默降级 hljs，是「本地 tree-sitter 全链失效却无任何痕迹」的主要观测障碍
@@ -224,6 +228,6 @@ async function create(): Promise<HighlightClient> {
   attachHighlightClient(withDebug(client));
   // 预热 runtime wasm：同上，worker 内 fetch 不经 SW，主线程预热使其进 vv-runtime-*
   // CacheFirst（离线重开代码文件的 runtime 来源）
-  warmHighlightAsset('/tree-sitter.wasm');
+  warmHighlightAsset(`${base}/tree-sitter.wasm`);
   return client;
 }

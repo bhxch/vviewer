@@ -1,0 +1,73 @@
+# Pages 部署流水线：纯前端静态站点 → gh-pages 分支。
+# 触发：push main 且前端面（web/packages/grammar 构建器/锁文件/本文件）变更，或手动触发。
+# 子路径适配：GitHub Pages 项目站点伺服在 /<repo>/ 下，构建注入 VV_BASE_PATH
+# （svelte paths.base、PWA manifest start_url/scope、highlight worker 的
+# grammars/queries/runtime 资产路径同源取用，见 svelte.config.js 注释）；
+# 仓库本身是 <owner>.github.io 用户站点时 base 置空按根路径部署。
+# 部署 action：peaceiris/actions-gh-pages@v4（当前最新主版本）——默认写入
+# .nojekyll（SvelteKit 的 _app/ 下划线目录必需，否则 Jekyll 忽略全部产物），
+# force_orphan 使 gh-pages 恒为单提交（常见静态站点分支形态，免历史膨胀）。
+# 前置：仓库 Settings → Pages → Source 选 gh-pages 分支；Actions 写权限默认
+# 允许（contents: write 已在 job 级显式声明）。
+name: Pages 部署（gh-pages）
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/web/**'
+      - 'packages/**'
+      - 'tools/grammar-builder/**'
+      - 'pnpm-lock.yaml'
+      - '.github/actions/setup-grammars/**'
+      - '.github/workflows/pages-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: 构建纯前端 → 推送 gh-pages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # gh-pages 分支推送（peaceiris 经 GITHUB_TOKEN）
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # 产物不入库：web 包内置 lite 集 grammar（aliases 34 键）构建期生成；
+      # 复用 setup-grammars composite action（工具链/源树/产物三层缓存，同 release.yml web job）
+      - uses: ./.github/actions/setup-grammars
+        with:
+          languages: lite
+      # Pages base：项目站点 /<repo>/；用户站点（<owner>.github.io）按根路径
+      - name: 计算 Pages base 路径
+        id: base
+        run: |
+          repo="${GITHUB_REPOSITORY#*/}"
+          owner="${GITHUB_REPOSITORY%%/*}"
+          if [ "$repo" = "${owner}.github.io" ]; then
+            echo "path=" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=/$repo" >> "$GITHUB_OUTPUT"
+          fi
+      - name: 构建前端（注入子路径 base）
+        run: pnpm --filter web build
+        env:
+          VV_BASE_PATH: ${{ steps.base.outputs.path }}
+      - name: 推送 gh-pages 分支
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ github.token }}
+          publish_dir: apps/web/build
+          force_orphan: true
+          commit_message: 'deploy: pages ${{ github.sha }}'

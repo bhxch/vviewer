@@ -55,6 +55,12 @@ pnpm --filter web build
 # 将 apps/web/build/ 整目录部署到任意静态托管（Nginx/对象存储/GitHub Pages 等）
 ```
 
+**GitHub Pages**：推送到 main（前端面变更）时 `pages-deploy.yml` 自动构建并部署到
+`gh-pages` 分支——项目站点会自动注入子路径 base（`VV_BASE_PATH=/<repo>/`，贯通
+SvelteKit 路由、PWA manifest 与高亮资产路径；`<owner>.github.io` 用户站点自动按根
+路径）。首次启用需在 Settings → Pages 把 Source 设为 `gh-pages` 分支。自建托管需
+子路径部署时同样以 `VV_BASE_PATH=/前缀 pnpm --filter web build` 构建。
+
 打开页面后拖入或选择本地文件夹即可浏览；`file://` 直开不可用（worker/模块限制），需经 HTTP 访问。
 
 ## 架构概览
