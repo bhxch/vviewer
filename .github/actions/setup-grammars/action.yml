@@ -17,7 +17,7 @@ runs:
   using: 'composite'
   steps:
     - name: 缓存 grammar 工具链/源树/产物
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cache/tree-sitter
