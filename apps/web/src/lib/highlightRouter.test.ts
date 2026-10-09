@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // highlightRouter.test.ts — BUG-10：>2MB 文件远程高亮路由的 policy 硬护栏。
-// highlightRouter 依赖 highlightClient（$app/environment，vitest 不可用）与
+// highlightRouter 依赖 highlightClient（$app/env，vitest 不可用）与
 // loadSettings（localStorage），两者均以 vi.mock 隔离：本测试只验证「策略 → 是否
 // 发起远程请求」的裁决，decodeHighlightResponse 为 core 纯函数真跑。
 

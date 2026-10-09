@@ -1,0 +1,56 @@
+# ZCode 工作区文件搜索忽略规则（.zcodeignore）
+# 语法与 .gitignore 一致，只影响 ZCode 的 @ 文件候选 / Command Center / 文件树搜索，
+# 不影响文件树浏览、上传或 Agent 文件访问。
+# 修改 .gitignore 不会自动同步到本文件；可在设置页「从 .gitignore 同步」。
+# 以下为 .gitignore 项目规则的手工同步（node_modules/ 等通用项已在下方默认区，不重复）：
+.temp/
+apps/web/.svelte-kit/
+apps/web/build/
+apps/web/dist/
+apps/web/test-results/
+apps/web/playwright-report/
+packages/*/dist/
+*.tsbuildinfo
+server/target/
+tools/grammar-builder/grammars/
+tools/grammar-builder/out/
+*.wasm
+!tools/grammar-builder/fixtures/*.wasm
+apps/web/static/grammars/
+apps/web/static/queries/
+apps/web/static/libarchive/
+apps/web/static/tree-sitter.wasm
+apps/web/static/icons/
+samples/m6/e2e-big.js
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+node_modules/
+bower_components/
+jspm_packages/
+__pycache__/
+site-packages/
+venv/
+coverage/
+htmlcov/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.egg-info/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）

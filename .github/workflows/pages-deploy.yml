@@ -2,7 +2,8 @@
 # 触发：push main 且前端面（web/packages/grammar 构建器/锁文件/本文件）变更，或手动触发。
 # 子路径适配：GitHub Pages 项目站点伺服在 /<repo>/ 下，构建注入 VV_BASE_PATH
 # （svelte paths.base、PWA manifest start_url/scope、highlight worker 的
-# grammars/queries/runtime 资产路径同源取用，见 svelte.config.js 注释）；
+# grammars/queries/runtime 资产路径同源取用，见 apps/web/vite.config.ts 的
+# sveltekit() 插件参数注释）；
 # 仓库本身是 <owner>.github.io 用户站点时 base 置空按根路径部署。
 # 部署 action：peaceiris/actions-gh-pages@v4（当前最新主版本）——默认写入
 # .nojekyll（SvelteKit 的 _app/ 下划线目录必需，否则 Jekyll 忽略全部产物），
