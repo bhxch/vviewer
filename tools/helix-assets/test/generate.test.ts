@@ -164,9 +164,16 @@ describe('生成产物（packages/highlight/assets）', () => {
 });
 
 describe('QUERY_PATCHES（原样拷贝后的针对性查询修正）', () => {
-  it('补丁已应用：入库资产 ecma/injections.scm 含 graphql 注入的 `.` 锚点（防 O(n²) 挂起回归）', () => {
+  it('守门：入库资产 ecma/injections.scm 含 graphql 注入的 `.` 锚点（防 O(n²) 挂起回归；曾为 QUERY_PATCHES 条目，Markpad pin 点上游已内置等价锚点，见 generate.mjs QUERY_PATCHES 注释）', () => {
     const text = readFileSync(path.join(assetsDir, 'queries/ecma/injections.scm'), 'utf8');
+    expect(text).toContain('((comment) @_ecma_comment) . [');
+    // 无锚形态（补丁前的上游病态 pattern）不得回归
+    expect(text).not.toContain('((comment) @_ecma_comment [\n');
+  });
+
+  it('补丁已应用：入库资产含每个 QUERY_PATCHES 条目的 replace 且不含 find', () => {
     for (const patch of QUERY_PATCHES) {
+      const text = readFileSync(path.join(assetsDir, 'queries', patch.file), 'utf8');
       expect(text).toContain(patch.replace);
       expect(text).not.toContain(patch.find);
     }

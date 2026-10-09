@@ -204,17 +204,23 @@ export function collectThemes(themesDir) {
 /**
  * 查询补丁：markpad queries 原样拷贝后的针对性修正（源更新导致 find 失配时 copyQueries
  * 报错退出、提醒人工复核，不静默跳过）。每项 { file, reason, find, replace }，find 须唯一命中。
+ *
+ * 历史条目（已移除）：ecma/injections.scm graphql 注入的 `.` 锚点——web-tree-sitter 0.25 对
+ * 「根级双兄弟、无锚点」pattern（comment 与 [string|template_string] 并列）做 O(n²) 兄弟配对
+ * 扫描，19KB 文件注入匹配 40s+ 挂起。Markpad 2026-10-07 pin 点上游已内置等价锚点
+ * `((comment) @_ecma_comment) . [`（形态差异仅在锚点位于右括号外，语义相同），条目随之移除；
+ * O(n²) 防护改由守门测试直接锁定入库资产的锚点形态。若未来上游回退为无锚形态，在此重新
+ * 添加条目（find `  ((comment) @_ecma_comment [\n` → replace `  ((comment) @_ecma_comment . [\n`）。
  */
 export const QUERY_PATCHES = [
   {
-    file: 'ecma/injections.scm',
-    // web-tree-sitter 0.25 查询游标对"根级双兄弟、无锚点"pattern（comment 与 [string|template_string]
-    // 并列）做 O(n²) 兄弟配对扫描：19KB JS 文件注入匹配即 40s+ 不返回（worker 挂起，promise 永不 settle）。
-    // 插入 `.` 锚点要求 comment 与字符串相邻，复杂度回落线性（实测 19KB 40s → 2ms），
-    // 语义收紧为"紧邻 comment 的字符串"——与上游注释声明的本意（graphql 字符串的注释引导）一致。
-    reason: '根级无锚兄弟 pattern 触发 O(n²) 兄弟配对扫描，大文件注入匹配挂起',
-    find: '  ((comment) @_ecma_comment [\n',
-    replace: '  ((comment) @_ecma_comment . [\n',
+    file: 'solidity/highlights.scm',
+    // 上游 struct_expression 的 type 捕获带组尾 `.`；单子元素组内的尾随锚点无兄弟可依
+    // （0.25 语义空转），tree-sitter 0.27 起为硬语法错误（TSQueryErrorSyntax）。删去组尾
+    // 锚点——服务端 301 门禁（full_registry_count_is_301）依赖 solidity 可编译，勿回灌。
+    reason: '单子元素组内尾随锚点为 tree-sitter 0.27 硬语法错误，且 0.25 语义空转',
+    find: '(struct_expression type: ((expression (identifier)) @type .))',
+    replace: '(struct_expression type: ((expression (identifier)) @type))',
   },
 ];
 
