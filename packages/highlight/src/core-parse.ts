@@ -11,8 +11,12 @@ import type { HighlightInterval } from './types';
 /** 虚拟查询来源：与目录布局同形的映射（lang → 查询文件），供浏览器端打包使用。 */
 export type VirtualQueries = Map<string, QueryFile> | Record<string, QueryFile>;
 
-/** grammar 清单：与 apps/web/static/grammars/manifest.json 的 grammars 字段同形。 */
-export type GrammarTable = Record<string, { file: string; aliases?: string[] }>;
+/**
+ * grammar 清单：与 apps/web/static/grammars/manifest.json 的 grammars 字段同形。
+ * `base` 为该条目 wasm 的目录 URL/路径前缀（资产三层解析链逐条注记来源），
+ * 缺省回落 grammarsBase——Task 2/3 的消费契约。
+ */
+export type GrammarTable = Record<string, { file: string; aliases?: string[]; base?: string }>;
 
 /** highlight 的结果：成功带全量区间（调用方负责去重叠渲染），失败带错误信息。 */
 export type HighlightResult =
@@ -259,9 +263,9 @@ export class TreeSitterEngine {
       expanded = expandQuery(this.assets, lang);
     }
     if (!expanded) return null;
-    const file = this.resolveGrammar(lang);
-    if (!file) return null;
-    const language = await Language.load(joinPath(this.grammarsBase, file));
+    const entry = this.resolveGrammarEntry(lang);
+    if (!entry) return null;
+    const language = await Language.load(joinPath(entry.base ?? this.grammarsBase, entry.file));
     const toQuery = (scm: string): Query | null => {
       if (scm.trim() === '') return null;
       return new Query(language, scm);
@@ -269,11 +273,12 @@ export class TreeSitterEngine {
     return { language, highlights: toQuery(expanded.highlights), injections: toQuery(expanded.injections) };
   }
 
-  /** 语言名 → grammar wasm 文件名：精确键 → aliases → null。 */
-  private resolveGrammar(lang: string): string | null {
+  /** 语言名 → grammar 清单条目（别名路径同样返回条目，含 base）：精确键 → aliases → null。 */
+  private resolveGrammarEntry(lang: string): { file: string; base?: string } | null {
     const direct = this.grammarTable[lang];
-    if (direct) return direct.file;
-    return this.aliasToLang.get(lang) ?? null;
+    if (direct) return direct;
+    const alias = this.aliasToLang.get(lang);
+    return alias ? (this.grammarTable[alias] ?? null) : null;
   }
 }
 

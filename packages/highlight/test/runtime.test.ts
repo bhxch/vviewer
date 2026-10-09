@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { TreeSitterEngine, type VirtualQueries } from '../src/core-parse';
 
@@ -243,3 +244,65 @@ describe.skipIf(!grammarAssetsReady)('大文件护栏（web-tree-sitter 病态�
     }
   }, 30_000);
 });
+
+describe.skipIf(!grammarAssetsReady || !existsSync(path.join(grammarsDir, 'json.wasm')))(
+  'GrammarTable 条目 base 覆写 wasm 加载前缀（资产三层解析链契约）',
+  () => {
+    // 目录 A 只放真 wasm，grammarsBase 指向空目录 B：条目不带 base 时只能从 B 加载、
+    // 必然失败；带 base=A 的条目成功——证明 wasm 按 entry.base ?? grammarsBase 定位。
+    let dirA: string;
+    let dirB: string;
+
+    beforeAll(() => {
+      dirA = mkdtempSync(path.join(tmpdir(), 'vv-grammar-base-a-'));
+      dirB = mkdtempSync(path.join(tmpdir(), 'vv-grammar-base-b-'));
+      copyFileSync(path.join(grammarsDir, 'json.wasm'), path.join(dirA, 'json.wasm'));
+    });
+    afterAll(() => {
+      rmSync(dirA, { recursive: true, force: true });
+      rmSync(dirB, { recursive: true, force: true });
+    });
+
+    it('entry.base 优先于 grammarsBase 定位 wasm；无 base 条目回落 grammarsBase 而失败', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const engine = await TreeSitterEngine.create({
+        queriesDir, // 真实 queries（json 有 highlights.scm），排除查询缺失干扰
+        runtimeDir: staticDir, // runtime wasm 与 grammarsBase 无关，显式钉在 static
+        grammarsBase: dirB, // 空目录
+        grammars: { json: { file: 'json.wasm', base: dirA, aliases: ['j'] } },
+      });
+      try {
+        // base 生效：从 dirA 加载成功
+        const r = await engine.highlight('{}', 'json');
+        expect(r.ok).toBe(true);
+        if (!r.ok) return;
+        expect(r.intervals.length).toBeGreaterThan(0); // json 查询对 {} 产出对象定界捕获
+
+        // 别名解析链同样返回条目（含 base）
+        const viaAlias = await engine.highlight('{}', 'j');
+        expect(viaAlias.ok).toBe(true);
+        if (!viaAlias.ok) return;
+        expect(viaAlias.intervals.length).toBeGreaterThan(0);
+
+        // 对照：唯一差异是去掉 base——同一空 grammarsBase 下加载失败
+        const bare = await TreeSitterEngine.create({
+          queriesDir,
+          runtimeDir: staticDir,
+          grammarsBase: dirB,
+          grammars: { json: { file: 'json.wasm' } },
+        });
+        try {
+          const noBase = await bare.highlight('{}', 'json');
+          expect(noBase.ok).toBe(false);
+          if (noBase.ok) return;
+          expect(noBase.error.length).toBeGreaterThan(0);
+        } finally {
+          bare.dispose();
+        }
+      } finally {
+        engine.dispose();
+        warn.mockRestore();
+      }
+    }, 30_000);
+  },
+);
