@@ -7,7 +7,9 @@
 //! - tree-sitter 节点偏移是 UTF-8 字节偏移，前端区间是 UTF-16 代码单元偏移，
 //!   响应前经 [`Utf16Index`]（按行增量表 + 二分定位 + 行内小步修正）转换；
 //! - path 模式走 [`crate::guard`]（canonicalize 越界校验）并按
-//!   `(canonical_path, mtime_ms, size)` 缓存响应（64 条 LRU 简易淘汰）；
+//!   `(canonical_path, mtime_ms, size, lang, start_line, line_count)` 缓存响应
+//!   （64 条 LRU 简易淘汰）；带 range 的请求流式扫行、区间相对 chunk 首行，
+//!   响应带 `baseLine`（= startLine）告知客户端基准行；
 //! - 解析是同步 CPU 工作：`spawn_blocking` + 响应侧 `tokio::time::timeout`
 //!   （生产 [`HIGHLIGHT_TIMEOUT`]，封装于 [`parse_with_timeout`]，测试可注入短时限）。
 //!   超时无法中断已进入同步解析的线程（无取消点），只能放弃其结果返回 504，
@@ -38,6 +40,10 @@ use crate::state::AppState;
 /// text/path 输入上限（UTF-8 字节）：超限 413。
 pub const HIGHLIGHT_MAX_BYTES: usize = 20 * 1024 * 1024;
 
+/// range.lineCount 上限：懒高亮按可视区请求，5000 行远超最大视口预算；
+/// 超限 400（区间数上限 [`MAX_INTERVALS`] 之外的第一道闸，防单次请求解析量失控）。
+pub const MAX_RANGE_LINES: u64 = 5000;
+
 /// 区间数上限：超过即 413（防御病态输入——UTF-16 转换与 JSON 序列化都是
 /// O(intervals)，2M 区间远超正常源文件的必要精度，放行会拖垮内存与响应）。
 pub const MAX_INTERVALS: usize = 2_000_000;
@@ -50,10 +56,24 @@ pub const CACHE_MAX_INTERVALS: usize = 500_000;
 pub const HIGHLIGHT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// 响应体：区间三元组（UTF-16 起止偏移 + 捕获名索引，左闭右开）。
+/// 带 range 的请求：区间相对 chunk 首行，`baseLine` = 请求 startLine；
+/// 无 range（整文件/text）：`baseLine` = 0（与历史响应口径一致）。
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct HighlightResponse {
     pub intervals: Vec<[u64; 3]>,
     pub captures: Vec<String>,
+    #[serde(rename = "baseLine")]
+    pub base_line: u64,
+}
+
+/// 可视区行范围（serde rename 对齐前端驼峰契约；行号 0 起，与客户端
+/// buildLineIndex/revealLine 的行号约定一致）。
+#[derive(Debug, Copy, Clone, Deserialize, PartialEq, Eq)]
+pub struct HighlightRange {
+    #[serde(rename = "startLine")]
+    pub start_line: u64,
+    #[serde(rename = "lineCount")]
+    pub line_count: u64,
 }
 
 #[derive(Deserialize)]
@@ -67,6 +87,9 @@ pub struct HighlightRequest {
     /// 语言名（queries 注册表键）。
     #[serde(default)]
     pub lang: Option<String>,
+    /// 可视区行范围（仅 path 模式接受；缺省 = 整文件）。
+    #[serde(default)]
+    pub range: Option<HighlightRange>,
 }
 
 // ---------- 字节 → UTF-16 偏移转换 ----------
@@ -171,14 +194,17 @@ pub fn run_highlight(lang: &str, text: &str) -> Result<HighlightResponse, AppErr
             }
         }
     }
-    Ok(HighlightResponse { intervals, captures })
+    Ok(HighlightResponse { intervals, captures, base_line: 0 })
 }
 
 // ---------- path 模式响应缓存 ----------
 
 /// 缓存键必须含 lang：同 (path,mtime,size) 换语言请求结果不同，
 /// 缺 lang 会让不同语言互命中错误区间（review fix 1）。
-type CacheKey = (PathBuf, u64, u64, String);
+/// 末两位 (start_line, line_count) 为 range 维度：无 range 用 (0, u64::MAX)
+/// 占位——合法 lineCount ∈ 1..=[`MAX_RANGE_LINES`]，占位键与任何具体 range 键
+/// 互不命中；缓存响应含 baseLine（= start_line），键不含 range 会互命中错基准。
+type CacheKey = (PathBuf, u64, u64, String, u64, u64);
 
 /// (path, mtime_ms, size) → 响应；HashMap + 访问序 VecDeque 的简易 LRU（64 条）。
 struct CacheInner {
@@ -302,9 +328,51 @@ fn mtime_ms(meta: &std::fs::Metadata) -> u64 {
         .unwrap_or(0)
 }
 
-/// body `{path?, text?, lang}` → `{intervals, captures}`。
+/// 流式扫行（path+range 模式）：跳过 start_line 行后读至多 line_count 行，
+/// `\n` join 为 chunk 文本——全程不整读文件，内存有界（range 模式因此不设
+/// [`HIGHLIGHT_MAX_BYTES`] 文件大小上限）。
+/// 行语义与 wc -l 同口径（以 `\n` 结尾的文件不计末尾空行），行号 0 起；末尾
+/// 空行不参与 range 寻址（客户端 meta 行数同口径）。tokio `next_line` 剥离
+/// `\r\n` 行尾，残留 `\r`（CR-only 文件、行内孤立 `\r`）由调用方对 chunk 文本
+/// 沿用整文件路径的 `replace` 归一——两模式同源语义。
+/// 返回：`Ok(Ok((chunk, 实际行数)))`（实际行数可少于 line_count，自然截断）；
+/// `Ok(Err(实际行数))` = start_line ≥ 实际行数（越过文件尾，含空文件 0 行）；
+/// `Err(io)` = 读文件失败（含非 UTF-8：`lines()` 产 InvalidData）。
+async fn read_line_chunk(
+    path: &std::path::Path,
+    start_line: u64,
+    line_count: u64,
+) -> std::io::Result<Result<(String, u64), u64>> {
+    use tokio::io::AsyncBufReadExt;
+    let file = tokio::fs::File::open(path).await?;
+    let mut lines = tokio::io::BufReader::new(file).lines();
+    let mut skipped: u64 = 0;
+    while skipped < start_line {
+        match lines.next_line().await? {
+            Some(_) => skipped += 1,
+            None => return Ok(Err(skipped)),
+        }
+    }
+    let mut chunk: Vec<String> = Vec::new();
+    while (chunk.len() as u64) < line_count {
+        match lines.next_line().await? {
+            Some(l) => chunk.push(l),
+            None => break, // 不足 line_count：越过文件尾，自然截断（200）
+        }
+    }
+    if chunk.is_empty() {
+        // line_count 已校验 ≥ 1：跳行成功但一行未得 = start_line 恰为总行数
+        return Ok(Err(start_line));
+    }
+    Ok(Ok((chunk.join("\n"), chunk.len() as u64)))
+}
+
+/// body `{path?, text?, lang, range?}` → `{intervals, captures, baseLine}`。
 /// text/path 超 20MB → 413；区间数超 [`MAX_INTERVALS`] → 413；未知语言 → 400；
 /// 解析超 10s → 504。path 模式区间数超 [`CACHE_MAX_INTERVALS`] 的响应不进缓存。
+/// range 仅 path 模式接受（text+range → 400）；lineCount ∈ 1..=[`MAX_RANGE_LINES`]
+/// 否则 400；startLine ≥ 文件实际行数（含空文件）→ 400 并报实际行数；lineCount
+/// 越过文件尾 → 自然截断为实际行数（200）。
 pub async fn highlight(State(state): State<AppState>, Json(req): Json<HighlightRequest>) -> Response {
     highlight_with_timeout(state, req, HIGHLIGHT_TIMEOUT).await
 }
@@ -327,60 +395,113 @@ pub(crate) async fn highlight_with_timeout(
         .into_response();
     }
 
-    // path 模式：guard 解析（400/403/404）→ 元数据 → 缓存查询 → 读文件
+    // range 结构校验（先于模式分流）：仅 path 模式接受（text+range → 400）
+    if let Some(range) = req.range {
+        if range.line_count == 0 || range.line_count > MAX_RANGE_LINES {
+            return AppError::bad_request(format!(
+                "range.lineCount must be in 1..={MAX_RANGE_LINES}, got {}",
+                range.line_count
+            ))
+            .into_response();
+        }
+        if req.path.as_deref().filter(|p| !p.is_empty()).is_none() {
+            return AppError::bad_request(
+                "range requires path mode (text + range is not supported)",
+            )
+            .into_response();
+        }
+    }
+
+    // path 模式：guard 解析（400/403/404）→ 元数据 → 缓存查询 → 读文件/流式扫行
     let mut cache_key: Option<CacheKey> = None;
-    let text: String = if let Some(path) = req.path.as_deref().filter(|p| !p.is_empty()) {
-        let canonical = match crate::guard::resolve(&state, Some(path)).await {
-            Ok(p) => p,
-            Err(e) => return e.into_response(),
-        };
-        let meta = match tokio::fs::metadata(&canonical).await {
-            Ok(m) if m.is_file() => m,
-            Ok(_) => return AppError::bad_request("path is not a file").into_response(),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return AppError::not_found("path not found").into_response()
+    let (text, base_line): (String, u64) =
+        if let Some(path) = req.path.as_deref().filter(|p| !p.is_empty()) {
+            let canonical = match crate::guard::resolve(&state, Some(path)).await {
+                Ok(p) => p,
+                Err(e) => return e.into_response(),
+            };
+            let meta = match tokio::fs::metadata(&canonical).await {
+                Ok(m) if m.is_file() => m,
+                Ok(_) => return AppError::bad_request("path is not a file").into_response(),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    return AppError::not_found("path not found").into_response()
+                }
+                Err(e) => return AppError::internal(e.to_string()).into_response(),
+            };
+            // 整文件模式保留 20MB 上限；range 模式流式扫行内存有界，不设上限
+            if req.range.is_none() && meta.len() > HIGHLIGHT_MAX_BYTES as u64 {
+                return too_large("file");
             }
-            Err(e) => return AppError::internal(e.to_string()).into_response(),
+            // LRU 键追加 range 维度（无 range 用 (0, u64::MAX) 占位，见 CacheKey 注释）
+            let (start_line, line_count) = match req.range {
+                Some(r) => (r.start_line, r.line_count),
+                None => (0, u64::MAX),
+            };
+            let key =
+                (canonical.clone(), mtime_ms(&meta), meta.len(), lang.to_string(), start_line, line_count);
+            if let Some(cached) = CACHE.get(&key) {
+                return Json(HighlightResponse::clone(&cached)).into_response();
+            }
+            let file_text: String = match req.range {
+                Some(r) => match read_line_chunk(&canonical, r.start_line, r.line_count).await {
+                    Ok(Ok((chunk, _))) => chunk,
+                    // startLine ≥ 实际行数（含空文件）：400 携带实际行数
+                    Ok(Err(total)) => {
+                        return AppError::bad_request(format!(
+                            "range.startLine {} is beyond end of file: {} lines",
+                            r.start_line, total
+                        ))
+                        .into_response()
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                        return AppError::bad_request("file is not valid UTF-8").into_response()
+                    }
+                    Err(e) => return AppError::internal(e.to_string()).into_response(),
+                },
+                None => {
+                    let bytes = match tokio::fs::read(&canonical).await {
+                        Ok(b) => b,
+                        Err(e) => return AppError::internal(e.to_string()).into_response(),
+                    };
+                    match String::from_utf8(bytes) {
+                        Ok(t) => t,
+                        Err(_) => {
+                            return AppError::bad_request("file is not valid UTF-8").into_response()
+                        }
+                    }
+                }
+            };
+            cache_key = Some(key);
+            let base_line = req.range.map_or(0, |r| r.start_line);
+            (file_text, base_line)
+        } else if let Some(text) = req.text {
+            if text.len() > HIGHLIGHT_MAX_BYTES {
+                return too_large("text");
+            }
+            (text, 0)
+        } else {
+            return AppError::bad_request("path or text is required").into_response();
         };
-        if meta.len() > HIGHLIGHT_MAX_BYTES as u64 {
-            return too_large("file");
-        }
-        let key = (canonical.clone(), mtime_ms(&meta), meta.len(), lang.to_string());
-        if let Some(cached) = CACHE.get(&key) {
-            return Json(HighlightResponse::clone(&cached)).into_response();
-        }
-        let bytes = match tokio::fs::read(&canonical).await {
-            Ok(b) => b,
-            Err(e) => return AppError::internal(e.to_string()).into_response(),
-        };
-        cache_key = Some(key);
-        match String::from_utf8(bytes) {
-            Ok(t) => t,
-            Err(_) => return AppError::bad_request("file is not valid UTF-8").into_response(),
-        }
-    } else if let Some(text) = req.text {
-        if text.len() > HIGHLIGHT_MAX_BYTES {
-            return too_large("text");
-        }
-        text
-    } else {
-        return AppError::bad_request("path or text is required").into_response();
-    };
 
     // CRLF/CR → LF 归一化（final re-review 修复）：path 模式原样读文件、text 模式
     // 原样收文本，Utf16Index 会在含 \r 的原文上换算——\r 计入前一行长度，CRLF 文件
     // 的区间相对客户端（renderCode 解码后即归一化，apps/web highlightClient 只发
     // {path, lang}）整体右移。两模式统一在解析前归一，与客户端口径三方一致；
-    // (canonical_path, mtime, size) 缓存键指向原文件元数据，不受归一化影响。
+    // (canonical_path, mtime, size, range) 缓存键指向原文件元数据，不受归一化影响。
+    // range 模式 chunk 同源处理：tokio 扫行已剥离 \r\n 行尾，此处的 replace 兜底
+    // 行内孤立 \r 与 CR-only 文件——与整文件路径语义一致（流式扫行注释）。
     let text = text.replace("\r\n", "\n").replace('\r', "\n");
 
     // 同步解析：阻塞线程执行，响应侧超时（无法中断线程本身，见模块注释）
     let lang_owned = lang.to_string();
     let handle = tokio::task::spawn_blocking(move || run_highlight(&lang_owned, &text));
-    let result = match parse_with_timeout(timeout, handle).await {
+    let mut result = match parse_with_timeout(timeout, handle).await {
         Ok(resp) => resp,
         Err(response) => return response,
     };
+    // range 模式：区间相对 chunk 首行（Utf16Index 以 chunk 文本建表，不做平移），
+    // baseLine 告知客户端基准行；无 range/text 模式保持 0
+    result.base_line = base_line;
 
     if let Some(key) = cache_key {
         CACHE.insert(key, result.clone());
@@ -529,17 +650,25 @@ fn main() {
     fn cache_skips_responses_over_interval_cap() {
         let _g = serial_lock();
         cache_reset();
-        let key: CacheKey = (PathBuf::from("/tmp/huge.rs"), 1, 1, "rust".into());
+        let key: CacheKey = (PathBuf::from("/tmp/huge.rs"), 1, 1, "rust".into(), 0, u64::MAX);
         // 超限响应：insert 静默跳过（请求侧仍正常返回，只是不占缓存）
         CACHE.insert(
             key.clone(),
-            HighlightResponse { intervals: vec![[0, 1, 0]; CACHE_MAX_INTERVALS + 1], captures: vec![] },
+            HighlightResponse {
+                intervals: vec![[0, 1, 0]; CACHE_MAX_INTERVALS + 1],
+                captures: vec![],
+                base_line: 0,
+            },
         );
         assert_eq!(CACHE.len(), 0, "超 50 万区间的响应不进缓存");
         // 未超限：正常入缓存
         CACHE.insert(
             key.clone(),
-            HighlightResponse { intervals: vec![[0, 1, 0]; CACHE_MAX_INTERVALS], captures: vec![] },
+            HighlightResponse {
+                intervals: vec![[0, 1, 0]; CACHE_MAX_INTERVALS],
+                captures: vec![],
+                base_line: 0,
+            },
         );
         assert_eq!(CACHE.len(), 1, "阈值内正常缓存");
         assert!(CACHE.get(&key).is_some());
@@ -550,29 +679,31 @@ fn main() {
     fn cache_hit_miss_and_lru_eviction() {
         let _g = serial_lock();
         cache_reset();
-        let key: CacheKey = (PathBuf::from("/tmp/a.rs"), 1, 2, "rust".into());
+        let key: CacheKey = (PathBuf::from("/tmp/a.rs"), 1, 2, "rust".into(), 0, u64::MAX);
         assert!(CACHE.get(&key).is_none(), "未插入时 miss");
         for i in 0..(CACHE_CAP as u64) {
             CACHE.insert(
-                (PathBuf::from(format!("/tmp/k{i}")), 0, i, "rust".into()),
-                HighlightResponse { intervals: vec![], captures: vec![] },
+                (PathBuf::from(format!("/tmp/k{i}")), 0, i, "rust".into(), 0, u64::MAX),
+                HighlightResponse { intervals: vec![], captures: vec![], base_line: 0 },
             );
         }
         assert_eq!(CACHE.len(), CACHE_CAP);
         // 命中 0 号把它移到队尾，插入新条目淘汰的应是 1 号而非 0 号
-        let hit0 = CACHE.get(&(PathBuf::from("/tmp/k0"), 0, 0, "rust".into())).is_some();
+        let hit0 = CACHE
+            .get(&(PathBuf::from("/tmp/k0"), 0, 0, "rust".into(), 0, u64::MAX))
+            .is_some();
         assert!(hit0);
         CACHE.insert(
-            (PathBuf::from("/tmp/new"), 0, 9, "rust".into()),
-            HighlightResponse { intervals: vec![], captures: vec![] },
+            (PathBuf::from("/tmp/new"), 0, 9, "rust".into(), 0, u64::MAX),
+            HighlightResponse { intervals: vec![], captures: vec![], base_line: 0 },
         );
         assert_eq!(CACHE.len(), CACHE_CAP, "上限 64");
         assert!(
-            CACHE.get(&(PathBuf::from("/tmp/k0"), 0, 0, "rust".into())).is_some(),
+            CACHE.get(&(PathBuf::from("/tmp/k0"), 0, 0, "rust".into(), 0, u64::MAX)).is_some(),
             "LRU touch 后 0 号保留"
         );
         assert!(
-            CACHE.get(&(PathBuf::from("/tmp/k1"), 0, 1, "rust".into())).is_none(),
+            CACHE.get(&(PathBuf::from("/tmp/k1"), 0, 1, "rust".into(), 0, u64::MAX)).is_none(),
             "最久未用的 1 号被淘汰"
         );
         let (hits, misses) = cache_stats();
@@ -587,11 +718,18 @@ fn main() {
         let _g = serial_lock();
         cache_reset();
         let path = PathBuf::from("/tmp/poly.gl");
-        let rust_key: CacheKey = (path.clone(), 7, 100, "rust".into());
-        let py_key: CacheKey = (path.clone(), 7, 100, "python".into());
-        let rust_resp =
-            HighlightResponse { intervals: vec![[0, 1, 0]], captures: vec!["keyword".into()] };
-        let py_resp = HighlightResponse { intervals: vec![[0, 2, 0]], captures: vec!["string".into()] };
+        let rust_key: CacheKey = (path.clone(), 7, 100, "rust".into(), 0, u64::MAX);
+        let py_key: CacheKey = (path.clone(), 7, 100, "python".into(), 0, u64::MAX);
+        let rust_resp = HighlightResponse {
+            intervals: vec![[0, 1, 0]],
+            captures: vec!["keyword".into()],
+            base_line: 0,
+        };
+        let py_resp = HighlightResponse {
+            intervals: vec![[0, 2, 0]],
+            captures: vec!["string".into()],
+            base_line: 0,
+        };
         CACHE.insert(rust_key.clone(), rust_resp.clone());
         // 同 (path,mtime,size) 换 lang：必须 miss，不命中 rust 的响应
         assert!(CACHE.get(&py_key).is_none(), "异 lang 不得互命中");
@@ -599,6 +737,51 @@ fn main() {
         assert_eq!(*CACHE.get(&rust_key).unwrap(), rust_resp, "rust 键仍是 rust 响应");
         assert_eq!(*CACHE.get(&py_key).unwrap(), py_resp, "python 键是 python 响应");
         cache_reset();
+    }
+
+    /// range 维度（Task 1）：无 range 的 (0, u64::MAX) 占位键与具体 range 键
+    /// 互不命中——缓存响应含 baseLine，键不含 range 会互命中错基准。
+    #[test]
+    fn cache_key_range_dimension_no_cross_hit() {
+        let _g = serial_lock();
+        cache_reset();
+        let whole: CacheKey = (PathBuf::from("/tmp/r.rs"), 1, 10, "rust".into(), 0, u64::MAX);
+        let r03: CacheKey = (PathBuf::from("/tmp/r.rs"), 1, 10, "rust".into(), 0, 3);
+        let whole_resp =
+            HighlightResponse { intervals: vec![[0, 9, 0]], captures: vec![], base_line: 0 };
+        let range_resp =
+            HighlightResponse { intervals: vec![[0, 2, 0]], captures: vec![], base_line: 0 };
+        CACHE.insert(whole.clone(), whole_resp.clone());
+        assert!(CACHE.get(&r03).is_none(), "range 键不得命中无 range 条目");
+        CACHE.insert(r03.clone(), range_resp.clone());
+        assert_eq!(*CACHE.get(&whole).unwrap(), whole_resp, "无 range 键仍是整文件响应");
+        cache_reset();
+    }
+
+    /// 流式扫行（Task 1）：中段取行、越过文件尾自然截断、start_line == 总行数
+    /// 与空文件返回 Err(实际行数)、tokio next_line 剥离 \r\n 行尾。
+    #[tokio::test]
+    async fn read_line_chunk_skip_truncate_and_beyond_eof() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("chunk.txt");
+        std::fs::write(&p, "l0\nl1\nl2\nl3\n").unwrap();
+        // 中段：跳 1 取 2
+        let chunk = read_line_chunk(&p, 1, 2).await.unwrap().unwrap();
+        assert_eq!(chunk, ("l1\nl2".to_string(), 2));
+        // 越过文件尾：截断为实际行数
+        let chunk = read_line_chunk(&p, 2, 10).await.unwrap().unwrap();
+        assert_eq!(chunk, ("l2\nl3".to_string(), 2));
+        // start_line == 总行数（4）→ Err(4)；空文件 → Err(0)
+        assert_eq!(read_line_chunk(&p, 4, 1).await.unwrap().unwrap_err(), 4);
+        let empty = dir.path().join("empty.txt");
+        std::fs::write(&empty, "").unwrap();
+        assert_eq!(read_line_chunk(&empty, 0, 3).await.unwrap().unwrap_err(), 0);
+        // \r\n 行尾在扫描期剥离：chunk 与 LF 版本逐字节一致（孤立 \r 由调用方
+        // replace 兜底，与整文件路径同源）
+        let crlf = dir.path().join("crlf.txt");
+        std::fs::write(&crlf, "a\r\nb\r\n").unwrap();
+        let chunk = read_line_chunk(&crlf, 0, 5).await.unwrap().unwrap();
+        assert_eq!(chunk, ("a\nb".to_string(), 2));
     }
     /// 504 自动化（终审 M6：超时路径此前无测试）：注入永不完成的解析任务 + 200ms
     /// deadline + 挂钟暂停——advance 越过 deadline 后超时分支确定触发，不依赖
