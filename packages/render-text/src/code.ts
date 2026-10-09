@@ -624,10 +624,12 @@ export function renderCode(
   async function start(): Promise<void> {
     if (strategy === 'hljs-block') {
       mount(); // 先渲染纯文本立即可见；hljs 到位（或远程区间到达）后 refresh 重绘
-      // BUG-10：显式 remote 策略下 >2MB 文件也问路由。仅当注入了 router 且有服务端
-      // path 与可识别语言时发起；**auto 策略在注入侧（apps/web highlightRouter）被
-      // 硬护栏拦为 null——3MB 文件在 auto 下保持本地 hljs 分块、零 POST**（避免远程
-      // 大文件拖慢默认体验的既定裁决，勿改为渲染端问路由）。
+      // BUG-10：remote 策略下 >2MB 文件问路由；auto 下 server-served 文件（有服务
+      // 端 path）阶段 3 起不限大小也问路由，失败由注入侧 warn+null 回退本地 hljs
+      // 分块（显式 remote 失败抛错→错误卡片）。仅当注入了 router 且有服务端 path
+      // 与可识别语言时发起；**local 与本地添加文件（无 path）在注入侧
+      // （apps/web highlightRouter）被硬护栏拦为 null——恒本地 hljs 分块、零
+      // POST**，勿改为渲染端问路由。
       const router = attachedRouter;
       if (router && lang !== null && opts.computeSrc?.path) {
         engine = 'pending';

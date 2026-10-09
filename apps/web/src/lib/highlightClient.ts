@@ -11,7 +11,6 @@ import {
   createComputeRouter,
   decodeHighlightResponse,
   encodeCanceled,
-  highlightRemoteEligible,
   remoteLanguageAdvertised,
   type ComputeRouter,
   type ComputeSource,
@@ -35,8 +34,8 @@ import { loadSettings } from './stores/settings';
  * M6：注入前经 compute router 路由——远程 store 文件（有服务端 path 语义）在
  * auto/remote 策略且服务器宣告 compute 能力时走 POST /api/compute/highlight，
  * 其余走本地 tree-sitter worker；结果统一带执行位置回调（状态栏指示）。
- * 注入语言路由：auto 下 INJECTION_LANGS（服务端带 injections.scm 的语言）不装配
- * remoteFn——服务端 v1 无 injection，本地高亮保注入完整；显式 remote 仍远程。
+ * 注入语言不再路由豁免：服务端已接线 injections（阶段 1），auto 下注入语言
+ * 同样走远程；显式 remote 仍远程。
  *
  * P2 资产三层解析链（spec §3）：grammar manifest 按同源 → 服务端 → CDN 逐层
  * fetch 并 first-wins 合并（grammarLayers.ts），条目 base 标明 wasm 来源层。
@@ -177,14 +176,14 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
       };
       const src = ctx?.src;
       const policy = loadSettings().computePolicy;
-      // 装配 remoteFn 即"本调用尝试过远程"（policy 非 local 且 auto 下非注入语言，
-      // 且 BUG-06c：auto 下语言在服务端宣告集合内——集合未知（旧服务端）保持先试
-      // 远程；显式 remote 是用户选择，不做集合门控，失败如实错误卡片不静默降级）；
+      // 装配 remoteFn 即"本调用尝试过远程"（policy 非 local，且 BUG-06c：auto 下
+      // 语言在服务端宣告集合内——集合未知（旧服务端）保持先试远程；显式 remote
+      // 是用户选择，不做集合门控，失败如实错误卡片不静默降级）。服务端已接线
+      // injections（阶段 1），auto 不再豁免注入语言。
       // auto 回退本地时 where 为 local，据此在状态栏之外补一条 console.warn 留痕
       const remoteAttempted =
         !!src &&
         policy !== 'local' &&
-        highlightRemoteEligible(policy, lang) &&
         (policy === 'remote' || remoteLanguageAdvertised(lang, new Set(loadComputeLanguages())));
       // runRouted 从不 reject（失败折叠为 ok:false），onFulfilled 内统一回调；
       // 结果身份收敛进 resolveHighlightResult：取消重建 HighlightCanceledError
@@ -199,8 +198,8 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
               if (err instanceof Error && err.name === 'HighlightCanceled') throw encodeCanceled(err);
               throw err;
             }),
-          // 注入语言路由（INJECTION_LANGS）：auto 下服务端 v1 无 injection，
-          // 远程高亮会丢注入区间——不装配 remoteFn 留在本地；显式 remote 仍远程。
+          // 服务端已接线 injections（阶段 1），auto 不再豁免注入语言：
+          // remoteAttempted 即装配 remoteFn，无注入语言豁免。
           remoteAttempted ? (s, l) => remoteHighlight(s, l) : undefined
         )
         .then((res) => {

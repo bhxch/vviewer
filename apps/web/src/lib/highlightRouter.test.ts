@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// highlightRouter.test.ts — BUG-10：>2MB 文件远程高亮路由的 policy 硬护栏。
+// highlightRouter.test.ts — 大文件路由的 policy × path 契约矩阵（spec §4 阶段 3）。
 // highlightRouter 依赖 highlightClient（$app/env，vitest 不可用）与
 // loadSettings（localStorage），两者均以 vi.mock 隔离：本测试只验证「策略 → 是否
-// 发起远程请求」的裁决，decodeHighlightResponse 为 core 纯函数真跑。
+// 发起远程请求 → 失败分流（remote 抛错错误卡片 / auto warn+null 回退本地分块）」
+// 的裁决，decodeHighlightResponse 为 core 纯函数真跑。
 
 const loadSettingsMock = vi.hoisted(() => vi.fn());
 const remoteCallMock = vi.hoisted(() => vi.fn());
@@ -19,9 +20,11 @@ vi.mock('./highlightClient', () => ({
 import { routeLargeFileHighlight } from './highlightRouter';
 
 const SRC = { path: 'big.js', storeId: 'remote:abc' } as const;
+const LOCAL_SRC = { path: '', storeId: 'localfs:x' } as const;
 const ENCODED = { intervals: [[0, 3, 0]], captures: ['keyword'] };
+const DECODED = [{ start: 0, end: 3, capture: 'keyword' }];
 
-describe('routeLargeFileHighlight（BUG-10 硬护栏）', () => {
+describe('routeLargeFileHighlight（阶段 3 契约矩阵）', () => {
   beforeEach(() => {
     remoteCallMock.mockReset();
     loadSettingsMock.mockReset();
@@ -31,15 +34,16 @@ describe('routeLargeFileHighlight（BUG-10 硬护栏）', () => {
     vi.unstubAllGlobals();
   });
 
-  it('auto / local 策略：恒返回 null，不触碰远程端点（3MB auto 无 POST 的回归护栏）', async () => {
-    for (const policy of ['auto', 'local'] as const) {
-      loadSettingsMock.mockReturnValue({ computePolicy: policy });
-      await expect(routeLargeFileHighlight(SRC, 'javascript')).resolves.toBeNull();
-    }
+  it('local + 有 path：恒 null，零 fetch', async () => {
+    loadSettingsMock.mockReturnValue({ computePolicy: 'local' });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(routeLargeFileHighlight(SRC, 'javascript')).resolves.toBeNull();
     expect(remoteCallMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('remote 策略：POST /api/compute/highlight（Bearer 头），响应解码为 intervals', async () => {
+  it('remote + 有 path：fetch POST /api/compute/highlight（Bearer 头），200 解码为 intervals', async () => {
     loadSettingsMock.mockReturnValue({ computePolicy: 'remote' });
     remoteCallMock.mockReturnValue({
       url: 'http://s:8321/api/compute/highlight',
@@ -50,7 +54,7 @@ describe('routeLargeFileHighlight（BUG-10 硬护栏）', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
     const intervals = await routeLargeFileHighlight(SRC, 'javascript');
-    expect(intervals).toEqual([{ start: 0, end: 3, capture: 'keyword' }]);
+    expect(intervals).toEqual(DECODED);
     expect(fetchMock).toHaveBeenCalledWith(
       'http://s:8321/api/compute/highlight',
       expect.objectContaining({
@@ -64,22 +68,73 @@ describe('routeLargeFileHighlight（BUG-10 硬护栏）', () => {
     expect(body).toEqual({ path: 'big.js', lang: 'javascript' });
   });
 
-  it('remote 策略 + 未连接服务器（remoteCall null）：抛错（渲染端错误卡片，不静默本地）', async () => {
+  it('remote + 未连接服务器（remoteCall null）：抛错（渲染端错误卡片，不静默本地）', async () => {
     loadSettingsMock.mockReturnValue({ computePolicy: 'remote' });
     remoteCallMock.mockReturnValue(null);
     await expect(routeLargeFileHighlight(SRC, 'javascript')).rejects.toThrow('未连接服务器');
   });
 
-  it('remote 策略 + 非 2xx：抛错（不回退本地）', async () => {
+  it('remote + fetch 500：抛错（错误卡片语义，不回退本地）', async () => {
     loadSettingsMock.mockReturnValue({ computePolicy: 'remote' });
     remoteCallMock.mockReturnValue({ url: 'http://s:8321/api/compute/highlight', headers: {} });
     vi.stubGlobal('fetch', vi.fn(async () => new Response('err', { status: 500 })));
     await expect(routeLargeFileHighlight(SRC, 'javascript')).rejects.toThrow('HTTP 500');
   });
 
-  it('无服务端 path（本地文件）：remote 策略也返回 null', async () => {
-    loadSettingsMock.mockReturnValue({ computePolicy: 'remote' });
-    await expect(routeLargeFileHighlight({ path: '', storeId: 'localfs:x' }, 'javascript')).resolves.toBeNull();
+  it('auto + 有 path：fetch POST，200 → intervals（server-served 不限大小走服务端）', async () => {
+    loadSettingsMock.mockReturnValue({ computePolicy: 'auto' });
+    remoteCallMock.mockReturnValue({ url: 'http://s:8321/api/compute/highlight', headers: {} });
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify(ENCODED), { status: 200 })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(routeLargeFileHighlight(SRC, 'javascript')).resolves.toEqual(DECODED);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('auto + fetch 500：console.warn 一次 + null（回退本地 hljs 分块，不抛错）', async () => {
+    loadSettingsMock.mockReturnValue({ computePolicy: 'auto' });
+    remoteCallMock.mockReturnValue({ url: 'http://s:8321/api/compute/highlight', headers: {} });
+    const fetchMock = vi.fn(async () => new Response('err', { status: 500 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(routeLargeFileHighlight(SRC, 'javascript')).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0]?.[0]).toContain('回退本地');
+    warnSpy.mockRestore();
+  });
+
+  it('auto + fetch 网络异常：console.warn + null（与 !res.ok 同进 catch 分流）', async () => {
+    loadSettingsMock.mockReturnValue({ computePolicy: 'auto' });
+    remoteCallMock.mockReturnValue({ url: 'http://s:8321/api/compute/highlight', headers: {} });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('Failed to fetch');
+      })
+    );
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(routeLargeFileHighlight(SRC, 'javascript')).resolves.toBeNull();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
+  });
+
+  it('auto + 无 path（本地添加文件）：恒 null，零 fetch（回归护栏）', async () => {
+    loadSettingsMock.mockReturnValue({ computePolicy: 'auto' });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(routeLargeFileHighlight(LOCAL_SRC, 'javascript')).resolves.toBeNull();
     expect(remoteCallMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('remote + 无 path：恒 null，零 fetch（现状保持）', async () => {
+    loadSettingsMock.mockReturnValue({ computePolicy: 'remote' });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(routeLargeFileHighlight(LOCAL_SRC, 'javascript')).resolves.toBeNull();
+    expect(remoteCallMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
