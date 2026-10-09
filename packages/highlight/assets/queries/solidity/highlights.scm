@@ -99,7 +99,10 @@
 )
 
 ; Structs and members
-(struct_expression type: ((expression (identifier)) @type .))
+; 本地适配（相对上游 ln 的唯一偏离，2026-10-09）：删去组尾 `.`——单子元素组内的尾随
+; 锚点无兄弟可依（0.25 语义空转），tree-sitter 0.27 起为硬语法错误（TSQueryErrorSyntax）；
+; helix 同步时勿回灌，否则服务端 301 门禁（full_registry_count_is_301）将剔除 solidity。
+(struct_expression type: ((expression (identifier)) @type))
 (struct_field_assignment name: (identifier) @variable.other.member)
 
 
