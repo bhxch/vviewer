@@ -1,0 +1,25 @@
+diff --git a/src/exports/vite/plugins/guard.js b/src/exports/vite/plugins/guard.js
+index d661f8a929ff168b8e9b3e66e5927c8a02a34e67..0903cddf3fe10d056058096cfddbfb26896215bc 100644
+--- a/src/exports/vite/plugins/guard.js
++++ b/src/exports/vite/plugins/guard.js
+@@ -112,12 +112,18 @@ export function plugin_guard(kit, get_config, get_manifest_data) {
+ 
+ 				// skip .server.js files outside the cwd or in node_modules, as the filename might not mean 'server-only module' in this context
+ 				if (id.startsWith(normalized_cwd + '/') && !id.startsWith(normalized_node_modules + '/')) {
++					// [vviewer local patch] test the cwd-relative id: the raw absolute id may
++					// contain a `/server/` segment from an ANCESTOR of the project (e.g. a
++					// checkout at `<somewhere>/server/<app>`), which would false-positive
++					// every project file as server-only
++					const project_relative_id = id.slice(normalized_cwd.length);
++
+ 					// e.g. `server.ts` or `foo.server.ts`
+-					is_server_only ||= server_only_module_pattern.test(id);
++					is_server_only ||= server_only_module_pattern.test(project_relative_id);
+ 
+ 					// e.g. `server/foo.ts`, unless in `src/routes` or `static`
+ 					is_server_only ||=
+-						server_only_directory_pattern.test(id) &&
++						server_only_directory_pattern.test(project_relative_id) &&
+ 						!id.startsWith(normalized_routes + '/') &&
+ 						!id.startsWith(normalized_assets + '/');
+ 				}

@@ -16,7 +16,7 @@
     "@vviewer/render-text": "workspace:*",
     "jszip": "^3.10.2",
     "mammoth": "^1.13.0",
-    "pdfjs-dist": "^5.0.0",
+    "pdfjs-dist": "^6.4.299",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "license": "Apache-2.0"

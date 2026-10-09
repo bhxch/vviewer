@@ -1,3 +1,4 @@
+import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig, type Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -5,6 +6,12 @@ import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, rmSync }
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+
+// 子路径托管（GitHub Pages 项目站点 /<repo>/ 等）：VV_BASE_PATH 注入（如 /vviewer）。
+// 默认空 = 根路径，本地 dev/e2e/自建服务器部署行为不变。同名值供下方 sveltekit()
+// 的 kit.paths.base 与 PWA manifest（start_url/scope）取用，两处必须取同一值。
+// kit 3 起 SvelteKit 配置不再读 svelte.config.js，全部经 sveltekit() 插件参数传入。
+const base = process.env.VV_BASE_PATH ?? '';
 
 const QUERIES_SRC = fileURLToPath(new URL('../../packages/highlight/assets/queries', import.meta.url));
 const QUERIES_DEST = fileURLToPath(new URL('./static/queries', import.meta.url));
@@ -97,7 +104,10 @@ function serveIndexHtmlInPreview(): Plugin {
 export default defineConfig({
   plugins: [
     serveIndexHtmlInPreview(),
-    sveltekit(),
+    sveltekit({
+      adapter: adapter({ fallback: 'index.html' }),
+      paths: { base }
+    }),
     copyTsQueries(),
     copyLibarchiveAssets(),
     // M7 PWA（Task 1）：应用壳预缓存 + 高亮资产 CacheFirst 运行时缓存。
@@ -106,6 +116,11 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: null,
+      // vite 8 + kit 3：全局 build.outDir 不再被 kit 覆写（改按环境各自 outDir），
+      // 插件默认取 vite.root/vite.build.outDir 会落到默认 dist/——sw.js 不进
+      // adapter 拷贝、precache glob 也扫不到客户端产物。显式指回 kit 的客户端
+      // 输出目录：sw.js/workbox-*.js 随 adapter 进 build/，precache 清单取自真实产物。
+      outDir: '.svelte-kit/output/client',
       manifest: {
         // theme_color 不支持 CSS 变量：写死亮色值，暗色由 app.html 的
         // media=(prefers-color-scheme: dark) meta theme-color 覆盖

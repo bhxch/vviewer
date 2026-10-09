@@ -16,7 +16,7 @@ import { pptxRenderer } from '@vviewer/render-doc/pptx';
 import { hexRenderer } from '@vviewer/render-binary';
 import { archiveRenderer } from '@vviewer/render-archive';
 import { configureLibarchive } from '@vviewer/render-archive/libarchiveStore';
-import { browser } from '$app/environment';
+import { browser } from '$app/env';
 import { ensureHighlightClient, computeRouter } from './highlightClient';
 import { routeLargeFileHighlight } from './highlightRouter';
 import { resolveImageBlobUrl } from './markdownImages';
@@ -138,7 +138,8 @@ if (browser) {
 // dev-only HMR 防线（遗留 T14）：本模块是装配单例来源（registry、libarchive worker
 // 配置、markdown backend/图片 resolver 注入），Vite 局部热替换会重跑装配——重复
 // install 与新旧模块状态并存。decline 使变更冒泡为整页刷新，杜绝半新半旧状态；
-// 生产构建 import.meta.hot 恒为 undefined，分支不存在。
-if (import.meta.hot) {
+// 生产构建 import.meta.hot 恒为 undefined，分支不存在。vite 8 起 SSR module
+// runner 也给出 truthy 的 import.meta.hot 但无 accept.decline——加 SSR 收窄。
+if (!import.meta.env.SSR && import.meta.hot) {
   import.meta.hot.accept.decline();
 }

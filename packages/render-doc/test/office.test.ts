@@ -12,8 +12,15 @@ import { xlsxRenderer } from '../src/xlsx';
 import { pptxRenderer } from '../src/pptx';
 import { decodeXmlEntities, extractSlideLines } from '../src/pptxText';
 
-// CJS 双形态互操作（先例：render-archive zipStore.ts）
-const JSZip = ((JsZipNs as unknown as { default?: typeof JsZipNs }).default ?? JsZipNs);
+// CJS 双形态互操作（先例：render-archive zipStore.ts）。TS6 起 `import * as` 对
+// export= 模块给到模块记录类型（.default 属性化、构造签名消失），故与 zipStore
+// 同法：先解包 default 再收敛为最小结构类型
+interface ZipInstance {
+  file(name: string, data: string): unknown;
+  generateAsync(opts: { type: 'uint8array' }): Promise<Uint8Array>;
+}
+type ZipCtor = new () => ZipInstance;
+const JSZip = ((JsZipNs as unknown as { default?: ZipCtor }).default ?? JsZipNs) as ZipCtor;
 const XLSX = ((XlsxNs as unknown as { default?: typeof XlsxNs }).default ?? XlsxNs);
 
 const source: FileSource = {

@@ -56,8 +56,11 @@ export const pdfRenderer: Renderer = {
     // BUG-04 握手点 2 代工：size 须在 getDocument 前捕获——pdfjs 会 transfer 该 buffer
     // 到 worker（detach），detach 后 byteLength 归零，getMeta 再读就是 0
     const size = buffer.length;
-    // pdfjs 会 transfer 该 buffer 到 worker（detach）：调用方每次 dispatch 前重新 read，无复用问题
-    const doc: PDFDocumentProxy = await pdfjs.getDocument({ data: buffer }).promise;
+    // pdfjs 会 transfer 该 buffer 到 worker（detach）：调用方每次 dispatch 前重新 read，无复用问题。
+    // pdfjs 6 起移除 PDFDocumentProxy.prototype.destroy（api-major，upstream PR 21245）：
+    // 资源释放改走 loadingTask.destroy()，故保留 loadingTask 引用
+    const loadingTask = pdfjs.getDocument({ data: buffer });
+    const doc: PDFDocumentProxy = await loadingTask.promise;
 
     let destroyed = false;
     let scaleIdx = SCALE_PRESETS.indexOf(1);
@@ -290,7 +293,7 @@ export const pdfRenderer: Renderer = {
         for (const st of pageStates) st.renderTask?.cancel();
         pageStates.length = 0;
         stateByWrap.clear();
-        void doc.destroy(); // 释放 worker 端文档资源
+        void loadingTask.destroy(); // 释放 worker 端文档资源（pdfjs 6：destroy 移至 loadingTask）
         root.remove(); // canvas 一并移除释放
       }
     };

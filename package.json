@@ -12,12 +12,14 @@
     "server:dev": "cargo run --manifest-path server/Cargo.toml -- serve --root . --port 8321"
   },
   "devDependencies": {
+    "@types/node": "^26.6.4",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^30.1.2",
     "smol-toml": "^1.9.0",
-    "tree-sitter-cli": "~0.27.0",
-    "typescript": "^5.9.0",
-    "vitest": "^3.2.0"
+    "tree-sitter-cli": "~0.27.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.3"
   },
   "pnpm": {
     "overrides": {
@@ -25,6 +27,9 @@
     },
     "onlyBuiltDependencies": [
       "tree-sitter-cli"
-    ]
+    ],
+    "patchedDependencies": {
+      "@sveltejs/kit@3.0.1": "patches/@sveltejs__kit@3.0.1.patch"
+    }
   }
 }

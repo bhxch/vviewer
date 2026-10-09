@@ -8,6 +8,7 @@
     "skipLibCheck": true,
     "declaration": true,
     "sourceMap": true,
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    "types": ["node"]
   }
 }

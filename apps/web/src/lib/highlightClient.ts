@@ -1,5 +1,10 @@
-import { base } from '$app/paths';
-import { browser } from '$app/environment';
+import { resolve } from '$app/paths';
+import { browser } from '$app/env';
+
+// kit 3 移除了 `$app/paths` 的 `base` 字符串导出：以 `resolve('/')` 求得
+// 「<base>/」前缀（base='' 时为 '/'，子路径托管时为 '/<base>/'），静态资产
+// URL（grammars/queries/runtime wasm）由它拼接，语义与 kit2 的 `${base}/...` 一致。
+const baseUrl = resolve('/');
 import { HighlightClient, HighlightCanceledError } from '@vviewer/highlight';
 import { attachHighlightClient, type CodeHighlightClient, type HighlightCallContext } from '@vviewer/render-text';
 import {
@@ -152,7 +157,7 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
       // 首次调用某语言时主线程预热其 grammar wasm（进 vv-grammars-* CacheFirst）；
       // warmHighlightAsset 按 URL 幂等，同语言重复调用为 no-op
       const g = grammarManifest?.[lang];
-      if (g) warmHighlightAsset(`${base}/grammars/${g.file}`);
+      if (g) warmHighlightAsset(`${baseUrl}grammars/${g.file}`);
       const record = (ok: boolean): void => {
         dbg.__vvLastHighlightMs = performance.now() - t0;
         dbg.__vvLastHighlightLang = lang;
@@ -201,7 +206,7 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
 }
 
 async function create(): Promise<HighlightClient> {
-  const res = await fetch(`${base}/grammars/manifest.json`);
+  const res = await fetch(`${baseUrl}grammars/manifest.json`);
   if (!res.ok) throw new Error(`grammar manifest 加载失败: HTTP ${res.status}`);
   const manifest = (await res.json()) as {
     grammars: Record<string, { file: string; aliases?: string[] }>;
@@ -212,12 +217,12 @@ async function create(): Promise<HighlightClient> {
     worker,
     {
       grammars: manifest.grammars,
-      grammarsBase: `${base}/grammars/`,
-      queriesBase: `${base}/queries/`, // vite 启动时从 packages/highlight/assets/queries 拷贝到 static/queries
+      grammarsBase: `${baseUrl}grammars/`,
+      queriesBase: `${baseUrl}queries/`, // vite 启动时从 packages/highlight/assets/queries 拷贝到 static/queries
       // runtime 随 base：子路径托管（Pages）下 worker 内 Parser.init 按
       // locateFile(joinPath(runtimeDir, file)) 取 /<base>/tree-sitter.wasm，
       // 根绝对 '/' 在子路径下 404 → init 失败 → 全部高亮静默回退 hljs
-      runtimeDir: `${base}/` // web-tree-sitter runtime 位于 static/tree-sitter.wasm（base='' 时即 '/'）
+      runtimeDir: baseUrl // web-tree-sitter runtime 位于 static/tree-sitter.wasm（base='' 时即 '/'）
     },
     // BUG-06 可观测：worker 脚本/消息错误经显式标签上报——此前该类失败零提示
     // 静默降级 hljs，是「本地 tree-sitter 全链失效却无任何痕迹」的主要观测障碍
@@ -228,6 +233,6 @@ async function create(): Promise<HighlightClient> {
   attachHighlightClient(withDebug(client));
   // 预热 runtime wasm：同上，worker 内 fetch 不经 SW，主线程预热使其进 vv-runtime-*
   // CacheFirst（离线重开代码文件的 runtime 来源）
-  warmHighlightAsset(`${base}/tree-sitter.wasm`);
+  warmHighlightAsset(`${baseUrl}tree-sitter.wasm`);
   return client;
 }
