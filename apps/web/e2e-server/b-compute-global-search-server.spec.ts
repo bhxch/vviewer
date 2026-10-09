@@ -13,10 +13,13 @@ import { stopServer, waitHealthy } from '../e2e/serverHarness';
  *
  * 本文件覆盖（缺陷回归为主）：
  * - CMP-02/BUG-10：显式 remote 下 >2MB 文件不再被本地阈值压制（状态栏远程 + POST
- *   /api/compute/highlight 发生）；auto 下 3MB 保持 hljs 分块零 POST（路由注入侧硬护栏）
+ *   /api/compute/highlight 发生）；auto 双护栏——server-served 3MB 不限大小走服务端
+ *   （POST + tree-sitter 渲染），本地添加 3MB（单文件上传通道）恒 hljs 分块零 POST
  * - CMP-03/BUG-22：auto 下含围栏 md 与 html（渲染/源码两视图）均显示「渲染: 本地」；
  *   围栏二级高亮保留；非注入语言（py）auto 仍远程（路由矩阵抽样不回归）
- * - CMP-04：php 触发服务端 400——auto 真实回退本地可读，remote 错误卡片「远程高亮失败: HTTP 400」
+ * - CMP-04：php（阶段 1 起在服务端 301 集内，正例对照）auto 远程成功；POST lang
+ *   改写集外 brainfuck（server 单测同款名）触发真实 400——auto 回退本地可读，
+ *   remote 错误卡片「远程高亮失败: HTTP 400」
  * - CMP-06/BUG-09：全局搜索点击命中行滚动定位（视口渲染命中行）+ .vv-search-hit-line
  *   高亮 + 2.5s 后不丢；分组/<mark> 回归
  * - CMP-07：Aa/.* 开关与 /api/search glob 参数（BUG-21 回归不破坏项）
@@ -75,6 +78,8 @@ test.beforeAll(async () => {
     '<!DOCTYPE html>\n<html><head><title>cg03</title></head>\n<body><p>cg html body</p>\n<script>window.__vvCg = 1;</script>\n</body></html>\n'
   );
   writeFileSync(join(FIXTURE, 'cg-hello.py'), 'value = 7\nprint(f"v={value}")\n');
+  // CMP-04 载体：php（301 集内）——阶段 1 语法源同步后 php 已是服务端支持的正例，
+  // 用作对照组；集外 400 场景经 ② 的请求改写注入（见用例内注释）
   writeFileSync(join(FIXTURE, 'cg-probe.php'), '<?php\nfunction hello($n) { return "hi $n"; }\necho hello("php");\n');
   // BUG-09：801 行 tall-hit，第 751 行第 1 列 treasure（复核实测 801 行口径）
   const tall: string[] = [];
@@ -183,8 +188,10 @@ test.describe('CMP-02/BUG-10 大文件远程高亮路由', () => {
     await expect(sb).toContainText('执行: 远程', { timeout: 30_000 });
   });
 
-  test('auto 硬护栏：3MB 文件保持 hljs 分块零 POST（回归护栏），不触发大文件路由', async ({ page }) => {
-    test.setTimeout(120_000);
+  test('auto 双护栏① server-served：3MB 文件不限大小走服务端（POST 发生 + tree-sitter 渲染）', async ({
+    page
+  }) => {
+    test.setTimeout(180_000);
     const highlightPosts: string[] = [];
     page.on('request', (r) => {
       if (r.method() === 'POST' && r.url().includes('/api/compute/highlight')) highlightPosts.push(r.url());
@@ -193,8 +200,41 @@ test.describe('CMP-02/BUG-10 大文件远程高亮路由', () => {
     await openFile(page, 'cg-code-3mb.js');
 
     const sb = page.locator('.vv-statusbar');
+    // 阶段 3 语义反转：server-served 文件 auto 下不限大小走服务端（旧契约「auto 3MB
+    // 零 POST」作废）——远程区间按 tree-sitter 路径渲染，状态栏引擎与执行位置如实反映
+    await expect(sb).toContainText('高亮: tree-sitter', { timeout: 120_000 });
+    await expect(sb).toContainText('执行: 远程', { timeout: 120_000 });
+    await expect(sb).not.toContainText('hljs 分块');
+    expect(highlightPosts.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('auto 双护栏② 本地来源：3MB 单文件上传恒 hljs 分块零 POST（硬护栏回归）', async ({ page }) => {
+    test.setTimeout(120_000);
+    const highlightPosts: string[] = [];
+    page.on('request', (r) => {
+      if (r.method() === 'POST' && r.url().includes('/api/compute/highlight')) highlightPosts.push(r.url());
+    });
+    await connectCompute(page, 'auto');
+
+    // 本地添加文件（单文件上传通道，同 fix-pwa 的 __vvOpenDirImpl 前例）：无服务端
+    // path 语义 → 注入侧硬护栏恒 null。已连接 --compute 实例（capabilities+宣告
+    // 齐备）仍零 POST——证明护栏按来源而非能力判定
+    await page.waitForFunction(
+      () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
+    );
+    await page.evaluate(() => {
+      const content = 'const vv = 1; // c\n'.repeat(160_000); // ≈3.4MB > 2MiB 阈值
+      const f = new File([content], 'cg-local-3mb.js', { type: 'text/javascript' });
+      Object.defineProperty(f, 'webkitRelativePath', { value: 'cg-local/cg-local-3mb.js' });
+      (window as unknown as { __vvOpenDirImpl: (f: File[]) => void }).__vvOpenDirImpl([f]);
+    });
+    // 注入目录 tab 不会自动打开文件：显式点树行触发渲染链（路由问询发生处）
+    await openFile(page, 'cg-local-3mb.js');
+
+    const sb = page.locator('.vv-statusbar');
     await expect(sb).toContainText('高亮: hljs 分块', { timeout: 60_000 });
-    expect(highlightPosts).toEqual([]); // auto 下 3MB 零 POST（highlightRouter 注入侧护栏）
+    await expect(sb).not.toContainText('执行: 远程');
+    expect(highlightPosts).toEqual([]); // 本地来源恒零 POST（highlightRouter 注入侧护栏）
   });
 });
 
@@ -230,24 +270,45 @@ test.describe('CMP-03/BUG-22 auto 执行位置指示', () => {
 });
 
 test.describe('CMP-04 远程高亮失败语义', () => {
-  test('php 不在服务端语言集：auto 零远程请求直达本地，remote 错误卡片如实报 400', async ({ page }) => {
+  test('php 正例 auto 远程成功；lang 改写集外 brainfuck 后 auto 回退本地可读、remote 错误卡片 400', async ({
+    page
+  }) => {
     test.setTimeout(120_000);
     const statuses: number[] = [];
     page.on('response', (r) => {
       if (r.url().includes('/api/compute/highlight')) statuses.push(r.status());
     });
 
-    // ① auto（BUG-06c 语言集对齐后契约）：php 不在服务端宣告的 computeLanguages
-    // 内 → 直接本地渲染，零远程请求（旧行为「400 后回退」已被对齐消除，不再白发）；
-    // 内容可读不白屏（无错误卡片）
+    // ① 对照组：php 随阶段 1 进入服务端 301 集——auto 宣告集内语言真实走服务端（200）
     await connectCompute(page, 'auto');
     await openFile(page, 'cg-probe.php');
     await expect(page.locator('.vv-code-pre')).toContainText('hello', { timeout: 30_000 });
-    expect(statuses).toHaveLength(0);
+    await expect(page.locator('.vv-statusbar')).toContainText('执行: 远程', { timeout: 30_000 });
+    expect(statuses).toContain(200);
+    await expect(page.locator('.vv-error-card')).toHaveCount(0);
+
+    // ② 集外 400 场景经请求改写注入：阶段 1 后前端语言表与 code 渲染白名单识别出的
+    // 语言已与服务端 301 集完全对齐（能进渲染管线的扩展名全部映射集内语言），不存在
+    // 天然集外语料可打开——POST body lang 改写为 brainfuck（server 单测同款集外名），
+    // 400 真实来自服务端（unsupported language），非 mock 响应
+    await page.route('**/api/compute/highlight', async (route) => {
+      const body = route.request().postDataJSON() as { path: string; lang: string };
+      const headers = { ...route.request().headers() };
+      delete headers['content-length'];
+      await route.continue({ headers, postData: JSON.stringify({ ...body, lang: 'brainfuck' }) });
+    });
+
+    // ③ auto：服务端 400 → warn 留痕回退本地 hljs 分块（可用性优先，不抛错），
+    // 内容可读、无错误卡片（重新 goto 重置 tab，route 持续生效）
+    statuses.length = 0;
+    await connectCompute(page, 'auto');
+    await openFile(page, 'cg-probe.php');
+    await expect(page.locator('.vv-code-pre')).toContainText('hello', { timeout: 30_000 });
+    expect(statuses).toContain(400);
     await expect(page.locator('.vv-error-card')).toHaveCount(0);
     await expect(page.locator('.vv-statusbar')).toContainText('执行: 本地', { timeout: 30_000 });
 
-    // ② remote：显式远程失败不静默回退，错误卡片「远程高亮失败: HTTP 400」
+    // ④ remote：显式远程失败不静默回退，错误卡片「远程高亮失败: HTTP 400」
     statuses.length = 0;
     await connectCompute(page, 'remote');
     await openFile(page, 'cg-probe.php');
