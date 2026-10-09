@@ -230,18 +230,20 @@ test.describe('CMP-03/BUG-22 auto 执行位置指示', () => {
 });
 
 test.describe('CMP-04 远程高亮失败语义', () => {
-  test('php 触发服务端 400：auto 真实回退本地渲染可读，remote 错误卡片如实报错', async ({ page }) => {
+  test('php 不在服务端语言集：auto 零远程请求直达本地，remote 错误卡片如实报 400', async ({ page }) => {
     test.setTimeout(120_000);
     const statuses: number[] = [];
     page.on('response', (r) => {
       if (r.url().includes('/api/compute/highlight')) statuses.push(r.status());
     });
 
-    // ① auto：服务端 400 后回退本地渲染，内容可读不白屏（无错误卡片）
+    // ① auto（BUG-06c 语言集对齐后契约）：php 不在服务端宣告的 computeLanguages
+    // 内 → 直接本地渲染，零远程请求（旧行为「400 后回退」已被对齐消除，不再白发）；
+    // 内容可读不白屏（无错误卡片）
     await connectCompute(page, 'auto');
     await openFile(page, 'cg-probe.php');
     await expect(page.locator('.vv-code-pre')).toContainText('hello', { timeout: 30_000 });
-    expect(statuses).toContain(400);
+    expect(statuses).toHaveLength(0);
     await expect(page.locator('.vv-error-card')).toHaveCount(0);
     await expect(page.locator('.vv-statusbar')).toContainText('执行: 本地', { timeout: 30_000 });
 

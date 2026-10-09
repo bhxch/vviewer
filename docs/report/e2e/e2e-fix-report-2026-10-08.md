@@ -147,3 +147,32 @@
 - **最终 HEAD 复跑**：typecheck 绿；vitest 613/613（53 文件）；cargo test 11 个测试目标全部通过；`pnpm --filter web build` + check-pwa-build 通过；playwright 默认套件 170 passed + 1 flaky（mobile MEDIA-11 计时型，重试通过）+ 15 skipped（既定 fixme 占位）；服务端套件 34 passed + 1 skipped。工作区干净（仅 .zcodeignore，先于本批存在）——HEAD 现可独立复现本报告全部结论。
 
 §6 其余各项（BUG-01 残留子项、BUG-06 覆盖缺口立项、BUG-16 spec 口径实测、BUG-02 成因定论、真机补测专项、过程改进）维持不变，作为后续批次的输入。
+
+## 8. 遗留问题清账（2026-10-09 第二批，目标：修复全部可修遗留）
+
+§6 与暂缓裁决的逐项落地结果（提交号 34b310f..本批）：
+
+| 遗留项 | 处置 | 证据 |
+| --- | --- | --- |
+| §6.2 BUG-01 残留子项 | **已修复**：hls.js 清单/层级/分片网络重试上限收紧为 2 次（500ms/2s 退避），404 分片数秒升级 fatal → 既有重试上限 → 错误卡片；fixme 用例放开为回归护栏 | 34b310f；missing-seg 用例实跑 6.1s 通过（服务端套件 35/35） |
+| §6.3 BUG-06a 单 grammar 失败上报 | **已修复**：prepare() 静默吞异常补 console.warn（per-language 通道） | 8b2251c |
+| §6.3 BUG-06b python/java 本地回退 | **定案为环境观察残留**：Node 同构测试（真实 wasm+查询）与干净浏览器会话均 tree-sitter·本地正常；新增 local-grammars.test.ts 锁死资产可用性 | 8b2251c；浏览器实测两语言状态栏「tree-sitter · 执行: 本地」 |
+| §6.3 BUG-06c compute 语言集不对齐 | **已修复**：/api/health 宣告 computeLanguages（canonical 排序清单）；客户端 auto 策略仅对宣告集合内语言尝试远程（java 不再白发 400），显式 remote 不做集合门控（失败如实错误卡片） | 44d5642 + ffe394c + 本批 CMP-04 契约更新；集成测试锁死清单排序与 java 缺席 |
+| §6.4 BUG-16 spec 预算 | **实测达标**：hex 首屏桌面 35~50ms（中位 38ms < 200ms）、移动 262~275ms（中位 274ms < 500ms），页内 t0→首个 .vv-hex-row 口径 5 轮；走 upload 通道，§6.4 的「upload 通道未测」一并闭环 | 23f8a52；PWA-08/BUG-16 段已回写 docs/e2e/pwa-mobile-performance.md |
+| §6.5 BUG-02 btrfs 成因 | **定论**：非 btrfs 不兼容——新可观测性实测 btrfs 上 INotifyWatcher 建立成功、变更事件正常推送；原故障判为首轮评测 10+ 并发实例逼近 fs.inotify.max_user_instances=128 的 EMFILE 资源性失败（修复的自愈+降级+可观测即对症） | 本机探针：watch 建立日志 + SSE 收到 changed 事件；sysctl 128 限额 |
+| §6.7 200MB 搜索上限 | **验证闭环**：210×1MB 注入恰在第 201 文件触达上限，截断提示与服务器引导同屏正确；顺带修复引导文案写死「2000 文件」与字节上限触因不符 | 23f8a52；单测补 200MB 包含断言 |
+| §6.7 BUG-10 服务端缓存与 gzip | **已闭环**：(path,mtime,size,lang) 缓存此前已在审查修复落地；本批补 CompressionLayer（仅 /api/compute/*，Range 流不压缩） | 44d5642；集成测试断言 content-encoding: gzip + gzip magic 与不压缩对照 |
+| §6.7 BUG-17/MD-13 外域媒体兼容 | **已修复**：外域 video/audio 强制 preload=none + 去 autoplay（不点不发请求，点播放=主动行为与外链同口径）、source 外域候选剥除；enrich 转换路径同口径 | 1532f10；干净浏览器实测外域零请求、内域不受影响；单测 6 例 |
+| §6.7 manifest abi 误读 | **已消除**：生成器写入语义注记（abi=null 为构建元数据占位，加载侧无 ABI 门控） | c617d68 |
+| BUG-21 glob UI（暂缓） | **文档收口**：规格仅承诺 API 参数，UI 控件属产品决策并入搜索面板改造批次；CMP-07 API 断言维持为回归护栏 | 002c0a6 |
+| 过程改进（§6.8） | 部分落地：本批回归口径已含 typecheck（并实际兜住 health 单测编译错）；「按包提交用 git status 兜底」「评审记录入库」属工作流脚本改进，记录在案待下批工作流采纳 | 本批门禁 |
+
+### 8.1 确实无法完成项（环境物理限制，非回避）
+
+- **FS Access 真机链路**（showDirectoryPicker 端到端、原生目录选择器与权限弹窗、真实文件夹拖拽 webkitGetAsEntry）：headless 无法驱动原生对话框，仓库内无该通道的任何可编程入口。
+- **真机触摸/惯性**（BUG-26）与移动 UA 真机 wheel：无真实设备；仿真触摸经 CDP 合成注入，惯性表现与真机合成器不可比（PWA-06 对照数据已留档）。
+- **ext4/xfs/NFS watcher 影响面**：本机仅 btrfs/tmpfs 可用；根因既定论为 inotify 实例资源（与文件系统类型无关），风险受限。
+
+### 8.2 收批门禁（最终 HEAD 实跑）
+
+typecheck 绿；vitest **623/623**（54 文件）；cargo test **127/127**（11 目标，含 health computeLanguages 与 gzip 协商新测试）；`pnpm --filter web build` + check-pwa-build 过；playwright 默认套件 **171 passed / 15 skipped，exit 0（零 flaky）**；服务端套件 **35 passed，exit 0**（含放开的 missing-seg 用例与 CMP-04 新契约）。本批新增/改动测试：av 重试上限、local-grammars、remoteLanguageAdvertised、health×2、gzip×2、sanitize/enrich 外域媒体×6、CMP-04 契约更新。
