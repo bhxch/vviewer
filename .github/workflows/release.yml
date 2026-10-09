@@ -71,6 +71,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: server
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-grammars
+        with:
+          languages: all
+          fetch-only: 'true'
       - run: cargo build --release --manifest-path server/Cargo.toml --target x86_64-unknown-linux-gnu
       - run: cp server/target/x86_64-unknown-linux-gnu/release/vviewer vviewer-linux-x86_64
       - uses: actions/upload-artifact@v7

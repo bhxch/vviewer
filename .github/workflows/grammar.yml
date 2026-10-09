@@ -55,3 +55,25 @@ jobs:
           name: grammar-wasm
           path: apps/web/static/grammars/
           if-no-files-found: error
+
+  server-full:
+    name: server 全量 301 门禁
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-grammars
+        with:
+          languages: all
+          fetch-only: 'true'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - name: 全量构建 + 301 门禁
+        run: cargo test --manifest-path server/Cargo.toml full_registry_count_is_301 -- --nocapture

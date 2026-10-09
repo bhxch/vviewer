@@ -13,6 +13,10 @@ inputs:
     description: '语言选择面：all | lite | 逗号分隔语言名'
     required: false
     default: 'lite'
+  fetch-only:
+    description: '仅获取源树（服务端构建输入），跳过 wasm self-build'
+    required: false
+    default: 'false'
 runs:
   using: 'composite'
   steps:
@@ -40,4 +44,8 @@ runs:
           BUILD_ARGS="--languages ${{ inputs.languages }}"
         fi
         node tools/grammar-builder/build.mjs --fetch $FETCH_ARGS
+        if [ "${{ inputs.fetch-only }}" = "true" ]; then
+          echo "fetch-only: 跳过 wasm self-build"
+          exit 0
+        fi
         node tools/grammar-builder/build.mjs --self-build $BUILD_ARGS
