@@ -3,6 +3,8 @@
 #   web：pnpm build → dist zip
 #   server：cargo build --release（targets：x86_64-unknown-linux-gnu 起步；
 #           后续扩平台在下方 server job 注释的 matrix 上展开）
+#   publish-npm：grammar-wasm artifact → npm <scope>/vviewer-grammars-full（scope
+#           variable 门控、版本幂等；scope 未配置则 npm 分发与 CDN env 均不启用）
 # 聚合 job 以 gh CLI 建 GitHub Release 并上传：vviewer 二进制、web dist zip、
 # grammar-wasm.tar.zst。发布写权限仅授予聚合 release job（job 级 contents: write）；
 # 顶层 contents: read 兜底，web/server job 级再显式声明 read（grammar 由被调
@@ -42,6 +44,15 @@ jobs:
       - uses: ./.github/actions/setup-grammars
         with:
           languages: lite
+      # 第 3 层 CDN base 构建期烙入：版本归一（去 v 前缀）与 publish-npm job 同法同值；
+      # scope 未配置（repo variable）则不注入 env——第 3 层整体缺席，而非注入畸形 URL
+      - name: 计算 CDN 资产 base（NPM_SCOPE 已配置时）
+        if: vars.NPM_SCOPE != ''
+        env:
+          NPM_SCOPE: ${{ vars.NPM_SCOPE }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VV_GRAMMAR_CDN=https://cdn.jsdelivr.net/npm/${NPM_SCOPE}/vviewer-grammars-full@${VERSION}/grammars/" >> "$GITHUB_ENV"
       - run: pnpm --filter web build
       # adapter-static 产物在 apps/web/build；zip 内容平铺（解包即站点根），落仓库根供上传
       - run: zip -qr "$GITHUB_WORKSPACE/vviewer-web-dist.zip" .
@@ -88,6 +99,47 @@ jobs:
           name: vviewer-linux-x86_64
           path: vviewer-linux-x86_64
           if-no-files-found: error
+
+  publish-npm:
+    name: npm 资产包发布（grammars-full）
+    runs-on: ubuntu-latest
+    # scope 未配置（repo variable）则整个包分发未启用：job 跳过，web 侧 CDN env
+    # 同门控不注入（三层解析链的第 3 层整体缺席）。npm 发布不经 GitHub 权限
+    if: vars.NPM_SCOPE != ''
+    needs: [grammar]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v8
+        with:
+          name: grammar-wasm
+          path: artifacts/grammar-wasm
+      # 版本归一与 web job 同法同值（tag v1.2.3 → npm 版本 1.2.3，无 v 前缀）；
+      # VV_GRAMMARS_OUT 指向 artifact 解包目录（pack-npm 默认读构建产物路径，本 job 无构建）
+      - name: 归一版本号并打包
+        env:
+          NPM_SCOPE: ${{ vars.NPM_SCOPE }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VV_NPM_PACKAGE_VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "VV_NPM_PACKAGE_NAME=${NPM_SCOPE}/vviewer-grammars-full" >> "$GITHUB_ENV"
+          echo "VV_NPM_OUT=$GITHUB_WORKSPACE/dist-npm" >> "$GITHUB_ENV"
+          echo "VV_GRAMMARS_OUT=$GITHUB_WORKSPACE/artifacts/grammar-wasm" >> "$GITHUB_ENV"
+          node tools/grammar-builder/pack-npm.mjs
+      - name: 版本已发布则跳过（幂等）
+        run: |
+          if npm view "$VV_NPM_PACKAGE_NAME@$VV_NPM_PACKAGE_VERSION" version >/dev/null 2>&1; then
+            echo "SKIP_PUBLISH=1" >> "$GITHUB_ENV"
+          fi
+      - name: npm publish
+        if: env.SKIP_PUBLISH != '1'
+        run: npm publish ./dist-npm --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   release:
     name: 聚合发布 GitHub Release

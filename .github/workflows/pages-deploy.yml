@@ -61,6 +61,16 @@ jobs:
           else
             echo "path=/$repo" >> "$GITHUB_OUTPUT"
           fi
+      # 第 3 层 CDN base 构建期烙入：版本归一（去 v 前缀）与 release.yml web/publish
+      # job 同法同值；main 触发时 ref_name 无 v 前缀，原样取用。scope 未配置
+      # （repo variable）则不注入 env——第 3 层整体缺席，而非注入畸形 URL
+      - name: 计算 CDN 资产 base（NPM_SCOPE 已配置时）
+        if: vars.NPM_SCOPE != ''
+        env:
+          NPM_SCOPE: ${{ vars.NPM_SCOPE }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VV_GRAMMAR_CDN=https://cdn.jsdelivr.net/npm/${NPM_SCOPE}/vviewer-grammars-full@${VERSION}/grammars/" >> "$GITHUB_ENV"
       - name: 构建前端（注入子路径 base）
         run: pnpm --filter web build
         env:
