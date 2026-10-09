@@ -49,7 +49,9 @@ function fixture() {
   writeFileSync(path.join(queries, 'c', 'highlights.scm'), '; c highlights');
   const repoPkgJson = path.join(dir, 'repo-pkg.json');
   writeFileSync(repoPkgJson, JSON.stringify({ name: 'vviewer', repository: 'https://github.com/x/vviewer' }));
-  return { dir, grammars, queries, repoPkgJson, outDir: path.join(dir, 'dist-npm') };
+  const licenseFile = path.join(dir, 'GRAMMAR_LICENSES.md');
+  writeFileSync(licenseFile, '# Grammar Licenses\n\nfixture license text\n');
+  return { dir, grammars, queries, repoPkgJson, licenseFile, outDir: path.join(dir, 'dist-npm') };
 }
 
 /** 测试内独立重走 outDir（与实现各自的遍历互为对照） */
@@ -70,17 +72,18 @@ const ARGS = (f: ReturnType<typeof fixture>) => ({
   name: '@scope/vviewer-grammars-full',
   version: '1.2.3',
   repoPkgJson: f.repoPkgJson,
+  licenseFile: f.licenseFile,
 });
 
 describe('packNpm（npm 单包布局：manifest 与 wasm 同目录的统一 base 契约）', () => {
-  it('布局：outDir/grammars/manifest.json（包根无 manifest.json）+ grammars/*.wasm + queries/<dir>/*.scm；wasm 字节原样拷贝', () => {
+  it('布局：outDir/grammars/manifest.json（包根无 manifest.json）+ grammars/*.wasm + queries/<dir>/*.scm + 包根 license；wasm 字节原样拷贝', () => {
     const f = fixture();
     packNpm(ARGS(f));
     // manifest 在 grammars/ 内、不在包根（布局契约：客户端 manifest URL 与 wasm URL 同 base）
     expect(existsSync(path.join(f.outDir, 'grammars', 'manifest.json'))).toBe(true);
     expect(existsSync(path.join(f.outDir, 'manifest.json'))).toBe(false);
     expect(readdirSync(path.join(f.outDir, 'grammars')).sort()).toEqual(['javascript.wasm', 'manifest.json', 'swift.wasm']);
-    expect(readdirSync(f.outDir).sort()).toEqual(['grammars', 'package.json', 'queries']);
+    expect(readdirSync(f.outDir).sort()).toEqual(['GRAMMAR_LICENSES.md', 'grammars', 'package.json', 'queries']);
     expect(existsSync(path.join(f.outDir, 'queries', 'javascript', 'highlights.scm'))).toBe(true);
     expect(existsSync(path.join(f.outDir, 'queries', 'javascript', 'injections.scm'))).toBe(true);
     expect(existsSync(path.join(f.outDir, 'queries', 'c', 'highlights.scm'))).toBe(true);
@@ -88,27 +91,35 @@ describe('packNpm（npm 单包布局：manifest 与 wasm 同目录的统一 base
     expect(readFileSync(path.join(f.outDir, 'grammars', 'javascript.wasm'))).toEqual(Buffer.from([1, 2, 3, 4]));
   });
 
-  it('返回值：files/bytes 覆盖包内全部文件（package.json + manifest + wasm + queries）', () => {
+  it('返回值：files/bytes 覆盖包内全部文件（package.json + license + manifest + wasm + queries）', () => {
     const f = fixture();
     const r = packNpm(ARGS(f)) as { files: number; bytes: number };
     const walked = walkOut(f.outDir);
-    expect(r.files).toBe(walked.length); // package.json + manifest.json + 2 wasm + 3 scm = 7
-    expect(r.files).toBe(7);
+    expect(r.files).toBe(walked.length); // package.json + GRAMMAR_LICENSES.md + manifest.json + 2 wasm + 3 scm = 8
+    expect(r.files).toBe(8);
     expect(r.bytes).toBe(walked.reduce((s, x) => s + x.bytes, 0));
   });
 
-  it('package.json：name/version/files(["grammars","queries"])/private false/license/description/repository（从根 package.json 读出）', () => {
+  it('package.json：name/version/files(["grammars","queries","GRAMMAR_LICENSES.md"])/private false/license/description/repository（从根 package.json 读出）', () => {
     const f = fixture();
     packNpm(ARGS(f));
     const pkg = JSON.parse(readFileSync(path.join(f.outDir, 'package.json'), 'utf8')) as PkgJson;
     expect(pkg.name).toBe('@scope/vviewer-grammars-full');
     expect(pkg.version).toBe('1.2.3');
-    expect(pkg.files).toEqual(['grammars', 'queries']);
-    expect(NPM_FILES_FIELD).toEqual(['grammars', 'queries']);
+    expect(pkg.files).toEqual(['grammars', 'queries', 'GRAMMAR_LICENSES.md']);
+    expect(NPM_FILES_FIELD).toEqual(['grammars', 'queries', 'GRAMMAR_LICENSES.md']);
     expect(pkg.private).toBe(false);
     expect(pkg.license).toBe('SEE LICENSE IN GRAMMAR_LICENSES.md');
     expect(pkg.description).toContain('grammar wasm');
     expect(pkg.repository).toBe('https://github.com/x/vviewer');
+  });
+
+  it('license 文件随包：包根 GRAMMAR_LICENSES.md 内容与源逐字节一致（SEE LICENSE IN 指向必须在包内）', () => {
+    const f = fixture();
+    packNpm(ARGS(f));
+    const dest = path.join(f.outDir, 'GRAMMAR_LICENSES.md');
+    expect(existsSync(dest)).toBe(true);
+    expect(readFileSync(dest)).toEqual(readFileSync(f.licenseFile));
   });
 
   it('manifest 每条 entry 注 base "./"（同目录相对；layer.base 消费时覆写，仅独立消费可读）且其余字段保留', () => {
@@ -161,9 +172,10 @@ describe('packNpm 异常路径（publish 前即失败，不产出残包）', () 
     expect(() => packNpm({ ...ARGS(f), grammarsDir: broken })).toThrow(/swift\.wasm/);
   });
 
-  it('queriesDir 不存在 / name 或 version 缺失，抛错', () => {
+  it('queriesDir 不存在 / license 文件缺失 / name 或 version 缺失，抛错', () => {
     const f = fixture();
     expect(() => packNpm({ ...ARGS(f), queriesDir: path.join(f.dir, 'nope') })).toThrow(/queriesDir/);
+    expect(() => packNpm({ ...ARGS(f), licenseFile: path.join(f.dir, 'nope.md') })).toThrow(/GRAMMAR_LICENSES/);
     expect(() => packNpm({ ...ARGS(f), name: '' })).toThrow(/name/);
     expect(() => packNpm({ ...ARGS(f), version: '' })).toThrow(/version/);
     expect(() => packNpm({ ...ARGS(f), outDir: '' })).toThrow(/outDir/);
@@ -180,10 +192,11 @@ describe('main()（CLI 入口：Task 5 publish job 经 env 驱动）', () => {
       VV_GRAMMARS_OUT: f.grammars,
       VV_QUERIES_DIR: f.queries,
     })) as { files: number; bytes: number };
-    expect(r.files).toBe(7);
+    expect(r.files).toBe(8); // license 文件走默认路径（仓库根 server/GRAMMAR_LICENSES.md，入库稳定存在）
     const pkg = JSON.parse(readFileSync(path.join(f.outDir, 'package.json'), 'utf8')) as PkgJson;
     expect(pkg.name).toBe('@scope/vviewer-grammars-full');
     expect(pkg.version).toBe('1.2.3');
+    expect(existsSync(path.join(f.outDir, 'GRAMMAR_LICENSES.md'))).toBe(true);
     await expect(main({})).rejects.toThrow(/VV_NPM_PACKAGE_NAME/);
   });
 

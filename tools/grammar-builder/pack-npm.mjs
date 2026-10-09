@@ -4,6 +4,10 @@
 //   outDir/grammars/manifest.json  grammar 清单（移入 grammars/，与 *.wasm 同目录）
 //   outDir/grammars/*.wasm         wasm 全集（逐字节拷贝）
 //   outDir/queries/<lang>/*.scm    查询资产（整目录拷贝，仅供独立消费；客户端不从 CDN 取 queries）
+//   outDir/GRAMMAR_LICENSES.md     许可证聚合随包附带（npm 是第三方分发主通道，license 字段
+//                                  'SEE LICENSE IN GRAMMAR_LICENSES.md' 指向的文件必须在包内；
+//                                  源 = 仓库根 server/GRAMMAR_LICENSES.md，gen-licenses.mjs 产物，
+//                                  打包前置——缺失即抛错）
 // 布局契约（控制台裁决 2026-10-09，ledger「布局契约统一」条，绑定）：客户端 manifest URL =
 // `${base}manifest.json`、wasm URL = `${base}${file}` 同 base（grammarLayers.ts 装配），
 // 因此 manifest 必须与 wasm 同目录。manifest 条目注 base: './'（同目录相对）——客户端消费时
@@ -20,8 +24,8 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../..');
 
-/** npm files 白名单：queries 仅供独立消费，客户端不取 */
-export const NPM_FILES_FIELD = ['grammars', 'queries'];
+/** npm files 白名单：queries 仅供独立消费，客户端不取；license 聚合随包（分发义务） */
+export const NPM_FILES_FIELD = ['grammars', 'queries', 'GRAMMAR_LICENSES.md'];
 
 /** manifest 条目 base：与 manifest 同目录的相对前缀（布局契约见文件头） */
 export const MANIFEST_ENTRY_BASE = './';
@@ -33,6 +37,7 @@ export function resolvePathsFrom(env = process.env) {
     queriesDir: env.VV_QUERIES_DIR ?? path.join(repoRoot, 'packages/highlight/assets/queries'),
     outDir: env.VV_NPM_OUT,
     repoPkgJson: path.join(repoRoot, 'package.json'),
+    licenseFile: path.join(repoRoot, 'server/GRAMMAR_LICENSES.md'),
   };
 }
 
@@ -66,9 +71,17 @@ function walkFiles(dir) {
  * 组装 npm 包布局。返回 { files, bytes }——files/bytes 覆盖包内全部文件
  * （package.json + grammars + queries），Task 5 publish job 用于发布日志。
  * 残包拦截：grammarsDir 缺失/无 wasm/manifest 缺失/manifest 引用悬空/queriesDir 缺失/
- * name|version|outDir 缺失，任一命中即抛错（publish 前即失败，不产出不完整包）。
+ * license 文件缺失/name|version|outDir 缺失，任一命中即抛错（publish 前即失败，不产出不完整包）。
  */
-export function packNpm({ grammarsDir, queriesDir, outDir, name, version, repoPkgJson = resolvePathsFrom().repoPkgJson }) {
+export function packNpm({
+  grammarsDir,
+  queriesDir,
+  outDir,
+  name,
+  version,
+  repoPkgJson = resolvePathsFrom().repoPkgJson,
+  licenseFile = resolvePathsFrom().licenseFile,
+}) {
   if (!grammarsDir || !fs.existsSync(grammarsDir)) throw new Error(`packNpm: grammarsDir 不存在: ${grammarsDir}`);
   const wasmFiles = fs.readdirSync(grammarsDir).filter((f) => f.endsWith('.wasm')).sort();
   if (!wasmFiles.length) throw new Error(`packNpm: grammarsDir 无 *.wasm: ${grammarsDir}`);
@@ -79,6 +92,10 @@ export function packNpm({ grammarsDir, queriesDir, outDir, name, version, repoPk
   const dangling = Object.values(manifestEntries).map((e) => e.file).filter((f) => !wasmFiles.includes(f));
   if (dangling.length) throw new Error(`packNpm: manifest 引用的 wasm 缺失: ${dangling.join(', ')}（清单与目录不一致）`);
   if (!queriesDir || !fs.existsSync(queriesDir)) throw new Error(`packNpm: queriesDir 不存在: ${queriesDir}`);
+  // license 聚合是打包前置（SEE LICENSE IN 指向必须随包）
+  if (!licenseFile || !fs.existsSync(licenseFile)) {
+    throw new Error(`packNpm: GRAMMAR_LICENSES.md 缺失: ${licenseFile}（先跑 gen-licenses.mjs？）`);
+  }
   if (!outDir) throw new Error('packNpm: outDir 必填');
   if (!name || !version) throw new Error('packNpm: name 与 version 必填');
 
@@ -94,6 +111,7 @@ export function packNpm({ grammarsDir, queriesDir, outDir, name, version, repoPk
   const manifestOut = path.join(pkgGrammars, 'manifest.json');
   fs.writeFileSync(manifestOut, JSON.stringify(packedManifest, null, 2) + '\n');
   fs.cpSync(queriesDir, path.join(outDir, 'queries'), { recursive: true });
+  fs.copyFileSync(licenseFile, path.join(outDir, 'GRAMMAR_LICENSES.md'));
 
   const repository = readRepository(repoPkgJson);
   const pkg = {
