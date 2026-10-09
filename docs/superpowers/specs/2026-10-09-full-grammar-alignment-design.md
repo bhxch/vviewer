@@ -135,3 +135,37 @@ vviewer 现状：客户端 wasm 内嵌 lite 集 34 语言，服务端 compute �
   上游形态更新：上游 2026-10-07 已自带等价锚点 `((comment) @_ecma_comment) . [`，
   防 O(n²) 目标仍达成，属阶段 1 遗留的补丁列表过时，修复涉及 generate.mjs/测试，
   超出文档收口任务文件范围，遗留单独处理）；`pnpm typecheck` 通过。
+
+### 7.2 阶段 2 实测结果回写（2026-10-10 收口）
+
+- **三层解析链**：`apps/web/src/lib/grammarLayers.ts`（同源→服务端→CDN 串行 fetch、
+  first-wins、失败跳层）；`GrammarTable` 条目 base 覆写 wasm 加载前缀（packages/highlight）。
+  **布局契约（控制台裁决）**：manifest URL = `${base}manifest.json`、wasm URL =
+  `${base}${file}`，manifest 与 wasm 恒同目录（base 以 `/` 结尾）——npm 包内 base
+  `./`、CDN env `VV_GRAMMAR_CDN` 以 `/grammars/` 结尾、pages 构建仅 tag 注入（main
+  构建不注入，规避 jsdelivr `@main` 404 白打请求）。
+- **npm 单包 + 发布管线**：pack-npm（lite 实测 992 files / 47.5MB，base 注入与残包
+  拦截见 `tools/grammar-builder/README.md`「npm 资产包」；CI publish 用 `grammar.yml`
+  全量 artifact）。`release.yml` 的 `web` / `publish-npm` 两 job 均以
+  `vars.NPM_SCOPE != ''` 门控（web 仅 tag 触发；publish 带 `npm view` 幂等门 +
+  `secrets.NPM_TOKEN`）；`pages-deploy.yml` CDN 注入收紧为
+  `vars.NPM_SCOPE != '' && github.ref_type == 'tags'`。运营清单
+  （NPM_SCOPE / NPM_TOKEN / 首发走 tag）见 `server/README.md`「资产分发」。
+- **SW 适配**：grammars runtimeCaching maxEntries 300→500（全量集 ~299 wasm 不提前
+  逐出，跨版本陈旧由 cacheName 修订号兜底）；`VV_GRAMMAR_CDN` 经 vite define 构建期
+  注入（CI e2e job 同参注入 mock CDN 域）。
+- **e2e 实测**：`e2e/b-grammar-layers.spec.ts` 2 用例（同源缺失 java→CDN 层兜底高亮
+  生效、CDN 不可达→跳层 warn 一条降级 hljs 不崩溃）×2 project = 4 passed；
+  `e2e-server/b-grammar-layers-server.spec.ts` 2 用例（连接快照预写→启动期跨源
+  `<serverBase>/grammars/manifest.json` 请求且 200 命中、js 高亮不变 + wasm 零跨源
+  锚定 first-wins 来源层；无快照→零服务端请求，反向锚定快照语义）——本机 4 连跑绿。
+- **已知语义**：服务端层为连接时快照——create() 随启动只读一次 sessionStorage 会话
+  记录（`vviewer-last-server`），会话内新连接的服务器不进入资产链，刷新页面生效
+  （compute 路由为实时读取，与此不同）。
+- **门禁三命令（本地 2026-10-10）**：`cargo test` 133 项全绿；`pnpm vitest run`
+  653/653（57 文件）；`pnpm typecheck` 通过。
+- **环境遗留观察**：本机 chromium 下，页面加载期创建的 tree-sitter worker 在
+  「manifest 经真实网络交付」或「真实 CDN 域 fetch 与完整合并表并存」时确定性 init
+  挂起（15s 看门狗兜底 hljs；同字节 route 回放或独立延迟创建的 worker 探针正常，
+  vite preview 与 release 二进制伺服均复现）——与资产链语义无关的底层传输问题，两套
+  分层 e2e 以 mock/回放规避（对齐 b-grammar-layers 惯例），留待单独排查。

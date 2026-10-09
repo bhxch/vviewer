@@ -74,6 +74,34 @@ vviewer serve --root /srv/data --cors-origin https://viewer.example.com --token-
   放行方法 GET/POST 与 `Authorization`/`Content-Type` 头。
 - 反之，前端与 server 同源部署（`--web-dist` 模式直接访问）时无需任何 CORS 配置。
 
+## 资产分发：grammar wasm 三层解析链
+
+前端 grammar 资产按 **同源 → 服务端 → CDN** 三层逐层 fetch 各自的
+`grammars/manifest.json` 并 first-wins 合并（同名语言以更近层为准；单层失败仅
+console.warn 跳层，不阻塞其余层。实现：`apps/web/src/lib/grammarLayers.ts`，spec §3）：
+
+| 层 | base | 说明 |
+|---|---|---|
+| 同源 | `<页面源>/grammars/` | 页面部署自带的资产（如 GitHub Pages 上的 lite 集），恒在 |
+| 服务端 | `<serverBase>/grammars/` | 本服务伺服：`--web-dist` 目录下的 `grammars/`（manifest.json 与 *.wasm **同目录**）。默认 web 构建仅含 lite 集；把全量 wasm 集（CI `grammar.yml` 的 `grammar-wasm` artifact，或 npm 包解包出的 `grammars/`）放入该目录即可升级本层语言覆盖 |
+| CDN | jsdelivr npm 包 | 构建期注入（`VV_GRAMMAR_CDN`，以 `/grammars/` 结尾），形态 `https://cdn.jsdelivr.net/npm/<scope>/vviewer-grammars-full@<version>/grammars/` |
+
+- **服务端层为连接时快照**：客户端只在启动时读一次「上次成功连接」的会话记录
+  （sessionStorage `vviewer-last-server`）——会话中新连接的服务器不进入资产链，
+  刷新页面生效（compute 路由为实时读取，与此不同）。
+- **跨源组合必配 `--cors-origin`**：前端静态托管（Pages 等）+ 远程本服务时，浏览器对
+  `<serverBase>/grammars/manifest.json` 与 `*.wasm` 的跨源 fetch 须 CORS 放行。CORS
+  层作用于全部路由（含 `--web-dist` 静态文件），配精确页面源即可；缺配时服务端层整体
+  跳过（console.warn 留痕），同源/CDN 层不受影响：
+  `vviewer serve --root … --web-dist … --cors-origin https://<pages-host>`。
+- **npm 发布运营清单（首次发布前一次性准备）**：
+  1. 仓库 variable `NPM_SCOPE`（带 `@` 前缀，如 `@vviewer`）——release `web` / `publish-npm`
+     两 job 的总开关，未配置时 npm 发布与 CDN 注入整体跳过（不影响其余 release 产物）；
+  2. 仓库 secret `NPM_TOKEN`（npm automation token，publish 步注入 `NODE_AUTH_TOKEN`）；
+  3. 首发走 tag：`publish-npm` 挂在 push `v*` 触发的 release 流程上（`npm view` 幂等门，
+     已发布版本自动跳过可重跑）；GitHub Pages 的 CDN 注入仅 tag 构建生效（main 构建
+     不注入，避免 jsdelivr `@main` 404 白打请求）。
+
 ## 构建前置（grammar 源树）
 
 `cargo build` / `cargo test` 在构建期以源码编译全部 grammar（build.rs + cc/FFI，非

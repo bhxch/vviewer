@@ -56,6 +56,43 @@ cli ≥0.26 的 wasi-sdk wasm 工具链不支持 **C++ 外置 scanner**（`get_s
   node -e "const bl=require('./tools/grammar-builder/build-list.json'),m=require('./server/grammars-manifest.json');const b=new Set(bl.map(e=>e.name)),s=new Set(m.grammars.map(e=>e.name));console.log('build-list',b.size,'server',s.size);console.log('仅 build-list:',[...b].filter(n=>!s.has(n)));console.log('仅 server:',[...s].filter(n=>!b.has(n)))"
   ```
 
+## npm 资产包（pack-npm）
+
+把 grammar wasm 集打成可发布的 npm 单包（spec §3 阶段 2：manifest + wasm + queries +
+许可证聚合一个包）。发布由 CI 承接（`.github/workflows/release.yml` 的 `publish-npm`
+job，`vars.NPM_SCOPE`/`secrets.NPM_TOKEN` 门控，首发走 tag）；本地打包：
+
+```bash
+VV_NPM_PACKAGE_NAME='@your-scope/vviewer-grammars-full' \
+VV_NPM_PACKAGE_VERSION='0.0.0-local' \
+VV_NPM_OUT=/tmp/dist-npm \
+node tools/grammar-builder/pack-npm.mjs
+```
+
+- **输入**：`VV_GRAMMARS_OUT`（默认 `apps/web/static/grammars`——本地即 lite 集 34
+  wasm；CI publish 下载 `grammar.yml` 的 `grammar-wasm` artifact，为全量集）+
+  `VV_QUERIES_DIR`（默认 `packages/highlight/assets/queries`）+ 仓库根
+  `server/GRAMMAR_LICENSES.md`（缺失即抛错，许可证聚合必须随包）。
+- **包布局**（与客户端三层装配 `apps/web/src/lib/grammarLayers.ts` 的 base 契约同构）：
+
+  ```
+  package.json            # private:false；files: [grammars, queries, GRAMMAR_LICENSES.md]
+  grammars/manifest.json  # 条目统一注入 base:'./'，与 *.wasm 同目录
+  grammars/*.wasm
+  queries/                # 整目录随包；客户端不走 CDN 取 queries，仅供独立消费
+  GRAMMAR_LICENSES.md
+  ```
+
+- **`base` 字段语义**：包内条目 `base:'./'` 为同目录相对前缀（node_modules 直读场景的
+  wasm 位置）；客户端运行时三层装配会以层 base（CDN 形态 `<pkg>@<ver>/grammars/`，
+  以 `/` 结尾）覆写条目 base，wasm URL = `${base}${file}`——manifest 与 wasm 恒同目录，
+  客户端不再插入中间段。
+- **残包拦截**（publish 前即失败，不出残包）：grammarsDir 缺失/无 wasm、manifest 引用
+  悬空 wasm、queriesDir 或 license 缺失、name/version/outDir 缺失，任一命中即抛错。
+- **规模实测**（lite 集）：992 files / 47.5MB（34 wasm 共 46.4MB + manifest 7.6KB +
+  queries ~1.1MB + license 20.9KB）；npm 发布为 gzip tarball。测试：
+  `pnpm vitest run tools/grammar-builder`（pack-npm 8 项在列）。
+
 ## 构建要点（实测结论）
 
 - **tree-sitter.json shim**：cli 0.27 只在有 `tree-sitter.json` 时编译链接外置 scanner，
