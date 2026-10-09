@@ -1518,6 +1518,7 @@ name = "vviewer"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "cc",
  "clap",
  "comrak",
  "futures-core",
