@@ -11,11 +11,15 @@ export const JSONL_OVERSIZE_PREVIEW_BYTES = 65_536;
 export const JSONL_COLLAPSE_LINES = 40;
 /** 展开封顶：即使展开也最多渲染 400 行，超出走卡片内滚动 */
 export const JSONL_EXPAND_CAP_LINES = 400;
+/** 卡片自动高亮的输入上限（UTF-16 字符数，1MB）：深嵌套小行 pretty 后可放大数倍
+ * （单行 <1MB、pretty 可达数 MB），超限跳过自动高亮保持纯文本（防 worker 载荷
+ * 与主线程卡顿）。与解析阈值同置本模块，作为 jsonl 渲染管线的规模阈值清单。 */
+export const JSONL_HIGHLIGHT_MAX_CHARS = 1_048_576;
 
 /** 单行解析结果三态：成功（pretty 形态）/ 失败（保原始文本+短原因）/ 超大（仅预览） */
 export type JsonlLineState =
   | { kind: 'ok'; pretty: string; prettyLines: number }
-  | { kind: 'failed'; raw: string; reason: string }
+  | { kind: 'failed'; raw: string; reason: string; truncated?: boolean }
   | { kind: 'oversize'; raw: string };
 
 /** 模块级单例：TextEncoder 构造有开销，行级调用（每行一次）不应重复创建 */
@@ -41,7 +45,8 @@ export function splitJsonlLines(text: string): string[] {
  * 解析单行：字节长 ≥ 1MB 直接判 oversize（不进 JSON.parse，避免解析+stringify
  * 的内存放大；阈值取等号即 oversize，测试锚定 1MB 整为超限），原始文本只截前
  * 64KB 作预览；否则尝试 JSON.parse——成功转 2 空格缩进的 pretty 形态
- * （stringify 保对象键插入序），失败保留原文并给出去换行、截 120 字符的短原因
+ * （stringify 保对象键插入序），失败保留原文（超 64KB 截断并标 truncated，
+ * 防巨行撑爆 DOM）并给出去换行、截 120 字符的短原因
  * （防多行报错破坏单行展示与 title 属性）。
  */
 export function parseJsonlLine(raw: string): JsonlLineState {
@@ -59,20 +64,26 @@ export function parseJsonlLine(raw: string): JsonlLineState {
     const reason = (err instanceof Error ? err.message : String(err))
       .replace(/\s+/g, ' ')
       .slice(0, 120);
-    return { kind: 'failed', raw, reason };
+    // 截断口径与 oversize 预览一致（字符切片；字符数 > 64KB 即截，容差可接受）
+    return raw.length > JSONL_OVERSIZE_PREVIEW_BYTES
+      ? { kind: 'failed', raw: raw.slice(0, JSONL_OVERSIZE_PREVIEW_BYTES), reason, truncated: true }
+      : { kind: 'failed', raw, reason };
   }
 }
 
 /**
- * 折叠计算：≤40 行全显；>40 行默认折叠——普通超长卡片初始 40 行可见，
- * 超过 400 行封顶的卡片则直接按封顶值展示（capped=true，UI 据此挂卡片内
- * 滚动与「已截断显示」提示）。展开点击由渲染层直接置 visibleLines=prettyLines
- * 重渲染，不做渐进展开。
+ * 折叠计算（spec：pretty 后超 40 行默认折叠显示首 40 行；展开仍封顶 400 行）：
+ * ≤40 行全显；>40 行一律折叠 40 行可见——capped 与否不改变折叠初始态；capped
+ * 含义为「展开时将被封顶」（prettyLines > 400），渲染层据此在展开后把切片截到
+ * 400 行并挂卡片内滚动与「已截断显示」提示。展开点击由渲染层重渲染，不做渐进。
  */
 export function collapseFor(prettyLines: number): { collapsed: boolean; visibleLines: number; capped: boolean } {
   if (prettyLines <= JSONL_COLLAPSE_LINES) {
     return { collapsed: false, visibleLines: prettyLines, capped: false };
   }
-  const capped = prettyLines > JSONL_EXPAND_CAP_LINES;
-  return { collapsed: true, visibleLines: capped ? JSONL_EXPAND_CAP_LINES : JSONL_COLLAPSE_LINES, capped };
+  return {
+    collapsed: true,
+    visibleLines: JSONL_COLLAPSE_LINES,
+    capped: prettyLines > JSONL_EXPAND_CAP_LINES
+  };
 }

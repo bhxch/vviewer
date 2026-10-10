@@ -70,6 +70,7 @@ describe('renderJsonl 卡片渲染', () => {
       .toBe(65_536); // 只保留 64KB 预览
 
     expect(host.querySelector('.vv-jsonl-status')?.textContent).toBe('共 3 行 · 1 行解析失败');
+    expect(host.querySelector('.vv-jsonl-status')?.getAttribute('aria-live')).toBe('polite'); // 恒挂
     expect(inst.getMeta()).toEqual({ encoding: 'utf-8', lang: 'json', size: enc(text).length, lines: 3 });
     inst.destroy();
   });
@@ -103,6 +104,30 @@ describe('renderJsonl 卡片级高亮', () => {
     expect(cards.length).toBeLessThan(rows.length); // 窗口内而非全量
     expect(calls.length).toBe(cards.length); // 每可视卡片恰好一次
     expect(calls.every(([, lang]) => lang === 'json')).toBe(true);
+    inst.destroy();
+  });
+
+  it('pretty 超 1M 字符上限：跳过自动高亮保持纯文本，console.debug 仅一次', async () => {
+    stubResizeObserver();
+    const calls: Array<[string, string]> = [];
+    attachHighlightClient({
+      highlight: async (text, lang) => {
+        calls.push([text, lang]);
+        return [];
+      }
+    });
+    const dbg = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    // 27 万个数字元素：raw ≈ 0.54MB（<1MB 不判 oversize），pretty ≈ 1.08M 字符（>1M 上限）
+    const compact = '[' + '0,'.repeat(269_999) + '0]';
+    const host = mount();
+    const inst = await jsonlRenderer.render(enc(compact), host, source, det);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls.length).toBe(0); // 跳过自动高亮
+    expect(
+      (host.querySelector('.vv-jsonl-body') as HTMLElement).textContent!.startsWith('[\n  0,')
+    ).toBe(true); // pretty 纯文本仍在
+    expect(dbg).toHaveBeenCalledTimes(1); // 每卡只留痕一次
+    dbg.mockRestore();
     inst.destroy();
   });
 
@@ -171,22 +196,36 @@ describe('renderJsonl 折叠/封顶', () => {
     inst.destroy();
   });
 
-  it('>400 行点击展开后出现 .vv-jsonl-cap + 卡片内滚动（style 断言）', async () => {
+  it('>400 行：折叠初始 40 行；展开封顶 400 行 + .vv-jsonl-cap + 卡片内滚动', async () => {
     stubResizeObserver();
     const compact = JSON.stringify(Array.from({ length: 420 }, (_, i) => i)); // pretty 422 行 > 400 封顶
     const host = mount();
     const inst = await jsonlRenderer.render(enc(compact), host, source, det);
     const card = host.querySelector('.vv-jsonl-card')!;
+    // spec：默认折叠显示首 40 行（capped 不改变折叠初始态，不再初始 400 行）
     expect((card.querySelector('.vv-jsonl-body') as HTMLElement).textContent!.split('\n').length)
-      .toBe(400); // 初始即按封顶值展示
+      .toBe(40);
+    expect(card.querySelector('.vv-jsonl-cap')).toBeNull(); // 未展开无截断提示
     (card.querySelector('.vv-jsonl-expand') as HTMLButtonElement).click();
     const body = host.querySelector('.vv-jsonl-body') as HTMLElement;
-    expect(body.textContent!.split('\n').length).toBe(400);
+    expect(body.textContent!.split('\n').length).toBe(400); // 展开仍封顶 400 行
     const cap = host.querySelector('.vv-jsonl-cap');
-    expect(cap?.textContent).toBe('已截断显示（400 行）'); // N = min(visibleLines, 实际行数)=400
+    expect(cap?.textContent).toBe('已截断显示（400 行）'); // N = min(400, 实际 422) = 400
     expect(body.style.maxHeight).not.toBe(''); // 卡片内 max-height 滚动
     expect(body.style.overflowY).toBe('auto');
     expect(host.querySelector('.vv-jsonl-expand')).toBeNull();
+    inst.destroy();
+  });
+
+  it('failed 巨行（>64KB）：预览截断 + 截断徽标，仍计入失败数', async () => {
+    stubResizeObserver();
+    const text = '{"a":1}\n' + '{oops' + 'x'.repeat(70_000) + '\n';
+    const host = mount();
+    const inst = await jsonlRenderer.render(enc(text), host, source, det);
+    const failed = host.querySelector('.vv-jsonl-card-failed') as HTMLElement;
+    expect((failed.querySelector('.vv-jsonl-body') as HTMLElement).textContent!.length).toBe(65_536);
+    expect(failed.textContent).toContain('已截断');
+    expect(host.querySelector('.vv-jsonl-status')?.textContent).toBe('共 2 行 · 1 行解析失败');
     inst.destroy();
   });
 });

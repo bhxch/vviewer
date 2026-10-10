@@ -9,6 +9,8 @@
  *
  * 高亮裁决：卡片级——每张 ok 卡片对自身 pretty 全文调一次
  * getHighlightClient().highlight(pretty, 'json')，窗口外的行永不解析/高亮；
+ * pretty 超过 JSONL_HIGHLIGHT_MAX_CHARS（1M 字符）的卡片跳过自动高亮保持纯文本
+ * （深嵌套小行 pretty 可放大数倍，防 worker 载荷与主线程卡顿）；
  * 区间 → 行 HTML 复用 code.ts 导出的 assignIntervalsToLines + renderLineHtml
  * （两者即 code.ts tree-sitter 整文件路径的同一管线，无需本地副本；code.ts 的
  * splitHighlightedLines 面向 hljs HTML 字符串输出，本处 client 产出 intervals，
@@ -32,6 +34,8 @@ import {
 import {
   collapseFor,
   JSONL_COLLAPSE_LINES,
+  JSONL_EXPAND_CAP_LINES,
+  JSONL_HIGHLIGHT_MAX_CHARS,
   parseJsonlLine,
   splitJsonlLines,
   type JsonlLineState
@@ -77,6 +81,8 @@ export function renderJsonl(
   target.classList.add('vv-jsonl');
   const status = document.createElement('div');
   status.className = 'vv-jsonl-status';
+  status.setAttribute('aria-live', 'polite'); // 恒挂（失败计数 0→N 时读屏可感知）
+  status.title = '失败行数随滚动解析渐进统计'; // 失败计数非首屏终值，口径见 tooltip
 
   // 解析缓存（惰性填充，不设上限，见模块头）与失败行计数（解析流式的代价：
   // 失败数随窗口解析渐进逼近全量，小文件首屏即终值）
@@ -84,7 +90,6 @@ export function renderJsonl(
   let failedCount = 0;
 
   function refreshStatus(): void {
-    if (failedCount > 0) status.setAttribute('aria-live', 'polite');
     if (failedCount > 0) {
       const badge = document.createElement('span');
       badge.className = 'vv-jsonl-status-failed';
@@ -138,6 +143,8 @@ export function renderJsonl(
   const highlightCache = new Map<number, HighlightInterval[]>();
   const pendingRows = new Set<number>();
   const inFlight = new Set<Promise<unknown>>();
+  /** pretty 超高亮输入上限的行（去重：每行只 console.debug 留痕一次） */
+  const highlightSkippedRows = new Set<number>();
   /** 已展开（点击过 .vv-jsonl-expand）的行：重渲染窗口时不回退折叠态 */
   const expandedRows = new Set<number>();
 
@@ -180,6 +187,15 @@ export function renderJsonl(
   /** 卡片级高亮请求（幂等）：结果到达后仅当卡片仍在窗口内才重绘 */
   function requestHighlight(i: number, pretty: string): void {
     if (pendingRows.has(i) || highlightCache.has(i)) return;
+    // 输入上限防护：深嵌套小行 pretty 可放大数倍（单行 <1MB、pretty 数 MB），
+    // 超限跳过自动高亮保持纯文本（防 worker 载荷与主线程卡顿），每行只 debug 一次
+    if (pretty.length > JSONL_HIGHLIGHT_MAX_CHARS) {
+      if (!highlightSkippedRows.has(i)) {
+        highlightSkippedRows.add(i);
+        console.debug('[jsonl] pretty 超过高亮输入上限（>1M 字符），本卡保持纯文本', i);
+      }
+      return;
+    }
     const client = getHighlightClient();
     if (!client) return; // 未接线（App 未启动高亮/单测）：保持纯文本
     pendingRows.add(i);
@@ -218,7 +234,9 @@ export function renderJsonl(
     const st = stateOf(i);
     const card = document.createElement('div');
     card.className = 'vv-jsonl-card';
-    card.dataset.line = String(i); // e2e/重绘定位锚（0 基行号，与 data-line 惯例一致）
+    // 口径：data-line 是 0 基「内容行」序号——切行时已剔除空行/纯空白行，
+    // 与原文件行号可相差空行数（gutter 展示号 = data-line + 1，同口径）
+    card.dataset.line = String(i);
     const gutter = document.createElement('span');
     gutter.className = 'vv-jsonl-gutter';
     gutter.textContent = String(i + 1);
@@ -229,8 +247,9 @@ export function renderJsonl(
     if (st.kind === 'failed') {
       card.classList.add('vv-jsonl-card-failed');
       card.title = st.reason;
-      body.textContent = st.raw;
+      body.textContent = st.raw; // 巨行（>64KB）时 parse 层已截（truncated 标记）
       card.append(makeBadge('解析失败'));
+      if (st.truncated) card.append(makeBadge('行过长，已截断（前 64KB）'));
       return card;
     }
     if (st.kind === 'oversize') {
@@ -239,12 +258,16 @@ export function renderJsonl(
       return card;
     }
 
-    // ok 卡片：pretty 行数组切片（T1 口径：visibleLines 以「每行以换行符收尾」计，
-    // 可能 = 真实行数 + 1；Array.slice 自动容忍越界，恰好全显）
+    // ok 卡片：pretty 行数组切片（T1 口径：prettyLines 以「每行以换行符收尾」计，
+    // 可能 = 真实行数 + 1；Array.slice 自动容忍越界恰好全显）。折叠初始态恒 40 行
+    // （spec：pretty 后超 40 行默认折叠显示首 40 行，capped 与否不影响初始态）；
+    // 展开态全显，封顶卡片（prettyLines>400）截到 400 行，超出走卡片内滚动。
     const realLines = st.pretty.split('\n');
     const c = collapseFor(st.prettyLines);
     const expanded = expandedRows.has(i);
-    const visibleLines = expanded && !c.capped ? st.prettyLines : c.visibleLines;
+    const visibleLines = expanded
+      ? (c.capped ? JSONL_EXPAND_CAP_LINES : st.prettyLines)
+      : c.visibleLines;
     const slice = realLines.slice(0, visibleLines);
     const html = highlightedHtml(i, slice);
     if (html !== null) body.innerHTML = html;
@@ -254,11 +277,11 @@ export function renderJsonl(
     }
 
     if (expanded && c.capped) {
-      // 封顶展开：DOM 已 400 行封顶再挂卡片内滚动 + 截断提示（N = min(可见, 实际)，
-      // 恰边界（visibleLines=真实+1）不虚报）
+      // 封顶展开：DOM 已截 400 行再挂卡片内滚动 + 截断提示（N = min(400, 实际行数)，
+      // 恰边界（prettyLines=真实+1）不虚报）
       const cap = document.createElement('div');
       cap.className = 'vv-jsonl-cap';
-      cap.textContent = `已截断显示（${Math.min(visibleLines, realLines.length)} 行）`;
+      cap.textContent = `已截断显示（${Math.min(JSONL_EXPAND_CAP_LINES, realLines.length)} 行）`;
       card.append(cap);
       body.style.maxHeight = `${JSONL_CAPPED_BODY_MAX_HEIGHT}px`;
       body.style.overflowY = 'auto';
@@ -345,6 +368,7 @@ export function renderJsonl(
       for (const p of inFlight) p.catch(() => {});
       inFlight.clear();
       pendingRows.clear();
+      highlightSkippedRows.clear();
       parseCache.clear();
       highlightCache.clear();
       expandedRows.clear();

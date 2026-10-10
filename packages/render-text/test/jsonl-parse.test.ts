@@ -23,7 +23,15 @@ describe('parseJsonlLine', () => {
   it('failed: keeps raw and short reason', () => {
     const s = parseJsonlLine('{oops');
     expect(s.kind).toBe('failed');
-    if (s.kind === 'failed') { expect(s.raw).toBe('{oops'); expect(s.reason.length).toBeLessThanOrEqual(120); }
+    if (s.kind === 'failed') { expect(s.raw).toBe('{oops'); expect(s.reason.length).toBeLessThanOrEqual(120); expect(s.truncated).toBeUndefined(); }
+  });
+  it('failed: raw >64KB truncated to 64KB with truncated flag', () => {
+    const s = parseJsonlLine('{oops' + 'x'.repeat(70_000));
+    expect(s.kind).toBe('failed');
+    if (s.kind === 'failed') {
+      expect(s.raw.length).toBe(65_536);
+      expect(s.truncated).toBe(true);
+    }
   });
   it('oversize: >1MB raw truncated to 64KB with oversize kind', () => {
     const big = 'x'.repeat(1_048_577);
@@ -41,10 +49,11 @@ describe('collapseFor', () => {
   it('short lines fully visible', () => {
     expect(collapseFor(8)).toEqual({ collapsed: false, visibleLines: 8, capped: false });
   });
-  it('long lines collapse to 40 and cap expansion at 400', () => {
+  it('long lines collapse to 40; capped flags >400 expansion cap', () => {
     expect(collapseFor(JSONL_COLLAPSE_LINES + 1))
       .toEqual({ collapsed: true, visibleLines: JSONL_COLLAPSE_LINES, capped: false });
+    // capped = 「展开时将被封顶」：折叠初始态仍 40 行（spec：默认折叠首 40 行）
     expect(collapseFor(JSONL_EXPAND_CAP_LINES + 50))
-      .toEqual({ collapsed: true, visibleLines: JSONL_EXPAND_CAP_LINES, capped: true });
+      .toEqual({ collapsed: true, visibleLines: JSONL_COLLAPSE_LINES, capped: true });
   });
 });
