@@ -16,9 +16,9 @@
 1. **基线套件**：vitest 685/685 通过（exit=0）；服务端 e2e exit=0；前端 e2e exit=1（4 个失败全部为 `b-grammar-layers.spec.ts` 两个用例 × chromium/mobile，经静态取证定性为执行侧环境缺失——构建未注入 `VV_GRAMMAR_CDN`——非产品缺陷、非脚本缺陷，详见 3.1）。
 2. **基线分诊**：产品缺陷候选 1 条（BUG-08 的滚动还原观察，本轮确认为 BUG-64）、测试脚本缺陷 0、flaky 备注 3 条（详见 4.3/6.2）。
 3. **分域黑盒探索**：10 个功能域全部完成（各域独立探测脚本、截图与结构化输出归档），产出缺陷候选。
-4. **缺陷确认复核**：候选逐条独立复核（多含对照实验与根因源码定位），确认 41 条、**误报 0 条**（unconfirmed 候选清单为空）。
+4. **缺陷确认复核**：候选逐条独立复核（多含对照实验与根因源码定位），确认 41 条（合并前清单条目数）、**误报 0 条**（unconfirmed 候选清单为空）。
 5. **跨域重复合并**：2 组重复发现合并（4 并 1、2 并 1），最终缺陷 **37 条主条目**：high 3 / medium 15 / low 19，**全部 verified；unconfirmed 为 0**。
-6. **编号缺口补测**：新增 10 个 `t-*` spec 文件共 **70 个用例**（含 5 个场景受限 `test.fixme` 占位），对应上轮缺口分析的 59 项缺口场景；统一串行执行 **10/10 域全部通过**（执行轮次 1~2）。
+6. **编号缺口补测**：新增 **12 个 `t-*` spec 文件**（t-bin、t-media 各按执行通道拆 web/`e2e` 与服务端/`e2e-server` 两处）；最终文件内共 **108 个 test 声明 = 64 个可执行用例 + 44 个 `test.fixme`**（44 = 5 场景受限占位 + 37 条确认缺陷回归锚点 + 2 个场景用例载体，分域实测对账见 §3.3），对应上轮缺口分析的 59 项缺口场景；统一串行执行 **10/10 域全部通过**（域结果字段口径，执行轮次 1~2；`test.fixme` 不执行不计数，Playwright 原始 passed/skipped 计数无归档可转录，见 §3.3「执行结果口径」）。
 7. **占位编号勘误**：一次中断的部分执行曾以旧编号（31~48 段等，与本轮权威编号空间重叠但含义错位）提交过部分占位，已按权威编号逐域勘误去重，对照见附录 A。
 
 ### 1.2 缺陷计数（合并后口径）
@@ -36,7 +36,7 @@
 
 ### 1.3 一句话结论
 
-**重构主目标达成、主干扎实，但配套面与边界面欠账集中暴露**：本地/远程 tree-sitter 高亮、懒高亮零错位、服务端 HTTP 契约、主题、Markdown/Office/压缩包渲染与全局搜索主链路可用（10 域 70 个补测用例全部执行通过）；但 3 条 high（快速打开开箱即不可用、djot 单请求崩服、hex 大文件尾部不可达且显示错误偏移）与一批「重构配套未跟随」类 medium（渲染器扩展名白名单、yaml vendored wasm、主题 capture 清单、SW 缓存策略漏 manifest/libarchive）以及四域独立命中同一处看门狗协议缺口（BUG-35），构成当前主要修复优先级。
+**重构主目标达成、主干扎实，但配套面与边界面欠账集中暴露**：本地/远程 tree-sitter 高亮、懒高亮零错位、服务端 HTTP 契约、主题、Markdown/Office/压缩包渲染与全局搜索主链路可用（10 域 64 个可执行补测用例统一执行通过，域结果字段口径，见 §3.3）；但 3 条 high（快速打开开箱即不可用、djot 单请求崩服、hex 大文件尾部不可达且显示错误偏移）与一批「重构配套未跟随」类 medium（渲染器扩展名白名单、yaml vendored wasm、主题 capture 清单、SW 缓存策略漏 manifest/libarchive）以及四域独立命中同一处看门狗协议缺口（BUG-35），构成当前主要修复优先级。
 
 ---
 
@@ -50,14 +50,14 @@
 
 ### 2.2 运行实例
 
-- **主服务端档**：`vviewer serve --root .temp/e2e-data --web-dist apps/web/build --port 8391 --compute`，PID 633975（PPID=1 常驻），日志 `.temp/explore-server-8391.log`。健康检查 `curl /api/health` → HTTP 200 JSON，`capabilities=["file-server","compute"]` 含 compute，`computeLanguages` 覆盖 300+ 语言（301 宣告，与各域实测逐项一致）。
+- **主服务端档**：`vviewer serve --root .temp/e2e-data --web-dist apps/web/build --port 8391 --compute`，PID 633975（PPID=1 常驻），日志 `.temp/explore-server-8391.log`。健康检查 `curl /api/health` → HTTP 200 JSON，`capabilities=["file-server","compute"]` 含 compute，`computeLanguages` 覆盖 300+ 语言（301 宣告，与各域实测逐项一致）。**遗留状态（报告落笔后复核，见 §2.3）**：该实例在本轮结束后仍常驻（`ps -o pid,etime -p 633975` → ELAPSED 07:07:38），日志已达 13.65GB 且持续增长，处置（进程停止与日志清理）在本轮任务约束内未执行、留待编排方决定。
 - **纯前端档**：`apps/web` 下 `pnpm vite preview --host 127.0.0.1 --port 4199 --strictPort`，vite 实际进程 PID 634483，日志 `.temp/explore-web-4199.log`。根路径 HTTP 200（4184B），`/grammars/manifest.json` 经 4199 亦 200。
 - 端口 4173/4174/8399（Playwright 专用）启动前确认空闲。
 - **各域辅助/自起短命实例**（842x~844x 段，均测毕按 PID 清理，端口冲突时改口并如实记录）：如 hl 域 8433/8434/8435/8436/8440/8441/8443/8445~8449、srv 域 8430/8431/8434/8437/8440/8441、media 域 8431/8441/8442、bin 域 8430/8441、cmp 域 8433/8434/8441/8443、pwa 域 8430/8442、shell 域复用 8391/4199 等。8432 曾有一个先前 smoke 测试遗留的 vviewer 进程 PID 1190058（root 在 /tmp/vv-smoke-khW5），不占用目标端口，未动。
 
 ### 2.3 遗留环境告警（不影响本轮结论）
 
-1. 服务端 watcher 对 `.temp/e2e-data/edge/symlink/escape-etc/audit`（历史 symlink 边界测试遗留数据）报 PermissionDenied，已回退 PollWatcher——仅影响文件变更实时推送，不影响 HTTP 服务与 compute；srv 域探索另行实证该 PermissionDenied→后台退避→PollWatcher 降级链路按 BUG-02 修复口径工作，无内容泄露。
+1. 服务端 watcher 对 `.temp/e2e-data/edge/symlink/escape-etc/audit`（历史 symlink 边界测试遗留数据，→ /etc）报 PermissionDenied，已回退 PollWatcher——仅影响文件变更实时推送，不影响 HTTP 服务与 compute；srv 域探索另行实证该 PermissionDenied→后台退避→PollWatcher 降级链路按 BUG-02 修复口径工作，无内容泄露。**报告落笔后遗留状态复核（均为本修订时实测）**：①主实例（PID 633975）仍常驻，`ps -o pid,etime,pcpu -p 633975` → ELAPSED 07:07:38、平均 %CPU 203，`top -bn1 -p 633975` 瞬时 CPU 184.4%；②日志 `.temp/explore-server-8391.log` 已达 13,645,964,047B（≈13.65GB）且持续增长——间隔 5 秒两次 `stat -c %s` 采样为 13,645,964,047 → 13,648,758,732（+2,794,685B/5s ≈ 559KB/s ≈ 47GB/天），`tail` 可见全部为 `notify::poll::data: walkdir error scanning … PermissionDenied` WARN（对 escape-etc → /etc 下大量路径的 PollWatcher 周期扫描重复报错）。**磁盘风险与处置**：按当前速率日志每天增长约 47GB，存在写满磁盘的现实风险；本轮任务约束内未清理任何现场，建议编排方尽快决定——kill 633975、清理或移走该日志、并清理数据根中的 `edge/symlink/escape-etc` 遗留数据后重启实例（三者任一即可止住增长；③中 8432 遗留 smoke 进程同批处置）。
 2. 8432 端口遗留 smoke 实例（见上）。
 3. vite preview 启动有 vite-plugin-pwa transformIndexHtml 不支持告警，属 preview 模式正常现象（PWA sw.js 已在 build 产物内）；前端与 -server 两轮 Playwright WebServer 均报同类告警，本轮用例不依赖 PWA dev-sw（b-grammar-layers 还显式 `serviceWorkers:'block'`），不影响结果。
 
@@ -95,24 +95,29 @@
 
 ### 3.3 域覆盖与补测执行
 
-| 域 | 文档场景数 | 既有自动化 | 上轮缺口场景 | 本轮新增 | 执行结果（轮次） | 确认缺陷（合并后） |
+| 域 | 文档场景数 | 既有自动化 | 上轮缺口场景 | 本轮新增（最终文件实测：可执行 test() + test.fixme()） | 执行结果（轮次） | 确认缺陷（合并后） |
 | --- | --- | --- | --- | --- | --- | --- |
-| 应用外壳 shell | 14 | 9 | 10 | t-shell.spec.ts 14 用例（1 fixme） | ✅ 通过（2） | 5 |
-| 代码高亮 hl | 11 | 6 | 7 | t-hl.spec.ts 10 用例（1 fixme） | ✅ 通过（2） | 7 |
-| 主题系统 theme | 7 | 6 | 4 | t-theme.spec.ts 4 用例 | ✅ 通过（1） | 3 |
-| Markdown 渲染 md | 13 | 10 | 3 | t-md.spec.ts 4 用例 | ✅ 通过（2） | 4 |
-| 文件内搜索 fsearch | 7 | 3 | 4 | t-fsearch.spec.ts 4 用例 | ✅ 通过（1） | 1 |
-| 媒体与 Office media | 11 | 8 | 6 | t-media（web 4 + e2e-server 1） | ✅ 通过（2） | 3 |
-| hex 与压缩包 bin | 10 | 10 | 6 | t-bin（web 4 + e2e-server 2） | ✅ 通过（1） | 1 |
-| 服务端文件服务 srv | 13 | 11 | 9 | t-srv.spec.ts 10 用例（1 fixme） | ✅ 通过（1） | 4 |
-| 计算卸载与全局搜索 cmp | 12 | 12 | 4 | t-cmp.spec.ts 4 用例（1 fixme） | ✅ 通过（2） | 2 |
-| PWA 与移动端 pwa | 9 | 9 | 6 | t-pwa.spec.ts 9 用例（1 fixme） | ✅ 通过（1） | 6 |
-| **合计** | **107** | **84** | **59** | **70 用例（5 个场景受限 fixme）** | **10/10 域通过** | **36 + 套件级 1 = 37** |
+| 应用外壳 shell | 14 | 9 | 10 | e2e/t-shell.spec.ts：13 + 7 fixme | ✅ 通过（2） | 5 |
+| 代码高亮 hl | 11 | 6 | 7 | e2e/t-hl.spec.ts：8 + 7 fixme | ✅ 通过（2） | 7 |
+| 主题系统 theme | 7 | 6 | 4 | e2e/t-theme.spec.ts：4 + 3 fixme | ✅ 通过（1） | 3 |
+| Markdown 渲染 md | 13 | 10 | 3 | e2e/t-md.spec.ts：4 + 4 fixme | ✅ 通过（2） | 4 |
+| 文件内搜索 fsearch | 7 | 3 | 4 | e2e/t-fsearch.spec.ts：4 + 1 fixme | ✅ 通过（1） | 1 |
+| 媒体与 Office media | 11 | 8 | 6 | e2e/t-media.spec.ts：5 + 3 fixme；e2e-server/t-media.spec.ts：1 + 0 | ✅ 通过（2） | 3 |
+| hex 与压缩包 bin | 10 | 10 | 6 | e2e/t-bin.spec.ts：4 + 1 fixme；e2e-server/t-bin.spec.ts：2 + 0 | ✅ 通过（1） | 1 |
+| 服务端文件服务 srv | 13 | 11 | 9 | e2e-server/t-srv.spec.ts：9 + 5 fixme | ✅ 通过（1） | 4 |
+| 计算卸载与全局搜索 cmp | 12 | 12 | 4 | e2e-server/t-cmp.spec.ts：2 + 6 fixme | ✅ 通过（2） | 2 |
+| PWA 与移动端 pwa | 9 | 9 | 6 | e2e/t-pwa.spec.ts：8 + 7 fixme | ✅ 通过（1） | 6 |
+| **合计（12 个文件）** | **107** | **84** | **59** | **64 可执行 + 44 fixme（共 108 个 test 声明）** | **10/10 域通过** | **36 + 套件级 1 = 37** |
 
 补充口径：
 
-- 新增 `t-*` 用例全部只补缺口、不重复既有 `b-*`/`m*` 已覆盖的编号断言；5 个 `test.fixme` 为场景受限占位而非失败：SHELL-07（headless 无法驱动 FS Access picker/requestPermission）、HL-10/3（需同源 --compute 辅助实例模式，注明参照 b-compute-global-search-server 的 :4180 模式转正）、SRV-06/2（e2e 无法稳定注入 notify 运行期错误，状态机分支已有 mock opener 单测覆盖）、CMP-02/2（验收 2「关标签重开二次更快」依赖服务端 intervals 缓存的 spec 未决项，断言体已写好）、PWA-06/2（快滑惯性断言已写好，现状必败——虚拟滚动路径惯性恒 0 疑似回归，待人工/真机复核后转正）。
-- 域级确认缺陷数为合并后口径；**域探索期原始计数**为 shell 6 / hl 7 / theme 3 / md 5 / fsearch 2 / media 3 / bin 1 / srv 4 / cmp 3 / pwa 6，加套件级 1，共 41 条，合并两组后为 37（见 4.1）。
+**用例数对账说明**：§3.3 表中「本轮新增」为**最终文件实测口径**（`grep -cE '^\s*test\('` 与 `grep -cE '^\s*test\.fixme\('` 对 12 个 t-* 文件逐一分文件统计，本修订时实测）。各域补测**编写阶段**材料曾报「编写时点」用例数（如 t-hl 10 用例含 1 fixme、t-cmp 4 用例含 1 fixme、t-media web 4 用例、t-shell 14 用例），其后占位勘误阶段为 37 条确认缺陷落回归锚点、并把 2 个场景用例载体转/标为 fixme，最终文件因此变为上表实测数（如 t-hl 8+7、t-cmp 2+6、t-shell 13+7）；编写时点数仅反映补测场景用例本身，不代表最终文件全量。本报告一律以实测口径为准。
+
+**fixme 总数披露（44 个，本修订时实测）**：44 = **5 个场景受限占位**（SHELL-07：headless 无法驱动 FS Access picker/requestPermission；HL-10/3：需同源 --compute 辅助实例模式，注明参照 b-compute-global-search-server 的 :4180 模式转正；SRV-06/2：e2e 无法稳定注入 notify 运行期错误，状态机分支已有 mock opener 单测覆盖；CMP-02/2：验收 2「关标签重开二次更快」依赖服务端 intervals 缓存的 spec 未决项，断言体已写好；PWA-06/2：快滑惯性断言已写好，现状必败——虚拟滚动路径惯性恒 0 疑似回归，待人工/真机复核后转正）+ **37 个确认缺陷回归锚点**（合并后 37 条主条目各恰一锚点，逐条编号见 §4.2 与附录 A）+ **2 个场景用例载体**（MD-01/2 [CAND-md-F1]，`e2e/t-md.spec.ts:80`；CMP-05 [BUG-67]，`e2e-server/t-cmp.spec.ts:239`——两者为 BUG-66 的场景判据用例，按「不改场景用例」口径保留 fixme）。`test.fixme` 不执行、不计入通过/失败。
+
+**执行结果口径（如实披露）**：「10/10 域全部通过」指统一串行执行轮次中各域**可执行用例**（非 fixme）的域级结果字段结论（域材料 execRan=true / execPassed=true，执行轮次 1~2），其依据是域材料给定的执行结论字段，**Playwright 原始 passed/skipped/failed 逐项计数未归档、无法在本报告中转录**——复核时 `apps/web/playwright-report` 不存在（`ls: cannot access 'apps/web/playwright-report': No such file or directory`），`apps/web/test-results/` 仅余 BUG-65 确认会话的遗留探针目录（zzz-review-hl02-probe-*），无统一执行轮次的报告产物。基线三套运行（§3.1）的结论同样转录自粘贴输出、无原始日志归档（m3-search flaky 的汇总段截断已在 §3.2 注明）。此为本报告执行数字的口径边界，读者引用 passed/skipped 级别数字时应以复跑为准。
+
+- 域级确认缺陷数为合并后口径；**域探索期原始计数**为 shell 6 / hl 7 / theme 3 / md 5 / fsearch 2 / media 3 / bin 1 / srv 4 / cmp 3 / pwa 6，加套件级 1，共 41 条（= 确认清单原始条目数，41 条候选全部确认、无误报），合并两组后为 37（见 4.1）。
 - 各域补测执行要点（示例，完整见各域 writeNotes 档案）：t-shell 覆盖 SHELL-01/02/03/04/06/09/10/12/13（SHELL-07 fixme）；t-hl 覆盖 HL-01/02/03/04/08/10/11（「abi 非 null」判据按过时口径退役改断 file/sha256；HL-04/2 为 >200MiB plain 分支 chromium only）；t-theme 含 214 主题页内全遍历与 hljs 变量逐项断言；t-md 含 MD-12 源码/渲染双视图搜索；t-fsearch 含 pdftotext 外部基准；t-media 含 ffmpeg 生成 HLS 播完；t-bin 含加密混合包 /api/file 护栏（只能落 4174）；t-srv 含 --token/--cors-origin/--hidden 跨源与拒启矩阵（辅助实例 4375-4377）；t-cmp 含 301 语言 computeLanguages 宣告断言与路由矩阵重锚定；t-pwa 含 SW precache/离线 wasm 缓存命中与性能预算硬门。
 
 ### 3.4 缺陷分布（合并后 37 条，按域 × 严重度）
@@ -214,7 +219,7 @@
 **BUG-36【medium · verified】服务端 compute 高亮对「单行大文本」O(n²)：446KB 单行超 10s 预算 504，且 504 后解析线程继续满核空转；同内容多行 477KB 仅 0.15s**
 
 - **域/根因位置**：hl｜`server/src/compute/highlight.rs:123-133`（Utf16Index::to_utf16 行内逐字符累加 O(行长)）、`:191-192`（每个 Source 事件调用两次）——单行文件行长=全文、区间数亦 O(n)，整体 O(n²)；无前置闸拦截（MAX_INTERVALS=2M 远未触及，range chunk 上限 20MB 不拦）；text/path/range 三模式同病。
-- **现象与校准**：梯度实测 50KB=0.28s → 141KB=3.39s → 285KB=8.82s → 446KB 504（尺寸×2.8 耗时×12.3，符合 O(n²)）；504 后 10s 窗口实测 993 ticks ≈99% 单核后台空转。UI 端 server-served 单行 456KB json 打开 11.1s 后远程超时回退本地 wasm 至终态，功能最终可用。维持 medium：客户端回退兜底使功能不完全不可用，但服务端能力对 minified js/json 常见形态实际失效并持续浪费 CPU（8391 实例实测长期 205% CPU 即此影响的在野证据）。
+- **现象与校准**：梯度实测 50KB=0.28s → 141KB=3.39s → 285KB=8.82s → 446KB 504（尺寸×2.8 耗时×12.3，符合 O(n²)）；504 后 10s 窗口实测 993 ticks ≈99% 单核后台空转。UI 端 server-served 单行 456KB json 打开 11.1s 后远程超时回退本地 wasm 至终态，功能最终可用。维持 medium：客户端回退兜底使功能不完全不可用，但服务端能力对 minified js/json 常见形态实际失效并持续浪费 CPU。**归因甄别（报告落笔后复核补充）**：原稿曾以「8391 实例实测长期 205% CPU」作为本缺陷在野证据，该归因**不成立为单因素证据**——报告发布后复核（§2.3）主实例无任何高亮请求时瞬时 CPU 仍达 184.4%（top -bn1），其来源是 PollWatcher 对 `edge/symlink/escape-etc`（→ /etc）的周期扫描与 ≈559KB/s 的 WARN 日志写盘，与本缺陷的高亮解析空转是**两个相互独立的 CPU 来源**；「长期 205% CPU」系两者叠加的进程均值（ps %CPU），不能单独归因于 BUG-36。本缺陷的空转证据以确认会话的紧贴采样为准（504 返回后 10s 窗口 993 ticks ≈99% 单核，采样窗口内无其它负载干扰）。
 - **复现**：POST `{"path":"oneline-446kb.json","lang":"json"}` → 504/10.0s；同内容多行 → 200/0.148s。
 - **证据**：自起实例 8441（root=/tmp/hl-verify）梯度全表；8391 夹具复验 `edge/size/minified-3mb.js` 与 range{0,1} 均 504/10.0s；`/proc/PID/stat` 采样 98~99% 单核；UI Playwright 状态栏「解析中…」→T+11.1s→「tree-sitter · 本地」+ console「远程高亮失败，已回退本地高亮」。
 
@@ -461,8 +466,8 @@
 
 ### 5.2 总体结论
 
-1. **重构主目标达成**：与上轮相比，三大系统性缺口全部关闭——本地 tree-sitter wasm 主路径可用（BUG-06 修复经多域回归锚点确认无回退，含 SW 离线缓存命中链）、键盘/快速打开/设置面板全部实现并有编号断言（BUG-03/04/05 关闭）、状态栏元数据四字段齐全（SHELL-12/SRV-05 口径达成）。上轮 26 条缺陷未发现行为回退（唯一的滚动还原残留缺口独立定档 BUG-64）。
-2. **主干扎实**：10 域 70 个补测用例统一执行 10/10 通过；基线 vitest 685/685、服务端 e2e 全绿；服务端 HTTP 契约（穿越/越权/Range/CORS/token）、懒高亮零错位、301 语言 round-trip、压缩包与结构树边界矩阵等深水区全部通过。
+1. **重构主目标达成**：与上轮相比，三大系统性缺口全部关闭——本地 tree-sitter wasm 主路径可用（BUG-06 修复经多域回归锚点确认无回退，含 SW 离线缓存命中链）、键盘/快速打开/设置面板全部实现并有编号断言（BUG-03/04/05 关闭）、状态栏元数据四字段齐全（SHELL-12/SRV-05 口径达成）。**上轮 26 条缺陷的回归状态（收窄口径）**：本轮对其中 **19 条**取得了直接回归/修复证据且未发现回退，**2 条**仅部分观察（BUG-02 降级链路、BUG-12 验收⑥通道护栏），**4 条未复测**（BUG-11/21/24/25），**1 条发现疑似回归待复核**（BUG-26 触摸惯性：本轮 harness 实测虚拟滚动路径惯性恒 0，t-pwa PWA-06/2 已 fixme 待真机复核）——即本轮**不是**对 26 条逐一复测后的全量回归结论，「未发现行为回退」仅适用于已复核的 19+2 条范围；逐条对照见附录 D。滚动还原残留缺口独立定档 BUG-64。
+2. **主干扎实**：10 域可执行补测用例统一执行 10/10 通过（64 个可执行用例，域结果字段口径，见 §3.3）；基线 vitest 685/685、服务端 e2e 全绿；服务端 HTTP 契约（穿越/越权/Range/CORS/token）、懒高亮零错位、301 语言 round-trip、压缩包与结构树边界矩阵等深水区全部通过。
 3. **当前主要风险集中在四处**：①**high×3**——BUG-27（自带数据集开箱即触发的快速打开整体失效）、BUG-33（djot 单请求崩服，公网暴露场景为可用性风险）、BUG-55（>28.44MiB 二进制尾部不可达且显示错误偏移）；②**重构配套未跟随**——code.ts 扩展名白名单（BUG-34）、yaml vendored wasm（BUG-37）、CODE_CAPTURES 清单（BUG-50）、SW 缓存策略漏 manifest/libarchive（BUG-58/59）均属「301 对齐重构与 PWA 策略未同步更新」类，修复面集中；③**看门狗协议缺口**（BUG-35）被四个域独立命中，是服务端档/纯前端档共同的中等严重度体验缺陷，修复点单一（worker init ack 或看门狗判活条件）；④**双引擎一致性**（BUG-39/66/42/65）——远程 comrak 与本地 markdown-it/langdetect 的语义分歧随「执行位置」动态切换暴露给终端用户，宜一次性立「双引擎输出契约」专项。
 4. **建议修复顺序**：BUG-33（崩服）→ BUG-27/55（开箱即触发/错误结果）→ BUG-35（四域共因，回归锚点已就位）→ BUG-34/37/50（重构配套）→ BUG-58/59（离线承诺）→ BUG-40（隐私外联）→ 其余 medium/low。
 
@@ -474,7 +479,7 @@
 
 - **基线三套**：vitest 685 用例、前端 e2e（chromium+mobile）、服务端 e2e 全量各跑一轮。
 - **10 域黑盒探索**（全部实跑）：301 语言 text 模式全量扫描（djot 唯一崩服）、range 协议 17 项 API 边界、shebang 矩阵 9 变体、injection 与 worker 病态输入稳定性矩阵、懒高亮三处逐行比对零错位；TOC/锚点本地引擎 slug 边界全套；文件内搜索六类视图全链（词级/行级高亮、外部基准计数、大小写、跨 chunk、关闭重开、还原无损比对）；损坏媒体兜底矩阵 15 件；大图缩放矩阵与 500 页 PDF；hex 28/30/40MB 边界矩阵 + 7 格式结构树 + 压缩包边界矩阵（截断/空包/zip64/中文/超 200MB/嵌套限深）；服务端 HTTP 97 条矩阵（穿越/越权/编码/特殊文件名/token/CORS）+ Range 22 条 + 真浏览器跨源实证；PWA 离线/更新流/移动端抽屉与表单几何/性能预算（桌面+移动各 5 轮中位）；主题全交互面与 FOUC 逐帧采样。
-- **补测 70 用例**：10 个 t-* spec 全部统一执行通过（见 3.3）。
+- **补测**：12 个 t-* spec（最终文件实测 64 个可执行用例 + 44 个 fixme，对账见 §3.3），可执行用例统一执行 10/10 域通过（域结果字段口径，见 §3.3 执行结果口径）。
 - **缺陷确认复核**：41 条候选 100% 独立复现（多数含正/负对照实验与根因源码实读），误报 0。
 
 ### 6.2 未覆盖与受限（如实披露，未跑的检查不写成已验证）
@@ -489,7 +494,7 @@
 8. **真实设备输入**：真实 OS 亮暗切换按键（headless 用 CDP emulateMedia 仿真，BUG-51 白帧时长本地实测、真实网络下更长）；BUG-26 触摸惯性按上轮文档口径维持待真机复核。
 9. **局部对照**：纯前端档全局搜索 local 路径的 UI 对照未做（以 node 直跑产品代码 grepStoreLocal 覆盖函数行为，UI 调用即该函数）；BUG-57 的 4199 UI 对照未做（同理由）。
 10. **探索期未重复的既有覆盖面**：HL-04/2 >200MiB plain 分支由补测用例覆盖但与 HL-08/HL-03/2 并行跑时需注意内存；MEDIA-01~11 文档已覆盖场景（250 行 xlsx 截断、EXIF rot90、HLS 起播等）未重复执行；BUG-16 的 1MB hex 首帧口径本轮以 10MB 桌面档补实测（中位 148ms 达标），1MB 档未重复。
-11. **占位转正项**：5 个场景受限 test.fixme（SHELL-07、HL-10/3、SRV-06/2、CMP-02/2、PWA-06/2）与 41 条确认缺陷的回归锚点 fixme 均为占位，待对应前提（真机/辅助实例模式/服务端缓存落地/缺陷修复）满足后转正执行。
+11. **占位转正项**：44 个 `test.fixme` 均为占位而非失败——5 个场景受限占位（SHELL-07、HL-10/3、SRV-06/2、CMP-02/2、PWA-06/2）+ 37 个确认缺陷回归锚点（§4.2 合并后 37 条主条目各一）+ 2 个 BUG-66 场景判据载体（MD-01/2 [CAND-md-F1]、CMP-05 [BUG-67]），待对应前提（真机/辅助实例模式/服务端缓存落地/缺陷修复）满足后转正执行。
 
 ---
 
@@ -561,6 +566,41 @@
 | 服务端/前端实例日志 | `.temp/explore-server-8391.log`、`.temp/explore-web-4199.log` | 主实例运行日志 |
 | 占位勘误提交 | 0790cf9 / b148bd1 / 23cee73 / f1d228e / 4df85d2 / d1eda64 / 8c39501 / 88ff85e / d078d27 / 87fcdb2 | 各域 test(e2e) 占位编号勘误与补齐（正文均含新旧编号对照） |
 
+### 附录 D：上轮（2026-10-08 报告）26 条缺陷本轮回归对照表
+
+> 目的：界定 §5.2「未发现行为回退」的实际范围。上轮报告恰含 26 个唯一缺陷编号（BUG-01~26，本修订时 `grep -oE '^### BUG-[0-9]+'` 计数核实）。本轮**未做** 26 条逐一复测，下表按本轮材料中实际存在的回归证据逐条标注：**A = 直接回归/修复证据，未发现回退**；**B = 部分观察（间接证据或仅覆盖部分验收面）**；**C = 本轮未复测**；**D = 发现疑似回归待复核**。证据出处均转录自本轮域材料（staleDocNotes/writeNotes/探索覆盖说明/确认缺陷清单）；标注「随基线套件通过」指该既有编号用例在前端 e2e 套件运行中通过（本轮套件仅 b-grammar-layers 4 项失败，见 §3.1）。
+
+| 上轮编号 | 上轮缺陷（摘要） | 本轮状态 | 本轮证据（出处） |
+| --- | --- | --- | --- |
+| BUG-01 | HLS 分片 blob: 死循环、ts 乱码（high） | A | t-media MEDIA-04/播完（e2e-server，ffmpeg 生成 2s HLS，断言清单/分片 200、readyState≥3、播放至 ended 无错误卡片）执行通过（media 域 writeNotes） |
+| BUG-02 | btrfs 数据根 watcher 持续故障（medium） | B | srv 域探索：PermissionDenied→后台退避→PollWatcher 降级链路按 BUG-02 修复口径工作、无内容泄露；主实例遗留状态见 §2.3（btrfs 特定故障场景与恢复窗口本轮未复测） |
+| BUG-03 | 键盘快捷键 j/k/gg/G/Ctrl+P 零实现（medium） | A | shell 域探索实测通过（j×5/k×2 步进、gg/G、Ctrl+P 全链）+ b-app-shell-sources.spec.ts:91-172 编号断言（shell 域 staleDocNotes） |
+| BUG-04 | 状态栏元数据四字段缺失（medium） | A | CodeFileMeta 四字段渲染，状态栏/属性面板编号断言（shell 域 staleDocNotes，code.ts:491-498 等行号证据） |
+| BUG-05 | 设置面板整体缺失（medium） | A | ⚙ 按钮/Ctrl+,/排除预设/自动刷新/手动刷新均在（TopBar.svelte、SettingsPanel.svelte 行号证据，shell 域 staleDocNotes）+ t-shell SHELL-09/2、SHELL-13/1 执行通过 |
+| BUG-06 | 本地 tree-sitter wasm 主路径整链失效（medium） | A | theme 域探索：BUG-06 验收锚点无回退（SW 三缓存建立、断网打开未开过 rust 文件仍 tree-sitter，截图 p4b-offline-rust.png）；md 域：b-markdown-html-docs-bug-regressions.spec.ts:207 实跑通过；hl/theme 多域 ts-* span 正常 |
+| BUG-07 | 无扩展名文件被拒（medium） | A | shebang→python、Makefile 文本预览编号断言（b-app-shell-sources.spec.ts:292-329，shell 域 staleDocNotes） |
+| BUG-08 | 服务器 tab 刷新误标本地占位（unconfirmed→已修） | A | 服务器来源 tab 刷新后自动重读渲染（b-server-regression.spec.ts:97-130）；BUG-64 条目：「内容自动重读正常（BUG-08 主修复目标达成，原用例仍通过）」；滚动还原残留缺口独立定档 BUG-64 |
+| BUG-09 | 全局搜索点击不定位不高亮（medium） | A | cmp 域探索「BUG-09 回归通过」：点击 751:1 后 data-line=750 行在视口内、带 vv-search-hit-line(-active)、gutter=751 |
+| BUG-10 | remote >2MB 被本地阈值压制（medium） | A | 阶段 3 后 auto 不限大小走服务端（cmp 域 staleDocNotes）；3.2MB/48000 行 server-served auto 终态「tree-sitter·远程」零错位；t-cmp CMP-03/2 路由矩阵重锚定执行通过 |
+| BUG-11 | 纯前端超限无「建议改用服务器模式」引导（medium） | C | 本轮无任何域覆盖此场景 |
+| BUG-12 | 加密 zip 整包拒绝（medium） | B | 仅验收⑥通道护栏：t-bin BIN-08/6（/api/file 200 + application/zip + PK 头，e2e-server）执行通过；「整包拒绝」前端 UI 行为本轮未复测 |
+| BUG-13 | magic 预检重定向缺失（medium） | B | t-bin BIN-10/2（验收②签名不符分支：.zip 扩展名纯文本 → 错误卡片兜底 + ≤6 无循环改派）执行通过；正路径 magic 识别本轮另有 7 格式结构树黑盒全对（bin 域探索），改派正路径 UI 复测未单列 |
+| BUG-14 | 媒体损坏无统一错误卡片（medium） | A | media 域探索：hollow.mp4 解码错误 ~1s 内卡片+按钮出现（升级链正常）、Office 损坏件卡片+按钮齐全；BUG-52/53/54 对照证据同链确认 |
+| BUG-15 | 离线 reload 落 chrome-error（medium） | A | 既有 fix-pwa.spec.ts:95 离线 reload 同管线用例随基线套件通过 + t-pwa PWA-02/2（断网地址栏重新导航完整壳）、PWA-02/3（在线 reload 基线）执行通过（pwa 域 writeNotes） |
+| BUG-16 | hex 首屏超预算 3~9 倍（medium） | A | bin 域探索：10MB hex 首帧 5 轮中位 148ms（BUG-16 验收第 2 条「≤10MB <300ms 桌面」全轮达标）；pwa 域性能预算：perf-1mb.bin hex 73/74ms（预算 200/500ms） |
+| BUG-17 | markdown 外部图片真实外联（medium） | A | md 域探索：img src/srcset 剥除、BUG-17 img[src] 拦截标记正常（MD-10/MD-11 既有验收面无回退）；BUG-40 证据回归面同快照完好（img src 已剥 + data-vv-blocked-external='1'） |
+| BUG-18 | 文件内搜索无词级高亮（medium） | A | app.css:219-223 词级/行级类名在位、b-in-file-search.spec.ts:95-97 断言 4 mark+3 行级（fsearch 域 staleDocNotes）+ t-fsearch FSEARCH-01 执行通过 |
+| BUG-19 | 「打开文件夹」点击无反馈（low） | A | 取消后状态栏「已取消选择文件夹」提示 + b-app-shell-sources.spec.ts:356/399 编号断言（shell 域 staleDocNotes） |
+| BUG-20 | >20MB 无明确超限提示（low） | A | 口径已按阶段 4 反转（>20MiB 懒高亮 + 「可视区懒高亮」一次性提示条，hl 域 staleDocNotes）；既有 HL-04 编号用例随基线套件通过 + t-hl HL-04/2（>200MiB plain 分支）执行通过 |
+| BUG-21 | 全局搜索 glob 无 UI 入口（low） | C | 本轮无任何域覆盖此场景 |
+| BUG-22 | auto 路由指示不符期望（low） | A | 旧 13 语言矩阵判据随重构反转，cmp 域以新契约重锚定：t-cmp CMP-03/2（rs/go/c/cpp/java/sql auto 下断言「tree-sitter · 远程」）执行通过 |
+| BUG-23 | 文件内搜索无大小写开关（low） | A | Aa 开关实装（SearchPanel.svelte:9-11、b-in-file-search.spec.ts:138-149 断言，fsearch 域 staleDocNotes）+ t-fsearch FSEARCH-03 执行通过 |
+| BUG-24 | 断网展开未加载目录静默失败（low） | C | 本轮无任何域覆盖此场景 |
+| BUG-25 | webkitdirectory 回退通道不存在（unconfirmed，上轮已判误报） | C | 本轮未复测（SHELL-07 仍为 headless 受限 fixme；上轮复核判误报的结论维持） |
+| BUG-26 | 触摸滑动无惯性（unconfirmed） | **D** | pwa 域 staleDocNotes：当前 harness 实测虚拟滚动路径惯性恒 0、非虚拟容器 0~1263px 不稳定（b-pwa-mobile-performance.spec.ts:14-16），上轮复核基准不再代表当前基线——**疑似虚拟滚动改造回归**，既有 spec 已记录待人工复核；t-pwa PWA-06/2（快滑惯性断言）现状必败，fixme 待真机复核后转正 |
+
+**汇总**：A 19 条、B 2 条、C 4 条（BUG-11/21/24/25）、D 1 条（BUG-26）。§5.2 的「未发现行为回退」仅覆盖 A（及 B 的已观察面）；BUG-26 的疑似回归不在「未发现回退」范围内，需按 t-pwa PWA-06/2 的转正路径（真机/人工复核）闭环。
+
 ---
 
-*报告完。所有数字、结论与证据路径均转录自本轮探索、确认复核、补测执行与占位勘误的实跑材料；verified 与 unconfirmed 全程明确区分；跨域重复发现按合并后口径统计（被并入编号不独立成条）；除本文档外未改动任何文件。*
+*报告完。所有数字、结论与证据路径均转录自本轮探索、确认复核、补测执行与占位勘误的实跑材料；verified 与 unconfirmed 全程明确区分；跨域重复发现按合并后口径统计（被并入编号不独立成条）；执行计数为修订时对最终文件的实测对账口径（§3.3），passed/skipped 级原始计数无归档已如实披露；除本文档外未改动任何文件。*
