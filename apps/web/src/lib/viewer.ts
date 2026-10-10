@@ -16,6 +16,7 @@ import { pptxRenderer } from '@vviewer/render-doc/pptx';
 import { hexRenderer } from '@vviewer/render-binary';
 import { archiveRenderer } from '@vviewer/render-archive';
 import { configureLibarchive } from '@vviewer/render-archive/libarchiveStore';
+import { jsonlRenderer } from '@vviewer/render-text/jsonl';
 import { browser } from '$app/env';
 import { ensureHighlightClient, computeRouter } from './highlightClient';
 import { routeLargeFileHighlight } from './highlightRouter';
@@ -38,6 +39,9 @@ registry.install(xlsxRenderer);
 registry.install(pptxRenderer);
 registry.install(hexRenderer);
 registry.install(archiveRenderer);
+// JSON Lines 渲染器（.jsonl/.ndjson）：注册于生成物 fallback 之前——installFallbackExtensions
+// 冲突跳过语义保证生成物不会覆盖专有注册（与 hex/archive 等专有渲染器同序原则）
+registry.install(jsonlRenderer);
 
 // C 项：手工清单之外的语法类扩展名由生成物补充（专有渲染器已先注册，冲突跳过）。
 const fallback = registry.installFallbackExtensions('code', GENERATED_EXTENSIONS);

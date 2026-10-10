@@ -10,8 +10,11 @@ import { test, expect, type Page } from '@playwright/test';
  * - OPEN-03：MetaPanel「打开方式」手选二进制 → override 即时重渲染 + 快照落盘；
  *   刷新后本地注入文件按既有语义以占位恢复（m1.spec.ts:102 先例）。override 的
  *   UI 级刷新恢复由 BUG-69 用例覆盖（假服务器 + 预置快照通道）。
- * - OPEN-04：notes.jsonl → code 视图——jsonl 不在 codeRenderer.extensions 手工清单
- *   （仅 json/jsonc），可预览只能来自 gen-code-extensions 生成物（C/D 装配锚点）。
+ * - OPEN-04：notes.jsonl → 专有 JSON Lines 卡片视图（jsonlRenderer 装配锚点）。
+ * - OPEN-05：混合合法/非法行 jsonl → 失败行徽标 + 状态条失败计数。
+ * - OPEN-06：打开方式往返 jsonl↔code（override 路径，候选经 C 项 openWithOf）。
+ * - OPEN-07：1MB/约 5000 行 jsonl 首屏性能锚点（BUG-16 口径：桌面<200ms/
+ *   移动<400ms，9 轮取中位；探针仿 t-pwa.spec.ts installPaintProbe）。
  *
  * 注入通道：合成 drop（页内 new DataTransfer + DragEvent 派发 window）——先例
  * t-shell.spec.ts L145-155（SHELL-03①）；二进制载荷经 base64 → Uint8Array
@@ -63,6 +66,60 @@ async function openRightIfNarrow(page: Page): Promise<boolean> {
   if (!narrow) return false;
   await page.locator('.vv-right-toggle').click();
   return true;
+}
+
+// ── OPEN-07 性能锚点辅助（探针/中位数仿 t-pwa.spec.ts L137-155 与 PWA-08/2） ──
+
+/** 首帧探针：MutationObserver 首现选择器 + 双 rAF（t-pwa installPaintProbe 同款） */
+async function installPaintProbe(page: Page, selector: string): Promise<void> {
+  await page.evaluate((sel) => {
+    (window as unknown as Record<string, unknown>).__vvPaintProbe = new Promise<number>((resolve) => {
+      const t0 = performance.now();
+      if (document.querySelector(sel)) {
+        resolve(0);
+        return;
+      }
+      const mo = new MutationObserver(() => {
+        if (document.querySelector(sel)) {
+          mo.disconnect();
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve(performance.now() - t0)));
+        }
+      });
+      mo.observe(document.body, { childList: true, subtree: true });
+      setTimeout(() => resolve(-1), 30_000);
+    });
+  }, selector);
+}
+
+async function readProbe(page: Page): Promise<number> {
+  const ms = await page.evaluate(
+    () => (window as unknown as { __vvPaintProbe?: Promise<number> }).__vvPaintProbe
+  );
+  expect(ms, '首帧探针超时（30s 内容未现）').toBeGreaterThanOrEqual(0);
+  return ms as number;
+}
+
+/** 9 样本中位（t-pwa median 同款；调用契约 values 非空奇数个，断言收窄索引） */
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[(sorted.length - 1) >> 1] as number;
+}
+
+/** 合成 ~1MB jsonl 载荷：~212B/行 × 5000 行 ≈ 1.02MB（brief 口径 ~5000 行 × ~200B） */
+function makeJsonlPayload(rows: number): string {
+  const lines: string[] = [];
+  for (let i = 0; i < rows; i++) {
+    lines.push(
+      JSON.stringify({
+        id: i,
+        name: `item-${i}`,
+        tags: ['alpha', 'beta'],
+        active: i % 2 === 0,
+        note: 'x'.repeat(140)
+      })
+    );
+  }
+  return lines.join('\n');
 }
 
 test('OPEN-01：未知扩展名 probe.foo + PNG 签名内容 → 签名改派 image 渲染', async ({ page }) => {
@@ -248,12 +305,78 @@ test('BUG-69 [open-with e2e]: restore 透传 overrideRenderer 生效——remote
   }
 });
 
-test('OPEN-04：jsonl（生成扩展名集契约锚点）→ 以 code 视图渲染', async ({ page }) => {
+test('OPEN-04：jsonl → 专有 JSON Lines 卡片视图（jsonlRenderer 装配锚点）', async ({ page }) => {
   test.setTimeout(60_000);
   await waitAppMounted(page);
   const jsonl = '{"id":1,"label":"first"}\n{"id":2,"label":"second"}\n';
   await dropFile(page, { name: 'notes.jsonl', type: 'application/jsonl', content: jsonl });
   await expect(page.locator('.vv-error-card')).toHaveCount(0);
-  await expect(page.locator('.vv-code-pre')).toContainText('"first"', { timeout: 20_000 });
-  await expect(page.locator('.vv-code-pre')).toContainText('"second"');
+  await expect(page.locator('.vv-jsonl')).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('.vv-jsonl-card', { hasText: 'first' })).toBeVisible();
+  await expect(page.locator('.vv-jsonl-card', { hasText: 'second' })).toBeVisible();
+});
+
+test('OPEN-05：解析失败行徽标与折叠（混合合法/非法行）', async ({ page }) => {
+  test.setTimeout(60_000);
+  await waitAppMounted(page);
+  const lines = [
+    JSON.stringify({ id: 1, nested: { deep: [1, 2, 3] } }),
+    '{broken',
+    JSON.stringify({ id: 3 })
+  ].join('\n');
+  await dropFile(page, { name: 'mixed.jsonl', type: 'application/jsonl', content: lines });
+  await expect(page.locator('.vv-jsonl-card-failed')).toHaveCount(1);
+  await expect(page.locator('.vv-jsonl-status')).toContainText('1 行解析失败');
+});
+
+test('OPEN-06：打开方式往返 jsonl↔code（override）', async ({ page }) => {
+  test.setTimeout(60_000);
+  await waitAppMounted(page);
+  await dropFile(page, { name: 'r.jsonl', type: 'application/jsonl', content: '{"a":1}\n' });
+  await expect(page.locator('.vv-jsonl-card')).toHaveCount(1);
+  await openRightIfNarrow(page); // 移动断点右栏在抽屉里（OPEN-03 同款）
+  // 切 code（候选含 code，经 C 项 openWithOf 自动出现）
+  await page.locator('.meta-openwith').selectOption('code');
+  await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 20_000 });
+  // 切回 jsonl
+  await page.locator('.meta-openwith').selectOption('jsonl');
+  await expect(page.locator('.vv-jsonl-card')).toBeVisible({ timeout: 20_000 });
+});
+
+test('OPEN-07：1MB/约 5000 行首屏性能锚点（BUG-16 口径）', async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
+  const isMobile = testInfo.project.name === 'mobile';
+  await waitAppMounted(page);
+  // 1MB 载荷一次性预置进页面：后续每轮派发只引用页内字符串——传输/序列化
+  // 开销落在探针 t0 之前，不污染测量窗口（探针只盖 File 构造 + drop → 首卡双 rAF）
+  await page.evaluate((payload) => {
+    (window as unknown as Record<string, unknown>).__vvJsonlPerfPayload = payload;
+  }, makeJsonlPayload(5000));
+  const samples: number[] = [];
+  for (let i = 0; i < 9; i++) {
+    await installPaintProbe(page, '.vv-jsonl-card');
+    await page.evaluate((idx) => {
+      const payload = (window as unknown as Record<string, unknown>).__vvJsonlPerfPayload as string;
+      const file = new File([payload], `perf-${idx}.jsonl`, { type: 'application/jsonl' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      window.dispatchEvent(
+        new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })
+      );
+    }, i);
+    samples.push(await readProbe(page));
+    if (i < 8) {
+      // 轮间换小文件重置 pane（PWA-08「换文件天然重置」口径）：jsonl 卡片随 tab
+      // 切换 destroy 移除，下一轮探针不会对上一轮残留 DOM 立即命中（0ms 假样本）
+      await dropFile(page, { name: `pad-${i}.txt`, type: 'text/plain', content: 'pad\n' });
+      await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 20_000 });
+    }
+  }
+  const med = median(samples);
+  const budget = isMobile ? 400 : 200; // 移动放宽 = t-pwa 双倍惯例（spec §3 锚点）
+  expect(med, `探针假样本（0ms=残留 DOM 立即命中）或超时：${samples.join('/')}`).toBeGreaterThan(0);
+  console.log(
+    `[perf] jsonl 首帧中位 ${med}ms（${samples.map(Math.round).join('/')}），预算 ${budget}ms（${testInfo.project.name}）`
+  );
+  expect(med, '1MB/约 5000 行首屏中位达验收预算（BUG-16 口径）').toBeLessThan(budget);
 });
