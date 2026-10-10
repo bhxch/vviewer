@@ -202,6 +202,18 @@ describe('dispatcher 无扩展名回退链（BUG-07）', () => {
     expect(target.textContent).toContain('无扩展名且无法识别内容');
     expect(target.textContent).not.toContain('""');
   });
+  it('真二进制无扩展名 + hex 已注册 → hex 兜底，reclassifiedFrom 不置位（原生 extless 不算改派）', async () => {
+    const reg = createRegistry();
+    reg.install(mk('code', ['txt']));
+    reg.install(mk('hex', []));
+    const target = document.createElement('div');
+    // 上一用例 registry 为空走「皆不命中」错误卡片；本例钉住 C 项 hex 兜底后的新行为：
+    // extless 二进制 → hex（非 error），且原生无扩展名不改写 reclassifiedFrom
+    const { rendererId, det } = await createDispatcher(reg).dispatch(
+      source('blob'), new Uint8Array([0x00, 0x01, 0x02, 0x03, 0x00]), target);
+    expect(rendererId).toBe('hex');
+    expect(det.reclassifiedFrom).toBeUndefined();
+  });
 });
 
 describe('dispatcher 错误卡片 actions（BUG-14）', () => {

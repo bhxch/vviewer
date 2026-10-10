@@ -24,8 +24,9 @@ export interface FileMetaState {
   size: number | null;
   /** 内容行数（仅 code 渲染器有；markdown/html 渲染视图无行概念） */
   lines: number | null;
-  /** 打开方式候选与生效项（C 项）；null = 不显示（未渲染成功/错误卡片/tab 空） */
-  openWith: { current: string; manual: boolean; options: { id: string; label: string }[] } | null;
+  /** 打开方式候选与生效项（C 项）；null = 不显示（tab 空/清理/store.read 失败卡片）。
+   * dispatch 返回的错误卡片仍带候选（'error' id 经 openWithOf 守卫滤除） */
+  openWith: FileOpenWith | null;
 }
 
 export const fileMeta = $state<FileMetaState>({
@@ -56,6 +57,8 @@ export function setFileMeta(
   fileMeta.lang = meta?.lang ?? '';
   fileMeta.size = meta?.size ?? null;
   fileMeta.lines = meta?.lines ?? null;
-  // 未带 openWith 的调用（无 meta 实例/错误卡片/清理）一并清空：下拉只在渲染成功时出现
+  // 未带 openWith 的调用（无 meta 实例/store.read 失败卡片/清理）一并清空：下拉只随
+  // dispatch 返回的实例出现——渲染失败的错误卡片也带（'error' id 已被 openWithOf
+  // 守卫滤出候选），仅 store.read 失败与 tab 清理不带上行、下拉消失
   fileMeta.openWith = meta?.openWith ?? null;
 }

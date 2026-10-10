@@ -23,9 +23,13 @@ const source = readFileSync(
 );
 
 describe('fileMeta.openWith 数据形状（C 项 Task 6）', () => {
-  it('FileMetaState 声明 openWith: { current; manual; options } | null', () => {
+  it('FileMetaState 声明 openWith: FileOpenWith | null（形状收敛至导出接口，终审 Minor）', () => {
+    expect(source).toMatch(/openWith:\s*FileOpenWith\s*\|\s*null/);
+  });
+
+  it('FileOpenWith 接口声明 current/manual/options 字段（形状单一来源）', () => {
     expect(source).toMatch(
-      /openWith:\s*\{\s*current: string;\s*manual: boolean;\s*options:\s*\{\s*id: string;\s*label: string\s*\}\[\]\s*\}\s*\|\s*null/
+      /interface FileOpenWith\s*\{[\s\S]*?current: string;[\s\S]*?manual: boolean;[\s\S]*?options:\s*\{\s*id: string;\s*label: string\s*\}\[\]/
     );
   });
 

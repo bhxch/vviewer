@@ -6,6 +6,7 @@
   import type { Tab } from './openFlow.svelte';
   import { persistScroll } from './openFlow.svelte';
   import { setFileMeta, type FileOpenWith } from './metaStore.svelte';
+  import { openWithOf } from './openWith';
   import { dispatcher, registry, cancelMarkdownRemote } from './viewer';
   import { cancelHighlight } from './highlightClient';
   import { watchHealth, statusNotice } from './openFlow.svelte';
@@ -101,8 +102,9 @@ import SearchPanel from './SearchPanel.svelte';
   }
 
   /** 实例元数据 → 状态栏段 + 属性面板（BUG-04；'getMeta' in inst 探测，不动 core 类型）。
-   * openWith（C 项入口 B）：dispatch 成功时上行候选与当前项，两分支共用（无 meta
-   * 实例也有打开方式下拉）；null = 不显示 */
+   * openWith（C 项入口 B）：dispatch 返回实例时上行候选与当前项（含渲染失败的错误
+   * 卡片，候选经 openWithOf 守卫过滤），两分支共用（无 meta 实例也有打开方式下拉）；
+   * null = 不显示（store.read 失败卡片/tab 清理） */
   function readInstanceMeta(
     inst: RenderedInstance,
     tabName: string,
@@ -135,27 +137,6 @@ import SearchPanel from './SearchPanel.svelte';
     });
   }
 
-  /** 打开方式候选（C 项入口 B）=「自动」+ 生效渲染器 ∪ 扩展名注册渲染器 ∪ code/hex
-   * （去重）。current 取 tab 的 override 状态（'' = 自动，供下拉选中态；「（手动）」
-   * 标记由 MetaPanel 按 manual 渲染）。registry.byExtension 返回单个 Renderer，
-   * 扩展名候选经 all() 过滤 extensions 命中。 */
-  function openWithOf(t: Tab, rendererId: string, detExt: string): FileOpenWith {
-    const seen = new Set<string>(['']);
-    const options: { id: string; label: string }[] = [{ id: '', label: '自动（按扩展名）' }];
-    const push = (id: string): void => {
-      if (seen.has(id)) return;
-      seen.add(id);
-      options.push({ id, label: registry.byId(id)?.label ?? id });
-    };
-    push(rendererId);
-    for (const r of registry.all()) {
-      if (detExt !== '' && r.extensions.includes(detExt)) push(r.id);
-    }
-    push('code');
-    push('hex');
-    return { current: t.overrideRenderer ?? '', manual: t.overrideRenderer !== undefined, options };
-  }
-
   $effect(() => {
     if (!host || !tab || tab.source.path === '') return;
     const current = tab;
@@ -179,13 +160,17 @@ import SearchPanel from './SearchPanel.svelte';
         }
         live = res.instance;
         instance = res.instance;
-        // BUG-04：实例元数据 → 状态栏「编码/语言/大小/行」段 + 右栏属性面板；
-        // C 项入口 B：openWith 候选与当前项随渲染上行（错误卡片分支不带 → 下拉消失）
+        // BUG-04：实例元数据 → 状态栏「编码/语言/大小/行」段 + 右栏属性面板。
+        // C 项入口 B：openWith 候选与当前项随 dispatch 返回上行——渲染失败的错误卡片
+        // 也走本分支（rendererId 'error' 未注册，被 openWithOf 存在性守卫滤出候选，
+        // current 维持 ''/自动，label 不回退英文 id）。错误卡片上的「以纯文本/以 hex
+        // 打开」在卡片内部以 rendererOverride 重派 dispatch、不经 setRendererOverride，
+        // 故 open-as 成功后本下拉维持「自动」不跟随（临时查看不落 override）。
         readInstanceMeta(
           res.instance,
           current.source.name,
           current.source.storeLabel,
-          openWithOf(current, res.rendererId, res.det.ext)
+          openWithOf(registry, current.overrideRenderer, res.rendererId, res.det.ext)
         );
         // BUG-09：全局搜索跳转——渲染完成后定位到命中行（消费即清，tab 切换不误触发；
         // revealLine 仅 code 实例实现，markdown/HTML 等静默跳过不阻塞打开）。

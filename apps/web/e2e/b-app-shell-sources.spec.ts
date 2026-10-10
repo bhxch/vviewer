@@ -290,7 +290,7 @@ test('BUG-05/SHELL-09/13：设置面板排除规则预设生效，设置与开�
   await expect(page.locator('.vv-settings')).toHaveCount(0);
 });
 
-test('BUG-07/SHELL-03/05：无扩展名文件可预览（shebang→python、Makefile），.xyz 兜底不回退', async ({
+test('BUG-07/SHELL-03/05：无扩展名文件可预览（shebang→python、Makefile），.xyz 未知扩展名按内容探测渲染', async ({
   page
 }) => {
   test.setTimeout(60_000);
