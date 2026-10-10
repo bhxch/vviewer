@@ -120,7 +120,9 @@ export function renderJsonl(
   const scroll = document.createElement('div');
   scroll.className = 'vv-jsonl-scroll';
   const spacer = document.createElement('div');
+  spacer.className = 'vv-virtual-spacer'; // app.css 虚拟滚动惯例类（absolute top:0，按类名自动生效）
   const viewport = document.createElement('div');
+  viewport.className = 'vv-virtual-viewport';
   scroll.replaceChildren(spacer, viewport);
   refreshStatus();
   target.replaceChildren(status, scroll);
@@ -155,15 +157,22 @@ export function renderJsonl(
 
   /**
    * 区间 → 可见行 HTML（复用 code.ts 管线）：intervals 相对 pretty 全文，行偏移表
-   * 按可见切片构建——切片是全文前缀，前缀偏移与全文一致，越界区间由 renderLineHtml
-   * 的 end 夹紧吸收。无缓存产出（未接 client / 在途 / 取消）返回 null，调用方回落
-   * 纯文本转义。
+   * 按可见切片构建——切片是全文前缀，前缀偏移与全文一致；折叠/封顶时落在切片总长
+   * 之外的区间先过滤丢弃（renderLineHtml 的 end 夹紧只会把这类区间变成空 ts-* span，
+   * 见下），切片内起点的区间越出末行行尾的部分仍由夹紧吸收。无缓存产出（未接
+   * client / 在途 / 取消）返回 null，调用方回落纯文本转义。
    */
   function highlightedHtml(i: number, visibleLines: string[]): string | null {
     const intervals = highlightCache.get(i);
     if (intervals === undefined) return null;
+    const offsets = buildLineOffsets(visibleLines);
+    // 切片总长（末行起点 + 末行长）：起点越过它的区间在夹紧后产出空 ts-* span，丢弃
+    const limit =
+      (offsets[offsets.length - 1] ?? 0) + (visibleLines[visibleLines.length - 1]?.length ?? 0);
+    const visible = intervals.filter((iv) => iv.start < limit);
+    if (visible.length === 0) return null;
     const byLine = new Map(
-      assignIntervalsToLines(intervals, buildLineOffsets(visibleLines)).map((a) => [a.line, a.segs])
+      assignIntervalsToLines(visible, offsets).map((a) => [a.line, a.segs])
     );
     return visibleLines.map((l, k) => renderLineHtml(l, byLine.get(k))).join('\n');
   }
@@ -186,8 +195,10 @@ export function renderJsonl(
         inFlight.delete(p);
         pendingRows.delete(i);
         // 取消 ≠ 失败（code.ts 同语义）：静默不写 DOM；其余错误本卡保持纯文本，
-        // 也不抛未处理 rejection（卡片级高亮是增强，不该以报错形态打扰）
+        // 也不抛未处理 rejection（卡片级高亮是增强，不该以报错形态打扰），
+        // 但 debug 留痕便于诊断
         if (destroyed || err instanceof HighlightCanceledError) return;
+        console.debug('[jsonl] 卡片高亮失败，本卡保持纯文本', err);
       }
     );
     inFlight.add(p);
@@ -349,11 +360,12 @@ export const jsonlRenderer: Renderer = {
   label: 'JSON Lines',
   extensions: ['jsonl', 'ndjson'],
   async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection) {
-    if (shouldDelegateToCode(buffer.byteLength)) {
-      // >200MB：JSONL 逐行解析/逐卡高亮的内存与主线程成本失控，委托 code 纯文本
-      // 虚拟滚动（沿用其超限提示条与实例扩展；encoding 透传保证非 UTF-8 解码一致）
-      return renderCode(buffer, target, { encoding: det.encoding, highlight: false, oversizeNotice: true });
-    }
+      if (shouldDelegateToCode(buffer.byteLength)) {
+        // >200MB：JSONL 逐行解析/逐卡高亮的内存与主线程成本失控，委托 code 纯文本
+        // 虚拟滚动（沿用其超限提示条与实例扩展；encoding/ext 透传保证非 UTF-8 解码
+        // 一致与状态栏语言段正确）
+        return renderCode(buffer, target, { encoding: det.encoding, ext: det.ext, highlight: false, oversizeNotice: true });
+      }
     return renderJsonl(buffer, target, det);
   }
 };

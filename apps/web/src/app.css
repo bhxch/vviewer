@@ -267,3 +267,24 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .toc .level-3 { padding-left: 12px; }
 .toc .level-4 { padding-left: 24px; }
 .toc-empty { margin: 0; padding: .25rem .5rem; font-size: 12px; color: var(--ui-fg-muted); }
+/* JSON Lines 渲染器（jsonl/index.ts：状态条 + .vv-jsonl-scroll 可变高度虚拟滚动 +
+   行卡片；spacer/viewport 复用 .vv-virtual-* 惯例类，容器自身承担 position:relative） */
+.vv-jsonl { display: flex; flex-direction: column; height: 100%; }
+.vv-jsonl-status { flex: none; padding: 4px 10px; border-bottom: 1px solid var(--ui-border);
+  color: var(--ui-fg-muted); font-size: 12px; }
+.vv-jsonl-status-failed { color: var(--ui-danger, #d33); }
+.vv-jsonl-scroll { position: relative; flex: 1; min-height: 0; overflow: auto; }
+.vv-jsonl-card { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 .6em;
+  margin: .4rem .6rem; padding: .4rem .6rem; border: 1px solid var(--ui-border); border-radius: 6px;
+  background: var(--code-bg); }
+.vv-jsonl-card-failed { border-color: var(--ui-danger, #d33); }
+.vv-jsonl-gutter { user-select: none; min-width: 2.2em; text-align: right;
+  color: var(--ui-fg-muted); flex: none; }
+.vv-jsonl-body { flex: 1; min-width: 0; overflow-x: auto; margin: 0; white-space: pre;
+  font-family: var(--vv-code-font); font-size: 13px; line-height: var(--vv-code-line-height);
+  color: var(--code-fg); }
+.vv-jsonl-badge { flex: none; align-self: center; font-size: 12px; padding: 0 .4em;
+  border: 1px solid var(--ui-danger, #d33); border-radius: 4px; color: var(--ui-danger, #d33); }
+.vv-jsonl-cap { flex-basis: 100%; font-size: 12px; color: var(--ui-fg-muted); }
+.vv-jsonl-expand { flex: none; margin-left: auto; font-size: 12px;
+  color: var(--ui-accent); border-color: var(--ui-accent); background: none; }
