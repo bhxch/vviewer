@@ -60,9 +60,11 @@ pub struct AppState {
     pub cors_origin: Option<String>,
     /// `--compute`：启用服务端计算端点（/api/compute/*；health 能力追加 "compute"）。
     pub compute: bool,
-    /// ripgrep 可执行文件路径；None = 请求时从 PATH 探测（M6 T4 /api/search）。
-    /// 测试注入不存在路径以模拟 rg 缺失 → 501。
+    /// rg 可执行路径覆盖：None = 请求时 PATH 探测；Some(可执行) = 直接绑定；
+    /// Some(不可执行) = rg 不可用（跳过 PATH 探测——测试模拟 rg 缺失，A 项降级链）。
     pub rg_path: Option<String>,
+    /// grep 路径覆盖：语义同 `rg_path`（rg 不可用时的 fallback 引擎，探测链第二位）。
+    pub grep_path: Option<String>,
     /// 一次性 ticket 表（SSE 升级用）。
     pub tickets: TicketStore,
     /// root 变更广播中心（启动时创建一次，共享 watcher + debounce 聚合）。
@@ -88,6 +90,7 @@ impl AppState {
             cors_origin,
             compute: false,
             rg_path: None,
+            grep_path: None,
             tickets: TicketStore::default(),
             changes: crate::watch::ChangeHub::spawn(&root_canonical),
         }
@@ -102,6 +105,12 @@ impl AppState {
     /// builder：注入 ripgrep 路径（None = PATH 探测；测试注入不存在路径模拟 501）。
     pub fn with_rg_path(mut self, rg_path: Option<String>) -> Self {
         self.rg_path = rg_path;
+        self
+    }
+
+    /// builder：注入 grep 路径（None = PATH 探测；测试注入不存在路径模拟 grep 缺失）。
+    pub fn with_grep_path(mut self, grep_path: Option<String>) -> Self {
+        self.grep_path = grep_path;
         self
     }
 }

@@ -62,17 +62,60 @@ pub struct SearchRequest {
     pub path: Option<String>,
 }
 
-/// PATH 探测首个可执行的 `rg`；找不到返回 None（→ 501）。
-pub fn probe_rg() -> Option<String> {
+/// 跨文件搜索引擎：rg 主路径，grep 降级路径（A 项 fallback）。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum SearchEngine {
+    Rg,
+    Grep,
+}
+
+impl SearchEngine {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            SearchEngine::Rg => "rg",
+            SearchEngine::Grep => "grep",
+        }
+    }
+}
+
+/// PATH 探测首个可执行文件；找不到返回 None（Windows 补 .exe 后缀）。
+pub fn probe(exe: &str) -> Option<String> {
     let paths = std::env::var_os("PATH")?;
-    let exe = if cfg!(windows) { "rg.exe" } else { "rg" };
+    let exe = if cfg!(windows) { format!("{exe}.exe") } else { exe.to_string() };
     for dir in std::env::split_paths(&paths) {
-        let candidate = dir.join(exe);
+        let candidate = dir.join(&exe);
         if is_executable(&candidate) {
             return Some(candidate.to_string_lossy().into_owned());
         }
     }
     None
+}
+
+/// 兼容旧调用（rg_available 守卫等）。
+pub fn probe_rg() -> Option<String> {
+    probe("rg")
+}
+
+/// 单引擎解析（覆盖语义见 state.rs 字段注释）。
+fn resolve_one(over: Option<&String>, exe: &str, engine: SearchEngine) -> Option<(SearchEngine, String)> {
+    match over {
+        None => probe(exe).map(|p| (engine, p)),
+        Some(p) if is_executable(Path::new(p)) => Some((engine, p.clone())),
+        Some(_) => None, // 显式注入但不可执行：该引擎不可用，跳过（模拟缺失）
+    }
+}
+
+/// 引擎选择链：rg 覆盖/探测 → grep 覆盖/探测 → 双缺 501。
+pub(crate) fn resolve_engine(state: &AppState) -> Result<(SearchEngine, String), AppError> {
+    if let Some(found) = resolve_one(state.rg_path.as_ref(), "rg", SearchEngine::Rg) {
+        return Ok(found);
+    }
+    if let Some(found) = resolve_one(state.grep_path.as_ref(), "grep", SearchEngine::Grep) {
+        return Ok(found);
+    }
+    Err(AppError::not_implemented(
+        "cross-file search unavailable: neither ripgrep (rg) nor grep found on server",
+    ))
 }
 
 #[cfg(unix)]
@@ -463,6 +506,42 @@ mod tests {
             Some(p) => assert!(p.ends_with("rg")),
             None => {}
         }
+    }
+
+    // ---------- resolve_engine ----------
+
+    /// 与 health 测试同款的轻量 state（root 仅作 watcher 基准，不参与断言）。
+    fn test_state() -> AppState {
+        AppState::new(PathBuf::from("."), None, None, false, None)
+    }
+
+    #[test]
+    fn resolve_engine_prefers_executable_rg_path_override() {
+        // /bin/sh 恒存在且可执行：验证「Some(可执行) → 直接绑定 rg」
+        let state = test_state().with_rg_path(Some("/bin/sh".to_string()));
+        let (engine, path) = resolve_engine(&state).unwrap();
+        assert_eq!(engine, SearchEngine::Rg);
+        assert_eq!(path, "/bin/sh");
+    }
+
+    #[test]
+    fn resolve_engine_missing_rg_path_falls_back_to_grep() {
+        // Some(不可执行) = rg 不可用（跳过 rg 探测）→ 降级 grep 链
+        let grep = probe("grep").expect("测试环境需要系统 grep");
+        let state = test_state()
+            .with_rg_path(Some("/nonexistent/rg-for-test".to_string()))
+            .with_grep_path(Some(grep.clone()));
+        let (engine, path) = resolve_engine(&state).unwrap();
+        assert_eq!(engine, SearchEngine::Grep);
+        assert_eq!(path, grep);
+    }
+
+    #[test]
+    fn resolve_engine_both_unavailable_is_err() {
+        let state = test_state()
+            .with_rg_path(Some("/nonexistent/rg-for-test".to_string()))
+            .with_grep_path(Some("/nonexistent/grep-for-test".to_string()));
+        assert!(resolve_engine(&state).is_err());
     }
 
     // ---------- 取消：客户端断连 → kill 子进程 ----------
