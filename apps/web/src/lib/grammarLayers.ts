@@ -4,7 +4,8 @@ import type { GrammarTable } from '@vviewer/highlight';
  * grammar 资产三层解析链（spec §3）：同源 → 服务端 → CDN，逐层 fetch 各自的
  * manifest.json 并做 first-wins 合并——同名语言以先命中层（更近的来源）为准。
  * 每个条目写全 `base`（wasm 目录前缀），worker 端 doPrepare 按 entry.base 加载；
- * 单层 fetch 失败（非 2xx / 网络错）仅 console.warn 并跳过该层，绝不阻塞其余层
+ * 单层 fetch 失败（非 2xx / 200 text/html SPA fallback / 网络错）仅 console.warn 并
+ * 跳过该层，绝不阻塞其余层
  * （可用性优先于完整性：合并结果缺某语言时，该语言高亮降级，其余语言不受影响）。
  *
  * base 契约：同时容纳 manifest.json 与 *.wasm 的目录前缀（以 / 结尾），三层同构
@@ -36,12 +37,22 @@ export function mergeGrammarLayers(layers: GrammarLayer[]): MergedGrammarTable {
   return out;
 }
 
-/** 拉取单层 manifest：非 2xx / 网络错 → null + console.warn（跳层语义的折叠点）。 */
+/**
+ * 拉取单层 manifest：非 2xx / 200 text/html（SPA fallback）/ 网络错 → null +
+ * console.warn（跳层语义的折叠点）。
+ */
 export async function fetchGrammarManifest(url: string): Promise<GrammarTable | null> {
   try {
     const res = await fetch(url);
     if (!res.ok) {
       console.warn(`[vviewer] grammar manifest ${url}: HTTP ${res.status}，跳过该资产层`);
+      return null;
+    }
+    // SPA-fallback 防御（与 core-parse remoteQueryLoader 的 C1 前端层修复同款）：
+    // 静态服务器把缺失 manifest 兜底成 200 index.html 时视为层缺失——不嗅探会在
+    // res.json() 抛 SyntaxError 走 catch，warn 文案误导为网络错。
+    if ((res.headers.get('content-type') ?? '').includes('text/html')) {
+      console.warn(`[vviewer] grammar manifest ${url}: 非 JSON 资产应答（SPA fallback？），跳过该资产层`);
       return null;
     }
     const json = (await res.json()) as { grammars?: GrammarTable };

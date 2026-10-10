@@ -10,7 +10,8 @@ import {
 /**
  * 三层 grammar manifest 合并链（同源 → 服务端 → CDN）的单元测试：
  * 纯函数 mergeGrammarLayers 的 first-wins 与逐条 base 注记契约；
- * fetchGrammarManifest 的失败折叠（非 2xx / 网络错 → null + warn，不阻塞后续层）；
+ * fetchGrammarManifest 的失败折叠（非 2xx / 200 text/html SPA fallback / 网络错 →
+ * null + warn，不阻塞后续层）；
  * assembleGrammarLayers 的候选层编排（null 层跳过、失败层跳过、layers 如实回报）；
  * grammarWarmUrl 的 wasm URL 拼接（base 已含目录段，防 grammars/ 双拼回归）。
  * fetch 经 vi.stubGlobal 逐 URL 编排，无真实网络。
@@ -21,11 +22,12 @@ function table(entries: Record<string, { file: string; aliases?: string[] }>): G
   return entries;
 }
 
-/** fetch 响应桩：ok/status/json 三元组。 */
-function res(status: number, body?: unknown): Response {
+/** fetch 响应桩：ok/status/headers/json 四元组（contentType 缺省无该头）。 */
+function res(status: number, body?: unknown, contentType?: string): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: new Headers(contentType ? { 'content-type': contentType } : {}),
     json: async () => body
   } as Response;
 }
@@ -101,6 +103,13 @@ describe('fetchGrammarManifest（失败折叠为 null + warn）', () => {
   it('200 但无 grammars 字段 → null（视为该层不可用）', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => res(200, {})));
     await expect(fetchGrammarManifest('/grammars/manifest.json')).resolves.toBeNull();
+  });
+
+  it('命题 3d：200 + text/html（SPA fallback 兜底 index.html）→ null + warn，不阻塞', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => res(200, '<!doctype html>', 'text/html; charset=utf-8')));
+    await expect(fetchGrammarManifest('/grammars/manifest.json')).resolves.toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('非 JSON 资产应答（SPA fallback？）');
   });
 });
 
