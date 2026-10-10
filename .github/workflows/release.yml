@@ -205,10 +205,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
       # 以 tag ref 重触发 Pages 部署：pages-deploy 自身只有 push main 触发（到不了
-      # tag ref），CDN 注入（ref_type == 'tags'）经本步才可达——发布后 pages 站点
-      # 即带全量 CDN 资产层。scope 未配置或 publish 未成功时跳过（main 部署已覆盖）。
+      # tag ref），CDN 注入（grammar_version input）经本步才可达——发布后 pages 站点
+      # 即带全量 CDN 资产层。版本取 publish-npm 已解析版本（内容零变化时为线上
+      # latest，URL 稳定）；scope 未配置或 publish 未成功时跳过（main 部署已覆盖）。
       - name: 触发 Pages 部署（tag ref，CDN 注入生效）
-        if: vars.NPM_SCOPE != '' && needs['publish-npm'].result == 'success'
-        run: gh workflow run pages-deploy.yml --ref "$GITHUB_REF_NAME"
+        if: needs['publish-npm'].outputs.version != ''
+        run: gh workflow run pages-deploy.yml --ref "$GITHUB_REF_NAME" -f grammar_version="${{ needs['publish-npm'].outputs.version }}"
         env:
           GH_TOKEN: ${{ github.token }}

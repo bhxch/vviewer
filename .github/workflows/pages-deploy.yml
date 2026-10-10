@@ -1,7 +1,8 @@
 # Pages 部署流水线：纯前端静态站点 → gh-pages 分支。
 # 触发：push main 且前端面（web/packages/grammar 构建器/锁文件/本文件）变更，或手动触发；
 # 另有 tag ref 触发路径——release 聚合 job 发布成功后 `gh workflow run --ref <tag>`
-# 重部署（CDN 注入仅此路径生效：ref_type == 'tags'，version 段即该 tag 的 npm 版本）。
+# 重部署并以 input 下发 grammar 版本（CDN 注入仅此路径生效：版本即 npm 已解析版本，
+# 内容零变化时复用线上 latest，URL 稳定）。
 # 子路径适配：GitHub Pages 项目站点伺服在 /<repo>/ 下，构建注入 VV_BASE_PATH
 # （svelte paths.base、PWA manifest start_url/scope、highlight worker 的
 # grammars/queries/runtime 资产路径同源取用，见 apps/web/vite.config.ts 的
@@ -25,6 +26,14 @@ on:
       - '.github/actions/setup-grammars/**'
       - '.github/workflows/pages-deploy.yml'
   workflow_dispatch:
+    inputs:
+      # release 聚合 job 以 tag ref 触发时下发（publish-npm 已解析版本：内容变化 →
+      # 新 tag 版本；内容零变化 → 复用线上 latest）。非空才注入 CDN env
+      grammar_version:
+        description: 'grammar 资产 npm 版本（非空则注入 CDN）'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -63,16 +72,16 @@ jobs:
           else
             echo "path=/$repo" >> "$GITHUB_OUTPUT"
           fi
-      # 第 3 层 CDN base 构建期烙入：版本归一（去 v 前缀）与 release.yml web/publish
-      # job 同法同值。仅 tag ref 触发时注入——pages 由 push main 触发，ref_name 无
-      # 版本语义，注入 `@main` 在 npm 恒 404（每次访问白打一发失败请求）；scope 未
-      # 配置（repo variable）或不属 tag 构建则不注入 env，第 3 层整体缺席
-      - name: 计算 CDN 资产 base（tag 构建且 NPM_SCOPE 已配置时）
-        if: vars.NPM_SCOPE != '' && github.ref_type == 'tags'
+      # 第 3 层 CDN base 构建期烙入：版本由 release 聚合 job 下发（publish-npm 已解析
+      # 版本——内容变化 → 新 tag 版本；内容零变化 → 复用线上 latest，CDN URL 稳定）。
+      # push main 触发时 input 为空 → 不注入（避免 jsdelivr `@main` 404 白打请求）；
+      # scope 未配置（repo variable）则 release 不触发本工作流，同样不注入
+      - name: 计算 CDN 资产 base（release 下发 grammar_version 时）
+        if: inputs.grammar_version != ''
         env:
           NPM_SCOPE: ${{ vars.NPM_SCOPE }}
+          VERSION: ${{ inputs.grammar_version }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
           echo "VV_GRAMMAR_CDN=https://cdn.jsdelivr.net/npm/${NPM_SCOPE}/vviewer-grammars-full@${VERSION}/grammars/" >> "$GITHUB_ENV"
       - name: 构建前端（注入子路径 base）
         run: pnpm --filter web build

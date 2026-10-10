@@ -121,10 +121,13 @@ console.warn 跳层，不阻塞其余层。实现：`apps/web/src/lib/grammarLay
   1. 仓库 variable `NPM_SCOPE`（带 `@` 前缀，如 `@vviewer`）——release `web` / `publish-npm`
      两 job 的总开关，未配置时 npm 发布与 CDN 注入整体跳过（不影响其余 release 产物）；
   2. 仓库 secret `NPM_TOKEN`（npm automation token，publish 步注入 `NODE_AUTH_TOKEN`）；
-  3. 首发走 tag：`publish-npm` 挂在 push `v*` 触发的 release 流程上（`npm view` 幂等门，
-     已发布版本自动跳过可重跑）；GitHub Pages 的 CDN 注入仅 tag 构建生效（main 构建
-     不注入，避免 jsdelivr `@main` 404 白打请求）；publish 带 `--provenance` 供应链
-     签名（publish-npm job 持 `id-token: write`，npm 页面展示 "Published with provenance"）。
+  3. 首发走 tag：`publish-npm` 挂在 push `v*` 触发的 release 流程上（**内容哈希去重**：
+     打包时计算 `contentHash` 与线上 latest 对比——前端-only 变更零发包、复用线上
+     latest 版本；grammar 资产变化才发新版本，版本号即当时的 tag）；publish 带
+     `--provenance` 供应链签名（publish-npm job 持 `id-token: write`，npm 页面展示
+     "Published with provenance"）；GitHub Pages 部署在发布成功后以 tag ref 自动重触发
+     （`grammar_version` input 下发已解析版本，CDN 注入仅此路径生效——main 构建不注入，
+     避免 jsdelivr `@main` 404 白打请求）。
 
 ## 构建前置（grammar 源树）
 
