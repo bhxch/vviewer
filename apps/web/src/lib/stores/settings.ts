@@ -2,6 +2,10 @@ import type { ComputePolicy } from '@vviewer/core';
 
 export interface Settings {
   themeMode: 'light' | 'dark' | 'system';
+  /** 亮/暗模式下各自记忆的外观主题（'default' | 'vscode:…' 内置名 | 'imported:<id>'）；
+   * 非 default 时代码槽由外观的 tokenColors 表接管（theme.ts applyAppearance） */
+  appearanceLight: string;
+  appearanceDark: string;
   /** 亮/暗模式下各自记忆的代码主题（键名需存在于 @vviewer/highlight 的 themes.json） */
   codeThemeLight: string;
   codeThemeDark: string;
@@ -14,6 +18,8 @@ export interface Settings {
 const KEY = 'vviewer:settings';
 const DEFAULTS: Settings = {
   themeMode: 'system',
+  appearanceLight: 'default',
+  appearanceDark: 'default',
   codeThemeLight: 'onelight',
   codeThemeDark: 'serika-dark',
   excludedPatterns: [],

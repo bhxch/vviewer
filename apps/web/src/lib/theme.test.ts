@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { captureToCssClass, resolveCapture, themeToCssVars } from '@vviewer/highlight';
 import { renderLineHtml } from '@vviewer/render-text';
 import {
+  applyAppearance,
   applyCodeTheme,
   CODE_CAPTURES,
   CURATED_CODE_THEMES,
@@ -32,6 +33,15 @@ function hljsVarsOf(theme: NonNullable<Awaited<ReturnType<typeof getTheme>>>): s
     })
     .filter((s): s is string => s !== null)
     .join('\n');
+}
+
+/**
+ * 旧 applyCodeTheme 时代注入文本的期望构造器（default 路径须逐字节等价）。
+ * 新旧断言共用：theme.ts 内部重构（applyAppearance 接管注入）后仍锁同一文本。
+ */
+async function legacyExpectedText(name: string, mode: 'light' | 'dark'): Promise<string> {
+  const theme = (await getTheme(name))!;
+  return `/* vviewer 代码主题：${name}（${mode}）——只换 CSS 变量，不重解析 */\n${THEME_ROOT_SELECTOR} {\n${themeToCssVars(theme, [...CODE_CAPTURES])}\n${hljsVarsOf(theme)}\n}`;
 }
 
 afterEach(() => {
@@ -66,9 +76,7 @@ describe('applyCodeTheme（注入 style#vv-code-theme）', () => {
     expect(before).not.toBe(after);
     const gruvbox = await getTheme('gruvbox');
     expect(gruvbox).not.toBeNull();
-    expect(after).toBe(
-      `/* vviewer 代码主题：gruvbox（dark）——只换 CSS 变量，不重解析 */\n${THEME_ROOT_SELECTOR} {\n${themeToCssVars(gruvbox!, CODE_CAPTURES)}\n${hljsVarsOf(gruvbox!)}\n}`
-    );
+    expect(after).toBe(await legacyExpectedText('gruvbox', 'dark'));
   });
 
   it('未知主题（残留下架名）：console.warn 并回退该亮暗槽位的默认主题', async () => {
@@ -78,9 +86,7 @@ describe('applyCodeTheme（注入 style#vv-code-theme）', () => {
     const fallback = await getTheme(DEFAULT_CODE_THEME.dark);
     expect(fallback).not.toBeNull();
     // 回退后生效的是默认主题（serika-dark），而非保持无 style / 旧主题
-    expect(styleEl()?.textContent).toBe(
-      `/* vviewer 代码主题：${DEFAULT_CODE_THEME.dark}（dark）——只换 CSS 变量，不重解析 */\n${THEME_ROOT_SELECTOR} {\n${themeToCssVars(fallback!, CODE_CAPTURES)}\n${hljsVarsOf(fallback!)}\n}`
-    );
+    expect(styleEl()?.textContent).toBe(await legacyExpectedText(DEFAULT_CODE_THEME.dark, 'dark'));
   });
 
   it('onSystemModeChange：matchMedia 变化触发回调，解绑后不再触发', async () => {
@@ -102,6 +108,31 @@ describe('applyCodeTheme（注入 style#vv-code-theme）', () => {
     off();
     expect(fakeMq.removeEventListener).toHaveBeenCalled();
     vi.unstubAllGlobals();
+  });
+});
+
+describe('applyAppearance（B 项）', () => {
+  it('default keeps legacy text identical', async () => {
+    await applyAppearance('default', 'light', 'onelight');
+    // 与 applyCodeTheme 时代文本逐字节等价（沿用既有精确断言文本）
+    expect(styleEl()?.textContent).toBe(await legacyExpectedText('onelight', 'light'));
+  });
+
+  it('vscode ref injects UI vars + capture vars', async () => {
+    await applyAppearance('vscode:Dark Modern', 'dark', 'serika-dark');
+    const text = styleEl()?.textContent;
+    expect(text).toContain('--ui-bg: #1F1F1F'); // dark_modern editor.background（上游为大写）
+    expect(text).toContain('--vv-ts-comment: #6A9955');
+    expect(styleEl()?.dataset.mode).toBe('dark');
+  });
+
+  it('unknown ref falls back to default with warn', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await applyAppearance('imported:ghost', 'light', 'onelight');
+    expect(warn).toHaveBeenCalled();
+    // 回退 default：注入文本与 default 路径一致
+    expect(styleEl()?.textContent).toBe(await legacyExpectedText('onelight', 'light'));
+    warn.mockRestore();
   });
 });
 

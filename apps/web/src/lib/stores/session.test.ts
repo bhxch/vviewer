@@ -23,13 +23,15 @@ describe('session store', () => {
   it('settings round-trip with defaults', () => {
     expect(loadSettings()).toEqual({
       themeMode: 'system',
+      appearanceLight: 'default',
+      appearanceDark: 'default',
       codeThemeLight: 'onelight',
       codeThemeDark: 'serika-dark',
       excludedPatterns: [],
       autoRefresh: true,
       computePolicy: 'auto'
     });
-    saveSettings({ themeMode: 'dark', codeThemeLight: 'onelight', codeThemeDark: 'serika-dark', excludedPatterns: ['node_modules'], autoRefresh: false, computePolicy: 'remote' });
+    saveSettings({ themeMode: 'dark', appearanceLight: 'default', appearanceDark: 'default', codeThemeLight: 'onelight', codeThemeDark: 'serika-dark', excludedPatterns: ['node_modules'], autoRefresh: false, computePolicy: 'remote' });
     expect(loadSettings().themeMode).toBe('dark');
     expect(loadSettings().computePolicy).toBe('remote');
   });

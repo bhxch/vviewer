@@ -5,7 +5,14 @@
  * themes.json（~1.1MB）经动态 import 惰性加载为独立 chunk，不进主包；
  * 各 API 变 async，内部缓存同一份加载 promise（并发调用只请求一次）。
  */
-import { themeToCssVars, resolveCapture, type ThemeTable } from '@vviewer/highlight';
+import {
+  colorsToUiVars,
+  resolveCapture,
+  themeToCssVars,
+  tokenColorsToThemeTable,
+  type ThemeTable,
+  type VscodeThemeJson
+} from '@vviewer/highlight';
 import type { Settings } from './stores/settings';
 
 /** themes.json 全量表（键为 helix 主题名）。 */
@@ -167,29 +174,101 @@ export const THEME_ROOT_SELECTOR =
   ':root, :root[data-theme-mode="light"], :root[data-theme-mode="dark"], :root[data-theme-mode="system"]';
 
 /**
- * 应用代码主题：生成常用捕获集的 CSS 变量并注入/替换 style#vv-code-theme（单节点幂等）。
- * 主题名不存在（残留下架主题等）→ console.warn 并回退该亮暗槽位的默认主题，
- * 不再"保持现状"——保持现状会让 UI 下拉与实际生效主题不一致。
+ * 外观主题引用（spec B §2.1）：'default' | 'vscode:Dark Modern' 等内置名 |
+ * 'imported:<id>'（导入管线，Task 3 接入存储）。
  */
-export async function applyCodeTheme(name: string, mode: 'light' | 'dark'): Promise<void> {
-  const tables = await loadTables();
-  let theme = tables[name];
-  if (!theme) {
-    const fallback = DEFAULT_CODE_THEME[mode];
-    console.warn(`未知代码主题：${name}，回退默认代码主题 ${fallback}`);
-    if (fallback !== name && tables[fallback]) return applyCodeTheme(fallback, mode);
-    return; // 默认主题也不在表内（themes.json 异常）：保持现状
-  }
+export type AppearanceRef = string;
+
+/**
+ * VSCode 内置外观清单：主题名 → vendor JSON 动态加载器（两种 theme 名都在清单）。
+ * 与 loadTables 同款动态 import 模式：vendor JSON 独立 chunk，不进主包。
+ */
+const BUILTIN_APPEARANCES: Record<string, () => Promise<{ default: unknown }>> = {
+  'vscode:Dark Modern': () => import('@vviewer/highlight/assets/vscode/dark_modern.json'),
+  'vscode:Light Modern': () => import('@vviewer/highlight/assets/vscode/light_modern.json')
+};
+
+/** 解析外观引用为 VSCode 主题 JSON；未知 ref 返回 null（调用方 warn 并回退 default）。 */
+async function resolveAppearance(ref: string): Promise<VscodeThemeJson | null> {
+  const loader = BUILTIN_APPEARANCES[ref];
+  if (!loader) return null;
+  return ((await loader()) as { default: VscodeThemeJson }).default;
+}
+
+/** 确保 style#vv-code-theme 单节点存在（首次注入创建，后续复用）。 */
+function ensureStyleEl(): HTMLStyleElement {
   let el = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
   if (!el) {
     el = document.createElement('style');
     el.id = STYLE_ID;
     document.head.append(el);
   }
+  return el;
+}
+
+/**
+ * default 外观的注入体（即旧 applyCodeTheme 全量逻辑）：helix 代码主题表 + hljs
+ * 近似映射。主题名不存在（残留下架主题等）→ console.warn 并回退该亮暗槽位的
+ * 默认主题，不再"保持现状"——保持现状会让 UI 下拉与实际生效主题不一致。
+ * 注入文本与 applyAppearance 引入前逐字节等价（单测 legacyExpectedText 与 e2e
+ * 注释头断言共同锁定），勿改动格式。
+ */
+async function injectCodeTheme(name: string, mode: 'light' | 'dark'): Promise<void> {
+  const tables = await loadTables();
+  let theme = tables[name];
+  if (!theme) {
+    const fallback = DEFAULT_CODE_THEME[mode];
+    console.warn(`未知代码主题：${name}，回退默认代码主题 ${fallback}`);
+    if (fallback !== name && tables[fallback]) return injectCodeTheme(fallback, mode);
+    return; // 默认主题也不在表内（themes.json 异常）：保持现状
+  }
+  const el = ensureStyleEl();
   // 整体替换 textContent（非追加）：切换主题零残留；span 类名不变 → 零重解析。
   // 同一节点内追加 --hljs-* 近似映射（M7）：hljs 兜底着色跟随当前代码主题
   el.textContent = `/* vviewer 代码主题：${name}（${mode}）——只换 CSS 变量，不重解析 */\n${THEME_ROOT_SELECTOR} {\n${themeToCssVars(theme, [...CODE_CAPTURES])}\n${hljsThemeVars(theme)}\n}`;
   el.dataset.mode = mode;
+}
+
+/**
+ * 外观型（appearance ≠ default）注入：tokenColors 映射表接管代码槽——ts vars 与
+ * hljs vars 均取自 TextMate→capture 映射结果（Task 1 vscode.ts），而非 helix 代码
+ * 主题表；UI vars 段（colorsToUiVars 12 键白名单）仅此外观型才有。组装顺序：
+ * 注释头 → UI vars → ts vars → hljs vars。
+ */
+function injectAppearance(appearance: string, mode: 'light' | 'dark', json: VscodeThemeJson): void {
+  const table = tokenColorsToThemeTable(json.tokenColors, CODE_CAPTURES);
+  const el = ensureStyleEl();
+  el.textContent = `/* vviewer 外观主题：${appearance}（${mode}）——只换 CSS 变量，不重解析 */\n${THEME_ROOT_SELECTOR} {\n${colorsToUiVars(json.colors ?? {}).join('\n')}\n${themeToCssVars(table, [...CODE_CAPTURES])}\n${hljsThemeVars(table)}\n}`;
+  el.dataset.mode = mode;
+}
+
+/**
+ * 应用外观主题（spec B §2.1/2.2）：单节点 style#vv-code-theme 幂等注入。
+ * 'default' 时退化为纯代码主题注入（与旧 applyCodeTheme 文本逐字节等价，不含
+ * UI vars 段）；vscode/imported 时 UI+代码一物两用——appearance 非 default 时
+ * 代码槽被接管，codeTheme 参数仅作 default 路径的代码主题。未知 ref（清单外 /
+ * 未注册 imported）console.warn 一次并回退 default 路径。
+ */
+export async function applyAppearance(
+  appearance: AppearanceRef,
+  mode: 'light' | 'dark',
+  codeTheme: string
+): Promise<void> {
+  const json = appearance === 'default' ? null : await resolveAppearance(appearance);
+  if (appearance !== 'default' && !json) {
+    console.warn(`未知外观主题：${appearance}，回退 default`);
+    return injectCodeTheme(codeTheme, mode);
+  }
+  if (json) {
+    injectAppearance(appearance, mode, json);
+    return;
+  }
+  await injectCodeTheme(codeTheme, mode);
+}
+
+/** 旧入口（薄包装）：等价 applyAppearance('default', mode, name)，注入文本不变。 */
+export async function applyCodeTheme(name: string, mode: 'light' | 'dark'): Promise<void> {
+  return applyAppearance('default', mode, name);
 }
 
 /**
