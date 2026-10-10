@@ -13,15 +13,24 @@ const manifest = JSON.parse(fs.readFileSync(path.join(here, '../../server/gramma
 
 function firstLicenseFile(dir) {
     for (const f of fs.readdirSync(dir)) {
-        // 简报正则漏配 COPYING.*（clojure/janet-simple 为 COPYING.txt/CC0），补上
-        if (/^(LICENSE|COPYING|COPYING\..*|LICENSE\..*|LICENSE-.*)$/i.test(f)) return path.join(dir, f);
+        // 英式 LICENCE 拼写补齐（gitcommit/twig 的 WTFPL 文件名为 LICENCE，修前漏配
+        // 致 declared=WTFPL 而 file 空列）；COPYING.*（clojure/janet-simple 为 COPYING.txt）
+        if (/^(LICENSE|LICENCE|COPYING|LICENSE\..*|LICENCE\..*|COPYING\..*|LICENSE-.*)$/i.test(f)) return path.join(dir, f);
     }
-    // SPDX 风格 LICENSES/<SPDX-ID>.txt（nim、slint）
+    // SPDX 风格 LICENSES/<SPDX-ID>.txt 兜底（实测仅 slint 命中——nim 的顶层
+    // LICENSE.txt 已被上一条正则先吃掉；目录内可能存多份 SPDX 文本，取首个 .txt）
     const licensesDir = path.join(dir, 'LICENSES');
     if (fs.existsSync(licensesDir)) {
         for (const f of fs.readdirSync(licensesDir)) {
             if (/\.txt$/i.test(f)) return path.join(licensesDir, f);
         }
+    }
+    // 最后兜底：license 声明写在 README 的仓库（如 ptx——「## License / MIT」在
+    // README.md:19，Cargo.toml 无 license 字段）。仅当 README 确有 license 小节才
+    // 认领，避免把无声明的 README 误标为许可证出处（groovy 即无小节，保持未找到）
+    const readme = path.join(dir, 'README.md');
+    if (fs.existsSync(readme) && /^#{1,6}\s*licen[cs]e/im.test(fs.readFileSync(readme, 'utf8'))) {
+        return readme;
     }
     return null;
 }

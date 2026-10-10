@@ -89,7 +89,7 @@ vviewer 服务端二进制静态链接了以下 tree-sitter grammar（源码按 
 | git-config | MIT | tools/grammar-builder/out/grammars/git-config/LICENSE |
 | git-rebase | MIT | tools/grammar-builder/out/grammars/git-rebase/LICENSE |
 | gitattributes | MIT | tools/grammar-builder/out/grammars/gitattributes/LICENSE |
-| gitcommit | WTFPL |  |
+| gitcommit | WTFPL | tools/grammar-builder/out/grammars/gitcommit/LICENCE |
 | gitignore | MIT | tools/grammar-builder/out/grammars/gitignore/LICENSE |
 | gleam | Apache-2.0 | tools/grammar-builder/out/grammars/gleam/LICENSE |
 | glimmer | MIT | tools/grammar-builder/out/grammars/glimmer/LICENSE.md |
@@ -209,7 +209,7 @@ vviewer 服务端二进制静态链接了以下 tree-sitter grammar（源码按 
 | proto | MIT | tools/grammar-builder/out/grammars/proto/LICENSE |
 | proverif | 0BSD | tools/grammar-builder/out/grammars/proverif/LICENSE |
 | prql | MIT | tools/grammar-builder/out/grammars/prql/LICENSE |
-| ptx | 未找到 |  |
+| ptx | 见文件 | tools/grammar-builder/out/grammars/ptx/README.md |
 | pug | ISC | tools/grammar-builder/out/grammars/pug/LICENSE |
 | puppet | MIT | tools/grammar-builder/out/grammars/puppet/LICENSE |
 | purescript | MIT | tools/grammar-builder/out/grammars/purescript/LICENSE |
@@ -276,7 +276,7 @@ vviewer 服务端二进制静态链接了以下 tree-sitter grammar（源码按 
 | toml | MIT | tools/grammar-builder/out/grammars/toml/LICENSE |
 | tql | MIT | tools/grammar-builder/out/grammars/tql/LICENSE |
 | tsx | 见文件 | tools/grammar-builder/out/grammars/tsx/LICENSE |
-| twig | WTFPL |  |
+| twig | WTFPL | tools/grammar-builder/out/grammars/twig/LICENCE |
 | typescript | 见文件 | tools/grammar-builder/out/grammars/typescript/LICENSE |
 | typespec | 见文件 | tools/grammar-builder/out/grammars/typespec/LICENSE |
 | typst | MIT | tools/grammar-builder/out/grammars/typst/LICENSE |
