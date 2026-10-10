@@ -14,6 +14,8 @@
 - **档 1 file-server**：目录树、Range 文件流、服务端语言/编码检测、SSE 变更推送（文件修改自动刷新）、Bearer token 路径安全。
 - **档 2 `--compute`**：在档 1 上追加服务端计算——tree-sitter / comrak 远程高亮与渲染、ripgrep 全局搜索（`TopBar` 计算策略可切换 本地/远程/自动）。
 
+跨文件搜索依赖 ripgrep（rg）——**可选**：缺失时自动降级系统 grep（功能差异：无大文件跳过、结果顺序不保证、正则为 ERE 方言、无列定位）；两者皆缺时搜索退回浏览器内执行。`GET /api/health` 经 `searchEngine` 字段宣告实际引擎。
+
 ## 功能矩阵
 
 | 格式 | 能力 |
@@ -27,7 +29,7 @@
 | 二进制 | hex 三列 dump（偏移/hex/ASCII）+ 结构树（PNG/IHDR 等字段展开） |
 | 压缩包 | zip（jszip）/ tar·tgz·tbz2·7z·rar（libarchive wasm）：包内树 + 条目递归预览（嵌套深度限 3 层，超限拒绝） |
 | Office | docx（mammoth 转 HTML）、xlsx（SheetJS，多 sheet 页签、>200 行截断）、pptx（文本提纲卡片） |
-| 搜索 | 文件内（`/`）+ 全局（`Ctrl+Shift+F`）双实现：浏览器内 grep / 远程 ripgrep（server 缺 rg 时 501 → 前端自动降级本地 grep） |
+| 搜索 | 文件内（`/`）+ 全局（`Ctrl+Shift+F`）双实现：浏览器内 grep / 远程搜索（rg 可选：缺 rg 自动降级系统 grep，皆缺时 501 → 前端退回浏览器内 grep） |
 | 会话 | IndexedDB tab 快照恢复 + 目录句柄权限记忆（本地文件内容不保留，刷新后以占位提示重开） |
 | PWA | manifest + Service Worker：静态资产预缓存，grammar wasm/查询文件运行时缓存，离线可用（已缓存范围） |
 | 外观 | helix 代码主题体系 + 亮/暗双模式记忆，hljs 兜底着色近似跟随代码主题 |
@@ -45,7 +47,7 @@ pnpm build:all        # 前端 → apps/web/build + cargo build --release → se
 # 打开 http://127.0.0.1:8321（本机免鉴权；局域网加 --allow-lan --token-gen）
 ```
 
-需要服务端计算（远程高亮/comrak/ripgrep 搜索）时追加 `--compute`（要求 PATH 内有 `rg`）。
+需要服务端计算（远程高亮/comrak/ripgrep 搜索）时追加 `--compute`；rg 可选——缺失时自动降级系统 grep（差异与引擎宣告见上）。
 
 ### 纯前端（静态托管）
 

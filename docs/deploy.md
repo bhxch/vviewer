@@ -18,6 +18,8 @@ pnpm build:all        # = pnpm build（前端 → apps/web/build）+ cargo build
 发布物只需两个东西：`server/target/release/vviewer`（单二进制）和前端静态目录
 `apps/web/build/`（`--web-dist` 指定）。
 
+跨文件搜索依赖 ripgrep（rg）——**可选**：缺失时自动降级系统 grep（功能差异：无大文件跳过、结果顺序不保证、正则为 ERE 方言、无列定位）；两者皆缺时搜索退回浏览器内执行。`GET /api/health` 经 `searchEngine` 字段宣告实际引擎。
+
 ## 局域网使用
 
 ```bash

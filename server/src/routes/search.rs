@@ -1,7 +1,8 @@
 //! `POST /api/search`：ripgrep 跨文件搜索，NDJSON 流式响应。
 //!
 //! 裁决（M6）：search 属 file-server 基础能力——挂在 Bearer 组内但不要求
-//! `--compute`；ripgrep 缺失时 501（前端据此降级为浏览器内 grep）。
+//! `--compute`；rg 与 grep 皆缺时 501（前端据此降级为浏览器内 grep；仅 rg
+//! 缺失时服务端自动降级 grep）。
 //!
 //! 实现链路：spawn `rg --json`（PATH 探测，`state.rg_path` 可覆盖）→ 逐行解析
 //! match 事件 → 转 NDJSON 帧下发；上限 1000 命中即 kill 子进程并下发截断终帧；
