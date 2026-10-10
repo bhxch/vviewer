@@ -194,10 +194,14 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
           src ? { ...src, text } : { text },
           lang,
           () =>
-            client.highlight(text, lang).catch((err: unknown) => {
-              if (err instanceof Error && err.name === 'HighlightCanceled') throw encodeCanceled(err);
-              throw err;
-            }),
+            // ctx.chunk 透传（spec §5.1 子文本窗口语义标注）：lazy chunk 调用的
+            // text 即该窗口子文本，worker 侧仅作 debug 语义标注，区间仍相对 text
+            client
+              .highlight(text, lang, ctx?.chunk ? { chunk: ctx.chunk } : undefined)
+              .catch((err: unknown) => {
+                if (err instanceof Error && err.name === 'HighlightCanceled') throw encodeCanceled(err);
+                throw err;
+              }),
           // 服务端已接线 injections（阶段 1），auto 不再豁免注入语言：
           // remoteAttempted 即装配 remoteFn，无注入语言豁免。
           remoteAttempted ? (s, l) => remoteHighlight(s, l) : undefined
