@@ -608,3 +608,140 @@ test.fixme('BUG-43 [探索]: tree-sitter worker init 成功零回包——页面
   expect(consoleErrors.join('\n')).not.toContain('初始化超时');
   await expect(page.locator('.vv-error-card')).toHaveCount(0);
 });
+
+// ── 探索复核确认缺陷回归占位：发现于 Markdown 渲染域、根因属 hl（2026-10-10；README
+// §3.2.1 一域一文件按根因归属落位，§3.2.4 修复合入前 test.fixme 占位、修复 PR 转正）──
+// 该两缺陷上一轮按探索期编号（BUG-40/BUG-38）落在 t-md.spec.ts；本轮缺陷库定档编号
+// 偏移为 BUG-41/BUG-42 且根因在 packages/highlight，按根因迁入本域文件，修复 PR 以
+// 本节为转正载体（t-md 侧探索期编号占位一并转正）。
+
+test.fixme('BUG-41 [探索]: worker 看门狗 15s 静默误杀后 markdown 围栏高亮全会话降级 hljs——init 成功不回 ack', async ({
+  page
+}) => {
+  // 发现于 Markdown 渲染域、根因属 hl（packages/highlight worker/client 链路）；复核成立
+  // （medium）。= 探索期编号 BUG-40（t-md.spec.ts 'BUG-40 [探索]' 用例，同一缺陷的 md
+  // 围栏视角，两占位一并转正）；与上方 BUG-43 [探索]（文件内搜索域发现）为同根因缺陷
+  // ——编号按发现域各留一条（BUG-41 md 围栏视角 / BUG-43 本地代码文件主视角），修复 PR
+  // 转正时一并处理。
+  // 根因链：init 成功路径 .then 内仅派发排队请求、不向主线程回任何 ack
+  // （packages/highlight/src/worker.ts:86-90）；看门狗 INIT_TIMEOUT_MS=15_000
+  // （packages/highlight/src/client.ts:18）只认 onmessage 置位的 workerAlive
+  // （client.ts:85-92），15s 内无高亮请求即 failWorker（client.ts:74-80）；initFailed 后
+  // 所有 highlight() 直接 reject 短路（client.ts:126-127），单例 clientPromise 失败不重试
+  // （apps/web/src/lib/highlightClient.ts:87-94）——页面加载后 15s 内未发生高亮请求的
+  // 会话（viewer.ts:51-56 启动即预热，看门狗自加载起算），worker 实际 init 成功仍被误杀：
+  // 全会话本地 tree-sitter 永久降级 hljs，console 报误导性错误「初始化超时（15s 无响应）
+  // ·排查 worker chunk 是否 404/MIME 异常」，实测 worker chunk/tree-sitter.wasm/manifest
+  // 全 200。15s 看门狗由提交 1a95b0a（2026-10-08）引入。
+  // 最小复现（md 围栏视角）：打开页面静置 >15s → 打开含 ```rust 围栏的 md → 围栏
+  // pre code className 为 "language-rust hljs"、span 全 hljs-*，console 出现上述 error；
+  // 对照 <15s 打开同一文件 cls "language-rust"、ts-* span 正常。
+  // 证据（复核轮独立取得，8391/4199 双档 A/B 对照翻转）：/tmp/md-e3-reverify/reverify.mjs
+  // ——A 档（等 17s 开 rust-fence.md）{cls:"language-rust hljs", ts:0, hljs:8} + 同轮
+  // ts-worker/tree-sitter.wasm/manifest 全 200；B 档（300ms 即开）{cls:"language-rust",
+  // ts:19, hljs:0}；/tmp/md-e3-reverify/session2.mjs——超时后同会话再开 .rs 仍仅 hljs
+  // （全会话短路，{ts:0, hljs:8}）。
+  // 修复方向：init 成功回 ack（workerAlive 置位解除看门狗）；修复后本用例转正。
+  test.setTimeout(150_000);
+  const consoleErrors: string[] = [];
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') consoleErrors.push(msg.text());
+  });
+  await page.goto('/');
+  // 注入后静置 16s：预热 init 握手已发出（viewer.ts:51-56），期间零高亮请求——越过 15s
+  // 看门狗窗口（现状在此窗口内被误杀；修复后 ack 到达解除看门狗）
+  await openDir(page, [
+    {
+      name: 'watchdog41-fence.md',
+      type: 'text/markdown',
+      content: ['```rust', 'fn main() {', '    let x = 1;', '}', '```', ''].join('\n')
+    },
+    { name: 'watchdog41-after.rs', type: 'text/plain', content: RS_B }
+  ]);
+  await page.waitForTimeout(16_000);
+
+  // 修复判据 1：越过看门狗窗口后首次 md 围栏高亮仍走 tree-sitter（缺陷态：cls
+  // "language-rust hljs" 零 ts-* span）
+  await openFile(page, 'watchdog41-fence.md');
+  const fence = page.locator('.vv-markdown pre code');
+  await expect(fence).toBeVisible({ timeout: 20_000 });
+  await expect(fence).toHaveClass(/language-rust/);
+  await expect(fence.locator('span[class^="ts-"]').first()).toBeVisible({ timeout: 30_000 });
+  await expect(fence.locator('span[class^="hljs-"]')).toHaveCount(0);
+
+  // 修复判据 2：全会话不短路——同会话再开 .rs 代码文件仍 tree-sitter（缺陷态：单例失败
+  // 不重试，全 reject；全会话面主视角详见上方 BUG-43 用例，此处一条护栏防 md 视角回退）
+  await openFile(page, 'watchdog41-after.rs');
+  await expect(page.locator('.vv-code-pre span[class^="ts-"]').first()).toBeVisible({
+    timeout: 30_000
+  });
+  await expect(page.locator('.vv-code-pre span[class^="hljs-"]')).toHaveCount(0);
+
+  // 修复判据 3：误导性超时错误不出现（现状文案含「初始化超时」，资产实为全 200）
+  expect(consoleErrors.join('\n')).not.toContain('初始化超时');
+  await expect(page.locator('.vv-error-card')).toHaveCount(0);
+});
+
+test.fixme('BUG-42 [探索]: 围栏代码块语言标识大小写不归一——Rust 大写写法静默丢失 tree-sitter 降级 hljs 兜底', async ({
+  page
+}) => {
+  // 发现于 Markdown 渲染域、根因属 hl（packages/highlight/src/core-parse.ts）；复核成立
+  // （low）。= 探索期编号 BUG-38（t-md.spec.ts 'BUG-38 [探索]' 用例，同一缺陷同判据，
+  // 两占位一并转正）。
+  // 根因：canonicalLang 两级查找（grammar 清单键/别名表）均区分大小写且未命中原样返回
+  // （packages/highlight/src/core-parse.ts:243-245）；buildAliasTable 别名原样入表无
+  // toLowerCase（core-parse.ts:376-382）；apps/web/build/grammars/manifest.json 实测 34 键
+  // 全小写、无 Rust 键、rust 别名仅 ['rs']、bash 别名 ['sh','shell','zsh']——```Rust 不命中
+  // 清单键与别名表，tree-sitter 路径静默丢失、降级 hljs（cls "language-Rust hljs"，仅
+  // 2 个 hljs-* span），```rust 得 10 个 ts-* span；别名机制本身正常（```zsh 经别名表命中
+  // bash grammar）。服务端 auto / 显式 remote / 本地注入三策略结果完全一致。hljs 兜底仍
+  // 着色，仅质量降级且与同语言小写写法行为不一致。
+  // 最小复现：注入含 ```rust / ```Rust / ```zsh 的 md → Rust 块 cls "language-Rust hljs"
+  // 零 ts-* span（对照 rust 块 language-rust + 10 个 ts-* span）。
+  // 证据（复核轮独立取得）：/tmp/vv-recheck-md-e4/recheck.mjs（server-auto 档块1
+  // {cls:"language-rust",spanTotal:10,ts:10,hljs:0} vs 块6 {cls:"language-Rust hljs",
+  // spanTotal:2,ts:0,hljs:2}；server-remote 与 local-injected 三组逐块一致）。
+  // 修复方向：围栏语言经 toLowerCase（及别名查表）归一后再查 grammar；修复后转正。
+  test.setTimeout(120_000);
+  const content = [
+    '```rust',
+    'fn main() {',
+    '    let x = 1;',
+    '}',
+    '```',
+    '',
+    '```Rust',
+    'fn main() {',
+    '    let y = 2;',
+    '}',
+    '```',
+    '',
+    '```zsh',
+    'echo hi',
+    '```',
+    ''
+  ].join('\n');
+  await openDir(page, [{ name: 'fence-case42.md', type: 'text/markdown', content }]);
+  await openFile(page, 'fence-case42.md');
+  const blocks = page.locator('.vv-markdown pre code');
+  await expect(blocks).toHaveCount(3, { timeout: 20_000 });
+
+  // 基线护栏：小写 rust 块 grammar 命中（修复不回退既有路径）
+  await expect(blocks.nth(0)).toHaveClass(/language-rust/);
+  await expect(blocks.nth(0).locator('span[class^="ts-"]').first()).toBeVisible({
+    timeout: 30_000
+  });
+
+  // 修复判据：Rust 大写写法归一命中 grammar——cls language-rust + ts-* span，无 hljs 兜底
+  await expect(blocks.nth(1)).toHaveClass(/language-rust/);
+  await expect(blocks.nth(1).locator('span[class^="ts-"]').first()).toBeVisible({
+    timeout: 30_000
+  });
+  await expect(blocks.nth(1).locator('span[class^="hljs-"]')).toHaveCount(0);
+
+  // 基线护栏：zsh 别名机制照常（别名表命中 bash grammar）
+  await expect(blocks.nth(2).locator('span[class^="ts-"]').first()).toBeVisible({
+    timeout: 30_000
+  });
+  await expect(page.locator('.vv-error-card')).toHaveCount(0);
+});
