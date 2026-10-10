@@ -5,10 +5,10 @@
   import type { MarkdownEngineState } from '@vviewer/render-text/markdown/markdownRenderer';
   import type { Tab } from './openFlow.svelte';
   import { persistScroll } from './openFlow.svelte';
-  import { dispatcher, cancelMarkdownRemote } from './viewer';
+  import { setFileMeta, type FileOpenWith } from './metaStore.svelte';
+  import { dispatcher, registry, cancelMarkdownRemote } from './viewer';
   import { cancelHighlight } from './highlightClient';
   import { watchHealth, statusNotice } from './openFlow.svelte';
-  import { setFileMeta } from './metaStore.svelte';
 import SearchPanel from './SearchPanel.svelte';
 
   let { tab, ontoc }: { tab: Tab | null; ontoc?: (entries: TocEntry[]) => void } = $props();
@@ -100,12 +100,19 @@ import SearchPanel from './SearchPanel.svelte';
     metaLabel = '';
   }
 
-  /** 实例元数据 → 状态栏段 + 属性面板（BUG-04；'getMeta' in inst 探测，不动 core 类型） */
-  function readInstanceMeta(inst: RenderedInstance, tabName: string, sourceLabel: string): void {
+  /** 实例元数据 → 状态栏段 + 属性面板（BUG-04；'getMeta' in inst 探测，不动 core 类型）。
+   * openWith（C 项入口 B）：dispatch 成功时上行候选与当前项，两分支共用（无 meta
+   * 实例也有打开方式下拉）；null = 不显示 */
+  function readInstanceMeta(
+    inst: RenderedInstance,
+    tabName: string,
+    sourceLabel: string,
+    openWith: FileOpenWith | null
+  ): void {
     const readMeta = (inst as { getMeta?: () => CodeFileMeta }).getMeta;
     if (typeof readMeta !== 'function') {
       metaLabel = '';
-      setFileMeta({ name: tabName, sourceLabel });
+      setFileMeta({ name: tabName, sourceLabel, openWith });
       return;
     }
     const m = readMeta.call(inst);
@@ -123,8 +130,30 @@ import SearchPanel from './SearchPanel.svelte';
       encoding: m.encoding,
       lang: m.lang ?? '',
       size: m.size,
-      lines: m.lines
+      lines: m.lines,
+      openWith
     });
+  }
+
+  /** 打开方式候选（C 项入口 B）=「自动」+ 生效渲染器 ∪ 扩展名注册渲染器 ∪ code/hex
+   * （去重）。current 取 tab 的 override 状态（'' = 自动，供下拉选中态；「（手动）」
+   * 标记由 MetaPanel 按 manual 渲染）。registry.byExtension 返回单个 Renderer，
+   * 扩展名候选经 all() 过滤 extensions 命中。 */
+  function openWithOf(t: Tab, rendererId: string, detExt: string): FileOpenWith {
+    const seen = new Set<string>(['']);
+    const options: { id: string; label: string }[] = [{ id: '', label: '自动（按扩展名）' }];
+    const push = (id: string): void => {
+      if (seen.has(id)) return;
+      seen.add(id);
+      options.push({ id, label: registry.byId(id)?.label ?? id });
+    };
+    push(rendererId);
+    for (const r of registry.all()) {
+      if (detExt !== '' && r.extensions.includes(detExt)) push(r.id);
+    }
+    push('code');
+    push('hex');
+    return { current: t.overrideRenderer ?? '', manual: t.overrideRenderer !== undefined, options };
   }
 
   $effect(() => {
@@ -150,8 +179,14 @@ import SearchPanel from './SearchPanel.svelte';
         }
         live = res.instance;
         instance = res.instance;
-        // BUG-04：实例元数据 → 状态栏「编码/语言/大小/行」段 + 右栏属性面板
-        readInstanceMeta(res.instance, current.source.name, current.source.storeLabel);
+        // BUG-04：实例元数据 → 状态栏「编码/语言/大小/行」段 + 右栏属性面板；
+        // C 项入口 B：openWith 候选与当前项随渲染上行（错误卡片分支不带 → 下拉消失）
+        readInstanceMeta(
+          res.instance,
+          current.source.name,
+          current.source.storeLabel,
+          openWithOf(current, res.rendererId, res.det.ext)
+        );
         // BUG-09：全局搜索跳转——渲染完成后定位到命中行（消费即清，tab 切换不误触发；
         // revealLine 仅 code 实例实现，markdown/HTML 等静默跳过不阻塞打开）。
         // GrepMatch.line 为 1 起，code 行号 0 起。

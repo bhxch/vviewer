@@ -2,7 +2,19 @@
   // 元数据面板（BUG-04 兑付 M4 占位）：读 metaStore 的模块级状态展示当前活动
   // 文件的名称/大小/编码/语言/行数/来源。数据由 ViewerPane 渲染实例的 getMeta
   // 写入（code 含行列；媒体/图片等渲染器至少大小与编码），错误卡片/tab 空时显示占位。
+  // 「打开方式」下拉（C 项入口 B）：候选与选中态来自 fileMeta.openWith（ViewerPane
+  // 渲染成功时上行）；change 经 tabStore.setRendererOverride 写 override（选「自动」
+  // = null 清 override 回自动路由）——rev++ 复用渲染 effect 重跑通道即时生效。
   import { fileMeta } from './metaStore.svelte';
+  import { tabStore } from './openFlow.svelte';
+
+  /** 手选打开方式（MetaPanel 由 AppShell 渲染、非 ViewerPane 子组件，故回调
+   * 经 tabStore 单例直连而非 prop 下传）：'' = 自动（清 override），其余写 override */
+  function onOpenWith(id: string): void {
+    const tab = tabStore.list.find((t) => t.active);
+    if (!tab) return;
+    tabStore.setRendererOverride(tab.id, id === '' ? null : id);
+  }
 </script>
 
 <section class="meta-panel">
@@ -10,6 +22,24 @@
   {#if fileMeta.name}
     <dl class="meta-list">
       <div class="meta-row"><dt>名称</dt><dd class="meta-name">{fileMeta.name}</dd></div>
+      {#if fileMeta.openWith}
+        <div class="meta-row">
+          <dt>打开方式</dt>
+          <dd>
+            <select
+              class="meta-openwith"
+              aria-label="打开方式"
+              value={fileMeta.openWith.current}
+              onchange={(e) => onOpenWith(e.currentTarget.value)}
+            >
+              {#each fileMeta.openWith.options as opt (opt.id)}
+                <option value={opt.id}>{opt.label}</option>
+              {/each}
+            </select>
+            {#if fileMeta.openWith.manual}<span class="meta-openwith-manual">（手动）</span>{/if}
+          </dd>
+        </div>
+      {/if}
       {#if fileMeta.size !== null}
         <div class="meta-row"><dt>大小</dt><dd>{fileMeta.size} 字节</dd></div>
       {/if}
@@ -58,5 +88,12 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .meta-openwith {
+    font: inherit;
+    max-width: 100%;
+  }
+  .meta-openwith-manual {
+    color: var(--ui-fg-muted);
   }
 </style>

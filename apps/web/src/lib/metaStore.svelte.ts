@@ -3,6 +3,16 @@
 // watchHealth/statusNotice 同模式（openFlow/ViewerPane 写入、UI 只读）。
 // $state 须位于 .svelte.ts（Svelte 5 runes 编译约定）。
 
+/** 「打开方式」下拉状态（C 项入口 B）：MetaPanel 据此渲染手选渲染器 */
+export interface FileOpenWith {
+  /** 生效渲染器 id（纯 id 供下拉选中态）；options 头部的 '' = 自动（按扩展名） */
+  current: string;
+  /** override 手选生效中（MetaPanel 据此附「（手动）」标记） */
+  manual: boolean;
+  /** 候选项（去重后；头部恒有 { id: '', label: '自动（按扩展名）' }） */
+  options: { id: string; label: string }[];
+}
+
 /** 属性面板展示的元数据（字符串字段空串 = 该项无数据不展示） */
 export interface FileMetaState {
   name: string;
@@ -14,6 +24,8 @@ export interface FileMetaState {
   size: number | null;
   /** 内容行数（仅 code 渲染器有；markdown/html 渲染视图无行概念） */
   lines: number | null;
+  /** 打开方式候选与生效项（C 项）；null = 不显示（未渲染成功/错误卡片/tab 空） */
+  openWith: { current: string; manual: boolean; options: { id: string; label: string }[] } | null;
 }
 
 export const fileMeta = $state<FileMetaState>({
@@ -22,7 +34,8 @@ export const fileMeta = $state<FileMetaState>({
   encoding: '',
   lang: '',
   size: null,
-  lines: null
+  lines: null,
+  openWith: null
 });
 
 /** 写入当前活动文件的元数据（null = 无实例/错误卡片：清空展示） */
@@ -34,6 +47,7 @@ export function setFileMeta(
     lang?: string | null;
     size?: number | null;
     lines?: number | null;
+    openWith?: FileOpenWith | null;
   } | null
 ): void {
   fileMeta.name = meta?.name ?? '';
@@ -42,4 +56,6 @@ export function setFileMeta(
   fileMeta.lang = meta?.lang ?? '';
   fileMeta.size = meta?.size ?? null;
   fileMeta.lines = meta?.lines ?? null;
+  // 未带 openWith 的调用（无 meta 实例/错误卡片/清理）一并清空：下拉只在渲染成功时出现
+  fileMeta.openWith = meta?.openWith ?? null;
 }
