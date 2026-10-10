@@ -11,8 +11,9 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * 只补缺口分析（2026-10-10）认定未覆盖的面，与既有护栏分工：
  * - HL-01：自动/本地两策略主路径对照 + manifest 门控信息（fix-pwa「BUG-06」用例只断本地单路径）；
  * - HL-01/2：BUG-06 验收 2 后半——缓存就绪后断网打开未开过的同语言文件仍 tree-sitter；
- * - HL-02：hljs 整文件兜底完整验收（现 test.fixme——CAND-hl-F1 产品缺陷：前端语言首表把
- *   pl 误识为 prolog，hljs 按该语法着色 Perl 源得 0 个 hljs-keyword，判据不满足）；
+ * - HL-02：hljs 整文件兜底完整验收（缺陷态占位见文末 BUG-65——CAND-hl-F1 定档编号：
+ *   前端语言首表把 pl 误识为 prolog，hljs 按该语法着色 Perl 源得 0 个 hljs-keyword；
+ *   原 HL-02 [CAND-hl-F1] 用例按一缺陷一锚点并入 BUG-65 用例）；
  * - HL-03/2：单行 3MB（行极少字节极大）chunk 边界——既有 HL-03 载体为 4.8 万行规则文本；
  * - HL-04/2：>200MiB plain 分支（纯文本虚拟滚动 + 提示条 + 零着色）——全仓库此前无用例；
  * - HL-08：3MB 滚到底末行行数一致 + 四次到底↔回顶折返无白屏——此前完全无用例；
@@ -27,7 +28,7 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * 通道同 m1-m3/b-hl：页面内 File + webkitRelativePath 经 __vvOpenDirImpl 注入（本地 store）。
  */
 
-/** samples/m2 的 sample.pl 载体（HL-02；与 m2.spec.ts 同源同内容） */
+/** samples/m2 的 sample.pl 载体（BUG-65，原 HL-02；与 m2.spec.ts 同源同内容） */
 const M2_SAMPLES = fileURLToPath(new URL('../../../samples/m2', import.meta.url));
 const SAMPLE_PL = new Uint8Array(readFileSync(`${M2_SAMPLES}/sample.pl`));
 
@@ -267,37 +268,6 @@ test('HL-01/2: BUG-06 验收 2 后半——vv-grammars/vv-runtime 缓存就绪�
   }
 });
 
-test.fixme('HL-02 [CAND-hl-F1]: sample.pl 由 hljs 整文件兜底着色——hljs-keyword 专项 + 零 ts-* span + 无错误卡片', async ({
-  page
-}) => {
-  // CAND-hl-F1（产品缺陷，2026-10-10 分诊转 fixme，断言不放宽）：
-  // detectLanguage('pl') 按 languages.json 首表序命中 prolog（languages.json:999 的
-  // prolog fileTypes 含 pl，先于 :1083 的 perl），hljs 整文件兜底（code.ts:682-687）
-  // 据此以 prolog 语法着色 Perl 源——实测 0 个 hljs-keyword、hljs-* 仅 9 个乱命中，
-  // 状态栏「高亮: hljs 兜底 · 语言: prolog」。违反场景文档 §2 HL-02 判据（报告实测
-  // 19 hljs-keyword / 50 hljs-*）；服务端 detect.rs:97 同扩展名断言 pl→perl
-  //（"perl < prolog"），客户端首表序与服务端相悖。修复后本用例应转正回 test。
-  test.setTimeout(60_000);
-  await page.goto('/');
-  await openDir(page, [{ name: 'sample.pl', type: 'text/plain', content: SAMPLE_PL }]);
-  await openFile(page, 'sample.pl');
-
-  // hljs 着色到达：keyword 捕获专项（验收②报告实测 19 个，量级随 hljs 版本漂移不作硬编码）
-  await expect(page.locator('.vv-code-pre span.hljs-keyword').first()).toBeVisible({
-    timeout: 20_000
-  });
-  const hljsTotal = await page.locator('.vv-code-pre span[class^="hljs-"]').count();
-  expect(hljsTotal).toBeGreaterThan(0);
-  // 主路径未介入：零 ts-* span（引擎可分辨）
-  await expect(page.locator('.vv-code-pre span[class^="ts-"]')).toHaveCount(0);
-  // 状态栏引擎段（hljs-block 已退役，兜底只此一种文案；验收：非「hljs 分块」）
-  await expect(page.locator('.vv-statusbar')).toContainText('高亮: hljs 兜底', { timeout: 20_000 });
-  // 验收③：无错误卡片/提示浮层
-  await expect(page.locator('.vv-error-card')).toHaveCount(0);
-  // 代码内容真实渲染（预览而非空壳）
-  await expect(page.locator('.vv-code-pre')).toContainText('use strict');
-});
-
 test('HL-03/2: 单行 3MB（行极少字节极大）chunk 边界——整行文本零错位且 tree-sitter 着色到达', async ({
   page
 }) => {
@@ -533,7 +503,7 @@ test('HL-11/2: 约 2MB 解析期间 rAF 帧率不掉（域文档实测 53fps；�
   await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 20_000 });
 });
 
-/** typescript 载体 B（BUG-43 判据 2 会话级短路验证件；与 TS_SRC 不同内容，防「重开已
+/** typescript 载体 B（BUG-35 判据 2 会话级短路验证件；与 TS_SRC 不同内容，防「重开已
  * 打开文件」缓存路径混入——先例 HL-01 的 RS_A/RS_B 惯例） */
 const TS_SRC_B = [
   'export function sum(list: number[]): number {',
@@ -541,7 +511,7 @@ const TS_SRC_B = [
   '}'
 ].join('\n');
 
-test.fixme('BUG-43 [探索]: tree-sitter worker init 成功零回包——页面静置 >15s 看门狗误杀，全会话本地高亮静默降级 hljs', async ({
+test.fixme('BUG-35 [探索]: tree-sitter worker init 成功零回包——页面静置 >15s 看门狗误杀，全会话本地高亮静默降级 hljs', async ({
   page
 }) => {
   // 发现于文件内搜索域、根因属 hl（代码高亮链路，packages/highlight）。复核成立（medium，
@@ -558,9 +528,11 @@ test.fixme('BUG-43 [探索]: tree-sitter worker init 成功零回包——页面
   // （highlightClient.ts:254-256；实测 manifest.json/ts-worker-*.js/tree-sitter.wasm 全 200）。
   // 本条为该缺陷全仓库唯一回归锚点（hl 域主视角：本地代码文件 + 同会话二次打开仍降级，
   // 全会话永久短路；markdown 围栏与服务端档 remote-first 视角同判据，并入本条影响面）。
-  // 原同源多份占位已按缺陷库权威编号收编删除（2026-10-10 占位整理，fsearch 域清单）：
-  // t-md.spec.ts 'BUG-40 [探索]'、本文件 'BUG-41 [探索]'（md 围栏视角）、'BUG-35 [探索]'
-  // （hl 域立档）、t-shell.spec.ts 'BUG-34 [探索]'（服务端档视角）——按旧编号检索请落本条。
+  // 本条原以探索期编号 BUG-43 落位（fsearch 域整理轮一度按其清单定档 BUG-43），2026-10-10
+  // 编号勘误轮按 hl 域权威清单内容配对定档 BUG-35；原同源多份占位已按一缺陷一锚点收编
+  // 删除：t-md.spec.ts 'BUG-40 [探索]'、本文件 'BUG-41 [探索]'（md 围栏视角）、本文件
+  // 'BUG-35 [探索]'（hl 域复核立档空壳，其独立复核证据见下）、t-shell.spec.ts
+  // 'BUG-34 [探索]'（服务端档视角）——按旧编号检索请落本条。
   // 最小复现：cwd=apps/web，node .temp/explore-fsearch/p5d-watchdog.mjs（空闲 20s 再开
   // crossline.ts；对照组不空闲）；影响面 p6-confirm.mjs（md 围栏）、p7-final.mjs（含 8391）。
   // 证据：node .temp/verify-fsearch-E1/watchdog-verify.mjs 六场景——A1（4199 空闲 20s 后开
@@ -571,6 +543,10 @@ test.fixme('BUG-43 [探索]: tree-sitter worker init 成功零回包——页面
   // 围栏 0 vs 32 span。watchdog-verify2.mjs（4199 空闲 20s 后同会话连开 one.ts→two.ts→
   // note.md）三文件全降级（ts-span 均 0、hljs-span>0 证明 hljs 在渲染），console.error 仅
   // t+15.1s 一条——误杀后全会话永久短路，非单文件现象；截图 6 张同目录。
+  // 已删除同胞占位各自的独立证据路径（保留可发现性）：/tmp/review-cand-hl-e3/
+  // repro-watchdog.mjs（第三轮独立复核四判据全真 reproduced: true）、/tmp/md-e3-reverify/
+  // reverify.mjs + session2.mjs（md 围栏 A/B 翻转与会话级短路）、apps/web/.temp/review-e2/
+  // r1-watchdog.mjs + r2-autofallback.mjs（服务端档远程命中→切本地仍死，对照会话健康）。
   // 「15s 内有高亮请求则健康」的对照由既有 HL-01/HL-10/HL-10/2 等用例天然承担（goto 后
   // 立即开文件，全绿即对照不回归）。修复方向：init 成功回 ack（workerAlive 置位解除看门狗）；
   // 修复后本用例转正。
@@ -617,7 +593,8 @@ test.fixme('BUG-43 [探索]: tree-sitter worker init 成功零回包——页面
 // 本缺陷（BUG-42）上一轮按探索期编号 BUG-38 落在 t-md.spec.ts；缺陷库定档编号为 BUG-42
 // 且根因在 packages/highlight，按根因迁入本域文件，修复 PR 以本节为转正载体（t-md 侧
 // 探索期编号占位一并转正）。同批探索期编号 BUG-40（worker 看门狗，md 围栏视角）与本文件
-// 原 BUG-41 占位系上方 BUG-43 同一缺陷的重复锚点，已按权威编号收编删除（2026-10-10 整理）。
+// 原 BUG-41 占位系上方 BUG-35（原探索期编号 BUG-43，编号勘误轮定档）同一缺陷的重复锚点，
+// 已按权威编号收编删除（2026-10-10 整理）。
 
 test.fixme('BUG-42 [探索]: 围栏代码块语言标识大小写不归一——Rust 大写写法静默丢失 tree-sitter 降级 hljs 兜底', async ({
   page
@@ -681,4 +658,234 @@ test.fixme('BUG-42 [探索]: 围栏代码块语言标识大小写不归一——
     timeout: 30_000
   });
   await expect(page.locator('.vv-error-card')).toHaveCount(0);
+});
+
+// ── 代码高亮域探索复核确认缺陷回归占位（2026-10-10 轮，BUG-33~38/65 批次；README
+// §3.2.1 一域一文件、§3.2.4 修复合入前 test.fixme 占位、修复 PR 转正）──
+// 其中 BUG-33（djot SIGSEGV）/ BUG-36（单行大文本 O(n²)）根因在 server/src/compute/
+// highlight.rs（服务端 compute 高亮链路），按根因归属改落 e2e-server/t-cmp.spec.ts（见
+// 该文件同批次节注释）；以下五条根因在 packages/highlight / packages/render-text 前端
+// 高亮与代码查看链路，落本文件。各用例注释给出复核结论、最小复现步骤、证据路径与源码定位。
+
+test.fixme('BUG-34 [探索]: codeRenderer 扩展名白名单未跟随 301 语言全量重构——zig/hs/ex/erl/clj/scala/djot 等 7 类文件打开即「无法预览此文件」', async ({
+  page
+}) => {
+  // 复核成立（medium，8445 实例 + Playwright 7/7 复现 + rs 正对照排除通路整体不可用）。
+  // 根因：packages/render-text/src/code.ts:1012-1018 codeRenderer.extensions 白名单未含
+  // zig/hs/ex/erl/clj/scala/dj(ot)；有扩展名未命中时不进无扩展名回退链
+  // （packages/core/src/dispatch/dispatcher.ts:100 仅 det.ext === '' 进入），于
+  // dispatcher.ts:144-153 抛「不支持的扩展名 ".xx"」→ UI 错误卡片。识别与高亮资产两路
+  // 均就绪：服务端 x-vv-lang 7/7 识别正确（zig、hs→haskell、ex→elixir、erl→erlang、
+  // clj→clojure、scala、dj→djot）；packages/highlight/assets/languages.json（342 条）实有
+  // 各条目（zig fileTypes [zig,zon]、scala [scala,sbt,sc]、haskell [hs,…]、elixir [ex,exs]、
+  // erlang [erl,…]、clojure [clj,…]、djot [dj,djot]），构建产物 apps/web/build/grammars/
+  // zig.wasm 与 queries/zig 实有——白名单在选路层即拦截，语言识别与高亮（本地 wasm /
+  // 远程 compute）无从发生。白名单内语言（rs 的 tree-sitter 远程高亮）不受影响。
+  // 最小复现：注入 sample.zig（'pub fn main() void { }'）并打开 → 错误卡片「无法预览
+  // 此文件 / 不支持的扩展名 ".zig"」（纯 web :4173 注入通道即可复现）。
+  // 证据（复核轮独立取得）：自起实例 8445（vviewer serve --root .temp/explore/hl/data
+  // --web-dist apps/web/build --port 8445 --compute）；Playwright 脚本
+  // /tmp/vv-verify-hl-e2e/rep.mjs——sample.zig/.hs/.ex/.erl/.clj/.scala 与 range/crash.djot
+  // 7/7 全部错误卡片（截图 shots/zig.png、shots/djot.png），正对照 sample2.rs 正常渲染
+  // 「高亮: tree-sitter · 执行: 远程 · 语言: rust」（shots/rs-control.png）；服务端对照
+  // curl -s -D - '/api/file?path=langs/sample.zig' → 200 + x-vv-lang: zig（7/7 同法）。
+  // 修复方向：extensions 白名单跟随 languages.json 全量 fileTypes（或改查表开放）；
+  // 修复后本用例转正。
+  test.setTimeout(120_000);
+  await page.goto('/');
+  // 正对照先于缺陷组：rs 在白名单内正常渲染，证明 UI 通路整体可用（排除「错误卡片系
+  // 预览通路整体坏」的解释，同复核 evidence ④ 口径）
+  await openDir(page, [
+    { name: 'wl34-control.rs', type: 'text/plain', content: RS_A },
+    { name: 'sample.zig', type: 'text/plain', content: 'pub fn main() void { }\n' },
+    { name: 'sample.hs', type: 'text/plain', content: 'main :: IO ()\nmain = putStrLn "hi"\n' },
+    {
+      name: 'sample.ex',
+      type: 'text/plain',
+      content: 'defmodule Sample do\n  def hi, do: :ok\nend\n'
+    },
+    {
+      name: 'sample.erl',
+      type: 'text/plain',
+      content: '-module(sample).\n-export([hi/0]).\nhi() -> ok.\n'
+    },
+    { name: 'sample.clj', type: 'text/plain', content: '(defn hi [] "hi")\n' },
+    {
+      name: 'sample.scala',
+      type: 'text/plain',
+      content: 'object Sample { def hi: String = "hi" }\n'
+    },
+    { name: 'sample.dj', type: 'text/plain', content: '# Heading\ntext **bold**\n' }
+  ]);
+  await openFile(page, 'wl34-control.rs');
+  await expect(page.locator('.vv-code-pre span[class^="ts-"]').first()).toBeVisible({
+    timeout: 30_000
+  });
+  await expect(page.locator('.vv-error-card')).toHaveCount(0);
+
+  // 修复判据：7 类白名单缺口扩展名全部不再出错误卡片、内容真实渲染（现状：逐个
+  // 「无法预览此文件 / 不支持的扩展名 ".xx"」）。引擎/语言段不作硬性约定——视 grammar
+  // 资产形态落 tree-sitter 或 hljs/纯文本均属修复可接受形态，唯「选路层拒绝预览」必须消除。
+  for (const name of [
+    'sample.zig',
+    'sample.hs',
+    'sample.ex',
+    'sample.erl',
+    'sample.clj',
+    'sample.scala',
+    'sample.dj'
+  ]) {
+    await openFile(page, name);
+    await expect(page.locator('.vv-error-card')).toHaveCount(0);
+    await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 20_000 });
+  }
+});
+
+test.fixme('BUG-37 [探索]: yaml 本地 wasm 高亮全链静默失败——parse 首次调外置 scanner 抛 TypeError 被吞，恒降级 hljs 兜底且零日志', async ({
+  page
+}) => {
+  // 复核确认（medium，4 次独立复现稳定）：本地路径下任何正常 yaml 恒「hljs 兜底」
+  // （ts-* span=0、hljs-* span=9），零 UI 错误、零 console 输出；同批 vue/php/html/python/
+  // bash 本地 tree-sitter 全部正常，远程 compute 路径 yaml 正常——仅本地 wasm 路径坏。
+  // 根因：vendored 静态 yaml.wasm 在 web-tree-sitter 0.25.10 下 Parser.parse 首次调用
+  // 外置 scanner 抛 'TypeError: resolved is not a function'（glue tree-sitter.js:2947 stubs
+  // ← wasm ts_parser_parse_wasm，scanner 符号解析为非函数；Language.load、setLanguage、
+  // 查询编译均成功，失败阶段不在 load）。产物溯源：apps/web/static/grammars/manifest.json
+  // yaml 条目 "source":"vendored"，sha256 5dea7cfff83d41d8f87fb8e434e1a5b292c0d670bfcdc42cb2
+  // af420ef490dde5 与 tools/grammar-builder/fixtures/yaml.wasm 一致（docs/spec-deviations.md
+  // :115——yaml 因 C++ 外置 scanner 无法 cli 自建而 vendored；同为 vendored 的 vue 可用）。
+  // 静默机制：doPrepare 成功故 core-parse.ts:248-260 的 console.warn（仅覆盖 doPrepare
+  // 拒绝）不触发，parse 抛错被 highlight() 外层 catch（core-parse.ts:185-186）吞为
+  // {ok:false}，worker.ts:95 console.error 仅 init 失败路径——全链零日志。测试缺口：
+  // rg 'yaml' packages/highlight/test/（含 local-grammars.test.ts 全部 8 个测试文件）零命中。
+  // 最小复现：15s 内（避开 BUG-35 看门狗窗口）注入正常 yaml 并打开 → 状态栏
+  // 「高亮: hljs 兜底 · 执行: 本地 · 语言: yaml」。资产在位对照：/grammars/yaml.wasm 与
+  // /queries/yaml/highlights.scm 均 200；远程对照 POST /api/compute/highlight
+  // {lang:'yaml'} 正常出区间（8391 实测）。
+  // 证据（复核轮独立取得）：/tmp/review-hl-e5/load-check.mjs（node 同构：yaml load OK →
+  // PARSE FAIL TypeError，vue captures=28/php=15/html=21 同法全 OK）+ pinpoint.mjs（栈顶
+  // 定位）；e5.engine.test.ts 引擎级（TreeSitterEngine.create 同 local-grammars.test.ts
+  // 构形）：yaml FAIL:resolved is not a function，vue 34/php 15/html 21/python 12/bash 3 ok；
+  // ui-repro.mjs（Playwright，4199 与 8391 双档）：config.yaml → 「hljs 兜底」ts=0/hljs=9、
+  // 复读一致、console+pageerror 共 0 条；对照 app.vue → tree-sitter ts=26。
+  // 修复方向：重建 vendored yaml.wasm（对齐 web-tree-sitter 0.25.x 的 scanner 符号）或
+  // 解除 C++ scanner 自建阻塞；并补 packages/highlight 的 yaml 覆盖。修复后本用例转正。
+  test.setTimeout(90_000);
+  await page.goto('/');
+  // 立即打开（看门狗 15s 窗口内），隔离 BUG-35 误杀缺陷对判据的干扰
+  await openDir(page, [
+    {
+      name: 'config.yaml',
+      type: 'text/yaml',
+      content: 'server:\n  host: 127.0.0.1\n  port: 8443\n  debug: true\n'
+    },
+    {
+      name: 'cmp37.vue',
+      type: 'text/plain',
+      content: '<script setup lang="ts">\nconst x = 1;\n</script>\n<template><p>{{ x }}</p></template>\n'
+    }
+  ]);
+  await openFile(page, 'config.yaml');
+  // 修复判据：yaml 走本地 tree-sitter（缺陷态：hljs 兜底、ts-*=0、hljs-*=9、零日志）
+  await expect(page.locator('.vv-code-pre span[class^="ts-"]').first()).toBeVisible({
+    timeout: 30_000
+  });
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 20_000 });
+  await expect(page.locator('.vv-statusbar')).toContainText('语言: yaml', { timeout: 20_000 });
+  await expect(page.locator('.vv-code-pre span[class^="hljs-"]')).toHaveCount(0);
+
+  // 基线护栏：同为 vendored 的 vue 不回退（复核 evidence 对照件；修复不得破坏）
+  await openFile(page, 'cmp37.vue');
+  await expect(page.locator('.vv-code-pre span[class^="ts-"]').first()).toBeVisible({
+    timeout: 30_000
+  });
+  await expect(page.locator('.vv-error-card')).toHaveCount(0);
+});
+
+test.fixme('BUG-38 [探索]: 以 \\n 结尾文件 buildLineIndex 多出末尾虚行——gutter N+1 与状态栏「行: N」自相矛盾，服务端档滚到底虚 chunk 必发 400', async ({
+  page
+}) => {
+  // 复核确认（low）。text.split('\n')（packages/render-text/src/code.ts:140-142）对以 \n
+  // 结尾的文本多出末尾空串元素，虚拟滚动以 lines.length 挂载（code.ts:672）遂多渲染一条
+  // 不存在空行，而 getMeta（code.ts:939-946）按 wc -l 口径减 1——渲染行数与状态栏行数
+  // 自相矛盾。服务端档加重面：滚到底时 wantedChunkKeys/highlightChunk（code.ts:721-731、
+  // 757-758）以虚行行号发出 {startLine:N, lineCount:1}，服务端 StartBeyondEof 判 400
+  // （server/src/compute/highlight.rs:474-481），auto 策略下路由注入侧 catch 后
+  // console.warn + null（apps/web/src/lib/highlightRouter.ts:78,94-99），虚 chunk 静默落
+  // 行级 hljs（code.ts:812-815，行内容为空故无可见画质损失）；显式 remote 策略下同 400
+  // 走抛错分支，滚到底整页变「无法预览此文件 / 远程高亮失败: HTTP 400」错误卡片并停机
+  // （非默认策略，复核另记供分诊一并考虑）。
+  // 最小复现（本用例可执行部分，纯 web 注入通道）：注入 'a\nb\nc\n' 打开 → 渲染 4 行
+  // （gutter 4 为空行）而状态栏「行: 3」。
+  // 服务端档部分（需 server-served 大文件，本套件 :4173 纯 web 不可执行，落骨架）：
+  // 48000 行带尾 \n 的 .js 打开一步到底 → 网络恰 3 条 highlight POST：{0,200}→200、
+  // {47800,200}→200、{48000,1}→400 + console 恰 1 条「[vviewer] 大文件远程高亮失败，回退
+  // 本地分块：远程高亮失败: HTTP 400」；末渲染行 dataLine=48000/gutter='48001'/body 空，
+  // 底部真实行与源文件逐字符一致（纯虚行、零错位）。证据：8440 实例 curl 直证 400 文案
+  // 'range.startLine 48000 is beyond end of file: 48000 lines'（startLine=47999/47800+200
+  // 均 200；数据 big.js 自造 48000 行带尾 \n，wc -lc = 48000 2976000）；Playwright
+  // /tmp/vv-recheck/repro.mjs（网络三相捕获 + console 恰 1 条）；加重场景
+  // /tmp/vv-recheck/repro-remote.mjs（localStorage 预注入 computePolicy:'remote' → 错误
+  // 卡片 + 引擎跌「纯文本」、无 warn）。既有 HL-08 特意以「末行不带 \n」构造避开此口径
+  // （构造注释自记），佐证套件此前未覆盖带尾换行形态。
+  // 修复方向：lines 构建对尾 \n 归一（与 getMeta 的 wc 口径一致，消除虚行）；修复后
+  // 本用例转正，服务端档 400/告警面在 server-served 套件另行补断言。
+  test.setTimeout(60_000);
+  await page.goto('/');
+  await openDir(page, [{ name: 'three-lines.txt', type: 'text/plain', content: 'a\nb\nc\n' }]);
+  await openFile(page, 'three-lines.txt');
+
+  // 修复判据：渲染行数与 wc/状态栏口径一致——恰 3 行、末 gutter '3'、状态栏「行: 3」
+  // （缺陷态：4 行渲染、gutter 4 为空行，与「行: 3」自相矛盾）
+  await expect(page.locator('.vv-code-pre .vv-code-line')).toHaveCount(3, { timeout: 20_000 });
+  await lastGutterIs(page, 3); // poll 到 '3'
+  await expect(page.locator('.vv-statusbar')).toContainText('行: 3', { timeout: 20_000 });
+  await expect(page.locator('.vv-code-pre')).toContainText('a');
+  await expect(page.locator('.vv-code-pre')).toContainText('c');
+  await expect(page.locator('.vv-error-card')).toHaveCount(0);
+});
+
+test.fixme('BUG-65 [探索]: .pl 前端语言首表误识 prolog——hljs 以 prolog 语法着色 Perl 源（0 个 hljs-keyword）且状态栏语言标注错误', async ({
+  page
+}) => {
+  // = CAND-hl-F1 的复核定论缺陷库编号（2026-10-10 复核确认，severity 维持 medium）。
+  // 原同名占位 HL-02 [CAND-hl-F1]（2026-10-10 分诊转 fixme 的 HL-02 场景用例）与本条
+  // 同缺陷——2026-10-10 编号勘误轮按「一缺陷一锚点」删除该重复占位，本条为其唯一锚点：
+  // 判据 = HL-02 原断言（hljs-keyword 到达 + 零 ts-* + 无错误卡片 + 内容真实渲染）+
+  // 状态栏「语言:」段标注专项补强，判据出处 docs/e2e/code-highlight-degrade.md:38
+  // HL-02（hljs-keyword=19、hljs-*=50）。
+  // 根因：packages/highlight/src/langdetect.ts:29 buildTables 首表 first-wins（'pl' 命中
+  // languages.json 中先出现的 prolog 条目 fileTypes ["pl","prolog"]，perl 条目在后），
+  // hljs 整文件兜底遂以 prolog 语法着色 Perl 源——实测 hljs-keyword=0、hljs-*=9、ts-*=0、
+  // 状态栏「高亮: hljs 兜底 · 执行: 本地 · 语言: prolog」；服务端 detect.rs:97 同扩展名
+  // 断言 pl→perl（'perl < prolog' 字典序），客户端与服务端相悖。文本内容渲染正确、无
+  // 崩溃/数据丢失/错误内容，维持 medium（.pl 整类文件高亮静默失效 + 语言标注错误）。
+  // 最小复现：注入 samples/m2/sample.pl 并打开 → 状态栏「语言: prolog」、代码无关键字
+  // 着色。证据（复核轮独立取得）：Playwright 探针复刻 HL-02 操作与原样断言，两轮诊断
+  // 一致——statusbar 含「语言: prolog」、hljsAll=9、hljsKeyword=0、tsAll=0、errorCard=0、
+  // hasUseStrict=true；hljs 库直呼交叉验证：highlight(sample.pl,{language:'prolog'}) 得
+  // 0/9 与浏览器逐数吻合（证明前端确实按 prolog 着色），{language:'perl'} 得 19/50 与
+  // 文档判据吻合（检测正确即可通过）。
+  // 修复方向：首表构建按服务端同款字典序定胜负（或 perl 条目前置）；修复后两用例转正。
+  test.setTimeout(60_000);
+  await page.goto('/');
+  await openDir(page, [{ name: 'sample.pl', type: 'text/plain', content: SAMPLE_PL }]);
+  await openFile(page, 'sample.pl');
+
+  // 场景判据原强度：hljs 以 perl 语法着色——keyword 捕获到达（报告实测 19 个，量级随
+  // hljs 版本漂移不作硬编码；缺陷态 prolog 语法 0 个）
+  await expect(page.locator('.vv-code-pre span.hljs-keyword').first()).toBeVisible({
+    timeout: 20_000
+  });
+  const hljsTotal = await page.locator('.vv-code-pre span[class^="hljs-"]').count();
+  expect(hljsTotal).toBeGreaterThan(0);
+  // BUG-65 专项判据：语言标注正确——「语言: perl」且不再出现 prolog（缺陷态 prolog）
+  await expect(page.locator('.vv-statusbar')).toContainText('语言: perl', { timeout: 20_000 });
+  await expect(page.locator('.vv-statusbar')).not.toContainText('prolog');
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: hljs 兜底', { timeout: 20_000 });
+  // 主路径未介入：零 ts-* span（引擎可分辨）
+  await expect(page.locator('.vv-code-pre span[class^="ts-"]')).toHaveCount(0);
+  // 验收③：无错误卡片/提示浮层 + 内容真实渲染
+  await expect(page.locator('.vv-error-card')).toHaveCount(0);
+  await expect(page.locator('.vv-code-pre')).toContainText('use strict');
 });

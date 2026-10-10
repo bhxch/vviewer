@@ -266,3 +266,92 @@ test.fixme(
   }
 );
 
+// ── 代码高亮域探索复核确认缺陷回归占位（2026-10-10 编号勘误轮补落；即 t-hl.spec.ts
+// 「BUG-33~38/65 批次」节注释所指的本文件落点）──
+// BUG-33 / BUG-36 根因在 server/src/compute/highlight.rs（服务端 compute 高亮链路），
+// 按根因归属落本文件（README §3.2.1 一域一文件；需 spawn 二进制 / 直呼 compute API 的
+// 断言归 e2e-server）。来源标注 [探索]：hl 域探索复核会话独立复现确认。注意两条缺陷态
+// 都会破坏/拖垮共享 :4181 compute 实例，转正前保持 test.fixme，不与其他用例同跑。
+
+test.fixme('BUG-33 [探索]: lang=djot 高亮含命中内容文本使服务端 SIGSEGV——单请求杀死整个 vviewer（文件服务+compute 同时不可用直至重启）', async () => {
+  // 复核成立（severity high，text/path/range 三模式实测全触发，崩溃+功能完全不可用）。
+  // 根因：run_highlight 直接调 tree-sitter-highlight C 层 Highlighter::highlight
+  // （server/src/compute/highlight.rs:147-156），djot 语法在 C 层触发段错误；:297
+  // parse_with_timeout 的响应侧超时保护对 SIGSEGV 无效（Rust panic 捕获亦不适用于段
+  // 错误），日志无任何 panic/错误痕迹。三模式汇合点 spawn_blocking（highlight.rs:525）。
+  // 复现工艺：实例启动后 queries 懒编译 301 语言需约 6~8s（服务日志可见编译 WARN），
+  // 编译未就绪时请求表现为连接失败假象——需「health 200 + 任一无害高亮请求 200」双就绪。
+  // 最小复现：curl -X POST /api/compute/highlight -H 'content-type: application/json'
+  //   -d '{"text":"# Heading\n","lang":"djot"}' → curl 000 + shell 打印 'Segmentation
+  //   fault (core dumped)'、进程退出码 139（128+11），随后 /api/health 连接失败、进程消失。
+  //   最小触发文本另有 'text **bold**\n' 与 '`code`\n'（bisect 逐变体重启验证 4/4 全崩）；
+  //   对照：纯文本 'x\n'/'Heading\n'/'#x\n' 不崩（200 零区间），同文本换 lang=markdown
+  //   200 正常区间；path 模式（a.dj）与 range 模式（startLine 0/lineCount 10）同 139；
+  //   coredumpctl 记三实例 PID 均 'SIGSEGV present'。
+  // 证据（复核轮独立取得，release 二进制 --compute 端口 8441~8449 多实例）：
+  //   apps/web/.temp/explore-hl/bisect-djot.sh（逐变体重启验证）；源码定位
+  //   server/src/compute/highlight.rs:147-156、:525。
+  // 修复方向：tree-sitter-highlight 升级/换 djot 生成物，或 run_highlight 前置拦该输入类
+  // （子进程隔离/语法白名单验证）；修复后本用例转正。
+  test.setTimeout(120_000);
+  // 双就绪门：懒编译完成前请求呈连接失败假象，轮询无害高亮至 200 再触发（上限 30s）
+  let warmOk = false;
+  for (let i = 0; i < 30 && !warmOk; i++) {
+    try {
+      const warm = await fetch(`${COMPUTE_BASE}/api/compute/highlight`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'const a = 1;\n', lang: 'javascript' })
+      });
+      warmOk = warm.ok;
+    } catch {
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+  }
+  expect(warmOk).toBe(true);
+  // 缺陷触发（最小触发文本之一；text 模式即达 C 层，path/range 同根因不重复展开）
+  const res = await fetch(`${COMPUTE_BASE}/api/compute/highlight`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '# Heading\n', lang: 'djot' })
+  });
+  // 修复判据 1：djot 高亮正常返回（缺陷态：服务端进程立即 SIGSEGV，本请求连接层失败）
+  expect(res.status).toBe(200);
+  // 修复判据 2：服务端进程仍存活——文件服务+compute 不被单请求带走（缺陷态：/api/health
+  // 连接失败、退出码 139）
+  expect((await fetch(`${COMPUTE_BASE}/api/health`)).ok).toBeTruthy();
+});
+
+test.fixme('BUG-36 [探索]: 服务端 compute 高亮单行大文本 O(n²)——446KB 单行 json 10s 超时 504，解析线程后台满核空转', async () => {
+  // 复核成立（severity medium，8441 实例梯度实测；text/path/range 三模式同病，同内容
+  // 多行形态不受影响——477KB 多行 0.148s vs 446KB 单行 504/10.002s）。
+  // 根因：Utf16Index::to_utf16 行内逐字符累加为 O(行长)（server/src/compute/highlight.rs
+  // :123-133），:191-192 对每个 Source 事件调用两次——单行文件行长=全文、区间数亦 O(n)，
+  // 整体 O(n²)；:98 注释自认「单行长度即修正开销」；无前置闸拦截该输入类（MAX_INTERVALS
+  // =2M 远未触及，range chunk 上限 20MB 不拦）。504 只是响应侧放弃：解析线程后台继续满核
+  // 空转至自然结束（504 后 10s 窗口实测 993 ticks ≈ 99% 单核）；UI 端 server-served 单行
+  // 456KB json 打开需 11.1s 才经「远程 504→回退本地 wasm」到终态。
+  // 梯度证据（path 模式 lang=json，8441 实例）：50KB=0.276s → 141KB=3.386s →
+  // 285KB=8.823s → 446KB=504/10.002s（尺寸×2.8 耗时×12.3，符合 O(n²)）；text 模式同文本
+  // 504/10.004s；单行文件 range(0,1) 504/10.007s；既有 8391 夹具
+  // edge/size/minified-3mb.js（lang=javascript 全文与 range{0,1}）均 504/10.0s，报错文案
+  // 'highlight timed out after 10000ms (parsing thread finishes in background)'。
+  // 最小复现：POST /api/compute/highlight {"path":"<单行 ~450KB json>","lang":"json"} → 504。
+  // 修复方向：to_utf16 改区间前缀和/预计算行偏移，消行内逐字符累加；修复后本用例转正
+  // （判据：单行 ~450KB json 200 且耗时显著低于 10s 预算，对照多行同尺寸 0.148s）。
+  test.setTimeout(60_000);
+  const name = 'tcmp-oneline-446kb.json';
+  // 单行（无换行符）~456KB json 缺陷形态载体（测试体内自建，幂等，不动 beforeAll 夹具）
+  writeFileSync(join(FIXTURE, name), '{"k":"' + 'x'.repeat(456_000) + '"}');
+  const t0 = Date.now();
+  const res = await fetch(`${COMPUTE_BASE}/api/compute/highlight`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path: name, lang: 'json' })
+  });
+  // 修复判据：不触 10s 预算（缺陷态 504/10.0s + 后台满核空转）；阈值 9.5s 仅拦截超时
+  // 形态，二次方→线性的量化断言归性能套件
+  expect(res.status).toBe(200);
+  expect(Date.now() - t0).toBeLessThan(9_500);
+});
+
