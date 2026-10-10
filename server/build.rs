@@ -40,6 +40,7 @@ fn main() {
 
     let mut built: Vec<&GrammarEntry> = Vec::new();
     let mut missing: Vec<&str> = Vec::new();
+    let mut cpp_scanners = 0usize;
     for e in &manifest {
         let rel = if e.subpath.is_empty() { e.dir.clone() } else { format!("{}/{}", e.dir, e.subpath) };
         let src = sources_root.join(&rel).join("src");
@@ -49,7 +50,9 @@ fn main() {
         }
         // grammar_dir = 源仓库根（不含 subpath），subpath 由 compile_grammar 内部拼接
         // （Markpad 原版契约；否则 ocaml 等带 subpath 语言路径双拼）
-        compile_grammar(e, &sources_root.join(&e.dir), &out_dir);
+        if compile_grammar(e, &sources_root.join(&e.dir), &out_dir) {
+            cpp_scanners += 1;
+        }
         built.push(e);
     }
     if !missing.is_empty() {
@@ -62,8 +65,22 @@ fn main() {
     }
 
     generate_entries(&out_dir, &built);
-    // 含 C++ scanner 的 grammar（yaml/vue/ruby 等）需要 libstdc++
-    println!("cargo:rustc-link-lib=dylib=stdc++");
+    // 含 C++ scanner 的 grammar（yaml/vue/ruby 等）需要 C++ 标准库，按 target 发链接
+    // 指令：linux/android（及其余 unix 系）→ libstdc++、apple 系 → libc++、
+    // windows/msvc 跳过（msvc 链接器默认拉入 CRT 的 C++ 运行时，无需显式指令；
+    // windows-gnu 保守回退 stdc++）。无 C++ scanner 编译时不发，保持链接图干净。
+    if cpp_scanners > 0 {
+        let os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+        let msvc = env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc");
+        let lib: Option<&str> = match os.as_str() {
+            "macos" | "ios" => Some("c++"),
+            "windows" if msvc => None,
+            _ => Some("stdc++"),
+        };
+        if let Some(lib) = lib {
+            println!("cargo:rustc-link-lib=dylib={lib}");
+        }
+    }
 }
 
 /// 查询三件套拷入 OUT_DIR/queries/<dir>/（缺失文件物化为空串，使生成代码的
@@ -97,7 +114,8 @@ fn copy_queries(out_dir: &Path) {
 
 /// 编译单个 grammar：parser.c + scanner.c 走 cc；C++ scanner 手动 g++（gnu++17 +
 /// -include cstdint，见 Markpad 注释），vue 内嵌 html scanner 符号 objcopy localize。
-fn compile_grammar(e: &GrammarEntry, grammar_dir: &Path, out_dir: &Path) {
+/// 返回是否编译了 C++ scanner（供 main 决定 C++ 标准库链接指令）。
+fn compile_grammar(e: &GrammarEntry, grammar_dir: &Path, out_dir: &Path) -> bool {
     let src_dir = if e.subpath.is_empty() { grammar_dir.join("src") } else { grammar_dir.join(&e.subpath).join("src") };
     let lib_name = format!("tree_sitter_{}", e.name.replace('-', "_"));
     println!("cargo:rerun-if-changed={}", src_dir.join("parser.c").display());
@@ -120,62 +138,65 @@ fn compile_grammar(e: &GrammarEntry, grammar_dir: &Path, out_dir: &Path) {
         .compile(&lib_name);
 
     let scanner_cc = src_dir.join("scanner.cc");
-    if scanner_cc.exists() {
-        println!("cargo:rerun-if-changed={}", scanner_cc.display());
-        let obj = out_dir.join(format!("{lib_name}_scanner.o"));
-        let status = Command::new("g++")
-            .args([
-                "-std=gnu++17",
-                "-include",
-                "cstdint",
-                "-Os",
-                "-fPIC",
-                "-ffunction-sections",
-                "-fdata-sections",
-                "-c",
-                "-w",
-                &format!("-I{}", src_dir.display()),
-                &format!("-I{}", grammar_dir.display()),
-                &format!("-I{}", src_dir.parent().unwrap().display()),
-                "-o",
-            ])
-            .arg(&obj)
-            .arg(&scanner_cc)
-            .status()
-            .expect("g++ 运行失败（C++ scanner 编译）");
-        assert!(status.success(), "C++ scanner 编译失败: {}", e.name);
+    if !scanner_cc.exists() {
+        println!("cargo:rustc-link-lib=static={lib_name}");
+        return false;
+    }
+    println!("cargo:rerun-if-changed={}", scanner_cc.display());
+    let obj = out_dir.join(format!("{lib_name}_scanner.o"));
+    let status = Command::new("g++")
+        .args([
+            "-std=gnu++17",
+            "-include",
+            "cstdint",
+            "-Os",
+            "-fPIC",
+            "-ffunction-sections",
+            "-fdata-sections",
+            "-c",
+            "-w",
+            &format!("-I{}", src_dir.display()),
+            &format!("-I{}", grammar_dir.display()),
+            &format!("-I{}", src_dir.parent().unwrap().display()),
+            "-o",
+        ])
+        .arg(&obj)
+        .arg(&scanner_cc)
+        .status()
+        .expect("g++ 运行失败（C++ scanner 编译）");
+    assert!(status.success(), "C++ scanner 编译失败: {}", e.name);
 
-        // vue scanner.cc 内嵌 html scanner 未重命名符号 → 降级本地符号避免静态链接重定义
-        if e.name == "vue" {
-            for sym in [
-                "tree_sitter_html_external_scanner_create",
-                "tree_sitter_html_external_scanner_destroy",
-                "tree_sitter_html_external_scanner_scan",
-                "tree_sitter_html_external_scanner_serialize",
-                "tree_sitter_html_external_scanner_deserialize",
-            ] {
-                let st = Command::new("objcopy")
-                    .arg(format!("--localize-symbol={sym}"))
-                    .arg(&obj)
-                    .status()
-                    .expect("objcopy 运行失败");
-                assert!(st.success(), "objcopy localize 失败: {}", e.name);
-            }
+    // vue scanner.cc 内嵌 html scanner 未重命名符号 → 降级本地符号避免静态链接重定义
+    if e.name == "vue" {
+        for sym in [
+            "tree_sitter_html_external_scanner_create",
+            "tree_sitter_html_external_scanner_destroy",
+            "tree_sitter_html_external_scanner_scan",
+            "tree_sitter_html_external_scanner_serialize",
+            "tree_sitter_html_external_scanner_deserialize",
+        ] {
+            let st = Command::new("objcopy")
+                .arg(format!("--localize-symbol={sym}"))
+                .arg(&obj)
+                .status()
+                .expect("objcopy 运行失败");
+            assert!(st.success(), "objcopy localize 失败: {}", e.name);
         }
-
-        let main_lib = out_dir.join(format!("lib{lib_name}.a"));
-        let st = Command::new("ar")
-            .arg("rs")
-            .arg(&main_lib)
-            .arg(&obj)
-            .current_dir(out_dir)
-            .status()
-            .expect("ar 运行失败");
-        assert!(st.success(), "ar 合并失败: {}", e.name);
-        let _ = fs::remove_file(&obj);
     }
 
+    let main_lib = out_dir.join(format!("lib{lib_name}.a"));
+    let st = Command::new("ar")
+        .arg("rs")
+        .arg(&main_lib)
+        .arg(&obj)
+        .current_dir(out_dir)
+        .status()
+        .expect("ar 运行失败");
+    assert!(st.success(), "ar 合并失败: {}", e.name);
+    let _ = fs::remove_file(&obj);
+
     println!("cargo:rustc-link-lib=static={lib_name}");
+    true
 }
 
 /// 生成 OUT_DIR/grammar_entries.rs：extern 声明 + entries/parents + 计数。
