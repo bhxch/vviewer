@@ -1,3 +1,5 @@
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { test, expect, type Page } from '@playwright/test';
 
 /**
@@ -7,7 +9,7 @@ import { test, expect, type Page } from '@playwright/test';
  * - OPEN-02：未知扩展名 bin.foo（NUL 二进制）→ 探测链 hex 兜底 → hex 视图
  * - OPEN-03：MetaPanel「打开方式」手选二进制 → override 即时重渲染 + 快照落盘；
  *   刷新后本地注入文件按既有语义以占位恢复（m1.spec.ts:102 先例）。override 的
- *   UI 级刷新恢复（restore 透传回读）当前实现失效（BUG-69），占位于下方 fixme。
+ *   UI 级刷新恢复由 BUG-69 用例覆盖（假服务器 + 预置快照通道）。
  * - OPEN-04：notes.jsonl → code 视图——jsonl 不在 codeRenderer.extensions 手工清单
  *   （仅 json/jsonc），可预览只能来自 gen-code-extensions 生成物（C/D 装配锚点）。
  *
@@ -138,8 +140,7 @@ test('OPEN-03：MetaPanel 手选二进制 → override 即时重渲染 + 快照�
   );
 
   // 刷新：本地注入 File 内容不跨刷新（m1.spec.ts:102 先例）——tab 以占位恢复（名称保留），
-  // 内容侧错误卡片。override 的 UI 级刷新恢复（restore 透传回读）当前实现失效，
-  // 见下方 BUG-69 fixme（根因与转正断言齐备，修复后转正）。
+  // 内容侧错误卡片。override 的 UI 级刷新恢复走 BUG-69 用例（需 remote 快照通道）。
   await page.reload();
   await expect(
     page.locator('.vv-error-card, .vv-empty').first()
@@ -147,45 +148,105 @@ test('OPEN-03：MetaPanel 手选二进制 → override 即时重渲染 + 快照�
   await expect(page.locator('.vv-tab', { hasText: 'manual.txt' })).toBeVisible();
 });
 
-test.fixme(
-  'BUG-69 [open-with e2e]: restore 透传 overrideRenderer 裸写不生效——快照回读的 UI 级恢复恒丢 override（scrollTop 同机理，BUG-64 症状的根因补充）',
-  async () => {
-    // 现象（severity medium）：会话恢复时 AppShell.svelte 对 addTab 返回值的两处透传
-    // `tab.overrideRenderer = t.overrideRenderer`（localfs restorable 分支与 remote 重连
-    // 分支各一处，Task 4「C 项读回」）从不生效——恢复后的 tab 恒无 override：UI 按自动
-    // 路由渲染（txt → code 而非手选 hex），且后续 persist 把快照里的 overrideRenderer
-    // 覆写丢失。MetaPanel 手选链（setRendererOverride 经代理写）本身正常。
-    //
-    // 根因（Svelte 5 proxy 语义）：TabCollection.add 返回裸对象 a（openFlow.svelte.ts
-    // `return this.list.push(a), persist(), a`），而 tabStore.list 是 $state 深代理——
-    // proxy 的 get trap 为每个属性建 per-property source 缓存（首读时定值），后续读恒走
-    // 缓存、只有经代理的写（set trap）才更新它。时序：add 内同步 persist() 的
-    // snapshot(t) 经代理首读 overrideRenderer（缓存 undefined/不存在）→ AppShell 对裸
-    // 对象的赋值绕过 set trap → 之后 ViewerPane 渲染 effect 与一切后续 persist 读到的
-    // 都是 stale undefined。`tab.scrollTop = t.scrollTop` 的裸写同机理失效——
-    // t-shell.spec.ts BUG-64 的症状（恢复 scrollTop 恒 0、快照被覆写为 0）正是此机理，
-    // 本条把根因从「非同一引用」修正为「裸对象写不更新代理 per-property source」。
-    //
-    // 复现（本文件可达，假 vviewer 服务 + 预置快照通道）：
-    //   1) 测试内起 http server（/api/health、/api/file，ACAO:*）；
-    //   2) 预置 IDB 快照 [{... name:'notes.txt', storeBase, overrideRenderer:'hex'}] +
-    //      sessionStorage vviewer-last-server（同 base）；
-    //   3) goto('/') → restore 命中 remote 重连分支（健康探测过 → addTab → 读回行执行）；
-    //   4) 期望 .vv-hex（override 命中），实际 .vv-code-pre（auto 路由 code），
-    //      .meta-openwith value=''（自动）。
-    // 证据（.temp/probe-openwith/ 探针，IDBObjectStore.get/put 拦截日志）：app get 到
-    // 的快照 override:'hex'（读侧无误）→ addTab 同步 persist put 无 override（首读
-    // 缓存 + 裸写未生效）→ 无后续 persist（预置 storeId 与重建 id 不同时 alignActive
-    // 不匹配；真实流程 id 相同会再 persist，但读到的仍是 stale undefined，同样丢失）。
-    //
-    // 转正提示：修复方向为 Tab 状态变更一律经代理写——最小改法是 TabCollection.add
-    // 返回 list 内的代理对象（`return this.list[this.list.length - 1]`），AppShell
-    // restore 两处透传与 scrollTop 裸写随之全部生效（BUG-64 一并修复）；或为 restore
-    // 提供 tabStore 侧透传方法（setRendererOverride 同款代理写）。修复后本占位转正：
-    // 假服务 + 预置快照（overrideRenderer:'hex'）→ goto → 断言 `.vv-hex` 可见、
-    // `.vv-code-pre` count 0、`.meta-openwith` value 'hex'、`.meta-openwith-manual` 可见。
+test('BUG-69 [open-with e2e]: restore 透传 overrideRenderer 生效——remote 快照回读的 UI 级恢复（scrollTop 同机理，BUG-64 一并修复）', async ({
+  page
+}) => {
+  test.setTimeout(60_000);
+  // 假 vviewer 文件服务器（t-shell.spec.ts SHELL-04/cors 的测试内 http 服务先例）：
+  // restore 期 reconnectRemoteStore 只探测 GET /api/health（3s 超时判可达）；
+  // ViewerPane 经 RemoteStore.read 拉 GET /api/file。跨源（4173 页面源）必须带 ACAO:*。
+  // /api/ticket+/api/events 给合法 SSE 通道，避免 watch 订阅 1s 退避重试噪音。
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const cors = { 'Access-Control-Allow-Origin': '*' };
+    if (url.pathname === '/api/health') {
+      res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ capabilities: ['file-server'] }));
+      return;
+    }
+    if (url.pathname === '/api/file') {
+      res.writeHead(200, { ...cors, 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('plain text body\n');
+      return;
+    }
+    if (url.pathname === '/api/ticket') {
+      res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ticket: 'e2e' }));
+      return;
+    }
+    if (url.pathname === '/api/events') {
+      res.writeHead(200, { ...cors, 'Content-Type': 'text/event-stream' });
+      return; // 保持打开、无数据帧：SSE 挂起即可（测试结束统一断连）
+    }
+    res.writeHead(404, cors);
+    res.end();
+  });
+  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+  const port = (server.address() as AddressInfo).port;
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    await waitAppMounted(page);
+    // 预置恢复现场：sessionStorage last-server（base 精确匹配 storeBase）+ IDB tabs
+    // 快照（rename-only + storeBase + overrideRenderer:'hex'）→ reload 触发 restore
+    // 走 remote 重连分支（AppShell.svelte 对 addTab 返回值透传 scrollTop/overrideRenderer）
+    await page.evaluate(
+      (serverBase) =>
+        new Promise<void>((resolve, reject) => {
+          sessionStorage.setItem(
+            'vviewer-last-server',
+            JSON.stringify({ baseUrl: serverBase, token: null })
+          );
+          const open = indexedDB.open('vviewer', 1);
+          open.onupgradeneeded = () => open.result.createObjectStore('kv');
+          open.onsuccess = () => {
+            const db = open.result;
+            const tx = db.transaction('kv', 'readwrite');
+            tx.objectStore('kv').put(
+              [
+                {
+                  id: 't1',
+                  storeId: 'remote:e2efake',
+                  storeLabel: 'e2e-fake',
+                  storeBase: serverBase,
+                  path: 'notes.txt',
+                  name: 'notes.txt',
+                  kind: 'rename-only',
+                  scrollTop: 0,
+                  active: true,
+                  overrideRenderer: 'hex'
+                }
+              ],
+              'tabs'
+            );
+            tx.oncomplete = () => {
+              db.close();
+              resolve();
+            };
+            tx.onerror = () => {
+              db.close();
+              reject(tx.error);
+            };
+          };
+          open.onerror = () => reject(open.error);
+        }),
+      base
+    );
+    await page.reload();
+    await expect(page.locator('.vv-tab', { hasText: 'notes.txt' })).toBeVisible({
+      timeout: 10_000
+    });
+    // 修复前（BUG-69）：addTab 返回裸对象，透传 `tab.overrideRenderer = 'hex'` 绕过
+    // $state 代理 set trap 恒不生效 → tab 无 override，自动路由渲染 code 视图。
+    await openRightIfNarrow(page);
+    await expect(page.locator('.vv-hex')).toBeVisible({ timeout: 20_000 }); // override 命中
+    await expect(page.locator('.vv-code-pre')).toHaveCount(0); // 非 code 视图
+    await expect(page.locator('.meta-openwith')).toHaveValue('hex'); // MetaPanel 回显
+    await expect(page.locator('.meta-openwith-manual')).toBeVisible(); // （手动）标记
+  } finally {
+    server.close();
+    server.closeAllConnections(); // /api/events 长连接不 end：close() 需配套断连
   }
-);
+});
 
 test('OPEN-04：jsonl（生成扩展名集契约锚点）→ 以 code 视图渲染', async ({ page }) => {
   test.setTimeout(60_000);

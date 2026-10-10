@@ -73,7 +73,12 @@ class TabCollection {
     for (const t of this.list) t.active = false;
     this.list.push(tab);
     void persist();
-    return tab;
+    // BUG-69：必须返回 $state 数组内元素（响应式代理）而非上面的裸对象 tab——
+    // Svelte 5 $state 深代理的响应性按属性缓存（首读定值），add 内同步 persist 的
+    // snapshot 首读之后，调用方对裸对象的属性写（AppShell.restore 透传
+    // scrollTop/overrideRenderer、addPlaceholderTab 置 unrestorable、GlobalSearchPanel
+    // 写 pendingLine）全部绕过 set trap 恒不生效（BUG-64 scrollTop 恢复恒 0 的真正根因）
+    return this.list[this.list.length - 1]!;
   }
 
   close(id: string): void {
