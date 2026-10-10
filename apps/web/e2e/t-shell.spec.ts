@@ -465,7 +465,7 @@ test('SHELL-13/1：计算策略 UI 修改写入 localStorage 并跨刷新恢复�
 // 独立复现确认，severity 见各用例注释。
 
 test.fixme(
-  'BUG-31 [探索]: 服务端档裸路径 URL 静默渲染 index.html——档伺服 fallback 200+text/html 被 createUrlStore 当文件内容，无错误卡片',
+  'BUG-29 [探索]: 服务端档裸路径 URL 静默渲染 index.html——档伺服 fallback 200+text/html 被 createUrlStore 当文件内容，无错误卡片',
   async () => {
     // 现象（severity medium）：服务端档伺服层对一切非 .scm/.wasm 未命中路径（含真实存在
     // 的数据文件裸路径）以 200 + text/html 返回 index.html（server/src/lib.rs:55-85
@@ -500,7 +500,7 @@ test.fixme(
 );
 
 test.fixme(
-  'BUG-32 [探索]: Ctrl+P 快速打开对任一 listChildren 失败目录一票否决——整列表 0 行完全不可用（edge/symlink/escape-etc 403）',
+  'BUG-27 [探索]: Ctrl+P 快速打开对任一 listChildren 失败目录一票否决——整列表 0 行完全不可用（edge/symlink/escape-etc 403）',
   async () => {
     // 现象（severity high，服务端 e2e 数据集开箱即触发）：服务端档下 Ctrl+P 快速打开对
     // 「呈现为目录但 listChildren 被拒」的条目（数据根自带 root 外 symlink
@@ -532,7 +532,7 @@ test.fixme(
 );
 
 test.fixme(
-  'BUG-33 [探索]: 快速打开面板已开时再按 Ctrl+P 不关闭且不 preventDefault——AppShell inField 提前 return 吞 toggle',
+  'BUG-31 [探索]: 快速打开面板已开时再按 Ctrl+P 不关闭且不 preventDefault——AppShell inField 提前 return 吞 toggle',
   async () => {
     // 现象（severity low，键位语义缺陷）：快速打开面板输入框被 $effect 自动聚焦
     // （QuickOpenPanel.svelte:27-29），AppShell 全局 keydown handler 对 INPUT 焦点提前
@@ -565,7 +565,7 @@ test.fixme(
 );
 
 test.fixme(
-  'BUG-35 [探索]: 图片文件状态栏「编码」恒显示 gb18030——编码检测对二进制媒体不豁免，getMeta 透传误导值',
+  'BUG-32 [探索]: 图片文件状态栏「编码」恒显示 gb18030——编码检测对二进制媒体不豁免，getMeta 透传误导值',
   async () => {
     // 现象（severity low，误导性呈现缺陷）：文本编码检测对二进制媒体不豁免——
     // packages/core/src/detect/encoding.ts:31-37 严格 UTF-8 校验失败即回退 gb18030，
@@ -593,7 +593,7 @@ test.fixme(
 );
 
 test.fixme(
-  'BUG-36 [探索]: URL 尾斜杠产出空名伪目录 tab——内容区显示「目录来源」引导，不渲染内容也不报错',
+  'BUG-30 [探索]: URL 尾斜杠产出空名伪目录 tab——内容区显示「目录来源」引导，不渲染内容也不报错',
   async () => {
     // 现象（severity low）：URL 以 / 结尾时 openUrl 对 split('/').pop() 得空串
     // （apps/web/src/lib/openFlow.svelte.ts:424，:431 addTab(createUrlStore(url),'','')），
@@ -623,5 +623,63 @@ test.fixme(
     //
     // 转正提示：修复方向为 openUrl 对空名（尾斜杠/目录形态）拒绝或明确提示；期望断言
     // 「提交尾斜杠 URL 不产出空名激活 tab」（或出明确错误提示），不落「目录来源」空态。
+  }
+);
+
+test.fixme(
+  'BUG-64 [探索]: 服务器模式 tab 重载后滚动位置不还原——AppShell.restore 赋值对象与 ViewerPane 渲染 effect 读取对象非同一引用（=== false）致恢复 rAF 从未调度，restore 期 persist 又以初始 0 覆写快照',
+  async () => {
+    // 现象（severity low）：IndexedDB tabs 快照中 scrollTop 正确落盘 2500，重载后
+    // .vv-code-pre.scrollTop 恒 0、零 scroll 事件。内容自动重读正常（BUG-08/SHELL-14
+    // 主修复目标达成，b-server-regression BUG-08 用例仍通过），仅滚动位置这一会话状态丢失。
+    //
+    // 根因（两处断点均独立复现，主缺口在①，②为次级放大器）：
+    //   ① 应用链断裂：AppShell.restore 读到快照 2500 并赋值成功（AppShell.svelte:99/:112
+    //      `tab.scrollTop = t.scrollTop`，插桩写入对象 800ms 后仍 2500），但 ViewerPane
+    //      渲染 effect 判定 `current.scrollTop > 0`（ViewerPane.svelte:175）时读到的同 id
+    //      tab 对象 scrollTop=0，插桩证实二者 `===` 为 false（同 id 不同底层对象），
+    //      恢复 rAF 从未调度（hook rAF 计数 0、hook scrollTop setter 零次调用），还原从未应用。
+    //   ② 快照覆写：add 初始 scrollTop:0（openFlow.svelte.ts:66）+ void persist()（:71），
+    //      restore 内 add（:71）与 activate（:102）两次 persist 在 reload 后 t≈82ms 即把
+    //      快照从 2500 覆写为 0（hook IDBObjectStore.put('tabs') 证实 reload 后仅两条、
+    //      均 scrollTop:0）。对照实验：手动把快照 put 回 2500 并验证落盘后 reload 仍
+    //      finalTop=0——即使快照正确也不还原，故①为主缺口、②仅为放大器。
+    //
+    // 最小复现：
+    //   1) 连接服务器 → 打开 b08-long.js（400 行长文件 7600B=400×19B，scrollTop=2500
+    //      位移成立）；
+    //   2) 滚动至 scrollTop=2500，等待 IndexedDB tabs 快照持久化（轮询快照值达 2500）；
+    //   3) 重载页面 → 读取 .vv-code-pre.scrollTop：恒 0、零 scroll 事件（4 次探针重载实测）。
+    //   套件内对照：e2e-server/b-server-regression.spec.ts BUG-08 用例 console.log
+    //   「[BUG-08 观察] 重载后 scrollTop=0（快照值 2500，未还原）」（该用例门为宽松口径
+    //   「内容可重读」故仍 passed，滚动还原缺口只写 summary 未设门）。
+    //
+    // 证据（7 次独立运行全部复现，不同端口/实例；/tmp/vv-repro-b08/）：verify.mjs（自起
+    // 实例 vviewer serve --port 8440，重载后 t0/+1s/+3s 三探针 scrollTop 恒 0、
+    // scrollEvents=0、快照 0）；verify2.mjs 实验 A（重载前快照 ~300ms 写 2500 且 2.4s
+    // 稳定——覆写不发生在重载前）/实验 B（手动 put 快照 scrollTop=2500 验证落盘
+    // patchedValue=2500 后 reload 仍 finalTop=0、restored=false）；verify3.mjs（reload 后
+    // 逐帧 1.5s：t=63ms pre 挂载 spacer 8020px、scrollTop 全程 0、scroll 事件日志空）；
+    // verify4.mjs（hook Element.prototype.scrollTop setter，reload 后零次调用）；verify5.mjs
+    // （rafCount=0 即 ViewerPane.svelte:175 判定 false；快照 reload 后 t≈82ms 被覆写为 0）；
+    // verify6.mjs（hook IDB put('tabs')：reload 前序列 [连接:0 → 打开:0 → 滚动后
+    // 745ms:2500] 落盘正确，reload 后仅两条 t=78/79 均 scrollTop:0）；/tmp 补丁构建插桩
+    // （cp build 到 /tmp、vviewer serve --web-dist 副本，未改仓库文件）输出 [P1-RESTORE]
+    // b08-long.js 2500 2500、[P3-VIEWER] t3 0 false 2500（effect 读到 scrollTop=0 的同 id
+    // 对象且与 restore 写入对象 === 为 false）、[P1-LATE] 800ms 后原对象仍 2500；hook
+    // IDB get('tabs') 证实 restore 读到的快照是 2500。
+    //
+    // 覆盖核对：SHELL-07 fixme 注释称 IndexedDB tab 快照恢复由 m1.spec.ts 与
+    // b-server-regression 覆盖，但两边均未对「重载后滚动还原」设断言；
+    // b-server-file-service.spec.ts:288 的 scrollTop 保留断言走 SSE 重读通道（不
+    // reload），不覆盖本缺陷。
+    //
+    // 转正提示：复现需服务器模式（真实伺服器 + reload），e2e/ 纯前端 harness 不可达；
+    // 根因属本域（AppShell.svelte / openFlow.svelte.ts / ViewerPane.svelte 均为
+    // app-shell-sources 文件，服务器仅为复现环境），故占位落此，转正可在 e2e-server
+    // 环境（playwright.server.config.ts）落断言：重载后 .vv-code-pre.scrollTop 还原至
+    // 2500（或 ≥1 次程序性赋值生效）。修复方向：restore 与 ViewerPane 渲染 effect 间
+    // 传递同一 tab 对象引用（或按 tab id 从同一 store 读取），并避免 restore 期
+    // addTab/activate 的 persist 以初始 0 覆写快照（恢复完成后再 persist）。
   }
 );
