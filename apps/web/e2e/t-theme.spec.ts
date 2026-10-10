@@ -230,7 +230,9 @@ test('THEME-03/2: 代码主题下拉全量可切——option 集=themes.json 键
 
   // 下拉 option 全集与 themes.json 键集一一对应（TopBar themeOptions：精选置顶+全部字母序）
   const optionValues = await page.evaluate(() =>
-    [...document.querySelectorAll('select[aria-label="代码主题"] option')].map((o) => o.value)
+    [
+      ...document.querySelectorAll<HTMLOptionElement>('select[aria-label="代码主题"] option')
+    ].map((o) => o.value)
   );
   const tableNames = Object.keys(THEMES);
   expect(optionValues.length, `下拉项数=themes.json 主题数(${THEME_COUNT})`).toBe(tableNames.length);

@@ -174,7 +174,8 @@ async function activeMarkIndex(page: Page): Promise<number> {
     const host = document.querySelector('.vv-markdown');
     if (host === null) return -2;
     const marks = Array.from(host.querySelectorAll('mark.vv-search-hit'));
-    return marks.indexOf(host.querySelector('mark.vv-search-hit-active'));
+    const active = host.querySelector('mark.vv-search-hit-active');
+    return active === null ? -1 : marks.indexOf(active);
   });
 }
 
