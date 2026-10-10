@@ -249,7 +249,7 @@ commits `a4f2c64..678ce2c` + 本收口提交。
 - **e2e 与性能锚点（Task 5）**：默认 playwright（无 env dist，chromium+mobile）
   172 passed / 4 failed（b-grammar-layers env 守卫，无 env dist 下必败属设计）/
   16 skipped；b-grammar-layers（env dist 定向）4/4；e2e-server（release 二进制）
-  38/38。性能锚点 PERF-LAZY（25MB，1,315,789 行）：纯文本首帧 246-355ms（锚
+  38/38，加 Task 6 回补的宣告门用例后 e2e-server 总数 39。性能锚点 PERF-LAZY（25MB，1,315,789 行）：纯文本首帧 246-355ms（锚
   <1000ms）、跳滚 110 万行后 chunk 着色到达 32ms（锚 <2000ms）、滚动连发 6 跳
   longtask 0 个（锚 0）——三处数量级裕量。
 - **宣告门 e2e 回补（Task 6，§7.3 勘误承接）**：server-served >2MB .jsonc（差集

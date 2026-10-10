@@ -43,7 +43,9 @@ cli ≥0.26 的 wasi-sdk wasm 工具链不支持 **C++ 外置 scanner**（`get_s
   的 301 条一一对应。
 - **wasm 集 ≤301**：受 cli wasm 工具链限制（`get_scanner_path` 只认 `scanner.c`，
   见上文 vendored 例外），带 C++ 外置 scanner 的语言无法自建。对 fetch 源树全量排查：
-  `find out/grammars -name scanner.cc | sort` 命中 6 个——yaml/vue 命中 vendored
+  `find out/grammars -name scanner.cc | sort` 输出 7 行、命中 6 个语言——vue 含嵌套
+  html scanner 共 2 文件（`vue/src/scanner.cc` + `vue/src/tree_sitter_html/scanner.cc`），
+  yaml/vue 命中 vendored
   短路计入，**astro / haskell-persistent / lean / org** 为 wasm 集自建缺口（解析法
   理论口径 301 − 4 = 297，含 vendored；全量自建未在本地实跑，实测数待 CI
   `grammar.yml` 首跑回填）。

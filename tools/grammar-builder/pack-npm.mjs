@@ -69,9 +69,10 @@ function walkFiles(dir) {
 
 /**
  * 组装 npm 包布局。返回 { files, bytes }——files/bytes 覆盖包内全部文件
- * （package.json + grammars + queries），Task 5 publish job 用于发布日志。
- * 残包拦截：grammarsDir 缺失/无 wasm/manifest 缺失/manifest 引用悬空/queriesDir 缺失/
- * license 文件缺失/name|version|outDir 缺失，任一命中即抛错（publish 前即失败，不产出不完整包）。
+ * （package.json + grammars + queries + GRAMMAR_LICENSES.md），Task 5 publish job
+ * 用于发布日志。残包拦截：grammarsDir 缺失/无 wasm/manifest 缺失/manifest 引用悬空/
+ * queriesDir 缺失/license 文件缺失/name|version|outDir 缺失，任一命中即抛错
+ * （publish 前即失败，不产出不完整包）。
  */
 export function packNpm({
   grammarsDir,

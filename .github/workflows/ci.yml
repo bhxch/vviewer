@@ -1,6 +1,7 @@
 # 最小 CI（final review A2）：typecheck + vitest + web 构建 + cargo test + E2E。
 # grammar wasm 不入库：单测/e2e 前经 composite action 生成最小语言集（tree-sitter-cli
-# 自建，免 emcc；工具链/源树/产物三层缓存）。全量门禁在 grammar.yml（tag 时）。
+# 自建，免 emcc；工具链/源树/产物三层缓存）。全量门禁触发链：tag → release.yml →
+# workflow_call 复用 grammar.yml（I2 后其自身无 push 触发器）。
 # E2E 依赖 Playwright 浏览器下载：用 actions/cache 按 lockfile 哈希缓存 ms-playwright 目录。
 name: CI
 
