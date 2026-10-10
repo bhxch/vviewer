@@ -121,17 +121,33 @@ async function connectForm(page: Page, base: string, token: string | null): Prom
   await page.getByRole('button', { name: '连接', exact: true }).click();
 }
 
-/** 树行精确匹配（共享夹具名字相近行多，避免 hasText 子串误中；同 b-server-regression 前例） */
-function treeRow(page: Page, name: string): ReturnType<Page['locator']> {
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return page
-    .locator('.vv-tree-row')
-    .filter({ has: page.locator('.vv-tree-name', { hasText: new RegExp(`^${escaped}$`) }) });
+/** 精确名正则（同名行歧义防护，避免 hasText 子串误中） */
+function exactName(name: string): RegExp {
+  return new RegExp(`^${name.replace(/[.*+?${}()|[\]\\]/g, '\\$&')}$`);
 }
 
-/** 展开目录树行（懒加载：点击目录行出现子层） */
-async function expandRow(page: Page, name: string): Promise<void> {
-  await treeRow(page, name).first().click();
+/** 树行精确匹配（共享夹具名字相近行多；同 b-server-regression 前例） */
+function treeRow(page: Page, name: string): ReturnType<Page['locator']> {
+  return page
+    .locator('.vv-tree-row')
+    .filter({ has: page.locator('.vv-tree-name', { hasText: exactName(name) }) });
+}
+
+/** 父行子树内的树行：li[role=treeitem] 包住 row 按钮与其子 ul（TreeNodeRow.svelte:43-58），
+ *  嵌套行是 row 按钮父节点的 DOM 后代。夹具根自古有顶层 sub/（fixtures.mjs:72），
+ *  与 token-tree 下的 sub 同名——裸 treeRow 的 .first() 在父行子行渲染完成前会误点
+ *  顶层同名行（SRV-01/03 曾因此竞态稳定失败） */
+function treeRowUnder(page: Page, parent: string, name: string): ReturnType<Page['locator']> {
+  return treeRow(page, parent)
+    .locator('..')
+    .locator('.vv-tree-row')
+    .filter({ has: page.locator('.vv-tree-name', { hasText: exactName(name) }) });
+}
+
+/** 展开目录树行（懒加载：点击目录行出现子层）；parent 给定时限定嵌套上下文 */
+async function expandRow(page: Page, name: string, parent?: string): Promise<void> {
+  const row = parent === undefined ? treeRow(page, name).first() : treeRowUnder(page, parent, name);
+  await row.click({ timeout: 10_000 });
 }
 
 test('SRV-01: release 二进制冒烟——首页 200、capabilities=[file-server]、目录树懒加载展开', async ({
@@ -149,32 +165,35 @@ test('SRV-01: release 二进制冒烟——首页 200、capabilities=[file-serve
   expect(home!.status()).toBe(200);
   await expect(page.locator('.vv-shell')).toBeVisible();
 
-  // ③ 目录树懒加载展开：三层逐层点击，末层叶可见
+  // ③ 目录树懒加载展开：三层逐层点击，末层叶可见（sub 限定 token-tree 子树内——
+  //    与顶层同名 sub/ 歧义，见 treeRowUnder 注）
   await connectForm(page, BASE, null);
   await expect(treeRow(page, 'srv-t')).toBeVisible({ timeout: 10_000 });
   await expandRow(page, 'srv-t');
   await expect(treeRow(page, 'token-tree')).toBeVisible();
   await expandRow(page, 'token-tree');
-  await expect(treeRow(page, 'sub')).toBeVisible({ timeout: 10_000 });
-  await expandRow(page, 'sub');
+  await expect(treeRowUnder(page, 'token-tree', 'sub')).toBeVisible({ timeout: 10_000 });
+  await expandRow(page, 'sub', 'token-tree');
   await expect(treeRow(page, 'deep.txt')).toBeVisible({ timeout: 10_000 });
 });
 
 test('SRV-03: 无 token 与 token 两形态连接成功、树懒加载展开、凭据存 sessionStorage（偏差 #2）', async ({
   page
 }) => {
-  // ① 无 token 同源（主实例）：连接 → 逐层展开至叶
+  // ① 无 token 同源（主实例）：连接 → 逐层展开至叶（sub 限定 token-tree 子树内）
   await connectForm(page, BASE, null);
   await expect(treeRow(page, 'srv-t')).toBeVisible({ timeout: 10_000 });
   await expandRow(page, 'srv-t');
   await expandRow(page, 'token-tree');
-  await expandRow(page, 'sub');
+  await expandRow(page, 'sub', 'token-tree');
   await expect(treeRow(page, 'deep.txt')).toBeVisible({ timeout: 10_000 });
 
-  // ② token 实例（:4375，跨源 + CORS 放行）：表单粘贴 token 连接 → 树出现
+  // ② token 实例（:4375，跨源 + CORS 放行）：表单粘贴 token 连接 → 树出现。
+  //    top.txt 在 token-tree 下（首提交即缺本层展开，该步从未绿过——本轮补齐）
   await connectForm(page, `http://127.0.0.1:${PORT_TOKEN}`, TOKEN);
   await expect(treeRow(page, 'srv-t')).toBeVisible({ timeout: 10_000 });
   await expandRow(page, 'srv-t');
+  await expandRow(page, 'token-tree');
   await expect(treeRow(page, 'top.txt')).toBeVisible({ timeout: 10_000 });
 
   // ③ 偏差 #2：凭据存 sessionStorage（键 vviewer-last-server，packages/core/src/tree/remote.ts:58，
