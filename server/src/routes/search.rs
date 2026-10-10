@@ -238,8 +238,15 @@ pub async fn search(State(state): State<AppState>, Json(req): Json<SearchRequest
     let stderr: ChildStderr = child.stderr.take().expect("rg stderr must be piped");
 
     let (tx, rx) = mpsc::channel::<Result<String, std::io::Error>>(FRAME_CHANNEL);
-    let pump_handle =
-        tokio::spawn(pump(child, stdout, stderr, state.root_canonical.clone(), tx, SEARCH_TIMEOUT));
+    // 引擎接线（resolve_engine → grep_args）改造前，handler 仍直连 rg 解析器（行为不变）
+    let pump_handle = tokio::spawn(pump(
+        child,
+        stdout,
+        stderr,
+        FrameParser::Rg { root_canonical: state.root_canonical.clone() },
+        tx,
+        SEARCH_TIMEOUT,
+    ));
     // 结局观测（tracing debug 级）：读取 outcome 字段同时消除 test-only 字段告警
     tokio::spawn(async move {
         if let Ok(outcome) = pump_handle.await {
@@ -266,13 +273,34 @@ pub(crate) struct PumpOutcome {
     pub rg_error: Option<String>,
 }
 
-/// 读取 rg --json 输出并下发 NDJSON 帧；客户端断连 / 截断 / 墙钟超时均 kill 子进程。
-/// `timeout` 为整个读循环的总 deadline（生产 SEARCH_TIMEOUT，测试注入短时限）。
+/// 引擎感知的行解析：None = 跳过该行（rg 非 match 事件/二进制帧、grep 畸形行）。
+pub(crate) enum FrameParser {
+    Rg { root_canonical: PathBuf },
+    Grep { root_canonical: PathBuf },
+}
+
+impl FrameParser {
+    fn frame(&self, line: &str) -> Option<String> {
+        match self {
+            FrameParser::Rg { root_canonical } => {
+                let v = serde_json::from_str::<Value>(line).ok()?;
+                if v.get("type").and_then(Value::as_str) != Some("match") {
+                    return None;
+                }
+                match_frame(&v, root_canonical)
+            }
+            FrameParser::Grep { root_canonical } => grep_frame(line, root_canonical),
+        }
+    }
+}
+
+/// 读取引擎子进程输出并经解析器下发 NDJSON 帧；客户端断连 / 截断 / 墙钟超时均
+/// kill 子进程。`timeout` 为整个读循环的总 deadline（生产 SEARCH_TIMEOUT，测试注入短时限）。
 pub(crate) async fn pump(
     mut child: Child,
     stdout: ChildStdout,
     stderr: ChildStderr,
-    root_canonical: PathBuf,
+    parser: FrameParser,
     tx: mpsc::Sender<Result<String, std::io::Error>>,
     timeout: Duration,
 ) -> PumpOutcome {
@@ -296,14 +324,8 @@ pub(crate) async fn pump(
     }
     let exited = tokio::time::timeout(timeout, async {
         while let Ok(Some(line)) = lines.next_line().await {
-            let Ok(frame) = serde_json::from_str::<Value>(&line) else {
-                continue; // 非 JSON 行（理论上没有）：跳过
-            };
-            if frame.get("type").and_then(Value::as_str) != Some("match") {
-                continue; // 简化：只发 match 帧 + 终帧（begin/end 丢弃）
-            }
-            let Some(payload) = match_frame(&frame, &root_canonical) else {
-                continue; // 二进制文件（lines.bytes）等无文本帧：跳过，不参与截断判定
+            let Some(payload) = parser.frame(&line) else {
+                continue; // 非 match 事件 / 二进制帧 / 畸形行：跳过，不参与截断判定
             };
             if sent >= MAX_MATCHES {
                 // 恰好 1000 时不能立即判截断（可能 rg 已无更多命中）；
@@ -393,6 +415,22 @@ fn match_frame(frame: &Value, root_canonical: &Path) -> Option<String> {
     let preview: String = text.chars().take(PREVIEW_MAX_CHARS).collect();
     // NDJSON：帧自带换行分隔（Body 逐 chunk 写出，不补分隔符）
     Some(format!("{}\n", json!({ "file": rel, "line": line_no, "col": col, "text": preview })))
+}
+
+/// grep `--null -rHn` 输出行 `path\0line:content` → NDJSON 命中帧；畸形行 None。
+/// NUL 分隔文件名与行内容（文件名含冒号安全）；行号后首个冒号切出内容
+/// （内容含冒号无歧义）。grep 无列号：col 恒 1（spec §2.3 裁决）。
+fn grep_frame(line: &str, root_canonical: &Path) -> Option<String> {
+    let (path_text, rest) = line.split_once('\0')?;
+    let (line_no_raw, content) = rest.split_once(':')?;
+    let line_no: u64 = line_no_raw.parse().ok()?;
+
+    let abs = Path::new(path_text);
+    let rel = abs.strip_prefix(root_canonical).unwrap_or(abs);
+    let rel = rel.to_string_lossy().replace('\\', "/");
+
+    let text: String = content.chars().take(PREVIEW_MAX_CHARS).collect();
+    Some(format!("{}\n", json!({ "file": rel, "line": line_no, "col": 1, "text": text })))
 }
 
 /// mpsc Receiver → Stream 适配（tokio 未开 stream feature，手写避免新依赖）。
@@ -576,6 +614,52 @@ mod tests {
         assert!(match_frame(&frame, Path::new("/tmp/root")).is_none());
     }
 
+    // ---------- grep_frame ----------
+
+    #[test]
+    fn grep_frame_parses_nul_line_format() {
+        let root = Path::new("/tmp/root");
+        let line = "/tmp/root/sub/a.rs\012:const needle = 1;";
+        let out: Value = serde_json::from_str(&grep_frame(line, root).unwrap()).unwrap();
+        assert_eq!(out["file"], "sub/a.rs");
+        assert_eq!(out["line"], 12);
+        assert_eq!(out["col"], 1, "grep 无列号，恒 1");
+        assert_eq!(out["text"], "const needle = 1;");
+    }
+
+    #[test]
+    fn grep_frame_colon_in_path_and_content_is_safe() {
+        let root = Path::new("/tmp/root");
+        // 文件名含冒号（NUL 分隔保护）与内容含冒号（首个冒号后全为内容）
+        let line = "/tmp/root/we:ird.txt\01:the:rest: here";
+        let out: Value = serde_json::from_str(&grep_frame(line, root).unwrap()).unwrap();
+        assert_eq!(out["file"], "we:ird.txt");
+        assert_eq!(out["line"], 1);
+        assert_eq!(out["text"], "the:rest: here");
+    }
+
+    #[test]
+    fn grep_frame_utf8_content_and_preview_truncation() {
+        let root = Path::new("/tmp/root");
+        let out: Value =
+            serde_json::from_str(&grep_frame("/tmp/root/zh.txt\01:中文needle", root).unwrap())
+                .unwrap();
+        assert_eq!(out["text"], "中文needle");
+        let long = "中".repeat(500);
+        let out: Value =
+            serde_json::from_str(&grep_frame(&format!("/tmp/root/l\01:{long}"), root).unwrap())
+                .unwrap();
+        assert_eq!(out["text"].as_str().unwrap().chars().count(), PREVIEW_MAX_CHARS);
+    }
+
+    #[test]
+    fn grep_frame_malformed_lines_are_skipped() {
+        let root = Path::new("/tmp/root");
+        assert!(grep_frame("no nul at all", root).is_none());
+        assert!(grep_frame("/p\0not-a-number:content", root).is_none());
+        assert!(grep_frame("/p\0", root).is_none());
+    }
+
     // ---------- probe_rg ----------
 
     #[test]
@@ -651,7 +735,7 @@ mod tests {
             child,
             stdout,
             stderr,
-            dir.path().to_path_buf(),
+            FrameParser::Rg { root_canonical: dir.path().to_path_buf() },
             tx,
             std::time::Duration::from_secs(60),
         ));
@@ -696,7 +780,7 @@ mod tests {
             child,
             stdout,
             stderr,
-            dir.path().to_path_buf(),
+            FrameParser::Grep { root_canonical: dir.path().to_path_buf() },
             tx,
             std::time::Duration::from_millis(200),
         ));
@@ -757,7 +841,7 @@ mod tests {
             child,
             stdout,
             stderr,
-            dir.path().to_path_buf(),
+            FrameParser::Rg { root_canonical: dir.path().to_path_buf() },
             tx,
             std::time::Duration::from_secs(60),
         ));
@@ -817,7 +901,7 @@ mod tests {
             child,
             stdout,
             stderr,
-            dir.path().to_path_buf(),
+            FrameParser::Rg { root_canonical: dir.path().to_path_buf() },
             tx,
             std::time::Duration::from_secs(60),
         ));
@@ -832,5 +916,63 @@ mod tests {
         assert_eq!(hits, 1000, "二进制命中帧不应下发");
         let done: Value = serde_json::from_str(frames.last().unwrap()).unwrap();
         assert_eq!(done["truncated"], false);
+    }
+
+    // ---------- pump 走 grep 引擎全链路（真子进程） ----------
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pump_grep_streams_match_frames_and_done() {
+        let Some(grep) = probe("grep") else {
+            return; // 环境无 grep：跳过
+        };
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "needle here\nno\n").unwrap();
+        std::fs::write(dir.path().join("b.txt"), "中文needle\n").unwrap();
+
+        let mut child = Command::new(&grep)
+            .args(["--null", "-rHn", "-s", "-I", "-e", "needle"])
+            .arg(dir.path())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
+
+        let parser = FrameParser::Grep { root_canonical: dir.path().to_path_buf() };
+        let (tx, mut rx) = mpsc::channel::<Result<String, std::io::Error>>(8);
+        let handle = tokio::spawn(pump(
+            child,
+            stdout,
+            stderr,
+            parser,
+            tx,
+            std::time::Duration::from_secs(60),
+        ));
+
+        let mut frames = Vec::new();
+        while let Some(Ok(line)) = rx.recv().await {
+            frames.push(line);
+        }
+        let outcome = handle.await.unwrap();
+        assert!(!outcome.truncated);
+        assert!(outcome.rg_error.is_none(), "grep 退出码 0/1 均非错误");
+        let hits: Vec<Value> = frames[..frames.len() - 1]
+            .iter()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(frames.last().is_some(), true, "必须有终帧");
+        let done: Value = serde_json::from_str(frames.last().unwrap()).unwrap();
+        assert_eq!(done["done"], true);
+        assert_eq!(hits.len(), 2);
+        let a = hits.iter().find(|h| h["file"] == "a.txt").unwrap();
+        assert_eq!(a["line"], 1);
+        assert_eq!(a["col"], 1);
+        assert_eq!(a["text"], "needle here");
+        let b = hits.iter().find(|h| h["file"] == "b.txt").unwrap();
+        assert_eq!(b["text"], "中文needle");
     }
 }
