@@ -125,7 +125,9 @@ pub fn build_router(state: AppState) -> Router {
     let app = app.layer(TraceLayer::new_for_http());
 
     // CORS：--cors-origin 时精确 origin + GET/POST + authorization/content-type；否则不加层。
-    // 用 list 而非 Const(exact)：仅当请求 Origin 匹配才回显该值（Const 会无条件回显常量）
+    // 用 list 而非 Const(exact)：仅当请求 Origin 匹配才回显该值（Const 会无条件回显常量）。
+    // expose_headers：x-vv-lang/x-vv-encoding 是 JS 可读响应头，跨源默认被浏览器
+    // CSP 过滤拦截（I1）——不暴露则前端跨源部署拿不到语言/编码检测结果
     let cors = state
         .cors_origin
         .as_deref()
@@ -135,6 +137,10 @@ pub fn build_router(state: AppState) -> Router {
                 .allow_origin(AllowOrigin::list([origin]))
                 .allow_methods([Method::GET, Method::POST])
                 .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+                .expose_headers([
+                    header::HeaderName::from_static("x-vv-lang"),
+                    header::HeaderName::from_static("x-vv-encoding"),
+                ])
         });
     match cors {
         Some(layer) => app.layer(layer),

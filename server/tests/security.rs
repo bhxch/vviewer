@@ -323,3 +323,24 @@ async fn cross_origin_not_echoed_for_unlisted_origin() {
     let res = app.oneshot(builder.body(Body::empty()).unwrap()).await.unwrap();
     assert!(res.headers().get("access-control-allow-origin").is_none());
 }
+
+#[tokio::test]
+async fn cors_exposes_vv_detection_response_headers() {
+    // I1：x-vv-lang/x-vv-encoding 是 JS 可读响应头，跨源默认被浏览器过滤——
+    // 不宣告 access-control-expose-headers 则跨源部署的前端拿不到检测结果
+    let f = fixture(Some("tok-123"), Some("http://example.com"));
+    let app = vviewer::build_router(f.state);
+    let builder = Request::builder()
+        .method("GET")
+        .uri("/api/health")
+        .header("origin", "http://example.com");
+    let res = app.oneshot(builder.body(Body::empty()).unwrap()).await.unwrap();
+    let expose = res
+        .headers()
+        .get("access-control-expose-headers")
+        .expect("跨源响应应含 access-control-expose-headers")
+        .to_str()
+        .unwrap();
+    assert!(expose.contains("x-vv-lang"), "expose 头缺 x-vv-lang: {expose}");
+    assert!(expose.contains("x-vv-encoding"), "expose 头缺 x-vv-encoding: {expose}");
+}
