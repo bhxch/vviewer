@@ -532,3 +532,79 @@ test('HL-11/2: 约 2MB 解析期间 rAF 帧率不掉（域文档实测 53fps；�
   // 解析本身正常完成（不冻结的最终证据）
   await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 20_000 });
 });
+
+/** typescript 载体 B（BUG-43 判据 2 会话级短路验证件；与 TS_SRC 不同内容，防「重开已
+ * 打开文件」缓存路径混入——先例 HL-01 的 RS_A/RS_B 惯例） */
+const TS_SRC_B = [
+  'export function sum(list: number[]): number {',
+  '  return list.reduce((acc, n) => acc + n, 0);',
+  '}'
+].join('\n');
+
+test.fixme('BUG-43 [探索]: tree-sitter worker init 成功零回包——页面静置 >15s 看门狗误杀，全会话本地高亮静默降级 hljs', async ({
+  page
+}) => {
+  // 发现于文件内搜索域、根因属 hl（代码高亮链路，packages/highlight）。复核成立（medium，
+  // 4199/8391 双实例 3/3 稳定，对照组全健康）：init 成功路径不向主线程回任何 ack
+  // （packages/highlight/src/worker.ts:82-107——.then 内仅排空排队请求，队列空则零回包，
+  // 仅失败走 console.error+postError）；HighlightClient 看门狗（client.ts:18
+  // INIT_TIMEOUT_MS=15_000）以「收到过任何消息」判活（markWorkerAlive 仅由 onmessage 置位，
+  // client.ts:85-92），超时即 failWorker 置 initFailed（client.ts:74-80,104-117），此后
+  // highlight() 一律 reject（client.ts:126-128）——页面加载后 15s 内无本地代码高亮请求的
+  // 会话（viewer.ts:51-56 启动即预热握手、无请求，打开页面→浏览/连接→再开文件的自然序列
+  // 必然命中）被误判「初始化超时」，worker 永久短路：该会话内此后所有本地代码文件与
+  // markdown 围栏静默降级 hljs 兜底（hljs 兜底仍正确渲染文本、搜索高亮不受影响），仅一条
+  // 误导性 console.error「初始化超时（15s 无响应）·排查 worker chunk 是否 404/MIME 异常」
+  // （highlightClient.ts:254-256；实测 manifest.json/ts-worker-*.js/tree-sitter.wasm 全 200）。
+  // 同根因已在 t-md.spec.ts BUG-40 [探索] 占位（markdown 围栏视角）；本条为 hl 域主视角：
+  // 本地代码文件 + 同会话二次打开仍降级（全会话永久短路）。
+  // 最小复现：cwd=apps/web，node .temp/explore-fsearch/p5d-watchdog.mjs（空闲 20s 再开
+  // crossline.ts；对照组不空闲）；影响面 p6-confirm.mjs（md 围栏）、p7-final.mjs（含 8391）。
+  // 证据：node .temp/verify-fsearch-E1/watchdog-verify.mjs 六场景——A1（4199 空闲 20s 后开
+  // verify-case.ts）状态栏「高亮: hljs 兜底 · 执行: 本地」、.vv-code-body 内 ts-* span=0、
+  // __vvLastHighlightOk=false、console.error 出现于 t+15.1s（早于 t+20s 的开文件动作，证明
+  // 看门狗在空闲期独立触发），同会话网络记录 manifest/ts-worker/tree-sitter.wasm 全 200；
+  // A2 对照（同实例立即开）→ tree-sitter、ts-span=205；B1/B2 于 8391 同构复现；C1/C2 md
+  // 围栏 0 vs 32 span。watchdog-verify2.mjs（4199 空闲 20s 后同会话连开 one.ts→two.ts→
+  // note.md）三文件全降级（ts-span 均 0、hljs-span>0 证明 hljs 在渲染），console.error 仅
+  // t+15.1s 一条——误杀后全会话永久短路，非单文件现象；截图 6 张同目录。
+  // 「15s 内有高亮请求则健康」的对照由既有 HL-01/HL-10/HL-10/2 等用例天然承担（goto 后
+  // 立即开文件，全绿即对照不回归）。修复方向：init 成功回 ack（workerAlive 置位解除看门狗）；
+  // 修复后本用例转正。
+  test.setTimeout(120_000);
+  const consoleErrors: string[] = [];
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') consoleErrors.push(msg.text());
+  });
+  await page.goto('/');
+  // 注入后静置 16s：预热 init 握手已发出（viewer.ts:51-56），期间零高亮请求——越过 15s
+  // 看门狗窗口（现状在此窗口内被误杀；修复后 ack 到达解除看门狗）
+  await openDir(page, [
+    { name: 'watchdog43-a.ts', type: 'text/plain', content: TS_SRC },
+    { name: 'watchdog43-b.ts', type: 'text/plain', content: TS_SRC_B }
+  ]);
+  await page.waitForTimeout(16_000);
+
+  // 修复判据 1：越过看门狗窗口后首次打开代码文件仍走 tree-sitter（缺陷态：状态栏
+  // 「高亮: hljs 兜底 · 执行: 本地」+ .vv-code-body 内 ts-* span=0）
+  await openFile(page, 'watchdog43-a.ts');
+  await expect(page.locator('.vv-code-pre span[class^="ts-"]').first()).toBeVisible({
+    timeout: 30_000
+  });
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 20_000 });
+  await expect(page.locator('.vv-statusbar')).toContainText('执行: 本地', { timeout: 20_000 });
+  await expect(page.locator('.vv-code-pre span[class^="hljs-"]')).toHaveCount(0);
+
+  // 修复判据 2：全会话不短路——同会话再开第二个文件仍 tree-sitter（缺陷态：initFailed
+  // 后所有 highlight() 直接 reject，watchdog-verify2 三文件全降级）
+  await openFile(page, 'watchdog43-b.ts');
+  await expect(page.locator('.vv-code-pre span[class^="ts-"]').first()).toBeVisible({
+    timeout: 30_000
+  });
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 20_000 });
+
+  // 修复判据 3：误导性超时错误不出现（现状文案含「初始化超时」并把排查引向 worker chunk
+  // 404/MIME，实测资产全 200）
+  expect(consoleErrors.join('\n')).not.toContain('初始化超时');
+  await expect(page.locator('.vv-error-card')).toHaveCount(0);
+});
