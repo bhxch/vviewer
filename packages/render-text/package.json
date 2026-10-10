@@ -20,7 +20,8 @@
     ".": "./src/code.ts",
     "./markdown/markdownRenderer": "./src/markdown/markdownRenderer.ts",
     "./html": "./src/html.ts",
-    "./sanitize": "./src/markdown/sanitize.ts"
+    "./sanitize": "./src/markdown/sanitize.ts",
+    "./jsonl": "./src/jsonl/index.ts"
   },
   "license": "Apache-2.0"
 }
