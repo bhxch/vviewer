@@ -30,4 +30,12 @@ export {
   type VirtualQueries,
 } from './core-parse';
 export { HighlightClient, HighlightCanceledError } from './client';
+export {
+  colorsToUiVars,
+  TEXTMATE_TO_CAPTURE,
+  themeKind,
+  tokenColorsToThemeTable,
+  validateVscodeTheme,
+  type VscodeThemeJson,
+} from './vscode';
 export { createHandler, initWorker, serveWorker, type InitMessage, type WorkerInit } from './worker';
