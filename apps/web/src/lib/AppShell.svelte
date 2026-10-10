@@ -97,6 +97,7 @@
         if (t.kind === 'restorable' && dirStoreAtRestore) {
           const tab = addTab(dirStoreAtRestore, t.path, t.name);
           tab.scrollTop = t.scrollTop;
+          if (t.overrideRenderer !== undefined) tab.overrideRenderer = t.overrideRenderer; // C 项读回
           continue;
         }
         if (t.kind === 'rename-only' && t.storeBase !== undefined && last !== null && last.baseUrl === t.storeBase) {
@@ -110,6 +111,7 @@
           if (store !== null) {
             const tab = addTab(store, t.path, t.name);
             tab.scrollTop = t.scrollTop;
+            if (t.overrideRenderer !== undefined) tab.overrideRenderer = t.overrideRenderer; // C 项读回
             continue;
           }
         }

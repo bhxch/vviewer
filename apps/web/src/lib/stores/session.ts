@@ -9,6 +9,8 @@ export interface TabSnapshot {
   kind: 'restorable' | 'rename-only';
   scrollTop: number;
   active: boolean;
+  /** C 项：手选打开方式（override 渲染器 id）；无手选时不写，restore 侧读回重建。 */
+  overrideRenderer?: string;
 }
 
 const DB = 'vviewer';

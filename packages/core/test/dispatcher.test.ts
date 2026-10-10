@@ -334,3 +334,27 @@ describe('unknown-extension probe chain (C 项)', () => {
     expect(det.reclassifiedFrom).toBeUndefined(); // 原生无扩展名不算改派
   });
 });
+
+describe('dispatch rendererOverride (C 项)', () => {
+  it('forces the chosen renderer and skips BUG-13 magic precheck', async () => {
+    const reg = createRegistry();
+    reg.install(mk('code', ['txt']));
+    reg.install(mk('image', ['png']));
+    const d = createDispatcher(reg);
+    // .png + PNG 字节本该走 image；override=code 强制文本且不被 magic 预检改派
+    const { rendererId } = await d.dispatch(
+      source('real.png'), PNG, document.createElement('div'), { rendererOverride: 'code' },
+    );
+    expect(rendererId).toBe('code');
+  });
+
+  it('falls back to normal routing when override id is unknown', async () => {
+    const reg = createRegistry();
+    reg.install(mk('image', ['png']));
+    const d = createDispatcher(reg);
+    const { rendererId } = await d.dispatch(
+      source('real.png'), PNG, document.createElement('div'), { rendererOverride: 'ghost' },
+    );
+    expect(rendererId).toBe('image');
+  });
+});

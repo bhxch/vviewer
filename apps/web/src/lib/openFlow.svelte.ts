@@ -26,6 +26,8 @@ export interface Tab {
   unrestorable?: boolean;
   /** 渲染代数：SSE 变更刷新自增（ViewerPane 渲染 effect 依赖它重跑）；不进会话快照 */
   rev?: number;
+  /** C 项：手选打开方式（override 渲染器 id）。缺省 = 自动路由；写进会话快照 */
+  overrideRenderer?: string;
 }
 
 let seq = 0;
@@ -44,7 +46,8 @@ function snapshot(t: Tab): TabSnapshot {
     name: t.source.name,
     kind: t.source.storeId.startsWith('localfs:') ? 'restorable' : 'rename-only',
     scrollTop: t.scrollTop,
-    active: t.active
+    active: t.active,
+    ...(t.overrideRenderer !== undefined ? { overrideRenderer: t.overrideRenderer } : {})
   };
 }
 
@@ -127,6 +130,16 @@ class TabCollection {
       persistTimer = null;
       void persist();
     }, 300);
+  }
+
+  /** C 项：手选打开方式。rev++ 复用 SSE 刷新的重渲染通道；persist 落快照。 */
+  setRendererOverride(tabId: string, rendererId: string | null): void {
+    const tab = this.list.find((t) => t.id === tabId);
+    if (!tab) return;
+    if (rendererId === null) delete tab.overrideRenderer;
+    else tab.overrideRenderer = rendererId;
+    tab.rev = (tab.rev ?? 0) + 1;
+    void persist(); // 与 persistScroll 同款落盘入口（saveTabs 快照）
   }
 }
 

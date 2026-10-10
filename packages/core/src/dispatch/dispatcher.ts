@@ -11,8 +11,20 @@ import {
 } from './errorRenderer';
 
 export interface Dispatcher {
-  dispatch(source: FileSource, buffer: Uint8Array, target: HTMLElement):
-    Promise<{ instance: RenderedInstance; rendererId: RendererId; det: Detection }>;
+  dispatch(
+    source: FileSource,
+    buffer: Uint8Array,
+    target: HTMLElement,
+    opts?: DispatchOptions
+  ): Promise<{ instance: RenderedInstance; rendererId: RendererId; det: Detection }>;
+}
+
+/** dispatch 可选项（C 项：手选打开方式） */
+export interface DispatchOptions {
+  /** 渲染器 override：命中 registry.byId 即用——用户显式选择 ≠ 内容识别，
+   * 跳过探测链（resolveInitialRenderer）与 BUG-13 magic 预检，且不置
+   * reclassifiedFrom（改派语义只属于自动识别）；id 未命中静默走正常链。 */
+  rendererOverride?: RendererId;
 }
 
 const HEAD_SIZE = 8192;
@@ -156,29 +168,39 @@ export function createDispatcher(registry: Registry): Dispatcher {
   // render-media 不反向依赖 render-binary（避免包间耦合）；重复 createDispatcher 时后者覆盖
   setHexFallbackRenderer(registry.byId('hex') ?? null);
   return {
-    async dispatch(source, buffer, target) {
+    async dispatch(source, buffer, target, opts) {
       const head = buffer.slice(0, HEAD_SIZE);
       const det = detect({ name: source.name, head, full: buffer.length <= FULL_LIMIT ? buffer : undefined });
-      let renderer = registry.byExtension(det.ext);
+      // C 项 override 先于 byExtension 拦截：命中即用；id 未命中静默走正常探测链
+      const override = opts?.rendererOverride === undefined ? undefined : registry.byId(opts.rendererOverride);
+      let renderer: Renderer | undefined;
       try {
-        renderer = resolveInitialRenderer(renderer, det, head, registry);
-        if (!renderer) {
-          // 选路失败时 det.ext 必为 ''（extless 回退链未命中）或非空未知扩展名
-          throw new Error(
-            det.ext === ''
-              ? '不支持的文件类型（无扩展名且无法识别内容）'
-              : `不支持的扩展名 ".${det.ext}"`
-          );
-        }
-        let redirected = false;
-        if (renderer.sniff) {
-          const to = await renderer.sniff(head, det);
-          if (to && to !== renderer.id) {
-            const next = registry.byId(to);
-            if (next) { redirected = true; renderer = next; }
+        if (override) {
+          // override 路径：用户显式选择 ≠ 内容识别——不经过 resolveInitialRenderer
+          // （签名改派/文本探测/hex 兜底，因而不置 reclassifiedFrom）与 BUG-13 预检；
+          // sniff 仅作元数据补齐（ooxml 族依赖），返回的改派建议被忽略——显式选择不被推翻
+          renderer = override;
+          if (override.sniff) await override.sniff(head, det);
+        } else {
+          renderer = resolveInitialRenderer(registry.byExtension(det.ext), det, head, registry);
+          if (!renderer) {
+            // 选路失败时 det.ext 必为 ''（extless 回退链未命中）或非空未知扩展名
+            throw new Error(
+              det.ext === ''
+                ? '不支持的文件类型（无扩展名且无法识别内容）'
+                : `不支持的扩展名 ".${det.ext}"`
+            );
           }
+          let redirected = false;
+          if (renderer.sniff) {
+            const to = await renderer.sniff(head, det);
+            if (to && to !== renderer.id) {
+              const next = registry.byId(to);
+              if (next) { redirected = true; renderer = next; }
+            }
+          }
+          if (redirected && renderer.sniff) await renderer.sniff(head, det); // 允许最终 renderer 补充 sniff 元数据，但不再改派
         }
-        if (redirected && renderer.sniff) await renderer.sniff(head, det); // 允许最终 renderer 补充 sniff 元数据，但不再改派
         const instance = await renderer.render(buffer, target, source, det);
         return { instance, rendererId: renderer.id, det };
       } catch (err) {

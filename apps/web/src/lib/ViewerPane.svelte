@@ -139,7 +139,11 @@ import SearchPanel from './SearchPanel.svelte';
       try {
         const buffer = await current.source.store.read(current.source.path);
         if (cancelled || !host) return;
-        const res = await dispatcher.dispatch(current.source, buffer, host);
+        // C 项：手选打开方式随渲染重跑生效——setRendererOverride 的 rev++ 使本 effect
+        // 重跑，此处读回 override 传给 dispatch（命中即用，跳过自动探测链）
+        const res = await dispatcher.dispatch(current.source, buffer, host, {
+          rendererOverride: current.overrideRenderer
+        });
         if (cancelled) {
           res.instance.destroy();
           return;
