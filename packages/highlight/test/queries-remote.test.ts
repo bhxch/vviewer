@@ -81,3 +81,55 @@ describe.skipIf(!grammarAssetsReady)('TreeSitterEngine（queriesBase fetch 版�
     expect(r.ok).toBe(false);
   }, 30_000);
 });
+
+/**
+ * SPA-fallback 防御（终审 C1，双层修之前端层回归锚）：
+ * 静态服务器对缺失查询文件以 200 index.html 兜底（content-type text/html）时，
+ * 不得把 HTML 误载为查询文本——否则该语言 Query 编译抛错，整语言降级 hljs。
+ * 正确语义：200 text/html 视同缺失（undefined），highlights 照常生效。
+ */
+describe.skipIf(!grammarAssetsReady)('remoteQueryLoader（200 text/html 兜底防误载）', () => {
+  it('injections.scm 回 200 text/html → 视为缺失，highlights 单独生效（语言不整体降级）', async () => {
+    const server = http.createServer((req, res) => {
+      const url = (req.url ?? '/').split('?')[0]!;
+      // SPA fallback 模拟：injections.scm「未命中」回 200 index.html；highlights.scm 正常
+      if (url.endsWith('/injections.scm')) {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        res.end('<!doctype html><html><body>spa-shell</body></html>');
+        return;
+      }
+      const m = /^\/queries\/(.+)$/.exec(url);
+      try {
+        const body = readFileSync(path.join(queriesAssetDir, m?.[1] ?? ''));
+        res.writeHead(200, { 'content-type': 'text/plain' });
+        res.end(body);
+      } catch {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    const engine = await TreeSitterEngine.create({
+      queriesBase: `http://127.0.0.1:${port}/queries/`,
+      grammars: JSON.parse(
+        readFileSync(path.join(staticDir, 'grammars', 'manifest.json'), 'utf8'),
+      ).grammars as GrammarTable,
+      grammarsDir: path.join(staticDir, 'grammars'),
+      runtimeDir: staticDir,
+    });
+    try {
+      // 修前：HTML 被当作 injections 查询编译 → 整语言失败（ok:false）降级 hljs；
+      // 修后：HTML 视为缺失，bash 的 highlights 照常产出区间
+      const r = await engine.highlight('echo "hello"', 'sh');
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      const stringHit = r.intervals.find((i) => i.capture === 'string');
+      expect(stringHit).toBeDefined();
+      expect('echo "hello"'.slice(stringHit!.start, stringHit!.end)).toBe('"hello"');
+    } finally {
+      engine.dispose();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 30_000);
+});

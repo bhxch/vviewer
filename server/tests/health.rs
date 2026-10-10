@@ -90,6 +90,43 @@ async fn web_dist_serves_assets_and_spa_fallback() {
 }
 
 #[tokio::test]
+async fn grammar_asset_paths_not_swallowed_by_spa_fallback() {
+    let root = tempfile::tempdir().unwrap();
+    let dist = tempfile::tempdir().unwrap();
+    std::fs::write(dist.path().join("index.html"), "<html>spa-shell</html>").unwrap();
+    // 存在的 .scm 资产：ServeDir 直接命中 → 200 正常内容（非 index.html）
+    std::fs::create_dir_all(dist.path().join("queries").join("rust")).unwrap();
+    std::fs::write(dist.path().join("queries").join("rust").join("highlights.scm"), ";; rust query").unwrap();
+
+    let app = vviewer::build_router(test_state(
+        root.path().to_path_buf(),
+        Some(dist.path().to_path_buf()),
+    ));
+
+    // 存在 .scm → 200 正常
+    let (status, body) = get_body(app.clone(), "/queries/rust/highlights.scm").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_ref(), b";; rust query");
+
+    // 不存在的 .scm/.wasm → 404（终审 C1：不得以 200 index.html 兜底——
+    // 否则前端把 HTML 误载为查询文本，缺 injections.scm 的语言整体降级 hljs）
+    for uri in [
+        "/queries/elisp/injections.scm",
+        "/grammars/tree-sitter-elisp.wasm",
+        "/queries/a/b/highlights.scm",
+    ] {
+        let (status, body) = get_body(app.clone(), uri).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{uri} 应 404");
+        assert_ne!(body.as_ref(), b"<html>spa-shell</html>", "{uri} 不得回 index.html");
+    }
+
+    // 非 .scm/.wasm 未知路径仍走 SPA fallback（回归确认修法不外溢）
+    let (status, body) = get_body(app, "/some/spa/route").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_ref(), b"<html>spa-shell</html>");
+}
+
+#[tokio::test]
 async fn compute_health_advertises_sorted_language_list() {
     let dir = tempfile::tempdir().unwrap();
     let state = test_state(dir.path().to_path_buf(), None).with_compute(true);

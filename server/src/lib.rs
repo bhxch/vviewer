@@ -12,7 +12,7 @@ pub mod watch;
 use std::time::Duration;
 
 use axum::extract::{Request, State};
-use axum::http::{header, HeaderValue, Method, StatusCode};
+use axum::http::{header, HeaderValue, Method, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
@@ -52,8 +52,14 @@ async fn placeholder_page() -> Html<&'static str> {
     )
 }
 
-/// SPA fallback：任何未知路径返回 dist/index.html。
-async fn serve_index(State(state): State<AppState>) -> Response {
+/// SPA fallback：任何未知路径返回 dist/index.html。`.scm`/`.wasm` 资产路径除外——
+/// 查询目录（如 113/307 缺 injections.scm）未命中时不得以 200 index.html 兜底，
+/// 否则前端把 HTML 误载为查询文本，整语言查询编译失败降级 hljs（终审 C1，双层修之 server 层）。
+async fn serve_index(uri: Uri, State(state): State<AppState>) -> Response {
+    let path = uri.path();
+    if path.ends_with(".scm") || path.ends_with(".wasm") {
+        return (StatusCode::NOT_FOUND, "grammar asset not found").into_response();
+    }
     let Some(dist) = &state.web_dist else {
         return placeholder_page().await.into_response();
     };

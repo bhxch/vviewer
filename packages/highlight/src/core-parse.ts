@@ -327,7 +327,12 @@ function remoteQueryLoader(base: string): AsyncQuerySource {
       const read = async (name: string): Promise<string | undefined> => {
         try {
           const res = await fetch(`${dir}/${name}`);
-          return res.ok ? await res.text() : undefined;
+          // SPA-fallback 防御（终审 C1，双层修之前端层）：缺失查询被静态服务器以
+          // 200 index.html 兜底时视为缺失——误载会让 Query 编译抛错，整语言降级 hljs
+          if (!res.ok || (res.headers.get('content-type') ?? '').includes('text/html')) {
+            return undefined;
+          }
+          return await res.text();
         } catch {
           return undefined;
         }
