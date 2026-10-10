@@ -16,6 +16,10 @@ pub struct Health {
     /// 字段整体省略。客户端清单过期/缺失时按未知处理（保持既有先试远程行为）。
     #[serde(rename = "computeLanguages", skip_serializing_if = "Option::is_none")]
     pub compute_languages: Option<Vec<&'static str>>,
+    /// 跨文件搜索引擎宣告（A 项）：rg/grep 择一；双缺时字段整体省略。
+    /// 与 /api/search 同一选择链，测试经 rg_path/grep_path 注入覆盖。
+    #[serde(rename = "searchEngine", skip_serializing_if = "Option::is_none")]
+    pub search_engine: Option<&'static str>,
 }
 
 /// 能力宣告：`file-server` 恒有；`--compute` 时追加 `compute`
@@ -27,11 +31,14 @@ pub async fn health(State(state): State<AppState>) -> Json<Health> {
         capabilities.push("compute");
         compute_languages = Some(crate::compute::queries::supported_languages());
     }
+    let search_engine =
+        crate::routes::search::resolve_engine(&state).ok().map(|(engine, _)| engine.name());
     Json(Health {
         name: "vviewer",
         version: env!("CARGO_PKG_VERSION"),
         capabilities,
         compute_languages,
+        search_engine,
     })
 }
 
@@ -42,8 +49,7 @@ mod tests {
     use axum::response::IntoResponse;
     use std::path::PathBuf;
 
-    async fn health_json(compute: bool) -> serde_json::Value {
-        let state = AppState::new(PathBuf::from("."), None, None, false, None).with_compute(compute);
+    async fn health_json(state: AppState) -> serde_json::Value {
         let res = health(State(state)).await;
         let bytes = to_bytes(res.into_response().into_body(), 64 * 1024)
             .await
@@ -51,16 +57,20 @@ mod tests {
         serde_json::from_slice(&bytes).expect("json")
     }
 
+    fn base_state() -> AppState {
+        AppState::new(PathBuf::from("."), None, None, false, None)
+    }
+
     #[tokio::test]
     async fn no_compute_omits_language_list() {
-        let v = health_json(false).await;
+        let v = health_json(base_state()).await;
         assert_eq!(v["capabilities"], serde_json::json!(["file-server"]));
         assert!(v.get("computeLanguages").is_none());
     }
 
     #[tokio::test]
     async fn compute_advertises_sorted_full_registry() {
-        let v = health_json(true).await;
+        let v = health_json(base_state().with_compute(true)).await;
         assert!(v["capabilities"].as_array().unwrap().contains(&serde_json::json!("compute")));
         let langs = v["computeLanguages"].as_array().expect("computeLanguages 数组");
         let names: Vec<&str> = langs.iter().map(|x| x.as_str().expect("str")).collect();
@@ -72,5 +82,24 @@ mod tests {
         assert!(names.contains(&"rust") && names.contains(&"python"));
         // 阶段 1 收口：java 已进服务端集合（BUG-06c 时代的缺席断言翻转）
         assert!(names.contains(&"java"));
+    }
+
+    #[tokio::test]
+    async fn search_engine_omitted_when_both_engines_missing() {
+        let state = base_state()
+            .with_rg_path(Some("/nonexistent/rg-for-test".to_string()))
+            .with_grep_path(Some("/nonexistent/grep-for-test".to_string()));
+        let v = health_json(state).await;
+        assert!(v.get("searchEngine").is_none());
+    }
+
+    #[tokio::test]
+    async fn search_engine_announces_forced_grep() {
+        let grep = crate::routes::search::probe("grep").expect("CI 需要系统 grep");
+        let state = base_state()
+            .with_rg_path(Some("/nonexistent/rg-for-test".to_string()))
+            .with_grep_path(Some(grep));
+        let v = health_json(state).await;
+        assert_eq!(v["searchEngine"], "grep");
     }
 }
