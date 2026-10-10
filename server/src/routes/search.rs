@@ -171,7 +171,8 @@ fn rg_args(req: &SearchRequest, hidden: bool) -> Vec<String> {
 /// 已知差异（spec §2.2）：无 --max-filesize（全读，60s 墙钟+命中上限兜底）、
 /// 无 --sort path（顺序不保证）、regex 走 ERE 方言、无列号（col 恒 1）。
 /// `hidden` 无对应开关：grep -r 天然含 dot 条目、不读 ignore。
-/// - --include 仅按 basename 匹配 glob（rg -g 对相对路径全程匹配），含 / 的 glob 在 grep 下语义不同
+/// --include 仅按 basename 匹配 glob（rg -g 对相对路径全程匹配），含 / 的 glob 在 grep 下语义不同；
+/// BSD grep 的 --include 为全路径匹配（* 跨 /），含 / 的 glob 两端行为不同。
 fn grep_args(req: &SearchRequest, hidden: bool) -> Vec<String> {
     let _ = hidden;
     let mut args = vec![
@@ -688,6 +689,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // /bin/sh 仅 unix 恒存在
     fn resolve_engine_prefers_executable_rg_path_override() {
         // /bin/sh 恒存在且可执行：验证「Some(可执行) → 直接绑定 rg」
         let state = test_state().with_rg_path(Some("/bin/sh".to_string()));

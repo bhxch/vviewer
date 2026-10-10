@@ -47,7 +47,7 @@ pnpm build:all        # 前端 → apps/web/build + cargo build --release → se
 # 打开 http://127.0.0.1:8321（本机免鉴权；局域网加 --allow-lan --token-gen）
 ```
 
-需要服务端计算（远程高亮/comrak/ripgrep 搜索）时追加 `--compute`；rg 可选——缺失时自动降级系统 grep（差异与引擎宣告见上）。
+需要服务端计算（远程高亮/comrak 渲染）时追加 `--compute`；跨文件搜索除外：属文件服务基础能力，无需 `--compute`——rg 可选，缺失时自动降级系统 grep（差异与引擎宣告见上）。
 
 ### 纯前端（静态托管）
 
