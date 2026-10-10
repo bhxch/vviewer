@@ -6,6 +6,7 @@ export * from './compute/remote';
 export * from './compute/search';
 export * from './detect';
 export * from './registry/registry';
+export * from './registry/generated-extensions';
 export * from './dispatch/dispatcher';
 export * from './dispatch/errorRenderer';
 export * from './tree/singleFile';

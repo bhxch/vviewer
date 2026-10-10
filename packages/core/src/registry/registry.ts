@@ -8,6 +8,7 @@ export class RegistryError extends Error {
 
 export interface Registry {
   install(r: Renderer): void;
+  installFallbackExtensions(ownerId: RendererId, exts: readonly string[]): { added: string[]; skipped: string[] };
   byExtension(ext: string): Renderer | undefined;
   byId(id: string): Renderer | undefined;
   all(): Renderer[];
@@ -28,6 +29,25 @@ export function createRegistry(): Registry {
       }
       byId.set(r.id, r);
       for (const ext of exts) byExt.set(ext, r);
+    },
+    installFallbackExtensions(ownerId, exts) {
+      const owner = byId.get(ownerId);
+      if (!owner) throw new Error(`Renderer id "${ownerId}" 不存在，无法补注册扩展名`);
+      const added: string[] = [];
+      const skipped: string[] = [];
+      // 生成物只补空位：专有渲染器先注册（C 项装配铁律），被占即跳过——
+      // jsonl/ndjson 等未来由专有渲染器（D 项）注册后天然免疫生成物覆盖
+      for (const raw of [...exts].sort()) {
+        const ext = raw.toLowerCase();
+        const existing = byExt.get(ext);
+        if (existing) {
+          skipped.push(ext);
+          continue;
+        }
+        byExt.set(ext, owner);
+        added.push(ext);
+      }
+      return { added, skipped };
     },
     byExtension: (ext) => byExt.get(ext.toLowerCase()),
     byId: (id) => byId.get(id),

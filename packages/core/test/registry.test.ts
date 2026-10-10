@@ -34,3 +34,24 @@ describe('createRegistry', () => {
     expect(createRegistry().byExtension('zzz')).toBeUndefined();
   });
 });
+
+describe('installFallbackExtensions', () => {
+  it('registers free extensions and skips taken ones without throwing', () => {
+    const reg = createRegistry();
+    reg.install(mk('code', ['txt']));
+    reg.install(mk('markdown', ['md']));
+    const res = reg.installFallbackExtensions('code', ['jsonl', 'txt', 'md', 'adoc']);
+    expect(res.added).toEqual(['adoc', 'jsonl']);   // 升序稳定
+    expect(res.skipped).toEqual(['md', 'txt']);
+    expect(reg.byExtension('jsonl')?.id).toBe('code');
+    expect(reg.byExtension('md')?.id).toBe('markdown'); // 占用者不变
+  });
+
+  it('normalizes case and rejects unknown owner', () => {
+    const reg = createRegistry();
+    expect(() => reg.installFallbackExtensions('ghost', ['x'])).toThrow(/ghost/);
+    reg.install(mk('code', []));
+    reg.installFallbackExtensions('code', ['JSONL']);
+    expect(reg.byExtension('jsonl')?.id).toBe('code');
+  });
+});

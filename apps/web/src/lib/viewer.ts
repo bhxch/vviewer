@@ -1,4 +1,4 @@
-import { createRegistry, createDispatcher, type Dispatcher, type Registry } from '@vviewer/core';
+import { createRegistry, createDispatcher, GENERATED_EXTENSIONS, type Dispatcher, type Registry } from '@vviewer/core';
 import { codeRenderer, attachHighlightRouter } from '@vviewer/render-text';
 import {
   markdownRenderer,
@@ -38,6 +38,12 @@ registry.install(xlsxRenderer);
 registry.install(pptxRenderer);
 registry.install(hexRenderer);
 registry.install(archiveRenderer);
+
+// C 项：手工清单之外的语法类扩展名由生成物补充（专有渲染器已先注册，冲突跳过）。
+const fallback = registry.installFallbackExtensions('code', GENERATED_EXTENSIONS);
+if (fallback.added.length > 0) {
+  console.debug(`[viewer] generated extensions → code: +${fallback.added.length} (skipped ${fallback.skipped.length})`);
+}
 
 // libarchive worker 路径：worker bundle + wasm 由 vite 插件拷到 static/libarchive/
 // （见 vite.config.ts copyLibarchiveAssets），仅存 URL 字符串，首次解包时才起 worker
