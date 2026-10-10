@@ -208,3 +208,35 @@ describe('main()（CLI 入口：Task 5 publish job 经 env 驱动）', () => {
     expect(p.repoPkgJson).toBe(path.join(repoRoot, 'package.json'));
   });
 });
+
+describe('packNpm contentHash（发布去重门的内容寻址哈希）', () => {
+  it('contentHash：16 hex 入 package.json', () => {
+    const f = fixture();
+    packNpm(ARGS(f));
+    const pkg = JSON.parse(readFileSync(path.join(f.outDir, 'package.json'), 'utf8')) as PkgJson & {
+      contentHash: string;
+    };
+    expect(pkg.contentHash).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it('确定性：generatedAt 差异不影响哈希（manifest 唯一非稳定字段被归一）', () => {
+    const f1 = fixture();
+    const r1 = packNpm(ARGS(f1));
+    const f2 = fixture();
+    const m2 = path.join(f2.grammars, 'manifest.json');
+    const parsed = JSON.parse(readFileSync(m2, 'utf8')) as { generatedAt: string };
+    parsed.generatedAt = '2099-01-01T00:00:00.000Z';
+    writeFileSync(m2, JSON.stringify(parsed));
+    const r2 = packNpm(ARGS(f2));
+    expect(r2.contentHash).toBe(r1.contentHash);
+  });
+
+  it('敏感性：wasm 字节变化 → 哈希变化', () => {
+    const f1 = fixture();
+    const r1 = packNpm(ARGS(f1));
+    const f2 = fixture();
+    writeFileSync(path.join(f2.grammars, 'javascript.wasm'), Buffer.from([1, 2, 3, 4, 255]));
+    const r2 = packNpm(ARGS(f2));
+    expect(r2.contentHash).not.toBe(r1.contentHash);
+  });
+});

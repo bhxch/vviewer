@@ -8,6 +8,9 @@
 //                                  'SEE LICENSE IN GRAMMAR_LICENSES.md' 指向的文件必须在包内；
 //                                  源 = 仓库根 server/GRAMMAR_LICENSES.md，gen-licenses.mjs 产物，
 //                                  打包前置——缺失即抛错）
+//   package.json.contentHash       打包内容确定性哈希（wasm+queries+license；manifest 剔除
+//                                  generatedAt 后归一纳入；版本号不参与）——publish 门据此
+//                                  跳过零变化发包：内容不变时复用已发布版本，CDN URL 稳定
 // 布局契约（控制台裁决 2026-10-09，ledger「布局契约统一」条，绑定）：客户端 manifest URL =
 // `${base}manifest.json`、wasm URL = `${base}${file}` 同 base（grammarLayers.ts 装配），
 // 因此 manifest 必须与 wasm 同目录。manifest 条目注 base: './'（同目录相对）——客户端消费时
@@ -19,6 +22,7 @@
 // VV_QUERIES_DIR（默认 packages/highlight/assets/queries）。outDir 应指向空目录（脚本不清理既有内容）。
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -65,6 +69,33 @@ function walkFiles(dir) {
     else out.push({ file: p, bytes: fs.statSync(p).size });
   }
   return out;
+}
+
+/**
+ * 打包内容确定性哈希（sha256 前 16 hex）：wasm 字节 + 查询树 + license 全参与；
+ * package.json（含版本号）不参与；grammars/manifest.json 以归一化形态纳入——
+ * 剔除 generatedAt 时间戳（唯一跨构建非稳定字段），键按字典序重排。同内容
+ * 跨构建/跨版本哈希稳定，publish 门据此跳过零变化发包（阶段 4 终审后裁决）。
+ */
+function contentHashOf(outDir) {
+  const h = createHash('sha256');
+  const files = walkFiles(outDir)
+    .map((f) => ({ file: f.file, rel: path.relative(outDir, f.file).split(path.sep).join('/') }))
+    .sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
+  for (const f of files) {
+    if (f.rel === 'package.json' || f.rel === 'grammars/manifest.json') continue;
+    h.update(f.rel);
+    h.update('\0');
+    h.update(fs.readFileSync(f.file));
+    h.update('\0');
+  }
+  const manifest = JSON.parse(fs.readFileSync(path.join(outDir, 'grammars', 'manifest.json'), 'utf8'));
+  delete manifest.generatedAt;
+  h.update('grammars/manifest.json');
+  h.update('\0');
+  h.update(JSON.stringify(manifest, Object.keys(manifest).sort()));
+  h.update('\0');
+  return h.digest('hex').slice(0, 16);
 }
 
 /**
@@ -115,6 +146,7 @@ export function packNpm({
   fs.copyFileSync(licenseFile, path.join(outDir, 'GRAMMAR_LICENSES.md'));
 
   const repository = readRepository(repoPkgJson);
+  const contentHash = contentHashOf(outDir);
   const pkg = {
     name,
     version,
@@ -123,12 +155,13 @@ export function packNpm({
     ...(repository ? { repository } : {}),
     license: 'SEE LICENSE IN GRAMMAR_LICENSES.md',
     description: 'vviewer grammar wasm 全量资产（自建，manifest+queries）',
+    contentHash,
   };
   fs.writeFileSync(path.join(outDir, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
 
   const files = walkFiles(outDir);
   const bytes = files.reduce((s, f) => s + f.bytes, 0);
-  return { files: files.length, bytes };
+  return { files: files.length, bytes, contentHash };
 }
 
 export async function main(env = process.env) {
@@ -149,7 +182,7 @@ export async function main(env = process.env) {
   const r = packNpm({ ...paths, name: env.VV_NPM_PACKAGE_NAME, version: env.VV_NPM_PACKAGE_VERSION });
   console.log(
     `[pack-npm] ${r.files} files, ${(r.bytes / 1024 / 1024).toFixed(1)}MB -> ${paths.outDir}` +
-      ` (${env.VV_NPM_PACKAGE_NAME}@${env.VV_NPM_PACKAGE_VERSION})`,
+      ` (${env.VV_NPM_PACKAGE_NAME}@${env.VV_NPM_PACKAGE_VERSION}) contentHash=${r.contentHash}`,
   );
   return r;
 }
