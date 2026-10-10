@@ -17,6 +17,12 @@
 //! 全同步实现（聚合走 std 线程 + `recv_timeout`，watcher 重建同在聚合线程内）：
 //! `AppState::new` 无需 tokio runtime 也可构造（main 在进入 runtime 前构造
 //! state，测试在任意上下文构造）。
+//!
+//! 扫描不跟随 symlink（BUG-68）：notify 8.2 默认 `follow_symlinks=true` 会使
+//! 递归扫描深入 root 外 symlink（如 → /etc），权限错误致建监听失败降级
+//! PollWatcher 后，周期重扫每轮对每个被拒路径刷 WARN（实测 ≈47GB/天）。
+//! `with_follow_symlinks(false)` 后两级后端都只在 root 内扫描；越界 symlink
+//! 目标内的变更本就在 root 外（collect_event 既有口径剔除），语义不变。
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -473,9 +479,14 @@ fn open_recommended(
     root: &Path,
 ) -> Result<(RecommendedWatcher, std::sync::mpsc::Receiver<RawEvent>), NotifyError> {
     let (raw_tx, raw_rx) = std::sync::mpsc::channel::<RawEvent>();
-    let mut watcher = notify::recommended_watcher(move |res| {
-        let _ = raw_tx.send(res);
-    })?;
+    let mut watcher = RecommendedWatcher::new(
+        move |res: RawEvent| {
+            let _ = raw_tx.send(res);
+        },
+        // BUG-68：扫描不跟随 symlink——越界 symlink（如 → /etc）内的权限错误
+        // 不再使建监听失败/重扫报错；symlink 条目自身的增删改仍上报
+        NotifyConfig::default().with_follow_symlinks(false),
+    )?;
     watcher.watch(root, RecursiveMode::Recursive)?;
     Ok((watcher, raw_rx))
 }
@@ -490,7 +501,10 @@ fn open_poll(
         move |res| {
             let _ = raw_tx.send(res);
         },
-        NotifyConfig::default().with_poll_interval(poll_interval),
+        // 同 open_recommended：poll 扫描也不跟随 symlink（BUG-68）
+        NotifyConfig::default()
+            .with_poll_interval(poll_interval)
+            .with_follow_symlinks(false),
     )?;
     watcher.watch(root, RecursiveMode::Recursive)?;
     Ok((watcher, raw_rx))
@@ -886,5 +900,89 @@ mod tests {
             frame.contains("changed") && frame.contains("seed.txt"),
             "changed 帧应含相对路径 seed.txt: {frame}"
         );
+    }
+
+    /// 构造「root 内含指向外部目录的 symlink，目标含 0o000 子目录」的场景。
+    /// 修复前：inotify 建 watch 的 walkdir 深入 symlink 遇 EACCES → 建监听失败
+    /// → 健康非 Ok（BUG-68 现场形态）；修复后（follow_symlinks=false）不深入 → Ok。
+    /// chmod 0o000 仅对非 root 生效，测试以非 root 运行。
+    #[cfg(unix)]
+    fn make_root_with_escape_symlink(dir: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let root = dir.join("root");
+        let target = dir.join("outside");
+        std::fs::create_dir_all(target.join("locked")).unwrap();
+        std::fs::set_permissions(target.join("locked"), PermissionsExt::from_mode(0o000)).unwrap();
+        std::fs::create_dir_all(&root).unwrap();
+        std::os::unix::fs::symlink(&target, root.join("escape")).unwrap();
+        root
+    }
+
+    /// BUG-68 根因回归：root 含越界 symlink（目标含不可读目录）时 watcher 健康应为
+    /// Ok——扫描不深入 symlink，不再因目标内权限错误致建监听失败。
+    #[cfg(unix)]
+    #[test]
+    fn escape_symlink_root_watches_ok() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = make_root_with_escape_symlink(dir.path());
+        let hub = ChangeHub::spawn(&root);
+        assert_eq!(hub.health(), WatchHealth::Ok, "含越界 symlink 的 root 应健康 Ok");
+        // 后台重试/降级稳定后仍为 Ok（不因运行期问题翻转为 Recovering/Degraded）
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(hub.health(), WatchHealth::Ok);
+        drop(hub); // stop 置位，聚合线程退出
+        // 恢复权限便于 tempdir 清理
+        std::fs::set_permissions(dir.path().join("outside/locked"), PermissionsExt::from_mode(0o700))
+            .ok();
+    }
+
+    /// 降级路径（PollWatcher）同样不深入 symlink：强制降级后，root 内真实文件的
+    /// 变更仍能经 pollscan 聚合为 changed（越界 symlink 不阻断扫描、不产生错误事件）。
+    #[cfg(unix)]
+    #[test]
+    fn poll_session_over_escape_symlink_still_delivers_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = make_root_with_escape_symlink(dir.path());
+        let stop = AtomicBool::new(false);
+        let rec_fails = Arc::new(AtomicUsize::new(0));
+        let poll_root = root.clone();
+        let open_rec: Opener = Box::new(move || {
+            rec_fails.fetch_add(1, Ordering::SeqCst);
+            Err(NotifyError::io(std::io::Error::other("forced degrade")))
+        });
+        let open_poll: Opener = Box::new(move || {
+            let (w, rx) = open_poll(&poll_root, Duration::from_millis(50))?;
+            Ok((Box::new(w) as Box<dyn Send>, rx, "Poll".to_string()))
+        });
+        let mut factory = factory(open_rec, open_poll);
+        let session = factory.build(&stop).expect("降级 poll 会话应建立成功");
+        assert!(session.degraded);
+        // 写一个真实文件，等 ≥2 个轮询周期，断言收到该路径的事件（无 Err 事件）
+        std::fs::write(root.join("seed.txt"), "x").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut saw_seed = false;
+        while Instant::now() < deadline {
+            match session.rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(Ok(ev)) => {
+                    let mut out = BTreeSet::new();
+                    collect_event(&ev, &root, &mut out);
+                    if out.iter().any(|p| p.contains("seed.txt")) {
+                        saw_seed = true;
+                        break;
+                    }
+                }
+                Ok(Err(_)) => panic!("poll 会话不得产生错误事件（BUG-68 刷屏源应消失）"),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(_) => panic!("事件通道意外断开"),
+            }
+        }
+        assert!(saw_seed, "3s 内应收到 seed.txt 的变更事件");
+        drop(session);
+        std::fs::set_permissions(
+            dir.path().join("outside/locked"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o700),
+        )
+        .ok();
     }
 }
