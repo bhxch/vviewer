@@ -1,0 +1,67 @@
+{
+  "note": "abi 字段为构建元数据占位（恒 null）；加载侧无 ABI 门控，兼容性由 web-tree-sitter 运行时加载校验兜底",
+  "generatedAt": "2026-10-10T16:32:45.730Z",
+  "source": "self-built",
+  "grammars": {
+    "cpp": {
+      "file": "cpp.wasm",
+      "abi": null,
+      "sha256": "ab9e891709f5dc88fd6b1b4d33f110fb23e5ddc5e64296caf4a41d0a3e585ebe",
+      "aliases": [
+        "c++",
+        "cc",
+        "hpp"
+      ]
+    },
+    "elisp": {
+      "file": "elisp.wasm",
+      "abi": null,
+      "sha256": "61fe68b20457c7c23f915301ec6cc2615516185c7683ca64f32b03be2128ee01",
+      "aliases": [
+        "emacs-lisp",
+        "el"
+      ]
+    },
+    "embedded-template": {
+      "file": "embedded-template.wasm",
+      "abi": null,
+      "sha256": "2d7dfbb768ed912bfdb6127797cbc6c39bb91be199bf0a169f91801b0eb9bcf8",
+      "aliases": [
+        "erb",
+        "ejs"
+      ]
+    },
+    "ql": {
+      "file": "ql.wasm",
+      "abi": null,
+      "sha256": "4a5978dbdc64554d1894051a39fd2528824bb1007a306bbd99292ed14eba3ad4",
+      "aliases": [
+        "codeql"
+      ]
+    },
+    "solidity": {
+      "file": "solidity.wasm",
+      "abi": null,
+      "sha256": "7ae2d8aff2ec119ff8706667f45f5ff0d4edea901acef86e227664de83c6df51",
+      "aliases": [
+        "sol"
+      ]
+    },
+    "vue": {
+      "file": "vue.wasm",
+      "abi": null,
+      "sha256": "6244521bb3fb60f34ce5f677f2af81facb2c38691193985ca5fa85e1b6f29250",
+      "aliases": [],
+      "source": "vendored"
+    },
+    "yaml": {
+      "file": "yaml.wasm",
+      "abi": null,
+      "sha256": "5dea7cfff83d41d8f87fb8e434e1a5b292c0d670bfcdc42cb2af420ef490dde5",
+      "aliases": [
+        "yml"
+      ],
+      "source": "vendored"
+    }
+  }
+}
