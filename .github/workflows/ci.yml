@@ -32,6 +32,8 @@ jobs:
         with:
           languages: javascript,typescript,bash,html,css,json,python,rust
       - run: pnpm typecheck
+      # C 项：生成扩展名物入库（运行时装配依赖）——与 languages.json 失同步即失败，防入库漂移
+      - run: node tools/grammar-builder/gen-code-extensions.mjs --check
       - run: pnpm vitest run
       - run: pnpm --filter web build
       # 第三方声明完整性辅助检查（warning-only，恒 exit 0；新依赖忘登记时在日志可见）

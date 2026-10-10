@@ -10,7 +10,8 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * - SHELL-11 / BUG-03：j/k 逐行滚、gg 顶、G 底、Ctrl+P 快速打开（修复前全零响应）
  * - SHELL-12 / BUG-04：状态栏「语言/编码/大小/行」段 + 右栏属性面板（修复前全占位）
  * - SHELL-09/13 / BUG-05：设置面板（⚙/Ctrl+,）排除规则预设生效、自动刷新开关落盘（修复前无 UI 入口）
- * - SHELL-03/05 / BUG-07：无扩展名文件可预览（shebang→python、Makefile），.xyz 兜底不回退
+ * - SHELL-03/05 / BUG-07：无扩展名文件可预览（shebang→python、Makefile）；未知扩展名
+ *   unknown.xyz（文本内容）经 C 项探测链同样落 code 视图（不再「不支持的扩展名」错误卡片）
  * - SHELL-01/08 / BUG-19/25：打开文件夹两通道均有可见反馈（取消提示），回退通道可达
  */
 
@@ -321,10 +322,12 @@ test('BUG-07/SHELL-03/05：无扩展名文件可预览（shebang→python、Make
   await expect(page.locator('.vv-code-pre')).toContainText('echo hi');
   await expect(page.locator('.vv-statusbar')).toContainText('编码: utf-8');
 
-  // 回归不破坏（BUG-07 验收 4 / SHELL-05 已 pass 项）：真未知类型 .xyz 兜底不变
+  // 未知扩展名 .xyz（内容为文本）：C 项探测链后与无扩展名同走文本性探测 → code 视图，
+  // 不再出现「不支持的扩展名 ".xyz"」错误卡片（错误卡兜底仅剩签名/文本探测皆不命中的内容）
   await openFile(page, 'unknown.xyz');
-  await expect(page.locator('.vv-error-card')).toBeVisible();
-  await expect(page.locator('.vv-error-card')).toContainText('不支持的扩展名 ".xyz"');
+  await expect(page.locator('.vv-error-card')).toHaveCount(0);
+  await expect(page.locator('.vv-code-pre')).toContainText('data');
+  await expect(page.locator('.vv-statusbar')).toContainText('编码: utf-8');
   expect(errors).toEqual([]);
 });
 
