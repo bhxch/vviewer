@@ -5,7 +5,7 @@
 //! 的多事件合并为一条 `{"type":"changed","paths":[...]}`（相对 root、排序去重）
 //! → tokio broadcast 分发给所有订阅的 SSE 连接。
 //!
-//! 自愈（BUG-02）：启动失败保留 Err 写 stderr 日志（含 OS 错误码与 root 路径）
+//! 自愈（BUG-02）：启动失败保留 Err 经 tracing 记日志（含 OS 错误码与 root 路径）
 //! 并在后台线程退避重试，连续失败降级 `PollWatcher`（轮询，跨文件系统可用）继续
 //! 广播 changed，之后周期性探试 recommended（暂时性故障解除后回归实时）；运行期
 //! 错误丢弃当前 watcher 重建，恢复实时监听后广播 `{"type":"watch-recovered"}`。
@@ -36,6 +36,49 @@ use notify::{
 };
 use serde_json::json;
 use tokio::sync::broadcast;
+use tracing::{error, info, warn};
+
+/// 运行期错误日志限频（BUG-68 抑制层）：同窗口内错误只记首条，过期后输出
+/// 一条「n 条已抑制」摘要，避免高频错误事件逐条刷日志。
+struct ErrorLogGate {
+    window: Duration,
+    last_reset: Option<Instant>,
+    suppressed: u64,
+}
+
+enum Admission {
+    /// 窗口首条：直接记录
+    First,
+    /// 窗口内：静默累计
+    Suppressed,
+    /// 窗口过期后的首条：输出摘要（携带被抑制条数），并重开窗口
+    Summary(u64),
+}
+
+impl ErrorLogGate {
+    fn new(window: Duration) -> Self {
+        Self { window, last_reset: None, suppressed: 0 }
+    }
+
+    fn admit(&mut self, now: Instant) -> Admission {
+        match self.last_reset {
+            None => {
+                self.last_reset = Some(now);
+                Admission::First
+            }
+            Some(t) if now.duration_since(t) >= self.window => {
+                let n = self.suppressed;
+                self.suppressed = 0;
+                self.last_reset = Some(now);
+                Admission::Summary(n)
+            }
+            Some(_) => {
+                self.suppressed += 1;
+                Admission::Suppressed
+            }
+        }
+    }
+}
 
 /// debounce 聚合窗口：首个事件到达后等这么久，窗口内的后续事件并入同一条 changed。
 pub const DEBOUNCE_WINDOW: Duration = Duration::from_millis(500);
@@ -114,7 +157,7 @@ impl ChangeHub {
         let stop = Arc::new(AtomicBool::new(false));
 
         // 诊断补丁（BUG-02）：数据根的文件系统类型，便于 e2e 环境判读（如 btrfs）
-        eprintln!(
+        info!(
             "[watch] root={} fstype={}",
             root.display(),
             fs_type_of(root).unwrap_or_else(|| "unknown".into())
@@ -122,13 +165,13 @@ impl ChangeHub {
 
         let initial = match (factory.open_recommended)() {
             Ok((keep, rx, backend)) => {
-                eprintln!("[watch] watcher established backend={backend} root={}", root.display());
+                info!("[watch] watcher established backend={backend} root={}", root.display());
                 health.store(WatchHealth::Ok.to_u8(), Ordering::SeqCst);
                 Some(WatchSession::new(keep, rx, backend, false))
             }
             Err(e) => {
                 // 含 OS 错误码（Debug 格式的 Os { code: .. }）与 root 路径
-                eprintln!(
+                error!(
                     "[watch] watcher startup FAILED root={} err={e:?}; retrying in background (backoff x{}, then PollWatcher fallback)",
                     root.display(),
                     factory.policy.attempts
@@ -254,7 +297,7 @@ impl RetryFactory {
         }
     }
 
-    /// 阻塞直到成功建立会话或 stop 置位（返回 None）。每次尝试失败写 stderr 日志。
+    /// 阻塞直到成功建立会话或 stop 置位（返回 None）。每次尝试失败经 tracing 记日志。
     fn build(&mut self, stop: &AtomicBool) -> Option<WatchSession> {
         if self.prefer_poll {
             if stop.load(Ordering::SeqCst) {
@@ -265,14 +308,14 @@ impl RetryFactory {
                 match (self.open_recommended)() {
                     Ok((keep, rx, backend)) => {
                         self.prefer_poll = false;
-                        eprintln!(
+                        info!(
                             "[watch] recommended probe succeeded, restored realtime watcher backend={backend} root={}",
                             self.root.display()
                         );
                         return Some(WatchSession::new(keep, rx, backend, false));
                     }
                     Err(e) => {
-                        eprintln!(
+                        warn!(
                             "[watch] recommended probe failed (next probe in {POLL_PROBE_EVERY} rebuilds) root={} err={e:?}",
                             self.root.display()
                         );
@@ -282,7 +325,7 @@ impl RetryFactory {
             match (self.open_poll)() {
                 Ok((keep, rx, backend)) => return Some(WatchSession::new(keep, rx, backend, true)),
                 Err(e) => {
-                    eprintln!(
+                    warn!(
                         "[watch] preferred PollWatcher failed root={} err={e:?}",
                         self.root.display()
                     );
@@ -297,7 +340,7 @@ impl RetryFactory {
             match (self.open_recommended)() {
                 Ok((keep, rx, backend)) => return Some(WatchSession::new(keep, rx, backend, false)),
                 Err(e) => {
-                    eprintln!(
+                    warn!(
                         "[watch] watcher establish failed (retry {}/{}) root={} err={e:?}",
                         attempt + 1,
                         self.policy.attempts,
@@ -316,7 +359,7 @@ impl RetryFactory {
             Ok((keep, rx, backend)) => {
                 self.prefer_poll = true;
                 self.poll_rebuilds = 0;
-                eprintln!(
+                warn!(
                     "[watch] degraded to PollWatcher (interval {:?}) root={}",
                     self.policy.poll_interval,
                     self.root.display()
@@ -324,7 +367,7 @@ impl RetryFactory {
                 return Some(WatchSession::new(keep, rx, backend, true));
             }
             Err(e) => {
-                eprintln!(
+                error!(
                     "[watch] PollWatcher fallback failed root={} err={e:?}",
                     self.root.display()
                 );
@@ -341,7 +384,7 @@ impl RetryFactory {
             }
             match (self.open_recommended)() {
                 Ok((keep, rx, backend)) => {
-                    eprintln!(
+                    info!(
                         "[watch] watcher established after {misses} fallback failures root={}",
                         self.root.display()
                     );
@@ -350,7 +393,7 @@ impl RetryFactory {
                 Err(e) => {
                     misses += 1;
                     if misses == 1 || misses % 12 == 0 {
-                        eprintln!(
+                        warn!(
                             "[watch] watcher still unavailable ({misses} failures) root={} err={e:?}",
                             self.root.display()
                         );
@@ -377,6 +420,8 @@ fn run_loop(
 ) {
     let mut session = initial;
     let mut prev = WatchHealth::from_u8(health.load(Ordering::SeqCst));
+    // 运行期错误日志限频：跨会话共享一个窗口（BUG-68 抑制层，防高频错误刷日志）
+    let mut gate = ErrorLogGate::new(Duration::from_secs(60));
     loop {
         let sess = match session.take() {
             Some(s) => s,
@@ -403,7 +448,7 @@ fn run_loop(
             let _ = tx.send(payload.to_string());
         }
 
-        let errored = session_loop(sess, &root, &tx, &stop);
+        let errored = session_loop(sess, &root, &tx, &stop, &mut gate);
         if !errored || stop.load(Ordering::SeqCst) {
             return; // 优雅退出（stop / watcher 句柄被丢弃）
         }
@@ -418,19 +463,27 @@ fn run_loop(
 
 /// 单会话聚合循环：首个事件开窗，窗口内事件全部合并为一条 changed 帧。
 /// 返回 true = 会话异常（收到运行期 Err，调用方应重建）；false = 优雅退出
-/// （stop 置位或 watcher 句柄被丢弃致通道断开）。
+/// （stop 置位或 watcher 句柄被丢弃致通道断开）。`gate` 为错误日志限频器，
+/// 跨会话由 `run_loop` 持有（重建不重置窗口）。
 fn session_loop(
     session: WatchSession,
     root: &Path,
     tx: &broadcast::Sender<String>,
     stop: &AtomicBool,
+    gate: &mut ErrorLogGate,
 ) -> bool {
     let WatchSession { _keepalive, rx, .. } = session;
     loop {
         // 以 DEBOUNCE_WINDOW 作为空闲等待：每窗醒一次检查 stop（销毁信号）
         match rx.recv_timeout(DEBOUNCE_WINDOW) {
             Ok(Err(e)) => {
-                eprintln!("[watch] runtime error, will rebuild: {e:?}");
+                match gate.admit(Instant::now()) {
+                    Admission::First => warn!("[watch] runtime error, will rebuild: {e:?}"),
+                    Admission::Suppressed => {}
+                    Admission::Summary(n) => {
+                        warn!("[watch] runtime error window: {n} suppressed, latest: {e:?}")
+                    }
+                }
                 return true;
             }
             Ok(Ok(first)) => {
@@ -448,7 +501,10 @@ fn session_loop(
                         Ok(Ok(ev)) => collect_event(&ev, root, &mut paths),
                         // 窗口内混入错误同样按会话异常处理：若故障仅以这一个 Err
                         // 事件表现（此后无事件），不重建会卡在空转
-                        Ok(Err(_)) => return true,
+                        Ok(Err(_)) => {
+                            let _ = gate.admit(Instant::now()); // 该分支不含错误详情，静默或摘要皆由下次输出兜底
+                            return true;
+                        }
                         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => break,
                         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return false,
                     }
@@ -599,6 +655,7 @@ fn collect_paths(ev: &RawEvent, root: &Path, out: &mut BTreeSet<String>) {
 mod tests {
     use std::sync::mpsc::{Receiver, Sender};
     use std::sync::atomic::AtomicUsize;
+    use std::time::Instant;
 
     use super::*;
     use notify::event::{AccessKind, AccessMode, CreateKind, EventKind};
@@ -654,6 +711,22 @@ mod tests {
     fn fs_type_of_resolves_mount_of_tmp() {
         let fstype = fs_type_of(Path::new("/tmp")).expect("/tmp 应有挂载点条目");
         assert!(!fstype.is_empty(), "fstype 应非空: {fstype}");
+    }
+
+    /// 限频器：窗口首条直记（First）；窗口内后续静默累计（Suppressed）；窗口过期后
+    /// 的首条以摘要形式输出累计数（Summary(n)）并重开窗口（该条即新窗口首条语义）。
+    #[test]
+    fn error_log_gate_first_suppress_then_summary() {
+        let t0 = Instant::now();
+        let mut gate = ErrorLogGate::new(Duration::from_secs(60));
+        assert!(matches!(gate.admit(t0), Admission::First));
+        for i in 1..=5 {
+            assert!(matches!(gate.admit(t0 + Duration::from_secs(i)), Admission::Suppressed));
+        }
+        // 窗口（60s）过期后的首条：Summary(5) 并重开窗口
+        assert!(matches!(gate.admit(t0 + Duration::from_secs(61)), Admission::Summary(5)));
+        // 新窗口内继续静默
+        assert!(matches!(gate.admit(t0 + Duration::from_secs(62)), Admission::Suppressed));
     }
 
     /// 极短退避：mock/真实故障注入测试毫秒级完成，不拖慢套件。
