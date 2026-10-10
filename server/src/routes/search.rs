@@ -162,6 +162,37 @@ fn rg_args(req: &SearchRequest, hidden: bool) -> Vec<String> {
     args
 }
 
+/// 组装 grep 参数（rg 缺失 fallback，A 项）。行格式 `path\0line:content`。
+/// 已知差异（spec §2.2）：无 --max-filesize（全读，60s 墙钟+命中上限兜底）、
+/// 无 --sort path（顺序不保证）、regex 走 ERE 方言、无列号（col 恒 1）。
+/// `hidden` 无对应开关：grep -r 天然含 dot 条目、不读 ignore。
+fn grep_args(req: &SearchRequest, hidden: bool) -> Vec<String> {
+    let _ = hidden;
+    let mut args = vec![
+        // 长选项强制：短参 -Z 在 GNU grep 是 --null、BSD grep 是 --decompress
+        "--null".to_string(),
+        "-rHn".to_string(),
+        "-s".to_string(),
+        "-I".to_string(),
+        "-m".to_string(),
+        RG_MAX_COUNT.to_string(),
+    ];
+    if let Some(glob) = req.glob.as_deref().filter(|g| !g.is_empty()) {
+        args.push(format!("--include={glob}"));
+    }
+    if !req.case_sensitive {
+        args.push("-i".to_string());
+    }
+    if req.regex {
+        args.push("-E".to_string());
+    } else {
+        args.push("-F".to_string());
+    }
+    args.push("-e".to_string());
+    args.push(req.pattern.clone());
+    args
+}
+
 pub async fn search(State(state): State<AppState>, Json(req): Json<SearchRequest>) -> Response {
     if req.pattern.is_empty() {
         return AppError::bad_request("pattern must not be empty").into_response();
@@ -432,6 +463,54 @@ mod tests {
             path: None,
         };
         assert!(!rg_args(&req, false).contains(&"-g".to_string()));
+    }
+
+    // ---------- grep_args ----------
+
+    #[test]
+    fn grep_args_defaults_are_literal_and_insensitive() {
+        let req = SearchRequest {
+            pattern: "needle".into(),
+            glob: None,
+            case_sensitive: false,
+            regex: false,
+            path: None,
+        };
+        let args = grep_args(&req, false);
+        // 行格式协议：NUL 分隔（长选项——-Z 在 BSD grep 是 decompress）
+        for a in ["--null", "-rHn", "-s", "-I", "-m", "50", "-i", "-F", "-e", "needle"] {
+            assert!(args.contains(&a.to_string()), "缺参数 {a}: {args:?}");
+        }
+        // NUL 必须长选项，禁短参
+        assert!(!args.contains(&"-Z".to_string()));
+    }
+
+    #[test]
+    fn grep_args_regex_case_sensitive_glob() {
+        let req = SearchRequest {
+            pattern: "n.e+".into(),
+            glob: Some("*.rs".into()),
+            case_sensitive: true,
+            regex: true,
+            path: None,
+        };
+        let args = grep_args(&req, true);
+        assert!(!args.contains(&"-i".to_string()));
+        assert!(!args.contains(&"-F".to_string()));
+        assert!(args.contains(&"-E".to_string()), "regex 模式用 ERE");
+        assert!(args.contains(&"--include=*.rs".to_string()));
+    }
+
+    #[test]
+    fn grep_args_empty_glob_is_ignored() {
+        let req = SearchRequest {
+            pattern: "x".into(),
+            glob: Some(String::new()),
+            case_sensitive: false,
+            regex: false,
+            path: None,
+        };
+        assert!(!grep_args(&req, false).iter().any(|a| a.starts_with("--include")));
     }
 
     // ---------- match_frame ----------
