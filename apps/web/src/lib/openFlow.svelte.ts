@@ -132,10 +132,17 @@ class TabCollection {
     }, 300);
   }
 
-  /** C 项：手选打开方式。rev++ 复用 SSE 刷新的重渲染通道；persist 落快照。 */
+  /** C 项：手选打开方式。rev++ 复用 SSE 刷新的重渲染通道；persist 落快照。
+   * 值未变化（同为空或同 id）时提前返回：重复手选同一方式/重复清除不 rev++、不落盘，
+   * 避免无意义的重渲染与会话写盘。 */
   setRendererOverride(tabId: string, rendererId: string | null): void {
     const tab = this.list.find((t) => t.id === tabId);
     if (!tab) return;
+    const unchanged =
+      rendererId === null
+        ? tab.overrideRenderer === undefined
+        : tab.overrideRenderer === rendererId;
+    if (unchanged) return;
     if (rendererId === null) delete tab.overrideRenderer;
     else tab.overrideRenderer = rendererId;
     tab.rev = (tab.rev ?? 0) + 1;

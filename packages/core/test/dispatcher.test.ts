@@ -205,7 +205,7 @@ describe('dispatcher 无扩展名回退链（BUG-07）', () => {
 });
 
 describe('dispatcher 错误卡片 actions（BUG-14）', () => {
-  it('render 失败的卡片带「重试」「降级查看」按钮；重试成功即恢复渲染且新实例被级联托管', async () => {
+  it('render 失败的卡片带「重试」「以纯文本打开」「以 hex 打开」按钮；重试成功即恢复渲染且新实例被级联托管', async () => {
     const reg = createRegistry();
     let attempts = 0;
     const retryDestroyed = vi.fn();
@@ -224,7 +224,8 @@ describe('dispatcher 错误卡片 actions（BUG-14）', () => {
       source('a.txt'), new TextEncoder().encode('hi'), target);
     expect(rendererId).toBe('error');
     const buttons = [...target.querySelectorAll<HTMLButtonElement>('button.vv-error-action')];
-    expect(buttons.map((b) => b.textContent)).toEqual(['重试', '降级查看']);
+    // 「降级查看」已更名「以 hex 打开」（C 项 open-as）；registry 无 code 渲染器 → 无文本按钮
+    expect(buttons.map((b) => b.textContent)).toEqual(['重试', '以 hex 打开']);
     buttons[0]!.click();
     await Promise.resolve();
     await Promise.resolve();
@@ -238,7 +239,7 @@ describe('dispatcher 错误卡片 actions（BUG-14）', () => {
     target.remove();
   });
 
-  it('降级查看成功的 hex 实例同样被级联托管', async () => {
+  it('「以 hex 打开」（override 重入 dispatch）成功的 hex 实例同样被级联托管', async () => {
     const reg = createRegistry();
     reg.install(mk('boom', ['txt'], { render: async () => { throw new Error('boom'); } }));
     const hexDestroyed = vi.fn();
@@ -253,10 +254,9 @@ describe('dispatcher 错误卡片 actions（BUG-14）', () => {
     const { instance: cardInstance } = await createDispatcher(reg).dispatch(
       source('a.txt'), new TextEncoder().encode('hi'), target);
     const buttons = [...target.querySelectorAll<HTMLButtonElement>('button.vv-error-action')];
-    expect(buttons.map((b) => b.textContent)).toEqual(['重试', '降级查看']);
-    buttons[1]!.click();
-    await Promise.resolve();
-    await Promise.resolve();
+    expect(buttons.map((b) => b.textContent)).toEqual(['重试', '以 hex 打开']);
+    buttons[1]!.click(); // 以 hex 打开 = rendererOverride 重入 dispatch（不再直调 hex.render）
+    await new Promise<void>((resolve) => { setTimeout(resolve, 0); }); // 重入链路跨多个微任务，宏任务边界冲刷
     expect(target.textContent).toContain('hexdump');
     cardInstance.destroy();
     expect(hexDestroyed).toHaveBeenCalledTimes(1);
@@ -332,6 +332,60 @@ describe('unknown-extension probe chain (C 项)', () => {
     const { det } = await d.dispatch(source('Makefile'), text, document.createElement('div'));
     expect(det.extless).toBe(true);               // 既有语义保持
     expect(det.reclassifiedFrom).toBeUndefined(); // 原生无扩展名不算改派
+  });
+});
+
+describe('error card open-as actions (C 项)', () => {
+  function failing(id: string, exts: string[]): Renderer {
+    return { id, label: id, extensions: exts, render: async () => { throw new Error('boom'); } };
+  }
+
+  it('offers retry + open-as-text/hex on render failure, text first for textual det', async () => {
+    const reg = createRegistry();
+    reg.install(failing('code', ['txt']));
+    reg.install(mk('hex', []));
+    const d = createDispatcher(reg);
+    const target = document.createElement('div');
+    const text = new TextEncoder().encode('hello\n');
+    await d.dispatch(source('a.txt'), text, target);
+    const labels = [...target.querySelectorAll('.vv-error-action')].map(b => b.textContent);
+    expect(labels).toEqual(['重试', '以纯文本打开', '以 hex 打开']);
+  });
+
+  it('hex failure offers only open-as-text (no duplicate hex)', async () => {
+    const reg = createRegistry();
+    reg.install(mk('code', ['txt']));
+    const hexFailing = failing('hex', []);
+    reg.install(hexFailing);
+    const d = createDispatcher(reg);
+    const target = document.createElement('div');
+    const bin = new Uint8Array([0, 1, 2, 3, 0, 0, 0, 0]);
+    await d.dispatch(source('b.foo'), bin, target);
+    const labels = [...target.querySelectorAll('.vv-error-action')].map(b => b.textContent);
+    // 当前 renderer 即 hex：不重复给「以 hex 打开」（重试保留，BUG-14 语义不变）
+    expect(labels).toEqual(['重试', '以纯文本打开']);
+  });
+
+  it('routing failure still offers open-as actions', async () => {
+    const reg = createRegistry();
+    reg.install(failing('hex', [])); // 仅 hex 且失败 → 选路探到 hex → 走失败路径
+    const d = createDispatcher(reg);
+    const target = document.createElement('div');
+    await d.dispatch(source('c.foo'), new Uint8Array([0, 1, 2, 3, 4, 5, 6, 0]), target);
+    expect(target.querySelector('.vv-error-card')).toBeTruthy();
+  });
+
+  it('true routing failure (no renderer resolved) offers open-as-text only when hex absent', async () => {
+    const reg = createRegistry();
+    reg.install(mk('code', ['txt'])); // 有 code、无 hex：二进制内容探测链走不到底 → 选路失败
+    const d = createDispatcher(reg);
+    const target = document.createElement('div');
+    const { rendererId } = await d.dispatch(
+      source('blob.foo'), new Uint8Array([0, 1, 2, 3, 4, 5, 6, 0]), target,
+    );
+    expect(rendererId).toBe('error');
+    const labels = [...target.querySelectorAll('.vv-error-action')].map(b => b.textContent);
+    expect(labels).toEqual(['以纯文本打开']); // 无重试；hex 缺失只给文本
   });
 });
 

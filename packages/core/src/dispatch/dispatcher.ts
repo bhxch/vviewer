@@ -4,7 +4,6 @@ import { detect } from '../detect';
 import { looksTextual, shebangLangOf } from '../detect/magic';
 import {
   errorRenderer,
-  getHexFallbackRenderer,
   setHexFallbackRenderer,
   showErrorCard,
   type ErrorCardAction
@@ -58,42 +57,83 @@ export function signatureRouteOf(signature: Detection['signature']): SignatureRo
  * 错误卡片兜底，语义正确；与 ooxml 渲染器「sniff 永不改派」的既有裁决同向）。 */
 const TEXTUAL_RENDERER_IDS = new Set<RendererId>(['code', 'markdown', 'html']);
 
-/** 渲染阶段失败错误卡片的动作（BUG-14）：重试 = 重跑本渲染器 render；降级 = hex 渲染原始字节。
- * onRendered 接收重试/降级成功产出的实例，由调用方（dispatch catch）级联托管 */
+/** 错误卡片 open-as 动作的重入闭包：同一 source/buffer/target 以新 opts 重派 dispatch */
+type Redisplay = (
+  opts?: DispatchOptions
+) => Promise<{ instance: RenderedInstance; rendererId: RendererId; det: Detection }>;
+
+/** 「以纯文本/以 hex 打开」（C 项）：onClick 以 rendererOverride 重入 dispatch——与
+ * TopBar 手选打开方式同一语义（显式选择 ≠ 内容识别，不走探测链）。重入产出的实例
+ * （含重入自身失败时的错误卡片复合实例）经 onRendered 级联托管：外层卡片销毁
+ * （tab 关闭/重渲染）时一并释放，杜绝资源泄漏。 */
+function openAsAction(
+  id: RendererId,
+  label: string,
+  redisplay: Redisplay,
+  onRendered: (instance: RenderedInstance) => void
+): ErrorCardAction {
+  return {
+    label,
+    onClick: () => {
+      void redisplay({ rendererOverride: id }).then((r) => onRendered(r.instance));
+    }
+  };
+}
+
+/**
+ * 渲染阶段失败错误卡片的动作（BUG-14 + C 项）：重试 = 重跑本渲染器 render；
+ * 「以纯文本/以 hex 打开」= rendererOverride 重入 dispatch（取代原「降级查看」直调
+ * hex.render——label 更明确且与手选打开方式同语义）。open-as 按 looksTextual 探测排序
+ * （判文本 → 纯文本在前，否则 hex 在前）；当前 renderer 即 hex 时不重复给 hex。
+ * onRendered 接收重试/open-as 成功产出的实例，由调用方（dispatch catch）级联托管。
+ */
 function buildRenderErrorActions(
+  registry: Registry,
   renderer: Renderer,
   buffer: Uint8Array,
   source: FileSource,
   det: Detection,
   target: HTMLElement,
-  onRendered: (instance: RenderedInstance) => void
+  onRendered: (instance: RenderedInstance) => void,
+  redisplay: Redisplay
 ): ErrorCardAction[] {
   const retry = (): void => {
     renderer.render(buffer, target, source, det)
       .then(onRendered)
       .catch((err: unknown) => {
-        // 重试仍失败：保留错误详情，按钮随之重建（可继续重试/降级）
+        // 重试仍失败：保留错误详情，按钮随之重建（可继续重试/以其他方式打开）
         const message = err instanceof Error ? err.message : String(err);
         showErrorCard(target, message, source, {
-          actions: buildRenderErrorActions(renderer, buffer, source, det, target, onRendered)
+          actions: buildRenderErrorActions(registry, renderer, buffer, source, det, target, onRendered, redisplay)
         });
       });
   };
   const actions: ErrorCardAction[] = [{ label: '重试', onClick: retry }];
-  const hex = getHexFallbackRenderer();
-  if (hex) {
-    actions.push({
-      label: '降级查看',
-      onClick: () => {
-        Promise.resolve(hex.render(buffer, target, source, det))
-          .then(onRendered)
-          .catch((err: unknown) => {
-            const message = err instanceof Error ? err.message : String(err);
-            showErrorCard(target, message, source);
-          });
-      }
-    });
+  const text = registry.byId('code')
+    ? openAsAction('code', '以纯文本打开', redisplay, onRendered)
+    : null;
+  const hex = registry.byId('hex') && renderer.id !== 'hex'
+    ? openAsAction('hex', '以 hex 打开', redisplay, onRendered)
+    : null;
+  for (const action of looksTextual(buffer.slice(0, HEAD_SIZE)) ? [text, hex] : [hex, text]) {
+    if (action) actions.push(action);
   }
+  return actions;
+}
+
+/**
+ * 选路失败（renderer undefined）错误卡片的动作（C 项）：无重试（同一路径重试无意义），
+ * [以纯文本打开, 以 hex 打开]；未注册对应渲染器即省略该按钮（hex 缺失只给文本——
+ * 选路失败时 hex 必未注册，hex 分支实为防御性对齐通用语义）。
+ */
+function buildRoutingErrorActions(
+  registry: Registry,
+  onRendered: (instance: RenderedInstance) => void,
+  redisplay: Redisplay
+): ErrorCardAction[] {
+  const actions: ErrorCardAction[] = [];
+  if (registry.byId('code')) actions.push(openAsAction('code', '以纯文本打开', redisplay, onRendered));
+  if (registry.byId('hex')) actions.push(openAsAction('hex', '以 hex 打开', redisplay, onRendered));
   return actions;
 }
 
@@ -167,67 +207,73 @@ export function createDispatcher(registry: Registry): Dispatcher {
   // hex 降级渲染器注册（BUG-14）：av 渲染器运行期错误卡片的「降级查看」经 core getter 消费，
   // render-media 不反向依赖 render-binary（避免包间耦合）；重复 createDispatcher 时后者覆盖
   setHexFallbackRenderer(registry.byId('hex') ?? null);
-  return {
-    async dispatch(source, buffer, target, opts) {
-      const head = buffer.slice(0, HEAD_SIZE);
-      const det = detect({ name: source.name, head, full: buffer.length <= FULL_LIMIT ? buffer : undefined });
-      // C 项 override 先于 byExtension 拦截：命中即用；id 未命中静默走正常探测链
-      const override = opts?.rendererOverride === undefined ? undefined : registry.byId(opts.rendererOverride);
-      let renderer: Renderer | undefined;
-      try {
-        if (override) {
-          // override 路径：用户显式选择 ≠ 内容识别——不经过 resolveInitialRenderer
-          // （签名改派/文本探测/hex 兜底，因而不置 reclassifiedFrom）与 BUG-13 预检；
-          // sniff 仅作元数据补齐（ooxml 族依赖），返回的改派建议被忽略——显式选择不被推翻
-          renderer = override;
-          if (override.sniff) await override.sniff(head, det);
-        } else {
-          renderer = resolveInitialRenderer(registry.byExtension(det.ext), det, head, registry);
-          if (!renderer) {
-            // 选路失败时 det.ext 必为 ''（extless 回退链未命中）或非空未知扩展名
-            throw new Error(
-              det.ext === ''
-                ? '不支持的文件类型（无扩展名且无法识别内容）'
-                : `不支持的扩展名 ".${det.ext}"`
-            );
-          }
-          let redirected = false;
-          if (renderer.sniff) {
-            const to = await renderer.sniff(head, det);
-            if (to && to !== renderer.id) {
-              const next = registry.byId(to);
-              if (next) { redirected = true; renderer = next; }
-            }
-          }
-          if (redirected && renderer.sniff) await renderer.sniff(head, det); // 允许最终 renderer 补充 sniff 元数据，但不再改派
+  const dispatch = async (
+    source: FileSource,
+    buffer: Uint8Array,
+    target: HTMLElement,
+    opts?: DispatchOptions
+  ): Promise<{ instance: RenderedInstance; rendererId: RendererId; det: Detection }> => {
+    const head = buffer.slice(0, HEAD_SIZE);
+    const det = detect({ name: source.name, head, full: buffer.length <= FULL_LIMIT ? buffer : undefined });
+    // C 项：override 先于 byExtension 拦截：命中即用；id 未命中静默走正常探测链
+    const override = opts?.rendererOverride === undefined ? undefined : registry.byId(opts.rendererOverride);
+    // C 项：错误卡片 open-as 动作的重入闭包（同一 source/buffer/target 重派）
+    const redisplay: Redisplay = (o) => dispatch(source, buffer, target, o);
+    let renderer: Renderer | undefined;
+    try {
+      if (override) {
+        // override 路径：用户显式选择 ≠ 内容识别——不经过 resolveInitialRenderer
+        // （签名改派/文本探测/hex 兜底，因而不置 reclassifiedFrom）与 BUG-13 预检；
+        // sniff 仅作元数据补齐（ooxml 族依赖），返回的改派建议被忽略——显式选择不被推翻
+        renderer = override;
+        if (override.sniff) await override.sniff(head, det);
+      } else {
+        renderer = resolveInitialRenderer(registry.byExtension(det.ext), det, head, registry);
+        if (!renderer) {
+          // 选路失败时 det.ext 必为 ''（extless 回退链未命中）或非空未知扩展名
+          throw new Error(
+            det.ext === ''
+              ? '不支持的文件类型（无扩展名且无法识别内容）'
+              : `不支持的扩展名 ".${det.ext}"`
+          );
         }
-        const instance = await renderer.render(buffer, target, source, det);
-        return { instance, rendererId: renderer.id, det };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        // 仅 render 阶段失败提供重试/降级（选路失败重试同一路径无意义，保持纯错误卡片）。
-        // 重试/降级成功产出的真实实例由 liveChild 级联托管：调用方（ViewerPane）持有的
-        // live 仍是本卡片实例，其 destroy（tab 关闭/重渲染）时级联释放，杜绝资源泄漏
-        let liveChild: RenderedInstance | null = null;
-        const takeOver = (instance: RenderedInstance): void => {
-          liveChild?.destroy(); // 同一插槽先释放上一个成功实例（重试/降级互斥替换语义）
-          liveChild = instance;
-        };
-        const actions = renderer
-          ? { actions: buildRenderErrorActions(renderer, buffer, source, det, target, takeOver) }
-          : undefined;
-        const card = showErrorCard(target, message, source, actions);
-        return {
-          instance: {
-            destroy() {
-              liveChild?.destroy();
-              card.destroy();
-            }
-          },
-          rendererId: errorRenderer.id,
-          det
-        };
+        let redirected = false;
+        if (renderer.sniff) {
+          const to = await renderer.sniff(head, det);
+          if (to && to !== renderer.id) {
+            const next = registry.byId(to);
+            if (next) { redirected = true; renderer = next; }
+          }
+        }
+        if (redirected && renderer.sniff) await renderer.sniff(head, det); // 允许最终 renderer 补充 sniff 元数据，但不再改派
       }
+      const instance = await renderer.render(buffer, target, source, det);
+      return { instance, rendererId: renderer.id, det };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // render 失败提供重试 + open-as（选路失败无重试，只给 open-as 换打开方式）。
+      // 重试/open-as 成功产出的真实实例由 liveChild 级联托管：调用方（ViewerPane）持有的
+      // live 仍是本卡片实例，其 destroy（tab 关闭/重渲染）时级联释放，杜绝资源泄漏
+      let liveChild: RenderedInstance | null = null;
+      const takeOver = (instance: RenderedInstance): void => {
+        liveChild?.destroy(); // 同一插槽先释放上一个成功实例（重试/open-as 互斥替换语义）
+        liveChild = instance;
+      };
+      const actions = renderer
+        ? { actions: buildRenderErrorActions(registry, renderer, buffer, source, det, target, takeOver, redisplay) }
+        : { actions: buildRoutingErrorActions(registry, takeOver, redisplay) };
+      const card = showErrorCard(target, message, source, actions);
+      return {
+        instance: {
+          destroy() {
+            liveChild?.destroy();
+            card.destroy();
+          }
+        },
+        rendererId: errorRenderer.id,
+        det
+      };
     }
   };
+  return { dispatch };
 }
