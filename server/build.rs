@@ -67,7 +67,10 @@ fn main() {
 }
 
 /// 查询三件套拷入 OUT_DIR/queries/<dir>/（缺失文件物化为空串，使生成代码的
-/// include_str! 恒可解析）。逐文件发 rerun-if-changed（目录级指令不感知深层修改）。
+/// include_str! 恒可解析）。追踪双层：目录级指令感知该目录内文件的新建/删除
+/// （此前不存在的 injections/locals.scm 落盘或移除时目录 mtime 变化，逐文件指令
+/// 对新出现/已消失的路径无从追踪）；逐文件指令感知深层内容修改（目录级指令
+/// 不感知）。双层并存，cargo 对重复路径去重。
 fn copy_queries(out_dir: &Path) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../packages/highlight/assets/queries");
     for dir in fs::read_dir(&root).expect("queries 资产目录") {
@@ -75,6 +78,7 @@ fn copy_queries(out_dir: &Path) {
         if !dir.is_dir() {
             continue;
         }
+        println!("cargo:rerun-if-changed={}", dir.display());
         let name = dir.file_name().unwrap().to_str().unwrap();
         let dest = out_dir.join("queries").join(name);
         fs::create_dir_all(&dest).unwrap();
