@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import * as os from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
@@ -592,4 +593,101 @@ test.fixme('BUG-48 [探索]: 非 UTF-8 文件名经 /api/tree 列出（U+FFFD �
   // 护栏：正常名不受影响（对照形态）
   const okFile = await fetch(`${BASE}/api/file?path=${encodeURIComponent('srv-t/cors-lang.js')}`);
   expect(okFile.status).toBe(200);
+});
+
+// ── BUG-68 修复回归锚点（README §3.2.4：本任务即修复 PR，直接落正式断言） ──
+// 来源：2026-10-10 e2e 轮 §2.3 现场最小化（root 含越界 symlink → watcher 降级）。
+// 修复前：watcher 扫描跟随 symlink 深入外部目录，watch 其 0o000 子目录遇 EACCES
+// → 3 连败降级 → 建连快照带 watch-degraded；修复后（扫描 follow_symlinks=false，
+// server/src/watch.rs 578763d）不深入 → 无降级帧，root 内真实文件变更照常 changed。
+// 红相证据由 watch.rs 单测 escape_symlink_root_watches_ok /
+// poll_session_over_escape_symlink_still_delivers_changed 的红→绿承担（修复已先行
+// 落地，e2e 不设红相）。端口 4383 与既有 4375-4379/4381/4382 错开。
+
+test.describe('BUG-68 [探索]: root 含越界 symlink 时 watcher 不降级', () => {
+  test('建连快照无 watch-degraded，root 内变更照常 changed', async () => {
+    test.setTimeout(30_000);
+    // 1) 自建 root：内部 symlink → 外部目录（含 0o000 子目录，制造「若跟随即 EACCES」形态）
+    const base = mkdtempSync(join(os.tmpdir(), 'vv-bug68-'));
+    const root = join(base, 'root');
+    const outside = join(base, 'outside');
+    mkdirSync(join(outside, 'locked'), { recursive: true });
+    chmodSync(join(outside, 'locked'), 0o000);
+    mkdirSync(root, { recursive: true });
+    symlinkSync(outside, join(root, 'escape'));
+
+    // 2) 独立实例（:4383，--root 指向该 root；同源 web-dist 与主实例一致）
+    await assertPortFree('http://127.0.0.1:4383');
+    const child = spawn(
+      BIN,
+      [
+        'serve', '--root', root, '--web-dist', join(repoRoot, 'apps/web/build'),
+        '--port', '4383'
+      ],
+      { stdio: ['ignore', 'inherit', 'inherit'] }
+    );
+    const bug68Base = 'http://127.0.0.1:4383';
+    try {
+      await waitHealthy(bug68Base);
+      // 3) SSE 建连：POST /api/ticket → GET /api/events（b-server-file-service 前例）
+      const ticket = (
+        (await (await fetch(`${bug68Base}/api/ticket`, { method: 'POST' })).json()) as {
+          ticket: string;
+        }
+      ).ticket;
+      const res = await fetch(`${bug68Base}/api/events?ticket=${ticket}`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      expect(res.ok).toBeTruthy();
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      /** 读一个 SSE chunk；超时返回 null（不 reject、不丢弃 pending read——
+       *  ReadableStream 读请求排队，被 race 丢弃的 read 仍会吞走下一个 chunk） */
+      let pendingRead: Promise<string | null> | null = null;
+      const readChunk = (timeoutMs: number): Promise<string | null> => {
+        pendingRead ??= reader.read().then(({ value, done }) => {
+          pendingRead = null;
+          return done ? null : decoder.decode(value);
+        });
+        pendingRead.catch(() => {}); // race 丢弃后若流出错，不产生 unhandled rejection
+        return Promise.race([
+          pendingRead,
+          new Promise<null>((r) => setTimeout(() => r(null), timeoutMs))
+        ]);
+      };
+
+      // 建连快照窗口（2s）：健康时快照无帧、窗口内静默属正常；一旦降级，
+      // watch-degraded 必现（建连快照或 session 广播，watch.rs:443/events.rs:60）
+      let snapshot = '';
+      const snapDeadline = Date.now() + 2_000;
+      while (Date.now() < snapDeadline && !snapshot.includes('data:')) {
+        const chunk = await readChunk(1_000);
+        if (chunk !== null) snapshot += chunk;
+      }
+      expect(snapshot).not.toContain('watch-degraded');
+
+      // 4) root 内真实文件变更照常 changed（watcher 活着，未因越界 symlink 降级为失效）
+      writeFileSync(join(root, 'seed68.txt'), 'x');
+      let changed = '';
+      const changedDeadline = Date.now() + 10_000;
+      while (Date.now() < changedDeadline && !changed.includes('seed68.txt')) {
+        const chunk = await readChunk(1_000);
+        if (chunk !== null) changed += chunk;
+      }
+      await reader.cancel().catch(() => {});
+      expect(changed).toContain('"changed"');
+      const line = changed
+        .split('\n')
+        .find((l) => l.startsWith('data:') && l.includes('seed68.txt'));
+      expect(line).toBeDefined();
+      expect((JSON.parse(line!.slice(5).trim()) as { paths: string[] }).paths).toContain('seed68.txt');
+      // 建连→变更全程无降级帧（覆盖降级发生在首窗口之后的时序分支）
+      expect(changed).not.toContain('watch-degraded');
+    } finally {
+      // 停服先于 chmod 恢复：SIGTERM 宽限内 server 退出后 0o000 目录才可删
+      await stopServer(child, 'srv-t-bug68');
+      chmodSync(join(outside, 'locked'), 0o700);
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
 });
