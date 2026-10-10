@@ -40,7 +40,13 @@ function db(): Promise<IDBDatabase> {
       if (!d.objectStoreNames.contains(STORE)) d.createObjectStore(STORE);
       if (!d.objectStoreNames.contains(THEMES)) d.createObjectStore(THEMES);
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const conn = req.result;
+      // 多标签让路（T3 评审 Important）：他方标签页以更高版本 open 时本连接收到
+      // versionchange，主动关闭避免对方 blocked 永挂（loadSession 停摆）。
+      conn.onversionchange = () => conn.close();
+      resolve(conn);
+    };
     req.onerror = () => reject(req.error);
   });
 }

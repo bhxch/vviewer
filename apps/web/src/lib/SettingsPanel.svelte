@@ -2,24 +2,51 @@
   // SettingsPanel.svelte — 设置面板浮层（BUG-05，SHELL-09/13 + SRV-07）。
   // TopBar 以 ⚙ 挂载（Ctrl+comma 切换）：排除规则编辑（条目删除/手动添加/预设
   // 一键加入）、autoRefresh 开关（关闭后目录树 SSE 自动同步停用，手动刷新 ↻
-  // 不受影响）。修改即时经 saveSettings 持久化，AppShell 经 onSettingsChanged
+  // 不受影响）、界面主题管理（spec B §2.3：亮暗双槽 select + JSON/VSIX 导入 +
+  // 已导入列表删除；槽切换经 saveSettings → TopBar onSettingsChanged 订阅触发
+  // applyAppearance）。修改即时经 saveSettings 持久化，AppShell 经 onSettingsChanged
   // 订阅刷新响应式副本（FileTree 随排除规则重建）。Esc / ✕ 关闭。
   import { loadSettings, saveSettings } from './stores/settings';
+  import { deleteTheme, listThemes, type ImportedTheme } from './stores/session';
+  import { importThemeFiles } from './vsixImport';
 
   let { onclose }: { onclose(): void } = $props();
 
   /** 面板本地草稿：打开时从 localStorage 读一次；保存时合并最新持久值 */
   let patterns = $state<string[]>([...loadSettings().excludedPatterns]);
   let autoRefresh = $state(loadSettings().autoRefresh);
+  let appearanceLight = $state(loadSettings().appearanceLight);
+  let appearanceDark = $state(loadSettings().appearanceDark);
   let draft = $state('');
   let inputEl = $state<HTMLInputElement | null>(null);
   let panelEl = $state<HTMLElement | null>(null);
 
+  /** 已导入主题（spec B §2.3）：挂载后异步填充，导入/删除后刷新 */
+  let imported = $state<ImportedTheme[]>([]);
+  let importing = $state(false);
+  let importNote = $state('');
+  let importErrors = $state<string[]>([]);
+  let themeInputEl = $state<HTMLInputElement | null>(null);
+
   /** 常用排除预设：一键加入（重复添加幂等） */
   const PRESETS: readonly string[] = ['.git', 'node_modules'];
 
+  /** 内置外观候选（spec B §2.3）：值即 theme.ts BUILTIN_APPEARANCES 清单键 + default */
+  const APPEARANCE_BUILTINS: readonly { value: string; label: string }[] = [
+    { value: 'default', label: '默认' },
+    { value: 'vscode:Dark Modern', label: 'Dark Modern (VSCode)' },
+    { value: 'vscode:Light Modern', label: 'Light Modern (VSCode)' }
+  ];
+
   $effect(() => {
     inputEl?.focus();
+  });
+
+  $effect(() => {
+    // 已导入列表挂载后异步填充（IndexedDB）；失败（存储不可用）留空不阻塞面板
+    void listThemes()
+      .then((ts) => (imported = ts.sort((a, b) => a.name.localeCompare(b.name) || a.addedAt - b.addedAt)))
+      .catch(() => (imported = []));
   });
 
   $effect(() => {
@@ -39,13 +66,15 @@
   });
 
   /**
-   * 保存：读最新持久值只覆盖本面板管的两个字段——面板打开期间 TopBar 若改了
-   * 主题/计算策略，不被面板的旧草稿覆盖。
+   * 保存：读最新持久值只覆盖本面板管的四个字段——面板打开期间 TopBar 若改了
+   * 主题模式/计算策略，不被面板的旧草稿覆盖。
    */
   function persist(): void {
     const fresh = loadSettings();
     fresh.excludedPatterns = [...patterns];
     fresh.autoRefresh = autoRefresh;
+    fresh.appearanceLight = appearanceLight;
+    fresh.appearanceDark = appearanceDark;
     saveSettings(fresh);
   }
 
@@ -70,6 +99,56 @@
   function toggleAutoRefresh(): void {
     autoRefresh = !autoRefresh;
     persist();
+  }
+
+  /** 槽切换（spec B §2.3）：即时持久化，TopBar 的 onSettingsChanged 订阅自动 applyAppearance */
+  function onAppearanceChange(slot: 'light' | 'dark', e: Event): void {
+    const v = (e.currentTarget as HTMLSelectElement).value;
+    if (slot === 'light') appearanceLight = v;
+    else appearanceDark = v;
+    persist();
+  }
+
+  /** 文件选择 → 导入管线（.json 直读 / .vsix 解包全部主题）：计数通知 + 刷新列表 */
+  async function onImportChange(e: Event): Promise<void> {
+    const inp = e.currentTarget as HTMLInputElement;
+    const files = Array.from(inp.files ?? []); // FileList 非可迭代（该 tsconfig lib 下）→ Array.from
+    inp.value = ''; // 允许重复选同一文件
+    if (files.length === 0) return;
+    importing = true;
+    importNote = '';
+    importErrors = [];
+    try {
+      const { imported: ok, errors } = await importThemeFiles(files);
+      importErrors = errors;
+      importNote = errors.length === 0 ? `已导入 ${ok.length} 个主题` : `已导入 ${ok.length} 个，失败 ${errors.length} 个`;
+      imported = [...(await listThemes())].sort((a, b) => a.name.localeCompare(b.name) || a.addedAt - b.addedAt);
+    } catch (err) {
+      importErrors = [err instanceof Error ? err.message : String(err)];
+      importNote = '导入失败';
+    } finally {
+      importing = false;
+    }
+  }
+
+  /** 删除已导入主题：确认后删库；仍被槽引用的回 'default'（悬空 id 本有 warn 回退，UI 同步归位） */
+  async function removeImported(t: ImportedTheme): Promise<void> {
+    if (!window.confirm(`删除已导入主题「${t.name}」？`)) return;
+    await deleteTheme(t.id);
+    const fresh = loadSettings();
+    let changed = false;
+    if (fresh.appearanceLight === t.id) {
+      fresh.appearanceLight = 'default';
+      appearanceLight = 'default';
+      changed = true;
+    }
+    if (fresh.appearanceDark === t.id) {
+      fresh.appearanceDark = 'default';
+      appearanceDark = 'default';
+      changed = true;
+    }
+    if (changed) saveSettings(fresh);
+    imported = imported.filter((x) => x.id !== t.id);
   }
 
   function close(): void {
@@ -150,6 +229,65 @@
     <div class="vv-settings-hint">
       连接服务器时内容变更自动重读；关闭后目录树同步停用，可用顶栏 ↻ 手动刷新当前文件与目录树
     </div>
+  </section>
+
+  <section class="vv-settings-sec">
+    <div class="vv-settings-label">界面主题</div>
+    <div class="vv-settings-hint">
+      VSCode 外观主题同时接管代码配色（亮/暗各自记忆，跟随顶栏主题模式）；非默认时代顶栏代码主题选择停用
+    </div>
+    <label class="vv-settings-theme-row">
+      <span>亮色</span>
+      <select value={appearanceLight} onchange={(e) => onAppearanceChange('light', e)} aria-label="亮色界面主题">
+        {#each APPEARANCE_BUILTINS as o (o.value)}
+          <option value={o.value}>{o.label}</option>
+        {/each}
+        {#each imported as t (t.id)}
+          <option value={t.id}>{t.name}（{t.kind === 'dark' ? '暗' : '亮'}）</option>
+        {/each}
+      </select>
+    </label>
+    <label class="vv-settings-theme-row">
+      <span>暗色</span>
+      <select value={appearanceDark} onchange={(e) => onAppearanceChange('dark', e)} aria-label="暗色界面主题">
+        {#each APPEARANCE_BUILTINS as o (o.value)}
+          <option value={o.value}>{o.label}</option>
+        {/each}
+        {#each imported as t (t.id)}
+          <option value={t.id}>{t.name}（{t.kind === 'dark' ? '暗' : '亮'}）</option>
+        {/each}
+      </select>
+    </label>
+    <div class="vv-settings-import">
+      <button type="button" disabled={importing} onclick={() => themeInputEl?.click()}>
+        {importing ? '导入中…' : '导入主题…'}
+      </button>
+      <input type="file" multiple accept=".json,.vsix" hidden bind:this={themeInputEl} onchange={onImportChange} />
+    </div>
+    {#if importNote}
+      <div class="vv-settings-note" title={importErrors.length > 0 ? importErrors.join('\n') : undefined} role="status">
+        {importNote}
+      </div>
+    {/if}
+    {#if imported.length > 0}
+      <ul class="vv-settings-themes">
+        {#each imported as t (t.id)}
+          <li class="vv-settings-theme">
+            <span class="vv-settings-theme-name" title={t.name}>{t.name}</span>
+            <span class="vv-settings-theme-src">{t.source}</span>
+            <button
+              type="button"
+              class="vv-settings-remove"
+              aria-label="删除已导入主题 {t.name}"
+              title="删除"
+              onclick={() => void removeImported(t)}>✕</button
+            >
+          </li>
+        {/each}
+      </ul>
+    {:else}
+      <div class="vv-settings-empty">暂无已导入主题</div>
+    {/if}
   </section>
 </div>
 

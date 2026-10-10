@@ -178,6 +178,26 @@ describe('applyAppearance（B 项）', () => {
     expect(text).not.toContain('\n\n'); // 空段跳过：组装不残留空行
     await deleteTheme(t.id);
   });
+
+  it('三段全空（无 colors 且 tokenColors 均无 foreground）：回退 default 注入文案不 warn', async () => {
+    // validateVscodeTheme 只要求 colors/tokenColors 至少其一非空——settings 无
+    // foreground 的 tokenColors 可通过校验却产不出任何变量（T4 顺手项边界）
+    const t: ImportedTheme = {
+      id: 'imported:emptysec',
+      name: 'Empty Sections',
+      kind: 'dark',
+      colors: {},
+      tokenColors: [{ scope: 'comment', settings: {} }],
+      source: 'json',
+      addedAt: Date.now()
+    };
+    await putTheme(t);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await applyAppearance('imported:emptysec', 'dark', 'serika-dark');
+    expect(warn).not.toHaveBeenCalled(); // ref 可解析，非异常：静默回退
+    expect(styleEl()?.textContent).toBe(await legacyExpectedText('serika-dark', 'dark'));
+    await deleteTheme(t.id);
+  });
 });
 
 describe('hljs 兜底近似映射（M7 Task 3：--hljs-* 跟随代码主题）', () => {

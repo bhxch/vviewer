@@ -237,6 +237,8 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-server-form input:first-child { width: 220px; }
 .vv-server-form input[type='password'] { width: 150px; }
 .vv-server-error { color: var(--ui-danger, #d33); font-size: 12px; max-width: 320px; }
+/* 代码主题 select 被外观主题接管时的禁用态（SettingsPanel 界面主题区非默认） */
+.vv-topbar select:disabled { opacity: .5; cursor: default; }
 /* 引擎状态条（ViewerPane 底部，code 渲染器专用） */
 .vv-statusbar { flex: none; padding: 2px 10px; font-size: 12px; color: var(--ui-fg-muted);
   border-top: 1px solid var(--ui-border); background: var(--ui-tab-bg); user-select: none; }
@@ -295,3 +297,19 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-jsonl-cap { flex-basis: 100%; font-size: 12px; color: var(--ui-fg-muted); }
 .vv-jsonl-expand { flex: none; margin-left: auto; font-size: 12px;
   color: var(--ui-accent); border-color: var(--ui-accent); background: none; }
+/* 设置面板「界面主题」区（SettingsPanel 第三 section；样式惯例同 jsonl 渲染器 D 项：
+   全局类消费 --ui-* token。槽行/导入/通知/已导入列表，复用组件内 .vv-settings-remove） */
+.vv-settings-theme-row { display: flex; align-items: center; justify-content: space-between;
+  gap: 6px; font-size: 13px; }
+.vv-settings-theme-row select { flex: 1; min-width: 0; max-width: 210px; }
+.vv-settings-import { display: flex; gap: 6px; }
+.vv-settings-import button { font-size: 12px; }
+.vv-settings-import button:disabled { opacity: .5; cursor: default; }
+.vv-settings-note { color: var(--ui-accent); font-size: 12px; overflow-wrap: anywhere; }
+.vv-settings-themes { list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 4px; }
+.vv-settings-theme { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.vv-settings-theme-name { flex: 1; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.vv-settings-theme-src { flex: none; color: var(--ui-fg-muted); border: 1px solid var(--ui-border);
+  border-radius: 8px; padding: 0 6px; font-size: 11px; }

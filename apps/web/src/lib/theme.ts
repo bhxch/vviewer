@@ -243,18 +243,21 @@ async function injectCodeTheme(name: string, mode: 'light' | 'dark'): Promise<vo
  * hljs vars 均取自 TextMate→capture 映射结果（Task 1 vscode.ts），而非 helix 代码
  * 主题表；UI vars 段（colorsToUiVars 12 键白名单）仅此外观型才有。组装顺序：
  * 注释头 → UI vars → ts vars → hljs vars；某段为空（如主题无 colors）整段跳过
- * 不留空行（T3 顺手项）。
+ * 不留空行；三段全空（validate 后仍可能：无 colors 且 tokenColors 均无
+ * foreground）返回 false，由调用方回退 default 注入文案（T4 顺手项）。
  */
-function injectAppearance(appearance: string, mode: 'light' | 'dark', json: VscodeThemeJson): void {
+function injectAppearance(appearance: string, mode: 'light' | 'dark', json: VscodeThemeJson): boolean {
   const table = tokenColorsToThemeTable(json.tokenColors, CODE_CAPTURES);
-  const el = ensureStyleEl();
   const sections = [
     colorsToUiVars(json.colors ?? {}).join('\n'),
     themeToCssVars(table, [...CODE_CAPTURES]),
     hljsThemeVars(table)
   ].filter((s) => s !== '');
+  if (sections.length === 0) return false;
+  const el = ensureStyleEl();
   el.textContent = `/* vviewer 外观主题：${appearance}（${mode}）——只换 CSS 变量，不重解析 */\n${THEME_ROOT_SELECTOR} {\n${sections.join('\n')}\n}`;
   el.dataset.mode = mode;
+  return true;
 }
 
 /**
@@ -262,7 +265,8 @@ function injectAppearance(appearance: string, mode: 'light' | 'dark', json: Vsco
  * 'default' 时退化为纯代码主题注入（与旧 applyCodeTheme 文本逐字节等价，不含
  * UI vars 段）；vscode/imported 时 UI+代码一物两用——appearance 非 default 时
  * 代码槽被接管，codeTheme 参数仅作 default 路径的代码主题。未知 ref（清单外 /
- * 未注册 imported）console.warn 一次并回退 default 路径。
+ * 未注册 imported）console.warn 一次并回退 default 路径；外观 json 三段全空
+ * （无变量可注入）同样回退 default 文案但不 warn（非异常，只是无事可做）。
  */
 export async function applyAppearance(
   appearance: AppearanceRef,
@@ -274,10 +278,7 @@ export async function applyAppearance(
     console.warn(`未知外观主题：${appearance}，回退 default`);
     return injectCodeTheme(codeTheme, mode);
   }
-  if (json) {
-    injectAppearance(appearance, mode, json);
-    return;
-  }
+  if (json && injectAppearance(appearance, mode, json)) return;
   await injectCodeTheme(codeTheme, mode);
 }
 

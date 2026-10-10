@@ -24,6 +24,8 @@
   let mode = $derived(effectiveMode(settings.themeMode));
   let currentCodeTheme = $derived(mode === 'dark' ? settings.codeThemeDark : settings.codeThemeLight);
   let currentAppearance = $derived(mode === 'dark' ? settings.appearanceDark : settings.appearanceLight);
+  /** 外观接管（spec B §2.3）：当前 mode 槽非 default 时代码配色由外观 tokenColors 决定 */
+  let appearanceTakesOver = $derived(currentAppearance !== 'default');
 
   /** 应用当前外观槽：appearance 非 default 时代码槽由外观的 tokenColors 表接管
    * （codeTheme 仅作 default 回退），default 时即旧 applyCodeTheme 注入 */
@@ -204,7 +206,13 @@
     <option value="local">计算: 本地</option>
     <option value="remote">计算: 远程</option>
   </select>
-  <select value={currentCodeTheme} onchange={onCodeThemeChange} aria-label="代码主题" title="代码主题">
+  <select
+    value={currentCodeTheme}
+    onchange={onCodeThemeChange}
+    aria-label="代码主题"
+    title={appearanceTakesOver ? '由外观主题接管（设置面板界面主题区选回「默认」后可换）' : '代码主题'}
+    disabled={appearanceTakesOver}
+  >
     {#each codeThemeOptions as { group, themes } (group)}
       <optgroup label={group}>
         {#each themes as t (t)}
@@ -213,7 +221,7 @@
       </optgroup>
     {/each}
   </select>
-  <button onclick={() => (settingsOpen = !settingsOpen)} aria-label="设置" title="设置（Ctrl+,）：排除规则 / 自动刷新">
+  <button onclick={() => (settingsOpen = !settingsOpen)} aria-label="设置" title="设置（Ctrl+,）：排除规则 / 自动刷新 / 界面主题">
     ⚙
   </button>
 </header>
