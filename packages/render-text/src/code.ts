@@ -788,10 +788,22 @@ export function renderCode(
         // 偏移表解释（baseLine 即全文件首行）
         const maxEnd = res.intervals.reduce((m, iv) => Math.max(m, iv.end), 0);
         const wholeFile = res.baseLine !== startLine || maxEnd > chunkText.length;
-        chunkCache.set(
-          startLine,
-          mergeChunkLines(res.intervals, wholeFile ? lineOffsets : chunkOffsets, wholeFile ? 0 : res.baseLine)
+        const merged = mergeChunkLines(
+          res.intervals,
+          wholeFile ? lineOffsets : chunkOffsets,
+          wholeFile ? 0 : res.baseLine
         );
+        if (wholeFile) {
+          // 旧服务端 wholeFile 兜底只保留本 chunk 切片（T4 评审 Minor 的自抖动收口）：
+          // lineHtml 按 chunkKey 读值，整文件行表中属其他 chunk 的条目永不可达；
+          // 原样入库会让该 chunk 行数超 CHUNK_CACHE_MAX_LINES → evictChunksByLines
+          // 整块逐出 → 下次 onRange 重发全文件请求 → 「写入→逐出→重发」无限自抖动。
+          // 裁剪后缓存粒度与 range 路径一致，逐出预算照常成立。
+          for (const line of merged.keys()) {
+            if (line < startLine || line >= startLine + lineCount) merged.delete(line);
+          }
+        }
+        chunkCache.set(startLine, merged);
         evictChunksByLines(chunkCache, CHUNK_CACHE_MAX_LINES);
         engine = 'tree-sitter';
         computeWhere = 'remote';
