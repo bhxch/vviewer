@@ -174,11 +174,18 @@ export const TEXTMATE_TO_CAPTURE: Record<string, string> = {
   'markup.changed': 'diff.delta',
 };
 
-/** scope 归一：string 或 array；逗号分隔串按 array 拆（TextMate scope 选择器惯例），空项剔除。 */
+/**
+ * scope 归一：string 或 array；逗号分隔串按 array 拆（TextMate scope 选择器惯例），空项剔除。
+ * 导入 JSON 不可信：scope 形态异常（null/数字/对象等非 string 非 array）或数组含非字符串
+ * 元素一律跳过（仿 Markpad filter_map(as_str)），不让单条坏规则炸掉整个映射。
+ */
 function normalizeScopes(scope: string | string[] | undefined): string[] {
-  if (scope === undefined) return [];
-  const list = typeof scope === 'string' ? scope.split(',') : scope;
-  return list.map((s) => s.trim()).filter((s) => s !== '');
+  if (typeof scope === 'string') return scope.split(',').map((s) => s.trim()).filter((s) => s !== '');
+  if (!Array.isArray(scope)) return [];
+  return scope
+    .filter((s): s is string => typeof s === 'string')
+    .map((s) => s.trim())
+    .filter((s) => s !== '');
 }
 
 const TABLE_KEYS = Object.keys(TEXTMATE_TO_CAPTURE);

@@ -70,6 +70,20 @@ describe('tokenColorsToThemeTable（Markpad 快照基准）', () => {
     const t = tokenColorsToThemeTable([{ scope: 'comment', settings: { foreground: '#fff' } }], ['keyword']);
     expect(t.comment).toBeUndefined();
   });
+  it('畸形 scope（数字/null/对象/数组含非字符串）不炸且跳过非法项', () => {
+    // 导入 JSON 不可信：scope 形态异常不让单条坏规则炸掉映射（Markpad filter_map(as_str) 同精神）
+    const t = tokenColorsToThemeTable(
+      [
+        { scope: 123 as unknown as string, settings: { foreground: '#111' } },
+        { scope: null as unknown as string, settings: { foreground: '#222' } },
+        { scope: { nested: true } as unknown as string, settings: { foreground: '#333' } },
+        { scope: [1, 'a', null, 'keyword'] as unknown as string[], settings: { foreground: '#444' } },
+      ],
+      ['keyword'],
+    );
+    expect(t.keyword).toEqual({ fg: '#444' }); // 仅数组内合法的 'keyword' 生效
+    expect(Object.keys(t)).toEqual(['keyword']);
+  });
 });
 
 describe('colorsToUiVars', () => {
