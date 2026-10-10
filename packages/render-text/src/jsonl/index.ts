@@ -360,12 +360,12 @@ export const jsonlRenderer: Renderer = {
   label: 'JSON Lines',
   extensions: ['jsonl', 'ndjson'],
   async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection) {
-      if (shouldDelegateToCode(buffer.byteLength)) {
-        // >200MB：JSONL 逐行解析/逐卡高亮的内存与主线程成本失控，委托 code 纯文本
-        // 虚拟滚动（沿用其超限提示条与实例扩展；encoding/ext 透传保证非 UTF-8 解码
-        // 一致与状态栏语言段正确）
-        return renderCode(buffer, target, { encoding: det.encoding, ext: det.ext, highlight: false, oversizeNotice: true });
-      }
+    if (shouldDelegateToCode(buffer.byteLength)) {
+      // >200MB：JSONL 逐行解析/逐卡高亮的内存与主线程成本失控，委托 code 纯文本
+      // 虚拟滚动（沿用其超限提示条与实例扩展；encoding/ext 透传保证非 UTF-8 解码
+      // 一致与状态栏语言段正确）
+      return renderCode(buffer, target, { encoding: det.encoding, ext: det.ext, highlight: false, oversizeNotice: true });
+    }
     return renderJsonl(buffer, target, det);
   }
 };

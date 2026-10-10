@@ -21,6 +21,7 @@
 | 格式 | 能力 |
 | --- | --- |
 | 代码/文本 | tree-sitter 预编译 36 语言（wasm 按需加载，22 个查询可用；14 个查询/ABI 失配自动降级）+ highlight.js 全量兜底（语言检测表对齐 helix 264 语言清单）；>2MB 自动切 hljs 分块、≤20MB；utf-8/utf-16/gb18030 编码；虚拟滚动；状态栏实时显示引擎与执行位置 |
+| JSON Lines | .jsonl/.ndjson 行卡片视图：逐行 JSON 美化 + 卡片级懒高亮、可变高度虚拟滚动、长行折叠；>200MB 委托 code 纯文本（超限提示条） |
 | Markdown | 本地管线：GFM 表格/任务列表、callout、KaTeX 公式、mermaid 图表、围栏代码高亮、TOC 侧栏、图片灯箱；后端版可切远程 comrak 渲染（双引擎样式归一） |
 | HTML | 沙箱 iframe 预览（sandbox 无 `allow-scripts`）+ DOMPurify 净化，源码/渲染双视图 |
 | 图片 | 常见位图/矢量格式 + markdown 图片灯箱 |
