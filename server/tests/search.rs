@@ -1,7 +1,8 @@
 //! Task 4 集成测试：POST /api/search（ripgrep NDJSON 流式）。
 //!
 //! 真 rg 子进程断言：命中帧形状 / --max-count 截断 / glob / 大小写 /
-//! 字面量与正则 / path 限定与越界 403 / pattern 校验 400 / rg 缺失 501 / Bearer。
+//! 字面量与正则 / path 限定与越界 403 / pattern 校验 400 / 双缺 501 /
+//! rg 缺失 fallback grep / Bearer。
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -279,16 +280,47 @@ async fn truncates_at_1000_matches() {
     assert_eq!(done["truncated"], true);
 }
 
-// ---------- rg 缺失 → 501 ----------
+// ---------- rg+grep 双缺 → 501（spec A：单注 rg 在有 grep 机器会走 fallback） ----------
 
 #[tokio::test]
-async fn missing_rg_is_501() {
+async fn missing_rg_and_grep_is_501() {
     let f = fixture(None);
-    let state = f.state.with_rg_path(Some("/nonexistent/rg-for-test".to_string()));
+    let state = f
+        .state
+        .with_rg_path(Some("/nonexistent/rg-for-test".to_string()))
+        .with_grep_path(Some("/nonexistent/grep-for-test".to_string()));
     let (status, frames) = post_search(state, json!({ "pattern": "needle" })).await;
     assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
     assert_eq!(frames.len(), 1);
     assert!(frames[0].get("error").is_some());
+}
+
+// ---------- rg 缺失 + grep 存在 → 200（fallback 全链路） ----------
+
+#[tokio::test]
+async fn missing_rg_falls_back_to_grep() {
+    let Some(grep) = vviewer::routes::search::probe("grep") else {
+        return;
+    };
+    let f = fixture(None);
+    let state = f
+        .state
+        .with_rg_path(Some("/nonexistent/rg-for-test".to_string()))
+        .with_grep_path(Some(grep));
+    let (status, frames) = post_search(state, json!({ "pattern": "needle" })).await;
+    assert_eq!(status, StatusCode::OK);
+    let hits = match_frames(&frames);
+    let first = hits.iter().find(|h| h["file"] == "a.txt").unwrap();
+    assert_eq!(first["line"], 2);
+    assert_eq!(first["col"], 1, "grep 路径 col 恒 1");
+    assert_eq!(first["text"], "needle here");
+    // 已知差异（spec §2.2）：grep 无 --max-filesize，>2MiB 的 big.txt 照常命中
+    assert!(
+        hits.iter().any(|h| h["file"] == "big.txt"),
+        "grep 无大文件跳过：fallback 行为差异用测试固化"
+    );
+    let done = done_frame(&frames);
+    assert_eq!(done["done"], true);
 }
 
 // ---------- Bearer 鉴权 ----------

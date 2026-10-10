@@ -12,6 +12,10 @@
 //! （不尊重 .gitignore）；`state.hidden` 时追加 `--hidden` 与树同步展示 dot 条目；
 //! pattern 一律经 `-e` 传入（防 `-` 开头 pattern 被解析为 flag）；字面量默认
 //! `-F`，`regex: true` 用 rg 默认正则引擎。
+//!
+//! A 项降级链：rg 缺失时自动 fallback 系统 grep——参数映射/`--null` 行协议/
+//! 已知差异（无 filesize 跳过、顺序不保证、ERE、col=1）见 `grep_args`/`grep_frame`；
+//! health 据同一选择链宣告 `searchEngine`。
 
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -97,20 +101,20 @@ pub fn probe_rg() -> Option<String> {
 }
 
 /// 单引擎解析（覆盖语义见 state.rs 字段注释）。
-fn resolve_one(over: Option<&String>, exe: &str, engine: SearchEngine) -> Option<(SearchEngine, String)> {
+fn resolve_one(over: Option<&str>, exe: &str, engine: SearchEngine) -> Option<(SearchEngine, String)> {
     match over {
         None => probe(exe).map(|p| (engine, p)),
-        Some(p) if is_executable(Path::new(p)) => Some((engine, p.clone())),
+        Some(p) if is_executable(Path::new(p)) => Some((engine, p.to_string())),
         Some(_) => None, // 显式注入但不可执行：该引擎不可用，跳过（模拟缺失）
     }
 }
 
 /// 引擎选择链：rg 覆盖/探测 → grep 覆盖/探测 → 双缺 501。
 pub(crate) fn resolve_engine(state: &AppState) -> Result<(SearchEngine, String), AppError> {
-    if let Some(found) = resolve_one(state.rg_path.as_ref(), "rg", SearchEngine::Rg) {
+    if let Some(found) = resolve_one(state.rg_path.as_deref(), "rg", SearchEngine::Rg) {
         return Ok(found);
     }
-    if let Some(found) = resolve_one(state.grep_path.as_ref(), "grep", SearchEngine::Grep) {
+    if let Some(found) = resolve_one(state.grep_path.as_deref(), "grep", SearchEngine::Grep) {
         return Ok(found);
     }
     Err(AppError::not_implemented(
@@ -166,6 +170,7 @@ fn rg_args(req: &SearchRequest, hidden: bool) -> Vec<String> {
 /// 已知差异（spec §2.2）：无 --max-filesize（全读，60s 墙钟+命中上限兜底）、
 /// 无 --sort path（顺序不保证）、regex 走 ERE 方言、无列号（col 恒 1）。
 /// `hidden` 无对应开关：grep -r 天然含 dot 条目、不读 ignore。
+/// - --include 仅按 basename 匹配 glob（rg -g 对相对路径全程匹配），含 / 的 glob 在 grep 下语义不同
 fn grep_args(req: &SearchRequest, hidden: bool) -> Vec<String> {
     let _ = hidden;
     let mut args = vec![
@@ -207,16 +212,19 @@ pub async fn search(State(state): State<AppState>, Json(req): Json<SearchRequest
         Err(e) => return e.into_response(),
     };
 
-    let Some(rg) = state.rg_path.clone().or_else(probe_rg) else {
-        return AppError::not_implemented(
-            "cross-file search unavailable: ripgrep (rg) not found on server",
-        )
-        .into_response();
+    // handler 返回 Response 而非 Result，? 不可用：与 guard::resolve 同款 match 展开
+    let (engine, bin) = match resolve_engine(&state) {
+        Ok(found) => found,
+        Err(e) => return e.into_response(),
     };
 
-    let mut command = Command::new(&rg);
+    let args = match engine {
+        SearchEngine::Rg => rg_args(&req, state.hidden),
+        SearchEngine::Grep => grep_args(&req, state.hidden),
+    };
+    let mut command = Command::new(&bin);
     command
-        .args(rg_args(&req, state.hidden))
+        .args(args)
         .arg(&dir)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -224,29 +232,29 @@ pub async fn search(State(state): State<AppState>, Json(req): Json<SearchRequest
         .kill_on_drop(true); // 兜底：pump 任务整体被 drop 时也要杀掉子进程
     let mut child = match command.spawn() {
         Ok(c) => c,
-        // 注入路径不存在 / 可执行文件缺失：等同 rg 不可用
+        // 探测与 spawn 之间文件被移除（TOCTOU 窗口）：等同引擎不可用
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return AppError::not_implemented(format!(
-                "cross-file search unavailable: failed to spawn rg ({e})"
+                "cross-file search unavailable: failed to spawn {} ({e})",
+                engine.name()
             ))
             .into_response();
         }
-        Err(e) => return AppError::internal(format!("failed to spawn rg: {e}")).into_response(),
+        Err(e) => {
+            return AppError::internal(format!("failed to spawn {}: {e}", engine.name()))
+                .into_response()
+        }
     };
 
     let stdout: ChildStdout = child.stdout.take().expect("rg stdout must be piped");
     let stderr: ChildStderr = child.stderr.take().expect("rg stderr must be piped");
 
     let (tx, rx) = mpsc::channel::<Result<String, std::io::Error>>(FRAME_CHANNEL);
-    // 引擎接线（resolve_engine → grep_args）改造前，handler 仍直连 rg 解析器（行为不变）
-    let pump_handle = tokio::spawn(pump(
-        child,
-        stdout,
-        stderr,
-        FrameParser::Rg { root_canonical: state.root_canonical.clone() },
-        tx,
-        SEARCH_TIMEOUT,
-    ));
+    let parser = match engine {
+        SearchEngine::Rg => FrameParser::Rg { root_canonical: state.root_canonical.clone() },
+        SearchEngine::Grep => FrameParser::Grep { root_canonical: state.root_canonical.clone() },
+    };
+    let pump_handle = tokio::spawn(pump(child, stdout, stderr, parser, tx, SEARCH_TIMEOUT));
     // 结局观测（tracing debug 级）：读取 outcome 字段同时消除 test-only 字段告警
     tokio::spawn(async move {
         if let Ok(outcome) = pump_handle.await {
@@ -964,7 +972,7 @@ mod tests {
             .iter()
             .map(|l| serde_json::from_str(l).unwrap())
             .collect();
-        assert_eq!(frames.last().is_some(), true, "必须有终帧");
+        assert!(frames.last().is_some(), "必须有终帧");
         let done: Value = serde_json::from_str(frames.last().unwrap()).unwrap();
         assert_eq!(done["done"], true);
         assert_eq!(hits.len(), 2);
