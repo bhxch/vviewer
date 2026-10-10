@@ -642,7 +642,8 @@ test.describe('BUG-68 [探索]: root 含越界 symlink 时 watcher 不降级', (
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
       /** 读一个 SSE chunk；超时返回 null（不 reject、不丢弃 pending read——
-       *  ReadableStream 读请求排队，被 race 丢弃的 read 仍会吞走下一个 chunk） */
+       *  ReadableStream 读请求排队，被 race 丢弃的 read 仍会吞走下一个 chunk）。
+       *  race 超时后 pending chunk 迟到会被丢弃——对本用例的负向断言可接受 */
       let pendingRead: Promise<string | null> | null = null;
       const readChunk = (timeoutMs: number): Promise<string | null> => {
         pendingRead ??= reader.read().then(({ value, done }) => {
@@ -657,7 +658,8 @@ test.describe('BUG-68 [探索]: root 含越界 symlink 时 watcher 不降级', (
       };
 
       // 建连快照窗口（2s）：健康时快照无帧、窗口内静默属正常；一旦降级，
-      // watch-degraded 必现（建连快照或 session 广播，watch.rs:443/events.rs:60）
+      // watch-degraded 必现（建连快照或 session 广播，见 watch.rs 的
+      // session_loop 与 routes/events.rs 的建连快照逻辑）
       let snapshot = '';
       const snapDeadline = Date.now() + 2_000;
       while (Date.now() < snapDeadline && !snapshot.includes('data:')) {

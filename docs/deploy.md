@@ -81,7 +81,9 @@ RUST_LOG=info,notify=warn ./server/target/release/vviewer serve --root /path/to/
 ⚠️ 不要用 `nohup … > file 2>&1` 裸重定向到文件：无轮转无上限。数据根内存在
 越界 symlink / 不可读目录时，旧版本曾出现日志无界增长与 CPU 空转（BUG-68，
 2026-10-10 已修复并默认过滤 notify 扫描告警）；即便修复后，裸重定向也使任何
-未预期的日志增长直达磁盘。
+未预期的日志增长直达磁盘。已知残留：root 内真实不可读目录（非 symlink）仍会
+使 inotify 建监听失败并降级轮询——日志已被默认过滤与限频约束为有界，但轮询
+扫描本身按树大小消耗 CPU。
 
 ## 常见问题
 

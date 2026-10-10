@@ -39,7 +39,8 @@ use tokio::sync::broadcast;
 use tracing::{error, info, warn};
 
 /// 运行期错误日志限频（BUG-68 抑制层）：同窗口内错误只记首条，过期后输出
-/// 一条「n 条已抑制」摘要，避免高频错误事件逐条刷日志。
+/// 一条「n 条已抑制」摘要（n=0 时不输出空摘要，直接按新窗口首条），避免
+/// 高频错误事件逐条刷日志。
 struct ErrorLogGate {
     window: Duration,
     last_reset: Option<Instant>,
@@ -47,7 +48,7 @@ struct ErrorLogGate {
 }
 
 enum Admission {
-    /// 窗口首条：直接记录
+    /// 窗口首条：直接记录（含窗口过期但期间无抑制、零摘要可输出的情形）
     First,
     /// 窗口内：静默累计
     Suppressed,
@@ -70,7 +71,13 @@ impl ErrorLogGate {
                 let n = self.suppressed;
                 self.suppressed = 0;
                 self.last_reset = Some(now);
-                Admission::Summary(n)
+                // 零抑制的过期窗口没有可摘要的内容，退化为首条语义，
+                // 避免「0 suppressed」噪声行
+                if n == 0 {
+                    Admission::First
+                } else {
+                    Admission::Summary(n)
+                }
             }
             Some(_) => {
                 self.suppressed += 1;
@@ -736,6 +743,20 @@ mod tests {
         assert!(matches!(gate.admit(t0 + Duration::from_secs(61)), Admission::Summary(5)));
         // 新窗口内继续静默
         assert!(matches!(gate.admit(t0 + Duration::from_secs(62)), Admission::Suppressed));
+    }
+
+    /// 窗口过期但期间零抑制：按新窗口首条（First）重开，而非 Summary(0)——
+    /// 避免输出「0 suppressed」噪声摘要行。
+    #[test]
+    fn error_log_gate_expired_window_without_suppression_reopens_as_first() {
+        let t0 = Instant::now();
+        let mut gate = ErrorLogGate::new(Duration::from_secs(60));
+        assert!(matches!(gate.admit(t0), Admission::First));
+        // 窗口内无任何被抑制的错误，过期后的下一条应为首条语义（非空摘要）
+        assert!(matches!(gate.admit(t0 + Duration::from_secs(61)), Admission::First));
+        // 重开的窗口内继续静默累计，摘要数值正确
+        assert!(matches!(gate.admit(t0 + Duration::from_secs(62)), Admission::Suppressed));
+        assert!(matches!(gate.admit(t0 + Duration::from_secs(125)), Admission::Summary(1)));
     }
 
     /// 极短退避：mock/真实故障注入测试毫秒级完成，不拖慢套件。
