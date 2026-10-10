@@ -195,8 +195,71 @@ vviewer 现状：客户端 wasm 内嵌 lite 集 34 语言，服务端 compute �
   「远程高亮失败: HTTP 400」。宣告门的零请求语义由 `highlightRouter.test.ts` 单测
   矩阵锁定（无 compute 零 fetch / 语言未宣告零 fetch / 宣告空集先试远程 / 未连接
   warn+null）。
+- **勘误（2026-10-10，阶段 4 收口评审 Minor）**：上条「前端语言表与 code 渲染器
+  扩展名白名单识别出的语言已与服务端 301 集完全对齐」「不存在天然集外语料可打开」
+  表述失实。实测（以构建产物核对）：languages.json 342 条目与服务端 301 差集 57
+  （jsonc/jsx/json5/json-ld/starlark/qml 等），反向服务端另有 16 个 helix 派生名
+  不在前端表，两集合非包含关系。其中 **jsonc / jsx 经 code 渲染器扩展名白名单可达**
+  （server-served 路径 X-VV-Lang 按 languages.json 条目名下发，前端 langdetect 的
+  grammar 字段归并仅在本地来源路径生效），「auto 无集外 400 可构造」结论不变、论据
+  修正——差集语言的请求被 auto 宣告门前置拦截（零请求直落本地分块），到不了 400
+  而非集外语料不存在；显式 remote 不做宣告门，jsonc/jsx 打开即真实 400 错误卡片
+  （与 brainfuck 改写注入语义同型，既有用例保留不动）。e2e 锚：`e2e-server` CMP 系
+  新增 server-served >2MB .jsonc + auto 零 POST 用例（§7.4）。
+  **拓扑边界（收口实测补充）**：「宣告门前置拦截」以同源部署为边界——跨源部署
+  （`--cors-origin`）下服务端 CORS 层未 `Access-Control-Expose-Headers` 暴露
+  X-VV-Lang/X-VV-Encoding，前端 `headers.get` 恒 null → meta.lang 缺失、回落本地
+  langdetect 的 grammar 归并（jsonc→json、jsx→javascript，均宣告集内）→ 门放行真实
+  POST（服务端照常 200）。该 expose 缺口同压 BUG-04 的编码/语言状态栏（跨源下恒显
+  前端检测值），属预存在缺陷，建议随 SPA-fallback 缺陷一并立项（server CORS 层加
+  expose_headers 一行）。
 - **关联排查**：`m6.spec.ts`（policy=remote 1.5MB 远程、小文件远程）与
   `b-code-highlight-degrade.spec.ts`（HL 系列，本地通道）无旧契约断言，实测全绿
   ——m6 14 passed、degrade 12 passed（双 project），无波及。
 - **门禁（本地 2026-10-10）**：`pnpm vitest run` 658/658（57 文件）；`pnpm typecheck`
   通过；上述三套 playwright（cg 10 / degrade 12 / m6 14）全绿。
+
+### 7.4 阶段 4 实测结果回写（2026-10-10 收口）
+
+六任务（range 协议 → worker chunk → 路由 → chunkCache 渲染 → e2e 改写 → 文档收口），
+commits `a4f2c64..678ce2c` + 本收口提交。
+
+- **range 协议（服务端，Task 1）**：`HighlightRequest.range {startLine, lineCount}`
+  （serde rename 驼峰）/ 响应 `baseLine`；`MAX_RANGE_LINES=5000`、仅 path 模式、
+  越界 400 携带实际行数、越尾自然截断；chunk 字节上限复用 20MB → 413 不截断，且
+  **只约束产出窗口、不约束跳行距离**（深窗口钉子：26.4MB 文件 `startLine=500000`
+  的 10 行窗口 200，对照整文件路径 413）；LRU 键追加 range 维度（无 range 占位
+  `(0, u64::MAX)` 互不命中）；不传 range 行为与旧版逐字节一致（回归锚）。
+- **本地 worker chunk（Task 2）**：`highlight(text, lang, ctx?: {chunk})` 语义标注
+  链路——engine 零改动（子文本直接 parse 裁决），区间相对子文本、行号平移归调用侧；
+  runtime 对照测试钉「整文本窗口区间 ≡ 子文本区间、chunk 标注不改变结果」。
+- **路由（Task 3）**：`routeLargeFileHighlight` 升级 range 契约，返回
+  `{intervals, baseLine}`（baseLine 缺省/NaN 兜 0 兼容旧服务端）；body 缺省不带
+  range 字段（旧请求语义）；auto 宣告门/来源护栏/失败分流语义零变化。
+- **渲染 chunkCache 模型（Task 4）**：strategy 三态 ≤2MiB tree-sitter / ≤200MiB lazy
+  （`CHUNK_LINES=200` 对齐 + overscan+2 裕量）/ >200MiB plain；`'hljs-block'` 退役；
+  chunk 级来源选择（服务端 range → auto 门 null 行级 hljs，不回落本地 wasm / 本地
+  worker chunk / 行级 hljs）；取消≠失败（只逐出在-flight）；本地 chunk 单在-flight 泵
+  + 最新窗口优先队列裁剪；`CHUNK_CACHE_MAX_LINES=5000` chunk 粒度逐出；>20MB「可视区
+  懒高亮」一次性提示条；旧服务端 wholeFile 兜底按 chunk 切片入库（自抖动收口）。
+- **门禁数字（本地 2026-10-10）**：`cargo test` 150 项全绿（range 新增 17：集成 15 +
+  单测 2，基线 133）；`packages/highlight` 67/67（chunk 链路 +3）；`highlightRouter`
+  14/14；`packages/render-text` 211/211（chunkCache 重构）；全仓 vitest 679/679；
+  `pnpm typecheck` 通过。
+- **e2e 与性能锚点（Task 5）**：默认 playwright（无 env dist，chromium+mobile）
+  172 passed / 4 failed（b-grammar-layers env 守卫，无 env dist 下必败属设计）/
+  16 skipped；b-grammar-layers（env dist 定向）4/4；e2e-server（release 二进制）
+  38/38。性能锚点 PERF-LAZY（25MB，1,315,789 行）：纯文本首帧 246-355ms（锚
+  <1000ms）、跳滚 110 万行后 chunk 着色到达 32ms（锚 <2000ms）、滚动连发 6 跳
+  longtask 0 个（锚 0）——三处数量级裕量。
+- **宣告门 e2e 回补（Task 6，§7.3 勘误承接）**：server-served >2MB .jsonc（差集
+  语言）+ `--compute` 同源实例 + auto → **零 POST + 行级 hljs 本地分块**（宣告门前置
+  拦截：X-VV-Lang 按条目名下发 `jsonc`，不在宣告集合），落
+  `e2e-server/b-compute-global-search-server.spec.ts` CMP-02 描述组（专用同源实例
+  :4180——跨源下 X-VV-Lang 未被 CORS expose，见 §7.3 拓扑边界）。
+- **环境口径**：本机 CDN-env 网络回归（透明代理 fake-IP 使 env dist 页面加载期
+  grammar fetch 变真实 socket，阶段 2 文档在案）使默认套件 b-grammar-layers 的 env
+  守卫半区不可复现，本机门禁按「无 env dist 全量 + env dist 定向补 b-grammar-layers」
+  组合记录（两半拼图覆盖 176 用例）；CI 的 env 构建套件为权威门禁。挂终审修复波的
+  预存在缺陷备案：release 二进制 SPA fallback 把缺失 .scm 回 200 index.html →
+  query loader 误载 → 本地 tree-sitter 静默落 hljs（根因两处各一行，建议单独立项）。

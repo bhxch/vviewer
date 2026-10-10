@@ -14,7 +14,10 @@ import { stopServer, waitHealthy } from '../e2e/serverHarness';
  * 本文件覆盖（缺陷回归为主）：
  * - CMP-02/BUG-10：显式 remote 下 >2MB 文件不再被本地阈值压制（状态栏远程 + POST
  *   /api/compute/highlight 发生）；auto 双护栏——server-served 3MB 不限大小走服务端
- *   （POST + tree-sitter 渲染），本地添加 3MB（单文件上传通道）恒本地懒高亮零 POST
+ *   （POST + tree-sitter 渲染），本地添加 3MB（单文件上传通道）恒本地懒高亮零 POST；
+ *   宣告门（阶段 4 收口，spec §7.3 勘误承接）——server-served >2MB .jsonc（差集
+ *   语言，languages.json 342 与 301 差集 57）+ auto：零 POST + 行级 hljs 本地分块
+ *   （同源 compute 实例；跨源下 X-VV-Lang 未被 CORS expose，门语义以同源为边界）
  * - CMP-03/BUG-22：auto 下含围栏 md 与 html（渲染/源码两视图）均显示「渲染: 本地」；
  *   围栏二级高亮保留；非注入语言（py）auto 仍远程（路由矩阵抽样不回归）
  * - CMP-04：php（阶段 1 起在服务端 301 集内，正例对照）auto 远程成功；POST lang
@@ -29,7 +32,8 @@ import { stopServer, waitHealthy } from '../e2e/serverHarness';
  *
  * 实例拓扑：主实例 :4174（webServer，无 compute）承担搜索类场景（search 属 file-server
  * 基础能力，不要求 --compute）；辅助 --compute 实例 :4178（带 token + cors-origin 指
- * 页面源，高亮/markdown 路由类场景经连接表单跨源连接，同 m5/m6 跨源前例）；辅助无 rg
+ * 页面源，高亮/markdown 路由类场景经连接表单跨源连接，同 m5/m6 跨源前例）；同源
+ * --compute 实例 :4180（无 token，宣告门用例专用——X-VV-Lang 需同源可读）；辅助无 rg
  * 实例 :4179（PATH 剔除 rg 所在目录，CMP-09 专用）。夹具 cg- 前缀写入共享 fixture 根。
  */
 
@@ -40,6 +44,7 @@ const BASE = 'http://127.0.0.1:4174';
 const PAGE_ORIGIN = 'http://127.0.0.1:4174';
 const CG_TOKEN = 'cg-e2e-token';
 const PORT_COMPUTE = 4178;
+const PORT_COMPUTE_SAME = 4180; // 宣告门专用：同源 compute 实例（页面即该实例伺服）
 const PORT_NORG = 4179;
 
 function spawnServe(port: number, extraArgs: string[], env?: NodeJS.ProcessEnv): ChildProcess {
@@ -54,6 +59,7 @@ function spawnServe(port: number, extraArgs: string[], env?: NodeJS.ProcessEnv):
 }
 
 let computeServer: ChildProcess | null = null;
+let computeSameServer: ChildProcess | null = null;
 let norgServer: ChildProcess | null = null;
 
 /** PATH 剔除 rg 所在目录（probe_rg 按 PATH 逐目录探测可执行 rg） */
@@ -68,6 +74,12 @@ test.beforeAll(async () => {
   mkdirSync(join(FIXTURE, 'cg-sub'), { recursive: true });
   // BUG-10 主体：>2MB（现役本地阈值 2MiB）单文件 JS，块内重复行避免转义噪音
   writeFileSync(join(FIXTURE, 'cg-code-3mb.js'), 'const vv = 1; // c\n'.repeat(160_000));
+  // 宣告门 e2e（阶段 4 收口，spec §7.3 勘误承接）：languages.json 342 与服务端 301
+  // 差集 57，jsonc 为差集内且 code 渲染白名单可达的语言——server-served 路径
+  // X-VV-Lang 按条目名下发 jsonc（同源可读，前端本地 langdetect 的 grammar 归并
+  // json 不生效），auto 宣告门前置拦截：零 POST + 行级 hljs 本地分块。载体行含
+  // JSON 特征（hljs 原生注册 jsonc 别名，行级兜底按 jsonc 着色）
+  writeFileSync(join(FIXTURE, 'cg-code-3mb.jsonc'), '{"vv": "cg", "n": 1} // jsonc\n'.repeat(120_000));
   writeFileSync(join(FIXTURE, 'cg-small-sample.js'), 'const small = "cg02";\n');
   writeFileSync(
     join(FIXTURE, 'cg-rust-fence.md'),
@@ -120,6 +132,15 @@ test.beforeAll(async () => {
     undefined,
     (c) => (computeServer = c)
   );
+  // 宣告门专用同源实例：无 token、无 --cors-origin（页面与 API 同源，X-VV-Lang/
+  // X-VV-Encoding 检测头无需 Access-Control-Expose-Headers 即可读——跨源部署下
+  // 服务端 CORS 层未暴露该头，前端回落本地检测，宣告门语义边界见用例内注释）
+  await ensureServe(
+    PORT_COMPUTE_SAME,
+    ['--compute'],
+    undefined,
+    (c) => (computeSameServer = c)
+  );
   await ensureServe(
     PORT_NORG,
     ['--cors-origin', PAGE_ORIGIN],
@@ -130,16 +151,22 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await stopServer(computeServer, 'cg-compute');
+  await stopServer(computeSameServer, 'cg-compute-same');
   await stopServer(norgServer, 'cg-norg');
 });
 
-/** 主实例同源连接（无 token；search 类场景用） */
-async function connectSameOrigin(page: Page): Promise<void> {
-  await page.goto('/');
+/** 连接服务器：任意同源实例（无 token；4174 主实例 / 4180 同源 compute 实例共用） */
+async function connectSameOriginAt(page: Page, base: string): Promise<void> {
+  await page.goto(base + '/');
   await page.getByRole('button', { name: '连接服务器' }).click();
-  await page.getByLabel('服务器地址').fill(BASE);
+  await page.getByLabel('服务器地址').fill(base);
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await expect(page.locator('.vv-tree-row', { hasText: 'cg-' }).first()).toBeVisible({ timeout: 10_000 });
+}
+
+/** 主实例同源连接（无 token；search 类场景用） */
+async function connectSameOrigin(page: Page): Promise<void> {
+  await connectSameOriginAt(page, BASE);
 }
 
 /** 连接 --compute 辅助实例（跨源，策略经 localStorage 预注入，同 m6 gotoWithPolicy） */
@@ -245,6 +272,37 @@ test.describe('CMP-02/BUG-10 大文件远程高亮路由', () => {
     ).toBeVisible({ timeout: 60_000 });
     expect(highlightPosts).toEqual([]); // 本地来源恒零 POST（highlightRouter 注入侧护栏）
   });
+
+  test('auto 宣告门：server-served >2MB .jsonc（差集语言）零 POST + 行级 hljs 本地分块（同源）', async ({
+    page
+  }) => {
+    test.setTimeout(120_000);
+    const highlightPosts: string[] = [];
+    page.on('request', (r) => {
+      if (r.method() === 'POST' && r.url().includes('/api/compute/highlight')) highlightPosts.push(r.url());
+    });
+    // 同源 compute 实例（4180）：页面与 API 同源，X-VV-Lang（条目名 jsonc）可读，
+    // meta.lang 生效。跨源部署下服务端 CORS 层未 Access-Control-Expose-Headers 该头，
+    // 前端回落本地 langdetect 的 grammar 归并（jsonc→json，宣告集内）→ 门放行真实
+    // POST——「宣告门前置拦截」语义以同源部署为边界（预存在缺口，已在案单独立项候选）。
+    await connectSameOriginAt(page, `http://127.0.0.1:${PORT_COMPUTE_SAME}`);
+    await openFile(page, 'cg-code-3mb.jsonc');
+
+    // languages.json 342 与服务端 301 差集 57，jsonc 在差集内且经 code 渲染白名单可达
+    //（spec §7.3 勘误）：meta.lang = X-VV-Lang = 条目名 jsonc，不在宣告集合 → auto
+    // 宣告门（BUG-06c 同源）前置拦截返回 null——零请求直落本地分块，而非白发 400 再
+    // 回退。引擎身份可钉定：null → 行级 hljs（不回落本地 wasm，渲染侧裁决），且
+    // jsonc 不在任何 grammar manifest，本地 wasm 路径本就不可达。
+    const sb = page.locator('.vv-statusbar');
+    await expect(sb).toContainText('语言: jsonc', { timeout: 30_000 }); // X-VV-Lang 同源可读且生效
+    await expect(sb).toContainText('执行: 本地', { timeout: 60_000 });
+    await expect(sb).not.toContainText('执行: 远程');
+    await expect(sb).toContainText('高亮: hljs 兜底', { timeout: 60_000 });
+    await expect(page.locator('.vv-code-pre span[class^="hljs-"]').first()).toBeVisible({
+      timeout: 60_000
+    });
+    expect(highlightPosts).toEqual([]); // 宣告门前置拦截：零 POST（与护栏②的来源拦截相区分）
+  });
 });
 
 test.describe('CMP-03/BUG-22 auto 执行位置指示', () => {
@@ -296,10 +354,11 @@ test.describe('CMP-04 远程高亮失败语义', () => {
     expect(statuses).toContain(200);
     await expect(page.locator('.vv-error-card')).toHaveCount(0);
 
-    // ② 集外 400 场景经请求改写注入：阶段 1 后前端语言表与 code 渲染白名单识别出的
-    // 语言已与服务端 301 集完全对齐（能进渲染管线的扩展名全部映射集内语言），不存在
-    // 天然集外语料可打开——POST body lang 改写为 brainfuck（server 单测同款集外名），
-    // 400 真实来自服务端（unsupported language），非 mock 响应
+    // ② 集外 400 场景经请求改写注入（spec §7.3 勘误后的口径）：languages.json 342 与
+    // 服务端 301 差集 57，但差集语言的请求被 auto 宣告门前置拦截为零请求（本文件
+    // CMP-02 描述组的 jsonc 用例），auto 下到不了 400——故「auto 收 400」场景仍需
+    // 改写注入：POST body lang 改写为 brainfuck（server 单测同款集外名），400 真实
+    // 来自服务端（unsupported language），非 mock 响应
     await page.route('**/api/compute/highlight', async (route) => {
       const body = route.request().postDataJSON() as { path: string; lang: string };
       const headers = { ...route.request().headers() };

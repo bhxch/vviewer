@@ -183,3 +183,43 @@ grammar wasm 资产不入库、构建期生成：测试前必须先执行 `pnpm 
    - 服务端 compute 内嵌语言集 14 种（`server/src/compute/queries.rs:41-54`，无 java）与客户端 34 项 manifest 不对齐：java 在线走 compute 得 HTTP 400「无可用 grammar 或查询」如实回退本地，而本地路径同样不可用 → java 无任何 tree-sitter 路径。
 2. 报告「主路径整链失效」主体（sample.rs 零 wasm/全兜底、vv-grammars 缓存永不创建）按环境定性收口：根因为 BUG-15 残缺 SW，两修复已落地并以 `apps/web/e2e/fix-pwa.spec.ts` 护栏。
 3. `docs/deploy.md` 已按 spec 注记「升级部署后需硬刷新/清站点数据」（残缺 SW 的用户侧成因与对策）。
+
+## 6. 阶段 4 三态降级链更新（2026-10-10）
+
+> 第 1-5 节为 M2 报告转写，按历史口径保留不改动。阶段 4 统一懒高亮（spec
+> `docs/superpowers/specs/2026-10-09-full-grammar-alignment-design.md` §5）重写了本域
+> 降级链模型：按字节三态，`'hljs-block'`（状态栏「高亮: hljs 分块」）退役，
+> HL-03/HL-04 现状反转。本节记录新模型语义与现役护栏位置。
+
+### 6.1 三态降级链（`resolveStrategy`，字节阈值）
+
+| 字节区间 | 策略 | 行为 |
+| --- | --- | --- |
+| ≤2MiB（`TREE_SITTER_MAX_BYTES`） | `tree-sitter` | 整文件一次解析（失败 → hljs 整文件兜底），首屏路径不变 |
+| ≤200MiB（`PLAIN_MAX_BYTES`） | `lazy` | 可视区驱动 chunk 懒高亮：chunk 按 200 行对齐 + overscan/重叠 2 行裕量；来源选择 服务端 range 路由（auto 宣告门 null → 该 chunk 行级 hljs，不回落本地 wasm）→ 本地 worker chunk → 行级 hljs 兜底；chunk 级失败（超时/413/网络）只降该 chunk，切 tab 取消只逐出在-flight、不落 hljs 兜底 |
+| >200MiB | `plain` | 纯文本虚拟滚动 + 提示条 |
+
+- **HL-04 现状反转（BUG-20 修复落地）**：>20MiB 不再落纯文本——虚拟滚动 + 懒高亮
+  兜底，打开后出现一次性「可视区懒高亮」提示条（轻量不阻断）；「纯文本虚拟滚动」
+  提示只属于 >200MiB。
+- **状态栏口径**：行级兜底显示「高亮: hljs 兜底 · 执行: 本地」；「高亮: hljs 分块」
+  不再产出（`'hljs-block'` 类型值仅为状态栏兼容保留于 `CodeEngine`）。
+- **缓存**：`chunkCache`/`hljsChunkCache` 双缓存，chunk 粒度逐出
+  （`CHUNK_CACHE_MAX_LINES=5000`，原 hljs-block 的 5000 行等价预算）。
+
+### 6.2 对第 2 节场景的现时语义
+
+| 场景 | M2 口径（第 2 节） | 阶段 4 现时语义 |
+| --- | --- | --- |
+| HL-03（3MB） | 「hljs 分块」+ 三处零错位 | lazy chunk（tree-sitter），零错位断言沿用；「hljs 分块」文案断言退役 |
+| HL-04（25MB） | 纯文本虚拟滚动、无超限提示（BUG-20 partial） | 懒高亮 + 「可视区懒高亮」提示条（BUG-20 修复，断言反转） |
+| HL-09（切 tab 取消） | 1.9MB 整文件解析期取消 | 载体改 3.0MB 走 lazy chunk：cancelAll 取消只逐出在-flight、切回后 hljs- span 为 0（不落兜底） |
+| HL-11（1.9MB 响应性） | 解析期 rAF 53fps | 不变（≤2MiB 仍整文件路径） |
+
+### 6.3 现役护栏与性能锚点
+
+- 护栏：`apps/web/e2e/b-code-highlight-degrade.spec.ts`——BUG-20 反转（>20MB .js
+  载体）、HL-03（3MB chunk 零错位）、HL-09（切 tab 取消不落兜底）、PERF-LAZY
+  （25MB：首屏纯文本 <1s、跳滚后 2s 内 chunk 着色、滚动期零长任务，桌面基准 only）。
+- 服务端 range 协议与大文件路由契约见 `server/README.md`「高亮 range 协议」与
+  `docs/e2e/compute-global-search.md` BUG-10 路由语义更新。

@@ -48,6 +48,29 @@ cargo build --release --manifest-path server/Cargo.toml
 `/api/compute/*` 响应按 `Accept-Encoding` 协商 gzip（`CompressionLayer`，BUG-10：highlight
 intervals 可达十余 MB）；file/tree 等 Range 流端点不压缩——压缩会破坏字节区间语义。
 
+## 高亮 range 协议（compute）
+
+`POST /api/compute/highlight` 的 path 模式支持可视区分块请求（大文件懒高亮，spec
+`docs/superpowers/specs/2026-10-09-full-grammar-alignment-design.md` §5.1）：
+
+```json
+// 请求：range 有值才带字段（缺省 = 整文件 text 模式，行为与旧版完全一致）
+{ "path": "big.json", "lang": "json", "range": { "startLine": 1200, "lineCount": 200 } }
+// 响应：intervals 为 [start, end, capture 下标] 三元组（相对 chunk 首行 baseLine
+// 的 UTF-16 区间），captures 为去重捕获名表
+{ "intervals": [ [ 0, 5, 0 ] ], "captures": [ "keyword" ], "baseLine": 1200 }
+```
+
+- **校验**：`lineCount ∈ 1..=5000`；range 仅接受 path 模式（`text`+`range` → 400）；
+  `startLine ≥ 实际行数`（含空文件 0 行）→ 400 携带实际行数；`lineCount` 越文件尾
+  自然截断 200；行号 0 基。非 UTF-8 文件 → 400（与整文件路径平价）。
+- **413 上限与深窗口语义**：chunk 产出窗口的字节量超 `HIGHLIGHT_MAX_BYTES`（复用
+  20MB）→ 413 `too_large`，不截断（截断会让请求窗口无声缩水）；跳行距离不受该上限
+  约束——字节上限只约束产出窗口，超大文件深处的窄窗口（如 26MB 文件
+  `startLine=500000` 的 10 行）正常 200。单行超长（如 >20MB 的 minified 单行）仍 413。
+- **LRU 缓存**：键为 `(canonical_path, mtime_ms, size, lang, startLine, lineCount)`；
+  无 range 请求占位 `(0, u64::MAX)`，与具体 range 键互不命中。10s 超时与预算机制沿用。
+
 ## 安全注意事项
 
 
