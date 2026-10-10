@@ -250,6 +250,11 @@ test.fixme(
     // 在指纹对比断言处同样失败。违反场景文档 §3 CMP-05 判据①②，与 t-md 的
     // CAND-md-F1 同一缺陷类（该裁决给出修复方向：本地引擎 renderer rule 把
     // strikethrough_open/close 输出 del，与 comrak/GFM 对齐；修复后本用例转正）。
+    // 跨域编号对照（2026-10-10 占位整理轮锁定，勿再互改）：同一删除线缺陷按 md 域
+    // 权威清单定档 BUG-66——锚点 t-md.spec.ts 'BUG-66 [探索]'（其场景用例
+    // 'MD-01/2 [CAND-md-F1]' 判据同源；md 侧整理提交 d078d27 的终态注释已指认
+    // 本条为 cmp 域场景锚点、编号按 cmp 清单保留不改）。按 BUG-67 检索落本条，
+    // 按 BUG-66/CAND-md-F1 检索落 t-md 侧锚点；他域锚点编号归承载域清单，双向不改写。
     test.setTimeout(180_000);
     const fingerprints: MdFingerprint[] = [];
 
