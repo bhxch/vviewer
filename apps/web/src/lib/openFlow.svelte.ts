@@ -15,6 +15,7 @@ import { ARCHIVE_OPEN_EVENT } from '@vviewer/render-archive';
 import { saveDirHandle, saveTabs, maxTabSeqOf, type TabSnapshot } from './stores/session';
 import { loadSettings } from './stores/settings';
 import { releaseStoreIfLast } from './storeRelease';
+import { saveSearchEngine } from './searchEngineCache';
 
 export interface Tab {
   id: string;
@@ -309,9 +310,13 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
     throw new Error(`无法连接 ${base}：网络错误或地址不可达`);
   }
   if (!res.ok) throw new Error(`服务器响应异常: HTTP ${res.status}`);
-  let caps: { capabilities?: unknown; computeLanguages?: unknown };
+  let caps: { capabilities?: unknown; computeLanguages?: unknown; searchEngine?: unknown };
   try {
-    caps = (await res.json()) as { capabilities?: unknown; computeLanguages?: unknown };
+    caps = (await res.json()) as {
+      capabilities?: unknown;
+      computeLanguages?: unknown;
+      searchEngine?: unknown;
+    };
   } catch {
     throw new Error('health 响应不是有效 JSON');
   }
@@ -341,6 +346,8 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
   } catch {
     // 存储不可用：路由回落既有行为，连接不受影响
   }
+  // 搜索引擎宣告缓存（A 项）：旧服务端无字段 → 清缓存，徽标不显示
+  saveSearchEngine(caps.searchEngine);
 
   // 鉴权预检：health 免认证，错误 token 也能过能力校验——用 Bearer 保护的
   // ticket 端点实际验证令牌，避免"假连接成功后所有数据请求 401、目录树全空"

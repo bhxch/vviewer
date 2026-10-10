@@ -8,6 +8,7 @@
   import { matchRanges } from '@vviewer/core';
   import { addTab } from './openFlow.svelte';
   import { runGlobalSearch, serverSearchHint } from './globalSearch';
+  import { loadSearchEngine } from './searchEngineCache';
 
   let { store, onclose }: { store: TreeStore | null; onclose(): void } = $props();
 
@@ -22,6 +23,8 @@
   let running = $state(false);
   let inputEl = $state<HTMLInputElement | null>(null);
   let panelEl = $state<HTMLElement | null>(null);
+  /** 服务端搜索引擎徽标（A 项）：连接时 health 宣告缓存，组件内只读一次 */
+  const searchEngine = loadSearchEngine();
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   /** 代际防护：新输入/关闭使旧请求结果作废 */
@@ -234,6 +237,14 @@
     {/if}
     {#if degraded}
       <span class="vv-gsearch-hint">服务器 ripgrep 不可用，已改用浏览器内搜索（可能较慢）</span>
+    {/if}
+    {#if searchEngine}
+      <span
+        class="vv-gsearch-hint"
+        title={searchEngine === 'grep'
+          ? '降级引擎：无列定位、结果顺序不保证、正则为 ERE 方言'
+          : ''}
+      >服务端搜索：{searchEngine}</span>
     {/if}
   </div>
   {#if rows.length > 0}
