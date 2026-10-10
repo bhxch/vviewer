@@ -358,7 +358,12 @@ describe.skipIf(!grammarAssetsReady || !existsSync(path.join(grammarsDir, 'json.
           const noBase = await bare.highlight('{}', 'json');
           expect(noBase.ok).toBe(false);
           if (noBase.ok) return;
-          expect(noBase.error.length).toBeGreaterThan(0);
+          // 钉语义：对外 error 是通用「无可用 grammar」文案，wasm 定位细节走 BUG-06a
+          // 的 prepare 失败 warn——钉 warn 携带目标文件名（Node 侧 fs ENOENT 消息必含
+          // 'json.wasm'），证明失败源自 wasm 定位而非查询编译等无关环节
+          expect(noBase.error).toContain('无可用 grammar');
+          const prepFail = warn.mock.calls.find((c) => String(c[0]).includes('grammar/查询准备失败'));
+          expect(String((prepFail?.[1] as Error | undefined)?.message)).toContain('json.wasm');
         } finally {
           bare.dispose();
         }

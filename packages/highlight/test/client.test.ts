@@ -70,7 +70,10 @@ describe('HighlightClient', () => {
     const { worker, client } = fake();
     await client.highlight('a=1', 'json', { chunk: { startLine: 3, lineCount: 2 } });
     await client.highlight('b=2', 'json');
-    expect(worker.requests.map((r) => r.chunk)).toEqual([{ startLine: 3, lineCount: 2 }, undefined]);
+    // 缺省请求须「无 chunk 键」而非「chunk: undefined」——wire 契约钉死（JSON 序列化
+    // 丢弃 undefined 键，服务端旧版兼容判 in 字段而非值）
+    expect(worker.requests[0]).toHaveProperty('chunk', { startLine: 3, lineCount: 2 });
+    expect(worker.requests[1]).not.toHaveProperty('chunk');
     client.dispose();
   });
 
