@@ -565,44 +565,6 @@ test.fixme(
 );
 
 test.fixme(
-  'BUG-34 [探索]: 服务端档 auto 策略 15s 无本地高亮请求时健康 tree-sitter worker 被看门狗误杀——本会话本地高亮静默降级 hljs',
-  async () => {
-    // 现象（severity medium，服务端档默认配置必现）：auto 策略（settings.ts:21
-    // computePolicy='auto'）下会话启动 15s 内无本地高亮请求时（远程命中即如此），健康的
-    // 本地 tree-sitter worker 被看门狗以「初始化超时（15s 无响应）」误杀——根因是 init
-    // 成功路径无 ack 的协议缺口：client 端只认「worker 回过任意消息」
-    // （packages/highlight/src/client.ts:74-81 看门狗；:45-46+85-92 markWorkerAlive 仅
-    // onmessage 解除），worker 端 init 成功静默（packages/highlight/src/worker.ts:84-90
-    // 不 postMessage）。误杀后 initFailed 短路整段会话所有本地高亮（client.ts:124-128；
-    // apps/web/src/lib/highlightClient.ts:87-94 clientPromise 失败 catch 后 rethrow 不重试），
-    // 显式 local 与 auto 本地回退均静默降级 hljs（状态栏「hljs 兜底 · 执行: 本地」），刷新
-    // 页面前不可恢复；且 highlightClient.ts:254-256 报错文案误导为「加载失败」（实际资产全 200）。
-    // 与 BUG-06 不同：干净 profile、资产全 200、对照会话证明 worker 本身健康，3 个独立会话稳定复现。
-    //
-    // 最小复现：
-    //   1) 打开 http://127.0.0.1:8391 并连接服务器，树中打开任一文件（samples/m1/hello.js）
-    //      ——状态栏「高亮: tree-sitter · 执行: 远程」正常，本地 worker 零请求；
-    //   2) 等待 16 秒，console 出现「[vviewer] tree-sitter worker 加载失败：初始化超时
-    //      （15s 无响应）」（期间全部 worker/wasm/grammar 资产请求均 200，非加载失败）；
-    //   3) 顶栏「计算策略」切「本地」，再打开 samples/m5/sample.js——状态栏「高亮: hljs 兜底 ·
-    //      执行: 本地」，tree-sitter 本地通道已死且本会话不会重试。
-    //
-    // 证据（复核会话自写探测，cwd=apps/web，.temp/review-e2/）：
-    //   - r1-watchdog.mjs 会话 A：15.2s 超时报错、资产非 200 数=0（/grammars/manifest.json、
-    //     ts-worker、tree-sitter.wasm×2、javascript.wasm 全 200）、切 local 开样例后 hljs 兜底
-    //     __vvLastHighlightOk=false 且不恢复；对照会话 B（加载后立即 local 开文件，15s 内有
-    //     本地请求）：17s 处超时报错 0 条、之后开新文件仍 tree-sitter·本地 ok=true——排除
-    //     资产/环境因素，误杀纯因静默。
-    //   - r2-autofallback.mjs 会话 C：远程命中后 15.3s 看门狗报错，清 vv:capabilities 强制
-    //     auto 本地路由开 sample.rs → hljs 兜底 ok=false，auto 本地回退同样死亡。
-    //
-    // 转正提示：需服务端档（远程命中为触发前提）+ 15s 时序，归 e2e-server 可达；修复方向
-    // 为 init ack 协议（worker init 成功回执解除看门狗），期望断言「远程命中会话等 16s 后
-    // 切本地策略仍 tree-sitter 高亮」。
-  }
-);
-
-test.fixme(
   'BUG-35 [探索]: 图片文件状态栏「编码」恒显示 gb18030——编码检测对二进制媒体不豁免，getMeta 透传误导值',
   async () => {
     // 现象（severity low，误导性呈现缺陷）：文本编码检测对二进制媒体不豁免——

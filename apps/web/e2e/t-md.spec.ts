@@ -357,46 +357,6 @@ test.fixme('BUG-39 [探索]: markdown 渲染视图净化放行五类等价加载
   await expect(page.locator('.vv-error-card')).toHaveCount(0);
 });
 
-test.fixme('BUG-40 [探索]: highlight worker 看门狗 15s 静默误杀——init 成功不回 ack，页面加载 15s 后首次高亮全会话降级 hljs', async ({
-  page
-}) => {
-  // 复核成立（medium）：init 成功路径不向主线程回任何 ack
-  // （packages/highlight/src/worker.ts:86-90，.then 内仅派发排队请求）；看门狗
-  // （packages/highlight/src/client.ts:18 INIT_TIMEOUT_MS=15_000；:74-80 超时即
-  // failWorker）只认 onmessage 置位的 workerAlive（client.ts:85-92）——页面加载后
-  // 15s 内无高亮请求时（viewer.ts:51-56 启动即预热，看门狗自加载起算），worker 实际
-  // init 成功仍被误杀：client.ts:126-127 initFailed 后所有 highlight() 直接 reject
-  // 短路，highlightClient.ts:87-94 单例失败不重试 → 全会话本地 tree-sitter 永久降级
-  // hljs，且 console 报误导性错误「初始化超时（15s 无响应）·排查 worker chunk 是否
-  // 404/MIME 异常」（实测 worker chunk/tree-sitter.wasm/manifest 全 200）。
-  // 最小复现：打开页面静置 >15s → 打开含 ```rust 的 md → pre code 为 hljs 兜底 +
-  // console error；对照 <15s 打开同一文件 ts-* span 正常。15s 看门狗由提交 1a95b0a
-  // （2026-10-08）引入。修复方向：init 成功回 ack（workerAlive 置位解除看门狗）；
-  // 修复后本用例转正。
-  test.setTimeout(120_000);
-  const consoleErrors: string[] = [];
-  page.on('console', (msg) => {
-    if (msg.type() === 'error') consoleErrors.push(msg.text());
-  });
-  // 注入装载（helper 内 goto('/')）后静置 16s：预热 init 握手已发出，期间零高亮请求
-  // ——越过 15s 看门狗窗口（现状在此窗口内被误杀，修复后 ack 到达解除看门狗）
-  await injectDir(page, [
-    { name: 'md40-rust.md', content: ['```rust', 'fn main() {', '    let x = 1;', '}', '```', ''].join('\n') }
-  ]);
-  await page.waitForTimeout(16_000);
-  await openTreeFile(page, 'md40-rust.md');
-
-  const code = page.locator('.vv-markdown pre code');
-  await expect(code).toBeVisible({ timeout: 20_000 });
-  // 修复判据：>15s 首次高亮仍走 tree-sitter（cls language-rust + ts-* span，无 hljs 兜底）
-  await expect(code).toHaveClass(/language-rust/);
-  await expect(code.locator('span[class^="ts-"]').first()).toBeVisible({ timeout: 30_000 });
-  await expect(code.locator('span[class^="hljs-"]')).toHaveCount(0);
-  // 误导性超时错误不出现（现状文案含「初始化超时」，资产实为全 200）
-  expect(consoleErrors.join('\n')).not.toContain('初始化超时');
-  await expect(page.locator('.vv-error-card')).toHaveCount(0);
-});
-
 test.fixme('BUG-66 [探索]: 本地 markdown-it 路径删除线渲染为 s 而非 del——与远程 comrak 双引擎标签不一致', async ({
   page
 }) => {
@@ -433,6 +393,9 @@ test.fixme('BUG-66 [探索]: 本地 markdown-it 路径删除线渲染为 s 而�
 // 与上方对应用例一并转正），避免修复 PR 按确认编号检索命中错位用例；BUG-42/BUG-41
 // 根因属 hl（packages/highlight），按一域一文件落 t-hl.spec.ts；BUG-66 编号未偏移
 // （上方用例即挂确认编号），不再重复。
+// 【2026-10-10 占位整理更新】worker 看门狗缺陷最终以 fsearch 域清单定档 BUG-43：上方原
+// 探索期 'BUG-40 [探索]' 用例与 t-hl 侧 'BUG-41 [探索]' 占位已按「同缺陷唯一锚点」收编
+// 删除，全仓库唯一锚点为 t-hl.spec.ts 'BUG-43 [探索]'——按 BUG-41/探索期 BUG-40 检索请落该条。
 
 test.fixme('BUG-39 [探索]: 远程档 heading id 双引擎方案不一致——comrak user-content- 前缀致页内锚死链、内嵌 anchor href 自不一致', async () => {
   // = 探索期编号 BUG-37（本文件上方 'BUG-37 [探索]' 用例）复核定档后的缺陷库确认编号，
