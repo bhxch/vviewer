@@ -2,7 +2,9 @@
 // 服务端 grammar 清单生成器：解析 Markpad build.rs 的 (name, dir, subpath, c_symbol)
 // 静态表（301 语言的服务端验收集合，spec §2.1），产出 server/grammars-manifest.json。
 // 该 JSON 与 build-list.json 同理入库（体积小、由仓库外现势生成、无源不可再生）。
-// 用法：node tools/grammar-builder/gen-server-manifest.mjs
+// 上游 build.rs 路径经 VV_MARKPAD_BUILD_RS 覆盖；缺省路径是生成机本机硬编码，
+// 不存在时直接报错并提示覆盖（绝不静默沿用后以 ENOENT 迷惑调用方）。
+// 用法：VV_MARKPAD_BUILD_RS=<Markpad>/src-tauri/build.rs node tools/grammar-builder/gen-server-manifest.mjs
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +41,12 @@ export function toManifest(entries) {
 }
 
 export function main() {
+  if (!fs.existsSync(SOURCES.buildRs)) {
+    throw new Error(
+      `Markpad build.rs 不存在: ${SOURCES.buildRs}（缺省路径为生成机本机硬编码；` +
+        `用 VV_MARKPAD_BUILD_RS=<路径> 指向上游 Markpad src-tauri/build.rs 后重试）`,
+    );
+  }
   const entries = parseBuildRsTable(fs.readFileSync(SOURCES.buildRs, 'utf8'));
   if (entries.length < 301) {
     throw new Error(`Markpad build.rs 表仅 ${entries.length} 条（期望 ≥301），上游文件可能已变动`);
