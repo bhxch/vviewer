@@ -28,7 +28,9 @@ runs:
           tools/grammar-builder/out/grammars
           apps/web/static/grammars
           apps/web/static/tree-sitter.wasm
-        key: grammars-${{ runner.os }}-${{ inputs.languages }}-${{ hashFiles('pnpm-lock.yaml', 'tools/grammar-builder/languages.toml', 'tools/grammar-builder/build-list.json') }}
+        # key 追加 fetch-only（I2）：fetch-only 产的「无 wasm」缓存与 self-build 缓存
+        # 同键互踩——self-build 恢复到空产物缓存后重建再回写同键，双 job 竞争抖动
+        key: grammars-${{ runner.os }}-${{ inputs.languages }}-${{ inputs.fetch-only }}-${{ hashFiles('pnpm-lock.yaml', 'tools/grammar-builder/languages.toml', 'tools/grammar-builder/build-list.json') }}
     - name: fetch + self-build
       shell: bash
       run: |

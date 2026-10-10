@@ -2,7 +2,8 @@
 # --fetch（vendored languages.toml 浅取 pinned rev）→ tree-sitter-cli 全量 self-build
 # （免 emcc，工具链自动下载并经 composite action 缓存）→ artifact。
 # 门禁语义：workflow_dispatch 手动触发（PR 可选跑，默认不跑——约 290 次浅取 + 全量编译
-# 太重）；push tag v* 时必跑，并经 workflow_call 供 release.yml 复用为 release 输入。
+# 太重）；发布经 workflow_call 供 release.yml 复用为发布唯一入口（I2：删 push tags
+# 触发器，与 release.yml 双跑且各自缓存键竞争）。
 # 门禁阈值：manifest 键数 ≥ 264（spec 验收口径），不足即 fail（失败清单随日志输出）。
 # 产物不入库：wasm/manifest 仅存在于 artifact（release 的 grammar-wasm.tar.zst 与 web
 # 包的 lite 集由各 job 自行生成）。
@@ -11,8 +12,6 @@ name: Grammar
 on:
   workflow_dispatch:
   workflow_call:
-  push:
-    tags: ['v*']
 
 permissions:
   contents: read
