@@ -152,10 +152,14 @@ jobs:
   release:
     name: 聚合发布 GitHub Release
     runs-on: ubuntu-latest
-    needs: [grammar, web, server]
-    # 全工作流唯一写权限点：建 Release + 上传产物（job 级显式覆盖顶层 read 兜底）
+    # publish-npm 入 needs：npm 包发布成功后才值得以 tag ref 重部署 pages（CDN 注入
+    # 指向该版本）；publish 失败时 pages 保持上一次部署（可重跑 publish 后重触发）。
+    needs: [grammar, web, server, publish-npm]
+    # 全工作流唯一写权限点：建 Release + 上传产物（job 级显式覆盖顶层 read 兜底）；
+    # actions: write 供 gh workflow run 以 tag ref 触发 pages 部署（CDN 注入生效）
     permissions:
       contents: write
+      actions: write
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -172,5 +176,13 @@ jobs:
           )
           gh release create "$tag" --title "vviewer ${tag}" --generate-notes "${files[@]}" \
             || gh release upload "$tag" "${files[@]}" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+      # 以 tag ref 重触发 Pages 部署：pages-deploy 自身只有 push main 触发（到不了
+      # tag ref），CDN 注入（ref_type == 'tags'）经本步才可达——发布后 pages 站点
+      # 即带全量 CDN 资产层。scope 未配置或 publish 未成功时跳过（main 部署已覆盖）。
+      - name: 触发 Pages 部署（tag ref，CDN 注入生效）
+        if: vars.NPM_SCOPE != '' && needs['publish-npm'].result == 'success'
+        run: gh workflow run pages-deploy.yml --ref "$GITHUB_REF_NAME"
         env:
           GH_TOKEN: ${{ github.token }}

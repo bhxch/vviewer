@@ -1,5 +1,7 @@
 # Pages 部署流水线：纯前端静态站点 → gh-pages 分支。
-# 触发：push main 且前端面（web/packages/grammar 构建器/锁文件/本文件）变更，或手动触发。
+# 触发：push main 且前端面（web/packages/grammar 构建器/锁文件/本文件）变更，或手动触发；
+# 另有 tag ref 触发路径——release 聚合 job 发布成功后 `gh workflow run --ref <tag>`
+# 重部署（CDN 注入仅此路径生效：ref_type == 'tags'，version 段即该 tag 的 npm 版本）。
 # 子路径适配：GitHub Pages 项目站点伺服在 /<repo>/ 下，构建注入 VV_BASE_PATH
 # （svelte paths.base、PWA manifest start_url/scope、highlight worker 的
 # grammars/queries/runtime 资产路径同源取用，见 apps/web/vite.config.ts 的
