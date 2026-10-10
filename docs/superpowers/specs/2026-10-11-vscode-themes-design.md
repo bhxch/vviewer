@@ -54,7 +54,7 @@
 
 - 单测：colors/tokenColors 映射表（样例主题快照）；JSON/VSIX 校验（坏 JSON、缺 contributes、hc 归类、体积超限）；IndexedDB 主题存取往返；`applyAppearance` 切换后变量断言（default↔Dark Modern）。
 - e2e：切换 Dark Modern 后 `--ui-bg` 等变量值变化且代码高亮随 tokenColors 变化；导入 JSON 主题并应用；导入含多主题的 VSIX 勾选部分导入；刷新后槽位恢复（IndexedDB 读取）。
-- 许可：THIRD_PARTY_NOTICES 更新入 CI 既有检查（如无自动检查则人工核对项）。
+- 许可：THIRD_PARTY_NOTICES 增加 vscode MIT 条目（仓库当前无自动许可检查，人工核对项）。
 
 ## 4. 风险与已知限制
 
