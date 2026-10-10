@@ -1007,6 +1007,42 @@ describe('renderCode lazy 服务端 range 路由（阶段 4 契约，接替 BUG-
     handle.destroy();
   });
 
+  it('旧服务端 wholeFile 应答（baseLine=0 整文件区间）：入库裁剪到请求窗口行，不触发重复请求（自抖动回归锚）', async () => {
+    stubResizeObserver();
+    const buf = lazyJsBuffer(); // ~16 万行，> CHUNK_CACHE_MAX_LINES(5000)
+    // 旧服务端契约形状：不感知 range → 整文件单区间 + baseLine=0（>5000 高亮行大文件形态）
+    const router = vi.fn(async () => ({
+      intervals: [{ start: 0, end: buf.length, capture: 'keyword' } as HighlightInterval],
+      baseLine: 0
+    }));
+    attachHighlightRouter(router);
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(buf, host, { ext: 'js', lang: 'javascript', computeSrc: { path: 'big.js' } });
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('tree-sitter'));
+    // 首窗口恰请求一次（chunk 0），窗口行着色
+    expect(router).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('[data-line="0"] .ts-keyword')).not.toBeNull();
+    // 同 chunk 内移动可视区（行 150 仍在 [0,200)）：chunk 0 裁剪后仅 200 行不被
+    // evictChunksByLines 逐出 → 不重发。修前整文件条目（16 万行）超限被整块逐出，
+    // 下一次 onRange 必重发全文件请求（写入→逐出→重发无限自抖动）
+    handle.revealLine(150);
+    await new Promise((r) => setTimeout(r, 40));
+    expect(router).toHaveBeenCalledTimes(1);
+    // 跨 chunk 窗口照常请求（(240,260) 经 chunkRangeFor 恰落 chunk 200 单 chunk）；
+    // 应答同样裁剪到自身窗口 [200,400)——行 250 的着色来自窗口切片，非整文件条目泄漏
+    handle.revealLine(250);
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-line="250"] .ts-keyword')).not.toBeNull();
+    });
+    expect(router).toHaveBeenCalledTimes(2);
+    // 回到 chunk 0 窗口：缓存仍在（未逐出），不重发
+    handle.revealLine(10);
+    await new Promise((r) => setTimeout(r, 40));
+    expect(router).toHaveBeenCalledTimes(2);
+    handle.destroy();
+  });
+
   it('router null（auto warn+null 回退门）：该 chunk 行级 hljs，不回落本地 wasm', async () => {
     stubResizeObserver();
     attachHighlightRouter(async () => null);
