@@ -43,6 +43,9 @@ enum Command {
         /// 启用服务端计算端点（/api/compute/*，health 能力追加 "compute"）
         #[arg(long)]
         compute: bool,
+        /// 日志写文件（可选；默认 stdout），超 10MB 滚动为 <PATH>.old 单备份
+        #[arg(long)]
+        log_file: Option<PathBuf>,
     },
 }
 
@@ -59,6 +62,7 @@ fn main() {
             hidden,
             cors_origin,
             compute,
+            log_file,
         } => {
             if let Err(code) = serve(ServeArgs {
                 root,
@@ -70,6 +74,7 @@ fn main() {
                 hidden,
                 cors_origin,
                 compute,
+                log_file,
             }) {
                 std::process::exit(code);
             }
@@ -87,6 +92,7 @@ pub struct ServeArgs {
     pub hidden: bool,
     pub cors_origin: Option<String>,
     pub compute: bool,
+    pub log_file: Option<PathBuf>,
 }
 
 /// 启动服务；配置错误返回 exit code（不 panic）。
@@ -123,12 +129,10 @@ fn serve(args: ServeArgs) -> Result<(), i32> {
         }
     }
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    if let Err(e) = vviewer::logging::init_tracing(args.log_file.as_deref()) {
+        eprintln!("error: --log-file 不可用: {e}");
+        return Err(2);
+    }
 
     // bind：--allow-lan ? 0.0.0.0 : 127.0.0.1
     let ip: std::net::IpAddr = if args.allow_lan {
@@ -192,6 +196,7 @@ mod tests {
             hidden: false,
             cors_origin: None,
             compute: false,
+            log_file: None,
         }
     }
 

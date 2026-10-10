@@ -5,6 +5,7 @@ pub mod compute;
 pub mod detect;
 pub mod error;
 pub mod guard;
+pub mod logging;
 pub mod routes;
 pub mod state;
 pub mod watch;
