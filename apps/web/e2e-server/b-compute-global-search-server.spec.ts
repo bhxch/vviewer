@@ -14,7 +14,7 @@ import { stopServer, waitHealthy } from '../e2e/serverHarness';
  * 本文件覆盖（缺陷回归为主）：
  * - CMP-02/BUG-10：显式 remote 下 >2MB 文件不再被本地阈值压制（状态栏远程 + POST
  *   /api/compute/highlight 发生）；auto 双护栏——server-served 3MB 不限大小走服务端
- *   （POST + tree-sitter 渲染），本地添加 3MB（单文件上传通道）恒 hljs 分块零 POST
+ *   （POST + tree-sitter 渲染），本地添加 3MB（单文件上传通道）恒本地懒高亮零 POST
  * - CMP-03/BUG-22：auto 下含围栏 md 与 html（渲染/源码两视图）均显示「渲染: 本地」；
  *   围栏二级高亮保留；非注入语言（py）auto 仍远程（路由矩阵抽样不回归）
  * - CMP-04：php（阶段 1 起在服务端 301 集内，正例对照）auto 远程成功；POST lang
@@ -208,7 +208,7 @@ test.describe('CMP-02/BUG-10 大文件远程高亮路由', () => {
     expect(highlightPosts.length).toBeGreaterThanOrEqual(1);
   });
 
-  test('auto 双护栏② 本地来源：3MB 单文件上传恒 hljs 分块零 POST（硬护栏回归）', async ({ page }) => {
+  test('auto 双护栏② 本地来源：3MB 单文件上传恒本地执行零 POST（硬护栏回归）', async ({ page }) => {
     test.setTimeout(120_000);
     const highlightPosts: string[] = [];
     page.on('request', (r) => {
@@ -218,7 +218,12 @@ test.describe('CMP-02/BUG-10 大文件远程高亮路由', () => {
 
     // 本地添加文件（单文件上传通道，同 fix-pwa 的 __vvOpenDirImpl 前例）：无服务端
     // path 语义 → 注入侧硬护栏恒 null。已连接 --compute 实例（capabilities+宣告
-    // 齐备）仍零 POST——证明护栏按来源而非能力判定
+    // 齐备）仍零 POST——证明护栏按来源而非能力判定。阶段 4 后 null → 本地懒高亮
+    // （worker chunk tree-sitter 或其失败行级 hljs 兜底，二者执行位置均为本地）。
+    // 引擎身份不作本用例锚点：release 二进制对缺失 .scm 查询文件 SPA-fallback 成
+    // 200 index.html，worker 查询准备失败落 hljs 兜底（vite preview 404 跳过则
+    // tree-sitter 正常）——该伺服兼容问题见 b-grammar-layers-server 文件头，与
+    // 本用例锚定的「来源护栏」正交。
     await page.waitForFunction(
       () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
     );
@@ -232,8 +237,12 @@ test.describe('CMP-02/BUG-10 大文件远程高亮路由', () => {
     await openFile(page, 'cg-local-3mb.js');
 
     const sb = page.locator('.vv-statusbar');
-    await expect(sb).toContainText('高亮: hljs 分块', { timeout: 60_000 });
+    await expect(sb).toContainText('执行: 本地', { timeout: 60_000 });
     await expect(sb).not.toContainText('执行: 远程');
+    // 懒高亮着色到达（tree-sitter chunk 或行级 hljs 兜底任一引擎，正文非裸转义）
+    await expect(
+      page.locator('.vv-code-pre span[class^="ts-"], .vv-code-pre span[class^="hljs-"]').first()
+    ).toBeVisible({ timeout: 60_000 });
     expect(highlightPosts).toEqual([]); // 本地来源恒零 POST（highlightRouter 注入侧护栏）
   });
 });

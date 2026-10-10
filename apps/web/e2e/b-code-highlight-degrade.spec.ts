@@ -2,13 +2,17 @@ import { test, expect, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 
 /**
- * b-code-highlight-degrade E2E（code-highlight-degrade 域补齐，2026-10-09 缺陷修复批次回归）。
+ * b-code-highlight-degrade E2E（code-highlight-degrade 域补齐，2026-10-09 缺陷修复批次回归；
+ * 阶段 4 统一懒高亮改写——>2MB 一律可视区懒高亮 chunk，不再有 hljs-block 分块路径）。
  * 场景来源：docs/e2e/code-highlight-degrade.md——
  * - BUG-07（HL-05）：无扩展名文件不再被「不支持的扩展名 "."」拒绝，shebang 识别进入预览；
  * - BUG-04（HL-06/07 前端口径）：状态栏元数据段（编码/大小/行）随实例渲染展示；
- * - BUG-20（HL-04）：>20MB 纯文本虚拟滚动出现明确超限提示条，滚动/行号不回退；
- * - HL-03：3MB 分块路径滚动位置与行内容零错位；
- * - HL-09/HL-11：约 2MB 解析中切 tab 无残留错误 + 解析期交互响应（宽松阈值防抖动）。
+ * - BUG-20（HL-04，阶段 4 反转）：>20MB 文件不再纯文本降级——可视区懒高亮提示条出现
+ *   且不阻断，滚动出现 tree-sitter chunk 着色，行号不回退；
+ * - HL-03：3MB lazy chunk 路径滚动位置/行内容/语法着色零错位；
+ * - HL-09：>2MB lazy chunk 解析中切 tab 取消（cancelAll 只逐出在-flight，不落 hljs 兜底）；
+ * - HL-11：约 2MB（≤2MB 整文件 tree-sitter 路径）解析期交互响应（宽松阈值防抖动）；
+ * - PERF-LAZY：25MB 懒高亮性能锚点（首屏纯文本 <1s、滚动后 2s 内 chunk 着色、滚动无长任务）。
  * BUG-06 主路径护栏已由 fix-pwa.spec.ts 覆盖，此处不重复。
  * 通道同 m1-m3：页面内 File + webkitRelativePath 经 __vvOpenDirImpl 注入（本地 store）。
  */
@@ -135,45 +139,51 @@ test('BUG-04：状态栏元数据段展示编码/大小/行——gb18030 与 UTF
   await expect(page.locator('.vv-code-pre')).toContainText('中文');
 });
 
-test('BUG-20：>20MB 纯文本虚拟滚动出现明确超限提示条，滚到底末行行号与字节数吻合，切走重开提示仍在', async ({
+test('BUG-20（阶段 4 反转）：>20MB 文件可视区懒高亮——提示条出现不阻断、滚动 tree-sitter chunk 着色、末行行号吻合、切走重开提示仍在', async ({
   page
 }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   await page.goto('/');
-  // 338,770 行 × 65B = 22,020,050B ≈ 21.0MiB ∈ (20MB, ∞) → plain 虚拟滚动 + 超限提示。
-  // 单次注入两个文件：重复 __vvOpenDirImpl 会按 label 替换同目录树，先注入的中转件会消失
+  // 338,770 行 × 72B = 24,391,440B ≈ 23.3MiB ∈ (20MB, 200MB] → lazy + >20MB 提示条。
+  // 行文本自带行号供比对；旧契约（>20MB 纯文本降级零高亮）已反转（spec §5.4）
   const ROWS = 338_770;
   await page.waitForFunction(
     () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
   );
-  // 21MB 内容在页内构造（经 evaluate 传参会翻倍内存）
+  // 24MB 内容在页内构造（经 evaluate 传参会翻倍内存）
   await page.evaluate((rows) => {
     const mk = (name: string, content: string): File => {
-      const f = new File([content], name, { type: 'text/plain' });
+      const f = new File([content], name, { type: 'text/javascript' });
       Object.defineProperty(f, 'webkitRelativePath', { value: `bhl/${name}` });
       return f;
     };
-    const row = 'x'.repeat(64) + '\n';
-    // 去掉末尾换行：末行不带 \n → 总字节恰 rows×65，行数（渲染与 wc 口径）一致为 rows
+    const no6 = (n: number): string => String(n).padStart(6, '0');
+    // 行长恒 72B（两处行号都定宽）：字节数恰 rows×72-1，稳超 HLJS_MAX_BYTES(20MiB)
+    const row = (no: number): string => `const row${no6(no)} = '${'x'.repeat(40)}'; // ${no6(no)}\n`;
+    // 去掉末尾换行：末行不带 \n → 行数（渲染与 wc 口径）一致为 rows，末行有内容可断言着色
+    const content = Array.from({ length: rows }, (_, i) => row(i)).join('').slice(0, -1);
     (window as unknown as { __vvOpenDirImpl: (f: File[]) => void }).__vvOpenDirImpl([
       mk('tiny-switch.txt', 'switch target\n'), // 切走重开的中转件
-      mk('big-21mb.txt', row.repeat(rows).slice(0, -1))
+      mk('big-24mb.js', content)
     ]);
   }, ROWS);
-  await openFile(page, 'big-21mb.txt');
+  await openFile(page, 'big-24mb.js');
 
-  // 缺陷态：三时点全文零超限文案。修复后：打开即见提示条（文案含阈值与降级说明）
+  // 打开即见提示条（文案含阈值与懒高亮说明），且首屏纯文本先行渲染不被阻断
   const notice = page.locator('.vv-code-oversize-card');
   await expect(notice).toBeVisible({ timeout: 30_000 });
   await expect(notice).toContainText('20MB');
-  await expect(notice).toContainText('纯文本虚拟滚动');
-  await expect(page.locator('.vv-statusbar')).toContainText('纯文本', { timeout: 20_000 });
-  // BUG-04 行段与 wc 口径一致（行数 × 65B = 22,020,050B 与字节数吻合）
+  await expect(notice).toContainText('懒高亮');
+  await expect(page.locator('.vv-code-pre .vv-code-line').first()).toBeVisible({ timeout: 10_000 });
+  // BUG-04 行段与 wc 口径一致（末行带 \n，行数恰 ROWS）
   await expect(page.locator('.vv-statusbar')).toContainText(`行: ${ROWS}`, { timeout: 20_000 });
-  // 降级链不回退：无语法 span（plain 不做高亮）
-  await expect(page.locator('.vv-code-pre span[class^="hljs-"]')).toHaveCount(0);
+  // 阶段 4 反转：可视区 chunk tree-sitter 着色到达（不再是 plain 零高亮）
+  await expect(page.locator('.vv-code-pre span[class^="ts-"]').first()).toBeVisible({
+    timeout: 30_000
+  });
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 20_000 });
 
-  // 滚动一步到底：末行行号 = 338,770（行数 × 65B 与字节数吻合；性能仅记录不作硬门）
+  // 滚动到底：末行行号 = 338,770（提示条不阻断滚动；性能仅记录不作硬门）
   const pre = page.locator('.vv-code-pre');
   const t0 = Date.now();
   await pre.evaluate((el) => {
@@ -186,21 +196,26 @@ test('BUG-20：>20MB 纯文本虚拟滚动出现明确超限提示条，滚到�
       message: '等待滚动到底后的末行渲染'
     })
     .toBe(String(ROWS));
-  console.log(`[perf] 21MB 滚动到底耗时: ${Date.now() - t0}ms（宽松记录，不作硬门）`);
+  console.log(`[perf] 24MB 滚动到底耗时: ${Date.now() - t0}ms（宽松记录，不作硬门）`);
+  // 末视口 chunk 同样着色到达（懒高亮对任意可视区生效）
+  await expect(pre.locator('.vv-code-line').last().locator('span[class^="ts-"]').first()).toBeVisible({
+    timeout: 30_000
+  });
 
   // 提示条持久（滚动后仍在，非一次性 toast 已消失的形态）
   await expect(notice).toBeVisible();
 
   // 切走再重开：提示条再次可观察（缺陷态「重开 1.3s 时点」亦无文案）
   await openFile(page, 'tiny-switch.txt');
-  await openFile(page, 'big-21mb.txt');
+  await openFile(page, 'big-24mb.js');
   await expect(page.locator('.vv-code-oversize-card')).toBeVisible({ timeout: 30_000 });
 });
 
-test('HL-03：3MB 分块路径滚动 50%/75%/100% 渲染行内容与行号零错位', async ({ page }) => {
+test('HL-03：3MB lazy chunk 路径滚动 50%/75%/100% 行号/行内容/语法着色零错位', async ({ page }) => {
   test.setTimeout(120_000);
   await page.goto('/');
-  // 48,000 行 × 65B ≈ 3.1MB ∈ (2MB, 20MB] → hljs 分块 + 虚拟滚动；行文本自带行号供比对
+  // 48,000 行 × 62B ≈ 3.0MB ∈ (2MB, 200MB] → 可视区懒高亮 chunk + 虚拟滚动；
+  // 行文本自带行号供比对；行行含 const 关键字 → 着色到达后行行有 ts-* span
   const ROWS = 48_000;
   await page.waitForFunction(
     () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
@@ -217,10 +232,15 @@ test('HL-03：3MB 分块路径滚动 50%/75%/100% 渲染行内容与行号零错
   }, ROWS);
   await openFile(page, 'scroll-3mb.js');
   await expect(page.locator('.vv-code-pre .vv-code-line').first()).toBeVisible();
-  await expect(page.locator('.vv-statusbar')).toContainText('高亮: hljs 分块', { timeout: 20_000 });
+  // 首视口 chunk 着色到达（lazy 管线先纯文本后增量着色）
+  await expect(page.locator('.vv-code-pre span[class^="ts-"]').first()).toBeVisible({
+    timeout: 20_000
+  });
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 20_000 });
 
   const pre = page.locator('.vv-code-pre');
-  // 50%/75%/100% 三处：首可见行的行号应与 scrollTop/行高(20px) 推算一致，且文本行号自洽
+  // 50%/75%/100% 三处：首可见行的行号应与 scrollTop/行高(20px) 推算一致，文本行号自洽，
+  // 且该行语法着色同步到达（行 HTML 与 chunk 缓存零错位——着色缺失/错行都判负）
   for (const ratio of [0.5, 0.75, 1]) {
     await pre.evaluate(
       (el, { ratio, rows }) => {
@@ -238,32 +258,40 @@ test('HL-03：3MB 分块路径滚动 50%/75%/100% 渲染行内容与行号零错
             const line = Number(first.dataset.line);
             const no = String(line).padStart(6, '0');
             const text = first.textContent ?? '';
-            return text.includes(`row${no}`) && text.includes(`// ${no}`);
+            return (
+              text.includes(`row${no}`) &&
+              text.includes(`// ${no}`) &&
+              first.querySelector('span[class^="ts-"]') !== null
+            );
           }),
-        { timeout: 10_000, message: `等待 ${ratio * 100}% 处渲染稳定` }
+        { timeout: 20_000, message: `等待 ${ratio * 100}% 处渲染稳定（含 chunk 着色到达）` }
       )
       .toBe(true);
   }
 });
 
-test('HL-09：约 2MB 解析中切 tab——新文件正常渲染、无报错、切回无残留错误卡片', async ({ page }) => {
+test('HL-09：>2MB lazy chunk 解析中切 tab——cancelAll 取消只逐出不落兜底，切回 chunk 重发正常着色', async ({
+  page
+}) => {
   test.setTimeout(120_000);
   const pageErrors: string[] = [];
   page.on('pageerror', (err) => pageErrors.push(String(err)));
   await page.goto('/');
   await openDir(page, [
     {
-      name: 'big2m.ts',
+      name: 'big3m.ts',
       type: 'text/typescript',
-      content: 'const vv = 1; // c\n'.repeat(100_000) // 1.9MB ≤ 2MB → tree-sitter 主路径（解析秒级）
+      content: 'const vv = 1; // c\n'.repeat(160_000) // ≈3.0MB > 2MiB → lazy chunk 路径
     },
     { name: 'tiny.txt', type: 'text/plain', content: 'tiny marker\n' }
   ]);
 
-  // 发起打开 2MB 后不等待解析，立即切另一文件（缺陷场景的竞态窗口）；
-  // mobile 视口树行在抽屉内：先开抽屉连点两行再关（drawer.ts 惯例）
+  // 发起打开 3MB（lazy chunk 请求在途）后不等待，立即切另一文件（缺陷场景的竞态窗口；
+  // tab 切换 cancelHighlight → cancelAll，chunk 以 HighlightCanceledError 结束——
+  // 只逐出在-flight、不写行级 hljs 兜底、无重试风暴）。mobile 视口树行在抽屉内：
+  // 先开抽屉连点两行再关（drawer.ts 惯例）
   const drawer = await openDrawerIfNarrow(page);
-  await page.locator('.vv-tree-row', { hasText: 'big2m.ts' }).click();
+  await page.locator('.vv-tree-row', { hasText: 'big3m.ts' }).click();
   await page.locator('.vv-tree-row', { hasText: 'tiny.txt' }).click();
   await closeDrawerIfOpened(page, drawer);
 
@@ -272,12 +300,14 @@ test('HL-09：约 2MB 解析中切 tab——新文件正常渲染、无报错、
   await expect(page.locator('.vv-code-pre')).toContainText('tiny marker', { timeout: 20_000 });
   await expect(page.locator('.vv-error-card')).toHaveCount(0);
 
-  // 切回大文件 tab：解析完成正常渲染（tree-sitter span 到达），无残留错误卡片
-  await openFile(page, 'big2m.ts');
+  // 切回大文件 tab：chunk 重发正常着色（tree-sitter span 到达），无残留错误卡片，
+  // 且零 hljs span——取消≠失败的硬约束（取消的 chunk 不得落 hljs 兜底遮蔽质量）
+  await openFile(page, 'big3m.ts');
   await expect(page.locator('.vv-code-pre span[class^="ts-"]').first()).toBeVisible({
     timeout: 60_000
   });
   await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 20_000 });
+  await expect(page.locator('.vv-code-pre span[class^="hljs-"]')).toHaveCount(0);
   await expect(page.locator('.vv-error-card')).toHaveCount(0);
   expect(pageErrors).toEqual([]);
 });
@@ -314,4 +344,72 @@ test('HL-11：约 2MB 解析期间 UI 交互保持毫秒级响应（宽松阈值
   await expect(page.locator('.vv-code-pre span[class^="ts-"]').first()).toBeVisible({
     timeout: 60_000
   });
+});
+
+test('PERF-LAZY：25MB 文件懒高亮性能锚点——首屏纯文本 <1s、跳滚后 2s 内 chunk 着色、滚动期无长任务', async ({
+  page
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium', '25MB 级性能锚点仅桌面基准跑（域文档 4.4，THEME-03/06 前例）');
+  test.setTimeout(180_000);
+  await page.goto('/');
+  // 19B × 1,315,789 ≈ 25MB ∈ (20MB, 200MB] → lazy + >20MB 提示条；行行同构避免转义噪音
+  const ROWS = 1_315_789;
+  await page.waitForFunction(
+    () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
+  );
+  await page.evaluate((rows) => {
+    const f = new File(['const vv = 1; // c\n'.repeat(rows)], 'perf-25mb.js', { type: 'text/javascript' });
+    Object.defineProperty(f, 'webkitRelativePath', { value: 'bhl/perf-25mb.js' });
+    (window as unknown as { __vvOpenDirImpl: (f: File[]) => void }).__vvOpenDirImpl([f]);
+  }, ROWS);
+
+  // 锚点 1：首屏纯文本首帧 < 1s（打开点击 → 首行渲染；解码+行索引 25MB 的同步成本在此内）
+  const t0 = Date.now();
+  await page.locator('.vv-tree-row', { hasText: 'perf-25mb.js' }).click();
+  await expect(page.locator('.vv-code-pre .vv-code-line').first()).toBeVisible({ timeout: 20_000 });
+  const firstFrame = Date.now() - t0;
+  console.log(`[perf] 25MB 首屏纯文本首帧: ${firstFrame}ms（锚点 <1000ms，spec §5.4）`);
+  expect(firstFrame, '25MB 首屏纯文本首帧（懒高亮不阻塞首帧的锚点）').toBeLessThan(1000);
+
+  // 首视口 chunk 着色到达后装长任务观测（首帧前的解码/索引长任务不属滚动窗口）
+  await expect(page.locator('.vv-code-pre span[class^="ts-"]').first()).toBeVisible({
+    timeout: 30_000
+  });
+  await page.evaluate(() => {
+    const w = window as unknown as { __vvLongTasks?: number };
+    w.__vvLongTasks = 0;
+    new PerformanceObserver((list) => {
+      w.__vvLongTasks = (w.__vvLongTasks ?? 0) + list.getEntries().length;
+    }).observe({ type: 'longtask' });
+  });
+
+  // 锚点 2：跳滚到未读区后 2s 内 tree-sitter chunk 着色出现（懒高亮追滚动预算）
+  const pre = page.locator('.vv-code-pre');
+  const TARGET = 1_100_000;
+  const t1 = Date.now();
+  await pre.evaluate((el, line) => {
+    el.scrollTop = line * 20;
+  }, TARGET);
+  await expect(
+    pre.locator(`[data-line="${TARGET}"] span[class^="ts-"]`).first()
+  ).toBeVisible({ timeout: 2_000 });
+  const chunkArrival = Date.now() - t1;
+  console.log(`[perf] 25MB 跳滚 110 万行后 chunk 着色到达: ${chunkArrival}ms（锚点 <2000ms）`);
+  expect(chunkArrival, '跳滚后 chunk 着色到达（懒高亮追滚动锚点）').toBeLessThan(2000);
+
+  // 锚点 3：滚动连发期间主线程无长任务（chunk 解析在 worker、fillRows 毫秒级）
+  for (const line of [200_000, 400_000, 600_000, 800_000, 1_000_000, 1_200_000]) {
+    await pre.evaluate((el, l) => {
+      el.scrollTop = l * 20;
+    }, line);
+    await page.waitForTimeout(120);
+  }
+  const longTasks = await page.evaluate(
+    () => (window as unknown as { __vvLongTasks?: number }).__vvLongTasks ?? -1
+  );
+  console.log(`[perf] 25MB 滚动连发 longtask 数: ${longTasks}（锚点 0）`);
+  expect(longTasks, '滚动期间主线程无 >50ms 长任务（解析不占主线程的锚点）').toBe(0);
+
+  // 滚动全程提示条常驻不阻断（连发后仍可观察）
+  await expect(page.locator('.vv-code-oversize-card')).toContainText('懒高亮');
 });

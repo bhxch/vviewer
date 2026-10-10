@@ -10,16 +10,33 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  *   规模口径按域文档桌面基准；零重解析契约与视口无关）
  * - THEME-04：亮暗双槽位独立记忆、互不串扰、刷新恢复
  * - THEME-05：markdown rust 围栏与独立 .rs 同主题同色、切主题同步更新
- * - THEME-06：>2MB hljs 分块路径 9 个 --hljs-* 变量全量跟随 + 视口 span 计算色一致
- *   （chromium project；域文档 4.4 边界：大 DOM 断言只用页内 evaluate，不做 AX snapshot）
+ * - THEME-06：hljs 整文件兜底路径（perl/prolog 不在内嵌 grammar 集）9 个 --hljs-* 变量
+ *   全量跟随 + 视口 span 计算色一致（chromium project；域文档 4.4：主题断言只用页内 evaluate）
  * - THEME-07：切主题仅 style#vv-code-theme 变化（head 结构签名 + span 哈希不变）+ 落 DOM 耗时
  *   宽松断言（报告口径 0.5~0.8ms，阈值放宽到 50ms 防环境抖动）
  */
 
 const RUST_SNIPPET = 'fn main() {\n    let x = 42;\n    println!("hello {}", x);\n} // c\n';
 
-/** THEME-03/06 的大文件行模式（含关键字/字符串/数字/注释，token 多样） */
-const TOKEN_LINE = 'const vv = 1; // c\nfunction f(a) { return "s"; }\n';
+/** THEME-06 载体：perl 源码。prolog/perl 均不在内嵌 grammar 集（apps/web/static/grammars
+ * 为 lite 子集）→ hljs 整文件兜底——阶段 4 后视口 hljs-* span 的唯一真实消费路径 */
+const PERL_SNIPPET = `# THEME-06 载体：perl 脚本（hljs 兜底）
+use strict;
+use warnings;
+
+my %counts;
+open my $fh, '<', $ARGV[0] or die "cannot open $ARGV[0]: $!";
+while (my $line = <$fh>) {
+    for my $word (split /\\s+/, lc $line) {
+        $counts{$word}++;
+    }
+}
+close $fh;
+
+for my $word (sort { $counts{$b} <=> $counts{$a} } keys %counts) {
+    printf "%-20s %d\\n", $word, $counts{$word};
+}
+`;
 
 interface Payload {
   name: string;
@@ -248,17 +265,18 @@ test('THEME-03：长 .rs 滚动 100000 后连切两主题——类名哈希不�
   expect(base.count).toBeGreaterThan(0);
 });
 
-test('THEME-06：>2MB hljs 分块路径 9 个 --hljs-* 变量全量跟随 + 视口 span 计算色一致', async ({
+test('THEME-06：hljs 整文件兜底路径 9 个 --hljs-* 变量全量跟随 + 视口 span 计算色一致', async ({
   page
 }, testInfo) => {
-  test.skip(testInfo.project.name !== 'chromium', '3MB 级规模断言仅在桌面基准跑（域文档 4.4）');
+  test.skip(testInfo.project.name !== 'chromium', '与 THEME-03/07 同批桌面基准（域文档 4.4）');
   test.setTimeout(120_000);
   await page.goto('/');
-  // 2.2MB ∈ (2MB, 20MB] → resolveStrategy = 'hljs-block'
-  const units = Math.ceil((2.2 * 1024 * 1024) / TOKEN_LINE.length);
-  await openDir(page, [{ name: 'big2m.js', type: 'text/javascript', content: TOKEN_LINE.repeat(units) }]);
-  await openFile(page, 'big2m.js');
-  await expect(page.locator('.vv-statusbar')).toContainText('高亮: hljs 分块', { timeout: 30_000 });
+  // 阶段 4 改写：hljs-block 分块路径已退役，>2MB 走 lazy chunk（tree-sitter 质量）。
+  // 视口 hljs-* span 的消费路径收窄为「≤2MB 且无内嵌 grammar」的整文件兜底——
+  // .pl 载体（detectLanguage('pl')→prolog，不在内嵌集）正是 m2 sample.pl 同款降级链
+  await openDir(page, [{ name: 'theme06.pl', type: 'text/plain', content: PERL_SNIPPET }]);
+  await openFile(page, 'theme06.pl');
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: hljs 兜底', { timeout: 30_000 });
   await expect(page.locator('.vv-code-pre span[class^="hljs-"]').first()).toBeVisible({
     timeout: 30_000
   });

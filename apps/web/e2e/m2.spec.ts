@@ -111,19 +111,19 @@ test('sample.pl（lite 集未内嵌 grammar）自动降级 hljs 整文件', asyn
   // M3 起 sample.md 归 markdownRenderer（markdown 渲染断言在 m3.spec.ts），不再是 code 降级链的载体
 });
 
-test('6MB 文本按降级链走 hljs 分块，不发起 tree-sitter 高亮', async ({ page }) => {
+test('6MB 文本按降级链走 lazy chunk 可视区懒高亮（tree-sitter 质量，hljs 不介入）', async ({ page }) => {
   await page.goto('/');
-  // 19B × 320000 = 6.08MB ∈ (2MB, 20MB] → resolveStrategy = 'hljs-block'
+  // 19B × 320000 = 6.08MB ∈ (2MB, 200MB] → resolveStrategy = 'lazy'（阶段 4 接替 hljs-block）
   await openDir(page, [{ name: 'big.js', type: 'text/javascript', content: 'const vv = 1; // c\n'.repeat(320000) }]);
   await openFile(page, 'big.js');
 
   await expect(page.locator('.vv-code-pre .vv-code-line').first()).toBeVisible();
-  await expect(page.locator('.vv-code-pre span[class^="hljs-"]').first()).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator('.vv-code-pre span[class^="ts-"]')).toHaveCount(0);
-  await expect(page.locator('.vv-statusbar')).toContainText('高亮: hljs 分块', { timeout: 20_000 });
-  // 本页面从未发起过 tree-sitter 高亮请求（__vvLastHighlight* 未被写入）
+  await expect(page.locator('.vv-code-pre span[class^="ts-"]').first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('.vv-code-pre span[class^="hljs-"]')).toHaveCount(0); // chunk 主路径不落 hljs 兜底
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 20_000 });
+  // 可视区 chunk 经本地 worker（__vvLastHighlight* 记录 chunk 调用；旧契约「不发起」已反转）
   const lang = await page.evaluate(() => (window as unknown as { __vvLastHighlightLang?: string }).__vvLastHighlightLang);
-  expect(lang).toBeUndefined();
+  expect(lang).toBe('javascript');
 });
 
 test('1.9MB 文本 tree-sitter 高亮性能计时（__vvLastHighlightMs，预算 ≤5s=2MB×2.4s/MB，仅记录）', async ({ page }) => {

@@ -174,12 +174,12 @@ test('BUG-23：Aa 大小写开关切换即重搜，敏感口径 2/2/1/1，导航
   await expect(page.locator('.vv-error-card')).toHaveCount(0);
 });
 
-test('FSEARCH-02：3MB 分块路径稀疏 10 命中，Enter 步进逐次前滚且行号与构造吻合（虚拟滚动不错位）', async ({
+test('FSEARCH-02：3MB lazy chunk 路径稀疏 10 命中，Enter 步进逐次前滚且行号与构造吻合（虚拟滚动不错位）', async ({
   page
 }) => {
   test.setTimeout(120_000);
   await page.goto('/');
-  // 48,000 行 × 65B ≈ 3.1MB ∈ (2MB, 20MB] → hljs 分块 + 虚拟滚动；
+  // 48,000 行 × 62B ≈ 3.0MB ∈ (2MB, 200MB] → lazy chunk 懒高亮 + 虚拟滚动；
   // 每 4,800 行埋一处 zzneedleqz（行 100/4900/…/43300，共 10 处）
   await openDir(page, [
     {
@@ -192,8 +192,8 @@ test('FSEARCH-02：3MB 分块路径稀疏 10 命中，Enter 步进逐次前滚�
   ]);
   await openFile(page, 'sparse-3mb.js');
   await expect(page.locator('.vv-code-pre .vv-code-line').first()).toBeVisible();
-  // 分块路径在跑（HL-03/FSEARCH-02 的渲染路径前提）
-  await expect(page.locator('.vv-statusbar')).toContainText('高亮: hljs 分块', { timeout: 20_000 });
+  // lazy chunk 路径在跑（HL-03/FSEARCH-02 的渲染路径前提；阶段 4 后不再有 hljs 分块）
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 20_000 });
 
   await openPanelAndSearch(page, 'zzneedleqz');
   await expect(page.locator('.vv-search-count')).toHaveText('1/10', { timeout: 10_000 });
