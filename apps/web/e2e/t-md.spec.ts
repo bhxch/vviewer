@@ -424,3 +424,100 @@ test.fixme('BUG-66 [探索]: 本地 markdown-it 路径删除线渲染为 s 而�
 
   await expect(page.locator('.vv-error-card')).toHaveCount(0);
 });
+
+// ── 复核确认缺陷库编号挂接（2026-10-10 第二轮；README §3.2.4 口径与上节相同）──
+// 上节占位落位时（eecd910）缺陷库编号未定档、标题用探索期编号（BUG-37/38/39/40/66）；
+// 本轮复核定档后编号偏移：探索 BUG-37→BUG-39（heading id 死链）、BUG-39→BUG-40（净化
+// 向量）、BUG-38→BUG-42（围栏大小写）、BUG-40→BUG-41（worker 看门狗）、BUG-66 不变。
+// 按「只追加不改」约定：编号偏移的两条 md 域缺陷在此补挂确认编号占位（同缺陷同判据，
+// 与上方对应用例一并转正），避免修复 PR 按确认编号检索命中错位用例；BUG-42/BUG-41
+// 根因属 hl（packages/highlight），按一域一文件落 t-hl.spec.ts；BUG-66 编号未偏移
+// （上方用例即挂确认编号），不再重复。
+
+test.fixme('BUG-39 [探索]: 远程档 heading id 双引擎方案不一致——comrak user-content- 前缀致页内锚死链、内嵌 anchor href 自不一致', async () => {
+  // = 探索期编号 BUG-37（本文件上方 'BUG-37 [探索]' 用例）复核定档后的缺陷库确认编号，
+  // 同缺陷同判据，两用例一并转正；本条挂确认编号供修复 PR 按 BUG-39 检索。
+  // 复核维持 medium：本地 slugifyHeading 无前缀、重名 -2 起、全标点回退 section
+  // （packages/render-text/src/markdown/markdownRenderer.ts slugifyHeading/assignHeadingIds）；
+  // 远程 comrak 0.56.0（server/Cargo.toml:22、Cargo.lock:252-253）统一 user-content- 前缀、
+  // 重名 -1 起、全标点/emoji 标题成 user-content- / user-content--1 / user-content-标题--emoji
+  // （server/src/compute/markdown.rs:26 header_id_prefix），且自产内嵌 anchor「id 带前缀、
+  // href 不带」自不一致（仿 GitHub 形态——GitHub 靠自家前端 JS 做 hash→前缀映射，本仓库
+  // 前端无任何此逻辑：rg 'data-heading-content|user-content' apps/web/src packages 零命中，
+  // 页内锚也无自定义点击处理，hashchange/scrollIntoView 仅 markdownRenderer.ts:339 搜索
+  // mark 高亮一处）→ 纯远程档输出内部自不一致：正文作者页内锚 3 条中 2 条死链（hash 变
+  // scrollTop 不动）、comrak 自产 anchor 链接 12 条中 11 条死链、#intro 碰巧命中作者
+  // <div id="intro"> 滚到错误元素。校准：TOC 面板按实际 DOM id 定位不受影响（远程档点
+  // TOC scrollTop 0→121），文档浏览与其余功能正常，非崩溃/数据丢失/功能不可用。
+  // 最小复现（需 --compute 同源实例，本套件 :4173 纯 web 不可执行，拓扑先例 HL-10/3）：
+  //   ① http://127.0.0.1:8391 → 连接服务器 → 填 http://127.0.0.1:8391 → 连接；
+  //   ② 文件树展开 explore-md/，点 toc-edge.md，确认状态栏「渲染: 远程」；
+  //   ③ 点正文链接「到中文标题一」→ location.hash 变 #%E4%B8%AD%E6%96%87%E6%A0%87%E9%A2%98%E4%B8%80
+  //      但 .vv-viewer-scroll.scrollTop 保持 0；emoji 标题链接同样不滚；
+  //   ④ 对照：同一文件本地注入通道（无服务器连接）打开（渲染: 本地），同一链接
+  //      scrollTop 0→121 正常跳转。
+  // 证据（复核轮独立取得）：/tmp/md-e1-repro/repro.mjs——远程档 12 个 heading id 全带
+  //   前缀（user-content-中文标题一 / -1 / user-content- / user-content--1 /
+  //   user-content-标题--emoji），16 条 a[href^=#] 中 13 条目标 id 不存在（comrak 自产
+  //   anchor 类 11 + 正文 2），仅 #intro/#deep-target 命中作者 HTML 自带 id；
+  //   curl POST /api/compute/markdown 原始输出即「id 带前缀、内嵌锚 href 不带」
+  //   （comrak 0.56 输出行为，非前端改写）；/tmp/md-e1-repro/toc.mjs——TOC 面板不受影响。
+  // 修复方向：前端补 hash→user-content- 前缀映射（GitHub 同款）或 comrak 侧对齐本地方案。
+  //   转正断言（--compute 同源实例）：正文页内锚点击 scrollTop 变化 + deadLinkCheck
+  //   0 死链（comrak 自产 anchor href 与实际 heading id 全一致）。
+});
+
+test.fixme('BUG-40 [探索]: markdown 渲染视图净化放行五类等价加载向量——poster/SVG image/style url/table background/input image 外域真实外联', async ({
+  page
+}) => {
+  // = 探索期编号 BUG-39（本文件上方 'BUG-39 [探索]' 用例）复核定档后的缺陷库确认编号，
+  // 同缺陷同判据（载体/断言与上方用例一致），两用例一并转正；本条挂确认编号供修复 PR
+  // 按 BUG-40 检索。复核成立、范围校准为 md 档（medium）：净化钩子
+  // （packages/render-text/src/markdown/sanitize.ts:54-116，仅覆盖 IMG 的 src/srcset 与
+  // VIDEO/AUDIO/SOURCE 的 src）放行 video/audio poster、SVG <image href/xlink:href>、
+  // 行内 style url(...)、table background 属性、input type=image src 五类等价加载向量，
+  // DOM 属性全保留且浏览器真实发起外域请求（md 档与纯前端档各 6 条 GET，failures 均为
+  // net::ERR_EMPTY_RESPONSE 即已进网络栈——跟踪像素可回传 IP/会话）。html 沙箱档属性
+  // 同样保留但被 srcdoc 内 CSP meta（packages/render-text/src/html.ts:27-28、68-71）在
+  // 网络栈之前拦死（failures='csp'，对照实验证实 meta CSP 在 srcdoc 正常执行），不在本
+  // 缺陷范围。
+  // 证据（复核轮独立取得）：/tmp/vv-repro-cand-md-e2/repro.mjs（request/requestfailed/
+  // requestresponse 三相记录）——md 档 requests=6（poster/svg-img/svg-xlink/bg/tbg/input），
+  // failures 全为网络层错误，img[alt=plain] 等既有 BUG-17 行为完好；control.mjs——
+  // errorText='csp'=网络栈之前拦截、未出浏览器。
+  // 修复后判据：external.example 请求 0 条（不预设净化实现形态：剥属性/打 BUG-17 同款
+  // data-vv-blocked-external 标记均可）。
+  test.setTimeout(90_000);
+  const V = 'http://external.example.com';
+  const content = [
+    `<img alt="plain" src="${V}/plain.jpg">`,
+    '',
+    `<video controls poster="${V}/poster.jpg"></video>`,
+    '',
+    `<svg><image href="${V}/svg-img.png"></image><image xlink:href="${V}/svg-xlink.png"></image></svg>`,
+    '',
+    `<div style="background:url(${V}/bg.png)">行内样式 url 外联</div>`,
+    '',
+    `<table background="${V}/tbg.png"><tr><td>表格背景外联</td></tr></table>`,
+    '',
+    `<p><input type="image" src="${V}/input.png" alt="input 外联"></p>`,
+    ''
+  ].join('\n');
+  // 外域请求监听先于注入装载（核心判据：修复后 0 条外联，不预设净化实现形态）
+  const external: string[] = [];
+  page.on('request', (req) => {
+    if (req.url().includes('external.example')) external.push(req.url());
+  });
+  await injectDir(page, [{ name: 'md40-vectors.md', content }]);
+  await openTreeFile(page, 'md40-vectors.md');
+  const md = page.locator('.vv-markdown');
+  await expect(md).toBeVisible({ timeout: 20_000 });
+  await page.waitForTimeout(1_500); // 网络观察窗：覆盖属性加载触发的外域请求
+  expect(external).toEqual([]);
+
+  // 基线护栏：既有 BUG-17 行为不回退（img 外域 src 剥除 + 拦截标记）
+  const img = md.locator('img[alt="plain"]');
+  await expect(img).not.toHaveAttribute('src');
+  await expect(img).toHaveAttribute('data-vv-blocked-external', '1');
+  await expect(page.locator('.vv-error-card')).toHaveCount(0);
+});
