@@ -30,6 +30,7 @@ cargo build --release --manifest-path server/Cargo.toml
 | `--allow-lan` | — | 绑定 `0.0.0.0`（局域网可访问）；**必须**同时配置 `--token`/`--token-gen`，否则拒绝启动（exit 2） |
 | `--hidden` | — | 目录列表隐藏 dot 开头条目（默认显示全部） |
 | `--cors-origin <URL>` | 无 | 允许来自该精确 origin 的跨域 API 访问（见下文 CORS）；省略时不加 CORS 层 |
+| `--log-file <PATH>` | stdout | 日志写文件（ANSI 关闭），超 10MB 滚动为 `<PATH>.old` 单备份；不可用则拒绝启动（exit 2） |
 
 配置错误一律 exit code 2 并输出 `error: ...`（空 token、`--allow-lan` 无 token、root/web-dist 不存在、端口占用等）。
 

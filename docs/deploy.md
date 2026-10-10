@@ -61,6 +61,28 @@ WantedBy=multi-user.target
 `--token-gen` 每次重启换新令牌（journal 里查）；要固定令牌见 server/README.md 的
 Environment 传参写法。
 
+## 日志与轮转
+
+默认日志走 stdout（tracing 格式化）。默认过滤 `info,notify=error`：notify crate
+的扫描 WARN（如数据根存在指向外部的 symlink、权限不足目录时的轮询报错）默认
+静默，需要排查时用 `RUST_LOG` 覆盖：
+
+```bash
+RUST_LOG=info,notify=warn ./server/target/release/vviewer serve --root /path/to/data
+```
+
+长时间常驻二选一：
+
+1. **systemd/journald（推荐）**：日志进 journald，自带大小上限与轮转
+   （`journald.conf` 的 `SystemMaxUse` 等）；
+2. **`--log-file <PATH>`**：服务端直接写文件，超过 10MB 自动滚动为
+   `<PATH>.old`（单备份覆盖式）。
+
+⚠️ 不要用 `nohup … > file 2>&1` 裸重定向到文件：无轮转无上限。数据根内存在
+越界 symlink / 不可读目录时，旧版本曾出现日志无界增长与 CPU 空转（BUG-68，
+2026-10-10 已修复并默认过滤 notify 扫描告警）；即便修复后，裸重定向也使任何
+未预期的日志增长直达磁盘。
+
 ## 常见问题
 
 **连接提示「鉴权失败：令牌缺失或错误（HTTP 401）」**
