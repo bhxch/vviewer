@@ -502,7 +502,16 @@ fn session_loop(
                         // 窗口内混入错误同样按会话异常处理：若故障仅以这一个 Err
                         // 事件表现（此后无事件），不重建会卡在空转
                         Ok(Err(_)) => {
-                            let _ = gate.admit(Instant::now()); // 该分支不含错误详情，静默或摘要皆由下次输出兜底
+                            // 该分支不含错误详情：First/Suppressed 静默（无处记
+                            // 详情）；Summary 仍须输出无详情摘要——窗口恰在此
+                            // 过期时 admit 已清零计数，丢弃返回值会使被抑制的
+                            // n 条永不进入任何摘要
+                            match gate.admit(Instant::now()) {
+                                Admission::Summary(n) => {
+                                    warn!("[watch] runtime error window: {n} suppressed")
+                                }
+                                Admission::First | Admission::Suppressed => {}
+                            }
                             return true;
                         }
                         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => break,
