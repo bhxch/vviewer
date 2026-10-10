@@ -357,7 +357,7 @@ test.fixme('BUG-39 [探索]: markdown 渲染视图净化放行五类等价加载
   await expect(page.locator('.vv-error-card')).toHaveCount(0);
 });
 
-test.fixme('BUG-66 [探索]: 本地 markdown-it 路径删除线渲染为 s 而非 del——与远程 comrak 双引擎标签不一致', async ({
+test.fixme('BUG-67 [探索]: 本地 markdown-it 路径删除线渲染为 s 而非 del——与远程 comrak 双引擎标签不一致', async ({
   page
 }) => {
   // = CAND-md-F1 的复核定论缺陷库编号（2026-10-10 复核确认，low）；与本文件上方
@@ -398,6 +398,10 @@ test.fixme('BUG-66 [探索]: 本地 markdown-it 路径删除线渲染为 s 而�
 // 'BUG-40 [探索]' 用例与 t-hl 侧 'BUG-41 [探索]' 占位已按「同缺陷唯一锚点」收编删除，
 // 全仓库唯一锚点为 t-hl.spec.ts 'BUG-35 [探索]'——按 BUG-41/探索期 BUG-40/早期定档
 // BUG-43 检索请落该条。
+// 【2026-10-10 占位整理更新 2】删除线缺陷按 cmp 域权威清单定档 BUG-67（缺陷与
+// CAND-md-F1/CAND-cmp-F1 同一缺陷）：上方 'BUG-66 [探索]' 标题已就地勘误为
+// 'BUG-67 [探索]'（根因属 md 语义域故锚点留在本文件，内容/判据/位置不动；t-cmp.spec.ts
+// 场景 fixme 同步勘误为 'CMP-05 [BUG-67]'）——按 BUG-66 检索请落 BUG-67。
 
 test.fixme('BUG-39 [探索]: 远程档 heading id 双引擎方案不一致——comrak user-content- 前缀致页内锚死链、内嵌 anchor href 自不一致', async () => {
   // = 探索期编号 BUG-37（本文件上方 'BUG-37 [探索]' 用例）复核定档后的缺陷库确认编号，

@@ -88,6 +88,18 @@ test.beforeAll(async () => {
   writeFileSync(join(FIXTURE, 'tcmp-matrix.cpp'), '#include <iostream>\n\nint main() {\n    int a = 42;\n    std::cout << a << std::endl;\n    return 0;\n}\n');
   writeFileSync(join(FIXTURE, 'tcmp-matrix.java'), 'public class TcmpMatrix {\n    public static void main(String[] args) {\n        int a = 42;\n        System.out.println(a);\n    }\n}\n');
   writeFileSync(join(FIXTURE, 'tcmp-matrix.sql'), 'SELECT id, name FROM devices WHERE status = 1;\n');
+  // BUG-56 载体：4 行 jsonc（∉ 服务端 301 宣告集；显式 remote 策略下 POST
+  // /api/compute/highlight 真实 400——宣告门只在 auto 前置拦截，remote 不拦）
+  writeFileSync(
+    join(FIXTURE, 'tcmp-remote-fail.jsonc'),
+    '{\n  "vv": "remote-fail", // jsonc\n  "n": 1\n}\n'
+  );
+  // BUG-57 载体：60 行 "vvneedle line N"（单文件命中数超服务端 RG_MAX_COUNT=50；
+  // vvneedle 为本 spec 专属词，避免共享 fixture 其他夹具干扰命中计数）
+  writeFileSync(
+    join(FIXTURE, 'tcmp-many60.txt'),
+    Array.from({ length: 60 }, (_, i) => `vvneedle line ${i + 1}`).join('\n') + '\n'
+  );
 
   // ---- 同源 compute 实例（重试安全复用，同 b-server-file-service 口径） ----
   try {
@@ -224,9 +236,10 @@ async function readMarkdownFingerprint(page: Page): Promise<MdFingerprint> {
 }
 
 test.fixme(
-  'CMP-05 [CAND-cmp-F1]: 同文档 remote/local 两次渲染 DOM 指纹一致（无围栏 GFM：表格/任务列表/删除线）',
+  'CMP-05 [BUG-67]: 同文档 remote/local 两次渲染 DOM 指纹一致（无围栏 GFM：表格/任务列表/删除线）',
   async ({ browser }) => {
-    // CAND-cmp-F1（产品缺陷，2026-10-10 分诊转 fixme，断言不放宽）：
+    // BUG-67（=CAND-cmp-F1，编号按 cmp 域缺陷清单勘误；产品缺陷，2026-10-10 分诊转
+    // fixme，断言不放宽）：
     // 首轮执行 remote 轮护栏全过（comrak <del> 经 sanitize 存活，del 计数 1），
     // local 轮 del 断言 0 命中（error-context 状态栏「渲染: 本地」）——本地
     // markdown-it 15.0.2（packages/render-text/package.json:13）把 ~~x~~ 渲染为
@@ -354,4 +367,112 @@ test.fixme('BUG-36 [探索]: 服务端 compute 高亮单行大文本 O(n²)—�
   expect(res.status).toBe(200);
   expect(Date.now() - t0).toBeLessThan(9_500);
 });
+
+// ── 计算卸载与全局搜索域探索复核确认缺陷回归占位（2026-10-10 编号勘误轮补落）──
+// BUG-56 / BUG-57 由 cmp 域缺陷清单（2026-10-10 探索复核）确认，全仓库此前无任何占位
+// 锚点（rg 两 e2e 目录全量核对），按清单落位规则新增于本文件（需 spawn 二进制 / API
+// 断言的归 e2e-server；复用上方 :4181 同源 compute 实例拓扑与 helper）。来源标注
+// [探索]：缺陷由探索/复核会话独立复现确认。转正前保持 test.fixme（修复 PR 转正）。
+
+test.fixme(
+  'BUG-56 [探索]: 显式 remote 策略远程高亮失败后 engine 停留初始值 pending——状态栏「高亮」段永久停留「解析中…」并补出「执行: 远程」，与大文件 chunk 失败路径（置终值）口径不一致',
+  async ({ page }) => {
+    // 复核成立（low，2026-10-10）：≤2MB 常规链 jsonc（∉ 301 宣告集）在显式 remote 下
+    // POST /api/compute/highlight 返回 400（RemoteComputeError → 错误卡片），整文件
+    // 主路径 catch 分支 showErrorCard 后直接 return 不置终值
+    // （packages/render-text/src/code.ts:896-903；engine 初始 'pending' :583），状态栏
+    // 「高亮: 解析中…」（apps/web/src/lib/ViewerPane.svelte:18）永久驻留且 :242 补出
+    // 「执行: 远程」——computeWhere 在请求期已被 onWhere 回填 'remote'、失败后无人
+    // 清空（t0 读不到「执行: 远程」仅因状态栏 250ms 轮询）。对照：大文件 chunk 路径
+    // 同 400 后 `engine='plain'; computeWhere=null`（code.ts:773-778，注释明言
+    // 「engine 置非 pending 终值」）→ 状态栏「纯文本」、无执行段——与既裁决口径
+    // （失败后引擎置终值、不停留解析中）不一致。既有 CMP-04 用例
+    // （b-compute-global-search-server.spec.ts:379-386）只断言错误卡片与 400，未锚定
+    // 状态栏终值，确非已覆盖。
+    // 最小复现：① serve --root <data> --web-dist apps/web/build --port 8433 --compute
+    // ② 页面 localStorage 注入 vviewer:settings={"computePolicy":"remote"} ③ 顶栏
+    // 「连接服务器」连本实例 ④ 打开 4 行 jsonc → 错误卡片「无法预览此文件/远程高亮
+    // 失败: HTTP 400」⑤ t0 与 t5/t15 各读一次 .vv-statusbar：t5 起逐字驻留
+    // 「高亮: 解析中… · 执行: 远程 · …」不自愈。
+    // 证据（复核轮独立取得）：截图 /tmp/vv-review-cmp-e1/rv-t0.png、rv-t5.png；
+    // POST 直呼 lang=jsonc → 400 "unsupported language: jsonc"（301 宣告集无 jsonc）、
+    // 对照 lang=python → 200；同 jsonc 2.3MB 走 chunk 路径 t5 即「纯文本」置终值。
+    // 修复方向：整文件主路径 catch RemoteComputeError 与 chunk 路径对齐置终值
+    // （engine 置非 pending 终值、computeWhere 清空）；修复后转正，下方末条断言即转正判据。
+    test.setTimeout(60_000);
+    const statuses: number[] = [];
+    page.on('response', (r) => {
+      if (r.url().includes('/api/compute/highlight')) statuses.push(r.status());
+    });
+    await connectSameOriginCompute(page, 'remote');
+    await openFile(page, 'tcmp-remote-fail.jsonc');
+
+    // 护栏（缺陷态已成立，与 CMP-04 ④ 同口径）：错误卡片出现 + 真实 400
+    await expect(page.locator('.vv-error-card')).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('.vv-error-card')).toContainText('远程高亮失败: HTTP 400');
+    expect(statuses).toContain(400);
+
+    // 转正判据（缺陷态失败：t15 状态栏仍逐字驻留「高亮: 解析中… · 执行: 远程…」）：
+    // 失败后 engine 置终值——状态栏不再停留「解析中…」，与大文件 chunk 失败路径
+    // （「纯文本」、无执行段）同口径
+    await expect(page.locator('.vv-statusbar')).not.toContainText('解析中', { timeout: 10_000 });
+  }
+);
+
+test.fixme(
+  'BUG-57 [探索]: 服务端档全局搜索单文件命中数静默截断至 50——超出命中行被丢弃且终帧 truncated=false、UI 无不完整提示，与纯前端路径（60 条）不一致',
+  async ({ page }) => {
+    // 复核成立（low，2026-10-10）：server/src/routes/search.rs:42 定义 RG_MAX_COUNT='50'，
+    // :96-97 作为 --max-count 传入 rg，单文件命中行超 50 即静默截断；终帧 truncated 仅由
+    // 全局 1000 命中上限（MAX_MATCHES :36，:234-240/:288）驱动——单文件 50 上限触达时
+    // 无任何信号。纯前端 grepStoreLocal（packages/core/src/compute/search.ts:116-192，
+    // 上限仅 2000 文件/200MB/单文件 2MB/1000 命中 :50-55）同查询返回全部 60 条——同
+    // 数据两路径 50 vs 60。缺陷点不在参数本身（search.rs 注释与单测围绕它设计），在
+    // 「截断无信号」与「双路径结果不一致」：1000 全局上限触达有 truncated 提示（CMP-08
+    // 已覆盖），单文件 50 触达没有。返回的 50 条均为真实命中（不完整但非错误结果）。
+    // 最小复现：① 夹具 tcmp-many60.txt 含 60 行 "vvneedle line N" ② POST /api/search
+    // {"pattern":"vvneedle"} → 该文件恰 50 帧、终帧 {"done":true,"truncated":false}
+    // ③ UI Ctrl+Shift+F 搜 vvneedle（远程 store）→ 「50 个命中」无「不完整/已达上限」
+    // 字样 ④ node 直跑产品源码 grepStoreLocal 同查询 → total=60。
+    // 证据（复核轮独立取得，8441 实例 /tmp/cand-cmp-e2/root）：UI 截图
+    // /tmp/cand-cmp-e2/artifacts/gs-needle-50-hits.png；rg 参数对照（root 直跑产品同参
+    // --max-count 50 → 50、去掉 → 60）；GlobalSearchPanel.svelte:126 状态=「${matches.length}
+    // 个命中」、:225 仅 truncated 追加「（结果不完整，已达上限）」、:80-84/:245 文件头
+    // 计数=命中帧数。
+    // 修复方向（二选一）：放开单文件截断（返回 60 帧）或保留截断但终帧/搜索面板给
+    // truncated 信号（与 1000 上限口径对齐）；修复后按实际方向保留下方对应判据转正。
+    test.setTimeout(60_000);
+
+    // API 半：截断触达必须有信号——缺陷态该文件恰 50 帧 + 终帧 truncated=false
+    // （行 51–60 静默丢弃），两修复方向判据（60 帧或 truncated 信号）均不满足
+    const res = await fetch(`${COMPUTE_BASE}/api/search`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pattern: 'vvneedle', caseSensitive: false, regex: false })
+    });
+    expect(res.ok).toBeTruthy();
+    const frames = (await res.text())
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    const fileFrames = frames.filter(
+      (f) => typeof f.file === 'string' && f.file.endsWith('tcmp-many60.txt')
+    );
+    expect(
+      fileFrames.length === 60 || frames[frames.length - 1]?.truncated === true,
+      '单文件截断触达必须有信号或放开截断；缺陷态 50 帧 + truncated=false 双双违背'
+    ).toBe(true);
+
+    // UI 半：远程 store 同查询——缺陷态状态条「50 个命中」且无「结果不完整」提示；
+    // 修复后为「60 个命中」（方向 A）或「50 个命中（结果不完整，已达上限）」（方向 B）
+    await connectSameOriginCompute(page, 'auto');
+    await page.keyboard.press('Control+Shift+F');
+    await expect(page.locator('.vv-gsearch')).toBeVisible();
+    await page.getByLabel('全局搜索内容').fill('vvneedle');
+    await expect(page.locator('.vv-gsearch-status')).toContainText(/60 个命中|结果不完整/, {
+      timeout: 15_000
+    });
+    await page.keyboard.press('Escape');
+  }
+);
 
