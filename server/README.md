@@ -123,7 +123,8 @@ console.warn 跳层，不阻塞其余层。实现：`apps/web/src/lib/grammarLay
   2. 仓库 secret `NPM_TOKEN`（npm automation token，publish 步注入 `NODE_AUTH_TOKEN`）；
   3. 首发走 tag：`publish-npm` 挂在 push `v*` 触发的 release 流程上（`npm view` 幂等门，
      已发布版本自动跳过可重跑）；GitHub Pages 的 CDN 注入仅 tag 构建生效（main 构建
-     不注入，避免 jsdelivr `@main` 404 白打请求）。
+     不注入，避免 jsdelivr `@main` 404 白打请求）；publish 带 `--provenance` 供应链
+     签名（publish-npm job 持 `id-token: write`，npm 页面展示 "Published with provenance"）。
 
 ## 构建前置（grammar 源树）
 

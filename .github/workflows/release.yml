@@ -4,11 +4,13 @@
 #   server：cargo build --release（targets：x86_64-unknown-linux-gnu 起步；
 #           后续扩平台在下方 server job 注释的 matrix 上展开）
 #   publish-npm：grammar-wasm artifact → npm <scope>/vviewer-grammars-full（scope
-#           variable 门控、版本幂等；scope 未配置则 npm 分发与 CDN env 均不启用）
+#           variable 门控、版本幂等；scope 未配置则 npm 分发与 CDN env 均不启用；
+#           --provenance 签名需 job 级 id-token: write）
 # 聚合 job 以 gh CLI 建 GitHub Release 并上传：vviewer 二进制、web dist zip、
 # grammar-wasm.tar.zst。发布写权限仅授予聚合 release job（job 级 contents: write）；
-# 顶层 contents: read 兜底，web/server job 级再显式声明 read（grammar 由被调
-# workflow 自身的 contents: read 约束）——与实现一一对应，勿只改注释不改权限。
+# publish-npm 另持 id-token: write（provenance，无内容写权限）；顶层 contents: read
+# 兜底，web/server job 级再显式声明 read（grammar 由被调 workflow 自身的
+# contents: read 约束）——与实现一一对应，勿只改注释不改权限。
 name: Release
 
 on:
@@ -104,9 +106,13 @@ jobs:
     name: npm 资产包发布（grammars-full）
     runs-on: ubuntu-latest
     # scope 未配置（repo variable）则整个包分发未启用：job 跳过，web 侧 CDN env
-    # 同门控不注入（三层解析链的第 3 层整体缺席）。npm 发布不经 GitHub 权限
+    # 同门控不注入（三层解析链的第 3 层整体缺席）。npm 发布不经 GitHub 内容写
+    # 权限，但 --provenance 供应链签名需要 OIDC（id-token: write）。
     if: vars.NPM_SCOPE != ''
     needs: [grammar]
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -137,7 +143,9 @@ jobs:
           fi
       - name: npm publish
         if: env.SKIP_PUBLISH != '1'
-        run: npm publish ./dist-npm --access public
+        # --provenance：npm 供应链签名（公开包 + GitHub Actions + id-token: write），
+        # 发布页展示 "Published with provenance"；对齐 aicommit release 实践
+        run: npm publish ./dist-npm --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
