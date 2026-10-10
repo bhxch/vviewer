@@ -216,148 +216,18 @@ test('MD-12/渲染视图: 重复搜索恒无结果（沙箱 iframe 不做跨文�
 });
 
 // ── 探索复核确认缺陷回归占位（README §3.2.4：修复合入前 test.fixme 落位，修复 PR 转正） ──
-// 来源：探索期候选缺陷独立复核确认（BUG-37/38/39/40/66，2026-10-10 轮）。标题以缺陷库
-// 编号开头、[探索] 标注来源；各用例注释给出最小复现步骤、证据路径与源码定位。
+// 来源：探索期候选缺陷独立复核确认（2026-10-10 轮）。标题以缺陷库编号开头、[探索] 标注
+// 来源；各用例注释给出最小复现步骤、证据路径与源码定位。
 // 通道口径：本套件 baseURL :4173 为 vite preview 纯 web 形态——本地注入通道（injectDir，
 // auto 策略落本地管线）可复现的落完整可执行正文；需 --compute 同源实例的远程档缺陷落
 // 骨架注释（拓扑参照 e2e-server 的 :4180 同源辅助实例模式，先例 HL-10/3）。
+// 【2026-10-10 占位整理 3】按 md 域权威缺陷清单做编号勘误与唯一锚点收编：原探索期编号
+// 占位 BUG-37（heading id 死链）、BUG-39（净化向量）已并入下方同缺陷确认编号占位
+// BUG-39/BUG-40 后删除；原 BUG-38（围栏大小写）按根因归属保留 t-hl.spec.ts 'BUG-42
+// [探索]' 唯一锚点，本文件重复份删除；删除线缺陷权威编号为 BUG-66（下方 'BUG-66
+// [探索]'，标题自此前的 'BUG-67 [探索]' 勘误回来，见下节整理更新说明）。
 
-test.fixme('BUG-37 [探索]: 远程档页内锚链接死链——comrak heading id 带 user-content- 前缀而内嵌锚 href 不带，前端无 hash 映射', async () => {
-  // 双引擎 heading id 方案不一致（复核维持 medium）：
-  // - 本地：packages/render-text/src/markdown/markdownRenderer.ts:162 slugifyHeading
-  //   （无前缀）、:179 assignHeadingIds（重名 -2 起、全标点回退 section）；
-  // - 远程：comrak 0.56.0（server/Cargo.toml:22）统一 user-content- 前缀
-  //   （server/src/compute/markdown.rs:26），且自产内嵌 anchor「id 带前缀、href 不带」
-  //   自不一致（仿 GitHub 形态——GitHub 靠自家前端 JS 做 hash→前缀映射，本仓库前端
-  //   无任何此逻辑：rg 'data-heading-content|user-content' apps/web/src packages 零命中，
-  //   也无页内锚自定义点击处理，hashchange/scrollIntoView 仅 markdownRenderer.ts:339
-  //   搜索 mark 高亮一处）→ 纯远程档输出内部自不一致。
-  // 最小复现（需 --compute 同源实例，本套件 :4173 纯 web 不可执行）：
-  //   ① 实例 http://127.0.0.1:8391（root 夹具目录）→ 连接服务器 → 连接；
-  //   ② 文件树展开 explore-md/，点 toc-edge.md，确认状态栏「渲染: 远程」；
-  //   ③ 点正文链接「到中文标题一」→ location.hash 变 #中文标题一（URL 编码形态），
-  //      但 .vv-viewer-scroll.scrollTop 保持 0（死链）；emoji 标题链接同样不滚；
-  //   ④ 对照：同一文件本地注入通道打开（渲染: 本地），同一链接 scrollTop 0→121 正常。
-  // 证据（复核轮独立取得）：/tmp/md-e1-repro/repro.mjs——远程档 12 个 heading id 全带
-  //   前缀；16 条 a[href^=#] 中 13 条目标 id 不存在（comrak 自产 anchor 类 11 死链 +
-  //   正文 2 死链），仅 #intro/#deep-target 命中作者 HTML 自带 id，#intro 滚到作者 div
-  //   而非标题；API 直呼 POST /api/compute/markdown 原始输出即自不一致（非前端改写）；
-  //   /tmp/md-e1-repro/toc.mjs——TOC 面板按实际 DOM id 定位不受影响（scrollTop 0→121）。
-  // 修复方向：前端补 hash→user-content- 前缀映射（GitHub 同款）或 comrak 侧对齐本地
-  //   方案。修复后在 --compute 同源实例转正，断言：正文页内锚点击 scrollTop 变化 +
-  //   comrak 自产 anchor href 与实际 heading id 全一致（deadLinkCheck 0 死链）。
-});
-
-test.fixme('BUG-38 [探索]: 围栏语言标识大小写不归一——Rust 大写写法静默丢失 tree-sitter 降级 hljs 兜底', async ({
-  page
-}) => {
-  // 复核成立（low）：```Rust（大写 R）不命中全小写 grammar 清单键与别名表，tree-sitter
-  // 路径静默丢失、降级 hljs（cls "language-Rust hljs"，仅 hljs-* span）；```rust 正常
-  // 出 ts-* span。别名机制本身正常（```zsh 经别名表命中 bash grammar）。三策略
-  // （server auto / 显式 remote / 本地注入）结果一致。
-  // 源码：packages/highlight/src/core-parse.ts:243-245 canonicalLang 两级查找均区分
-  // 大小写且未命中原样返回；core-parse.ts:376-382 buildAliasTable 别名原样入表；
-  // apps/web/build/grammars/manifest.json grammars 表 34 键全小写、无 Rust 键、
-  // rust 别名仅 ['rs']、bash 别名 ['sh','shell','zsh']。
-  // 最小复现：注入含 ```rust / ```Rust / ```zsh 的 md → Rust 块 cls "language-Rust hljs"
-  // 零 ts-* span（对照 rust 块 language-rust + ts-* span）。
-  // 修复方向：围栏语言经 toLowerCase（及别名查表）归一后再查 grammar；修复后转正。
-  test.setTimeout(90_000);
-  const content = [
-    '```rust',
-    'fn main() {',
-    '    let x = 1;',
-    '}',
-    '```',
-    '',
-    '```Rust',
-    'fn main() {',
-    '    let y = 2;',
-    '}',
-    '```',
-    '',
-    '```zsh',
-    'echo hi',
-    '```',
-    ''
-  ].join('\n');
-  await injectDir(page, [{ name: 'md38-fence.md', content }]);
-  await openTreeFile(page, 'md38-fence.md');
-  const blocks = page.locator('.vv-markdown pre code');
-  await expect(blocks).toHaveCount(3, { timeout: 20_000 });
-
-  // 基线护栏：小写 rust 块 grammar 命中（修复不回退既有路径）
-  await expect(blocks.nth(0)).toHaveClass(/language-rust/);
-  await expect(blocks.nth(0).locator('span[class^="ts-"]').first()).toBeVisible({
-    timeout: 30_000
-  });
-
-  // 修复判据：Rust 大写写法归一命中 grammar——cls language-rust + ts-* span，无 hljs 兜底
-  await expect(blocks.nth(1)).toHaveClass(/language-rust/);
-  await expect(blocks.nth(1).locator('span[class^="ts-"]').first()).toBeVisible({
-    timeout: 30_000
-  });
-  await expect(blocks.nth(1).locator('span[class^="hljs-"]')).toHaveCount(0);
-
-  // 基线护栏：zsh 别名机制照常（别名表命中 bash grammar）
-  await expect(blocks.nth(2).locator('span[class^="ts-"]').first()).toBeVisible({
-    timeout: 30_000
-  });
-  await expect(page.locator('.vv-error-card')).toHaveCount(0);
-});
-
-test.fixme('BUG-39 [探索]: markdown 渲染视图净化放行五类等价加载向量——poster/SVG image/style url/table background/input image 外域真实外联', async ({
-  page
-}) => {
-  // 复核成立、范围校准为 md 档（medium）：净化钩子
-  // （packages/render-text/src/markdown/sanitize.ts:63-114，仅覆盖 IMG 的 src/srcset 与
-  // VIDEO/AUDIO/SOURCE 的 src）放行五类等价加载向量，DOM 属性全保留且浏览器真实发起
-  // 外域请求（md 档 6 条，失败原因 net::ERR_EMPTY_RESPONSE 即已进网络栈——跟踪像素
-  // 可回传 IP/会话）。html 沙箱档（vectors.html）属性同样保留但被 srcdoc 内 CSP meta
-  // （packages/render-text/src/html.ts:27-28 CSP_CONTENT，:66-71 注入）在网络栈前拦死，
-  // 不在本缺陷范围。
-  // 最小复现：注入含五类向量的 md（外域指向不可解析保留域 external.example.com）→
-  // 打开渲染视图 → 检索请求命中 6 条；修复后判据：external.example 请求 0 条
-  // （不预设实现形态：剥属性/打 BUG-17 同款 data-vv-blocked-external 标记均可）。
-  // 证据（复核轮独立取得）：/tmp/vv-repro-cand-md-e2/repro.mjs（request/requestfailed/
-  // requestresponse 三相记录）——md 档 requests=6（poster/svg-img/svg-xlink/bg/tbg/
-  // input），failures 全为网络层错误；img[alt=plain] 等既有 BUG-17 行为完好。
-  test.setTimeout(90_000);
-  const V = 'http://external.example.com';
-  const content = [
-    `<img alt="plain" src="${V}/plain.jpg">`,
-    '',
-    `<video controls poster="${V}/poster.jpg"></video>`,
-    '',
-    `<svg><image href="${V}/svg-img.png"></image><image xlink:href="${V}/svg-xlink.png"></image></svg>`,
-    '',
-    `<div style="background:url(${V}/bg.png)">行内样式 url 外联</div>`,
-    '',
-    `<table background="${V}/tbg.png"><tr><td>表格背景外联</td></tr></table>`,
-    '',
-    `<p><input type="image" src="${V}/input.png" alt="input 外联"></p>`,
-    ''
-  ].join('\n');
-  // 外域请求监听先于注入装载（核心判据：修复后 0 条外联，不预设净化实现形态）
-  const external: string[] = [];
-  page.on('request', (req) => {
-    if (req.url().includes('external.example')) external.push(req.url());
-  });
-  await injectDir(page, [{ name: 'md39-vectors.md', content }]);
-  await openTreeFile(page, 'md39-vectors.md');
-  const md = page.locator('.vv-markdown');
-  await expect(md).toBeVisible({ timeout: 20_000 });
-  await page.waitForTimeout(1_500); // 网络观察窗：覆盖属性加载触发的外域请求
-  expect(external).toEqual([]);
-
-  // 基线护栏：既有 BUG-17 行为不回退（img 外域 src 剥除 + 拦截标记）
-  const img = md.locator('img[alt="plain"]');
-  await expect(img).not.toHaveAttribute('src');
-  await expect(img).toHaveAttribute('data-vv-blocked-external', '1');
-  await expect(page.locator('.vv-error-card')).toHaveCount(0);
-});
-
-test.fixme('BUG-67 [探索]: 本地 markdown-it 路径删除线渲染为 s 而非 del——与远程 comrak 双引擎标签不一致', async ({
+test.fixme('BUG-66 [探索]: 本地 markdown-it 路径删除线渲染为 s 而非 del——与远程 comrak 双引擎标签不一致', async ({
   page
 }) => {
   // = CAND-md-F1 的复核定论缺陷库编号（2026-10-10 复核确认，low）；与本文件上方
@@ -387,25 +257,29 @@ test.fixme('BUG-67 [探索]: 本地 markdown-it 路径删除线渲染为 s 而�
 
 // ── 复核确认缺陷库编号挂接（2026-10-10 第二轮；README §3.2.4 口径与上节相同）──
 // 上节占位落位时（eecd910）缺陷库编号未定档、标题用探索期编号（BUG-37/38/39/40/66）；
-// 本轮复核定档后编号偏移：探索 BUG-37→BUG-39（heading id 死链）、BUG-39→BUG-40（净化
+// 复核定档后编号偏移：探索 BUG-37→BUG-39（heading id 死链）、BUG-39→BUG-40（净化
 // 向量）、BUG-38→BUG-42（围栏大小写）、BUG-40→BUG-41（worker 看门狗）、BUG-66 不变。
-// 按「只追加不改」约定：编号偏移的两条 md 域缺陷在此补挂确认编号占位（同缺陷同判据，
-// 与上方对应用例一并转正），避免修复 PR 按确认编号检索命中错位用例；BUG-42/BUG-41
-// 根因属 hl（packages/highlight），按一域一文件落 t-hl.spec.ts；BUG-66 编号未偏移
-// （上方用例即挂确认编号），不再重复。
+// 编号偏移的两条 md 域缺陷在此挂确认编号占位（同缺陷同判据），避免修复 PR 按确认编号
+// 检索命中错位用例；BUG-42/BUG-41 根因属 hl（packages/highlight），按一域一文件落
+// t-hl.spec.ts；BUG-66 编号未偏移（上方用例即挂确认编号），不再重复。
 // 【2026-10-10 占位整理更新】worker 看门狗缺陷按 hl 域权威清单定档 BUG-35（fsearch 域
-// 整理轮曾按其清单记 BUG-43，编号勘误轮以内容配对归一为 BUG-35）：上方原探索期
+// 整理轮曾按其清单记 BUG-43，编号勘误轮以内容配对归一为 BUG-35）：原探索期
 // 'BUG-40 [探索]' 用例与 t-hl 侧 'BUG-41 [探索]' 占位已按「同缺陷唯一锚点」收编删除，
 // 全仓库唯一锚点为 t-hl.spec.ts 'BUG-35 [探索]'——按 BUG-41/探索期 BUG-40/早期定档
 // BUG-43 检索请落该条。
-// 【2026-10-10 占位整理更新 2】删除线缺陷按 cmp 域权威清单定档 BUG-67（缺陷与
-// CAND-md-F1/CAND-cmp-F1 同一缺陷）：上方 'BUG-66 [探索]' 标题已就地勘误为
-// 'BUG-67 [探索]'（根因属 md 语义域故锚点留在本文件，内容/判据/位置不动；t-cmp.spec.ts
-// 场景 fixme 同步勘误为 'CMP-05 [BUG-67]'）——按 BUG-66 检索请落 BUG-67。
+// 【2026-10-10 占位整理更新 2→3】删除线缺陷（与 CAND-md-F1/CAND-cmp-F1 同一缺陷）
+// 曾按 cmp 域清单定档 BUG-67 并把上方标题勘误为 'BUG-67 [探索]'；占位整理轮按 md 域
+// 权威缺陷清单（唯一权威）以内容配对勘误回 BUG-66，上方标题现为 'BUG-66 [探索]'
+// （根因属 md 语义域故锚点留在本文件，内容/判据/位置不动）。t-cmp.spec.ts 'CMP-05
+// [BUG-67]' 系 cmp 域场景锚点，编号按 cmp 域清单现状保留不改——按 BUG-67 检索请落
+// 该条，按 BUG-66 检索请落上方 'BUG-66 [探索]'。同轮唯一锚点收编：上方原探索期
+// 'BUG-37 [探索]'/'BUG-39 [探索]'（净化向量）两份旧编号占位已删除，唯一锚点为下方
+// 'BUG-39 [探索]'/'BUG-40 [探索]'；围栏大小写原 'BUG-38 [探索]' 本域份删除，唯一锚点
+// 为 t-hl.spec.ts 'BUG-42 [探索]'（根因 packages/highlight/src/core-parse.ts）。
 
 test.fixme('BUG-39 [探索]: 远程档 heading id 双引擎方案不一致——comrak user-content- 前缀致页内锚死链、内嵌 anchor href 自不一致', async () => {
-  // = 探索期编号 BUG-37（本文件上方 'BUG-37 [探索]' 用例）复核定档后的缺陷库确认编号，
-  // 同缺陷同判据，两用例一并转正；本条挂确认编号供修复 PR 按 BUG-39 检索。
+  // = 探索期编号 BUG-37（原同文件 'BUG-37 [探索]' 占位，已按唯一锚点收编删除）复核
+  // 定档后的缺陷库确认编号，同缺陷同判据；本条挂确认编号供修复 PR 按 BUG-39 检索。
   // 复核维持 medium：本地 slugifyHeading 无前缀、重名 -2 起、全标点回退 section
   // （packages/render-text/src/markdown/markdownRenderer.ts slugifyHeading/assignHeadingIds）；
   // 远程 comrak 0.56.0（server/Cargo.toml:22、Cargo.lock:252-253）统一 user-content- 前缀、
@@ -439,9 +313,9 @@ test.fixme('BUG-39 [探索]: 远程档 heading id 双引擎方案不一致——
 test.fixme('BUG-40 [探索]: markdown 渲染视图净化放行五类等价加载向量——poster/SVG image/style url/table background/input image 外域真实外联', async ({
   page
 }) => {
-  // = 探索期编号 BUG-39（本文件上方 'BUG-39 [探索]' 用例）复核定档后的缺陷库确认编号，
-  // 同缺陷同判据（载体/断言与上方用例一致），两用例一并转正；本条挂确认编号供修复 PR
-  // 按 BUG-40 检索。复核成立、范围校准为 md 档（medium）：净化钩子
+  // = 探索期编号 BUG-39（原同文件 'BUG-39 [探索]' 占位，已按唯一锚点收编删除）复核
+  // 定档后的缺陷库确认编号，同缺陷同判据；本条挂确认编号供修复 PR 按 BUG-40 检索。
+  // 复核成立、范围校准为 md 档（medium）：净化钩子
   // （packages/render-text/src/markdown/sanitize.ts:54-116，仅覆盖 IMG 的 src/srcset 与
   // VIDEO/AUDIO/SOURCE 的 src）放行 video/audio poster、SVG <image href/xlink:href>、
   // 行内 style url(...)、table background 属性、input type=image src 五类等价加载向量，
