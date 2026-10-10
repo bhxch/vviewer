@@ -86,7 +86,8 @@ function buildRenderErrorActions(
 }
 
 /**
- * 统一选路：扩展名主路由 → 无扩展名回退链（签名改派 → 文本性探测 + shebang，BUG-07）
+ * 统一选路：扩展名主路由 → 内容探测回退链（签名改派 → 文本性探测 + shebang，BUG-07
+ * 原生无扩展名；C 项放宽为未知扩展名同样探测，链尾追加 hex 兜底）
  * → 文本类渲染器的 magic 签名预检改派（BUG-13）。会按改派结果原地纠偏 det.ext，
  * 并在 extless 文本命中时写 det.extless 与 det.lang（shebang 语言，供 code 渲染器消费）。
  */
@@ -97,26 +98,43 @@ function resolveInitialRenderer(
   registry: Registry
 ): Renderer | undefined {
   let renderer = initial;
-  if (!renderer && det.ext === '') {
-    // ① 签名改派（与 BUG-13 同表）：无扩展名但有强签名（PK/PNG/PDF/…）直接进规范渲染器
+  if (!renderer) {
+    // C 项：未知扩展名不再直接报错——与原生无扩展名（BUG-07）同走内容探测链，链尾 hex 兜底
+    const originalExt = det.ext;
+    // ① 签名改派（与 BUG-13 同表）：有强签名（PK/PNG/PDF/…）直接进规范渲染器
     const route = signatureRouteOf(det.signature);
     if (route) {
       const next = registry.byId(route.rendererId);
       if (next) {
         renderer = next;
         det.ext = route.ext; // 纠偏：渲染器内部按 ext 分派（av 的 ts → mpegts loader 等）
+        // 仅「有扩展名但被改派」置位；原生无扩展名的签名纠偏不算改派
+        if (originalExt !== '' && route.ext !== originalExt) det.reclassifiedFrom = originalExt;
       }
     }
-    // ② 文本性探测 → code 渲染器 + shebang 语言识别（detectLanguage 的窄表实现）
+    // ② 文本性探测 → code 渲染器 + shebang 语言识别（detectLanguage 的窄表实现）；
+    // extless 语义收窄：仅原生无扩展名文件置位（既有 e2e 断言依赖）
     if (!renderer && looksTextual(head)) {
       const code = registry.byId('code');
       if (code) {
         renderer = code;
-        det.extless = true;
+        if (originalExt === '') {
+          det.extless = true;
+        } else {
+          det.reclassifiedFrom = originalExt;
+        }
         det.lang = shebangLangOf(new TextDecoder().decode(head)) ?? undefined;
       }
     }
-    // ③ 皆不命中：返回 undefined，由调用方抛特化文案（不再出现 `""` 字样）
+    // ③ hex 兜底（C 项）：签名/文本皆不命中的未知扩展名（或无扩展名）内容落 hex 查看器
+    if (!renderer) {
+      const hex = registry.byId('hex');
+      if (hex) {
+        renderer = hex;
+        if (originalExt !== '') det.reclassifiedFrom = originalExt;
+      }
+    }
+    // ④ 皆不命中：返回 undefined，由调用方抛特化文案（不再出现 `""` 字样）
   }
   if (renderer && TEXTUAL_RENDERER_IDS.has(renderer.id)) {
     // BUG-13 magic 预检（在 renderer.sniff 之前）：文本类渲染器 + 已识别签名不符 → 改派一次；

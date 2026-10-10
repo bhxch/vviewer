@@ -286,3 +286,51 @@ describe('dispatcher 错误卡片 actions（BUG-14）', () => {
     target.remove();
   });
 });
+
+describe('unknown-extension probe chain (C 项)', () => {
+  it('routes .foo PNG by signature to image', async () => {
+    const reg = createRegistry();
+    reg.install(mk('code', ['txt']));
+    reg.install(mk('image', ['png']));
+    reg.install(mk('hex', []));
+    const d = createDispatcher(reg);
+    const target = document.createElement('div');
+    const { rendererId, det } = await d.dispatch(source('x.foo'), PNG, target);
+    expect(rendererId).toBe('image');
+    expect(det.reclassifiedFrom).toBe('foo');
+  });
+
+  it('routes .foo binary to hex and marks reclassified', async () => {
+    const reg = createRegistry();
+    reg.install(mk('code', ['txt']));
+    reg.install(mk('hex', []));
+    const d = createDispatcher(reg);
+    const bin = new Uint8Array([0x00, 0x01, 0x02, 0xde, 0xad, 0xbe, 0xef, 0x00]);
+    const { rendererId, det } = await d.dispatch(source('y.foo'), bin, document.createElement('div'));
+    expect(rendererId).toBe('hex');
+    expect(det.reclassifiedFrom).toBe('foo');
+  });
+
+  it('routes .foo textual content to code without extless flag', async () => {
+    const reg = createRegistry();
+    reg.install(mk('code', ['txt']));
+    reg.install(mk('hex', []));
+    const d = createDispatcher(reg);
+    const text = new TextEncoder().encode('plain text\n');
+    const { rendererId, det } = await d.dispatch(source('z.foo'), text, document.createElement('div'));
+    expect(rendererId).toBe('code');
+    expect(det.extless).toBeFalsy();
+    expect(det.reclassifiedFrom).toBe('foo');
+  });
+
+  it('keeps extless flag only for extensionless files', async () => {
+    const reg = createRegistry();
+    reg.install(mk('code', ['txt']));
+    reg.install(mk('hex', []));
+    const d = createDispatcher(reg);
+    const text = new TextEncoder().encode('#!/bin/sh\necho hi\n');
+    const { det } = await d.dispatch(source('Makefile'), text, document.createElement('div'));
+    expect(det.extless).toBe(true);               // 既有语义保持
+    expect(det.reclassifiedFrom).toBeUndefined(); // 原生无扩展名不算改派
+  });
+});

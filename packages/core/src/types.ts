@@ -40,6 +40,9 @@ export interface Detection {
    * 此后 ext 可能已被签名纠偏为规范扩展名，本标记保留"原始无扩展名"事实。
    */
   extless?: boolean;
+  /** C 项探测改派标记：内容探测/签名改派生效时记录原扩展名（无点为 ''）；
+   * 渲染器/错误卡片据此显示「已按内容识别」提示。原生路由不置位。 */
+  reclassifiedFrom?: string;
   signature?: 'zip' | 'ole' | 'png' | 'jpeg' | 'gif' | 'pdf' | 'mpegts' | null;
 }
 
