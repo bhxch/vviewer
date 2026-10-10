@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import 'fake-indexeddb/auto';
 import { captureToCssClass, resolveCapture, themeToCssVars } from '@vviewer/highlight';
 import { renderLineHtml } from '@vviewer/render-text';
 import {
@@ -16,6 +17,7 @@ import {
   onSystemModeChange,
   THEME_ROOT_SELECTOR
 } from './theme';
+import { deleteTheme, putTheme, type ImportedTheme } from './stores/session';
 import { loadSettings } from './stores/settings';
 
 const STYLE_ID = 'vv-code-theme';
@@ -133,6 +135,48 @@ describe('applyAppearance（B 项）', () => {
     // 回退 default：注入文本与 default 路径一致
     expect(styleEl()?.textContent).toBe(await legacyExpectedText('onelight', 'light'));
     warn.mockRestore();
+  });
+
+  it('imported ref 命中 IndexedDB：按其 colors/tokenColors 注入，不 warn', async () => {
+    const t: ImportedTheme = {
+      id: 'imported:aaaa1111',
+      name: 'Imported Owl',
+      kind: 'dark',
+      colors: { 'editor.background': '#011627' },
+      tokenColors: [{ scope: 'keyword', settings: { foreground: '#c792ea' } }],
+      source: 'json',
+      addedAt: Date.now()
+    };
+    await putTheme(t);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await applyAppearance('imported:aaaa1111', 'dark', 'serika-dark');
+    expect(warn).not.toHaveBeenCalled();
+    const text = styleEl()?.textContent ?? '';
+    expect(text).toContain('--ui-bg: #011627');
+    expect(text).toContain('--vv-ts-keyword: #c792ea');
+    expect(styleEl()?.dataset.mode).toBe('dark');
+    await deleteTheme(t.id);
+  });
+
+  it('外观 colors 全缺时 UI vars 段为空：空段跳过不产出空行', async () => {
+    const t: ImportedTheme = {
+      id: 'imported:nocolor1',
+      name: 'Token Only',
+      kind: 'dark',
+      colors: {},
+      tokenColors: [{ scope: 'keyword', settings: { foreground: '#c792ea' } }],
+      source: 'json',
+      addedAt: Date.now()
+    };
+    await putTheme(t);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await applyAppearance('imported:nocolor1', 'dark', 'serika-dark');
+    expect(warn).not.toHaveBeenCalled();
+    const text = styleEl()?.textContent ?? '';
+    expect(text).not.toContain('--ui-bg:'); // 无 colors → 无 UI vars
+    expect(text).toContain('--vv-ts-keyword: #c792ea');
+    expect(text).not.toContain('\n\n'); // 空段跳过：组装不残留空行
+    await deleteTheme(t.id);
   });
 });
 

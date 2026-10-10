@@ -14,6 +14,7 @@ import {
   type VscodeThemeJson
 } from '@vviewer/highlight';
 import type { Settings } from './stores/settings';
+import { listThemes as listImportedThemes } from './stores/session';
 
 /** themes.json 全量表（键为 helix 主题名）。 */
 type ThemeTables = Record<string, ThemeTable>;
@@ -188,11 +189,19 @@ const BUILTIN_APPEARANCES: Record<string, () => Promise<{ default: unknown }>> =
   'vscode:Light Modern': () => import('@vviewer/highlight/assets/vscode/light_modern.json')
 };
 
-/** 解析外观引用为 VSCode 主题 JSON；未知 ref 返回 null（调用方 warn 并回退 default）。 */
+/**
+ * 解析外观引用为 VSCode 主题 JSON；未知 ref 返回 null（调用方 warn 并回退 default）。
+ * 内置名查清单；`imported:<id>` 查 IndexedDB 主题库（session themes store，Task 3），
+ * 未命中（已删除/损坏 id）同样返回 null 走回退。
+ */
 async function resolveAppearance(ref: string): Promise<VscodeThemeJson | null> {
   const loader = BUILTIN_APPEARANCES[ref];
-  if (!loader) return null;
-  return ((await loader()) as { default: VscodeThemeJson }).default;
+  if (loader) return ((await loader()) as { default: VscodeThemeJson }).default;
+  if (ref.startsWith('imported:')) {
+    const hit = (await listImportedThemes()).find((t) => t.id === ref);
+    if (hit) return { name: hit.name, type: hit.kind, colors: hit.colors, tokenColors: hit.tokenColors };
+  }
+  return null;
 }
 
 /** 确保 style#vv-code-theme 单节点存在（首次注入创建，后续复用）。 */
@@ -233,12 +242,18 @@ async function injectCodeTheme(name: string, mode: 'light' | 'dark'): Promise<vo
  * 外观型（appearance ≠ default）注入：tokenColors 映射表接管代码槽——ts vars 与
  * hljs vars 均取自 TextMate→capture 映射结果（Task 1 vscode.ts），而非 helix 代码
  * 主题表；UI vars 段（colorsToUiVars 12 键白名单）仅此外观型才有。组装顺序：
- * 注释头 → UI vars → ts vars → hljs vars。
+ * 注释头 → UI vars → ts vars → hljs vars；某段为空（如主题无 colors）整段跳过
+ * 不留空行（T3 顺手项）。
  */
 function injectAppearance(appearance: string, mode: 'light' | 'dark', json: VscodeThemeJson): void {
   const table = tokenColorsToThemeTable(json.tokenColors, CODE_CAPTURES);
   const el = ensureStyleEl();
-  el.textContent = `/* vviewer 外观主题：${appearance}（${mode}）——只换 CSS 变量，不重解析 */\n${THEME_ROOT_SELECTOR} {\n${colorsToUiVars(json.colors ?? {}).join('\n')}\n${themeToCssVars(table, [...CODE_CAPTURES])}\n${hljsThemeVars(table)}\n}`;
+  const sections = [
+    colorsToUiVars(json.colors ?? {}).join('\n'),
+    themeToCssVars(table, [...CODE_CAPTURES]),
+    hljsThemeVars(table)
+  ].filter((s) => s !== '');
+  el.textContent = `/* vviewer 外观主题：${appearance}（${mode}）——只换 CSS 变量，不重解析 */\n${THEME_ROOT_SELECTOR} {\n${sections.join('\n')}\n}`;
   el.dataset.mode = mode;
 }
 

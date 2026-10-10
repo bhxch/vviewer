@@ -1,3 +1,5 @@
+import type { VscodeThemeJson } from '@vviewer/highlight';
+
 export interface TabSnapshot {
   id: string;
   storeId: string;
@@ -13,13 +15,31 @@ export interface TabSnapshot {
   overrideRenderer?: string;
 }
 
+/** 导入主题（spec B §2.3）：id='imported:<随机8>'，applyAppearance 按 id 解析注入。 */
+export interface ImportedTheme {
+  id: string;
+  name: string;
+  kind: 'dark' | 'light';
+  colors: Record<string, string>;
+  tokenColors: VscodeThemeJson['tokenColors'];
+  source: 'json' | 'vsix';
+  addedAt: number;
+}
+
 const DB = 'vviewer';
 const STORE = 'kv';
+const THEMES = 'themes';
+/** v2：补建 themes store（v1 的 kv 存量原样保留，onupgradeneeded 按需补建）。 */
+const DB_VERSION = 2;
 
 function db(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB, 1);
-    req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+    const req = indexedDB.open(DB, DB_VERSION);
+    req.onupgradeneeded = () => {
+      const d = req.result;
+      if (!d.objectStoreNames.contains(STORE)) d.createObjectStore(STORE);
+      if (!d.objectStoreNames.contains(THEMES)) d.createObjectStore(THEMES);
+    };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
@@ -47,6 +67,39 @@ async function kvPut(key: string, value: unknown): Promise<void> {
 
 export async function saveTabs(tabs: TabSnapshot[]): Promise<void> { await kvPut('tabs', tabs); }
 export async function saveDirHandle(h: FileSystemDirectoryHandle | null): Promise<void> { await kvPut('dirHandle', h); }
+
+/** 主题库列表（spec B §2.3）。 */
+export async function listThemes(): Promise<ImportedTheme[]> {
+  const d = await db();
+  return new Promise((resolve, reject) => {
+    const req = d.transaction(THEMES, 'readonly').objectStore(THEMES).getAll();
+    req.onsuccess = () => resolve((req.result as ImportedTheme[] | undefined) ?? []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/** 入库/更新（themes store 无 keyPath，自管 id 键）。 */
+export async function putTheme(t: ImportedTheme): Promise<void> {
+  const d = await db();
+  return new Promise((resolve, reject) => {
+    const tx = d.transaction(THEMES, 'readwrite');
+    tx.objectStore(THEMES).put(t, t.id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'));
+  });
+}
+
+export async function deleteTheme(id: string): Promise<void> {
+  const d = await db();
+  return new Promise((resolve, reject) => {
+    const tx = d.transaction(THEMES, 'readwrite');
+    tx.objectStore(THEMES).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'));
+  });
+}
 
 export async function loadSession(): Promise<{ tabs: TabSnapshot[]; lastDirHandle: FileSystemDirectoryHandle | null }> {
   const [tabs, lastDirHandle] = await Promise.all([kvGet<TabSnapshot[]>('tabs'), kvGet<FileSystemDirectoryHandle>('dirHandle')]);
