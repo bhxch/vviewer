@@ -16,9 +16,10 @@ vendor 基准 tag：**1.141.0**（2026-10-11 抓取；`main` 分支同路径文�
   等键在近期上游 JSON 中均不存在（移入 VSCode 主题服务默认值）。因此
   `src/vscode.ts` 的 `colorsToUiVars` 12 键映射对这两份资产：dark 命中 8 键、light 命中
   9 键，其余键走消费方 app.css 的 default 值回退（设计内：缺键跳过，不推断）。
-- tokenColors 的 scope 含空格选择器（如 `source.powershell variable.other.member`）与
-  `semanticTokenColors` 段：前者被映射管线按「无前缀命中」自然跳过（不解析 selector
-  语法），后者本管线不消费，均保留在文件中（原样值）。
+- tokenColors 的 scope 含空格选择器（如 `source.powershell variable.other.member`）：
+  被映射管线按「无前缀命中」自然跳过（不解析 selector 语法），原样保留在文件中；
+  `semanticTokenColors` 段被丢弃（vendor 合并未收入两份 JSON，映射管线亦只消费
+  `colors`/`tokenColors`）。
 - 上游色值大小写混杂（如 `#569cd6` 小写、`#6A9955` 大写），快照断言以本目录文件实际值为准。
 
 ## 许可

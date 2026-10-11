@@ -22,5 +22,6 @@
 | mammoth | BSD-2-Clause | docx 转 HTML（render-doc 包，动态 import 不进主包） | M4 |
 | xlsx（SheetJS community） | Apache-2.0 | Excel 解析/表格渲染（render-doc 包，动态 import 不进主包） | M4 |
 | helix-editor/helix | MPL-2.0 | `packages/highlight/assets/themes.json`（214 主题派生自 `runtime/themes`，格式转换修改）与 `languages.json`（派生自 `languages.toml`）、`packages/highlight/assets/queries/`（vendored 拷贝）；溯源见 `tools/helix-assets/README.md` | M2 |
+| microsoft/vscode | MIT | `packages/highlight/assets/vscode/dark_modern.json`、`light_modern.json`（theme-defaults 扩展主题，原样 vendor） | B |
 
 各组件的完整许可文本随其 npm 包分发（`node_modules/<pkg>/LICENSE`），构建产物不含许可文本裁剪。

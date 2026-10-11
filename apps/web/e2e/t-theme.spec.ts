@@ -16,6 +16,12 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * - THEME-07/2：THEME-07 的 3MB 规模载体——既有载体 small.ts 仅 50 行；
  *   3MB ∈ (2MB, 200MB] 走统一懒高亮通道（hljs 分块路径已退役，域文档 4.3 口径过时），
  *   验证可视区懒高亮渲染下「切主题仅 style#vv-code-theme 变化」契约不因规模回退。
+ * - B-THEME-1..4：外观主题端到端（spec B §2.1-2.3，vscode-themes 计划 Task 5）——
+ *   设置面板暗色槽切 Dark Modern 的 UI token+代码高亮联动、JSON 导入应用与刷新
+ *   （IndexedDB）恢复、合成最小 VSIX 导入、切回 default 观感零变化。桌面基准
+ *   （chromium project，同 03/2/06/2/07/2 惯例）。期望值唯一来源：
+ *   packages/highlight/assets/vscode/*.json 资产原值（大小写混杂，注入文本为运行时
+ *   textContent 不经构建压缩，按原值断言；#1F1F1F 等保持大写）。
  */
 
 // ── Node 侧主题表与 resolveCapture 复刻（期望值唯一来源：@vviewer/highlight 资产） ──
@@ -394,6 +400,197 @@ test('THEME-07/2: 3MB 懒高亮通道下切主题仅 style#vv-code-theme 变化�
   expect(after.spans).toBe(base.spans); // 可视区 span 类名序列逐字不变（零重解析）
   expect(after.styleText).not.toBe(base.styleText); // 变化的仅是 style#vv-code-theme 文本
   expect(await themeCommentHeader(page, 'github_dark')).toBe(true);
+});
+
+// ── B 项外观主题（spec B §2.1-2.3，vscode-themes 计划 Task 5）────────────────────
+// 桌面基准（chromium project）：导入/IndexedDB/页内探针为重量级场景，同 03/2/06/2/07/2
+// 的跳非 chromium 惯例。装置走真实用户管线：设置面板（⚙）双槽 select、隐藏 file input
+// 的 setInputFiles、主题按钮三态循环切亮暗。
+
+/** jszip 最窄构造面（export = 的 CJS 包，互操作形态对齐 render-archive zipStore.ts 同款：
+ * ESM 下类挂 default、Node 直出 module.exports 本体，二者取其一）。 */
+interface ZipBuilder {
+  file(path: string, content: string): void;
+  generateAsync(opts: { type: 'nodebuffer' }): Promise<Buffer>;
+}
+
+/** Node 侧合成最小 VSIX（B-THEME-3）：extension/package.json + contributes.themes 一条
+ * + 主题 JSON。浏览器侧消费走真实 createZipStore 解包管线。 */
+async function makeVsix(files: Record<string, string>): Promise<Buffer> {
+  const mod = await import('jszip');
+  const JSZip = (mod as unknown as { default?: new () => ZipBuilder }).default ?? (mod as unknown as new () => ZipBuilder);
+  const zip = new JSZip();
+  for (const [path, content] of Object.entries(files)) zip.file(path, content);
+  return zip.generateAsync({ type: 'nodebuffer' });
+}
+
+/** 主题按钮三态循环到目标亮暗（新 context 的 localStorage 为默认 system；headless
+ * prefers light，故 light 一次点击、dark 两次——THEME-01 同通道）。 */
+async function gotoInMode(page: Page, mode: 'light' | 'dark'): Promise<void> {
+  await page.goto('/');
+  const themeBtn = page.getByRole('button', { name: /主题：/ });
+  await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'system');
+  await themeBtn.click();
+  if (mode === 'dark') await themeBtn.click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme-mode', mode);
+}
+
+/** 打开设置面板（⚙ aria-label「设置」→ role=dialog）。 */
+async function openSettings(page: Page): Promise<void> {
+  await page.getByRole('button', { name: '设置' }).click();
+  await expect(page.getByRole('dialog', { name: '设置' })).toBeVisible();
+}
+
+/** style#vv-code-theme 注入全文（运行时 textContent，未经验练压缩，按原值断言）。 */
+function injectedStyle(page: Page): Promise<string> {
+  return page.evaluate(() => document.getElementById('vv-code-theme')?.textContent ?? '');
+}
+
+/** :root 上任意 UI token 计算值（JS 注入的 --ui-* 原样保留资产大小写）。 */
+function uiVar(page: Page, name: string): Promise<string> {
+  return page.evaluate((n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(), name);
+}
+
+test('B-THEME-1: 暗色槽切 Dark Modern——UI token 与代码高亮联动（注入文本 + 视口 span 探针）', async ({
+  page
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium', '桌面基准（同 THEME-03/2 惯例）');
+  await gotoInMode(page, 'dark');
+  await openDir(page, [{ name: 'b1.ts', type: 'text/plain', content: TS_SNIPPET.repeat(20) }]);
+  await openFile(page, 'b1.ts');
+  await expect(page.locator('.vv-code-pre span[class^="ts-"]').first()).toBeVisible({ timeout: 20_000 });
+  expect(await uiBg(page)).toBe('#0d1117'); // 切换前基线：default 外观暗色板
+
+  // 暗色槽 → vscode:Dark Modern（面板 persist 后即时重注入）
+  await openSettings(page);
+  await page.getByLabel('暗色界面主题').selectOption('vscode:Dark Modern');
+
+  // UI token：dark_modern 资产原值（12 键映射 dark 命中 8 键，取三个代表键；缺键走
+  // app.css default 回退，不在断言面——README「上游现状备注」）
+  await expect.poll(() => uiBg(page)).toBe('#1F1F1F');
+  expect(await uiVar(page, '--ui-side-bg')).toBe('#181818');
+  expect(await uiVar(page, '--ui-accent')).toBe('#0078D4');
+  // 注入文本：外观头 + UI vars 段 + tokenColors 映射的注释色（Markpad 基准值）
+  const text = await injectedStyle(page);
+  expect(text).toContain('/* vviewer 外观主题：vscode:Dark Modern（dark）');
+  expect(text).toContain('--ui-bg: #1F1F1F;');
+  expect(text).toContain('--vv-ts-comment: #6A9955;');
+  // 代码主题下拉被接管禁用（TopBar appearanceTakesOver）
+  await expect(page.getByLabel('代码主题')).toBeDisabled();
+
+  // 视口探针（THEME-06/2 同手法泛化）：每个出现过的 ts-* 类，其注入变量
+  // --vv-<类名> 的计算色与 span 计算色逐类一致
+  const scan = await page.evaluate(() => {
+    const probe = document.createElement('div');
+    probe.style.display = 'none';
+    document.body.append(probe);
+    const checked: string[] = [];
+    const bad: string[] = [];
+    for (const span of document.querySelectorAll('.vv-code-pre span[class^="ts-"]')) {
+      const cls = span.className;
+      if (checked.includes(cls)) continue;
+      const varName = `--vv-${cls}`;
+      if (getComputedStyle(document.documentElement).getPropertyValue(varName).trim() === '') continue;
+      checked.push(cls);
+      probe.style.color = `var(${varName})`;
+      if (getComputedStyle(span).color !== getComputedStyle(probe).color) bad.push(cls);
+    }
+    probe.remove();
+    return { checked, bad };
+  });
+  expect(scan.checked.length, '至少一个 ts-* 类的映射变量已注入').toBeGreaterThan(0);
+  expect(scan.bad, '视口 span 计算色与外观注入变量逐类一致').toEqual([]);
+});
+
+test('B-THEME-2: 导入 JSON 主题并应用、刷新后 IndexedDB 持久恢复', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium', '桌面基准（同 THEME-03/2 惯例）');
+  await gotoInMode(page, 'dark');
+  await openSettings(page);
+
+  // 合法主题 JSON 经隐藏 file input 注入（真实 onchange 管线）
+  const probe = {
+    name: 'Probe Dark',
+    type: 'dark',
+    colors: { 'editor.background': '#123456', 'sideBar.background': '#234567', focusBorder: '#ABCDEF' },
+    tokenColors: [{ scope: 'comment', settings: { foreground: '#654321' } }]
+  };
+  await page.locator('.vv-settings input[type="file"]').setInputFiles({
+    name: 'probe-dark.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(probe))
+  });
+  await expect(page.locator('.vv-settings-note', { hasText: '已导入 1 个主题' })).toBeVisible();
+  await expect(page.locator('.vv-settings-theme-name', { hasText: 'Probe Dark' })).toBeVisible();
+
+  // 暗色槽选导入主题（value 是随机 imported:<id>，按 label 选）：--ui-bg 等于注入值
+  await page.getByLabel('暗色界面主题').selectOption({ label: 'Probe Dark（暗）' });
+  await expect.poll(() => uiBg(page)).toBe('#123456');
+  expect(await uiVar(page, '--ui-side-bg')).toBe('#234567');
+  expect(await uiVar(page, '--ui-accent')).toBe('#ABCDEF');
+  expect(await injectedStyle(page)).toContain('--vv-ts-comment: #654321;');
+
+  // reload：槽位（localStorage）+ 主题体（IndexedDB）双持久，恢复选中且生效
+  await page.reload();
+  await expect.poll(() => uiBg(page), { timeout: 10_000 }).toBe('#123456');
+  expect(await injectedStyle(page)).toMatch(/\/\* vviewer 外观主题：imported:.+（dark）——/);
+  await openSettings(page);
+  // 槽 select 的 imported option 异步填充（listThemes IndexedDB）后才回显持久值，
+  // 轮询到回显完成（option 未齐时 select.value 为空串）
+  await expect(page.getByLabel('暗色界面主题')).toHaveValue(/^imported:/, { timeout: 10_000 });
+});
+
+test('B-THEME-3: 导入合成最小 VSIX（package.json + contributes.themes + 主题 JSON）', async ({
+  page
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium', '桌面基准（同 THEME-03/2 惯例）');
+  const vsix = await makeVsix({
+    'extension/package.json': JSON.stringify({
+      name: 'vv-probe-themes',
+      publisher: 'probe',
+      contributes: { themes: [{ label: 'Vsix Probe', path: './themes/probe-dark.json' }] }
+    }),
+    'extension/themes/probe-dark.json': JSON.stringify({
+      name: 'Vsix Probe',
+      type: 'dark',
+      colors: { 'editor.background': '#246824' },
+      tokenColors: [{ scope: 'comment', settings: { foreground: '#864286' } }]
+    })
+  });
+
+  await gotoInMode(page, 'dark');
+  await openSettings(page);
+  await page.locator('.vv-settings input[type="file"]').setInputFiles({
+    name: 'probe-themes.vsix',
+    mimeType: 'application/octet-stream',
+    buffer: vsix
+  });
+  // 清单 label → 主题名「Vsix Probe」入库；列表行带 vsix 来源徽标
+  await expect(page.locator('.vv-settings-note', { hasText: '已导入 1 个主题' })).toBeVisible();
+  await expect(page.locator('.vv-settings-theme', { hasText: 'Vsix Probe' })).toBeVisible();
+  await expect(page.locator('.vv-settings-theme-src', { hasText: 'vsix' })).toBeVisible();
+  // 槽 select 候选同步出现（kind 徽标「暗」）；选中即应用
+  await page.getByLabel('暗色界面主题').selectOption({ label: 'Vsix Probe（暗）' });
+  await expect.poll(() => uiBg(page)).toBe('#246824');
+});
+
+test('B-THEME-4: 外观槽切回 default——观感零变化（--ui-bg 回默认、注入文本回 legacy 形态）', async ({
+  page
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium', '桌面基准（同 THEME-03/2 惯例）');
+  await gotoInMode(page, 'light');
+  await openSettings(page);
+  // 亮色槽 → Dark Modern（槽/主题亮暗不匹配不阻止）：UI token 被接管
+  await page.getByLabel('亮色界面主题').selectOption('vscode:Dark Modern');
+  await expect.poll(() => uiBg(page)).toBe('#1F1F1F');
+  // 切回 default：--ui-bg 回亮色默认；注入文本回 legacy 形态（代码主题注释头，
+  // UI vars 段消失；byte 级 legacy 等价由 theme.test.ts legacyExpectedText 单测锁定）
+  await page.getByLabel('亮色界面主题').selectOption('default');
+  await expect.poll(() => uiBg(page)).toBe('#ffffff');
+  const text = await injectedStyle(page);
+  expect(text).toContain('/* vviewer 代码主题：onelight（light）');
+  expect(text).not.toContain('--ui-');
+  // 接管解除：代码主题下拉恢复可用
+  await expect(page.getByLabel('代码主题')).toBeEnabled();
 });
 
 // ── 主题系统域探索复核确认缺陷回归占位（2026-10-10 轮）──────────────────────────

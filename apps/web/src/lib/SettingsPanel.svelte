@@ -3,11 +3,13 @@
   // TopBar 以 ⚙ 挂载（Ctrl+comma 切换）：排除规则编辑（条目删除/手动添加/预设
   // 一键加入）、autoRefresh 开关（关闭后目录树 SSE 自动同步停用，手动刷新 ↻
   // 不受影响）、界面主题管理（spec B §2.3：亮暗双槽 select + JSON/VSIX 导入 +
-  // 已导入列表删除；槽切换经 saveSettings → TopBar onSettingsChanged 订阅触发
-  // applyAppearance）。修改即时经 saveSettings 持久化，AppShell 经 onSettingsChanged
-  // 订阅刷新响应式副本（FileTree 随排除规则重建）。Esc / ✕ 关闭。
+  // 已导入列表删除；槽切换/删除归位经 saveSettings 持久化后由本面板直接调
+  // applyAppearance 即时重注入——TopBar 的 onSettingsChanged 订阅只刷新响应式
+  // 副本，不重触发注入）。修改即时经 saveSettings 持久化，AppShell 经
+  // onSettingsChanged 订阅刷新响应式副本（FileTree 随排除规则重建）。Esc / ✕ 关闭。
   import { loadSettings, saveSettings } from './stores/settings';
   import { deleteTheme, listThemes, type ImportedTheme } from './stores/session';
+  import { applyAppearance, effectiveMode } from './theme';
   import { importThemeFiles } from './vsixImport';
 
   let { onclose }: { onclose(): void } = $props();
@@ -101,12 +103,26 @@
     persist();
   }
 
-  /** 槽切换（spec B §2.3）：即时持久化，TopBar 的 onSettingsChanged 订阅自动 applyAppearance */
+  /** 槽切换/删除归位后即时重注入（spec B §2.3）：读最新持久值按当前亮暗槽
+   * applyAppearance（与 TopBar applyCurrentAppearance 同参、幂等——面板先
+   * persist() 再调，注入的就是刚保存的槽值）。 */
+  function reapplyAppearance(): void {
+    const fresh = loadSettings();
+    const mode = effectiveMode(fresh.themeMode);
+    void applyAppearance(
+      mode === 'dark' ? fresh.appearanceDark : fresh.appearanceLight,
+      mode,
+      mode === 'dark' ? fresh.codeThemeDark : fresh.codeThemeLight
+    );
+  }
+
+  /** 槽切换（spec B §2.3）：即时持久化 + 即时重注入 */
   function onAppearanceChange(slot: 'light' | 'dark', e: Event): void {
     const v = (e.currentTarget as HTMLSelectElement).value;
     if (slot === 'light') appearanceLight = v;
     else appearanceDark = v;
     persist();
+    reapplyAppearance();
   }
 
   /** 文件选择 → 导入管线（.json 直读 / .vsix 解包全部主题）：计数通知 + 刷新列表 */
@@ -131,10 +147,16 @@
     }
   }
 
-  /** 删除已导入主题：确认后删库；仍被槽引用的回 'default'（悬空 id 本有 warn 回退，UI 同步归位） */
+  /** 删除已导入主题：确认后删库；仍被槽引用的回 'default'（悬空 id 本有 warn 回退，UI 同步归位）。
+   * 删库失败（存储不可用等）只记 console.error，列表/槽保持不动（对齐 onImportChange 的容错风格）。 */
   async function removeImported(t: ImportedTheme): Promise<void> {
     if (!window.confirm(`删除已导入主题「${t.name}」？`)) return;
-    await deleteTheme(t.id);
+    try {
+      await deleteTheme(t.id);
+    } catch (err) {
+      console.error(`删除已导入主题「${t.name}」失败`, err);
+      return;
+    }
     const fresh = loadSettings();
     let changed = false;
     if (fresh.appearanceLight === t.id) {
@@ -147,7 +169,10 @@
       appearanceDark = 'default';
       changed = true;
     }
-    if (changed) saveSettings(fresh);
+    if (changed) {
+      saveSettings(fresh);
+      reapplyAppearance();
+    }
     imported = imported.filter((x) => x.id !== t.id);
   }
 
@@ -234,7 +259,7 @@
   <section class="vv-settings-sec">
     <div class="vv-settings-label">界面主题</div>
     <div class="vv-settings-hint">
-      VSCode 外观主题同时接管代码配色（亮/暗各自记忆，跟随顶栏主题模式）；非默认时代顶栏代码主题选择停用
+      VSCode 外观主题同时接管代码配色（亮/暗各自记忆，跟随顶栏主题模式）；非默认时顶栏代码主题选择停用
     </div>
     <label class="vv-settings-theme-row">
       <span>亮色</span>
