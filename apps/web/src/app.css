@@ -335,6 +335,24 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-tabbar-manage { flex: none; margin-left: auto; border: 0; border-left: 1px solid var(--ui-border);
   border-radius: 0; background: var(--ui-tab-bg); font-size: 12px; }
 .vv-tabbar-manage:hover { background: var(--ui-hover-bg); }
+/* pinned tab（F 项 T2）：斜体标签 + 锁形字符图标（伪元素承载，DOM 零新增节点）；
+   data-pinned 与 .vv-tab-pinned 双锚点（plan DOM 锚点约定）供 e2e 与样式选择 */
+.vv-tab-pinned .vv-tab-name { font-style: italic; }
+.vv-tab-pinned .vv-tab-name::before { content: '🔒 '; font-size: 10px; }
+/* 拖拽插入点指示（T2）：目标行中点前/后沿 2px accent 内嵌线（data-drop-before 定边）；
+   禁止落点（pinned 区内等）不置指示类，配合 dropEffect='none' 的禁止光标 */
+.vv-tab.vv-tab-dragover { box-shadow: inset 2px 0 0 var(--ui-accent); }
+.vv-tab.vv-tab-dragover[data-drop-before='false'] { box-shadow: inset -2px 0 0 var(--ui-accent); }
+/* tab 右键菜单（T2）：fixed 浮层，left/top 内联由组件视口收敛后给出；
+   z-index 90 高于面板层 30（菜单为瞬态操作面，不被任何浮层压住） */
+.vv-tabctx { position: fixed; z-index: 90; min-width: 11em; padding: 4px; display: flex;
+  flex-direction: column; background: var(--ui-tab-active-bg); border: 1px solid var(--ui-border);
+  border-radius: 6px; box-shadow: 0 4px 16px rgb(0 0 0 / 18%); }
+.vv-tabctx-item { background: none; border: none; border-radius: 4px; text-align: left;
+  padding: 4px 10px; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.vv-tabctx-item:hover { background: var(--ui-hover-bg); }
+.vv-tabctx-item[aria-disabled='true'] { color: var(--ui-fg-muted); opacity: .55; cursor: default; }
+.vv-tabctx-item[aria-disabled='true']:hover { background: none; }
 .vv-tree { list-style: none; margin: 0; padding: 0; }
 .vv-tree .vv-tree { padding-left: 14px; }
 .vv-tree-row { display: flex; gap: 4px; align-items: center; width: 100%; text-align: left;

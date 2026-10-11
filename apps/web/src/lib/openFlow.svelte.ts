@@ -581,6 +581,15 @@ export function reopenClosed(): Tab | null {
   return tabStore.reopenClosed();
 }
 
+/**
+ * 撤销栈深度（TabContextMenu「重新打开已关闭标签」置灰判定用）：调用时查询而非
+ * 响应式——菜单每次打开时重新组装 actions（TabBar ctxActions $derived 随菜单开合
+ * 重算），届时读一次即拿到最新栈深，无需为浅灰态建响应式通道（会话态、刷新即清）。
+ */
+export function closedStackSize(): number {
+  return closedStack.size;
+}
+
 export function activateTab(id: string): void {
   tabStore.activate(id);
 }
