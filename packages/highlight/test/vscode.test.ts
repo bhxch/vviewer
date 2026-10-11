@@ -9,6 +9,54 @@ describe('validateVscodeTheme', () => {
     expect(r).toMatchObject({ ok: true });
     if (r.ok) expect(r.theme.kind).toBe('dark');
   });
+  it('themeKind 缺省回归上游语义：缺省/light→light，dark→dark，hc-*→dark', () => {
+    // VSCode uiTheme 的 type 缺省即 light（contributes.themes 缺 vs 选项按 light 处理）
+    const kindOf = (t?: string) => {
+      const r = validateVscodeTheme({ name: 'x', type: t, colors: { 'editor.background': '#111111' } });
+      return r.ok ? r.theme.kind : 'rejected';
+    };
+    expect(kindOf(undefined)).toBe('light'); // 缺省 → light（终审 Minor 2：原误按 dark）
+    expect(kindOf('light')).toBe('light');
+    expect(kindOf('dark')).toBe('dark');
+    expect(kindOf('hc-black')).toBe('dark'); // hc-* 归 dark（plan Global Constraints）不变
+    expect(kindOf('hc-light')).toBe('dark');
+  });
+  it('色值白名单：colors 非法值逐键过滤、合法值保留（容错不整体拒绝）', () => {
+    const r = validateVscodeTheme({
+      name: 'x',
+      type: 'dark',
+      colors: {
+        'editor.background': '#1f1f1f', // 合法 hex 保留
+        'sideBar.background': 'red;}', // 含 ;} 的注入值 → 该键剔除
+        'editor.foreground': 42 as unknown as string, // 数字 → 该键剔除
+        'focusBorder': 'url(https://evil)' // 非 hex/rgb 形态 → 该键剔除
+      }
+    });
+    expect(r).toMatchObject({ ok: true });
+    if (r.ok) expect(r.theme.colors).toEqual({ 'editor.background': '#1f1f1f' });
+  });
+  it('色值白名单：foreground 非法（数字/含 ;}）的 tokenColors 规则整条跳过，合法规则保留', () => {
+    const r = validateVscodeTheme({
+      name: 'x',
+      type: 'dark',
+      tokenColors: [
+        { scope: 'keyword', settings: { foreground: '#569cd6' } }, // 合法保留
+        { scope: 'comment', settings: { foreground: 123 as unknown as string } }, // 数字 fg → 整条跳过
+        { scope: 'string', settings: { foreground: '#ce9178;}' } }, // 注入值 → 整条跳过
+        { scope: 'comment', settings: {} } // 无 foreground：保留（映射层本就跳过，行为不变）
+      ]
+    });
+    expect(r).toMatchObject({ ok: true });
+    if (r.ok) expect(r.theme.tokenColors).toEqual([{ scope: 'keyword', settings: { foreground: '#569cd6' } }, { scope: 'comment', settings: {} }]);
+  });
+  it('色值全部非法时过滤后两手全空 → 拒绝（至少其一非空）', () => {
+    expect(
+      validateVscodeTheme({ name: 'x', type: 'dark', colors: { 'editor.background': 'p;}' } }).ok
+    ).toBe(false);
+    expect(
+      validateVscodeTheme({ name: 'x', type: 'dark', tokenColors: [{ scope: 'keyword', settings: { foreground: 1 as unknown as string } }] }).ok
+    ).toBe(false);
+  });
   it('rejects missing name / empty colors+tokenColors / bad shape', () => {
     expect(validateVscodeTheme({ type: 'dark' }).ok).toBe(false);
     expect(validateVscodeTheme({ name: 'x', type: 'dark' }).ok).toBe(false);
@@ -84,6 +132,22 @@ describe('tokenColorsToThemeTable（Markpad 快照基准）', () => {
     expect(t.keyword).toEqual({ fg: '#444' }); // 仅数组内合法的 'keyword' 生效
     expect(Object.keys(t)).toEqual(['keyword']);
   });
+  it('foreground 白名单双重闸：数字/含 ;} 的 fg 直入映射层也被过滤（兜底存量主题）', () => {
+    // 存量导入主题（早于 validate 收口）不经 validate 直读注入，映射层同规则兜底
+    const t = tokenColorsToThemeTable(
+      [
+        { scope: 'keyword', settings: { foreground: '#569cd6' } },
+        { scope: 'comment', settings: { foreground: 123 as unknown as string } },
+        { scope: 'string', settings: { foreground: '#ce9178;}' } },
+        { scope: 'entity.name.function', settings: { foreground: '#dcdcaa' } },
+      ],
+      ['keyword', 'comment', 'string', 'function'],
+    );
+    expect(t.keyword).toEqual({ fg: '#569cd6' });
+    expect(t.function).toEqual({ fg: '#dcdcaa' });
+    expect(t.comment).toBeUndefined();
+    expect(t.string).toBeUndefined();
+  });
 });
 
 describe('colorsToUiVars', () => {
@@ -99,6 +163,14 @@ describe('colorsToUiVars', () => {
     // 全部未知键 → 0 行（映射只认白名单 12 键，缺键跳过不推断）
     expect(colorsToUiVars(all).length).toBe(0);
     expect(colorsToUiVars({ 'editorWarning.foreground': '#cca700' })).toEqual(['--ui-warning: #cca700;']);
+  });
+  it('色值白名单双重闸：已知键上非法值（;}/数字）不落注入文本', () => {
+    const vars = colorsToUiVars({
+      'editor.background': '#ffffff;}', // 注入值 → 跳过
+      'focusBorder': 42 as unknown as string, // 数字 → 跳过
+      'editor.foreground': 'rgb(31, 35, 40)' // rgb() 函数形态合法 → 保留
+    });
+    expect(vars).toEqual(['--ui-fg: rgb(31, 35, 40);']);
   });
 });
 

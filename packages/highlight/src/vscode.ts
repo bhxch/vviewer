@@ -16,16 +16,63 @@ export interface VscodeThemeJson {
   tokenColors?: { scope?: string | string[]; settings?: { foreground?: string } }[];
 }
 
-/** 主题亮暗槽归属：hc-* 归 dark（plan Global Constraints），缺省/未知按 dark。 */
+/**
+ * 主题亮暗槽归属：缺省回归上游语义——VSCode uiTheme 的 type 缺省即 light
+ * （package.json contributes.themes 缺 vs 选项时按 light 主题处理）；dark→dark、
+ * light→light；hc-* 归 dark（plan Global Constraints）。
+ */
 export function themeKind(raw: VscodeThemeJson): 'dark' | 'light' {
-  return raw.type === 'light' ? 'light' : 'dark';
+  if (raw.type === 'hc-black' || raw.type === 'hc-light') return 'dark';
+  return raw.type === 'dark' ? 'dark' : 'light';
 }
 
 const THEME_TYPES = new Set(['dark', 'light', 'hc-black', 'hc-light']);
 
 /**
- * 导入校验：name 必填非空；type 白名单（hc-* 归 dark）；colors/tokenColors
- * 至少其一非空。1MB 体积闸与解包在导入层（Task 3），此处只管形状。
+ * 合法色值白名单：#RGB/#RGBA/#RRGGBB/#RRGGBBAA（3-8 位 hex，完整匹配）或
+ * rgb()/rgba() 函数形态（完整闭合，参数仅数字/逗号/点/空格/百分号/斜杠）。
+ * 导入 JSON 不可信且色值会原样拼进注入文本：白名单从根上杜绝 `;}`、`/*` 等
+ * CSS 注入与数字形态 fg（hex 全匹配 + rgb 参数字符集均不含 `;}{/*`）。
+ */
+const COLOR_VALUE_RE = /^#[0-9a-fA-F]{3,8}$|^rgba?\([0-9.,%\s/]+\)$/;
+
+/** colors 逐键过滤：值非 string 或不在色值白名单的键剔除（容错优先，不整体拒绝）。 */
+function sanitizeColors(colors: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (typeof colors !== 'object' || colors === null || Array.isArray(colors)) return out;
+  for (const [key, value] of Object.entries(colors as Record<string, unknown>)) {
+    if (typeof value === 'string' && COLOR_VALUE_RE.test(value)) out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * tokenColors 规则级过滤：规则非对象（null/数组/原始值）或 settings.foreground
+ * 存在但不合法（非 string / 不在白名单）→ 整条跳过；foreground 缺省的规则保留
+ * （映射层本就跳过无 fg 规则，保留不产出任何变量，也不影响「至少其一非空」语义）。
+ */
+function sanitizeTokenColors(tokenColors: unknown): VscodeThemeJson['tokenColors'] {
+  if (tokenColors === undefined) return undefined;
+  if (!Array.isArray(tokenColors)) return [];
+  const out: NonNullable<VscodeThemeJson['tokenColors']> = [];
+  for (const rule of tokenColors) {
+    if (typeof rule !== 'object' || rule === null || Array.isArray(rule)) continue;
+    const settings = (rule as { settings?: unknown }).settings;
+    const fg =
+      typeof settings === 'object' && settings !== null
+        ? (settings as { foreground?: unknown }).foreground
+        : undefined;
+    if (fg !== undefined && !(typeof fg === 'string' && COLOR_VALUE_RE.test(fg))) continue;
+    out.push(rule as NonNullable<VscodeThemeJson['tokenColors']>[number]);
+  }
+  return out;
+}
+
+/**
+ * 导入校验：name 必填非空；type 白名单（hc-* 归 dark、缺省按上游语义归 light）；
+ * colors/tokenColors 至少其一「过滤后」非空——色值不在白名单的 colors 键逐键剔除、
+ * foreground 不合法的 tokenColors 规则整条跳过（容错优先，坏值不炸整个主题），
+ * 过滤后两手全空才拒绝。1MB 体积闸与解包在导入层（Task 3），此处只管形状。
  */
 export function validateVscodeTheme(
   raw: unknown,
@@ -40,14 +87,12 @@ export function validateVscodeTheme(
   if (theme.type !== undefined && !THEME_TYPES.has(theme.type)) {
     return { ok: false, reason: `type 须为 dark/light/hc-black/hc-light，收到 ${String(theme.type)}` };
   }
-  const hasColors =
-    typeof theme.colors === 'object' && theme.colors !== null && !Array.isArray(theme.colors) &&
-    Object.keys(theme.colors).length > 0;
-  const hasTokenColors = Array.isArray(theme.tokenColors) && theme.tokenColors.length > 0;
-  if (!hasColors && !hasTokenColors) {
+  const colors = sanitizeColors(theme.colors);
+  const tokenColors = sanitizeTokenColors(theme.tokenColors);
+  if (Object.keys(colors).length === 0 && (tokenColors ?? []).length === 0) {
     return { ok: false, reason: 'colors 与 tokenColors 至少其一非空' };
   }
-  return { ok: true, theme: { ...theme, name: theme.name, kind: themeKind(theme) } };
+  return { ok: true, theme: { ...theme, name: theme.name, kind: themeKind(theme), colors, tokenColors } };
 }
 
 /**
@@ -206,7 +251,9 @@ export function tokenColorsToThemeTable(
   const allowed = new Set(captures);
   for (const rule of tokenColors) {
     const fg = rule?.settings?.foreground;
-    if (!fg) continue;
+    // 白名单双重闸：导入时 validate 已过滤，这里兜底 IndexedDB 存量主题（早于
+    // 校验收口的导入不经 validate 直读注入）——非 string / 非法色值整条跳过。
+    if (typeof fg !== 'string' || !COLOR_VALUE_RE.test(fg)) continue;
     for (const scope of normalizeScopes(rule?.scope)) {
       const exact = TEXTMATE_TO_CAPTURE[scope];
       if (exact !== undefined) {
@@ -256,7 +303,8 @@ export function colorsToUiVars(colors: Record<string, string>): string[] {
   const lines: string[] = [];
   for (const [key, cssVar] of COLORS_TO_UI_VARS) {
     const value = colors[key];
-    if (typeof value === 'string' && value !== '') lines.push(`${cssVar}: ${value};`);
+    // 同 tokenColors 侧的白名单双重闸：存量主题直读注入时非法值不落文本
+    if (typeof value === 'string' && COLOR_VALUE_RE.test(value)) lines.push(`${cssVar}: ${value};`);
   }
   return lines;
 }

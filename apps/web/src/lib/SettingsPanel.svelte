@@ -40,6 +40,28 @@
     { value: 'vscode:Light Modern', label: 'Light Modern (VSCode)' }
   ];
 
+  /**
+   * 外观引用的亮暗归属（spec B §2.3 不匹配提醒用）：内置两主题 kind 已知；
+   * imported 主题查已导入列表取 kind 字段（列表未加载/已删除 → null）。
+   * default 不归属任一槽（null）。仅用于显示提醒，不阻止选择。
+   */
+  function appearanceKind(ref: string): 'dark' | 'light' | null {
+    if (ref === 'vscode:Dark Modern') return 'dark';
+    if (ref === 'vscode:Light Modern') return 'light';
+    if (ref.startsWith('imported:')) return imported.find((t) => t.id === ref)?.kind ?? null;
+    return null;
+  }
+
+  /** 槽与主题亮暗不匹配提醒文案（空串=无不匹配）：与所选主题 kind 反色的槽才提示 */
+  const lightWarn = $derived.by(() => {
+    const k = appearanceKind(appearanceLight);
+    return k === 'dark' ? '已选主题为暗色，与当前亮色槽不匹配（仍会生效）' : '';
+  });
+  const darkWarn = $derived.by(() => {
+    const k = appearanceKind(appearanceDark);
+    return k === 'light' ? '已选主题为亮色，与当前暗色槽不匹配（仍会生效）' : '';
+  });
+
   $effect(() => {
     inputEl?.focus();
   });
@@ -272,6 +294,9 @@
         {/each}
       </select>
     </label>
+    {#if lightWarn}
+      <div class="vv-settings-warn" role="status">{lightWarn}</div>
+    {/if}
     <label class="vv-settings-theme-row">
       <span>暗色</span>
       <select value={appearanceDark} onchange={(e) => onAppearanceChange('dark', e)} aria-label="暗色界面主题">
@@ -283,6 +308,9 @@
         {/each}
       </select>
     </label>
+    {#if darkWarn}
+      <div class="vv-settings-warn" role="status">{darkWarn}</div>
+    {/if}
     <div class="vv-settings-import">
       <button type="button" disabled={importing} onclick={() => themeInputEl?.click()}>
         {importing ? '导入中…' : '导入主题…'}
@@ -411,5 +439,10 @@
     gap: 6px;
     font-size: 13px;
     cursor: pointer;
+  }
+  /* 槽与主题亮暗不匹配提醒（spec B §2.3）：消费 --ui-warning token，不阻止选择 */
+  .vv-settings-warn {
+    color: var(--ui-warning);
+    font-size: 12px;
   }
 </style>

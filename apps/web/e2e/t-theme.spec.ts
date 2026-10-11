@@ -18,7 +18,8 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  *   验证可视区懒高亮渲染下「切主题仅 style#vv-code-theme 变化」契约不因规模回退。
  * - B-THEME-1..4：外观主题端到端（spec B §2.1-2.3，vscode-themes 计划 Task 5）——
  *   设置面板暗色槽切 Dark Modern 的 UI token+代码高亮联动、JSON 导入应用与刷新
- *   （IndexedDB）恢复、合成最小 VSIX 导入、切回 default 观感零变化。桌面基准
+ *   （IndexedDB）恢复、合成最小 VSIX 导入、切回 default 观感零变化 + 槽/主题亮暗
+ *   不匹配提醒出现/消失（spec §2.3 终审补）。桌面基准
  *   （chromium project，同 03/2/06/2/07/2 惯例）。期望值唯一来源：
  *   packages/highlight/assets/vscode/*.json 资产原值（大小写混杂，注入文本为运行时
  *   textContent 不经构建压缩，按原值断言；#1F1F1F 等保持大写）。
@@ -573,7 +574,7 @@ test('B-THEME-3: 导入合成最小 VSIX（package.json + contributes.themes + �
   await expect.poll(() => uiBg(page)).toBe('#246824');
 });
 
-test('B-THEME-4: 外观槽切回 default——观感零变化（--ui-bg 回默认、注入文本回 legacy 形态）', async ({
+test('B-THEME-4: 外观槽切回 default——观感零变化（--ui-bg 回默认、注入文本回 legacy 形态）；亮暗不匹配提醒随匹配度出现/消失', async ({
   page
 }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium', '桌面基准（同 THEME-03/2 惯例）');
@@ -582,6 +583,13 @@ test('B-THEME-4: 外观槽切回 default——观感零变化（--ui-bg 回默�
   // 亮色槽 → Dark Modern（槽/主题亮暗不匹配不阻止）：UI token 被接管
   await page.getByLabel('亮色界面主题').selectOption('vscode:Dark Modern');
   await expect.poll(() => uiBg(page)).toBe('#1F1F1F');
+  // 不匹配提醒（spec §2.3 终审补）：亮槽选暗色主题出现一行提醒，且选择未被阻止
+  //（上一行 --ui-bg 轮询到 #1F1F1F 即证已应用）
+  await expect(page.locator('.vv-settings-warn', { hasText: '亮色槽' })).toBeVisible();
+  // 切回匹配主题（Light Modern）：提醒消失，配色为亮色资产值
+  await page.getByLabel('亮色界面主题').selectOption('vscode:Light Modern');
+  await expect(page.locator('.vv-settings-warn')).toHaveCount(0);
+  await expect.poll(() => uiBg(page)).toBe('#FFFFFF');
   // 切回 default：--ui-bg 回亮色默认；注入文本回 legacy 形态（代码主题注释头，
   // UI vars 段消失；byte 级 legacy 等价由 theme.test.ts legacyExpectedText 单测锁定）
   await page.getByLabel('亮色界面主题').selectOption('default');
