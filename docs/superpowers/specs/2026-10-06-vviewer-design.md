@@ -12,7 +12,7 @@ vviewer 是一个**网页版只读文件查看器**，支持代码、Markdown、
 1. **纯前端版**：部署到任意静态托管站点（PWA）。通过拖拽/对话框打开本地**文件或文件夹**，全部解析渲染在浏览器内完成。
 2. **带后端版**：Rust + axum 单二进制，两个递进档位：
    - **档 1 文件服务**：浏览与打开服务器本地文件（目录树 + 文件流 + 变更推送），渲染仍在前端。
-   - **档 2 计算卸载**：高亮、Markdown 渲染、压缩包解包、格式检测、二进制结构解析、**跨文件搜索（ripgrep）**等重任务放到后端执行，避免浏览器过大的性能消耗。
+   - **档 2 计算卸载**：高亮、Markdown 渲染、压缩包解包、格式检测、二进制结构解析等重任务放到后端执行，避免浏览器过大的性能消耗。跨文件搜索不属计算档：为文件服务基础能力（rg 可选，缺失自动降级 grep）。
 
 **移动端是一等公民**：布局、交互（触屏手势）、性能预算均按桌面 + 移动双档设计。
 
@@ -20,7 +20,7 @@ vviewer 是一个**网页版只读文件查看器**，支持代码、Markdown、
 
 - 纯前端版可静态托管后离线使用（PWA 应用壳 + 已缓存资产），本地文件夹浏览全部支持格式。
 - 带后端版档 1 可浏览服务器目录树、流畅查看大文件（Range 流式）、文件变更自动刷新。
-- 档 2 下浏览器不做 wasm 重解析；跨文件搜索由服务端 ripgrep 完成。
+- 档 2 下浏览器不做 wasm 重解析；跨文件搜索由服务端完成（rg 可选，缺失时自动降级系统 grep，两者皆缺退回浏览器内）。
 - 代码高亮覆盖 helix 语言清单（目标 ≥264，编译失败者清单化并 hljs 兜底）。
 - Markdown 与代码高亮均支持多主题切换，markdown 内代码块与代码主题联动。
 - 当前文件内搜索：代码/文本/markdown/HTML 源码/PDF 全部支持。
@@ -253,7 +253,7 @@ interface InspectBackend   { inspect(ref: FileRef, kind: string): Promise<Struct
 
 **跨文件搜索（决策 Q6/Q15）**
 
-- 档 2：`POST /api/search` → **ripgrep 子进程**（`--json` 流式输出），支持 pattern/glob/大小写/正则开关，结果流式返回、按文件分组、可取消。
+- 服务器模式（基础能力，无需 --compute）：`POST /api/search` → **ripgrep 子进程，缺失时自动降级系统 grep**（rg 为 `--json` 流式输出，grep 为文本行解析），支持 pattern/glob/大小写/正则开关，结果流式返回、按文件分组、可取消。
 - 纯前端版：内存遍历已打开文件夹（LocalFilesStore/LocalFsStore 已授权范围），仅文本类文件（检测为文本且单文件 <2MB），**上限累计 2000 文件 / 200MB**，超限提示改用服务器模式。
 - UI：全局搜索面板（`Ctrl+Shift+F`），结果按文件分组、点击跳转到文件内高亮行。
 
@@ -275,7 +275,7 @@ interface InspectBackend   { inspect(ref: FileRef, kind: string): Promise<Struct
 | `POST /api/detect` | `{name, head_base64}` → 检测结果 |
 | `GET /api/events?ticket=` | SSE 变更事件流（debounce 500ms） |
 | `POST /api/ticket` | Bearer 换一次性短时 ticket |
-| `POST /api/search` | ripgrep 流式搜索（档 2） |
+| `POST /api/search` | 跨文件流式搜索：rg，缺失时自动降级 grep（基础能力，无需 `--compute`） |
 | `POST /api/compute/highlight` | `{path \| text, lang, range?}` → 区间 + capture；结果按 `(path, mtime, size)` 缓存（档 2） |
 | `POST /api/compute/markdown` | comrak 渲染（档 2） |
 | `GET /api/compute/archive/*` | 服务端解包列表/提取（档 2） |

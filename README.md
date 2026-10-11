@@ -12,7 +12,7 @@
 后端两档能力，由 `/api/health` 的 `capabilities` 宣告，前端自动适配：
 
 - **档 1 file-server**：目录树、Range 文件流、服务端语言/编码检测、SSE 变更推送（文件修改自动刷新）、Bearer token 路径安全。
-- **档 2 `--compute`**：在档 1 上追加服务端计算——tree-sitter / comrak 远程高亮与渲染、ripgrep 全局搜索（`TopBar` 计算策略可切换 本地/远程/自动）。
+- **档 2 `--compute`**：在档 1 上追加服务端计算——tree-sitter / comrak 远程高亮与渲染（`TopBar` 计算策略可切换 本地/远程/自动）。
 
 跨文件搜索依赖 ripgrep（rg）——**可选**：缺失时自动降级系统 grep（功能差异：无大文件跳过、结果顺序不保证、正则为 ERE 方言、无列定位）；两者皆缺时搜索退回浏览器内执行。`GET /api/health` 经 `searchEngine` 字段宣告实际引擎。
 
