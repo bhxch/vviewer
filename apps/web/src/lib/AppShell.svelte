@@ -223,6 +223,14 @@
         // 累积一个（与旧 restore 同款）。来源未重建成功的 tab 落占位 ——
         for (const t of wsItem.tabs) {
           if (t.path === '') continue;
+          // merge 路径快点击窗口查重：merging 判定到本循环之间有权限弹窗/重连
+          // 探测两处 await，窗口内用户/注入钩子可能已打开同一文件（目录 tab 有
+          // addDirTabForRestore 去重防线，文件 tab 此前没有）——按 storeId+path
+          // 跳过，快照条目让位于用户已开 tab（merge 契约：用户已建数据为先）
+          const exists = tabStore
+            .tabsOf(wsItem.id)
+            .some((t2) => t2.source.path === t.path && t2.source.storeId === t.storeId);
+          if (exists) continue;
           const store = rebuilt.get(t.storeId);
           if (store !== undefined) {
             const tab = addTab(store, t.path, t.name);
