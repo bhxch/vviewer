@@ -183,6 +183,9 @@
   function onpanelkeydown(e: KeyboardEvent): void {
     if (e.key === 'Escape') {
       e.preventDefault();
+      // 内嵌于 WorkspaceCreateModal 时本面板是其 DOM 子节点：不阻断冒泡会让
+      // 外层面板的容器 keydown（finish()）连着触发——Esc 只关浏览层
+      e.stopPropagation();
       close();
     }
   }

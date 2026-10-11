@@ -78,8 +78,13 @@ const searchRouter: ComputeRouter = createComputeRouter({
  * path——多根服务器语义「跨根搜索 path 必须缺省」（带了即 400），单根服务器
  * 缺省即唯一根，与历史单源请求形状一致。endpoint 由 loadLastServer 构造
  * （router.remote.base），故仅 base 与其一致的来源参与远端（base 不匹配的来源
- * 在 auto 下由本地回退覆盖）；命中统一归组内首个来源的 storeId——跨根命中帧的
- * root 归属需 core grepRemote 解析帧的 root 字段，随 T5 远端来源粒度细化。
+ * 在 auto 下由本地回退覆盖）。
+ * 已知边界（T5 评审收尾，移交 T7）：命中统一归组内首个来源的 storeId——多根
+ * 服务器跨根搜索时非 0 号根的命中会以首源 store 打开（路径空间/归属错位）。
+ * 精确归属需 core grepRemote 解析命中帧的 root 字段 + 按 members[].rootIndex
+ * 归属；未顺手实现的原因：T5 起 basePath 子目录来源使「同根多源」成为常态
+ * （rootIndex 不再唯一），且帧路径相对根、子目录源的路径空间相对 basePath，
+ * 仅按 root 归属仍会错标——需要帧路径按源 basePath 换算的完整方案，非小改。
  * truncated 不在返回契约内，经回调透传给调用方（与本地路径同模式）。
  */
 async function remoteGrep(

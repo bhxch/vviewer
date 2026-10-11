@@ -129,10 +129,14 @@
         const key = `${src.storeBase}|${src.rootIndex ?? 0}|${src.basePath ?? ''}`;
         let p = reconnected.get(key);
         if (p === undefined) {
-          p = reconnectRemoteStore(src.storeBase ?? '', last?.token ?? null, {
-            rootIndex: src.rootIndex,
-            basePath: src.basePath
-          });
+          // storeLabel 原值回环（I-1）：label 参与 storeId hash，快照 sources[].storeLabel
+          // 必须原样传入，重算 host 会使多根/basePath 来源的重建 storeId ≠ 快照 storeId
+          p = reconnectRemoteStore(
+            src.storeBase ?? '',
+            last?.token ?? null,
+            src.storeLabel,
+            { rootIndex: src.rootIndex, basePath: src.basePath }
+          );
           reconnected.set(key, p);
         }
         return p;
@@ -200,10 +204,16 @@
    * 交由调用方落占位。不发目录 tab（不自动弹树），只服务快照 tab 的内容恢复。
    * 多根（T4）：rootIndex/basePath 由调用方从快照 sources[] 显式传入——storeId 的
    * basePath 段是 32 位 FNV 指纹不可反解（T3 评审约束），恢复链路绝不从 storeId 反解。
+   * label 回环（T5 评审 I-1）：label 参与 storeId hash（hash8(`${base}:${label}`)），
+   * 必须用快照 sources[].storeLabel 原值重建——与运行期 createRemoteStore 用同一
+   * 字符串才能精确复现快照 storeId；重算 host 会使多根/basePath 来源（label 为
+   * 尾段/文件名/「host · 根N/x」形态）得到不同 storeId，恢复链 storeId 回环断裂
+   * （树行消失/tab 分叉/二次重启落占位/来源复用防线失效）。
    */
   async function reconnectRemoteStore(
     base: string,
     token: string | null,
+    storeLabel: string,
     opts?: { rootIndex?: number; basePath?: string }
   ): Promise<TreeStore | null> {
     const headers: Record<string, string> = {};
@@ -217,13 +227,8 @@
     } catch {
       return null; // 网络不可达/超时：恢复降级为占位，不阻塞启动
     }
-    let label = base;
-    try {
-      label = new URL(base).host;
-    } catch {
-      // base 非法（极端）：显示名退回原串
-    }
-    const store = createRemoteStore(base, token, label, opts);
+    // 不重算 host：label 用快照原值（见函数 doc——label 参与 storeId hash）
+    const store = createRemoteStore(base, token, storeLabel, opts);
     watchHealth.degraded = false;
     store.watch(
       (paths) => {
