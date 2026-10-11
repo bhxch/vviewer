@@ -198,21 +198,22 @@ describe('renderHex：搜索工具条', () => {
     target.remove();
   });
 
-  it('大小写开关仅文本模式可用：文本搜索传 caseInsensitive，hex 搜索不受影响', async () => {
+  it('大小写开关默认敏感（spec）；取消勾选为不敏感；hex 模式禁用开关', async () => {
     const { inst, target, search, caseToggle, fakes } = setup();
+    expect(caseToggle.checked).toBe(true); // spec §Global Constraints：默认敏感
     search.value = 'Hi'; // 含非 hex 字符 → 文本模式
     pressEnter(search);
     await flush();
-    expect((fakes[1]!.requests[0] as { caseInsensitive?: boolean }).caseInsensitive).toBe(true); // 默认不敏感
+    expect((fakes[1]!.requests[0] as { caseInsensitive?: boolean }).caseInsensitive).toBe(false);
     inst.destroy();
     target.remove();
 
     const b = setup();
     b.search.value = 'Hi';
-    b.caseToggle.checked = true; // 勾选「区分大小写」
+    b.caseToggle.checked = false; // 取消「区分大小写」→ 不敏感
     pressEnter(b.search);
     await flush();
-    expect((b.fakes[1]!.requests[0] as { caseInsensitive?: boolean }).caseInsensitive).toBe(false);
+    expect((b.fakes[1]!.requests[0] as { caseInsensitive?: boolean }).caseInsensitive).toBe(true);
     b.inst.destroy();
     b.target.remove();
 

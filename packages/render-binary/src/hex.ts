@@ -167,6 +167,8 @@ export function renderHex(
   caseToggle.type = 'checkbox';
   caseToggle.className = 'vv-hex-search-case';
   caseToggle.setAttribute('aria-label', '区分大小写（仅文本搜索）');
+  caseToggle.checked = true; // spec §Global Constraints：大小写开关默认敏感
+
   const btnCss = 'flex:none; font-size:12px; padding:1px 6px; cursor:pointer;';
   const prevBtn = document.createElement('button');
   prevBtn.type = 'button';
@@ -325,7 +327,7 @@ export function renderHex(
       const { BinaryClient: BinaryClientImpl } = await import('./client');
       searchClient = new BinaryClientImpl(w);
       return searchClient;
-    })();
+    })().catch(() => null); // 建连失败降级主线程 scanAll，且缓存 promise 不再拒
     return searchClientPromise;
   }
 
@@ -516,7 +518,9 @@ export function renderHex(
   return {
     destroy() {
       ++searchSeq; // 兜底扫描/迟滞回调失效
-      searchClient?.dispose(); // 终止搜索 worker（与结构树 worker 分离）
+      // 终止搜索 worker（与结构树 worker 分离）；建连竞态（client 未就绪）经 promise 兜底
+      if (searchClient) searchClient.dispose();
+      else void searchClientPromise?.then((c) => c?.dispose());
       if (flashTimer !== null) clearTimeout(flashTimer);
       scroller.destroy();
       worker?.terminate();
