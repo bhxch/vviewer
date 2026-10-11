@@ -34,7 +34,7 @@
 - **CLI**：`--root <PATH>` 可重复（≥1 必填语义不变）；`main` 逐个校验目录存在并 canonicalize。
 - **AppState**：`roots: Vec<RootSpec { raw: PathBuf, canonical: PathBuf }>`；`root`/`root_canonical` 字段保留为「默认根 = roots[0]」兼容视图（`AppState::new` 签名不变，既有测试零改动）；新增 `with_roots(Vec<PathBuf>)`。
 - **guard**：`resolve(state, raw, root_idx)`——`clean_relative` 以所选根为基准，canonicalize 后越界校验对所选根；`root_idx` 越界 → 400。
-- **API**：`/api/tree`、`/api/file`、`/api/compute/*` 增加可选 `root`（0-based 索引，缺省 0）；`POST /api/search` 的 `root` 语义：缺省 = **跨全部根**搜索（rg/grep 均支持多目录参数，此时 `path` 必须缺省，传了报 400）；指定 `root` = 限定该根，`path` 相对该根解析。多根跨根搜索时命中帧新增 `"root": <index>` 字段，单根或限定单根时省略（与现状帧形状兼容）。
+- **API**：`/api/tree`、`/api/file`、`/api/compute/*` 增加可选 `root`（0-based 索引，缺省 0）；`POST /api/search` 的 `root` 语义：缺省 = **跨全部根**搜索（rg/grep 均支持多目录参数，此时 `path` 必须缺省，传了报 400）；指定 `root` = 限定该根，`path` 相对该根解析。单根部署保持历史语义：root 缺省时 path 相对 0 号根（不 400）；400 仅在多根（roots>1）且 root 缺省时触发。多根跨根搜索时命中帧新增 `"root": <index>` 字段，单根或限定单根时省略（与现状帧形状兼容）。
 - **watch/SSE**：每根一个 notify watcher 实例聚合进现有 `ChangeHub`；SSE 事件帧新增 `root` 字段（单根省略）。ticket 机制不变。
 - **health**：新增 `roots: Option<usize>`（=1 省略）——前端「从后端选路径」据此决定是否先展示根选择。
 - 文档：deploy.md 更新多根示例与语义（各根独立越界防护；搜索跨全部根）。

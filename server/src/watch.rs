@@ -2,7 +2,8 @@
 //!
 //! watcher 在服务器启动时由 `ChangeHub::spawn` 创建一次（挂在 AppState 内），
 //! 而非每个 SSE 连接各建一个：workspace 多根下每根一个 watcher 线程（各自
-//! notify 实例 + 自愈状态机，共享 broadcast 通道 / health / stop 标志），
+//! notify 实例 + 自愈状态机，共享 broadcast 通道与 stop 标志；健康为每根
+//! 槽位、读取时聚合，见 `HealthSlots`），
 //! notify 事件 → std mpsc → 聚合线程把 500ms 窗口内的多事件按根合并为
 //! `{"type":"changed","paths":[...]}`（相对所在根、排序去重；多根时帧携带
 //! `"root": <idx>`，单根形状不变）→ tokio broadcast 分发给所有订阅的 SSE 连接。
@@ -11,7 +12,9 @@
 //! 并在后台线程退避重试，连续失败降级 `PollWatcher`（轮询，跨文件系统可用）继续
 //! 广播 changed，之后周期性探试 recommended（暂时性故障解除后回归实时）；运行期
 //! 错误丢弃当前 watcher 重建，恢复实时监听后广播 `{"type":"watch-recovered"}`。
-//! 健康状态 `Ok / Recovering / Degraded` 经 `ChangeHub::health` 暴露，SSE 建连
+//! 健康状态 `Ok / Recovering / Degraded` 经 `ChangeHub::health` 暴露（每根一个
+//! 槽位，读取时取 worst-of 聚合——任一根 Recovering → Recovering，否则任一根
+//! Degraded → Degraded），SSE 建连
 //! 按快照发降级帧（非 Ok 统一 `watch-degraded`——`watch-error` 在前端是终态
 //! 语义，见 `snapshot_frame`；运行期错误同样不广播它，自愈经状态帧与恢复的
 //! changed 表达）。
@@ -137,7 +140,8 @@ impl WatchHealth {
 /// watcher 句柄移入各自聚合线程（自愈重建需在错误现场执行），销毁经 stop 标志。
 pub struct ChangeHub {
     tx: broadcast::Sender<String>,
-    health: Arc<AtomicU8>,
+    /// 每根一个健康槽位（线程各写各的），[`ChangeHub::health`] 读取时聚合。
+    health: Arc<HealthSlots>,
     /// ChangeHub 销毁（最后一个 Arc 释放）时置位：各聚合线程停止建 watch 并退出。
     stop: Arc<AtomicBool>,
 }
@@ -145,6 +149,45 @@ pub struct ChangeHub {
 impl Drop for ChangeHub {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
+    }
+}
+
+/// 每根一个健康槽位，读取时聚合（worst-of）。多根下各 watcher 线程只写自己的
+/// 槽位：共享单标量会被任一线程的成功转换覆写——首建部分失败时成功根首轮翻
+/// Ok（坏根重试窗口内新连接拿不到降级快照、其变更静默），反向同理（先恢复的
+/// 根置 Ok 会掩盖仍在重建窗口内的另一根）。槽位隔离让聚合在读取时计算，
+/// 两类竞态一并消除。
+struct HealthSlots {
+    slots: Vec<AtomicU8>,
+}
+
+impl HealthSlots {
+    /// 按各根首建结果初始化（建会话 → Ok；失败 → Recovering）。
+    fn new(initial: &[WatchHealth]) -> Self {
+        Self { slots: initial.iter().map(|h| AtomicU8::new(h.to_u8())).collect() }
+    }
+
+    fn set(&self, root_idx: usize, v: WatchHealth) {
+        self.slots[root_idx].store(v.to_u8(), Ordering::SeqCst);
+    }
+
+    fn get(&self, root_idx: usize) -> WatchHealth {
+        WatchHealth::from_u8(self.slots[root_idx].load(Ordering::SeqCst))
+    }
+
+    /// 聚合（worst-of）：任一根 Recovering（无 watcher、无事件）→ Recovering；
+    /// 否则任一根 Degraded（轮询、事件非实时）→ Degraded；全 Ok → Ok。
+    /// 快照帧只分 Ok / 非 Ok（watch-degraded），聚合序与帧语义一致。
+    fn aggregate(&self) -> WatchHealth {
+        let mut worst = WatchHealth::Ok;
+        for slot in &self.slots {
+            match WatchHealth::from_u8(slot.load(Ordering::SeqCst)) {
+                WatchHealth::Recovering => return WatchHealth::Recovering,
+                WatchHealth::Degraded => worst = WatchHealth::Degraded,
+                WatchHealth::Ok => {}
+            }
+        }
+        worst
     }
 }
 
@@ -160,17 +203,17 @@ impl ChangeHub {
     }
 
     /// 注入工厂的 spawn：每根同步首建一次（不重试），spawn 返回时健康状态即确定
-    /// （任一根首建失败 → Recovering），SSE 建连快照无竞态；启动失败的退避重试与
-    /// PollWatcher 降级移交各自后台线程，不拖慢服务器启动。测试注入 mock opener
-    /// 驱动状态机各分支。
+    /// （各根槽位按首建结果写入，任一根失败整体聚合为 Recovering），SSE 建连
+    /// 快照无竞态；启动失败的退避重试与 PollWatcher 降级移交各自后台线程，
+    /// 不拖慢服务器启动。测试注入 mock opener 驱动状态机各分支。
     fn spawn_with(roots: &[PathBuf], mut factories: Vec<RetryFactory>) -> Arc<Self> {
         debug_assert_eq!(roots.len(), factories.len(), "每根一个工厂");
         let (tx, _) = broadcast::channel(CHANNEL_CAPACITY);
-        let health = Arc::new(AtomicU8::new(WatchHealth::Recovering.to_u8()));
         let stop = Arc::new(AtomicBool::new(false));
 
-        // 同步首建（每根一次）：任一根失败 → 整体 Recovering（共享 health 表达）
+        // 同步首建（每根一次）：各根槽位按首建结果初始化（不互相覆写）
         let mut initial: Vec<Option<WatchSession>> = Vec::with_capacity(roots.len());
+        let mut initial_health: Vec<WatchHealth> = Vec::with_capacity(roots.len());
         for (root, factory) in roots.iter().zip(factories.iter_mut()) {
             // 诊断补丁（BUG-02）：数据根的文件系统类型，便于 e2e 环境判读（如 btrfs）
             info!(
@@ -182,6 +225,7 @@ impl ChangeHub {
                 Ok((keep, rx, backend)) => {
                     info!("[watch] watcher established backend={backend} root={}", root.display());
                     initial.push(Some(WatchSession::new(keep, rx, backend, false)));
+                    initial_health.push(WatchHealth::Ok);
                 }
                 Err(e) => {
                     // 含 OS 错误码（Debug 格式的 Os { code: .. }）与 root 路径
@@ -191,14 +235,11 @@ impl ChangeHub {
                         factory.policy.attempts
                     );
                     initial.push(None);
+                    initial_health.push(WatchHealth::Recovering);
                 }
             }
         }
-        let all_ok = initial.iter().all(Option::is_some);
-        health.store(
-            if all_ok { WatchHealth::Ok.to_u8() } else { WatchHealth::Recovering.to_u8() },
-            Ordering::SeqCst,
-        );
+        let health = Arc::new(HealthSlots::new(&initial_health));
 
         // 每根一个聚合/自愈线程：不持有 JoinHandle，ChangeHub drop → stop 置位后
         // 线程自行退出。多根时 changed 帧携带根索引，单根保持历史形状（无 root）。
@@ -227,9 +268,9 @@ impl ChangeHub {
         self.tx.subscribe()
     }
 
-    /// 当前 watcher 健康状态（SSE 建连快照用）。
+    /// 当前 watcher 健康状态（SSE 建连快照用）：各根槽位的 worst-of 聚合。
     pub fn health(&self) -> WatchHealth {
-        WatchHealth::from_u8(self.health.load(Ordering::SeqCst))
+        self.health.aggregate()
     }
 }
 
@@ -440,25 +481,28 @@ impl RetryFactory {
 
 /// 聚合与自愈主循环（每根一个）：建立会话 → 聚合事件直到错误/停止 → 重建。
 /// 状态转换时广播对应帧（各一次）：降级发 `watch-degraded`、恢复实时发
-/// `watch-recovered`，changed 帧照常。会话异常只把健康置为 Recovering、不广播
-/// 帧——`watch-error` 在前端是终态语义（断开不重连），广播会令全部存量活跃
-/// 连接永久失联、自愈帧到不了任何存活客户端；自愈表达为恢复后的
+/// `watch-recovered`，changed 帧照常。会话异常只把本根槽位置为 Recovering、
+/// 不广播帧——`watch-error` 在前端是终态语义（断开不重连），广播会令全部存量
+/// 活跃连接永久失联、自愈帧到不了任何存活客户端；自愈表达为恢复后的
 /// watch-recovered/watch-degraded 与 changed 恢复流动。重建重试循环（build 内）
-/// 不发帧。多根部署时各根独立运行本循环，changed 帧按 `root_idx` 标注
+/// 不发帧。多根部署时各根独立运行本循环：只写本根健康槽位（聚合在读取时
+/// 计算，任一根的建立/故障不覆写其余根），changed 帧按 `root_idx` 标注
 /// （`total_roots` = 1 时保持历史形状，不带 root 字段）。
 #[allow(clippy::too_many_arguments)]
 fn run_loop(
     initial: Option<WatchSession>,
     mut factory: RetryFactory,
     tx: broadcast::Sender<String>,
-    health: Arc<AtomicU8>,
+    health: Arc<HealthSlots>,
     stop: Arc<AtomicBool>,
     root: PathBuf,
     root_idx: usize,
     total_roots: usize,
 ) {
     let mut session = initial;
-    let mut prev = WatchHealth::from_u8(health.load(Ordering::SeqCst));
+    // prev 以自身会话健康初始化（spawn_with 已按首建结果写入本根槽位）：
+    // 首建成功的根首轮无状态转换（不发帧），也不会把他根槽位/聚合推向 Ok
+    let mut prev = health.get(root_idx);
     // 运行期错误日志限频：跨会话共享一个窗口（BUG-68 抑制层，防高频错误刷日志）
     let mut gate = ErrorLogGate::new(Duration::from_secs(60));
     loop {
@@ -470,11 +514,12 @@ fn run_loop(
             },
         };
 
-        // 建立成功：更新健康状态，状态变化才发帧（重试期间不重复发）。
-        // prev 不在此处更新：错误分支（或优雅退出）是循环内唯一的后续路径，
-        // 下一轮比较用到的是 Recovering——重复发帧由「状态变化才发」天然抑制。
+        // 建立成功：只写本根槽位（聚合在读取时计算），状态变化才发帧
+        //（重试期间不重复发）。prev 不在此处更新：错误分支（或优雅退出）是
+        // 循环内唯一的后续路径，下一轮比较用到的是 Recovering——重复发帧由
+        // 「状态变化才发」天然抑制。
         let next = if sess.degraded { WatchHealth::Degraded } else { WatchHealth::Ok };
-        health.store(next.to_u8(), Ordering::SeqCst);
+        health.set(root_idx, next);
         if next != prev {
             let payload = match next {
                 WatchHealth::Ok => json!({ "type": "watch-recovered", "backend": sess.backend }),
@@ -496,7 +541,7 @@ fn run_loop(
         // watch-recovered/changed 到不了任何存活客户端；状态经 health 快照
         // （新连接 watch-degraded 帧）与恢复后的状态帧表达
         prev = WatchHealth::Recovering;
-        health.store(WatchHealth::Recovering.to_u8(), Ordering::SeqCst);
+        health.set(root_idx, WatchHealth::Recovering);
     }
 }
 
@@ -1041,6 +1086,43 @@ mod tests {
         std::thread::sleep(Duration::from_millis(300));
         assert_ne!(hub.health(), WatchHealth::Ok, "不可 watch 的 root 不应转为 Ok");
         // drop 触发 stop：兜底无限重试循环随之退出（不 join，随进程回收）
+    }
+
+    /// 双根部分失败（I-1 回归）：一根可 watch、一根不可。坏根的整个后台重试
+    /// 窗口内共享健康必须保持非 Ok（新 SSE 连接拿得到 watch-degraded 快照），
+    /// 好根的变更照常推送。撤修复（首建成功线程以共享标量为 prev 并无条件
+    /// 覆写 Ok）时本用例红：好根首轮即翻 Ok 并伪发 watch-recovered。
+    #[tokio::test]
+    async fn partial_root_failure_keeps_shared_health_non_ok_and_good_root_flows() {
+        let good = tempfile::tempdir().unwrap();
+        let root = good.path().to_path_buf();
+        std::fs::write(root.join("seed.txt"), "seed").unwrap();
+        let bad = PathBuf::from("/nonexistent-vviewer-watch-root-xyz");
+
+        let hub = ChangeHub::spawn(&[root.clone(), bad]);
+        assert_ne!(hub.health(), WatchHealth::Ok, "任一根首建失败整体应为非 Ok");
+        let mut sub = hub.subscribe();
+
+        // 失败窗口内好根事件照常推送（坏根静默只属失败根自身，不牵连好根）
+        std::fs::write(root.join("seed.txt"), "changed").unwrap();
+        let frame = tokio::time::timeout(Duration::from_secs(3), sub.recv())
+            .await
+            .expect("好根变更应在失败窗口内照常推送")
+            .expect("broadcast 接收失败");
+        assert!(
+            frame.contains("changed") && frame.contains("seed.txt"),
+            "失败窗口内首帧应为好根 changed（不得被伪 watch-recovered 占先）: {frame}"
+        );
+
+        // 好根线程首建成功不得把共享健康覆写为 Ok（坏根仍在重试窗口）
+        std::thread::sleep(Duration::from_millis(300));
+        assert_ne!(hub.health(), WatchHealth::Ok, "坏根重试窗口内共享健康应保持非 Ok");
+        assert_eq!(
+            hub.health().snapshot_frame(),
+            Some("watch-degraded"),
+            "失败窗口内建连应拿到降级快照帧"
+        );
+        // drop 触发 stop：坏根兜底无限重试线程退出（不 join，随进程回收）
     }
 
     /// 真实文件系统端到端：inotify watcher 建立（健康 Ok）→ 写文件 → 3s 内
