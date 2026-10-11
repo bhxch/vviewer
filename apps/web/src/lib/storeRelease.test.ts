@@ -59,7 +59,9 @@ describe('storeRetained（撤销栈实例捕获判据，I-1）', () => {
   });
 
   it('与 releaseStoreIfLast 的终结判据互补：retained 者永不触发 close', () => {
-    const store = mkStore('zip:a.zip', false);
+    // 桩 id 用无 close 型（localfs）：zip/archive 型实现 close、属终结型，
+    // 不可用无 close 桩冒充其 id（同上注释口径）
+    const store = mkStore('localfs:demo', false);
     expect(storeRetained(store)).toBe(true);
     releaseStoreIfLast([], store); // 无 close：终结路径 no-op
     expect(storeRetained(store)).toBe(true); // 实例仍可用
