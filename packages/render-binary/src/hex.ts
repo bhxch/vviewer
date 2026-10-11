@@ -305,12 +305,14 @@ export function renderHex(
     scroller.refresh(true);
   }
   function gotoOffset(): void {
+    // 空文件分支置于非法输入清态之前（终审 Minor 4）：空文件任何输入都不动作，
+    // 不存在「合法输入早退绕过清态致旧文案残留」的路径分歧
+    if (buffer.length === 0) return; // 空文件不动作（spec §2.1）
     const parsed = parseGotoInput(gotoInput.value);
     if (parsed === null) {
       toolbarStatus.textContent = ''; // 非法输入清空过期状态位（如「已跳至文件尾」残留）
       return;
     }
-    if (buffer.length === 0) return; // 空文件不动作（spec §2.1）
     const clamped = Math.min(parsed, buffer.length - 1); // 超界 clamp 到最后一个字节
     toolbarStatus.textContent = clamped < parsed ? '已跳至文件尾' : '';
     const row = Math.floor(clamped / HEX_ROW_BYTES);
@@ -335,10 +337,15 @@ export function renderHex(
     searchClientPromise = (async (): Promise<BinaryClient | null> => {
       const w = opts.createWorker?.() ?? null;
       if (!w) return null;
-      // 动态 import 避免把 client 静态拖进依赖图（同 structReady 薄壳模式）
-      const { BinaryClient: BinaryClientImpl } = await import('./client');
-      searchClient = new BinaryClientImpl(w);
-      return searchClient;
+      try {
+        // 动态 import 避免把 client 静态拖进依赖图（同 structReady 薄壳模式）
+        const { BinaryClient: BinaryClientImpl } = await import('./client');
+        searchClient = new BinaryClientImpl(w);
+        return searchClient;
+      } catch (e) {
+        w.terminate(); // 终审 Minor 3：import/构造失败终止已建 worker，避免泄漏
+        throw e;
+      }
     })().catch(() => null); // 建连失败降级主线程 scanAll，且缓存 promise 不再拒
     return searchClientPromise;
   }
@@ -470,6 +477,11 @@ export function renderHex(
     ++searchSeq; // 兜底扫描/迟滞回调一并失效
     searchClient?.cancelSearch();
     setSearchBusy(false);
+    // 终审 Minor 1：取消即弃部分命中——不清则屏上残留已上屏的部分高亮，与状态位
+    // 「已取消」（及后续输入触发的 renderSearchStatus「无命中」）语义漂移
+    hitRows.clear();
+    hitNeedleLen = 0;
+    scroller.refresh(true); // 重绘摘除残留高亮
     searchStatus.textContent = '已取消';
   });
 

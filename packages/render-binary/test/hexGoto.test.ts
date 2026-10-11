@@ -170,11 +170,14 @@ describe('renderHex：工具条与跳转', () => {
     target.remove();
   });
 
-  it('空 buffer：跳转不动作、不抛错', () => {
+  it('空 buffer：跳转不动作、不抛错；非法输入亦不清态（空文件分支置于清态前，终审 Minor 4）', () => {
     const { inst, target, dump, input } = setup(new Uint8Array(0));
     input.value = '0x10';
     pressEnter(input);
     expect(dump.scrollTop).toBe(0);
+    input.value = 'abc';
+    pressEnter(input); // 空文件任何输入均不动作（不触碰状态位）
+    expect(target.querySelector('.vv-hex-toolbar-status')?.textContent).toBe('');
     inst.destroy();
     target.remove();
   });
