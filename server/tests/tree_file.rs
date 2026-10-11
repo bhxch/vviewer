@@ -362,3 +362,61 @@ async fn file_missing_returns_json_404_and_directory_rejected() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(json["error"].is_string());
 }
+
+// ---------- 多 root（E 项阶段 1） ----------
+
+fn multi_root_fixture() -> (tempfile::TempDir, tempfile::TempDir, AppState) {
+    let d0 = tempfile::tempdir().unwrap();
+    let d1 = tempfile::tempdir().unwrap();
+    std::fs::write(d0.path().join("a.txt"), "root zero\n").unwrap();
+    std::fs::create_dir(d1.path().join("sub")).unwrap();
+    std::fs::write(d1.path().join("sub/b.txt"), "root one\n").unwrap();
+    let state = vviewer::state::AppState::new(d0.path().to_path_buf(), None, None, false, None)
+        .with_roots(vec![d0.path().to_path_buf(), d1.path().to_path_buf()]);
+    (d0, d1, state)
+}
+
+#[tokio::test]
+async fn tree_accepts_root_index_and_defaults_to_zero() {
+    let (_d0, _d1, state) = multi_root_fixture();
+    let app = vviewer::build_router(state);
+    // 缺省 = 0 号根（兼容现状形状）
+    let (s0, _, body0) = get(app.clone(), "/api/tree").await;
+    assert_eq!(s0, 200);
+    assert!(serde_json::from_slice::<serde_json::Value>(&body0).unwrap()["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["name"] == "a.txt"));
+    // root=1 → 1 号根
+    let (s1, _, body1) = get(app.clone(), "/api/tree?root=1").await;
+    assert_eq!(s1, 200);
+    assert!(serde_json::from_slice::<serde_json::Value>(&body1).unwrap()["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["name"] == "sub"));
+    // root 越界 → 400
+    let (s2, _, _) = get(app.clone(), "/api/tree?root=5").await;
+    assert_eq!(s2, 400);
+    // root=1 下的相对 path 相对 1 号根解析
+    let (s3, _, body3) = get(app, "/api/tree?root=1&path=sub").await;
+    assert_eq!(s3, 200);
+    assert!(serde_json::from_slice::<serde_json::Value>(&body3).unwrap()["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["name"] == "b.txt"));
+}
+
+#[tokio::test]
+async fn file_honors_root_index_and_escape_check_targets_selected_root() {
+    let (_d0, _d1, state) = multi_root_fixture();
+    let app = vviewer::build_router(state);
+    let (s, _, body) = get(app.clone(), "/api/file?root=1&path=sub/b.txt").await;
+    assert_eq!(s, 200);
+    assert!(String::from_utf8(body.to_vec()).unwrap().contains("root one"));
+    // 越界校验对所选根：0 号根文件用 root=1 找不到 → 404；而非 0 号根视角的误判
+    let (s2, _, _) = get(app, "/api/file?root=1&path=a.txt").await;
+    assert_eq!(s2, 404);
+}

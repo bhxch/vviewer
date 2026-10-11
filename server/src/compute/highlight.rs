@@ -90,6 +90,9 @@ pub struct HighlightRequest {
     /// 可视区行范围（仅 path 模式接受；缺省 = 整文件）。
     #[serde(default)]
     pub range: Option<HighlightRange>,
+    /// 多根索引（仅 path 模式；缺省 0 号根，越界 400）。
+    #[serde(default)]
+    pub root: Option<usize>,
 }
 
 // ---------- 字节 → UTF-16 偏移转换 ----------
@@ -442,10 +445,11 @@ pub(crate) async fn highlight_with_timeout(
     let mut cache_key: Option<CacheKey> = None;
     let (text, base_line): (String, u64) =
         if let Some(path) = req.path.as_deref().filter(|p| !p.is_empty()) {
-            let canonical = match crate::guard::resolve(&state, Some(path)).await {
-                Ok(p) => p,
-                Err(e) => return e.into_response(),
-            };
+            let canonical =
+                match crate::guard::resolve_at(&state, Some(path), req.root.unwrap_or(0)).await {
+                    Ok(p) => p,
+                    Err(e) => return e.into_response(),
+                };
             let meta = match tokio::fs::metadata(&canonical).await {
                 Ok(m) if m.is_file() => m,
                 Ok(_) => return AppError::bad_request("path is not a file").into_response(),

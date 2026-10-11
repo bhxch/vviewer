@@ -228,6 +228,23 @@ async fn legitimate_subpath_still_works() {
     assert_eq!(body.as_ref(), b"inner");
 }
 
+#[tokio::test]
+async fn root_index_out_of_range_returns_400() {
+    let f = fixture(Some("tok-123"), None);
+    let app = vviewer::build_router(f.state);
+    let auth = Some("Bearer tok-123");
+
+    for uri in [
+        "/api/tree?root=1",
+        "/api/tree?root=99",
+        "/api/file?path=a.txt&root=1",
+    ] {
+        let (status, _, body) = req(app.clone(), "GET", uri, auth).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "uri={uri}");
+        assert!(json(&body)["error"].is_string(), "uri={uri}");
+    }
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn symlink_escaping_root_forbidden_but_internal_allowed() {

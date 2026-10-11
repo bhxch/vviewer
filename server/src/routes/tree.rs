@@ -13,6 +13,8 @@ use crate::state::AppState;
 #[derive(Deserialize)]
 pub struct TreeQuery {
     pub path: Option<String>,
+    /// 多根索引（缺省 0 号根；越界 400）。
+    pub root: Option<usize>,
 }
 
 #[derive(Serialize)]
@@ -41,7 +43,7 @@ pub async fn tree(
     State(state): State<AppState>,
     Query(q): Query<TreeQuery>,
 ) -> Result<Json<TreeResponse>, AppError> {
-    let dir = guard::resolve(&state, q.path.as_deref()).await?;
+    let dir = guard::resolve_at(&state, q.path.as_deref(), q.root.unwrap_or(0)).await?;
 
     if !tokio::fs::metadata(&dir).await.map_err(AppError::from)?.is_dir() {
         return Err(AppError::not_found("not a directory"));

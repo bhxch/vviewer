@@ -43,13 +43,24 @@ impl TicketStore {
     }
 }
 
+/// 单个根的规格：原始路径 + canonicalize 结果（guard 越界校验基准）。
+#[derive(Clone, Debug)]
+pub struct RootSpec {
+    /// `--root` 原始路径。
+    pub raw: PathBuf,
+    /// canonicalize 结果（构造时一次，失败回退原路径）。
+    pub canonical: PathBuf,
+}
+
 /// 传给所有 handler 的共享状态。
 #[derive(Clone)]
 pub struct AppState {
-    /// `--root` 原始路径。
+    /// `--root` 原始路径（兼容视图 = [`AppState::roots`][0]）。
     pub root: PathBuf,
-    /// root 的 canonicalize 结果（构造时一次），guard 越界校验基准。
+    /// root 的 canonicalize 结果（构造时一次），guard 越界校验基准（兼容视图 = roots[0]）。
     pub root_canonical: PathBuf,
+    /// 多根列表（workspace 阶段 1）：单根部署时恒为 1 项，形状与历史一致。
+    pub roots: Vec<RootSpec>,
     /// `--web-dist` 前端静态产物目录；未指定时 `/` 返回占位页。
     pub web_dist: Option<PathBuf>,
     /// 访问令牌；None 表示免鉴权（仅默认 127.0.0.1 绑定时允许）。
@@ -82,8 +93,9 @@ impl AppState {
         // main 启动前已校验目录存在；canonicalize 失败时退回原路径（保持可测）
         let root_canonical: PathBuf = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
         Self {
-            root,
+            root: root.clone(),
             root_canonical: root_canonical.clone(),
+            roots: vec![RootSpec { raw: root, canonical: root_canonical.clone() }],
             web_dist,
             token,
             hidden,
@@ -92,8 +104,28 @@ impl AppState {
             rg_path: None,
             grep_path: None,
             tickets: TicketStore::default(),
+            // 多根聚合 watch 在 Task 2；本任务仍只挂 0 号根
             changes: crate::watch::ChangeHub::spawn(&root_canonical),
         }
+    }
+
+    /// builder：覆盖多根列表（workspace 阶段 1 地基）。逐个 canonicalize，
+    /// 失败回退原路径——与 [`AppState::new`] 同款；`root`/`root_canonical`
+    /// 兼容视图同步为 0 号根。ChangeHub 仍挂构造时的 0 号根（Task 2 聚合）。
+    pub fn with_roots(mut self, roots: Vec<PathBuf>) -> Self {
+        self.roots = roots
+            .into_iter()
+            .map(|raw| {
+                let canonical =
+                    std::fs::canonicalize(&raw).unwrap_or_else(|_| raw.clone());
+                RootSpec { raw, canonical }
+            })
+            .collect();
+        if let Some(first) = self.roots.first() {
+            self.root = first.raw.clone();
+            self.root_canonical = first.canonical.clone();
+        }
+        self
     }
 
     /// builder：`--compute` 启用服务端计算端点（new 默认 false，既有测试零改动）。

@@ -22,6 +22,8 @@ static X_VV_ENCODING: HeaderName = HeaderName::from_static("x-vv-encoding");
 #[derive(Deserialize)]
 pub struct FileQuery {
     pub path: Option<String>,
+    /// 多根索引（缺省 0 号根；越界 400）。
+    pub root: Option<usize>,
 }
 
 /// 解析 Range 头（单区间；多区间取第一个）→ Some((start, len))。
@@ -184,7 +186,7 @@ pub async fn file(
     Query(q): Query<FileQuery>,
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
-    let path = guard::resolve(&state, q.path.as_deref()).await?;
+    let path = guard::resolve_at(&state, q.path.as_deref(), q.root.unwrap_or(0)).await?;
 
     let meta = tokio::fs::metadata(&path).await.map_err(AppError::from)?;
     if meta.is_dir() {

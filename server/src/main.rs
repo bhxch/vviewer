@@ -16,9 +16,9 @@ struct Cli {
 enum Command {
     /// 通过 HTTP 暴露一个本地目录
     Serve {
-        /// 要暴露的根目录
+        /// 要暴露的根目录（可重复传入挂载多根；首个为 0 号根）
         #[arg(long)]
-        root: PathBuf,
+        root: Vec<PathBuf>,
         /// 前端构建产物目录（SvelteKit adapter-static build），挂载于 `/`
         #[arg(long)]
         web_dist: Option<PathBuf>,
@@ -83,7 +83,7 @@ fn main() {
 }
 
 pub struct ServeArgs {
-    pub root: PathBuf,
+    pub root: Vec<PathBuf>,
     pub web_dist: Option<PathBuf>,
     pub port: u16,
     pub token: Option<String>,
@@ -115,12 +115,20 @@ fn serve(args: ServeArgs) -> Result<(), i32> {
         return Err(2);
     }
 
-    let root = if args.root.is_dir() {
-        args.root
-    } else {
-        eprintln!("error: --root is not a directory: {}", args.root.display());
+    if args.root.is_empty() {
+        eprintln!("error: at least one --root is required");
         return Err(2);
-    };
+    }
+
+    let mut roots = Vec::with_capacity(args.root.len());
+    for root in args.root {
+        if root.is_dir() {
+            roots.push(root);
+        } else {
+            eprintln!("error: --root is not a directory: {}", root.display());
+            return Err(2);
+        }
+    }
 
     if let Some(dist) = &args.web_dist {
         if !dist.is_dir() {
@@ -143,12 +151,13 @@ fn serve(args: ServeArgs) -> Result<(), i32> {
     let sock = SocketAddr::new(ip, args.port);
 
     let state = vviewer::state::AppState::new(
-        root,
+        roots[0].clone(),
         args.web_dist,
         token,
         args.hidden,
         args.cors_origin,
     )
+    .with_roots(roots)
     .with_compute(args.compute);
     let app = vviewer::build_router(state.clone());
     let tickets = state.tickets;
@@ -187,7 +196,7 @@ mod tests {
 
     fn args(token: Option<String>) -> ServeArgs {
         ServeArgs {
-            root: PathBuf::from("/nonexistent-root-for-test"),
+            root: vec![PathBuf::from("/nonexistent-root-for-test")],
             web_dist: None,
             port: 8321,
             token,
@@ -204,5 +213,13 @@ mod tests {
     fn empty_token_is_rejected() {
         // 空 token 启动即拒（exit 2），先于 root 校验（root 故意指向不存在路径）
         assert_eq!(serve(args(Some(String::new()))), Err(2));
+    }
+
+    #[test]
+    fn empty_root_list_is_rejected() {
+        // 多值 --root 后缺根同样启动即拒（exit 2）
+        let mut a = args(None);
+        a.root.clear();
+        assert_eq!(serve(a), Err(2));
     }
 }
