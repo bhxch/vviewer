@@ -8,7 +8,8 @@ import { test, expect, type Page } from '@playwright/test';
  * - 布局链：.vv-hex-row 处于 .vv-virtual-viewport（absolute left:0 right:0）内，
  *   block 行默认被拉伸为容器宽，hex.ts 点击换算的「行宽/77=单字符宽」随之高估
  *   2~2.5 倍（检查器核心交互系统性偏移）。修复：app.css `.vv-hex-row{width:
- *   max-content;min-width:100%}` 使行宽回到内容宽。
+ *   max-content}` 使行宽回到内容宽（不可配对 min-width:100%——容器更宽时行被顶回
+ *   容器宽、抵消 max-content，e2e 首跑实测 768 vs 554.6px 后移除）。
  * - 断言口径：Range 圈选行首字符**独立实测**单字符宽（不依赖被测的 rect.width/77
  *   公式），先锁「行宽 ≈ 77×字符宽」（max-content 回归护栏——jsdom 无布局，单测
  *   mock 只能固化假设，真实布局只能在此验证），再驱动真实鼠标点击断言检查器 offset。

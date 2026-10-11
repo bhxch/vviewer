@@ -179,10 +179,11 @@ function setup(buffer: Uint8Array = BUF): {
 }
 
 /** 等宽布局 mock：行宽 mock 为**内容宽** 77 字符 × 10px/字符（renderHexBytes 行总宽
- * 恒 77）。真实布局由 app.css `.vv-hex-row { width: max-content; min-width: 100% }`
- * 保证（fix round 1 Critical 1：无此规则时行被 .vv-virtual-viewport 拉伸为容器宽，
- * 「行宽/字符数=单字符宽」高估）；jsdom 无布局只能以 mock 固化该假设，真实布局
- * 断言在 e2e t-hex-enhance.spec.ts（Range 实测字符宽 × 77 ≈ 行宽）。 */
+ * 恒 77）。真实布局由 app.css `.vv-hex-row { width: max-content }` 保证（fix round 1
+ * Critical 1：无此规则时行被 .vv-virtual-viewport 拉伸为容器宽，「行宽/字符数=单字
+ * 符宽」高估；配对 min-width:100% 会把行顶回容器宽、抵消 max-content，故不采用）；
+ * jsdom 无布局只能以 mock 固化该假设，真实布局断言在 e2e t-hex-enhance.spec.ts
+ * （Range 实测字符宽 × 77 ≈ 行宽）。 */
 function mockRowRect(): MockInstance {
   return vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
     left: 0, top: 0, right: 770, bottom: 18, width: 770, height: 18, x: 0, y: 0,
