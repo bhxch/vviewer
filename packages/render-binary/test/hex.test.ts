@@ -1,6 +1,7 @@
 // hex.test.ts — hex dump 行格式纯函数单测（renderHexBytes）+ 虚拟滚动 DOM 渲染（renderHex）。
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { renderHexBytes, HEX_ROW_BYTES } from '../src/hexBytes';
+import type { HexHighlight, HexRow } from '../src/hexBytes';
 
 // jsdom 无 ResizeObserver（虚拟滚动依赖），全文件 stub（照 render-text code.test.ts 惯例）
 beforeEach(() => {
@@ -51,6 +52,52 @@ describe('renderHexBytes', () => {
 
   it('空输入返回空数组', () => {
     expect(renderHexBytes(new Uint8Array(0), 0)).toEqual([]);
+  });
+});
+
+// ---- Task 2：renderHexBytes 可选命中高亮（两档 span 切分；无区间逐字节一致锁定）----
+
+describe('renderHexBytes 高亮', () => {
+  const data = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) data[i] = i;
+
+  it('无 highlights 与显式 undefined 输出逐字节一致（锁定）', () => {
+    expect(renderHexBytes(data, 0)).toEqual(renderHexBytes(data, 0, undefined));
+    expect(renderHexBytes(data, 0, [])).toEqual(renderHexBytes(data, 0)); // 空区间同义
+  });
+
+  it('两档区间：hex 列与 ASCII 列对应字节同档，切分无损、非命中区整串', () => {
+    const hls: HexHighlight[] = [
+      { start: 2, end: 4, active: false },
+      { start: 5, end: 6, active: true }
+    ];
+    const rows = renderHexBytes(data, 0, hls) as HexRow[];
+    expect(rows).toHaveLength(2);
+    const r0 = rows[0]!;
+    expect(r0.text).toBe(renderHexBytes(data, 0)[0]); // 整行文本不变
+    expect(r0.spans.map((s) => s.text).join('')).toBe(r0.text); // 切分无损
+    expect(r0.spans[0]).toEqual({ text: '00000000  00 01 ' }); // 前缀+未命中字节整串
+    expect(r0.spans.filter((s) => s.active === false).map((s) => s.text)).toEqual(['02 03', '..']);
+    expect(r0.spans.filter((s) => s.active === true).map((s) => s.text)).toEqual(['05', '.']);
+  });
+
+  it('跨行命中按行裁剪（17 字节命中跨两行，end 独占）', () => {
+    const rows = renderHexBytes(data, 0, [{ start: 14, end: 31, active: false }]) as HexRow[];
+    expect(rows[0]!.spans.filter((s) => s.active === false).map((s) => s.text)).toEqual(['0e 0f', '..']);
+    // 第二行命中 abs 16..30 → 行内 15 字节；abs 31（'1f'）不在区间
+    expect(rows[1]!.spans.filter((s) => s.active === false).map((s) => s.text)).toEqual([
+      '10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e',
+      '...............'
+    ]);
+  });
+
+  it('尾行（不足 16 字节）命中：行宽不变、命中段列位正确', () => {
+    const tail = data.subarray(0, 3);
+    const plain = renderHexBytes(tail, 0)[0]!;
+    const rows = renderHexBytes(tail, 0, [{ start: 1, end: 3, active: true }]) as HexRow[];
+    expect(rows[0]!.text.length).toBe(plain.length);
+    expect(rows[0]!.text).toBe(plain);
+    expect(rows[0]!.spans.filter((s) => s.active === true).map((s) => s.text)).toEqual(['01 02', '..']);
   });
 });
 

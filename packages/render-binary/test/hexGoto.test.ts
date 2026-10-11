@@ -145,6 +145,29 @@ describe('renderHex：工具条与跳转', () => {
     }
   });
 
+  it('IME 组合期 Enter 不触发跳转（isComposing 过滤，Task 2 补）', () => {
+    const { inst, target, dump, input } = setup(MB);
+    input.value = '0x100';
+    input.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true })
+    );
+    expect(dump.scrollTop).toBe(0);
+    inst.destroy();
+    target.remove();
+  });
+
+  it('非法输入提交清空过期状态位（「已跳至文件尾」残留，Task 2 补）', () => {
+    const { inst, target, input } = setup(MB);
+    input.value = '0x99999999';
+    pressEnter(input);
+    expect(target.querySelector('.vv-hex-toolbar-status')?.textContent).toBe('已跳至文件尾');
+    input.value = 'abc';
+    pressEnter(input);
+    expect(target.querySelector('.vv-hex-toolbar-status')?.textContent).toBe('');
+    inst.destroy();
+    target.remove();
+  });
+
   it('空 buffer：跳转不动作、不抛错', () => {
     const { inst, target, dump, input } = setup(new Uint8Array(0));
     input.value = '0x10';

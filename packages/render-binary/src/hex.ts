@@ -4,8 +4,13 @@
 // 与 render-text 的 virtualScroller（上移后由 @vviewer/core 提供）共用。
 // 原分页「加载更多」语义随之取消：滚动到底即达数据末偏移，无续读步骤。
 // 结构树走 binary.worker（BinaryClient），状态行展示大小/识别类型。
+// Task 2（spec H §2.2）：工具条搜索——worker 分块扫描（进度/取消/截断），
+// 命中列表驻主线程镜像（数组 + 行号 Set），命中行两档 span 切分高亮与导航。
 import { virtualScroller, type VirtualScrollerHandle, type Detection, type FileSource, type RenderedInstance, type Renderer } from '@vviewer/core';
 import { renderHexBytes, HEX_ROW_BYTES } from './hexBytes';
+import type { HexHighlight, HexRow } from './hexBytes';
+import type { BinaryClient, SearchDoneInfo, SearchProgressInfo } from './client';
+import { scanAll } from './searchScan';
 import { STRUCT_TAIL_BYTES, type ParseResult, type StructNode } from './struct';
 
 /** hex 行高（px）：字号 12px × 1.5 行距，与 app.css .vv-hex-dump 一致；行内样式显式锁定 */
@@ -26,6 +31,31 @@ export function parseGotoInput(input: string): number | null {
   return null;
 }
 
+/**
+ * 搜索输入解析（Task 2，spec §2.2 hex/文本消歧义）：去空白后为偶数位合法 hex 串
+ * → 按字节；奇数位 hex → invalid（aria-invalid 内联提示）；其余（含 0x 前缀、
+ * 一般文本）→ 文本（UTF-8 编码）；空 → null（不动作）。独立纯函数便于单测。
+ */
+export type ParsedSearchInput =
+  | { kind: 'hex'; bytes: Uint8Array }
+  | { kind: 'text'; bytes: Uint8Array }
+  | { kind: 'invalid' };
+
+export function parseSearchInput(input: string): ParsedSearchInput | null {
+  const s = input.trim();
+  if (s === '') return null;
+  const hexStr = s.replace(/\s+/g, '');
+  if (/^[0-9a-f]+$/i.test(hexStr)) {
+    if (hexStr.length % 2 !== 0) return { kind: 'invalid' };
+    const bytes = new Uint8Array(hexStr.length / 2);
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = parseInt(hexStr.slice(i * 2, i * 2 + 2), 16);
+    }
+    return { kind: 'hex', bytes };
+  }
+  return { kind: 'text', bytes: new TextEncoder().encode(s) };
+}
+
 // .vv-hex-goto-flash 衰减样式（注入一次，模块级去重）：加类即着色（transition 0s），
 // 移除类后经 .vv-hex-row 基态过渡 1s 渐隐。不依赖 app.css 到位（同 dump 字号锁定
 // 思路）；Task 3 cursor 字节级高亮落地后由其统一收编。
@@ -37,6 +67,19 @@ function ensureGotoFlashStyle(): void {
   style.textContent =
     '.vv-hex-row{transition:background-color 1s ease-out}' +
     '.vv-hex-goto-flash{background-color:rgba(255,176,0,.4);transition:background-color 0s}';
+  document.head.append(style);
+}
+
+// 命中两档高亮样式（注入一次，模块级去重）：普通命中淡橙底，当前命中加重。
+// Task 3 cursor 字节级高亮落地后与 goto-flash 一并由其收编。
+let hexHitStyleInjected = false;
+function ensureHexHitStyle(): void {
+  if (hexHitStyleInjected) return;
+  hexHitStyleInjected = true;
+  const style = document.createElement('style');
+  style.textContent =
+    '.vv-hex-hit{background-color:rgba(255,176,0,.22)}' +
+    '.vv-hex-hit-active{background-color:rgba(255,120,0,.55)}';
   document.head.append(style);
 }
 
@@ -96,11 +139,11 @@ export function renderHex(
     'flex:1 1 auto; min-height:0; overflow:auto;' +
     'font-family:var(--vv-code-font, monospace); font-size:12px; line-height:1.5; white-space:pre;';
   body.append(dump);
-  // ---- 工具条（spec §2.1）：dump 的兄弟节点而非子节点——virtualScroller 会
+  // ---- 工具条（spec §2.1/§2.2）：dump 的兄弟节点而非子节点——virtualScroller 会
   // replaceChildren 滚动容器，放里面会被清掉且 spacer 定位被顶偏（code.ts 提示条
-  // 先例）。Task 1 只渲染跳转框（搜索框 Task 2 再增补，占位 disabled 会误导）；
-  // 状态位先行就位（超界提示 / Task 2 命中计数复用）。样式行内锁定（同 dump 思路，
-  // 不依赖 app.css 到位）；位于滚动区上方、flex:none，即 sticky 语义。
+  // 先例）。Task 1 跳转框 + Task 2 搜索簇（输入/大小写开关/上下导航/状态位/取消）。
+  // 样式行内锁定（同 dump 思路，不依赖 app.css 到位）；位于滚动区上方、flex:none，
+  // 即 sticky 语义。
   const toolbar = document.createElement('div');
   toolbar.className = 'vv-hex-toolbar';
   toolbar.style.cssText =
@@ -114,9 +157,56 @@ export function renderHex(
   const toolbarStatus = document.createElement('span');
   toolbarStatus.className = 'vv-hex-toolbar-status';
   toolbarStatus.style.cssText = 'font-size:12px; color:var(--ui-fg-muted, inherit);';
-  toolbar.append(gotoInput, toolbarStatus);
+  // 搜索簇（Task 2）
+  const searchInput = document.createElement('input');
+  searchInput.className = 'vv-hex-search';
+  searchInput.placeholder = '搜索 (hex 或文本)';
+  searchInput.setAttribute('aria-label', '搜索（hex 字节或文本）');
+  searchInput.style.cssText = 'flex:0 1 auto; width:12em; min-width:0;';
+  const caseToggle = document.createElement('input');
+  caseToggle.type = 'checkbox';
+  caseToggle.className = 'vv-hex-search-case';
+  caseToggle.setAttribute('aria-label', '区分大小写（仅文本搜索）');
+  const btnCss = 'flex:none; font-size:12px; padding:1px 6px; cursor:pointer;';
+  const prevBtn = document.createElement('button');
+  prevBtn.type = 'button';
+  prevBtn.className = 'vv-hex-search-prev';
+  prevBtn.textContent = '↑';
+  prevBtn.setAttribute('aria-label', '上一处命中');
+  prevBtn.style.cssText = btnCss;
+  const nextBtn = document.createElement('button');
+  nextBtn.type = 'button';
+  nextBtn.className = 'vv-hex-search-next';
+  nextBtn.textContent = '↓';
+  nextBtn.setAttribute('aria-label', '下一处命中');
+  nextBtn.style.cssText = btnCss;
+  const searchStatus = document.createElement('span');
+  searchStatus.className = 'vv-hex-search-status';
+  searchStatus.style.cssText = 'font-size:12px; color:var(--ui-fg-muted, inherit);';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'vv-hex-search-cancel';
+  cancelBtn.textContent = '取消';
+  cancelBtn.style.cssText = `${btnCss} display:none;`;
+  toolbar.append(gotoInput, toolbarStatus, searchInput, caseToggle, prevBtn, nextBtn, searchStatus, cancelBtn);
   root.append(status, toolbar, body);
   target.replaceChildren(root);
+
+  // ---- 搜索状态（Task 2）：声明先于 virtualScroller（其初始化即触发 onRange，
+  // 闭包引用这些变量，声明在后会 TDZ）。命中列表驻主线程镜像（数组 + 行号 Set：
+  // onRange 按行 O(1) 判定该行走 span 切分，其余行整串零开销）。----
+  let searchClient: BinaryClient | null = null; // 常驻（structReady 的 client 解析完即 dispose 终止）
+  let searchClientPromise: Promise<BinaryClient | null> | null = null;
+  let searchSeq = 0; // 主线程取消令牌：兜底扫描与迟滞回调的失效判据
+  let hitOffsets: number[] = [];
+  let hitIndex = -1;
+  const hitRows = new Set<number>();
+  let hitNeedleLen = 0;
+  let hitTruncated = false;
+  let lastSearchedInput: string | null = null;
+  let progressScanned = 0;
+  let progressTotal = 0;
+  let searchBusy = false;
 
   // ---- 虚拟滚动 dump：总行数 = ceil(大小/16)，可视行即时格式化 ----
   const rowCount = Math.ceil(buffer.length / HEX_ROW_BYTES);
@@ -129,11 +219,51 @@ export function renderHex(
       const end = Math.min(buffer.length, (last + 1) * HEX_ROW_BYTES);
       const frag = document.createDocumentFragment();
       if (start < end) {
-        for (const row of renderHexBytes(buffer.subarray(start, end), start)) {
-          const el = document.createElement('div');
-          el.className = 'vv-hex-row';
-          el.textContent = row;
-          frag.append(el);
+        // 命中行 Set O(1) 查询：窗口含命中才走 span 切分，否则整串（与原版逐字节一致）
+        let windowHasHits = false;
+        for (let r = first; r <= last; r++) {
+          if (hitRows.has(r)) {
+            windowHasHits = true;
+            break;
+          }
+        }
+        const slice = buffer.subarray(start, end);
+        if (!windowHasHits) {
+          for (const row of renderHexBytes(slice, start)) {
+            const el = document.createElement('div');
+            el.className = 'vv-hex-row';
+            el.textContent = row;
+            frag.append(el);
+          }
+        } else {
+          // 窗口内命中 → 字节区间（窗口相对坐标；needle 起点可越窗界，一并纳入）
+          const activeOff = hitIndex >= 0 ? hitOffsets[hitIndex]! : -1;
+          const hls: HexHighlight[] = [];
+          if (hitNeedleLen > 0) {
+            for (const off of hitOffsets) {
+              if (off + hitNeedleLen <= start || off >= end) continue;
+              hls.push({ start: off - start, end: off - start + hitNeedleLen, active: off === activeOff });
+            }
+          }
+          for (const row of renderHexBytes(slice, start, hls)) {
+            const el = document.createElement('div');
+            el.className = 'vv-hex-row';
+            if (typeof row === 'string') {
+              el.textContent = row;
+            } else {
+              for (const span of (row as HexRow).spans) {
+                if (span.active === undefined) {
+                  el.append(document.createTextNode(span.text));
+                } else {
+                  const s = document.createElement('span');
+                  s.className = span.active ? 'vv-hex-hit vv-hex-hit-active' : 'vv-hex-hit';
+                  s.textContent = span.text;
+                  el.append(s);
+                }
+              }
+            }
+            frag.append(el);
+          }
         }
       }
       viewport.replaceChildren(frag);
@@ -161,7 +291,11 @@ export function renderHex(
   }
   function gotoOffset(): void {
     const parsed = parseGotoInput(gotoInput.value);
-    if (parsed === null || buffer.length === 0) return; // 空输入不动作（spec §2.1）
+    if (parsed === null) {
+      toolbarStatus.textContent = ''; // 非法输入清空过期状态位（如「已跳至文件尾」残留）
+      return;
+    }
+    if (buffer.length === 0) return; // 空文件不动作（spec §2.1）
     const clamped = Math.min(parsed, buffer.length - 1); // 超界 clamp 到最后一个字节
     toolbarStatus.textContent = clamped < parsed ? '已跳至文件尾' : '';
     const row = Math.floor(clamped / HEX_ROW_BYTES);
@@ -174,7 +308,156 @@ export function renderHex(
     flashTargetRow(row);
   }
   gotoInput.addEventListener('keydown', (e) => {
+    if (e.isComposing) return; // IME 组合期不提交
     if (e.key === 'Enter') gotoOffset();
+  });
+
+  // ---- 搜索行为（Task 2，spec §2.2）：worker 分块扫描 + 兜底主线程 scanAll ----
+  // 搜索 worker 与结构树分离：懒创建常驻（structReady 的 client 解析完即 dispose
+  // 终止其 worker，搜索需要长生命周期）；环境无 Worker 时兜底主线程 scanAll
+  // （同分块语义，块间让出可取消，小文件同步量级）。
+  function ensureSearchClient(): Promise<BinaryClient | null> {
+    if (searchClientPromise) return searchClientPromise;
+    searchClientPromise = (async (): Promise<BinaryClient | null> => {
+      const w = opts.createWorker?.() ?? null;
+      if (!w) return null;
+      // 动态 import 避免把 client 静态拖进依赖图（同 structReady 薄壳模式）
+      const { BinaryClient: BinaryClientImpl } = await import('./client');
+      searchClient = new BinaryClientImpl(w);
+      return searchClient;
+    })();
+    return searchClientPromise;
+  }
+
+  function setSearchBusy(busy: boolean): void {
+    searchBusy = busy;
+    cancelBtn.style.display = busy ? '' : 'none';
+  }
+
+  function addHitRows(offsets: number[]): void {
+    for (const off of offsets) hitRows.add(Math.floor(off / HEX_ROW_BYTES));
+  }
+
+  function renderSearchStatus(): void {
+    const n = hitOffsets.length;
+    if (searchBusy) {
+      searchStatus.textContent = `${progressScanned}/${progressTotal}`;
+    } else if (n === 0) {
+      searchStatus.textContent = lastSearchedInput !== null ? '无命中' : '';
+    } else if (hitIndex >= 0) {
+      searchStatus.textContent = `${hitIndex + 1}/${n} 处命中${hitTruncated ? '（截断）' : ''}`;
+    } else {
+      searchStatus.textContent = `${n} 处命中${hitTruncated ? '（截断）' : ''}`;
+    }
+  }
+
+  /** 命中导航：循环取模；滚动定位同 goto（jsdom 无布局退化为行顶对齐）+ 同步重绘 */
+  function gotoHit(index: number): void {
+    const n = hitOffsets.length;
+    if (n === 0) return;
+    hitIndex = ((index % n) + n) % n;
+    const row = Math.floor(hitOffsets[hitIndex]! / HEX_ROW_BYTES);
+    dump.scrollTop = Math.max(0, row * HEX_LINE_HEIGHT - dump.clientHeight / 2);
+    scroller.refresh(true); // 当前命中行以 active 档重绘
+    ensureHexHitStyle();
+    renderSearchStatus();
+  }
+
+  function startSearch(): void {
+    const parsed = parseSearchInput(searchInput.value);
+    if (parsed === null || buffer.length === 0) return; // 空输入/空文件不动作
+    if (parsed.kind === 'invalid') {
+      searchInput.setAttribute('aria-invalid', 'true');
+      searchStatus.textContent = 'hex 位数须为偶数';
+      return;
+    }
+    searchInput.removeAttribute('aria-invalid');
+    // 新搜索自动取消旧任务：seq 失效兜底回调；client.search 覆盖处理器（旧 id
+    // 消息丢弃），worker 收到新请求后亦因搜索 id 失效在块边界停扫
+    const seq = ++searchSeq;
+    hitOffsets = [];
+    hitIndex = -1;
+    hitRows.clear();
+    hitNeedleLen = parsed.bytes.length;
+    hitTruncated = false;
+    lastSearchedInput = searchInput.value;
+    progressScanned = 0;
+    progressTotal = buffer.length;
+    setSearchBusy(true);
+    renderSearchStatus();
+    const caseInsensitive = parsed.kind === 'text' && !caseToggle.checked;
+    const onProgress = (p: SearchProgressInfo): void => {
+      if (seq !== searchSeq) return;
+      progressScanned = p.scanned;
+      progressTotal = p.total;
+      addHitRows(p.offsets);
+      renderSearchStatus();
+      scroller.refresh(true); // 进度到达即重绘可视区命中
+    };
+    const onDone = (r: SearchDoneInfo): void => {
+      if (seq !== searchSeq) return;
+      hitOffsets = r.offsets;
+      hitTruncated = r.truncated;
+      addHitRows(r.offsets);
+      setSearchBusy(false);
+      if (hitOffsets.length > 0) {
+        gotoHit(0); // 首个命中滚动定位 + active 档
+      } else {
+        renderSearchStatus();
+        scroller.refresh(true); // 清除上一轮残留高亮
+      }
+    };
+    void ensureSearchClient().then((client) => {
+      if (seq !== searchSeq) return; // 建连期间已被新搜索/取消取代
+      if (client) {
+        client.search(parsed.bytes, { data: buffer, caseInsensitive, onProgress, onDone });
+        return;
+      }
+      void scanAll(buffer, parsed.bytes, {
+        fold: caseInsensitive,
+        shouldContinue: () => seq === searchSeq,
+        onChunk: (info) => {
+          onProgress({ scanned: info.scanned, total: info.total, hits: info.hits, offsets: info.offsets });
+        }
+      }).then((res) => {
+        if (seq !== searchSeq || res.aborted) return;
+        onDone({ truncated: res.truncated, offsets: res.offsets });
+      });
+    });
+  }
+
+  searchInput.addEventListener('input', () => {
+    const parsed = parseSearchInput(searchInput.value);
+    if (parsed?.kind === 'invalid') {
+      searchInput.setAttribute('aria-invalid', 'true');
+      searchStatus.textContent = 'hex 位数须为偶数';
+    } else {
+      searchInput.removeAttribute('aria-invalid');
+      if (!searchBusy) renderSearchStatus();
+    }
+    caseToggle.disabled = parsed?.kind !== 'text'; // 大小写开关仅文本模式有意义
+  });
+
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.isComposing) return; // IME 组合期不提交
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    if (searchInput.value !== lastSearchedInput) {
+      startSearch(); // 输入变化 → 发起新搜索
+    } else if (e.shiftKey) {
+      gotoHit(hitIndex < 0 ? hitOffsets.length - 1 : hitIndex - 1); // Shift+Enter 上一处（循环）
+    } else {
+      gotoHit(hitIndex + 1); // Enter 下一处（循环）
+    }
+  });
+
+  prevBtn.addEventListener('click', () => gotoHit(hitIndex < 0 ? hitOffsets.length - 1 : hitIndex - 1));
+  nextBtn.addEventListener('click', () => gotoHit(hitIndex + 1));
+  cancelBtn.addEventListener('click', () => {
+    ++searchSeq; // 兜底扫描/迟滞回调一并失效
+    searchClient?.cancelSearch();
+    setSearchBusy(false);
+    searchStatus.textContent = '已取消';
   });
 
   // ---- 结构树（Worker 化，失败降级主线程）----
@@ -232,6 +515,8 @@ export function renderHex(
 
   return {
     destroy() {
+      ++searchSeq; // 兜底扫描/迟滞回调失效
+      searchClient?.dispose(); // 终止搜索 worker（与结构树 worker 分离）
       if (flashTimer !== null) clearTimeout(flashTimer);
       scroller.destroy();
       worker?.terminate();
