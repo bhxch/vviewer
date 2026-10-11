@@ -6,9 +6,13 @@
 // 结构树走 binary.worker（BinaryClient），状态行展示大小/识别类型。
 // Task 2（spec H §2.2）：工具条搜索——worker 分块扫描（进度/取消/截断），
 // 命中列表驻主线程镜像（数组 + 行号 Set），命中行两档 span 切分高亮与导航。
+// Task 3（spec H §2.3）：数据检查器——cursor 点击/键盘定位 + 光标字节高亮（复用
+// span 切分，cursor/flash 档与命中档按字节叠加），跳转行级 flash 收编为字节级；
+// getInspector/setLittle 鸭子接口供 ViewerPane 轮询上行/总线下行（本包不依赖 web）。
 import { virtualScroller, type VirtualScrollerHandle, type Detection, type FileSource, type RenderedInstance, type Renderer } from '@vviewer/core';
-import { renderHexBytes, HEX_ROW_BYTES } from './hexBytes';
+import { renderHexBytes, HEX_ROW_BYTES, byteIndexAtColumn } from './hexBytes';
 import type { HexHighlight, HexRow } from './hexBytes';
+import { decodeAt, type InspectorRow, type InspectorSnapshot } from './inspector';
 import type { BinaryClient, SearchDoneInfo, SearchProgressInfo } from './client';
 import { scanAll } from './searchScan';
 import { STRUCT_TAIL_BYTES, type ParseResult, type StructNode } from './struct';
@@ -56,32 +60,8 @@ export function parseSearchInput(input: string): ParsedSearchInput | null {
   return { kind: 'text', bytes: new TextEncoder().encode(s) };
 }
 
-// .vv-hex-goto-flash 衰减样式（注入一次，模块级去重）：加类即着色（transition 0s），
-// 移除类后经 .vv-hex-row 基态过渡 1s 渐隐。不依赖 app.css 到位（同 dump 字号锁定
-// 思路）；Task 3 cursor 字节级高亮落地后由其统一收编。
-let gotoFlashStyleInjected = false;
-function ensureGotoFlashStyle(): void {
-  if (gotoFlashStyleInjected) return;
-  gotoFlashStyleInjected = true;
-  const style = document.createElement('style');
-  style.textContent =
-    '.vv-hex-row{transition:background-color 1s ease-out}' +
-    '.vv-hex-goto-flash{background-color:rgba(255,176,0,.4);transition:background-color 0s}';
-  document.head.append(style);
-}
-
-// 命中两档高亮样式（注入一次，模块级去重）：普通命中淡橙底，当前命中加重。
-// Task 3 cursor 字节级高亮落地后与 goto-flash 一并由其收编。
-let hexHitStyleInjected = false;
-function ensureHexHitStyle(): void {
-  if (hexHitStyleInjected) return;
-  hexHitStyleInjected = true;
-  const style = document.createElement('style');
-  style.textContent =
-    '.vv-hex-hit{background-color:rgba(255,176,0,.22)}' +
-    '.vv-hex-hit-active{background-color:rgba(255,120,0,.55)}';
-  document.head.append(style);
-}
+// 高亮样式（命中两档 / 光标 / 跳转衰减）已收编 app.css 的 .vv-hex-* 段落（Task 3
+// 裁决）：原运行时 <style> 注入不随 destroy 清理的问题随之消除。
 
 function formatSize(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -116,13 +96,19 @@ export interface HexDomOptions {
 
 /**
  * hex dump DOM 渲染（hexRenderer.render 的主体，独立导出便于复用）。
- * 返回实例 destroy：移除 DOM、终止 worker。
+ * 返回实例 destroy：移除 DOM、终止 worker；getInspector/setLittle：数据检查器
+ * 鸭子接口（Task 3，ViewerPane 轮询上行/总线下行）。
  */
 export function renderHex(
   buffer: Uint8Array,
   target: HTMLElement,
   opts: HexDomOptions = {}
-): { destroy(): void; structReady: Promise<void> } {
+): {
+  destroy(): void;
+  structReady: Promise<void>;
+  getInspector(): InspectorSnapshot | null;
+  setLittle(v: boolean): void;
+} {
   const root = document.createElement('div');
   root.className = 'vv-hex';
   const status = document.createElement('div');
@@ -210,6 +196,15 @@ export function renderHex(
   let progressTotal = 0;
   let searchBusy = false;
 
+  // ---- 检查器状态（Task 3，spec §2.3）：cursor 单字节 + 跳转 flash 单区间 + 字节序。
+  // 声明先于 virtualScroller（其初始化即触发 onRange，闭包引用这些变量，声明在后会
+  // TDZ，同搜索状态注记）。inspectorRows 为 cursor 处解码缓存（cursor/字节序变化时
+  // 重算，getInspector 直读，ViewerPane 轮询上行）----
+  let cursor: number | null = null; // 光标字节（绝对偏移；null = 未定位）
+  let flashOffset: number | null = null; // 跳转目标字节（绝对偏移；1s 衰减）
+  let little = true; // 检查器字节序（spec §2.3：默认小端）
+  let inspectorRows: InspectorRow[] = [];
+
   // ---- 虚拟滚动 dump：总行数 = ceil(大小/16)，可视行即时格式化 ----
   const rowCount = Math.ceil(buffer.length / HEX_ROW_BYTES);
   const scroller: VirtualScrollerHandle = virtualScroller(
@@ -221,16 +216,19 @@ export function renderHex(
       const end = Math.min(buffer.length, (last + 1) * HEX_ROW_BYTES);
       const frag = document.createDocumentFragment();
       if (start < end) {
-        // 命中行 Set O(1) 查询：窗口含命中才走 span 切分，否则整串（与原版逐字节一致）
-        let windowHasHits = false;
+        // 装饰行判定 O(1)：命中行 Set ∪ 光标行 ∪ flash 行，窗口含任一装饰才走
+        // span 切分，否则整串（与原版逐字节一致，零开销）
+        const cursorRow = cursor === null ? -1 : Math.floor(cursor / HEX_ROW_BYTES);
+        const flashRow = flashOffset === null ? -1 : Math.floor(flashOffset / HEX_ROW_BYTES);
+        let windowHasDecor = false;
         for (let r = first; r <= last; r++) {
-          if (hitRows.has(r)) {
-            windowHasHits = true;
+          if (hitRows.has(r) || r === cursorRow || r === flashRow) {
+            windowHasDecor = true;
             break;
           }
         }
         const slice = buffer.subarray(start, end);
-        if (!windowHasHits) {
+        if (!windowHasDecor) {
           for (const row of renderHexBytes(slice, start)) {
             const el = document.createElement('div');
             el.className = 'vv-hex-row';
@@ -238,7 +236,10 @@ export function renderHex(
             frag.append(el);
           }
         } else {
-          // 窗口内命中 → 字节区间（窗口相对坐标；needle 起点可越窗界，一并纳入）
+          // 窗口内装饰 → 字节区间（窗口相对坐标；needle 起点可越窗界，一并纳入）。
+          // 四档互斥按字节叠加、高档胜出（cursor > flash > 当前命中 > 普通命中，
+          // 合并逻辑在 hexBytes highlightIntervals）——cursor 单区间与命中区间
+          // 同行/同字节共存即天然合并，此处只需把各装饰区间线性并入。
           const activeOff = hitIndex >= 0 ? hitOffsets[hitIndex]! : -1;
           const hls: HexHighlight[] = [];
           if (hitNeedleLen > 0) {
@@ -247,6 +248,12 @@ export function renderHex(
               hls.push({ start: off - start, end: off - start + hitNeedleLen, active: off === activeOff });
             }
           }
+          if (cursor !== null && cursor >= start && cursor < end) {
+            hls.push({ start: cursor - start, end: cursor - start + 1, active: false, cursor: true });
+          }
+          if (flashOffset !== null && flashOffset >= start && flashOffset < end) {
+            hls.push({ start: flashOffset - start, end: flashOffset - start + 1, active: false, flash: true });
+          }
           for (const row of renderHexBytes(slice, start, hls)) {
             const el = document.createElement('div');
             el.className = 'vv-hex-row';
@@ -254,11 +261,17 @@ export function renderHex(
               el.textContent = row;
             } else {
               for (const span of (row as HexRow).spans) {
-                if (span.active === undefined) {
+                if (span.active === undefined && !span.cursor && !span.flash) {
                   el.append(document.createTextNode(span.text));
                 } else {
                   const s = document.createElement('span');
-                  s.className = span.active ? 'vv-hex-hit vv-hex-hit-active' : 'vv-hex-hit';
+                  s.className = span.cursor
+                    ? 'vv-hex-cursor'
+                    : span.flash
+                      ? 'vv-hex-goto-flash'
+                      : span.active
+                        ? 'vv-hex-hit vv-hex-hit-active'
+                        : 'vv-hex-hit';
                   s.textContent = span.text;
                   el.append(s);
                 }
@@ -272,24 +285,24 @@ export function renderHex(
     }
   );
 
-  // ---- 跳转（spec §2.1）：解析 → 超界 clamp → 经既有虚拟滚动定位 → 瞬时高亮 ----
+  // ---- 跳转（spec §2.1）：解析 → 超界 clamp → 经既有虚拟滚动定位 → 字节级瞬时
+  // 高亮（Task 1 行级 flash 收编为 Task 3 span 切分 flash 档；样式在 app.css
+  // .vv-hex-goto-flash，衰减动画由其 keyframes 承担，1s 后重绘摘除——span 随重绘
+  // 重建，transition 渐隐不可行）----
   const GOTO_FLASH_MS = 1000;
   let flashTimer: ReturnType<typeof setTimeout> | null = null;
-  function flashTargetRow(row: number): void {
-    // 行级近似：按行首偏移列（8 位小写 hex，与 renderHexBytes 一致）匹配目标行，
-    // 加临时类 1s 后移除。Task 3 的 cursor span 切分机制落地后升级为字节级高亮，
-    // 此处随之收编。
-    const want = (row * HEX_ROW_BYTES).toString(16).padStart(8, '0');
-    for (const el of dump.querySelectorAll<HTMLElement>('.vv-hex-row')) {
-      if (!(el.textContent ?? '').startsWith(want)) continue;
-      el.classList.add('vv-hex-goto-flash');
-      if (flashTimer !== null) clearTimeout(flashTimer);
+  function setFlash(offset: number | null): void {
+    flashOffset = offset;
+    if (flashTimer !== null) clearTimeout(flashTimer);
+    flashTimer = null;
+    if (offset !== null) {
       flashTimer = setTimeout(() => {
-        el.classList.remove('vv-hex-goto-flash');
+        flashOffset = null;
         flashTimer = null;
+        scroller.refresh(true); // 衰减结束：重绘摘除高亮
       }, GOTO_FLASH_MS);
-      break;
     }
+    scroller.refresh(true);
   }
   function gotoOffset(): void {
     const parsed = parseGotoInput(gotoInput.value);
@@ -306,8 +319,7 @@ export function renderHex(
     // 区间未变为 no-op；refresh(true) 保证目标行在下面的高亮查询前已同步渲染。
     dump.scrollTop = Math.max(0, row * HEX_LINE_HEIGHT - dump.clientHeight / 2);
     scroller.refresh(true);
-    ensureGotoFlashStyle();
-    flashTargetRow(row);
+    setFlash(clamped);
   }
   gotoInput.addEventListener('keydown', (e) => {
     if (e.isComposing) return; // IME 组合期不提交
@@ -361,7 +373,6 @@ export function renderHex(
     const row = Math.floor(hitOffsets[hitIndex]! / HEX_ROW_BYTES);
     dump.scrollTop = Math.max(0, row * HEX_LINE_HEIGHT - dump.clientHeight / 2);
     scroller.refresh(true); // 当前命中行以 active 档重绘
-    ensureHexHitStyle();
     renderSearchStatus();
   }
 
@@ -462,6 +473,44 @@ export function renderHex(
     searchStatus.textContent = '已取消';
   });
 
+  // ---- 数据检查器（Task 3，spec §2.3）：cursor 点击/键盘定位 + 光标字节高亮 +
+  // getInspector/setLittle 鸭子接口。上行/下行均不在本包内：ViewerPane 轮询
+  // getInspector 快照写 metaStore（引擎指示器 watchEngine 同款先例），MetaPanel
+  // 字节序 select 写 inspectorBus、ViewerPane 探测 setLittle 透传 ----
+  function refreshInspectorRows(): void {
+    if (cursor !== null) inspectorRows = decodeAt(buffer, cursor, little);
+  }
+  function setCursor(offset: number): void {
+    cursor = offset;
+    refreshInspectorRows();
+    scroller.refresh(true); // 光标行以 cursor 档重绘
+  }
+  dump.tabIndex = 0; // 键盘 ±1 需容器可聚焦（点击行内即获得焦点）
+  dump.addEventListener('click', (e) => {
+    const rowEl = (e.target as HTMLElement | null)?.closest?.('.vv-hex-row') as HTMLElement | null;
+    if (!rowEl) return;
+    const text = rowEl.textContent ?? '';
+    // 整行字符串下按 x 坐标定位字节：等宽布局下行宽/字符数 = 单字符宽（行总宽恒
+    // 77 字符——renderHexBytes 尾行空格补齐保证）；无布局环境（jsdom）行宽为 0
+    // 无法换算，忽略点击。字符列 → 字节序号经 byteIndexAtColumn（行布局单一来源
+    // 在 hexBytes）。行首偏移取自偏移列（8 位小写 hex，与 renderHexBytes 同构）。
+    const rect = rowEl.getBoundingClientRect();
+    if (rect.width <= 0 || text.length < 10) return;
+    const charW = rect.width / text.length;
+    const rowStart = parseInt(text.slice(0, 8), 16);
+    const rowLen = Math.min(HEX_ROW_BYTES, buffer.length - rowStart);
+    const col = Math.floor((e.clientX - rect.left) / charW);
+    setCursor(rowStart + byteIndexAtColumn(col, rowLen));
+  });
+  dump.addEventListener('keydown', (e) => {
+    if (e.isComposing) return; // IME 组合期不动作
+    if (cursor === null) return; // 未定位光标：方向键交还容器默认滚动
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const next = cursor + (e.key === 'ArrowLeft' ? -1 : 1);
+    setCursor(Math.min(buffer.length - 1, Math.max(0, next))); // 首尾字节 clamp
+    e.preventDefault(); // 光标移动取代容器滚动
+  });
+
   // ---- 结构树（Worker 化，失败降级主线程）----
   let worker: Worker | null = null;
   const structReady = (async (): Promise<void> => {
@@ -526,7 +575,17 @@ export function renderHex(
       worker?.terminate();
       root.remove();
     },
-    structReady
+    structReady,
+    getInspector(): InspectorSnapshot | null {
+      // hex 实例激活但光标未定位 → null（ViewerPane 据此清空 MetaPanel 区块）
+      if (cursor === null) return null;
+      return { offset: cursor, little, rows: inspectorRows };
+    },
+    setLittle(v: boolean): void {
+      if (little === v) return;
+      little = v;
+      refreshInspectorRows(); // 字节序变换后重解码（ViewerPane 轮询拾取新快照上行）
+    }
   };
 }
 
@@ -546,10 +605,18 @@ export const hexRenderer: Renderer = {
       }
     });
     await instance.structReady;
-    return {
+    // getInspector/setLittle 供 ViewerPane 属性面板上行/字节序下行（Task 3，鸭子
+    // 探测同 code 的 getMeta 先例）；结构化扩展 RenderedInstance 不动 core。
+    const rendered: RenderedInstance & {
+      getInspector(): InspectorSnapshot | null;
+      setLittle(v: boolean): void;
+    } = {
       destroy() {
         instance.destroy();
-      }
+      },
+      getInspector: () => instance.getInspector(),
+      setLittle: (v) => instance.setLittle(v)
     };
+    return rendered;
   }
 };

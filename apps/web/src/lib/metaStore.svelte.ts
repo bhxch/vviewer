@@ -13,6 +13,21 @@ export interface FileOpenWith {
   options: { id: string; label: string }[];
 }
 
+/** 数据检查器单行（render-binary decodeAt 输出的结构镜像——web 侧不依赖包内部
+ * 导出路径，形状以 metaStore 为单一来源；available=false 的行 value='—' 灰显） */
+export interface InspectorRowState {
+  label: string;
+  value: string;
+  available: boolean;
+}
+
+/** 数据检查器快照（hex 实例 getInspector 鸭子接口返回；光标定位时存在） */
+export interface InspectorSnapshot {
+  offset: number;
+  little: boolean;
+  rows: InspectorRowState[];
+}
+
 /** 属性面板展示的元数据（字符串字段空串 = 该项无数据不展示） */
 export interface FileMetaState {
   name: string;
@@ -27,6 +42,8 @@ export interface FileMetaState {
   /** 打开方式候选与生效项（C 项）；null = 不显示（tab 空/清理/store.read 失败卡片）。
    * dispatch 返回的错误卡片仍带候选（'error' id 经 openWithOf 守卫滤除） */
   openWith: FileOpenWith | null;
+  /** 数据检查器（Task 3，hex 增强 §2.3）：hex 实例 + 光标定位时非 null */
+  inspector: InspectorSnapshot | null;
 }
 
 export const fileMeta = $state<FileMetaState>({
@@ -36,7 +53,8 @@ export const fileMeta = $state<FileMetaState>({
   lang: '',
   size: null,
   lines: null,
-  openWith: null
+  openWith: null,
+  inspector: null
 });
 
 /** 写入当前活动文件的元数据（null = 无实例/错误卡片：清空展示） */
@@ -49,6 +67,7 @@ export function setFileMeta(
     size?: number | null;
     lines?: number | null;
     openWith?: FileOpenWith | null;
+    inspector?: InspectorSnapshot | null;
   } | null
 ): void {
   fileMeta.name = meta?.name ?? '';
@@ -59,6 +78,23 @@ export function setFileMeta(
   fileMeta.lines = meta?.lines ?? null;
   // 未带 openWith 的调用（无 meta 实例/store.read 失败卡片/清理）一并清空：下拉只随
   // dispatch 返回的实例出现——渲染失败的错误卡片也带（'error' id 已被 openWithOf
-  // 守卫滤出候选），仅 store.read 失败与 tab 清理不带上行、下拉消失
+  // 守卫滤出候选），仅 store.read 失败与 tab 清理不带上行、下拉消失。
+  // inspector 同语义（Task 3）：只随 hex 实例的光标快照出现，实例切换即清空。
   fileMeta.openWith = meta?.openWith ?? null;
+  fileMeta.inspector = meta?.inspector ?? null;
+}
+
+/** 数据检查器快照上行（Task 3）：ViewerPane 轮询 hex 实例 getInspector 写入，
+ * 只动 inspector 字段（不整表覆盖 fileMeta，避免与 readInstanceMeta 通道互踩） */
+export function setInspector(snap: InspectorSnapshot | null): void {
+  fileMeta.inspector = snap;
+}
+
+/** 数据检查器字节序下行总线（Task 3 裁决）：MetaPanel 无 props 约束（C 项确立），
+ * 字节序 select onchange 经本模块级 $state 总线写入，ViewerPane $effect 探测
+ * hex 实例 setLittle 透传——与 fileMeta 上行方向相反的同模式单例 */
+export const inspectorBus = $state<{ little: boolean }>({ little: true });
+
+export function setInspectorLittle(little: boolean): void {
+  inspectorBus.little = little;
 }

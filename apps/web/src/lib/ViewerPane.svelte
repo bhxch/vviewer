@@ -5,7 +5,7 @@
   import type { MarkdownEngineState } from '@vviewer/render-text/markdown/markdownRenderer';
   import type { Tab } from './openFlow.svelte';
   import { persistScroll } from './openFlow.svelte';
-  import { setFileMeta, type FileOpenWith } from './metaStore.svelte';
+  import { setFileMeta, setInspector, inspectorBus, type FileOpenWith, type InspectorSnapshot } from './metaStore.svelte';
   import { openWithOf } from './openWith';
   import { dispatcher, registry, cancelMarkdownRemote } from './viewer';
   import { cancelHighlight } from './highlightClient';
@@ -67,6 +67,42 @@ import SearchPanel from './SearchPanel.svelte';
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  // 数据检查器持续上行（Task 3）：hex 实例光标移动/字节序切换无事件通道，以 250ms
+  // 轮询 getInspector 快照（引擎指示器 watchEngine 的 setInterval 同款先例）；快照
+  // 未变（offset/little 同值）不写，避免无效触发 MetaPanel 重渲染。非 hex 实例
+  // （无 getInspector）不启动轮询、保持 null；实例销毁随 cleanup 清空区块。
+  $effect(() => {
+    const inst = instance;
+    const read = (inst as { getInspector?: () => InspectorSnapshot | null } | null)?.getInspector;
+    if (typeof read !== 'function') return;
+    let lastKey = '';
+    const tick = (): void => {
+      const snap = read.call(inst);
+      const key = snap === null ? '' : `${snap.offset}:${snap.little}`;
+      if (key !== lastKey) {
+        lastKey = key;
+        setInspector(snap);
+      }
+    };
+    tick();
+    const timer = setInterval(tick, 250);
+    return () => {
+      clearInterval(timer);
+      setInspector(null);
+    };
+  });
+
+  // 字节序下行（Task 3 裁决）：MetaPanel select 写 inspectorBus（模块级 $state），
+  // 此处探测 hex 实例 setLittle 透传——MetaPanel 无 props 是 C 项约束，不经组件链。
+  // 读 instance 使 effect 依赖实例：切换回 hex tab 的新实例默认小端，由总线当前值重同步。
+  $effect(() => {
+    const little = inspectorBus.little;
+    const inst = instance;
+    if (!inst) return;
+    const setLittle = (inst as { setLittle?: (v: boolean) => void }).setLittle;
+    if (typeof setLittle === 'function') setLittle.call(inst, little);
+  });
+
   function watchEngine(inst: RenderedInstance): void {
     if (!('getEngine' in inst)) return;
     // code 实例带 getComputeWhere（高亮引擎 + 计算执行位置，M6）；
@@ -111,6 +147,11 @@ import SearchPanel from './SearchPanel.svelte';
     sourceLabel: string,
     openWith: FileOpenWith | null
   ): void {
+    // 数据检查器快照（Task 3，'getInspector' 探测与 getMeta 并列的鸭子模式）：
+    // 渲染完成时读一次（hex 实例光标尚未定位 → null，区块隐藏）；光标移动/字节序
+    // 切换后的持续上行由下方轮询 effect 承担，非 hex 实例恒 null。
+    const readInspector = (inst as { getInspector?: () => InspectorSnapshot | null }).getInspector;
+    setInspector(typeof readInspector === 'function' ? readInspector.call(inst) : null);
     const readMeta = (inst as { getMeta?: () => CodeFileMeta }).getMeta;
     if (typeof readMeta !== 'function') {
       metaLabel = '';

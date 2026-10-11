@@ -127,15 +127,17 @@ describe('renderHex：工具条与跳转', () => {
     target.remove();
   });
 
-  it('目标行瞬时高亮：.vv-hex-goto-flash 1s 后移除（行级近似，Task 3 升级字节级）', () => {
+  it('目标字节瞬时高亮：.vv-hex-goto-flash 落在单字节（hex+ASCII 双 span，Task 3 字节级收编）1s 后移除', () => {
     vi.useFakeTimers();
     try {
       const { inst, target, dump, input } = setup(MB);
-      input.value = '0x100';
+      input.value = '0x107'; // 行内第 8 字节：证明字节级而非行级
       pressEnter(input);
-      const flashed = dump.querySelectorAll('.vv-hex-goto-flash');
-      expect(flashed).toHaveLength(1);
-      expect(flashed[0]!.textContent!.startsWith('00000100')).toBe(true);
+      const flashed = [...dump.querySelectorAll('.vv-hex-goto-flash')] as HTMLElement[];
+      expect(flashed.map((s) => s.textContent)).toEqual(['00', '.']); // hex 列 + ASCII 列同字节
+      for (const s of flashed) {
+        expect(s.closest('.vv-hex-row')!.textContent!.startsWith('00000100')).toBe(true);
+      }
       vi.advanceTimersByTime(1000);
       expect(dump.querySelectorAll('.vv-hex-goto-flash')).toHaveLength(0);
       inst.destroy();

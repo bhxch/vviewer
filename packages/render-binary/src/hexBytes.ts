@@ -3,6 +3,8 @@
 // 三列对齐由行内空格保证（等宽字体渲染），不引入逐单元格 DOM。
 // Task 2：renderHexBytes 增可选命中高亮区间——命中行走两档 span 切分（.vv-hex-hit /
 // .vv-hex-hit-active），hex 列与 ASCII 列对应字节同档；无区间时输出与原版逐字节一致。
+// Task 3：档位扩展 cursor（光标字节）与 flash（跳转衰减）——四个单字节/区间档按
+// 字节叠加时高档胜出，cursor 与命中区间同行共存即天然合并（hex.ts 装饰机制复用）。
 
 /** 每行字节数 */
 export const HEX_ROW_BYTES = 16;
@@ -16,17 +18,28 @@ function toAscii(byte: number): string {
   return byte >= 0x20 && byte < 0x7f ? String.fromCharCode(byte) : '.';
 }
 
-/** 命中高亮区间：相对本次 bytes 参数的 [start, end) 字节区间；active = 当前命中档 */
+/**
+ * 高亮区间：相对本次 bytes 参数的 [start, end) 字节区间；active = 当前命中档。
+ * Task 3 增 cursor（光标字节）与 flash（跳转衰减）两个档——同一字节被多个区间
+ * 覆盖时高档胜出（优先级 cursor > flash > active 命中 > 普通命中），不产生嵌套
+ * span（区间合并由 highlightIntervals 的逐字节档位归并完成）。
+ */
 export interface HexHighlight {
   start: number;
   end: number;
   active: boolean;
+  /** 光标字节档（Task 3）：最高优先级（光标是用户显式意图，命中是批量标注） */
+  cursor?: boolean;
+  /** 跳转衰减档（Task 3 收编 T1 行级 flash）：高于命中两档、低于 cursor */
+  flash?: boolean;
 }
 
-/** 行内切分段：active 为 undefined 的段是普通文本，true/false 对应两档命中类 */
+/** 行内切分段：无档位字段的段是普通文本；cursor/flash/active 三档互斥（高档胜出） */
 export interface HexRowSpan {
   text: string;
   active?: boolean;
+  cursor?: boolean;
+  flash?: boolean;
 }
 
 /** 高亮行：text 与无高亮时逐字节一致；spans 顺序拼接还原整行 */
@@ -36,25 +49,33 @@ export interface HexRow {
 }
 
 /**
- * 本行命中字节档位（0 无 / 1 普通 / 2 当前，重叠时当前档优先）→ 行列区间：
- * hex 段含段内分隔空格（字节 j 的 hex 列自 10+3j 起两字符），ASCII 列对应字节同档。
+ * 字节档位：0 无 / 1 普通命中 / 2 当前命中 / 3 跳转衰减 / 4 光标。同一字节多区间
+ * 覆盖时高档胜出（取 max）——cursor 与命中区间同字节共存即在此合并，无嵌套 span。
+ */
+function tierOf(hl: HexHighlight): number {
+  return hl.cursor ? 4 : hl.flash ? 3 : hl.active ? 2 : 1;
+}
+
+/**
+ * 本行高亮字节档位 → 行列区间：hex 段含段内分隔空格（字节 j 的 hex 列自 10+3j 起
+ * 两字符），ASCII 列对应字节同档。
  */
 function highlightIntervals(
   rowStart: number,
   rowLen: number,
   highlights: HexHighlight[]
-): { start: number; end: number; active: boolean }[] {
+): { start: number; end: number; tier: number }[] {
   const tier = new Uint8Array(HEX_ROW_BYTES);
   for (const hl of highlights) {
     const from = Math.max(hl.start, rowStart);
     const to = Math.min(hl.end, rowStart + rowLen); // 跨行命中裁剪到本行
-    const t = hl.active ? 2 : 1;
+    const t = tierOf(hl);
     for (let b = from; b < to; b++) {
       const j = b - rowStart;
       if (tier[j]! < t) tier[j] = t;
     }
   }
-  const intervals: { start: number; end: number; active: boolean }[] = [];
+  const intervals: { start: number; end: number; tier: number }[] = [];
   let j = 0;
   while (j < rowLen) {
     const t = tier[j]!;
@@ -68,15 +89,22 @@ function highlightIntervals(
     intervals.push({
       start: HEX_PREFIX_LEN + 3 * first,
       end: HEX_PREFIX_LEN + 3 * last + 2,
-      active: t === 2
+      tier: t
     });
     intervals.push({
       start: HEX_ASCII_COL + first,
       end: HEX_ASCII_COL + last + 1,
-      active: t === 2
+      tier: t
     });
   }
   return intervals.sort((a, b) => a.start - b.start);
+}
+
+/** 档位 → 切分段（三档互斥：cursor/flash 布尔字段，命中两档经 active 表达） */
+function tierToSpan(text: string, tier: number): HexRowSpan {
+  if (tier === 4) return { text, cursor: true };
+  if (tier === 3) return { text, flash: true };
+  return { text, active: tier === 2 };
 }
 
 /** 整行 → 切分段（区间间隙为普通文本，各段拼接无损还原整行） */
@@ -85,7 +113,7 @@ function rowSpans(line: string, rowStart: number, rowLen: number, highlights: He
   let cur = 0;
   for (const iv of highlightIntervals(rowStart, rowLen, highlights)) {
     if (iv.start > cur) spans.push({ text: line.slice(cur, iv.start) });
-    spans.push({ text: line.slice(iv.start, iv.end), active: iv.active });
+    spans.push(tierToSpan(line.slice(iv.start, iv.end), iv.tier));
     cur = Math.max(cur, iv.end);
   }
   if (cur < line.length) spans.push({ text: line.slice(cur) });
@@ -137,4 +165,16 @@ export function renderHexBytes(
   }
   flush();
   return rows as string[] | HexRow[];
+}
+
+/**
+ * 行内字符列 → 字节序号（Task 3 点击定位的纯换算，jsdom 单测锁定；调用方只需把
+ * 点击 x 坐标换算成字符列）。布局同上行构造：偏移列 [0,10) 归首字节（最近字节
+ * 语义）；hex 列自 10 起每字节 3 列，字节间分隔空格归左邻字节；hex/ASCII 两列的
+ * 间隙 [57,60) 与闭合竖线归末字节；ASCII 列自 60 起逐字节。col 须已 clamp 到行宽
+ * 内；rowLen 为本行实际字节数（尾行 <16），越界一律 clamp 到 rowLen-1。
+ */
+export function byteIndexAtColumn(col: number, rowLen: number): number {
+  if (col >= HEX_ASCII_COL) return Math.min(col - HEX_ASCII_COL, rowLen - 1);
+  return Math.min(Math.max(Math.floor((col - HEX_PREFIX_LEN) / 3), 0), rowLen - 1);
 }
