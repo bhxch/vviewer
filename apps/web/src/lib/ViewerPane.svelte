@@ -147,11 +147,9 @@ import SearchPanel from './SearchPanel.svelte';
     sourceLabel: string,
     openWith: FileOpenWith | null
   ): void {
-    // 数据检查器快照（Task 3，'getInspector' 探测与 getMeta 并列的鸭子模式）：
-    // 渲染完成时读一次（hex 实例光标尚未定位 → null，区块隐藏）；光标移动/字节序
-    // 切换后的持续上行由下方轮询 effect 承担，非 hex 实例恒 null。
-    const readInspector = (inst as { getInspector?: () => InspectorSnapshot | null }).getInspector;
-    setInspector(typeof readInspector === 'function' ? readInspector.call(inst) : null);
+    // 数据检查器（Task 3）不经此函数上行：此处写 setInspector 会被下方 setFileMeta
+    // 的整表清空语义（?? null）立即覆盖成 no-op——初始读与持续上行统一由轮询
+    // effect 的 tick() 承担（实例挂载即读一次，cursor 未定位 → null，区块隐藏）。
     const readMeta = (inst as { getMeta?: () => CodeFileMeta }).getMeta;
     if (typeof readMeta !== 'function') {
       metaLabel = '';

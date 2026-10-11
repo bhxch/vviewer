@@ -155,6 +155,13 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
   color: var(--ui-fg-muted); font-size: 12px; }
 .vv-hex-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; padding: 8px 10px; }
 .vv-hex-dump { font-family: var(--vv-code-font); font-size: 12px; line-height: 1.5; white-space: pre; }
+/* 行宽=内容宽（fix round 1，Critical 1）：viewport（.vv-virtual-viewport absolute
+   left:0 right:0）会把 block 行拉伸为容器宽，点击→字节换算的「行宽/77=字符宽」
+   随之高估 2~2.5 倍；width:max-content 收回内容宽后公式成立。不可加 min-width:
+   100%——容器比内容宽时 min-width 会把行顶回容器宽、抵消 max-content（e2e
+   t-hex-enhance HEX-INSP-01 实测 768px vs 554.6px 踩坑）。代价仅行尾右侧空白
+   点击不再命中行元素（=不定位，与 vscode-hexeditor 点击空白语义一致） */
+.vv-hex-row { width: max-content; }
 .vv-hex-more { margin: 8px auto; display: block; }
 .vv-hex-struct { margin: 12px 0; font-size: 13px; }
 .vv-hex-struct summary { cursor: pointer; list-style: revert; font-weight: 600; }
