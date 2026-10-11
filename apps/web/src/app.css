@@ -239,6 +239,38 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-server-error { color: var(--ui-danger, #d33); font-size: 12px; max-width: 320px; }
 /* 代码主题 select 被外观主题接管时的禁用态（SettingsPanel 界面主题区非默认） */
 .vv-topbar select:disabled { opacity: .5; cursor: default; }
+/* workspace 切换器（T5）：打开按钮组右侧下拉；≤600px 触发按钮收敛、下拉改
+   SettingsPanel 同位 fixed 浮层。z-index 30 对齐 SettingsPanel/GlobalSearchPanel 惯例 */
+.vv-ws { position: relative; }
+.vv-ws-trigger { white-space: nowrap; max-width: 22vw; overflow: hidden; text-overflow: ellipsis; }
+.vv-ws-pop { position: absolute; top: calc(100% + 4px); left: 0; min-width: 210px; max-width: 320px;
+  max-height: 60vh; overflow: auto; display: flex; flex-direction: column; gap: 2px; padding: 4px;
+  background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 8px;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 22%); z-index: 30; }
+.vv-ws-pop.narrow { position: fixed; top: 44px; right: 8px; left: auto; min-width: 230px; }
+.vv-ws-item { display: flex; align-items: center; gap: 2px; border-radius: 6px; }
+.vv-ws-item:hover, .vv-ws-item:focus-within { background: var(--ui-hover-bg); }
+.vv-ws-item.active .vv-ws-name { color: var(--ui-accent); font-weight: 600; }
+.vv-ws-name { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 5px 8px;
+  font: inherit; color: var(--ui-fg); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* hover 出重命名/删除图标（触屏段 ≤600px 常显——无 hover） */
+.vv-ws-actions { display: inline-flex; gap: 2px; opacity: 0; transition: opacity .12s; }
+.vv-ws-item:hover .vv-ws-actions, .vv-ws-item:focus-within .vv-ws-actions { opacity: 1; }
+@media (max-width: 600px) { .vv-ws-actions { opacity: 1; } }
+.vv-ws-act { border: 0; background: none; padding: 2px 5px; color: var(--ui-fg-muted); font-size: 12px; cursor: pointer; border-radius: 4px; }
+.vv-ws-act:hover { color: var(--ui-fg); }
+.vv-ws-new { margin-top: 2px; border-top: 1px solid var(--ui-border); border-radius: 0; background: none;
+  text-align: left; padding: 6px 8px; font: inherit; color: var(--ui-accent); cursor: pointer; }
+.vv-ws-new:hover { background: var(--ui-hover-bg); }
+.vv-ws-rename { display: flex; gap: 4px; padding: 2px 4px; }
+.vv-ws-rename input { flex: 1; min-width: 0; }
+.vv-ws-rename button { padding: 2px 8px; font-size: 12px; }
+/* 新建工作区模态（WorkspaceCreateModal 面板定位；组件内只管内容布局）：
+   GlobalSearchPanel 同位（top 44px 居中）、z-index 30 惯例 */
+.vv-wscreate-panel { position: fixed; top: 44px; left: 50%; transform: translateX(-50%);
+  width: min(420px, calc(100vw - 16px)); max-height: min(75vh, 560px); overflow: auto; padding: 10px 12px;
+  background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 8px;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 22%); z-index: 30; }
 /* 引擎状态条（ViewerPane 底部，code 渲染器专用） */
 .vv-statusbar { flex: none; padding: 2px 10px; font-size: 12px; color: var(--ui-fg-muted);
   border-top: 1px solid var(--ui-border); background: var(--ui-tab-bg); user-select: none; }

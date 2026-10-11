@@ -179,6 +179,11 @@ class TabCollection {
    * AppShell 以目录 tab 的 rev 为 key 重建左栏 FileTree。
    */
   refreshPaths(storeId: string, paths: string[]): void {
+    // M-2（T4 评审遗留）：任何变更推送/手动刷新都视为「源数据可能变化」信号——
+    // 旧 treeKey 只聚合目录 tab rev，恢复的 remote 源没有目录 tab（重连不自动弹
+    // 树）时左栏树不随 SSE 重建；storesRevision 与目录 tab 的「任何 changed 无条件
+    // 自增」语义对齐，且天然覆盖只有文件 tab 的源
+    storesRevision.value += 1;
     for (const t of this.list) {
       if (t.source.storeId !== storeId) continue;
       if (t.source.path !== '' && paths.length > 0 && !paths.includes(t.source.path)) continue;
@@ -227,6 +232,17 @@ export const tabStore = new TabCollection();
  * 变化的超集信号，且避免 $state 深代理包裹 store 实例引入的代理身份问题。
  */
 const activeStores = new Map<string, TreeStore>();
+
+/**
+ * 活动 store 数据版本 token（M-2，T4 评审遗留）：TabCollection.refreshPaths 任何
+ * 调用即自增（SSE changed / 手动刷新 ↻）。AppShell treeKey 聚合本 token 代替逐源
+ * 目录 tab rev——「当前 workspace 全部源的 store 版本」的单一信号：恢复的 remote
+ * 源只有文件 tab（重连不自动弹树，T4 裁决），旧聚合对它恒为 'x' 占位不重建；
+ * token 与目录 tab「任何 changed 无条件自增」语义对齐，无关 workspace 的变更
+ * 会使当前树多做一次根列表重读（正确性优先，代价可忽略）。$state 对象承载的
+ * 原因同 TabCollection（模块级可重赋值导出不受 Svelte 5 支持）。
+ */
+export const storesRevision = $state({ value: 0 });
 
 /** storeId → 活动实例；无 tab 持有（未打开/已全部关闭）返回 null。 */
 export function storeById(storeId: string): TreeStore | null {
@@ -551,18 +567,118 @@ function sourceOf(store: TreeStore): WorkspaceSource {
  * 多根工作区（T4）：来源先登记进当前 workspace（workspace.sources 是文件树/
  * QuickOpen/全局搜索的数据锚，addSource 按 storeId 组内去重）；目录 tab 跨 workspace
  * 全局去重（T3 遗留裁决）：同 storeId 已有目录 tab 则激活之并切换到其所在 workspace
- * ——用户点树/连接里一个已打开的目录 = 回到它，不重复建。 */
-function addDirStoreTab(store: TreeStore): void {
+ * ——用户点树/连接里一个已打开的目录 = 回到它，不重复建。
+ * T5：source 可显式传入（openRemoteSource 携带 rootIndex/basePath——sourceOf 派生
+ * 不出多根字段，storeId 的 basePath 段是 32 位 FNV 指纹不可反解）；缺省走 sourceOf。
+ * 去重命中切换 workspace 后对目标组补登记：addSource 按 storeId 去重，目标组已有
+ * （含完整多根字段）为 no-op，缺了才补——不会丢 rootIndex/basePath。 */
+export function addDirStoreTab(store: TreeStore, source: WorkspaceSource = sourceOf(store)): void {
   const existing = tabStore.list.find((t) => t.source.path === '' && t.source.storeId === store.id);
   if (existing) {
     if (existing.workspaceId !== workspaceStore.activeId) {
       workspaceStore.setActive(existing.workspaceId);
     }
     tabStore.activate(existing.id);
+    workspaceStore.addSource(workspaceStore.activeId, source);
     return;
   }
-  workspaceStore.addSource(workspaceStore.activeId, sourceOf(store));
+  workspaceStore.addSource(workspaceStore.activeId, source);
   addTab(store, '', store.displayName());
+}
+
+/**
+ * 后端路径来源（T5）：多根服务器的指定根/根内子目录（或根内单文件）作为来源——
+ * createRemoteStore 显式携带 rootIndex/basePath（storeId 的 basePath 段是 32 位
+ * FNV 指纹，恢复链路从快照 sources[] 读取，绝不反解）+ addSource + 目录 tab
+ * （path=''，basePath 为源根）；file 提供时为单文件来源（spec：远端来源仅目录或
+ * 单文件）——底层模型仍以 basePath 目录为源（RemoteStore 以目录为粒度），额外
+ * 打开该文件的 tab；同目录多个单文件来源共享同一 storeId（addSource 去重）。
+ * 重复打开防线：先按 storeBase+rootIndex+basePath 查各 workspace 已登记来源，
+ * 命中且实例存活（storeById）直接复用——再 createRemoteStore 会得到同 id 新实例
+ * 而旧实例 SSE 流未关（双流）；实例已随最后一个 tab 关闭释放时才走新建
+ * （close() 已清资源表，新实例重新登记）。
+ */
+export function openRemoteSource(
+  base: string,
+  token: string | null,
+  rootIndex: number,
+  basePath: string,
+  file?: string
+): void {
+  const normBase = normalizeServerBase(base);
+  const normPath = basePath.replace(/^\/+|\/+$/g, ''); // 与 RemoteStore 内部归一同款
+  for (const w of workspacesView.list) {
+    const src = w.sources.find(
+      (s) =>
+        s.kind === 'remote' &&
+        s.storeBase === normBase &&
+        (s.rootIndex ?? 0) === rootIndex &&
+        (s.basePath ?? '') === normPath
+    );
+    if (src === undefined) continue;
+    const store = storeById(src.storeId);
+    if (store === null) continue; // 该来源的 tab 已全部关闭：走新建
+    const source: WorkspaceSource = {
+      kind: 'remote',
+      storeId: store.id,
+      storeLabel: store.displayName(),
+      storeBase: normBase,
+      ...(rootIndex !== 0 ? { rootIndex } : {}),
+      ...(normPath !== '' ? { basePath: normPath } : {})
+    };
+    if (file === undefined) addDirStoreTab(store, source);
+    else {
+      workspaceStore.addSource(workspaceStore.activeId, source);
+      addTab(store, file, file.split('/').pop() ?? file);
+    }
+    return;
+  }
+  const label = remoteSourceLabel(normBase, rootIndex, normPath, file);
+  const store = createRemoteStore(normBase, token, label, {
+    rootIndex,
+    ...(normPath !== '' ? { basePath: normPath } : {})
+  });
+  // SSE 接线与 connectServer 同款：autoRefresh 关闭时回调过滤（手动刷新 ↻ 不受影响）、
+  // watch-error 置状态栏降级指示
+  watchHealth.degraded = false;
+  store.watch(
+    (paths) => {
+      if (!loadSettings().autoRefresh) return;
+      tabStore.refreshPaths(store.id, paths);
+    },
+    () => {
+      watchHealth.degraded = true;
+      console.warn('[vviewer] 服务器变更推送不可用，自动刷新已停用');
+    }
+  );
+  // 登记显式携带 rootIndex/basePath（sourceOf 派生不出多根字段——T3 指纹约束）；
+  // 根 0 无 basePath 时省略两字段：与 connectServer 登记形状一致，快照迁移/恢复兼容
+  const source: WorkspaceSource = {
+    kind: 'remote',
+    storeId: store.id,
+    storeLabel: label,
+    storeBase: normBase,
+    ...(rootIndex !== 0 ? { rootIndex } : {}),
+    ...(normPath !== '' ? { basePath: normPath } : {})
+  };
+  if (file === undefined) addDirStoreTab(store, source);
+  else {
+    workspaceStore.addSource(workspaceStore.activeId, source);
+    addTab(store, file, file.split('/').pop() ?? file);
+  }
+}
+
+/**
+ * 远端来源显示名：单文件来源取文件名；目录来源取 basePath 尾段（根整体为源时
+ * 取 host）。根 0 且无 basePath 必须与 connectServer 同 label（host）——storeId
+ * hash 含 label，异 label 会为同一来源造出第二个 storeId（双 SSE 流/双树行）。
+ */
+function remoteSourceLabel(base: string, rootIndex: number, basePath: string, file?: string): string {
+  if (file !== undefined) return file.split('/').pop() ?? file;
+  const host = serverLabel(base);
+  if (rootIndex === 0 && basePath === '') return host;
+  const tail = basePath.split('/').pop() ?? basePath;
+  return rootIndex === 0 ? `${host}/${tail}` : `${host} · 根${rootIndex}/${tail}`;
 }
 
 /**

@@ -1,7 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import SettingsPanel from './SettingsPanel.svelte';
-  import { openFiles, openDirectoryViaPicker, openUrl, connectServer, loadLastServer, tabStore } from './openFlow.svelte';
+  import WorkspaceCreateModal from './WorkspaceCreateModal.svelte';
+  import {
+    openFiles,
+    openDirectoryViaPicker,
+    openUrl,
+    connectServer,
+    loadLastServer,
+    closeTab,
+    tabStore,
+    workspacesView
+  } from './openFlow.svelte';
+  import { workspaceStore } from './workspaceStore';
   import { loadSettings, saveSettings, onSettingsChanged, type Settings } from './stores/settings';
   import { applyAppearance, effectiveMode, onSystemModeChange, themeOptions } from './theme';
 
@@ -10,6 +21,15 @@
   let fileInput = $state<HTMLInputElement | null>(null);
   // 设置面板浮层开关（BUG-05）：⚙ 按钮挂载，Ctrl+comma 切换
   let settingsOpen = $state(false);
+  // workspace 切换器（T5）：下拉开关 + 新建模态挂载 + 行内重命名草稿
+  let wsMenuOpen = $state(false);
+  let createOpen = $state(false);
+  let renamingId = $state<string | null>(null);
+  let renameDraft = $state('');
+  let wsAnchorEl = $state<HTMLElement | null>(null);
+  let wsPopEl = $state<HTMLElement | null>(null);
+  /** ≤600px 收进溢出：触发按钮收敛为图标、下拉改 SettingsPanel 同位 fixed 浮层 */
+  let narrow = $state(false);
   // 主题表经动态 import 惰性加载（不进主 chunk），下拉选项挂载后异步填充
   let codeThemeOptions = $state<Awaited<ReturnType<typeof themeOptions>>>([]);
 
@@ -33,6 +53,50 @@
     void applyAppearance(currentAppearance, mode, currentCodeTheme);
   }
 
+  /** 当前 workspace（workspacesView 为 workspaceStore 的 runes 镜像） */
+  const activeWorkspace = $derived(
+    workspacesView.list.find((w) => w.id === workspacesView.activeId) ?? null
+  );
+
+  // ---------- workspace 切换器（T5） ----------
+
+  function switchTo(id: string): void {
+    workspaceStore.setActive(id);
+    wsMenuOpen = false;
+  }
+
+  function startRename(id: string, current: string): void {
+    renamingId = id;
+    renameDraft = current;
+  }
+
+  function commitRename(): void {
+    if (renamingId !== null) {
+      const v = renameDraft.trim();
+      if (v !== '') workspaceStore.rename(renamingId, v);
+    }
+    renamingId = null;
+  }
+
+  function cancelRename(): void {
+    renamingId = null;
+  }
+
+  /** 删除工作区：confirm → 关闭其全部 tab → remove（ensureNonEmpty 兜底，删最后
+   * 一个自动建默认；删活动组时 remove 内部切到剩余组首）。 */
+  function removeWorkspace(id: string, name: string): void {
+    if (!window.confirm(`删除工作区「${name}」？将关闭其全部 tab。`)) return;
+    for (const t of [...tabStore.tabsOf(id)]) closeTab(t.id);
+    workspaceStore.remove(id);
+    workspaceStore.ensureNonEmpty();
+    if (renamingId === id) renamingId = null;
+  }
+
+  function openCreate(): void {
+    wsMenuOpen = false;
+    createOpen = true;
+  }
+
   onMount(() => {
     void themeOptions().then((opts) => (codeThemeOptions = opts));
     applyCurrentAppearance();
@@ -50,10 +114,51 @@
         sysMode === 'dark' ? settings.codeThemeDark : settings.codeThemeLight
       );
     });
+    // ≤600px 断点（spec E §2.3 切换器收进溢出）：matchMedia 驱动渲染分支；
+    // 断点跨越时仅切换触发器形态，已展开的列表不强行收起
+    const mq = window.matchMedia('(max-width: 600px)');
+    const applyNarrow = (): void => {
+      narrow = mq.matches;
+    };
+    applyNarrow();
+    mq.addEventListener('change', applyNarrow);
     return () => {
       offSettings();
       offSystem();
+      mq.removeEventListener('change', applyNarrow);
     };
+  });
+
+  $effect(() => {
+    // 下拉外点关闭：pointerdown 落在触发按钮与浮层之外即收起（模态类浮层不做
+    // 外点关——SettingsPanel 惯例，避免误触丢输入；仅菜单性浮层外点关）
+    if (!wsMenuOpen) return;
+    const onDown = (e: PointerEvent): void => {
+      const t = e.target as Node | null;
+      if (t === null) return;
+      if (wsAnchorEl?.contains(t) === true || wsPopEl?.contains(t) === true) return;
+      wsMenuOpen = false;
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  });
+
+  $effect(() => {
+    // Esc 关闭（GlobalSearchPanel 模式）：容器 keydown 覆盖面板内焦点，window
+    // 兜底只处理 target 在浮层外的事件（同一事件只有一个 target，不会双触发）
+    if (!wsMenuOpen) return;
+    const onWinKey = (e: KeyboardEvent): void => {
+      if (
+        e.key === 'Escape' &&
+        wsPopEl !== null &&
+        (e.target instanceof Node ? !wsPopEl.contains(e.target) : true)
+      ) {
+        e.preventDefault();
+        wsMenuOpen = false;
+      }
+    };
+    window.addEventListener('keydown', onWinKey);
+    return () => window.removeEventListener('keydown', onWinKey);
   });
 
   function cycleTheme(): void {
@@ -168,6 +273,73 @@
   <button onclick={() => fileInput?.click()}>打开文件</button>
   <input type="file" multiple hidden bind:this={fileInput} onchange={onPick} />
   <button onclick={() => void openDirectoryViaPicker()}>打开文件夹</button>
+  <div class="vv-ws" bind:this={wsAnchorEl}>
+    <button
+      class="vv-ws-trigger"
+      onclick={() => (wsMenuOpen = !wsMenuOpen)}
+      aria-label="切换工作区"
+      aria-expanded={wsMenuOpen}
+      title="切换工作区（新建 / 重命名 / 删除）"
+    >
+      {narrow ? '工作区 ▾' : `${activeWorkspace?.name ?? '工作区'} ▾`}
+    </button>
+    {#if wsMenuOpen}
+      <!-- 不用 role="menu"：条目均为原生 button（键盘可达），menu 角色反而要求
+           tabindex/方向键管理（a11y_interactive_supports_focus 警告）；aria-expanded
+           已在触发按钮上表达展开态 -->
+      <div class="vv-ws-pop" class:narrow bind:this={wsPopEl}>
+        {#each workspacesView.list as w (w.id)}
+          {#if renamingId === w.id}
+            <form
+              class="vv-ws-rename"
+              onsubmit={(e) => {
+                e.preventDefault();
+                commitRename();
+              }}
+            >
+              <input
+                bind:value={renameDraft}
+                aria-label="重命名工作区"
+                spellcheck="false"
+                onkeydown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    cancelRename();
+                  }
+                }}
+              />
+              <button type="submit" aria-label="确认重命名" title="确认（Enter）">✓</button>
+              <button type="button" aria-label="取消重命名" title="取消（Esc）" onclick={cancelRename}>✕</button>
+            </form>
+          {:else}
+            <div class="vv-ws-item" class:active={w.id === workspacesView.activeId}>
+              <button type="button" class="vv-ws-name" title={w.name} onclick={() => switchTo(w.id)}>
+                {w.name}
+              </button>
+              <span class="vv-ws-actions">
+                <button
+                  type="button"
+                  class="vv-ws-act"
+                  aria-label="重命名工作区 {w.name}"
+                  title="重命名"
+                  onclick={() => startRename(w.id, w.name)}>✎</button
+                >
+                <button
+                  type="button"
+                  class="vv-ws-act"
+                  aria-label="删除工作区 {w.name}"
+                  title="删除（将关闭其全部 tab）"
+                  onclick={() => removeWorkspace(w.id, w.name)}>✕</button
+                >
+              </span>
+            </div>
+          {/if}
+        {/each}
+        <button type="button" class="vv-ws-new" onclick={openCreate}>＋ 新建工作区…</button>
+      </div>
+    {/if}
+  </div>
   <form onsubmit={submit}>
     <input placeholder="粘贴文件 URL" bind:value={urlValue} aria-label="文件 URL" />
   </form>
@@ -227,4 +399,7 @@
 </header>
 {#if settingsOpen}
   <SettingsPanel onclose={() => (settingsOpen = false)} />
+{/if}
+{#if createOpen}
+  <WorkspaceCreateModal onclose={() => (createOpen = false)} />
 {/if}

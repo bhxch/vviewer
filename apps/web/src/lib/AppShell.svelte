@@ -20,6 +20,7 @@
     seedSeqFromSnapshots,
     loadLastServer,
     storeById,
+    storesRevision,
     workspacesView,
     watchHealth
   } from './openFlow.svelte';
@@ -77,19 +78,15 @@
   });
 
   /**
-   * 整树重建 key（BUG-05 通道，T4 多源化）：源数量 + 各源目录 tab 的 rev 聚合
-   * （refreshPaths 对 path==='' 的目录 tab 无条件自增）+ 排除规则。某源无目录
-   * tab（跨 workspace 去重被跳过）以 'x' 占位，不触发无意义的整树重建。
+   * 整树重建 key（BUG-05 通道，T4 多源化；M-2 修正）：源数量 + 源数据版本
+   * （openFlow.storesRevision——refreshPaths 任何调用即自增）+ 排除规则。
+   * 旧实现逐源聚合「目录 tab rev、无则以 'x' 占位」：恢复的 remote 源只有文件
+   * tab（重连不自动弹树，T4 裁决）时恒 'x'，左栏树不随 SSE changed 重建；改为
+   * 「当前 workspace 全部源的 store 版本」token 后天然覆盖无目录 tab 的源。
    */
-  const treeKey = $derived.by(() => {
-    const revs = sources
-      .map(
-        (s) =>
-          tabStore.list.find((t) => t.source.path === '' && t.source.storeId === s.store.id)?.rev ?? 'x'
-      )
-      .join(',');
-    return `${sources.length}|${revs}|${JSON.stringify(settings.excludedPatterns)}`;
-  });
+  const treeKey = $derived(
+    `${sources.length}|${storesRevision.value}|${JSON.stringify(settings.excludedPatterns)}`
+  );
 
   onMount(() => {
     document.documentElement.dataset.themeMode = settings.themeMode;
@@ -369,7 +366,7 @@
   <div class="vv-body">
     <aside class="vv-side">
       {#if sources.length > 0}
-        <!-- 整树重建 key：源数量 | 各源目录 tab rev 聚合 | 排除规则（BUG-05 通道，T4 多源化） -->
+        <!-- 整树重建 key：源数量 | 源数据版本 storesRevision | 排除规则（BUG-05 通道，T4 多源化，M-2 修正） -->
         {#key treeKey}
           <FileTree {sources} excludedPatterns={settings.excludedPatterns} onopen={onTreeOpen} onremove={removeSource} />
         {/key}
