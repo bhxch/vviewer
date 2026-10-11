@@ -271,6 +271,48 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
   width: min(420px, calc(100vw - 16px)); max-height: min(75vh, 560px); overflow: auto; padding: 10px 12px;
   background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 8px;
   box-shadow: 0 8px 28px rgb(0 0 0 / 22%); z-index: 30; }
+/* tab 管理覆盖层面板（WorkspaceTabsPanel，T6）：GlobalSearchPanel 同位浮层、
+   z-index 30 惯例；半屏限高。类名即 brief 指定：.vv-wspanel / -search / -group / -row，
+   全部消费 --ui-* token */
+.vv-wspanel { position: fixed; top: 44px; left: 50%; transform: translateX(-50%);
+  width: min(640px, calc(100vw - 24px)); max-height: min(50vh, 560px); display: flex; flex-direction: column;
+  background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 8px;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 22%); z-index: 30; overflow: hidden; }
+.vv-wspanel-search { display: flex; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--ui-border); flex: none; }
+.vv-wspanel-search input { flex: 1; min-width: 0; }
+.vv-wspanel-body { flex: 1; min-height: 0; overflow: auto; padding: 2px 0 6px; }
+.vv-wspanel-group { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
+  background: var(--ui-side-bg); border: 0; border-radius: 0; padding: 5px 10px 3px; font: inherit;
+  font-weight: 600; font-size: 12px; color: var(--ui-fg-muted); cursor: pointer;
+  position: sticky; top: 0; }
+.vv-wspanel-group:hover { color: var(--ui-fg); }
+.vv-wspanel-group.active .vv-wspanel-gname { color: var(--ui-accent); }
+.vv-wspanel-caret { flex: none; width: 1em; }
+.vv-wspanel-gname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vv-wspanel-gcount { flex: none; font-variant-numeric: tabular-nums; }
+.vv-wspanel-row { display: flex; align-items: center; gap: 8px; padding: 3px 10px 3px 20px; cursor: pointer; }
+.vv-wspanel-row:hover, .vv-wspanel-row:focus-visible { background: var(--ui-hover-bg); }
+.vv-wspanel-row.active .vv-wspanel-name { color: var(--ui-accent); font-weight: 600; }
+.vv-wspanel-name { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vv-wspanel-badge { flex: none; max-width: 10em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; color: var(--ui-fg-muted); border: 1px solid var(--ui-border); border-radius: 8px;
+  padding: 0 5px; }
+.vv-wspanel-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--ui-fg-muted); font-size: 12px; }
+/* 行悬停/键盘聚焦出快捷关闭钮（触屏段 ≤600px 常显——无 hover） */
+.vv-wspanel-close { flex: none; background: none; border: none; border-radius: 0; color: var(--ui-fg-muted);
+  font: inherit; opacity: 0; padding: 0 3px; cursor: pointer; }
+.vv-wspanel-row:hover .vv-wspanel-close, .vv-wspanel-row:focus-within .vv-wspanel-close { opacity: 1; }
+.vv-wspanel-close:hover { color: var(--ui-danger, #d33); }
+@media (max-width: 600px) { .vv-wspanel-close { opacity: 1; } }
+.vv-wspanel-empty { padding: 4px 10px 6px 20px; color: var(--ui-fg-muted); font-size: 12px; }
+.vv-wspanel-addbtn { display: block; margin: 2px 10px 4px 20px; background: none; border: 0; border-radius: 4px;
+  text-align: left; padding: 3px 6px; font: inherit; font-size: 12px; color: var(--ui-accent); cursor: pointer; }
+.vv-wspanel-addbtn:hover { background: var(--ui-hover-bg); }
+.vv-wspanel-add { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 10px 6px 20px; }
+.vv-wspanel-add button { font-size: 12px; }
+/* 内嵌后端路径浏览层（RemoteSourceModal 无自带定位，由本层承担） */
+.vv-wspanel-remote { padding: 10px 12px; overflow: auto; min-height: 0; }
 /* 引擎状态条（ViewerPane 底部，code 渲染器专用） */
 .vv-statusbar { flex: none; padding: 2px 10px; font-size: 12px; color: var(--ui-fg-muted);
   border-top: 1px solid var(--ui-border); background: var(--ui-tab-bg); user-select: none; }
@@ -285,6 +327,14 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-tab-close { background: none; border: none; border-radius: 0; color: inherit; font: inherit;
   opacity: .6; padding: 0 2px; }
 .vv-tab-close:hover { opacity: 1; }
+/* 来源徽标（T6）：仅多源 workspace 显示（TabBar badgeOf），截短走 ellipsis（title 全名） */
+.vv-tab-src { flex: none; max-width: 9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; line-height: 1.5; color: var(--ui-fg-muted); border: 1px solid var(--ui-border);
+  border-radius: 8px; padding: 0 5px; }
+/* 「管理」按钮（T6）：推到右端、不随横向滚动挤压；融入标签栏观感 */
+.vv-tabbar-manage { flex: none; margin-left: auto; border: 0; border-left: 1px solid var(--ui-border);
+  border-radius: 0; background: var(--ui-tab-bg); font-size: 12px; }
+.vv-tabbar-manage:hover { background: var(--ui-hover-bg); }
 .vv-tree { list-style: none; margin: 0; padding: 0; }
 .vv-tree .vv-tree { padding-left: 14px; }
 .vv-tree-row { display: flex; gap: 4px; align-items: center; width: 100%; text-align: left;

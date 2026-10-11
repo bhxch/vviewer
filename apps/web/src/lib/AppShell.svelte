@@ -8,6 +8,7 @@
   import MetaPanel from './MetaPanel.svelte';
   import GlobalSearchPanel from './GlobalSearchPanel.svelte';
   import QuickOpenPanel from './QuickOpenPanel.svelte';
+  import WorkspaceTabsPanel from './WorkspaceTabsPanel.svelte';
   import type { TreeStore, TocEntry } from '@vviewer/core';
   import { createRemoteStore } from '@vviewer/core';
   import {
@@ -51,11 +52,22 @@
   let globalSearchOpen = $state(false);
   /** 快速打开面板开关（BUG-03）：Ctrl+P 切换，Esc 面板内关闭 */
   let quickOpenOpen = $state(false);
+  /** tab 管理覆盖层面板开关（T6）：Alt+W / TabBar「管理」切换，Esc/外点面板内关闭 */
+  let wsPanelOpen = $state(false);
 
   /** 当前 workspace（workspacesView 为 openFlow 维护的 workspaceStore runes 镜像）。 */
   const activeWorkspace = $derived(
     workspacesView.list.find((w) => w.id === workspacesView.activeId) ?? null
   );
+
+  /**
+   * 当前 workspace 的组内 tabs（T6）：TabBar 与 ViewerPane 的取数源——
+   * 派生内读 tabStore.list（$state）+ workspacesView.activeId（runes 镜像），
+   * 关 tab / 切组即时反映。活动 tab 查找随之收窄到组内（激活是组内作用域，
+   * 全量 find(t.active) 会命中他组的活动 tab——跨组激活后面板/标签栏/查看区
+   * 必须一致指向当前组）。单 workspace 时与全量过滤等价（组即全集）。
+   */
+  const activeTabs = $derived(tabStore.tabsOf(workspacesView.activeId));
 
   /**
    * 左栏文件树的来源列表（多根 T4）：当前 workspace 的每个来源解析出活动 store
@@ -303,8 +315,8 @@
   }
 
   // 全局键位（BUG-03，场景 SHELL-11）：Ctrl+Shift+F 全局搜索（既有）、Ctrl+P
-  // 快速打开、j/k 逐行滚、gg 顶、G 底。统一走 inField 判定（非输入焦点才接管
-  // ——与 M3 '/' 的惯例同源），组合键均 preventDefault。
+  // 快速打开、Alt+W tab 管理面板（T6）、j/k 逐行滚、gg 顶、G 底。统一走 inField
+  // 判定（非输入焦点才接管——与 M3 '/' 的惯例同源），组合键均 preventDefault。
   // 行高 20px 与 render-text code.ts 的 LINE_HEIGHT 同源（计划包 5 依赖说明：
   // 不 import 包 2 文件，常量复制需注释同源）。
   const CODE_LINE_HEIGHT = 20;
@@ -340,6 +352,13 @@
         quickOpenOpen = !quickOpenOpen;
         return;
       }
+      // Alt+W 切换 tab 管理面板（T6）：浏览器无默认占用（关闭标签页是 Ctrl+W，
+      // 与 Alt+W 无关）；inField 拦截沿用本 handler 顶部的统一判定
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === 'w') {
+        e.preventDefault();
+        wsPanelOpen = !wsPanelOpen;
+        return;
+      }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const key = e.key;
       if (key !== 'j' && key !== 'k' && key !== 'g' && key !== 'G') return;
@@ -367,7 +386,11 @@
 
 <div class="vv-shell" class:drawer={drawerOpen} class:rightopen={rightOpen}>
   <TopBar />
-  <TabBar tabs={tabStore.list} />
+  <TabBar
+    tabs={activeTabs}
+    sources={activeWorkspace?.sources ?? []}
+    onmanage={() => (wsPanelOpen = !wsPanelOpen)}
+  />
   <div class="vv-body">
     <aside class="vv-side">
       {#if sources.length > 0}
@@ -381,7 +404,7 @@
     </aside>
     <main class="vv-main">
       <ViewerPane
-        tab={tabStore.list.find((t) => t.active) ?? null}
+        tab={activeTabs.find((t) => t.active) ?? null}
         ontoc={(entries) => (tocEntries = entries)}
       />
     </main>
@@ -399,6 +422,9 @@
   {/if}
   {#if quickOpenOpen}
     <QuickOpenPanel {sources} onclose={() => (quickOpenOpen = false)} />
+  {/if}
+  {#if wsPanelOpen}
+    <WorkspaceTabsPanel onclose={() => (wsPanelOpen = false)} />
   {/if}
 </div>
 
