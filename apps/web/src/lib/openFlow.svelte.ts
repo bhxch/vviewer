@@ -181,9 +181,9 @@ class TabCollection {
   refreshPaths(storeId: string, paths: string[]): void {
     // M-2（T4 评审遗留）：任何变更推送/手动刷新都视为「源数据可能变化」信号——
     // 旧 treeKey 只聚合目录 tab rev，恢复的 remote 源没有目录 tab（重连不自动弹
-    // 树）时左栏树不随 SSE 重建；storesRevision 与目录 tab 的「任何 changed 无条件
-    // 自增」语义对齐，且天然覆盖只有文件 tab 的源
-    storesRevision.value += 1;
+    // 树）时左栏树不随 SSE 重建；storeRevisions 分桶自增与目录 tab 的「任何 changed
+    // 无条件自增」语义对齐，且天然覆盖只有文件 tab 的源（T7 分桶：无关源不重建）
+    storeRevisions[storeId] = (storeRevisions[storeId] ?? 0) + 1;
     for (const t of this.list) {
       if (t.source.storeId !== storeId) continue;
       if (t.source.path !== '' && paths.length > 0 && !paths.includes(t.source.path)) continue;
@@ -234,15 +234,14 @@ export const tabStore = new TabCollection();
 const activeStores = new Map<string, TreeStore>();
 
 /**
- * 活动 store 数据版本 token（M-2，T4 评审遗留）：TabCollection.refreshPaths 任何
- * 调用即自增（SSE changed / 手动刷新 ↻）。AppShell treeKey 聚合本 token 代替逐源
- * 目录 tab rev——「当前 workspace 全部源的 store 版本」的单一信号：恢复的 remote
- * 源只有文件 tab（重连不自动弹树，T4 裁决），旧聚合对它恒为 'x' 占位不重建；
- * token 与目录 tab「任何 changed 无条件自增」语义对齐，无关 workspace 的变更
- * 会使当前树多做一次根列表重读（正确性优先，代价可忽略）。$state 对象承载的
- * 原因同 TabCollection（模块级可重赋值导出不受 Svelte 5 支持）。
+ * 活动 store 数据版本信号（M-2，T4 评审遗留；T7 分桶化）：TabCollection.refreshPaths
+ * 按调用 storeId 分桶自增（SSE changed / 手动刷新 ↻）。AppShell treeKey 聚合
+ * 「当前 workspace 全部源的版本」——单值全局 token（T5 形态）会使无关 workspace 的
+ * 帧也重建当前树并丢 TreeNodeRow 展开态（严格超集语义的代价）；按 storeId 分桶后
+ * 只有所涉源的变更才重建树。$state 对象承载的原因同 TabCollection（模块级可重赋值
+ * 导出不受 Svelte 5 支持）。
  */
-export const storesRevision = $state({ value: 0 });
+export const storeRevisions = $state<Record<string, number>>({});
 
 /** storeId → 活动实例；无 tab 持有（未打开/已全部关闭）返回 null。 */
 export function storeById(storeId: string): TreeStore | null {
@@ -320,6 +319,23 @@ export function seedSeqFromSnapshots(snaps: ReadonlyArray<TabSnapshot> | Workspa
       ? snaps.workspaces.flatMap((w) => w.tabs.map((t) => t.id))
       : snaps.map((s) => s.id);
   seq = Math.max(seq, maxTabSeqOf(ids));
+}
+
+/**
+ * boot 后是否已有用户操作（restore 快点击竞态防线，T7）：__vvOpenDirImpl 注入钩子
+ * 与 TopBar 的打开入口在模块初始化即可用，早于 AppShell.restore 的异步 IndexedDB
+ * 读取完成——并行加载/慢盘下，用户（或 e2e 注入）的打开会先于快照进入模型。
+ * 启动基线是「单个默认组、无来源、无 tab」，故三者任一成立即发生过用户操作：
+ * restore 据此分流——无活动照旧 replaceAll 整体恢复，有活动改 mergeSnapshot 合并
+ * （replaceAll 会抹掉已登记的来源而 tab 留存，左栏树与 tab 集合脱节）。
+ * 在决策点（await 之后、落模型之前）调用，天然覆盖等待期间到达的操作。
+ */
+export function hasUserActivity(): boolean {
+  return (
+    tabStore.list.length > 0 ||
+    workspaceStore.list.length > 1 ||
+    workspaceStore.list.some((w) => w.sources.length > 0)
+  );
 }
 
 export async function openDirectoryViaPicker(): Promise<void> {

@@ -19,9 +19,10 @@
     tryRestoreDirectory,
     bindArchiveOpenEvents,
     seedSeqFromSnapshots,
+    hasUserActivity,
     loadLastServer,
     storeById,
-    storesRevision,
+    storeRevisions,
     workspacesView,
     watchHealth
   } from './openFlow.svelte';
@@ -34,10 +35,14 @@
   import { migrateLegacyTabs, workspaceStore, type WorkspaceSnapshotItem, type WorkspaceSource } from './workspaceStore';
   import { loadSettings, onSettingsChanged } from './stores/settings';
 
-  /** 文件树/面板的来源条目：workspace.sources（模型）× storeById（活动实例）的合成。 */
+  /** 文件树/面板的来源条目：workspace.sources（模型）× storeById（活动实例）的合成。
+   * rootIndex/basePath 随模型透传（GlobalSearchPanel → globalSearch 的远程命中
+   * 跨根归属依据；FileTree/QuickOpenPanel 不消费、结构多余字段无感）。 */
   interface TreeSource {
     label: string;
     store: TreeStore;
+    rootIndex?: number;
+    basePath?: string;
   }
 
   // 响应式副本：onSettingsChanged 订阅刷新（BUG-05）。此前是非响应式快照，
@@ -83,21 +88,27 @@
     for (const s of ws.sources) {
       const store = storeById(s.storeId);
       if (store !== null && tabs.some((t) => t.source.storeId === s.storeId)) {
-        out.push({ label: s.storeLabel, store });
+        out.push({
+          label: s.storeLabel,
+          store,
+          ...(s.rootIndex !== undefined ? { rootIndex: s.rootIndex } : {}),
+          ...(s.basePath !== undefined ? { basePath: s.basePath } : {})
+        });
       }
     }
     return out;
   });
 
   /**
-   * 整树重建 key（BUG-05 通道，T4 多源化；M-2 修正）：源数量 + 源数据版本
-   * （openFlow.storesRevision——refreshPaths 任何调用即自增）+ 排除规则。
-   * 旧实现逐源聚合「目录 tab rev、无则以 'x' 占位」：恢复的 remote 源只有文件
-   * tab（重连不自动弹树，T4 裁决）时恒 'x'，左栏树不随 SSE changed 重建；改为
-   * 「当前 workspace 全部源的 store 版本」token 后天然覆盖无目录 tab 的源。
+   * 整树重建 key（BUG-05 通道，T4 多源化；M-2 修正；T7 分桶化）：源数量 +
+   * 各源数据版本（openFlow.storeRevisions 按 storeId 分桶——仅当前 workspace
+   * 所涉源的 SSE changed/手动刷新才重建，无关 workspace 的帧不再丢 TreeNodeRow
+   * 展开态）+ 排除规则。旧逐源目录 tab rev 聚合：恢复的 remote 源只有文件
+   * tab（重连不自动弹树，T4 裁决）时恒 'x' 占位不重建；分桶 token 天然覆盖
+   * 无目录 tab 的源。
    */
   const treeKey = $derived(
-    `${sources.length}|${storesRevision.value}|${JSON.stringify(settings.excludedPatterns)}`
+    `${sources.length}|${sources.map((s) => storeRevisions[s.store.id] ?? 0).join(',')}|${JSON.stringify(settings.excludedPatterns)}`
   );
 
   onMount(() => {
@@ -116,21 +127,35 @@
 
   /**
    * 会话恢复 v2（workspace 多根 T4）：loadWorkspaces 读 'workspaces' 快照（缺失则
-   * migrateLegacyTabs 一次性迁移旧 'tabs' 键），组/来源结构经 replaceAll 入模型后
-   * 逐 workspace 重建——先按来源类别重建 store（localfs 重授权 / remote 重连 /
-   * 其余类别无会话句柄不重建），再逐 tab 恢复（归属由恢复循环的逐组 setActive
-   * 锚定）+ 组内对齐活动 tab；最后回设快照记录的活动组。恢复失败（IndexedDB
-   * 异常、快照损坏等）不得阻断应用启动：降级为空会话。
+   * migrateLegacyTabs 一次性迁移旧 'tabs' 键），组/来源结构入模型后逐 workspace
+   * 重建——先按来源类别重建 store（localfs 重授权 / remote 重连 / 其余类别无会话
+   * 句柄不重建），再逐 tab 恢复（归属由恢复循环的逐组 setActive 锚定）+ 组内对齐
+   * 活动 tab；最后回设活动组。恢复失败（IndexedDB 异常、快照损坏等）不得阻断
+   * 应用启动：降级为空会话。
+   *
+   * 快点击竞态（T7 52+ e2e 失败根因）：__vvOpenDirImpl 注入钩子与用户操作可先于
+   * 本函数的 IndexedDB 读取完成——此前无条件 replaceAll 会用快照（测试环境为空
+   * 默认，生产为上次会话）整体覆盖已入模型的用户态：source 被抹掉而 tab 留存
+   * （TabBar 按 workspaceId 过滤仍显示）→ 左栏树消失。故在 await 之后按
+   * hasUserActivity() 分流：无活动照旧整体恢复；有活动改 mergeSnapshot 合并
+   * （缺失组/来源并入，用户已建数据为先），且活动组保持用户当前所在——快照的
+   * activeId 属上个会话，不得把刚操作完的用户拽走。
    */
   async function restore(): Promise<void> {
     try {
       const [{ snapshot, legacyTabs }, dirHandle] = await Promise.all([loadWorkspaces(), loadDirHandle()]);
       // 旧会话（无 'workspaces' 键）：迁移成单默认 workspace 的 v2 形状走同一恢复路径
       const snap = snapshot ?? migrateLegacyTabs(legacyTabs);
+      // 决策点在 await 之后：等待期间到达的注入/用户操作同样被识别（决策到落模型
+      // 之间为同步代码，无新的竞态窗口）
+      const merging = hasUserActivity();
+      const userActiveId = workspaceStore.activeId;
       // 新 tab id 以快照最大序号为基：占位 tab 保留快照旧 id，seq 从 0 重计数会撞车
+      //（seq 为 max 语义，合并路径已有用户 tab 的序号在 add 时已推进，天然覆盖）
       seedSeqFromSnapshots(snap);
-      // 组/来源结构入 workspace 模型；快照 tabs 字段被 replaceAll 丢弃，由下方逐组重建
-      workspaceStore.replaceAll(snap);
+      // 组/来源结构入 workspace 模型；快照 tabs 字段被丢弃，由下方逐组重建
+      if (merging) workspaceStore.mergeSnapshot(snap);
+      else workspaceStore.replaceAll(snap);
       // BUG-08（方案 A）：remote 来源且与会话内上次成功连接（loadLastServer，
       // sessionStorage 跨 F5 存活）base 一致时，restore 期自动重建 RemoteStore。
       // 同 base+root+basePath 只探测一次（多 workspace 共享同一来源时复用实例，
@@ -202,8 +227,9 @@
         }
         alignActiveOfGroup(wsItem);
       }
-      // 恢复循环逐组 setActive，最后回设快照记录的活动组
-      workspaceStore.setActive(snap.activeId);
+      // 恢复循环逐组 setActive，最后回设活动组：整体恢复路径用快照记录的活动组；
+      // 合并路径保持用户当前所在（恢复循环的逐组锚定会把活动组拨到快照末组，需拨回）
+      workspaceStore.setActive(merging ? userActiveId : snap.activeId);
     } catch (err) {
       console.error('会话恢复失败，已降级为空会话', err);
     }
@@ -353,8 +379,9 @@
         return;
       }
       // Alt+W 切换 tab 管理面板（T6）：浏览器无默认占用（关闭标签页是 Ctrl+W，
-      // 与 Alt+W 无关）；inField 拦截沿用本 handler 顶部的统一判定
-      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === 'w') {
+      // 与 Alt+W 无关）；inField 拦截沿用本 handler 顶部的统一判定。
+      // 按 e.code 判定（T6 评审移交）：macOS Option+W 产出 e.key='∑'，按 key 判恒失效
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.code === 'KeyW') {
         e.preventDefault();
         wsPanelOpen = !wsPanelOpen;
         return;
@@ -394,7 +421,7 @@
   <div class="vv-body">
     <aside class="vv-side">
       {#if sources.length > 0}
-        <!-- 整树重建 key：源数量 | 源数据版本 storesRevision | 排除规则（BUG-05 通道，T4 多源化，M-2 修正） -->
+        <!-- 整树重建 key：源数量 | 各源数据版本 storeRevisions | 排除规则（BUG-05 通道，T4 多源化，M-2 修正，T7 分桶） -->
         {#key treeKey}
           <FileTree {sources} excludedPatterns={settings.excludedPatterns} onopen={onTreeOpen} onremove={removeSource} />
         {/key}

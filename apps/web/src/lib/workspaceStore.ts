@@ -119,6 +119,15 @@ export function createWorkspaceState(): {
   nextId(): string;
   /** 迁移/恢复入口：整体覆写为快照内容（tabs/activeTabId 字段丢弃，属活动 tab 层）。 */
   replaceAll(snapshot: WorkspacesSnapshot): void;
+  /**
+   * 合并恢复（快点击竞态防线）：boot 后已有用户操作时 restore 改走本入口——
+   * 整体覆写会抹掉已入模型的用户态（见 AppShell.restore 注释）。快照组与现有组
+   * 按 id 匹配：既有组仅并入当前缺失的来源（storeId 去重，既有来源不采纳快照值，
+   * 用户态为先）；快照独有组整组追加；不改写当前活动组（由调用方决定恢复后的
+   * 活动组）。tabs 同 replaceAll 不归本模块：快照 tabs 字段丢弃，由 restore 循环
+   * 经活动 tab 层重建。
+   */
+  mergeSnapshot(snapshot: WorkspacesSnapshot): void;
   onWorkspacesChanged(cb: WorkspacesListener): () => void;
 } {
   let list: Workspace[] = [];
@@ -217,6 +226,32 @@ export function createWorkspaceState(): {
         createdAt: item.createdAt
       }));
       activeId = list.some((w) => w.id === snapshot.activeId) ? snapshot.activeId : (list[0]?.id ?? '');
+      ensureNonEmptyInternal();
+      if (!list.some((w) => w.id === activeId)) activeId = list[0]!.id;
+      notify();
+    },
+    mergeSnapshot(snapshot: WorkspacesSnapshot): void {
+      for (const item of snapshot.workspaces) {
+        const existing = list.find((w) => w.id === item.id);
+        if (existing === undefined) {
+          // 快照独有组：整组追加（模型字段拾取同 replaceAll，tabs/activeTabId 不进内存模型）
+          list = [
+            ...list,
+            {
+              id: item.id,
+              name: item.name,
+              sources: item.sources.map((s) => ({ ...s })),
+              createdAt: item.createdAt
+            }
+          ];
+          continue;
+        }
+        // 既有组：仅并入当前缺失的来源（storeId 去重）——既有来源与组元数据不动
+        const missing = item.sources.filter((s) => !existing.sources.some((x) => x.storeId === s.storeId));
+        if (missing.length > 0) {
+          existing.sources = [...existing.sources, ...missing.map((s) => ({ ...s }))];
+        }
+      }
       ensureNonEmptyInternal();
       if (!list.some((w) => w.id === activeId)) activeId = list[0]!.id;
       notify();

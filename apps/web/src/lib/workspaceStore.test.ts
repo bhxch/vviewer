@@ -154,6 +154,59 @@ describe('createWorkspaceState', () => {
     expect(ws.list).toHaveLength(2);
   });
 
+  it('mergeSnapshot：既有组按 id 并入缺失来源（快照值不覆写既有），快照独有组整组追加', () => {
+    const ws = createWorkspaceState();
+    ws.ensureNonEmpty();
+    // 用户已建态：默认 w1 已登记来源 remote:user1（快点击竞态里 restore 前入模型）
+    ws.addSource('w1', src('remote:user1'));
+    ws.mergeSnapshot({
+      activeId: 'w1',
+      workspaces: [
+        {
+          id: 'w1',
+          name: '上次会话名',
+          sources: [src('remote:snap1'), src('remote:user1', { rootIndex: 9 })],
+          createdAt: 111,
+          tabs: [],
+          activeTabId: null
+        },
+        { id: 'w2', name: '快照新组', sources: [src('remote:snap2')], createdAt: 222, tabs: [], activeTabId: null }
+      ]
+    });
+    expect(ws.list.map((w) => w.id)).toEqual(['w1', 'w2']);
+    // 用户态为先：既有组不采纳快照的 name/createdAt
+    expect(ws.list[0]!.name).toBe('默认');
+    expect(ws.list[0]!.createdAt).not.toBe(111);
+    // 同 id 组：仅并入缺失来源，既有来源对象原样保留（快照 rootIndex:9 不覆写）
+    expect(ws.list[0]!.sources.map((s) => s.storeId)).toEqual(['remote:user1', 'remote:snap1']);
+    expect(ws.list[0]!.sources[0]!.rootIndex).toBeUndefined();
+    // 快照独有组：整组追加（含快照元数据）
+    expect(ws.list[1]).toMatchObject({ id: 'w2', name: '快照新组', createdAt: 222 });
+    expect(ws.list[1]!.sources.map((s) => s.storeId)).toEqual(['remote:snap2']);
+  });
+
+  it('mergeSnapshot：不改写活动组；空态兜底建默认；重复合并幂等（storeId 去重）', () => {
+    const ws = createWorkspaceState();
+    ws.ensureNonEmpty();
+    ws.addSource('w1', src('remote:user1')); // 用户活动
+    ws.mergeSnapshot({
+      activeId: 'w9', // 快照 activeId 指向不存在的组：不改写当前活动组
+      workspaces: [{ id: 'w1', name: '默认', sources: [], createdAt: 1, tabs: [], activeTabId: null }]
+    });
+    expect(ws.activeId).toBe('w1');
+    // 幂等：同一快照再合并，来源不重复
+    ws.mergeSnapshot({
+      activeId: 'w1',
+      workspaces: [{ id: 'w1', name: '默认', sources: [src('remote:user1')], createdAt: 1, tabs: [], activeTabId: null }]
+    });
+    expect(ws.list[0]!.sources).toHaveLength(1);
+    // 空态工厂直接合并空快照：不变式兜底建默认
+    const fresh = createWorkspaceState();
+    fresh.mergeSnapshot({ activeId: 'w1', workspaces: [] });
+    expect(fresh.list).toHaveLength(1);
+    expect(fresh.activeId).toBe('w1');
+  });
+
   it('onWorkspacesChanged：变更触发且回调收到副本；退订生效', () => {
     const ws = createWorkspaceState();
     const seen: string[] = [];
