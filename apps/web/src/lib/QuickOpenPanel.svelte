@@ -3,15 +3,17 @@
   // AppShell 以 Ctrl+P 挂载：打开时递归 listChildren（应用排除规则，逻辑在
   // quickOpen.ts 可单测）列文件 → 输入子串过滤（文件名命中优先）→ ↑↓ 选择、
   // Enter 经 addTab 打开 → Esc/✕ 关闭。浮层/焦点管理对齐 GlobalSearchPanel。
+  // workspace 多根（T4）：扫描当前 workspace 全部来源，结果行带「源名 / path」
+  // 前缀、打开按结果的 storeId 定位来源。
   import type { TreeStore } from '@vviewer/core';
   import { addTab } from './openFlow.svelte';
   import { loadSettings } from './stores/settings';
-  import { fileNameOf, filterFiles, listFilesRecursively } from './quickOpen';
+  import { fileNameOf, filterFiles, listFilesRecursively, type ScannedFile } from './quickOpen';
 
-  let { store, onclose }: { store: TreeStore | null; onclose(): void } = $props();
+  let { sources, onclose }: { sources: Array<{ label: string; store: TreeStore }>; onclose(): void } = $props();
 
   let query = $state('');
-  let files = $state<string[]>([]);
+  let files = $state<ScannedFile[]>([]);
   /** 状态条：列文件中 / 失败 / 未打开目录 / 无匹配 */
   let status = $state('');
   let active = $state(0);
@@ -28,16 +30,17 @@
     inputEl?.focus();
   });
 
-  // 打开时列一次文件；store 卸载/替换后代际防护（stale 丢弃过期结果）
+  // 打开时列一次文件；来源集变化（切 workspace/增删源）后重扫。
+  // 来源卸载/替换后代际防护（stale 丢弃过期结果）
   $effect(() => {
-    const s = store;
-    if (!s) {
+    const srcs = sources;
+    if (srcs.length === 0) {
       status = '未打开文件夹';
       return;
     }
     let stale = false;
     status = '正在列出文件…';
-    listFilesRecursively(s, loadSettings().excludedPatterns)
+    listFilesRecursively(srcs, loadSettings().excludedPatterns)
       .then((list) => {
         if (stale) return;
         files = list;
@@ -74,6 +77,11 @@
     return () => window.removeEventListener('keydown', onWinKey);
   });
 
+  /** 结果行的来源显示名（来源已移除的陈旧结果退回 storeId）。 */
+  function labelOf(storeId: string): string {
+    return sources.find((s) => s.store.id === storeId)?.label ?? storeId;
+  }
+
   function scrollActiveIntoView(): void {
     listEl?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
   }
@@ -89,14 +97,15 @@
       scrollActiveIntoView();
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      const path = results[active];
-      if (path !== undefined) open(path);
+      const f = results[active];
+      if (f !== undefined) open(f);
     }
   }
 
-  function open(path: string): void {
-    if (!store) return;
-    addTab(store, path, fileNameOf(path));
+  function open(f: ScannedFile): void {
+    const src = sources.find((s) => s.store.id === f.storeId);
+    if (!src) return; // 来源已移除（陈旧结果）：静默忽略
+    addTab(src.store, f.path, f.name);
     close();
   }
 
@@ -140,19 +149,19 @@
   </div>
   {#if results.length > 0}
     <ul class="vv-quickopen-list" bind:this={listEl}>
-      {#each results as path, i (path)}
+      {#each results as f, i (f.storeId + ':' + f.path)}
         <li>
           <button
             type="button"
             class="vv-quickopen-row"
             class:active={i === active}
             data-active={i === active}
-            title={path}
-            onclick={() => open(path)}
+            title={f.path}
+            onclick={() => open(f)}
             onmousemove={() => (active = i)}
           >
-            <span class="vv-quickopen-name">{fileNameOf(path)}</span>
-            <span class="vv-quickopen-path">{path}</span>
+            <span class="vv-quickopen-name">{fileNameOf(f.path)}</span>
+            <span class="vv-quickopen-path">{labelOf(f.storeId)} / {f.path}</span>
           </button>
         </li>
       {/each}

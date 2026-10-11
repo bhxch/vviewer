@@ -14,21 +14,33 @@
     tabStore,
     addTab,
     activateTab,
+    closeTab,
     tryRestoreDirectory,
     bindArchiveOpenEvents,
     seedSeqFromSnapshots,
     loadLastServer,
+    storeById,
+    workspacesView,
     watchHealth
   } from './openFlow.svelte';
-  import { loadSession, saveDirHandle, type TabSnapshot } from './stores/session';
+  import {
+    loadDirHandle,
+    loadWorkspaces,
+    saveDirHandle,
+    type TabSnapshot
+  } from './stores/session';
+  import { migrateLegacyTabs, workspaceStore, type WorkspaceSnapshotItem, type WorkspaceSource } from './workspaceStore';
   import { loadSettings, onSettingsChanged } from './stores/settings';
+
+  /** 文件树/面板的来源条目：workspace.sources（模型）× storeById（活动实例）的合成。 */
+  interface TreeSource {
+    label: string;
+    store: TreeStore;
+  }
 
   // 响应式副本：onSettingsChanged 订阅刷新（BUG-05）。此前是非响应式快照，
   // 设置面板改排除规则后 FileTree 拿不到新值
   let settings = $state(loadSettings());
-  let dirStore = $state<TreeStore | null>(null);
-  /** 目录 tab 的 rev（SSE changed 自增）：作 FileTree 的重建 key（左栏树刷新） */
-  let dirRev = $state(0);
   let drawerOpen = $state(false);
   /** 右栏（MetaPanel/TOC）抽屉开关：仅 ≤600px 断点生效（见样式媒体查询） */
   let rightOpen = $state(false);
@@ -39,12 +51,44 @@
   /** 快速打开面板开关（BUG-03）：Ctrl+P 切换，Esc 面板内关闭 */
   let quickOpenOpen = $state(false);
 
-  // 左栏文件树跟随目录 tab（目录 tab 由 addDirStoreTab 替换语义保证至多一个）
-  $effect(() => {
-    const list = tabStore.list;
-    const dirTab = list.find((t) => t.source.path === '' && !t.unrestorable);
-    dirStore = dirTab?.source.store ?? null;
-    dirRev = dirTab?.rev ?? 0;
+  /** 当前 workspace（workspacesView 为 openFlow 维护的 workspaceStore runes 镜像）。 */
+  const activeWorkspace = $derived(
+    workspacesView.list.find((w) => w.id === workspacesView.activeId) ?? null
+  );
+
+  /**
+   * 左栏文件树的来源列表（多根 T4）：当前 workspace 的每个来源解析出活动 store
+   * 实例；无实例（localfiles 恢复不可达 / remote 重连失败 / 已被移除）的来源不渲染。
+   * 读 tabStore.list 建立响应式依赖——activeStores 注册表是普通 Map 不可追踪，其
+   * 增删只发生在 tab add/close 的同一同步调用内，list 变化是其变化的超集信号。
+   */
+  const sources = $derived.by(() => {
+    const ws = activeWorkspace;
+    if (ws === null) return [] as TreeSource[];
+    const tabs = tabStore.list;
+    const out: TreeSource[] = [];
+    for (const s of ws.sources) {
+      const store = storeById(s.storeId);
+      if (store !== null && tabs.some((t) => t.source.storeId === s.storeId)) {
+        out.push({ label: s.storeLabel, store });
+      }
+    }
+    return out;
+  });
+
+  /**
+   * 整树重建 key（BUG-05 通道，T4 多源化）：源数量 + 各源目录 tab 的 rev 聚合
+   * （refreshPaths 对 path==='' 的目录 tab 无条件自增）+ 排除规则。某源无目录
+   * tab（跨 workspace 去重被跳过）以 'x' 占位，不触发无意义的整树重建。
+   */
+  const treeKey = $derived.by(() => {
+    const revs = sources
+      .map(
+        (s) =>
+          tabStore.list.find((t) => t.source.path === '' && t.source.storeId === s.store.id)?.rev ?? 'x'
+      )
+      .join(',');
+    return `${sources.length}|${revs}|${JSON.stringify(settings.excludedPatterns)}`;
   });
 
   onMount(() => {
@@ -61,63 +105,92 @@
     };
   });
 
+  /**
+   * 会话恢复 v2（workspace 多根 T4）：loadWorkspaces 读 'workspaces' 快照（缺失则
+   * migrateLegacyTabs 一次性迁移旧 'tabs' 键），组/来源结构经 replaceAll 入模型后
+   * 逐 workspace 重建——先按来源类别重建 store（localfs 重授权 / remote 重连 /
+   * 其余类别无会话句柄不重建），再逐 tab 恢复（归属由恢复循环的逐组 setActive
+   * 锚定）+ 组内对齐活动 tab；最后回设快照记录的活动组。恢复失败（IndexedDB
+   * 异常、快照损坏等）不得阻断应用启动：降级为空会话。
+   */
   async function restore(): Promise<void> {
-    // 恢复失败（IndexedDB 异常、快照损坏等）不得阻断应用启动：降级为空会话
     try {
-      const { tabs: saved, lastDirHandle } = await loadSession();
+      const [{ snapshot, legacyTabs }, dirHandle] = await Promise.all([loadWorkspaces(), loadDirHandle()]);
+      // 旧会话（无 'workspaces' 键）：迁移成单默认 workspace 的 v2 形状走同一恢复路径
+      const snap = snapshot ?? migrateLegacyTabs(legacyTabs);
       // 新 tab id 以快照最大序号为基：占位 tab 保留快照旧 id，seq 从 0 重计数会撞车
-      seedSeqFromSnapshots(saved);
-      let dirStoreAtRestore: TreeStore | null = null;
-      if (lastDirHandle) {
-        const ok = await tryRestoreDirectory(lastDirHandle);
-        if (!ok) {
-          await saveDirHandle(null); // 权限被拒：清除失效句柄，避免下次启动反复弹权限
-        } else {
-          dirStoreAtRestore = currentDirStore();
-        }
-      }
-      // BUG-08（方案 A）：remote 快照（快照带 storeBase）且与会话内上次成功连接
-      // （loadLastServer，sessionStorage 跨 F5 存活）base 一致时，restore 期自动
-      // 重建 RemoteStore 恢复内容与滚动位置；重建失败（不可达）落服务器来源占位。
-      // 同 base 只探测一次；health 探测 3s 超时，失败不重试、不阻塞启动
+      seedSeqFromSnapshots(snap);
+      // 组/来源结构入 workspace 模型；快照 tabs 字段被 replaceAll 丢弃，由下方逐组重建
+      workspaceStore.replaceAll(snap);
+      // BUG-08（方案 A）：remote 来源且与会话内上次成功连接（loadLastServer，
+      // sessionStorage 跨 F5 存活）base 一致时，restore 期自动重建 RemoteStore。
+      // 同 base+root+basePath 只探测一次（多 workspace 共享同一来源时复用实例，
+      // 避免同 id 双 SSE 流）；health 探测 3s 超时，失败不重试、不阻塞启动
       const last = loadLastServer();
       const reconnected = new Map<string, Promise<TreeStore | null>>();
-      const reconnectOf = (base: string, token: string | null): Promise<TreeStore | null> => {
-        let p = reconnected.get(base);
+      const reconnectOf = (src: WorkspaceSource): Promise<TreeStore | null> => {
+        const key = `${src.storeBase}|${src.rootIndex ?? 0}|${src.basePath ?? ''}`;
+        let p = reconnected.get(key);
         if (p === undefined) {
-          p = reconnectRemoteStore(base, token);
-          reconnected.set(base, p);
+          p = reconnectRemoteStore(src.storeBase ?? '', last?.token ?? null, {
+            rootIndex: src.rootIndex,
+            basePath: src.basePath
+          });
+          reconnected.set(key, p);
         }
         return p;
       };
-      for (const t of saved) {
-        // 目录来源已由 tryRestoreDirectory 重建为目录 tab；快照中的目录条目
-        // （path===''）若再恢复会每次启动累积一个，故跳过
-        if (t.path === '') continue;
-        if (t.kind === 'restorable' && dirStoreAtRestore) {
-          const tab = addTab(dirStoreAtRestore, t.path, t.name);
-          tab.scrollTop = t.scrollTop;
-          if (t.overrideRenderer !== undefined) tab.overrideRenderer = t.overrideRenderer; // C 项读回
-          continue;
-        }
-        if (t.kind === 'rename-only' && t.storeBase !== undefined && last !== null && last.baseUrl === t.storeBase) {
-          let store: TreeStore | null = null;
-          try {
-            store = await reconnectOf(t.storeBase, last.token);
-          } catch (err) {
-            // 重连通道意外抛错：与不可达同待遇——落占位，绝不让单 tab 拖垮整个恢复
-            console.error(`恢复服务器 ${t.storeBase} 的 tab 失败`, err);
+      for (const wsItem of snap.workspaces) {
+        // 组归属锚定：addTab 按 workspaceStore.activeId 归组，逐组 setActive 后组内
+        // addTab 全部归属本组。恢复通道的目录 tab（addDirTabForRestore）无激活/切换
+        // 语义，不会在循环中途改写 activeId 造成串组
+        workspaceStore.setActive(wsItem.id);
+        // —— 先重建各来源的 store ——
+        const rebuilt = new Map<string, TreeStore>();
+        for (const src of wsItem.sources) {
+          if (src.kind === 'localfs') {
+            // dirHandle 为全局单槽：仅当句柄目录名与来源 storeId（localfs:<目录名>）
+            // 一致才可重建；同名多 workspace 共享同一来源，addDirTabForRestore 去重
+            if (dirHandle !== null && `localfs:${dirHandle.name}` === src.storeId) {
+              const store = await tryRestoreDirectory(dirHandle, wsItem.id);
+              if (store !== null) {
+                rebuilt.set(src.storeId, store);
+              } else {
+                // 权限被拒：清除失效句柄，避免下次启动反复弹权限
+                await saveDirHandle(null);
+              }
+            }
+          } else if (src.kind === 'remote' && src.storeBase !== undefined && last !== null && last.baseUrl === src.storeBase) {
+            // basePath 指纹约束（T3 评审遗留）：storeId 中 basePath 段是 32 位 FNV
+            // 指纹不可反解——重建必须以快照 sources[].rootIndex/basePath 传入，
+            // 绝不从 storeId 反解（parseRemoteStoreId 只能给出指纹，给不出原路径）
+            let store: TreeStore | null = null;
+            try {
+              store = await reconnectOf(src);
+            } catch (err) {
+              // 重连通道意外抛错：与不可达同待遇——落占位，绝不让单来源拖垮整个恢复
+              console.error(`恢复服务器 ${src.storeBase} 的来源失败`, err);
+            }
+            if (store !== null) rebuilt.set(src.storeId, store);
           }
-          if (store !== null) {
+        }
+        // —— 再逐 tab 恢复；目录条目（path===''）已由来源重建，跳过防每次启动
+        // 累积一个（与旧 restore 同款）。来源未重建成功的 tab 落占位 ——
+        for (const t of wsItem.tabs) {
+          if (t.path === '') continue;
+          const store = rebuilt.get(t.storeId);
+          if (store !== undefined) {
             const tab = addTab(store, t.path, t.name);
             tab.scrollTop = t.scrollTop;
             if (t.overrideRenderer !== undefined) tab.overrideRenderer = t.overrideRenderer; // C 项读回
             continue;
           }
+          addPlaceholderTab(t);
         }
-        addPlaceholderTab(t);
+        alignActiveOfGroup(wsItem);
       }
-      alignActive(saved);
+      // 恢复循环逐组 setActive，最后回设快照记录的活动组
+      workspaceStore.setActive(snap.activeId);
     } catch (err) {
       console.error('会话恢复失败，已降级为空会话', err);
     }
@@ -128,8 +201,14 @@
    * 3s 超时判可达，可达即 createRemoteStore + SSE watch 订阅接线（与 connectServer
    * 同模式：autoRefresh 关闭时回调过滤、watch-error 置降级指示）；不可达返回 null
    * 交由调用方落占位。不发目录 tab（不自动弹树），只服务快照 tab 的内容恢复。
+   * 多根（T4）：rootIndex/basePath 由调用方从快照 sources[] 显式传入——storeId 的
+   * basePath 段是 32 位 FNV 指纹不可反解（T3 评审约束），恢复链路绝不从 storeId 反解。
    */
-  async function reconnectRemoteStore(base: string, token: string | null): Promise<TreeStore | null> {
+  async function reconnectRemoteStore(
+    base: string,
+    token: string | null,
+    opts?: { rootIndex?: number; basePath?: string }
+  ): Promise<TreeStore | null> {
     const headers: Record<string, string> = {};
     if (token) headers.authorization = `Bearer ${token}`;
     try {
@@ -147,7 +226,7 @@
     } catch {
       // base 非法（极端）：显示名退回原串
     }
-    const store = createRemoteStore(base, token, label);
+    const store = createRemoteStore(base, token, label, opts);
     watchHealth.degraded = false;
     store.watch(
       (paths) => {
@@ -162,8 +241,17 @@
     return store;
   }
 
-  function currentDirStore(): TreeStore | null {
-    return tabStore.list.find((t) => t.source.path === '' && !t.unrestorable)?.source.store ?? null;
+  /** 组内活动 tab 对齐：addTab 总是激活新 tab，恢复完一组后按快照 activeTabId 对齐。
+   * 恢复的 tab 不保留快照 id（新 id 顺延），按 path+storeId 匹配；占位来源的
+   * storeId 为 placeholder:${快照 storeId}，需一并匹配（沿袭旧 alignActive）。 */
+  function alignActiveOfGroup(wsItem: WorkspaceSnapshotItem): void {
+    const want = wsItem.tabs.find((t) => t.id === wsItem.activeTabId);
+    if (!want) return;
+    const match = tabStore.tabsOf(wsItem.id).find(
+      (t) => t.source.path === want.path
+        && (t.source.storeId === want.storeId || t.source.storeId === `placeholder:${want.storeId}`)
+    );
+    if (match) activateTab(match.id);
   }
 
   function addPlaceholderTab(t: TabSnapshot): void {
@@ -194,20 +282,22 @@
     tab.unrestorable = true;
   }
 
-  /** addTab 总是激活新 tab，恢复完成后需对齐快照记录的活动 tab */
-  function alignActive(saved: TabSnapshot[]): void {
-    const want = saved.find((t) => t.active);
-    if (!want) return;
-    // rename-only 占位的 storeId 为 placeholder:${快照 storeId}，需一并匹配
-    const match = tabStore.list.find(
-      (t) => t.source.path === want.path
-        && (t.source.storeId === want.storeId || t.source.storeId === `placeholder:${want.storeId}`)
-    );
-    if (match) activateTab(match.id);
+  /**
+   * 源级移除（FileTree 源行按钮，confirm 在组件内）：关闭当前 workspace 内该来源
+   * 的全部 tab，并把来源从当前 workspace 移除。移除是组内操作——其他 workspace
+   * 若共享同一 storeId，其来源与 tab 不受影响（store 实例仍被其 tab 持有）。
+   */
+  function removeSource(store: TreeStore): void {
+    const ws = activeWorkspace;
+    if (ws === null) return;
+    for (const t of [...tabStore.tabsOf(ws.id)]) {
+      if (t.source.storeId === store.id) closeTab(t.id);
+    }
+    workspaceStore.removeSource(ws.id, store.id);
   }
 
-  function onTreeOpen(e: { path: string; name: string }): void {
-    if (dirStore) addTab(dirStore, e.path, e.name);
+  function onTreeOpen(e: { path: string; name: string; store: TreeStore }): void {
+    addTab(e.store, e.path, e.name);
   }
 
   // 全局键位（BUG-03，场景 SHELL-11）：Ctrl+Shift+F 全局搜索（既有）、Ctrl+P
@@ -278,10 +368,10 @@
   <TabBar tabs={tabStore.list} />
   <div class="vv-body">
     <aside class="vv-side">
-      {#if dirStore}
-        <!-- 排除规则变更也重建整棵树（含已懒加载的子目录），与 dirRev（SSE）同一 key 通道（BUG-05） -->
-        {#key `${dirRev}|${JSON.stringify(settings.excludedPatterns)}`}
-          <FileTree store={dirStore} excludedPatterns={settings.excludedPatterns} onopen={onTreeOpen} />
+      {#if sources.length > 0}
+        <!-- 整树重建 key：源数量 | 各源目录 tab rev 聚合 | 排除规则（BUG-05 通道，T4 多源化） -->
+        {#key treeKey}
+          <FileTree {sources} excludedPatterns={settings.excludedPatterns} onopen={onTreeOpen} onremove={removeSource} />
         {/key}
       {:else}
         <div class="vv-side-empty">未打开文件夹</div>
@@ -303,10 +393,10 @@
   <button class="vv-drawer-toggle" aria-label="切换侧栏" onclick={() => (drawerOpen = !drawerOpen)}>☰</button>
   <button class="vv-right-toggle" aria-label="切换目录与属性面板" onclick={() => (rightOpen = !rightOpen)}>ℹ</button>
   {#if globalSearchOpen}
-    <GlobalSearchPanel store={dirStore} onclose={() => (globalSearchOpen = false)} />
+    <GlobalSearchPanel {sources} onclose={() => (globalSearchOpen = false)} />
   {/if}
   {#if quickOpenOpen}
-    <QuickOpenPanel store={dirStore} onclose={() => (quickOpenOpen = false)} />
+    <QuickOpenPanel {sources} onclose={() => (quickOpenOpen = false)} />
   {/if}
 </div>
 

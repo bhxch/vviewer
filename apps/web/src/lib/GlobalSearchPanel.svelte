@@ -4,13 +4,13 @@
   // 前端内存 grep）→ 按文件分组列表（行内 query 高亮）→ 点击 addTab 打开文件
   // （打开后行内定位为 P2）；Esc/✕ 关闭。代际防护：新输入使旧结果作废，
   // 本地 grep 经 canceled 提前自弃、远程经 AbortController 断流。
-  import type { GrepMatch, TreeStore } from '@vviewer/core';
+  import type { GrepMatch } from '@vviewer/core';
   import { matchRanges } from '@vviewer/core';
   import { addTab } from './openFlow.svelte';
-  import { runGlobalSearch, serverSearchHint } from './globalSearch';
+  import { runGlobalSearch, serverSearchHint, type SearchSource } from './globalSearch';
   import { loadSearchEngine } from './searchEngineCache';
 
-  let { store, onclose }: { store: TreeStore | null; onclose(): void } = $props();
+  let { sources, onclose }: { sources: Array<SearchSource>; onclose(): void } = $props();
 
   let query = $state('');
   let caseSensitive = $state(false);
@@ -67,14 +67,16 @@
     return () => window.removeEventListener('keydown', onWinKey);
   });
 
-  /** 展示行（保持命中顺序；文件首行带 header 标记），截到 MAX_ROWS */
+  /** 展示行（保持命中顺序；文件首行带 header 标记），截到 MAX_ROWS。
+   * T4 多源：分组键带 storeId——不同来源的同名路径不并组、计数与打开各归各源。 */
   const rows = $derived.by(() => {
     const out: Array<{ m: GrepMatch; header: boolean }> = [];
-    let lastPath = '';
+    let lastKey = '';
     for (const m of matches) {
       if (out.length >= MAX_ROWS) break;
-      const header = m.path !== lastPath;
-      lastPath = m.path;
+      const key = `${m.storeId}:${m.path}`;
+      const header = key !== lastKey;
+      lastKey = key;
       out.push({ m, header });
     }
     return out;
@@ -82,7 +84,10 @@
 
   const counts = $derived.by(() => {
     const c = new Map<string, number>();
-    for (const m of matches) c.set(m.path, (c.get(m.path) ?? 0) + 1);
+    for (const m of matches) {
+      const key = `${m.storeId}:${m.path}`;
+      c.set(key, (c.get(key) ?? 0) + 1);
+    }
     return c;
   });
 
@@ -94,11 +99,11 @@
   async function run(): Promise<void> {
     const my = ++gen;
     abort?.abort();
-    if (!store || query === '') {
+    if (sources.length === 0 || query === '') {
       matches = [];
       truncated = false;
       degraded = false;
-      status = store ? '' : '未打开文件夹';
+      status = sources.length > 0 ? '' : '未打开文件夹';
       return;
     }
     const ac = new AbortController();
@@ -112,7 +117,7 @@
     status = '搜索中…';
     try {
       const res = await runGlobalSearch(
-        store,
+        sources,
         query,
         { caseSensitive, regex },
         (done) => {
@@ -145,11 +150,14 @@
   }
 
   function open(m: GrepMatch): void {
-    if (!store) return;
+    // T4 多源：按命中携带的 storeId 定位来源（远端合并请求的命中归组内首源，
+    // 见 globalSearch.remoteGrep）；来源已移除的陈旧结果静默忽略
+    const src = sources.find((s) => s.store.id === m.storeId);
+    if (!src) return;
     // BUG-09：打开后定位到命中行——addTab 返回 tab 写一次性 pendingLine（对象扩展
     // 字段，不进 Tab 接口与会话快照），ViewerPane 渲染完成后消费（revealLine）；
     // 无 revealLine 的实例（markdown/HTML 渲染视图等）静默跳过，不阻塞打开
-    const tab = addTab(store, m.path, m.path.split('/').pop() ?? m.path);
+    const tab = addTab(src.store, m.path, m.path.split('/').pop() ?? m.path);
     Object.assign(tab, { pendingLine: m.line }); // m.line 为 1 起行号，消费端换算 0 起
   }
 
@@ -228,10 +236,10 @@
       {status}{truncated ? '（结果不完整，已达上限）' : ''}
     </span>
     {#if truncated}
-      {@const hint = serverSearchHint(store)}
+      {@const hint = serverSearchHint(sources)}
       {#if hint}
         <!-- BUG-11：纯前端搜索触达扫描上限时引导服务器模式（裁决见 serverSearchHint：
-             远程 store 已是服务器模式，不引导）；文案与裁决单测锚定 globalSearch.test.ts -->
+             任一来源为远程 store 即已是服务器模式，不引导）；文案锚定 globalSearch.test.ts -->
         <span class="vv-gsearch-hint">{hint}</span>
       {/if}
     {/if}
@@ -249,11 +257,11 @@
   </div>
   {#if rows.length > 0}
     <div class="vv-gsearch-results">
-      {#each rows as row (row.m.path + ':' + row.m.line + ':' + row.m.col)}
+      {#each rows as row (row.m.storeId + ':' + row.m.path + ':' + row.m.line + ':' + row.m.col)}
         {#if row.header}
           <div class="vv-gsearch-file">
             <span class="vv-gsearch-file-path">{row.m.path}</span>
-            <span class="vv-gsearch-file-count">{counts.get(row.m.path)}</span>
+            <span class="vv-gsearch-file-count">{counts.get(row.m.storeId + ':' + row.m.path)}</span>
           </div>
         {/if}
         {@const segs = segments(row.m)}

@@ -76,6 +76,15 @@ export async function saveTabs(tabs: TabSnapshot[]): Promise<void> { await kvPut
 export async function saveDirHandle(h: FileSystemDirectoryHandle | null): Promise<void> { await kvPut('dirHandle', h); }
 
 /**
+ * 目录句柄（kv 'dirHandle' 单槽）：restore v2（AppShell）以 `localfs:<目录名>`
+ * 与快照来源 storeId 匹配后重建对应 workspace 的 localfs 源——多来源时仅名字
+ * 一致的那一个可恢复，其余落占位（localfs 句柄无法持久化多个）。
+ */
+export async function loadDirHandle(): Promise<FileSystemDirectoryHandle | null> {
+  return (await kvGet<FileSystemDirectoryHandle>('dirHandle')) ?? null;
+}
+
+/**
  * workspaces 快照（v2，kv 键 'workspaces'）：与 'tabs' 并存的新键，
  * 不升 DB 版本（kv store 通吃）。
  */

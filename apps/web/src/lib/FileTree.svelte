@@ -2,38 +2,108 @@
   import type { TreeStore, TreeNode } from '@vviewer/core';
   import TreeNodeRow from './TreeNodeRow.svelte';
 
-  let { store, excludedPatterns = [], onopen }: {
-    store: TreeStore;
+  let { sources, excludedPatterns = [], onopen, onremove }: {
+    /** 当前 workspace 的全部可渲染来源（AppShell 由 workspace.sources × 活动实例解析） */
+    sources: Array<{ label: string; store: TreeStore }>;
     excludedPatterns?: string[];
-    onopen: (e: { path: string; name: string }) => void;
+    /** TreeNodeRow 上行的打开事件附带命中来源的 store（AppShell 按源 addTab） */
+    onopen: (e: { path: string; name: string; store: TreeStore }) => void;
+    /** 源级移除（confirm 在本组件内）；AppShell 关闭该组内该源全部 tab 并 removeSource */
+    onremove?: (store: TreeStore) => void;
   } = $props();
 
-  let nodes = $state<TreeNode[]>([]);
+  /** 各源根目录节点：一次 effect 全源加载；任一源失败该源为空列表，不拖垮其他源 */
+  let roots = $state<Array<{ storeId: string; label: string; store: TreeStore; nodes: TreeNode[] }>>([]);
 
   function excluded(name: string): boolean {
     return excludedPatterns.some((p) => name === p || (p.startsWith('*.') && name.endsWith(p.slice(1))));
   }
 
-  // 根目录懒加载；store 或排除模式变化时重载
+  // 各源根目录懒加载；来源集或排除模式变化时重载（整树重建另有 AppShell 的 treeKey 通道）
   $effect(() => {
-    const s = store;
-    const patterns = excludedPatterns;
+    const srcs = sources;
     let cancelled = false;
-    s.listChildren('')
-      .then((list) => {
-        if (!cancelled) nodes = list.filter((n) => !excluded(n.name));
-      })
-      .catch(() => {
-        if (!cancelled) nodes = [];
-      });
+    Promise.all(
+      srcs.map(async (src) => ({
+        storeId: src.store.id,
+        label: src.label,
+        store: src.store,
+        nodes: await src.store
+          .listChildren('')
+          .then((list) => list.filter((n) => !excluded(n.name)))
+          .catch(() => [] as TreeNode[])
+      }))
+    ).then((rs) => {
+      if (!cancelled) roots = rs;
+    });
     return () => {
       cancelled = true;
     };
   });
+
+  function requestRemove(store: TreeStore): void {
+    if (!confirm(`将关闭该来源下全部 tab，并从当前工作区移除来源「${store.displayName()}」，确定？`)) return;
+    onremove?.(store);
+  }
 </script>
 
-<ul class="vv-tree" role="tree">
-  {#each nodes as node (node.path)}
-    <TreeNodeRow {store} {excludedPatterns} {node} depth={0} {onopen} />
+<div class="vv-tree" role="tree">
+  {#each roots as src (src.storeId)}
+    <div class="vv-tree-src">
+      <span class="vv-tree-src-label" title={src.label}>{src.label}</span>
+      <button
+        type="button"
+        class="vv-tree-src-remove"
+        aria-label="移除来源 {src.label}"
+        title="移除该来源（将关闭该来源下全部 tab）"
+        onclick={() => requestRemove(src.store)}
+      >✕</button>
+    </div>
+    <ul class="vv-tree-group" role="group">
+      {#each src.nodes as node (node.path)}
+        <TreeNodeRow store={src.store} {excludedPatterns} {node} depth={0} onopen={(e) => onopen({ ...e, store: src.store })} />
+      {/each}
+    </ul>
   {/each}
-</ul>
+</div>
+
+<style>
+  /* 顶层源名行（T4 多根）：源级标签 + 移除入口。嵌套子树的缩进/列表复位
+     仍走 app.css 的 .vv-tree 规则（TreeNodeRow 的嵌套 ul.vv-tree） */
+  .vv-tree-src {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 6px 2px;
+    font-size: 12px;
+    color: var(--ui-fg-muted);
+  }
+  .vv-tree-src-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+  .vv-tree-src-remove {
+    flex: none;
+    border: 0;
+    background: none;
+    color: var(--ui-fg-muted);
+    font: inherit;
+    font-size: 11px;
+    padding: 0 4px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .vv-tree-src-remove:hover {
+    color: var(--ui-fg);
+    background: var(--ui-side-bg);
+  }
+  .vv-tree-group {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+</style>

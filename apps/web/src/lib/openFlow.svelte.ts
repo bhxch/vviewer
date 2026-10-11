@@ -14,13 +14,12 @@ import {
 import { ARCHIVE_OPEN_EVENT } from '@vviewer/render-archive';
 import {
   saveDirHandle,
-  saveTabs,
   saveWorkspaces,
   maxTabSeqOf,
   type TabSnapshot
 } from './stores/session';
-import type { WorkspacesSnapshot } from './workspaceStore';
-import { workspaceStore } from './workspaceStore';
+import type { WorkspacesSnapshot, Workspace, WorkspaceSource } from './workspaceStore';
+import { sourceKindOf, workspaceStore } from './workspaceStore';
 import { loadSettings } from './stores/settings';
 import { releaseStoreIfLast } from './storeRelease';
 import { saveSearchEngine } from './searchEngineCache';
@@ -62,7 +61,9 @@ function snapshot(t: Tab): TabSnapshot {
 }
 
 async function persist(): Promise<void> {
-  // 快照 v2：TabSnapshot 按所属 workspace 分组落 'workspaces' 键，activeTabId 记组内活动
+  // 快照 v2：TabSnapshot 按所属 workspace 分组落 'workspaces' 键，activeTabId 记组内活动。
+  // AppShell.restore 自 T4 起读 loadWorkspaces（v2 + 旧键迁移），旧 'tabs' 键的过渡期
+  // 双写移除：迁移后只写 'workspaces'（旧键保留最后一次迁移副本，progress.md 裁决）
   await saveWorkspaces({
     activeId: workspaceStore.activeId,
     workspaces: workspaceStore.list.map((w) => {
@@ -75,9 +76,6 @@ async function persist(): Promise<void> {
       };
     })
   });
-  // 过渡期双写旧 'tabs' 键（T4 接管 AppShell.restore 读 loadWorkspaces 后移除）：
-  // 未改造的恢复通道仍从旧键读，保证本轮消费方行为等价；旧键保留不删
-  await saveTabs(tabStore.list.map(snapshot));
 }
 
 /**
@@ -110,6 +108,7 @@ class TabCollection {
     //（单工作区时与旧的全局去活行为一致——新 tab 必成为组内唯一活动）
     for (const t of this.tabsOf(tab.workspaceId)) t.active = false;
     this.list.push(tab);
+    activeStores.set(store.id, store); // 实例注册表（storeById 的数据源）
     void persist();
     // BUG-69：必须返回 $state 数组内元素（响应式代理）而非上面的裸对象 tab——
     // Svelte 5 $state 深代理的响应性按属性缓存（首读定值），add 内同步 persist 的
@@ -147,6 +146,11 @@ class TabCollection {
         if (neighbor) neighbor.active = true;
       }
       void persist();
+      // 实例注册表清理：该 storeId 已无任何 tab 持有时摘除（与 releaseStoreIfLast
+      // 的对象身份计数无关——注册表按 storeId 键控，同 id 换新实例由 add 重新覆盖）
+      if (!this.list.some((t) => t.source.storeId === closed.source.storeId)) {
+        activeStores.delete(closed.source.storeId);
+      }
       this.releaseStoreIfLast(closed.source.store);
     }
   }
@@ -182,7 +186,7 @@ class TabCollection {
     }
   }
 
-  /** 滚动位置即时写入内存，saveTabs 落盘走 300ms 尾随防抖 */
+  /** 滚动位置即时写入内存，persist（saveWorkspaces 快照）走 300ms 尾随防抖 */
   persistScroll(id: string, top: number): void {
     const t = this.list.find((x) => x.id === id);
     if (!t) return;
@@ -208,11 +212,40 @@ class TabCollection {
     if (rendererId === null) delete tab.overrideRenderer;
     else tab.overrideRenderer = rendererId;
     tab.rev = (tab.rev ?? 0) + 1;
-    void persist(); // 与 persistScroll 同款落盘入口（saveTabs 快照）
+    void persist(); // 与 persistScroll 同款落盘入口（saveWorkspaces 快照）
   }
 }
 
 export const tabStore = new TabCollection();
+
+/**
+ * 活动 store 实例注册表：storeId → TreeStore（会话内尚有 tab 持有的实例）。
+ * workspace.sources 只存 storeId/元数据（可持久化）；文件树/面板需要活实例时经
+ * storeById 解析（AppShell.restore 也据它判断来源是否已重建）。
+ * 刻意用普通 Map 而非 $state：注册表仅在 TabCollection.add/close 的同一同步调用内
+ * 增删，UI 侧读 tabStore.list（$state）建立响应式依赖即可——list 变化是注册表
+ * 变化的超集信号，且避免 $state 深代理包裹 store 实例引入的代理身份问题。
+ */
+const activeStores = new Map<string, TreeStore>();
+
+/** storeId → 活动实例；无 tab 持有（未打开/已全部关闭）返回 null。 */
+export function storeById(storeId: string): TreeStore | null {
+  return activeStores.get(storeId) ?? null;
+}
+
+/**
+ * workspaceStore 的 runes 镜像（workspaceStore 是普通发布订阅模块，Svelte 不可
+ * 追踪）：模块级订阅先于任何组件挂载与 AppShell.restore 的 replaceAll，通知不丢；
+ * UI 层（文件树/面板/T5 切换器/T6 TabBar 过滤）读本镜像建立响应式。
+ */
+export const workspacesView = $state<{ list: Workspace[]; activeId: string }>({
+  list: [...workspaceStore.list],
+  activeId: workspaceStore.activeId
+});
+workspaceStore.onWorkspacesChanged((s) => {
+  workspacesView.list = s.list;
+  workspacesView.activeId = s.activeId;
+});
 
 /**
  * SSE 变更推送健康状态（终审 B2）：服务端 watch-error（watcher 启动失败或运行期
@@ -498,22 +531,66 @@ export function loadLastServer(): LastServer | null {
   }
 }
 
+/**
+ * TreeStore → workspace 来源登记项（kind 由 storeId 前缀推导；storeBase 仅 remote 有）。
+ * rootIndex/basePath 不在此派生：storeId 中 basePath 段是 32 位 FNV 指纹不可反解
+ * （T3 评审约束），运行期经本函数登记的来源只有根 0/无 basePath 形态；多根远端
+ * 来源由 T5 的 openRemoteSource 显式携带 rootIndex/basePath 构造后调 addSource。
+ */
+function sourceOf(store: TreeStore): WorkspaceSource {
+  const base = getRemoteBase(store.id);
+  return {
+    kind: sourceKindOf(store.id),
+    storeId: store.id,
+    storeLabel: store.displayName(),
+    ...(base !== undefined ? { storeBase: base } : {})
+  };
+}
+
 /** 目录来源以一个"目录 tab"表达：path=''，ViewerPane 显示引导提示，文件树渲染在左栏。
- * 多根工作区（T3）：目录 tab 加入当前 workspace；同 storeId 已有目录 tab 则直接激活
- * （去重）——废除旧版「关闭全部既有目录 tab」的替换语义（单根时期的临时方案）。 */
+ * 多根工作区（T4）：来源先登记进当前 workspace（workspace.sources 是文件树/
+ * QuickOpen/全局搜索的数据锚，addSource 按 storeId 组内去重）；目录 tab 跨 workspace
+ * 全局去重（T3 遗留裁决）：同 storeId 已有目录 tab 则激活之并切换到其所在 workspace
+ * ——用户点树/连接里一个已打开的目录 = 回到它，不重复建。 */
 function addDirStoreTab(store: TreeStore): void {
   const existing = tabStore.list.find((t) => t.source.path === '' && t.source.storeId === store.id);
   if (existing) {
+    if (existing.workspaceId !== workspaceStore.activeId) {
+      workspaceStore.setActive(existing.workspaceId);
+    }
     tabStore.activate(existing.id);
     return;
   }
+  workspaceStore.addSource(workspaceStore.activeId, sourceOf(store));
   addTab(store, '', store.displayName());
 }
 
-export async function tryRestoreDirectory(handle: FileSystemDirectoryHandle): Promise<boolean> {
-  if (!(await ensurePermission(handle))) return false;
-  addDirStoreTab(createLocalFsStore(handle));
-  return true;
+/**
+ * restore 通道的目录 tab（passive）：目标组显式传参（配合恢复循环的逐组
+ * setActive 归属）、不激活不切换；跨组去重命中（多 workspace 共享同一来源）
+ * 只跳过——恢复期切换活动组会让后续 addTab 串组。来源登记与运行时通道同款
+ * （addSource 组内去重，replaceAll 已登记的来源为 no-op）。
+ */
+export function addDirTabForRestore(wsId: string, store: TreeStore): void {
+  if (tabStore.list.some((t) => t.source.path === '' && t.source.storeId === store.id)) return;
+  workspaceStore.addSource(wsId, sourceOf(store));
+  addTab(store, '', store.displayName());
+}
+
+/**
+ * localfs 会话恢复（AppShell.restore 专用）：重授权成功经 addDirTabForRestore 建
+ * 目录 tab 并返回 store 实例，供同源文件 tab 挂靠与来源-实例配对；权限被拒返回
+ * null（调用方清除失效句柄，其余来源 tab 落占位）。wsId 为目标 workspace（恢复
+ * 循环逐组调用）。非 restore 场景的目录打开走 openDirectoryViaPicker 等运行时通道。
+ */
+export async function tryRestoreDirectory(
+  handle: FileSystemDirectoryHandle,
+  wsId: string
+): Promise<TreeStore | null> {
+  if (!(await ensurePermission(handle))) return null;
+  const store = createLocalFsStore(handle);
+  addDirTabForRestore(wsId, store);
+  return store;
 }
 
 export function openUrl(url: string): void {
