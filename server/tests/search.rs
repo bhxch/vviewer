@@ -49,6 +49,24 @@ fn big_fixture() -> Fixture {
     Fixture { _dir: dir, state }
 }
 
+/// workspace 多根 fixture：两个 tempdir 各含一个 needle 文件（文件名互异，
+/// 按相对路径即可断言命中归属哪个根）。
+struct DualFixture {
+    _d0: tempfile::TempDir,
+    _d1: tempfile::TempDir,
+    state: AppState,
+}
+
+fn dual_fixture() -> DualFixture {
+    let d0 = tempfile::tempdir().unwrap();
+    let d1 = tempfile::tempdir().unwrap();
+    std::fs::write(d0.path().join("r0.txt"), "needle in root0\n").unwrap();
+    std::fs::write(d1.path().join("r1.txt"), "needle in root1\n").unwrap();
+    let state = AppState::new(d0.path().to_path_buf(), None, None, false, None)
+        .with_roots(vec![d0.path().to_path_buf(), d1.path().to_path_buf()]);
+    DualFixture { _d0: d0, _d1: d1, state }
+}
+
 async fn post_search(state: AppState, body: Value) -> (StatusCode, Vec<Value>) {
     let app = vviewer::build_router(state);
     let res = app
@@ -321,6 +339,64 @@ async fn missing_rg_falls_back_to_grep() {
     );
     let done = done_frame(&frames);
     assert_eq!(done["done"], true);
+}
+
+// ---------- workspace 多根 ----------
+
+/// 多根下 root 缺省且有 path：path 无基准根（歧义）→ 400。
+#[tokio::test]
+async fn multi_root_path_without_root_is_400() {
+    let f = dual_fixture();
+    let (status, frames) =
+        post_search(f.state, json!({ "pattern": "needle", "path": "." })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(frames.len(), 1);
+    assert!(
+        frames[0]["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("path requires an explicit root")),
+        "错误信息应指明 path 需要显式 root: {frames:?}"
+    );
+}
+
+/// root 缺省 = 跨全部根：两根文件都命中，命中帧各带 root 索引（0 起）。
+#[tokio::test]
+async fn multi_root_search_spans_all_roots_and_tags_frames() {
+    if !rg_available() {
+        return;
+    }
+    let f = dual_fixture();
+    let (status, frames) = post_search(f.state, json!({ "pattern": "needle" })).await;
+    assert_eq!(status, StatusCode::OK);
+    let hits = match_frames(&frames);
+    let h0 = hits.iter().find(|h| h["file"] == "r0.txt").expect("0 号根应命中");
+    assert_eq!(h0["root"], 0, "跨根命中帧应携带 root: 0");
+    let h1 = hits.iter().find(|h| h["file"] == "r1.txt").expect("1 号根应命中");
+    assert_eq!(h1["root"], 1, "跨根命中帧应携带 root: 1");
+    let done = done_frame(&frames);
+    assert_eq!(done["done"], true);
+}
+
+/// root=Some(i)：仅该根参与，命中帧无 root 字段（与单根部署同形状）。
+#[tokio::test]
+async fn root_scoped_search_hits_only_that_root_without_root_field() {
+    if !rg_available() {
+        return;
+    }
+    let f = dual_fixture();
+    let (status, frames) =
+        post_search(f.state, json!({ "pattern": "needle", "root": 1 })).await;
+    assert_eq!(status, StatusCode::OK);
+    let hits = match_frames(&frames);
+    assert!(!hits.is_empty(), "1 号根应有命中");
+    assert!(
+        hits.iter().all(|h| h["file"] == "r1.txt"),
+        "root=1 只应命中 1 号根: {hits:?}"
+    );
+    assert!(
+        hits.iter().all(|h| h.get("root").is_none()),
+        "限定单根的命中帧不应有 root 字段: {hits:?}"
+    );
 }
 
 // ---------- Bearer 鉴权 ----------

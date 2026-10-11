@@ -17,6 +17,10 @@
 //! A 项降级链：rg 缺失时自动 fallback 系统 grep——参数映射/`--null` 行协议/
 //! 已知差异（无 filesize 跳过、顺序不保证、ERE、col=1）见 `grep_args`/`grep_frame`；
 //! health 据同一选择链宣告 `searchEngine`。
+//!
+//! workspace 多根：`root` 参数缺省 = 跨全部根（目录参数逐根追加，命中帧带
+//! `"root": <idx>`）；`root=Some(i)` = 限定单根（多根下此时才允许携带 path，
+//! 帧无 root 字段与单根部署同形状）。
 
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -65,6 +69,11 @@ pub struct SearchRequest {
     pub regex: bool,
     #[serde(default)]
     pub path: Option<String>,
+    /// 限定根索引（workspace 多根，0 起）：None = 跨全部根搜索；Some(i) = 仅第
+    /// i 根（此时 path 相对该根）。多根部署下 None+path 因无基准根 400；
+    /// 单根部署沿用历史形状（path 相对 0 号根，无需显式 root）。
+    #[serde(default)]
+    pub root: Option<usize>,
 }
 
 /// 跨文件搜索引擎：rg 主路径，grep 降级路径（A 项 fallback）。
@@ -208,10 +217,32 @@ pub async fn search(State(state): State<AppState>, Json(req): Json<SearchRequest
         return AppError::bad_request("pattern too long (max 256 chars)").into_response();
     }
 
-    // 搜索目录：复用 guard（清洗 + canonicalize + 越界 403）
-    let dir = match guard::resolve(&state, req.path.as_deref()).await {
-        Ok(d) => d,
-        Err(e) => return e.into_response(),
+    // 多根歧义防护：未显式指定根时 path 无基准根（单根部署无歧义，沿用历史形状）
+    if req.root.is_none() && req.path.is_some() && state.roots.len() > 1 {
+        return AppError::bad_request("path requires an explicit root").into_response();
+    }
+
+    // 搜索目录：root=Some(i) → 该根（path 相对该根，复用 guard 清洗 + canonicalize
+    // + 越界 403）；root=None → 跨根，目录 = 全部根逐个追加（rg/grep 均支持多目录；
+    // 单根部署带 path 时 path 相对 0 号根——历史形状，多根带 path 已在上方 400）
+    let dirs: Vec<PathBuf> = match req.root {
+        Some(i) => {
+            let dir = match guard::resolve_at(&state, req.path.as_deref(), i).await {
+                Ok(d) => d,
+                Err(e) => return e.into_response(),
+            };
+            vec![dir]
+        }
+        None => match req.path.as_deref() {
+            Some(path) => {
+                let dir = match guard::resolve_at(&state, Some(path), 0).await {
+                    Ok(d) => d,
+                    Err(e) => return e.into_response(),
+                };
+                vec![dir]
+            }
+            None => state.roots.iter().map(|r| r.canonical.clone()).collect(),
+        },
     };
 
     // handler 返回 Response 而非 Result，? 不可用：与 guard::resolve 同款 match 展开
@@ -227,11 +258,14 @@ pub async fn search(State(state): State<AppState>, Json(req): Json<SearchRequest
     let mut command = Command::new(&bin);
     command
         .args(args)
-        .arg(&dir)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true); // 兜底：pump 任务整体被 drop 时也要杀掉子进程
+    // 根目录参数逐个追加（跨根 = 多目录单进程；rg/grep 对多目录语义一致）
+    for dir in &dirs {
+        command.arg(dir);
+    }
     let mut child = match command.spawn() {
         Ok(c) => c,
         // 探测与 spawn 之间文件被移除（TOCTOU 窗口）：等同引擎不可用
@@ -252,9 +286,15 @@ pub async fn search(State(state): State<AppState>, Json(req): Json<SearchRequest
     let stderr: ChildStderr = child.stderr.take().expect("rg stderr must be piped");
 
     let (tx, rx) = mpsc::channel::<Result<String, std::io::Error>>(FRAME_CHANNEL);
+    // 根感知解析：限定单根（或部署单根）时解析器只见一个根——命中帧无 root 字段，
+    // 与历史单根形状逐字节一致；跨根时携带全部根，命中帧按命中根附 root 索引
+    let parser_roots: Vec<PathBuf> = match req.root {
+        Some(i) => vec![state.roots[i].canonical.clone()],
+        None => state.roots.iter().map(|r| r.canonical.clone()).collect(),
+    };
     let parser = match engine {
-        SearchEngine::Rg => FrameParser::Rg { root_canonical: state.root_canonical.clone() },
-        SearchEngine::Grep => FrameParser::Grep { root_canonical: state.root_canonical.clone() },
+        SearchEngine::Rg => FrameParser::Rg { roots: parser_roots },
+        SearchEngine::Grep => FrameParser::Grep { roots: parser_roots },
     };
     let pump_handle = tokio::spawn(pump(child, stdout, stderr, parser, tx, SEARCH_TIMEOUT));
     // 结局观测（tracing debug 级）：读取 outcome 字段同时消除 test-only 字段告警
@@ -284,22 +324,23 @@ pub(crate) struct PumpOutcome {
 }
 
 /// 引擎感知的行解析：None = 跳过该行（rg 非 match 事件/二进制帧、grep 畸形行）。
+/// `roots` 为参与搜索的根（canonical）列表：长度 >1 时命中帧携带 `"root": <idx>`。
 pub(crate) enum FrameParser {
-    Rg { root_canonical: PathBuf },
-    Grep { root_canonical: PathBuf },
+    Rg { roots: Vec<PathBuf> },
+    Grep { roots: Vec<PathBuf> },
 }
 
 impl FrameParser {
     fn frame(&self, line: &str) -> Option<String> {
         match self {
-            FrameParser::Rg { root_canonical } => {
+            FrameParser::Rg { roots } => {
                 let v = serde_json::from_str::<Value>(line).ok()?;
                 if v.get("type").and_then(Value::as_str) != Some("match") {
                     return None;
                 }
-                match_frame(&v, root_canonical)
+                match_frame(&v, roots)
             }
-            FrameParser::Grep { root_canonical } => grep_frame(line, root_canonical),
+            FrameParser::Grep { roots } => grep_frame(line, roots),
         }
     }
 }
@@ -399,8 +440,21 @@ pub(crate) async fn pump(
     PumpOutcome { client_gone: false, truncated, rg_error }
 }
 
+/// 逐根尝试剥绝对路径前缀：命中即返回 (相对路径, 根索引)。全不中时回退
+/// (原路径, 0)（与历史单根 `unwrap_or(abs)` 行为一致；正常链路 rg/grep 回显的
+/// 就是传入目录，不会走到回退）。嵌套根（根 B 在根 A 内）按索引序首个命中为准。
+fn strip_root<'a>(abs: &'a Path, roots: &[PathBuf]) -> (&'a Path, usize) {
+    for (i, root) in roots.iter().enumerate() {
+        if let Ok(rel) = abs.strip_prefix(root) {
+            return (rel, i);
+        }
+    }
+    (abs, 0)
+}
+
 /// rg match 事件 → NDJSON 命中帧字符串；无法提取文本（二进制帧等）返回 None。
-fn match_frame(frame: &Value, root_canonical: &Path) -> Option<String> {
+/// 跨根（roots.len() > 1）时命中帧携带命中根索引 `"root": <idx>`（0 起）。
+fn match_frame(frame: &Value, roots: &[PathBuf]) -> Option<String> {
     let data = frame.get("data")?;
     let path_text = data.get("path")?.get("text")?.as_str()?;
     let line_no = data.get("line_number")?.as_u64()?;
@@ -408,10 +462,10 @@ fn match_frame(frame: &Value, root_canonical: &Path) -> Option<String> {
     let submatch = data.get("submatches")?.as_array()?.first()?;
     let start = submatch.get("start")?.as_u64()? as usize;
 
-    // rg 回显的是我们传入的目录（canonical 绝对路径）：剥掉 root 得相对路径，
-    // 统一 `/` 分隔（Windows 反斜杠归一）
+    // rg 回显的是我们传入的目录（canonical 绝对路径）：逐根剥前缀得相对路径
+    // 与命中根索引，统一 `/` 分隔（Windows 反斜杠归一）
     let abs = Path::new(path_text);
-    let rel = abs.strip_prefix(root_canonical).unwrap_or(abs);
+    let (rel, root_idx) = strip_root(abs, roots);
     let rel = rel.to_string_lossy().replace('\\', "/");
 
     // rg 的 submatch start 是行内字节偏移：换算 1 起 UTF-16 码元列（与前端 JS
@@ -424,23 +478,32 @@ fn match_frame(frame: &Value, root_canonical: &Path) -> Option<String> {
     let text = line_text.trim_end_matches(['\n', '\r']);
     let preview: String = text.chars().take(PREVIEW_MAX_CHARS).collect();
     // NDJSON：帧自带换行分隔（Body 逐 chunk 写出，不补分隔符）
-    Some(format!("{}\n", json!({ "file": rel, "line": line_no, "col": col, "text": preview })))
+    let mut out = json!({ "file": rel, "line": line_no, "col": col, "text": preview });
+    if roots.len() > 1 {
+        out["root"] = json!(root_idx);
+    }
+    Some(format!("{}\n", out))
 }
 
 /// grep `--null -rHn` 输出行 `path\0line:content` → NDJSON 命中帧；畸形行 None。
 /// NUL 分隔文件名与行内容（文件名含冒号安全）；行号后首个冒号切出内容
 /// （内容含冒号无歧义）。grep 无列号：col 恒 1（spec §2.3 裁决）。
-fn grep_frame(line: &str, root_canonical: &Path) -> Option<String> {
+/// 跨根语义与 [`match_frame`] 一致（帧携带 `"root": <idx>`）。
+fn grep_frame(line: &str, roots: &[PathBuf]) -> Option<String> {
     let (path_text, rest) = line.split_once('\0')?;
     let (line_no_raw, content) = rest.split_once(':')?;
     let line_no: u64 = line_no_raw.parse().ok()?;
 
     let abs = Path::new(path_text);
-    let rel = abs.strip_prefix(root_canonical).unwrap_or(abs);
+    let (rel, root_idx) = strip_root(abs, roots);
     let rel = rel.to_string_lossy().replace('\\', "/");
 
     let text: String = content.chars().take(PREVIEW_MAX_CHARS).collect();
-    Some(format!("{}\n", json!({ "file": rel, "line": line_no, "col": 1, "text": text })))
+    let mut out = json!({ "file": rel, "line": line_no, "col": 1, "text": text });
+    if roots.len() > 1 {
+        out["root"] = json!(root_idx);
+    }
+    Some(format!("{}\n", out))
 }
 
 /// mpsc Receiver → Stream 适配（tokio 未开 stream feature，手写避免新依赖）。
@@ -474,6 +537,7 @@ mod tests {
             case_sensitive: false,
             regex: false,
             path: None,
+            root: None,
         };
         let args = rg_args(&req, false);
         assert!(args.contains(&"-i".to_string()));
@@ -492,6 +556,7 @@ mod tests {
             case_sensitive: true,
             regex: true,
             path: None,
+            root: None,
         };
         let args = rg_args(&req, true);
         assert!(!args.contains(&"-i".to_string()));
@@ -509,6 +574,7 @@ mod tests {
             case_sensitive: false,
             regex: false,
             path: None,
+            root: None,
         };
         assert!(!rg_args(&req, false).contains(&"-g".to_string()));
     }
@@ -523,6 +589,7 @@ mod tests {
             case_sensitive: false,
             regex: false,
             path: None,
+            root: None,
         };
         let args = grep_args(&req, false);
         // 行格式协议：NUL 分隔（长选项——-Z 在 BSD grep 是 decompress）
@@ -541,6 +608,7 @@ mod tests {
             case_sensitive: true,
             regex: true,
             path: None,
+            root: None,
         };
         let args = grep_args(&req, true);
         assert!(!args.contains(&"-i".to_string()));
@@ -557,6 +625,7 @@ mod tests {
             case_sensitive: false,
             regex: false,
             path: None,
+            root: None,
         };
         assert!(!grep_args(&req, false).iter().any(|a| a.starts_with("--include")));
     }
@@ -579,7 +648,7 @@ mod tests {
     fn match_frame_maps_fields_and_relative_path() {
         let root = Path::new("/tmp/root");
         let frame = sample_match("/tmp/root/sub/b.rs", 3, "const needle = 1;\n", 6);
-        let out: Value = serde_json::from_str(&match_frame(&frame, root).unwrap()).unwrap();
+        let out: Value = serde_json::from_str(&match_frame(&frame, &[root.to_path_buf()]).unwrap()).unwrap();
         assert_eq!(out["file"], "sub/b.rs");
         assert_eq!(out["line"], 3);
         assert_eq!(out["col"], 7);
@@ -591,12 +660,12 @@ mod tests {
         let root = Path::new("/tmp/root");
         // BMP 中文："中文needle" 的 n 字节偏移 6，UTF-16 码元列 3（与字符数一致）
         let frame = sample_match("/tmp/root/zh.txt", 1, "中文needle\n", 6);
-        let out: Value = serde_json::from_str(&match_frame(&frame, root).unwrap()).unwrap();
+        let out: Value = serde_json::from_str(&match_frame(&frame, &[root.to_path_buf()]).unwrap()).unwrap();
         assert_eq!(out["col"], 3);
         assert_eq!(out["text"], "中文needle");
         // 增补平面（😀 = 4 字节 / 1 字符 / 2 UTF-16 码元）：字符计会得 2，UTF-16 计得 3
         let frame = sample_match("/tmp/root/emoji.txt", 1, "\u{1F600}needle\n", 4);
-        let out: Value = serde_json::from_str(&match_frame(&frame, root).unwrap()).unwrap();
+        let out: Value = serde_json::from_str(&match_frame(&frame, &[root.to_path_buf()]).unwrap()).unwrap();
         assert_eq!(out["col"], 3);
     }
 
@@ -605,7 +674,7 @@ mod tests {
         let root = Path::new("/tmp/root");
         let long = "中".repeat(500);
         let frame = sample_match("/tmp/root/a.txt", 1, &format!("{long}\n"), 0);
-        let out: Value = serde_json::from_str(&match_frame(&frame, root).unwrap()).unwrap();
+        let out: Value = serde_json::from_str(&match_frame(&frame, &[root.to_path_buf()]).unwrap()).unwrap();
         let text = out["text"].as_str().unwrap();
         assert_eq!(text.chars().count(), PREVIEW_MAX_CHARS);
     }
@@ -621,7 +690,7 @@ mod tests {
                 "submatches": [{ "start": 0, "end": 6 }]
             }
         });
-        assert!(match_frame(&frame, Path::new("/tmp/root")).is_none());
+        assert!(match_frame(&frame, &[PathBuf::from("/tmp/root")]).is_none());
     }
 
     // ---------- grep_frame ----------
@@ -630,7 +699,7 @@ mod tests {
     fn grep_frame_parses_nul_line_format() {
         let root = Path::new("/tmp/root");
         let line = "/tmp/root/sub/a.rs\012:const needle = 1;";
-        let out: Value = serde_json::from_str(&grep_frame(line, root).unwrap()).unwrap();
+        let out: Value = serde_json::from_str(&grep_frame(line, &[root.to_path_buf()]).unwrap()).unwrap();
         assert_eq!(out["file"], "sub/a.rs");
         assert_eq!(out["line"], 12);
         assert_eq!(out["col"], 1, "grep 无列号，恒 1");
@@ -642,7 +711,7 @@ mod tests {
         let root = Path::new("/tmp/root");
         // 文件名含冒号（NUL 分隔保护）与内容含冒号（首个冒号后全为内容）
         let line = "/tmp/root/we:ird.txt\01:the:rest: here";
-        let out: Value = serde_json::from_str(&grep_frame(line, root).unwrap()).unwrap();
+        let out: Value = serde_json::from_str(&grep_frame(line, &[root.to_path_buf()]).unwrap()).unwrap();
         assert_eq!(out["file"], "we:ird.txt");
         assert_eq!(out["line"], 1);
         assert_eq!(out["text"], "the:rest: here");
@@ -651,23 +720,58 @@ mod tests {
     #[test]
     fn grep_frame_utf8_content_and_preview_truncation() {
         let root = Path::new("/tmp/root");
-        let out: Value =
-            serde_json::from_str(&grep_frame("/tmp/root/zh.txt\01:中文needle", root).unwrap())
-                .unwrap();
+        let out: Value = serde_json::from_str(
+            &grep_frame("/tmp/root/zh.txt\01:中文needle", &[root.to_path_buf()]).unwrap(),
+        )
+        .unwrap();
         assert_eq!(out["text"], "中文needle");
         let long = "中".repeat(500);
-        let out: Value =
-            serde_json::from_str(&grep_frame(&format!("/tmp/root/l\01:{long}"), root).unwrap())
-                .unwrap();
+        let out: Value = serde_json::from_str(
+            &grep_frame(&format!("/tmp/root/l\01:{long}"), &[root.to_path_buf()]).unwrap(),
+        )
+        .unwrap();
         assert_eq!(out["text"].as_str().unwrap().chars().count(), PREVIEW_MAX_CHARS);
     }
 
     #[test]
     fn grep_frame_malformed_lines_are_skipped() {
         let root = Path::new("/tmp/root");
-        assert!(grep_frame("no nul at all", root).is_none());
-        assert!(grep_frame("/p\0not-a-number:content", root).is_none());
-        assert!(grep_frame("/p\0", root).is_none());
+        assert!(grep_frame("no nul at all", &[root.to_path_buf()]).is_none());
+        assert!(grep_frame("/p\0not-a-number:content", &[root.to_path_buf()]).is_none());
+        assert!(grep_frame("/p\0", &[root.to_path_buf()]).is_none());
+    }
+
+    // ---------- 多根根感知：逐根剥前缀 + 帧 root 字段 ----------
+
+    /// 跨根：按命中根剥前缀并记索引（帧带 root）；单根：形状不变、无 root 字段。
+    #[test]
+    fn match_frame_tags_root_index_across_roots_and_omits_when_single() {
+        let roots = [PathBuf::from("/tmp/r0"), PathBuf::from("/tmp/r1")];
+        let frame = sample_match("/tmp/r1/a.txt", 1, "needle\n", 0);
+        let out: Value = serde_json::from_str(&match_frame(&frame, &roots).unwrap()).unwrap();
+        assert_eq!(out["file"], "a.txt");
+        assert_eq!(out["root"], 1, "跨根命中帧应带命中根索引");
+
+        let frame = sample_match("/tmp/r0/b.txt", 1, "needle\n", 0);
+        let out: Value = serde_json::from_str(&match_frame(&frame, &roots).unwrap()).unwrap();
+        assert_eq!(out["file"], "b.txt");
+        assert_eq!(out["root"], 0);
+
+        // 单根（部署单根或 root=Some 限定）：同一路径形状不变、无 root 字段
+        let out: Value = serde_json::from_str(&match_frame(&frame, &roots[..1]).unwrap()).unwrap();
+        assert_eq!(out["file"], "b.txt");
+        assert!(out.get("root").is_none(), "单根帧不应有 root 字段");
+    }
+
+    #[test]
+    fn grep_frame_tags_root_index_across_roots() {
+        let roots = [PathBuf::from("/tmp/r0"), PathBuf::from("/tmp/r1")];
+        let line = "/tmp/r1/sub/a.rs\012:needle";
+        let out: Value = serde_json::from_str(&grep_frame(line, &roots).unwrap()).unwrap();
+        assert_eq!(out["file"], "sub/a.rs");
+        assert_eq!(out["root"], 1);
+        let out: Value = serde_json::from_str(&grep_frame(line, &roots[..1]).unwrap()).unwrap();
+        assert!(out.get("root").is_none(), "单根帧不应有 root 字段");
     }
 
     // ---------- probe_rg ----------
@@ -746,7 +850,7 @@ mod tests {
             child,
             stdout,
             stderr,
-            FrameParser::Rg { root_canonical: dir.path().to_path_buf() },
+            FrameParser::Rg { roots: vec![dir.path().to_path_buf()] },
             tx,
             std::time::Duration::from_secs(60),
         ));
@@ -791,7 +895,7 @@ mod tests {
             child,
             stdout,
             stderr,
-            FrameParser::Grep { root_canonical: dir.path().to_path_buf() },
+            FrameParser::Grep { roots: vec![dir.path().to_path_buf()] },
             tx,
             std::time::Duration::from_millis(200),
         ));
@@ -852,7 +956,7 @@ mod tests {
             child,
             stdout,
             stderr,
-            FrameParser::Rg { root_canonical: dir.path().to_path_buf() },
+            FrameParser::Rg { roots: vec![dir.path().to_path_buf()] },
             tx,
             std::time::Duration::from_secs(60),
         ));
@@ -912,7 +1016,7 @@ mod tests {
             child,
             stdout,
             stderr,
-            FrameParser::Rg { root_canonical: dir.path().to_path_buf() },
+            FrameParser::Rg { roots: vec![dir.path().to_path_buf()] },
             tx,
             std::time::Duration::from_secs(60),
         ));
@@ -953,7 +1057,7 @@ mod tests {
         let stdout = child.stdout.take().unwrap();
         let stderr = child.stderr.take().unwrap();
 
-        let parser = FrameParser::Grep { root_canonical: dir.path().to_path_buf() };
+        let parser = FrameParser::Grep { roots: vec![dir.path().to_path_buf()] };
         let (tx, mut rx) = mpsc::channel::<Result<String, std::io::Error>>(8);
         let handle = tokio::spawn(pump(
             child,

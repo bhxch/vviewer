@@ -92,10 +92,13 @@ impl AppState {
     ) -> Self {
         // main 启动前已校验目录存在；canonicalize 失败时退回原路径（保持可测）
         let root_canonical: PathBuf = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
+        let roots = vec![RootSpec { raw: root.clone(), canonical: root_canonical.clone() }];
+        // 多根聚合 watch：每根一个 watcher 线程（单根即历史单 watcher 形状）
+        let canonicals: Vec<PathBuf> = roots.iter().map(|r| r.canonical.clone()).collect();
         Self {
             root: root.clone(),
             root_canonical: root_canonical.clone(),
-            roots: vec![RootSpec { raw: root, canonical: root_canonical.clone() }],
+            roots,
             web_dist,
             token,
             hidden,
@@ -104,15 +107,15 @@ impl AppState {
             rg_path: None,
             grep_path: None,
             tickets: TicketStore::default(),
-            // 多根聚合 watch 在 Task 2；本任务仍只挂 0 号根
-            changes: crate::watch::ChangeHub::spawn(&root_canonical),
+            changes: crate::watch::ChangeHub::spawn(&canonicals),
         }
     }
 
     /// builder：覆盖多根列表（workspace 阶段 1 地基）。逐个 canonicalize，
     /// 失败回退原路径——与 [`AppState::new`] 同款；`root`/`root_canonical`
-    /// 兼容视图同步为 0 号根。ChangeHub 仍挂构造时的 0 号根（Task 2 聚合）。
+    /// 兼容视图同步为 0 号根。ChangeHub 重建为挂载全部根（旧 hub 随 drop 停止）。
     pub fn with_roots(mut self, roots: Vec<PathBuf>) -> Self {
+        debug_assert!(!roots.is_empty(), "roots 不得为空：至少需要一个根");
         self.roots = roots
             .into_iter()
             .map(|raw| {
@@ -125,6 +128,8 @@ impl AppState {
             self.root = first.raw.clone();
             self.root_canonical = first.canonical.clone();
         }
+        let canonicals: Vec<PathBuf> = self.roots.iter().map(|r| r.canonical.clone()).collect();
+        self.changes = crate::watch::ChangeHub::spawn(&canonicals);
         self
     }
 

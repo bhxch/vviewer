@@ -123,6 +123,53 @@ async fn write_pushes_changed_with_relative_path() {
                 .is_some_and(|ps| ps.iter().any(|p| p == "sub/new.txt"))),
         "4s 窗口内应收到含 sub/new.txt 的 changed 帧: {frames:?}"
     );
+    // 单根逐字节等价：changed 帧不新增 root 字段
+    for v in parsed.iter().filter(|v| v["type"] == "changed") {
+        assert!(
+            v.get("root").is_none(),
+            "单根 changed 帧不应有 root 字段: {v}"
+        );
+    }
+}
+
+// ---------- workspace 多根 ----------
+
+/// 双根 fixture：d0/d1 各含一个种子文件，with_roots 挂双根
+/// （ChangeHub 每根一个 watcher 线程，事件按根聚合）。
+fn dual_root_fixture() -> (tempfile::TempDir, tempfile::TempDir, AppState) {
+    let d0 = tempfile::tempdir().unwrap();
+    let d1 = tempfile::tempdir().unwrap();
+    std::fs::write(d0.path().join("seed0.txt"), "s0").unwrap();
+    std::fs::write(d1.path().join("seed1.txt"), "s1").unwrap();
+    let state = AppState::new(d0.path().to_path_buf(), None, None, false, None)
+        .with_roots(vec![d0.path().to_path_buf(), d1.path().to_path_buf()]);
+    (d0, d1, state)
+}
+
+/// 多根下 changed 帧按根携带 root 索引（0 起），paths 相对所在根。
+#[tokio::test]
+async fn multi_root_changed_frames_carry_root_index() {
+    let (d0, d1, state) = dual_root_fixture();
+    let ticket = issue_ticket(&state).await;
+    let (status, _, mut body) = connect(&state, &ticket).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // 两根各写一个文件：各自产生带所属根索引的 changed 帧
+    std::fs::write(d0.path().join("new0.txt"), "a").unwrap();
+    std::fs::write(d1.path().join("new1.txt"), "b").unwrap();
+
+    let frames = collect_data_frames(&mut body, Duration::from_secs(4)).await;
+    let parsed = parse(&frames);
+    let by_path = |name: &str| {
+        parsed.iter().find(|v| {
+            v["type"] == "changed"
+                && v["paths"].as_array().is_some_and(|ps| ps.iter().any(|p| p == name))
+        })
+    };
+    let f0 = by_path("new0.txt").expect("应收到 0 号根的 changed 帧");
+    assert_eq!(f0["root"], 0, "0 号根的 changed 帧应携带 root: 0: {f0}");
+    let f1 = by_path("new1.txt").expect("应收到 1 号根的 changed 帧");
+    assert_eq!(f1["root"], 1, "1 号根的 changed 帧应携带 root: 1（paths 相对 d1）: {f1}");
 }
 
 // ---------- debounce 聚合 ----------

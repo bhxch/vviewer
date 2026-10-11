@@ -20,6 +20,10 @@ pub struct Health {
     /// 与 /api/search 同一选择链，测试经 rg_path/grep_path 注入覆盖。
     #[serde(rename = "searchEngine", skip_serializing_if = "Option::is_none")]
     pub search_engine: Option<&'static str>,
+    /// 多根宣告（workspace 阶段 1）：数据根数量；=1（单根部署，历史形状）时
+    /// 字段整体省略。客户端据命中帧的 root 索引定位所属根。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub roots: Option<usize>,
 }
 
 /// 能力宣告：`file-server` 恒有；`--compute` 时追加 `compute`
@@ -33,12 +37,14 @@ pub async fn health(State(state): State<AppState>) -> Json<Health> {
     }
     let search_engine =
         crate::routes::search::resolve_engine(&state).ok().map(|(engine, _)| engine.name());
+    let root_count = state.roots.len();
     Json(Health {
         name: "vviewer",
         version: env!("CARGO_PKG_VERSION"),
         capabilities,
         compute_languages,
         search_engine,
+        roots: (root_count > 1).then_some(root_count),
     })
 }
 
@@ -101,5 +107,18 @@ mod tests {
             .with_grep_path(Some(grep));
         let v = health_json(state).await;
         assert_eq!(v["searchEngine"], "grep");
+    }
+
+    #[tokio::test]
+    async fn single_root_omits_roots_field() {
+        let v = health_json(base_state()).await;
+        assert!(v.get("roots").is_none(), "单根部署应省略 roots 字段: {v}");
+    }
+
+    #[tokio::test]
+    async fn multi_root_advertises_roots_count() {
+        let state = base_state().with_roots(vec![PathBuf::from("."), PathBuf::from(".")]);
+        let v = health_json(state).await;
+        assert_eq!(v["roots"], 2, "多根应宣告根数量");
     }
 }

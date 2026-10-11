@@ -1,9 +1,11 @@
 //! root 变更监听（notify 递归 watch）与 500ms debounce 聚合广播，含故障自愈。
 //!
 //! watcher 在服务器启动时由 `ChangeHub::spawn` 创建一次（挂在 AppState 内），
-//! 而非每个 SSE 连接各建一个：notify 事件 → std mpsc → 聚合线程把 500ms 窗口内
-//! 的多事件合并为一条 `{"type":"changed","paths":[...]}`（相对 root、排序去重）
-//! → tokio broadcast 分发给所有订阅的 SSE 连接。
+//! 而非每个 SSE 连接各建一个：workspace 多根下每根一个 watcher 线程（各自
+//! notify 实例 + 自愈状态机，共享 broadcast 通道 / health / stop 标志），
+//! notify 事件 → std mpsc → 聚合线程把 500ms 窗口内的多事件按根合并为
+//! `{"type":"changed","paths":[...]}`（相对所在根、排序去重；多根时帧携带
+//! `"root": <idx>`，单根形状不变）→ tokio broadcast 分发给所有订阅的 SSE 连接。
 //!
 //! 自愈（BUG-02）：启动失败保留 Err 经 tracing 记日志（含 OS 错误码与 root 路径）
 //! 并在后台线程退避重试，连续失败降级 `PollWatcher`（轮询，跨文件系统可用）继续
@@ -24,7 +26,7 @@
 //! `with_follow_symlinks(false)` 后两级后端都只在 root 内扫描；越界 symlink
 //! 目标内的变更本就在 root 外（collect_event 既有口径剔除），语义不变。
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
@@ -131,12 +133,12 @@ impl WatchHealth {
     }
 }
 
-/// 共享变更广播中心：一个 watcher + 一个聚合线程，服务全部 SSE 连接。
-/// watcher 句柄移入聚合线程（自愈重建需在错误现场执行），销毁经 stop 标志。
+/// 共享变更广播中心：每根一个 watcher 线程 + 各自聚合循环，服务全部 SSE 连接。
+/// watcher 句柄移入各自聚合线程（自愈重建需在错误现场执行），销毁经 stop 标志。
 pub struct ChangeHub {
     tx: broadcast::Sender<String>,
     health: Arc<AtomicU8>,
-    /// ChangeHub 销毁（最后一个 Arc 释放）时置位：聚合线程停止建 watch 并退出。
+    /// ChangeHub 销毁（最后一个 Arc 释放）时置位：各聚合线程停止建 watch 并退出。
     stop: Arc<AtomicBool>,
 }
 
@@ -147,51 +149,76 @@ impl Drop for ChangeHub {
 }
 
 impl ChangeHub {
-    /// 创建递归 watcher 并启动聚合线程；失败不降级为永久静默（后台自愈接管）。
-    pub fn spawn(root: &Path) -> Arc<Self> {
-        Self::spawn_with(
-            root,
-            RetryFactory::notify(root.to_path_buf(), RetryPolicy::default()),
-        )
+    /// 为每个根创建递归 watcher 并启动聚合线程（每根一个 watcher 线程，共享
+    /// broadcast / health / stop）；失败不降级为永久静默（后台自愈接管）。
+    pub fn spawn(roots: &[PathBuf]) -> Arc<Self> {
+        let factories: Vec<RetryFactory> = roots
+            .iter()
+            .map(|root| RetryFactory::notify(root.clone(), RetryPolicy::default()))
+            .collect();
+        Self::spawn_with(roots, factories)
     }
 
-    /// 注入工厂的 spawn：同步首建一次（不重试），spawn 返回时健康状态即确定，
-    /// SSE 建连快照无竞态；启动失败的退避重试与 PollWatcher 降级移交后台线程，
-    /// 不拖慢服务器启动。测试注入 mock opener 驱动状态机各分支。
-    fn spawn_with(root: &Path, mut factory: RetryFactory) -> Arc<Self> {
+    /// 注入工厂的 spawn：每根同步首建一次（不重试），spawn 返回时健康状态即确定
+    /// （任一根首建失败 → Recovering），SSE 建连快照无竞态；启动失败的退避重试与
+    /// PollWatcher 降级移交各自后台线程，不拖慢服务器启动。测试注入 mock opener
+    /// 驱动状态机各分支。
+    fn spawn_with(roots: &[PathBuf], mut factories: Vec<RetryFactory>) -> Arc<Self> {
+        debug_assert_eq!(roots.len(), factories.len(), "每根一个工厂");
         let (tx, _) = broadcast::channel(CHANNEL_CAPACITY);
         let health = Arc::new(AtomicU8::new(WatchHealth::Recovering.to_u8()));
         let stop = Arc::new(AtomicBool::new(false));
 
-        // 诊断补丁（BUG-02）：数据根的文件系统类型，便于 e2e 环境判读（如 btrfs）
-        info!(
-            "[watch] root={} fstype={}",
-            root.display(),
-            fs_type_of(root).unwrap_or_else(|| "unknown".into())
+        // 同步首建（每根一次）：任一根失败 → 整体 Recovering（共享 health 表达）
+        let mut initial: Vec<Option<WatchSession>> = Vec::with_capacity(roots.len());
+        for (root, factory) in roots.iter().zip(factories.iter_mut()) {
+            // 诊断补丁（BUG-02）：数据根的文件系统类型，便于 e2e 环境判读（如 btrfs）
+            info!(
+                "[watch] root={} fstype={}",
+                root.display(),
+                fs_type_of(root).unwrap_or_else(|| "unknown".into())
+            );
+            match (factory.open_recommended)() {
+                Ok((keep, rx, backend)) => {
+                    info!("[watch] watcher established backend={backend} root={}", root.display());
+                    initial.push(Some(WatchSession::new(keep, rx, backend, false)));
+                }
+                Err(e) => {
+                    // 含 OS 错误码（Debug 格式的 Os { code: .. }）与 root 路径
+                    error!(
+                        "[watch] watcher startup FAILED root={} err={e:?}; retrying in background (backoff x{}, then PollWatcher fallback)",
+                        root.display(),
+                        factory.policy.attempts
+                    );
+                    initial.push(None);
+                }
+            }
+        }
+        let all_ok = initial.iter().all(Option::is_some);
+        health.store(
+            if all_ok { WatchHealth::Ok.to_u8() } else { WatchHealth::Recovering.to_u8() },
+            Ordering::SeqCst,
         );
 
-        let initial = match (factory.open_recommended)() {
-            Ok((keep, rx, backend)) => {
-                info!("[watch] watcher established backend={backend} root={}", root.display());
-                health.store(WatchHealth::Ok.to_u8(), Ordering::SeqCst);
-                Some(WatchSession::new(keep, rx, backend, false))
-            }
-            Err(e) => {
-                // 含 OS 错误码（Debug 格式的 Os { code: .. }）与 root 路径
-                error!(
-                    "[watch] watcher startup FAILED root={} err={e:?}; retrying in background (backoff x{}, then PollWatcher fallback)",
-                    root.display(),
-                    factory.policy.attempts
-                );
-                None
-            }
-        };
-        let thread_root = root.to_path_buf();
-        // 不持有 JoinHandle：ChangeHub drop → stop 置位后线程自行退出
-        let (thread_tx, thread_health, thread_stop) = (tx.clone(), health.clone(), stop.clone());
-        std::thread::spawn(move || {
-            run_loop(initial, factory, thread_tx, thread_health, thread_stop, thread_root)
-        });
+        // 每根一个聚合/自愈线程：不持有 JoinHandle，ChangeHub drop → stop 置位后
+        // 线程自行退出。多根时 changed 帧携带根索引，单根保持历史形状（无 root）。
+        let total_roots = roots.len();
+        for (root_idx, ((root, factory), session)) in roots
+            .iter()
+            .cloned()
+            .zip(factories)
+            .zip(initial.into_iter())
+            .enumerate()
+        {
+            let (thread_tx, thread_health, thread_stop) =
+                (tx.clone(), health.clone(), stop.clone());
+            std::thread::spawn(move || {
+                run_loop(
+                    session, factory, thread_tx, thread_health, thread_stop, root, root_idx,
+                    total_roots,
+                )
+            });
+        }
         Arc::new(Self { tx, health, stop })
     }
 
@@ -411,12 +438,15 @@ impl RetryFactory {
     }
 }
 
-/// 聚合与自愈主循环：建立会话 → 聚合事件直到错误/停止 → 重建。状态转换时
-/// 广播对应帧（各一次）：降级发 `watch-degraded`、恢复实时发 `watch-recovered`，
-/// changed 帧照常。会话异常只把健康置为 Recovering、不广播帧——`watch-error`
-/// 在前端是终态语义（断开不重连），广播会令全部存量活跃连接永久失联、自愈
-/// 帧到不了任何存活客户端；自愈表达为恢复后的 watch-recovered/watch-degraded
-/// 与 changed 恢复流动。重建重试循环（build 内）不发帧。
+/// 聚合与自愈主循环（每根一个）：建立会话 → 聚合事件直到错误/停止 → 重建。
+/// 状态转换时广播对应帧（各一次）：降级发 `watch-degraded`、恢复实时发
+/// `watch-recovered`，changed 帧照常。会话异常只把健康置为 Recovering、不广播
+/// 帧——`watch-error` 在前端是终态语义（断开不重连），广播会令全部存量活跃
+/// 连接永久失联、自愈帧到不了任何存活客户端；自愈表达为恢复后的
+/// watch-recovered/watch-degraded 与 changed 恢复流动。重建重试循环（build 内）
+/// 不发帧。多根部署时各根独立运行本循环，changed 帧按 `root_idx` 标注
+/// （`total_roots` = 1 时保持历史形状，不带 root 字段）。
+#[allow(clippy::too_many_arguments)]
 fn run_loop(
     initial: Option<WatchSession>,
     mut factory: RetryFactory,
@@ -424,6 +454,8 @@ fn run_loop(
     health: Arc<AtomicU8>,
     stop: Arc<AtomicBool>,
     root: PathBuf,
+    root_idx: usize,
+    total_roots: usize,
 ) {
     let mut session = initial;
     let mut prev = WatchHealth::from_u8(health.load(Ordering::SeqCst));
@@ -455,7 +487,7 @@ fn run_loop(
             let _ = tx.send(payload.to_string());
         }
 
-        let errored = session_loop(sess, &root, &tx, &stop, &mut gate);
+        let errored = session_loop(sess, root_idx, &root, total_roots, &tx, &stop, &mut gate);
         if !errored || stop.load(Ordering::SeqCst) {
             return; // 优雅退出（stop / watcher 句柄被丢弃）
         }
@@ -471,10 +503,14 @@ fn run_loop(
 /// 单会话聚合循环：首个事件开窗，窗口内事件全部合并为一条 changed 帧。
 /// 返回 true = 会话异常（收到运行期 Err，调用方应重建）；false = 优雅退出
 /// （stop 置位或 watcher 句柄被丢弃致通道断开）。`gate` 为错误日志限频器，
-/// 跨会话由 `run_loop` 持有（重建不重置窗口）。
+/// 跨会话由 `run_loop` 持有（重建不重置窗口）。聚合按根归组
+/// （`BTreeMap<根索引, 路径集合>`），窗口关闭时逐根发帧——单根时帧与历史
+/// 形状逐字节一致，多根时每帧携带 `"root": <idx>`。
 fn session_loop(
     session: WatchSession,
+    root_idx: usize,
     root: &Path,
+    total_roots: usize,
     tx: &broadcast::Sender<String>,
     stop: &AtomicBool,
     gate: &mut ErrorLogGate,
@@ -494,8 +530,8 @@ fn session_loop(
                 return true;
             }
             Ok(Ok(first)) => {
-                let mut paths = BTreeSet::new();
-                collect_event(&first, root, &mut paths);
+                let mut paths: BTreeMap<usize, BTreeSet<String>> = BTreeMap::new();
+                collect_event(&first, root_idx, root, &mut paths);
 
                 // 固定窗口：从首个事件起 DEBOUNCE_WINDOW 内继续吸收后续事件
                 let deadline = Instant::now() + DEBOUNCE_WINDOW;
@@ -505,7 +541,7 @@ fn session_loop(
                         break;
                     }
                     match rx.recv_timeout(remaining) {
-                        Ok(Ok(ev)) => collect_event(&ev, root, &mut paths),
+                        Ok(Ok(ev)) => collect_event(&ev, root_idx, root, &mut paths),
                         // 窗口内混入错误同样按会话异常处理：若故障仅以这一个 Err
                         // 事件表现（此后无事件），不重建会卡在空转
                         Ok(Err(_)) => {
@@ -531,10 +567,16 @@ fn session_loop(
                     continue;
                 }
 
-                let payload =
-                    json!({ "type": "changed", "paths": paths.into_iter().collect::<Vec<_>>() });
-                // 无订阅者时 send 失败属正常（无连接即丢弃）
-                let _ = tx.send(payload.to_string());
+                // 逐根发帧：BTreeMap 迭代序 = 根索引升序，帧序确定
+                for (idx, set) in paths {
+                    let mut payload =
+                        json!({ "type": "changed", "paths": set.into_iter().collect::<Vec<_>>() });
+                    if total_roots > 1 {
+                        payload["root"] = json!(idx);
+                    }
+                    // 无订阅者时 send 失败属正常（无连接即丢弃）
+                    let _ = tx.send(payload.to_string());
+                }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 if stop.load(Ordering::SeqCst) {
@@ -645,26 +687,37 @@ fn unescape_mount(s: &str) -> Option<PathBuf> {
     Some(PathBuf::from(String::from_utf8_lossy(&out).into_owned()))
 }
 
-/// notify 事件（成功态）→ 相对 root 的路径集合（'/' 分隔，排序去重由 BTreeSet 保证）。
-fn collect_event(ev: &NotifyEvent, root: &Path, out: &mut BTreeSet<String>) {
+/// notify 事件（成功态）→ 按根归组的相对路径集合（'/' 分隔，排序去重由
+/// BTreeSet 保证；键 = 事件所属根索引）。窗口关闭时逐根发帧（见 session_loop）。
+fn collect_event(
+    ev: &NotifyEvent,
+    root_idx: usize,
+    root: &Path,
+    out: &mut BTreeMap<usize, BTreeSet<String>>,
+) {
     // Access（打开/读取）不改变内容：过滤掉 watcher 自身的初始目录扫描事件，
     // 也避免 SSE 客户端查看文件（读操作）反过来触发一次无意义的变更推送
     if matches!(ev.kind, notify::EventKind::Access(_)) {
         return;
     }
     for p in &ev.paths {
-        // root 外路径不进 changed 帧（防止绝对路径泄露给客户端）：直接跳过
+        // 根外路径不进 changed 帧（防止绝对路径泄露给客户端）：直接跳过
         let Ok(rel) = p.strip_prefix(root) else { continue };
         // Windows 分隔符统一为 '/'，与 /api/tree、/api/file 的 path 参数一致
-        out.insert(rel.to_string_lossy().replace('\\', "/"));
+        out.entry(root_idx).or_default().insert(rel.to_string_lossy().replace('\\', "/"));
     }
 }
 
 /// 原始通道事件（含 Err）：错误事件不产生路径（由 session_loop 触发重建自愈）。
 #[cfg(test)]
-fn collect_paths(ev: &RawEvent, root: &Path, out: &mut BTreeSet<String>) {
+fn collect_paths(
+    ev: &RawEvent,
+    root_idx: usize,
+    root: &Path,
+    out: &mut BTreeMap<usize, BTreeSet<String>>,
+) {
     let Ok(ev) = ev else { return };
-    collect_event(ev, root, out);
+    collect_event(ev, root_idx, root, out);
 }
 
 #[cfg(test)]
@@ -688,7 +741,7 @@ mod tests {
     #[test]
     fn access_events_and_out_of_root_paths_are_dropped() {
         let root = PathBuf::from("/srv/root");
-        let mut out = BTreeSet::new();
+        let mut out: BTreeMap<usize, BTreeSet<String>> = BTreeMap::new();
 
         // Access 事件（如 watcher 自身初始扫描 / 客户端读文件）不构成变更
         collect_paths(
@@ -696,21 +749,26 @@ mod tests {
                 EventKind::Access(AccessKind::Open(AccessMode::Any)),
                 &["/srv/root/a.txt"],
             ),
+            0,
             &root,
             &mut out,
         );
         assert!(out.is_empty(), "Access 事件应被过滤");
 
-        // root 内路径转相对；root 外绝对路径跳过（不泄露给客户端）
+        // 根内路径转相对、归入对应根索引；根外绝对路径跳过（不泄露给客户端）
         collect_paths(
             &ev(
                 EventKind::Create(CreateKind::File),
                 &["/srv/root/sub/b.txt", "/etc/passwd"],
             ),
+            0,
             &root,
             &mut out,
         );
-        assert_eq!(out, BTreeSet::from(["sub/b.txt".to_string()]));
+        assert_eq!(
+            out,
+            BTreeMap::from([(0, BTreeSet::from(["sub/b.txt".to_string()]))])
+        );
     }
 
     #[test]
@@ -844,7 +902,7 @@ mod tests {
             ),
             scripted_opener(vec![], Arc::new(AtomicUsize::new(0))),
         );
-        let hub = ChangeHub::spawn_with(Path::new("/srv/root"), factory);
+        let hub = ChangeHub::spawn_with(&[PathBuf::from("/srv/root")], vec![factory]);
         assert_eq!(hub.health(), WatchHealth::Ok);
         let mut sub = hub.subscribe();
 
@@ -877,7 +935,7 @@ mod tests {
             scripted_opener(vec![(tx1.clone(), rx1, "mock-a")], rec_fails.clone()),
             scripted_opener(vec![], poll_fails.clone()),
         );
-        let hub = ChangeHub::spawn_with(Path::new("/srv/root"), factory);
+        let hub = ChangeHub::spawn_with(&[PathBuf::from("/srv/root")], vec![factory]);
         assert_eq!(hub.health(), WatchHealth::Ok);
         let mut sub = hub.subscribe();
 
@@ -953,7 +1011,7 @@ mod tests {
             scripted_opener(vec![], rec_fails.clone()),
             scripted_opener(vec![(txp.clone(), rxp, "mock-poll")], Arc::new(AtomicUsize::new(0))),
         );
-        let hub = ChangeHub::spawn_with(Path::new("/srv/root"), factory);
+        let hub = ChangeHub::spawn_with(&[PathBuf::from("/srv/root")], vec![factory]);
         assert_ne!(hub.health(), WatchHealth::Ok, "首建失败不应为 Ok");
         let mut sub = hub.subscribe();
 
@@ -975,7 +1033,10 @@ mod tests {
     #[test]
     fn unwatchable_root_never_becomes_ok() {
         let root = PathBuf::from("/nonexistent-vviewer-watch-root-xyz");
-        let hub = ChangeHub::spawn_with(&root, RetryFactory::notify(root.clone(), fast_policy()));
+        let hub = ChangeHub::spawn_with(
+            &[root.clone()],
+            vec![RetryFactory::notify(root.clone(), fast_policy())],
+        );
         assert_ne!(hub.health(), WatchHealth::Ok, "首建失败即非 Ok");
         std::thread::sleep(Duration::from_millis(300));
         assert_ne!(hub.health(), WatchHealth::Ok, "不可 watch 的 root 不应转为 Ok");
@@ -984,13 +1045,14 @@ mod tests {
 
     /// 真实文件系统端到端：inotify watcher 建立（健康 Ok）→ 写文件 → 3s 内
     /// 广播 changed（相对路径）。本机 tmpfs/ext4 对照回归（验收 3）。
+    /// 单根形状逐字节等价：changed 帧只有 type/paths 两个键（无 root 字段）。
     #[tokio::test]
     async fn real_fs_change_broadcasts_changed() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         std::fs::write(root.join("seed.txt"), "seed").unwrap();
 
-        let hub = ChangeHub::spawn(&root);
+        let hub = ChangeHub::spawn(&[root.clone()]);
         assert_eq!(hub.health(), WatchHealth::Ok, "真实可 watch 的 root 应为 Ok");
         let mut sub = hub.subscribe();
 
@@ -1003,6 +1065,14 @@ mod tests {
             frame.contains("changed") && frame.contains("seed.txt"),
             "changed 帧应含相对路径 seed.txt: {frame}"
         );
+        let v: serde_json::Value = serde_json::from_str(&frame).unwrap();
+        let obj = v.as_object().expect("changed 帧应为 JSON 对象");
+        assert_eq!(
+            obj.len(),
+            2,
+            "单根 changed 帧只有 type/paths 两个键（逐字节等价 = 不新增字段）: {frame}"
+        );
+        assert!(obj.contains_key("type") && obj.contains_key("paths"));
     }
 
     /// 构造「root 内含指向外部目录的 symlink，目标含 0o000 子目录」的场景。
@@ -1029,7 +1099,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let root = make_root_with_escape_symlink(dir.path());
-        let hub = ChangeHub::spawn(&root);
+        let hub = ChangeHub::spawn(&[root.clone()]);
         assert_eq!(hub.health(), WatchHealth::Ok, "含越界 symlink 的 root 应健康 Ok");
         // 后台重试/降级稳定后仍为 Ok（不因运行期问题翻转为 Recovering/Degraded）
         std::thread::sleep(Duration::from_millis(300));
@@ -1068,9 +1138,9 @@ mod tests {
         while Instant::now() < deadline {
             match session.rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(Ok(ev)) => {
-                    let mut out = BTreeSet::new();
-                    collect_event(&ev, &root, &mut out);
-                    if out.iter().any(|p| p.contains("seed.txt")) {
+                    let mut out: BTreeMap<usize, BTreeSet<String>> = BTreeMap::new();
+                    collect_event(&ev, 0, &root, &mut out);
+                    if out.get(&0).is_some_and(|s| s.iter().any(|p| p.contains("seed.txt"))) {
                         saw_seed = true;
                         break;
                     }
