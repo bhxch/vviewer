@@ -12,13 +12,23 @@ import {
   type LastServerRecord
 } from '@vviewer/core';
 import { ARCHIVE_OPEN_EVENT } from '@vviewer/render-archive';
-import { saveDirHandle, saveTabs, maxTabSeqOf, type TabSnapshot } from './stores/session';
+import {
+  saveDirHandle,
+  saveTabs,
+  saveWorkspaces,
+  maxTabSeqOf,
+  type TabSnapshot
+} from './stores/session';
+import type { WorkspacesSnapshot } from './workspaceStore';
+import { workspaceStore } from './workspaceStore';
 import { loadSettings } from './stores/settings';
 import { releaseStoreIfLast } from './storeRelease';
 import { saveSearchEngine } from './searchEngineCache';
 
 export interface Tab {
   id: string;
+  /** 所属工作区（workspaceStore.activeId 快照于入列时；作用域化 add/close/activate 的依据） */
+  workspaceId: string;
   source: FileSource;
   scrollTop: number;
   active: boolean;
@@ -52,6 +62,21 @@ function snapshot(t: Tab): TabSnapshot {
 }
 
 async function persist(): Promise<void> {
+  // 快照 v2：TabSnapshot 按所属 workspace 分组落 'workspaces' 键，activeTabId 记组内活动
+  await saveWorkspaces({
+    activeId: workspaceStore.activeId,
+    workspaces: workspaceStore.list.map((w) => {
+      const tabs = tabStore.tabsOf(w.id);
+      return {
+        ...w,
+        sources: [...w.sources],
+        tabs: tabs.map(snapshot),
+        activeTabId: tabs.find((t) => t.active)?.id ?? null
+      };
+    })
+  });
+  // 过渡期双写旧 'tabs' 键（T4 接管 AppShell.restore 读 loadWorkspaces 后移除）：
+  // 未改造的恢复通道仍从旧键读，保证本轮消费方行为等价；旧键保留不删
   await saveTabs(tabStore.list.map(snapshot));
 }
 
@@ -63,14 +88,27 @@ async function persist(): Promise<void> {
 class TabCollection {
   list = $state<Tab[]>([]);
 
+  /** 当前工作区 id（委托 workspaceStore 单例；add/close/activate 的作用域来源） */
+  get activeWorkspaceId(): string {
+    return workspaceStore.activeId;
+  }
+
+  /** 某工作区的 tabs（全量 list 的过滤视图；元素仍是 $state 代理，写穿有效） */
+  tabsOf(wsId: string): Tab[] {
+    return this.list.filter((t) => t.workspaceId === wsId);
+  }
+
   add(store: TreeStore, path: string, name: string): Tab {
     const tab: Tab = {
       id: `t${++seq}`,
+      workspaceId: workspaceStore.activeId,
       source: { storeId: store.id, storeLabel: store.displayName(), path, name, store },
       scrollTop: 0,
       active: true
     };
-    for (const t of this.list) t.active = false;
+    // 激活作用域收窄到所属 workspace：他组的活动 tab 不被顶掉
+    //（单工作区时与旧的全局去活行为一致——新 tab 必成为组内唯一活动）
+    for (const t of this.tabsOf(tab.workspaceId)) t.active = false;
     this.list.push(tab);
     void persist();
     // BUG-69：必须返回 $state 数组内元素（响应式代理）而非上面的裸对象 tab——
@@ -88,9 +126,25 @@ class TabCollection {
       const wasActive = closed.active;
       this.list.splice(i, 1);
       if (wasActive) {
-        // 关闭活动 tab 时激活相邻 tab，避免出现无活动 tab 的空窗
-        const next = this.list[Math.min(i, this.list.length - 1)];
-        if (next) next.active = true;
+        // 关闭活动 tab 时激活相邻 tab，避免出现无活动 tab 的空窗；
+        // 多根下激活限同 workspace 组内（先右后左取最近邻），不跨组抢激活
+        //（单工作区时右邻/左邻即旧的 list[min(i, len-1)]，行为一致）
+        let neighbor: Tab | undefined;
+        for (let j = i; j < this.list.length; j++) {
+          if (this.list[j]!.workspaceId === closed.workspaceId) {
+            neighbor = this.list[j];
+            break;
+          }
+        }
+        if (!neighbor) {
+          for (let j = i - 1; j >= 0; j--) {
+            if (this.list[j]!.workspaceId === closed.workspaceId) {
+              neighbor = this.list[j];
+              break;
+            }
+          }
+        }
+        if (neighbor) neighbor.active = true;
       }
       void persist();
       this.releaseStoreIfLast(closed.source.store);
@@ -107,7 +161,10 @@ class TabCollection {
   }
 
   activate(id: string): void {
-    for (const t of this.list) t.active = t.id === id;
+    const target = this.list.find((t) => t.id === id);
+    if (!target) return;
+    // 激活作用域限目标 tab 所属 workspace：组内唯一活动，他组活动保持记忆
+    for (const t of this.tabsOf(target.workspaceId)) t.active = t.id === id;
     void persist();
   }
 
@@ -206,9 +263,14 @@ export function openFiles(files: File[]): void {
  * 恢复的占位 tab 保留快照旧 id（如 t5），seq 若从 0 重新计数，新 tab 的 t1/t2
  * 会与占位 id 撞车（activate/close 按 id 找首个匹配即错乱）。AppShell.restore
  * 在恢复循环前调用；id 解析（tabSeqOf/maxTabSeqOf）在 stores/session 可单测。
+ * 快照 v2 兼容：workspace 快照从各 workspace.tabs 取最大序号。
  */
-export function seedSeqFromSnapshots(snaps: ReadonlyArray<TabSnapshot>): void {
-  seq = Math.max(seq, maxTabSeqOf(snaps.map((s) => s.id)));
+export function seedSeqFromSnapshots(snaps: ReadonlyArray<TabSnapshot> | WorkspacesSnapshot): void {
+  const ids =
+    'workspaces' in snaps
+      ? snaps.workspaces.flatMap((w) => w.tabs.map((t) => t.id))
+      : snaps.map((s) => s.id);
+  seq = Math.max(seq, maxTabSeqOf(ids));
 }
 
 export async function openDirectoryViaPicker(): Promise<void> {
@@ -319,7 +381,8 @@ function serverLabel(base: string): string {
 /**
  * 连接 vviewer 文件服务器：GET /api/health 校验（capabilities 须含 file-server）
  * → POST /api/ticket 鉴权预检（health 免认证，需受保护端点实际验 token）
- * → createRemoteStore（watch 订阅 SSE 变更）→ addDirStoreTab（目录 tab 替换语义）
+ * → createRemoteStore（watch 订阅 SSE 变更）→ addDirStoreTab（目录 tab 加入当前
+ * workspace，同 storeId 去重激活）
  * → 记入 sessionStorage。失败抛错给 UI 展示；连接句柄不可持久化，重连本期需手动（M7 恢复）。
  */
 export async function connectServer(baseUrl: string, token: string | null): Promise<void> {
@@ -389,8 +452,7 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
   }
 
   // 同 base 重连：先关闭同 base 的旧 remote tab（目录 + 文件）。旧 store 无 tab
-  // 持有后经引用计数接线 close()（停 SSE + 清资源表），避免新旧两条事件流并行；
-  // 其余目录 tab（本地文件夹）仍由 addDirStoreTab 的替换语义关闭
+  // 持有后经引用计数接线 close()（停 SSE + 清资源表），避免新旧两条事件流并行
   for (const t of [...tabStore.list]) {
     if (getRemoteBase(t.source.storeId) === base) tabStore.close(t.id);
   }
@@ -436,12 +498,14 @@ export function loadLastServer(): LastServer | null {
   }
 }
 
-/** 目录来源以一个"目录 tab"表达：path=''，ViewerPane 显示引导提示，文件树渲染在左栏 */
+/** 目录来源以一个"目录 tab"表达：path=''，ViewerPane 显示引导提示，文件树渲染在左栏。
+ * 多根工作区（T3）：目录 tab 加入当前 workspace；同 storeId 已有目录 tab 则直接激活
+ * （去重）——废除旧版「关闭全部既有目录 tab」的替换语义（单根时期的临时方案）。 */
 function addDirStoreTab(store: TreeStore): void {
-  // spec 不做多根工作区，采用替换语义：添加新目录 tab 前先关闭既有目录 tab，
-  // 避免连续打开第二个文件夹后文件树仍钉在第一个目录
-  for (const t of [...tabStore.list]) {
-    if (t.source.path === '') tabStore.close(t.id);
+  const existing = tabStore.list.find((t) => t.source.path === '' && t.source.storeId === store.id);
+  if (existing) {
+    tabStore.activate(existing.id);
+    return;
   }
   addTab(store, '', store.displayName());
 }

@@ -1,4 +1,5 @@
 import type { VscodeThemeJson } from '@vviewer/highlight';
+import type { WorkspacesSnapshot } from '../workspaceStore';
 
 export interface TabSnapshot {
   id: string;
@@ -73,6 +74,24 @@ async function kvPut(key: string, value: unknown): Promise<void> {
 
 export async function saveTabs(tabs: TabSnapshot[]): Promise<void> { await kvPut('tabs', tabs); }
 export async function saveDirHandle(h: FileSystemDirectoryHandle | null): Promise<void> { await kvPut('dirHandle', h); }
+
+/**
+ * workspaces 快照（v2，kv 键 'workspaces'）：与 'tabs' 并存的新键，
+ * 不升 DB 版本（kv store 通吃）。
+ */
+export async function saveWorkspaces(s: WorkspacesSnapshot): Promise<void> { await kvPut('workspaces', s); }
+
+/**
+ * 读工作区快照：'workspaces' 缺失（旧版本会话）回落读旧 'tabs' 键——
+ * 一次性迁移入口，旧键保留不删（降级/对照兜底，调用方以 migrateLegacyTabs 迁移）。
+ */
+export async function loadWorkspaces(): Promise<{ snapshot: WorkspacesSnapshot | null; legacyTabs: TabSnapshot[] }> {
+  const [snapshot, legacyTabs] = await Promise.all([
+    kvGet<WorkspacesSnapshot>('workspaces'),
+    kvGet<TabSnapshot[]>('tabs')
+  ]);
+  return { snapshot: snapshot ?? null, legacyTabs: legacyTabs ?? [] };
+}
 
 /** 主题库列表（spec B §2.3）。 */
 export async function listThemes(): Promise<ImportedTheme[]> {

@@ -84,17 +84,67 @@ function asEncoding(v: string | null): Encoding | undefined {
 }
 
 /**
+ * storeId 编码分量。新格式 `remote:<hash8(base:label)>:r<n>[:<hash8(basePath)>]`；
+ * 旧格式 `remote:<hash8>`（无 :r 段）= 根 0 且无 basePath——解析端兼容两种。
+ */
+export interface RemoteStoreIdParts {
+  hash: string;
+  rootIndex: number;
+  basePathHash?: string;
+}
+
+/**
+ * storeId → 编码分量（非 remote id，含 placeholder:/localfs: 等前缀，返回 null）。
+ * workspace 多根恢复（T4）由此从快照 storeId 反解根索引/basePath 指纹。
+ */
+export function parseRemoteStoreId(storeId: string): RemoteStoreIdParts | null {
+  const m = /^remote:([0-9a-f]{8})(?::r(\d+))?(?::([0-9a-f]{8}))?$/.exec(storeId);
+  if (m === null) return null;
+  return {
+    hash: m[1]!,
+    rootIndex: m[2] !== undefined ? Number(m[2]) : 0,
+    ...(m[3] !== undefined ? { basePathHash: m[3] } : {})
+  };
+}
+
+/** createRemoteStore 的多根选项（缺省 = 根 0、无 basePath，与历史行为一致）。 */
+export interface RemoteStoreOptions {
+  /** 服务器多根下的根索引（server /api/* 的 root 参数）；缺省 0。 */
+  rootIndex?: number;
+  /** 根内子目录前缀：源内路径相对该前缀（请求前拼合、watch 回调前剥离）；首尾斜杠归一。 */
+  basePath?: string;
+}
+
+/**
  * 远端 vviewer 文件服务器的 TreeStore（M5）：
  * listChildren → GET /api/tree?path=，read → GET /api/file?path=（全量读，
  * Range 由服务端支持但前端暂不使用）；每次 read 把 X-VV-* 检测头写入 remoteMeta。
  * id 由 base+label 哈希派生；base 登记在 remoteBaseById（会话快照 storeBase，M7 恢复）。
+ * 多根（workspace T3）：opts.rootIndex/basePath 时 id 追加 :rN[:basePathHash] 段
+ * （默认形态保持旧 id 不变，既有会话快照/资源表键零迁移）；请求按源相对路径
+ * 拼合 basePath 前缀与 &root=；watch 帧带 root 时按 rootIndex 过滤（单根服务器
+ * 省略 root = 全部接受）、按 basePath 剥离换算回源相对路径。
  * watch() 订阅 SSE 变更推送：POST /api/ticket（Bearer）换一次性票 →
  * GET /api/events?ticket=（EventSource 无法自带头）；断线手动重连接（ticket 一次性，
  * EventSource 原生自动重连会复用已消费的 ticket 永远 401，必须关掉重开）。
  */
-export function createRemoteStore(baseUrl: string, token: string | null, dirLabel: string): RemoteStore {
+export function createRemoteStore(
+  baseUrl: string,
+  token: string | null,
+  dirLabel: string,
+  opts?: RemoteStoreOptions
+): RemoteStore {
   const base = normalizeServerBase(baseUrl);
-  const id = `remote:${hash8(`${base}:${dirLabel}`)}`;
+  const rootIndex = opts?.rootIndex ?? 0;
+  const basePathOpt = opts?.basePath?.replace(/^\/+|\/+$/g, '');
+  const basePath = basePathOpt !== undefined && basePathOpt !== '' ? basePathOpt : undefined;
+  const hash = hash8(`${base}:${dirLabel}`);
+  // 默认形态（根 0、无 basePath）沿用旧编码：恢复路径/占位 id/资源表键零迁移；
+  // 其余形态追加段保证互异（同 base+label 的 hash 段不变，编码只追加后缀）
+  const id =
+    rootIndex === 0 && basePath === undefined
+      ? `remote:${hash}`
+      : `remote:${hash}:r${rootIndex}${basePath !== undefined ? `:${hash8(basePath)}` : ''}`;
   remoteBaseById.set(id, base);
   // base 带非根 path（归一化后仍保留，可能是反向代理前缀）：请求失败时在错误信息提示
   let baseHasPath = false;
@@ -105,15 +155,28 @@ export function createRemoteStore(baseUrl: string, token: string | null, dirLabe
   }
 
   /**
+   * 源相对路径 → 服务器根相对路径：basePath 前缀拼合（空路径 = 前缀自身——
+   * server 树/文件路径相对根而非相对 basePath，listChildren('') 即查前缀目录）。
+   */
+  function toServerPath(path: string): string {
+    if (basePath === undefined) return path;
+    return path === '' ? basePath : `${basePath}/${path}`;
+  }
+
+  /**
    * 带 Bearer 头的 GET；非 2xx 抛含状态码的 Error（server 错误体若为 JSON 则附 detail；
    * base 带 path 时附误粘贴提示）。挂 30s 超时：服务器失联时请求有界失败而非永久悬挂。
+   * 多根：路径经 toServerPath 换算，rootIndex!=0 追加 &root=<n>（根 0 不拼，URL 形状不变）。
    */
   async function request(apiPath: string, path: string): Promise<Response> {
     const headers: Record<string, string> = {};
     if (token) headers.authorization = `Bearer ${token}`;
+    const query =
+      `path=${encodeURIComponent(toServerPath(path))}` +
+      (rootIndex !== 0 ? `&root=${rootIndex}` : '');
     let res: Response;
     try {
-      res = await fetch(`${base}${apiPath}?path=${encodeURIComponent(path)}`, {
+      res = await fetch(`${base}${apiPath}?${query}`, {
         headers,
         signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(30_000) : undefined
       });
@@ -147,11 +210,11 @@ export function createRemoteStore(baseUrl: string, token: string | null, dirLabe
   let reconnectDelay = 1000;
   let watchClosed = false;
 
-  /** SSE 数据帧：`{"type":"changed","paths":[..]}` 或降级帧 `{"type":"watch-error"}`。 */
+  /** SSE 数据帧：`{"type":"changed","paths":[..]}`（多根服务器附加 `"root":n`）或降级帧 `{"type":"watch-error"}`。 */
   function onChangedFrame(data: string): void {
-    let body: { type?: string; paths?: unknown };
+    let body: { type?: string; paths?: unknown; root?: unknown };
     try {
-      body = JSON.parse(data) as { type?: string; paths?: unknown };
+      body = JSON.parse(data) as { type?: string; paths?: unknown; root?: unknown };
     } catch {
       return; // 非 JSON 帧：忽略
     }
@@ -165,7 +228,21 @@ export function createRemoteStore(baseUrl: string, token: string | null, dirLabe
     }
     if (body.type !== 'changed' || !Array.isArray(body.paths)) return;
     reconnectDelay = 1000; // 有正常帧说明链路健康，重置退避
-    const paths = body.paths.filter((p): p is string => typeof p === 'string');
+    // 多根服务器帧带 root（按 rootIndex 过滤异根帧）；单根服务器省略 root
+    // （历史形状）——缺省不过滤（preflight 契约「单根省略=全部接受」），
+    // 仅「带 root 参数的 SSE 帧」参与 rootIndex 过滤
+    if (body.root !== undefined && body.root !== rootIndex) return;
+    let paths = body.paths.filter((p): p is string => typeof p === 'string');
+    if (basePath !== undefined) {
+      // server 推送的路径相对根：剥离 basePath 前缀换算回源相对；
+      // 前缀不匹配（其他源的变更）丢弃；恰为前缀自身（目录本身变更）剥离为 ''
+      paths = paths.flatMap((p) => {
+        if (p === basePath) return [''];
+        if (p.startsWith(`${basePath}/`)) return [p.slice(basePath.length + 1)];
+        return [];
+      });
+      if (paths.length === 0) return;
+    }
     for (const listener of changeListeners) listener(paths);
   }
 
