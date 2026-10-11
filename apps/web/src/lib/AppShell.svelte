@@ -226,6 +226,7 @@
             const tab = addTab(store, t.path, t.name);
             tab.scrollTop = t.scrollTop;
             if (t.overrideRenderer !== undefined) tab.overrideRenderer = t.overrideRenderer; // C 项读回
+            if (t.pinned) tab.pinned = true; // F 项读回：快照序 pinned 靠左，add 顺序保持区不变式
             continue;
           }
           addPlaceholderTab(t);
@@ -326,6 +327,7 @@
     };
     const tab = addTab(store, t.path, t.name);
     tab.unrestorable = true;
+    if (t.pinned) tab.pinned = true; // F 项读回：占位 tab 的 pinned 态一并恢复（保快照序区不变式）
   }
 
   /**

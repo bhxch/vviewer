@@ -23,6 +23,13 @@ import { sourceKindOf, workspaceStore } from './workspaceStore';
 import { loadSettings } from './stores/settings';
 import { releaseStoreIfLast } from './storeRelease';
 import { saveSearchEngine } from './searchEngineCache';
+import {
+  CLOSED_STACK_MAX,
+  ClosedStack,
+  reorderIds,
+  regroupPinned,
+  type ClosedTabEntry
+} from './tabOrder';
 
 export interface Tab {
   id: string;
@@ -33,6 +40,8 @@ export interface Tab {
   active: boolean;
   /** 会话恢复的占位 tab：内容无法自动还原，需用户重新打开 */
   unrestorable?: boolean;
+  /** F 项：浏览器式固定 tab（pinned 区靠左连续）；不参与 rev 刷新机制，随会话快照持久化 */
+  pinned?: boolean;
   /** 渲染代数：SSE 变更刷新自增（ViewerPane 渲染 effect 依赖它重跑）；不进会话快照 */
   rev?: number;
   /** C 项：手选打开方式（override 渲染器 id）。缺省 = 自动路由；写进会话快照 */
@@ -56,8 +65,19 @@ function snapshot(t: Tab): TabSnapshot {
     kind: t.source.storeId.startsWith('localfs:') ? 'restorable' : 'rename-only',
     scrollTop: t.scrollTop,
     active: t.active,
-    ...(t.overrideRenderer !== undefined ? { overrideRenderer: t.overrideRenderer } : {})
+    ...(t.overrideRenderer !== undefined ? { overrideRenderer: t.overrideRenderer } : {}),
+    ...(t.pinned ? { pinned: true } : {})
   };
+}
+
+/**
+ * 占位 storeId（`placeholder:<原 storeId>`）剥回原 id：撤销重建占位 tab 时不叠加前缀
+ * （关闭的占位 tab 快照 storeId 已带 placeholder: 前缀，直接再包一层会得到双前缀 id）。
+ */
+function originStoreIdOf(snap: TabSnapshot): string {
+  return snap.storeId.startsWith('placeholder:')
+    ? snap.storeId.slice('placeholder:'.length)
+    : snap.storeId;
 }
 
 async function persist(): Promise<void> {
@@ -124,6 +144,10 @@ class TabCollection {
     if (i >= 0) {
       const closed = this.list[i]!;
       const wasActive = closed.active;
+      // F 项撤销栈：所有 close 路径（单关/批量 closeOthers·closeRight/面板）统一入栈——
+      // 元素为关闭瞬间的会话快照 + 所属 workspace，reopenClosed 出栈重建；
+      // 批量关闭经本方法的循环逐个入栈，与单关语义一致
+      pushClosed({ ...snapshot(closed), workspaceId: closed.workspaceId });
       this.list.splice(i, 1);
       if (wasActive) {
         // 关闭活动 tab 时激活相邻 tab，避免出现无活动 tab 的空窗；
@@ -164,6 +188,203 @@ class TabCollection {
    */
   private releaseStoreIfLast(store: TreeStore): void {
     releaseStoreIfLast(this.list, store);
+  }
+
+  // ---------- F 项：浏览器式 tab 动作（T1，全部组内作用域 + persist） ----------
+
+  /** 组内 id 序 + pinned 集合（动作数学 reorderIds/regroupPinned 的输入形状）。 */
+  private groupOrderOf(wsId: string): { ids: string[]; pinned: Set<string> } {
+    const group = this.tabsOf(wsId);
+    return {
+      ids: group.map((t) => t.id),
+      pinned: new Set(group.filter((t) => t.pinned).map((t) => t.id))
+    };
+  }
+
+  /**
+   * 组内 tabs 按 order 重排落 $state：组内槽位重写为 order 序，其余组的相对位不动。
+   * 写入的是 tabsOf 取出的同一批 $state 代理（元素身份不变，写穿有效——BUG-69 惯例）。
+   */
+  private rewriteGroupOrder(wsId: string, order: string[]): void {
+    const slotOf = new Map(order.map((id, i) => [id, i] as const));
+    const group = this.tabsOf(wsId).sort((a, b) => slotOf.get(a.id)! - slotOf.get(b.id)!);
+    let k = 0;
+    for (let i = 0; i < this.list.length; i++) {
+      if (this.list[i]!.workspaceId === wsId) this.list[i] = group[k++]!;
+    }
+  }
+
+  /**
+   * 批量关闭（F 项 closeOthers）：组内除自身与 pinned 外全关。
+   * 复用单关 close() 循环——releaseStoreIfLast 与 pushClosed（每个被关 tab 逐个入
+   * 撤销栈）语义与逐个关完全一致；激活落点在循环后显式对齐（级联激活的中间态不可靠）。
+   */
+  closeOthers(tabId: string): void {
+    const anchor = this.list.find((t) => t.id === tabId);
+    if (!anchor) return;
+    const wsId = anchor.workspaceId;
+    const before = this.tabsOf(wsId);
+    const prevActive = before.find((t) => t.active);
+    for (const v of before.filter((t) => t.id !== tabId && !t.pinned)) this.close(v.id);
+    this.alignActivationAfterBatch(wsId, before, prevActive);
+  }
+
+  /** 批量关闭（F 项 closeRight）：组内该 tab 右侧的非 pinned 全关（pinned 豁免）。 */
+  closeRight(tabId: string): void {
+    const anchor = this.list.find((t) => t.id === tabId);
+    if (!anchor) return;
+    const wsId = anchor.workspaceId;
+    const before = this.tabsOf(wsId);
+    const prevActive = before.find((t) => t.active);
+    const at = before.findIndex((t) => t.id === tabId);
+    for (const v of before.slice(at + 1).filter((t) => !t.pinned)) this.close(v.id);
+    this.alignActivationAfterBatch(wsId, before, prevActive);
+  }
+
+  /**
+   * 批量关闭后的激活对齐：原活动 tab 已在批量中关闭时，激活其组内最近存活邻位
+   * （按关闭前的组序先右后左，与单关 close() 的邻位语义一致）；原活动仍存活则不动。
+   */
+  private alignActivationAfterBatch(wsId: string, before: Tab[], prevActive: Tab | undefined): void {
+    if (prevActive === undefined || this.list.some((t) => t.id === prevActive.id)) return;
+    const survivors = new Set(this.tabsOf(wsId).map((t) => t.id));
+    const ids = before.map((t) => t.id);
+    const from = ids.indexOf(prevActive.id);
+    let neighbor: string | null = null;
+    for (let j = from + 1; j < ids.length; j++) {
+      if (survivors.has(ids[j]!)) {
+        neighbor = ids[j]!;
+        break;
+      }
+    }
+    if (neighbor === null) {
+      for (let j = from - 1; j >= 0; j--) {
+        if (survivors.has(ids[j]!)) {
+          neighbor = ids[j]!;
+          break;
+        }
+      }
+    }
+    if (neighbor !== null) this.activate(neighbor);
+  }
+
+  /** pin（F 项）：置位 + 组内重排——pinned 区靠左（区内相对序保持），新 tab 落 pinned 区尾。 */
+  pin(tabId: string): void {
+    const tab = this.list.find((t) => t.id === tabId);
+    if (!tab || tab.pinned) return;
+    tab.pinned = true;
+    this.regroupAfterPinFlip(tab, true);
+    void persist();
+  }
+
+  /** unpin（F 项）：去位 + 组内重排——落普通区首位（整个 pinned 区之后第一位）。 */
+  unpin(tabId: string): void {
+    const tab = this.list.find((t) => t.id === tabId);
+    if (!tab || !tab.pinned) return;
+    delete tab.pinned;
+    this.regroupAfterPinFlip(tab, false);
+    void persist();
+  }
+
+  /** 置位/去位后的组内重排（数学在 tabOrder.regroupPinned，此处落 $state）。 */
+  private regroupAfterPinFlip(tab: Tab, nowPinned: boolean): void {
+    const { ids, pinned } = this.groupOrderOf(tab.workspaceId);
+    this.rewriteGroupOrder(tab.workspaceId, regroupPinned(ids, tab.id, nowPinned, pinned));
+  }
+
+  /**
+   * 复制 tab（F 项）：同 source 新 tab 插入原 tab 右侧并激活（add 落组尾后 splice 回
+   * 原位 +1）。unrestorable 占位的内容不可重建：返回 null 不动作。pinned/手选渲染方式
+   * 随原 tab（原 tab pinned 而副本不 pinned 会把普通 tab 插进 pinned 区，破区不变式）；
+   * 滚动位置不复制（新视图从头看）。
+   */
+  duplicate(tabId: string): Tab | null {
+    const src = this.list.find((t) => t.id === tabId);
+    if (!src || src.unrestorable) return null;
+    const tab = this.add(src.source.store, src.source.path, src.source.name);
+    if (src.pinned) tab.pinned = true;
+    if (src.overrideRenderer !== undefined) tab.overrideRenderer = src.overrideRenderer;
+    this.list.splice(this.list.indexOf(tab), 1);
+    this.list.splice(this.list.indexOf(src) + 1, 0, tab);
+    void persist(); // add 已按组尾序落盘；归位后再落一次保序
+    return tab;
+  }
+
+  /**
+   * 组内拖拽重排（F 项）：插入到 toId 之前/之后由 UI 传 before；跨 pinned 区边界拒绝
+   * 返回 false——普通 tab 的插入点在 pinned 区内不受理（截断到 pinned 区尾之后的
+   * 第一个普通位语义，即仅区尾边界受理），pinned tab 越区尾同理。数学见 tabOrder.reorderIds。
+   */
+  dragReorder(fromId: string, toId: string, before: boolean): boolean {
+    const from = this.list.find((t) => t.id === fromId);
+    if (!from) return false;
+    const { ids, pinned } = this.groupOrderOf(from.workspaceId);
+    const next = reorderIds(ids, fromId, toId, before, pinned);
+    if (next === null) return false;
+    this.rewriteGroupOrder(from.workspaceId, next);
+    void persist();
+    return true;
+  }
+
+  /**
+   * 撤销关闭（F 项，撤销栈消费端）：出栈重建——目标 workspace 仍在 → 落回原组尾；
+   * 已删除 → 当前活动组。store 实例存活（storeById）直接复用重建；不存活落占位
+   * （与 AppShell.restore 的 addPlaceholderTab 同语义：read 即抛错 + unrestorable）。
+   * 栈空返回 null。快照携带的 pinned 落回后归位 pinned 区尾（保区不变式）。
+   */
+  reopenClosed(): Tab | null {
+    const snap = closedStack.pop();
+    if (snap === null) return null;
+    const targetWs = workspaceStore.list.some((w) => w.id === snap.workspaceId)
+      ? snap.workspaceId
+      : workspaceStore.activeId;
+    workspaceStore.setActive(targetWs); // add 按 activeId 归组：先拨组再入列（落回原组尾）
+    const alive = storeById(originStoreIdOf(snap));
+    if (alive !== null) {
+      // 来源幂等补挂（removeSource 连带关闭 / 原组被删后落活动组等来源缺口场景）：
+      // addSource 按 storeId 去重，已登记为 no-op
+      workspaceStore.addSource(targetWs, sourceOf(alive));
+    }
+    const tab = alive !== null ? this.add(alive, snap.path, snap.name) : this.addPlaceholder(snap);
+    tab.scrollTop = snap.scrollTop;
+    if (snap.overrideRenderer !== undefined) tab.overrideRenderer = snap.overrideRenderer;
+    if (snap.pinned) {
+      tab.pinned = true;
+      this.regroupAfterPinFlip(tab, true); // 组尾落位会破 pinned 区不变式：归位区尾
+    }
+    void persist(); // add 的落盘是组尾/无回填态：此处统一再落最终形态
+    return tab;
+  }
+
+  /**
+   * 占位 tab（reopenClosed 专用，与 AppShell.restore 的 addPlaceholderTab 同语义）：
+   * read 即抛错的占位 store——ViewerPane 以错误卡片提示"需重新打开"；文案按快照是否
+   * 携带服务端 base 区分（SHELL-14 同款）。
+   */
+  private addPlaceholder(snap: TabSnapshot): Tab {
+    const remote = snap.storeBase !== undefined;
+    let host = snap.storeBase ?? '';
+    if (remote) {
+      try {
+        host = new URL(snap.storeBase ?? '').host;
+      } catch {
+        // base 非法：显示名退回原串
+      }
+    }
+    const message = remote
+      ? `服务器 ${host} 的文件，重连后可恢复（会话不保留服务器文件内容）`
+      : '会话中的本地文件需要重新打开（浏览器不保留文件内容）';
+    const store: TreeStore = {
+      id: `placeholder:${originStoreIdOf(snap)}`,
+      displayName: () => snap.storeLabel,
+      listChildren: async () => [],
+      read: async () => {
+        throw new Error(message);
+      }
+    };
+    const tab = this.add(store, snap.path, snap.name);
+    tab.unrestorable = true;
+    return tab;
   }
 
   activate(id: string): void {
@@ -224,6 +445,14 @@ class TabCollection {
 }
 
 export const tabStore = new TabCollection();
+
+/**
+ * 撤销关闭栈（F 项 T1，模块级）：容量 CLOSED_STACK_MAX 的 LIFO，元素为关闭瞬间的
+ * 会话快照 + 所属 workspace（tabOrder.ClosedStack 纯结构，tabActions.test.ts 直测）。
+ * 所有 close 路径统一 pushClosed；reopenClosed 出栈消费。会话级内存态：不持久化
+ * （重启后撤销历史清空）。
+ */
+const closedStack = new ClosedStack<ClosedTabEntry>(CLOSED_STACK_MAX);
 
 /**
  * 活动 store 实例注册表：storeId → TreeStore（会话内尚有 tab 持有的实例）。
@@ -311,6 +540,19 @@ export function addTab(store: TreeStore, path: string, name: string): Tab {
 
 export function closeTab(id: string): void {
   tabStore.close(id);
+}
+
+/**
+ * 撤销关闭入栈（F 项）：快照级元素（TabSnapshot + workspaceId）。所有 close 路径
+ * （单关/批量 closeOthers·closeRight/面板）统一经 TabCollection.close 调用本函数。
+ */
+export function pushClosed(entry: ClosedTabEntry): void {
+  closedStack.push(entry);
+}
+
+/** 撤销关闭（F 项）：出栈重建——原组在落回原组尾，原组已删落当前活动组；栈空返回 null。 */
+export function reopenClosed(): Tab | null {
+  return tabStore.reopenClosed();
 }
 
 export function activateTab(id: string): void {

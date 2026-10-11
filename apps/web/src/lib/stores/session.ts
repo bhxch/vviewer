@@ -14,6 +14,8 @@ export interface TabSnapshot {
   active: boolean;
   /** C 项：手选打开方式（override 渲染器 id）；无手选时不写，restore 侧读回重建。 */
   overrideRenderer?: string;
+  /** F 项：pinned tab（pinned 区靠左）；仅置位时写入（缺省 = 普通区），restore 侧读回。 */
+  pinned?: boolean;
 }
 
 /** 导入主题（spec B §2.3）：id='imported:<随机8>'，applyAppearance 按 id 解析注入。 */
