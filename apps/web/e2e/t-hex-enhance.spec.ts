@@ -322,18 +322,18 @@ test('HEX-SEARCH-02：文本模式 + 大小写开关（默认敏感）+ 无命�
   await expect(caseToggle).toBeDisabled();
 });
 
-test('HEX-SEARCH-03：命中数超上限截断（块粒度）——状态位「（截断）」', async ({ page }) => {
+test('HEX-SEARCH-03：命中数超上限截断（块内即时判停）——状态位「（截断）」', async ({ page }) => {
   test.setTimeout(60_000);
   await page.goto('/');
   await openDir(page, 'trunc.bin', makeTruncatedSample());
   await openHexFile(page, 'trunc.bin');
   const search = page.locator('.vv-hex-search');
-  // 4096B 全 'de ad' → 2048 处命中 > SEARCH_MAX_HITS=1000 → 截断标记。上限检查在每块
-  // 扫描完成后（块粒度，Task 2 已知语义）：4KB 为单块，块内命中一次收满 2048 后停扫
-  // 并置 truncated——断言锁定「（截断）」标记与确定性命中数。done 自动定位首处
+  // 4096B 全 'de ad' → 2048 处命中 > SEARCH_MAX_HITS=1000 → 截断标记。上限为块内
+  // 即时判停（块内收满配额即 break）：单块恰好收满 1000 即停扫并置 truncated——
+  // 断言锁定「（截断）」标记与精确命中数。done 自动定位首处
   await search.fill('de ad');
   await search.press('Enter');
-  await expect(page.locator('.vv-hex-search-status')).toHaveText('1/2048 处命中（截断）');
+  await expect(page.locator('.vv-hex-search-status')).toHaveText('1/1000 处命中（截断）');
 });
 
 test('HEX-INSP-02：检查器值表各类型断言 + 字节序翻转值（≤600px 右抽屉可达性）', async ({ page }) => {

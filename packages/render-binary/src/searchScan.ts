@@ -5,7 +5,8 @@
 
 /** worker 搜索块大小（1MB）：每块扫描后回报进度并让出消息循环（取消即时生效） */
 export const SEARCH_CHUNK_BYTES = 1 << 20;
-/** 命中上限：累计达此值提前终止（truncated），防巨型文件命中风暴 */
+/** 命中上限：块内即时判停（收满即 break），防巨型文件命中风暴——单字节 needle
+ * 也不会在单块内超额收满（spec「1000 上限」精确成立） */
 export const SEARCH_MAX_HITS = 1000;
 
 /**
@@ -15,12 +16,16 @@ export const SEARCH_MAX_HITS = 1000;
  * 去重语义：完全落在重叠区（data 前 overlap 字节）内的命中不再返回——该区域属前
  * 块扫描范围，前块已报；起点在重叠区、终点伸入新区域的跨界命中由本块恰报一次。
  * overlap = needle.length - 1 时，两块各自可报的命中起点区间不相交，天然不重不漏。
+ *
+ * maxHits 配额（块内即时判停）：收满即 break，不再扫完整块——调用方传「剩余配额」
+ * （总量 - 已收），使累计恰好封顶；缺省不限。
  */
 export function scanChunk(
   data: Uint8Array,
   needle: Uint8Array,
   baseOffset: number,
-  overlap: number
+  overlap: number,
+  maxHits = Number.POSITIVE_INFINITY
 ): number[] {
   const hits: number[] = [];
   const n = needle.length;
@@ -36,7 +41,10 @@ export function scanChunk(
         break;
       }
     }
-    if (matched) hits.push(baseOffset + i);
+    if (matched) {
+      hits.push(baseOffset + i);
+      if (hits.length >= maxHits) break; // 配额收满：即时判停
+    }
   }
   return hits;
 }
@@ -115,7 +123,8 @@ export async function scanAll(
     const winEnd = Math.min(total, regionStart + chunkSize);
     let win = buffer.subarray(winStart, winEnd);
     if (opts.fold) win = foldBytes(win);
-    const chunkHits = scanChunk(win, pin, winStart, regionStart - winStart);
+    // 块内即时判停：传剩余配额（总量 - 已收），单块命中风暴恰好封顶 maxHits
+    const chunkHits = scanChunk(win, pin, winStart, regionStart - winStart, maxHits - offsets.length);
     for (const h of chunkHits) offsets.push(h);
     scanned = winEnd;
     opts.onChunk?.({

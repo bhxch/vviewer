@@ -34,6 +34,12 @@ describe('scanChunk', () => {
     expect(scanChunk(data, enc('bc'), 100, 2)).toEqual([101, 105]);
     expect(scanChunk(data, enc('cd'), 100, 2)).toEqual([102, 106]);
   });
+
+  it('maxHits 配额：块内收满即停（即时判停），不扫完整块', () => {
+    // 6 个连续 'a'，配额 3：收满即 break——单字节 needle 命中风暴不再全块收满
+    expect(scanChunk(enc('aaaaaa'), enc('a'), 0, 0, 3)).toEqual([0, 1, 2]);
+    expect(scanChunk(enc('aaaaaa'), enc('a'), 500, 0, 3)).toEqual([500, 501, 502]);
+  });
 });
 
 describe('scanAll', () => {
@@ -54,6 +60,16 @@ describe('scanAll', () => {
     expect(res.offsets).toHaveLength(SEARCH_MAX_HITS); // 第 10 块后达限，停扫
     expect(res.truncated).toBe(true);
     expect(res.offsets[0]).toBe(0);
+  });
+
+  it('单块命中风暴：块内即时判停，恰好收满 maxHits（不再超额收满整块）', async () => {
+    // 旧语义（块后检查）：单字节 needle + 单大块一次性收满 2048 才停——超 maxHits；
+    // 新语义：块内配额判停，恰 1000（spec「1000 上限」精确成立）
+    const data = new Uint8Array(2048).fill(0x61); // 2048 个 'a'，默认 1MB 块为单块
+    const res = await scanAll(data, enc('a'));
+    expect(res.offsets).toHaveLength(SEARCH_MAX_HITS);
+    expect(res.truncated).toBe(true);
+    expect(res.offsets[SEARCH_MAX_HITS - 1]).toBe(SEARCH_MAX_HITS - 1);
   });
 
   it('无命中 / 空 needle：空列表、不截断、不中止', async () => {
