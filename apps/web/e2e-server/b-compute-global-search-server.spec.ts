@@ -372,9 +372,12 @@ test.describe('CMP-04 远程高亮失败语义', () => {
     await connectCompute(page, 'auto');
     await openFile(page, 'cg-probe.php');
     await expect(page.locator('.vv-code-pre')).toContainText('hello', { timeout: 30_000 });
+    // 先等回退完成（'hello' 渲染与 highlight POST 响应无顺序保证——正文纯文本
+    // 先行可读，POST 经 route 改写 + 服务端 400 的往返在后；直读 statuses 会
+    // 竞在响应落地前），'执行: 本地' 即回退完成信号
+    await expect(page.locator('.vv-statusbar')).toContainText('执行: 本地', { timeout: 30_000 });
     expect(statuses).toContain(400);
     await expect(page.locator('.vv-error-card')).toHaveCount(0);
-    await expect(page.locator('.vv-statusbar')).toContainText('执行: 本地', { timeout: 30_000 });
 
     // ④ remote：显式远程失败不静默回退，错误卡片「远程高亮失败: HTTP 400」
     statuses.length = 0;
@@ -494,7 +497,10 @@ test.describe('CMP-08 命中上限与截断终帧', () => {
       '1000 个命中（结果不完整，已达上限）',
       { timeout: 15_000 }
     );
-    await expect(page.locator('.vv-gsearch-hint')).toHaveCount(0); // serverSearchHint 远程侧 null（BUG-11 护栏）
+    // serverSearchHint 远程侧 null（BUG-11 护栏）。注意引擎徽标「服务端搜索：rg」
+    // （3dfc57e 起连接成功即显示）与降级提示同为 .vv-gsearch-hint 类——类名全量
+    // 计数恒 ≥1，须按降级文案定位（m6 同款修正口径）
+    await expect(page.locator('.vv-gsearch-hint', { hasText: '已改用浏览器内搜索' })).toHaveCount(0);
   });
 });
 

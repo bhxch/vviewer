@@ -600,26 +600,30 @@ test.fixme('BUG-48 [探索]: 非 UTF-8 文件名经 /api/tree 列出（U+FFFD �
 //   ① health 多根宣告 roots=2（数量）；② /api/tree?path=&root=1 按根列出；
 //   ③ /api/search 缺省跨根——命中帧带 "root": <idx>（search.rs FrameParser）；
 //   ④ SSE changed 帧多根带 "root" 字段端到端（watch.rs session_loop 逐根发帧）。
-// 根选择：root1 用独立临时目录（与 FIXTURE 不相交）——嵌套根会被 strip_root 的
-// 逐根前缀匹配误归 0 号根（索引序首个命中），双根必须不相交。端口 4384 与既有
-// 4375-4383/4174 错开；套件单 worker 串行执行。
+// 根选择：双根均用独立临时目录（互不相交、不写共享 FIXTURE——root0 顶层清单被
+// 既有用例断言，顶层新条目会外溢；嵌套根会被 strip_root 的逐根前缀匹配误归
+// 0 号根，双根必须不相交）。端口 4384 与既有 4375-4383/4174 错开；套件单
+// worker 串行执行。
 
 test.describe('SRV-MULTIROOT [workspace 多根]: --root 双值实例 tree?root / search 跨根 / SSE root 帧', () => {
   test('health roots=2、tree?root=1 按根列出、search 缺省跨根帧带 root、SSE changed 帧带 root', async () => {
     test.setTimeout(60_000);
-    // 1) 独立 root1：临时目录 + 命中素材（与 FIXTURE 不相交）；root0 用共享 fixture
-    //    的 srv-t/ 命名空间（幂等写，不与既有清单断言冲突——SRV-12/2 只看 srv-t/mixed）
-    const base1 = mkdtempSync(join(os.tmpdir(), 'vv-srv-multiroot-'));
-    const root1 = join(base1, 'root1');
+    // 1) 双根均用独立临时目录（互不相交、不污染共享 FIXTURE——root0 顶层清单被
+    //    既有用例断言，写入顶层条目会外溢；嵌套根会被 strip_root 的逐根前缀匹配
+    //    误归 0 号根，双根必须不相交）：各放一枚顶层命中素材
+    const base0 = mkdtempSync(join(os.tmpdir(), 'vv-srv-multiroot-'));
+    const root0 = join(base0, 'root0');
+    const root1 = join(base0, 'root1');
+    mkdirSync(root0, { recursive: true });
     mkdirSync(root1, { recursive: true });
+    writeFileSync(join(root0, 'needle-r0.txt'), 'dualroot needle shared\n');
     writeFileSync(join(root1, 'needle-r1.txt'), 'dualroot needle shared\n');
-    writeFileSync(join(FIXTURE, 'srv-t/needle-r0.txt'), 'dualroot needle shared\n');
 
     await assertPortFree('http://127.0.0.1:4384');
     const child = spawn(
       BIN,
       [
-        'serve', '--root', FIXTURE, '--root', root1, '--web-dist', join(repoRoot, 'apps/web/build'),
+        'serve', '--root', root0, '--root', root1, '--web-dist', join(repoRoot, 'apps/web/build'),
         '--port', '4384'
       ],
       { stdio: ['ignore', 'inherit', 'inherit'] }
@@ -640,7 +644,7 @@ test.describe('SRV-MULTIROOT [workspace 多根]: --root 双值实例 tree?root /
         await fetch(`${multiBase}/api/tree?path=&root=1`)
       ).json()) as { entries: Array<{ name: string; kind: string }> };
       expect(tree1.entries.map((e) => e.name)).toContain('needle-r1.txt');
-      expect(tree1.entries.map((e) => e.name)).not.toContain('srv-t');
+      expect(tree1.entries.map((e) => e.name)).not.toContain('needle-r0.txt');
       const tree0 = (await (
         await fetch(`${multiBase}/api/tree?path=`)
       ).json()) as { entries: Array<{ name: string }> };
@@ -713,7 +717,7 @@ test.describe('SRV-MULTIROOT [workspace 多根]: --root 双值实例 tree?root /
       expect(frame1!.paths).toContain('needle-r1.txt');
 
       // root0 变更 → 帧 root:0（多根下 0 号根也显式携带）
-      appendFileSync(join(FIXTURE, 'srv-t/needle-r0.txt'), `r0 change ${Date.now()}\n`);
+      appendFileSync(join(root0, 'needle-r0.txt'), `r0 change ${Date.now()}\n`);
       const acc0 = await waitFrame('"root":0', 10_000);
       const frame0 = acc0
         .split('\n')
@@ -725,7 +729,7 @@ test.describe('SRV-MULTIROOT [workspace 多根]: --root 双值实例 tree?root /
       await reader.cancel().catch(() => {});
     } finally {
       await stopServer(child, 'srv-t-multiroot');
-      rmSync(base1, { recursive: true, force: true });
+      rmSync(base0, { recursive: true, force: true });
     }
   });
 });

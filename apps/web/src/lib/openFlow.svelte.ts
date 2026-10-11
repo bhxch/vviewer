@@ -109,6 +109,7 @@ class TabCollection {
     for (const t of this.tabsOf(tab.workspaceId)) t.active = false;
     this.list.push(tab);
     activeStores.set(store.id, store); // 实例注册表（storeById 的数据源）
+    registryVersion.n++;
     void persist();
     // BUG-69：必须返回 $state 数组内元素（响应式代理）而非上面的裸对象 tab——
     // Svelte 5 $state 深代理的响应性按属性缓存（首读定值），add 内同步 persist 的
@@ -150,6 +151,7 @@ class TabCollection {
       // 的对象身份计数无关——注册表按 storeId 键控，同 id 换新实例由 add 重新覆盖）
       if (!this.list.some((t) => t.source.storeId === closed.source.storeId)) {
         activeStores.delete(closed.source.storeId);
+        registryVersion.n++;
       }
       this.releaseStoreIfLast(closed.source.store);
     }
@@ -227,11 +229,17 @@ export const tabStore = new TabCollection();
  * 活动 store 实例注册表：storeId → TreeStore（会话内尚有 tab 持有的实例）。
  * workspace.sources 只存 storeId/元数据（可持久化）；文件树/面板需要活实例时经
  * storeById 解析（AppShell.restore 也据它判断来源是否已重建）。
- * 刻意用普通 Map 而非 $state：注册表仅在 TabCollection.add/close 的同一同步调用内
- * 增删，UI 侧读 tabStore.list（$state）建立响应式依赖即可——list 变化是注册表
- * 变化的超集信号，且避免 $state 深代理包裹 store 实例引入的代理身份问题。
+ * 刻意用普通 Map 而非 $state：避免 $state 深代理包裹 store 实例引入的代理身份
+ * 问题（releaseStoreIfLast 等按对象身份比较）。响应式经 registryVersion 版本
+ * 计数器承载——旧设计假设「list 变化是注册表变化的超集信号」在 restore 重连
+ * （registerStore 注册时无任何 list 变化）与 close→recreate 窗口下不成立，
+ * 读侧漏更新曾致恢复后左栏树恒空（CMP-04 实测）：读 registryVersion.n 建立
+ * 依赖，注册表任何增删必然触发消费者重算。
  */
 const activeStores = new Map<string, TreeStore>();
+
+/** 注册表版本计数（随 activeStores 增删自增）：消费侧读它建立响应式依赖。 */
+export const registryVersion = $state({ n: 0 });
 
 /**
  * 活动 store 数据版本信号（M-2，T4 评审遗留；T7 分桶化）：TabCollection.refreshPaths
@@ -246,6 +254,17 @@ export const storeRevisions = $state<Record<string, number>>({});
 /** storeId → 活动实例；无 tab 持有（未打开/已全部关闭）返回 null。 */
 export function storeById(storeId: string): TreeStore | null {
   return activeStores.get(storeId) ?? null;
+}
+
+/**
+ * 显式注册 store 实例（AppShell.restore 重连通道专用）：重连创建的 store 此前
+ * 依赖「其 tab 的 addTab」间接入册——注册与 tab 重建分处两步，窗口内 sources
+ * derived（storeById 门）看不到存活实例；source 快照只有目录 tab（恢复循环跳过
+ * 目录 tab 不重建）时该窗口成为永久态。重连成功即入册，注册表恒指向存活实例。
+ */
+export function registerStore(store: TreeStore): void {
+  activeStores.set(store.id, store);
+  registryVersion.n++;
 }
 
 /**
@@ -514,6 +533,40 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
     throw new Error(
       authRes.status === 401 ? '鉴权失败：令牌缺失或错误（HTTP 401）' : `服务器响应异常: HTTP ${authRes.status}`
     );
+  }
+
+  // 存活实例复用（与 openRemoteSource 同一防线）：restore 重连通道重建的同源
+  // store 实例仍在注册表存活时，重复连接直接复用之——不再走「关闭同 base 全部
+  // tab → 重建」路径。该路径存在两重代价：①左栏树经 sources derived 的
+  // 「源 × 注册表 × tab 持有」三条件在 close→addTab 窗口内瞬态为空（FileTree
+  // 卸载重挂、树闪烁）；②restore 重连实例的 SSE 流未被关闭前，新实例构成双流
+  // （openRemoteSource 的复用裁决即为此）。复用条件对齐 restore 重连的构造输入
+  //（base + 会话 last-server 的 token——重连以它建 store），token 不一致（用户
+  // 换令牌重连）回退既有关闭重建路径。connectServer 恒为根 0/整根形态。
+  const last = loadLastServer();
+  if (last !== null && last.baseUrl === base && (last.token ?? null) === tok) {
+    for (const w of workspacesView.list) {
+      const src = w.sources.find(
+        (s) =>
+          s.kind === 'remote' &&
+          s.storeBase === base &&
+          (s.rootIndex ?? 0) === 0 &&
+          s.basePath === undefined
+      );
+      if (src === undefined) continue;
+      const alive = storeById(src.storeId);
+      if (alive === null) continue; // 实例不存活（tab 已全部关闭）：走关闭重建
+      addDirStoreTab(alive);
+      try {
+        sessionStorage.setItem(
+          LAST_SERVER_KEY,
+          JSON.stringify({ baseUrl: base, token: tok } satisfies LastServer)
+        );
+      } catch {
+        // 存储不可用：连接本身不受影响
+      }
+      return;
+    }
   }
 
   // 同 base 重连：先关闭同 base 的旧 remote tab（目录 + 文件）。旧 store 无 tab

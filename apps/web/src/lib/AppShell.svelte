@@ -21,6 +21,8 @@
     seedSeqFromSnapshots,
     hasUserActivity,
     loadLastServer,
+    registryVersion,
+    registerStore,
     storeById,
     storeRevisions,
     workspacesView,
@@ -84,6 +86,7 @@
     const ws = activeWorkspace;
     if (ws === null) return [] as TreeSource[];
     const tabs = tabStore.list;
+    registryVersion.n; // 注册表版本依赖：activeStores 为普通 Map 不可追踪（openFlow doc）
     const out: TreeSource[] = [];
     for (const s of ws.sources) {
       const store = storeById(s.storeId);
@@ -267,6 +270,7 @@
     }
     // 不重算 host：label 用快照原值（见函数 doc——label 参与 storeId hash）
     const store = createRemoteStore(base, token, storeLabel, opts);
+    registerStore(store); // 重连即入册：不依赖其 tab 的 addTab 时序（registerStore doc）
     watchHealth.degraded = false;
     store.watch(
       (paths) => {
