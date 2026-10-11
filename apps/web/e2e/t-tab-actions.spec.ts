@@ -8,10 +8,11 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * 用例（brief Step 2 的 6 条 + 控制器补充的 remote 撤销占位）：
  * - TA-01：右键菜单六动作逐一（含置灰态断言：关闭右侧/重新打开已关闭标签在
  *   置灰态可点击但无动作——TabContextMenu aria-disabled 语义）
- * - TA-02：pinned 豁免与拖拽（关闭其他 → pinned 幸存；dragTo 到 pinned 区拒绝
- *   序不变；普通区受理移动成立——后者同时证明 dragTo 机制真实触发 dnd，
- *   防拒绝断言的假通过）※仅 chromium project：375px 下四 tab 触发横向滚动，
- *   拖拽坐标不可靠（THEME-03 桌面基准惯例）
+ * - TA-02：pinned 豁免与拖拽（关闭其他/关闭右侧 → pinned 幸存——后者锚在 pinned
+ *   区首、右侧 pinned 豁免的真实形态；批量关闭含原活动 tab 时激活落原活动最近
+ *   存活邻位；dragTo 到 pinned 区拒绝序不变；普通区受理移动成立——后者同时证明
+ *   dragTo 机制真实触发 dnd，防拒绝断言的假通过）※仅 chromium project：375px 下
+ *   四 tab 触发横向滚动，拖拽坐标不可靠（THEME-03 桌面基准惯例）
  * - TA-03：中键关闭 + Alt+Shift+T 撤销（关 2 个 → 两次撤销按 LIFO 恢复——批量
  *   关闭逐个入栈、单次撤销只恢复一个的记档口径；栈空 → 状态栏一次性提示）
  * - TA-04：复制标签页（新 tab 激活于原 tab 右侧且内容渲染，原件退居非激活）
@@ -24,6 +25,10 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * - TA-07：remote tab 撤销 = 占位恢复（T1 记档口径：close 实现型 store 不捕获
  *   实例）——断言占位错误卡文案而非内容恢复；需先关目录 tab 使 store 无持有者
  *   （dir tab 仍在时 storeById 命中，撤销会拿回真实内容，不落占位）
+ * - TA-08：撤销落点——来源 workspace 已删时 tab 落当前活动组（reopenClosed 的
+ *   已删组回落分支，终审 2c）；无 close 型 store 靠撤销栈捕获实例恢复内容非占位。
+ *   已知副作用（progress.md 记档）：removeWorkspace 的批量关闭照常入栈，先弹目录
+ *   tab 再弹文件 tab
  *
  * 通道：目录注入同 t-shell（__vvOpenDirImpl，webkitRelativePath 首段 = label）；
  * 右键 button:'right'、中键 button:'middle'、拖拽 dragTo（T2 报告接口提示）。
@@ -367,6 +372,24 @@ test('TA-02：pinned 批量关闭豁免 + 拖拽跨区拒绝（dragTo）', async
   await runMenuItem(page, '关闭其他');
   await expect.poll(() => tabNames(page)).toEqual(['bb.txt', 'aa.txt']);
   await expect(tabNamed(page, 'bb.txt')).toHaveAttribute('data-pinned', 'true');
+
+  // 批量关闭激活落点：原活动 cc 在批量中同关 → 激活其关闭前组序的最近存活邻位
+  //（先右后左：cc 右侧 = aa 存活）——alignActivationAfterBatch（终审 2b）
+  await expect(page.locator('.vv-tab.active', { hasText: 'aa.txt' })).toBeVisible();
+
+  // closeRight 的 pinned 豁免（终审 2a）：撤销恢复 cc（栈顶——closeOthers 关闭序
+  // [ttab, cc]）并固定 → pinned 区 [bb, cc]。pinned 区恒靠左，「pinned tab 出现在
+  // 锚右侧」的唯一形态是锚也在 pinned 区：以区首 bb 为锚关闭右侧，右侧 pinned cc
+  // 须豁免幸存（撤掉豁免此断言必挂——cc 会被一并关闭），普通 aa 全关
+  await page.keyboard.press('Alt+Shift+T');
+  await expect.poll(() => tabNames(page)).toEqual(['bb.txt', 'aa.txt', 'cc.txt']);
+  await openTabMenu(page, 'cc.txt');
+  await runMenuItem(page, '固定');
+  await expect.poll(() => tabNames(page)).toEqual(['bb.txt', 'cc.txt', 'aa.txt']);
+  await openTabMenu(page, 'bb.txt');
+  await runMenuItem(page, '关闭右侧');
+  await expect.poll(() => tabNames(page)).toEqual(['bb.txt', 'cc.txt']);
+  await expect(tabNamed(page, 'cc.txt')).toHaveAttribute('data-pinned', 'true');
 });
 
 // ---------------------------------------------------------------- TA-03
@@ -553,4 +576,48 @@ test('TA-07：remote tab 撤销为占位恢复（close 型 store 不捕获实例
   } finally {
     await fake.close();
   }
+});
+
+// ---------------------------------------------------------------- TA-08
+
+test('TA-08：撤销落点——来源 workspace 已删时落当前活动组（无 close 型实例内容恢复）', async ({
+  page
+}) => {
+  test.setTimeout(90_000);
+  await waitAppMounted(page);
+  await openDir(page, [{ name: 'aa.txt', type: 'text/plain', content: 'default group body\n' }], 'ttab1');
+  await openFile(page, 'aa.txt');
+  await createWorkspace(page, '待删组');
+  await openDir(page, [{ name: 'bb.txt', type: 'text/plain', content: 'doomed group body\n' }], 'ttab2');
+  await openFile(page, 'bb.txt');
+
+  // 中键关 bb：入撤销栈（workspaceId = 待删组），组内仅剩 ttab2 目录 tab
+  await tabNamed(page, 'bb.txt').click({ button: 'middle' });
+  await expect(fileTabs(page)).toHaveCount(0);
+
+  // 删除待删组（confirm 接受；删活动组 → remove 内部切剩余组首 = 默认组）。
+  // 已知副作用（progress.md 记档）：removeWorkspace 对剩余 tab 的批量关闭照常
+  // 入栈——栈自顶向下 [ttab2, bb]，第一次撤销先弹目录 tab
+  page.on('dialog', (d) => void d.accept());
+  await page.locator('.vv-ws-trigger').click();
+  await page.getByRole('button', { name: '删除工作区 待删组' }).click();
+  // 删组后下拉保持展开（removeWorkspace 不复位 wsMenuOpen，WS-01 同款）：直接断言
+  // 活动行切到剩余组首（默认组），Escape 关闭
+  await expect(page.locator('.vv-ws-item.active .vv-ws-name', { hasText: '默认' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.vv-ws-pop')).toHaveCount(0);
+  await expect(page.locator('.vv-tab')).toHaveCount(2);
+
+  // Alt+Shift+T #1：ttab2 目录 tab——workspaceId 指向已删组 → 落当前活动组组尾
+  //（reopenClosed 的已删组回落分支，终审 2c）
+  await page.keyboard.press('Alt+Shift+T');
+  await expect.poll(() => tabNames(page)).toEqual(['ttab1', 'aa.txt', 'ttab2']);
+
+  // Alt+Shift+T #2：bb——localfiles 无 close 型，撤销栈捕获的存活实例重建（#1 恢复
+  // 的目录 tab 已把实例重新入册）→ 内容渲染非占位，同落当前活动组
+  await page.keyboard.press('Alt+Shift+T');
+  await expect.poll(() => tabNames(page)).toEqual(['ttab1', 'aa.txt', 'ttab2', 'bb.txt']);
+  await expect(page.locator('.vv-tab.active', { hasText: 'bb.txt' })).toBeVisible();
+  await expect(page.locator('.vv-code-pre')).toContainText('doomed group body', { timeout: 20_000 });
+  await expect(page.locator('.vv-error-card')).toHaveCount(0);
 });

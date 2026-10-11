@@ -314,7 +314,7 @@ class TabCollection {
     const src = this.list.find((t) => t.id === tabId);
     if (!src || src.unrestorable) return null;
     // M-1 防御（fix round 1）：副本经 add 落「当前活动组」，原 tab 在非活动组时
-    // 副本会错组（无法落原 tab 右侧）——拒绝不动作（调用方后续经切组重试）
+    // 副本会错组（无法落原 tab 右侧）——防御性拒绝（当前无切组重试路径）
     if (src.workspaceId !== workspaceStore.activeId) return null;
     const tab = this.add(src.source.store, src.source.path, src.source.name);
     if (src.pinned) tab.pinned = true;

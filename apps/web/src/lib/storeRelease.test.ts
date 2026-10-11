@@ -16,8 +16,8 @@ function mkStore(id: string, withClose: boolean): TreeStore {
 const tabOf = (store: TreeStore) => ({ source: { store } });
 
 describe('releaseStoreIfLast', () => {
-  it('store 无 close（zip/localfiles 等）：no-op 不抛错', () => {
-    const store = mkStore('zip:a.zip', false);
+  it('store 无 close（localfs/localfiles 等无 close 型）：no-op 不抛错', () => {
+    const store = mkStore('localfiles:demo', false);
     expect(() => releaseStoreIfLast([tabOf(store)], store)).not.toThrow();
   });
 
@@ -45,9 +45,12 @@ describe('releaseStoreIfLast', () => {
 });
 
 describe('storeRetained（撤销栈实例捕获判据，I-1）', () => {
-  it('无 close（zip/localfiles/remote/url/single）：捕获（close 不终结，实例恒存活）', () => {
+  it('无 close 桩（localfs/localfiles/url 无 close 型）：捕获（close 不终结，实例恒存活）', () => {
+    // 桩 id 须与真实类型的 close 形态一致：无 close 型仅 localfs/localfiles/single/url。
+    // remote 实现 close（remote.ts close()，终结 SSE 流）属终结型不捕获；zip 同
+    // （zipStore.ts close() 接线 libarchive worker）——不可用无 close 桩冒充其 id。
     expect(storeRetained(mkStore('localfs:demo', false))).toBe(true);
-    expect(storeRetained(mkStore('remote:abcd1234', false))).toBe(true);
+    expect(storeRetained(mkStore('localfiles:demo', false))).toBe(true);
     expect(storeRetained(mkStore('url:https://x', false))).toBe(true);
   });
 
