@@ -168,8 +168,12 @@ test('Ctrl+Shift+F 全局搜索 "inner"：远程 ripgrep 命中 sub/inner.txt，
     timeout: 10_000
   });
   await expect(page.locator('.vv-gsearch-status')).toContainText('个命中');
-  // 无降级提示条 = 未回退浏览器内 grep（ripgrep 路径生效的直接证据）
-  await expect(page.locator('.vv-gsearch-hint')).toHaveCount(0);
+  // 无降级提示条 = 未回退浏览器内 grep（ripgrep 路径生效的直接证据）。注意引擎
+  // 徽标「服务端搜索：rg」（3dfc57e 起连接成功即显示）与降级提示同为
+  // .vv-gsearch-hint 类——类名全量计数恒 ≥1，须按降级文案定位；并正向断言
+  // 徽标宣告 rg（远程 ripgrep 通道在位的直接证据）
+  await expect(page.locator('.vv-gsearch-hint', { hasText: '已改用浏览器内搜索' })).toHaveCount(0);
+  await expect(page.locator('.vv-gsearch-hint', { hasText: '服务端搜索：' })).toContainText('rg');
 
   // 点击结果行 → 该文件以新 tab 打开并激活，内容真实加载（含 "inner" 关键行）
   await page.locator('.vv-gsearch-row').first().click();

@@ -13,7 +13,8 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * - SHELL-02：两文件追加 tab 接管激活、原 tab 保留、内容不串扰
  * - SHELL-03①：合成 drop（DataTransfer）通道新建 tab 渲染 + 无扩展名 drop 不被拒
  * - SHELL-04：文件 URL 三路径（有效渲染 / 404 / CORS 失败原因提示）
- * - SHELL-06：3 tab 切换内容跟随、逐个关闭递减、全关空态
+ * - SHELL-06：3 tab 切换内容跟随、逐个关闭递减、全关空态；目录 tab 追加/去重
+ *   语义（workspace T3：废除替换扫描——第二文件夹为追加、同 storeId 激活既有）
  * - SHELL-07：test.fixme 占位（headless 无法驱动 FS Access 原生 picker/requestPermission）
  * - SHELL-09②：排除规则跨刷新持久——重载后重建树仍排除（设置面板回显持久已由既有用例覆盖）
  * - SHELL-10：800px 平板段树抽屉 + 右栏内联；550px 双抽屉独立开合
@@ -31,24 +32,28 @@ interface Payload {
   b64?: string;
 }
 
-/** 同 m1/b-* 的 openDir 通道（内容在页内构造 File，避免大 base64 往返） */
-async function openDir(page: Page, payloads: Payload[]): Promise<void> {
+/** 同 m1/b-* 的 openDir 通道（内容在页内构造 File，避免大 base64 往返）；
+ * label = webkitRelativePath 首段（store 显示名 + localfiles:<label> storeId 的来源） */
+async function openDir(page: Page, payloads: Payload[], label = 'tshell'): Promise<void> {
   await page.waitForFunction(
     () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
   );
-  await page.evaluate((payloads) => {
-    const files = payloads.map(({ name, type, content, b64 }) => {
-      const f = new File(
-        [content !== undefined ? content : Uint8Array.from(atob(b64!), (c) => c.charCodeAt(0))],
-        name,
-        { type }
-      );
-      // webkitRelativePath 是原型上仅 getter 的访问器，defineProperty 写自有属性遮蔽（与真实 input 一致）
-      Object.defineProperty(f, 'webkitRelativePath', { value: `tshell/${name}` });
-      return f;
-    });
-    return (window as unknown as { __vvOpenDirImpl: (f: File[]) => void }).__vvOpenDirImpl(files);
-  }, payloads);
+  await page.evaluate(
+    ({ payloads, label }) => {
+      const files = payloads.map(({ name, type, content, b64 }) => {
+        const f = new File(
+          [content !== undefined ? content : Uint8Array.from(atob(b64!), (c) => c.charCodeAt(0))],
+          name,
+          { type }
+        );
+        // webkitRelativePath 是原型上仅 getter 的访问器，defineProperty 写自有属性遮蔽（与真实 input 一致）
+        Object.defineProperty(f, 'webkitRelativePath', { value: `${label}/${name}` });
+        return f;
+      });
+      return (window as unknown as { __vvOpenDirImpl: (f: File[]) => void }).__vvOpenDirImpl(files);
+    },
+    { payloads, label }
+  );
 }
 
 async function openFile(page: Page, name: string): Promise<void> {
@@ -75,12 +80,16 @@ async function waitAppMounted(page: Page): Promise<void> {
   await expect(page.locator('.vv-topbar')).toBeVisible();
 }
 
-/** 根层树名按 DOM 顺序读取（根 ul role="tree"，嵌套组为 role="group" 不受影响） */
+/** 根层树名按 DOM 顺序读取（workspace T4 多源后顶层为 div[role=tree] 包逐源
+ * ul[role=group]，每源一个组；行按钮在其 li 下——直接子组合子限定根层，
+ * TreeNodeRow 的嵌套 ul[role=group] 不受影响） */
 function rootTreeNames(page: Page): Promise<string[]> {
   return page.evaluate(() =>
-    [...document.querySelectorAll('ul[role="tree"] > li > button.vv-tree-row .vv-tree-name')].map(
-      (el) => el.textContent ?? ''
-    )
+    [
+      ...document.querySelectorAll(
+        'div[role="tree"] > ul[role="group"] > li > button.vv-tree-row .vv-tree-name'
+      )
+    ].map((el) => el.textContent ?? '')
   );
 }
 
@@ -221,7 +230,9 @@ test('SHELL-04/cors：文件 URL 跨源被 CORS 拒绝给出明确提示', async
 
 // ---------------------------------------------------------------- SHELL-06
 
-test('SHELL-06：3 tab 切换内容跟随、逐个关闭递减、全部关闭后空态', async ({ page }) => {
+test('SHELL-06：3 tab 切换内容跟随、逐个关闭递减、全部关闭后空态；目录 tab 追加/去重语义', async ({
+  page
+}) => {
   test.setTimeout(60_000);
   await waitAppMounted(page);
   await openDir(page, [
@@ -235,11 +246,42 @@ test('SHELL-06：3 tab 切换内容跟随、逐个关闭递减、全部关闭后
   // 产品设计：目录来源以一个"目录 tab"表达（openFlow.svelte.ts addDirStoreTab 经
   // addTab 入 tabStore.list，TabBar 全量渲染；m1-skeleton plan 同款），注入目录
   // （webkitRelativePath 首段 tshell）会产生一个目录 tab——判据「3 个 tab」指文件
-  // tab，计数口径排除它（服务器场景「已连接服务器」前置下目录 tab 同样存在）
-  const dirTab = page.locator('.vv-tab', { hasText: 'tshell' });
-  const fileTabs = page.locator('.vv-tab').filter({ hasNotText: 'tshell' });
+  // tab，计数口径排除它（服务器场景「已连接服务器」前置下目录 tab 同样存在）。
+  // 目录 tab 精确名匹配经 .vv-tab-name 子元素：tab 元素 textContent 含关闭钮
+  // 「×」，根级 /^tshell$/ 永不匹配（SHELL-06 首轮全量失败根因）；^tshell$ 锚定
+  // .vv-tab-name 使追加语义后的第二个目录 tshell2 不被误吞
+  const dirTab = page.locator('.vv-tab').filter({
+    has: page.locator('.vv-tab-name', { hasText: /^tshell$/ })
+  });
+  // 文件 tab 同经 .vv-tab-name 锚定排除：多源 workspace（T4）下每个 tab 织入来源
+  // 徽标（.vv-tab-src 文本=来源名），根级 hasNotText 'tshell' 会把文件 tab 一并排除
+  const fileTabs = page.locator('.vv-tab').filter({
+    has: page.locator('.vv-tab-name', { hasNotText: /^tshell/ })
+  });
   await expect(dirTab).toHaveCount(1);
   await expect(fileTabs).toHaveCount(3);
+
+  // 目录 tab 追加语义（workspace T3；旧语义→新语义：旧 addDirStoreTab 的替换扫描
+  // 会关闭既有目录 tab——打开第二个文件夹后 count 恒 1；废除后为追加，两个目录
+  // tab 并存、树多一个来源）
+  await openDir(page, [{ name: 't6-z.txt', type: 'text/plain', content: 'zeta\n' }], 'tshell2');
+  const dirTab2 = page.locator('.vv-tab').filter({
+    has: page.locator('.vv-tab-name', { hasText: /^tshell2$/ })
+  });
+  await expect(dirTab).toHaveCount(1);
+  await expect(dirTab2).toHaveCount(1);
+  await expect(fileTabs).toHaveCount(3); // 文件不自动打开：文件 tab 数不变
+
+  // 目录 tab 去重语义（T3 遗留裁决）：同 storeId（localfiles:tshell）再注入 →
+  // 激活既有目录 tab 并切到其所在 workspace，不重复建
+  await openDir(page, [{ name: 't6-dup.txt', type: 'text/plain', content: 'dup\n' }]);
+  await expect(dirTab).toHaveCount(1);
+  await expect(dirTab2).toHaveCount(1);
+  await expect(
+    page.locator('.vv-tab.active').filter({
+      has: page.locator('.vv-tab-name', { hasText: /^tshell$/ })
+    })
+  ).toBeVisible();
 
   // ② 依次切换：内容跟随所点文件
   await page.locator('.vv-tab', { hasText: 't6-a1.txt' }).click();
@@ -260,6 +302,7 @@ test('SHELL-06：3 tab 切换内容跟随、逐个关闭递减、全部关闭后
   await expect(fileTabs).toHaveCount(0);
   // 文件 tab 关完但目录 tab 尚在：ViewerPane 显示「目录来源」引导而非空态
   await expect(page.locator('.vv-empty')).toContainText('目录来源');
+  await dirTab2.locator('.vv-tab-close').click();
   await dirTab.locator('.vv-tab-close').click();
   await expect(page.locator('.vv-tab')).toHaveCount(0);
   // ViewerPane.svelte：无 tab 时 .vv-empty「拖入文件/文件夹，或使用顶栏打开」
@@ -308,11 +351,14 @@ test('SHELL-09/2：排除规则跨刷新持久——重载后重建树仍排除 
   // 跨刷新：重载（排除规则持久于 localStorage vviewer:settings）后重建同结构树，
   // 树级仍被排除——本地 File 会话不能跨刷新还原树，重注入是纯 web 模式下
   // 「持久化的规则作用于新树」的可达验证；服务器树级的重连恢复归服务端套件。
+  // 重注入必须换新 label（tshell-r2）：T3 去重语义下同 storeId（localfiles:tshell）
+  // 再注入只激活重载后的占位目录 tab、不重建 store/树（SHELL-06 去重锚同款），
+  // 新 label 才产生新 store 与新树——规则丢失时 .git/node_modules 行将出现在新树
   await page.reload();
   // 等会话恢复落定（本地目录 tab 恢复为占位 → 错误卡/空态，m1.spec.ts:104 同款信号），
   // 再重注入目录，避免注入与会话恢复竞态导致快照覆盖新树
   await expect(page.locator('.vv-error-card, .vv-empty').first()).toBeVisible({ timeout: 10_000 });
-  await openDir(page, demoDir);
+  await openDir(page, demoDir, 'tshell-r2');
   await expect(page.locator('.vv-tree-row', { hasText: '.git' })).toHaveCount(0);
   await expect(page.locator('.vv-tree-row', { hasText: 'node_modules' })).toHaveCount(0);
   const drawer = await openDrawerIfNarrow(page);

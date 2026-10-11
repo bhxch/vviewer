@@ -1,6 +1,7 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test, expect, type Page } from '@playwright/test';
+import { hash8 } from '@vviewer/core';
 
 /**
  * open-with 域回归（C 项「格式覆盖自动化」Task 7）：探测链与打开方式 override 的
@@ -163,21 +164,27 @@ test('OPEN-03：MetaPanel 手选二进制 → override 即时重渲染 + 快照�
   await expect(openWith).toHaveValue('hex');
   await expect(page.locator('.meta-openwith-manual')).toBeVisible(); // （手动）标记
 
-  // override 落盘（setRendererOverride 经代理写 → persist）：IDB tabs 快照含
-  // overrideRenderer:'hex'（确定性等待异步写，m1.spec.ts:74 轮询先例）
+  // override 落盘（setRendererOverride 经代理写 → persist）：IDB workspaces 快照含
+  // overrideRenderer:'hex'（确定性等待异步写，m1.spec.ts 轮询先例）。
+  // 旧语义→新语义（workspace T3）：快照键 'tabs'（扁平数组）→ 'workspaces'
+  // （{activeId, workspaces:[{tabs:[…]}]} 按组分桶；旧键双写已移除），DB 版本 2。
   await page.waitForFunction(
     () =>
       new Promise<boolean>((resolve) => {
-        const open = indexedDB.open('vviewer', 1);
+        const open = indexedDB.open('vviewer', 2);
         open.onsuccess = () => {
           const db = open.result;
           try {
-            const get = db.transaction('kv', 'readonly').objectStore('kv').get('tabs');
+            const get = db.transaction('kv', 'readonly').objectStore('kv').get('workspaces');
             get.onsuccess = () => {
-              const tabs = (get.result ?? []) as { name?: string; overrideRenderer?: string }[];
+              const snap = get.result as
+                | { workspaces?: { tabs?: { name?: string; overrideRenderer?: string }[] }[] }
+                | undefined;
+              const tabs = Array.isArray(snap?.workspaces)
+                ? snap.workspaces.flatMap((w) => w.tabs ?? [])
+                : [];
               resolve(
-                Array.isArray(tabs) &&
-                  tabs.some((t) => t.name === 'manual.txt' && t.overrideRenderer === 'hex')
+                tabs.some((t) => t.name === 'manual.txt' && t.overrideRenderer === 'hex')
               );
               db.close();
             };
@@ -243,32 +250,49 @@ test('BUG-69 [open-with e2e]: restore 透传 overrideRenderer 生效——remote
   const base = `http://127.0.0.1:${port}`;
   try {
     await waitAppMounted(page);
-    // 预置恢复现场：sessionStorage last-server（base 精确匹配 storeBase）+ IDB tabs
-    // 快照（rename-only + storeBase + overrideRenderer:'hex'）→ reload 触发 restore
-    // 走 remote 重连分支（AppShell.svelte 对 addTab 返回值透传 scrollTop/overrideRenderer）
+    // 预置恢复现场：sessionStorage last-server（base 精确匹配 storeBase）+ IDB 旧键
+    // 'tabs' 快照 → reload 触发 restore 走迁移（migrateLegacyTabs）+ remote 重连分支。
+    // 旧语义→新语义（workspace T3/T4）：旧 restore 按单 tab storeBase 重连；v2 restore
+    // 只重连「迁移派生的来源」（path==='' 目录条目派生 source）并按 storeId 挂靠 tab
+    // ——故快照须含目录条目，且 storeId 必须等于重建 store 的 id（hash8(base:label)，
+    // label 参与 hash：T5 I-1「快照 storeLabel 原值回环」的本用例即锚）。DB 版本 2
+    //（主题库升级；v1 open 对既有 v2 库 VersionError）。
+    const remoteId = `remote:${hash8(`${base}:e2e-fake`)}`;
+    const baseTab = {
+      storeId: remoteId,
+      storeLabel: 'e2e-fake',
+      storeBase: base,
+      kind: 'rename-only' as const,
+      scrollTop: 0
+    };
     await page.evaluate(
-      (serverBase) =>
+      (seed) =>
         new Promise<void>((resolve, reject) => {
           sessionStorage.setItem(
             'vviewer-last-server',
-            JSON.stringify({ baseUrl: serverBase, token: null })
+            JSON.stringify({ baseUrl: seed.base, token: null })
           );
-          const open = indexedDB.open('vviewer', 1);
-          open.onupgradeneeded = () => open.result.createObjectStore('kv');
+          const open = indexedDB.open('vviewer', 2);
+          open.onupgradeneeded = () => {
+            if (!open.result.objectStoreNames.contains('kv')) open.result.createObjectStore('kv');
+          };
           open.onsuccess = () => {
             const db = open.result;
             const tx = db.transaction('kv', 'readwrite');
             tx.objectStore('kv').put(
               [
                 {
+                  ...seed.baseTab,
+                  id: 't0',
+                  path: '',
+                  name: 'e2e-fake',
+                  active: false
+                },
+                {
+                  ...seed.baseTab,
                   id: 't1',
-                  storeId: 'remote:e2efake',
-                  storeLabel: 'e2e-fake',
-                  storeBase: serverBase,
                   path: 'notes.txt',
                   name: 'notes.txt',
-                  kind: 'rename-only',
-                  scrollTop: 0,
                   active: true,
                   overrideRenderer: 'hex'
                 }
@@ -286,7 +310,7 @@ test('BUG-69 [open-with e2e]: restore 透传 overrideRenderer 生效——remote
           };
           open.onerror = () => reject(open.error);
         }),
-      base
+      { base, baseTab }
     );
     await page.reload();
     await expect(page.locator('.vv-tab', { hasText: 'notes.txt' })).toBeVisible({

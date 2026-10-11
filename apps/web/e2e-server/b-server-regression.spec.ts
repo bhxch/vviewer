@@ -61,18 +61,27 @@ function treeRow(page: Page, name: string): ReturnType<Page['locator']> {
     .filter({ has: page.locator(`.vv-tree-name`, { hasText: new RegExp(`^${name}$`) }) });
 }
 
-/** 等待 IndexedDB tabs 快照中 name 的 scrollTop 达到 min（持久化是异步写，轮询防 flake） */
+/** 等待 IndexedDB 快照中 name 的 scrollTop 达到 min（持久化是异步写，轮询防 flake）。
+ * 旧语义→新语义（workspace T3/T7 适配）：快照键 'tabs'（扁平数组）→ 'workspaces'
+ * （{activeId, workspaces:[{tabs:[…]}]} 按组分桶，旧键仅存迁移副本不再更新），
+ * DB 版本随主题库升 2（v1 open 对既有 v2 库 VersionError）。断言语义等价：
+ * 跨全部组的 tab 均参与 scrollTop 匹配。 */
 async function waitSnapshotScroll(page: Page, name: string, min: number): Promise<void> {
   await page.waitForFunction(
     ({ name, min }) =>
       new Promise<boolean>((resolve) => {
-        const open = indexedDB.open('vviewer', 1);
+        const open = indexedDB.open('vviewer', 2);
         open.onsuccess = () => {
           const db = open.result;
           try {
-            const get = db.transaction('kv', 'readonly').objectStore('kv').get('tabs');
+            const get = db.transaction('kv', 'readonly').objectStore('kv').get('workspaces');
             get.onsuccess = () => {
-              const tabs = get.result as { name: string; scrollTop: number }[] | undefined;
+              const snap = get.result as
+                | { workspaces?: { tabs?: { name: string; scrollTop: number }[] }[] }
+                | undefined;
+              const tabs = Array.isArray(snap?.workspaces)
+                ? snap.workspaces.flatMap((w) => w.tabs ?? [])
+                : undefined;
               resolve(
                 Array.isArray(tabs) && tabs.some((t) => t.name === name && t.scrollTop >= min)
               );

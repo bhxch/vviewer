@@ -595,6 +595,141 @@ test.fixme('BUG-48 [探索]: 非 UTF-8 文件名经 /api/tree 列出（U+FFFD �
   expect(okFile.status).toBe(200);
 });
 
+// ── workspace 多根端到端（SRV-MULTIROOT，T7 新增）：--root 双值实例 ──
+// 覆盖（docs/superpowers/plans/2026-10-11-workspace-tabs.md §2.1/§5）：
+//   ① health 多根宣告 roots=2（数量）；② /api/tree?path=&root=1 按根列出；
+//   ③ /api/search 缺省跨根——命中帧带 "root": <idx>（search.rs FrameParser）；
+//   ④ SSE changed 帧多根带 "root" 字段端到端（watch.rs session_loop 逐根发帧）。
+// 根选择：root1 用独立临时目录（与 FIXTURE 不相交）——嵌套根会被 strip_root 的
+// 逐根前缀匹配误归 0 号根（索引序首个命中），双根必须不相交。端口 4384 与既有
+// 4375-4383/4174 错开；套件单 worker 串行执行。
+
+test.describe('SRV-MULTIROOT [workspace 多根]: --root 双值实例 tree?root / search 跨根 / SSE root 帧', () => {
+  test('health roots=2、tree?root=1 按根列出、search 缺省跨根帧带 root、SSE changed 帧带 root', async () => {
+    test.setTimeout(60_000);
+    // 1) 独立 root1：临时目录 + 命中素材（与 FIXTURE 不相交）；root0 用共享 fixture
+    //    的 srv-t/ 命名空间（幂等写，不与既有清单断言冲突——SRV-12/2 只看 srv-t/mixed）
+    const base1 = mkdtempSync(join(os.tmpdir(), 'vv-srv-multiroot-'));
+    const root1 = join(base1, 'root1');
+    mkdirSync(root1, { recursive: true });
+    writeFileSync(join(root1, 'needle-r1.txt'), 'dualroot needle shared\n');
+    writeFileSync(join(FIXTURE, 'srv-t/needle-r0.txt'), 'dualroot needle shared\n');
+
+    await assertPortFree('http://127.0.0.1:4384');
+    const child = spawn(
+      BIN,
+      [
+        'serve', '--root', FIXTURE, '--root', root1, '--web-dist', join(repoRoot, 'apps/web/build'),
+        '--port', '4384'
+      ],
+      { stdio: ['ignore', 'inherit', 'inherit'] }
+    );
+    const multiBase = 'http://127.0.0.1:4384';
+    try {
+      await waitHealthy(multiBase);
+
+      // ① health 多根宣告：roots 为根数量（health.rs，>1 才出现）
+      const health = (await (await fetch(`${multiBase}/api/health`)).json()) as {
+        capabilities: string[];
+        roots?: number;
+      };
+      expect(health.roots).toBe(2);
+
+      // ② tree 按根列出：root=1 只见 root1 条目；缺省 root=0 只见 root0 条目
+      const tree1 = (await (
+        await fetch(`${multiBase}/api/tree?path=&root=1`)
+      ).json()) as { entries: Array<{ name: string; kind: string }> };
+      expect(tree1.entries.map((e) => e.name)).toContain('needle-r1.txt');
+      expect(tree1.entries.map((e) => e.name)).not.toContain('srv-t');
+      const tree0 = (await (
+        await fetch(`${multiBase}/api/tree?path=`)
+      ).json()) as { entries: Array<{ name: string }> };
+      expect(tree0.entries.map((e) => e.name)).toContain('needle-r0.txt');
+      expect(tree0.entries.map((e) => e.name)).not.toContain('needle-r1.txt');
+
+      // ③ search 缺省跨根（path 必须缺省）：命中帧带 root 字段，路径相对各自根
+      const search = await fetch(`${multiBase}/api/search`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ pattern: 'dualroot needle' })
+      });
+      expect(search.status).toBe(200);
+      const lines = (await search.text()).split('\n').filter((l) => l.trim() !== '');
+      const frames = lines
+        .map((l) => JSON.parse(l) as { file?: string; done?: boolean; root?: number })
+        .filter((f) => f.file !== undefined);
+      const byRoot = new Map<number, string>();
+      for (const f of frames) byRoot.set(f.root ?? 0, f.file!);
+      expect(byRoot.get(0)).toBe('needle-r0.txt');
+      expect(byRoot.get(1)).toBe('needle-r1.txt');
+      // 终帧不携带 root（形状不变）
+      const done = lines.map((l) => JSON.parse(l) as { done?: boolean }).find((f) => f.done);
+      expect(done?.done).toBe(true);
+
+      // ④ SSE changed 帧端到端：ticket → events，追加两根文件，帧带各自 root 字段
+      const ticket = (
+        (await (await fetch(`${multiBase}/api/ticket`, { method: 'POST' })).json()) as {
+          ticket: string;
+        }
+      ).ticket;
+      const res = await fetch(`${multiBase}/api/events?ticket=${ticket}`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      expect(res.ok).toBeTruthy();
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let pendingRead: Promise<string | null> | null = null;
+      const readChunk = (timeoutMs: number): Promise<string | null> => {
+        pendingRead ??= reader.read().then(({ value, done: d }) => {
+          pendingRead = null;
+          return d ? null : decoder.decode(value);
+        });
+        pendingRead.catch(() => {});
+        return Promise.race([
+          pendingRead,
+          new Promise<null>((r) => setTimeout(() => r(null), timeoutMs))
+        ]);
+      };
+      const waitFrame = async (marker: string, deadlineMs: number): Promise<string> => {
+        let acc = '';
+        const deadline = Date.now() + deadlineMs;
+        while (Date.now() < deadline) {
+          const chunk = await readChunk(1_000);
+          if (chunk !== null) acc += chunk;
+          if (acc.includes(marker)) return acc;
+        }
+        return acc;
+      };
+
+      // root1 变更 → 帧 root:1 + 相对 root1 的路径
+      appendFileSync(join(root1, 'needle-r1.txt'), `r1 change ${Date.now()}\n`);
+      const acc1 = await waitFrame('"root":1', 10_000);
+      const frame1 = acc1
+        .split('\n')
+        .map((l) => l.replace(/^data:\s*/, ''))
+        .filter((l) => l.includes('"changed"') && l.includes('"root":1'))
+        .map((l) => JSON.parse(l) as { paths: string[] })[0];
+      expect(frame1).toBeDefined();
+      expect(frame1!.paths).toContain('needle-r1.txt');
+
+      // root0 变更 → 帧 root:0（多根下 0 号根也显式携带）
+      appendFileSync(join(FIXTURE, 'srv-t/needle-r0.txt'), `r0 change ${Date.now()}\n`);
+      const acc0 = await waitFrame('"root":0', 10_000);
+      const frame0 = acc0
+        .split('\n')
+        .map((l) => l.replace(/^data:\s*/, ''))
+        .filter((l) => l.includes('"changed"') && l.includes('"root":0'))
+        .map((l) => JSON.parse(l) as { paths: string[] })[0];
+      expect(frame0).toBeDefined();
+      expect(frame0!.paths).toContain('needle-r0.txt');
+      await reader.cancel().catch(() => {});
+    } finally {
+      await stopServer(child, 'srv-t-multiroot');
+      rmSync(base1, { recursive: true, force: true });
+    }
+  });
+});
+
 // ── BUG-68 修复回归锚点（README §3.2.4：本任务即修复 PR，直接落正式断言） ──
 // 来源：2026-10-10 e2e 轮 §2.3 现场最小化（root 含越界 symlink → watcher 降级）。
 // 修复前：watcher 扫描跟随 symlink 深入外部目录，watch 其 0o000 子目录遇 EACCES

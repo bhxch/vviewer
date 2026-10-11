@@ -70,17 +70,24 @@ test('open folder, render code with hljs and image, restore session after reload
   await expect(page.locator('.vv-tab', { hasText: 'hello.js' })).toHaveCount(0);
 
   // 确定性等待 IndexedDB 会话落盘：close 触发的持久化是异步写，轮询 'vviewer' 库
-  // kv store 的 tabs 记录不含 hello.js 后再刷新（固定 sleep 是 flake 向量）
+  // kv store 的快照记录不含 hello.js 后再刷新（固定 sleep 是 flake 向量）。
+  // 旧语义→新语义（workspace T3）：快照键 'tabs'（扁平数组）→ 'workspaces'
+  // （WorkspacesSnapshot {activeId, workspaces:[{tabs:[…]}]}，按组分桶；旧键
+  // 双写已移除、仅存迁移副本不再更新），DB 版本随主题库升 2（v1 open 会
+  // VersionError）。断言语义等价：跨全部组的 tab 均不含 hello.js。
   await page.waitForFunction(
     () =>
       new Promise<boolean>((resolve) => {
-        const open = indexedDB.open('vviewer', 1);
+        const open = indexedDB.open('vviewer', 2);
         open.onsuccess = () => {
           const db = open.result;
           try {
-            const get = db.transaction('kv', 'readonly').objectStore('kv').get('tabs');
+            const get = db.transaction('kv', 'readonly').objectStore('kv').get('workspaces');
             get.onsuccess = () => {
-              const tabs = get.result as { name: string }[] | undefined;
+              const snap = get.result as { workspaces?: { tabs?: { name: string }[] }[] } | undefined;
+              const tabs = Array.isArray(snap?.workspaces)
+                ? snap.workspaces.flatMap((w) => w.tabs ?? [])
+                : undefined;
               resolve(Array.isArray(tabs) && !tabs.some((t) => t.name === 'hello.js'));
               db.close();
             };

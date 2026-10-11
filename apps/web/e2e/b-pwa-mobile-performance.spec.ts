@@ -246,11 +246,15 @@ test('PWA-06：触摸滑动 1:1 驱动虚拟滚动（硬门）；快滑惯性对
     console.log(`[perf] 虚拟滚动代码容器快滑第 ${round} 轮 touchend 后续滚: ${await flingInertia(() => pre)}px`);
   }
 
-  // 对照组①：markdown 原生滚动容器（非虚拟，.vv-viewer-scroll）
+  // 对照组①：markdown 原生滚动容器（非虚拟，.vv-viewer-scroll）。
+  // 注入 label 用新目录 bpwa-md：T3 去重语义下同 storeId（localfiles:bpwa）再注入
+  // 只激活既有目录 tab、不重建 store/树，新文件永远不进树（PWA-06 首轮失败根因：
+  // scroll-ctl.md 树行不存在，点击超时）——换 label 即新 store，openPerfDir 的
+  // bpwa 树保持不动
   const mdBody = Array.from({ length: 800 }, (_, i) => `第 ${i + 1} 段。内容用于撑起滚动高度。`).join('\n\n');
   await page.evaluate((mdBody) => {
     const f = new File([mdBody], 'scroll-ctl.md', { type: 'text/markdown' });
-    Object.defineProperty(f, 'webkitRelativePath', { value: 'bpwa/scroll-ctl.md' });
+    Object.defineProperty(f, 'webkitRelativePath', { value: 'bpwa-md/scroll-ctl.md' });
     return (window as unknown as { __vvOpenDirImpl: (f: File[]) => void }).__vvOpenDirImpl([f]);
   }, mdBody);
   const drawer2 = await openDrawerIfNarrow(page);
@@ -263,7 +267,7 @@ test('PWA-06：触摸滑动 1:1 驱动虚拟滚动（硬门）；快滑惯性对
   await page.evaluate(() => {
     const content = Array.from({ length: 400 }, (_, i) => `const v${i} = ${i}; // line`).join('\n');
     const f = new File([content], 'scroll-ctl.js', { type: 'text/javascript' });
-    Object.defineProperty(f, 'webkitRelativePath', { value: 'bpwa/scroll-ctl.js' });
+    Object.defineProperty(f, 'webkitRelativePath', { value: 'bpwa-js/scroll-ctl.js' });
     return (window as unknown as { __vvOpenDirImpl: (f: File[]) => void }).__vvOpenDirImpl([f]);
   });
   const drawer3 = await openDrawerIfNarrow(page);
