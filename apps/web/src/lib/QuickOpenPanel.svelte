@@ -44,6 +44,7 @@
       .then((list) => {
         if (stale) return;
         files = list;
+        active = 0; // 重扫完成列表已换血：复位选中项，防越界空选（Enter 落空）
         status = '';
       })
       .catch((err) => {
