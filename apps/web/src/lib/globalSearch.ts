@@ -114,8 +114,8 @@ export function attributeRemoteMatches(
  * 远程 ripgrep（T4 多源合并）：同 base 的 remote 源合并为一次请求。请求不带
  * path——多根服务器语义「跨根搜索 path 必须缺省」（带了即 400），单根服务器
  * 缺省即唯一根，与历史单源请求形状一致。endpoint 由 loadLastServer 构造
- * （router.remote.base），故仅 base 与其一致的来源参与远端（base 不匹配的来源
- * 在 auto 下由本地回退覆盖）。
+ * （router.remote.base），故仅 base 与其一致的来源参与远端；base 不匹配的来源
+ * 由调用方（runGlobalSearch 远端路径）本地补扫覆盖，不经本函数。
  * 跨根归属（T5 移交兑现）：命中帧 root 字段由 grepRemote 透传，经
  * attributeRemoteMatches 按 members 的 rootIndex/basePath 归属到正确来源并换算
  * 路径；无法消歧的命中保守保持 members[0] 摊派（见该函数 doc）。
@@ -148,10 +148,50 @@ async function remoteGrep(
 }
 
 /**
+ * 逐源本地扫描（本地路径主扫与远端路径非 members 补扫共用）：串行 grepStoreLocal
+ * 合并命中，进度跨源累加（onProgress 报「累计已扫文件数」），任一源触达上限即置位
+ * truncated。canceled() 为真时尽快返回已扫部分（结果作废由调用方代际防护裁决）。
+ */
+async function grepSourcesLocal(
+  sources: ReadonlyArray<SearchSource>,
+  query: string,
+  opts: GlobalSearchOptions,
+  onProgress: ((filesDone: number) => void) | undefined,
+  canceled: () => boolean
+): Promise<{ matches: GrepMatch[]; truncated: boolean }> {
+  const matches: GrepMatch[] = [];
+  let truncated = false;
+  let done = 0; // 已完成源的累计文件数（进度跨源累加的基线）
+  for (const s of sources) {
+    if (canceled()) return { matches, truncated };
+    let seen = 0;
+    const r = await grepStoreLocal(
+      s.store,
+      query,
+      { caseSensitive: opts.caseSensitive, regex: opts.regex, canceled },
+      onProgress === undefined
+        ? undefined
+        : (n) => {
+            seen = Math.max(seen, n);
+            onProgress(done + n);
+          }
+    );
+    matches.push(...r.matches);
+    truncated = truncated || r.truncated;
+    done += seen;
+  }
+  return { matches, truncated };
+}
+
+/**
  * 执行一次全局搜索（T4 多源）。canceled() 为真时本地 grep 尽快自弃；signal 取消
  * 远程 fetch/流读。返回执行位置与 truncated；auto 策略回退时 degraded = true。
  * 抛错仅发生在显式 remote 策略的远程失败（router 语义），调用方展示消息。
  * 本地路径：逐源 grepStoreLocal 串行合并，进度跨源累加、截断任一源触达即置位。
+ * 远端路径（T7 混合来源修复）：远端请求只覆盖 base 与 last-server 一致的 members
+ * 源，其余来源（不同 base 的 remote 源 + 全部本地源）在远端路径内本地补扫合并——
+ * 服务器一次请求触达不到它们，混合 workspace 不再静默漏搜本地源（本地源不依赖
+ * 服务器、不受 auto 回退影响）。
  */
 export async function runGlobalSearch(
   sources: ReadonlyArray<SearchSource>,
@@ -171,32 +211,36 @@ export async function runGlobalSearch(
     src,
     query,
     async () => {
-      const matches: GrepMatch[] = [];
-      let localTruncated = false;
-      let done = 0; // 已完成源的累计文件数（进度跨源累加的基线）
-      for (const s of sources) {
-        if (canceled()) return matches;
-        let seen = 0;
-        const r = await grepStoreLocal(
-          s.store,
-          query,
-          { caseSensitive: opts.caseSensitive, regex: opts.regex, canceled },
-          onProgress === undefined
-            ? undefined
-            : (n) => {
-                seen = Math.max(seen, n);
-                onProgress(done + n);
-              }
-        );
-        matches.push(...r.matches);
-        localTruncated = localTruncated || r.truncated;
-        done += seen;
-      }
-      truncated = localTruncated;
-      return matches;
+      const r = await grepSourcesLocal(sources, query, opts, onProgress, canceled);
+      truncated = r.truncated;
+      return r.matches;
     },
     remote
-      ? () => remoteGrep(remoteSources, query, opts, (t) => (truncated = t), signal)
+      ? async () => {
+          // 非 members 源 = base 与 last-server 不一致的 remote 源 + 全部本地源
+          //（local store 无 base，getRemoteBase 返回 undefined 必不等）。远端失败
+          // 即抛（router 语义不变：auto 回退本地全量扫描 / remote 策略如实报错），
+          // 故补扫在远端请求成功后进行。
+          const last = loadLastServer();
+          const nonMembers =
+            last === null
+              ? []
+              : sources.filter(
+                  (s) => !isRemoteStore(s.store) || getRemoteBase(s.store.id) !== last.baseUrl
+                );
+          const remoteMatches = await remoteGrep(
+            remoteSources,
+            query,
+            opts,
+            (t) => (truncated = t),
+            signal
+          );
+          // 进度合计口径（最简）：远端 NDJSON 无逐文件进度事件、计 0，进度只累计
+          // 本地补扫的文件数（自 0 起）；auto 回退时本地路径重新全量汇报
+          const local = await grepSourcesLocal(nonMembers, query, opts, onProgress, canceled);
+          truncated = truncated || local.truncated; // 任一路径截断即置位
+          return [...remoteMatches, ...local.matches];
+        }
       : undefined
   );
   if (!res.ok) throw new Error(res.error ?? '搜索失败');

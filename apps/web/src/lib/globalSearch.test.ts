@@ -1,16 +1,36 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // globalSearch.test.ts — BUG-11/CMP-11：截断引导文案的裁决纯函数 + T4 多源本地
-// grep 合并。globalSearch.ts 经 openFlow.svelte.ts 间接依赖 svelte runes（$state），
-// vitest 无 svelte 插件无法编译该模块——以 vi.mock 隔离（远程 ripgrep 主链路由
-// e2e CMP-08~11 覆盖，本测试只验证本地路径与裁决纯函数）。
+// grep 合并 + T7 混合来源远端路径合并。globalSearch.ts 经 openFlow.svelte.ts 间接
+// 依赖 svelte runes（$state），vitest 无 svelte 插件无法编译该模块——以 vi.mock
+// 隔离 openFlow；远端链路另经 @vviewer/core 部分覆写注入（getRemoteBase 映射 base、
+// grepRemote 返回注入帧），不发真实网络（真实 ripgrep 链路由 e2e CMP-08~11 覆盖）。
+
+/** loadLastServer 注入值（默认 null = 未连接；远端路径用例覆写）。 */
+const mockLastServer: { value: { baseUrl: string; token: string | null } | null } = { value: null };
 
 vi.mock('./openFlow.svelte', () => ({
-  loadLastServer: () => null,
+  loadLastServer: () => mockLastServer.value,
   loadCapabilities: () => []
 }));
 
-import type { TreeStore, TreeNode } from '@vviewer/core';
+/** storeId → 服务端 base 注入表（真实表在 core 模块内部，测试用例登记）。 */
+const mockRemoteBases: Record<string, string> = {};
+/** grepRemote 注入返回值（成员远端请求的模拟帧）。 */
+const mockGrepRemote: { value: { matches: GrepMatch[]; truncated: boolean } } = {
+  value: { matches: [], truncated: false }
+};
+
+vi.mock('@vviewer/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@vviewer/core')>();
+  return {
+    ...actual,
+    getRemoteBase: (storeId: string) => mockRemoteBases[storeId],
+    grepRemote: () => Promise.resolve(mockGrepRemote.value)
+  };
+});
+
+import type { GrepMatch, TreeStore, TreeNode } from '@vviewer/core';
 import {
   attributeRemoteMatches,
   isRemoteStore,
@@ -59,8 +79,9 @@ describe('serverSearchHint（BUG-11 截断引导裁决；T4 起作用于来源�
 
 // ---------- T4 多源本地 grep 合并 ----------
 
-/** 带文件内容的 fake store：grepStoreLocal 走 listChildren 逐层 + read 扫描。 */
-function storeWithFiles(id: string, files: Record<string, string>): TreeStore {
+/** 带文件内容的 fake store：grepStoreLocal 走 listChildren 逐层 + read 扫描。
+ * withWatch = 伪装 remote store（isRemoteStore 以 watch 有无裁决，T7 多 base 用例用）。 */
+function storeWithFiles(id: string, files: Record<string, string>, withWatch = false): TreeStore {
   const nodes = new Map<string, TreeNode>();
   const dirs = new Set<string>(['']);
   for (const [path, content] of Object.entries(files)) {
@@ -85,8 +106,9 @@ function storeWithFiles(id: string, files: Record<string, string>): TreeStore {
       const content = files[path];
       if (content === undefined) throw new Error(`路径不存在: ${path}`);
       return new TextEncoder().encode(content);
-    }
-  };
+    },
+    ...(withWatch ? { watch: () => () => {} } : {})
+  } as TreeStore;
 }
 
 describe('runGlobalSearch 多源本地合并（T4：grepStoreLocal 逐源扫描合并）', () => {
@@ -144,6 +166,93 @@ describe('runGlobalSearch 多源本地合并（T4：grepStoreLocal 逐源扫描�
     );
     expect(res.matches).toEqual([]);
     expect(res.where).toBe('local');
+  });
+});
+
+// ---------- T7 混合来源远端路径合并（远端不漏非 members 源） ----------
+
+describe('runGlobalSearch 混合来源远端路径（T7 修复：非 members 源本地补扫参与）', () => {
+  beforeEach(() => {
+    mockLastServer.value = null;
+    for (const k of Object.keys(mockRemoteBases)) delete mockRemoteBases[k];
+    mockGrepRemote.value = { matches: [], truncated: false };
+  });
+
+  it('1 remote + 1 local：远端命中与本地命中都出现（不再漏搜本地源）', async () => {
+    mockLastServer.value = { baseUrl: 'http://srv:8321', token: null };
+    mockRemoteBases['remote:srv'] = 'http://srv:8321';
+    mockGrepRemote.value = {
+      matches: [{ storeId: 'remote:srv', path: 'srv.txt', line: 1, col: 1, preview: 'remote hit' }],
+      truncated: false
+    };
+    const res = await runGlobalSearch(
+      [
+        { label: 'srv', store: makeStore('remote:srv', true) },
+        { label: 'loc', store: storeWithFiles('localfs:x', { 'a.txt': 'local hit' }) }
+      ],
+      'hit',
+      { caseSensitive: false, regex: false },
+      undefined,
+      () => false,
+      new AbortController().signal
+    );
+    expect(res.where).toBe('remote');
+    expect(res.degraded).toBe(false);
+    expect(res.truncated).toBe(false);
+    // 远端部分在前、本地补扫在后；各自带所属 storeId（面板按 storeId 归组打开）
+    expect(res.matches.map((m) => ({ storeId: m.storeId, path: m.path }))).toEqual([
+      { storeId: 'remote:srv', path: 'srv.txt' },
+      { storeId: 'localfs:x', path: 'a.txt' }
+    ]);
+  });
+
+  it('多 remote base：非 last-server 的 remote 源走本地补扫路径参与', async () => {
+    mockLastServer.value = { baseUrl: 'http://a:8321', token: null };
+    mockRemoteBases['remote:a'] = 'http://a:8321';
+    mockRemoteBases['remote:b'] = 'http://b:8321'; // 另一台服务器，远端请求覆盖不到
+    mockGrepRemote.value = {
+      matches: [{ storeId: 'remote:a', path: 'a.txt', line: 2, col: 1, preview: 'alpha hit' }],
+      truncated: false
+    };
+    // remote:b 是 remote store（带 watch）但 base 不匹配 last-server：grepStoreLocal 扫其文件
+    const res = await runGlobalSearch(
+      [
+        { label: 'a', store: makeStore('remote:a', true) },
+        { label: 'b', store: storeWithFiles('remote:b', { 'b.txt': 'bravo hit' }, true) }
+      ],
+      'hit',
+      { caseSensitive: false, regex: false },
+      undefined,
+      () => false,
+      new AbortController().signal
+    );
+    expect(res.where).toBe('remote');
+    expect(res.matches.map((m) => ({ storeId: m.storeId, path: m.path }))).toEqual([
+      { storeId: 'remote:a', path: 'a.txt' },
+      { storeId: 'remote:b', path: 'b.txt' }
+    ]);
+  });
+
+  it('truncated 语义：任一路径截断即置位（远端截断 + 本地未截断 → true）', async () => {
+    mockLastServer.value = { baseUrl: 'http://srv:8321', token: null };
+    mockRemoteBases['remote:srv'] = 'http://srv:8321';
+    mockGrepRemote.value = {
+      matches: [{ storeId: 'remote:srv', path: 's.txt', line: 1, col: 1, preview: 'x hit' }],
+      truncated: true
+    };
+    const res = await runGlobalSearch(
+      [
+        { label: 'srv', store: makeStore('remote:srv', true) },
+        { label: 'loc', store: storeWithFiles('localfs:x', { 'a.txt': 'local hit' }) }
+      ],
+      'hit',
+      { caseSensitive: false, regex: false },
+      undefined,
+      () => false,
+      new AbortController().signal
+    );
+    expect(res.where).toBe('remote');
+    expect(res.truncated).toBe(true);
   });
 });
 

@@ -79,8 +79,10 @@
   /**
    * 左栏文件树的来源列表（多根 T4）：当前 workspace 的每个来源解析出活动 store
    * 实例；无实例（localfiles 恢复不可达 / remote 重连失败 / 已被移除）的来源不渲染。
-   * 读 tabStore.list 建立响应式依赖——activeStores 注册表是普通 Map 不可追踪，其
-   * 增删只发生在 tab add/close 的同一同步调用内，list 变化是其变化的超集信号。
+   * activeStores 注册表是普通 Map 不可追踪，实例增删的响应式依赖经读
+   * registryVersion.n 建立（openFlow doc——「list 变化是注册表变化的超集信号」的
+   * 旧假设在 restore 重连下不成立）；读 tabStore.list 只服务于「来源是否有 tab」
+   * 过滤本身，不是注册表变化的信号。
    */
   const sources = $derived.by(() => {
     const ws = activeWorkspace;
