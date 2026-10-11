@@ -13,6 +13,33 @@ export const HEX_LINE_HEIGHT = 18;
 /** 结构树解析取头部字节数 */
 const STRUCT_HEAD_BYTES = 8192;
 
+/**
+ * 跳转输入解析（spec §2.1 语法消歧义）：`0x` 前缀按十六进制，其余按十进制；
+ * 非法/负数/空 → null（空输入不动作）。独立纯函数便于单测。
+ */
+export function parseGotoInput(input: string): number | null {
+  const s = input.trim();
+  if (s === '') return null;
+  const hex = /^0x([0-9a-f]+)$/i.exec(s);
+  if (hex) return parseInt(hex[1]!, 16);
+  if (/^\d+$/.test(s)) return parseInt(s, 10);
+  return null;
+}
+
+// .vv-hex-goto-flash 衰减样式（注入一次，模块级去重）：加类即着色（transition 0s），
+// 移除类后经 .vv-hex-row 基态过渡 1s 渐隐。不依赖 app.css 到位（同 dump 字号锁定
+// 思路）；Task 3 cursor 字节级高亮落地后由其统一收编。
+let gotoFlashStyleInjected = false;
+function ensureGotoFlashStyle(): void {
+  if (gotoFlashStyleInjected) return;
+  gotoFlashStyleInjected = true;
+  const style = document.createElement('style');
+  style.textContent =
+    '.vv-hex-row{transition:background-color 1s ease-out}' +
+    '.vv-hex-goto-flash{background-color:rgba(255,176,0,.4);transition:background-color 0s}';
+  document.head.append(style);
+}
+
 function formatSize(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -69,7 +96,26 @@ export function renderHex(
     'flex:1 1 auto; min-height:0; overflow:auto;' +
     'font-family:var(--vv-code-font, monospace); font-size:12px; line-height:1.5; white-space:pre;';
   body.append(dump);
-  root.append(status, body);
+  // ---- 工具条（spec §2.1）：dump 的兄弟节点而非子节点——virtualScroller 会
+  // replaceChildren 滚动容器，放里面会被清掉且 spacer 定位被顶偏（code.ts 提示条
+  // 先例）。Task 1 只渲染跳转框（搜索框 Task 2 再增补，占位 disabled 会误导）；
+  // 状态位先行就位（超界提示 / Task 2 命中计数复用）。样式行内锁定（同 dump 思路，
+  // 不依赖 app.css 到位）；位于滚动区上方、flex:none，即 sticky 语义。
+  const toolbar = document.createElement('div');
+  toolbar.className = 'vv-hex-toolbar';
+  toolbar.style.cssText =
+    'flex:none; display:flex; align-items:center; gap:8px; padding:4px 10px;' +
+    'border-bottom:1px solid var(--ui-border, rgba(128,128,128,.35));';
+  const gotoInput = document.createElement('input');
+  gotoInput.className = 'vv-hex-goto';
+  gotoInput.placeholder = '跳转 (0x10 或 16)';
+  gotoInput.setAttribute('aria-label', '跳转到偏移');
+  gotoInput.style.cssText = 'flex:0 1 auto; width:12em; min-width:0;';
+  const toolbarStatus = document.createElement('span');
+  toolbarStatus.className = 'vv-hex-toolbar-status';
+  toolbarStatus.style.cssText = 'font-size:12px; color:var(--ui-fg-muted, inherit);';
+  toolbar.append(gotoInput, toolbarStatus);
+  root.append(status, toolbar, body);
   target.replaceChildren(root);
 
   // ---- 虚拟滚动 dump：总行数 = ceil(大小/16)，可视行即时格式化 ----
@@ -93,6 +139,43 @@ export function renderHex(
       viewport.replaceChildren(frag);
     }
   );
+
+  // ---- 跳转（spec §2.1）：解析 → 超界 clamp → 经既有虚拟滚动定位 → 瞬时高亮 ----
+  const GOTO_FLASH_MS = 1000;
+  let flashTimer: ReturnType<typeof setTimeout> | null = null;
+  function flashTargetRow(row: number): void {
+    // 行级近似：按行首偏移列（8 位小写 hex，与 renderHexBytes 一致）匹配目标行，
+    // 加临时类 1s 后移除。Task 3 的 cursor span 切分机制落地后升级为字节级高亮，
+    // 此处随之收编。
+    const want = (row * HEX_ROW_BYTES).toString(16).padStart(8, '0');
+    for (const el of dump.querySelectorAll<HTMLElement>('.vv-hex-row')) {
+      if (!(el.textContent ?? '').startsWith(want)) continue;
+      el.classList.add('vv-hex-goto-flash');
+      if (flashTimer !== null) clearTimeout(flashTimer);
+      flashTimer = setTimeout(() => {
+        el.classList.remove('vv-hex-goto-flash');
+        flashTimer = null;
+      }, GOTO_FLASH_MS);
+      break;
+    }
+  }
+  function gotoOffset(): void {
+    const parsed = parseGotoInput(gotoInput.value);
+    if (parsed === null || buffer.length === 0) return; // 空输入不动作（spec §2.1）
+    const clamped = Math.min(parsed, buffer.length - 1); // 超界 clamp 到最后一个字节
+    toolbarStatus.textContent = clamped < parsed ? '已跳至文件尾' : '';
+    const row = Math.floor(clamped / HEX_ROW_BYTES);
+    // scroller 无居中 API：目标行滚至视口中部（jsdom 等无布局环境 clientHeight=0
+    // 退化为行顶对齐）。scrollTop 赋值即时生效，浏览器 scroll 事件随后到达时可视
+    // 区间未变为 no-op；refresh(true) 保证目标行在下面的高亮查询前已同步渲染。
+    dump.scrollTop = Math.max(0, row * HEX_LINE_HEIGHT - dump.clientHeight / 2);
+    scroller.refresh(true);
+    ensureGotoFlashStyle();
+    flashTargetRow(row);
+  }
+  gotoInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') gotoOffset();
+  });
 
   // ---- 结构树（Worker 化，失败降级主线程）----
   let worker: Worker | null = null;
@@ -149,6 +232,7 @@ export function renderHex(
 
   return {
     destroy() {
+      if (flashTimer !== null) clearTimeout(flashTimer);
       scroller.destroy();
       worker?.terminate();
       root.remove();
