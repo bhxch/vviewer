@@ -18,6 +18,30 @@ pnpm build:all        # = pnpm build（前端 → apps/web/build）+ cargo build
 发布物只需两个东西：`server/target/release/vviewer`（单二进制）和前端静态目录
 `apps/web/build/`（`--web-dist` 指定）。
 
+## 多数据根（--root 多值）
+
+一个实例可同时暴露多个目录，`--root` 重复传参即可：
+
+```bash
+./server/target/release/vviewer serve \
+  --root /srv/docs --root /srv/code --web-dist apps/web/build
+```
+
+多根语义（单根部署完全不受影响，API 形状与历史逐字节一致）：
+
+- **目录树/文件**：`/api/tree`、`/api/file` 接受可选 `root=<n>` 参数（0 起），
+  缺省 = 0 号根；前端在 workspace 里添加「后端路径」来源时可选择根与根内子目录。
+- **跨根搜索**：`/api/search` 不带 `root`（且不带 `path`）时**缺省跨全部根**搜索，
+  命中帧携带命中根索引 `"root": <idx>`，文件路径相对各自根；`root=<n>` 限定单根时
+  帧不带 root 字段（此时才允许携带 `path`）。
+- **SSE 变更推送**：多根部署的 `changed` 帧按根分组下发，每帧带 `"root": <idx>`；
+  单根帧形状不变。
+- **health 宣告**：多根部署 `GET /api/health` 附 `roots: <根数量>`（仅数量，不暴露
+  根路径）；单根省略该字段。
+
+根之间应是相互独立的目录：嵌套根（根 B 在根 A 内）的路径归属按索引序取首个命中
+前缀，B 内路径会被归到 A——请避免嵌套。
+
 跨文件搜索依赖 ripgrep（rg）——**可选**：缺失时自动降级系统 grep（功能差异：无大文件跳过、结果顺序不保证、正则为 ERE 方言、无列定位）；两者皆缺时搜索退回浏览器内执行。`GET /api/health` 经 `searchEngine` 字段宣告实际引擎。
 
 ## 局域网使用
