@@ -23,6 +23,8 @@
     loadLastServer,
     registryVersion,
     registerStore,
+    reopenClosed,
+    showStatusNotice,
     storeById,
     storeRevisions,
     workspacesView,
@@ -349,7 +351,8 @@
   }
 
   // 全局键位（BUG-03，场景 SHELL-11）：Ctrl+Shift+F 全局搜索（既有）、Ctrl+P
-  // 快速打开、Alt+W tab 管理面板（T6）、j/k 逐行滚、gg 顶、G 底。统一走 inField
+  // 快速打开、Alt+W tab 管理面板（T6）、Alt+Shift+T 撤销关闭 tab（F 项 T3）、
+  // j/k 逐行滚、gg 顶、G 底。统一走 inField
   // 判定（非输入焦点才接管——与 M3 '/' 的惯例同源），组合键均 preventDefault。
   // 行高 20px 与 render-text code.ts 的 LINE_HEIGHT 同源（计划包 5 依赖说明：
   // 不 import 包 2 文件，常量复制需注释同源）。
@@ -392,6 +395,15 @@
       if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.code === 'KeyW') {
         e.preventDefault();
         wsPanelOpen = !wsPanelOpen;
+        return;
+      }
+      // Alt+Shift+T 撤销关闭 tab（F 项 T3）：出栈重建最近关闭的一个（LIFO 单个——
+      // 批量关闭是逐个入栈，多次按键逐个恢复）。e.code 判定同 Alt+W（macOS Option
+      // 修饰的 key 变体口径一致）；浏览器无默认占用。栈空以状态栏一次性提示反馈
+      // （BUG-19「已取消选择文件夹」同通道），不静默——空按必须有可感知结果。
+      if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyT') {
+        e.preventDefault();
+        if (reopenClosed() === null) showStatusNotice('没有可重新打开的标签页');
         return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;

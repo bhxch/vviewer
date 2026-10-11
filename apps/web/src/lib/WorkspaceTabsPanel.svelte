@@ -237,6 +237,11 @@
                 }
               }}
             >
+              {#if tab.pinned === true}
+                <!-- F 项 T3：pinned 徽标（spec 附件裁决最简形态：仅显示、无右键入口；
+                     锁形字符与 TabBar .vv-tab-pinned 的 ::before 同源，样式零新增） -->
+                <span class="vv-wspanel-pin" title="已固定">🔒</span>
+              {/if}
               <span class="vv-wspanel-name">{tab.source.name}</span>
               {#if badge !== null}
                 <span class="vv-wspanel-badge" title={badge}>{badge}</span>
