@@ -4,6 +4,7 @@
  * （仅 type 引 TabSnapshot），由 tabActions.test.ts 直测；openFlow.svelte.ts 的
  * TabCollection 方法消费这些函数再落 $state。
  */
+import type { TreeStore } from '@vviewer/core';
 import type { TabSnapshot } from './stores/session';
 
 // ---------- pinned 区拆分与重排 ----------
@@ -71,8 +72,15 @@ export function regroupPinned(
 /** 撤销栈容量：超出淘汰最旧（栈底）。 */
 export const CLOSED_STACK_MAX = 10;
 
-/** 撤销栈元素：关闭瞬间的会话快照 + 所属工作区（reopenClosed 的重建依据）。 */
-export type ClosedTabEntry = TabSnapshot & { workspaceId: string };
+/**
+ * 撤销栈元素：关闭瞬间的会话快照 + 所属工作区（reopenClosed 的重建依据）。
+ * store（I-1）：close 时捕获的非 worker 型存活实例（storeRetained 判据，见
+ * storeRelease.ts）——close() 会把 storeId 从注册表摘除，storeById 必为 null，
+ * 「关闭某 store 唯一 tab → 撤销」这一最高频路径靠它拿回内容（worker 型已被
+ * releaseStoreIfLast 终结，不捕获，撤销仍走占位/重连）。容量 10 内存有界，
+ * 仅存引用不复制。
+ */
+export type ClosedTabEntry = TabSnapshot & { workspaceId: string; store?: TreeStore };
 
 /**
  * 撤销关闭栈：LIFO + 容量淘汰（超 max 弹掉栈底最旧）。

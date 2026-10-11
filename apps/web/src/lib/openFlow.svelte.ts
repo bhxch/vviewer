@@ -21,7 +21,7 @@ import {
 import type { WorkspacesSnapshot, Workspace, WorkspaceSource } from './workspaceStore';
 import { sourceKindOf, workspaceStore } from './workspaceStore';
 import { loadSettings } from './stores/settings';
-import { releaseStoreIfLast } from './storeRelease';
+import { releaseStoreIfLast, storeRetained } from './storeRelease';
 import { saveSearchEngine } from './searchEngineCache';
 import {
   CLOSED_STACK_MAX,
@@ -139,15 +139,27 @@ class TabCollection {
     return this.list[this.list.length - 1]!;
   }
 
-  close(id: string): void {
+  close(id: string, opts: { undoable?: boolean } = {}): void {
     const i = this.list.findIndex((t) => t.id === id);
     if (i >= 0) {
       const closed = this.list[i]!;
       const wasActive = closed.active;
-      // F 项撤销栈：所有 close 路径（单关/批量 closeOthers·closeRight/面板）统一入栈——
-      // 元素为关闭瞬间的会话快照 + 所属 workspace，reopenClosed 出栈重建；
-      // 批量关闭经本方法的循环逐个入栈，与单关语义一致
-      pushClosed({ ...snapshot(closed), workspaceId: closed.workspaceId });
+      // F 项撤销栈：所有用户关闭路径（单关/批量 closeOthers·closeRight/面板）统一入栈——
+      // 元素为关闭瞬间的会话快照 + 所属 workspace + 存活实例捕获，reopenClosed 出栈重建；
+      // 批量关闭经本方法的循环逐个入栈，与单关语义一致。
+      // 系统替换动作豁免（fix round 1 Concern 1）：connectServer 同 base 重连的清扫
+      // 非用户关闭——入栈会淹没容量 10 的栈，且撤销会复活用户未关的 tab 制造重复
+      // （评审 fix round 1 Concern 1：系统替换动作豁免）
+      if (opts.undoable !== false) {
+        pushClosed({
+          ...snapshot(closed),
+          workspaceId: closed.workspaceId,
+          // I-1：捕获非 worker 型存活实例——本方法稍后会把 storeId 从注册表摘除
+          //（storeById 必 null），撤销重建靠此引用拿回内容；worker 型（实现 close）
+          // 已被/将被 releaseStoreIfLast 终结，跳过，撤销走占位/重连路径
+          ...(storeRetained(closed.source.store) ? { store: closed.source.store } : {})
+        });
+      }
       this.list.splice(i, 1);
       if (wasActive) {
         // 关闭活动 tab 时激活相邻 tab，避免出现无活动 tab 的空窗；
@@ -301,6 +313,9 @@ class TabCollection {
   duplicate(tabId: string): Tab | null {
     const src = this.list.find((t) => t.id === tabId);
     if (!src || src.unrestorable) return null;
+    // M-1 防御（fix round 1）：副本经 add 落「当前活动组」，原 tab 在非活动组时
+    // 副本会错组（无法落原 tab 右侧）——拒绝不动作（调用方后续经切组重试）
+    if (src.workspaceId !== workspaceStore.activeId) return null;
     const tab = this.add(src.source.store, src.source.path, src.source.name);
     if (src.pinned) tab.pinned = true;
     if (src.overrideRenderer !== undefined) tab.overrideRenderer = src.overrideRenderer;
@@ -328,9 +343,11 @@ class TabCollection {
 
   /**
    * 撤销关闭（F 项，撤销栈消费端）：出栈重建——目标 workspace 仍在 → 落回原组尾；
-   * 已删除 → 当前活动组。store 实例存活（storeById）直接复用重建；不存活落占位
-   * （与 AppShell.restore 的 addPlaceholderTab 同语义：read 即抛错 + unrestorable）。
-   * 栈空返回 null。快照携带的 pinned 落回后归位 pinned 区尾（保区不变式）。
+   * 已删除 → 当前活动组。store 实例优先复用（I-1）：注册表命中或撤销栈捕获的存活
+   * 实例（close 摘注册表项后的「关唯一 tab → 撤销」高频路径靠后者拿回内容；worker
+   * 型已被终结不在捕获之列）→ 不存活落占位（与 AppShell.restore 的 addPlaceholderTab
+   * 同语义：read 即抛错 + unrestorable）。栈空返回 null。快照携带的 pinned 落回后
+   * 归位 pinned 区尾（保区不变式）。
    */
   reopenClosed(): Tab | null {
     const snap = closedStack.pop();
@@ -339,11 +356,20 @@ class TabCollection {
       ? snap.workspaceId
       : workspaceStore.activeId;
     workspaceStore.setActive(targetWs); // add 按 activeId 归组：先拨组再入列（落回原组尾）
-    const alive = storeById(originStoreIdOf(snap));
+    const originId = originStoreIdOf(snap);
+    // I-1：注册表摘除后靠撤销栈捕获的存活实例拿回内容；捕获到占位实例（撤销的是
+    // 占位 tab）不复用——占位须重经 addPlaceholder 置 unrestorable（直接复用会丢置位）
+    const captured = snap.store?.id.startsWith('placeholder:') ? null : (snap.store ?? null);
+    const alive = storeById(originId) ?? captured;
     if (alive !== null) {
       // 来源幂等补挂（removeSource 连带关闭 / 原组被删后落活动组等来源缺口场景）：
-      // addSource 按 storeId 去重，已登记为 no-op
-      workspaceStore.addSource(targetWs, sourceOf(alive));
+      // addSource 按 storeId 去重，已登记为 no-op。形状优先抄其他组同 storeId 的
+      // 既有来源（M-3：多根 rootIndex/basePath 的 FNV 指纹不可反解，sourceOf 只能
+      // 派生根 0 形态——快照 sources[] 是唯一可信出处）
+      const known = workspaceStore.list
+        .flatMap((w) => w.sources)
+        .find((s) => s.storeId === originId);
+      workspaceStore.addSource(targetWs, known ?? sourceOf(alive));
     }
     const tab = alive !== null ? this.add(alive, snap.path, snap.name) : this.addPlaceholder(snap);
     tab.scrollTop = snap.scrollTop;
@@ -812,9 +838,11 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
   }
 
   // 同 base 重连：先关闭同 base 的旧 remote tab（目录 + 文件）。旧 store 无 tab
-  // 持有后经引用计数接线 close()（停 SSE + 清资源表），避免新旧两条事件流并行
+  // 持有后经引用计数接线 close()（停 SSE + 清资源表），避免新旧两条事件流并行。
+  // undoable:false（fix round 1 Concern 1）：系统替换动作非用户关闭——入栈会淹没
+  // 容量 10 的撤销栈，且撤销会复活用户未关的 tab 制造重复 tab
   for (const t of [...tabStore.list]) {
-    if (getRemoteBase(t.source.storeId) === base) tabStore.close(t.id);
+    if (getRemoteBase(t.source.storeId) === base) tabStore.close(t.id, { undoable: false });
   }
 
   const store = createRemoteStore(base, tok, serverLabel(base));

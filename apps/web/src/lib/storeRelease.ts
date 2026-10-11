@@ -16,3 +16,15 @@ export function releaseStoreIfLast(
   if (tabs.some((t) => t.source.store === store)) return;
   store.close();
 }
+
+/**
+ * 撤销栈实例捕获判据（F 项 fix round 1，I-1）：worker 型 store（实现 close()）在
+ * 最后一个持有 tab 关闭时被 releaseStoreIfLast 终结（worker/wasm 堆已释放）——缓存
+ * 其实例会让撤销重建拿到僵尸 store。仅无 close 的实例（close 不终结，对象恒存活：
+ * zip/localfiles/remote/url/single）可被 ClosedTabEntry.store 捕获，撤销重建时
+ * storeById 摘除注册表项后仍能复用拿回内容。与 releaseStoreIfLast 的终结判据
+ * （typeof close === 'function'）互为反面的同一出处，改一处须对另一处。
+ */
+export function storeRetained(store: TreeStore): boolean {
+  return typeof store.close !== 'function';
+}
