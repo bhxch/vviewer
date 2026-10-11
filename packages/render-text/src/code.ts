@@ -442,6 +442,15 @@ export interface CodeHighlightClient {
 
 let attachedClient: CodeHighlightClient | null = null;
 
+/** 注入相位：pending=尚未 attach（attach 竞态窗口，等待者挂起）；attached=client
+ * 在位；failed=attachHighlightClient(null) 显式解绑（创建失败终态）——即刻放行
+ * 等待者走 hljs 兜底，不占超时（区分「还没好」与「不会有」两种 null）。 */
+type AttachPhase =
+  | { phase: 'pending' }
+  | { phase: 'attached' }
+  | { phase: 'failed' };
+let attachPhase: AttachPhase = { phase: 'pending' };
+
 /** 等待注入的渲染实例（start() 时 client 尚未就绪的挂起点，attach/超时即放行） */
 interface AttachWaiter {
   resolve: (client: CodeHighlightClient | null) => void;
@@ -450,10 +459,12 @@ interface AttachWaiter {
 let attachWaiters: AttachWaiter[] = [];
 
 /**
- * 应用侧注入 HighlightClient 单例（apps/web 启动时调用；传 null 解绑并放行等待者）
+ * 应用侧注入 HighlightClient 单例（apps/web 启动时调用；传 null 为创建失败解绑
+ * 终态——放行全部等待者，后续 waitForAttachedClient 即刻返回 null 不再等待）
  */
 export function attachHighlightClient(client: CodeHighlightClient | null): void {
   attachedClient = client;
+  attachPhase = client === null ? { phase: 'failed' } : { phase: 'attached' };
   const waiters = attachWaiters;
   attachWaiters = [];
   for (const w of waiters) w.resolve(client);
@@ -463,13 +474,15 @@ export function attachHighlightClient(client: CodeHighlightClient | null): void 
  * 等待高亮客户端注入（P2 CDN 层引入的 attach 竞态修复）：client 由 apps/web
  * 启动预热创建，但 create() 需先走 grammar 资产三层解析链——CDN 层注入后含一次
  * 真实网络 fetch（CI 假域名快速失败，本地/代理环境可耗秒级），「启动预热早于
- * 首个 code tab」不再保证。此前 start() 同步读 attachedClient，未就绪即整文件
- * 落 hljs 兜底且永不恢复（首开文件引擎错锁，m6 远程高亮 spec 实测竞态）。
- * 现未就绪时挂起等待注入（或超时/失败放行 null → 既有 hljs 兜底路径）；超时
- * 上限兜底创建期永久挂起（如 CDN fetch 无响应）不让渲染无限等。
+ * 首个 code tab」不再保证。此前 start()/懒 chunk 泵/markdown 围栏同步读
+ * attachedClient，未就绪即落 hljs 兜底且永不恢复（首开文件/围栏引擎错锁——
+ * m6 远程高亮与 >2MB 懒高亮家族在 CDN 构建下实测竞态）。现 pending 相位挂起
+ * 等待注入（或超时/failed 放行 null → 既有 hljs 兜底路径）；超时上限兜底创建期
+ * 永久挂起（如 CDN fetch 无响应）不让渲染无限等。
  */
 export function waitForAttachedClient(timeoutMs = 10_000): Promise<CodeHighlightClient | null> {
   if (attachedClient !== null) return Promise.resolve(attachedClient);
+  if (attachPhase.phase === 'failed') return Promise.resolve(null); // 解绑终态：不会有 client
   return new Promise((resolve) => {
     const waiter: AttachWaiter = {
       resolve: (client) => {
@@ -488,6 +501,14 @@ export function waitForAttachedClient(timeoutMs = 10_000): Promise<CodeHighlight
 /** 读取已注入的高亮客户端单例（markdownRenderer 的围栏高亮复用同一注入，无需二次接线） */
 export function getHighlightClient(): CodeHighlightClient | null {
   return attachedClient;
+}
+
+/** 测试专用：重置注入相位为 pending（模拟「client 尚未创建」的启动窗口）——
+ * 生产代码不调用；attachHighlightClient(null) 是失败终态，测试需要重新构造
+ * 竞态窗口时经此恢复（code.test/markdownRenderer.test 的 attach 竞态用例）。 */
+export function __resetAttachPhaseForTest(): void {
+  attachedClient = null;
+  attachPhase = { phase: 'pending' };
 }
 
 /**
@@ -853,7 +874,15 @@ export function renderCode(
       await hljsChunk(startLine, lineCount, subLines);
       return;
     }
-    const client = attachedClient;
+    // client 未就绪先等待注入（同 start() attach 竞态口径）：懒 chunk 若在此窗口
+    // 直落 hljsChunk 会双锁——hljsChunkCache 使 hasChunkData 视为已处理（attach 后
+    // 该 chunk 永不重发 tree-sitter）且 engine 锁定 'hljs'（BUG-20/HL-03/FSEARCH-02/
+    // m2 懒高亮家族在 CDN 构建下实测竞态）
+    let client = attachedClient;
+    if (client === null && lang !== null) {
+      client = await waitForAttachedClient();
+      if (destroyed) return;
+    }
     if (client && lang !== null) {
       try {
         // 本地 worker chunk：区间相对子文本，mergeChunkLines 平移 +startLine

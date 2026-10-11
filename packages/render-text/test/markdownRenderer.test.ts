@@ -14,7 +14,7 @@ import {
   type MarkdownEngineState
 } from '../src/markdown/markdownRenderer';
 import { LIGHTBOX_OVERLAY_ID } from '../src/markdown/pipeline';
-import { attachHighlightClient, type CodeHighlightClient } from '../src/code';
+import { attachHighlightClient, __resetAttachPhaseForTest, type CodeHighlightClient } from '../src/code';
 
 const SOURCE: FileSource = {
   storeId: 's',
@@ -186,7 +186,22 @@ describe('fenceToHtml——highlightFence 接线（依赖倒置）', () => {
     });
     expect(await fenceToHtml('x', 'js')).toBeNull();
     attachHighlightClient(null);
+    // attach(null) 为 failed 终态：即刻放行 null（降级路径不占超时）
     expect(await fenceToHtml('x', 'js')).toBeNull();
+  });
+
+  it('client 晚于围栏渲染（pending 相位）：等待注入后产出 ts-* HTML，不错锁 hljs 兜底', async () => {
+    // CDN 构建竞态（MD-05/THEME-05 家族）：围栏在 attach 前同步读 null 会永久落 hljs
+    __resetAttachPhaseForTest(); // 前序用例 afterEach 已 attach(null)：重建 pending 竞态窗口
+    setTimeout(() => {
+      attachHighlightClient({
+        highlight: async (text: string): Promise<HighlightInterval[]> =>
+          text.startsWith('const') ? [{ start: 0, end: 5, capture: 'keyword' }] : []
+      });
+    }, 10);
+    expect(await fenceToHtml('const a = 1;', 'js')).toBe(
+      '<span class="ts-keyword">const</span> a = 1;'
+    );
   });
 
   it('client 取消（HighlightCanceledError）→ 重抛给管线跳过该块，不 hljs 兜底', async () => {

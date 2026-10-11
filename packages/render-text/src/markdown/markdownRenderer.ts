@@ -17,7 +17,7 @@ import { HighlightCanceledError, type HighlightInterval } from '@vviewer/highlig
 import {
   DECODERS,
   MARKUP_MAX_BYTES,
-  getHighlightClient,
+  waitForAttachedClient,
   buildLineIndex,
   buildLineOffsets,
   assignIntervalsToLines,
@@ -37,12 +37,15 @@ import { runPipeline, removeLightboxOverlay, LIGHTBOX_OVERLAY_ID } from './pipel
 /**
  * 围栏代码高亮回调（pipeline 的 highlightFence 实现）：HighlightClient 区间
  * → 行分配 → span HTML（类名经 captureToCssClass，与 code 渲染器同一来源）。
- * client 未注入、语言不在 grammar 清单等失败返回 null → 管线内 hljs 兜底；
- * 请求被取消（tab 切换）时重抛 HighlightCanceledError → 管线静默跳过该块、
- * 不再跑 hljs 兜底（结果即将随 tab 丢弃，整篇兜底纯属空转）。
+ * client 未就绪时等待注入（waitForAttachedClient：CDN 层构建使启动预热不再
+ * 保证早于首个 markdown tab，同步读 null 会让围栏永久落 hljs 兜底——MD-05/
+ * THEME-05 实测竞态）；超时/创建失败放行 null、语言不在 grammar 清单等失败
+ * 同样返回 null → 管线内 hljs 兜底；请求被取消（tab 切换）时重抛
+ * HighlightCanceledError → 管线静默跳过该块、不再跑 hljs 兜底（结果即将随
+ * tab 丢弃，整篇兜底纯属空转）。
  */
 export async function fenceToHtml(code: string, lang: string): Promise<string | null> {
-  const client = getHighlightClient();
+  const client = await waitForAttachedClient();
   if (!client) return null;
   let intervals: HighlightInterval[];
   try {

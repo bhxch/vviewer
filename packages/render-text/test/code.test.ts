@@ -12,6 +12,7 @@ import {
   renderCode,
   attachHighlightClient,
   waitForAttachedClient,
+  __resetAttachPhaseForTest,
   attachHighlightRouter,
   evictOldestEntries,
   evictChunksByLines,
@@ -509,6 +510,7 @@ describe('renderCode（tree-sitter 主路径，fake client）', () => {
   // start() 时 client 未注入须等待而非直接 hljs 兜底（否则首开文件引擎永久错锁）
 
   it('attach 晚于渲染启动：等待注入后落 tree-sitter，不错锁 hljs', async () => {
+    __resetAttachPhaseForTest(); // 前序用例 afterEach 已 attach(null)（failed 终态）：重建 pending 竞态窗口
     stubResizeObserver();
     const host = document.createElement('div');
     document.body.append(host);
@@ -530,14 +532,18 @@ describe('renderCode（tree-sitter 主路径，fake client）', () => {
     await expect(waitForAttachedClient(1)).resolves.toBe(fake);
   });
 
-  it('waitForAttachedClient：attach(null)（创建失败解绑）即刻以 null 放行', async () => {
+  it('waitForAttachedClient：attach(null)（创建失败解绑，failed 终态）即刻以 null 放行', async () => {
     const pending = waitForAttachedClient(1000);
     attachHighlightClient(null);
     await expect(pending).resolves.toBeNull();
+    // 终态语义：解绑后不再等待（降级路径不占超时）
+    const t0 = Date.now();
+    await expect(waitForAttachedClient(1000)).resolves.toBeNull();
+    expect(Date.now() - t0).toBeLessThan(100);
   });
 
-  it('waitForAttachedClient：超时以当前值放行（兜底创建期永久挂起）', async () => {
-    attachHighlightClient(null);
+  it('waitForAttachedClient：pending 相位超时以当前值放行（兜底创建期永久挂起）', async () => {
+    __resetAttachPhaseForTest(); // pending：无 attach 也无 failed 终态
     const pending = waitForAttachedClient(20);
     const client = await pending;
     expect(client).toBeNull();
@@ -895,6 +901,29 @@ describe('renderCode lazy 本地 chunk 管线', () => {
     await vi.waitFor(() => {
       expect(host.querySelector('[data-line="0"] .ts-keyword')?.textContent).toBe('const');
     });
+    handle.destroy();
+  });
+
+  it('attach 晚于渲染启动：懒 chunk 等待注入后落 tree-sitter，不错锁 hljs 兜底', async () => {
+    // CDN 构建竞态（BUG-20/HL-03/FSEARCH-02/m2 家族）：attach 前泵入 hljsChunk 会
+    // 双锁——hljsChunkCache 使该 chunk 永不重发 tree-sitter 且 engine 锁定 'hljs'
+    __resetAttachPhaseForTest(); // 前序用例 afterEach 已 attach(null)：重建 pending 竞态窗口
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(lazyJsBuffer(), host, { ext: 'js', lang: 'javascript' });
+    expect(handle.getEngine()).toBe('pending');
+    setTimeout(() => {
+      attachHighlightClient({
+        highlight: async () => [{ start: 0, end: 5, capture: 'keyword' }]
+      });
+    }, 10);
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('tree-sitter'));
+    expect(handle.getComputeWhere()).toBe('local');
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-line="0"] .ts-keyword')?.textContent).toBe('const');
+    });
+    expect(host.querySelector('[data-line="1"] .hljs-keyword')).toBeNull(); // 未落行级 hljs 兜底
     handle.destroy();
   });
 

@@ -44,6 +44,8 @@ import { loadSettings } from './stores/settings';
  */
 
 let clientPromise: Promise<HighlightClient> | null = null;
+/** clientPromise 是否已落定（成功或失败）：cancelHighlight 的「迟到 cancelAll」防护开关 */
+let clientSettled = false;
 
 /** 在途远程高亮的中止控制器（cancelHighlight 随 tab 切换一并 abort，不等无主响应）。 */
 let remoteAbort: AbortController | null = null;
@@ -85,25 +87,39 @@ function warmHighlightAsset(url: string): void {
 export function ensureHighlightClient(): Promise<HighlightClient> | null {
   if (!browser) return null;
   if (!clientPromise) {
-    clientPromise = create().catch((e: unknown) => {
-      // BUG-06 可观测：创建期失败（worker 创建等；manifest 各层失败已在 grammarLayers
-      // 跳层折叠，不再走到这里）同样显式上报，不再零提示静默降级 hljs；
-      // rethrow 保持既有 rejected 语义（不重试）
-      console.error(`[vviewer] tree-sitter worker 加载失败：${e instanceof Error ? e.message : String(e)}`);
-      // 同步放行渲染端 attach 等待者（render-text waitForAttachedClient）：
-      // 创建失败即解绑，降级 hljs 路径不必等超时（attachHighlightClient(null) 语义）
-      attachHighlightClient(null);
-      throw e;
-    });
+    clientPromise = create()
+      .then((c) => {
+        clientSettled = true;
+        return c;
+      })
+      .catch((e: unknown) => {
+        // BUG-06 可观测：创建期失败（worker 创建等；manifest 各层失败已在 grammarLayers
+        // 跳层折叠，不再走到这里）同样显式上报，不再零提示静默降级 hljs；
+        // rethrow 保持既有 rejected 语义（不重试）
+        console.error(`[vviewer] tree-sitter worker 加载失败：${e instanceof Error ? e.message : String(e)}`);
+        // 同步放行渲染端 attach 等待者（render-text waitForAttachedClient）：
+        // 创建失败即解绑，降级 hljs 路径不必等超时（attachHighlightClient(null) 语义）
+        clientSettled = true;
+        attachHighlightClient(null);
+        throw e;
+      });
   }
   return clientPromise;
 }
 
-/** tab 切换时取消全部未完成高亮请求（client 尚未创建则无事可做）。 */
+/**
+ * tab 切换时取消全部未完成高亮请求（client 尚未创建则无事可做）。
+ * clientPromise 未决（创建期资产链在途）时**必须跳过**而非排队延迟 cancel：
+ * CDN 层构建使创建窗口可达秒级，窗口内的 tab 切换排队的 cancelAll 会在 attach
+ * 完成后落袋——误杀 attach 后新活动 tab 刚发出的首个合法 chunk 请求
+ *（HighlightCanceledError → 泵按「用户已切走」停机且无重触发 → 永久「解析中…」，
+ * HL-09 在 CDN 构建下实测 3/3 复现）。语义等价性：client 未创建必无在途 worker
+ * 请求可取消；等待中的渲染端 attach 等待者由 destroyed 检查逐出自灭。
+ */
 export function cancelHighlight(): void {
   remoteAbort?.abort(); // 在途远程高亮一并中止（router 按 remote 失败折叠，auto 回退本地）
   remoteAbort = null;
-  if (!clientPromise) return;
+  if (!clientPromise || !clientSettled) return;
   void clientPromise.then((c) => c.cancelAll()).catch(() => {});
 }
 
