@@ -75,7 +75,11 @@ function openAsAction(
   return {
     label,
     onClick: () => {
-      void redisplay({ rendererOverride: id }).then((r) => onRendered(r.instance));
+      // 重入链补 .catch：detect/buffer.slice 在 dispatch try 块外，极低概率 reject
+      // （unhandled rejection）；失败时保留原错误卡片（用户可改选其他方式），仅记录
+      void redisplay({ rendererOverride: id })
+        .then((r) => onRendered(r.instance))
+        .catch((err: unknown) => console.error('[vviewer] open-as 重入失败', err));
     }
   };
 }
@@ -204,7 +208,7 @@ function resolveInitialRenderer(
 }
 
 export function createDispatcher(registry: Registry): Dispatcher {
-  // hex 降级渲染器注册（BUG-14）：av 渲染器运行期错误卡片的「降级查看」经 core getter 消费，
+  // hex 降级渲染器注册（BUG-14）：av 渲染器运行期错误卡片的「以 hex 打开」经 core getter 消费，
   // render-media 不反向依赖 render-binary（避免包间耦合）；重复 createDispatcher 时后者覆盖
   setHexFallbackRenderer(registry.byId('hex') ?? null);
   const dispatch = async (

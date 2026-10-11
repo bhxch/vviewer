@@ -451,7 +451,8 @@ export const avRenderer: Renderer = {
       const hex = getHexFallbackRenderer();
       if (hex) {
         actions.push({
-          label: '降级查看',
+          // label 与 dispatch 级 open-as 动作统一（C 项口径：「降级查看」已更名）
+          label: '以 hex 打开',
           onClick: () => {
             release(); // 先释放播放器资源（blob/worker），再以 hex 渲染原始字节（当前为原始字节视图）
             Promise.resolve(hex.render(buffer, target, source, det))

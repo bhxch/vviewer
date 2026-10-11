@@ -419,7 +419,8 @@ test('MEDIA-11/BUG-14：截断 mp4 与截断 PDF 出统一错误卡片（含重�
   await expect(card.locator('.vv-error-detail')).toContainText('无法播放此媒体');
   await expect(card.locator('.vv-error-action')).toHaveCount(2);
   await expect(card.locator('.vv-error-action').nth(0)).toHaveText('重试');
-  await expect(card.locator('.vv-error-action').nth(1)).toHaveText('降级查看');
+  // label 与 dispatch 级 open-as 统一（原「降级查看」已更名）
+  await expect(card.locator('.vv-error-action').nth(1)).toHaveText('以 hex 打开');
   // 黑屏播放器不再呈现（video 容器被卡片替换）
   await expect(page.locator('.vv-artplayer')).toHaveCount(0);
 
