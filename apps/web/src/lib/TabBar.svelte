@@ -3,6 +3,7 @@
   import type { WorkspaceSource } from './workspaceStore';
   import { activateTab, closeTab, closedStackSize, reopenClosed, tabStore } from './openFlow.svelte';
   import { reorderIds } from './tabOrder';
+  import { badgeOf } from './tabBadge';
   import TabContextMenu, { type TabCtxAction } from './TabContextMenu.svelte';
 
   /**
@@ -16,11 +17,9 @@
     onmanage
   }: { tabs: Tab[]; sources: WorkspaceSource[]; onmanage(): void } = $props();
 
-  /** 行内来源徽标（T6）：仅多源 workspace 显示（单源省略），且只给已登记来源的
-   * tab——openFiles 的单文件 tab 不登记来源，无徽标（名称即身份）。 */
-  function badgeOf(tab: Tab): string | null {
-    if (sources.length < 2) return null;
-    return sources.find((s) => s.storeId === tab.source.storeId)?.storeLabel ?? null;
+  /** 行内来源徽标（T6）：逻辑在 tabBadge.ts 可单测；此处注入当前组来源集。 */
+  function badgeOfFor(tab: Tab): string | null {
+    return badgeOf(sources, tab);
   }
 
   // ---------- F 项 T2：右键菜单 / 中键关闭 / 拖拽重排 / pinned 态 ----------
@@ -145,7 +144,7 @@
 
 <div class="vv-tabbar" role="tablist">
   {#each tabs as tab (tab.id)}
-    {@const badge = badgeOf(tab)}
+    {@const badge = badgeOfFor(tab)}
     <!-- 遗留 U2：激活区与关闭钮拆为兄弟节点——button 内不得再嵌 span[role=button]
          （嵌套交互元素违反 a11y 嵌套交互规则）。外层 div[role=tab][tabindex] 键盘可达，
          Enter/Space 激活需手动接线（ARIA APG 的 tab 键盘约定）；关闭钮为真实 button，
