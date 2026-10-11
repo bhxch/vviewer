@@ -228,6 +228,9 @@
               tabindex="0"
               onclick={() => activateRow(group.ws, tab)}
               onkeydown={(e) => {
+                // 快捷键只认行本身：Enter/Space 聚焦在行内关闭钮上时不得被行吞掉
+                //（按钮原生触发 closeTab，行级 preventDefault 会截胡——T6 评审移交）
+                if (e.target !== e.currentTarget) return;
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
                   activateRow(group.ws, tab);

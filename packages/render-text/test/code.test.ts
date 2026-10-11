@@ -11,6 +11,7 @@ import {
   renderLineHtml,
   renderCode,
   attachHighlightClient,
+  waitForAttachedClient,
   attachHighlightRouter,
   evictOldestEntries,
   evictChunksByLines,
@@ -502,6 +503,44 @@ describe('renderCode（tree-sitter 主路径，fake client）', () => {
     }
     expect(host.querySelector('[data-line="4"]')).toBeNull();
     handle.destroy();
+  });
+
+  // attach 竞态（P2 CDN 层：create() 含真实网络 fetch，预热不再保证早于首开）：
+  // start() 时 client 未注入须等待而非直接 hljs 兜底（否则首开文件引擎永久错锁）
+
+  it('attach 晚于渲染启动：等待注入后落 tree-sitter，不错锁 hljs', async () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    // 渲染启动时未 attach（模拟 boot 期资产链未完成），10ms 后注入
+    const handle = renderCode(new TextEncoder().encode('let x'), host, { ext: 'rs', lang: 'rust' });
+    setTimeout(() => {
+      attachHighlightClient({ highlight: async () => [{ start: 0, end: 3, capture: 'keyword' }] });
+    }, 10);
+    await vi.waitFor(() => {
+      expect(handle.getEngine()).toBe('tree-sitter');
+    });
+    expect(host.querySelector('.ts-keyword')?.textContent).toBe('let');
+    handle.destroy();
+  });
+
+  it('waitForAttachedClient：已 attach 即刻返回', async () => {
+    const fake = { highlight: async () => [] };
+    attachHighlightClient(fake);
+    await expect(waitForAttachedClient(1)).resolves.toBe(fake);
+  });
+
+  it('waitForAttachedClient：attach(null)（创建失败解绑）即刻以 null 放行', async () => {
+    const pending = waitForAttachedClient(1000);
+    attachHighlightClient(null);
+    await expect(pending).resolves.toBeNull();
+  });
+
+  it('waitForAttachedClient：超时以当前值放行（兜底创建期永久挂起）', async () => {
+    attachHighlightClient(null);
+    const pending = waitForAttachedClient(20);
+    const client = await pending;
+    expect(client).toBeNull();
   });
 });
 

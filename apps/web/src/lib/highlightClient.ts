@@ -90,6 +90,9 @@ export function ensureHighlightClient(): Promise<HighlightClient> | null {
       // 跳层折叠，不再走到这里）同样显式上报，不再零提示静默降级 hljs；
       // rethrow 保持既有 rejected 语义（不重试）
       console.error(`[vviewer] tree-sitter worker 加载失败：${e instanceof Error ? e.message : String(e)}`);
+      // 同步放行渲染端 attach 等待者（render-text waitForAttachedClient）：
+      // 创建失败即解绑，降级 hljs 路径不必等超时（attachHighlightClient(null) 语义）
+      attachHighlightClient(null);
       throw e;
     });
   }

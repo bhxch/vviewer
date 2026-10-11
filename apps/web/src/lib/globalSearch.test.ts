@@ -11,7 +11,13 @@ vi.mock('./openFlow.svelte', () => ({
 }));
 
 import type { TreeStore, TreeNode } from '@vviewer/core';
-import { isRemoteStore, serverSearchHint, runGlobalSearch, SERVER_SEARCH_HINT } from './globalSearch';
+import {
+  attributeRemoteMatches,
+  isRemoteStore,
+  serverSearchHint,
+  runGlobalSearch,
+  SERVER_SEARCH_HINT
+} from './globalSearch';
 
 function makeStore(id: string, withWatch: boolean): TreeStore {
   return {
@@ -138,5 +144,85 @@ describe('runGlobalSearch 多源本地合并（T4：grepStoreLocal 逐源扫描�
     );
     expect(res.matches).toEqual([]);
     expect(res.where).toBe('local');
+  });
+});
+
+// ---------- 远端命中归属（T7：跨根 root 字段 → 来源 storeId + basePath 路径换算） ----------
+
+describe('attributeRemoteMatches（T5 移交兑现：跨根命中按 rootIndex/basePath 归属）', () => {
+  // storeId 即身份（归属改写 store.id）；label 无关
+  const wholeR0 = { label: 'srv', store: makeStore('remote:whole', true) } as const;
+  const subR0 = {
+    label: 'srv/sub',
+    store: makeStore('remote:sub0', true),
+    basePath: 'sub'
+  } as const;
+  const wholeR1 = {
+    label: 'srv · 根1',
+    store: makeStore('remote:r1', true),
+    rootIndex: 1
+  } as const;
+  const subR1 = {
+    label: 'srv · 根1/sub',
+    store: makeStore('remote:r1sub', true),
+    rootIndex: 1,
+    basePath: 'sub'
+  } as const;
+
+  it('跨根命中帧按 root 归属到对应根的来源', () => {
+    const matches = [
+      { storeId: 'remote:whole', path: 'a.txt', line: 1, col: 1, preview: 'x', root: 0 },
+      { storeId: 'remote:whole', path: 'b.txt', line: 2, col: 1, preview: 'x', root: 1 }
+    ];
+    const out = attributeRemoteMatches(matches, [wholeR0, wholeR1]);
+    expect(out.map((m) => ({ storeId: m.storeId, path: m.path }))).toEqual([
+      { storeId: 'remote:whole', path: 'a.txt' },
+      { storeId: 'remote:r1', path: 'b.txt' }
+    ]);
+  });
+
+  it('单根帧（无 root 字段）视为根 0；同根多源取 basePath 前缀匹配的最具体源并剥前缀', () => {
+    const matches = [
+      // 帧路径相对根：sub/data.txt 落 sub 源（剥 basePath → data.txt）
+      { storeId: 'remote:whole', path: 'sub/data.txt', line: 1, col: 1, preview: 'x' },
+      // 根下其他路径落整根源（路径原样）
+      { storeId: 'remote:whole', path: 'other.txt', line: 3, col: 1, preview: 'x' }
+    ];
+    const out = attributeRemoteMatches(matches, [wholeR0, subR0]);
+    expect(out.map((m) => ({ storeId: m.storeId, path: m.path }))).toEqual([
+      { storeId: 'remote:sub0', path: 'data.txt' },
+      { storeId: 'remote:whole', path: 'other.txt' }
+    ]);
+  });
+
+  it('嵌套 basePath 取最长前缀（sub/sub2 命中归 sub2 源而非 sub 源）', () => {
+    const sub2 = {
+      label: 'srv/sub/sub2',
+      store: makeStore('remote:sub2', true),
+      basePath: 'sub/sub2'
+    } as const;
+    const matches = [
+      { storeId: 'remote:whole', path: 'sub/sub2/deep.txt', line: 1, col: 1, preview: 'x' },
+      { storeId: 'remote:whole', path: 'sub/other.txt', line: 2, col: 1, preview: 'x' }
+    ];
+    const out = attributeRemoteMatches(matches, [subR0, sub2]);
+    expect(out.map((m) => ({ storeId: m.storeId, path: m.path }))).toEqual([
+      { storeId: 'remote:sub2', path: 'deep.txt' },
+      { storeId: 'remote:sub0', path: 'other.txt' }
+    ]);
+  });
+
+  it('该根无已登记来源 / 前缀不匹配且无整根源：保守保持 members[0] 摊派原样', () => {
+    const matches = [
+      // 根 2 无来源
+      { storeId: 'remote:whole', path: 'x.txt', line: 1, col: 1, preview: 'x', root: 2 },
+      // 根 1 只有 basePath 源，命中在 sub 外
+      { storeId: 'remote:whole', path: 'outside.txt', line: 2, col: 1, preview: 'x', root: 1 }
+    ];
+    const out = attributeRemoteMatches(matches, [wholeR0, subR1]);
+    expect(out.map((m) => ({ storeId: m.storeId, path: m.path }))).toEqual([
+      { storeId: 'remote:whole', path: 'x.txt' },
+      { storeId: 'remote:whole', path: 'outside.txt' }
+    ]);
   });
 });

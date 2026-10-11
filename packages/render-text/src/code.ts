@@ -442,9 +442,47 @@ export interface CodeHighlightClient {
 
 let attachedClient: CodeHighlightClient | null = null;
 
-/** 应用侧注入 HighlightClient 单例（apps/web 启动时调用；传 null 解绑） */
+/** 等待注入的渲染实例（start() 时 client 尚未就绪的挂起点，attach/超时即放行） */
+interface AttachWaiter {
+  resolve: (client: CodeHighlightClient | null) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+let attachWaiters: AttachWaiter[] = [];
+
+/**
+ * 应用侧注入 HighlightClient 单例（apps/web 启动时调用；传 null 解绑并放行等待者）
+ */
 export function attachHighlightClient(client: CodeHighlightClient | null): void {
   attachedClient = client;
+  const waiters = attachWaiters;
+  attachWaiters = [];
+  for (const w of waiters) w.resolve(client);
+}
+
+/**
+ * 等待高亮客户端注入（P2 CDN 层引入的 attach 竞态修复）：client 由 apps/web
+ * 启动预热创建，但 create() 需先走 grammar 资产三层解析链——CDN 层注入后含一次
+ * 真实网络 fetch（CI 假域名快速失败，本地/代理环境可耗秒级），「启动预热早于
+ * 首个 code tab」不再保证。此前 start() 同步读 attachedClient，未就绪即整文件
+ * 落 hljs 兜底且永不恢复（首开文件引擎错锁，m6 远程高亮 spec 实测竞态）。
+ * 现未就绪时挂起等待注入（或超时/失败放行 null → 既有 hljs 兜底路径）；超时
+ * 上限兜底创建期永久挂起（如 CDN fetch 无响应）不让渲染无限等。
+ */
+export function waitForAttachedClient(timeoutMs = 10_000): Promise<CodeHighlightClient | null> {
+  if (attachedClient !== null) return Promise.resolve(attachedClient);
+  return new Promise((resolve) => {
+    const waiter: AttachWaiter = {
+      resolve: (client) => {
+        clearTimeout(waiter.timer);
+        resolve(client);
+      },
+      timer: setTimeout(() => {
+        attachWaiters = attachWaiters.filter((w) => w !== waiter);
+        resolve(attachedClient); // 超时放行：仍为 null → 调用方走既有 hljs 兜底
+      }, timeoutMs)
+    };
+    attachWaiters.push(waiter);
+  });
 }
 
 /** 读取已注入的高亮客户端单例（markdownRenderer 的围栏高亮复用同一注入，无需二次接线） */
@@ -877,7 +915,10 @@ export function renderCode(
     }
     if (strategy === 'tree-sitter') {
       mount(); // 先渲染纯文本立即可见，区间到达后刷新
-      const client = attachedClient;
+      // client 未注入（创建期资产链未完成）先等待而非直接 hljs 兜底：首开文件
+      // 不得因 attach 竞态被永久错锁引擎（waitForAttachedClient doc）
+      const client = attachedClient ?? (await waitForAttachedClient());
+      if (destroyed) return;
       if (!client || lang === null) {
         await hljsWholeFile(lang);
         return;

@@ -27,6 +27,12 @@ export interface GrepMatch {
   col: number;
   /** 命中行文本（截断 200 字符） */
   preview: string;
+  /**
+   * 多根服务器跨根搜索的命中根索引（server /api/search 命中帧的 root 字段；
+   * 单根部署与本地扫描省略 = 根 0）。调用方（globalSearch）据此把命中归属到
+   * 正确来源的 store——grepRemote 不做归属（storeId 仅为摊派缺省）。
+   */
+  root?: number;
 }
 
 /** 本地内存 grep 选项与可覆盖上限（maxXxx 主要供测试收紧行为）。 */
@@ -217,6 +223,8 @@ interface GrepFrame {
   done?: unknown;
   truncated?: unknown;
   error?: unknown;
+  /** 多根服务器跨根搜索的命中根索引（单根部署省略）。 */
+  root?: unknown;
 }
 
 function isGrepMatchFrame(f: GrepFrame): f is GrepFrame & { file: string; line: number; col: number; text: string } {
@@ -281,7 +289,10 @@ export async function grepRemote(
           path: frame.file,
           line: frame.line,
           col: frame.col,
-          preview: frame.text
+          preview: frame.text,
+          // root 字段原样透传（仅帧携带时）：归属裁决在调用方（globalSearch 按
+          // 来源 rootIndex/basePath 消歧），本层无来源元数据不做归属
+          ...(typeof frame.root === 'number' ? { root: frame.root } : {})
         });
       }
     }

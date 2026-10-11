@@ -262,6 +262,24 @@ describe('grepRemote', () => {
     ]);
   });
 
+  it('跨根命中帧的 root 字段透传到命中（单根帧省略 root 字段）', async () => {
+    // 多根服务器跨根搜索（search.rs FrameParser）：命中帧携带 "root": <idx>；
+    // 单根部署帧无该字段 → 命中不带 root（归属裁决在 globalSearch 调用方）
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        ndjsonResponse([
+          '{"file":"a.txt","line":1,"col":1,"text":"hit r0","root":0}\n{"file":"b.txt","line":2,"col":3,"text":"hit r1","root":1}\n{"done":true,"truncated":false}\n'
+        ])
+      )
+    );
+    const res = await grepRemote(endpoint, { pattern: 'hit' }, { storeId: 'remote:x' });
+    expect(res.matches.map((m) => ({ path: m.path, root: m.root }))).toEqual([
+      { path: 'a.txt', root: 0 },
+      { path: 'b.txt', root: 1 }
+    ]);
+  });
+
   it('非 2xx 抛错（router auto 据此回退本地）', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ndjsonResponse([], 501)));
     await expect(grepRemote(endpoint, { pattern: 'x' }, { storeId: 'r' })).rejects.toThrow(
