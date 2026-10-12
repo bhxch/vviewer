@@ -40,6 +40,14 @@ export function loadSettings(): Settings {
     const s = { ...defaults(), ...(JSON.parse(raw) as Partial<Settings>) };
     // computePolicy 白名单校验：旧版本/手改 localStorage 的非法值回落默认
     if (!POLICIES.includes(s.computePolicy)) s.computePolicy = DEFAULTS.computePolicy;
+    // 外观槽格式白名单（spec 2026-10-12 §2.3）：'default' 或 'vscode:'/'imported:'
+    // 前缀；存在性校验（内置名单/imported id）由注入期 warn+回退兜底，此处只挡格式
+    for (const key of ['appearanceLight', 'appearanceDark'] as const) {
+      const v = s[key];
+      if (v !== 'default' && !v.startsWith('vscode:') && !v.startsWith('imported:')) {
+        s[key] = DEFAULTS[key];
+      }
+    }
     return s;
   } catch {
     return defaults();

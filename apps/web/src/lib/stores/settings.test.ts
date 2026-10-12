@@ -71,3 +71,25 @@ describe('settings 变更订阅（BUG-05 前置基建）', () => {
     expect(a.mock.calls[0]![0]).not.toBe(b.mock.calls[0]![0]);
   });
 });
+
+describe('loadSettings 外观槽格式白名单（spec 2026-10-12 §2.3）', () => {
+  it('非法格式（无前缀的任意串）归位 default', () => {
+    localStorage.setItem(
+      'vviewer:settings',
+      JSON.stringify({ ...BASE, appearanceLight: 'javascript:dark', appearanceDark: '42' })
+    );
+    const s = loadSettings();
+    expect(s.appearanceLight).toBe('default');
+    expect(s.appearanceDark).toBe('default');
+  });
+
+  it('合法形态原样通过：default / vscode: 内置名 / imported:<id>', () => {
+    localStorage.setItem(
+      'vviewer:settings',
+      JSON.stringify({ ...BASE, appearanceLight: 'vscode:Dark Modern', appearanceDark: 'imported:abc123' })
+    );
+    const s = loadSettings();
+    expect(s.appearanceLight).toBe('vscode:Dark Modern');
+    expect(s.appearanceDark).toBe('imported:abc123');
+  });
+});
