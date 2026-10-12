@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HighlightCanceledError, type HighlightInterval } from '@vviewer/highlight';
 import type { Detection, FileSource, RenderedInstance, StreamCtx } from '@vviewer/core';
+import { STREAM_MAX_BYTES } from '../src/blockStream';
 import { attachHighlightClient, type CodeFileMeta } from '../src/code';
 import { jsonlRenderer, jsonlWindowedInternals, shouldDelegateToCode } from '../src/jsonl/index';
 
@@ -590,6 +591,56 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
     expect(calls.filter((c) => c.start === BLOCK && c.end === 2 * BLOCK - 1).length).toBe(2);
     expect(calls.filter((c) => c.start === 2 * BLOCK && c.end === 3 * BLOCK - 1).length).toBe(2);
     expect(host.querySelector('[data-line="345"]')!.querySelector('.vv-jsonl-card-failed')).toBeNull();
+    inst.destroy();
+  });
+
+  // 计划 3 Task 2 / T2 遗留钉：oversized 预览的跨块多字节此前无专测——4 字节
+  // emoji 骑在块切口上，预览 gather 必须字节域缝合（与全量 64KB 字符截断逐字符一致）。
+  it('oversized 预览跨块多字节：emoji 骑块边界，窗口与全量 64KB 预览逐字符一致', async () => {
+    stubResizeObserver();
+    // 字节布局：row0 = 8B；row1 填充使行 2 恰始于块 0 末字节（262143）；
+    // row2 = 65534 个 🎉（4B/字符）+ y 填充，字节长恰 1MB（阈值取等即 oversize）
+    const row1 = '"' + 'z'.repeat(262_132) + '"\n'; // 合法 JSON 字符串行
+    expect(8 + row1.length).toBe(BLOCK - 1); // 行 2 起点 = 块 0 末字节（自校验非空转）
+    const row2 = '🎉'.repeat(65_534) + 'y'.repeat(786_440);
+    expect(enc(row2).length).toBe(1_048_576);
+    const text = '{"a":1}\n' + row1 + row2;
+    const bytes = enc(text);
+    expect(bytes[BLOCK - 1]).toBe(0xf0); // 🎉 首字节落在块 0 尾
+    expect(bytes[BLOCK]).toBe(0x9f); // 续字节跨入块 1（切口打碎该字符）
+
+    const hostA = mount();
+    const instA = (await jsonlRenderer.render(bytes, hostA, source, det)) as JsonlInstance;
+    const hostB = mount();
+    const instB = (await jsonlRenderer.render(bytes.slice(0, 8192), hostB, source, det,
+      streamCtx({ size: bytes.length, content: bytes, head: bytes.slice(0, 8192) }))) as JsonlInstance;
+    await vi.waitFor(() => {
+      expect(hostB.querySelector('.vv-jsonl-status')!.textContent!.startsWith('共 3 行')).toBe(true);
+    });
+    const bodyA = hostA.querySelector('[data-line="2"] .vv-jsonl-body') as HTMLElement;
+    const bodyB = hostB.querySelector('[data-line="2"] .vv-jsonl-body') as HTMLElement;
+    // 64KB 字符预览（UTF-16 码元口径）= 32768 个 emoji（每个占 2 码元）；
+    // 切口处的 emoji 完整（字节域缝合），无 U+FFFD、无孤立代理对
+    expect(bodyA.textContent).toBe('🎉'.repeat(32_768));
+    expect(bodyB.textContent).toBe(bodyA.textContent);
+    expect(hostB.querySelector('[data-line="2"] .vv-jsonl-badge')?.textContent).toBe('行过大（>1MB）');
+    instA.destroy();
+    instB.destroy();
+  });
+
+  it('窗口模式尺寸防线（STREAM_MAX_BYTES）：size 超限 → 零续读停机，状态条追加建议以 hex 打开（非失败态）', async () => {
+    stubResizeObserver();
+    const content = enc(padLines(3, 100)); // 微型内容：防线由 ctx.size 触发，不真造 512MB
+    const calls: RangeCall[] = [];
+    const host = mount();
+    const inst = (await jsonlRenderer.render(content.slice(0, 8192), host, source, det,
+      streamCtx({ size: STREAM_MAX_BYTES + 1, content, head: content.slice(0, 8192), calls }))) as JsonlInstance;
+    expect(calls).toStrictEqual([]); // 防线在 IO 之前：一个块都不拉
+    expect(host.querySelector('.vv-jsonl-status')!.textContent)
+      .toBe('已加载 0 行 · 已达流式上限，建议以 hex 打开'); // 非失败态：无错误卡片
+    expect(host.querySelectorAll('.vv-jsonl-card').length).toBe(0);
+    expect(host.querySelectorAll('.vv-jsonl-card-failed').length).toBe(0);
+    expect(inst.getMeta().lines).toBe(0);
     inst.destroy();
   });
 });

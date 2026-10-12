@@ -51,6 +51,11 @@
  * 缺块行渲染占位卡、不进解析（防污染 parseCache），maybeContinue 统一重拉后
  * refresh 填充（hexSource「占位+ensure+重拉」同语义）。
  *
+ * 尺寸防线（计划 3 Task 2，B1 统一裁决）：窗口模式已确认字节超 STREAM_MAX_BYTES
+ * （512MB）→ 续读停机，状态条追加「已达流式上限，建议以 hex 打开」——非失败态
+ * （不复用错误卡片）。防线在 IO 之前裁决：size 已知构造即知（零读停机），size
+ * 未知随短读探测逐块裁决；超限后 indexFinished 恒假，状态条保持「已加载 N 行」口径。
+ *
  * 高亮裁决：卡片级——每张 ok 卡片对自身 pretty 全文调一次
  * getHighlightClient().highlight(pretty, 'json')，窗口外的行永不解析/高亮；
  * pretty 超过 JSONL_HIGHLIGHT_MAX_CHARS（1M 字符）的卡片跳过自动高亮保持纯文本；
@@ -62,7 +67,8 @@
  */
 import type { Detection, FileSource, RenderedInstance, Renderer, StreamCtx } from '@vviewer/core';
 import { HighlightCanceledError, type HighlightInterval } from '@vviewer/highlight';
-import { createBlockStream } from '../blockStream';
+import { STREAM_MAX_BYTES, createBlockStream } from '../blockStream';
+import { createTextWindow, type BlockTextEntry } from '../textWindow';
 import {
   assignIntervalsToLines,
   buildLineOffsets,
@@ -113,20 +119,11 @@ const WINDOW_BLOCK_BYTES = 256 * 1024;
 /** 块解码缓存 LRU 上限（块数）：8 块 ≈ 2MB 文本（spec §4.2） */
 const BLOCK_TEXT_CACHE_MAX = 8;
 /** 块表驻留上界（BlockStream maxBlocks，计划 3 Task 1 / 计划 2 终审 B1）：
- * 16×256KB = 4MB 原始字节，滚动到底不再全量常驻。文本缓存 8 块热集之外留一倍
+ * 16×256KB = 4MB 原始字节，滚动到底原始字节不再全量常驻。文本缓存 8 块热集之外留一倍
  * 余量；被逐出块经 lineAvailable 把关 + ensureBlock 重拉（hexSource 同语义）。 */
 const WINDOW_STREAM_MAX_BLOCKS = 16;
-/** 窗口模式行文本解码器（模块级单例：decode 非 stream 模式调用间无状态） */
-const LINE_DECODER = new TextDecoder('utf-8', { fatal: false });
-
-/** 块解码缓存条目：块文本 + 前缀解码游标（walkByte 恒为字符边界——只落行首/行尾） */
-interface BlockTextEntry {
-  text: string;
-  /** 游标已覆盖的字节偏移（块内） */
-  walkByte: number;
-  /** walkByte 对应的块文本字符下标 */
-  walkChar: number;
-}
+/** 尺寸防线状态条追加语（非失败态：不复用错误卡片，B1 统一裁决口径） */
+const STREAM_LIMIT_NOTICE = ' · 已达流式上限，建议以 hex 打开';
 
 /** 窗口模式内部状态观测口（indexStream.ts internals 同款 WeakMap 模式）：
  * 实例 → 块解码缓存。生产代码不读；单测据此断言 LRU 上限。 */
@@ -570,6 +567,10 @@ async function renderJsonlWindowed(
   // 消费契约（T2→T3 指令②）：finishJsonlIndex 之后不得再 advanceJsonlIndex——
   // 此标志后续读全部停机，EOF 确认后滚动零 IO
   let indexFinished = false;
+  // 尺寸防线（STREAM_MAX_BYTES，计划 3 Task 2 / B1 统一裁决）：已确认字节超限 →
+  // 续读停机。防线在 IO 之前裁决（size 已知构造即知——零读停机；size 未知随
+  // 短读探测逐块裁决）。非失败态：不复用错误卡片，仅状态条追加 hex 建议
+  let limitReached = false;
 
   const startsWithBom = (b: Uint8Array<ArrayBuffer>): boolean =>
     b.length >= 3 && b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf;
@@ -592,7 +593,11 @@ async function renderJsonlWindowed(
    * 重试（用户滚动动作再触发）拉同一块，块序列不错位。
    */
   const pullBlock = async (): Promise<void> => {
-    if (indexFinished) return;
+    if (indexFinished || limitReached) return;
+    if (bs.confirmedBytes > STREAM_MAX_BYTES) {
+      limitReached = true; // 超限停机：loadedBytes 不再增长（续读面与 maybeContinue 同步封闭）
+      return;
+    }
     maybeFinish(); // size 已知空文件：0 块即 EOF，无需任何拉取
     if (indexFinished) return;
     const i = nextFeed;
@@ -609,70 +614,20 @@ async function renderJsonlWindowed(
 
   const rows = (): number => index.offsets.length;
 
-  // 块解码缓存：blockIndex → 块文本 + 前缀解码游标，LRU 上限 8 块（spec §4.2 ≈2MB）
-  const blockText = new Map<number, BlockTextEntry>();
-
-  /**
-   * 块文本（LRU：触碰即重插，超限按 Map 插入序逐出最旧）。仅对已 ensureBlock 的
-   * 块调用（T1→T3 指令③：调用面全部满足「可见行 ⊆ 已喂块」不变量——可见行号
-   * < 已加载行数，其字节范围 ⊆ 已喂字节，故块已在 BlockStream 块表且为整块）。
-   */
-  function blockTextOf(b: number): BlockTextEntry {
-    const hit = blockText.get(b);
-    if (hit !== undefined) {
-      blockText.delete(b);
-      blockText.set(b, hit);
-      return hit;
-    }
-    const entry: BlockTextEntry = { text: LINE_DECODER.decode(bs.block(b)), walkByte: 0, walkChar: 0 };
-    blockText.set(b, entry);
-    if (blockText.size > BLOCK_TEXT_CACHE_MAX) {
-      const oldest = blockText.keys().next().value;
-      if (oldest !== undefined) blockText.delete(oldest);
-    }
-    return entry;
-  }
-
-  /**
-   * 块内字节偏移 → 块文本字符下标。行首/行尾恒为字符边界（行终结符是单字节
-   * ASCII），故自游标起的字节前缀独立 decode 的长度即字符增量；降序/冷查询回退
-   * 整前缀（块 0 前缀 decode 同样剥 BOM，与整块解码口径一致）。
-   */
-  function charOffsetOf(e: BlockTextEntry, b: number, byteOff: number): number {
-    const bytes = bs.block(b);
-    const ch = byteOff >= e.walkByte
-      ? e.walkChar + LINE_DECODER.decode(bytes.subarray(e.walkByte, byteOff)).length
-      : LINE_DECODER.decode(bytes.subarray(0, byteOff)).length;
-    e.walkByte = byteOff;
-    e.walkChar = ch;
-    return ch;
-  }
-
-  /** 行原始字节跨块拼装（[startFile, endFile) 文件字节空间；末块短读按实际块长） */
-  function gatherLineBytes(startFile: number, endFile: number): Uint8Array<ArrayBuffer> {
-    const b0 = Math.floor(startFile / bs.blockSize);
-    const b1 = Math.floor((endFile - 1) / bs.blockSize);
-    const first = bs.block(b0);
-    if (b0 === b1) {
-      return first.subarray(startFile - b0 * bs.blockSize, endFile - b0 * bs.blockSize);
-    }
-    const out = new Uint8Array(endFile - startFile);
-    let pos = 0;
-    for (let b = b0; b <= b1; b++) {
-      const base = b * bs.blockSize;
-      const from = Math.max(0, startFile - base);
-      const to = Math.min(bs.block(b).length, endFile - base);
-      out.set(bs.block(b).subarray(from, to), pos);
-      pos += to - from;
-    }
-    return out;
-  }
+  // 文本窗口（计划 3 Task 2 公共抽取：块解码缓存 LRU + 前缀解码游标 + 跨块字节域
+  // 拼装，textWindow.ts）：blockAt 注入 BlockStream 块表取数——驻留性由
+  // lineAvailable/has 把关（缺块行在 buildCard 已被占位，不到取数面）
+  const win = createTextWindow({
+    blockSize: WINDOW_BLOCK_BYTES,
+    maxBlocks: BLOCK_TEXT_CACHE_MAX,
+    blockAt: (b) => bs.block(b)
+  });
 
   /**
    * 行文本（stateOf 的行来源，见模块头三路）：单块行=块文本缓存切片；跨块行=按
    * 索引 lengths 拼原始字节后单次解码（块切口不打碎跨块多字节字符）；oversized
    * 行不走拼装——行首 4×64KB 字节解码后截 64KB 字符（与全量 parseJsonlLine 的
-   * 64KB 字符截断逐字符一致）。
+   * 64KB 字符截断逐字符一致）。解码/拼装面全部经 textWindow（公共抽取）。
    */
   function rawLine(i: number): string {
     const len = index.lengths[i]!;
@@ -681,16 +636,15 @@ async function renderJsonlWindowed(
     if (index.oversized.has(i)) {
       // 4×64KB 字节前缀内行首 64K 字符必完整（UTF-8 每字符 ≤4 字节）
       const previewEnd = Math.min(endFile, startFile + JSONL_OVERSIZE_PREVIEW_BYTES * 4);
-      return LINE_DECODER.decode(gatherLineBytes(startFile, previewEnd))
-        .slice(0, JSONL_OVERSIZE_PREVIEW_BYTES);
+      return win.decode(win.gather(startFile, previewEnd)).slice(0, JSONL_OVERSIZE_PREVIEW_BYTES);
     }
-    const b0 = Math.floor(startFile / bs.blockSize);
-    const b1 = Math.floor((endFile - 1) / bs.blockSize);
-    if (b0 !== b1) return LINE_DECODER.decode(gatherLineBytes(startFile, endFile));
-    const entry = blockTextOf(b0);
-    const off = startFile - b0 * bs.blockSize;
-    const cs = charOffsetOf(entry, b0, off);
-    const ce = charOffsetOf(entry, b0, off + len);
+    const b0 = Math.floor(startFile / win.blockSize);
+    const b1 = Math.floor((endFile - 1) / win.blockSize);
+    if (b0 !== b1) return win.decode(win.gather(startFile, endFile));
+    const entry = win.entryOf(b0);
+    const off = startFile - b0 * win.blockSize;
+    const cs = win.charOffsetOf(entry, b0, off);
+    const ce = win.charOffsetOf(entry, b0, off + len);
     return entry.text.slice(cs, ce);
   }
 
@@ -745,7 +699,7 @@ async function renderJsonlWindowed(
       })();
       return;
     }
-    if (indexFinished || pulling || continueFailed || api.destroyed()) return;
+    if (indexFinished || limitReached || pulling || continueFailed || api.destroyed()) return;
     if (lastVisible < rows() - OVERSCAN * 2) return; // 距尾部余量充足
     pulling = true;
     void (async () => {
@@ -789,14 +743,16 @@ async function renderJsonlWindowed(
     // 索引层已判 oversized（行字节 ≥1MB）：直接构造 parseJsonlLine 的 oversize
     // 形态——预览 <1MB，若再过 parseJsonlLine 的 encode 阈值会被误判进 JSON.parse
     oversizedState: (i) => (index.oversized.has(i) ? { kind: 'oversize', raw: rawLine(i) } : null),
-    statusText: () => (indexFinished ? `共 ${rows()} 行` : `已加载 ${rows()} 行`),
+    statusText: () =>
+      (indexFinished ? `共 ${rows()} 行` : `已加载 ${rows()} 行`) +
+      (limitReached ? STREAM_LIMIT_NOTICE : ''),
     streamDone: () => indexFinished,
     afterUpdate: maybeContinue,
     notifyUserAction: () => { continueFailed = false; }, // 用户动作解除续读停机（单次重试）
     metaSize: () => ctx.size ?? bs.confirmedBytes,
     metaLines: rows
   });
-  jsonlWindowedInternals.set(instance, { blockTextCache: blockText });
+  jsonlWindowedInternals.set(instance, { blockTextCache: win.entries });
   return instance;
 }
 
