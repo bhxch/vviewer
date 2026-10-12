@@ -757,4 +757,31 @@ describe('dispatch 读下沉（io-streaming §3：streaming 选路 + StreamCtx �
     expect(det.encoding).toBe('utf-8');
     expect(det.binary).toBe(false); // encoding 翻转连带派生 binary 同步（gb18030 判二进制 → utf-8 不判）
   });
+
+  // T4 评审指令：⑫ 的 streaming 分支镜像——size 未知 + streaming + !rangeCapable 降级
+  // 全量（openUrl 打开 url jsonl 可达路径）。redet 缺失时 head 截断多字节误判 gb18030
+  // 直抵 render（jsonl 非 UTF-8 全量回退面误触发/尾部 mojibake）；补 redet 后 full 精判
+  // 翻转 utf-8。断言 utf-8 即证明 streaming 降级路径同样以 full 重算了 det。
+  it('⑬ size 未知 + streaming + !capable：降级全量到手后同样重算编码——head 截断多字节误判 gb18030 恢复 full 精判 utf-8', async () => {
+    const reg = createRegistry();
+    // 4 字节 UTF-8 序列横跨 8KB 探测边界：head 截断 → gb18030；全量完整 → utf-8
+    const FULL = new Uint8Array(500_000).fill(0x41);
+    FULL.set([0xf0, 0x9f, 0x98, 0x80], 8190);
+    const calls: Array<{ start: number; end: number } | undefined> = [];
+    const read = readOf(FULL, calls);
+    let seenDet: Detection | undefined;
+    let seenCtx: StreamCtx | undefined;
+    reg.install(mk('st', ['stx'], {
+      streaming: true,
+      render: async (_b, _t, _s, det, ctx) => { seenDet = det; seenCtx = ctx; return { destroy() {} }; }
+    }));
+    const target = document.createElement('div');
+    const { det } = await createDispatcher(reg).dispatch(
+      srcWith('a.stx', fakeStore()), null, target, { read }); // fakeStore() 无 rangeCapable → 降级
+    expect(calls).toStrictEqual([{ start: 0, end: 8191 }, undefined]); // head 探测 + 降级全量（读策略不变）
+    expect(seenDet?.encoding).toBe('utf-8'); // full 精判抵达 streaming render（head 口径为 gb18030）
+    expect(det.encoding).toBe('utf-8');
+    expect(det.binary).toBe(false); // 派生 binary 同步翻转
+    expect(seenCtx?.size).toBe(FULL.length); // 降级 ctx 形态不变：size = 全量长
+  });
 });

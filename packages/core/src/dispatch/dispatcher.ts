@@ -329,7 +329,16 @@ export function createDispatcher(registry: Registry): Dispatcher {
       // 不交付全量 buffer。store 无 range 能力（含兼容路径 read 缺省的 buffer 直传）→
       // 先全量 read，ctx 退化为全量切片视图（零拷贝 subarray）
       const capable = source.store.rangeCapable === true && read !== undefined;
-      if (!capable && full === null) full = await readFull();
+      if (!capable && full === null) {
+        full = await readFull();
+        // 终审 F2 镜像（T4 评审指令）：headOnly（size 未知/超限）streaming 降级路径的
+        // det 同样仅以 8KB head 短样本判编码——降级全量到手后重算回填（openUrl 打开
+        // url jsonl 可达；head 误判 utf-8 时尾部 mojibake）。只合并 encoding/binary，
+        // 理由同 !streaming 分支：ext 等已被 sniff 阶段纠偏，整对象替换会回退纠偏
+        const redet = detect({ name: source.name, head, full });
+        det.encoding = redet.encoding;
+        det.binary = redet.binary;
+      }
       // buffer 形参 = full ?? probe：capable 且 size 未知/超限 → head 探测块；否则全量
       const base = full ?? probe;
       renderCtx = capable
