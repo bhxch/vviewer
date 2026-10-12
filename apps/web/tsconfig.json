@@ -12,6 +12,9 @@
     // 否则 include 进来的 vite.config.ts 等根文件解析不了 node 内建模块
     "types": ["node", "$app/types"]
   },
-  "include": ["src", "test", "*"],
+  // render-text 的 vendor ambient 声明（markdown-it-task-lists/footnote 均无类型）：
+  // svelte-check 经 src 模块解析跨包检查 engine.ts，须把声明文件拉进本程序才生效
+  //（render-text 自身的 plain tsc 程序已含，无需处理）
+  "include": ["src", "test", "*", "../../packages/render-text/src/types"],
   "exclude": ["src/service-worker"]
 }

@@ -285,7 +285,7 @@ describe('createZipStore 混合加密包（BUG-12：不整包拒绝，明文可�
     document.body.append(target);
     const source: FileSource = {
       storeId: 'localfiles:samples', storeLabel: 'samples', path: 'mixed.zip', name: 'mixed.zip',
-      store: { id: 'localfiles:samples', displayName: () => 'samples', listChildren: async () => [], read: async () => buffer }
+      store: { id: 'localfiles:samples', displayName: () => 'samples', listChildren: async () => [], read: async () => new Uint8Array(buffer) }
     };
     const instance = await archiveRenderer.render(buffer, target, source, { ext: 'zip' } as Detection);
     try {
@@ -333,7 +333,7 @@ describe('archiveRenderer：真实递归路径（depth 由 source.storeId 接线
       storeLabel: 'zip-test',
       path: clickName,
       name: clickName,
-      store: { id: storeId, displayName: () => 'zip-test', listChildren: async () => [], read: async () => buffer }
+      store: { id: storeId, displayName: () => 'zip-test', listChildren: async () => [], read: async () => new Uint8Array(buffer) }
     };
     const det = { ext: 'zip' } as Detection;
     const details: ArchiveOpenDetail[] = [];

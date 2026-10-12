@@ -290,7 +290,7 @@ describe('app.css 与 CODE_CAPTURES 对齐（.ts-* 规则双向覆盖）', () =>
   });
 
   it('app.css 中每个 .ts- 规则都来自 CODE_CAPTURES（无漂移）', () => {
-    const rules = [...css.matchAll(/\.ts-([a-z0-9-]+) \{/g)].map((m) => m[1]);
+    const rules = [...css.matchAll(/\.ts-([a-z0-9-]+) \{/g)].map((m) => m[1]!);
     const expected = new Set(CODE_CAPTURES.map((c) => captureToCssClass(c)));
     for (const r of rules) expect(expected.has(r), `.ts-${r} 不在 CODE_CAPTURES`).toBe(true);
     expect(rules.length).toBe(expected.size);

@@ -8,7 +8,7 @@
     "build": "pnpm --filter web build",
     "build:all": "pnpm build && cargo build --release --manifest-path server/Cargo.toml",
     "gen:grammars": "node tools/grammar-builder/build.mjs --fetch --lite && node tools/grammar-builder/build.mjs --self-build",
-    "typecheck": "tsc -b packages/*/tsconfig.json apps/web/tsconfig.e2e.json --noEmit",
+    "typecheck": "tsc -b packages/*/tsconfig.json apps/web/tsconfig.e2e.json --noEmit && pnpm --filter web typecheck",
     "server:dev": "cargo run --manifest-path server/Cargo.toml -- serve --root . --port 8321"
   },
   "devDependencies": {

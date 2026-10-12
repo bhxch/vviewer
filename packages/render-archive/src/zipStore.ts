@@ -167,7 +167,9 @@ interface ZipEntry {
 }
 interface ZipInstance {
   forEach(cb: (relPath: string, entry: ZipEntry) => void): void;
-  file(name: string): { async(type: 'uint8array'): Promise<Uint8Array> } | null;
+  // uint8array 收窄为 ArrayBuffer 版：jszip 条目读取每次新分配自有 buffer
+  //（BlobPart 可直用，TreeStore.read 同款签名）
+  file(name: string): { async(type: 'uint8array'): Promise<Uint8Array<ArrayBuffer>> } | null;
 }
 type ZipConstructor = { loadAsync(data: Uint8Array): Promise<ZipInstance> };
 

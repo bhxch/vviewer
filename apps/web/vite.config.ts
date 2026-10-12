@@ -12,6 +12,9 @@ import { createRequire } from 'node:module';
 // 的 kit.paths.base 与 PWA manifest（start_url/scope）取用，两处必须取同一值。
 // kit 3 起 SvelteKit 配置不再读 svelte.config.js，全部经 sveltekit() 插件参数传入。
 const base = process.env.VV_BASE_PATH ?? '';
+// kit 3 起 paths.base 类型收窄为 '' | `/${string}`：空串放行；非空归一为单斜杠开头
+//（吞掉漏写/重复的前导斜杠），与下方 PWA manifest 同源取 kitBase。
+const kitBase: '' | `/${string}` = base === '' ? '' : `/${base.replace(/^\/+/, '')}`;
 
 const QUERIES_SRC = fileURLToPath(new URL('../../packages/highlight/assets/queries', import.meta.url));
 const QUERIES_DEST = fileURLToPath(new URL('./static/queries', import.meta.url));
@@ -106,7 +109,7 @@ export default defineConfig({
     serveIndexHtmlInPreview(),
     sveltekit({
       adapter: adapter({ fallback: 'index.html' }),
-      paths: { base }
+      paths: { base: kitBase }
     }),
     copyTsQueries(),
     copyLibarchiveAssets(),
@@ -130,8 +133,8 @@ export default defineConfig({
         lang: 'zh-CN',
         // 子路径托管（VV_BASE_PATH，与 sveltekit() 插件参数 kit.paths.base 同源）：
         // Pages 项目站点部署在 /<repo>/ 下时 start_url/scope 必须带前缀
-        start_url: `${process.env.VV_BASE_PATH ?? ''}/`,
-        scope: `${process.env.VV_BASE_PATH ?? ''}/`,
+        start_url: `${kitBase}/`,
+        scope: `${kitBase}/`,
         display: 'standalone',
         background_color: '#ffffff',
         theme_color: '#ffffff',

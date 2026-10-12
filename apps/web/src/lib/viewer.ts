@@ -149,7 +149,9 @@ if (browser) {
 // 配置、markdown backend/图片 resolver 注入），Vite 局部热替换会重跑装配——重复
 // install 与新旧模块状态并存。decline 使变更冒泡为整页刷新，杜绝半新半旧状态；
 // 生产构建 import.meta.hot 恒为 undefined，分支不存在。vite 8 起 SSR module
-// runner 也给出 truthy 的 import.meta.hot 但无 accept.decline——加 SSR 收窄。
+// runner 也给出 truthy 的 import.meta.hot 但无 accept.decline——加 SSR 收窄；
+// 浏览器端 decline 自 accept 属性挪为 hot.decline() 顶级方法（运行时存在，见
+// vite/dist/client 的 HMRContext），但 types/hot.d.ts 漏声明——受控断言补缺口。
 if (!import.meta.env.SSR && import.meta.hot) {
-  import.meta.hot.accept.decline();
+  (import.meta.hot as unknown as { decline(): void }).decline();
 }

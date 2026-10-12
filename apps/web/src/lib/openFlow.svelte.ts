@@ -532,7 +532,7 @@ export const workspacesView = $state<{ list: Workspace[]; activeId: string }>({
   activeId: workspaceStore.activeId
 });
 workspaceStore.onWorkspacesChanged((s) => {
-  workspacesView.list = s.list;
+  workspacesView.list = [...s.list]; // listener 的 ReadonlyArray 拷成可变（与上方初始化同形）
   workspacesView.activeId = s.activeId;
 });
 

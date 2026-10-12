@@ -5,6 +5,8 @@ const BASE: Settings = {
   themeMode: 'system',
   codeThemeLight: 'onelight',
   codeThemeDark: 'serika-dark',
+  appearanceLight: 'default',
+  appearanceDark: 'default',
   excludedPatterns: [],
   autoRefresh: true,
   computePolicy: 'auto'

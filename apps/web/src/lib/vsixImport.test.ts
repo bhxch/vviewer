@@ -22,7 +22,9 @@ async function zipToVsixFile(entries: Record<string, string>): Promise<File> {
   const zip = new JSZip();
   for (const [path, content] of Object.entries(entries)) zip.file(path, content);
   const bytes = await zip.generateAsync({ type: 'uint8array' });
-  return new File([bytes], 'owl.vsix');
+  // jszip 类型面为 Uint8Array<ArrayBufferLike>（BlobPart 拒收）；运行时是自有
+  // ArrayBuffer，拷贝一层即得 Uint8Array<ArrayBuffer>（零断言，量级 KB 无感）
+  return new File([new Uint8Array(bytes)], 'owl.vsix');
 }
 
 const GOOD_VSIX_ENTRIES = {

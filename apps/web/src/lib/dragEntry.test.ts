@@ -17,7 +17,7 @@ function fileEntry({ name, fileError }: EntryStubOptions): FileSystemEntry {
     isFile: true,
     isDirectory: false,
     name,
-    file: (success, error) => {
+    file: (success: (data: File) => void, error?: (err: DOMException) => void) => {
       if (fileError) error?.(new DOMException('denied'));
       else success(stubFile(name));
     }

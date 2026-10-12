@@ -337,8 +337,9 @@ describe('markdownRenderer——后端注入（M7 远程引擎，M6 遗留）', 
 });
 
 describe('markdownRenderer——相对图片经 store 解析（终审 M3：404 现状的补齐）', () => {
-  /** store 桩：files 为「store 内路径 → 字节」的映射，read 未命中抛错（同真实 store 语义） */
-  function storeStub(files: Record<string, Uint8Array>): TreeStore {
+  /** store 桩：files 为「store 内路径 → 字节」的映射，read 未命中抛错（同真实 store 语义；
+   * 值类型与 TreeStore.read 收窄后的 Uint8Array<ArrayBuffer> 对齐） */
+  function storeStub(files: Record<string, Uint8Array<ArrayBuffer>>): TreeStore {
     return {
       id: 'stub',
       displayName: () => 'stub',

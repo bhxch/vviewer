@@ -19,7 +19,11 @@ export interface TreeStore {
   readonly id: string;    // 实例唯一 id，会话恢复用
   displayName(): string;
   listChildren(path: string): Promise<TreeNode[]>;
-  read(path: string, opts?: { range?: ByteRange }): Promise<Uint8Array>;
+  // 返回值按 ArrayBuffer 显式标注：各实现均以自有 ArrayBuffer 构造
+  //（fetch/arrayBuffer → new Uint8Array(...)），收窄后结果可直接作 BlobPart（TS 5.7+
+  // 泛型 TypedArray：默认 Uint8Array<ArrayBufferLike> 含 SharedArrayBuffer，不满足
+  // Blob 构造的 ArrayBufferView<ArrayBuffer> 约束）。
+  read(path: string, opts?: { range?: ByteRange }): Promise<Uint8Array<ArrayBuffer>>;
   /**
    * 可选：释放 store 持有的底层资源（libarchive worker/wasm 堆等）。
    * 由引用计数接线调用（openFlow：最后一个持有该实例的 tab 关闭时）；

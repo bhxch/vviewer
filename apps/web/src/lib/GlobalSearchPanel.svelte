@@ -202,7 +202,10 @@
   }
 </script>
 
-<div class="vv-gsearch" role="search" aria-label="全局搜索" bind:this={panelEl} onkeydown={onpanelkeydown}>
+<!-- role 用 dialog（Esc 关闭的浮层面板，同 WorkspaceCreateModal 等 5 处先例）：
+     search 属 landmark 非交互角色，容器 keydown 委托会触发 a11y 告警；dialog +
+     tabindex=-1（不进 Tab 序，键盘行为不变）即仓库统一的浮层面板 a11y 模式 -->
+<div class="vv-gsearch" role="dialog" aria-label="全局搜索" tabindex="-1" bind:this={panelEl} onkeydown={onpanelkeydown}>
   <div class="vv-gsearch-bar">
     <input
       bind:this={inputEl}

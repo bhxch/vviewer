@@ -15,7 +15,7 @@ export function createSingleFileStore(file: File): TreeStore {
 }
 
 export function createUrlStore(url: string): TreeStore {
-  let bytes: Promise<Uint8Array> | null = null;
+  let bytes: Promise<Uint8Array<ArrayBuffer>> | null = null;
   const name = decodeURIComponent(url.split('/').pop() ?? url).split(/[?#]/, 1)[0] ?? url;
   const id = `url:${hash8(url)}`;
   return {

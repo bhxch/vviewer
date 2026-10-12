@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite dev",
     "build": "node ../../tools/gen-icons.mjs && vite build && node scripts/check-pwa-build.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
     "@vviewer/core": "workspace:*",
@@ -26,6 +27,7 @@
     "@types/node": "^26.6.4",
     "jszip": "^3.10.2",
     "svelte": "^5.57.2",
+    "svelte-check": "^4.7.6",
     "vite": "^8.3.4",
     "vite-plugin-pwa": "2.0.0",
     "workbox-build": "^7.4.1",

@@ -236,7 +236,7 @@ describe('archiveRenderer tar 分支（magic 分派 + 事件解耦）', () => {
       storeLabel: 'samples',
       path: 'sample.tar',
       name: 'sample.tar',
-      store: { id: 'localfiles:samples', displayName: () => 'samples', listChildren: async () => [], read: async () => bytes }
+      store: { id: 'localfiles:samples', displayName: () => 'samples', listChildren: async () => [], read: async () => new Uint8Array(bytes) }
     };
     const details: ArchiveOpenDetail[] = [];
     const onOpen = (ev: Event): void => {

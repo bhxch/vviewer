@@ -3,8 +3,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TreeNode, TreeStore } from '@vviewer/core';
 import { IMAGE_MAX_BYTES, resolveImageBlobUrl, resolveInStorePath } from './markdownImages';
 
-// jsdom 无 URL.createObjectURL/revokeObjectURL：补桩（blob 语义不在本测范围）
-const createObjectURL = vi.fn(() => 'blob:stub-1');
+// jsdom 无 URL.createObjectURL/revokeObjectURL：补桩（blob 语义不在本测范围）；
+// 桩带显式参数类型，使 mock.calls 元素为 [Blob] 元组（第 51 行取参免断言）
+const createObjectURL = vi.fn((_blob: Blob) => 'blob:stub-1');
 const revokeObjectURL = vi.fn();
 Object.defineProperty(URL, 'createObjectURL', { value: createObjectURL, configurable: true, writable: true });
 Object.defineProperty(URL, 'revokeObjectURL', { value: revokeObjectURL, configurable: true, writable: true });
@@ -13,8 +14,9 @@ afterEach(() => {
   revokeObjectURL.mockClear();
 });
 
-/** 目录树桩：nodes 为已知清单（带 size），files 为可读内容；记录 read 调用 */
-function storeStub(nodes: TreeNode[], files: Record<string, Uint8Array>) {
+/** 目录树桩：nodes 为已知清单（带 size），files 为可读内容；记录 read 调用
+ * （files 值与 TreeStore.read 同签名：Uint8Array<ArrayBuffer>） */
+function storeStub(nodes: TreeNode[], files: Record<string, Uint8Array<ArrayBuffer>>) {
   const reads: string[] = [];
   const store: TreeStore = {
     id: 'stub',
@@ -48,8 +50,8 @@ describe('resolveImageBlobUrl', () => {
     );
     const url = await resolveImageBlobUrl(store, 'docs/readme.md', 'img/a.png');
     expect(url).toBe('blob:stub-1');
-    const blob = createObjectURL.mock.calls[0]?.[0] as Blob;
-    expect(blob.type).toBe('image/png');
+    const blob = createObjectURL.mock.calls[0]?.[0];
+    expect(blob?.type).toBe('image/png');
   });
 
   it('TreeNode.size 超上限：零读取跳过（保留原 src 的语义，不生成 blob）', async () => {
