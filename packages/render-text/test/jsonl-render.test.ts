@@ -643,4 +643,25 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
     expect(inst.getMeta().lines).toBe(0);
     inst.destroy();
   });
+
+  // F1 回归钉（fix round 1）：size 已知 + head=全量 + 尺寸非块对齐——末块为部分
+  // 预置块（nextBlock 停在 blockCount-1），构造期 atEnd 须为真（head 触达文件尾
+  // 即 EOF 证据），否则排空循环不进入：索引滞留前 2 块、状态条滞留「已加载 N 行」、
+  // meta.lines 少计。生产可达形态：!rangeCapable 全量切片视图、capable≤1MB 直读。
+  it('head=全量 + 尺寸非块对齐：状态条直接「共 N 行」、meta.lines 全量、部分末块恰一次重拉', async () => {
+    stubResizeObserver();
+    const text = padLines(409, 1500); // 613,908B ≈ 600KB：3 块（0/1 满、块 2 部分预置 89,620B）
+    const content = enc(text);
+    expect(content.length % BLOCK).not.toBe(0); // 非对齐自校验（非空转）
+    const calls: RangeCall[] = [];
+    const host = mount();
+    const inst = (await jsonlRenderer.render(content, host, source, det,
+      streamCtx({ size: content.length, content, head: content, calls }))) as JsonlInstance;
+    expect(host.querySelector('.vv-jsonl-status')!.textContent).toBe('共 409 行');
+    expect(inst.getMeta().lines).toBe(409);
+    expect(host.querySelectorAll('.vv-jsonl-card').length).toBeGreaterThan(0);
+    // 排空仅触发部分预置末块的契约⑦整块重拉（块 0/1 零 IO 直取）
+    expect(calls).toStrictEqual([{ start: 2 * BLOCK, end: content.length - 1 }]);
+    inst.destroy();
+  });
 });

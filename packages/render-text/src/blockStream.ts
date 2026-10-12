@@ -24,7 +24,8 @@
 // 上界——head 预置块同样计入，命中触新（删除重插）、超限逐出表首（最旧），与
 // hexSource 同语义；被逐出块再访问 = block 同步抛未就绪 / ensureBlock 重拉（已被
 // 确认的块内容视为终态，重拉同字节）。nextBlock 与 confirmedBytes 均单调（重拉
-// 不回退），atEnd 由 nextBlock 推导（逐出不影响 EOF 判定）、shortSeen 一经置位锁存。
+// 不回退），atEnd 由 nextBlock 推导、head 预置末块（可短）同作 EOF 证据（fix
+// round 1 F1 disjunct）、shortSeen 一经置位锁存——逐出与重拉均不翻转 EOF 事实。
 import type { StreamCtx } from '@vviewer/core';
 
 /**
@@ -238,9 +239,13 @@ export function createBlockStream(
     atEnd() {
       if (fullData !== null) return true; // 全量即末块已知
       if (shortSeen) return true; // 短读确认 EOF
-      // size 已知：末块就绪 = nextBlock 精确到达（空文件 0 块，构造即 atEnd）。
-      // 用 nextBlock 而非查块表：末块被 LRU 逐出不翻转 EOF 事实（atEnd 单调）
-      return sizeKnown ? blockCount === 0 || nextBlock >= blockCount : false;
+      // size 已知：末块就绪 = nextBlock 精确到达（空文件 0 块，构造即 atEnd），
+      // 或末块已由 head 预置——head 触达文件尾即 EOF 证据（!rangeCapable 全量
+      // 视图 / capable≤1MB 直读形态，末块可短：head 未必落在块边界，fix round 1
+      // F1 disjunct）。优先 nextBlock 推进事实：LRU 逐出末块不翻转 EOF（atEnd 单调）
+      return sizeKnown
+        ? blockCount === 0 || nextBlock >= blockCount || blocks.has(blockCount - 1)
+        : false;
     }
   };
 }

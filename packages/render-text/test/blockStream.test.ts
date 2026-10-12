@@ -303,4 +303,16 @@ describe('createBlockStream', () => {
   it('⑰ STREAM_MAX_BYTES = 512MB（流式尺寸防线常量，jsonl/code 统一裁决共享）', () => {
     expect(STREAM_MAX_BYTES).toBe(512 * 1024 * 1024);
   });
+
+  it('⑱ head 覆盖全文件 + 尺寸非块对齐（F1）：部分预置末块即 EOF 证据，atEnd 构造期为真', async () => {
+    const data = ALPHA.slice(0, 6); // 6B：块 0=4B 满、块 1=2B 部分预置（head=全量、尺寸非对齐）
+    const calls: RangeCall[] = [];
+    const bs = createBlockStream(fakeCtx({ size: 6, content: data, head: data, calls }), B);
+    expect(bs.atEnd()).toBe(true); // nextBlock 停在 blockCount-1（末块非整块不推进）——disjunct blocks.has(末块) 恢复证据
+    expect(bs.confirmedBytes).toBe(6);
+    // atEnd 为真不越契约⑦：部分预置末块经 ensureBlock 仍恰一次整块重拉（短读端点精确）
+    expect(await bs.ensureBlock(1)).toEqual(data.slice(4, 6));
+    expect(calls).toStrictEqual([{ start: 4, end: 5 }]);
+    expect(bs.atEnd()).toBe(true);
+  });
 });
