@@ -72,6 +72,7 @@ describe('createLocalFsStore', () => {
     ]);
     const store = createLocalFsStore(root as unknown as FileSystemDirectoryHandle);
     expect(store.id).toBe('localfs:proj');
+    expect(store.rangeCapable).toBe(true); // 能力标记（spec §2.3）：read 的 opts.range 分支已实现，dispatcher 据此选路 streaming
     expect((await store.listChildren('')).map((n) => `${n.kind}:${n.name}`))
       .toEqual(['dir:src', 'file:README.md']);
     expect(await store.read('src/main.rs')).toEqual(new Uint8Array([2, 3]));
