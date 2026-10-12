@@ -7,7 +7,9 @@ import {
   serveBinaryWorker,
   type BinaryRequest,
   type BinaryWorkerMessage,
+  type SearchChunkRequest,
   type SearchDoneMessage,
+  type SearchNeedMessage,
   type SearchProgressMessage
 } from '../src/binary.worker';
 
@@ -113,7 +115,10 @@ function fakeCtx(): { ctx: { onmessage: ((ev: MessageEvent) => void) | null; pos
   return { ctx, out };
 }
 
-function post(ctx: { onmessage: ((ev: MessageEvent) => void) | null }, req: BinaryRequest): void {
+function post(
+  ctx: { onmessage: ((ev: MessageEvent) => void) | null },
+  req: BinaryRequest | SearchChunkRequest
+): void {
   ctx.onmessage?.({ data: req } as MessageEvent);
 }
 
@@ -171,5 +176,152 @@ describe('serveBinaryWorker：search 流（fake ctx）', () => {
     expect(out.filter((m): m is SearchDoneMessage => 'type' in m && m.type === 'search-done')).toEqual([
       { id: 2, type: 'search-done', truncated: false }
     ]);
+  });
+});
+
+// ---- binary.worker search 窗口协议（io-streaming Task 6）：无 data 请求 →
+// search-need 逐块要数 → search-chunk 回灌，scanChunk 语义与 data 模式一致 ----
+
+describe('serveBinaryWorker：search 窗口协议（need/chunk 握手，fake ctx）', () => {
+  it('无 data 请求 → search-need 逐块驱动，chunk 回灌后照常 progress/done', async () => {
+    const { ctx, out } = fakeCtx();
+    serveBinaryWorker(ctx, { chunkSize: 4 });
+    post(ctx, { id: 7, kind: 'search', needle: enc('ab'), size: 8 }); // 无 data（窗口模式）
+    await drain();
+    // 首条 need：[0, 4)（chunkSize 步进）；未供数前无 progress/done
+    expect(out).toEqual([{ id: 7, type: 'search-need', start: 0, end: 4 }]);
+    post(ctx, { id: 7, type: 'search-chunk', start: 0, bytes: enc('abab') });
+    await drain();
+    post(ctx, { id: 7, type: 'search-chunk', start: 4, bytes: enc('abab') });
+    await drain();
+    const progress = out.filter((m): m is SearchProgressMessage => 'type' in m && m.type === 'search-progress');
+    expect(progress.map((m) => [m.scanned, m.total, m.hits, m.offsets])).toEqual([
+      [4, 8, 2, [0, 2]],
+      [8, 8, 2, [4, 6]]
+    ]);
+    expect(out.find((m): m is SearchDoneMessage => 'type' in m && m.type === 'search-done')).toEqual({
+      id: 7,
+      type: 'search-done',
+      truncated: false
+    });
+  });
+
+  it('overlap 跨块命中恰报一次（前块尾 overlap 回借组窗，语义同 scanAll）', async () => {
+    const { ctx, out } = fakeCtx();
+    serveBinaryWorker(ctx, { chunkSize: 3 });
+    post(ctx, { id: 1, kind: 'search', needle: enc('Xa'), size: 6 }); // 数据逐块供给 'abX' + 'abX'
+    await drain();
+    expect(out).toEqual([{ id: 1, type: 'search-need', start: 0, end: 3 }]);
+    post(ctx, { id: 1, type: 'search-chunk', start: 0, bytes: enc('abX') });
+    await drain();
+    post(ctx, { id: 1, type: 'search-chunk', start: 3, bytes: enc('abX') });
+    await drain();
+    const progress = out.filter((m): m is SearchProgressMessage => 'type' in m && m.type === 'search-progress');
+    // 'Xa'@2 起点在前块区域、终点伸入后块：前块截断不可见，后块组窗（尾 1 字节 +
+    // 本块）恰报一次——'ab'@0、'ab'@3 等非跨界命中不受 overlap 影响
+    expect(progress.map((m) => [m.scanned, m.offsets])).toEqual([[3, []], [6, [2]]]);
+    expect(out.find((m): m is SearchDoneMessage => 'type' in m && m.type === 'search-done')).toEqual({
+      id: 1,
+      type: 'search-done',
+      truncated: false
+    });
+  });
+
+  it('maxHits 提前终止：配额收满即 done(truncated:true)，块内即时判停、不再发 need', async () => {
+    const { ctx, out } = fakeCtx();
+    serveBinaryWorker(ctx, { chunkSize: 2, maxHits: 3 });
+    post(ctx, { id: 2, kind: 'search', needle: enc('a'), size: 6 }); // 供给 'aaaaaa'
+    await drain();
+    expect(out).toEqual([{ id: 2, type: 'search-need', start: 0, end: 2 }]);
+    post(ctx, { id: 2, type: 'search-chunk', start: 0, bytes: enc('aa') });
+    await drain();
+    expect(out.at(-1)).toMatchObject({ id: 2, type: 'search-need', start: 2, end: 4 });
+    post(ctx, { id: 2, type: 'search-chunk', start: 2, bytes: enc('aa') });
+    await drain();
+    const progress = out.filter((m): m is SearchProgressMessage => 'type' in m && m.type === 'search-progress');
+    // 第二块配额仅剩 1（3-2）：块内即时判停恰收满 maxHits
+    expect(progress.map((m) => [m.scanned, m.hits])).toEqual([[2, 2], [4, 1]]);
+    expect(out.find((m): m is SearchDoneMessage => 'type' in m && m.type === 'search-done')).toEqual({
+      id: 2,
+      type: 'search-done',
+      truncated: true
+    });
+    expect(out.some((m) => (m as SearchNeedMessage).type === 'search-need' && (m as SearchNeedMessage).start === 4)).toBe(false);
+  });
+
+  it('末块钳制：size 非块整数倍时 need.end 钳到 size，末块供给后 done', async () => {
+    const { ctx, out } = fakeCtx();
+    serveBinaryWorker(ctx, { chunkSize: 4 });
+    post(ctx, { id: 3, kind: 'search', needle: enc('zz'), size: 6 }); // 数据 'abab' + 'zz'
+    await drain();
+    expect(out[0]).toMatchObject({ id: 3, type: 'search-need', start: 0, end: 4 });
+    post(ctx, { id: 3, type: 'search-chunk', start: 0, bytes: enc('abab') });
+    await drain();
+    expect(out.at(-1)).toMatchObject({ id: 3, type: 'search-need', start: 4, end: 6 }); // 末块钳制
+    post(ctx, { id: 3, type: 'search-chunk', start: 4, bytes: enc('zz') });
+    await drain();
+    const progress = out.filter((m): m is SearchProgressMessage => 'type' in m && m.type === 'search-progress');
+    expect(progress[1]).toMatchObject({ scanned: 6, total: 6, hits: 1, offsets: [4] });
+    expect(out.find((m): m is SearchDoneMessage => 'type' in m && m.type === 'search-done')).toEqual({
+      id: 3,
+      type: 'search-done',
+      truncated: false
+    });
+  });
+
+  it('search-cancel 使窗口任务失效：不再发 need，迟到 chunk 丢弃', async () => {
+    const { ctx, out } = fakeCtx();
+    serveBinaryWorker(ctx, { chunkSize: 2 });
+    post(ctx, { id: 9, kind: 'search', needle: enc('a'), size: 4 });
+    await drain();
+    post(ctx, { id: 9, kind: 'search-cancel' });
+    post(ctx, { id: 9, type: 'search-chunk', start: 0, bytes: enc('aa') }); // 取消后的迟到块
+    await drain();
+    expect(out).toEqual([{ id: 9, type: 'search-need', start: 0, end: 2 }]); // 仅首条 need，无 progress/done
+  });
+
+  it('新窗口搜索自动失效旧任务：旧 chunk 丢弃，新任务照常完成', async () => {
+    const { ctx, out } = fakeCtx();
+    serveBinaryWorker(ctx, { chunkSize: 2 });
+    post(ctx, { id: 1, kind: 'search', needle: enc('a'), size: 4 });
+    await drain();
+    post(ctx, { id: 2, kind: 'search', needle: enc('b'), size: 2 });
+    await drain();
+    post(ctx, { id: 1, type: 'search-chunk', start: 0, bytes: enc('aa') }); // 旧任务迟到块
+    await drain();
+    expect(out.at(-1)).toMatchObject({ id: 2, type: 'search-need', start: 0, end: 2 });
+    post(ctx, { id: 2, type: 'search-chunk', start: 0, bytes: enc('bb') });
+    await drain();
+    const done = out.filter((m): m is SearchDoneMessage => 'type' in m && m.type === 'search-done');
+    expect(done).toEqual([{ id: 2, type: 'search-done', truncated: false }]);
+  });
+
+  it('空 needle / size 0：不发 need 直接 done（同 scanAll 空集语义）', async () => {
+    const { ctx, out } = fakeCtx();
+    serveBinaryWorker(ctx, { chunkSize: 4 });
+    post(ctx, { id: 1, kind: 'search', needle: new Uint8Array(0), size: 8 });
+    post(ctx, { id: 2, kind: 'search', needle: enc('a'), size: 0 });
+    await drain();
+    expect(out).toEqual([
+      { id: 1, type: 'search-done', truncated: false },
+      { id: 2, type: 'search-done', truncated: false }
+    ]);
+  });
+
+  it('caseInsensitive 折叠在窗口模式同样生效（数据与 needle 均折叠）', async () => {
+    const { ctx, out } = fakeCtx();
+    serveBinaryWorker(ctx, { chunkSize: 4 });
+    post(ctx, { id: 5, kind: 'search', needle: enc('AB'), caseInsensitive: true, size: 6 }); // 供给 'aBab' + 'AB'
+    await drain();
+    post(ctx, { id: 5, type: 'search-chunk', start: 0, bytes: enc('aBab') });
+    await drain();
+    post(ctx, { id: 5, type: 'search-chunk', start: 4, bytes: enc('AB') });
+    await drain();
+    const progress = out.filter((m): m is SearchProgressMessage => 'type' in m && m.type === 'search-progress');
+    expect(progress.map((m) => m.offsets)).toEqual([[0, 2], [4]]);
+    expect(out.find((m): m is SearchDoneMessage => 'type' in m && m.type === 'search-done')).toMatchObject({
+      id: 5,
+      truncated: false
+    });
   });
 });

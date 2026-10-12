@@ -377,4 +377,42 @@ describe('renderHex：窗口模式（StreamCtx）', () => {
     inst.destroy();
     target.remove();
   });
+
+  it('窗口模式装饰叠加 DOM：命中/光标/flash 三档 span 切分同行输出（T5 评审 Minor 补钉）', async () => {
+    const calls: Array<{ start: number; end: number }> = [];
+    const { inst, target, dump } = mount(makeCtx(calls));
+    await inst.structReady;
+    // 命中：字节 @100（0x64 0x65 → hex '6465'；模式每 256 字节重复，首个命中在行 6）
+    const search = target.querySelector('.vv-hex-search') as HTMLInputElement;
+    search.value = '6465';
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    // flash：跳转 0x68（104，与命中同行 6）
+    const goto = target.querySelector('.vv-hex-goto') as HTMLInputElement;
+    goto.value = '0x68';
+    goto.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    // cursor：mock 行矩形（jsdom 无布局）后点击行 6 列 0 → byteIndexAtColumn 落行首字节 96
+    const row6 = [...dump.querySelectorAll('.vv-hex-row')].find((r) => r.textContent!.startsWith('00000060'));
+    expect(row6).toBeDefined();
+    row6!.getBoundingClientRect = () =>
+      ({ width: 77 * 8, left: 0, top: 0, right: 616, bottom: 18, height: 18, x: 0, y: 0 }) as DOMRect;
+    row6!.dispatchEvent(new MouseEvent('click', { clientX: 0, bubbles: true }));
+    // 点击触发 refresh 会整窗重建行元素：重新查询行 6 再断言
+    const row6After = [...dump.querySelectorAll('.vv-hex-row')].find((r) => r.textContent!.startsWith('00000060'))!;
+    // 行 6（偏移 96..111）三档装饰齐备：命中 @100（active）、flash @104、cursor @96
+    const spans = [...row6After.querySelectorAll('span')];
+    expect(spans.filter((s) => s.classList.contains('vv-hex-hit-active')).map((s) => s.textContent)).toEqual([
+      '64 65',
+      'de'
+    ]); // hex 列与 ASCII 列同档（0x64/0x65 恰为可打印 'de'）
+    expect(spans.some((s) => s.classList.contains('vv-hex-goto-flash'))).toBe(true);
+    expect(spans.some((s) => s.classList.contains('vv-hex-cursor'))).toBe(true);
+    // span 切分无损：各段文本拼接 = 整行文本（行格式与全量模式逐字节一致）
+    const joined = [...row6After.childNodes].map((n) => n.textContent).join('');
+    expect(joined).toBe(row6After.textContent);
+    inst.destroy();
+    target.remove();
+  });
 });

@@ -3,7 +3,7 @@
 // （Enter 发起、进度/命中状态位、取消、两档高亮渲染、导航、IME 过滤、兜底扫描）。
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { renderHex, parseSearchInput } from '../src/hex';
-import type { BinaryRequest, BinaryWorkerMessage, SearchRequest } from '../src/binary.worker';
+import type { BinaryRequest, BinaryWorkerMessage, SearchChunkRequest, SearchRequest, SearchWindowRequest } from '../src/binary.worker';
 
 // jsdom 无 ResizeObserver（虚拟滚动依赖），全文件 stub（照 hex.test.ts 惯例）
 beforeEach(() => {
@@ -58,7 +58,7 @@ const BUF = (() => {
   return b;
 })();
 
-type FakeMsg = BinaryRequest | BinaryWorkerMessage;
+type FakeMsg = BinaryRequest | SearchChunkRequest | BinaryWorkerMessage;
 
 function makeFake() {
   const requests: FakeMsg[] = [];
@@ -122,9 +122,10 @@ function pressEnter(el: HTMLInputElement, opts: { shift?: boolean; composing?: b
 }
 
 async function flush(): Promise<void> {
-  for (let i = 0; i < 4; i++) await Promise.resolve();
-  await new Promise((r) => setTimeout(r, 0));
-  await new Promise((r) => setTimeout(r, 0));
+  // 动态 import('./client')（ensureSearchClient/structReady 首次加载）经 vite-node
+  // 多跳异步传播，固定微任务数不可靠（全仓并行加载下尤其如此）——逐轮 setTimeout
+  // 多次直至稳定（同 hexWorkerLeak settle 的粒度）
+  for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0));
 }
 
 /** 搜索 fake（fakes[1]）回灌一次完整搜索（progress + done） */
@@ -325,6 +326,106 @@ describe('renderHex：搜索工具条', () => {
     await flush();
     expect(status.textContent).toBe('1/2 处命中'); // done 后自动定位首个命中
     expect(dump.querySelectorAll('.vv-hex-hit-active').length).toBeGreaterThan(0);
+    inst.destroy();
+    target.remove();
+  });
+});
+
+// ---- io-streaming Task 6：窗口模式搜索（need/chunk 协议，无 data 请求）----
+
+describe('renderHex：窗口模式搜索（need/chunk 协议）', () => {
+  /** fake 全量文件：字节值 = 偏移 mod 256（'deadbeef' 命中 @222 起每 256 字节重复） */
+  const FULL = Uint8Array.from({ length: 200_000 }, (_, i) => i & 0xff);
+  const HEAD = FULL.slice(0, 8192);
+
+  /** fake read：按 ByteRange（end 含）切片并记录调用 */
+  function readOf(calls: Array<{ start: number; end: number }>) {
+    return async (r: { start: number; end: number }): Promise<Uint8Array<ArrayBuffer>> => {
+      calls.push({ start: r.start, end: r.end });
+      const end = Math.min(r.end, FULL.length - 1);
+      return FULL.slice(r.start, end + 1);
+    };
+  }
+
+  function setupWindow(read: (r: { start: number; end: number }) => Promise<Uint8Array<ArrayBuffer>>): {
+    inst: ReturnType<typeof renderHex>;
+    target: HTMLElement;
+    dump: HTMLElement;
+    search: HTMLInputElement;
+    status: HTMLElement;
+    cancel: HTMLButtonElement;
+    fakes: ReturnType<typeof makeFake>[];
+  } {
+    const target = document.createElement('div');
+    document.body.append(target);
+    const fakes: ReturnType<typeof makeFake>[] = [];
+    const inst = renderHex(HEAD, target, {
+      createWorker: () => {
+        const f = makeFake();
+        fakes.push(f);
+        return f.worker as unknown as Worker; // 第 1 次=结构树（不响应），第 2 次=搜索
+      }
+    }, { size: FULL.length, head: HEAD, read });
+    return {
+      inst,
+      target,
+      dump: target.querySelector('.vv-hex-dump') as HTMLElement,
+      search: target.querySelector('.vv-hex-search') as HTMLInputElement,
+      status: target.querySelector('.vv-hex-search-status') as HTMLElement,
+      cancel: target.querySelector('.vv-hex-search-cancel') as HTMLButtonElement,
+      fakes
+    };
+  }
+
+  it('窗口模式走 need/chunk 协议：请求无 data、read 按区间供块（不全量预读），命中照常', async () => {
+    const calls: Array<{ start: number; end: number }> = [];
+    const { inst, target, dump, search, status, cancel, fakes } = setupWindow(readOf(calls));
+    await flush();
+    search.value = 'deadbeef';
+    pressEnter(search);
+    await flush();
+    // 搜索请求为窗口形态：无 data、带 size（worker 不再收到全量副本）
+    const req = fakes[1]!.requests[0] as SearchWindowRequest;
+    expect('data' in req).toBe(false);
+    expect(req.size).toBe(FULL.length);
+    expect(req.needle).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
+    expect(cancel.style.display).toBe('');
+    // worker 需要首 1MB → 末块钳制即全文件 → client 经 ctx.read 供块（end 含换算）
+    const id = req.id;
+    fakes[1]!.worker.respond({ id, type: 'search-need', start: 0, end: FULL.length });
+    await flush();
+    // 无全量回退读（T5 过渡方案已移除）：触达偏移 0 的 read 仅 need 供块这一次
+    //（结构树尾窗读不涉偏移 0，与供块读可区分）
+    expect(calls.filter((c) => c.start === 0)).toEqual([{ start: 0, end: FULL.length - 1 }]);
+    const chunk = fakes[1]!.requests[1] as SearchChunkRequest;
+    expect(chunk).toMatchObject({ id, type: 'search-chunk', start: 0 });
+    expect(chunk.bytes).toEqual(FULL);
+    // 测试扮演 worker：progress + done（命中 @222/@478，行 13/行 29）
+    fakes[1]!.worker.respond({ id, type: 'search-progress', scanned: FULL.length, total: FULL.length, hits: 2, offsets: [222, 478] });
+    fakes[1]!.worker.respond({ id, type: 'search-done', truncated: false });
+    expect(status.textContent).toBe('1/2 处命中'); // done 后自动定位首个命中
+    expect(dump.querySelectorAll('.vv-hex-hit-active').length).toBeGreaterThan(0);
+    inst.destroy();
+    target.remove();
+  });
+
+  it('窗口模式供数读失败：状态位「搜索数据读取失败」+ 复位忙碌（发 cancel，不悬挂）', async () => {
+    const { inst, target, search, status, cancel, fakes } = setupWindow(async () => {
+      throw new Error('io gone');
+    });
+    await flush();
+    search.value = 'deadbeef';
+    pressEnter(search);
+    await flush();
+    // 读全拒时 structReady 在尾窗 ensure 处即失败、结构树 worker 不创建——搜索
+    // fake 取最后一个（正常路径为 fakes[1]，本路径为 fakes[0]）
+    const searchFake = fakes[fakes.length - 1]!;
+    const id = (searchFake.requests[0] as { id: number }).id;
+    searchFake.worker.respond({ id, type: 'search-need', start: 0, end: 4 });
+    await flush();
+    expect(status.textContent).toBe('搜索数据读取失败');
+    expect(cancel.style.display).toBe('none'); // 忙碌已复位
+    expect(searchFake.requests.some((r) => (r as { kind?: string }).kind === 'search-cancel')).toBe(true);
     inst.destroy();
     target.remove();
   });

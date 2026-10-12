@@ -13,6 +13,9 @@
 //（hexSource 块缓存供数：可视行命中直取、未就绪占位 + ensure 拉块重渲），size
 // 未知由 hexRenderer 先做全量回退读再进既有全量装配。行格式输出与全量模式逐字节
 // 一致（spec §4.1，hex.test 窗口用例钉住）。
+// Task 6（io-streaming）：窗口模式搜索接 need/chunk 握手——worker 以 search-need
+//（1MB 步进）驱动、client 经 ctx.read 逐块回灌，超大文件不再整件预读（T5 全量
+// 回退过渡方案移除，仅存于无 Worker 降级路径）。
 import { virtualScroller, type VirtualScrollerHandle, type Detection, type FileSource, type RenderedInstance, type Renderer, type StreamCtx } from '@vviewer/core';
 import { renderHexBytes, HEX_ROW_BYTES, byteIndexAtColumn } from './hexBytes';
 import type { HexHighlight, HexRow } from './hexBytes';
@@ -98,6 +101,14 @@ export interface HexDomOptions {
   /** 注入 worker 创建器（测试/无 Worker 环境可替换）；默认 new Worker(binary.worker) */
   createWorker?: () => Worker | null;
 }
+
+/**
+ * 搜索扫描数据源（io-streaming Task 6）：full = buffer 直用（全量模式现状，data
+ * 协议）；window = size + read 交 client need/chunk 握手逐块拉取（worker 驱动）。
+ */
+type SearchScanSource =
+  | { kind: 'full'; bytes: Uint8Array }
+  | { kind: 'window'; size: number; read: (r: { start: number; end: number }) => Promise<Uint8Array<ArrayBuffer>> };
 
 /**
  * hex dump DOM 渲染（hexRenderer.render 的主体，独立导出便于复用）。
@@ -427,11 +438,12 @@ export function renderHex(
     renderSearchStatus();
   }
 
-  /** 搜索执行（数据底座就绪后）：worker 分块扫描 + 兜底主线程 scanAll。Task 5 从
-   * startSearch 拆出——仅把扫描数据源参数化，令牌/回调逻辑原样（legacy 路径时序不变）。 */
+  /** 搜索执行（数据底座就绪后）：worker 分块扫描 + 兜底主线程 scanAll。Task 6 数
+   * 据源参数化为两形态——全量（buffer 直用，data 协议现状）与窗口（size+read 交
+   * worker need/chunk 握手逐块拉取）；令牌/回调逻辑两形态共用（legacy 路径时序不变）。 */
   function runSearch(
     parsed: NonNullable<Exclude<ParsedSearchInput, { kind: 'invalid' }>>,
-    scanBytes: Uint8Array,
+    source: SearchScanSource,
     seq: number
   ): void {
     const caseInsensitive = parsed.kind === 'text' && !caseToggle.checked;
@@ -445,6 +457,12 @@ export function renderHex(
     };
     const onDone = (r: SearchDoneInfo): void => {
       if (seq !== searchSeq) return;
+      if (r.error !== undefined) {
+        // 窗口模式供数失败（读失败/短读/超时）：复位忙碌 + 状态位提示，不落错误卡片
+        setSearchBusy(false);
+        searchStatus.textContent = '搜索数据读取失败';
+        return;
+      }
       hitOffsets = r.offsets;
       hitTruncated = r.truncated;
       addHitRows(r.offsets);
@@ -459,18 +477,39 @@ export function renderHex(
     void ensureSearchClient().then((client) => {
       if (seq !== searchSeq) return; // 建连期间已被新搜索/取消取代
       if (client) {
-        client.search(parsed.bytes, { data: scanBytes, caseInsensitive, onProgress, onDone });
+        if (source.kind === 'window') {
+          // 窗口模式：无 data 请求，worker 经 search-need 驱动、client 注入的 read
+          // 闭包逐块回灌（Task 6 协议）
+          client.search(parsed.bytes, { size: source.size, read: source.read, caseInsensitive, onProgress, onDone });
+          return;
+        }
+        client.search(parsed.bytes, { data: source.bytes, caseInsensitive, onProgress, onDone });
         return;
       }
-      void scanAll(scanBytes, parsed.bytes, {
-        fold: caseInsensitive,
-        shouldContinue: () => seq === searchSeq,
-        onChunk: (info) => {
-          onProgress({ scanned: info.scanned, total: info.total, hits: info.hits, offsets: info.offsets });
+      // 无 Worker 兜底：主线程 scanAll。窗口模式需备齐全量字节——head 已覆盖全文
+      // 件直用 buffer（零读），否则一次全量回退读（T5 过渡语义仅存于本降级路径）。
+      // 读失败自兜底（评审指令①口径）：状态位提示 + 复位忙碌，不落错误卡片。
+      void (async (): Promise<Uint8Array | null> => {
+        if (source.kind === 'full') return source.bytes;
+        if (buffer.length >= source.size) return buffer;
+        return ctx!.read({ start: 0, end: Number.MAX_SAFE_INTEGER });
+      })().then((base) => {
+        if (seq !== searchSeq) return; // 拉取期间已被新搜索/取消取代
+        if (base === null) {
+          setSearchBusy(false);
+          searchStatus.textContent = '搜索数据读取失败';
+          return;
         }
-      }).then((res) => {
-        if (seq !== searchSeq || res.aborted) return;
-        onDone({ truncated: res.truncated, offsets: res.offsets });
+        void scanAll(base, parsed.bytes, {
+          fold: caseInsensitive,
+          shouldContinue: () => seq === searchSeq,
+          onChunk: (info) => {
+            onProgress({ scanned: info.scanned, total: info.total, hits: info.hits, offsets: info.offsets });
+          }
+        }).then((res) => {
+          if (seq !== searchSeq || res.aborted) return;
+          onDone({ truncated: res.truncated, offsets: res.offsets });
+        });
       });
     });
   }
@@ -498,25 +537,14 @@ export function renderHex(
     setSearchBusy(true);
     renderSearchStatus();
     if (src === null) {
-      runSearch(parsed, buffer, seq); // 全量模式：buffer 即扫描底座（Task 2 原路径）
+      runSearch(parsed, { kind: 'full', bytes: buffer }, seq); // 全量模式：buffer 即扫描底座（Task 2 原路径）
       return;
     }
-    // 窗口模式临时处理（Task 6 接入分块扫描前的过渡）：扫描需要全量字节，经
-    // ctx.read 一次拉全（head 已覆盖全文件时直用 buffer，零读）。读失败自兜底
-    // （评审指令①口径）：状态位提示 + 复位忙碌，不落错误卡片。命中行渲染仍走
-    // 「slice null → ensure + 重渲」（行未就绪时占位，到位后高亮重绘）。
-    void (async (): Promise<Uint8Array | null> => {
-      if (buffer.length >= src.size) return buffer; // head 已是全量（≤1MB/非 rangeCapable）
-      return ctx!.read({ start: 0, end: Number.MAX_SAFE_INTEGER });
-    })().then((base) => {
-      if (seq !== searchSeq) return; // 拉取期间已被新搜索/取消取代
-      if (base === null) {
-        setSearchBusy(false);
-        searchStatus.textContent = '搜索数据读取失败';
-        return;
-      }
-      runSearch(parsed, base, seq);
-    });
+    // 窗口模式（io-streaming Task 6 need/chunk 握手）：worker 逐块经 ctx.read 拉取
+    // 扫描（1MB 步进、末块钳制），超大文件不再整件预读（T5 全量回退过渡方案移除）。
+    // 命中行的块加载仍走「slice null → ensure + 重渲」——gotoHit 定位行未就绪时
+    // 占位、到位后高亮重绘，命中 offset 所在块由 ensure 保证。
+    runSearch(parsed, { kind: 'window', size: src.size, read: ctx!.read }, seq);
   }
 
   searchInput.addEventListener('input', () => {

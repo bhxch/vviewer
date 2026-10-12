@@ -49,8 +49,9 @@ export function scanChunk(
   return hits;
 }
 
-/** ASCII 字母折叠（大小写不敏感文本搜索；仅 A-Z↔a-z，多字节 UTF-8 序列不受影响） */
-function foldBytes(bytes: Uint8Array): Uint8Array {
+/** ASCII 字母折叠（大小写不敏感文本搜索；仅 A-Z↔a-z，多字节 UTF-8 序列不受影响）。
+ * 导出供 binary.worker 窗口模式复用（need/chunk 组窗后折叠，语义同 scanAll 的 fold） */
+export function foldBytes(bytes: Uint8Array): Uint8Array {
   const out = new Uint8Array(bytes.length);
   for (let i = 0; i < bytes.length; i++) {
     const b = bytes[i]!;
