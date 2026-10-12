@@ -269,6 +269,20 @@ function padLines(n: number, lineBytes: number): string {
   }).join('\n');
 }
 
+/** gb18030 字节串构造（测试专用极简表：'中'=0xd6 0xd0，其余字符走 UTF-8 直通——
+ * 仅用于构造「非 UTF-8 探测头」形态的假字节，解码侧由被测代码的 DECODERS 表承担） */
+function gbBytes(rows: string[]): Uint8Array<ArrayBuffer> {
+  const parts: number[] = [];
+  for (const row of rows) {
+    for (const ch of row) {
+      if (ch === '中') parts.push(0xd6, 0xd0);
+      else parts.push(...new TextEncoder().encode(ch));
+    }
+    parts.push(0x0a); // LF 终结符
+  }
+  return Uint8Array.from(parts);
+}
+
 /** 模拟滚动到最底（jsdom 无布局：scrollTop 大值 → rowAt 夹到末行） */
 function scrollToBottom(host: HTMLElement): void {
   const scroll = host.querySelector('.vv-jsonl-scroll') as HTMLElement;
@@ -453,6 +467,30 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
     expect(host.querySelector('.vv-jsonl-status')!.textContent).toBe('共 1 行 · 1 行解析失败');
     expect((host.querySelector('.vv-jsonl-body') as HTMLElement).textContent).toBe('中'); // gb18030 解码正确
     expect(inst.getMeta().encoding).toBe('gb18030');
+    inst.destroy();
+  });
+
+  // streaming 声明后的回退矩阵收口：dispatcher streaming 分支（capable 且 size>1MB 或
+  // size 未知）只交付 8KB 探测头作 buffer——非 UTF-8 不进窗口模式，全量路径若直接解码
+  // 头部即静默截断。render 入口须先经 ctx.read 补拉全量（head 已覆盖全文件时不触发）。
+  it('非 UTF-8 + 探测头 ctx（head 短于 size）：render 入口补拉全量，行数以全文件计', async () => {
+    stubResizeObserver();
+    // 每行 gb 字节「中」开头 + ASCII 填充：gb18030 解码必非 JSON（确定性全 failed），
+    // 行数与字节数可精确预算（600 行 ≈ 12KB > 8KB 探测头）
+    const rows = Array.from({ length: 600 }, (_, i) => `中${'p'.repeat(15)}${i}`);
+    const content = gbBytes(rows);
+    expect(content.length).toBeGreaterThan(8192); // 探测头形态成立
+    const calls: RangeCall[] = [];
+    const host = mount();
+    const gbDet: Detection = { ext: 'jsonl', encoding: 'gb18030' };
+    const inst = (await jsonlRenderer.render(content.slice(0, 8192), host, source, gbDet,
+      streamCtx({ size: content.length, content, head: content.slice(0, 8192), calls }))) as JsonlInstance;
+    expect(calls).toStrictEqual([{ start: 0, end: Number.MAX_SAFE_INTEGER }]); // 恰一次全量补拉
+    // 总行数以全文件计（截断面只会有头部行数）；失败徽标为渐进统计（随窗口解析），
+    // 不钉具体值（Task 3 报告设计裁决：失败行数随滚动渐进）
+    expect(host.querySelector('.vv-jsonl-status')!.textContent!.startsWith('共 600 行')).toBe(true);
+    expect(inst.getMeta().lines).toBe(600);
+    expect((host.querySelector('.vv-jsonl-card') as HTMLElement).textContent).toContain('中'); // gb18030 解码正确（UTF-8 解码此处必为替换符）
     inst.destroy();
   });
 

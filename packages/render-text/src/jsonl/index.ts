@@ -730,7 +730,26 @@ export const jsonlRenderer: Renderer = {
   id: 'jsonl',
   label: 'JSON Lines',
   extensions: ['jsonl', 'ndjson'],
+  // streaming（io-streaming 计划 2 Task 4）：dispatcher 只交付 head + StreamCtx，远端
+  // jsonl 打开即进窗口模式。回退面均在渲染器内自处（spec §4.2/§5）：非 UTF-8 → 全量
+  // 模式（下方探测头补拉保证全量字节在手）；!rangeCapable 的全量视图（ctx.head=全量
+  // +同步切片 read）属窗口模式退化形态，BlockStream 零 IO 排空。
+  streaming: true,
   async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection, ctx?: StreamCtx) {
+    // 非 UTF-8 全量回退的探测头补拉（回退矩阵收口）：streaming 分支（capable 且
+    // size>1MB 或 size 未知）只交付 8KB 探测头作 buffer，窗口模式不收（编码非 UTF-8）
+    // ——全量路径若直接解码头部即静默截断。head 未覆盖全文件（size 未知无法排除截断，
+    // 或 head 短于 size）时经 ctx.read 拉全量再走下游：>200MB 委托检查也因此对全量
+    // 生效，与 streaming 前的交付形态逐字节一致（hex size-未知回退同款 {0,MAX} 形态，
+    // Range 端点由服务端钳制）。head 即全量（兼容路径/!capable 全量视图/capable≤1MB
+    // 直读——ctx.head.length === ctx.size）不触发，零额外读。
+    if (
+      ctx !== undefined &&
+      (det.encoding ?? 'utf-8') !== 'utf-8' &&
+      (ctx.size === null || ctx.head.length < ctx.size)
+    ) {
+      buffer = await ctx.read({ start: 0, end: Number.MAX_SAFE_INTEGER });
+    }
     if (shouldDelegateToCode(buffer.byteLength)) {
       // >200MB：JSONL 逐行解析/逐卡高亮的内存与主线程成本失控，委托 code 纯文本
       // 虚拟滚动（沿用其超限提示条与实例扩展；encoding/ext 透传保证非 UTF-8 解码

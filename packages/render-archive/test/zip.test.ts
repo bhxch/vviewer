@@ -390,4 +390,13 @@ describe('archiveRenderer：真实递归路径（depth 由 source.storeId 接线
     await expect(d3.store.read('plain.txt')).resolves.toBeInstanceOf(Uint8Array);
     await expect(d3.store.read('too-deep.zip')).rejects.toThrow('嵌套层数超限');
   });
+
+  // io-streaming 计划 2 Task 4：条目 size 随 vv-open-entry 透传（openFlow addTab →
+  // Tab.source.size → dispatcher 读策略/渲染器 ctx.size），无大小信息的条目为 null
+  it('vv-open-entry detail 携带条目 size（字节数），随点击透传', async () => {
+    const content = 'size-payload'; // 12 字节
+    const buffer = await zipOf({ 'sized.txt': content });
+    const detail = await renderAndClick(buffer, 'localfiles:samples', 'sized.txt');
+    expect(detail.size).toBe(content.length);
+  });
 });

@@ -1104,9 +1104,10 @@ export function openUrl(url: string): void {
  */
 export function bindArchiveOpenEvents(): () => void {
   const handler = (ev: Event): void => {
-    const detail = (ev as CustomEvent<{ store: TreeStore; path: string; name: string }>).detail;
+    const detail = (ev as CustomEvent<{ store: TreeStore; path: string; name: string; size?: number | null }>).detail;
     if (!detail || typeof detail.path !== 'string') return;
-    addTab(detail.store, detail.path, detail.name);
+    // size 随事件透传（io-streaming Task 4，ArchiveOpenDetail.size 源自条目 TreeNode.size）；无来源传 null
+    addTab(detail.store, detail.path, detail.name, detail.size ?? null);
   };
   window.addEventListener(ARCHIVE_OPEN_EVENT, handler);
   return () => window.removeEventListener(ARCHIVE_OPEN_EVENT, handler);

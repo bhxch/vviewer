@@ -106,7 +106,8 @@
   function open(f: ScannedFile): void {
     const src = sources.find((s) => s.store.id === f.storeId);
     if (!src) return; // 来源已移除（陈旧结果）：静默忽略
-    addTab(src.store, f.path, f.name);
+    // size 随链路透传（io-streaming Task 4，ScannedFile.size 源自 TreeNode.size）；无来源传 null
+    addTab(src.store, f.path, f.name, f.size ?? null);
     close();
   }
 

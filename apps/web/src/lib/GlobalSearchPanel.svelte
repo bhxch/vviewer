@@ -157,7 +157,8 @@
     // BUG-09：打开后定位到命中行——addTab 返回 tab 写一次性 pendingLine（对象扩展
     // 字段，不进 Tab 接口与会话快照），ViewerPane 渲染完成后消费（revealLine）；
     // 无 revealLine 的实例（markdown/HTML 渲染视图等）静默跳过，不阻塞打开
-    const tab = addTab(src.store, m.path, m.path.split('/').pop() ?? m.path);
+    // size 显式 null（io-streaming Task 4）：GrepMatch 命中行无文件大小信息
+    const tab = addTab(src.store, m.path, m.path.split('/').pop() ?? m.path, null);
     Object.assign(tab, { pendingLine: m.line }); // m.line 为 1 起行号，消费端换算 0 起
   }
 

@@ -27,11 +27,13 @@ interface CachedArchive {
 }
 const storeCache = new WeakMap<Uint8Array, CachedArchive>();
 
-/** ARCHIVE_OPEN_EVENT 的 detail 形状 */
+/** ARCHIVE_OPEN_EVENT 的 detail 形状。size（io-streaming 计划 2 Task 4）：条目
+ * 字节数（TreeNode.size 透传），供打开链路写入 Tab.source.size；null = 条目无大小信息。 */
 export interface ArchiveOpenDetail {
   store: TreeStore;
   path: string;
   name: string;
+  size?: number | null;
 }
 
 /** zip magic：'PK' + 03/05/07（普通/空/分卷 zip）；其余格式交给 libarchive 识别 */
@@ -52,7 +54,7 @@ function isZipMagic(buffer: Uint8Array): boolean {
 export function mountArchiveTree(
   target: HTMLElement,
   store: TreeStore,
-  onopen: (path: string, name: string) => void
+  onopen: (path: string, name: string, size: number | null) => void
 ): { destroy(): void } {
   const root = document.createElement('ul');
   root.className = 'vv-tree vv-archive';
@@ -99,7 +101,7 @@ export function mountArchiveTree(
     // 加密条目锁形标记（BUG-12）：点击后 read 抛「加密不支持预览」，由错误卡片呈现
     name.textContent = node.encrypted ? `🔒 ${label}` : label;
     row.append(caret, name);
-    row.onclick = () => onopen(node.path, node.name);
+    row.onclick = () => onopen(node.path, node.name, node.size ?? null);
     return row;
   }
 
@@ -134,11 +136,12 @@ export const archiveRenderer: Renderer = {
     // mount 抛错（极端 DOM 异常）时同步释放：未派发过的 store 不留悬挂 worker
     let tree: { destroy(): void };
     try {
-      tree = mountArchiveTree(target, store, (path, name) => {
+      tree = mountArchiveTree(target, store, (path, name, size) => {
         cached!.entryOpened = true;
         // 解耦通道：包内文件点击 → 窗口事件；apps/web openFlow.bindArchiveOpenEvents 监听后 addTab，
-        // 派发器按扩展名自然路由（txt→code、png→image、zip→递归…）
-        window.dispatchEvent(new CustomEvent<ArchiveOpenDetail>(ARCHIVE_OPEN_EVENT, { detail: { store, path, name } }));
+        // 派发器按扩展名自然路由（txt→code、png→image、zip→递归…）。size 随事件透传
+        //（io-streaming Task 4，条目无大小信息时为 null）
+        window.dispatchEvent(new CustomEvent<ArchiveOpenDetail>(ARCHIVE_OPEN_EVENT, { detail: { store, path, name, size } }));
       });
     } catch (err) {
       if (!cached.entryOpened) {

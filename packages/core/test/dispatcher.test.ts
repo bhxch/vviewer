@@ -475,6 +475,39 @@ describe('dispatch 读下沉（io-streaming §3：streaming 选路 + StreamCtx �
     expect(calls).toStrictEqual([{ start: 0, end: 8191 }, { start: 10, end: 14 }]);
   });
 
+  // 计划 1 遗留②：① 的互补分支——size ≤ FULL_LIMIT(1MB) 时读策略先行全量直读
+  //（无 head 探测），capable 分支不再补任何读：渲染前恰一次读，base/ctx.head 均为全量。
+  it('①b streaming + capable + size≤1MB：全量直读恰一次，ctx.head=全量、ctx.size=size，渲染前零额外读', async () => {
+    const reg = createRegistry();
+    const FULL = new TextEncoder().encode('hello jsonl!'); // 12B ≤ FULL_LIMIT
+    const calls: Array<{ start: number; end: number } | undefined> = [];
+    const read = readOf(FULL, calls);
+    let seenBuf: Uint8Array | undefined;
+    let seenCtx: StreamCtx | undefined;
+    let callsAtRender = -1;
+    reg.install(mk('st', ['stx'], {
+      streaming: true,
+      render: async (buffer, _t, _s, _det, ctx) => {
+        seenBuf = buffer;
+        seenCtx = ctx;
+        callsAtRender = calls.length;
+        return { destroy() {} };
+      }
+    }));
+    const target = document.createElement('div');
+    const { rendererId } = await createDispatcher(reg).dispatch(
+      srcWith('a.stx', fakeStore(true), FULL.length), null, target, { read });
+    expect(rendererId).toBe('st');
+    expect(calls).toStrictEqual([undefined]); // size≤1MB 策略直读全量：无 head 探测区间读
+    expect(callsAtRender).toBe(1); // 渲染前零额外读（capable 分支不触发降级补读）
+    expect(seenBuf).toEqual(FULL); // buffer 形参 = 全量（非 head 探测块）
+    expect(seenCtx?.size).toBe(FULL.length); // ctx.size = source.size 透传
+    expect(seenCtx?.head).toEqual(FULL); // capable 分支 probe 即全量 → ctx.head = 全量
+    const chunk = await seenCtx!.read({ start: 2, end: 5 }); // 按需区间读仍经 read 闭包
+    expect([...chunk]).toEqual([...FULL.slice(2, 6)]);
+    expect(calls).toStrictEqual([undefined, { start: 2, end: 5 }]);
+  });
+
   it('② streaming + !rangeCapable：降级全量 read，ctx.head 为全量、size = 全量长、read 同步切片', async () => {
     const reg = createRegistry();
     const FULL = new TextEncoder().encode('hello world!'); // 12B；source.size 未知

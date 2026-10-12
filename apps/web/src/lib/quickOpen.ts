@@ -15,11 +15,14 @@ export function excludedName(name: string, patterns: readonly string[]): boolean
   return patterns.some((p) => name === p || (p.startsWith('*.') && name.endsWith(p.slice(1))));
 }
 
-/** 多源扫描的一个结果：path 为源内相对路径，storeId 指回来源（面板按源 addTab）。 */
+/** 多源扫描的一个结果：path 为源内相对路径，storeId 指回来源（面板按源 addTab）。
+ * size（io-streaming 计划 2 Task 4）：TreeNode.size 透传，供打开链路写入 Tab.source.size
+ * （dispatcher 读策略与渲染器 ctx.size 消费）；缺省 = 条目无大小信息。 */
 export interface ScannedFile {
   storeId: string;
   path: string;
   name: string;
+  size?: number;
 }
 
 /**
@@ -43,7 +46,15 @@ export async function listFilesRecursively(
         if (out.length >= maxFiles) return;
         if (excludedName(node.name, patterns)) continue;
         if (node.kind === 'dir') await walk(node.path);
-        else out.push({ storeId, path: node.path, name: node.name });
+        // size 条件展开：无大小信息的条目不落 size 键（既有结果形状不变，quickOpen.test
+        // 的 toEqual 断言零变更）；有则透传供打开链路消费
+        else {
+          out.push(
+            node.size !== undefined
+              ? { storeId, path: node.path, name: node.name, size: node.size }
+              : { storeId, path: node.path, name: node.name }
+          );
+        }
       }
     };
     await walk('');
