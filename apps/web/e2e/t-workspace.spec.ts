@@ -483,3 +483,53 @@ test('WS-06：pinned 目录 tab 刷新保持（M-5——快照目录条目按来
     await fake.close();
   }
 });
+
+// ---------------------------------------------------------------- WS-07
+
+test('WS-07：单文件来源重载两次不落占位（T5 I-1 回环——openRemoteSource file 通道 e2e 锚）', async ({
+  page
+}) => {
+  test.setTimeout(90_000);
+  const fake = await startFakeServer({ 'sub/notes.txt': 'single file source body\n' });
+  try {
+    await waitAppMounted(page);
+    await connectForm(page, fake.base);
+
+    // 新建工作区 → 后端路径浏览 → 进入 sub → 对文件行「将此文件作为来源」
+    //（openRemoteSource 第 5 参 file：label=文件名 basename，参与 storeId hash）
+    await page.locator('.vv-ws-trigger').click();
+    await page.getByRole('button', { name: '＋ 新建工作区…' }).click();
+    const modal = page.locator('.vv-wscreate');
+    await expect(modal).toBeVisible();
+    await page.getByLabel('工作区名称').fill('单文件源');
+    await modal.getByRole('button', { name: '后端路径…' }).click();
+    const browse = page.locator('.vv-remotesrc');
+    await expect(browse).toBeVisible();
+    await browse.locator('.vv-remotesrc-name', { hasText: 'sub/' }).click();
+    await browse.getByRole('button', { name: '将此文件作为来源' }).click();
+    await expect(browse).toHaveCount(0);
+    await modal.getByRole('button', { name: '创建并激活' }).click();
+    await expect(modal).toHaveCount(0);
+
+    // 单文件来源 tab：path=根内相对路径、name=basename（label 同文，徽标抑制形态）
+    await expect(page.locator('.vv-code-pre')).toContainText('single file source body', {
+      timeout: 20_000
+    });
+
+    // 快照落盘后重载两次：来源按快照 storeLabel 原值（文件名）回环重建——任何
+    // 一次落占位/错误卡即单文件恢复链断裂（此前仅 WS-05 锚目录源）
+    await waitSnapshotTabs(page, ['notes.txt']);
+    for (let i = 0; i < 2; i++) {
+      await page.reload();
+      await expect(page.locator('.vv-tab', { hasText: 'notes.txt' })).toBeVisible({
+        timeout: 15_000
+      });
+      await expect(page.locator('.vv-code-pre')).toContainText('single file source body', {
+        timeout: 20_000
+      });
+      await expect(page.locator('.vv-error-card')).toHaveCount(0);
+    }
+  } finally {
+    await fake.close();
+  }
+});

@@ -955,6 +955,13 @@ export function openRemoteSource(
 ): void {
   const normBase = normalizeServerBase(base);
   const normPath = basePath.replace(/^\/+|\/+$/g, ''); // 与 RemoteStore 内部归一同款
+  // 单文件来源 tab 路径为源相对（与树行/读路径同基准）：file 是根相对（RemoteSourceModal
+  // 以「当前目录 + 文件名」拼合传入），有 basePath 时剥前缀换算——否则 read 经
+  // toServerPath 再拼前缀成双重前缀（sub/sub/x），首开即 404
+  const fileRel =
+    file !== undefined && normPath !== '' && file.startsWith(`${normPath}/`)
+      ? file.slice(normPath.length + 1)
+      : file;
   for (const w of workspacesView.list) {
     const src = w.sources.find(
       (s) =>
@@ -977,7 +984,7 @@ export function openRemoteSource(
     if (file === undefined) addDirStoreTab(store, source);
     else {
       workspaceStore.addSource(workspaceStore.activeId, source);
-      addTab(store, file, file.split('/').pop() ?? file);
+      addTab(store, fileRel!, fileRel!.split('/').pop() ?? fileRel!);
     }
     return;
   }
@@ -1012,7 +1019,7 @@ export function openRemoteSource(
   if (file === undefined) addDirStoreTab(store, source);
   else {
     workspaceStore.addSource(workspaceStore.activeId, source);
-    addTab(store, file, file.split('/').pop() ?? file);
+    addTab(store, fileRel!, fileRel!.split('/').pop() ?? fileRel!);
   }
 }
 
