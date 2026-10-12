@@ -6,6 +6,7 @@ import { captureToCssClass, resolveCapture, themeToCssVars } from '@vviewer/high
 import { renderLineHtml } from '@vviewer/render-text';
 import {
   applyAppearance,
+  applyAppearanceFromSettings,
   applyCodeTheme,
   CODE_CAPTURES,
   CURATED_CODE_THEMES,
@@ -18,7 +19,7 @@ import {
   THEME_ROOT_SELECTOR
 } from './theme';
 import { deleteTheme, putTheme, type ImportedTheme } from './stores/session';
-import { loadSettings } from './stores/settings';
+import { loadSettings, type Settings } from './stores/settings';
 
 const STYLE_ID = 'vv-code-theme';
 
@@ -205,6 +206,7 @@ describe('applyAppearance 并发弃单（spec：last-INITIATED 胜）', () => {
     // putTheme 写真库（fake-indexeddb）：imported 路径经 listImportedThemes 的
     // IndexedDB 回调（宏任务）恢复，必然晚于 default 路径的缓存 tablesPromise
     //（纯微任务）——token 规则下后发 p2 胜与完成顺序无关，断言确定性成立
+    await getTheme('onelight'); // 显式预热 tablesPromise：竞态方向不依赖前序用例的缓存，测试自足
     const theme: ImportedTheme = {
       id: 'imported:imp-race',
       name: 'Race Theme',
@@ -220,6 +222,81 @@ describe('applyAppearance 并发弃单（spec：last-INITIATED 胜）', () => {
     await Promise.all([p1, p2]);
     expect(styleEl()?.textContent).toBe(await legacyExpectedText('onelight', 'dark'));
     await deleteTheme(theme.id);
+  });
+});
+
+describe('applyAppearanceFromSettings（订阅触发入口，spec 2026-10-12 §2.1）', () => {
+  // DEFAULTS 是 settings.ts 模块私有：fixture 显式内联（同 settings.test.ts BASE 先例）
+  const base = (): Settings => ({
+    themeMode: 'dark',
+    appearanceLight: 'default',
+    appearanceDark: 'default',
+    codeThemeLight: 'onelight',
+    codeThemeDark: 'onelight',
+    excludedPatterns: [],
+    autoRefresh: true,
+    computePolicy: 'auto'
+  });
+
+  it('首次调用必注入（签名初值 null）', async () => {
+    // lastAppearanceSig 是模块级状态、跨用例残留：先注入一个与 base 目标签名
+    //（dark|default|onelight）必然不同的主题把签名推离，保证 FromSettings 的
+    // diff 必命中——用例自足，不依赖执行顺序。
+    // 等待点用「注入文本到位」而非「节点存在」：哨兵已创建 style 节点，且
+    // FromSettings 内部是未 await 的异步注入，文本到位才代表签名已落盘。
+    await applyCodeTheme('serika-dark', 'dark');
+    applyAppearanceFromSettings(base());
+    await vi.waitFor(async () =>
+      expect(styleEl()?.textContent).toBe(await legacyExpectedText('onelight', 'dark'))
+    );
+  });
+
+  it('槽无关字段变化（excludedPatterns）不注入——style 节点零变动', async () => {
+    // 哨兵注入同上：把签名推离 base，确保首调 FromSettings 真正走注入路径；
+    // 先等首次注入完成（签名落盘），观察窗内第二次调用才应被 diff 拦下
+    await applyCodeTheme('serika-dark', 'dark');
+    applyAppearanceFromSettings(base());
+    await vi.waitFor(async () =>
+      expect(styleEl()?.textContent).toBe(await legacyExpectedText('onelight', 'dark'))
+    );
+    const before = styleEl()?.textContent;
+    const mutations: unknown[] = [];
+    const mo = new MutationObserver((m) => mutations.push(...m));
+    mo.observe(styleEl()!, { characterData: true, childList: true, subtree: true });
+    applyAppearanceFromSettings({ ...base(), excludedPatterns: ['node_modules'] });
+    // diff 命中时注入是微任务级（tablesPromise 已缓存）：20ms 宏任务足够暴露失守
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mutations).toHaveLength(0);
+    expect(styleEl()?.textContent).toBe(before);
+    mo.disconnect();
+  });
+
+  it('代码主题槽变化 → diff 命中重注入', async () => {
+    await applyCodeTheme('serika-dark', 'dark');
+    applyAppearanceFromSettings(base());
+    // 先等 base（onelight）注入完成，再切槽：back-to-back 时第二次会读到未落
+    // 的旧签名而误判——等待点保证两次调用之间签名已更新
+    await vi.waitFor(async () =>
+      expect(styleEl()?.textContent).toBe(await legacyExpectedText('onelight', 'dark'))
+    );
+    applyAppearanceFromSettings({ ...base(), codeThemeDark: 'serika-dark' });
+    await vi.waitFor(async () =>
+      expect(styleEl()?.textContent).toBe(await legacyExpectedText('serika-dark', 'dark'))
+    );
+  });
+
+  it('themeMode=system 按 effectiveMode 解析槽（stub matchMedia dark → dark 槽）', async () => {
+    // 目标 effective 签名（dark|default|serika-dark）与前例终态签名可能相同：
+    // 亮色哨兵推开起点，保证 system 路径 diff 必命中
+    await applyCodeTheme('onelight', 'light');
+    vi.stubGlobal('matchMedia', (q: string) => ({
+      matches: q.includes('dark'),
+      addEventListener: () => {},
+      removeEventListener: () => {}
+    }));
+    const s: Settings = { ...base(), themeMode: 'system', codeThemeDark: 'serika-dark' };
+    applyAppearanceFromSettings(s);
+    await vi.waitFor(async () => expect(styleEl()?.textContent).toBe(await legacyExpectedText('serika-dark', 'dark')));
   });
 });
 

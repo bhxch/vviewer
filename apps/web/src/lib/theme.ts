@@ -328,3 +328,20 @@ export function effectiveMode(themeMode: Settings['themeMode']): 'light' | 'dark
     ? 'dark'
     : 'light';
 }
+
+/**
+ * 订阅触发入口（spec 2026-10-12 §2.1）：按 settings 计算生效四元组
+ * (mode, appearance, codeTheme)，与上次注入签名 diff——仅槽相关变化才注入。
+ * 口径为「生效值」而非「原始槽值」：system 的亮暗解析在 effectiveMode 内完成，
+ * OS 亮暗切换（不经 saveSettings）同样命中 diff；excludedPatterns 等无关字段
+ * 变化零注入。非法槽值注入期回退 default（applyAppearance 既有行为）后落
+ * effective 签名——同一非法槽值重复触发会幂等重注入一次，无害。
+ */
+export function applyAppearanceFromSettings(settings: Settings): void {
+  const mode = effectiveMode(settings.themeMode);
+  const appearance = mode === 'dark' ? settings.appearanceDark : settings.appearanceLight;
+  const codeTheme = mode === 'dark' ? settings.codeThemeDark : settings.codeThemeLight;
+  const sig = appearanceSig(mode, appearance, codeTheme);
+  if (sig === lastAppearanceSig) return;
+  void applyAppearance(appearance, mode, codeTheme);
+}
