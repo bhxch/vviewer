@@ -1,8 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HighlightCanceledError, type HighlightInterval } from '@vviewer/highlight';
-import type { Detection, FileSource, RenderedInstance } from '@vviewer/core';
+import type { Detection, FileSource, RenderedInstance, StreamCtx } from '@vviewer/core';
 import { attachHighlightClient, type CodeFileMeta } from '../src/code';
-import { jsonlRenderer, shouldDelegateToCode } from '../src/jsonl/index';
+import { jsonlRenderer, jsonlWindowedInternals, shouldDelegateToCode } from '../src/jsonl/index';
+
+/** fake ctx 的请求区间记录（blockStream.test.ts 同款） */
+interface RangeCall {
+  start: number;
+  end: number;
+}
 
 /** jsonlRenderer.render 按 Renderer 接口返回 RenderedInstance；getMeta 为鸭子扩展 */
 type JsonlInstance = RenderedInstance & { getMeta(): CodeFileMeta };
@@ -15,7 +21,7 @@ const source: FileSource = {
   store: {} as FileSource['store']
 };
 const det: Detection = { ext: 'jsonl', encoding: 'utf-8' };
-const enc = (text: string): Uint8Array => new TextEncoder().encode(text);
+const enc = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
 
 function mount(): HTMLElement {
   const host = document.createElement('div');
@@ -226,6 +232,244 @@ describe('renderJsonl 折叠/封顶', () => {
     expect((failed.querySelector('.vv-jsonl-body') as HTMLElement).textContent!.length).toBe(65_536);
     expect(failed.textContent).toContain('已截断');
     expect(host.querySelector('.vv-jsonl-status')?.textContent).toBe('共 2 行 · 1 行解析失败');
+    inst.destroy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 窗口模式（第 4 参 ctx：UTF-8 流式索引 + 块解码缓存 + 滚动续读，spec §4.2）
+// ---------------------------------------------------------------------------
+
+/** 窗口模式块大小（与实现 WINDOW_BLOCK_BYTES 同值；实现侧为模块私有常量） */
+const BLOCK = 256 * 1024;
+
+/** fake StreamCtx：content 为底层全量数据，read 记录每次请求区间（blockStream.test.ts 同款） */
+function streamCtx(opts: {
+  size: number | null;
+  content: Uint8Array<ArrayBuffer>;
+  head?: Uint8Array<ArrayBuffer>;
+  calls?: RangeCall[];
+}): StreamCtx {
+  return {
+    size: opts.size,
+    head: opts.head ?? new Uint8Array(0),
+    read: async (r) => {
+      opts.calls?.push({ start: r.start, end: r.end });
+      return opts.content.slice(r.start, r.end + 1);
+    }
+  };
+}
+
+/** 固定字长的合法 JSONL 行内容（纯 ASCII，行长 ≈ lineBytes 字节） */
+function padLines(n: number, lineBytes: number): string {
+  return Array.from({ length: n }, (_, i) => {
+    const head = `{"i":${i},"pad":"`;
+    const tail = '"}';
+    return head + 'p'.repeat(Math.max(0, lineBytes - head.length - tail.length)) + tail;
+  }).join('\n');
+}
+
+/** 模拟滚动到最底（jsdom 无布局：scrollTop 大值 → rowAt 夹到末行） */
+function scrollToBottom(host: HTMLElement): void {
+  const scroll = host.querySelector('.vv-jsonl-scroll') as HTMLElement;
+  scroll.scrollTop = Number.MAX_SAFE_INTEGER;
+  scroll.dispatchEvent(new Event('scroll'));
+}
+
+describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
+  it('首屏只拉 2 块（fake ctx 区间断言，8KB head 部分块被整块重拉）；状态条「已加载 N 行」与 meta.lines 动态一致；首屏不触发续读', async () => {
+    stubResizeObserver();
+    const text = padLines(400, 1500); // ≈600KB > 2×256KB，第 3 块未拉
+    const content = enc(text);
+    const calls: RangeCall[] = [];
+    const host = mount();
+    const inst = (await jsonlRenderer.render(content.slice(0, 8192), host, source, det,
+      streamCtx({ size: null, content, head: content.slice(0, 8192), calls }))) as JsonlInstance;
+    expect(calls).toStrictEqual([
+      { start: 0, end: BLOCK - 1 },
+      { start: BLOCK, end: 2 * BLOCK - 1 }
+    ]);
+    const status = host.querySelector('.vv-jsonl-status')!.textContent!;
+    expect(status.startsWith('已加载 ')).toBe(true);
+    expect(status.endsWith(' 行')).toBe(true);
+    const loaded = Number(status.slice('已加载 '.length, -' 行'.length));
+    expect(loaded).toBeGreaterThan(0);
+    expect(loaded).toBeLessThan(400); // EOF 未确认，非终值
+    expect(inst.getMeta().lines).toBe(loaded); // getMeta().lines = 动态已加载行数
+    await new Promise((r) => setTimeout(r, 20)); // 首屏窗口远离已加载尾部：不触发续读
+    expect(calls.length).toBe(2);
+    inst.destroy();
+  });
+
+  it('滚动到底触发续读至 EOF：状态条变「共 N 行」；EOF 后再滚动无新 read（finish 后不再 advance）', async () => {
+    stubResizeObserver();
+    const text = padLines(400, 1500);
+    const content = enc(text);
+    const calls: RangeCall[] = [];
+    const host = mount();
+    const inst = (await jsonlRenderer.render(content.slice(0, 8192), host, source, det,
+      streamCtx({ size: null, content, head: content.slice(0, 8192), calls }))) as JsonlInstance;
+    scrollToBottom(host);
+    await vi.waitFor(() => {
+      expect(host.querySelector('.vv-jsonl-status')!.textContent!.startsWith('共 400 行')).toBe(true);
+    });
+    expect(inst.getMeta().lines).toBe(400);
+    expect(host.querySelector('[data-line="399"]')).not.toBeNull(); // 尾行卡片已渲染
+    const readsAtEnd = calls.length;
+    for (let k = 0; k < 3; k++) {
+      host.querySelector('.vv-jsonl-scroll')!.dispatchEvent(new Event('scroll'));
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(calls.length).toBe(readsAtEnd); // EOF 已确认：不再产生任何 read
+    inst.destroy();
+  });
+
+  it('同文件双模式 DOM 逐字节一致（BOM/CRLF/跨块多字节字符/折叠/失败行/oversized/悬挂尾行；块 0 尾恰切「中」字）', async () => {
+    stubResizeObserver();
+    // 字节布局：BOM + CRLF 行 + 空行 + 纯空白行 = 17 字节；填充行使「中」的首字节
+    // 恰落在 256KB 块边界前 1 字节（跨块字符不得被打成 U+FFFD）
+    const headPart = '\uFEFF{"a":1}\r\n\n   \n';
+    const headBytes = enc(headPart).length;
+    const padLine = 'p'.repeat(BLOCK - 1 - headBytes - 1); // 填充行 + '\n' 恰至块边界前 1 字节
+    const text = headPart + padLine + '\n'
+      + '中{"b":"跨块字符"}🎉\n'
+      + JSON.stringify(Array.from({ length: 39 }, (_, i) => i)) + '\n' // pretty 41 行 → 折叠
+      + 'not json\n'
+      + 'plain\rline\n'
+      + 'x'.repeat(1_048_576) + '\n'
+      + '{"tail":"no trailing newline"}';
+    const bytes = enc(text);
+    expect(bytes[BLOCK - 1]).toBe(0xe4); // 「中」（E4 B8 AD）首字节在块 0 尾
+    expect(bytes[BLOCK]).toBe(0xb8); // 其余续字节跨入块 1（切口不得打碎该字符）
+
+    const hostA = mount();
+    const instA = (await jsonlRenderer.render(bytes, hostA, source, det)) as JsonlInstance; // 全量模式（无 ctx）
+    const hostB = mount();
+    const calls: RangeCall[] = [];
+    const instB = (await jsonlRenderer.render(bytes.slice(0, 8192), hostB, source, det,
+      streamCtx({ size: bytes.length, content: bytes, head: bytes.slice(0, 8192), calls }))) as JsonlInstance;
+    await vi.waitFor(() => { // 窗口模式续读到 EOF 后再比对（状态条同为终值口径；
+      // 9 行 = {"a":1}/填充/跨块/折叠大行/not json/plain/line/巨行/悬挂尾行）
+      expect(hostB.querySelector('.vv-jsonl-status')!.textContent!.startsWith('共 9 行')).toBe(true);
+    });
+    const domA = () => (hostA.querySelector('.vv-jsonl-scroll') as HTMLElement).innerHTML;
+    const domB = () => (hostB.querySelector('.vv-jsonl-scroll') as HTMLElement).innerHTML;
+    expect(hostB.querySelector('.vv-jsonl-status')!.textContent)
+      .toBe(hostA.querySelector('.vv-jsonl-status')!.textContent);
+    expect(domB()).toBe(domA()); // 首屏窗口逐字节一致
+    scrollToBottom(hostA);
+    scrollToBottom(hostB);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(domB()).toBe(domA()); // 滚动到底后仍逐字节一致（oversized/失败行/尾行窗口）
+    expect(instA.getMeta().lines).toBe(instB.getMeta().lines);
+    instA.destroy();
+    instB.destroy();
+  });
+
+  it('块解码缓存 LRU 上限 8 块：滚动扫过 10 个块后缓存恰好压到上限', async () => {
+    stubResizeObserver();
+    const text = padLines(2000, 1200); // ≈2.4MB ≈ 10 块
+    const content = enc(text);
+    const host = mount();
+    const inst = (await jsonlRenderer.render(content.slice(0, 8192), host, source, det,
+      streamCtx({ size: content.length, content, head: content.slice(0, 8192) }))) as JsonlInstance;
+    scrollToBottom(host); // 先续读到全文加载
+    await vi.waitFor(() => {
+      expect(host.querySelector('.vv-jsonl-status')!.textContent!.startsWith('共 2000 行')).toBe(true);
+    });
+    // 分步扫过整文件：行文本提取触及 >8 个块（15000px ≈ 125 行 ≈ 0.6 块/步）
+    for (let y = 0; y <= 250_000; y += 15_000) {
+      const scroll = host.querySelector('.vv-jsonl-scroll') as HTMLElement;
+      scroll.scrollTop = y;
+      scroll.dispatchEvent(new Event('scroll'));
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    const internals = jsonlWindowedInternals.get(inst);
+    expect(internals).toBeDefined();
+    expect(internals!.blockTextCache.size).toBe(8); // 触及 >8 块才可能顶到上限（自我校验非空转）
+    inst.destroy();
+  });
+
+  it('oversized 行（索引判 ≥1MB）：不跨块拼装，前 2 块内不出现；滚动加载后 64KB 预览 + 徽标与全量一致', async () => {
+    stubResizeObserver();
+    const text = '{"a":1}\n' + 'x'.repeat(1_048_576) + '\n{"b":2}\n';
+    const content = enc(text);
+    const host = mount();
+    const inst = (await jsonlRenderer.render(content.slice(0, 8192), host, source, det,
+      streamCtx({ size: content.length, content, head: content.slice(0, 8192) }))) as JsonlInstance;
+    expect(host.querySelectorAll('.vv-jsonl-card').length).toBe(1); // 巨行未终结：只加载第 1 行
+    scrollToBottom(host);
+    await vi.waitFor(() => {
+      expect(host.querySelector('.vv-jsonl-status')!.textContent).toBe('共 3 行');
+    });
+    const oversizeCard = host.querySelector('[data-line="1"]') as HTMLElement;
+    expect(oversizeCard.querySelector('.vv-jsonl-badge')!.textContent).toBe('行过大（>1MB）');
+    const body = oversizeCard.querySelector('.vv-jsonl-body') as HTMLElement;
+    expect(body.textContent).toBe('x'.repeat(65_536)); // 与全量 parseJsonlLine 64KB 截断逐字符一致
+    inst.destroy();
+  });
+
+  it('BOM 文件：索引/解码前剥离字节（首行正常解析不 failed）——T2→T3 指令①断言钉住', async () => {
+    stubResizeObserver();
+    const body = enc('{"a":1}\n{"b":2}');
+    const content = new Uint8Array(3 + body.length);
+    content.set([0xef, 0xbb, 0xbf], 0);
+    content.set(body, 3);
+    const host = mount();
+    const inst = (await jsonlRenderer.render(content.slice(0, 8192), host, source, det,
+      streamCtx({ size: null, content, head: content.slice(0, 8192) }))) as JsonlInstance;
+    expect(host.querySelector('.vv-jsonl-status')!.textContent).toBe('共 2 行'); // 无「解析失败」徽标
+    const first = host.querySelector('.vv-jsonl-card') as HTMLElement;
+    expect(first.classList.contains('vv-jsonl-card-failed')).toBe(false);
+    expect((first.querySelector('.vv-jsonl-body') as HTMLElement).textContent).toBe('{\n  "a": 1\n}');
+    inst.destroy();
+  });
+
+  it('流式中途失败行：徽标文案不变，「已加载 N 行 · X 行解析失败」→ EOF 后「共 N 行 · X 行解析失败」', async () => {
+    stubResizeObserver();
+    const text = 'not json\n' + padLines(400, 1500); // 401 行，失败行在首屏
+    const content = enc(text);
+    const host = mount();
+    const inst = (await jsonlRenderer.render(content.slice(0, 8192), host, source, det,
+      streamCtx({ size: null, content, head: content.slice(0, 8192) }))) as JsonlInstance;
+    expect(host.querySelector('.vv-jsonl-status')!.textContent)
+      .toMatch(/^已加载 \d+ 行 · 1 行解析失败$/);
+    scrollToBottom(host);
+    await vi.waitFor(() => {
+      expect(host.querySelector('.vv-jsonl-status')!.textContent).toBe('共 401 行 · 1 行解析失败');
+    });
+    inst.destroy();
+  });
+
+  it('非 UTF-8 encoding（gb18030）+ ctx：走全量路径（现状行为），ctx.read 未被调用', async () => {
+    stubResizeObserver();
+    const content = Uint8Array.from([0xd6, 0xd0]); // 「中」的 gb18030 编码
+    const calls: RangeCall[] = [];
+    const host = mount();
+    const gbDet: Detection = { ext: 'jsonl', encoding: 'gb18030' };
+    const inst = (await jsonlRenderer.render(content, host, source, gbDet,
+      streamCtx({ size: content.length, content, head: content, calls }))) as JsonlInstance;
+    expect(calls).toStrictEqual([]); // 全量路径不触碰 ctx
+    expect(host.querySelector('.vv-jsonl-status')!.textContent).toBe('共 1 行 · 1 行解析失败');
+    expect((host.querySelector('.vv-jsonl-body') as HTMLElement).textContent).toBe('中'); // gb18030 解码正确
+    expect(inst.getMeta().encoding).toBe('gb18030');
+    inst.destroy();
+  });
+
+  it('全量视图退化形态（head=全量预置全部块）：窗口模式零 read 天然工作，状态条直接「共 N 行」', async () => {
+    stubResizeObserver();
+    const text = padLines(50, 200);
+    const content = enc(text);
+    const calls: RangeCall[] = [];
+    const host = mount();
+    const inst = (await jsonlRenderer.render(content, host, source, det,
+      streamCtx({ size: content.length, content, head: content, calls }))) as JsonlInstance;
+    // head（约 10KB）短于 256KB 块：按 BlockStream 契约⑦对部分预置块做恰一次
+    // 整块重拉（read 为 dispatcher 的同步切片，零网络 IO）；此后零 read
+    expect(calls).toStrictEqual([{ start: 0, end: content.length - 1 }]);
+    expect(host.querySelector('.vv-jsonl-status')!.textContent).toBe('共 50 行');
+    expect(host.querySelectorAll('.vv-jsonl-card').length).toBeGreaterThan(0);
+    expect(inst.getMeta().lines).toBe(50);
     inst.destroy();
   });
 });

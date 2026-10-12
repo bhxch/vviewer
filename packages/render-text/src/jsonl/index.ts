@@ -1,26 +1,60 @@
 /**
  * JSON Lines 渲染器（.jsonl/.ndjson）：行卡片 + 可变高度窗口 + 卡片级懒高亮。
  *
- * IO/解析裁决（spec D §2.3）：IO 全量——上层 dispatcher 交付的是整文件 buffer，
- * TextDecoder 一次解码 + CRLF 归一（与 code.ts 同款）；解析流式——splitJsonlLines
- * 只切行不解析，JSON.parse 在卡片首次进入窗口时惰性执行。解析缓存
- * Map<number, JsonlLineState> 不设上限：结果字符串体积与原文本同阶（pretty 放大
- * 有限），行数已知可全持，逐出只会导致滚动回看时重复解析，无收益。
+ * 双模式裁决（io-streaming 计划 2 Task 3，spec §4.2）：renderJsonl 第 4 参 ctx
+ * 存在且编码属 utf-8（Encoding 联合类型无 ascii——ASCII 为 UTF-8 子集，探测即
+ * utf-8）→ **窗口模式**：行索引按字节流式构建（BlockStream 256KB 逐块喂
+ * advanceJsonlIndex，首屏确保前 2 块）、行文本=块解码缓存切片、状态条「已加载
+ * N 行」（EOF 确认后「共 N 行」，归还 jsonl spec §2.2「总行数未知，滚动到底才
+ * 确定」口径）、滚动接近已加载尾部续读。size 未知同样流式（BlockStream 短读
+ * 探测 atEnd）；!rangeCapable 的全量视图（ctx.head=全量+同步切片 read）属窗口
+ * 模式的退化形态，BlockStream head 预置全部块后零 IO 排空，天然工作。ctx 缺省
+ * 或非 UTF-8 → **全量模式**：现状路径行为不动（IO 全量——上层交付整文件
+ * buffer，TextDecoder 一次解码 + CRLF 归一；解析流式——卡片进窗口才 JSON.parse）。
+ *
+ * IO/解析裁决（spec D §2.3）：解析缓存 Map<number, JsonlLineState> 不设上限：
+ * 结果字符串体积与原文本同阶（pretty 放大有限），行数已知可全持，逐出只会导致
+ * 滚动回看时重复解析，无收益（窗口模式行数渐进，同理只增不减）。
+ *
+ * 窗口模式行文本三路（简报 Interfaces 对应）：
+ * - 单块行 = 块解码缓存（Map<blockIndex, string> LRU 8 ≈ 2MB）文本切片。字节
+ *   偏移 → 字符下标经「前缀解码游标」换算：行首/行尾恒为字符边界（终结符是单
+ *   字节 ASCII），自游标起的前缀独立 decode 长度即字符增量（块 0 前缀 decode
+ *   同样剥 BOM，与整块解码口径一致）；
+ * - 跨块行 = 按索引 lengths 拼原始字节后单次解码——块切口可能切开多字节字符，
+ *   逐块解码再拼会产出重复 U+FFFD，故拼装必须在字节域进行；
+ * - oversized 行（索引层判行字节 ≥1MB）不走拼装——行首 4×64KB 字节解码后截
+ *   64KB 字符：块内自行首起至少 4×65536 字节（不足即行已在后续块，拼装范围
+ *   同式），其中行首 64K 字符必完整（UTF-8 每字符 ≤4 字节），与全量模式
+ *   parseJsonlLine 的 raw.slice(0, 64KB) 逐字符一致；状态直接构造 oversize 形态
+ *   （预览 <1MB，若再过 parseJsonlLine 的 encode 阈值会被误判进 JSON.parse）。
+ *
+ * BOM 裁决（T2→T3 指令①，硬性）：索引层不剥 BOM——窗口模式在索引/解码前剥离
+ * 文件头 UTF-8 BOM（EF BB BF；恒在文件头=块 0 首部，无跨块问题）。剥离后索引
+ * 偏移为「逻辑字节空间」（文件字节 = 逻辑偏移 + bomLen），取块取数时换回，首行
+ * 才能与全量模式（TextDecoder 剥 BOM）解析一致——不剥则首行带 BOM 必 failed。
+ *
+ * 消费契约（T2→T3 指令②）：finishJsonlIndex 之后不得再 advanceJsonlIndex——
+ * indexFinished 置位后续读/拉块全部停机（pullBlock 直返），EOF 后滚动零 IO。
+ *
+ * 块取数纪律（T1→T3 指令③）：先 await ensureBlock(i) 再 block(i)——head 预置
+ * 的部分块（探测头 8KB < 256KB 块）未经整块替换不得进索引/解码。索引喂块统一
+ * 走 pullBlock（ensure 后才 advance）；行文本取数依赖不变量「可见行 ⊆ 已喂块」
+ * （可见行号 < 已加载行数，行字节范围 ⊆ 已喂字节），并对块 0 部分预置天然免疫
+ * （索引有行 ⇒ 块 0 已整块替换）。
  *
  * 高亮裁决：卡片级——每张 ok 卡片对自身 pretty 全文调一次
  * getHighlightClient().highlight(pretty, 'json')，窗口外的行永不解析/高亮；
- * pretty 超过 JSONL_HIGHLIGHT_MAX_CHARS（1M 字符）的卡片跳过自动高亮保持纯文本
- * （深嵌套小行 pretty 可放大数倍，防 worker 载荷与主线程卡顿）；
- * 区间 → 行 HTML 复用 code.ts 导出的 assignIntervalsToLines + renderLineHtml
- * （两者即 code.ts tree-sitter 整文件路径的同一管线，无需本地副本；code.ts 的
- * splitHighlightedLines 面向 hljs HTML 字符串输出，本处 client 产出 intervals，
- * 不合用）。取消语义沿用 code.ts：HighlightCanceledError 静默，不写 DOM、不兜底。
+ * pretty 超过 JSONL_HIGHLIGHT_MAX_CHARS（1M 字符）的卡片跳过自动高亮保持纯文本；
+ * 区间 → 行 HTML 复用 code.ts 导出的 assignIntervalsToLines + renderLineHtml。
+ * 取消语义沿用 code.ts：HighlightCanceledError 静默，不写 DOM、不兜底。
  *
  * 高度模型：复用 window.ts 的 HeightModel/visibleRange（实测前缀和 + 估算外推），
  * DOM 适配层在本模块——rAF 合并一帧内的批量 measure 修正（一帧消费一次 dirty）。
  */
-import type { Detection, FileSource, RenderedInstance, Renderer } from '@vviewer/core';
+import type { Detection, FileSource, RenderedInstance, Renderer, StreamCtx } from '@vviewer/core';
 import { HighlightCanceledError, type HighlightInterval } from '@vviewer/highlight';
+import { createBlockStream } from '../blockStream';
 import {
   assignIntervalsToLines,
   buildLineOffsets,
@@ -36,10 +70,18 @@ import {
   JSONL_COLLAPSE_LINES,
   JSONL_EXPAND_CAP_LINES,
   JSONL_HIGHLIGHT_MAX_CHARS,
+  JSONL_OVERSIZE_LINE_BYTES,
+  JSONL_OVERSIZE_PREVIEW_BYTES,
   parseJsonlLine,
   splitJsonlLines,
   type JsonlLineState
 } from './parse';
+import {
+  advanceJsonlIndex,
+  createJsonlIndex,
+  finishJsonlIndex,
+  type JsonlIndexState
+} from './indexStream';
 import { HeightModel, visibleRange } from './window';
 
 /** 封顶卡片的 body 内滚动最大高度（px）：400 行 × 20px 全展开会顶爆窗口滚动
@@ -58,26 +100,74 @@ export function shouldDelegateToCode(size: number): boolean {
 /** 卡片滚动容器 / 窗口 overscan（与 visibleRange 缺省一致，显式书写便于调参） */
 const OVERSCAN = 5;
 
-/**
- * JSONL 渲染本体：构建 .vv-jsonl DOM（状态条 + 滚动容器）并驱动可变高度窗口循环。
- * 返回实例含 destroy 与 getMeta（CodeFileMeta 同形状，ViewerPane 鸭子探测自动消费）。
- */
-export function renderJsonl(
-  buffer: Uint8Array,
-  target: HTMLElement,
-  det: Detection
-): RenderedInstance & { getMeta(): CodeFileMeta } {
-  // 解码 + 归一（code.ts L537 同款：DECODERS 表 + fatal:false；标签异常容错回落 utf-8）
-  let text: string;
-  try {
-    text = new TextDecoder(DECODERS[det.encoding ?? 'utf-8'], { fatal: false }).decode(buffer);
-  } catch {
-    text = new TextDecoder('utf-8', { fatal: false }).decode(buffer);
-  }
-  text = text.replace(/\r\n?/g, '\n'); // CRLF/CR → LF（行索引/高亮偏移全在归一文本上）
-  const lines = splitJsonlLines(text); // 丢弃空行/纯空白行（JSONL 惯例）
-  const totalRows = lines.length;
+/** 窗口模式块大小：256KB（spec §4.2：首屏 2 块 = 512KB，滚动近尾部续读） */
+const WINDOW_BLOCK_BYTES = 256 * 1024;
+/** 块解码缓存 LRU 上限（块数）：8 块 ≈ 2MB 文本（spec §4.2） */
+const BLOCK_TEXT_CACHE_MAX = 8;
+/** 窗口模式行文本解码器（模块级单例：decode 非 stream 模式调用间无状态） */
+const LINE_DECODER = new TextDecoder('utf-8', { fatal: false });
 
+/** 块解码缓存条目：块文本 + 前缀解码游标（walkByte 恒为字符边界——只落行首/行尾） */
+interface BlockTextEntry {
+  text: string;
+  /** 游标已覆盖的字节偏移（块内） */
+  walkByte: number;
+  /** walkByte 对应的块文本字符下标 */
+  walkChar: number;
+}
+
+/** 窗口模式内部状态观测口（indexStream.ts internals 同款 WeakMap 模式）：
+ * 实例 → 块解码缓存。生产代码不读；单测据此断言 LRU 上限。 */
+export interface JsonlWindowedInternals {
+  blockTextCache: Map<number, BlockTextEntry>;
+}
+export const jsonlWindowedInternals = new WeakMap<
+  RenderedInstance & { getMeta(): CodeFileMeta },
+  JsonlWindowedInternals
+>();
+
+/** 双模式渲染核的运行期 API（afterUpdate 钩子的回调面：续读完成后重渲） */
+interface ViewRuntimeApi {
+  refreshStatus(): void;
+  /** 按当前行数重设 spacer 总高（model.total(rowCount)） */
+  setSpacerHeight(): void;
+  /** 强制重渲当前窗口（update(true)，内部再评估续读） */
+  refresh(): void;
+  destroyed(): boolean;
+}
+
+/** 双模式差异钩子：行数/行文本/状态文案/meta 的模式差异全部收口于此，
+ * 卡片渲染管线（解析缓存/高亮/折叠/窗口循环/destroy）两模式共用 */
+interface JsonlViewHooks {
+  /** 行数（窗口模式随续读增长，全量模式恒定） */
+  rowCount(): number;
+  /** 行原始文本（stateOf 的解析输入；全量=预切分数组直取，窗口=块缓存切片/拼装） */
+  lineAt(i: number): string;
+  /** 索引层已判 oversized 行的直接状态（窗口模式专用；全量不提供走 parseJsonlLine）。
+   * 返回 null = 非 oversized，回落 parseJsonlLine。 */
+  oversizedState?(i: number): JsonlLineState | null;
+  /** 状态条文案（不含失败徽标）：全量恒「共 N 行」；窗口「已加载 N 行」→ EOF 后「共 N 行」 */
+  statusText(): string;
+  /** 是否已到流末尾（全量恒 true；窗口模式据其决定 rows=0 是否空态早退） */
+  streamDone(): boolean;
+  /** 窗口更新后的模式钩子（窗口模式：接近已加载尾部续读；全量不提供） */
+  afterUpdate?(last: number, api: ViewRuntimeApi): void;
+  /** meta 尺寸/行数（窗口模式两者皆动态） */
+  metaSize(): number;
+  metaLines(): number;
+}
+
+/**
+ * 双模式共用渲染核：构建 .vv-jsonl DOM（状态条 + 滚动容器）并驱动可变高度窗口
+ * 循环。返回实例含 destroy 与 getMeta（CodeFileMeta 同形状，ViewerPane 鸭子探测
+ * 自动消费）。模式差异经 hooks 注入，DOM 结构与事件接线两模式完全一致。
+ */
+function mountJsonlView(
+  target: HTMLElement,
+  det: Detection,
+  hooks: JsonlViewHooks
+): RenderedInstance & { getMeta(): CodeFileMeta } {
+  const rows = hooks.rowCount;
   target.classList.add('vv-jsonl');
   const status = document.createElement('div');
   status.className = 'vv-jsonl-status';
@@ -94,21 +184,22 @@ export function renderJsonl(
       const badge = document.createElement('span');
       badge.className = 'vv-jsonl-status-failed';
       badge.textContent = ` · ${failedCount} 行解析失败`;
-      status.replaceChildren(document.createTextNode(`共 ${totalRows} 行`), badge);
+      status.replaceChildren(document.createTextNode(hooks.statusText()), badge);
     } else {
-      status.textContent = `共 ${totalRows} 行`;
+      status.textContent = hooks.statusText();
     }
   }
 
   const meta = (): CodeFileMeta => ({
     encoding: det.encoding,
     lang: 'json',
-    size: buffer.length,
-    lines: totalRows
+    size: hooks.metaSize(),
+    lines: hooks.metaLines()
   });
 
-  // rows=0 守卫：全空行文件不进窗口循环（visibleRange 无行可窗口化），空状态即终态
-  if (totalRows === 0) {
+  // rows=0 守卫：全空行文件不进窗口循环（visibleRange 无行可窗口化），空状态即
+  // 终态。窗口模式流未到 EOF 时不得早退（后续块可能带来行），交给续读循环。
+  if (rows() === 0 && hooks.streamDone()) {
     refreshStatus();
     target.replaceChildren(status);
     return {
@@ -152,7 +243,9 @@ export function renderJsonl(
   function stateOf(i: number): JsonlLineState {
     let st = parseCache.get(i);
     if (st === undefined) {
-      st = parseJsonlLine(lines[i] ?? '');
+      // 窗口模式：索引层已判 oversized 的行走直接构造（见模块头三路口径）；
+      // 其余行（含 FFFD 膨胀再越限的病态输入）交 parseJsonlLine，与全量同管
+      st = hooks.oversizedState?.(i) ?? parseJsonlLine(hooks.lineAt(i));
       parseCache.set(i, st);
       if (st.kind === 'failed') {
         failedCount += 1;
@@ -315,15 +408,25 @@ export function renderJsonl(
     scheduleMeasure();
   }
 
+  const api: ViewRuntimeApi = {
+    refreshStatus,
+    setSpacerHeight() {
+      spacer.style.height = `${model.total(rows())}px`;
+    },
+    refresh: () => update(true),
+    destroyed: () => destroyed
+  };
+
   /** 窗口循环：滚动/resize → visibleRange → 仅窗口内卡片重绘 + transform 定位 */
   function update(force = false): void {
     if (destroyed) return;
-    const { first, last } = visibleRange(model, scroll.scrollTop, scroll.clientHeight, totalRows, OVERSCAN);
+    const { first, last } = visibleRange(model, scroll.scrollTop, scroll.clientHeight, rows(), OVERSCAN);
     if (!force && first === curFirst && last === curLast) return;
     curFirst = first;
     curLast = last;
     viewport.style.transform = `translateY(${model.offsetOf(first)}px)`;
     renderCards(first, last);
+    hooks.afterUpdate?.(last, api); // 窗口模式：接近已加载尾部触发续读
   }
 
   /**
@@ -341,7 +444,7 @@ export function renderJsonl(
         if (h > 0) model.measure(Number((el as HTMLElement).dataset.line), h);
       }
       if (model.dirty) {
-        spacer.style.height = `${model.total(totalRows)}px`;
+        spacer.style.height = `${model.total(rows())}px`;
         viewport.style.transform = `translateY(${model.offsetOf(curFirst)}px)`;
         model.dirty = false;
       }
@@ -353,7 +456,7 @@ export function renderJsonl(
   const ro = new ResizeObserver(() => update());
   ro.observe(scroll);
 
-  spacer.style.height = `${model.total(totalRows)}px`;
+  spacer.style.height = `${model.total(rows())}px`;
   update(true);
 
   return {
@@ -379,17 +482,240 @@ export function renderJsonl(
   };
 }
 
+/**
+ * JSONL 渲染本体（双模式入口）：ctx 存在且 UTF-8 → 窗口流式；否则全量模式
+ * （现状路径：!ctx 兼容 / 非 UTF-8 编码，行为逐字节不动）。
+ */
+export async function renderJsonl(
+  buffer: Uint8Array,
+  target: HTMLElement,
+  det: Detection,
+  ctx?: StreamCtx
+): Promise<RenderedInstance & { getMeta(): CodeFileMeta }> {
+  if (ctx !== undefined && (det.encoding ?? 'utf-8') === 'utf-8') {
+    return renderJsonlWindowed(ctx, target, det);
+  }
+  // —— 全量模式（现状路径，行为不动）——
+  // 解码 + 归一（code.ts L537 同款：DECODERS 表 + fatal:false；标签异常容错回落 utf-8）
+  let text: string;
+  try {
+    text = new TextDecoder(DECODERS[det.encoding ?? 'utf-8'], { fatal: false }).decode(buffer);
+  } catch {
+    text = new TextDecoder('utf-8', { fatal: false }).decode(buffer);
+  }
+  text = text.replace(/\r\n?/g, '\n'); // CRLF/CR → LF（行索引/高亮偏移全在归一文本上）
+  const lines = splitJsonlLines(text); // 丢弃空行/纯空白行（JSONL 惯例）
+  const totalRows = lines.length;
+
+  return mountJsonlView(target, det, {
+    rowCount: () => totalRows,
+    lineAt: (i) => lines[i] ?? '',
+    statusText: () => `共 ${totalRows} 行`,
+    streamDone: () => true,
+    metaSize: () => buffer.length,
+    metaLines: () => totalRows
+  });
+}
+
+/**
+ * 窗口模式：BlockStream（256KB）逐块喂 advanceJsonlIndex 流式构建行索引，行文本
+ * 经块解码缓存切片/字节拼装，滚动接近已加载尾部续读（spec §4.2）。
+ */
+async function renderJsonlWindowed(
+  ctx: StreamCtx,
+  target: HTMLElement,
+  det: Detection
+): Promise<RenderedInstance & { getMeta(): CodeFileMeta }> {
+  const bs = createBlockStream(ctx, WINDOW_BLOCK_BYTES);
+  const index: JsonlIndexState = createJsonlIndex(JSONL_OVERSIZE_LINE_BYTES);
+  // BOM 剥离（T2→T3 指令①）：恒在文件头=块 0 首，无跨块问题；剥离后索引偏移为
+  // 逻辑字节空间，文件字节 = 逻辑偏移 + bomLen
+  let bomLen = 0;
+  let nextFeed = 0; // 下一个待喂索引的块号
+  // 消费契约（T2→T3 指令②）：finishJsonlIndex 之后不得再 advanceJsonlIndex——
+  // 此标志后续读全部停机，EOF 确认后滚动零 IO
+  let indexFinished = false;
+
+  const startsWithBom = (b: Uint8Array<ArrayBuffer>): boolean =>
+    b.length >= 3 && b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf;
+
+  /** EOF 收口：atEnd 且已确认字节全部喂完（200-回退全量底座/全量视图需喂到文件尾） */
+  function maybeFinish(): void {
+    if (indexFinished) return;
+    if (bs.atEnd() && nextFeed * bs.blockSize >= bs.confirmedBytes) {
+      finishJsonlIndex(index); // 提交悬挂尾行；此后不再 advance（见上契约）
+      indexFinished = true;
+    }
+  }
+
+  /**
+   * 拉取下一块（至多一个新块）并喂入索引。块喂入前必经 ensureBlock——head 预置
+   * 的部分块（探测头 8KB < 256KB 块）未经整块替换不得进索引/解码（T1→T3 指令③：
+   * 未 ensure 的 block(i) 对 head 预置部分块返回截断字节）。
+   */
+  const pullBlock = async (): Promise<void> => {
+    if (indexFinished) return;
+    maybeFinish(); // size 已知空文件：0 块即 EOF，无需任何拉取
+    if (indexFinished) return;
+    const i = nextFeed++;
+    const raw = await bs.ensureBlock(i);
+    let chunk = raw;
+    if (i === 0 && startsWithBom(raw)) {
+      bomLen = 3; // 索引/解码前剥离（见上裁决）
+      chunk = raw.subarray(3);
+    }
+    advanceJsonlIndex(index, chunk);
+    maybeFinish();
+  };
+
+  const rows = (): number => index.offsets.length;
+
+  // 块解码缓存：blockIndex → 块文本 + 前缀解码游标，LRU 上限 8 块（spec §4.2 ≈2MB）
+  const blockText = new Map<number, BlockTextEntry>();
+
+  /**
+   * 块文本（LRU：触碰即重插，超限按 Map 插入序逐出最旧）。仅对已 ensureBlock 的
+   * 块调用（T1→T3 指令③：调用面全部满足「可见行 ⊆ 已喂块」不变量——可见行号
+   * < 已加载行数，其字节范围 ⊆ 已喂字节，故块已在 BlockStream 块表且为整块）。
+   */
+  function blockTextOf(b: number): BlockTextEntry {
+    const hit = blockText.get(b);
+    if (hit !== undefined) {
+      blockText.delete(b);
+      blockText.set(b, hit);
+      return hit;
+    }
+    const entry: BlockTextEntry = { text: LINE_DECODER.decode(bs.block(b)), walkByte: 0, walkChar: 0 };
+    blockText.set(b, entry);
+    if (blockText.size > BLOCK_TEXT_CACHE_MAX) {
+      const oldest = blockText.keys().next().value;
+      if (oldest !== undefined) blockText.delete(oldest);
+    }
+    return entry;
+  }
+
+  /**
+   * 块内字节偏移 → 块文本字符下标。行首/行尾恒为字符边界（行终结符是单字节
+   * ASCII），故自游标起的字节前缀独立 decode 的长度即字符增量；降序/冷查询回退
+   * 整前缀（块 0 前缀 decode 同样剥 BOM，与整块解码口径一致）。
+   */
+  function charOffsetOf(e: BlockTextEntry, b: number, byteOff: number): number {
+    const bytes = bs.block(b);
+    const ch = byteOff >= e.walkByte
+      ? e.walkChar + LINE_DECODER.decode(bytes.subarray(e.walkByte, byteOff)).length
+      : LINE_DECODER.decode(bytes.subarray(0, byteOff)).length;
+    e.walkByte = byteOff;
+    e.walkChar = ch;
+    return ch;
+  }
+
+  /** 行原始字节跨块拼装（[startFile, endFile) 文件字节空间；末块短读按实际块长） */
+  function gatherLineBytes(startFile: number, endFile: number): Uint8Array<ArrayBuffer> {
+    const b0 = Math.floor(startFile / bs.blockSize);
+    const b1 = Math.floor((endFile - 1) / bs.blockSize);
+    const first = bs.block(b0);
+    if (b0 === b1) {
+      return first.subarray(startFile - b0 * bs.blockSize, endFile - b0 * bs.blockSize);
+    }
+    const out = new Uint8Array(endFile - startFile);
+    let pos = 0;
+    for (let b = b0; b <= b1; b++) {
+      const base = b * bs.blockSize;
+      const from = Math.max(0, startFile - base);
+      const to = Math.min(bs.block(b).length, endFile - base);
+      out.set(bs.block(b).subarray(from, to), pos);
+      pos += to - from;
+    }
+    return out;
+  }
+
+  /**
+   * 行文本（stateOf 的行来源，见模块头三路）：单块行=块文本缓存切片；跨块行=按
+   * 索引 lengths 拼原始字节后单次解码（块切口不打碎跨块多字节字符）；oversized
+   * 行不走拼装——行首 4×64KB 字节解码后截 64KB 字符（与全量 parseJsonlLine 的
+   * 64KB 字符截断逐字符一致）。
+   */
+  function rawLine(i: number): string {
+    const len = index.lengths[i]!;
+    const startFile = index.offsets[i]! + bomLen;
+    const endFile = startFile + len;
+    if (index.oversized.has(i)) {
+      // 4×64KB 字节前缀内行首 64K 字符必完整（UTF-8 每字符 ≤4 字节）
+      const previewEnd = Math.min(endFile, startFile + JSONL_OVERSIZE_PREVIEW_BYTES * 4);
+      return LINE_DECODER.decode(gatherLineBytes(startFile, previewEnd))
+        .slice(0, JSONL_OVERSIZE_PREVIEW_BYTES);
+    }
+    const b0 = Math.floor(startFile / bs.blockSize);
+    const b1 = Math.floor((endFile - 1) / bs.blockSize);
+    if (b0 !== b1) return LINE_DECODER.decode(gatherLineBytes(startFile, endFile));
+    const entry = blockTextOf(b0);
+    const off = startFile - b0 * bs.blockSize;
+    const cs = charOffsetOf(entry, b0, off);
+    const ce = charOffsetOf(entry, b0, off + len);
+    return entry.text.slice(cs, ce);
+  }
+
+  let pulling = false;
+  /**
+   * 滚动接近已加载尾部（可视末行距尾 ≤ OVERSCAN×2 行）→ 续读下一块并重渲
+   * （spec §4.2「滚动接近已加载尾部续读」）。一次一块：完成后 refresh 重评，
+   * 仍近尾部则再次触发直至余量充足/EOF。渲染期首拉失败走 render 上抛（读失败
+   * 面）；滚动期续读失败自兜底（hex.ts 滚动期 ensure 同口径）：保留已加载内容、
+   * 不落错误卡片，debug 留痕。
+   */
+  function maybeContinue(lastVisible: number, api: ViewRuntimeApi): void {
+    if (indexFinished || pulling || api.destroyed()) return;
+    if (lastVisible < rows() - OVERSCAN * 2) return; // 距尾部余量充足
+    pulling = true;
+    void (async () => {
+      try {
+        await pullBlock();
+      } catch (err) {
+        console.debug('[jsonl] 流式续读失败，停在已加载行', err);
+      }
+      pulling = false;
+      if (api.destroyed()) return;
+      api.refreshStatus();
+      api.setSpacerHeight();
+      api.refresh(); // 重渲 + 再评估（仍近尾部则续读下一块）
+    })();
+  }
+
+  // 首屏确保前 2 块（spec §4.2）；失败上抛走渲染期读失败面（dispatcher 口径）。
+  // 已本地化（全量视图 head 预置全部块 / 200-回退切全量 / 短读已确认 EOF）时
+  // 排空剩余已确认块——零 IO，仅把索引喂到文件尾，状态条直接落「共 N 行」。
+  await pullBlock();
+  await pullBlock();
+  while (!indexFinished && bs.atEnd()) await pullBlock();
+
+  const instance = mountJsonlView(target, det, {
+    rowCount: rows,
+    lineAt: rawLine,
+    // 索引层已判 oversized（行字节 ≥1MB）：直接构造 parseJsonlLine 的 oversize
+    // 形态——预览 <1MB，若再过 parseJsonlLine 的 encode 阈值会被误判进 JSON.parse
+    oversizedState: (i) => (index.oversized.has(i) ? { kind: 'oversize', raw: rawLine(i) } : null),
+    statusText: () => (indexFinished ? `共 ${rows()} 行` : `已加载 ${rows()} 行`),
+    streamDone: () => indexFinished,
+    afterUpdate: maybeContinue,
+    metaSize: () => ctx.size ?? bs.confirmedBytes,
+    metaLines: rows
+  });
+  jsonlWindowedInternals.set(instance, { blockTextCache: blockText });
+  return instance;
+}
+
 export const jsonlRenderer: Renderer = {
   id: 'jsonl',
   label: 'JSON Lines',
   extensions: ['jsonl', 'ndjson'],
-  async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection) {
+  async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection, ctx?: StreamCtx) {
     if (shouldDelegateToCode(buffer.byteLength)) {
       // >200MB：JSONL 逐行解析/逐卡高亮的内存与主线程成本失控，委托 code 纯文本
       // 虚拟滚动（沿用其超限提示条与实例扩展；encoding/ext 透传保证非 UTF-8 解码
-      // 一致与状态栏语言段正确）
+      // 一致与状态栏语言段正确）。仅对全量 buffer 生效——窗口模式 buffer 形参是
+      // 探测头，永不触发（code 渲染器流式化为计划 3，届时由其 streaming 路径承接）
       return renderCode(buffer, target, { encoding: det.encoding, ext: det.ext, highlight: false, oversizeNotice: true });
     }
-    return renderJsonl(buffer, target, det);
+    return renderJsonl(buffer, target, det, ctx);
   }
 };
