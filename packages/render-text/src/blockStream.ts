@@ -20,45 +20,95 @@
 // 0..nextBlock-1 恒为终态块——短读后合法末块可达、越界报错块号恒为实际末块）；
 // 同块并发 ensureBlock 经 in-flight 表合并为单次 fetch（hexSource 并发去重先例），
 // 各调用方共享同一 resolve/reject（非伪拒绝）。
+// 块表 LRU 有界化（计划 3 Task 1，计划 2 终审 B1）：可选 maxBlocks 约束块表驻留
+// 上界——head 预置块同样计入，命中触新（删除重插）、超限逐出表首（最旧），与
+// hexSource 同语义；被逐出块再访问 = block 同步抛未就绪 / ensureBlock 重拉（已被
+// 确认的块内容视为终态，重拉同字节）。nextBlock 与 confirmedBytes 均单调（重拉
+// 不回退），atEnd 由 nextBlock 推导（逐出不影响 EOF 判定）、shortSeen 一经置位锁存。
 import type { StreamCtx } from '@vviewer/core';
+
+/**
+ * 流式尺寸防线（spec §4.3 防线换代）：流式渲染器索引/块表常驻内存的统一上限口径，
+ * jsonl 与 code（计划 3 Task 4）共享。超限方停止续读并以非失败态提示「建议以 hex
+ * 打开」——取代全量渲染时代的 PLAIN_MAX_BYTES「全量解码失控」前提。
+ */
+export const STREAM_MAX_BYTES = 512 * 1024 * 1024;
 
 export interface BlockStream {
   readonly blockSize: number;
-  /** 已确认的文件字节数（size 已知时= size；未知时随短读探测推进） */
+  /** 已确认的文件字节数（size 已知时= size；未知时随短读探测推进，单调不减） */
   readonly confirmedBytes: number;
   /** 200-回退已触发：ctx 交付过全量（此时 readBlock 为全量切片） */
   readonly degradedToFull: boolean;
   /** 第 i 块字节（末块短读）；i 必须已 ensure */
   block(i: number): Uint8Array<ArrayBuffer>;
-  /** 确保第 i 块就绪；返回该块字节。i > 当前已确认块数时仅按序推进（不跳读） */
+  /** 块 i 是否驻留块表（degraded 全量底座按文件范围判定）。渲染侧「可见行 ⊆ 驻留
+   * 块」把关用：缺块行走占位 + ensureBlock 重拉（maxBlocks LRU 逐出后的补块面）。 */
+  has(i: number): boolean;
+  /** 确保第 i 块就绪；返回该块字节。i > 当前已确认块数时仅按序推进（不跳读）；
+   * 已确认但被 LRU 逐出的块按 hexSource 同语义重拉（零跳读、坐标不变） */
   ensureBlock(i: number): Promise<Uint8Array<ArrayBuffer>>;
   /** 已确认末块（短读或 size 精确到达） */
   atEnd(): boolean;
 }
 
-export function createBlockStream(ctx: StreamCtx, blockSize: number): BlockStream {
+/** maxBlocks LRU 选项：块表驻留上界（块数）。缺省 = 无界（调用方自管时兼容现状）。 */
+export interface BlockStreamOptions {
+  maxBlocks?: number;
+}
+
+export function createBlockStream(
+  ctx: StreamCtx,
+  blockSize: number,
+  opts?: BlockStreamOptions
+): BlockStream {
   if (!Number.isInteger(blockSize) || blockSize <= 0) {
     throw new Error(`blockStream：blockSize 须为正整数，收到 ${blockSize}`);
+  }
+  const maxBlocks = opts?.maxBlocks;
+  if (maxBlocks !== undefined && (!Number.isInteger(maxBlocks) || maxBlocks < 1)) {
+    throw new Error(`blockStream：maxBlocks 须为正整数，收到 ${maxBlocks}`);
   }
   const sizeKnown = ctx.size !== null;
   // 已知 size 的块总数（空文件为 0）；未知 size 以 Infinity 占位（边界靠短读发现）
   const blockCount = sizeKnown ? Math.ceil(ctx.size / blockSize) : Number.POSITIVE_INFINITY;
 
-  // 块表：head 按 blockSize 切分预置（末块可短——head 未必落在块边界）
+  // 块表：head 按 blockSize 切分预置（末块可短——head 未必落在块边界）。
+  // Map 插入序即 LRU 新近序（hexSource 同款）：命中触新 = 删除重插挪表尾，
+  // 超限逐出表首（最旧）。
   const blocks = new Map<number, Uint8Array<ArrayBuffer>>();
   for (let i = 0; i * blockSize < ctx.head.length; i++) {
     blocks.set(i, ctx.head.subarray(i * blockSize, (i + 1) * blockSize));
   }
   // 下一个待拉块下标：首个非整块的预置块（重拉替换），否则已预置块数。
-  // 不变量：0..nextBlock-1 均为终态整块（或已知末块的精确短块），不再重拉。
+  // 不变量：0..nextBlock-1 均为终态整块（或已知末块的精确短块），不再重拉——
+  // （maxBlocks 逐出后语义微调：坐标仍终态，字节缺失经 ensureBlock 重拉补齐）
   let nextBlock = 0;
   while (nextBlock < blocks.size && blocks.get(nextBlock)!.length === blockSize) nextBlock++;
 
+  /** LRU 触新：命中块删除重插挪到表尾（hexSource 同款） */
+  const touch = (i: number): void => {
+    const b = blocks.get(i);
+    if (b === undefined) return;
+    blocks.delete(i);
+    blocks.set(i, b);
+  };
+
+  /** 超限逐出表首（最旧）。恰插入的新块在表尾，maxBlocks ≥ 1 下不会被自逐出 */
+  const evictOverflow = (): void => {
+    while (blocks.size > (maxBlocks ?? Number.POSITIVE_INFINITY)) {
+      const oldest = blocks.keys().next().value;
+      if (oldest === undefined) break;
+      blocks.delete(oldest);
+    }
+  };
+  evictOverflow(); // head 预置超限（如 !rangeCapable 全量视图预置全部块）同样有界
+
   let confirmed = sizeKnown ? ctx.size : ctx.head.length; // 已确认字节数
-  let shortSeen = false; // size 未知：短读已确认 EOF
+  let shortSeen = false; // size 未知：短读已确认 EOF（一经置位锁存）
   let fullData: Uint8Array<ArrayBuffer> | null = null; // 200-回退全量底座（非 null 即 degraded）
 
-  /** 同步取块：degraded 时为全量切片（越界抛错），否则查块表（未就绪抛错） */
+  /** 同步取块：degraded 时为全量切片（越界抛错），否则查块表（未就绪抛错）；命中触新 */
   const block = (i: number): Uint8Array<ArrayBuffer> => {
     const full = fullData;
     if (full !== null) {
@@ -69,7 +119,15 @@ export function createBlockStream(ctx: StreamCtx, blockSize: number): BlockStrea
     }
     const b = blocks.get(i);
     if (b === undefined) throw new Error(`blockStream：块 ${i} 未就绪（block(i) 前须先 ensureBlock(i)）`);
+    touch(i);
     return b;
+  };
+
+  /** 块 i 是否驻留：degraded 按文件范围判定（一切块可零 IO 切片），否则查块表 */
+  const has = (i: number): boolean => {
+    const full = fullData;
+    if (full !== null) return i >= 0 && i * blockSize < full.length;
+    return blocks.has(i);
   };
 
   /** 拉取块 i（替换任何预置部分块）；处理超长 200-回退/短读 EOF/满块三态 */
@@ -86,6 +144,7 @@ export function createBlockStream(ctx: StreamCtx, blockSize: number): BlockStrea
       return;
     }
     blocks.set(i, chunk);
+    evictOverflow(); // 入表后保持 LRU 上界（恰插入块在表尾，不会被自逐出）
     if (sizeKnown) {
       if (chunk.length < cap) {
         // size 已知来源按 ByteRange 契约精确返回（EOF 已由端点钳制表达）：
@@ -93,7 +152,9 @@ export function createBlockStream(ctx: StreamCtx, blockSize: number): BlockStrea
         throw new Error(`blockStream：块 ${i} 读取返回 ${chunk.length} 字节，不足 ${cap}（size 已知来源的短读违约）`);
       }
     } else {
-      confirmed = i * blockSize + chunk.length;
+      // 单调确认（LRU 重拉安全）：重拉已确认区间时不得回退 confirmed——末次短读
+      // 探测值是 EOF 事实，被更早块的重拉覆盖会让 atEnd/maybeFinish 误判未达
+      confirmed = Math.max(confirmed, i * blockSize + chunk.length);
       if (chunk.length < blockSize) shortSeen = true; // 短读确认 EOF
     }
   };
@@ -108,7 +169,8 @@ export function createBlockStream(ctx: StreamCtx, blockSize: number): BlockStrea
    * 与 fetch 绑定（并发调用方各自跑主循环时不会重复推进），且成功即推进（含短读
    * 末块），维持「0..nextBlock-1 恒为终态块」不变量——短读确认后合法末块仍可达
    * （零重拉），越界报错块号（nextBlock-1）恒为实际末块。失败清在途表后原样上抛
-   * （后续重试重新发起）。
+   * （后续重试重新发起）。LRU 重拉安全：重拉被逐出的已确认块不得回退 nextBlock
+   * （否则前向推进错位、后续块重复 IO）。
    */
   const ensureOne = (target: number): Promise<void> => {
     const existing = inflight.get(target);
@@ -116,7 +178,7 @@ export function createBlockStream(ctx: StreamCtx, blockSize: number): BlockStrea
     const p = fetchBlock(target).then(
       () => {
         inflight.delete(target);
-        nextBlock = target + 1;
+        nextBlock = Math.max(nextBlock, target + 1);
       },
       (err: unknown) => {
         inflight.delete(target);
@@ -153,6 +215,12 @@ export function createBlockStream(ctx: StreamCtx, blockSize: number): BlockStrea
         throw new Error(`blockStream：文件已在块 ${nextBlock - 1} 结束（短读确认），块 ${i} 不存在`);
       }
     }
+    if (!blocks.has(i)) {
+      // 已确认坐标但被 maxBlocks LRU 逐出：重拉补齐（hexSource 同语义）。ensureOne
+      // 复用并发去重；成功后 nextBlock/confirmed 均单调（见上），坐标与字节不变。
+      await ensureOne(i);
+      if (fullData !== null) return block(i); // 途中 200-回退：直接切全量切片
+    }
     return block(i);
   };
 
@@ -165,12 +233,14 @@ export function createBlockStream(ctx: StreamCtx, blockSize: number): BlockStrea
       return fullData !== null;
     },
     block,
+    has,
     ensureBlock,
     atEnd() {
       if (fullData !== null) return true; // 全量即末块已知
       if (shortSeen) return true; // 短读确认 EOF
-      // size 已知：末块就绪 = size 精确到达（空文件 0 块，构造即 atEnd）
-      return sizeKnown ? blockCount === 0 || blocks.has(blockCount - 1) : false;
+      // size 已知：末块就绪 = nextBlock 精确到达（空文件 0 块，构造即 atEnd）。
+      // 用 nextBlock 而非查块表：末块被 LRU 逐出不翻转 EOF 事实（atEnd 单调）
+      return sizeKnown ? blockCount === 0 || nextBlock >= blockCount : false;
     }
   };
 }

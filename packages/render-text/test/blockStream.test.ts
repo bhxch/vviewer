@@ -1,10 +1,11 @@
 // blockStream.test.ts — Task 1（io-streaming 计划 2）：blockStream 公共块流读取器单测。
 // 语义覆盖：head 覆盖首块直取零 IO、size 已知末块精确短读 + atEnd、size 未知短读
 // 探测 atEnd、ensureBlock 按序推进不跳读、Range-less 200 超长返回切全量（计划 1
-// 终审 F3）、read 失败原样上抛。纯逻辑模块，fake ctx 记录每次请求区间。
+// 终审 F3）、read 失败原样上抛；计划 3 Task 1 追加：maxBlocks LRU 有界化（B1）与
+// STREAM_MAX_BYTES 统一裁决常量。纯逻辑模块，fake ctx 记录每次请求区间。
 import { describe, expect, it } from 'vitest';
 import type { StreamCtx } from '@vviewer/core';
-import { createBlockStream } from '../src/blockStream';
+import { STREAM_MAX_BYTES, createBlockStream } from '../src/blockStream';
 
 /** 测试块大小：4 字节（区间小、便于手算端点） */
 const B = 4;
@@ -224,5 +225,82 @@ describe('createBlockStream', () => {
       { start: 4, end: 7 },
       { start: 8, end: 11 }
     ]);
+  });
+
+  // —— 计划 3 Task 1：maxBlocks LRU 有界化（计划 2 终审 B1）——
+
+  it('⑫ maxBlocks LRU 逐出：head 预置计入，第 N+1 块入表逐出最旧；被逐出块 ensureBlock 重拉同字节，nextBlock/confirmed 不回退', async () => {
+    const calls: RangeCall[] = [];
+    const bs = createBlockStream(
+      fakeCtx({ size: null, head: ALPHA.slice(0, 8), content: ALPHA, calls }), B, { maxBlocks: 2 });
+    expect(bs.has(0)).toBe(true); // head 预置块计入 LRU 表
+    expect(bs.has(1)).toBe(true);
+    await bs.ensureBlock(2); // 块 2 入表 → 超 2 逐出最旧（块 0）
+    expect(bs.has(0)).toBe(false);
+    expect(bs.has(2)).toBe(true);
+    expect(() => bs.block(0)).toThrow(/未就绪/); // 同步契约不变：被逐出块不可直取
+    expect(await bs.ensureBlock(0)).toEqual(ALPHA.slice(0, 4)); // 重拉（hexSource 同语义）
+    expect(calls).toStrictEqual([{ start: 8, end: 11 }, { start: 0, end: 3 }]);
+    expect(bs.confirmedBytes).toBe(12); // size 未知来源：重拉不回退已确认字节
+    expect(bs.atEnd()).toBe(false);
+    await bs.ensureBlock(3); // 前向推进不受重拉影响（nextBlock 不回退——不重复拉 1/2）
+    expect(calls).toStrictEqual([
+      { start: 8, end: 11 },
+      { start: 0, end: 3 },
+      { start: 12, end: 15 }
+    ]);
+  });
+
+  it('⑬ LRU 触新：命中块挪到表尾，逐出对象随之改变（非 FIFO）', async () => {
+    const calls: RangeCall[] = [];
+    const bs = createBlockStream(
+      fakeCtx({ size: null, head: ALPHA.slice(0, 8), content: ALPHA, calls }), B, { maxBlocks: 2 });
+    await bs.ensureBlock(2); // 表 {1,2}（逐出 0）
+    bs.block(1); // 触新块 1 → 序 {2,1}
+    await bs.ensureBlock(3); // 入表超限逐出最旧 = 块 2（块 1 因触新存活）
+    expect(bs.has(1)).toBe(true);
+    expect(bs.has(2)).toBe(false);
+    expect(bs.block(1)).toEqual(ALPHA.slice(4, 8));
+    expect(calls).toStrictEqual([{ start: 8, end: 11 }, { start: 12, end: 15 }]);
+  });
+
+  it('⑭ 逐出与短读 EOF 并存：末块短读后重拉被逐出块，atEnd 锁存维持、confirmed 单调', async () => {
+    const calls: RangeCall[] = [];
+    const data = ALPHA.slice(0, 6); // 块 0=4B 满、块 1=2B 短读（EOF）
+    const bs = createBlockStream(fakeCtx({ size: null, content: data, calls }), B, { maxBlocks: 1 });
+    await bs.ensureBlock(0);
+    await bs.ensureBlock(1); // 短读 EOF；块 1 入表逐出块 0
+    expect(bs.atEnd()).toBe(true);
+    expect(bs.has(0)).toBe(false);
+    expect(await bs.ensureBlock(0)).toEqual(data.slice(0, 4)); // EOF 后重拉仍可达
+    expect(bs.atEnd()).toBe(true); // shortSeen 锁存不因重拉翻转
+    expect(bs.confirmedBytes).toBe(6); // 单调：重拉满块不回退已确认字节
+    expect(calls).toStrictEqual([
+      { start: 0, end: 3 },
+      { start: 4, end: 7 },
+      { start: 0, end: 3 }
+    ]);
+    await expect(bs.ensureBlock(2)).rejects.toThrow(/已在块 1 结束/); // EOF 越界面不变
+  });
+
+  it('⑮ degraded 全量底座：has 按文件范围判定（一切块视为驻留，LRU 不参与）', async () => {
+    const bs = createBlockStream(fakeCtx({ size: 10, content: ALPHA, ignoreRange: true }), B);
+    await bs.ensureBlock(0);
+    expect(bs.degradedToFull).toBe(true);
+    expect(bs.has(0)).toBe(true);
+    expect(bs.has(6)).toBe(true); // 26B 共 7 块（0..6）
+    expect(bs.has(7)).toBe(false);
+    expect(bs.has(-1)).toBe(false);
+  });
+
+  it('⑯ maxBlocks 须为正整数', () => {
+    const ctx = fakeCtx({ size: 10, content: ALPHA });
+    expect(() => createBlockStream(ctx, B, { maxBlocks: 0 })).toThrow(/maxBlocks/);
+    expect(() => createBlockStream(ctx, B, { maxBlocks: 1.5 })).toThrow(/maxBlocks/);
+    expect(() => createBlockStream(ctx, B, { maxBlocks: -1 })).toThrow(/maxBlocks/);
+  });
+
+  it('⑰ STREAM_MAX_BYTES = 512MB（流式尺寸防线常量，jsonl/code 统一裁决共享）', () => {
+    expect(STREAM_MAX_BYTES).toBe(512 * 1024 * 1024);
   });
 });

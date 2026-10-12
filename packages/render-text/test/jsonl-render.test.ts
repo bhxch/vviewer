@@ -561,4 +561,35 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
       process.off('unhandledRejection', onUnhandled);
     }
   });
+
+  // 计划 3 Task 1（B1 块表有界化）：窗口模式接入 maxBlocks（16 块）。跳入文本缓存与
+  // 块表都已逐出且从未渲染解析的区间 → 占位卡 + 按需重拉 + 重渲实卡（hex 同语义）。
+  it('窗口模式块表 LRU（16 块）：滚动跳入已逐出块区间，占位后按需重拉、内容正确且无失败卡', async () => {
+    stubResizeObserver();
+    const text = padLines(3400, 1500); // ≈5.1MB ≈ 20 块 > 16：滚到底后块 0..3 已逐出
+    const content = enc(text);
+    const calls: RangeCall[] = [];
+    const host = mount();
+    const inst = (await jsonlRenderer.render(content.slice(0, 8192), host, source, det,
+      streamCtx({ size: content.length, content, head: content.slice(0, 8192), calls }))) as JsonlInstance;
+    scrollToBottom(host); // 续读到 EOF：前向喂块恰好每块一次，表内只留块 4..19
+    await vi.waitFor(() => {
+      expect(host.querySelector('.vv-jsonl-status')!.textContent!.startsWith('共 3400 行')).toBe(true);
+    });
+    expect(calls.length).toBe(20);
+    // 跳到行 350 附近（块 1/2：两缓存均已逐出且这些行从未解析）——未测行估算高
+    // 120px，rowAt(42000) 精确落行 350，可视窗口 345..355
+    const scroll = host.querySelector('.vv-jsonl-scroll') as HTMLElement;
+    scroll.scrollTop = 120 * 350;
+    scroll.dispatchEvent(new Event('scroll'));
+    await vi.waitFor(() => {
+      const body = host.querySelector('[data-line="345"] .vv-jsonl-body') as HTMLElement | null;
+      expect(body?.textContent ?? '').toContain('"i": 345'); // 重拉完成后实卡渲染
+    });
+    // 块 1/2 各恰重拉一次（pendingReload 去重：占位期不重复登记，refresh 后零多余 IO）
+    expect(calls.filter((c) => c.start === BLOCK && c.end === 2 * BLOCK - 1).length).toBe(2);
+    expect(calls.filter((c) => c.start === 2 * BLOCK && c.end === 3 * BLOCK - 1).length).toBe(2);
+    expect(host.querySelector('[data-line="345"]')!.querySelector('.vv-jsonl-card-failed')).toBeNull();
+    inst.destroy();
+  });
 });

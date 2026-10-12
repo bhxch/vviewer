@@ -46,6 +46,11 @@
  * 滚动期续读失败置停机标志（「下次用户动作才重试」，hex.ts 同口径），杜绝
  * 「失败→重评→仍近尾部→再失败」的无限重试活锁。
  *
+ * 块表有界（计划 3 Task 1，计划 2 终审 B1）：BlockStream maxBlocks=16（4MB 原始
+ * 字节）——滚动到底原始字节不再全量常驻。被逐出块经 hooks.lineAvailable 把关：
+ * 缺块行渲染占位卡、不进解析（防污染 parseCache），maybeContinue 统一重拉后
+ * refresh 填充（hexSource「占位+ensure+重拉」同语义）。
+ *
  * 高亮裁决：卡片级——每张 ok 卡片对自身 pretty 全文调一次
  * getHighlightClient().highlight(pretty, 'json')，窗口外的行永不解析/高亮；
  * pretty 超过 JSONL_HIGHLIGHT_MAX_CHARS（1M 字符）的卡片跳过自动高亮保持纯文本；
@@ -107,6 +112,10 @@ const OVERSCAN = 5;
 const WINDOW_BLOCK_BYTES = 256 * 1024;
 /** 块解码缓存 LRU 上限（块数）：8 块 ≈ 2MB 文本（spec §4.2） */
 const BLOCK_TEXT_CACHE_MAX = 8;
+/** 块表驻留上界（BlockStream maxBlocks，计划 3 Task 1 / 计划 2 终审 B1）：
+ * 16×256KB = 4MB 原始字节，滚动到底不再全量常驻。文本缓存 8 块热集之外留一倍
+ * 余量；被逐出块经 lineAvailable 把关 + ensureBlock 重拉（hexSource 同语义）。 */
+const WINDOW_STREAM_MAX_BLOCKS = 16;
 /** 窗口模式行文本解码器（模块级单例：decode 非 stream 模式调用间无状态） */
 const LINE_DECODER = new TextDecoder('utf-8', { fatal: false });
 
@@ -146,6 +155,10 @@ interface JsonlViewHooks {
   rowCount(): number;
   /** 行原始文本（stateOf 的解析输入；全量=预切分数组直取，窗口=块缓存切片/拼装） */
   lineAt(i: number): string;
+  /** 行 i 渲染所需块是否驻留（窗口模式专用：块表 LRU 逐出后暂不可用；全量不提供）。
+   * 返回 false 的行渲染占位卡、不进 stateOf（防不可用文本污染解析缓存），探测到
+   * 的缺块由渲染器登记待办、统一 ensureBlock 重拉后 refresh 重渲（hex 同语义）。 */
+  lineAvailable?(i: number): boolean;
   /** 索引层已判 oversized 行的直接状态（窗口模式专用；全量不提供走 parseJsonlLine）。
    * 返回 null = 非 oversized，回落 parseJsonlLine。 */
   oversizedState?(i: number): JsonlLineState | null;
@@ -328,9 +341,8 @@ function mountJsonlView(
     }
   }
 
-  /** 单卡构建：gutter(1 起行号) + pre body + 徽标/截断提示/展开按钮按状态挂载 */
-  function buildCard(i: number): HTMLElement {
-    const st = stateOf(i);
+  /** 卡片骨架：gutter(1 起行号) + pre body。实卡与「块被逐出」占位卡共用结构 */
+  function cardSkeleton(i: number): { card: HTMLElement; body: HTMLElement } {
     const card = document.createElement('div');
     card.className = 'vv-jsonl-card';
     // 口径：data-line 是 0 基「内容行」序号——切行时已剔除空行/纯空白行，
@@ -342,6 +354,17 @@ function mountJsonlView(
     const body = document.createElement('pre');
     body.className = 'vv-jsonl-body';
     card.append(gutter, body);
+    return { card, body };
+  }
+
+  /** 单卡构建：gutter + pre body + 徽标/截断提示/展开按钮按状态挂载 */
+  function buildCard(i: number): HTMLElement {
+    // 行所需块被块表 LRU 逐出的暂态（lineAvailable 探测）：占位卡——hex「占位 +
+    // ensure + 重拉」同型，重拉完成后 refresh 重渲实卡；不进 stateOf（防不可用
+    // 文本被 JSON.parse 出错误状态污染解析缓存）
+    const { card, body } = cardSkeleton(i);
+    if (hooks.lineAvailable !== undefined && !hooks.lineAvailable(i)) return card;
+    const st = stateOf(i);
 
     if (st.kind === 'failed') {
       card.classList.add('vv-jsonl-card-failed');
@@ -538,7 +561,7 @@ async function renderJsonlWindowed(
   target: HTMLElement,
   det: Detection
 ): Promise<RenderedInstance & { getMeta(): CodeFileMeta }> {
-  const bs = createBlockStream(ctx, WINDOW_BLOCK_BYTES);
+  const bs = createBlockStream(ctx, WINDOW_BLOCK_BYTES, { maxBlocks: WINDOW_STREAM_MAX_BLOCKS });
   const index: JsonlIndexState = createJsonlIndex(JSONL_OVERSIZE_LINE_BYTES);
   // BOM 剥离（T2→T3 指令①）：恒在文件头=块 0 首，无跨块问题；剥离后索引偏移为
   // 逻辑字节空间，文件字节 = 逻辑偏移 + bomLen
@@ -676,6 +699,23 @@ async function renderJsonlWindowed(
   // CPU 空转），置位后停止自动续读；用户滚动/resize 动作（notifyUserAction）解除，
   // 重评时单次重试（hex.ts「下次用户动作才重试」口径）
   let continueFailed = false;
+  // 回看重拉待办（计划 3 Task 1，B1 块表有界化配套）：lineAvailable 探测到缺块时
+  // 登记（Set 去重），maybeContinue 统一 ensureBlock 后 refresh 重渲。同步渲染路径
+  // 不能 await——缺块行先渲染占位卡，补块到达由下一次 update 填充（hex「占位 +
+  // ensure + 重拉」同型）。
+  const pendingReload = new Set<number>();
+
+  /** 行 i 所需块号区间 [b0, b1]：含 oversized 预览跨块（预览字节同样必须驻留） */
+  function lineBlockSpan(i: number): [number, number] {
+    const startFile = index.offsets[i]! + bomLen;
+    const len = index.lengths[i]!;
+    const end = index.oversized.has(i)
+      ? Math.min(startFile + len, startFile + JSONL_OVERSIZE_PREVIEW_BYTES * 4)
+      : startFile + len;
+    const b0 = Math.floor(startFile / bs.blockSize);
+    return [b0, Math.floor((end - 1) / bs.blockSize)];
+  }
+
   /**
    * 滚动接近已加载尾部（可视末行距尾 ≤ OVERSCAN×2 行）→ 续读下一块并重渲
    * （spec §4.2「滚动接近已加载尾部续读」）。一次一块：完成后 refresh 重评，
@@ -684,6 +724,27 @@ async function renderJsonlWindowed(
    * 不落错误卡片、debug 留痕，并置停机标志（见上）。
    */
   function maybeContinue(lastVisible: number, api: ViewRuntimeApi): void {
+    // 回看重拉优先于续读：缺块占位卡等待补块（与 EOF/尾部距离无关——回看发生在
+    // 已加载坐标区，逐块 ensure 后一次 refresh 填充全部占位行）
+    if (pendingReload.size > 0 && !pulling && !api.destroyed()) {
+      const targets = [...pendingReload];
+      pendingReload.clear();
+      pulling = true;
+      void (async () => {
+        try {
+          for (const b of targets) await bs.ensureBlock(b);
+        } catch (err) {
+          for (const b of targets) pendingReload.add(b); // 未完成块回待办（占位卡维持）
+          console.debug('[jsonl] 回看重拉失败，已停机（滚动后重试）', err);
+          pulling = false;
+          return; // 失败停机不 refresh（下次用户动作再试，续读失败同口径——防活锁）
+        }
+        pulling = false;
+        if (api.destroyed()) return;
+        api.refresh(); // 重渲：占位卡换实卡
+      })();
+      return;
+    }
     if (indexFinished || pulling || continueFailed || api.destroyed()) return;
     if (lastVisible < rows() - OVERSCAN * 2) return; // 距尾部余量充足
     pulling = true;
@@ -712,6 +773,19 @@ async function renderJsonlWindowed(
   const instance = mountJsonlView(target, det, {
     rowCount: rows,
     lineAt: rawLine,
+    // 块表 LRU 把关（计划 3 Task 1）：行所需块全部驻留才可渲染/解析；缺块登记
+    // 待办并渲染占位卡，maybeContinue 统一重拉后 refresh 填充
+    lineAvailable: (i) => {
+      const [b0, b1] = lineBlockSpan(i);
+      let ok = true;
+      for (let b = b0; b <= b1; b++) {
+        if (!bs.has(b)) {
+          ok = false;
+          pendingReload.add(b);
+        }
+      }
+      return ok;
+    },
     // 索引层已判 oversized（行字节 ≥1MB）：直接构造 parseJsonlLine 的 oversize
     // 形态——预览 <1MB，若再过 parseJsonlLine 的 encode 阈值会被误判进 JSON.parse
     oversizedState: (i) => (index.oversized.has(i) ? { kind: 'oversize', raw: rawLine(i) } : null),
