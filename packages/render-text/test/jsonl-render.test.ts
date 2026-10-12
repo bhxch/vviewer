@@ -472,4 +472,55 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
     expect(inst.getMeta().lines).toBe(50);
     inst.destroy();
   });
+
+  it('续读读失败（块 2 失败一次）：无 unhandled rejection、同块重试不跳块、失败停机不自动重试、用户滚动动作恢复续读到 EOF', async () => {
+    stubResizeObserver();
+    const text = padLines(1200, 1500); // ≈1.8MB ≈ 7 块
+    const content = enc(text);
+    const calls: RangeCall[] = [];
+    let readCount = 0;
+    const ctx: StreamCtx = {
+      size: null,
+      head: content.slice(0, 8192),
+      read: async (r) => {
+        calls.push({ start: r.start, end: r.end });
+        readCount += 1;
+        if (readCount === 3) throw new Error('块 2 网络抖动'); // 首屏 2 块后的首次续读失败
+        return content.slice(r.start, r.end + 1);
+      }
+    };
+    const unhandled: unknown[] = [];
+    const onUnhandled = (err: unknown): void => { unhandled.push(err); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const host = mount();
+      const inst = (await jsonlRenderer.render(content.slice(0, 8192), host, source, det, ctx)) as JsonlInstance;
+      scrollToBottom(host); // 触发续读 → 块 2 read 失败
+      await vi.waitFor(() => expect(readCount).toBeGreaterThanOrEqual(3));
+      await new Promise((r) => setTimeout(r, 30)); // 失败处理链（catch/停机/refresh）落地
+      expect(unhandled).toStrictEqual([]); // 失败被 catch 自兜底，无 unhandled rejection
+      // 失败停机：refresh 重评不再自动重试（read 数不增长——无「失败→重评→再失败」活锁）
+      const readsAfterFail = calls.length;
+      expect(readsAfterFail).toBe(3); // 块 0/1 成功 + 块 2 失败尝试
+      await new Promise((r) => setTimeout(r, 30));
+      expect(calls.length).toBe(readsAfterFail);
+      // 用户滚动动作（离开末位再回来）→ 解除停机，单次重试
+      const scroll = host.querySelector('.vv-jsonl-scroll') as HTMLElement;
+      scroll.scrollTop = 0;
+      scroll.dispatchEvent(new Event('scroll'));
+      await new Promise((r) => setTimeout(r, 10));
+      scroll.scrollTop = Number.MAX_SAFE_INTEGER;
+      scroll.dispatchEvent(new Event('scroll'));
+      await vi.waitFor(() => {
+        expect(host.querySelector('.vv-jsonl-status')!.textContent!.startsWith('共 1200 行')).toBe(true);
+      });
+      // 同块重试（不跳块）：第 4 次 read 与失败尝试（第 3 次）区间相同
+      expect(calls[3]).toStrictEqual(calls[2]);
+      expect(calls[2]).toStrictEqual({ start: 2 * BLOCK, end: 3 * BLOCK - 1 });
+      expect(inst.getMeta().lines).toBe(1200);
+      inst.destroy();
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
 });

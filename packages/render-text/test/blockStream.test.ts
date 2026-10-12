@@ -17,7 +17,8 @@ interface RangeCall {
 }
 
 /** fake ctx：content 为底层全量数据；ignoreRange=true 模拟 Range-less 服务器
- * （任何区间请求都回 200 全量）；calls 记录每次请求区间；failWith 挂抛错。 */
+ * （任何区间请求都回 200 全量）；calls 记录每次请求区间；failWith 挂抛错；
+ * failCall 指定第 N 次 read 抛 failWith（一次性失败，后续调用正常——续读重试用）。 */
 function fakeCtx(opts: {
   size: number | null;
   content: Uint8Array<ArrayBuffer>;
@@ -25,13 +26,20 @@ function fakeCtx(opts: {
   ignoreRange?: boolean;
   calls?: RangeCall[];
   failWith?: unknown;
+  failCall?: number;
 }): StreamCtx {
+  let n = 0;
   return {
     size: opts.size,
     head: opts.head ?? new Uint8Array(0),
     read: async (r) => {
       opts.calls?.push({ start: r.start, end: r.end });
-      if (opts.failWith !== undefined) throw opts.failWith;
+      n += 1;
+      if (opts.failCall !== undefined) {
+        if (n === opts.failCall) throw opts.failWith; // 仅第 N 次失败（重试可过）
+      } else if (opts.failWith !== undefined) {
+        throw opts.failWith; // 恒失败（既有用例⑥口径）
+      }
       if (opts.ignoreRange) return opts.content.slice();
       return opts.content.slice(r.start, r.end + 1);
     }
@@ -136,5 +144,32 @@ describe('createBlockStream', () => {
     expect(calls).toStrictEqual([{ start: 0, end: 3 }]); // 重拉整块
     expect(b0).toEqual(ALPHA.slice(0, 4)); // 整块替换部分预置
     expect(bs.confirmedBytes).toBe(4);
+  });
+
+  it('⑧ 块读取失败：nextBlock 仅成功后推进——重试同块，序列完整不错位（fix round 1 原子性）', async () => {
+    const boom = new Error('块 1 网络抖动');
+    const calls: RangeCall[] = [];
+    const bs = createBlockStream(fakeCtx({
+      size: 16,
+      content: ALPHA.slice(0, 16),
+      calls,
+      failWith: boom,
+      failCall: 2 // 第 2 次 read（块 1）失败一次
+    }), B);
+    await expect(bs.ensureBlock(2)).rejects.toBe(boom);
+    expect(calls).toStrictEqual([{ start: 0, end: 3 }, { start: 4, end: 7 }]);
+    // 重试：块 0 已确认零 IO，重拉同一块 1（旧实现 nextBlock 先 ++ 后 await，失败
+    // 跳块 → 块 1 永久缺位、后续块字节错位拼进缺失坐标位）
+    expect(await bs.ensureBlock(2)).toEqual(ALPHA.slice(8, 12));
+    expect(calls).toStrictEqual([
+      { start: 0, end: 3 },
+      { start: 4, end: 7 },
+      { start: 4, end: 7 }, // 同块重试（不跳块）
+      { start: 8, end: 11 }
+    ]);
+    expect(bs.block(1)).toEqual(ALPHA.slice(4, 8)); // 块 1 内容就位（序列完整）
+    await bs.ensureBlock(3); // 补末块（ensureBlock(2) 只到块 2，atEnd 依赖末块就绪）
+    expect(bs.block(3)).toEqual(ALPHA.slice(12, 16));
+    expect(bs.atEnd()).toBe(true);
   });
 });

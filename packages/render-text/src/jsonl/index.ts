@@ -41,7 +41,10 @@
  * 的部分块（探测头 8KB < 256KB 块）未经整块替换不得进索引/解码。索引喂块统一
  * 走 pullBlock（ensure 后才 advance）；行文本取数依赖不变量「可见行 ⊆ 已喂块」
  * （可见行号 < 已加载行数，行字节范围 ⊆ 已喂字节），并对块 0 部分预置天然免疫
- * （索引有行 ⇒ 块 0 已整块替换）。
+ * （索引有行 ⇒ 块 0 已整块替换）。拉块原子性（fix round 1）：nextFeed 与
+ * BlockStream 的 nextBlock 均成功后才推进——read 失败可同块重试，块序列不错位；
+ * 滚动期续读失败置停机标志（「下次用户动作才重试」，hex.ts 同口径），杜绝
+ * 「失败→重评→仍近尾部→再失败」的无限重试活锁。
  *
  * 高亮裁决：卡片级——每张 ok 卡片对自身 pretty 全文调一次
  * getHighlightClient().highlight(pretty, 'json')，窗口外的行永不解析/高亮；
@@ -152,6 +155,9 @@ interface JsonlViewHooks {
   streamDone(): boolean;
   /** 窗口更新后的模式钩子（窗口模式：接近已加载尾部续读；全量不提供） */
   afterUpdate?(last: number, api: ViewRuntimeApi): void;
+  /** 用户视图动作通知（scroll/resize 事件入口）：窗口模式据此解除续读失败停机
+   * ——「下次用户动作才重试」（hex.ts 同口径）；全量不提供 */
+  notifyUserAction?(): void;
   /** meta 尺寸/行数（窗口模式两者皆动态） */
   metaSize(): number;
   metaLines(): number;
@@ -451,9 +457,15 @@ function mountJsonlView(
     });
   }
 
-  const onScroll = (): void => update();
+  const onScroll = (): void => {
+    hooks.notifyUserAction?.(); // 用户动作：解除续读停机（如有），随后重评单次重试
+    update();
+  };
   scroll.addEventListener('scroll', onScroll, { passive: true });
-  const ro = new ResizeObserver(() => update());
+  const ro = new ResizeObserver(() => {
+    hooks.notifyUserAction?.();
+    update();
+  });
   ro.observe(scroll);
 
   spacer.style.height = `${model.total(rows())}px`;
@@ -552,12 +564,15 @@ async function renderJsonlWindowed(
    * 拉取下一块（至多一个新块）并喂入索引。块喂入前必经 ensureBlock——head 预置
    * 的部分块（探测头 8KB < 256KB 块）未经整块替换不得进索引/解码（T1→T3 指令③：
    * 未 ensure 的 block(i) 对 head 预置部分块返回截断字节）。
+   * 原子性（fix round 1）：ensureBlock 失败上抛时 nextFeed 不推进（ensure 成功后
+   * 到 advance 之间无 await、无失败点），配合 BlockStream nextBlock 的成功后推进，
+   * 重试（用户滚动动作再触发）拉同一块，块序列不错位。
    */
   const pullBlock = async (): Promise<void> => {
     if (indexFinished) return;
     maybeFinish(); // size 已知空文件：0 块即 EOF，无需任何拉取
     if (indexFinished) return;
-    const i = nextFeed++;
+    const i = nextFeed;
     const raw = await bs.ensureBlock(i);
     let chunk = raw;
     if (i === 0 && startsWithBom(raw)) {
@@ -565,6 +580,7 @@ async function renderJsonlWindowed(
       chunk = raw.subarray(3);
     }
     advanceJsonlIndex(index, chunk);
+    nextFeed = i + 1; // 喂入成功才推进
     maybeFinish();
   };
 
@@ -656,28 +672,33 @@ async function renderJsonlWindowed(
   }
 
   let pulling = false;
+  // 续读失败停机（fix round 1）：失败后 refresh 重评仍近尾部会无限重试（活锁——
+  // CPU 空转），置位后停止自动续读；用户滚动/resize 动作（notifyUserAction）解除，
+  // 重评时单次重试（hex.ts「下次用户动作才重试」口径）
+  let continueFailed = false;
   /**
    * 滚动接近已加载尾部（可视末行距尾 ≤ OVERSCAN×2 行）→ 续读下一块并重渲
    * （spec §4.2「滚动接近已加载尾部续读」）。一次一块：完成后 refresh 重评，
    * 仍近尾部则再次触发直至余量充足/EOF。渲染期首拉失败走 render 上抛（读失败
    * 面）；滚动期续读失败自兜底（hex.ts 滚动期 ensure 同口径）：保留已加载内容、
-   * 不落错误卡片，debug 留痕。
+   * 不落错误卡片、debug 留痕，并置停机标志（见上）。
    */
   function maybeContinue(lastVisible: number, api: ViewRuntimeApi): void {
-    if (indexFinished || pulling || api.destroyed()) return;
+    if (indexFinished || pulling || continueFailed || api.destroyed()) return;
     if (lastVisible < rows() - OVERSCAN * 2) return; // 距尾部余量充足
     pulling = true;
     void (async () => {
       try {
         await pullBlock();
       } catch (err) {
-        console.debug('[jsonl] 流式续读失败，停在已加载行', err);
+        continueFailed = true; // 停机：杜绝「失败→refresh 重评→仍近尾部→再失败」活锁
+        console.debug('[jsonl] 流式续读失败，已停机（滚动后重试）', err);
       }
       pulling = false;
       if (api.destroyed()) return;
       api.refreshStatus();
       api.setSpacerHeight();
-      api.refresh(); // 重渲 + 再评估（仍近尾部则续读下一块）
+      api.refresh(); // 重渲 + 再评估（停机时 maybeContinue 直返；未停机仍近尾部则续读下一块）
     })();
   }
 
@@ -697,6 +718,7 @@ async function renderJsonlWindowed(
     statusText: () => (indexFinished ? `共 ${rows()} 行` : `已加载 ${rows()} 行`),
     streamDone: () => indexFinished,
     afterUpdate: maybeContinue,
+    notifyUserAction: () => { continueFailed = false; }, // 用户动作解除续读停机（单次重试）
     metaSize: () => ctx.size ?? bs.confirmedBytes,
     metaLines: rows
   });

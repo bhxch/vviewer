@@ -106,14 +106,17 @@ export function createBlockStream(ctx: StreamCtx, blockSize: number): BlockStrea
       // EOF 已在既往探测中确认：nextBlock 之前的块仍在，之后不存在
       throw new Error(`blockStream：文件已在块 ${nextBlock - 1} 结束（短读确认），块 ${i} 不存在`);
     }
-    // 按序推进（不跳读）：逐块 await——后一块的合法性依赖前一块未短读
+    // 按序推进（不跳读）：逐块 await——后一块的合法性依赖前一块未短读。
+    // 原子性（fix round 1）：nextBlock 仅在 fetchBlock 成功后推进——read 失败
+    // 上抛时停在原块，重试（调用方再 ensure）拉同一块；旧实现先 ++ 后 await，
+    // 失败块永久缺位、后续块字节错位拼进缺失坐标位
     while (nextBlock <= i) {
-      const idx = nextBlock++;
-      await fetchBlock(idx);
+      await fetchBlock(nextBlock);
       if (fullData !== null) return block(i); // 途中 200-回退：直接切全量切片
-      if (shortSeen && idx < i) {
-        throw new Error(`blockStream：文件已在块 ${idx} 结束（短读确认），块 ${i} 不存在`);
+      if (shortSeen && nextBlock < i) {
+        throw new Error(`blockStream：文件已在块 ${nextBlock} 结束（短读确认），块 ${i} 不存在`);
       }
+      nextBlock++;
     }
     return block(i);
   };
