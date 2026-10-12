@@ -1651,19 +1651,24 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     handle.destroy();
   });
 
-  // fix round 1 Important 2：snapshotLines 最小防护——空 query 短路零补块；补块
-  // 受并发上限分批（全量并发会是缺块数、全串行会是 1，二者皆非）。
-  it('搜索补块最小防护：空 query 短路零补块；非空 query 补块并发在飞 ≤ 4', async () => {
+  // Task 5 重写（原 snapshotLines 补块防护——后台全文扫描已接管）：空 query 短路
+  // 零补读；扫描期对块表 LRU 逐出的已确认块按行序单飞补拉。工作集（25 块）> LRU
+  //（16）时顺序扫描必然级联逐出（先补的块被后补挤出）：全量扫描每块恰读一次即为
+  // 该场景最优——「风暴面」以每块无重复读 + 单飞在飞钉住（snapshotLines 旧实现是
+  // 先验全量并发补块，同块随补随逐白拉重传）。
+  it('搜索扫描补块：空 query 短路零读；非空 query 每块恰补读一次且单飞', async () => {
     stubResizeObserver();
     const content = enc(codeLines(4200)); // 6.3MB ≈ 25 块 > 16：滚到底后缺块 0..8（9 个）
     let readCount = 0;
     let inflight = 0;
     let maxInflight = 0;
+    const lateReads: number[] = [];
     const ctx: StreamCtx = {
       size: content.length,
       head: content.slice(0, 8192),
       read: async (r) => {
         readCount += 1;
+        if (readCount > 25) lateReads.push(r.start); // EOF 后（搜索期）的读分布
         inflight += 1;
         maxInflight = Math.max(maxInflight, inflight);
         await new Promise((res) => setTimeout(res, 3)); // 拉开并发重叠窗口
@@ -1675,12 +1680,224 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
     scrollCode(host, Number.MAX_SAFE_INTEGER); // 续读到 EOF：25 次串行前向喂块（在飞 1）
     await vi.waitFor(() => expect(handle.getMeta().lines).toBe(4200));
-    expect(maxInflight).toBe(1); // 自证：续读链全串行，非空在飞只来自搜索补块
+    expect(maxInflight).toBe(1); // 自证：续读链全串行，非空在飞只来自扫描补拉
     const readsAtEof = readCount;
-    await handle.search(''); // 空 query（退出搜索）：短路快照/补块面
-    expect(readCount).toBe(readsAtEof); // 零补块
-    await handle.search('const'); // 非空 query：缺块 0..8 分批补（4+4+1）
-    expect(maxInflight).toBe(4); // 同批并发、批间串行：恰好上限
+    await handle.search(''); // 空 query（退出搜索）：短路扫描/补拉面
+    expect(readCount).toBe(readsAtEof); // 零补读
+    const matches = await handle.search('const a = 42;'); // 唯一命中在块 0（已被 LRU 逐出）
+    expect(matches.map((m) => m.line)).toEqual([42]); // 逐出不丢命中（行序补拉）
+    expect(readCount - readsAtEof).toBe(25); // 全文扫描触及全部块：每块恰读一次（无重复补拉）
+    expect(new Set(lateReads).size).toBe(lateReads.length); // 无同块重复读（风暴面消除）
+    expect(maxInflight).toBe(1); // 扫描补拉单飞（行序 ensure）：无并发风暴
+    handle.destroy();
+  });
+
+  // ---------- Task 5：后台全文扫描搜索（替换 snapshotLines 快照过渡实现） ----------
+  //
+  // 语义基线：search() 即刻返回 Promise，后台从文件头驱动 BlockStream 逐块前向喂
+  // 索引扫描到 EOF；命中随扫描渐进上屏（先到先出）；取消 = 新搜索/空查询/destroy
+  // 令牌失效（旧 Promise 以部分结果收场）；gotoMatch 先 ensure 目标块再跳转高亮。
+
+  it('全文扫描命中未加载区与跨块行：扫描自驱动 IO 到 EOF，行号/行内偏移正确', async () => {
+    stubResizeObserver();
+    // 巨行横跨块 0/1 切口（文件字节 262144）：行起始于文件偏移 14（'zzneedle head\n'
+    // 之长），行内偏移 262128 的 'zzneedle' 落在文件字节 262142..262150——恰跨切口
+    const straddle = `${'A'.repeat(262128)}zzneedle${'B'.repeat(60)}`;
+    const lines: string[] = ['zzneedle head', straddle];
+    for (let i = 2; i < 4000; i++) {
+      lines.push(i === 3000 ? 'deep zzneedle hit' : `pad ${i} ${'x'.repeat(100)}`);
+    }
+    const content = enc(lines.join('\n') + '\n');
+    const calls: RangeCall[] = [];
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, {
+      ext: 'js',
+      lang: 'javascript',
+      ctx: streamCtx({ size: content.length, content, head: content.slice(0, 8192), calls })
+    });
+    await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
+    const readsAtMount = calls.length;
+    const matches = await handle.search('zzneedle');
+    expect(matches.map((m) => m.line)).toEqual([0, 1, 3000]);
+    expect(calls.length).toBeGreaterThan(readsAtMount); // 扫描自驱动了未加载区的前向读取
+    expect(matches[1]).toMatchObject({ line: 1, start: 262128, end: 262136 }); // 跨块行命中
+    handle.destroy();
+  });
+
+  it('重入搜索令牌失效：旧扫描以部分结果收场且不触碰状态，新查询完整落地', async () => {
+    stubResizeObserver();
+    const lines: string[] = [];
+    for (let i = 0; i < 6000; i++) {
+      if (i === 5) lines.push('beta here');
+      else if (i === 5990) lines.push('alpha deep');
+      else lines.push(`row ${i} ${'p'.repeat(90)}`);
+    }
+    const content = enc(lines.join('\n') + '\n'); // ≈ 553KB ≈ 3 块
+    let releaseTail: (() => void) | null = null;
+    const tailGate = new Promise<void>((res) => {
+      releaseTail = res;
+    });
+    const ctx: StreamCtx = {
+      size: content.length,
+      head: content.slice(0, 8192),
+      read: async (r) => {
+        if (r.start >= 2 * WINDOW_BLOCK) await tailGate; // 末块（alpha 所在）挂起
+        return content.slice(r.start, r.end + 1);
+      }
+    };
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
+    let aSettled = false;
+    const pA = handle.search('alpha').then((m) => {
+      aSettled = true;
+      return m;
+    });
+    // 旧扫描推进到块 1（无 alpha）后在末块闸前停住
+    await vi.waitFor(() => expect(handle.getMeta().lines).toBeGreaterThan(5000));
+    expect(aSettled).toBe(false);
+    const pB = handle.search('beta'); // 重入：旧扫描令牌即刻失效
+    releaseTail!();
+    const [aMatches, bMatches] = await Promise.all([pA, pB]);
+    expect(aMatches).toEqual([]); // 取消 = 部分结果语义：alpha 在未扫区，旧 Promise 空手收场
+    expect(bMatches.map((m) => m.line)).toEqual([5]); // 新查询扫到全文（含末块）
+    expect(preHtml(host)).toContain('<mark class="vv-search-hit">beta</mark>'); // 新查询命中已上屏
+    expect(preHtml(host)).not.toContain('alpha'); // 旧查询（alpha）零痕迹
+    handle.destroy();
+  });
+
+  it('空查询（退出搜索）取消在飞扫描：旧 Promise 部分结果收场且零补读', async () => {
+    stubResizeObserver();
+    const lines: string[] = [];
+    for (let i = 0; i < 6000; i++) {
+      lines.push(i === 5990 ? 'zzneedle deep' : `row ${i} ${'p'.repeat(90)}`);
+    }
+    const content = enc(lines.join('\n') + '\n');
+    let releaseTail: (() => void) | null = null;
+    const tailGate = new Promise<void>((res) => {
+      releaseTail = res;
+    });
+    let readCount = 0;
+    const ctx: StreamCtx = {
+      size: content.length,
+      head: content.slice(0, 8192),
+      read: async (r) => {
+        readCount += 1;
+        if (r.start >= 2 * WINDOW_BLOCK) await tailGate;
+        return content.slice(r.start, r.end + 1);
+      }
+    };
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
+    let aSettled = false;
+    const pA = handle.search('zzneedle').then((m) => {
+      aSettled = true;
+      return m;
+    });
+    await vi.waitFor(() => expect(handle.getMeta().lines).toBeGreaterThan(5000)); // 块 0/1 已扫
+    const readsBeforeCancel = readCount; // 含已发起而挂闸的末块读（取消前发起不计数变化）
+    handle.search(''); // 退出搜索：取消在飞扫描
+    releaseTail!();
+    const aMatches = await pA;
+    expect(aSettled).toBe(true); // 取消后 Promise 收场（不悬挂）
+    expect(aMatches).toEqual([]); // 针在未扫区：部分结果为空
+    expect(readCount).toBe(readsBeforeCancel); // 取消后零补读
+    expect(preHtml(host)).not.toContain('<mark'); // 退出搜索：痕迹清除
+    handle.destroy();
+  });
+
+  it('gotoMatch 先 ensure 目标块再跳转：补齐前不跳转，补齐后高亮落实到实行', async () => {
+    stubResizeObserver();
+    const lines: string[] = [];
+    for (let i = 0; i < 3400; i++) {
+      const head = i === 100 ? 'zzneedle here ' : `row ${i} `;
+      lines.push(head + 'q'.repeat(Math.max(0, 1499 - head.length)) + '\n'); // 每行恰 1500B
+    }
+    const content = enc(lines.join('')); // ≈ 5.1MB ≈ 20 块 > 16（块表 LRU）
+    let block0Reads = 0;
+    let releaseEnsure: (() => void) | null = null;
+    const ensureGate = new Promise<void>((res) => {
+      releaseEnsure = res;
+    });
+    const ctx: StreamCtx = {
+      size: content.length,
+      head: content.slice(0, 8192),
+      read: async (r) => {
+        if (r.start === 0) {
+          block0Reads += 1;
+          // 第 2 次块 0 读 = 扫描期的视口补拉：预置失败 → reloadFailed 停机闩落下，
+          // 块 0 保持缺驻（无自动重试）——gotoMatch 的 ensure 成为第 3 次读（挂闸）
+          if (block0Reads === 2) throw new Error('块 0 视口补拉失败（预置）');
+          if (block0Reads >= 3) await ensureGate;
+        }
+        return content.slice(r.start, r.end + 1);
+      }
+    };
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
+    const matches = await handle.search('zzneedle'); // 扫描自驱动喂块到 EOF：块 0 已被逐出
+    expect(matches.map((m) => m.line)).toEqual([100]);
+    const topBefore = handle.scrollTop();
+    handle.gotoMatch(0);
+    await new Promise((r) => setTimeout(r, 30)); // ensure 读挂闸：同步阶段与微任务均不得提前跳转
+    expect(handle.scrollTop()).toBe(topBefore); // ensure 未完成：不跳转
+    releaseEnsure!(); // 放行 gotoMatch 的补块读
+    await vi.waitFor(() => {
+      const row = host.querySelector('[data-line="100"]');
+      expect(row?.classList.contains('vv-search-hit-line-active')).toBe(true);
+      expect(row?.querySelector('mark.vv-search-hit')?.textContent).toBe('zzneedle');
+      expect(row?.querySelector('.vv-code-body')?.textContent).toContain('zzneedle'); // 实行非占位
+    });
+    expect(handle.scrollTop()).not.toBe(topBefore); // ensure 完成后才跳转
+    expect(block0Reads).toBe(3); // 首块重拉 + 失败的视口补拉 + gotoMatch 的 ensure
+    handle.destroy();
+  });
+
+  it('扫描渐进可用：前块命中先于全文完成上屏（先到先出），完成时全量收场', async () => {
+    stubResizeObserver();
+    const lines: string[] = [];
+    for (let i = 0; i < 6000; i++) {
+      if (i === 3) lines.push('early zzneedle');
+      else if (i === 3000) lines.push('mid zzneedle');
+      else lines.push(`row ${i} ${'r'.repeat(90)}`);
+    }
+    const content = enc(lines.join('\n') + '\n'); // ≈ 553KB ≈ 3 块（块 1 ≈ 行 2700..5350）
+    const releases: Array<() => void> = [];
+    let armed = false;
+    const ctx: StreamCtx = {
+      size: content.length,
+      head: content.slice(0, 8192),
+      read: async (r) => {
+        if (armed) await new Promise<void>((res) => releases.push(res)); // 每笔读挂起待放行（FIFO）
+        return content.slice(r.start, r.end + 1);
+      }
+    };
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
+    armed = true;
+    let settled = false;
+    const pending = handle.search('zzneedle').then((m) => {
+      settled = true;
+      return m;
+    });
+    // 块 0 命中即时上屏（行已驻留，无需任何 IO）
+    await vi.waitFor(() =>
+      expect(host.querySelector('[data-line="3"] mark.vv-search-hit')).not.toBeNull()
+    );
+    expect(settled).toBe(false); // 全文未扫完：Promise 不落地
+    scrollCode(host, 60_000); // 视口移到行 ~3000：索引未及 → 占位行
+    releases[0]!(); // 放行块 1：扫描推进并渐进落地行 3000 的命中
+    await vi.waitFor(() =>
+      expect(host.querySelector('[data-line="3000"] mark.vv-search-hit')).not.toBeNull()
+    );
+    expect(settled).toBe(false); // 末块仍在闸前：前块命中先于全文完成可见
+    for (const rel of releases) rel();
+    const matches = await pending;
+    expect(settled).toBe(true);
+    expect(matches.map((m) => m.line)).toEqual([3, 3000]);
     handle.destroy();
   });
 });

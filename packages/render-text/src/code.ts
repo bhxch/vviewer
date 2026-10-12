@@ -9,7 +9,7 @@ export type { HighlightInterval };
 /** hljs 动态导入的默认导出类型（HLJSApi） */
 type HLJS = (typeof import('highlight.js'))['default'];
 import { virtualScroller, type VirtualScrollerHandle } from './virtualScroller';
-import { searchCode } from './search';
+import { searchCode, type SearchMatchWithPreview } from './search';
 
 /**
  * hljs 别名桥接：helix 语言名 → hljs 语言 id（仅收录 hljs.getLanguage 直查失败的键；
@@ -1225,8 +1225,8 @@ function renderCodeWindowed(
   // 产出后保持主导引擎）
   let engine: CodeEngine = strategy === 'plain' || limitReached ? 'plain' : 'pending';
   let computeWhere: ComputeWhere | null = null;
-  // 文件内搜索状态（BUG-18/23 同构）。窗口模式现状=已加载区间快照扫描（行文本经
-  // lineText），Task 5 换后台全文扫描——SearchPanel 挂载/消费面零变更
+  // 文件内搜索状态（BUG-18/23 同构）。窗口模式 = 后台全文扫描（Task 5，见下方
+  // 扫描段注释）——SearchPanel 挂载/消费面零变更
   let lastQuery: string | null = null;
   let lastCaseSensitive = false;
   let lastMatches: SearchMatch[] = [];
@@ -1694,50 +1694,104 @@ function renderCodeWindowed(
     }, 1500);
   }
 
-  /** 搜索补块并发上限（Task 5 后台全文扫描接管前的现状面最小防护）：滚到底后
-   * [0,nextFeed) 缺块可达数百个，全部并发 ensure = 数百并发 256KB 读，且先回的块
-   * 随即被块表 LRU(16) 逐出（白拉重传）——分批推进，同批并发、批间串行 */
-  const SEARCH_REFILL_CONCURRENCY = 4;
+  // ---------- 后台全文扫描搜索（Task 5，spec §4.3 搜索） ----------
+  //
+  // 替换 Task 4 的 snapshotLines「已加载区间快照」过渡实现，同时消除其补块风暴面
+  //（先对 [0,nextFeed) 全量并发补块再解码——大文件先验重拉数百块，先回的随即被
+  // LRU 逐出，白拉重传）。新语义：
+  // - 全文性：search() 从文件头驱动 BlockStream 逐块前向喂索引（pullBlock 与滚动
+  //   续读共用单飞闸 pulling——双喂会使索引错位），每块落地后把新提交的行逐行解码
+  //   扫描到 EOF；
+  // - 渐进可用（先到先出）：命中即时并入命中集并重绘——已扫描区域的行级背景/词级
+  //   mark 先于全文完成可见；Promise 仍为完成制（SearchPanel await 后才读计数并
+  //   gotoMatch，UI 零变更，面板现状无进度挂点——扫描进度不上 UI，报告已说明）；
+  // - 取消 = 令牌失效：新搜索/空查询（退出搜索）/destroy 递增 scanSeq，旧扫描在
+  //   下一个检查点退出，以当时已得的部分命中收场，不再触碰共享状态；
+  // - 停机口径与滚动续读一致：limitReached（STREAM_MAX_BYTES 防线）与
+  //   continueFailed（读失败闩，用户滚动解除）下扫描只覆盖已加载区间即收场；
+  // - 补块：块表 LRU 逐出的已确认块按行序懒补（scanLineText 单飞 ensure——行序
+  //   推进天然按块序触达，无先验全量补块，风暴面即此消除）。
 
-  /** 搜索前补块（已加载区间快照的前置）：块表 LRU 逐出的块按并发上限分批重拉后再
-   * 快照行文本；单批失败即止自兜底（不可解码行回落空串），不阻断搜索 */
-  async function snapshotLines(): Promise<string[]> {
-    const missing: number[] = [];
-    for (let b = 0; b < nextFeed; b++) {
-      if (!bs.has(b)) missing.push(b);
-    }
-    for (let i = 0; i < missing.length; i += SEARCH_REFILL_CONCURRENCY) {
-      const batch = missing.slice(i, i + SEARCH_REFILL_CONCURRENCY);
+  /** 扫描等待在飞喂块（续读/回看持有 pulling 时）的轮询间隔（毫秒） */
+  const SCAN_POLL_MS = 4;
+
+  /** 扫描令牌：seq 失效制；scan 为在飞句柄（同键重入共享同一 Promise，完成后
+   * 置 null 恢复 lastQuery×caseSensitive 短路缓存语义） */
+  let scanSeq = 0;
+  let scan: { seq: number; key: string; promise: Promise<SearchMatch[]> } | null = null;
+
+  const delay = (ms: number): Promise<void> => new Promise<void>((r) => setTimeout(r, ms));
+
+  /** 行 i 的扫描文本：所需块缺驻留时按行序单飞补拉；补块失败该行以空串参与扫描
+   * （不可得 ≠ 命中断言，快照口径同源），不阻断全文扫描 */
+  async function scanLineText(i: number): Promise<string> {
+    const len = index.lengths[i] ?? 0;
+    if (len === 0) return '';
+    const [b0, b1] = lineBlockSpan(i);
+    for (let b = b0; b <= b1; b++) {
+      if (bs.has(b)) continue;
       try {
-        await Promise.all(batch.map((b) => bs.ensureBlock(b)));
+        await bs.ensureBlock(b);
       } catch (err) {
-        console.debug('[code] 搜索前补块失败（已加载区间快照可能不全）', err);
-        break; // 该批失败即止：快照以可解码行为准
+        console.debug('[code] 搜索扫描补块失败（该行以空串参与扫描）', err);
+        return '';
       }
     }
-    const out: string[] = new Array(rows());
-    for (let i = 0; i < out.length; i++) {
-      const len = index.lengths[i] ?? 0;
-      if (len === 0) {
-        out[i] = '';
+    return lineText(i);
+  }
+
+  /** 后台全文扫描主循环：返回扫描终止时已得的命中（取消/停机 = 部分结果） */
+  async function runScan(
+    acc: SearchMatchWithPreview[],
+    query: string,
+    caseSensitive: boolean,
+    mySeq: number
+  ): Promise<SearchMatch[]> {
+    const alive = (): boolean => !destroyed && scanSeq === mySeq;
+    let scanned = 0; // 已扫描行数（索引已提交行的前缀指针：断点续扫不重复）
+    for (;;) {
+      if (!alive()) return acc;
+      if (scanned < rows()) {
+        for (; scanned < rows() && alive(); scanned++) {
+          const text = await scanLineText(scanned);
+          if (!alive()) return acc;
+          if (text === '') continue;
+          for (const m of searchCode([text], query, { caseSensitive })) {
+            acc.push({ line: scanned, start: m.start, end: m.end, preview: m.preview });
+            const arr = searchHitsByLine.get(scanned);
+            if (arr) arr.push({ start: m.start, end: m.end });
+            else searchHitsByLine.set(scanned, [{ start: m.start, end: m.end }]);
+          }
+        }
+        if (!alive()) return acc;
+        remountOrRefresh(); // 渐进落地：新行/新命中上屏（行数增长 → 重建 scroller）
+        await delay(0); // 让出主线程：扫描期间滚动手感不受阻塞
         continue;
       }
-      const [b0, b1] = lineBlockSpan(i);
-      let ok = true;
-      for (let b = b0; b <= b1; b++) {
-        if (!bs.has(b)) {
-          ok = false;
-          break;
-        }
+      if (indexFinished) return acc; // 全文扫完（finishCodeIndex 已提交末尾空串条目）
+      if (limitReached || continueFailed) return acc; // 停机面：已加载区间即终
+      if (pulling) {
+        await delay(SCAN_POLL_MS); // 续读/回看重拉在飞：等待其落地后重评
+        continue;
       }
-      out[i] = ok ? lineText(i) : '';
+      pulling = true; // 前向喂一块（单飞闸与续读共用：pullBlock 重入会双喂错位）
+      try {
+        await pullBlock();
+      } catch (err) {
+        continueFailed = true; // 与滚动续读同口径：停机闩，用户滚动动作解除
+        console.debug('[code] 搜索扫描续读失败，已停机（返回已得部分结果）', err);
+        return acc;
+      } finally {
+        pulling = false;
+      }
     }
-    return out;
   }
 
   const handle: RenderCodeHandle = {
     destroy() {
       destroyed = true;
+      scanSeq += 1; // 在飞后台扫描令牌失效（下一检查点退出，部分结果收场）
+      scan = null;
       if (hitTimer !== null) clearTimeout(hitTimer);
       wantedChunks = []; // 队列作废；在-flight chunk 的回写在各 await 点被 destroyed 拦截
       scroller?.destroy();
@@ -1776,43 +1830,59 @@ function renderCodeWindowed(
     },
     search(query, searchOpts?: { caseSensitive?: boolean }) {
       const caseSensitive = searchOpts?.caseSensitive === true;
-      if (query === lastQuery && caseSensitive === lastCaseSensitive) {
+      const key = `${caseSensitive ? '1' : '0'}\u0000${query}`;
+      if (scan !== null && scan.key === key) return scan.promise; // 同键在飞：共享同一扫描
+      if (scan === null && query === lastQuery && caseSensitive === lastCaseSensitive) {
         return Promise.resolve(lastMatches);
       }
-      // 命中集落地 + 行级背景/mark 状态更新 + 强制重绘（空查询 = 退出搜索语义）
-      const apply = (matches: SearchMatch[]): SearchMatch[] => {
-        if (destroyed) return lastMatches;
-        lastQuery = query;
-        lastCaseSensitive = caseSensitive;
-        searchHitsByLine = new Map();
-        lastMatches = matches;
-        for (const m of lastMatches) {
-          const arr = searchHitsByLine.get(m.line);
-          if (arr) arr.push({ start: m.start, end: m.end });
-          else searchHitsByLine.set(m.line, [{ start: m.start, end: m.end }]);
-        }
-        if (query === '') {
-          clearHit(); // 空查询 = 退出搜索
-        } else {
-          if (hitTimer !== null) {
-            clearTimeout(hitTimer);
-            hitTimer = null;
-          }
-          hitLine = -1;
-        }
+      const mySeq = ++scanSeq; // 令牌失效：旧扫描在下一检查点退出（新搜索/退出搜索取消）
+      scan = null;
+      // 命中集/行级背景/active 重置（旧查询的视觉痕迹即刻清除，新命中随扫描渐进上屏）
+      if (hitTimer !== null) {
+        clearTimeout(hitTimer);
+        hitTimer = null;
+      }
+      hitLine = -1;
+      searchHitsByLine = new Map();
+      lastMatches = [];
+      lastQuery = query;
+      lastCaseSensitive = caseSensitive;
+      if (query === '') {
+        clearHit(); // 空 query = 退出搜索：active 与全部行级背景立即消退
         scroller?.refresh(true);
-        return lastMatches;
-      };
-      // 空 query（退出搜索）无需行文本：短路快照/补块面，零补块
-      if (query === '') return Promise.resolve(apply([]));
-      return snapshotLines().then((snapshot) =>
-        apply(destroyed ? [] : searchCode(snapshot, query, { caseSensitive }))
-      );
+        return Promise.resolve([]);
+      }
+      const acc: SearchMatchWithPreview[] = [];
+      lastMatches = acc; // 渐进：扫描期间 gotoMatch/可见性按部分结果工作
+      const promise = runScan(acc, query, caseSensitive, mySeq).catch((err: unknown) => {
+        console.debug('[code] 后台全文扫描异常（返回已得部分结果）', err);
+        return acc;
+      });
+      scan = { seq: mySeq, key, promise };
+      void promise.then(() => {
+        if (scan !== null && scan.seq === mySeq) scan = null; // 完成制：短路缓存恢复生效
+      });
+      scroller?.refresh(true);
+      return promise;
     },
-    gotoMatch(index) {
-      const match = lastMatches[index];
+    gotoMatch(matchIndex) {
+      const match = lastMatches[matchIndex];
       if (!match) return;
-      jumpToLine(match.line);
+      // ensure 后跳转（spec §4.3 定位）：目标行所在块可能已被块表 LRU 逐出（全文
+      // 扫描后早期块普遍不在驻）——占位行不承载命中高亮，先跳后补会闪失。跳转改
+      // 异步（接口签名 void 不变）：补齐（或补块失败占位兜底）后再滚动+行级高亮
+      const [b0, b1] = lineBlockSpan(match.line);
+      void (async () => {
+        try {
+          for (let b = b0; b <= b1; b++) {
+            if (!bs.has(b)) await bs.ensureBlock(b);
+          }
+        } catch (err) {
+          console.debug('[code] 搜索跳转补块失败（占位行兜底，滚动后重试）', err);
+        }
+        if (destroyed) return;
+        jumpToLine(match.line);
+      })();
     },
     revealLine(line, col) {
       void col;
