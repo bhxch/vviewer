@@ -1,7 +1,7 @@
 # applyAppearance 订阅中心化设计
 
 - 日期：2026-10-12
-- 状态：已评审（brainstorm 确认，待实施）
+- 状态：已评审（brainstorm 确认），已实施
 - 来源：交接文档 §2.1 跨项架构债（B 项 T5 评审 + 终审清单）；现状探查（theme.ts / TopBar.svelte / SettingsPanel.svelte / stores/settings.ts）
 
 ## 1. 问题陈述
