@@ -66,41 +66,43 @@ function treeRow(page: Page, name: string): ReturnType<Page['locator']> {
  * （{activeId, workspaces:[{tabs:[…]}]} 按组分桶，旧键仅存迁移副本不再更新），
  * DB 版本随主题库升 2（v1 open 对既有 v2 库 VersionError）。断言语义等价：
  * 跨全部组的 tab 均参与 scrollTop 匹配。 */
+/** 轮询 IndexedDB 直至指定 tab 的 scrollTop 落盘 ≥ min（persistScroll 300ms 尾随
+ * 防抖——必须真等到落盘再 reload，否则防抖定时器随页面销毁、快照恒 0）。 */
 async function waitSnapshotScroll(page: Page, name: string, min: number): Promise<void> {
-  await page.waitForFunction(
-    ({ name, min }) =>
-      new Promise<boolean>((resolve) => {
-        const open = indexedDB.open('vviewer', 2);
-        open.onsuccess = () => {
-          const db = open.result;
-          try {
-            const get = db.transaction('kv', 'readonly').objectStore('kv').get('workspaces');
-            get.onsuccess = () => {
-              const snap = get.result as
-                | { workspaces?: { tabs?: { name: string; scrollTop: number }[] }[] }
-                | undefined;
-              const tabs = Array.isArray(snap?.workspaces)
-                ? snap.workspaces.flatMap((w) => w.tabs ?? [])
-                : undefined;
-              resolve(
-                Array.isArray(tabs) && tabs.some((t) => t.name === name && t.scrollTop >= min)
-              );
-              db.close();
-            };
-            get.onerror = () => {
-              resolve(false);
-              db.close();
-            };
-          } catch {
-            resolve(false);
-            db.close();
-          }
+  await expect
+    .poll(async () => page.evaluate(readSnapshotScroll, name), { timeout: 10_000, interval: 100 })
+    .toBeGreaterThanOrEqual(min);
+}
+
+/** 单次读取 kv 'workspaces' 中指定 tab 名的 scrollTop（无则 null）。 */
+function readSnapshotScroll(name: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const open = indexedDB.open('vviewer', 2);
+    open.onsuccess = () => {
+      const db = open.result;
+      try {
+        const get = db.transaction('kv', 'readonly').objectStore('kv').get('workspaces');
+        get.onsuccess = () => {
+          const snap = get.result as
+            | { workspaces?: { tabs?: { name: string; scrollTop: number }[] }[] }
+            | undefined;
+          const tabs = Array.isArray(snap?.workspaces)
+            ? snap.workspaces.flatMap((w) => w.tabs ?? [])
+            : [];
+          resolve(tabs.find((t) => t.name === name)?.scrollTop ?? null);
+          db.close();
         };
-        open.onerror = () => resolve(false);
-      }),
-    { name, min },
-    { polling: 50, timeout: 10_000 }
-  );
+        get.onerror = () => {
+          resolve(null);
+          db.close();
+        };
+      } catch {
+        resolve(null);
+        db.close();
+      }
+    };
+    open.onerror = () => resolve(null);
+  });
 }
 
 test('BUG-08/SHELL-14：服务器 tab 刷新后自动重读并恢复滚动，不落「本地文件」占位', async ({
@@ -111,7 +113,9 @@ test('BUG-08/SHELL-14：服务器 tab 刷新后自动重读并恢复滚动，不
   await openFile(page, 'b08-long.js');
   await expect(page.locator('.vv-code-pre .vv-code-line').first()).toBeVisible();
 
-  // 滚动到 2500 并等待快照落盘（spec L262：保留滚动位置）
+  // 滚动到 2500 并等待快照落盘（spec L262：保留滚动位置）。persistScroll 走
+  // 300ms 尾随防抖——必须真等到落盘再 reload，否则防抖定时器随页面销毁、
+  // 快照恒 0（转正诊断发现旧 waitSnapshotScroll 轮询单次评估即放行，形同虚设）
   await page.locator('.vv-code-pre').evaluate((el) => {
     el.scrollTop = 2500;
   });
@@ -131,13 +135,16 @@ test('BUG-08/SHELL-14：服务器 tab 刷新后自动重读并恢复滚动，不
   await expect(page.getByText(/重连后可恢复/)).toHaveCount(0);
   expect(refetches, '重载后应重新拉取 /api/file').toBeGreaterThan(0);
 
-  // SHELL-14 验收 3 的宽松口径「至少内容可重读」成立。滚动还原（scrollTop=2500 还原）
-  // 在本 build 实测未生效（4 次探针重载后 .vv-code-pre.scrollTop 恒 0、零 scroll 事件、
-  // 快照被 add() 的 persist 覆写为 0）——作为疑似残留缺口写入 summary，不作为本用例门。
-  const restoredTop = await page.locator('.vv-code-pre').evaluate((el) => el.scrollTop);
-  console.log(`[BUG-08 观察] 重载后 scrollTop=${restoredTop}（快照值 2500，未还原）`);
+  // SHELL-14 验收：滚动位置还原。旧缺口 BUG-64（AppShell.restore 写入对象与
+  // ViewerPane effect 读取对象非同一引用，恢复 rAF 从未调度）已由 BUG-69 修复
+  // 解决（90a2166：TabCollection.add 返回响应式代理，restore 赋值与渲染读取同源）——
+  // 转正硬断言：重载且内容重读渲染后 scrollTop 还原至 2500（容忍布局微差 ≥2000）
+  await expect
+    .poll(() => page.locator('.vv-code-pre').evaluate((el) => el.scrollTop), {
+      timeout: 10_000
+    })
+    .toBeGreaterThanOrEqual(2000);
 });
-
 test('BUG-05/SRV-07：关自动刷新后 SSE 不自动重读，手动刷新 ↻ 拉到追加内容', async ({ page }) => {
   test.setTimeout(60_000);
   await connectServer(page);
