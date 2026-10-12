@@ -2,7 +2,7 @@
 // 块缓存语义：head 预置直取、未就绪 slice → null、ensure 拉块（64KB 对齐、跨块
 // 一次多块、同块并发去重、LRU 上限 8 块逐出最旧）。纯逻辑，fake read 记录区间。
 import { describe, expect, it } from 'vitest';
-import { createHexSource, HEX_SOURCE_BLOCK_BYTES } from '../src/hexSource';
+import { createHexSource, HexSourceRangeError, HEX_SOURCE_BLOCK_BYTES } from '../src/hexSource';
 
 /** fake 全量数据：字节值 = 偏移 mod 256，任一区间可逐字节校验 */
 const FULL = Uint8Array.from({ length: 200_000 }, (_, i) => i & 0xff);
@@ -140,5 +140,36 @@ describe('createHexSource', () => {
 
   it('块大小常量 = 64KB（对齐口径锁定）', () => {
     expect(HEX_SOURCE_BLOCK_BYTES).toBe(65536);
+  });
+
+  // ---- 终审 F3：Range-less 服务器（超返回）宁败勿静默 clamp 错位块 ----
+
+  it('Range-less 超返回：ensure reject HexSourceRangeError 携全量 bytes，错位数据不入缓存', async () => {
+    const calls: Array<{ start: number; end: number }> = [];
+    const src = createHexSource(FULL.length, new Uint8Array(0), async (r) => {
+      calls.push({ start: r.start, end: r.end });
+      return FULL.slice(0); // 忽略 Range：任意区间请求回 200 全量
+    });
+    const err: unknown = await src.ensure(BLOCK + 10, BLOCK + 20).then(
+      () => null,
+      (e: unknown) => e
+    );
+    expect(err).toBeInstanceOf(HexSourceRangeError);
+    expect((err as HexSourceRangeError).full).toEqual(FULL); // 全量响应随错误携出（调用方切换全量用）
+    // 错位数据未入缓存：目标块仍视为未就绪（slice → null），且 inflight 已清理可重试
+    expect(src.slice(BLOCK + 10, BLOCK + 20)).toBeNull();
+    await expect(src.ensure(BLOCK + 10, BLOCK + 20)).rejects.toThrow(HexSourceRangeError);
+  });
+
+  it('replaceWithFull：装载全量后 slice 恒命中（含尾块）、ensure 零 IO', async () => {
+    const calls: Array<{ start: number; end: number }> = [];
+    const src = createHexSource(FULL.length, FULL.slice(0, 8), fakeRead(calls));
+    expect(src.slice(BLOCK, BLOCK + 1)).toBeNull(); // 切换前 block 1 未就绪
+    src.replaceWithFull(FULL);
+    expectBytes(src.slice(BLOCK, BLOCK + 10)!, BLOCK, 10);
+    expectBytes(src.slice(FULL.length - 10, FULL.length)!, FULL.length - 10, 10);
+    calls.length = 0;
+    await src.ensure(0, FULL.length); // 全量块全部就绪：零读
+    expect(calls).toStrictEqual([]);
   });
 });

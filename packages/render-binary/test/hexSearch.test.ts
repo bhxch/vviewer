@@ -361,7 +361,10 @@ describe('renderHex：窗口模式搜索（need/chunk 协议）', () => {
     };
   }
 
-  function setupWindow(read: (r: { start: number; end: number }) => Promise<Uint8Array<ArrayBuffer>>): {
+  function setupWindow(
+    read: (r: { start: number; end: number }) => Promise<Uint8Array<ArrayBuffer>>,
+    createWorker?: () => Worker | null
+  ): {
     inst: ReturnType<typeof renderHex>;
     target: HTMLElement;
     dump: HTMLElement;
@@ -374,11 +377,13 @@ describe('renderHex：窗口模式搜索（need/chunk 协议）', () => {
     document.body.append(target);
     const fakes: ReturnType<typeof makeFake>[] = [];
     const inst = renderHex(HEAD, target, {
-      createWorker: () => {
-        const f = makeFake();
-        fakes.push(f);
-        return f.worker as unknown as Worker; // 第 1 次=结构树（不响应），第 2 次=搜索
-      }
+      createWorker:
+        createWorker ??
+        (() => {
+          const f = makeFake();
+          fakes.push(f);
+          return f.worker as unknown as Worker; // 第 1 次=结构树（不响应），第 2 次=搜索
+        })
     }, { size: FULL.length, head: HEAD, read });
     return {
       inst,
@@ -441,6 +446,26 @@ describe('renderHex：窗口模式搜索（need/chunk 协议）', () => {
     expect(status.textContent).toBe('搜索数据读取失败');
     expect(cancel.style.display).toBe('none'); // 忙碌已复位
     expect(searchFake.requests.some((r) => (r as { kind?: string }).kind === 'search-cancel')).toBe(true);
+    inst.destroy();
+    target.remove();
+  });
+
+  // 终审 F1：无 Worker 兜底 + head（8KB）不足全量 → 扫描前的一次全量回退读
+  // reject——此前该 rejection 无 handler（unhandled rejection 且忙碌态永不复位），
+  // 修复后链尾 catch 与 worker 主路径 r.error 同口径收尾
+  it('无 Worker 兜底 + 窗口全量回退读失败：状态位「搜索数据读取失败」+ 复位忙碌（不悬挂）', async () => {
+    const { inst, target, search, status, cancel } = setupWindow(
+      async () => {
+        throw new Error('io gone');
+      },
+      () => null // 无 Worker：走主线程 scanAll 兜底（不 import client，读闭包直接拒）
+    );
+    await flush();
+    search.value = 'deadbeef';
+    pressEnter(search);
+    await flush();
+    expect(status.textContent).toBe('搜索数据读取失败');
+    expect(cancel.style.display).toBe('none'); // 忙碌已复位
     inst.destroy();
     target.remove();
   });

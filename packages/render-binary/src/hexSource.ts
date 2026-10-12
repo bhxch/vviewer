@@ -11,6 +11,21 @@ export const HEX_SOURCE_BLOCK_BYTES = 64 * 1024;
 /** LRU 上限：8 块（滚回已看区间多数仍命中，超限按最旧逐出重拉） */
 const LRU_MAX_BLOCKS = 8;
 
+/**
+ * Range-less 服务器专属错误（终审 F3）：块读取返回字节超出请求区间长度 =
+ * 服务器忽略 Range 回 200 全量。携带全量响应字节——调用方（hex.ts）捕获后以
+ * replaceWithFull 切换全量模式，而非把文件头 clamp 进错位块静默上屏。
+ */
+export class HexSourceRangeError extends Error {
+  /** Range-less 响应的完整文件字节（任意区间请求的 200 响应体均为整文件） */
+  readonly full: Uint8Array<ArrayBuffer>;
+  constructor(full: Uint8Array<ArrayBuffer>, requested: number) {
+    super(`hexSource：块读取返回 ${full.length} 字节，超出请求区间长度 ${requested}（服务器疑似忽略 Range）`);
+    this.name = 'HexSourceRangeError';
+    this.full = full;
+  }
+}
+
 export interface HexSource {
   /** 文件总字节数（构造入参原样透出；status 行/rowCount 的事实来源） */
   readonly size: number;
@@ -26,6 +41,12 @@ export interface HexSource {
    * 块读取失败则 reject（inflight 已清理，可重试）。
    */
   ensure(start: number, end: number): Promise<void>;
+  /**
+   * 切换全量模式（终审 F3）：以 Range-less 全量响应重建块底座——按 64KB 切分、
+   * 全部块就绪，此后 slice 恒命中、ensure 零 IO。在途拉取一并作废（其超长响应
+   * 已由 HexSourceRangeError 携出，残留 promise 对新请求不可见）。
+   */
+  replaceWithFull(full: Uint8Array): void;
 }
 
 /**
@@ -86,7 +107,13 @@ export function createHexSource(
         // 宁可失败重试也不静默截断（截断渲染正是本任务要消除的活面）
         throw new Error(`hexSource：块 ${index} 读取返回 ${chunk.length} 字节，不足 ${cap}`);
       }
-      blocks.set(index, chunk.subarray(0, cap)); // 超返回 clamp 到标称长度
+      if (chunk.length > cap) {
+        // 超返回（终审 F3）= 服务器忽略 Range 回 200 全量：subarray clamp 会把
+        // 文件头当本块缓存（错位数据静默上屏）——抛专属错误携全量 bytes，调用方
+        //（hex.ts）捕获后切换全量模式
+        throw new HexSourceRangeError(chunk, cap);
+      }
+      blocks.set(index, chunk);
       evict();
     };
     const p = run().finally(() => {
@@ -101,8 +128,18 @@ export function createHexSource(
     end: Math.min(size, end)
   });
 
+  /** 全量底座重建（终审 F3）：清作废在途与旧块表，按 64KB 切分全量、全部就绪 */
+  const replaceWithFull = (full: Uint8Array): void => {
+    inflight.clear();
+    blocks.clear();
+    for (let i = 0; i * HEX_SOURCE_BLOCK_BYTES < full.length; i++) {
+      blocks.set(i, full.subarray(i * HEX_SOURCE_BLOCK_BYTES, (i + 1) * HEX_SOURCE_BLOCK_BYTES));
+    }
+  };
+
   return {
     size,
+    replaceWithFull,
     slice(start, end) {
       const c = clamp(start, end);
       if (c.start >= c.end) return new Uint8Array(0);

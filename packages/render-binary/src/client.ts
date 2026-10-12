@@ -70,6 +70,8 @@ interface ActiveSearchState {
   onDone?: (r: SearchDoneInfo) => void;
   /** 窗口模式供数闭包（data 模式为 null——不会收到 search-need） */
   read: SearchChunkRead | null;
+  /** 文件总字节数（终审 F3 全量判定基准；data 模式 0——不收 need） */
+  size: number;
   /** need 回灌超时（仅窗口模式使用） */
   needTimeoutMs: number;
   /** 在途 need 的超时定时器（供数落定/任务终结时清除） */
@@ -133,7 +135,8 @@ export class BinaryClient {
 
   /**
    * 窗口供数（Task 6）：search-need 区间 [start, end) 经 read 闭包取块（换算为
-   * end 含）回灌 search-chunk，超返回钳到区间长度（同 hexSource cap 语义；不
+   * end 含）回灌 search-chunk，超返回且恰为整文件时判定 Range-less 全量原样单
+   * chunk 供给（终审 F3），其余超返回钳到区间长度（同 hexSource cap 语义；不
    * transfer——切片视图底层 buffer 可能与来源共享，结构化克隆自行拷贝）。
    * 读失败/短读/超时 → abortWindowSearch；落定前任务被取代/取消/释放则静默丢弃。
    */
@@ -152,11 +155,15 @@ export class BinaryClient {
           this.abortWindowSearch(s, `search-chunk 短读：请求 ${want} 字节，实得 ${bytes.length}`);
           return;
         }
+        // 超返回恰为整文件（终审 F3）= 服务器忽略 Range 回 200 全量：clamp 会以
+        // 文件头冒充请求区间（扫描字节错位）——全量原样作为单 chunk 供给，worker
+        // 校验 start 一致后整扫，nextStart 一步越过 size 正常收尾
+        const rangeless = bytes.length > want && bytes.length === s.size;
         const chunk: SearchChunkRequest = {
           id: s.id,
           type: 'search-chunk',
           start: need.start,
-          bytes: bytes.subarray(0, want)
+          bytes: rangeless ? bytes : bytes.subarray(0, want)
         };
         this.worker.postMessage(chunk);
       },
@@ -218,6 +225,7 @@ export class BinaryClient {
       onProgress: opts.onProgress,
       onDone: opts.onDone,
       read: full ? null : opts.read,
+      size: full ? 0 : opts.size,
       needTimeoutMs: full ? SEARCH_NEED_TIMEOUT_MS : (opts.needTimeoutMs ?? SEARCH_NEED_TIMEOUT_MS),
       needTimer: null
     };

@@ -22,7 +22,7 @@ import type { HexHighlight, HexRow } from './hexBytes';
 import { decodeAt, INSPECTOR_WINDOW_BYTES, type InspectorRow, type InspectorSnapshot } from './inspector';
 import type { BinaryClient, SearchDoneInfo, SearchProgressInfo } from './client';
 import { scanAll } from './searchScan';
-import { createHexSource, type HexSource } from './hexSource';
+import { createHexSource, HexSourceRangeError, type HexSource } from './hexSource';
 import { STRUCT_TAIL_BYTES, type ParseResult, type StructNode } from './struct';
 
 /** hex 行高（px）：字号 12px × 1.5 行距，与 app.css .vv-hex-dump 一致；行内样式显式锁定 */
@@ -141,6 +141,16 @@ export function renderHex(
   // 全量，后者块缓存全部预置命中、read 永不触发，自然退化为全量行为）。
   const src: HexSource | null =
     ctx !== undefined && ctxSize !== null ? createHexSource(ctxSize, ctx.head, ctx.read) : null;
+  /**
+   * Range-less 全量切换（终审 F3）：ensure 抛 HexSourceRangeError（块读超返回 =
+   * 服务器忽略 Range 回 200 全量）时，以错误携带的全量响应重建块底座——此后
+   * slice 恒命中、ensure 零 IO。返回是否已切换，调用方据此重渲/重算而非落失败面。
+   */
+  function adoptFull(e: unknown): boolean {
+    if (!(e instanceof HexSourceRangeError)) return false;
+    src?.replaceWithFull(e.full);
+    return true;
+  }
   /** 总字节数：全量模式 = buffer.length；窗口模式 = ctx.size（行数/状态行/clamp 的事实来源） */
   const totalSize = src !== null ? src.size : buffer.length;
   const root = document.createElement('div');
@@ -267,7 +277,14 @@ export function renderHex(
           viewport.replaceChildren(frag);
           void src!.ensure(start, end).then(() => {
             if (root.isConnected) scroller.refresh(true); // 就绪后重渲当前窗口
-          }).catch(() => {
+          }).catch((e: unknown) => {
+            // Range-less 服务器（终审 F3）：超返回已在 hexSource 判定为全量——切换
+            // 全量底座后重渲当前窗口，行字节随即正确；其余读失败自兜底（评审指令①
+            // 口径）：占位保留 + 工具条状态位提示，不落错误卡片、不影响其余窗口滚动。
+            if (adoptFull(e)) {
+              if (root.isConnected) scroller.refresh(true);
+              return;
+            }
             if (root.isConnected) toolbarStatus.textContent = '窗口读取失败';
           });
           return;
@@ -488,18 +505,15 @@ export function renderHex(
       }
       // 无 Worker 兜底：主线程 scanAll。窗口模式需备齐全量字节——head 已覆盖全文
       // 件直用 buffer（零读），否则一次全量回退读（T5 过渡语义仅存于本降级路径）。
-      // 读失败自兜底（评审指令①口径）：状态位提示 + 复位忙碌，不落错误卡片。
-      void (async (): Promise<Uint8Array | null> => {
+      // 读失败自兜底（终审 F1：链尾 catch 与 worker 主路径 r.error 同口径——复位
+      // 忙碌 + 状态位提示，不落错误卡片；此前 reject 无 handler 会 unhandled
+      // rejection 且忙碌态永不复位，base===null 死分支随之消除）。
+      void (async (): Promise<Uint8Array> => {
         if (source.kind === 'full') return source.bytes;
         if (buffer.length >= source.size) return buffer;
         return ctx!.read({ start: 0, end: Number.MAX_SAFE_INTEGER });
       })().then((base) => {
         if (seq !== searchSeq) return; // 拉取期间已被新搜索/取消取代
-        if (base === null) {
-          setSearchBusy(false);
-          searchStatus.textContent = '搜索数据读取失败';
-          return;
-        }
         void scanAll(base, parsed.bytes, {
           fold: caseInsensitive,
           shouldContinue: () => seq === searchSeq,
@@ -510,6 +524,10 @@ export function renderHex(
           if (seq !== searchSeq || res.aborted) return;
           onDone({ truncated: res.truncated, offsets: res.offsets });
         });
+      }).catch(() => {
+        if (seq !== searchSeq) return; // 已被新搜索/取消取代：不覆盖新任务的状态位
+        setSearchBusy(false);
+        searchStatus.textContent = '搜索数据读取失败';
       });
     });
   }
@@ -606,7 +624,11 @@ export function renderHex(
       inspectorRows = [];
       void src.ensure(cursor, winEnd).then(() => {
         if (root.isConnected && cursor !== null) refreshInspectorRows();
-      }).catch(() => {});
+      }).catch((e: unknown) => {
+        // Range-less（终审 F3）已切换全量底座：字节即可得，重算快照；其余读失败
+        // 静默留空（自兜底，检查器灰显不阻塞交互），不落错误卡片。
+        if (adoptFull(e) && root.isConnected && cursor !== null) refreshInspectorRows();
+      });
       return;
     }
     inspectorRows = decodeAt(win, 0, little);
@@ -653,7 +675,13 @@ export function renderHex(
       // worker 的副本会被 transfer 脱离原 ArrayBuffer，兜底路径重新拷贝仍可用
       //（src 缓存块同样绝不能被 detach），窗口/全量两模式语义对齐。
       const tailLen = Math.min(STRUCT_TAIL_BYTES, totalSize);
-      if (src !== null) await src.ensure(totalSize - tailLen, totalSize);
+      if (src !== null) {
+        await src.ensure(totalSize - tailLen, totalSize).catch((e: unknown) => {
+          // Range-less（终审 F3）已切换全量底座：尾窗块即可得，继续解析；其余读
+          // 失败照旧上抛走下方 catch 自兜底「结构解析失败」
+          if (!adoptFull(e)) throw e;
+        });
+      }
       /** 独立尾窗副本：窗口模式经 src（slice 视图 → 拷贝），全量模式 buffer 直 slice */
       const tailSlice = (): Uint8Array => {
         if (src !== null) {

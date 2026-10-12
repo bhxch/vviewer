@@ -310,7 +310,18 @@ export function createDispatcher(registry: Registry): Dispatcher {
         // 非 streaming 渲染器：全量 buffer 交付（旧行为，第 5 参不传）。兼容路径 full
         // 即入参 buffer（零重复读）；headOnly 且 size 未知/超限时此处补一次全量 read
         // （headOnly 不变量保证 read 已定义）
-        if (full === null) full = await readFull();
+        if (full === null) {
+          full = await readFull();
+          // 终审 F2：headOnly（size 未知）时 det 仅以 8KB head 短样本判编码（旧
+          // 「≤1MB full 精判」退化面）——全量到手后重算恢复精判（detect 纯函数可
+          // 重入；head/name 未变 → ext/signature 复算值与初算一致，仅 encoding 及
+          // 其派生 binary 可能翻转）。只合并这两字段：det.ext 等已被 sniff 阶段纠偏
+          //（签名改派/extless/lang），整对象替换会回退纠偏。streaming 分支不动
+          //（io-streaming 计划 2 处理）。
+          const redet = detect({ name: source.name, head, full });
+          det.encoding = redet.encoding;
+          det.binary = redet.binary;
+        }
         const instance = await renderer.render(full, target, source, det);
         return { instance, rendererId: renderer.id, det };
       }

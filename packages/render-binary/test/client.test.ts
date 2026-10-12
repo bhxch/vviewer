@@ -208,6 +208,23 @@ describe('BinaryClient.search 窗口模式（need/chunk 握手）', () => {
     client.dispose();
   });
 
+  // 终审 F3：超返回恰为整文件（length === size）= 服务器忽略 Range 回 200 全量——
+  // clamp 会以文件头冒充请求区间（扫描字节错位），改判全量原样单 chunk 供给
+  it('超返回恰为整文件（Range-less 200 全量）：不 clamp，全量原样单 chunk 供给', async () => {
+    const { worker, requests } = fakeWorker();
+    const client = new BinaryClient(worker as unknown as Worker);
+    const FULL = enc('aabbccdd');
+    client.search(enc('bb'), {
+      size: FULL.length,
+      read: async () => FULL.slice(0) // 忽略 Range：任意区间请求回 200 全量
+    });
+    worker.respond({ id: 1, type: 'search-need', start: 0, end: 4 });
+    await flushMicro();
+    // 全量（8B === size）作为单 chunk 原样供给：worker 整扫后 nextStart 越过 size 正常收尾
+    expect(requests[1]).toEqual({ id: 1, type: 'search-chunk', start: 0, bytes: FULL });
+    client.dispose();
+  });
+
   it('读失败 → abort：post search-cancel 且 onDone 携 error 与已累计 offsets', async () => {
     const { worker, requests } = fakeWorker();
     const client = new BinaryClient(worker as unknown as Worker);

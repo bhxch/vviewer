@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createRegistry } from '../src/registry/registry';
 import { createDispatcher, signatureRouteOf } from '../src/dispatch/dispatcher';
-import type { Renderer, StreamCtx, TreeStore } from '../src/types';
+import type { Detection, Renderer, StreamCtx, TreeStore } from '../src/types';
 
 const mk = (id: string, exts: string[], over: Partial<Renderer> = {}): Renderer => ({
   id, label: id, extensions: exts, render: async () => ({ destroy() {} }), ...over
@@ -698,5 +698,30 @@ describe('dispatch 读下沉（io-streaming §3：streaming 选路 + StreamCtx �
       cardInstance.destroy();
       target.remove();
     });
+  });
+
+  // 终审 F2：headOnly（size 未知）时 det 仅以 8KB head 短样本判编码——旧「≤1MB
+  // full 精判」退化面。全量到手后须重算再 render，否则非 streaming 渲染器以退化
+  // det 渲染（潜在 mojibake）。head 口径下本用例 encoding 必为 gb18030（head 只含
+  // 截断多字节序列前 2 字节），断言 utf-8 即证明 detect 收到了 full（非 undefined）。
+  it('⑫ size 未知 + 非 streaming：全量到手后重算编码——head 截断多字节误判 gb18030 恢复 full 精判 utf-8', async () => {
+    const reg = createRegistry();
+    // 4 字节 UTF-8 序列横跨 8KB 探测边界：head 截断 → gb18030；全量完整 → utf-8。
+    // 2MB 全量 > FULL_LIMIT：钉住重算不做 1MB 钳制、full 参数恒传
+    const FULL = new Uint8Array(2_000_000).fill(0x41);
+    FULL.set([0xf0, 0x9f, 0x98, 0x80], 8190);
+    const calls: Array<{ start: number; end: number } | undefined> = [];
+    const read = readOf(FULL, calls);
+    let seenDet: Detection | undefined;
+    reg.install(mk('plain', ['pln'], {
+      render: async (_b, _t, _s, det) => { seenDet = det; return { destroy() {} }; }
+    }));
+    const target = document.createElement('div');
+    const { det } = await createDispatcher(reg).dispatch(
+      srcWith('a.pln', fakeStore(true), null), null, target, { read });
+    expect(calls).toStrictEqual([{ start: 0, end: 8191 }, undefined]); // head 探测 + 延迟全量（读策略不变）
+    expect(seenDet?.encoding).toBe('utf-8'); // full 精判抵达 render（head 口径为 gb18030）
+    expect(det.encoding).toBe('utf-8');
+    expect(det.binary).toBe(false); // encoding 翻转连带派生 binary 同步（gb18030 判二进制 → utf-8 不判）
   });
 });

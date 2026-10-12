@@ -352,6 +352,37 @@ describe('renderHex：窗口模式（StreamCtx）', () => {
     target.remove();
   });
 
+  it('Range-less 服务器（终审 F3）：块读超返回 → 抛错切换全量模式，行输出正确且后续零读', async () => {
+    const calls: Array<{ start: number; end: number }> = [];
+    // fake read 忽略 Range：任意区间请求回 200 全量（响应体 = 整文件）
+    const { inst, target, dump } = mount(makeCtx(calls, async (r) => {
+      calls.push({ start: r.start, end: r.end });
+      return FULL.slice(0);
+    }));
+    // 结构树尾窗块读先触发超返回 → adoptFull 切换全量底座：解析照常，不落「结构解析失败」
+    await inst.structReady;
+    expect(target.querySelector('.vv-hex-status')?.textContent).toContain('195.3 KB');
+    expect(target.querySelector('.vv-hex-status')?.textContent).not.toContain('结构解析失败');
+    // 同步滚动（早于 read promise 落定）：远处窗口先占位、ensure 超返回后经窗口渲染
+    // 路径 catch 切换全量并重渲——行输出与全量模式逐字节一致
+    dump.scrollTop = 2000 * 18;
+    dump.dispatchEvent(new Event('scroll'));
+    await vi.waitFor(() => {
+      const row2000 = [...dump.querySelectorAll('.vv-hex-row')].find((r) => r.textContent!.startsWith('00007d00'));
+      expect(row2000?.textContent).toBe(renderHexBytes(FULL.subarray(32000, 32016), 32000)[0]);
+    });
+    expect([...dump.querySelectorAll('.vv-hex-row')].some((r) => r.textContent === ' ')).toBe(false);
+    expect(target.querySelector('.vv-hex-toolbar-status')?.textContent).toBe(''); // 无「窗口读取失败」
+    // 全量底座就绪后 slice 恒命中：再滚动不再触发任何 read
+    const reads = calls.length;
+    dump.scrollTop = 5000 * 18;
+    dump.dispatchEvent(new Event('scroll'));
+    expect([...dump.querySelectorAll('.vv-hex-row')].some((r) => r.textContent!.startsWith('00013880'))).toBe(true);
+    expect(calls.length).toBe(reads);
+    inst.destroy();
+    target.remove();
+  });
+
   it('无 Worker 兜底路径：窗口模式搜索降级主线程扫描，命中与高亮照常（head 已含全量时零额外读）', async () => {
     // createWorker: () => null 钉住无 Worker 降级路径；head 覆盖全文件（≤1MB 策略
     // 形态）时兜底扫描直用 buffer，不触发任何 read（need/chunk 主路径由 worker 用例覆盖）
