@@ -1,6 +1,9 @@
-import type { Renderer, Encoding, Detection, FileSource, RenderedInstance, SearchMatch, ComputeSource, ComputeWhere } from '@vviewer/core';
+import type { Renderer, Encoding, Detection, FileSource, RenderedInstance, SearchMatch, ComputeSource, ComputeWhere, StreamCtx } from '@vviewer/core';
 import { getRemoteBase, getRemoteMeta, RemoteComputeError, showErrorCard } from '@vviewer/core';
 import { detectLanguage, HighlightCanceledError, captureToCssClass, type HighlightChunk, type HighlightInterval } from '@vviewer/highlight';
+import { STREAM_MAX_BYTES, createBlockStream } from './blockStream';
+import { createTextWindow } from './textWindow';
+import { advanceCodeIndex, createCodeIndex, finishCodeIndex } from './codeIndexStream';
 
 export type { HighlightInterval };
 /** hljs 动态导入的默认导出类型（HLJSApi） */
@@ -575,20 +578,37 @@ export interface RenderCodeHandle {
   revealLine(line: number, col?: number): void;
 }
 
+/** renderCode 选项（双模式共用）：全量模式（现状）与窗口流式模式的差异全部经
+ * ctx 字段表达——其余字段语义两模式一致（encoding/highlight/ext/lang/computeSrc/
+ * oversizeNotice）。 */
+export interface CodeRenderOptions {
+  encoding?: Encoding;
+  highlight?: boolean;
+  ext?: string;
+  lang?: string;
+  computeSrc?: ComputeSource;
+  /** >20MB 纯文本降级的超限提示条开关（BUG-20）；缺省跟随 highlight。
+   * renderDegradedCode 传 false：降级卡已存在，不重复提示。 */
+  oversizeNotice?: boolean;
+  /** 流式读上下文（io-streaming 计划 3 Task 4，spec §4.3）：存在时 renderCode 走
+   * 窗口流式模式（buffer 形参仅作语言探测头部样本，不参与渲染）。前置条件：编码
+   * 须为 UTF-8（codeRenderer.render 守卫——窗口模式仅 UTF-8/ASCII，见其注释）；
+   * ≤2MB 全量走现状路径的守卫补拉同样在 codeRenderer.render 入口完成。 */
+  ctx?: StreamCtx;
+}
+
 export function renderCode(
   buffer: Uint8Array,
   target: HTMLElement,
-  opts: {
-    encoding?: Encoding;
-    highlight?: boolean;
-    ext?: string;
-    lang?: string;
-    computeSrc?: ComputeSource;
-    /** >20MB 纯文本降级的超限提示条开关（BUG-20）；缺省跟随 highlight。
-     * renderDegradedCode 传 false：降级卡已存在，不重复提示。 */
-    oversizeNotice?: boolean;
-  } = {}
+  opts: CodeRenderOptions = {}
 ): RenderCodeHandle {
+  // 窗口流式模式（ctx 存在）：索引流式推进 + textWindow 窗口解码 + lazy chunk 高亮。
+  // 独立闭包而非参数化共用全量闭包——两模式数据源（静态 lines 数组 vs 动态索引+块
+  // 缓存）差异贯穿行渲染/行数/搜索/meta 各面，参数化需给生产稳定基座（全量路径）
+  // 加贯穿性开关，风险大于约 300 行复用收益（codeIndexStream 独立于 jsonlIndex 的
+  // 同款裁决）；纯函数层（renderLineHtml/chunkRangeFor/mergeChunkLines/evict* 等）
+  // 仍单源复用。
+  if (opts.ctx !== undefined) return renderCodeWindowed(opts.ctx, buffer, target, opts);
   const enc = DECODERS[opts.encoding ?? 'utf-8'];
   // CRLF/CR → LF 归一化：行索引（buildLineIndex/lineOffsets）、高亮区间偏移、搜索
   // 全部在归一化文本上计算——解码后、一切索引前做一次，保证偏移一致性（否则
@@ -1074,6 +1094,722 @@ export function renderCode(
   }
 }
 
+// ---------- 窗口流式模式（io-streaming 计划 3 Task 4，spec §4.3） ----------
+//
+// 前置条件（codeRenderer.render 守卫）：ctx 存在且编码为 UTF-8（Encoding 联合类型
+// 无 ascii——ASCII 为 UTF-8 子集，探测即 utf-8）。窗口模式仅 UTF-8/ASCII：行终结符
+// 字节扫描与块解码均依赖 UTF-8 假设；非 UTF-8 回退全量路径后 dispatcher 终审 F2 以
+// 全量重算 detect 编码精判——detect 的 O(n) 全量扫描只发生在全量路径（设计内解决
+// detect 收口遗留）。
+//
+// 形态同 jsonl 窗口模式（spec §4.2/§4.3）：BlockStream 256KB 逐块喂 codeIndex 后台
+// 推进行索引（首屏首块即可渲染）；行文本经 textWindow 块解码缓存切片/跨块字节域拼
+// 装；滚动接近已加载尾部续读；行所需块被块表 LRU 逐出走「占位 + ensure + 重拉」
+// （hex 同语义）；高亮沿用 lazy chunk 机制（chunkKey=startLine），仅行文本来源换
+// textWindow。size 未知同样流式（BlockStream 短读探测 atEnd）；!rangeCapable 的全量
+// 视图（ctx.head=全量+同步切片 read）属退化形态，BlockStream head 预置全部块后零 IO
+// 排空；200-回退切全量底座同构（二次路径自查：degraded 后排空即全量等价，无需重选路）。
+//
+// 防线换代（spec §4.3）：窗口模式不再有全量解码失控前提——上限裁决换 STREAM_MAX_BYTES
+// （512MB，索引/块表常驻内存口径）：size 已知构造即知（零读停机 + 提示条建议 hex），
+// size 未知随续读逐块裁决（confirmedBytes 判定，动态插条）。PLAIN_MAX_BYTES 仅约束
+// 非 streaming 的全量调用面（jsonl 委托/降级卡等），本模式不触及。
+//
+// 首拉失败面：start() 的首块拉取/本地化排空失败经 whenReady 上抛（codeRenderer.render
+// await 后销毁半装配实例再 rethrow——dispatcher 已把 ctx.read 失败标为 DispatchReadError，
+// 走调用方读取失败面，同 jsonl 渲染期首拉口径）；滚动期续读/回看重拉失败自兜底
+// （continueFailed/reloadFailed 停机闩 + 用户滚动动作解除，「下次用户动作才重试」，
+// hex/jsonl 三处纪律同款）。
+
+/** 窗口模式块大小：256KB（jsonl 窗口同款，spec §4.2 口径：首屏首块即可渲染） */
+const CODE_WINDOW_BLOCK_BYTES = 256 * 1024;
+/** 块解码缓存 LRU 上限（块数）：8 块 ≈ 2MB 解码文本（spec 验收「jsonl/code 文本缓存 ≤8 块」） */
+const CODE_TEXT_CACHE_MAX_BLOCKS = 8;
+/** BlockStream 块表驻留上界（块数）：16×256KB = 4MB 原始字节（jsonl 同款；逐出块经
+ * 行渲染占位 + ensureBlock 重拉补齐，坐标与字节不变） */
+const CODE_STREAM_MAX_BLOCKS = 16;
+/** 续读余量（行）：可视末行距已加载尾部 ≤ 此值即续读下一块（scroller overscan 10 的 2 倍，
+ * 覆盖滚动连发时「请求发出→块完成」间隙的越界窗口） */
+const WINDOW_CONTINUE_MARGIN_LINES = 20;
+/** 流式上限提示条（spec §4.3 防线换代：非失败态，不复用错误卡片；建议 hex 与 jsonl
+ * STREAM_LIMIT_NOTICE 同口径） */
+const CODE_STREAM_LIMIT_NOTICE =
+  '文件超过 512MB，已达流式渲染上限（索引停止推进），建议以 hex 打开';
+
+function renderCodeWindowed(
+  ctx: StreamCtx,
+  buffer: Uint8Array,
+  target: HTMLElement,
+  opts: CodeRenderOptions
+): RenderCodeHandle {
+  // 高亮分界（spec §4.3）：窗口模式按定义 >2MB（或 size 未知）→ lazy；highlight:false
+  // 仍纯文本（renderDegradedCode/委托形态不传 ctx，此组合仅直接调用可达）
+  const strategy: HighlightStrategy = opts.highlight === false ? 'plain' : 'lazy';
+  // 语言：与全量模式同一表达式形态，但文本探测仅用头部 8KB——shebang 恒在首行，
+  // ext 命中 languages.json 时文本不参与。窗口模式不持全量解码文本（spec 验收内存
+  // 有界断言：唯一的全量解码面是行级窗口切片）
+  const headText = new TextDecoder('utf-8', { fatal: false }).decode(buffer.subarray(0, 8192));
+  const lang = opts.lang ?? (opts.ext ? detectLanguage(opts.ext, headText) : null);
+
+  target.classList.add('vv-code');
+  const pre = document.createElement('div');
+  pre.className = 'vv-code-pre'; // virtualScroller 的滚动容器
+
+  // 提示条（BUG-20 同构）：pre 的兄弟节点而非子节点——virtualScroller 会
+  // replaceChildren 滚动容器，提示条放里面会被清掉且 spacer 定位被顶偏。
+  // 流式上限提示不受 noticeEnabled 门控（它是停机解释而非高亮提示；highlight:false
+  // 的窗口调用超限同样必须解释「为何不再推进」）
+  let limitReached = ctx.size !== null && ctx.size > STREAM_MAX_BYTES;
+  const noticeEnabled = opts.oversizeNotice ?? opts.highlight !== false;
+  let noticeBar: HTMLElement | null = null;
+  function buildNotice(text: string): void {
+    if (noticeBar !== null) return;
+    noticeBar = document.createElement('div');
+    noticeBar.className = 'vv-error-card vv-oversize-card vv-code-oversize-card';
+    const title = document.createElement('div');
+    title.className = 'vv-error-title';
+    title.textContent = text;
+    noticeBar.append(title);
+  }
+  function mountNotice(): void {
+    if (noticeBar === null || noticeBar.isConnected) return;
+    target.classList.add('vv-code-oversize');
+    target.insertBefore(noticeBar, pre);
+  }
+  if (limitReached) {
+    buildNotice(CODE_STREAM_LIMIT_NOTICE);
+  } else if (
+    noticeEnabled && strategy === 'lazy' && ctx.size !== null && ctx.size > HLJS_MAX_BYTES
+  ) {
+    buildNotice(
+      `文件超过 ${HLJS_MAX_BYTES / 1024 / 1024}MB，已按可视区懒高亮显示（滚动到即增量解析，稍候即着色）`
+    );
+  }
+  if (noticeBar !== null) target.replaceChildren(noticeBar, pre);
+  else target.replaceChildren(pre);
+
+  // 块流 + 行索引 + 文本窗口（Task 1/2/3 公共基座）：索引在原始 UTF-8 字节上增量
+  // 推进（不解码）；行文本经块解码缓存切片/跨块字节域拼装。maxLineBytes=Infinity：
+  // code 无逐行巨行防护概念（超限防线是整流级 STREAM_MAX_BYTES，非逐行）
+  const bs = createBlockStream(ctx, CODE_WINDOW_BLOCK_BYTES, { maxBlocks: CODE_STREAM_MAX_BLOCKS });
+  const index = createCodeIndex(Number.POSITIVE_INFINITY);
+  const win = createTextWindow({
+    blockSize: CODE_WINDOW_BLOCK_BYTES,
+    maxBlocks: CODE_TEXT_CACHE_MAX_BLOCKS,
+    blockAt: (b) => bs.block(b)
+  });
+  // BOM 剥离（jsonl 窗口同裁决）：恒在文件头=块 0 首，无跨块问题；剥离后索引偏移为
+  // 逻辑字节空间（文件字节 = 逻辑偏移 + bomLen），首行解码与全量 TextDecoder 剥 BOM
+  // 口径一致——不剥则首行长度含 BOM，getMeta 展示层口径漂移
+  let bomLen = 0;
+  let nextFeed = 0; // 下一个待喂索引的块号
+  // 消费契约（codeIndexStream）：finishCodeIndex 之后不得再 advanceCodeIndex——
+  // 此标志后续读全部停机，EOF 确认后滚动零 IO
+  let indexFinished = false;
+  // 行数 = 索引条目数：含末尾空串条目，与全量 buildLineIndex lines.length 同值
+  //（虚拟滚动 itemCount/chunkRangeFor 的 totalLines 同口径，指令④不在索引层减 1）
+  const rows = (): number => index.offsets.length;
+
+  // lazy 路径双缓存（chunkKey=startLine → 行 map）：与全量模式同构，仅行文本来源换
+  // textWindow（highlightChunk 内 subLines 构建）
+  const chunkCache = new Map<number, Map<number, LineSeg[]>>();
+  const hljsChunkCache = new Map<number, Map<number, string>>();
+  let hljs: HLJS | null = null;
+  let hljsLang: string | null = null;
+  let scroller: VirtualScrollerHandle | null = null;
+  let mountedRows = -1; // 当前 scroller 的行数（窗口模式行数动态：增长即重建）
+  let destroyed = false;
+  // 引擎实时值：lazy 主路径在首个 chunk 产出到达前为 pending；plain 策略即终值。
+  // 构造期已判超限（size 已知 >STREAM_MAX_BYTES，零读停机）同样即终值 plain——
+  // 不留「解析中」。chunk 全走行级 hljs 兜底时置 'hljs'（首个 tree-sitter chunk
+  // 产出后保持主导引擎）
+  let engine: CodeEngine = strategy === 'plain' || limitReached ? 'plain' : 'pending';
+  let computeWhere: ComputeWhere | null = null;
+  // 文件内搜索状态（BUG-18/23 同构）。窗口模式现状=已加载区间快照扫描（行文本经
+  // lineText），Task 5 换后台全文扫描——SearchPanel 挂载/消费面零变更
+  let lastQuery: string | null = null;
+  let lastCaseSensitive = false;
+  let lastMatches: SearchMatch[] = [];
+  let searchHitsByLine = new Map<number, Array<{ start: number; end: number }>>();
+  let hitLine = -1;
+  let hitTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * 把 hitLine 的行级类同步到已渲染行 DOM（全量路径同款，见其注释）
+   */
+  function applyHitClass(): void {
+    for (const el of pre.querySelectorAll('.vv-code-line.vv-search-hit-line-active')) {
+      el.classList.remove('vv-search-hit-line-active');
+    }
+    if (hitLine >= 0) {
+      const el = pre.querySelector(`[data-line="${hitLine}"]`);
+      if (el) el.classList.add('vv-search-hit-line', 'vv-search-hit-line-active');
+    }
+  }
+
+  function clearHit(): void {
+    if (hitTimer !== null) {
+      clearTimeout(hitTimer);
+      hitTimer = null;
+    }
+    const prev = hitLine;
+    hitLine = -1;
+    applyHitClass();
+    if (prev >= 0 && !searchHitsByLine.has(prev)) scroller?.refresh(true);
+  }
+
+  /**
+   * 行原始文本（窗口三路，jsonl rawLine 同构）：单块行=块解码缓存切片（前缀解码游
+   * 标换算字符下标）；跨块行=按索引 lengths 拼原始字节后单次解码（块切口不打碎跨
+   * 块多字节字符）。len=0 的空行直返空串——行首恰在块边界时避免对未驻留块的无效
+   * 取数。调用面前置：行所需块驻留（fillRows 的 lineAvailable / pump 的
+   * chunkBlocksReady 把关；块 0 部分预置天然免疫——索引有行 ⇒ 块 0 已整块替换）
+   */
+  function lineText(i: number): string {
+    const len = index.lengths[i] ?? 0;
+    if (len === 0) return '';
+    const startFile = (index.offsets[i] ?? 0) + bomLen;
+    const endFile = startFile + len;
+    const b0 = Math.floor(startFile / win.blockSize);
+    const b1 = Math.floor((endFile - 1) / win.blockSize);
+    if (b0 !== b1) return win.decode(win.gather(startFile, endFile));
+    const entry = win.entryOf(b0);
+    const off = startFile - b0 * win.blockSize;
+    const cs = win.charOffsetOf(entry, b0, off);
+    const ce = win.charOffsetOf(entry, b0, off + len);
+    return entry.text.slice(cs, ce);
+  }
+
+  /** 行 i 所需块号区间 [b0, b1]（驻留性把关面） */
+  function lineBlockSpan(i: number): [number, number] {
+    const startFile = (index.offsets[i] ?? 0) + bomLen;
+    const endFile = startFile + (index.lengths[i] ?? 0);
+    const b0 = Math.floor(startFile / bs.blockSize);
+    return [b0, Math.floor(Math.max(startFile, endFile - 1) / bs.blockSize)];
+  }
+
+  // 回看重拉待办（块表 LRU 配套）：lineAvailable 探测到缺块时登记（Set 去重），
+  // maybeContinue 统一 ensureBlock 后 refresh 重渲（同步渲染路径不能 await）
+  const pendingReload = new Set<number>();
+
+  /** 行 i 所需块全部驻留才可渲染；缺块登记待办并渲染占位行（hex「占位+ensure+重拉」） */
+  function lineAvailable(i: number): boolean {
+    if ((index.lengths[i] ?? 0) === 0) return true; // 空行无字节需求
+    const [b0, b1] = lineBlockSpan(i);
+    let ok = true;
+    for (let b = b0; b <= b1; b++) {
+      if (!bs.has(b)) {
+        ok = false;
+        pendingReload.add(b);
+      }
+    }
+    return ok;
+  }
+
+  /**
+   * 行 HTML 文本段统一入口（全量路径同构去 lineSegs/hlLines 整文件两路——窗口模式
+   * 恒 lazy/plain，无整文件高亮产出）：tree-sitter chunk 段落 → 行级 hljs chunk →
+   * null（无高亮产出，调用方回落纯文本转义）
+   */
+  function lineHtml(i: number): string | null {
+    const chunkKey = Math.floor(i / CHUNK_LINES) * CHUNK_LINES;
+    const chunkSegs = chunkCache.get(chunkKey)?.get(i);
+    if (chunkSegs) return renderLineHtml(lineText(i), chunkSegs);
+    const cached = hljsChunkCache.get(chunkKey)?.get(i);
+    return cached !== undefined ? cached : null;
+  }
+
+  function fillRows(first: number, last: number, viewport: HTMLElement): void {
+    const frag = document.createDocumentFragment();
+    for (let i = Math.max(0, first); i <= last; i++) {
+      const row = document.createElement('div');
+      row.className = 'vv-code-line';
+      row.style.height = `${LINE_HEIGHT}px`; // 占位行同款保行高
+      row.dataset.line = String(i);
+      const gutter = document.createElement('span');
+      gutter.className = 'vv-code-gutter';
+      gutter.textContent = String(i + 1);
+      // 行所需块被块表 LRU 逐出（或越界防御）：占位行——pendingReload 已由
+      // lineAvailable 登记，maybeContinue 统一重拉后 refresh 填充（hex 同语义）
+      if (i >= rows() || !lineAvailable(i)) {
+        row.append(gutter);
+        frag.append(row);
+        continue;
+      }
+      const hits = searchHitsByLine.get(i);
+      if (hits !== undefined || i === hitLine) row.classList.add('vv-search-hit-line');
+      if (i === hitLine) row.classList.add('vv-search-hit-line-active');
+      const body = document.createElement('span');
+      body.className = 'vv-code-body';
+      const html = lineHtml(i);
+      if (hits !== undefined) {
+        body.innerHTML = overlaySearchHits(html ?? escapeHtml(lineText(i)), hits);
+      } else if (html !== null) body.innerHTML = html;
+      else body.textContent = lineText(i);
+      row.append(gutter, body);
+      frag.append(row);
+    }
+    viewport.replaceChildren(frag);
+  }
+
+  // ---------- lazy 路径：可视区 chunk 懒高亮（与全量路径同构，行文本来源换窗口） ----------
+  /** 待请求 chunk 键队列/串行化泵/取消与停机语义：全量路径同款（见其注释——
+   * 串行化裁决勿改并发） */
+  let wantedChunks: number[] = [];
+  let chunkBusy = false;
+  let chunkCanceled = false;
+  let chunkPipelineStopped = false;
+
+  function hasChunkData(startLine: number): boolean {
+    if (!chunkCache.has(startLine) && !hljsChunkCache.has(startLine)) return false;
+    // 覆盖率裁决（窗口模式新增面；全量路径行数静态无此问题）：chunk 可能在更少
+    // 已加载行数时被处理（渐进索引），行数增长后其缓存不覆盖增长后的行段——不视为
+    // 已处理，须重发（覆盖式整 chunk 重算，renderLineHtml 段落照常夹紧）
+    const need = Math.min(CHUNK_LINES, rows() - startLine);
+    return (chunkCoverage.get(startLine) ?? 0) >= need;
+  }
+
+  /** chunkKey → 处理时已覆盖的行数（hasChunkData 覆盖率裁决的依据；条目数与 chunk
+   * 缓存同阶且只增不减，缓存被 LRU 逐出后由缓存缺席面兜底重发，不另设逐出） */
+  const chunkCoverage = new Map<number, number>();
+
+  /** chunk 文本所需块是否驻留（pump 取数面前置）：未驻留 chunk 留队不处理，块经
+   * 续读/回看重拉补齐后由下次 onRange 重发——杜绝 lineText 在 pump 内对未驻留块
+   * 抛错（全量路径行数组恒可用，此把关为窗口模式新增面） */
+  function chunkBlocksReady(startLine: number): boolean {
+    const last = startLine + Math.min(CHUNK_LINES, rows() - startLine) - 1;
+    if (last < startLine) return false;
+    const startFile = (index.offsets[startLine] ?? 0) + bomLen;
+    const endFile = (index.offsets[last] ?? 0) + bomLen + (index.lengths[last] ?? 0);
+    if (endFile <= startFile) return true; // 单空行 chunk：无字节需求
+    const b0 = Math.floor(startFile / bs.blockSize);
+    const b1 = Math.floor((endFile - 1) / bs.blockSize);
+    for (let b = b0; b <= b1; b++) {
+      if (!bs.has(b)) return false;
+    }
+    return true;
+  }
+
+  /** 可视区 → 未缓存的 chunk 键（对齐、去重），近视口中心者优先（全量路径同款） */
+  function wantedChunkKeys(first: number, last: number): number[] {
+    const { startLine, lineCount } = chunkRangeFor(first, last, rows());
+    const keys: number[] = [];
+    for (let s = startLine; s < startLine + lineCount; s += CHUNK_LINES) {
+      if (!hasChunkData(s)) keys.push(s);
+    }
+    const mid = (first + last) / 2;
+    return keys.sort(
+      (a, b) => Math.abs(a + CHUNK_LINES / 2 - mid) - Math.abs(b + CHUNK_LINES / 2 - mid)
+    );
+  }
+
+  function scheduleChunks(first: number, last: number): void {
+    if (chunkPipelineStopped) return;
+    wantedChunks = wantedChunkKeys(first, last);
+    void pumpChunk();
+  }
+
+  /** 队列泵：单在-flight，逐个消化最新窗口的 chunk（串行化裁决同全量路径） */
+  async function pumpChunk(): Promise<void> {
+    if (chunkBusy || destroyed || chunkPipelineStopped) return;
+    const startLine = wantedChunks.find((s) => !hasChunkData(s) && chunkBlocksReady(s));
+    if (startLine === undefined) return;
+    chunkBusy = true;
+    chunkCanceled = false;
+    try {
+      await highlightChunk(startLine);
+    } finally {
+      chunkBusy = false;
+    }
+    if (destroyed || chunkCanceled) return;
+    scroller?.refresh(true); // 新 chunk 到达：重绘可视行（fillRows 经 lineHtml 读到）
+    void pumpChunk(); // 下一个（队列已被本次 refresh 的 onRange 重算裁剪过）
+  }
+
+  /** 单 chunk 高亮：来源选择——服务端 range 路由 → 本地 worker chunk → 行级 hljs 兜底。
+   * 与全量路径唯一的差异是 subLines 来源（lineText 窗口解码 vs lines 数组切片） */
+  async function highlightChunk(startLine: number): Promise<void> {
+    const lineCount = Math.min(CHUNK_LINES, rows() - startLine);
+    if (lineCount <= 0) return;
+    // chunk 行文本窗口解码（同步、无 await——chunkBlocksReady 已把关驻留性，
+    // 到首个 await 之间块不会被动）
+    const subLines: string[] = new Array(lineCount);
+    for (let k = 0; k < lineCount; k++) subLines[k] = lineText(startLine + k);
+    const chunkText = subLines.join('\n');
+    const chunkOffsets = buildLineOffsets(subLines);
+    const router = attachedRouter;
+    if (router && lang !== null && opts.computeSrc?.path) {
+      let res: LargeFileHighlightChunk | null;
+      try {
+        res = await router(opts.computeSrc, lang, { startLine, lineCount });
+      } catch (err) {
+        if (destroyed || err instanceof HighlightCanceledError) {
+          chunkCanceled = true; // 取消≠失败：仅逐出在-flight
+          return;
+        }
+        // 显式 remote 失败：如实错误卡片，不静默降级；管线停机闩落下（全量路径同款）
+        chunkPipelineStopped = true;
+        wantedChunks = [];
+        engine = 'plain';
+        computeWhere = null;
+        showErrorCard(target, err instanceof Error ? err.message : String(err), {
+          name: opts.ext ? `.${opts.ext}` : '代码'
+        });
+        return;
+      }
+      if (destroyed) return;
+      if (res !== null) {
+        // 区间相对 chunk 首行（baseLine 平移到绝对行）。旧服务端 wholeFile 应答
+        //（baseLine=0 与请求 startLine 不符，或区间越出 chunk 长度）在窗口模式下
+        // 无法忠实解释——全量路径按整文件字符偏移表解释，而窗口模式设计上不持
+        // 全量解码文本/字符偏移（内存有界验收），硬解释会把整文件偏移错切到 chunk
+        // 窗口（渲染错位高亮）。按 chunk 失败同面走行级 hljs 兜底（质量降级、
+        // 位置永远正确），debug 留痕便于服务端升级排查。
+        const maxEnd = res.intervals.reduce((m, iv) => Math.max(m, iv.end), 0);
+        if (res.baseLine !== startLine || maxEnd > chunkText.length) {
+          console.debug('[code] 窗口模式收到 wholeFile 高亮应答（旧服务端），本 chunk 落行级 hljs 兜底', startLine);
+          await hljsChunk(startLine, lineCount, subLines);
+          return;
+        }
+        const merged = mergeChunkLines(res.intervals, chunkOffsets, res.baseLine);
+        chunkCache.set(startLine, merged);
+        chunkCoverage.set(startLine, lineCount);
+        evictChunksByLines(chunkCache, CHUNK_CACHE_MAX_LINES);
+        engine = 'tree-sitter';
+        computeWhere = 'remote';
+        return;
+      }
+      // router null（auto 门/失败回退）：该 chunk 行级 hljs——不回落本地 wasm
+      //（server-served 大文件连发本地 chunk 会持续占用 worker，全量路径同裁决）
+      await hljsChunk(startLine, lineCount, subLines);
+      return;
+    }
+    // client 未就绪先等待注入（attach 竞态口径同全量路径——懒 chunk 若直落 hljsChunk
+    // 会双锁：hljsChunkCache 永不重发 tree-sitter 且 engine 错锁 'hljs'）
+    let client = attachedClient;
+    if (client === null && lang !== null) {
+      client = await waitForAttachedClient();
+      if (destroyed) return;
+    }
+    if (client && lang !== null) {
+      try {
+        const intervals = await client.highlight(chunkText, lang, {
+          chunk: { startLine, lineCount }
+        });
+        if (destroyed) return;
+        chunkCache.set(startLine, mergeChunkLines(intervals, chunkOffsets, startLine));
+        chunkCoverage.set(startLine, lineCount);
+        evictChunksByLines(chunkCache, CHUNK_CACHE_MAX_LINES);
+        engine = 'tree-sitter';
+        computeWhere = 'local';
+        return;
+      } catch (err) {
+        if (destroyed || err instanceof HighlightCanceledError) {
+          chunkCanceled = true; // 取消≠失败：仅逐出在-flight，不落 hljs 兜底
+          return;
+        }
+        await hljsChunk(startLine, lineCount, subLines); // chunk 失败 → 行级 hljs 兜底
+        return;
+      }
+    }
+    await hljsChunk(startLine, lineCount, subLines); // 无 client/lang：hljs highlightAuto chunk
+  }
+
+  /** 行级 hljs 兜底：单 chunk 主线程高亮（200 行）写 hljsChunkCache（全量路径同款） */
+  async function hljsChunk(startLine: number, lineCount: number, subLines: string[]): Promise<void> {
+    hljs ??= (await import('highlight.js')).default;
+    if (destroyed) return;
+    hljsLang = hljsLang ?? resolveHljsLang(hljs, lang);
+    const chunkText = subLines.join('\n');
+    let value: string;
+    try {
+      value = hljsLang
+        ? hljs.highlight(chunkText, { language: hljsLang, ignoreIllegals: true }).value
+        : hljs.highlightAuto(chunkText).value;
+    } catch {
+      value = hljs.highlightAuto(chunkText).value;
+    }
+    if (destroyed) return;
+    const parts = splitHighlightedLines(value, lineCount);
+    const byLine = new Map<number, string>();
+    for (let k = 0; k < parts.length; k++) byLine.set(startLine + k, parts[k] ?? '');
+    hljsChunkCache.set(startLine, byLine);
+    chunkCoverage.set(startLine, lineCount);
+    evictChunksByLines(hljsChunkCache, CHUNK_CACHE_MAX_LINES);
+    if (engine !== 'tree-sitter') {
+      engine = 'hljs';
+      computeWhere = 'local';
+    }
+  }
+
+  function onRange(first: number, last: number, viewport: HTMLElement): void {
+    if (strategy === 'lazy') scheduleChunks(first, last); // 可视区驱动 chunk 请求
+    fillRows(first, last, viewport);
+    maybeContinue(last); // 接近已加载尾部续读 / 缺块回看重拉
+  }
+
+  /** 行数动态的 scroller 装配：virtualScroller rowCount 为构造期快照——行数增长即
+   * 重建（scrollTop 在容器上不丢，构造即按当前 scrollTop 重渲；RO 重挂开销可忽略） */
+  function mount(): void {
+    if (destroyed) return;
+    const n = rows();
+    if (scroller !== null && mountedRows === n) return;
+    scroller?.destroy();
+    mountedRows = n;
+    scroller = virtualScroller(pre, n, LINE_HEIGHT, onRange);
+  }
+
+  /** 续读/重拉完成后的重渲：行数增长 → 重建 scroller（spacer/总数更新，构造即重渲）；
+   * 未增长（巨行块无新行提交等）→ 强制重绘重评（仍近尾部则续读下一块） */
+  function remountOrRefresh(): void {
+    const prev = mountedRows;
+    mount();
+    if (mountedRows === prev) scroller?.refresh(true);
+  }
+
+  const startsWithBom = (b: Uint8Array<ArrayBuffer>): boolean =>
+    b.length >= 3 && b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf;
+
+  /** EOF 收口：atEnd 且已确认字节全部喂完（200-回退全量底座/全量视图需喂到文件尾） */
+  function maybeFinish(): void {
+    if (indexFinished) return;
+    if (bs.atEnd() && nextFeed * bs.blockSize >= bs.confirmedBytes) {
+      finishCodeIndex(index); // 提交悬挂尾段；此后不再 advance（消费契约）
+      indexFinished = true;
+    }
+  }
+
+  /**
+   * 拉取下一块（至多一个新块）并喂入索引。块喂入前必经 ensureBlock——head 预置的
+   * 部分块（探测头 8KB < 256KB 块）未经整块替换不得进索引/解码。原子性（jsonl 同款）：
+   * ensureBlock 失败上抛时 nextFeed 不推进，重试拉同一块，块序列不错位。
+   */
+  const pullBlock = async (): Promise<void> => {
+    if (indexFinished || limitReached) return;
+    // 尺寸防线（STREAM_MAX_BYTES）：已确认字节超限 → 续读停机 + 提示条（非失败态）。
+    // 防线在 IO 之前裁决：size 已知构造即知（零读停机）；size 未知随短读探测逐块裁决
+    if (bs.confirmedBytes > STREAM_MAX_BYTES) {
+      limitReached = true; // loadedBytes 不再增长（续读面与 maybeContinue 同步封闭）
+      if (engine === 'pending') engine = 'plain'; // 非 pending 终值（不留「解析中」）
+      buildNotice(CODE_STREAM_LIMIT_NOTICE);
+      mountNotice();
+      return;
+    }
+    maybeFinish(); // size 已知空文件：0 块即 EOF，无需任何拉取
+    if (indexFinished) return;
+    const i = nextFeed;
+    const raw = await bs.ensureBlock(i);
+    let chunk = raw;
+    if (i === 0 && startsWithBom(raw)) {
+      bomLen = 3; // 索引/解码前剥离（见上裁决）
+      chunk = raw.subarray(3);
+    }
+    advanceCodeIndex(index, chunk);
+    nextFeed = i + 1; // 喂入成功才推进
+    maybeFinish();
+  };
+
+  let pulling = false;
+  // 续读失败停机（jsonl 同款）：失败后 refresh 重评仍近尾部会无限重试（活锁），置位
+  // 后停止自动续读；用户滚动动作（onUserScroll）解除，重评时单次重试
+  let continueFailed = false;
+  // 回看重拉失败停机（占位卡维持，滚动后重试）
+  let reloadFailed = false;
+
+  function maybeContinue(lastVisible: number): void {
+    // 回看重拉优先于续读：缺块占位行等待补块（与 EOF/尾部距离无关——回看发生在已
+    // 加载坐标区，逐块 ensure 后一次 refresh 填充全部占位行）
+    if (pendingReload.size > 0 && !pulling && !destroyed) {
+      const targets = [...pendingReload];
+      pendingReload.clear();
+      pulling = true;
+      void (async () => {
+        try {
+          for (const b of targets) await bs.ensureBlock(b);
+        } catch (err) {
+          for (const b of targets) pendingReload.add(b); // 未完成块回待办（占位行维持）
+          reloadFailed = true;
+          console.debug('[code] 回看重拉失败，已停机（滚动后重试）', err);
+          pulling = false;
+          return; // 失败停机不 refresh（下次用户动作再试，续读失败同口径——防活锁）
+        }
+        pulling = false;
+        if (destroyed) return;
+        remountOrRefresh(); // 重渲：占位行换实行
+      })();
+      return;
+    }
+    if (indexFinished || limitReached || pulling || continueFailed || destroyed) return;
+    if (lastVisible < rows() - WINDOW_CONTINUE_MARGIN_LINES) return; // 距尾部余量充足
+    pulling = true;
+    void (async () => {
+      try {
+        await pullBlock();
+      } catch (err) {
+        continueFailed = true; // 停机：杜绝「失败→refresh 重评→仍近尾部→再失败」活锁
+        console.debug('[code] 流式续读失败，已停机（滚动后重试）', err);
+      }
+      pulling = false;
+      if (destroyed) return;
+      remountOrRefresh(); // 重渲 + 再评估（停机时 maybeContinue 直返；未停机仍近尾部则续读下一块）
+    })();
+  }
+
+  // 用户动作入口（滚动）：解除续读/回看停机闩（「下次用户动作才重试」，hex/jsonl 同口径）
+  const onUserScroll = (): void => {
+    continueFailed = false;
+    reloadFailed = false;
+  };
+  pre.addEventListener('scroll', onUserScroll, { passive: true });
+
+  /**
+   * 启动：首块拉取（失败上抛——经 whenReady 到 codeRenderer.render 的渲染期读失败
+   * 面）；已本地化（!rangeCapable 全量视图 head 预置全部块 / 200-回退切全量底座 /
+   * 短读已确认 EOF）时排空剩余已确认块——零 IO，仅把索引喂到文件尾。首块在手即
+   * mount（首屏首块即可渲染），其余交滚动续读。
+   */
+  async function start(): Promise<void> {
+    await pullBlock();
+    while (!destroyed && !indexFinished && !limitReached && bs.atEnd()) await pullBlock();
+    if (destroyed) return;
+    // 空流/超限停机：不留「解析中」终态
+    if (rows() === 0 && engine === 'pending' && (indexFinished || limitReached)) {
+      engine = 'plain';
+    }
+    mount();
+  }
+
+  function jumpToLine(line: number): void {
+    if (hitTimer !== null) clearTimeout(hitTimer);
+    hitLine = line;
+    const center = line * LINE_HEIGHT - pre.clientHeight / 2 + LINE_HEIGHT / 2;
+    pre.scrollTop = Math.max(0, center);
+    scroller?.refresh();
+    applyHitClass();
+    hitTimer = setTimeout(() => {
+      hitTimer = null;
+      clearHit();
+    }, 1500);
+  }
+
+  /** 搜索前补块（已加载区间快照的前置）：块表 LRU 逐出的块重拉补齐后再快照行文本；
+   * 失败自兜底（安全快照回落空串），不阻断搜索（Task 5 后台全文扫描接管前的现状面） */
+  async function snapshotLines(): Promise<string[]> {
+    const missing: Promise<Uint8Array<ArrayBuffer>>[] = [];
+    for (let b = 0; b < nextFeed; b++) {
+      if (!bs.has(b)) missing.push(bs.ensureBlock(b));
+    }
+    if (missing.length > 0) {
+      await Promise.all(missing).catch((err: unknown) => {
+        console.debug('[code] 搜索前补块失败（已加载区间快照可能不全）', err);
+      });
+    }
+    const out: string[] = new Array(rows());
+    for (let i = 0; i < out.length; i++) {
+      const len = index.lengths[i] ?? 0;
+      if (len === 0) {
+        out[i] = '';
+        continue;
+      }
+      const [b0, b1] = lineBlockSpan(i);
+      let ok = true;
+      for (let b = b0; b <= b1; b++) {
+        if (!bs.has(b)) {
+          ok = false;
+          break;
+        }
+      }
+      out[i] = ok ? lineText(i) : '';
+    }
+    return out;
+  }
+
+  const handle: RenderCodeHandle = {
+    destroy() {
+      destroyed = true;
+      if (hitTimer !== null) clearTimeout(hitTimer);
+      wantedChunks = []; // 队列作废；在-flight chunk 的回写在各 await 点被 destroyed 拦截
+      scroller?.destroy();
+      scroller = null;
+      chunkCache.clear();
+      hljsChunkCache.clear();
+      pendingReload.clear();
+      pre.removeEventListener('scroll', onUserScroll);
+      pre.remove();
+      // 提示条与 flex 布局类随实例销毁清理（host 复用时不得残留）
+      target.classList.remove('vv-code-oversize');
+    },
+    setScrollTop(top) {
+      pre.scrollTop = top;
+    },
+    scrollTop() {
+      return pre.scrollTop;
+    },
+    getScrollHost() {
+      return pre;
+    },
+    getEngine: () => engine,
+    getComputeWhere: () => computeWhere,
+    // 渲染期动态元数据快照。lines 为内容行数口径（展示层 wc -l，指令④）：索引
+    // offsets.length 含末尾空串条目（=全量 lines.length 同值），EOF 后末条目空串才在
+    // 此减 1——流中条目全为已提交真实行不减（「已加载 N 行」渐进口径，ViewerPane
+    // 首读数字形态兼容）。size：已知取 ctx.size，未知取已确认字节（随续读增长）
+    getMeta() {
+      const lastLen = index.lengths[index.lengths.length - 1] ?? -1;
+      return {
+        encoding: opts.encoding ?? 'utf-8',
+        lang, // 与实际高亮语言同源（评审③同口径）
+        size: ctx.size ?? bs.confirmedBytes,
+        lines: indexFinished && lastLen === 0 ? rows() - 1 : rows()
+      };
+    },
+    search(query, searchOpts?: { caseSensitive?: boolean }) {
+      const caseSensitive = searchOpts?.caseSensitive === true;
+      if (query === lastQuery && caseSensitive === lastCaseSensitive) {
+        return Promise.resolve(lastMatches);
+      }
+      return snapshotLines().then((snapshot) => {
+        if (destroyed) return lastMatches;
+        lastQuery = query;
+        lastCaseSensitive = caseSensitive;
+        searchHitsByLine = new Map();
+        lastMatches = query === '' ? [] : searchCode(snapshot, query, { caseSensitive });
+        for (const m of lastMatches) {
+          const arr = searchHitsByLine.get(m.line);
+          if (arr) arr.push({ start: m.start, end: m.end });
+          else searchHitsByLine.set(m.line, [{ start: m.start, end: m.end }]);
+        }
+        if (query === '') {
+          clearHit(); // 空查询 = 退出搜索
+        } else {
+          if (hitTimer !== null) {
+            clearTimeout(hitTimer);
+            hitTimer = null;
+          }
+          hitLine = -1;
+        }
+        scroller?.refresh(true);
+        return lastMatches;
+      });
+    },
+    gotoMatch(index) {
+      const match = lastMatches[index];
+      if (!match) return;
+      jumpToLine(match.line);
+    },
+    revealLine(line, col) {
+      void col;
+      // 越上界（含未加载行——渐进语义下未加载即不可达）静默，与全量路径越界同口径
+      if (!Number.isInteger(line) || line < 0 || line >= rows()) return;
+      jumpToLine(line);
+    }
+  };
+  // 首拉完成面：codeRenderer.render await 它——首块/本地化排空失败 → 销毁半装配实例
+  // 后 rethrow（渲染期读失败面）；resolve 后实例已 mount，滚动期失败走自兜底（上方闩）
+  (handle as { whenReady?: Promise<void> }).whenReady = start();
+  return handle;
+}
+
 export const codeRenderer: Renderer = {
   id: 'code',
   label: '代码/文本',
@@ -1086,7 +1822,12 @@ export const codeRenderer: Renderer = {
     'lua', 'php', 'pl', 'swift', 'dart', 'vue', 'svelte', 'gradle', 'cmake', 'properties', 'gitignore',
     'license', 'makefile', 'diff', 'patch'
   ],
-  async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection) {
+  // streaming（io-streaming 计划 3 Task 4，spec §4.3）：dispatcher 只交付 head +
+  // StreamCtx，code 打开即走窗口流式（>2MB/size 未知）或入口守卫补拉全量（≤2MB/非
+  // UTF-8）。回退面均在 render 内自处（下方守卫）；!rangeCapable 的全量视图 ctx 属
+  // 窗口模式退化形态，BlockStream 零 IO 排空。
+  streaming: true,
+  async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection, ctx?: StreamCtx) {
     // 远端文件（M5 RemoteStore）的服务端检测头纠偏：X-VV-Lang/X-VV-Encoding
     // 与 languages.json 同源，比本地扩展名表/编码启发式更准（无扩展名脚本等）。
     // opts.lang 有值时 renderCode 直接采用、跳过 detectLanguage；服务端无检测头时
@@ -1095,13 +1836,51 @@ export const codeRenderer: Renderer = {
     // M6 compute 路由：只有远程 store 的文件带服务端 path（auto 策略据此走远程高亮）
     const computeSrc: ComputeSource | undefined =
       getRemoteBase(source.storeId) !== undefined ? { path: source.path, storeId: source.storeId } : undefined;
-    const inst = renderCode(buffer, target, {
-      encoding: meta?.encoding ?? det.encoding,
+    const encoding = meta?.encoding ?? det.encoding;
+    const renderOpts = {
+      encoding,
       highlight: true,
       ext: det.ext,
       lang: meta?.lang ?? det.lang ?? undefined,
       computeSrc
-    });
+    };
+    // 窗口流式候选：ctx 存在且 UTF-8 且 size>2MB 或 size 未知（spec §4.3 高亮分界）。
+    // detect 收口：窗口模式仅 UTF-8/ASCII（Encoding 无 ascii——ASCII 为 UTF-8 子集，
+    // 探测即 utf-8）；非 UTF-8 不入此分支，全量回退后 dispatcher 终审 F2 以全量重算
+    // detect 编码精判——O(n) 全量扫描只发生在全量路径，设计内解决遗留
+    const windowed =
+      ctx !== undefined &&
+      (encoding ?? 'utf-8') === 'utf-8' &&
+      (ctx.size === null || ctx.size > TREE_SITTER_MAX_BYTES);
+    let inst: RenderCodeHandle;
+    if (windowed && ctx !== undefined) {
+      inst = renderCode(buffer, target, { ...renderOpts, ctx });
+    } else {
+      // 全量路径守卫补拉（回退矩阵收口，同 jsonl/hex 形态）：streaming 分支只交付
+      // 8KB 探测头作 buffer（capable 且 size>1MB 或 size 未知），head 未覆盖全文件
+      // （size 未知无法排除截断，或 head 短于 size）时经 ctx.read 拉全量再走下游——
+      // 覆盖非 UTF-8 解码回退与 ≤2MB tree-sitter 全量两场景（指令①），否则 8KB 探测
+      // 头静默截断。head 即全量（兼容路径/!capable 全量视图/capable≤1MB 直读——
+      // buffer.byteLength === ctx.size）不触发，零额外读。读失败在此 await 处 reject
+      //（dispatcher 已把 ctx.read 失败标为 DispatchReadError → 调用方读取失败面，
+      // 评审指令①口径：不落「错误卡片 + 8KB probe 重试」截断活面）。
+      if (ctx !== undefined && (ctx.size === null || buffer.byteLength < ctx.size)) {
+        buffer = await ctx.read({ start: 0, end: Number.MAX_SAFE_INTEGER });
+      }
+      inst = renderCode(buffer, target, renderOpts);
+    }
+    // 窗口模式首拉完成面：首块/本地化排空失败 → 销毁半装配实例（防空壳 scroller
+    // 泄漏）后 rethrow——DispatchReadError 直抛调用方读取失败面，非读失败走渲染错误
+    // 卡片（dispatcher catch，重试动作经 renderCtx 透传 ctx——评审指令②已验证）
+    const ready = (inst as { whenReady?: Promise<void> }).whenReady;
+    if (ready !== undefined) {
+      try {
+        await ready;
+      } catch (err) {
+        inst.destroy();
+        throw err;
+      }
+    }
     // getScrollHost/getEngine 供 ViewerPane 接滚动持久化与引擎指示器；
     // getComputeWhere 供状态栏执行位置指示（M6）；search/gotoMatch 供 SearchPanel（Task 6）；
     // getMeta 供状态栏/属性面板元数据（BUG-04）；revealLine 供全局搜索跳转（BUG-09）。

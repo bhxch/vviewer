@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import hljs from 'highlight.js';
 import { HighlightCanceledError } from '@vviewer/highlight';
-import { RemoteComputeError } from '@vviewer/core';
+import { RemoteComputeError, type ComputeWhere, type FileSource, type RenderedInstance, type StreamCtx } from '@vviewer/core';
+import { STREAM_MAX_BYTES } from '../src/blockStream';
 import {
   buildLineIndex,
   buildLineOffsets,
@@ -10,6 +11,7 @@ import {
   assignIntervalsToLines,
   renderLineHtml,
   renderCode,
+  codeRenderer,
   attachHighlightClient,
   waitForAttachedClient,
   __resetAttachPhaseForTest,
@@ -27,6 +29,8 @@ import {
   PLAIN_MAX_BYTES,
   TREE_SITTER_MAX_BYTES,
   HLJS_MAX_BYTES,
+  type CodeEngine,
+  type CodeFileMeta,
   type HighlightInterval,
 } from '../src/code';
 
@@ -1163,6 +1167,445 @@ describe('renderCode lazy 服务端 range 路由（阶段 4 契约，接替 BUG-
     await vi.waitFor(() => expect(handle.getEngine()).toBe('hljs'));
     expect(router).not.toHaveBeenCalled();
     expect(handle.getComputeWhere()).toBe('local');
+    handle.destroy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 窗口流式模式（io-streaming 计划 3 Task 4：ctx + UTF-8 流式索引 + textWindow
+// 窗口解码 + lazy 高亮按已构建索引 + STREAM_MAX_BYTES 防线）
+// ---------------------------------------------------------------------------
+
+/** 窗口模式块大小（与实现 CODE_WINDOW_BLOCK_BYTES 同值；实现侧为模块私有常量） */
+const WINDOW_BLOCK = 256 * 1024;
+
+interface RangeCall {
+  start: number;
+  end: number;
+}
+
+/** fake StreamCtx（jsonl-render.test.ts 同款）：content 为底层全量数据，read 记录区间 */
+function streamCtx(opts: {
+  size: number | null;
+  content: Uint8Array<ArrayBuffer>;
+  head?: Uint8Array<ArrayBuffer>;
+  calls?: RangeCall[];
+  /** 模拟 Range-less 服务器：任何区间都回全量（BlockStream 200-回退触发形态） */
+  ignoreRange?: boolean;
+}): StreamCtx {
+  return {
+    size: opts.size,
+    head: opts.head ?? new Uint8Array(0),
+    read: async (r) => {
+      opts.calls?.push({ start: r.start, end: r.end });
+      return opts.ignoreRange ? opts.content.slice(0) : opts.content.slice(r.start, r.end + 1);
+    }
+  };
+}
+
+const enc = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
+
+/** 固定字长代码行（行内嵌行号供内容定位断言；每行含 \n 恰 lineBytes 字节） */
+function codeLines(n: number, lineBytes = 1500): string {
+  return Array.from({ length: n }, (_, i) => {
+    const head = `const a = ${i}; // `;
+    return head + 'x'.repeat(Math.max(0, lineBytes - head.length - 1)) + '\n';
+  }).join('');
+}
+
+/** gb18030 字节串构造（jsonl-render.test.ts 同款极简表：'中'=0xd6 0xd0） */
+function gbBytes(rows: string[]): Uint8Array<ArrayBuffer> {
+  const parts: number[] = [];
+  for (const row of rows) {
+    for (const ch of row) {
+      if (ch === '中') parts.push(0xd6, 0xd0);
+      else parts.push(...new TextEncoder().encode(ch));
+    }
+    parts.push(0x0a);
+  }
+  return Uint8Array.from(parts);
+}
+
+const winSource: FileSource = {
+  storeId: 'local',
+  storeLabel: 'local',
+  path: '/big.js',
+  name: 'big.js',
+  store: {} as FileSource['store']
+};
+
+/** codeRenderer.render 按 Renderer 接口返回 RenderedInstance；code 扩展为鸭子形态 */
+type CodeInstance = RenderedInstance & {
+  getEngine(): CodeEngine;
+  getComputeWhere(): ComputeWhere | null;
+  getMeta(): CodeFileMeta;
+  revealLine(line: number, col?: number): void;
+};
+
+function newHost(): HTMLElement {
+  const host = document.createElement('div');
+  document.body.append(host);
+  return host;
+}
+
+/** code 的滚动容器即 .vv-code-pre（virtualScroller 监听其 scroll） */
+function scrollCode(host: HTMLElement, top: number): void {
+  const pre = host.querySelector('.vv-code-pre') as HTMLElement;
+  pre.scrollTop = top;
+  pre.dispatchEvent(new Event('scroll'));
+}
+
+function preHtml(host: HTMLElement): string {
+  return (host.querySelector('.vv-code-pre') as HTMLElement).innerHTML;
+}
+
+function bodyText(host: HTMLElement, line: number): string | undefined {
+  return host.querySelector(`[data-line="${line}"] .vv-code-body`)?.textContent ?? undefined;
+}
+
+describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
+  afterEach(() => {
+    attachHighlightClient(null);
+    attachHighlightRouter(null);
+    document.body.innerHTML = '';
+    vi.unstubAllGlobals();
+  });
+
+  function stubResizeObserver(): void {
+    vi.stubGlobal('ResizeObserver', class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    });
+  }
+
+  it('首屏只读 head+首块（8KB 部分块整块重拉，零全量 read）；行文本经窗口解码正确；getMeta lines 为已加载行数', async () => {
+    stubResizeObserver();
+    const content = enc(codeLines(400)); // 600KB ≈ 2.3 块
+    const calls: RangeCall[] = [];
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, {
+      ext: 'js',
+      lang: 'javascript',
+      ctx: streamCtx({ size: null, content, head: content.slice(0, 8192), calls })
+    });
+    await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
+    expect(bodyText(host, 0)!.startsWith('const a = 0; // ')).toBe(true);
+    expect(bodyText(host, 12)!.startsWith('const a = 12;')).toBe(true); // 视口内行（jsdom 高度 0 → ~20+ 行窗口）
+    expect(calls).toStrictEqual([{ start: 0, end: WINDOW_BLOCK - 1 }]); // 仅首块
+    // 262144/1500：行 0..173 的终结符在首块内（行 174 跨块未提交）——已加载行数
+    expect(handle.getMeta().lines).toBe(174);
+    expect(handle.getMeta().size).toBe(WINDOW_BLOCK); // size 未知：已确认字节
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls.length).toBe(1); // 首屏远离已加载尾部：不触发续读
+    handle.destroy();
+  });
+
+  it('双模式 DOM 逐字节一致（BOM/CRLF/空行/空白行/跨块多字节/巨行/孤立 CR/无尾换行；「中」与 emoji 骑块切口；lazy chunk 高亮同构）', async () => {
+    stubResizeObserver();
+    attachHighlightClient({
+      highlight: async () => [{ start: 0, end: 5, capture: 'keyword' }] // chunk 内 [0,5) 恒为 'const'/'let x' 等行首
+    });
+    const LINE = 'const a = 0;\n'; // 13B
+    const parts: string[] = [];
+    let cur = 0;
+    const push = (s: string): void => {
+      parts.push(s);
+      cur += enc(s).length;
+    };
+    const fillTo = (target: number): void => {
+      const gap = target - cur;
+      expect(gap).toBeGreaterThanOrEqual(0);
+      const full = Math.floor(gap / LINE.length);
+      for (let i = 0; i < full; i++) push(LINE);
+      const rem = gap - full * LINE.length;
+      if (rem > 0) push('x'.repeat(rem - 1) + '\n'); // 调整行
+    };
+    push('\uFEFFconst head = 1;\r\n\n   \n'); // BOM + CRLF 行 + 空行 + 纯空白行
+    fillTo(WINDOW_BLOCK - 5);
+    push('let 中 = 1;\n'); // 13B：「中」(E4 B8 AD) 首字节恰在块 0 末字节
+    fillTo(2 * WINDOW_BLOCK - 7);
+    push('const 🎉 = 2;\n'); // 16B：🎉 首字节恰在块 1 末字节
+    fillTo(4 * WINDOW_BLOCK - 1000);
+    push('/* ' + '巨'.repeat(100_000) + ' */\n'); // 300KB 巨行跨块 4 边界（索引单条目 + gather 拼装）
+    push('old\rnew\r'); // 孤立 CR 两个终结符
+    fillTo(2_100_000);
+    push('const end = 1;'); // 悬挂尾行（无尾换行）
+    const bytes = enc(parts.join(''));
+    expect(bytes[WINDOW_BLOCK - 1]).toBe(0xe4); // 「中」首字节骑在块 0 切口
+    expect(bytes[WINDOW_BLOCK]).toBe(0xb8);
+    expect(bytes[2 * WINDOW_BLOCK - 1]).toBe(0xf0); // 🎉 首字节骑在块 1 切口
+    expect(bytes.length).toBeGreaterThan(TREE_SITTER_MAX_BYTES); // 双模式同为 lazy 策略
+
+    const hostA = newHost();
+    const instA = renderCode(bytes, hostA, { ext: 'js', lang: 'javascript' }); // 全量模式（无 ctx）
+    const hostB = newHost();
+    const instB = renderCode(bytes.slice(0, 8192), hostB, {
+      ext: 'js',
+      lang: 'javascript',
+      ctx: streamCtx({ size: bytes.length, content: bytes, head: bytes.slice(0, 8192) })
+    });
+    await vi.waitFor(() => expect(instA.getEngine()).toBe('tree-sitter'));
+    await vi.waitFor(() => expect(instB.getEngine()).toBe('tree-sitter'));
+    // 先双双滚到底：B 经续读排空到 EOF（spacer 总行数与 meta 与 A 一致）后再比对
+    scrollCode(hostA, Number.MAX_SAFE_INTEGER);
+    scrollCode(hostB, Number.MAX_SAFE_INTEGER);
+    await vi.waitFor(() => expect(instB.getMeta().lines).toBe(instA.getMeta().lines)); // EOF 且 wc-l 口径一致
+    expect(instB.getMeta().size).toBe(instA.getMeta().size);
+    // 底部窗口逐字节一致（悬挂尾行 + 行级渐进 chunk 的覆盖率补齐收敛）
+    await vi.waitFor(() => expect(preHtml(hostB)).toBe(preHtml(hostA)));
+    // 回顶部（「中」/emoji 骑切口行 + chunk 覆盖率重发收敛）
+    scrollCode(hostA, 0);
+    scrollCode(hostB, 0);
+    await vi.waitFor(() => expect(preHtml(hostB)).toBe(preHtml(hostA)));
+    // 中部（巨行所在窗口：跨块 gather 解码）
+    scrollCode(hostA, 1_600_000);
+    scrollCode(hostB, 1_600_000);
+    await vi.waitFor(() => expect(preHtml(hostB)).toBe(preHtml(hostA)));
+    // 再回顶部（窗口侧行进中缓存的自然回看）
+    scrollCode(hostA, 0);
+    scrollCode(hostB, 0);
+    await vi.waitFor(() => expect(preHtml(hostB)).toBe(preHtml(hostA)));
+    instA.destroy();
+    instB.destroy();
+  });
+
+  it('size≤2MB 走全量 tree-sitter：renderer 入口守卫补拉全量恰一次 {0,MAX}（8KB 探测头不得静默截断）；head 覆盖全文件时零额外读', async () => {
+    stubResizeObserver();
+    attachHighlightClient({ highlight: async () => [{ start: 0, end: 5, capture: 'keyword' }] });
+    const content = enc(codeLines(1000)); // 1.5MB：>1MB 交付形态=探测头，≤2MB=全量路径
+    const calls: RangeCall[] = [];
+    const host = newHost();
+    const inst = (await codeRenderer.render(content.slice(0, 8192), host, winSource,
+      { ext: 'js', encoding: 'utf-8', lang: 'javascript' },
+      streamCtx({ size: content.length, content, head: content.slice(0, 8192), calls }))) as CodeInstance;
+    expect(calls).toStrictEqual([{ start: 0, end: Number.MAX_SAFE_INTEGER }]); // 守卫补拉全量
+    expect(inst.getEngine()).toBe('tree-sitter');
+    expect(inst.getMeta()).toMatchObject({ encoding: 'utf-8', size: content.length, lines: 1000 });
+    inst.revealLine(999); // 全量在手：跳转渲染视口外行（非 8KB 截断）
+    expect(bodyText(host, 999)!.startsWith('const a = 999;')).toBe(true);
+    inst.destroy();
+
+    // head 即全量（dispatcher ≤1MB 直读形态）：守卫不触发，零额外读
+    const calls2: RangeCall[] = [];
+    const host2 = newHost();
+    const inst2 = (await codeRenderer.render(content, host2, winSource,
+      { ext: 'js', encoding: 'utf-8', lang: 'javascript' },
+      streamCtx({ size: content.length, content, head: content, calls: calls2 }))) as CodeInstance;
+    expect(calls2).toStrictEqual([]);
+    expect(inst2.getEngine()).toBe('tree-sitter');
+    inst2.destroy();
+  });
+
+  it('size>2MB 走窗口流式（streaming 声明 + renderer 透传 ctx）：首块索引即可渲染，lazy chunk 高亮按窗口文本工作', async () => {
+    stubResizeObserver();
+    expect(codeRenderer.streaming).toBe(true); // dispatcher 只交付 head + StreamCtx
+    const text = codeLines(1400); // 2.1MB > 2MB
+    const content = enc(text);
+    const calls: RangeCall[] = [];
+    const chunkCalls: Array<{ text: string; chunk?: { startLine: number; lineCount: number } }> = [];
+    attachHighlightClient({
+      highlight: async (t, _lang, hctx) => {
+        chunkCalls.push({ text: t, chunk: hctx?.chunk });
+        return [{ start: 0, end: 5, capture: 'keyword' }];
+      }
+    });
+    const host = newHost();
+    const inst = (await codeRenderer.render(content.slice(0, 8192), host, winSource,
+      { ext: 'js', encoding: 'utf-8', lang: 'javascript' },
+      streamCtx({ size: content.length, content, head: content.slice(0, 8192), calls }))) as CodeInstance;
+    expect(calls).toStrictEqual([{ start: 0, end: WINDOW_BLOCK - 1 }]); // 窗口模式：无全量 read
+    await vi.waitFor(() => expect(inst.getEngine()).toBe('tree-sitter'));
+    expect(inst.getComputeWhere()).toBe('local');
+    // chunk 按已构建索引渐进：首块后 rows()=174 → 首请求 174 行（索引驱动边界）
+    expect(chunkCalls[0]!.chunk).toEqual({ startLine: 0, lineCount: 174 });
+    // chunk 行文本来自窗口解码（非 8KB 截断面）
+    expect(chunkCalls[0]!.text).toBe(text.split('\n').slice(0, 174).join('\n'));
+    expect(host.querySelector('[data-line="0"] .ts-keyword')?.textContent).toBe('const');
+    expect(inst.getMeta().size).toBe(content.length);
+    // 续读到 EOF 后回顶部：chunk 0 覆盖率裁决（174 < 200）触发重发，补齐 chunk 尾段高亮
+    scrollCode(host, Number.MAX_SAFE_INTEGER);
+    await vi.waitFor(() => expect(inst.getMeta().lines).toBe(1400));
+    scrollCode(host, 0);
+    await vi.waitFor(() => {
+      expect(chunkCalls.some((c) => c.chunk?.startLine === 0 && c.chunk.lineCount === 200)).toBe(true);
+    });
+    const refilled = chunkCalls.find((c) => c.chunk?.startLine === 0 && c.chunk.lineCount === 200)!;
+    expect(refilled.text).toBe(text.split('\n').slice(0, 200).join('\n'));
+    inst.destroy();
+  });
+
+  it('getMeta().lines 动态：首块后为已加载行数，滚动续读到 EOF 后=内容行数（末尾空串条目展示层减 1，wc-l 口径）', async () => {
+    stubResizeObserver();
+    const content = enc(codeLines(400)); // 600KB，以 \n 收尾
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, {
+      ext: 'js',
+      lang: 'javascript',
+      ctx: streamCtx({ size: content.length, content, head: content.slice(0, 8192) })
+    });
+    expect(handle.getMeta().lines).toBe(0); // 同步构造期：首拉未落地（异步 start）
+    await vi.waitFor(() => expect(handle.getMeta().lines).toBe(174)); // 首块已加载行数
+    scrollCode(host, Number.MAX_SAFE_INTEGER);
+    await vi.waitFor(() => expect(handle.getMeta().lines).toBe(400)); // 400 非 401（索引层含末尾空串条目，getMeta 展示层减 1）
+    // 滚动到底：末视口行 = 末尾空串条目（行 400，与全量 lines.length=401 同构的空行）
+    await vi.waitFor(() => expect(host.querySelector('[data-line="400"]')).not.toBeNull());
+    expect(bodyText(host, 400)).toBe('');
+    // 尾实行走 revealLine（视口上行 399）
+    handle.revealLine(399);
+    await vi.waitFor(() => expect(bodyText(host, 399)).toBeDefined());
+    expect(bodyText(host, 399)!.startsWith('const a = 399;')).toBe(true);
+    handle.destroy();
+  });
+
+  it('STREAM_MAX_BYTES（512MB）防线：size 超限 → 零读停机 + 提示条（建议 hex，非失败态）+ engine 非 pending 终值', async () => {
+    stubResizeObserver();
+    const content = enc(codeLines(3, 100));
+    const calls: RangeCall[] = [];
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, {
+      ext: 'js',
+      lang: 'javascript',
+      ctx: streamCtx({ size: STREAM_MAX_BYTES + 1, content, head: content.slice(0, 8192), calls })
+    });
+    expect(calls).toStrictEqual([]); // 防线在 IO 之前：一个块都不拉
+    const card = host.querySelector('.vv-code-oversize-card');
+    expect(card).not.toBeNull();
+    expect(card!.textContent).toContain('512MB');
+    expect(card!.textContent).toContain('hex');
+    expect(host.querySelector('.vv-code-pre')).not.toBeNull(); // 提示条与滚动容器并存
+    expect(host.querySelector('.vv-code-line')).toBeNull(); // 0 行
+    expect(handle.getEngine()).toBe('plain');
+    expect(handle.getMeta().lines).toBe(0);
+    handle.destroy();
+  });
+
+  it('非 UTF-8（gb18030）+ 探测头 ctx：render 入口守卫补拉全量（指令①，解码/行数以全文件计）；head 覆盖全文件时不触发', async () => {
+    stubResizeObserver();
+    const rows: string[] = [];
+    for (let i = 0; i < 600; i++) rows.push(`中${'p'.repeat(14)}${i}`);
+    const content = gbBytes(rows);
+    expect(content.length).toBeGreaterThan(8192); // 探测头形态成立
+    const calls: RangeCall[] = [];
+    const host = newHost();
+    const inst = (await codeRenderer.render(content.slice(0, 8192), host, winSource,
+      { ext: 'log', encoding: 'gb18030' },
+      streamCtx({ size: content.length, content, head: content.slice(0, 8192), calls }))) as CodeInstance;
+    expect(calls).toStrictEqual([{ start: 0, end: Number.MAX_SAFE_INTEGER }]); // 恰一次全量补拉
+    expect(inst.getMeta().lines).toBe(600); // 行数以全文件计（截断面只会有头部行数）
+    expect(inst.getMeta().encoding).toBe('gb18030');
+    expect(bodyText(host, 0)).toBe(`中${'p'.repeat(14)}0`); // gb18030 解码正确（UTF-8 解码此处必为替换符）
+    inst.destroy();
+
+    // head 覆盖全文件：守卫不触发
+    const calls2: RangeCall[] = [];
+    const host2 = newHost();
+    const inst2 = (await codeRenderer.render(content, host2, winSource,
+      { ext: 'log', encoding: 'gb18030' },
+      streamCtx({ size: content.length, content, head: content, calls: calls2 }))) as CodeInstance;
+    expect(calls2).toStrictEqual([]);
+    expect(inst2.getMeta().lines).toBe(600);
+    inst2.destroy();
+  });
+
+  it('BlockStream 200-回退（Range-less 服务器回全量）：degraded 后索引排空到 EOF，内容完整（二次路径自查）', async () => {
+    stubResizeObserver();
+    const content = enc(codeLines(1400)); // 2.1MB
+    const calls: RangeCall[] = [];
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, {
+      ext: 'js',
+      lang: 'javascript',
+      ctx: streamCtx({ size: content.length, content, head: content.slice(0, 8192), calls, ignoreRange: true })
+    });
+    await vi.waitFor(() => expect(handle.getMeta().lines).toBe(1400)); // 排空到 EOF（全量底座零 IO）
+    expect(calls).toStrictEqual([
+      { start: 0, end: WINDOW_BLOCK - 1 }, // 首块请求收到全量 → 触发回退
+      { start: 0, end: Number.MAX_SAFE_INTEGER } // 回退重取全量
+    ]);
+    expect(handle.getMeta().size).toBe(content.length);
+    handle.revealLine(1399);
+    expect(bodyText(host, 1399)!.startsWith('const a = 1399;')).toBe(true); // 尾行完整
+    handle.destroy();
+  });
+
+  it('续读读失败：无 unhandled rejection、同块重试不跳块、失败停机不自动重试、用户滚动动作恢复续读到 EOF', async () => {
+    stubResizeObserver();
+    const content = enc(codeLines(1200)); // 1.8MB ≈ 7 块
+    const calls: RangeCall[] = [];
+    let readCount = 0;
+    const ctx: StreamCtx = {
+      size: null,
+      head: content.slice(0, 8192),
+      read: async (r) => {
+        calls.push({ start: r.start, end: r.end });
+        readCount += 1;
+        if (readCount === 3) throw new Error('块 2 网络抖动'); // 首块 + 续读块 1 后的首次续读失败
+        return content.slice(r.start, r.end + 1);
+      }
+    };
+    const unhandled: unknown[] = [];
+    const onUnhandled = (err: unknown): void => { unhandled.push(err); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const host = newHost();
+      const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+      scrollCode(host, Number.MAX_SAFE_INTEGER); // 触发续读 → 块 2 read 失败
+      await vi.waitFor(() => expect(readCount).toBeGreaterThanOrEqual(3));
+      await new Promise((r) => setTimeout(r, 30)); // 失败处理链（停机/refresh）落地
+      expect(unhandled).toStrictEqual([]); // 失败被 catch 自兜底
+      expect(calls.length).toBe(3); // 块 0/1 成功 + 块 2 失败尝试
+      await new Promise((r) => setTimeout(r, 30));
+      expect(calls.length).toBe(3); // 停机：无「失败→重评→再失败」活锁
+      scrollCode(host, 0); // 用户动作：解除停机
+      await new Promise((r) => setTimeout(r, 10));
+      scrollCode(host, Number.MAX_SAFE_INTEGER);
+      await vi.waitFor(() => expect(handle.getMeta().lines).toBe(1200));
+      expect(calls[3]).toStrictEqual(calls[2]); // 同块重试（不跳块）
+      expect(calls[2]).toStrictEqual({ start: 2 * WINDOW_BLOCK, end: 3 * WINDOW_BLOCK - 1 });
+      handle.destroy();
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  it('窗口模式块表 LRU（16 块）：滚动跳入已逐出块区间，占位后按需重拉、内容正确且恰一次补块', async () => {
+    stubResizeObserver();
+    const content = enc(codeLines(3400)); // 5.1MB ≈ 20 块 > 16：滚到底后块 0..3 已逐出
+    const calls: RangeCall[] = [];
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, {
+      ext: 'js',
+      lang: 'javascript',
+      ctx: streamCtx({ size: content.length, content, head: content.slice(0, 8192), calls })
+    });
+    scrollCode(host, Number.MAX_SAFE_INTEGER); // 续读到 EOF：前向喂块恰每块一次
+    await vi.waitFor(() => expect(handle.getMeta().lines).toBe(3400));
+    expect(calls.length).toBe(20);
+    // 跳到行 350 附近（字节 525,000 → 块 1/2：块表与文本缓存均已逐出且从未渲染）
+    scrollCode(host, 7000); // 行 350 × 20px
+    await vi.waitFor(() => expect(bodyText(host, 345)).toContain('= 345;')); // 重拉完成后实行渲染
+    // 块 1/2 各恰重拉一次（pendingReload 去重：占位期不重复登记，refresh 后零多余 IO）
+    expect(calls.filter((c) => c.start === WINDOW_BLOCK && c.end === 2 * WINDOW_BLOCK - 1).length).toBe(2);
+    expect(calls.filter((c) => c.start === 2 * WINDOW_BLOCK && c.end === 3 * WINDOW_BLOCK - 1).length).toBe(2);
+    handle.destroy();
+  });
+
+  it('BOM 文件：索引/解码前剥离（首行无 BOM 残留，meta 行数与全量 TextDecoder 口径一致）', async () => {
+    stubResizeObserver();
+    const body = enc('const first = 1;\nconst second = 2;\n');
+    const content = new Uint8Array(3 + body.length);
+    content.set([0xef, 0xbb, 0xbf], 0);
+    content.set(body, 3);
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, {
+      ext: 'js',
+      lang: 'javascript',
+      ctx: streamCtx({ size: content.length, content, head: content.slice(0, 8192) })
+    });
+    await vi.waitFor(() => expect(handle.getMeta().lines).toBe(2));
+    expect(bodyText(host, 0)).toBe('const first = 1;'); // 无 \uFEFF 残留
+    expect(bodyText(host, 1)).toBe('const second = 2;');
     handle.destroy();
   });
 });
