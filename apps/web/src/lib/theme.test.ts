@@ -238,7 +238,7 @@ describe('applyAppearanceFromSettings（订阅触发入口，spec 2026-10-12 §2
     computePolicy: 'auto'
   });
 
-  it('首次调用必注入（签名初值 null）', async () => {
+  it('diff 命中必注入（哨兵先行把签名推离目标）', async () => {
     // lastAppearanceSig 是模块级状态、跨用例残留：先注入一个与 base 目标签名
     //（dark|default|onelight）必然不同的主题把签名推离，保证 FromSettings 的
     // diff 必命中——用例自足，不依赖执行顺序。
