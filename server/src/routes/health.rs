@@ -24,6 +24,12 @@ pub struct Health {
     /// 字段整体省略。客户端据命中帧的 root 索引定位所属根。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub roots: Option<usize>,
+    /// 多根路径宣告（遗留项-UX）：与 roots 同门槛（多根）按序宣告 canonical
+    /// 路径，RemoteSourceModal 根选择显示真实路径而非「根 N」。仅免鉴权部署
+    /// 宣告——health 免鉴权可读，token 鉴权的局域网部署宣告路径会向未认证
+    /// 对端泄漏服务器目录结构，此时字段整体省略（旧前端/受限部署回落「根 N」）。
+    #[serde(rename = "rootPaths", skip_serializing_if = "Option::is_none")]
+    pub root_paths: Option<Vec<String>>,
 }
 
 /// 能力宣告：`file-server` 恒有；`--compute` 时追加 `compute`
@@ -38,6 +44,10 @@ pub async fn health(State(state): State<AppState>) -> Json<Health> {
     let search_engine =
         crate::routes::search::resolve_engine(&state).ok().map(|(engine, _)| engine.name());
     let root_count = state.roots.len();
+    // 路径宣告双门槛：多根（与 roots 同）+ 免鉴权（token 部署不泄漏目录结构）
+    let root_paths = (root_count > 1 && state.token.is_none()).then(|| {
+        state.roots.iter().map(|r| r.canonical.display().to_string()).collect::<Vec<_>>()
+    });
     Json(Health {
         name: "vviewer",
         version: env!("CARGO_PKG_VERSION"),
@@ -45,6 +55,7 @@ pub async fn health(State(state): State<AppState>) -> Json<Health> {
         compute_languages,
         search_engine,
         roots: (root_count > 1).then_some(root_count),
+        root_paths,
     })
 }
 
@@ -113,6 +124,7 @@ mod tests {
     async fn single_root_omits_roots_field() {
         let v = health_json(base_state()).await;
         assert!(v.get("roots").is_none(), "单根部署应省略 roots 字段: {v}");
+        assert!(v.get("rootPaths").is_none(), "单根部署应省略 rootPaths 字段: {v}");
     }
 
     #[tokio::test]
@@ -120,5 +132,27 @@ mod tests {
         let state = base_state().with_roots(vec![PathBuf::from("."), PathBuf::from(".")]);
         let v = health_json(state).await;
         assert_eq!(v["roots"], 2, "多根应宣告根数量");
+    }
+
+    #[tokio::test]
+    async fn multi_root_no_token_advertises_root_paths() {
+        let state = base_state().with_roots(vec![PathBuf::from("."), PathBuf::from("server")]);
+        let v = health_json(state).await;
+        let paths = v["rootPaths"].as_array().expect("多根免鉴权应宣告 rootPaths");
+        assert_eq!(paths.len(), 2, "rootPaths 与 roots 数量一致: {v}");
+        // canonicalize 已把 "." 解析为绝对路径（canonical 宣告语义）
+        let first = paths[0].as_str().expect("str");
+        assert!(first.starts_with('/'), "首根为 canonical 绝对路径: {first}");
+        assert!(paths[1].as_str().expect("str").ends_with("server"));
+    }
+
+    #[tokio::test]
+    async fn token_deployment_omits_root_paths() {
+        // health 免鉴权可读：token 鉴权部署宣告路径 = 向未认证对端泄漏目录结构
+        let state = AppState::new(PathBuf::from("."), None, Some("tok".to_string()), false, None)
+            .with_roots(vec![PathBuf::from("."), PathBuf::from(".")]);
+        let v = health_json(state).await;
+        assert_eq!(v["roots"], 2, "数量宣告不受 token 影响");
+        assert!(v.get("rootPaths").is_none(), "token 部署应省略 rootPaths: {v}");
     }
 }

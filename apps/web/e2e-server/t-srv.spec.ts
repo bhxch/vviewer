@@ -632,12 +632,15 @@ test.describe('SRV-MULTIROOT [workspace 多根]: --root 双值实例 tree?root /
     try {
       await waitHealthy(multiBase);
 
-      // ① health 多根宣告：roots 为根数量（health.rs，>1 才出现）
+      // ① health 多根宣告：roots 为根数量（health.rs，>1 才出现）；免鉴权部署
+      // 同告 rootPaths（遗留项-UX，canonical 路径按根序）
       const health = (await (await fetch(`${multiBase}/api/health`)).json()) as {
         capabilities: string[];
         roots?: number;
+        rootPaths?: string[];
       };
       expect(health.roots).toBe(2);
+      expect(health.rootPaths).toEqual([root0, root1]);
 
       // ② tree 按根列出：root=1 只见 root1 条目；缺省 root=0 只见 root0 条目
       const tree1 = (await (

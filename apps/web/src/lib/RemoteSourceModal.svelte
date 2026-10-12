@@ -2,8 +2,9 @@
   // RemoteSourceModal.svelte — 后端路径来源浏览（workspace T5）。消费方为
   // WorkspaceCreateModal（内嵌视图切换）：
   //   loadLastServer() 判定「已连接」（connectServer 成功即写入 sessionStorage，
-  //   restore 重连同源——未连接显示引导提示）→ health 取 roots 数量（服务端只宣告
-  //   数量、无根路径字段，根选择仅显示序号「根 N」）→ roots>1 先选根 →
+  //   restore 重连同源——未连接显示引导提示）→ health 取 roots 数量与 rootPaths
+  //   路径（免鉴权多根部署才有路径，token 部署/旧服务端回落序号「根 N」）→
+  //   roots>1 先选根 →
   //   /api/tree?path=&root=n 逐层浏览（目录行点击进入；面包屑返回）→ 每行「作为
   //   来源」/「将当前目录作为来源」→ openRemoteSource（base/token 取
   //   loadLastServer）→ onpicked + onclose。
@@ -28,6 +29,9 @@
   /** no-server=未连接；roots=多根待选；browse=逐层浏览（含错误展示与重试） */
   let phase = $state<'no-server' | 'roots' | 'browse'>(last === null ? 'no-server' : 'roots');
   let rootsCount = $state(0);
+  /** 根路径宣告（health rootPaths，遗留项-UX）：免鉴权多根部署才有；与 roots
+   * 数量不一致视为不可信丢弃，回落「根 N」序号显示。 */
+  let rootPaths = $state<string[]>([]);
   let rootIndex = $state(0);
   /** 当前浏览目录（相对所选根的路径；'' = 根） */
   let path = $state('');
@@ -38,6 +42,11 @@
 
   /** 根序号清单（health roots 为数量；each 用数字数组保持类型安全） */
   const rootIndices = $derived(Array.from({ length: rootsCount }, (_, i) => i));
+
+  /** 根显示名：有路径宣告显示路径，否则回落「根 N」序号（旧服务端/token 部署） */
+  function rootLabel(i: number): string {
+    return rootPaths[i] ?? `根 ${i}`;
+  }
 
   /** Bearer 头构造（connectServer 同款：token 空串归一 null） */
   function headers(): Record<string, string> {
@@ -73,16 +82,25 @@
       phase = 'browse';
       return;
     }
-    let body: { roots?: unknown };
+    let body: { roots?: unknown; rootPaths?: unknown };
     try {
-      body = (await res.json()) as { roots?: unknown };
+      body = (await res.json()) as { roots?: unknown; rootPaths?: unknown };
     } catch {
       error = 'health 响应不是有效 JSON';
       phase = 'browse';
       return;
     }
-    // 服务端多根宣告（health.rs）：roots 为根数量（>1 才出现），无根路径字段
+    // 服务端多根宣告（health.rs）：roots 为根数量（>1 才出现）；rootPaths 为
+    // canonical 路径（免鉴权多根部署才有，遗留项-UX）——形状不信任，长度与
+    // roots 不符即整体丢弃，显示回落「根 N」
     rootsCount = typeof body.roots === 'number' && body.roots > 1 ? body.roots : 0;
+    rootPaths =
+      rootsCount > 1 &&
+      Array.isArray(body.rootPaths) &&
+      body.rootPaths.length === rootsCount &&
+      body.rootPaths.every((p) => typeof p === 'string' && p !== '')
+        ? (body.rootPaths as string[])
+        : [];
     if (rootsCount > 1) {
       phase = 'roots';
       return;
@@ -207,19 +225,22 @@
       {#each rootIndices as i (i)}
         <button
           type="button"
+          title={rootPaths[i]}
           onclick={() => {
             rootIndex = i;
             phase = 'browse';
             void load('');
-          }}>根 {i}</button
+          }}>{rootLabel(i)}</button
         >
       {/each}
     </div>
-    <div class="vv-remotesrc-hint">服务器仅宣告根数量（无根路径），以序号表示。</div>
+    {#if rootPaths.length === 0}
+      <div class="vv-remotesrc-hint">服务器仅宣告根数量（无根路径），以序号表示。</div>
+    {/if}
   {:else}
     {#if rootsCount > 1}
       <button type="button" class="vv-remotesrc-rootback" onclick={() => (phase = 'roots')}>
-        ← 重选根（当前：根 {rootIndex}）
+        ← 重选根（当前：{rootLabel(rootIndex)}）
       </button>
     {/if}
     <div class="vv-remotesrc-crumbs" aria-label="路径面包屑">
@@ -236,7 +257,7 @@
       {/each}
     </div>
     <button type="button" class="vv-remotesrc-pickcurrent" disabled={loading} onclick={() => pick(path)}>
-      将当前目录作为来源（{path === '' ? `根 ${rootIndex}` : path}）
+      将当前目录作为来源（{path === '' ? rootLabel(rootIndex) : path}）
     </button>
     {#if error}
       <div class="vv-remotesrc-error" role="alert">
