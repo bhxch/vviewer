@@ -172,4 +172,57 @@ describe('createBlockStream', () => {
     expect(bs.block(3)).toEqual(ALPHA.slice(12, 16));
     expect(bs.atEnd()).toBe(true);
   });
+
+  it('⑨ 短读分支推进不变量：短读后合法末块仍可达（零重拉）、越界报错块号正确（fix round 2）', async () => {
+    const calls: RangeCall[] = [];
+    const data = ALPHA.slice(0, 6); // 6 字节：块 0=4B 满、块 1=2B 短读（EOF）
+    const bs = createBlockStream(fakeCtx({ size: null, content: data, calls }), B);
+    await expect(bs.ensureBlock(3)).rejects.toThrow(/已在块 1 结束/); // 报错块号 = 实际末块 1
+    // 合法末块（刚确认的短块）可达：0..nextBlock-1 恒终态块，零 IO 直取
+    expect(await bs.ensureBlock(1)).toEqual(data.slice(4, 6));
+    expect(await bs.ensureBlock(0)).toEqual(data.slice(0, 4));
+    expect(calls).toStrictEqual([
+      { start: 0, end: 3 },
+      { start: 4, end: 7 } // 无任何重拉
+    ]);
+    expect(bs.atEnd()).toBe(true);
+    await expect(bs.ensureBlock(2)).rejects.toThrow(/已在块 1 结束/); // 越界报错块号正确
+  });
+
+  it('⑩ 并发 ensureBlock 同块去重：单次 fetch、双调用方同字节 resolve（fix round 2）', async () => {
+    const calls: RangeCall[] = [];
+    const bs = createBlockStream(fakeCtx({ size: 16, content: ALPHA.slice(0, 16), calls }), B);
+    const [a, b] = await Promise.all([bs.ensureBlock(1), bs.ensureBlock(1)]);
+    expect(calls).toStrictEqual([
+      { start: 0, end: 3 },
+      { start: 4, end: 7 } // 块 0/1 各恰一次（并发不重复 IO）
+    ]);
+    expect(a).toEqual(ALPHA.slice(4, 8)); // 双调用方同字节 resolve
+    expect(b).toEqual(ALPHA.slice(4, 8));
+    expect(bs.atEnd()).toBe(false); // 块 2/3 未取
+  });
+
+  it('⑪ 并发失败共享：双调用方收同一真实拒绝（非伪拒绝），重试同块成功', async () => {
+    const boom = new Error('块 0 抖动');
+    const calls: RangeCall[] = [];
+    const bs = createBlockStream(fakeCtx({
+      size: 16,
+      content: ALPHA.slice(0, 16),
+      calls,
+      failWith: boom,
+      failCall: 1 // 第 1 次 read（块 0）失败一次
+    }), B);
+    const results = await Promise.allSettled([bs.ensureBlock(2), bs.ensureBlock(2)]);
+    expect(results[0]?.status).toBe('rejected');
+    expect(results[1]?.status).toBe('rejected'); // 败者也拒绝（非伪成功/伪拒绝）
+    expect((results[0] as PromiseRejectedResult).reason).toBe(boom); // 同一错误实例
+    expect((results[1] as PromiseRejectedResult).reason).toBe(boom);
+    expect(await bs.ensureBlock(2)).toEqual(ALPHA.slice(8, 12)); // 在途表已清：重试成功
+    expect(calls).toStrictEqual([
+      { start: 0, end: 3 }, // 失败尝试（共享单次）
+      { start: 0, end: 3 }, // 重试
+      { start: 4, end: 7 },
+      { start: 8, end: 11 }
+    ]);
+  });
 });

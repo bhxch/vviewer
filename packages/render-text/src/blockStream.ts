@@ -16,6 +16,10 @@
 // EOF 证据（探测帽长度与真实 EOF 不可区分），atEnd 只由显式读探测产生。
 // ensureBlock 越界部分按序推进（不跳读）：size 未知时块边界靠逐块短读发现，跳读
 // 会在 EOF 附近读到错位/空区间；size 已知时同口径，保持单一推进语义。
+// 原子推进与并发（fix round 1/2）：nextBlock 仅在 fetch 成功后推进（含短读末块，
+// 0..nextBlock-1 恒为终态块——短读后合法末块可达、越界报错块号恒为实际末块）；
+// 同块并发 ensureBlock 经 in-flight 表合并为单次 fetch（hexSource 并发去重先例），
+// 各调用方共享同一 resolve/reject（非伪拒绝）。
 import type { StreamCtx } from '@vviewer/core';
 
 export interface BlockStream {
@@ -94,6 +98,35 @@ export function createBlockStream(ctx: StreamCtx, blockSize: number): BlockStrea
     }
   };
 
+  // 在途拉取表：块号 → fetch promise（fix round 2 并发去重——对齐 hexSource 的
+  // 并发合并先例：同块并发 ensureBlock 共享单次 fetch，不重复 IO；败者与胜者
+  // await 同一结果，收到同一真实 resolve/reject（非伪拒绝/伪成功））
+  const inflight = new Map<number, Promise<void>>();
+
+  /**
+   * 确保单块就绪（fetch + 确认推进的原子单元）：成功回调里推进 nextBlock——推进
+   * 与 fetch 绑定（并发调用方各自跑主循环时不会重复推进），且成功即推进（含短读
+   * 末块），维持「0..nextBlock-1 恒为终态块」不变量——短读确认后合法末块仍可达
+   * （零重拉），越界报错块号（nextBlock-1）恒为实际末块。失败清在途表后原样上抛
+   * （后续重试重新发起）。
+   */
+  const ensureOne = (target: number): Promise<void> => {
+    const existing = inflight.get(target);
+    if (existing !== undefined) return existing;
+    const p = fetchBlock(target).then(
+      () => {
+        inflight.delete(target);
+        nextBlock = target + 1;
+      },
+      (err: unknown) => {
+        inflight.delete(target);
+        throw err;
+      }
+    );
+    inflight.set(target, p);
+    return p;
+  };
+
   const ensureBlock = async (i: number): Promise<Uint8Array<ArrayBuffer>> => {
     if (!Number.isInteger(i) || i < 0) {
       throw new Error(`blockStream：块下标须为非负整数，收到 ${i}`);
@@ -107,16 +140,18 @@ export function createBlockStream(ctx: StreamCtx, blockSize: number): BlockStrea
       throw new Error(`blockStream：文件已在块 ${nextBlock - 1} 结束（短读确认），块 ${i} 不存在`);
     }
     // 按序推进（不跳读）：逐块 await——后一块的合法性依赖前一块未短读。
-    // 原子性（fix round 1）：nextBlock 仅在 fetchBlock 成功后推进——read 失败
+    // 原子性（fix round 1）：推进在 ensureOne 内与 fetch 成功绑定——read 失败
     // 上抛时停在原块，重试（调用方再 ensure）拉同一块；旧实现先 ++ 后 await，
-    // 失败块永久缺位、后续块字节错位拼进缺失坐标位
+    // 失败块永久缺位、后续块字节错位拼进缺失坐标位。
+    // 短读检查（fix round 2）：fetch 成功即推进（含短读末块）后再判——刚取回的
+    // 短块计入已确认段（0..nextBlock-1 恒终态块），短读后合法末块仍可达（零重拉），
+    // 越界报错块号（nextBlock-1）恒为实际末块
     while (nextBlock <= i) {
-      await fetchBlock(nextBlock);
+      await ensureOne(nextBlock);
       if (fullData !== null) return block(i); // 途中 200-回退：直接切全量切片
-      if (shortSeen && nextBlock < i) {
-        throw new Error(`blockStream：文件已在块 ${nextBlock} 结束（短读确认），块 ${i} 不存在`);
+      if (shortSeen && nextBlock - 1 < i) {
+        throw new Error(`blockStream：文件已在块 ${nextBlock - 1} 结束（短读确认），块 ${i} 不存在`);
       }
-      nextBlock++;
     }
     return block(i);
   };
