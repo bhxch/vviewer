@@ -92,4 +92,26 @@ describe('loadSettings 外观槽格式白名单（spec 2026-10-12 §2.3）', () 
     expect(s.appearanceLight).toBe('vscode:Dark Modern');
     expect(s.appearanceDark).toBe('imported:abc123');
   });
+
+  it("裸 'default' 原样通过（白名单合法形态之一）", () => {
+    localStorage.setItem(
+      'vviewer:settings',
+      JSON.stringify({ ...BASE, appearanceLight: 'default', appearanceDark: 'default' })
+    );
+    const s = loadSettings();
+    expect(s.appearanceLight).toBe('default');
+    expect(s.appearanceDark).toBe('default');
+  });
+
+  it('非字符串脏值（JSON 数字）字段级归位，不整体回落其余字段', () => {
+    // autoRefresh/excludedPatterns 刻意写成非默认值：若整体回落 defaults() 则两断言必炸
+    localStorage.setItem(
+      'vviewer:settings',
+      JSON.stringify({ ...BASE, appearanceLight: 42, autoRefresh: false, excludedPatterns: ['.git'] })
+    );
+    const s = loadSettings();
+    expect(s.appearanceLight).toBe('default');
+    expect(s.autoRefresh).toBe(false);
+    expect(s.excludedPatterns).toEqual(['.git']);
+  });
 });

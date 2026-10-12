@@ -44,7 +44,9 @@ export function loadSettings(): Settings {
     // 前缀；存在性校验（内置名单/imported id）由注入期 warn+回退兜底，此处只挡格式
     for (const key of ['appearanceLight', 'appearanceDark'] as const) {
       const v = s[key];
-      if (v !== 'default' && !v.startsWith('vscode:') && !v.startsWith('imported:')) {
+      // typeof 守卫前置：非字符串脏值（如 JSON 里的数字）走字段级归位，
+      // 否则 startsWith 抛 TypeError 被外层 try/catch 兜成整体回落 defaults()
+      if (typeof v !== 'string' || (v !== 'default' && !v.startsWith('vscode:') && !v.startsWith('imported:'))) {
         s[key] = DEFAULTS[key];
       }
     }
