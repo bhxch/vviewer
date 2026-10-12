@@ -220,15 +220,22 @@ function ensureStyleEl(): HTMLStyleElement {
  * 近似映射。主题名不存在（残留下架主题等）→ console.warn 并回退该亮暗槽位的
  * 默认主题，不再"保持现状"——保持现状会让 UI 下拉与实际生效主题不一致。
  * 注入文本与 applyAppearance 引入前逐字节等价（单测 legacyExpectedText 与 e2e
- * 注释头断言共同锁定），勿改动格式。
+ * 注释头断言共同锁定），勿改动格式。isCurrent（弃单守卫）：loadTables 等待期
+ * 可能被更新的 applyAppearance 调用超越——await 恢复后、写 textContent 前核对，
+ * 返回 false 即静默返回（不写 style）；fallback 递归透传同一守卫。
  */
-async function injectCodeTheme(name: string, mode: 'light' | 'dark'): Promise<void> {
+async function injectCodeTheme(
+  name: string,
+  mode: 'light' | 'dark',
+  isCurrent?: () => boolean
+): Promise<void> {
   const tables = await loadTables();
+  if (isCurrent && !isCurrent()) return; // 弃单守卫：已被更新调用超越，不写 style
   let theme = tables[name];
   if (!theme) {
     const fallback = DEFAULT_CODE_THEME[mode];
     console.warn(`未知代码主题：${name}，回退默认代码主题 ${fallback}`);
-    if (fallback !== name && tables[fallback]) return injectCodeTheme(fallback, mode);
+    if (fallback !== name && tables[fallback]) return injectCodeTheme(fallback, mode, isCurrent);
     return; // 默认主题也不在表内（themes.json 异常）：保持现状
   }
   const el = ensureStyleEl();
@@ -280,9 +287,11 @@ function appearanceSig(mode: 'light' | 'dark', appearance: string, codeTheme: st
  * 并发序（spec 2026-10-12 §2.2）：monotonic token 弃单，last-INITIATED 胜——被
  * 更新调用超越的调用不写 style、不落签名；fallback 路径签名记 effective='default'
  * （注入文本的真实形态），订阅 diff 用「请求槽值」比对，非法槽值每次都会重注入
- * 一次 default 文本（幂等无害），换取签名恒等于注入真相。第二个 token 检查只护
- * 签名簿记——style 写点在 injectCodeTheme 内部，被超越调用的中间态写入会被新
- * 调用的注入覆盖，终态仍为 last-INITIATED。
+ * 一次 default 文本（幂等无害），换取签名恒等于注入真相。「被超越调用不写
+ * style」由三层检查无条件成立（冷启动窗口已封死）：① resolveAppearance 恢复
+ * 后的 token 检查（default 路径无此前置 await，由 ② 兜住）；② injectCodeTheme
+ * 内 loadTables 恢复后、写 textContent 前的 isCurrent 守卫（fallback 递归
+ * 透传）；③ 注入完成后的 token 检查护签名簿记。
  */
 export async function applyAppearance(
   appearance: AppearanceRef,
@@ -297,7 +306,7 @@ export async function applyAppearance(
     return;
   }
   if (appearance !== 'default' && !json) console.warn(`未知外观主题：${appearance}，回退 default`);
-  await injectCodeTheme(codeTheme, mode);
+  await injectCodeTheme(codeTheme, mode, () => token === appearanceCallSeq);
   if (token !== appearanceCallSeq) return; // loadTables 等待期被超越：注入文本已被更新调用覆写，只补签名
   lastAppearanceSig = appearanceSig(mode, 'default', codeTheme);
 }
@@ -335,7 +344,9 @@ export function effectiveMode(themeMode: Settings['themeMode']): 'light' | 'dark
  * 口径为「生效值」而非「原始槽值」：system 的亮暗解析在 effectiveMode 内完成，
  * OS 亮暗切换（不经 saveSettings）同样命中 diff；excludedPatterns 等无关字段
  * 变化零注入。非法槽值注入期回退 default（applyAppearance 既有行为）后落
- * effective 签名——同一非法槽值重复触发会幂等重注入一次，无害。
+ * effective 签名——同一非法槽值重复触发会幂等重注入一次，无害。签名初值
+ * null 仅保证首个 FromSettings 调用必注入；其他入口先直调 applyAppearance /
+ * applyCodeTheme 不破坏正确性（其写入的签名即注入文本真相），onMount 无时序特权。
  */
 export function applyAppearanceFromSettings(settings: Settings): void {
   const mode = effectiveMode(settings.themeMode);

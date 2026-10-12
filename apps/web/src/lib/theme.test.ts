@@ -223,6 +223,33 @@ describe('applyAppearance 并发弃单（spec：last-INITIATED 胜）', () => {
     expect(styleEl()?.textContent).toBe(await legacyExpectedText('onelight', 'dark'));
     await deleteTheme(theme.id);
   });
+
+  it('冷启动窗口：default 路径被超越调用的写点被 isCurrent 守卫拦下（全程只写一次）', async () => {
+    // 终态断言无法区分守卫生效与否（无守卫时 stale 写入也会被 p2 覆盖），
+    // 故拦截 style 元素的 textContent 写点、按写次计数：无守卫 = p1 先写
+    // onelight + p2 写 serika-dark（2 次）；有守卫 = p1 在 loadTables 恢复点
+    // 被拦，仅 p2 一次写。两调用 await 同一已决 tablesPromise，微任务 FIFO
+    // 保证时序确定（spec §2.2 弃单语义同款确定性）。
+    await getTheme('onelight'); // 预热 tablesPromise
+    const el = document.createElement('style');
+    el.id = STYLE_ID;
+    document.head.append(el);
+    const writes: string[] = [];
+    let raw = '';
+    Object.defineProperty(el, 'textContent', {
+      get: () => raw,
+      set: (v: string) => {
+        writes.push(v);
+        raw = v;
+      },
+      configurable: true
+    });
+    const p1 = applyAppearance('default', 'dark', 'onelight');
+    const p2 = applyAppearance('default', 'dark', 'serika-dark');
+    await Promise.all([p1, p2]);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toBe(await legacyExpectedText('serika-dark', 'dark'));
+  });
 });
 
 describe('applyAppearanceFromSettings（订阅触发入口，spec 2026-10-12 §2.1）', () => {
