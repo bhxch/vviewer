@@ -440,3 +440,46 @@ test('WS-05：后端路径 basePath 来源重载两次不落占位（T5 I-1 stor
     await fake.close();
   }
 });
+
+// ---------------------------------------------------------------- WS-06
+
+test('WS-06：pinned 目录 tab 刷新保持（M-5——快照目录条目按来源重建并读回 pinned）', async ({
+  page
+}) => {
+  test.setTimeout(90_000);
+  const fake = await startFakeServer({ 'hello.js': 'const wsPinned = 1\n' });
+  try {
+    await waitAppMounted(page);
+    await connectForm(page, fake.base);
+    const dirTab = page.locator('.vv-tab', { hasText: fake.host });
+    await expect(dirTab).toBeVisible({ timeout: 10_000 });
+
+    // 打开一个文件 tab 与目录 tab 并存（锚「只重建快照目录条目，文件 tab 照常」）
+    const drawer = await openDrawerIfNarrow(page);
+    await page.locator('.vv-tree-row', { hasText: 'hello.js' }).click();
+    await closeDrawerIfOpened(page, drawer);
+    await expect(page.locator('.vv-code-pre')).toContainText('wsPinned', { timeout: 20_000 });
+
+    // 右键固定目录 tab（host 含「:」正则元字符，用字符串文本精确定位）
+    await dirTab.click({ button: 'right' });
+    await expect(page.locator('.vv-tabctx')).toBeVisible();
+    await page.getByRole('menuitem', { name: '固定', exact: true }).click();
+    await expect(page.locator('.vv-tabctx')).toHaveCount(0);
+    await expect(dirTab).toHaveAttribute('data-pinned', 'true');
+
+    // 快照含目录条目（pinned:true）后刷新：远端重连重建来源（BUG-08 通道），
+    // M-5 后快照目录条目忠实恢复（pinned 读回；此前整个目录 tab 丢失）
+    await waitSnapshotTabs(page, [fake.host, 'hello.js']);
+    await page.reload();
+    await expect(page.locator('.vv-tab', { hasText: fake.host })).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('.vv-tab', { hasText: fake.host })).toHaveAttribute(
+      'data-pinned',
+      'true'
+    );
+    await expect(page.locator('.vv-tab', { hasText: 'hello.js' })).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('.vv-code-pre')).toContainText('wsPinned', { timeout: 20_000 });
+    await expect(page.locator('.vv-error-card')).toHaveCount(0);
+  } finally {
+    await fake.close();
+  }
+});

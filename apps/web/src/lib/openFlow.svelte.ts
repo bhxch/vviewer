@@ -1034,11 +1034,19 @@ function remoteSourceLabel(base: string, rootIndex: number, basePath: string, fi
  * setActive 归属）、不激活不切换；跨组去重命中（多 workspace 共享同一来源）
  * 只跳过——恢复期切换活动组会让后续 addTab 串组。来源登记与运行时通道同款
  * （addSource 组内去重，replaceAll 已登记的来源为 no-op）。
+ * opts.pinned（M-5）：快照目录条目的 pinned 读回——目录条目不进文件 tab 循环，
+ * pinned 须在来源重建时一并传入；直接置位与文件 tab 读回同款（快照序 pinned
+ * 靠左不变式由 add 顺序保持）。
  */
-export function addDirTabForRestore(wsId: string, store: TreeStore): void {
+export function addDirTabForRestore(
+  wsId: string,
+  store: TreeStore,
+  opts?: { pinned?: boolean }
+): void {
   if (tabStore.list.some((t) => t.source.path === '' && t.source.storeId === store.id)) return;
   workspaceStore.addSource(wsId, sourceOf(store));
-  addTab(store, '', store.displayName());
+  const tab = addTab(store, '', store.displayName());
+  if (opts?.pinned === true) tab.pinned = true;
 }
 
 /**
@@ -1049,11 +1057,12 @@ export function addDirTabForRestore(wsId: string, store: TreeStore): void {
  */
 export async function tryRestoreDirectory(
   handle: FileSystemDirectoryHandle,
-  wsId: string
+  wsId: string,
+  opts?: { pinned?: boolean }
 ): Promise<TreeStore | null> {
   if (!(await ensurePermission(handle))) return null;
   const store = createLocalFsStore(handle);
-  addDirTabForRestore(wsId, store);
+  addDirTabForRestore(wsId, store, opts);
   return store;
 }
 

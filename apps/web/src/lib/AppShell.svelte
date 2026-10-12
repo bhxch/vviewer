@@ -19,6 +19,7 @@
     tryRestoreDirectory,
     bindArchiveOpenEvents,
     seedSeqFromSnapshots,
+    addDirTabForRestore,
     hasUserActivity,
     loadLastServer,
     registryVersion,
@@ -197,7 +198,12 @@
             // dirHandle 为全局单槽：仅当句柄目录名与来源 storeId（localfs:<目录名>）
             // 一致才可重建；同名多 workspace 共享同一来源，addDirTabForRestore 去重
             if (dirHandle !== null && `localfs:${dirHandle.name}` === src.storeId) {
-              const store = await tryRestoreDirectory(dirHandle, wsItem.id);
+              // M-5：pinned 目录 tab 读回——目录条目不进文件 tab 循环，pinned 须
+              // 在来源重建时经 addDirTabForRestore 一并传入
+              const dirSnap = wsItem.tabs.find((t) => t.path === '' && t.storeId === src.storeId);
+              const store = await tryRestoreDirectory(dirHandle, wsItem.id, {
+                pinned: dirSnap?.pinned === true
+              });
               if (store !== null) {
                 rebuilt.set(src.storeId, store);
               } else {
@@ -216,11 +222,21 @@
               // 重连通道意外抛错：与不可达同待遇——落占位，绝不让单来源拖垮整个恢复
               console.error(`恢复服务器 ${src.storeBase} 的来源失败`, err);
             }
-            if (store !== null) rebuilt.set(src.storeId, store);
+            if (store !== null) {
+              rebuilt.set(src.storeId, store);
+              // M-5：快照有该来源的目录条目（path===''）则按快照忠实恢复目录 tab
+              //（含 pinned 读回）——远端重连默认不弹树（BUG-08）不变，用户刷新前
+              // 开着目录 tab 才重建
+              const dirSnap = wsItem.tabs.find((t) => t.path === '' && t.storeId === src.storeId);
+              if (dirSnap !== undefined) {
+                addDirTabForRestore(wsItem.id, store, { pinned: dirSnap.pinned === true });
+              }
+            }
           }
         }
-        // —— 再逐 tab 恢复；目录条目（path===''）已由来源重建，跳过防每次启动
-        // 累积一个（与旧 restore 同款）。来源未重建成功的 tab 落占位 ——
+        // —— 再逐 tab 恢复；目录条目（path===''）已由来源重建（M-5：remote 侧
+        // 快照有目录条目才重建），跳过防每次启动累积一个（与旧 restore 同款）。
+        // 来源未重建成功的 tab 落占位 ——
         for (const t of wsItem.tabs) {
           if (t.path === '') continue;
           // merge 路径快点击窗口查重：merging 判定到本循环之间有权限弹窗/重连

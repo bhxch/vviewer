@@ -468,8 +468,8 @@ test('TA-05：刷新恢复——pinned 与组内快照序保持、撤销栈清�
   await page.reload();
   await expect(page.locator('.vv-error-card').first()).toBeVisible({ timeout: 15_000 });
 
-  // pinned + 顺序按快照数组序恢复（目录条目 path==='' 被跳过——既有 restore 行为；
-  // ledger M-5 规避：不对 pinned 目录 tab 跨刷新设断言）
+  // pinned + 顺序按快照数组序恢复（localfiles 目录条目无来源重建仍跳过——既有
+  // restore 行为；pinned 目录 tab 的跨刷新锚在 WS-06：server 通道按快照重建，M-5）
   await expect.poll(() => tabNames(page), { timeout: 10_000 }).toEqual(['bb.txt', 'aa.txt', 'cc.txt']);
   await expect(tabNamed(page, 'bb.txt')).toHaveAttribute('data-pinned', 'true');
   await expect(tabNamed(page, 'aa.txt')).not.toHaveClass(/vv-tab-pinned/);
