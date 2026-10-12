@@ -200,6 +200,29 @@ describe('applyAppearance（B 项）', () => {
   });
 });
 
+describe('applyAppearance 并发弃单（spec：last-INITIATED 胜）', () => {
+  it('先发慢调用（IndexedDB 宏任务）被后发快调用（缓存微任务）超越：终态=后发', async () => {
+    // putTheme 写真库（fake-indexeddb）：imported 路径经 listImportedThemes 的
+    // IndexedDB 回调（宏任务）恢复，必然晚于 default 路径的缓存 tablesPromise
+    //（纯微任务）——token 规则下后发 p2 胜与完成顺序无关，断言确定性成立
+    const theme: ImportedTheme = {
+      id: 'imported:imp-race',
+      name: 'Race Theme',
+      kind: 'dark',
+      colors: { 'editor.background': '#101010' },
+      tokenColors: [],
+      source: 'json',
+      addedAt: 1
+    };
+    await putTheme(theme);
+    const p1 = applyAppearance('imported:imp-race', 'dark', 'serika-dark');
+    const p2 = applyAppearance('default', 'dark', 'onelight');
+    await Promise.all([p1, p2]);
+    expect(styleEl()?.textContent).toBe(await legacyExpectedText('onelight', 'dark'));
+    await deleteTheme(theme.id);
+  });
+});
+
 describe('hljs 兜底近似映射（M7 Task 3：--hljs-* 跟随代码主题）', () => {
   it('映射表恰为契约 9 条（capture → --hljs-* 变量）', () => {
     expect(HLJS_CAPTURE_TO_VAR).toEqual([

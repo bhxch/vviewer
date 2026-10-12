@@ -260,6 +260,16 @@ function injectAppearance(appearance: string, mode: 'light' | 'dark', json: Vsco
   return true;
 }
 
+// 外观注入并发序号与上次生效签名（spec 2026-10-12 §2.2）：monotonic token 弃单——
+// 每个 await 恢复后比对序号，被更新调用超越即静默放弃（last-INITIATED 胜）；
+// 签名仅在未被弃单、真正完成注入的同步段写入，供 applyAppearanceFromSettings diff。
+let appearanceCallSeq = 0;
+let lastAppearanceSig: string | null = null;
+
+function appearanceSig(mode: 'light' | 'dark', appearance: string, codeTheme: string): string {
+  return `${mode}|${appearance}|${codeTheme}`;
+}
+
 /**
  * 应用外观主题（spec B §2.1/2.2）：单节点 style#vv-code-theme 幂等注入。
  * 'default' 时退化为纯代码主题注入（与旧 applyCodeTheme 文本逐字节等价，不含
@@ -267,19 +277,29 @@ function injectAppearance(appearance: string, mode: 'light' | 'dark', json: Vsco
  * 代码槽被接管，codeTheme 参数仅作 default 路径的代码主题。未知 ref（清单外 /
  * 未注册 imported）console.warn 一次并回退 default 路径；外观 json 三段全空
  * （无变量可注入）同样回退 default 文案但不 warn（非异常，只是无事可做）。
+ * 并发序（spec 2026-10-12 §2.2）：monotonic token 弃单，last-INITIATED 胜——被
+ * 更新调用超越的调用不写 style、不落签名；fallback 路径签名记 effective='default'
+ * （注入文本的真实形态），订阅 diff 用「请求槽值」比对，非法槽值每次都会重注入
+ * 一次 default 文本（幂等无害），换取签名恒等于注入真相。第二个 token 检查只护
+ * 签名簿记——style 写点在 injectCodeTheme 内部，被超越调用的中间态写入会被新
+ * 调用的注入覆盖，终态仍为 last-INITIATED。
  */
 export async function applyAppearance(
   appearance: AppearanceRef,
   mode: 'light' | 'dark',
   codeTheme: string
 ): Promise<void> {
+  const token = ++appearanceCallSeq;
   const json = appearance === 'default' ? null : await resolveAppearance(appearance);
-  if (appearance !== 'default' && !json) {
-    console.warn(`未知外观主题：${appearance}，回退 default`);
-    return injectCodeTheme(codeTheme, mode);
+  if (token !== appearanceCallSeq) return; // 已被更新调用超越：弃单，不写 style 不落签名
+  if (json && injectAppearance(appearance, mode, json)) {
+    lastAppearanceSig = appearanceSig(mode, appearance, codeTheme);
+    return;
   }
-  if (json && injectAppearance(appearance, mode, json)) return;
+  if (appearance !== 'default' && !json) console.warn(`未知外观主题：${appearance}，回退 default`);
   await injectCodeTheme(codeTheme, mode);
+  if (token !== appearanceCallSeq) return; // loadTables 等待期被超越：注入文本已被更新调用覆写，只补签名
+  lastAppearanceSig = appearanceSig(mode, 'default', codeTheme);
 }
 
 /** 旧入口（薄包装）：等价 applyAppearance('default', mode, name)，注入文本不变。 */
