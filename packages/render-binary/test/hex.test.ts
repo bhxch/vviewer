@@ -352,8 +352,9 @@ describe('renderHex：窗口模式（StreamCtx）', () => {
     target.remove();
   });
 
-  it('窗口模式下搜索走全量回退读：扫描命中与高亮照常（head 已含全量时零额外读）', async () => {
-    // head 覆盖全文件（≤1MB 策略形态）：扫描直接用 buffer，不触发任何 read
+  it('无 Worker 兜底路径：窗口模式搜索降级主线程扫描，命中与高亮照常（head 已含全量时零额外读）', async () => {
+    // createWorker: () => null 钉住无 Worker 降级路径；head 覆盖全文件（≤1MB 策略
+    // 形态）时兜底扫描直用 buffer，不触发任何 read（need/chunk 主路径由 worker 用例覆盖）
     const CONTENT = new Uint8Array(256);
     CONTENT.set([0xde, 0xad, 0xbe, 0xef], 100); // 唯一命中
     const calls: Array<{ start: number; end: number }> = [];
