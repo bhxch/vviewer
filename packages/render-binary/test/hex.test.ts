@@ -102,7 +102,8 @@ describe('renderHexBytes 高亮', () => {
 });
 
 // ---- renderHex DOM 渲染：worker 不可用/出错时的主线程降级（jsdom 下直测 DOM 结构）----
-import { renderHex } from '../src/hex';
+import { renderHex, hexRenderer } from '../src/hex';
+import type { StreamCtx, FileSource } from '@vviewer/core';
 
 const PNG_BYTES = (() => {
   const b = new Uint8Array(64);
@@ -200,6 +201,179 @@ describe('renderHex：行虚拟滚动', () => {
     const inst = renderHex(new Uint8Array(0), target, { createWorker: () => null });
     expect(target.querySelectorAll('.vv-hex-row')).toHaveLength(0);
     expect(target.querySelector('.vv-hex-status')?.textContent).toContain('0 B');
+    inst.destroy();
+    target.remove();
+  });
+});
+
+// ---- Task 5（io-streaming）：窗口模式渲染（StreamCtx 供数 + 占位/ensure/重渲）----
+
+describe('renderHex：窗口模式（StreamCtx）', () => {
+  const BLOCK = 65536;
+  /** fake 全量文件：字节值 = 偏移 mod 256（任一窗口可逐字节比对） */
+  const FULL = Uint8Array.from({ length: 200_000 }, (_, i) => i & 0xff);
+  const HEAD = FULL.slice(0, 8192);
+
+  /** fake read：按 ByteRange（end 含）切片并记录调用；end 超界按数据长度钳制 */
+  function readOf(calls: Array<{ start: number; end: number }>, content: Uint8Array = FULL) {
+    return async (r: { start: number; end: number }): Promise<Uint8Array<ArrayBuffer>> => {
+      calls.push({ start: r.start, end: r.end });
+      const end = Math.min(r.end, content.length - 1);
+      return content.slice(r.start, end + 1);
+    };
+  }
+
+  function makeCtx(calls: Array<{ start: number; end: number }>, read?: ReturnType<typeof readOf>): StreamCtx {
+    return { size: FULL.length, head: HEAD, read: read ?? readOf(calls) };
+  }
+
+  function mount(ctx: StreamCtx, buffer: Uint8Array = HEAD): { inst: ReturnType<typeof renderHex>; target: HTMLElement; dump: HTMLElement } {
+    const target = document.createElement('div');
+    document.body.append(target);
+    const inst = renderHex(buffer, target, { createWorker: () => null }, ctx);
+    return { inst, target, dump: target.querySelector('.vv-hex-dump') as HTMLElement };
+  }
+
+  it('首屏只读 head+结构树尾窗块：首屏窗口字节全部直取 head，read 不触前 128KB', async () => {
+    const calls: Array<{ start: number; end: number }> = [];
+    const { inst, target, dump } = mount(makeCtx(calls));
+    // 首屏行渲染自 head，零窗口读
+    const rows = [...dump.querySelectorAll('.vv-hex-row')];
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[0]!.textContent).toBe(renderHexBytes(FULL.subarray(0, 16), 0)[0]);
+    // read 仅结构树尾窗触发：全部落在文件尾两块内（≥ block 2），字节数 ≤ 2 块
+    expect(calls.length).toBeLessThanOrEqual(2);
+    for (const c of calls) {
+      expect(c.start).toBeGreaterThanOrEqual(2 * BLOCK);
+      expect(c.end - c.start + 1).toBeLessThanOrEqual(BLOCK);
+    }
+    await inst.structReady;
+    expect(target.querySelector('.vv-hex-status')?.textContent).toContain('未知二进制');
+    expect(target.querySelector('.vv-hex-status')?.textContent).toContain('195.3 KB'); // 200000B 状态行用 src.size
+    inst.destroy();
+    target.remove();
+  });
+
+  it('滚动到远处窗口：先占位保行高，ensure 拉覆盖块后重渲为正确字节（区间断言）', async () => {
+    const calls: Array<{ start: number; end: number }> = [];
+    const { inst, target, dump } = mount(makeCtx(calls));
+    dump.scrollTop = 2000 * 18; // 行 2000 → 偏移 32000，超出 head（8KB）
+    dump.dispatchEvent(new Event('scroll'));
+    // 占位行保行高（占位文本为单个空格）
+    const placeholders = [...dump.querySelectorAll('.vv-hex-row')];
+    expect(placeholders.length).toBeGreaterThan(0);
+    expect(placeholders.every((r) => r.textContent === ' ')).toBe(true);
+    // ensure 到位后重渲：行 2000 文本与全量模式逐字节一致（首行含 overscan 上探，
+    // 按偏移列定位行 2000 断言）
+    const expectedRow = renderHexBytes(FULL.subarray(32000, 32016), 32000)[0];
+    await vi.waitFor(() => {
+      const rows = [...dump.querySelectorAll('.vv-hex-row')];
+      const row2000 = rows.find((r) => r.textContent!.startsWith('00007d00'));
+      expect(row2000?.textContent).toBe(expectedRow);
+    });
+    expect([...dump.querySelectorAll('.vv-hex-row')].some((r) => r.textContent === ' ')).toBe(false);
+    expect(calls).toContainEqual({ start: 0, end: BLOCK - 1 }); // block 0 整块拉取
+    inst.destroy();
+    target.remove();
+  });
+
+  it('size null（hexRenderer 全量回退）：一次全量读后行为与全量模式等价', async () => {
+    vi.stubGlobal('Worker', undefined); // hexRenderer 内建 createWorker 在 jsdom 降级 null
+    try {
+      const SMALL = Uint8Array.from({ length: 300 }, (_, i) => i & 0xff);
+      const calls: Array<{ start: number; end: number }> = [];
+      const target = document.createElement('div');
+      document.body.append(target);
+      const source: FileSource = { storeId: 's', storeLabel: 's', path: 'a.bin', name: 'a.bin', store: {} as never };
+      const instance = await hexRenderer.render(SMALL.slice(0, 8192), target, source, { ext: 'bin' }, {
+        size: null,
+        head: SMALL.slice(0, 8192),
+        read: readOf(calls, SMALL)
+      });
+      // 全量回退读：单次 MAX_SAFE_INTEGER 端点（远端由服务端钳制、本地自然钳制）
+      expect(calls).toStrictEqual([{ start: 0, end: Number.MAX_SAFE_INTEGER }]);
+      const rows = [...target.querySelectorAll('.vv-hex-row')];
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows[0]!.textContent).toBe(renderHexBytes(SMALL.subarray(0, 16), 0)[0]);
+      expect(target.querySelector('.vv-hex-status')?.textContent).toContain('300 B');
+      expect(instance.destroy).toBeTypeOf('function');
+      instance.destroy();
+      target.remove();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('行文本与全量模式逐字节一致：同 buffer 同滚动位置两种模式输出 diff 为空', async () => {
+    const calls: Array<{ start: number; end: number }> = [];
+    // 全量模式（现状路径）
+    const legacyTarget = document.createElement('div');
+    document.body.append(legacyTarget);
+    const legacy = renderHex(FULL, legacyTarget, { createWorker: () => null });
+    // 窗口模式（head 8KB + 块拉取）
+    const { inst, target: windowTarget, dump } = mount(makeCtx(calls));
+    dump.scrollTop = 5000 * 18; // 行 5000 → 偏移 80000（block 1，超出 head）
+    const legacyDump = legacyTarget.querySelector('.vv-hex-dump') as HTMLElement;
+    legacyDump.scrollTop = dump.scrollTop;
+    legacyDump.dispatchEvent(new Event('scroll'));
+    dump.dispatchEvent(new Event('scroll'));
+    await vi.waitFor(() => {
+      const winRows = [...dump.querySelectorAll('.vv-hex-row')];
+      expect(winRows.some((r) => r.textContent!.startsWith('00013880'))).toBe(true); // 80000 = 0x13880，窗口已就绪
+    });
+    const winRows = [...dump.querySelectorAll('.vv-hex-row')].map((r) => r.textContent);
+    const legacyRows = [...legacyDump.querySelectorAll('.vv-hex-row')].map((r) => r.textContent);
+    expect(winRows).toEqual(legacyRows); // 逐字节一致（含行数、占位无残留）
+    expect(winRows.length).toBeGreaterThan(0);
+    legacy.destroy();
+    inst.destroy();
+    legacyTarget.remove();
+    windowTarget.remove();
+  });
+
+  it('窗口读失败自兜底（评审指令①）：占位保留 + 工具条状态位提示，不落错误卡片', async () => {
+    const calls: Array<{ start: number; end: number }> = [];
+    const { inst, target, dump } = mount(makeCtx(calls, async () => {
+      throw new Error('io gone');
+    }));
+    await inst.structReady; // 结构树尾窗同样失败 → status「结构解析失败」（既有自兜底面）
+    expect(target.querySelector('.vv-hex-status')?.textContent).toContain('结构解析失败');
+    dump.scrollTop = 2000 * 18;
+    dump.dispatchEvent(new Event('scroll'));
+    // 占位保留（无崩溃、无重试活面），失败提示在工具条状态位
+    await vi.waitFor(() => {
+      expect(target.querySelector('.vv-hex-toolbar-status')?.textContent).toBe('窗口读取失败');
+    });
+    const rows = [...dump.querySelectorAll('.vv-hex-row')];
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.textContent === ' ')).toBe(true);
+    expect(target.querySelector('.vv-error-card')).toBeNull();
+    inst.destroy();
+    target.remove();
+  });
+
+  it('窗口模式下搜索走全量回退读：扫描命中与高亮照常（head 已含全量时零额外读）', async () => {
+    // head 覆盖全文件（≤1MB 策略形态）：扫描直接用 buffer，不触发任何 read
+    const CONTENT = new Uint8Array(256);
+    CONTENT.set([0xde, 0xad, 0xbe, 0xef], 100); // 唯一命中
+    const calls: Array<{ start: number; end: number }> = [];
+    const target = document.createElement('div');
+    document.body.append(target);
+    const inst = renderHex(CONTENT, target, { createWorker: () => null }, {
+      size: CONTENT.length,
+      head: CONTENT, // head 即全量：src 全部块预置，read 永不触发
+      read: readOf(calls, CONTENT)
+    });
+    await inst.structReady;
+    const search = target.querySelector('.vv-hex-search') as HTMLInputElement;
+    const status = target.querySelector('.vv-hex-search-status') as HTMLElement;
+    search.value = 'deadbeef';
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(status.textContent).toBe('1/1 处命中'); // 主线程兜底扫描（无 worker）照常出命中
+    expect(target.querySelectorAll('.vv-hex-hit-active').length).toBeGreaterThan(0);
+    expect(calls).toStrictEqual([]); // head 已是全量：搜索零额外读
     inst.destroy();
     target.remove();
   });

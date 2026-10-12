@@ -9,12 +9,17 @@
 // Task 3（spec H §2.3）：数据检查器——cursor 点击/键盘定位 + 光标字节高亮（复用
 // span 切分，cursor/flash 档与命中档按字节叠加），跳转行级 flash 收编为字节级；
 // getInspector/setLittle 鸭子接口供 ViewerPane 轮询上行/总线下行（本包不依赖 web）。
-import { virtualScroller, type VirtualScrollerHandle, type Detection, type FileSource, type RenderedInstance, type Renderer } from '@vviewer/core';
+// Task 5（io-streaming）：renderHex 增末参 StreamCtx——size 已知来源走窗口模式
+//（hexSource 块缓存供数：可视行命中直取、未就绪占位 + ensure 拉块重渲），size
+// 未知由 hexRenderer 先做全量回退读再进既有全量装配。行格式输出与全量模式逐字节
+// 一致（spec §4.1，hex.test 窗口用例钉住）。
+import { virtualScroller, type VirtualScrollerHandle, type Detection, type FileSource, type RenderedInstance, type Renderer, type StreamCtx } from '@vviewer/core';
 import { renderHexBytes, HEX_ROW_BYTES, byteIndexAtColumn } from './hexBytes';
 import type { HexHighlight, HexRow } from './hexBytes';
-import { decodeAt, type InspectorRow, type InspectorSnapshot } from './inspector';
+import { decodeAt, INSPECTOR_WINDOW_BYTES, type InspectorRow, type InspectorSnapshot } from './inspector';
 import type { BinaryClient, SearchDoneInfo, SearchProgressInfo } from './client';
 import { scanAll } from './searchScan';
+import { createHexSource, type HexSource } from './hexSource';
 import { STRUCT_TAIL_BYTES, type ParseResult, type StructNode } from './struct';
 
 /** hex 行高（px）：字号 12px × 1.5 行距，与 app.css .vv-hex-dump 一致；行内样式显式锁定 */
@@ -96,24 +101,42 @@ export interface HexDomOptions {
 
 /**
  * hex dump DOM 渲染（hexRenderer.render 的主体，独立导出便于复用）。
+ * 末参 ctx（Task 5）：streaming 渲染时由 hexRenderer 透传 dispatch 构造的 StreamCtx。
+ * ctx === undefined → 现状全量逻辑（buffer 直用，零行为变化）；ctx.size 已知 →
+ * 窗口模式（hexSource 块缓存）。size 未知的 ctx 不进本函数（hexRenderer 已先做
+ * 全量回退读；此处收到即调用违约，抛错而非以 head 静默截断）。
  * 返回实例 destroy：移除 DOM、终止 worker；getInspector/setLittle：数据检查器
  * 鸭子接口（Task 3，ViewerPane 轮询上行/总线下行）。
  */
 export function renderHex(
   buffer: Uint8Array,
   target: HTMLElement,
-  opts: HexDomOptions = {}
+  opts: HexDomOptions = {},
+  ctx?: StreamCtx
 ): {
   destroy(): void;
   structReady: Promise<void>;
   getInspector(): InspectorSnapshot | null;
   setLittle(v: boolean): void;
 } {
+  // size 未知的 ctx 属调用违约：hexRenderer 已先做全量回退读；renderHex 若直接以
+  // 8KB head 静默续渲即截断活面——宁抛不截
+  const ctxSize = ctx?.size ?? null;
+  if (ctx !== undefined && ctxSize === null) {
+    throw new Error('renderHex 不接受 size 未知的 ctx：size 未知来源应由 hexRenderer 先做全量回退读');
+  }
+  // 窗口模式判定（窗口模式不变量：ctx.head 即 dispatch 的 base/probe，与 buffer
+  // 形参同一字节——headOnly 时为 8KB 探测块，≤1MB 全量策略/非 rangeCapable 时为
+  // 全量，后者块缓存全部预置命中、read 永不触发，自然退化为全量行为）。
+  const src: HexSource | null =
+    ctx !== undefined && ctxSize !== null ? createHexSource(ctxSize, ctx.head, ctx.read) : null;
+  /** 总字节数：全量模式 = buffer.length；窗口模式 = ctx.size（行数/状态行/clamp 的事实来源） */
+  const totalSize = src !== null ? src.size : buffer.length;
   const root = document.createElement('div');
   root.className = 'vv-hex';
   const status = document.createElement('div');
   status.className = 'vv-hex-status';
-  status.textContent = formatSize(buffer.length);
+  status.textContent = formatSize(totalSize);
   const body = document.createElement('div');
   body.className = 'vv-hex-body';
   const dump = document.createElement('div');
@@ -206,16 +229,38 @@ export function renderHex(
   let inspectorRows: InspectorRow[] = [];
 
   // ---- 虚拟滚动 dump：总行数 = ceil(大小/16)，可视行即时格式化 ----
-  const rowCount = Math.ceil(buffer.length / HEX_ROW_BYTES);
+  const rowCount = Math.ceil(totalSize / HEX_ROW_BYTES);
   const scroller: VirtualScrollerHandle = virtualScroller(
     dump,
     rowCount,
     HEX_LINE_HEIGHT,
     (first, last, viewport) => {
       const start = first * HEX_ROW_BYTES;
-      const end = Math.min(buffer.length, (last + 1) * HEX_ROW_BYTES);
+      const end = Math.min(totalSize, (last + 1) * HEX_ROW_BYTES);
       const frag = document.createDocumentFragment();
       if (start < end) {
+        // 窗口取数（Task 5）：全量模式 buffer 直取（现状）；窗口模式经 src 块缓存——
+        // 未就绪返回 null，走「占位 + ensure + 重渲」路径
+        const slice = src !== null ? src.slice(start, end) : buffer.subarray(start, end);
+        if (slice === null) {
+          // 窗口块未就绪（io-streaming Task 5）：占位行保行高（单个空格在
+          // white-space:pre 下撑起 18px 行高，行格式与真实行同构仅无文本），
+          // ensure 到位后 refresh 重渲当前窗口。读失败自兜底（评审指令①口径）：
+          // 占位保留 + 工具条状态位提示，不落错误卡片、不影响其余窗口滚动。
+          for (let r = first; r <= last; r++) {
+            const el = document.createElement('div');
+            el.className = 'vv-hex-row';
+            el.textContent = ' ';
+            frag.append(el);
+          }
+          viewport.replaceChildren(frag);
+          void src!.ensure(start, end).then(() => {
+            if (root.isConnected) scroller.refresh(true); // 就绪后重渲当前窗口
+          }).catch(() => {
+            if (root.isConnected) toolbarStatus.textContent = '窗口读取失败';
+          });
+          return;
+        }
         // 装饰行判定 O(1)：命中行 Set ∪ 光标行 ∪ flash 行，窗口含任一装饰才走
         // span 切分，否则整串（与原版逐字节一致，零开销）
         const cursorRow = cursor === null ? -1 : Math.floor(cursor / HEX_ROW_BYTES);
@@ -227,7 +272,6 @@ export function renderHex(
             break;
           }
         }
-        const slice = buffer.subarray(start, end);
         if (!windowHasDecor) {
           for (const row of renderHexBytes(slice, start)) {
             const el = document.createElement('div');
@@ -307,13 +351,13 @@ export function renderHex(
   function gotoOffset(): void {
     // 空文件分支置于非法输入清态之前（终审 Minor 4）：空文件任何输入都不动作，
     // 不存在「合法输入早退绕过清态致旧文案残留」的路径分歧
-    if (buffer.length === 0) return; // 空文件不动作（spec §2.1）
+    if (totalSize === 0) return; // 空文件不动作（spec §2.1）
     const parsed = parseGotoInput(gotoInput.value);
     if (parsed === null) {
       toolbarStatus.textContent = ''; // 非法输入清空过期状态位（如「已跳至文件尾」残留）
       return;
     }
-    const clamped = Math.min(parsed, buffer.length - 1); // 超界 clamp 到最后一个字节
+    const clamped = Math.min(parsed, totalSize - 1); // 超界 clamp 到最后一个字节
     toolbarStatus.textContent = clamped < parsed ? '已跳至文件尾' : '';
     const row = Math.floor(clamped / HEX_ROW_BYTES);
     // scroller 无居中 API：目标行滚至视口中部（jsdom 等无布局环境 clientHeight=0
@@ -383,28 +427,13 @@ export function renderHex(
     renderSearchStatus();
   }
 
-  function startSearch(): void {
-    const parsed = parseSearchInput(searchInput.value);
-    if (parsed === null || buffer.length === 0) return; // 空输入/空文件不动作
-    if (parsed.kind === 'invalid') {
-      searchInput.setAttribute('aria-invalid', 'true');
-      searchStatus.textContent = 'hex 位数须为偶数';
-      return;
-    }
-    searchInput.removeAttribute('aria-invalid');
-    // 新搜索自动取消旧任务：seq 失效兜底回调；client.search 覆盖处理器（旧 id
-    // 消息丢弃），worker 收到新请求后亦因搜索 id 失效在块边界停扫
-    const seq = ++searchSeq;
-    hitOffsets = [];
-    hitIndex = -1;
-    hitRows.clear();
-    hitNeedleLen = parsed.bytes.length;
-    hitTruncated = false;
-    lastSearchedInput = searchInput.value;
-    progressScanned = 0;
-    progressTotal = buffer.length;
-    setSearchBusy(true);
-    renderSearchStatus();
+  /** 搜索执行（数据底座就绪后）：worker 分块扫描 + 兜底主线程 scanAll。Task 5 从
+   * startSearch 拆出——仅把扫描数据源参数化，令牌/回调逻辑原样（legacy 路径时序不变）。 */
+  function runSearch(
+    parsed: NonNullable<Exclude<ParsedSearchInput, { kind: 'invalid' }>>,
+    scanBytes: Uint8Array,
+    seq: number
+  ): void {
     const caseInsensitive = parsed.kind === 'text' && !caseToggle.checked;
     const onProgress = (p: SearchProgressInfo): void => {
       if (seq !== searchSeq) return;
@@ -430,10 +459,10 @@ export function renderHex(
     void ensureSearchClient().then((client) => {
       if (seq !== searchSeq) return; // 建连期间已被新搜索/取消取代
       if (client) {
-        client.search(parsed.bytes, { data: buffer, caseInsensitive, onProgress, onDone });
+        client.search(parsed.bytes, { data: scanBytes, caseInsensitive, onProgress, onDone });
         return;
       }
-      void scanAll(buffer, parsed.bytes, {
+      void scanAll(scanBytes, parsed.bytes, {
         fold: caseInsensitive,
         shouldContinue: () => seq === searchSeq,
         onChunk: (info) => {
@@ -443,6 +472,50 @@ export function renderHex(
         if (seq !== searchSeq || res.aborted) return;
         onDone({ truncated: res.truncated, offsets: res.offsets });
       });
+    });
+  }
+
+  function startSearch(): void {
+    const parsed = parseSearchInput(searchInput.value);
+    if (parsed === null || totalSize === 0) return; // 空输入/空文件不动作
+    if (parsed.kind === 'invalid') {
+      searchInput.setAttribute('aria-invalid', 'true');
+      searchStatus.textContent = 'hex 位数须为偶数';
+      return;
+    }
+    searchInput.removeAttribute('aria-invalid');
+    // 新搜索自动取消旧任务：seq 失效兜底回调；client.search 覆盖处理器（旧 id
+    // 消息丢弃），worker 收到新请求后亦因搜索 id 失效在块边界停扫
+    const seq = ++searchSeq;
+    hitOffsets = [];
+    hitIndex = -1;
+    hitRows.clear();
+    hitNeedleLen = parsed.bytes.length;
+    hitTruncated = false;
+    lastSearchedInput = searchInput.value;
+    progressScanned = 0;
+    progressTotal = totalSize;
+    setSearchBusy(true);
+    renderSearchStatus();
+    if (src === null) {
+      runSearch(parsed, buffer, seq); // 全量模式：buffer 即扫描底座（Task 2 原路径）
+      return;
+    }
+    // 窗口模式临时处理（Task 6 接入分块扫描前的过渡）：扫描需要全量字节，经
+    // ctx.read 一次拉全（head 已覆盖全文件时直用 buffer，零读）。读失败自兜底
+    // （评审指令①口径）：状态位提示 + 复位忙碌，不落错误卡片。命中行渲染仍走
+    // 「slice null → ensure + 重渲」（行未就绪时占位，到位后高亮重绘）。
+    void (async (): Promise<Uint8Array | null> => {
+      if (buffer.length >= src.size) return buffer; // head 已是全量（≤1MB/非 rangeCapable）
+      return ctx!.read({ start: 0, end: Number.MAX_SAFE_INTEGER });
+    })().then((base) => {
+      if (seq !== searchSeq) return; // 拉取期间已被新搜索/取消取代
+      if (base === null) {
+        setSearchBusy(false);
+        searchStatus.textContent = '搜索数据读取失败';
+        return;
+      }
+      runSearch(parsed, base, seq);
     });
   }
 
@@ -490,7 +563,25 @@ export function renderHex(
   // getInspector 快照写 metaStore（引擎指示器 watchEngine 同款先例），MetaPanel
   // 字节序 select 写 inspectorBus、ViewerPane 探测 setLittle 透传 ----
   function refreshInspectorRows(): void {
-    if (cursor !== null) inspectorRows = decodeAt(buffer, cursor, little);
+    if (cursor === null) return;
+    if (src === null) {
+      inspectorRows = decodeAt(buffer, cursor, little); // 全量模式：现状直解
+      return;
+    }
+    // 窗口模式（Task 5）：取 cursor 起 ≤16 字节窗口解码——窗口字节与全量模式
+    // decodeAt(buffer, cursor) 各行 available/值逐行一致（截断窗口语义同构）。
+    // 未就绪先清快照，ensure 到位后重算；读失败静默留空（自兜底，检查器灰显
+    // 不阻塞交互），不落错误卡片。
+    const winEnd = Math.min(src.size, cursor + INSPECTOR_WINDOW_BYTES);
+    const win = src.slice(cursor, winEnd);
+    if (win === null) {
+      inspectorRows = [];
+      void src.ensure(cursor, winEnd).then(() => {
+        if (root.isConnected && cursor !== null) refreshInspectorRows();
+      }).catch(() => {});
+      return;
+    }
+    inspectorRows = decodeAt(win, 0, little);
   }
   function setCursor(offset: number): void {
     cursor = offset;
@@ -510,7 +601,7 @@ export function renderHex(
     if (rect.width <= 0 || text.length < 10) return;
     const charW = rect.width / text.length;
     const rowStart = parseInt(text.slice(0, 8), 16);
-    const rowLen = Math.min(HEX_ROW_BYTES, buffer.length - rowStart);
+    const rowLen = Math.min(HEX_ROW_BYTES, totalSize - rowStart);
     const col = Math.floor((e.clientX - rect.left) / charW);
     setCursor(rowStart + byteIndexAtColumn(col, rowLen));
   });
@@ -519,7 +610,7 @@ export function renderHex(
     if (cursor === null) return; // 未定位光标：方向键交还容器默认滚动
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     const next = cursor + (e.key === 'ArrowLeft' ? -1 : 1);
-    setCursor(Math.min(buffer.length - 1, Math.max(0, next))); // 首尾字节 clamp
+    setCursor(Math.min(totalSize - 1, Math.max(0, next))); // 首尾字节 clamp
     e.preventDefault(); // 光标移动取代容器滚动
   });
 
@@ -527,16 +618,28 @@ export function renderHex(
   let worker: Worker | null = null;
   const structReady = (async (): Promise<void> => {
     try {
-      // head 供 magic 识别；tail（EOCD 尾窗，≤64KB+22）供 ZIP 分支扫描——本地来源
-      // buffer 全量在手，同步 slice 即可，无 IO 改动。两段 slice 各自独立可 transfer；
-      // 交给 worker 的副本会被 transfer 脱离原 buffer，兜底路径重新 slice（同旧版
-      // head 被转移后兜底失效的坑，这里一并规避）。
-      const tailLen = Math.min(STRUCT_TAIL_BYTES, buffer.length);
+      // head 供 magic 识别；tail（EOCD 尾窗，≤64KB+22）供 ZIP 分支扫描。全量模式
+      // buffer 全量在手同步 slice；窗口模式 head 即 buffer（探测块），尾窗块先经
+      // src ensure 按需拉取（异步语义本就在 structReady promise 内，读失败走下方
+      // catch 自兜底「结构解析失败」）。尾窗一律每次调用点取独立拷贝副本：交给
+      // worker 的副本会被 transfer 脱离原 ArrayBuffer，兜底路径重新拷贝仍可用
+      //（src 缓存块同样绝不能被 detach），窗口/全量两模式语义对齐。
+      const tailLen = Math.min(STRUCT_TAIL_BYTES, totalSize);
+      if (src !== null) await src.ensure(totalSize - tailLen, totalSize);
+      /** 独立尾窗副本：窗口模式经 src（slice 视图 → 拷贝），全量模式 buffer 直 slice */
+      const tailSlice = (): Uint8Array => {
+        if (src !== null) {
+          const t = src.slice(totalSize - tailLen, totalSize);
+          if (t === null) throw new Error('结构尾窗块不可得');
+          return t.slice();
+        }
+        return buffer.slice(buffer.length - tailLen);
+      };
       const fallbackParse = async (): Promise<ParseResult> => {
         const { parseStruct } = await import('./struct');
         return parseStruct(buffer.slice(0, STRUCT_HEAD_BYTES), {
-          tail: buffer.slice(buffer.length - tailLen),
-          totalSize: buffer.length
+          tail: tailSlice(),
+          totalSize
         });
       };
       let result: ParseResult;
@@ -549,7 +652,7 @@ export function renderHex(
         try {
           result = await client.parseStruct(
             buffer.slice(0, STRUCT_HEAD_BYTES),
-            { tail: buffer.slice(buffer.length - tailLen), totalSize: buffer.length }
+            { tail: tailSlice(), totalSize }
           );
         } catch {
           result = await fallbackParse(); // worker 出错/无响应：主线程同构兜底
@@ -561,7 +664,7 @@ export function renderHex(
       }
       if (!root.isConnected) return;
       if (result.root) {
-        status.textContent = `${formatSize(buffer.length)} · ${result.root.name}${result.truncated ? '（解析超时，结构不完整）' : ''}`;
+        status.textContent = `${formatSize(totalSize)} · ${result.root.name}${result.truncated ? '（解析超时，结构不完整）' : ''}`;
         const details = document.createElement('details');
         details.className = 'vv-hex-struct';
         const summary = document.createElement('summary');
@@ -569,10 +672,10 @@ export function renderHex(
         details.append(summary, nodeToDetails(result.root, false));
         body.append(details);
       } else {
-        status.textContent = `${formatSize(buffer.length)} · 未知二进制`;
+        status.textContent = `${formatSize(totalSize)} · 未知二进制`;
       }
     } catch {
-      status.textContent = `${formatSize(buffer.length)} · 结构解析失败`;
+      status.textContent = `${formatSize(totalSize)} · 结构解析失败`;
     }
   })();
 
@@ -605,7 +708,18 @@ export const hexRenderer: Renderer = {
   id: 'hex',
   label: '二进制',
   extensions: ['bin', 'exe', 'dll', 'so', 'dylib', 'elf', 'o', 'a', 'class', 'wasm', 'dat', 'img', 'iso', 'dmg'],
-  async render(buffer: Uint8Array, target: HTMLElement, _source: FileSource, _det: Detection): Promise<RenderedInstance> {
+  // streaming（io-streaming Task 5）：dispatch 只交付 head + StreamCtx（render 第 5
+  // 参），全量字节按需经 ctx.read 拉取（窗口模式），不再整文件预取
+  streaming: true,
+  async render(buffer: Uint8Array, target: HTMLElement, _source: FileSource, _det: Detection, ctx?: StreamCtx): Promise<RenderedInstance> {
+    // size 未知来源回退（spec §5）：一次全量读后走既有全量装配（=旧行为）。远端
+    // Range 端点由服务端钳制返回整文件、本地 slice 越界自然钳制。读失败在此 await
+    // 处 reject——dispatcher 已把 ctx.read 失败标为 DispatchReadError，直抛调用方
+    // 读取失败面（评审指令①口径：不落「错误卡片 + 8KB probe 重试」截断活面）。
+    if (ctx !== undefined && ctx.size === null) {
+      buffer = await ctx.read({ start: 0, end: Number.MAX_SAFE_INTEGER });
+      ctx = undefined;
+    }
     // Worker 构建：vite 把 new URL(worker 模块) 打包为独立 chunk；失败（如环境不支持）降级主线程解析
     const instance = renderHex(buffer, target, {
       createWorker: () => {
@@ -615,7 +729,7 @@ export const hexRenderer: Renderer = {
           return null;
         }
       }
-    });
+    }, ctx);
     await instance.structReady;
     // getInspector/setLittle 供 ViewerPane 属性面板上行/字节序下行（Task 3，鸭子
     // 探测同 code 的 getMeta 先例）；结构化扩展 RenderedInstance 不动 core。

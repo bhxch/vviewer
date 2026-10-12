@@ -629,5 +629,74 @@ describe('dispatch 读下沉（io-streaming §3：streaming 选路 + StreamCtx �
       ).rejects.toThrow('gone');
       expect(rendered).toBe(false);
     });
+
+    // Task 5 评审指令①：渲染期 ctx.read 失败与 Task 4 同口径——dispatcher 侧标记
+    // DispatchReadError 向上直抛，不落「错误卡片 + 8KB probe 重试」的截断活面
+    it('⑩ 渲染期 ctx.read 失败 → dispatch reject，target 无错误卡片（无重试通道）', async () => {
+      const reg = createRegistry();
+      const BIG = Uint8Array.from({ length: 2_000_000 }, (_, i) => i & 0xff);
+      const read = async (range?: { start: number; end: number }): Promise<Uint8Array<ArrayBuffer>> => {
+        if (range && !(range.start === 0 && range.end === 8191)) throw new Error('range io gone');
+        return range ? BIG.slice(0, 8192) : BIG;
+      };
+      let rendered = false;
+      reg.install(mk('st', ['stx'], {
+        streaming: true,
+        render: async (_b, _t, _s, _det, ctx) => {
+          await ctx!.read({ start: 65536, end: 65536 }); // 渲染期按需读失败
+          rendered = true;
+          return { destroy() {} };
+        }
+      }));
+      const target = document.createElement('div');
+      document.body.append(target);
+      await expect(
+        createDispatcher(reg).dispatch(srcWith('a.stx', fakeStore(true), BIG.length), null, target, { read })
+      ).rejects.toThrow('range io gone');
+      expect(rendered).toBe(false); // await 的按需读失败即失败，渲染未完成
+      expect(target.querySelector('.vv-error-card')).toBeNull(); // 不落渲染错误卡片
+      target.remove();
+    });
+
+    // Task 5 评审指令②：streaming 渲染器失败卡片的「重试」须透传 ctx 重跑 render
+    //（字节经 ctx.read 重读），不得以裸 probe、无第 5 参重跑（必次次失败）
+    it('⑪ streaming 渲染器重试收到 ctx（第 5 参）而非裸 probe，字节经 ctx.read 重读可用', async () => {
+      const reg = createRegistry();
+      const BIG = Uint8Array.from({ length: 2_000_000 }, (_, i) => i & 0xff);
+      const calls: Array<{ start: number; end: number } | undefined> = [];
+      const read = readOf(BIG, calls);
+      let attempts = 0;
+      let retryBufLen = -1;
+      let retryCtx: StreamCtx | undefined;
+      reg.install(mk('flaky', ['stx'], {
+        streaming: true,
+        render: async (buffer, t, _s, _det, ctx) => {
+          attempts++;
+          if (attempts === 1) throw new Error('render boom');
+          retryBufLen = buffer.length;
+          retryCtx = ctx;
+          t.replaceChildren('retried'); // 模拟真实渲染器挂载内容（替换错误卡片）
+          return { destroy() {} };
+        }
+      }));
+      const target = document.createElement('div');
+      document.body.append(target);
+      const { instance: cardInstance } = await createDispatcher(reg).dispatch(
+        srcWith('a.stx', fakeStore(true), BIG.length), null, target, { read });
+      const buttons = [...target.querySelectorAll<HTMLButtonElement>('button.vv-error-action')];
+      expect(buttons[0]!.textContent).toBe('重试');
+      buttons[0]!.click();
+      await new Promise<void>((resolve) => { setTimeout(resolve, 0); }); // 重试链路跨微任务，宏任务边界冲刷
+      expect(attempts).toBe(2);
+      expect(retryBufLen).toBe(8192); // buffer = head 探测块（streaming 交付形态不变）
+      expect(retryCtx).toBeDefined(); // 收到 ctx 而非裸 probe——重试以 ctx.read 重读取数
+      expect(retryCtx!.size).toBe(BIG.length);
+      const chunk = await retryCtx!.read({ start: 0, end: 3 });
+      expect([...chunk]).toEqual([0, 1, 2, 3]); // 重试后的 ctx.read 仍可用（经同一 read 闭包）
+      expect(target.querySelector('.vv-error-card')).toBeNull(); // 重试成功，卡片被实例替换
+      expect(target.textContent).toContain('retried');
+      cardInstance.destroy();
+      target.remove();
+    });
   });
 });

@@ -110,7 +110,10 @@ function openAsAction(
  * 「以纯文本/以 hex 打开」= rendererOverride 重入 dispatch（取代原「降级查看」直调
  * hex.render——label 更明确且与手选打开方式同语义）。open-as 按 looksTextual 探测排序
  * （判文本 → 纯文本在前，否则 hex 在前）；当前 renderer 即 hex 时不重复给 hex。
- * onRendered 接收重试/open-as 成功产出的实例，由调用方（dispatch catch）级联托管。
+ * streaming 渲染器重试须透传 ctx（io-streaming Task 5 评审指令②）：以原 base +
+ * ctx 重跑 render，字节经 ctx.read 重读（opts.read 链）——缺省第 5 参会以裸 probe
+ * 重跑，streaming 渲染器必次次失败。onRendered 接收重试/open-as 成功产出的实例，
+ * 由调用方（dispatch catch）级联托管。
  */
 function buildRenderErrorActions(
   registry: Registry,
@@ -120,16 +123,17 @@ function buildRenderErrorActions(
   det: Detection,
   target: HTMLElement,
   onRendered: (instance: RenderedInstance) => void,
-  redisplay: Redisplay
+  redisplay: Redisplay,
+  ctx?: StreamCtx
 ): ErrorCardAction[] {
   const retry = (): void => {
-    renderer.render(buffer, target, source, det)
+    renderer.render(buffer, target, source, det, ctx)
       .then(onRendered)
       .catch((err: unknown) => {
         // 重试仍失败：保留错误详情，按钮随之重建（可继续重试/以其他方式打开）
         const message = err instanceof Error ? err.message : String(err);
         showErrorCard(target, message, source, {
-          actions: buildRenderErrorActions(registry, renderer, buffer, source, det, target, onRendered, redisplay)
+          actions: buildRenderErrorActions(registry, renderer, buffer, source, det, target, onRendered, redisplay, ctx)
         });
       });
   };
@@ -266,6 +270,9 @@ export function createDispatcher(registry: Registry): Dispatcher {
     const redisplay: Redisplay = (o) =>
       headOnly ? dispatch(source, null, target, { ...o, read }) : dispatch(source, buffer, target, o);
     let renderer: Renderer | undefined;
+    // 渲染期 ctx（streaming 分支构造）：声明在 try 外——catch 的重试动作需要透传
+    //（评审指令②），try 作用域变量 catch 不可见
+    let renderCtx: StreamCtx | undefined;
     // 延迟全量读统一包装（headOnly 不变量保证此处 read 已定义）：失败标 DispatchReadError，
     // 由下方 catch 识别后向上 reject，不落渲染错误卡片（见 DispatchReadError doc）
     const readFull = (): Promise<Uint8Array<ArrayBuffer>> =>
@@ -314,10 +321,22 @@ export function createDispatcher(registry: Registry): Dispatcher {
       if (!capable && full === null) full = await readFull();
       // buffer 形参 = full ?? probe：capable 且 size 未知/超限 → head 探测块；否则全量
       const base = full ?? probe;
-      const ctx: StreamCtx = capable
-        ? { size: source.size ?? null, head: probe, read: (r) => read!(r) }
+      renderCtx = capable
+        ? {
+          size: source.size ?? null,
+          head: probe,
+          // 渲染期按需读失败与 Task 4 DispatchReadError 同口径（io-streaming Task 5
+          // 评审指令①）：失败标为读错误向上直抛调用方读取失败面（dispatch catch 识别
+          // 后 rethrow，无重试通道）——渲染器 await 它的路径（如 hex size 回退全量读）
+          // 不会落「错误卡片 + 8KB probe 重试」的截断活面；渲染器自行 catch 的按需读
+          //（如 hex 窗口 ensure）收到的也是已标记读失败，走自兜底而非错误重试
+          read: (r) =>
+            read!(r).catch((err: unknown): never => {
+              throw new DispatchReadError(err);
+            })
+        }
         : { size: base.length, head: base, read: async (r) => base.subarray(r.start, r.end + 1) };
-      const instance = await renderer.render(base, target, source, det, ctx);
+      const instance = await renderer.render(base, target, source, det, renderCtx);
       return { instance, rendererId: renderer.id, det };
     } catch (err) {
       // 读失败 ≠ 渲染失败（T3 评审）：重跑 render 无意义且 catch 手头只有 8KB head
@@ -336,7 +355,7 @@ export function createDispatcher(registry: Registry): Dispatcher {
       // buffer；headOnly 时退化为 head 探测块——渲染在全量拉取前已失败，以 head 判
       // looksTextual 足够近似且零额外读（可接受的退化，非旧行为回归面）
       const actions = renderer
-        ? { actions: buildRenderErrorActions(registry, renderer, full ?? probe, source, det, target, takeOver, redisplay) }
+        ? { actions: buildRenderErrorActions(registry, renderer, full ?? probe, source, det, target, takeOver, redisplay, renderCtx) }
         : { actions: buildRoutingErrorActions(registry, takeOver, redisplay) };
       const card = showErrorCard(target, message, source, actions);
       return {

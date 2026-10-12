@@ -23,7 +23,11 @@ export interface ByteRange { start: number; end: number; } // end 含
 export interface StreamCtx {
   /** 文件总字节数；null = store 无法预知（渲染器应走全量回退路径） */
   readonly size: number | null;
-  /** 已就绪的头部字节（探测块，长度 ≥ HEAD_SIZE；非 rangeCapable 来源=全量） */
+  /**
+   * 已就绪的头部字节：探测策略下为文件前 min(文件长度, HEAD_SIZE) 字节（短文件为
+   * 全量，可短于 HEAD_SIZE）；size ≤1MB 直读全量策略与非 rangeCapable 来源下为
+   * 全量字节（可远超 HEAD_SIZE）。
+   */
   readonly head: Uint8Array<ArrayBuffer>;
   /** 按字节区间读取（end 含，同 ByteRange 语义）；store 无 range 能力时为
    * 全量 buffer 的切片视图（同步 resolve，零拷贝 subarray）。 */
