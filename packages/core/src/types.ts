@@ -15,6 +15,21 @@ export interface TreeNode {
 
 export interface ByteRange { start: number; end: number; } // end 含
 
+/**
+ * 流式渲染上下文（spec 2026-10-12-io-streaming §2.1）：streaming 渲染器按需取字节
+ * 的唯一通道，由 dispatcher 构造、经 render 第 5 参注入。纯增量类型——非 streaming
+ * 渲染器不接触该参数，缺省即旧行为（全量 buffer 交付），既有实现零改动。
+ */
+export interface StreamCtx {
+  /** 文件总字节数；null = store 无法预知（渲染器应走全量回退路径） */
+  readonly size: number | null;
+  /** 已就绪的头部字节（探测块，长度 ≥ HEAD_SIZE；非 rangeCapable 来源=全量） */
+  readonly head: Uint8Array<ArrayBuffer>;
+  /** 按字节区间读取（end 含，同 ByteRange 语义）；store 无 range 能力时为
+   * 全量 buffer 的切片视图（同步 resolve，零拷贝 subarray）。 */
+  read(range: ByteRange): Promise<Uint8Array<ArrayBuffer>>;
+}
+
 export interface TreeStore {
   readonly id: string;    // 实例唯一 id，会话恢复用
   displayName(): string;
@@ -24,6 +39,13 @@ export interface TreeStore {
   // 泛型 TypedArray：默认 Uint8Array<ArrayBufferLike> 含 SharedArrayBuffer，不满足
   // Blob 构造的 ArrayBufferView<ArrayBuffer> 约束）。
   read(path: string, opts?: { range?: ByteRange }): Promise<Uint8Array<ArrayBuffer>>;
+  /**
+   * 能力标记（spec 2026-10-12-io-streaming §2.3）：read 支持 opts.range（bytes
+   * 区间语义，end 含）；缺省 false = 仅全量。dispatcher 据此决定 streaming 渲染器
+   * 的 StreamCtx 形态（有 range 能力 → 按需读取；无 → 全量构造 ctx）。纯增量
+   * 可选标记，既有 store 实现不声明即保持旧行为。
+   */
+  readonly rangeCapable?: boolean;
   /**
    * 可选：释放 store 持有的底层资源（libarchive worker/wasm 堆等）。
    * 由引用计数接线调用（openFlow：最后一个持有该实例的 tab 关闭时）；
@@ -58,6 +80,13 @@ export interface FileSource {
   path: string;           // store 内路径
   name: string;           // 文件显示名（含扩展名）
   store: TreeStore;
+  /**
+   * 文件总字节数（spec 2026-10-12-io-streaming §3：从 TreeNode.size / File.size /
+   * remote Content-Length 透传）：UI/渲染器免二次探测即可显示大小或做容量决策；
+   * null/缺省 = store 无法预知（渲染器走全量回退）。纯增量可选字段，既有构造点
+   * 零改动。
+   */
+  size?: number | null;
 }
 
 export interface RenderedInstance {
@@ -97,5 +126,16 @@ export interface Renderer {
   extensions: string[];   // 该 renderer 拥有的扩展名（小写无点）
   /** 可选：基于文件头部做签名纠偏，返回应改派的 rendererId */
   sniff?(head: Uint8Array, det: Detection): Promise<RendererId | null> | RendererId | null;
-  render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection): Promise<RenderedInstance>;
+  /**
+   * 流式渲染器标记（spec 2026-10-12-io-streaming §2.2）：置位后 dispatcher 只交付
+   * head + StreamCtx（render 第 5 参），不交付全量 buffer。缺省 = 既有全量语义，
+   * 第 5 参被忽略——未迁移渲染器零改动。
+   */
+  streaming?: boolean;
+  /**
+   * 第 5 参 ctx（spec 2026-10-12-io-streaming §2.2）为流式读上下文，向后兼容：
+   * streaming 渲染器的 buffer 形参收到的是 head（探测块），全量字节一律经
+   * ctx.read；非 streaming 渲染器照常收到全量 buffer，忽略该参即旧行为。
+   */
+  render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection, ctx?: StreamCtx): Promise<RenderedInstance>;
 }
