@@ -1,4 +1,4 @@
-import type { Detection, FileSource, RenderedInstance, Renderer, RendererId } from '../types';
+import type { ByteRange, Detection, FileSource, RenderedInstance, Renderer, RendererId, StreamCtx } from '../types';
 import type { Registry } from '../registry/registry';
 import { detect } from '../detect';
 import { looksTextual, shebangLangOf } from '../detect/magic';
@@ -12,18 +12,25 @@ import {
 export interface Dispatcher {
   dispatch(
     source: FileSource,
-    buffer: Uint8Array,
+    buffer: Uint8Array<ArrayBuffer> | null,
     target: HTMLElement,
     opts?: DispatchOptions
   ): Promise<{ instance: RenderedInstance; rendererId: RendererId; det: Detection }>;
 }
 
-/** dispatch 可选项（C 项：手选打开方式） */
+/** dispatch 级流式读闭包（io-streaming §3）：range 缺省 = 全量读；range 的 end 含
+ * （同 ByteRange 语义）。由调用方以 store.read 绑定（Task 4 ViewerPane 接线）。 */
+export type DispatchRead = (range?: ByteRange) => Promise<Uint8Array<ArrayBuffer>>;
+
+/** dispatch 可选项（C 项：手选打开方式；io-streaming §3：流式读） */
 export interface DispatchOptions {
   /** 渲染器 override：命中 registry.byId 即用——用户显式选择 ≠ 内容识别，
    * 跳过探测链（resolveInitialRenderer）与 BUG-13 magic 预检，且不置
    * reclassifiedFrom（改派语义只属于自动识别）；id 未命中静默走正常链。 */
   rendererOverride?: RendererId;
+  /** 流式读闭包：buffer === null 时必填（全量字节不预取，head 探测与按需读都经它）；
+   * buffer 直传（兼容路径）时省略，dispatch 不触发任何 store 读。 */
+  read?: DispatchRead;
 }
 
 const HEAD_SIZE = 8192;
@@ -213,16 +220,37 @@ export function createDispatcher(registry: Registry): Dispatcher {
   setHexFallbackRenderer(registry.byId('hex') ?? null);
   const dispatch = async (
     source: FileSource,
-    buffer: Uint8Array,
+    buffer: Uint8Array<ArrayBuffer> | null,
     target: HTMLElement,
     opts?: DispatchOptions
   ): Promise<{ instance: RenderedInstance; rendererId: RendererId; det: Detection }> => {
-    const head = buffer.slice(0, HEAD_SIZE);
-    const det = detect({ name: source.name, head, full: buffer.length <= FULL_LIMIT ? buffer : undefined });
+    const read = opts?.read;
+    // 流式读下沉（io-streaming §3）：buffer === null = 全量字节不预取、按需经 read；
+    // 两者皆缺 = 调用方违约（内容不可得，错误卡片无从构造），直接拒绝。
+    // 读失败在此 try 块外的 probe/full 拉取处 reject（与旧 ViewerPane 先 store.read 的
+    // 失败面一致，由调用方既有的读取失败卡片承接），不进下方渲染错误卡片
+    if (buffer === null && read === undefined) throw new Error('dispatch 需要 buffer 或 opts.read');
+    // 读策略（io-streaming §3）：buffer 直传 = 兼容路径（full 即 buffer，零重复读）；
+    // buffer === null 且 size 已知且 ≤1MB → 直接全量（保 detect 的 full 编码精判，与旧
+    // 「full: buffer.length <= FULL_LIMIT」语义一致）；size 未知或超限 → 先 head 探测
+    let full: Uint8Array<ArrayBuffer> | null = buffer;
+    let probe: Uint8Array<ArrayBuffer>;
+    const headOnly = buffer === null;
+    if (buffer === null) {
+      const size = source.size ?? null;
+      if (size !== null && size <= FULL_LIMIT) full = await read!();
+      probe = full ?? (await read!({ start: 0, end: HEAD_SIZE - 1 }));
+    } else {
+      probe = buffer;
+    }
+    const head = probe.slice(0, HEAD_SIZE);
+    const det = detect({ name: source.name, head, full: full !== null && full.length <= FULL_LIMIT ? full : undefined });
     // C 项：override 先于 byExtension 拦截：命中即用；id 未命中静默走正常探测链
     const override = opts?.rendererOverride === undefined ? undefined : registry.byId(opts.rendererOverride);
-    // C 项：错误卡片 open-as 动作的重入闭包（同一 source/buffer/target 重派）
-    const redisplay: Redisplay = (o) => dispatch(source, buffer, target, o);
+    // C 项：错误卡片 open-as 动作的重入闭包（同一 source/buffer/target 重派）。
+    // read 透传：headOnly 时重入同样以 null+read 走流式读；兼容路径保持 buffer 直传不变
+    const redisplay: Redisplay = (o) =>
+      headOnly ? dispatch(source, null, target, { ...o, read }) : dispatch(source, buffer, target, o);
     let renderer: Renderer | undefined;
     try {
       if (override) {
@@ -251,7 +279,25 @@ export function createDispatcher(registry: Registry): Dispatcher {
         }
         if (redirected && renderer.sniff) await renderer.sniff(head, det); // 允许最终 renderer 补充 sniff 元数据，但不再改派
       }
-      const instance = await renderer.render(buffer, target, source, det);
+      if (!renderer.streaming) {
+        // 非 streaming 渲染器：全量 buffer 交付（旧行为，第 5 参不传）。兼容路径 full
+        // 即入参 buffer（零重复读）；headOnly 且 size 未知/超限时此处补一次全量 read
+        // （headOnly 不变量保证 read 已定义）
+        if (full === null) full = await read!();
+        const instance = await renderer.render(full, target, source, det);
+        return { instance, rendererId: renderer.id, det };
+      }
+      // streaming 渲染器（io-streaming §2.2）：只交付 head + StreamCtx（render 第 5 参），
+      // 不交付全量 buffer。store 无 range 能力（含兼容路径 read 缺省的 buffer 直传）→
+      // 先全量 read，ctx 退化为全量切片视图（零拷贝 subarray）
+      const capable = source.store.rangeCapable === true && read !== undefined;
+      if (!capable && full === null) full = await read!();
+      // buffer 形参 = full ?? probe：capable 且 size 未知/超限 → head 探测块；否则全量
+      const base = full ?? probe;
+      const ctx: StreamCtx = capable
+        ? { size: source.size ?? null, head: probe, read: (r) => read!(r) }
+        : { size: base.length, head: base, read: async (r) => base.subarray(r.start, r.end + 1) };
+      const instance = await renderer.render(base, target, source, det, ctx);
       return { instance, rendererId: renderer.id, det };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -263,8 +309,11 @@ export function createDispatcher(registry: Registry): Dispatcher {
         liveChild?.destroy(); // 同一插槽先释放上一个成功实例（重试/open-as 互斥替换语义）
         liveChild = instance;
       };
+      // open-as 排序与重试复用的字节：full ?? probe（旧 buffer 语义）。兼容路径即入参
+      // buffer；headOnly 时退化为 head 探测块——渲染在全量拉取前已失败，以 head 判
+      // looksTextual 足够近似且零额外读（可接受的退化，非旧行为回归面）
       const actions = renderer
-        ? { actions: buildRenderErrorActions(registry, renderer, buffer, source, det, target, takeOver, redisplay) }
+        ? { actions: buildRenderErrorActions(registry, renderer, full ?? probe, source, det, target, takeOver, redisplay) }
         : { actions: buildRoutingErrorActions(registry, takeOver, redisplay) };
       const card = showErrorCard(target, message, source, actions);
       return {

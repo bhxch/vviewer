@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createRegistry } from '../src/registry/registry';
 import { createDispatcher, signatureRouteOf } from '../src/dispatch/dispatcher';
-import type { Renderer } from '../src/types';
+import type { Renderer, StreamCtx, TreeStore } from '../src/types';
 
 const mk = (id: string, exts: string[], over: Partial<Renderer> = {}): Renderer => ({
   id, label: id, extensions: exts, render: async () => ({ destroy() {} }), ...over
@@ -422,5 +422,158 @@ describe('dispatch rendererOverride (C 项)', () => {
       source('real.png'), PNG, document.createElement('div'), { rendererOverride: 'ghost' },
     );
     expect(rendererId).toBe('image');
+  });
+});
+
+describe('dispatch 读下沉（io-streaming §3：streaming 选路 + StreamCtx 构造 + 兼容路径）', () => {
+  /** 构造 dispatch 级 read 闭包（区间语义 end 含；无 range = 全量），记录每次调用的 range */
+  function readOf(content: Uint8Array<ArrayBuffer>, calls: Array<{ start: number; end: number } | undefined>) {
+    return async (range?: { start: number; end: number }): Promise<Uint8Array<ArrayBuffer>> => {
+      calls.push(range);
+      return range ? content.slice(range.start, range.end + 1) : content;
+    };
+  }
+  /** 最小 TreeStore 替身：dispatch 不经 store.read（全量读已下沉为 opts.read 闭包），只消费 rangeCapable */
+  function fakeStore(rangeCapable?: boolean): TreeStore {
+    return {
+      id: 'fake',
+      displayName: () => 'fake',
+      listChildren: async () => [],
+      read: async () => new Uint8Array(0),
+      rangeCapable
+    };
+  }
+  function srcWith(
+    name: string,
+    store: TreeStore,
+    size?: number | null
+  ): Parameters<ReturnType<typeof createDispatcher>['dispatch']>[0] {
+    return { storeId: 's', storeLabel: 's', path: name, name, store, size };
+  }
+
+  it('① streaming + rangeCapable：render 收 8KB head 而非全量，第 5 参 ctx 带 size 与区间 read', async () => {
+    const reg = createRegistry();
+    const BIG = Uint8Array.from({ length: 2_000_000 }, (_, i) => i & 0xff); // > FULL_LIMIT(1MB)
+    const calls: Array<{ start: number; end: number } | undefined> = [];
+    const read = readOf(BIG, calls);
+    let seenBuf: Uint8Array | undefined;
+    let seenCtx: StreamCtx | undefined;
+    reg.install(mk('st', ['stx'], {
+      streaming: true,
+      render: async (buffer, _t, _s, _det, ctx) => { seenBuf = buffer; seenCtx = ctx; return { destroy() {} }; }
+    }));
+    const target = document.createElement('div');
+    const { rendererId } = await createDispatcher(reg).dispatch(
+      srcWith('a.stx', fakeStore(true), BIG.length), null, target, { read });
+    expect(rendererId).toBe('st');
+    // 仅一次 head 探测读（0..8191 区间），全量从未被拉取
+    expect(calls).toStrictEqual([{ start: 0, end: 8191 }]);
+    expect(seenBuf?.length).toBe(8192); // buffer 形参 = head 探测块，不是全量
+    expect(seenCtx?.size).toBe(BIG.length); // ctx.size = source.size
+    const chunk = await seenCtx!.read({ start: 10, end: 14 }); // 区间 read 经 read 闭包直达 store
+    expect([...chunk]).toEqual([...BIG.slice(10, 15)]);
+    expect(calls).toStrictEqual([{ start: 0, end: 8191 }, { start: 10, end: 14 }]);
+  });
+
+  it('② streaming + !rangeCapable：降级全量 read，ctx.head 为全量、size = 全量长、read 同步切片', async () => {
+    const reg = createRegistry();
+    const FULL = new TextEncoder().encode('hello world!'); // 12B；source.size 未知
+    const calls: Array<{ start: number; end: number } | undefined> = [];
+    const read = readOf(FULL, calls);
+    let seenBuf: Uint8Array | undefined;
+    let seenCtx: StreamCtx | undefined;
+    reg.install(mk('st', ['stx'], {
+      streaming: true,
+      render: async (buffer, _t, _s, _det, ctx) => { seenBuf = buffer; seenCtx = ctx; return { destroy() {} }; }
+    }));
+    const target = document.createElement('div');
+    await createDispatcher(reg).dispatch(srcWith('a.stx', fakeStore()), null, target, { read });
+    // 先 head 区间探测、再降级一次全量 read（无 range）
+    expect(calls).toStrictEqual([{ start: 0, end: 8191 }, undefined]);
+    expect(seenBuf).toEqual(FULL); // buffer 形参 = 全量
+    expect(seenCtx?.size).toBe(FULL.length);
+    expect(seenCtx?.head).toEqual(FULL);
+    const chunk = await seenCtx!.read({ start: 2, end: 5 });
+    expect([...chunk]).toEqual([...FULL.slice(2, 6)]);
+    expect(chunk.buffer).toBe(FULL.buffer); // 零拷贝：全量底座的切片视图
+  });
+
+  it('③ 非 streaming + opts.read：render 收全量（read() 全量被拉取一次）、无 ctx', async () => {
+    const reg = createRegistry();
+    const FULL = new TextEncoder().encode('hello world!');
+    const calls: Array<{ start: number; end: number } | undefined> = [];
+    const read = readOf(FULL, calls);
+    let seenBuf: Uint8Array | undefined;
+    let seenCtx: StreamCtx | undefined;
+    reg.install(mk('plain', ['pln'], {
+      render: async (buffer, _t, _s, _det, ctx) => { seenBuf = buffer; seenCtx = ctx; return { destroy() {} }; }
+    }));
+    const target = document.createElement('div');
+    const { rendererId } = await createDispatcher(reg).dispatch(
+      srcWith('a.pln', fakeStore(true), FULL.length), null, target, { read });
+    expect(rendererId).toBe('plain');
+    expect(calls).toStrictEqual([undefined]); // size ≤ 1MB → 一次全量 read，零重复
+    expect(seenBuf).toEqual(FULL);
+    expect(seenCtx).toBeUndefined(); // 非 streaming 渲染器不接触第 5 参
+  });
+
+  it('④ 兼容路径：buffer 直传、无 read——行为与旧逐字节等价（render 收全量、size 不参与）', async () => {
+    const reg = createRegistry();
+    const text = 'v'.repeat(8999) + '!';
+    const full = new TextEncoder().encode(text); // 9000B > HEAD_SIZE：head 切片与全量可区分
+    let seenBuf: Uint8Array | undefined;
+    reg.install(mk('plain', ['pln'], {
+      render: async (buffer) => { seenBuf = buffer; return { destroy() {} }; }
+    }));
+    const target = document.createElement('div');
+    // store.read 一旦被触达即抛错 + 故意矛盾的 size=7：兼容路径以 buffer 为准，不得触碰 store
+    const store: TreeStore = {
+      id: 'strict', displayName: () => 'strict', listChildren: async () => [],
+      read: async () => { throw new Error('compat 路径不得触发 store.read'); }
+    };
+    const { rendererId, det } = await createDispatcher(reg).dispatch(
+      srcWith('a.pln', store, 7), full, target);
+    expect(rendererId).toBe('plain');
+    expect(seenBuf).toEqual(full); // 全量字节逐字节等价（非 head 切片）
+    expect(seenBuf?.length).toBe(9000);
+    expect(det.encoding).toBeDefined(); // ≤1MB full 编码精判语义保持
+  });
+
+  it('⑤ buffer === null 且无 opts.read → 拒绝，错误信息含 dispatch', async () => {
+    const reg = createRegistry();
+    reg.install(mk('plain', ['pln']));
+    const target = document.createElement('div');
+    await expect(
+      createDispatcher(reg).dispatch(srcWith('a.pln', fakeStore(true)), null, target)
+    ).rejects.toThrow(/dispatch/);
+  });
+
+  it('⑥ streaming 渲染器失败卡片 open-as 重入：read 透传，重入后仍走 streaming 路径', async () => {
+    const reg = createRegistry();
+    const BIG = Uint8Array.from({ length: 2_000_000 }, (_, i) => i & 0xff);
+    const calls: Array<{ start: number; end: number } | undefined> = [];
+    const read = readOf(BIG, calls);
+    reg.install(mk('boom', ['stx'], { streaming: true, render: async () => { throw new Error('boom'); } }));
+    let hexBufLen = -1;
+    let hexCtx: StreamCtx | undefined;
+    reg.install(mk('hex', ['bin'], {
+      streaming: true,
+      render: async (buffer, _t, _s, _det, ctx) => { hexBufLen = buffer.length; hexCtx = ctx; return { destroy() {} }; }
+    }));
+    const target = document.createElement('div');
+    document.body.append(target);
+    const { instance: cardInstance } = await createDispatcher(reg).dispatch(
+      srcWith('a.stx', fakeStore(true), BIG.length), null, target, { read });
+    const buttons = [...target.querySelectorAll<HTMLButtonElement>('button.vv-error-action')];
+    // 头部 0x00… 非文本：open-as 排序 hex 在前（head-only 时以 head 探测替代全量 looksTextual）
+    expect(buttons.map((b) => b.textContent)).toEqual(['重试', '以 hex 打开']);
+    buttons[1]!.click(); // open-as 重入：redisplay 必须透传 read，否则重入 dispatch 直接拒绝
+    await new Promise<void>((resolve) => { setTimeout(resolve, 0); }); // 重入链路跨多个微任务，宏任务边界冲刷
+    expect(hexBufLen).toBe(8192); // 重入后仍 streaming：hex 收 head 而非全量
+    expect(hexCtx?.size).toBe(BIG.length);
+    const chunk = await hexCtx!.read({ start: 0, end: 3 });
+    expect([...chunk]).toEqual([0, 1, 2, 3]); // 重入构造的 ctx.read 仍经同一 read 闭包可用
+    cardInstance.destroy();
+    target.remove();
   });
 });
