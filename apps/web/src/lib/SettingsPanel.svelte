@@ -3,13 +3,12 @@
   // TopBar 以 ⚙ 挂载（Ctrl+comma 切换）：排除规则编辑（条目删除/手动添加/预设
   // 一键加入）、autoRefresh 开关（关闭后目录树 SSE 自动同步停用，手动刷新 ↻
   // 不受影响）、界面主题管理（spec B §2.3：亮暗双槽 select + JSON/VSIX 导入 +
-  // 已导入列表删除；槽切换/删除归位经 saveSettings 持久化后由本面板直接调
-  // applyAppearance 即时重注入——TopBar 的 onSettingsChanged 订阅只刷新响应式
-  // 副本，不重触发注入）。修改即时经 saveSettings 持久化，AppShell 经
+  // 已导入列表删除；槽切换/删除归位只经 saveSettings 持久化，注入由 TopBar 的
+  // onSettingsChanged 订阅 diff 触发——订阅即注入通道，本面板不直调注入，
+  // spec 2026-10-12 §2.4）。修改即时经 saveSettings 持久化，AppShell 经
   // onSettingsChanged 订阅刷新响应式副本（FileTree 随排除规则重建）。Esc / ✕ 关闭。
   import { loadSettings, saveSettings } from './stores/settings';
   import { deleteTheme, listThemes, type ImportedTheme } from './stores/session';
-  import { applyAppearance, effectiveMode } from './theme';
   import { importThemeFiles } from './vsixImport';
 
   let { onclose }: { onclose(): void } = $props();
@@ -125,26 +124,13 @@
     persist();
   }
 
-  /** 槽切换/删除归位后即时重注入（spec B §2.3）：读最新持久值按当前亮暗槽
-   * applyAppearance（与 TopBar applyCurrentAppearance 同参、幂等——面板先
-   * persist() 再调，注入的就是刚保存的槽值）。 */
-  function reapplyAppearance(): void {
-    const fresh = loadSettings();
-    const mode = effectiveMode(fresh.themeMode);
-    void applyAppearance(
-      mode === 'dark' ? fresh.appearanceDark : fresh.appearanceLight,
-      mode,
-      mode === 'dark' ? fresh.codeThemeDark : fresh.codeThemeLight
-    );
-  }
-
-  /** 槽切换（spec B §2.3）：即时持久化 + 即时重注入 */
+  /** 槽切换：即时持久化——注入由 TopBar 的 onSettingsChanged 订阅 diff 触发
+   * （spec 2026-10-12 §2.4） */
   function onAppearanceChange(slot: 'light' | 'dark', e: Event): void {
     const v = (e.currentTarget as HTMLSelectElement).value;
     if (slot === 'light') appearanceLight = v;
     else appearanceDark = v;
     persist();
-    reapplyAppearance();
   }
 
   /** 文件选择 → 导入管线（.json 直读 / .vsix 解包全部主题）：计数通知 + 刷新列表 */
@@ -192,8 +178,8 @@
       changed = true;
     }
     if (changed) {
+      // 槽归位只持久化：注入由 TopBar 订阅 diff 触发（spec 2026-10-12 §2.4）
       saveSettings(fresh);
-      reapplyAppearance();
     }
     imported = imported.filter((x) => x.id !== t.id);
   }

@@ -14,7 +14,7 @@
   } from './openFlow.svelte';
   import { workspaceStore } from './workspaceStore';
   import { loadSettings, saveSettings, onSettingsChanged, type Settings } from './stores/settings';
-  import { applyAppearance, effectiveMode, onSystemModeChange, themeOptions } from './theme';
+  import { applyAppearanceFromSettings, effectiveMode, onSystemModeChange, themeOptions } from './theme';
 
   let settings = $state<Settings>(loadSettings());
   let urlValue = $state('');
@@ -46,12 +46,6 @@
   let currentAppearance = $derived(mode === 'dark' ? settings.appearanceDark : settings.appearanceLight);
   /** 外观接管（spec B §2.3）：当前 mode 槽非 default 时代码配色由外观 tokenColors 决定 */
   let appearanceTakesOver = $derived(currentAppearance !== 'default');
-
-  /** 应用当前外观槽：appearance 非 default 时代码槽由外观的 tokenColors 表接管
-   * （codeTheme 仅作 default 回退），default 时即旧 applyCodeTheme 注入 */
-  function applyCurrentAppearance(): void {
-    void applyAppearance(currentAppearance, mode, currentCodeTheme);
-  }
 
   /** 当前 workspace（workspacesView 为 workspaceStore 的 runes 镜像） */
   const activeWorkspace = $derived(
@@ -99,20 +93,18 @@
 
   onMount(() => {
     void themeOptions().then((opts) => (codeThemeOptions = opts));
-    applyCurrentAppearance();
-    // 订阅设置变更保持本副本最新：设置面板（SettingsPanel）改的排除/自动刷新，
-    // 以及合并保存的其余字段，都同步回来——本组件后续 saveSettings(settings)
-    // 写完整对象时不会把面板刚改的值写回旧值
-    const offSettings = onSettingsChanged((s) => (settings = s));
-    // themeMode=system：OS 亮暗切换时按新槽位重应用外观（UI 配色由
-    // prefers-color-scheme 媒体查询自动跟随，JS 注入的主题变量需要这一步）
-    const offSystem = onSystemModeChange((sysMode) => {
+    applyAppearanceFromSettings(settings); // 首次注入：签名初值 null 必命中
+    // 订阅设置变更保持本副本最新（防本组件 saveSettings 写回旧值），同时作为
+    // 注入的唯一触发通道：diff 四元组、槽相关变化才注入（spec 2026-10-12 §2.4）
+    const offSettings = onSettingsChanged((s) => {
+      settings = s;
+      applyAppearanceFromSettings(s);
+    });
+    // themeMode=system：OS 亮暗切换不经 saveSettings，effectiveMode 随之变化命中
+    // diff（UI 配色由 prefers-color-scheme 媒体查询自动跟随，JS 注入变量需要这步）
+    const offSystem = onSystemModeChange(() => {
       if (settings.themeMode !== 'system') return;
-      void applyAppearance(
-        sysMode === 'dark' ? settings.appearanceDark : settings.appearanceLight,
-        sysMode,
-        sysMode === 'dark' ? settings.codeThemeDark : settings.codeThemeLight
-      );
+      applyAppearanceFromSettings(settings);
     });
     // ≤600px 断点（spec E §2.3 切换器收进溢出）：matchMedia 驱动渲染分支；
     // 断点跨越时仅切换触发器形态，已展开的列表不强行收起
@@ -167,18 +159,15 @@
     saveSettings(settings);
     // 'system' 模式的暗色由 app.css 的 @media prefers-color-scheme 处理，无需 JS
     document.documentElement.dataset.themeMode = settings.themeMode;
-    // 亮暗切换联动：重应用对应记忆槽的外观（零重解析，只换 CSS 变量）
-    applyCurrentAppearance();
+    // 注入不在此直调：saveSettings → onSettingsChanged 订阅 → effectiveMode
+    // 变化命中 diff（spec 2026-10-12 §2.4）
   }
 
   function onCodeThemeChange(e: Event): void {
     const name = (e.currentTarget as HTMLSelectElement).value;
     if (mode === 'dark') settings.codeThemeDark = name;
     else settings.codeThemeLight = name;
-    saveSettings(settings);
-    // 仍走外观管线：appearance 非 default 时代码槽被外观接管（本次注入外观不变，
-    // 仅记忆槽更新），default 时即应用新代码主题
-    void applyAppearance(currentAppearance, mode, name);
+    saveSettings(settings); // 注入由订阅 diff（codeTheme 变化）触发，此处不直调
   }
 
   /** 计算策略三态（M6）：下次高亮/渲染调用即生效（router 每次实时读 settings） */
