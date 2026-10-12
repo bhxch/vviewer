@@ -122,10 +122,22 @@ function pressEnter(el: HTMLInputElement, opts: { shift?: boolean; composing?: b
 }
 
 async function flush(): Promise<void> {
-  // 动态 import('./client')（ensureSearchClient/structReady 首次加载）经 vite-node
-  // 多跳异步传播，固定微任务数不可靠（全仓并行加载下尤其如此）——逐轮 setTimeout
-  // 多次直至稳定（同 hexWorkerLeak settle 的粒度）
-  for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0));
+  // 仅用于「已就绪链路」排空（client 就绪后的微任务回灌、无 Worker 兜底 scanAll
+  // 的块间让出）。依赖 import('./client') 首载的场景不可用固定轮次等待——该导入
+  // 经 vite-node 多跳异步传播，全仓并行加载下耗时不可控（固定预算会被击穿），
+  // 须用 waitForSearchRequest 条件等待（同 hex.test 的 vi.waitFor 先例）。
+  for (let i = 0; i < 4; i++) await Promise.resolve();
+  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setTimeout(r, 0));
+}
+
+/** 条件等待搜索请求出现在 fake worker：import('./client') 就绪前 client 不存在、
+ * postMessage 不会发生（ensureSearchClient 的 createWorker 调用在 pressEnter 同步
+ * 栈内，故 fake 引用本身无需等待）。count 断言累计请求数下界（新搜索取代场景用 2）。 */
+async function waitForSearchRequest(fake: ReturnType<typeof makeFake>, count = 1): Promise<void> {
+  await vi.waitFor(() => {
+    expect(fake.requests.length).toBeGreaterThanOrEqual(count);
+  }, { timeout: 10_000 });
 }
 
 /** 搜索 fake（fakes[1]）回灌一次完整搜索（progress + done） */
@@ -164,7 +176,7 @@ describe('renderHex：搜索工具条', () => {
     const { inst, target, dump, search, status, cancel, fakes } = setup();
     search.value = 'dead';
     pressEnter(search);
-    await flush();
+    await waitForSearchRequest(fakes[1]!);
     expect(fakes).toHaveLength(2);
     const req = fakes[1]!.requests[0] as SearchRequest;
     expect(req.kind).toBe('search');
@@ -204,7 +216,7 @@ describe('renderHex：搜索工具条', () => {
     expect(caseToggle.checked).toBe(true); // spec §Global Constraints：默认敏感
     search.value = 'Hi'; // 含非 hex 字符 → 文本模式
     pressEnter(search);
-    await flush();
+    await waitForSearchRequest(fakes[1]!);
     expect((fakes[1]!.requests[0] as { caseInsensitive?: boolean }).caseInsensitive).toBe(false);
     inst.destroy();
     target.remove();
@@ -213,7 +225,7 @@ describe('renderHex：搜索工具条', () => {
     b.search.value = 'Hi';
     b.caseToggle.checked = false; // 取消「区分大小写」→ 不敏感
     pressEnter(b.search);
-    await flush();
+    await waitForSearchRequest(b.fakes[1]!);
     expect((b.fakes[1]!.requests[0] as { caseInsensitive?: boolean }).caseInsensitive).toBe(true);
     b.inst.destroy();
     b.target.remove();
@@ -223,7 +235,7 @@ describe('renderHex：搜索工具条', () => {
     c.search.dispatchEvent(new Event('input', { bubbles: true })); // 程序赋值需手动派发
     expect(c.caseToggle.disabled).toBe(true); // hex 模式禁用大小写开关
     pressEnter(c.search);
-    await flush();
+    await waitForSearchRequest(c.fakes[1]!);
     expect((c.fakes[1]!.requests[0] as { caseInsensitive?: boolean }).caseInsensitive).toBe(false);
     c.inst.destroy();
     c.target.remove();
@@ -233,7 +245,7 @@ describe('renderHex：搜索工具条', () => {
     const { inst, target, dump, search, status, fakes } = setup();
     search.value = 'dead';
     pressEnter(search);
-    await flush();
+    await waitForSearchRequest(fakes[1]!);
     const searchFake = fakes[1]!;
     const id = (searchFake.requests[0] as { id: number }).id;
     respondSearch(searchFake, id, [20, 200]);
@@ -258,7 +270,7 @@ describe('renderHex：搜索工具条', () => {
     const { inst, target, search, status, fakes } = setup();
     search.value = 'dead';
     pressEnter(search);
-    await flush();
+    await waitForSearchRequest(fakes[1]!);
     respondSearch(fakes[1]!, (fakes[1]!.requests[0] as { id: number }).id, [20], { truncated: true });
     expect(status.textContent).toBe('1/1 处命中（截断）');
     inst.destroy();
@@ -269,7 +281,7 @@ describe('renderHex：搜索工具条', () => {
     const { inst, target, search, status, cancel, fakes } = setup();
     search.value = 'dead';
     pressEnter(search);
-    await flush();
+    await waitForSearchRequest(fakes[1]!); // client 就绪（否则 searchClient 为 null，点击无效）
     expect(cancel.style.display).toBe('');
     cancel.click();
     expect(fakes[1]!.requests.some((r) => (r as { kind?: string }).kind === 'search-cancel')).toBe(true);
@@ -302,10 +314,12 @@ describe('renderHex：搜索工具条', () => {
     const { inst, target, search, status, fakes } = setup();
     search.value = 'dead';
     pressEnter(search);
-    await flush();
+    // 首个请求须真实发出（client 就绪）再发起第二个——否则第一次的 client 回调
+    // 因 seq 已被取代而不发请求，两条请求的时序前提不成立
+    await waitForSearchRequest(fakes[1]!);
     search.value = 'beef';
     pressEnter(search);
-    await flush();
+    await waitForSearchRequest(fakes[1]!, 2);
     expect(fakes[1]!.requests).toHaveLength(2);
     const idA = (fakes[1]!.requests[0] as { id: number }).id;
     const idB = (fakes[1]!.requests[1] as { id: number }).id;
@@ -383,7 +397,7 @@ describe('renderHex：窗口模式搜索（need/chunk 协议）', () => {
     await flush();
     search.value = 'deadbeef';
     pressEnter(search);
-    await flush();
+    await waitForSearchRequest(fakes[1]!);
     // 搜索请求为窗口形态：无 data、带 size（worker 不再收到全量副本）
     const req = fakes[1]!.requests[0] as SearchWindowRequest;
     expect('data' in req).toBe(false);
@@ -416,10 +430,11 @@ describe('renderHex：窗口模式搜索（need/chunk 协议）', () => {
     await flush();
     search.value = 'deadbeef';
     pressEnter(search);
-    await flush();
     // 读全拒时 structReady 在尾窗 ensure 处即失败、结构树 worker 不创建——搜索
-    // fake 取最后一个（正常路径为 fakes[1]，本路径为 fakes[0]）
+    // fake 取最后一个（正常路径为 fakes[1]，本路径为 fakes[0]）；createWorker 在
+    // pressEnter 同步栈内已调用，引用同步可得
     const searchFake = fakes[fakes.length - 1]!;
+    await waitForSearchRequest(searchFake);
     const id = (searchFake.requests[0] as { id: number }).id;
     searchFake.worker.respond({ id, type: 'search-need', start: 0, end: 4 });
     await flush();
