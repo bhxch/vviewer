@@ -59,7 +59,7 @@ export interface SearchChunkRequest {
   type: 'search-chunk';
   /** 本块起始绝对偏移（与对应 search-need.start 一致） */
   start: number;
-  /** 块字节（长度 = need.end - need.start） */
+  /** 块字节（≥ need.end - need.start：恰额经 client 钳制；Range-less 服务器回 200 全量时为整件超额——终审 F3，worker 按实际 length 推进 nextStart） */
   bytes: Uint8Array;
 }
 

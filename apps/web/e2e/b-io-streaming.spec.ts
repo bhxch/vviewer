@@ -16,6 +16,10 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * - IO-04：窗口模式搜索 need/chunk 端到端——worker 以 1MB 步进发 search-need、
  *   client 经 ctx.read 逐块回灌（命中 0x600000 需 chunk 0..6），命中跳转正确
  *   （t-hex-enhance HEX-SEARCH 模式）
+ * - IO-05：远端 5MB jsonl 窗口模式计量（计划 2 Task 5）——首屏探针+前 2 块
+ *   （256KB 块）总拉取 <1MB；滚动到底一次一块续读至 EOF 状态条「共 N 行」；
+ *   EOF 后滚动零 IO（消费契约停机）；末行坏行徽标「N 行解析失败」渐进文案
+ *   与全量模式同款（t-open-with OPEN-05 语义）
  *
  * 通道：t-workspace 假服务器先例（health/ticket/events SSE + CORS，跨源 4173 页面），
  * 本版扩展：/api/tree 携带 size（FileSource.size 事实来源，窗口模式判定依赖）、
@@ -396,6 +400,108 @@ test('IO-04：窗口模式搜索 need/chunk 端到端——1MB 步进拉块扫�
     for (const r of stats.records) {
       expect(r.range, '搜索全程不得出现全量 200 拉取').not.toBeNull();
     }
+  } finally {
+    await fake.close();
+  }
+});
+
+// ---------------------------------------------------------------- IO-05
+
+/** 5MB jsonl：256B/行（含 \n）× 20480 行 = 恰 5MB；窗口块 256KB → 每块恰 1024 行 */
+const JSONL_BYTES = 5 * MB;
+const JSONL_ROWS = JSONL_BYTES / 256;
+/** 首屏理论恰值：探针 8KB + 前 2 块（2×256KB）——下界锁「窗口路径真实发生」 */
+const JSONL_FIRST_SCREEN_EXPECTED = 8 * 1024 + 2 * 256 * 1024;
+
+/**
+ * 已知行数的 5MB jsonl：每行 `{"id":N,"pad":"aaa…"}` 补齐 255 字符 + '\n'（末行
+ * 故意未闭合字符串 = 同长坏行）。坏行让失败徽标的渐进语义一并入锚：解析按窗口
+ * 惰性，首屏（全合法行）无徽标，滚动到底坏行入窗后状态条出现「1 行解析失败」
+ * （t-open-with OPEN-05 的徽标文案在窗口流式模式同款，不回归）。
+ */
+function makeJsonlFile(): Uint8Array {
+  const ROW = 256;
+  const lines: string[] = [];
+  for (let i = 0; i < JSONL_ROWS; i++) {
+    const head = `{"id":${i},"pad":"`;
+    const broken = i === JSONL_ROWS - 1;
+    lines.push(head + 'a'.repeat(ROW - 1 - head.length - (broken ? 0 : 2)) + (broken ? '' : '"}'));
+  }
+  return new TextEncoder().encode(lines.join('\n') + '\n'); // ASCII：字节数 === 字符数
+}
+
+test('IO-05：远端 5MB jsonl 首屏总拉取 <1MB（探针+2 块）+ 滚动到底续读至 EOF「共 N 行」', async ({ page }) => {
+  test.setTimeout(120_000);
+  const fake = await startIoFakeServer({ 'big.jsonl': makeJsonlFile() });
+  try {
+    const stats = new IoStats();
+    stats.attach(page);
+    await waitAppMounted(page);
+    await connectForm(page, fake.base);
+    await expect(page.locator('.vv-tab', { hasText: fake.host })).toBeVisible({ timeout: 10_000 });
+    const drawer = await openDrawerIfNarrow(page);
+    await page.locator('.vv-tree-row', { hasText: 'big.jsonl' }).click();
+    await closeDrawerIfOpened(page, drawer);
+    await expect(page.locator('.vv-tab.active', { hasText: 'big.jsonl' })).toBeVisible();
+    const status = page.locator('.vv-jsonl-status');
+
+    // ① 首屏窗口模式：.vv-jsonl 挂载前已 ensure 前 2 块（render 先拉后挂）——
+    //    「已加载 2048 行」（2 块 × 每块 1024 行）即窗口路径的确定性信号
+    await expect(page.locator('.vv-jsonl')).toBeVisible({ timeout: 20_000 });
+    await expect(status).toHaveText('已加载 2048 行', { timeout: 20_000 });
+    await stats.settled();
+    await page.waitForTimeout(300); // 收敛保险（IO-01 同口径）：防偶发迟滞请求漏计
+    await stats.settled();
+    expect(stats.count()).toBeGreaterThanOrEqual(3); // 探针 + 块 0 + 块 1
+    for (const r of stats.records) {
+      expect(r.range, '首屏 /api/file 请求必须带 Range（200 全量拉取 = streaming 选路回归）').not.toBeNull();
+    }
+    // 上限即本用例标题口径：head+2 块+余量（<1MB）；全量回归时 5MB 级必超
+    expect(stats.total()).toBeGreaterThanOrEqual(JSONL_FIRST_SCREEN_EXPECTED);
+    expect(stats.total(), `jsonl 首屏总拉取 ${stats.total()}B 应 <1MB`).toBeLessThan(1_000_000);
+    console.log(
+      `[iostream] jsonl 首屏计量: ${stats.count()} 请求 / ${stats.total()} B（预算 1_000_000，理论 ${JSONL_FIRST_SCREEN_EXPECTED}）`
+    );
+
+    // ② 滚动到底触发续读：一次一块（滚动近尾部 → 拉块 → refresh 重评）直至 EOF，
+    //    状态条落「共 20480 行」（页内循环反复贴底：每次贴底触发一块续读）
+    const scroll = page.locator('.vv-jsonl-scroll');
+    await scroll.evaluate(async (el) => {
+      const statusEl = el.parentElement!.querySelector('.vv-jsonl-status')!;
+      for (let i = 0; i < 300; i++) {
+        el.scrollTop = el.scrollHeight;
+        await new Promise((r) => setTimeout(r, 50));
+        if (statusEl.textContent?.startsWith('共 ')) return;
+      }
+      throw new Error('jsonl 续读未在预算轮次内到达 EOF');
+    });
+    await expect(status).toContainText('共 20480 行', { timeout: 10_000 });
+    await stats.settled();
+    for (const r of stats.records) {
+      expect(r.range, '续读全程不得出现全量 200 拉取').not.toBeNull();
+    }
+    expect(stats.total(), '续读到底后总拉取应 ≥ 文件本体（20 块逐块拉取的证据）').toBeGreaterThanOrEqual(
+      5 * MB
+    );
+
+    // ③ EOF 后滚动零 IO（消费契约：finishJsonlIndex 后续读/拉块停机）
+    const countAtEnd = stats.count();
+    await scroll.evaluate((el) => {
+      el.scrollTop = 0;
+      el.scrollTop = el.scrollHeight;
+    });
+    await page.waitForTimeout(300);
+    await stats.settled();
+    expect(stats.count(), 'EOF 后滚动不得再发任何 /api/file 请求').toBe(countAtEnd);
+
+    // ④ 失败徽标渐进语义 + 到尾证据：末行坏行入窗才计数（首屏无徽标），
+    //    徽标文案与全量模式逐字同款（t-open-with OPEN-05 对照）；末行邻位真实卡片
+    await expect(page.locator('.vv-jsonl-card-failed')).toHaveCount(1);
+    await expect(status).toContainText('1 行解析失败');
+    // 末行邻位真实行渲染（续读到尾的证据）：卡片=「1 基行号徽标 + pretty 正文」
+    // （JSON.stringify 2 缩进，冒号带空格）；'"id": 20478' 唯一命中行 20478 正文
+    //（裸 '20478' 会同时命中行 20477 的徽标——strict mode 二元素冲突）
+    await expect(page.locator('.vv-jsonl-card', { hasText: '"id": 20478' })).toBeVisible();
   } finally {
     await fake.close();
   }
