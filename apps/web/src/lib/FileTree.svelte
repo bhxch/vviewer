@@ -6,8 +6,9 @@
     /** 当前 workspace 的全部可渲染来源（AppShell 由 workspace.sources × 活动实例解析） */
     sources: Array<{ label: string; store: TreeStore }>;
     excludedPatterns?: string[];
-    /** TreeNodeRow 上行的打开事件附带命中来源的 store（AppShell 按源 addTab） */
-    onopen: (e: { path: string; name: string; store: TreeStore }) => void;
+    /** TreeNodeRow 上行的打开事件附带命中来源的 store（AppShell 按源 addTab）；
+     * size 随事件透传（io-streaming Task 4）写入 Tab.source.size */
+    onopen: (e: { path: string; name: string; size?: number; store: TreeStore }) => void;
     /** 源级移除（confirm 在本组件内）；AppShell 关闭该组内该源全部 tab 并 removeSource */
     onremove?: (store: TreeStore) => void;
   } = $props();

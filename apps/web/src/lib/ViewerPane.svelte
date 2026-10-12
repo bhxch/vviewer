@@ -186,12 +186,13 @@ import SearchPanel from './SearchPanel.svelte';
       live = null;
       instance = null;
       try {
-        const buffer = await current.source.store.read(current.source.path);
-        if (cancelled || !host) return;
-        // C 项：手选打开方式随渲染重跑生效——setRendererOverride 的 rev++ 使本 effect
-        // 重跑，此处读回 override 传给 dispatch（命中即用，跳过自动探测链）
-        const res = await dispatcher.dispatch(current.source, buffer, host, {
-          rendererOverride: current.overrideRenderer
+        // 读下放 dispatch（io-streaming §3，Task 4）：buffer 直传改 null + read 闭包，
+        // 全量字节不再由视图层预取——读策略（head 探测/≤1MB 直读/按需区间）由
+        // dispatcher 接管。读失败经 dispatch 向上 reject（渲染前读错误不落错误卡片
+        // 重试通道，消除「8KB head 截断渲染」活面），由下方 catch 走读取失败卡片。
+        const res = await dispatcher.dispatch(current.source, null, host, {
+          rendererOverride: current.overrideRenderer,
+          read: (range) => current.source.store.read(current.source.path, range ? { range } : undefined)
         });
         if (cancelled) {
           res.instance.destroy();

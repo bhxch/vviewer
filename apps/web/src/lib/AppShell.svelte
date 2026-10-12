@@ -370,8 +370,8 @@
     workspaceStore.removeSource(ws.id, store.id);
   }
 
-  function onTreeOpen(e: { path: string; name: string; store: TreeStore }): void {
-    addTab(e.store, e.path, e.name);
+  function onTreeOpen(e: { path: string; name: string; size?: number; store: TreeStore }): void {
+    addTab(e.store, e.path, e.name, e.size ?? null);
   }
 
   // 全局键位（BUG-03，场景 SHELL-11）：Ctrl+Shift+F 全局搜索（既有）、Ctrl+P

@@ -116,11 +116,23 @@ class TabCollection {
     return this.list.filter((t) => t.workspaceId === wsId);
   }
 
-  add(store: TreeStore, path: string, name: string): Tab {
+  /**
+   * size（io-streaming Task 4）：文件总字节数随打开链路写入 Tab.source.size，供
+   * dispatcher 读策略（≤1MB 直读 vs head 探测）与渲染器 ctx.size 消费，免二次探测。
+   * 缺省/null = 来源无法预知（目录树条目无 size、url 未知大小）。
+   */
+  add(store: TreeStore, path: string, name: string, size?: number | null): Tab {
     const tab: Tab = {
       id: `t${++seq}`,
       workspaceId: workspaceStore.activeId,
-      source: { storeId: store.id, storeLabel: store.displayName(), path, name, store },
+      source: {
+        storeId: store.id,
+        storeLabel: store.displayName(),
+        path,
+        name,
+        store,
+        ...(size != null ? { size } : {})
+      },
       scrollTop: 0,
       active: true
     };
@@ -316,7 +328,7 @@ class TabCollection {
     // M-1 防御（fix round 1）：副本经 add 落「当前活动组」，原 tab 在非活动组时
     // 副本会错组（无法落原 tab 右侧）——防御性拒绝（当前无切组重试路径）
     if (src.workspaceId !== workspaceStore.activeId) return null;
-    const tab = this.add(src.source.store, src.source.path, src.source.name);
+    const tab = this.add(src.source.store, src.source.path, src.source.name, src.source.size);
     if (src.pinned) tab.pinned = true;
     if (src.overrideRenderer !== undefined) tab.overrideRenderer = src.overrideRenderer;
     this.list.splice(this.list.indexOf(tab), 1);
@@ -560,8 +572,8 @@ export function showStatusNotice(text: string, duration = 4000): void {
   }, duration);
 }
 
-export function addTab(store: TreeStore, path: string, name: string): Tab {
-  return tabStore.add(store, path, name);
+export function addTab(store: TreeStore, path: string, name: string, size?: number | null): Tab {
+  return tabStore.add(store, path, name, size);
 }
 
 export function closeTab(id: string): void {
@@ -599,7 +611,8 @@ export async function persistScroll(id: string, top: number): Promise<void> {
 }
 
 export function openFiles(files: File[]): void {
-  for (const f of files) addTab(createSingleFileStore(f), f.name, f.name);
+  // File.size 随链路透传（拖拽打开即可知大小，io-streaming Task 4）
+  for (const f of files) addTab(createSingleFileStore(f), f.name, f.name, f.size);
 }
 
 /**
@@ -1081,7 +1094,8 @@ export function openUrl(url: string): void {
   } catch {
     // 非法百分号编码：保留原样作为显示名
   }
-  addTab(createUrlStore(url), name, name);
+  // url 打开时大小未知：显式 null（读策略走 head 探测）
+  addTab(createUrlStore(url), name, name, null);
 }
 
 /**

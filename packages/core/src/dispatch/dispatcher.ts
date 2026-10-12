@@ -36,6 +36,20 @@ export interface DispatchOptions {
 const HEAD_SIZE = 8192;
 const FULL_LIMIT = 1 << 20;
 
+/**
+ * 读闭包失败（T3 评审活面消除）：延迟全量读在选路 try 块内执行，若按渲染失败落
+ * 错误卡片，「重试」会以 catch 手头仅有的 8KB head 探测块当完整文件静默截断渲染。
+ * 包装后由 catch 识别并向上 reject（调用方既有读取失败面承接，无重试通道），与
+ * 策略读（try 外，天然 reject）的失败语义对齐。open-as 重入路径同样 reject，
+ * 经 openAsAction 既有 .catch 保留原错误卡片。
+ */
+class DispatchReadError extends Error {
+  constructor(err: unknown) {
+    super(err instanceof Error ? err.message : String(err));
+    this.name = 'DispatchReadError';
+  }
+}
+
 /** 签名 → 规范改派目标（BUG-13 与 BUG-07 无扩展名回退链共用的改派表）。
  * ole 无专用渲染器不改派（维持 hex 语义）；mpegts 规范扩展名 'ts'
  * （av 渲染器按 det.ext 分派 video 形态与 mpegts loader，故改派需同步纠偏 ext）。 */
@@ -252,6 +266,12 @@ export function createDispatcher(registry: Registry): Dispatcher {
     const redisplay: Redisplay = (o) =>
       headOnly ? dispatch(source, null, target, { ...o, read }) : dispatch(source, buffer, target, o);
     let renderer: Renderer | undefined;
+    // 延迟全量读统一包装（headOnly 不变量保证此处 read 已定义）：失败标 DispatchReadError，
+    // 由下方 catch 识别后向上 reject，不落渲染错误卡片（见 DispatchReadError doc）
+    const readFull = (): Promise<Uint8Array<ArrayBuffer>> =>
+      read!().catch((err: unknown) => {
+        throw new DispatchReadError(err);
+      });
     try {
       if (override) {
         // override 路径：用户显式选择 ≠ 内容识别——不经过 resolveInitialRenderer
@@ -283,7 +303,7 @@ export function createDispatcher(registry: Registry): Dispatcher {
         // 非 streaming 渲染器：全量 buffer 交付（旧行为，第 5 参不传）。兼容路径 full
         // 即入参 buffer（零重复读）；headOnly 且 size 未知/超限时此处补一次全量 read
         // （headOnly 不变量保证 read 已定义）
-        if (full === null) full = await read!();
+        if (full === null) full = await readFull();
         const instance = await renderer.render(full, target, source, det);
         return { instance, rendererId: renderer.id, det };
       }
@@ -291,7 +311,7 @@ export function createDispatcher(registry: Registry): Dispatcher {
       // 不交付全量 buffer。store 无 range 能力（含兼容路径 read 缺省的 buffer 直传）→
       // 先全量 read，ctx 退化为全量切片视图（零拷贝 subarray）
       const capable = source.store.rangeCapable === true && read !== undefined;
-      if (!capable && full === null) full = await read!();
+      if (!capable && full === null) full = await readFull();
       // buffer 形参 = full ?? probe：capable 且 size 未知/超限 → head 探测块；否则全量
       const base = full ?? probe;
       const ctx: StreamCtx = capable
@@ -300,6 +320,9 @@ export function createDispatcher(registry: Registry): Dispatcher {
       const instance = await renderer.render(base, target, source, det, ctx);
       return { instance, rendererId: renderer.id, det };
     } catch (err) {
+      // 读失败 ≠ 渲染失败（T3 评审）：重跑 render 无意义且 catch 手头只有 8KB head
+      // 探测块（headOnly 时）——重试会静默截断渲染。向上 reject 走调用方读取失败面。
+      if (err instanceof DispatchReadError) throw err;
       const message = err instanceof Error ? err.message : String(err);
       // render 失败提供重试 + open-as（选路失败无重试，只给 open-as 换打开方式）。
       // 重试/open-as 成功产出的真实实例由 liveChild 级联托管：调用方（ViewerPane）持有的

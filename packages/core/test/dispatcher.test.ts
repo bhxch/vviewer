@@ -576,4 +576,58 @@ describe('dispatch 读下沉（io-streaming §3：streaming 选路 + StreamCtx �
     cardInstance.destroy();
     target.remove();
   });
+
+  // 读失败 ≠ 渲染失败（T3 评审活面）：延迟全量读在选路 try 内，失败若落错误卡片，
+  // 「重试」会以 8KB head 探测块当完整文件静默截断渲染——必须向上 reject，不落卡片。
+  describe('读失败向上 reject（不落渲染错误卡片）', () => {
+    /** head 探测（8KB 区间）成功、全量读失败的 read 闭包（模拟盘故障/句柄失效） */
+    function headOkFullFails(message: string) {
+      return async (range?: { start: number; end: number }): Promise<Uint8Array<ArrayBuffer>> => {
+        if (range) return new Uint8Array(range.end - range.start + 1);
+        throw new Error(message);
+      };
+    }
+
+    it('⑦ 非 streaming + size 未知：延迟全量读失败 → dispatch reject，render 不执行、target 无卡片', async () => {
+      const reg = createRegistry();
+      let rendered = false;
+      reg.install(mk('plain', ['pln'], { render: async () => { rendered = true; return { destroy() {} }; } }));
+      const target = document.createElement('div');
+      document.body.append(target);
+      await expect(
+        createDispatcher(reg).dispatch(
+          srcWith('a.pln', fakeStore(true), null), null, target, { read: headOkFullFails('disk error') })
+      ).rejects.toThrow('disk error');
+      expect(rendered).toBe(false); // 全量从未到手：不得以 8KB head 截断渲染
+      expect(target.querySelector('.vv-error-card')).toBeNull(); // 不落渲染错误卡片（无重试通道）
+      target.remove();
+    });
+
+    it('⑧ streaming + !rangeCapable：降级全量读失败 → dispatch reject，render 不执行', async () => {
+      const reg = createRegistry();
+      let rendered = false;
+      reg.install(mk('st', ['stx'], {
+        streaming: true,
+        render: async () => { rendered = true; return { destroy() {} }; }
+      }));
+      const target = document.createElement('div');
+      await expect(
+        createDispatcher(reg).dispatch(
+          srcWith('a.stx', fakeStore(), null), null, target, { read: headOkFullFails('io gone') })
+      ).rejects.toThrow('io gone');
+      expect(rendered).toBe(false);
+    });
+
+    it('⑨ 策略读失败（size ≤ 1MB 首次全量即失败）→ dispatch reject（try 外路径同语义）', async () => {
+      const reg = createRegistry();
+      let rendered = false;
+      reg.install(mk('plain', ['pln'], { render: async () => { rendered = true; return { destroy() {} }; } }));
+      const target = document.createElement('div');
+      await expect(
+        createDispatcher(reg).dispatch(
+          srcWith('a.pln', fakeStore(true), 100), null, target, { read: headOkFullFails('gone') })
+      ).rejects.toThrow('gone');
+      expect(rendered).toBe(false);
+    });
+  });
 });

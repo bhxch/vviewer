@@ -8,7 +8,8 @@
     excludedPatterns?: string[];
     node: TreeNode;
     depth: number;
-    onopen: (e: { path: string; name: string }) => void;
+    /** size：TreeNode.size 透传（io-streaming Task 4），缺省 = 条目无大小信息 */
+    onopen: (e: { path: string; name: string; size?: number }) => void;
   } = $props();
 
   let expanded = $state(false);
@@ -20,7 +21,7 @@
 
   async function toggle(): Promise<void> {
     if (node.kind !== 'dir') {
-      onopen({ path: node.path, name: node.name });
+      onopen({ path: node.path, name: node.name, size: node.size });
       return;
     }
     expanded = !expanded;
