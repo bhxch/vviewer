@@ -1618,8 +1618,10 @@ function renderCodeWindowed(
 
   function maybeContinue(lastVisible: number): void {
     // 回看重拉优先于续读：缺块占位行等待补块（与 EOF/尾部距离无关——回看发生在已
-    // 加载坐标区，逐块 ensure 后一次 refresh 填充全部占位行）
-    if (pendingReload.size > 0 && !pulling && !destroyed) {
+    // 加载坐标区，逐块 ensure 后一次 refresh 填充全部占位行）。reloadFailed 停机闩
+    // 与 continueFailed 同款：失败后任何自动 onRange/refresh 不得重试重拉（防活锁），
+    // 用户滚动动作（onUserScroll）解除后单次重试
+    if (pendingReload.size > 0 && !pulling && !reloadFailed && !destroyed) {
       const targets = [...pendingReload];
       pendingReload.clear();
       pulling = true;
@@ -1692,17 +1694,26 @@ function renderCodeWindowed(
     }, 1500);
   }
 
-  /** 搜索前补块（已加载区间快照的前置）：块表 LRU 逐出的块重拉补齐后再快照行文本；
-   * 失败自兜底（安全快照回落空串），不阻断搜索（Task 5 后台全文扫描接管前的现状面） */
+  /** 搜索补块并发上限（Task 5 后台全文扫描接管前的现状面最小防护）：滚到底后
+   * [0,nextFeed) 缺块可达数百个，全部并发 ensure = 数百并发 256KB 读，且先回的块
+   * 随即被块表 LRU(16) 逐出（白拉重传）——分批推进，同批并发、批间串行 */
+  const SEARCH_REFILL_CONCURRENCY = 4;
+
+  /** 搜索前补块（已加载区间快照的前置）：块表 LRU 逐出的块按并发上限分批重拉后再
+   * 快照行文本；单批失败即止自兜底（不可解码行回落空串），不阻断搜索 */
   async function snapshotLines(): Promise<string[]> {
-    const missing: Promise<Uint8Array<ArrayBuffer>>[] = [];
+    const missing: number[] = [];
     for (let b = 0; b < nextFeed; b++) {
-      if (!bs.has(b)) missing.push(bs.ensureBlock(b));
+      if (!bs.has(b)) missing.push(b);
     }
-    if (missing.length > 0) {
-      await Promise.all(missing).catch((err: unknown) => {
+    for (let i = 0; i < missing.length; i += SEARCH_REFILL_CONCURRENCY) {
+      const batch = missing.slice(i, i + SEARCH_REFILL_CONCURRENCY);
+      try {
+        await Promise.all(batch.map((b) => bs.ensureBlock(b)));
+      } catch (err) {
         console.debug('[code] 搜索前补块失败（已加载区间快照可能不全）', err);
-      });
+        break; // 该批失败即止：快照以可解码行为准
+      }
     }
     const out: string[] = new Array(rows());
     for (let i = 0; i < out.length; i++) {
@@ -1768,12 +1779,13 @@ function renderCodeWindowed(
       if (query === lastQuery && caseSensitive === lastCaseSensitive) {
         return Promise.resolve(lastMatches);
       }
-      return snapshotLines().then((snapshot) => {
+      // 命中集落地 + 行级背景/mark 状态更新 + 强制重绘（空查询 = 退出搜索语义）
+      const apply = (matches: SearchMatch[]): SearchMatch[] => {
         if (destroyed) return lastMatches;
         lastQuery = query;
         lastCaseSensitive = caseSensitive;
         searchHitsByLine = new Map();
-        lastMatches = query === '' ? [] : searchCode(snapshot, query, { caseSensitive });
+        lastMatches = matches;
         for (const m of lastMatches) {
           const arr = searchHitsByLine.get(m.line);
           if (arr) arr.push({ start: m.start, end: m.end });
@@ -1790,7 +1802,12 @@ function renderCodeWindowed(
         }
         scroller?.refresh(true);
         return lastMatches;
-      });
+      };
+      // 空 query（退出搜索）无需行文本：短路快照/补块面，零补块
+      if (query === '') return Promise.resolve(apply([]));
+      return snapshotLines().then((snapshot) =>
+        apply(destroyed ? [] : searchCode(snapshot, query, { caseSensitive }))
+      );
     },
     gotoMatch(index) {
       const match = lastMatches[index];

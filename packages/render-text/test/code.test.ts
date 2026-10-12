@@ -1608,4 +1608,79 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     expect(bodyText(host, 1)).toBe('const second = 2;');
     handle.destroy();
   });
+
+  // fix round 1 Important 1：reloadFailed 停机闩必须真实生效——回看重拉失败后任何
+  // 自动 onRange/refresh 不得重试重拉（防活锁），用户滚动动作解除后单次重试。
+  it('回看重拉失败：停机闩挡住自动重试（无活锁），用户滚动动作解除后单次重试成功', async () => {
+    stubResizeObserver();
+    const content = enc(codeLines(3400)); // 5.1MB ≈ 20 块 > 16：滚到底后块 0..3 已逐出
+    const calls: RangeCall[] = [];
+    let block1Reads = 0;
+    const ctx: StreamCtx = {
+      size: content.length,
+      head: content.slice(0, 8192),
+      read: async (r) => {
+        calls.push({ start: r.start, end: r.end });
+        if (r.start === WINDOW_BLOCK) {
+          block1Reads += 1;
+          if (block1Reads === 2) throw new Error('块 1 回看重拉失败'); // 初始喂块成功，第 2 次（回看重拉）失败
+        }
+        return content.slice(r.start, r.end + 1);
+      }
+    };
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    scrollCode(host, Number.MAX_SAFE_INTEGER); // 续读到 EOF：前向喂块恰每块一次
+    await vi.waitFor(() => expect(handle.getMeta().lines).toBe(3400));
+    expect(calls.length).toBe(20);
+    scrollCode(host, 7000); // 跳入块 1/2 区间：占位 + 回看重拉 → 块 1 失败 → 停机
+    await vi.waitFor(() => expect(block1Reads).toBe(2)); // 失败落地
+    await new Promise((r) => setTimeout(r, 30));
+    const readsAtFail = calls.length;
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls.length).toBe(readsAtFail); // 停机闩：无自动重试（整批待办冻结，块 2 也不拉）
+    // 用户滚动动作（onUserScroll）：解除停机 → 单次重试（恢复批串行 ensure：块 1/2/0）
+    scrollCode(host, 0);
+    scrollCode(host, 7000); // 补块到位：窗口实卡渲染
+    await vi.waitFor(() => expect(bodyText(host, 345)).toContain('= 345;'));
+    expect(calls.filter((c) => c.start === WINDOW_BLOCK && c.end === 2 * WINDOW_BLOCK - 1).length).toBe(3);
+    await new Promise((r) => setTimeout(r, 30)); // 恢复批全部落地
+    const stable = calls.length;
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls.length).toBe(stable); // 成功后无额外拉取（无重试风暴）
+    handle.destroy();
+  });
+
+  // fix round 1 Important 2：snapshotLines 最小防护——空 query 短路零补块；补块
+  // 受并发上限分批（全量并发会是缺块数、全串行会是 1，二者皆非）。
+  it('搜索补块最小防护：空 query 短路零补块；非空 query 补块并发在飞 ≤ 4', async () => {
+    stubResizeObserver();
+    const content = enc(codeLines(4200)); // 6.3MB ≈ 25 块 > 16：滚到底后缺块 0..8（9 个）
+    let readCount = 0;
+    let inflight = 0;
+    let maxInflight = 0;
+    const ctx: StreamCtx = {
+      size: content.length,
+      head: content.slice(0, 8192),
+      read: async (r) => {
+        readCount += 1;
+        inflight += 1;
+        maxInflight = Math.max(maxInflight, inflight);
+        await new Promise((res) => setTimeout(res, 3)); // 拉开并发重叠窗口
+        inflight -= 1;
+        return content.slice(r.start, r.end + 1);
+      }
+    };
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    scrollCode(host, Number.MAX_SAFE_INTEGER); // 续读到 EOF：25 次串行前向喂块（在飞 1）
+    await vi.waitFor(() => expect(handle.getMeta().lines).toBe(4200));
+    expect(maxInflight).toBe(1); // 自证：续读链全串行，非空在飞只来自搜索补块
+    const readsAtEof = readCount;
+    await handle.search(''); // 空 query（退出搜索）：短路快照/补块面
+    expect(readCount).toBe(readsAtEof); // 零补块
+    await handle.search('const'); // 非空 query：缺块 0..8 分批补（4+4+1）
+    expect(maxInflight).toBe(4); // 同批并发、批间串行：恰好上限
+    handle.destroy();
+  });
 });
