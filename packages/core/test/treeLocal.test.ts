@@ -22,6 +22,22 @@ describe('createLocalFilesStore', () => {
     expect(nodes.map((n) => n.name).sort()).toEqual(['lib.rs', 'main.rs']);
     expect(await store.read('src/main.rs')).toEqual(new Uint8Array([2, 3]));
   });
+  it('read 带 range：File.slice 按 end 含语义切片（slice(start, end+1)）', async () => {
+    // 'abcdef'：range {start:1, end:3} end 含 → 下标 1..3 共 3 字节 'bcd'
+    //（若实现为 end 不含则得 2 字节 'bc'，此处即失败）
+    const bin = mkFile('proj/data.bin', [0x61, 0x62, 0x63, 0x64, 0x65, 0x66]);
+    const store = createLocalFilesStore([mkFile('proj/README.md', [1]), bin, mkFile('proj/src/lib.rs', [4])], 'proj');
+    expect(store.rangeCapable).toBe(true);
+    const got = await store.read('data.bin', { range: { start: 1, end: 3 } });
+    expect(got).toEqual(new Uint8Array([0x62, 0x63, 0x64]));
+  });
+  it('read 无 range：全量返回不变（range 分支不影响既有路径）', async () => {
+    const store = createLocalFilesStore(
+      [mkFile('proj/data.bin', [0x61, 0x62, 0x63, 0x64, 0x65, 0x66])],
+      'proj'
+    );
+    expect(await store.read('data.bin')).toEqual(new Uint8Array([0x61, 0x62, 0x63, 0x64, 0x65, 0x66]));
+  });
 });
 
 describe('naturalCompare', () => {

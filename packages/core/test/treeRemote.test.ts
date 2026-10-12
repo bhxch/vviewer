@@ -23,12 +23,16 @@ function treeResponse(
   };
 }
 
-/** fetch 响应桩（file 响应）：arrayBuffer + X-VV-* 检测头 */
-function fileResponse(bytes: Uint8Array, headers: Record<string, string> = {}): unknown {
+/** fetch 响应桩（file 响应）：arrayBuffer + X-VV-* 检测头；status 可选（206 = Range 区间响应） */
+function fileResponse(
+  bytes: Uint8Array,
+  headers: Record<string, string> = {},
+  status = 200
+): unknown {
   const map = new Map(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
   return {
-    ok: true,
-    status: 200,
+    ok: true, // request 只看 res.ok：200（全量）与 206（区间）均按成功交付
+    status,
     arrayBuffer: async () =>
       bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
     headers: { get: (name: string) => map.get(name.toLowerCase()) ?? null }
@@ -146,6 +150,35 @@ describe('createRemoteStore', () => {
     );
     const store = createRemoteStore('http://127.0.0.1:8321', null, 'err-srv');
     await expect(store.read('missing.txt')).rejects.toThrow('HTTP 404');
+  });
+
+  it('read 带 range：透传 Range 头（bytes=start-end），206 返回区间字节', async () => {
+    const slice = Uint8Array.from({ length: 100 }, (_, i) => i);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      // 桩内校验 Range 头形状：未透传/格式错即在此失败
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      expect(headers.range).toBe('bytes=100-199');
+      return fileResponse(slice, {}, 206);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const store = createRemoteStore('http://127.0.0.1:8321', 'tok', 'range-srv');
+    const got = await store.read('a.bin', { range: { start: 100, end: 199 } });
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8321/api/file?path=a.bin', {
+      headers: { authorization: 'Bearer tok', range: 'bytes=100-199' },
+      signal: expect.anything()
+    });
+    expect(got).toHaveLength(100); // 206：服务器已按区间切片，原样交付
+    expect(store.rangeCapable).toBe(true);
+  });
+
+  it('read 带 range 但服务器忽略 Range 回 200 全量：原样返回全量（调用方自校验）', async () => {
+    const FULL = Uint8Array.from({ length: 256 }, (_, i) => i % 256);
+    // 桩忽略 Range 头：回 200 + 全量（老服务器/代理剥离 Range 的形态）
+    vi.stubGlobal('fetch', vi.fn(async () => fileResponse(FULL)));
+    const store = createRemoteStore('http://127.0.0.1:8321', null, 'full-srv');
+    const got = await store.read('a.bin', { range: { start: 0, end: 9 } });
+    expect(got).toHaveLength(FULL.length); // 不做客户端切片：spec §2.3 调用方自校验
+    expect(got).toEqual(FULL);
   });
 });
 

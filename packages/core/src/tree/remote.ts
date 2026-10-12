@@ -117,8 +117,9 @@ export interface RemoteStoreOptions {
 
 /**
  * 远端 vviewer 文件服务器的 TreeStore（M5）：
- * listChildren → GET /api/tree?path=，read → GET /api/file?path=（全量读，
- * Range 由服务端支持但前端暂不使用）；每次 read 把 X-VV-* 检测头写入 remoteMeta。
+ * listChildren → GET /api/tree?path=，read → GET /api/file?path=（带 opts.range 时
+ * 透传 Range: bytes=start-end，206 返回区间；200（服务器忽略 Range）返回全量原样
+ * 交付，由调用方自校验——spec §2.3）；每次 read 把 X-VV-* 检测头写入 remoteMeta。
  * id 由 base+label 哈希派生；base 登记在 remoteBaseById（会话快照 storeBase，M7 恢复）。
  * 多根（workspace T3）：opts.rootIndex/basePath 时 id 追加 :rN[:basePathHash] 段
  * （默认形态保持旧 id 不变，既有会话快照/资源表键零迁移）；请求按源相对路径
@@ -167,9 +168,14 @@ export function createRemoteStore(
    * 带 Bearer 头的 GET；非 2xx 抛含状态码的 Error（server 错误体若为 JSON 则附 detail；
    * base 带 path 时附误粘贴提示）。挂 30s 超时：服务器失联时请求有界失败而非永久悬挂。
    * 多根：路径经 toServerPath 换算，rootIndex!=0 追加 &root=<n>（根 0 不拼，URL 形状不变）。
+   * extraHeaders：调用方附加头（read 的 Range 透传），合并进 fetch headers。
    */
-  async function request(apiPath: string, path: string): Promise<Response> {
-    const headers: Record<string, string> = {};
+  async function request(
+    apiPath: string,
+    path: string,
+    extraHeaders?: Record<string, string>
+  ): Promise<Response> {
+    const headers: Record<string, string> = { ...extraHeaders };
     if (token) headers.authorization = `Bearer ${token}`;
     const query =
       `path=${encodeURIComponent(toServerPath(path))}` +
@@ -340,9 +346,12 @@ export function createRemoteStore(
       }));
       // 排序信任服务端（目录优先 + 自然序已由 /api/tree 保证）
     },
-    async read(path) {
-      // opts.range 暂不使用：renderer 全量 read（hex 1MB 场景可接受，M6 优化）
-      const res = await request('/api/file', path);
+    async read(path, opts) {
+      // range 透传（spec §2.3）：Range: bytes=start-end（end 含）；服务器回 206
+      // 即区间字节原样交付，回 200（忽略 Range）则全量原样交付——不做客户端切片，
+      // 长度/边界校验由调用方（dispatcher 的 StreamCtx 构造）自担。
+      const r = opts?.range;
+      const res = await request('/api/file', path, r ? { range: `bytes=${r.start}-${r.end}` } : undefined);
       const lang = res.headers.get('x-vv-lang');
       const encoding = asEncoding(res.headers.get('x-vv-encoding'));
       const key = `${id}:${path}`;
@@ -353,6 +362,8 @@ export function createRemoteStore(
       }
       return new Uint8Array(await res.arrayBuffer());
     },
+    // 能力标记（spec §2.3）：read 支持 opts.range，dispatcher 据此构造按需 StreamCtx
+    rangeCapable: true,
     watch,
     close
   };

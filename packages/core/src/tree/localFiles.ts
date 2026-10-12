@@ -52,12 +52,17 @@ export function createLocalFilesStore(files: FileList | File[], label: string): 
       }
       return out.sort((a, b) => (a.kind === b.kind ? naturalCompare(a.name, b.name) : a.kind === 'dir' ? -1 : 1));
     },
-    async read(path) {
+    async read(path, opts) {
       const f = (byDir.get(path.split('/').slice(0, -1).join('/') ?? '') ?? []).find(
         (x) => x.webkitRelativePath.split('/').slice(1).join('/') === path
       );
       if (!f) throw new Error(`未知路径: ${path}`);
-      return new Uint8Array(await f.arrayBuffer());
-    }
+      // range 分支（spec §2.3）：end 含语义 → File.slice(start, end + 1)
+      const r = opts?.range;
+      const blob = r ? f.slice(r.start, r.end + 1) : f;
+      return new Uint8Array(await blob.arrayBuffer());
+    },
+    // 能力标记（spec §2.3）：read 支持 opts.range，dispatcher 据此构造按需 StreamCtx
+    rangeCapable: true
   };
 }

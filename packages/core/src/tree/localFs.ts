@@ -64,6 +64,8 @@ export function createLocalFsStore(handle: FileSystemDirectoryHandle): TreeStore
         return new Uint8Array(await file.slice(start, end + 1).arrayBuffer());
       }
       return new Uint8Array(await file.arrayBuffer());
-    }
+    },
+    // 能力标记（spec §2.3）：read 的 opts.range 分支已实现（File.slice，end 含）
+    rangeCapable: true
   };
 }
