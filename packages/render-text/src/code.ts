@@ -1851,8 +1851,13 @@ function renderCodeWindowed(
   // 扫描主循环外圈（≈每块一次，不逐行写 DOM）。样式内联（hex toolbar 先例，不依赖
   // app.css）；getMeta 零变更。
   let scanBar: HTMLElement | null = null;
+  // 项 A（W3-4）：进度条属主扫描序号——扫描在飞换 query 时新扫描接管既有条，
+  // 被取消旧扫描的收场清理不得移除新扫描的条（否则新扫描数分钟无进度）：
+  // show 记录 ownerSeq、hide 仅属主匹配才移除
+  let scanBarOwnerSeq = -1;
 
-  function showScanProgress(): void {
+  function showScanProgress(ownerSeq: number): void {
+    scanBarOwnerSeq = ownerSeq; // 属主切换：条已存在则新扫描复用同一实例
     if (scanBar !== null) return; // 一次性元素：续扫/同键重入复用同一实例
     scanBar = document.createElement('div');
     scanBar.className = 'vv-code-scan-progress';
@@ -1882,8 +1887,11 @@ function renderCodeWindowed(
     scanBar.textContent = `${where}（已命中 ${hits} 处）`;
   }
 
-  function hideScanProgress(): void {
-    scanBar?.remove();
+  /** 移除进度条（项 A 属主语义）：仅属主扫描才移除——被取消旧扫描的收场清理
+   * 不得移除已被新扫描接管的条 */
+  function hideScanProgress(ownerSeq: number): void {
+    if (scanBar === null || scanBarOwnerSeq !== ownerSeq) return;
+    scanBar.remove();
     scanBar = null;
   }
 
@@ -1901,7 +1909,7 @@ function renderCodeWindowed(
     const alive = (): boolean => !destroyed && scanSeq === mySeq;
     const failedBlocks = new Set<number>(); // 补拉失败块记忆（本次扫描一份，见 scanLineText）
     let scanned = startFrom; // 已扫描行数（索引已提交行的前缀指针：断点续扫不重复）
-    showScanProgress(); // 项 2：扫描开始即挂进度条（同键续扫复用同一元素）
+    showScanProgress(mySeq); // 项 2：扫描开始即挂进度条（同键续扫/接管复用同一元素，项 A 属主切换）
     try {
       for (;;) {
         if (!alive()) return acc;
@@ -1949,7 +1957,7 @@ function renderCodeWindowed(
         }
       }
     } finally {
-      hideScanProgress(); // 项 2：完成/取消/失败三态统一移除（destroy 即时收口另行直调）
+      hideScanProgress(mySeq); // 项 2：完成/取消/失败三态统一移除（项 A：非属主不移除；destroy 即时收口另行直调）
     }
   }
 
@@ -1960,7 +1968,11 @@ function renderCodeWindowed(
       destroyed = true;
       scanSeq += 1; // 在飞后台扫描令牌失效（下一检查点退出，部分结果收场）
       scan = null;
-      hideScanProgress(); // 项 2：取消态即时移除进度条（在途读闸挂起时 finally 不可达）
+      // 项 2：取消态即时移除进度条（在途读闸挂起时 finally 不可达）；项 A：destroy
+      // 终态无条件收口——此后无新扫描可接管，属主语义不适用
+      scanBar?.remove();
+      scanBar = null;
+      scanBarOwnerSeq = -1;
       if (hitTimer !== null) clearTimeout(hitTimer);
       wantedChunks = []; // 队列作废；在-flight chunk 的回写在各 await 点被 destroyed 拦截
       scroller?.destroy();

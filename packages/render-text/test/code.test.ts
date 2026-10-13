@@ -2300,4 +2300,44 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     expect(host2.querySelector('.vv-code-scan-progress')).toBeNull();
     handle2.destroy();
   });
+
+  // 项 A（Important，W3-4）：进度条属主竞态——扫描在飞换 query 时，新扫描的
+  // showScanProgress 因 scanBar !== null 早退复用旧条，随后被取消旧扫描的
+  // hideScanProgress 把条移除，新扫描数分钟无进度。修法：条与 scanSeq 绑定属主
+  //（show 记录 ownerSeq、hide 仅属主匹配才移除、新扫描接管并复用同一元素）。
+  it('项 A 进度条属主：扫描在飞换 query，旧扫描取消不移除新扫描已接管的进度条', async () => {
+    stubResizeObserver();
+    const content = enc(codeLines(1400)); // 2.1MB ≈ 9 块：首块后仍有大量块可拉
+    let release: (() => void) | null = null;
+    let gated = false;
+    const ctx = streamCtx({ size: content.length, content, head: content.slice(0, 8192) });
+    const rawRead = ctx.read.bind(ctx);
+    ctx.read = async (r) => {
+      if (r.start >= WINDOW_BLOCK && !gated) {
+        gated = true; // 仅首个续块挂起：扫描 A 停在半途供断言（fake ctx 读闸）
+        await new Promise<void>((res) => {
+          release = res;
+        });
+      }
+      return rawRead(r);
+    };
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
+    const pA = handle.search('qqq-no-hit'); // 扫描 A 在飞：拉块 1 挂闸
+    await vi.waitFor(() => expect(release).not.toBeNull());
+    expect(host.querySelector('.vv-code-scan-progress')).not.toBeNull();
+    const pB = handle.search('const'); // 换 query：新扫描 B 接管进度条（属主切换）
+    // 文本随新扫描更新：块 0 行全含 const，命中数 > 0（旧查询无命中，形态可分辨）
+    await vi.waitFor(() =>
+      expect(host.querySelector('.vv-code-scan-progress')!.textContent).toMatch(/已命中 [1-9]/)
+    );
+    release!(); // 放行：扫描 A 令牌已失效，取消收场（finally 清理路径）
+    await pA; // 旧扫描以部分结果收场
+    expect(host.querySelector('.vv-code-scan-progress')).not.toBeNull(); // 核心：旧扫描的 hide 不得移除新扫描已接管的条
+    const hits = await pB; // 新扫描完成
+    expect(hits.length).toBeGreaterThan(0);
+    expect(host.querySelector('.vv-code-scan-progress')).toBeNull(); // 新扫描完成才移除
+    handle.destroy();
+  });
 });
