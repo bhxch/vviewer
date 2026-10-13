@@ -2437,4 +2437,49 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     }
     handle.destroy();
   });
+
+  // 项 F（Minor，W2-2）：scanLineText 补块失败的行按 '' 计入已扫（游标越过），续扫
+  // 永不回访——命中静默永久缺失。修法：块拉取失败时记录失败块起始行（failedResume），
+  // 收场游标不越过它；停机解除后的续扫自失败块起重扫（与项 E 配合覆盖失败区间）。
+  it('项 F 补块失败游标回退：收场游标不越过失败块，同 query 重搜重访块 1（命中不再缺失）', async () => {
+    stubResizeObserver();
+    attachHighlightClient({ highlight: async () => [] });
+    const lines: string[] = [];
+    for (let i = 0; i < 4200; i++) {
+      const head = i === 42 ? 'zzneedle early ' : i === 200 ? 'zzneedle in block1 ' : `row ${i} `;
+      lines.push(head + 'p'.repeat(Math.max(0, 1499 - head.length)) + '\n'); // 每行恰 1500B
+    }
+    const content = enc(lines.join('')); // ≈6.3MB ≈ 25 块 > 16：滚到底后早期块已逐出
+    const reads: RangeCall[] = [];
+    let readCalls = 0;
+    let block1Retries = 0;
+    const ctx: StreamCtx = {
+      size: content.length,
+      head: content.slice(0, 8192),
+      read: async (r) => {
+        readCalls += 1;
+        reads.push({ start: r.start, end: r.end });
+        // 初始前向喂块成功；扫描期对块 1 的重拉首次失败、续扫放行
+        if (r.start === WINDOW_BLOCK && readCalls > 25) {
+          block1Retries += 1;
+          if (block1Retries === 1) throw new Error('块 1 补拉失败（首扫）');
+        }
+        return content.slice(r.start, r.end + 1);
+      }
+    };
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    scrollCode(host, Number.MAX_SAFE_INTEGER); // 续读到 EOF
+    await vi.waitFor(() => expect(handle.getMeta().lines).toBe(4200));
+    expect(readCalls).toBe(25); // 自校验：初始前向喂块恰每块一次（与项 3 用例同基线）
+    const first = await handle.search('zzneedle');
+    expect(first.map((m) => m.line)).toEqual([42]); // 首扫：块 1 补拉失败，行 200 静默缺失
+    const readsAtStop = readCalls;
+    const second = await handle.search('zzneedle'); // 续扫自失败块 1 起始行（游标回退）
+    expect(readCalls).toBeGreaterThan(readsAtStop); // 续扫真实发生
+    expect(second.map((m) => m.line)).toEqual([42, 200]); // 命中不再缺失
+    const block1Reads = reads.filter((c) => c.start === WINDOW_BLOCK).length;
+    expect(block1Reads).toBe(3); // 块 1 读 = 初始喂块 + 首扫失败重拉 + 续扫重拉（read 再次请求块 1）
+    handle.destroy();
+  });
 });

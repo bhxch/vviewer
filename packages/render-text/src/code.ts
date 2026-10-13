@@ -1820,27 +1820,58 @@ function renderCodeWindowed(
 
   const delay = (ms: number): Promise<void> => new Promise<void>((r) => setTimeout(r, ms));
 
-  /** 行 i 的扫描文本：所需块缺驻留时按行序单飞补拉；补块失败该行以空串参与扫描
-   * （不可得 ≠ 命中断言，快照口径同源），不阻断全文扫描。failedBlocks 记忆本次
-   * 扫描内已失败的块号（项 3 突发收敛）：持续失败时同块只发一次失败请求（失败
-   * 粒度从「每行」收敛到「每块一次」），记忆命中的行直接空串跳过、下一块继续；
-   * 记忆按次扫描新建（runScan 内），续扫/换键重搜保留单次重试机会 */
-  async function scanLineText(i: number, failedBlocks: Set<number>): Promise<string> {
+  /**
+   * 行 i 的扫描文本：所需块缺驻留时按行序单飞补拉；补块失败返回 null（该项 F 语义：
+   * 该行以缺失参与本次扫描——不可得 ≠ 命中断言——但不计入已扫前缀，收场游标回退，
+   * 续扫重访）。failedBlocks 记忆本次扫描内已失败的块号（项 3 突发收敛）：持续失败
+   * 时同块只发一次失败请求（失败粒度从「每行」收敛到「每块一次」），记忆命中的行
+   * 直接跳过、下一块继续；记忆按次扫描新建（runScan 内），续扫/换键重搜保留单次
+   * 重试机会。onBlockFailed 上抛失败块号（runScan 据此算游标回退点，项 F）。
+   */
+  async function scanLineText(
+    i: number,
+    failedBlocks: Set<number>,
+    onBlockFailed: (b: number) => void
+  ): Promise<string | null> {
     const len = index.lengths[i] ?? 0;
     if (len === 0) return '';
     const [b0, b1] = lineBlockSpan(i);
     for (let b = b0; b <= b1; b++) {
       if (bs.has(b)) continue;
-      if (failedBlocks.has(b)) return ''; // 本扫描内该块已失败：不再逐行重试
+      if (failedBlocks.has(b)) return null; // 本扫描内该块已失败：不再逐行重试
       try {
         await bs.ensureBlock(b);
       } catch (err) {
         failedBlocks.add(b);
+        onBlockFailed(b);
         console.debug('[code] 搜索扫描补块失败（该块行以空串参与扫描）', err);
-        return '';
+        return null;
       }
     }
     return lineText(i);
+  }
+
+  /**
+   * 块 b 的起始行（项 F 游标回退点）：最大 l 使 offsets[l] ≤ 块起始逻辑字节。该行
+   * 可能跨本块与前块切口（行首在前块字节域）——自它起重扫恰好覆盖失败块全部行
+   * （失败行之前的同块行可能从未被扫过：跨块失败行先行触达失败块）。b=0 且 BOM
+   * 存在时逻辑字节为负，兜底返回行 0。
+   */
+  function blockStartLine(b: number): number {
+    const logical = b * bs.blockSize - bomLen;
+    let lo = 0;
+    let hi = index.offsets.length - 1;
+    let ans = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if ((index.offsets[mid] ?? 0) <= logical) {
+        ans = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return ans;
   }
 
   // ---------- 项 2（遗留清偿波 3）：后台扫描进度条（spec §4.3 承诺兑现） ----------
@@ -1918,6 +1949,14 @@ function renderCodeWindowed(
   ): Promise<SearchMatch[]> {
     const alive = (): boolean => !destroyed && scanSeq === mySeq;
     const failedBlocks = new Set<number>(); // 补拉失败块记忆（本次扫描一份，见 scanLineText）
+    // 项 F（W2-2）：失败块游标回退点（块起始行；-1 = 本次扫描无失败）。补块失败的
+    // 行不得计入已扫前缀（否则续扫永不回访、命中永久缺失）——收场游标不越过它，
+    // 停机解除后的续扫自失败块起重扫（与项 E 配合：重搜触发续扫覆盖失败区间）
+    let failedResume = -1;
+    const markFailedBlock = (b: number): void => {
+      const start = blockStartLine(b);
+      if (failedResume < 0 || start < failedResume) failedResume = start;
+    };
     let scanned = startFrom; // 已扫描行数（索引已提交行的前缀指针：断点续扫不重复）
     showScanProgress(mySeq); // 项 2：扫描开始即挂进度条（同键续扫/接管复用同一元素，项 A 属主切换）
     try {
@@ -1926,8 +1965,9 @@ function renderCodeWindowed(
         updateScanProgress(scanned, acc.length); // 项 2：外圈每轮一次（≈每块粒度，渲染节流）
         if (scanned < rows()) {
           for (; scanned < rows() && alive(); scanned++) {
-            const text = await scanLineText(scanned, failedBlocks);
+            const text = await scanLineText(scanned, failedBlocks, markFailedBlock);
             if (!alive()) return acc;
+            if (text === null) continue; // 项 F：缺失行不中断扫描，游标回退点已记
             if (text === '') continue;
             for (const m of searchCode([text], query, { caseSensitive })) {
               acc.push({ line: scanned, start: m.start, end: m.end, preview: m.preview });
@@ -1937,13 +1977,16 @@ function renderCodeWindowed(
             }
           }
           if (!alive()) return acc;
-          lastScanCursor = scanned; // 游标上行（续扫起点；取消后由换键方重置，不回写）
+          // 项 F：收场游标不越过失败块起点（同批多块失败取最早）；无失败原样上行
+          lastScanCursor = failedResume >= 0 ? Math.min(scanned, failedResume) : scanned;
           remountOrRefresh(); // 渐进落地：新行/新命中上屏（行数增长 → 重建 scroller）
           await delay(0); // 让出主线程：扫描期间滚动手感不受阻塞
           continue;
         }
         if (indexFinished) {
-          lastScanComplete = true; // 全文扫完：同键短路缓存恢复生效（项 2 分界）
+          // 项 F：EOF 已至但存在补块失败块——同键不得短路（部分覆盖），收场后同
+          // query 重搜续扫自失败块起点重访
+          lastScanComplete = failedResume < 0;
           return acc; // finishCodeIndex 已提交末尾空串条目
         }
         if (limitReached || continueFailed || encodingBroken) {
