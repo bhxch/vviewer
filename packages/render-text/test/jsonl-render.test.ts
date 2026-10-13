@@ -808,7 +808,8 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
     );
     expect(reads).toBe(STREAM_MAX_BYTES / BLOCK); // 恰 2048（修前 2049：越限一块）
     inst.destroy();
-  });
+  }, 20_000); // 整用例显式超时：一次滚动的 2046 次级联 update（DOM churn）在全仓
+  // 高负载下会超默认 5s（waitFor 的 10s 只约束等待循环，不约束整用例）——逻辑非慢路径
 
   // F1 回归钉（fix round 1）：size 已知 + head=全量 + 尺寸非块对齐——末块为部分
   // 预置块（nextBlock 停在 blockCount-1），构造期 atEnd 须为真（head 触达文件尾
