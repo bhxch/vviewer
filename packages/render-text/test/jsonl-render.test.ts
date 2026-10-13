@@ -884,4 +884,24 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
     //（status 元素的留存为 mountJsonlView destroy 既有语义，不在本项范围）
     expect(host.querySelector('.vv-jsonl-scroll')).toBeNull();
   });
+
+  // 项 D（Minor，W3-2）：jsonl 降级后 metaSize 未转投——`ctx.size ?? bs.confirmedBytes`
+  // 仍指旧底座：size 未知文件降级后状态栏 size 停在判脏前缀字节数。修法：对齐 code
+  // 整体转投口径——降级后经全量实例返回全量字节数（metaLines 同款）。
+  it('项 D 降级后 metaSize 转投全量：size 未知文件降级后 size=全量字节数（非判脏前缀）', async () => {
+    stubResizeObserver();
+    const content = utf8HeadGbTail(500, 500); // 干净 ≈750KB（块 0..2 前段）+ 脏 500 行 ≈809KB
+    const calls: RangeCall[] = [];
+    const host = mount();
+    const inst = (await jsonlRenderer.render(content.slice(0, 8192), host, source, det,
+      streamCtx({ size: null, content, head: content.slice(0, 8192), calls }))) as JsonlInstance;
+    await vi.waitFor(() => expect(host.querySelector('[data-line="0"]')).not.toBeNull());
+    expect(inst.getMeta().size).toBeLessThan(content.length); // 降级前：size 未知 → 已确认字节
+    scrollToBottom(host); // 续读触脏 → 嗅探判非 UTF-8 → 全量重渲
+    await vi.waitFor(() => {
+      expect(host.querySelector('.vv-jsonl-status')!.textContent).toBe(`共 ${1000} 行`);
+    });
+    expect(inst.getMeta().size).toBe(content.length); // 项 D：降级后转投全量字节（旧底座为判脏前缀）
+    inst.destroy();
+  });
 });

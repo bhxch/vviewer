@@ -809,7 +809,10 @@ async function renderJsonlWindowed(
     afterUpdate: maybeContinue,
     // 用户动作解除续读/回看停机（单次重试）——code.ts onUserScroll 同口径
     notifyUserAction: () => { continueFailed = false; reloadFailed = false; },
-    metaSize: () => ctx.size ?? bs.confirmedBytes,
+    // 项 D（遗留清偿波 3）：降级后 size 转投全量实例——`ctx.size ?? bs.confirmedBytes`
+    // 仍指旧底座，size 未知文件降级后状态栏 size 停在判脏前缀字节数；对齐 code 整体
+    // 转投口径（metaLines 同款），降级底座 length 即全量字节数
+    metaSize: () => fullInst?.getMeta().size ?? (ctx.size ?? bs.confirmedBytes),
     // 项 1：降级后行数转投全量实例（窗口索引停在判脏前缀，ViewerPane 的 meta 轮询
     // 面须读到全量重渲的行数；encoding 经 det 就地翻转、size 经 ctx.size 天然正确）
     metaLines: () => fullInst?.getMeta().lines ?? rows()
