@@ -1649,9 +1649,12 @@ function renderCodeWindowed(
         fullInst = await opts.onEncodingBroken!();
       })();
       downgradePromise = p;
-      // 滚动期降级无等待面：空 catch 防 unhandled rejection（首拉期降级经 start 的
-      // await 原始 promise，拒绝照常上抛走 whenReady 渲染期读失败面）
-      p.catch(() => {});
+      // 滚动期降级无等待面：catch 留痕防 unhandled rejection（项 C，W3-1——此前纯
+      // 静默，「已停在前缀」未落地日志；首拉期降级经 start 的 await 原始 promise，
+      // 拒绝照常上抛走 whenReady 渲染期读失败面，不经此处）
+      p.catch((err: unknown) => {
+        console.debug('[vviewer] 窗口降级读取失败，已停在前缀', err);
+      });
       return;
     }
     advanceCodeIndex(index, chunk);
