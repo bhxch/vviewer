@@ -18,6 +18,8 @@ import {
   attachHighlightRouter,
   evictOldestEntries,
   evictChunksByLines,
+  capChunkCoverage,
+  CHUNK_COVERAGE_MAX_ENTRIES,
   chunkRangeFor,
   mergeChunkLines,
   resolveHljsLang,
@@ -171,6 +173,28 @@ describe('evictOldestEntries（Map 插入序淘汰原语）', () => {
     const m = new Map<number, string>([[1, 'a'], [2, 'b']]);
     evictOldestEntries(m, CHUNK_CACHE_MAX_LINES);
     expect(m.size).toBe(2);
+  });
+});
+
+// R-1：chunkCoverage 与 chunk 缓存逐出联动加界——512MB 流式上限 × 短行下条目数
+// 无界增长收口为常量上限；被清条目的 chunk 由 hasChunkData 未处理面兜底重发
+describe('capChunkCoverage（chunkCoverage 条目加界，R-1）', () => {
+  it('超出上限按插入序清最旧，恰好收敛到上限', () => {
+    const m = new Map<number, number>();
+    for (let i = 0; i < CHUNK_COVERAGE_MAX_ENTRIES + 500; i++) m.set(i * CHUNK_LINES, CHUNK_LINES);
+    capChunkCoverage(m);
+    expect(m.size).toBe(CHUNK_COVERAGE_MAX_ENTRIES);
+    expect(m.has(0)).toBe(false); // 最旧的 500 条已清
+    expect([...m.keys()][0]).toBe(500 * CHUNK_LINES);
+    expect([...m.keys()][CHUNK_COVERAGE_MAX_ENTRIES - 1]).toBe(
+      (CHUNK_COVERAGE_MAX_ENTRIES + 499) * CHUNK_LINES
+    );
+  });
+  it('未超上限不动；上限常量为 4096 条（≈82 万行覆盖窗口，足够滚回复用）', () => {
+    const m = new Map<number, number>([[0, CHUNK_LINES], [CHUNK_LINES, CHUNK_LINES]]);
+    capChunkCoverage(m);
+    expect(m.size).toBe(2);
+    expect(CHUNK_COVERAGE_MAX_ENTRIES).toBe(4096);
   });
 });
 

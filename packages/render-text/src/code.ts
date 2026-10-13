@@ -124,6 +124,18 @@ export function evictOldestEntries<K, V>(m: Map<K, V>, max: number): void {
   }
 }
 
+/** chunkCoverage 条目上限（R-1 加界）：覆盖率条目与 chunk 缓存同阶只增不减，
+ * 512MB 流式上限 × 短行（~16B）理论可达数万条目——与 chunk 缓存逐出联动加界：
+ * 超出按插入序清最旧。被清条目的 chunk 若其高亮缓存仍在，hasChunkData 的覆盖率
+ * 裁决视为未处理而重发（覆盖式整 chunk 重算、set 回写条目，无正确性影响，代价
+ * 仅为极端长文件下最旧 chunk 的一次重高亮）；与「缓存缺席面兜底重发」同语义 */
+export const CHUNK_COVERAGE_MAX_ENTRIES = 4096;
+
+/** chunkCoverage 加界（纯函数，导出供单测）：超出上限按插入序清最旧（evictOldestEntries 复用） */
+export function capChunkCoverage(coverage: Map<number, number>): void {
+  evictOldestEntries(coverage, CHUNK_COVERAGE_MAX_ENTRIES);
+}
+
 /**
  * chunk 粒度逐出（纯函数）：把 chunk 缓存（startLine → 行 map）总行数裁到 ≤maxLines，
  * 超出版的最早 chunk 整个删除（行级半删会让 chunkKey 缓存标记失真——hasChunkData 按
@@ -1369,8 +1381,9 @@ function renderCodeWindowed(
     return (chunkCoverage.get(startLine) ?? 0) >= need;
   }
 
-  /** chunkKey → 处理时已覆盖的行数（hasChunkData 覆盖率裁决的依据；条目数与 chunk
-   * 缓存同阶且只增不减，缓存被 LRU 逐出后由缓存缺席面兜底重发，不另设逐出） */
+  /** chunkKey → 处理时已覆盖的行数（hasChunkData 覆盖率裁决的依据）：条目数与
+   * chunk 缓存同阶只增不减——R-1 加界（capChunkCoverage，写入点同步裁剪），缓存被
+   * LRU 逐出/条目被清最旧后由 hasChunkData 的未处理面兜底重发 */
   const chunkCoverage = new Map<number, number>();
 
   /** chunk 文本所需块是否驻留（pump 取数面前置）：未驻留 chunk 留队不处理，块经
@@ -1474,6 +1487,7 @@ function renderCodeWindowed(
         const merged = mergeChunkLines(res.intervals, chunkOffsets, res.baseLine);
         chunkCache.set(startLine, merged);
         chunkCoverage.set(startLine, lineCount);
+        capChunkCoverage(chunkCoverage); // R-1 加界：与 chunk 缓存逐出联动（见常量注）
         evictChunksByLines(chunkCache, CHUNK_CACHE_MAX_LINES);
         engine = 'tree-sitter';
         computeWhere = 'remote';
@@ -1499,6 +1513,7 @@ function renderCodeWindowed(
         if (destroyed) return;
         chunkCache.set(startLine, mergeChunkLines(intervals, chunkOffsets, startLine));
         chunkCoverage.set(startLine, lineCount);
+        capChunkCoverage(chunkCoverage); // R-1 加界：与 chunk 缓存逐出联动（见常量注）
         evictChunksByLines(chunkCache, CHUNK_CACHE_MAX_LINES);
         engine = 'tree-sitter';
         computeWhere = 'local';
@@ -1535,6 +1550,7 @@ function renderCodeWindowed(
     for (let k = 0; k < parts.length; k++) byLine.set(startLine + k, parts[k] ?? '');
     hljsChunkCache.set(startLine, byLine);
     chunkCoverage.set(startLine, lineCount);
+    capChunkCoverage(chunkCoverage); // R-1 加界：与 chunk 缓存逐出联动（见常量注）
     evictChunksByLines(hljsChunkCache, CHUNK_CACHE_MAX_LINES);
     if (engine !== 'tree-sitter') {
       engine = 'hljs';
