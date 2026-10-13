@@ -2340,4 +2340,50 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     expect(host.querySelector('.vv-code-scan-progress')).toBeNull(); // 新扫描完成才移除
     handle.destroy();
   });
+
+  // 项 B（Minor，W3-5）：进度条更新节流——拉块等待期 SCAN_POLL_MS=4ms 自旋每轮
+  // updateScanProgress（≈250Hz DOM 写）。修法：updateScanProgress 内部 ≥100ms 才写
+  // DOM；收场路径属主绕过节流强制末写。轮询形态 = 滚动续读持有 pulling（扫描在
+  // await pullBlock 之前自旋），故先触发续读挂闸、再发起搜索。
+  it('项 B 进度更新节流：拉块等待轮询期 DOM 写频次受限（≥100ms 间隔，非每轮 4ms 一写）', async () => {
+    stubResizeObserver();
+    const content = enc(codeLines(1400)); // 2.1MB ≈ 9 块：首块后仍有大量块可拉
+    let release: (() => void) | null = null;
+    let gated = false;
+    const ctx = streamCtx({ size: content.length, content, head: content.slice(0, 8192) });
+    const rawRead = ctx.read.bind(ctx);
+    ctx.read = async (r) => {
+      if (r.start >= WINDOW_BLOCK && !gated) {
+        gated = true; // 首个续块长闸：滚动续读持有 pulling，扫描进入 4ms 轮询等待期
+        await new Promise<void>((res) => {
+          release = res;
+        });
+      }
+      return rawRead(r);
+    };
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
+    scrollCode(host, Number.MAX_SAFE_INTEGER); // 滚动续读在飞：pulling 由续读持有（块 1 挂闸）
+    await vi.waitFor(() => expect(release).not.toBeNull());
+    const pending = handle.search('qqq-no-hit'); // 续读在飞期间启动扫描 → 4ms 轮询等待期
+    await vi.waitFor(() =>
+      expect(host.querySelector('.vv-code-scan-progress')!.textContent).not.toBe('')
+    ); // 扫描已挂条并写过首轮进度（自证非空转）
+    const bar = host.querySelector('.vv-code-scan-progress')!;
+    let writes = 0;
+    let text = bar.textContent;
+    Object.defineProperty(bar, 'textContent', {
+      get: () => text,
+      set: (v: string) => {
+        writes += 1;
+        text = v;
+      }
+    });
+    await new Promise((r) => setTimeout(r, 250)); // 轮询 ≈60 轮：未节流会写 ~60 次
+    expect(writes).toBeLessThanOrEqual(3); // ≥100ms 节流：250ms 窗口至多 3 次
+    release!();
+    await pending;
+    handle.destroy();
+  });
 });

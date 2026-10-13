@@ -1875,9 +1875,16 @@ function renderCodeWindowed(
   }
 
   /** 进度文本更新（扫描主循环外圈调用）：字节游标 = 已扫描行前缀的字节终点
-   * （scannedRow==rows() 的拉块间隙取已加载末行行尾，显示值不回退；+BOM 换算文件字节） */
-  function updateScanProgress(scannedRow: number, hits: number): void {
+   * （scannedRow==rows() 的拉块间隙取已加载末行行尾，显示值不回退；+BOM 换算文件字节）。
+   * 项 B（W3-5）：内部按时间节流——拉块等待期 SCAN_POLL_MS=4ms 自旋每轮调用
+   * （≈250Hz），≥100ms 才写 DOM；force=true（属主收场末写）绕过节流强制刷新 */
+  const SCAN_PROGRESS_THROTTLE_MS = 100;
+  let lastProgressWriteAt = 0;
+  function updateScanProgress(scannedRow: number, hits: number, force = false): void {
     if (scanBar === null) return;
+    const now = Date.now();
+    if (!force && now - lastProgressWriteAt < SCAN_PROGRESS_THROTTLE_MS) return;
+    lastProgressWriteAt = now;
     const at = Math.min(scannedRow, index.offsets.length) - 1;
     const bytes = (at >= 0 ? (index.offsets[at] ?? 0) + (index.lengths[at] ?? 0) : 0) + bomLen;
     const where =
@@ -1957,7 +1964,10 @@ function renderCodeWindowed(
         }
       }
     } finally {
-      hideScanProgress(mySeq); // 项 2：完成/取消/失败三态统一移除（项 A：非属主不移除；destroy 即时收口另行直调）
+      // 项 B：收场末次必写（属主才写——非属主不得覆盖新扫描已接管的进度文本，
+      // 项 A）；随后统一移除（destroy 即时收口另行直调）
+      if (scanBarOwnerSeq === mySeq) updateScanProgress(scanned, acc.length, true);
+      hideScanProgress(mySeq);
     }
   }
 
