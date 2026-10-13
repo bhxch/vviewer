@@ -3,6 +3,8 @@ import hljs from 'highlight.js';
 import { HighlightCanceledError } from '@vviewer/highlight';
 import { RemoteComputeError, type ComputeWhere, type FileSource, type RenderedInstance, type StreamCtx } from '@vviewer/core';
 import { STREAM_MAX_BYTES } from '../src/blockStream';
+import * as searchModule from '../src/search';
+import { searchCode as originalSearchCode } from '../src/search';
 import {
   buildLineIndex,
   buildLineOffsets,
@@ -2384,6 +2386,52 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     expect(writes).toBeLessThanOrEqual(3); // ≥100ms 节流：250ms 窗口至多 3 次
     release!();
     await pending;
+    handle.destroy();
+  });
+
+  // 项 E（Minor，W2-1）：runScan 异常路径退出时 search 的 catch 兜底不回写
+  // lastScanComplete=false——残留 true 可使后续同键搜索以部分结果短路。修法：
+  // catch 内补置位。异常注入面：searchCode 模块导出 spy（扫描推进途中抛）。
+  it('项 E 扫描异常收场回写完成旗标：同 query 重搜重新扫描（非短路部分结果）', async () => {
+    stubResizeObserver();
+    attachHighlightClient({ highlight: async () => [] });
+    const lines: string[] = [];
+    for (let i = 0; i < 3400; i++) {
+      const head = i === 10 ? 'alpha here ' : i === 3300 ? 'beta deep ' : `row ${i} `;
+      lines.push(head + 'p'.repeat(Math.max(0, 1499 - head.length)) + '\n'); // 每行恰 1500B
+    }
+    const content = enc(lines.join('')); // ≈5.1MB ≈ 20 块
+    let readCalls = 0;
+    const ctx: StreamCtx = {
+      size: content.length,
+      head: content.slice(0, 8192),
+      read: async (r) => {
+        readCalls += 1;
+        return content.slice(r.start, r.end + 1);
+      }
+    };
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
+    const first = await handle.search('alpha'); // 全文完成：完成旗标置 true
+    expect(first.map((m) => m.line)).toEqual([10]);
+    const spy = vi.spyOn(searchModule, 'searchCode');
+    try {
+      let injected = 0;
+      spy.mockImplementation((linesArg, query, opts) => {
+        injected += 1;
+        if (injected > 200) throw new Error('扫描注入异常'); // 扫描推进途中抛（约行 200 后）
+        return originalSearchCode(linesArg, query, opts);
+      });
+      const partial = await handle.search('beta'); // 换键扫描异常收场：catch 兜底部分结果
+      expect(partial).toEqual([]); // beta 在未扫区（行 3300）：空手收场
+      const readsAtFail = readCalls;
+      const second = await handle.search('beta'); // 同 query 重搜：旗标已回写 false → 重扫
+      expect(readCalls).toBeGreaterThan(readsAtFail); // 重扫真实发生（非短路零读）
+      expect(second.map((m) => m.line)).toEqual([3300]); // 完整命中（非部分结果短路）
+    } finally {
+      spy.mockRestore(); // 注入不得泄漏至后续用例
+    }
     handle.destroy();
   });
 });

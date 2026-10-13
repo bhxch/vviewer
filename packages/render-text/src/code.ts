@@ -2067,6 +2067,9 @@ function renderCodeWindowed(
       }
       const promise = runScan(lastAcc, query, caseSensitive, mySeq, lastScanCursor).catch(
         (err: unknown) => {
+          // 项 E（W2-1）：异常收场非全文完成——不回写则残留 true（上次全文完成的
+          // 旗标跨换键不重置），后续同键搜索会以部分结果短路
+          lastScanComplete = false;
           console.debug('[code] 后台全文扫描异常（返回已得部分结果）', err);
           return lastAcc;
         }
