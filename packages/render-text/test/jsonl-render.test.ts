@@ -316,6 +316,26 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
     inst.destroy();
   });
 
+  // 项 4（ViewerPane meta 轮询的消费面契约）：apps/web 无 .svelte 组件测试基建
+  //（根 vitest 配置无 svelte 插件），此处钉渲染层契约——窗口模式 getMeta 的
+  // size/lines 随续读动态增长（ViewerPane 的 250ms 周期重读上行消费的就是它，
+  // 重读非 no-op）；组件侧接线由 svelte-check 与 e2e 兜底（报告已说明取舍）。
+  it('meta 动态消费面：size 未知时 getMeta 的 size/lines 随续读增长，EOF 后 size=全量', async () => {
+    stubResizeObserver();
+    const text = padLines(400, 1500);
+    const content = enc(text);
+    const host = mount();
+    const inst = (await jsonlRenderer.render(content.slice(0, 8192), host, source, det,
+      streamCtx({ size: null, content, head: content.slice(0, 8192) }))) as JsonlInstance;
+    await vi.waitFor(() => expect(inst.getMeta().lines).toBeGreaterThan(0));
+    const first = inst.getMeta();
+    expect(first.size).toBeLessThan(content.length); // 首屏：size 未知 → 已确认字节（未 EOF）
+    scrollToBottom(host);
+    await vi.waitFor(() => expect(inst.getMeta().lines).toBe(400));
+    expect(inst.getMeta().size).toBe(content.length); // EOF：已确认字节=全量（轮询可见增长）
+    inst.destroy();
+  });
+
   it('滚动到底触发续读至 EOF：状态条变「共 N 行」；EOF 后再滚动无新 read（finish 后不再 advance）', async () => {
     stubResizeObserver();
     const text = padLines(400, 1500);

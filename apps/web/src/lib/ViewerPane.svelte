@@ -41,13 +41,17 @@ import SearchPanel from './SearchPanel.svelte';
   let engineLabel = $state('');
   /** 高亮计算执行位置（M6）：'远程'/'本地'/''（'' = 未发生计算路由或非 code 实例） */
   let computeWhereLabel = $state('');
-  /** 状态栏元数据段（BUG-04）：「编码: … · 语言: … · 大小: … · 行: …」（实例 getMeta
-   * 一次性读取——渲染期静态值，无需轮询；错误卡片/无 meta 实例为空段） */
+  /** 状态栏元数据段（BUG-04）：「编码: … · 语言: … · 大小: … · 行: …」（带 getMeta
+   * 的实例经 startWatchMeta 首读 + 250ms 周期重读——窗口流式实例的行数/大小随加载
+   * 动态增长，终审 M-3 同族；错误卡片/无 meta 实例为空段） */
   let metaLabel = $state('');
   /** code 渲染器的内部滚动容器（.vv-code-pre）；其余渲染器为 null（滚动在外层 .vv-viewer-scroll） */
   let scrollHost: HTMLElement | null = null;
   /** 引擎轮询句柄：高亮结果异步到达（pending→tree-sitter/hljs），轻量轮询反映最新值 */
   let engineTimer: ReturnType<typeof setInterval> | null = null;
+  /** meta 轮询句柄：窗口流式实例的行数/大小随加载增长（watchEngine 的 250ms 同款
+   * 先例；metaStore 同一上行通道），快照未变不写 */
+  let metaTimer: ReturnType<typeof setInterval> | null = null;
   /** 文件内搜索面板开关（Task 6）：'/' 打开，Esc 关闭，tab 切换随之关闭 */
   let searchOpen = $state(false);
 
@@ -137,6 +141,13 @@ import SearchPanel from './SearchPanel.svelte';
     metaLabel = '';
   }
 
+  function stopWatchMeta(): void {
+    if (metaTimer !== null) {
+      clearInterval(metaTimer);
+      metaTimer = null;
+    }
+  }
+
   /** 实例元数据 → 状态栏段 + 属性面板（BUG-04；'getMeta' in inst 探测，不动 core 类型）。
    * openWith（C 项入口 B）：dispatch 返回实例时上行候选与当前项（含渲染失败的错误
    * 卡片，候选经 openWithOf 守卫过滤），两分支共用（无 meta 实例也有打开方式下拉）；
@@ -176,6 +187,34 @@ import SearchPanel from './SearchPanel.svelte';
     });
   }
 
+  /**
+   * 实例元数据观察（项 4，终审 M-3 同族）：首读 + 250ms 周期重读上行（数据检查器
+   * 轮询 effect / watchEngine 的 setInterval 同款先例；metaStore 同一上行通道）。
+   * 窗口流式实例（code/jsonl）行数/大小随加载动态增长，一次性读取使状态栏/属性
+   * 面板停在首帧值——周期重读修正。快照未变不写（避免无效触发 MetaPanel 重渲染，
+   * 检查器 lastKey 同款）；无 getMeta 实例只做单次读取（现状语义不变）。
+   */
+  function startWatchMeta(
+    inst: RenderedInstance,
+    tabName: string,
+    sourceLabel: string,
+    openWith: FileOpenWith | null
+  ): void {
+    stopWatchMeta();
+    readInstanceMeta(inst, tabName, sourceLabel, openWith);
+    const readMeta = (inst as { getMeta?: () => CodeFileMeta }).getMeta;
+    if (typeof readMeta !== 'function') return;
+    const keyOf = (m: CodeFileMeta): string =>
+      `${m.encoding ?? ''}:${m.lang ?? ''}:${m.size}:${m.lines}`;
+    let lastKey = keyOf(readMeta.call(inst));
+    metaTimer = setInterval(() => {
+      const key = keyOf(readMeta.call(inst));
+      if (key === lastKey) return;
+      lastKey = key;
+      readInstanceMeta(inst, tabName, sourceLabel, openWith);
+    }, 250);
+  }
+
   $effect(() => {
     if (!host || !tab || tab.source.path === '') return;
     const current = tab;
@@ -201,12 +240,14 @@ import SearchPanel from './SearchPanel.svelte';
         live = res.instance;
         instance = res.instance;
         // BUG-04：实例元数据 → 状态栏「编码/语言/大小/行」段 + 右栏属性面板。
+        // 项 4（M-3 同族）：首读 + 250ms 周期重读（窗口流式实例的行数/大小随加载
+        // 动态增长，一次性读取停在首帧值）。
         // C 项入口 B：openWith 候选与当前项随 dispatch 返回上行——渲染失败的错误卡片
         // 也走本分支（rendererId 'error' 未注册，被 openWithOf 存在性守卫滤出候选，
         // current 维持 ''/自动，label 不回退英文 id）。错误卡片上的「以纯文本/以 hex
         // 打开」在卡片内部以 rendererOverride 重派 dispatch、不经 setRendererOverride，
         // 故 open-as 成功后本下拉维持「自动」不跟随（临时查看不落 override）。
-        readInstanceMeta(
+        startWatchMeta(
           res.instance,
           current.source.name,
           current.source.storeLabel,
@@ -257,6 +298,7 @@ import SearchPanel from './SearchPanel.svelte';
       cancelled = true;
       cancelAnimationFrame(rafId);
       stopWatchEngine();
+      stopWatchMeta(); // meta 轮询随实例销毁停止（readInstanceMeta 通道上行面）
       setFileMeta(null); // tab 切换/销毁：属性面板随之清空
       ontoc?.([]); // tab 切换/销毁：右栏目录随之清空
       scrollHost?.removeEventListener('scroll', onScroll);
