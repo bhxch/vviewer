@@ -2492,4 +2492,48 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     expect(block1Reads).toBe(3); // 块 1 读 = 初始喂块 + 首扫失败重拉 + 续扫重拉（read 再次请求块 1）
     handle.destroy();
   });
+
+  // 项 F 残留角（复审）：startFrom=0 的同键续扫（块 0 命中后扫描途中异常、游标未
+  // 写点）——截断无条件执行（不按 startFrom > 0 设门）后重扫自 0 重收，命中不重复。
+  it('项 F 残留角：块 0 命中后扫描异常（游标未写）——同 query 重搜命中不重复', async () => {
+    stubResizeObserver();
+    attachHighlightClient({ highlight: async () => [] });
+    const lines: string[] = [];
+    for (let i = 0; i < 3400; i++) {
+      const head = i === 0 ? 'aa early ' : i === 3000 ? 'aa deep ' : `row ${i} `;
+      lines.push(head + 'p'.repeat(Math.max(0, 1499 - head.length)) + '\n'); // 每行恰 1500B
+    }
+    const content = enc(lines.join('')); // ≈5.1MB ≈ 20 块
+    let readCalls = 0;
+    const ctx: StreamCtx = {
+      size: content.length,
+      head: content.slice(0, 8192),
+      read: async (r) => {
+        readCalls += 1;
+        return content.slice(r.start, r.end + 1);
+      }
+    };
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
+    const spy = vi.spyOn(searchModule, 'searchCode');
+    try {
+      let injected = 0;
+      spy.mockImplementation((linesArg, query, opts) => {
+        injected += 1;
+        // 块 0 内、行 0 命中已入集后的下一行抛（游标未写点：异常前无块级检查点）
+        if (injected === 2) throw new Error('扫描注入异常'); // 行 0 已命中入 acc、检查点未写
+        return originalSearchCode(linesArg, query, opts);
+      });
+      const partial = await handle.search('aa'); // 异常收场：游标残留 0（未达块级检查点，
+      // lastAcc 未同步——部分结果只在检查点暴露），本断言锚定该语义
+      expect(partial).toEqual([]);
+      spy.mockRestore();
+      const second = await handle.search('aa'); // 同 query 重搜：自 0 重扫
+      expect(second.map((m) => m.line)).toEqual([0, 3000]); // 无重复（截断无条件生效）
+    } finally {
+      spy.mockRestore();
+    }
+    handle.destroy();
+  });
 });

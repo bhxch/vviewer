@@ -1961,9 +1961,11 @@ function renderCodeWindowed(
     // 重扫——既有命中集中行号 ≥ startFrom 的条目（首扫在失败块之后已成功扫描的行）
     // 须先截断，否则重扫再 push 一次：命中数虚高、gotoMatch 索引错位、行级高亮
     // 区间重复。双截：lastAcc（按扫描行序升序，线性找首个越界条目截尾）+
-    // searchHitsByLine（键为行号，删越界键）。换键重搜 startFrom 恒 0 且命中集已
-    // 重置，此截断为空操作。
-    if (startFrom > 0) {
+    // searchHitsByLine（键为行号，删越界键）。截断无条件执行（不按 startFrom > 0
+    // 设门）：startFrom=0 的同键续扫（块 0 拉取失败回退/首写点前异常的残留角）
+    // 同样可能有已入集命中，重扫自 0 重收——截断即清空，语义仍正确；换键重搜
+    // 命中集已重置，截断为空操作。
+    {
       let cut = acc.length;
       for (let i = 0; i < acc.length; i++) {
         if (acc[i]!.line >= startFrom) {
