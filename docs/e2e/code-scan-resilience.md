@@ -18,21 +18,21 @@ code 渲染器窗口模式（`packages/render-text/src/code.ts`）的后台全�
 
 ## 2. 场景清单
 
-公共环境（构造见第 4 节）：vite preview :4173 纯前端页面，远端来源由 spec 内 node:http 假服务器模拟（跨源 + CORS），`/api/file` 请求经 page.on('response') 逐条计量（Range 头 + 字节数）。块大小 256KB（`CODE_WINDOW_BLOCK_BYTES`），块表 LRU 16 块。套件跑 chromium + mobile 双 project。
+公共环境（构造见第 4 节）：vite preview :4173 纯前端页面，远端来源由 spec 内 node:http 假服务器模拟（跨源 + CORS + OPTIONS 预检），`/api/file` 请求经 page.on('response') 逐条计量（Range 头 + HTTP 状态 + 字节数）。块大小 256KB（`CODE_WINDOW_BLOCK_BYTES`），块表 LRU 16 块。套件跑 chromium + mobile 双 project。全部 11 场景已实跑锚定（b-code-scan-resilience.spec.ts，双 project 22/22 passed）。
 
 | 编号 | 前置条件 | 步骤 | 期望 | 关联缺陷 |
 | --- | --- | --- | --- | --- |
-| SCAN-01 | 假服务器 10MB js（40 块，布点若干命中）；已打开进窗口模式 | ① `/` 打开搜索面板输入无命中词触发全文扫描；② 轮询读取 `.vv-code-scan-progress` 文本（两次间隔 ≥300ms）；③ `stats.settled()` 后对照已拉块数 | 扫描期间进度条可见且文本匹配「扫描中 N%（已命中 M 处）」（size 已知 % 形态，code.ts:1926）；N% 随块落地单调不减；全程无全量 200 | BUG-100 |
-| SCAN-02 | 同 SCAN-01 | ① 等扫描至 EOF 收场（计数终值落定）；② 查 `.vv-code-scan-progress`；③ 断言 `.vv-search-count` 终值与布点一致 | 扫描完成后进度条移除（count 0）；命中计数与构造布点精确一致 | BUG-100 |
-| SCAN-03 | 同 SCAN-01，另加 stall 门（块 2+ 应答挂起） | ① 触发扫描，等进度条可见；② Esc 关闭面板；③ 断言进度条；④ releaseStall 后照常新搜索 | 取消后进度条同步移除（IO-10 只断言面板关闭与 IO 计量，本锚补 UI 面）；无悬挂请求（stall 放行后挂起应答有归宿） | BUG-100 |
-| SCAN-04 | 同 SCAN-03 | ① 扫描 A 在飞（挂在块 2）；② 输入新 query B；③ 断言进度条仍在；④ releaseStall；⑤ 等扫描 B 完成 | 在飞换 query 时进度条不被旧扫描的收场清理误删（ffab040 属主 scanSeq 语义：条被扫描 B 接管持续推进）；B 完成后条移除；B 命中数与 B 布点一致（A 的布点不入集） | BUG-100 |
-| SCAN-05 | 假服务器条目**不带 size**（2MB js）；已打开（size 未知仍窗口流式） | ① 触发全文扫描；② 轮询进度条文本；③ 等收场 | 进度文本匹配「扫描中 · 已扫描 N KB（已命中 M 处）」（size 未知 KB 形态，code.ts:1927）；EOF 短读后收场、条移除 | BUG-100 |
-| SCAN-06 | 同 SCAN-01，扫描完整跑完 | ① 记录首次扫描终值与计量数；② 清空搜索再输入同一 query；③ `stats.settled()` 对照计量增量 | 同 query 重搜零新增 /api/file 请求（lastScanComplete 短路，4102b26）；计数与首次完全一致 | BUG-101 |
-| SCAN-07 | 同 SCAN-03（stall 门块 2+），布点分属块 0 与块 5 | ① 扫描挂起在块 2 时 Esc（部分收场，游标停块 2）；② releaseStall；③ 重新输入同一 query；④ 等终值并对照计量 | 收场后再搜不短路（9ed0626：异常收场回写完成旗标）：出现块 2 起的续扫请求；续扫起扫前截断游标后既有命中（6076448/c019a1e）：终值计数恰为全部布点、每布点行高亮恰一次（无重复入集）；块 0~1 不重读（游标续扫，4102b26） | BUG-101 |
-| SCAN-08 | 假服务器 fail 门（块 3 起 Range 应答 500 直至放行），布点分属块 1 与块 5 | ① 触发扫描：块 3 补块失败→收场（部分结果）；② 记录终值（缺块 5 命中）；③ releaseFail；④ 同 query 重搜；⑤ 对照终值与计量 | ① 阶段收场非崩溃、计数=块 0~2 布点（失败块行以缺失参与，5cd1698 每块收敛不逐行重试——块 3~N 只各失败一次）；④ 重搜后块 5 命中被找到（e75c59e 游标回退失败块起点，缺失行不被永久跳过）；终值=全部布点且无重复；二阶段请求自块 3 起（块 0~2 不重读） | BUG-102 |
-| SCAN-09 | 本地目录注入（__vvOpenDirImpl）：10MB js 单文件，唯一深命中词落在约 30 万行处 | ① Ctrl+Shift+F 全局搜索命中词；② 点击该文件命中行；③ 等渲染完成，断言 `.vv-code-line[data-line="<深行号>"]` 内容含命中词；④ 查无错误卡片 | revealLine 对未加载行驱动续读后跳转（d37fcd0）：目标行真实渲染且内容与构造一致（BUG-09 全局搜索跳大文件不因「行未入索引静默丢弃」失效）；无错误卡片 | —（d37fcd0 回归锚） |
-| SCAN-10 | 假服务器 6MB js（24 块 >16 块 LRU），fail 门只放行前 1 次块 0 重拉（首轮回看重拉 500 一次） | ① 打开并滚动到底（块 0 被逐出）；② 滚回顶部触发回看重拉（首拒）；③ 观察 2s 内计量增量；④ 再次滚离又滚回（用户动作重试） | ② 首次回看重拉失败不停机不崩溃：无请求风暴（停机闩 90f4ca5：增量有界，前缀行保持占位/已渲染内容）；④ 重试成功后顶部行内容与构造一致 | —（90f4ca5 回归锚） |
-| SCAN-11 | 同 SCAN-03 | ① 扫描挂起在块 2 时读取 `.vv-search-count`；② releaseStall；③ 等终值 | 命中渐进可用：挂起阶段计数已反映已扫块布点（spec §4.3「命中即时并入命中集并重绘」）；放行后终值正确 | —（spec §4.3 渐进承诺锚） |
+| SCAN-01 | 假服务器 10MB js（40 块，无布点）；已打开进窗口模式；206 应答统一延迟 60ms（确定性撑采样窗） | ① `/` 打开搜索面板输入无命中词触发全文扫描；② 页内 100ms 间隔采样器抓取 `.vv-code-scan-progress` 文本（条在位才采样）；③ 以 IO 事实收场（块 39 Range 已拉取）后取全部样本 | 扫描期间进度条可见且文本匹配「扫描中 N%（已命中 0 处）」（size 已知 % 形态，code.ts:1926）；N% 随扫描推进单调不减且末样本 >30%（已离开起扫段）；全程无全量 200。注意：面板计数完成制，扫描期间恒「无结果」，不可作完成信号 | BUG-100 |
+| SCAN-02 | 假服务器 10MB js（40 块，布点行 1000/21000 分属块 0/5）；已打开 | ① 输入布点词等扫描收场；② 查 `.vv-code-scan-progress`；③ 断言 `.vv-search-count` 终值与 Enter 导航 | 扫描完成后进度条移除（count 0）；计数 1/2→Enter→2/2，active 行号与两布点逐一吻合 | BUG-100 |
+| SCAN-03 | 同 SCAN-02，另加 stall 门（块 2+ 应答挂起） | ① 触发扫描，等进度条可见（计量停在探针+块 0+块 1）；② Esc 关闭面板；③ releaseStall 等块 2 应答落地；④ 断言进度条后照常新搜索 | 挂起应答有归宿（块 2 落地）且扫描收场后进度条同步移除（收场在放行后——挂起读不可中断，取消令牌在下一检查点生效；IO-10 只断言面板关闭与 IO 计量，本锚补 UI 面）；放行后新搜索照常完成 | BUG-100 |
+| SCAN-04 | 同 SCAN-03 | ① 扫描 A（无命中词）在飞挂在块 2；② fill 替换输入为新 query B（布点词）；③ 断言进度条仍在且文本出现「已命中 1 处」（B 接管后块 0 布点渐进入集）；④ releaseStall 后等块 3 已发出（⇒ A 必已退出）再断进度条仍在；⑤ 等 B 完成 | 在飞换 query 时进度条不被旧扫描的收场清理误删（ffab040 属主 scanSeq 语义：条被 B 接管持续推进、A 收场清理属主不符为 no-op）；B 完成后条移除；计数 1/2 与 B 布点一致（A 零命中不入集） | BUG-100 |
+| SCAN-05 | 假服务器条目**不带 size**（2MB js，8 块）；已打开（size 未知仍窗口流式）；206 应答延迟 100ms | ① 触发布点词全文扫描；② 页内采样器抓进度条文本；③ 等计数 1/2 收场 | 进度文本匹配「扫描中 · 已扫描 N KB（已命中 M 处）」（size 未知 KB 形态，code.ts:1927），KB 数单调不减；块 8 出现 0 字节 EOF 短读探测（Range `bytes=2097152-2359295` 应答 0 字节）后收场、条移除 | BUG-100 |
+| SCAN-06 | 同 SCAN-02，扫描完整跑完 | ① 记录首次扫描计数；② Enter 步进到第二布点（改变 current/active，使短路重搜的回落可观测）并等 IO 落定；③ 面板保持开启，向输入框重派发**同值 input 事件**（等价全选重贴同词；清空再输入是换键，会重置命中集与游标，不是同键重搜）；④ 对照计量增量 | 同键重搜零扫描 IO（lastScanComplete 短路，4102b26）：新请求至多 1 条且只能是 gotoMatch 的块 0 缺驻补拉（本例视口停在顶部持续触新块 0 时实测为 0 条）；短路回归（重扫全文）时 39+ 块级增量必红；计数回落 1/2、active 回首布点（证明重搜真实跑过且秒回） | BUG-101 |
+| SCAN-07 | 同 SCAN-03（stall 门块 2+），布点行 1000/21000 分属块 0/5 | ① 扫描挂起在块 2 时 Esc（部分收场，游标停块 2）；② releaseStall（挂起块 2 落地）；③ 重开面板输入同一 query；④ 等计数 1/2 与 Enter 导航 2/2 | 收场后再搜不短路（9ed0626：异常收场回写完成旗标）：续扫至 EOF（计数落定）；扫描前沿块 1..39 各恰拉取一次（6076448/c019a1e 起扫前截断 + 游标续扫 4102b26：无重复 Range、无重读回环）；块 0 除打开首拉外至多 2 次（视口停在顶部，其所在块被 LRU 逐出后经回看重拉补齐，属合法 backtracking 补块非扫描重读）；终值 2 布点无重复入集 | BUG-101 |
+| SCAN-08 | 假服务器 fail 门（块 3 起 Range 应答 500 直至放行），布点行 5000/21000 分属块 1（门前）与块 5（门后） | ① 触发扫描：块 3 补块失败→收场（部分结果）；② 记录终值（缺块 5 命中）与 500 计量；③ releaseFail；④ 同键重搜（同值 input 事件）；⑤ 对照终值与计量 | ① 阶段收场非崩溃、计数 1/1（仅门前布点）、500 恰一条死在块 3（5cd1698 失败块一次请求，无重试风暴）；④ 重搜后块 5 布点被补全（计数 1/2，e75c59e 游标回退失败块起点，缺失行不被永久跳过）；二阶段首请求即块 3 的 206 重试（游标续扫）、块 2 不重读、扫描前沿块 4..39 各恰一次；全程块 3 恰 2 次（500+206）、块 0 恰 1 次 | BUG-102 |
+| SCAN-09 | 假服务器 ~19.5MB js（79 块，唯一布点行 300000 ∈ 块 73）+ **POST /api/search 固定 NDJSON 命中帧**（1 起行 300001、text 为该行构造原文）；已连接未开文件 | ① Ctrl+Shift+F 全局搜索布点词（远端 ripgrep 通道）；② 点 `.vv-gsearch-row` 命中行；③ 等渲染完成，断言 `.vv-code-line[data-line="300000"]` 内容含布点词；④ 查无错误卡片 | revealLine 对未加载行驱动续读后跳转（d37fcd0）：目标行真实渲染且内容与构造一致；IO 证据：续读按 256KB 块步进（≥探针+74 块、块 73 在列）、无全量 200。注意：本地全局搜索单文件 >2MB 被过滤（core search.ts GREP_MAX_FILE_BYTES），大文件「命中点击打开」只能走远端通道——这正是 BUG-09 的真实触发形态 | —（d37fcd0 回归锚） |
+| SCAN-10 | 假服务器 6MB js（24 块 >16 块 LRU），failOnce 门只对块 0 整块 Range 的第 2 次请求（首轮回看重拉）500 一次（skip=1 放过打开期首拉） | ① 打开并贴底滚动至 EOF（块 0 被逐出）；② 滚回顶部（缺块占位行 + 回看重拉首拒）；③ 观察 1.5s 内计量增量；④ 再次滚离又滚回（用户动作重试） | ② 首次回看重拉 500 恰一次、占位行维持（gutter 无正文）；③ 停机闩 90f4ca5：1.5s 零新增请求（无风暴）、无错误卡片；④ 重试成功后顶部行内容与构造一致（块 0 全程恰 206/500/206 三次） | —（90f4ca5 回归锚） |
+| SCAN-11 | 同 SCAN-03，另加 206 应答延迟 120ms（块 1 落地晚于 100ms 进度节流窗，渐进文本可确定性采样） | ① 触发布点词扫描，等计量停在块 2 门上；② 断言进度条文本与面板计数；③ 滚动至布点行 1000 断言行级类与词级命中；④ releaseStall 等终值 | 命中渐进可用：挂起阶段进度条已显示「已命中 1 处」（spec §4.3「命中即时并入命中集并重绘」；对照：面板计数完成制仍「无结果」）；行 1000 具 `.vv-search-hit-line` 行级背景且词级命中可见——先于全文完成上屏；放行后终值 1/2 正确、条移除 | —（spec §4.3 渐进承诺锚） |
 
 ## 3. 关联缺陷的验收行为
 
@@ -69,22 +69,22 @@ code 渲染器窗口模式（`packages/render-text/src/code.ts`）的后台全�
 ### 4.1 套件与 helper
 
 - default 套件（`apps/web/playwright.config.ts`：vite preview :4173，chromium+mobile 双 project，workers 3，retries 1）。
-- spec：`apps/web/e2e/b-code-scan-resilience.spec.ts`；共享 helper：`apps/web/e2e/b-stream-resilience-helpers.ts`（本域与 JVL/DEG 三域共用，自包含实现，不 import 既有 spec 内未导出的装置）：IoStats 计量类（同 b-io-streaming 口径：过滤 /api/file，记录 Range 头与响应字节数）、startStreamFakeServer（b-io-streaming startIoFakeServer 的扩展版：stall 门 + fail 门（500 直至 release）+ rangeless 模式 + 条目省略 size + notifyChanged SSE 注入）、connectForm/openRemoteCodeFile/panelSearch（b-io-streaming 同名装置的复制适配）。
+- spec：`apps/web/e2e/b-code-scan-resilience.spec.ts`；共享 helper：`apps/web/e2e/b-stream-resilience-helpers.ts`（SCAN/JVL/DEG 三域共用，自包含实现，不 import 既有 spec 内未导出的装置）：IoStats 计量类（同 b-io-streaming 口径：过滤 /api/file，记录 Range 头、HTTP 状态与响应字节数）、startStreamFakeServer（b-io-streaming startIoFakeServer 的共享扩展版：stall 门 + fail 门（500 直至 release）+ failOnce 精确 Range 自愈门（skip 放过首拉后指定次数 500）+ slowMs 应答统一延迟 + 条目省略 size + POST /api/search 固定 NDJSON 应答（含 OPTIONS 预检）+ notifyChanged SSE 注入）、connectForm/openRemoteFile/settleStats 页面装置。code 侧装置（openCode/panelSearch/replaceSearchQuery/retriggerSameQuerySearch/进度条采样器）在 spec 内自含。
 
 ### 4.2 夹具构造
 
 | 夹具 | 规格 | 用于场景 |
 | --- | --- | --- |
-| scan-10mb.js | 10MB（40×256KB 块），行式 `v{n}` 内容，布点词分属块 0/5，无命中词 qqnothingqz 触发全文扫描 | SCAN-01/02/06/07 |
-| scan-stall.js | 同上 + 假服务器 stall/fail 门 | SCAN-03/04/07/08/11 |
-| scan-nosize.js | 2MB，tree 条目省略 size 字段（FileSource.size null → 短读探 EOF） | SCAN-05 |
-| local-10mb.js | 本地注入 10MB js，唯一深命中词落在约 300000 行 | SCAN-09 |
-| backtrack-6mb.js | 6MB（24 块 > LRU 16 块） | SCAN-10 |
+| scan-10mb.js | 10MB（40×256KB 块 = 163840 行×64B），行式 `const v{i} = '…';`，布点词行 1000/21000（分属块 0/5），无命中词 qqnothingqz 触发全文扫描 | SCAN-01/02/03/04/06/07/08/11 |
+| scan-nosize.js | 2MB（8 块），tree 条目省略 size 字段（FileSource.size null → 短读探 EOF），布点行 500/9000 | SCAN-05 |
+| deep-20mb.js | ~19.5MB（79 块），唯一布点行 300000（块 73）；配套 /api/search NDJSON 命中帧（行 300001、text=构造原文） | SCAN-09 |
+| backtrack-6mb.js | 6MB（24 块 > LRU 16 块），无布点 | SCAN-10 |
 
 ### 4.3 边界与注意事项
 
-1. 计量 attach 必须先于 goto（b-io-streaming 口径），`stats.settled()` 后再读数。
-2. stall/fail 门是确定性时序构造（挂起/拒绝指定 minStart 起的 Range 应答），杜绝真实时序竞态；门一次性放行不复闭。
-3. SCAN-09 走本地目录通道（localFiles store rangeCapable，无网络计量），只断言跳转正确性；全局搜索本地扫描上限 2000 文件/200MB 累计（globalSearch.ts:60）单文件 10MB 富余。
+1. 计量 attach 先于 goto（openRemoteFile 内置），`settleStats`（settled → 300ms 静置 → settled）后再读数。
+2. stall/fail/failOnce 门是确定性时序构造（挂起/拒绝/首拒指定 Range 的应答），杜绝真实时序竞态；stall/fail 门一次性放行不复闭，failOnce 自愈。
+3. SCAN-09 走远端 ripgrep 通道（假服务器 /api/search NDJSON）：本地全局搜索单文件 >2MB 被过滤（core compute/search.ts GREP_MAX_FILE_BYTES，search.ts:158），大文件「搜索命中点击打开」唯一通道是远端——这正是 BUG-09 的真实触发形态；addTab 以 size null 打开 → ctx.size null 窗口流式，revealLine 驱动续读路径与真实场景等价。
 4. 全程负向护栏：窗口模式路径不得出现全量 200（Range-less 场景除外，归 DEG 域）。
-5. mobile project 断点下树行点击经 `e2e/drawer.ts` openDrawerIfNarrow 适配（既有先例）。
+5. mobile project 断点下树行点击经 `e2e/drawer.ts` openDrawerIfNarrow 适配（helper 的 openTreeFile 内置）；SCAN-09 的 Ctrl+Shift+F 与命中行点击在 375px 视口下无需抽屉适配（浮层面板）。
+6. 同键重搜的触发面：面板保持开启下重派发同值 input 事件（等价全选重贴同词）；「清空再输入」是换键（search('') 重置命中集与游标），不构成同键重搜。面板计数为完成制（SearchPanel await 后才写 total），扫描期间恒「无结果」——扫描中的渐进命中数看进度条文本。
