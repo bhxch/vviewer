@@ -2255,4 +2255,49 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     inst.destroy(); // 复合销毁：全量实例随宿主收口，无 DOM 残留
     expect(host.querySelector('.vv-code-pre')).toBeNull();
   });
+
+  // 项 2（遗留清偿波 3）：后台扫描进度条（spec §4.3 承诺兑现）——扫描期间 target
+  // 顶部（oversize 条同位，pre 的兄弟节点）一次性 .vv-code-scan-progress 元素，
+  // 完成/取消（destroy）即移除；SearchPanel/getMeta 零变更（进度承载在渲染器 DOM 层）。
+  it('项 2 后台扫描进度条：扫描期间出现（扫描中 N% + 已命中 M 处形态），destroy 取消与扫描完成均移除', async () => {
+    stubResizeObserver();
+    const content = enc(codeLines(1400)); // 2.1MB ≈ 9 块：首块后仍有大量块可拉（读闸控节奏）
+    let release: (() => void) | null = null;
+    let gated = false;
+    const ctx = streamCtx({ size: content.length, content, head: content.slice(0, 8192) });
+    const rawRead = ctx.read.bind(ctx);
+    ctx.read = async (r) => {
+      if (r.start >= WINDOW_BLOCK && !gated) {
+        gated = true; // 仅首个续块挂起：扫描停在半途供断言（fake ctx 读闸）
+        await new Promise<void>((res) => {
+          release = res;
+        });
+      }
+      return rawRead(r);
+    };
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
+    expect(host.querySelector('.vv-code-scan-progress')).toBeNull(); // 未搜索：无进度元素
+    // —— 取消态：destroy 即移除（不待在途读闸收场）。闸被扫描拉取面实际持有
+    //（release 非空）才断言——bar 出现早于首个续块拉取，时序不确定会假挂 ——
+    void handle.search('zzz-no-hit');
+    await vi.waitFor(() => expect(release).not.toBeNull());
+    const barText = host.querySelector('.vv-code-scan-progress')!.textContent!;
+    expect(barText).toMatch(/扫描中 \d+%/); // size 已知：百分比形态
+    expect(barText).toContain('已命中 0 处');
+    handle.destroy();
+    expect(host.querySelector('.vv-code-scan-progress')).toBeNull();
+    // —— 完成态：闸已放行（gated 锁存），扫描全速至 EOF 后移除（search 完成制
+    // Promise 契约不变）。runScan 同步执行至首个 await：search 返回时元素必已挂 ——
+    const host2 = newHost();
+    const handle2 = renderCode(content.slice(0, 8192), host2, { ext: 'js', lang: 'javascript', ctx });
+    await vi.waitFor(() => expect(bodyText(host2, 0)).toBeDefined());
+    const pending = handle2.search('zzz-no-hit');
+    expect(host2.querySelector('.vv-code-scan-progress')).not.toBeNull();
+    const hits = await pending;
+    expect(hits).toStrictEqual([]);
+    expect(host2.querySelector('.vv-code-scan-progress')).toBeNull();
+    handle2.destroy();
+  });
 });

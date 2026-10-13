@@ -1840,6 +1840,53 @@ function renderCodeWindowed(
     return lineText(i);
   }
 
+  // ---------- 项 2（遗留清偿波 3）：后台扫描进度条（spec §4.3 承诺兑现） ----------
+  //
+  // 扫描完成制 Promise + 命中渐进上屏期间进度无处可看（SearchPanel 零变更约束）——
+  // 进度承载在渲染器 DOM 层：扫描期间在 target 顶部（oversize 条同位，pre 的兄弟
+  // 节点）显示一次性 .vv-code-scan-progress 元素。形态：size 已知「扫描中 N%（已命中
+  // M 处）」（N% = 已扫描字节/size，字节游标取索引行偏移）；size 未知「扫描中 · 已
+  // 扫描 N KB（已命中 M 处）」。完成/取消（destroy）/失败三态移除（runScan finally
+  // 统一收口 + destroy 直调即时收口——在途读闸挂起时 finally 不可达）。更新节流在
+  // 扫描主循环外圈（≈每块一次，不逐行写 DOM）。样式内联（hex toolbar 先例，不依赖
+  // app.css）；getMeta 零变更。
+  let scanBar: HTMLElement | null = null;
+
+  function showScanProgress(): void {
+    if (scanBar !== null) return; // 一次性元素：续扫/同键重入复用同一实例
+    scanBar = document.createElement('div');
+    scanBar.className = 'vv-code-scan-progress';
+    scanBar.setAttribute('role', 'status');
+    scanBar.style.cssText = [
+      'display:flex',
+      'align-items:center',
+      'padding:2px 10px',
+      'font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
+      'color:var(--vv-text-dim, #888)',
+      'background:var(--vv-panel, rgba(127,127,127,0.08))',
+      'border-bottom:1px solid var(--vv-border, rgba(127,127,127,0.25))'
+    ].join(';');
+    target.insertBefore(scanBar, pre); // oversize 条同位（pre 的兄弟节点，见 mountNotice 注）
+  }
+
+  /** 进度文本更新（扫描主循环外圈调用）：字节游标 = 已扫描行前缀的字节终点
+   * （scannedRow==rows() 的拉块间隙取已加载末行行尾，显示值不回退；+BOM 换算文件字节） */
+  function updateScanProgress(scannedRow: number, hits: number): void {
+    if (scanBar === null) return;
+    const at = Math.min(scannedRow, index.offsets.length) - 1;
+    const bytes = (at >= 0 ? (index.offsets[at] ?? 0) + (index.lengths[at] ?? 0) : 0) + bomLen;
+    const where =
+      ctx.size !== null
+        ? `扫描中 ${Math.min(100, Math.floor((bytes * 100) / ctx.size))}%`
+        : `扫描中 · 已扫描 ${Math.floor(bytes / 1024)} KB`;
+    scanBar.textContent = `${where}（已命中 ${hits} 处）`;
+  }
+
+  function hideScanProgress(): void {
+    scanBar?.remove();
+    scanBar = null;
+  }
+
   /** 后台全文扫描主循环：返回扫描终止时已得的命中（取消/停机 = 部分结果）。
    * startFrom 为断点续扫起点（项 2：停机收场后同 query 重搜自游标继续）；
    * 收场形态回写 lastScanComplete/lastScanCursor（alive 守卫——取消方已重置，
@@ -1854,49 +1901,55 @@ function renderCodeWindowed(
     const alive = (): boolean => !destroyed && scanSeq === mySeq;
     const failedBlocks = new Set<number>(); // 补拉失败块记忆（本次扫描一份，见 scanLineText）
     let scanned = startFrom; // 已扫描行数（索引已提交行的前缀指针：断点续扫不重复）
-    for (;;) {
-      if (!alive()) return acc;
-      if (scanned < rows()) {
-        for (; scanned < rows() && alive(); scanned++) {
-          const text = await scanLineText(scanned, failedBlocks);
-          if (!alive()) return acc;
-          if (text === '') continue;
-          for (const m of searchCode([text], query, { caseSensitive })) {
-            acc.push({ line: scanned, start: m.start, end: m.end, preview: m.preview });
-            const arr = searchHitsByLine.get(scanned);
-            if (arr) arr.push({ start: m.start, end: m.end });
-            else searchHitsByLine.set(scanned, [{ start: m.start, end: m.end }]);
-          }
-        }
+    showScanProgress(); // 项 2：扫描开始即挂进度条（同键续扫复用同一元素）
+    try {
+      for (;;) {
         if (!alive()) return acc;
-        lastScanCursor = scanned; // 游标上行（续扫起点；取消后由换键方重置，不回写）
-        remountOrRefresh(); // 渐进落地：新行/新命中上屏（行数增长 → 重建 scroller）
-        await delay(0); // 让出主线程：扫描期间滚动手感不受阻塞
-        continue;
+        updateScanProgress(scanned, acc.length); // 项 2：外圈每轮一次（≈每块粒度，渲染节流）
+        if (scanned < rows()) {
+          for (; scanned < rows() && alive(); scanned++) {
+            const text = await scanLineText(scanned, failedBlocks);
+            if (!alive()) return acc;
+            if (text === '') continue;
+            for (const m of searchCode([text], query, { caseSensitive })) {
+              acc.push({ line: scanned, start: m.start, end: m.end, preview: m.preview });
+              const arr = searchHitsByLine.get(scanned);
+              if (arr) arr.push({ start: m.start, end: m.end });
+              else searchHitsByLine.set(scanned, [{ start: m.start, end: m.end }]);
+            }
+          }
+          if (!alive()) return acc;
+          lastScanCursor = scanned; // 游标上行（续扫起点；取消后由换键方重置，不回写）
+          remountOrRefresh(); // 渐进落地：新行/新命中上屏（行数增长 → 重建 scroller）
+          await delay(0); // 让出主线程：扫描期间滚动手感不受阻塞
+          continue;
+        }
+        if (indexFinished) {
+          lastScanComplete = true; // 全文扫完：同键短路缓存恢复生效（项 2 分界）
+          return acc; // finishCodeIndex 已提交末尾空串条目
+        }
+        if (limitReached || continueFailed || encodingBroken) {
+          lastScanComplete = false; // 停机收场：同键重搜不短路（续扫）
+          return acc; // 停机面：已加载区间即终（项 1 判非 UTF-8 同口径：降级重渲接手）
+        }
+        if (pulling) {
+          await delay(SCAN_POLL_MS); // 续读/回看重拉在飞：等待其落地后重评
+          continue;
+        }
+        pulling = true; // 前向喂一块（单飞闸与续读共用：pullBlock 重入会双喂错位）
+        try {
+          await pullBlock();
+        } catch (err) {
+          continueFailed = true; // 与滚动续读同口径：停机闩，用户滚动动作解除
+          lastScanComplete = false; // 同键重搜即用户动作：解除闩后续扫（见 search）
+          console.debug('[code] 搜索扫描续读失败，已停机（返回已得部分结果）', err);
+          return acc;
+        } finally {
+          pulling = false;
+        }
       }
-      if (indexFinished) {
-        lastScanComplete = true; // 全文扫完：同键短路缓存恢复生效（项 2 分界）
-        return acc; // finishCodeIndex 已提交末尾空串条目
-      }
-      if (limitReached || continueFailed || encodingBroken) {
-        lastScanComplete = false; // 停机收场：同键重搜不短路（续扫）
-        return acc; // 停机面：已加载区间即终（项 1 判非 UTF-8 同口径：降级重渲接手）
-      }
-      if (pulling) {
-        await delay(SCAN_POLL_MS); // 续读/回看重拉在飞：等待其落地后重评
-        continue;
-      }
-      pulling = true; // 前向喂一块（单飞闸与续读共用：pullBlock 重入会双喂错位）
-      try {
-        await pullBlock();
-      } catch (err) {
-        continueFailed = true; // 与滚动续读同口径：停机闩，用户滚动动作解除
-        lastScanComplete = false; // 同键重搜即用户动作：解除闩后续扫（见 search）
-        console.debug('[code] 搜索扫描续读失败，已停机（返回已得部分结果）', err);
-        return acc;
-      } finally {
-        pulling = false;
-      }
+    } finally {
+      hideScanProgress(); // 项 2：完成/取消/失败三态统一移除（destroy 即时收口另行直调）
     }
   }
 
@@ -1907,6 +1960,7 @@ function renderCodeWindowed(
       destroyed = true;
       scanSeq += 1; // 在飞后台扫描令牌失效（下一检查点退出，部分结果收场）
       scan = null;
+      hideScanProgress(); // 项 2：取消态即时移除进度条（在途读闸挂起时 finally 不可达）
       if (hitTimer !== null) clearTimeout(hitTimer);
       wantedChunks = []; // 队列作废；在-flight chunk 的回写在各 await 点被 destroyed 拦截
       scroller?.destroy();
