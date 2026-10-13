@@ -47,6 +47,13 @@ export interface HexSource {
    * 已由 HexSourceRangeError 携出，残留 promise 对新请求不可见）。
    */
   replaceWithFull(full: Uint8Array): void;
+  /**
+   * Range-less 降级后持有的全量字节（M-2）：replaceWithFull 已发生则返回该全量，
+   * 未降级返回 null。hex 无 Worker 搜索兜底据此复用已在 src 手里的全量，不再对
+   * 同一件多付一次全量读（构造期 head 即全量的形态由调用方 buffer.length 判定，
+   * 与本方法互补）。
+   */
+  degradedFull(): Uint8Array | null;
 }
 
 /**
@@ -128,8 +135,12 @@ export function createHexSource(
     end: Math.min(size, end)
   });
 
-  /** 全量底座重建（终审 F3）：清作废在途与旧块表，按 64KB 切分全量、全部就绪 */
+  /** 全量底座重建（终审 F3）：清作废在途与旧块表，按 64KB 切分全量、全部就绪。
+   * 原始全量另存一份引用（M-2：degradedFull 供无 Worker 搜索兜底零读复用——块表
+   * 仅存 subarray 视图且受 LRU 逐出，不可替代） */
+  let degraded: Uint8Array | null = null;
   const replaceWithFull = (full: Uint8Array): void => {
+    degraded = full;
     inflight.clear();
     blocks.clear();
     for (let i = 0; i * HEX_SOURCE_BLOCK_BYTES < full.length; i++) {
@@ -140,6 +151,7 @@ export function createHexSource(
   return {
     size,
     replaceWithFull,
+    degradedFull: () => degraded,
     slice(start, end) {
       const c = clamp(start, end);
       if (c.start >= c.end) return new Uint8Array(0);

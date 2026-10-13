@@ -469,4 +469,33 @@ describe('renderHex：窗口模式搜索（need/chunk 协议）', () => {
     inst.destroy();
     target.remove();
   });
+
+  // 终审 M-2：Range-less 降级（replaceWithFull）后全量已在 src 手里——无 Worker
+  // 兜底取数须复用之（零额外读），不再对已在本地的一件多付一次全量回退读
+  it('无 Worker 兜底 + Range-less 已降级：复用 src 降级全量零读扫描，不触发全量回退读', async () => {
+    const calls: Array<{ start: number; end: number }> = [];
+    // 忽略 Range：任何区间请求回 200 全量 → 首次 ensure 即 HexSourceRangeError →
+    // adoptFull 切换全量底座（structReady 的尾窗 ensure 触发）。needle '0001' 在
+    // FULL（i&0xff）中每 256 字节命中一处（0..199936 共 782 处，真实扫描可验证）
+    const { inst, target, dump, search, status } = setupWindow(
+      async (r) => {
+        calls.push({ start: r.start, end: r.end });
+        return FULL.slice(0);
+      },
+      () => null // 无 Worker：主线程 scanAll 兜底
+    );
+    await inst.structReady;
+    await flush();
+    const readsBeforeSearch = calls.length;
+    expect(readsBeforeSearch).toBeGreaterThanOrEqual(1); // 降级由读触发（自校验非空转）
+    search.value = '0001';
+    pressEnter(search);
+    await flush();
+    expect(status.textContent).toBe('1/782 处命中'); // 扫描基于复用的全量完成（真实命中计数）
+    expect(dump.querySelectorAll('.vv-hex-hit-active').length).toBeGreaterThan(0);
+    expect(calls.length).toBe(readsBeforeSearch); // 搜索期零读（降级全量复用）
+    expect(calls.some((c) => c.end === Number.MAX_SAFE_INTEGER)).toBe(false); // 全量回退读未发生
+    inst.destroy();
+    target.remove();
+  });
 });

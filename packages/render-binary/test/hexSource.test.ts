@@ -172,4 +172,14 @@ describe('createHexSource', () => {
     await src.ensure(0, FULL.length); // 全量块全部就绪：零读
     expect(calls).toStrictEqual([]);
   });
+
+  // M-2：无 Worker 搜索兜底复用降级全量的依据面——replaceWithFull 后 degradedFull
+  // 返回同一全量引用（零拷贝），未降级为 null（调用方回落回退读）
+  it('degradedFull：未降级为 null，replaceWithFull 后返回全量同一引用', () => {
+    const calls: Array<{ start: number; end: number }> = [];
+    const src = createHexSource(FULL.length, FULL.slice(0, 8), fakeRead(calls));
+    expect(src.degradedFull()).toBeNull(); // 未降级：不得伪造全量
+    src.replaceWithFull(FULL);
+    expect(src.degradedFull()).toBe(FULL); // 同一引用（兜底扫描只读不转移，零拷贝安全）
+  });
 });

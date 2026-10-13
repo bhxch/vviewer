@@ -511,6 +511,12 @@ export function renderHex(
       void (async (): Promise<Uint8Array> => {
         if (source.kind === 'full') return source.bytes;
         if (buffer.length >= source.size) return buffer;
+        // M-2：Range-less 降级（replaceWithFull）后全量已在 src 手里——复用之，
+        // 不再对已在本地的一件多付一次全量读（head 即全量的形态已由上一行判定，
+        // 与 src.degradedFull 互补覆盖两种全量在手形态）。兜底取数与降级并发竞态
+        // 的最坏代价是回落一次回退读（修前行为），不另加锁。
+        const degraded = src?.degradedFull() ?? null;
+        if (degraded !== null) return degraded;
         return ctx!.read({ start: 0, end: Number.MAX_SAFE_INTEGER });
       })().then((base) => {
         if (seq !== searchSeq) return; // 拉取期间已被新搜索/取消取代
