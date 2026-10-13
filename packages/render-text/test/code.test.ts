@@ -1808,6 +1808,43 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     handle.destroy();
   });
 
+  // 项 3（补拉失败突发收敛）：scanLineText 对已逐出块逐行 ensureBlock——持续失败时
+  // 每行一次失败请求（块内 ~174 行 = ~174 次突发）。修法：失败块按扫描记忆（每扫描
+  // 一份），同块只发一次失败请求，该块行以空串跳过、其余块照常扫描。
+  it('扫描补块失败按块收敛：失败块恰一次失败请求（非每行一次），其余块照常扫描', async () => {
+    stubResizeObserver();
+    // fake client：chunk 高亮即时返回（隔离 hljs highlightAuto 的测试环境开销——
+    // 行数渐进增长使底部视口 chunk 键随行数移动，真实 Auto 高亮会淹没本测试语义）
+    attachHighlightClient({ highlight: async () => [] });
+    const lines: string[] = [];
+    for (let i = 0; i < 4200; i++) {
+      const head = i === 42 ? 'zzneedle early ' : i === 1000 ? 'zzneedle mid ' : `row ${i} `;
+      lines.push(head + 'p'.repeat(Math.max(0, 1499 - head.length)) + '\n'); // 每行恰 1500B
+    }
+    const content = enc(lines.join('')); // ≈ 6.3MB ≈ 25 块 > 16：滚到底后块 0..8 已逐出
+    const calls: RangeCall[] = [];
+    const ctx: StreamCtx = {
+      size: content.length,
+      head: content.slice(0, 8192),
+      read: async (r) => {
+        calls.push({ start: r.start, end: r.end });
+        // 初始前向喂块（首屏 25 次内）成功；扫描期对块 1 的重拉恒失败
+        if (r.start === WINDOW_BLOCK && calls.length > 25) throw new Error('块 1 补拉持续失败');
+        return content.slice(r.start, r.end + 1);
+      }
+    };
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    scrollCode(host, Number.MAX_SAFE_INTEGER); // 续读到 EOF：前向喂块恰每块一次
+    await vi.waitFor(() => expect(handle.getMeta().lines).toBe(4200));
+    expect(calls.length).toBe(25);
+    const matches = await handle.search('zzneedle');
+    expect(matches.map((m) => m.line)).toEqual([42, 1000]); // 其余块照常扫描（块 0/5 重拉成功）
+    // 块 1 的读 = 初始喂块 1 次 + 扫描期失败重拉 1 次（修前为逐行 ~174 次突发）
+    expect(calls.filter((c) => c.start === WINDOW_BLOCK && c.end === 2 * WINDOW_BLOCK - 1).length).toBe(2);
+    handle.destroy();
+  });
+
   // ---------- Task 5：后台全文扫描搜索（替换 snapshotLines 快照过渡实现） ----------
   //
   // 语义基线：search() 即刻返回 Promise，后台从文件头驱动 BlockStream 逐块前向喂

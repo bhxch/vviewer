@@ -1776,17 +1776,22 @@ function renderCodeWindowed(
   const delay = (ms: number): Promise<void> => new Promise<void>((r) => setTimeout(r, ms));
 
   /** 行 i 的扫描文本：所需块缺驻留时按行序单飞补拉；补块失败该行以空串参与扫描
-   * （不可得 ≠ 命中断言，快照口径同源），不阻断全文扫描 */
-  async function scanLineText(i: number): Promise<string> {
+   * （不可得 ≠ 命中断言，快照口径同源），不阻断全文扫描。failedBlocks 记忆本次
+   * 扫描内已失败的块号（项 3 突发收敛）：持续失败时同块只发一次失败请求（失败
+   * 粒度从「每行」收敛到「每块一次」），记忆命中的行直接空串跳过、下一块继续；
+   * 记忆按次扫描新建（runScan 内），续扫/换键重搜保留单次重试机会 */
+  async function scanLineText(i: number, failedBlocks: Set<number>): Promise<string> {
     const len = index.lengths[i] ?? 0;
     if (len === 0) return '';
     const [b0, b1] = lineBlockSpan(i);
     for (let b = b0; b <= b1; b++) {
       if (bs.has(b)) continue;
+      if (failedBlocks.has(b)) return ''; // 本扫描内该块已失败：不再逐行重试
       try {
         await bs.ensureBlock(b);
       } catch (err) {
-        console.debug('[code] 搜索扫描补块失败（该行以空串参与扫描）', err);
+        failedBlocks.add(b);
+        console.debug('[code] 搜索扫描补块失败（该块行以空串参与扫描）', err);
         return '';
       }
     }
@@ -1805,12 +1810,13 @@ function renderCodeWindowed(
     startFrom: number
   ): Promise<SearchMatch[]> {
     const alive = (): boolean => !destroyed && scanSeq === mySeq;
+    const failedBlocks = new Set<number>(); // 补拉失败块记忆（本次扫描一份，见 scanLineText）
     let scanned = startFrom; // 已扫描行数（索引已提交行的前缀指针：断点续扫不重复）
     for (;;) {
       if (!alive()) return acc;
       if (scanned < rows()) {
         for (; scanned < rows() && alive(); scanned++) {
-          const text = await scanLineText(scanned);
+          const text = await scanLineText(scanned, failedBlocks);
           if (!alive()) return acc;
           if (text === '') continue;
           for (const m of searchCode([text], query, { caseSensitive })) {
