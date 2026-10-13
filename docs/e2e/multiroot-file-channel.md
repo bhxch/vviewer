@@ -57,7 +57,7 @@
 | root0/a.txt、root1/b.txt | 单行文本，内容互异可断言 | MRF-01/02/03 |
 | root1/sub/only-r1.txt、root0/other.txt | 根归属判别件 | MRF-03 |
 | root1/esc → ../outside-secret | symlink（outside-secret 在双根之外的临时目录，内容可断言） | MRF-04 |
-| root1/range.bin | 1MB 二进制（0xde 布点于 0x100/0xff00） | MRF-05 |
+| root1/range.bin | 1MB 二进制（值=偏移低 8 位，0xde 布点于 0x100/0xff00/0xffffa——末布点供尾段 Range body 字节核对） | MRF-05 |
 | root1/hello-r1.txt | 文本件（SSE 阶段被改写） | MRF-07/08 |
 | 主实例夹具 | 复用 :4174 webServer 既有 fixtures.mjs 清单中的任一文本件 | MRF-06 |
 
