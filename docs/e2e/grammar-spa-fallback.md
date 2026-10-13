@@ -14,18 +14,18 @@
 
 ## 2. 场景清单
 
-公共环境：default 套件；`test.use({ serviceWorkers: 'block' })`（b-grammar-layers 先例：SW CacheFirst 使 page.route 随机失效，屏蔽 SW 求确定性）；本地目录经 `__vvOpenDirImpl` 注入；构建期前提 `VV_GRAMMAR_CDN=https://cdn.grammars.test/grammars/`（CDN 层用例 1/2 必需，构建注入缺失时 CDN 命中计数恒 0——用例内断言即守卫）。mock 均经 page.route（fulfill 跨源需显式 ACAO）。
+公共环境：default 套件；`test.use({ serviceWorkers: 'block' })`（b-grammar-layers 先例：SW CacheFirst 使 page.route 随机失效，屏蔽 SW 求确定性）；本地目录经 `__vvOpenDirImpl` 注入；构建期前提 `VV_GRAMMAR_CDN=https://cdn.grammars.test/grammars/`（CDN 层用例 GRF-01/02 必需，构建注入缺失时 CDN 命中/warn 计数恒 0——用例内断言即守卫）。mock 均经 page.route（fulfill 跨源需显式 ACAO）。CDN 请求纪律：凡不专门 mock CDN 资产的用例一律 `blockCdn()`（`**/cdn.grammars.test/**` 全域 abort）——三层链在 CDN 构建下对每个页面加载都会发 CDN manifest 请求，不 mock 会打真实 socket（full-grammar-alignment §7.2 环境遗留观察）。
 
 | 编号 | 前置条件 | 步骤 | 期望 | 关联缺陷 |
 | --- | --- | --- | --- | --- |
-| GRF-01 | mock CDN manifest（`**/cdn.grammars.test/grammars/manifest.json`）→ 200 text/html doctype 页 | ① 打开 java 文件（同源 manifest 剥离 java 条目）；② 挂 console.warn 监听；③ 读状态栏高亮段与 warn 计数 | CDN manifest 200 text/html → 层缺失跳过：不把 HTML 当 JSON 解析；warn 恰一条且文案含「非 JSON 资产应答」（050ae69 修复文案）；页面不崩，java 降级 hljs 兜底 | BUG-106 |
-| GRF-02 | 同源 manifest 200 text/html（route 拦截同源 /grammars/manifest.json，负向前瞻排除 CDN host——b-grammar-layers 同款 glob 分流）；CDN manifest 正常（含 java） | ① 打开 java 文件；② 读状态栏与 cdnWasmHits 计数 | 同源层判缺失不误载 HTML；CDN 层兜底生效（first-wins 跨层）：cdnWasmHits ≥1、tree-sitter 生效（`ts-*` span>0、状态栏非「hljs 兜底」） | BUG-106 |
-| GRF-03 | mock 同源 `/grammars/java.wasm` → 200 text/html（同源 manifest 含 java） | ① 打开 java 文件；② 读状态栏与 console | wasm 资产被 HTML 兜底 → 不实例化 HTML（WebAssembly 编译失败被捕获）：整语言降级 hljs 兜底不崩、无未捕获异常；hljs- span 正常 | BUG-106 |
-| GRF-04 | mock 同源 `/queries/java/injections.scm` → 200 text/html（highlights.scm 照常 200） | ① 打开 java 文件；② 读状态栏与 `ts-*` span 计数 | 查询资产 HTML 兜底视同缺失（7fab3a5 前端层）：injections.scm 缺席不炸 Query 编译，highlights.scm 照常加载——java 仍 tree-sitter（`ts-*` span>0），**不整语言降级 hljs** | BUG-106 |
-| GRF-05 | 不 mock（真实同源 manifest，content-type application/json） | ① 打开 rust 文件；② 读状态栏 | 正锚（嗅探不误伤）：manifest 正常载入、tree-sitter 生效、零 warn | —（回归护栏） |
-| GRF-06 | mock 同源 manifest → 200、**无 content-type 头**、body 为 HTML 文本 | ① 打开任意语法文件；② 读 warn 与状态栏 | 无 content-type 的 HTML body 走 JSON.parse 失败 catch：等价层缺失（warn 跳层、不崩、hljs 兜底）；不得把 HTML 误当 manifest 条目 | BUG-106 |
-| GRF-07 | GRF-01 场景延续 | ① 同会话内连续打开第二个 java 文件（换文件中转重载）；② 汇总 warn 计数 | 层缺失 warn 每层每会话恰一条不重复刷屏（既有用例 2「warn 恰一条」口径在 SPA-fallback 形态的对位）；第二文件渲染正常 | —（可观测性锚） |
-| GRF-08 | mock `/queries/java/injections.scm` → 200 text/html（GRF-04 同款），同目录另开 rust 文件 | ① 打开 java；② 打开 rust；③ 分别读两文件状态栏 | 隔离性：查询缺失只降级涉事语言——java 仍 tree-sitter（GRF-04 判据）、rust 完全不受影响（ts-* 正常）；两文件无交叉污染 | —（隔离性锚） |
+| GRF-01 | mock CDN manifest（`**/cdn.grammars.test/grammars/manifest.json`）→ 200 text/html doctype 页；同源 manifest 剥离 java 条目（真实清单读取后 delete，防硬编码漂移）；CDN java.wasm 挂计数 | ① 打开 java 文件（同源 manifest 无 java，java 唯一来源是 CDN 层）；② 挂 console.warn 监听；③ 读状态栏高亮段、warn 计数与 CDN wasm 命中数 | CDN manifest 200 text/html → 层缺失跳过：warn 恰一条且文案含「非 JSON 资产应答（SPA fallback？）」、不含「加载失败」（050ae69 修复文案，修复前误报网络错）；HTML 未被当 JSON 解析——java.wasm 零请求；页面不崩（正文照常、无错误卡片、无 pageerror），java 降级 hljs 兜底、`__vvLastHighlightOk={ok:false,lang:'java'}` | BUG-106 |
+| GRF-02 | 同源 manifest 200 text/html（route 拦截同源 /grammars/manifest.json，负向前瞻排除 CDN host——b-grammar-layers 同款 glob 分流）；CDN manifest 合法 JSON（含 java 条目）；CDN java.wasm 回放真实字节+ACAO 计数；同源 java.wasm 404（防御：意外回落同源在此暴露而非假绿） | ① 打开 java 文件；② 读状态栏、`__vvLastHighlightOk` 与 cdnWasmHits 计数 | 同源层判缺失不误载 HTML（嗅探 warn 恰一条）；CDN 层兜底生效（first-wins 跨层不受嗅探影响）：cdnWasmHits ≥1、`__vvLastHighlightOk={ok:true,lang:'java'}`、状态栏「高亮: tree-sitter」、无错误卡片无 pageerror | BUG-106 |
+| GRF-03 | 同源 manifest 不 mock（lite 集含 java）；mock 同源 `/grammars/java.wasm` → 200 text/html（挂计数确证被请求）；CDN 全域 abort | ① 打开 java 文件；② 读状态栏、console 与 `__vvLastHighlightOk` | wasm 资产被 HTML 兜底 → WebAssembly 实例化失败被捕获：BUG-06a per-language warn（「grammar/查询准备失败」）恰一条且含 java；整语言降级 hljs 兜底（状态栏「高亮: hljs 兜底」、`ok:false`、hljs- span 在场）不崩、无错误卡片无未捕获异常 | BUG-106 |
+| GRF-04 | mock 同源 `/queries/java/injections.scm` → 200 text/html（挂计数确证被请求）；同源 `/queries/java/highlights.scm` 计数后 `continue()` 放行真实资产；CDN 全域 abort | ① 打开 java 文件；② 读 `__vvLastHighlightOk`、状态栏与 ts-/hljs- span 计数、两条 route 计数 | 查询资产 HTML 兜底视同缺失（7fab3a5 前端层）：injections.scm 缺席不炸 Query 编译（准备失败 warn 为零），highlights.scm 照常加载（route 计数 ≥1）——java 仍 tree-sitter（`ok:true`、ts- span>0、hljs- span=0），**不整语言降级 hljs** | BUG-106 |
+| GRF-05 | 同源不 mock（真实 manifest，content-type application/json）；CDN manifest mock 为合法空 JSON `{grammars:{}}`（CDN 构建下三层链恒发 CDN manifest 请求，不 mock 会打真实 socket——空 JSON 同走 application/json 正锚路径） | ① 打开 rust 文件（lite 集内，同源真实条目）；② 读状态栏与 warn 全量 | 正锚（嗅探不误伤）：manifest 正常载入、`ok:true`、tree-sitter 生效（ts- span>0）、嗅探/跳层/准备失败三类 warn 全零 | —（回归护栏） |
+| GRF-06 | mock 同源 manifest → 200、**无 content-type 头**（route.fulfill 不带 contentType，探针已验证响应无该头）、body 为 HTML 文本；CDN 全域 abort；同源 java.wasm 挂计数 | ① 打开 java 文件；② 读同源 manifest 的跳层 warn、java.wasm 计数与状态栏 | 无 content-type → 嗅探分支不触发，走 `res.json()` SyntaxError catch：同源 manifest 的「加载失败，跳过该资产层」warn 恰一条（非嗅探文案）；HTML body 未被误当 manifest 条目——java.wasm 零请求；等价层缺失：java 降级 hljs 兜底不崩 | BUG-106 |
+| GRF-07 | GRF-01 场景延续（同 mock 形态）；目录含两个 java 文件 | ① 打开第一个 java 文件；② 同会话内再打开第二个 java 文件（新 tab，不重载页面——资产链为 create() 单例）；③ 汇总嗅探 warn 计数 | 层缺失 warn 每层每会话恰一条不重复刷屏：两次文件打开后嗅探 warn 仍恰 1 条（既有用例 2「warn 恰一条」口径在 SPA-fallback 形态的对位）；第二文件正文照常渲染、`ok:false` 如实 | —（可观测性锚） |
+| GRF-08 | mock 同源 `/queries/java/injections.scm` → 200 text/html（GRF-04 同款）；rust 查询目录不 mock；CDN 全域 abort；目录含 Hello.java 与 sample.rs | ① 打开 java；② 切打开 rust；③ 分别读两文件 `__vvLastHighlightOk` 与 ts- span | 隔离性：查询缺失只降级涉事语言——java 仍 tree-sitter（`ok:true`、ts- span>0，GRF-04 判据）、rust 完全不受影响（自身查询真实加载，`ok:true`、正文 rust 本尊、ts- span>0）；准备失败 warn 全零、无错误卡片、无 pageerror | —（隔离性锚） |
 
 ## 3. 关联缺陷的验收行为
 
@@ -55,7 +55,8 @@
 | 夹具 | 规格 | 用于场景 |
 | --- | --- | --- |
 | Hello.java | 短小 java 源（tree-sitter 与 hljs 均可识别，b-grammar-layers 同款） | GRF-01/02/03/04/07/08 |
-| sample.rs | 基础样例 | GRF-05/08 |
+| World.java | 第二个 java 源（内容可区分：farewell 方法） | GRF-07 |
+| sample.rs | 基础样例（add/main） | GRF-05/08 |
 | SPA 页面应答 | `<!DOCTYPE html><html>…</html>` 最小 doctype 页，content-type `text/html; charset=utf-8`（GRF-06 变体去 content-type 头） | 全部 mock |
 
 ### 4.3 边界与注意事项
