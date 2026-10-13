@@ -22,6 +22,9 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  *   VV_GRAMMAR_CDN=https://cdn.grammars.test/grammars/ pnpm build
  * 构建（CI e2e job 已设该 env）。该值经 vite define 静态替换进 highlightClient.ts，
  * 未注入时 CDN 层不发起任何请求——GRF-01/02 的 warn/命中计数断言即构建注入守卫。
+ * GRF-07 刻意不取 CDN 面（blockCdn + 同源 manifest SPA fallback）：刷屏/单次性锚
+ * 与层身份无关，而 CDN 层是否装配取决于构建期注入；同源面在注入/未注入两种构建
+ * 下嗅探 warn 均恰 1 条，用例不依赖该构建前提（本地门禁曾因未注入假红）。
  *
  * serviceWorkers: 'block'（b-grammar-layers 同款已知边界）：PWA SW 对 grammar 资产
  * 注册 CacheFirst 而 page.route 拦不到经 SW 的请求，SW 激活时机会使 mock 随机失效；
@@ -480,14 +483,15 @@ test('GRF-06: 同源 manifest 200 无 content-type + HTML body → 走 JSON.pars
 });
 
 test('GRF-07: SPA-fallback 层缺失 warn 每层每会话恰一条——连续打开第二个 java 文件不重复刷屏，第二文件照常渲染', async ({
-  page,
-  request
+  page
 }) => {
   test.setTimeout(60_000);
   const probe = attachWarnProbe(page);
-  // GRF-01 同款场景：CDN manifest 被 SPA fallback，java 唯一来源缺失
-  await mockOriginManifestWithoutJava(page, request);
-  await mockCdnManifestSpa(page);
+  // SPA-fallback 面取同源 manifest（GRF-01 的 CDN 面在此刻意不用）：CDN 层是否装配
+  // 取决于构建期注入（未注入则 CDN manifest 请求根本不发起，warn 恒 0 假红）；
+  // 同源面在注入/未注入两种构建下嗅探 warn 均恰 1 条。CDN 面嗅探 warn 由 GRF-01 锚定
+  await blockCdn(page);
+  await mockOriginManifestSpa(page);
 
   await page.goto('/');
   await openDir(page, [
