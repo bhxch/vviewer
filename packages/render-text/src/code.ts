@@ -1758,9 +1758,20 @@ function renderCodeWindowed(
   const SCAN_POLL_MS = 4;
 
   /** 扫描令牌：seq 失效制；scan 为在飞句柄（同键重入共享同一 Promise，完成后
-   * 置 null 恢复 lastQuery×caseSensitive 短路缓存语义） */
+   * 置 null 恢复短路缓存语义） */
   let scanSeq = 0;
   let scan: { seq: number; key: string; promise: Promise<SearchMatch[]> } | null = null;
+  /** 上次同键扫描的收场形态（缓存键纳入扫描进度，项 2）：true = 全文完成
+   * （indexFinished 且扫描至尾）——同 query 重搜可短路零读；false = 停机/取消收场
+   * 的部分结果——不得短路，同 query 重搜触发续扫。取消方（换键搜索）自行重置，
+   * 被取消扫描不回写（「取消不触碰共享状态」纪律） */
+  let lastScanComplete = false;
+  /** 上次扫描的进度游标（已扫描行数）：lastScanComplete=false 时同 query 重搜据此
+   * 断点续扫（不重复扫已扫行/不重拉已扫块），换键重置为 0 */
+  let lastScanCursor = 0;
+  /** lastMatches 的具体形态引用（SearchMatchWithPreview[]）：续扫时往同一数组合并
+   * 命中（lastMatches 对 SearchPanel 的引用保持稳定） */
+  let lastAcc: SearchMatchWithPreview[] = [];
 
   const delay = (ms: number): Promise<void> => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -1782,15 +1793,19 @@ function renderCodeWindowed(
     return lineText(i);
   }
 
-  /** 后台全文扫描主循环：返回扫描终止时已得的命中（取消/停机 = 部分结果） */
+  /** 后台全文扫描主循环：返回扫描终止时已得的命中（取消/停机 = 部分结果）。
+   * startFrom 为断点续扫起点（项 2：停机收场后同 query 重搜自游标继续）；
+   * 收场形态回写 lastScanComplete/lastScanCursor（alive 守卫——取消方已重置，
+   * 被取消扫描不得回写） */
   async function runScan(
     acc: SearchMatchWithPreview[],
     query: string,
     caseSensitive: boolean,
-    mySeq: number
+    mySeq: number,
+    startFrom: number
   ): Promise<SearchMatch[]> {
     const alive = (): boolean => !destroyed && scanSeq === mySeq;
-    let scanned = 0; // 已扫描行数（索引已提交行的前缀指针：断点续扫不重复）
+    let scanned = startFrom; // 已扫描行数（索引已提交行的前缀指针：断点续扫不重复）
     for (;;) {
       if (!alive()) return acc;
       if (scanned < rows()) {
@@ -1806,12 +1821,19 @@ function renderCodeWindowed(
           }
         }
         if (!alive()) return acc;
+        lastScanCursor = scanned; // 游标上行（续扫起点；取消后由换键方重置，不回写）
         remountOrRefresh(); // 渐进落地：新行/新命中上屏（行数增长 → 重建 scroller）
         await delay(0); // 让出主线程：扫描期间滚动手感不受阻塞
         continue;
       }
-      if (indexFinished) return acc; // 全文扫完（finishCodeIndex 已提交末尾空串条目）
-      if (limitReached || continueFailed) return acc; // 停机面：已加载区间即终
+      if (indexFinished) {
+        lastScanComplete = true; // 全文扫完：同键短路缓存恢复生效（项 2 分界）
+        return acc; // finishCodeIndex 已提交末尾空串条目
+      }
+      if (limitReached || continueFailed) {
+        lastScanComplete = false; // 停机收场：同键重搜不短路（续扫）
+        return acc; // 停机面：已加载区间即终
+      }
       if (pulling) {
         await delay(SCAN_POLL_MS); // 续读/回看重拉在飞：等待其落地后重评
         continue;
@@ -1821,6 +1843,7 @@ function renderCodeWindowed(
         await pullBlock();
       } catch (err) {
         continueFailed = true; // 与滚动续读同口径：停机闩，用户滚动动作解除
+        lastScanComplete = false; // 同键重搜即用户动作：解除闩后续扫（见 search）
         console.debug('[code] 搜索扫描续读失败，已停机（返回已得部分结果）', err);
         return acc;
       } finally {
@@ -1875,9 +1898,10 @@ function renderCodeWindowed(
       const caseSensitive = searchOpts?.caseSensitive === true;
       const key = `${caseSensitive ? '1' : '0'}\u0000${query}`;
       if (scan !== null && scan.key === key) return scan.promise; // 同键在飞：共享同一扫描
-      if (scan === null && query === lastQuery && caseSensitive === lastCaseSensitive) {
-        return Promise.resolve(lastMatches);
-      }
+      const sameKey = scan === null && query === lastQuery && caseSensitive === lastCaseSensitive;
+      // 同键短路分界（项 2）：仅全文完成（lastScanComplete）的同 query 才短路零读；
+      // 停机/取消收场的部分结果不得短路——重搜触发断点续扫（自 lastScanCursor）
+      if (sameKey && lastScanComplete) return Promise.resolve(lastMatches);
       const mySeq = ++scanSeq; // 令牌失效：旧扫描在下一检查点退出（新搜索/退出搜索取消）
       scan = null;
       // 命中集/行级背景/active 重置（旧查询的视觉痕迹即刻清除，新命中随扫描渐进上屏）
@@ -1886,21 +1910,30 @@ function renderCodeWindowed(
         hitTimer = null;
       }
       hitLine = -1;
-      searchHitsByLine = new Map();
-      lastMatches = [];
-      lastQuery = query;
-      lastCaseSensitive = caseSensitive;
+      if (sameKey) {
+        // 停机收场后同 query 重搜：续扫。重搜即用户动作，解除续读停机闩（「下次
+        // 用户动作才重试」）；命中集与游标保持，扫描自断点合并推进
+        continueFailed = false;
+      } else {
+        // 换键：命中集/行级背景/进度游标全量重置（lastMatches 引用随 lastAcc 更新）
+        lastAcc = [];
+        lastMatches = lastAcc;
+        searchHitsByLine = new Map();
+        lastQuery = query;
+        lastCaseSensitive = caseSensitive;
+        lastScanCursor = 0;
+      }
       if (query === '') {
         clearHit(); // 空 query = 退出搜索：active 与全部行级背景立即消退
         scroller?.refresh(true);
         return Promise.resolve([]);
       }
-      const acc: SearchMatchWithPreview[] = [];
-      lastMatches = acc; // 渐进：扫描期间 gotoMatch/可见性按部分结果工作
-      const promise = runScan(acc, query, caseSensitive, mySeq).catch((err: unknown) => {
-        console.debug('[code] 后台全文扫描异常（返回已得部分结果）', err);
-        return acc;
-      });
+      const promise = runScan(lastAcc, query, caseSensitive, mySeq, lastScanCursor).catch(
+        (err: unknown) => {
+          console.debug('[code] 后台全文扫描异常（返回已得部分结果）', err);
+          return lastAcc;
+        }
+      );
       scan = { seq: mySeq, key, promise };
       void promise.then(() => {
         if (scan !== null && scan.seq === mySeq) scan = null; // 完成制：短路缓存恢复生效

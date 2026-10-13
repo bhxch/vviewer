@@ -1923,6 +1923,44 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     handle.destroy();
   });
 
+  // 项 2（缓存键纳入扫描进度）：scan===null && 同键 短路此前不区分收场形态——
+  // 停机收场（limitReached/continueFailed）的部分结果也被短路，同 query 重搜无法
+  // 续扫。语义分界：全文完成（indexFinished+扫描至尾）才短路零读；停机收场后同
+  // query 重搜触发续扫（重搜即用户动作，解除续读停机闩）并合并既有命中。
+  it('停机收场后同 query 重搜续扫合并命中；全文完成后同 query 短路零读', async () => {
+    stubResizeObserver();
+    const lines: string[] = [];
+    for (let i = 0; i < 3400; i++) {
+      const head = i === 5 ? 'zzneedle early ' : i === 3300 ? 'zzneedle deep ' : `row ${i} `;
+      lines.push(head + 'p'.repeat(Math.max(0, 1499 - head.length)) + '\n'); // 每行恰 1500B
+    }
+    const content = enc(lines.join('')); // ≈ 5.1MB ≈ 20 块（行 5 在块 0，行 3300 在块 18）
+    let readCount = 0;
+    const ctx: StreamCtx = {
+      size: content.length,
+      head: content.slice(0, 8192),
+      read: async (r) => {
+        readCount += 1;
+        if (readCount === 3) throw new Error('块 2 续读网络抖动'); // 首查在块 2 停机
+        return content.slice(r.start, r.end + 1);
+      }
+    };
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
+    const first = await handle.search('zzneedle');
+    expect(first.map((m) => m.line)).toEqual([5]); // 停机收场：仅已加载区部分结果
+    const readsAtStop = readCount;
+    const second = await handle.search('zzneedle'); // 同 query 重搜：不短路，续扫
+    expect(readCount).toBeGreaterThan(readsAtStop); // 扫描继续推进（续读真实发生）
+    expect(second.map((m) => m.line)).toEqual([5, 3300]); // 既有命中合并 + 新命中
+    const readsAtDone = readCount;
+    const third = await handle.search('zzneedle'); // 全文完成：短路零读
+    expect(readCount).toBe(readsAtDone);
+    expect(third.map((m) => m.line)).toEqual([5, 3300]);
+    handle.destroy();
+  });
+
   it('gotoMatch 先 ensure 目标块再跳转：补齐前不跳转，补齐后高亮落实到实行', async () => {
     stubResizeObserver();
     const lines: string[] = [];
