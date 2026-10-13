@@ -1645,6 +1645,46 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     }
   });
 
+  // 项 1（对齐 jsonl 口径）：窗口模式停机双闩此前仅 scroll 解除——视口 resize 同为
+  // 用户动作面（jsonl 的 ResizeObserver→notifyUserAction 双入口同构）。窗口 RO 回调
+  // 须清双闩 + 单次重评：续读失败停机后不经任何 scroll 事件，resize 即单次重试恢复。
+  it('窗口 resize 解锁续读停机：RO 回调清双闩并单次重评，同块重试恢复到 EOF', async () => {
+    const roCallbacks: Array<() => void> = [];
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(cb: () => void) {
+        roCallbacks.push(cb);
+      }
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    });
+    const content = enc(codeLines(1200)); // 1.8MB ≈ 7 块
+    const calls: RangeCall[] = [];
+    let readCount = 0;
+    const ctx: StreamCtx = {
+      size: null,
+      head: content.slice(0, 8192),
+      read: async (r) => {
+        calls.push({ start: r.start, end: r.end });
+        readCount += 1;
+        if (readCount === 3) throw new Error('块 2 网络抖动'); // 首块 + 续读块 1 后的首次续读失败
+        return content.slice(r.start, r.end + 1);
+      }
+    };
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    scrollCode(host, Number.MAX_SAFE_INTEGER); // 触发续读 → 块 2 失败 → 停机
+    await vi.waitFor(() => expect(readCount).toBeGreaterThanOrEqual(3));
+    await new Promise((r) => setTimeout(r, 30)); // 失败处理链（停机闩）落地
+    const readsAtFail = calls.length;
+    expect(roCallbacks.length).toBeGreaterThanOrEqual(1); // 窗口 RO 已挂载（自校验非空转）
+    roCallbacks[0]!(); // 模拟视口 resize：解锁停机 + 单次重评（不经 scroll 事件）
+    await vi.waitFor(() => expect(handle.getMeta().lines).toBe(1200)); // 恢复续读到 EOF
+    expect(calls.length).toBeGreaterThan(readsAtFail); // 重试真实发生
+    expect(calls[3]).toStrictEqual(calls[2]); // 同块重试（不跳块）
+    handle.destroy();
+  });
+
   it('窗口模式块表 LRU（16 块）：滚动跳入已逐出块区间，占位后按需重拉、内容正确且恰一次补块', async () => {
     stubResizeObserver();
     const content = enc(codeLines(3400)); // 5.1MB ≈ 20 块 > 16：滚到底后块 0..3 已逐出

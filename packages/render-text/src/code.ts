@@ -1673,12 +1673,19 @@ function renderCodeWindowed(
     })();
   }
 
-  // 用户动作入口（滚动）：解除续读/回看停机闩（「下次用户动作才重试」，hex/jsonl 同口径）
+  // 用户动作入口（滚动/视口 resize）：解除续读/回看停机闩（「下次用户动作才重试」，
+  // hex/jsonl 同口径）。jsonl 的 ResizeObserver→notifyUserAction 双入口同构：视口
+  // 尺寸变化同为用户可感知动作（侧栏折叠/窗口调整等），停机后 resize 即单次重评
   const onUserScroll = (): void => {
     continueFailed = false;
     reloadFailed = false;
   };
   pre.addEventListener('scroll', onUserScroll, { passive: true });
+  const ro = new ResizeObserver(() => {
+    onUserScroll(); // 与 scroll 同一解锁入口：清续读/回看双闩
+    scroller?.refresh(true); // 单次重评：重绘可视行并重估续读/回看（maybeContinue）
+  });
+  ro.observe(pre);
 
   /**
    * 启动：首块拉取（失败上抛——经 whenReady 到 codeRenderer.render 的渲染期读失败
@@ -1834,6 +1841,7 @@ function renderCodeWindowed(
       chunkCache.clear();
       hljsChunkCache.clear();
       pendingReload.clear();
+      ro.disconnect(); // 视口 resize 解锁入口随实例销毁（jsonl 同款）
       pre.removeEventListener('scroll', onUserScroll);
       pre.remove();
       // 提示条与 flex 布局类随实例销毁清理（host 复用时不得残留）
