@@ -1694,6 +1694,25 @@ function renderCodeWindowed(
     }, 1500);
   }
 
+  /** 已加载行的跳转共用体（gotoMatch/revealLine 共用）：目标行所在块可能已被块表
+   * LRU 逐出（全文扫描后早期块普遍不在驻）——占位行不承载命中高亮，先跳后补会闪
+   * 失。跳转异步化（接口签名 void 不变）：补齐（或补块失败占位兜底）后再滚动+行级
+   * 高亮（spec §4.3 定位）。 */
+  function revealLoadedLine(line: number): void {
+    const [b0, b1] = lineBlockSpan(line);
+    void (async () => {
+      try {
+        for (let b = b0; b <= b1; b++) {
+          if (!bs.has(b)) await bs.ensureBlock(b);
+        }
+      } catch (err) {
+        console.debug('[code] 搜索跳转补块失败（占位行兜底，滚动后重试）', err);
+      }
+      if (destroyed) return;
+      jumpToLine(line);
+    })();
+  }
+
   // ---------- 后台全文扫描搜索（Task 5，spec §4.3 搜索） ----------
   //
   // 替换 Task 4 的 snapshotLines「已加载区间快照」过渡实现，同时消除其补块风暴面
@@ -1868,32 +1887,51 @@ function renderCodeWindowed(
     gotoMatch(matchIndex) {
       const match = lastMatches[matchIndex];
       if (!match) return;
-      // ensure 后跳转（spec §4.3 定位）：目标行所在块可能已被块表 LRU 逐出（全文
-      // 扫描后早期块普遍不在驻）——占位行不承载命中高亮，先跳后补会闪失。跳转改
-      // 异步（接口签名 void 不变）：补齐（或补块失败占位兜底）后再滚动+行级高亮
-      const [b0, b1] = lineBlockSpan(match.line);
-      void (async () => {
-        try {
-          for (let b = b0; b <= b1; b++) {
-            if (!bs.has(b)) await bs.ensureBlock(b);
-          }
-        } catch (err) {
-          console.debug('[code] 搜索跳转补块失败（占位行兜底，滚动后重试）', err);
-        }
-        if (destroyed) return;
-        jumpToLine(match.line);
-      })();
+      revealLoadedLine(match.line);
     },
     revealLine(line, col) {
       void col;
-      // 越上界（含未加载行——渐进语义下未加载即不可达）静默，与全量路径越界同口径
-      if (!Number.isInteger(line) || line < 0 || line >= rows()) return;
-      jumpToLine(line);
+      if (!Number.isInteger(line) || line < 0) return;
+      if (line < rows()) {
+        revealLoadedLine(line); // 已加载行：与 gotoMatch 同款 ensure 补块后跳转
+        return;
+      }
+      // 未加载行（BUG-09 全局搜索跳转对大文件的回归面：ViewerPane 消费 pendingLine
+      // 即清，本调用是唯一补读机会，静默丢弃即跳转失效）：对齐 gotoMatch 的异步路径
+      // ——驱动续读（循环 pullBlock 至该行入索引，单飞闸 pulling 与滚动续读/扫描共用，
+      // 在飞时轮询等待；受既有停机口径约束 indexFinished/limitReached/continueFailed/
+      // destroyed）后 jumpToLine；停机未达或行号确越出 EOF（EOF 确认后仍不在索引）
+      // 才静默兜底，与全量路径越界同口径。签名 void 不变。
+      void (async () => {
+        await ready.catch(() => {}); // 与首拉串行（start 未设 pulling 闸，双喂会使索引错位）；首拉失败面已由 whenReady 上抛，此处吞掉防 unhandled
+        const rowsBefore = rows();
+        while (!destroyed && line >= rows() && !indexFinished && !limitReached && !continueFailed) {
+          if (pulling) {
+            await delay(SCAN_POLL_MS); // 续读/回看在飞：等待其落地后重评（扫描同款）
+            continue;
+          }
+          pulling = true;
+          try {
+            await pullBlock();
+          } catch (err) {
+            continueFailed = true; // 与滚动续读同口径：停机闩，用户滚动动作解除
+            console.debug('[code] revealLine 续读失败（跳转静默兜底，滚动后重试）', err);
+          } finally {
+            pulling = false;
+          }
+        }
+        if (destroyed) return;
+        if (rows() !== rowsBefore) remountOrRefresh(); // 行数已增长：重建 scroller（spacer 总高对齐已加载行数，跳转定位才可达）
+        if (line >= rows()) return; // 停机面未达/越出 EOF：静默兜底不跳转
+        jumpToLine(line);
+      })();
     }
   };
   // 首拉完成面：codeRenderer.render await 它——首块/本地化排空失败 → 销毁半装配实例
-  // 后 rethrow（渲染期读失败面）；resolve 后实例已 mount，滚动期失败走自兜底（上方闩）
-  (handle as { whenReady?: Promise<void> }).whenReady = start();
+  // 后 rethrow（渲染期读失败面）；resolve 后实例已 mount，滚动期失败走自兜底（上方闩）。
+  // 捕获引用供 revealLine 的未加载行续读路径 await（与其串行，防双喂）
+  const ready = start();
+  (handle as { whenReady?: Promise<void> }).whenReady = ready;
   return handle;
 }
 

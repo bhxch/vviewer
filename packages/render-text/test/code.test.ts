@@ -1900,4 +1900,83 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     expect(matches.map((m) => m.line)).toEqual([3, 3000]);
     handle.destroy();
   });
+
+  // 终审 I-1（BUG-09 大文件回归面）：全局搜索跳转（pendingLine）指向远部未加载行
+  // ——revealLine 不得静默丢弃（此前 `line >= rows()` 即 return），须驱动续读至该行
+  // 入索引后跳转到位。ViewerPane 消费 pendingLine 即清，本调用是唯一补读机会。
+  it('revealLine 未加载行（全局搜索跳转形态）：驱动续读至该行入索引后跳转到位（实行 + active 高亮）', async () => {
+    stubResizeObserver();
+    const content = enc(codeLines(3400)); // 5.1MB ≈ 20 块：行 3300 在末块（首块后不可见）
+    const calls: RangeCall[] = [];
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, {
+      ext: 'js',
+      lang: 'javascript',
+      ctx: streamCtx({ size: content.length, content, head: content.slice(0, 8192), calls })
+    });
+    await vi.waitFor(() => expect(handle.getMeta().lines).toBe(174)); // 仅首块已加载
+    const readsAtJump = calls.length;
+    handle.revealLine(3300); // 目标行远部未加载
+    await vi.waitFor(() => {
+      const row = host.querySelector('[data-line="3300"]');
+      expect(row?.classList.contains('vv-search-hit-line-active')).toBe(true); // 跳转已落地
+    });
+    expect(bodyText(host, 3300)!.startsWith('const a = 3300;')).toBe(true); // 实行非占位
+    expect(handle.getMeta().lines).toBeGreaterThan(174); // 续读已推进索引（补读真实发生）
+    expect(calls.length).toBeGreaterThan(readsAtJump);
+    handle.destroy();
+  });
+
+  it('revealLine 越出 EOF：续读到 EOF 确认后静默不跳转（全量路径越界同口径）', async () => {
+    stubResizeObserver();
+    const content = enc(codeLines(400)); // 600KB ≈ 3 块
+    const calls: RangeCall[] = [];
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, {
+      ext: 'js',
+      lang: 'javascript',
+      ctx: streamCtx({ size: content.length, content, head: content.slice(0, 8192), calls })
+    });
+    await vi.waitFor(() => expect(handle.getMeta().lines).toBe(174));
+    handle.revealLine(999_999); // 越出 EOF：驱动续读到 EOF 才能判定不存在
+    await vi.waitFor(() => expect(handle.getMeta().lines).toBe(400)); // EOF 已确认（补读非空转）
+    await new Promise((r) => setTimeout(r, 20));
+    expect(host.querySelector('.vv-search-hit-line-active')).toBeNull(); // 静默兜底：不跳转
+    handle.destroy();
+  });
+
+  it('revealLine 续读失败：continueFailed 停机静默兜底不跳转，无 unhandled rejection', async () => {
+    stubResizeObserver();
+    const content = enc(codeLines(3400));
+    let readCount = 0;
+    const unhandled: unknown[] = [];
+    const onUnhandled = (err: unknown): void => { unhandled.push(err); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const host = newHost();
+      const handle = renderCode(content.slice(0, 8192), host, {
+        ext: 'js',
+        lang: 'javascript',
+        ctx: {
+          size: content.length,
+          head: content.slice(0, 8192),
+          read: async (r) => {
+            void r;
+            readCount += 1;
+            if (readCount === 2) throw new Error('续读网络抖动'); // 首块成功后的首次续读失败
+            return content.slice(r.start, r.end + 1);
+          }
+        }
+      });
+      await vi.waitFor(() => expect(handle.getMeta().lines).toBe(174));
+      handle.revealLine(3300);
+      await vi.waitFor(() => expect(readCount).toBeGreaterThanOrEqual(2)); // 失败落地
+      await new Promise((r) => setTimeout(r, 30));
+      expect(unhandled).toStrictEqual([]); // 失败被 catch 自兜底
+      expect(host.querySelector('.vv-search-hit-line-active')).toBeNull(); // 静默兜底：不跳转
+      handle.destroy();
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
 });
