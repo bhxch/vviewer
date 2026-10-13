@@ -70,7 +70,10 @@ export function createHexSource(
   const blocks = new Map<number, Uint8Array>();
   // 块下标 → 在途拉取 promise（并发去重；失败在 finally 清理，可重试）
   const inflight = new Map<number, Promise<void>>();
-  // head 按 64KB 切分预置（短 head → block 0 部分就绪；全量 head → 覆盖至文件头若干块）
+  // head 按 64KB 切分预置（短 head → block 0 部分就绪；全量 head → 覆盖至文件头若干块）。
+  // ≤1MB 全 head 策略下预置可达 16 项（1MB / 64KB），字面超出 LRU_MAX_BLOCKS 8 块口径——
+  // 内存仍被 FULL_LIMIT（1MB）有界且 read 永不触发（一切块已就绪），首次拉取触发 evict
+  // 即恢复上界，属设计内例外（终审 M1）
   for (let i = 0; i * HEX_SOURCE_BLOCK_BYTES < head.length; i++) {
     blocks.set(i, head.subarray(i * HEX_SOURCE_BLOCK_BYTES, (i + 1) * HEX_SOURCE_BLOCK_BYTES));
   }

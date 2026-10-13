@@ -89,7 +89,7 @@ export interface TreeStore {
 
 - **索引**：`offsets: number[]`（行起始字节偏移，流式追加）+ `loadedBytes` 游标。首屏读 2 块（2×256KB），滚动接近已加载尾部续读；`streamEnd` 布尔标记「已到文件末尾」。
 - **行内容**：块解码缓存 `Map<blockIndex, string>`（上限 8 块 LRU ≈ 2MB 文本）；行文本 = 块文本切片；窗口行渲染命中缓存直取。
-- **块边界**：块尾回退到最后一个 `\n`（不含）——残余字节并入下块；**仅 UTF-8/ASCII 流式**（换行 0x0A 在 UTF-8 无歧义、块切不破多字节字符——前提是按行边界切）；`det.encoding` 非 utf-8/undefined → 全量回退（现状路径）。
+- **块边界**：块尾回退到最后一个 `\n`（不含）——残余字节并入下块；**仅 UTF-8/ASCII 流式**（换行 0x0A 在 UTF-8 无歧义、块切不破多字节字符——前提是按行边界切）；`det.encoding` 非 utf-8/undefined → 全量回退（现状路径）。undefined 措辞补笔（终审 A2）：detectEncoding 恒返回四值之一，undefined 实际不可达；实现视 undefined 为 utf-8（ASCII 为其子集）。
 - **巨行防护**：索引阶段按字节记录行长，>1MB 行不解析、64KB 预览截断（既有语义保持，跨块行以索引期边界为准）。
 - **meta/UI**：总行数未知 → 「已加载 N 行」；`streamEnd` 后显示「共 N 行」；滚动到底自动续读（spec §2.2「总行数未知，滚动到底才确定」）。既有「总行数」断言随 §8 清单更新。
 
@@ -111,7 +111,7 @@ export interface TreeStore {
 | single / url | false | File.size / Content-Length（可缺） | ctx=全量切片视图（=现状，零收益零风险） |
 | zip / libarchive | false | 条目 size | 同上 |
 
-编码非 UTF-8（UTF-16/GBK 等）：jsonl/code 回退全量（hex 不解码，不受影响）。
+编码非 UTF-8（UTF-16/GBK 等）：jsonl/code 回退全量（hex 不解码，不受影响）。undefined 措辞补笔（终审 A2，同 §4.2）：detectEncoding 恒返回四值之一，undefined 实际不可达；实现视 undefined 为 utf-8（ASCII 为其子集）。
 
 ## 6. 测试与验收
 

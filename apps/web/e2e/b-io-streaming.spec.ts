@@ -49,7 +49,9 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 const MB = 1024 * 1024;
 /** 10MB：窗口模式必经路径（> FULL_LIMIT 1MB → head 探测而非全量直读） */
 const BIG_BYTES = 10 * MB;
-/** 探针 + 结构尾窗（2×64KB 块）的理论首屏字节，实证锚的下界参考 */
+/** 探针 + 结构尾窗（2×64KB 块）的理论首屏字节，实证锚的下界参考。与 dispatcher
+ * HEAD_SIZE（8KB 探针）、struct.ts STRUCT_TAIL_BYTES（尾窗 22+65535 → ≤2×64KB 块）、
+ * hexSource HEX_SOURCE_BLOCK_BYTES（64KB）耦合：任一侧漂移即红为预期告警 */
 const FIRST_SCREEN_EXPECTED = 8 * 1024 + 2 * 64 * 1024;
 
 /**
@@ -473,7 +475,8 @@ test('IO-04：窗口模式搜索 need/chunk 端到端——1MB 步进拉块扫�
 /** 5MB jsonl：256B/行（含 \n）× 20480 行 = 恰 5MB；窗口块 256KB → 每块恰 1024 行 */
 const JSONL_BYTES = 5 * MB;
 const JSONL_ROWS = JSONL_BYTES / 256;
-/** 首屏理论恰值：探针 8KB + 前 2 块（2×256KB）——下界锁「窗口路径真实发生」 */
+/** 首屏理论恰值：探针 8KB + 前 2 块（2×256KB）——下界锁「窗口路径真实发生」。与
+ * dispatcher HEAD_SIZE（8KB）、jsonl WINDOW_BLOCK_BYTES（256KB）耦合：漂移即红为预期告警 */
 const JSONL_FIRST_SCREEN_EXPECTED = 8 * 1024 + 2 * 256 * 1024;
 
 /**
@@ -666,7 +669,9 @@ test('IO-06：远端 10MB js code 窗口首屏总拉取 ≤1MB（探针+首块�
     }
     expect(stats.records[0]?.range, '首请求应为 head 探测').toBe('bytes=0-8191');
     expect(stats.records[1]?.range, '次请求应为块 0 整块（256KB）').toBe(codeBlockRange(0));
-    // 上限即本用例标题口径（spec §6 同款 +10% 余量）；全量/大预取回归时 10MB 级必超
+    // 上限即本用例标题口径（spec §6 同款 +10% 余量）；全量/大预取回归时 10MB 级必超。
+    // 理论值与 dispatcher HEAD_SIZE（8KB 探针）、code CODE_WINDOW_BLOCK_BYTES（256KB
+    // 首块）耦合：任一侧漂移即红为预期告警
     const firstScreenExpected = 8 * 1024 + CODE_BLOCK_BYTES;
     expect(stats.total()).toBeGreaterThanOrEqual(firstScreenExpected);
     expect(stats.total(), `code 首屏总拉取 ${stats.total()}B 应 ≤1.1MB`).toBeLessThanOrEqual(1_100_000);
