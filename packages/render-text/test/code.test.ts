@@ -38,6 +38,12 @@ import {
   type HighlightInterval,
 } from '../src/code';
 
+// 模块求值期捕获原始函数值（任何 spyOn 之前 → 必为原函数；ES import 声明提升，
+// 求值时 ../src/search 命名空间尚未被改写）。named import 是活绑定：spyOn 改写
+// 命名空间后 `originalSearchCode(...)` 会路由回 spy（双层 spy 帧，真实函数永不
+// 执行）；需真实透传的 mock 须用此常量，不能用 named import。
+const REAL_SEARCH_CODE = searchModule.searchCode;
+
 describe('buildLineIndex', () => {
   it('splits keeping line count', () => {
     expect(buildLineIndex('a\nb\nc')).toEqual(['a', 'b', 'c']);
@@ -2495,6 +2501,9 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
 
   // 项 F 残留角（复审）：startFrom=0 的同键续扫（块 0 命中后扫描途中异常、游标未
   // 写点）——截断无条件执行（不按 startFrom > 0 设门）后重扫自 0 重收，命中不重复。
+  // 注入面用 REAL_SEARCH_CODE 透传（顶层捕获的原函数值）：call 1（行 0）真实执行
+  // 命中入 acc，call 2（行 1）抛——若误用 named import 透传会路由回 spy，行 0 命中
+  // 永不入集，用例退化为平凡成立（回退源码修复依然全绿，锚不住截断）。
   it('项 F 残留角：块 0 命中后扫描异常（游标未写）——同 query 重搜命中不重复', async () => {
     stubResizeObserver();
     attachHighlightClient({ highlight: async () => [] });
@@ -2523,11 +2532,12 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
         injected += 1;
         // 块 0 内、行 0 命中已入集后的下一行抛（游标未写点：异常前无块级检查点）
         if (injected === 2) throw new Error('扫描注入异常'); // 行 0 已命中入 acc、检查点未写
-        return originalSearchCode(linesArg, query, opts);
+        return REAL_SEARCH_CODE(linesArg, query, opts);
       });
       const partial = await handle.search('aa'); // 异常收场：游标残留 0（未达块级检查点，
-      // lastAcc 未同步——部分结果只在检查点暴露），本断言锚定该语义
-      expect(partial).toEqual([]);
+      // lastScanCursor 未写）。runScan 的 acc 即 lastAcc 同一引用，search catch 返回
+      // lastAcc=[行 0 命中]——部分结果含已入集命中（异常在检查点前，acc 即所得）
+      expect(partial.map((m) => m.line)).toEqual([0]);
       spy.mockRestore();
       const second = await handle.search('aa'); // 同 query 重搜：自 0 重扫
       expect(second.map((m) => m.line)).toEqual([0, 3000]); // 无重复（截断无条件生效）
