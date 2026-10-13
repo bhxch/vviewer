@@ -893,7 +893,10 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
     const content = utf8HeadGbTail(500, 500); // 干净 ≈750KB（块 0..2 前段）+ 脏 500 行 ≈809KB
     const calls: RangeCall[] = [];
     const host = mount();
-    const inst = (await jsonlRenderer.render(content.slice(0, 8192), host, source, det,
+    // 局部 det：describe 级共享 det 会被前序用例的 redetectWithFull 就地翻转
+    //（encoding→gb18030 不恢复），沿用会误入「非 UTF-8 全量补拉」入口
+    const localDet: Detection = { ext: 'jsonl', encoding: 'utf-8' };
+    const inst = (await jsonlRenderer.render(content.slice(0, 8192), host, source, localDet,
       streamCtx({ size: null, content, head: content.slice(0, 8192), calls }))) as JsonlInstance;
     await vi.waitFor(() => expect(host.querySelector('[data-line="0"]')).not.toBeNull());
     expect(inst.getMeta().size).toBeLessThan(content.length); // 降级前：size 未知 → 已确认字节
