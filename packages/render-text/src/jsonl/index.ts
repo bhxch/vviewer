@@ -68,7 +68,7 @@
 import type { Detection, FileSource, RenderedInstance, Renderer, StreamCtx } from '@vviewer/core';
 import { redetectWithFull } from '@vviewer/core';
 import { HighlightCanceledError, type HighlightInterval } from '@vviewer/highlight';
-import { STREAM_MAX_BYTES, createBlockStream } from '../blockStream';
+import { STREAM_MAX_BYTES, createBlockStream, memoizedFullRead } from '../blockStream';
 import { createTextWindow, type BlockTextEntry } from '../textWindow';
 import {
   assignIntervalsToLines,
@@ -797,7 +797,9 @@ export const jsonlRenderer: Renderer = {
       (ctx.size === null || ctx.head.length < ctx.size)
     ) {
       const head = buffer; // 探测头（head 即全量时守卫不触发，此处必为文件前缀）
-      buffer = await ctx.read({ start: 0, end: Number.MAX_SAFE_INTEGER });
+      // 项 6（retry 免重拉）：补拉按 ctx 记忆——错误卡片 retry 重入 render 不再
+      // 重复全量下载（memoizedFullRead，见 blockStream.ts 注）
+      buffer = await memoizedFullRead(ctx);
       // I-2 补拉后编码精判：capable 且 size 未知/超限时 det 仅由 8KB head 判定，截断
       // 多字节可双向误判（误判 gb18030 直接解码即整文件 mojibake）——以全量重算翻转
       // （dispatcher redetectWithFull 同款共享 helper）。误判 gb18030 翻转 utf-8 后，

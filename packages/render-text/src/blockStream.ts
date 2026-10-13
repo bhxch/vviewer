@@ -35,6 +35,25 @@ import type { StreamCtx } from '@vviewer/core';
  */
 export const STREAM_MAX_BYTES = 512 * 1024 * 1024;
 
+/**
+ * 守卫补拉记忆（遗留清偿项 6，retry 免重拉）：非 UTF-8 回退/全量守卫的
+ * {0, MAX} 全量补拉以模块级 WeakMap 按 ctx 记忆——错误卡片 retry 重入 render
+ * （同一 ctx）不再重复全量下载；ctx 无引用后条目随 GC 回收，无手动清理面。
+ * 成功即记忆（字节终态）；失败即刻出表（防毒化：retry 需可重新发起）。
+ */
+const fullReadMemo = new WeakMap<StreamCtx, Promise<Uint8Array<ArrayBuffer>>>();
+
+export function memoizedFullRead(ctx: StreamCtx): Promise<Uint8Array<ArrayBuffer>> {
+  const memo = fullReadMemo.get(ctx);
+  if (memo !== undefined) return memo;
+  const p = ctx.read({ start: 0, end: Number.MAX_SAFE_INTEGER });
+  fullReadMemo.set(ctx, p);
+  p.catch(() => {
+    fullReadMemo.delete(ctx); // 失败不记忆：下次 render 重入可重试
+  });
+  return p;
+}
+
 export interface BlockStream {
   readonly blockSize: number;
   /** 已确认的文件字节数（size 已知时= size；未知时随短读探测推进，单调不减） */

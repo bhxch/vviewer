@@ -526,6 +526,26 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
     inst.destroy();
   });
 
+  // 项 6（retry 免重拉）：入口 {0,MAX} 补拉此前每次 render 重入都重发——错误卡片
+  // retry 场景同一 ctx 重复全量下载。修后以模块级 WeakMap 记忆同 ctx 的补拉
+  //（memoizedFullRead：成功即记忆、失败出表可重试），ctx 随实例 GC 回收。
+  it('入口补拉记忆：同 ctx 两次 render（retry 场景）→ 全量 read 仅一次，行数以全文件计', async () => {
+    stubResizeObserver();
+    const rows = Array.from({ length: 600 }, (_, i) => `中${'p'.repeat(15)}${i}`);
+    const content = gbBytes(rows);
+    const calls: RangeCall[] = [];
+    const ctx = streamCtx({ size: content.length, content, head: content.slice(0, 8192), calls });
+    const gbDet: Detection = { ext: 'jsonl', encoding: 'gb18030' };
+    const host = mount();
+    const inst1 = (await jsonlRenderer.render(content.slice(0, 8192), host, source, gbDet, ctx)) as JsonlInstance;
+    inst1.destroy();
+    const host2 = mount();
+    const inst2 = (await jsonlRenderer.render(content.slice(0, 8192), host2, source, gbDet, ctx)) as JsonlInstance;
+    expect(calls).toStrictEqual([{ start: 0, end: Number.MAX_SAFE_INTEGER }]); // 第二次零新读
+    expect(inst2.getMeta().lines).toBe(600); // 记忆的全量字节同样可用（非截断面）
+    inst2.destroy();
+  });
+
   // 终审 I-2：入口补拉后的编码精判——capable 且 size 未知/超限时 det 仅由 8KB head
   // 判定（dispatcher.test ⑬ 同构，渲染器侧镜像）：head 截断多字节误判 gb18030，补拉
   // 全量后须以 full 重算翻转 utf-8（随之落窗口模式），否则以误判值解码整文件 mojibake。

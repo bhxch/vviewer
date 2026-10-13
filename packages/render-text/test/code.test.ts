@@ -1583,6 +1583,28 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     inst2.destroy();
   });
 
+  // 项 6（retry 免重拉）：守卫 {0,MAX} 补拉此前每次 render 重入都重发——错误卡片
+  // retry 场景同一 ctx 重复全量下载。修后以模块级 WeakMap 记忆同 ctx 的补拉
+  //（memoizedFullRead：成功即记忆、失败出表可重试），ctx 随实例 GC 回收。
+  it('守卫补拉记忆：同 ctx 两次 render（retry 场景）→ 全量 read 仅一次，记忆字节同样可用', async () => {
+    stubResizeObserver();
+    const rows: string[] = [];
+    for (let i = 0; i < 600; i++) rows.push(`中${'p'.repeat(14)}${i}`);
+    const content = gbBytes(rows);
+    const calls: RangeCall[] = [];
+    const ctx = streamCtx({ size: content.length, content, head: content.slice(0, 8192), calls });
+    const host = newHost();
+    const inst1 = (await codeRenderer.render(content.slice(0, 8192), host, winSource,
+      { ext: 'log', encoding: 'gb18030' }, ctx)) as CodeInstance;
+    inst1.destroy();
+    const host2 = newHost();
+    const inst2 = (await codeRenderer.render(content.slice(0, 8192), host2, winSource,
+      { ext: 'log', encoding: 'gb18030' }, ctx)) as CodeInstance;
+    expect(calls).toStrictEqual([{ start: 0, end: Number.MAX_SAFE_INTEGER }]); // 第二次零新读
+    expect(inst2.getMeta().lines).toBe(600); // 记忆的全量字节同样可用（非截断面）
+    inst2.destroy();
+  });
+
   // 终审 I-2：守卫补拉后的编码精判——capable 且 head（8KB 探测）短于 size 时 det 仅
   // 由 head 判定，截断多字节误判 gb18030（dispatcher.test ⑬ 同构，渲染器侧镜像）；
   // 补拉全量后须以 full 重算翻转，否则 renderOpts.encoding 以误判值解码整文件 mojibake。

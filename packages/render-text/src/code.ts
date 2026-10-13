@@ -1,7 +1,7 @@
 import type { Renderer, Encoding, Detection, FileSource, RenderedInstance, SearchMatch, ComputeSource, ComputeWhere, StreamCtx } from '@vviewer/core';
 import { getRemoteBase, getRemoteMeta, redetectWithFull, RemoteComputeError, showErrorCard } from '@vviewer/core';
 import { detectLanguage, HighlightCanceledError, captureToCssClass, type HighlightChunk, type HighlightInterval } from '@vviewer/highlight';
-import { STREAM_MAX_BYTES, createBlockStream } from './blockStream';
+import { STREAM_MAX_BYTES, createBlockStream, memoizedFullRead } from './blockStream';
 import { createTextWindow } from './textWindow';
 import { advanceCodeIndex, createCodeIndex, finishCodeIndex } from './codeIndexStream';
 
@@ -2060,7 +2060,9 @@ export const codeRenderer: Renderer = {
       // 评审指令①口径：不落「错误卡片 + 8KB probe 重试」截断活面）。
       if (ctx !== undefined && (ctx.size === null || buffer.byteLength < ctx.size)) {
         const head = buffer; // 探测头（head 即全量时守卫不触发，此处必为文件前缀）
-        buffer = await ctx.read({ start: 0, end: Number.MAX_SAFE_INTEGER });
+        // 项 6（retry 免重拉）：补拉按 ctx 记忆——错误卡片 retry 重入 render 不再
+        // 重复全量下载（memoizedFullRead，见 blockStream.ts 注）
+        buffer = await memoizedFullRead(ctx);
         // I-2 补拉后编码精判：capable 且 size 未知/超限时 det 仅由 8KB head 判定，
         // 截断多字节可双向误判（误判 gb18030 直接解码即整文件 mojibake）——以全量
         // 重算翻转（dispatcher redetectWithFull 同款共享 helper），encoding 随之重取
