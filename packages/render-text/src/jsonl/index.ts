@@ -654,6 +654,12 @@ async function renderJsonlWindowed(
   // CPU 空转），置位后停止自动续读；用户滚动/resize 动作（notifyUserAction）解除，
   // 重评时单次重试（hex.ts「下次用户动作才重试」口径）
   let continueFailed = false;
+  // 回看重拉失败停机（M-3 与 code.ts reloadFailed 同款闩）：失败后任何自动
+  // update/refresh 不得重试重拉（防活锁），用户滚动/resize 动作（notifyUserAction）
+  // 解除后单次重试。当前「失败不 refresh ⇒ 无自动重评」虽已使重试只挂在用户动作上，
+  // 但该等价性依赖「jsonl 无其他自动 refresh 入口」的实现细节——闩显式落下使与
+  // code.ts 的停机纪律同款，未来新增自动 refresh 面（渐进扫描等）不再依赖隐性约束
+  let reloadFailed = false;
   // 回看重拉待办（计划 3 Task 1，B1 块表有界化配套）：lineAvailable 探测到缺块时
   // 登记（Set 去重），maybeContinue 统一 ensureBlock 后 refresh 重渲。同步渲染路径
   // 不能 await——缺块行先渲染占位卡，补块到达由下一次 update 填充（hex「占位 +
@@ -680,8 +686,10 @@ async function renderJsonlWindowed(
    */
   function maybeContinue(lastVisible: number, api: ViewRuntimeApi): void {
     // 回看重拉优先于续读：缺块占位卡等待补块（与 EOF/尾部距离无关——回看发生在
-    // 已加载坐标区，逐块 ensure 后一次 refresh 填充全部占位行）
-    if (pendingReload.size > 0 && !pulling && !api.destroyed()) {
+    // 已加载坐标区，逐块 ensure 后一次 refresh 填充全部占位行）。reloadFailed 停机
+    // 闩与 continueFailed 同款：失败后任何自动 update/refresh 不得重试重拉（防活锁），
+    // 用户滚动/resize 动作（notifyUserAction）解除后单次重试
+    if (pendingReload.size > 0 && !pulling && !reloadFailed && !api.destroyed()) {
       const targets = [...pendingReload];
       pendingReload.clear();
       pulling = true;
@@ -690,6 +698,7 @@ async function renderJsonlWindowed(
           for (const b of targets) await bs.ensureBlock(b);
         } catch (err) {
           for (const b of targets) pendingReload.add(b); // 未完成块回待办（占位卡维持）
+          reloadFailed = true;
           console.debug('[jsonl] 回看重拉失败，已停机（滚动后重试）', err);
           pulling = false;
           return; // 失败停机不 refresh（下次用户动作再试，续读失败同口径——防活锁）
@@ -749,7 +758,8 @@ async function renderJsonlWindowed(
       (limitReached ? STREAM_LIMIT_NOTICE : ''),
     streamDone: () => indexFinished,
     afterUpdate: maybeContinue,
-    notifyUserAction: () => { continueFailed = false; }, // 用户动作解除续读停机（单次重试）
+    // 用户动作解除续读/回看停机（单次重试）——code.ts onUserScroll 同口径
+    notifyUserAction: () => { continueFailed = false; reloadFailed = false; },
     metaSize: () => ctx.size ?? bs.confirmedBytes,
     metaLines: rows
   });

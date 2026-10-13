@@ -626,6 +626,59 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
     inst.destroy();
   });
 
+  // M-3（与 code.ts reloadFailed 同款停机闩）：回看重拉失败后任何自动 update/refresh
+  // 不得重试重拉（防活锁），用户滚动动作解除后单次重试成功。
+  it('回看重拉失败：停机闩挡住自动重试（无活锁），用户滚动动作解除后单次重试成功', async () => {
+    stubResizeObserver();
+    const text = padLines(3400, 1500); // ≈5.1MB ≈ 20 块 > 16：滚到底后块 0..3 已逐出
+    const content = enc(text);
+    const calls: RangeCall[] = [];
+    let block1Reads = 0;
+    const ctx: StreamCtx = {
+      size: content.length,
+      head: content.slice(0, 8192),
+      read: async (r) => {
+        calls.push({ start: r.start, end: r.end });
+        if (r.start === BLOCK) {
+          block1Reads += 1;
+          if (block1Reads === 2) throw new Error('块 1 回看重拉失败'); // 初始喂块成功，第 2 次（回看重拉）失败
+        }
+        return content.slice(r.start, r.end + 1);
+      }
+    };
+    const host = mount();
+    const inst = (await jsonlRenderer.render(content.slice(0, 8192), host, source, det, ctx)) as JsonlInstance;
+    scrollToBottom(host); // 续读到 EOF：前向喂块恰每块一次
+    await vi.waitFor(() => {
+      expect(host.querySelector('.vv-jsonl-status')!.textContent!.startsWith('共 3400 行')).toBe(true);
+    });
+    expect(calls.length).toBe(20);
+    const scroll = host.querySelector('.vv-jsonl-scroll') as HTMLElement;
+    scroll.scrollTop = 120 * 350; // 跳入块 1/2 区间：占位卡 + 回看重拉 → 块 1 失败 → 停机
+    scroll.dispatchEvent(new Event('scroll'));
+    await vi.waitFor(() => expect(block1Reads).toBe(2)); // 失败落地
+    await new Promise((r) => setTimeout(r, 30));
+    const readsAtFail = calls.length;
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls.length).toBe(readsAtFail); // 停机闩：无自动重试（整批待办冻结，块 2 也不拉）
+    // 用户滚动动作（notifyUserAction）：解除停机 → 单次重试（恢复批串行 ensure：块 1/2）
+    scroll.scrollTop = 0;
+    scroll.dispatchEvent(new Event('scroll'));
+    await new Promise((r) => setTimeout(r, 10));
+    scroll.scrollTop = 120 * 350; // 补块到位：窗口实卡渲染
+    scroll.dispatchEvent(new Event('scroll'));
+    await vi.waitFor(() => {
+      const body = host.querySelector('[data-line="345"] .vv-jsonl-body') as HTMLElement | null;
+      expect(body?.textContent ?? '').toContain('"i": 345');
+    });
+    expect(calls.filter((c) => c.start === BLOCK && c.end === 2 * BLOCK - 1).length).toBe(3); // 块 1 恰重试一次
+    await new Promise((r) => setTimeout(r, 30)); // 恢复批全部落地
+    const stable = calls.length;
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls.length).toBe(stable); // 成功后无额外拉取（无重试风暴）
+    inst.destroy();
+  });
+
   // 计划 3 Task 2 / T2 遗留钉：oversized 预览的跨块多字节此前无专测——4 字节
   // emoji 骑在块切口上，预览 gather 必须字节域缝合（与全量 64KB 字符截断逐字符一致）。
   it('oversized 预览跨块多字节：emoji 骑块边界，窗口与全量 64KB 预览逐字符一致', async () => {
