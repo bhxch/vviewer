@@ -386,7 +386,10 @@ class TabCollection {
         .find((s) => s.storeId === originId);
       workspaceStore.addSource(targetWs, known ?? sourceOf(alive));
     }
-    const tab = alive !== null ? this.add(alive, snap.path, snap.name) : this.addPlaceholder(snap);
+    const tab =
+      alive !== null
+        ? this.add(alive, snap.path, snap.name, snap.size) // size 随快照（项 3 同源），撤销重建免二次探测
+        : this.addPlaceholder(snap);
     tab.scrollTop = snap.scrollTop;
     if (snap.overrideRenderer !== undefined) tab.overrideRenderer = snap.overrideRenderer;
     if (snap.pinned) {
