@@ -16,6 +16,13 @@ export interface TabSnapshot {
   overrideRenderer?: string;
   /** F 项：pinned tab（pinned 区靠左）；仅置位时写入（缺省 = 普通区），restore 侧读回。 */
   pinned?: boolean;
+  /**
+   * 项 3（遗留清偿波 3）：文件字节数（Tab.source.size 回环）——restore 链把它传回
+   * addTab，恢复的远端文件 tab 免 head 探测 + size 未知路径（dispatcher 读策略直取
+   * size，hex 亦不退全量）。未知大小（null/缺省）省略字段（对齐 pinned 的「仅置位
+   * 写入」风格）；旧快照无该字段 → undefined → 既有探测路径，天然兼容（无需迁移）。
+   */
+  size?: number | null;
 }
 
 /** 导入主题（spec B §2.3）：id='imported:<随机8>'，applyAppearance 按 id 解析注入。 */

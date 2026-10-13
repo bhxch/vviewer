@@ -20,6 +20,22 @@ describe('session store', () => {
     expect(loaded).toEqual(tabs);
     expect(loaded[0]?.storeBase).toBe('http://127.0.0.1:8321');
   });
+  it('round-trips optional size on tab snapshots（项 3：会话恢复免探测）', async () => {
+    const tabs = [{
+      id: 't3', storeId: 'remote:abcd1234', storeLabel: 'srv', storeBase: 'http://127.0.0.1:8321',
+      path: 'data/big.jsonl', name: 'big.jsonl', kind: 'rename-only' as const, scrollTop: 0, active: true,
+      size: 12345
+    }];
+    await saveTabs(tabs);
+    const { tabs: loaded } = await loadSession();
+    expect(loaded[0]?.size).toBe(12345);
+  });
+  it('legacy snapshot without size field loads unchanged（旧快照天然兼容，无需迁移）', async () => {
+    const legacy = [{ id: 't4', storeId: 's1', storeLabel: 'x', path: 'a.txt', name: 'a.txt', kind: 'restorable' as const, scrollTop: 0, active: true }];
+    await saveTabs(legacy);
+    const { tabs: loaded } = await loadSession();
+    expect(loaded).toEqual(legacy); // 无 size 字段：形状不变（restore 侧走既有探测路径）
+  });
   it('settings round-trip with defaults', () => {
     expect(loadSettings()).toEqual({
       themeMode: 'system',

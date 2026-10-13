@@ -270,6 +270,16 @@ describe('migrateLegacyTabs（旧扁平 tabs 快照 → 单 workspace）', () =>
       activeTabId: null
     });
   });
+
+  it('size 字段随迁移原样保留（项 3：restore 链 size 回环的迁移面；无 size 的旧条目形状不变）', () => {
+    const legacy = [
+      snap('t1', { path: 'a/big.jsonl', name: 'big.jsonl', size: 4096 }),
+      snap('t2', { path: 'b/x.txt', name: 'x.txt' }) // 旧快照无 size 字段
+    ];
+    const tabs = migrateLegacyTabs(legacy).workspaces[0]!.tabs;
+    expect(tabs[0]?.size).toBe(4096);
+    expect('size' in (tabs[1] ?? {})).toBe(false);
+  });
 });
 
 describe('单例 workspaceStore', () => {

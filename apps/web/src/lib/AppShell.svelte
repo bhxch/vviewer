@@ -249,7 +249,9 @@
           if (exists) continue;
           const store = rebuilt.get(t.storeId);
           if (store !== undefined) {
-            const tab = addTab(store, t.path, t.name);
+            // 项 3：size 读回（与运行期 addTab 同参位）——恢复的远端文件 tab 免 head
+            // 探测 + size 未知路径；旧快照无该字段 → undefined → null（既有探测路径）
+            const tab = addTab(store, t.path, t.name, t.size ?? null);
             tab.scrollTop = t.scrollTop;
             if (t.overrideRenderer !== undefined) tab.overrideRenderer = t.overrideRenderer; // C 项读回
             if (t.pinned) tab.pinned = true; // F 项读回：快照序 pinned 靠左，add 顺序保持区不变式

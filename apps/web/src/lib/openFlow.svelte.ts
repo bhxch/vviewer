@@ -65,6 +65,9 @@ function snapshot(t: Tab): TabSnapshot {
     kind: t.source.storeId.startsWith('localfs:') ? 'restorable' : 'rename-only',
     scrollTop: t.scrollTop,
     active: t.active,
+    // 项 3：size 随快照（restore 传回 addTab 免二次探测）；未知大小省略字段，对齐
+    // 下方 overrideRenderer/pinned 的「仅置位写入」风格
+    ...(t.source.size != null ? { size: t.source.size } : {}),
     ...(t.overrideRenderer !== undefined ? { overrideRenderer: t.overrideRenderer } : {}),
     ...(t.pinned ? { pinned: true } : {})
   };
