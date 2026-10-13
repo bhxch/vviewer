@@ -495,6 +495,38 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
     inst.destroy();
   });
 
+  // 终审 I-2：入口补拉后的编码精判——capable 且 size 未知/超限时 det 仅由 8KB head
+  // 判定（dispatcher.test ⑬ 同构，渲染器侧镜像）：head 截断多字节误判 gb18030，补拉
+  // 全量后须以 full 重算翻转 utf-8（随之落窗口模式），否则以误判值解码整文件 mojibake。
+  it('head 误判 gb18030 + 入口补拉：补拉后以全量重算编码翻转 utf-8（窗口模式正确解码）', async () => {
+    stubResizeObserver();
+    // 真实 utf-8 内容（head 若真解码须为 utf-8）：行 0 含 emoji，gb18030 解码必为
+    // 替换符——翻转成功（utf-8 解码）才可能原样上屏
+    const rows: string[] = [];
+    for (let i = 0; i < 200; i++) {
+      rows.push(i === 0 ? JSON.stringify({ i, s: '🎉' }) : JSON.stringify({ i, s: 'p'.repeat(90) }));
+    }
+    const content = enc(rows.join('\n') + '\n');
+    expect(content.length).toBeGreaterThan(8192); // 探测头形态成立
+    const calls: RangeCall[] = [];
+    const host = mount();
+    const gbDet: Detection = { ext: 'jsonl', encoding: 'gb18030' }; // dispatcher head 口径的误判形态
+    const inst = (await jsonlRenderer.render(content.slice(0, 8192), host, source, gbDet,
+      streamCtx({ size: content.length, content, head: content.slice(0, 8192), calls }))) as JsonlInstance;
+    // 入口补拉恰一次全量 + 翻转 utf-8 后落窗口模式的首块拉取（翻转生效的形态证明：
+    // 未翻转将停留全量模式，绝无第二笔按块读）
+    expect(calls).toStrictEqual([
+      { start: 0, end: Number.MAX_SAFE_INTEGER },
+      { start: 0, end: content.length - 1 }
+    ]);
+    expect(inst.getMeta().encoding).toBe('utf-8'); // 精判翻转（head 口径为 gb18030）
+    expect(host.querySelector('.vv-jsonl-status')!.textContent).toBe('共 200 行'); // 翻转 utf-8 → 窗口模式
+    const first = host.querySelector('[data-line="0"] .vv-jsonl-body') as HTMLElement;
+    expect(first.textContent).toContain('🎉'); // 精判解码正确
+    expect(first.textContent).not.toContain('\ufffd'); // 无替换符（误判解码必然产生）
+    inst.destroy();
+  });
+
   it('全量视图退化形态（head=全量预置全部块）：窗口模式零 read 天然工作，状态条直接「共 N 行」', async () => {
     stubResizeObserver();
     const text = padLines(50, 200);

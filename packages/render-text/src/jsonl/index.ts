@@ -66,6 +66,7 @@
  * DOM 适配层在本模块——rAF 合并一帧内的批量 measure 修正（一帧消费一次 dirty）。
  */
 import type { Detection, FileSource, RenderedInstance, Renderer, StreamCtx } from '@vviewer/core';
+import { redetectWithFull } from '@vviewer/core';
 import { HighlightCanceledError, type HighlightInterval } from '@vviewer/highlight';
 import { STREAM_MAX_BYTES, createBlockStream } from '../blockStream';
 import { createTextWindow, type BlockTextEntry } from '../textWindow';
@@ -778,7 +779,13 @@ export const jsonlRenderer: Renderer = {
       (det.encoding ?? 'utf-8') !== 'utf-8' &&
       (ctx.size === null || ctx.head.length < ctx.size)
     ) {
+      const head = buffer; // 探测头（head 即全量时守卫不触发，此处必为文件前缀）
       buffer = await ctx.read({ start: 0, end: Number.MAX_SAFE_INTEGER });
+      // I-2 补拉后编码精判：capable 且 size 未知/超限时 det 仅由 8KB head 判定，截断
+      // 多字节可双向误判（误判 gb18030 直接解码即整文件 mojibake）——以全量重算翻转
+      // （dispatcher redetectWithFull 同款共享 helper）。误判 gb18030 翻转 utf-8 后，
+      // 下方 renderJsonl 以 det.encoding 现值裁决 → 自然落窗口模式（渐进、正确解码）
+      redetectWithFull(source, head, buffer, det);
     }
     if (shouldDelegateToCode(buffer.byteLength)) {
       // >200MB：JSONL 逐行解析/逐卡高亮的内存与主线程成本失控，委托 code 纯文本

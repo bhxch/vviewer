@@ -1,5 +1,5 @@
 import type { Renderer, Encoding, Detection, FileSource, RenderedInstance, SearchMatch, ComputeSource, ComputeWhere, StreamCtx } from '@vviewer/core';
-import { getRemoteBase, getRemoteMeta, RemoteComputeError, showErrorCard } from '@vviewer/core';
+import { getRemoteBase, getRemoteMeta, redetectWithFull, RemoteComputeError, showErrorCard } from '@vviewer/core';
 import { detectLanguage, HighlightCanceledError, captureToCssClass, type HighlightChunk, type HighlightInterval } from '@vviewer/highlight';
 import { STREAM_MAX_BYTES, createBlockStream } from './blockStream';
 import { createTextWindow } from './textWindow';
@@ -1961,7 +1961,7 @@ export const codeRenderer: Renderer = {
     // M6 compute 路由：只有远程 store 的文件带服务端 path（auto 策略据此走远程高亮）
     const computeSrc: ComputeSource | undefined =
       getRemoteBase(source.storeId) !== undefined ? { path: source.path, storeId: source.storeId } : undefined;
-    const encoding = meta?.encoding ?? det.encoding;
+    let encoding = meta?.encoding ?? det.encoding;
     const renderOpts = {
       encoding,
       highlight: true,
@@ -1990,7 +1990,15 @@ export const codeRenderer: Renderer = {
       //（dispatcher 已把 ctx.read 失败标为 DispatchReadError → 调用方读取失败面，
       // 评审指令①口径：不落「错误卡片 + 8KB probe 重试」截断活面）。
       if (ctx !== undefined && (ctx.size === null || buffer.byteLength < ctx.size)) {
+        const head = buffer; // 探测头（head 即全量时守卫不触发，此处必为文件前缀）
         buffer = await ctx.read({ start: 0, end: Number.MAX_SAFE_INTEGER });
+        // I-2 补拉后编码精判：capable 且 size 未知/超限时 det 仅由 8KB head 判定，
+        // 截断多字节可双向误判（误判 gb18030 直接解码即整文件 mojibake）——以全量
+        // 重算翻转（dispatcher redetectWithFull 同款共享 helper），encoding 随之重取
+        //（服务端 X-VV-Encoding 头仍最优先），下游 renderCode 以现值解码
+        redetectWithFull(source, head, buffer, det);
+        encoding = meta?.encoding ?? det.encoding;
+        renderOpts.encoding = encoding;
       }
       inst = renderCode(buffer, target, renderOpts);
     }

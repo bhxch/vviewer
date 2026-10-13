@@ -1508,6 +1508,34 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     inst2.destroy();
   });
 
+  // 终审 I-2：守卫补拉后的编码精判——capable 且 head（8KB 探测）短于 size 时 det 仅
+  // 由 head 判定，截断多字节误判 gb18030（dispatcher.test ⑬ 同构，渲染器侧镜像）；
+  // 补拉全量后须以 full 重算翻转，否则 renderOpts.encoding 以误判值解码整文件 mojibake。
+  it('head 误判 gb18030 + 守卫补拉：补拉后以全量重算编码翻转 utf-8，行文本按精判解码', async () => {
+    stubResizeObserver();
+    // 4 字节 emoji 横跨 8KB 探测边界（head 只含前 2 字节 → gb18030 误判；全量完整 →
+    // utf-8）：每行恰 100 字节，行 81 起于 8100，行内 90 字节处即 8190
+    const lines: string[] = [];
+    for (let i = 0; i < 100; i++) {
+      lines.push(i === 81 ? 'A'.repeat(90) + '🎉' + 'A'.repeat(5) : 'A'.repeat(99));
+    }
+    const content = enc(lines.join('\n') + '\n');
+    expect(content[8190]).toBe(0xf0); // emoji 首字节恰骑在探测边界（自校验非空转）
+    expect(content.length).toBe(100 * 100);
+    const calls: RangeCall[] = [];
+    const host = newHost();
+    const inst = (await codeRenderer.render(content.slice(0, 8192), host, winSource,
+      { ext: 'log', encoding: 'gb18030' }, // dispatcher head 口径的误判形态（⑬ 同构）
+      streamCtx({ size: content.length, content, head: content.slice(0, 8192), calls }))) as CodeInstance;
+    expect(calls).toStrictEqual([{ start: 0, end: Number.MAX_SAFE_INTEGER }]); // 守卫补拉恰一次
+    expect(inst.getMeta().encoding).toBe('utf-8'); // 精判翻转抵达渲染（head 口径为 gb18030）
+    expect(inst.getMeta().lines).toBe(100); // 全文件行数
+    inst.revealLine(81); // 行 81 在首屏视口外（jsdom 高度 0）：跳转后断言行文本
+    await vi.waitFor(() => expect(bodyText(host, 81)).toBeDefined());
+    expect(bodyText(host, 81)).toBe('A'.repeat(90) + '🎉' + 'A'.repeat(5)); // 精判解码正确（gb18030 解码此处必为替换符）
+    inst.destroy();
+  });
+
   it('BlockStream 200-回退（Range-less 服务器回全量）：degraded 后索引排空到 EOF，内容完整（二次路径自查）', async () => {
     stubResizeObserver();
     const content = enc(codeLines(1400)); // 2.1MB

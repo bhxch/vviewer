@@ -50,10 +50,29 @@ class DispatchReadError extends Error {
   }
 }
 
+/**
+ * 补拉全量后的编码精判（终审 F2 及其渲染器侧镜像的共享 helper，I-2 收口）：
+ * size 未知/超限时 det 仅由 8KB head 短样本判编码（截断多字节序列可误判 gb18030），
+ * 全量到手后以 full 重算 detect 并只把 encoding/binary 两字段合并回 det（原地变更，
+ * 无返回值——调用点少一行即少一次遗漏面）。只合并这两字段：ext/signature 等已被
+ * sniff/改派阶段纠偏（签名改派/extless/lang），整对象替换会回退纠偏；head/name 未变
+ * → 其余字段复算值与初算一致（detect 纯函数可重入）。凡「补拉全量后解码」的入口
+ * （本文件两处 + 渲染器守卫补拉）一律经此，防第五次遗漏。
+ */
+export function redetectWithFull(
+  source: FileSource,
+  head: Uint8Array,
+  full: Uint8Array,
+  det: Detection
+): void {
+  const redet = detect({ name: source.name, head, full });
+  det.encoding = redet.encoding;
+  det.binary = redet.binary;
+}
+
 /** 签名 → 规范改派目标（BUG-13 与 BUG-07 无扩展名回退链共用的改派表）。
  * ole 无专用渲染器不改派（维持 hex 语义）；mpegts 规范扩展名 'ts'
- * （av 渲染器按 det.ext 分派 video 形态与 mpegts loader，故改派需同步纠偏 ext）。 */
-export interface SignatureRoute {
+ * （av 渲染器按 det.ext 分派 video 形态与 mpegts loader，故改派需同步纠偏 ext）。 */export interface SignatureRoute {
   rendererId: RendererId;
   ext: string;
 }
@@ -313,14 +332,9 @@ export function createDispatcher(registry: Registry): Dispatcher {
         if (full === null) {
           full = await readFull();
           // 终审 F2：headOnly（size 未知）时 det 仅以 8KB head 短样本判编码（旧
-          // 「≤1MB full 精判」退化面）——全量到手后重算恢复精判（detect 纯函数可
-          // 重入；head/name 未变 → ext/signature 复算值与初算一致，仅 encoding 及
-          // 其派生 binary 可能翻转）。只合并这两字段：det.ext 等已被 sniff 阶段纠偏
-          //（签名改派/extless/lang），整对象替换会回退纠偏。streaming 分支不动
-          //（io-streaming 计划 2 处理）。
-          const redet = detect({ name: source.name, head, full });
-          det.encoding = redet.encoding;
-          det.binary = redet.binary;
+          // 「≤1MB full 精判」退化面）——全量到手后重算恢复精判（共享 helper 见
+          // redetectWithFull doc）。streaming 分支不动（io-streaming 计划 2 处理）。
+          redetectWithFull(source, head, full, det);
         }
         const instance = await renderer.render(full, target, source, det);
         return { instance, rendererId: renderer.id, det };
@@ -333,11 +347,8 @@ export function createDispatcher(registry: Registry): Dispatcher {
         full = await readFull();
         // 终审 F2 镜像（T4 评审指令）：headOnly（size 未知/超限）streaming 降级路径的
         // det 同样仅以 8KB head 短样本判编码——降级全量到手后重算回填（openUrl 打开
-        // url jsonl 可达；head 误判 utf-8 时尾部 mojibake）。只合并 encoding/binary，
-        // 理由同 !streaming 分支：ext 等已被 sniff 阶段纠偏，整对象替换会回退纠偏
-        const redet = detect({ name: source.name, head, full });
-        det.encoding = redet.encoding;
-        det.binary = redet.binary;
+        // url jsonl 可达；head 误判 utf-8 时尾部 mojibake）。共享 helper 见其 doc。
+        redetectWithFull(source, head, full, det);
       }
       // buffer 形参 = full ?? probe：capable 且 size 未知/超限 → head 探测块；否则全量
       const base = full ?? probe;
