@@ -1957,6 +1957,25 @@ function renderCodeWindowed(
       const start = blockStartLine(b);
       if (failedResume < 0 || start < failedResume) failedResume = start;
     };
+    // 返修（项 F fix round 2）：断点续扫自 startFrom 起对 [startFrom, EOF) 全区间
+    // 重扫——既有命中集中行号 ≥ startFrom 的条目（首扫在失败块之后已成功扫描的行）
+    // 须先截断，否则重扫再 push 一次：命中数虚高、gotoMatch 索引错位、行级高亮
+    // 区间重复。双截：lastAcc（按扫描行序升序，线性找首个越界条目截尾）+
+    // searchHitsByLine（键为行号，删越界键）。换键重搜 startFrom 恒 0 且命中集已
+    // 重置，此截断为空操作。
+    if (startFrom > 0) {
+      let cut = acc.length;
+      for (let i = 0; i < acc.length; i++) {
+        if (acc[i]!.line >= startFrom) {
+          cut = i;
+          break;
+        }
+      }
+      acc.length = cut;
+      for (const key of [...searchHitsByLine.keys()]) {
+        if (key >= startFrom) searchHitsByLine.delete(key);
+      }
+    }
     let scanned = startFrom; // 已扫描行数（索引已提交行的前缀指针：断点续扫不重复）
     showScanProgress(mySeq); // 项 2：扫描开始即挂进度条（同键续扫/接管复用同一元素，项 A 属主切换）
     try {
