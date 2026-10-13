@@ -35,7 +35,7 @@
   let rootIndex = $state(0);
   /** 当前浏览目录（相对所选根的路径；'' = 根） */
   let path = $state('');
-  let entries = $state<Array<{ name: string; kind: 'dir' | 'file' }>>([]);
+  let entries = $state<Array<{ name: string; kind: 'dir' | 'file'; size?: number }>>([]);
   let loading = $state(false);
   let error = $state('');
   let panelEl = $state<HTMLElement | null>(null);
@@ -142,19 +142,25 @@
       loading = false;
       return;
     }
-    let body: { entries?: Array<{ name?: unknown; kind?: unknown }> };
+    let body: { entries?: Array<{ name?: unknown; kind?: unknown; size?: unknown }> };
     try {
-      body = (await res.json()) as { entries?: Array<{ name?: unknown; kind?: unknown }> };
+      body = (await res.json()) as { entries?: Array<{ name?: unknown; kind?: unknown; size?: unknown }> };
     } catch {
       error = 'tree 响应不是有效 JSON';
       loading = false;
       return;
     }
+    // size 透传（WS-07）：/api/tree 对 file 条目宣告字节数（服务端旧形状/目录条目
+    // 缺省）——形状不信任，非有限数丢弃，随 pick → openRemoteSource 写 Tab.source.size
     entries = (Array.isArray(body.entries) ? body.entries : [])
-      .filter((e): e is { name: string; kind: 'dir' | 'file' } =>
+      .filter((e): e is { name: string; kind: 'dir' | 'file'; size?: number } =>
         typeof e.name === 'string' && (e.kind === 'dir' || e.kind === 'file')
       )
-      .map((e) => ({ name: e.name, kind: e.kind }));
+      .map((e) => ({
+        name: e.name,
+        kind: e.kind,
+        ...(typeof e.size === 'number' && Number.isFinite(e.size) && e.size >= 0 ? { size: e.size } : {})
+      }));
     path = p;
     loading = false;
   }
@@ -164,10 +170,12 @@
     return base === '' ? name : `${base}/${name}`;
   }
 
-  /** 选定来源 → openRemoteSource（归当前活动 workspace——创建模态已先建组） */
-  function pick(asBasePath: string, file?: string): void {
+  /** 选定来源 → openRemoteSource（归当前活动 workspace——创建模态已先建组）。
+   * file 条目的 size（/api/tree 宣告）一并透传，写入 Tab.source.size（WS-07 断链接续） */
+  function pick(asBasePath: string, file?: string, size?: number): void {
     if (last === null) return;
-    openRemoteSource(last.baseUrl, last.token, rootIndex, asBasePath, file);
+    openRemoteSource(last.baseUrl, last.token, rootIndex, asBasePath,
+      file === undefined ? undefined : { file, size: size ?? null });
     onpicked?.();
     close();
   }
@@ -291,7 +299,7 @@
                 type="button"
                 class="vv-remotesrc-pick"
                 title={`将此文件作为来源：${join(path, e.name)}`}
-                onclick={() => pick(path, join(path, e.name))}>将此文件作为来源</button
+                onclick={() => pick(path, join(path, e.name), e.size)}>将此文件作为来源</button
               >
             {/if}
           </li>

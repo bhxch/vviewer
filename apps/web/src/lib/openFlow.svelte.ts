@@ -951,9 +951,12 @@ export function addDirStoreTab(store: TreeStore, source: WorkspaceSource = sourc
  * 后端路径来源（T5）：多根服务器的指定根/根内子目录（或根内单文件）作为来源——
  * createRemoteStore 显式携带 rootIndex/basePath（storeId 的 basePath 段是 32 位
  * FNV 指纹，恢复链路从快照 sources[] 读取，绝不反解）+ addSource + 目录 tab
- * （path=''，basePath 为源根）；file 提供时为单文件来源（spec：远端来源仅目录或
- * 单文件）——底层模型仍以 basePath 目录为源（RemoteStore 以目录为粒度），额外
+ * （path=''，basePath 为源根）；opts.file 提供时为单文件来源（spec：远端来源仅
+ * 目录或单文件）——底层模型仍以 basePath 目录为源（RemoteStore 以目录为粒度），额外
  * 打开该文件的 tab；同目录多个单文件来源共享同一 storeId（addSource 去重）。
+ * WS-07：opts.size 为树条目宣告的文件字节数（/api/tree 对 file 条目返回 size）——
+ * 随 addTab 写入 Tab.source.size（io-streaming 读策略消费，免二次探测），服务端
+ * 未宣告/旧形状缺省 null（走 head 探测，与 url 打开同口径）。
  * 重复打开防线：先按 storeBase+rootIndex+basePath 查各 workspace 已登记来源，
  * 命中且实例存活（storeById）直接复用——再 createRemoteStore 会得到同 id 新实例
  * 而旧实例 SSE 流未关（双流）；实例已随最后一个 tab 关闭释放时才走新建
@@ -964,8 +967,10 @@ export function openRemoteSource(
   token: string | null,
   rootIndex: number,
   basePath: string,
-  file?: string
+  opts?: { file?: string; size?: number | null }
 ): void {
+  const file = opts?.file;
+  const fileSize = opts?.size ?? null;
   const normBase = normalizeServerBase(base);
   const normPath = basePath.replace(/^\/+|\/+$/g, ''); // 与 RemoteStore 内部归一同款
   // 单文件来源 tab 路径为源相对（与树行/读路径同基准）：file 是根相对（RemoteSourceModal
@@ -997,7 +1002,7 @@ export function openRemoteSource(
     if (file === undefined) addDirStoreTab(store, source);
     else {
       workspaceStore.addSource(workspaceStore.activeId, source);
-      addTab(store, fileRel!, fileRel!.split('/').pop() ?? fileRel!);
+      addTab(store, fileRel!, fileRel!.split('/').pop() ?? fileRel!, fileSize);
     }
     return;
   }
@@ -1032,7 +1037,7 @@ export function openRemoteSource(
   if (file === undefined) addDirStoreTab(store, source);
   else {
     workspaceStore.addSource(workspaceStore.activeId, source);
-    addTab(store, fileRel!, fileRel!.split('/').pop() ?? fileRel!);
+    addTab(store, fileRel!, fileRel!.split('/').pop() ?? fileRel!, fileSize);
   }
 }
 
