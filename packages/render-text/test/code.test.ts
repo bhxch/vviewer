@@ -2420,17 +2420,20 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
       let injected = 0;
       spy.mockImplementation((linesArg, query, opts) => {
         injected += 1;
-        if (injected > 200) throw new Error('扫描注入异常'); // 扫描推进途中抛（约行 200 后）
+        // 扫描推进途中抛（约行 700 后：落在被 LRU 逐出的中间块区，注入前的推进
+        // 已发生真实补块读——可视区常触的块 0/1 驻留零读，不构成「已推进」证据）
+        if (injected > 700) throw new Error('扫描注入异常');
         return originalSearchCode(linesArg, query, opts);
       });
       const partial = await handle.search('beta'); // 换键扫描异常收场：catch 兜底部分结果
       expect(partial).toEqual([]); // beta 在未扫区（行 3300）：空手收场
+      spy.mockRestore(); // 注入仅覆盖异常收场一拍：重搜须在干净 searchCode 下重扫
       const readsAtFail = readCalls;
       const second = await handle.search('beta'); // 同 query 重搜：旗标已回写 false → 重扫
       expect(readCalls).toBeGreaterThan(readsAtFail); // 重扫真实发生（非短路零读）
       expect(second.map((m) => m.line)).toEqual([3300]); // 完整命中（非部分结果短路）
     } finally {
-      spy.mockRestore(); // 注入不得泄漏至后续用例
+      spy.mockRestore(); // 幂等兜底：断言失败路径同样不得泄漏至后续用例
     }
     handle.destroy();
   });
