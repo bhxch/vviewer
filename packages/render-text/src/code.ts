@@ -1602,9 +1602,15 @@ function renderCodeWindowed(
    */
   const pullBlock = async (): Promise<void> => {
     if (indexFinished || limitReached) return;
-    // 尺寸防线（STREAM_MAX_BYTES）：已确认字节超限 → 续读停机 + 提示条（非失败态）。
-    // 防线在 IO 之前裁决：size 已知构造即知（零读停机）；size 未知随短读探测逐块裁决
-    if (bs.confirmedBytes > STREAM_MAX_BYTES) {
+    // 尺寸防线（STREAM_MAX_BYTES）：size 已知构造即知（零读停机），此处 > 分支只
+    // 防御 200-回退 degraded 等构造后确认字节越限的形态；size 未知随续读逐块裁决
+    // ——达限即停（项 5 恰界收紧：旧判定 > 允许越限一块 ≤256KB 才停），不发起会
+    // 越限的块读。恰等于上限的 size 已知文件不受影响（构造期 > 判定放行、
+    // confirmedBytes=size 不触发达限分支），可完整流式至 EOF
+    if (
+      bs.confirmedBytes > STREAM_MAX_BYTES ||
+      (ctx.size === null && bs.confirmedBytes >= STREAM_MAX_BYTES)
+    ) {
       limitReached = true; // loadedBytes 不再增长（续读面与 maybeContinue 同步封闭）
       if (engine === 'pending') engine = 'plain'; // 非 pending 终值（不留「解析中」）
       buildNotice(CODE_STREAM_LIMIT_NOTICE);

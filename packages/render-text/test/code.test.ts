@@ -1528,6 +1528,33 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     handle.destroy();
   });
 
+  // 项 5（恰界收紧）：size 未知流式此前 confirmedBytes 超 512MB 后才停（越限一块
+  // ≤256KB 才触发 > 判定）；修后达限即停——不发起会越限的块读，恰在 LIMIT 停。
+  // 恒满块 fake ctx（无换行索引零行）经 search 扫描自驱动前向喂块至达限，无需真造
+  // 512MB 内容。size 已知路径构造期判定不变（恰等于上限的文件可完整流式）。
+  it('STREAM_MAX_BYTES 恰界：size 未知达限即停，恰 2048 块、无越限块读', async () => {
+    stubResizeObserver();
+    const block = new Uint8Array(WINDOW_BLOCK).fill(0x61); // 256KB 无换行：索引零行
+    let reads = 0;
+    const ctx: StreamCtx = {
+      size: null,
+      head: new Uint8Array(0),
+      read: async () => {
+        reads += 1;
+        return block; // 恒满块：无短读即无 EOF 证据，confirmedBytes 随每块 +256KB
+      }
+    };
+    const host = newHost();
+    const handle = renderCode(block, host, { ext: 'js', lang: 'javascript', ctx });
+    await handle.search('zzneedle'); // 扫描自驱动前向喂块至达限停机（部分结果收场）
+    expect(reads).toBe(STREAM_MAX_BYTES / WINDOW_BLOCK); // 恰 2048（修前 2049：越限一块）
+    expect(handle.getMeta().size).toBe(STREAM_MAX_BYTES); // size 未知：已确认字节停在恰界
+    await new Promise((r) => setTimeout(r, 30));
+    expect(reads).toBe(STREAM_MAX_BYTES / WINDOW_BLOCK); // 停机：无进一步读
+    expect(host.querySelector('.vv-code-oversize-card')).not.toBeNull(); // 提示条（建议 hex）
+    handle.destroy();
+  });
+
   it('非 UTF-8（gb18030）+ 探测头 ctx：render 入口守卫补拉全量（指令①，解码/行数以全文件计）；head 覆盖全文件时不触发', async () => {
     stubResizeObserver();
     const rows: string[] = [];

@@ -760,6 +760,36 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
     inst.destroy();
   });
 
+  // 项 5（恰界收紧）：size 未知流式此前 confirmedBytes 超 512MB 后才停（越限一块
+  // ≤256KB 才触发 > 判定）；修后达限即停——恰 2048 块、无越限块读。恒满块 fake ctx
+  //（无换行索引零行）经滚动续读级联喂块至达限，无需真造 512MB 内容。
+  it('STREAM_MAX_BYTES 恰界：size 未知达限即停，恰 2048 块、无越限块读', async () => {
+    stubResizeObserver();
+    const block = new Uint8Array(BLOCK).fill(0x70); // 256KB 无换行：索引零行
+    let reads = 0;
+    const ctx: StreamCtx = {
+      size: null,
+      head: block.subarray(0, 8192),
+      read: async () => {
+        reads += 1;
+        return block; // 恒满块：无短读即无 EOF 证据，confirmedBytes 随每块 +256KB
+      }
+    };
+    const host = mount();
+    const inst = (await jsonlRenderer.render(block, host, source, det, ctx)) as JsonlInstance;
+    scrollToBottom(host); // 触发续读级联（一次滚动即逐块推进）至达限停机
+    await vi.waitFor(
+      () => {
+        expect(host.querySelector('.vv-jsonl-status')!.textContent).toBe(
+          '已加载 0 行 · 已达流式上限，建议以 hex 打开'
+        );
+      },
+      { timeout: 10_000 }
+    );
+    expect(reads).toBe(STREAM_MAX_BYTES / BLOCK); // 恰 2048（修前 2049：越限一块）
+    inst.destroy();
+  });
+
   // F1 回归钉（fix round 1）：size 已知 + head=全量 + 尺寸非块对齐——末块为部分
   // 预置块（nextBlock 停在 blockCount-1），构造期 atEnd 须为真（head 触达文件尾
   // 即 EOF 证据），否则排空循环不进入：索引滞留前 2 块、状态条滞留「已加载 N 行」、

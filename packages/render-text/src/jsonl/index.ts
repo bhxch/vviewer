@@ -595,7 +595,14 @@ async function renderJsonlWindowed(
    */
   const pullBlock = async (): Promise<void> => {
     if (indexFinished || limitReached) return;
-    if (bs.confirmedBytes > STREAM_MAX_BYTES) {
+    // 尺寸防线（STREAM_MAX_BYTES）：size 已知超限即停（confirmedBytes 构造即 size，
+    // 零读停机面）；size 未知达限即停（项 5 恰界收紧：旧判定 > 允许越限一块 ≤256KB
+    // 才停）——不发起会越限的块读。恰等于上限的已知尺寸文件不受影响（> 不触发），
+    // 可完整流式至 EOF
+    if (
+      bs.confirmedBytes > STREAM_MAX_BYTES ||
+      (ctx.size === null && bs.confirmedBytes >= STREAM_MAX_BYTES)
+    ) {
       limitReached = true; // 超限停机：loadedBytes 不再增长（续读面与 maybeContinue 同步封闭）
       return;
     }
