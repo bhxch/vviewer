@@ -610,6 +610,45 @@ describe('dispatch 读下沉（io-streaming §3：streaming 选路 + StreamCtx �
     target.remove();
   });
 
+  // ⑥ 的钉力补强（终审遗留清偿）：⑥ 未注册 'code' 渲染器，「以纯文本打开」按钮无论
+  // looksTextual 真假都不出现，排序断言恒真、钉不住「head-only 退化：open-as 排序以
+  // 8KB head 探测块裁决 looksTextual（buildRenderErrorActions catch 分支，full ?? probe
+  // 退化为 probe）」。本组变体补注册 code 渲染器两向钉死排序；probe 均只经 8KB head
+  // 探测（size>1MB 不预取全量），即排序判据确为 head 探测块而非全量。
+  // 注意：非文本 probe 不能用全 0xFF——looksTextual 只计 NUL/<0x20 控制符/0x7f 为嫌，
+  // 0xFF 不计嫌（判文本）；含 0x00 的循环模式字节（i & 0xff）才判非文本。
+  it('⑥a 失败卡片 open-as 排序（code 已注册）：head 探测块非文本 → hex 在前', async () => {
+    const reg = createRegistry();
+    const BIG = Uint8Array.from({ length: 2_000_000 }, (_, i) => i & 0xff); // 含 0x00 → 非文本
+    const calls: Array<{ start: number; end: number } | undefined> = [];
+    const read = readOf(BIG, calls);
+    reg.install(mk('boom', ['stx'], { streaming: true, render: async () => { throw new Error('boom'); } }));
+    reg.install(mk('code', ['txt']));
+    reg.install(mk('hex', ['bin']));
+    const target = document.createElement('div');
+    await createDispatcher(reg).dispatch(
+      srcWith('a.stx', fakeStore(true), BIG.length), null, target, { read });
+    expect(calls).toStrictEqual([{ start: 0, end: 8191 }]); // 仅 head 探测：排序判据 = 探测块
+    const buttons = [...target.querySelectorAll<HTMLButtonElement>('button.vv-error-action')];
+    expect(buttons.map((b) => b.textContent)).toEqual(['重试', '以 hex 打开', '以纯文本打开']);
+  });
+
+  it('⑥b 失败卡片 open-as 排序（code 已注册）：head 探测块为文本 → 纯文本在前', async () => {
+    const reg = createRegistry();
+    const BIG = new TextEncoder().encode(('x'.repeat(127) + '\n').repeat(16_000)); // ≈2MB 文本
+    const calls: Array<{ start: number; end: number } | undefined> = [];
+    const read = readOf(BIG, calls);
+    reg.install(mk('boom', ['stx'], { streaming: true, render: async () => { throw new Error('boom'); } }));
+    reg.install(mk('code', ['txt']));
+    reg.install(mk('hex', ['bin']));
+    const target = document.createElement('div');
+    await createDispatcher(reg).dispatch(
+      srcWith('a.stx', fakeStore(true), BIG.length), null, target, { read });
+    expect(calls).toStrictEqual([{ start: 0, end: 8191 }]);
+    const buttons = [...target.querySelectorAll<HTMLButtonElement>('button.vv-error-action')];
+    expect(buttons.map((b) => b.textContent)).toEqual(['重试', '以纯文本打开', '以 hex 打开']);
+  });
+
   // 读失败 ≠ 渲染失败（T3 评审活面）：延迟全量读在选路 try 内，失败若落错误卡片，
   // 「重试」会以 8KB head 探测块当完整文件静默截断渲染——必须向上 reject，不落卡片。
   describe('读失败向上 reject（不落渲染错误卡片）', () => {
@@ -649,6 +688,7 @@ describe('dispatch 读下沉（io-streaming §3：streaming 选路 + StreamCtx �
           srcWith('a.stx', fakeStore(), null), null, target, { read: headOkFullFails('io gone') })
       ).rejects.toThrow('io gone');
       expect(rendered).toBe(false);
+      expect(target.querySelector('.vv-error-card')).toBeNull(); // 不落渲染错误卡片（⑦ 同口径补齐）
     });
 
     it('⑨ 策略读失败（size ≤ 1MB 首次全量即失败）→ dispatch reject（try 外路径同语义）', async () => {
@@ -661,6 +701,7 @@ describe('dispatch 读下沉（io-streaming §3：streaming 选路 + StreamCtx �
           srcWith('a.pln', fakeStore(true), 100), null, target, { read: headOkFullFails('gone') })
       ).rejects.toThrow('gone');
       expect(rendered).toBe(false);
+      expect(target.querySelector('.vv-error-card')).toBeNull(); // 不落渲染错误卡片（⑦ 同口径补齐）
     });
 
     // Task 5 评审指令①：渲染期 ctx.read 失败与 Task 4 同口径——dispatcher 侧标记

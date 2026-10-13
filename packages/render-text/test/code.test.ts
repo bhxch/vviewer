@@ -1459,6 +1459,30 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     inst.destroy();
   });
 
+  // 首拉失败面（codeRenderer.render 收口）：窗口模式 whenReady（start 的首块拉取）
+  // 失败 → 销毁半装配实例后原样 rethrow——dispatcher 已把 ctx.read 失败标为
+  // DispatchReadError，走调用方读取失败面（无「错误卡片 + 重试」通道）。本用例在
+  // 渲染器层钉：render promise rejects（错误实例身份不变）且 target 无 .vv-code-pre
+  // 残留（destroy 已执行，无空壳 scroller/DOM 泄漏）。
+  it('首拉失败（首块 read 即 reject）：render rejects 且销毁半装配实例（无 .vv-code-pre 残留）', async () => {
+    stubResizeObserver();
+    const content = enc(codeLines(400));
+    const boom = new Error('首块网络故障');
+    const ctx: StreamCtx = {
+      size: null,
+      head: content.slice(0, 8192),
+      read: async () => {
+        throw boom; // 首调即失败：拉取面无任何成功字节
+      }
+    };
+    const host = newHost();
+    await expect(
+      codeRenderer.render(content.slice(0, 8192), host, winSource,
+        { ext: 'js', encoding: 'utf-8', lang: 'javascript' }, ctx)
+    ).rejects.toBe(boom); // 原样上抛（调用方按 DispatchReadError 口径识别）
+    expect(host.querySelector('.vv-code-pre')).toBeNull(); // destroy 已执行：半装配实例无 DOM 残留
+  });
+
   it('getMeta().lines 动态：首块后为已加载行数，滚动续读到 EOF 后=内容行数（末尾空串条目展示层减 1，wc-l 口径）', async () => {
     stubResizeObserver();
     const content = enc(codeLines(400)); // 600KB，以 \n 收尾

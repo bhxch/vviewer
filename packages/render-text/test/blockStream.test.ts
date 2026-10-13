@@ -315,4 +315,27 @@ describe('createBlockStream', () => {
     expect(calls).toStrictEqual([{ start: 4, end: 5 }]);
     expect(bs.atEnd()).toBe(true);
   });
+
+  it('⑲ head 部分块 × 并发去重组合：双并发 ensureBlock(0) 恰一次重拉、双方同字节 resolve（⑦×⑩ 组合面）', async () => {
+    const calls: RangeCall[] = [];
+    // head 2B 仅部分覆盖块 0（nextBlock 停在 0）：重拉与并发合并在同一块上叠加
+    const bs = createBlockStream(fakeCtx({ size: null, head: ALPHA.slice(0, 2), content: ALPHA, calls }), B);
+    const [a, b] = await Promise.all([bs.ensureBlock(0), bs.ensureBlock(0)]);
+    expect(calls).toStrictEqual([{ start: 0, end: 3 }]); // 在途表合并：部分预置块恰一次整块重拉
+    expect(a).toEqual(ALPHA.slice(0, 4)); // 双调用方同字节（部分预置已被整块替换）
+    expect(b).toEqual(ALPHA.slice(0, 4));
+    expect(bs.confirmedBytes).toBe(4); // 重拉推进确认字节（2 → 4）
+    expect(bs.atEnd()).toBe(false); // 满块非短读：size 未知下 EOF 未确认
+  });
+
+  it('⑳ size 已知短读违约：read 返回短于端点钳制请求 → ensureBlock 抛「短读违约」（宁败勿静默截断，非「已在块 N 结束」EOF 口径）', async () => {
+    const calls: RangeCall[] = [];
+    // size 声明 10B（3 块）而实际内容仅 6B：块 1 请求 {4,7}（cap=4）只回 2 字节 = 违约。
+    // 对照⑨（size 未知：短读即 EOF 证据，越界报「已在块 N 结束」）——size 已知来源按
+    // ByteRange 契约精确返回，短读只能解释为读闭包违约（文件中途收缩），恒抛错
+    const bs = createBlockStream(fakeCtx({ size: 10, content: ALPHA.slice(0, 6), calls }), B);
+    await expect(bs.ensureBlock(2)).rejects.toThrow(/短读违约/); // 实际末块（数据 6B）之后的越界请求
+    expect(calls).toStrictEqual([{ start: 0, end: 3 }, { start: 4, end: 7 }]); // 按序推进至块 1 即违约
+    expect(bs.atEnd()).toBe(false); // 违约 ≠ EOF 证据：不静默当作文件终点
+  });
 });

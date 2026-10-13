@@ -363,15 +363,26 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
     const calls: RangeCall[] = [];
     const instB = (await jsonlRenderer.render(bytes.slice(0, 8192), hostB, source, det,
       streamCtx({ size: bytes.length, content: bytes, head: bytes.slice(0, 8192), calls }))) as JsonlInstance;
-    await vi.waitFor(() => { // 窗口模式续读到 EOF 后再比对（状态条同为终值口径；
-      // 9 行 = {"a":1}/填充/跨块/折叠大行/not json/plain/line/巨行/悬挂尾行）
+    await vi.waitFor(() => { // 检查点为 EOF 排空后而非首帧：本文件行数少（9 行 < 可视窗
+      // ~20 行），首帧任意可视末行都「近尾部」→ 静默续读直至 EOF 的设计行为（首帧即终态）
       expect(hostB.querySelector('.vv-jsonl-status')!.textContent!.startsWith('共 9 行')).toBe(true);
     });
     const domA = () => (hostA.querySelector('.vv-jsonl-scroll') as HTMLElement).innerHTML;
     const domB = () => (hostB.querySelector('.vv-jsonl-scroll') as HTMLElement).innerHTML;
     expect(hostB.querySelector('.vv-jsonl-status')!.textContent)
       .toBe(hostA.querySelector('.vv-jsonl-status')!.textContent);
-    expect(domB()).toBe(domA()); // 首屏窗口逐字节一致
+    expect(domB()).toBe(domA()); // EOF 排空后的窗口 DOM 逐字节一致（非首帧快照，见上检查点注释）
+    // 跨块多字节显式断言（等价性比对之外的独立钉面）：块 0 尾「中」字切口必须字节域
+    // 缝合——两种模式的行 body 均含完整多字节字符且无 U+FFFD（切口打碎即现替换符）
+    for (const h of [hostA, hostB]) {
+      const cross = [...h.querySelectorAll<HTMLElement>('.vv-jsonl-body')]
+        .find((el) => (el.textContent ?? '').includes('跨块字符'));
+      expect(cross).toBeDefined(); // 跨块行已入窗（EOF 后窗口覆盖首部行段）
+      expect(cross!.textContent).toContain('中');
+      expect(cross!.textContent).toContain('跨块字符');
+      expect(cross!.textContent).toContain('🎉');
+      expect(cross!.textContent).not.toContain('\uFFFD');
+    }
     scrollToBottom(hostA);
     scrollToBottom(hostB);
     await new Promise((r) => setTimeout(r, 20));
