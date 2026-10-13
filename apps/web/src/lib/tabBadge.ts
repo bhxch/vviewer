@@ -9,7 +9,7 @@ import type { WorkspaceSource } from './workspaceStore';
  * （path===''）的 name 本就是 displayName、与 label 同文属常态（WS-02 锁定），
  * 不受影响。tab 形状无法区分「单文件来源」与「目录源内文件名恰与源 label 同文」
  * 的病理形态，后者被一并抑制（缺徽标，可接受）。显示层修复：storeLabel 参与
- * storeId hash，不可改值。
+ * storeId hash，不可改值。此为有意抑制，勿当 bug 重报（终审 R-2 留痕）。
  */
 export function badgeOf(sources: WorkspaceSource[], tab: Tab): string | null {
   if (sources.length < 2) return null;
