@@ -339,3 +339,48 @@ describe('createBlockStream', () => {
     expect(bs.atEnd()).toBe(false); // 违约 ≠ EOF 证据：不静默当作文件终点
   });
 });
+
+// ---------------------------------------------------------------------------
+// 项 1（遗留清偿波 3）：流式逐块 UTF-8 嗅探判定面（纯函数）。head 误判 utf-8
+//（头部干净、尾部 GB18030 等）时窗口模式流式解码产出 U+FFFD——嗅探在喂块面计数
+// 非法序列，超阈判非 UTF-8 切全量重渲。判据与 packages/core detect 的 isStrictUtf8
+// 同源（RFC 3629，overlong/代理对拒绝），计数变体支持「处数/占比」双阈值；块切口
+// 悬挂的多字节序列必须剔除出判定面，防合法块误判。
+// ---------------------------------------------------------------------------
+import { UTF8_SNIFF_ILLEGAL_MIN, isSuspiciousUtf8Block } from '../src/blockStream';
+
+describe('isSuspiciousUtf8Block（项 1 流内嗅探，纯函数）', () => {
+  /** 256KB ASCII 底（真实窗口块口径，1% 阈值 = 2621 处不干扰处数阈值的用例） */
+  const asciiBlock = (): Uint8Array<ArrayBuffer> => new Uint8Array(256 * 1024).fill(0x61);
+
+  it('纯 ASCII/合法 UTF-8（含完整多字节与文字 U+FFFD 字符）：零误报', () => {
+    const b = new TextEncoder().encode('const a = 1;\n中文🎉\n\uFFFD literal\n');
+    expect(isSuspiciousUtf8Block(b)).toBe(false);
+    expect(isSuspiciousUtf8Block(asciiBlock())).toBe(false);
+  });
+
+  it('块尾悬挂多字节序列（lead/延续字节骑切口）：剔除不误判（下一块续判）', () => {
+    const b = Uint8Array.from([...new TextEncoder().encode('x'), 0xe4, 0xb8]); // '中' 前 2 字节悬挂
+    expect(isSuspiciousUtf8Block(b)).toBe(false);
+    expect(isSuspiciousUtf8Block(new Uint8Array([0xe4, 0xb8, 0xad, 0x61]))).toBe(false); // 完整序列放行
+  });
+
+  it(`单块非法序列 ≥${UTF8_SNIFF_ILLEGAL_MIN} 处判非 UTF-8，阈值以下放行（0xBA 为孤立延续字节=非法）`, () => {
+    const withBad = (n: number): Uint8Array<ArrayBuffer> => {
+      const b = asciiBlock();
+      for (let i = 0; i < n; i++) b[i] = 0xba;
+      return b;
+    };
+    expect(isSuspiciousUtf8Block(withBad(UTF8_SNIFF_ILLEGAL_MIN))).toBe(true);
+    expect(isSuspiciousUtf8Block(withBad(UTF8_SNIFF_ILLEGAL_MIN - 1))).toBe(false);
+  });
+
+  it('非法占比 ≥ 块字节 1% 亦判非（处数阈下的短块占比路径：7 处 <8 处但占比超 1%）', () => {
+    // 小块（400B）上处数阈不触发、占比阈触发——1% 分支的独立钉（256KB 真实块口径
+    // 下 1%=2621 处恒晚于处数阈触发，两阈值取或即 GB18030 密集块必判真）
+    const b = new Uint8Array(400).fill(0x61);
+    for (let i = 0; i < 7; i++) b[i] = 0xba; // 7/400 = 1.75% ≥ 1%
+    expect(isSuspiciousUtf8Block(b)).toBe(true);
+    expect(isSuspiciousUtf8Block(new Uint8Array(400).fill(0x61))).toBe(false);
+  });
+});

@@ -2219,4 +2219,40 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
       process.off('unhandledRejection', onUnhandled);
     }
   });
+
+  // 项 1（遗留清偿波 3）：head 干净 + 尾部 GB18030 的窗口流式形态——续读触达脏块
+  // 时流内嗅探判非 UTF-8，经 codeRenderer.render 注入的降级出口（与入口「判出的
+  // 非 UTF-8」回退同路径：memoizedFullRead 补拉 + redetectWithFull 精判 + 全量重渲）
+  // 重渲，实例方法面转投全量实例（getMeta/getEngine/revealLine…），销毁复合收口。
+  it('项 1 流内嗅探降级：head 干净 + 尾部 GB18030 → 首块正常渲染，续读触发全量重渲（无 U+FFFD、meta 精判 gb18030）', async () => {
+    stubResizeObserver();
+    attachHighlightClient({ highlight: async () => [{ start: 0, end: 5, capture: 'keyword' }] });
+    const parts: number[] = [...enc(codeLines(1400))]; // 干净前缀 ≈2.1MB >2MB（窗口分支门槛；块 0..7 全净）
+    for (let i = 0; i < 100; i++) {
+      parts.push(...enc(`// gb ${i} `));
+      for (let k = 0; k < 50; k++) parts.push(0xba, 0xba); // GBK「汉」：两字节均非法 UTF-8 lead
+      parts.push(0x0a);
+    }
+    const content = Uint8Array.from(parts);
+    const calls: RangeCall[] = [];
+    const host = newHost();
+    const inst = (await codeRenderer.render(content.slice(0, 8192), host, winSource,
+      { ext: 'js', encoding: 'utf-8', lang: 'javascript' },
+      streamCtx({ size: content.length, content, head: content.slice(0, 8192), calls }))) as CodeInstance;
+    await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
+    expect(calls.some((c) => c.end === Number.MAX_SAFE_INTEGER)).toBe(false); // 窗口模式：无全量补拉
+    expect(host.textContent).not.toContain('\uFFFD'); // 首块干净
+    scrollCode(host, Number.MAX_SAFE_INTEGER); // 续读触达脏块 → 嗅探判非 UTF-8 → 降级
+    await vi.waitFor(() => expect(inst.getMeta().encoding).toBe('gb18030')); // 精判回填（方法面转投）
+    expect(calls.some((c) => c.start === 0 && c.end === Number.MAX_SAFE_INTEGER)).toBe(true); // 补拉全量
+    // 全文正确解码：脏区行（1400..1499）'汉' 就位、无 U+FFFD 扩散
+    inst.revealLine(1450);
+    await vi.waitFor(() => expect(bodyText(host, 1450)).toBeDefined());
+    expect(bodyText(host, 1450)).toContain('汉');
+    expect(host.textContent).not.toContain('\uFFFD');
+    expect(inst.getMeta().lines).toBe(1500); // wc-l 口径回环全量
+    await vi.waitFor(() => expect(inst.getEngine()).toBe('tree-sitter')); // 引擎指示随全量实例
+    inst.destroy(); // 复合销毁：全量实例随宿主收口，无 DOM 残留
+    expect(host.querySelector('.vv-code-pre')).toBeNull();
+  });
 });

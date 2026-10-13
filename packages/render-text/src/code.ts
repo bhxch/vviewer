@@ -1,7 +1,7 @@
 import type { Renderer, Encoding, Detection, FileSource, RenderedInstance, SearchMatch, ComputeSource, ComputeWhere, StreamCtx } from '@vviewer/core';
 import { getRemoteBase, getRemoteMeta, redetectWithFull, RemoteComputeError, showErrorCard } from '@vviewer/core';
 import { detectLanguage, HighlightCanceledError, captureToCssClass, type HighlightChunk, type HighlightInterval } from '@vviewer/highlight';
-import { STREAM_MAX_BYTES, createBlockStream, memoizedFullRead } from './blockStream';
+import { STREAM_MAX_BYTES, createBlockStream, isSuspiciousUtf8Block, memoizedFullRead } from './blockStream';
 import { createTextWindow } from './textWindow';
 import { advanceCodeIndex, createCodeIndex, finishCodeIndex } from './codeIndexStream';
 
@@ -607,6 +607,11 @@ export interface CodeRenderOptions {
    * 须为 UTF-8（codeRenderer.render 守卫——窗口模式仅 UTF-8/ASCII，见其注释）；
    * ≤2MB 全量走现状路径的守卫补拉同样在 codeRenderer.render 入口完成。 */
   ctx?: StreamCtx;
+  /** 项 1（遗留清偿波 3）：流内嗅探判非 UTF-8 的降级出口（codeRenderer.render 注入）：
+   * 实现走「判出的非 UTF-8」入口回退同路径（memoizedFullRead 补拉 + redetectWithFull
+   * 精判 + 全量重渲）并返回全量重渲实例——窗口实例的方法面转投该实例。缺省（直接
+   * 调用面）不嗅探不降级，行为与现状一致。 */
+  onEncodingBroken?: () => Promise<RenderCodeHandle>;
 }
 
 export function renderCode(
@@ -1218,6 +1223,14 @@ function renderCodeWindowed(
   // 消费契约（codeIndexStream）：finishCodeIndex 之后不得再 advanceCodeIndex——
   // 此标志后续读全部停机，EOF 确认后滚动零 IO
   let indexFinished = false;
+  // 项 1（遗留清偿波 3）：流内嗅探判非 UTF-8（head 误判 utf-8 形态）——置位后停喂
+  //（防 U+FFFD 扩散），降级经注入出口异步进行。已喂的干净前缀在降级完成前保持可读。
+  // 无降级通道（onEncodingBroken 缺省）不嗅探：行为与现状一致
+  let encodingBroken = false;
+  let downgradePromise: Promise<void> | null = null;
+  // 降级产物（全量重渲实例）：窗口 handle 的方法面转投它（ViewerPane 只持窗口
+  // handle——render 已先于滚动期降级返回），销毁复合收口
+  let fullInst: RenderCodeHandle | null = null;
   // 行数 = 索引条目数：含末尾空串条目，与全量 buildLineIndex lines.length 同值
   //（虚拟滚动 itemCount/chunkRangeFor 的 totalLines 同口径，指令④不在索引层减 1）
   const rows = (): number => index.offsets.length;
@@ -1601,7 +1614,7 @@ function renderCodeWindowed(
    * ensureBlock 失败上抛时 nextFeed 不推进，重试拉同一块，块序列不错位。
    */
   const pullBlock = async (): Promise<void> => {
-    if (indexFinished || limitReached) return;
+    if (indexFinished || limitReached || encodingBroken) return;
     // 尺寸防线（STREAM_MAX_BYTES）：size 已知构造即知（零读停机），此处 > 分支只
     // 防御 200-回退 degraded 等构造后确认字节越限的形态；size 未知随续读逐块裁决
     // ——达限即停（项 5 恰界收紧：旧判定 > 允许越限一块 ≤256KB 才停），不发起会
@@ -1626,6 +1639,21 @@ function renderCodeWindowed(
       bomLen = 3; // 索引/解码前剥离（见上裁决）
       chunk = raw.subarray(3);
     }
+    // 项 1：喂块面流内嗅探（每块一次性判定，零非法块不重复嗅探；判定面共享于
+    // blockStream.isSuspiciousUtf8Block，jsonl 同款）——单块非法序列超阈判非 UTF-8：
+    // 停喂（本块不入索引，干净前缀不受影响），降级经注入出口异步进行（与「判出的
+    // 非 UTF-8」入口回退同路径，见 CodeRenderOptions.onEncodingBroken 注）
+    if (opts.onEncodingBroken !== undefined && isSuspiciousUtf8Block(chunk)) {
+      encodingBroken = true;
+      const p = (async () => {
+        fullInst = await opts.onEncodingBroken!();
+      })();
+      downgradePromise = p;
+      // 滚动期降级无等待面：空 catch 防 unhandled rejection（首拉期降级经 start 的
+      // await 原始 promise，拒绝照常上抛走 whenReady 渲染期读失败面）
+      p.catch(() => {});
+      return;
+    }
     advanceCodeIndex(index, chunk);
     nextFeed = i + 1; // 喂入成功才推进
     maybeFinish();
@@ -1643,7 +1671,7 @@ function renderCodeWindowed(
     // 加载坐标区，逐块 ensure 后一次 refresh 填充全部占位行）。reloadFailed 停机闩
     // 与 continueFailed 同款：失败后任何自动 onRange/refresh 不得重试重拉（防活锁），
     // 用户滚动动作（onUserScroll）解除后单次重试
-    if (pendingReload.size > 0 && !pulling && !reloadFailed && !destroyed) {
+    if (pendingReload.size > 0 && !pulling && !reloadFailed && !encodingBroken && !destroyed) {
       const targets = [...pendingReload];
       pendingReload.clear();
       pulling = true;
@@ -1663,7 +1691,7 @@ function renderCodeWindowed(
       })();
       return;
     }
-    if (indexFinished || limitReached || pulling || continueFailed || destroyed) return;
+    if (indexFinished || limitReached || encodingBroken || pulling || continueFailed || destroyed) return;
     if (lastVisible < rows() - WINDOW_CONTINUE_MARGIN_LINES) return; // 距尾部余量充足
     pulling = true;
     void (async () => {
@@ -1675,6 +1703,7 @@ function renderCodeWindowed(
       }
       pulling = false;
       if (destroyed) return;
+      if (encodingBroken) return; // 项 1：判非 UTF-8——降级重渲进行中/已完成，窗口面停评
       remountOrRefresh(); // 重渲 + 再评估（停机时 maybeContinue 直返；未停机仍近尾部则续读下一块）
     })();
   }
@@ -1701,8 +1730,15 @@ function renderCodeWindowed(
    */
   async function start(): Promise<void> {
     await pullBlock();
-    while (!destroyed && !indexFinished && !limitReached && bs.atEnd()) await pullBlock();
+    while (!destroyed && !indexFinished && !limitReached && !encodingBroken && bs.atEnd()) await pullBlock();
     if (destroyed) return;
+    // 项 1：首拉即判非 UTF-8（脏块落在已排空区间）——降级在此收口：补拉失败经
+    // await 原样上抛（whenReady → codeRenderer.render 的渲染期读失败面）；成功时
+    // 全量实例已重渲上屏，不 mount 窗口面（方法面经 fullInst 转投）
+    if (encodingBroken && downgradePromise !== null) {
+      await downgradePromise;
+      return;
+    }
     // 空流/超限停机：不留「解析中」终态
     if (rows() === 0 && engine === 'pending' && (indexFinished || limitReached)) {
       engine = 'plain';
@@ -1842,9 +1878,9 @@ function renderCodeWindowed(
         lastScanComplete = true; // 全文扫完：同键短路缓存恢复生效（项 2 分界）
         return acc; // finishCodeIndex 已提交末尾空串条目
       }
-      if (limitReached || continueFailed) {
+      if (limitReached || continueFailed || encodingBroken) {
         lastScanComplete = false; // 停机收场：同键重搜不短路（续扫）
-        return acc; // 停机面：已加载区间即终
+        return acc; // 停机面：已加载区间即终（项 1 判非 UTF-8 同口径：降级重渲接手）
       }
       if (pulling) {
         await delay(SCAN_POLL_MS); // 续读/回看重拉在飞：等待其落地后重评
@@ -1866,6 +1902,8 @@ function renderCodeWindowed(
 
   const handle: RenderCodeHandle = {
     destroy() {
+      // 项 1：降级产物（全量重渲实例）随宿主一并销毁（ViewerPane 只持本 handle）
+      if (fullInst !== null) fullInst.destroy();
       destroyed = true;
       scanSeq += 1; // 在飞后台扫描令牌失效（下一检查点退出，部分结果收场）
       scan = null;
@@ -1882,22 +1920,28 @@ function renderCodeWindowed(
       // 提示条与 flex 布局类随实例销毁清理（host 复用时不得残留）
       target.classList.remove('vv-code-oversize');
     },
+    // —— 项 1：降级后的方法面转投（判非 UTF-8 后全量实例接手渲染，ViewerPane 持
+    // 有的仍是本 handle——滚动宿主/引擎指示/meta/搜索/跳转全部随全量实例读写）——
     setScrollTop(top) {
+      if (fullInst !== null) return fullInst.setScrollTop(top);
       pre.scrollTop = top;
     },
     scrollTop() {
+      if (fullInst !== null) return fullInst.scrollTop();
       return pre.scrollTop;
     },
     getScrollHost() {
+      if (fullInst !== null) return fullInst.getScrollHost();
       return pre;
     },
-    getEngine: () => engine,
-    getComputeWhere: () => computeWhere,
+    getEngine: () => (fullInst !== null ? fullInst.getEngine() : engine),
+    getComputeWhere: () => (fullInst !== null ? fullInst.getComputeWhere() : computeWhere),
     // 渲染期动态元数据快照。lines 为内容行数口径（展示层 wc -l，指令④）：索引
     // offsets.length 含末尾空串条目（=全量 lines.length 同值），EOF 后末条目空串才在
     // 此减 1——流中条目全为已提交真实行不减（「已加载 N 行」渐进口径，ViewerPane
     // 首读数字形态兼容）。size：已知取 ctx.size，未知取已确认字节（随续读增长）
     getMeta() {
+      if (fullInst !== null) return fullInst.getMeta(); // 项 1：降级后转投全量实例（encoding 精判/行数全量）
       const lastLen = index.lengths[index.lengths.length - 1] ?? -1;
       return {
         encoding: opts.encoding ?? 'utf-8',
@@ -1907,6 +1951,8 @@ function renderCodeWindowed(
       };
     },
     search(query, searchOpts?: { caseSensitive?: boolean }) {
+      // 项 1：降级后转投全量实例（全文行数组扫描，索引停喂面不再参与）
+      if (fullInst !== null) return fullInst.search(query, searchOpts);
       const caseSensitive = searchOpts?.caseSensitive === true;
       const key = `${caseSensitive ? '1' : '0'}\u0000${query}`;
       if (scan !== null && scan.key === key) return scan.promise; // 同键在飞：共享同一扫描
@@ -1954,12 +2000,16 @@ function renderCodeWindowed(
       return promise;
     },
     gotoMatch(matchIndex) {
+      // 项 1：降级后转投全量实例（全量行表定位）
+      if (fullInst !== null) return fullInst.gotoMatch(matchIndex);
       const match = lastMatches[matchIndex];
       if (!match) return;
       revealLoadedLine(match.line);
     },
     revealLine(line, col) {
       void col;
+      // 项 1：降级后转投全量实例（全量行表定位）
+      if (fullInst !== null) return fullInst.revealLine(line, col);
       if (!Number.isInteger(line) || line < 0) return;
       if (line < rows()) {
         revealLoadedLine(line); // 已加载行：与 gotoMatch 同款 ensure 补块后跳转
@@ -1974,7 +2024,7 @@ function renderCodeWindowed(
       void (async () => {
         await ready.catch(() => {}); // 与首拉串行（start 未设 pulling 闸，双喂会使索引错位）；首拉失败面已由 whenReady 上抛，此处吞掉防 unhandled
         const rowsBefore = rows();
-        while (!destroyed && line >= rows() && !indexFinished && !limitReached && !continueFailed) {
+        while (!destroyed && line >= rows() && !indexFinished && !limitReached && !continueFailed && !encodingBroken) {
           if (pulling) {
             await delay(SCAN_POLL_MS); // 续读/回看在飞：等待其落地后重评（扫描同款）
             continue;
@@ -2048,7 +2098,19 @@ export const codeRenderer: Renderer = {
       (ctx.size === null || ctx.size > TREE_SITTER_MAX_BYTES);
     let inst: RenderCodeHandle;
     if (windowed && ctx !== undefined) {
-      inst = renderCode(buffer, target, { ...renderOpts, ctx });
+      inst = renderCode(buffer, target, {
+        ...renderOpts,
+        ctx,
+        // 项 1（遗留清偿波 3）：流内嗅探判非 UTF-8 的降级出口——与下方全量守卫的
+        // 「判出的非 UTF-8」回退同路径（memoizedFullRead 补拉 + redetectWithFull 精判
+        // + 全量重渲）。注入在渲染器入口：source/det（精判就地翻转 det.encoding）只在
+        // 该层可见；head 样本取 ctx.head（dispatcher 交付的探测头，与入口回退同源）
+        onEncodingBroken: async () => {
+          const full = await memoizedFullRead(ctx);
+          redetectWithFull(source, ctx.head, full, det);
+          return renderCode(full, target, { ...renderOpts, encoding: det.encoding });
+        }
+      });
     } else {
       // 全量路径守卫补拉（回退矩阵收口，同 jsonl/hex 形态）：streaming 分支只交付
       // 8KB 探测头作 buffer（capable 且 size>1MB 或 size 未知），head 未覆盖全文件

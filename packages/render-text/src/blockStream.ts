@@ -268,3 +268,103 @@ export function createBlockStream(
     }
   };
 }
+
+// ---------------------------------------------------------------------------
+// 项 1（遗留清偿波 3）：流式逐块 UTF-8 嗅探（head 误判 utf-8 的收口）
+// ---------------------------------------------------------------------------
+// 窗口模式仅以探测头判编码：head 干净、尾部 GB18030 等非 UTF-8 时流式解码产出
+// U+FFFD/mojibake。嗅探在喂块面（jsonl/code 的 pullBlock，每块一次性判定）对原始
+// 字节做严格 UTF-8 合法性计数，单块超阈判非 UTF-8 → 切全量重渲（「判出的非 UTF-8」
+// 入口回退同路径）。公共判定面放本模块（块字节层，jsonl/code 共享）；降级出口在
+// 各渲染器（source/det 与全量重渲入口都在渲染器层）。判据同 packages/core detect
+// 的 isStrictUtf8（RFC 3629，overlong/代理对拒绝）——布尔版首败即 false 无法计数，
+// 流式嗅探需「处数」与阈值比较，故此处实现同判据的计数变体（注释互引，判据同源）。
+
+/** 单块非法序列计数的判定阈值（处）：≥ 此值判非 UTF-8（合法 UTF-8 零非法，阈值
+ * 只为容忍假阳性边缘——截断安全前缀已剔除块切口悬挂序列，其余非法必真） */
+export const UTF8_SNIFF_ILLEGAL_MIN = 8;
+
+/** 严格 UTF-8 合法性计数（isStrictUtf8 同判据的计数变体）：返回 [0, len) 内非法
+ * 序列处数。失配后按字节推进重同步——只影响脏块的计数偏多（判非方向），合法块
+ * 恒零不计，无假阳性面 */
+function countIllegalUtf8(b: Uint8Array, len: number): number {
+  let i = 0;
+  let bad = 0;
+  while (i < len) {
+    const c = b[i]!;
+    if (c < 0x80) {
+      i += 1;
+      continue;
+    }
+    let seqLen: number;
+    let min: number;
+    let cp: number;
+    if ((c & 0xe0) === 0xc0) {
+      seqLen = 2;
+      min = 0x80;
+      cp = c & 0x1f;
+    } else if ((c & 0xf0) === 0xe0) {
+      seqLen = 3;
+      min = 0x800;
+      cp = c & 0x0f;
+    } else if ((c & 0xf8) === 0xf0) {
+      seqLen = 4;
+      min = 0x10000;
+      cp = c & 0x07;
+    } else {
+      bad += 1; // 非法 lead（含孤立延续字节）
+      i += 1;
+      continue;
+    }
+    if (i + seqLen > len) {
+      bad += 1; // 防御（len 已截断安全，正常不可达）
+      i += 1;
+      continue;
+    }
+    let ok = true;
+    for (let k = 1; k < seqLen; k++) {
+      const cc = b[i + k]!;
+      if ((cc & 0xc0) !== 0x80) {
+        ok = false;
+        break;
+      }
+      cp = (cp << 6) | (cc & 0x3f);
+    }
+    if (!ok || cp < min || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) {
+      bad += 1; // 延续字节失配 / overlong / 越界 / 代理区：isStrictUtf8 同判据
+      i += 1;
+      continue;
+    }
+    i += seqLen;
+  }
+  return bad;
+}
+
+/** 截断安全前缀长：块切口可能切开多字节字符（悬挂 lead/延续字节跨块），剔除块尾
+ * 悬挂序列防合法块误判——悬挂的合法 lead 由下一块（含其延续字节）续判；悬挂的
+ * 非法 lead（不可能构成任何合法序列的字节）保留在判定面照常计数 */
+function sniffSafeLen(b: Uint8Array): number {
+  const n = b.length;
+  let end = n;
+  while (end > 0 && (b[end - 1]! & 0xc0) === 0x80) end--; // 回退尾部延续字节
+  if (end === 0) return 0; // 整块皆延续字节：无可判定前缀（理论形态，防御）
+  const lead = b[end - 1]!;
+  if ((lead & 0x80) === 0) return n; // ASCII 收尾：整块可判
+  let seqLen: number;
+  if ((lead & 0xe0) === 0xc0) seqLen = 2;
+  else if ((lead & 0xf0) === 0xe0) seqLen = 3;
+  else if ((lead & 0xf8) === 0xf0) seqLen = 4;
+  else return n; // 非法 lead：本身可判（计数面计入非法）
+  return end - 1 + seqLen <= n ? n : end - 1; // 序列完整整块可判；悬挂剔除
+}
+
+/**
+ * 单块流内嗅探（纯函数，jsonl/code 窗口模式喂块面共享）：截断安全前缀内非法序列
+ * ≥8 处或 ≥ 块字节 1% → 判非 UTF-8。零非法 = 合法块（每块一次性判定，不重复嗅探）。
+ */
+export function isSuspiciousUtf8Block(bytes: Uint8Array): boolean {
+  const len = sniffSafeLen(bytes);
+  if (len === 0) return false;
+  const bad = countIllegalUtf8(bytes, len);
+  return bad >= UTF8_SNIFF_ILLEGAL_MIN || bad * 100 >= len;
+}

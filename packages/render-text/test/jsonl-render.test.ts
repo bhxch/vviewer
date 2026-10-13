@@ -831,4 +831,57 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
     expect(calls).toStrictEqual([{ start: 2 * BLOCK, end: content.length - 1 }]);
     inst.destroy();
   });
+
+  // 项 1（遗留清偿波 3）：head 干净 + 尾部 GB18030——head 探测误判 utf-8，窗口模式
+  // 首块正常；续读触达脏块 → 流内嗅探判非 UTF-8 → 与「判出的非 UTF-8」入口回退同
+  // 路径（memoizedFullRead 补拉 + redetectWithFull 精判 + 全量重渲）：全文正确解码、
+  // 无 U+FFFD 扩散、状态条/meta 落精判值。
+  /** head 干净 + 尾部 GB18030 的字节构造：干净前缀跨块 0..1，脏区自块 2 起（首屏
+   * 两拉不触脏，降级只能由滚动续读触发——用例形态即「续读触发降级」）；GBK「汉」
+   * = BA BA，两字节均为非法 UTF-8 lead（非合法形态的 mojibake，必产 U+FFFD 计数） */
+  function utf8HeadGbTail(cleanRows: number, dirtyRows: number): Uint8Array<ArrayBuffer> {
+    const parts: number[] = [...new TextEncoder().encode(`${padLines(cleanRows, 1500)}\n`)];
+    for (let i = 0; i < dirtyRows; i++) {
+      parts.push(...new TextEncoder().encode(`{"i":${i},"gb":"`));
+      for (let k = 0; k < 50; k++) parts.push(0xba, 0xba); // 每行 100 处非法 ≫ 嗅探阈值
+      parts.push(...new TextEncoder().encode('"}\n'));
+    }
+    return Uint8Array.from(parts);
+  }
+
+  it('项 1 流内嗅探降级：head 干净 + 尾部 GB18030 → 首块正常，续读触发全量重渲（无 U+FFFD、精判 gb18030）', async () => {
+    stubResizeObserver();
+    const content = utf8HeadGbTail(500, 100); // ≈850KB：干净 ≈750KB（块 0..2 前段）+ 脏 100 行
+    const calls: RangeCall[] = [];
+    const host = mount();
+    const inst = (await jsonlRenderer.render(content.slice(0, 8192), host, source, det,
+      streamCtx({ size: content.length, content, head: content.slice(0, 8192), calls }))) as JsonlInstance;
+    // 首块正常：窗口模式在跑（无全量补拉）、首屏无替换符、状态条「已加载」口径
+    expect(calls.some((c) => c.end === Number.MAX_SAFE_INTEGER)).toBe(false);
+    await vi.waitFor(() => expect(host.querySelector('[data-line="0"]')).not.toBeNull());
+    expect(host.textContent).not.toContain('\uFFFD');
+    expect(host.querySelector('.vv-jsonl-status')!.textContent!.startsWith('已加载 ')).toBe(true);
+    // 滚动续读触达脏块 → 嗅探判非 UTF-8 → 全量重渲（状态条转「共 N 行」全量口径）
+    scrollToBottom(host);
+    await vi.waitFor(() => {
+      expect(host.querySelector('.vv-jsonl-status')!.textContent).toBe('共 600 行');
+    });
+    expect(calls.some((c) => c.start === 0 && c.end === Number.MAX_SAFE_INTEGER)).toBe(true); // 补拉全量
+    // 全文正确解码：滚到底看脏区行（重渲后视口回顶），'汉' 就位、无 U+FFFD 扩散
+    const rescroll = host.querySelector('.vv-jsonl-scroll') as HTMLElement;
+    rescroll.scrollTop = Number.MAX_SAFE_INTEGER;
+    rescroll.dispatchEvent(new Event('scroll'));
+    await vi.waitFor(() => {
+      expect([...host.querySelectorAll('.vv-jsonl-body')].some((b) => b.textContent!.includes('汉'))).toBe(true);
+    });
+    expect(host.textContent).not.toContain('\uFFFD');
+    // meta 落精判值：encoding=det 就地翻转（redetectWithFull），lines/size 回环全量
+    expect(inst.getMeta().encoding).toBe('gb18030');
+    expect(inst.getMeta().lines).toBe(600);
+    expect(inst.getMeta().size).toBe(content.length);
+    inst.destroy();
+    // 复合销毁收口（降级产物随宿主）：全量实例与窗口实例的滚动容器均移除
+    //（status 元素的留存为 mountJsonlView destroy 既有语义，不在本项范围）
+    expect(host.querySelector('.vv-jsonl-scroll')).toBeNull();
+  });
 });

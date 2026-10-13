@@ -68,7 +68,7 @@
 import type { Detection, FileSource, RenderedInstance, Renderer, StreamCtx } from '@vviewer/core';
 import { redetectWithFull } from '@vviewer/core';
 import { HighlightCanceledError, type HighlightInterval } from '@vviewer/highlight';
-import { STREAM_MAX_BYTES, createBlockStream, memoizedFullRead } from '../blockStream';
+import { STREAM_MAX_BYTES, createBlockStream, isSuspiciousUtf8Block, memoizedFullRead } from '../blockStream';
 import { createTextWindow, type BlockTextEntry } from '../textWindow';
 import {
   assignIntervalsToLines,
@@ -516,6 +516,17 @@ function mountJsonlView(
 }
 
 /**
+ * 项 1（遗留清偿波 3）流内嗅探降级出口（jsonlRenderer.render 注入，窗口模式专用）：
+ * 流内嗅探判非 UTF-8 时调用——实现走「判出的非 UTF-8」入口回退同路径（memoizedFullRead
+ * 补拉 + redetectWithFull 精判 + 全量重渲，>200MB 委托 code 同款）并返回全量重渲实例。
+ * 注入在渲染器入口：source/det（redetectWithFull 就地翻转）只在该层可见。缺省（直接
+ * 调用面）不嗅探不降级，行为与现状一致。
+ */
+export interface JsonlWindowedDowngrade {
+  onEncodingBroken?: () => Promise<RenderedInstance & { getMeta(): CodeFileMeta }>;
+}
+
+/**
  * JSONL 渲染本体（双模式入口）：ctx 存在且 UTF-8 → 窗口流式；否则全量模式
  * （现状路径：!ctx 兼容 / 非 UTF-8 编码，行为逐字节不动）。
  */
@@ -523,10 +534,11 @@ export async function renderJsonl(
   buffer: Uint8Array,
   target: HTMLElement,
   det: Detection,
-  ctx?: StreamCtx
+  ctx?: StreamCtx,
+  downgrade?: JsonlWindowedDowngrade
 ): Promise<RenderedInstance & { getMeta(): CodeFileMeta }> {
   if (ctx !== undefined && (det.encoding ?? 'utf-8') === 'utf-8') {
-    return renderJsonlWindowed(ctx, target, det);
+    return renderJsonlWindowed(ctx, target, det, downgrade);
   }
   // —— 全量模式（现状路径，行为不动）——
   // 解码 + 归一（code.ts L537 同款：DECODERS 表 + fatal:false；标签异常容错回落 utf-8）
@@ -557,7 +569,8 @@ export async function renderJsonl(
 async function renderJsonlWindowed(
   ctx: StreamCtx,
   target: HTMLElement,
-  det: Detection
+  det: Detection,
+  downgrade?: JsonlWindowedDowngrade
 ): Promise<RenderedInstance & { getMeta(): CodeFileMeta }> {
   const bs = createBlockStream(ctx, WINDOW_BLOCK_BYTES, { maxBlocks: WINDOW_STREAM_MAX_BLOCKS });
   const index: JsonlIndexState = createJsonlIndex(JSONL_OVERSIZE_LINE_BYTES);
@@ -572,6 +585,14 @@ async function renderJsonlWindowed(
   // 续读停机。防线在 IO 之前裁决（size 已知构造即知——零读停机；size 未知随
   // 短读探测逐块裁决）。非失败态：不复用错误卡片，仅状态条追加 hex 建议
   let limitReached = false;
+  // 项 1（遗留清偿波 3）：流内嗅探判非 UTF-8（head 误判 utf-8 形态）——置位后停喂
+  //（防 U+FFFD 扩散），降级经注入出口异步进行。已喂的干净前缀在降级完成前保持可读。
+  // 无降级通道（downgrade 缺省）不嗅探：行为与现状一致
+  let encodingBroken = false;
+  let downgradePromise: Promise<void> | null = null;
+  // 降级产物（全量重渲实例）：窗口实例的 meta lines 委托与复合销毁转投它
+  //（ViewerPane 只持窗口实例——render 已先于滚动期降级返回）
+  let fullInst: RenderedInstance & { getMeta(): CodeFileMeta } | null = null;
 
   const startsWithBom = (b: Uint8Array<ArrayBuffer>): boolean =>
     b.length >= 3 && b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf;
@@ -594,7 +615,7 @@ async function renderJsonlWindowed(
    * 重试（用户滚动动作再触发）拉同一块，块序列不错位。
    */
   const pullBlock = async (): Promise<void> => {
-    if (indexFinished || limitReached) return;
+    if (indexFinished || limitReached || encodingBroken) return;
     // 尺寸防线（STREAM_MAX_BYTES）：size 已知超限即停（confirmedBytes 构造即 size，
     // 零读停机面）；size 未知达限即停（项 5 恰界收紧：旧判定 > 允许越限一块 ≤256KB
     // 才停）——不发起会越限的块读。恰等于上限的已知尺寸文件不受影响（> 不触发），
@@ -614,6 +635,20 @@ async function renderJsonlWindowed(
     if (i === 0 && startsWithBom(raw)) {
       bomLen = 3; // 索引/解码前剥离（见上裁决）
       chunk = raw.subarray(3);
+    }
+    // 项 1：喂块面流内嗅探（每块一次性判定，零非法块不重复嗅探）——单块非法序列
+    // 超阈判非 UTF-8：停喂（本块不入索引，干净前缀不受影响），降级经注入出口异步
+    // 进行（与「判出的非 UTF-8」入口回退同路径，见 JsonlWindowedDowngrade 注）
+    if (downgrade?.onEncodingBroken !== undefined && isSuspiciousUtf8Block(chunk)) {
+      encodingBroken = true;
+      const p = (async () => {
+        fullInst = await downgrade.onEncodingBroken!();
+      })();
+      downgradePromise = p;
+      // 滚动期降级无等待面：空 catch 防 unhandled rejection（首拉期降级经下方
+      // await 原始 promise，拒绝照常上抛走渲染期读失败面）
+      p.catch(() => {});
+      return;
     }
     advanceJsonlIndex(index, chunk);
     nextFeed = i + 1; // 喂入成功才推进
@@ -696,7 +731,7 @@ async function renderJsonlWindowed(
     // 已加载坐标区，逐块 ensure 后一次 refresh 填充全部占位行）。reloadFailed 停机
     // 闩与 continueFailed 同款：失败后任何自动 update/refresh 不得重试重拉（防活锁），
     // 用户滚动/resize 动作（notifyUserAction）解除后单次重试
-    if (pendingReload.size > 0 && !pulling && !reloadFailed && !api.destroyed()) {
+    if (pendingReload.size > 0 && !pulling && !reloadFailed && !encodingBroken && !api.destroyed()) {
       const targets = [...pendingReload];
       pendingReload.clear();
       pulling = true;
@@ -716,7 +751,7 @@ async function renderJsonlWindowed(
       })();
       return;
     }
-    if (indexFinished || limitReached || pulling || continueFailed || api.destroyed()) return;
+    if (indexFinished || limitReached || encodingBroken || pulling || continueFailed || api.destroyed()) return;
     if (lastVisible < rows() - OVERSCAN * 2) return; // 距尾部余量充足
     pulling = true;
     void (async () => {
@@ -728,6 +763,7 @@ async function renderJsonlWindowed(
       }
       pulling = false;
       if (api.destroyed()) return;
+      if (encodingBroken) return; // 项 1：判非 UTF-8——降级重渲进行中/已完成，窗口面停评
       api.refreshStatus();
       api.setSpacerHeight();
       api.refresh(); // 重渲 + 再评估（停机时 maybeContinue 直返；未停机仍近尾部则续读下一块）
@@ -739,7 +775,13 @@ async function renderJsonlWindowed(
   // 排空剩余已确认块——零 IO，仅把索引喂到文件尾，状态条直接落「共 N 行」。
   await pullBlock();
   await pullBlock();
-  while (!indexFinished && bs.atEnd()) await pullBlock();
+  while (!indexFinished && !encodingBroken && bs.atEnd()) await pullBlock();
+  // 项 1：首拉即判非 UTF-8（脏块落在前两块）——降级在此收口：补拉失败经 await
+  // 原样上抛（渲染期读失败面，入口回退同口径）；成功直接返回全量重渲实例
+  if (encodingBroken && downgradePromise !== null) {
+    await downgradePromise;
+    return fullInst!;
+  }
 
   const instance = mountJsonlView(target, det, {
     rowCount: rows,
@@ -768,9 +810,19 @@ async function renderJsonlWindowed(
     // 用户动作解除续读/回看停机（单次重试）——code.ts onUserScroll 同口径
     notifyUserAction: () => { continueFailed = false; reloadFailed = false; },
     metaSize: () => ctx.size ?? bs.confirmedBytes,
-    metaLines: rows
+    // 项 1：降级后行数转投全量实例（窗口索引停在判脏前缀，ViewerPane 的 meta 轮询
+    // 面须读到全量重渲的行数；encoding 经 det 就地翻转、size 经 ctx.size 天然正确）
+    metaLines: () => fullInst?.getMeta().lines ?? rows()
   });
   jsonlWindowedInternals.set(instance, { blockTextCache: win.entries });
+  // 项 1：复合销毁——降级产物（全量重渲实例）随宿主一并销毁（ViewerPane 只持窗口
+  // 实例）。先毁全量面再走窗口面清理：全量面销毁会摘 target 的 vv-jsonl 类，窗口
+  // 面重复移除幂等无害
+  const ownDestroy = instance.destroy;
+  instance.destroy = () => {
+    fullInst?.destroy();
+    ownDestroy();
+  };
   return instance;
 }
 
@@ -813,6 +865,21 @@ export const jsonlRenderer: Renderer = {
       // 探测头，永不触发（code 渲染器流式化为计划 3，届时由其 streaming 路径承接）
       return renderCode(buffer, target, { encoding: det.encoding, ext: det.ext, highlight: false, oversizeNotice: true });
     }
-    return renderJsonl(buffer, target, det, ctx);
+    if (ctx === undefined) return renderJsonl(buffer, target, det); // 兼容路径：无流上下文
+    return renderJsonl(buffer, target, det, ctx, {
+      // 项 1（遗留清偿波 3）：流内嗅探判非 UTF-8 的降级出口——与上方「判出的
+      // 非 UTF-8」入口回退同路径（memoizedFullRead 补拉 + redetectWithFull 精判 +
+      // 全量重渲；>200MB 委托 code 同款）。注入在渲染器入口：source/det（精判就地
+      // 翻转 det.encoding）只在该层可见。head 样本取 ctx.head（dispatcher 交付的
+      // 探测头，与入口回退的 redetect 样本同源）
+      onEncodingBroken: async () => {
+        const full = await memoizedFullRead(ctx);
+        redetectWithFull(source, ctx.head, full, det);
+        if (shouldDelegateToCode(full.byteLength)) {
+          return renderCode(full, target, { encoding: det.encoding, ext: det.ext, highlight: false, oversizeNotice: true });
+        }
+        return renderJsonl(full, target, det, undefined); // ctx 缺省 → 全量路径（现状）
+      }
+    });
   }
 };
