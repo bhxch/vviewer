@@ -72,7 +72,8 @@ export function redetectWithFull(
 
 /** 签名 → 规范改派目标（BUG-13 与 BUG-07 无扩展名回退链共用的改派表）。
  * ole 无专用渲染器不改派（维持 hex 语义）；mpegts 规范扩展名 'ts'
- * （av 渲染器按 det.ext 分派 video 形态与 mpegts loader，故改派需同步纠偏 ext）。 */export interface SignatureRoute {
+ * （av 渲染器按 det.ext 分派 video 形态与 mpegts loader，故改派需同步纠偏 ext）。 */
+export interface SignatureRoute {
   rendererId: RendererId;
   ext: string;
 }
