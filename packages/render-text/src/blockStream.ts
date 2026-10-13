@@ -68,6 +68,18 @@ export interface BlockStream {
   /** 确保第 i 块就绪；返回该块字节。i > 当前已确认块数时仅按序推进（不跳读）；
    * 已确认但被 LRU 逐出的块按 hexSource 同语义重拉（零跳读、坐标不变） */
   ensureBlock(i: number): Promise<Uint8Array<ArrayBuffer>>;
+  /**
+   * 并行预取（遗留清偿 A1）：确保块 [0..lastBlock] 全部就绪——对 [nextBlock..lastBlock]
+   * 中未驻留整块的块并发发起 fetch，全部 settle 后按升序提交推进（取块并行化、提交
+   * 升序，0..nextBlock-1 恒终态块不变量不破；块字节的同步消费在就绪后才发生，并行
+   * 落表先后无关紧要）。失败语义：等全部 settle 后按块序最靠前的失败上抛，nextBlock
+   * 停在该块（已成功块字节已在块表，重试经驻留跳过不重拉）。size 未知退化为逐块
+   * 顺序 ensureBlock 等价（短读 EOF 依赖顺序发现，不并行）。lastBlock 越过实际末块
+   * 钳到末块/EOF——预取是「尽力确保」提示面，首屏「前 2 块」在不足两块的文件上不是
+   * 错误；非法下标仍按 ensureBlock 口径抛错。并发去重经既有 in-flight 表（预取发起
+   * 时 set，与 ensureBlock 共享同一 fetch）。
+   */
+  prefetchThrough(lastBlock: number): Promise<void>;
   /** 已确认末块（短读或 size 精确到达） */
   atEnd(): boolean;
 }
@@ -127,6 +139,9 @@ export function createBlockStream(
   let confirmed = sizeKnown ? ctx.size : ctx.head.length; // 已确认字节数
   let shortSeen = false; // size 未知：短读已确认 EOF（一经置位锁存）
   let fullData: Uint8Array<ArrayBuffer> | null = null; // 200-回退全量底座（非 null 即 degraded）
+  // 200-回退全量重取的在途去重（A1 并行预取）：同批多块同时收到超长 200 时共享
+  // 单次全量 read（重复全量下载对字节事实无害但成倍浪费 IO）；失败即刻出表可重试
+  let fullReload: Promise<Uint8Array<ArrayBuffer>> | null = null;
 
   /** 同步取块：degraded 时为全量切片（越界抛错），否则查块表（未就绪抛错）；命中触新 */
   const block = (i: number): Uint8Array<ArrayBuffer> => {
@@ -156,8 +171,13 @@ export function createBlockStream(
     const chunk = await ctx.read({ start: i * blockSize, end: i * blockSize + cap - 1 });
     if (chunk.length > cap) {
       // 超长返回 = Range-less 200 全量（终审 F3）：抛弃流式缓冲，重取全量
-      //（端点钳制语义）——subarray 钳制会把文件头错位当本块，宁切全量不错位上屏
-      const full = await ctx.read({ start: 0, end: Number.MAX_SAFE_INTEGER });
+      //（端点钳制语义）——subarray 钳制会把文件头错位当本块，宁切全量不错位上屏。
+      // 重取在途去重（A1）：并行预取同批多块同时触发时共享单次全量 read
+      fullReload ??= ctx.read({ start: 0, end: Number.MAX_SAFE_INTEGER }).catch((err: unknown) => {
+        fullReload = null; // 失败出表：重试可重新发起（memoizedFullRead 同纪律）
+        throw err;
+      });
+      const full = await fullReload;
       blocks.clear();
       fullData = full;
       confirmed = full.length;
@@ -244,6 +264,85 @@ export function createBlockStream(
     return block(i);
   };
 
+  /**
+   * 并行预取（遗留清偿 A1，语义见接口注）：确保块 [0..lastBlock] 全部就绪。
+   * size 未知：逐块顺序 ensureBlock 等价（直接循环 await，不并行——短读 EOF 发现
+   * 依赖顺序，跳读会在 EOF 附近读到错位/空区间）；短读确认后剩余块不存在即已就绪
+   *（EOF 容忍——预取是「尽力确保」提示面，与 size 已知的末块钳取同口径，不上抛）。
+   * size 已知：越界钳到实际末块；对 [nextBlock..lastBlock] 中未驻留整块的块并发
+   * 发起 fetchBlock（发起序=块序；fetchBlock 首个 await 前同步调用 ctx.read，夹持
+   * 断言可在任一放行前观测到全部请求已发出），失败吸收进 failures 不短路（其余
+   * 在途块照常落表），全部 settle 后升序提交推进。
+   * 推进与 fetch 成功绑定的不变量在此以「升序 commit」维持（而非 ensureOne 的
+   * 逐块成功即推进）：nextBlock 逐块推进到 last+1，遇块序最靠前的失败停在该块并
+   * 上抛——已成功块的字节已在块表（并行落表的「先落表后推进」中间态无害：同步
+   * 取数面在提交完成后才被消费），重试经驻留跳过不重拉。
+   * 并发去重经既有 in-flight 表：预取发起时 set 原始 promise（重叠 ensureBlock 收到
+   * 同一真实 resolve/reject），重叠方已发起的块复用不重复 IO。
+   */
+  const prefetchThrough = async (lastBlock: number): Promise<void> => {
+    if (!Number.isInteger(lastBlock) || lastBlock < 0) {
+      throw new Error(`blockStream：块下标须为非负整数，收到 ${lastBlock}`);
+    }
+    if (fullData !== null) return; // 全量底座：一切块已就绪，零 IO
+    if (!sizeKnown) {
+      while (nextBlock <= lastBlock && !shortSeen) {
+        await ensureBlock(nextBlock);
+        if (fullData !== null) return; // 途中 200-回退：全量底座就绪
+      }
+      return;
+    }
+    const last = Math.min(lastBlock, blockCount - 1); // 越界钳到实际末块（空文件 last=-1 即空转）
+    const start = nextBlock;
+    const failures = new Map<number, unknown>(); // 块号 → 失败原因（升序提交裁决用）
+    const targets: number[] = [];
+    for (let i = start; i <= last; i++) {
+      const b = blocks.get(i);
+      if (b !== undefined && b.length === blockSize) continue; // 已驻留整块：跳过（重试不重拉）
+      targets.push(i);
+    }
+    if (targets.length > 0) {
+      const jobs: Array<Promise<void>> = [];
+      for (const i of targets) {
+        const existing = inflight.get(i);
+        if (existing !== undefined) {
+          // 既有在途（重叠 ensureBlock 已发起）：复用共享单次 fetch；推进由 ensureOne
+          // 自带，失败同样记入参与升序裁决
+          jobs.push(
+            existing.then(
+              () => {},
+              (err: unknown) => {
+                failures.set(i, err);
+              }
+            )
+          );
+          continue;
+        }
+        const raw = fetchBlock(i);
+        inflight.set(i, raw); // 共享表存原始 promise：重叠 ensureBlock 收到同一真实拒绝
+        jobs.push(
+          raw.then(
+            () => {
+              inflight.delete(i);
+            },
+            (err: unknown) => {
+              inflight.delete(i);
+              failures.set(i, err);
+            }
+          )
+        );
+      }
+      await Promise.all(jobs); // 等全部 settle（拒绝已吸收，不短路其余在途块）
+    }
+    if (fullData !== null) return; // 并行途中 200-回退：全量底座就绪，无推进面
+    // 升序提交推进：nextBlock 逐块推进到 last+1，遇块序最靠前的失败停在该块并上抛
+    for (let i = start; i <= last; i++) {
+      const err = failures.get(i);
+      if (err !== undefined) throw err;
+      nextBlock = Math.max(nextBlock, i + 1);
+    }
+  };
+
   return {
     blockSize,
     get confirmedBytes() {
@@ -255,6 +354,7 @@ export function createBlockStream(
     block,
     has,
     ensureBlock,
+    prefetchThrough,
     atEnd() {
       if (fullData !== null) return true; // 全量即末块已知
       if (shortSeen) return true; // 短读确认 EOF

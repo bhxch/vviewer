@@ -597,6 +597,13 @@ async function renderJsonlWindowed(
   const startsWithBom = (b: Uint8Array<ArrayBuffer>): boolean =>
     b.length >= 3 && b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf;
 
+  /** 尺寸防线判定（STREAM_MAX_BYTES）：已确认字节超限 → true。pullBlock 与首屏
+   * 并行预取共享同一裁决面——A1 预取发起在 IO 之前必须过同一道闸，超限文件维持
+   * 「零读停机」面（防线在 IO 之前裁决，见上注）。 */
+  const overStreamLimit = (): boolean =>
+    bs.confirmedBytes > STREAM_MAX_BYTES ||
+    (ctx.size === null && bs.confirmedBytes >= STREAM_MAX_BYTES);
+
   /** EOF 收口：atEnd 且已确认字节全部喂完（200-回退全量底座/全量视图需喂到文件尾） */
   function maybeFinish(): void {
     if (indexFinished) return;
@@ -620,10 +627,7 @@ async function renderJsonlWindowed(
     // 零读停机面）；size 未知达限即停（项 5 恰界收紧：旧判定 > 允许越限一块 ≤256KB
     // 才停）——不发起会越限的块读。恰等于上限的已知尺寸文件不受影响（> 不触发），
     // 可完整流式至 EOF
-    if (
-      bs.confirmedBytes > STREAM_MAX_BYTES ||
-      (ctx.size === null && bs.confirmedBytes >= STREAM_MAX_BYTES)
-    ) {
+    if (overStreamLimit()) {
       limitReached = true; // 超限停机：loadedBytes 不再增长（续读面与 maybeContinue 同步封闭）
       return;
     }
@@ -770,9 +774,18 @@ async function renderJsonlWindowed(
     })();
   }
 
-  // 首屏确保前 2 块（spec §4.2）；失败上抛走渲染期读失败面（dispatcher 口径）。
-  // 已本地化（全量视图 head 预置全部块 / 200-回退切全量 / 短读已确认 EOF）时
-  // 排空剩余已确认块——零 IO，仅把索引喂到文件尾，状态条直接落「共 N 行」。
+  // 首屏确保前 2 块（spec §4.2）——A1 并行预取：prefetchThrough(1) 一次 RTT 并发
+  // 发出前两块的读（size 未知内部退化为逐块顺序等价；不足两块钳到实际末块/EOF），
+  // 喂入仍逐块 pullBlock（ensureBlock 命中已驻留块零 IO，喂入序约束不变）。预取
+  // 前置过同一道尺寸防线闸（overStreamLimit）——超限文件维持零读停机面。失败上抛
+  // 走渲染期读失败面（dispatcher 口径）。已本地化（全量视图 head 预置全部块 /
+  // 200-回退切全量 / 短读已确认 EOF）时排空剩余已确认块——零 IO，仅把索引喂到
+  // 文件尾，状态条直接落「共 N 行」。
+  if (overStreamLimit()) {
+    limitReached = true; // 构造即超限：零读停机（防线在 IO 之前，同 pullBlock 裁决面）
+  } else {
+    await bs.prefetchThrough(1);
+  }
   await pullBlock();
   await pullBlock();
   while (!indexFinished && !encodingBroken && bs.atEnd()) await pullBlock();

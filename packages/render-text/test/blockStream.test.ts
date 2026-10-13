@@ -338,6 +338,184 @@ describe('createBlockStream', () => {
     expect(calls).toStrictEqual([{ start: 0, end: 3 }, { start: 4, end: 7 }]); // 按序推进至块 1 即违约
     expect(bs.atEnd()).toBe(false); // 违约 ≠ EOF 证据：不静默当作文件终点
   });
+
+  // —— 遗留清偿 A1：首屏块并行预取（prefetchThrough）——
+
+  /** 夹持 ctx：每次 read 未决直到测试显式放行（并行发起面断言用）——resolveAt(k)/
+   * rejectAt(k, err) 操作第 k 次 read（0 基；resolve 以对应区间切片交付） */
+  function gatedCtx(opts: {
+    size: number | null;
+    content: Uint8Array<ArrayBuffer>;
+    calls?: RangeCall[];
+  }): { ctx: StreamCtx; resolveAt: (k: number) => void; rejectAt: (k: number, err: unknown) => void } {
+    const resolvers = new Map<number, () => void>();
+    const rejecters = new Map<number, (err: unknown) => void>();
+    let n = 0;
+    const ctx: StreamCtx = {
+      size: opts.size,
+      head: new Uint8Array(0),
+      read: (r) => {
+        opts.calls?.push({ start: r.start, end: r.end });
+        const k = n++;
+        return new Promise<Uint8Array<ArrayBuffer>>((resolve, reject) => {
+          resolvers.set(k, () => resolve(opts.content.slice(r.start, r.end + 1)));
+          rejecters.set(k, reject);
+        });
+      }
+    };
+    return {
+      ctx,
+      resolveAt: (k) => resolvers.get(k)!(),
+      rejectAt: (k, err) => rejecters.get(k)!(err)
+    };
+  }
+
+  /** 让出宏任务：并行发起在同步段完成，放行前后的在途观测在此稳定 */
+  const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+  it('㉑ 并行预取：prefetchThrough(1) 在任一块放行前两块 read 均已发出（夹持），全部就绪后提交推进 nextBlock=2', async () => {
+    const calls: RangeCall[] = [];
+    const g = gatedCtx({ size: 16, content: ALPHA.slice(0, 16), calls });
+    const bs = createBlockStream(g.ctx, B);
+    const p = bs.prefetchThrough(1);
+    await tick();
+    // 并发发起面：两块 read 在任一放行前都在途（串行旧实现此处 calls 停在 1）
+    expect(calls).toStrictEqual([
+      { start: 0, end: 3 },
+      { start: 4, end: 7 }
+    ]);
+    g.resolveAt(0);
+    g.resolveAt(1);
+    await p;
+    expect(bs.block(0)).toEqual(ALPHA.slice(0, 4)); // 升序提交后两块就绪
+    expect(bs.block(1)).toEqual(ALPHA.slice(4, 8));
+    expect(bs.atEnd()).toBe(false);
+    // 提交推进 nextBlock=2：ensureBlock(2) 仅补块 2（0/1 已确认零 IO；夹持 read 须放行）
+    const tail = bs.ensureBlock(2);
+    g.resolveAt(2);
+    await tail;
+    expect(calls).toStrictEqual([
+      { start: 0, end: 3 },
+      { start: 4, end: 7 },
+      { start: 8, end: 11 }
+    ]);
+  });
+
+  it('㉒ 并行失败语义：块 0 失败、块 1 成功 → 抛块 0 的错、nextBlock 停 0（重试仅重拉块 0，块 1 不重拉）', async () => {
+    const boom = new Error('块 0 网络炸了');
+    const calls: RangeCall[] = [];
+    const g = gatedCtx({ size: 16, content: ALPHA.slice(0, 16), calls });
+    const bs = createBlockStream(g.ctx, B);
+    const p = bs.prefetchThrough(1);
+    await tick();
+    g.rejectAt(0, boom);
+    g.resolveAt(1);
+    await expect(p).rejects.toBe(boom); // 等全部 settle 后按块序最靠前的失败上抛
+    // 已成功块字节已在块表（重试不重拉的依据）；失败块 0 不在表
+    expect(bs.has(1)).toBe(true);
+    expect(bs.has(0)).toBe(false);
+    // nextBlock 停在最靠前失败块：重试预取恰只重拉块 0（驻留整块的块 1 跳过——
+    // 若 nextBlock 被并发的块 1 成功越位推进，此处将无任何新 read，断言即红）
+    const p2 = bs.prefetchThrough(1);
+    await tick();
+    expect(calls).toStrictEqual([
+      { start: 0, end: 3 },
+      { start: 4, end: 7 },
+      { start: 0, end: 3 }
+    ]);
+    g.resolveAt(2);
+    await p2;
+    expect(bs.block(0)).toEqual(ALPHA.slice(0, 4));
+    expect(bs.block(1)).toEqual(ALPHA.slice(4, 8));
+    const tail = bs.ensureBlock(2); // 提交推进 nextBlock=2：仅补块 2（同步发出夹持 read 后放行）
+    g.resolveAt(3);
+    await tail;
+    expect(calls[3]).toStrictEqual({ start: 8, end: 11 });
+  });
+
+  it('㉓ size 未知退化为顺序等价：首块未决不发第二块（夹持）；短文件预取越 EOF 不抛、EOF 后再预取零 IO', async () => {
+    const calls: RangeCall[] = [];
+    const g = gatedCtx({ size: null, content: ALPHA, calls });
+    const bs = createBlockStream(g.ctx, B);
+    const p = bs.prefetchThrough(2);
+    await tick();
+    expect(calls).toStrictEqual([{ start: 0, end: 3 }]); // 顺序退化：第二块待首块就绪才发起
+    g.resolveAt(0);
+    await tick();
+    expect(calls).toStrictEqual([
+      { start: 0, end: 3 },
+      { start: 4, end: 7 }
+    ]);
+    g.resolveAt(1);
+    await tick();
+    g.resolveAt(2);
+    await p;
+    expect(calls.map((c) => c.start)).toStrictEqual([0, 4, 8]);
+    expect(bs.block(2)).toEqual(ALPHA.slice(8, 12));
+
+    // EOF 容忍（钳到 EOF，非错误）：10B 文件实际 3 块（块 2 短读），预取请求 10 块
+    const data = ALPHA.slice(0, 10);
+    const calls2: RangeCall[] = [];
+    const bs2 = createBlockStream(fakeCtx({ size: null, content: data, calls: calls2 }), B);
+    await bs2.prefetchThrough(9);
+    expect(bs2.atEnd()).toBe(true);
+    expect(bs2.confirmedBytes).toBe(10);
+    expect(calls2).toStrictEqual([
+      { start: 0, end: 3 },
+      { start: 4, end: 7 },
+      { start: 8, end: 11 } // 块 2 短读确认 EOF 后停止（剩余块不存在即已就绪）
+    ]);
+    await expect(bs2.ensureBlock(3)).rejects.toThrow(/已在块 2 结束/); // EOF 面不变
+    await bs2.prefetchThrough(9); // EOF 已确认：再预取零 IO
+    expect(calls2.length).toBe(3);
+  });
+
+  it('㉔ 200-回退在并行下的正确切换：全量重取恰一次（同批两块同时触发在途去重），degraded 全量切片 + atEnd', async () => {
+    const calls: RangeCall[] = [];
+    const bs = createBlockStream(fakeCtx({ size: 10, content: ALPHA, calls, ignoreRange: true }), B);
+    await bs.prefetchThrough(1); // 两块区间读均收超长 200 → 全量重取共享单次（不重复下载）
+    expect(bs.degradedToFull).toBe(true);
+    expect(bs.atEnd()).toBe(true);
+    expect(bs.confirmedBytes).toBe(26);
+    expect(bs.block(0)).toEqual(ALPHA.slice(0, 4)); // 全量切片（非超长原始响应错位上屏）
+    expect(bs.block(1)).toEqual(ALPHA.slice(4, 8));
+    expect(calls).toStrictEqual([
+      { start: 0, end: 3 },
+      { start: 4, end: 7 },
+      { start: 0, end: Number.MAX_SAFE_INTEGER } // 在途去重：恰一次全量重取
+    ]);
+    expect(await bs.ensureBlock(6)).toEqual(ALPHA.slice(24, 26)); // degraded 一切块零 IO 切片
+    expect(calls.length).toBe(3);
+  });
+
+  it('㉕ 越界钳取与 head 整块跳过：prefetchThrough 越过实际末块钳到末块不抛；预置整块零 IO；非法下标抛错', async () => {
+    const calls: RangeCall[] = [];
+    // size 6 = 2 块（块 1 精确短块）：请求前 11 块钳到块 1，atEnd 精确到达
+    const bs = createBlockStream(fakeCtx({ size: 6, content: ALPHA.slice(0, 6), calls }), B);
+    await bs.prefetchThrough(10);
+    expect(calls).toStrictEqual([
+      { start: 0, end: 3 },
+      { start: 4, end: 5 }
+    ]);
+    expect(bs.block(1)).toEqual(ALPHA.slice(4, 6));
+    expect(bs.atEnd()).toBe(true);
+
+    // head 预置整块 0/1（构造期已推进 nextBlock）：预取范围内全部驻留 → 零 IO
+    const calls2: RangeCall[] = [];
+    const bs2 = createBlockStream(
+      fakeCtx({ size: 16, content: ALPHA.slice(0, 16), head: ALPHA.slice(0, 8), calls: calls2 }), B);
+    await bs2.prefetchThrough(1);
+    expect(calls2).toStrictEqual([]);
+    expect(bs2.block(0)).toEqual(ALPHA.slice(0, 4));
+    await bs2.ensureBlock(2); // nextBlock=2：仅补块 2
+    expect(calls2).toStrictEqual([{ start: 8, end: 11 }]);
+
+    // 非法下标按 ensureBlock 口径抛错（越 EOF 的合法下标才钳取容忍）
+    const bs3 = createBlockStream(fakeCtx({ size: 16, content: ALPHA }), B);
+    await expect(bs3.prefetchThrough(-1)).rejects.toThrow(/非负整数/);
+    await expect(bs3.prefetchThrough(1.5)).rejects.toThrow(/非负整数/);
+  });
+
 });
 
 // ---------------------------------------------------------------------------

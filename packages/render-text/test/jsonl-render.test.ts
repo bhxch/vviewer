@@ -292,6 +292,43 @@ function scrollToBottom(host: HTMLElement): void {
 }
 
 describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
+  // A1（遗留清偿）：首屏并行预取——prefetchThrough(1) 一次 RTT 并发发出前两块的
+  // read（IO-05 同款夹持思路到单测）：两块都未决时观测发起面，旧串行实现此处
+  // calls 停在 1（首块 resolve 前第二块绝不发出），并行化后恰 2。
+  it('首屏并行预取：前两块 read 在任一放行前并发发出（夹持），放行后零新增拉取完成首屏', async () => {
+    stubResizeObserver();
+    const text = padLines(400, 1500); // ≈600KB > 2×256KB：首屏恰前两块
+    const content = enc(text);
+    const calls: RangeCall[] = [];
+    const resolvers = new Map<number, () => void>();
+    let n = 0;
+    const ctx: StreamCtx = {
+      size: content.length,
+      head: content.slice(0, 8192),
+      read: (r) => {
+        calls.push({ start: r.start, end: r.end });
+        const k = n++;
+        return new Promise((resolve) => {
+          resolvers.set(k, () => resolve(content.slice(r.start, r.end + 1)));
+        });
+      }
+    };
+    const host = mount();
+    const renderP = jsonlRenderer.render(content.slice(0, 8192), host, source, det, ctx) as Promise<JsonlInstance>;
+    await new Promise((r) => setTimeout(r, 0));
+    // 夹持断言：两块 read 均已发出且都未决（串行旧实现 calls 停在 1，此处红）
+    expect(calls).toStrictEqual([
+      { start: 0, end: BLOCK - 1 },
+      { start: BLOCK, end: 2 * BLOCK - 1 }
+    ]);
+    resolvers.forEach((release) => release());
+    const inst = await renderP;
+    expect(calls.length).toBe(2); // 并行不增请求数（IO-05「探针+2 块」计量口径）
+    expect(host.querySelectorAll('.vv-jsonl-card').length).toBeGreaterThan(0);
+    expect(host.querySelector('.vv-jsonl-status')!.textContent!.startsWith('已加载 ')).toBe(true);
+    inst.destroy();
+  });
+
   it('首屏只拉 2 块（fake ctx 区间断言，8KB head 部分块被整块重拉）；状态条「已加载 N 行」与 meta.lines 动态一致；首屏不触发续读', async () => {
     stubResizeObserver();
     const text = padLines(400, 1500); // ≈600KB > 2×256KB，第 3 块未拉
