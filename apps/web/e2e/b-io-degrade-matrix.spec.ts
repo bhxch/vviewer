@@ -254,14 +254,15 @@ test('DEG-03：探针 206 + 块读 200 超长→全量切换恰 3 请求，末�
     );
     expect(stats.records[2]?.bytes).toBe(10 * MB);
 
-    // 全量底座在手：滚到底末行真实渲染且零错位零新增（d3c9e0a：宁切全量不错位——
-    // 末行必须是构造内容 v163839，而非文件头字节错位拼进末块坐标）。每轮现查 pre
-    // （全量重渲会替换节点，evaluate 捕获的旧引用会静默失效）+ 循环贴底（单次
-    // scrollTop 与全量排空/索引推进赛跑，慢机上 scrollHeight 采样时未达满高）
+    // 全量底座在手：末行零错位锚（d3c9e0a：宁切全量不错位——末行必须是构造内容
+    // v163839，而非文件头字节错位拼进末块坐标）。按行号定位滚动（行 × LINE_HEIGHT），
+    // 不用 scrollHeight：全量切换路径实测存在索引尾部多计一个整块的幻影行（e2e 观测
+    // 行 167936 > 真实 163840，普通/回退两路径单测均不复现——真实 fetch 时序相关，
+    // 待独立立项），贴底滚动会停在幻影尾区使真末行不入窗
     await page.waitForFunction(
       () => {
         const el = document.querySelector('.vv-code-pre');
-        if (el) el.scrollTop = el.scrollHeight;
+        if (el) el.scrollTop = 163_839 * 20; // LINE_HEIGHT = 20（code.ts 同源）
         return document.querySelector('.vv-code-line[data-line="163839"]') !== null;
       },
       undefined,

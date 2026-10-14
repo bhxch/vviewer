@@ -1981,10 +1981,19 @@ function renderCodeWindowed(
    * （≈250Hz），≥100ms 才写 DOM；force=true（属主收场末写）绕过节流强制刷新 */
   const SCAN_PROGRESS_THROTTLE_MS = 100;
   let lastProgressWriteAt = 0;
+  let lastProgressHits = -1;
   function updateScanProgress(scannedRow: number, hits: number, force = false): void {
     if (scanBar === null) return;
     const now = Date.now();
-    if (!force && now - lastProgressWriteAt < SCAN_PROGRESS_THROTTLE_MS) return;
+    // 命中数变化不受节流：spec §4.3「命中即时并入命中集并重绘」的进度条侧契约——
+    // 快扫后挂死（stall 门/慢网）的扫描，字节游标与命中数若同被节流吞掉，进度条
+    // 恒停在初始 0%/0 处假死（CI 实证），命中渐进不可观察
+    if (!force && hits !== lastProgressHits) {
+      lastProgressHits = hits;
+      lastProgressWriteAt = now;
+    } else if (!force && now - lastProgressWriteAt < SCAN_PROGRESS_THROTTLE_MS) {
+      return;
+    }
     lastProgressWriteAt = now;
     const at = Math.min(scannedRow, index.offsets.length) - 1;
     const bytes = (at >= 0 ? (index.offsets[at] ?? 0) + (index.lengths[at] ?? 0) : 0) + bomLen;

@@ -88,6 +88,9 @@ jobs:
       - run: pnpm --filter web build
         env:
           VV_GRAMMAR_CDN: https://cdn.grammars.test/grammars/
+      # m6 远程 rg 通道断言依赖 runner 提供 ripgrep（health searchEngine=rg）：新
+      # runner 镜像不再预装（2026-10-14 CI 实证降级 grep），显式安装保通道真实
+      - run: sudo apt-get update && sudo apt-get install -y ripgrep
       - run: pnpm --filter web exec playwright install --with-deps chromium
       # playwright.config 的 webServer 在 CI 下自行启动 vite preview（CI 环境变量内置）
       - run: pnpm --filter web exec playwright test
