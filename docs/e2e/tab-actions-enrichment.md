@@ -32,7 +32,7 @@
 | TAX-06 | aa/bb 两文件打开 | ① 对 bb 合成派发 mousedown(button=1,cancelable)；② 对 bb 合成派发 auxclick(button=1)；③ 真实中键点 aa；④ Alt+Shift+T ×3 | ① defaultPrevented=true 且 bb 不关闭（mousedown 只拦默认行为不接线关闭——双事件防御半）；② auxclick 同样 preventDefault（防中键滚动双保险）且 bb 恰关一次（auxclick 才是关闭接线）；③ aa 关闭；④ 恢复序 aa→bb（栈恰 2 条：每次点击恰 1 条目，mousedown+auxclick 不双开），第 3 次状态栏提示且 tab 数不变 | —（中键 mousedown/auxclick 职责切分 + 恰一次入栈锚） |
 | TAX-07 | aa/bb 打开；中键关 aa（栈 1 条） | ① 按 `/` 打开文件内搜索；② 焦点在 .vv-search-input 内按 Alt+Shift+T，等 500ms 读状态；③ Esc 关面板后再按 Alt+Shift+T | ① 输入框聚焦；② inField 拦截（AppShell.svelte:402-407）：不恢复 aa、tab 数不变、状态栏无「没有可重新打开的标签页」、输入框保持聚焦（现状锚定：输入焦点内快捷键不误触）；③ 出框后同键生效：aa 恢复、内容渲染、无栈空提示 | —（快捷键 inField 防御锚） |
 | TAX-08 | aa/bb 打开、pin bb；中键关 aa；等快照落盘后刷新 | ① 读恢复现场；② Alt+Shift+T；③ 紧接再按 Alt+Shift+T | ① [bb] 占位恢复（错误卡信号；localfiles 目录条目跳过同 TA-05 口径）；② 栈空（会话级不持久化）：状态栏「没有可重新打开的标签页」、tab 数不变、无幽灵 aa 恢复；③ 幂等：提示仍在、tab 数仍 1、无新增 tab/错误卡 | —（快照恢复后立即撤销幂等/无幽灵锚） |
-| TAX-09 | 注入 lfile.txt 打开后中键关闭（栈恰 1 条本地条目）；node:http 假服务器（health/ticket/events/tree/file + OPTIONS 预检）；连接（token 空）→ 打开 hello.js | ① 带 token 'tok-b' 重连同 base；② 读现场；③ 点击 hello.js 读渲染；④ Alt+Shift+T；⑤ 再按 Alt+Shift+T | ① 清扫路径（token 不一致不走实例复用）：旧目录 tab 被关、新目录 tab 落组尾 [ttab,hello.js,host]——**现状锚**：同 storeId 的文件 tab 因旧实例终结（关目录 tab → releaseStoreIfLast → remote.ts close 删 base 登记）匹配落空而幸存（见 suspects SUS-TAX-1）；③ 幸存 hello.js 仍可读：内容渲染无错误卡（remote.ts:23-27「close 之后 store 仍可正常 read」语义）；④ 撤销恢复的是 lfile.txt 而非被清扫的目录 tab（清扫贡献 0 条目，undoable:false 豁免成立），内容渲染非占位；⑤ 栈空提示、tab 数不变（栈深恰 1 旁证） | —（重连清扫豁免撤销栈锚，openFlow.svelte.ts:872-874；清扫不完整形态见 suspects） |
+| TAX-09 | 注入 lfile.txt 打开后中键关闭（栈恰 1 条本地条目）；node:http 假服务器（health/ticket/events/tree/file + OPTIONS 预检）；连接（token 空）→ 打开 hello.js | ① 带 token 'tok-b' 重连同 base；② Alt+Shift+T；③ 再按 Alt+Shift+T | ① 清扫路径（token 不一致不走实例复用）：**目录 + 文件 tab 一并清扫**（SUS-TAX-1 修复后，2026-10-14：匹配在任一关闭前一次性计算，不依赖逐一关闭后的 remoteBaseById 存活）——[ttab,host]、hello.js 归零、新目录 tab 落组尾；② 撤销恢复的是 lfile.txt 而非被清扫的 remote tab（清扫贡献 0 条目，undoable:false 豁免成立），内容渲染非占位；③ 栈空提示、tab 数 3 不变（栈深恰 1 旁证）。原「文件 tab 幸存仍可读」现状锚已随修复退役（存档于 §3.1） | —（重连清扫豁免撤销栈锚 + SUS-TAX-1 修复验收锚，openFlow.svelte.ts 清扫段） |
 | TAX-10 | aa/bb/cc 打开（chromium）；中键关 aa | ① cc 拖到 bb 左沿；② Alt+Shift+T；③ 再按 Alt+Shift+T | ① 邻位重排受理：[ttab,cc,bb]；② 撤销恢复的是最近**关闭**的 aa（重排不在栈上），落组尾：[ttab,cc,bb,aa]，重排序保持、内容渲染；③ 栈空提示（重排未产生条目） | —（拖拽重排非 undoable 语义锚） |
 
 ## 3. 关联缺陷的验收行为
@@ -52,7 +52,7 @@
 **SUS-TAX-1 同 base 重连清扫不彻底：文件 tab 残留失联（TAX-09 观察记录）**
 - 现象（2026-10-14 实测，构建 08114d2，MutationObserver + IndexedDB 快照取证）：目录 tab + 文件 tab 并存时换 token 重连，清扫循环（openFlow.svelte.ts:872-874，匹配条件 `getRemoteBase(t.source.storeId) === base`）只关掉目录 tab；同 storeId 的文件 tab 幸存。机制：关目录 tab 使该 store 实例失去最后持有者 → releaseStoreIfLast 终结实例（remote.ts close 删除 remoteBaseById 登记 + 停 SSE，服务端侧观测到 SSE 连接关闭）→ 清扫循环走到文件 tab 时 `getRemoteBase` 已返回 undefined，匹配落空。
 - 用户可见后果：幸存文件 tab 不在新连接的 watch 内（丢 SSE 自动刷新）、快照 storeBase 登记被清（此后关闭该 tab 再撤销会退化为本地占位文案而非「服务器…重连后可恢复」）；内容 read 仍可用（remote.ts:23-27）。代码注释（openFlow.svelte.ts:868-870「先关闭同 base 的旧 remote tab（目录 + 文件）」）宣称目录+文件都被清扫，与实测不符。
-- TAX-09 按现状锚定（幸存 + 仍可读），修复时（如清扫改为先按 storeId 聚合、或匹配脱离 remoteBaseById 依赖）应同步把该场景的期望改为「文件 tab 一并清扫或迁移至新连接」，撤销栈豁免判据（清扫贡献 0 条目）保持不变。
+- ~~TAX-09 按现状锚定（幸存 + 仍可读），修复时（如清扫改为先按 storeId 聚合、或匹配脱离 remoteBaseById 依赖）应同步把该场景的期望改为「文件 tab 一并清扫或迁移至新连接」，撤销栈豁免判据（清扫贡献 0 条目）保持不变。~~ **已修复（2026-10-14）**：清扫改为关闭前一次性收集同 base tab id（先收集后关，匹配脱离逐一关闭后的 remoteBaseById 存活依赖），TAX-09 期望已同步改为「文件 tab 一并清扫」，撤销栈豁免判据不变；幸存可读的现状记录保留于上文本作修复对照存档。
 
 ## 4. 环境与数据
 

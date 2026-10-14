@@ -24,8 +24,9 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * - TAX-08：快照恢复后立即撤销——栈为会话级（刷新即清）：提示、无幽灵恢复、
  *   重复按幂等
  * - TAX-09：同 base 重连清扫豁免撤销栈（undoable:false）——换 token 重连触发清扫
- *   （token 一致走实例复用不清扫），被清扫的 remote tab 不入栈不复活：撤销恢复的
- *   是先前用户关闭的本地 tab；node:http 假服务器自包含
+ *   （token 一致走实例复用不清扫），目录与文件 tab 一并清扫（SUS-TAX-1 修复：
+ *   先收集后关，不依赖逐一关闭后的 remoteBaseById 存活）且不入栈不复活：撤销
+ *   恢复的是先前用户关闭的本地 tab；node:http 假服务器自包含
  * - TAX-10：拖拽重排不入撤销栈——重排后撤销仍恢复最近「关闭」的 tab 且重排序保持
  *   ※仅 chromium
  *
@@ -682,7 +683,7 @@ test('TAX-08：快照恢复后立即撤销——栈空幂等无幽灵恢复', as
 
 // ---------------------------------------------------------------- TAX-09
 
-test('TAX-09：同 base 重连清扫豁免撤销栈（undoable:false）——清扫不入栈不复活', async ({
+test('TAX-09：同 base 重连清扫豁免撤销栈（undoable:false）——目录与文件 tab 一并清扫、不入栈不复活', async ({
   page
 }) => {
   test.setTimeout(90_000);
@@ -704,25 +705,18 @@ test('TAX-09：同 base 重连清扫豁免撤销栈（undoable:false）——清
     await expect(page.locator('.vv-code-pre')).toContainText('resweep', { timeout: 20_000 });
 
     // 换 token 重连同 base：token 不一致不走存活实例复用 → 清扫路径。
-    // 现状锚（实测，见场景文档 TAX-09 行与 suspects）：清扫匹配 getRemoteBase
-    // （openFlow.svelte.ts:873），旧目录 tab 先关会触发旧实例终结（remote.ts close
-    // 删 remoteBaseById 登记）→ 同 storeId 的文件 tab 匹配落空**幸存**（仍可 read，
-    // remote.ts:23-27）；目录 tab 被替换为新实例（落组尾——复用路径只会激活既有
-    // 目录 tab 不新建，此形态差即「走了清扫」的判据）
+    // 修复后期望（SUS-TAX-1，清扫先收集后关）：同 base 的目录 + 文件 tab 一并
+    // 清扫——匹配在任一关闭发生前一次性计算，不再依赖逐一关闭后的
+    // remoteBaseById 存活（旧实现关目录 tab 先终结实例 → 文件 tab 匹配落空幸存）
     await connectForm(page, fake.base, 'tok-b');
     await expect(tabNamed(page, fake.host)).toHaveCount(1, { timeout: 10_000 }); // 目录 tab 唯一
-    await expect.poll(() => tabNames(page)).toEqual(['ttab', 'hello.js', fake.host]); // 新目录落尾=清扫
-    await expect(tabNamed(page, 'hello.js')).toHaveCount(1); // 文件 tab 幸存（清扫不彻底，suspects 记录）
+    await expect.poll(() => tabNames(page)).toEqual(['ttab', fake.host]); // 文件 tab 一并清扫
+    await expect(tabNamed(page, 'hello.js')).toHaveCount(0); // 幸存缺陷已修（SUS-TAX-1）
 
-    // 幸存文件 tab 仍可读（close 后 read/listChildren 正常，remote.ts:23-27 语义）
-    await tabNamed(page, 'hello.js').click();
-    await expect(page.locator('.vv-code-pre')).toContainText('resweep', { timeout: 20_000 });
-    await expect(page.locator('.vv-error-card')).toHaveCount(0);
-
-    // 撤销恢复的是先前用户关闭的 lfile.txt——被清扫的目录 tab 贡献 0 条目
-    //（undoable:false；若入栈，栈顶是其快照，恢复的会是目录 tab 而非 lfile）
+    // 撤销恢复的是先前用户关闭的 lfile.txt——被清扫的目录/文件 tab 贡献 0 条目
+    //（undoable:false；若入栈，栈顶是其快照，恢复的会是 remote tab 而非 lfile）
     await page.keyboard.press('Alt+Shift+T');
-    await expect.poll(() => tabNames(page)).toEqual(['ttab', 'hello.js', fake.host, 'lfile.txt']);
+    await expect.poll(() => tabNames(page)).toEqual(['ttab', fake.host, 'lfile.txt']);
     await expect(page.locator('.vv-tab.active', { hasText: 'lfile.txt' })).toBeVisible();
     await expect(page.locator('.vv-code-pre')).toContainText('local undo body', { timeout: 20_000 });
     await expect(page.locator('.vv-error-card')).toHaveCount(0);
@@ -730,7 +724,7 @@ test('TAX-09：同 base 重连清扫豁免撤销栈（undoable:false）——清
     // 栈深恰 1 旁证：再按即栈空提示，tab 数不变
     await page.keyboard.press('Alt+Shift+T');
     await expect(page.locator('.vv-statusbar')).toContainText(UNDO_NOTICE);
-    await expect(page.locator('.vv-tab')).toHaveCount(4);
+    await expect(page.locator('.vv-tab')).toHaveCount(3);
   } finally {
     await fake.close();
   }

@@ -868,9 +868,16 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
   // 同 base 重连：先关闭同 base 的旧 remote tab（目录 + 文件）。旧 store 无 tab
   // 持有后经引用计数接线 close()（停 SSE + 清资源表），避免新旧两条事件流并行。
   // undoable:false（fix round 1 Concern 1）：系统替换动作非用户关闭——入栈会淹没
-  // 容量 10 的撤销栈，且撤销会复活用户未关的 tab 制造重复 tab
-  for (const t of [...tabStore.list]) {
-    if (getRemoteBase(t.source.storeId) === base) tabStore.close(t.id, { undoable: false });
+  // 容量 10 的撤销栈，且撤销会复活用户未关的 tab 制造重复 tab。
+  // 匹配须在任一关闭发生前一次性完成（SUS-TAX-1）：逐个关闭时，关掉目录 tab 可
+  // 能使旧 store 实例失去最后持有者而被终结（remote.ts close 删 remoteBaseById
+  // 登记），后续文件 tab 的 getRemoteBase 已返回 undefined 匹配落空——文件 tab
+  // 幸存失联（不在新连接 watch 内、快照 storeBase 登记被清）
+  const staleTabIds = tabStore.list
+    .filter((t) => getRemoteBase(t.source.storeId) === base)
+    .map((t) => t.id);
+  for (const id of staleTabIds) {
+    tabStore.close(id, { undoable: false });
   }
 
   const store = createRemoteStore(base, tok, serverLabel(base));
