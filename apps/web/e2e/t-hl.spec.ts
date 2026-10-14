@@ -310,7 +310,7 @@ test('HL-03/2: 单行 3MB（行极少字节极大）chunk 边界——整行文�
   await expect(page.locator('.vv-error-card')).toHaveCount(0);
 });
 
-test('HL-04/2: >200MiB plain 分支——纯文本虚拟滚动 + 提示条 + 零着色（阶段 4 三态上限档）', async ({
+test('HL-04/2: >200MiB 窗口流式 lazy——提示条 + 行数 + 一步到底 + 懒着色（io 防线换代后 200MiB plain 档对 ctx 来源退役）', async ({
   page
 }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium', '210MB 级内存构造仅桌面基准跑（PERF-LAZY 前例）');
@@ -319,8 +319,10 @@ test('HL-04/2: >200MiB plain 分支——纯文本虚拟滚动 + 提示条 + 零
   await page.waitForFunction(
     () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
   );
-  // 1,992B × 105,500 ≈ 210.2MB > PLAIN_MAX_BYTES(200MiB)：行数控制在 10.5 万降低行索引开销；
-  // 阶段 4 前 >20MB 即纯文本（文档 §2 HL-04 旧口径），现仅 >200MiB 萰入本档（code.ts:554-555）
+  // 1,992B × 105,500 ≈ 210.2MB：io-streaming 防线换代（spec §4.3）后 >200MiB 对
+  // rangeCapable 来源不再纯文本——窗口流式 lazy 接管，新上限档为 512MB
+  // STREAM_MAX_BYTES；原「>200MiB 纯文本零着色」仅存于非 ctx 全量路径（e2e 不可达，
+  // resolveStrategy 单测 code.test.ts「>200MB → plain」锁档位）
   const ROWS = 105_500;
   await page.evaluate((rows) => {
     const row = `const a="${'x'.repeat(1980)}";\n`; // 1992B/行
@@ -330,19 +332,18 @@ test('HL-04/2: >200MiB plain 分支——纯文本虚拟滚动 + 提示条 + 零
   }, ROWS);
   await openFile(page, 'huge-plain.js');
 
-  // 提示条（BUG-20 模式 plain 分支文案，code.ts:555）且不阻断首屏
+  // 提示条（>HLJS_MAX_BYTES 懒高亮说明）且不阻断首屏
   const notice = page.locator('.vv-code-oversize-card');
   await expect(notice).toBeVisible({ timeout: 90_000 });
-  await expect(notice).toContainText('200MB');
-  await expect(notice).toContainText('纯文本');
+  await expect(notice).toContainText('20MB');
+  await expect(notice).toContainText('懒高亮');
   await expect(page.locator('.vv-code-pre .vv-code-line').first()).toBeVisible({ timeout: 60_000 });
-  // plain 引擎即终值（code.ts:583）——状态栏「纯文本」（ViewerPane ENGINE_LABELS）
-  await expect(page.locator('.vv-statusbar')).toContainText('纯文本', { timeout: 60_000 });
-  // 行数与 wc 口径一致（末行带 \n：状态栏行数 = 恰 ROWS；「行:」无千分位直插）
-  await expect(page.locator('.vv-statusbar')).toContainText(`行: ${ROWS}`, { timeout: 60_000 });
-  // 纯文本零着色：ts-*/hljs-* 均不出现（若回归成 lazy，ts-* 到达即判负）
-  await expect(page.locator('.vv-code-pre span[class^="ts-"]')).toHaveCount(0);
-  await expect(page.locator('.vv-code-pre span[class^="hljs-"]')).toHaveCount(0);
+  // 可视区 chunk tree-sitter 着色在 210MB 仍工作（原「零着色」随 plain 档退役）
+  await expect(page.locator('.vv-code-pre span[class^="ts-"]').first()).toBeVisible({
+    timeout: 90_000
+  });
+  // 行数与 wc 口径一致（后台索引泵推进至 EOF；末行带 \n：状态栏行数 = 恰 ROWS）
+  await expect(page.locator('.vv-statusbar')).toContainText(`行: ${ROWS}`, { timeout: 90_000 });
 
   // 一步到底：末行行号 = ROWS（渲染/滚动/行号正确性不回退，BUG-20 验收 2）
   const pre = page.locator('.vv-code-pre');

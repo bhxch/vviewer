@@ -207,6 +207,27 @@ grammar wasm 资产不入库、构建期生成：测试前必须先执行 `pnpm 
 - **缓存**：`chunkCache`/`hljsChunkCache` 双缓存，chunk 粒度逐出
   （`CHUNK_CACHE_MAX_LINES=5000`，原 hljs-block 的 5000 行等价预算）。
 
+### 6.1.1 io-streaming 防线换代后的现役口径（2026-10-14 更新）
+
+> io-streaming（spec `docs/superpowers/specs/2026-10-12-io-streaming-design.md`
+> §4.3）为 ctx 来源（rangeCapable 本地/远端、!rangeCapable 全量切片形态）引入
+> 窗口流式渲染。上表三态对 **ctx 来源**的现役口径如下；非 ctx 全量路径（直接
+> 调用 `renderCode` 不带 ctx）仍按 §6.1 表：
+
+| 字节区间（ctx 来源） | 行为 |
+| --- | --- |
+| ≤2MiB | 入口守卫补拉全量 → 整文件 tree-sitter（§6.1 首档同） |
+| 2MiB–512MiB（`STREAM_MAX_BYTES`） | 窗口流式：首块即渲染 + **后台索引泵**逐块推进至 EOF（不滚动行数也达终值，spacer 随索引增长）+ 可视区 chunk 懒高亮；>20MiB 有一次性懒高亮提示条 |
+| >512MiB | STREAM_MAX_BYTES 防线：零读停机 + 提示条（建议 hex），engine plain 终值 |
+
+- `PLAIN_MAX_BYTES(200MiB)` 的「纯文本零着色」档对 ctx 来源**退役**（HL-04/2 已按
+  此重定基：210MB 锚窗口 lazy 提示条/行数/一步到底/懒着色）；该档仅存于非 ctx
+  全量路径（`resolveStrategy` 单测锁档位）。
+- 行索引后台泵（BUG-201 修复，`code.ts` 后台索引泵段）：停机条件与滚动续读同款
+  （`continueFailed` 读失败闩用户滚动解除、limitReached/encodingBroken/destroyed
+  永久停），单飞闸 `pulling` 与滚动续读/回看重拉/搜索扫描互斥不双喂；测试开关
+  `codeWindowedPumpControls`（jsonlWindowedInternals 先例）。
+
 ### 6.2 对第 2 节场景的现时语义
 
 | 场景 | M2 口径（第 2 节） | 阶段 4 现时语义 |
