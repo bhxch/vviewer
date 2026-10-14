@@ -2,9 +2,11 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e',
-  // 8 核机器默认 4 worker，双 project 并发跑 tree-sitter wasm 用例 CPU 已饱和；
-  // 收敛到 3 降低资源竞争引发的瞬态超时（总时长影响 ~秒级）
-  workers: 3,
+  // 本地 8 核机器 3 worker 并发平衡时长与资源竞争（实测一轮 35s ↔ 3.1m）；CI runner
+  // 仅 2-4 核且共享给 vite preview + 多浏览器实例，3 worker 争抢使流式计量/扫描进度
+  // 类时序断言系统性漂红（2026-10-14 CI 首跑 28 failed，2 核受限本地复现同病）——
+  // CI 收敛单 worker：页面前后台节流与 CPU 争抢面消除，时长换确定性
+  workers: process.env.CI ? 1 : 3,
   // 共享机器存在外部负载波动（实测一轮总时长 35s ↔ 3.1m），瞬态失败重试一次
   retries: 1,
   use: { baseURL: 'http://127.0.0.1:4173' },

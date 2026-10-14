@@ -658,30 +658,42 @@ function activeCodeHitLine(page: Page): Locator {
 
 test('IO-06：远端 10MB js code 窗口首屏总拉取 ≤1MB（探针+首块，逐请求 Range）', async ({ page }) => {
   test.setTimeout(120_000);
-  const fake = await startIoFakeServer({ 'big.js': makeCodeFile(BIG_JS_ROWS, BIG_JS_NEEDLES) });
+  // 后台索引泵（BUG-201）按 setTimeout(0) 逐块拉向 EOF——「首屏」计量必须物理冻结
+  // 泵的推进面，否则采样与泵赛跑（CI 2-4 核机实测采样前已拉 15 块 3.9MB）。stall 门
+  // 挂起块 ≥1 的应答（不响应即不入计量），首屏窗口收敛为确定性的探针+块 0
+  const fake = await startIoFakeServer(
+    { 'big.js': makeCodeFile(BIG_JS_ROWS, BIG_JS_NEEDLES) },
+    { stall: { path: 'big.js', minStart: CODE_BLOCK_BYTES } }
+  );
   try {
     const stats = new IoStats();
     await openRemoteCodeFile(page, fake, stats, 'big.js');
-    // 首屏至少探针 + 块 0（head 8KB 部分预置被整块替换），全部带 Range
-    expect(stats.count()).toBeGreaterThanOrEqual(2);
+    // 首屏恰为探针 + 块 0（head 8KB 部分预置被整块替换），全部带 Range
+    expect(stats.count(), `首屏应恰为探针+块 0 两个请求，实得 ${JSON.stringify(stats.records.map((r) => r.range))}`).toBe(2);
+    expect(stats.records[0]?.range, '首请求应为 head 探测').toBe('bytes=0-8191');
+    expect(stats.records[1]?.range, '次请求应为块 0 整块（256KB）').toBe(codeBlockRange(0));
     for (const r of stats.records) {
       expect(r.range, '首屏 /api/file 请求必须带 Range（200 全量拉取 = streaming 选路回归）').not.toBeNull();
     }
-    expect(stats.records[0]?.range, '首请求应为 head 探测').toBe('bytes=0-8191');
-    expect(stats.records[1]?.range, '次请求应为块 0 整块（256KB）').toBe(codeBlockRange(0));
-    // 上限即本用例标题口径（spec §6 同款 +10% 余量）；全量/大预取回归时 10MB 级必超。
-    // 理论值与 dispatcher HEAD_SIZE（8KB 探针）、code CODE_WINDOW_BLOCK_BYTES（256KB
-    // 首块）耦合：任一侧漂移即红为预期告警
+    // stall 冻结下计量确定：恰为探针 8KB + 块 0 256KB（理论值与 dispatcher HEAD_SIZE、
+    // code CODE_WINDOW_BLOCK_BYTES 耦合，任一侧漂移即红为预期告警）
     const firstScreenExpected = 8 * 1024 + CODE_BLOCK_BYTES;
-    expect(stats.total()).toBeGreaterThanOrEqual(firstScreenExpected);
-    expect(stats.total(), `code 首屏总拉取 ${stats.total()}B 应 ≤1.1MB`).toBeLessThanOrEqual(1_100_000);
-    console.log(
-      `[iostream] code 首屏计量: ${stats.count()} 请求 / ${stats.total()} B（预算 1_100_000，理论 ${firstScreenExpected}）`
+    expect(stats.total(), `code 首屏总拉取 ${stats.total()}B 应恰为 ${firstScreenExpected}B`).toBe(
+      firstScreenExpected
+    );
+    // 放行后泵续推（块 1 到场）——既是 stall 生效证据，也证流式未停选路
+    fake.releaseStall();
+    await stats.settled();
+    await page.waitForTimeout(300);
+    await stats.settled();
+    expect(stats.records.map((r) => r.range), '放行后应出现块 1（stall 生效证据）').toContain(
+      codeBlockRange(1)
     );
     // 引擎标签 = 窗口 lazy 路径证据：远端 store 无 compute 能力 → 路由 null → 行级 hljs
     await expect(page.locator('.vv-statusbar')).toContainText('高亮: hljs 兜底', { timeout: 30_000 });
     await expect(page.locator('.vv-error-card')).toHaveCount(0);
   } finally {
+    fake.releaseStall();
     await fake.close();
   }
 });
@@ -694,11 +706,12 @@ test('IO-07：code 滚动续读至 EOF——256KB 块精确区间逐块拉取 + 
   try {
     const stats = new IoStats();
     const pre = await openRemoteCodeFile(page, fake, stats, 'big.js');
-    const baseline = stats.count();
     const lastLine = BIG_JS_ROWS - 1; // 0 基；行起始偏移 = 163839×64 ∈ 块 39
 
     // 贴底循环驱动续读（jsonl IO-05 同构：一次滚动事件至多推进一块，行数动态增长
-    // 至 spacer 稳定、末行入窗即停）
+    // 至 spacer 稳定、末行入窗即停）。泵时代语义：后台索引泵与滚动续读共用同一
+    // BlockStream（并发去重 + 驻留缓存），EOF 前每块恰被拉取一次与驱动方无关——
+    // 故计量取全程而非采样切片（切片与泵赛跑，慢机必漂红）
     await pre.evaluate(async (el, last: number) => {
       for (let i = 0; i < 600; i++) {
         el.scrollTop = el.scrollHeight;
@@ -713,18 +726,23 @@ test('IO-07：code 滚动续读至 EOF——256KB 块精确区间逐块拉取 + 
     );
     await stats.settled();
 
-    // 续读证据：全部新请求为恰 256KB 的块区间（BlockStream 步进形状；文件恰 40 块，
-    // 无末块短读干扰），并覆盖中部块 20 与末块 39
-    const ranges = stats.records.slice(baseline).map((r) => r.range);
-    expect(ranges.length, '滚动必须触发按需续读').toBeGreaterThan(0);
-    for (const range of ranges) {
-      expect(range, '续读请求必须带 Range').not.toBeNull();
-      const m = /^bytes=(\d+)-(\d+)$/.exec(range as string);
-      expect(m, `Range 形状异常: ${range}`).not.toBeNull();
-      expect(Number(m![2]) - Number(m![1]) + 1, `块请求应恰 256KB: ${range}`).toBe(CODE_BLOCK_BYTES);
+    // 全程证据：探针 8KB + 文件恰 40 块全部被逐块覆盖（无末块短读干扰），全部带
+    // Range 且恰 256KB（BlockStream 步进形状）、全程无 200 全量形态。不锁请求总数与
+    // 「恰一次」：块表 LRU（16×256KB）逐出后的视口重拉是合法产品行为（IO-06 实测
+    // 记录可见块 0 逐出重拉），锁的是块粒度 ranged 通路与 EOF 覆盖——全量回归/预取
+    // 越界均红
+    expect(stats.records.length, `应至少为探针+40 块共 41 请求，实得 ${stats.records.length}`).toBeGreaterThanOrEqual(41);
+    const blockRanges = stats.records.map((r) => r.range);
+    for (let b = 0; b < BIG_JS_ROWS * CODE_ROW_BYTES / CODE_BLOCK_BYTES; b++) {
+      expect(blockRanges, `块 ${b} 应被覆盖`).toContain(codeBlockRange(b));
     }
-    expect(ranges, `实得 ${JSON.stringify(ranges)}`).toContain(codeBlockRange(20));
-    expect(ranges, `实得 ${JSON.stringify(ranges)}`).toContain(codeBlockRange(39));
+    for (const r of stats.records) {
+      expect(r.range, '续读请求必须带 Range').not.toBeNull();
+      if (r.range === 'bytes=0-8191') continue; // 探针形态单独成立
+      const m = /^bytes=(\d+)-(\d+)$/.exec(r.range as string);
+      expect(m, `Range 形状异常: ${r.range}`).not.toBeNull();
+      expect(Number(m![2]) - Number(m![1]) + 1, `块请求应恰 256KB: ${r.range}`).toBe(CODE_BLOCK_BYTES);
+    }
   } finally {
     await fake.close();
   }
@@ -841,7 +859,9 @@ test('IO-10：扫描取消不悬挂 + 扫描中滚动交错——stall 门冻结
   try {
     const stats = new IoStats();
     const pre = await openRemoteCodeFile(page, fake, stats, 'scan.js');
-    expect(stats.count(), '打开应恰为 探针+块 0').toBe(2);
+    // 块 1 不受 stall 门限：采样时泵是否已拉到块 1 取决于机器速度（慢机采样前即拉），
+    // 两种形态皆合法——扫描停门断言（恰 3 请求）在块 1 落地后依然精确
+    expect(stats.count(), '打开应为探针+块 0（或泵已推进至块 1）').toBeLessThanOrEqual(3);
 
     // 无命中词触发全文扫描：块 1 落地后在块 2 上挂起（T5 评审待验面的确定性构造——
     // 扫描进度不上 UI，in-flight 证据取 IO 计量而非计数文本）

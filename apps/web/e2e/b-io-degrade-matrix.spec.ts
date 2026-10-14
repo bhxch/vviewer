@@ -255,11 +255,19 @@ test('DEG-03：探针 206 + 块读 200 超长→全量切换恰 3 请求，末�
     expect(stats.records[2]?.bytes).toBe(10 * MB);
 
     // 全量底座在手：滚到底末行真实渲染且零错位零新增（d3c9e0a：宁切全量不错位——
-    // 末行必须是构造内容 v163839，而非文件头字节错位拼进末块坐标）
+    // 末行必须是构造内容 v163839，而非文件头字节错位拼进末块坐标）。每轮现查 pre
+    // （全量重渲会替换节点，evaluate 捕获的旧引用会静默失效）+ 循环贴底（单次
+    // scrollTop 与全量排空/索引推进赛跑，慢机上 scrollHeight 采样时未达满高）
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector('.vv-code-pre');
+        if (el) el.scrollTop = el.scrollHeight;
+        return document.querySelector('.vv-code-line[data-line="163839"]') !== null;
+      },
+      undefined,
+      { polling: 120, timeout: 30_000 }
+    );
     const pre = page.locator('.vv-code-pre');
-    await pre.evaluate((el) => {
-      el.scrollTop = el.scrollHeight;
-    });
     await expect(pre.locator('.vv-code-line[data-line="163839"]')).toContainText(
       'v163839',
       { timeout: 10_000 }
@@ -384,10 +392,9 @@ test('DEG-06：code 流内 UTF-8 嗅探判非→全量重渲——编码精判 g
     await openRemoteFile(page, fake, stats, 'sniff-gbk.js');
     const pre = page.locator('.vv-code-pre');
     await expect(pre.locator('.vv-code-line').first()).toBeVisible({ timeout: 20_000 });
-    // 基线：head 8KB 纯 ASCII → 窗口模式 + 编码误判 utf-8（状态栏元数据段）
-    await expect(page.locator('.vv-statusbar')).toContainText('编码: utf-8', { timeout: 30_000 });
-    await settleStats(page, stats);
-    expect(stats.count(), '首屏应恰为 探针+块 0').toBe(2);
+    // 不锚「utf-8 误判」瞬态：后台索引泵（BUG-201）可能在本断言前就推进到脏块 4
+    // 触发降级（慢机必然）——瞬态时相属实现细节，契约锚是降级终态（gb18030）与
+    // 计量总账（下方 ===2+4+1）
 
     // 贴底滚动驱动喂块（块 1→4 逐块推进）；块 4（首脏块）喂入即判非 UTF-8 → 停喂 +
     // memoizedFullRead 全量补拉 + redetectWithFull 精判 gb18030 全量重渲（状态栏
@@ -483,10 +490,15 @@ test('DEG-08：code SSE changed 重渲染免全量重读——增量仅探针+�
 }) => {
   test.setTimeout(120_000);
   // 10MB（40 块）；更新行布点块 0 首屏可见（行 5）——窗口级重读判据不受行位影响，
-  // 且免去中部定位的额外块拉取噪声
+  // 且免去中部定位的额外块拉取噪声。stall 门挂起块 ≥1 应答：后台索引泵（BUG-201）
+  // 的持续推进面与「增量」计量物理隔离（挂起应答不响应即不入计量），两次采样窗口
+  // 内增量恰为重渲染自身的探针+块 0——采样与泵赛跑在慢机必漂红（2026-10-14 CI 首跑）
   const before = makeCodeFile(163_840, { 5: 'sse-before-qz7' });
   const after = makeCodeFile(163_840, { 5: 'sse-after-k4md' });
-  const fake = await startStreamFakeServer({ 'sse-10mb.js': before });
+  const fake = await startStreamFakeServer(
+    { 'sse-10mb.js': before },
+    { stall: { path: 'sse-10mb.js', minStart: CODE_BLOCK } }
+  );
   try {
     const stats = new IoStats();
     await openRemoteFile(page, fake, stats, 'sse-10mb.js');
@@ -497,6 +509,7 @@ test('DEG-08：code SSE changed 重渲染免全量重读——增量仅探针+�
     await settleStats(page, stats);
     const bytesBefore = stats.total();
     const countBefore = stats.count();
+    expect(countBefore, `打开应恰为探针+块 0，实得 ${countBefore}`).toBe(2);
 
     fake.updateFile('sse-10mb.js', after);
     fake.notifyChanged(['sse-10mb.js']);
@@ -507,7 +520,7 @@ test('DEG-08：code SSE changed 重渲染免全量重读——增量仅探针+�
     await settleStats(page, stats);
 
     const delta = stats.records.slice(countBefore);
-    expect(delta.length).toBeGreaterThanOrEqual(2);
+    expect(delta.length, `重渲染增量应恰为探针+块 0，实得 ${delta.length}`).toBe(2);
     const growth = stats.total() - bytesBefore;
     expect(growth, `SSE 重渲染增量 ${growth}B 应为窗口级（<2MB），全量回归即 ~10MB`).toBeLessThan(
       2_000_000
@@ -518,6 +531,7 @@ test('DEG-08：code SSE changed 重渲染免全量重读——增量仅探针+�
     }
     await expect(page.locator('.vv-error-card')).toHaveCount(0);
   } finally {
+    fake.releaseStall();
     await fake.close();
   }
 });
