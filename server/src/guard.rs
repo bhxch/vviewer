@@ -26,6 +26,13 @@ pub fn clean_relative(root: &std::path::Path, raw: Option<&str>) -> Result<PathB
     Ok(out)
 }
 
+/// root 越界 400 的单一事实源（WSX 观察 1）：guard 前置拒绝与各 handler 的防御式
+/// 分支（search 的 parser_roots 取根等）共用同一构造，文案不得漂移——reachable 面
+/// 形状由 WSX-02 / MRF-02 e2e 与本模块单测锁定。
+pub(crate) fn root_out_of_range(idx: usize) -> AppError {
+    AppError::bad_request(format!("root index out of range: {idx}"))
+}
+
 /// [`resolve`] 的多根参数化形态：按 `root_idx` 选择基准根。
 /// 越界 → 400 "root index out of range"；清洗与越界校验均对所选根。
 pub async fn resolve_at(
@@ -33,9 +40,10 @@ pub async fn resolve_at(
     raw: Option<&str>,
     root_idx: usize,
 ) -> Result<PathBuf, AppError> {
-    let root = state.roots.get(root_idx).ok_or_else(|| {
-        AppError::bad_request(format!("root index out of range: {root_idx}"))
-    })?;
+    let root = state
+        .roots
+        .get(root_idx)
+        .ok_or_else(|| root_out_of_range(root_idx))?;
     let joined = clean_relative(&root.raw, raw)?;
 
     let canonical = tokio::fs::canonicalize(&joined).await.map_err(|e| match e.kind() {
@@ -55,4 +63,18 @@ pub async fn resolve_at(
 /// 返回 canonical 路径，handler 后续 fs 操作都基于它。
 pub async fn resolve(state: &AppState, raw: Option<&str>) -> Result<PathBuf, AppError> {
     resolve_at(state, raw, 0).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 越界文案单一事实源锁测（WSX 观察 1）：guard 前置拒绝与 search 防御分支
+    /// 共用本构造，reachable 面（WSX-02/MRF-02 e2e）形状即此，不得漂移。
+    #[test]
+    fn root_out_of_range_message_is_canonical() {
+        let err = root_out_of_range(2);
+        assert_eq!(err.0, axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(err.1, "root index out of range: 2");
+    }
 }

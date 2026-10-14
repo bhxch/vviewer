@@ -421,3 +421,18 @@ async fn search_requires_bearer_when_token_configured() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
+// WSX 观察 1 锁测：root 越界 400 文案为 guard::root_out_of_range 单一事实源形状。
+// 防御分支（parser_roots 取根）不可达——resolve_at 前置拒绝先命中，此处锚可达面。
+#[tokio::test]
+async fn root_out_of_range_rejects_with_canonical_message() {
+    let f = dual_fixture();
+    let (status, frames) = post_search(
+        f.state,
+        json!({ "pattern": "needle", "root": 999 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(frames.len(), 1);
+    assert_eq!(frames[0]["error"], "root index out of range: 999");
+}

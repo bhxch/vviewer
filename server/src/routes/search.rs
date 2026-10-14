@@ -288,14 +288,13 @@ pub async fn search(State(state): State<AppState>, Json(req): Json<SearchRequest
     let (tx, rx) = mpsc::channel::<Result<String, std::io::Error>>(FRAME_CHANNEL);
     // 根感知解析：限定单根（或部署单根）时解析器只见一个根——命中帧无 root 字段，
     // 与历史单根形状逐字节一致；跨根时携带全部根，命中帧按命中根附 root 索引。
-    // 防御式取根：root 越界本应被 guard::resolve_at 前置 403，这里不再依赖该
-    // 顺序耦合（直接索引 panic 会绕过 handler 的错误应答通道）
+    // 防御式取根：root 越界本应被 guard::resolve_at 前置 400，这里不再依赖该
+    // 顺序耦合（直接索引 panic 会绕过 handler 的错误应答通道）。文案走
+    // guard::root_out_of_range 单一事实源（WSX 观察 1：两处曾不一致且本分支不可达）
     let parser_roots: Vec<PathBuf> = match req.root {
         Some(i) => match state.roots.get(i) {
             Some(r) => vec![r.canonical.clone()],
-            None => {
-                return AppError::bad_request(format!("root index {i} out of range")).into_response()
-            }
+            None => return guard::root_out_of_range(i).into_response(),
         },
         None => state.roots.iter().map(|r| r.canonical.clone()).collect(),
     };
