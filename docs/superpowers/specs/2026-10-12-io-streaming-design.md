@@ -62,7 +62,7 @@ export interface TreeStore {
 
 | store | rangeCapable | 改动 |
 | --- | --- | --- |
-| remote | true | `read(path, {range})` 透传 `Range: bytes=start-end` 头（request() 增 headers 透传）；206 正常；**200（服务器忽略 Range）时返回全量，read 内不切片**——调用方（块读取器）按返回长度自校验并停在该块（回退语义，见 §4.2）；单根 baseURL 不支持 Range 的假服务器场景由该路径兜底 |
+| remote | true | `read(path, {range})` 透传 `Range: bytes=start-end` 头（request() 增 headers 透传）；206 正常；**200（服务器忽略 Range）时返回全量，read 内不切片**——块读取器对超长应答按 200-回退语义处理：**切换全量底座并单飞去重重取全量**（实现语义，SUSP-04 实测锚定；2026-10-14 文字对齐——原「按返回长度自校验并停在该块」与 blockStream.ts fetchBlock 的实现形态不符：全量底座下重取是单飞去重的，Range-less 大文件首屏传输放大为该语义的已知代价，见 b-io-degrade-matrix DEG-02/03）；单根 baseURL 不支持 Range 的假服务器场景由该路径兜底 |
 | localFs | true | 已实现（既有） |
 | localFiles | true | `file.slice(start, end+1)`（File 引用已保留，纯补分支） |
 | single / url / zip / libarchive | 缺省 false | 不改——dispatcher 全量构造 ctx |
