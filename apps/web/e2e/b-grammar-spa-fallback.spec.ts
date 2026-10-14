@@ -416,7 +416,7 @@ test('GRF-04: 查询 injections.scm 200 text/html → 视同缺失，highlights.
   expect(probe.pageErrors).toEqual([]);
 });
 
-test('GRF-05: 正常 application/json manifest 零误伤——同源不 mock（真实清单），rust tree-sitter 生效、零 grammar warn（回归护栏）', async ({
+test('GRF-05: 正常 application/json manifest 零误伤——同源走真实清单（不 mock）+ CDN manifest mock 合法空 JSON（避免打真实 socket），rust tree-sitter 生效、零 grammar warn（回归护栏）', async ({
   page
 }) => {
   test.setTimeout(60_000);
