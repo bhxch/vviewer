@@ -14,6 +14,7 @@ import {
   renderLineHtml,
   renderCode,
   codeRenderer,
+  codeWindowedPumpControls,
   attachHighlightClient,
   waitForAttachedClient,
   __resetAttachPhaseForTest,
@@ -1311,6 +1312,13 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     });
   }
 
+  /** 泵测试开关（BUG-201 后台索引泵引入后的重定基手段）：pause 冻结后台推进，
+   * 使既有「首屏最小 IO / 滚动驱动续读 / 扫描自驱动 IO」契约用例逐字保持可断言
+   * ——这些用例的期望面（首块后 174 行、读计数、渐进时序）正是泵所改变的行为。 */
+  function pausePump(handle: ReturnType<typeof renderCode>): void {
+    codeWindowedPumpControls.get(handle)!.pause();
+  }
+
   it('首屏只读 head+首块（8KB 部分块整块重拉，零全量 read）；行文本经窗口解码正确；getMeta lines 为已加载行数', async () => {
     stubResizeObserver();
     const content = enc(codeLines(400)); // 600KB ≈ 2.3 块
@@ -1321,6 +1329,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
       lang: 'javascript',
       ctx: streamCtx({ size: null, content, head: content.slice(0, 8192), calls })
     });
+    pausePump(handle); // 冻结后台泵：本用例锁「首屏最小 IO、不滚动零续读」契约面
     await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
     expect(bodyText(host, 0)!.startsWith('const a = 0; // ')).toBe(true);
     expect(bodyText(host, 12)!.startsWith('const a = 12;')).toBe(true); // 视口内行（jsdom 高度 0 → ~20+ 行窗口）
@@ -1377,6 +1386,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
       lang: 'javascript',
       ctx: streamCtx({ size: bytes.length, content: bytes, head: bytes.slice(0, 8192) })
     });
+    pausePump(instB); // B 冻结泵：与 A 同为滚动驱动口径，逐字节比对不受后台推进扰动
     await vi.waitFor(() => expect(instA.getEngine()).toBe('tree-sitter'));
     await vi.waitFor(() => expect(instB.getEngine()).toBe('tree-sitter'));
     // 先双双滚到底：B 经续读排空到 EOF（spacer 总行数与 meta 与 A 一致）后再比对
@@ -1500,6 +1510,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
       lang: 'javascript',
       ctx: streamCtx({ size: content.length, content, head: content.slice(0, 8192) })
     });
+    pausePump(handle); // 冻结泵：首块 174 / 滚动续读到 400 的动态口径逐字保留
     expect(handle.getMeta().lines).toBe(0); // 同步构造期：首拉未落地（异步 start）
     await vi.waitFor(() => expect(handle.getMeta().lines).toBe(174)); // 首块已加载行数
     scrollCode(host, Number.MAX_SAFE_INTEGER);
@@ -1851,6 +1862,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     };
     const host = newHost();
     const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    pausePump(handle); // 冻结泵：EOF 前的读全由滚动续读驱动，扫描补读计数不受泵干扰
     scrollCode(host, Number.MAX_SAFE_INTEGER); // 续读到 EOF：25 次串行前向喂块（在飞 1）
     await vi.waitFor(() => expect(handle.getMeta().lines).toBe(4200));
     expect(maxInflight).toBe(1); // 自证：续读链全串行，非空在飞只来自扫描补拉
@@ -1925,6 +1937,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
       lang: 'javascript',
       ctx: streamCtx({ size: content.length, content, head: content.slice(0, 8192), calls })
     });
+    pausePump(handle); // 冻结泵：readsAtMount 之后的前向读全部由扫描自驱动（原契约面）
     await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
     const readsAtMount = calls.length;
     const matches = await handle.search('zzneedle');
@@ -2124,6 +2137,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     };
     const host = newHost();
     const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    pausePump(handle); // 冻结泵：armed 门只拦扫描的读，渐进时序不被泵抢跑
     await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
     armed = true;
     let settled = false;
@@ -2162,6 +2176,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
       lang: 'javascript',
       ctx: streamCtx({ size: content.length, content, head: content.slice(0, 8192), calls })
     });
+    pausePump(handle); // 冻结泵：行 3300 的未加载状态由 reveal 驱动续读抵达（原契约面）
     await vi.waitFor(() => expect(handle.getMeta().lines).toBe(174)); // 仅首块已加载
     const readsAtJump = calls.length;
     handle.revealLine(3300); // 目标行远部未加载
@@ -2185,6 +2200,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
       lang: 'javascript',
       ctx: streamCtx({ size: content.length, content, head: content.slice(0, 8192), calls })
     });
+    pausePump(handle); // 冻结泵：EOF 确认由 reveal 驱动续读达成（原契约面）
     await vi.waitFor(() => expect(handle.getMeta().lines).toBe(174));
     handle.revealLine(999_999); // 越出 EOF：驱动续读到 EOF 才能判定不存在
     await vi.waitFor(() => expect(handle.getMeta().lines).toBe(400)); // EOF 已确认（补读非空转）

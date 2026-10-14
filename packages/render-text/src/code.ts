@@ -1148,6 +1148,11 @@ const CODE_STREAM_MAX_BLOCKS = 16;
 /** 续读余量（行）：可视末行距已加载尾部 ≤ 此值即续读下一块（scroller overscan 10 的 2 倍，
  * 覆盖滚动连发时「请求发出→块完成」间隙的越界窗口） */
 const WINDOW_CONTINUE_MARGIN_LINES = 20;
+/** 后台索引泵（BUG-201）：拉块间隙节拍（毫秒）——逐块让出主线程 */
+const CODE_PUMP_TICK_MS = 0;
+/** 后台索引泵：单飞闸被占（滚动续读/回看重拉/搜索扫描在飞）时的重评间隔（毫秒）
+ * ——不取 0，防慢网 stall 期间 0ms 定时器空转刷频（fa41d40 进度自旋同病理） */
+const CODE_PUMP_WAIT_MS = 50;
 /** 流式上限提示条（spec §4.3 防线换代：非失败态，不复用错误卡片；建议 hex 与 jsonl
  * STREAM_LIMIT_NOTICE 同口径） */
 const CODE_STREAM_LIMIT_NOTICE =
@@ -1717,6 +1722,7 @@ function renderCodeWindowed(
   const onUserScroll = (): void => {
     continueFailed = false;
     reloadFailed = false;
+    scheduleIndexPump(); // 停机闩解除后重启后台泵（用户动作单次重试口径的延续）
   };
   pre.addEventListener('scroll', onUserScroll, { passive: true });
   const ro = new ResizeObserver(() => {
@@ -1724,6 +1730,59 @@ function renderCodeWindowed(
     scroller?.refresh(true); // 单次重评：重绘可视行并重估续读/回看（maybeContinue）
   });
   ro.observe(pre);
+
+  // ---------- 后台索引泵（BUG-201，io spec §4.3「后台逐块推进、可取消」） ----------
+  //
+  // 缺陷：窗口流式下行索引原仅靠滚动续读推进（maybeContinue 距尾 WINDOW_CONTINUE_
+  // MARGIN_LINES 闸），start() 排空仅在 bs.atEnd() 形态可达——size 已知 range 流式
+  // 打开大文件后不滚动则行数永久冻结在首块部分值（BUG-20 契约锚受 io plan「既有
+  // 断言零变更」保护而确定性双红）。泵在空闲节拍下逐块 pullBlock 推进至 EOF/防线：
+  // - 单飞闸复用 pulling（与滚动续读/回看重拉/搜索扫描互斥，pullBlock 重入会双喂
+  //   错位——扫描注释同款约束）；闸被占时间隔重评（CODE_PUMP_WAIT_MS，慢网 stall
+  //   不刷频）；
+  // - 停机条件与 maybeContinue 完全同款：indexFinished/limitReached/encodingBroken/
+  //   destroyed 永久停；continueFailed 读失败闩防活锁，用户滚动动作（onUserScroll）
+  //   解除后重启泵；
+  // - 可取消：destroy 清定时器（在飞 pullBlock 落地后各项检查点拦截）。
+  let pumpTimer: ReturnType<typeof setTimeout> | null = null;
+  let pumpPaused = false;
+  function scheduleIndexPump(delayMs: number = CODE_PUMP_TICK_MS): void {
+    if (pumpTimer !== null || destroyed || pumpPaused) return;
+    if (indexFinished || limitReached || encodingBroken || continueFailed) return;
+    pumpTimer = setTimeout(pumpTick, delayMs);
+  }
+  function pumpTick(): void {
+    pumpTimer = null;
+    if (destroyed || pumpPaused || indexFinished || limitReached || encodingBroken || continueFailed) return;
+    if (pulling) {
+      scheduleIndexPump(CODE_PUMP_WAIT_MS); // 单飞闸在飞：间隔重评，不双喂
+      return;
+    }
+    pulling = true;
+    void (async () => {
+      try {
+        await pullBlock();
+      } catch (err) {
+        continueFailed = true; // 与滚动续读同口径：停机闩防活锁，用户滚动动作解除
+        console.debug('[code] 后台索引泵拉块失败，已停机（滚动后重试）', err);
+      }
+      pulling = false;
+      if (destroyed) return;
+      if (encodingBroken) return; // 项 1：判非 UTF-8——降级重渲进行中/已完成，窗口面停评
+      remountOrRefresh(); // 行数增长上屏（spacer/总数随索引更新，滚动续读同款）——
+      // 缺此步则 scroller 行数停在最后一次滚动续读的 mount 值，滚到底够不着真实末行
+      scheduleIndexPump(); // 未停机则续拍至 EOF/防线；已停机则空转直返
+    })();
+  }
+  function setPumpPaused(paused: boolean): void {
+    pumpPaused = paused;
+    if (paused) {
+      if (pumpTimer !== null) clearTimeout(pumpTimer);
+      pumpTimer = null;
+    } else {
+      scheduleIndexPump();
+    }
+  }
 
   /**
    * 启动：首块拉取（失败上抛——经 whenReady 到 codeRenderer.render 的渲染期读失败
@@ -1747,6 +1806,7 @@ function renderCodeWindowed(
       engine = 'plain';
     }
     mount();
+    scheduleIndexPump(); // 首屏在手，余下交后台泵推进（不滚动也至 EOF——BUG-201）
   }
 
   function jumpToLine(line: number): void {
@@ -2043,6 +2103,8 @@ function renderCodeWindowed(
       // 项 1：降级产物（全量重渲实例）随宿主一并销毁（ViewerPane 只持本 handle）
       if (fullInst !== null) fullInst.destroy();
       destroyed = true;
+      if (pumpTimer !== null) clearTimeout(pumpTimer); // 后台索引泵可取消（§4.3）
+      pumpTimer = null;
       scanSeq += 1; // 在飞后台扫描令牌失效（下一检查点退出，部分结果收场）
       scan = null;
       // 项 2：取消态即时移除进度条（在途读闸挂起时 finally 不可达）；项 A：destroy
@@ -2197,8 +2259,17 @@ function renderCodeWindowed(
   // 捕获引用供 revealLine 的未加载行续读路径 await（与其串行，防双喂）
   const ready = start();
   (handle as { whenReady?: Promise<void> }).whenReady = ready;
+  codeWindowedPumpControls.set(handle, {
+    pause: () => setPumpPaused(true),
+    resume: () => setPumpPaused(false)
+  });
   return handle;
 }
+
+/** 窗口流式后台索引泵的测试开关（jsonlWindowedInternals 同款先例）：pause 冻结后台
+ * 推进，使 code.test.ts 既有「首屏最小 IO / 滚动驱动续读 / 扫描自驱动 IO」契约面
+ * 在泵语义下逐字保持可断言；resume 恢复。生产路径不使用。 */
+export const codeWindowedPumpControls = new WeakMap<RenderCodeHandle, { pause(): void; resume(): void }>();
 
 export const codeRenderer: Renderer = {
   id: 'code',
