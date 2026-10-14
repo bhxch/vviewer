@@ -21,6 +21,14 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: 归一缓存键语言清单（逗号不合法于 cache key）
+      id: key
+      shell: bash
+      env:
+        LANGS: ${{ inputs.languages }}
+      # 表达式无 split/replace 可用（join 有、split 无），经 shell tr 归一；
+      # all/lite 等无逗号输入原样透传，既有缓存键不受影响
+      run: echo "languages=$(printf '%s' "$LANGS" | tr ',' '-')" >> "$GITHUB_OUTPUT"
     - name: 缓存 grammar 工具链/源树/产物
       uses: actions/cache@v6
       with:
@@ -30,10 +38,8 @@ runs:
           apps/web/static/grammars
           apps/web/static/tree-sitter.wasm
         # key 追加 fetch-only（I2）：fetch-only 产的「无 wasm」缓存与 self-build 缓存
-        # 同键互踩——self-build 恢复到空产物缓存后重建再回写同键，双 job 竞争抖动。
-        # 逗号清单经 join(split(...)) 归一为连字符：actions/cache 校验拒绝 key 含逗号
-        # （Key Validation Error，all/lite 等无逗号输入不受影响）
-        key: grammars-${{ runner.os }}-${{ join(split(inputs.languages, ','), '-') }}-${{ inputs.fetch-only }}-${{ hashFiles('pnpm-lock.yaml', 'tools/grammar-builder/languages.toml', 'tools/grammar-builder/build-list.json') }}
+        # 同键互踩——self-build 恢复到空产物缓存后重建再回写同键，双 job 竞争抖动
+        key: grammars-${{ runner.os }}-${{ steps.key.outputs.languages }}-${{ inputs.fetch-only }}-${{ hashFiles('pnpm-lock.yaml', 'tools/grammar-builder/languages.toml', 'tools/grammar-builder/build-list.json') }}
     - name: fetch + self-build
       shell: bash
       run: |
