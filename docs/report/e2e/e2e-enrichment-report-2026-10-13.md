@@ -243,3 +243,20 @@
 ---
 
 *报告完。被测版本与执行版本口径、提交链与时间线、4 spec 用例数与全量声明数（260/69/329）、构建产物注入指纹（exit 1）、门禁三轮与全量回归的盘上状态文件与现场目录数、typecheck 复跑 exit 0、SUSP-07 探针复跑 2 passed、BUG-20 契约锚修订时补跑（2 failed，冻结值 3640 复现，§4.1(2)）、以及被引源码/文档行（FileTree.svelte:35 / search.rs:293-299 / guard.rs:37-38 / openFlow.svelte.ts:868 / TabContextMenu.svelte:63-74 / av.ts:457-458 / tree/remote.ts:43/149/328 / b-grammar-spa-fallback.spec.ts:24 / io spec §2.3:65·§4.3:98·§8:131-136 / io plan:17 / 姐妹篇：594 / TAX skip :323/:401/:742），为本报告撰写及修订时亲手实测/核对（命令与输出见各节）；门禁与回归的通过/失败计数、cdnInjected/build/cargo、域材料本地实跑明细、SUSP 9 条定档的读码证据、SUS-TAX-1 取证实跑与回归分诊 8 条记录，为 workflow/复核会话/域材料转录（逐处已标注；BUG-201 的复核复跑原为转录，修订时已由本报告亲手复跑坐实）。verified 与 unconfirmed 全程区分——本轮 verified 产品缺陷 2 条（SUSP-07、BUG-201，均 medium 开修复立项），新增缺陷候选 1 条（SUS-TAX-1）与现象记录 2 条均未定档；9 条存疑探针全绿（现象确认）而仅 1 条判缺陷（读码裁决），8 条 confirmed-design 按「7 维持现状记录 + SUSP-09 关闭」口径计。「37 条历史缺陷的回归验收由全量套件承载」已兑现，且无修复回退定性失败——含 BUG-20 锚双红经分诊豁免 1 条与 PERF-LAZY 性能定档悬置（编号级映射未做，§5.3）；server 通道全量未跑、6 条终态回归失败未修复（§7）。*
+
+---
+
+## 附录 C：编排方补跑附记（2026-10-14，报告交付后）
+
+**背景**：本轮 workflow 的 `serverRunnable` 旗标在构建阶段取值——当时 typecheck 因 BUG-200 两处 TS 错误为非零（`e0c0951` 修复在其后），旗标遂被冻结为 false 并贯穿始终，server 通道的门禁轮次与全量回归均未发起（§2.2/§5.1/§7 第 1 条即此因）。**属编排脚本缺陷，非产品或测试缺陷**；上轮姐妹篇（2026-10-13 补充轮）的 server 通道不受影响（其构建顺序不同）。
+
+**补跑**（编排方 2026-10-14 亲手执行；被测版本 `main` @ `431e29e`——`git diff --stat e0c0951..431e29e` 实测仅 2 个 docs 文件，产品与测试代码零差异，结论可平移）：
+
+1. **server 套件全量**：`pnpm exec playwright test --config playwright.server.config.ts --reporter=line`（apps/web 下）→ **67 passed / 0 failed / 2 flaky（重试转绿：BIN-10/BUG-13 与 BIN-10/2，既有计时型）/ 11 skipped，3.3m，exit 0**——存量 server 用例与本轮新增 WSX-01~06 一并实跑，server 通道回归**零失败**。
+2. **WSX server spec 单独复跑**：`e2e-server/b-wsx-root-channel.spec.ts` → **6 passed（19.1s）**，WSX-01~06 逐条绿（WSX-04 的 `501 Not Implemented` ERROR 日志为该用例断言目标本身，非故障）。
+
+**对正文的更正与升级**：
+
+- §2.2/§5.1/§7 第 1 条「server 套件全量未跑」→ **已补跑，零失败**（2 flaky 转绿，与 default 通道 BIN-10 计时型同源，不构成新缺陷）；§5.3 的「server 通道未跑」口径限定随之解除。
+- §2.2 WSX server 6 用例由「域材料本地实跑（转录）」升级为**编排方亲手复跑坐实（6 passed 19.1s）**。
+- §1.2 缺陷计数不变（补跑未新增任何缺陷或失败项）。
