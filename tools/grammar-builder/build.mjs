@@ -17,6 +17,7 @@
 // 用法：node build.mjs --fetch [--lite|--languages x,y]
 //       node build.mjs --self-build [--all|--languages x,y] [--force]
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync, execFile as execFileCb } from 'node:child_process';
@@ -69,6 +70,32 @@ export function resolveTreeSitterBin(root = repoRoot) {
 export function detectTreeSitter(bin = resolveTreeSitterBin(), env = process.env) {
   const r = spawnSync(bin, ['--version'], { encoding: 'utf8', env });
   return r.status === 0;
+}
+
+/**
+ * CLI 工具链缓存目录（tree-sitter CLI 经 dirs::cache_dir() 解析，与平台相关）。
+ */
+export function toolchainCacheDir(env = process.env, platform = process.platform, home = os.homedir()) {
+  if (platform === 'darwin') return path.join(home, 'Library/Caches');
+  if (platform === 'win32') return path.join(env.LOCALAPPDATA ?? path.join(home, 'AppData/Local'), 'cache');
+  return env.XDG_CACHE_HOME ?? path.join(home, '.cache');
+}
+
+/**
+ * 工具链是否已就位（wasi-sdk clang + binaryen wasm-opt）。冷缓存时 CLI 首个构建
+ * 会下载并解压工具链——多 worker 并发首建会各自触发下载/解压到同一路径，后启动的
+ * 编译撞上半解压产物（CI 实测 8 路并发 6 败：clang Bus error / Extracting 中被读），
+ * 见 selfBuild 的单飞预热。
+ */
+export function isToolchainWarm(
+  cacheDir = toolchainCacheDir(),
+  fsMod = fs,
+) {
+  const base = path.join(cacheDir, 'tree-sitter');
+  return (
+    fsMod.existsSync(path.join(base, 'wasi-sdk', 'bin', 'clang')) &&
+    fsMod.existsSync(path.join(base, 'binaryen', 'bin', 'wasm-opt'))
+  );
 }
 
 /**
@@ -190,52 +217,62 @@ export async function selfBuild({
   let vendored = 0;
   let skipped = 0;
   let cursor = 0;
+  async function buildTarget(entry) {
+    const outFile = path.join(outDir, `${entry.name}.wasm`);
+    if (!force && fs.existsSync(outFile)) {
+      skipped++;
+      return;
+    }
+    // vendored 短路：不可再生语言直接拷贝遗留产物
+    const vendoredSrc = vendoredFiles.get(entry.name);
+    if (vendoredSrc) {
+      fs.copyFileSync(vendoredSrc, outFile);
+      vendored++;
+      return;
+    }
+    const srcDir = path.join(grammarsDir, entry.name, entry.subpath);
+    if (!fs.existsSync(path.join(srcDir, 'src', 'parser.c'))) {
+      failures.push({
+        name: entry.name,
+        subpath: entry.subpath,
+        reason: `parser.c not found under ${srcDir}/src（先跑 --fetch？）`,
+      });
+      return;
+    }
+    ensureTreeSitterConfig(srcDir, entry.name);
+    try {
+      await execFile(treeSitterBin, ['build', '--wasm', '--output', outFile, '.'], {
+        cwd: srcDir,
+        encoding: 'utf8',
+        timeout: 600_000,
+        maxBuffer: 4 * 1024 * 1024,
+        env,
+      });
+      built++;
+      const bytes = fs.statSync(outFile).size;
+      if (bytes > WARN_FILE_BYTES) {
+        console.warn(`[self-build] ${entry.name}.wasm ${(bytes / 1024 / 1024).toFixed(1)}MB > 8MB（仅告警）`);
+      }
+    } catch (err) {
+      // cli 的符号检查在写产物之后才做，失败会留下坏产物——删除避免污染 skip-if-exists 缓存
+      fs.rmSync(outFile, { force: true });
+      const detail = String((err && (err.stderr || err.stdout)) || err?.message || err).trim().slice(-500);
+      failures.push({ name: entry.name, subpath: entry.subpath, reason: detail || 'build failed' });
+    }
+  }
   async function worker() {
     for (;;) {
       const i = cursor++;
       if (i >= targets.length) return;
-      const entry = targets[i];
-      const outFile = path.join(outDir, `${entry.name}.wasm`);
-      if (!force && fs.existsSync(outFile)) {
-        skipped++;
-        continue;
-      }
-      // vendored 短路：不可再生语言直接拷贝遗留产物
-      const vendoredSrc = vendoredFiles.get(entry.name);
-      if (vendoredSrc) {
-        fs.copyFileSync(vendoredSrc, outFile);
-        vendored++;
-        continue;
-      }
-      const srcDir = path.join(grammarsDir, entry.name, entry.subpath);
-      if (!fs.existsSync(path.join(srcDir, 'src', 'parser.c'))) {
-        failures.push({
-          name: entry.name,
-          subpath: entry.subpath,
-          reason: `parser.c not found under ${srcDir}/src（先跑 --fetch？）`,
-        });
-        continue;
-      }
-      ensureTreeSitterConfig(srcDir, entry.name);
-      try {
-        await execFile(treeSitterBin, ['build', '--wasm', '--output', outFile, '.'], {
-          cwd: srcDir,
-          encoding: 'utf8',
-          timeout: 600_000,
-          maxBuffer: 4 * 1024 * 1024,
-          env,
-        });
-        built++;
-        const bytes = fs.statSync(outFile).size;
-        if (bytes > WARN_FILE_BYTES) {
-          console.warn(`[self-build] ${entry.name}.wasm ${(bytes / 1024 / 1024).toFixed(1)}MB > 8MB（仅告警）`);
-        }
-      } catch (err) {
-        // cli 的符号检查在写产物之后才做，失败会留下坏产物——删除避免污染 skip-if-exists 缓存
-        fs.rmSync(outFile, { force: true });
-        const detail = String((err && (err.stderr || err.stdout)) || err?.message || err).trim().slice(-500);
-        failures.push({ name: entry.name, subpath: entry.subpath, reason: detail || 'build failed' });
-      }
+      await buildTarget(targets[i]);
+    }
+  }
+  // 冷工具链预热单飞：CLI 首建会下载+解压 wasi-sdk/binaryen 到共享缓存路径，多 worker
+  // 并发首建互相踩半解压产物（CI 实测 8 路并发 6 败）。先行单目标直至工具链就位（构建
+  // 本身失败的条目不装工具链，顺延下一个），再放并行；缓存暖（本地常态）零串行开销。
+  if (targets.length > 0 && !isToolchainWarm()) {
+    while (cursor < targets.length && !isToolchainWarm()) {
+      await buildTarget(targets[cursor++]);
     }
   }
   await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, targets.length)) }, worker));
