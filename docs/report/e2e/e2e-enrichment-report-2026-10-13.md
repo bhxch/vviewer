@@ -1,6 +1,6 @@
 # vviewer E2E 富化测试报告（2026-10-13）——三域富化、存疑复核定档与全量回归轮
 
-> 被测版本：`main` @ `e0c0951`（`git rev-parse HEAD` → `e0c09518dce2afa17321347c0d1a9e5b56996225`，2026-10-14 09:47「fix(test): 修复 SUSP-06/WSX-12 两处 TS 类型错误使 TYPECHECK 门禁转绿」，`git status --short` 为空——工作树干净，本报告撰写时实测）。**执行版本口径**：本轮提交链 `be8ab79`/`9d3cef6`/`80de937`（10-14 09:36）→ 门禁轮 1（09:38:45）→ `b56e908`+`e0c0951`（09:37/09:47）→ 门禁轮 2/3（09:48:10/09:48:45）→ 全量回归收尾（10:07:09，以上时点均 `stat` 实测）；门禁轮 1 执行于 `80de937` 树、轮 2/3 与全量回归执行于 `e0c0951`（HEAD）——`80de937..e0c0951` 仅动 2 个 spec 文件的夹具形参与类型断言（`git show --stat e0c0951` 实测 2 files +5/−2，纯测试侧），产品代码零差异，结论不受影响。
+> 被测版本：`main` @ `e0c0951`（`git rev-parse HEAD` → `e0c09518dce2afa17321347c0d1a9e5b56996225`，2026-10-14 09:47「fix(test): 修复 SUSP-06/WSX-12 两处 TS 类型错误使 TYPECHECK 门禁转绿」，`git status --short` 为空——工作树干净，本报告撰写时实测）。**执行版本口径**：本轮提交链 `be8ab79`/`9d3cef6`/`80de937`（10-14 09:36）→ 门禁轮 1（落盘 09:38:45）→ `b56e908`+`e0c0951`（09:37/09:47）→ 门禁轮 2/3（09:48:10/09:48:45）→ 全量回归收尾（10:07:09，以上时点均 `stat` 实测）。**轮 1 的起跑树盘上不可判定，如实标注不裁断**：其落盘时点界于 `80de937`（09:36）之后、`e0c0951`（09:47）之前，无法区分起跑于 `80de937` 抑或 `b56e908`（09:37），且产物已被 10:08:47 重建覆盖（§2.1）；轮 2/3 与全量回归执行于 `e0c0951`（HEAD）。所涉三提交均纯测试侧（`git show --stat` 实测：`b56e908` 仅测试标题 1 行、`e0c0951` 仅 2 个 spec 文件的夹具形参与类型断言 +5/−2），产品代码零差异，定档与分诊结论不受影响。
 > 背景批次：本报告为 **2026-10-13 两份姐妹篇之后续**（同日补充轮报告 `docs/report/e2e/e2e-test-report-2026-10-13.md` 交付 52 场景 6 域补测并留下 10 条存疑观察与 §7 复核出口）。本轮三域并行富化：① workspace 多根语义/恢复链/搜索引擎宣告（WSX）② tab 动作撤销栈与拖拽受理边界（TAX）③ 上轮存疑观察 e2e 复核定档探针（SUSP），并以 default 全量回归兑现上轮 §7.2 欠下的「37 条历史缺陷回归复测载体」。
 > 证据根目录：`apps/web/.temp/pw-out-r1|r2|r3`（新场景门禁三轮，`.last-run.json` 均 passed）、`apps/web/.temp/pw-full-def`（全量回归，status failed + failedTests 恰 6 + 14 个失败现场目录，均 `stat`/`cat`/`ls` 实测）、`docs/e2e/{workspace-enrichment,tab-actions-enrichment,susp-verification}.md`（3 份域文档）、自动化 spec 4 份（default 3 + e2e-server 1，在盘实测）。
 > 状态标记约定（沿姐妹篇）：**verified** = 本轮经复核会话/分诊会话或本报告撰写时亲手复现/核对证实；**转录** = workflow/域材料记录值（逐处标注，不冒充实测）。
@@ -17,7 +17,7 @@
 2. **新场景门禁 3 轮**（gateHistory 转录 + `.last-run.json` 实测）：default(:4173) 47 通过 / 0 失败 × 3 轮，exit 0；`.last-run.json` 均 status passed（09:38:45 / 09:48:10 / 09:48:45），盘上无失败现场目录——**本轮新场景门禁零失败、零分诊**。
 3. **TYPECHECK 红转绿**：门禁 typecheck 记录 exit 2（转录）→ `e0c0951` 修复 SUSP-06/WSX-12 两处 TS 类型错误（diff 实测：SUSP-06 夹具形参 `content`→`bytes`、WSX-12 类型双跳断言，纯测试侧）→ 本报告撰写时复跑 `pnpm typecheck` **exit 0**（tsc -b + svelte-check 0 errors 0 warnings，实测）。
 4. **全量回归（default 全套件）**：481 通过 / 6 终态失败（workflow 转录），盘上 `pw-full-def/.last-run.json`（10:07:09，failedTests 恰 6）+ 14 个失败现场目录实存（实测）；另有 2 条 flaky 转绿记录。8 条失败记录全部完成分诊：**env-flaky 2 / test-issue 5 / product-bug 1（新产品缺陷 BUG-201，verified medium）**——详见 §5。
-5. **存疑定档清账**：上轮 10 条存疑观察中的 9 条探针化复核（SUSP-01~07/09/10；SUSP-08 依上轮 §4.2 裁决并入既有 BUG-53 不设探针）——**9/9 探针绿（现象全部运行期复现，probe-negative 0）**；定档 **confirmed-design 8 条 + confirmed-bug 1 条（SUSP-07，medium，开修复立项）**。GRF-05 标题随 `b56e908` 修订（上轮 §5.4 缺口③清账）。
+5. **存疑定档清账**：上轮 10 条存疑观察中的 9 条探针化复核（SUSP-01~07/09/10；SUSP-08 依上轮 §4.2 裁决并入既有 BUG-53 不设探针）——**9/9 探针绿（现象全部运行期复现，probe-negative 0）**；定档 **confirmed-design 8 条（7 条维持现状记录 + SUSP-09 关闭）+ confirmed-bug 1 条（SUSP-07，medium，开修复立项）**。GRF-05 标题随 `b56e908` 修订（上轮 §5.4 缺口③清账）。
 6. **缺陷计数**：verified 产品缺陷 **2 条**（SUSP-07 medium、BUG-201 medium，均开修复立项）；新增 unconfirmed 存疑观察 **3 条**（SUS-TAX-1 缺陷候选 + WSX 两条现象记录，§4.3）。
 
 ### 1.2 缺陷计数
@@ -32,11 +32,11 @@
 | 全量回归终态失败 | 6（分诊：test-issue 5 + product-bug 1） | 0 | 6（另有 flaky 转绿 2） |
 
 - 与姐妹篇（同日补充轮）的关系：其 10 条存疑观察中 9 条本轮定档完毕（§4.2），SUSP-08 维持并入 BUG-53；其 §7.2 欠下的全量回归载体本轮兑现（§5.3）。
-- 与上上轮（2026-10-10，37 条确认缺陷）的关系：**37 条历史缺陷的回归验收由本轮 default 全量套件承载**，分诊 8 条记录中无一条定性为「历史缺陷修复回退」（§5.3）。
+- 与上上轮（2026-10-10，37 条确认缺陷）的关系：**37 条历史缺陷的回归验收由本轮 default 全量套件承载**，分诊 8 条记录中无一条定性为「历史缺陷修复回退」——其中 BUG-20（37 条之一，e2e-test-report-2026-10-10.md:594）的契约锚本轮 chromium+mobile **双红**，经分诊定性豁免（断言时代差 + 新缺口 BUG-201，非修复回退；§5.3）。
 
 ### 1.3 一句话结论
 
-**本轮三域富化目标全部达成、新场景门禁三轮零失败，存疑清单完成定档清账（8 design + 1 bug），并以 default 全量回归补上了上轮欠下的历史缺陷回归载体——但全量回归暴露 1 条新产品缺陷（BUG-201：窗口流式下大文件行索引无自动推进通道）与 5 处断言时代差，全部完成分诊。** 取舍理由：confirmed-bug 仅 SUSP-07 一条——9 条探针全绿只证「现象在」，定缺陷靠读码裁决（FileTree 根级失败静默与既有 BUG-24 提示通道不成对、且查无静默为设计之裁决），其余 8 条均有承诺面注释/矩阵注释在案故维持现状记录（其中 5 条带优化立项候选，§4.2）；BUG-201 定缺陷靠复核复跑 4 次同冻结值 3640 的确定性失败 + 读码证实无索引泵 + 契约面（io spec §4.3「后台逐块推进」）不被豁免清单覆盖。**复核出口建议**（本轮未定，待编排方裁决，§6.2）：SUSP-07 与 BUG-201 开修复立项（SUSP-07 修复后按 `susp-verification.md` §3 翻转探针负向断言；BUG-201 修复后 BUG-20 契约锚应转绿、5 处 test-issue 断言按窗口流式口径重定基）；SUSP-04 的 io spec §2.3 本体文字待清（域文档路线已执行）。
+**本轮三域富化目标全部达成、新场景门禁三轮零失败，存疑清单完成定档清账（8 design + 1 bug），并以 default 全量回归补上了上轮欠下的历史缺陷回归载体——但全量回归暴露 1 条新产品缺陷（BUG-201：窗口流式下大文件行索引无自动推进通道）与 5 处断言时代差，全部完成分诊。** 取舍理由：confirmed-bug 仅 SUSP-07 一条——9 条探针全绿只证「现象在」，定缺陷靠读码裁决（FileTree 根级失败静默与既有 BUG-24 提示通道不成对、且查无静默为设计之裁决），其余 8 条 confirmed-design（**7 条维持现状记录 + SUSP-09 关闭**）均有承诺面注释/矩阵注释在案（其中 **4 条带优化立项候选**〔SUSP-01/02/03/06〕、SUSP-04 附文档债〔io spec §2.3 文字待清〕，§4.2）；BUG-201 定缺陷靠复核复跑与本报告修订时亲手复跑同冻结值 3640 的确定性失败 + 读码证实无索引泵 + 契约面（io spec〔docs/superpowers/specs/2026-10-12-io-streaming-design.md，下同〕§4.3:98「后台逐块推进」不被 §8:131-136 豁免清单〔4 项〕覆盖）。**复核出口建议**（本轮未定，待编排方裁决，§6.2）：SUSP-07 与 BUG-201 开修复立项（SUSP-07 修复后按 `susp-verification.md` §3 翻转探针负向断言；BUG-201 修复后 BUG-20 契约锚应转绿、5 处 test-issue 断言按窗口流式口径重定基）；SUSP-04 的 io spec §2.3 本体文字待清（域文档路线已执行）。
 
 ---
 
@@ -46,7 +46,7 @@
 
 - git 基线：`main` @ `e0c09518dce2afa17321347c0d1a9e5b56996225`（`git rev-parse HEAD` 实测，工作树干净）。本轮提交链 5 条（`git log --format` 实测）：`be8ab79`(09:36 WSX) → `9d3cef6`(09:36 TAX) → `80de937`(09:36 SUSP) → `b56e908`(09:37 GRF-05 标题) → `e0c0951`(09:47 TS 修复)。
 - **VV_GRAMMAR_CDN 注入链（本报告核对在位）**：`apps/web/vite.config.ts:225`（define `'import.meta.env.VV_GRAMMAR_CDN': JSON.stringify(process.env.VV_GRAMMAR_CDN ?? '')`，缺省空串，实测）→ `highlightClient.ts:246`（`|| null`）→ `grammarLayers.ts:80`（cdnBase 空则 CDN 层不入候选，姐妹篇核对转录）；CI 恒注入（`.github/workflows/ci.yml:90` `VV_GRAMMAR_CDN: https://cdn.grammars.test/grammars/`，实测）。本轮门禁构建步骤携 env 注入（workflow 记录 `cdnInjected=true`，**转录**）。
-- **产物状态警示（本报告撰写时实测，先例重演）**：盘上 `apps/web/build/` 已被 **2026-10-14 10:08:47** 重建覆盖（`stat` 实测 index.html 与 nodes/*.js mtime），`rg -c 'cdn\.grammars\.test' apps/web/build/` → **exit 1 零命中——当前盘上产物无注入**。时序：三轮门禁（09:38–09:48）→ 全量回归收尾（10:07:09）→ 10:08:47 无 env 重建——即测试全部结束后产物才被覆盖。**测试期间产物为注入版的证据**：① workflow 构建步骤 `cdnInjected=true`（转录）；② 侧证——全量回归 481 通过中含 GRF-01（env 守卫用例，无注入构建必假红，姐妹篇 §7.5 口径），而其不在 6 条终态失败与 2 条 flaky 之列（`pw-full-def` 目录实测无其现场目录、failedTests 无其哈希）。**固化诉求（姐妹篇 §7.3）仍未兑现**：`apps/web/package.json:8` build 脚本仍无 env（实测 `rg '"build"'`），任何一次无 env 重建都会令 GRF-01/02 再假红——本轮 10:08:47 重建即为先例重演。
+- **产物状态警示（本报告撰写时实测，先例重演）**：盘上 `apps/web/build/` 已被 **2026-10-14 10:08:47** 重建覆盖（`stat` 实测 index.html 与 nodes/*.js mtime），`rg -c 'cdn\.grammars\.test' apps/web/build/` → **exit 1 零命中——当前盘上产物无注入**。时序：三轮门禁（09:38–09:48）→ 全量回归收尾（10:07:09）→ 10:08:47 无 env 重建——即测试全部结束后产物才被覆盖。**测试期间产物为注入版的证据**：① workflow 构建步骤 `cdnInjected=true`（转录）；② 侧证——全量回归 481 通过中含 GRF-01（env 守卫用例，无注入构建必假红），而其不在 6 条终态失败与 2 条 flaky 之列（`pw-full-def` 目录实测无其现场目录、failedTests 无其哈希）；该前提不依赖姐妹篇转录——in-repo 佐证（本报告修订时核对）：`b-grammar-spa-fallback.spec.ts:24` 注释明言「未注入时 CDN 层不发起任何请求——GRF-01/02 的 warn/命中计数断言即构建注入守卫」。**固化诉求（姐妹篇 §7.3）仍未兑现**：`apps/web/package.json:8` build 脚本仍无 env（实测 `rg '"build"'`），任何一次无 env 重建都会令 GRF-01/02 再假红——本轮 10:08:47 重建即为先例重演。
 - typecheck：门禁记录 exit 2（转录，SUSP-06/WSX-12 两处 TS 类型错误）→ `e0c0951` 修复 → 本报告撰写时复跑 **`pnpm typecheck` exit 0**（tsc -b packages + svelte-check 0 errors 0 warnings，实测，命令与输出见本节）。build exit 0 / cargo exit 0：**workflow 转录，本报告未复跑**（build 会覆写共享产物；cargo 未执行）。
 
 ### 2.2 运行实例与双套件通道
@@ -57,7 +57,7 @@
 ### 2.3 门禁与回归范围口径（重要，防止误读）
 
 - **新场景门禁集**（47 的构成）：default 侧 3 个新 spec——`b-wsx-recovery` 6 + `b-tab-actions-enrichment` 10 + `b-susp-verify` 9 = 25 声明用例（grep 实测）× 双 project = 50 执行 − 3 条 TAX mobile skip（TAX-02/03/10 按 project 惯例跳过，域材料转录）= **47 通过**。server 侧 `b-wsx-root-channel` 6 用例不在 default 门禁集（§2.2）。
-- **全量回归**：default 全套件（含全部 t-\* 既有回归锚与本轮新增 b-\*），执行 481+6=487；声明用例数 `e2e/` 260 + `e2e-server/` 69 = **329**（grep `'^\s*test\('` 实测；其中本轮新增 25+6=31，存量 298 与姐妹篇 §2.3 基线 235+63 严丝合缝）。执行数与声明数×2 project 的差 = 条件 `test.fixme`（`e2e/` 内 32 处声明，grep 实测）与 TAX 3 条 mobile skip 的运行期展开，未逐项盘点（如实标注）。
+- **全量回归**：default 全套件（含全部 t-\* 既有回归锚与本轮新增 b-\*），执行 481+6=487；声明用例数 `e2e/` 260 + `e2e-server/` 69 = **329**（grep `'^\s*test\('` 实测；其中本轮新增 25+6=31，存量 298 与姐妹篇 §2.3 基线 235+63 严丝合缝）。对账**如实标注未闭合**：潜在执行 260×2=520，实录 481+6=487（另有 flaky 2）——**差 33 条执行未逐项对账**：可点名者仅 TAX 3 条 mobile skip（`b-tab-actions-enrichment.spec.ts:323/:401/:742` 三处 `test.skip(project!=='chromium')`，本报告修订时 grep 实测），其余归于条件 `test.fixme`（`e2e/` 内 32 处声明 × 双 project 的条件展开，哪些条件为真未盘点）及其他运行期 skip；workflow 转录未含 skipped/flaky 汇总行，等号不写死。
 - **server 套件全量本轮未跑**（`regression.server=null`）——全量回归结论限于 default 通道，见 §7。
 
 ---
@@ -91,12 +91,12 @@
 
 | 轮次 | 套件（通道） | 通过 | 失败 | exit | 时点（.last-run.json 实测） | 处置 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | default（vite preview:4173） | 47 | 0 | 0 | 2026-10-14 09:38:45 | 全绿（执行于 `80de937` 树，§执行版本口径） |
+| 1 | default（vite preview:4173） | 47 | 0 | 0 | 2026-10-14 09:38:45 | 全绿（落盘时点界于 80de937/b56e908 与 e0c0951 之间，起跑树盘上不可判定——所涉提交均纯测试侧，§执行版本口径） |
 | 2 | default（vite preview:4173） | 47 | 0 | 0 | 2026-10-14 09:48:10 | 全绿（`e0c0951` 后） |
 | 3 | default（vite preview:4173） | 47 | 0 | 0 | 2026-10-14 09:48:45 | 全绿；newGateFinal 47/0 |
 
 - **与姐妹篇门禁的差异**：本轮三轮零失败、零分诊、零修复——姐妹篇轮 1 的 6 个 CDN 注入假红未重演（本轮门禁构建步骤携 `VV_GRAMMAR_CDN` 注入，`cdnInjected=true` 转录；且新场景集不含 GRF 用例，注入敏感面为 WSX-03/04 的 PATH 拓扑与 grep 宣告面，不依赖构建期 CDN 注入）。
-- **域材料本地实跑记录（均先于门禁、超出 --list 的验证，转录）**：WSX server 6 passed (19.3s)、WSX default 12 passed (9.6s)（--retries=0），过程中修正 4 处脚本侧错误（root0 目录漏建、sub 夹具内容串命中集、search 越界文案按不可达分支断言、allTexts API 误用）；TAX 首轮 9 失败全部根因定位——8 处断言/夹具错误修复 + 1 处真实产品缺陷候选 SUS-TAX-1（改锚现状并记录，§4.3），终态 17 passed/3 skipped；SUSP 两轮 18/18（26.6s/27.0s）+ GRF 全组 16 passed（`b56e908` 标题修订后验证不破坏）。
+- **域材料本地实跑记录（均先于门禁、超出 --list 的验证，转录）**：WSX server 6 passed (19.3s)、WSX default 12 passed (9.6s)（--retries=0），过程中修正 4 处脚本侧错误（root0 目录漏建、sub 夹具内容串命中集、search 越界文案按不可达分支断言、allTexts API 误用）；TAX 首轮 9 失败全部根因定位——8 处断言/夹具错误修复 + 1 处真实产品缺陷候选 SUS-TAX-1（改锚现状并记录，§4.3），终态 17 passed/3 skipped；SUSP 两轮 18/18（26.6s/27.0s）+ GRF 全组 8 用例 × 双 project = 16 执行全过（`b56e908` 标题修订后验证不破坏）。
 - 诊断用临时 spec（TAX 域 zz-debug-\*）已全部删除、未留仓库（域材料声明，`git status` 干净佐证）。
 
 ---
@@ -113,13 +113,13 @@
 
 **（2）BUG-201——窗口流式下大文件行索引无自动推进通道（product-bug，medium，verified）**
 
-- **现象确认（复核复跑实证，转录）**：`pnpm --filter web exec playwright test e2e/b-code-highlight-degrade.spec.ts -g "BUG-20"` → chromium+mobile 双 project 2 failed，同断言 `Expected "行: 338770" / Received "行: 3640"`（`b-code-highlight-degrade.spec.ts:179`）；每项目首轮+retry 共 4 次运行同冻结值 3640（轮询 40+ 次不变，「高亮: 解析中…」仅前 3-4 次）——**确定性失败非 flaky**。24391439=338770×72−1 与用例页内构造吻合；3640=262080/72 即首块 256KB 完整行数。
-- **判缺陷（读码裁决，转录；本报告未逐行重验）**：`packages/render-text/src/code.ts:1734-1736` start() 排空 while 条件含 `bs.atEnd()`（range 流式恒假、不排空）；:1697-1698 maybeContinue 唯一续读闸「距已加载尾 >WINDOW_CONTINUE_MARGIN_LINES(20) 行即 return」（:1150）；rg 全文件无 requestIdleCallback/setInterval 索引泵——滚动贴近尾 20 行内是唯一 IO 推进通道，不滚动永不自愈。高亮管线正常完成（tree-sitter 着色）而行数冻结——高亮与索引泵相互独立。契约：io spec §4.3「行索引后台逐块推进、可取消」+ §8 豁免清单无 code 总行数项；既有契约断言受 io plan:17「既有断言零变更」保护而必挂。git 考古：断言入库 `678ce2c`（10-10）早于窗口流式引入 `89ca699`（10-13），断言文件此后零改动（`git log` 输出为空，复核会话实测）。
-- **处置建议（开修复立项）**：补后台索引泵（如 idle 推进）；修复后 BUG-20 契约锚应转绿。severity medium：核心读阅/滚动/着色不受影响，但状态栏行数误导（无「N+」提示的冻结值）且必挂契约断言。
+- **现象确认（两级实证）**：复核会话复跑（转录：chromium+mobile 双 project 2 failed，4 次运行同冻结值）+ **本报告修订时亲手复跑** `pnpm exec playwright test e2e/b-code-highlight-degrade.spec.ts -g "BUG-20"`（apps/web 下）→ **2 failed**，失败点 `b-code-highlight-degrade.spec.ts:179:47`（`Expected "行: 338770"`）；call log 实录——前 4 次轮询「高亮: 解析中… · … · 行: 3640」→ 后 40 次轮询「高亮: tree-sitter · 执行: 本地 · … · 行: 3640」，**着色已完成而行数恒冻结 3640，确定性失败非 flaky**（与转录的 4 次运行同冻结值相互印证；3640=262080/72 即首块 256KB 完整行数，24391439=338770×72−1 与用例页内构造吻合）。
+- **判缺陷（读码裁决，转录；本报告未逐行重验）**：`packages/render-text/src/code.ts:1734-1736` start() 排空 while 条件含 `bs.atEnd()`（range 流式恒假、不排空）；:1697-1698 maybeContinue 唯一续读闸「距已加载尾 >WINDOW_CONTINUE_MARGIN_LINES(20) 行即 return」（:1150）；rg 全文件无 requestIdleCallback/setInterval 索引泵——滚动贴近尾 20 行内是唯一 IO 推进通道，不滚动永不自愈。高亮管线正常完成（tree-sitter 着色）而行数冻结——高亮与索引泵相互独立（修订时复跑 call log 再证，见上）。契约：io spec（docs/superpowers/specs/2026-10-12-io-streaming-design.md，路径本报告修订时核对）§4.3:98「行索引后台逐块推进、可取消」+ §8:131-136 豁免清单 4 项无 code 总行数项（修订时核对）；既有契约断言受 io plan（docs/superpowers/plans/2026-10-12-io-streaming-3-code.md）:17「既有断言零变更」保护而必挂。git 考古：断言入库 `678ce2c`（10-10）早于窗口流式引入 `89ca699`（10-13），断言文件此后零改动（`git log` 输出为空，复核会话实测）。
+- **处置建议（开修复立项）**：补后台索引泵（如 idle 推进）；修复后 BUG-20 契约锚应转绿。**同锚伴生缺口并入本条定档**（§5.2 #7 上报的「滚动条一步到底停在已加载尾、无贴底跟随」在此落档，回应「一个 issue 还是两个」）：根因同源——无索引泵时一步到底的落点即已加载尾，续读推高 scrollHeight 后视口退离尾部、maybeContinue 续读闸（距尾 >20 行即 return）不再触发，故无贴底跟随；修复验收判据须同时覆盖「行数到达终值」与「贴底跟随」两面。severity medium：核心读阅/滚动/着色不受影响，但状态栏行数误导（无「N+」提示的冻结值）且必挂契约断言。
 
 ### 4.2 SUSP 定档表（9 条；现象确认 = 探针 e2e 实证，定档 = 读码裁决）
 
-**总口径**：9 探针全绿（门禁 47 含其 chromium+mobile 双跑 + 复核会话本地 18 passed ×2 轮，转录；SUSP-07 另有本报告复跑实测）——**「现象确认」9/9，probe-negative 0**；「定档」仅 SUSP-07 判缺陷，其余 8 条 confirmed-design（维持现状记录，承诺面证据在各条 evidence/域文档）。探针绿只证现象在，不证是缺陷——两层严格分列。SUSP-08（第 10 条）无探针，维持并入既有 BUG-53 随其修复验收。
+**总口径**：9 探针全绿（门禁 47 含其 chromium+mobile 双跑 + 复核会话本地 18 passed ×2 轮，转录；SUSP-07 另有本报告复跑实测）——**「现象确认」9/9，probe-negative 0**；「定档」仅 SUSP-07 判缺陷，其余 8 条 confirmed-design（**7 条维持现状记录 + SUSP-09 关闭**，承诺面证据在各条 evidence/域文档）。探针绿只证现象在，不证是缺陷——两层严格分列。SUSP-08（第 10 条）无探针，维持并入既有 BUG-53 随其修复验收。
 
 | 编号 | 位置 | 现象（探针实证确认） | 定档 | 处置建议 |
 | --- | --- | --- | --- | --- |
@@ -131,13 +131,13 @@
 | SUSP-06 | `core-parse.ts:266-273` | 同源 manifest 剥离 java 条目打开 java 文件，/queries/java/** 空打（≥1）而 java.wasm 零请求——doPrepare 先 expandQueryAsync 后 resolveGrammarEntry 的执行顺序**首次运行期实证**（此前仅读码推断） | confirmed-design（design） | 维持现状记录（低害冗余 IO，整语言降级 hljs 兜底生效）；doPrepare 内将 resolveGrammarEntry 前置可作**微优化立项候选** |
 | **SUSP-07** | **`FileTree.svelte:35`** | /api/tree 一律 500 下连接成功、来源标签行在场但树区零行，1.5s 窗零「加载失败」文案零错误卡片——与 TreeNodeRow.svelte:32-38 的 BUG-24 状态栏提示通道不成对，多根来源呈「静默空树」 | **confirmed-bug（medium，verified）** | **开修复立项（BUG-24 同族）**：复用 showStatusNotice 通道按源提示，保留失败隔离；修复后补正向锚并翻转探针负向断言（§4.1） |
 | SUSP-09 | `av.ts:456-464` + `ViewerPane.svelte:245-255` | av 内构错误卡片「以 hex 打开」上位后 MetaPanel 打开方式下拉维持 value=''（自动）且无（手动）标记——内构链直调 hex.render+takeOver 不经 dispatch 重入不写 override | confirmed-design（design） | 关闭（与既有 OWX-03 同锚同判据：两条链 UI 语义一致——「临时查看不落 override」，差异仅实现路径，error-card-open-as.md §1 已记录为架构事实；「同按钮不同语义」担忧不成立） |
-| SUSP-10 | `av.ts:457` | 远端截断 mp4（300B）卡片上位 hex 零新增请求（打开期 1 条全量读后 settle 零增量，双 project）——内构链以手头全量 buffer 渲染，无 StreamCtx 窗口流式 | confirmed-design（design） | 维持现状记录（error-card-open-as.md §1 已有案，行为正确性记录——300B 全量在手零 Range 是正确行为）；内构链流式化属**架构演进项**，非缺陷，暂不立项 |
+| SUSP-10 | `av.ts:458`（修订时核对：:457 为 release()，`hex.render(buffer,…)` 调用在 :458；域材料原引 ：457 系行号偏差） | 远端截断 mp4（300B）卡片上位 hex 零新增请求（打开期 1 条全量读后 settle 零增量，双 project）——内构链以手头全量 buffer 渲染，无 StreamCtx 窗口流式 | confirmed-design（design） | 维持现状记录（error-card-open-as.md §1 已有案，行为正确性记录——300B 全量在手零 Range 是正确行为）；内构链流式化属**架构演进项**，非缺陷，暂不立项 |
 
 ### 4.3 本轮新增 unconfirmed（未定档；域材料 suspects + 本报告核对）
 
 | 编号 | 位置 | 现象 | 证据与状态 | 处置 |
 | --- | --- | --- | --- | --- |
-| SUS-TAX-1（缺陷候选） | `openFlow.svelte.ts:868-876`（注释宣称「先关闭同 base 的旧 remote tab（目录 + 文件）」）+ `remote.ts:43-48/198` | 同 base 换 token 重连的清扫不彻底：目录 tab+文件 tab 并存时，清扫循环只关掉目录 tab——关目录 tab 使旧 store 实例失去最后持有者 → releaseStoreIfLast 终结实例（SSE#1 关闭、base 登记删除）→ 循环走到文件 tab 时 getRemoteBase 已返回 undefined 匹配落空。幸存文件 tab（同 storeId）不在新连接 watch 内（丢 SSE 自动刷新）但 read 仍可用（非死件） | 域材料实跑取证（2026-10-14 构建 08114d2，MutationObserver tab 增删 + IndexedDB 快照；TAX-09 按现状锚定「幸存+可读+清扫贡献 0 撤销条目」）——转录；本报告核对 `openFlow.svelte.ts:869` 注释与 :872-874 清扫循环在位（实测）。**未定档** | 缺陷候选，待分诊；修复期按 `tab-actions-enrichment.md` §3.1 预写改法回改 TAX-09 期望。另 TAX-09 假服务器需 OPTIONS 预检（带 authorization 头为非简单请求）属夹具扩展非产品缺陷 |
+| SUS-TAX-1（缺陷候选） | `openFlow.svelte.ts:868`（注释宣称「先关闭同 base 的旧 remote tab（目录 + 文件）」）+ `packages/core/src/tree/remote.ts`（注册 ：43/:149、**close 清理 ：328**、getRemoteBase :45-47——域材料原引 ：198 不确，:196-199 实为响应 detail 处理，本报告修订时 grep 实测；仓库另有一 `compute/remote.ts`，所指为 tree/） | 同 base 换 token 重连的清扫不彻底：目录 tab+文件 tab 并存时，清扫循环只关掉目录 tab——关目录 tab 使旧 store 实例失去最后持有者 → releaseStoreIfLast 终结实例（SSE#1 关闭、base 登记删除）→ 循环走到文件 tab 时 getRemoteBase 已返回 undefined 匹配落空。幸存文件 tab（同 storeId）不在新连接 watch 内（丢 SSE 自动刷新）但 read 仍可用（非死件） | 域材料实跑取证（2026-10-14 构建 08114d2，MutationObserver tab 增删 + IndexedDB 快照；TAX-09 按现状锚定「幸存+可读+清扫贡献 0 撤销条目」）——转录；本报告核对 `openFlow.svelte.ts:868` 注释（修订时确认首行在 ：868，原稿误引 ：869，:869 为续行）与 ：872-874 清扫循环在位（实测）。**未定档** | 缺陷候选，**挂账待编排方分配分诊轮次**（改法已预写：`tab-actions-enrichment.md` §3.1，修复期回改 TAX-09 期望）。另 TAX-09 假服务器需 OPTIONS 预检（带 authorization 头为非简单请求）属夹具扩展非产品缺陷 |
 | WSX 观察 1（现象记录） | `server/src/routes/search.rs:293-299` 对照 `guard.rs:37-38` | parser_roots 的越界 400 分支（文案 `root index {i} out of range`）实跑证实不可达——带 root 请求在 guard::resolve_at 阶段已被前置拒绝，可达文案为 `root index out of range: 2`（WSX-02 初版按 search.rs 文案断言失败、改按 guard 文案通过）——防御式死分支+两处文案不一致 | 本报告核对两处文案确实不一致（search.rs:299 `root index {i} out of range` vs guard.rs:38 `root index out of range: {root_idx}`，sed 实测）；不可达性为 WSX-02 实跑（转录）。无用户可见影响，不裁断危害 | 记录在案，随 server 侧后续改动顺带清理 |
 | WSX 观察 2（现象记录） | `TabContextMenu.svelte:63-74`（域材料引 :49-51 系行号漂移，机制在位） | 右键菜单对任意滚动立即关闭（:69 `window.addEventListener('scroll', onGone, true)` capture，:13 注释明示设计意图）：mobile 375px 下 TabBar 溢出（app.css:345 overflow-x:auto）时右键自带的自动滚动尾随 scroll 事件把刚弹出的菜单秒关——WSX-08 mobile 实跑确定性复现（须 scrollIntoViewIfNeeded+250ms 滚动静默才能右键成功；单 tab 无溢出的 WS-06/TA 先例不触发） | 本报告核对 :67-69 监听在位（sed 实测）；溢出复现为 WSX-08 mobile 实跑（转录）。溢出场景触屏用户 tab 右键可用性存疑，不裁断 | 记录在案；如复核立项可考虑滚动来源过滤或右键期豁免 |
 | WSX 观察 3（环境注意事项，非产品） | 测试环境 | 同仓库多域 agent 并发跑 playwright 时 `apps/web/test-results/` 互相覆盖（WSX-08 mobile 失败现场 error-context.md 曾被并行域产物替换，需重跑取证）；:4173 preview 经 `reuseExistingServer: !CI` 跨域复用 | 域材料记录（转录） | 并行开发时失败现场须即时收割；门禁统一单入口跑时不存在 |
@@ -166,11 +166,11 @@
 | 7 | `b-code-highlight-degrade` BUG-20 契约锚 [chromium] | **test-issue**（附带产品缺口上报） | 契约断言（20s 内行数=338770）与窗口流式现实冲突；一步到底停在已加载尾、无贴底跟随（scrollTop=scrollHeight 一步到底末行恒 3651≠338770，续读一次即停机） | 断言移至滚动推进完成后/改渐进到达口径；「一步到底」改绝对坐标或多步贴底；附带缺口（滚动条一步到底无贴底跟随）与 #8 合并定档 |
 | 8 | `b-code-highlight-degrade` BUG-20 契约锚 [mobile] | **product-bug（verified）** | 同一断言同冻结值 3640 × 4 次运行（轮询 40+ 次）——根因为行索引无自动推进通道（**BUG-201**，§4.1(2)）；对分诊的一处修正：「高亮： 解析中…」仅前 3-4 次轮询出现、随后转 tree-sitter 而行数仍冻结——着色与索引推进相互独立，缺的是索引泵 | **开修复立项**（BUG-201，medium）；修复后本契约锚应转绿，#7 的断言改写随之落地 |
 
-分诊纪律：8 条记录全部给出命令级证据（复跑输出/轮询 call log/git 考古/一次性探针）；retry 期一次 preview server 死亡（ERR_CONNECTION_REFUSED）经复核复跑未再现，确认为与本病无关的次生环境现象（转录）。
+分诊纪律：8 条记录均附命令级证据（复跑输出/轮询 call log/git 考古/一次性探针）——**证据本体为分诊会话记录（转录），未落盘归档**（`ls apps/web/.temp` 实测 10-14 无 triage 目录，pw-out-triage-\* 全为 10-13 姐妹篇产物；一次性探针已清理）；盘上可验的是失败现场本身（`pw-full-def` 14 个目录的 error-context，含各条失败签名与轮询 call log）与 §4.1(2) 修订时补跑。retry 期一次 preview server 死亡（ERR_CONNECTION_REFUSED）经复核复跑未再现，确认为与本病无关的次生环境现象（转录）。
 
 ### 5.3 37 条历史缺陷的回归验收结论
 
-**「37 条历史缺陷的回归验收由全量套件承载」——本轮兑现**（姐妹篇 §7.2 明文所欠的载体）：2026-10-10 轮 37 条确认缺陷的回归锚点（t-\* 既有断言）随本轮 default 全量套件实跑，**除 §5.2 的 8 条记录外全绿；8 条记录经分诊无一条定性为「历史缺陷修复回退」**——2 条 env-flaky（环境）、5 条 test-issue（窗口流式换代引发的断言时代差，被换代对象为 io spec §4.3 防线而非历史缺陷修复）、1 条 product-bug（**新产品缺陷** BUG-201，非旧修复回退；其挂掉的 BUG-20 契约锚受 io plan:17「既有断言零变更」保护而必挂）。即：**37 条历史缺陷的修复在本轮全量实跑中未见回归失败**。口径限定（如实标注）：本结论限于分诊定性层面——本轮未做 37 条编号与 t-\* 用例的逐条映射盘点；且承载面为 default 通道，server 通道未跑（§7）。
+**「37 条历史缺陷的回归验收由全量套件承载」——本轮兑现**（姐妹篇 §7.2 明文所欠的载体）：2026-10-10 轮 37 条确认缺陷的回归锚点（t-\* 既有断言）随本轮 default 全量套件实跑，**除 §5.2 的 8 条记录外全绿；8 条记录经分诊无一条定性为「历史缺陷修复回退」**——2 条 env-flaky（环境）、5 条 test-issue（窗口流式换代引发的断言时代差，被换代对象为 io spec §4.3:98 防线而非历史缺陷修复；其中 **PERF-LAZY 的 25MB 级推进性能定档悬置**——§5.2 #6 自注「需单独定档」，未排除「索引泵过慢=产品性能缺陷」，不随归类关账）、1 条 product-bug（**新产品缺陷** BUG-201，非旧修复回退；其挂掉的 BUG-20 契约锚受 io plan〔docs/superpowers/plans/2026-10-12-io-streaming-3-code.md〕:17「既有断言零变更」保护而必挂）。**须点名的事实（防「37 锚全绿」误读）**：BUG-20 本身即 37 条之一（e2e-test-report-2026-10-10.md:594，本报告修订时核对），其契约锚本轮 chromium+mobile **双红**（§5.2 #7/#8，盘上 4 个现场目录实测）——「无修复回退」的成立依据是**分诊定性**（断言时代差 + 新缺口 BUG-201）而非锚绿，本结论含 1 条锚红经分诊豁免的情形。故准确表述为：**37 条历史缺陷的修复在本轮全量实跑中无一条定性为修复回退**。口径限定（如实标注）：本结论限于分诊定性层面——本轮未做 37 条编号与 t-\* 用例的逐条映射盘点（BUG-20 因锚双红而显式点名，其余 36 条按「无定性失败」覆盖）；且承载面为 default 通道，server 通道未跑（§7）。
 
 ---
 
@@ -196,7 +196,7 @@
 - **姐妹篇 §7.3 env 注入固化：未兑现**——`apps/web/package.json:8` build 脚本仍无 env（实测），且撰写时产物已被 10:08:47 无 env 重建覆盖（先例重演，§2.1）；三档固化选项仍待裁决。
 - **两条 verified 缺陷修复未落地**：SUSP-07、BUG-201 本轮仅定档/立项（§4.1），修复归后续轮。
 - **SUSP-04 文档路线半程**：域文档/矩阵注释已对齐现实，io spec §2.3 本体「停在该块」旧文字待清（§4.2）。
-- **姐妹篇 SCAN/JVL/DEG/OWX 域缺口清单：本轮未动（非本轮范围），维持原样**——SCAN (a)failedBlocks 机制归因仅单测/(b)进度节流仅单测/(c)destroy 收口未布点/(d)嗅探归 DEG/JVL；JVL (a)25c704e 恰界停机按裁决不设/(b)缓存上限仅单测/(c)JVL-08 DOM 代理面/(e)helper 整并；DEG (a)恰界停机/(c)zip 形态/(e)hex tail 面；OWX ①二进制→hex 排前无 dispatcher 级锚/②image 形态随 BUG-53/③排序窄化设计裁决候选。其中 OWX 相关的 SUSP-09/10 疑虑经本轮复核**关闭**（§4.2），属增量。
+- **姐妹篇 SCAN/JVL/DEG/OWX 域缺口清单：本轮未动（非本轮范围），维持原样**——SCAN (a)failedBlocks 机制归因仅单测/(b)进度节流仅单测/(c)destroy 收口未布点/(d)嗅探归 DEG/JVL；JVL (a)25c704e 恰界停机按裁决不设/(b)缓存上限仅单测/(c)JVL-08 DOM 代理面/(e)helper 整并；DEG (a)恰界停机/(c)zip 形态/(e)hex tail 面；OWX ①二进制→hex 排前无 dispatcher 级锚/②image 形态随 BUG-53/③排序窄化设计裁决候选。其中 OWX 相关疑虑经本轮复核**分层收口**：SUSP-09 **关闭**（与既有 OWX-03 同锚同判据）、SUSP-10 **维持现状记录**（行为正确性记录，非关闭）——§4.2，属增量。
 - **WSX 域新增剩余缺口**：QuickOpen Ctrl+P 多源扩域（设计承诺扫描全部源、结果带源名前缀）无 e2e；文件树源级操作（折叠/移除源+移除确认连带关 tab）无 e2e；watch-log --log-file 轮转（10MB 阈值运维面）、ErrorLogGate 限频与 EnvFilter 默认——设计原文即归 Rust 单测，非 e2e 缺口。
 - **TAX 域剩余缺口**：duplicate 作用于目录 tab / 与手选打开方式（overrideRenderer）组合未布点（后者属 open-with 域交叉）；pinned 目录 tab 跨刷新锚在 workspace 域（WS-06/M-5）不重复；触屏拖拽 spec 明示不做无布点面；跨组移动 tab 为 spec §1 非目标（文档 §1 已记录）；SUS-TAX-1 修复后应回改 TAX-09 期望（文档 §3.1 已预写改法）。
 - **SUSP 域后续面**：探针为现状固化器——产品修复落地时须按 `susp-verification.md` §3 改写方向同步转写为回归锚；SUSP-02 断言取 ≥2 下界（记录恰 2 次、容忍刷新节奏差异）；SUSP-08 无探针（随 BUG-53 修复验收）。
@@ -234,6 +234,7 @@
 | --- | --- | --- |
 | 新场景门禁三轮 | `apps/web/.temp/pw-out-r1|r2|r3/.last-run.json` | 2026-10-14 09:38:45 / 09:48:10 / 09:48:45，均 status passed、failedTests 空；无 error-context 目录（零失败） |
 | 全量回归 | `apps/web/.temp/pw-full-def/` | `.last-run.json`（10:07:09，status failed、failedTests 恰 6：b-code-highlight-degrade ×3 + t-hl ×3）+ **14 个失败现场目录**（6 终态 × 含 retry1 + 2 flaky 单现场），与 §5.2 清单逐一对应 |
+| 本轮回归分诊证据 | 分诊会话记录（转录；**无盘上归档目录**） | 8 条分诊注的复跑输出/轮询 call log/git 考古/一次性探针**未落盘**（`ls apps/web/.temp` 实测 10-14 无 triage 目录，pw-out-triage-\* 全为 10-13 姐妹篇产物；/tmp 一次性探针已清理）；盘上可验为 `pw-full-def` 14 个现场目录内的失败签名与 call log。**修订时补跑**：BUG-20 `-g` 复跑 2 failed（§4.1(2)，输出在会话内未归档） |
 | server 套件输出（姐妹篇产物，非本轮） | `apps/web/.temp/pw-srv-out-r1`（10-13 19:53:07）/ `pw-srv-out-r2`（10-13 20:18:02） | 均 passed——本轮 server 无门禁轮次与全量（§2.2/§7.1） |
 | 域三件套 | `docs/e2e/{workspace-enrichment,tab-actions-enrichment,susp-verification}.md` + 4 个 spec | 在盘实测；spec 用例数 6/6/10/9（grep 实测） |
 | 构建产物 | `apps/web/build/` | 2026-10-14 10:08:47 重建，**无注入指纹**（rg exit 1）——警示 §2.1，固化诉求未兑现 |
@@ -241,4 +242,4 @@
 
 ---
 
-*报告完。被测版本与执行版本口径、提交链与时间线、4 spec 用例数与全量声明数（260/69/329）、构建产物注入指纹（exit 1）、门禁三轮与全量回归的盘上状态文件与现场目录数、typecheck 复跑 exit 0、SUSP-07 探针复跑 2 passed、以及 §4.3 所引源码行（FileTree.svelte:35 / search.rs:293-299 / guard.rs:37-38 / openFlow.svelte.ts:868-876 / TabContextMenu.svelte:63-74），为本报告撰写时亲手实测/核对（命令与输出见各节）；门禁与回归的通过/失败计数、cdnInjected/build/cargo、域材料本地实跑明细、SUSP 9 条定档的读码证据、BUG-201 复核复跑与 SUS-TAX-1 取证实跑、回归分诊 8 条记录，为 workflow/复核会话/域材料转录（逐处已标注）。verified 与 unconfirmed 全程区分——本轮 verified 产品缺陷 2 条（SUSP-07、BUG-201，均 medium 开修复立项），新增缺陷候选 1 条（SUS-TAX-1）与现象记录 2 条均未定档；9 条存疑探针全绿（现象确认）而仅 1 条判缺陷（读码裁决）。「37 条历史缺陷的回归验收由全量套件承载」已兑现且无修复回退定性失败（编号级映射未做，§5.3）；server 通道全量未跑、6 条终态回归失败未修复（§7）。*
+*报告完。被测版本与执行版本口径、提交链与时间线、4 spec 用例数与全量声明数（260/69/329）、构建产物注入指纹（exit 1）、门禁三轮与全量回归的盘上状态文件与现场目录数、typecheck 复跑 exit 0、SUSP-07 探针复跑 2 passed、BUG-20 契约锚修订时补跑（2 failed，冻结值 3640 复现，§4.1(2)）、以及被引源码/文档行（FileTree.svelte:35 / search.rs:293-299 / guard.rs:37-38 / openFlow.svelte.ts:868 / TabContextMenu.svelte:63-74 / av.ts:457-458 / tree/remote.ts:43/149/328 / b-grammar-spa-fallback.spec.ts:24 / io spec §2.3:65·§4.3:98·§8:131-136 / io plan:17 / 姐妹篇：594 / TAX skip :323/:401/:742），为本报告撰写及修订时亲手实测/核对（命令与输出见各节）；门禁与回归的通过/失败计数、cdnInjected/build/cargo、域材料本地实跑明细、SUSP 9 条定档的读码证据、SUS-TAX-1 取证实跑与回归分诊 8 条记录，为 workflow/复核会话/域材料转录（逐处已标注；BUG-201 的复核复跑原为转录，修订时已由本报告亲手复跑坐实）。verified 与 unconfirmed 全程区分——本轮 verified 产品缺陷 2 条（SUSP-07、BUG-201，均 medium 开修复立项），新增缺陷候选 1 条（SUS-TAX-1）与现象记录 2 条均未定档；9 条存疑探针全绿（现象确认）而仅 1 条判缺陷（读码裁决），8 条 confirmed-design 按「7 维持现状记录 + SUSP-09 关闭」口径计。「37 条历史缺陷的回归验收由全量套件承载」已兑现，且无修复回退定性失败——含 BUG-20 锚双红经分诊豁免 1 条与 PERF-LAZY 性能定档悬置（编号级映射未做，§5.3）；server 通道全量未跑、6 条终态回归失败未修复（§7）。*
