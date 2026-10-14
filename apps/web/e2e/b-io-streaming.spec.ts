@@ -905,11 +905,21 @@ test('IO-10：扫描取消不悬挂 + 扫描中滚动交错——stall 门冻结
       { timeout: 10_000 }
     );
 
-    // 第二次扫描至 EOF：贴底末行真实渲染（取消/交错后索引完好、消费契约未破坏）
-    await pre.evaluate((el) => {
-      el.scrollTop = el.scrollHeight;
-    });
+    // 第二次扫描至 EOF：贴底末行真实渲染（取消/交错后索引完好、消费契约未破坏）。
+    // 贴底循环（SCAN-10 同语义）：一次性 scrollTop 在泵推进期间被钳在已加载底，
+    // 循环重设直至末行入窗
     const lastLine = SCAN_JS_ROWS - 1;
+    await pre.evaluate(
+      async (el, last) => {
+        for (let i = 0; i < 300; i++) {
+          el.scrollTop = el.scrollHeight;
+          await new Promise((r) => setTimeout(r, 50));
+          if (el.querySelector(`[data-line="${last}"]`) !== null) return;
+        }
+        throw new Error('code 续读未在预算轮次内到达 EOF');
+      },
+      lastLine
+    );
     await expect(pre.locator(`.vv-code-line[data-line="${lastLine}"]`)).toContainText(
       `v${lastLine}`,
       { timeout: 15_000 }

@@ -390,12 +390,20 @@ test('PERF-LAZY：25MB 文件懒高亮性能锚点——首屏纯文本 <1s、�
   const LAZY_ARRIVAL_BUDGET = process.env.CI ? 8_000 : 2_000;
   const pre = page.locator('.vv-code-pre');
   const TARGET = 1_100_000;
-  await pre.evaluate((el, line) => {
-    el.scrollTop = line * 20;
-  }, TARGET);
-  await expect(pre.locator(`[data-line="${TARGET}"]`).first()).toBeVisible({
-    timeout: 90_000
-  });
+  // 循环跟随（SCAN-10 贴底循环同语义）：一次性 scrollTop 在行数未达时被钳在已加载
+  // 底，泵推进 spacer 增高不劫持滚动位置（虚拟滚动固有语义）——行数增长后重设目标
+  // 直至目标行入窗；行存在（索引推进到目标行）与着色预算分离计量不变
+  await pre.evaluate(
+    async (el, line) => {
+      for (let i = 0; i < 600; i++) {
+        el.scrollTop = line * 20;
+        await new Promise((r) => setTimeout(r, 120));
+        if (el.querySelector(`[data-line="${line}"]`) !== null) return;
+      }
+      throw new Error('25MB 索引未在预算轮次内推进到目标行');
+    },
+    TARGET
+  );
   const t1 = Date.now();
   await expect(
     pre.locator(`[data-line="${TARGET}"] span[class^="ts-"]`).first()
