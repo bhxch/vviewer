@@ -7,7 +7,7 @@
     "dev": "vite dev",
     "build": "node ../../tools/gen-icons.mjs && vite build && node scripts/check-pwa-build.mjs",
     "preview": "vite preview",
-    "typecheck": "svelte-check --tsconfig ./tsconfig.json"
+    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
     "@vviewer/core": "workspace:*",
