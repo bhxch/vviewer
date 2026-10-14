@@ -33,6 +33,14 @@
 
   let menuEl = $state<HTMLElement | null>(null);
 
+  /** 打开动作自身滚动的宽限窗（毫秒）：溢出 TabBar 上右键裁剪目标时，动作性滚动
+   * （浏览器/自动化 scrollIntoView、触屏裁剪目标自动滚入）的位移虽先于 contextmenu
+   * 完成，scroll 事件却在下一渲染帧异步派发——落在菜单挂载之后，原「任意滚动即关」
+   * 会把刚弹出的菜单秒关（WSX 观察 2，TAX-11）。宽限窗只豁免打开动作自身的尾随
+   * 滚动；其后的用户滚动照常关闭（设计意图保留）。 */
+  const SELF_SCROLL_GRACE_MS = 200;
+  let openedAt = 0;
+
   /** 视口内收敛：右/下越界向内平移（8px 边距）；尺寸未测得（首帧）按 160×项数×30 估算 */
   const pos = $derived.by(() => {
     const margin = 8;
@@ -62,7 +70,11 @@
       if (t instanceof Node && menuEl !== null && menuEl.contains(t)) return; // 菜单内交互不关
       onclose();
     };
-    const onGone = (): void => onclose(); // 滚动 / resize：锚定位置失真，直接关
+    const onGone = (): void => {
+      if (performance.now() - openedAt < SELF_SCROLL_GRACE_MS) return; // 打开动作自身滚动宽限
+      onclose(); // 滚动 / resize：锚定位置失真，直接关
+    };
+    openedAt = performance.now();
     window.addEventListener('keydown', onKey);
     document.addEventListener('pointerdown', onDown);
     // capture：scroll 不冒泡——只有捕获阶段能覆盖任意滚动容器（WorkspaceTabsPanel 同款思路）

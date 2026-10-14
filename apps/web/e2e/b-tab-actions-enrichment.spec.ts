@@ -765,3 +765,46 @@ test('TAX-10：拖拽重排不入撤销栈——撤销仍恢复最近关闭且�
   await expect(page.locator('.vv-statusbar')).toContainText(UNDO_NOTICE);
   await expect(page.locator('.vv-tab')).toHaveCount(4);
 });
+
+// ---------------------------------------------------------------- TAX-11
+
+// WSX 观察 2（富化轮现象记录）的修复验收：TabBar 溢出时右键裁剪目标的动作性滚动
+// （Playwright actionability / 触屏裁剪目标自动滚入）位移先于 contextmenu 完成，
+// 但 scroll 事件在下一渲染帧异步派发——落在菜单挂载之后，原「任意滚动即关」
+// （window capture）把刚弹出的菜单秒关。修复=开菜单后短宽限窗豁免自身触发的
+// 尾随滚动；宽限窗后的容器滚动仍关闭（「任意滚动即关」设计意图保留）。
+test('TAX-11：溢出 TabBar 右键菜单不被打开动作自身滚动秒关；宽限窗后用户滚动仍关', async ({
+  page
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium', '溢出面按桌面宽视口构造（豁免逻辑与视口无关，mobile 同路径覆盖）');
+  test.setTimeout(60_000);
+  await waitAppMounted(page);
+  const names = Array.from({ length: 22 }, (_, i) => `ovr-${String(i).padStart(2, "0")}-overflow-case.txt`);
+  await openDir(
+    page,
+    names.map((n, i) => ({ name: n, type: 'text/plain', content: `overflow ${i}\n` }))
+  );
+  for (const n of names) await openFile(page, n);
+  // 自证非空转：22 长名 tab + 管理钮远超 1280px 视口，TabBar 横向溢出
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const bar = document.querySelector('.vv-tabbar');
+        return bar !== null && bar.scrollWidth > bar.clientWidth + 1;
+      })
+    )
+    .toBe(true);
+
+  const menu = page.locator('.vv-tabctx');
+  // 末位裁剪 tab：右键强制动作性滚动（位移同步完成，scroll 事件异步尾随）
+  await page.locator('.vv-tab').last().click({ button: 'right' });
+  await expect(menu).toBeVisible();
+  await page.waitForTimeout(300); // 越过宽限窗：菜单仍开（缺陷态在此前已被秒关）
+  await expect(menu).toBeVisible();
+
+  // 宽限窗后的容器滚动仍关闭
+  await page.evaluate(() => {
+    (document.querySelector('.vv-tabbar') as HTMLElement).scrollTo({ left: 0 });
+  });
+  await expect(menu).toHaveCount(0);
+});
