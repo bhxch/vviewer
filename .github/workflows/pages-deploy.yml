@@ -48,7 +48,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # 产物不入库：web 包内置 lite 集 grammar（aliases 34 键）构建期生成；
+      # 产物不入库：web 包内置 lite 集 grammar（aliases.json 键，产出 34）构建期生成；
       # 复用 setup-grammars composite action（工具链/源树/产物三层缓存，同 release.yml web job）
       - uses: ./.github/actions/setup-grammars
         with:

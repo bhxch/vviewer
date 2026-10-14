@@ -2,7 +2,8 @@
 #   --fetch（vendored languages.toml 浅取 pinned rev → tools/grammar-builder/out/grammars）
 #   → --self-build（tree-sitter-cli 免 emcc 自建，写 apps/web/static/grammars + manifest，
 #     运行时 tree-sitter.wasm 一并就位）。
-# languages 输入：all = 全量 build-list（Grammar 门禁 / release）；lite = aliases.json 34 键
+# languages 输入：all = 全量 build-list（Grammar 门禁 / release）；
+# lite = aliases.json 36 键 → 产出 34（objc/systemrdl 无源不产出，见 grammar-builder README）
 # （release web 包）；逗号分隔名 = 显式集合（CI 单测/e2e 的最小集）。
 # 缓存三层：wasi-sdk/binaryen 工具链（~/.cache/tree-sitter）、浅取源树、生成产物——
 # 命中时 self-build 全部 skip(cached)，秒级完成。
