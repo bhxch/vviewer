@@ -122,7 +122,7 @@ jobs:
     # 版本下发给 web job（CDN env）与 release 触发 pages 的 input：
     # 内容变化 → 新 tag 版本；内容零变化 → 复用线上 latest（CDN URL 稳定、缓存继续命中）
     outputs:
-      version: ${{ jobs.publish-npm.outputs.version }}
+      version: ${{ steps.gate.outputs.version }}
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
