@@ -1754,6 +1754,13 @@ function renderCodeWindowed(
   function pumpTick(): void {
     pumpTimer = null;
     if (destroyed || pumpPaused || indexFinished || limitReached || encodingBroken || continueFailed) return;
+    if (scan !== null) {
+      // 扫描在飞：泵让位（扫描自身逐块喂向 EOF，索引照常推进；扫描进度游标/进度条
+      // 以「已扫描字节」计——泵抢喂只会推高行数而扫描游标不动，0% 假死）。慢机实证：
+      // setTimeout(0) 泵与 50ms 轮询的扫描争用单飞闸，扫描全程饿死在 0%
+      scheduleIndexPump(CODE_PUMP_WAIT_MS);
+      return;
+    }
     if (pulling) {
       scheduleIndexPump(CODE_PUMP_WAIT_MS); // 单飞闸在飞：间隔重评，不双喂
       return;
