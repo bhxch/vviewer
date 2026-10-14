@@ -94,3 +94,12 @@ jobs:
       - run: pnpm --filter web exec playwright install --with-deps chromium
       # playwright.config 的 webServer 在 CI 下自行启动 vite preview（CI 环境变量内置）
       - run: pnpm --filter web exec playwright test
+      # 失败用例 trace 取证（config 的 trace: retain-on-failure）：真实 fetch 时序
+      # 类缺陷的远程复现证据（网络面板/DOM 快照），本地不落盘仅 CI 收集
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-traces
+          path: apps/web/test-results/
+          retention-days: 7
+          if-no-files-found: ignore

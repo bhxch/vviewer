@@ -9,7 +9,12 @@ export default defineConfig({
   workers: process.env.CI ? 1 : 3,
   // 共享机器存在外部负载波动（实测一轮总时长 35s ↔ 3.1m），瞬态失败重试一次
   retries: 1,
-  use: { baseURL: 'http://127.0.0.1:4173' },
+  use: {
+    baseURL: 'http://127.0.0.1:4173',
+    // CI 失败用例留 trace（网络面板/DOM 快照——真实 fetch 时序缺陷的远程取证面，
+    // ci.yml 失败步上传 artifact；本地不落盘，避免拖慢）
+    trace: process.env.CI ? 'retain-on-failure' : undefined
+  },
   webServer: {
     command: 'pnpm vite preview --host 127.0.0.1 --port 4173 --strictPort',
     url: 'http://127.0.0.1:4173',
