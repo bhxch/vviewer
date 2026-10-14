@@ -50,7 +50,9 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  *   read + tail 部分块整块重拉 bytes=786432-921599
  * - SUSP-06：manifest 无 java 条目仍发起 /queries/java/** 空打（≥1）且 java.wasm
  *   零请求（doPrepare 先 expand 后 resolve 的执行顺序实证）
- * - SUSP-07：/api/tree 500 → 来源标签行在场、树区零行、零错误提示（静默空树）
+ * - SUSP-07：/api/tree 500 → 标签行在场、树区零行（失败隔离）、状态栏提示
+ *   「加载失败」（BUG-24 通道——confirmed-bug 修复后翻转，原静默现状存档于
+ *   susp-verification.md §SUSP-07）
  * - SUSP-09：av 卡片「以 hex 打开」上位后打开方式下拉维持「自动」无手动标记
  * - SUSP-10：远端截断 mp4 卡片上位 hex 零新增请求（buffer 全量在手，零 Range）
  *
@@ -612,7 +614,7 @@ async function startTreeFailServer(): Promise<{
   };
 }
 
-test('SUSP-07：来源根目录 listChildren 失败被静默吞掉——标签行在场、树区零行、零错误提示', async ({ page }) => {
+test('SUSP-07：来源根目录 listChildren 失败显性提示（BUG-24 同款通道）——失败隔离保留（标签行在场、树区零行）', async ({ page }) => {
   test.setTimeout(60_000);
   const srv = await startTreeFailServer();
   try {
@@ -622,19 +624,16 @@ test('SUSP-07：来源根目录 listChildren 失败被静默吞掉——标签�
     // 失败真实发生（服务器侧证据；FileTree $effect 对 listChildren('') 的调用）
     await expect.poll(() => srv.treeFails(), { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
 
-    // 记录的现状：失败来源渲染标签行（FileTree.svelte:35-36 .catch(() => []) 兜底）
-    // 但树区零行
+    // 失败隔离语义保留：来源渲染标签行，树区零行（本源空列表，不拖垮其他源）
     const drawer = await openDrawerIfNarrow(page);
     await expect(page.locator('.vv-tree-src-label')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('.vv-tree-row')).toHaveCount(0);
 
-    // 静默：观察窗内无「加载失败」提示（对照 TreeNodeRow 子目录展开失败的 BUG-24
-    // 状态栏通道，root 级失败不成对）、无错误卡片
-    await page.waitForTimeout(1_500);
-    expect(
-      await page.getByText('加载失败').count(),
-      '来源根目录失败应有提示（BUG-24 同款通道）——记录现状为静默（零提示）'
-    ).toBe(0);
+    // 修复后验收（SUSP-07 定档 confirmed-bug 修复立项；原「静默空树」现状记录见
+    // susp-verification.md）：复用 BUG-24 状态栏提示通道（TreeNodeRow 子目录展开
+    // 失败同款），观察窗内出现「加载失败」提示；错误卡片仍为零（轻量异常走状态栏
+    // 而非错误卡片，与「已取消选择文件夹」同通道口径）
+    await expect(page.getByText('加载失败')).toBeVisible({ timeout: 5_000 });
     await expect(page.locator('.vv-error-card')).toHaveCount(0);
     await closeDrawerIfOpened(page, drawer);
   } finally {

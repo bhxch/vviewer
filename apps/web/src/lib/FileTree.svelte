@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { TreeStore, TreeNode } from '@vviewer/core';
   import TreeNodeRow from './TreeNodeRow.svelte';
+  import { showStatusNotice } from './openFlow.svelte';
 
   let { sources, excludedPatterns = [], onopen, onremove }: {
     /** 当前 workspace 的全部可渲染来源（AppShell 由 workspace.sources × 活动实例解析） */
@@ -32,7 +33,14 @@
         nodes: await src.store
           .listChildren('')
           .then((list) => list.filter((n) => !excluded(n.name)))
-          .catch(() => [] as TreeNode[])
+          .catch((err: unknown) => {
+            // SUSP-07：根级加载失败不再静默——复用 BUG-24 状态栏提示通道
+            //（TreeNodeRow 子目录展开失败同款），失败隔离语义保留（本源空列表
+            // 不拖垮其他源）；轻量异常走状态栏一次性提示而非错误卡片
+            const message = err instanceof Error ? err.message : String(err);
+            showStatusNotice(`来源 ${src.label} 加载失败：${message}`);
+            return [] as TreeNode[];
+          })
       }))
     ).then((rs) => {
       if (!cancelled) roots = rs;
