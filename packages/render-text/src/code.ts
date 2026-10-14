@@ -1798,8 +1798,20 @@ function renderCodeWindowed(
    * mount（首屏首块即可渲染），其余交滚动续读。
    */
   async function start(): Promise<void> {
-    await pullBlock();
-    while (!destroyed && !indexFinished && !limitReached && !encodingBroken && bs.atEnd()) await pullBlock();
+    // 首拉/排空全程持单飞闸：本函数的 pullBlock 循环是唯一不经 pulling 直呼的驱动
+    // 面，真实 fetch 的宏任务级 RTT 窗口内，用户动作（ResizeObserver 初次回调/scroll
+    // → onUserScroll → scheduleIndexPump(0)）启动的泵 tick 会经 blockStream inflight
+    // 表去重 await 同一块 promise——落地后双方各自 advanceCodeIndex 一次 = 同块双喂，
+    // 行数恰多一整块且内容重复已扫块（CI 幻影行三观测：DEG-03 +4096 / BUG-20 阶段4
+    // +3640 / SCAN-10 mobile +4096；单测 read 直返微任务即落、无重叠窗口故不复现）。
+    // 持闸后泵/滚动续读在飞等待（WAIT 重评），start 收闸后接管，语义不变。
+    pulling = true;
+    try {
+      await pullBlock();
+      while (!destroyed && !indexFinished && !limitReached && !encodingBroken && bs.atEnd()) await pullBlock();
+    } finally {
+      pulling = false;
+    }
     if (destroyed) return;
     // 项 1：首拉即判非 UTF-8（脏块落在已排空区间）——降级在此收口：补拉失败经
     // await 原样上抛（whenReady → codeRenderer.render 的渲染期读失败面）；成功时

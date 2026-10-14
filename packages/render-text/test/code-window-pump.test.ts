@@ -31,6 +31,54 @@ afterEach(() => {
 });
 
 describe('code 窗口流式后台索引泵（BUG-201）', () => {
+  it('首拉在飞窗口内泵 tick 插入——同块只喂一次（start() 与泵并发双喂防线）', async () => {
+    stubResizeObserver();
+    // 缺陷复现口径（2026-10-14 CI 幻影行三观测：DEG-03 +4096 / BUG-20 阶段4 +3640 /
+    // SCAN-10 mobile +4096，均为恰一整块行数且内容重复已扫块）：ctx.read 直返（微任务
+    // 即落）时 start() 首拉与泵 tick 无重叠窗口——真实 fetch 的 RTT 是宏任务级延迟，
+    // 用户动作（ResizeObserver 初次回调/scroll → onUserScroll → scheduleIndexPump(0)）
+    // 启动的泵 tick 恰落在首拉在飞窗口内。泵经 blockStream inflight 表去重 await 同一
+    // 块 promise，落地后 start() 与泵的 pullBlock 各自 advanceCodeIndex 一次 = 同块
+    // 双喂：行数恰多一整块、内容重复。本用例以宏任务级延迟（30ms > 0ms 泵拍）复现该
+    // 窗口，断言 EOF 终行数守恒。
+    const blocks = 11; // 11×256KB ≈ 2.8MB > 2MB 阈值 → 窗口路由
+    const totalLines = LINES_PER_BLOCK * blocks;
+    const full = new Uint8Array(totalLines * LINE_BYTES);
+    for (let i = 0; i < totalLines; i++) full.set(LINE_ENC, i * LINE_BYTES);
+    const sleep = (ms: number): Promise<void> => new Promise<void>((r) => setTimeout(r, ms));
+    let firstBlockInflight = false;
+    const ctx: StreamCtx = {
+      size: full.length,
+      head: full.slice(0, 8192),
+      read: async (r) => {
+        // 块 0 首请求挂起一个宏任务级 RTT（start() 首拉在飞窗口）；后续块直返
+        if (r.start === 0 && !firstBlockInflight) {
+          firstBlockInflight = true;
+          await sleep(30);
+        }
+        return full.slice(r.start, r.end + 1);
+      }
+    };
+    const host = document.createElement('div');
+    document.body.append(host);
+    const inst = renderCode(full.slice(0, 8192), host, { ctx, ext: 'js', highlight: false });
+    try {
+      // renderCode 同步返回时 start() 已挂在块 0 上：scroll → onUserScroll 启动泵，
+      // pumpTick（0ms 拍）在 RTT 窗口内插入
+      const pre = host.querySelector<HTMLElement>('.vv-code-pre')!;
+      pre.dispatchEvent(new Event('scroll'));
+      // 修复前：双喂使终行数多恰 LINES_PER_BLOCK（3640），本断言超时失败
+      await vi.waitFor(
+        () => {
+          expect(inst.getMeta().lines).toBe(totalLines);
+        },
+        { timeout: 5_000, interval: 50 }
+      );
+    } finally {
+      inst.destroy();
+    }
+  });
+
   it('打开后不滚动，行数自动推进至 EOF 终值（后台逐块推进，不再冻结首块值）', async () => {
     stubResizeObserver();
     const blocks = 11; // 11×256KB ≈ 2.8MB > 2MB 阈值 → 窗口路由
