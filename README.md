@@ -20,21 +20,23 @@
 
 | 格式 | 能力 |
 | --- | --- |
-| 代码/文本 | tree-sitter 预编译 36 语言（wasm 按需加载，22 个查询可用；14 个查询/ABI 失配自动降级）+ highlight.js 全量兜底（语言检测表对齐 helix 264 语言清单）；>2MB 自动切 hljs 分块、≤20MB；utf-8/utf-16/gb18030 编码；虚拟滚动；状态栏实时显示引擎与执行位置 |
-| JSON Lines | .jsonl/.ndjson 行卡片视图：逐行 JSON 美化 + 卡片级懒高亮、可变高度虚拟滚动、长行折叠、失败行计数随滚动渐进统计；>200MB 委托 code 纯文本（超限提示条） |
+| 代码/文本 | tree-sitter 高亮：34 语言 lite 集 wasm 随包内置，其余 helix 301 语言经「同源 → 服务端 → CDN」三层资产链按需加载（查询资产与 helix 版本对齐）；≤2MB 整文件高亮（失败 hljs 整文件兜底），>2MB 可视区懒高亮（chunk 失败行级 hljs 兜底，非流式来源 >200MB 降纯文本）；语言检测表对齐 helix（342 语言/685 扩展名）；utf-8/utf-16/gb18030 编码；虚拟滚动；状态栏实时显示引擎与执行位置 |
+| JSON Lines | .jsonl/.ndjson 行卡片视图：逐行 JSON 美化 + 卡片级懒高亮、可变高度虚拟滚动、长行折叠、失败行计数随滚动渐进统计；窗口流式渐进加载（「已加载 N 行」，滚动到底才确定总行数）；非流式来源 >200MB 委托 code 纯文本 |
 | Markdown | 本地管线：GFM 表格/任务列表、callout、KaTeX 公式、mermaid 图表、围栏代码高亮、TOC 侧栏、图片灯箱；后端版可切远程 comrak 渲染（双引擎样式归一） |
 | HTML | 沙箱 iframe 预览（sandbox 无 `allow-scripts`）+ DOMPurify 净化，源码/渲染双视图 |
 | 图片 | 常见位图/矢量格式 + markdown 图片灯箱 |
 | 音视频 | ArtPlayer 集成：mp4/webm 直接播，`.m3u8` 按需加载 hls.js、`.flv/.ts` 按需加载 mpegts.js |
 | PDF | pdfjs canvas 渲染 + 文件内文本搜索定位 |
-| 二进制 | hex 三列 dump（偏移/hex/ASCII）+ 结构树（PNG/IHDR 等字段展开） |
+| 二进制 | hex 三列 dump（偏移/hex/ASCII）+ 结构树（PNG/IHDR 等字段展开）；offset 跳转、hex/UTF-8 双模式搜索（进度可取消、1000 命中截断）、字节检查器（属性面板展示，类型/字节序可切） |
 | 压缩包 | zip（jszip）/ tar·tgz·tbz2·7z·rar（libarchive wasm）：包内树 + 条目递归预览（嵌套深度限 3 层，超限拒绝） |
 | Office | docx（mammoth 转 HTML）、xlsx（SheetJS，多 sheet 页签、>200 行截断）、pptx（文本提纲卡片） |
-| 搜索 | 文件内（`/`）+ 全局（`Ctrl+Shift+F`）双实现：浏览器内 grep / 远程搜索（rg 可选：缺 rg 自动降级系统 grep，皆缺时 501 → 前端退回浏览器内 grep） |
+| 大文件 | hex / JSON Lines / 代码文本窗口流式：首屏仅拉头部 + 首窗口，滚动续读/回看，块缓存 LRU 内存有界；本地文件 slice、后端 Range 分块拉取（压缩包条目等全量来源不流式）；code/jsonl 流式仅 UTF-8，非 UTF-8 自动回退全量；512MB 流式上限，到限提示转 hex |
+| 打开方式 | 未知扩展名探测链（magic 签名 → 文本嗅探 → hex 兜底）；错误卡片快捷动作与属性面板「打开方式」下拉切换渲染器（如音视频 → hex） |
+| 搜索 | 文件内（`/`）+ 全局（`Ctrl+Shift+F`）双实现：浏览器内 grep / 远程搜索（rg 可选：缺 rg 自动降级系统 grep，皆缺时 501 → 前端退回浏览器内 grep）；大文件文件内搜索为后台全文扫描（进度提示、可取消、结果随扫描累积） |
 | 会话 | IndexedDB tab 快照恢复 + 目录句柄权限记忆（本地文件内容不保留，刷新后以占位提示重开） |
 | 工作区 | 命名工作区分组管理数据来源（本地文件夹 / 后端路径，支持服务器多根 `--root` 与根内子目录）：tab 按组隔离，顶栏切换器与管理面板（`Alt+W`）创建/切换/搜索，刷新后组结构与远端来源自动恢复 |
 | PWA | manifest + Service Worker：静态资产预缓存，grammar wasm/查询文件运行时缓存，离线可用（已缓存范围） |
-| 外观 | helix 代码主题体系 + 亮/暗双模式记忆，hljs 兜底着色近似跟随代码主题 |
+| 外观 | helix 代码主题体系 + VSCode 主题导入（JSON/VSIX，亮/暗双槽独立记忆、IndexedDB 存储），hljs 兜底着色近似跟随代码主题 |
 | 移动 | 601-900px 文件树收进抽屉（右栏保留），≤600px 右栏（目录/属性）再收进独立抽屉，触摸滚动可用 |
 
 ## 快速开始
@@ -73,11 +75,11 @@ pnpm workspace monorepo：
 
 ```
 packages/
-  core/             TreeStore/TabStore 抽象、格式派发器、编码检测（框架无关）
-  highlight/        web-tree-sitter Worker 管线、helix 查询继承/injection、主题
-  render-text/      代码（虚拟滚动/降级链）、markdown 管线、HTML 沙箱、文件内搜索
+  core/             TreeStore/TabStore 抽象、格式派发器与流式读上下文（StreamCtx）、编码检测（框架无关）
+  highlight/        web-tree-sitter Worker 管线、helix 查询继承/injection、语法资产三层解析链（同源→服务端→CDN）、主题
+  render-text/      代码（虚拟滚动/降级链/窗口流式）、markdown 管线、HTML 沙箱、文件内搜索
   render-doc/       pdfjs、docx/xlsx/pptx
-  render-binary/    hex dump、结构树
+  render-binary/    hex dump（窗口流式/搜索/检查器）、结构树
   render-media/     ArtPlayer/hls.js/mpegts.js、图片
   render-archive/   jszip/libarchive 包内树与递归预览
 apps/web/           SvelteKit 5 + adapter-static 壳（TopBar/FileTree/TabBar/ViewerPane）、PWA
@@ -88,6 +90,8 @@ server/             Rust axum：tree/file/events SSE/ticket/search/compute 端�
 
 - 设计 spec：`docs/superpowers/specs/2026-10-06-vviewer-design.md`
 - 实施计划：`docs/superpowers/plans/2026-10-07-m1-skeleton.md` … `2026-10-07-m7-pwa-polish.md`（M1 骨架 / M2 高亮 / M3 markdown+HTML / M4 二进制媒体 / M5 server / M6 compute+搜索 / M7 PWA+打磨）
+- 后续特性 spec/plan 同目录按日期排列：rg 缺失降级 grep、格式覆盖与打开方式、JSON Lines 查看器、VSCode 主题、工作区多根、tab 动作、hex 增强、IO 级流式、外观订阅中心化等
+- E2E 场景文档：`docs/e2e/`；历轮测试报告：`docs/report/e2e/`
 - 部署细节：`docs/deploy.md`；server 参数与安全：`server/README.md`
 
 ## 开发
@@ -95,11 +99,12 @@ server/             Rust axum：tree/file/events SSE/ticket/search/compute 端�
 ```bash
 pnpm test                     # vitest 全仓单元测试
 cargo test --manifest-path server/Cargo.toml   # Rust 单元/集成测试
-cd apps/web && npx playwright test             # E2E（chromium + mobile 双 project）
-pnpm typecheck                # TS 类型检查
+cd apps/web && npx playwright test             # E2E 默认通道（chromium + mobile 双 project）
+cd apps/web && npx playwright test -c playwright.server.config.ts   # E2E 服务端通道（需先 pnpm build:all）
+pnpm typecheck                # TS 类型检查（含 svelte-check）
 ```
 
-E2E 覆盖：桌面 chromium 全量 m1-m7 场景 + 移动视口（375×667 触摸）冒烟；`apps/web/e2e/` 内各 spec 对应里程碑。
+E2E 双通道（Playwright/chromium）：默认通道 `apps/web/e2e/`（桌面全量场景 + 移动视口 375×667 触摸冒烟，mock 数据经 vite preview 伺服）；服务端通道 `apps/web/e2e-server/`（release 二进制伺服真实后端）。各域场景说明见 `docs/e2e/`，历轮测试报告见 `docs/report/e2e/`。
 
 ## License
 
