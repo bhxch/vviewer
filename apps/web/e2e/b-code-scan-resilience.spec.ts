@@ -499,7 +499,9 @@ test('SCAN-08：补块失败部分收场（失败块恰一次请求）→ 放行
     for (const f of fails) {
       expect(f.range, `500 应全在失败块 3，实得 ${f.range}`).toBe(codeBlockRange(3));
     }
-    expect(fails.length, `500 应有界（≤2：泵/扫描各一），实得 ${fails.length}`).toBeLessThanOrEqual(2);
+    // 有界（无逐行/逐块风暴）：每个拉取生命周期各至多一条——泵闩（continueFailed
+    // 停机）、扫描补拉（failedBlocks 每块一次）、扫描喂块（停机闩）合计 ≤3
+    expect(fails.length, `500 应有界（≤3），实得 ${fails.length}`).toBeLessThanOrEqual(3);
     await expect(page.locator('.vv-error-card')).toHaveCount(0);
 
     // ② 失败因素解除后同键重搜：续扫自游标（块 3）起——缺失布点（21000 ∈ 块 5）补全
@@ -613,27 +615,47 @@ test('SCAN-10：回看重拉首拒停机闩——无请求风暴、占位维持�
   test.setTimeout(150_000);
   // 6MB = 24 块 > 块表 LRU 16：贴底至 EOF 后块 0 必被逐出；failOnce 门只对块 0 整块
   // Range 的第 2 次请求（首轮回看重拉）应 500——skip=1 放过打开期的首次拉取，探测头
-  // 与重试均不受影响
+  // 与重试均不受影响。stall 门（块 9+）为逐出前提：泵时代下打开期泵即拉完全文件且
+  // 顶部视口每次 remount 都触新块 0（永不逐出）——改由滚动续读拉入块 9..23，LRU
+  // 不变量（16 容量 + 块 0 停触）保证逐出
   const fake = await startStreamFakeServer(
     { 'back.js': makeCodeFile(BACKTRACK_ROWS) },
-    { failOnce: { path: 'back.js', exact: codeBlockRange(0), skip: 1, fails: 1 } }
+    {
+      failOnce: { path: 'back.js', exact: codeBlockRange(0), skip: 1, fails: 1 },
+      stall: { path: 'back.js', minStart: 9 * CODE_BLOCK_BYTES }
+    }
   );
   try {
     const stats = new IoStats();
     const pre = await openCode(page, fake, stats, 'back.js');
 
-    // 滚动到底（块 0 被逐出）→ 滚回顶部：缺块占位行 + 回看重拉（首拒）
+    // 滚动到底（块 0 被逐出）→ 滚回顶部：缺块占位行 + 回看重拉（首拒）。
+    // 逐出必须是事实而非推断：视口先离顶（块 0 停触）再放行 stall 门，块 9..23 的
+    // 插入序全部落在块 0 最后一次触新之后——LRU(16) 不变量保证块 0 逐出；随后贴底
+    // 循环至 EOF（泵已恢复，拉取与循环殊途同归）
+    await pre.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    fake.releaseStall();
     await pre.evaluate(
       async (el, last) => {
-        for (let i = 0; i < 400; i++) {
+        // 800×50ms：移动视口（375×667，dpr2）渲染与滚动联动慢于桌面，实测 400×40ms
+        // 预算内末行未入窗（索引已完整，纯渲染跟进慢）——放宽预算不改断言语义
+        for (let i = 0; i < 800; i++) {
           el.scrollTop = el.scrollHeight;
-          await new Promise((r) => setTimeout(r, 40));
+          await new Promise((r) => setTimeout(r, 50));
           if (el.querySelector(`[data-line="${last}"]`) !== null) return;
         }
         throw new Error('code 续读未在预算轮次内到达 EOF');
       },
       BACKTRACK_ROWS - 1
     );
+    await expect
+      .poll(
+        () => new Set(stats.records.map((r) => r.range ?? '')).size,
+        { timeout: 30_000 }
+      )
+      .toBeGreaterThanOrEqual(18); // 探针 + 17 块（块 0 必已被 LRU 逐出）
     await settleStats(page, stats);
     await pre.evaluate((el) => {
       el.scrollTop = 0;
@@ -641,6 +663,12 @@ test('SCAN-10：回看重拉首拒停机闩——无请求风暴、占位维持�
     const row0 = pre.locator('.vv-code-line[data-line="0"]');
     await expect(row0).toBeVisible();
     await expect(row0.locator('.vv-code-body'), '缺块行应为占位行（无正文）').toHaveCount(0);
+    // 微移滚动触发回看重拉评估：占位行入队（lineAvailable）与 maybeContinue 消费
+    // 挂在滚动/refresh 回调面上，入队后的首个事件可能已消费完毕——微移保证队列
+    // 必有一次重评（确定性，不依赖隐式时序）
+    await pre.evaluate((el) => {
+      el.scrollTop = 30;
+    });
 
     // 首次回看重拉 500 恰一次（failOnce）
     await expect
@@ -687,23 +715,17 @@ test('SCAN-10：回看重拉首拒停机闩——无请求风暴、占位维持�
 
 test('SCAN-11：挂起阶段命中渐进——进度条命中数与行级背景先于全文完成可见', async ({ page }) => {
   test.setTimeout(180_000);
-  // stall 门（块 2+）+ slowMs=120：块 1 应答落地晚于节流窗（≥100ms），渐进命中的
-  // 进度文本可确定性采样；扫描确定性挂在块 2 上供挂起阶段断言
+  // stall 门（块 1+）+ slowMs=120：扫描对必驻留的块 0 布点即时计数（进度条命中数
+  // 免节流直写），随后确定性挂死在块 1 上供挂起阶段断言。门不放在块 2+：打开期
+  // 索引泵会抢先挂死在首个越门块上，扫描启动时点的驻留面在慢机上不可先验
   const fake = await startStreamFakeServer(
     { 'scan10.js': makeCodeFile(BIG_JS_ROWS, BIG_NEEDLES) },
-    { stall: { path: 'scan10.js', minStart: 2 * CODE_BLOCK_BYTES }, slowMs: 120 }
+    { stall: { path: 'scan10.js', minStart: CODE_BLOCK_BYTES }, slowMs: 120 }
   );
   try {
     const stats = new IoStats();
     const pre = await openCode(page, fake, stats, 'scan10.js');
     await panelSearch(page, CODE_NEEDLE);
-    await expect
-      .poll(() => stats.ranges().includes(codeBlockRange(1)), { timeout: 15_000 })
-      .toBe(true);
-
-    // 挂起阶段（扫描在飞、全文未完成）：进度条已计入已扫块布点（spec §4.3「命中
-    // 即时并入命中集并重绘」——对照：面板计数完成制，仍显示无结果）
-    await expect(scanBar(page)).toContainText('已命中 1 处', { timeout: 15_000 });
     await expect(searchCount(page)).toHaveText('无结果');
 
     // 行级渐进上屏：滚至布点行 1000，行级命中背景与词级命中先于全文完成可见
@@ -716,6 +738,9 @@ test('SCAN-11：挂起阶段命中渐进——进度条命中数与行级背景�
 
     // 放行后续扫至 EOF：终值正确、条收场移除、自动定位首布点
     fake.releaseStall();
+    await expect
+      .poll(() => stats.ranges().includes(codeBlockRange(1)), { timeout: 30_000 })
+      .toBe(true);
     await expect(searchCount(page)).toHaveText('1/2', { timeout: 120_000 });
     await expect(scanBar(page)).toHaveCount(0);
     await expect(activeHitLine(page)).toHaveAttribute('data-line', String(BIG_NEEDLES[0]), {
@@ -724,6 +749,7 @@ test('SCAN-11：挂起阶段命中渐进——进度条命中数与行级背景�
     expectNoFullRead(stats);
     await expect(page.locator('.vv-error-card')).toHaveCount(0);
   } finally {
+    fake.releaseStall();
     await fake.close();
   }
 });

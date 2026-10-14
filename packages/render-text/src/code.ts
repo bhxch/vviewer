@@ -2061,7 +2061,26 @@ function renderCodeWindowed(
         if (!alive()) return acc;
         updateScanProgress(scanned, acc.length); // 项 2：外圈每轮一次（≈每块粒度，渲染节流）
         if (scanned < rows()) {
+          let innerHits = acc.length;
+          let progressDirty = false;
           for (; scanned < rows() && alive(); scanned++) {
+            // 阻塞前刷新：本行所需块缺驻留 → 下方 scanLineText 会挂起（stall 门/
+            // 慢网/读闸）——先把已得命中上屏（进度条 + 行级背景重绘），否则命中已
+            // 入集而进度条恒 0 处、背景不上屏（CI/2 核实证）。命中即时上屏是
+            // spec §4.3 契约；驻留行连扫不重绘（命中密集文本不退化为逐行 remount）
+            const [spanStart, spanEnd] = lineBlockSpan(scanned);
+            let willBlock = false;
+            for (let b = spanStart; b <= spanEnd; b++) {
+              if (!bs.has(b)) {
+                willBlock = true;
+                break;
+              }
+            }
+            if (willBlock && progressDirty) {
+              progressDirty = false;
+              updateScanProgress(scanned, acc.length);
+              remountOrRefresh();
+            }
             const text = await scanLineText(scanned, failedBlocks, markFailedBlock);
             if (!alive()) return acc;
             if (text === null) continue; // 项 F：缺失行不中断扫描，游标回退点已记
@@ -2071,6 +2090,11 @@ function renderCodeWindowed(
               const arr = searchHitsByLine.get(scanned);
               if (arr) arr.push({ start: m.start, end: m.end });
               else searchHitsByLine.set(scanned, [{ start: m.start, end: m.end }]);
+            }
+            if (acc.length !== innerHits) {
+              innerHits = acc.length;
+              progressDirty = true;
+              updateScanProgress(scanned, acc.length); // hits 变化免节流，进度条即时
             }
           }
           if (!alive()) return acc;

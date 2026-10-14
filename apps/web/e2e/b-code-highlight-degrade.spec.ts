@@ -385,14 +385,18 @@ test('PERF-LAZY：25MB 文件懒高亮性能锚点——首屏纯文本 <1s、�
 
   // 锚点 2：跳滚到未读区后 chunk 着色出现（懒高亮追滚动预算）。本地预算 2s；
   // CI runner（4 核共享）实测同锚点 >2s——预算 CI 感知 ×4，锚点语义（着色到达且
-  // 量级受控）保留，硬件差计入常量而非删除断言
+  // 量级受控）保留，硬件差计入常量而非删除断言。行存在（索引推进到目标行）先于
+  // 预算计时单独等待：泵逐块建索引的耗时属吞吐锚点（HL-08 面），不属于本锚点
   const LAZY_ARRIVAL_BUDGET = process.env.CI ? 8_000 : 2_000;
   const pre = page.locator('.vv-code-pre');
   const TARGET = 1_100_000;
-  const t1 = Date.now();
   await pre.evaluate((el, line) => {
     el.scrollTop = line * 20;
   }, TARGET);
+  await expect(pre.locator(`[data-line="${TARGET}"]`).first()).toBeVisible({
+    timeout: 90_000
+  });
+  const t1 = Date.now();
   await expect(
     pre.locator(`[data-line="${TARGET}"] span[class^="ts-"]`).first()
   ).toBeVisible({ timeout: LAZY_ARRIVAL_BUDGET });
