@@ -1572,7 +1572,8 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     expect(reads).toBe(STREAM_MAX_BYTES / WINDOW_BLOCK); // 停机：无进一步读
     expect(host.querySelector('.vv-code-oversize-card')).not.toBeNull(); // 提示条（建议 hex）
     handle.destroy();
-  });
+  }, 20_000); // 整用例显式超时：2048 块扫描自驱动的级联 update（DOM churn）在全仓并行
+  // 负载的 CI 2 核机上超 vitest 默认 5s——jsonl 侧恰界用例同款先例（7bdf48b）
 
   it('非 UTF-8（gb18030）+ 探测头 ctx：render 入口守卫补拉全量（指令①，解码/行数以全文件计）；head 覆盖全文件时不触发', async () => {
     stubResizeObserver();
