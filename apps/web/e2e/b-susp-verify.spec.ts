@@ -542,7 +542,9 @@ test('SUSP-06：语言不在合并 manifest 仍发起该语言 /queries/** 空�
   await page.route(`**/cdn.grammars.test/**`, (route) => route.abort());
 
   await page.goto('/');
-  await openDir(page, [{ name: 'Hello.java', type: 'text/x-java-source', content: JAVA_SRC }]);
+  await openDir(page, [
+    { name: 'Hello.java', type: 'text/x-java-source', bytes: new TextEncoder().encode(JAVA_SRC) }
+  ]);
   await openFileLocal(page, 'Hello.java');
   // doPrepare 已跑且失败兜底（manifest 无 java 条目 → 整语言降级 hljs）
   await expect(page.locator('.vv-statusbar')).toContainText('高亮: hljs 兜底', { timeout: 30_000 });

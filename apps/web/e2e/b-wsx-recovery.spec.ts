@@ -756,7 +756,8 @@ test('WSX-12：三组切换后刷新——快照组序保序、活动组还原�
       { timeout: 15_000 }
     )
     .toBe(true);
-  const finalSnap = snap as SnapshotView;
+  // TS 控制流不追踪 expect.poll 回调内对 snap 的赋值（窄化为 null），双跳断言取真值
+  const finalSnap = snap as unknown as SnapshotView;
   expect(finalSnap.order).toEqual(['默认', '甲组', '乙组']);
   expect(finalSnap.activeName).toBe('乙组');
   expect(finalSnap.groups.map((g) => `${g.name}:${g.tabs.join(',')}`)).toEqual([
