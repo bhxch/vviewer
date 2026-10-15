@@ -3,6 +3,7 @@
 - 日期：2026-10-15
 - 状态：待用户审阅 → writing-plans
 - 来源：2026-10-14 CI 转绿轮（4c6f5b9..abf52d0）遗留产品立项 + e2e 富化报告 SUSP 定档（docs/report/e2e/e2e-enrichment-report-2026-10-13.md §4.2，四条 confirmed-design 带优化立项候选）
+- 实施：2026-10-15 Task 1–9（cb5ca3b..aa0d129）；Task 10 收尾门禁与本节 §8 回填为随后的收尾提交
 - 用户裁决：缺陷/健壮性 7 项合为一个 spec；阶段顺序缺陷面优先；localFiles 取降级语义（remote 真取消）
 
 ## 1. 背景与动机
@@ -114,6 +115,13 @@ abort 产生的 reject 走既有 catch 分支（`continueFailed`/`reloadFailed` 
 - 采集路径：本机按已知条件复现挂起读打点；CI 侧经失败 artifact 的 console 自然采集。
 
 **产出与边界**：挂点结论（wasm fetch 挂 / DNS 挂 / Parser.init 内部挂 / queries 串行挂）+ 修复方向建议文档（写入本 spec 回填节）。修复本身另行立项，不在本 spec；打点代码低噪声（开关门控）落地保留。
+
+### Spike 结论（回填）（Task 10，2026-10-15）
+
+- 本机生产构建（adapter-static + `vite preview` + chromium headless）**未复现挂起**：`?vvWorkerDebug=1` 下四阶段帧 wasm-fetch→parser-init→assets→ready 全数依序到达，高亮正常（301 着色节点）；debug=off 缺省零探针帧、行为不变。
+- assets 帧的 `queries=N` 在浏览器端恒 0：`queriesBase` 惰性按语言 fetch，create 时静态映射恒空——勿据此判资产缺失。
+- 待 CI 带 `?vvWorkerDebug=1` 观察 artifact console（失败用例 trace 已随 retain-on-failure 采集）；挂点定位与修复方向按 CI 取证另行立项。
+- 收尾门禁旁证：本机 e2e mobile 通道 1 例瞬态红（BUG-07 shebang 用例，状态栏「高亮： hljs 兜底」＝ init 20s 窗口未就绪降级，与既有挂起面吻合；单测复跑 5.9s 绿、全通道复跑绿）——`--retries=0` 门禁口径下暴露，无代码缺陷面，留作 CI 取证旁证。
 
 ## 9. 总验收与门禁
 
