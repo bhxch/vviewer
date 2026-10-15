@@ -44,7 +44,9 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  *   （退出搜索仅令牌失效 + 视觉清理，短路缓存保留；优化前为全新全文扫描 40 块级
  *   重拉、缓存不复用）；对照面同值 input 重派发 = 同键短路零扫描 IO
  * - SUSP-02：SCAN-08 布点续扫中视口块 1 被 LRU 逐出经 pendingReload 回拉 ≥2 次
- * - SUSP-03：流内嗅探降级整体 replaceChildren → 视口回顶（scrollTop=0）
+ * - SUSP-03（已锚定落地，探针随落地翻转）：流内嗅探降级重渲后视口锚定原首行
+ *   （不回顶；原「整体 replaceChildren → 视口回顶 scrollTop=0」现状存档于
+ *   susp-verification.md §SUSP-03）
  * - SUSP-04：Range-less(200-only) + size 已知 10MB：首屏恰 3 请求共 3×文件字节，
  *   滚动零新增
  * - SUSP-05：900KB 非块对齐 jsonl（≤1MB 全量直读路径）恰 2 请求：无 Range 全量
@@ -385,16 +387,17 @@ test('SUSP-02：长扫描续扫中视口块被 LRU 逐出经 pendingReload 回�
 
 // ---------------------------------------------------------------- SUSP-03
 
-test('SUSP-03：流内嗅探降级重渲整体 replaceChildren——视口回顶、滚动位置丢失', async ({ page }) => {
+test('SUSP-03（已锚定落地，探针随落地翻转）：流内嗅探降级重渲后视口锚定原首行——不回顶', async ({ page }) => {
   test.setTimeout(120_000);
   const f = makeGbkNoSizeJsonl();
   // 条目省略 size（size 未知窗口流式）：前 512KB 干净、脏块块 2 起
   const fake = await startStreamFakeServer({ 'susp-gbk-nosize.jsonl': { bytes: f.bytes } });
   try {
     const stats = new IoStats();
+    const loadedRows = 2048; // 降级前已加载行数（夹具前 512KB 均匀行的构造值）
     await openRemoteFile(page, fake, stats, 'susp-gbk-nosize.jsonl');
     const status = page.locator('.vv-jsonl-status');
-    await expect(status).toHaveText('已加载 2048 行', { timeout: 20_000 });
+    await expect(status).toHaveText(`已加载 ${loadedRows} 行`, { timeout: 20_000 });
 
     // ① 滚动到已加载区中部（记录位置 >0）——此处不触发续读（距前沿余量充足）
     const scroll = page.locator('.vv-jsonl-scroll');
@@ -405,7 +408,8 @@ test('SUSP-03：流内嗅探降级重渲整体 replaceChildren——视口回顶
     expect(midTop, '前置：应已滚至中部（scrollTop > 0）').toBeGreaterThan(0);
 
     // ② 继续滚动到加载前沿：续读喂入脏块（块 2 起 GBK）→ 流内嗅探判非 UTF-8
-    //    → 降级重渲（jsonl/index.ts:891-898）
+    //    → 降级重渲（jsonl/index.ts:709 嗅探点捕获锚行 curFirst、:713 新实例
+    //    mount 完成后经 revealLine 恢复）
     await scroll.evaluate((el) => {
       el.scrollTop = el.scrollHeight;
     });
@@ -415,10 +419,24 @@ test('SUSP-03：流内嗅探降级重渲整体 replaceChildren——视口回顶
     await expect(page.locator('.vv-statusbar')).toContainText('编码: gb18030', { timeout: 10_000 });
     await settleStats(page, stats);
 
-    // 记录的现状：视口回顶（scrollTop = 0）、滚动位置丢失——JVL-03 实跑中降级收口
-    // 后须重新贴底才能让 GBK 卡片入窗的同现象
-    const top = await scroll.evaluate((el) => el.scrollTop);
-    expect(top, `降级后应回顶（滚动位置丢失，记录现状），实得 scrollTop=${top}`).toBe(0);
+    // 翻转后的验收（原「回顶 scrollTop=0、滚动位置丢失」现状记录存档于
+    // susp-verification.md §SUSP-03）：降级时视口贴着加载前沿（已加载 2048 行的
+    // 末屏），嗅探时刻 curFirst = 2048 - 可视行数 - overscan 内——恢复后可视首行
+    // （窗口 min data-line，overscan 口径降级前后一致）应落在「前沿一屏 + overscan
+    // 容差」带内：下界 2048 - 可视卡片数 - 20（一屏可视 + overscan + 精调余量），
+    // 上界 < 2048（不得越过降级前加载前沿）。锚定用行号而非 scrollTop（窗口估算
+    // 行高 vs 全量卡片可变高度，scrollTop 不可直译——spec §5 裁决）。
+    const firstAfter = await page.evaluate(() => {
+      const cards = document.querySelectorAll<HTMLElement>('.vv-jsonl-card');
+      let min = Number.MAX_SAFE_INTEGER;
+      cards.forEach((c) => { min = Math.min(min, Number(c.dataset.line)); });
+      return cards.length === 0 ? -1 : min;
+    });
+    const visible = await page.locator('.vv-jsonl-card').count();
+    expect(firstAfter, `降级后可视首行应 ≈ 降级前前沿首行（±可视范围+overscan，非回顶）：first=${firstAfter} 可视卡片=${visible}`)
+      .toBeGreaterThan(loadedRows - visible - 20);
+    expect(firstAfter, `降级后可视首行不得越过降级前加载前沿：first=${firstAfter} 前沿=${loadedRows}`)
+      .toBeLessThan(loadedRows);
     await expect(page.locator('.vv-error-card')).toHaveCount(0); // 降级非失败态
   } finally {
     await fake.close();

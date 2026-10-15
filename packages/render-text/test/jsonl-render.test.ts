@@ -945,6 +945,51 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
     inst.destroy();
   });
 
+  // SUSP-03（流式硬化 Task 6）：嗅探降级全量重渲后视口锚定原首行——降级出口前经
+  // onViewMove 捕获 curFirst（嗅探时刻可视首行），新实例 mount 后按行号恢复（不回顶）。
+  // jsdom 无布局（offsetTop 恒 0、无自动 scroll 事件），布局有效性由 e2e 探针（真实
+  // 浏览器）裁决；此处钉恢复逻辑真实执行：锚行卡片（±overscan 容差）回到新实例视口
+  // 集合、scrollTop 离 0。
+  it('SUSP-03：嗅探降级重渲后视口锚定原首行（不回顶）', async () => {
+    stubResizeObserver();
+    const content = utf8HeadGbTail(500, 100); // 干净 ≈750KB（块 0..2 前段）+ 脏 100 行
+    const calls: RangeCall[] = [];
+    const host = mount();
+    // 局部 det：describe 级共享 det 会被前序用例的 redetectWithFull 就地翻转（项 D 同款）
+    const localDet: Detection = { ext: 'jsonl', encoding: 'utf-8' };
+    const inst = (await jsonlRenderer.render(content.slice(0, 8192), host, source, localDet,
+      streamCtx({ size: null, content, head: content.slice(0, 8192), calls }))) as JsonlInstance;
+    await vi.waitFor(() => expect(host.querySelector('[data-line="0"]')).not.toBeNull());
+    const statusText = host.querySelector('.vv-jsonl-status')!.textContent!;
+    const loaded = Number(/已加载 (\d+) 行/.exec(statusText)?.[1]);
+    expect(loaded, '前置自校验：首屏窗口模式已加载行数可解析').toBeGreaterThan(30);
+    // 滚到续读触发线内的确定性位置（jsdom 全估算模型 120px/行，rowAt 精确）：
+    // 可视末行 = loaded-6 ≥ loaded-OVERSCAN*2（触发线）→ 续读喂入脏块 → 嗅探降级；
+    // 可视首行（=嗅探时刻 curFirst，即锚行）= rowAt - OVERSCAN = loaded-16
+    const scroll = host.querySelector('.vv-jsonl-scroll') as HTMLElement;
+    scroll.scrollTop = 120 * (loaded - 11);
+    scroll.dispatchEvent(new Event('scroll'));
+    const anchor = loaded - 16;
+    // 降级完成信号：全量实例接管（状态条转「共 N 行」全量口径）
+    await vi.waitFor(() => {
+      expect(host.querySelector('.vv-jsonl-status')!.textContent).toBe('共 600 行');
+    });
+    // 恢复语义锚点（jsdom 可断面）：锚行卡片（±overscan 容差）在降级后视口集合内，
+    // 且滚动位置离 0（现状降级后视口回顶 → min data-line=0、scrollTop=0，此处红）
+    const lines = [...host.querySelectorAll<HTMLElement>('.vv-jsonl-card')]
+      .map((c) => Number(c.dataset.line));
+    expect(lines.length, '降级后应有可视卡片').toBeGreaterThan(0);
+    expect(Math.min(...lines), '降级后可视首行应 ≈ 锚行（不越过锚行之上一个容差）')
+      .toBeGreaterThanOrEqual(anchor - 6);
+    expect(Math.max(...lines), '降级后可视末行应覆盖锚行（±overscan 容差）')
+      .toBeGreaterThanOrEqual(anchor);
+    expect(Math.min(...lines), '降级后可视首行不得远低于锚行（锚行在视口集合内）')
+      .toBeLessThanOrEqual(anchor + 6);
+    expect((host.querySelector('.vv-jsonl-scroll') as HTMLElement).scrollTop,
+      '降级后 scrollTop 应离 0（不回顶）').toBeGreaterThan(0);
+    inst.destroy();
+  });
+
   // 流式硬化 Task 3（code.ts 同款）：实例级 AbortController——destroy 即取消在飞
   // 块读；abort 产生的 reject 是取消而非读失败，续读 catch 静默（闩不动、不打印）。
   // jsonl 无后台泵/扫描，catch 面即 maybeContinue 的续读/回看重拉两处。controller

@@ -64,6 +64,14 @@
  *
  * 高度模型：复用 window.ts 的 HeightModel/visibleRange（实测前缀和 + 估算外推），
  * DOM 适配层在本模块——rAF 合并一帧内的批量 measure 修正（一帧消费一次 dirty）。
+ *
+ * 降级视口锚定（SUSP-03，流式硬化 Task 6）：窗口模式流内嗅探判非 UTF-8 降级全量
+ * 重渲会整体 replaceChildren——降级出口前经 onViewMove 快照可视首行（锚行，嗅探
+ * 时刻窗口实例仍在、DOM 未替换），新实例 mount 完成后按锚行恢复：委托实例
+ * revealLine（code 委托形态既有 API、jsonl 两模式本任务补齐），粗定位=前缀和
+ * offsetOf + 同步重渲锚行窗口，精调=锚行卡片 data-line 定位 + offsetTop 实测位置
+ * （可变行高，不用 scrollTop 直译；offsetTop 相对 viewport 布局原点，须加
+ * translateY 才是滚动内容坐标），越界钳到末行。语义=降级后可视首行 ≈ 降级前首行。
  */
 import type { Detection, FileSource, RenderedInstance, Renderer, StreamCtx } from '@vviewer/core';
 import { redetectWithFull } from '@vviewer/core';
@@ -166,6 +174,10 @@ interface JsonlViewHooks {
   streamDone(): boolean;
   /** 窗口更新后的模式钩子（窗口模式：接近已加载尾部续读；全量不提供） */
   afterUpdate?(last: number, api: ViewRuntimeApi): void;
+  /** 可视窗口移动通知（update() 写入 curFirst/curLast 后同步回调；窗口模式据此
+   * 镜像 curFirst 作降级锚行捕获源——SUSP-03 视口锚定，见 renderJsonlWindowed
+   * 的 viewFirst 注） */
+  onViewMove?(first: number, last: number): void;
   /** 用户视图动作通知（scroll/resize 事件入口）：窗口模式据此解除续读失败停机
    * ——「下次用户动作才重试」（hex.ts 同口径）；全量不提供 */
   notifyUserAction?(): void;
@@ -183,7 +195,7 @@ function mountJsonlView(
   target: HTMLElement,
   det: Detection,
   hooks: JsonlViewHooks
-): RenderedInstance & { getMeta(): CodeFileMeta } {
+): RenderedInstance & { getMeta(): CodeFileMeta; revealLine?(line: number): void } {
   const rows = hooks.rowCount;
   target.classList.add('vv-jsonl');
   const status = document.createElement('div');
@@ -451,6 +463,7 @@ function mountJsonlView(
     if (!force && first === curFirst && last === curLast) return;
     curFirst = first;
     curLast = last;
+    hooks.onViewMove?.(first, last); // SUSP-03：锚行捕获源（curFirst 镜像上报）
     viewport.style.transform = `translateY(${model.offsetOf(first)}px)`;
     renderCards(first, last);
     hooks.afterUpdate?.(last, api); // 窗口模式：接近已加载尾部触发续读
@@ -511,6 +524,21 @@ function mountJsonlView(
       scroll.remove();
       target.classList.remove('vv-jsonl');
     },
+    // SUSP-03：按 0 基内容行号恢复视口（降级锚定的恢复面；两模式通用）。越界钳到
+    // 末行、空窗口 no-op。粗定位=前缀和 offsetOf（实测优先、未测估算外推）+ 同步
+    // 重渲锚行窗口（不等异步 scroll 事件，恢复面确定性）；精调=锚行卡片 data-line
+    // 定位 + offsetTop 实测位置——offsetTop 相对 viewport 布局原点（transform 不改
+    // 布局偏移），须加 translateY（= offsetOf(curFirst)）才是滚动内容坐标：估算与
+    // 实测偏差大时粗定位会让锚行漂出视口，精调把它钉回视口顶。锚行未入窗（极端
+    // 漂移）保持粗定位，后续滚动事件链自然收敛。
+    revealLine(line: number): void {
+      if (destroyed || rows() === 0) return;
+      const n = Math.max(0, Math.min(line, rows() - 1));
+      scroll.scrollTop = model.offsetOf(n);
+      update(true);
+      const card = viewport.querySelector<HTMLElement>(`[data-line="${n}"]`);
+      if (card !== null) scroll.scrollTop = model.offsetOf(curFirst) + card.offsetTop;
+    },
     getMeta: meta
   };
 }
@@ -524,6 +552,28 @@ function mountJsonlView(
  */
 export interface JsonlWindowedDowngrade {
   onEncodingBroken?: () => Promise<RenderedInstance & { getMeta(): CodeFileMeta }>;
+}
+
+/**
+ * SUSP-03 降级视口锚定恢复：在「新实例 mount 完成（DOM 可查）之后」调用（降级
+ * IIFE 内 await onEncodingBroken 返回后）——按锚行把降级产物滚回原可视首行，语义
+ * = 降级后可视首行 ≈ 降级前首行（不回顶）。锚行 <0（首拉期降级：窗口尚未 mount、
+ * 视口本就顶置）跳过，现状行为不变。
+ *
+ * 恢复委托实例的 revealLine（行号锚定，0 基内容行号同口径）：renderCode 委托形态
+ * 既有该 API；jsonl 全量形态由本任务在 mountJsonlView 补齐——其内部才是简报裁决
+ * 的「data-line 定位 + offsetTop 实测位置」精调面（全量实例是虚拟窗口，mount 后
+ * 锚行卡片通常不在 DOM，外部裸 querySelector 必空手而归，故粗定位必须借实例的
+ * HeightModel）。实例无 revealLine 的形态（空文件等）跳过——与现状等价，不做半
+ * 吊子恢复。
+ */
+function restoreViewportAfterDegrade(
+  full: RenderedInstance & { getMeta(): CodeFileMeta },
+  anchorLine: number
+): void {
+  if (anchorLine < 0) return;
+  const reveal = (full as { revealLine?: (line: number) => void }).revealLine;
+  if (typeof reveal === 'function') reveal.call(full, anchorLine);
 }
 
 /**
@@ -594,6 +644,9 @@ async function renderJsonlWindowed(
   //（防 U+FFFD 扩散），降级经注入出口异步进行。已喂的干净前缀在降级完成前保持可读。
   // 无降级通道（downgrade 缺省）不嗅探：行为与现状一致
   let encodingBroken = false;
+  // SUSP-03 降级锚行：窗口实例经 onViewMove 上报的可视首行（curFirst 镜像）。
+  // -1 = 窗口尚未 mount（首拉期降级：视口本就顶置，恢复跳过、现状行为不变）
+  let viewFirst = -1;
   let downgradePromise: Promise<void> | null = null;
   // 降级产物（全量重渲实例）：窗口实例的 meta lines 委托与复合销毁转投它
   //（ViewerPane 只持窗口实例——render 已先于滚动期降级返回）
@@ -650,8 +703,13 @@ async function renderJsonlWindowed(
     // 进行（与「判出的非 UTF-8」入口回退同路径，见 JsonlWindowedDowngrade 注）
     if (downgrade?.onEncodingBroken !== undefined && isSuspiciousUtf8Block(chunk)) {
       encodingBroken = true;
+      // SUSP-03 锚行捕获：嗅探判脏此刻窗口实例仍在（降级出口替换 DOM 前可读
+      // curFirst），经 viewFirst 闭包快照取值，不改 onEncodingBroken 签名
+      const anchorLine = viewFirst;
       const p = (async () => {
         fullInst = await downgrade.onEncodingBroken!();
+        // 恢复时点 = 新实例 mount 完成（DOM 可查）之后（见 restoreViewportAfterDegrade）
+        restoreViewportAfterDegrade(fullInst, anchorLine);
       })();
       downgradePromise = p;
       // 滚动期降级无等待面：空 catch 防 unhandled rejection（首拉期降级经下方
@@ -827,6 +885,8 @@ async function renderJsonlWindowed(
       (limitReached ? STREAM_LIMIT_NOTICE : ''),
     streamDone: () => indexFinished,
     afterUpdate: maybeContinue,
+    // SUSP-03：可视窗口移动上报（降级锚行捕获源，见 viewFirst 注）
+    onViewMove: (first) => { viewFirst = first; },
     // 用户动作解除续读/回看停机（单次重试）——code.ts onUserScroll 同口径
     notifyUserAction: () => { continueFailed = false; reloadFailed = false; },
     // 项 D（遗留清偿波 3）：降级后 size 转投全量实例——`ctx.size ?? bs.confirmedBytes`
