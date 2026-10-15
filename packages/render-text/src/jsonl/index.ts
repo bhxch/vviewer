@@ -567,14 +567,33 @@ export interface JsonlWindowedDowngrade {
  * 锚行卡片通常不在 DOM，外部裸 querySelector 必空手而归，故粗定位必须借实例的
  * HeightModel）。实例无 revealLine 的形态（空文件等）跳过——与现状等价，不做半
  * 吊子恢复。
+ *
+ * 行号域换算（deferred 清偿 Task 5）：anchorLine 是 jsonl 内容行号（索引层剔空行），
+ * code revealLine 收物理行号（含空行）——含空行文件直传会向上漂移「锚行前空行数」。
+ * 故委托 code 分支以锚行字节偏移（anchorByteOffset = index.offsets[anchorLine] +
+ * bomLen，调用方在索引可见处换算）经实例 lineAtOffset（全量模式 lineOffsets 二分）
+ * 映射物理行号再 reveal；实例无 lineAtOffset（旧产物/非全量形态）或偏移不可得
+ * （anchorByteOffset <0）回退内容行号直传（现状行为，向后兼容）。偏移口径注：
+ * jsonl 侧 BOM 已剥离（offsets 为逻辑字节空间，+bomLen 还原文件字节）；code 侧
+ * lineOffsets 为剥 BOM 归一文本偏移——非 BOM 纯 ASCII 文件两侧逐字节对齐；带 BOM
+ * 时 +bomLen 使锚点越过 BOM 落在锚行内（锚行 ≥3 字节即仍二分归锚行，jsonl 数据行
+ * 常态），多字节非 ASCII 的字节/字符偏移差同理被锚行长度吸收，粗定位语义（≈原首行
+ * + revealLine 精调）下可接受。
  */
 function restoreViewportAfterDegrade(
   full: RenderedInstance & { getMeta(): CodeFileMeta },
-  anchorLine: number
+  anchorLine: number,
+  anchorByteOffset = -1
 ): void {
   if (anchorLine < 0) return;
   const reveal = (full as { revealLine?: (line: number) => void }).revealLine;
-  if (typeof reveal === 'function') reveal.call(full, anchorLine);
+  if (typeof reveal !== 'function') return;
+  const lineAtOffset = (full as { lineAtOffset?: (offset: number) => number }).lineAtOffset;
+  if (anchorByteOffset >= 0 && typeof lineAtOffset === 'function') {
+    reveal.call(full, lineAtOffset.call(full, anchorByteOffset));
+    return;
+  }
+  reveal.call(full, anchorLine);
 }
 
 /**
@@ -705,12 +724,19 @@ async function renderJsonlWindowed(
     if (downgrade?.onEncodingBroken !== undefined && isSuspiciousUtf8Block(chunk)) {
       encodingBroken = true;
       // SUSP-03 锚行捕获：嗅探判脏此刻窗口实例仍在（降级出口替换 DOM 前可读
-      // curFirst），经 viewFirst 闭包快照取值，不改 onEncodingBroken 签名
+      // curFirst），经 viewFirst 闭包快照取值，不改 onEncodingBroken 签名。
+      // 锚行字节偏移（deferred 清偿 Task 5）同点换算（index/bomLen 唯一可见处）：
+      // 委托 code 形态经实例 lineAtOffset 映射物理行号（restoreViewportAfterDegrade）；
+      // 锚行越出已喂索引时置 -1（防御，viewFirst 恒被 visibleRange 钳内理论不可达）
       const anchorLine = viewFirst;
+      const anchorByteOffset =
+        anchorLine >= 0 && anchorLine < index.offsets.length
+          ? index.offsets[anchorLine]! + bomLen
+          : -1;
       const p = (async () => {
         fullInst = await downgrade.onEncodingBroken!();
         // 恢复时点 = 新实例 mount 完成（DOM 可查）之后（见 restoreViewportAfterDegrade）
-        restoreViewportAfterDegrade(fullInst, anchorLine);
+        restoreViewportAfterDegrade(fullInst, anchorLine, anchorByteOffset);
       })();
       downgradePromise = p;
       // 滚动期降级无等待面：空 catch 防 unhandled rejection（首拉期降级经下方

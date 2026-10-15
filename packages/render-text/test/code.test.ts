@@ -895,6 +895,88 @@ describe('renderCode revealLine（BUG-09）', () => {
   });
 });
 
+// ---------- deferred 清偿 Task 5：lineAtOffset（全量模式偏移 → 物理行号） ----------
+//
+// jsonl 委托降级锚行映射的上游接口：jsonl 侧锚行字节偏移（index.offsets[anchorLine]
+// + bomLen）经本方法二分换算为 code 物理行号再 revealLine。实现前 handle 类型尚无
+// 此方法，测试统一走鸭子探测（类型中立写法）。
+
+describe('renderCode lineAtOffset（deferred 清偿 Task 5：仅全量模式）', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+    vi.unstubAllGlobals();
+  });
+
+  function stubResizeObserver(): void {
+    vi.stubGlobal('ResizeObserver', class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    });
+  }
+
+  function lineAtOffsetOf(handle: ReturnType<typeof renderCode>): ((o: number) => number) | undefined {
+    return (handle as { lineAtOffset?: (o: number) => number }).lineAtOffset;
+  }
+
+  it('行起始/行中/恰在换行符上 → 本行；下一行起始 → 下一行；超文件尾钳末行', () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    // 'ab\ncd\n\nef\n'：归一文本行表 ['ab','cd','','ef','']，行起始 [0,3,6,7,10]
+    const handle = renderCode(enc('ab\ncd\n\nef\n'), host, { highlight: false });
+    const lineAtOffset = lineAtOffsetOf(handle);
+    expect(lineAtOffset, '全量模式 handle 应提供 lineAtOffset').toBeTypeOf('function');
+    if (lineAtOffset === undefined) return;
+    expect(lineAtOffset.call(handle, 0)).toBe(0); // 首行起始
+    expect(lineAtOffset.call(handle, 1)).toBe(0); // 行中
+    expect(lineAtOffset.call(handle, 2)).toBe(0); // 恰在行尾换行符上：未达下一行起始，归本行
+    expect(lineAtOffset.call(handle, 3)).toBe(1); // 恰在下一行起始
+    expect(lineAtOffset.call(handle, 6)).toBe(2); // 空行起始（含空行文件锚点不漂移的关键面）
+    expect(lineAtOffset.call(handle, 7)).toBe(3);
+    expect(lineAtOffset.call(handle, 10)).toBe(4); // trailing \n 后的末空串元素
+    expect(lineAtOffset.call(handle, 99)).toBe(4); // 超文件尾：钳末行
+    handle.destroy();
+  });
+
+  it('BOM 前缀：偏移以剥 BOM 后文本为基准（TextDecoder 现状口径）', () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const bom = new Uint8Array([0xef, 0xbb, 0xbf]);
+    const body = enc('ab\ncd\n');
+    const buf = new Uint8Array(bom.length + body.length);
+    buf.set(bom, 0);
+    buf.set(body, bom.length);
+    const handle = renderCode(buf, host, { highlight: false });
+    const lineAtOffset = lineAtOffsetOf(handle);
+    expect(lineAtOffset, '全量模式 handle 应提供 lineAtOffset').toBeTypeOf('function');
+    if (lineAtOffset === undefined) return;
+    expect(lineAtOffset.call(handle, 0)).toBe(0); // 剥 BOM 后 'ab' 行起始
+    expect(lineAtOffset.call(handle, 3)).toBe(1); // 'cd' 行起始
+    handle.destroy();
+  });
+
+  it('空文件偏移钳 0；窗口流式模式不暴露 lineAtOffset（仅全量形态有 lineOffsets）', async () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const empty = renderCode(enc(''), host, { highlight: false });
+    const emptyFn = lineAtOffsetOf(empty);
+    expect(emptyFn, '空文件（全量模式）同样应提供 lineAtOffset').toBeTypeOf('function');
+    if (emptyFn !== undefined) expect(emptyFn.call(empty, 123)).toBe(0);
+    empty.destroy();
+
+    const content = enc(codeLines(40)); // 60KB：单块窗口
+    const win = renderCode(content.slice(0, 8192), host, {
+      highlight: false,
+      ctx: streamCtx({ size: content.length, content, head: content.slice(0, 8192) })
+    });
+    expect(lineAtOffsetOf(win), '窗口模式无全量 lineOffsets，不暴露 lineAtOffset').toBeUndefined();
+    win.destroy();
+  });
+});
+
 // ---------- 阶段 4：lazy 路径（>2MB 可视区 chunk 懒高亮） ----------
 
 describe('renderCode lazy 本地 chunk 管线', () => {

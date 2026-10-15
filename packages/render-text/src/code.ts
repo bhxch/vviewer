@@ -605,6 +605,12 @@ export interface RenderCodeHandle {
   gotoMatch(index: number): void;
   /** 跳到指定行（0 起）并滚动至视口中部 + 行级临时高亮（BUG-09 全局搜索跳转；独立于搜索结果） */
   revealLine(line: number, col?: number): void;
+  /** 字节偏移 → 物理行号（deferred 清偿 Task 5，可选扩展）：全量模式 lineOffsets 二分
+   * （lineOf）。偏移口径=归一文本（BOM 已剥、CRLF→LF）的 UTF-16 字符偏移（与
+   * buildLineOffsets 同源）；边界语义——offset 恰在行尾换行符上归本行（未达下一行
+   * 起始）、超文件尾钳末行。仅全量模式提供（窗口模式无全量 lineOffsets，缺席）；
+   * 消费方（jsonl 委托降级锚行映射）鸭子探测，缺席回退内容行号直传（向后兼容）。 */
+  lineAtOffset?(offset: number): number;
 }
 
 /** renderCode 选项（双模式共用）：全量模式（现状）与窗口流式模式的差异全部经
@@ -1110,6 +1116,11 @@ export function renderCode(
       void col;
       if (!Number.isInteger(line) || line < 0 || line >= lines.length) return;
       jumpToLine(line);
+    },
+    // deferred 清偿 Task 5：偏移 → 物理行号二分（jsonl 委托降级锚行映射的上游；
+    // 边界语义见 RenderCodeHandle.lineAtOffset 注——行尾换行符归本行、超尾钳末行）
+    lineAtOffset(offset: number) {
+      return lineOf(lineOffsets, offset);
     }
   };
 

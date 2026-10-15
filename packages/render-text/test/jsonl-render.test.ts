@@ -3,7 +3,7 @@ import { HighlightCanceledError, type HighlightInterval } from '@vviewer/highlig
 import type { Detection, FileSource, RenderedInstance, StreamCtx } from '@vviewer/core';
 import { STREAM_MAX_BYTES } from '../src/blockStream';
 import { attachHighlightClient, type CodeFileMeta } from '../src/code';
-import { jsonlRenderer, jsonlWindowedInternals, shouldDelegateToCode } from '../src/jsonl/index';
+import { jsonlRenderer, jsonlWindowedInternals, renderJsonl, shouldDelegateToCode } from '../src/jsonl/index';
 
 /** fake ctx 的请求区间记录（blockStream.test.ts 同款） */
 interface RangeCall {
@@ -987,6 +987,121 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
       .toBeLessThanOrEqual(anchor + 6);
     expect((host.querySelector('.vv-jsonl-scroll') as HTMLElement).scrollTop,
       '降级后 scrollTop 应离 0（不回顶）').toBeGreaterThan(0);
+    inst.destroy();
+  });
+
+  // deferred 清偿 Task 5：委托降级锚行映射——jsonl data-line 是剔空行号（索引层丢弃
+  // 空行/纯空白行条目），code 物理行号含空行；含空行文件按内容行号直传 revealLine
+  // 会向上漂移「锚行前的空行数」。修后恢复链为「锚行字节偏移（index.offsets[anchor]
+  // + bomLen）→ code 实例 lineAtOffset → 物理行号 → revealLine」；实例无 lineAtOffset
+  // （旧产物/非全量形态）回退内容行号直传（向后兼容，第二用例钉住）。
+  /** utf8HeadGbTail 的含空行变体：第 i 数据行后恒跟一个空行——数据行 k 的物理行号
+   * = 2k（空行不进 jsonl 索引但占 code 物理行）；行几何与 utf8HeadGbTail 同量级
+   * （干净前缀跨块 0..2，脏区自块 3 起，滚动续读触发嗅探降级） */
+  function interleavedBlankHeadGbTail(cleanRows: number, dirtyRows: number): Uint8Array<ArrayBuffer> {
+    const parts: number[] = [];
+    for (let i = 0; i < cleanRows; i++) {
+      const head = `{"i":${i},"pad":"`;
+      const row = head + 'p'.repeat(1500 - head.length - 2) + '"}';
+      parts.push(...new TextEncoder().encode(`${row}\n\n`)); // 数据行 + 空行
+    }
+    for (let i = 0; i < dirtyRows; i++) {
+      parts.push(...new TextEncoder().encode(`{"i":${i},"gb":"`));
+      for (let k = 0; k < 50; k++) parts.push(0xba, 0xba); // 每行 100 处非法 ≫ 嗅探阈值
+      parts.push(...new TextEncoder().encode('"}\n'));
+    }
+    return Uint8Array.from(parts);
+  }
+
+  it('委托降级锚行映射：含空行文件恢复物理行号（lineAtOffset 收到锚行字节偏移），不再按内容行号直传', async () => {
+    stubResizeObserver();
+    const content = interleavedBlankHeadGbTail(500, 100);
+    // 独立朴素扫描 fixture 字节得物理行起始偏移（oracle：不与被测实现共用二分代码）
+    const physicalStarts: number[] = [];
+    {
+      let start = 0;
+      for (let i = 0; i < content.length; i++) {
+        if (content[i] === 0x0a) {
+          physicalStarts.push(start);
+          start = i + 1;
+        }
+      }
+      physicalStarts.push(start);
+    }
+    const lineByOffset = (offset: number): number => {
+      let line = 0;
+      for (let i = 0; i < physicalStarts.length; i++) {
+        if ((physicalStarts[i] ?? 0) <= offset) line = i;
+        else break;
+      }
+      return line;
+    };
+    // fake code 委托实例：记录 lineAtOffset 收到的偏移与 revealLine 收到的行号
+    const seen: Array<{ offset: number; physical: number }> = [];
+    const revealArgs: number[] = [];
+    const fakeCode = {
+      destroy(): void {},
+      getMeta: () => ({ encoding: 'utf-8' as const, lang: null, size: content.length, lines: 600 }),
+      lineAtOffset: (offset: number): number => {
+        const physical = lineByOffset(offset);
+        seen.push({ offset, physical });
+        return physical;
+      },
+      revealLine: (line: number): void => {
+        revealArgs.push(line);
+      }
+    };
+    const calls: RangeCall[] = [];
+    const host = mount();
+    // 局部 det：describe 级共享 det 会被前序用例的 redetectWithFull 就地翻转（项 D 同款）
+    const localDet: Detection = { ext: 'jsonl', encoding: 'utf-8' };
+    const inst = await renderJsonl(content.slice(0, 8192), host, localDet,
+      streamCtx({ size: null, content, head: content.slice(0, 8192), calls }),
+      { onEncodingBroken: async () => fakeCode as unknown as JsonlInstance });
+    await vi.waitFor(() => expect(host.querySelector('[data-line="0"]')).not.toBeNull());
+    const statusText = host.querySelector('.vv-jsonl-status')!.textContent!;
+    const loaded = Number(/已加载 (\d+) 行/.exec(statusText)?.[1]);
+    expect(loaded, '前置自校验：首屏窗口模式已加载数据行数可解析').toBeGreaterThan(30);
+    // SUSP-03 同几何：可视首行（嗅探时刻锚行，数据行号）= rowAt - OVERSCAN = loaded-16
+    const scroll = host.querySelector('.vv-jsonl-scroll') as HTMLElement;
+    scroll.scrollTop = 120 * (loaded - 11);
+    scroll.dispatchEvent(new Event('scroll'));
+    const anchor = loaded - 16;
+    const expectedPhysical = 2 * anchor; // 数据行 k 前各有 k 个空行 → 物理行号 2k
+    await vi.waitFor(() => expect(revealArgs.length).toBeGreaterThan(0));
+    expect(seen.length, 'lineAtOffset 应恰被调用一次（锚行字节偏移换算）').toBe(1);
+    expect(seen[0]!.offset, '锚行字节偏移 = index.offsets[anchor]（非 BOM 夹具 = 文件字节偏移）')
+      .toBe(physicalStarts[expectedPhysical]);
+    expect(seen[0]!.physical, '换算结果应为锚行的物理行号').toBe(expectedPhysical);
+    expect(revealArgs[0], 'revealLine 应收物理行号（现状直传内容行号 → 漂移 anchor 个空行）')
+      .toBe(expectedPhysical);
+    inst.destroy();
+  });
+
+  it('委托降级锚行回退：实例无 lineAtOffset（旧产物/非全量形态）保持内容行号直传', async () => {
+    stubResizeObserver();
+    const content = interleavedBlankHeadGbTail(500, 100);
+    const revealArgs: number[] = [];
+    const fakeCode = {
+      destroy(): void {},
+      getMeta: () => ({ encoding: 'utf-8' as const, lang: null, size: content.length, lines: 600 }),
+      revealLine: (line: number): void => {
+        revealArgs.push(line);
+      }
+    };
+    const host = mount();
+    const localDet: Detection = { ext: 'jsonl', encoding: 'utf-8' };
+    const inst = await renderJsonl(content.slice(0, 8192), host, localDet,
+      streamCtx({ size: null, content, head: content.slice(0, 8192) }),
+      { onEncodingBroken: async () => fakeCode as unknown as JsonlInstance });
+    await vi.waitFor(() => expect(host.querySelector('[data-line="0"]')).not.toBeNull());
+    const loaded = Number(/已加载 (\d+) 行/.exec(host.querySelector('.vv-jsonl-status')!.textContent!)?.[1]);
+    const scroll = host.querySelector('.vv-jsonl-scroll') as HTMLElement;
+    scroll.scrollTop = 120 * (loaded - 11);
+    scroll.dispatchEvent(new Event('scroll'));
+    await vi.waitFor(() => expect(revealArgs.length).toBeGreaterThan(0));
+    expect(revealArgs[0], '无 lineAtOffset：回退现行为（内容行号直传，向后兼容）')
+      .toBe(loaded - 16);
     inst.destroy();
   });
 
