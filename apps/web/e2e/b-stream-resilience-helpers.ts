@@ -336,19 +336,23 @@ export async function startStreamFakeServer(
       const serveSlice = (start: number, end: number, gate: 'pass' | 'stall' | 'fail'): void => {
         const slice = bytes.subarray(start, end + 1);
         const serve = (): void => {
-          if (gate === 'fail') {
-            res.writeHead(500, cors);
-            res.end('fail gate');
-            return;
+          try {
+            if (gate === 'fail') {
+              res.writeHead(500, cors);
+              res.end('fail gate');
+              return;
+            }
+            res.writeHead(206, {
+              ...cors,
+              'Content-Type': 'application/octet-stream',
+              'Content-Length': String(slice.length),
+              'Accept-Ranges': 'bytes',
+              'Content-Range': `bytes ${start}-${end}/${bytes.length}`
+            });
+            res.end(slice);
+          } catch {
+            // 客户端已 abort（destroy 取消常态化后）：断管写入静默
           }
-          res.writeHead(206, {
-            ...cors,
-            'Content-Type': 'application/octet-stream',
-            'Content-Length': String(slice.length),
-            'Accept-Ranges': 'bytes',
-            'Content-Range': `bytes ${start}-${end}/${bytes.length}`
-          });
-          res.end(slice);
         };
         if (gate === 'stall') {
           void stallGate.then(serve);
@@ -366,18 +370,22 @@ export async function startStreamFakeServer(
         // 无 Range 或 rangeless='all'：200 全量（门按 start=0 对齐）
         const gate = gateOf(0);
         const serve = (): void => {
-          if (gate === 'fail') {
-            res.writeHead(500, cors);
-            res.end('fail gate');
-            return;
+          try {
+            if (gate === 'fail') {
+              res.writeHead(500, cors);
+              res.end('fail gate');
+              return;
+            }
+            res.writeHead(200, {
+              ...cors,
+              'Content-Type': 'application/octet-stream',
+              'Content-Length': String(bytes.length),
+              'Accept-Ranges': 'bytes'
+            });
+            res.end(bytes);
+          } catch {
+            // 客户端已 abort（destroy 取消常态化后）：断管写入静默
           }
-          res.writeHead(200, {
-            ...cors,
-            'Content-Type': 'application/octet-stream',
-            'Content-Length': String(bytes.length),
-            'Accept-Ranges': 'bytes'
-          });
-          res.end(bytes);
         };
         if (gate === 'stall') {
           void stallGate.then(serve);
@@ -392,18 +400,22 @@ export async function startStreamFakeServer(
         // 探针之外一律 200 全量（忽略 Range）：块读超长 → 客户端 200-回退全量切换
         const gate = gateOf(start);
         const serve = (): void => {
-          if (gate === 'fail') {
-            res.writeHead(500, cors);
-            res.end('fail gate');
-            return;
+          try {
+            if (gate === 'fail') {
+              res.writeHead(500, cors);
+              res.end('fail gate');
+              return;
+            }
+            res.writeHead(200, {
+              ...cors,
+              'Content-Type': 'application/octet-stream',
+              'Content-Length': String(bytes.length),
+              'Accept-Ranges': 'bytes'
+            });
+            res.end(bytes);
+          } catch {
+            // 客户端已 abort（destroy 取消常态化后）：断管写入静默
           }
-          res.writeHead(200, {
-            ...cors,
-            'Content-Type': 'application/octet-stream',
-            'Content-Length': String(bytes.length),
-            'Accept-Ranges': 'bytes'
-          });
-          res.end(bytes);
         };
         if (gate === 'stall') {
           void stallGate.then(serve);

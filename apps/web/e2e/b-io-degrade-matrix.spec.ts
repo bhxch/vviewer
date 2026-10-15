@@ -514,15 +514,11 @@ test('DEG-08：code SSE changed 重渲染免全量重读——增量仅探针+�
 
     fake.updateFile('sse-10mb.js', after);
     fake.notifyChanged(['sse-10mb.js']);
-    // 60s 而非 30s（2026-10-14 CI trace 取证，run 38588619265）：重渲染摘旧实例时，
-    // 旧实例在飞的块读（stall 门挂起）无 AbortSignal 贯穿、不随 destroy 取消，占住
-    // 同 host 连接资源直至其 30s 读超时（trace 铁证：重渲染块 0 应答完成时刻
-    // 44.984+9.675=54.66Z 与旧块 1 超时 abort 24.655+30=54.67Z 同瞬间解锁），新实例
-    // 块 0 因此排队 ~20s，行上屏 ~29.7s——30s 窗口压哨红。窗口须覆盖 30s 超时+重渲
-    // 染 ~5s；在飞读随 destroy 取消（StreamCtx signal 贯穿）为产品侧独立立项，落地
-    // 后可回收本窗口。计量断言（513/523-531）不受影响，仍是用例灵魂。
+    // 30s 窗口（signal 贯穿落地后回收，spec 2026-10-15 §3.6）：destroy 即取消旧实例
+    // 在飞块读，不再等 30s 读超时释放连接——行上屏回归重渲染自身耗时（探针+块 0 两
+    // RTT）。原 60s 宽限（旧读排队机制）已由产品修复消除。
     await expect(pre.locator('.vv-code-line[data-line="5"]')).toContainText('sse-after-k4md', {
-      timeout: 60_000
+      timeout: 30_000
     });
     await expect(pre.locator('.vv-code-line[data-line="5"]')).not.toContainText('sse-before-qz7');
     await settleStats(page, stats);
