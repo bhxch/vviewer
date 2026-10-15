@@ -169,23 +169,29 @@ export function createRemoteStore(
    * base 带 path 时附误粘贴提示）。挂 30s 超时：服务器失联时请求有界失败而非永久悬挂。
    * 多根：路径经 toServerPath 换算，rootIndex!=0 追加 &root=<n>（根 0 不拼，URL 形状不变）。
    * extraHeaders：调用方附加头（read 的 Range 透传），合并进 fetch headers。
+   * signal：调用方取消信号（read 的 opts.signal 透传），与 30s 超时信号 AbortSignal.any
+   * 合并；取消以 fetch 原生 AbortError reject，不转写为超时/其他错误。
    */
   async function request(
     apiPath: string,
     path: string,
-    extraHeaders?: Record<string, string>
+    extraHeaders?: Record<string, string>,
+    signal?: AbortSignal
   ): Promise<Response> {
     const headers: Record<string, string> = { ...extraHeaders };
     if (token) headers.authorization = `Bearer ${token}`;
     const query =
       `path=${encodeURIComponent(toServerPath(path))}` +
       (rootIndex !== 0 ? `&root=${rootIndex}` : '');
+    const timeoutSignal =
+      typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(30_000) : undefined;
+    // 调用方 signal 与 30s 超时信号合并（任一触发即断）：预 abort 的 signal 进
+    // any 后 fetch 未发出即断，取消不产生真实网络等待
+    const merged =
+      signal && timeoutSignal ? AbortSignal.any([timeoutSignal, signal]) : (signal ?? timeoutSignal);
     let res: Response;
     try {
-      res = await fetch(`${base}${apiPath}?${query}`, {
-        headers,
-        signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(30_000) : undefined
-      });
+      res = await fetch(`${base}${apiPath}?${query}`, { headers, signal: merged });
     } catch (err) {
       if (err instanceof Error && err.name === 'TimeoutError') {
         throw new Error(`服务器请求超时（30s）: ${base}${apiPath}`);
@@ -351,7 +357,12 @@ export function createRemoteStore(
       // 即区间字节原样交付，回 200（忽略 Range）则全量原样交付——不做客户端切片，
       // 长度/边界校验由调用方（dispatcher 的 StreamCtx 构造）自担。
       const r = opts?.range;
-      const res = await request('/api/file', path, r ? { range: `bytes=${r.start}-${r.end}` } : undefined);
+      const res = await request(
+        '/api/file',
+        path,
+        r ? { range: `bytes=${r.start}-${r.end}` } : undefined,
+        opts?.signal
+      );
       const lang = res.headers.get('x-vv-lang');
       const encoding = asEncoding(res.headers.get('x-vv-encoding'));
       const key = `${id}:${path}`;

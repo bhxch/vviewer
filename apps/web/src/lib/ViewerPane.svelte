@@ -231,7 +231,12 @@ import SearchPanel from './SearchPanel.svelte';
         // 重试通道，消除「8KB head 截断渲染」活面），由下方 catch 走读取失败卡片。
         const res = await dispatcher.dispatch(current.source, null, host, {
           rendererOverride: current.overrideRenderer,
-          read: (range) => current.source.store.read(current.source.path, range ? { range } : undefined)
+          // signal 透传（流式硬化）：渲染实例 destroy 时取消在飞 store 读
+          read: (range, signal) =>
+            current.source.store.read(
+              current.source.path,
+              range !== undefined || signal !== undefined ? { range, signal } : undefined
+            )
         });
         if (cancelled) {
           res.instance.destroy();

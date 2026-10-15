@@ -7,7 +7,8 @@ export function createSingleFileStore(file: File): TreeStore {
     async listChildren(): Promise<TreeNode[]> {
       return [{ name: file.name, path: file.name, kind: 'file', size: file.size, mtime: file.lastModified }];
     },
-    async read(path) {
+    async read(path, opts) {
+      if (opts?.signal?.aborted) throw new Error('读取已取消');
       if (path !== file.name) throw new Error(`未知路径: ${path}`);
       return new Uint8Array(await file.arrayBuffer());
     }
@@ -24,11 +25,19 @@ export function createUrlStore(url: string): TreeStore {
     async listChildren() {
       return [{ name, path: name, kind: 'file' }];
     },
-    async read(path) {
+    async read(path, opts) {
       if (path !== name) throw new Error(`未知路径: ${path}`);
-      bytes ??= fetch(url).then(async (res) => {
+      if (opts?.signal?.aborted) throw new Error('读取已取消');
+      // 缓存键不含 signal：取消后重试走新 fetch（取消的尝试不留缓存）
+      bytes ??= fetch(url, { signal: opts?.signal }).then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status} 获取 ${url} 失败`);
         return new Uint8Array(await res.arrayBuffer());
+      });
+      // 取消/失败的尝试即出表（memoizedFullRead 同纪律）：仅当缓存仍是本次尝试时
+      // 清空——不误清并发后到的重试；catch 已挂链，无未处理 rejection
+      const attempt = bytes;
+      void attempt.catch(() => {
+        if (bytes === attempt) bytes = null;
       });
       return bytes;
     }

@@ -30,8 +30,10 @@ export interface StreamCtx {
    */
   readonly head: Uint8Array<ArrayBuffer>;
   /** 按字节区间读取（end 含，同 ByteRange 语义）；store 无 range 能力时为
-   * 全量 buffer 的切片视图（同步 resolve，零拷贝 subarray）。 */
-  read(range: ByteRange): Promise<Uint8Array<ArrayBuffer>>;
+   * 全量 buffer 的切片视图（同步 resolve，零拷贝 subarray）。可选 signal：渲染实例
+   * destroy 时取消在飞读——aborted 即 reject，取消错误不视为读失败（由 dispatcher
+   * 侧区分标注）。 */
+  read(range: ByteRange, signal?: AbortSignal): Promise<Uint8Array<ArrayBuffer>>;
 }
 
 export interface TreeStore {
@@ -42,7 +44,9 @@ export interface TreeStore {
   //（fetch/arrayBuffer → new Uint8Array(...)），收窄后结果可直接作 BlobPart（TS 5.7+
   // 泛型 TypedArray：默认 Uint8Array<ArrayBufferLike> 含 SharedArrayBuffer，不满足
   // Blob 构造的 ArrayBufferView<ArrayBuffer> 约束）。
-  read(path: string, opts?: { range?: ByteRange }): Promise<Uint8Array<ArrayBuffer>>;
+  // opts.signal（流式硬化）：destroy 时取消在飞读——aborted 即 reject（remote 抛
+  // fetch 原生 AbortError；localFiles/singleFile 抛 Error('读取已取消')）。
+  read(path: string, opts?: { range?: ByteRange; signal?: AbortSignal }): Promise<Uint8Array<ArrayBuffer>>;
   /**
    * 能力标记（spec 2026-10-12-io-streaming §2.3）：read 支持 opts.range（bytes
    * 区间语义，end 含）；缺省 false = 仅全量。dispatcher 据此决定 streaming 渲染器

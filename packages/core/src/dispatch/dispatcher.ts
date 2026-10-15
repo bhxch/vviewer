@@ -19,8 +19,9 @@ export interface Dispatcher {
 }
 
 /** dispatch 级流式读闭包（io-streaming §3）：range 缺省 = 全量读；range 的 end 含
- * （同 ByteRange 语义）。由调用方以 store.read 绑定（Task 4 ViewerPane 接线）。 */
-export type DispatchRead = (range?: ByteRange) => Promise<Uint8Array<ArrayBuffer>>;
+ * （同 ByteRange 语义）。可选 signal：渲染实例 destroy 时取消在飞读（流式硬化）。
+ * 由调用方以 store.read 绑定（Task 4 ViewerPane 接线）。 */
+export type DispatchRead = (range?: ByteRange, signal?: AbortSignal) => Promise<Uint8Array<ArrayBuffer>>;
 
 /** dispatch 可选项（C 项：手选打开方式；io-streaming §3：流式读） */
 export interface DispatchOptions {
@@ -361,9 +362,12 @@ export function createDispatcher(registry: Registry): Dispatcher {
           // 评审指令①）：失败标为读错误向上直抛调用方读取失败面（dispatch catch 识别
           // 后 rethrow，无重试通道）——渲染器 await 它的路径（如 hex size 回退全量读）
           // 不会落「错误卡片 + 8KB probe 重试」的截断活面；渲染器自行 catch 的按需读
-          //（如 hex 窗口 ensure）收到的也是已标记读失败，走自兜底而非错误重试
-          read: (r) =>
-            read!(r).catch((err: unknown): never => {
+          //（如 hex 窗口 ensure）收到的也是已标记读失败，走自兜底而非错误重试。
+          // 例外（流式硬化）：signal.aborted 时的 reject 是 destroy 取消而非读失败，
+          // 原样透传不标 DispatchReadError——取消不该落错误卡片/触发重试
+          read: (r, signal) =>
+            read!(r, signal).catch((err: unknown): never => {
+              if (signal?.aborted) throw err; // destroy 取消：非读失败，不标 DispatchReadError
               throw new DispatchReadError(err);
             })
         }

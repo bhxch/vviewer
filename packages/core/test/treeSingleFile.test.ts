@@ -41,7 +41,11 @@ describe('createUrlStore', () => {
       { name: 'log file.txt', path: 'log file.txt', kind: 'file' }
     ]);
     expect(await store.read('log file.txt')).toEqual(new Uint8Array([9, 8, 7]));
-    expect(fetchMock).toHaveBeenCalledWith('https://example.com/dir/log%20file.txt?v=1');
+    // 流式硬化：fetch 增 init 形参透传 signal（无 signal 时为 { signal: undefined }），
+    // URL 断言语义不变
+    expect(fetchMock).toHaveBeenCalledWith('https://example.com/dir/log%20file.txt?v=1', {
+      signal: undefined
+    });
   });
 
   it('throws with reason on http failure', async () => {
