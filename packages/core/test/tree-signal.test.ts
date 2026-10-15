@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createRemoteStore } from '../src/tree/remote';
 import { createLocalFilesStore } from '../src/tree/localFiles';
+import { createLocalFsStore } from '../src/tree/localFs';
 
 describe('store read 的 signal 取消语义', () => {
   it('remote：signal 已 abort 时 fetch 被取消（AbortError reject），不发出网络等待', async () => {
@@ -38,6 +39,29 @@ describe('store read 的 signal 取消语义', () => {
       webkitRelativePath: 'd/a.txt'
     });
     const store = createLocalFilesStore([file], 't');
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      store.read('a.txt', { signal: controller.signal })
+    ).rejects.toThrow('读取已取消');
+  });
+
+  it('localFs：signal 预先 aborted → 立即 reject（读取已取消，localFiles 同款入口截断）', async () => {
+    // File System Access handle 最小 mock 面：read 入口在 resolve 之前即截断，
+    // 目录句柄只需 kind/name 满足构造；values() 供 resolve 可达性兜底
+    const fileHandle = {
+      kind: 'file',
+      name: 'a.txt',
+      getFile: async () => new File([new TextEncoder().encode('a\n')], 'a.txt')
+    };
+    const dirHandle = {
+      kind: 'directory',
+      name: 'd',
+      values: async function* () {
+        yield fileHandle;
+      }
+    } as unknown as FileSystemDirectoryHandle;
+    const store = createLocalFsStore(dirHandle);
     const controller = new AbortController();
     controller.abort();
     await expect(
