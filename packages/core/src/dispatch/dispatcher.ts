@@ -52,6 +52,20 @@ class DispatchReadError extends Error {
 }
 
 /**
+ * 取消错误身份判定（deferred 清偿 Task 5）：err 是否为取消（AbortError 形态）。
+ * 与 render-text code.ts 导出的 isAbortError 同源同形——core 不反向依赖 render-text
+ * （依赖方向 render-text → core），故此处维护镜像实现，判定面一致由测试钉住；
+ * jsdom 等环境的 DOMException 未必是 Error 子类，instanceof 两支并判。消费面：
+ * dispatch catch 的「取消 ≠ 渲染失败」静默分支（abort 不上屏裁决）。
+ */
+function isAbortError(err: unknown): boolean {
+  return (
+    (err instanceof DOMException && err.name === 'AbortError') ||
+    (err instanceof Error && err.name === 'AbortError')
+  );
+}
+
+/**
  * 补拉全量后的编码精判（终审 F2 及其渲染器侧镜像的共享 helper，I-2 收口）：
  * size 未知/超限时 det 仅由 8KB head 短样本判编码（截断多字节序列可误判 gb18030），
  * 全量到手后以 full 重算 detect 并只把 encoding/binary 两字段合并回 det（原地变更，
@@ -378,6 +392,14 @@ export function createDispatcher(registry: Registry): Dispatcher {
       // 读失败 ≠ 渲染失败（T3 评审）：重跑 render 无意义且 catch 手头只有 8KB head
       // 探测块（headOnly 时）——重试会静默截断渲染。向上 reject 走调用方读取失败面。
       if (err instanceof DispatchReadError) throw err;
+      // abort 不上屏（deferred 清偿 Task 5 裁决）：effect 级取消（ViewerPane
+      // effectAbort）使「AbortError 经 render 冒泡」可达——取消不是渲染失败：不落
+      // 错误卡片（DOM 即将被新一轮渲染接管，卡片只会闪现/滞留），返回 no-op 实例，
+      // 调用方既有 cancelled 面将其丢弃（cleanup 晚于 resolve 的形态由实例级
+      // controller 兜底，不再冒泡至此）
+      if (isAbortError(err)) {
+        return { instance: { destroy() {} }, rendererId: errorRenderer.id, det };
+      }
       const message = err instanceof Error ? err.message : String(err);
       // render 失败提供重试 + open-as（选路失败无重试，只给 open-as 换打开方式）。
       // 重试/open-as 成功产出的真实实例由 liveChild 级联托管：调用方（ViewerPane）持有的

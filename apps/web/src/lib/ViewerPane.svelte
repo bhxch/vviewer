@@ -1,12 +1,14 @@
 <script lang="ts">
   import type { RenderedInstance, TocEntry, ComputeWhere } from '@vviewer/core';
   import { showErrorCard } from '@vviewer/core';
+  import { isAbortError } from '@vviewer/render-text';
   import type { CodeEngine, CodeFileMeta } from '@vviewer/render-text';
   import type { MarkdownEngineState } from '@vviewer/render-text/markdown/markdownRenderer';
   import type { Tab } from './openFlow.svelte';
   import { persistScroll } from './openFlow.svelte';
   import { setFileMeta, setInspector, inspectorBus, type FileOpenWith, type InspectorSnapshot } from './metaStore.svelte';
   import { openWithOf } from './openWith';
+  import { mergeAbortSignals } from './mergeAbortSignals';
   import { dispatcher, registry, cancelMarkdownRemote } from './viewer';
   import { cancelHighlight } from './highlightClient';
   import { watchHealth, statusNotice } from './openFlow.svelte';
@@ -220,6 +222,12 @@ import SearchPanel from './SearchPanel.svelte';
     const current = tab;
     void current.rev; // SSE 变更刷新：读入 rev 使 effect 依赖它，自增即重跑（重读+重渲染）
     let cancelled = false;
+    // effect 级取消（deferred 清偿 Task 5）：覆盖「rev++ 早于实例 resolve」的
+    // pre-instance 窗口——旧 render 在飞读无实例可 destroy，此前只能等读超时（30s）；
+    // cleanup 时 abort 使在飞读即刻 reject。实例级 signal（dispatcher 渲染链透传，
+    // pre-instance 面为 undefined）与之合并传入 store.read；实例建成后的在飞取消仍
+    // 由实例级 controller 兜底（流式硬化 Task 3 面），两级信号互不替代
+    const effectAbort = new AbortController();
     void (async () => {
       live?.destroy();
       live = null;
@@ -231,12 +239,15 @@ import SearchPanel from './SearchPanel.svelte';
         // 重试通道，消除「8KB head 截断渲染」活面），由下方 catch 走读取失败卡片。
         const res = await dispatcher.dispatch(current.source, null, host, {
           rendererOverride: current.overrideRenderer,
-          // signal 透传（流式硬化）：渲染实例 destroy 时取消在飞 store 读
-          read: (range, signal) =>
-            current.source.store.read(
+          // signal 透传（流式硬化 + Task 5 effect 级取消）：实例级 signal 与
+          // effectAbort.signal 合并（缺省直通，双侧缺省维持无 opts 调用形态）
+          read: (range, signal) => {
+            const merged = mergeAbortSignals(signal, effectAbort.signal);
+            return current.source.store.read(
               current.source.path,
-              range !== undefined || signal !== undefined ? { range, signal } : undefined
-            )
+              range !== undefined || merged !== undefined ? { range, signal: merged } : undefined
+            );
+          }
         });
         if (cancelled) {
           res.instance.destroy();
@@ -289,8 +300,12 @@ import SearchPanel from './SearchPanel.svelte';
           });
         }
       } catch (err) {
-        // store.read 失败（如会话占位 tab、句柄失效）也走错误卡片
-        if (cancelled || !host) return;
+        // store.read 失败（如会话占位 tab、句柄失效）也走错误卡片；abort 不上屏
+        //（deferred 清偿 Task 5 裁决）：effect 级/实例级取消的 AbortError 不落读取
+        // 失败卡片——取消不是读失败，静默 return 交新一轮渲染接管（dispatch 侧
+        // no-op 实例分支同裁决；cancelled 面已覆盖 cleanup 先于 reject 的形态，
+        // 此处补「abort 错误 + 未 cancelled」的显式静默面）
+        if (cancelled || !host || isAbortError(err)) return;
         const message = err instanceof Error ? err.message : String(err);
         live = showErrorCard(host, message, current.source);
         instance = live;
@@ -301,6 +316,7 @@ import SearchPanel from './SearchPanel.svelte';
     })();
     return () => {
       cancelled = true;
+      effectAbort.abort(); // effect 级取消：pre-instance 在飞读即刻 reject（见上注）
       cancelAnimationFrame(rafId);
       stopWatchEngine();
       stopWatchMeta(); // meta 轮询随实例销毁停止（readInstanceMeta 通道上行面）

@@ -79,6 +79,50 @@ describe('dispatcher', () => {
   });
 });
 
+// ---------- deferred 清偿 Task 5：abort 不上屏 ----------
+//
+// effect 级取消（ViewerPane effectAbort）使「AbortError 经 render 冒泡 → dispatch
+// catch」路径可达：取消 ≠ 渲染失败——catch 识别 abort 错误时必须静默（不落错误卡片
+// DOM），返回 no-op 实例交调用方既有 cancelled 面丢弃。
+
+describe('dispatch abort 不上屏（deferred 清偿 Task 5）', () => {
+  it('render 抛 DOMException AbortError：不落错误卡片，返回 rendererId=error 的 no-op 实例', async () => {
+    const reg = createRegistry();
+    reg.install(mk('code', ['txt'], {
+      render: async () => { throw new DOMException('读取已取消', 'AbortError'); }
+    }));
+    const target = document.createElement('div');
+    const res = await createDispatcher(reg).dispatch(
+      source('a.txt'), new TextEncoder().encode('hi'), target);
+    expect(res.rendererId).toBe('error');
+    expect(target.querySelector('.vv-error-card'), '取消不得落错误卡片 DOM').toBeNull();
+    expect(target.textContent).not.toContain('读取已取消');
+    expect(() => res.instance.destroy()).not.toThrow();
+  });
+
+  it('Error 且 name=AbortError 同判为取消（code.ts isAbortError 同源口径）；其余 DOMException 照常落卡片', async () => {
+    const reg = createRegistry();
+    const err = new Error('取消');
+    err.name = 'AbortError';
+    reg.install(mk('code', ['txt'], { render: async () => { throw err; } }));
+    const targetA = document.createElement('div');
+    const resA = await createDispatcher(reg).dispatch(
+      source('a.txt'), new TextEncoder().encode('hi'), targetA);
+    expect(resA.rendererId).toBe('error');
+    expect(targetA.querySelector('.vv-error-card')).toBeNull();
+
+    const reg2 = createRegistry();
+    reg2.install(mk('code', ['txt'], {
+      render: async () => { throw new DOMException('boom', 'DataCloneError'); }
+    }));
+    const targetB = document.createElement('div');
+    const resB = await createDispatcher(reg2).dispatch(
+      source('a.txt'), new TextEncoder().encode('hi'), targetB);
+    expect(resB.rendererId).toBe('error');
+    expect(targetB.querySelector('.vv-error-card'), '非 abort 错误照常落错误卡片').not.toBeNull();
+  });
+});
+
 describe('dispatcher magic 预检改派（BUG-13/BUG-01.3）', () => {
   it('.ts 扩展名 + mpegts 签名 → 改派 av 渲染器（det.ext 纠偏为 ts）', async () => {
     const reg = createRegistry();
