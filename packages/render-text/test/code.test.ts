@@ -2069,6 +2069,44 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     handle.destroy();
   });
 
+  // SUSP-01（e2e 富化定档 confirmed-design 优化候选落地）：退出搜索（空 query）此前
+  // 走换键重置分支（清 lastQuery/命中集/游标），重输同词触发全新全文扫描（≥20 块级
+  // 请求）。落地后空 query 只做令牌失效 + 视觉清理，短路缓存保留——同词重搜走既有
+  // 完成态短路，零块级拉取；命中视觉（词级 mark/行级背景）自缓存命中集零 IO 复现。
+  it('SUSP-01：退出搜索（空 query）不作废短路缓存——同词重搜零读、命中视觉复现', async () => {
+    stubResizeObserver();
+    const lines: string[] = [];
+    for (let i = 0; i < 3400; i++) {
+      const head = i === 5 ? 'zzneedle early ' : i === 3300 ? 'zzneedle deep ' : `row ${i} `;
+      lines.push(head + 'p'.repeat(Math.max(0, 1499 - head.length)) + '\n'); // 每行恰 1500B
+    }
+    const content = enc(lines.join('')); // ≈ 5.1MB ≈ 20 块（行 5 在块 0，行 3300 在块 18）
+    let readCount = 0;
+    const ctx: StreamCtx = {
+      size: content.length,
+      head: content.slice(0, 8192),
+      read: async (r) => {
+        readCount += 1;
+        return content.slice(r.start, r.end + 1);
+      }
+    };
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    pausePump(handle); // 冻结后台泵：前向读全部由扫描自驱动，读计数确定
+    await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
+    const first = await handle.search('zzneedle'); // 首扫自驱动至 EOF：全文完成
+    expect(first.map((m) => m.line)).toEqual([5, 3300]);
+    const readsAfterFirst = readCount;
+    expect(readsAfterFirst).toBeGreaterThan(1); // 首扫有真实块级 IO
+    await handle.search(''); // 退出搜索：视觉清理照旧（词级 mark/行级背景消退）
+    expect(host.querySelector('mark.vv-search-hit')).toBeNull();
+    const second = await handle.search('zzneedle'); // 同词重搜：完成态短路（同步 resolve 路径）
+    expect(readCount).toBe(readsAfterFirst); // 零新增块级拉取（SUSP-01 断言核心）
+    expect(second.map((m) => m.line)).toEqual([5, 3300]); // 命中集自短路缓存原样返回
+    expect(host.querySelector('mark.vv-search-hit')).not.toBeNull(); // 命中视觉自缓存复现
+    handle.destroy();
+  });
+
   it('gotoMatch 先 ensure 目标块再跳转：补齐前不跳转，补齐后高亮落实到实行', async () => {
     stubResizeObserver();
     const lines: string[] = [];

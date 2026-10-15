@@ -40,8 +40,9 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * manifest 的 page.route mock 不被 PWA SW CacheFirst 旁路；其余用例不依赖 SW。
  *
  * 场景 → 探针断言概览（记录的现状）：
- * - SUSP-01：清空→重输同词 = 全新全文扫描（40 块级重拉、缓存不复用）；对照面
- *   同值 input 重派发 = 同键短路零扫描 IO
+ * - SUSP-01（已优化落地，探针随落地翻转）：清空→重输同词 = 同词短路零扫描 IO
+ *   （退出搜索仅令牌失效 + 视觉清理，短路缓存保留；优化前为全新全文扫描 40 块级
+ *   重拉、缓存不复用）；对照面同值 input 重派发 = 同键短路零扫描 IO
  * - SUSP-02：SCAN-08 布点续扫中视口块 1 被 LRU 逐出经 pendingReload 回拉 ≥2 次
  * - SUSP-03：流内嗅探降级整体 replaceChildren → 视口回顶（scrollTop=0）
  * - SUSP-04：Range-less(200-only) + size 已知 10MB：首屏恰 3 请求共 3×文件字节，
@@ -258,7 +259,7 @@ function digest(records: Array<{ range: string | null; status: number; bytes: nu
 
 // ---------------------------------------------------------------- SUSP-01
 
-test('SUSP-01：清空→重输同词触发全新全文扫描（缓存不复用）；对照同键重搜短路零 IO', async ({ page }) => {
+test('SUSP-01（已优化落地）：清空→重输同词短路零扫描（退出保留短路缓存）；对照同键重搜短路零 IO', async ({ page }) => {
   test.setTimeout(240_000);
   const fake = await startStreamFakeServer({ 'susp10.js': makeCodeFile(SUSP_ROWS, SUSP_NEEDLES) });
   try {
@@ -291,27 +292,33 @@ test('SUSP-01：清空→重输同词触发全新全文扫描（缓存不复用�
     ).toHaveLength(0);
     expect(shortCircuit.length, '对照面短路 IO 至多 1 条').toBeLessThanOrEqual(1);
 
-    // ③ 清空输入框：空 query 调 search('')（SearchPanel.svelte:105）走换键重置分支
-    //    （code.ts:2118-2128 清空 lastQuery/命中集/游标）——计数转「无结果」为已执行信号
+    // ③ 清空输入框：空 query 调 search('')（SearchPanel.svelte:105）= 退出搜索——
+    //    仅令牌失效 + 视觉清理（词级 mark/行级背景消退），短路缓存保留（SUSP-01
+    //    优化落地）；计数转「无结果」为已执行信号
     await replaceSearchQuery(page, '');
     await expect(searchCount(page)).toHaveText('无结果', { timeout: 10_000 });
     await settleStats(page, stats);
 
-    // ④⑤ 重输同一布点词：记录的现状 = 全新全文扫描（40 块级重拉），缓存不复用
+    // ④⑤ 重输同一布点词（SUSP-01 优化后目标形态）：退出不清缓存 → 同词重搜走完成态
+    //    短路，零新增扫描请求（至多 gotoMatch 块 0 补拉 1 条，与对照面同口径）；优化
+    //    前的「全新全文扫描」形态（块级请求 ≥20、末块 39 在列）若复现即回归
     const beforeRescan = stats.count();
     await replaceSearchQuery(page, CODE_NEEDLE);
-    await expect(searchCount(page)).toHaveText('1/2', { timeout: 120_000 });
+    await expect(searchCount(page)).toHaveText('1/2', { timeout: 10_000 });
+    await expect(activeHitLine(page)).toHaveAttribute('data-line', String(SUSP_NEEDLES[0]), {
+      timeout: 15_000
+    });
     await settleStats(page, stats);
     const rescan = stats.records.slice(beforeRescan);
     const blockPulls = rescan.filter((r) => r.range !== null).length;
     expect(
-      rescan.map((r) => r.range),
-      `清空→重输同词应触发全新全文扫描（末块 39 须在列，缓存复用时必红），实得 ${digest(rescan)}`
-    ).toContain(codeBlockRange(39));
+      rescan.filter((r) => r.range !== codeBlockRange(0)),
+      `重输同词应短路零扫描（块 0 补拉之外不得有任何请求），实得 ${digest(rescan)}`
+    ).toHaveLength(0);
     expect(
       blockPulls,
-      `重搜块级请求应 ≥20（全新扫描形态；缓存复用 ≤1），实得 ${digest(rescan)}`
-    ).toBeGreaterThanOrEqual(20);
+      `重搜块级请求应 ≤1（短路形态；全新全文扫描为 ≥20 且末块 39 在列），实得 ${digest(rescan)}`
+    ).toBeLessThanOrEqual(1);
     expectNoFullRead(stats);
     await expect(page.locator('.vv-error-card')).toHaveCount(0);
   } finally {

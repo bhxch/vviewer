@@ -2224,9 +2224,24 @@ function renderCodeWindowed(
       if (scan !== null && scan.key === key) return scan.promise; // 同键在飞：共享同一扫描
       const sameKey = scan === null && query === lastQuery && caseSensitive === lastCaseSensitive;
       // 同键短路分界（项 2）：仅全文完成（lastScanComplete）的同 query 才短路零读；
-      // 停机/取消收场的部分结果不得短路——重搜触发断点续扫（自 lastScanCursor）
-      if (sameKey && lastScanComplete) return Promise.resolve(lastMatches);
+      // 停机/取消收场的部分结果不得短路——重搜触发断点续扫（自 lastScanCursor）。
+      // SUSP-01：退出搜索保留了短路缓存但已清行级命中索引（视觉清理，见空 query
+      // 分支）——同词重搜短路时自 lastMatches 重建（零 IO），词级 mark/行级背景
+      // 随缓存命中集复现
+      if (sameKey && lastScanComplete) {
+        if (searchHitsByLine.size === 0 && lastMatches.length > 0) {
+          searchHitsByLine = new Map();
+          for (const m of lastMatches) {
+            const arr = searchHitsByLine.get(m.line);
+            if (arr) arr.push({ start: m.start, end: m.end });
+            else searchHitsByLine.set(m.line, [{ start: m.start, end: m.end }]);
+          }
+          scroller?.refresh(true);
+        }
+        return Promise.resolve(lastMatches);
+      }
       const mySeq = ++scanSeq; // 令牌失效：旧扫描在下一检查点退出（新搜索/退出搜索取消）
+      if (scan !== null) lastScanComplete = false; // 在飞扫描被取代：其部分命中不作完成态（SUSP-01 保留的缓存不得以半成品短路）
       scan = null;
       // 命中集/行级背景/active 重置（旧查询的视觉痕迹即刻清除，新命中随扫描渐进上屏）
       if (hitTimer !== null) {
@@ -2234,11 +2249,18 @@ function renderCodeWindowed(
         hitTimer = null;
       }
       hitLine = -1;
-      if (sameKey) {
-        // 停机收场后同 query 重搜：续扫。重搜即用户动作，解除续读停机闩（「下次
-        // 用户动作才重试」）；命中集与游标保持，扫描自断点合并推进
-        continueFailed = false;
-      } else {
+      if (query === '') {
+        // SUSP-01：空 query = 退出搜索——只做令牌失效（上方）与视觉清理，短路缓存
+        // （lastQuery/lastCaseSensitive/lastAcc/lastMatches/lastScanComplete/
+        // lastScanCursor）原样保留：同词重搜零读短路，换新词走下方换键分支全量
+        // 重置。用户可见行为零变化（视觉清理照旧），仅省全文重扫 IO。
+        continueFailed = false; // 退出即用户动作：解除续读停机（与同键重搜同口径）
+        searchHitsByLine = new Map(); // 行级命中索引清空：refresh 后 mark/行级背景即刻消退
+        clearHit(); // 空 query = 退出搜索：active 与全部行级背景立即消退
+        scroller?.refresh(true);
+        return Promise.resolve([]);
+      }
+      if (!sameKey) {
         // 换键：命中集/行级背景/进度游标全量重置（lastMatches 引用随 lastAcc 更新）
         lastAcc = [];
         lastMatches = lastAcc;
@@ -2246,11 +2268,10 @@ function renderCodeWindowed(
         lastQuery = query;
         lastCaseSensitive = caseSensitive;
         lastScanCursor = 0;
-      }
-      if (query === '') {
-        clearHit(); // 空 query = 退出搜索：active 与全部行级背景立即消退
-        scroller?.refresh(true);
-        return Promise.resolve([]);
+      } else {
+        // 停机收场后同 query 重搜：续扫。重搜即用户动作，解除续读停机闩（「下次
+        // 用户动作才重试」）；命中集与游标保持，扫描自断点合并推进
+        continueFailed = false;
       }
       const promise = runScan(lastAcc, query, caseSensitive, mySeq, lastScanCursor).catch(
         (err: unknown) => {
