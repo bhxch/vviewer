@@ -2107,14 +2107,64 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     handle.destroy();
   });
 
-  it('gotoMatch 先 ensure 目标块再跳转：补齐前不跳转，补齐后高亮落实到实行', async () => {
+  // SUSP-02（e2e 富化定档 confirmed-design UX 候选落地）：后台全文扫描逐块喂入时，
+  // 块表 LRU（16×256KB）曾把视口所在块挤出——视口行经 lineAvailable 占位化 +
+  // pendingReload 回看重拉（SCAN-08 一次续扫内 ≥2 次，可见闪烁）。修后 runScan
+  // 每块落地对可视区所需块 bs.block 触新（自带 LRU touch）：视口块恒驻留、占位化
+  // 面消失。断言面：视口块 0 的块级读恰 1 次——任何「挤出→占位化」episode 都必然
+  // 经 pendingReload→ensureBlock 产生第 2 次读，读计数是占位化的忠实代理。
+  it('SUSP-02：扫描推进期视口块被触新——不触发回看重拉（pendingReload 恒空）', async () => {
     stubResizeObserver();
     const lines: string[] = [];
     for (let i = 0; i < 3400; i++) {
       const head = i === 100 ? 'zzneedle here ' : `row ${i} `;
       lines.push(head + 'q'.repeat(Math.max(0, 1499 - head.length)) + '\n'); // 每行恰 1500B
     }
-    const content = enc(lines.join('')); // ≈ 5.1MB ≈ 20 块 > 16（块表 LRU）
+    const content = enc(lines.join('')); // ≈ 5.1MB ≈ 20 块 > 块表 LRU 16：挤出压力成立
+    let block0Reads = 0;
+    const ctx: StreamCtx = {
+      size: content.length,
+      head: content.slice(0, 8192),
+      read: async (r) => {
+        if (r.start === 0) block0Reads += 1;
+        return content.slice(r.start, r.end + 1);
+      }
+    };
+    const host = newHost();
+    // 钉 attach 相位 failed（顺序无关，杜绝 pending 相位 10s 挂起泄漏）：chunk 走
+    // hljs 兜底 = 视口 chunk 高亮缓存的生产行态——此后渲染经 lineHtml 缓存取行、
+    // 不再经 lineText/charOffsetOf 触块（渲染路径触新的缺席正是 SUSP-02 现象的
+    // 成立前提：视口块 LRU 位随喂块推进自然变陈旧）
+    __resetAttachPhaseForTest();
+    attachHighlightClient(null);
+    const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    pausePump(handle); // 冻结泵：前向喂块全由扫描自驱动（SCAN 域既有口径），读计数归因唯一
+    await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
+    expect(block0Reads).toBe(1); // 自证：打开首拉恰一次
+    const matches = await handle.search('zzneedle'); // 扫描自驱动喂块 1..19 到 EOF（视口驻块 0）
+    expect(matches.map((m) => m.line)).toEqual([100]); // 全文扫描完成（布点行入集）
+    await vi.waitFor(() => expect(handle.getMeta().lines).toBe(3400));
+    // 断言核心：视口（顶部行 0..~20 ∈ 块 0）全程实卡——扫描新块未将块 0 挤出
+    //（修前：喂块至 16 块挤出块 0 → 视口行占位化 → pendingReload 回拉 = 第 2 次读）
+    expect(block0Reads, '视口块 0 应恰 1 次读（扫描期触新驻留，无占位化回拉）').toBe(1);
+    expect(bodyText(host, 0)!.startsWith('row 0 ')).toBe(true); // 视口首行实行非占位
+    handle.destroy();
+  });
+
+  // SUSP-02 落地后的形态改造（原「扫描期视口补拉预置失败」前提已被触新消除——
+  // 顶部视口驻留块 0 在扫描期恒被触新、不再逐出重拉）：gotoMatch 的 ensure 闸面
+  // 改由「视口先离顶（贴底驱动续读）→ 前向 40 块 LRU(16) 逐出块 0..24 → 扫描补拉
+  // 块 0 后又被第 17 次后续插入挤出」承担。补齐前不跳转、补齐后高亮落实到实行
+  // 的钉住语义不变；本用例不经 runScan 喂块落地点（indexFinished 纯内存扫描），
+  // 对触新实现前后不变。
+  it('gotoMatch 先 ensure 目标块再跳转：补齐前不跳转，补齐后高亮落实到实行', async () => {
+    stubResizeObserver();
+    const lines: string[] = [];
+    for (let i = 0; i < 7000; i++) {
+      const head = i === 100 ? 'zzneedle here ' : `row ${i} `;
+      lines.push(head + 'q'.repeat(Math.max(0, 1499 - head.length)) + '\n'); // 每行恰 1500B
+    }
+    const content = enc(lines.join('')); // ≈ 10.5MB ≈ 41 块 > 16（块表 LRU）
     let block0Reads = 0;
     let releaseEnsure: (() => void) | null = null;
     const ensureGate = new Promise<void>((res) => {
@@ -2126,19 +2176,28 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
       read: async (r) => {
         if (r.start === 0) {
           block0Reads += 1;
-          // 第 2 次块 0 读 = 扫描期的视口补拉：预置失败 → reloadFailed 停机闩落下，
-          // 块 0 保持缺驻（无自动重试）——gotoMatch 的 ensure 成为第 3 次读（挂闸）
-          if (block0Reads === 2) throw new Error('块 0 视口补拉失败（预置）');
+          // 读 1 = 打开首拉、读 2 = 扫描面对已逐出块 0 的补拉（布点行 100 所在，
+          // 须成功）；读 3 = gotoMatch 的回看 ensure（补拉后再逐出）——挂闸钉住
+          // 「补齐前不跳转」
           if (block0Reads >= 3) await ensureGate;
         }
         return content.slice(r.start, r.end + 1);
       }
     };
     const host = newHost();
-    const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    const handle = renderCode(content.slice(0, 8192), host, {
+      ext: 'js',
+      lang: 'javascript',
+      highlight: false, // plain 策略：零 chunk 管线（前沿推进不触发逐块 hljs 高亮）——
+      // 本用例钉的是回看 ensure 面，与高亮无关；词级 mark/行级高亮走搜索 overlay 面
+      ctx
+    });
+    pausePump(handle); // 冻结泵：EOF 前的前向读全由贴底滚动续读驱动（读计数归因唯一）
     await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
-    const matches = await handle.search('zzneedle'); // 扫描自驱动喂块到 EOF：块 0 已被逐出
-    expect(matches.map((m) => m.line)).toEqual([100]);
+    scrollCode(host, Number.MAX_SAFE_INTEGER); // 视口离顶贴前沿：块 0 停触，续读至 EOF
+    await vi.waitFor(() => expect(handle.getMeta().lines).toBe(7000));
+    const matches = await handle.search('zzneedle'); // EOF 已至：纯内存扫描 + 已逐出块补拉
+    expect(matches.map((m) => m.line)).toEqual([100]); // 块 0 补拉（读 2）时布点已入集
     const topBefore = handle.scrollTop();
     handle.gotoMatch(0);
     await new Promise((r) => setTimeout(r, 30)); // ensure 读挂闸：同步阶段与微任务均不得提前跳转
@@ -2151,7 +2210,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
       expect(row?.querySelector('.vv-code-body')?.textContent).toContain('zzneedle'); // 实行非占位
     });
     expect(handle.scrollTop()).not.toBe(topBefore); // ensure 完成后才跳转
-    expect(block0Reads).toBe(3); // 首块重拉 + 失败的视口补拉 + gotoMatch 的 ensure
+    expect(block0Reads).toBe(3); // 首块重拉 + 扫描补拉 + gotoMatch 的 ensure
     handle.destroy();
   });
 

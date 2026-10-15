@@ -43,7 +43,9 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * - SUSP-01（已优化落地，探针随落地翻转）：清空→重输同词 = 同词短路零扫描 IO
  *   （退出搜索仅令牌失效 + 视觉清理，短路缓存保留；优化前为全新全文扫描 40 块级
  *   重拉、缓存不复用）；对照面同值 input 重派发 = 同键短路零扫描 IO
- * - SUSP-02：SCAN-08 布点续扫中视口块 1 被 LRU 逐出经 pendingReload 回拉 ≥2 次
+ * - SUSP-02（已优化落地，探针随落地翻转）：SCAN-08 布点续扫中视口块触新驻留——
+ *   同一次续扫内块 1 回拉 <2 次（0 为理想；原「≥2 次」逐出回拉现状记录于
+ *   susp-verification.md §SUSP-02）
  * - SUSP-03（已锚定落地，探针随落地翻转）：流内嗅探降级重渲后视口锚定原首行
  *   （不回顶；原「整体 replaceChildren → 视口回顶 scrollTop=0」现状存档于
  *   susp-verification.md §SUSP-03）
@@ -330,7 +332,7 @@ test('SUSP-01（已优化落地）：清空→重输同词短路零扫描（退�
 
 // ---------------------------------------------------------------- SUSP-02
 
-test('SUSP-02：长扫描续扫中视口块被 LRU 逐出经 pendingReload 回看——同一次续扫内回拉 ≥2 次', async ({ page }) => {
+test('SUSP-02（已优化落地，探针随落地翻转）：长扫描续扫中视口块触新驻留——同一次续扫内回拉 <2 次（0 为理想）', async ({ page }) => {
   test.setTimeout(240_000);
   // SCAN-08 布点（fail 门块 3 起 500 直至放行；布点行 5000/21000 分属块 1 门前/块 5
   // 门后）+ slowMs=60：续扫 37 块撑开到 ~2.3s，两次「逐出→回拉」窗口均可观测
@@ -359,14 +361,15 @@ test('SUSP-02：长扫描续扫中视口块被 LRU 逐出经 pendingReload 回�
     await settleStats(page, stats);
     const phase = stats.records.slice(baseline);
 
-    // 记录的现状：视口块 1 在续扫中被块表 LRU（16×256KB）逐出 → pendingReload 回看
-    // 重拉（code.ts:1677-1696）——同一次续扫内 ≥2 次（上轮 SCAN-08 实测恰 2 次：
-    // 逐出→回拉→再逐出→再回拉），伴随可见闪烁
+    // 翻转后的验收（原「视口块 1 在续扫中被块表 LRU（16×256KB）逐出 → pendingReload
+    // 回看重拉 ≥2 次、伴随可见闪烁」现状记录见 susp-verification.md §SUSP-02）：
+    // runScan 每块落地对可视区所需块 LRU 触新（code.ts SUSP-02 注），视口块 1 恒
+    // 驻留——同一次续扫内回拉 <2 次（0 为理想）
     const b1 = phase.filter((r) => r.range === codeBlockRange(1));
     expect(
       b1.length,
-      `续扫内视口块 1 应经回看重拉 ≥2 次（记录现状），实得 ${b1.length}：${digest(phase)}`
-    ).toBeGreaterThanOrEqual(2);
+      `续扫内视口块 1 应回拉 <2 次（扫描喂块落地触新驻留，0 为理想），实得 ${b1.length}：${digest(phase)}`
+    ).toBeLessThan(2);
     for (const r of b1) {
       expect(r.status, '回看重拉应为 206（占位兜底契约，非失败面）').toBe(206);
     }

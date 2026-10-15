@@ -1252,6 +1252,10 @@ function renderCodeWindowed(
   let hljsLang: string | null = null;
   let scroller: VirtualScrollerHandle | null = null;
   let mountedRows = -1; // 当前 scroller 的行数（窗口模式行数动态：增长即重建）
+  // 当前可视行范围（onRange 更新，SUSP-02：runScan 喂块落地后的视口块触新消费）。
+  // 初始 visLast = -1：首帧 onRange 前触新循环天然空转
+  let visFirst = 0;
+  let visLast = -1;
   let destroyed = false;
   // 引擎实时值：lazy 主路径在首个 chunk 产出到达前为 pending；plain 策略即终值。
   // 构造期已判超限（size 已知 >STREAM_MAX_BYTES，零读停机）同样即终值 plain——
@@ -1581,6 +1585,8 @@ function renderCodeWindowed(
   }
 
   function onRange(first: number, last: number, viewport: HTMLElement): void {
+    visFirst = first;
+    visLast = last; // SUSP-02：可视行范围存闭包（扫描喂块落地的触新消费，见 runScan）
     if (strategy === 'lazy') scheduleChunks(first, last); // 可视区驱动 chunk 请求
     fillRows(first, last, viewport);
     maybeContinue(last); // 接近已加载尾部续读 / 缺块回看重拉
@@ -2148,6 +2154,19 @@ function renderCodeWindowed(
           return acc;
         } finally {
           pulling = false;
+        }
+        // SUSP-02：扫描新块落地后对可视区所需块 LRU 触新（bs.block 自带 touch）——
+        // 视口 2-3 块挪表尾后，扫描前沿新块不再将其挤出（占位化闪烁根因：视口块
+        // 渲染面触新随 chunk 高亮缓存接管 lineHtml 而缺席，LRU 位陈旧被逐出 →
+        // lineAvailable 占位化 + pendingReload 回看重拉，SCAN-08 一次续扫内 ≥2 次）。
+        // 扫描期间泵让位（pumpTick 检测 scan!==null 重评），本落地点是喂块唯一推进
+        // 源，触新挂此即全覆盖。上界夹 rows()-1 防越界；空行（len=0）无块需求跳过；
+        // bs.has 先行把关，触新零 IO。
+        for (let v = visFirst; v <= Math.min(visLast, rows() - 1); v++) {
+          const len = index.lengths[v] ?? 0;
+          if (len === 0) continue;
+          const [b0, b1] = lineBlockSpan(v);
+          for (let b = b0; b <= b1; b++) if (bs.has(b)) bs.block(b);
         }
       }
     } finally {
