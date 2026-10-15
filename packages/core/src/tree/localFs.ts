@@ -57,8 +57,10 @@ export function createLocalFsStore(handle: FileSystemDirectoryHandle): TreeStore
     },
     async read(path, opts) {
       // 降级语义（流式硬化，localFiles 同款）：File.slice().arrayBuffer() 无 signal
-      // 参数，取消只能在入口截断——aborted 即 reject；晚 abort 由调用方丢弃结果
-      if (opts?.signal?.aborted) throw new Error('读取已取消');
+      // 参数，取消只能在入口截断——aborted 即 reject；晚 abort 由调用方丢弃结果。
+      // 错误身份统一（deferred 清偿 Task 5 合批）：DOMException AbortError 对齐
+      // localFiles/singleFile——isAbortError 同源判定（name 判别）恒静默不误吞读失败
+      if (opts?.signal?.aborted) throw new DOMException('读取已取消', 'AbortError');
       const h = await resolve(path);
       if (h.kind !== 'file' || !h.getFile) throw new Error(`${path} 不是文件`);
       const file = await h.getFile();

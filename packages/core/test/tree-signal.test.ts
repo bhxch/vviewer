@@ -73,8 +73,10 @@ describe('store read 的 signal 取消语义', () => {
     const store = createLocalFsStore(dirHandle);
     const controller = new AbortController();
     controller.abort();
+    // 错误身份统一（deferred 清偿 Task 5 合批：localFs 补齐 localFiles/singleFile 同款
+    // DOMException 形态）——message 不变，name 可判别（isAbortError 同源判定消费面）
     await expect(
       store.read('a.txt', { signal: controller.signal })
-    ).rejects.toThrow('读取已取消');
+    ).rejects.toMatchObject({ name: 'AbortError', message: '读取已取消' });
   });
 });

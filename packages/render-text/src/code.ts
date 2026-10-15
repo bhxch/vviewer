@@ -16,7 +16,7 @@ import { searchCode, type SearchMatchWithPreview } from './search';
  * 双形态兼容：标准环境 DOMException instanceof Error 成立（WHATWG 继承链），但
  * jsdom 等环境的 DOMException 未必是 Error 子类，故两支并判。窗口流式的静默分支
  * （续读/回看重拉/后台泵/搜索扫描，code 与 jsonl 同款）以此为唯一判据，不再看
- * catch 时刻 signal.aborted 状态态——「真实读失败 + abort 竞态」（先失败、catch
+ * catch 时刻 signal.aborted 状态——「真实读失败 + abort 竞态」（先失败、catch
  * 时已 abort）不再被误吞，照常置闩 + debug 留痕（destroyed 终态无消费方，日志
  * 如实）；真取消（remote fetch 原生 AbortError、localFiles/singleFile 预 abort
  * 抛 DOMException('读取已取消','AbortError')——Task 1 统一后的形态）恒静默。

@@ -45,7 +45,7 @@ export interface TreeStore {
   // 泛型 TypedArray：默认 Uint8Array<ArrayBufferLike> 含 SharedArrayBuffer，不满足
   // Blob 构造的 ArrayBufferView<ArrayBuffer> 约束）。
   // opts.signal（流式硬化）：destroy 时取消在飞读——aborted 即 reject（remote 抛
-  // fetch 原生 AbortError；localFiles/singleFile 抛 DOMException('读取已取消', 'AbortError')）。
+  // fetch 原生 AbortError；localFs/localFiles/singleFile 抛 DOMException('读取已取消', 'AbortError')）。
   read(path: string, opts?: { range?: ByteRange; signal?: AbortSignal }): Promise<Uint8Array<ArrayBuffer>>;
   /**
    * 能力标记（spec 2026-10-12-io-streaming §2.3）：read 支持 opts.range（bytes
