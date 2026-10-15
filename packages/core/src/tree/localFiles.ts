@@ -55,7 +55,7 @@ export function createLocalFilesStore(files: FileList | File[], label: string): 
     async read(path, opts) {
       // 降级语义（流式硬化）：File.slice().arrayBuffer() 无 signal 参数，取消只能在
       // 入口截断——aborted 即 reject；晚 abort 由调用方（destroy）丢弃结果
-      if (opts?.signal?.aborted) throw new Error('读取已取消');
+      if (opts?.signal?.aborted) throw new DOMException('读取已取消', 'AbortError');
       const f = (byDir.get(path.split('/').slice(0, -1).join('/') ?? '') ?? []).find(
         (x) => x.webkitRelativePath.split('/').slice(1).join('/') === path
       );

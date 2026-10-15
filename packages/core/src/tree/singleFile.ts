@@ -8,7 +8,7 @@ export function createSingleFileStore(file: File): TreeStore {
       return [{ name: file.name, path: file.name, kind: 'file', size: file.size, mtime: file.lastModified }];
     },
     async read(path, opts) {
-      if (opts?.signal?.aborted) throw new Error('读取已取消');
+      if (opts?.signal?.aborted) throw new DOMException('读取已取消', 'AbortError');
       if (path !== file.name) throw new Error(`未知路径: ${path}`);
       return new Uint8Array(await file.arrayBuffer());
     }
@@ -27,7 +27,7 @@ export function createUrlStore(url: string): TreeStore {
     },
     async read(path, opts) {
       if (path !== name) throw new Error(`未知路径: ${path}`);
-      if (opts?.signal?.aborted) throw new Error('读取已取消');
+      if (opts?.signal?.aborted) throw new DOMException('读取已取消', 'AbortError');
       // 缓存键不含 signal：取消后重试走新 fetch（取消的尝试不留缓存）
       bytes ??= fetch(url, { signal: opts?.signal }).then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status} 获取 ${url} 失败`);

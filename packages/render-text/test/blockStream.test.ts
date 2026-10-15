@@ -4,7 +4,7 @@
 // 终审 F3）、read 失败原样上抛；计划 3 Task 1 追加：maxBlocks LRU 有界化（B1）与
 // STREAM_MAX_BYTES 统一裁决常量。纯逻辑模块，fake ctx 记录每次请求区间。流式硬化
 // Task 2 追加：构造期 signal 透传 ctx.read（abort 在飞块读，AbortError 原样上抛）。
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { StreamCtx } from '@vviewer/core';
 import { STREAM_MAX_BYTES, createBlockStream } from '../src/blockStream';
 
@@ -521,21 +521,68 @@ describe('createBlockStream', () => {
 
   it('㉖ signal：构造期传入，ensureBlock 的在飞读被 abort 后 reject（AbortError 原样上抛）', async () => {
     const controller = new AbortController();
+    let sawSignal: AbortSignal | undefined;
     const ctx: StreamCtx = {
       size: 1_000_000,
       head: ALPHA, // 简报 bytes(8192) 的等价替换：沿用本文件 head 惯用构造（ALPHA 部分预置块 0）
-      read: (r, signal) =>
-        new Promise((resolve, reject) => {
+      read: (r, signal) => {
+        sawSignal = signal;
+        return new Promise((resolve, reject) => {
           signal?.addEventListener('abort', () =>
             reject(new DOMException('The operation was aborted.', 'AbortError'))
           );
           // 永不 resolve：模拟挂起
-        })
+        });
+      }
     };
     const bs = createBlockStream(ctx, 256 * 1024, { signal: controller.signal });
     const p = bs.ensureBlock(1);
+    await vi.waitFor(() => expect(sawSignal).toBeDefined()); // 在飞读已发起
+    // 身份断言（deferred 清偿 Task 1 ④）：ctx.read 收到的就是构造期传入的同一 signal
+    // 实例——实现若漏透传/换 signal，此处即时失败可诊断（Object.is 直接显示两个
+    // signal），「rejects 断言退化为 5s 超时黑箱失败」的形态被消除
+    expect(sawSignal).toBe(controller.signal);
     controller.abort();
     await expect(p).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  // deferred 清偿 Task 1 ②：200-回退的全量重取读同样透传构造期 signal——首块区间
+  // 请求收超长返回触发 fullReload（read {0,MAX}）后重取挂起中 abort，ensureBlock 须
+  // reject AbortError（而非无限悬挂）；全量未到手不降级（失败出表，重试可重新发起）。
+  it('㉗ 200-回退的全量重取挂起中 abort：ensureBlock reject AbortError（重取读同样透传 signal）', async () => {
+    const controller = new AbortController();
+    const calls: RangeCall[] = [];
+    const ctx: StreamCtx = {
+      size: 10, // 3 块（B=4）
+      head: new Uint8Array(0),
+      read: (r, signal) => {
+        calls.push({ start: r.start, end: r.end });
+        if (r.start === 0 && r.end === 3) {
+          // 首块区间请求收超长返回（2×blockSize）→ 触发 200-回退全量重取
+          return Promise.resolve(ALPHA.slice(0, 2 * B));
+        }
+        if (r.start === 0 && r.end === Number.MAX_SAFE_INTEGER) {
+          // 全量重取挂起至 abort（经构造期 signal 取消，abort reject 契约同 ㉖）
+          return new Promise((resolve, reject) => {
+            signal?.addEventListener('abort', () =>
+              reject(new DOMException('The operation was aborted.', 'AbortError'))
+            );
+          });
+        }
+        return Promise.resolve(ALPHA.slice(r.start, r.end + 1));
+      }
+    };
+    const bs = createBlockStream(ctx, B, { signal: controller.signal });
+    const p = bs.ensureBlock(0);
+    await vi.waitFor(() => expect(calls.length).toBe(2)); // 区间读 + 全量重取均已发出
+    expect(calls).toStrictEqual([
+      { start: 0, end: 3 },
+      { start: 0, end: Number.MAX_SAFE_INTEGER } // fullReload 端点钳制语义
+    ]);
+    controller.abort();
+    await expect(p).rejects.toMatchObject({ name: 'AbortError' });
+    expect(bs.degradedToFull).toBe(false); // 全量未到手：不降级（失败出表可重试）
+    expect(bs.atEnd()).toBe(false);
   });
 
 });

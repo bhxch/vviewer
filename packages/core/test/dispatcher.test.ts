@@ -825,4 +825,85 @@ describe('dispatch 读下沉（io-streaming §3：streaming 选路 + StreamCtx �
     expect(det.binary).toBe(false); // 派生 binary 同步翻转
     expect(seenCtx?.size).toBe(FULL.length); // 降级 ctx 形态不变：size = 全量长
   });
+
+  // 流式硬化终审 deferred（Task 1 ①）：渲染期 ctx.read 的取消透传——destroy 取消
+  //（signal.aborted）时的 reject 是取消而非读失败，真实包装层原样上抛不标
+  // DispatchReadError（取消不该被渲染器当读失败处置）；非 abort 的读失败仍标
+  // DispatchReadError（对照）。断言经真实包装层：render 收到的第 5 参 ctx.read 即
+  // dispatcher 构造的 streaming 渲染期闭包（capable 分支），非测试自造等价物。
+  describe('渲染期 ctx.read 取消透传（abort 原样上抛，不标 DispatchReadError）', () => {
+    const BIG = Uint8Array.from({ length: 2_000_000 }, (_, i) => i & 0xff);
+
+    /** head 探测（{0,8191}）正常交付、渲染期读（其余区间）挂起的可编程 read 闭包：
+     * 挂起 promise 监听 signal abort（以预建 AbortError reject）；非 abort 的读失败
+     * 由测试经 rejectInflight 显式注入（对照场景用） */
+    function programmableRead() {
+      const calls: Array<{ start: number; end: number } | undefined> = [];
+      const abortErr = new DOMException('The operation was aborted.', 'AbortError');
+      let inflight: ((err: unknown) => void) | null = null;
+      const read = (
+        range?: { start: number; end: number },
+        signal?: AbortSignal
+      ): Promise<Uint8Array<ArrayBuffer>> => {
+        calls.push(range);
+        if (range && !(range.start === 0 && range.end === 8191)) {
+          return new Promise((resolve, reject) => {
+            inflight = reject;
+            signal?.addEventListener('abort', () => reject(abortErr));
+          });
+        }
+        return Promise.resolve(range ? BIG.slice(0, 8192) : BIG);
+      };
+      return { read, calls, abortErr, rejectInflight: () => inflight! };
+    }
+
+    it('⑭ abort：渲染期读挂起中取消 → 渲染器收到 AbortError 原样实例（非 DispatchReadError）', async () => {
+      const reg = createRegistry();
+      const controller = new AbortController();
+      const r = programmableRead();
+      let caught: unknown;
+      reg.install(mk('t', ['stx'], {
+        streaming: true,
+        render: async (_b, _tg, _s, _det, ctx) => {
+          try {
+            await ctx!.read({ start: 8192, end: 8195 }, controller.signal);
+          } catch (err) { caught = err; } // 渲染器自行捕获取消（真实渲染器静默收场形态）
+          return { destroy() {} };
+        }
+      }));
+      const p = createDispatcher(reg).dispatch(
+        srcWith('a.stx', fakeStore(true), BIG.length), null, document.createElement('div'), { read: r.read });
+      await vi.waitFor(() => expect(r.calls.length).toBe(2)); // head 探测 + 渲染期读已在飞
+      controller.abort();
+      const { rendererId } = await p;
+      expect(rendererId).toBe('t'); // 取消被渲染器捕获：渲染正常完成，不落错误卡片
+      await vi.waitFor(() => expect(caught).toBeDefined());
+      expect(caught).toBe(r.abortErr); // 原样实例上抛：包装层未重建/未包装错误
+      expect((caught as Error).name).toBe('AbortError'); // 非 DispatchReadError
+    });
+
+    it('⑮ 对照：非 abort 的渲染期读失败 → 渲染器收到 DispatchReadError（读失败口径）', async () => {
+      const reg = createRegistry();
+      const r = programmableRead();
+      let caught: unknown;
+      reg.install(mk('t', ['stx'], {
+        streaming: true,
+        render: async (_b, _tg, _s, _det, ctx) => {
+          try {
+            await ctx!.read({ start: 8192, end: 8195 });
+          } catch (err) { caught = err; }
+          return { destroy() {} };
+        }
+      }));
+      const p = createDispatcher(reg).dispatch(
+        srcWith('a.stx', fakeStore(true), BIG.length), null, document.createElement('div'), { read: r.read });
+      await vi.waitFor(() => expect(r.calls.length).toBe(2));
+      r.rejectInflight()(new Error('range io gone')); // 非 abort 读失败（无 signal 参与）
+      const { rendererId } = await p;
+      expect(rendererId).toBe('t');
+      await vi.waitFor(() => expect(caught).toBeDefined());
+      expect((caught as Error).name).toBe('DispatchReadError'); // 读失败被标记
+      expect((caught as Error).message).toBe('range io gone'); // 原错误 message 透传
+    });
+  });
 });

@@ -113,13 +113,17 @@ describe.skipIf(!grammarAssetsReady)('TreeSitterEngine（SUSP-06：manifest 剥�
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as { port: number }).port;
-    const engine = await TreeSitterEngine.create({
-      queriesBase: `http://127.0.0.1:${port}/queries/`,
-      grammars: manifest.grammars,
-      grammarsDir: path.join(staticDir, 'grammars'),
-      runtimeDir: staticDir,
-    });
+    // 引擎创建移入 try（deferred 清偿 Task 1 ⑧）：TreeSitterEngine.create 抛错
+    //（wasm 加载失败/资产缺失等）时 server 也必须关闭，否则本地 http 句柄泄漏、
+    // 测试进程无法退出。engine 以 let 声明 + 可选调用：create 失败时无实例可 dispose
+    let engine: TreeSitterEngine | undefined;
     try {
+      engine = await TreeSitterEngine.create({
+        queriesBase: `http://127.0.0.1:${port}/queries/`,
+        grammars: manifest.grammars,
+        grammarsDir: path.join(staticDir, 'grammars'),
+        runtimeDir: staticDir,
+      });
       const r = await engine.highlight('x', 'java');
       expect(r.ok).toBe(false);
       if (r.ok) return;
@@ -130,7 +134,7 @@ describe.skipIf(!grammarAssetsReady)('TreeSitterEngine（SUSP-06：manifest 剥�
         `条目缺失不得发起 /queries/java/** 请求（修前 expandQueryAsync 先行空打 ≥1），实得 ${JSON.stringify(javaHits)}`,
       ).toEqual([]);
     } finally {
-      engine.dispose();
+      engine?.dispose();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   }, 30_000);

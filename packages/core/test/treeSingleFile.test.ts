@@ -20,6 +20,18 @@ describe('createSingleFileStore', () => {
     const store = createSingleFileStore(new File([new Uint8Array([1])], 'a.bin'));
     await expect(store.read('b.bin')).rejects.toThrow('未知路径: b.bin');
   });
+
+  it('signal 预先 aborted → 入口立即 reject（取消统一 DOMException AbortError）', async () => {
+    // File.arrayBuffer() 无 signal 形参：取消只能入口截断（localFiles 同款语义）。
+    // 错误身份统一为 DOMException('读取已取消', 'AbortError')——message 不变，
+    // 调用方按 err.name === 'AbortError' 判别取消（非读失败）
+    const store = createSingleFileStore(new File([new Uint8Array([1])], 'a.bin'));
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      store.read('a.bin', { signal: controller.signal })
+    ).rejects.toMatchObject({ name: 'AbortError', message: '读取已取消' });
+  });
 });
 
 describe('createUrlStore', () => {
@@ -55,5 +67,19 @@ describe('createUrlStore', () => {
     );
     const store = createUrlStore('https://example.com/missing.txt');
     await expect(store.read('missing.txt')).rejects.toThrow('HTTP 404');
+  });
+
+  it('signal 预先 aborted → fetch 未发起即 reject（取消统一 DOMException AbortError）', async () => {
+    // 预 abort 分支与 createSingleFileStore 同款入口截断：取消不产生网络等待，
+    // 错误身份统一 DOMException AbortError（message「读取已取消」不变）
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const store = createUrlStore('https://example.com/a.txt');
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      store.read('a.txt', { signal: controller.signal })
+    ).rejects.toMatchObject({ name: 'AbortError', message: '读取已取消' });
+    expect(fetchMock).not.toHaveBeenCalled(); // 入口截断在 fetch 之前
   });
 });
