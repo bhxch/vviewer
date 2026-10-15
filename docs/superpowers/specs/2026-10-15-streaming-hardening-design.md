@@ -51,6 +51,8 @@ SSE rev++ 重渲染摘旧实例时，旧实例在飞的块读（stall 门/慢网
 
 abort 产生的 reject 走既有 catch 分支（`continueFailed`/`reloadFailed` 停机闩）——实例已 destroyed，闩无后续面，无活锁。实现须在 `pullBlock`/`maybeContinue`/`runScan` 的 catch 中识别 abort（`signal.throwIfAborted()` 抛出的 `AbortError`/`TimeoutError` 之外的 abort 名，或 controller 关联判断），**不得标为 `DispatchReadError` 上屏**（destroy 竞态下错误卡片/读取失败面不应触发）。jsonl 同口径。
 
+> **回填（deferred 清偿 Task 5 落地）**：abort 静默判定已收敛为错误身份判定（`isAbortError`：DOMException/Error 的 `name === 'AbortError'` 双形态并判，code/jsonl 六处静默分支统一消费，不再看 catch 时刻 `signal.aborted` 状态）；dispatch catch 对 abort 错误返回 no-op 实例不落错误卡片（abort 不上屏裁决）；ViewerPane 渲染 effect 持 effect 级 `AbortController`（cleanup 即 abort，`mergeAbortSignals` 与实例级 signal 合并后传 store.read），与渲染器实例级 controller 组成两级取消，覆盖「rev++ 早于实例 resolve」的 pre-instance 重渲窗口。
+
 ### 3.5 测试装置配套（⑦）
 
 `startStreamFakeServer`（b-stream-resilience-helpers.ts）的 `serve` 与 rangeless 两分支的 `res.writeHead/res.end` 包 try/catch：客户端已 abort（连接断开）时写入抛出的 `ERR_STREAM_WRITE_AFTER_END` 静默吞掉。阶段 A 落地后 abort 常态化，此为配套卫生。

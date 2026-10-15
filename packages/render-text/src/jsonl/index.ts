@@ -570,17 +570,18 @@ export interface JsonlWindowedDowngrade {
  *
  * 行号域换算（deferred 清偿 Task 5）：anchorLine 是 jsonl 内容行号（索引层剔空行），
  * code revealLine 收物理行号（含空行）——含空行文件直传会向上漂移「锚行前空行数」。
- * 故委托 code 分支以锚行字节偏移（anchorByteOffset = index.offsets[anchorLine] +
- * bomLen，调用方在索引可见处换算）经实例 lineAtOffset（全量模式 lineOffsets 二分）
+ * 故委托 code 分支以锚行偏移（anchorByteOffset = index.offsets[anchorLine]，
+ * 调用方在索引可见处换算）经实例 lineAtOffset（全量模式 lineOffsets 二分）
  * 映射物理行号再 reveal；实例无 lineAtOffset（旧产物/非全量形态）或偏移不可得
  * （anchorByteOffset <0）回退内容行号直传（现状行为，向后兼容）。偏移口径注：
- * jsonl offsets 是字节偏移（CRLF 记 2 字节单终结符）；code lineOffsets 是剥 BOM +
- * CRLF→LF 归一文本的 UTF-16 字符偏移——两侧仅在「非 BOM 纯 ASCII + LF」主态逐字
- * 节精确（>200MB 委托 JSONL 的常态）；带 BOM 时 +bomLen 的 3 字节越界由锚行长度
- * 吸收（锚行 ≥3 字节即仍二分归锚行），但重多字节/全 CRLF 文件的字节-字符差与
- * CRLF 差随锚行**之前所有行累计**、不被锚行长度吸收——偏移量仅为「锚行前累计差
- * ÷ 平均行长」量级的粗定位，可偏多行乃至远端（粗定位语义下仍收敛于 revealLine
- * 精调）。精确映射需字节→字符换算（code 侧持字节域行索引），随后续立项。
+ * jsonl offsets 是 post-BOM 逻辑字节空间（BOM 在喂索引前剥离，本模块头 BOM 裁决）；
+ * code lineAtOffset 的域是剥 BOM 归一文本的字符偏移——两域同基，锚行偏移不做
+ * +bomLen 补偿直传（终审 Minor 1：补偿引入 +3，BOM 文件的 <3 字节短数据行漂 1
+ * 行；直传使 BOM ASCII 文件也逐字节精确）。残留近似仅两支：多字节非 ASCII 的
+ * 字节-字符差，与 CRLF 差（jsonl 字节域 CRLF 记 2 字节单终结符、code 归一为 1
+ * 字符）——均随锚行**之前所有行累计**、不被锚行长度吸收，偏移量仅为「锚行前
+ * 累计差 ÷ 平均行长」量级的粗定位，可偏多行乃至远端（粗定位语义下仍收敛于
+ * revealLine 精调）。精确映射需字节→字符换算（code 侧持字节域行索引），随后续立项。
  */
 function restoreViewportAfterDegrade(
   full: RenderedInstance & { getMeta(): CodeFileMeta },
@@ -727,13 +728,15 @@ async function renderJsonlWindowed(
       encodingBroken = true;
       // SUSP-03 锚行捕获：嗅探判脏此刻窗口实例仍在（降级出口替换 DOM 前可读
       // curFirst），经 viewFirst 闭包快照取值，不改 onEncodingBroken 签名。
-      // 锚行字节偏移（deferred 清偿 Task 5）同点换算（index/bomLen 唯一可见处）：
-      // 委托 code 形态经实例 lineAtOffset 映射物理行号（restoreViewportAfterDegrade）；
+      // 锚行偏移（deferred 清偿 Task 5）同点换算（index 唯一可见处）：委托 code
+      // 形态经实例 lineAtOffset 映射物理行号（restoreViewportAfterDegrade）；
+      // offsets 为 post-BOM 逻辑字节空间，与 lineAtOffset 的剥 BOM 归一字符域同基，
+      // 不做 +bomLen 补偿（终审 Minor 1：补偿反而引入 +3，BOM 短行漂 1 行）；
       // 锚行越出已喂索引时置 -1（防御，viewFirst 恒被 visibleRange 钳内理论不可达）
       const anchorLine = viewFirst;
       const anchorByteOffset =
         anchorLine >= 0 && anchorLine < index.offsets.length
-          ? index.offsets[anchorLine]! + bomLen
+          ? index.offsets[anchorLine]!
           : -1;
       const p = (async () => {
         fullInst = await downgrade.onEncodingBroken!();
