@@ -412,7 +412,7 @@ test('SUSP-03（已锚定落地，探针随落地翻转）：流内嗅探降级�
     expect(midTop, '前置：应已滚至中部（scrollTop > 0）').toBeGreaterThan(0);
 
     // ② 继续滚动到加载前沿：续读喂入脏块（块 2 起 GBK）→ 流内嗅探判非 UTF-8
-    //    → 降级重渲（jsonl/index.ts:709 嗅探点捕获锚行 curFirst、:713 新实例
+    //    → 降级重渲（jsonl/index.ts:708 嗅探点捕获锚行 curFirst、:712 新实例
     //    mount 完成后经 revealLine 恢复）
     await scroll.evaluate((el) => {
       el.scrollTop = el.scrollHeight;

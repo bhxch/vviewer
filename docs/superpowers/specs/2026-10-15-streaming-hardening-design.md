@@ -65,7 +65,7 @@ abort 产生的 reject 走既有 catch 分支（`continueFailed`/`reloadFailed` 
 
 **现状**（code.ts search()，报告 SUSP-01 行 126）：清空输入框/Esc 的 `search('')` 走换键重置分支，短路缓存（`lastScanComplete/lastAcc/lastScanCursor/lastQuery/lastCaseSensitive`）一并作废；重输同词触发全新全文扫描（块级请求 ≥20，增量含末块）。
 
-**设计**：`query === ''` 分支仅做①令牌失效（`scanSeq++` 取消在飞扫描，既有）与②视觉清理（`clearHit` + `scroller.refresh(true)`，既有），**不再重置短路缓存与命中集**。同词重搜命中 `sameKey && lastScanComplete` 短路零读返回。
+**设计**：`query === ''` 分支仅做①令牌失效（`scanSeq++` 取消在飞扫描，既有）与②视觉清理（`clearHit` + `scroller.refresh(true)`，既有），**不再重置短路缓存与命中集**（命中集=短路缓存面 `lastAcc/lastMatches`；行级视觉索引 `searchHitsByLine` 属视觉清理面，退出时照旧清空——用户可见行为零变化；同词短路/续扫路径自缓存重建游标前命中，见 fix wave）。同词重搜命中 `sameKey && lastScanComplete` 短路零读返回。
 
 **陈旧性边界（无新风险）**：remote 文件变更走 SSE rev++ 重建渲染实例，缓存随实例消亡天然失效；本地文件外部变更无 watch 为既有边界，与本阶段无关；退出时在飞扫描被取消 → `lastScanComplete=false` → 重搜走既有断点续扫。
 
