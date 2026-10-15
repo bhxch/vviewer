@@ -2566,18 +2566,26 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
 
   // 流式硬化 Task 3：实例级 AbortController（DEG-08 排队根因的修复面）——destroy
   // 即取消全部在飞块读；abort 产生的 reject 是取消而非读失败，catch 静默（闩不动、
-  // 不打印）。controller 归实例内部，测试只观测 ctx.read 收到的 signal。
+  // 不打印）。controller 归实例内部，测试只观测 ctx.read 收到的 signal。在飞挂起
+  // 点必须选在泵 tick 的块 1（首块立即 resolve 成功 mount）——abort reject 真实落
+  // 在泵 catch 上，断言 2 才对静默分支有杀伤力（评审变异验证：挂起点若在 start()
+  // 首拉，reject 经 whenReady 上抛、泵 catch 不执行，断言 vacuous pass）。
   it('destroy 取消在飞读：signal aborted，泵 catch 静默（continueFailed 闩不置位）', async () => {
     stubResizeObserver();
     const debugSpy = vi.spyOn(console, 'debug');
-    const content = enc(codeLines(1280)); // head 8KB 部分块：首块须整块重拉（读闸挂起供 destroy 取消）
+    const content = enc(codeLines(1280)); // ≈1.9MB ≈ 8 块：首块成功 mount 后仍有大量块可拉
+    const calls: Array<{ start: number; end: number }> = [];
     let sawSignal: AbortSignal | undefined;
     const ctx: StreamCtx = {
       size: 5 * WINDOW_BLOCK,
       head: content.slice(0, 8192),
       read: (r, signal) => {
-        void r;
+        calls.push({ start: r.start, end: r.end });
         sawSignal = signal;
+        if (r.start === 0) {
+          return Promise.resolve(content.slice(0, WINDOW_BLOCK)); // 块 0 立即 resolve：首屏成功 mount
+        }
+        // 块 1+（后台索引泵的续拉）挂起在飞：destroy 时经 signal 取消（reject 落泵 catch）
         return new Promise((resolve, reject) => {
           signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
         });
@@ -2585,13 +2593,12 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     };
     const host = newHost();
     const inst = renderCode(content.slice(0, 8192), host, { ctx, ext: 'js', highlight: false });
-    await vi.waitFor(() => expect(sawSignal).toBeDefined(), { timeout: 2_000 });
+    await vi.waitFor(() => expect(calls.length).toBe(2)); // 首块成功 + 泵 tick 已发出块 1 读（在飞挂起）
+    expect(calls[1]!.start).toBe(WINDOW_BLOCK); // 在飞的正是泵的续拉（自校验非首块）
     inst.destroy();
-    // start() 首拉面随 abort reject——直呼 renderCode 无 whenReady 消费方，显式吞掉
-    // 防 unhandled rejection（生产面由 codeRenderer.render await 承接读取失败面）
-    (inst as { whenReady?: Promise<void> }).whenReady?.catch(() => {});
     // 断言 1：destroy 后实例持有的 signal 立即 aborted（不等读自然结束）
     await vi.waitFor(() => expect(sawSignal!.aborted).toBe(true), { timeout: 2_000 });
+    await new Promise((r) => setTimeout(r, 20)); // abort reject 落地：泵 catch 静默路径执行完
     // 断言 2：泵 catch 静默——不打印「后台索引泵拉块失败」（abort ≠ 读失败）
     expect(debugSpy).not.toHaveBeenCalledWith(expect.stringContaining('后台索引泵拉块失败'), expect.anything());
     debugSpy.mockRestore();

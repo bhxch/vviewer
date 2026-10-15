@@ -748,7 +748,7 @@ async function renderJsonlWindowed(
         try {
           for (const b of targets) await bs.ensureBlock(b);
         } catch (err) {
-          if (readAbort.signal.aborted) return; // destroy 取消：静默，闩不动、不回填待办（code.ts 同款）
+          if (readAbort.signal.aborted) { pulling = false; return; } // destroy 取消：静默，闩不动、不回填待办；pulling 复位（code.ts 同款）
           for (const b of targets) pendingReload.add(b); // 未完成块回待办（占位卡维持）
           reloadFailed = true;
           console.debug('[jsonl] 回看重拉失败，已停机（滚动后重试）', err);
@@ -768,7 +768,7 @@ async function renderJsonlWindowed(
       try {
         await pullBlock();
       } catch (err) {
-        if (readAbort.signal.aborted) return; // destroy 取消：静默，闩不动（code.ts 同款）
+        if (readAbort.signal.aborted) { pulling = false; return; } // destroy 取消：静默，闩不动；pulling 复位（code.ts 同款）
         continueFailed = true; // 停机：杜绝「失败→refresh 重评→仍近尾部→再失败」活锁
         console.debug('[jsonl] 流式续读失败，已停机（滚动后重试）', err);
       }

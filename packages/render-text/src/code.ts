@@ -1691,7 +1691,7 @@ function renderCodeWindowed(
         try {
           for (const b of targets) await bs.ensureBlock(b);
         } catch (err) {
-          if (readAbort.signal.aborted) return; // destroy 取消：静默，闩不动、不回填待办（spec §3.4）
+          if (readAbort.signal.aborted) { pulling = false; return; } // destroy 取消：静默，闩不动、不回填待办；pulling 复位（spec §3.4）
           for (const b of targets) pendingReload.add(b); // 未完成块回待办（占位行维持）
           reloadFailed = true;
           console.debug('[code] 回看重拉失败，已停机（滚动后重试）', err);
@@ -1711,7 +1711,7 @@ function renderCodeWindowed(
       try {
         await pullBlock();
       } catch (err) {
-        if (readAbort.signal.aborted) return; // destroy 取消：静默，闩不动（spec §3.4）
+        if (readAbort.signal.aborted) { pulling = false; return; } // destroy 取消：静默，闩不动；pulling 复位（catch 后的复位语句位不经此路径，spec §3.4）
         continueFailed = true; // 停机：杜绝「失败→refresh 重评→仍近尾部→再失败」活锁
         console.debug('[code] 流式续读失败，已停机（滚动后重试）', err);
       }
@@ -1776,7 +1776,7 @@ function renderCodeWindowed(
       try {
         await pullBlock();
       } catch (err) {
-        if (readAbort.signal.aborted) return; // destroy 取消：静默，闩不动（spec §3.4）
+        if (readAbort.signal.aborted) { pulling = false; return; } // destroy 取消：静默，闩不动；pulling 复位（catch 后的复位语句位不经此路径，spec §3.4）
         continueFailed = true; // 与滚动续读同口径：停机闩防活锁，用户滚动动作解除
         console.debug('[code] 后台索引泵拉块失败，已停机（滚动后重试）', err);
       }
@@ -2141,7 +2141,7 @@ function renderCodeWindowed(
         try {
           await pullBlock();
         } catch (err) {
-          if (readAbort.signal.aborted) return acc; // destroy 取消：静默，闩不动（spec §3.4）
+          if (readAbort.signal.aborted) return acc; // destroy 取消：静默，闩不动（spec §3.4；pulling 由下方 finally 复位）
           continueFailed = true; // 与滚动续读同口径：停机闩，用户滚动动作解除
           lastScanComplete = false; // 同键重搜即用户动作：解除闩后续扫（见 search）
           console.debug('[code] 搜索扫描续读失败，已停机（返回已得部分结果）', err);
