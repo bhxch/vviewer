@@ -1066,17 +1066,18 @@ export function renderCode(
         if (arr) arr.push({ start: m.start, end: m.end });
         else searchHitsByLine.set(m.line, [{ start: m.start, end: m.end }]);
       }
-      if (query === '') {
-        clearHit(); // 空查询 = 退出搜索：active 与全部行级背景立即消退
-      } else {
-        // 新查询：旧 hitLine 的行号不再可靠，重置后重绘使已渲染行立即带上
-        // 词级 mark 与命中行背景（虚拟滚动重绘由 searchState 驱动，天然保持）
-        if (hitTimer !== null) {
-          clearTimeout(hitTimer);
-          hitTimer = null;
-        }
-        hitLine = -1;
+      if (hitTimer !== null) {
+        clearTimeout(hitTimer);
+        hitTimer = null;
       }
+      hitLine = -1;
+      // 空查询 = 退出搜索：active 行级高亮立即消退——applyHitClass（hitLine 已置
+      // -1）与 clearHit 的清理面等价，但不走其内部条件 refresh（它在此与下方统一
+      // 重绘构成双刷，deferred 卫生合并为恰一次重绘）；行级背景与词级 mark 的消退
+      // 由下方单次 refresh(true) 重绘完成。新查询无需此 DOM 兜底：旧 hitLine 已
+      // 重置，词级 mark 与命中行背景随重绘上屏（虚拟滚动重绘由 searchState 驱动，
+      // 天然保持）。hitTimer 清理对两分支同语义（对照 clearHit 实现）
+      if (query === '') applyHitClass();
       // 词级 mark 在行 innerHTML 里：已渲染行必须重绘（force）才能更新/清除
       scroller?.refresh(true);
       return Promise.resolve(lastMatches);
@@ -2284,7 +2285,10 @@ function renderCodeWindowed(
         // 重置。用户可见行为零变化（视觉清理照旧），仅省全文重扫 IO。
         continueFailed = false; // 退出即用户动作：解除续读停机（与同键重搜同口径）
         searchHitsByLine = new Map(); // 行级命中索引清空：refresh 后 mark/行级背景即刻消退
-        clearHit(); // 空 query = 退出搜索：active 与全部行级背景立即消退
+        // active 消退走 applyHitClass（hitTimer/hitLine 已于上方统一重置，与
+        // clearHit 清理面等价且不走其内部条件 refresh）——重绘收敛到下方单次
+        // refresh(true)，与全量路径退出分支同款（deferred 卫生：双刷合并）
+        applyHitClass();
         scroller?.refresh(true);
         return Promise.resolve([]);
       }

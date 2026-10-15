@@ -103,7 +103,10 @@ export function serveWorker(): void {
       // 进度回调以闭包注入 initWorker——结构化克隆不可经消息携带函数，onInitProgress
       // 不进 WorkerInit 契约。debug 未开（缺省）：不注入回调 → engine 零打点 → 零探针帧，
       // 行为与既有协议逐字节一致。
-      const { kind: _kind, debug, ...initConfig } = data;
+      const { debug, ...initConfig } = data;
+      // 握手键显式剔除（deferred 卫生：非 _kind rest 剥离形态）——传入 initWorker
+      // 的配置只含引擎配置，不含协议帧字段 kind/debug
+      delete initConfig.kind;
       handler = initWorker(
         initConfig,
         debug

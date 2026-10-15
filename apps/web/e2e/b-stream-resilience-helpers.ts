@@ -351,7 +351,7 @@ export async function startStreamFakeServer(
             });
             res.end(slice);
           } catch {
-            // 客户端已 abort（destroy 取消常态化后）：断管写入静默
+            // 客户端已 abort（destroy 取消常态化后）：纯静默——连接已断无行为可做（对比 notifyChanged catch 的出册=有行为），吞断管写错即完
           }
         };
         if (gate === 'stall') {
@@ -384,7 +384,7 @@ export async function startStreamFakeServer(
             });
             res.end(bytes);
           } catch {
-            // 客户端已 abort（destroy 取消常态化后）：断管写入静默
+            // 客户端已 abort（destroy 取消常态化后）：纯静默——连接已断无行为可做（对比 notifyChanged catch 的出册=有行为），吞断管写错即完
           }
         };
         if (gate === 'stall') {
@@ -414,7 +414,7 @@ export async function startStreamFakeServer(
             });
             res.end(bytes);
           } catch {
-            // 客户端已 abort（destroy 取消常态化后）：断管写入静默
+            // 客户端已 abort（destroy 取消常态化后）：纯静默——连接已断无行为可做（对比 notifyChanged catch 的出册=有行为），吞断管写错即完
           }
         };
         if (gate === 'stall') {
@@ -454,7 +454,8 @@ export async function startStreamFakeServer(
         try {
           client.write(frame);
         } catch {
-          sseClients.delete(client); // 已断连的挂连：出册，帧由活连承载
+          // 出册=有行为可做（对比 /api/file serve catch 的纯静默：连接已断无行为可做）——已断连挂连出册，帧由活连承载
+          sseClients.delete(client);
         }
       }
     },

@@ -53,7 +53,10 @@ export class HighlightClient {
       // （进度帧不计为存活证据，看门狗语义不变）；帧仅在 init 握手携带 debug 开关时出现
       if ((res as { kind?: string }).kind === 'init-progress') {
         const frame = res as unknown as InitProgressFrame;
-        console.debug('[vviewer-worker]', frame.stage, frame.detail);
+        // detail 条件化（deferred 卫生）：无 detail 两参、有 detail 三参——
+        // undefined 字面尾参不进 console 留痕
+        if (frame.detail !== undefined) console.debug('[vviewer-worker]', frame.stage, frame.detail);
+        else console.debug('[vviewer-worker]', frame.stage);
         return;
       }
       this.markWorkerAlive();
