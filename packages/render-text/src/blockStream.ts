@@ -87,6 +87,8 @@ export interface BlockStream {
 /** maxBlocks LRU 选项：块表驻留上界（块数）。缺省 = 无界（调用方自管时兼容现状）。 */
 export interface BlockStreamOptions {
   maxBlocks?: number;
+  /** 构造期传入的取消信号：透传给每次 ctx.read——宿主实例 destroy 时 abort 在飞读 */
+  signal?: AbortSignal;
 }
 
 export function createBlockStream(
@@ -101,6 +103,9 @@ export function createBlockStream(
   if (maxBlocks !== undefined && (!Number.isInteger(maxBlocks) || maxBlocks < 1)) {
     throw new Error(`blockStream：maxBlocks 须为正整数，收到 ${maxBlocks}`);
   }
+  // 流式硬化 Task 2：构造期取消信号——透传给每次 ctx.read（fetchBlock 与 200-回退
+  // 全量重取），abort reject 走 ctx.read 契约（AbortError）经既有失败清理路径原样上抛
+  const externalSignal = opts?.signal;
   const sizeKnown = ctx.size !== null;
   // 已知 size 的块总数（空文件为 0）；未知 size 以 Infinity 占位（边界靠短读发现）
   const blockCount = sizeKnown ? Math.ceil(ctx.size / blockSize) : Number.POSITIVE_INFINITY;
@@ -168,15 +173,17 @@ export function createBlockStream(
   /** 拉取块 i（替换任何预置部分块）；处理超长 200-回退/短读 EOF/满块三态 */
   const fetchBlock = async (i: number): Promise<void> => {
     const cap = sizeKnown ? Math.min(blockSize, ctx.size - i * blockSize) : blockSize;
-    const chunk = await ctx.read({ start: i * blockSize, end: i * blockSize + cap - 1 });
+    const chunk = await ctx.read({ start: i * blockSize, end: i * blockSize + cap - 1 }, externalSignal);
     if (chunk.length > cap) {
       // 超长返回 = Range-less 200 全量（终审 F3）：抛弃流式缓冲，重取全量
       //（端点钳制语义）——subarray 钳制会把文件头错位当本块，宁切全量不错位上屏。
       // 重取在途去重（A1）：并行预取同批多块同时触发时共享单次全量 read
-      fullReload ??= ctx.read({ start: 0, end: Number.MAX_SAFE_INTEGER }).catch((err: unknown) => {
-        fullReload = null; // 失败出表：重试可重新发起（memoizedFullRead 同纪律）
-        throw err;
-      });
+      fullReload ??= ctx
+        .read({ start: 0, end: Number.MAX_SAFE_INTEGER }, externalSignal)
+        .catch((err: unknown) => {
+          fullReload = null; // 失败出表：重试可重新发起（memoizedFullRead 同纪律）
+          throw err;
+        });
       const full = await fullReload;
       blocks.clear();
       fullData = full;

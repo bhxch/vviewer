@@ -2,7 +2,8 @@
 // 语义覆盖：head 覆盖首块直取零 IO、size 已知末块精确短读 + atEnd、size 未知短读
 // 探测 atEnd、ensureBlock 按序推进不跳读、Range-less 200 超长返回切全量（计划 1
 // 终审 F3）、read 失败原样上抛；计划 3 Task 1 追加：maxBlocks LRU 有界化（B1）与
-// STREAM_MAX_BYTES 统一裁决常量。纯逻辑模块，fake ctx 记录每次请求区间。
+// STREAM_MAX_BYTES 统一裁决常量。纯逻辑模块，fake ctx 记录每次请求区间。流式硬化
+// Task 2 追加：构造期 signal 透传 ctx.read（abort 在飞块读，AbortError 原样上抛）。
 import { describe, expect, it } from 'vitest';
 import type { StreamCtx } from '@vviewer/core';
 import { STREAM_MAX_BYTES, createBlockStream } from '../src/blockStream';
@@ -514,6 +515,27 @@ describe('createBlockStream', () => {
     const bs3 = createBlockStream(fakeCtx({ size: 16, content: ALPHA }), B);
     await expect(bs3.prefetchThrough(-1)).rejects.toThrow(/非负整数/);
     await expect(bs3.prefetchThrough(1.5)).rejects.toThrow(/非负整数/);
+  });
+
+  // —— 流式硬化 Task 2：构造期 signal 透传 ctx.read——abort 在飞块读 ——
+
+  it('㉖ signal：构造期传入，ensureBlock 的在飞读被 abort 后 reject（AbortError 原样上抛）', async () => {
+    const controller = new AbortController();
+    const ctx: StreamCtx = {
+      size: 1_000_000,
+      head: ALPHA, // 简报 bytes(8192) 的等价替换：沿用本文件 head 惯用构造（ALPHA 部分预置块 0）
+      read: (r, signal) =>
+        new Promise((resolve, reject) => {
+          signal?.addEventListener('abort', () =>
+            reject(new DOMException('The operation was aborted.', 'AbortError'))
+          );
+          // 永不 resolve：模拟挂起
+        })
+    };
+    const bs = createBlockStream(ctx, 256 * 1024, { signal: controller.signal });
+    const p = bs.ensureBlock(1);
+    controller.abort();
+    await expect(p).rejects.toMatchObject({ name: 'AbortError' });
   });
 
 });
