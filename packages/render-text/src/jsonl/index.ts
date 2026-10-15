@@ -574,11 +574,13 @@ export interface JsonlWindowedDowngrade {
  * bomLen，调用方在索引可见处换算）经实例 lineAtOffset（全量模式 lineOffsets 二分）
  * 映射物理行号再 reveal；实例无 lineAtOffset（旧产物/非全量形态）或偏移不可得
  * （anchorByteOffset <0）回退内容行号直传（现状行为，向后兼容）。偏移口径注：
- * jsonl 侧 BOM 已剥离（offsets 为逻辑字节空间，+bomLen 还原文件字节）；code 侧
- * lineOffsets 为剥 BOM 归一文本偏移——非 BOM 纯 ASCII 文件两侧逐字节对齐；带 BOM
- * 时 +bomLen 使锚点越过 BOM 落在锚行内（锚行 ≥3 字节即仍二分归锚行，jsonl 数据行
- * 常态），多字节非 ASCII 的字节/字符偏移差同理被锚行长度吸收，粗定位语义（≈原首行
- * + revealLine 精调）下可接受。
+ * jsonl offsets 是字节偏移（CRLF 记 2 字节单终结符）；code lineOffsets 是剥 BOM +
+ * CRLF→LF 归一文本的 UTF-16 字符偏移——两侧仅在「非 BOM 纯 ASCII + LF」主态逐字
+ * 节精确（>200MB 委托 JSONL 的常态）；带 BOM 时 +bomLen 的 3 字节越界由锚行长度
+ * 吸收（锚行 ≥3 字节即仍二分归锚行），但重多字节/全 CRLF 文件的字节-字符差与
+ * CRLF 差随锚行**之前所有行累计**、不被锚行长度吸收——偏移量仅为「锚行前累计差
+ * ÷ 平均行长」量级的粗定位，可偏多行乃至远端（粗定位语义下仍收敛于 revealLine
+ * 精调）。精确映射需字节→字符换算（code 侧持字节域行索引），随后续立项。
  */
 function restoreViewportAfterDegrade(
   full: RenderedInstance & { getMeta(): CodeFileMeta },
