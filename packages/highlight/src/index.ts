@@ -24,6 +24,7 @@ export type {
 } from './types';
 export {
   TreeSitterEngine,
+  type EngineInitProgress,
   type EngineOptions,
   type GrammarTable,
   type HighlightResult,
@@ -38,4 +39,11 @@ export {
   validateVscodeTheme,
   type VscodeThemeJson,
 } from './vscode';
-export { createHandler, initWorker, serveWorker, type InitMessage, type WorkerInit } from './worker';
+export {
+  createHandler,
+  initWorker,
+  serveWorker,
+  type InitMessage,
+  type InitProgressFrame,
+  type WorkerInit
+} from './worker';

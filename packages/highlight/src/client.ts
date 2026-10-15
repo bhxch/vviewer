@@ -1,5 +1,5 @@
 import type { HighlightContext, HighlightInterval, HighlightRequest, HighlightResponse } from './types';
-import type { InitMessage, WorkerInit } from './worker';
+import type { InitMessage, InitProgressFrame, WorkerInit } from './worker';
 
 /** 取消的请求 reject 此错误（name 为 HighlightCanceled）。 */
 export class HighlightCanceledError extends Error {
@@ -39,12 +39,24 @@ export class HighlightClient {
   /** 应用层错误上报回调（状态栏一次性提示或 console 显式标签） */
   private readonly onWorkerError?: (reason: string) => void;
 
-  constructor(worker: Worker, init?: WorkerInit, onWorkerError?: (reason: string) => void) {
+  /**
+   * init：WorkerInit 引擎配置；debug（可选，Task 9 spike 取证面，如 ?vvWorkerDebug=1）
+   * 开启 worker init 阶段探针——各阶段 init-progress 帧经 console.debug 留痕，用于定位
+   * init 静默挂起。开关关闭（缺省）时该键不上线、零探针帧，协议行为逐字节不变。
+   */
+  constructor(worker: Worker, init?: WorkerInit & { debug?: boolean }, onWorkerError?: (reason: string) => void) {
     this.worker = worker;
     this.onWorkerError = onWorkerError;
     this.worker.onmessage = (ev: MessageEvent<HighlightResponse>) => {
-      this.markWorkerAlive();
       const res = ev.data;
+      // init-progress 探针帧（spike）：早退分流——不进 pending 表，也不 markWorkerAlive
+      // （进度帧不计为存活证据，看门狗语义不变）；帧仅在 init 握手携带 debug 开关时出现
+      if ((res as { kind?: string }).kind === 'init-progress') {
+        const frame = res as unknown as InitProgressFrame;
+        console.debug('[vviewer-worker]', frame.stage, frame.detail);
+        return;
+      }
+      this.markWorkerAlive();
       const p = this.pending.get(res.id);
       if (!p) return;
       this.pending.delete(res.id);
@@ -65,8 +77,14 @@ export class HighlightClient {
     this.worker.onmessageerror = () => {
       this.failWorker('worker 消息反序列化失败（onmessageerror）');
     };
-    // 握手：首条 init 消息携带引擎配置（serveWorker 排队等待 init 后才处理请求）
-    const handshake: InitMessage = { kind: 'init', ...init };
+    // 握手：首条 init 消息携带引擎配置（serveWorker 排队等待 init 后才处理请求）。
+    // debug 开启时附探针开关且仅此时该键上线——缺省握手与既有协议逐字节一致。
+    const { debug, ...initConfig } = init ?? {};
+    const handshake: InitMessage = {
+      kind: 'init',
+      ...initConfig,
+      ...(debug ? { debug: true } : {})
+    };
     this.worker.postMessage(handshake);
     // 初始化看门狗：worker 静默（脚本/wasm/grammar 加载挂死）时拒绝全部未完成
     // 请求并短路后续请求——渲染端以普通 Error 接通 hljs 兜底，不永久悬挂。

@@ -23,6 +23,12 @@ export type HighlightResult =
   | { ok: true; intervals: HighlightInterval[] }
   | { ok: false; error: string };
 
+/** init 阶段打点（Task 9 spike 取证面）：阶段序 wasm-fetch → parser-init → assets → ready。 */
+export interface EngineInitProgress {
+  stage: 'wasm-fetch' | 'parser-init' | 'assets' | 'ready';
+  detail?: string;
+}
+
 export interface EngineOptions {
   /** 查询来源：assets/queries 目录路径（Node，自动扫描子目录）或虚拟映射。 */
   queriesDir?: string | VirtualQueries;
@@ -111,9 +117,20 @@ export class TreeSitterEngine {
     this.parser = new Parser();
   }
 
-  /** 初始化 runtime（Parser.init 幂等，失败可重试）并构建引擎。 */
-  static async create(opts: EngineOptions): Promise<TreeSitterEngine> {
+  /**
+   * 初始化 runtime（Parser.init 幂等，失败可重试）并构建引擎。
+   * onInitProgress（可选，Task 9 spike 取证面）：init 各阶段打点回调，仅用于定位
+   * init 静默挂起（如 wasm fetch 不归）——缺省不传即零打点零开销，行为与既有签名一致。
+   * assets 打点位于两形态（grammars 直传表 / grammarsDir readManifest）合流、queries 就绪后，
+   * 两形态均被覆盖。detail 的 queries=N 为静态资产映射大小：Node 目录扫描/虚拟映射如实计数；
+   * 浏览器端走 queriesBase 惰性按语言 fetch（assets 映射恒空），此处恒为 queries=0 非异常。
+   */
+  static async create(
+    opts: EngineOptions & { onInitProgress?: (p: EngineInitProgress) => void }
+  ): Promise<TreeSitterEngine> {
+    const report = opts.onInitProgress;
     const runtimeDir = opts.runtimeDir ?? opts.grammarsBase ?? opts.grammarsDir ?? '';
+    report?.({ stage: 'wasm-fetch', detail: `runtimeDir=${runtimeDir}` });
     if (!initPromise) {
       initPromise = Parser.init({ locateFile: (file: string) => joinPath(runtimeDir, file) }).catch((e) => {
         initPromise = null; // 失败可重试（下次 create 用正确的 runtimeDir）
@@ -121,6 +138,7 @@ export class TreeSitterEngine {
       });
     }
     await initPromise;
+    report?.({ stage: 'parser-init' });
 
     let grammarTable = opts.grammars;
     if (!grammarTable) {
@@ -133,7 +151,10 @@ export class TreeSitterEngine {
         : opts.queriesDir === undefined
           ? new Map<never, never>()
           : normalizeVirtualQueries(opts.queriesDir);
-    return new TreeSitterEngine(assets, grammarTable, opts);
+    report?.({ stage: 'assets', detail: `queries=${assets.size ?? 0}` });
+    const engine = new TreeSitterEngine(assets, grammarTable, opts);
+    report?.({ stage: 'ready' });
+    return engine;
   }
 
   /**

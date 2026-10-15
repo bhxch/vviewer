@@ -266,7 +266,11 @@ async function create(): Promise<HighlightClient> {
       // runtime 随 base：子路径托管（Pages）下 worker 内 Parser.init 按
       // locateFile(joinPath(runtimeDir, file)) 取 /<base>/tree-sitter.wasm，
       // 根绝对 '/' 在子路径下 404 → init 失败 → 全部高亮静默回退 hljs
-      runtimeDir: baseUrl // web-tree-sitter runtime 位于 static/tree-sitter.wasm（base='' 时即 '/'）
+      runtimeDir: baseUrl, // web-tree-sitter runtime 位于 static/tree-sitter.wasm（base='' 时即 '/'）
+      // worker init 阶段探针开关（Task 9 spike 取证面）：?vvWorkerDebug=1 时各 init 阶段
+      // （wasm fetch/queries/engine ready）经 init-progress 帧 → console.debug 留痕，用于
+      // 定位 init 静默挂起；缺省 false——线上握手无 debug 键、零探针帧，协议行为不变
+      debug: new URLSearchParams(location.search).has('vvWorkerDebug')
     },
     // BUG-06 可观测：worker 脚本/消息错误经显式标签上报——此前该类失败零提示
     // 静默降级 hljs，是「本地 tree-sitter 全链失效却无任何痕迹」的主要观测障碍

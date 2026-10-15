@@ -1,4 +1,4 @@
-import { TreeSitterEngine, type GrammarTable } from './core-parse';
+import { TreeSitterEngine, type EngineInitProgress, type GrammarTable } from './core-parse';
 import type { QueryFile } from './queries';
 import type { HighlightRequest, HighlightResponse } from './types';
 
@@ -27,21 +27,37 @@ export async function createHandler(engine: TreeSitterEngine): Promise<RequestHa
   };
 }
 
-/** 创建引擎并返回请求处理器。 */
-export async function initWorker(init: WorkerInit): Promise<RequestHandler> {
-  const engine = await TreeSitterEngine.create(init);
+/** 创建引擎并返回请求处理器。onInitProgress（可选，Task 9 spike 取证面）为 init 阶段
+ *  打点回调：仅 serveWorker 在 init 握手携带 debug 开关时以闭包注入——结构化克隆不可
+ *  经消息携带函数，故回调不入 WorkerInit 契约。 */
+export async function initWorker(
+  init: WorkerInit,
+  onInitProgress?: (p: EngineInitProgress) => void
+): Promise<RequestHandler> {
+  const engine = await TreeSitterEngine.create(onInitProgress ? { ...init, onInitProgress } : init);
   return createHandler(engine);
+}
+
+/** worker → client 的 init 阶段探针帧（Task 9 spike 取证面）：仅 init 握手携带 debug
+ *  开关时出现，缺省（开关关闭）零出现。client 侧不计为存活证据（markWorkerAlive 不触发）。 */
+export interface InitProgressFrame {
+  kind: 'init-progress';
+  stage: string;
+  detail?: string;
 }
 
 /** Worker 上下文（仅真实 Worker/jsdom 环境存在 self）。 */
 type WorkerCtx = {
   onmessage: ((ev: MessageEvent) => void) | null;
-  postMessage: (msg: HighlightResponse) => void;
+  postMessage: (msg: HighlightResponse | InitProgressFrame) => void;
 };
 
 /** client → worker 的首条握手消息（与 serveWorker 协议对齐）。 */
 export interface InitMessage extends WorkerInit {
   kind: 'init';
+  /** init 阶段探针开关（Task 9 spike）：true 时 serveWorker 注入进度回调，逐阶段回
+   *  init-progress 帧。缺省省略该键——线上握手与既有协议逐字节一致。 */
+  debug?: boolean;
 }
 
 function workerCtx(): WorkerCtx | null {
@@ -80,10 +96,26 @@ export function serveWorker(): void {
   };
 
   ctx.onmessage = (ev: MessageEvent) => {
-    const data = ev.data as { kind?: string } & HighlightRequest & WorkerInit;
+    const data = ev.data as { kind?: string; debug?: boolean } & HighlightRequest & WorkerInit;
     if (data.kind === 'init') {
       if (handler) return; // 忽略重复 init
-      handler = initWorker(data)
+      // init-progress 探针（Task 9 spike 取证面）：data 解构为 init 配置与 debug 开关两份，
+      // 进度回调以闭包注入 initWorker——结构化克隆不可经消息携带函数，onInitProgress
+      // 不进 WorkerInit 契约。debug 未开（缺省）：不注入回调 → engine 零打点 → 零探针帧，
+      // 行为与既有协议逐字节一致。
+      const { kind: _kind, debug, ...initConfig } = data;
+      handler = initWorker(
+        initConfig,
+        debug
+          ? (p) => {
+              ctx.postMessage({
+                kind: 'init-progress',
+                stage: p.stage,
+                ...(p.detail !== undefined ? { detail: p.detail } : {}),
+              });
+            }
+          : undefined
+      )
         .then((h) => {
           for (const req of queued.splice(0)) void dispatch(req, h);
           return h;

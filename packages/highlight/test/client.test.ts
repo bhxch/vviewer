@@ -1,6 +1,20 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { HighlightClient } from '../src/client';
+import { serveWorker } from '../src/worker';
 import type { HighlightInterval, HighlightRequest, HighlightResponse } from '../src/types';
+
+// —— init-progress 探针（Task 9 spike）测试装置 ——
+// serveWorker 直调形态（worker.test.ts 同款）：stub self/WorkerGlobalScope 后手动驱动，
+// TreeSitterEngine.create 以可换装桩代替（真实 Parser.init 走 wasm，非本组用例关注点）。
+const engineCreate = vi.hoisted(() => ({
+  impl: (..._args: unknown[]): Promise<unknown> => Promise.reject(new Error('engine create 桩未安装')),
+}));
+
+vi.mock('../src/core-parse', () => ({
+  TreeSitterEngine: {
+    create: (...args: unknown[]) => engineCreate.impl(...args),
+  },
+}));
 
 const interval = (start: number, end: number, capture: string): HighlightInterval => ({
   start,
@@ -216,5 +230,118 @@ describe('HighlightClient', () => {
       expect(reported).toHaveLength(1); // 看门狗已被首错清除，无双报
       client.dispose();
     });
+  });
+});
+
+/** serveWorker 桥接 Worker：postMessage 喂 worker 侧 ctx.onmessage（微任务异步，贴近真实消息时序）。 */
+class BridgeWorker {
+  onmessage: ((ev: { data: unknown }) => void) | null = null;
+  onerror: ((ev: ErrorEvent) => void) | null = null;
+  onmessageerror: (() => void) | null = null;
+  terminated = false;
+  /** client → worker 已发消息记录（含 init 握手）：断言线上字节形（debug 键有无）。 */
+  sent: unknown[] = [];
+  private readonly ctx: { onmessage: ((ev: { data: unknown }) => void) | null };
+
+  constructor(ctx: { onmessage: ((ev: { data: unknown }) => void) | null }) {
+    this.ctx = ctx;
+  }
+
+  postMessage(msg: unknown): void {
+    this.sent.push(msg);
+    queueMicrotask(() => this.ctx.onmessage?.({ data: msg }));
+  }
+
+  terminate(): void {
+    this.terminated = true;
+  }
+}
+
+/** 安装 serveWorker 并桥接双向消息；返回 worker 桥与 worker → client 帧记录。 */
+function installBridge(): { worker: BridgeWorker; frames: unknown[] } {
+  const frames: unknown[] = [];
+  const ctx: { onmessage: ((ev: { data: unknown }) => void) | null; postMessage: (msg: unknown) => void } = {
+    onmessage: null,
+    postMessage: () => {},
+  };
+  const worker = new BridgeWorker(ctx);
+  ctx.postMessage = (msg: unknown): void => {
+    frames.push(msg);
+    worker.onmessage?.({ data: msg });
+  };
+  vi.stubGlobal('self', ctx);
+  vi.stubGlobal('WorkerGlobalScope', class {});
+  serveWorker();
+  return { worker, frames };
+}
+
+describe('init-progress 探针（vvWorkerDebug spike：打点通道，非存活证据）', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('debug 开关下 worker 阶段帧依序透传为 console.debug；进度帧不计存活（看门狗语义不变）', async () => {
+    vi.useFakeTimers();
+    const debugCalls: unknown[][] = [];
+    const spy = vi.spyOn(console, 'debug').mockImplementation((...args: unknown[]) => {
+      debugCalls.push(args);
+    });
+    engineCreate.impl = async (...args: unknown[]) => {
+      const opts = args[0] as { onInitProgress?: (p: { stage: string; detail?: string }) => void } | undefined;
+      const report = opts?.onInitProgress;
+      report?.({ stage: 'wasm-fetch', detail: 'runtimeDir=/x/' });
+      report?.({ stage: 'parser-init' });
+      report?.({ stage: 'assets', detail: 'queries=2' });
+      report?.({ stage: 'ready' });
+      // 高亮请求挂起（worker 此后静默）：验证进度帧不解除看门狗
+      return { highlight: (): Promise<never> => new Promise(() => {}) };
+    };
+    const { worker, frames } = installBridge();
+    const client = new HighlightClient(worker as unknown as Worker, { grammarsDir: '/x', debug: true });
+    // 握手带 debug: true 键（探针开关上线）
+    expect(worker.sent[0]).toStrictEqual({ kind: 'init', grammarsDir: '/x', debug: true });
+    const p = client.highlight('a=1', 'bash');
+    const watchdog = expect(p).rejects.toThrow('初始化超时');
+    await vi.advanceTimersByTimeAsync(0); // 冲刷微任务：init 链跑完、四帧到达
+    // 断言 1：create 各阶段回调 → onInitProgress 依序到达（wasm-fetch/parser-init/assets/ready）
+    expect(frames.map((f) => (f as { kind?: string }).kind)).toEqual([
+      'init-progress',
+      'init-progress',
+      'init-progress',
+      'init-progress',
+    ]);
+    expect(frames[2]).toStrictEqual({ kind: 'init-progress', stage: 'assets', detail: 'queries=2' });
+    expect(debugCalls.map((c) => c[1])).toEqual(['wasm-fetch', 'parser-init', 'assets', 'ready']);
+    expect(debugCalls[0]).toEqual(['[vviewer-worker]', 'wasm-fetch', 'runtimeDir=/x/']);
+    expect(debugCalls[2]).toEqual(['[vviewer-worker]', 'assets', 'queries=2']);
+    // 进度帧不计为存活证据：markWorkerAlive 未触发，15s 到点看门狗照常拒绝
+    await vi.advanceTimersByTimeAsync(15_000);
+    await watchdog;
+    client.dispose();
+    spy.mockRestore();
+  });
+
+  it('无 debug 开关：engine 收不到 onInitProgress、线上握手无 debug 键、零探针帧零 console.debug', async () => {
+    const debugCalls: unknown[][] = [];
+    const spy = vi.spyOn(console, 'debug').mockImplementation((...args: unknown[]) => {
+      debugCalls.push(args);
+    });
+    let seenOpts: unknown;
+    engineCreate.impl = async (opts?: unknown) => {
+      seenOpts = opts;
+      return { highlight: async () => ({ ok: true as const, intervals: [] }) };
+    };
+    const { worker, frames } = installBridge();
+    const client = new HighlightClient(worker as unknown as Worker, { grammarsDir: '/x' });
+    await client.highlight('echo hi', 'bash');
+    // 断言 2：无 debug 开关时 onInitProgress 恒不被调用——engine 侧回调缺位（键不存在）
+    expect(seenOpts).not.toHaveProperty('onInitProgress');
+    // 线上握手无 debug 键（缺省省略而非 debug:false）——协议逐字节不变
+    expect(worker.sent[0]).toStrictEqual({ kind: 'init', grammarsDir: '/x' });
+    expect(frames.some((f) => (f as { kind?: string }).kind === 'init-progress')).toBe(false);
+    expect(debugCalls).toHaveLength(0);
+    client.dispose();
+    spy.mockRestore();
   });
 });
