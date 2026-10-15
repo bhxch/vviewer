@@ -12,6 +12,23 @@ import { virtualScroller, type VirtualScrollerHandle } from './virtualScroller';
 import { searchCode, type SearchMatchWithPreview } from './search';
 
 /**
+ * 取消错误身份判定（deferred 清偿 Task 3）：err 是否为取消（AbortError 形态）。
+ * 双形态兼容：标准环境 DOMException instanceof Error 成立（WHATWG 继承链），但
+ * jsdom 等环境的 DOMException 未必是 Error 子类，故两支并判。窗口流式的静默分支
+ * （续读/回看重拉/后台泵/搜索扫描，code 与 jsonl 同款）以此为唯一判据，不再看
+ * catch 时刻 signal.aborted 状态态——「真实读失败 + abort 竞态」（先失败、catch
+ * 时已 abort）不再被误吞，照常置闩 + debug 留痕（destroyed 终态无消费方，日志
+ * 如实）；真取消（remote fetch 原生 AbortError、localFiles/singleFile 预 abort
+ * 抛 DOMException('读取已取消','AbortError')——Task 1 统一后的形态）恒静默。
+ */
+export function isAbortError(err: unknown): boolean {
+  return (
+    (err instanceof DOMException && err.name === 'AbortError') ||
+    (err instanceof Error && err.name === 'AbortError')
+  );
+}
+
+/**
  * hljs 别名桥接：helix 语言名 → hljs 语言 id（仅收录 hljs.getLanguage 直查失败的键；
  * sh/shell/zsh/golang/rb/md/yml/c++ 等 hljs 自带别名已直查命中，不在此列）。
  * 目标 id 全部经 hljs.getLanguage 实测命中；hljs 无对应语言的键（zig/wgsl 等）不收录，
@@ -1698,7 +1715,7 @@ function renderCodeWindowed(
         try {
           for (const b of targets) await bs.ensureBlock(b);
         } catch (err) {
-          if (readAbort.signal.aborted) { pulling = false; return; } // destroy 取消：静默，闩不动、不回填待办；pulling 复位（spec §3.4）
+          if (isAbortError(err)) { pulling = false; return; } // 取消（AbortError 身份）：静默，闩不动、不回填待办；pulling 复位（spec §3.4）
           for (const b of targets) pendingReload.add(b); // 未完成块回待办（占位行维持）
           reloadFailed = true;
           console.debug('[code] 回看重拉失败，已停机（滚动后重试）', err);
@@ -1718,7 +1735,7 @@ function renderCodeWindowed(
       try {
         await pullBlock();
       } catch (err) {
-        if (readAbort.signal.aborted) { pulling = false; return; } // destroy 取消：静默，闩不动；pulling 复位（catch 后的复位语句位不经此路径，spec §3.4）
+        if (isAbortError(err)) { pulling = false; return; } // 取消（AbortError 身份）：静默，闩不动；pulling 复位（catch 后的复位语句位不经此路径，spec §3.4）
         continueFailed = true; // 停机：杜绝「失败→refresh 重评→仍近尾部→再失败」活锁
         console.debug('[code] 流式续读失败，已停机（滚动后重试）', err);
       }
@@ -1783,7 +1800,7 @@ function renderCodeWindowed(
       try {
         await pullBlock();
       } catch (err) {
-        if (readAbort.signal.aborted) { pulling = false; return; } // destroy 取消：静默，闩不动；pulling 复位（catch 后的复位语句位不经此路径，spec §3.4）
+        if (isAbortError(err)) { pulling = false; return; } // 取消（AbortError 身份）：静默，闩不动；pulling 复位（catch 后的复位语句位不经此路径，spec §3.4）
         continueFailed = true; // 与滚动续读同口径：停机闩防活锁，用户滚动动作解除
         console.debug('[code] 后台索引泵拉块失败，已停机（滚动后重试）', err);
       }
@@ -2165,7 +2182,7 @@ function renderCodeWindowed(
         try {
           await pullBlock();
         } catch (err) {
-          if (readAbort.signal.aborted) return acc; // destroy 取消：静默，闩不动（spec §3.4；pulling 由下方 finally 复位）
+          if (isAbortError(err)) return acc; // 取消（AbortError 身份）：静默，闩不动（spec §3.4；pulling 由下方 finally 复位）
           continueFailed = true; // 与滚动续读同口径：停机闩，用户滚动动作解除
           lastScanComplete = false; // 同键重搜即用户动作：解除闩后续扫（见 search）
           console.debug('[code] 搜索扫描续读失败，已停机（返回已得部分结果）', err);

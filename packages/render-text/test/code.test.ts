@@ -22,6 +22,7 @@ import {
   evictOldestEntries,
   evictChunksByLines,
   capChunkCoverage,
+  isAbortError,
   CHUNK_COVERAGE_MAX_ENTRIES,
   chunkRangeFor,
   mergeChunkLines,
@@ -2749,5 +2750,84 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     // 断言 2：泵 catch 静默——不打印「后台索引泵拉块失败」（abort ≠ 读失败）
     expect(debugSpy).not.toHaveBeenCalledWith(expect.stringContaining('后台索引泵拉块失败'), expect.anything());
     debugSpy.mockRestore();
+  });
+
+  // deferred 清偿 Task 3 锚 A：非 abort 读失败照常置闩 + debug（收紧的反面不误伤）。
+  // 块 1 立即以普通 Error reject（ECONNRESET 形态），无任何 abort 参与——失败经
+  // 后台索引泵 catch 落 continueFailed 停机闩 + 留痕。
+  it('abort 判定收紧锚 A：非 abort 读失败照常置闩+日志（无 abort 参与）', async () => {
+    stubResizeObserver();
+    const debugSpy = vi.spyOn(console, 'debug');
+    const content = enc(codeLines(1280)); // ≈1.9MB ≈ 8 块：首块成功 mount 后仍有大量块可拉
+    const ctx: StreamCtx = {
+      size: 5 * WINDOW_BLOCK,
+      head: content.slice(0, 8192),
+      read: (r) =>
+        r.start === 0
+          ? Promise.resolve(content.slice(0, WINDOW_BLOCK)) // 块 0 立即 resolve：首屏成功 mount
+          : Promise.reject(Object.assign(new Error('连接被重置'), { code: 'ECONNRESET' })) // 块 1+：真实读失败（无 abort 参与）
+    };
+    const host = newHost();
+    const inst = renderCode(content.slice(0, 8192), host, { ctx, ext: 'js', highlight: false });
+    await vi.waitFor(
+      () => expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('后台索引泵拉块失败'), expect.anything()),
+      { timeout: 2_000 }
+    );
+    debugSpy.mockRestore();
+    inst.destroy();
+  });
+
+  // deferred 清偿 Task 3 锚 B（收紧主断言）：destroy 竞态下的真实读失败不被误吞。
+  // 块 1 读先挂起（无视 signal）→ destroy（signal 已 aborted）→ read 随后以普通
+  // Error reject——catch 时刻 signal.aborted 为真但 err 非 AbortError：旧判定按
+  // 「catch 时 signal 状态」会静默误吞，收紧后按错误身份判定照常置闩 + 留痕
+  // （destroyed 终态无消费方，日志如实）。
+  it('abort 判定收紧：destroy 竞态下的真实读失败不被误吞（置闩+日志，非静默）', async () => {
+    stubResizeObserver();
+    const debugSpy = vi.spyOn(console, 'debug');
+    const content = enc(codeLines(1280));
+    const calls: Array<{ start: number; end: number }> = [];
+    let sawSignal: AbortSignal | undefined;
+    const ctx: StreamCtx = {
+      size: 5 * WINDOW_BLOCK,
+      head: content.slice(0, 8192),
+      read: (r, signal) => {
+        calls.push({ start: r.start, end: r.end });
+        sawSignal = signal;
+        if (r.start === 0) {
+          return Promise.resolve(content.slice(0, WINDOW_BLOCK)); // 块 0 立即 resolve：首屏成功 mount
+        }
+        // 块 1+：忽略 signal 挂起 50ms 后以真实读失败 reject——「先失败/挂起、
+        // 等待期 destroy abort、catch 时 signal 已 aborted」的竞态形态
+        return new Promise((_, reject) => {
+          setTimeout(() => reject(Object.assign(new Error('连接被重置'), { code: 'ECONNRESET' })), 50);
+        });
+      }
+    };
+    const host = newHost();
+    const inst = renderCode(content.slice(0, 8192), host, { ctx, ext: 'js', highlight: false });
+    await vi.waitFor(() => expect(calls.length).toBe(2)); // 首块成功 + 泵 tick 已发出块 1 读（挂起中）
+    expect(calls[1]!.start).toBe(WINDOW_BLOCK); // 在飞的正是泵的续拉（自校验非首块）
+    inst.destroy(); // 竞态注入点：块 1 在飞挂起中 destroy → signal aborted
+    await vi.waitFor(() => expect(sawSignal!.aborted).toBe(true), { timeout: 2_000 });
+    // 收紧断言：catch 时 signal 已 aborted 且 err 非 AbortError → 不静默（旧实现误吞）
+    await vi.waitFor(
+      () => expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('后台索引泵拉块失败'), expect.anything()),
+      { timeout: 2_000 }
+    );
+    debugSpy.mockRestore();
+  });
+});
+
+describe('isAbortError（deferred 清偿 Task 3：取消错误身份判定矩阵）', () => {
+  it('DOMException AbortError / Error name AbortError → true；普通 Error / 非 Abort 的 DOMException / 非 Error 值 → false', () => {
+    expect(isAbortError(new DOMException('aborted', 'AbortError'))).toBe(true); // localFiles/singleFile 预 abort 形态（Task 1 统一）
+    expect(isAbortError(Object.assign(new Error('aborted'), { name: 'AbortError' }))).toBe(true); // DOMException 非 Error 子类环境的兜底形态
+    expect(isAbortError(new Error('连接被重置'))).toBe(false); // 真实读失败（ECONNRESET 形态）
+    expect(isAbortError(new DOMException('普通 DOM 异常', 'SyntaxError'))).toBe(false); // 非 Abort 的 DOMException
+    expect(isAbortError(Object.assign(new Error('fail'), { code: 'ECONNRESET' }))).toBe(false);
+    expect(isAbortError('abort')).toBe(false); // 非 Error 值
+    expect(isAbortError(null)).toBe(false);
+    expect(isAbortError(undefined)).toBe(false);
   });
 });
