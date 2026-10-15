@@ -29,17 +29,30 @@ export async function createHandler(engine: TreeSitterEngine): Promise<RequestHa
 
 /** 创建引擎并返回请求处理器。onInitProgress（可选，Task 9 spike 取证面）为 init 阶段
  *  打点回调：仅 serveWorker 在 init 握手携带 debug 开关时以闭包注入——结构化克隆不可
- *  经消息携带函数，故回调不入 WorkerInit 契约。 */
+ *  经消息携带函数，故回调不入 WorkerInit 契约。debug 注入时同时派生 onQueryLoaded
+ *  （Task 4 细口径）：远程 query 资产逐文件 fetch 完成折算为一帧 query-loaded（detail=
+ *  文件相对名），复用同一探针回调与帧类型——client 侧 init-progress 统一分流不变。
+ *  缺省（无开关）两回调均不注入：engine 零打点，线上行为逐字节不变。 */
 export async function initWorker(
   init: WorkerInit,
   onInitProgress?: (p: EngineInitProgress) => void
 ): Promise<RequestHandler> {
-  const engine = await TreeSitterEngine.create(onInitProgress ? { ...init, onInitProgress } : init);
+  const engine = await TreeSitterEngine.create(
+    onInitProgress
+      ? {
+          ...init,
+          onInitProgress,
+          onQueryLoaded: (file: string) => onInitProgress({ stage: 'query-loaded', detail: file }),
+        }
+      : init
+  );
   return createHandler(engine);
 }
 
 /** worker → client 的 init 阶段探针帧（Task 9 spike 取证面）：仅 init 握手携带 debug
- *  开关时出现，缺省（开关关闭）零出现。client 侧不计为存活证据（markWorkerAlive 不触发）。 */
+ *  开关时出现，缺省（开关关闭）零出现。client 侧不计为存活证据（markWorkerAlive 不触发）。
+ *  query 逐文件帧（query-loaded，Task 4 细口径）同型复用本帧：每份 query 资产 fetch 完成
+ *  一帧、detail 为文件相对名，时序可在 ready 之后（首次高亮的惰性加载）。 */
 export interface InitProgressFrame {
   kind: 'init-progress';
   stage: string;

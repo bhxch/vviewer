@@ -294,8 +294,14 @@ describe('init-progress 探针（vvWorkerDebug spike：打点通道，非存活�
       report?.({ stage: 'parser-init' });
       report?.({ stage: 'assets', detail: 'queries=2' });
       report?.({ stage: 'ready' });
-      // 高亮请求挂起（worker 此后静默）：验证进度帧不解除看门狗
-      return { highlight: (): Promise<never> => new Promise(() => {}) };
+      // query 逐文件帧（Task 4 细口径）：真实链路在 ready 后首次高亮的远程 fetch 完成时
+      // 出现——桩在 highlight 调用时补发，覆盖 ready 之后帧的同通道透传与非存活同口径
+      return {
+        highlight: (): Promise<never> => {
+          report?.({ stage: 'query-loaded', detail: 'bash/highlights.scm' });
+          return new Promise(() => {});
+        },
+      };
     };
     const { worker, frames } = installBridge();
     const client = new HighlightClient(worker as unknown as Worker, { grammarsDir: '/x', debug: true });
@@ -303,16 +309,20 @@ describe('init-progress 探针（vvWorkerDebug spike：打点通道，非存活�
     expect(worker.sent[0]).toStrictEqual({ kind: 'init', grammarsDir: '/x', debug: true });
     const p = client.highlight('a=1', 'bash');
     const watchdog = expect(p).rejects.toThrow('初始化超时');
-    await vi.advanceTimersByTimeAsync(0); // 冲刷微任务：init 链跑完、四帧到达
-    // 断言 1：create 各阶段回调 → onInitProgress 依序到达（wasm-fetch/parser-init/assets/ready）
+    await vi.advanceTimersByTimeAsync(0); // 冲刷微任务：init 链跑完、四帧到达、请求派发补发 query-loaded
+    // 断言 1：create 各阶段回调 → onInitProgress 依序到达（wasm-fetch/parser-init/assets/ready），
+    // 随后请求派发触发 highlight 桩补发 query-loaded（ready 之后的逐文件帧）
     expect(frames.map((f) => (f as { kind?: string }).kind)).toEqual([
+      'init-progress',
       'init-progress',
       'init-progress',
       'init-progress',
       'init-progress',
     ]);
     expect(frames[2]).toStrictEqual({ kind: 'init-progress', stage: 'assets', detail: 'queries=2' });
-    expect(debugCalls.map((c) => c[1])).toEqual(['wasm-fetch', 'parser-init', 'assets', 'ready']);
+    // query-loaded 帧（每 query 文件一帧，spec §8 细口径）：同一帧类型同一分流
+    expect(frames[4]).toStrictEqual({ kind: 'init-progress', stage: 'query-loaded', detail: 'bash/highlights.scm' });
+    expect(debugCalls.map((c) => c[1])).toEqual(['wasm-fetch', 'parser-init', 'assets', 'ready', 'query-loaded']);
     expect(debugCalls[0]).toEqual(['[vviewer-worker]', 'wasm-fetch', 'runtimeDir=/x/']);
     expect(debugCalls[2]).toEqual(['[vviewer-worker]', 'assets', 'queries=2']);
     // 进度帧不计为存活证据：markWorkerAlive 未触发，15s 到点看门狗照常拒绝
@@ -335,8 +345,10 @@ describe('init-progress 探针（vvWorkerDebug spike：打点通道，非存活�
     const { worker, frames } = installBridge();
     const client = new HighlightClient(worker as unknown as Worker, { grammarsDir: '/x' });
     await client.highlight('echo hi', 'bash');
-    // 断言 2：无 debug 开关时 onInitProgress 恒不被调用——engine 侧回调缺位（键不存在）
+    // 断言 2：无 debug 开关时 onInitProgress/onQueryLoaded 恒不被注入——engine 侧回调缺位
+    //（键不存在；onQueryLoaded 由 initWorker 仅在 debug 回调注入时派生，缺省零键零打点）
     expect(seenOpts).not.toHaveProperty('onInitProgress');
+    expect(seenOpts).not.toHaveProperty('onQueryLoaded');
     // 线上握手无 debug 键（缺省省略而非 debug:false）——协议逐字节不变
     expect(worker.sent[0]).toStrictEqual({ kind: 'init', grammarsDir: '/x' });
     expect(frames.some((f) => (f as { kind?: string }).kind === 'init-progress')).toBe(false);

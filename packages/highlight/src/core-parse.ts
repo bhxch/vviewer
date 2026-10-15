@@ -23,9 +23,13 @@ export type HighlightResult =
   | { ok: true; intervals: HighlightInterval[] }
   | { ok: false; error: string };
 
-/** init 阶段打点（Task 9 spike 取证面）：阶段序 wasm-fetch → parser-init → assets → ready。 */
+/**
+ * init 阶段打点（Task 9 spike 取证面）：阶段序 wasm-fetch → parser-init → assets → ready。
+ * query-loaded 为 query 资产逐文件帧（Task 4 细口径，debug 链路经 onQueryLoaded 折算）：
+ * 随首次 highlight 的远程 fetch 完成、时序在 ready 之后，帧缺席 = 该文件请求悬挂。
+ */
 export interface EngineInitProgress {
-  stage: 'wasm-fetch' | 'parser-init' | 'assets' | 'ready';
+  stage: 'wasm-fetch' | 'parser-init' | 'assets' | 'ready' | 'query-loaded';
   detail?: string;
 }
 
@@ -42,6 +46,14 @@ export interface EngineOptions {
   grammarsBase?: string;
   /** web-tree-sitter runtime（tree-sitter.wasm）所在目录/URL 前缀，默认 grammarsBase。 */
   runtimeDir?: string;
+  /**
+   * 远程 query 资产逐文件打点（Task 4 细口径，debug 取证面）：queriesBase 惰性加载形态下，
+   * 每份查询文件 fetch 完成上报一次，file 形态 `${lang}/${file}`（如 'bash/highlights.scm'，
+   * 与 queriesBase 下目录布局一致）。语义是「fetch 已完成」而非「内容可用」——404/SPA 兜底
+   * 缺失/网络失败同样出帧，帧缺席才是悬挂信号。仅 queriesBase 形态生效；queriesDir/虚拟
+   * 映射零回调（帧天然缺席）。缺省不传即零打点零开销：线上仅 debug 握手经 initWorker 注入。
+   */
+  onQueryLoaded?: (file: string) => void;
   /** 注入递归最大深度，默认 3。 */
   maxInjectionDepth?: number;
 }
@@ -88,6 +100,34 @@ function queryBudget(text: string): number {
   return Math.min(3_000_000, Math.max(50_000, text.length * 20));
 }
 
+/** web-tree-sitter runtime 的 wasm 文件名（Parser.init 经 locateFile 于 runtimeDir 下取用）。 */
+const RUNTIME_WASM_FILE = 'tree-sitter.wasm';
+
+/**
+ * wasm 加载 resource timing 明细（Task 4 细口径，debug 取证面）：读 performance resource
+ * 条目过滤 runtime wasm，取 name/duration/transferSize——定位 init 挂起时区分「fetch 慢」
+ * 与「fetch 完成但 Parser.init 内部挂」。只读既有 buffer 不二次 fetch；worker 上下文的
+ * resource buffer 独立，读到的即 worker 自己那次 fetch。字段缺失容错：transferSize 跨源
+ * 无 Timing-Allow-Origin 或缓存命中时为 0，照实上报不推断；查不到条目（buffer 清空/
+ * 极端环境/jsdom 无此 API）返回 undefined——detail 省略、帧仍发。
+ */
+function runtimeWasmDetail(): string | undefined {
+  const perf = performance as {
+    getEntriesByType?: (type: string) => Array<{ name: string; duration?: number; transferSize?: number }>;
+  };
+  const entry = perf.getEntriesByType?.('resource')?.find((e) => e.name.includes(RUNTIME_WASM_FILE));
+  if (!entry) return undefined;
+  const parts = [`name=${entry.name}`];
+  if (typeof entry.duration === 'number') parts.push(`duration=${Math.round(entry.duration * 100) / 100}ms`);
+  if (typeof entry.transferSize === 'number') parts.push(`transfer=${entry.transferSize}B`);
+  return parts.join(' ');
+}
+
+/** debug 帧的 detail 条件化（deferred 卫生）：无 detail 不产生 detail 键。 */
+function optDetail(detail: string | undefined): { detail?: string } {
+  return detail !== undefined ? { detail } : {};
+}
+
 let initPromise: Promise<void> | null = null;
 
 /**
@@ -109,7 +149,7 @@ export class TreeSitterEngine {
 
   private constructor(assets: QueryAssets, grammarTable: GrammarTable, opts: EngineOptions) {
     this.assets = assets;
-    this.remoteQueries = opts.queriesBase ? remoteQueryLoader(opts.queriesBase) : null;
+    this.remoteQueries = opts.queriesBase ? remoteQueryLoader(opts.queriesBase, opts.onQueryLoaded) : null;
     this.grammarTable = grammarTable;
     this.grammarsBase = opts.grammarsBase ?? opts.grammarsDir ?? '';
     this.aliasToLang = buildAliasTable(grammarTable);
@@ -120,10 +160,14 @@ export class TreeSitterEngine {
   /**
    * 初始化 runtime（Parser.init 幂等，失败可重试）并构建引擎。
    * onInitProgress（可选，Task 9 spike 取证面）：init 各阶段打点回调，仅用于定位
-   * init 静默挂起（如 wasm fetch 不归）——缺省不传即零打点零开销，行为与既有签名一致。
+   * init 静默挂起（如 wasm fetch 不归）——缺省不传即零打点零开销，行为与既有签名一致
+   * （可选调用的短路语义保证 report 缺位时 runtimeWasmDetail 不执行）。
    * assets 打点位于两形态（grammars 直传表 / grammarsDir readManifest）合流、queries 就绪后，
    * 两形态均被覆盖。detail 的 queries=N 为静态资产映射大小：Node 目录扫描/虚拟映射如实计数；
    * 浏览器端走 queriesBase 惰性按语言 fetch（assets 映射恒空），此处恒为 queries=0 非异常。
+   * Task 4 细口径：parser-init/ready 帧附 wasm resource timing（runtimeWasmDetail，
+   * 查不到条目时 detail 省略、帧仍发）；query 逐文件打点经 onQueryLoaded 透传
+   * remoteQueryLoader，折算为 query-loaded 帧（仅 queriesBase 形态，见字段注）。
    */
   static async create(
     opts: EngineOptions & { onInitProgress?: (p: EngineInitProgress) => void }
@@ -138,7 +182,7 @@ export class TreeSitterEngine {
       });
     }
     await initPromise;
-    report?.({ stage: 'parser-init' });
+    report?.({ stage: 'parser-init', ...optDetail(runtimeWasmDetail()) });
 
     let grammarTable = opts.grammars;
     if (!grammarTable) {
@@ -153,7 +197,9 @@ export class TreeSitterEngine {
           : normalizeVirtualQueries(opts.queriesDir);
     report?.({ stage: 'assets', detail: `queries=${assets.size ?? 0}` });
     const engine = new TreeSitterEngine(assets, grammarTable, opts);
-    report?.({ stage: 'ready' });
+    // ready 帧同补 wasm timing（Task 4 细口径）：条目若在 parser-init 时点尚未入 buffer，
+    // 此处兜底再读一次——两帧独立取值，取到即附
+    report?.({ stage: 'ready', ...optDetail(runtimeWasmDetail()) });
     return engine;
   }
 
@@ -340,8 +386,11 @@ function shebangLanguage(text: string): string | null {
 /**
  * fetch 版查询来源（浏览器 Worker 端）：按需请求 `${base}${lang}/highlights.scm` 与 `injections.scm`。
  * 目录布局与 assets/queries 一致；请求结果（含 404 的 null）按语言缓存，语言不变则只请求一次。
+ * onLoaded（可选，Task 4 细口径）：每份文件 fetch 完成上报一次（`${lang}/${name}`，含
+ * 404/SPA 兜底缺失/网络失败——帧语义是「fetch 已完成」，缺席才是悬挂）；缺省 undefined
+ * 零调用（非 debug 链路不注入，行为与既有签名逐字节一致）。
  */
-function remoteQueryLoader(base: string): AsyncQuerySource {
+function remoteQueryLoader(base: string, onLoaded?: (file: string) => void): AsyncQuerySource {
   const cache = new Map<string, Promise<QueryFile | null>>();
   return (lang) => {
     let p = cache.get(lang);
@@ -358,6 +407,9 @@ function remoteQueryLoader(base: string): AsyncQuerySource {
           return await res.text();
         } catch {
           return undefined;
+        } finally {
+          // 逐文件打点：finally 保证命中/缺失/异常三路恰好一帧
+          onLoaded?.(`${lang}/${name}`);
         }
       };
       p = Promise.all([read('highlights.scm'), read('injections.scm')]).then(([highlights, injections]) =>

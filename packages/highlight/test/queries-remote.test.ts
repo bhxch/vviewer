@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import http from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { TreeSitterEngine, type GrammarTable } from '../src/core-parse';
+import { TreeSitterEngine, type EngineInitProgress, type GrammarTable } from '../src/core-parse';
+import { initWorker } from '../src/worker';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const staticDir = path.join(here, '../../../apps/web/static');
@@ -137,6 +138,110 @@ describe.skipIf(!grammarAssetsReady)('TreeSitterEngine（SUSP-06：manifest 剥�
       engine?.dispose();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  }, 30_000);
+});
+
+/**
+ * init 探针细口径（deferred 清偿 Task 4，spec §8）：debug 链路的 query 逐文件帧与
+ * wasm resource timing。query-loaded 用既有 http 服务形态驱动真实帧序列（fetch →
+ * remoteQueryLoader → onQueryLoaded → initWorker 折算，全真实代码，别名规范化后按
+ * bash 计）；wasm resource timing 在 jsdom（performance 无 getEntriesByType，真实
+ * resource 条目仅浏览器产生）以「注入 mock getEntriesByType」驱动命中分支、以
+ * 「无条目/无 API」驱动省略分支——真实浏览器形态由 e2e ?vvWorkerDebug=1 观察。
+ */
+describe.skipIf(!grammarAssetsReady)('init 探针细口径（debug：query 逐文件帧 + wasm resource timing）', () => {
+  it('debug 回调下：init 四阶段后逐文件 query-loaded（真实 http fetch，detail 为目录布局相对名）', async () => {
+    const manifest = JSON.parse(readFileSync(path.join(staticDir, 'grammars', 'manifest.json'), 'utf8')) as {
+      grammars: GrammarTable;
+    };
+    const server = http.createServer((req, res) => {
+      const url = (req.url ?? '/').split('?')[0]!;
+      const m = /^\/queries\/(.+)$/.exec(url);
+      const file = m ? path.join(queriesAssetDir, m[1]!) : path.join(staticDir, url);
+      try {
+        const body = readFileSync(file);
+        res.writeHead(200, { 'content-type': url.endsWith('.scm') ? 'text/plain' : 'application/octet-stream' });
+        res.end(body);
+      } catch {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    // initWorker 真实链路：debug 回调注入时派生 onQueryLoaded → query-loaded 事件
+    const events: EngineInitProgress[] = [];
+    const handler = await initWorker(
+      {
+        queriesBase: `http://127.0.0.1:${port}/queries/`,
+        grammars: manifest.grammars,
+        grammarsDir: path.join(staticDir, 'grammars'),
+        runtimeDir: staticDir,
+      },
+      (p) => events.push(p),
+    );
+    try {
+      // init 四阶段依序（探针通道本身不因细口径改变）
+      expect(events.slice(0, 4).map((e) => e.stage)).toEqual(['wasm-fetch', 'parser-init', 'assets', 'ready']);
+      // 首次高亮触发 query 资产远程加载：每份文件 fetch 完成一帧（sh 别名规范化为 bash；
+      // bash 无 inherits，恰好两文件）。并发完成顺序不保证，按集合比较
+      const r = await handler({ id: 1, text: 'echo "hello"', lang: 'sh' });
+      expect(r.ok).toBe(true);
+      expect(events.filter((e) => e.stage === 'query-loaded').map((e) => e.detail).sort()).toEqual([
+        'bash/highlights.scm',
+        'bash/injections.scm',
+      ]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 30_000);
+
+  it('resource 条目命中（mock 注入）：parser-init/ready 帧附 name/duration/transferSize', async () => {
+    const entry = { name: 'https://assets.example.com/vv/tree-sitter.wasm', duration: 12.25, transferSize: 5678 };
+    const getEntriesByType = vi.fn(() => [entry]);
+    // jsdom 的 performance 无 getEntriesByType：原型链保留既有能力，仅注入该方法的替身
+    vi.stubGlobal(
+      'performance',
+      Object.assign(Object.create(Object.getPrototypeOf(performance)), performance, { getEntriesByType }),
+    );
+    try {
+      const events: EngineInitProgress[] = [];
+      const engine = await TreeSitterEngine.create({
+        queriesDir: queriesAssetDir,
+        grammarsDir: path.join(staticDir, 'grammars'),
+        runtimeDir: staticDir,
+        onInitProgress: (p) => events.push(p),
+      });
+      engine.dispose();
+      // 既有帧形态不变（wasm-fetch 的 runtimeDir detail）
+      expect(events[0]).toStrictEqual({ stage: 'wasm-fetch', detail: `runtimeDir=${staticDir}` });
+      const parserInit = events.find((e) => e.stage === 'parser-init');
+      const ready = events.find((e) => e.stage === 'ready');
+      // 三字段齐备（Task 4 细口径：wasm 加载 resource timing）
+      expect(parserInit?.detail).toContain('tree-sitter.wasm');
+      expect(parserInit?.detail).toContain('duration=12.25ms');
+      expect(parserInit?.detail).toContain('transfer=5678B');
+      // ready 帧同补：独立再读一次 buffer，取到同一条目
+      expect(ready?.detail).toBe(parserInit?.detail);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }, 30_000);
+
+  it('resource 条目缺失（buffer 清空/jsdom 无此 API）：detail 省略但 parser-init/ready 帧仍发', async () => {
+    // 本环境即 jsdom：performance.getEntriesByType 缺位（或 Node perf 下无匹配条目），
+    // 读取分支静默容错——帧不缺席、零 detail 键（deferred 卫生：非 detail: undefined）
+    const events: EngineInitProgress[] = [];
+    const engine = await TreeSitterEngine.create({
+      queriesDir: queriesAssetDir,
+      grammarsDir: path.join(staticDir, 'grammars'),
+      runtimeDir: staticDir,
+      onInitProgress: (p) => events.push(p),
+    });
+    engine.dispose();
+    expect(events.map((e) => e.stage)).toEqual(['wasm-fetch', 'parser-init', 'assets', 'ready']);
+    expect(events[1]).toStrictEqual({ stage: 'parser-init' });
+    expect(events[3]).toStrictEqual({ stage: 'ready' });
   }, 30_000);
 });
 
