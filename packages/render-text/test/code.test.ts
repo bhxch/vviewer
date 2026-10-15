@@ -2563,4 +2563,37 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     }
     handle.destroy();
   });
+
+  // 流式硬化 Task 3：实例级 AbortController（DEG-08 排队根因的修复面）——destroy
+  // 即取消全部在飞块读；abort 产生的 reject 是取消而非读失败，catch 静默（闩不动、
+  // 不打印）。controller 归实例内部，测试只观测 ctx.read 收到的 signal。
+  it('destroy 取消在飞读：signal aborted，泵 catch 静默（continueFailed 闩不置位）', async () => {
+    stubResizeObserver();
+    const debugSpy = vi.spyOn(console, 'debug');
+    const content = enc(codeLines(1280)); // head 8KB 部分块：首块须整块重拉（读闸挂起供 destroy 取消）
+    let sawSignal: AbortSignal | undefined;
+    const ctx: StreamCtx = {
+      size: 5 * WINDOW_BLOCK,
+      head: content.slice(0, 8192),
+      read: (r, signal) => {
+        void r;
+        sawSignal = signal;
+        return new Promise((resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+        });
+      }
+    };
+    const host = newHost();
+    const inst = renderCode(content.slice(0, 8192), host, { ctx, ext: 'js', highlight: false });
+    await vi.waitFor(() => expect(sawSignal).toBeDefined(), { timeout: 2_000 });
+    inst.destroy();
+    // start() 首拉面随 abort reject——直呼 renderCode 无 whenReady 消费方，显式吞掉
+    // 防 unhandled rejection（生产面由 codeRenderer.render await 承接读取失败面）
+    (inst as { whenReady?: Promise<void> }).whenReady?.catch(() => {});
+    // 断言 1：destroy 后实例持有的 signal 立即 aborted（不等读自然结束）
+    await vi.waitFor(() => expect(sawSignal!.aborted).toBe(true), { timeout: 2_000 });
+    // 断言 2：泵 catch 静默——不打印「后台索引泵拉块失败」（abort ≠ 读失败）
+    expect(debugSpy).not.toHaveBeenCalledWith(expect.stringContaining('后台索引泵拉块失败'), expect.anything());
+    debugSpy.mockRestore();
+  });
 });

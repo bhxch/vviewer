@@ -572,7 +572,12 @@ async function renderJsonlWindowed(
   det: Detection,
   downgrade?: JsonlWindowedDowngrade
 ): Promise<RenderedInstance & { getMeta(): CodeFileMeta }> {
-  const bs = createBlockStream(ctx, WINDOW_BLOCK_BYTES, { maxBlocks: WINDOW_STREAM_MAX_BLOCKS });
+  // 实例级取消信号（code.ts 同款，流式硬化 Task 3）：destroy 时取消全部在飞块读
+  const readAbort = new AbortController();
+  const bs = createBlockStream(ctx, WINDOW_BLOCK_BYTES, {
+    maxBlocks: WINDOW_STREAM_MAX_BLOCKS,
+    signal: readAbort.signal
+  });
   const index: JsonlIndexState = createJsonlIndex(JSONL_OVERSIZE_LINE_BYTES);
   // BOM 剥离（T2→T3 指令①）：恒在文件头=块 0 首，无跨块问题；剥离后索引偏移为
   // 逻辑字节空间，文件字节 = 逻辑偏移 + bomLen
@@ -743,6 +748,7 @@ async function renderJsonlWindowed(
         try {
           for (const b of targets) await bs.ensureBlock(b);
         } catch (err) {
+          if (readAbort.signal.aborted) return; // destroy 取消：静默，闩不动、不回填待办（code.ts 同款）
           for (const b of targets) pendingReload.add(b); // 未完成块回待办（占位卡维持）
           reloadFailed = true;
           console.debug('[jsonl] 回看重拉失败，已停机（滚动后重试）', err);
@@ -762,6 +768,7 @@ async function renderJsonlWindowed(
       try {
         await pullBlock();
       } catch (err) {
+        if (readAbort.signal.aborted) return; // destroy 取消：静默，闩不动（code.ts 同款）
         continueFailed = true; // 停机：杜绝「失败→refresh 重评→仍近尾部→再失败」活锁
         console.debug('[jsonl] 流式续读失败，已停机（滚动后重试）', err);
       }
@@ -836,6 +843,7 @@ async function renderJsonlWindowed(
   // 面重复移除幂等无害
   const ownDestroy = instance.destroy;
   instance.destroy = () => {
+    readAbort.abort(); // 在飞块读即时取消（code.ts 同款：DEG-08 排队根因的修复面）
     fullInst?.destroy();
     ownDestroy();
   };

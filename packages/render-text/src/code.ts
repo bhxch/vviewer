@@ -1213,7 +1213,11 @@ function renderCodeWindowed(
   // 块流 + 行索引 + 文本窗口（Task 1/2/3 公共基座）：索引在原始 UTF-8 字节上增量
   // 推进（不解码）；行文本经块解码缓存切片/跨块字节域拼装。maxLineBytes=Infinity：
   // code 无逐行巨行防护概念（超限防线是整流级 STREAM_MAX_BYTES，非逐行）
-  const bs = createBlockStream(ctx, CODE_WINDOW_BLOCK_BYTES, { maxBlocks: CODE_STREAM_MAX_BLOCKS });
+  const readAbort = new AbortController(); // 实例级：destroy 时取消全部在飞块读
+  const bs = createBlockStream(ctx, CODE_WINDOW_BLOCK_BYTES, {
+    maxBlocks: CODE_STREAM_MAX_BLOCKS,
+    signal: readAbort.signal
+  });
   const index = createCodeIndex(Number.POSITIVE_INFINITY);
   const win = createTextWindow({
     blockSize: CODE_WINDOW_BLOCK_BYTES,
@@ -1687,6 +1691,7 @@ function renderCodeWindowed(
         try {
           for (const b of targets) await bs.ensureBlock(b);
         } catch (err) {
+          if (readAbort.signal.aborted) return; // destroy 取消：静默，闩不动、不回填待办（spec §3.4）
           for (const b of targets) pendingReload.add(b); // 未完成块回待办（占位行维持）
           reloadFailed = true;
           console.debug('[code] 回看重拉失败，已停机（滚动后重试）', err);
@@ -1706,6 +1711,7 @@ function renderCodeWindowed(
       try {
         await pullBlock();
       } catch (err) {
+        if (readAbort.signal.aborted) return; // destroy 取消：静默，闩不动（spec §3.4）
         continueFailed = true; // 停机：杜绝「失败→refresh 重评→仍近尾部→再失败」活锁
         console.debug('[code] 流式续读失败，已停机（滚动后重试）', err);
       }
@@ -1770,6 +1776,7 @@ function renderCodeWindowed(
       try {
         await pullBlock();
       } catch (err) {
+        if (readAbort.signal.aborted) return; // destroy 取消：静默，闩不动（spec §3.4）
         continueFailed = true; // 与滚动续读同口径：停机闩防活锁，用户滚动动作解除
         console.debug('[code] 后台索引泵拉块失败，已停机（滚动后重试）', err);
       }
@@ -2134,6 +2141,7 @@ function renderCodeWindowed(
         try {
           await pullBlock();
         } catch (err) {
+          if (readAbort.signal.aborted) return acc; // destroy 取消：静默，闩不动（spec §3.4）
           continueFailed = true; // 与滚动续读同口径：停机闩，用户滚动动作解除
           lastScanComplete = false; // 同键重搜即用户动作：解除闩后续扫（见 search）
           console.debug('[code] 搜索扫描续读失败，已停机（返回已得部分结果）', err);
@@ -2155,6 +2163,7 @@ function renderCodeWindowed(
       // 项 1：降级产物（全量重渲实例）随宿主一并销毁（ViewerPane 只持本 handle）
       if (fullInst !== null) fullInst.destroy();
       destroyed = true;
+      readAbort.abort(); // 在飞块读即时取消（DEG-08 排队根因的修复面）
       if (pumpTimer !== null) clearTimeout(pumpTimer); // 后台索引泵可取消（§4.3）
       pumpTimer = null;
       scanSeq += 1; // 在飞后台扫描令牌失效（下一检查点退出，部分结果收场）

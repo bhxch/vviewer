@@ -944,4 +944,48 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
     expect(inst.getMeta().size).toBe(content.length); // 项 D：降级后转投全量字节（旧底座为判脏前缀）
     inst.destroy();
   });
+
+  // 流式硬化 Task 3（code.ts 同款）：实例级 AbortController——destroy 即取消在飞
+  // 块读；abort 产生的 reject 是取消而非读失败，续读 catch 静默（闩不动、不打印）。
+  // jsonl 无后台泵/扫描，catch 面即 maybeContinue 的续读/回看重拉两处。controller
+  // 归实例内部，测试只观测 ctx.read 收到的 signal。
+  it('destroy 取消在飞读：signal aborted，续读 catch 静默（continueFailed 闩不置位）', async () => {
+    stubResizeObserver();
+    const debugSpy = vi.spyOn(console, 'debug');
+    const text = padLines(1200, 1500); // ≈1.8MB ≈ 7 块：首屏 2 块后仍有大量块可拉
+    const content = enc(text);
+    const calls: RangeCall[] = [];
+    let sawSignal: AbortSignal | undefined;
+    const ctx: StreamCtx = {
+      size: null,
+      head: content.slice(0, 8192),
+      read: (r, signal) => {
+        calls.push({ start: r.start, end: r.end });
+        sawSignal = signal;
+        if (r.start === 2 * BLOCK) {
+          // 块 2（滚动续读首块）挂起在飞：destroy 时经 signal 取消（首屏两块照常返回
+          // ——render 须先 resolve 才有实例可 destroy）
+          return new Promise((resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+          });
+        }
+        return Promise.resolve(content.slice(r.start, r.end + 1));
+      }
+    };
+    const host = mount();
+    // 局部 det：describe 级共享 det 会被前序用例的 redetectWithFull 就地翻转
+    //（encoding→gb18030 不恢复），沿用会误入「非 UTF-8 全量补拉」入口（项 D 同款）
+    const localDet: Detection = { ext: 'jsonl', encoding: 'utf-8' };
+    const inst = (await jsonlRenderer.render(content.slice(0, 8192), host, source, localDet, ctx)) as JsonlInstance;
+    expect(calls.length).toBe(2); // 首屏恰前两块（自校验非空转）
+    scrollToBottom(host); // 触发续读：块 2 read 在飞挂起
+    await vi.waitFor(() => expect(calls.length).toBe(3));
+    inst.destroy();
+    // 断言 1：destroy 后实例持有的 signal 立即 aborted（在飞读被取消，不等自然结束）
+    await vi.waitFor(() => expect(sawSignal!.aborted).toBe(true), { timeout: 2_000 });
+    await new Promise((r) => setTimeout(r, 20)); // abort reject 落地：续读 catch 静默路径执行完
+    // 断言 2：续读 catch 静默——不打印「流式续读失败」（abort ≠ 读失败）
+    expect(debugSpy).not.toHaveBeenCalledWith(expect.stringContaining('流式续读失败'), expect.anything());
+    debugSpy.mockRestore();
+  });
 });
