@@ -2037,6 +2037,23 @@ function renderCodeWindowed(
     scanBar = null;
   }
 
+  /** SUSP-01 fix wave：自缓存重建行级命中索引（lastMatches → searchHitsByLine）。
+   * 退出搜索清空视觉索引（视觉清理面）而短路缓存保留——同词短路（全量重建）与
+   * 断点续扫（补 line < maxLine，与 runScan 截断删 >= startFrom 精确互补）各自经此
+   * 恢复 mark/行级背景（fillRows 唯一消费面）。lastMatches 按扫描行序升序；已有
+   * 索引（非退出态）或空命中集不动，返回是否有重建（调用方据以 refresh）。 */
+  function rebuildSearchHitsFromCache(maxLine = Number.POSITIVE_INFINITY): boolean {
+    if (searchHitsByLine.size > 0 || lastMatches.length === 0) return false;
+    searchHitsByLine = new Map();
+    for (const m of lastMatches) {
+      if (m.line >= maxLine) break;
+      const arr = searchHitsByLine.get(m.line);
+      if (arr) arr.push({ start: m.start, end: m.end });
+      else searchHitsByLine.set(m.line, [{ start: m.start, end: m.end }]);
+    }
+    return true;
+  }
+
   /** 后台全文扫描主循环：返回扫描终止时已得的命中（取消/停机 = 部分结果）。
    * startFrom 为断点续扫起点（项 2：停机收场后同 query 重搜自游标继续）；
    * 收场形态回写 lastScanComplete/lastScanCursor（alive 守卫——取消方已重置，
@@ -2248,15 +2265,7 @@ function renderCodeWindowed(
       // 分支）——同词重搜短路时自 lastMatches 重建（零 IO），词级 mark/行级背景
       // 随缓存命中集复现
       if (sameKey && lastScanComplete) {
-        if (searchHitsByLine.size === 0 && lastMatches.length > 0) {
-          searchHitsByLine = new Map();
-          for (const m of lastMatches) {
-            const arr = searchHitsByLine.get(m.line);
-            if (arr) arr.push({ start: m.start, end: m.end });
-            else searchHitsByLine.set(m.line, [{ start: m.start, end: m.end }]);
-          }
-          scroller?.refresh(true);
-        }
+        if (rebuildSearchHitsFromCache()) scroller?.refresh(true);
         return Promise.resolve(lastMatches);
       }
       const mySeq = ++scanSeq; // 令牌失效：旧扫描在下一检查点退出（新搜索/退出搜索取消）
@@ -2291,6 +2300,11 @@ function renderCodeWindowed(
         // 停机收场后同 query 重搜：续扫。重搜即用户动作，解除续读停机闩（「下次
         // 用户动作才重试」）；命中集与游标保持，扫描自断点合并推进
         continueFailed = false;
+        // SUSP-01 fix wave：扫描中途退出→同词重搜续扫路径——退出清空了行级命中
+        // 索引而 lastAcc/lastScanCursor 保留，runScan 截断只删 >= startFrom，游标前
+        // 既有命中若不在此重建，计数/gotoMatch 仍报告它们而行内 mark/行级背景消失
+        // （且续扫产出新命中后索引非空，无自愈）。补 line < lastScanCursor：
+        if (rebuildSearchHitsFromCache(lastScanCursor)) scroller?.refresh(true);
       }
       const promise = runScan(lastAcc, query, caseSensitive, mySeq, lastScanCursor).catch(
         (err: unknown) => {

@@ -2107,6 +2107,56 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     handle.destroy();
   });
 
+  // SUSP-01 fix wave（终局评审发现的跨任务交互回归）：扫描在飞时退出 → 同词重搜走
+  // 续扫（sameKey && !lastScanComplete）——退出清空了行级命中索引，而 runScan 截断
+  // 只删 >= startFrom，游标前既有命中留在 lastMatches 却不进 searchHitsByLine：
+  // 计数/gotoMatch 报告它们、行内 mark/行级背景却消失（fillRows 唯一消费面）。
+  // 修复后续扫分支自缓存重建 line < lastScanCursor 的条目（与截断语义精确互补）。
+  it('SUSP-01 修复：扫描中途退出→同词重搜续扫——游标前命中行 mark/行级背景保留', async () => {
+    stubResizeObserver();
+    const lines: string[] = [];
+    for (let i = 0; i < 3400; i++) {
+      const head = i === 5 ? 'zzneedle early ' : i === 3300 ? 'zzneedle deep ' : `row ${i} `;
+      lines.push(head + 'p'.repeat(Math.max(0, 1499 - head.length)) + '\n'); // 每行恰 1500B
+    }
+    const content = enc(lines.join('')); // ≈ 5.1MB ≈ 20 块（行 5 在块 0，行 3300 在块 18）
+    let readCount = 0;
+    let block0Reads = 0;
+    let releaseTail: (() => void) | null = null;
+    const tailGate = new Promise<void>((res) => {
+      releaseTail = res;
+    });
+    const ctx: StreamCtx = {
+      size: content.length,
+      head: content.slice(0, 8192),
+      read: async (r) => {
+        readCount += 1;
+        if (r.start === 0) block0Reads += 1;
+        if (r.start >= 2 * WINDOW_BLOCK) await tailGate; // 块 2 起挂闸：首扫只覆盖块 0/1
+        return content.slice(r.start, r.end + 1);
+      }
+    };
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });
+    pausePump(handle); // 冻结后台泵：前向读全部由扫描自驱动，读计数确定
+    await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
+    const first = handle.search('zzneedle'); // 在飞：块 0/1 已扫（行 5 已入命中集），块 2 闸前挂起
+    await vi.waitFor(() => expect(handle.getMeta().lines).toBeGreaterThan(300)); // 块 0/1 已入索引
+    const readsAtExit = readCount;
+    handle.search(''); // 扫描中途退出：令牌失效 + 视觉清理，短路缓存（命中集/游标）保留
+    expect(host.querySelector('[data-line="5"] mark.vv-search-hit')).toBeNull(); // 视觉清理照旧
+    releaseTail!(); // 放行在飞读：旧扫描下一检查点令牌失效退出（部分结果收场）
+    expect((await first).map((m) => m.line)).toEqual([5]); // 取消 = 部分结果语义
+    const second = await handle.search('zzneedle'); // 同词重搜：sameKey && !complete → 断点续扫
+    expect(second.map((m) => m.line)).toEqual([5, 3300]); // 游标前命中保留 + 续扫新命中
+    expect(readCount).toBeGreaterThan(readsAtExit); // 续扫真实发生（非短路）
+    expect(block0Reads).toBe(1); // 游标前块 0 不重读（续扫自 lastScanCursor 推进）
+    // Fix 1 断言核心：游标前既有命中的视觉不丢——mark 与行级背景在 fillRows 产物中
+    expect(host.querySelector('[data-line="5"] mark.vv-search-hit')).not.toBeNull();
+    expect(host.querySelector('[data-line="5"]')?.classList.contains('vv-search-hit-line')).toBe(true);
+    handle.destroy();
+  });
+
   // SUSP-02（e2e 富化定档 confirmed-design UX 候选落地）：后台全文扫描逐块喂入时，
   // 块表 LRU（16×256KB）曾把视口所在块挤出——视口行经 lineAvailable 占位化 +
   // pendingReload 回看重拉（SCAN-08 一次续扫内 ≥2 次，可见闪烁）。修后 runScan
