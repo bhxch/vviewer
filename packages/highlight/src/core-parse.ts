@@ -262,6 +262,10 @@ export class TreeSitterEngine {
   }
 
   private async doPrepare(lang: string): Promise<PreparedLanguage | null> {
+    // SUSP-06：条目判定前置——grammar 缺失时零 query 资产请求（此前 expandQueryAsync
+    // 先行，同源 manifest 剥离条目时 /queries/** 空打）
+    const entry = this.resolveGrammarEntry(lang);
+    if (!entry) return null;
     let expanded: ExpandedQuery | null;
     if (this.remoteQueries) {
       expanded = await expandQueryAsync(this.remoteQueries, lang);
@@ -269,8 +273,6 @@ export class TreeSitterEngine {
       expanded = expandQuery(this.assets, lang);
     }
     if (!expanded) return null;
-    const entry = this.resolveGrammarEntry(lang);
-    if (!entry) return null;
     const language = await Language.load(joinPath(entry.base ?? this.grammarsBase, entry.file));
     const toQuery = (scm: string): Query | null => {
       if (scm.trim() === '') return null;

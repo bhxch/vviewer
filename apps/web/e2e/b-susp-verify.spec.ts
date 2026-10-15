@@ -53,8 +53,9 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  *   滚动零新增
  * - SUSP-05：900KB 非块对齐 jsonl（≤1MB 全量直读路径）恰 2 请求：无 Range 全量
  *   read + tail 部分块整块重拉 bytes=786432-921599
- * - SUSP-06：manifest 无 java 条目仍发起 /queries/java/** 空打（≥1）且 java.wasm
- *   零请求（doPrepare 先 expand 后 resolve 的执行顺序实证）
+ * - SUSP-06（已优化落地，探针随落地翻转）：manifest 无 java 条目零 /queries/java/**
+ *   请求（doPrepare 条目判定前置），java.wasm 亦零请求，java 降级 hljs 不变
+ *   （原「/queries/** 空打 ≥1」现状存档于 susp-verification.md §SUSP-06）
  * - SUSP-07：/api/tree 500 → 标签行在场、树区零行（失败隔离）、状态栏提示
  *   「加载失败」（BUG-24 通道——confirmed-bug 修复后翻转，原静默现状存档于
  *   susp-verification.md §SUSP-07）
@@ -537,7 +538,7 @@ test('SUSP-05：≤1MB 全量直读路径在 size 非块对齐时恰 2 请求（
 
 // ---------------------------------------------------------------- SUSP-06
 
-test('SUSP-06：语言不在合并 manifest 仍发起该语言 /queries/** 空打——java.wasm 零请求对照', async ({ page, request }) => {
+test('SUSP-06（探针翻转）：语言不在合并 manifest 零该语言 /queries/** 请求——java.wasm 零请求 + 降级 hljs 对照', async ({ page, request }) => {
   test.setTimeout(60_000);
   // 计数预挂（goto 前）：/queries/java/** 与 java.wasm 的响应计数（404/HTML 兜底均计）
   const queryHits: string[] = [];
@@ -579,13 +580,13 @@ test('SUSP-06：语言不在合并 manifest 仍发起该语言 /queries/** 空�
   // doPrepare 已跑且失败兜底（manifest 无 java 条目 → 整语言降级 hljs）
   await expect(page.locator('.vv-statusbar')).toContainText('高亮: hljs 兜底', { timeout: 30_000 });
 
-  // 记录的现状（core-parse.ts:266-273 执行顺序实证）：doPrepare 先 expandQueryAsync
-  // 后 resolveGrammarEntry——查询 .scm 空打发生（≥1），而 java.wasm 零请求（manifest
-  // 无条目短路）。若实跑为零空打 = SUSP-06 未复现（顺序推断有误）
+  // SUSP-06 修复后翻转（core-parse.ts doPrepare 条目判定前置）：manifest 无 java
+  // 条目时 resolveGrammarEntry 先行短路，零 /queries/java/** 请求；java.wasm 仍零
+  // 请求（对照面），整语言降级 hljs 行为不变。若实跑 ≥1 空打 = 顺序回归（expand 又先行）
   expect(
-    queryHits.length,
-    `/queries/java/** 空打应发生（≥1），实得 ${JSON.stringify(queryHits)}`
-  ).toBeGreaterThanOrEqual(1);
+    queryHits,
+    `manifest 无 java 条目不得发起 /queries/java/** 请求（SUSP-06 条目判定前置），实得 ${JSON.stringify(queryHits)}`
+  ).toEqual([]);
   expect(
     wasmHits,
     `manifest 无 java 条目不得发起 java.wasm 请求（resolveGrammarEntry 短路面），实得 ${JSON.stringify(wasmHits)}`

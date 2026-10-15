@@ -83,6 +83,60 @@ describe.skipIf(!grammarAssetsReady)('TreeSitterEngine（queriesBase fetch 版�
 });
 
 /**
+ * SUSP-06（doPrepare 顺序微优化）：同源 manifest 剥离条目时，highlight 该语言应在
+ * resolveGrammarEntry 短路——零 /queries/** 请求（修前 expandQueryAsync 先行，
+ * /queries/java/{highlights,injections}.scm 空打 ≥1），结果仍 ok:false（「语言 java
+ * 无可用 grammar 或查询」）→ 调用方 hljs 兜底不变。剥离手法沿用 e2e GRF-01/SUSP-06
+ * 同款：读真实清单后删条目，防硬编码漂移。
+ */
+describe.skipIf(!grammarAssetsReady)('TreeSitterEngine（SUSP-06：manifest 剥离条目 → 条目判定前置零 query 请求）', () => {
+  it('grammar 条目缺失时不发 query 资产请求（resolveGrammarEntry 前置）', async () => {
+    const manifest = JSON.parse(readFileSync(path.join(staticDir, 'grammars', 'manifest.json'), 'utf8')) as {
+      grammars: GrammarTable;
+    };
+    delete manifest.grammars.java;
+    // 计数先行：所有请求无论命中与否都记录（断言面是「发没发」，不是「有没有」）
+    const queryHits: string[] = [];
+    const server = http.createServer((req, res) => {
+      const url = (req.url ?? '/').split('?')[0]!;
+      queryHits.push(url);
+      const m = /^\/queries\/(.+)$/.exec(url);
+      const file = m ? path.join(queriesAssetDir, m[1]!) : path.join(staticDir, url);
+      try {
+        const body = readFileSync(file);
+        res.writeHead(200, { 'content-type': 'text/plain' });
+        res.end(body);
+      } catch {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    const engine = await TreeSitterEngine.create({
+      queriesBase: `http://127.0.0.1:${port}/queries/`,
+      grammars: manifest.grammars,
+      grammarsDir: path.join(staticDir, 'grammars'),
+      runtimeDir: staticDir,
+    });
+    try {
+      const r = await engine.highlight('x', 'java');
+      expect(r.ok).toBe(false);
+      if (r.ok) return;
+      expect(r.error).toContain('语言 java 无可用 grammar 或查询');
+      const javaHits = queryHits.filter((u) => u.includes('/queries/java/'));
+      expect(
+        javaHits,
+        `条目缺失不得发起 /queries/java/** 请求（修前 expandQueryAsync 先行空打 ≥1），实得 ${JSON.stringify(javaHits)}`,
+      ).toEqual([]);
+    } finally {
+      engine.dispose();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 30_000);
+});
+
+/**
  * SPA-fallback 防御（终审 C1，双层修之前端层回归锚）：
  * 静态服务器对缺失查询文件以 200 index.html 兜底（content-type text/html）时，
  * 不得把 HTML 误载为查询文本——否则该语言 Query 编译抛错，整语言降级 hljs。
