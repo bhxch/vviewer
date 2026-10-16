@@ -978,6 +978,90 @@ describe('renderCode lineAtOffset（deferred 清偿 Task 5：仅全量模式）'
   });
 });
 
+describe('renderCode lineAtByteOffset（错误身份与字节映射 Task 4：字节域行索引）', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+    vi.unstubAllGlobals();
+  });
+
+  function stubResizeObserver(): void {
+    vi.stubGlobal('ResizeObserver', class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    });
+  }
+
+  function byteAtOf(handle: ReturnType<typeof renderCode>): ((o: number) => number) | undefined {
+    return (handle as { lineAtByteOffset?: (o: number) => number }).lineAtByteOffset;
+  }
+
+  it('CRLF：\\r\\n 记 2 字节单终结符，行号与字符域一致', () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(enc('ab\r\ncd\r\n'), host, { highlight: false });
+    const f = byteAtOf(handle);
+    expect(f, '全量模式 handle 应提供 lineAtByteOffset').toBeTypeOf('function');
+    if (f === undefined) return;
+    expect(f.call(handle, 0)).toBe(0);
+    expect(f.call(handle, 2)).toBe(0); // 恰在 \r 上：归本行
+    expect(f.call(handle, 4)).toBe(1); // \r\n 后 = 下一行起始（字节域 4）
+    expect(f.call(handle, 8)).toBe(2);
+    expect(f.call(handle, 99)).toBe(2); // 超尾钳末行
+    handle.destroy();
+  });
+
+  it('BOM：post-BOM 逻辑域（首行起算剥 3 字节，与 jsonl offsets 同基）', () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(enc('\uFEFFab\ncd\n'), host, { highlight: false });
+    const f = byteAtOf(handle);
+    if (f === undefined) return;
+    expect(f.call(handle, 0)).toBe(0); // BOM 后首字节 = 首行起始
+    expect(f.call(handle, 3)).toBe(1); // 'ab\n' 后
+    expect(f.call(handle, 6)).toBe(2);
+    handle.destroy();
+  });
+
+  it('多字节 UTF-8：字节偏移含 3 字节/汉字的行距（字符域近似的反例面）', () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(enc('中\n文\n'), host, { highlight: false });
+    const f = byteAtOf(handle);
+    if (f === undefined) return;
+    expect(f.call(handle, 0)).toBe(0);
+    expect(f.call(handle, 4)).toBe(1); // '中'=3 字节 + \n
+    expect(f.call(handle, 7)).toBe(1); // 恰在行尾 \n 上：归本行（行尾终结符归本行）
+    expect(f.call(handle, 8)).toBe(2); // trailing \n 后 = 末空串行伪起始（字节域 8）
+    handle.destroy();
+  });
+
+  it('lone \\r：终结记 1 字节（行号与字符域归一语义一致）', () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(enc('a\rb\nc'), host, { highlight: false });
+    const f = byteAtOf(handle);
+    if (f === undefined) return;
+    expect(f.call(handle, 2)).toBe(1);
+    expect(f.call(handle, 4)).toBe(2);
+    handle.destroy();
+  });
+
+  it('窗口流式模式缺席（鸭子探测 undefined，与 lineAtOffset 同裁决）', () => {
+    stubResizeObserver();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const bytes = enc('ab\ncd\n');
+    const handle = renderCode(bytes, host, { highlight: false, ctx: streamCtx({ size: bytes.length, content: bytes, head: bytes }) });
+    expect((handle as { lineAtByteOffset?: unknown }).lineAtByteOffset).toBeUndefined();
+    handle.destroy();
+  });
+});
+
 // ---------- 阶段 4：lazy 路径（>2MB 可视区 chunk 懒高亮） ----------
 
 describe('renderCode lazy 本地 chunk 管线', () => {

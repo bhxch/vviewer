@@ -174,6 +174,33 @@ export function buildLineOffsets(lines: string[]): number[] {
   return offsets;
 }
 
+/**
+ * 字节域行起始偏移（spec 2026-10-16 错误身份与字节映射 §4.5）：在原始 buffer 上扫
+ * 终结符记行起始——\r\n 单终结符记 2 字节、\n 记 1、lone \r 亦终结记 1（与字符域
+ * 归一语义的行号一致）；BOM 从偏移剔除（post-BOM 逻辑域，与 jsonl 索引 offsets
+ * 同基）。返回数组含末尾伪起始（trailing 终结符后的空串行），与 buildLineOffsets
+ * 的 split('\n') 语义对齐。lone \r 文件两域不可同时逐字节对齐（jsonl 记账不终结），
+ * 属已知边界（jsonl 内容按定义不含裸 \r 行尾）。
+ */
+export function buildByteLineOffsets(buffer: Uint8Array): number[] {
+  const bom = buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf ? 3 : 0;
+  const starts: number[] = [0];
+  let i = bom;
+  while (i < buffer.length) {
+    const b = buffer[i]!;
+    if (b === 0x0d) {
+      i += buffer[i + 1] === 0x0a ? 2 : 1;
+    } else if (b === 0x0a) {
+      i += 1;
+    } else {
+      i += 1;
+      continue;
+    }
+    starts.push(i - bom);
+  }
+  return starts;
+}
+
 /** 把 hljs 高亮 HTML 按行切分；跨行 span 在每行末尾全部闭合、下一行开头按原序重开 */
 export function splitHighlightedLines(html: string, lineCount: number): string[] {
   const out: string[] = new Array(lineCount).fill('');
@@ -595,12 +622,18 @@ export interface RenderCodeHandle {
   gotoMatch(index: number): void;
   /** 跳到指定行（0 起）并滚动至视口中部 + 行级临时高亮（BUG-09 全局搜索跳转；独立于搜索结果） */
   revealLine(line: number, col?: number): void;
-  /** 字节偏移 → 物理行号（deferred 清偿 Task 5，可选扩展）：全量模式 lineOffsets 二分
+  /** 字符偏移 → 物理行号（deferred 清偿 Task 5，可选扩展）：全量模式 lineOffsets 二分
    * （lineOf）。偏移口径=归一文本（BOM 已剥、CRLF→LF）的 UTF-16 字符偏移（与
    * buildLineOffsets 同源）；边界语义——offset 恰在行尾换行符上归本行（未达下一行
    * 起始）、超文件尾钳末行。仅全量模式提供（窗口模式无全量 lineOffsets，缺席）；
    * 消费方（jsonl 委托降级锚行映射）鸭子探测，缺席回退内容行号直传（向后兼容）。 */
   lineAtOffset?(offset: number): number;
+  /** 字节偏移 → 物理行号（spec 2026-10-16 错误身份与字节映射 §4.5，可选扩展）：与
+   * lineAtOffset 同款二分与边界语义（行尾终结符归本行、超尾钳末行），域为 post-BOM
+   * 逻辑字节偏移（\r\n 记 2 字节单终结符、\n 记 1、lone \r 终结记 1）——与 jsonl
+   * 索引 offsets 在 \r\n/\n 文件上逐字节同基，委托锚行映射的精确通道。仅全量模式
+   * 提供（窗口模式无全量索引，缺席）；消费方鸭子探测（三级回退首级）。 */
+  lineAtByteOffset?(offset: number): number;
 }
 
 /** renderCode 选项（双模式共用）：全量模式（现状）与窗口流式模式的差异全部经
@@ -646,6 +679,7 @@ export function renderCode(
   const text = new TextDecoder(enc, { fatal: false }).decode(buffer).replace(/\r\n?/g, '\n');
   const lines = buildLineIndex(text);
   const lineOffsets = buildLineOffsets(lines);
+  const byteLineOffsets = buildByteLineOffsets(buffer); // 字节域行索引（lineAtByteOffset 用，post-BOM）
   // 实际生效的高亮语言（与 start() 同一表达式、同步可预算）：getMeta 的 lang 取此
   // 单源——本地扩展名文件（无服务端 x-vv-lang、det.lang 为空）按 detectLanguage
   // 高亮后，状态栏/属性面板的语言段与实际引擎一致（评审③）
@@ -1111,6 +1145,10 @@ export function renderCode(
     // 边界语义见 RenderCodeHandle.lineAtOffset 注——行尾换行符归本行、超尾钳末行）
     lineAtOffset(offset: number) {
       return lineOf(lineOffsets, offset);
+    },
+    // 字节域行索引二分（域与边界语义见 RenderCodeHandle.lineAtByteOffset 注）
+    lineAtByteOffset(offset: number) {
+      return lineOf(byteLineOffsets, offset);
     }
   };
 
