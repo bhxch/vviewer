@@ -64,15 +64,12 @@ export class DispatchReadError extends Error { readonly cause?: unknown }
 /** 统一抛出形态（Task 1 既有约定的单源化） */
 export function abortReadError(): Error; // new DOMException('读取已取消', 'AbortError')
 
-/**
- * 错误分类：身份优先（isAbortError / DispatchReadError），ctx.signal.aborted 仅作
- * 状态兜底（非 AbortError 身份但上下文已取消的竞态，沿 dispatcher 现行 :384 语义）。
- * ctx 可省略（无 signal 可言的 catch 面，如 openAsAction）。
- */
-export function classifyDispatchError(
-  err: unknown,
-  ctx?: { signal?: AbortSignal | null }
-): DispatchErrorKind;
+/** 错误分类：纯身份判定（勘误：原设计曾含 ctx.signal.aborted 状态兜底，plan 阶段
+ * 核实 StreamCtx 无 signal 字段——signal 仅按读调用传递（types.ts:36），无承载面；
+ * 且六处收紧（Task 3）的既定裁决恰是「身份优先、弃 catch 时刻状态判定」，状态
+ * 兜底会重新引入「真实失败 + abort 竞态被误吞」的已修缺陷。dispatcher :384 的
+ * signal.aborted 检查留在读包装标注点原位不动，不进分类层。） */
+export function classifyDispatchError(err: unknown): DispatchErrorKind;
 ```
 
 经 `packages/core/src/index.ts` 导出。kind 集合刻意收窄为三类：'read' 维持 rethrow 语义
@@ -83,11 +80,11 @@ export function classifyDispatchError(
 - 删私有镜像 isAbortError 与本地 DispatchReadError，改从 errors.ts 导入。
 - 主 catch（现 :391-429）改 `switch (classifyDispatchError(err, { signal }))`：read →
   rethrow；abort → no-op 实例；generic → 错误卡片（现状不变）。
-- **retry catch（现 :167-173）**：`classifyDispatchError(err, { signal: ctx?.signal })` 为
-  abort → 静默 return（原错误卡片保留在屏，用户已取消则不重画）；generic → 现行为不变。
-  StreamCtx 携带 signal（流式硬化阶段 A 已贯穿），此处免费获得状态兜底。
+- **retry catch（现 :167-173）**：`classifyDispatchError(err)` 为 abort → 静默 return
+  （原错误卡片保留在屏，用户已取消则不重画）；read → 维持现状（catch 内无向上通道，
+  卡片消息照常更新，注释明示）；generic → 现行卡片重建不变。
 - **openAsAction catch（现 :138）**：abort → 静默 return（用户取消触发的重入失败不属
-  「重入失败」）；generic → 保持 console.error。openAsAction 无 ctx，仅身份判定。
+  「重入失败」）；generic → 保持 console.error。
 
 ### 4.3 单源迁移
 
@@ -129,8 +126,7 @@ tree 层三处 `throw new DOMException('读取已取消', 'AbortError')` 改 `th
 
 - dispatcher.test.ts：**新增 retry-abort 不上屏用例（现状红）**——重试 render reject
   AbortError → 不出新卡、原卡保留；generic 重试失败仍出卡（既有锚不翻转）。
-  classify 矩阵：AbortError 双形态 / DispatchReadError / signal.aborted 状态兜底 / 普通
-  Error → generic。
+  classify 矩阵：AbortError 双形态 / DispatchReadError / 普通 Error → generic。
 - code.test.ts：判定矩阵迁 core 单源 + identity 断言；lineAtByteOffset 字节域 describe——
   多字节汉字 / CRLF / BOM / lone `\r`（已知边界断言）四类夹具，含「现状直传漂行」的反例
   形态；lineAtOffset 字符版既有用例（:898-936）全数保持绿。
@@ -138,16 +134,17 @@ tree 层三处 `throw new DOMException('读取已取消', 'AbortError')` 改 `th
   多字节字符），锚行经 lineAtByteOffset 映射后 `revealArgs` 命中目标物理行；无 lineAtOffset
   回退用例（:1081-1106）保持绿（三级回退兼容）。
 - tree-signal.test.ts / 既有 abort 竞态用例（Task 3 Step 1 模板）保持绿。
-- 门禁：typecheck + svelte-check 0E0W、vitest 全量、cargo 全套件（tree 层改动涉 Rust 侧
-  消费面核查）、playwright 双通道既有锚零翻转。
+- 门禁：typecheck + svelte-check 0E0W、vitest 全量、playwright 默认通道既有锚零翻转
+  （本 spec 无 e2e 新增）；cargo 不涉及（tree/dispatch 层均为 TS，无 Rust 消费面）。
 
 ## 6. 风险与边界
 
 - 全量模式多一次 O(n) 扫描：仅全量模式构建（窗口模式本无此方法），大文件全量模式本就
   持有完整 buffer，可接受；不做惰性化（YAGNI）。
-- 状态兜底（signal.aborted）与「真实失败 + abort 竞态」的张力：Task 3 的裁决是**身份优先**
-  （真失败不误吞），分类层保持该优先级，signal 兜底仅在其他身份都不命中时生效——与
-  dispatcher :384 现行语义逐点等价，不引入新误吞面。
+- 勘误（plan 阶段，2026-10-16）：原设计的 classify 状态兜底（ctx.signal.aborted）撤销
+  ——StreamCtx 无 signal 承载字段（types.ts:36 仅 read 形参可携带），且与六处收紧
+  「身份优先、弃状态判定」裁决相抵（兜底会重吞「真实失败 + abort 竞态」这一 Task 3
+  已修缺陷）；dispatcher :384 的 signal 检查留在读包装标注点原位，不进分类层。
 - retry catch 引入 abort 过滤是**行为修复**（现状会把 AbortError 画回卡片），需在测试中
   锚定原卡保留语义，防止误伤「重试确实失败」的正路展示。
 
@@ -156,3 +153,5 @@ tree 层三处 `throw new DOMException('读取已取消', 'AbortError')` 改 `th
 - 2026-10-16 用户拍板：三条候选合并立项（errors.ts 共同载体）；字节映射取「code 侧持
   字节域索引」方案（jsonl 侧换算不可行——窗口模式从不持有全量文本）；notfound/decode
   结构化身份列非目标；retry/openAs catch 的 abort 过滤纳入本 spec（探索发现的现行不一致）。
+- 2026-10-16 plan 阶段勘误：classifyDispatchError 定为纯身份判定（撤销 ctx.signal 状态
+  兜底），理由见 §6。
