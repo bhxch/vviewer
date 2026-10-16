@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite dev",
     "build": "node ../../tools/gen-icons.mjs && vite build && node scripts/check-pwa-build.mjs",
+    "build:e2e": "node ../../tools/gen-icons.mjs && env VV_GRAMMAR_CDN=https://cdn.grammars.test/grammars/ vite build && node scripts/check-pwa-build.mjs",
     "preview": "vite preview",
     "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
   },

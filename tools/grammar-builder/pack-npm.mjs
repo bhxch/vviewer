@@ -3,7 +3,7 @@
 //   outDir/package.json            包元数据（name/version/files/license/description/repository）
 //   outDir/grammars/manifest.json  grammar 清单（移入 grammars/，与 *.wasm 同目录）
 //   outDir/grammars/*.wasm         wasm 全集（逐字节拷贝）
-//   outDir/queries/<lang>/*.scm    查询资产（整目录拷贝，仅供独立消费；客户端不从 CDN 取 queries）
+//   outDir/queries/<lang>/*.scm    查询资产（仅 .scm 拷贝，仅供独立消费；客户端不从 CDN 取 queries）
 //   outDir/GRAMMAR_LICENSES.md     许可证聚合随包附带（npm 是第三方分发主通道，license 字段
 //                                  'SEE LICENSE IN GRAMMAR_LICENSES.md' 指向的文件必须在包内；
 //                                  源 = 仓库根 server/GRAMMAR_LICENSES.md，gen-licenses.mjs 产物，
@@ -19,7 +19,8 @@
 //   VV_NPM_PACKAGE_NAME=@scope/vviewer-grammars-full \
 //   VV_NPM_PACKAGE_VERSION=0.0.0 VV_NPM_OUT=/tmp/dist-npm node tools/grammar-builder/pack-npm.mjs
 // 输入路径可覆写：VV_GRAMMARS_OUT（默认 apps/web/static/grammars，与 build.mjs 同名同义）、
-// VV_QUERIES_DIR（默认 packages/highlight/assets/queries）。outDir 应指向空目录（脚本不清理既有内容）。
+// VV_QUERIES_DIR（默认 packages/highlight/assets/queries）。outDir 应指向空目录（脚本不清理既有内容；
+// 已含打包产物时 fail-fast 拒跑——ledger H8）。
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -130,6 +131,11 @@ export function packNpm({
   }
   if (!outDir) throw new Error('packNpm: outDir 必填');
   if (!name || !version) throw new Error('packNpm: name 与 version 必填');
+  // outDir fail-fast（ledger H8）：已含打包产物（上次运行的 package.json）时拒跑——
+  // 脚本不清理既有内容，陈旧混包（新旧 wasm/queries 混杂）是最危险的失败形态
+  if (fs.existsSync(path.join(outDir, 'package.json'))) {
+    throw new Error(`packNpm: outDir 非空（已含打包产物）：请清空或换目录: ${outDir}`);
+  }
 
   fs.mkdirSync(outDir, { recursive: true });
   const pkgGrammars = path.join(outDir, 'grammars');
@@ -142,7 +148,11 @@ export function packNpm({
   };
   const manifestOut = path.join(pkgGrammars, 'manifest.json');
   fs.writeFileSync(manifestOut, JSON.stringify(packedManifest, null, 2) + '\n');
-  fs.cpSync(queriesDir, path.join(outDir, 'queries'), { recursive: true });
+  // queries 拷贝：仅 .scm（ledger H8——queries/ 混入的非 scm 资产不进包）；目录层级保持
+  fs.cpSync(queriesDir, path.join(outDir, 'queries'), {
+    recursive: true,
+    filter: (src) => fs.statSync(src).isDirectory() || src.endsWith('.scm'),
+  });
   fs.copyFileSync(licenseFile, path.join(outDir, 'GRAMMAR_LICENSES.md'));
 
   const repository = readRepository(repoPkgJson);

@@ -37,7 +37,7 @@
 
 1. **环境准备**（报告 §2.1/§2.2，各域文档第 4 节均有转录）：
    - 前置执行 `pnpm gen:grammars`（偏差 #10 强制前置：grammar wasm 资产不入库、构建期生成）；
-   - 构建前端 production build 与 release 二进制；
+   - 构建前端 production build 与 release 二进制；**GRF 域（grammar SPA-fallback/layers）用例需 CDN 注入产物：本地构建用 `pnpm --filter web build:e2e`（与 CI 同参 `VV_GRAMMAR_CDN`，2026-10-16 裁决档②）**——忘走它时 GRF-01/02 假红即构建注入守卫报警；
    - 主实例：`vviewer serve --root .temp/e2e-data --web-dist apps/web/build --port 8391 --compute`，`/api/health` 应返回 `capabilities=["file-server","compute"]`；
    - 测试数据按各域文档第 4 节的清单与构造规格重建于 `.temp/e2e-data/`；server-file-service 域需按其 §4.1 实例矩阵另起辅助实例。
 2. **逐场景执行**：每份域文档第 2 节为场景清单表（编号 | 前置条件 | 步骤 | 期望 | 关联缺陷），按行执行；「期望」列中「修复后验收判据」与「实测现状」并存时，以实测现状核对环境是否与报告一致，以验收判据作为回归期望。

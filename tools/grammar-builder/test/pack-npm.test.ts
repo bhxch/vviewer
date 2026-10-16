@@ -180,6 +180,22 @@ describe('packNpm 异常路径（publish 前即失败，不产出残包）', () 
     expect(() => packNpm({ ...ARGS(f), version: '' })).toThrow(/version/);
     expect(() => packNpm({ ...ARGS(f), outDir: '' })).toThrow(/outDir/);
   });
+
+  it('queries 拷贝过滤非 scm（ledger H8）：queries/ 混入的非 .scm 资产不进包、目录层级保持', () => {
+    const f = fixture();
+    writeFileSync(path.join(f.queries, 'javascript', 'README.md'), 'not a scm asset');
+    packNpm(ARGS(f));
+    expect(existsSync(path.join(f.outDir, 'queries', 'javascript', 'README.md'))).toBe(false);
+    expect(existsSync(path.join(f.outDir, 'queries', 'javascript', 'highlights.scm'))).toBe(true);
+    expect(existsSync(path.join(f.outDir, 'queries', 'c', 'highlights.scm'))).toBe(true);
+  });
+
+  it('outDir 已含打包产物 fail-fast（ledger H8）：package.json 在场即拒跑（脚本不清理，防陈旧混包）', () => {
+    const f = fixture();
+    mkdirSync(f.outDir, { recursive: true });
+    writeFileSync(path.join(f.outDir, 'package.json'), '{"stale":true}');
+    expect(() => packNpm(ARGS(f))).toThrow(/outDir 非空/);
+  });
 });
 
 describe('main()（CLI 入口：Task 5 publish job 经 env 驱动）', () => {
