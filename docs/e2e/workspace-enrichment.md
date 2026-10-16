@@ -121,3 +121,8 @@
 8. headless 边界（README §3.1.4）：本域不涉及 FS Access 原生对话框与真实触摸；localfs 权限重确认恢复链因此不在本域布点（沿用既有「真机补测」口径）。
 9. 右键固定目录 tab 在窄视口（mobile 375px）的一个坑：TabContextMenu 对**任意滚动**（window capture，TabContextMenu.svelte:49-51「scroll 不冒泡」）即关——双 tab + 管理钮溢出 tabbar 时，右键自带的自动滚动尾随 scroll 事件会把刚弹出的菜单立即关掉。脚本须先 `scrollIntoViewIfNeeded` + 短暂等待滚动安静再右键（WSX-08 实跑发现的确定性失败，单 tab 的 WS-06 无溢出故不触发）；手工执行同理：先把目标 tab 滚到可见再右键。
 10. 多源 workspace 下文件 tab 也带来源徽标文本（`.vv-tab-src` 渲染 storeLabel，如「host · 根1/」）——按 tab 名定位目录 tab 时须排除文件 tab（如 `filter({ hasNotText: 'hello-r1.txt' })`），否则 strict violation。
+
+## 勘误（2026-10-16）
+
+2026-10-13 报告所称「源级折叠」在 UI 中不存在（文件树仅目录级展开/折叠，无源级
+折叠实现）——非待补面，系报告措辞失实（e2e 富化第三轮 spec §3 既有记录）。
