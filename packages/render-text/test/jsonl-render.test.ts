@@ -1078,6 +1078,136 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
     inst.destroy();
   });
 
+  it('委托降级锚行映射优先 lineAtByteOffset（字节域精确）：lineAtOffset 不再被调用', async () => {
+    stubResizeObserver();
+    const content = interleavedBlankHeadGbTail(500, 100);
+    const physicalStarts: number[] = [];
+    {
+      let start = 0;
+      for (let i = 0; i < content.length; i++) {
+        if (content[i] === 0x0a) {
+          physicalStarts.push(start);
+          start = i + 1;
+        }
+      }
+      physicalStarts.push(start);
+    }
+    const lineByOffset = (offset: number): number => {
+      let line = 0;
+      for (let i = 0; i < physicalStarts.length; i++) {
+        if ((physicalStarts[i] ?? 0) <= offset) line = i;
+        else break;
+      }
+      return line;
+    };
+    const byteCalls: number[] = [];
+    const charCalls: number[] = [];
+    const revealArgs: number[] = [];
+    const fakeCode = {
+      destroy(): void {},
+      getMeta: () => ({ encoding: 'utf-8' as const, lang: null, size: content.length, lines: 600 }),
+      lineAtByteOffset: (offset: number): number => {
+        byteCalls.push(offset);
+        return lineByOffset(offset);
+      },
+      lineAtOffset: (offset: number): number => {
+        charCalls.push(offset);
+        return lineByOffset(offset);
+      },
+      revealLine: (line: number): void => {
+        revealArgs.push(line);
+      }
+    };
+    const calls: RangeCall[] = [];
+    const host = mount();
+    const localDet: Detection = { ext: 'jsonl', encoding: 'utf-8' };
+    const inst = await renderJsonl(content.slice(0, 8192), host, localDet,
+      streamCtx({ size: null, content, head: content.slice(0, 8192), calls }),
+      { onEncodingBroken: async () => fakeCode as unknown as JsonlInstance });
+    await vi.waitFor(() => expect(host.querySelector('[data-line="0"]')).not.toBeNull());
+    const loaded = Number(/已加载 (\d+) 行/.exec(host.querySelector('.vv-jsonl-status')!.textContent!)?.[1]);
+    const scroll = host.querySelector('.vv-jsonl-scroll') as HTMLElement;
+    scroll.scrollTop = 120 * (loaded - 11);
+    scroll.dispatchEvent(new Event('scroll'));
+    const anchor = loaded - 16;
+    const expectedPhysical = 2 * anchor;
+    await vi.waitFor(() => expect(revealArgs.length).toBeGreaterThan(0));
+    expect(byteCalls.length, '应优先走字节域精确通道').toBe(1);
+    expect(byteCalls[0]).toBe(physicalStarts[expectedPhysical]);
+    expect(charCalls.length, '字节域命中后不得回退字符域近似').toBe(0);
+    expect(revealArgs[0]).toBe(expectedPhysical);
+    inst.destroy();
+  });
+
+  it('多字节中文夹具：锚行经 lineAtByteOffset 映射物理行号精确命中（字节域与字符域差随行累计的反例）', async () => {
+    stubResizeObserver();
+    // 每数据行嵌中文（每汉字 3 字节）+ 空行交织：字符域近似随锚行前累计漂移。
+    // 行几何与 interleavedBlankHeadGbTail 同构（净前缀跨块 0..1、GB 脏尾落块 2 由
+    // 滚动续读喂入触发嗅探降级——纯合法 UTF-8 夹具嗅探恒不触发，降级不会发生）
+    const parts: number[] = [];
+    for (let k = 0; k < 500; k++) {
+      const head = `{"n":${k},"t":"中文内容每字三字节","pad":"`;
+      const row = head + 'p'.repeat(1500 - head.length - 2) + '"}';
+      parts.push(...enc(`${row}\n\n`)); // 数据行 + 空行
+    }
+    for (let i = 0; i < 100; i++) {
+      parts.push(...enc(`{"i":${i},"gb":"`));
+      for (let k = 0; k < 50; k++) parts.push(0xba, 0xba); // 每行 100 处非法 ≫ 嗅探阈值
+      parts.push(...enc('"}\n'));
+    }
+    const content = Uint8Array.from(parts);
+    const physicalStarts: number[] = [];
+    {
+      let start = 0;
+      for (let i = 0; i < content.length; i++) {
+        if (content[i] === 0x0a) {
+          physicalStarts.push(start);
+          start = i + 1;
+        }
+      }
+      physicalStarts.push(start);
+    }
+    const lineByOffset = (offset: number): number => {
+      let line = 0;
+      for (let i = 0; i < physicalStarts.length; i++) {
+        if ((physicalStarts[i] ?? 0) <= offset) line = i;
+        else break;
+      }
+      return line;
+    };
+    const revealArgs: number[] = [];
+    const byteCalls: number[] = [];
+    const fakeCode = {
+      destroy(): void {},
+      getMeta: () => ({ encoding: 'utf-8' as const, lang: null, size: content.length, lines: 600 }),
+      lineAtByteOffset: (offset: number): number => {
+        byteCalls.push(offset);
+        return lineByOffset(offset);
+      },
+      revealLine: (line: number): void => {
+        revealArgs.push(line);
+      }
+    };
+    const calls: RangeCall[] = [];
+    const host = mount();
+    const localDet: Detection = { ext: 'jsonl', encoding: 'utf-8' };
+    const inst = await renderJsonl(content.slice(0, 8192), host, localDet,
+      streamCtx({ size: null, content, head: content.slice(0, 8192), calls }),
+      { onEncodingBroken: async () => fakeCode as unknown as JsonlInstance });
+    await vi.waitFor(() => expect(host.querySelector('[data-line="0"]')).not.toBeNull());
+    const loaded = Number(/已加载 (\d+) 行/.exec(host.querySelector('.vv-jsonl-status')!.textContent!)?.[1]);
+    const scroll = host.querySelector('.vv-jsonl-scroll') as HTMLElement;
+    scroll.scrollTop = 120 * (loaded - 11);
+    scroll.dispatchEvent(new Event('scroll'));
+    const anchor = loaded - 16;
+    const expectedPhysical = 2 * anchor; // 数据行 k 前各有 k 个空行
+    await vi.waitFor(() => expect(revealArgs.length).toBeGreaterThan(0));
+    expect(byteCalls.length).toBe(1);
+    expect(byteCalls[0]).toBe(physicalStarts[expectedPhysical]);
+    expect(revealArgs[0]).toBe(expectedPhysical);
+    inst.destroy();
+  });
+
   it('委托降级锚行回退：实例无 lineAtOffset（旧产物/非全量形态）保持内容行号直传', async () => {
     stubResizeObserver();
     const content = interleavedBlankHeadGbTail(500, 100);

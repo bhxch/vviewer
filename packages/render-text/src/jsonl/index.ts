@@ -568,20 +568,15 @@ export interface JsonlWindowedDowngrade {
  * HeightModel）。实例无 revealLine 的形态（空文件等）跳过——与现状等价，不做半
  * 吊子恢复。
  *
- * 行号域换算（deferred 清偿 Task 5）：anchorLine 是 jsonl 内容行号（索引层剔空行），
- * code revealLine 收物理行号（含空行）——含空行文件直传会向上漂移「锚行前空行数」。
- * 故委托 code 分支以锚行偏移（anchorByteOffset = index.offsets[anchorLine]，
- * 调用方在索引可见处换算）经实例 lineAtOffset（全量模式 lineOffsets 二分）
- * 映射物理行号再 reveal；实例无 lineAtOffset（旧产物/非全量形态）或偏移不可得
- * （anchorByteOffset <0）回退内容行号直传（现状行为，向后兼容）。偏移口径注：
- * jsonl offsets 是 post-BOM 逻辑字节空间（BOM 在喂索引前剥离，本模块头 BOM 裁决）；
- * code lineAtOffset 的域是剥 BOM 归一文本的字符偏移——两域同基，锚行偏移不做
- * +bomLen 补偿直传（终审 Minor 1：补偿引入 +3，BOM 文件的 <3 字节短数据行漂 1
- * 行；直传使 BOM ASCII 文件也逐字节精确）。残留近似仅两支：多字节非 ASCII 的
- * 字节-字符差，与 CRLF 差（jsonl 字节域 CRLF 记 2 字节单终结符、code 归一为 1
- * 字符）——均随锚行**之前所有行累计**、不被锚行长度吸收，偏移量仅为「锚行前
- * 累计差 ÷ 平均行长」量级的粗定位，可偏多行乃至远端（粗定位语义下仍收敛于
- * revealLine 精调）。精确映射需字节→字符换算（code 侧持字节域行索引），随后续立项。
+ * 行号域换算（spec 2026-10-16 错误身份与字节映射，三级回退）：anchorLine 是 jsonl
+ * 内容行号（索引层剔空行），code revealLine 收物理行号（含空行）——含空行文件直传
+ * 会向上漂移「锚行前空行数」。故委托 code 分支以锚行偏移（anchorByteOffset =
+ * index.offsets[anchorLine]，调用方在索引可见处换算）映射物理行号再 reveal，优先
+ * lineAtByteOffset（post-BOM 字节域行索引，与 jsonl offsets 同基逐字节精确——
+ * 多字节/CRLF 两支历史近似消灭），次选 lineAtOffset（字符域旧近似，兼容旧委托
+ * 实例），实例两者皆无（旧产物/非全量形态）或偏移不可得（anchorByteOffset <0）
+ * 回退内容行号直传（现状行为，向后兼容）。偏移不做 +bomLen 补偿（终审 Minor 1：
+ * 两域同为 post-BOM，补偿反引 +3 使 BOM 文件短数据行漂 1 行）。
  */
 function restoreViewportAfterDegrade(
   full: RenderedInstance & { getMeta(): CodeFileMeta },
@@ -591,6 +586,14 @@ function restoreViewportAfterDegrade(
   if (anchorLine < 0) return;
   const reveal = (full as { revealLine?: (line: number) => void }).revealLine;
   if (typeof reveal !== 'function') return;
+  // 三级回退（spec §4.5）：字节域精确（lineAtByteOffset，post-BOM 与 jsonl offsets
+  // 同基）→ 字符域旧近似（lineAtOffset，兼容旧委托实例——多字节/CRLF 两支累计差
+  // 残留）→ 内容行号直传（现状行为，向后兼容）
+  const lineAtByteOffset = (full as { lineAtByteOffset?: (offset: number) => number }).lineAtByteOffset;
+  if (anchorByteOffset >= 0 && typeof lineAtByteOffset === 'function') {
+    reveal.call(full, lineAtByteOffset.call(full, anchorByteOffset));
+    return;
+  }
   const lineAtOffset = (full as { lineAtOffset?: (offset: number) => number }).lineAtOffset;
   if (anchorByteOffset >= 0 && typeof lineAtOffset === 'function') {
     reveal.call(full, lineAtOffset.call(full, anchorByteOffset));
@@ -729,10 +732,10 @@ async function renderJsonlWindowed(
       // SUSP-03 锚行捕获：嗅探判脏此刻窗口实例仍在（降级出口替换 DOM 前可读
       // curFirst），经 viewFirst 闭包快照取值，不改 onEncodingBroken 签名。
       // 锚行偏移（deferred 清偿 Task 5）同点换算（index 唯一可见处）：委托 code
-      // 形态经实例 lineAtOffset 映射物理行号（restoreViewportAfterDegrade）；
-      // offsets 为 post-BOM 逻辑字节空间，与 lineAtOffset 的剥 BOM 归一字符域同基，
-      // 不做 +bomLen 补偿（终审 Minor 1：补偿反而引入 +3，BOM 短行漂 1 行）；
-      // 锚行越出已喂索引时置 -1（防御，viewFirst 恒被 visibleRange 钳内理论不可达）
+      // 形态经实例 lineAtByteOffset（字节域精确，次选 lineAtOffset 旧近似）映射物理
+      // 行号；offsets 为 post-BOM 逻辑字节空间与字节域索引同基，不做 +bomLen 补偿
+      //（终审 Minor 1）；锚行越出已喂索引时置 -1（防御，viewFirst 恒被 visibleRange
+      // 钳内理论不可达）
       const anchorLine = viewFirst;
       const anchorByteOffset =
         anchorLine >= 0 && anchorLine < index.offsets.length
