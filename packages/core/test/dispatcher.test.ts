@@ -123,6 +123,63 @@ describe('dispatch abort 不上屏（deferred 清偿 Task 5）', () => {
   });
 });
 
+// 错误身份与字节映射 Task 2：retry/open-as 的 catch 面接分类层。第二用例是止跌锚
+// 而非真 RED——本场景的重入 abort 在 dispatch 主 catch 已被吞为 no-op（dispatch
+// resolve，不进 openAsAction 的 catch），现状下也应绿；过滤器防的是 try 块外策略读/
+// 未来路径的裸 AbortError reject。保留为防回归锚。
+
+describe('dispatch retry/open-as 的 abort 过滤（错误身份与字节映射 Task 2）', () => {
+  it('重试被取消：不重画卡片、原卡保留在屏（现状红——会把「读取已取消」画回卡片）', async () => {
+    const reg = createRegistry();
+    let calls = 0;
+    reg.install(mk('code', ['txt'], {
+      render: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error('首次渲染失败');
+        throw new DOMException('读取已取消', 'AbortError');
+      }
+    }));
+    const target = document.createElement('div');
+    await createDispatcher(reg).dispatch(source('a.txt'), new TextEncoder().encode('hi'), target);
+    expect(target.querySelector('.vv-error-card'), '前置：首次失败已落卡').not.toBeNull();
+    const retryBtn = [...target.querySelectorAll<HTMLButtonElement>('.vv-error-action')]
+      .find((b) => b.textContent === '重试');
+    expect(retryBtn, '前置：卡片含重试按钮').toBeDefined();
+    retryBtn!.click();
+    await vi.waitFor(() => expect(calls).toBe(2));
+    // 重试失败链跨多个微任务（render reject → .catch → showErrorCard 重画），宏任务
+    // 边界冲刷后再断言：calls 同步递增会让 waitFor 在重画前放行，钉不住行为
+    await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+    expect(target.textContent, '取消文案不得上屏').not.toContain('读取已取消');
+    expect(target.querySelector('.vv-error-card'), '原卡保留（不重画也不清空）').not.toBeNull();
+  });
+
+  it('open-as 重入被取消：不 console.error 留痕（现状红）', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const reg = createRegistry();
+    let calls = 0;
+    reg.install(mk('code', ['txt'], {
+      render: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error('首次渲染失败');
+        throw new DOMException('读取已取消', 'AbortError');
+      }
+    }));
+    const target = document.createElement('div');
+    await createDispatcher(reg).dispatch(source('a.txt'), new TextEncoder().encode('hi'), target);
+    const openAsBtn = [...target.querySelectorAll<HTMLButtonElement>('.vv-error-action')]
+      .find((b) => b.textContent === '以纯文本打开');
+    expect(openAsBtn, '前置：卡片含以纯文本打开按钮').toBeDefined();
+    openAsBtn!.click();
+    await vi.waitFor(() => expect(calls).toBeGreaterThanOrEqual(2));
+    // 重入链跨多个微任务，宏任务边界冲刷后再断言：确保若 console.error 会发生，必已
+    // 发生在断言前（缺席断言必须等链路沉降，否则锚不住回归）
+    await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+    expect(errSpy).not.toHaveBeenCalledWith('[vviewer] open-as 重入失败', expect.anything());
+    errSpy.mockRestore();
+  });
+});
+
 describe('dispatcher magic 预检改派（BUG-13/BUG-01.3）', () => {
   it('.ts 扩展名 + mpegts 签名 → 改派 av 渲染器（det.ext 纠偏为 ts）', async () => {
     const reg = createRegistry();

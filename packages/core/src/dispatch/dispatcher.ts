@@ -8,6 +8,7 @@ import {
   showErrorCard,
   type ErrorCardAction
 } from './errorRenderer';
+import { classifyDispatchError, DispatchReadError } from './errors';
 
 export interface Dispatcher {
   dispatch(
@@ -36,34 +37,6 @@ export interface DispatchOptions {
 
 const HEAD_SIZE = 8192;
 const FULL_LIMIT = 1 << 20;
-
-/**
- * 读闭包失败（T3 评审活面消除）：延迟全量读在选路 try 块内执行，若按渲染失败落
- * 错误卡片，「重试」会以 catch 手头仅有的 8KB head 探测块当完整文件静默截断渲染。
- * 包装后由 catch 识别并向上 reject（调用方既有读取失败面承接，无重试通道），与
- * 策略读（try 外，天然 reject）的失败语义对齐。open-as 重入路径同样 reject，
- * 经 openAsAction 既有 .catch 保留原错误卡片。
- */
-class DispatchReadError extends Error {
-  constructor(err: unknown) {
-    super(err instanceof Error ? err.message : String(err));
-    this.name = 'DispatchReadError';
-  }
-}
-
-/**
- * 取消错误身份判定（deferred 清偿 Task 5）：err 是否为取消（AbortError 形态）。
- * 与 render-text code.ts 导出的 isAbortError 同源同形——core 不反向依赖 render-text
- * （依赖方向 render-text → core），故此处维护镜像实现，判定面一致由测试钉住；
- * jsdom 等环境的 DOMException 未必是 Error 子类，instanceof 两支并判。消费面：
- * dispatch catch 的「取消 ≠ 渲染失败」静默分支（abort 不上屏裁决）。
- */
-function isAbortError(err: unknown): boolean {
-  return (
-    (err instanceof DOMException && err.name === 'AbortError') ||
-    (err instanceof Error && err.name === 'AbortError')
-  );
-}
 
 /**
  * 补拉全量后的编码精判（终审 F2 及其渲染器侧镜像的共享 helper，I-2 收口）：
@@ -135,7 +108,11 @@ function openAsAction(
       // （unhandled rejection）；失败时保留原错误卡片（用户可改选其他方式），仅记录
       void redisplay({ rendererOverride: id })
         .then((r) => onRendered(r.instance))
-        .catch((err: unknown) => console.error('[vviewer] open-as 重入失败', err));
+        .catch((err: unknown) => {
+          // 取消不属「重入失败」（错误身份与字节映射 Task 2）：不留 error 级痕
+          if (classifyDispatchError(err) === 'abort') return;
+          console.error('[vviewer] open-as 重入失败', err);
+        });
     }
   };
 }
@@ -165,6 +142,9 @@ function buildRenderErrorActions(
     renderer.render(buffer, target, source, det, ctx)
       .then(onRendered)
       .catch((err: unknown) => {
+        // 取消 ≠ 重试失败（错误身份与字节映射 Task 2，与主 catch「abort 不上屏」
+        // 同裁决）：重试被取消时原卡保留在屏，不以「读取已取消」重画
+        if (classifyDispatchError(err) === 'abort') return;
         // 重试仍失败：保留错误详情，按钮随之重建（可继续重试/以其他方式打开）
         const message = err instanceof Error ? err.message : String(err);
         showErrorCard(target, message, source, {
@@ -308,8 +288,9 @@ export function createDispatcher(registry: Registry): Dispatcher {
     // 渲染期 ctx（streaming 分支构造）：声明在 try 外——catch 的重试动作需要透传
     //（评审指令②），try 作用域变量 catch 不可见
     let renderCtx: StreamCtx | undefined;
-    // 延迟全量读统一包装（headOnly 不变量保证此处 read 已定义）：失败标 DispatchReadError，
-    // 由下方 catch 识别后向上 reject，不落渲染错误卡片（见 DispatchReadError doc）
+    // 延迟全量读统一包装（headOnly 不变量保证此处 read 已定义）：失败标 DispatchReadError
+    // （单源见 ./errors），由下方 catch 识别后向上 reject，不落渲染错误卡片；
+    // open-as 重入路径同样 reject，经 openAsAction 既有 .catch 保留原错误卡片
     const readFull = (): Promise<Uint8Array<ArrayBuffer>> =>
       read!().catch((err: unknown) => {
         throw new DispatchReadError(err);
@@ -389,15 +370,16 @@ export function createDispatcher(registry: Registry): Dispatcher {
       const instance = await renderer.render(base, target, source, det, renderCtx);
       return { instance, rendererId: renderer.id, det };
     } catch (err) {
+      const kind = classifyDispatchError(err);
       // 读失败 ≠ 渲染失败（T3 评审）：重跑 render 无意义且 catch 手头只有 8KB head
       // 探测块（headOnly 时）——重试会静默截断渲染。向上 reject 走调用方读取失败面。
-      if (err instanceof DispatchReadError) throw err;
+      if (kind === 'read') throw err;
       // abort 不上屏（deferred 清偿 Task 5 裁决）：effect 级取消（ViewerPane
       // effectAbort）使「AbortError 经 render 冒泡」可达——取消不是渲染失败：不落
       // 错误卡片（DOM 即将被新一轮渲染接管，卡片只会闪现/滞留），返回 no-op 实例，
       // 调用方既有 cancelled 面将其丢弃（cleanup 晚于 resolve 的形态由实例级
       // controller 兜底，不再冒泡至此）
-      if (isAbortError(err)) {
+      if (kind === 'abort') {
         return { instance: { destroy() {} }, rendererId: errorRenderer.id, det };
       }
       const message = err instanceof Error ? err.message : String(err);
