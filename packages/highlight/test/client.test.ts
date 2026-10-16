@@ -281,7 +281,7 @@ describe('init-progress 探针（vvWorkerDebug spike：打点通道，非存活�
     vi.useRealTimers();
   });
 
-  it('debug 开关下 worker 阶段帧依序透传为 console.debug；进度帧不计存活（看门狗语义不变）', async () => {
+  it('debug 开关下 worker 阶段帧依序透传为 console.debug；init 挂起（无 ack）时进度帧不救活看门狗', async () => {
     vi.useFakeTimers();
     const debugCalls: unknown[][] = [];
     const spy = vi.spyOn(console, 'debug').mockImplementation((...args: unknown[]) => {
@@ -294,14 +294,9 @@ describe('init-progress 探针（vvWorkerDebug spike：打点通道，非存活�
       report?.({ stage: 'parser-init' });
       report?.({ stage: 'assets', detail: 'queries=2' });
       report?.({ stage: 'ready' });
-      // query 逐文件帧（Task 4 细口径）：真实链路在 ready 后首次高亮的远程 fetch 完成时
-      // 出现——桩在 highlight 调用时补发，覆盖 ready 之后帧的同通道透传与非存活同口径
-      return {
-        highlight: (): Promise<never> => {
-          report?.({ stage: 'query-loaded', detail: 'bash/highlights.scm' });
-          return new Promise(() => {});
-        },
-      };
+      // 挂起形态（BUG-35 锚语义）：create 永不 resolve → 恒无 init-ok ack——
+      // 钉「进度帧不计存活」：即便四帧全数到达，15s 到点看门狗照常拒绝
+      return new Promise(() => {});
     };
     const { worker, frames } = installBridge();
     const client = new HighlightClient(worker as unknown as Worker, { grammarsDir: '/x', debug: true });
@@ -309,20 +304,17 @@ describe('init-progress 探针（vvWorkerDebug spike：打点通道，非存活�
     expect(worker.sent[0]).toStrictEqual({ kind: 'init', grammarsDir: '/x', debug: true });
     const p = client.highlight('a=1', 'bash');
     const watchdog = expect(p).rejects.toThrow('初始化超时');
-    await vi.advanceTimersByTimeAsync(0); // 冲刷微任务：init 链跑完、四帧到达、请求派发补发 query-loaded
-    // 断言 1：create 各阶段回调 → onInitProgress 依序到达（wasm-fetch/parser-init/assets/ready），
-    // 随后请求派发触发 highlight 桩补发 query-loaded（ready 之后的逐文件帧）
+    await vi.advanceTimersByTimeAsync(0); // 冲刷微任务：init 链挂起、四帧到达
+    // 断言 1：create 各阶段回调 → onInitProgress 依序到达（wasm-fetch/parser-init/assets/ready）；
+    // init 未完成 → 零 init-ok（query-loaded 透传与四帧同分流，语义由本锚覆盖不单列）
     expect(frames.map((f) => (f as { kind?: string }).kind)).toEqual([
-      'init-progress',
       'init-progress',
       'init-progress',
       'init-progress',
       'init-progress',
     ]);
     expect(frames[2]).toStrictEqual({ kind: 'init-progress', stage: 'assets', detail: 'queries=2' });
-    // query-loaded 帧（每 query 文件一帧，spec §8 细口径）：同一帧类型同一分流
-    expect(frames[4]).toStrictEqual({ kind: 'init-progress', stage: 'query-loaded', detail: 'bash/highlights.scm' });
-    expect(debugCalls.map((c) => c[1])).toEqual(['wasm-fetch', 'parser-init', 'assets', 'ready', 'query-loaded']);
+    expect(debugCalls.map((c) => c[1])).toEqual(['wasm-fetch', 'parser-init', 'assets', 'ready']);
     expect(debugCalls[0]).toEqual(['[vviewer-worker]', 'wasm-fetch', 'runtimeDir=/x/']);
     expect(debugCalls[2]).toEqual(['[vviewer-worker]', 'assets', 'queries=2']);
     // 进度帧不计为存活证据：markWorkerAlive 未触发，15s 到点看门狗照常拒绝
@@ -355,5 +347,36 @@ describe('init-progress 探针（vvWorkerDebug spike：打点通道，非存活�
     expect(debugCalls).toHaveLength(0);
     client.dispose();
     spy.mockRestore();
+  });
+});
+
+describe('init-ok ack（BUG-35：init 成功置活看门狗，静置不再误杀）', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('init 成功回 init-ok（无 debug 亦恒发），先于排队请求派发', async () => {
+    engineCreate.impl = async () => ({ highlight: async () => ({ ok: true as const, intervals: [] }) });
+    const { worker, frames } = installBridge();
+    const client = new HighlightClient(worker as unknown as Worker, { grammarsDir: '/x' });
+    const p = client.highlight('echo hi', 'bash'); // init 完成前排入队列
+    await p; // 排队请求在 init 完成后被派发并应答
+    const kinds = frames.map((f) => (f as { kind?: string }).kind);
+    expect(kinds, 'init 成功 ack 恒发（修复本体非探针，与 debug 开关无关）').toContain('init-ok');
+    expect(kinds.indexOf('init-ok'), 'ack 先于排队请求的应答帧').toBeLessThan(kinds.length - 1);
+    client.dispose();
+  });
+
+  it('ack 置活：init 完成后静置越过 15s 窗口，看门狗不误杀（对照：进度帧不计存活的既有锚）', async () => {
+    vi.useFakeTimers();
+    engineCreate.impl = async () => ({ highlight: () => new Promise(() => {}) }); // 引擎健康但无人用
+    const reported: string[] = [];
+    const { worker } = installBridge();
+    const client = new HighlightClient(worker as unknown as Worker, { grammarsDir: '/x' }, (r) => reported.push(r));
+    await vi.advanceTimersByTimeAsync(0); // 冲刷微任务：init 链沉降、ack 到达
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(reported, 'ack 已置活，静置超窗不触发初始化超时').toHaveLength(0);
+    client.dispose();
   });
 });

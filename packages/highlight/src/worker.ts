@@ -59,10 +59,17 @@ export interface InitProgressFrame {
   detail?: string;
 }
 
+/** init 完成回执（BUG-35）：无 id 帧——client onmessage 现行路径 markWorkerAlive 后
+ *  pending 落空 return。无论 debug 开关恒发（修复本体非探针）：此前 init 成功路径
+ *  零回包，页面静置 >15s 再开文件被 15s 看门狗误杀健康 worker → 全会话静默降级 hljs。 */
+export interface InitOkFrame {
+  kind: 'init-ok';
+}
+
 /** Worker 上下文（仅真实 Worker/jsdom 环境存在 self）。 */
 type WorkerCtx = {
   onmessage: ((ev: MessageEvent) => void) | null;
-  postMessage: (msg: HighlightResponse | InitProgressFrame) => void;
+  postMessage: (msg: HighlightResponse | InitProgressFrame | InitOkFrame) => void;
 };
 
 /** client → worker 的首条握手消息（与 serveWorker 协议对齐）。 */
@@ -133,6 +140,10 @@ export function serveWorker(): void {
           : undefined
       )
         .then((h) => {
+          // BUG-35：init 成功回 ack（无论 debug 开关）——client onmessage 现行路径
+          // markWorkerAlive 解除看门狗，「静置 >15s 再开文件」不再被误杀降级 hljs。
+          // 真挂起（init 永不 resolve → 无 ack）仍由看门狗 15s 收口，语义不变。
+          ctx.postMessage({ kind: 'init-ok' } satisfies InitOkFrame);
           for (const req of queued.splice(0)) void dispatch(req, h);
           return h;
         })

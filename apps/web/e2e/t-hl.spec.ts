@@ -512,45 +512,17 @@ const TS_SRC_B = [
   '}'
 ].join('\n');
 
-test.fixme('BUG-35 [探索]: tree-sitter worker init 成功零回包——页面静置 >15s 看门狗误杀，全会话本地高亮静默降级 hljs', async ({
+test('BUG-35: tree-sitter worker init 成功零回包——页面静置 >15s 看门狗误杀，全会话本地高亮静默降级 hljs', async ({
   page
 }) => {
-  // 发现于文件内搜索域、根因属 hl（代码高亮链路，packages/highlight）。复核成立（medium，
-  // 4199/8391 双实例 3/3 稳定，对照组全健康）：init 成功路径不向主线程回任何 ack
-  // （packages/highlight/src/worker.ts:82-107——.then 内仅排空排队请求，队列空则零回包，
-  // 仅失败走 console.error+postError）；HighlightClient 看门狗（client.ts:18
-  // INIT_TIMEOUT_MS=15_000）以「收到过任何消息」判活（markWorkerAlive 仅由 onmessage 置位，
-  // client.ts:85-92），超时即 failWorker 置 initFailed（client.ts:74-80,104-117），此后
-  // highlight() 一律 reject（client.ts:126-128）——页面加载后 15s 内无本地代码高亮请求的
-  // 会话（viewer.ts:51-56 启动即预热握手、无请求，打开页面→浏览/连接→再开文件的自然序列
-  // 必然命中）被误判「初始化超时」，worker 永久短路：该会话内此后所有本地代码文件与
-  // markdown 围栏静默降级 hljs 兜底（hljs 兜底仍正确渲染文本、搜索高亮不受影响），仅一条
-  // 误导性 console.error「初始化超时（15s 无响应）·排查 worker chunk 是否 404/MIME 异常」
-  // （highlightClient.ts:254-256；实测 manifest.json/ts-worker-*.js/tree-sitter.wasm 全 200）。
-  // 本条为该缺陷全仓库唯一回归锚点（hl 域主视角：本地代码文件 + 同会话二次打开仍降级，
-  // 全会话永久短路；markdown 围栏与服务端档 remote-first 视角同判据，并入本条影响面）。
-  // 本条原以探索期编号 BUG-43 落位（fsearch 域整理轮一度按其清单定档 BUG-43），2026-10-10
-  // 编号勘误轮按 hl 域权威清单内容配对定档 BUG-35；原同源多份占位已按一缺陷一锚点收编
-  // 删除：t-md.spec.ts 'BUG-40 [探索]'、本文件 'BUG-41 [探索]'（md 围栏视角）、本文件
-  // 'BUG-35 [探索]'（hl 域复核立档空壳，其独立复核证据见下）、t-shell.spec.ts
-  // 'BUG-34 [探索]'（服务端档视角）——按旧编号检索请落本条。
-  // 最小复现：cwd=apps/web，node .temp/explore-fsearch/p5d-watchdog.mjs（空闲 20s 再开
-  // crossline.ts；对照组不空闲）；影响面 p6-confirm.mjs（md 围栏）、p7-final.mjs（含 8391）。
-  // 证据：node .temp/verify-fsearch-E1/watchdog-verify.mjs 六场景——A1（4199 空闲 20s 后开
-  // verify-case.ts）状态栏「高亮: hljs 兜底 · 执行: 本地」、.vv-code-body 内 ts-* span=0、
-  // __vvLastHighlightOk=false、console.error 出现于 t+15.1s（早于 t+20s 的开文件动作，证明
-  // 看门狗在空闲期独立触发），同会话网络记录 manifest/ts-worker/tree-sitter.wasm 全 200；
-  // A2 对照（同实例立即开）→ tree-sitter、ts-span=205；B1/B2 于 8391 同构复现；C1/C2 md
-  // 围栏 0 vs 32 span。watchdog-verify2.mjs（4199 空闲 20s 后同会话连开 one.ts→two.ts→
-  // note.md）三文件全降级（ts-span 均 0、hljs-span>0 证明 hljs 在渲染），console.error 仅
-  // t+15.1s 一条——误杀后全会话永久短路，非单文件现象；截图 6 张同目录。
-  // 已删除同胞占位各自的独立证据路径（保留可发现性）：/tmp/review-cand-hl-e3/
-  // repro-watchdog.mjs（第三轮独立复核四判据全真 reproduced: true）、/tmp/md-e3-reverify/
-  // reverify.mjs + session2.mjs（md 围栏 A/B 翻转与会话级短路）、apps/web/.temp/review-e2/
-  // r1-watchdog.mjs + r2-autofallback.mjs（服务端档远程命中→切本地仍死，对照会话健康）。
-  // 「15s 内有高亮请求则健康」的对照由既有 HL-01/HL-10/HL-10/2 等用例天然承担（goto 后
-  // 立即开文件，全绿即对照不回归）。修复方向：init 成功回 ack（workerAlive 置位解除看门狗）；
-  // 修复后本用例转正。
+  // 缺陷（medium，唯一回归锚点）：init 成功路径不向主线程回任何 ack（worker.ts .then
+  // 内仅排空排队请求），HighlightClient 看门狗（INIT_TIMEOUT_MS=15s）以「收到过任何
+  // 消息」判活——页面加载后 15s 内无本地代码高亮请求的会话被误判初始化超时，worker
+  // 永久短路：此后所有本地代码文件与 markdown 围栏静默降级 hljs + 一条误导性
+  // console.error。修复（2026-10-16）：worker init 成功回 {kind:'init-ok'} ack（无论
+  // debug 开关），client onmessage 现行 markWorkerAlive 路径解除看门狗；真挂起（无
+  // ack）仍 15s 收口。历史证据/编号勘误史（原 BUG-43 等收编记录）见缺陷库与
+  // 2026-10-16 卫生批 SDD 台账。
   test.setTimeout(120_000);
   const consoleErrors: string[] = [];
   page.on('console', (msg) => {
