@@ -1,4 +1,37 @@
-import type { Encoding, RenderedInstance, Renderer } from '@vviewer/core';
+import { getHexFallbackRenderer, showErrorCard, type Encoding, type ErrorCardAction, type RenderedInstance, type Renderer } from '@vviewer/core';
+
+/** 超时护栏（spec §4.2）：decode 挂死（异常大图/畸形编码）时按成功放行，迟到失败
+ * 走渲染器内构兜底卡——不阻塞查看器主路径。 */
+const IMAGE_DECODE_TIMEOUT_MS = 10_000;
+
+type DecodeOutcome = { kind: 'ok' } | { kind: 'failed' } | { kind: 'timeout' };
+
+/**
+ * 解码校验观察（BUG-53）：decode() 主路径、load/error 事件回退（jsdom/无 decode
+ * 环境）、超时三路竞待。结果枚举而非 promise reject——竞待落定后迟到的另一路
+ * 不产生 unhandled rejection。finish 幂等（首达移除全部监听与计时器）。
+ */
+function observeImageDecode(img: HTMLImageElement, timeoutMs: number): Promise<DecodeOutcome> {
+  return new Promise((resolve) => {
+    const finish = (outcome: DecodeOutcome): void => {
+      clearTimeout(timer);
+      img.removeEventListener('error', onError);
+      img.removeEventListener('load', onLoad);
+      resolve(outcome);
+    };
+    const onError = (): void => finish({ kind: 'failed' });
+    const onLoad = (): void => finish({ kind: 'ok' });
+    img.addEventListener('error', onError);
+    img.addEventListener('load', onLoad);
+    const timer = setTimeout(() => finish({ kind: 'timeout' }), timeoutMs);
+    if (typeof img.decode === 'function') {
+      img.decode().then(
+        () => finish({ kind: 'ok' }),
+        () => finish({ kind: 'failed' })
+      );
+    }
+  });
+}
 
 /** SVG 只读消毒：去除 script、on* 事件属性、javascript: 与外部 href|src|xlink */
 export function sanitizeSvg(svgText: string): string {
@@ -68,17 +101,81 @@ export const imageRenderer: Renderer = {
     const img = document.createElement('img');
     img.src = url;
     img.alt = source.name;
+    // BUG-53 解码校验：失败即 revoke + throw（DOM 未污染）→ dispatcher 现成错误
+    // 卡片（重试/以 hex/以纯文本；损坏二进制图片经 looksTextual 走「以 hex 打开」
+    // 排前）；超时按成功放行 + 迟到 error 渲染器内构兜底卡（超时路径动作面较窄，
+    // 无 dispatcher 级 open-as，注释明示的降级体验）
+    // SVG 走 sanitizeSvg throw 锚（spec 铁律：SVG 分支不接解码校验）——仅 raster 校验
+    const outcome = det.ext === 'svg'
+      ? ({ kind: 'ok' } as const)
+      : await observeImageDecode(img, IMAGE_DECODE_TIMEOUT_MS);
+    if (outcome.kind === 'failed') {
+      URL.revokeObjectURL(url);
+      throw new Error('图片解码失败：数据损坏或格式不支持');
+    }
+    const lateGuard = outcome.kind === 'timeout';
     wrap.append(img);
     target.replaceChildren(wrap);
     const detach = attachZoom(wrap, img);
+    // —— 迟到兜底（BUG-53 超时路径专属）：渲染器内构卡，av 同款形态 ——
+    let cardShown = false;
+    let liveChild: RenderedInstance | null = null;
+    const takeOver = (instance: RenderedInstance): void => {
+      liveChild?.destroy();
+      liveChild = instance;
+    };
+    const detachImage = (): void => {
+      URL.revokeObjectURL(url);
+      wrap.remove();
+    };
+    const buildActions = (): ErrorCardAction[] => {
+      const actions: ErrorCardAction[] = [
+        {
+          label: '重试',
+          onClick: () => {
+            imageRenderer.render(buffer, target, source, det)
+              .then(takeOver)
+              .catch((err: unknown) => {
+                const message = err instanceof Error ? err.message : String(err);
+                showErrorCard(target, message, source, { actions: buildActions() });
+              });
+          }
+        }
+      ];
+      const hex = getHexFallbackRenderer();
+      if (hex) {
+        actions.push({
+          label: '以 hex 打开',
+          onClick: () => {
+            detachImage();
+            Promise.resolve(hex.render(buffer, target, source, det))
+              .then(takeOver)
+              .catch((err: unknown) => {
+                const message = err instanceof Error ? err.message : String(err);
+                showErrorCard(target, message, source);
+              });
+          }
+        });
+      }
+      return actions;
+    };
+    if (lateGuard) {
+      img.addEventListener('error', () => {
+        if (cardShown) return;
+        cardShown = true;
+        detach();
+        detachImage();
+        showErrorCard(target, '图片解码失败：数据损坏或格式不支持', source, { actions: buildActions() });
+      });
+    }
     // BUG-04（SHELL-12 验收）：图片状态栏/属性面板至少含大小与编码——det.encoding
     // 为服务端 x-vv-encoding 或本地启发式的检测结果，ViewerPane 按 'getMeta' in 探测
     const instance: RenderedInstance & { getMeta(): { size: number; encoding?: Encoding } } = {
       getMeta: () => ({ size: buffer.length, encoding: det.encoding }),
       destroy() {
         detach();
-        URL.revokeObjectURL(url);
-        wrap.remove();
+        detachImage();
+        liveChild?.destroy();
       }
     };
     return instance;

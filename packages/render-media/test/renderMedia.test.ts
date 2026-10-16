@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { FileSource, RenderedInstance } from '@vviewer/core';
 import { imageRenderer, sanitizeSvg } from '../src/image';
 
@@ -35,6 +35,9 @@ describe('imageRenderer getMeta（BUG-04 代工）', () => {
       name: 'pixel.png',
       store: { id: 's', displayName: () => '样本', listChildren: async () => [], read: async () => new Uint8Array() }
     };
+    // BUG-53 解码校验适配：jsdom 无 decode 且不为 img 派发 load/error（渲染前校验
+    // 会等待落定），桩 decode 立即 resolve 走主路径
+    (HTMLImageElement.prototype as { decode?: unknown }).decode = () => Promise.resolve();
     const target = document.createElement('div');
     document.body.append(target);
     const instance = await imageRenderer.render(new Uint8Array(16), target, source, {
@@ -47,6 +50,100 @@ describe('imageRenderer getMeta（BUG-04 代工）', () => {
     expect(meta.encoding).toBe('utf-8');
     instance.destroy();
     expect(revoke).toHaveBeenCalledTimes(1);
+    delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
     target.remove();
+  });
+});
+
+describe('imageRenderer 解码校验（BUG-53）', () => {
+  const create = vi.fn(() => 'blob:mock');
+  const revoke = vi.fn();
+  beforeEach(() => {
+    create.mockClear();
+    revoke.mockClear();
+    Object.defineProperty(URL, 'createObjectURL', { value: create, configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: revoke, configurable: true });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
+    document.body.innerHTML = '';
+  });
+  function fakeSource(name: string): FileSource {
+    return {
+      storeId: 'localfiles:s', storeLabel: 's', path: name, name,
+      store: { id: 'x', displayName: () => 'x', listChildren: async () => [], read: async () => new Uint8Array() }
+    };
+  }
+  const target = (): HTMLElement => {
+    const el = document.createElement('div');
+    document.body.append(el);
+    return el;
+  };
+
+  it('decode() reject → render throw「图片解码失败」+ blob 已 revoke + DOM 未污染', async () => {
+    (HTMLImageElement.prototype as { decode?: unknown }).decode = () => Promise.reject(new DOMException('bad', 'EncodingError'));
+    const target = document.createElement('div');
+    document.body.append(target);
+    await expect(
+      imageRenderer.render(new Uint8Array(8), target, fakeSource('broken.jpg'), { ext: 'jpg' } as never)
+    ).rejects.toThrow('图片解码失败');
+    expect(revoke).toHaveBeenCalledTimes(1);
+    expect(target.querySelector('.vv-image'), '校验失败不得污染 DOM').toBeNull();
+  });
+
+  it('decode() resolve → 正常渲染零回归', async () => {
+    (HTMLImageElement.prototype as { decode?: unknown }).decode = () => Promise.resolve();
+    const target = document.createElement('div');
+    document.body.append(target);
+    const instance = await imageRenderer.render(new Uint8Array(8), target, fakeSource('good.png'), { ext: 'png' } as never);
+    expect(target.querySelector('.vv-image img')).not.toBeNull();
+    instance.destroy();
+    expect(revoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('无 decode 环境（jsdom）：load 事件回退正常渲染', async () => {
+    // 渲染前校验（BUG-53）落定前 img 尚未入 DOM，jsdom 又不为 blob src 派发
+    // load/error——经 createElement 捕获 img 引用，在 detached 节点上派发 load
+    let captured: HTMLImageElement | null = null;
+    const rawCreate = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation(((tagName: string, options?: ElementCreationOptions) => {
+      const el = rawCreate(tagName, options);
+      if (String(tagName).toLowerCase() === 'img') captured = el as HTMLImageElement;
+      return el;
+    }) as typeof document.createElement);
+    const target = document.createElement('div');
+    document.body.append(target);
+    const p = imageRenderer.render(new Uint8Array(8), target, fakeSource('good.png'), { ext: 'png' } as never);
+    const img = captured!;
+    img.dispatchEvent(new Event('load'));
+    const instance = await p;
+    expect(target.querySelector('.vv-image img')).not.toBeNull();
+    instance.destroy();
+  });
+
+  it('10s 超时护栏：按成功放行 + 迟到 error 兜底内构卡（重试按钮；hex 未注册不出现）', async () => {
+    vi.useFakeTimers();
+    const target = document.createElement('div');
+    document.body.append(target);
+    const p = imageRenderer.render(new Uint8Array(8), target, fakeSource('slow.png'), { ext: 'png' } as never);
+    await vi.advanceTimersByTimeAsync(10_000);
+    const instance = await p;
+    expect(target.querySelector('.vv-image img'), '超时按成功放行（大图不阻塞查看器）').not.toBeNull();
+    // 迟到解码失败 → 渲染器内构兜底卡（不走 dispatcher——render 已 resolve）
+    (target.querySelector('.vv-image img') as HTMLImageElement).dispatchEvent(new Event('error'));
+    const card = target.querySelector('.vv-error-card');
+    expect(card, '迟到失败应出兜底卡').not.toBeNull();
+    expect(card!.querySelector('.vv-error-detail')!.textContent).toContain('图片解码失败');
+    expect([...card!.querySelectorAll('.vv-error-action')].map((b) => b.textContent)).toContain('重试');
+    instance.destroy();
+    vi.useRealTimers();
+  });
+
+  it('SVG 分支不接解码校验（spec 铁律）：render 立即 resolve，不等待解码事件', async () => {
+    const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>');
+    const instance = await imageRenderer.render(svg, target(), fakeSource('ok.svg'), { ext: 'svg' } as never);
+    expect(document.querySelector('.vv-image img')).not.toBeNull();
+    instance.destroy();
   });
 });
