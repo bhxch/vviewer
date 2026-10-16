@@ -404,7 +404,17 @@
       const inField =
         t !== null &&
         (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
-      if (inField) return;
+      if (inField) {
+        // BUG-31：快速打开面板输入框自动聚焦，本分支提前 return 会吞掉 Ctrl+P
+        // toggle（面板已开时再按不关闭、不 preventDefault → 真实浏览器触发打印）。
+        // 组合键例外放行：Ctrl/Cmd+P 恒走 toggle（VSCode 同惯例）；其余按键维持
+        // inField 不接管语义（j/k/gg/G、单键面）。
+        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p') {
+          e.preventDefault();
+          quickOpenOpen = !quickOpenOpen;
+        }
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
         e.preventDefault();
         globalSearchOpen = !globalSearchOpen;

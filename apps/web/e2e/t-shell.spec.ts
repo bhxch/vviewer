@@ -577,36 +577,27 @@ test.fixme(
   }
 );
 
-test.fixme(
-  'BUG-31 [探索]: 快速打开面板已开时再按 Ctrl+P 不关闭且不 preventDefault——AppShell inField 提前 return 吞 toggle',
-  async () => {
-    // 现象（severity low，键位语义缺陷）：快速打开面板输入框被 $effect 自动聚焦
-    // （QuickOpenPanel.svelte:27-29），AppShell 全局 keydown handler 对 INPUT 焦点提前
-    // return（AppShell.svelte:234-238 inField 分支，无 preventDefault），面板打开态再按
-    // Ctrl+P 既不切换关闭（AppShell.svelte:244-248 toggle 分支不可达）也不
-    // preventDefault——真实桌面浏览器中该按键会触发打印对话框。面板输入框自身 handler
-    // （QuickOpenPanel.svelte:81-95）只处理 ↑↓/Enter、无 Ctrl+P 分支；Esc 与 ✕ 仍可关闭
-    // （有替代路径）。服务端档 8391 与纯前端档 4199 结果一致。
-    //
-    // 最小复现：
-    //   1) 连接服务器后按 Ctrl+P 打开面板（输入框自动聚焦，activeElement=.vv-quickopen-input）；
-    //   2) 再按一次 Ctrl+P：面板不关闭；
-    //   3) 页内对输入框派发 new KeyboardEvent('keydown',{key:'p',ctrlKey:true,cancelable:true})：
-    //      ev.defaultPrevented === false。
-    //   对照：同一事件派发到 BODY（target 非 INPUT）时 defaultPrevented=true 且面板关闭/重开
-    //   （toggle 双向正常），证明行为差异确由 inField 分支造成。
-    //
-    // 证据（复核会话，apps/web/.temp/reverify-shell-e5/）：
-    //   - reverify.mjs（两档）：s2_inputFocused=true、s3_panelStillOpenAfter2ndCtrlP=true
-    //     （两档均 true）、s4_synthetic={defaultPrevented:false,target:'INPUT.vv-quickopen-input'}、
-    //     s5_panelClosedByEsc=true。
-    //   - reverify3.mjs（两档）：s2_bodyDispatch={defaultPrevented:true,target:'BODY'}、
-    //     s3_panelClosedByBodyDispatch=true、s4_bodyDispatch2={defaultPrevented:true}、
-    //     s5_panelReopened=true。
-    //
-    // 转正提示：纯前端 harness 即可达（两档一致）；期望修复后「面板已开时再按 Ctrl+P
-    // 关闭面板且事件被 preventDefault」，可用 page.keyboard.press('Control+p') 两按 +
-    // 面板可见性/defaultPrevented 断言。
+test(
+  'BUG-31: 快速打开面板已开时再按 Ctrl+P 应 toggle 关闭且 preventDefault（inField 例外放行）',
+  async ({ page }) => {
+    // 缺陷（low，键位语义）：面板输入框自动聚焦（QuickOpenPanel.svelte），AppShell
+    // 全局 keydown 的 inField 提前 return 吞掉 Ctrl+P toggle——面板已开再按不关闭、
+    // 不 preventDefault（真实浏览器触发打印对话框）。修复（2026-10-16）：inField
+    // 分支内 Ctrl/Cmd+P 组合键例外放行（恒走 toggle + preventDefault，VSCode 同
+    // 惯例）；其余按键 inField 语义原样。历史证据路径见缺陷库。
+    test.setTimeout(60_000);
+    await page.goto('/');
+    await openDir(page, [{ name: 'bug31.ts', type: 'text/plain', content: 'export const a = 1;\n' }]);
+    // 第一按：打开面板（输入框自动聚焦）
+    await page.keyboard.press('Control+p');
+    const panel = page.locator('.vv-quickopen');
+    await expect(panel).toBeVisible();
+    // 第二按：面板已开（输入焦点）→ toggle 关闭（现状：inField 吞掉，面板不关）
+    await page.keyboard.press('Control+p');
+    await expect(panel, 'BUG-31：面板已开再按 Ctrl+P 应关闭').toBeHidden();
+    // 第三按：toggle 双向——重开
+    await page.keyboard.press('Control+p');
+    await expect(panel, 'toggle 双向：再按重开').toBeVisible();
   }
 );
 
