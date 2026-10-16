@@ -260,6 +260,33 @@ describe('avRenderer', () => {
     target.remove();
   });
 
+  it('BUG-52：损坏音频 error → 错误卡片（文案含映射表条目 + 重试按钮）；首错收口不双弹；destroy 幂等', async () => {
+    const create = vi.fn(() => 'blob:mock');
+    const revoke = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { value: create, configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: revoke, configurable: true });
+    const target = document.createElement('div');
+    document.body.append(target);
+    const instance = await avRenderer.render(new Uint8Array(8), target, fakeSource('broken.mp3'), { ext: 'mp3' } as never);
+    const el = target.querySelector('audio');
+    expect(el).not.toBeNull();
+    // 注入 MediaError（code=4 与实机 DEMUXER_ERROR 同值）后派发 error
+    Object.defineProperty(el!, 'error', { value: { code: 4 }, configurable: true });
+    el!.dispatchEvent(new Event('error'));
+    const card = target.querySelector('.vv-error-card');
+    expect(card, '解码失败应出错误卡片').not.toBeNull();
+    expect(card!.querySelector('.vv-error-detail')!.textContent).toContain('无法播放此媒体');
+    expect(card!.querySelector('.vv-error-detail')!.textContent).toContain('MEDIA_ERR_SRC_NOT_SUPPORTED');
+    expect([...card!.querySelectorAll('.vv-error-action')].map((b) => b.textContent)).toContain('重试');
+    // 首错收口：二次 error 不重弹（cardShown guard）——卡片仍恰一张
+    el!.dispatchEvent(new Event('error'));
+    expect(target.querySelectorAll('.vv-error-card').length).toBe(1);
+    // 播放器已 release（revoke 恰一次）；实例 destroy 幂等不再 revoke
+    instance.destroy();
+    expect(revoke).toHaveBeenCalledTimes(1);
+    target.remove();
+  });
+
   it('本地 store 的 m3u8 明确报错（不再静默挂起；错误卡片由 dispatcher catch 呈现）', async () => {
     const target = document.createElement('div');
     document.body.append(target);

@@ -15,6 +15,8 @@
 // video error）升级为统一错误卡片（BUG-01 消除静默无限重试、BUG-14 替换黑屏+瞬时
 // Reconnect 计数），卡片带「重试」（重跑本渲染器 render）与「降级查看」（hex 兜底）按钮，
 // 重试/降级成功产出的新实例由本渲染闭包级联托管（本实例 destroy 时级联释放，不泄漏）。
+// BUG-52：错误卡片装置上提为音频/视频双分支共享——音频解码失败同样弹卡（首错收口、
+// 映射表复用），liveChild 级联并入音频实例 destroy，不再静默。
 // 类型分派/协议映射/配置构造/HLS 直连解析/清单改写/fatal 决策为纯函数导出（单测直测；
 // jsdom 无法真渲染 ArtPlayer，真实播放 E2E 留 T7）。
 import { getHexFallbackRenderer, getRemoteBase, SESSION_LAST_SERVER_KEY, showErrorCard } from '@vviewer/core';
@@ -364,66 +366,13 @@ export const avRenderer: Renderer = {
       throw new Error('本地文件的 HLS（m3u8）暂不支持播放：请通过顶栏「连接服务器」打开该文件');
     }
 
-    if (playerKindOf(det.ext) === 'audio') {
-      const url = URL.createObjectURL(makeBlob());
-      const el = document.createElement('audio');
-      el.setAttribute('controls', '');
-      el.src = url;
-      el.className = 'vv-av';
-      target.replaceChildren(el);
-      const instance: RenderedInstance & { getMeta(): { size: number; encoding?: Encoding } } = {
-        // BUG-04 握手点 2 代工：av 实例暴露大小与编码（SHELL-12 验收要求媒体至少大小+编码）
-        getMeta: () => ({ size: buffer.length, encoding: det.encoding }),
-        destroy() {
-          el.pause();
-          URL.revokeObjectURL(url);
-          el.remove();
-        }
-      };
-      return instance;
-    }
-
-    // blob URL 推迟到 ArtPlayer 构造前一刻创建：动态 import 与 customType 装配失败时
-    // 尚未创建（零泄漏）；构造抛错则 revoke 后 rethrow（destroy 永不执行的失败路径不再漏）。
-    // HLS 直连不建 blob（url 为服务端真实地址），revoke 面天然不存在。
-    const Artplayer = (await import('artplayer')).default;
-    const cleanups: Cleanup[] = [];
-    // 运行期 fatal 升级通道：loader 内部错误事件 → showMediaError（art 构造前先占位）
-    let mediaFatal: StreamFatalHandler = () => {};
-    const customType: NonNullable<Option['customType']> = {};
-    if (streamProtocolOf(det.ext) === 'hls') {
-      customType.m3u8 = await makeHlsLoader(hlsDirect!, cleanups, (m) => mediaFatal(m));
-    } else if (det.ext === 'flv' || det.ext === 'ts') {
-      const loader = await makeMpegtsLoader(det.ext, cleanups, (m) => mediaFatal(m));
-      customType.flv = loader;
-      customType.ts = loader;
-    }
-    const container = document.createElement('div');
-    container.className = 'vv-av vv-artplayer';
-    target.replaceChildren(container);
-    const url = hlsDirect ? hlsDirect.url : URL.createObjectURL(makeBlob());
-    let art: InstanceType<typeof Artplayer>;
-    try {
-      // 主题色传 CSS 变量引用（见 ART_THEME 注释）：随主题切换自动跟随
-      art = new Artplayer({ ...buildArtConfig(container, url, det.ext, ART_THEME), customType });
-    } catch (err) {
-      if (!hlsDirect) URL.revokeObjectURL(url);
-      throw err;
-    }
-
     // ---------- BUG-14：运行期错误 → 统一错误卡片（重试/降级查看） ----------
+    // BUG-52 起装置上提为音频/视频双分支共享——原装置段闭包捕获视频路径状态，音频
+    // 分支提前 return 够不着，损坏音频完全静默。release 声明为 no-op 缺省，各分支
+    // 创建自己的资源后覆写装配；更早的失败路径（如 art 构造失败）在赋值前 throw，
+    // release 仍为缺省 no-op（revoke 已在该失败路径内就地完成，不受影响）。
     let released = false;
-    const release = (): void => {
-      if (released) return;
-      released = true;
-      for (const cleanup of cleanups) cleanup(); // hls/mpegts 实例先于 art.destroy 释放
-      try {
-        art.destroy(true);
-      } catch {
-        // 容器已被替换等极端场景：art 内部状态清理失败可忽略（DOM 已由 replaceChildren 摘除）
-      }
-      if (!hlsDirect) URL.revokeObjectURL(url);
-    };
+    let release: () => void = () => {};
     let cardShown = false;
     // 重试/降级成功产出的新实例由本渲染闭包级联托管：ViewerPane 持有的 live 仍是本卡片
     // 实例（旧播放器实例），tab 关闭/重渲染时 destroy 走级联释放——重试产出的新播放器
@@ -471,6 +420,79 @@ export const avRenderer: Renderer = {
       cardShown = true;
       release(); // 摘除黑屏容器并释放播放器资源，错误卡片随即替换
       showErrorCard(target, `无法播放此媒体：${message}`, source, { actions: buildActions() });
+    };
+
+    if (playerKindOf(det.ext) === 'audio') {
+      const url = URL.createObjectURL(makeBlob());
+      const el = document.createElement('audio');
+      el.setAttribute('controls', '');
+      el.src = url;
+      el.className = 'vv-av';
+      target.replaceChildren(el);
+      release = () => {
+        if (released) return;
+        released = true;
+        el.pause();
+        URL.revokeObjectURL(url);
+        el.remove();
+      };
+      // BUG-52：音频解码失败不再静默——对齐视频分支 showMediaError（首错收口，
+      // MediaError code 语义音视频一致，映射表复用）
+      el.addEventListener('error', () => {
+        showMediaError(videoErrorMessage(el.error?.code));
+      });
+      const instance: RenderedInstance & { getMeta(): { size: number; encoding?: Encoding } } = {
+        // BUG-04 握手点 2 代工：av 实例暴露大小与编码（SHELL-12 验收要求媒体至少大小+编码）
+        getMeta: () => ({ size: buffer.length, encoding: det.encoding }),
+        destroy() {
+          release(); // 幂等：错误卡片 release 后 destroy 为 no-op
+          liveChild?.destroy(); // 级联：销毁重试/降级托管的成功实例（对齐视频实例）
+        }
+      };
+      return instance;
+    }
+
+    // blob URL 推迟到 ArtPlayer 构造前一刻创建：动态 import 与 customType 装配失败时
+    // 尚未创建（零泄漏）；构造抛错则 revoke 后 rethrow（destroy 永不执行的失败路径不再漏）。
+    // HLS 直连不建 blob（url 为服务端真实地址），revoke 面天然不存在。
+    const Artplayer = (await import('artplayer')).default;
+    const cleanups: Cleanup[] = [];
+    // 运行期 fatal 升级通道：loader 内部错误事件 → showMediaError（art 构造前先占位）
+    let mediaFatal: StreamFatalHandler = () => {};
+    const customType: NonNullable<Option['customType']> = {};
+    if (streamProtocolOf(det.ext) === 'hls') {
+      customType.m3u8 = await makeHlsLoader(hlsDirect!, cleanups, (m) => mediaFatal(m));
+    } else if (det.ext === 'flv' || det.ext === 'ts') {
+      const loader = await makeMpegtsLoader(det.ext, cleanups, (m) => mediaFatal(m));
+      customType.flv = loader;
+      customType.ts = loader;
+    }
+    const container = document.createElement('div');
+    container.className = 'vv-av vv-artplayer';
+    target.replaceChildren(container);
+    const url = hlsDirect ? hlsDirect.url : URL.createObjectURL(makeBlob());
+    let art: InstanceType<typeof Artplayer>;
+    try {
+      // 主题色传 CSS 变量引用（见 ART_THEME 注释）：随主题切换自动跟随
+      art = new Artplayer({ ...buildArtConfig(container, url, det.ext, ART_THEME), customType });
+    } catch (err) {
+      if (!hlsDirect) URL.revokeObjectURL(url);
+      throw err;
+    }
+
+    // release 装配点（art 创建成功之后；装置段已上提为双分支共享）：摘除播放器容器
+    // 并释放 blob/流实例。构造失败路径在赋值前已 throw（revoke 于 catch 内就地完成），
+    // 缺省 no-op 的 release 不会被触发。
+    release = (): void => {
+      if (released) return;
+      released = true;
+      for (const cleanup of cleanups) cleanup(); // hls/mpegts 实例先于 art.destroy 释放
+      try {
+        art.destroy(true);
+      } catch {
+        // 容器已被替换等极端场景：art 内部状态清理失败可忽略（DOM 已由 replaceChildren 摘除）
+      }
+      if (!hlsDirect) URL.revokeObjectURL(url);
     };
     mediaFatal = showMediaError;
     // video 运行期解码错误（截断 mp4 等）：ArtPlayer 转发 video 'error' 事件
