@@ -151,6 +151,12 @@ vviewer 现状：客户端 wasm 内嵌 lite 集 34 语言，服务端 compute �
   `secrets.NPM_TOKEN`）；`pages-deploy.yml` CDN 注入收紧为
   `vars.NPM_SCOPE != '' && github.ref_type == 'tags'`。运营清单
   （NPM_SCOPE / NPM_TOKEN / 首发走 tag）见 `server/README.md`「资产分发」。
+- **勘误（2026-10-16，卫生批 ledger H1）**：上条发布管线表述已过时且与实现不符——
+  2026-10-10 npm 方案 B（contentHash 对比线上 latest）整体重写 publish-npm 门后，
+  `web` job 无 job 级 `NPM_SCOPE` 门（CDN 版本改各次部署自解析 npm latest，注入为
+  step 级），「两 job 均以 `vars.NPM_SCOPE != ''` 门控」不再成立；`pages-deploy.yml`
+  亦已删除 grammar_version 关联（pages 无需关联 tag）。本条保留原文仅作历史记录，
+  现行为准以 `release.yml` / `pages-deploy.yml` 现文为准。
 - **SW 适配**：grammars runtimeCaching maxEntries 300→500（全量集 ~299 wasm 不提前
   逐出，跨版本陈旧由 cacheName 修订号兜底）；`VV_GRAMMAR_CDN` 经 vite define 构建期
   注入（CI e2e job 同参注入 mock CDN 域）。
