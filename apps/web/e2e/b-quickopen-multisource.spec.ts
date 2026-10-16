@@ -1,6 +1,5 @@
-import http from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { test, expect, type Page } from '@playwright/test';
+import { startFakeFileServer } from './fake-file-server';
 
 /**
  * QuickOpen 多源扫描域（QO-01..04，docs/e2e/quickopen-multisource.md；富化第三轮）。
@@ -10,81 +9,9 @@ import { test, expect, type Page } from '@playwright/test';
  * 拼接与源名前缀 / 按 storeId 打开落对来源 / 跨源排除规则 / 空来源态。maxFiles 上限
  * 由单测承载，e2e 不重复布点（spec §2 既有裁决）。
  *
- * 装置：本地源走 __vvOpenDirImpl 注入（t-shell 同款）；remote 走 spec 内单根假服务
- * （b-wsx-recovery startWsxFakeServer 的单根精简版）。
+ * 装置：本地源走 __vvOpenDirImpl 注入（t-shell 同款）；remote 走共享单根假服务
+ * fake-file-server（审计 R1 M-2 下沉，filetree-src-remove 同款）。
  */
-
-interface FakeOptions {
-  rootPath: string;
-  files: Record<string, string>;
-}
-
-async function startQoFakeServer(opts: FakeOptions): Promise<{ base: string; host: string; close: () => Promise<void> }> {
-  const server = http.createServer((req, res) => {
-    const url = new URL(req.url ?? '/', 'http://localhost');
-    const cors: Record<string, string> = { 'Access-Control-Allow-Origin': '*' };
-    if (url.pathname === '/api/health') {
-      res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ capabilities: ['file-server'] }));
-      return;
-    }
-    if (url.pathname === '/api/ticket') {
-      res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ticket: 'e2e' }));
-      return;
-    }
-    if (url.pathname === '/api/events') {
-      res.writeHead(200, { ...cors, 'Content-Type': 'text/event-stream' });
-      return; // 保持打开、无数据帧：SSE 挂起即可（测试结束统一断连）
-    }
-    if (url.pathname === '/api/tree' || url.pathname === '/api/file') {
-      const p = (url.searchParams.get('path') ?? '').replace(/^\/+|\/+$/g, '');
-      const table = opts.files;
-      if (url.pathname === '/api/tree') {
-        const entries = new Map<string, 'dir' | 'file'>();
-        const prefix = p === '' ? '' : `${p}/`;
-        for (const key of Object.keys(table)) {
-          if (!key.startsWith(prefix)) continue;
-          const rest = key.slice(prefix.length);
-          const head = rest.split('/')[0]!;
-          entries.set(head, rest.includes('/') ? 'dir' : 'file');
-        }
-        res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            entries: [...entries].map(([name, kind]) => ({
-              name,
-              kind,
-              ...(kind === 'file' ? { size: (table[`${prefix}${name}`] ?? '').length } : {})
-            }))
-          })
-        );
-        return;
-      }
-      const content = table[p];
-      if (content === undefined) {
-        res.writeHead(404, cors);
-        res.end('no such file');
-        return;
-      }
-      res.writeHead(200, { ...cors, 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end(content);
-      return;
-    }
-    res.writeHead(404, cors);
-    res.end();
-  });
-  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
-  const port = (server.address() as AddressInfo).port;
-  return {
-    base: `http://127.0.0.1:${port}`,
-    host: `127.0.0.1:${port}`,
-    close: async () => {
-      server.closeAllConnections();
-      await new Promise<void>((ok) => server.close(() => ok()));
-    }
-  };
-}
 
 async function waitAppMounted(page: Page): Promise<void> {
   await page.waitForFunction(
@@ -118,7 +45,7 @@ async function openQuickOpen(page: Page): Promise<void> {
 
 test.describe('QuickOpen 多源扫描（QO-01..04）', () => {
   test('QO-01：双源扫描拼接——结果行同时含两源文件且带「源名 / path」前缀', async ({ page }) => {
-    const fake = await startQoFakeServer({ rootPath: '/qo-root', files: { 'hello-remote.txt': 'remote body\n' } });
+    const fake = await startFakeFileServer({ rootPath: '/qo-root', files: { 'hello-remote.txt': 'remote body\n' } });
     try {
       await page.goto('/');
       await waitAppMounted(page);
@@ -141,7 +68,7 @@ test.describe('QuickOpen 多源扫描（QO-01..04）', () => {
   });
 
   test('QO-02：按 storeId 打开——过滤词命中 remote 源文件，Enter 后内容落 remote 来源', async ({ page }) => {
-    const fake = await startQoFakeServer({ rootPath: '/qo-root', files: { 'hello-remote.txt': 'remote body marker-42\n' } });
+    const fake = await startFakeFileServer({ rootPath: '/qo-root', files: { 'hello-remote.txt': 'remote body marker-42\n' } });
     try {
       await page.goto('/');
       await waitAppMounted(page);
@@ -159,7 +86,7 @@ test.describe('QuickOpen 多源扫描（QO-01..04）', () => {
   });
 
   test('QO-03：跨源排除规则——命中排除的两源同名文件均不出现，其余文件在', async ({ page }) => {
-    const fake = await startQoFakeServer({ rootPath: '/qo-root', files: { 'secret.txt': 'remote secret\n', 'keep.txt': 'remote keep\n' } });
+    const fake = await startFakeFileServer({ rootPath: '/qo-root', files: { 'secret.txt': 'remote secret\n', 'keep.txt': 'remote keep\n' } });
     try {
       // 排除规则在应用启动读取（settings store）：addInitScript 预写 localStorage（先于首次导航）
       await page.addInitScript(() => {
@@ -180,7 +107,7 @@ test.describe('QuickOpen 多源扫描（QO-01..04）', () => {
   });
 
   test('QO-04：空来源态——本地空目录来源不拖垮扫描，remote 结果正常列出且无错误态', async ({ page }) => {
-    const fake = await startQoFakeServer({ rootPath: '/qo-root', files: { 'only-remote.txt': 'remote only\n' } });
+    const fake = await startFakeFileServer({ rootPath: '/qo-root', files: { 'only-remote.txt': 'remote only\n' } });
     try {
       await page.goto('/');
       await waitAppMounted(page);

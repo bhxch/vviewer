@@ -1,7 +1,6 @@
-import http from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { test, expect, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
+import { startFakeFileServer } from './fake-file-server';
 
 /**
  * 文件树源级移除全链（FTSRC-01..04，docs/e2e/filetree-src-remove.md；富化第三轮）。
@@ -11,80 +10,8 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * 若共享同一 storeId 不受影响。
  *
  * 装置：本地源走 __vvOpenDirImpl 注入（label 决定 localfiles:<label> storeId）；
- * remote 走 spec 内单根假服务（b-quickopen-multisource 同款精简版）。
+ * remote 走共享单根假服务 fake-file-server（审计 R1 M-2 下沉，quickopen 同款）。
  */
-
-interface FakeOptions {
-  rootPath: string;
-  files: Record<string, string>;
-}
-
-async function startFtFakeServer(opts: FakeOptions): Promise<{ base: string; host: string; close: () => Promise<void> }> {
-  const server = http.createServer((req, res) => {
-    const url = new URL(req.url ?? '/', 'http://localhost');
-    const cors: Record<string, string> = { 'Access-Control-Allow-Origin': '*' };
-    if (url.pathname === '/api/health') {
-      res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ capabilities: ['file-server'] }));
-      return;
-    }
-    if (url.pathname === '/api/ticket') {
-      res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ticket: 'e2e' }));
-      return;
-    }
-    if (url.pathname === '/api/events') {
-      res.writeHead(200, { ...cors, 'Content-Type': 'text/event-stream' });
-      return;
-    }
-    if (url.pathname === '/api/tree' || url.pathname === '/api/file') {
-      const p = (url.searchParams.get('path') ?? '').replace(/^\/+|\/+$/g, '');
-      const table = opts.files;
-      if (url.pathname === '/api/tree') {
-        const entries = new Map<string, 'dir' | 'file'>();
-        const prefix = p === '' ? '' : `${p}/`;
-        for (const key of Object.keys(table)) {
-          if (!key.startsWith(prefix)) continue;
-          const rest = key.slice(prefix.length);
-          const head = rest.split('/')[0]!;
-          entries.set(head, rest.includes('/') ? 'dir' : 'file');
-        }
-        res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            entries: [...entries].map(([name, kind]) => ({
-              name,
-              kind,
-              ...(kind === 'file' ? { size: (table[`${prefix}${name}`] ?? '').length } : {})
-            }))
-          })
-        );
-        return;
-      }
-      const content = table[p];
-      if (content === undefined) {
-        res.writeHead(404, cors);
-        res.end('no such file');
-        return;
-      }
-      res.writeHead(200, { ...cors, 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end(content);
-      return;
-    }
-    res.writeHead(404, cors);
-    res.end();
-  });
-  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
-  const port = (server.address() as AddressInfo).port;
-  return {
-    base: `http://127.0.0.1:${port}`,
-    host: `127.0.0.1:${port}`,
-    close: async () => {
-      server.closeAllConnections();
-      await new Promise<void>((ok) => server.close(() => ok()));
-    }
-  };
-}
 
 async function waitAppMounted(page: Page): Promise<void> {
   await page.goto('/');
@@ -145,7 +72,7 @@ async function expectActiveWorkspace(page: Page, name: string): Promise<void> {
 
 test.describe('文件树源级移除（FTSRC-01..04）', () => {
   test('FTSRC-01/03：confirm 接受——该源 tab 全关 + 源标签消失；同组他源 tab 与标签保留', async ({ page }) => {
-    const fake = await startFtFakeServer({ rootPath: '/ft-root', files: { 'hello-remote.txt': 'remote body\n' } });
+    const fake = await startFakeFileServer({ rootPath: '/ft-root', files: { 'hello-remote.txt': 'remote body\n' } });
     try {
       await waitAppMounted(page);
       await openLocalDir(page, [{ name: 'alpha-local.txt', content: 'local alpha\n' }], 'ftsrc-local');
@@ -169,7 +96,7 @@ test.describe('文件树源级移除（FTSRC-01..04）', () => {
   });
 
   test('FTSRC-02：confirm 取消——tab 与源标签均不动', async ({ page }) => {
-    const fake = await startFtFakeServer({ rootPath: '/ft-root', files: { 'hello-remote.txt': 'remote body\n' } });
+    const fake = await startFakeFileServer({ rootPath: '/ft-root', files: { 'hello-remote.txt': 'remote body\n' } });
     try {
       await waitAppMounted(page);
       await openLocalDir(page, [{ name: 'alpha-local.txt', content: 'local alpha\n' }], 'ftsrc-local');
@@ -190,7 +117,7 @@ test.describe('文件树源级移除（FTSRC-01..04）', () => {
     // 新组不产生重复源——「他组同 storeId 不受影响」的组内移除保护（AppShell
     // removeSource 注释在案）在当前 UI 无自然触发面，属防御性实现。本用例锚定该
     // 路由行为本身（行为变更须经评审）。
-    const fake = await startFtFakeServer({ rootPath: '/ft-root', files: {} });
+    const fake = await startFakeFileServer({ rootPath: '/ft-root', files: {} });
     try {
       await waitAppMounted(page);
       await openLocalDir(page, [{ name: 'shared-file.txt', content: 'shared body\n' }], 'shared-src');
@@ -206,8 +133,6 @@ test.describe('文件树源级移除（FTSRC-01..04）', () => {
       // 组 B 内二次同 label 注入：路由回原组（默认）——不产生重复源
       await openLocalDir(page, [{ name: 'shared-file.txt', content: 'shared body\n' }], 'shared-src');
       await expectActiveWorkspace(page, '默认');
-      await expect(page.locator('.vv-tree-src', { hasText: 'shared-src' })).toBeVisible();
-      await expect(page.locator('.vv-tab', { hasText: 'shared-src' })).toBeVisible(); // 既有目录 tab 激活
       await expect(page.locator('.vv-tree-src', { hasText: 'shared-src' })).toBeVisible();
       await expect(page.locator('.vv-tab', { hasText: 'shared-src' })).toBeVisible(); // 既有目录 tab 激活
       // 组 B 仍空（无重复源）

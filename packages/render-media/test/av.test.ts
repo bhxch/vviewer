@@ -3,7 +3,7 @@
 // + 音频原生 <audio> 路径（blob 生命周期不变 + getMeta 代工）+ 本地 m3u8 明确报错。
 // vi.mock 双态：默认构造抛错（T7 构造失败路径 revoke 后 rethrow）；可切正常构造，
 // 验证 BUG-54 视频运行期错误的 video:error 同步点缓存（卡片文案命中映射表）。
-import { describe, expect, it, vi, afterEach } from 'vitest';
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
 import { createRemoteStore, SESSION_LAST_SERVER_KEY } from '@vviewer/core';
 import type { RenderedInstance } from '@vviewer/core';
 import {
@@ -243,6 +243,18 @@ describe('videoErrorMessage：HTMLMediaElement error code → 可读文案', () 
 });
 
 describe('avRenderer', () => {
+  // 审计 R1 M-4：artMock 态还原收口——此前 BUG-54 用例手动翻转 failConstruct/instances
+  // 且仅尾部还原，中途失败即泄漏默认态到后续用例。beforeEach 复位默认态（构造失败 +
+  // 空实例表），afterEach 兜底同复位（防中途失败泄漏）。
+  beforeEach(() => {
+    artMock.state.failConstruct = true;
+    artMock.state.instances = [];
+  });
+  afterEach(() => {
+    artMock.state.failConstruct = true;
+    artMock.state.instances = [];
+  });
+
   /** 最小 FileSource 桩（av 渲染只读 det.ext 与 m3u8 直连解析，其余仅透传） */
   function fakeSource(name: string, storeId = 'localfiles:samples'): FileSource {
     return {
@@ -380,8 +392,8 @@ describe('avRenderer', () => {
     const revoke = vi.fn();
     Object.defineProperty(URL, 'createObjectURL', { value: create, configurable: true });
     Object.defineProperty(URL, 'revokeObjectURL', { value: revoke, configurable: true });
+    // 翻默认态（failConstruct 复位由本 describe beforeEach/afterEach 收口，M-4）
     artMock.state.failConstruct = false;
-    artMock.state.instances = [];
     const target = document.createElement('div');
     document.body.append(target);
     await avRenderer.render(new Uint8Array(16), target, fakeSource('broken.mp4'), { ext: 'mp4' } as never);
@@ -395,7 +407,6 @@ describe('avRenderer', () => {
     expect(detail).toContain('MEDIA_ERR_SRC_NOT_SUPPORTED');
     expect(detail).not.toContain('未知错误');
     expect(revoke).toHaveBeenCalledTimes(1); // release 摘播放器并回收 blob
-    artMock.state.failConstruct = true;
     target.remove();
   });
 });
