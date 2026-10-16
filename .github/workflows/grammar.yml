@@ -58,6 +58,7 @@ jobs:
   server-full:
     name: server 全量 301 门禁
     runs-on: ubuntu-latest
+    timeout-minutes: 240  # 全量 301 编译+测试上限（ledger H7：默认 360 兜底不显式；self-build 为 120）
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6

@@ -197,7 +197,23 @@ static CONFIGS: Lazy<HashMap<&'static str, Arc<HighlightConfiguration>>> = Lazy:
                 map.insert(entry.name, Arc::new(config));
             }
             Err(e) => {
-                tracing::warn!("language {} highlights query 编译失败，已剔除: {e}", entry.name);
+                // 合并后编译失败（ledger H10 严格化）：降级重试——仅主 queries 重建
+                // 配置（injections/locals 剔除），不再剔整语言；与 ENTRIES 层「逐文件
+                // 置空保底」的 sanitize 契约对齐，再失败才剔除。
+                tracing::warn!("language {} 合并查询编译失败，降级为主 queries 重试: {e}", entry.name);
+                match HighlightConfiguration::new(Language::from(entry.language), entry.name, &expanded, "", "") {
+                    Ok(mut config) => {
+                        config.configure(names);
+                        tracing::warn!(
+                            "language {} 以主 queries 降级可用（injections/locals 剔除）",
+                            entry.name
+                        );
+                        map.insert(entry.name, Arc::new(config));
+                    }
+                    Err(e2) => {
+                        tracing::warn!("language {} highlights query 编译失败，已剔除: {e2}", entry.name);
+                    }
+                }
             }
         }
     }
