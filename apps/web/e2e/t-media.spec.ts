@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { deflateSync, crc32 } from 'node:zlib';
 import { test, expect, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 
@@ -28,6 +29,40 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
 /** 样例与 m4 套件同源（samples/m4，tools/gen-samples.mjs 生成） */
 const sampleOf = (name: string): Uint8Array => new Uint8Array(readFileSync(`${repoRoot}/samples/m4/${name}`));
+
+/** 真 PNG（32×8 RGBA，签名+IHDR+IDAT+IEND，CRC 经 node:zlib crc32）。
+ * BUG-53 解码校验合入后，sample.bin（PNG 头+伪随机体，无 IDAT/IEND，本就不可完整解码）
+ * 被「图片解码失败」卡正确拒绝，不能再作正常图片载体——本 helper 现地构造可解码 PNG。 */
+const goodPng = (): Uint8Array => {
+  const w = 32;
+  const h = 8;
+  const chunk = (type: string, data: Uint8Array): Uint8Array => {
+    const out = new Uint8Array(12 + data.length);
+    const dv = new DataView(out.buffer);
+    dv.setUint32(0, data.length);
+    out.set(new TextEncoder().encode(type), 4);
+    out.set(data, 8);
+    dv.setUint32(8 + data.length, crc32(out.subarray(4, 8 + data.length)));
+    return out;
+  };
+  const ihdr = new Uint8Array(13);
+  const ihdrDv = new DataView(ihdr.buffer);
+  ihdrDv.setUint32(0, w);
+  ihdrDv.setUint32(4, h);
+  ihdr[8] = 8; // 位深 8
+  ihdr[9] = 6; // 色型 RGBA
+  const raw = new Uint8Array(h * (1 + w * 4)); // 每行 filter 0 + RGBA 像素（全 0 透明）
+  const idat = new Uint8Array(deflateSync(raw));
+  const sig = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const parts = [sig, chunk('IHDR', ihdr), chunk('IDAT', idat), chunk('IEND', new Uint8Array(0))];
+  const png = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let off = 0;
+  for (const p of parts) {
+    png.set(p, off);
+    off += p.length;
+  }
+  return png;
+};
 
 interface SpecFile {
   name: string;
@@ -67,9 +102,10 @@ test('MEDIA-01：图片滚轮缩放逐次 1.1×/0.9× 步进倍率、上限 10×
   page
 }) => {
   test.setTimeout(60_000);
-  // sample.bin 本体即 PNG（IHDR 32×8，m4.spec 同源口径），改名为 .png 走图片渲染器
+  // 载体真 PNG（goodPng() 现地构造）：原 sample.bin 为 PNG 头+伪随机体（无 IDAT/IEND），
+  // BUG-53 解码校验合入后被「图片解码失败」卡正确拒绝，不再可作正常图片载体
   await page.goto('/');
-  await openDir(page, [{ name: 't-zoom.png', type: 'image/png', bytes: sampleOf('sample.bin') }]);
+  await openDir(page, [{ name: 't-zoom.png', type: 'image/png', bytes: goodPng() }]);
   await openFile(page, 't-zoom.png');
 
   const img = page.locator('.vv-image img');
@@ -272,115 +308,67 @@ test('MEDIA-10：pptx 提纲卡片页码齐全且文本与源 slide XML 一致',
   }
 });
 
-// ── 媒体与 Office 域探索复核确认缺陷回归占位（2026-10-10 轮）──────────────────────────
-// README §3.2.4 第 4 条：修复合入前以 test.fixme 落占位并在标题/注释标注缺陷号，缺陷修复
-// PR 中转为正式断言。标题以缺陷库编号开头、[探索] 标注来源（缺陷由探索/复核会话独立复现
-// 确认）；各用例注释给出最小复现步骤、证据路径与源码定位。分诊：三条均发现于媒体与 Office
-// 域探索、根因均属本域（packages/render-media 渲染链路：av.ts 音频分支 / image.ts 图片 /
-// av.ts 错误文案取值链），不外迁；BUG-54 虽牵涉 ArtPlayer 重连时序，但缺陷面与修复点在本域
-// av.ts:476-478。转正时三条均可用本文件既有页内 File 注入装置构造截断/垃圾字节载体
-// （音频/视频/图片渲染分支对本地 store 无 source 限制，av.ts:357-384、image.ts:57-72），
-// 无需服务端实例。
+// ── 媒体与 Office 域探索复核确认缺陷回归（2026-10-10 轮）——已全部转正 ─────────────────
+// README §3.2.4 第 4 条：修复合入前以 test.fixme 落占位，缺陷修复 PR 中转为正式断言。
+// BUG-52（音频分支无 error 监听）/ BUG-53（图片解码失败无兜底）/ BUG-54（ArtPlayer 重连
+// 清空 video.error 致文案映射不可达）三条根因均在本域 packages/render-media 渲染链路，
+// 产品修复已先后合入（音频 error 兜底、图片同步解码校验 throw、video:error 同步点缓存
+// code），占位用例已转为正式断言（截断 mp3 / 垃圾 jpg / 截断 mp4 载体，经本文件页内
+// File 注入装置构造，无需服务端实例）。原始现象/复现步骤/证据路径见缺陷库 BUG-52/53/54。
 
-test.fixme('BUG-52 [探索]：损坏音频解码失败后完全静默——audio 分支无 error 监听，无错误卡片与重试/降级（对照视频分支正常弹卡）', async () => {
-  // 现象：损坏/截断音频（mp3/wav）解码失败后 UI 完全静默，audio.error 已触发
-  //   （code=4 DEMUXER_ERROR_COULD_NOT_OPEN）但 main 区域无 .vv-error-card、无任何动作
-  //   按钮，仅呈现空 0:00/0:00 原生控件。影响全部音频扩展名（mp3/wav/flac/m4a/aac/oga/
-  //   opus 均走该分支，av.ts:354）。严重度 medium：正常音频可播；损坏音频即便有卡片也
-  //   无法播放，缺的是错误呈现与重试/降级恢复路径，属健壮性/错误处理一致性缺陷。
-  // 根因（已核对源码）：packages/render-media/src/av.ts:367-384 音频分支只创建
-  //   audio.vv-av + blob src，无任何 error 监听；对照视频分支同文件 av.ts:476-479 有
-  //   art.on('error')→showMediaError→showErrorCard（av.ts:436-473，错误卡片带重试/降级
-  //   查看按钮；类名见 packages/core/src/dispatch/errorRenderer.ts:16,29）——BUG-14 错误
-  //   卡片升级链本身工作，唯独原生音频分支漏接。上报会话 rg 全仓
-  //   addEventListener('error')/onerror 仅命中 SSE/XHR/IndexedDB，无 audio 元素错误兜底。
-  // 最小复现（服务端档，上报口径）：
-  //   1) head -c 300 .temp/explore/media/data/normal.mp3 > /tmp/x.mp3（或直接用已生成的
-  //      broken.mp3）；
-  //   2) server/target/release/vviewer serve --root .temp/explore/media/data --web-dist
-  //      apps/web/build --port 8431；
-  //   3) 连接服务器 → 文件树点击 broken.mp3；
-  //   4) 页内 eval：document.querySelector('audio.vv-av').error → {code:4,...}，
-  //      document.querySelector('main .vv-error-card') → null。
-  //   探测脚本：cd apps/web && node .temp/explore-media/p1c-one.mjs broken.mp3 audio。
-  // 证据（上报会话亲手复现）：broken.mp3 → {"audio":true,"audioErr":{"code":4,"msg":
-  //   "PipelineStatus::DEMUXER_ERROR_COULD_NOT_OPEN: FFmpegDemuxer: open context failed"},
-  //   "errorCard":false,"actions":[]}；broken.wav 同结果（code=4、errorCard:false）。
-  //   对照：同浏览器点 broken.mp4（截断 mp4，视频分支）→ {"card":true,"detail":
-  //   "无法播放此媒体：未知错误","actions":["重试","降级查看"]}——证明 BUG-14 错误卡片
-  //   升级链本身工作，唯独音频分支漏接。截图对比 /tmp/cand-media-e1/broken-mp3-8442.png
-  //   （空 0:00/0:00 原生控件无卡片）vs /tmp/cand-media-e1/broken-mp4-card.png（统一错误
-  //   卡片+两按钮）。覆盖缺口：现有 e2e 仅 apps/web/e2e/t-pwa.spec.ts:483（PWA-09/2 正常
-  //   音频可起播），无损坏音频错误呈现用例。
-  // 转正提示：修复 = 音频分支挂 el.addEventListener('error') → showErrorCard（带重试/降级，
-  //   对齐视频分支）；断言 = 注入截断 mp3 字节后 .vv-error-card 可见且含重试/降级查看按钮。
+test('BUG-52：损坏音频解码失败 → 统一错误卡片（重试按钮）', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto('/');
+  // 2026-10-10 探索复核缺陷回归：音频分支原只建 audio.vv-av 无 error 监听，audio.error
+  // （code=4 demux 失败）后 UI 完全静默；修复 = 对齐视频分支挂 error → showErrorCard。
+  // 载体：mp3 头（ID3）+ 垃圾字节，浏览器 demux 直接失败。
+  await openDir(page, [
+    { name: 'broken.mp3', type: 'audio/mpeg', bytes: new Uint8Array(300).map((_, i) => (i < 3 ? 0x49 : 0xba)) }
+  ]);
+  await openFile(page, 'broken.mp3');
+  const card = page.locator('.vv-error-card');
+  await expect(card, '音频解码失败出统一错误卡片（BUG-52 修复面）').toBeVisible({ timeout: 30_000 });
+  await expect(card.locator('.vv-error-detail')).toContainText('无法播放此媒体');
+  await expect(card.locator('.vv-error-action', { hasText: '重试' })).toBeVisible();
 });
 
-test.fixme('BUG-53 [探索]：损坏图片解码失败无任何兜底——img error 已触发但无错误卡片，仅裂图+alt 文件名（与 BUG-14 修复后的 av 渲染器不一致）', async () => {
-  // 现象：损坏图片（jpg/webp）解码失败，img error 事件已触发（window capture 级监听捕获
-  //   {tag:"img",src:"blob:..."}）、naturalWidth=0、complete=true，但 main 区域无
-  //   .vv-error-card、无重试/降级按钮，UI 仅裂图图标+alt 文件名。严重度 medium：正常图片
-  //   渲染不受影响（对照 good.png naturalWidth=8 渲染成功），损坏文件属性面板仍可读，
-  //   属错误呈现缺失，与原 BUG-14 同级。
-  // 根因（已核对源码）：packages/render-media/src/image.ts:68-69 `img.src = url` 赋值后
-  //   无 error 事件监听，render() 亦不校验解码结果；对照 BUG-14 修复范围
-  //   docs/report/e2e/e2e-fix-report-2026-10-08.md:35（单测 av.test.ts、场景截断 mp4/PDF，
-  //   不含 image）。
-  // 最小复现（服务端档，上报口径）：
-  //   1) 自起实例（测试件自制并经 file(1) 验证 magic：broken.jpg 'JPEG image data, JFIF
-  //      standard 1.01'、broken.webp 'RIFF…Web/P image'，magic 头+垃圾数据）：
-  //      server/target/release/vviewer serve --root <fixture> --web-dist apps/web/build
-  //      --port 8442；
-  //   2) 连接服务器 → 点击 broken.jpg；
-  //   3) 页内 eval：document.querySelector('.vv-image img').naturalWidth → 0，
-  //      document.querySelector('main .vv-error-card') → null。
-  //   探测脚本：cd apps/web && node .temp/explore-media/p1c-one.mjs broken.jpg img
-  //   （复核复刻版 /tmp/reverify-media-e2/verify.mjs 同口径）。
-  // 证据（复核三次运行）：broken.jpg → {"mediaErrs":[{"tag":"img","src":"blob:…"}],
-  //   "final":{"hasCard":false,"retryBtn":false,"naturalWidth":0,"complete":true}}；
-  //   broken.webp 同构（mediaErrs 含 img error、hasCard:false、naturalWidth:0）；对照
-  //   good.png 无 error 事件、naturalWidth=8 正常渲染（排除渲染器整体失效）；对照
-  //   broken.mp4（ffmpeg libopenh264 生成 2s 后 head -c 3000 截断，file(1) 验证
-  //   'ISO Media, MP4'）→ {"mediaErrs":[{"tag":"video","errCode":4}],"final":{"hasCard":
-  //   true,"cardText":"无法播放此媒体：未知错误","retryBtn":true}}，与
-  //   apps/web/e2e/b-media-office-viewer.spec.ts:416-422 断言的修复后行为一致（broken.mp4
-  //   → .vv-error-card 可见 + detail 含「无法播放此媒体」+ 重试/降级查看两按钮）。
-  //   截图 /tmp/reverify-media-e2/shot-broken.jpg.png（裂图图标+alt 文本，无卡片）。
-  // 转正提示：修复 = img.addEventListener('error') → showErrorCard（或 render 后校验解码
-  //   结果）；断言 = 注入垃圾字节 .jpg 后 .vv-error-card 可见、.vv-image 不残留裂图 img。
+test('BUG-53：损坏图片解码失败 → dispatcher 错误卡片（hex 排前），无残留裂图', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto('/');
+  // 2026-10-10 探索复核缺陷回归：image.ts 原 img.src 赋值后无 error 监听，解码失败仅裂图
+  // +alt 文件名无卡片；修复 = render 后同步解码校验 throw 落 dispatcher 错误卡片。
+  // 载体：JPEG 头 + NUL 填充——解码必败；含 NUL 判非文本（magic.ts:32，git 同口径），
+  // open-as 排序落 hex 在前分支（纯 0xba 垃圾 suspicious=0 会被误判文本，不可用）。
+  await openDir(page, [
+    {
+      name: 'broken.jpg',
+      type: 'image/jpeg',
+      bytes: new Uint8Array(512).map((_, i) => (i === 0 ? 0xff : i === 1 ? 0xd8 : i === 2 ? 0xff : 0x00))
+    }
+  ]);
+  await openFile(page, 'broken.jpg');
+  const card = page.locator('.vv-error-card');
+  await expect(card, '解码失败 throw → dispatcher 卡片').toBeVisible({ timeout: 30_000 });
+  const labels = card.locator('.vv-error-action');
+  await expect(labels).toHaveCount(3);
+  await expect(labels.nth(0), 'dispatcher 约定：重试恒首（排序只作用于 open-as 组内）').toHaveText('重试');
+  await expect(labels.nth(1), '判非文本 → 「以 hex 打开」排「以纯文本打开」前（排序锚）').toHaveText('以 hex 打开');
+  await expect(labels.nth(2)).toHaveText('以纯文本打开');
+  await expect(page.locator('.vv-image'), '无残留裂图 img').toHaveCount(0);
 });
 
-test.fixme('BUG-54 [探索]：video 运行期错误卡片文案恒为「无法播放此媒体：未知错误」——ArtPlayer 重连重设源清空 video.error，videoErrorMessage 映射表不可达', async () => {
-  // 现象：av 渲染器 video 运行期错误卡片文案恒为「无法播放此媒体：未知错误」，无论底层
-  //   MediaError 是 code=3（解码失败）还是 code=4（格式不支持）——av.ts:270-278 的
-  //   videoErrorMessage 映射表实际不可达（永远落 default「未知错误」，av.ts:276）。影响
-  //   限于错误详情文案的诊断信息量：错误卡片本身、重试/降级按钮、播放器摘除、不阻塞其他
-  //   tab 均正常；BUG-14 验收「含明确错误信息」的达成度被削弱，现有 e2e
-  //   （apps/web/e2e/b-media-office-viewer.spec.ts:419）只断「无法播放此媒体」前缀，不红。
-  // 根因（已核对源码）：av.ts:476-478 art.on('error') 回调签名 ()、忽略事件参数，读
-  //   art.video?.error；而 ArtPlayer 5.4.0 的 video:error handler（node_modules/.pnpm/
-  //   artplayer@5.4.0/node_modules/artplayer/dist/artplayer.mjs:2495-2501）在
-  //   art.emit("error", error2, reconnectTime) 之前先 await sleep(1s) 并
-  //   art.url = option.url 重设源（重设 src 按 media load 算法清空 video.error），故回调
-  //   读到的恒为 null/undefined → videoErrorMessage(undefined) 落 default；
-  //   RECONNECT_TIME_MAX=5、RECONNECT_SLEEP_TIME=1e3（artplayer.mjs:4976-4977）。
-  // 最小复现（服务端档，上报口径）：
-  //   1) 8391 实例（.temp/e2e-data root，--compute）连接服务器，打开
-  //      domain-media-office-viewer/broken-video.mp4（截断 mp4，video error code=4）；
-  //   2) 等错误卡片出现（约 2~5s，ArtPlayer 重连 sleep 后），读卡片文案；
-  //   3) code=3 对照：自起 8440 实例打开 hollow.mp4（sample-video.mp4 mdat 挖空 88633
-  //      字节构造，video error code=3），同文案。
-  // 证据（复核实跑 /tmp/vv-review-e3/repro.mjs：document 捕获级 error 监听记录真实
-  //   MediaError + 读卡片文案）：broken-video.mp4 → {"detail":"无法播放此媒体：未知错误",
-  //   "buttons":["重试","降级查看"],"videoErrors":[{"code":4,"message":
-  //   "PipelineStatus::DEMUXER_ERROR_COULD_NOT_OPEN: FFmpegDemuxer: open context failed"}],
-  //   "artCountAfterCard":0}，截图 /tmp/vv-review-e3/broken-mp4-8391.png；hollow.mp4 →
-  //   {"detail":"无法播放此媒体：未知错误","videoErrors":[{"code":3,"message":
-  //   "PipelineStatus::PIPELINE_ERROR_DECODE: …"}]}，截图 /tmp/vv-review-e3/hollow-8440.png。
-  //   按 av.ts:274-275 两场景本应分别显示「解码失败：文件损坏或编码不支持
-  //   （MEDIA_ERR_DECODE）」「媒体源不可达或格式不支持（MEDIA_ERR_SRC_NOT_SUPPORTED）」。
-  // 转正提示：修复 = error 回调改接事件参数携带的 MediaError（art.emit("error", error2, …)
-  //   第一参即原始 error；或在重设 url 前缓存 video.error）；断言 = code=4 卡片文案含
-  //   MEDIA_ERR_SRC_NOT_SUPPORTED、code=3 含 MEDIA_ERR_DECODE（载体可用本文件装置注入
-  //   截断/挖空 mp4 字节）。
+test('BUG-54：video 运行期错误文案命中映射表（code=4 → MEDIA_ERR_SRC_NOT_SUPPORTED）', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto('/');
+  // 2026-10-10 探索复核缺陷回归：ArtPlayer video:error 先 sleep 重连并重设源（清空
+  //   video.error），av 回调读 art.video?.error 恒空 → 文案恒「未知错误」、映射表不可达；
+  //   修复 = video:error 同步点缓存 code 供重连后的 emit(error) 取用。
+  // 载体：真 mp4 截断 300B（moov 损坏，video error code=4），沿 b- 套件截断口径。
+  const sample = sampleOf('sample.mp4');
+  await openDir(page, [{ name: 'broken.mp4', type: 'video/mp4', bytes: sample.slice(0, 300) }]);
+  await openFile(page, 'broken.mp4');
+  const card = page.locator('.vv-error-card');
+  // ArtPlayer video:error → 1s sleep 重连 → emit error：文案在卡片出现即查缓存表
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await expect(card.locator('.vv-error-detail')).toContainText('MEDIA_ERR_SRC_NOT_SUPPORTED', { timeout: 30_000 });
 });
