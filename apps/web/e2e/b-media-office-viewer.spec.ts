@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
+import { goodPng } from './png-fixture';
 
 /**
  * media-office-viewer 域补充 E2E（b- 前缀：缺陷修复回归 + 既有套件缺失场景）。
@@ -200,10 +201,12 @@ async function expectGoodPlaying(page: Page): Promise<void> {
 
 test('MEDIA-01：图片滚轮缩放 1.1× 步进、上限 10×、下限 0.1×、双击复位', async ({ page }) => {
   test.setTimeout(60_000);
-  // sample.bin 本体即 PNG（IHDR 32×8，m4 已验证），改名为 .png 走图片渲染器
-  const png = new Uint8Array(readFileSync(`${repoRoot}/samples/m4/sample.bin`));
+  // 载体为规范真 PNG（png-fixture goodPng：签名+IHDR+IDAT+IEND 全链合法）。原用
+  // sample.bin——它仅「PNG 签名+IHDR+伪随机体」，无 IDAT/IEND、本就不可完整解码
+  // （file(1) 只认头部）；BUG-53 图片解码校验（image.ts observeImageDecode）合入后
+  // 被按设计以「图片解码失败」卡拒绝，.vv-image img 永不出现（2026-10-16 T4a 实证）。
   await page.goto('/');
-  await openDir(page, [{ name: 'zoom.png', type: 'image/png', bytes: png }]);
+  await openDir(page, [{ name: 'zoom.png', type: 'image/png', bytes: goodPng() }]);
   await openFile(page, 'zoom.png');
 
   const img = page.locator('.vv-image img');
