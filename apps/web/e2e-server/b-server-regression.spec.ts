@@ -70,7 +70,7 @@ function treeRow(page: Page, name: string): ReturnType<Page['locator']> {
  * 防抖——必须真等到落盘再 reload，否则防抖定时器随页面销毁、快照恒 0）。 */
 async function waitSnapshotScroll(page: Page, name: string, min: number): Promise<void> {
   await expect
-    .poll(async () => page.evaluate(readSnapshotScroll, name), { timeout: 10_000, interval: 100 })
+    .poll(async () => page.evaluate(readSnapshotScroll, name), { timeout: 10_000, intervals: [100] })
     .toBeGreaterThanOrEqual(min);
 }
 

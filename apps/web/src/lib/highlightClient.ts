@@ -243,7 +243,7 @@ async function create(): Promise<HighlightClient> {
   // 三层资产解析链（spec §3）：同源 → 服务端（连接时快照，会话中新连接需刷新
   // 页面才进入资产链）→ CDN。各层失败跳层不阻塞；同名语言 first-wins 归更近层。
   // 环境变量经 vite define 静态替换，构建时定型。
-  const cdnBase = (import.meta.env.VV_GRAMMAR_CDN as string | undefined) || null;
+  const cdnBase = import.meta.env.VV_GRAMMAR_CDN || null;
   const serverBase = loadLastServer()?.baseUrl ?? null;
   const { grammars, layers } = await assembleGrammarLayers({
     sameOriginBase: `${baseUrl}grammars/`,

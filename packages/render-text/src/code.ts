@@ -888,6 +888,12 @@ export function renderCode(
     chunkCanceled = false;
     try {
       await highlightChunk(startLine);
+    } catch (err) {
+      // 高亮失败兜底（ledger H9，low）：unhandled rejection 噪音消除，该块停留
+      // plain（与 hljs 缺席同形态）；不续泵——失败块留在 wantedChunks，下次滚动
+      // scheduleChunks 自然重试（避免恒失败源的当前轮紧循环）；取消同此静默
+      console.debug('[code] pumpChunk 高亮失败（该块停留 plain）', err);
+      return;
     } finally {
       chunkBusy = false;
     }
@@ -1514,6 +1520,12 @@ function renderCodeWindowed(
     chunkCanceled = false;
     try {
       await highlightChunk(startLine);
+    } catch (err) {
+      // 高亮失败兜底（ledger H9，low）：unhandled rejection 噪音消除，该块停留
+      // plain（与 hljs 缺席同形态）；不续泵——失败块留在 wantedChunks，下次滚动
+      // scheduleChunks 自然重试（避免恒失败源的当前轮紧循环）；取消同此静默
+      console.debug('[code] pumpChunk 高亮失败（该块停留 plain）', err);
+      return;
     } finally {
       chunkBusy = false;
     }

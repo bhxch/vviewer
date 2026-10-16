@@ -50,9 +50,10 @@ describe.skipIf(!grammarAssetsReady)('本地 tree-sitter 引擎：python/java �
       if (!r.ok) return;
       expect(r.intervals.length).toBeGreaterThan(0);
       // 层级捕获词法（上游查询同步伴生变化）：python def→keyword.function、java class→keyword。
-      // 断言意图是「keyword 系捕获产出」，用前缀匹配——与 theme.ts 最长前缀回退同构
-      const kw = r.intervals.find((i) => i.capture.startsWith('keyword'));
-      expect(kw).toBeDefined();
+      // 钉死具体 capture 名（ledger H4：前缀匹配弱于精确名）；与 theme.ts 最长前缀回退
+      // 同构的设计意图由该回退自身承担，此处断言查询产出的精确层级
+      const expected = lang === 'python' ? 'keyword.function' : 'keyword';
+      expect(r.intervals.some((i) => i.capture === expected), `${lang} 应产出 ${expected}`).toBe(true);
     }, 30_000);
   }
 });

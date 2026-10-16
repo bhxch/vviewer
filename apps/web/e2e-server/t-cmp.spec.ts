@@ -186,8 +186,8 @@ test.fixme(
 
     // 二次打开命中缓存：响应体显著小于首次（首次≈intervals 本体 17MB 级）
     expect(postSizes.length).toBe(2);
-    expect(postSizes[0]).toBeGreaterThan(1_000_000);
-    expect(postSizes[1]).toBeLessThan(postSizes[0] * 0.5);
+    expect(postSizes[0]!).toBeGreaterThan(1_000_000);
+    expect(postSizes[1]!).toBeLessThan(postSizes[0]! * 0.5);
   }
 );
 
@@ -279,8 +279,8 @@ test.fixme(
     }
 
     // 验收①②：remote（comrak）与 local（markdown-it）经同一 sanitize+enrich 管线，指纹一致
-    expect(fingerprints[1].structure).toEqual(fingerprints[0].structure);
-    expect(fingerprints[1].text).toBe(fingerprints[0].text);
+    expect(fingerprints[1]!.structure).toEqual(fingerprints[0]!.structure);
+    expect(fingerprints[1]!.text).toBe(fingerprints[0]!.text);
   }
 );
 
