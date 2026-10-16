@@ -70,3 +70,12 @@
 5. Range 计量只对「点击 open-as 之后」的请求断言（恢复期非 streaming 渲染器全量读是 dispatcher 读策略语义内行为）；hex 阶段出现全量 200 = 窗口流式回归。
 6. 远端快照种子必须含 path==='' 目录条目（migrateLegacyTabs 只从目录条目派生 remote 来源，缺则 restore 落占位 tab 无内容）。
 7. 本域原盘点假设「损坏 PNG 卡片」「NUL 二进制重入 code 被拒」经源码核实不成立（损坏图片无卡片=BUG-53；code 无二进制守卫），已按上表样本修正——见文件头「两条实现链」注记。
+
+## 动态排序口径（2026-10-16 裁决）
+
+open-as 动作排序 = `looksTextual(head)` 二分（判文本 → 纯文本在前，否则 hex 在前；
+head 为 8KB 探测块）。`detect()` 的签名/binary 探测链结论**不参与排序**——知情现状
+（SUSP-10 同类口径）：两判据罕有分歧，卡片构造于全量拉取前，以 head 近似是声明过的
+可接受退化（dispatcher.ts buildRenderErrorActions 注释在案）。OWX-09（JPEG 头+NUL
+二进制载体图片 → hex 排前）与 OWX-02（损坏 SVG → 纯文本排前）构成双向锚。
+

@@ -19,7 +19,8 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * - dispatcher 级卡片（抛错型）：render throw → buildRenderErrorActions →
  *   [重试, 以纯文本打开, 以 hex 打开]（looksTextual 动态排序）+ openAsAction 以
  *   rendererOverride 重入 dispatch —— OWX-02/04/05（broken.svg：sanitizeSvg 抛
- *   「SVG 解析失败」，损坏 PNG 无卡片=BUG-53 在案不可用）。
+ *   「SVG 解析失败」）与 OWX-09（broken-binary.jpg：图片解码校验 throw，BUG-53
+ *   修复面，t-media 同载体）。
  *
  * 注入通道：本地目录经 __vvOpenDirImpl（b-media-office-viewer 同款）；远端经 spec 内
  * mini 假服务器（t-open-with BUG-69 同款端点集）+ 旧键 'tabs' 快照预置恢复（须含
@@ -49,6 +50,14 @@ function makeBrokenSvgBytes(total: number): Uint8Array {
 
 const BROKEN_SVG_SMALL = makeBrokenSvgBytes(128); // formatSize → "128 B"
 const BROKEN_SVG_BIG = makeBrokenSvgBytes(1_572_864); // 1.5MiB：>1MB → head 探测 + hex 窗口模式
+
+/**
+ * JPEG 头 + NUL 填充：解码必败（image.ts BUG-53 解码校验 throw → dispatcher 卡片）；
+ * 含 NUL 判非文本（magic.ts:32，git 同口径）→ open-as 排序「以 hex 打开」排前。
+ * 纯 0xba 垃圾字节 suspicious=0 会被 looksTextual 误判文本（t-media BUG-53 实证），
+ * 不可作本锚载体。
+ */
+const BROKEN_JPG = new Uint8Array(512).map((_, i) => (i === 0 ? 0xff : i === 1 ? 0xd8 : i === 2 ? 0xff : 0x00));
 
 interface SpecFile {
   name: string;
@@ -577,4 +586,22 @@ test('OWX-08：移动断点（375px）错误卡片按钮可达可点——入口
   await openRightIfNarrow(page);
   await expect(page.locator('.meta-openwith')).toBeVisible();
   await expect(page.locator('.meta-openwith')).toHaveValue('');
+});
+
+// ── OWX-09：dispatcher 链排序锚（二进制图片 → hex 排前，与 OWX-02 纯文本排前成双向） ──
+
+test('OWX-09：损坏二进制图片卡片动作「以 hex 打开」排前（looksTextual 判非文本）', async ({ page }) => {
+  test.setTimeout(60_000);
+  await waitAppMounted(page);
+  await openDir(page, [{ name: 'broken-binary.jpg', type: 'image/jpeg', bytes: BROKEN_JPG }]);
+  await openFile(page, 'broken-binary.jpg');
+  // 解码失败 throw → dispatcher 级卡片（BUG-53 修复解锁的本分支 e2e 锚；t-media BUG-53 同载体）
+  const card = await expectErrorCard(page, 'broken-binary.jpg', '图片解码失败');
+  // dispatcher 约定：重试恒首（排序只作用于 open-as 组内，t-media BUG-53 同款）
+  await expect(card.locator('.vv-error-action')).toHaveCount(3);
+  await expect(card.locator('.vv-error-action').nth(0)).toHaveText('重试');
+  await expect(card.locator('.vv-error-action').nth(1), '判非文本 → 「以 hex 打开」排「以纯文本打开」前（排序锚）').toHaveText(
+    '以 hex 打开'
+  );
+  await expect(card.locator('.vv-error-action').nth(2)).toHaveText('以纯文本打开');
 });
