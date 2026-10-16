@@ -239,6 +239,10 @@ import SearchPanel from './SearchPanel.svelte';
         // 重试通道，消除「8KB head 截断渲染」活面），由下方 catch 走读取失败卡片。
         const res = await dispatcher.dispatch(current.source, null, host, {
           rendererOverride: current.overrideRenderer,
+          // render 级 signal（审计 R1 I-1）：与 read 的合并 signal 同源（effectAbort）
+          // ——effect 重跑/tab 切换/destroy 即 abort，渲染器迟到落定（image 解码窗）
+          // 据此快速失败，dispatch catch 的 abort 分类 no-op 不上屏
+          signal: effectAbort.signal,
           // signal 透传（流式硬化 + Task 5 effect 级取消）：实例级 signal 与
           // effectAbort.signal 合并（缺省直通，双侧缺省维持无 opts 调用形态）
           read: (range, signal) => {

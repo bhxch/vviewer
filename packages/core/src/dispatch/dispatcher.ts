@@ -33,6 +33,10 @@ export interface DispatchOptions {
   /** 流式读闭包：buffer === null 时必填（全量字节不预取，head 探测与按需读都经它）；
    * buffer 直传（兼容路径）时省略，dispatch 不触发任何 store 读。 */
   read?: DispatchRead;
+  /** render 级取消 signal（审计 R1 I-1）：透传为 render 第 6 参——超时/异步渲染器
+   * 的迟到落定校验（image 解码窗）aborted 即快速失败，由本 catch 的 abort 分类
+   * 接管（no-op 不上屏）。缺省不传第 6 参，渲染器侧零感知。 */
+  signal?: AbortSignal;
 }
 
 const HEAD_SIZE = 8192;
@@ -333,7 +337,13 @@ export function createDispatcher(registry: Registry): Dispatcher {
           // redetectWithFull doc）。streaming 分支不动（io-streaming 计划 2 处理）。
           redetectWithFull(source, head, full, det);
         }
-        const instance = await renderer.render(full, target, source, det);
+        // 第 6 参透传（审计 R1 I-1）：render 级取消 signal——异步渲染器的迟到落定
+        // （如 image 解码 await 窗）据此快速失败，abort 身份经下方 catch no-op 不上屏
+        const instance = await renderer.render(
+          full, target, source, det,
+          undefined,
+          opts?.signal ? { signal: opts.signal } : undefined
+        );
         return { instance, rendererId: renderer.id, det };
       }
       // streaming 渲染器（io-streaming §2.2）：只交付 head + StreamCtx（render 第 5 参），
@@ -367,7 +377,10 @@ export function createDispatcher(registry: Registry): Dispatcher {
             })
         }
         : { size: base.length, head: base, read: async (r) => base.subarray(r.start, r.end + 1) };
-      const instance = await renderer.render(base, target, source, det, renderCtx);
+      const instance = await renderer.render(
+        base, target, source, det, renderCtx,
+        opts?.signal ? { signal: opts.signal } : undefined
+      );
       return { instance, rendererId: renderer.id, det };
     } catch (err) {
       const kind = classifyDispatchError(err);

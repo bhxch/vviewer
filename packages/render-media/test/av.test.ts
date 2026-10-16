@@ -313,6 +313,29 @@ describe('avRenderer', () => {
     target.remove();
   });
 
+  // 审计 R1 I-2：音频 error 监听永不摘除（原生 <audio> 无 art 代理面）——destroy
+  // （release：revoke+el.remove）后在途加载的迟到 error 不得把错误卡画进新渲染
+  // target（镜像 image.ts 监听生命周期收口）
+  it('destroy 后迟到 error 不出错误卡（监听收口 released 收口）', async () => {
+    const create = vi.fn(() => 'blob:mock');
+    const revoke = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { value: create, configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: revoke, configurable: true });
+    const target = document.createElement('div');
+    document.body.append(target);
+    const instance = await avRenderer.render(new Uint8Array(8), target, fakeSource('slow.mp3'), { ext: 'mp3' } as never);
+    // 捕获 audio 引用（destroy 后 el 已摘出文档，querySelector 取不到——先捕获再销毁）
+    const el = target.querySelector('audio')!;
+    expect(el).not.toBeNull();
+    instance.destroy();
+    expect(target.querySelector('audio'), 'destroy 已摘除播放器').toBeNull();
+    // 迟到 error（release revoke 中止在途加载的真实后果）：released 收口，不出卡
+    Object.defineProperty(el, 'error', { value: { code: 4 }, configurable: true });
+    el.dispatchEvent(new Event('error'));
+    expect(target.querySelectorAll('.vv-error-card').length, 'destroy 后迟到 error 不出卡').toBe(0);
+    target.remove();
+  });
+
   it('本地 store 的 m3u8 明确报错（不再静默挂起；错误卡片由 dispatcher catch 呈现）', async () => {
     const target = document.createElement('div');
     document.body.append(target);

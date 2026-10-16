@@ -1,29 +1,39 @@
-import { getHexFallbackRenderer, showErrorCard, type Encoding, type ErrorCardAction, type RenderedInstance, type Renderer } from '@vviewer/core';
+import { abortReadError, getHexFallbackRenderer, showErrorCard, type Encoding, type ErrorCardAction, type RenderedInstance, type Renderer } from '@vviewer/core';
 
 /** 超时护栏（spec §4.2）：decode 挂死（异常大图/畸形编码）时按成功放行，迟到失败
  * 走渲染器内构兜底卡——不阻塞查看器主路径。 */
 const IMAGE_DECODE_TIMEOUT_MS = 10_000;
 
-type DecodeOutcome = { kind: 'ok' } | { kind: 'failed' } | { kind: 'timeout' };
+type DecodeOutcome = { kind: 'ok' } | { kind: 'failed' } | { kind: 'timeout' } | { kind: 'aborted' };
 
 /**
  * 解码校验观察（BUG-53）：decode() 主路径、load/error 事件回退（jsdom/无 decode
  * 环境）、超时三路竞待。结果枚举而非 promise reject——竞待落定后迟到的另一路
  * 不产生 unhandled rejection。finish 幂等（首达移除全部监听与计时器）。
+ * 审计 R1 I-1：可选 signal（render 第 6 参透传）——解码 await 窗内的取消
+ * （tab 重派/切走/destroy）即刻落定 'aborted'，堵住「迟到 resolve/reject 覆写
+ * 或污染新渲染」盲窗；预 aborted 初始即短路。
  */
-function observeImageDecode(img: HTMLImageElement, timeoutMs: number): Promise<DecodeOutcome> {
+function observeImageDecode(img: HTMLImageElement, timeoutMs: number, signal?: AbortSignal): Promise<DecodeOutcome> {
   return new Promise((resolve) => {
     const finish = (outcome: DecodeOutcome): void => {
       clearTimeout(timer);
       img.removeEventListener('error', onError);
       img.removeEventListener('load', onLoad);
+      signal?.removeEventListener('abort', onAbort);
       resolve(outcome);
     };
     const onError = (): void => finish({ kind: 'failed' });
     const onLoad = (): void => finish({ kind: 'ok' });
+    const onAbort = (): void => finish({ kind: 'aborted' });
     img.addEventListener('error', onError);
     img.addEventListener('load', onLoad);
+    signal?.addEventListener('abort', onAbort);
     const timer = setTimeout(() => finish({ kind: 'timeout' }), timeoutMs);
+    if (signal?.aborted) {
+      finish({ kind: 'aborted' });
+      return;
+    }
     if (typeof img.decode === 'function') {
       img.decode().then(
         () => finish({ kind: 'ok' }),
@@ -87,7 +97,9 @@ export const imageRenderer: Renderer = {
   id: 'image',
   label: '图片',
   extensions: ['png', 'jpeg', 'jpg', 'gif', 'webp', 'avif', 'bmp', 'ico', 'svg'],
-  async render(buffer, target, source, det) {
+  // 第 5 参 ctx 不读（非 streaming 渲染器）；第 6 参 opts.signal 审计 R1 I-1：
+  // 解码 await 窗取消快速失败（见 observeImageDecode doc）
+  async render(buffer, target, source, det, _ctx, opts) {
     const wrap = document.createElement('div');
     wrap.className = 'vv-image';
     let url: string;
@@ -108,7 +120,13 @@ export const imageRenderer: Renderer = {
     // SVG 走 sanitizeSvg throw 锚（spec 铁律：SVG 分支不接解码校验）——仅 raster 校验
     const outcome = det.ext === 'svg'
       ? ({ kind: 'ok' } as const)
-      : await observeImageDecode(img, IMAGE_DECODE_TIMEOUT_MS);
+      : await observeImageDecode(img, IMAGE_DECODE_TIMEOUT_MS, opts?.signal);
+    // 审计 R1 I-1：解码窗内取消——revoke 后以 abortReadError 身份快速失败，经
+    // dispatch catch 的 abort 分类 no-op 不上屏（迟到落定不再覆写/污染新渲染）
+    if (outcome.kind === 'aborted') {
+      URL.revokeObjectURL(url);
+      throw abortReadError();
+    }
     if (outcome.kind === 'failed') {
       URL.revokeObjectURL(url);
       throw new Error('图片解码失败：数据损坏或格式不支持');

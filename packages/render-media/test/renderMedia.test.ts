@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { FileSource, RenderedInstance } from '@vviewer/core';
+import { isAbortError } from '@vviewer/core';
 import { imageRenderer, sanitizeSvg } from '../src/image';
 
 describe('sanitizeSvg', () => {
@@ -100,6 +101,28 @@ describe('imageRenderer 解码校验（BUG-53）', () => {
     expect(target.querySelector('.vv-image img')).not.toBeNull();
     instance.destroy();
     expect(revoke).toHaveBeenCalledTimes(1);
+  });
+
+  // 审计 R1 I-1：解码 await 窗内的取消（tab 重派/切走/destroy → effectAbort）——
+  // render 第 6 参 signal aborted 即快速失败（abortReadError 身份，isAbortError 判真
+  // → dispatch catch 的 abort 分类 no-op 不上屏），revoke 成对、DOM 未污染——
+  // 迟到 resolve/reject 不再覆写或污染新渲染
+  it('decode 挂窗内 abort → render reject AbortError（isAbortError 真）+ revoke + DOM 未污染', async () => {
+    // decode 永不落定 = 解码挂窗（大图/畸形编码的竞态窗口）
+    (HTMLImageElement.prototype as { decode?: unknown }).decode = () => new Promise(() => {});
+    const target = document.createElement('div');
+    document.body.append(target);
+    const ctrl = new AbortController();
+    const p = imageRenderer.render(
+      new Uint8Array(8), target, fakeSource('slow.png'), { ext: 'png' } as never,
+      undefined, { signal: ctrl.signal }
+    );
+    ctrl.abort(); // 手动驱动：effect 重跑/tab 切换的 effectAbort.abort() 等价面
+    const err = await p.then(() => null, (e: unknown) => e);
+    expect(err, '挂窗内取消必须 reject（不得按成功放行覆写新渲染）').not.toBeNull();
+    expect(isAbortError(err), '取消身份：isAbortError 判真（dispatch catch abort 分类接管）').toBe(true);
+    expect(revoke, 'blob URL 成对回收').toHaveBeenCalledTimes(1);
+    expect(target.querySelector('.vv-image'), 'DOM 未污染').toBeNull();
   });
 
   it('无 decode 环境（jsdom）：load 事件回退正常渲染', async () => {

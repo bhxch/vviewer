@@ -438,7 +438,11 @@ export const avRenderer: Renderer = {
       };
       // BUG-52：音频解码失败不再静默——对齐视频分支 showMediaError（首错收口，
       // MediaError code 语义音视频一致，映射表复用）
+      // 审计 R1 I-2：监听永不摘除（原生 <audio> 无 art.destroy 代理面）——destroy/
+      // showMediaError 已 release（revoke+el.remove）后，在途加载的迟到 error 不得
+      // 再把错误卡画进新渲染 target（镜像 image.ts R1 修复）
       el.addEventListener('error', () => {
+        if (released) return;
         showMediaError(videoErrorMessage(el.error?.code));
       });
       const instance: RenderedInstance & { getMeta(): { size: number; encoding?: Encoding } } = {

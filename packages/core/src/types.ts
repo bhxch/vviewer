@@ -146,6 +146,18 @@ export interface Renderer {
    * 第 5 参 ctx（spec 2026-10-12-io-streaming §2.2）为流式读上下文，向后兼容：
    * streaming 渲染器的 buffer 形参收到的是 head（探测块），全量字节一律经
    * ctx.read；非 streaming 渲染器照常收到全量 buffer，忽略该参即旧行为。
+   *
+   * 第 6 参 opts.signal：可选取消 signal——超时/异步渲染器的迟到落定校验
+   * （image 解码窗）：aborted 即快速失败（abortReadError 身份），由 dispatch
+   * catch 的 abort 分类接管（no-op 不上屏）。可选参，渲染器不读即零破坏；
+   * 与第 5 参语义独立（code 的窗口模式仅由 ctx 触发，不受本参影响）。
    */
-  render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection, ctx?: StreamCtx): Promise<RenderedInstance>;
+  render(
+    buffer: Uint8Array,
+    target: HTMLElement,
+    source: FileSource,
+    det: Detection,
+    ctx?: StreamCtx,
+    opts?: { signal?: AbortSignal }
+  ): Promise<RenderedInstance>;
 }

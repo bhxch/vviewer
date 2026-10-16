@@ -7,6 +7,7 @@ import {
   createRemoteStore,
   ensurePermission,
   getRemoteBase,
+  isAbortError,
   normalizeServerBase,
   SESSION_LAST_SERVER_KEY,
   type LastServerRecord
@@ -666,7 +667,9 @@ export async function openDirectoryViaPicker(): Promise<void> {
     handle = await w.showDirectoryPicker({ mode: 'read' });
   } catch (err) {
     // BUG-19：用户取消（headless/自动化下立即取消）此前零反馈——接入状态栏一次性提示
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    // （审计 R1 I-3：第四份内联 AbortError 判定迁移 core 单源 isAbortError；Error+name
+    // 形态改判为取消对 picker 取消语义更正确，单支判定迁移属行为微扩，审计已定性）
+    if (isAbortError(err)) {
       showStatusNotice('已取消选择文件夹');
       return;
     }
