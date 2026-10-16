@@ -808,3 +808,61 @@ test('TAX-11：溢出 TabBar 右键菜单不被打开动作自身滚动秒关；
   });
   await expect(menu).toHaveCount(0);
 });
+
+// ---------------------------------------------------------------- TAX-12/13
+
+test('TAX-12：duplicate×目录 tab——目录 tab 经正常 addTab 创建（非占位、可复制），副本为同源第二个目录 tab', async ({
+  page
+}) => {
+  test.setTimeout(90_000);
+  await waitAppMounted(page);
+  await openDir(page, [{ name: 'dup-dir-body.txt', type: 'text/plain', content: 'dup dir body\n' }]);
+  // 目录 tab = 注入即建（label 'ttab'，path=''）；非占位/unrestorable——duplicate 可复制
+  await expect(tabNamed(page, 'ttab')).toHaveCount(1);
+
+  await openTabMenu(page, 'ttab');
+  await runMenuItem(page, '复制标签页');
+  // 现状锚（TAX-12 裁决：按实现现状锚定，不预设产品改动）：副本为同源第二个目录
+  // tab（同 store 再挂一个 path='' 的目录 tab），落原 tab 右侧并激活
+  await expect.poll(() => tabNames(page)).toEqual(['ttab', 'ttab']);
+  // 副本激活且为目录形态（树在左栏，主区提示目录来源——非文件渲染面）
+  await expect(page.locator('.vv-tab.active', { hasText: 'ttab' })).toBeVisible();
+});
+
+test('TAX-13：duplicate×overrideRenderer——手选 hex 的 tab 复制后副本继承 override（hex 形态渲染）', async ({
+  page
+}) => {
+  test.setTimeout(90_000);
+  await waitAppMounted(page);
+  await openDir(page, [
+    { name: 'ov-src.txt', type: 'text/plain', content: 'override source body\n' },
+    { name: 'plain.txt', type: 'text/plain', content: 'plain body\n' }
+  ]);
+  // 先 plain 后 ov-src：手选作用于激活 tab——openWith 必须落在 ov-src 上
+  await openFile(page, 'plain.txt');
+  await openFile(page, 'ov-src.txt');
+  // 手选打开方式：MetaPanel openWith → hex（OPEN-03 同款装置；窄视口右栏进抽屉）
+  const narrow = await page.evaluate(() => window.innerWidth <= 600);
+  if (narrow) await page.locator('.vv-right-toggle').click();
+  const openWith = page.locator('.meta-openwith');
+  await expect(openWith).toBeVisible();
+  await openWith.selectOption('hex');
+  await expect(page.locator('.vv-hex')).toBeVisible();
+  if (narrow) await page.locator('.vv-right-toggle').click();
+
+  // 复制：副本继承 overrideRenderer（openFlow.duplicate 直读拷贝）→ hex 形态渲染，
+  // 落原 tab 右侧（openFlow.splice 原位 +1）
+  await openTabMenu(page, 'ov-src.txt');
+  await runMenuItem(page, '复制标签页');
+  await expect.poll(() => tabNames(page)).toEqual(['ttab', 'plain.txt', 'ov-src.txt', 'ov-src.txt']);
+  const dup = tabNamed(page, 'ov-src.txt').nth(1);
+  await expect(dup).toHaveClass(/active/);
+  await expect(page.locator('.vv-hex'), '副本继承 override：hex 形态而非探测链 code').toBeVisible();
+  // 副本关闭撤销恢复同样带 override（栈条目捕获存活实例）——恢复件仍 hex
+  await dup.click({ button: 'middle' });
+  await expect.poll(() => tabNames(page)).toEqual(['ttab', 'plain.txt', 'ov-src.txt']);
+  await page.keyboard.press('Alt+Shift+T');
+  await expect.poll(() => tabNames(page)).toEqual(['ttab', 'plain.txt', 'ov-src.txt', 'ov-src.txt']);
+  await expect(page.locator('.vv-tab.active', { hasText: 'ov-src.txt' })).toBeVisible();
+  await expect(page.locator('.vv-hex')).toBeVisible();
+});
