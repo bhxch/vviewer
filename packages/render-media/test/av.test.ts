@@ -1,7 +1,8 @@
 // av.test.ts — avRenderer 单测：jsdom 无法真渲染 ArtPlayer（真实播放 E2E 留 T7），
 // 这里直测类型分派/流协议映射/配置构造/MIME 映射/HLS 直连解析/fatal 决策纯函数
 // + 音频原生 <audio> 路径（blob 生命周期不变 + getMeta 代工）+ 本地 m3u8 明确报错。
-// 末例以 vi.mock 令 ArtPlayer 构造抛错，验证 T7 修复：构造失败路径 revoke blob URL 后 rethrow。
+// vi.mock 双态：默认构造抛错（T7 构造失败路径 revoke 后 rethrow）；可切正常构造，
+// 验证 BUG-54 视频运行期错误的 video:error 同步点缓存（卡片文案命中映射表）。
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { createRemoteStore, SESSION_LAST_SERVER_KEY } from '@vviewer/core';
 import type { RenderedInstance } from '@vviewer/core';
@@ -21,11 +22,36 @@ import {
 } from '../src/av';
 import type { FileSource } from '@vviewer/core';
 
+// artplayer mock 可控双态：failConstruct=true（默认，T7 构造失败路径用）| false（BUG-54
+// 视频运行期错误路径用，instances 收集构造成功的实例供用例 emit 事件）。vi.hoisted 供
+// vi.mock 工厂引用外部态；默认态不变，既有用例零翻转。
+const artMock = vi.hoisted(() => ({
+  state: {
+    failConstruct: true,
+    instances: [] as Array<{
+      on(event: string, cb: (ev?: unknown) => void): void;
+      emit(event: string, ev?: unknown): void;
+      destroy(remove?: boolean): void;
+    }>
+  }
+}));
+
 vi.mock('artplayer', () => ({
   default: class {
+    private handlers = new Map<string, Array<(ev?: unknown) => void>>();
     constructor() {
-      throw new Error('artplayer 构造失败（测试注入）');
+      if (artMock.state.failConstruct) throw new Error('artplayer 构造失败（测试注入）');
+      artMock.state.instances.push(this);
     }
+    on(event: string, cb: (ev?: unknown) => void): void {
+      const list = this.handlers.get(event) ?? [];
+      list.push(cb);
+      this.handlers.set(event, list);
+    }
+    emit(event: string, ev?: unknown): void {
+      for (const cb of this.handlers.get(event) ?? []) cb(ev);
+    }
+    destroy(_remove?: boolean): void {}
   }
 }));
 
@@ -323,6 +349,30 @@ describe('avRenderer', () => {
     // 失败前已 create 的 URL 必须被 revoke（次数成对，destroy 之外的失败路径不漏）
     expect(create).toHaveBeenCalledTimes(1);
     expect(revoke).toHaveBeenCalledTimes(1);
+    target.remove();
+  });
+
+  it('BUG-54：video:error 同步点缓存 code——卡片文案命中映射表而非「未知错误」（时序不动）', async () => {
+    const create = vi.fn(() => 'blob:mock');
+    const revoke = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { value: create, configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: revoke, configurable: true });
+    artMock.state.failConstruct = false;
+    artMock.state.instances = [];
+    const target = document.createElement('div');
+    document.body.append(target);
+    await avRenderer.render(new Uint8Array(16), target, fakeSource('broken.mp4'), { ext: 'mp4' } as never);
+    // `!` 仅供 noUncheckedIndexedAccess 收窄；空数组时下方前置断言给出可读失败信息
+    const art = artMock.state.instances[0]!;
+    expect(art, '前置：ArtPlayer 已构造').toBeDefined();
+    // 复刻 ArtPlayer 真实时序：video:error（error 仍在）→ 1s 后重设源（error 清空）→ 'error'
+    art.emit('video:error', { target: { error: { code: 4 } } });
+    art.emit('error', { target: { error: null } });
+    const detail = target.querySelector('.vv-error-card .vv-error-detail')!.textContent!;
+    expect(detail).toContain('MEDIA_ERR_SRC_NOT_SUPPORTED');
+    expect(detail).not.toContain('未知错误');
+    expect(revoke).toHaveBeenCalledTimes(1); // release 摘播放器并回收 blob
+    artMock.state.failConstruct = true;
     target.remove();
   });
 });

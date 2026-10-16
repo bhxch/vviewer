@@ -495,10 +495,20 @@ export const avRenderer: Renderer = {
       if (!hlsDirect) URL.revokeObjectURL(url);
     };
     mediaFatal = showMediaError;
-    // video 运行期解码错误（截断 mp4 等）：ArtPlayer 转发 video 'error' 事件
+    // video 运行期解码错误（截断 mp4 等）：ArtPlayer 转发 video 'error' 事件。
+    // BUG-54：ArtPlayer 的 'error' 在 sleep(1s) + 重设 url（media load 算法清空
+    // video.error）之后才 emit，彼时读 art.video.error 恒 null → 映射表不可达、
+    // 文案恒「未知错误」。video:error 转发点是同步捕获的 DOM ErrorEvent（此刻
+    // error 还在），在此缓存 code 供 'error' 处理器查表——卡片时机/重连语义零变化
+    // （artplayer.mjs 5.4.0：proxy 同步转发 video:* 在 :2467-2471；'error' 在
+    // :2495-2501 的 sleep(RECONNECT_SLEEP_TIME=1e3) + art.url 重设之后才延迟 emit）
+    let lastVideoErrCode: number | null | undefined;
+    art.on('video:error', (event: unknown) => {
+      lastVideoErrCode = (event as { target?: { error?: { code: number } | null } } | undefined)?.target?.error?.code;
+    });
     art.on('error', () => {
       const mediaErr = (art as unknown as { video?: HTMLVideoElement | null }).video?.error;
-      showMediaError(videoErrorMessage(mediaErr?.code));
+      showMediaError(videoErrorMessage(lastVideoErrCode ?? mediaErr?.code));
     });
 
     const instance: RenderedInstance & { getMeta(): { size: number; encoding?: Encoding } } = {
