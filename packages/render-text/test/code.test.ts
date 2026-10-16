@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import hljs from 'highlight.js';
 import { HighlightCanceledError } from '@vviewer/highlight';
 import { RemoteComputeError, type ComputeWhere, type FileSource, type RenderedInstance, type StreamCtx } from '@vviewer/core';
+import { isAbortError as coreIsAbortError } from '@vviewer/core';
 import { STREAM_MAX_BYTES } from '../src/blockStream';
 import * as searchModule from '../src/search';
 import { searchCode as originalSearchCode } from '../src/search';
@@ -2911,5 +2912,9 @@ describe('isAbortError（deferred 清偿 Task 3：取消错误身份判定矩阵
     expect(isAbortError('abort')).toBe(false); // 非 Error 值
     expect(isAbortError(null)).toBe(false);
     expect(isAbortError(undefined)).toBe(false);
+  });
+
+  it('单源 identity：render-text re-export 与 core 同引用（防再镜像）', () => {
+    expect(isAbortError).toBe(coreIsAbortError);
   });
 });

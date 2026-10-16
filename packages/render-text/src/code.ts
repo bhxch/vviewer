@@ -1,5 +1,5 @@
 import type { Renderer, Encoding, Detection, FileSource, RenderedInstance, SearchMatch, ComputeSource, ComputeWhere, StreamCtx } from '@vviewer/core';
-import { getRemoteBase, getRemoteMeta, redetectWithFull, RemoteComputeError, showErrorCard } from '@vviewer/core';
+import { getRemoteBase, getRemoteMeta, redetectWithFull, RemoteComputeError, showErrorCard, isAbortError } from '@vviewer/core';
 import { detectLanguage, HighlightCanceledError, captureToCssClass, type HighlightChunk, type HighlightInterval } from '@vviewer/highlight';
 import { STREAM_MAX_BYTES, createBlockStream, isSuspiciousUtf8Block, memoizedFullRead } from './blockStream';
 import { createTextWindow } from './textWindow';
@@ -12,21 +12,11 @@ import { virtualScroller, type VirtualScrollerHandle } from './virtualScroller';
 import { searchCode, type SearchMatchWithPreview } from './search';
 
 /**
- * 取消错误身份判定（deferred 清偿 Task 3）：err 是否为取消（AbortError 形态）。
- * 双形态兼容：标准环境 DOMException instanceof Error 成立（WHATWG 继承链），但
- * jsdom 等环境的 DOMException 未必是 Error 子类，故两支并判。窗口流式的静默分支
- * （续读/回看重拉/后台泵/搜索扫描，code 与 jsonl 同款）以此为唯一判据，不再看
- * catch 时刻 signal.aborted 状态——「真实读失败 + abort 竞态」（先失败、catch
- * 时已 abort）不再被误吞，照常置闩 + debug 留痕（destroyed 终态无消费方，日志
- * 如实）；真取消（remote fetch 原生 AbortError、localFiles/singleFile 预 abort
- * 抛 DOMException('读取已取消','AbortError')——Task 1 统一后的形态）恒静默。
+ * 取消错误身份判定（单源，spec 2026-10-16 错误身份与字节映射 §4.3）：实现与契约
+ * 文档在 @vviewer/core（dispatch/errors），此处再导出保持本包内 jsonl 与
+ * web 层 ViewerPane 的既有导入路径零变动。
  */
-export function isAbortError(err: unknown): boolean {
-  return (
-    (err instanceof DOMException && err.name === 'AbortError') ||
-    (err instanceof Error && err.name === 'AbortError')
-  );
-}
+export { isAbortError };
 
 /**
  * hljs 别名桥接：helix 语言名 → hljs 语言 id（仅收录 hljs.getLanguage 直查失败的键；
@@ -2388,8 +2378,15 @@ function renderCodeWindowed(
           try {
             await pullBlock();
           } catch (err) {
-            continueFailed = true; // 与滚动续读同口径：停机闩，用户滚动动作解除
-            console.debug('[code] revealLine 续读失败（跳转静默兜底，滚动后重试）', err);
+            // 取消（destroy 在飞读 abort）不置闩（六处收紧同款第七处收口，spec
+            // §2 T5）：停机闩仅属真实读失败——abort 后 destroyed 即将成立或由
+            // 用户滚动动作重启，闩上会把取消当失败冻结续读
+            if (!isAbortError(err)) {
+              continueFailed = true; // 与滚动续读同口径：停机闩，用户滚动动作解除
+              console.debug('[code] revealLine 续读失败（跳转静默兜底，滚动后重试）', err);
+            } else {
+              console.debug('[code] revealLine 续读被取消（destroy）', err);
+            }
           } finally {
             pulling = false;
           }

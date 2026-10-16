@@ -10,7 +10,7 @@
   // 创建：组已建则 rename 为最终名（无取消语义，「可跳过」= 不加来源直接完成）。
   // Esc 双 handler 仿 GlobalSearchPanel（容器 keydown + window 兜底）；焦点在浏览
   // 层时由内层 handler 先关浏览层（target 互斥不双触发）。
-  import { createLocalFsStore } from '@vviewer/core';
+  import { createLocalFsStore, isAbortError } from '@vviewer/core';
   import {
     addDirStoreTab,
     openDirectoryViaInput,
@@ -76,7 +76,7 @@
       handle = await w.showDirectoryPicker({ mode: 'read' });
     } catch (err) {
       // 用户取消（BUG-19 同款文案走状态栏提示）：不建组，模态保持
-      if (err instanceof DOMException && err.name === 'AbortError') {
+      if (isAbortError(err)) {
         showStatusNotice('已取消选择文件夹');
         return;
       }

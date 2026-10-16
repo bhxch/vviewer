@@ -47,6 +47,7 @@ export interface TreeStore {
   // opts.signal（流式硬化）：destroy 时取消在飞读——aborted 即 reject（remote 抛
   // fetch 原生 AbortError；非 remote 实现（localFs/localFiles，及 singleFile 的
   // createSingleFileStore/createUrlStore）统一抛 DOMException('读取已取消', 'AbortError')）。
+  // 本地实现统一经 core/dispatch/errors 的 abortReadError() 抛出（单源形态）。
   read(path: string, opts?: { range?: ByteRange; signal?: AbortSignal }): Promise<Uint8Array<ArrayBuffer>>;
   /**
    * 能力标记（spec 2026-10-12-io-streaming §2.3）：read 支持 opts.range（bytes
