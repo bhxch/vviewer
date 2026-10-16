@@ -146,4 +146,26 @@ describe('imageRenderer 解码校验（BUG-53）', () => {
     expect(document.querySelector('.vv-image img')).not.toBeNull();
     instance.destroy();
   });
+
+  it('destroy 后迟到 error 不出兜底卡（监听生命周期收口）', async () => {
+    vi.useFakeTimers();
+    // destroy 已把 img 随 wrap 摘出文档，document.querySelector 取不到（可选链会
+    // 静默跳过 dispatch，无修复也绿）——经 createElement 捕获引用派发迟到 error，
+    // 真实验证监听生命周期收口（同「load 事件回退」用例手法）
+    let captured: HTMLImageElement | null = null;
+    const rawCreate = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation(((tagName: string, options?: ElementCreationOptions) => {
+      const el = rawCreate(tagName, options);
+      if (String(tagName).toLowerCase() === 'img') captured = el as HTMLImageElement;
+      return el;
+    }) as typeof document.createElement);
+    const t = target();
+    const p = imageRenderer.render(new Uint8Array(8), t, fakeSource('slow.png'), { ext: 'png' } as never);
+    await vi.advanceTimersByTimeAsync(10_000);
+    const instance = await p;
+    instance.destroy();
+    captured!.dispatchEvent(new Event('error'));
+    expect(t.querySelector('.vv-error-card'), 'destroy 后不再画卡').toBeNull();
+    vi.useRealTimers();
+  });
 });

@@ -119,6 +119,9 @@ export const imageRenderer: Renderer = {
     const detach = attachZoom(wrap, img);
     // —— 迟到兜底（BUG-53 超时路径专属）：渲染器内构卡，av 同款形态 ——
     let cardShown = false;
+    // 评审 R1：destroy 后 revoke 会中止在途加载并触发 img 迟到 error——实例已销毁
+    // 时不得再把兜底卡打进 target（可能覆盖 dispatcher 刚挂载的新渲染内容）
+    let destroyed = false;
     let liveChild: RenderedInstance | null = null;
     const takeOver = (instance: RenderedInstance): void => {
       liveChild?.destroy();
@@ -161,7 +164,7 @@ export const imageRenderer: Renderer = {
     };
     if (lateGuard) {
       img.addEventListener('error', () => {
-        if (cardShown) return;
+        if (cardShown || destroyed) return;
         cardShown = true;
         detach();
         detachImage();
@@ -173,6 +176,7 @@ export const imageRenderer: Renderer = {
     const instance: RenderedInstance & { getMeta(): { size: number; encoding?: Encoding } } = {
       getMeta: () => ({ size: buffer.length, encoding: det.encoding }),
       destroy() {
+        destroyed = true;
         detach();
         detachImage();
         liveChild?.destroy();
