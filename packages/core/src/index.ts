@@ -8,6 +8,7 @@ export * from './detect';
 export * from './registry/registry';
 export * from './registry/generated-extensions';
 export * from './dispatch/dispatcher';
+export * from './dispatch/errors';
 export * from './dispatch/errorRenderer';
 export * from './tree/singleFile';
 export * from './tree/localFs';
