@@ -543,6 +543,8 @@ test('PWA-09/2: mp4/wav 打开到可起播（readyState≥HAVE_FUTURE_DATA）<1s
 
 // ── 探索复核确认缺陷回归占位（2026-10-10；发现于 PWA 与移动端域、根因属本域，
 // README §3.2.1 一域一文件、§3.2.4 修复合入前 test.fixme 占位、修复 PR 转正）──
+// 2026-10-17：BUG-58/59/60/61/62/63 已修复转正；PWA-06/2 因本 harness 虚拟滚动
+// 路径触摸动量恒 0 保持 fixme（环境受限，复跑实证注记于用例内）。
 
 test(
   'BUG-58 [已修复 2026-10-17]: /grammars/manifest.json 不在任何 SW 缓存策略内——离线启动会话 grammar 三层资产全败，create() 单例固化全会话降级 hljs',

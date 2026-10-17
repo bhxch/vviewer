@@ -15,7 +15,7 @@ import { assertPortFree, stopServer, waitHealthy } from './serverHarness';
  * - MD-01 删除线 del 元素断言缺位（既有载体 samples/m3/demo.md 无 ~~ 内容），
  *   补自建含删除线样例 + checkbox「均为 disabled」逐个断言 + 无错误卡片；
  *   首轮执行分诊：表格/checkbox/无错误卡片达标，删除线判据属产品缺陷独立为
- *   MD-01/2（现 test.fixme——CAND-md-F1：本地 markdown-it 15 出 <s> 与远程
+ *   MD-01/2（当时落 fixme，2026-10-17 已修复转正——CAND-md-F1：本地 markdown-it 15 出 <s> 与远程
  *   comrak <del> 双引擎不一致，违反场景文档 §2 判据，断言不放宽）；
  * - MD-10 落编号用例：sandbox 形态/脚本不执行/行内样式保留/双视图切换
  *   （m3.spec.ts 旧用例无编号且未断言行内样式保留）；

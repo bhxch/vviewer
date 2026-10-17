@@ -509,6 +509,8 @@ test('SHELL-13/1：计算策略 UI 修改写入 localStorage 并跨刷新恢复�
 // 缺陷号，缺陷修复 PR 中转为正式断言）。每个用例注释给出最小复现步骤、证据路径与根因
 // 代码定位；来源标注 [探索]：缺陷由探索/复核会话（CAND-shell / review / verify 系列）
 // 独立复现确认，severity 见各用例注释。
+// 2026-10-17：BUG-27/29/30/32 已修复转正；SHELL-07 因 headless 无法驱动 FS Access
+// 原生对话框保持 fixme（环境受限，非能力不足）。
 
 test(
   'BUG-29: URL 裸路径命中 200+text/html fallback 出错误卡片——不再静默渲染 index.html',
