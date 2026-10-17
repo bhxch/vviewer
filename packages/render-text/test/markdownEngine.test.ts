@@ -10,9 +10,27 @@ describe('renderMarkdownToHtml——GFM 全家', () => {
     expect(html).toContain('<td>1</td>');
   });
 
-  it('删除线渲染为 <s>（markdown-it 内建双删除线用 s 标签）', () => {
+  it('删除线渲染为 <del>（BUG-67：对齐 comrak/GFM，markdown-it v13 默认 <s> 已改写）', () => {
     const { html } = renderMarkdownToHtml('~~划掉~~');
-    expect(html).toContain('<s>划掉</s>');
+    expect(html).toContain('<del>划掉</del>');
+    expect(html).not.toContain('<s>');
+  });
+
+  it('标题渲染尾置锚链接（BUG-67 指纹对齐：comrak header_id_prefix 的 anchor 同款形状）', () => {
+    const { html } = renderMarkdownToHtml('# 指纹样例\n\n正文\n');
+    // 锚在标题内、末尾；href 为 comrak 同款 GFM anchorize（无前缀）。
+    // heading id 不在此注入（user-content- 前缀 vs 本地 slug 的 id 方案归 t-md
+    // 域 BUG-39 裁决，见 engine.ts installHeadingAnchors 范围注释）
+    expect(html).toContain('<h1>指纹样例');
+    expect(html).toMatch(
+      /<a href="#指纹样例" aria-label="Link to heading '指纹样例'" data-heading-content="指纹样例" class="anchor"><\/a><\/h1>/
+    );
+  });
+
+  it('重名标题按 GFM 算法 -1 去重（comrak Anchorizer 同款，锚 href 同步去重）', () => {
+    const { html } = renderMarkdownToHtml('## Stuff\n\n## Stuff\n');
+    expect(html).toContain('href="#stuff"');
+    expect(html).toContain('href="#stuff-1"');
   });
 
   it('任务列表渲染 disabled checkbox 并标记 li', () => {
@@ -61,7 +79,7 @@ describe('renderMarkdownToHtml——front matter', () => {
     const src = '---\ntitle: Hello\ntags:\n  - a\n  - b\n---\n\n# 正文\n';
     const { html, frontMatter } = renderMarkdownToHtml(src);
     expect(frontMatter).toEqual({ title: 'Hello', tags: ['a', 'b'] });
-    expect(html).toContain('<h1>正文</h1>');
+    expect(html).toContain('<h1>正文<a href="#正文"'); // 标题含尾置锚（BUG-67 对齐）
     expect(html).not.toContain('title: Hello');
     expect(html).not.toContain('<hr>'); // 开头 --- 不得渲染为主题分割线
   });
@@ -69,7 +87,7 @@ describe('renderMarkdownToHtml——front matter', () => {
   it('无 front matter 返回 null 且正文照常渲染', () => {
     const { html, frontMatter } = renderMarkdownToHtml('# 只有标题\n');
     expect(frontMatter).toBeNull();
-    expect(html).toContain('<h1>只有标题</h1>');
+    expect(html).toContain('<h1>只有标题<a href="#只有标题"');
   });
 
   it('坏 YAML 容错：frontMatter=null 且原文整体渲染', () => {

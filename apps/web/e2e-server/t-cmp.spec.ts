@@ -259,26 +259,20 @@ async function readMarkdownFingerprint(page: Page): Promise<MdFingerprint> {
   });
 }
 
-test.fixme(
+test(
   'CMP-05 [BUG-67]: 同文档 remote/local 两次渲染 DOM 指纹一致（无围栏 GFM：表格/任务列表/删除线）',
   async ({ browser }) => {
-    // BUG-67（=CAND-cmp-F1，编号按 cmp 域缺陷清单勘误；产品缺陷，2026-10-10 分诊转
-    // fixme，断言不放宽）：
-    // 首轮执行 remote 轮护栏全过（comrak <del> 经 sanitize 存活，del 计数 1），
-    // local 轮 del 断言 0 命中（error-context 状态栏「渲染: 本地」）——本地
-    // markdown-it 15.0.2（packages/render-text/package.json:13）把 ~~x~~ 渲染为
-    // <s> 而非 <del>（v13 起默认标签 del→s；本仓库同 engine.ts:21 配置 node 实测
-    // 输出 <s>删除线文本</s>），与远程 comrak 的 <del>（server/src/compute/markdown.rs:19）
-    // 双引擎不一致。sanitize 为 DOMPurify 默认标签表（sanitize.ts:124-128）、enrich
-    // 无 del/s 归一，结构指纹必然差一个标签——即使撤掉 del 护栏，验收①②「指纹一致」
-    // 在指纹对比断言处同样失败。违反场景文档 §3 CMP-05 判据①②，与 t-md 的
-    // CAND-md-F1 同一缺陷类（该裁决给出修复方向：本地引擎 renderer rule 把
-    // strikethrough_open/close 输出 del，与 comrak/GFM 对齐；修复后本用例转正）。
-    // 跨域编号对照（2026-10-10 占位整理轮锁定，勿再互改）：同一删除线缺陷按 md 域
-    // 权威清单定档 BUG-66——锚点 t-md.spec.ts 'BUG-66 [探索]'（其场景用例
-    // 'MD-01/2 [CAND-md-F1]' 判据同源；md 侧整理提交 d078d27 的终态注释已指认
-    // 本条为 cmp 域场景锚点、编号按 cmp 清单保留不改）。按 BUG-67 检索落本条，
-    // 按 BUG-66/CAND-md-F1 检索落 t-md 侧锚点；他域锚点编号归承载域清单，双向不改写。
+    // BUG-67（=CAND-cmp-F1，2026-10-10 分诊转 fixme，2026-10-17 清偿转正）：
+    // 根因是本地 markdown-it 15.0.2 把 ~~x~~ 渲染为 <s>（v13 起默认 del→s）而远程
+    // comrak 出 <del>（server/src/compute/markdown.rs ext.strikethrough），双引擎
+    // DOM 指纹必然差一个标签。修复：本地引擎 renderer rule 把 strikethrough_open/
+    // close 输出 <del>（packages/render-text/src/markdown/engine.ts，GFM 规范推荐
+    // 标签，与 comrak 对齐）；sanitize 为 DOMPurify 默认标签表（del/s 均在表内）、
+    // enrich 无 del/s 归一需求——标签级对齐后指纹一致。
+    // 跨域编号对照（勿再互改）：同一删除线缺陷按 md 域权威清单定档 BUG-66——锚点
+    // t-md.spec.ts 'BUG-66 [探索]'（场景用例 'MD-01/2 [CAND-md-F1]' 判据同源）。
+    // 按 BUG-67 检索落本条，按 BUG-66/CAND-md-F1 检索落 t-md 侧锚点；他域锚点
+    // 编号归承载域清单，双向不改写。
     test.setTimeout(180_000);
     const fingerprints: MdFingerprint[] = [];
 

@@ -331,7 +331,7 @@ describe('markdownRenderer——后端注入（M7 远程引擎，M6 遗留）', 
   });
 
   it('renderMarkdownBody：直接渲染 body（不再剥 front matter），apps/web 本地回退用', () => {
-    expect(renderMarkdownBody('# t\n')).toContain('<h1>t</h1>');
+    expect(renderMarkdownBody('# t\n')).toContain('<h1>t<a href="#t"'); // 标题含尾置锚（BUG-67 对齐）
     expect(renderMarkdownBody('| a |\n|---|\n| 1 |\n')).toContain('<table>');
   });
 });

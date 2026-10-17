@@ -183,12 +183,24 @@ function convertCallouts(root: Document): void {
  * 任务列表类名归一化：直接产 HTML 的引擎（远程 comrak tasklist）不给 li 加类，
  * 而 markdown-it-task-lists 输出 li.task-list-item——补齐保证两引擎样式一致。
  * 幂等：已有类的 li（本地路径）不重复添加。
+ * ul/input 同点归一（BUG-67 指纹对齐，2026-10-17）：本地插件输出
+ * ul.contains-task-list + input.task-list-item-checkbox，远程 comrak tasklist
+ * 裸 ul/input——与 li.task-list-item 同一裁决方向（归一到插件命名），否则
+ * 同文档双引擎 DOM 指纹差三类名（CMP-05 实测）。
  */
 function normalizeTaskLists(root: Document): void {
   for (const li of Array.from(root.querySelectorAll('li'))) {
     const direct = Array.from(li.children).find((c) => c.tagName === 'INPUT');
-    if (direct?.getAttribute('type') === 'checkbox' && !li.classList.contains('task-list-item')) {
+    if (direct?.getAttribute('type') !== 'checkbox') continue;
+    if (!li.classList.contains('task-list-item')) {
       li.classList.add('task-list-item');
+    }
+    const ul = li.parentElement;
+    if (ul?.tagName === 'UL' && !ul.classList.contains('contains-task-list')) {
+      ul.classList.add('contains-task-list');
+    }
+    if (!direct.classList.contains('task-list-item-checkbox')) {
+      direct.classList.add('task-list-item-checkbox');
     }
   }
 }
