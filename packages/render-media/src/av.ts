@@ -446,7 +446,8 @@ export const avRenderer: Renderer = {
         showMediaError(videoErrorMessage(el.error?.code));
       });
       const instance: RenderedInstance & { getMeta(): { size: number; encoding?: Encoding } } = {
-        // BUG-04 握手点 2 代工：av 实例暴露大小与编码（SHELL-12 验收要求媒体至少大小+编码）
+        // BUG-04 握手点 2 代工：av 实例暴露大小与编码（SHELL-12 验收要求媒体至少大小+编码）；
+        // BUG-32：二进制媒体 det.encoding 为 undefined，消费方对 undefined 隐藏「编码」段
         getMeta: () => ({ size: buffer.length, encoding: det.encoding }),
         destroy() {
           release(); // 幂等：错误卡片 release 后 destroy 为 no-op
@@ -516,7 +517,8 @@ export const avRenderer: Renderer = {
     });
 
     const instance: RenderedInstance & { getMeta(): { size: number; encoding?: Encoding } } = {
-      // BUG-04 握手点 2 代工：av 实例暴露大小与编码（SHELL-12 验收要求媒体至少大小+编码）
+      // BUG-04 握手点 2 代工：av 实例暴露大小与编码（SHELL-12 验收要求媒体至少大小+编码）；
+      // BUG-32：二进制媒体 det.encoding 为 undefined，消费方对 undefined 隐藏「编码」段
       getMeta: () => ({ size: buffer.length, encoding: det.encoding }),
       destroy() {
         release(); // 幂等：错误卡片 release 后 destroy 为 no-op

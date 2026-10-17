@@ -656,31 +656,32 @@ test(
   }
 );
 
-test.fixme(
-  'BUG-32 [探索]: 图片文件状态栏「编码」恒显示 gb18030——编码检测对二进制媒体不豁免，getMeta 透传误导值',
-  async () => {
-    // 现象（severity low，误导性呈现缺陷）：文本编码检测对二进制媒体不豁免——
-    // packages/core/src/detect/encoding.ts:31-37 严格 UTF-8 校验失败即回退 gb18030，
-    // packages/core/src/detect/index.ts:16,23 即使 binary=true 也保留 encoding，
-    // packages/render-media/src/image.ts:77 的 getMeta 直接透传 det.encoding，
-    // ViewerPane.svelte:115 非空即显示。服务端档与纯前端档、三张不同 png/jpg 均复现同一
-    // 错误值；图片渲染正常，无崩溃/数据丢失/错误结果，仅状态栏与属性面板显示无意义编码值。
-    //
-    // 最小复现：
-    //   1) 连接 http://127.0.0.1:8391；
-    //   2) 依次打开 samples/m1/pixel.png、domain-media-office-viewer/exif-rot90.jpg、
-    //      domain-media-office-viewer/zoom-test.png；
-    //   3) 三者状态栏均「编码: gb18030 · 大小: …」（大小各异，编码恒为 gb18030）。
-    //   服务端响应头直接证据：curl -s -D - ".../api/file?path=samples/m1/pixel.png" 含
-    //   x-vv-encoding: gb18030。
-    //
-    // 证据（复核会话，/tmp/verify-shell-e6/）：
-    //   - repro.mjs（8391 树内逐层点击打开）：三文件状态栏「编码: gb18030 · 大小: 70/3657/4022」；
-    //   - repro4199.mjs（4199 纯前端档 setInputFiles 本地打开三文件）：同样 gb18030/70/3657/4022
-    //     ——两档一致，纯前端 b64 注入通道即可转正（本文件 SHELL-12/video 的 openDir 同款）。
-    //
-    // 转正提示：期望修复后图片类状态栏不出现「编码」段（或显式「二进制」），断言
-    // .vv-statusbar 不含「编码: gb18030」+ 图片仍正常渲染（无错误卡片）。
+test(
+  'BUG-32: 图片状态栏/属性面板不再显示「编码」段（编码检测对二进制媒体不透出）',
+  async ({ page }) => {
+    // 缺陷（low，误导性呈现）：编码检测对二进制不豁免——严格 UTF-8 校验失败恒回退
+    // gb18030，image/av 的 getMeta 透传致图片状态栏/属性面板恒显「编码: gb18030」
+    // （服务端档与纯前端档一致，历史证据路径见缺陷库）。修复（2026-10-16）：detect
+    // 对 binary 判定结果置 encoding undefined——消费方（ViewerPane 状态栏段组装 /
+    // MetaPanel 行渲染）对 undefined 即隐藏「编码」段；文本媒体（含 gb18030 文本，
+    // binary=false）编码照常透出，BUG-04「至少含大小」语义不变。
+    // 通道：纯前端 b64 注入（历史复核 repro4199 已证实两档同现此缺陷，openDir 同款）。
+    const png = fileURLToPath(new URL('../../../samples/m1/pixel.png', import.meta.url));
+    await waitAppMounted(page);
+    await openDir(page, [
+      { name: 'pixel.png', type: 'image/png', b64: readFileSync(png).toString('base64') }
+    ]);
+    await openFile(page, 'pixel.png');
+    // 图片渲染正常（无错误卡片）：编码修复不触碰渲染链
+    await expect(page.locator('.vv-image img')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('.vv-error-card')).toHaveCount(0);
+    // 状态栏：大小段仍在、编码段消失（修复前恒「编码: gb18030」）
+    await expect(page.locator('.vv-statusbar')).toContainText(/大小: \d+/);
+    await expect(page.locator('.vv-statusbar')).not.toContainText('编码:');
+    // 属性面板：无编码行
+    await openRightIfNarrow(page);
+    await expect(page.locator('.meta-name')).toHaveText('pixel.png');
+    await expect(page.locator('.meta-row', { hasText: '编码' })).toHaveCount(0);
   }
 );
 

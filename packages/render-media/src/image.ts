@@ -190,7 +190,10 @@ export const imageRenderer: Renderer = {
       });
     }
     // BUG-04（SHELL-12 验收）：图片状态栏/属性面板至少含大小与编码——det.encoding
-    // 为服务端 x-vv-encoding 或本地启发式的检测结果，ViewerPane 按 'getMeta' in 探测
+    // 为本地启发式的检测结果（服务端 x-vv-encoding 仅入 remoteMeta 供 code 渲染器
+    // 纠偏，不达此处），ViewerPane 按 'getMeta' in 探测；BUG-32：二进制媒体的
+    // det.encoding 为 undefined（编码检测对二进制无意义），消费方对 undefined 隐藏
+    // 「编码」段——「至少含编码」语义由「文本媒体恒有、二进制媒体合理省略」取代
     const instance: RenderedInstance & { getMeta(): { size: number; encoding?: Encoding } } = {
       getMeta: () => ({ size: buffer.length, encoding: det.encoding }),
       destroy() {

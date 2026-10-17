@@ -9,7 +9,11 @@ export { detectEncoding, isStrictUtf8 } from './encoding';
 
 const TEXT_EXTENSIONS = new Set(['txt','md','markdown','html','htm','css','scss','js','mjs','cjs','ts','tsx','jsx','json','jsonc','yaml','yml','toml','xml','svg','csv','log','py','rb','go','rs','java','kt','c','h','cpp','hpp','cc','sh','bash','zsh','fish','sql','lua','php','pl','swift','dart','vue','svelte','ini','conf','cfg','env','properties','gradle','cmake','dockerfile','gitignore','license','makefile']);
 
-/** 检测链：扩展名主路由 + magic 签名 + 编码。head 建议 ≥8KB；full 用于编码精确判定。 */
+/** 检测链：扩展名主路由 + magic 签名 + 编码。head 建议 ≥8KB；full 用于编码精确判定。
+ * BUG-32：binary 判定成立时不透出文本编码——编码检测对二进制字节无意义
+ * （png/jpg 严格 UTF-8 校验失败恒回退 gb18030 的误导值）；消费方约定：getMeta 的
+ * encoding 为 undefined 时状态栏/属性面板隐藏「编码」段（ViewerPane/MetaPanel 的
+ * 真值判断），文本渲染器本就以 `det.encoding ?? 'utf-8'` 兜底不受影响。 */
 export function detect(input: { name: string; head: Uint8Array; full?: Uint8Array }): Detection {
   const ext = extractExtension(input.name);
   const signature = sniffSignature(input.head);
@@ -20,5 +24,5 @@ export function detect(input: { name: string; head: Uint8Array; full?: Uint8Arra
     signature !== null
       ? !TEXT_EXTENSIONS.has(ext)
       : encoding === 'gb18030' && !TEXT_EXTENSIONS.has(ext);
-  return { ext, encoding, binary, signature };
+  return { ext, encoding: binary ? undefined : encoding, binary, signature };
 }
