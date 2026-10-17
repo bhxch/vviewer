@@ -289,11 +289,13 @@ test('HL-09：>2MB lazy chunk 解析中切 tab——cancelAll 取消只逐出不
   // 发起打开 3MB（lazy chunk 请求在途）后不等待，立即切另一文件（缺陷场景的竞态窗口；
   // tab 切换 cancelHighlight → cancelAll，chunk 以 HighlightCanceledError 结束——
   // 只逐出在-flight、不写行级 hljs 兜底、无重试风暴）。mobile 视口树行在抽屉内：
-  // 先开抽屉连点两行再关（drawer.ts 惯例）
+  // BUG-61 修复后每次打开文件即自动收起抽屉——两次树行点击各自独立开合抽屉
   const drawer = await openDrawerIfNarrow(page);
   await page.locator('.vv-tree-row', { hasText: 'big3m.ts' }).click();
-  await page.locator('.vv-tree-row', { hasText: 'tiny.txt' }).click();
   await closeDrawerIfOpened(page, drawer);
+  const drawer2 = await openDrawerIfNarrow(page);
+  await page.locator('.vv-tree-row', { hasText: 'tiny.txt' }).click();
+  await closeDrawerIfOpened(page, drawer2);
 
   // 新文件正常渲染，无错误卡片、无页面异常
   await expect(page.locator('.vv-tab.active', { hasText: 'tiny.txt' })).toBeVisible();
