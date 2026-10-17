@@ -1,4 +1,4 @@
-import type { Encoding, TreeStore, TreeNode } from '../types';
+import type { ByteRange, Encoding, TreeStore, TreeNode } from '../types';
 import { hash8 } from './singleFile';
 
 /**
@@ -350,11 +350,11 @@ export function createRemoteStore(
     remoteBaseById.delete(id);
   }
 
-  return {
-    id,
-    [STORE_UID]: ++storeUidSeq,
-    displayName: () => dirLabel,
-    async listChildren(path): Promise<TreeNode[]> {
+  return Object.assign(
+    {
+      id,
+      displayName: () => dirLabel,
+    async listChildren(path: string): Promise<TreeNode[]> {
       const res = await request('/api/tree', path);
       const body = (await res.json()) as {
         entries?: Array<{ name: string; kind: string; size?: number; mtime?: number }>;
@@ -369,7 +369,7 @@ export function createRemoteStore(
       }));
       // 排序信任服务端（目录优先 + 自然序已由 /api/tree 保证）
     },
-    async read(path, opts) {
+    async read(path: string, opts?: { range?: ByteRange; signal?: AbortSignal }) {
       // range 透传（spec §2.3）：Range: bytes=start-end（end 含）；服务器回 206
       // 即区间字节原样交付，回 200（忽略 Range）则全量原样交付——不做客户端切片，
       // 长度/边界校验由调用方（dispatcher 的 StreamCtx 构造）自担。
@@ -394,5 +394,9 @@ export function createRemoteStore(
     rangeCapable: true,
     watch,
     close
-  };
-}
+      },
+      // 实例身份令牌（storeRelease 代理免疫比较消费，见 STORE_UID 注）：符号键经
+      // Object.assign 附加以绕开 RemoteStore 接口的形状校验
+      { [STORE_UID]: ++storeUidSeq }
+    );
+  }

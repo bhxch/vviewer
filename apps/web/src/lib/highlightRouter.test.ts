@@ -124,7 +124,11 @@ describe('routeLargeFileHighlight（阶段 3+4 契约矩阵）', () => {
       new Response(JSON.stringify(hit), { status: 200 })
     ];
     let call = 0;
-    const fetchMock = vi.fn(async () => responses[call++]!);
+    // mock 按 fetch 签名类型化：mock.calls 元组带 init，避免无参 vi.fn 的 [] 元组索引
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> =>
+        responses[call++]!
+    );
     vi.stubGlobal('fetch', fetchMock);
     // 首次：完整 intervals + 令牌入库（body 不带 cacheId——会话尚无条目）
     await expect(routeLargeFileHighlight(SRC, 'javascript', range)).resolves.toEqual({

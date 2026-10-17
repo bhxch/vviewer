@@ -84,7 +84,7 @@ function installHeadingAnchors(md: MarkdownEngine): void {
     const text = headingText(tokens[idx - 1]);
     const id = anchorize(env as Record<string, unknown>, text);
     const escaped = escapeAttr(text);
-    return `<a href="#${id}" aria-label="Link to heading '${escaped}'" data-heading-content="${escaped}" class="anchor"></a></${tokens[idx].tag}>\n`;
+    return `<a href="#${id}" aria-label="Link to heading '${escaped}'" data-heading-content="${escaped}" class="anchor"></a></${tokens[idx]!.tag}>\n`;
   };
 }
 
