@@ -121,6 +121,18 @@ fn compile_grammar(e: &GrammarEntry, grammar_dir: &Path, out_dir: &Path) -> bool
     println!("cargo:rerun-if-changed={}", src_dir.join("parser.c").display());
 
     let mut build = cc::Build::new();
+    // BUG-33（high，2026-10-10 探索复核确认、2026-10-17 定位）：vendored
+    // tree-sitter-djot（treeman/tree-sitter-djot@759a618）的 C 外部扫描器在 -O2
+    // 下存在 UB——release 构建对最小输入（"# Heading\n"）即 SIGSEGV 于
+    // push_block 的 array_push（contents=NULL 直接写，gdb 实证），单请求杀死整个
+    // 进程（文件服务+compute 同时不可用）；debug/-O0 构建同一输入全部正常。
+    // 缓解：djot 的 C 编译单元（parser.c+scanner.c）锁定 -O0——扫描器单语言成本
+    // 可忽略，djot 解析语义以 -O0（无优化）为准。真正修复 = 上游升级/修 scanner
+    // 后摘除此 pin（回归守卫：tests/compute_highlight.rs
+    // djot_minimal_inputs_do_not_crash、e2e-server/t-cmp.spec.ts BUG-33）。
+    if e.name == "djot" {
+        build.opt_level(0);
+    }
     build.file(src_dir.join("parser.c"));
     for scanner in ["scanner.c"] {
         let p = src_dir.join(scanner);

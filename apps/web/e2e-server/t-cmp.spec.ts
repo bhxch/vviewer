@@ -309,26 +309,17 @@ test(
 // 断言归 e2e-server）。来源标注 [探索]：hl 域探索复核会话独立复现确认。注意两条缺陷态
 // 都会破坏/拖垮共享 :4181 compute 实例，转正前保持 test.fixme，不与其他用例同跑。
 
-test.fixme('BUG-33 [探索]: lang=djot 高亮含命中内容文本使服务端 SIGSEGV——单请求杀死整个 vviewer（文件服务+compute 同时不可用直至重启）', async () => {
-  // 复核成立（severity high，text/path/range 三模式实测全触发，崩溃+功能完全不可用）。
-  // 根因：run_highlight 直接调 tree-sitter-highlight C 层 Highlighter::highlight
-  // （server/src/compute/highlight.rs:147-156），djot 语法在 C 层触发段错误；:297
-  // parse_with_timeout 的响应侧超时保护对 SIGSEGV 无效（Rust panic 捕获亦不适用于段
-  // 错误），日志无任何 panic/错误痕迹。三模式汇合点 spawn_blocking（highlight.rs:525）。
-  // 复现工艺：实例启动后 queries 懒编译 301 语言需约 6~8s（服务日志可见编译 WARN），
-  // 编译未就绪时请求表现为连接失败假象——需「health 200 + 任一无害高亮请求 200」双就绪。
-  // 最小复现：curl -X POST /api/compute/highlight -H 'content-type: application/json'
-  //   -d '{"text":"# Heading\n","lang":"djot"}' → curl 000 + shell 打印 'Segmentation
-  //   fault (core dumped)'、进程退出码 139（128+11），随后 /api/health 连接失败、进程消失。
-  //   最小触发文本另有 'text **bold**\n' 与 '`code`\n'（bisect 逐变体重启验证 4/4 全崩）；
-  //   对照：纯文本 'x\n'/'Heading\n'/'#x\n' 不崩（200 零区间），同文本换 lang=markdown
-  //   200 正常区间；path 模式（a.dj）与 range 模式（startLine 0/lineCount 10）同 139；
-  //   coredumpctl 记三实例 PID 均 'SIGSEGV present'。
-  // 证据（复核轮独立取得，release 二进制 --compute 端口 8441~8449 多实例）：
-  //   apps/web/.temp/explore-hl/bisect-djot.sh（逐变体重启验证）；源码定位
-  //   server/src/compute/highlight.rs:147-156、:525。
-  // 修复方向：tree-sitter-highlight 升级/换 djot 生成物，或 run_highlight 前置拦该输入类
-  // （子进程隔离/语法白名单验证）；修复后本用例转正。
+test('BUG-33 [探索]: lang=djot 高亮含命中内容文本不再 SIGSEGV——单请求不杀死服务进程（djot C 编译单元 -O0 缓解）', async () => {
+  // 2026-10-10 复核成立（severity high，text/path/range 三模式全触发）；2026-10-17
+  // 定位并缓解转正。根因（gdb release 实证）：vendored tree-sitter-djot
+  // （treeman/tree-sitter-djot@759a618）的 C 外部扫描器在 -O2 下存在 UB——最小输入
+  // "# Heading\n" 即 SIGSEGV 于 scanner 的 push_block（array_push 对 contents=NULL
+  // 直接写），单请求杀死整个进程；debug/-O0 构建同一输入全部正常（优化暴露型 UB，
+  // 非 Rust 层可捕获：parse_with_timeout/catch_unwind 对段错误均无效）。
+  // 修复：build.rs 将 djot 的 C 编译单元（parser.c+scanner.c）锁定 -O0（djot 解析
+  // 语义以 -O0 为准，单语言成本可忽略）；真正修复 = 上游升级/修 scanner 后摘除 pin
+  // （回归守卫：server/tests/compute_highlight.rs djot_minimal_inputs_do_not_crash
+  // + 本用例）。响应侧超时（HIGHLIGHT_TIMEOUT）与进程存活判据保留为回归面。
   test.setTimeout(120_000);
   // 双就绪门：懒编译完成前请求呈连接失败假象，轮询无害高亮至 200 再触发（上限 30s）
   let warmOk = false;

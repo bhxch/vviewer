@@ -858,3 +858,32 @@ async fn highlight_range_deep_window_on_oversize_file_200() {
     assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
     cache_reset();
 }
+
+// ---------- BUG-33：djot 外部扫描器 release UB 回归守卫 ----------
+
+/// djot 最小崩溃形态（探索复核 4/4 bisect + gdb 实证 push_block array_push
+/// contents=NULL 写）在 -O2 下杀死进程（SIGSEGV，signal 11）——本测试若在
+/// release 下重新出现该 UB，测试二进制直接崩溃使 CI 变红（无法以断言表达）。
+/// 缓解见 build.rs 的 djot -O0 pin；上游升级后本测试与 t-cmp BUG-33 共同守卫。
+#[tokio::test]
+async fn djot_minimal_inputs_do_not_crash() {
+    let f = fixture(true, None);
+    for text in ["# Heading\n", "text **bold**\n", "`code`\n", "x\n", "Heading\n"] {
+        let (status, body) = post_json(
+            f.app.clone(),
+            "/api/compute/highlight",
+            None,
+            json!({ "text": text, "lang": "djot" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "djot 高亮应正常返回 {text:?}: {body}");
+        assert!(body["intervals"].is_array());
+    }
+    // 服务进程仍存活（缺陷态：单请求 SIGSEGV 带走全进程）；/api/health 200 即进程未死
+    let res = f
+        .app
+        .oneshot(Request::builder().uri("/api/health").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
