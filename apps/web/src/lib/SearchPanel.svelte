@@ -7,9 +7,11 @@
   // "此视图不支持搜索"。
   import type { RenderedInstance, SearchMatch } from '@vviewer/core';
 
-  /** search 契约的 caseSensitive 扩展（BUG-23；结构化收窄，不动 core 类型） */
+  /** search 契约的 caseSensitive 扩展（BUG-23；结构化收窄，不动 core 类型）+ 视图
+   * 切换订阅（BUG-44：html 渲染器内部重挂载切换源码/渲染视图，可达性随视图变化） */
   type SearchableInstance = RenderedInstance & {
     search?(query: string, opts?: { caseSensitive?: boolean }): Promise<SearchMatch[]>;
+    onViewChanged?(cb: () => void): () => void;
   };
 
   let { instance, onclose }: { instance: SearchableInstance | null; onclose(): void } = $props();
@@ -54,6 +56,20 @@
     };
     window.addEventListener('keydown', onWinKey);
     return () => window.removeEventListener('keydown', onWinKey);
+  });
+
+  $effect(() => {
+    // BUG-44：视图切换触发重扫——渲染器内部重挂载不重建面板（面板绑定同一 instance
+    // 对象），无此通知则计数陈旧：源码搜 1/5 切渲染视图仍 1/5，且渲染视图 Enter 经
+    // step() 本地空推进（导航无效更误导）。订阅渲染器的视图变化（仅 html 实现该鸭
+    // 子接口，无此接口的渲染器为 no-op）：重扫后渲染视图 search 恒空 → 「无结果」
+    // 且 total=0 使 step() 早退不推进；切回源码恢复真实命中与高亮。
+    if (!instance?.onViewChanged) return;
+    const off = instance.onViewChanged(() => {
+      if (debounceTimer !== null) clearTimeout(debounceTimer); // 挂起防抖作废，立即重扫
+      void runSearch(query);
+    });
+    return off;
   });
 
   async function runSearch(q: string): Promise<void> {

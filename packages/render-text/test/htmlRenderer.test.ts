@@ -150,6 +150,34 @@ describe('htmlRenderer——sandbox iframe 与视图切换', () => {
     expect(target.innerHTML).toBe('');
   });
 
+  it('BUG-44：视图切换通知 onViewChanged 订阅者，退订/同视图/destroy 后不再通知', async () => {
+    const { target, instance } = await renderHtml('<p>hi</p>');
+    const toggle = instance as RenderedInstance & {
+      toggleView(): void;
+      onViewChanged(cb: () => void): () => void;
+    };
+    let calls = 0;
+    const off = toggle.onViewChanged(() => calls++);
+
+    target.querySelector<HTMLButtonElement>('.vv-html-btn-source')!.click(); // 渲染→源码
+    toggle.toggleView(); // 源码→渲染（实例方法同通道）
+    expect(calls).toBe(2);
+
+    off(); // 退订
+    target.querySelector<HTMLButtonElement>('.vv-html-btn-source')!.click(); // 渲染→源码：已退订不通知
+    expect(calls).toBe(2);
+
+    // 同视图切换为空操作：不通知（当前已在源码视图，再点「源码」）
+    const on2 = toggle.onViewChanged(() => calls++);
+    target.querySelector<HTMLButtonElement>('.vv-html-btn-source')!.click();
+    expect(calls).toBe(2);
+
+    // destroy 后通知面清空：按钮虽已随宿主清空，防御性验证订阅集清空
+    on2();
+    instance.destroy();
+    expect(calls).toBe(2);
+  });
+
   it('>20MB：降级为源码视图 + 提示卡（无 iframe、无工具栏，切换为空操作）', async () => {
     stubResizeObserver();
     const big = new Uint8Array(20 * 1024 * 1024 + 1);

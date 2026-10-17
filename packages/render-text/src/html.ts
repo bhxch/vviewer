@@ -108,6 +108,8 @@ export const htmlRenderer: Renderer = {
     let destroyed = false;
     let view: HtmlView = 'rendered';
     let codeInst: RenderCodeHandle | null = null;
+    /** BUG-44：视图切换订阅（搜索面板重扫）；destroy 清空防迟滞回调 */
+    const viewListeners = new Set<() => void>();
 
     const raw = new TextDecoder(DECODERS[det.encoding ?? 'utf-8'], { fatal: false }).decode(buffer);
     const srcdoc = buildSandboxedSrcdoc(raw);
@@ -160,6 +162,10 @@ export const htmlRenderer: Renderer = {
       unmount();
       if (next === 'rendered') mountRendered();
       else mountSource();
+      // BUG-44：搜索可达性随视图变化（渲染视图 search 恒空、源码视图重建 codeInst），
+      // 重挂载不通知则搜索面板计数陈旧（源码 1/5 切渲染仍 1/5，Enter 空推进）——
+      // 切换后通知订阅方（搜索面板）按当前视图重扫。
+      for (const cb of viewListeners) cb();
     }
 
     renderedBtn.addEventListener('click', () => setView('rendered'));
@@ -170,12 +176,19 @@ export const htmlRenderer: Renderer = {
       toggleView(): void;
       getEngine(): 'local';
       search(query: string, opts?: { caseSensitive?: boolean }): Promise<SearchMatch[]>;
+      /** BUG-44：视图切换订阅（SearchPanel 重扫）；返回退订函数 */
+      onViewChanged(cb: () => void): () => void;
     } = {
       destroy() {
         destroyed = true;
+        viewListeners.clear();
         unmount();
         target.replaceChildren();
         target.classList.remove('vv-html');
+      },
+      onViewChanged(cb: () => void): () => void {
+        viewListeners.add(cb);
+        return () => viewListeners.delete(cb);
       },
       toggleView() {
         setView(view === 'rendered' ? 'source' : 'rendered');

@@ -400,29 +400,22 @@ const HTML_5HITS = [
   '</body></html>'
 ].join('\n');
 
-test.fixme('BUG-44 [探索]: HTML 源码↔渲染视图切换后搜索面板计数陈旧不刷新——双向复现，渲染视图 Enter 空推进', async ({
+/** 视图切换点击（面板开着时）：搜索浮层 absolute top-right z-60 在 mobile 视口遮住
+ * html 工具栏，真实指针点击被面板 subtree 拦截；而缺陷场景本身要求面板开着切视图
+ * （关面板重开即丢 query，场景不可达）——经 DOM click 通道触发（b-code-highlight-
+ * degrade spec dispatchEvent 同先例；桌面真实点击通道由本文件其余用例覆盖）。 */
+async function clickViewButton(page: Page, cls: string): Promise<void> {
+  await page.locator(`.${cls}`).evaluate((el) => (el as HTMLElement).click());
+}
+
+test('BUG-44：HTML 源码↔渲染视图切换后搜索计数随当前视图刷新（渲染视图「无结果」且 Enter 不推进）', async ({
   page
 }) => {
-  // 复核成立（文件内搜索域）：HTML 文件内搜索，源码↔渲染视图切换后面板计数不刷新，双向均现。
-  // 根因：setView 仅 unmount+mount，不通知 SearchPanel（packages/render-text/src/html.ts:155-163）；
-  // 渲染视图是沙箱 iframe，search 恒返回 []、gotoMatch 空操作（html.ts:185-190）；SearchPanel
-  // 的 runSearch 仅由输入防抖/Aa 开关触发、无视图变化观察者（apps/web/src/lib/SearchPanel.svelte:59-92），
-  // step() 不校验当前视图有无命中故计数本地空推进（SearchPanel.svelte:95-100）；面板随 tab 级
-  // cleanup 才关闭且绑定同一 instance 对象，视图切换不重建（apps/web/src/lib/ViewerPane.svelte:202,232-238）。
-  // 缺陷态 (a)：源码视图搜 1/5 → 切渲染，面板仍 1/5，600ms/2100ms 均无自我修正；渲染视图
-  // 按 Enter 计数空推进 1/5→2/5 但文档内无任何导航效果且不报错（校准上报者「Enter 无响应」：
-  // 数字会变但导航无效，更具误导性）。缺陷态 (b)：渲染视图搜「无结果」→ 切源码仍「无结果」
-  // （源码实际可得 1/5，且重挂载的源码无任何命中高亮）。重输 query 立即恢复正确计数——面板
-  // 本身可恢复，问题仅在视图切换不触发重搜。
-  // 最小复现/证据：cd apps/web && BASE=http://127.0.0.1:4199 node .temp/verify-fsearch-E2/repro.mjs
-  // （fixture 自带恰 5 处 "section"，不依赖上报者脚本）输出：[1] 源码视图 计数=1/5
-  // hitLines=5 active=1 → [2] 切渲染后 计数=1/5 面板仍开=true → [3] 渲染视图 Enter 后=2/5
-  // activeLine=0 → [4] 600ms/2100ms 后仍 2/5 → [5] 渲染视图直搜=无结果 → [6] 切回源码=无结果
-  // 源码实际命中行=0 → [7] 重输 sanity=1/5；pageErrors 无；BASE=:8391 输出逐行一致；
-  // 截图 shot.png 同目录。域文档 docs/e2e/in-file-search.md 已知缺陷仅 BUG-18/BUG-23，
-  // 非已知缺陷/已裁决偏差。
-  // 修复判据（转正时按 PR 实际方案微调）：视图切换触发重搜、计数与当前视图实际可得命中
-  // 一致——渲染视图 search 恒空 → 显示「无结果」且 Enter 不推进；切回源码恢复 1/5。
+  // 修前缺陷（复核成立）：setView 仅 unmount+mount 不通知 SearchPanel
+  // （html.ts），面板 runSearch 只由输入防抖/Aa 触发、step() 本地空推进——
+  // 源码搜 1/5 切渲染仍 1/5 且渲染视图 Enter 空推进（导航无效）、渲染视图搜
+  // 「无结果」切源码仍「无结果」（源码实际 1/5 无高亮）。修复 = html 实例增
+  // onViewChanged 订阅（setView 末尾通知），SearchPanel 订阅后按当前视图重扫。
   test.setTimeout(60_000);
   await page.goto('/');
   await openDir(page, [{ name: 'bug44.html', type: 'text/html', content: HTML_5HITS }]);
@@ -436,17 +429,17 @@ test.fixme('BUG-44 [探索]: HTML 源码↔渲染视图切换后搜索面板计�
   await expect(count).toHaveText('1/5', { timeout: 5_000 });
   await expect(page.locator('.vv-code-line.vv-search-hit-line')).toHaveCount(5);
 
-  // 缺陷态 (a)：切渲染视图后计数须刷新（渲染视图不支持搜索 → 「无结果」）；现状陈旧保持 1/5
-  await page.locator('.vv-html-btn-rendered').click();
+  // 缺陷态 (a) 修复面：切渲染视图后计数刷新——渲染视图不支持搜索 → 「无结果」
+  await clickViewButton(page, 'vv-html-btn-rendered');
   await expect(count).toHaveText('无结果', { timeout: 5_000 });
 
-  // 缺陷态 (a) 后半：渲染视图 Enter 不得空推进计数（现状 1/5→2/5 且无任何导航效果）
+  // 缺陷态 (a) 后半修复面：渲染视图 Enter 不推进计数（修前 1/5→2/5 且无导航效果）
   await page.locator('.vv-search-input').focus();
   await page.keyboard.press('Enter');
   await expect(count).toHaveText('无结果');
 
-  // 缺陷态 (b)：切回源码视图计数须恢复 1/5 并重出命中高亮；现状仍「无结果」且 hitLines=0
-  await page.locator('.vv-html-btn-source').click();
+  // 缺陷态 (b) 修复面：切回源码视图计数恢复 1/5 并重出命中高亮
+  await clickViewButton(page, 'vv-html-btn-source');
   await expect(count).toHaveText('1/5', { timeout: 5_000 });
   await expect(page.locator('.vv-code-line.vv-search-hit-line')).toHaveCount(5);
 });
