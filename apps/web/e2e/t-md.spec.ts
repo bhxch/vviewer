@@ -310,7 +310,7 @@ test.fixme('BUG-39 [探索]: 远程档 heading id 双引擎方案不一致——
   //   0 死链（comrak 自产 anchor href 与实际 heading id 全一致）。
 });
 
-test.fixme('BUG-40 [探索]: markdown 渲染视图净化放行五类等价加载向量——poster/SVG image/style url/table background/input image 外域真实外联', async ({
+test('BUG-40 [探索]: markdown 渲染视图净化放行五类等价加载向量——poster/SVG image/style url/table background/input image 外域真实外联', async ({
   page
 }) => {
   // = 探索期编号 BUG-39（原同文件 'BUG-39 [探索]' 占位，已按唯一锚点收编删除）复核
@@ -328,8 +328,11 @@ test.fixme('BUG-40 [探索]: markdown 渲染视图净化放行五类等价加载
   // requestresponse 三相记录）——md 档 requests=6（poster/svg-img/svg-xlink/bg/tbg/input），
   // failures 全为网络层错误，img[alt=plain] 等既有 BUG-17 行为完好；control.mjs——
   // errorText='csp'=网络栈之前拦截、未出浏览器。
-  // 修复后判据：external.example 请求 0 条（不预设净化实现形态：剥属性/打 BUG-17 同款
-  // data-vv-blocked-external 标记均可）。
+  // 【2026-10-17 清偿转正】修复=sanitize.ts 钩子扩展：五类向量与 img src 同权
+  // （poster/SVG image|use href+xlink:href/background 属性/input type=image src 移除
+  // 加载源 + data-vv-blocked-external 标记；行内 style 按声明剥除外域 url()/image-set
+  // 引用、其余声明保留），单测见 markdownSanitize.test.ts 'BUG-40' 组；下方断言原强度
+  // 转正（核心判据外域请求 0 条，不预设净化实现形态）。
   test.setTimeout(90_000);
   const V = 'http://external.example.com';
   const content = [

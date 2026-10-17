@@ -333,3 +333,91 @@ describe('enrich 媒体替换的外域守卫（a/img → video/audio，MD-13）'
     expect(v.hasAttribute('preload')).toBe(false);
   });
 });
+
+describe('sanitizeHtml——五类等价加载向量外域拦截（BUG-40）', () => {
+  it('① video/audio 的外域 poster 移除并打标记（poster 随渲染即拉取，preload 拦不住）', () => {
+    const html = sanitizeHtml(
+      '<video controls poster="https://evil.example.com/p.jpg" src="local.mp4"></video>' +
+        '<audio controls poster="//evil.example.net/a.jpg"></audio>'
+    );
+    expect(html).not.toContain('poster='); // 两形态全剥（http 绝对 + 协议相对）
+    expect(html).not.toContain('evil.example.com/p.jpg');
+    expect(html).not.toContain('evil.example.net/a.jpg');
+    expect(html).toContain('data-vv-blocked-external="1"');
+    expect(html).toContain('已拦截外部图片：evil.example.com');
+    // src 语义不受影响（MD-13：preload=none 点播放才请求）
+    expect(html).toContain('src="local.mp4"');
+  });
+
+  it('① 内域/相对 poster 保留（data: poster 由既有 data: 收窄分支剥除）', () => {
+    const html = sanitizeHtml(
+      '<video controls poster="local.jpg" src="local.mp4"></video>' +
+        '<video controls poster="data:image/png;base64,iVBOR"></video>'
+    );
+    expect(html).toContain('poster="local.jpg"');
+    expect(html).not.toContain('poster="data:'); // data: 收窄（非 BUG-40 判据，不置拦截标记）
+    expect(html).not.toContain('data-vv-blocked-external');
+  });
+
+  it('② SVG image 的 href/xlink:href 外域移除并打标记，内域保留', () => {
+    const html = sanitizeHtml(
+      '<svg><image href="https://evil.example.com/s.png"></image>' +
+        '<image xlink:href="https://evil.example.net/t.png"></image>' +
+        '<image href="local.png"></image></svg>'
+    );
+    expect(html).not.toContain('evil.example.com/s.png');
+    expect(html).not.toContain('evil.example.net/t.png');
+    expect(html).toContain('href="local.png"');
+    expect(html).toContain('data-vv-blocked-external="1"');
+    expect(html).toContain('已拦截外部图片：evil.example.com');
+  });
+
+  it('③ 行内 style 外域 url() 剥声明：其余声明保留，全部外域时整属性移除', () => {
+    const html = sanitizeHtml(
+      '<div style="color:red;background:url(https://evil.example.com/bg.png)">x</div>' +
+        '<div style="background:url(//evil.example.net/bg.png)">y</div>' +
+        '<div style="background:url(https://evil.example.com/only.png)">z</div>'
+    );
+    expect(html).toContain('style="color:red"'); // 外域声明剥除、其余保留
+    expect(html).not.toContain('evil.example.com/bg.png');
+    expect(html).not.toContain('evil.example.net/bg.png');
+    expect(html).not.toContain('style="background:'); // 仅外域声明 → 整属性移除
+    expect(html).toContain('data-vv-blocked-external="1"');
+    expect(html).toContain('已拦截外部图片：evil.example.com');
+  });
+
+  it('③ 行内 style 相对/data url 与无 url 声明不受损（image-set 字符串 URL 同拦）', () => {
+    const html = sanitizeHtml(
+      '<div style="color: crimson;background:url(./a.png);list-style-image:url(data:image/png;base64,iVBOR)">x</div>' +
+        '<div style="background:image-set(&quot;https://evil.example.com/i.png&quot; 1x)">y</div>'
+    );
+    expect(html).toContain('color: crimson');
+    expect(html).toContain('url(./a.png)');
+    expect(html).toContain('data:image/png;base64');
+    expect(html).not.toContain('image-set'); // 外域 image-set 声明整体剥除
+    expect(html).not.toContain('evil.example.com/i.png');
+    expect(html).toContain('data-vv-blocked-external="1"');
+  });
+
+  it('④ table background 属性外域移除并打标记，内域保留', () => {
+    const html = sanitizeHtml(
+      '<table background="https://evil.example.com/tbg.png"><tr><td>a</td></tr></table>' +
+        '<table background="tbg-local.png"><tr><td>b</td></tr></table>'
+    );
+    expect(html).not.toContain('evil.example.com/tbg.png');
+    expect(html).toContain('background="tbg-local.png"');
+    expect(html).toContain('data-vv-blocked-external="1"');
+    expect(html).toContain('已拦截外部图片：evil.example.com');
+  });
+
+  it('⑤ input type=image 的外域 src 移除并打标记，checkbox 等其余 input 不受影响', () => {
+    const html = sanitizeHtml(
+      '<input type="image" src="https://evil.example.com/i.png" alt="x">' +
+        '<input type="checkbox" checked><input type="text">'
+    );
+    expect(html).not.toContain('evil.example.com/i.png');
+    expect(html).toContain('type="checkbox"');
+    expect(html).toContain('data-vv-blocked-external="1"');
+    expect(html).toContain('已拦截外部图片：evil.example.com');
+  });
+});

@@ -2,6 +2,9 @@
 // 移植自 markpad src/lib/utils/sanitize.ts（单一策略模块原则），按 vviewer 契约
 // 调整 URI 白名单：http/https/mailto/相对路径/data:image（data: 仅限 src/srcset，
 // 见下方钩子）；FORBID_TAGS style/meta；ALLOW_DATA_ATTR 保留 mermaid/katex 管线钩子。
+// BUG-40：外域拦截自 img src/srcset（BUG-17）扩展到五类等价加载向量——
+// video/audio poster、SVG image/use href、行内 style url()、background 属性、
+// input type=image src（见钩子内 BUG-40 各分支）。
 import DOMPurify from 'dompurify';
 import type { Config } from 'dompurify';
 
@@ -45,6 +48,98 @@ export function hostOf(url: string): string {
 function markBlockedExternal(el: Element, host: string): void {
   el.setAttribute('data-vv-blocked-external', '1');
   el.setAttribute('title', `已拦截外部图片：${host}`);
+}
+
+// ---------- BUG-40：五类等价加载向量的外域拦截 ----------
+//
+// 既有防线只覆盖 IMG 的 src/srcset 与 VIDEO/AUDIO/SOURCE 的 src；以下属性同样是
+// 「元素渲染即自动加载」的外域向量（md 渲染视图把净化后 DOM 挂主文档、无 CSP 兜
+// 底，属性在即真实外联，跟踪像素可回传 IP/会话）：
+//   ① video/audio poster——poster 图随元素渲染即拉取（与 preload 无关）；
+//   ② SVG <image>/<use> 的 href/xlink:href——SVG 引用外域文档即加载；
+//   ③ 行内 style 的 url()/image-set() 字符串 URL——样式应用即拉取；
+//   ④ background 属性（table/td/body 等遗留表现属性）——同背景图自动加载；
+//   ⑤ input type=image src——与 img 同等的自动加载图片。
+// 策略与 IMG（BUG-17）同口径：移除加载源 + data-vv-blocked-external 标记 +
+// title 域名提示；行内 style 只剥含外域引用的声明、其余声明保留。
+
+/** SVG 命名空间（xlink:href 剥除用 removeAttributeNS，qualified name 双保险） */
+const XLINK_NS = 'http://www.w3.org/1999/xlink';
+
+/** 引号/括号感知的 style 声明切分：url("a;b")、image-set("a;b" 1x) 不误切。 */
+function splitStyleDeclarations(value: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let depth = 0;
+  let quote: string | null = null;
+  for (const ch of value) {
+    if (quote !== null) {
+      cur += ch;
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      cur += ch;
+      continue;
+    }
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth = Math.max(0, depth - 1);
+    if (ch === ';' && depth === 0) {
+      out.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim() !== '') out.push(cur);
+  return out;
+}
+
+/**
+ * 单条声明中的外域引用判定：命中返回引用 URL（供 title 域名提示），无外域返回
+ * null。先摘 data: URL（base64 字符可能含 '//'，避免误报）后查两种形态：
+ * url(...) 括号内（引号三态）与引号字符串字面量/无引号 //host（image-set 的
+ * URL 可不写 url()）。content:"…" 等纯展示文本命中属可接受的误伤（剥声明不剥内容）。
+ */
+function externalRefInDeclaration(decl: string): string | null {
+  const withoutData = decl.replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+(?:;[^;)'"\s]*)?/gi, '');
+  const urlFn = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*?))\s*\)/gi;
+  for (let m = urlFn.exec(withoutData); m !== null; m = urlFn.exec(withoutData)) {
+    const inner = (m[1] ?? m[2] ?? m[3] ?? '').trim();
+    if (isExternalMediaSrc(inner)) return inner;
+  }
+  const quoted = /(["'])((?:(?!\1).)*)\1/g;
+  for (let m = quoted.exec(withoutData); m !== null; m = quoted.exec(withoutData)) {
+    const inner = (m[2] ?? '').trim();
+    if (isExternalMediaSrc(inner)) return inner;
+  }
+  const bare = withoutData.match(/(?:^|[\s(,])(?:https?:)?\/\/[a-z0-9][^\s)'",;]*/i);
+  if (bare !== null) return bare[0].trim();
+  return null;
+}
+
+/** 行内 style：剥含外域引用的声明；全部被剥时整属性移除；有剥必打拦截标记。 */
+function sanitizeStyleAttribute(el: Element): void {
+  const style = el.getAttribute('style');
+  if (style === null) return;
+  const decls = splitStyleDeclarations(style);
+  const kept: string[] = [];
+  let blockedHost = '';
+  let blocked = false;
+  for (const decl of decls) {
+    const hit = externalRefInDeclaration(decl);
+    if (hit === null) {
+      kept.push(decl);
+      continue;
+    }
+    blocked = true;
+    if (blockedHost === '' && hit !== '') blockedHost = hostOf(hit);
+  }
+  if (!blocked) return;
+  if (kept.length === 0) el.removeAttribute('style');
+  else el.setAttribute('style', kept.join(';'));
+  markBlockedExternal(el, blockedHost);
 }
 
 let dataUriHookRegistered = false;
@@ -111,7 +206,44 @@ function registerDataUriHook(): void {
           el.removeAttribute('autoplay');
         }
       }
+      // BUG-40①：poster 图随元素渲染即拉取（与 preload 无关，preload=none 拦不住），
+      // 与 src 的「点播放才请求」语义不同权——直接移除（同 img 剥 src 口径）。
+      const poster = el.getAttribute('poster');
+      if (poster !== null && isExternalMediaSrc(poster.trim())) {
+        el.removeAttribute('poster');
+        markBlockedExternal(el, hostOf(poster.trim()));
+      }
     }
+    // BUG-40②③④⑤：SVG 引用元素 / 遗留 background 属性 / input type=image / 行内
+    // style url()——五类等价加载向量，全部与 img src 同权（移除加载源 + 拦截标记）。
+    // 注：text/html 解析下 SVG 元素 tagName 为小写（image/use）；<svg> 外的 <image>
+    // 会被 HTML 解析器改写为 img（上方 IMG 分支已覆盖）。
+    const svgTag = tag.toLowerCase();
+    if (svgTag === 'image' || svgTag === 'use') {
+      // SVG image/use 的 href 与 xlink:href（解析器二选一出现，双剥保险）
+      for (const attr of ['href', 'xlink:href']) {
+        const v = el.getAttribute(attr);
+        if (v === null) continue;
+        if (isExternalMediaSrc(v.trim())) {
+          el.removeAttribute(attr);
+          el.removeAttributeNS(XLINK_NS, 'href');
+          markBlockedExternal(el, hostOf(v.trim()));
+        }
+      }
+    }
+    const background = el.getAttribute('background');
+    if (background !== null && isExternalMediaSrc(background.trim())) {
+      el.removeAttribute('background');
+      markBlockedExternal(el, hostOf(background.trim()));
+    }
+    if (tag === 'INPUT' && (el.getAttribute('type') ?? '').toLowerCase() === 'image') {
+      const src = el.getAttribute('src');
+      if (src !== null && isExternalMediaSrc(src.trim())) {
+        el.removeAttribute('src');
+        markBlockedExternal(el, hostOf(src.trim()));
+      }
+    }
+    sanitizeStyleAttribute(el);
   }
   });
 }
