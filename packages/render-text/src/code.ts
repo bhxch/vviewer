@@ -1,6 +1,6 @@
 import type { Renderer, Encoding, Detection, FileSource, RenderedInstance, SearchMatch, ComputeSource, ComputeWhere, StreamCtx } from '@vviewer/core';
 import { getRemoteBase, getRemoteMeta, redetectWithFull, RemoteComputeError, showErrorCard, isAbortError } from '@vviewer/core';
-import { detectLanguage, HighlightCanceledError, captureToCssClass, type HighlightChunk, type HighlightInterval } from '@vviewer/highlight';
+import { detectLanguage, HighlightCanceledError, resolveCaptureClass, type HighlightChunk, type HighlightInterval } from '@vviewer/highlight';
 import { STREAM_MAX_BYTES, createBlockStream, isSuspiciousUtf8Block, memoizedFullRead } from './blockStream';
 import { createTextWindow } from './textWindow';
 import { advanceCodeIndex, createCodeIndex, finishCodeIndex } from './codeIndexStream';
@@ -469,7 +469,9 @@ export function overlaySearchHits(
 }
 
 /** 行文本 + 段落 → 转义后的行 HTML（段落包 `<span class="ts-<capture>">`，纯函数可测）。
- * 类名转义统一来自 @vviewer/highlight 的 captureToCssClass（与主题 CSS 变量同一唯一来源） */
+ * 类名经 @vviewer/highlight 的 resolveCaptureClass：先归约到 CODE_CAPTURES 最近语义
+ * 父级再点转 `-`（BUG-50）——类名 ⊂ 清单 ⇒ 每个 span 都有 app.css 规则与注入变量；
+ * 清单内 capture 恒等（与旧 captureToCssClass 直转逐字节一致）。 */
 export function renderLineHtml(text: string, segs: readonly LineSeg[] | undefined): string {
   if (!segs || segs.length === 0) return escapeHtml(text);
   let out = '';
@@ -479,7 +481,7 @@ export function renderLineHtml(text: string, segs: readonly LineSeg[] | undefine
     const end = Math.min(seg.end, text.length);
     if (end <= pos) continue;
     if (start > pos) out += escapeHtml(text.slice(pos, start));
-    out += `<span class="ts-${captureToCssClass(seg.capture)}">${escapeHtml(text.slice(Math.max(start, pos), end))}</span>`;
+    out += `<span class="ts-${resolveCaptureClass(seg.capture)}">${escapeHtml(text.slice(Math.max(start, pos), end))}</span>`;
     pos = end;
   }
   if (pos < text.length) out += escapeHtml(text.slice(pos));

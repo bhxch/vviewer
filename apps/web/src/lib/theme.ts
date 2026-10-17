@@ -6,6 +6,7 @@
  * 各 API 变 async，内部缓存同一份加载 promise（并发调用只请求一次）。
  */
 import {
+  CODE_CAPTURES,
   colorsToUiVars,
   resolveCapture,
   themeToCssVars,
@@ -48,66 +49,12 @@ export const DEFAULT_CODE_THEME: Record<'light' | 'dark', string> = {
 };
 
 /**
- * 代码高亮常用捕获全集（顶层 + 常用子捕获，53 个）：
- * 注入 CSS 变量的范围——span 可能出现的捕获远多于此（各语言 query 各异），
- * 未入集的捕获回落 `.ts-<capture>` 无规则 → inherit，不影响布局。
- * app.css 的 .ts-* 颜色规则与 此列表一一对齐（theme.test.ts 双向校验）。
+ * 代码高亮常用捕获全集（顶层 + 常用子捕获，53 个）：清单本体与 span 类名归约函数
+ * （resolveCaptureClass）在 @vviewer/highlight（BUG-50 后单一来源，渲染端 renderLineHtml
+ * 同消费）。app.css 的 .ts-* 颜色规则与此列表一一对齐（theme.test.ts 双向校验）；
+ * 注入变量范围 = 此清单（themeToCssVars），归约保证渲染类名 ⊂ 清单。
  */
-export const CODE_CAPTURES: readonly string[] = [
-  'attribute',
-  'comment',
-  'comment.line',
-  'comment.block',
-  'constant',
-  'constant.builtin',
-  'constant.character',
-  'constant.character.escape',
-  'constant.numeric',
-  'constructor',
-  'function',
-  'function.builtin',
-  'function.call',
-  'function.macro',
-  'function.method',
-  'keyword',
-  'keyword.control',
-  'keyword.control.conditional',
-  'keyword.control.import',
-  'keyword.control.repeat',
-  'keyword.directive',
-  'keyword.function',
-  'keyword.operator',
-  'label',
-  'markup.bold',
-  'markup.heading',
-  'markup.italic',
-  'markup.link',
-  'markup.list',
-  'markup.raw',
-  'module',
-  'namespace',
-  'number',
-  'operator',
-  'property',
-  'punctuation',
-  'punctuation.bracket',
-  'punctuation.delimiter',
-  'punctuation.special',
-  'special',
-  'string',
-  'string.escape',
-  'string.special',
-  'tag',
-  'type',
-  'type.builtin',
-  'type.enum.variant',
-  'variable',
-  'variable.builtin',
-  'variable.parameter',
-  'diff.delta',
-  'diff.minus',
-  'diff.plus'
-];
+export { CODE_CAPTURES };
 
 /** 全量主题名，按字母排序。 */
 export async function listThemes(): Promise<string[]> {

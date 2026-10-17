@@ -645,39 +645,73 @@ test('BUG-49 转正: themeMode=system 下 OS 亮暗切换后下拉显示=实际�
   await expect(select).toHaveValue('github_light');
 });
 
-test.fixme('BUG-50 [探索]: CODE_CAPTURES 53 项清单与各语言 highlights.scm 实际产出系统性缺口——数字/布尔/存储类关键字等 ts-span 恒不着色、切主题不变', async () => {
-  // 现象（校准 medium：主题功能局部失效，对照 span 如 string/comment/function/type 均正常变色，
-  //   非崩溃/数据丢失/完全不可用）：tree-sitter 主路径下，代码主题注入清单 CODE_CAPTURES
-  //   （apps/web/src/lib/theme.ts:48-102，53 项）与各语言 highlights.scm 实际产出的 capture 集
-  //   存在系统性缺口；span 类名是全量 capture 点转 `-`（packages/render-text/src/code.ts:420 经
-  //   packages/highlight/src/theme.ts:31-33 captureToCssClass，无前缀回退），app.css:55-81 的
-  //   .ts-* 规则也只覆盖这 53 项——数字字面量、布尔、fn/let/mut（keyword.storage*）、return 等
-  //   高频 token 的 span（ts-constant-numeric-integer / ts-keyword-storage /
-  //   ts-keyword-control-return 等）在任何代码主题下都无 CSS 规则、无注入变量，恒为 inherit
-  //   默认前景色 rgb(31,35,40)，切主题不变。long.rs 视口 413 个 ts-span 中 63 个（15%）恒不着色。
-  // 静态差集（本分诊以同口径脚本重跑，数值与上报逐项一致）：CODE_CAPTURES=53；rust 实际 54/
-  //   命中 34/缺 20（含 keyword.storage、keyword.storage.modifier(.mut/.ref)、keyword.storage.type、
-  //   keyword.control.return、constant.numeric.integer/.float、constant.builtin.boolean）、
-  //   go 37/24/13、ecma 41/29/12、c 32/24/8、python 33/26/7；缺口更广（scss 缺 26、djot 缺 21、
-  //   markdown 缺 15，约 240 个语言至少缺 1）。机制：resolveCapture 最长前缀回退
-  //   （packages/highlight/src/theme.ts:15-24）只用于 themeToCssVars 注入 CODE_CAPTURES 变量
-  //   （apps/web/src/lib/theme.ts:191），span 类名与 CSS 规则两端均无回退；themes.json 虽无
-  //   keyword.storage/constant.numeric.integer 直接键，经前缀回退可解析到色（github_light 的
-  //   constant.numeric=#0550ae、github_dark=#79c0ff）——缺口纯在清单与 CSS 对齐层（均本域文件，
-  //   非高亮链路缺陷）。
-  // 最小复现：服务端档 8391 连接后打开 domain-theme-system/long.rs（tree-sitter 主路径），对
-  //   .ts-keyword-storage/.ts-keyword-control-return/.ts-constant-numeric-integer span 依次在代码
-  //   主题 github_light→catppuccin_mocha→github_dark 下读 getComputedStyle().color——恒为
-  //   rgb(31,35,40)；同视口 .ts-string/.ts-comment-line 三主题明显变色
-  //   （如 .ts-string rgb(10,48,105)→rgb(166,227,161)→rgb(165,214,255)）。
-  // 证据：上报脚本 .temp/explore-theme/p3-verify.mjs B 段；复核探针（chromium headless 1280x900，
-  //   8391 档连接→domain-theme-system/long.rs）实测三主题 style#vv-code-theme 均不含
-  //   --vv-ts-keyword-storage / -keyword-control-return / -constant-numeric-integer /
-  //   -constant-builtin-boolean（--vv-ts-string 等为 true），span 计数 18/9/36、未着色 63/413
-  //   （三主题一致），全部数值与上报 p3 段 B 逐字吻合。
-  // 转正提示：修复 = CODE_CAPTURES 补齐各语言实际产出的 capture（或 span 类名/CSS 规则两端接入
-  //   前缀回退）+ app.css .ts-* 规则同步（theme.test.ts 双向校验一并更新）；断言按上述三类 span
-  //   在 ≥2 主题下计算色随主题变化落。
+/** hex #rrggbb → getComputedStyle 的 rgb(r, g, b) 形态（注入变量取 themes.json fg 原值）。 */
+function hexToRgb(hex: string): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return hex;
+  const n = parseInt(m[1]!, 16);
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+}
+
+/** 视口内指定类名 span 中文本为 text 的计算色（无匹配返回 null）。 */
+async function spanColor(page: Page, cls: string, text: string): Promise<string | null> {
+  return page.evaluate(
+    ([c, t]) => {
+      const el = [...document.querySelectorAll(`.vv-code-pre span.${c}`)].find(
+        (s) => s.textContent === t
+      );
+      return el ? getComputedStyle(el).color : null;
+    },
+    [cls, text] as const
+  );
+}
+
+// 修复背景（原占位注释压缩）：tree-sitter 主路径下 CODE_CAPTURES（53 项）与各语言
+// highlights.scm 实际产出的 capture 集存在系统性缺口——span 类名是全量 capture 点转 `-`
+//（无前缀回退），数字/布尔/存储类关键字等细粒度 capture（约 240 语言至少缺 1）的 span
+// 无 CSS 规则、无注入变量，任何代码主题下恒 inherit。修复 = 类名端接前缀归约
+//（highlight 包 resolveCaptureClass：最长前缀命中 CODE_CAPTURES 清单，清单内恒等），
+// renderLineHtml 改走归约——类名 ⊂ 清单 = 注入变量集 = app.css .ts-* 规则集，三面永久
+// 对齐；清单/注入文本/app.css 规则均不膨胀（Spec B vscode 移植逐键全等约束不触碰）。
+test('BUG-50 转正: 数字/布尔/存储类关键字 token 归约着色并随代码主题切换变化', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'vviewer:settings',
+      JSON.stringify({ themeMode: 'light', codeThemeLight: 'github_light' })
+    );
+  });
+  await page.goto('/');
+  const rust = 'fn main() {\n    let count: u32 = 42;\n    let ok = true;\n    if ok { return; }\n}\n';
+  await openDir(page, [{ name: 'captures.rs', type: 'text/plain', content: rust }]);
+  await openFile(page, 'captures.rs');
+  // tree-sitter 主路径（hljs 兜底的 span 是 hljs-* 类，不产 ts-* span）
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 20_000 });
+  // 修复前这些 token 的 span 类名是清单外细粒度名（ts-constant-numeric-integer /
+  // ts-constant-builtin-boolean / ts-keyword-storage / ts-keyword-control-return）——
+  // 归约后挂最近语义父级类名，细粒度类名不再出现
+  await expect(page.locator('.vv-code-pre span.ts-constant-numeric-integer')).toHaveCount(0);
+  const num = page.locator('.vv-code-pre span.ts-constant-numeric', { hasText: '42' });
+  await expect(num).toHaveCount(1, { timeout: 20_000 });
+  const numFg = resolveCaptureFg(THEMES['github_light']!, 'constant.numeric')!;
+  const boolFg = resolveCaptureFg(THEMES['github_light']!, 'constant.builtin')!;
+  const kwFg = resolveCaptureFg(THEMES['github_light']!, 'keyword')!;
+  expect(await spanColor(page, 'ts-constant-numeric', '42')).toBe(hexToRgb(numFg));
+  expect(await spanColor(page, 'ts-constant-builtin', 'true')).toBe(hexToRgb(boolFg));
+  expect(await spanColor(page, 'ts-keyword', 'let')).toBe(hexToRgb(kwFg));
+  // return @keyword.control.return → 归约 keyword.control（清单内子捕获，注入色经主题
+  // 表 keyword.control 精确键或前缀回退）
+  expect(await spanColor(page, 'ts-keyword-control', 'return')).toBe(
+    hexToRgb(resolveCaptureFg(THEMES['github_light']!, 'keyword.control')!)
+  );
+  // 切主题：归约 span 的计算色随注入变量整体切换（零重解析契约——类名不动只换变量）
+  await page.getByLabel('代码主题').selectOption('catppuccin_mocha');
+  const numFg2 = resolveCaptureFg(THEMES['catppuccin_mocha']!, 'constant.numeric')!;
+  const boolFg2 = resolveCaptureFg(THEMES['catppuccin_mocha']!, 'constant.builtin')!;
+  const kwFg2 = resolveCaptureFg(THEMES['catppuccin_mocha']!, 'keyword')!;
+  expect(numFg2.toLowerCase()).not.toBe(numFg.toLowerCase()); // 资产保证「随主题变化」可判定
+  await expect.poll(() => spanColor(page, 'ts-constant-numeric', '42')).toBe(hexToRgb(numFg2));
+  await expect.poll(() => spanColor(page, 'ts-constant-builtin', 'true')).toBe(hexToRgb(boolFg2));
+  await expect.poll(() => spanColor(page, 'ts-keyword', 'let')).toBe(hexToRgb(kwFg2));
 });
 
 // BUG-51 首帧采样探针：document-start 起 rAF 逐帧记录 body 背景 + html

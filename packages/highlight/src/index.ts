@@ -8,9 +8,11 @@ export {
 } from './queries';
 export { detectLanguage } from './langdetect';
 export {
+  CODE_CAPTURES,
   captureToCssClass,
   captureToCssVar,
   resolveCapture,
+  resolveCaptureClass,
   themeToCssVars,
   type ThemeStyle,
   type ThemeTable,

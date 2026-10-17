@@ -50,3 +50,89 @@ export function themeToCssVars(theme: ThemeTable, captures: string[]): string {
   }
   return lines.join('\n');
 }
+
+/**
+ * 代码高亮常用捕获全集（顶层 + 常用子捕获，53 个）——BUG-50 修复的归约目标集。
+ * 三面对齐契约：span 类名（resolveCaptureClass 归约后）⊂ 此清单 = 注入变量清单
+ * （themeToCssVars 消费方传入）= app.css .ts-* 规则清单（app 侧 theme.test.ts
+ * 双向校验）。各语言 highlights.scm 的实际 capture 集远多于此（约 240 语言各有
+ * 超集），渲染端 resolveCaptureClass 按「最长前缀命中本清单」归约——未入清单的
+ * 细粒度 capture（constant.numeric.integer、keyword.storage.modifier.mut 等）
+ * 落到最近语义父级（constant.numeric、keyword），任何语言都能拿到最近似着色而非
+ * 恒 inherit；无前缀命中的私有/杂项 capture（_ann 等）原样透传（无规则 → inherit，
+ * 与既有行为一致）。
+ */
+export const CODE_CAPTURES: readonly string[] = [
+  'attribute',
+  'comment',
+  'comment.line',
+  'comment.block',
+  'constant',
+  'constant.builtin',
+  'constant.character',
+  'constant.character.escape',
+  'constant.numeric',
+  'constructor',
+  'function',
+  'function.builtin',
+  'function.call',
+  'function.macro',
+  'function.method',
+  'keyword',
+  'keyword.control',
+  'keyword.control.conditional',
+  'keyword.control.import',
+  'keyword.control.repeat',
+  'keyword.directive',
+  'keyword.function',
+  'keyword.operator',
+  'label',
+  'markup.bold',
+  'markup.heading',
+  'markup.italic',
+  'markup.link',
+  'markup.list',
+  'markup.raw',
+  'module',
+  'namespace',
+  'number',
+  'operator',
+  'property',
+  'punctuation',
+  'punctuation.bracket',
+  'punctuation.delimiter',
+  'punctuation.special',
+  'special',
+  'string',
+  'string.escape',
+  'string.special',
+  'tag',
+  'type',
+  'type.builtin',
+  'type.enum.variant',
+  'variable',
+  'variable.builtin',
+  'variable.parameter',
+  'diff.delta',
+  'diff.minus',
+  'diff.plus'
+];
+
+const CODE_CAPTURE_SET: ReadonlySet<string> = new Set(CODE_CAPTURES);
+
+/**
+ * capture → span 类名片段（BUG-50）：先按最长前缀归约到 CODE_CAPTURES 内最近
+ * 语义父级，再经 captureToCssClass 点转 `-`。清单内 capture 恒等返回——常用
+ * token 类名与旧行为逐字节一致；未命中逐段剥 `.后缀`（resolveCapture 同款回退），
+ * 全剥尽仍未命中则原样转义返回。渲染端唯一类名出口（render-text renderLineHtml）
+ * 改走本函数：类名 ⊂ 清单 ⇒ 每个 ts-span 都有 CSS 规则与注入变量。
+ */
+export function resolveCaptureClass(capture: string): string {
+  let key = capture;
+  for (;;) {
+    if (CODE_CAPTURE_SET.has(key)) return captureToCssClass(key);
+    const dot = key.lastIndexOf('.');
+    if (dot < 0) return captureToCssClass(capture);
+    key = key.slice(0, dot);
+  }
+}
