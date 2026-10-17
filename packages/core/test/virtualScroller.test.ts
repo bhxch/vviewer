@@ -83,4 +83,59 @@ describe('virtualScroller', () => {
     expect(calls).toBe(1);
     c.remove();
   });
+
+  // ---- BUG-55：总行高超 Chromium 滚动域上限（SCROLL_PX_CAP）——spacer 钳制 + 滚动域映射 ----
+  const LH = 20;
+  const ROWS = 2_000_000; // 40,000,000px > 33,554,428px
+  const CAP = 33_554_428;
+
+  it('超上限：spacer 钳到 SCROLL_PX_CAP（不再声明总行高），未超限用例不受影响', () => {
+    const c = host();
+    const h = virtualScroller(c, ROWS, LH, () => {});
+    const spacer = c.querySelector('.vv-virtual-spacer') as HTMLElement;
+    expect(spacer.style.height).toBe(`${CAP}px`);
+    h.destroy();
+    c.remove();
+  });
+
+  it('超上限：滚动域 scrollTop 按比例张到虚拟域取行——置底即达末行窗口（jsdom clientH=0 口径）', () => {
+    const c = host();
+    const ranges: Array<[number, number]> = [];
+    const h = virtualScroller(c, ROWS, LH, (f, l) => ranges.push([f, l]));
+    // 置底：scrollTop 钳制值 = spacer 高（jsdom 无布局不钳，直接给上限值）
+    c.scrollTop = CAP;
+    c.dispatchEvent(new Event('scroll'));
+    const virtualY = (CAP / CAP) * (ROWS * LH); // = 40,000,000
+    const fExpected = Math.floor(virtualY / LH) - 10; // overscan=10
+    expect(ranges[ranges.length - 1]).toEqual([fExpected, ROWS - 1]); // 末行在窗口内
+    // viewport transform 带压缩补偿：translateY(f*lh - (virtualY - scrollTop))
+    const vp = c.querySelector('.vv-virtual-viewport') as HTMLElement;
+    expect(vp.style.transform).toBe(`translateY(${fExpected * LH - (virtualY - CAP)}px)`);
+    // 中段抽查：scrollTop 半程 → 虚拟 y 约半程
+    c.scrollTop = Math.floor(CAP / 2);
+    c.dispatchEvent(new Event('scroll'));
+    expect(ranges[ranges.length - 1]![0]).toBe(
+      Math.floor(Math.floor((ROWS * LH) / 2 / LH)) - 10
+    );
+    h.destroy();
+    c.remove();
+  });
+
+  it('超上限：scrollTo 以虚拟坐标定位（toScroll 逆映射），未超限恒等直写', () => {
+    const c = host();
+    const h = virtualScroller(c, ROWS, LH, () => {});
+    const targetVirtual = 30_000_000;
+    h.scrollTo(targetVirtual);
+    const expected = (targetVirtual / (ROWS * LH)) * CAP; // jsdom clientH=0 逆映射
+    expect(c.scrollTop).toBeCloseTo(expected, 5);
+    h.destroy();
+    c.remove();
+
+    const c2 = host();
+    const h2 = virtualScroller(c2, 1000, 20, () => {});
+    h2.scrollTo(50 * 20);
+    expect(c2.scrollTop).toBe(1000); // 未超限：与直写 scrollTop 等价
+    h2.destroy();
+    c2.remove();
+  });
 });

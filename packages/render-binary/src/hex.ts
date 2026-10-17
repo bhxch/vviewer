@@ -389,9 +389,11 @@ export function renderHex(
     toolbarStatus.textContent = clamped < parsed ? '已跳至文件尾' : '';
     const row = Math.floor(clamped / HEX_ROW_BYTES);
     // scroller 无居中 API：目标行滚至视口中部（jsdom 等无布局环境 clientHeight=0
-    // 退化为行顶对齐）。scrollTop 赋值即时生效，浏览器 scroll 事件随后到达时可视
-    // 区间未变为 no-op；refresh(true) 保证目标行在下面的高亮查询前已同步渲染。
-    dump.scrollTop = Math.max(0, row * HEX_LINE_HEIGHT - dump.clientHeight / 2);
+    // 退化为行顶对齐）。经 scroller.scrollTo 以虚拟坐标定位（BUG-55：总高超浏览器
+    // 滚动域上限后 scrollTop 与虚拟坐标不再恒等，直写 scrollTop 会落错位）；赋值
+    // 即时生效，浏览器 scroll 事件随后到达时可视区间未变为 no-op；refresh(true)
+    // 保证目标行在下面的高亮查询前已同步渲染。
+    scroller.scrollTo(Math.max(0, row * HEX_LINE_HEIGHT - dump.clientHeight / 2));
     scroller.refresh(true);
     setFlash(clamped);
   }
@@ -450,7 +452,7 @@ export function renderHex(
     if (n === 0) return;
     hitIndex = ((index % n) + n) % n;
     const row = Math.floor(hitOffsets[hitIndex]! / HEX_ROW_BYTES);
-    dump.scrollTop = Math.max(0, row * HEX_LINE_HEIGHT - dump.clientHeight / 2);
+    scroller.scrollTo(Math.max(0, row * HEX_LINE_HEIGHT - dump.clientHeight / 2)); // 虚拟坐标定位（BUG-55）
     scroller.refresh(true); // 当前命中行以 active 档重绘
     renderSearchStatus();
   }

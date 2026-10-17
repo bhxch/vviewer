@@ -156,57 +156,58 @@ test('BIN-05：zip 条目树与 unzip -l 逐项一致（7 条目含目录层级�
 });
 
 // （docs/e2e/README.md §3.2.4 第 4 条：修复合入前以 test.fixme 落占位并标注缺陷号，
-// 修复 PR 中转正式断言。以下为本轮探索在 bin 域确认的新缺陷回归占位，仅追加。）
-test.fixme(
-  'BUG-55 [探索]: hex 虚拟滚动 spacer 单元素定高超 Chromium 元素高度上限——≈28.44MiB 以上 .bin 尾部不可达且滚到底停在错误偏移',
-  async () => {
-    // 现象（severity high）：hex 渲染器虚拟滚动以单元素 spacer 表达总行高
-    // （packages/core/src/virtualScroller.ts:25 `spacer.style.height = rowCount*lineHeight px`；
-    // rowCount=ceil(len/16)：packages/render-binary/src/hex.ts:76；行高 18px：hex.ts:12）。
-    // 文件超过 ≈29,826,144B（33,554,428px÷18≈1,864,134 行×16B≈28.44MiB）后 spacer 声明
-    // 高度超出 Chromium 单元素上限 33,554,428px 被钳制：滚动区间缩短，尾部数据任何滚动
-    // 方式（程序化置底/滚轮循环到底均实测）不可达；且滚到底时视口末行停在中间偏移
-    // （40MB 实测 0x01c71d10~0x01c71d20，真实末行应为 0x027ffff0），状态栏仅「40.0 MB ·
-    // 未知二进制」无任何末偏移或截断提示，用户会误认为已到文件末尾——属「错误结果」+
-    // 大文件尾部经唯一查看器彻底不可查看（40MB 尾部 12,116,704B≈28.9% 不可达；hex.ts 无
-    // 偏移跳转输入，ViewerPane 的跳转仅文本搜索命中行、binary 域不适用，无替代通道）。
-    // <28.44MiB 不受影响：28MB 对照组末行 0x01bffff0 与期望精确吻合、尾部 0 字节不可达。
-    // 服务端数据完好（Range 请求末 16B 返回 206/16B），纯前端 UI 滚动域缺陷。违反
-    // docs/e2e/binary-hex-archive.md:23 BIN-02 期望③「末行偏移与总大小吻合」与 :99 §4.3
-    // 第 3 条「滚动到底即达数据末尾」（hex.ts:5 注释自述该语义）。
-    //
-    // 最小复现：
-    //   1) .temp/explore/bin/data/ 备 big-40mb.bin（41,943,040B 确定性伪随机，生成器
-    //      apps/web/.temp/explore-bin/make-data.mjs）；
-    //   2) 起实例（server/target/release/vviewer serve --root .temp/explore/bin/data
-    //      --web-dist apps/web/build --port 8441）并页内「连接服务器」接入；
-    //   3) 点击 big-40mb.bin 打开 hex 视图；
-    //   4) 滚到底（程序化 scrollTop=scrollHeight 或滚轮循环到底均可）→ 可视末行偏移停在
-    //      0x01c71d10~0x01c71d20，而真实末行应为 0x027ffff0；
-    //   5) 对照 28MB 文件同步骤末行 0x01bffff0 正确吻合。
-    //
-    // 证据（探索复核自起实例复现，复核完实例已关闭；独立脚本 /tmp/cand-bin-e1/verify.mjs，
-    // Playwright chromium 1440×900、页内「连接服务器」接入）：
-    //   - 根因坐实：空白页设 div height:47185920px（=2,621,440 行×18px）实测
-    //     offsetHeight=33554428（Chromium 单元素上限钳制）；40MB 页面内 spacer style 属性
-    //     实测 'height: 4.71859e+07px;'（CSSOM 科学计数法序列化）、offsetHeight 同为
-    //     33554428；
-    //   - big-28mb.bin（29,360,128B）{spacerOffsetH:33030144, clamped:false, 末行
-    //     0x01bffff0=期望, unreachableTailBytes:0}；big-30mb.bin {spacerOffsetH:33554428,
-    //     clamped:true, 末行 0x01c71d10、期望 0x1dffff0, unreachable:1,630,944}；
-    //     big-40mb.bin 程序化置底 {scrollTop:33553652, scrollHeight:33554432, 末行
-    //     0x01c71d10、期望 0x27ffff0, unreachable:12,116,704}；
-    //   - 用户交互通道复验：mouse.wheel 循环到底至 scrollTop 不再变化（33553656=
-    //     maxScrollTop），末行 0x01c71d20≠0x27ffff0，tailUnreachableBytes:12,116,688；
-    //   - 数据完整性对照：curl -H 'Range: bytes=41943024-41943039'
-    //     '/api/file?path=big-40mb.bin' → 206、16 字节，服务端尾部完好，纯属 UI 滚动域问题；
-    //   - 阈值复核：33,554,428/18≈1,864,134 行×16B≈29,826,144B，与报告的 ≈28.44MiB 边界
-    //     吻合；28MB（29,360,128B）未触发、30MB 触发，实测与推算一致。
-    //
-    // 转正提示：修复 PR 中转正式断言，口径沿 BIN-02 期望③——构造 >28.44MiB 的 .bin
-    // （如 40MB）打开后滚到底，可视末行偏移须等于真实末行（floor((size-1)/16)*16 的 8 位
-    // 十六进制，40MB 时 '027ffff0'，同本文件 lastHexRowOffset 口径）；或 spacer 改分块/
-    // 上限保护后按等效口径断言「滚动到底即达数据末尾」。护栏：<28.44MiB 行为不回归
-    // （本文件 BIN-01/BIN-02 已覆盖 4KB/3MB 口径）。
-  }
-);
+// 修复 PR 中转正式断言。BUG-55 已随修复转正，探索期现象/证据全录见缺陷库与
+// docs/report/e2e/e2e-test-report-2026-10-10.md。）
+test('BUG-55：hex 虚拟滚动 >28.44MiB .bin 滚动到底即达末行（spacer 钳上限 + 滚动域映射）', async ({
+  page
+}) => {
+  test.setTimeout(120_000);
+  await page.goto('/');
+  // 修前缺陷（2026-10-10 探索复核，severity high）：spacer 单元素定高超 Chromium
+  // 33,554,428px 上限被钳制，>≈28.44MiB 文件尾部任何滚动方式不可达且滚到底停在
+  // 错误偏移（40MB 实测可视末行 0x01c71d10，真实末行 0x027ffff0，约 28.9% 尾部
+  // 不可查看）。修复期补充实证：Chromium 可滚动区域本身亦在 2^25px 钳制——多元素
+  // 分段 spacer 不解除，故修复走「spacer 钳上限 + 滚动域↔虚拟域线性映射」
+  // （packages/core/src/virtualScroller.ts SCROLL_PX_CAP/toVirtual/toScroll）。
+  // 大 buffer 手法：40MB 在页面内构造（40MB Uint8Array 走 evaluate 参数会经 CDP
+  // JSON 序列化，不可用）；内容全零即可——断言只看偏移列，与字节值无关。
+  await page.waitForFunction(
+    () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
+  );
+  await page.evaluate(() => {
+    const bytes = new Uint8Array(41_943_040); // 40MB，同缺陷报告口径
+    const f = new File([bytes], 'big-40mb.bin', { type: 'application/octet-stream' });
+    Object.defineProperty(f, 'webkitRelativePath', { value: 'tbin/big-40mb.bin' });
+    (window as unknown as { __vvOpenDirImpl: (f: File[]) => void }).__vvOpenDirImpl([f]);
+  });
+  await openFile(page, 'big-40mb.bin');
+  const dump = page.locator('.vv-hex-dump');
+
+  // ① 滚动到底即达数据末尾（BIN-02 期望③大文件口径）：可视末行偏移
+  //    = floor((size-1)/16)*16 = 41,943,024 → '027ffff0'（同 lastHexRowOffset 口径）
+  await expect(dump.locator('.vv-hex-row').first()).toBeVisible({ timeout: 20_000 });
+  await scrollHexDump(page, 'bottom');
+  await expect
+    .poll(() => lastHexRowOffset(page), {
+      timeout: 15_000,
+      message: '等待滚动到底后的末行渲染（窗口模式尾部块 ensure 异步）'
+    })
+    .toBe('027ffff0');
+
+  // ② 超旧上限的中段跳转精确落位（scroller.scrollTo 虚拟坐标映射）：0x2000000 的
+  //    虚拟 y = 0x2000000/16×18 ≈ 37.7Mpx > 33,554,428，修前直写 scrollTop 落错位
+  await page.locator('.vv-hex-goto').fill('0x2000000');
+  await page.locator('.vv-hex-goto').press('Enter');
+  await expect
+    .poll(
+      () =>
+        dump.evaluate((el) => {
+          for (const r of el.querySelectorAll('.vv-hex-row')) {
+            if ((r as HTMLElement).textContent!.startsWith('02000000')) return true;
+          }
+          return false;
+        }),
+      { timeout: 10_000, message: '跳转目标行已渲染在可视窗口' }
+    )
+    .toBe(true);
+});

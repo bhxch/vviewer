@@ -1181,9 +1181,12 @@ export function renderCode(
   function jumpToLine(line: number): void {
     if (hitTimer !== null) clearTimeout(hitTimer);
     hitLine = line;
-    // 目标行滚到视口中部（clientHeight 为 0（jsdom/未布局）时回落贴顶）
+    // 目标行滚到视口中部（clientHeight 为 0（jsdom/未布局）时回落贴顶）。
+    // 经 scroller.scrollTo 以虚拟坐标定位（BUG-55：总行高超浏览器滚动域上限后
+    // scrollTop 与虚拟坐标不再恒等；scroller 未挂载窗口期回落直写）
     const center = line * LINE_HEIGHT - pre.clientHeight / 2 + LINE_HEIGHT / 2;
-    pre.scrollTop = Math.max(0, center);
+    if (scroller) scroller.scrollTo(Math.max(0, center));
+    else pre.scrollTop = Math.max(0, center);
     scroller?.refresh(); // 按新 scrollTop 重算可视范围（范围未变则行 DOM 已在，applyHitClass 兜底）
     applyHitClass();
     hitTimer = setTimeout(() => {
@@ -1934,7 +1937,8 @@ function renderCodeWindowed(
     if (hitTimer !== null) clearTimeout(hitTimer);
     hitLine = line;
     const center = line * LINE_HEIGHT - pre.clientHeight / 2 + LINE_HEIGHT / 2;
-    pre.scrollTop = Math.max(0, center);
+    if (scroller) scroller.scrollTo(Math.max(0, center)); // 虚拟坐标定位（BUG-55，同全量引擎）
+    else pre.scrollTop = Math.max(0, center);
     scroller?.refresh();
     applyHitClass();
     hitTimer = setTimeout(() => {
