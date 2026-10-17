@@ -430,7 +430,7 @@ test("BUG-45 [探索]: --cors-origin '*' 启动即 panic（exit 101）——'*' 
   }
 });
 
-test.fixme('BUG-46 [探索]: 三类奇异路径——NUL 字节、root 内自环 symlink、超长文件名——/api/file 与 /api/tree 归 500 而非 4xx', async () => {
+test('BUG-46 [探索]: 三类奇异路径——NUL 字节、root 内自环 symlink、超长文件名——/api/file 与 /api/tree 归 500 而非 4xx', async () => {
   // 复核确认（medium）：调用方可构造的病态输入被标成服务器内部故障（附 errno 文本），
   // 误导监控与重试语义；服务不崩溃、错误文本无路径泄露。
   // 根因：server/src/guard.rs:34-37——canonicalize 失败仅 NotFound→404，其余一律
