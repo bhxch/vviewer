@@ -18,7 +18,7 @@ import { assertPortFree, stopServer, waitHealthy } from '../e2e/serverHarness';
  *   文案出处 openFlow.svelte.ts:356）；
  * - SRV-05/2：跨源部署（--cors-origin）下 X-VV 头 JS 可读（d8ba77e expose_headers
  *   回归锚，server/src/lib.rs:134-140）+ 状态栏语言/编码与头逐字一致；
- * - SRV-06/2：watcher 故障注入→自愈（fixme 占位，原因见用例注释）；
+ * - SRV-06/2：watcher 故障注入→自愈（VV_WATCH_FAULT 注入开关，见用例注释）；
  * - SRV-07/2：刷新模式 manual→auto 回切后 SSE 自动重读恢复（b- 侧两个用例
  *   只测 auto→manual 单向）；
  * - SRV-10/2：--allow-lan 无 token 拒启的报错输出（b-server-file-service.spec.ts:368
@@ -250,17 +250,102 @@ test('SRV-05/2: 跨源部署下 X-VV 头 JS 可读（expose_headers）且状态�
 });
 
 // SRV-06/2（BUG-02 验收 3/5）：watcher 故障注入→自愈。
-// 暂以 fixme 占位：e2e 层无法稳定注入 notify 运行期错误——chmod 000 子目录依赖
-// 非 root 执行环境、symlink→不可读目标依赖环境特定行为
-// （b-server-file-service.spec.ts:81-88 首轮实测 /etc 形态会反复触发 watcher
-// 重建并毒化时序断言，但目标不可读性随执行环境变化）；降级→探试恢复的窗口由
-// RetryPolicy（attempts=3、退避 0.5/1/2s、POLL_PROBE_EVERY=5×poll 2s）支配，
-// 断言窗口 15s+ 且路径随 notify 内部行为分叉。状态机各分支（运行期错误→
-// watch-recovered、降级 PollWatcher 后 changed 仍流动、周期探试回归实时、
-// 全程不广播 watch-error）已由 server/src/watch.rs:717-889 的 mock opener 单测
-// 覆盖（cargo test 门禁 150 项内）。若需 e2e，须 server 提供故障注入开关后转正。
-test.fixme('SRV-06/2: watcher 故障注入→降级后 changed 仍流动→自愈 recovered（BUG-02 验收 3/5）', async () => {
-  expect(true).toBe(true);
+// 注入手法：server 端故障注入开关 VV_WATCH_FAULT="rec_open_fails:poll_err_ms"
+// （server/src/watch.rs WatchFault）——recommended 前 N 次打开注入合成失败
+// （首建+3 次退避重试全败 → PollWatcher 降级），每个 Poll 会话建立 err_ms 后
+// 注入一次运行期 Err（真实事件照常透传），重建链推进探试计数，第
+// POLL_PROBE_EVERY=5 次重建探试 recommended（注入计数已耗尽）成功回归实时。
+// `4:3000` 的时间线：t≈0 首建失败→Recovering；t≈3.5 降级→watch-degraded
+// (backend=Poll)；降级窗口内写文件经 2s 轮询照常 changed；t≈18.5 探试成功→
+// watch-recovered。全程服务端不广播 watch-error（前端终态语义）。此前占位
+// 原因（e2e 层无法稳定注入 notify 运行期错误：chmod 000 依赖非 root、symlink
+// →不可读目标随环境漂移，见下）由注入开关整体消除。
+test('SRV-06/2: watcher 故障注入→降级后 changed 仍流动→自愈 recovered（BUG-02 验收 3/5）', async () => {
+  test.setTimeout(90_000);
+  // 独立 root（mkdtemp，同 BUG-68 前例）：注入实例的 watcher 只看本根，
+  // 与共享 FIXTURE 的其它实例互不串扰
+  const base = mkdtempSync(join(os.tmpdir(), 'vv-srv062-'));
+  const root = join(base, 'root');
+  mkdirSync(root, { recursive: true });
+  writeFileSync(join(root, 'seed.txt'), 'seed\n');
+
+  await assertPortFree('http://127.0.0.1:4385');
+  const child = spawn(
+    BIN,
+    ['serve', '--root', root, '--web-dist', join(repoRoot, 'apps/web/build'), '--port', '4385'],
+    { env: { ...process.env, VV_WATCH_FAULT: '4:3000' }, stdio: ['ignore', 'inherit', 'inherit'] }
+  );
+  const srvBase = 'http://127.0.0.1:4385';
+  try {
+    await waitHealthy(srvBase);
+    // SSE 建连：POST /api/ticket → GET /api/events（BUG-68 前例）
+    const ticket = (
+      (await (await fetch(`${srvBase}/api/ticket`, { method: 'POST' })).json()) as {
+        ticket: string;
+      }
+    ).ticket;
+    const res = await fetch(`${srvBase}/api/events?ticket=${ticket}`, {
+      headers: { accept: 'text/event-stream' }
+    });
+    expect(res.ok).toBeTruthy();
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    /** race 超时读帧（BUG-68 前例）：不丢弃 pending read，防吞下一 chunk */
+    let pendingRead: Promise<string | null> | null = null;
+    const readChunk = (timeoutMs: number): Promise<string | null> => {
+      pendingRead ??= reader.read().then(({ value, done }) => {
+        pendingRead = null;
+        return done ? null : decoder.decode(value);
+      });
+      pendingRead.catch(() => {});
+      return Promise.race([
+        pendingRead,
+        new Promise<null>((r) => setTimeout(() => r(null), timeoutMs))
+      ]);
+    };
+
+    // 三段验收的读帧状态机：降级帧(backend=Poll) → 写 A → changed(A) →
+    // recovered 帧 → 写 B → changed(B)；40s 覆盖 3.5s 降级 + 5×3s 重建链
+    const nameA = `degraded-change-${Date.now()}.txt`;
+    const nameB = `recovered-change-${Date.now()}.txt`;
+    let acc = '';
+    let sawDegradedPoll = false;
+    let sawChangedA = false;
+    let sawRecovered = false;
+    let sawChangedB = false;
+    const deadline = Date.now() + 40_000;
+    while (Date.now() < deadline && !sawChangedB) {
+      const chunk = await readChunk(1_000);
+      if (chunk !== null) acc += chunk;
+      if (!sawDegradedPoll && acc.includes('watch-degraded') && acc.includes('"Poll"')) {
+        sawDegradedPoll = true;
+        writeFileSync(join(root, nameA), 'degraded window change\n');
+      }
+      if (!sawChangedA && sawDegradedPoll && acc.includes('"changed"') && acc.includes(nameA)) {
+        sawChangedA = true; // 降级（PollWatcher 轮询）模式下 changed 仍流动
+      }
+      if (!sawRecovered && acc.includes('"watch-recovered"')) {
+        sawRecovered = true; // 探试成功回归实时
+        writeFileSync(join(root, nameB), 'recovered realtime change\n');
+      }
+      if (sawRecovered && acc.includes('"changed"') && acc.includes(nameB)) {
+        sawChangedB = true; // 回归实时后 inotify 照常推送
+      }
+    }
+    await reader.cancel().catch(() => {});
+
+    // 验收 3/5：三段状态全部到位；全程无 watch-error（前端终态语义，服务端
+    // 状态机设计保证——Recovering/降级/恢复只经 watch-degraded/watch-recovered
+    // 与 changed 表达）
+    expect(sawDegradedPoll).toBe(true, '应收到降级帧（backend=Poll）');
+    expect(sawChangedA).toBe(true, '降级窗口内变更应照常 changed');
+    expect(sawRecovered).toBe(true, '探试成功后应收到 watch-recovered');
+    expect(sawChangedB).toBe(true, '恢复实时后变更应照常 changed');
+    expect(acc).not.toContain('watch-error');
+  } finally {
+    await stopServer(child, 'srv-t-srv062');
+    rmSync(base, { recursive: true, force: true });
+  }
 });
 
 test('SRV-07/2: 刷新模式 manual→auto 回切后 SSE 自动重读恢复', async ({ page }) => {

@@ -31,7 +31,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -194,10 +194,12 @@ impl HealthSlots {
 impl ChangeHub {
     /// 为每个根创建递归 watcher 并启动聚合线程（每根一个 watcher 线程，共享
     /// broadcast / health / stop）；失败不降级为永久静默（后台自愈接管）。
+    /// `VV_WATCH_FAULT` 环境变量激活故障注入（见 [`WatchFault`]，仅 e2e 使用）。
     pub fn spawn(roots: &[PathBuf]) -> Arc<Self> {
+        let fault = WatchFault::from_env();
         let factories: Vec<RetryFactory> = roots
             .iter()
-            .map(|root| RetryFactory::notify(root.clone(), RetryPolicy::default()))
+            .map(|root| RetryFactory::notify(root.clone(), RetryPolicy::default(), fault))
             .collect();
         Self::spawn_with(roots, factories)
     }
@@ -333,6 +335,33 @@ impl Default for RetryPolicy {
 /// ENOSPC）解除后可回归实时监听，避免永久停留在 2s 轮询。
 const POLL_PROBE_EVERY: u32 = 5;
 
+/// e2e 故障注入规格（SRV-06/2 验收 3/5：降级→changed 仍流动→自愈 recovered）。
+/// 环境变量 `VV_WATCH_FAULT="rec_open_fails:poll_err_ms"`（仅显式设置且可解析
+/// 时激活；生产部署不设即无注入）：
+/// - `rec_open_fails`：recommended watcher 打开前 N 次注入合成失败——首建 +
+///   3 次退避重试全败 → PollWatcher 降级（watch-degraded 路径）；
+/// - `poll_err_ms`：>0 时每个 PollWatcher 会话建立该毫秒数后注入一次运行期
+///   Err（真实事件随后照常透传）——重建链推进 `poll_rebuilds`，第
+///   `POLL_PROBE_EVERY` 次重建探试 recommended（此时注入计数已耗尽）成功 →
+///   watch-recovered（自愈路径）。e2e 用 `4:3000` 完整走通「降级→降级中
+///   changed 流动→探试回归实时」三段，无需依赖不可移植的 chmod/errno 手法。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WatchFault {
+    rec_open_fails: u32,
+    poll_err_ms: u64,
+}
+
+impl WatchFault {
+    fn from_env() -> Option<Self> {
+        let spec = std::env::var("VV_WATCH_FAULT").ok()?;
+        let (fails, err_ms) = spec.split_once(':')?;
+        Some(Self {
+            rec_open_fails: fails.trim().parse().ok()?,
+            poll_err_ms: err_ms.trim().parse().ok()?,
+        })
+    }
+}
+
 /// watcher 建立工厂：recommended 退避重试 → PollWatcher 降级（并记忆偏好，
 /// 每 POLL_PROBE_EVERY 次重建探试一次 recommended）→ 兜底无限重试（root 暂时
 /// 不可达时，条件移除后自愈）。opener 可注入（测试用 mock 会话替换真实 notify
@@ -351,23 +380,74 @@ struct RetryFactory {
 
 impl RetryFactory {
     /// 生产 opener 组装：recommended（inotify 等）与固定间隔 PollWatcher。
-    fn notify(root: PathBuf, policy: RetryPolicy) -> Self {
+    /// `fault` 非 None 时包装注入（[`WatchFault`]）。
+    fn notify(root: PathBuf, policy: RetryPolicy, fault: Option<WatchFault>) -> Self {
         let rec_root = root.clone();
         let poll_root = root.clone();
         let poll_interval = policy.poll_interval;
+        let rec_injected = Arc::new(AtomicU32::new(0));
         Self {
             root,
             policy,
             prefer_poll: false,
             poll_rebuilds: 0,
             open_recommended: Box::new(move || {
+                let injected = match fault {
+                    Some(f) => rec_injected.fetch_add(1, Ordering::SeqCst) < f.rec_open_fails,
+                    None => false,
+                };
+                if injected {
+                    return Err(NotifyError::io(std::io::Error::other(format!(
+                        "injected: recommended open failure {} of {}",
+                        rec_injected.load(Ordering::SeqCst),
+                        fault.map_or(0, |f| f.rec_open_fails)
+                    ))));
+                }
                 let (w, rx) = open_recommended(&rec_root)?;
                 let backend = backend_name(&w);
                 Ok((Box::new(w) as Box<dyn Send>, rx, backend))
             }),
             open_poll: Box::new(move || {
-                let (w, rx) = open_poll(&poll_root, poll_interval)?;
-                Ok((Box::new(w) as Box<dyn Send>, rx, "Poll".to_string()))
+                let (w, raw_rx) = open_poll(&poll_root, poll_interval)?;
+                // 会话内延迟运行期 Err 注入：中间通道 + 转发线程（先 Err 后透传
+                // 真实事件）。会话被聚合线程丢弃后 keepalive watcher 随之 drop、
+                // raw_rx 断开，转发线程自行退出。
+                let inject_err_ms = fault.map(|f| f.poll_err_ms).unwrap_or(0);
+                if inject_err_ms > 0 {
+                    let (mid_tx, mid_rx) = std::sync::mpsc::channel::<RawEvent>();
+                    std::thread::spawn(move || {
+                        // 实时透传真实事件（recv_timeout 轮转，不积压——积压会
+                        // 让 Err 先于缓冲事件到达，会话被杀时丢变更）；deadline
+                        // 到达后注入一次 Err，此后继续透传直到通道断开（会话被
+                        // 聚合线程丢弃 → keepalive watcher drop → raw_rx 断开）。
+                        let deadline = std::time::Instant::now() + Duration::from_millis(inject_err_ms);
+                        loop {
+                            let remain = deadline.saturating_duration_since(std::time::Instant::now());
+                            if remain.is_zero() {
+                                let _ = mid_tx.send(Err(NotifyError::io(std::io::Error::other(
+                                    "injected: poll session runtime error",
+                                ))));
+                                while let Ok(ev) = raw_rx.recv() {
+                                    if mid_tx.send(ev).is_err() {
+                                        break;
+                                    }
+                                }
+                                return;
+                            }
+                            match raw_rx.recv_timeout(remain) {
+                                Ok(ev) => {
+                                    if mid_tx.send(ev).is_err() {
+                                        return; // 会话已被丢弃（重建竞态）
+                                    }
+                                }
+                                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                            }
+                        }
+                    });
+                    return Ok((Box::new(w) as Box<dyn Send>, mid_rx, "Poll".to_string()));
+                }
+                Ok((Box::new(w) as Box<dyn Send>, raw_rx, "Poll".to_string()))
             }),
         }
     }
@@ -1080,7 +1160,7 @@ mod tests {
         let root = PathBuf::from("/nonexistent-vviewer-watch-root-xyz");
         let hub = ChangeHub::spawn_with(
             &[root.clone()],
-            vec![RetryFactory::notify(root.clone(), fast_policy())],
+            vec![RetryFactory::notify(root.clone(), fast_policy(), None)],
         );
         assert_ne!(hub.health(), WatchHealth::Ok, "首建失败即非 Ok");
         std::thread::sleep(Duration::from_millis(300));
