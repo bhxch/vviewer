@@ -444,7 +444,7 @@ test('SRV-12/3: 空格/中文/emoji 特殊文件名 API 列出与树懒加载展
   await expect(treeRow(page, '中文·名.txt')).toBeVisible();
 });
 
-// ── 探索复核确认缺陷回归占位（README §3.2.4：修复合入前 test.fixme 落位，修复 PR 转正） ──
+// ── 探索复核确认缺陷回归（README §3.2.4：修复 PR 已合入，本节四用例已全部转正为正式断言） ──
 // 来源：服务端文件服务域探索候选缺陷独立复核确认（BUG-45/46/47/48，2026-10-10 轮）。
 // 四条根因均定位在 server/src/*（lib.rs CORS 组装、guard.rs/error.rs 错误分类、
 // routes/file.rs Range 解析、routes/tree.rs lossy 名），按 README §2 域归属全部留本域
