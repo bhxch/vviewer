@@ -292,8 +292,11 @@ async fn file_range_end_clamped_to_size() {
     assert_eq!(headers["content-range"], "bytes 0-9/10");
 }
 
+/// BUG-47：多区间 Range 不再静默丢弃第二区间伪装单区间 206——服务器不实现
+/// multipart/byteranges，按 RFC 9110 §14.2 允许的「忽略 Range」回 200 全量
+/// （原行为：split(',').next() 取首区间回 206 "01"，第二区间无信号丢弃）。
 #[tokio::test]
-async fn file_multi_range_takes_first() {
+async fn file_multi_range_falls_back_to_full_200() {
     let f = fixture(false);
     let (status, _, body) = get_with(
         vviewer::build_router(f.state),
@@ -301,8 +304,28 @@ async fn file_multi_range_takes_first() {
         |b| b.header("range", "bytes=0-1,3-4"),
     )
     .await;
-    assert_eq!(status, StatusCode::PARTIAL_CONTENT);
-    assert_eq!(body.as_ref(), b"01");
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_ref(), b"0123456789");
+}
+
+/// BUG-47：携带 If-Range 的请求——本服务器从不下发 ETag/Last-Modified，
+/// 任何验证器值都不可能匹配，按 RFC 9110 §13.1.5 忽略 Range 回 200 全量
+/// （原行为：If-Range 完全被忽略、不匹配仍回 206）。
+#[tokio::test]
+async fn file_if_range_unmatched_ignores_range() {
+    let f = fixture(false);
+    for if_range in ["\"etag-xyz\"", "Wed, 01 Jan 2025 00:00:00 GMT"] {
+        let (status, _, body) = get_with(
+            vviewer::build_router(f.state.clone()),
+            "/api/file?path=digits.bin",
+            |b| {
+                b.header("range", "bytes=0-0").header("if-range", if_range)
+            },
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "if-range: {if_range}");
+        assert_eq!(body.as_ref(), b"0123456789", "if-range: {if_range}");
+    }
 }
 
 #[tokio::test]
