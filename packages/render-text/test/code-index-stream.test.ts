@@ -1,17 +1,18 @@
 // code-index-stream.test.ts — Task 3（io-streaming 计划 3）：codeIndex 行索引流式
 // 推进器单测。语义对齐 code.ts 全量路径（decode→replace(/\r\n?/g,'\n')→
-// buildLineIndex(=split('\n'))），与 jsonlIndex 的关键差异：
-// - 空行/纯空白行也产出条目（code 行号 = 文本行号，split('\n') 逐元素对齐）；
-// - 文本以终结符收尾时 finish 产出末尾空串条目（'a\n' → ['a',''] 两条目），
-//   空文件 '' → ['']（1 条目）——与虚拟滚动 itemCount=lines.length 严格一致；
+// buildLineIndex，BUG-38 起尾 \n 归一），与 jsonlIndex 的关键差异：
+// - 空行/纯空白行也产出条目（code 行号 = 文本行号，buildLineIndex 逐元素对齐）；
+// - 文本以终结符收尾时**不产出末尾虚行条目**（BUG-38：'a\n' → ['a'] 单条目，
+//   空文件 '' → 0 条目）——行数 = wc -l 口径，与虚拟滚动 itemCount=rows() 严格一致；
 // - code 无逐行巨行防护概念（code.ts 超限防线是整 buffer 级 STREAM_MAX_BYTES），
 //   maxLineBytes 支持 Infinity：永不记 oversized；有限阈值仍按 >= 判定（与
 //   jsonlIndex 同口径）。
 // 覆盖：LF/CRLF/孤立 CR 终结符、空行条目、跨块 \r\n（任意切面鲁棒）、Infinity
 // 与有限阈值双语义、atEnd 尾行/幂等 finish、空文件，以及与全量模式的逐字节
-// 等价性（字符空间参照实现，与被测字节扫描器不同构）。
+// 等价性（参照实现消费真实 buildLineIndex，钉住两侧语义同步防再漂移）。
 import { describe, expect, it } from 'vitest';
 import { advanceCodeIndex, createCodeIndex, finishCodeIndex } from '../src/codeIndexStream';
+import { buildLineIndex } from '../src/code';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder('utf-8');
@@ -35,7 +36,7 @@ describe('createCodeIndex / advanceCodeIndex / finishCodeIndex', () => {
     const text = 'a\n\nb\n';
     const bytes = enc.encode(text);
     const st = feed(bytes, Number.POSITIVE_INFINITY);
-    // 'a'(0,1)、''(2,0)、'b'(3,1) 已提交；末尾空串段（5,0）悬挂待 finish
+    // 'a'(0,1)、''(2,0)、'b'(3,1) 已提交；末尾终结符后空段（5,0）悬挂，finish 不提交
     expect(st.offsets).toEqual([0, 2, 3]);
     expect(st.lengths).toEqual([1, 0, 1]);
     expect([...st.oversized]).toEqual([]);
@@ -43,15 +44,15 @@ describe('createCodeIndex / advanceCodeIndex / finishCodeIndex', () => {
     expect(st.loadedBytes).toBe(bytes.length);
     finishCodeIndex(st);
     expect(st.atEnd).toBe(true);
-    expect(st.offsets).toEqual([0, 2, 3, 5]); // 末尾空串条目：对齐 ['a','','b','']
-    expect(st.lengths).toEqual([1, 0, 1, 0]);
+    expect(st.offsets).toEqual([0, 2, 3]); // 无尾虚行：对齐 buildLineIndex('a\n\nb\n') === ['a','','b']
+    expect(st.lengths).toEqual([1, 0, 1]);
   });
 
   it('CRLF 记为一个终结符：不产生额外空条目，lengths 不含 \\r\\n 两字节', () => {
     const st = feed(enc.encode('a\r\nb\r\n'), Number.POSITIVE_INFINITY);
     finishCodeIndex(st);
-    expect(st.offsets).toEqual([0, 3, 6]); // ['a','b','']——末尾空串条目
-    expect(st.lengths).toEqual([1, 1, 0]);
+    expect(st.offsets).toEqual([0, 3]); // ['a','b']——尾终结符不产虚行
+    expect(st.lengths).toEqual([1, 1]);
   });
 
   it('孤立 CR（旧 Mac）计终结符：a\\rb 切两行', () => {
@@ -64,18 +65,18 @@ describe('createCodeIndex / advanceCodeIndex / finishCodeIndex', () => {
   it('空行与纯 ASCII 空白行（空格/\\t/\\v/\\f）均产出条目（与 jsonlIndex 的关键差异）', () => {
     const st = feed(enc.encode('a\n\n \n\t\n\x0b\n\x0c\nb\n'), Number.POSITIVE_INFINITY);
     finishCodeIndex(st);
-    expect(st.offsets).toEqual([0, 2, 3, 5, 7, 9, 11, 13]);
-    expect(st.lengths).toEqual([1, 0, 1, 1, 1, 1, 1, 0]);
+    expect(st.offsets).toEqual([0, 2, 3, 5, 7, 9, 11]); // 尾终结符不产虚行
+    expect(st.lengths).toEqual([1, 0, 1, 1, 1, 1, 1]);
   });
 
-  it('空文件：finish 产出 1 条空条目（对齐全量 buildLineIndex("") === [""]）', () => {
+  it('空文件：finish 零条目（对齐全量 buildLineIndex("") === []）', () => {
     const st = feed(enc.encode(''), Number.POSITIVE_INFINITY);
     expect(st.offsets).toEqual([]);
     expect(st.loadedBytes).toBe(0);
     finishCodeIndex(st);
     expect(st.atEnd).toBe(true);
-    expect(st.offsets).toEqual([0]);
-    expect(st.lengths).toEqual([0]);
+    expect(st.offsets).toEqual([]);
+    expect(st.lengths).toEqual([]);
   });
 
   it('块边界切开 \\r\\n（\\r 块尾、\\n 下块头）不产生空条目；任意切面结果全等', () => {
@@ -125,8 +126,8 @@ describe('createCodeIndex / advanceCodeIndex / finishCodeIndex', () => {
 
     const st2 = feed(enc.encode('a\n'), Number.POSITIVE_INFINITY);
     finishCodeIndex(st2);
-    expect(st2.offsets).toEqual([0, 2]); // 以终结符收尾：仍有末尾空串条目（对齐 ['a','']）
-    expect(st2.lengths).toEqual([1, 0]);
+    expect(st2.offsets).toEqual([0]); // 尾终结符不产虚行（BUG-38，对齐 buildLineIndex('a\n') === ['a']）
+    expect(st2.lengths).toEqual([1]);
   });
 
   it('非法 maxLineBytes 抛错；Infinity 与正整数合法（与 blockStream 的 blockSize 校验同口径）', () => {
@@ -142,11 +143,11 @@ describe('createCodeIndex / advanceCodeIndex / finishCodeIndex', () => {
 describe('与全量模式等价性（decode→replace→buildLineIndex vs 索引产物）', () => {
   /**
    * 独立参照：在字符空间重放归一化文本（replace 只收缩终结符，段内容逐字符不变），
-   * 把每个归一化位置映射回原始字节偏移，从 buildLineIndex（split('\\n')，空行/末尾
-   * 空串元素全保留）语义推出 (offset,len)。与 jsonl 等价性用例的参照实现同源但
-   * 去掉 trim 过滤（code 语义空行也产出）。算法与被测字节扫描器不同构（字符空间
-   * 自顶向下 vs 字节空间增量状态机），代理对按码点合并计数以保证 UTF-8 字节累计
-   * 正确。
+   * 把每个归一化位置映射回原始字节偏移，行序列直接取真实 buildLineIndex（尾 \n 归一
+   * 语义单源，BUG-38 起 split 尾空串不再是行）推出 (offset,len)。参照消费生产函数
+   * 钉住两侧语义同步防再漂移；与 jsonl 等价性用例的参照实现同源但去掉 trim 过滤
+   * （code 语义空行也产出）。算法与被测字节扫描器不同构（字符空间自顶向下 vs 字节
+   * 空间增量状态机），代理对按码点合并计数以保证 UTF-8 字节累计正确。
    */
   function referenceIndex(
     text: string,
@@ -176,7 +177,7 @@ describe('与全量模式等价性（decode→replace→buildLineIndex vs 索引
       for (let u = 0; u < units; u++) normByte.push(byte);
       i += units;
     }
-    const lines = normalized.split('\n');
+    const lines = buildLineIndex(normalized);
     const offsets: number[] = [];
     const lengths: number[] = [];
     const oversized = new Set<number>();
@@ -239,7 +240,7 @@ describe('与全量模式等价性（decode→replace→buildLineIndex vs 索引
     for (const k of cuts) assertEquivalent(EQUIV_TEXT, k);
   }, 30_000);
 
-  it('终结符收尾复合文本：末尾空串条目与全量口径等价', () => {
+  it('终结符收尾复合文本：无末尾虚行条目，与全量口径等价', () => {
     for (const k of [Number.POSITIVE_INFINITY, 3, 4096]) assertEquivalent(TAIL_TEXT, k);
   });
 
@@ -256,9 +257,9 @@ describe('与全量模式等价性（decode→replace→buildLineIndex vs 索引
       '  \n a \n\t\nb',
       '中文\r\n行\r尾',
       '🎉\r\n🎉\r🎉',
-      '\n', // 单终结符：['',''] 两条目
-      'a\n', // 尾随终结符：['a',''] 末尾空串条目
-      '' // 空文件：[''] 1 条目
+      '\n', // 单终结符：[''] 单空行条目（无尾虚行）
+      'a\n', // 尾随终结符：['a'] 无末尾空串条目（BUG-38）
+      '' // 空文件：[] 0 条目
     ];
     for (const text of samples) {
       for (const k of [1, 2, 3]) assertEquivalent(text, k);

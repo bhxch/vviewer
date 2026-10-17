@@ -96,7 +96,7 @@ describe('code 窗口流式后台索引泵（BUG-201）', () => {
     const inst = renderCode(full.slice(0, 8192), host, { ctx, ext: 'js', highlight: false });
     try {
       // 修复前：行数冻结在首块完整行数 3640（262144B 中 3640×72=262080B 为完整行）
-      // 修复后：后台泵逐块推进，EOF 收口提交悬挂尾段（末条目空串，lines=rows-1）
+      // 修复后：后台泵逐块推进至 EOF（BUG-38 起尾终结符不产虚行条目，rows() 即 wc-l）
       await vi.waitFor(
         () => {
           expect(inst.getMeta().lines).toBe(totalLines);
@@ -105,10 +105,10 @@ describe('code 窗口流式后台索引泵（BUG-201）', () => {
       );
       // spacer 随索引增长（泵逐块 remount 上屏）：滚到底可达真实末行——缺此步则
       // scroller 行数冻结在末次滚动续读的 mount 值（BUG-20 mobile 回归面）。spacer
-      // 按 rows()（索引条目数，含末尾空串）计，与 getMeta 的 wc-l 展示口径差 1
+      // 按 rows()（索引条目数，尾终结符归一后 = wc-l 行数）计，与 getMeta 同口径
       const spacer = host.querySelector<HTMLElement>('.vv-virtual-spacer');
       expect(spacer).not.toBeNull();
-      expect(spacer!.style.height).toBe(`${(totalLines + 1) * LINE_HEIGHT}px`);
+      expect(spacer!.style.height).toBe(`${totalLines * LINE_HEIGHT}px`);
     } finally {
       inst.destroy();
     }

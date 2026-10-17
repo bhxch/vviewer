@@ -775,34 +775,34 @@ test.fixme('BUG-37 [探索]: yaml 本地 wasm 高亮全链静默失败——pars
   await expect(page.locator('.vv-error-card')).toHaveCount(0);
 });
 
-test.fixme('BUG-38 [探索]: 以 \\n 结尾文件 buildLineIndex 多出末尾虚行——gutter N+1 与状态栏「行: N」自相矛盾，服务端档滚到底虚 chunk 必发 400', async ({
+test('BUG-38 [探索]: 以 \\n 结尾文件 buildLineIndex 多出末尾虚行——gutter N+1 与状态栏「行: N」自相矛盾，服务端档滚到底虚 chunk 必发 400', async ({
   page
 }) => {
-  // 复核确认（low）。text.split('\n')（packages/render-text/src/code.ts:140-142）对以 \n
-  // 结尾的文本多出末尾空串元素，虚拟滚动以 lines.length 挂载（code.ts:672）遂多渲染一条
-  // 不存在空行，而 getMeta（code.ts:939-946）按 wc -l 口径减 1——渲染行数与状态栏行数
-  // 自相矛盾。服务端档加重面：滚到底时 wantedChunkKeys/highlightChunk（code.ts:721-731、
-  // 757-758）以虚行行号发出 {startLine:N, lineCount:1}，服务端 StartBeyondEof 判 400
-  // （server/src/compute/highlight.rs:474-481），auto 策略下路由注入侧 catch 后
-  // console.warn + null（apps/web/src/lib/highlightRouter.ts:78,94-99），虚 chunk 静默落
-  // 行级 hljs（code.ts:812-815，行内容为空故无可见画质损失）；显式 remote 策略下同 400
-  // 走抛错分支，滚到底整页变「无法预览此文件 / 远程高亮失败: HTTP 400」错误卡片并停机
-  // （非默认策略，复核另记供分诊一并考虑）。
-  // 最小复现（本用例可执行部分，纯 web 注入通道）：注入 'a\nb\nc\n' 打开 → 渲染 4 行
-  // （gutter 4 为空行）而状态栏「行: 3」。
-  // 服务端档部分（需 server-served 大文件，本套件 :4173 纯 web 不可执行，落骨架）：
-  // 48000 行带尾 \n 的 .js 打开一步到底 → 网络恰 3 条 highlight POST：{0,200}→200、
-  // {47800,200}→200、{48000,1}→400 + console 恰 1 条「[vviewer] 大文件远程高亮失败，回退
-  // 本地分块：远程高亮失败: HTTP 400」；末渲染行 dataLine=48000/gutter='48001'/body 空，
-  // 底部真实行与源文件逐字符一致（纯虚行、零错位）。证据：8440 实例 curl 直证 400 文案
-  // 'range.startLine 48000 is beyond end of file: 48000 lines'（startLine=47999/47800+200
-  // 均 200；数据 big.js 自造 48000 行带尾 \n，wc -lc = 48000 2976000）；Playwright
-  // /tmp/vv-recheck/repro.mjs（网络三相捕获 + console 恰 1 条）；加重场景
-  // /tmp/vv-recheck/repro-remote.mjs（localStorage 预注入 computePolicy:'remote' → 错误
-  // 卡片 + 引擎跌「纯文本」、无 warn）。既有 HL-08 特意以「末行不带 \n」构造避开此口径
-  // （构造注释自记），佐证套件此前未覆盖带尾换行形态。
-  // 修复方向：lines 构建对尾 \n 归一（与 getMeta 的 wc 口径一致，消除虚行）；修复后
-  // 本用例转正，服务端档 400/告警面在 server-served 套件另行补断言。
+  // 复核确认（low）。已修（2026-10-16，Wave 2）：缺陷态 text.split('\n')
+  // （packages/render-text/src/code.ts buildLineIndex）对以 \n 结尾的文本多出末尾
+  // 空串元素，虚拟滚动以 lines.length 挂载遂多渲染一条不存在空行，而 getMeta 按
+  // wc -l 口径减 1——渲染行数与状态栏行数自相矛盾。服务端档加重面：滚到底时
+  // wantedChunkKeys/highlightChunk 以虚行行号发出 {startLine:N, lineCount:1}，服务端
+  // StartBeyondEof 判 400（server/src/compute/highlight.rs），auto 策略下 catch 后
+  // console.warn + null 静默落行级 hljs；显式 remote 策略下同 400 走抛错分支整页错误
+  // 卡片停机。修复（尾终结符归一，行数 = wc -l 单口径）：① 全量 buildLineIndex 尾
+  // \n 不产虚行（'' → 0 行、中间空行保留）；② buildByteLineOffsets 尾终结符不产
+  // 伪起始（两域行号逐行一致）；③ 窗口流式 codeIndexStream.finishCodeIndex 悬挂
+  // 空段不提交（与全量逐行等价，等价性参照改消费真实 buildLineIndex 钉住两侧同步）；
+  // ④ 全量/窗口 getMeta 的「末元素空串减 1」展示层补偿随虚行消除一并退役（rows()/
+  // lines.length 恒 wc 口径）；服务端档 400 面随虚行行号域消失一并消除（chunk 请求
+  // 行号恒 ≤ wc 行数）。消费方核对：状态栏/spacer/chunk 边界/搜索行号/lineAtOffset/
+  // lineAtByteOffset 单源 rows()/lines 数组，markdownRenderer 围栏（pipeline 已去尾
+  // \n）不受影响。
+  // 最小复现（缺陷态，纯 web 注入通道）：注入 'a\nb\nc\n' 打开 → 渲染 4 行（gutter 4
+  // 为空行）而状态栏「行: 3」。服务端档证据（复核轮）：8440 实例 curl 直证 400 文案
+  // 'range.startLine 48000 is beyond end of file: 48000 lines'；Playwright
+  // /tmp/vv-recheck/repro.mjs（网络三相捕获 {0,200}→200、{47800,200}→200、{48000,1}→400
+  // + console 恰 1 条 warn）；加重场景 /tmp/vv-recheck/repro-remote.mjs（显式 remote →
+  // 错误卡片 + 引擎跌「纯文本」）。既有 HL-08 特意以「末行不带 \n」构造避开此口径
+  // （构造注释自记），佐证套件此前未覆盖带尾换行形态。单测：code.test.ts（行表/getMeta/
+  // lineAtOffset/lineAtByteOffset 全锚重钉）、code-index-stream.test.ts（索引语义 +
+  // 等价性）、code-window-pump.test.ts（spacer 口径）。
   test.setTimeout(60_000);
   await page.goto('/');
   await openDir(page, [{ name: 'three-lines.txt', type: 'text/plain', content: 'a\nb\nc\n' }]);

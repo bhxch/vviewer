@@ -5,15 +5,15 @@
  * 可视行解码经块缓存，同 jsonl 形态）。
  *
  * 语义对齐（等价性硬约束）：对任意文本，「全量 decode→replace(/\r\n?/g,'\n')→
- * buildLineIndex(=split('\n'))」的行序列与本模块「offsets/lengths 逐行取字节」在
- * UTF-8 假设下逐行号严格等价（等价性用例钉住，见 test/code-index-stream.test.ts）：
+ * buildLineIndex（尾 \n 归一，code.ts）」的行序列与本模块「offsets/lengths 逐行取
+ * 字节」在 UTF-8 假设下逐行号严格等价（等价性用例钉住，见 test/code-index-stream.test.ts）：
  * - 行终结符为 \n 或 \r，\r\n 记一个终结符（对齐归一化 replace(/\r\n?/g,'\n')）；
  * - **每一行都产出条目**，含空行与纯空白行（与 jsonlIndex 的关键差异）：code 行号
- *   = 文本行号（buildLineIndex 的 split('\n') 逐元素对齐），虚拟滚动 itemCount =
+ *   = 文本行号（buildLineIndex 逐元素对齐），虚拟滚动 itemCount =
  *   lines.length（code.ts 现状），故行 i 的字节段 decode 后必为 lines[i]；
- * - 文本以终结符收尾时产出**末尾空串条目**（'a\n' → ['a',''] 两条目），空文件
- *   '' → ['']（1 条目）——由 finishCodeIndex 无条件提交悬挂尾段实现；finish 幂等
- *   （重复调用不追加，否则与 split('\n') 行数不符）。
+ * - 文本以终结符收尾时**不产出末尾虚行条目**（BUG-38 尾 \n 归一：'a\n' → ['a']
+ *   单条目，空文件 '' → 0 条目）——finishCodeIndex 仅在悬挂尾段非空（文件不以
+ *   终结符收尾）时提交；finish 幂等（重复调用不追加）。
  * - 巨行阈值：code 无逐行巨行防护概念（code.ts 的超限防线是整 buffer 级
  *   STREAM_MAX_BYTES=512MB，非逐行），故 maxLineBytes 支持 **Infinity 语义**：
  *   永不记 oversized（流式渲染器将以 Infinity 调用）；有限阈值仍按 >= 判定（等号
@@ -30,7 +30,7 @@
  */
 
 /** codeIndex 公共索引状态（Produces 契约）：与 JsonlIndexState 同型，offsets/
- * lengths 平行数组按产出序（行号 = 文本行号，含空行条目） */
+ * lengths 平行数组按产出序（行号 = 文本行号，含空行条目，无尾终结符虚行） */
 export interface CodeIndexState {
   /** 行起始字节偏移（相对文件头；行内容不含终结符） */
   offsets: number[];
@@ -117,13 +117,15 @@ export function advanceCodeIndex(state: CodeIndexState, chunk: Uint8Array): void
 }
 
 /**
- * 文件末尾标记：无条件提交悬挂尾段（split('\n') 语义——'a\n' 的末尾空串、'a' 的
- * 尾行、'' 的唯一空行均在此产出）并置 atEnd；重复调用幂等（atEnd 后不再追加）。
+ * 文件末尾标记：悬挂尾段非空（文件不以终结符收尾）时提交尾行；以终结符收尾的
+ * 悬挂空段不再提交（BUG-38 尾 \n 归一——'a\n' 的 split 末尾空串是虚行，条目数
+ * = wc -l 口径，与全量 buildLineIndex 的尾 \n 归一语义逐行对齐；'' → 0 条目、
+ * 'a' → 1 条目）。置 atEnd；重复调用幂等（atEnd 后不再追加）。
  */
 export function finishCodeIndex(state: CodeIndexState): void {
   const scan = internals.get(state);
   if (scan === undefined) throw new Error('finishCodeIndex：state 非本模块产物（缺内部扫描状态）');
   if (state.atEnd) return;
-  commitLine(state, scan, state.loadedBytes);
+  if (scan.lineLen > 0) commitLine(state, scan, state.loadedBytes);
   state.atEnd = true;
 }

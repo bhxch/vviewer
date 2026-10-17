@@ -48,10 +48,11 @@ import {
 const REAL_SEARCH_CODE = searchModule.searchCode;
 
 describe('buildLineIndex', () => {
-  it('splits keeping line count', () => {
+  it('splits keeping line count（BUG-38 尾 \\n 归一：无末尾虚行，行数 = wc -l）', () => {
     expect(buildLineIndex('a\nb\nc')).toEqual(['a', 'b', 'c']);
-    expect(buildLineIndex('a\nb\n')).toEqual(['a', 'b', '']);
-    expect(buildLineIndex('')).toEqual(['']);
+    expect(buildLineIndex('a\nb\n')).toEqual(['a', 'b']); // 尾 \n 不产虚行
+    expect(buildLineIndex('a\n\n')).toEqual(['a', '']); // 中间空行保留
+    expect(buildLineIndex('')).toEqual([]); // 空文件 0 行
   });
 });
 
@@ -928,7 +929,8 @@ describe('renderCode lineAtOffset（deferred 清偿 Task 5：仅全量模式）'
     stubResizeObserver();
     const host = document.createElement('div');
     document.body.append(host);
-    // 'ab\ncd\n\nef\n'：归一文本行表 ['ab','cd','','ef','']，行起始 [0,3,6,7,10]
+    // 'ab\ncd\n\nef\n'：归一文本行表 ['ab','cd','','ef']（BUG-38 尾 \n 归一），
+    // 行起始 [0,3,6,7]
     const handle = renderCode(enc('ab\ncd\n\nef\n'), host, { highlight: false });
     const lineAtOffset = lineAtOffsetOf(handle);
     expect(lineAtOffset, '全量模式 handle 应提供 lineAtOffset').toBeTypeOf('function');
@@ -939,8 +941,9 @@ describe('renderCode lineAtOffset（deferred 清偿 Task 5：仅全量模式）'
     expect(lineAtOffset.call(handle, 3)).toBe(1); // 恰在下一行起始
     expect(lineAtOffset.call(handle, 6)).toBe(2); // 空行起始（含空行文件锚点不漂移的关键面）
     expect(lineAtOffset.call(handle, 7)).toBe(3);
-    expect(lineAtOffset.call(handle, 10)).toBe(4); // trailing \n 后的末空串元素
-    expect(lineAtOffset.call(handle, 99)).toBe(4); // 超文件尾：钳末行
+    expect(lineAtOffset.call(handle, 9)).toBe(3); // 尾行行中
+    expect(lineAtOffset.call(handle, 10)).toBe(3); // trailing \n 上：归本行（无尾虚行）
+    expect(lineAtOffset.call(handle, 99)).toBe(3); // 超文件尾：钳末行
     handle.destroy();
   });
 
@@ -1011,8 +1014,9 @@ describe('renderCode lineAtByteOffset（错误身份与字节映射 Task 4：字
     expect(f.call(handle, 0)).toBe(0);
     expect(f.call(handle, 2)).toBe(0); // 恰在 \r 上：归本行
     expect(f.call(handle, 4)).toBe(1); // \r\n 后 = 下一行起始（字节域 4）
-    expect(f.call(handle, 8)).toBe(2);
-    expect(f.call(handle, 99)).toBe(2); // 超尾钳末行
+    expect(f.call(handle, 7)).toBe(1); // 尾行行中
+    expect(f.call(handle, 8)).toBe(1); // 尾终结符上/后：归末行（BUG-38 无伪起始）
+    expect(f.call(handle, 99)).toBe(1); // 超尾钳末行
     handle.destroy();
   });
 
@@ -1025,7 +1029,7 @@ describe('renderCode lineAtByteOffset（错误身份与字节映射 Task 4：字
     if (f === undefined) throw new Error('lineAtByteOffset 缺席（应仅窗口模式）');
     expect(f.call(handle, 0)).toBe(0); // BOM 后首字节 = 首行起始
     expect(f.call(handle, 3)).toBe(1); // 'ab\n' 后
-    expect(f.call(handle, 6)).toBe(2);
+    expect(f.call(handle, 6)).toBe(1); // 尾终结符上：归末行（无伪起始）
     handle.destroy();
   });
 
@@ -1039,7 +1043,7 @@ describe('renderCode lineAtByteOffset（错误身份与字节映射 Task 4：字
     expect(f.call(handle, 0)).toBe(0);
     expect(f.call(handle, 4)).toBe(1); // '中'=3 字节 + \n
     expect(f.call(handle, 7)).toBe(1); // 恰在行尾 \n 上：归本行（行尾终结符归本行）
-    expect(f.call(handle, 8)).toBe(2); // trailing \n 后 = 末空串行伪起始（字节域 8）
+    expect(f.call(handle, 8)).toBe(1); // trailing \n 后：钳末行（BUG-38 无伪起始）
     handle.destroy();
   });
 
@@ -1673,7 +1677,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     expect(host.querySelector('.vv-code-pre')).toBeNull(); // destroy 已执行：半装配实例无 DOM 残留
   });
 
-  it('getMeta().lines 动态：首块后为已加载行数，滚动续读到 EOF 后=内容行数（末尾空串条目展示层减 1，wc-l 口径）', async () => {
+  it('getMeta().lines 动态：首块后为已加载行数，滚动续读到 EOF 后=内容行数（索引尾终结符归一，rows() 恒 wc-l 口径）', async () => {
     stubResizeObserver();
     const content = enc(codeLines(400)); // 600KB，以 \n 收尾
     const host = newHost();
@@ -1686,13 +1690,10 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     expect(handle.getMeta().lines).toBe(0); // 同步构造期：首拉未落地（异步 start）
     await vi.waitFor(() => expect(handle.getMeta().lines).toBe(174)); // 首块已加载行数
     scrollCode(host, Number.MAX_SAFE_INTEGER);
-    await vi.waitFor(() => expect(handle.getMeta().lines).toBe(400)); // 400 非 401（索引层含末尾空串条目，getMeta 展示层减 1）
-    // 滚动到底：末视口行 = 末尾空串条目（行 400，与全量 lines.length=401 同构的空行）
-    await vi.waitFor(() => expect(host.querySelector('[data-line="400"]')).not.toBeNull());
-    expect(bodyText(host, 400)).toBe('');
-    // 尾实行走 revealLine（视口上行 399）
-    handle.revealLine(399);
-    await vi.waitFor(() => expect(bodyText(host, 399)).toBeDefined());
+    await vi.waitFor(() => expect(handle.getMeta().lines).toBe(400)); // EOF 后恰 400（尾 \n 不产虚行条目）
+    // 滚动到底：末视口行 = 行 399（最后内容行，gutter '400'；BUG-38 起无行 400 虚行）
+    await vi.waitFor(() => expect(host.querySelector('[data-line="399"]')).not.toBeNull());
+    expect(host.querySelector('[data-line="400"]')).toBeNull();
     expect(bodyText(host, 399)!.startsWith('const a = 399;')).toBe(true);
     handle.destroy();
   });

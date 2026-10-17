@@ -159,8 +159,18 @@ export function evictChunksByLines<V>(m: Map<number, Map<number, V>>, maxLines: 
   }
 }
 
+/**
+ * 行表构建（BUG-38 尾 \n 归一）：以 \n 结尾的文本不再产出末尾虚行——'a\nb\n' →
+ * ['a','b']（wc -l 口径 2 行），与 getMeta/状态栏/服务端行域（StartBeyondEof 校验）
+ * 同一口径；中间空行保留（'a\n\n' → ['a','']）；空文件 '' → []（0 行）。缺陷态
+ * split('\n') 的尾空串元素曾让虚拟滚动多渲染一条不存在的空行（gutter N+1 与状态栏
+ * 「行: N」矛盾），服务端档滚到底还会以虚行行号发出 {startLine:N, lineCount:1} 的
+ * highlight chunk 被 StartBeyondEof 判 400。
+ */
 export function buildLineIndex(text: string): string[] {
-  return text.split('\n');
+  if (text === '') return [];
+  const lines = text.split('\n');
+  return lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines;
 }
 
 /** 行起始偏移（UTF-16，含前序换行符）：'ab\ncd' → [0, 3] */
@@ -178,14 +188,16 @@ export function buildLineOffsets(lines: string[]): number[] {
  * 字节域行起始偏移（spec 2026-10-16 错误身份与字节映射 §4.5）：在原始 buffer 上扫
  * 终结符记行起始——\r\n 单终结符记 2 字节、\n 记 1、lone \r 亦终结记 1（与字符域
  * 归一语义的行号一致）；BOM 从偏移剔除（post-BOM 逻辑域，与 jsonl 索引 offsets
- * 同基）。返回数组含末尾伪起始（trailing 终结符后的空串行），与 buildLineOffsets
- * 的 split('\n') 语义对齐。lone \r 文件两域不可同时逐字节对齐（jsonl 记账不终结），
- * 属已知边界（jsonl 内容按定义不含裸 \r 行尾）。非 UTF-8 多字节编码（GBK/Shift_JIS 等）
- * 的尾字节均不含 0x0D/0x0A，终结符扫描不受干扰；口径按原始字节定义（spec §4.5）。
+ * 同基）。BUG-38 尾 \n 归一：末尾终结符不再产出伪起始条目（与 buildLineIndex 的
+ * 尾 \n 归一对齐，两域行号逐行一致）；空文件/BOM-only 返回 []（lineOf 二分在空表
+ * 上恒钳 0，lineAtByteOffset 越界钳末行语义不受影响）。lone \r 文件两域不可同时
+ * 逐字节对齐（jsonl 记账不终结），属已知边界（jsonl 内容按定义不含裸 \r 行尾）。
+ * 非 UTF-8 多字节编码（GBK/Shift_JIS 等）的尾字节均不含 0x0D/0x0A，终结符扫描
+ * 不受干扰；口径按原始字节定义（spec §4.5）。
  */
 export function buildByteLineOffsets(buffer: Uint8Array): number[] {
   const bom = buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf ? 3 : 0;
-  const starts: number[] = [0];
+  const starts: number[] = buffer.length > bom ? [0] : [];
   let i = bom;
   while (i < buffer.length) {
     const b = buffer[i]!;
@@ -197,7 +209,7 @@ export function buildByteLineOffsets(buffer: Uint8Array): number[] {
       i += 1;
       continue;
     }
-    starts.push(i - bom);
+    if (i < buffer.length) starts.push(i - bom); // 文件尾终结符后的空段非真实行，不产伪起始
   }
   return starts;
 }
@@ -1099,16 +1111,15 @@ export function renderCode(
     },
     getEngine: () => engine,
     getComputeWhere: () => computeWhere,
-    // BUG-04：渲染期静态的元数据快照。lines 为内容行数口径：buildLineIndex 对以
-    // \n 结尾的文本产出末尾空串元素（301 行 → 302 元素），末元素为空时减 1，
-    // 与 wc -l 一致（空文件 '' → [''] → 0 行）
+    // BUG-04：渲染期静态的元数据快照。lines 为内容行数口径：buildLineIndex 已对尾
+    // \n 归一（BUG-38，'a\nb\n' → ['a','b']），lines.length 即 wc -l 口径（空文件
+    // '' → [] → 0 行）
     getMeta() {
-      const lastLine = lines[lines.length - 1] ?? '';
       return {
         encoding: opts.encoding ?? 'utf-8',
         lang, // 与 start() 实际高亮语言同源（评审③：本地 .js 也显示「语言: javascript」）
         size: buffer.byteLength,
-        lines: lastLine === '' ? lines.length - 1 : lines.length
+        lines: lines.length
       };
     },
     search(query, opts?: { caseSensitive?: boolean }) {
@@ -1309,8 +1320,9 @@ function renderCodeWindowed(
   // 降级产物（全量重渲实例）：窗口 handle 的方法面转投它（ViewerPane 只持窗口
   // handle——render 已先于滚动期降级返回），销毁复合收口
   let fullInst: RenderCodeHandle | null = null;
-  // 行数 = 索引条目数：含末尾空串条目，与全量 buildLineIndex lines.length 同值
-  //（虚拟滚动 itemCount/chunkRangeFor 的 totalLines 同口径，指令④不在索引层减 1）
+  // 行数 = 索引条目数：codeIndexStream 已对尾终结符归一（BUG-38，'a\n' → 1 条目），
+  // rows() 即 wc -l 口径（EOF 后与全量 buildLineIndex lines.length 同值），虚拟滚动
+  // itemCount/chunkRangeFor 的 totalLines 同口径，不再有「末尾空串条目」虚行
   const rows = (): number => index.offsets.length;
 
   // lazy 路径双缓存（chunkKey=startLine → 行 map）：与全量模式同构，仅行文本来源换
@@ -2313,18 +2325,17 @@ function renderCodeWindowed(
     },
     getEngine: () => (fullInst !== null ? fullInst.getEngine() : engine),
     getComputeWhere: () => (fullInst !== null ? fullInst.getComputeWhere() : computeWhere),
-    // 渲染期动态元数据快照。lines 为内容行数口径（展示层 wc -l，指令④）：索引
-    // offsets.length 含末尾空串条目（=全量 lines.length 同值），EOF 后末条目空串才在
-    // 此减 1——流中条目全为已提交真实行不减（「已加载 N 行」渐进口径，ViewerPane
-    // 首读数字形态兼容）。size：已知取 ctx.size，未知取已确认字节（随续读增长）
+    // 渲染期动态元数据快照。lines 为内容行数口径（展示层 wc -l，指令④）：索引已对
+    // 尾终结符归一（BUG-38，EOF 后无伪空串条目），rows() 恒为真实行数；流中条目全为
+    // 已提交真实行（「已加载 N 行」渐进口径，ViewerPane 首读数字形态兼容）。
+    // size：已知取 ctx.size，未知取已确认字节（随续读增长）
     getMeta() {
       if (fullInst !== null) return fullInst.getMeta(); // 项 1：降级后转投全量实例（encoding 精判/行数全量）
-      const lastLen = index.lengths[index.lengths.length - 1] ?? -1;
       return {
         encoding: opts.encoding ?? 'utf-8',
         lang, // 与实际高亮语言同源（评审③同口径）
         size: ctx.size ?? bs.confirmedBytes,
-        lines: indexFinished && lastLen === 0 ? rows() - 1 : rows()
+        lines: rows()
       };
     },
     search(query, searchOpts?: { caseSensitive?: boolean }) {
