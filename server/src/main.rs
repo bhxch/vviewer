@@ -115,6 +115,19 @@ fn serve(args: ServeArgs) -> Result<(), i32> {
         return Err(2);
     }
 
+    // '*'（及一切通配形态）不是合法的精确 origin：HeaderValue 校验拦不住它，
+    // 直传 tower-http `AllowOrigin::list` 会在 bind 前库内 panic（exit 101，BUG-45）。
+    // 按 main.rs「配置错误返回 exit code（不 panic）」约定与 SRV-10 前例，
+    // 启动即拒并指认参数与补救（通配 CORS 本就不在本服务威胁模型内，不提供替代值）。
+    if let Some(origin) = &args.cors_origin {
+        if origin.contains('*') {
+            eprintln!(
+                "error: --cors-origin does not support wildcard '{origin}'; pass an exact origin (e.g. http://127.0.0.1:8080)"
+            );
+            return Err(2);
+        }
+    }
+
     if args.root.is_empty() {
         eprintln!("error: at least one --root is required");
         return Err(2);
@@ -220,6 +233,20 @@ mod tests {
         // 多值 --root 后缺根同样启动即拒（exit 2）
         let mut a = args(None);
         a.root.clear();
+        assert_eq!(serve(a), Err(2));
+    }
+
+    #[test]
+    fn wildcard_cors_origin_is_rejected_cleanly() {
+        // BUG-45：'*' 直传 AllowOrigin::list 会在 bind 前库内 panic（exit 101）；
+        // 修复后启动即以配置错误退出（exit 2），且先于 root 校验无关紧要——
+        // args() 的 root 故意指向不存在路径，只要 Err(2) 即达验收。
+        let mut a = args(None);
+        a.cors_origin = Some("*".to_string());
+        assert_eq!(serve(a), Err(2));
+        // 通配形态变体同拒（防御不限于裸 '*'）
+        let mut a = args(None);
+        a.cors_origin = Some("http://*.example.com".to_string());
         assert_eq!(serve(a), Err(2));
     }
 }

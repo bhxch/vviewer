@@ -368,7 +368,7 @@ test('SRV-12/3: 空格/中文/emoji 特殊文件名 API 列出与树懒加载展
 // 4382 与既有 4375-4377/4379 错开）。标题以缺陷库编号开头、[探索] 标注来源；各用例
 // 注释给出最小复现步骤、证据路径与源码定位。
 
-test.fixme("BUG-45 [探索]: --cors-origin '*' 启动即 panic（exit 101）——'*' 过 from_str 校验后直传 AllowOrigin::list 触发 tower-http 库内 panic", async () => {
+test("BUG-45 [探索]: --cors-origin '*' 启动即 panic（exit 101）——'*' 过 from_str 校验后直传 AllowOrigin::list 触发 tower-http 库内 panic", async () => {
   // 复核确认（校准 medium）：启动即崩溃，但触发面是单一可选参数值、立即响亮失败、
   // 无数据丢失，精确 origin 用法一切正常，替换解法 trivial。build_router 在 bind 前
   // 急切执行，'*' 作为合法 header 值通过校验后原样传入 tower-http：

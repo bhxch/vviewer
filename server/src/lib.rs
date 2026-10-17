@@ -127,11 +127,14 @@ pub fn build_router(state: AppState) -> Router {
 
     // CORS：--cors-origin 时精确 origin + GET/POST + authorization/content-type；否则不加层。
     // 用 list 而非 Const(exact)：仅当请求 Origin 匹配才回显该值（Const 会无条件回显常量）。
+    // '*' 在此防御性跳过（CLI 层 main.rs 已启动即拒）：AllowOrigin::list 收到通配值
+    // 会在库内 panic（BUG-45），build_router 作为 pub API 不得因配置值崩溃。
     // expose_headers：x-vv-lang/x-vv-encoding 是 JS 可读响应头，跨源默认被浏览器
     // CSP 过滤拦截（I1）——不暴露则前端跨源部署拿不到语言/编码检测结果
     let cors = state
         .cors_origin
         .as_deref()
+        .filter(|o| !o.contains('*'))
         .and_then(|o| HeaderValue::from_str(o).ok())
         .map(|origin| {
             CorsLayer::new()
