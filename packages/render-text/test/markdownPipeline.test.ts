@@ -65,6 +65,17 @@ describe('highlight 步', () => {
     expect(code.classList.contains('hljs')).toBe(false);
   });
 
+  it('BUG-42：大写语言标识命中后 cls 同步小写归一（language-Rust → language-rust）', async () => {
+    const doc = docOf('```Rust\nfn main() {}\n```\n');
+    const ctx = noopCtx({ highlightFence: vi.fn().mockResolvedValue('<span class="ts-keyword">fn</span>') });
+    await runPipeline(doc, ctx);
+    const code = doc.querySelector('pre code')!;
+    expect(ctx.highlightFence).toHaveBeenCalledWith('fn main() {}', 'Rust');
+    expect(code.classList.contains('language-rust')).toBe(true);
+    expect(code.classList.contains('language-Rust')).toBe(false);
+    expect(code.classList.contains('hljs')).toBe(false);
+  });
+
   it('highlightFence 返回 null → hljs 兜底高亮', async () => {
     const doc = docOf('```js\nconst a = 1;\n```\n');
     await runPipeline(doc, noopCtx());

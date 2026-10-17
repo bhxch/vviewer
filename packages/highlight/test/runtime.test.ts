@@ -213,6 +213,26 @@ describe.skipIf(!grammarAssetsReady)('大文件护栏（web-tree-sitter 病态�
       expect(engine.hasLanguage('typescript')).toBe(true);
       expect(engine.hasLanguage('js')).toBe(true); // 别名
       expect(engine.hasLanguage('no-such-language')).toBe(false);
+      // BUG-42：大小写归一——```Rust 大写写法命中 rust 清单键（缺陷态静默 false 丢失
+      // tree-sitter 路径降级 hljs）；别名表同款（ZS… 此处以 rs 大写变体断言）
+      expect(engine.hasLanguage('Rust')).toBe(true);
+      expect(engine.hasLanguage('RS')).toBe(true); // 别名 rs 大写写法
+    } finally {
+      engine.dispose();
+    }
+  }, 60_000);
+
+  it('BUG-42：大写语言标识（Rust）高亮结果与小写写法一致（canonicalLang/别名表小写归一）', async () => {
+    const engine = await TreeSitterEngine.create({ queriesDir, grammarsDir, runtimeDir: staticDir });
+    try {
+      const src = 'fn main() {\n    let x = 1;\n}\n';
+      const lower = await engine.highlight(src, 'rust');
+      const upper = await engine.highlight(src, 'Rust');
+      expect(lower.ok).toBe(true);
+      expect(upper.ok).toBe(true);
+      if (!lower.ok || !upper.ok) return;
+      expect(upper.intervals.length).toBeGreaterThan(0);
+      expect(upper.intervals).toEqual(lower.intervals); // 归一后逐区间一致
     } finally {
       engine.dispose();
     }

@@ -306,9 +306,14 @@ export class TreeSitterEngine {
     this.parser.delete();
   }
 
-  /** 别名 → 规范语言名（不在清单键与别名中时原样返回）。 */
+  /**
+   * 别名 → 规范语言名（不在清单键与别名中时原样返回）。
+   * BUG-42：两级查找前先 toLowerCase——grammar 清单键与别名表均全小写，围栏语言
+   * 标识（如 ```Rust）不归一时静默不命中，tree-sitter 路径丢失降级 hljs 兜底。
+   */
   private canonicalLang(lang: string): string {
-    return this.grammarTable[lang] !== undefined ? lang : (this.aliasToLang.get(lang) ?? lang);
+    const key = lang.toLowerCase();
+    return this.grammarTable[key] !== undefined ? key : (this.aliasToLang.get(key) ?? lang);
   }
 
   /** 惰性准备单语言：别名规范化 → grammar 加载 + 查询编译，按规范名缓存。 */
@@ -447,11 +452,11 @@ function normalizeVirtualQueries(v: VirtualQueries): QueryAssets {
   return v instanceof Map ? v : new Map(Object.entries(v));
 }
 
-/** 构建别名反查表：alias → 主语言名（多对一，后写覆盖先写）。 */
+/** 构建别名反查表：alias → 主语言名（多对一，后写覆盖先写；键小写归一，BUG-42）。 */
 function buildAliasTable(table: GrammarTable): Map<string, string> {
   const aliases = new Map<string, string>();
   for (const [lang, entry] of Object.entries(table)) {
-    for (const alias of entry.aliases ?? []) aliases.set(alias, lang);
+    for (const alias of entry.aliases ?? []) aliases.set(alias.toLowerCase(), lang);
   }
   return aliases;
 }

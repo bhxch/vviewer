@@ -66,6 +66,11 @@ async function runHighlight(root: Document, ctx: PipelineCtx): Promise<void> {
     }
     if (spanHtml) {
       code.innerHTML = spanHtml;
+      // BUG-42：tree-sitter 命中后语言类名同步小写归一——```Rust 缺陷态曾整块降级
+      // hljs（cls "language-Rust hljs"）；归一后与同语言小写写法（```rust）类名一致
+      if (langClass !== undefined && lang !== lang.toLowerCase()) {
+        code.classList.replace(langClass, `language-${lang.toLowerCase()}`);
+      }
       continue;
     }
     // 兜底：注入回调失败/null → hljs 全量包

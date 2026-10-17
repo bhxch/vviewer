@@ -569,27 +569,29 @@ test('BUG-35: tree-sitter worker init 成功零回包——页面静置 >15s 看
 // 原 BUG-41 占位系上方 BUG-35（原探索期编号 BUG-43，编号勘误轮定档）同一缺陷的重复锚点，
 // 已按权威编号收编删除（2026-10-10 整理）。
 
-test.fixme('BUG-42 [探索]: 围栏代码块语言标识大小写不归一——Rust 大写写法静默丢失 tree-sitter 降级 hljs 兜底', async ({
+test('BUG-42 [探索]: 围栏代码块语言标识大小写不归一——Rust 大写写法静默丢失 tree-sitter 降级 hljs 兜底', async ({
   page
 }) => {
   // 发现于 Markdown 渲染域、根因属 hl（packages/highlight/src/core-parse.ts）；复核成立
   // （low）。= 探索期编号 BUG-38（t-md.spec.ts 'BUG-38 [探索]' 用例，同一缺陷同判据，
-  // 两占位一并转正）。
-  // 根因：canonicalLang 两级查找（grammar 清单键/别名表）均区分大小写且未命中原样返回
-  // （packages/highlight/src/core-parse.ts:243-245）；buildAliasTable 别名原样入表无
-  // toLowerCase（core-parse.ts:376-382）；apps/web/build/grammars/manifest.json 实测 34 键
-  // 全小写、无 Rust 键、rust 别名仅 ['rs']、bash 别名 ['sh','shell','zsh']——```Rust 不命中
-  // 清单键与别名表，tree-sitter 路径静默丢失、降级 hljs（cls "language-Rust hljs"，仅
-  // 2 个 hljs-* span），```rust 得 10 个 ts-* span；别名机制本身正常（```zsh 经别名表命中
-  // bash grammar）。服务端 auto / 显式 remote / 本地注入三策略结果完全一致。hljs 兜底仍
-  // 着色，仅质量降级且与同语言小写写法行为不一致。
-  // 最小复现：注入含 ```rust / ```Rust / ```zsh 的 md → Rust 块 cls "language-Rust hljs"
-  // 零 ts-* span（对照 rust 块 language-rust + 10 个 ts-* span）。
+  // t-md 侧占位已按根因收编删除，本条为唯一锚点）。
+  // 根因（已修 2026-10-16，Wave 2）：canonicalLang 两级查找（grammar 清单键/别名表）
+  // 均区分大小写且未命中原样返回（core-parse.ts:310-312）；buildAliasTable 别名原样
+  // 入表无 toLowerCase（core-parse.ts:451-457）；manifest 34 键全小写、无 Rust 键、
+  // rust 别名仅 ['rs']——```Rust 不命中清单键与别名表，tree-sitter 路径静默丢失、
+  // 降级 hljs（cls "language-Rust hljs"，仅 2 个 hljs-* span），```rust 得 10 个 ts-*
+  // span；别名机制本身正常（```zsh 经别名表命中 bash grammar）。修复：canonicalLang
+  // 与 buildAliasTable 双侧 toLowerCase 归一；pipeline highlight 步 tree-sitter 命中
+  // 后语言类名同步小写（cls 与 ```rust 写法一致）。单测：runtime.test.ts（Rust 大写
+  // 与小写高亮逐区间一致 + hasLanguage 大写命中）、markdownPipeline.test.ts（cls
+  // 归一）。
   // 证据（复核轮独立取得）：/tmp/vv-recheck-md-e4/recheck.mjs（server-auto 档块1
   // {cls:"language-rust",spanTotal:10,ts:10,hljs:0} vs 块6 {cls:"language-Rust hljs",
   // spanTotal:2,ts:0,hljs:2}；server-remote 与 local-injected 三组逐块一致）。
-  // 修复方向：围栏语言经 toLowerCase（及别名查表）归一后再查 grammar；修复后转正。
   test.setTimeout(120_000);
+  // 转正补课：fixme 占位期从未执行，骨架漏了导航——about:blank 上 __vvOpenDirImpl
+  // 永不就位，openDir 的 waitForFunction 必超时（首轮转正实测 120s × 2 project）
+  await page.goto('/');
   const content = [
     '```rust',
     'fn main() {',
