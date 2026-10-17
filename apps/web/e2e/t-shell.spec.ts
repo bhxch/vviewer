@@ -545,35 +545,90 @@ test.fixme(
   }
 );
 
-test.fixme(
-  'BUG-27 [探索]: Ctrl+P 快速打开对任一 listChildren 失败目录一票否决——整列表 0 行完全不可用（edge/symlink/escape-etc 403）',
-  async () => {
-    // 现象（severity high，服务端 e2e 数据集开箱即触发）：服务端档下 Ctrl+P 快速打开对
-    // 「呈现为目录但 listChildren 被拒」的条目（数据根自带 root 外 symlink
-    // edge/symlink/escape-etc -> /etc）一票否决——walk 无单目录容错
-    // （packages/core/src/quickOpen.ts:28-38，listChildren 无 try/catch），任一层 403 使整个
-    // listFilesRecursively reject，QuickOpenPanel.svelte:46-49 的 catch 整体置失败态且 files
-    // 保持空数组，列表 0 行，无法打开任何文件。树侧同状态正常（TreeNodeRow.svelte:27-38
-    // 单目录 try/catch + showStatusNotice + 展开回滚），反证快速打开面板缺同等容错。
-    // 减轻因素：左栏树可作替代打开路径，且可经排除规则规避——非应用整体不可用。
-    //
-    // 最小复现：
-    //   1) 打开 http://127.0.0.1:8391 →「连接服务器」→ 填 http://127.0.0.1:8391 → 连接；
-    //   2) 按 Ctrl+P → 状态行「列出文件失败：服务器请求失败: HTTP 403: path escapes root」，
-    //      列表 0 行。
-    //   根因对照：curl -s '.../api/tree?path=edge' 可见 symlink 条目 kind=dir；
-    //   curl -w '%{http_code}' '.../api/tree?path=edge/symlink/escape-etc' → 403
-    //   （父目录 edge/symlink 层 200，403 仅在越界子目录层）。恢复对照：localStorage
-    //   ['vviewer:settings']=JSON.stringify({excludedPatterns:['edge']})（settings.ts:14）
-    //   刷新重连后 Ctrl+P 正常列出 100 行且无 edge 路径——单目录 403 即整体失败。
-    //
-    // 证据（复核会话，.temp/verify-shell-e1/）：
-    //   - A-quickopen-403.png（agent-browser 会话 cand-shell-e1-29632ef6cf44，两轮复现均
-    //     {status:「列出文件失败：… HTTP 403: path escapes root」, rows:0}）；
-    //   - B-quickopen-excluded-ok.png（排除 edge 后 {rows:100, edgePaths:false}）。
-    //
-    // 转正提示：需服务端档真实数据集（edge symlink 形态），归 e2e-server 可达；修复方向为
-    // walk 单目录 try/catch 降级（与树侧一致），期望断言「单目录 403 不影响其余条目可列可开」。
+test(
+  'BUG-27: Ctrl+P 对单目录 listChildren 失败降级——其余条目照常可列可开（不整表否决）',
+  async ({ page }) => {
+    // 缺陷（high，服务端档数据集开箱即触发）：服务端档下「呈现为目录但 listChildren
+    // 被拒」的条目（数据根自带 root 外 symlink edge/symlink/escape-etc -> /etc，403
+    // 仅在越界子目录层）使 walk 整体 reject（listFilesRecursively 无单目录容错），
+    // QuickOpenPanel 的 catch 整体置失败态、列表 0 行。修复（2026-10-16）：walk 单目录
+    // try/catch 降级（树侧 TreeNodeRow 同款）——告警 + 跳过该子树，面板状态行透出
+    // 「部分目录无法列出」，其余条目照常可列可开。历史证据路径见缺陷库。
+    // 通道：内建 http 假服务（SHELL-04/cors 同款）实现最小 vviewer 文件服务器面
+    // （/api/health、/api/ticket、/api/events SSE、/api/tree、/api/file），全部响应带
+    // CORS 头（4173 页面源跨源访问）；'locked' 目录 listChildren 恒 403 复现越界
+    // symlink 形态（真实数据集 edge/ 的确定性替身）。
+    test.setTimeout(60_000);
+    const server = http.createServer((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      const cors = { 'Access-Control-Allow-Origin': '*' };
+      const json = (status: number, body: unknown): void => {
+        res.writeHead(status, { ...cors, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(body));
+      };
+      if (url.pathname === '/api/health') return json(200, { capabilities: ['file-server'] });
+      if (url.pathname === '/api/ticket') return json(200, { ticket: 'e2e-ticket' });
+      if (url.pathname === '/api/events') {
+        // SSE 空流挂住连接（watch 订阅），测试结束随 server 一并断开
+        res.writeHead(200, { ...cors, 'Content-Type': 'text/event-stream' });
+        return;
+      }
+      if (url.pathname === '/api/tree') {
+        const path = url.searchParams.get('path') ?? '';
+        if (path === 'locked') return json(403, { error: 'path escapes root' });
+        if (path === '') {
+          return json(200, {
+            entries: [
+              { name: 'locked', kind: 'dir' },
+              { name: 'bug27-ok.txt', kind: 'file', size: 16 },
+              { name: 'sub', kind: 'dir' }
+            ]
+          });
+        }
+        if (path === 'sub') {
+          return json(200, { entries: [{ name: 'inner.md', kind: 'file', size: 8 }] });
+        }
+        return json(200, { entries: [] });
+      }
+      if (url.pathname === '/api/file') {
+        if ((url.searchParams.get('path') ?? '') === 'bug27-ok.txt') {
+          res.writeHead(200, { ...cors, 'Content-Type': 'text/plain; charset=utf-8' });
+          return res.end('bug27-ok-marker\n');
+        }
+        return json(404, { error: 'no such file' });
+      }
+      json(404, { error: 'not found' });
+    });
+    await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+    const port = (server.address() as AddressInfo).port;
+    try {
+      await waitAppMounted(page);
+      // 连接服务器（TopBar 内联表单）；目录 tab 出现即连接成功
+      await page.getByRole('button', { name: '连接服务器' }).click();
+      await page.getByLabel('服务器地址').fill(`http://127.0.0.1:${port}`);
+      await page.locator('.vv-server-form').getByRole('button', { name: '连接', exact: true }).click();
+      await expect(page.locator('.vv-tab')).not.toHaveCount(0, { timeout: 10_000 });
+
+      // 修复前：locked 层 403 → 整表 reject → 列表 0 行；修复后其余条目照常列出
+      await page.keyboard.press('Control+p');
+      const panel = page.locator('.vv-quickopen');
+      await expect(panel).toBeVisible();
+      const statusLine = panel.locator('.vv-quickopen-status');
+      await expect(statusLine).toContainText('部分目录无法列出', { timeout: 10_000 });
+      await expect(statusLine).toContainText('HTTP 403: path escapes root');
+      await expect(panel.locator('.vv-quickopen-row')).toHaveCount(2);
+      await expect(panel.locator('.vv-quickopen-row').first()).toContainText('bug27-ok.txt');
+
+      // 可开：Enter 打开选中首条（bug27-ok.txt），内容正确渲染
+      await page.keyboard.press('Enter');
+      await expect(page.locator('.vv-tab.active', { hasText: 'bug27-ok.txt' })).toBeVisible();
+      await expect(page.locator('.vv-code-pre')).toContainText('bug27-ok-marker', {
+        timeout: 20_000
+      });
+    } finally {
+      server.close();
+      (server as unknown as { closeAllConnections?: () => void }).closeAllConnections?.();
+    }
   }
 );
 

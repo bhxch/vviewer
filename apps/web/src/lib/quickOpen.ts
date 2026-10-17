@@ -29,11 +29,14 @@ export interface ScannedFile {
  * 递归列出全部来源内的文件（相对路径），按来源顺序串行扫描。目录整棵命中
  * 排除规则时跳过子树；深度优先、目录内保持 listChildren 原顺序。
  * maxFiles 为跨源全局上限，防巨型树失控（前源打满即止，不再进入后源）。
+ * opts.onWarn（BUG-27）：单目录 listChildren 失败（服务端 403/断网等）不再
+ * 一票否决整表——树侧 TreeNodeRow.svelte 同款单目录降级：告警 + 跳过该子树，
+ * 其余条目照常可列可开。告警文本由调用方透出（面板状态行）。
  */
 export async function listFilesRecursively(
   sources: ReadonlyArray<{ label: string; store: TreeStore }>,
   patterns: readonly string[],
-  opts?: { maxFiles?: number }
+  opts?: { maxFiles?: number; onWarn?: (message: string) => void }
 ): Promise<ScannedFile[]> {
   const maxFiles = opts?.maxFiles ?? 5000;
   const out: ScannedFile[] = [];
@@ -41,7 +44,14 @@ export async function listFilesRecursively(
     if (out.length >= maxFiles) break;
     const storeId = src.store.id;
     const walk = async (dirPath: string): Promise<void> => {
-      const children = await src.store.listChildren(dirPath);
+      let children: Awaited<ReturnType<TreeStore['listChildren']>>;
+      try {
+        children = await src.store.listChildren(dirPath);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        opts?.onWarn?.(`目录 ${dirPath === '' ? src.label : dirPath} 列举失败：${message}`);
+        return; // 跳过失败子树，兄弟层与其余来源继续
+      }
       for (const node of children) {
         if (out.length >= maxFiles) return;
         if (excludedName(node.name, patterns)) continue;

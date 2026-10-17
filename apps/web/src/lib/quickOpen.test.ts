@@ -108,6 +108,45 @@ describe('listFilesRecursively 多源扫描（workspace T4：结果带 storeId�
   });
 });
 
+describe('listFilesRecursively 单目录容错（BUG-27）', () => {
+  it('单目录 listChildren 失败：告警 + 跳过该子树，其余文件照常列出（不整表否决）', async () => {
+    const store: TreeStore = {
+      id: 'store:bug27',
+      displayName: () => 'bug27',
+      listChildren: async (path: string) => {
+        if (path === 'locked') throw new Error('服务器请求失败: HTTP 403: path escapes root');
+        if (path === '') return [dir('locked'), file('a.txt'), dir('sub')];
+        if (path === 'sub') return [file('sub/inner.md')];
+        return [];
+      },
+      read: async () => {
+        throw new Error('not implemented');
+      }
+    };
+    const warns: string[] = [];
+    const files = await listFilesRecursively([{ label: 'bug27', store }], [], {
+      onWarn: (m) => warns.push(m)
+    });
+    expect(files).toEqual([
+      { storeId: 'store:bug27', path: 'a.txt', name: 'a.txt' },
+      { storeId: 'store:bug27', path: 'sub/inner.md', name: 'inner.md' }
+    ]);
+    expect(warns).toEqual(['目录 locked 列举失败：服务器请求失败: HTTP 403: path escapes root']);
+  });
+
+  it('根目录失败：该源告警跳过，多源时其余源不受牵连', async () => {
+    const bad = source('store:bad', {});
+    bad.store.listChildren = async () => {
+      throw new Error('boom');
+    };
+    const good = source('store:good', { '': [file('g.txt')] });
+    const warns: string[] = [];
+    const files = await listFilesRecursively([bad, good], [], { onWarn: (m) => warns.push(m) });
+    expect(files.map((f) => f.path)).toEqual(['g.txt']);
+    expect(warns).toEqual(['目录 label-store:bad 列举失败：boom']);
+  });
+});
+
 describe('excludedName（与 FileTree/TreeNodeRow 同规则的纯函数化）', () => {
   it('全名相等命中', () => {
     expect(excludedName('.git', ['.git'])).toBe(true);

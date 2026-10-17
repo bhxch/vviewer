@@ -40,12 +40,20 @@
     }
     let stale = false;
     status = '正在列出文件…';
-    listFilesRecursively(srcs, loadSettings().excludedPatterns)
+    // BUG-27：单目录 listChildren 失败降级收集（列表照常给出），状态行透出被跳过
+    // 的目录——树侧 showStatusNotice 同语义，不静默吞掉失败面
+    const warns: string[] = [];
+    listFilesRecursively(srcs, loadSettings().excludedPatterns, {
+      onWarn: (message) => warns.push(message)
+    })
       .then((list) => {
         if (stale) return;
         files = list;
         active = 0; // 重扫完成列表已换血：复位选中项，防越界空选（Enter 落空）
-        status = '';
+        status =
+          warns.length > 0
+            ? `部分目录无法列出（${warns.length} 个已跳过）：${warns[0]}`
+            : '';
       })
       .catch((err) => {
         if (stale) return;
