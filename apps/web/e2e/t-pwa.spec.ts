@@ -390,6 +390,9 @@ test.fixme(
      * 非虚拟容器 0~1263px 不稳定（b-pwa-mobile-performance.spec.ts:14-16 实测记录），
      * 疑似 BUG-16 修复的虚拟滚动改造引入的触摸动量回归，待人工/真机复核定论；
      * 按 README §3.2 第 4/5 条以占位落法保留完整断言，复核证实后去 fixme 转正。
+     * Wave 7 复跑（2026-10-17，headless mobile project）：5 轮快滑续滚
+     * 275/0/0/0/0px——仅首滑出现惯性、后续轮恒 0，与上述记录同象；转正仍待
+     * 真机/动量链路定论（环境受限 BLOCKED，见 wave7 报告）。
      */
     const LINE = 'const vv = 1; // c\n';
     await page.goto('/');
