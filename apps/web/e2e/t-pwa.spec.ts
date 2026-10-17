@@ -104,22 +104,29 @@ async function cacheUrls(page: Page, prefix: string): Promise<string[]> {
   }, prefix);
 }
 
-/** 页内构造 File 目录注入（__vvOpenDirImpl，同 t-bin/b-pwa 惯例） */
+/** 页内构造 File 目录注入（__vvOpenDirImpl，同 t-bin/b-pwa 惯例）；label 为注入
+ * 目录标签（webkitRelativePath 根段，参与来源 storeId）。离线场景注入与恢复快照
+ * 同 label（同 storeId）会被恢复 merge 按已存在来源去重覆盖（非确定竞态）——
+ * 离线注入须换独立 label。 */
 async function openTDir(
   page: Page,
-  files: Array<{ name: string; type: string; bytes: Uint8Array | string }>
+  files: Array<{ name: string; type: string; bytes: Uint8Array | string }>,
+  label = 'tpwa'
 ): Promise<void> {
   await page.waitForFunction(
     () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
   );
-  await page.evaluate((list) => {
-    const fs = list.map(({ name, type, bytes }) => {
-      const f = new File([bytes as unknown as BlobPart], name, { type });
-      Object.defineProperty(f, 'webkitRelativePath', { value: `tpwa/${name}` });
-      return f;
-    });
-    return (window as unknown as { __vvOpenDirImpl: (f: File[]) => void }).__vvOpenDirImpl(fs);
-  }, files);
+  await page.evaluate(
+    ({ list, label }) => {
+      const fs = list.map(({ name, type, bytes }) => {
+        const f = new File([bytes as unknown as BlobPart], name, { type });
+        Object.defineProperty(f, 'webkitRelativePath', { value: `${label}/${name}` });
+        return f;
+      });
+      return (window as unknown as { __vvOpenDirImpl: (f: File[]) => void }).__vvOpenDirImpl(fs);
+    },
+    { list: files, label }
+  );
 }
 
 async function openFileViaTree(page: Page, name: string): Promise<void> {
@@ -616,7 +623,7 @@ test(
 
       // 离线注入同语言文件并打开（openTDir 仅注入目录来源，文件须经树行点击打开；
       // openFileViaTree 内置窄视口抽屉适配，chromium/mobile 两 project 通用）
-      await openTDir(page, [{ name: 'bug58-b.rs', type: 'text/plain', bytes: RS_SRC_2 }]);
+      await openTDir(page, [{ name: 'bug58-b.rs', type: 'text/plain', bytes: RS_SRC_2 }], 'tpwa2');
       await openFileViaTree(page, 'bug58-b.rs');
       // 修复判据 1：离线启动会话本地 tree-sitter 可用（缺陷态：「高亮: hljs 兜底 ·
       // 执行: 本地」，恢复联网前无法复原）
@@ -633,8 +640,8 @@ test(
   }
 );
 
-test.fixme(
-  'BUG-59 [探索]: libarchive.wasm 无任何 SW 缓存通道——离线打开 tar/tgz/xz/7z/rar 必然 20s 超时错误卡（zip JS 解包对照不受影响）',
+test(
+  'BUG-59 [已修复 2026-10-17]: libarchive.wasm 无任何 SW 缓存通道——离线打开 tar/tgz/xz/7z/rar 必然 20s 超时错误卡（zip JS 解包对照不受影响）',
   async ({ page }) => {
     // 复核成立（medium；失败模式优雅可恢复——错误卡片带重试/降级按钮，非静默非
     // 崩溃，online 功能完全正常）。发现于本域、根因属 PWA（SW 缓存策略缺
@@ -656,8 +663,11 @@ test.fixme(
     // .temp/pwa-review/zip-control.mjs 解包成功；sw.js 静态核查（curl 下载 grep：
     // registerRoute 共 4 条、precache 零 .wasm）；截图 /tmp/pwa-review-e2/
     // r2-offline-tar.png。
-    // 修复方向：为 /libarchive/.*\.wasm$/ 增加 CacheFirst 运行时路由（或入
-    // precache）；修复后本用例转正。
+    // 修复（2026-10-17，Wave 7）：runtimeCaching 新增 /\/libarchive\/libarchive\.wasm$/
+    // CacheFirst（vv-runtime-<REV> 同族）。该 wasm 由 libarchive.js classic worker 内
+    // fetch——classic worker 受页面 SW 控制，在线首次打开压缩包即入缓存，离线命中。
+    // 注意与 ts-worker（module worker，创建时序决定受控与否）不同：classic worker
+    // 受控语义稳定，无需主线程预热通道。
     test.setTimeout(150_000);
     const tarBytes = new Uint8Array(
       readFileSync(fileURLToPath(new URL('../../../samples/m4/sample.tar', import.meta.url)))
@@ -667,20 +677,39 @@ test.fixme(
     );
 
     // 在线基线：libarchive.wasm 200 + tar 解包成功（清 HTTP 缓存使离线复现确定化，
-    // 与真实「隔天启发式过期后离线」同效）
+    // 与真实「隔天启发式过期后离线」同效）。先等 SW activated + controller 在位
+    // （waitSwActivated）再开 tar：快流程下首开可早于 SW 接管，classic worker 随
+    // 未受控页面创建、wasm fetch 绕过 SW——缓存不建立且离线 reload 成败随机
+    // （controller 未传播时导航不走 SW 直落 ERR_INTERNET_DISCONNECTED）。
     await page.goto('/');
+    await waitSwActivated(page);
     await openTDir(page, [{ name: 'bug59.tar', type: 'application/x-tar', bytes: tarBytes }]);
     await openFileViaTree(page, 'bug59.tar');
     await expect(page.locator('.vv-archive .vv-tree-row').first()).toBeVisible({ timeout: 20_000 });
+    // wasm 经 SW CacheFirst 入缓存（修复通道本体）——离线前确定化
+    await expect
+      .poll(async () => (await cacheUrls(page, 'vv-runtime-')).some((u) => u.endsWith('/libarchive.wasm')), {
+        timeout: 20_000,
+        message: '等待 libarchive.wasm 进 vv-runtime-* 缓存'
+      })
+      .toBe(true);
 
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Network.clearBrowserCache');
     await page.context().setOffline(true);
     try {
-      await openTDir(page, [
-        { name: 'bug59-off.tar', type: 'application/x-tar', bytes: tarBytes },
-        { name: 'bug59-off.zip', type: 'application/zip', bytes: zipBytes }
-      ]);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.locator('.vv-brand')).toBeVisible({ timeout: 10_000 });
+      // 离线注入（独立目录标签 tpwa2：与恢复快照的 tpwa 来源 storeId 不同，规避
+      // 恢复 merge 窗口的同 storeId 去重覆盖——注入行被快照来源非确定替换的实测竞态）
+      await openTDir(
+        page,
+        [
+          { name: 'bug59-off.tar', type: 'application/x-tar', bytes: tarBytes },
+          { name: 'bug59-off.zip', type: 'application/zip', bytes: zipBytes }
+        ],
+        'tpwa2'
+      );
       // 修复判据 1：离线 tar 解包成功（缺陷态：20s 超时后错误卡片「无法预览此
       // 文件 / 打开压缩包超时（20s）……」）
       await openFileViaTree(page, 'bug59-off.tar');

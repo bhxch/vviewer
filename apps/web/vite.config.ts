@@ -205,6 +205,21 @@ export default defineConfig({
             }
           },
           {
+            // BUG-59 配套：libarchive.wasm（static/libarchive/ 静态拷贝，~1MB）此前
+            // 不在 precache（glob 不含 .wasm）也无 runtimeCaching 路由——离线打开
+            // tar/tgz/xz/7z/rar 时 worker 初始化取不到 wasm，20s 超时错误卡。该 wasm
+            // 由 libarchive.js 的 classic worker（new Worker(workerUrl)）内 fetch——
+            // classic worker 受页面 SW 控制，CacheFirst 离线命中；CacheFirst 同上，
+            // 修订号兜底跨版本陈旧。
+            urlPattern: /\/libarchive\/libarchive\.wasm$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: `vv-runtime-${BUILD_REVISION}`,
+              expiration: { maxEntries: 4, purgeOnQuotaError: true },
+              cacheableResponse: { statuses: [200] }
+            }
+          },
+          {
             // tree-sitter 查询 .scm（构建期静态拷贝，路径随版本不变）；修订号同上
             urlPattern: /\/queries\//,
             handler: 'CacheFirst',
