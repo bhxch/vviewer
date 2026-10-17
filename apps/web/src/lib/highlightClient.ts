@@ -177,10 +177,12 @@ async function remoteHighlight(
  * 给注入渲染端的 client 包一层计时 + compute 路由：highlight 先问 router
  * （本地 tree-sitter worker vs 远程端点），完成后把耗时与执行位置写入
  * window.__vvLastHighlight*（E2E 性能断言读它）。
- * 原始实例经 window.__vvHighlightClient 暴露（E2E 语言可用性探测用）。
+ * 原始实例经 window.__vvHighlightClient 暴露（E2E 语言可用性探测用）——BUG-63
+ * 兑现本注释与 HighlightDebug 的悬空声明：create() 单例装配点即挂载点。
  */
 function withDebug(client: HighlightClient): CodeHighlightClient {
   const dbg = window as unknown as HighlightDebug;
+  dbg.__vvHighlightClient = client;
   return {
     highlight(text, lang, ctx?: HighlightCallContext) {
       const t0 = performance.now();

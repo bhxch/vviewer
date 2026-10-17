@@ -980,8 +980,8 @@ test(
   }
 );
 
-test.fixme(
-  'BUG-63 [探索]: highlightClient.ts:161 注释承诺 window.__vvHighlightClient E2E 探测钩子但全仓库无赋值实现——悬空类型声明，通道实际不存在',
+test(
+  'BUG-63 [已修复 2026-10-17]: highlightClient.ts 注释承诺 window.__vvHighlightClient E2E 探测钩子但全仓库无赋值实现——悬空类型声明，通道实际不存在',
   async ({ page }) => {
     // 复核成立（low；注释与实现失实 + 调试通道缺失——现役 e2e/e2e-server 套件经
     // rg 全量核实未引用该钩子，无现役测试失败；误导后续按注释使用该钩子的 E2E
@@ -1005,8 +1005,9 @@ test.fixme(
     // 证据：现役 HL-10 同机 `npx playwright test e2e/t-hl.spec.ts -g 'HL-10:'
     // --project=chromium` 3.0s passed（产品高亮通道正常，与本缺陷无关）；缺陷态
     // 高亮真实发生而钩子缺失的实测值见上（withDebug.record 已执行为反证）。
-    // 修复方向：create() 内把原始 client 挂到 window.__vvHighlightClient（与
-    // :161 注释兑现），或删除该注释与 :109 悬空类型；修复后本用例转正。
+    // 修复（2026-10-17，Wave 7）：withDebug() 装配点同步挂 window.__vvHighlightClient
+    // = 原始 client（highlightClient.ts）——兑现注释承诺与 HighlightDebug 声明。
+    // create() 单例只跑一次，挂载即最终实例，无时序窗口。
     test.setTimeout(60_000);
     await page.goto('/');
     // 触发高亮装配真实发生（排除「withDebug 未执行才缺失」的时序解释——缺陷态下
