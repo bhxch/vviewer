@@ -11,7 +11,7 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * 只补缺口分析（2026-10-10）认定未覆盖的面，与既有护栏分工：
  * - HL-01：自动/本地两策略主路径对照 + manifest 门控信息（fix-pwa「BUG-06」用例只断本地单路径）；
  * - HL-01/2：BUG-06 验收 2 后半——缓存就绪后断网打开未开过的同语言文件仍 tree-sitter；
- * - HL-02：hljs 整文件兜底完整验收（缺陷态占位见文末 BUG-65——CAND-hl-F1 定档编号：
+ * - HL-02：hljs 整文件兜底完整验收（BUG-65 已修复转正见文末——CAND-hl-F1 定档编号：
  *   前端语言首表把 pl 误识为 prolog，hljs 按该语法着色 Perl 源得 0 个 hljs-keyword；
  *   原 HL-02 [CAND-hl-F1] 用例按一缺陷一锚点并入 BUG-65 用例）；
  * - HL-03/2：单行 3MB（行极少字节极大）chunk 边界——既有 HL-03 载体为 4.8 万行规则文本；
@@ -818,7 +818,7 @@ test.fixme('BUG-38 [探索]: 以 \\n 结尾文件 buildLineIndex 多出末尾虚
   await expect(page.locator('.vv-error-card')).toHaveCount(0);
 });
 
-test.fixme('BUG-65 [探索]: .pl 前端语言首表误识 prolog——hljs 以 prolog 语法着色 Perl 源（0 个 hljs-keyword）且状态栏语言标注错误', async ({
+test('BUG-65: .pl 前端语言首表误识 prolog——hljs 以 prolog 语法着色 Perl 源（0 个 hljs-keyword）且状态栏语言标注错误', async ({
   page
 }) => {
   // = CAND-hl-F1 的复核定论缺陷库编号（2026-10-10 复核确认，severity 维持 medium）。
@@ -827,19 +827,20 @@ test.fixme('BUG-65 [探索]: .pl 前端语言首表误识 prolog——hljs 以 p
   // 判据 = HL-02 原断言（hljs-keyword 到达 + 零 ts-* + 无错误卡片 + 内容真实渲染）+
   // 状态栏「语言:」段标注专项补强，判据出处 docs/e2e/code-highlight-degrade.md:38
   // HL-02（hljs-keyword=19、hljs-*=50）。
-  // 根因：packages/highlight/src/langdetect.ts:29 buildTables 首表 first-wins（'pl' 命中
-  // languages.json 中先出现的 prolog 条目 fileTypes ["pl","prolog"]，perl 条目在后），
-  // hljs 整文件兜底遂以 prolog 语法着色 Perl 源——实测 hljs-keyword=0、hljs-*=9、ts-*=0、
-  // 状态栏「高亮: hljs 兜底 · 执行: 本地 · 语言: prolog」；服务端 detect.rs:97 同扩展名
-  // 断言 pl→perl（'perl < prolog' 字典序），客户端与服务端相悖。文本内容渲染正确、无
-  // 崩溃/数据丢失/错误内容，维持 medium（.pl 整类文件高亮静默失效 + 语言标注错误）。
-  // 最小复现：注入 samples/m2/sample.pl 并打开 → 状态栏「语言: prolog」、代码无关键字
-  // 着色。证据（复核轮独立取得）：Playwright 探针复刻 HL-02 操作与原样断言，两轮诊断
-  // 一致——statusbar 含「语言: prolog」、hljsAll=9、hljsKeyword=0、tsAll=0、errorCard=0、
-  // hasUseStrict=true；hljs 库直呼交叉验证：highlight(sample.pl,{language:'prolog'}) 得
-  // 0/9 与浏览器逐数吻合（证明前端确实按 prolog 着色），{language:'perl'} 得 19/50 与
-  // 文档判据吻合（检测正确即可通过）。
-  // 修复方向：首表构建按服务端同款字典序定胜负（或 perl 条目前置）；修复后两用例转正。
+  // 根因（已修 2026-10-16，Wave 2）：packages/highlight/src/langdetect.ts buildTables
+  // 首表 first-wins 按插入序迭代，'pl' 命中 languages.json 中先出现的 prolog 条目
+  // （fileTypes ["pl","prolog"]，perl 条目在后），hljs 整文件兜底遂以 prolog 语法着色
+  // Perl 源——实测 hljs-keyword=0、hljs-*=9、ts-*=0、状态栏「高亮: hljs 兜底 · 执行:
+  // 本地 · 语言: prolog」；服务端 detect.rs:97 同扩展名断言 pl→perl（'perl < prolog'
+  // 字典序），客户端与服务端相悖。修复：首表构建按语言名排序迭代 + first-wins（与
+  // 服务端 LANG_BY_EXT 的 BTreeMap 排序迭代 + or_insert 同语义），langdetect.test.ts
+  // 补与服务端 detect.rs 断言同集的重复扩展胜负单测。
+  // 最小复现（缺陷态）：注入 samples/m2/sample.pl 并打开 → 状态栏「语言: prolog」、
+  // 代码无关键字着色。证据（复核轮独立取得）：Playwright 探针复刻 HL-02 操作与原样
+  // 断言，两轮诊断一致——statusbar 含「语言: prolog」、hljsAll=9、hljsKeyword=0、
+  // tsAll=0、errorCard=0、hasUseStrict=true；hljs 库直呼交叉验证：
+  // highlight(sample.pl,{language:'prolog'}) 得 0/9 与浏览器逐数吻合（证明前端确实按
+  // prolog 着色），{language:'perl'} 得 19/50 与文档判据吻合（检测正确即可通过）。
   test.setTimeout(60_000);
   await page.goto('/');
   await openDir(page, [{ name: 'sample.pl', type: 'text/plain', content: SAMPLE_PL }]);

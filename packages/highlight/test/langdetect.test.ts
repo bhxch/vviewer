@@ -23,6 +23,20 @@ describe('detectLanguage（fileTypes 精确表）', () => {
     expect(detectLanguage('xyzzy')).toBeNull();
     expect(detectLanguage('')).toBeNull();
   });
+
+  it('跨语言重复扩展：胜者为字典序最小语言名（BUG-65，与 server detect.rs 断言同集）', () => {
+    // .pl 首表曾按插入序命中先出现的 prolog（hljs 以 prolog 语法着色 Perl 源且
+    // 状态栏语言标注错误）；排序迭代后 perl < prolog 胜出，与服务端 x-vv-lang 一致
+    expect(detectLanguage('pl')).toBe('perl'); // perl < prolog
+    expect(detectLanguage('v')).toBe('v'); // v < verilog
+    expect(detectLanguage('fs')).toBe('forth'); // forth < fsharp
+    expect(detectLanguage('bas')).toBe('basic'); // basic < freebasic
+    expect(detectLanguage('properties')).toBe('ini'); // ini < properties
+    // 前端返回值契约 = grammar 清单键（common-lisp 条目的 grammar 字段）；
+    // 服务端 x-vv-lang 同扩展名给条目名 common-lisp，胜负语义一致
+    expect(detectLanguage('cl')).toBe('commonlisp');
+    expect(detectLanguage('sc')).toBe('scala');
+  });
 });
 
 describe('detectLanguage（shebang 首行检测）', () => {

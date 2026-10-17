@@ -17,12 +17,21 @@ const SHEBANG_RE = /^#!\s*(?:\S*[/\\](?:env\s+(?:-\S+\s+)*)?)?([^\s.\d]+)/;
 let extToLang: Map<string, string> | null = null;
 let shebangToLang: Map<string, string> | null = null;
 
-/** 构建查询表（模块级懒加载：首次 detectLanguage 调用时构建一次） */
+/**
+ * 构建查询表（模块级懒加载：首次 detectLanguage 调用时构建一次）。
+ * BUG-65：跨语言重复扩展（pl/v/fs/bas/properties/cl/sc 等）的胜者必须是字典序最小
+ * 语言名——按语言名排序迭代 + first-wins，与服务端 detect.rs LANG_BY_EXT（BTreeMap
+ * 排序迭代 + entry().or_insert）同语义同结果（pl→perl 而非 prolog；languages.json
+ * 中 prolog 条目先于 perl，插入序首表会把 .pl 首表误判 prolog）。
+ */
 function buildTables(): void {
   if (extToLang && shebangToLang) return;
   extToLang = new Map();
   shebangToLang = new Map();
-  for (const [name, entry] of Object.entries(languagesTable as Record<string, LangEntry>)) {
+  const entries = Object.entries(languagesTable as Record<string, LangEntry>).sort(([a], [b]) =>
+    a < b ? -1 : a > b ? 1 : 0
+  );
+  for (const [name, entry] of entries) {
     const lang = entry.grammar ?? name;
     for (const ft of entry.fileTypes ?? []) {
       const ext = ft.toLowerCase();
