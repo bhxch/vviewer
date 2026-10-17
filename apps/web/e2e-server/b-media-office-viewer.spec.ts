@@ -15,8 +15,9 @@ import { test, expect } from '@playwright/test';
  * 2. video.ts 经 mpegts.js 起播（dispatcher 签名改派），不落入代码容器渲染乱码；
  * 3. 回归护栏：video.flv 照常起播；服务端 /api/file 对 m3u8/seg/缺失分片 200/200/404
  *    契约不变（报告 curl 对照口径，经 request API 断言）。
- * missing-seg.m3u8「分片不可达出错误卡片」一项目前未达（hls.js 对 404 分片不升级
- * fatal，静默重试依旧），以 test.fixme 记录预期行为，见文件末尾用例注释。
+ * missing-seg.m3u8「分片不可达出错误卡片」（曾以 test.fixme 占位）：av.ts
+ * buildHlsConfig 收紧重试（34b310f）后分片 404 数秒升级 fatal 走错误卡片，
+ * 已转正为文件末尾正式用例。
  * 夹具：beforeAll 以 ffmpeg（libopenh264）生成 HLS 切片组/flv/ts 写入 server fixture
  * 根（与基础夹具及其他域用例文件名不重叠），生成后经 TopBar
  * 连接服务器从真实目录树打开。服务端模式单 worker（playwright.server.config.ts），
