@@ -1115,6 +1115,15 @@ export function openUrl(url: string): void {
   } catch {
     // 非法百分号编码：保留原样作为显示名
   }
+  // BUG-30：尾斜杠（目录形态）URL 的 split('/').pop() 得空串——此前继续 addTab(store,'','')
+  // 产出空名伪目录 tab，path==='' 与目录 tab 语义双向冲突（ViewerPane 显示「目录来源」
+  // 引导而非内容/报错、纯前端档 dirStore 误解析空名 URL store、addDirStoreTab 的
+  // path==='' 替换扫描把它当目录 tab 静默误关）。目录形态 URL 明确拒绝：状态栏一次性
+  // 提示说明，不建 tab（真实目录请走「连接服务器」/打开文件夹通道）。
+  if (name === '') {
+    showStatusNotice('URL 以 / 结尾：指向目录而非文件，未打开');
+    return;
+  }
   // url 打开时大小未知：显式 null（读策略走 head 探测）
   addTab(createUrlStore(url), name, name, null);
 }

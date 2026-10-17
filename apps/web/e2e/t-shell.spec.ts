@@ -685,37 +685,29 @@ test(
   }
 );
 
-test.fixme(
-  'BUG-30 [探索]: URL 尾斜杠产出空名伪目录 tab——内容区显示「目录来源」引导，不渲染内容也不报错',
-  async () => {
-    // 现象（severity low）：URL 以 / 结尾时 openUrl 对 split('/').pop() 得空串
-    // （apps/web/src/lib/openFlow.svelte.ts:424，:431 addTab(createUrlStore(url),'','')），
-    // 产出空名伪目录 tab：tab 名空白且激活（TabBar.svelte:27 渲染 source.name），内容区
-    // 显示「目录来源：文件在左侧树中打开」（ViewerPane.svelte:222-223 的 path==='' 分支；
-    // :131 使 URL 内容根本不渲染也不报错），语义错误。path==='' 与目录 tab 语义双向冲突
-    // 均实测成立：服务端档真实目录 tab 在列表前部先被 find 命中（树未被顶掉）；纯前端档
-    // 空名 tab 为唯一 tab 时 AppShell.svelte:164 的 dirStore 解析命中它，URL store 被误当
-    // 目录 store，左栏渲染根名为空的 FileTree（加重观察）；经 __vvOpenDirImpl 注入真实目录
-    // 后，addDirStoreTab 的 path==='' 替换扫描（openFlow.svelte.ts:411-413）把空名 URL tab
-    // 一并静默误关。reload 后空 tab 消失（自愈，但归因分支未能单独确认）。
-    //
-    // 最小复现：
-    //   1) 连接 http://127.0.0.1:8391；
-    //   2) 顶栏 URL 输入 http://127.0.0.1:8391/samples/m1/ 回车；
-    //   3) 出现新 tab，名字为空字符串且激活，内容区显示「目录来源：文件在左侧树中打开」
-    //      而非文件内容或错误提示。
-    //
-    // 证据（复核会话，/tmp/verify-shell-e4/）：
-    //   - probe.mjs（Playwright 直连 8391）：提交前 tabs=[{name:'127.0.0.1:8391',active:true}]；
-    //     提交后 tabs=[{name:'127.0.0.1:8391',active:false},{name:'',active:true}]、
-    //     paneEmptyDiv='目录来源：文件在左侧树中打开'、treeVisible=true（树未被顶掉）；
-    //     第二个空名 URL 后两个空 tab 并存；reload 后 tabs=[]。截图 e4-empty-tab.png。
-    //   - probe-pure.mjs（4199 纯前端档）：尾斜杠 URL 为首个动作即 {name:'',active:true} +
-    //     paneEmptyDiv 同上 + treeRows=['']（URL store 被误渲染为文件树）；注入目录后仅剩
-    //     {name:'folder',active:true}（空名 tab 被替换扫描误关）。截图 e4-pure-first.png。
-    //
-    // 转正提示：修复方向为 openUrl 对空名（尾斜杠/目录形态）拒绝或明确提示；期望断言
-    // 「提交尾斜杠 URL 不产出空名激活 tab」（或出明确错误提示），不落「目录来源」空态。
+test(
+  'BUG-30: URL 尾斜杠（目录形态）拒绝打开——不产出空名伪目录 tab，状态栏明确提示',
+  async ({ page }) => {
+    // 缺陷（low）：URL 以 / 结尾时 openUrl 对 split('/').pop() 得空串，addTab(store,'','')
+    // 产出空名伪目录 tab 且激活——内容区显示「目录来源」引导，URL 内容不渲染也不报错；
+    // path==='' 与目录 tab 语义双向冲突（纯前端档 dirStore 误解析、注入目录后被替换
+    // 扫描静默误关；历史证据路径见缺陷库）。修复（2026-10-16）：openUrl 对空名（尾
+    // 斜杠/目录形态）拒绝——状态栏一次性提示说明，不建 tab。
+    // 通道：同源 URL + page.route 确定性 200（若被误开也不至于走真实网络）。
+    await page.route('**/samples/m1/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: 'never' })
+    );
+    await waitAppMounted(page);
+    await page.getByLabel('文件 URL').fill('http://127.0.0.1:4173/samples/m1/');
+    await page.getByLabel('文件 URL').press('Enter');
+    // 不产出任何 tab（修复前：空名 tab 激活 + 「目录来源」空态）
+    await expect(page.locator('.vv-tab')).toHaveCount(0);
+    // 状态栏明确提示（showStatusNotice 4s 自动清除，紧跟提交断言）
+    await expect(page.locator('.vv-statusbar')).toContainText('URL 以 / 结尾');
+    // 内容区保持真空态而非「目录来源」引导
+    const empty = page.locator('.vv-empty');
+    await expect(empty).toBeVisible();
+    await expect(empty).toContainText('拖入文件/文件夹');
   }
 );
 
