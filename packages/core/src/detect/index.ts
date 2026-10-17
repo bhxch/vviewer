@@ -7,7 +7,7 @@ export { extractExtension } from './extension';
 export { sniffSignature } from './magic';
 export { detectEncoding, isStrictUtf8 } from './encoding';
 
-const TEXT_EXTENSIONS = new Set(['txt','md','markdown','html','htm','css','scss','js','mjs','cjs','ts','tsx','jsx','json','jsonc','yaml','yml','toml','xml','svg','csv','log','py','rb','go','rs','java','kt','c','h','cpp','hpp','cc','sh','bash','zsh','fish','sql','lua','php','pl','swift','dart','vue','svelte','ini','conf','cfg','env','properties','gradle','cmake','dockerfile','gitignore','license','makefile']);
+const TEXT_EXTENSIONS = new Set(['txt','md','markdown','html','htm','css','scss','js','mjs','cjs','ts','tsx','jsx','json','jsonc','jsonl','ndjson','yaml','yml','toml','xml','svg','csv','log','py','rb','go','rs','java','kt','c','h','cpp','hpp','cc','sh','bash','zsh','fish','sql','lua','php','pl','swift','dart','vue','svelte','ini','conf','cfg','env','properties','gradle','cmake','dockerfile','gitignore','license','makefile']);
 
 /** 检测链：扩展名主路由 + magic 签名 + 编码。head 建议 ≥8KB；full 用于编码精确判定。
  * BUG-32：binary 判定成立时不透出文本编码——编码检测对二进制字节无意义
