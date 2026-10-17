@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type CDPSession, type Page } from '@playwright/test';
+import { closeDrawerIfOpened } from './drawer';
 
 /**
  * M7 Task 4：移动视口（375×667 触摸）冒烟——
@@ -37,10 +38,12 @@ async function openBigMd(page: Page): Promise<void> {
     Object.defineProperty(f, 'webkitRelativePath', { value: 'mobile/mobile.md' });
     return (window as unknown as { __vvOpenDirImpl: (f: File[]) => void }).__vvOpenDirImpl([f]);
   }, BIG_MD);
-  // 树行在抽屉内：≤900px 需先开抽屉（本 spec 本身就验证开合，此处显式点击）
+  // 树行在抽屉内：≤900px 需先开抽屉（本 spec 的「抽屉开合」用例单独验证开合，
+  // 此处显式点击）。行点击后 BUG-61 自动收起抽屉——收尾改为状态感知关闭：
+  // 若已被应用自动收起则 no-op，盲目 toggle 会把抽屉重新打开盖住内容区
   await page.locator('.vv-drawer-toggle').click();
   await page.locator('.vv-tree-row', { hasText: 'mobile.md' }).click();
-  await page.locator('.vv-drawer-toggle').click(); // 关抽屉还内容区
+  await closeDrawerIfOpened(page, true);
   await expect(page.locator('.vv-markdown')).toBeVisible({ timeout: 20_000 });
 }
 
@@ -150,7 +153,7 @@ test('视频播放页不崩：ArtPlayer 容器挂载，video 无 error', async (
   );
   await page.locator('.vv-drawer-toggle').click();
   await page.locator('.vv-tree-row', { hasText: 'sample.mp4' }).click();
-  await page.locator('.vv-drawer-toggle').click();
+  await closeDrawerIfOpened(page, true); // BUG-61 自动收起后多为 no-op（状态感知）
 
   // ArtPlayer 挂载（播放器初始化失败会抛错阻断容器出现）；无 codec 时 error 容忍
   await expect(page.locator('.vv-artplayer')).toBeVisible({ timeout: 20_000 });

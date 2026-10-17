@@ -139,10 +139,11 @@ test('PWA-05：375×667 无横向溢出，12 层嵌套 blockquote 全渲染', as
     return (window as unknown as { __vvOpenDirImpl: (f: File[]) => void }).__vvOpenDirImpl([f]);
   }, md);
 
-  // 抽屉开合 → 树 → 打开 md（域文档步骤 ②③④）
+  // 抽屉开合 → 树 → 打开 md（域文档步骤 ②③④）。行点击后 BUG-61 自动收起，
+  // 收尾用状态感知关闭（盲目 toggle 会把抽屉重新打开）
   await page.locator('.vv-drawer-toggle').click();
   await page.locator('.vv-tree-row', { hasText: 'deep-quotes.md' }).click();
-  await page.locator('.vv-drawer-toggle').click();
+  await closeDrawerIfOpened(page, true);
   await expect(page.locator('.vv-markdown')).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.vv-markdown')).toContainText('深层引用内容');
 
@@ -293,7 +294,7 @@ test('PWA-07：mp4 播放器挂载，全屏进入/退出', async ({ page }, test
   }, MP4_B64);
   await page.locator('.vv-drawer-toggle').click();
   await page.locator('.vv-tree-row', { hasText: 'sample.mp4' }).click();
-  await page.locator('.vv-drawer-toggle').click();
+  await closeDrawerIfOpened(page, true); // BUG-61 自动收起后多为 no-op（状态感知）
 
   // ArtPlayer 挂载（同 mobile.spec：headless codec 宽松，仅断容器与无 error）
   await expect(page.locator('.vv-artplayer')).toBeVisible({ timeout: 20_000 });
