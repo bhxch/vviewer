@@ -930,8 +930,8 @@ test(
   }
 );
 
-test.fixme(
-  'BUG-62 [探索]: 375px isMobile 视口「连接服务器」表单不折行——layout viewport 被撑宽到 465px，提交按钮屏外且页面无法横向滚动',
+test(
+  'BUG-62 [已修复 2026-10-17]: 375px isMobile 视口「连接服务器」表单不折行——layout viewport 被撑宽到 465px，提交按钮屏外且页面无法横向滚动',
   async ({ page }, testInfo) => {
     test.skip(
       testInfo.project.name !== 'mobile',
@@ -958,8 +958,8 @@ test.fixme(
     // 且点击后出现「请输入服务器地址」校验错误证明 submit 真实触发；C 场景地址框
     // Enter 连接成功、树 17 行；截图 /tmp/cand-pwa-e5/A-isMobile-375.png、
     // B-hard375.png。iOS Safari 真机未验证（无真机）。
-    // 修复方向：.vv-server-form 加 flex-wrap（或移动断点下输入改 100% 宽换行）；
-    // 修复后本用例转正。
+    // 修复（2026-10-17，Wave 7）：.vv-server-form 加 flex-wrap（app.css）——固定宽
+    // 输入与提交钮窄视口折行，layout viewport 不再被撑宽；宽视口不触发折行。
     test.setTimeout(60_000);
     await page.goto('/');
     await page.locator('header button', { hasText: '连接服务器' }).click();

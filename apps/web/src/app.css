@@ -257,8 +257,12 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-search-btn.active { color: var(--ui-accent); border-color: var(--ui-accent); }
 /* 树 / tabs */
 .vv-topbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--ui-border); flex-wrap: wrap; }
-/* 连接服务器内联表单（TopBar 展开行）：地址/token/连接/错误 */
-.vv-server-form { display: flex; gap: 6px; align-items: center; }
+/* 连接服务器内联表单（TopBar 展开行）：地址/token/连接/错误。
+ * BUG-62：flex-wrap 允许窄视口（375px）下固定宽输入（220/150px）与提交钮折行——
+ * 此前内容宽 465px 溢出，isMobile（Chrome Android）下 layout viewport 被撑宽到
+ * 465px、整页约缩 20% 渲染且无法横滚，提交按钮完全屏外不可点。宽视口下不触发
+ * 折行，行为不变。 */
+.vv-server-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .vv-server-form input:first-child { width: 220px; }
 .vv-server-form input[type='password'] { width: 150px; }
 .vv-server-error { color: var(--ui-danger, #d33); font-size: 12px; max-width: 320px; }
