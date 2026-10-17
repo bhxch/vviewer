@@ -79,10 +79,11 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       # e2e 高亮断言依赖真实 wasm（m1 js / m2 ts+rs / m3 围栏 ts+bash）；
-      # java 供 b-grammar-layers 分层链用例（同源缺失 → CDN 层兜底）的资产来源
+      # java 供 b-grammar-layers 分层链用例（同源缺失 → CDN 层兜底）的资产来源；
+      # yaml 供 t-hl BUG-37 用例（yaml 外置 scanner 修复后需真 yaml wasm）
       - uses: ./.github/actions/setup-grammars
         with:
-          languages: javascript,typescript,bash,html,css,json,python,rust,java
+          languages: javascript,typescript,bash,html,css,json,python,rust,java,yaml
       # b-grammar-layers 用例要求构建期注入 CDN 层 base（mock CDN，不依赖外网）；
       # 与 spec 内 mock 的路由前缀严格一致（base 同时容纳 manifest.json 与 *.wasm）
       - run: pnpm --filter web build
