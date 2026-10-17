@@ -430,32 +430,21 @@ test(
   }
 );
 
-test.fixme(
-  'BUG-57 [探索]: 服务端档全局搜索单文件命中数静默截断至 50——超出命中行被丢弃且终帧 truncated=false、UI 无不完整提示，与纯前端路径（60 条）不一致',
+test(
+  'BUG-57 [探索]: 服务端档全局搜索单文件命中不设限——60 命中全量返回，与纯前端路径一致（截断统一由 1000 全局上限 + truncated 终帧承担）',
   async ({ page }) => {
-    // 复核成立（low，2026-10-10）：server/src/routes/search.rs:42 定义 RG_MAX_COUNT='50'，
-    // :96-97 作为 --max-count 传入 rg，单文件命中行超 50 即静默截断；终帧 truncated 仅由
-    // 全局 1000 命中上限（MAX_MATCHES :36，:234-240/:288）驱动——单文件 50 上限触达时
-    // 无任何信号。纯前端 grepStoreLocal（packages/core/src/compute/search.ts:116-192，
-    // 上限仅 2000 文件/200MB/单文件 2MB/1000 命中 :50-55）同查询返回全部 60 条——同
-    // 数据两路径 50 vs 60。缺陷点不在参数本身（search.rs 注释与单测围绕它设计），在
-    // 「截断无信号」与「双路径结果不一致」：1000 全局上限触达有 truncated 提示（CMP-08
-    // 已覆盖），单文件 50 触达没有。返回的 50 条均为真实命中（不完整但非错误结果）。
-    // 最小复现：① 夹具 tcmp-many60.txt 含 60 行 "vvneedle line N" ② POST /api/search
-    // {"pattern":"vvneedle"} → 该文件恰 50 帧、终帧 {"done":true,"truncated":false}
-    // ③ UI Ctrl+Shift+F 搜 vvneedle（远程 store）→ 「50 个命中」无「不完整/已达上限」
-    // 字样 ④ node 直跑产品源码 grepStoreLocal 同查询 → total=60。
-    // 证据（复核轮独立取得，8441 实例 /tmp/cand-cmp-e2/root）：UI 截图
-    // /tmp/cand-cmp-e2/artifacts/gs-needle-50-hits.png；rg 参数对照（root 直跑产品同参
-    // --max-count 50 → 50、去掉 → 60）；GlobalSearchPanel.svelte:126 状态=「${matches.length}
-    // 个命中」、:225 仅 truncated 追加「（结果不完整，已达上限）」、:80-84/:245 文件头
-    // 计数=命中帧数。
-    // 修复方向（二选一）：放开单文件截断（返回 60 帧）或保留截断但终帧/搜索面板给
-    // truncated 信号（与 1000 上限口径对齐）；修复后按实际方向保留下方对应判据转正。
+    // 2026-10-10 复核成立（low）；2026-10-17 清偿转正。缺陷态：search.rs 定义
+    // RG_MAX_COUNT=50 作为 rg --max-count（grep 路径 -m），单文件命中行超 50 即
+    // 静默截断，终帧 truncated 仅由全局 1000 上限驱动——单文件 50 触达无任何信号，
+    // 与纯前端 grepStoreLocal（同查询 60 条）双路径不一致。
+    // 修复（两方向中取「放开」）：rg_args 去 --max-count、grep_args 去 -m，单文件
+    // 命中不设限；截断语义统一由 pump 的 MAX_MATCHES=1000（truncated:true 终帧）
+    // 承担——与纯前端 grepStoreLocal 的 1000 命中上限完全同构。服务端单测：
+    // search.rs rg_grep_args_have_no_per_file_count_cap + tests/search.rs
+    // per_file_matches_are_not_capped（60 行全量返回）。
     test.setTimeout(60_000);
 
-    // API 半：截断触达必须有信号——缺陷态该文件恰 50 帧 + 终帧 truncated=false
-    // （行 51–60 静默丢弃），两修复方向判据（60 帧或 truncated 信号）均不满足
+    // API 半：60 帧全量返回（缺陷态恰 50 帧 + 终帧 truncated=false 双双违背）
     const res = await fetch(`${COMPUTE_BASE}/api/search`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -469,18 +458,15 @@ test.fixme(
     const fileFrames = frames.filter(
       (f) => typeof f.file === 'string' && f.file.endsWith('tcmp-many60.txt')
     );
-    expect(
-      fileFrames.length === 60 || frames[frames.length - 1]?.truncated === true,
-      '单文件截断触达必须有信号或放开截断；缺陷态 50 帧 + truncated=false 双双违背'
-    ).toBe(true);
+    expect(fileFrames.length, '60 个命中行全量返回（缺陷态 50）').toBe(60);
+    expect(frames[frames.length - 1]?.truncated).toBe(false);
 
-    // UI 半：远程 store 同查询——缺陷态状态条「50 个命中」且无「结果不完整」提示；
-    // 修复后为「60 个命中」（方向 A）或「50 个命中（结果不完整，已达上限）」（方向 B）
+    // UI 半：远程 store 同查询——「60 个命中」（缺陷态「50 个命中」且无不完整提示）
     await connectSameOriginCompute(page, 'auto');
     await page.keyboard.press('Control+Shift+F');
     await expect(page.locator('.vv-gsearch')).toBeVisible();
     await page.getByLabel('全局搜索内容').fill('vvneedle');
-    await expect(page.locator('.vv-gsearch-status')).toContainText(/60 个命中|结果不完整/, {
+    await expect(page.locator('.vv-gsearch-status')).toContainText('60 个命中', {
       timeout: 15_000
     });
     await page.keyboard.press('Escape');

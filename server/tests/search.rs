@@ -1,6 +1,6 @@
 //! Task 4 集成测试：POST /api/search（ripgrep NDJSON 流式）。
 //!
-//! 真 rg 子进程断言：命中帧形状 / --max-count 截断 / glob / 大小写 /
+//! 真 rg 子进程断言：命中帧形状 / 单文件不截断（BUG-57）/ glob / 大小写 /
 //! 字面量与正则 / path 限定与越界 403 / pattern 校验 400 / 双缺 501 /
 //! rg 缺失 fallback grep / Bearer。
 
@@ -25,7 +25,7 @@ fn fixture(token: Option<&str>) -> Fixture {
     std::fs::write(root.join("zh.txt"), "中文needle\n").unwrap();
     // 字面量 vs 正则区分：'a.c' 字面量只命中第 2 行，正则命中两行
     std::fs::write(root.join("lit.txt"), "abc\na.c\n").unwrap();
-    // --max-count 50：60 个命中行只保留前 50
+    // BUG-57：单文件命中不设限——60 个命中行全量返回
     let many: String = "needle line\n".repeat(60);
     std::fs::write(root.join("many.txt"), many).unwrap();
     // --max-filesize 2M：略超 2MiB 的大文件即使含命中也跳过
@@ -37,8 +37,8 @@ fn fixture(token: Option<&str>) -> Fixture {
     Fixture { _dir: dir, state }
 }
 
-/// 截断场景独立 fixture：25 个文件 × 60 命中行（每文件被 --max-count 压到 50，
-/// 潜在 1250 > 上限 1000，必然触发截断）。
+/// 截断场景独立 fixture：25 个文件 × 60 命中行（总命中 1500 > 上限 1000，
+/// 必然触发 MAX_MATCHES 截断终帧）。
 fn big_fixture() -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     for i in 0..25 {
@@ -144,10 +144,10 @@ async fn streams_match_frames_and_done() {
     assert_eq!(done["truncated"], false);
 }
 
-// ---------- --max-count 50：每文件命中行数上限 ----------
+// ---------- BUG-57：单文件命中数不设限（截断统一由 MAX_MATCHES 承担） ----------
 
 #[tokio::test]
-async fn max_count_caps_matches_per_file() {
+async fn per_file_matches_are_not_capped() {
     if !rg_available() {
         return;
     }
@@ -155,13 +155,16 @@ async fn max_count_caps_matches_per_file() {
     let (_, frames) = post_search(f.state, json!({ "pattern": "needle" })).await;
     let hits = match_frames(&frames);
     let many_count = hits.iter().filter(|h| h["file"] == "many.txt").count();
-    assert_eq!(many_count, 50, "60 个命中行应被 --max-count 压到 50");
+    assert_eq!(many_count, 60, "60 个命中行应全量返回（无 --max-count 压制）");
     let many_lines: Vec<u64> = hits
         .iter()
         .filter(|h| h["file"] == "many.txt")
         .map(|h| h["line"].as_u64().unwrap())
         .collect();
-    assert_eq!(many_lines, (1..=50).collect::<Vec<_>>(), "保留前 50 行");
+    assert_eq!(many_lines, (1..=60).collect::<Vec<_>>(), "行 1..=60 全保留");
+    // 全 fixture 总命中 < 1000：不触发全局截断
+    let done = done_frame(&frames);
+    assert_eq!(done["truncated"], false);
 }
 
 // ---------- 大小写 ----------

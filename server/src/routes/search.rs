@@ -8,11 +8,14 @@
 //! match 事件 → 转 NDJSON 帧下发；上限 1000 命中即 kill 子进程并下发截断终帧；
 //! 客户端断连（响应 body 被 drop → channel 发送失败）→ kill 子进程。
 //!
-//! 参数实测（rg 15.2）：`--max-count 50` 按文件压命中行数；`--max-filesize 2M`
-//! 跳过超限文件；`--sort path` 输出顺序确定；`--no-ignore` 与文件树可见性对齐
-//! （不尊重 .gitignore）；`state.hidden` 时追加 `--hidden` 与树同步展示 dot 条目；
-//! pattern 一律经 `-e` 传入（防 `-` 开头 pattern 被解析为 flag）；字面量默认
-//! `-F`，`regex: true` 用 rg 默认正则引擎。
+//! 参数实测（rg 15.2）：`--max-filesize 2M` 跳过超限文件；`--sort path` 输出顺序
+//! 确定；`--no-ignore` 与文件树可见性对齐（不尊重 .gitignore）；`state.hidden` 时
+//! 追加 `--hidden` 与树同步展示 dot 条目；pattern 一律经 `-e` 传入（防 `-` 开头
+//! pattern 被解析为 flag）；字面量默认 `-F`，`regex: true` 用 rg 默认正则引擎。
+//! 单文件命中数不设限（BUG-57，2026-10-17）：`--max-count 50`（grep 路径 `-m`）
+//! 曾把单文件命中行静默压到 50 且终帧无任何信号，与纯前端 grepStoreLocal（全局
+//! 1000 命中上限 + truncated 终帧）双路径不一致——现放开单文件上限，截断语义
+//! 统一由 pump 的 MAX_MATCHES（1000，`truncated: true` 终帧）承担。
 //!
 //! A 项降级链：rg 缺失时自动 fallback 系统 grep——参数映射/`--null` 行协议/
 //! 已知差异（无 filesize 跳过、顺序不保证、ERE、col=1）见 `grep_args`/`grep_frame`；
@@ -47,8 +50,6 @@ pub const MAX_MATCHES: usize = 1000;
 pub const MAX_PATTERN_CHARS: usize = 256;
 /// 预览行文本最大字符数（按 Unicode 标量值截断，不劈多字节字符）。
 pub const PREVIEW_MAX_CHARS: usize = 200;
-/// 每文件命中行数上限（--max-count）。
-const RG_MAX_COUNT: &str = "50";
 /// 跳过的文件大小上限（--max-filesize；rg 的 M = MiB）。
 const RG_MAX_FILESIZE: &str = "2M";
 /// rg 搜索总墙钟上限：防子进程挂起导致 pump 永久 await（进程+任务泄漏），
@@ -146,11 +147,10 @@ fn is_executable(p: &Path) -> bool {
 }
 
 /// 组装 rg 参数（不含 rg 程序路径与搜索目录，便于单测断言）。
+/// 单文件命中数不设限（BUG-57）：无 --max-count，截断统一由 MAX_MATCHES 承担。
 fn rg_args(req: &SearchRequest, hidden: bool) -> Vec<String> {
     let mut args = vec![
         "--json".to_string(),
-        "--max-count".to_string(),
-        RG_MAX_COUNT.to_string(),
         "--max-filesize".to_string(),
         RG_MAX_FILESIZE.to_string(),
         "--sort".to_string(),
@@ -184,14 +184,13 @@ fn rg_args(req: &SearchRequest, hidden: bool) -> Vec<String> {
 /// BSD grep 的 --include 为全路径匹配（* 跨 /），含 / 的 glob 两端行为不同。
 fn grep_args(req: &SearchRequest, hidden: bool) -> Vec<String> {
     let _ = hidden;
+    // 单文件命中数不设限（BUG-57 同 rg 路径）：无 -m，截断统一由 MAX_MATCHES 承担。
     let mut args = vec![
         // 长选项强制：短参 -Z 在 GNU grep 是 --null、BSD grep 是 --decompress
         "--null".to_string(),
         "-rHn".to_string(),
         "-s".to_string(),
         "-I".to_string(),
-        "-m".to_string(),
-        RG_MAX_COUNT.to_string(),
     ];
     if let Some(glob) = req.glob.as_deref().filter(|g| !g.is_empty()) {
         args.push(format!("--include={glob}"));
@@ -554,6 +553,24 @@ mod tests {
         assert_eq!(args[e + 1], "needle");
     }
 
+    /// BUG-57：单文件命中数不设限——rg 无 --max-count、grep 无 -m；截断语义
+    /// 统一由 pump 的 MAX_MATCHES（终帧 truncated:true）承担。
+    #[test]
+    fn rg_grep_args_have_no_per_file_count_cap() {
+        let req = SearchRequest {
+            pattern: "x".into(),
+            glob: None,
+            case_sensitive: false,
+            regex: false,
+            path: None,
+            root: None,
+        };
+        let rg = rg_args(&req, false);
+        assert!(!rg.contains(&"--max-count".to_string()), "rg 不得带 --max-count: {rg:?}");
+        let grep = grep_args(&req, false);
+        assert!(!grep.contains(&"-m".to_string()), "grep 不得带 -m: {grep:?}");
+    }
+
     #[test]
     fn rg_args_regex_case_sensitive_glob_hidden() {
         let req = SearchRequest {
@@ -599,7 +616,7 @@ mod tests {
         };
         let args = grep_args(&req, false);
         // 行格式协议：NUL 分隔（长选项——-Z 在 BSD grep 是 decompress）
-        for a in ["--null", "-rHn", "-s", "-I", "-m", "50", "-i", "-F", "-e", "needle"] {
+        for a in ["--null", "-rHn", "-s", "-I", "-i", "-F", "-e", "needle"] {
             assert!(args.contains(&a.to_string()), "缺参数 {a}: {args:?}");
         }
         // NUL 必须长选项，禁短参
