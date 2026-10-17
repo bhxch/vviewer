@@ -1,7 +1,12 @@
 import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { test, expect } from '@playwright/test';
 import { injectDir, openTreeFile } from './b-markdown-html-docs-helpers';
+import { assertPortFree, stopServer, waitHealthy } from './serverHarness';
 
 /**
  * t-md.spec.ts — markdown-html-docs 域缺口补齐（t- 前缀标记本轮新增，不改既有文件）。
@@ -283,37 +288,148 @@ test('BUG-66 [探索]: 本地 markdown-it 路径删除线渲染为 s 而非 del�
 // 'BUG-39 [探索]'/'BUG-40 [探索]'；围栏大小写原 'BUG-38 [探索]' 本域份删除，唯一锚点
 // 为 t-hl.spec.ts 'BUG-42 [探索]'（根因 packages/highlight/src/core-parse.ts）。
 
-test.fixme('BUG-39 [探索]: 远程档 heading id 双引擎方案不一致——comrak user-content- 前缀致页内锚死链、内嵌 anchor href 自不一致', async () => {
+test('BUG-39 [探索]: 远程档 heading id 双引擎方案统一 user-content- 命名空间——页内锚可跳转、锚 href/id 自一致、双引擎同型', async ({
+  page,
+  browser
+}, testInfo) => {
   // = 探索期编号 BUG-37（原同文件 'BUG-37 [探索]' 占位，已按唯一锚点收编删除）复核
   // 定档后的缺陷库确认编号，同缺陷同判据；本条挂确认编号供修复 PR 按 BUG-39 检索。
-  // 复核维持 medium：本地 slugifyHeading 无前缀、重名 -2 起、全标点回退 section
-  // （packages/render-text/src/markdown/markdownRenderer.ts slugifyHeading/assignHeadingIds）；
-  // 远程 comrak 0.56.0（server/Cargo.toml:22、Cargo.lock:252-253）统一 user-content- 前缀、
-  // 重名 -1 起、全标点/emoji 标题成 user-content- / user-content--1 / user-content-标题--emoji
-  // （server/src/compute/markdown.rs:26 header_id_prefix），且自产内嵌 anchor「id 带前缀、
-  // href 不带」自不一致（仿 GitHub 形态——GitHub 靠自家前端 JS 做 hash→前缀映射，本仓库
-  // 前端无任何此逻辑：rg 'data-heading-content|user-content' apps/web/src packages 零命中，
-  // 页内锚也无自定义点击处理，hashchange/scrollIntoView 仅 markdownRenderer.ts:339 搜索
-  // mark 高亮一处）→ 纯远程档输出内部自不一致：正文作者页内锚 3 条中 2 条死链（hash 变
-  // scrollTop 不动）、comrak 自产 anchor 链接 12 条中 11 条死链、#intro 碰巧命中作者
-  // <div id="intro"> 滚到错误元素。校准：TOC 面板按实际 DOM id 定位不受影响（远程档点
-  // TOC scrollTop 0→121），文档浏览与其余功能正常，非崩溃/数据丢失/功能不可用。
-  // 最小复现（需 --compute 同源实例，本套件 :4173 纯 web 不可执行，拓扑先例 HL-10/3）：
-  //   ① http://127.0.0.1:8391 → 连接服务器 → 填 http://127.0.0.1:8391 → 连接；
-  //   ② 文件树展开 explore-md/，点 toc-edge.md，确认状态栏「渲染: 远程」；
-  //   ③ 点正文链接「到中文标题一」→ location.hash 变 #%E4%B8%AD%E6%96%87%E6%A0%87%E9%A2%98%E4%B8%80
-  //      但 .vv-viewer-scroll.scrollTop 保持 0；emoji 标题链接同样不滚；
-  //   ④ 对照：同一文件本地注入通道（无服务器连接）打开（渲染: 本地），同一链接
-  //      scrollTop 0→121 正常跳转。
-  // 证据（复核轮独立取得）：/tmp/md-e1-repro/repro.mjs——远程档 12 个 heading id 全带
-  //   前缀（user-content-中文标题一 / -1 / user-content- / user-content--1 /
-  //   user-content-标题--emoji），16 条 a[href^=#] 中 13 条目标 id 不存在（comrak 自产
-  //   anchor 类 11 + 正文 2），仅 #intro/#deep-target 命中作者 HTML 自带 id；
-  //   curl POST /api/compute/markdown 原始输出即「id 带前缀、内嵌锚 href 不带」
-  //   （comrak 0.56 输出行为，非前端改写）；/tmp/md-e1-repro/toc.mjs——TOC 面板不受影响。
-  // 修复方向：前端补 hash→user-content- 前缀映射（GitHub 同款）或 comrak 侧对齐本地方案。
-  //   转正断言（--compute 同源实例）：正文页内锚点击 scrollTop 变化 + deadLinkCheck
-  //   0 死链（comrak 自产 anchor href 与实际 heading id 全一致）。
+  // 复核维持 medium（缺陷态）：本地 slugifyHeading 无前缀、重名 -2 起、全标点回退
+  // section；远程 comrak 0.56.0 统一 user-content- 前缀、重名 -1 起，且自产内嵌
+  // anchor「id 带前缀、href 不带」自不一致（仿 GitHub 形态——GitHub 靠自家前端 JS
+  // 做 hash→前缀映射，本仓库前端无任何此逻辑）→ 纯远程档正文作者页内锚死链（hash
+  // 变 scrollTop 不动）、comrak 自产 anchor 链接死链、#intro 碰巧命中作者自带 id。
+  // 【2026-10-17 清偿转正】方向裁决=「统一 user-content- 前缀命名空间」（GitHub 同款，
+  // 对既有锚消费方影响最小：TOC 按实际 DOM id 定位本就不受影响）：
+  //   - server：comrak 开 header_id_prefix_in_href（server/src/compute/markdown.rs）——
+  //     自产锚 href 与 id 同带前缀，comrak 输出自一致（单测
+  //     heading_anchor_href_matches_id_including_prefix_and_duplicates）；
+  //   - 本地引擎：heading_close 锚 href 同款带前缀（engine.ts GfmAnchorizer，
+  //     comrak Anchorizer 同款 GFM 算法）；enrich assignHeadingIds 改用同一
+  //     GfmAnchorizer 分配 id（重名 -1 起，与 comrak 同序列）并把标题内 a.anchor
+  //     href 收口为最终 id（自一致由构造保证）；
+  //   - 前端 remapHeadingHashLinks（markdownRenderer.ts）：作者页内链接 [x](#标题)
+  //     直连目标不存在且 user-content-<hash> 存在时改写 href（GitHub hash→前缀
+  //     映射的渲染期确定性等价形态；作者自锚/脚注/已直达链接不动）。
+  // 拓扑（HL-10/3 先例）：远程半需 --compute 同源实例——用例内自起 release server
+  // （:4182，避开 e2e 套件 t-hl 的 :4181 与 e2e-server 的 :4178-4180）；本地半走
+  // :4173 注入通道同文档对照双引擎 id 同型。转正判据：正文页内锚点击 scrollTop
+  // 变化 + deadLinkCheck 0 死链 + 双引擎 heading id 序列一致。
+  test.skip(testInfo.project.name !== 'chromium', '自起 --compute 实例仅桌面基准跑（HL-10/3 前例）');
+  const specDir = dirname(fileURLToPath(import.meta.url));
+  const BIN = resolve(specDir, '../../../server/target/release/vviewer');
+  test.skip(!existsSync(BIN), 'release server 未构建（cargo build --release 后可用）');
+  test.setTimeout(180_000);
+
+  // 载体：重名标题（-1 去重序列）、CJK/英文标题、作者页内链接（裸 slug + 重名后缀
+  // 形态）；链接置顶部、填充段在后——保证点击时目标在视口外（scrollTop 可观测增长）
+  const filler = Array.from({ length: 30 }, (_, i) => `填充段落 ${i + 1}，撑出滚动距离。`);
+  const content = [
+    '导航：[到重名标题](#中文标题一-1)、[到英文标题](#english-title-here)。',
+    '',
+    '# 中文标题一',
+    '',
+    '## 中文标题一',
+    '',
+    '重名标题一节正文。',
+    '',
+    '## English Title Here',
+    '',
+    ...filler,
+    ''
+  ].join('\n');
+
+  // ── 远程半：自起 --compute 同源实例（:4182） ──
+  const root = mkdtempSync(join(tmpdir(), 'tmd-bug39-'));
+  writeFileSync(join(root, 'tmd39-anchors.md'), content);
+  const REMOTE = 'http://127.0.0.1:4182';
+  await assertPortFree(REMOTE); // 遗留进程预检（须在 spawn 前）
+  const server = spawn(
+    BIN,
+    [
+      'serve', '--root', root,
+      '--web-dist', resolve(specDir, '../build'),
+      '--port', '4182', '--compute'
+    ],
+    { stdio: 'ignore' }
+  );
+  let remoteIds: string[] = [];
+  try {
+    await waitHealthy(REMOTE);
+    const rpage = await browser.newPage();
+    await rpage.goto(`${REMOTE}/`);
+    await rpage.getByRole('button', { name: '连接服务器' }).click();
+    await rpage.getByLabel('服务器地址').fill(REMOTE);
+    await rpage.getByRole('button', { name: '连接', exact: true }).click();
+    await expect(rpage.locator('.vv-tree-row', { hasText: 'tmd39-' }).first()).toBeVisible({
+      timeout: 10_000
+    });
+    // 先切策略再开文件（切策略对已打开文件不回溯，域文档 4.4-2 复核要点）
+    await rpage.getByLabel('计算策略').selectOption('remote');
+    await rpage.locator('.vv-tree-row', { hasText: 'tmd39-anchors.md' }).first().click();
+    await expect(rpage.locator('.vv-tab.active', { hasText: 'tmd39-anchors.md' })).toBeVisible();
+    await expect(rpage.locator('.vv-statusbar')).toContainText('渲染: 远程', { timeout: 30_000 });
+    const rmd = rpage.locator('.vv-markdown');
+    await expect(rmd).toBeVisible({ timeout: 30_000 });
+
+    // deadLinkCheck 0：全部页内锚（comrak 自产 anchor + 作者页内链接）目标 id 均存在
+    const deadRemote = await rpage.evaluate(() => {
+      const md = document.querySelector('.vv-markdown')!;
+      const bad: string[] = [];
+      for (const a of Array.from(md.querySelectorAll('a[href^="#"]'))) {
+        const h = decodeURIComponent((a.getAttribute('href') ?? '').slice(1));
+        if (h !== '' && !md.querySelector(`[id="${CSS.escape(h)}"]`)) {
+          bad.push(a.getAttribute('href') ?? '');
+        }
+      }
+      return bad;
+    });
+    expect(deadRemote).toEqual([]);
+
+    // heading id 全带命名空间前缀；锚 href 与所在标题 id 自一致
+    remoteIds = await rpage.evaluate(() =>
+      Array.from(document.querySelectorAll('.vv-markdown h1, .vv-markdown h2')).map((h) => h.id)
+    );
+    expect(remoteIds).toEqual([
+      'user-content-中文标题一',
+      'user-content-中文标题一-1',
+      'user-content-english-title-here'
+    ]);
+    const anchorHref = await rpage.evaluate(() => {
+      const h = document.querySelector('.vv-markdown h2')!;
+      return { id: h.id, href: h.querySelector('a.anchor')?.getAttribute('href') };
+    });
+    expect(anchorHref.href).toBe(`#${anchorHref.id}`);
+
+    // 正文页内锚点击 scrollTop 变化（缺陷态：hash 变、scrollTop 恒 0 死链）
+    const scrollOf = (): Promise<number> =>
+      rpage.evaluate(
+        () => (document.querySelector('.vv-viewer-scroll') as HTMLElement).scrollTop
+      );
+    const beforeRemote = await scrollOf();
+    await rmd.getByRole('link', { name: '到英文标题' }).click();
+    await expect.poll(scrollOf, { timeout: 5_000 }).toBeGreaterThan(beforeRemote);
+    await rpage.close();
+  } finally {
+    await stopServer(server, 'tmd-bug39');
+    rmSync(root, { recursive: true, force: true });
+  }
+
+  // ── 本地半：同文档注入通道（:4173 纯 web）——双引擎 id 方案同型 + 页内锚可跳转 ──
+  await injectDir(page, [{ name: 'tmd39-local.md', content }]);
+  await openTreeFile(page, 'tmd39-local.md');
+  const md = page.locator('.vv-markdown');
+  await expect(md).toBeVisible({ timeout: 20_000 });
+  const localIds = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('.vv-markdown h1, .vv-markdown h2')).map((h) => h.id)
+  );
+  expect(localIds).toEqual(remoteIds); // 双引擎统一命名空间（同文档同 id 序列）
+  const scrollLocal = (): Promise<number> =>
+    page.evaluate(() => (document.querySelector('.vv-viewer-scroll') as HTMLElement).scrollTop);
+  const beforeLocal = await scrollLocal();
+  await md.getByRole('link', { name: '到英文标题' }).click();
+  await expect.poll(scrollLocal, { timeout: 5_000 }).toBeGreaterThan(beforeLocal);
+  await expect(page.locator('.vv-error-card')).toHaveCount(0);
 });
 
 test('BUG-40 [探索]: markdown 渲染视图净化放行五类等价加载向量——poster/SVG image/style url/table background/input image 外域真实外联', async ({

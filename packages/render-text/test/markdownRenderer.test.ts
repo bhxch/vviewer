@@ -68,7 +68,7 @@ describe('markdownRenderer——渲染与 TOC', () => {
     }
   });
 
-  it('无 id 的 heading 生成 slug id；重复标题唯一化；既有 id 保留', async () => {
+  it('无 id 的 heading 生成 user-content- 前缀 GFM 锚 id（BUG-39 统一命名空间）；重复标题 -1 起去重；既有 id 保留', async () => {
     const md = [
       '# Hello World!',
       '',
@@ -82,16 +82,42 @@ describe('markdownRenderer——渲染与 TOC', () => {
     const { target, instance } = await renderMd(md);
     const toc = tocOf(instance);
     const ids = toc.map((t) => t.id);
-    expect(ids[0]).toBe('hello-world'); // slug：去标点、空格转 -
-    expect(ids[1]).toBe('hello-world-2'); // 重复标题唯一化
+    expect(ids[0]).toBe('user-content-hello-world'); // GFM anchorize + 前缀：去标点、空格转 -
+    expect(ids[1]).toBe('user-content-hello-world-1'); // 重复标题按 GFM -1 起去重
     expect(ids[2]).toBe('custom-id'); // 既有 id 保留
-    expect(ids[3]).toBe('自定标题'); // 无 id 的 CJK 标题生成 CJK slug
+    expect(ids[3]).toBe('user-content-自定标题'); // 无 id 的 CJK 标题同方案
     expect(new Set(ids).size).toBe(ids.length);
     // DOM 内 id 与 TOC 一一对应
     for (const t of toc) expect(target.querySelector(`[id="${t.id}"]`)).not.toBeNull();
+    // 引擎自产锚 href 收口为最终 id（自一致由构造保证，BUG-39）
+    expect(target.querySelector('h1 a.anchor')?.getAttribute('href')).toBe(`#${ids[0]}`);
+    expect(target.querySelector('h2 a.anchor')?.getAttribute('href')).toBe(`#${ids[1]}`);
   });
 
-  it('CJK 标题生成 CJK slug', () => {
+  it('作者页内链接 hash 映射到 user-content- 命名空间 id（含百分号编码形态）；作者自锚/脚注不动', async () => {
+    const md = [
+      '# 中文标题一',
+      '',
+      '到[标题一](#中文标题一)与[编码形态](#%E4%B8%AD%E6%96%87%E6%A0%87%E9%A2%98%E4%B8%80)。',
+      '',
+      '<div id="intro">作者自锚目标</div>',
+      '',
+      '到[自锚](#intro)。'
+    ].join('\n');
+    const { target } = await renderMd(md);
+    const links = target.querySelectorAll('a[href^="#"]');
+    const hrefs = Array.from(links).map((a) => a.getAttribute('href'));
+    // 作者链接 → user-content-<slug>（两个形态都命中同一 id）
+    expect(hrefs).toContain('#user-content-中文标题一');
+    // 作者自锚：直连目标存在，不改写
+    expect(hrefs).toContain('#intro');
+    // 全部页内链接 0 死链（目标 id 均存在）
+    for (const h of hrefs) {
+      expect(target.querySelector(`[id="${CSS.escape((h ?? '').slice(1))}"]`)).not.toBeNull();
+    }
+  });
+
+  it('slugifyHeading 兼容导出：GFM 基名形态（全空回退 section 不再属 id 管线）', () => {
     expect(slugifyHeading('中文 标题')).toBe('中文-标题');
     expect(slugifyHeading('!!!')).toBe('section'); // 全空 slug 回退
   });
@@ -107,21 +133,22 @@ describe('markdownRenderer——渲染与 TOC', () => {
 });
 
 describe('markdownRenderer——heading id 与灯箱 overlay id 共存（F4）', () => {
-  it('assignHeadingIds：标题 slug 恰为灯箱 overlay id 时自动加 -2 后缀（overlay id 预占）', () => {
+  it('assignHeadingIds：user-content- 命名空间下标题 id 不与 overlay id 相撞（overlay 完好）', () => {
     const doc = new DOMParser().parseFromString(
       `<h1>${LIGHTBOX_OVERLAY_ID}</h1><div id="${LIGHTBOX_OVERLAY_ID}"></div>`,
       'text/html'
     );
     assignHeadingIds(doc);
-    // overlay id 不被标题占用（openLightbox 按 id 单例查找、removeLightboxOverlay 按 id 清理）
-    expect(doc.querySelector('h1')!.id).toBe(`${LIGHTBOX_OVERLAY_ID}-2`);
+    // 标题 id 落在前缀命名空间，与 overlay id 天然隔离（openLightbox 按 id 单例查找
+    // 不受影响）；used 预占与 -1 避让序列仅为防御性保留
+    expect(doc.querySelector('h1')!.id).toBe(`user-content-${LIGHTBOX_OVERLAY_ID}`);
     expect(doc.getElementById(LIGHTBOX_OVERLAY_ID)!.tagName).toBe('DIV');
   });
 
-  it('正文标题恰为 md-lightbox-overlay：标题加后缀，点击图片灯箱仍正常打开', async () => {
+  it('正文标题恰为 md-lightbox-overlay：标题 id 入命名空间，点击图片灯箱仍正常打开', async () => {
     const { target, instance } = await renderMd(`# ${LIGHTBOX_OVERLAY_ID}\n\n![图](a.png)\n`);
     const h1 = target.querySelector('h1')!;
-    expect(h1.id).toBe(`${LIGHTBOX_OVERLAY_ID}-2`);
+    expect(h1.id).toBe(`user-content-${LIGHTBOX_OVERLAY_ID}`);
     // 灯箱仍正常：点击图片 → body 上出现唯一 overlay 且展示图片
     (target.querySelector('img') as HTMLImageElement).click();
     const overlay = document.getElementById(LIGHTBOX_OVERLAY_ID);
@@ -331,7 +358,7 @@ describe('markdownRenderer——后端注入（M7 远程引擎，M6 遗留）', 
   });
 
   it('renderMarkdownBody：直接渲染 body（不再剥 front matter），apps/web 本地回退用', () => {
-    expect(renderMarkdownBody('# t\n')).toContain('<h1>t<a href="#t"'); // 标题含尾置锚（BUG-67 对齐）
+    expect(renderMarkdownBody('# t\n')).toContain('<h1>t<a href="#user-content-t"'); // 标题含尾置锚（BUG-67/BUG-39 对齐）
     expect(renderMarkdownBody('| a |\n|---|\n| 1 |\n')).toContain('<table>');
   });
 });

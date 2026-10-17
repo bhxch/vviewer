@@ -22,8 +22,14 @@ pub fn render(text: &str, wikilinks: bool) -> String {
     ext.footnotes = true;
     ext.description_lists = true;
     ext.shortcodes = true;
-    // heading id 用 GitHub 同款前缀命名空间，避免嵌入页面时撞 DOM id
+    // heading id 用 GitHub 同款前缀命名空间，避免嵌入页面时撞 DOM id。
+    // header_id_prefix_in_href（BUG-39 清偿，2026-10-17）：comrak 0.56 默认自产锚
+    // href 不带前缀（仿 GitHub 依赖其前端 JS 做 hash→前缀映射），本仓库前端无该
+    // 逻辑，纯远程档自产锚 href 与 heading id 自不一致（页内锚死链）——开启后
+    // href 与 id 同带前缀，自一致；前端 remapHeadingHashLinks 再把作者无前缀
+    // 页内链接映射到命名空间 id（渲染期 DOM 改写，GitHub 映射的确定性等价形态）。
     ext.header_id_prefix = Some("user-content-".to_string());
+    ext.header_id_prefix_in_href = true;
     options.render.r#unsafe = true; // raw HTML 透传——净化职责在前端管线
     options.render.hardbreaks = false;
 
@@ -131,5 +137,29 @@ mod tests {
     fn soft_breaks_stay_soft_and_raw_html_passes_through() {
         assert_eq!(render("a\nb\n", true), "<p>a\nb</p>\n");
         assert!(render("<div class=\"x\">raw</div>\n", true).contains(r#"<div class="x">raw</div>"#));
+    }
+
+    #[test]
+    fn heading_anchor_href_matches_id_including_prefix_and_duplicates() {
+        // BUG-39：自产锚 href 与 heading id 必须自一致（header_id_prefix_in_href），
+        // 且重名标题按 GFM -1 起去重时 id 与 href 同步——无前缀时代 href 缺前缀、
+        // 作者页内链接指向裸 slug 均死链。
+        let html = render("# 中文标题\n\n## 中文标题\n\n[跳转](#中文标题)\n", true);
+        assert!(html.contains(r##"<h1 id="user-content-中文标题">"##), "{html}");
+        assert!(html.contains(r##"<h2 id="user-content-中文标题-1">"##), "{html}");
+        assert!(
+            html.contains(r##"href="#user-content-中文标题" aria-label"##),
+            "{html}"
+        );
+        assert!(
+            html.contains(r##"href="#user-content-中文标题-1" aria-label"##),
+            "{html}"
+        );
+        // 作者页内链接保持作者视角的裸 slug hash（comrak 按惯例百分号编码非 ASCII，
+        // 解码映射归前端 remapHeadingHashLinks 的 decode 路径）
+        assert!(
+            html.contains(r##"href="#%E4%B8%AD%E6%96%87%E6%A0%87%E9%A2%98""##),
+            "{html}"
+        );
     }
 }

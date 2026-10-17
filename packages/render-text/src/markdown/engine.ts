@@ -38,53 +38,66 @@ export function createMarkdownEngine(): MarkdownEngine {
  * （server/src/compute/markdown.rs）为每级标题输出 id，并在标题末尾渲染空锚
  * `<a href="#{id}" aria-label="Link to heading '{text}'"
  * data-heading-content="{text}" class="anchor"></a>`（comrak 0.56 html.rs
- * render_heading；href 不带前缀）。本地 markdown-it 此前不产锚，同文档双引擎
- * DOM 指纹差 a.anchor。
- * 范围裁决（2026-10-17）：此处**仅补指纹面的锚元素**（形状逐属性对齐 comrak），
- * heading id 不在此注入——id 方案（user-content- 前缀 vs 本地 slug、页内锚
- * href 一致性）是 t-md 域在案缺陷 BUG-39 的修复空间（锚点 t-md.spec.ts
- * 'BUG-39 [探索]'，方向未决），越界注入会预支其裁决并引入本地版 href/id 死链。
- * 本地 heading id 仍由 enrich assignHeadingIds 的 slug 管线分配（markdown
- * Renderer.ts），行为零变化。anchorize 用 comrak Anchorizer 同款 GFM 算法
- * （小写 → 保留 空格/-/字母/附标/数字/连接标点 → 空格转 - → 文档内重名 -1
- * 去重，去重状态挂 env 每渲染独立）。
+ * render_heading）。本地 markdown-it 此前不产锚，同文档双引擎 DOM 指纹差 a.anchor。
+ * BUG-39 裁决落地（2026-10-17，Wave 4）：双引擎 heading id 方案统一为 user-content-
+ * 前缀命名空间（GitHub 同款）——本规则 href 与 comrak（header_id_prefix_in_href=true）
+ * 同款输出带前缀完整锚；本地 heading 的实际 id 由 enrich 侧 assignHeadingIds 用同一
+ * GfmAnchorizer 分配（markdownRenderer.ts），引擎 href 形态与其一致，前端锚 href
+ * 改写步再按最终 id 收口（自一致由构造保证）。
  */
+export class GfmAnchorizer {
+  private ids = new Set<string>();
+  private nextSuffix = new Map<string, number>();
+
+  /** GFM 基名变换（comrak Anchorizer 同款）：小写 → 保留 空格/-/字母/附标/数字/
+   * 连接标点 → 空格转 '-'。不去重。 */
+  baseSlug(text: string): string {
+    return text
+      .toLowerCase()
+      .replace(/[^ \-\p{L}\p{M}\p{N}\p{Pc}]/gu, '')
+      .replace(/ /g, '-');
+  }
+
+  /** comrak Anchorizer 同款去重：首现无后缀，重名 -1 起顺延。 */
+  anchorize(text: string): string {
+    const base = this.baseSlug(text);
+    let uniq = this.nextSuffix.get(base) ?? 0;
+    let anchor: string;
+    for (;;) {
+      anchor = uniq === 0 ? base : `${base}-${uniq}`;
+      if (!this.ids.has(anchor)) break;
+      uniq += 1;
+    }
+    this.ids.add(anchor);
+    this.nextSuffix.set(base, uniq + 1);
+    return anchor;
+  }
+
+  /** 预占既有 id（作者 HTML / 远程预填标题）：后续 anchorize 自动避让。 */
+  reserve(id: string): void {
+    this.ids.add(id);
+  }
+}
+
 function installHeadingAnchors(md: MarkdownEngine): void {
   const headingText = (inline: { content: string; children: { content: string }[] | null } | undefined): string => {
     if (!inline) return '';
     if (inline.children === null) return inline.content;
     return inline.children.map((c) => c.content).join('');
   };
-  const anchorize = (env: Record<string, unknown>, text: string): string => {
-    const state = (env.__anchorizer ??= { seen: new Set<string>(), next: new Map<string, number>() }) as {
-      seen: Set<string>;
-      next: Map<string, number>;
-    };
-    const base = text
-      .toLowerCase()
-      .replace(/[^ \-\p{L}\p{M}\p{N}\p{Pc}]/gu, '')
-      .replace(/ /g, '-');
-    let uniq = state.next.get(base) ?? 0;
-    let anchor: string;
-    for (;;) {
-      anchor = uniq === 0 ? base : `${base}-${uniq}`;
-      if (!state.seen.has(anchor)) break;
-      uniq += 1;
-    }
-    state.seen.add(anchor);
-    state.next.set(base, uniq + 1);
-    return anchor;
-  };
   const escapeAttr = (s: string): string =>
     s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
   md.renderer.rules.heading_close = (tokens, idx, _options, env) => {
-    // tokens[idx-1] = inline（标题文本）；id 取 comrak 同款 GFM anchorize（无前缀，
-    // 与远程 href 形态一致；本地 heading 的实际 id 归 enrich slug 管线，见上）
+    // tokens[idx-1] = inline（标题文本）；id 取 comrak 同款 GFM anchorize + user-content-
+    // 前缀（BUG-39 双引擎统一命名空间；本地 heading 的实际 id 归 enrich assignHeadingIds，
+    // 同一 GfmAnchorizer 算法，最终一致）
     const text = headingText(tokens[idx - 1]);
-    const id = anchorize(env as Record<string, unknown>, text);
+    const scope = (env ??= {}) as { __anchorizer?: GfmAnchorizer };
+    const state = scope.__anchorizer ?? (scope.__anchorizer = new GfmAnchorizer());
+    const id = state.anchorize(text);
     const escaped = escapeAttr(text);
-    return `<a href="#${id}" aria-label="Link to heading '${escaped}'" data-heading-content="${escaped}" class="anchor"></a></${tokens[idx]!.tag}>\n`;
+    return `<a href="#user-content-${id}" aria-label="Link to heading '${escaped}'" data-heading-content="${escaped}" class="anchor"></a></${tokens[idx]!.tag}>\n`;
   };
 }
 

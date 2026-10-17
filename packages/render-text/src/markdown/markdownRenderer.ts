@@ -28,7 +28,7 @@ import {
 } from '../code';
 import { makePreview, type SearchMatchWithPreview } from '../search';
 import type { SearchMatch } from '@vviewer/core';
-import { createMarkdownEngine, renderMarkdownToHtml } from './engine';
+import { createMarkdownEngine, renderMarkdownToHtml, GfmAnchorizer } from './engine';
 import { parseFrontMatter } from './frontMatter';
 import { sanitizeHtml } from './sanitize';
 import { enrichMarkdownDom } from './enrich';
@@ -159,40 +159,91 @@ export function renderMarkdownBody(body: string): string {
 }
 
 /**
- * 标题文本 → slug id：小写化、去标点（保留 Unicode 字母/数字，CJK 不丢）、
- * 空白折叠为 '-'；全空回退 'section'。
+ * 标题文本 → GFM 锚基名（comrak Anchorizer 同款，见 engine.ts GfmAnchorizer）。
+ * 兼容导出：本函数曾是本地 heading id 的 slug 管线（无前缀、全空回退 section、
+ * 重名 -2 起）；BUG-39 裁决（2026-10-17）后 id 生成统一走 assignHeadingIds 的
+ * user-content- 前缀 + GFM anchorize 方案，本函数保留仅供外部对基名形态的引用，
+ * 渲染管线不再使用。
  */
 export function slugifyHeading(text: string): string {
-  const slug = text
-    .trim()
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s-]/gu, '')
-    .replace(/\s+/g, '-');
+  const anchorizer = new GfmAnchorizer();
+  const slug = anchorizer.baseSlug(text.trim());
   return slug === '' || slug === '-' ? 'section' : slug;
 }
 
 /**
- * 为 h1-h4 确保元素 id：无 id 生成 slug；与文档内其他元素 id（含作者 HTML 的
- * id）冲突时追加 -2/-3 后缀。幂等：有 id 的 heading 保留原值（预填排除
- * heading 自身，否则会被自己的 id 判为冲突而改名）。
- * used 预置灯箱 overlay id：正文标题恰为 md-lightbox-overlay 时 slug 会撞车，
- * 而灯箱 overlay 后挂在 body 上（openLightbox 按 LIGHTBOX_OVERLAY_ID 单例查找，
- * 重名 heading 会先占文档 id），预占后标题自动追加 -2 后缀，灯箱不受影响。
+ * 为 h1-h4 确保元素 id（BUG-39 裁决：双引擎统一 user-content- 前缀命名空间，GitHub
+ * 同款）：无 id 的标题生成 `user-content-` + GFM anchorize（comrak Anchorizer 同款
+ * 算法与去重序列，与远程 comrak 预填 id、本地引擎锚 href 同一方案）；有 id 的标题
+ * （远程 comrak 输出 / 作者 raw HTML）保留原值。used 预置灯箱 overlay id 与全部
+ * 非 heading 元素 id：生成结果撞车时沿 GFM 后缀序列避让（overlay/作者 id 不被标题
+ * 占用；前缀命名空间下常规撞车已不可能，避让为防御性保留）。
+ * 幂等：有 id 的 heading 保留原值（预填排除 heading 自身，否则会被自己的 id 判为
+ * 冲突而改名）。
+ * 收尾把标题内引擎自产锚（comrak header anchors / 本地 heading_close 规则，均
+ * class="anchor"）的 href 改写为最终 id——内嵌锚 href 与 heading id 自一致由构造
+ * 保证（BUG-39「comrak 自产 anchor href 自不一致」的收口点；引擎侧 href 只是
+ * 净化前形态）。
  */
 export function assignHeadingIds(root: Document): void {
   const used = new Set<string>([LIGHTBOX_OVERLAY_ID]);
   for (const el of Array.from(root.querySelectorAll('[id]'))) {
     if (!el.matches('h1, h2, h3, h4')) used.add(el.id);
   }
-  for (const h of Array.from(root.querySelectorAll('h1, h2, h3, h4'))) {
-    let id = h.id || slugifyHeading(h.textContent ?? '');
+  const anchorizer = new GfmAnchorizer();
+  const headings = Array.from(root.querySelectorAll('h1, h2, h3, h4'));
+  for (const h of headings) {
+    if (h.id) {
+      // 预填 id 注册避让集与锚化器（后续生成不与之撞车）
+      used.add(h.id);
+      anchorizer.reserve(h.id);
+      continue;
+    }
+    let id = `user-content-${anchorizer.anchorize(h.textContent ?? '')}`;
     if (used.has(id)) {
-      let n = 2;
+      let n = 1;
       while (used.has(`${id}-${n}`)) n += 1;
       id = `${id}-${n}`;
     }
     h.id = id;
     used.add(id);
+    anchorizer.reserve(id);
+  }
+  for (const h of headings) {
+    if (!h.id) continue;
+    const anchorLink = h.querySelector('a.anchor');
+    if (anchorLink !== null) anchorLink.setAttribute('href', `#${h.id}`);
+  }
+}
+
+/**
+ * 正文页内锚的 hash→heading id 重映射（BUG-39，GitHub hash→前缀映射的渲染期
+ * 形态）：作者视角的页内链接 `[x](#标题)` hash 是无前缀 GFM slug，而 heading id
+ * 统一为 user-content- 命名空间——直连目标不存在且 `user-content-<hash>` 存在时
+ * 改写 href（markdown-it 会对 CJK href 百分号编码，decode 后同判）。作者自锚
+ * （指向非 heading 元素 id）、脚注互链与已可直达的链接不动；纯渲染期 DOM 改写，
+ * 不引入点击监听。
+ */
+export function remapHeadingHashLinks(root: Document): void {
+  const hasId = (id: string): boolean => root.getElementById(id) !== null;
+  for (const a of Array.from(root.querySelectorAll('a[href^="#"]'))) {
+    const href = a.getAttribute('href') ?? '';
+    const raw = href.slice(1);
+    if (raw === '' || hasId(raw)) continue;
+    let decoded = raw;
+    try {
+      decoded = decodeURIComponent(raw);
+    } catch {
+      // 非法百分号序列：保留原串继续
+    }
+    if (decoded !== raw && hasId(decoded)) continue;
+    for (const cand of decoded !== raw ? [raw, decoded] : [raw]) {
+      const mapped = `user-content-${cand}`;
+      if (hasId(mapped)) {
+        a.setAttribute('href', `#${mapped}`);
+        break;
+      }
+    }
   }
 }
 
@@ -435,6 +486,7 @@ export const markdownRenderer: Renderer = {
     }
     target.classList.add('vv-markdown');
     assignHeadingIds(doc); // TOC 点击按 id 定位，id 必须先于挂载/提取存在（挂载后节点已离开 doc）
+    remapHeadingHashLinks(doc); // 页内锚 hash→user-content- id 重映射（须在 id 定型后）
     // 解析文档 → 挂载（节点被主文档收养，管线加的复制按钮/灯箱监听随节点保留）
     target.replaceChildren(...Array.from(doc.body.childNodes));
     const toc = extractToc(target);
