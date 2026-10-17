@@ -725,8 +725,8 @@ test(
   }
 );
 
-test.fixme(
-  'BUG-60 [探索]: vv-* 运行时缓存 cacheName 拼 BUILD_REVISION——部署换版后旧 REV 缓存永久残留、随部署次数线性累积（cleanupOutdatedCaches 仅清 precache）',
+test(
+  'BUG-60 [已修复 2026-10-17]: vv-* 运行时缓存 cacheName 拼 BUILD_REVISION——部署换版后旧 REV 缓存永久残留、随部署次数线性累积（cleanupOutdatedCaches 仅清 precache）',
   async ({ page }) => {
     // 复核成立（low；纯存储泄漏无功能影响）。发现于本域、根因属 PWA。根因：三个
     // runtime 缓存 cacheName 模板拼 BUILD_REVISION（vite.config.ts:177/:192/:202），
@@ -749,8 +749,12 @@ test.fixme(
     // 已接管），v3 后 4 缓存全部残留（2×(201+1089)KB≈2.5MB），workbox-precache-v2
     // 全程单份；静态 grep apps/web/build/sw.js：三 REV 缓存名 + maxEntries:500/4/300
     // + purgeOnQuotaError:!0 + caches.delete 零命中。
-    // 修复方向：activate 处枚举 caches.keys() 清理 vv-grammars-/vv-runtime-/vv-queries-
-    // 前缀中非当前 REV 的缓存（或改单一 cacheName + 版本化 URL）；修复后本用例转正。
+    // 修复（2026-10-17，Wave 7）：workbox.importScripts 注入 static/vv-sw-cleanup.js
+    // （vite.config.ts genSwCleanup 构建期生成、烘焙 BUILD_REVISION）——activate 时
+    // 删除名称 ≠ 当前 REV 三缓存名的 vv-* 缓存。修订号必须烘焙：SW 内 fetch 自身
+    // scriptURL 拿到的是浏览器 script cache 的旧文本（实测自描述方案不成立）；
+    // 换版部署所有产物文件同步更新，本用例 v2 副本对 sw.js 与清理脚本一并替换
+    // REV 字符串，与真实部署语义一致。
     test.setTimeout(180_000);
     const fsp = await import('node:fs/promises');
     const http = await import('node:http');
@@ -766,12 +770,19 @@ test.fixme(
     const rev1 = swText1.match(/vv-grammars-([^'"`\\]+)/)?.[1];
     expect(rev1, 'sw.js 应含 vv-grammars-<BUILD_REVISION> 缓存名').toBeTruthy();
     const rev2 = `${rev1}-bug60v2`;
-    // ②v2 部署副本：sw.js 内 REV 全量替换（三条 cacheName 及相关引用一次到位）
+    // ②v2 部署副本：sw.js 与 vv-sw-cleanup.js 内 REV 全量替换（三条 cacheName、
+    // 相关引用及烘焙修订号一次到位——真实部署所有产物文件同步换新）
     await fsp.cp(join(work, 'v1'), join(work, 'v2'), { recursive: true });
     await fsp.writeFile(swPathOf('v2'), swText1.split(rev1 as string).join(rev2));
+    const cleanupPathOf = (v: string): string => join(work, v, 'vv-sw-cleanup.js');
+    const cleanupText1 = await fsp.readFile(cleanupPathOf('v1'), 'utf8');
+    expect(cleanupText1, '清理脚本应烘焙当前 REV').toContain(rev1 as string);
+    await fsp.writeFile(cleanupPathOf('v2'), cleanupText1.split(rev1 as string).join(rev2));
 
-    // ③node:http 静态服务（MIME 覆盖 html/js/wasm/json/css；每次请求读盘——
-    // 「部署」仅切目录指针）
+    // ③node:http 静态服务（MIME 覆盖 html/js/wasm/json/css/scm；每次请求读盘——
+    // 「部署」仅切目录指针）。.scm 必须 非 text/html：worker 端 remoteQueryLoader
+    // 的 SPA-fallback 防御把 text/html 应答视为查询缺失（core-parse.ts），整语言
+    // 降级 hljs——v1 预热的 tree-sitter 状态栏判据将必败
     let serving = join(work, 'v1');
     const server = http.createServer(async (req, res) => {
       try {
@@ -787,7 +798,9 @@ test.fixme(
               ? 'application/json'
               : p.endsWith('.css')
                 ? 'text/css'
-                : 'text/html';
+                : p.endsWith('.scm')
+                  ? 'text/plain'
+                  : 'text/html';
         res.writeHead(200, { 'content-type': mime }).end(text);
       } catch {
         res.writeHead(404).end();
@@ -828,13 +841,28 @@ test.fixme(
         )
         .toBe(true);
 
-      // 修复判据：旧 rev1 的 vv-* 缓存已被清理（缺陷态：原样残留、逐版累积）
+      // 修复判据：旧 rev1 的 vv-* 缓存已被清理（缺陷态：原样残留、逐版累积）。
+      // 轮询：清理在 activate waitUntil 内异步删除，rev2 缓存出现与清理完成间存在
+      // 在途窗口；且 autoUpdate 换版会触发页面 reload（controlling）——evaluate 遇
+      // context destroyed 时返回 null 走下轮（poll 对异常不重试、对断言失败重试）
+      await expect
+        .poll(
+          async () => {
+            try {
+              const keys = await page.evaluate(() => caches.keys());
+              return keys.filter(
+                (k) => /^(vv-grammars|vv-runtime|vv-queries)-/.test(k) && !k.endsWith(rev2 as string)
+              );
+            } catch {
+              return null;
+            }
+          },
+          { timeout: 30_000, message: '等待旧 REV vv-* 缓存被 activate 清理' }
+        )
+        .toEqual([]);
+      // 护栏：workbox-precache-* 始终单份（cleanupOutdatedCaches 正常工作面，不回归；
+      // 此时换版 reload 已在清理判据内落定，无导航在途）
       const keys = await page.evaluate(() => caches.keys());
-      const stale = keys.filter(
-        (k) => /^(vv-grammars|vv-runtime|vv-queries)-/.test(k) && !k.endsWith(rev2)
-      );
-      expect(stale, `旧 REV 缓存应被清理（缺陷态残留：${stale.join(', ') || '无'}）`).toEqual([]);
-      // 护栏：workbox-precache-* 始终单份（cleanupOutdatedCaches 正常工作面，不回归）
       const precacheNames = keys.filter((k) => k.startsWith('workbox-precache'));
       expect(precacheNames.length, 'precache 不随版本累积').toBeLessThanOrEqual(1);
     } finally {

@@ -28,6 +28,8 @@ apps/web/static/grammars/
 apps/web/static/queries/
 # libarchive.js worker bundle 与 wasm（构建期由 vite 插件从 node_modules 拷贝，不入库）
 apps/web/static/libarchive/
+# BUG-60：vv-* 运行时缓存跨版本清理脚本（构建期由 vite 插件生成、烘焙 BUILD_REVISION，不入库）
+apps/web/static/vv-sw-cleanup.js
 # web-tree-sitter runtime wasm（构建期由 gen:grammars 从 node_modules 拷贝，不入库；版本随 packages/highlight 的 lockfile 锁定）
 apps/web/static/tree-sitter.wasm
 

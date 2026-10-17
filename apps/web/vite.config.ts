@@ -2,7 +2,7 @@ import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig, type Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
-import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -74,6 +74,59 @@ function copyLibarchiveAssets(): Plugin {
   };
 }
 
+// BUG-60 配套：vv-* 运行时缓存跨版本清理脚本（构建期生成、烘焙 BUILD_REVISION，
+// static/ 不入库）。cacheName 拼构建修订号，部署换版后旧 REV 缓存不再被任何路由
+// 引用，而 workbox cleanupOutdatedCaches 仅清 precache 前缀、ExpirationPlugin 不跨
+// cacheName 删除——脚本经下方 workbox.importScripts 注入 sw.js，activate 时删除
+// 非当前 REV 命名的 vv-* 缓存。修订号必须烘焙而非运行时探测：SW 内 fetch 自身
+// scriptURL 拿到的是浏览器 script cache 的旧文本（实测），自描述方案不成立；
+// 换版部署所有产物文件同步更新，脚本随部署携带新 REV 即一次清理到位。
+const SW_CLEANUP_DEST = fileURLToPath(new URL('./static/vv-sw-cleanup.js', import.meta.url));
+
+function genSwCleanup(): Plugin {
+  const write = (): void => {
+    const current = [
+      `vv-grammars-${BUILD_REVISION}`,
+      `vv-runtime-${BUILD_REVISION}`,
+      `vv-queries-${BUILD_REVISION}`
+    ];
+    writeFileSync(
+      SW_CLEANUP_DEST,
+      `// 构建期生成（vite.config.ts genSwCleanup）：BUILD_REVISION=${BUILD_REVISION}，勿手改。
+// BUG-60：activate 清理非当前修订号的 vv-* 运行时缓存（cleanupOutdatedCaches 仅清
+// workbox-precache-* 前缀；cacheName 拼 BUILD_REVISION 的运行时缓存换版后永久残留、
+// 随部署次数线性累积——本脚本随部署换版携带新 REV，旧 REV 缓存清理一次到位）。
+self.addEventListener('activate', (event) => {
+  const current = ${JSON.stringify(current)};
+  event.waitUntil(
+    (async () => {
+      try {
+        const names = await self.caches.keys();
+        await Promise.all(
+          names
+            .filter((n) => /^(vv-grammars|vv-runtime|vv-queries)-/.test(n) && !current.includes(n))
+            .map((n) => self.caches.delete(n))
+        );
+      } catch {
+        // 清理失败不阻塞激活：纯存储卫生，非功能路径
+      }
+    })()
+  );
+});
+`
+    );
+  };
+  return {
+    name: 'gen-sw-cleanup',
+    configureServer() {
+      write();
+    },
+    buildStart() {
+      write();
+    }
+  };
+}
+
 // BUG-15 配套（仅 vite preview 生效）：SvelteKit 的 preview 中间件只认 kit 路由，
 // /index.html 直接 404——而 workbox precache 安装期会按清单条目请求
 // index.html?__WB_REVISION__=…，任一条目失败即 SW 安装整体失败（caches 永远
@@ -113,6 +166,7 @@ export default defineConfig({
     }),
     copyTsQueries(),
     copyLibarchiveAssets(),
+    genSwCleanup(),
     // M7 PWA（Task 1）：应用壳预缓存 + 高亮资产 CacheFirst 运行时缓存。
     // SW 注册不走插件 html 注入（SvelteKit 的 app.html 不经 transformIndexHtml），
     // 由 +layout.svelte 经 virtual:pwa-register 手动注册（registerType autoUpdate）。
@@ -177,6 +231,12 @@ export default defineConfig({
         // 无法消除单点异常时立项）。单点异常根因已由 precache 修复消除，残余
         // 静默风险由构建期 NavigationRoute 断言与 e2e 的运行期 SW 断言兜底。
         additionalManifestEntries: [{ url: 'index.html', revision: BUILD_REVISION }],
+        // BUG-60 配套：vv-* 运行时缓存跨版本清理（static/vv-sw-cleanup.js，构建期
+        // genSwCleanup 生成并烘焙 BUILD_REVISION；activate 删除非当前 REV 命名的
+        // vv-* 缓存——cleanupOutdatedCaches 只清 precache 前缀，cacheName 拼
+        // BUILD_REVISION 的运行时缓存换版后永久残留）。
+        // importScripts 相对 sw.js 所在根解析；子路径托管（VV_BASE_PATH）同前缀。
+        importScripts: [`${kitBase}/vv-sw-cleanup.js`],
         runtimeCaching: [
           {
             // tree-sitter 语法 wasm（~8MB 总量）：不变内容，缓存优先；
