@@ -642,30 +642,28 @@ test('BUG-42 [探索]: 围栏代码块语言标识大小写不归一——Rust �
 // 该文件同批次节注释）；以下五条根因在 packages/highlight / packages/render-text 前端
 // 高亮与代码查看链路，落本文件。各用例注释给出复核结论、最小复现步骤、证据路径与源码定位。
 
-test.fixme('BUG-34 [探索]: codeRenderer 扩展名白名单未跟随 301 语言全量重构——zig/hs/ex/erl/clj/scala/djot 等 7 类文件打开即「无法预览此文件」', async ({
+test('BUG-34 [探索]: codeRenderer 扩展名白名单未跟随 301 语言全量重构——zig/hs/ex/erl/clj/scala/djot 等 7 类文件打开即「无法预览此文件」', async ({
   page
 }) => {
   // 复核成立（medium，8445 实例 + Playwright 7/7 复现 + rs 正对照排除通路整体不可用）。
-  // 根因：packages/render-text/src/code.ts:1012-1018 codeRenderer.extensions 白名单未含
-  // zig/hs/ex/erl/clj/scala/dj(ot)；有扩展名未命中时不进无扩展名回退链
-  // （packages/core/src/dispatch/dispatcher.ts:100 仅 det.ext === '' 进入），于
-  // dispatcher.ts:144-153 抛「不支持的扩展名 ".xx"」→ UI 错误卡片。识别与高亮资产两路
-  // 均就绪：服务端 x-vv-lang 7/7 识别正确（zig、hs→haskell、ex→elixir、erl→erlang、
-  // clj→clojure、scala、dj→djot）；packages/highlight/assets/languages.json（342 条）实有
-  // 各条目（zig fileTypes [zig,zon]、scala [scala,sbt,sc]、haskell [hs,…]、elixir [ex,exs]、
-  // erlang [erl,…]、clojure [clj,…]、djot [dj,djot]），构建产物 apps/web/build/grammars/
-  // zig.wasm 与 queries/zig 实有——白名单在选路层即拦截，语言识别与高亮（本地 wasm /
-  // 远程 compute）无从发生。白名单内语言（rs 的 tree-sitter 远程高亮）不受影响。
-  // 最小复现：注入 sample.zig（'pub fn main() void { }'）并打开 → 错误卡片「无法预览
-  // 此文件 / 不支持的扩展名 ".zig"」（纯 web :4173 注入通道即可复现）。
+  // 根因（已随 C 项 2026-10-11 format-coverage-open-with 顺带修复，2026-10-16 Wave 2
+  // 转正确认）：探索期时点 codeRenderer.extensions 手工白名单未含 zig/hs/ex/erl/
+  // clj/scala/dj(ot) 且未知扩展名直接报错。C 项两步收口：① 选路层——dispatcher
+  // resolveInitialRenderer 放宽（未知扩展名不再直接报错，与无扩展名同走内容探测链，
+  // looksTextual → code 渲染器，链尾 hex 兜底）；② 注册层——viewer.ts 装配
+  // installFallbackExtensions('code', GENERATED_EXTENSIONS)，packages/core/src/registry/
+  // generated-extensions.ts（tools/grammar-builder/gen-code-extensions.mjs 从
+  // languages.json 342 条 fileTypes 生成的全集，CI --check 校验新鲜度）把手工清单
+  // 之外的语法类扩展名全部补注册到 code（专有渲染器冲突跳过）。7 类缺口扩展名两步
+  // 均已覆盖（zig/hs/ex/erl/clj/scala/dj/djot 全在生成物内），识别与高亮资产路
+  // （服务端 x-vv-lang 7/7 正确、languages.json 各条目 fileTypes 齐备、构建产物
+  // zig.wasm 实有）在复核时已就绪。
   // 证据（复核轮独立取得）：自起实例 8445（vviewer serve --root .temp/explore/hl/data
   // --web-dist apps/web/build --port 8445 --compute）；Playwright 脚本
   // /tmp/vv-verify-hl-e2e/rep.mjs——sample.zig/.hs/.ex/.erl/.clj/.scala 与 range/crash.djot
   // 7/7 全部错误卡片（截图 shots/zig.png、shots/djot.png），正对照 sample2.rs 正常渲染
   // 「高亮: tree-sitter · 执行: 远程 · 语言: rust」（shots/rs-control.png）；服务端对照
   // curl -s -D - '/api/file?path=langs/sample.zig' → 200 + x-vv-lang: zig（7/7 同法）。
-  // 修复方向：extensions 白名单跟随 languages.json 全量 fileTypes（或改查表开放）；
-  // 修复后本用例转正。
   test.setTimeout(120_000);
   await page.goto('/');
   // 正对照先于缺陷组：rs 在白名单内正常渲染，证明 UI 通路整体可用（排除「错误卡片系
