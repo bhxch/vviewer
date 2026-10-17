@@ -14,7 +14,7 @@
   } from './openFlow.svelte';
   import { workspaceStore } from './workspaceStore';
   import { loadSettings, saveSettings, onSettingsChanged, type Settings } from './stores/settings';
-  import { applyAppearanceFromSettings, effectiveMode, onSystemModeChange, themeOptions } from './theme';
+  import { applyAppearanceFromSettings, onSystemModeChange, themeOptions } from './theme';
 
   let settings = $state<Settings>(loadSettings());
   let urlValue = $state('');
@@ -40,8 +40,17 @@
   let serverError = $state<string | null>(null);
   let connecting = $state(false);
 
-  /** 当前生效亮暗（system 按 prefers-color-scheme 解析），决定下拉读写哪个记忆槽 */
-  let mode = $derived(effectiveMode(settings.themeMode));
+  /** OS 亮暗响应式镜像（BUG-49）：matchMedia 非响应式信号，effectiveMode 每次实时读
+   * matchMedia 但 OS 切换不触发重算——以 change 事件写入 $state 闭合 mode 的依赖链。 */
+  let osDark = $state(
+    typeof matchMedia !== 'undefined' && matchMedia('(prefers-color-scheme: dark)').matches
+  );
+  /** 当前生效亮暗（system 按 prefers-color-scheme 解析），决定下拉读写哪个记忆槽。
+   * 不直调 effectiveMode（内部 matchMedia 读非响应式，OS 切换后 mode 陈旧——BUG-49）；
+   * 无 matchMedia 环境（jsdom/SSR）osDark 初值 false → 回落 light，与 effectiveMode 同口径。 */
+  let mode = $derived(
+    settings.themeMode === 'system' ? (osDark ? 'dark' : 'light') : settings.themeMode
+  );
   let currentCodeTheme = $derived(mode === 'dark' ? settings.codeThemeDark : settings.codeThemeLight);
   let currentAppearance = $derived(mode === 'dark' ? settings.appearanceDark : settings.appearanceLight);
   /** 外观接管（spec B §2.3）：当前 mode 槽非 default 时代码配色由外观 tokenColors 决定 */
@@ -102,7 +111,8 @@
     });
     // themeMode=system：OS 亮暗切换不经 saveSettings，effectiveMode 随之变化命中
     // diff（UI 配色由 prefers-color-scheme 媒体查询自动跟随，JS 注入变量需要这步）
-    const offSystem = onSystemModeChange(() => {
+    const offSystem = onSystemModeChange((m) => {
+      osDark = m === 'dark'; // BUG-49：同步响应式镜像，mode 的 derived 随 OS 切换重算
       if (settings.themeMode !== 'system') return;
       applyAppearanceFromSettings(settings);
     });

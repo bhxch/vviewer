@@ -611,38 +611,38 @@ test('B-THEME-4: 外观槽切回 default——观感零变化（--ui-bg 回默�
 // BUG-51 为三态①首帧落 html[data-theme-mode] 的时机（app.html 无预置脚本、唯一写入点
 // AppShell onMount）。
 
-test.fixme('BUG-49 [探索]: themeMode=system 下 OS 亮暗切换后 TopBar mode 陈旧——代码主题下拉显示与实际生效脱钩，切主题写错槽位并污染另一槽位', async () => {
-  // 现象：themeMode=「跟随系统」页面加载后，OS 亮暗切换（不刷新页面）会——
-  //   a) 顶栏「代码主题」下拉显示值与实际生效主题脱钩：下拉仍显示旧槽位主题，
-  //      实际已应用另一槽位主题（style#vv-code-theme 注释头与 body 背景已切走）；
-  //   b) 此时在下拉切换主题：按陈旧 mode 写入错误槽位（写入与用户眼前亮暗相反的槽位），
-  //      且下拉值随即跳变为另一槽位主题；之后切到该亮暗态可见槽位被用户从未在该态
-  //      选过的主题污染（已持久化进 localStorage）。
-  // 根因（已核对源码）：
-  //   - apps/web/src/lib/TopBar.svelte:24 `let mode = $derived(effectiveMode(settings.themeMode))`
-  //     仅追踪 settings.themeMode；apps/web/src/lib/theme.ts:210-215 effectiveMode 每次实时读
-  //     matchMedia，而 matchMedia 非响应式信号 → OS 切换不触发 mode 重算（保持陈旧值）；
-  //   - TopBar.svelte:40-43 onSystemModeChange 回调仅调 applyCodeTheme 重应用样式，不更新任何 $state；
-  //   - TopBar.svelte:60-66 onCodeThemeChange 以 `if (mode === 'dark') …` 按陈旧 mode 决定写槽
-  //     （62-63 行判槽用旧值；65 行 applyCodeTheme 时 saveSettings→notify→settings 整体替换已
-  //     触发 derived 重算读到新值——「写槽旧值、生效新值」劈叉，实测注释确为「onelight（dark）」）。
-  // 最小复现（chromium colorScheme 仿真）：
-  //   1) colorScheme:light 打开 baseURL，localStorage 写 vviewer:settings=
-  //      {"themeMode":"system","codeThemeLight":"github_light","codeThemeDark":"gruvbox",…} 并刷新；
-  //   2) 不刷新页面，仿真切 prefers-color-scheme:dark；
-  //   3) select[aria-label="代码主题"].value 仍=github_light，而 style#vv-code-theme 注释已变
-  //      「代码主题：gruvbox（dark）」、body 背景 rgb(13,17,23)——下拉显示与实际生效脱钩；
-  //   4) 下拉选 onelight → localStorage 变 codeThemeLight:"onelight"（codeThemeDark 仍 gruvbox，
-  //      即写入与眼前暗态相反的亮槽位），style 变 onelight（dark），select 显示跳回 gruvbox；
-  //   5) 点主题按钮切到亮态 → 亮槽位出现用户从未在亮态选过的 onelight。
-  // 证据：上报探测 apps/web/.temp/explore-theme/p1-shell.mjs（p1-out.json）两轮 + p3-verify.mjs
-  //   A 段独立复现、数值一致；复核独立脚本 /tmp/vv-recheck-theme-E1/recheck.mjs（Playwright
-  //   chromium + colorScheme 仿真）在纯前端档 4199 与服务端档 8391 均完整复现、四项判定全 true。
-  //   对照：刷新页面（mode 正确初始化）后暗态下拉选 github_dark 正确写入 codeThemeDark、亮槽位
-  //   不受影响——缺陷仅限「OS 切换后未刷新」的陈旧 mode 场景。
-  // 转正提示：修复方向 = mode 响应式化（matchMedia 变更接入 $state）或 onSystemModeChange 同步
-  //   更新 mode 状态；按 3)4)5) 逆命题落断言（OS 切换后下拉显示恒=实际生效主题；下拉写槽恒=
-  //   用户眼前亮暗对应槽位；两槽位互不污染）。
+// 修复背景（原占位注释压缩）：themeMode=system 下 OS 亮暗切换（不刷新页面）后 TopBar 的
+// mode 陈旧（effectiveMode 实时读 matchMedia 但 matchMedia 非响应式信号）——代码主题下拉
+// 显示与实际生效主题脱钩；此时切主题按陈旧 mode 写错槽位（写入与眼前亮暗相反的槽）并污染
+// 另一槽位。修复 = TopBar 以 $state 镜像 matchMedia.matches（onSystemModeChange 回调同步），
+// mode 的 derived 依赖链闭合，下拉显示与 onCodeThemeChange 写槽恒等于实际生效亮暗。
+test('BUG-49 转正: themeMode=system 下 OS 亮暗切换后下拉显示=实际生效，写槽不串位', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'vviewer:settings',
+      JSON.stringify({ themeMode: 'system', codeThemeLight: 'github_light', codeThemeDark: 'gruvbox' })
+    );
+  });
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.goto('/');
+  const select = page.getByLabel('代码主题');
+  await expect(select).toHaveValue('github_light'); // 亮槽
+  // OS 切暗（不刷新）：下拉显示值跟随实际生效主题（修复前仍显示 github_light，
+  // 而 style#vv-code-theme 注释头已切 gruvbox（dark）——显示与生效脱钩）
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(select).toHaveValue('gruvbox');
+  await expect.poll(() => themeCommentHeader(page, 'gruvbox')).toBe(true);
+  // 此时切主题：写入眼前暗态对应的暗槽，亮槽不受污染（修复前按陈旧 mode 写亮槽
+  // codeThemeLight，且下拉值随即跳变为另一槽位主题）
+  await select.selectOption('github_dark');
+  const saved = (await page.evaluate(() => localStorage.getItem('vviewer:settings') ?? '{}')) as string;
+  const parsed = JSON.parse(saved) as { codeThemeDark?: string; codeThemeLight?: string };
+  expect(parsed.codeThemeDark).toBe('github_dark');
+  expect(parsed.codeThemeLight).toBe('github_light');
+  await expect.poll(() => themeCommentHeader(page, 'github_dark')).toBe(true);
+  // 切回亮态：亮槽记忆仍是用户当初的 github_light（两槽位互不污染）
+  await page.emulateMedia({ colorScheme: 'light' });
+  await expect(select).toHaveValue('github_light');
 });
 
 test.fixme('BUG-50 [探索]: CODE_CAPTURES 53 项清单与各语言 highlights.scm 实际产出系统性缺口——数字/布尔/存储类关键字等 ts-span 恒不着色、切主题不变', async () => {
