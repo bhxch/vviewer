@@ -510,38 +510,37 @@ test('SHELL-13/1：计算策略 UI 修改写入 localStorage 并跨刷新恢复�
 // 代码定位；来源标注 [探索]：缺陷由探索/复核会话（CAND-shell / review / verify 系列）
 // 独立复现确认，severity 见各用例注释。
 
-test.fixme(
-  'BUG-29 [探索]: 服务端档裸路径 URL 静默渲染 index.html——档伺服 fallback 200+text/html 被 createUrlStore 当文件内容，无错误卡片',
-  async () => {
-    // 现象（severity medium）：服务端档伺服层对一切非 .scm/.wasm 未命中路径（含真实存在
-    // 的数据文件裸路径）以 200 + text/html 返回 index.html（server/src/lib.rs:55-85
-    // serve_index，build_router:107-115 挂为 ServeDir fallback）；前端「文件 URL」通路的
-    // createUrlStore 仅判 res.ok（packages/core/src/tree/singleFile.ts:29-31；openFlow.svelte.ts:423-431
-    // TopBar URL 直通），粘贴裸路径 URL 时静默把 index.html 源码当该文件渲染，全程无错误卡片。
-    //
-    // 最小复现：
-    //   1) 连接 http://127.0.0.1:8391；
-    //   2) 顶栏「文件 URL」输入 http://127.0.0.1:8391/samples/m1/hello.js（真实 72B/2 行）回车；
-    //   3) 新 tab「hello.js」渲染出 index.html 带行号源码，状态栏「语言: javascript · 大小: 1610 ·
-    //      行: 36」，全程无错误提示。curl -i 同 URL → HTTP 200 + text/html + 1610B。
-    //   对照：/api/file?path=samples/m1/hello.js 正常渲染（72B/2 行）；
-    //         /api/file?path=no-such-xyz.js 有正确错误卡片「HTTP 404 获取 … 失败」
-    //         ——「404 明确提示」仅 /api/file 形态可达，裸路径形态不可达。
-    //
-    // 证据（探索复核自跑，/tmp/vv-reverify-e3/）：
-    //   - reverify.mjs（chromium 真实连 8391，无 route 拦截）三态对照：A 裸路径 →
-    //     activeTab=hello.js、errorCard=0、codePre 以「1 <!doctype html>」开头、statusbar=
-    //     「语言: javascript · 大小: 1610 · 行: 36」；B /api/file 好路径 → 72B/2 行正确渲染；
-    //     C /api/file 缺路径 → errorCard=1「无法预览此文件 HTTP 404」。
-    //   - stab.mjs 重复 A 态两次均复现；截图 A-barepath-indexhtml.png 属性面板
-    //     「大小 1610字节 / 行数 36」。
-    //
-    // 为什么既有 SHELL-04/404 未覆盖：本文件 SHELL-04 两用例均 page.route 拦截虚构 URL
-    // 提供确定性 200/404，从未打到真实伺服器裸路径 fallback（fetch 层 res.ok 逻辑本身正确）。
-    //
-    // 转正提示：需真实伺服器裸路径（不可 page.route 代替），归 e2e-server 套件可达；
-    // 修复方向二选一后按方案落断言（伺服层对裸路径数据文件出正确 content-type，或前端按
-    // content-type 拒渲染 text/html）——期望「错误卡片或正确内容渲染」而非 1610/36 伪渲染。
+test(
+  'BUG-29: URL 裸路径命中 200+text/html fallback 出错误卡片——不再静默渲染 index.html',
+  async ({ page }) => {
+    // 缺陷（medium）：伺服层对未命中路径（含真实数据文件裸路径）以 200+text/html 返回
+    // SPA index.html fallback，createUrlStore 仅判 res.ok——把 index.html 源码当该文件
+    // 静默渲染（伪渲染 1610B/36 行，全程无错误卡片；历史证据路径见缺陷库）。修复
+    // （2026-10-16）：createUrlStore 校验 content-type——text/html 且文件名非
+    // .html/.htm（有意预览 HTML 源码放行，单测覆盖豁免侧）即抛「疑似目录或 404 页面」，
+    // 走读取失败错误卡片。
+    // 通道：page.route 构造 200+text/html——修复点在 createUrlStore 的响应校验，fetch 层
+    // 对 fulfill 响应与真实 fallback 不可区分（响应头/体即全部输入），确定性且无需真实
+    // 伺服器（历史复现所需的真实伺服器裸路径形态由本 route 等价替代）。
+    await page.route('**/vv-fallback-bare.js', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'text/html; charset=utf-8',
+        body: '<!doctype html><html><body>index-fallback-marker</body></html>'
+      })
+    );
+    await waitAppMounted(page);
+    await page.getByLabel('文件 URL').fill('http://127.0.0.1:4173/vv-fallback-bare.js');
+    await page.getByLabel('文件 URL').press('Enter');
+    // tab 照常创建（openUrl 层无失败信息），内容由读取失败错误卡片呈现
+    await expect(page.locator('.vv-tab.active', { hasText: 'vv-fallback-bare.js' })).toBeVisible();
+    await expect(page.locator('.vv-error-card')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('.vv-error-card')).toContainText('无法预览此文件');
+    await expect(page.locator('.vv-error-detail')).toContainText('疑似目录或 404 页面');
+    await expect(page.locator('.vv-error-detail')).toContainText('text/html');
+    // index.html 内容不再被渲染
+    await expect(page.locator('.vv-code-pre')).toHaveCount(0);
+    await expect(page.locator('.vv-viewer-pane')).not.toContainText('index-fallback-marker');
   }
 );
 

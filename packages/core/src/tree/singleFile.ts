@@ -32,6 +32,14 @@ export function createUrlStore(url: string): TreeStore {
       // 缓存键不含 signal：取消后重试走新 fetch（取消的尝试不留缓存）
       bytes ??= fetch(url, { signal: opts?.signal }).then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status} 获取 ${url} 失败`);
+        // BUG-29：伺服层对未命中路径（含真实数据文件裸路径）常以 200 + text/html
+        // 返回 SPA index.html fallback，此前被当文件内容静默渲染（1610B/36 行伪渲染，
+        // 无任何错误提示）。content-type 为 text/html 且文件名非 .html/.htm（有意
+        // 预览 HTML 源码的场景放行）即拒绝，走读取失败错误卡片（提示疑似目录/404 页面）。
+        const type = (res.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
+        if (type === 'text/html' && !/\.(html?|xhtml)$/i.test(name)) {
+          throw new Error(`HTTP 200 返回 text/html：疑似目录或 404 页面（${url}）`);
+        }
         return new Uint8Array(await res.arrayBuffer());
       });
       // 取消/失败的尝试即出表（memoizedFullRead 同纪律）：仅当缓存仍是本次尝试时

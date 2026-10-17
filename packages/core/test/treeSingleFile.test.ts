@@ -43,6 +43,7 @@ describe('createUrlStore', () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       status: 200,
+      headers: { get: () => 'text/plain; charset=utf-8' },
       arrayBuffer: async () => new Uint8Array([9, 8, 7]).buffer
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -63,10 +64,46 @@ describe('createUrlStore', () => {
   it('throws with reason on http failure', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => ({ ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) }))
+      vi.fn(async () => ({
+        ok: false,
+        status: 404,
+        headers: { get: () => null },
+        arrayBuffer: async () => new ArrayBuffer(0)
+      }))
     );
     const store = createUrlStore('https://example.com/missing.txt');
     await expect(store.read('missing.txt')).rejects.toThrow('HTTP 404');
+  });
+
+  it('rejects 200 text/html fallback for non-html name (BUG-29)', async () => {
+    // 伺服层 SPA fallback：裸路径 200 + text/html（index.html 内容）不再被当文件
+    // 内容静默渲染——抛「疑似目录或 404 页面」，走读取失败错误卡片
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => 'text/html; charset=utf-8' },
+      arrayBuffer: async () => new TextEncoder().encode('<!doctype html><html>…').buffer
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const store = createUrlStore('https://example.com/samples/m1/hello.js');
+    await expect(store.read('hello.js')).rejects.toThrow('疑似目录或 404 页面');
+    // 失败尝试不留缓存：同 store 后续重试仍重新 fetch
+    await expect(store.read('hello.js')).rejects.toThrow('疑似目录或 404 页面');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('allows 200 text/html for intentional .html preview (BUG-29 exemption)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'text/html' },
+        arrayBuffer: async () => new TextEncoder().encode('<h1>hi</h1>').buffer
+      }))
+    );
+    const store = createUrlStore('https://example.com/page.html');
+    await expect(store.read('page.html')).resolves.toBeDefined();
   });
 
   it('signal 预先 aborted → fetch 未发起即 reject（取消统一 DOMException AbortError）', async () => {
