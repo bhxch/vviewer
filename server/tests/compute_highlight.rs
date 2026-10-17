@@ -867,6 +867,13 @@ async fn highlight_range_deep_window_on_oversize_file_200() {
 /// 缓解见 build.rs 的 djot -O0 pin；上游升级后本测试与 t-cmp BUG-33 共同守卫。
 #[tokio::test]
 async fn djot_minimal_inputs_do_not_crash() {
+    // CI rust job 用精简 grammar 集（djot 不在 registered 集内 → 400 unsupported）：
+    // 守卫只在 djot 可用（全量集，本地/grammar.yml 门禁）时执行——UB 守卫的前提是
+    // 该 (lang) 真正进入 tree-sitter 路径
+    if !vviewer::compute::queries::is_supported("djot") {
+        eprintln!("djot 不在当前 grammar 集（CI 精简集）：跳过 UB 守卫");
+        return;
+    }
     let f = fixture(true, None);
     for text in ["# Heading\n", "text **bold**\n", "`code`\n", "x\n", "Heading\n"] {
         let (status, body) = post_json(
