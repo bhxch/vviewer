@@ -5,7 +5,7 @@
 //!
 //! 关键点：
 //! - tree-sitter 节点偏移是 UTF-8 字节偏移，前端区间是 UTF-16 代码单元偏移，
-//!   响应前经 [`Utf16Index`]（按行增量表 + 二分定位 + 行内小步修正）转换；
+//!   响应前经 [`Utf16Index`]（字符边界前缀表 + 二分，O(log n)/查询）转换；
 //! - path 模式走 [`crate::guard`]（canonicalize 越界校验）并按
 //!   `(canonical_path, mtime_ms, size, lang, start_line, line_count)` 缓存响应
 //!   （64 条 LRU 简易淘汰）；缓存条目带 cacheId 令牌（CMP-02/2）：客户端重开
@@ -107,42 +107,41 @@ pub struct HighlightRequest {
 
 // ---------- 字节 → UTF-16 偏移转换 ----------
 
-/// 按行增量表：每行行首一对（字节偏移 → UTF-16 偏移）映射点。
-/// 查询时二分定位行，行内对该行内字符小步累加（单行长度即修正开销）。
+/// 字符边界前缀表：第 i 项 = 第 i 个字符的（起始字节偏移 → UTF-16 偏移），
+/// 末尾追加哨兵 (text.len(), utf16 总长) 覆盖「clamp 到文本末尾」的查询；
+/// 查询二分定位 O(log n)，非字符边界向下取整到所属字符起点（防御性兜底）。
+/// 旧实现按行建表 + 行内逐字符累加（O(行长)）：多区间超长单行（区间数与行长
+/// 同为 O(n)）整体 O(n²)——BUG-36 实测 minified 单行 js 50KB/2.6 万区间即拖满
+/// 10s 预算（解析线程满核空转、响应 504）。表内存 O(字符数)（2×u32/字符），
+/// 与区间转换的总体复杂度同阶。
 pub struct Utf16Index {
-    line_start_bytes: Vec<usize>,
-    line_start_utf16: Vec<usize>,
+    boundary_bytes: Vec<u32>,
+    boundary_utf16: Vec<u32>,
 }
 
 impl Utf16Index {
-    /// 单遍扫描文本建表：行首偏移 + 累计 UTF-16 长度（BMP 外字符计 2）。
+    /// 单遍扫描文本建表：字符边界偏移 + 累计 UTF-16 长度（BMP 外字符计 2）。
     pub fn new(text: &str) -> Self {
-        let mut line_start_bytes = vec![0usize];
-        let mut line_start_utf16 = vec![0usize];
-        let mut utf16 = 0usize;
+        let mut boundary_bytes = Vec::with_capacity(text.len() + 1);
+        let mut boundary_utf16 = Vec::with_capacity(text.len() + 1);
+        let mut utf16 = 0u32;
         for (byte, ch) in text.char_indices() {
-            if ch == '\n' {
-                // \n 之后即下一行行首
-                line_start_bytes.push(byte + 1);
-                line_start_utf16.push(utf16 + 1);
-            }
-            utf16 += ch.len_utf16();
+            boundary_bytes.push(byte as u32);
+            boundary_utf16.push(utf16);
+            utf16 += ch.len_utf16() as u32;
         }
-        Self { line_start_bytes, line_start_utf16 }
+        boundary_bytes.push(text.len() as u32);
+        boundary_utf16.push(utf16);
+        Self { boundary_bytes, boundary_utf16 }
     }
 
     /// 字节偏移 → UTF-16 代码单元偏移。`byte` 越界时按 clamp 处理，
     /// 非字符边界向下取整（tree-sitter 偏移理论上恒在边界上，防御性兜底）。
     pub fn to_utf16(&self, text: &str, byte: usize) -> usize {
-        let mut byte = byte.min(text.len());
-        while byte > 0 && !text.is_char_boundary(byte) {
-            byte -= 1;
-        }
-        // 二分：最后一个 <= byte 的行首
-        let line = self.line_start_bytes.partition_point(|&b| b <= byte) - 1;
-        let line_start = self.line_start_bytes[line];
-        let in_line: usize = text[line_start..byte].chars().map(char::len_utf16).sum();
-        self.line_start_utf16[line] + in_line
+        let byte = byte.min(text.len());
+        // 二分：最后一个 <= byte 的字符边界（哨兵 = 文本末尾，覆盖 clamp 查询）
+        let i = self.boundary_bytes.partition_point(|&b| (b as usize) <= byte) - 1;
+        self.boundary_utf16[i] as usize
     }
 }
 
@@ -719,6 +718,26 @@ fn main() {
         let idx = Utf16Index::new(text);
         assert_eq!(idx.to_utf16(text, 2), 0, "中间字节向下取整到字符边界");
         assert_eq!(idx.to_utf16(text, 100), 5, "越界 clamp 到文本末尾");
+    }
+
+    /// BUG-36 回归：多区间超长单行（区间数 O(n)、行长 O(n)）的区间换算不得
+    /// 随行长二次退化。ASCII 下 UTF-16 偏移 == 字节偏移：对高亮产出的每个区间
+    /// 断言 s<e 且 e ≤ 全长（前缀表逐点正确性由下方 step_by 恒等扫描锁定；
+    /// 旧行内累加实现在该形态下 50KB 即拖满 10s 预算）。
+    #[test]
+    fn utf16_single_line_many_intervals_stays_linear_and_correct() {
+        let text = "const vv=1;let ab=2;ab+=3;console.log(vv,ab);".repeat(2_000); // ~90KB 单行
+        let resp = highlight_rust(&text);
+        assert!(resp.intervals.len() > 10_000, "区间数应 O(n): {}", resp.intervals.len());
+        let total = text.encode_utf16().count() as u64;
+        for &[s, e, _] in &resp.intervals {
+            assert!(s < e && e <= total, "区间合法: {s},{e}");
+        }
+        let idx = Utf16Index::new(&text);
+        for (byte, _) in text.char_indices().step_by(97) {
+            assert_eq!(idx.to_utf16(&text, byte), byte, "@{byte}");
+        }
+        assert_eq!(idx.to_utf16(&text, text.len()), text.len());
     }
 
     #[test]

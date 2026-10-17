@@ -358,23 +358,16 @@ test.fixme('BUG-33 [探索]: lang=djot 高亮含命中内容文本使服务端 S
   expect((await fetch(`${COMPUTE_BASE}/api/health`)).ok).toBeTruthy();
 });
 
-test.fixme('BUG-36 [探索]: 服务端 compute 高亮单行大文本 O(n²)——446KB 单行 json 10s 超时 504，解析线程后台满核空转', async () => {
-  // 复核成立（severity medium，8441 实例梯度实测；text/path/range 三模式同病，同内容
-  // 多行形态不受影响——477KB 多行 0.148s vs 446KB 单行 504/10.002s）。
-  // 根因：Utf16Index::to_utf16 行内逐字符累加为 O(行长)（server/src/compute/highlight.rs
-  // :123-133），:191-192 对每个 Source 事件调用两次——单行文件行长=全文、区间数亦 O(n)，
-  // 整体 O(n²)；:98 注释自认「单行长度即修正开销」；无前置闸拦截该输入类（MAX_INTERVALS
-  // =2M 远未触及，range chunk 上限 20MB 不拦）。504 只是响应侧放弃：解析线程后台继续满核
-  // 空转至自然结束（504 后 10s 窗口实测 993 ticks ≈ 99% 单核）；UI 端 server-served 单行
-  // 456KB json 打开需 11.1s 才经「远程 504→回退本地 wasm」到终态。
-  // 梯度证据（path 模式 lang=json，8441 实例）：50KB=0.276s → 141KB=3.386s →
-  // 285KB=8.823s → 446KB=504/10.002s（尺寸×2.8 耗时×12.3，符合 O(n²)）；text 模式同文本
-  // 504/10.004s；单行文件 range(0,1) 504/10.007s；既有 8391 夹具
-  // edge/size/minified-3mb.js（lang=javascript 全文与 range{0,1}）均 504/10.0s，报错文案
-  // 'highlight timed out after 10000ms (parsing thread finishes in background)'。
-  // 最小复现：POST /api/compute/highlight {"path":"<单行 ~450KB json>","lang":"json"} → 504。
-  // 修复方向：to_utf16 改区间前缀和/预计算行偏移，消行内逐字符累加；修复后本用例转正
-  // （判据：单行 ~450KB json 200 且耗时显著低于 10s 预算，对照多行同尺寸 0.148s）。
+test('BUG-36 [探索]: 服务端 compute 高亮多区间超长单行不触超时——456KB 单行 json 200 且远低于 10s 预算', async () => {
+  // 2026-10-10 复核成立（medium，text/path/range 三模式同病）；2026-10-17 清偿转正。
+  // 根因：Utf16Index::to_utf16 按行建表 + 行内逐字符累加为 O(行长)（行长=全文时
+  // 每次 O(n)），区间数 O(n) 的单行输入整体 O(n²)——实测 minified 形态 50KB
+  // /2.6 万区间即 10s+（解析线程满核空转、响应 504，纯文本对照线性）。
+  // 修复：Utf16Index 改字符边界前缀表（2×u32/字符，末尾哨兵），查询二分
+  // O(log n)——release 实测多区间单行 285KB/14.9 万区间 15.0s → 0.21s（~70x，
+  // 区间数翻倍耗时线性）。区间数上限 MAX_INTERVALS=2M 与 10s 响应预算不变。
+  // 判据：单行 ~456KB json 200 且耗时显著低于 10s 预算；阈值 9.5s 仅拦截超时
+  // 形态，二次方→线性的量化断言归性能套件。
   test.setTimeout(60_000);
   const name = 'tcmp-oneline-446kb.json';
   // 单行（无换行符）~456KB json 缺陷形态载体（测试体内自建，幂等，不动 beforeAll 夹具）
@@ -385,8 +378,6 @@ test.fixme('BUG-36 [探索]: 服务端 compute 高亮单行大文本 O(n²)—�
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ path: name, lang: 'json' })
   });
-  // 修复判据：不触 10s 预算（缺陷态 504/10.0s + 后台满核空转）；阈值 9.5s 仅拦截超时
-  // 形态，二次方→线性的量化断言归性能套件
   expect(res.status).toBe(200);
   expect(Date.now() - t0).toBeLessThan(9_500);
 });
