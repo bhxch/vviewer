@@ -1003,7 +1003,7 @@ describe('renderCode lineAtByteOffset（错误身份与字节映射 Task 4：字
     const handle = renderCode(enc('ab\r\ncd\r\n'), host, { highlight: false });
     const f = byteAtOf(handle);
     expect(f, '全量模式 handle 应提供 lineAtByteOffset').toBeTypeOf('function');
-    if (f === undefined) return;
+    if (f === undefined) throw new Error('lineAtByteOffset 缺席（应仅窗口模式）');
     expect(f.call(handle, 0)).toBe(0);
     expect(f.call(handle, 2)).toBe(0); // 恰在 \r 上：归本行
     expect(f.call(handle, 4)).toBe(1); // \r\n 后 = 下一行起始（字节域 4）
@@ -1018,7 +1018,7 @@ describe('renderCode lineAtByteOffset（错误身份与字节映射 Task 4：字
     document.body.append(host);
     const handle = renderCode(enc('\uFEFFab\ncd\n'), host, { highlight: false });
     const f = byteAtOf(handle);
-    if (f === undefined) return;
+    if (f === undefined) throw new Error('lineAtByteOffset 缺席（应仅窗口模式）');
     expect(f.call(handle, 0)).toBe(0); // BOM 后首字节 = 首行起始
     expect(f.call(handle, 3)).toBe(1); // 'ab\n' 后
     expect(f.call(handle, 6)).toBe(2);
@@ -1031,7 +1031,7 @@ describe('renderCode lineAtByteOffset（错误身份与字节映射 Task 4：字
     document.body.append(host);
     const handle = renderCode(enc('中\n文\n'), host, { highlight: false });
     const f = byteAtOf(handle);
-    if (f === undefined) return;
+    if (f === undefined) throw new Error('lineAtByteOffset 缺席（应仅窗口模式）');
     expect(f.call(handle, 0)).toBe(0);
     expect(f.call(handle, 4)).toBe(1); // '中'=3 字节 + \n
     expect(f.call(handle, 7)).toBe(1); // 恰在行尾 \n 上：归本行（行尾终结符归本行）
@@ -1045,7 +1045,7 @@ describe('renderCode lineAtByteOffset（错误身份与字节映射 Task 4：字
     document.body.append(host);
     const handle = renderCode(enc('a\rb\nc'), host, { highlight: false });
     const f = byteAtOf(handle);
-    if (f === undefined) return;
+    if (f === undefined) throw new Error('lineAtByteOffset 缺席（应仅窗口模式）');
     expect(f.call(handle, 2)).toBe(1);
     expect(f.call(handle, 4)).toBe(2);
     handle.destroy();

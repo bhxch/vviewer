@@ -734,7 +734,7 @@ async function renderJsonlWindowed(
       // 锚行偏移（deferred 清偿 Task 5）同点换算（index 唯一可见处）：委托 code
       // 形态经实例 lineAtByteOffset（字节域精确，次选 lineAtOffset 旧近似）映射物理
       // 行号；offsets 为 post-BOM 逻辑字节空间与字节域索引同基，不做 +bomLen 补偿
-      //（终审 Minor 1）；锚行越出已喂索引时置 -1（防御，viewFirst 恒被 visibleRange
+      // （终审 Minor 1）；锚行越出已喂索引时置 -1（防御，viewFirst 恒被 visibleRange
       // 钳内理论不可达）
       const anchorLine = viewFirst;
       const anchorByteOffset =

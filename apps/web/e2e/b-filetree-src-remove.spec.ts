@@ -72,7 +72,7 @@ async function expectActiveWorkspace(page: Page, name: string): Promise<void> {
 
 test.describe('文件树源级移除（FTSRC-01..04）', () => {
   test('FTSRC-01/03：confirm 接受——该源 tab 全关 + 源标签消失；同组他源 tab 与标签保留', async ({ page }) => {
-    const fake = await startFakeFileServer({ rootPath: '/ft-root', files: { 'hello-remote.txt': 'remote body\n' } });
+    const fake = await startFakeFileServer({ files: { 'hello-remote.txt': 'remote body\n' } });
     try {
       await waitAppMounted(page);
       await openLocalDir(page, [{ name: 'alpha-local.txt', content: 'local alpha\n' }], 'ftsrc-local');
@@ -96,7 +96,7 @@ test.describe('文件树源级移除（FTSRC-01..04）', () => {
   });
 
   test('FTSRC-02：confirm 取消——tab 与源标签均不动', async ({ page }) => {
-    const fake = await startFakeFileServer({ rootPath: '/ft-root', files: { 'hello-remote.txt': 'remote body\n' } });
+    const fake = await startFakeFileServer({ files: { 'hello-remote.txt': 'remote body\n' } });
     try {
       await waitAppMounted(page);
       await openLocalDir(page, [{ name: 'alpha-local.txt', content: 'local alpha\n' }], 'ftsrc-local');
@@ -117,7 +117,7 @@ test.describe('文件树源级移除（FTSRC-01..04）', () => {
     // 新组不产生重复源——「他组同 storeId 不受影响」的组内移除保护（AppShell
     // removeSource 注释在案）在当前 UI 无自然触发面，属防御性实现。本用例锚定该
     // 路由行为本身（行为变更须经评审）。
-    const fake = await startFakeFileServer({ rootPath: '/ft-root', files: {} });
+    const fake = await startFakeFileServer({ files: {} });
     try {
       await waitAppMounted(page);
       await openLocalDir(page, [{ name: 'shared-file.txt', content: 'shared body\n' }], 'shared-src');

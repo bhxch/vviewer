@@ -5,7 +5,7 @@
 > **两条实现链（本轮脚本化前的源码盘点实锤，样本选择与断言口径据此设计）**：
 >
 > 1. **渲染器内构卡片（软失败）**：`packages/render-media/src/av.ts` showMediaError → 动作=「重试 + 以 hex 打开」两枚，hex 动作**直调** `hex.render(buffer, …)`（无 StreamCtx 全量形态）、经 takeOver 级联托管，**不经 dispatch 重入、无 rendererOverride、无「以纯文本打开」**（pdf 渲染器同构，MEDIA-11 断言的两按钮即此链）。截断 mp4/pdf 的卡片属这条链。
-> 2. **dispatcher 级卡片（抛错型）**：渲染器 render 抛错 → dispatcher.ts:373-403 catch → buildRenderErrorActions → 「重试 + 以纯文本打开/以 hex 打开」三枚（按 `looksTextual(head)` 动态排序，dispatcher.ts:167：文本→纯文本排前、NUL→hex 排前），openAsAction 以 `rendererOverride` **重入 dispatch**。损坏图片不产卡（img error 无监听仅裂图，t-media.spec.ts BUG-53 fixme 在案），抛错型样本用 **broken.svg**（sanitizeSvg 解析失败抛错，`packages/render-media/src/image.ts:8`）。
+> 2. **dispatcher 级卡片（抛错型）**：渲染器 render 抛错 → dispatcher.ts:373-403 catch → buildRenderErrorActions → 「重试 + 以纯文本打开/以 hex 打开」三枚（按 `looksTextual(head)` 动态排序，dispatcher.ts:167：文本→纯文本排前、NUL→hex 排前），openAsAction 以 `rendererOverride` **重入 dispatch**。损坏图片产卡已在 BUG-53 修复波落地（OWX-09 锚定），历史盘点语句保留原貌（sanitizeSvg 解析失败抛错，`packages/render-media/src/image.ts:8`）。
 >
 > 既有锚点：OPEN-01/02（探测改派）、OPEN-03/BUG-69（MetaPanel 手选+快照落盘+remote restore 透传 override）、MEDIA-11/BUG-14（卡片按钮存在性）、BUG-52/53 fixme（t-media 探索）。
 
@@ -75,7 +75,7 @@
 
 open-as 动作排序 = `looksTextual(head)` 二分（判文本 → 纯文本在前，否则 hex 在前；
 head 为 8KB 探测块）。`detect()` 的签名/binary 探测链结论**不参与排序**——知情现状
-（SUSP-10 同类口径）：两判据罕有分歧，卡片构造于全量拉取前，以 head 近似是声明过的
+（SUSP-10 同类口径）：两判据罕有分歧，卡片构造于全量拉取前（full 在手时用 full，仅 head-only 场景以 8KB head 近似——dispatcher.ts full ?? probe），是声明过的
 可接受退化（dispatcher.ts buildRenderErrorActions 注释在案）。OWX-09（JPEG 头+NUL
 二进制载体图片 → hex 排前）与 OWX-02（损坏 SVG → 纯文本排前）构成双向锚。
 

@@ -46,6 +46,8 @@ export type DispatchErrorKind = 'abort' | 'read' | 'generic';
  * 不设 ctx.signal 状态兜底：StreamCtx 无 signal 承载字段（signal 仅按读调用传递），
  * 且状态兜底与六处收紧「身份优先」裁决相抵；dispatcher 读包装处的 signal.aborted
  * 检查留在标注点原位，不进分类层。
+ * 不变量：DispatchReadError 恒改写 name='DispatchReadError'（与 AbortError 身份不相交），
+ * 故 abort 先判不吞 read；若未来让包装类保留底层 abort name，须先改本顺序。
  */
 export function classifyDispatchError(err: unknown): DispatchErrorKind {
   if (isAbortError(err)) return 'abort';

@@ -129,7 +129,7 @@ describe('dispatch abort 不上屏（deferred 清偿 Task 5）', () => {
 // 未来路径的裸 AbortError reject。保留为防回归锚。
 
 describe('dispatch retry/open-as 的 abort 过滤（错误身份与字节映射 Task 2）', () => {
-  it('重试被取消：不重画卡片、原卡保留在屏（现状红——会把「读取已取消」画回卡片）', async () => {
+  it('重试被取消：不重画卡片、原卡保留在屏', async () => {
     const reg = createRegistry();
     let calls = 0;
     reg.install(mk('code', ['txt'], {
@@ -154,7 +154,7 @@ describe('dispatch retry/open-as 的 abort 过滤（错误身份与字节映射 
     expect(target.querySelector('.vv-error-card'), '原卡保留（不重画也不清空）').not.toBeNull();
   });
 
-  it('open-as 重入被取消：不 console.error 留痕（现状红）', async () => {
+  it('open-as 重入被取消：不 console.error 留痕', async () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const reg = createRegistry();
     let calls = 0;

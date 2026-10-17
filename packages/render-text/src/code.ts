@@ -180,7 +180,8 @@ export function buildLineOffsets(lines: string[]): number[] {
  * 归一语义的行号一致）；BOM 从偏移剔除（post-BOM 逻辑域，与 jsonl 索引 offsets
  * 同基）。返回数组含末尾伪起始（trailing 终结符后的空串行），与 buildLineOffsets
  * 的 split('\n') 语义对齐。lone \r 文件两域不可同时逐字节对齐（jsonl 记账不终结），
- * 属已知边界（jsonl 内容按定义不含裸 \r 行尾）。
+ * 属已知边界（jsonl 内容按定义不含裸 \r 行尾）。非 UTF-8 多字节编码（GBK/Shift_JIS 等）
+ * 的尾字节均不含 0x0D/0x0A，终结符扫描不受干扰；口径按原始字节定义（spec §4.5）。
  */
 export function buildByteLineOffsets(buffer: Uint8Array): number[] {
   const bom = buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf ? 3 : 0;

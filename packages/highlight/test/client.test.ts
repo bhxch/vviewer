@@ -379,4 +379,43 @@ describe('init-ok ack（BUG-35：init 成功置活看门狗，静置不再误杀
     expect(reported, 'ack 已置活，静置超窗不触发初始化超时').toHaveLength(0);
     client.dispose();
   });
+
+  it('query-loaded 帧 client 透传锚（Wave 0 M-3 补回）：debug 开启下阶段帧+ack+逐文件帧依序到达', async () => {
+    vi.useFakeTimers();
+    const debugCalls: unknown[][] = [];
+    const spy = vi.spyOn(console, 'debug').mockImplementation((...args: unknown[]) => {
+      debugCalls.push(args);
+    });
+    engineCreate.impl = async (...args: unknown[]) => {
+      const opts = args[0] as { onInitProgress?: (p: { stage: string; detail?: string }) => void } | undefined;
+      const report = opts?.onInitProgress;
+      report?.({ stage: 'wasm-fetch', detail: 'runtimeDir=/x/' });
+      report?.({ stage: 'parser-init' });
+      report?.({ stage: 'assets', detail: 'queries=2' });
+      report?.({ stage: 'ready' });
+      return {
+        highlight: (): Promise<never> => {
+          report?.({ stage: 'query-loaded', detail: 'bash/highlights.scm' });
+          return new Promise(() => {});
+        }
+      };
+    };
+    const { worker, frames } = installBridge();
+    const client = new HighlightClient(worker as unknown as Worker, { grammarsDir: '/x', debug: true });
+    const p = client.highlight('a=1', 'bash');
+    p.catch(() => {}); // 高亮桩挂起：dispose 时以 Canceled reject，防 unhandled
+    await vi.advanceTimersByTimeAsync(0); // 冲刷微任务：init 链沉降、ack+四帧到达、请求派发补发 query-loaded
+    // 帧序列：create 四阶段进度 → init-ok ack → 队列派发触发 query-loaded 进度帧
+    expect(frames.map((f) => (f as { kind?: string }).kind)).toEqual([
+      'init-progress',
+      'init-progress',
+      'init-progress',
+      'init-progress',
+      'init-ok',
+      'init-progress'
+    ]);
+    expect(debugCalls.map((c) => c[1])).toEqual(['wasm-fetch', 'parser-init', 'assets', 'ready', 'query-loaded']);
+    client.dispose();
+    spy.mockRestore();
+  });
 });

@@ -66,6 +66,7 @@ describe('imageRenderer 解码校验（BUG-53）', () => {
     Object.defineProperty(URL, 'revokeObjectURL', { value: revoke, configurable: true });
   });
   afterEach(() => {
+    if (vi.isFakeTimers()) vi.useRealTimers();
     vi.restoreAllMocks();
     delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
     document.body.innerHTML = '';
@@ -159,8 +160,11 @@ describe('imageRenderer 解码校验（BUG-53）', () => {
     expect(card, '迟到失败应出兜底卡').not.toBeNull();
     expect(card!.querySelector('.vv-error-detail')!.textContent).toContain('图片解码失败');
     expect([...card!.querySelectorAll('.vv-error-action')].map((b) => b.textContent)).toContain('重试');
+    expect(
+      [...card!.querySelectorAll('.vv-error-action')].map((b) => b.textContent),
+      'hex 未注册：兜底卡不出现以 hex 打开（ledger 负断言）'
+    ).not.toContain('以 hex 打开');
     instance.destroy();
-    vi.useRealTimers();
   });
 
   it('SVG 分支不接解码校验（spec 铁律）：render 立即 resolve，不等待解码事件', async () => {
@@ -189,6 +193,5 @@ describe('imageRenderer 解码校验（BUG-53）', () => {
     instance.destroy();
     captured!.dispatchEvent(new Event('error'));
     expect(t.querySelector('.vv-error-card'), 'destroy 后不再画卡').toBeNull();
-    vi.useRealTimers();
   });
 });

@@ -246,13 +246,22 @@ describe('avRenderer', () => {
   // 审计 R1 M-4：artMock 态还原收口——此前 BUG-54 用例手动翻转 failConstruct/instances
   // 且仅尾部还原，中途失败即泄漏默认态到后续用例。beforeEach 复位默认态（构造失败 +
   // 空实例表），afterEach 兜底同复位（防中途失败泄漏）。
+  let urlCreate: ReturnType<typeof vi.fn>;
+  let urlRevoke: ReturnType<typeof vi.fn>;
   beforeEach(() => {
     artMock.state.failConstruct = true;
     artMock.state.instances = [];
+    // URL blob 桩收口（Wave 0 ledger：用例间不还原→describe 级统一安装/清理）
+    urlCreate = vi.fn(() => 'blob:mock');
+    urlRevoke = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { value: urlCreate, configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: urlRevoke, configurable: true });
   });
   afterEach(() => {
     artMock.state.failConstruct = true;
     artMock.state.instances = [];
+    delete (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
+    delete (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL;
   });
 
   /** 最小 FileSource 桩（av 渲染只读 det.ext 与 m3u8 直连解析，其余仅透传） */
@@ -276,11 +285,6 @@ describe('avRenderer', () => {
   });
 
   it('音频保持原生 <audio controls>，destroy 撤销 blob URL（ArtPlayer 仅视频）；实例带 getMeta（BUG-04 代工）', async () => {
-    // jsdom 不实现 createObjectURL/revokeObjectURL，测试桩之
-    const create = vi.fn(() => 'blob:mock');
-    const revoke = vi.fn();
-    Object.defineProperty(URL, 'createObjectURL', { value: create, configurable: true });
-    Object.defineProperty(URL, 'revokeObjectURL', { value: revoke, configurable: true });
     const target = document.createElement('div');
     document.body.append(target);
     const instance = await avRenderer.render(new Uint8Array(8), target, fakeSource('click.mp3'), { ext: 'mp3' } as never);
@@ -294,15 +298,11 @@ describe('avRenderer', () => {
       encoding: undefined // fakeSource 未给 det.encoding（SHELL-12 服务端路径会带 x-vv-encoding）
     });
     instance.destroy();
-    expect(revoke).toHaveBeenCalledTimes(1);
+    expect(urlRevoke).toHaveBeenCalledTimes(1);
     target.remove();
   });
 
   it('BUG-52：损坏音频 error → 错误卡片（文案含映射表条目 + 重试按钮）；首错收口不双弹；destroy 幂等', async () => {
-    const create = vi.fn(() => 'blob:mock');
-    const revoke = vi.fn();
-    Object.defineProperty(URL, 'createObjectURL', { value: create, configurable: true });
-    Object.defineProperty(URL, 'revokeObjectURL', { value: revoke, configurable: true });
     const target = document.createElement('div');
     document.body.append(target);
     const instance = await avRenderer.render(new Uint8Array(8), target, fakeSource('broken.mp3'), { ext: 'mp3' } as never);
@@ -321,7 +321,7 @@ describe('avRenderer', () => {
     expect(target.querySelectorAll('.vv-error-card').length).toBe(1);
     // 播放器已 release（revoke 恰一次）；实例 destroy 幂等不再 revoke
     instance.destroy();
-    expect(revoke).toHaveBeenCalledTimes(1);
+    expect(urlRevoke).toHaveBeenCalledTimes(1);
     target.remove();
   });
 
@@ -329,10 +329,6 @@ describe('avRenderer', () => {
   // （release：revoke+el.remove）后在途加载的迟到 error 不得把错误卡画进新渲染
   // target（镜像 image.ts 监听生命周期收口）
   it('destroy 后迟到 error 不出错误卡（监听收口 released 收口）', async () => {
-    const create = vi.fn(() => 'blob:mock');
-    const revoke = vi.fn();
-    Object.defineProperty(URL, 'createObjectURL', { value: create, configurable: true });
-    Object.defineProperty(URL, 'revokeObjectURL', { value: revoke, configurable: true });
     const target = document.createElement('div');
     document.body.append(target);
     const instance = await avRenderer.render(new Uint8Array(8), target, fakeSource('slow.mp3'), { ext: 'mp3' } as never);
@@ -371,27 +367,20 @@ describe('avRenderer', () => {
   });
 
   it('T7 回归：ArtPlayer 构造失败时 blob URL 不泄漏（revoke 后 rethrow，destroy 永不执行的路径）', async () => {
-    const create = vi.fn(() => 'blob:mock-fail');
-    const revoke = vi.fn();
-    Object.defineProperty(URL, 'createObjectURL', { value: create, configurable: true });
-    Object.defineProperty(URL, 'revokeObjectURL', { value: revoke, configurable: true });
     const target = document.createElement('div');
     document.body.append(target);
     // 文件头 vi.mock 注入构造抛错 → render 必然 reject
     await expect(
       avRenderer.render(new Uint8Array(8), target, fakeSource('clip.mp4'), { ext: 'mp4' } as never)
     ).rejects.toThrow('artplayer 构造失败');
-    // 失败前已 create 的 URL 必须被 revoke（次数成对，destroy 之外的失败路径不漏）
-    expect(create).toHaveBeenCalledTimes(1);
-    expect(revoke).toHaveBeenCalledTimes(1);
+    // 失败前已 create 的 URL 必须被 revoke（次数成对，destroy 之外的失败路径不漏；
+    // 共享桩由 describe beforeEach 安装）
+    expect(urlCreate).toHaveBeenCalledTimes(1);
+    expect(urlRevoke).toHaveBeenCalledTimes(1);
     target.remove();
   });
 
   it('BUG-54：video:error 同步点缓存 code——卡片文案命中映射表而非「未知错误」（时序不动）', async () => {
-    const create = vi.fn(() => 'blob:mock');
-    const revoke = vi.fn();
-    Object.defineProperty(URL, 'createObjectURL', { value: create, configurable: true });
-    Object.defineProperty(URL, 'revokeObjectURL', { value: revoke, configurable: true });
     // 翻默认态（failConstruct 复位由本 describe beforeEach/afterEach 收口，M-4）
     artMock.state.failConstruct = false;
     const target = document.createElement('div');
@@ -406,7 +395,7 @@ describe('avRenderer', () => {
     const detail = target.querySelector('.vv-error-card .vv-error-detail')!.textContent!;
     expect(detail).toContain('MEDIA_ERR_SRC_NOT_SUPPORTED');
     expect(detail).not.toContain('未知错误');
-    expect(revoke).toHaveBeenCalledTimes(1); // release 摘播放器并回收 blob
+    expect(urlRevoke).toHaveBeenCalledTimes(1); // release 摘播放器并回收 blob
     target.remove();
   });
 });

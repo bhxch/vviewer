@@ -9,7 +9,6 @@ import type { AddressInfo } from 'node:net';
  * 沿用各自测试体，行为零变化。
  */
 interface FakeOptions {
-  rootPath: string;
   files: Record<string, string>;
 }
 

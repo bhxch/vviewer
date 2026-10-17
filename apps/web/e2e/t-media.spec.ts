@@ -287,9 +287,9 @@ test('BUG-52：损坏音频解码失败 → 统一错误卡片（重试按钮）
   await page.goto('/');
   // 2026-10-10 探索复核缺陷回归：音频分支原只建 audio.vv-av 无 error 监听，audio.error
   // （code=4 demux 失败）后 UI 完全静默；修复 = 对齐视频分支挂 error → showErrorCard。
-  // 载体：mp3 头（ID3）+ 垃圾字节，浏览器 demux 直接失败。
+  // 载体：真 ID3 头（0x49 0x44 0x33）+ 垃圾字节，浏览器 demux 直接失败。
   await openDir(page, [
-    { name: 'broken.mp3', type: 'audio/mpeg', bytes: new Uint8Array(300).map((_, i) => (i < 3 ? 0x49 : 0xba)) }
+    { name: 'broken.mp3', type: 'audio/mpeg', bytes: new Uint8Array(300).map((_, i) => (i === 0 ? 0x49 : i === 1 ? 0x44 : i === 2 ? 0x33 : 0xba)) }
   ]);
   await openFile(page, 'broken.mp3');
   const card = page.locator('.vv-error-card');

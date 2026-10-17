@@ -128,8 +128,9 @@ function openAsAction(
  * （判文本 → 纯文本在前，否则 hex 在前）；当前 renderer 即 hex 时不重复给 hex。
  * streaming 渲染器重试须透传 ctx（io-streaming Task 5 评审指令②）：以原 base +
  * ctx 重跑 render，字节经 ctx.read 重读（opts.read 链）——缺省第 5 参会以裸 probe
- * 重跑，streaming 渲染器必次次失败。onRendered 接收重试/open-as 成功产出的实例，
- * 由调用方（dispatch catch）级联托管。
+ * 重跑，streaming 渲染器必次次失败。optsSignal 透传为 render 第 6 参（审计 R1：
+ * 重试/open-as 重入与主路径同获取消信号，同型解码盲窗收口）。onRendered 接收
+ * 重试/open-as 成功产出的实例，由调用方（dispatch catch）级联托管。
  */
 function buildRenderErrorActions(
   registry: Registry,
@@ -140,10 +141,11 @@ function buildRenderErrorActions(
   target: HTMLElement,
   onRendered: (instance: RenderedInstance) => void,
   redisplay: Redisplay,
-  ctx?: StreamCtx
+  ctx?: StreamCtx,
+  optsSignal?: AbortSignal
 ): ErrorCardAction[] {
   const retry = (): void => {
-    renderer.render(buffer, target, source, det, ctx)
+    renderer.render(buffer, target, source, det, ctx, optsSignal ? { signal: optsSignal } : undefined)
       .then(onRendered)
       .catch((err: unknown) => {
         // 取消 ≠ 重试失败（错误身份与字节映射 Task 2，与主 catch「abort 不上屏」
@@ -152,7 +154,7 @@ function buildRenderErrorActions(
         // 重试仍失败：保留错误详情，按钮随之重建（可继续重试/以其他方式打开）
         const message = err instanceof Error ? err.message : String(err);
         showErrorCard(target, message, source, {
-          actions: buildRenderErrorActions(registry, renderer, buffer, source, det, target, onRendered, redisplay, ctx)
+          actions: buildRenderErrorActions(registry, renderer, buffer, source, det, target, onRendered, redisplay, ctx, optsSignal)
         });
       });
   };
@@ -285,9 +287,13 @@ export function createDispatcher(registry: Registry): Dispatcher {
     // C 项：override 先于 byExtension 拦截：命中即用；id 未命中静默走正常探测链
     const override = opts?.rendererOverride === undefined ? undefined : registry.byId(opts.rendererOverride);
     // C 项：错误卡片 open-as 动作的重入闭包（同一 source/buffer/target 重派）。
-    // read 透传：headOnly 时重入同样以 null+read 走流式读；兼容路径保持 buffer 直传不变
+    // read 透传：headOnly 时重入同样以 null+read 走流式读；兼容路径保持 buffer 直传不变。
+    // 审计 R1：重试/open-as 重入与主路径同获取消信号（同型解码盲窗收口）
+    const optsSignal = opts?.signal;
     const redisplay: Redisplay = (o) =>
-      headOnly ? dispatch(source, null, target, { ...o, read }) : dispatch(source, buffer, target, o);
+      headOnly
+        ? dispatch(source, null, target, { ...o, signal: optsSignal, read })
+        : dispatch(source, buffer, target, { ...o, signal: optsSignal });
     let renderer: Renderer | undefined;
     // 渲染期 ctx（streaming 分支构造）：声明在 try 外——catch 的重试动作需要透传
     //（评审指令②），try 作用域变量 catch 不可见
@@ -408,7 +414,7 @@ export function createDispatcher(registry: Registry): Dispatcher {
       // buffer；headOnly 时退化为 head 探测块——渲染在全量拉取前已失败，以 head 判
       // looksTextual 足够近似且零额外读（可接受的退化，非旧行为回归面）
       const actions = renderer
-        ? { actions: buildRenderErrorActions(registry, renderer, full ?? probe, source, det, target, takeOver, redisplay, renderCtx) }
+        ? { actions: buildRenderErrorActions(registry, renderer, full ?? probe, source, det, target, takeOver, redisplay, renderCtx, opts?.signal) }
         : { actions: buildRoutingErrorActions(registry, takeOver, redisplay) };
       const card = showErrorCard(target, message, source, actions);
       return {

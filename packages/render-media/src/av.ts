@@ -429,7 +429,7 @@ export const avRenderer: Renderer = {
       el.src = url;
       el.className = 'vv-av';
       target.replaceChildren(el);
-      release = () => {
+      release = (): void => {
         if (released) return;
         released = true;
         el.pause();
@@ -506,7 +506,7 @@ export const avRenderer: Renderer = {
     // error 还在），在此缓存 code 供 'error' 处理器查表——卡片时机/重连语义零变化
     // （artplayer.mjs 5.4.0：proxy 同步转发 video:* 在 :2467-2471；'error' 在
     // :2495-2501 的 sleep(RECONNECT_SLEEP_TIME=1e3) + art.url 重设之后才延迟 emit）
-    let lastVideoErrCode: number | null | undefined;
+    let lastVideoErrCode: number | undefined;
     art.on('video:error', (event: unknown) => {
       lastVideoErrCode = (event as { target?: { error?: { code: number } | null } } | undefined)?.target?.error?.code;
     });

@@ -5,7 +5,7 @@ import { deflateSync, crc32 } from 'node:zlib';
  * e2e 套件作「正常图片」载体。来源：samples/m4/sample.bin 系「PNG 签名+IHDR+4KB
  * 伪随机体」（无 IDAT/IEND，本就不可完整解码），BUG-53 解码校验（image.ts render
  * 后 observeImageDecode，2026-10-16 合入）按设计以「图片解码失败」卡拒绝之——
- * b-media MEDIA-01（zoom.png）与 t-media MEDIA-01（t-zoom.png）双双连带红
+ * t-media MEDIA-01 连带红为载体修复波实证；b-media zoom.png 连带红为同批全量门禁发现
  * （2026-10-16 T4a 实证，fix(test) 07f9bf9 后抽出本夹具统一修面）。
  */
 export const goodPng = (): Uint8Array => {

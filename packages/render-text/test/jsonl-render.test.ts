@@ -291,6 +291,30 @@ function scrollToBottom(host: HTMLElement): void {
   scroll.dispatchEvent(new Event('scroll'));
 }
 
+
+/** 独立朴素扫描 fixture 字节得物理行起始偏移与偏移→行映射（oracle：不与被测实现共用
+ * 二分代码；三处委托锚行用例共享——Wave 0 ledger 抽取） */
+function naiveByteOracle(content: Uint8Array): { starts: number[]; lineByOffset: (offset: number) => number } {
+  const starts: number[] = [];
+  let start = 0;
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] === 0x0a) {
+      starts.push(start);
+      start = i + 1;
+    }
+  }
+  starts.push(start);
+  const lineByOffset = (offset: number): number => {
+    let line = 0;
+    for (let i = 0; i < starts.length; i++) {
+      if ((starts[i] ?? 0) <= offset) line = i;
+      else break;
+    }
+    return line;
+  };
+  return { starts, lineByOffset };
+}
+
 describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
   // A1（遗留清偿）：首屏并行预取——prefetchThrough(1) 一次 RTT 并发发出前两块的
   // read（IO-05 同款夹持思路到单测）：两块都未决时观测发起面，旧串行实现此处
@@ -1017,25 +1041,7 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
     stubResizeObserver();
     const content = interleavedBlankHeadGbTail(500, 100);
     // 独立朴素扫描 fixture 字节得物理行起始偏移（oracle：不与被测实现共用二分代码）
-    const physicalStarts: number[] = [];
-    {
-      let start = 0;
-      for (let i = 0; i < content.length; i++) {
-        if (content[i] === 0x0a) {
-          physicalStarts.push(start);
-          start = i + 1;
-        }
-      }
-      physicalStarts.push(start);
-    }
-    const lineByOffset = (offset: number): number => {
-      let line = 0;
-      for (let i = 0; i < physicalStarts.length; i++) {
-        if ((physicalStarts[i] ?? 0) <= offset) line = i;
-        else break;
-      }
-      return line;
-    };
+    const { starts: physicalStarts, lineByOffset } = naiveByteOracle(content);
     // fake code 委托实例：记录 lineAtOffset 收到的偏移与 revealLine 收到的行号
     const seen: Array<{ offset: number; physical: number }> = [];
     const revealArgs: number[] = [];
@@ -1081,25 +1087,7 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
   it('委托降级锚行映射优先 lineAtByteOffset（字节域精确）：lineAtOffset 不再被调用', async () => {
     stubResizeObserver();
     const content = interleavedBlankHeadGbTail(500, 100);
-    const physicalStarts: number[] = [];
-    {
-      let start = 0;
-      for (let i = 0; i < content.length; i++) {
-        if (content[i] === 0x0a) {
-          physicalStarts.push(start);
-          start = i + 1;
-        }
-      }
-      physicalStarts.push(start);
-    }
-    const lineByOffset = (offset: number): number => {
-      let line = 0;
-      for (let i = 0; i < physicalStarts.length; i++) {
-        if ((physicalStarts[i] ?? 0) <= offset) line = i;
-        else break;
-      }
-      return line;
-    };
+    const { starts: physicalStarts, lineByOffset } = naiveByteOracle(content);
     const byteCalls: number[] = [];
     const charCalls: number[] = [];
     const revealArgs: number[] = [];
@@ -1126,6 +1114,7 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
       { onEncodingBroken: async () => fakeCode as unknown as JsonlInstance });
     await vi.waitFor(() => expect(host.querySelector('[data-line="0"]')).not.toBeNull());
     const loaded = Number(/已加载 (\d+) 行/.exec(host.querySelector('.vv-jsonl-status')!.textContent!)?.[1]);
+    expect(loaded, '前置自校验：首屏窗口模式已加载数据行数可解析').toBeGreaterThan(30);
     const scroll = host.querySelector('.vv-jsonl-scroll') as HTMLElement;
     scroll.scrollTop = 120 * (loaded - 11);
     scroll.dispatchEvent(new Event('scroll'));
@@ -1156,25 +1145,7 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
       parts.push(...enc('"}\n'));
     }
     const content = Uint8Array.from(parts);
-    const physicalStarts: number[] = [];
-    {
-      let start = 0;
-      for (let i = 0; i < content.length; i++) {
-        if (content[i] === 0x0a) {
-          physicalStarts.push(start);
-          start = i + 1;
-        }
-      }
-      physicalStarts.push(start);
-    }
-    const lineByOffset = (offset: number): number => {
-      let line = 0;
-      for (let i = 0; i < physicalStarts.length; i++) {
-        if ((physicalStarts[i] ?? 0) <= offset) line = i;
-        else break;
-      }
-      return line;
-    };
+    const { starts: physicalStarts, lineByOffset } = naiveByteOracle(content);
     const revealArgs: number[] = [];
     const byteCalls: number[] = [];
     const fakeCode = {
@@ -1196,6 +1167,7 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
       { onEncodingBroken: async () => fakeCode as unknown as JsonlInstance });
     await vi.waitFor(() => expect(host.querySelector('[data-line="0"]')).not.toBeNull());
     const loaded = Number(/已加载 (\d+) 行/.exec(host.querySelector('.vv-jsonl-status')!.textContent!)?.[1]);
+    expect(loaded, '前置自校验：首屏窗口模式已加载数据行数可解析').toBeGreaterThan(30);
     const scroll = host.querySelector('.vv-jsonl-scroll') as HTMLElement;
     scroll.scrollTop = 120 * (loaded - 11);
     scroll.dispatchEvent(new Event('scroll'));
@@ -1226,6 +1198,7 @@ describe('renderJsonl 窗口模式（ctx + UTF-8 流式）', () => {
       { onEncodingBroken: async () => fakeCode as unknown as JsonlInstance });
     await vi.waitFor(() => expect(host.querySelector('[data-line="0"]')).not.toBeNull());
     const loaded = Number(/已加载 (\d+) 行/.exec(host.querySelector('.vv-jsonl-status')!.textContent!)?.[1]);
+    expect(loaded, '前置自校验：首屏窗口模式已加载数据行数可解析').toBeGreaterThan(30);
     const scroll = host.querySelector('.vv-jsonl-scroll') as HTMLElement;
     scroll.scrollTop = 120 * (loaded - 11);
     scroll.dispatchEvent(new Event('scroll'));

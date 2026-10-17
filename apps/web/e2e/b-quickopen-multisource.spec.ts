@@ -45,7 +45,7 @@ async function openQuickOpen(page: Page): Promise<void> {
 
 test.describe('QuickOpen 多源扫描（QO-01..04）', () => {
   test('QO-01：双源扫描拼接——结果行同时含两源文件且带「源名 / path」前缀', async ({ page }) => {
-    const fake = await startFakeFileServer({ rootPath: '/qo-root', files: { 'hello-remote.txt': 'remote body\n' } });
+    const fake = await startFakeFileServer({ files: { 'hello-remote.txt': 'remote body\n' } });
     try {
       await page.goto('/');
       await waitAppMounted(page);
@@ -68,7 +68,7 @@ test.describe('QuickOpen 多源扫描（QO-01..04）', () => {
   });
 
   test('QO-02：按 storeId 打开——过滤词命中 remote 源文件，Enter 后内容落 remote 来源', async ({ page }) => {
-    const fake = await startFakeFileServer({ rootPath: '/qo-root', files: { 'hello-remote.txt': 'remote body marker-42\n' } });
+    const fake = await startFakeFileServer({ files: { 'hello-remote.txt': 'remote body marker-42\n' } });
     try {
       await page.goto('/');
       await waitAppMounted(page);
@@ -86,7 +86,7 @@ test.describe('QuickOpen 多源扫描（QO-01..04）', () => {
   });
 
   test('QO-03：跨源排除规则——命中排除的两源同名文件均不出现，其余文件在', async ({ page }) => {
-    const fake = await startFakeFileServer({ rootPath: '/qo-root', files: { 'secret.txt': 'remote secret\n', 'keep.txt': 'remote keep\n' } });
+    const fake = await startFakeFileServer({ files: { 'secret.txt': 'remote secret\n', 'keep.txt': 'remote keep\n' } });
     try {
       // 排除规则在应用启动读取（settings store）：addInitScript 预写 localStorage（先于首次导航）
       await page.addInitScript(() => {
@@ -107,7 +107,7 @@ test.describe('QuickOpen 多源扫描（QO-01..04）', () => {
   });
 
   test('QO-04：空来源态——本地空目录来源不拖垮扫描，remote 结果正常列出且无错误态', async ({ page }) => {
-    const fake = await startFakeFileServer({ rootPath: '/qo-root', files: { 'only-remote.txt': 'remote only\n' } });
+    const fake = await startFakeFileServer({ files: { 'only-remote.txt': 'remote only\n' } });
     try {
       await page.goto('/');
       await waitAppMounted(page);
