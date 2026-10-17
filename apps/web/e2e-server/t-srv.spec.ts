@@ -489,7 +489,7 @@ test('BUG-46 [探索]: 三类奇异路径——NUL 字节、root 内自环 symli
   expect(traversal.status).toBe(400);
 });
 
-test.fixme('BUG-47 [探索]: 多区间 Range 静默丢弃第二区间（单区间 206 非 multipart/200 全量）、If-Range 完全被忽略（不匹配仍 206）', async () => {
+test('BUG-47 [探索]: 多区间 Range 静默丢弃第二区间（单区间 206 非 multipart/200 全量）、If-Range 完全被忽略（不匹配仍 206）', async () => {
   // 复核确认（维持 low）：非崩溃/数据丢失，vviewer 前端不使用多区间 Range 与
   // If-Range，服务器也不下发 ETag/Last-Modified（验证器缺失时第三方按 RFC 本不应
   // 使用 If-Range），影响面仅限依赖这两特性的第三方客户端。

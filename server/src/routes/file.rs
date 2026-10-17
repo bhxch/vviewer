@@ -26,6 +26,16 @@ pub struct FileQuery {
     pub root: Option<usize>,
 }
 
+/// 多区间 Range 检测（BUG-47）：`bytes=` 后含多个非空区间即视为多区间。
+/// 服务器不实现 multipart/byteranges：按 RFC 9110 §14.2 允许的「忽略 Range」
+/// 回 200 全量，不再静默丢弃第二区间伪装成单区间 206。
+fn has_multiple_ranges(h: &str) -> bool {
+    match h.strip_prefix("bytes=") {
+        Some(spec) => spec.split(',').filter(|p| !p.trim().is_empty()).count() > 1,
+        None => false,
+    }
+}
+
 /// 解析 Range 头（单区间；多区间取第一个）→ Some((start, len))。
 /// None = 无 Range；Err = 非法或越界（→ 416）。
 /// 语义：bytes=a-b / a- / -suffix；end 超界钳制；start ≥ size、suffix 0、
@@ -200,10 +210,22 @@ pub async fn file(
     let head = read_head(&mut f).await;
     let encoding = detect::detect_encoding(&head);
 
-    let range_header = headers
-        .get(header::RANGE)
-        .and_then(|v| v.to_str().ok())
-        .map(|h| parse_range(h, size));
+    // If-Range（BUG-47）：本服务器从不下发 ETag/Last-Modified（验证器缺失），
+    // 客户端携带的任何 If-Range 值（强/弱 ETag 或 HTTP-date）都不可能匹配当前
+    // 资源 → 按 RFC 9110 §13.1.5，条件不满足即忽略 Range 回 200 全量。
+    // 既有形态（忽略前回 206）会让第三方缓存把局部响应误当完整资源。
+    let if_range_present = headers.contains_key(header::IF_RANGE);
+
+    let range_header = if if_range_present {
+        None
+    } else {
+        headers
+            .get(header::RANGE)
+            .and_then(|v| v.to_str().ok())
+            // 多区间：忽略 Range（见 has_multiple_ranges 注），不进 206 分支
+            .filter(|h| !has_multiple_ranges(h))
+            .map(|h| parse_range(h, size))
+    };
     let range = match range_header {
         None => None,
         Some(Ok(r)) => r,
@@ -239,4 +261,40 @@ pub async fn file(
     }
     res.body(Body::from_stream(stream))
         .map_err(|e| AppError::internal(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// BUG-47 多区间检测锁测：两段/中置空段均视为多区间；单区间、尾逗号
+    /// （仅一个有效区间，与 parse_range 取首区间兼容）、非 bytes 单位不算多区间。
+    #[test]
+    fn multiple_range_specs_are_detected() {
+        assert!(has_multiple_ranges("bytes=0-1,3-4"));
+        assert!(has_multiple_ranges("bytes=100-105,200-205"));
+        assert!(has_multiple_ranges("bytes=0-1,,3-4"));
+        assert!(!has_multiple_ranges("bytes=0-1"));
+        assert!(!has_multiple_ranges("bytes=0-1,"));
+        assert!(!has_multiple_ranges("bytes=-4"));
+        assert!(!has_multiple_ranges("bytes=0-"));
+        assert!(!has_multiple_ranges("items=0-1,3-4"));
+    }
+
+    /// 单区间解析既有语义锁测（BUG-47 修复的护栏：多区间/If-Range 改在
+    /// handler 层忽略，parse_range 自身行为不变）。
+    #[test]
+    fn parse_range_single_range_semantics_unchanged() {
+        assert_eq!(parse_range("bytes=0-1", 256), Ok(Some((0, 2))));
+        assert_eq!(parse_range("bytes=-4", 256), Ok(Some((252, 4))));
+        assert_eq!(parse_range("bytes=250-", 256), Ok(Some((250, 6))));
+        // end 超界钳制
+        assert_eq!(parse_range("bytes=250-999", 256), Ok(Some((250, 6))));
+        // start ≥ size / suffix 0 / 倒挂 / 非法：不可满足（→ 416）
+        assert_eq!(parse_range("bytes=256-", 256), Err(()));
+        assert_eq!(parse_range("bytes=-0", 256), Err(()));
+        assert_eq!(parse_range("bytes=5-4", 256), Err(()));
+        assert_eq!(parse_range("bytes=x-y", 256), Err(()));
+        assert_eq!(parse_range("units=0-1", 256), Err(()));
+    }
 }
