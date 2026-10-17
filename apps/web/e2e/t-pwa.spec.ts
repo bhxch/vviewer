@@ -671,7 +671,9 @@ test(
     // fetch——classic worker 受页面 SW 控制，在线首次打开压缩包即入缓存，离线命中。
     // 注意与 ts-worker（module worker，创建时序决定受控与否）不同：classic worker
     // 受控语义稳定，无需主线程预热通道。
-    test.setTimeout(150_000);
+    // 预算：SW 预热 + 在线/离线双轮归档 + 换版级 SW 等待，mobile（375 触摸视口，
+    // 共享机 headless）实测全流程贴近 150s——留移动端余量
+    test.setTimeout(240_000);
     const tarBytes = new Uint8Array(
       readFileSync(fileURLToPath(new URL('../../../samples/m4/sample.tar', import.meta.url)))
     );
