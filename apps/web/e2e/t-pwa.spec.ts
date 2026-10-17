@@ -22,9 +22,10 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  *   不再 Failed to fetch」——从缓存枚举实际条目逐个离线 fetch。
  * - PWA-03/3：BUG-06 验收 3「离线打开本地代码文件显示 tree-sitter」——同会话
  *   断网后打开第二个 rust 文件（worker 已装配，与文档复核裁决「离线 cold.rs
- *   tree-sitter ts=15」同口径）。边界记录：manifest.json 无 runtimeCaching 策略
- *   （vite.config.ts:170-207 三条策略均不匹配 json），queries 由 worker 端 fetch
- *   不经 SW（vite.config.ts:187-188）——跨会话（reload 后）离线装配不属本验收。
+ *   tree-sitter ts=15」同口径）。边界记录：跨会话（reload 后）离线装配属
+ *   BUG-58 用例（下方，manifest.json 已入 precache 修复）。queries 由 worker
+ *   端 fetch（受控与否随 worker 创建时序，见 BUG-58 用例内注释）——本条同会话
+ *   不依赖跨会话资产通道。
  * - PWA-06/2：BUG-26 验收 2 快滑惯性多轮采样——README §3.2 第 5 条 unconfirmed
  *   场景落探针；现状本 harness 虚拟滚动路径惯性恒 0（b-pwa-mobile-performance
  *   .spec.ts:14-16 记录，疑似虚拟滚动改造引入的触摸动量回归），硬断言必败，
@@ -533,8 +534,8 @@ test('PWA-09/2: mp4/wav 打开到可起播（readyState≥HAVE_FUTURE_DATA）<1s
 // ── 探索复核确认缺陷回归占位（2026-10-10；发现于 PWA 与移动端域、根因属本域，
 // README §3.2.1 一域一文件、§3.2.4 修复合入前 test.fixme 占位、修复 PR 转正）──
 
-test.fixme(
-  'BUG-58 [探索]: /grammars/manifest.json 不在任何 SW 缓存策略内——离线启动会话 grammar 三层资产全败，create() 单例固化全会话降级 hljs',
+test(
+  'BUG-58 [已修复 2026-10-17]: /grammars/manifest.json 不在任何 SW 缓存策略内——离线启动会话 grammar 三层资产全败，create() 单例固化全会话降级 hljs',
   async ({ page }) => {
     // 复核成立（medium；hljs 兜底保证功能可用、无崩溃/数据丢失，仅离线启动会话
     // 主代码查看引擎全会话不可用且无法恢复）。发现于本域、根因属 PWA（SW 缓存
@@ -559,8 +560,12 @@ test.fixme(
     // 「高亮: hljs 兜底」而三份运行时缓存经 caches API 复查仍完整；B 组先在线后离线
     // 不 reload 保持 tree-sitter。截图与结构化结果
     // /share/rw/repo/server/vviewer/.temp/e2e-artifacts/recheck-pwa-e1/。
-    // 修复方向：manifest.json 纳入缓存通道（precache glob 补 .json 或 runtimeCaching
-    // 加 /grammars/manifest.json 条目），并考虑 create() 失败可重试；修复后本用例转正。
+    // 修复（2026-10-17，Wave 7）：manifest.json 纳入 precache（vite.config.ts
+    // globPatterns 补 .json）。不能走 runtimeCaching：create() 随 viewer.ts 启动
+    // 预热即 fetch manifest，首次访问时该请求早于 SW 接管、运行时路由拦不到，
+    // 离线启动会话恒 miss（实测诊断）；安装期 precache 确定化入缓存，首次离线
+    // 会话即命中，grammars 表可用后 worker 端 wasm/queries 走既有 vv-* 缓存。
+    // create() 失败可重试未在本条最小面内（空表降级链已断）。
     test.setTimeout(120_000);
     const consoleErrors: string[] = [];
     page.on('console', (msg) => {
@@ -583,6 +588,22 @@ test.fixme(
       })
       .toBeGreaterThanOrEqual(1);
 
+    // 第二段在线装载（受控会话）：首段会话的 ts-worker 创建早于 SW 接管（Chrome
+    // 对首访未受控页面创建的 module worker 终身不受控），worker 端 queries fetch
+    // 绕过 SW、vv-queries 未入缓存——离线会话受控 worker 经 SW 查询即 miss。
+    // 在线 reload 后 controller 自文档起在位，新 worker 受控，queries/剩余资产
+    // 全部经 CacheFirst 入缓存（真实「曾访问过」用户的确定化预热路径）。
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.vv-brand')).toBeVisible({ timeout: 10_000 });
+    await openTDir(page, [{ name: 'bug58-a2.rs', type: 'text/plain', bytes: RS_SRC_1 }]);
+    await openAndWaitTreeSitter(page, 'bug58-a2.rs');
+    await expect
+      .poll(async () => (await cacheUrls(page, 'vv-queries-')).length, {
+        timeout: 20_000,
+        message: '等待 vv-queries-* 缓存（受控 worker 经 SW 入缓存）'
+      })
+      .toBeGreaterThanOrEqual(1);
+
     // 离线启动：清 HTTP 缓存（保留 CacheStorage，复现确定化——manifest.json 无
     // Cache-Control，启发式新鲜度隔天过期同样命中）+ 断网 + reload；SW 壳经
     // precache 正常接管（BUG-15 通道），但 manifest.json 无任何缓存通道
@@ -593,8 +614,10 @@ test.fixme(
       await page.reload({ waitUntil: 'domcontentloaded' });
       await expect(page.locator('.vv-brand')).toBeVisible({ timeout: 10_000 });
 
-      // 离线注入同语言文件打开
+      // 离线注入同语言文件并打开（openTDir 仅注入目录来源，文件须经树行点击打开；
+      // openFileViaTree 内置窄视口抽屉适配，chromium/mobile 两 project 通用）
       await openTDir(page, [{ name: 'bug58-b.rs', type: 'text/plain', bytes: RS_SRC_2 }]);
+      await openFileViaTree(page, 'bug58-b.rs');
       // 修复判据 1：离线启动会话本地 tree-sitter 可用（缺陷态：「高亮: hljs 兜底 ·
       // 执行: 本地」，恢复联网前无法复原）
       await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 30_000 });

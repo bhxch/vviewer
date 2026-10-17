@@ -149,11 +149,18 @@ export default defineConfig({
       },
       workbox: {
         // 应用壳：打包产物 js/css + 字体；图标与 wasm 资产走静态拷贝不进预缓存。
+        // json（BUG-58 配套）：grammars/manifest.json 必须走 precache 而非
+        // runtimeCaching——create() 随 viewer.ts 启动预热即 fetch manifest，首次
+        // 访问该请求早于 SW 接管（运行时路由拦不到、缓存建不起来），离线启动
+        // 会话 CacheFirst 恒 miss、grammar 三层全败降级 hljs。安装期 precache
+        // 确定化入缓存，首次离线会话即命中；内容随 grammar 集构建演进，workbox
+        // 按内容 revision 翻新（换版 SW 更新即重装）。产物内 .json 仅此两文件
+        // （grammars/manifest.json + _app/version.json，后者 <100B）。
         // html 不入 glob：index.html 只有 additionalManifestEntries 单一来源
         //（build/ 下无其他 html，已核实）——workbox-build 对 additional 条目不去重
         //（direct push），若 glob 也抓到 index.html 会产生同 URL 双 revision 条目，
         // SW 求值期抛 add-to-cache-list-conflicting-entries → 完全死 SW。
-        globPatterns: ['**/*.{js,css,woff2}'],
+        globPatterns: ['**/*.{js,css,woff2,json}'],
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/^\/api\//],
         // BUG-15：vite-plugin-pwa 生成 precache manifest 的时点早于 SvelteKit
