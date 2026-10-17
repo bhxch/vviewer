@@ -1059,6 +1059,11 @@ export function renderCode(
         if (err instanceof RemoteComputeError) {
           // 显式 remote 失败（remote 策略，router 不回退）：真实错误如实展示错误卡，
           // 不静默降级 hljs——静默回退会掩盖服务端故障并造成"高亮结果与策略不符"的错觉
+          // BUG-56：engine/computeWhere 同步置终值（与 chunk 失败路径 :927 同口径）——
+          // 否则 engine 停留初始 'pending'（状态栏「解析中…」永不落定）、computeWhere
+          // 停留请求期回填的 'remote'（失败后补出「执行: 远程」且不自愈）
+          engine = 'plain';
+          computeWhere = null;
           showErrorCard(target, err.message, { name: opts.ext ? `.${opts.ext}` : '代码' });
           return;
         }

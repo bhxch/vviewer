@@ -508,6 +508,10 @@ describe('renderCode（tree-sitter 主路径，fake client）', () => {
     expect(host.querySelector('.vv-error-card')?.textContent).toContain('HTTP 500');
     expect(host.innerHTML).not.toContain('hljs-'); // 未静默降级 hljs 整文件
     expect(host.querySelector('[class*="ts-"]')).toBeNull();
+    // BUG-56：失败后 engine 置终值（不停留 pending「解析中…」）、computeWhere 清空
+    //（不补出「执行: 远程」）——与大文件 chunk 失败路径同口径
+    expect(handle.getEngine()).toBe('plain');
+    expect(handle.getComputeWhere()).toBeNull();
     handle.destroy();
   });
 

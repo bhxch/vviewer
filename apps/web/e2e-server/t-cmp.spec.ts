@@ -397,31 +397,18 @@ test.fixme('BUG-36 [探索]: 服务端 compute 高亮单行大文本 O(n²)—�
 // 断言的归 e2e-server；复用上方 :4181 同源 compute 实例拓扑与 helper）。来源标注
 // [探索]：缺陷由探索/复核会话独立复现确认。转正前保持 test.fixme（修复 PR 转正）。
 
-test.fixme(
-  'BUG-56 [探索]: 显式 remote 策略远程高亮失败后 engine 停留初始值 pending——状态栏「高亮」段永久停留「解析中…」并补出「执行: 远程」，与大文件 chunk 失败路径（置终值）口径不一致',
+test(
+  'BUG-56 [探索]: 显式 remote 策略远程高亮失败后 engine 置终值——状态栏不停留「解析中…」、不补出「执行: 远程」（与大文件 chunk 失败路径口径一致）',
   async ({ page }) => {
-    // 复核成立（low，2026-10-10）：≤2MB 常规链 jsonc（∉ 301 宣告集）在显式 remote 下
-    // POST /api/compute/highlight 返回 400（RemoteComputeError → 错误卡片），整文件
-    // 主路径 catch 分支 showErrorCard 后直接 return 不置终值
-    // （packages/render-text/src/code.ts:896-903；engine 初始 'pending' :583），状态栏
-    // 「高亮: 解析中…」（apps/web/src/lib/ViewerPane.svelte:18）永久驻留且 :242 补出
-    // 「执行: 远程」——computeWhere 在请求期已被 onWhere 回填 'remote'、失败后无人
-    // 清空（t0 读不到「执行: 远程」仅因状态栏 250ms 轮询）。对照：大文件 chunk 路径
-    // 同 400 后 `engine='plain'; computeWhere=null`（code.ts:773-778，注释明言
-    // 「engine 置非 pending 终值」）→ 状态栏「纯文本」、无执行段——与既裁决口径
-    // （失败后引擎置终值、不停留解析中）不一致。既有 CMP-04 用例
-    // （b-compute-global-search-server.spec.ts:379-386）只断言错误卡片与 400，未锚定
-    // 状态栏终值，确非已覆盖。
-    // 最小复现：① serve --root <data> --web-dist apps/web/build --port 8433 --compute
-    // ② 页面 localStorage 注入 vviewer:settings={"computePolicy":"remote"} ③ 顶栏
-    // 「连接服务器」连本实例 ④ 打开 4 行 jsonc → 错误卡片「无法预览此文件/远程高亮
-    // 失败: HTTP 400」⑤ t0 与 t5/t15 各读一次 .vv-statusbar：t5 起逐字驻留
-    // 「高亮: 解析中… · 执行: 远程 · …」不自愈。
-    // 证据（复核轮独立取得）：截图 /tmp/vv-review-cmp-e1/rv-t0.png、rv-t5.png；
-    // POST 直呼 lang=jsonc → 400 "unsupported language: jsonc"（301 宣告集无 jsonc）、
-    // 对照 lang=python → 200；同 jsonc 2.3MB 走 chunk 路径 t5 即「纯文本」置终值。
-    // 修复方向：整文件主路径 catch RemoteComputeError 与 chunk 路径对齐置终值
-    // （engine 置非 pending 终值、computeWhere 清空）；修复后转正，下方末条断言即转正判据。
+    // 2026-10-10 复核成立（low）；2026-10-17 清偿转正。缺陷态：整文件主路径
+    // jsonc（∉ 301 宣告集）显式 remote 下 POST /api/compute/highlight 真实 400
+    // （RemoteComputeError → 错误卡片）后直接 return，engine 停留初始 'pending'
+    // （状态栏「高亮: 解析中…」永久驻留）且 computeWhere 停留请求期回填的
+    // 'remote'（:242 补出「执行: 远程」不自愈）——与大文件 chunk 失败路径
+    // （engine='plain' + computeWhere=null，状态栏「纯文本」、无执行段）口径不一。
+    // 修复：packages/render-text/src/code.ts 整文件 tree-sitter 主路径
+    // RemoteComputeError catch 分支补置终值（engine='plain' + computeWhere=null，
+    // 错误卡片语义不变）。转正判据即下方末条断言：失败后状态栏不停留「解析中」。
     test.setTimeout(60_000);
     const statuses: number[] = [];
     page.on('response', (r) => {
@@ -439,6 +426,7 @@ test.fixme(
     // 失败后 engine 置终值——状态栏不再停留「解析中…」，与大文件 chunk 失败路径
     // （「纯文本」、无执行段）同口径
     await expect(page.locator('.vv-statusbar')).not.toContainText('解析中', { timeout: 10_000 });
+    await expect(page.locator('.vv-statusbar')).not.toContainText('执行: 远程');
   }
 );
 
