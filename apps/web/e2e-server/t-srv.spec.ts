@@ -337,10 +337,10 @@ test('SRV-06/2: watcher 故障注入→降级后 changed 仍流动→自愈 reco
     // 验收 3/5：三段状态全部到位；全程无 watch-error（前端终态语义，服务端
     // 状态机设计保证——Recovering/降级/恢复只经 watch-degraded/watch-recovered
     // 与 changed 表达）
-    expect(sawDegradedPoll).toBe(true, '应收到降级帧（backend=Poll）');
-    expect(sawChangedA).toBe(true, '降级窗口内变更应照常 changed');
-    expect(sawRecovered).toBe(true, '探试成功后应收到 watch-recovered');
-    expect(sawChangedB).toBe(true, '恢复实时后变更应照常 changed');
+    expect(sawDegradedPoll, '应收到降级帧（backend=Poll）').toBe(true);
+    expect(sawChangedA, '降级窗口内变更应照常 changed').toBe(true);
+    expect(sawRecovered, '探试成功后应收到 watch-recovered').toBe(true);
+    expect(sawChangedB, '恢复实时后变更应照常 changed').toBe(true);
     expect(acc).not.toContain('watch-error');
   } finally {
     await stopServer(child, 'srv-t-srv062');
