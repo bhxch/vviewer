@@ -680,29 +680,63 @@ test.fixme('BUG-50 [探索]: CODE_CAPTURES 53 项清单与各语言 highlights.s
   //   在 ≥2 主题下计算色随主题变化落。
 });
 
-test.fixme('BUG-51 [探索]: 暗色偏好用户每次导航/刷新先渲染完整亮色首帧——app.html 无预置脚本，data-theme-mode 唯一写入点是 AppShell onMount', async () => {
-  // 现象：系统偏好暗色用户每次导航/刷新都先渲染完整亮色首帧（白底、html 无 data-theme-mode
-  //   属性），直至 JS bundle 执行写入 data-theme-mode 后才恢复暗色。独立复现 6/6：本地白帧期约
-  //   17~167ms（首访最长，二/三访因缓存缩短至 17~44ms；网络越慢越长）；仅影响暗色偏好用户
-  //   （light 偏好对照组全程白底无闪烁）。
-  // 根因（已核对源码）：apps/web/src/app.html:3-7 head 仅两条 meta theme-color、无内联预置脚本；
-  //   apps/web/src/app.css:6 亮色默认（--ui-bg:#ffffff）、:29 body background:var(--ui-bg)，暗色
-  //   变量全部挂在 :root[data-theme-mode="dark"]（:13-19）与 @media(prefers-color-scheme:dark)
-  //   :root[data-theme-mode="system"]（:20-27）之下；rg 全源码确认 data-theme-mode 唯一写入点是
-  //   apps/web/src/lib/AppShell.svelte:51 onMount——暗色恢复唯一入口在 JS bundle 执行之后。
-  // 最小复现（chromium）：
-  //   1) newContext({colorScheme:'dark'})；addInitScript 在 document-start 挂 rAF 逐帧采样
-  //      getComputedStyle(document.body).backgroundColor 与 html data-theme-mode；
-  //   2) 导航到 baseURL（4199/8391 同样）：首帧 body 背景 rgb(255,255,255) 且 html 无
-  //      data-theme-mode 属性，持续至 JS 挂载写入 data-theme-mode=system 后变暗
-  //      （复核实测 4199 首访 60→227ms、二访 21→54ms、三访 32→49ms；8391 首访 12→162ms、
-  //      二访 11→44ms、三访 16→49ms）；
-  //   3) 交叉验证：route abort 全部 *.js 后页面永久停在白底/mode=null（两站 5s 采样均仅一帧）
-  //      → 暗色唯一入口在 JS；light 对照组首尾均白底、无闪烁。
-  // 证据：复核脚本 /tmp/review-theme-e3/fouc.mjs（6 组采样全部复现；视觉证据 dark-early.png
-  //   完整亮色 UI / dark-settled.png #0d1117）；上报脚本 .temp/explore-theme/p5-fouc.mjs 4 组
-  //   采样全部复现（4199 首访 77→147ms、8391 首访 30→173ms，同一量级）。
-  // 转正提示：修复 = app.html head 加内联预置脚本（按 localStorage/默认值在 %sveltekit.head%
-  //   之前写 data-theme-mode）；断言 = colorScheme:dark 下 rAF 首帧采样 body 背景即暗色、
-  //   html 首帧即带 data-theme-mode 属性。
+// BUG-51 首帧采样探针：document-start 起 rAF 逐帧记录 body 背景 + html
+// data-theme-mode（原复现探针同口径；body 未解析出的帧跳过，保证帧 0 必有背景值）。
+async function sampleFirstFrames(page: Page, settings: Record<string, unknown> | null): Promise<void> {
+  await page.addInitScript((s) => {
+    if (s !== null) localStorage.setItem('vviewer:settings', JSON.stringify(s));
+    const w = window as unknown as { __vvFrames?: { bg: string; mode: string | null }[] };
+    w.__vvFrames = [];
+    const sample = (): void => {
+      if (document.body) {
+        w.__vvFrames!.push({
+          bg: getComputedStyle(document.body).backgroundColor,
+          mode: document.documentElement.getAttribute('data-theme-mode')
+        });
+      }
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }, settings);
+}
+
+function firstFrames(page: Page): Promise<{ bg: string; mode: string | null }[]> {
+  return page.evaluate(() =>
+    (window as unknown as { __vvFrames: { bg: string; mode: string | null }[] }).__vvFrames.slice(0, 3)
+  );
+}
+
+// 修复背景（原占位注释压缩）：暗色偏好用户每次导航/刷新都先渲染完整亮色首帧（FOUC）——
+// data-theme-mode 唯一写入点曾是 AppShell onMount，暗色恢复唯一入口在 JS bundle 执行之后。
+// 修复 = app.html head 内联预置脚本（%sveltekit.head% 之前按 localStorage vviewer:settings
+// 的 themeMode 写 data-theme-mode，缺省 system；与 AppShell dataset 写入逐值同口径）。
+test('BUG-51 转正: colorScheme:dark 首帧即暗——预置脚本先于 JS bundle 落 html[data-theme-mode]', async ({ page }) => {
+  await sampleFirstFrames(page, null); // 无快照 → loadSettings 默认 themeMode=system
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.goto('/');
+  await expect(page.locator('.vv-topbar')).toBeVisible(); // 应用已挂载（采样窗口覆盖挂载前后）
+  const [first] = await firstFrames(page);
+  expect(first!.mode).toBe('system');
+  expect(first!.bg).toBe('rgb(13, 17, 23)'); // 首帧即暗（修复前 rgb(255,255,255) 且 mode=null）
+});
+
+test('BUG-51 转正: 显式 themeMode=dark 在 colorScheme:light 下首帧即暗', async ({ page }) => {
+  await sampleFirstFrames(page, { themeMode: 'dark' });
+  await page.goto('/'); // OS 偏好 light：显式 dark 槽优先，预置脚本同样命中
+  await expect(page.locator('.vv-topbar')).toBeVisible();
+  const [first] = await firstFrames(page);
+  expect(first!.mode).toBe('dark');
+  expect(first!.bg).toBe('rgb(13, 17, 23)');
+});
+
+test('BUG-51 转正: light 对照组首帧即亮、采样帧全程无暗色闪烁', async ({ page }) => {
+  await sampleFirstFrames(page, { themeMode: 'light' });
+  await page.goto('/');
+  await expect(page.locator('.vv-topbar')).toBeVisible();
+  const frames = await firstFrames(page);
+  expect(frames.length).toBeGreaterThan(0);
+  for (const f of frames) {
+    expect(f.mode).toBe('light');
+    expect(f.bg).toBe('rgb(255, 255, 255)');
+  }
 });
