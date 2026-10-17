@@ -1,4 +1,5 @@
-//! path 参数安全解析：清洗（绝对路径/`..` 段拒绝）+ canonicalize 越界校验。
+//! path 参数安全解析：清洗（绝对路径/`..` 段/NUL 拒绝）+ canonicalize 越界校验
+//! + 非 UTF-8 文件名 `%XX` 形态的寻址回退。
 
 use std::path::PathBuf;
 
@@ -60,6 +61,84 @@ pub(crate) fn root_out_of_range(idx: usize) -> AppError {
     AppError::bad_request(format!("root index out of range: {idx}"))
 }
 
+/// 十六进制位 → 数值（严格大小写混合 hex，不接受 +/- 符号）。
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// 组件级 `%XX`→字节解码（BUG-48 寻址回退的构件，与 tree 列出侧
+/// `encode_invalid_utf8` 互逆）：至少成功解码一处才返回 Some；`%` 后非
+/// 严格两位 hex 的序列按字面保留。
+fn percent_decode_bytes(comp: &str) -> Option<Vec<u8>> {
+    let bytes = comp.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    let mut decoded = false;
+    while i < bytes.len() {
+        let hex = if bytes[i] == b'%'
+            && i + 3 <= bytes.len()
+            && bytes[i + 1].is_ascii_hexdigit()
+            && bytes[i + 2].is_ascii_hexdigit()
+        {
+            Some((hex_val(bytes[i + 1]), hex_val(bytes[i + 2])))
+        } else {
+            None
+        };
+        match hex {
+            Some((Some(hi), Some(lo))) => {
+                out.push(hi * 16 + lo);
+                i += 3;
+                decoded = true;
+            }
+            _ => {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+    }
+    decoded.then_some(out)
+}
+
+/// 路径级 `%XX` 解码重写（BUG-48）：tree 列出的非 UTF-8 名以 `%XX` 形态
+/// 返回，其字面路径不存在；字面 canonicalize NotFound 后按组件解码重试。
+/// 任一组件解码结果引入路径语法（`/`、`\`、NUL）或等于 `..` → 400（否则
+/// 可借 `%2E%2E` 绕过 clean_relative 的穿越校验）。无组件可解码 → None
+/// （不重试，按原 404 报错）。
+fn percent_decoded_path(p: &std::path::Path) -> Result<Option<PathBuf>, AppError> {
+    use std::os::unix::ffi::OsStringExt;
+    let mut out = PathBuf::with_capacity(p.as_os_str().len());
+    let mut changed = false;
+    for comp in p.components() {
+        let os = comp.as_os_str();
+        match os.to_str() {
+            Some(s) => {
+                if let Some(decoded) = percent_decode_bytes(s) {
+                    if decoded.contains(&b'/')
+                        || decoded.contains(&b'\\')
+                        || decoded.contains(&0)
+                        || decoded == b".."
+                    {
+                        return Err(AppError::bad_request(
+                            "path must not contain '..' or path separators",
+                        ));
+                    }
+                    changed = true;
+                    out.push(std::ffi::OsString::from_vec(decoded));
+                } else {
+                    out.push(os);
+                }
+            }
+            None => out.push(os),
+        }
+    }
+    Ok(changed.then_some(out))
+}
+
 /// [`resolve`] 的多根参数化形态：按 `root_idx` 选择基准根。
 /// 越界 → 400 "root index out of range"；清洗与越界校验均对所选根。
 pub async fn resolve_at(
@@ -73,9 +152,20 @@ pub async fn resolve_at(
         .ok_or_else(|| root_out_of_range(root_idx))?;
     let joined = clean_relative(&root.raw, raw)?;
 
-    let canonical = tokio::fs::canonicalize(&joined)
-        .await
-        .map_err(classify_canonicalize_error)?;
+    let canonical = match tokio::fs::canonicalize(&joined).await {
+        Ok(c) => c,
+        // BUG-48 寻址回退：字面 NotFound 且含可解码组件 → `%XX` 解码重写后
+        // 重试（仍失败按分类报错）；解码前先过 `..`/分隔符走私防护
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            match percent_decoded_path(&joined)? {
+                Some(decoded) => tokio::fs::canonicalize(&decoded)
+                    .await
+                    .map_err(classify_canonicalize_error)?,
+                None => return Err(classify_canonicalize_error(e)),
+            }
+        }
+        Err(e) => return Err(classify_canonicalize_error(e)),
+    };
 
     if !canonical.starts_with(&root.canonical) {
         // symlink 等手段越出 root（含 root 自身之外的一切目标）
@@ -135,5 +225,50 @@ mod tests {
         let err = clean_relative(std::path::Path::new("/tmp"), Some("a\0b")).unwrap_err();
         assert_eq!(err.0, axum::http::StatusCode::BAD_REQUEST);
         assert_eq!(err.1, "path contains NUL byte");
+    }
+
+    /// BUG-48 组件级解码：与 tree 列出侧 `%XX` 编码互逆；无 `%HH` 序列
+    /// （含字面 `%` 非法序列）不解码（None → 不触发回退重试）。
+    #[test]
+    fn percent_decode_bytes_roundtrips_fidelity_names() {
+        assert_eq!(
+            percent_decode_bytes("bad%FF%FEname.txt").unwrap(),
+            b"bad\xff\xfename.txt".to_vec()
+        );
+        assert_eq!(percent_decode_bytes("a%2Bb%20c").unwrap(), b"a+b c".to_vec());
+        // 无 % → None；字面 % 与非法 hex 序列按原样保留且不算解码成功
+        assert_eq!(percent_decode_bytes("plain.txt"), None);
+        assert_eq!(percent_decode_bytes("100%.txt"), None);
+        assert_eq!(percent_decode_bytes("%ZZ"), None);
+        // 混合：%2E 解码、%ZZ 字面
+        assert_eq!(percent_decode_bytes("a%2Eb%ZZ").unwrap(), b"a.b%ZZ".to_vec());
+    }
+
+    /// BUG-48 路径级重写：可解码时重写整条路径；无组件可解码 → None。
+    #[test]
+    fn percent_decoded_path_rewrites_only_encoded_components() {
+        use std::os::unix::ffi::OsStringExt;
+        let p = std::path::Path::new("/root/dir/bad%FF%FEname.txt");
+        let out = percent_decoded_path(p).unwrap().unwrap();
+        assert_eq!(
+            out,
+            PathBuf::from(std::ffi::OsString::from_vec(
+                b"/root/dir/bad\xff\xfename.txt".to_vec()
+            ))
+        );
+        // 全组件无 %HH → None（resolve_at 不重试，保持 404）
+        let p = std::path::Path::new("/root/plain.txt");
+        assert!(percent_decoded_path(p).unwrap().is_none());
+    }
+
+    /// BUG-48 走私防护：解码结果不得引入 `..` / 路径分隔符 / NUL——
+    /// `%2E%2E` 形态若放行可绕过 clean_relative 的穿越校验。
+    #[test]
+    fn percent_decoded_path_rejects_traversal_smuggling() {
+        use axum::http::StatusCode;
+        for evil in ["/root/a/%2E%2E/b", "/root/a%2Fb", "/root/a%00b", "/root/%5C.."] {
+            let err = percent_decoded_path(std::path::Path::new(evil)).unwrap_err();
+            assert_eq!(err.0, StatusCode::BAD_REQUEST, "case: {evil}");
+        }
     }
 }

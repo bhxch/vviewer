@@ -1,5 +1,6 @@
 //! `GET /api/tree`：单层目录列表（目录优先 + 自然排序）。
 
+use std::ffi::OsStr;
 use std::time::UNIX_EPOCH;
 
 use axum::extract::{Query, State};
@@ -39,6 +40,44 @@ pub struct TreeResponse {
     pub entries: Vec<TreeEntry>,
 }
 
+/// 文件名保真转换（BUG-48）：合法 UTF-8 名原样返回；含非法字节的名把非法
+/// 字节 percent-encode 为 `%XX`（合法段原样），产出「可列出且可寻址」的可逆
+/// 形态。此前 `to_string_lossy` 把非法字节替换为 U+FFFD——替换名与磁盘真实
+/// 字节不匹配，该文件一旦被列出便无法经任何 HTTP 路径寻址（guard 侧配套
+/// `%XX` 解码回退见 guard.rs）。
+fn file_name_fidelity(name: &OsStr) -> String {
+    match std::str::from_utf8(name.as_encoded_bytes()) {
+        Ok(s) => s.to_string(),
+        Err(_) => encode_invalid_utf8(name.as_encoded_bytes()),
+    }
+}
+
+/// 非法 UTF-8 字节序列的 percent-encode：`std::str::from_utf8` 逐段校验，
+/// 合法段原样拼接、错误处按 `error_len`（None = 不完整尾部，取剩余全部）
+/// 逐字节 `%XX`。与 guard 的解码回退互为逆变换。
+fn encode_invalid_utf8(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() + 8);
+    let mut rest = bytes;
+    loop {
+        match std::str::from_utf8(rest) {
+            Ok(s) => {
+                out.push_str(s);
+                return out;
+            }
+            Err(e) => {
+                let valid = e.valid_up_to();
+                // valid_up_to 保证前缀合法；unwrap 只在切片越界时不可能发生
+                out.push_str(std::str::from_utf8(&rest[..valid]).unwrap_or(""));
+                let bad = e.error_len().unwrap_or(rest.len() - valid);
+                for b in &rest[valid..valid + bad] {
+                    out.push_str(&format!("%{b:02X}"));
+                }
+                rest = &rest[valid + bad..];
+            }
+        }
+    }
+}
+
 pub async fn tree(
     State(state): State<AppState>,
     Query(q): Query<TreeQuery>,
@@ -52,7 +91,7 @@ pub async fn tree(
     let mut rd = tokio::fs::read_dir(&dir).await.map_err(AppError::from)?;
     let mut entries: Vec<TreeEntry> = Vec::new();
     while let Some(e) = rd.next_entry().await.map_err(AppError::from)? {
-        let name = e.file_name().to_string_lossy().into_owned();
+        let name = file_name_fidelity(e.file_name().as_os_str());
         if state.hidden && name.starts_with('.') {
             continue;
         }
@@ -134,4 +173,26 @@ fn split_digits(b: &[u8]) -> (&[u8], &[u8]) {
 fn strip_leading_zeros(d: &[u8]) -> &[u8] {
     let first_non_zero = d.iter().position(|&c| c != b'0').unwrap_or(d.len());
     &d[first_non_zero..]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// BUG-48 保真列出锁测：合法 UTF-8（含空格/中文/emoji）原样透传；
+    /// 非法字节按 `%XX` 大写十六进制编码、合法段保持原样（与 guard 解码
+    /// 回退互为逆变换）。
+    #[test]
+    fn file_name_fidelity_passes_utf8_and_encodes_invalid_bytes() {
+        use std::os::unix::ffi::OsStrExt;
+        assert_eq!(file_name_fidelity(OsStr::new("ok.txt")), "ok.txt");
+        assert_eq!(file_name_fidelity(OsStr::new("空格 名.txt")), "空格 名.txt");
+        assert_eq!(file_name_fidelity(OsStr::new("emoji😀.txt")), "emoji😀.txt");
+        // 磁盘形态：bad ff fe 6e... → bad%FF%FEname.txt
+        let raw = OsStr::from_bytes(b"bad\xff\xfename.txt");
+        assert_eq!(file_name_fidelity(raw), "bad%FF%FEname.txt");
+        // 前缀 + 不完整多字节尾：合法段保留、尾字节逐个编码
+        let raw = OsStr::from_bytes(b"\xe4\xb8\xad\xff.txt");
+        assert_eq!(file_name_fidelity(raw), "中%FF.txt");
+    }
 }

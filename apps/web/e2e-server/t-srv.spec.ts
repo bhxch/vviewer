@@ -548,7 +548,7 @@ test('BUG-47 [探索]: 多区间 Range 静默丢弃第二区间（单区间 206 
   expect(suffix.headers.get('content-range')).toBe('bytes 252-255/256');
 });
 
-test.fixme('BUG-48 [探索]: 非 UTF-8 文件名经 /api/tree 列出（U+FFFD 替换）后任何 HTTP 路径名均不可寻址（恒 404）', async () => {
+test('BUG-48 [探索]: 非 UTF-8 文件名经 /api/tree 列出（U+FFFD 替换）后任何 HTTP 路径名均不可寻址（恒 404）', async () => {
   // 复核确认（维持 low）：边界场景缺口——文件在磁盘上完好可读、正常名（空格/中文等）
   // 不受影响，但该文件一旦被服务端列出便无法通过任何 HTTP 路径名寻址，树中呈现为乱码名。
   // 根因：server/src/routes/tree.rs:53 `e.file_name().to_string_lossy().into_owned()`
