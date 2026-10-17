@@ -1,7 +1,11 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { test, expect, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
+import { assertPortFree, stopServer, waitHealthy } from './serverHarness';
 
 /**
  * t-hl E2E（t- 前缀 = 2026-10-10 代码高亮域覆盖缺口补齐轮，不改动任何既有 spec）。
@@ -445,12 +449,75 @@ test('HL-10/2: rs/ts/sh 三语言本地路径矩阵均获 tree-sitter 高亮（�
   }
 });
 
-test.fixme('HL-10/3: 远程策略 rs/ts/sh 三语言 POST /api/compute/highlight 对照（报告实测 rs=98/ts=87/sh=23 个 ts-* span）', async () => {
-  // 前端套件 :4173 为 vite preview 纯 web 形态，无 --compute 实例可连，远程对照现状必不可执行：
-  // 需 release server --compute 同源实例（拓扑参照 e2e-server/b-compute-global-search-server.spec.ts
-  // 的 :4180 同源辅助实例模式起停，非常驻）。服务端 compute 已对齐 301 语言
-  // （server/src/compute/queries.rs:288 断言 301），rs/ts/sh 均在宣告集内，落位后按
-  // 「状态栏『高亮: tree-sitter · 执行: 远程』+ POST 发生 + ts-* span > 0」落正式断言。
+test('HL-10/3: 远程策略 rs/ts/sh 三语言 POST /api/compute/highlight 对照（报告实测 rs=98/ts=87/sh=23 个 ts-* span）', async ({
+  page
+}, testInfo) => {
+  // 前端套件 :4173 为 vite preview 纯 web 形态，无 --compute 实例可连，远程对照此前
+  // 不可执行。转正（2026-10-16，Wave 2）：用例内自起 release server --compute 同源
+  // 实例（:4181，非常驻，起停拓扑照 e2e-server/b-compute-global-search-server.spec.ts
+  // 的 :4180 同源辅助实例模式 + serverHarness 的 waitHealthy/stopServer）；服务端
+  // compute 已对齐 301 语言（server/src/compute/queries.rs:288 断言 301），rs/ts/sh
+  // 均在宣告集内。远程路径要求 server-served 来源（注入通道的本地 store 无
+  // remoteBase，highlightClient 的 remoteAttempted 前置 !!src 恒本地）——文件经
+  // fixture root 下发、同源连接表单进入 server store 树打开。
+  // 数量判据按报告量级放宽为「>0」：区间数随 web-tree-sitter/查询资产版本漂移，
+  // 硬编码 98/87/23 会随资产升级假红（同 BUG-65 判据「量级随 hljs 版本漂移不作
+  // 硬编码」口径）。
+  test.skip(testInfo.project.name !== 'chromium', '自起 --compute 实例仅桌面基准跑（HL-04/2 前例；移动视口连接表单无既有用例背书）');
+  const specDir = dirname(fileURLToPath(import.meta.url));
+  const BIN = resolve(specDir, '../../../server/target/release/vviewer');
+  test.skip(!existsSync(BIN), 'release server 未构建（cargo build --release 后可用）');
+  test.setTimeout(180_000);
+  const highlightPosts: string[] = [];
+  page.on('request', (r) => {
+    if (r.method() === 'POST' && r.url().includes('/api/compute/highlight')) highlightPosts.push(r.url());
+  });
+
+  const root = mkdtempSync(join(tmpdir(), 'thl-compute-'));
+  writeFileSync(join(root, 'thl-rs.rs'), RS_A);
+  writeFileSync(join(root, 'thl-matrix.ts'), TS_SRC);
+  writeFileSync(join(root, 'thl-deploy.sh'), SH_SRC);
+  const BASE = 'http://127.0.0.1:4181'; // 避开 e2e-server 套件的 4178/4179/4180
+  await assertPortFree(BASE); // 遗留进程预检（须在 spawn 前——spawn 后 health 命中的是自己）
+  const server = spawn(
+    BIN,
+    ['serve', '--root', root, '--web-dist', resolve(specDir, '../build'), '--port', '4181', '--compute'],
+    { stdio: 'ignore' }
+  );
+  try {
+    await waitHealthy(BASE);
+    // 同源连接（页面即该实例伺服，无 token）：server store 树出现即连接完成
+    await page.goto(`${BASE}/`);
+    await page.getByRole('button', { name: '连接服务器' }).click();
+    await page.getByLabel('服务器地址').fill(BASE);
+    await page.getByRole('button', { name: '连接', exact: true }).click();
+    await expect(page.locator('.vv-tree-row', { hasText: 'thl-' }).first()).toBeVisible({ timeout: 10_000 });
+    // 先切策略再开文件（切策略对已打开文件不回溯，域文档 4.4-2 复核要点）
+    await page.getByLabel('计算策略').selectOption('remote');
+    for (const [name, lang] of [
+      ['thl-rs.rs', 'rust'],
+      ['thl-matrix.ts', 'typescript'],
+      ['thl-deploy.sh', 'bash']
+    ] as const) {
+      const drawer = await openDrawerIfNarrow(page);
+      await page.locator('.vv-tree-row', { hasText: name }).first().click();
+      await closeDrawerIfOpened(page, drawer);
+      await expect(page.locator('.vv-tab.active', { hasText: name })).toBeVisible();
+      await expect(page.locator('.vv-code-pre span[class^="ts-keyword"]').first()).toBeVisible({
+        timeout: 60_000
+      });
+      await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 20_000 });
+      await expect(page.locator('.vv-statusbar')).toContainText('执行: 远程', { timeout: 20_000 });
+      await expect(page.locator('.vv-statusbar')).toContainText(`语言: ${lang}`, { timeout: 20_000 });
+      await expect(page.locator('.vv-code-pre span[class^="hljs-"]')).toHaveCount(0);
+      await expect(page.locator('.vv-error-card')).toHaveCount(0);
+    }
+    // 远程对照核心：三语言均真实发生服务端 compute POST（报告缺陷态为零请求）
+    expect(highlightPosts.length).toBeGreaterThanOrEqual(3);
+  } finally {
+    await stopServer(server, 'thl-10-3');
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('HL-11/2: 约 2MB 解析期间 rAF 帧率不掉（域文档实测 53fps；下限放宽防环境抖动）', async ({
