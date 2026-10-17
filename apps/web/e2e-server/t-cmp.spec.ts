@@ -15,9 +15,10 @@ import { stopServer, waitHealthy } from '../e2e/serverHarness';
  *   301」，此前仅 server 单测覆盖（queries.rs:288 长度 301、health.rs:152 排序+抽样），
  *   两个 e2e 套件零断言。compute 实例断言 301 条 + canonical 排序 + 集内抽样；
  *   无 --compute 对照实例断言字段整体省略（health.rs:58 单测同口径）。
- * - CMP-02/2：BUG-10 验收 2「关标签重开二次打开可观测更快（(path,mtime,size) 缓存）」
- *   占位（test.fixme）——实现裁决记录（域文档 L66）：服务端 intervals 缓存与 gzip 随
- *   spec 未决 #6 顺延，现状必失败；缓存落地后转正式断言。
+ * - CMP-02/2：BUG-10 验收 2「关标签重开二次打开可观测更快」——服务端响应缓存
+ *   （highlight.rs 64 条 LRU）+ cacheId 会话校验协议（2026-10-17 spec 未决 #6
+ *   清偿）：重开同 (path,lang,range) 回传令牌命中极小帧，不重复传输 intervals
+ *   本体。断言按阶段 4 range chunk 契约重锚（同签名 chunk 二次体 < 首次 50%）。
  * - CMP-03/2：BUG-22 验收 3 路由矩阵重锚定——原矩阵「rs/go/c/cpp/java/sql→hljs 兜底·
  *   本地」系阶段 1（injections 接线）/阶段 3（auto 不限大小走服务端，文档 L67/L131）
  *   之前的实测；按新契约这些 server-served 宣告集内语言在 auto 下应走 tree-sitter·远程。
@@ -154,19 +155,37 @@ test('CMP-01/2: --compute 实例 health computeLanguages 宣告 301 条（排序
   expect('computeLanguages' in bare).toBe(false);
 });
 
-test.fixme(
-  'CMP-02/2: 同文件关标签重开二次打开可观测更快（(path,mtime,size) intervals 缓存）',
+test(
+  'CMP-02/2: 同文件关标签重开二次打开可观测更快（(path,mtime,size) 服务端缓存 + cacheId 会话校验极小帧）',
   async ({ page }) => {
-    // 占位原因（域文档 L66 实现裁决记录）：验收 2 的服务端 intervals 缓存与 gzip 随
-    // spec 未决 #6 顺延——现状二次打开仅快 7.6~8% 且有波动、响应体 17MB 级无缓存
-    // 字段，下述断言现状必失败。缓存落地后去掉 fixme 转正式断言。
+    // 验收 2（BUG-10）：「同文件关标签重开，二次打开可观测地更快」。实现落点
+    // （spec 未决 #6 清偿，2026-10-17）：服务端响应缓存早已落地（highlight.rs 64 条
+    // LRU，键 (canonical_path, mtime, size, lang, startLine, lineCount)），本轮补
+    // cacheId 会话校验协议——客户端重开同 (path,lang,range) 时回传上次响应令牌，
+    // 服务端校验一致即回 `{"cached":true,"cacheId","baseLine"}` 极小帧，不再重复
+    // 传输 intervals 本体（客户端复用其会话缓存，apps/web highlightRouter.ts）。
+    // 断言按阶段 4 range 契约重锚（原「17MB 整文件单 POST」系阶段 4 之前的旧
+    // 形态；3MB 文件现行走可视区 chunk 请求），验收意图不变：同签名 chunk 的
+    // 二次响应体 < 首次 50%（intervals 本体 → 极小帧）。
     test.setTimeout(300_000);
-    // 收集每次高亮 POST 的响应体大小（intervals 本体；缓存命中后二次应显著更小）
-    const postSizes: number[] = [];
+    // 收集每次高亮 POST 响应体大小，按请求签名 (path|startLine|lineCount) 分组
+    const postBodies = new Map<string, number[]>();
     page.on('response', async (r) => {
       if (r.request().method() === 'POST' && r.url().includes('/api/compute/highlight')) {
+        const raw = r.request().postData() ?? '';
+        let sig = raw;
         try {
-          postSizes.push((await r.body()).length);
+          const b = JSON.parse(raw) as {
+            path?: string;
+            range?: { startLine: number; lineCount: number };
+          };
+          sig = `${b.path ?? ''}|${b.range?.startLine ?? ''}|${b.range?.lineCount ?? ''}`;
+        } catch {
+          // 签名解析失败保底用原文
+        }
+        try {
+          const size = (await r.body()).length;
+          postBodies.set(sig, [...(postBodies.get(sig) ?? []), size]);
         } catch {
           // body 可能已不可取（页面导航），跳过该次
         }
@@ -175,19 +194,24 @@ test.fixme(
 
     await connectSameOriginCompute(page, 'remote');
     for (let round = 0; round < 2; round++) {
-      const before = postSizes.length;
+      const postCount = () => [...postBodies.values()].reduce((n, a) => n + a.length, 0);
+      const before = postCount();
       await openFile(page, 'tcmp-code-3mb.js');
       await expect(page.locator('.vv-statusbar')).toContainText('执行: 远程', { timeout: 120_000 });
-      await expect.poll(() => postSizes.length, { timeout: 10_000 }).toBeGreaterThan(before);
+      await expect.poll(postCount, { timeout: 10_000 }).toBeGreaterThan(before);
       // 关标签重开（复现验收「同文件关标签重开」口径；关闭钮 aria-label 见 TabBar.svelte:31）
       await page.getByRole('button', { name: '关闭 tcmp-code-3mb.js' }).click();
       await expect(page.locator('.vv-tab', { hasText: 'tcmp-code-3mb.js' })).toHaveCount(0);
     }
 
-    // 二次打开命中缓存：响应体显著小于首次（首次≈intervals 本体 17MB 级）
-    expect(postSizes.length).toBe(2);
-    expect(postSizes[0]!).toBeGreaterThan(1_000_000);
-    expect(postSizes[1]!).toBeLessThan(postSizes[0]! * 0.5);
+    // 二次打开命中会话缓存：至少一个 chunk 签名两轮各一次 POST，且二次响应体
+    // 显著小于首次（首次=intervals 本体，二次=服务端确认极小帧）
+    const pairs = [...postBodies.entries()].filter(([, sizes]) => sizes.length >= 2);
+    expect(pairs.length, '至少一个 chunk 签名被二次请求').toBeGreaterThan(0);
+    for (const [sig, sizes] of pairs) {
+      expect(sizes[0]!, `签名 ${sig} 首次为 intervals 本体`).toBeGreaterThan(1_000);
+      expect(sizes[1]!, `签名 ${sig} 二次命中缓存极小帧`).toBeLessThan(sizes[0]! * 0.5);
+    }
   }
 );
 

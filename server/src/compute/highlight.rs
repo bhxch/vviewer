@@ -8,8 +8,10 @@
 //!   响应前经 [`Utf16Index`]（按行增量表 + 二分定位 + 行内小步修正）转换；
 //! - path 模式走 [`crate::guard`]（canonicalize 越界校验）并按
 //!   `(canonical_path, mtime_ms, size, lang, start_line, line_count)` 缓存响应
-//!   （64 条 LRU 简易淘汰）；带 range 的请求流式扫行、区间相对 chunk 首行，
-//!   响应带 `baseLine`（= startLine）告知客户端基准行；
+//!   （64 条 LRU 简易淘汰）；缓存条目带 cacheId 令牌（CMP-02/2）：客户端重开
+//!   同一回传即 `{"cached":true}` 极小帧，避免 17MB 级 intervals 重复传输；
+//!   带 range 的请求流式扫行、区间相对 chunk 首行，响应带 `baseLine`
+//!   （= startLine）告知客户端基准行；
 //! - 解析是同步 CPU 工作：`spawn_blocking` + 响应侧 `tokio::time::timeout`
 //!   （生产 [`HIGHLIGHT_TIMEOUT`]，封装于 [`parse_with_timeout`]，测试可注入短时限）。
 //!   超时无法中断已进入同步解析的线程（无取消点），只能放弃其结果返回 504，
@@ -93,6 +95,14 @@ pub struct HighlightRequest {
     /// 多根索引（仅 path 模式；缺省 0 号根，越界 400）。
     #[serde(default)]
     pub root: Option<usize>,
+    /// 会话缓存校验令牌（CMP-02/2，可选）：客户端对同一 (path,lang,range) 重开
+    /// 时回传上次响应的 cacheId——与缓存条目一致则响应
+    /// `{"cached":true,"cacheId","baseLine"}` 极小帧（不重复传输 17MB 级
+    /// intervals，客户端复用其会话缓存）；不一致/缓存缺失（文件变更 mtime/size
+    /// 变、LRU 淘汰、服务重启）照常回完整响应。id 由服务端按
+    /// (缓存键 + 响应内容) 哈希生成，客户端仅作不透明令牌。
+    #[serde(default, rename = "cacheId")]
+    pub cache_id: Option<String>,
 }
 
 // ---------- 字节 → UTF-16 偏移转换 ----------
@@ -210,8 +220,15 @@ pub fn run_highlight(lang: &str, text: &str) -> Result<HighlightResponse, AppErr
 type CacheKey = (PathBuf, u64, u64, String, u64, u64);
 
 /// (path, mtime_ms, size) → 响应；HashMap + 访问序 VecDeque 的简易 LRU（64 条）。
+/// 条目除响应本体外携带 `cache_id`（CMP-02/2 会话缓存校验令牌：键 + 响应内容
+/// 的进程内哈希，客户端回传即命中极小帧，见 [`HighlightRequest::cache_id`]）。
+struct CacheEntry {
+    resp: HighlightResponse,
+    cache_id: String,
+}
+
 struct CacheInner {
-    entries: HashMap<CacheKey, Arc<HighlightResponse>>,
+    entries: HashMap<CacheKey, Arc<CacheEntry>>,
     order: VecDeque<CacheKey>,
 }
 
@@ -229,8 +246,32 @@ static CACHE: Lazy<HighlightCache> = Lazy::new(|| HighlightCache {
     misses: AtomicU64::new(0),
 });
 
+/// 缓存条目的会话校验令牌：缓存键全维 + 响应内容哈希。DefaultHasher 的
+/// 跨进程稳定性无保证——令牌只在同进程会话内比对（服务重启后客户端旧 id
+/// 不匹配 → 完整响应，恰是期望语义），无跨进程持久化用途。
+fn cache_id_for(key: &CacheKey, resp: &HighlightResponse) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    key.0.hash(&mut h);
+    key.1.hash(&mut h);
+    key.2.hash(&mut h);
+    key.3.hash(&mut h);
+    key.4.hash(&mut h);
+    key.5.hash(&mut h);
+    resp.base_line.hash(&mut h);
+    for c in &resp.captures {
+        c.hash(&mut h);
+    }
+    for interval in &resp.intervals {
+        h.write_u64(interval[0]);
+        h.write_u64(interval[1]);
+        h.write_u64(interval[2]);
+    }
+    format!("{:016x}", h.finish())
+}
+
 impl HighlightCache {
-    fn get(&self, key: &CacheKey) -> Option<Arc<HighlightResponse>> {
+    fn get(&self, key: &CacheKey) -> Option<Arc<CacheEntry>> {
         let mut inner = self.inner.lock().unwrap();
         let hit = inner.entries.get(key).cloned();
         if hit.is_some() {
@@ -246,19 +287,23 @@ impl HighlightCache {
         hit
     }
 
-    fn insert(&self, key: CacheKey, resp: HighlightResponse) {
-        // 超大响应跳过缓存（请求仍正常返回）：见 CACHE_MAX_INTERVALS 注释
-        if resp.intervals.len() > CACHE_MAX_INTERVALS {
-            return;
+    fn insert(&self, key: CacheKey, resp: HighlightResponse) -> String {
+        let cache_id = cache_id_for(&key, &resp);
+        // 超大响应跳过缓存（请求仍正常返回）：见 CACHE_MAX_INTERVALS 注释。
+        // 跳过缓存同样回 cacheId——但下次必然 miss（无条目可比对），仅是
+        // 客户端多带一个无效令牌，无正确性影响。
+        if resp.intervals.len() <= CACHE_MAX_INTERVALS {
+            let mut inner = self.inner.lock().unwrap();
+            let entry = Arc::new(CacheEntry { resp, cache_id: cache_id.clone() });
+            if inner.entries.insert(key.clone(), entry).is_none() {
+                inner.order.push_back(key);
+            }
+            while inner.entries.len() > CACHE_CAP {
+                let Some(evict) = inner.order.pop_front() else { break };
+                inner.entries.remove(&evict);
+            }
         }
-        let mut inner = self.inner.lock().unwrap();
-        if inner.entries.insert(key.clone(), Arc::new(resp)).is_none() {
-            inner.order.push_back(key);
-        }
-        while inner.entries.len() > CACHE_CAP {
-            let Some(evict) = inner.order.pop_front() else { break };
-            inner.entries.remove(&evict);
-        }
+        cache_id
     }
 
     /// 条目数（测试断言用）。
@@ -320,6 +365,15 @@ async fn parse_with_timeout(
                 .into_response(),
         ),
     }
+}
+
+/// 完整高亮响应序列化（附带 `cacheId` 会话令牌）：HighlightResponse 本身不带
+/// 令牌字段（保持内部/单测形状），仅在线 Wire JSON 上合并，text 模式无缓存
+/// 条目不走此处（无令牌，向后兼容）。
+fn full_highlight_body(resp: &HighlightResponse, cache_id: &str) -> Response {
+    let mut body = serde_json::to_value(resp).expect("HighlightResponse serializes");
+    body["cacheId"] = serde_json::Value::String(cache_id.to_string());
+    Json(body).into_response()
 }
 
 /// mtime → epoch 毫秒（取不到则 0，仍参与键区分大小/路径）。
@@ -470,7 +524,18 @@ pub(crate) async fn highlight_with_timeout(
             let key =
                 (canonical.clone(), mtime_ms(&meta), meta.len(), lang.to_string(), start_line, line_count);
             if let Some(cached) = CACHE.get(&key) {
-                return Json(HighlightResponse::clone(&cached)).into_response();
+                // 会话缓存命中（CMP-02/2）：客户端令牌与条目一致 → 极小确认帧
+                // （intervals 由客户端会话缓存复用，17MB 级响应体不再重复传输）；
+                // 未带令牌/令牌过期（重启、另一客户端）→ 完整响应（幂等）。
+                if req.cache_id.as_deref() == Some(cached.cache_id.as_str()) {
+                    return Json(serde_json::json!({
+                        "cached": true,
+                        "cacheId": cached.cache_id,
+                        "baseLine": cached.resp.base_line,
+                    }))
+                    .into_response();
+                }
+                return full_highlight_body(&cached.resp, &cached.cache_id);
             }
             let file_text: String = match req.range {
                 Some(r) => match read_line_chunk(&canonical, r.start_line, r.line_count).await {
@@ -536,7 +601,8 @@ pub(crate) async fn highlight_with_timeout(
     result.base_line = base_line;
 
     if let Some(key) = cache_key {
-        CACHE.insert(key, result.clone());
+        let cache_id = CACHE.insert(key, result.clone());
+        return full_highlight_body(&result, &cache_id);
     }
     Json(result).into_response()
 }
@@ -707,6 +773,32 @@ fn main() {
         cache_reset();
     }
 
+    /// CMP-02/2 会话缓存令牌：按键全维 + 响应内容生成，任一变化令牌必变——
+    /// 客户端旧令牌在新内容/新键上不匹配即回完整响应（协议正确性根基）。
+    #[test]
+    fn cache_id_token_depends_on_key_and_content() {
+        let _g = serial_lock();
+        cache_reset();
+        let key: CacheKey = (PathBuf::from("/tmp/tok.js"), 5, 100, "rust".into(), 0, u64::MAX);
+        let resp = HighlightResponse {
+            intervals: vec![[0, 4, 0], [4, 9, 1]],
+            captures: vec!["keyword".into(), "string".into()],
+            base_line: 7,
+        };
+        let id = CACHE.insert(key.clone(), resp.clone());
+        assert_eq!(id.len(), 16, "令牌为 16 位 hex: {id}");
+        // 同键同内容重算一致（确定性）
+        assert_eq!(cache_id_for(&key, &resp), id);
+        // 内容变化 → 令牌变化
+        let mut other = resp.clone();
+        other.base_line = 8;
+        assert_ne!(CACHE.insert(key.clone(), other), id, "内容变化令牌必变");
+        // 键变化（mtime 不同）同内容 → 令牌变化
+        let key_b: CacheKey = (PathBuf::from("/tmp/tok.js"), 6, 100, "rust".into(), 0, u64::MAX);
+        assert_ne!(CACHE.insert(key_b, resp), id, "键变化令牌必变");
+        cache_reset();
+    }
+
     #[test]
     fn cache_hit_miss_and_lru_eviction() {
         let _g = serial_lock();
@@ -766,8 +858,8 @@ fn main() {
         // 同 (path,mtime,size) 换 lang：必须 miss，不命中 rust 的响应
         assert!(CACHE.get(&py_key).is_none(), "异 lang 不得互命中");
         CACHE.insert(py_key.clone(), py_resp.clone());
-        assert_eq!(*CACHE.get(&rust_key).unwrap(), rust_resp, "rust 键仍是 rust 响应");
-        assert_eq!(*CACHE.get(&py_key).unwrap(), py_resp, "python 键是 python 响应");
+        assert_eq!(CACHE.get(&rust_key).unwrap().resp, rust_resp, "rust 键仍是 rust 响应");
+        assert_eq!(CACHE.get(&py_key).unwrap().resp, py_resp, "python 键是 python 响应");
         cache_reset();
     }
 
@@ -786,7 +878,7 @@ fn main() {
         CACHE.insert(whole.clone(), whole_resp.clone());
         assert!(CACHE.get(&r03).is_none(), "range 键不得命中无 range 条目");
         CACHE.insert(r03.clone(), range_resp.clone());
-        assert_eq!(*CACHE.get(&whole).unwrap(), whole_resp, "无 range 键仍是整文件响应");
+        assert_eq!(CACHE.get(&whole).unwrap().resp, whole_resp, "无 range 键仍是整文件响应");
         cache_reset();
     }
 

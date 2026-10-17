@@ -113,6 +113,90 @@ describe('routeLargeFileHighlight（阶段 3+4 契约矩阵）', () => {
     });
   });
 
+  it('CMP-02/2 会话缓存：首响应带 cacheId → 重开同 (path,lang,range) 请求携带令牌，服务端 cached:true 极小帧复用会话 intervals', async () => {
+    loadSettingsMock.mockReturnValue({ computePolicy: 'remote' });
+    remoteCallMock.mockReturnValue({ url: 'http://s:8321/api/compute/highlight', headers: {} });
+    const range = { startLine: 0, lineCount: 200 };
+    const full = { ...ENCODED, baseLine: 0, cacheId: 'tok-1' };
+    const hit = { cached: true, cacheId: 'tok-1', baseLine: 0 };
+    const responses = [
+      new Response(JSON.stringify(full), { status: 200 }),
+      new Response(JSON.stringify(hit), { status: 200 })
+    ];
+    let call = 0;
+    const fetchMock = vi.fn(async () => responses[call++]!);
+    vi.stubGlobal('fetch', fetchMock);
+    // 首次：完整 intervals + 令牌入库（body 不带 cacheId——会话尚无条目）
+    await expect(routeLargeFileHighlight(SRC, 'javascript', range)).resolves.toEqual({
+      intervals: DECODED,
+      baseLine: 0
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body))).toEqual({
+      path: 'big.js',
+      lang: 'javascript',
+      range
+    });
+    // 重开：请求携带令牌；极小帧无 intervals，返回会话缓存的同一 intervals
+    await expect(routeLargeFileHighlight(SRC, 'javascript', range)).resolves.toEqual({
+      intervals: DECODED,
+      baseLine: 0
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]![1]?.body))).toEqual({
+      path: 'big.js',
+      lang: 'javascript',
+      range,
+      cacheId: 'tok-1'
+    });
+  });
+
+  it('CMP-02/2 会话缓存按 (path,lang,range) 键隔离：异 range 不携带令牌、不误命中', async () => {
+    loadSettingsMock.mockReturnValue({ computePolicy: 'remote' });
+    remoteCallMock.mockReturnValue({ url: 'http://s:8321/api/compute/highlight', headers: {} });
+    const full = { ...ENCODED, baseLine: 0, cacheId: 'tok-2' };
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> =>
+        new Response(JSON.stringify(full), { status: 200 })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await routeLargeFileHighlight(SRC, 'javascript', { startLine: 0, lineCount: 200 });
+    // 换一个 range：键不同，body 不携带上一次的令牌
+    await routeLargeFileHighlight(SRC, 'javascript', { startLine: 200, lineCount: 200 });
+    const second = JSON.parse(String(fetchMock.mock.calls[1]![1]?.body)) as { cacheId?: string };
+    expect(second.cacheId).toBeUndefined();
+  });
+
+  it('CMP-02/2 令牌过期（服务端回完整响应带新 cacheId）：客户端如实刷新会话条目', async () => {
+    loadSettingsMock.mockReturnValue({ computePolicy: 'remote' });
+    remoteCallMock.mockReturnValue({ url: 'http://s:8321/api/compute/highlight', headers: {} });
+    const STALE_SRC = { path: 'stale.js', storeId: 'remote:abc' } as const; // 独立键，不与前测会话串扰
+    const bodies = [
+      { ...ENCODED, baseLine: 0, cacheId: 'tok-a' },
+      { ...ENCODED, intervals: [[0, 5, 0]], baseLine: 0, cacheId: 'tok-b' }, // 文件已变更
+      { ...ENCODED, intervals: [[0, 5, 0]], baseLine: 0, cacheId: 'tok-b' } // 第三次仅观测请求体
+    ];
+    let call = 0;
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> =>
+        new Response(JSON.stringify(bodies[call++]!), { status: 200 })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const range = { startLine: 0, lineCount: 200 };
+    await routeLargeFileHighlight(STALE_SRC, 'javascript', range);
+    // 服务端令牌不匹配仍回完整响应：解码生效（非 cached 帧）+ 新令牌入库
+    await expect(routeLargeFileHighlight(STALE_SRC, 'javascript', range)).resolves.toEqual({
+      intervals: [{ start: 0, end: 5, capture: 'keyword' }],
+      baseLine: 0
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]![1]?.body))).toMatchObject({
+      cacheId: 'tok-a'
+    });
+    // 第三次请求携带刷新后的令牌
+    await routeLargeFileHighlight(STALE_SRC, 'javascript', range);
+    expect(JSON.parse(String(fetchMock.mock.calls[2]![1]?.body))).toMatchObject({
+      cacheId: 'tok-b'
+    });
+  });
+
   it('remote + 未连接服务器（remoteCall null）：抛错（渲染端错误卡片，不静默本地）', async () => {
     loadSettingsMock.mockReturnValue({ computePolicy: 'remote' });
     remoteCallMock.mockReturnValue(null);

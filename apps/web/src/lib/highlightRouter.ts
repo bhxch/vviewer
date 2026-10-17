@@ -7,6 +7,8 @@
 // 抛错（渲染端错误卡片，不静默回退）。经 computeRouter 组装鉴权头直连
 // /api/compute/highlight。与 highlightClient 的常规远程高亮独立：该链路只在
 // 本地阈值（2MB）已判定 hljs-block 之后才被问询。
+// CMP-02/2：附带会话缓存（cacheId 令牌校验），同 (path,lang,range) 重开时
+// 响应体降为服务端确认极小帧（见 sessionHighlights 注）。
 import {
   decodeHighlightResponse,
   remoteLanguageAdvertised,
@@ -26,6 +28,47 @@ export interface LargeFileHighlightChunk {
   intervals: HighlightInterval[];
   /** chunk 首行的全文件 0 基行号；旧服务端响应无此字段（serde rename 前部署）兜 0 */
   baseLine: number;
+}
+
+/**
+ * CMP-02/2 会话缓存：同 (path,lang,range) 关标签重开时，响应体以服务端令牌
+ * 校验命中——服务端回 `{"cached":true,"cacheId","baseLine"}` 极小帧（不再重复
+ * 传输 MB 级 intervals 本体，BUG-10 验收 2「二次打开可观测更快」的可观测面），
+ * intervals 复用本会话缓存。键含 range 维度（chunk 粒度）；令牌由服务端按
+ * (缓存键+响应内容) 生成，文件变更（mtime/size 变键）、LRU 淘汰、服务重启都
+ * 令校验不匹配而回完整响应，客户端随之刷新条目——正确性不依赖本缓存。
+ * 容量 16 条 FIFO（重开场景为最近文件的小子集；intervals 每 chunk 数十 KB 级）。
+ */
+interface SessionHighlightEntry {
+  cacheId: string;
+  intervals: HighlightInterval[];
+}
+
+const sessionHighlights = new Map<string, SessionHighlightEntry>();
+const SESSION_HIGHLIGHT_CAP = 16;
+
+function sessionHighlightKey(
+  path: string,
+  lang: string,
+  range?: { startLine: number; lineCount: number }
+): string {
+  return range ? `${path}\u0000${lang}\u0000${range.startLine}:${range.lineCount}` : `${path}\u0000${lang}`;
+}
+
+function sessionHighlightGet(key: string): SessionHighlightEntry | undefined {
+  const entry = sessionHighlights.get(key);
+  if (entry) sessionHighlights.set(key, entry); // touch：移到插入序末尾
+  return entry;
+}
+
+function sessionHighlightPut(key: string, entry: SessionHighlightEntry): void {
+  sessionHighlights.delete(key);
+  sessionHighlights.set(key, entry);
+  while (sessionHighlights.size > SESSION_HIGHLIGHT_CAP) {
+    const oldest = sessionHighlights.keys().next().value;
+    if (oldest === undefined) break;
+    sessionHighlights.delete(oldest);
+  }
 }
 
 /**
@@ -66,26 +109,40 @@ export async function routeLargeFileHighlight(
     if (!call) throw new Error('未连接服务器，无法远程高亮');
     // 不挂 tab 级 abort：tab 切换后渲染端以 destroyed 丢弃结果，短连接可接受
     //（常规远程高亮的 remoteAbort 管线在 highlightClient，本链路不经它）
+    // CMP-02/2：会话缓存有条目则随请求携带 cacheId 令牌，服务端校验命中回极小帧
+    const key = sessionHighlightKey(src.path, lang, range);
+    const cached = sessionHighlightGet(key);
     const res = await fetch(call.url, {
       method: 'POST',
       headers: { ...call.headers, 'content-type': 'application/json' },
       // range 随参透传（驼峰即服务端 serde rename 后的形状，Task 1）；缺省不带
       // range 字段——旧请求语义，服务端按全文件 text 模式应答 baseLine=0
-      body: JSON.stringify(
-        range ? { path: src.path, lang, range } : { path: src.path, lang }
-      )
+      body: JSON.stringify({
+        path: src.path,
+        lang,
+        ...(range ? { range } : {}),
+        ...(cached ? { cacheId: cached.cacheId } : {})
+      })
     });
     if (!res.ok) throw new Error(`远程高亮失败: HTTP ${res.status}`);
     // json 单次消费：decode 与 baseLine 同源读取；baseLine 缺失 = 旧服务端，兜 0
     const json: unknown = await res.json();
     const rawBaseLine = (json as { baseLine?: unknown }).baseLine;
-    return {
-      intervals: decodeHighlightResponse(json),
-      baseLine:
-        typeof rawBaseLine === 'number' && Number.isFinite(rawBaseLine)
-          ? rawBaseLine
-          : 0
-    };
+    const baseLine =
+      typeof rawBaseLine === 'number' && Number.isFinite(rawBaseLine) ? rawBaseLine : 0;
+    // 服务端确认命中（CMP-02/2）：极小帧不含 intervals，复用会话缓存条目。
+    // 条目必在（令牌即来自它；被容量逐出则本轮请求根本不会带令牌）
+    if ((json as { cached?: unknown }).cached === true) {
+      if (cached) return { intervals: cached.intervals, baseLine };
+      throw new Error('远程高亮缓存命中但本地会话条目缺失');
+    }
+    const intervals = decodeHighlightResponse(json);
+    const cacheId = (json as { cacheId?: unknown }).cacheId;
+    if (typeof cacheId === 'string' && cacheId !== '') {
+      // 旧服务端无 cacheId：不缓存，行为与此前一致
+      sessionHighlightPut(key, { cacheId, intervals });
+    }
+    return { intervals, baseLine };
   } catch (err) {
     // 失败分流（!res.ok 与 fetch 网络异常同进 catch）：显式 remote 抛错如实错误
     // 卡片（静默回退会掩盖服务端故障）；auto 可用性优先，warn 留痕后回退本地

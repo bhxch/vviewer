@@ -515,7 +515,16 @@ async fn highlight_range_overruns_file_tail_truncates() {
     )
     .await;
     assert_eq!(status2, StatusCode::OK);
-    assert_eq!(body, body2, "越界请求应截断为与精确请求一致: {body} vs {body2}");
+    // 截断语义锚：语义载荷（intervals/captures/baseLine）与精确请求一致。
+    // cacheId 是会话校验令牌（键含 range 维度，两种 lineCount 键不同故令牌不同），
+    // 不在截断语义比较面内。
+    for field in ["intervals", "captures", "baseLine"] {
+        assert_eq!(
+            body[field], body2[field],
+            "越界请求截断后 {field} 应与精确请求一致: {body} vs {body2}"
+        );
+    }
+    assert_ne!(body["cacheId"], body2["cacheId"], "range 键不同 → 会话令牌不同");
     assert_eq!(body["baseLine"].as_u64(), Some(6));
     // chunk = "    let x = 1;\n}"（UTF-16 长 16）：区间不越界
     let utf16_len = "    let x = 1;\n}".encode_utf16().count();
@@ -696,7 +705,18 @@ async fn highlight_without_range_legacy_anchor_base_line_zero() {
     )
     .await;
     assert_eq!(status2, StatusCode::OK);
-    assert_eq!(body, body2, "path 无 range 与 text 同内容响应应一致（回归锚）");
+    // 回归锚：path 无 range 与 text 同内容的语义载荷一致。text 模式无缓存条目
+    // 不带 cacheId（path 模式带），令牌字段不在语义比较面内。
+    for field in ["intervals", "captures", "baseLine"] {
+        assert_eq!(
+            body[field], body2[field],
+            "path 无 range 与 text 同内容 {field} 应一致（回归锚）: {body} vs {body2}"
+        );
+    }
+    assert!(
+        body.get("cacheId").is_some(),
+        "path 模式完整响应带会话令牌: {body}"
+    );
     cache_reset();
 }
 

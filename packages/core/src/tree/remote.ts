@@ -47,6 +47,13 @@ export function getRemoteBase(storeId: string): string | undefined {
   return remoteBaseById.get(storeId);
 }
 
+/** 读实例身份令牌（无令牌实例返回 null）；storeRelease 的持有者判定消费——
+ * 见 STORE_UID 注（$state 深代理 copy-on-write 下的对象身份不可靠问题）。 */
+export function storeInstanceUid(store: TreeStore): number | null {
+  const uid = (store as Partial<Record<typeof STORE_UID, number>>)[STORE_UID];
+  return typeof uid === 'number' ? uid : null;
+}
+
 // ---------- 会话内上次连接的服务器（跨包存储契约） ----------
 
 /**
@@ -78,6 +85,15 @@ export function normalizeServerBase(input: string): string {
 }
 
 const ENCODINGS: readonly string[] = ['utf-8', 'utf-16le', 'utf-16be', 'gb18030'];
+
+/**
+ * 实例身份令牌（storeRelease 的代理免疫比较用）：Svelte $state 深代理的
+ * copy-on-write 会把 tab.source.store 重新包裹（同实例的不同代代理对象身份不等），
+ * 对象 === 在「tab 列表内持有者判定」上不可靠。远端 store 建实例时注入单调数字
+ * 令牌，数字原值读比较对代理免疫；经 [`storeInstanceUid`] 读出消费。
+ */
+export const STORE_UID = Symbol('vviewer.storeUid');
+let storeUidSeq = 0;
 
 function asEncoding(v: string | null): Encoding | undefined {
   return v !== null && ENCODINGS.includes(v) ? (v as Encoding) : undefined;
@@ -336,6 +352,7 @@ export function createRemoteStore(
 
   return {
     id,
+    [STORE_UID]: ++storeUidSeq,
     displayName: () => dirLabel,
     async listChildren(path): Promise<TreeNode[]> {
       const res = await request('/api/tree', path);
