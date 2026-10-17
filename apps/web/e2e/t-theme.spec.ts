@@ -601,15 +601,10 @@ test('B-THEME-4: 外观槽切回 default——观感零变化（--ui-bg 回默�
   await expect(page.getByLabel('代码主题')).toBeEnabled();
 });
 
-// ── 主题系统域探索复核确认缺陷回归占位（2026-10-10 轮）──────────────────────────
-// README §3.2.4 第 4 条：修复合入前以 test.fixme 落占位并在标题/注释标注缺陷号，缺陷修复
-// PR 中转为正式断言。标题以缺陷库编号开头、[探索] 标注来源（缺陷由探索/复核会话独立复现
-// 确认）；各用例注释给出最小复现步骤、证据路径与源码定位。分诊：三条根因均属本域（theme），
-// 不外迁——BUG-49 主题三态①×代码主题双槽位②（TopBar.svelte/theme.ts）；BUG-50 缺口在代码
-// 主题注入清单 CODE_CAPTURES（theme.ts:48-102）与 app.css .ts-* 规则的对齐层，非 packages/
-// highlight 高亮链路（resolveCapture 前缀回退机制正常、themes.json 可经回退取到色）；
-// BUG-51 为三态①首帧落 html[data-theme-mode] 的时机（app.html 无预置脚本、唯一写入点
-// AppShell onMount）。
+// ── 主题系统域探索复核缺陷回归（2026-10-10 轮占位，2026-10-17 Wave 3 全数转正）──────
+// README §3.2.4 第 4 条：修复合入前以 test.fixme 落占位、缺陷修复 PR 中转为正式断言。
+// BUG-49（TopBar mode 响应式化）/ BUG-50（capture 类名端前缀归约，清单迁 highlight 包）/
+// BUG-51（app.html 首帧预置 data-theme-mode）三条均已清偿，占位转为下方正式用例。
 
 // 修复背景（原占位注释压缩）：themeMode=system 下 OS 亮暗切换（不刷新页面）后 TopBar 的
 // mode 陈旧（effectiveMode 实时读 matchMedia 但 matchMedia 非响应式信号）——代码主题下拉
