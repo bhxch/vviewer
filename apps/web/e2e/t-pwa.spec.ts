@@ -872,8 +872,8 @@ test(
   }
 );
 
-test.fixme(
-  'BUG-61 [探索]: ≤900px 移动视口点击树文件后抽屉不自动收起——无遮罩、Escape 与点外关闭均无效，唯一途径再点 ☰',
+test(
+  'BUG-61 [已修复 2026-10-17]: ≤900px 移动视口点击树文件后抽屉不自动收起——无遮罩、Escape 与点外关闭均无效，唯一途径再点 ☰',
   async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile', '缺陷仅 ≤900px 移动视口（mobile project 375×667 实测）');
     // 复核成立（low；移动端 UX 缺口——文件正常打开、tab 与渲染均正常，仅抽屉
@@ -894,8 +894,9 @@ test.fixme(
     // 覆盖核对：docs/e2e/pwa-mobile-performance.md:32 PWA-05 验收仅「无横向溢出；
     // 抽屉开合正常」，既有 e2e/drawer.ts 模式为「开抽屉点击后手动关回」——「选中
     // 文件后自动收起」在源码承诺与 e2e 均未覆盖，确系新缺口。
-    // 修复方向：onTreeOpen 内窄视口置 drawerOpen=false（可加遮罩/Esc 关闭）；
-    // 修复后本用例转正。
+    // 修复（2026-10-17，Wave 7）：onTreeOpen 内窄视口（matchMedia 与 CSS 断点
+    // 同条件）置 drawerOpen=false——文件打开即自动收起抽屉。遮罩/Esc 关闭未在本条
+    // 最小面内（自动收起已消除「全宽遮挡阅读」缺陷本身）。
     test.setTimeout(60_000);
     await page.goto('/');
     await openTDir(page, [{ name: 'bug61.txt', type: 'text/plain', bytes: 'hello drawer\n' }]);
@@ -911,12 +912,21 @@ test.fixme(
     // matrix(1,0,0,1,-301,0)；缺陷态保持 none）
     await expect(page.locator('.vv-side')).not.toHaveCSS('transform', 'none');
     // 修复判据 2：主区不再被遮挡——视口中心命中主滚动区（缺陷态中心被 300px 宽
-    // 抽屉覆盖、命中 .vv-side 内元素）
-    const centerHit = await page.evaluate(() => {
-      const el = document.elementFromPoint(Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2));
-      return el?.closest('.vv-viewer-scroll') != null;
-    });
-    expect(centerHit, '视口中心应命中主区（缺陷态被抽屉盖住）').toBe(true);
+    // 抽屉覆盖、命中 .vv-side 内元素）。轮询：收起走 0.2s transform 过渡，过渡中
+    // 抽屉仍瞬时覆盖视口中心，一次性采样会落进动画窗口
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const el = document.elementFromPoint(
+              Math.round(window.innerWidth / 2),
+              Math.round(window.innerHeight / 2)
+            );
+            return el?.closest('.vv-viewer-scroll') != null;
+          }),
+        { timeout: 5_000, message: '等待收起动画结束后视口中心命中主区' }
+      )
+      .toBe(true);
   }
 );
 

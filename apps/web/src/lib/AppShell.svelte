@@ -374,6 +374,11 @@
 
   function onTreeOpen(e: { path: string; name: string; size?: number; store: TreeStore }): void {
     addTab(e.store, e.path, e.name, e.size ?? null);
+    // BUG-61：≤900px 抽屉断点下点树文件后自动收起抽屉——固定定位的 300px 抽屉
+    // 会继续遮挡主阅读区，此前唯一收起途径是再点 ☰。断点经 matchMedia 求值，
+    // 与下方 @media (max-width: 900px) 同引擎同一条件（e2e/drawer.ts 同款约定，
+    // 改断点两处同步）。
+    if (drawerOpen && window.matchMedia('(max-width: 900px)').matches) drawerOpen = false;
   }
 
   // 全局键位（BUG-03，场景 SHELL-11）：Ctrl+Shift+F 全局搜索（既有）、Ctrl+P
