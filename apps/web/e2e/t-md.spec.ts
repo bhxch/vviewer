@@ -77,7 +77,7 @@ test('MD-01: GFM 表格渲染为 HTML 表格，任务列表 checkbox 均禁用�
   await expect(page.locator('.vv-error-card')).toHaveCount(0);
 });
 
-test.fixme('MD-01/2 [CAND-md-F1]: 删除线文本渲染为 del 元素（GFM strikethrough）', async ({
+test('MD-01/2 [CAND-md-F1]: 删除线文本渲染为 del 元素（GFM strikethrough）', async ({
   page
 }) => {
   // CAND-md-F1（产品缺陷，2026-10-10 分诊转 fixme，断言不放宽）：
@@ -92,6 +92,10 @@ test.fixme('MD-01/2 [CAND-md-F1]: 删除线文本渲染为 del 元素（GFM stri
   // 输出 del，与 comrak/GFM（cmark-gfm 参考实现）对齐；修复后本用例转正回 test。
   // 注：demo.md 历史从未含 ~~ 内容（git log -S'~~' 零命中），源报告「del 渲染」
   // 证据对本子判据属空转，场景文档第 4 节允许自造元素复测。
+  // 【2026-10-17 清偿转正】修复已随 Wave 1 CMP-05/BUG-67 落地
+  // （commit 8bbaad8：engine.ts renderer rules s_open/s_close 覆写输出 <del>，
+  // 与 comrak/GFM 对齐；单测 markdownEngine.test.ts '删除线渲染为 <del>'）。
+  // 本用例与下方 'BUG-66 [探索]' 同缺陷同判据，两用例一并转正。
   test.setTimeout(60_000);
   const content = ['正文含 ~~删除线文本~~ 与正常文本。', ''].join('\n');
   await injectDir(page, [{ name: 'md01-del.md', content }]);
@@ -227,7 +231,7 @@ test('MD-12/渲染视图: 重复搜索恒无结果（沙箱 iframe 不做跨文�
 // [探索]' 唯一锚点，本文件重复份删除；删除线缺陷权威编号为 BUG-66（下方 'BUG-66
 // [探索]'，标题自此前的 'BUG-67 [探索]' 勘误回来，见下节整理更新说明）。
 
-test.fixme('BUG-66 [探索]: 本地 markdown-it 路径删除线渲染为 s 而非 del——与远程 comrak 双引擎标签不一致', async ({
+test('BUG-66 [探索]: 本地 markdown-it 路径删除线渲染为 s 而非 del——与远程 comrak 双引擎标签不一致', async ({
   page
 }) => {
   // = CAND-md-F1 的复核定论缺陷库编号（2026-10-10 复核确认，low）；与本文件上方
@@ -241,6 +245,8 @@ test.fixme('BUG-66 [探索]: 本地 markdown-it 路径删除线渲染为 s 而�
   // line-through），缺陷为语义标签不符场景判据（docs/e2e/markdown-html-docs.md:27
   // 「删除线文本渲染为 del 元素」）+ 双引擎 DOM 一致性偏差。修复方向：本地 renderer
   // rule 把 strikethrough_open/close 输出 del，与 comrak/GFM 对齐；修复后转正。
+  // 【2026-10-17 清偿转正】同上方 MD-01/2：修复=Wave 1 8bbaad8 的 engine.ts
+  // s_open/s_close renderer rule 覆写（本地 <del> = 远程 comrak <del>），转正。
   test.setTimeout(60_000);
   const content = ['正文含 ~~删除线文本~~ 与正常文本。', ''].join('\n');
   await injectDir(page, [{ name: 'md66-del.md', content }]);
