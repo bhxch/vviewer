@@ -714,35 +714,30 @@ test('BUG-34 [探索]: codeRenderer 扩展名白名单未跟随 301 语言全量
   }
 });
 
-test.fixme('BUG-37 [探索]: yaml 本地 wasm 高亮全链静默失败——parse 首次调外置 scanner 抛 TypeError 被吞，恒降级 hljs 兜底且零日志', async ({
+test('BUG-37 [探索]: yaml 本地 wasm 高亮全链静默失败——parse 首次调外置 scanner 抛 TypeError 被吞，恒降级 hljs 兜底且零日志', async ({
   page
 }) => {
-  // 复核确认（medium，4 次独立复现稳定）：本地路径下任何正常 yaml 恒「hljs 兜底」
+  // 复核确认（medium，4 次独立复现稳定）：缺陷态本地路径下任何正常 yaml 恒「hljs 兜底」
   // （ts-* span=0、hljs-* span=9），零 UI 错误、零 console 输出；同批 vue/php/html/python/
   // bash 本地 tree-sitter 全部正常，远程 compute 路径 yaml 正常——仅本地 wasm 路径坏。
-  // 根因：vendored 静态 yaml.wasm 在 web-tree-sitter 0.25.10 下 Parser.parse 首次调用
-  // 外置 scanner 抛 'TypeError: resolved is not a function'（glue tree-sitter.js:2947 stubs
-  // ← wasm ts_parser_parse_wasm，scanner 符号解析为非函数；Language.load、setLanguage、
-  // 查询编译均成功，失败阶段不在 load）。产物溯源：apps/web/static/grammars/manifest.json
-  // yaml 条目 "source":"vendored"，sha256 5dea7cfff83d41d8f87fb8e434e1a5b292c0d670bfcdc42cb2
-  // af420ef490dde5 与 tools/grammar-builder/fixtures/yaml.wasm 一致（docs/spec-deviations.md
-  // :115——yaml 因 C++ 外置 scanner 无法 cli 自建而 vendored；同为 vendored 的 vue 可用）。
-  // 静默机制：doPrepare 成功故 core-parse.ts:248-260 的 console.warn（仅覆盖 doPrepare
-  // 拒绝）不触发，parse 抛错被 highlight() 外层 catch（core-parse.ts:185-186）吞为
-  // {ok:false}，worker.ts:95 console.error 仅 init 失败路径——全链零日志。测试缺口：
-  // rg 'yaml' packages/highlight/test/（含 local-grammars.test.ts 全部 8 个测试文件）零命中。
-  // 最小复现：15s 内（避开 BUG-35 看门狗窗口）注入正常 yaml 并打开 → 状态栏
-  // 「高亮: hljs 兜底 · 执行: 本地 · 语言: yaml」。资产在位对照：/grammars/yaml.wasm 与
-  // /queries/yaml/highlights.scm 均 200；远程对照 POST /api/compute/highlight
-  // {lang:'yaml'} 正常出区间（8391 实测）。
-  // 证据（复核轮独立取得）：/tmp/review-hl-e5/load-check.mjs（node 同构：yaml load OK →
-  // PARSE FAIL TypeError，vue captures=28/php=15/html=21 同法全 OK）+ pinpoint.mjs（栈顶
-  // 定位）；e5.engine.test.ts 引擎级（TreeSitterEngine.create 同 local-grammars.test.ts
-  // 构形）：yaml FAIL:resolved is not a function，vue 34/php 15/html 21/python 12/bash 3 ok；
-  // ui-repro.mjs（Playwright，4199 与 8391 双档）：config.yaml → 「hljs 兜底」ts=0/hljs=9、
-  // 复读一致、console+pageerror 共 0 条；对照 app.vue → tree-sitter ts=26。
-  // 修复方向：重建 vendored yaml.wasm（对齐 web-tree-sitter 0.25.x 的 scanner 符号）或
-  // 解除 C++ scanner 自建阻塞；并补 packages/highlight 的 yaml 覆盖。修复后本用例转正。
+  // 根因（已修 2026-10-16，Wave 2）：vendored 静态 yaml.wasm（tree-sitter-wasms 0.1.13
+  // 时代预编译产物，C++ 外置 scanner 时代）在 web-tree-sitter 0.25.10 下 Parser.parse
+  // 首次调用外置 scanner 抛 'TypeError: resolved is not a function'（glue stubs ← wasm
+  // ts_parser_parse_wasm，scanner 符号解析为非函数；Language.load、setLanguage、查询编译
+  // 均成功，失败阶段不在 load）。静默机制：doPrepare 成功故 prepare().catch 的 warn 不
+  // 触发，parse 抛错被 highlight() 外层 catch 吞为 {ok:false}——全链零日志。
+  // 修复（源再生而非日志补丁）：languages.toml yaml 源从 ikatyang（归档，scanner.cc）
+  // 换 tree-sitter-grammars/tree-sitter-yaml v0.7.2（C 外置 scanner.c），cli 0.27 自建
+  // yaml.wasm（specs-deviations §10 回补条件部分达成）；vendored fixture 删除，manifest
+  // 条目转 self-built。长期锚：local-grammars.test.ts yaml 用例（Node 同构同资产锁死）。
+  // 最小复现（缺陷态）：15s 内（避开 BUG-35 看门狗窗口）注入正常 yaml 并打开 → 状态栏
+  // 「高亮: hljs 兜底 · 执行: 本地 · 语言: yaml」。证据（复核轮独立取得）：
+  // /tmp/review-hl-e5/load-check.mjs（node 同构：yaml load OK → PARSE FAIL TypeError，
+  // vue captures=28/php=15/html=21 同法全 OK）+ pinpoint.mjs（栈顶定位）；
+  // e5.engine.test.ts 引擎级：yaml FAIL:resolved is not a function，vue 34/php 15/html 21/
+  // python 12/bash 3 ok；ui-repro.mjs（Playwright，4199 与 8391 双档）：config.yaml →
+  // 「hljs 兜底」ts=0/hljs=9、复读一致、console+pageerror 共 0 条；对照 app.vue →
+  // tree-sitter ts=26。
   test.setTimeout(90_000);
   await page.goto('/');
   // 立即打开（看门狗 15s 窗口内），隔离 BUG-35 误杀缺陷对判据的干扰

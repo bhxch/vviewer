@@ -1725,7 +1725,11 @@ auto-format = true
 
 [[grammar]]
 name = "yaml"
-source = { git = "https://github.com/ikatyang/tree-sitter-yaml", rev = "0e36bed171768908f331ff7dff9d956bae016efb" }
+# BUG-37：源从 ikatyang（归档，C++ 外置 scanner.cc）换 tree-sitter-grammars 维护 fork
+# v0.7.2（C 外置 scanner.c）——wasm 工具链（cli ≥0.26 get_scanner_path 只认 scanner.c）
+# 可自建，解除 vendored 遗留产物（tree-sitter-wasms 0.1.13 时代，web-tree-sitter 0.25.10
+# 下 parse 首调外置 scanner 抛 TypeError）的不可再生依赖
+source = { git = "https://github.com/tree-sitter-grammars/tree-sitter-yaml", rev = "7708026449bed86239b1cd5bce6e3c34dbca6415" }
 
 [[language]]
 name = "nestedtext"

@@ -369,11 +369,11 @@ describe('manifest.json（--self-build 构建产物；本机生成后校验结�
     }
   });
 
-  it.skipIf(!existsSync(manifestPath))('vendored 条目（yaml/vue）标 source vendored', () => {
+  it.skipIf(!existsSync(manifestPath))('vendored 条目标 source vendored（BUG-37 起 yaml 自建，仅 vue）', () => {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Manifest;
-    for (const lang of ['yaml', 'vue']) {
-      if (manifest.grammars[lang]) expect(manifest.grammars[lang]!.source).toBe('vendored');
-    }
+    if (manifest.grammars.vue) expect(manifest.grammars.vue!.source).toBe('vendored');
+    // yaml 源已换 tree-sitter-grammars（C scanner）自建：条目不得再标 vendored
+    if (manifest.grammars.yaml) expect(manifest.grammars.yaml!.source).toBeUndefined();
   });
 });
 

@@ -42,6 +42,10 @@ describe.skipIf(!grammarAssetsReady)('本地 tree-sitter 引擎：python/java �
   const samples: Record<string, string> = {
     python: 'def f(x):\n    return x + 1\n',
     java: 'class A { int x = 1; }\n',
+    // BUG-37：yaml 外置 scanner 曾因 vendored 遗留 wasm（C++ scanner 时代产物）在
+    // web-tree-sitter 0.25.10 下 parse 首调抛 'TypeError: resolved is not a function'
+    // 被吞，恒降级 hljs 且零日志；换 tree-sitter-grammars fork（C scanner）自建后锁死
+    yaml: 'server:\n  host: 127.0.0.1\n  port: 8443\n  debug: true\n',
   };
   for (const [lang, src] of Object.entries(samples)) {
     it.skipIf(!availableLangs.has(lang))(`${lang}：本地高亮成功且产生区间`, async () => {
@@ -49,10 +53,12 @@ describe.skipIf(!grammarAssetsReady)('本地 tree-sitter 引擎：python/java �
       expect(`${lang}:${r.ok ? `ok(${r.intervals.length})` : `FAIL:${r.error}`}`).toMatch(new RegExp(`^${lang}:ok\\(\\d+\\)$`));
       if (!r.ok) return;
       expect(r.intervals.length).toBeGreaterThan(0);
-      // 层级捕获词法（上游查询同步伴生变化）：python def→keyword.function、java class→keyword。
-      // 钉死具体 capture 名（ledger H4：前缀匹配弱于精确名）；与 theme.ts 最长前缀回退
-      // 同构的设计意图由该回退自身承担，此处断言查询产出的精确层级
-      const expected = lang === 'python' ? 'keyword.function' : 'keyword';
+      // 层级捕获词法（上游查询同步伴生变化）：python def→keyword.function、java class→
+      // keyword、yaml 键→variable.other.member。钉死具体 capture 名（ledger H4：前缀
+      // 匹配弱于精确名）；与 theme.ts 最长前缀回退同构的设计意图由该回退自身承担，
+      // 此处断言查询产出的精确层级
+      const expected =
+        lang === 'python' ? 'keyword.function' : lang === 'yaml' ? 'variable.other.member' : 'keyword';
       expect(r.intervals.some((i) => i.capture === expected), `${lang} 应产出 ${expected}`).toBe(true);
     }, 30_000);
   }

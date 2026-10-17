@@ -18,8 +18,9 @@ CI 流（`.github/workflows/grammar.yml`，经 composite action `.github/actions
 ## 选择面与语言解析
 
 - **lite**（默认，本地开发/测试/release web 包）：`aliases.json` 键（原 tree-sitter-wasms
-  36 键），其中 objc/systemrdl 无查询资产且 helix 未收录（无源可取）、yaml/vue 受下述
-  vendored 约束，实际产出 **34**（32 自建 + 2 vendored）。
+  36 键），其中 objc/systemrdl 无查询资产且 helix 未收录（无源可取）、vue 受下述
+  vendored 约束，实际产出 **34**（33 自建 + 1 vendored；yaml 曾 vendored，BUG-37 清偿
+  起自建）。
 - 语言解析顺序：build-list 的 `helixLang`/`name`（含 `_`/`-` 变体）→ `languages.toml`
   同名条目（swift 等不在 build-list 快照内者）→ `aliases.json` wasm 字段去
   `tree-sitter-` 前缀推导。解析失败仅告警不致命。
@@ -28,10 +29,14 @@ CI 流（`.github/workflows/grammar.yml`，经 composite action `.github/actions
 ## vendored 例外（fixtures/）
 
 cli ≥0.26 的 wasi-sdk wasm 工具链不支持 **C++ 外置 scanner**（`get_scanner_path` 只认
-`scanner.c`，0.27.0 实测），yaml/vue（`scanner.cc`）无法再生。二者以 tree-sitter-wasms
-0.1.13 时代的预编译产物作为**不可再生的遗留输入** vendor 在 `fixtures/`（gitignore 白名
-单 `!tools/grammar-builder/fixtures/*.wasm`）：命中选择面时短路拷贝，manifest 条目标
-`source: 'vendored'`。上游工具链支持 `.cc` 后删除对应 fixture 即恢复自建。
+`scanner.c`，0.27.0 实测），vue（`scanner.cc`，含嵌套 html scanner 共 2 文件）无法再生，
+以 tree-sitter-wasms 0.1.13 时代的预编译产物作为**不可再生的遗留输入** vendor 在
+`fixtures/`（gitignore 白名单 `!tools/grammar-builder/fixtures/*.wasm`）：命中选择面时
+短路拷贝，manifest 条目标 `source: 'vendored'`。上游工具链支持 `.cc` 后删除对应 fixture
+即恢复自建。yaml 曾同在此列（BUG-37：该 vendored 产物在 web-tree-sitter 0.25.10 下
+parse 首调外置 scanner 抛 TypeError，本地 yaml 高亮恒静默降级 hljs）——2026-10-16 起
+源换 tree-sitter-grammars/tree-sitter-yaml（C 外置 scanner.c，languages.toml pinned
+v0.7.2）自建，fixture 已删除。
 
 ## wasm 集与服务端集的口径差
 

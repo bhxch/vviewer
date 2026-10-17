@@ -117,6 +117,17 @@
 - **连带变化**：web-tree-sitter 运行时锁 ~0.25.10 的理由消失（cli 0.27 产物含 dylink.0，
   实测 0.25 可加载），维持 0.25 为 API 稳定性选择；历史 commit 中的 wasm blob 经
   filter-repo 移除（体积回收）。
+- **理由**：tree-sitter-wasms 0.1.13 上游停滞一年，预编译产物是唯一不受控环节；cli 0.27
+  免 emcc 自建使产物可从锁定的源清单（vendored `languages.toml` pinned rev）再生，入库
+  只剩 50MB 历史 object 成本与升级时的全量 diff。lite 集 36 → 34：objc/systemrdl 无查询
+  资产（原预编译集死产物）剔除；yaml/vue 因 cli wasm 工具链不支持 C++ 外置 scanner 以
+  vendored 遗留产物保留（`tools/grammar-builder/fixtures/`，manifest 标 `vendored`）。
 - **回补条件**：tree-sitter-wasms 或其他预编译分发源恢复活跃且覆盖 ≥264 语言时，可重评
   "预编译产物直接分发"方案；cli 支持 C++ scanner 后删除 fixtures 恢复全自建。
 - 2026-10-16：阶段 1 简报「6 纯父目录」散文估算失实——实测 307 目录全含 highlights.scm（卫生批 ledger H6 记档；验收当时已以 307 逐字镜像硬判据兜住，结论不变、论据修正）。
+- 2026-10-16（BUG-37 清偿，部分回补）：yaml 源从 ikatyang（归档，scanner.cc）换
+  tree-sitter-grammars fork v0.7.2（C 外置 scanner.c），cli 0.27 自建成功——vendored
+  yaml fixture 删除，lite 集恢复 33 自建 + 1 vendored（仅 vue）；该 vendored 产物在
+  web-tree-sitter 0.25.10 下 parse 首调外置 scanner 抛 'TypeError: resolved is not a
+  function'（本地 yaml 高亮恒静默降级 hljs）的缺陷随之消除。vue（嵌套 html scanner
+  仍为 scanner.cc）维持 vendored，待上游 C 化后同法收口。
