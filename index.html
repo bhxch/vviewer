@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="manifest" href="/vviewer/manifest.webmanifest" />
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0d1117" />
+  <script>
+    // BUG-51 首帧预置：data-theme-mode 此前唯一写入点在 AppShell onMount（JS bundle
+    // 执行后），暗色偏好用户每次导航/刷新都先渲染完整亮色首帧（FOUC）。此内联脚本在
+    // 首帧前按 localStorage vviewer:settings 的 themeMode 预置属性：取值口径与
+    // AppShell（loadSettings 后 dataset.themeMode = settings.themeMode）逐值一致——
+    // 键缺失（无快照/解析失败）→ 'system'（defaults 同款）；存在的值 String() 原样
+    // 透传（含手改 localStorage 的脏值，避免「预置一值、挂载跳另一值」的反向闪烁）。
+    // 三态值由 app.css 的 :root[data-theme-mode=…] 级联消费；无 CSP/nonce 要求
+    // （adapter-static 直出）。
+    try {
+      var s = JSON.parse(localStorage.getItem('vviewer:settings') || '{}');
+      document.documentElement.setAttribute(
+        'data-theme-mode',
+        'themeMode' in s ? String(s.themeMode) : 'system'
+      );
+    } catch (e) {
+      document.documentElement.setAttribute('data-theme-mode', 'system');
+    }
+  </script>
+  <link href="/vviewer/_app/immutable/entry/start.DBSRfMcl.js" rel="modulepreload">
+		<link href="/vviewer/_app/immutable/entry/payload.DSmR2FwN.js" rel="modulepreload">
+		<link href="/vviewer/_app/immutable/chunks/CRzLMJPS.js" rel="modulepreload">
+		<link href="/vviewer/_app/immutable/chunks/x9cFjbSn.js" rel="modulepreload">
+		<link href="/vviewer/_app/immutable/chunks/_i8RVxnR.js" rel="modulepreload">
+		<link href="/vviewer/_app/immutable/chunks/D4CrXch-.js" rel="modulepreload">
+		<link href="/vviewer/_app/immutable/chunks/DnknDF73.js" rel="modulepreload">
+		<link href="/vviewer/_app/immutable/entry/app.DeEWURBc.js" rel="modulepreload">
+		<link href="/vviewer/_app/immutable/nodes/0.DhU1ZJ2_.js" rel="modulepreload">
+		
+		<link href="/vviewer/_app/immutable/assets/0.CydKHj75.css" rel="stylesheet"></head>
+  <body data-sveltekit-preload-data="hover"><div style="display: contents">
+			<script>
+				{
+					__sveltekit_1ykaruf = {
+						base: "/vviewer",
+						version: "1792271975550",
+						assets: "/vviewer"
+					};
+
+					const element = document.currentScript.parentElement;
+
+					import("/vviewer/_app/immutable/entry/start.DBSRfMcl.js").then(async (kit) => {
+						kit.init(__sveltekit_1ykaruf);
+						const app = await import("/vviewer/_app/immutable/entry/app.DeEWURBc.js");
+						kit.start(app, element);
+					});
+				}
+			</script>
+		</div></body>
+</html>
