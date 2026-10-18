@@ -189,6 +189,9 @@ jobs:
       contents: write
       actions: write
     steps:
+      # job 只下载 artifact，工作目录无 .git；gh release create --generate-notes
+      # 与 gh workflow run 的 repo 归属探测都经 git remote，缺 checkout 即 fatal
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
