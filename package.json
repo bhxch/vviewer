@@ -2,6 +2,10 @@
   "name": "vviewer",
   "private": true,
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bhxch/vviewer.git"
+  },
   "packageManager": "pnpm@10.28.2",
   "scripts": {
     "test": "vitest run",
