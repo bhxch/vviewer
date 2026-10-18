@@ -136,7 +136,8 @@ jobs:
           path: artifacts/grammar-wasm
       # 版本归一与 web job 同法同值（tag v1.2.3 → npm 版本 1.2.3，无 v 前缀）；
       # VV_GRAMMARS_OUT 指向 artifact 解包目录（pack-npm 默认读构建产物路径，本 job 无构建）
-      - name: 归一版本号并打包
+      # GITHUB_ENV 仅对后续 step 生效：归一与打包必须分两步，pack-npm 才读得到变量
+      - name: 归一版本号
         env:
           NPM_SCOPE: ${{ vars.NPM_SCOPE }}
         run: |
@@ -145,7 +146,8 @@ jobs:
           echo "VV_NPM_PACKAGE_NAME=${NPM_SCOPE}/vviewer-grammars-full" >> "$GITHUB_ENV"
           echo "VV_NPM_OUT=$GITHUB_WORKSPACE/dist-npm" >> "$GITHUB_ENV"
           echo "VV_GRAMMARS_OUT=$GITHUB_WORKSPACE/artifacts/grammar-wasm" >> "$GITHUB_ENV"
-          node tools/grammar-builder/pack-npm.mjs
+      - name: 打包 npm 资产包
+        run: node tools/grammar-builder/pack-npm.mjs
       - name: 内容去重门（contentHash 对比线上 latest）
         id: gate
         env:
