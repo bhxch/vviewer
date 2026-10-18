@@ -112,8 +112,9 @@ jobs:
     name: npm 资产包发布（grammars-full）
     runs-on: ubuntu-latest
     # scope 未配置（repo variable）则整个包分发未启用：job 跳过，web 侧 CDN env
-    # 同门控不注入（三层解析链的第 3 层整体缺席）。npm 发布不经 GitHub 内容写
-    # 权限，但 --provenance 供应链签名需要 OIDC（id-token: write）。
+    # 同门控不注入（三层解析链的第 3 层整体缺席）。发布走 OIDC trusted publishing
+    # 免长驻 NPM_TOKEN：id-token: write 供 npm 换短时发布凭据与 provenance 签名，
+    # npm 侧须在包页配 Trusted Publisher（bhxch/vviewer/release.yml + 允许 npm publish）。
     if: vars.NPM_SCOPE != ''
     needs: [grammar]
     permissions:
@@ -126,10 +127,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
+      # 不配 registry-url：无 NODE_AUTH_TOKEN 时 .npmrc 空 authToken 会干扰 OIDC 换凭据
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
       - uses: actions/download-artifact@v8
         with:
           name: grammar-wasm
@@ -169,13 +170,17 @@ jobs:
             echo "version=${VV_NPM_PACKAGE_VERSION}" >> "$GITHUB_OUTPUT"
             echo "内容变化（${H_NEW} ≠ 线上 ${H_LATEST:-无}）：发布 ${VV_NPM_PACKAGE_VERSION}"
           fi
-      - name: npm publish
+      - name: npm publish（OIDC trusted publishing，免长驻 token）
         if: env.SKIP_PUBLISH != '1'
-        # --provenance：npm 供应链签名（公开包 + GitHub Actions + id-token: write），
-        # 发布页展示 "Published with provenance"；对齐 aicommit release 实践
-        run: npm publish ./dist-npm --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # OIDC 发布要求 npm CLI ≥ 11.5.1（node 22 自带 10.x，须显式升级）；
+        # 凭据由 npm 以 id-token: write 的 OIDC 自动换取，不设 NODE_AUTH_TOKEN。
+        # --provenance：供应链签名，发布页展示 "Published with provenance"；
+        # npm 侧 Trusted Publisher（bhxch/vviewer/release.yml）须勾选允许 npm publish
+        # ——2026-09-03 后新建配置默认仅允许 stage publish，漏勾发布即被拒
+        run: |
+          npm install -g npm@^11.5.1
+          npm --version
+          npm publish ./dist-npm --access public --provenance
 
   release:
     name: 聚合发布 GitHub Release
