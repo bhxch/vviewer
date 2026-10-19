@@ -14,14 +14,19 @@
     "markdown-it-footnote": "^4.0.0",
     "markdown-it-task-lists": "^2.1.1",
     "mermaid": "^12.1.0",
+    "pako": "^2.2.0",
     "yaml": "^2.9.1"
   },
   "exports": {
     ".": "./src/code.ts",
     "./markdown/markdownRenderer": "./src/markdown/markdownRenderer.ts",
+    "./markdown/diagrams": "./src/markdown/diagrams.ts",
     "./html": "./src/html.ts",
     "./sanitize": "./src/markdown/sanitize.ts",
     "./jsonl": "./src/jsonl/index.ts"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@types/pako": "^2.0.4"
+  }
 }
