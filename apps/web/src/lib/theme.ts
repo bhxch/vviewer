@@ -286,6 +286,15 @@ export function effectiveMode(themeMode: Settings['themeMode']): 'light' | 'dark
 }
 
 /**
+ * mermaid 主题映射（spec §2.3）：按生效亮暗映射 mermaid 内置主题。
+ * 单一来源：applyAppearanceFromSettings 派发 vv:appearance-applied 时计算 detail，
+ * Task 6 注入器以同源值喂 markdownRenderer 的初始 ctx（render-text 不持副本）。
+ */
+export function resolveMermaidTheme(mode: 'light' | 'dark'): 'default' | 'dark' {
+  return mode === 'dark' ? 'dark' : 'default';
+}
+
+/**
  * 订阅触发入口（spec 2026-10-12 §2.1）：按 settings 计算生效四元组
  * (mode, appearance, codeTheme)，与上次注入签名 diff——仅槽相关变化才注入。
  * 口径为「生效值」而非「原始槽值」：system 的亮暗解析在 effectiveMode 内完成，
@@ -294,6 +303,9 @@ export function effectiveMode(themeMode: Settings['themeMode']): 'light' | 'dark
  * effective 签名——同一非法槽值重复触发会幂等重注入一次，无害。签名初值
  * null 仅保证首个 FromSettings 调用必注入；其他入口先直调 applyAppearance /
  * applyCodeTheme 不破坏正确性（其写入的签名即注入文本真相），onMount 无时序特权。
+ * 注入提交后派发 vv:appearance-applied（detail.mermaidTheme = resolveMermaidTheme(mode)）：
+ * markdownRenderer 的挂载实例据此就地重画 mermaid（spec §2.3，Task 5）；派发只在
+ * 签名 diff 通过后发生（无冗余重画），browser 域模块仍加 document 守卫防 jsdom/SSR。
  */
 export function applyAppearanceFromSettings(settings: Settings): void {
   const mode = effectiveMode(settings.themeMode);
@@ -302,4 +314,9 @@ export function applyAppearanceFromSettings(settings: Settings): void {
   const sig = appearanceSig(mode, appearance, codeTheme);
   if (sig === lastAppearanceSig) return;
   void applyAppearance(appearance, mode, codeTheme);
+  if (typeof document !== 'undefined') {
+    document.dispatchEvent(
+      new CustomEvent('vv:appearance-applied', { detail: { mermaidTheme: resolveMermaidTheme(mode) } })
+    );
+  }
 }

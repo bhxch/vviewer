@@ -33,6 +33,7 @@ import { parseFrontMatter } from './frontMatter';
 import { sanitizeHtml } from './sanitize';
 import { enrichMarkdownDom } from './enrich';
 import { runPipeline, removeLightboxOverlay, LIGHTBOX_OVERLAY_ID } from './pipeline';
+import { renderMermaidInto } from './diagramEngines';
 
 /**
  * 围栏代码高亮回调（pipeline 的 highlightFence 实现）：HighlightClient 区间
@@ -516,6 +517,22 @@ export const markdownRenderer: Renderer = {
     // 解析文档 → 挂载（节点被主文档收养，管线加的复制按钮/灯箱监听随节点保留）
     target.replaceChildren(...Array.from(doc.body.childNodes));
     const toc = extractToc(target);
+    // 图表外观联动（spec §2.3）：mermaid 配色烘焙进 SVG 不可反演，外观变化就地重画。
+    // per-instance 文档监听（destroy 随实例摘除），查询锚定在本实例 target 内——
+    // 多实例共存只刷自己的容器。主题快照自本次 render 的 ctx（未注入/事件缺 detail
+    // 时兜底）；kroki 态 mermaid 视图同带锚，重渲染走 local 引擎（主题即时生效、
+    // 消除远端 kroki 依赖——可接受语义）。
+    const currentTheme = getDiagramOptions()?.mermaidTheme ?? 'default';
+    const listenDoc = target.ownerDocument;
+    const onAppearance = (ev: Event): void => {
+      if (destroyed) return;
+      const next = (ev as CustomEvent<{ mermaidTheme?: 'default' | 'dark' }>).detail?.mermaidTheme ?? currentTheme;
+      for (const el of Array.from(target.querySelectorAll('[data-mermaid]'))) {
+        const src = el.getAttribute('data-mermaid');
+        if (src) void renderMermaidInto(el, src, next);
+      }
+    };
+    listenDoc.addEventListener('vv:appearance-applied', onAppearance);
     // 渲染视图搜索（Task 6）：root 即挂载后的 target；destroyed 闭包供防御
     const domSearch = createDomSearcher(target, () => destroyed);
     // getEngine 供 ViewerPane 状态栏显示正文引擎（M7：渲染: 本地/远程），复用 code 实例的轮询模式；
@@ -527,6 +544,8 @@ export const markdownRenderer: Renderer = {
     } = {
       destroy() {
         destroyed = true;
+        // 外观联动监听随实例摘除（per-instance 文档监听不得跨实例泄漏）
+        listenDoc.removeEventListener('vv:appearance-applied', onAppearance);
         domSearch.restore(); // 还原搜索 mark，避免把包裹态节点留在 DOM（虽随即清空，保持对称）
         // 相对图片解析产出的 blob: URL 随实例释放（渲染重跑会重新解析，不复用旧 URL）
         for (const url of resolvedUrls) {
