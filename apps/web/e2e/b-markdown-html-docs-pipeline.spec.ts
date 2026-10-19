@@ -121,16 +121,17 @@ test('MD-04 mermaid：合法块 svg 渲染，非法块错误样式保留原文�
   const md = page.locator('.vv-markdown');
   await expect(md).toBeVisible({ timeout: 20_000 });
 
-  // 合法块：md-mermaid 容器（无错误类）内真实 svg（动态 import + 渲染留足超时）
-  const okBox = md.locator('div.md-mermaid:not(.md-mermaid-error)');
-  await expect(okBox).toHaveCount(1, { timeout: 30_000 });
-  await expect(okBox.locator('svg')).toBeVisible({ timeout: 30_000 });
+  // 合法块：diagram 视图（data-mermaid 锚仅 mermaid 设置，无错误类）内真实 svg
+  //（动态 import + 渲染留足超时）——Task 3 契约迁移：md-mermaid 容器 → wrapper 三段
+  const okView = md.locator('.md-diagram-view[data-mermaid]:not(.md-diagram-error)');
+  await expect(okView).toHaveCount(1, { timeout: 30_000 });
+  await expect(okView.locator('svg')).toBeVisible({ timeout: 30_000 });
 
-  // 非法块：md-mermaid-error 错误样式 + 原文保留（data-mermaid 与文本）
-  const badBox = md.locator('div.md-mermaid.md-mermaid-error');
-  await expect(badBox).toHaveCount(1);
-  await expect(badBox).toHaveAttribute('data-mermaid', /A\[ --> B/);
-  await expect(badBox).toContainText('A[ --> B');
+  // 非法块：视图错误态（md-diagram-error）+ 原文保留（data-mermaid 与文本）
+  const badView = md.locator('.md-diagram-view.md-diagram-error');
+  await expect(badView).toHaveCount(1);
+  await expect(badView).toHaveAttribute('data-mermaid', /A\[ --> B/);
+  await expect(badView).toContainText('A[ --> B');
 
   // 不阻塞后续管线：其后的 js 围栏仍产出复制按钮（copyCode 步正常执行）
   const copyBtn = md.locator('pre .md-copy-btn');

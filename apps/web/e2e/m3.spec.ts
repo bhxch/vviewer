@@ -75,14 +75,15 @@ test('markdown 全要素：表格/任务列表/围栏高亮/callout/katex/mermai
   await expect(md.locator('.katex').first()).toBeVisible();
   await expect(md.locator('.katex-display')).toHaveCount(1);
 
-  // mermaid：容器存在，svg 真实渲染（headless chromium 可用）或错误样式兜底均可接受
-  const mermaidBox = md.locator('div.md-mermaid');
-  await expect(mermaidBox).toHaveCount(1);
-  await expect(mermaidBox).toHaveAttribute('data-mermaid', /graph TD/);
-  const viaSvg = (await mermaidBox.locator('svg').count()) > 0;
+  // mermaid：diagram 视图存在（data-mermaid 锚），svg 真实渲染（headless chromium
+  // 可用）或错误态兜底均可接受——Task 3 契约迁移：md-mermaid 容器 → wrapper 视图
+  const mermaidView = md.locator('.md-diagram-view[data-mermaid]');
+  await expect(mermaidView).toHaveCount(1);
+  await expect(mermaidView).toHaveAttribute('data-mermaid', /graph TD/);
+  const viaSvg = (await mermaidView.locator('svg').count()) > 0;
   console.log(`[m3] mermaid 渲染路径: ${viaSvg ? 'svg 真实渲染' : 'error 样式兜底'}`);
   if (!viaSvg) {
-    await expect(mermaidBox).toHaveClass(/md-mermaid-error/);
+    await expect(mermaidView).toHaveClass(/md-diagram-error/);
   }
 });
 
