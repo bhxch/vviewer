@@ -14,7 +14,7 @@ import { stopServer, waitHealthy } from '../e2e/serverHarness';
  * 原文、切换钮与本地 fence 同构；容器带 data-md-diagram-wrapped（服务端产物的唯一
  * DOM 指纹——本地 fence 路径的 wrapper 不带该属性）。
  *
- * 三用例（viewer.ts hasNonDiagramFence 细化后的 auto 路由矩阵新面）：
+ * 四用例（viewer.ts hasNonDiagramFence 细化后的 auto 路由矩阵新面）：
  * ① auto 策略纯图表围栏文档路由服务端——服务端产物可见（[data-md-diagram-wrapped]
  *   内 svg）+ 真实 POST /api/compute/markdown 200 + 状态栏「渲染: 远程」（修复前：
  *   auto 含任意围栏即留本地，hasNonDiagramFence 细化前形态）；
@@ -24,10 +24,14 @@ import { stopServer, waitHealthy } from '../e2e/serverHarness';
  *   parse_failure_leaves_fence_untouched 同源）→ 客户端管线 local 引擎（viz wasm）
  *   渲染失败 → .md-diagram-view.md-diagram-error + 原文（与 Plan 1 本地失败语义一致）；
  *   「渲染: 远程」仍在——证明文档确实走了远程、失败发生在客户端接手段。
+ * ④ svgbob 真实引擎直出 style 端到端存活（终审 C1 钉子）——svgbob 0.7.6 恒在 style
+ *   写 `marker-start: url(#arrow)` 等片段引用（修复前 sanitize「含 url( 即整节点丢弃」
+ *   把全部 svgbob 服务端图杀掉）：断言 wrapper 内 svg + style 含 url(#arrow) 与
+ *   marker 定义，钉住「片段引用放行」穿过真实 sanitize 层。
  *
  * 拓扑：主实例 :4174（webServer，无 compute）不参与；同源 --compute 实例 :4185
  * （beforeAll ensureServe 拉起，afterAll 停止，同 t-cmp.spec.ts:4181 模式——端口错开
- * 既有 4178-4182）承担全部三用例（同源部署无需 CORS/token，契约链端到端走真实
+ * 既有 4178-4182）承担全部四用例（同源部署无需 CORS/token，契约链端到端走真实
  * POST /api/compute/markdown）。夹具 bcd- 前缀写入共享 fixture 根。
  */
 
@@ -88,6 +92,21 @@ test.beforeAll(async () => {
       '',
       '```dot',
       'digraph { broken ->',
+      '```',
+      ''
+    ].join('\n')
+  );
+  // ④ svgbob 载体（终审 C1 端到端钉子）：含箭头的盒图——svgbob crate 直出 style 恒含
+  //    marker-start/end: url(#arrow) 片段引用（0.7.6 固定规则），容器豁免钩子必须放行
+  writeFileSync(
+    join(FIXTURE, 'bcd-svgbob.md'),
+    [
+      '# svgbob 样例',
+      '',
+      '```svgbob',
+      '+------+       +------+',
+      '|  in  | ----> |  out |',
+      '+------+       +------+',
       '```',
       ''
     ].join('\n')
@@ -213,4 +232,26 @@ test('服务端图表③: 非法 dot 解析失败服务端保留 fence→客户�
   await expect(errView).toBeVisible({ timeout: 30_000 });
   await expect(errView).toContainText('digraph { broken ->');
   await expect(page.locator('.md-diagram-lang', { hasText: 'graphviz' })).toBeVisible();
+});
+
+test('服务端图表④: svgbob 直出 style 端到端存活——url(#arrow) 片段引用穿过 sanitize（终审 C1 钉子）', async ({
+  page
+}) => {
+  test.setTimeout(120_000);
+  await connectSameOriginCompute(page, 'auto');
+  await openFile(page, 'bcd-svgbob.md');
+
+  // 服务端 svgbob 渲染落位：契约 div 接回 wrapper、svg 进视图面板
+  const view = page.locator('.md-diagram-view [data-md-diagram-wrapped]');
+  await expect(view).toBeVisible({ timeout: 30_000 });
+  await expect(view.locator('svg')).toHaveCount(1);
+  // 真实引擎 style 存活：svgbob 固定描边规则（线条样式）+ 箭头 marker 片段引用——
+  // 修复前「含 url( 即整节点丢弃」会连 style 一起杀（线条全消失，缺陷态 style 计数 0）
+  const style = view.locator('style');
+  await expect(style).toHaveCount(1);
+  await expect(style).toContainText('stroke: black');
+  await expect(style).toContainText('marker-start: url(#arrow)');
+  await expect(style).toContainText('marker-end: url(#arrow)');
+  // 同文档引用目标（<marker id="arrow">）随 svg 存在，引用可解析
+  await expect(view.locator('svg marker#arrow')).toHaveCount(1);
 });

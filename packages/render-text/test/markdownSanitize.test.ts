@@ -476,6 +476,70 @@ describe('sanitizeHtml——服务端图表 style 上下文豁免（spec §2.5 �
     expect(out).toContain(engineCss);
   });
 
+  // ---- 终审 C1：真实引擎输出 fixture 三向固化（终审实证缺口：此前误杀回归用例为
+  // 自造近似样本。以下两段夹具分别自 layout-rs 0.1.3 与 svgbob 0.7.6 对代表性输入
+  // 的直出 <style> 逐字提取——svgbob 恒含 marker-start/end: url(#arrow) 等片段引用，
+  // 修复前「含 url( 即整节点丢弃」把全部 svgbob 服务端图杀掉） ----
+
+  /** svgbob 0.7.6 直出 style 片段（`svgbob::to_svg("+---+\n|a|")` 逐字提取，承载描边与箭头 marker 规则） */
+  const SVGBOB_STYLE_076 = `.svgbob line, .svgbob path, .svgbob circle, .svgbob rect, .svgbob polygon {
+  stroke: black;
+  stroke-width: 2;
+  stroke-opacity: 1;
+  fill-opacity: 1;
+  stroke-linecap: round;
+  stroke-linejoin: miter;
+}
+
+.svgbob text {
+  white-space: pre;
+  fill: black;
+  font-family: Iosevka Fixed, monospace;
+  font-size: 14px;
+}
+
+.svgbob .end_marked_arrow {
+  marker-end: url(#arrow);
+}
+
+.svgbob .start_marked_arrow {
+  marker-start: url(#arrow);
+}`;
+
+  it('真实引擎 fixture：svgbob 0.7.6 style（含 url(#arrow) 片段引用）存活——整杀即线条消失（C1）', () => {
+    const out = sanitizeHtml(`${SRV}<svg><style>${SVGBOB_STYLE_076}</style><line class="solid"/></svg></div>`);
+    expect(out).toContain('<style>');
+    expect(out).toContain('stroke: black');
+    expect(out).toContain('marker-end: url(#arrow)');
+    expect(out).toContain('marker-start: url(#arrow)');
+  });
+
+  it('真实引擎 fixture：layout-rs 0.1.3 style（字体类规则）存活', () => {
+    const out = sanitizeHtml(`${SRV}<svg><style>.a14 { font-size: 14px; font-family: Times, serif; }</style><ellipse/></svg></div>`);
+    expect(out).toContain('<style>');
+    expect(out).toContain('.a14 { font-size: 14px; font-family: Times, serif; }');
+  });
+
+  it('敌意 style 整节点丢弃后容器与 svg 仍在（降级不炸图，仅样式没了）', () => {
+    const hostile = [
+      // 归一化伪装的 url(（hex 转义 → url(https://…）
+      '\\75 rl(https://evil.example/x.png)',
+      // 直写非片段 url(（绝对 URL——片段放行规则的另一半：非 # 形态仍杀）
+      'background:url(https://evil.example/b.png)',
+      // image-set 引号 URL（无 url( 形态的字符串 URL 向量）
+      'background:image-set("https://evil.example/i.png" 1x)',
+    ];
+    for (const css of hostile) {
+      const out = sanitizeHtml(`${SRV}<svg><style>.a{${css}}</style><line/></svg></div>`);
+      expect(out).not.toContain('<style');
+      expect(out).not.toContain('evil.example');
+      // 丢弃仅限 style 节点：容器 div 与 svg 图元保留（图降级为无线条，不整块消失）
+      const back = new DOMParser().parseFromString(out, 'text/html');
+      expect(back.querySelector('div[data-vv-diagram="server"]')).not.toBeNull();
+      expect(back.querySelector('div[data-vv-diagram="server"] svg line')).not.toBeNull();
+    }
+  });
+
   it('普通位置的 style 仍被剥除（BUG-40 防线不松动）', () => {
     const out = sanitizeHtml('<style>.titlebar{display:none}</style><p>x</p>');
     expect(out).not.toContain('<style');

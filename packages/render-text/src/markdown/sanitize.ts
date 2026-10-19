@@ -166,9 +166,14 @@ function cssEscapeNormalized(text: string): string {
 
 // 危险 token 清单（不区分大小写；无 g 旗标——RegExp.test 无 lastIndex 状态）：
 //   </style       逃逸/守卫触发向量；
-//   url(          外联加载主向量（转义变体由归一化拆除）；
+//   url(          外联加载主向量（转义变体由归一化拆除）——仅拒绝非片段形态
+//                 （终审 C1）：`url(` 后（可选空白+可选引号）首字符为 # 属同文档
+//                 片段引用，零网络放行——svgbob 引擎 style 恒含
+//                 `marker-start: url(#arrow)` 等形态（0.7.6 实测），一刀切会把
+//                 全部 svgbob 服务端图的线条样式杀没；引号/绝对 URL 形态仍整杀；
 //   image-set(    字符串 URL 形态无 url(（M1：与属性层 externalRefInDeclaration
-//                 的 image-set 同口径——那里逐声明剥除，这里整节点丢弃）；
+//                 的 image-set 同口径——那里逐声明剥除，这里整节点丢弃），无
+//                 片段语义，维持整杀；
 //   @import       样式表级外联；
 //   behavior:     遗留 IE 行为绑定（L1）；
 //   -moz-binding: 遗留 XBL 绑定（L1）；
@@ -176,7 +181,7 @@ function cssEscapeNormalized(text: string): string {
 //   http(s)://    绝对 URL 兜底：引擎 CSS 无外链，任何转义伪装归一化后同此命中。
 const STYLE_DEADLY: readonly RegExp[] = [
   /<\/\s*style/i,
-  /url\(/i,
+  /url\((?!\s*['"]?#)/i,
   /image-set\(/i,
   /@import/i,
   /behavior\s*:/i,
@@ -197,10 +202,13 @@ function registerSanitizeHooks(): void {
     // ---------- 服务端图表 style 上下文豁免（spec §2.5，2026-10-19 控制器裁决） ----------
     //
     // compute markdown 的服务端图表（server/src/compute/diagrams.rs）产出带引擎生成
-    // <style> 的 SVG（layout-rs 仅字体规则、svgbob 固定描边规则，用户源码不进入
-    // style 块）；FORBID_TAGS 一刀切会把线条样式剥没（svgbob 线全消失）。裁决：
-    // [data-vv-diagram="server"] 容器内的 style 经安全检查后保留；容器外维持原剥
-    // 除语义（BUG-40 防线不松动）。
+    // <style> 的 SVG（layout-rs 仅字体规则；svgbob 固定描边规则 + 用户 CSS——
+    // `# Legend:` 语法 `name = {css}` 原样并入 style 块，0.7.6 实测）；FORBID_TAGS
+    // 一刀切会把线条样式剥没（svgbob 线全消失）。裁决：[data-vv-diagram="server"]
+    // 容器内的 style 经安全检查后保留；容器外维持原剥除语义（BUG-40 防线不松动）。
+    // Legend 用户 CSS 的外泄面由下方全量归一化危险 token 判定兜住（凡含 url(
+    // 非片段形态/@import/绝对 URL 等即整节点丢弃），页面级样式注入与作者伪造容器
+    // 同为 M2 口径知情接受。
     //
     // 威胁模型（修复轮 1 M2 落实）：该容器属性可被 markdown 作者伪造——comrak
     // render.unsafe 透传作者原始 HTML 且 ALLOW_DATA_ATTR 保留 data-*，豁免并非
