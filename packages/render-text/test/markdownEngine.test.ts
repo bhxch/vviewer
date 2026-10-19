@@ -97,6 +97,65 @@ describe('renderMarkdownToHtml——扩展语法（Task 2：mark/ins/deflist）'
   });
 });
 
+describe('renderMarkdownToHtml——行内脚注 ^[note]（Task 4）', () => {
+  // 计划前提校正（Task 4 选型记录）：markdown-it-footnote 4.0.0 自带 footnote_inline
+  // 规则（node_modules/markdown-it-footnote/index.mjs「Process inline footnotes
+  // (^[...])」节，注册于 md.inline.ruler.after('image', ...)），^[...] 开箱即用，
+  // 且与 [^1] 共用同一 env.footnotes.list 并轨编号——计划设想的「自写 inline rule
+  // 并入同一 env」没有实现面（自写只会与内建规则重复注册），故本组测试即交付物：
+  // 把内建行为以断言固化，供双端等价面回归。
+  //
+  // 双端等价面口径（Task 3 评审带入）：行内脚注 comrak 深层形态为 #fn-__inline_N /
+  // fnref-__inline_N / 尾注 section.footnotes>ol 无类 + data-footnote-backref；
+  // markdown-it-footnote 形态为 #fnN / fnrefN / [N] 文本 / hr.footnotes-sep +
+  // section.footnotes>ol.footnotes-list。双端不等深同构，等价面=class + DOM 结构层
+  // （sup.footnote-ref 内锚点 → section.footnotes>ol>li.footnote-item 含注内容与
+  // 回链 a.footnote-backref）。本侧锚定 markdown-it-footnote 自身形态（与 [^1] 用例
+  // 同一口径），不得拿 comrak 的 #fn-__inline_1 形态来锚本地输出（假失败）。
+
+  it('行内脚注 ^[注] 产出 footnote-ref 并入尾注（计划 Step 1 原用例）', () => {
+    const html = renderMarkdownToHtml('有注^[行内注]与常规[^1]\n\n[^1]: 常规注').html;
+    expect(html).toContain('footnote-ref');
+    expect(html).toContain('行内注');
+    expect(html).toContain('常规注');
+  });
+
+  it('编号与 [^1] 体系并轨：同一 env.footnotes.list 按出现顺序编号', () => {
+    const html = renderMarkdownToHtml('有注^[行内注]与常规[^1]\n\n[^1]: 常规注').html;
+    // 行内注先出现 → fn1；命名定义 → fn2；尾注条目同序
+    expect(html).toMatch(/<a href="#fn1" id="fnref1">\[1\]<\/a>/);
+    expect(html).toMatch(/<a href="#fn2" id="fnref2">\[2\]<\/a>/);
+    expect(html.indexOf('行内注')).toBeLessThan(html.indexOf('常规注'));
+    expect(html).toContain('footnotes-list');
+  });
+
+  it('纯行内注（无任何 [^label] 定义）同样产出完整尾注节', () => {
+    const html = renderMarkdownToHtml('甲^[注一]乙^[注二]').html;
+    expect(html).toContain('footnotes-sep');
+    expect(html).toContain('footnote-backref');
+    expect((html.match(/footnote-ref/g) ?? []).length).toBe(2);
+    expect(html).toContain('注一');
+    expect(html).toContain('注二');
+  });
+
+  it('行内注内容经 inline 解析（行内标记生效）', () => {
+    const html = renderMarkdownToHtml('见^[**强调**注]').html;
+    expect(html).toContain('<strong>强调</strong>');
+  });
+
+  it('未闭合 ^[abc 保持字面（不吞内容）', () => {
+    const html = renderMarkdownToHtml('未闭 ^[abc 不吞').html;
+    expect(html).toContain('^[abc');
+    expect(html).not.toContain('footnote-ref');
+  });
+
+  it('行内码内 ^[x] 保持字面（code 规则先于 footnote 规则）', () => {
+    const html = renderMarkdownToHtml('代码 `^[x]` 原样').html;
+    expect(html).toContain('<code>^[x]</code>');
+    expect(html).not.toContain('footnote-ref');
+  });
+});
+
 describe('renderMarkdownToHtml——front matter', () => {
   it('YAML 块剥离后渲染正文，front matter 返回解析对象', () => {
     const src = '---\ntitle: Hello\ntags:\n  - a\n  - b\n---\n\n# 正文\n';

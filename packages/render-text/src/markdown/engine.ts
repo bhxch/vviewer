@@ -9,6 +9,14 @@
 // mark/ins/deflist（Task 2，md-katex 语法对齐计划）：扩展语法 `==x==`→<mark>、
 // `++x++`→<ins>、term/`: def`→<dl><dt><dd>——与 comrak 侧扩展语法金标的本地半边
 // 对齐，此前三语法本地引擎均输出字面文本。
+// 行内脚注 `^[note]`（Task 4，同计划）：无需自写规则——markdown-it-footnote 4.0.0
+// 自带 footnote_inline（其 index.mjs「Process inline footnotes」节，注册于
+// inline.ruler.after('image')），与 `[^1]` 共用 env.footnotes.list 并轨编号；
+// md-katex 计划设想的「自写 inline rule 并入同一 env」经实读源码与实测确认没有
+// 实现面，行为由 test/markdownEngine.test.ts「行内脚注（Task 4）」describe 固化。
+// 双端等价面口径：comrak 行内脚注深层形态（#fn-__inline_N、尾注 ol 无类、
+// data-footnote-backref）与本插件（#fnN、ol.footnotes-list、footnote-backref 类）
+// 不等深同构，等价面=class + DOM 结构层，勿跨端互锚 id 形态。
 import MarkdownIt from 'markdown-it';
 import type { MarkdownIt as MarkdownItInstance } from 'markdown-it';
 // markdown-it-task-lists / markdown-it-footnote / markdown-it-mark / markdown-it-ins /
