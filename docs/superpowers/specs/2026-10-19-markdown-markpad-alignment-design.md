@@ -38,7 +38,7 @@
 
 | fence 语言 | 别名 | 默认模式 | 本地引擎（全懒加载） |
 | --- | --- | --- | --- |
-| mermaid | — | local | `mermaid`（已有依赖，维持 11.x 现行版本） |
+| mermaid | — | local | `mermaid`（已有依赖 ^12.1.0，维持现行版本） |
 | graphviz | `dot` | local | `@viz-js/viz`（wasm；**服务端原生**，见 §2.5） |
 | plantuml / c4plantuml / ditaa / blockdiag / nwdiag / actdiag / seqdiag / erd / pikchr | — | kroki | — |
 | svgbob | — | kroki | —（**服务端原生** `svgbob` crate，见 §2.5；客户端默认 kroki 不移植 markpad 的本地 JS 实现） |
