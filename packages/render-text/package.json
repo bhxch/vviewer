@@ -5,6 +5,7 @@
   "type": "module",
   "main": "src/code.ts",
   "dependencies": {
+    "@viz-js/viz": "^3.31.0",
     "@vviewer/core": "workspace:*",
     "@vviewer/highlight": "workspace:*",
     "dompurify": "^3.4.16",
@@ -14,6 +15,7 @@
     "markdown-it-footnote": "^4.0.0",
     "markdown-it-task-lists": "^2.1.1",
     "mermaid": "^12.1.0",
+    "nomnoml": "^1.7.0",
     "pako": "^2.2.0",
     "yaml": "^2.9.1"
   },
