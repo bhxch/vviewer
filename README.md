@@ -22,7 +22,7 @@
 | --- | --- |
 | 代码/文本 | tree-sitter 高亮：34 语言 lite 集 wasm 随包内置，其余 helix 301 语言经「同源 → 服务端 → CDN」三层资产链按需加载（查询资产与 helix 版本对齐）；≤2MB 整文件高亮（失败 hljs 整文件兜底），>2MB 可视区懒高亮（chunk 失败行级 hljs 兜底，非流式来源 >200MB 降纯文本）；语言检测表对齐 helix（342 语言/685 扩展名）；utf-8/utf-16/gb18030 编码；虚拟滚动；状态栏实时显示引擎与执行位置 |
 | JSON Lines | .jsonl/.ndjson 行卡片视图：逐行 JSON 美化 + 卡片级懒高亮、可变高度虚拟滚动、长行折叠、失败行计数随滚动渐进统计；窗口流式渐进加载（「已加载 N 行」，滚动到底才确定总行数）；非流式来源 >200MB 委托 code 纯文本 |
-| Markdown | 本地管线：GFM 表格/任务列表、callout、KaTeX 公式、mermaid 图表、围栏代码高亮、TOC 侧栏、图片灯箱；后端版可切远程 comrak 渲染（双引擎样式归一） |
+| Markdown | 本地管线：GFM 表格/任务列表、callout、KaTeX 公式、围栏代码高亮、TOC 侧栏、图片灯箱；图表矩阵：mermaid/graphviz/nomnoml 本地渲染 + 18 类语言 kroki 通道与源码模式、math 围栏、图/源码切换、按语言模式设置；后端版可切远程 comrak 渲染（双引擎样式归一） |
 | HTML | 沙箱 iframe 预览（sandbox 无 `allow-scripts`）+ DOMPurify 净化，源码/渲染双视图 |
 | 图片 | 常见位图/矢量格式 + markdown 图片灯箱 |
 | 音视频 | ArtPlayer 集成：mp4/webm 直接播，`.m3u8` 按需加载 hls.js、`.flv/.ts` 按需加载 mpegts.js |

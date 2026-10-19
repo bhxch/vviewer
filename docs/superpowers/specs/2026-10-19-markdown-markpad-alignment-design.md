@@ -54,7 +54,7 @@
 ### 2.2 kroki 通道
 
 - 移植 markpad `kroki.ts`：pako deflate + base64url → `{krokiHost}/{type}/svg/{data}`，以 `<img>` 承载；默认 `https://kroki.io`，可在设置改自架 host。
-- sanitize 允许 img src 指向配置的 kroki host（sanitize.ts URI 白名单加动态源——host 来自用户设置，按「用户自配置外域」放行并注记隐私语义：图源数据将发往该服务）。
+- 〔勘误〕kroki img 由管线在净化后创建，不经 sanitize，无动态源放行需求。
 - kroki 渲染失败保留源码卡片 + 错误态（对齐现有 mermaid 失败形态）。
 
 ### 2.3 mermaid 主题联动 + 图/源码切换
