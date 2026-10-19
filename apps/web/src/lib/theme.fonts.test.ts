@@ -85,6 +85,15 @@ describe('applyFonts（注入 style#vv-font）', () => {
     expect(fontEl()?.textContent).toContain(`--vv-ui-font: "My Font", system-ui, ${DEFAULT_UI_FONT_STACK};`);
   });
 
+  it('通用族清单覆盖 CSS Fonts 4 全集（终审 M-3）：math/fangsong 裸写不引号', () => {
+    applyFonts(baseSettings({ codeFamily: 'STIX Two Math, math' }));
+    expect(fontEl()?.textContent).toContain(`--vv-code-font: "STIX Two Math", math, ${DEFAULT_CODE_FONT_STACK};`);
+    applyFonts(baseSettings({ uiFamily: 'FangSong, fangsong' }));
+    expect(fontEl()?.textContent).toContain(
+      `--vv-ui-font: FangSong, fangsong, ${DEFAULT_UI_FONT_STACK};`
+    );
+  });
+
   it('uiFamily/uiSize 注入 body 槽变量；uiFamily 注入同样过引号转义', () => {
     applyFonts(baseSettings({ uiFamily: 'My; Font', uiSize: 22 }));
     const text = fontEl()?.textContent ?? '';
@@ -154,10 +163,11 @@ describe('app.css 变量化消费契约（CSS 变量 fallback 与 theme.ts 常�
     expect(css).toContain('--vv-ui-font-size: 16px;');
     expect(css).toContain('--vv-code-font-size: 13px;');
   });
-  it('消费点改变量：body 字族/字号、.vv-code-pre 与 .vv-hex-dump 字号均走 var 且保留现值 fallback', () => {
+  it('消费点改变量：body 字族/字号、.vv-code-pre/.vv-hex-dump/.vv-jsonl-body 字号均走 var 且保留现值 fallback（终审 I-2：三消费面清零硬编码）', () => {
     expect(css).toMatch(/body \{[^}]*font-family: var\(--vv-ui-font, system-ui, -apple-system, sans-serif\)/);
     expect(css).toMatch(/body \{[^}]*font-size: var\(--vv-ui-font-size, 16px\)/);
     expect(css).toMatch(/\.vv-code-pre \{[^}]*font-size: var\(--vv-code-font-size, 13px\)/);
     expect(css).toMatch(/\.vv-hex-dump \{[^}]*font-size: var\(--vv-code-font-size, 12px\)/);
+    expect(css).toMatch(/\.vv-jsonl-body \{[^}]*font-size: var\(--vv-code-font-size, 13px\)/);
   });
 });

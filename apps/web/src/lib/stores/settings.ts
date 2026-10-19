@@ -63,10 +63,11 @@ function defaults(): Settings {
   };
 }
 
-/** 字号 clamp（脏值 typeof 守卫后夹紧；非有限数字归位默认） */
-function clampSize(v: unknown, range: readonly [number, number] | readonly number[], dflt: number): number {
+/** 字号 clamp（脏值 typeof 守卫后四舍五入夹紧；非有限数字归位默认）。导出供面板
+ * 字号输入同口径消费（终审 M-2：13.7 → 14，输入侧与白名单侧不再一处取整一处截断） */
+export function clampSize(v: unknown, range: readonly [number, number] | readonly number[], dflt: number): number {
   if (typeof v !== 'number' || !Number.isFinite(v)) return dflt;
-  return Math.min(range[1]!, Math.max(range[0]!, v));
+  return Math.min(range[1]!, Math.max(range[0]!, Math.round(v)));
 }
 
 export function loadSettings(): Settings {

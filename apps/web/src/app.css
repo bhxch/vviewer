@@ -487,7 +487,7 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-jsonl-gutter { user-select: none; min-width: 2.2em; text-align: right;
   color: var(--ui-fg-muted); flex: none; }
 .vv-jsonl-body { flex: 1; min-width: 0; overflow-x: auto; margin: 0; white-space: pre;
-  font-family: var(--vv-code-font); font-size: 13px; line-height: var(--vv-code-line-height);
+  font-family: var(--vv-code-font); font-size: var(--vv-code-font-size, 13px); line-height: var(--vv-code-line-height);
   color: var(--code-fg); }
 .vv-jsonl-badge { flex: none; align-self: center; font-size: 12px; padding: 0 .4em;
   border: 1px solid var(--ui-danger, #d33); border-radius: 4px; color: var(--ui-danger, #d33); }

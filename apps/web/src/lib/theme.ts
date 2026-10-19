@@ -368,6 +368,8 @@ const GENERIC_FAMILY_KEYWORDS = new Set([
   'monospace',
   'cursive',
   'fantasy',
+  'math', // CSS Fonts 4 通用族（终审 M-3）：引号化即失效回退位，同其余关键字
+  'fangsong',
   'system-ui',
   'ui-monospace',
   'ui-sans-serif',

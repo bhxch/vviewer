@@ -189,6 +189,15 @@ describe('fonts 设置节白名单/clamp（spec 2026-10-19 字体系统 §2.1）
     expect(s.codeSize).toBe(28);
   });
 
+  it('字号 clamp 取整：13.7 → 14 / 9.2 → 9（终审 M-2：与面板输入口径一致）', () => {
+    localStorage.setItem('vviewer:settings', JSON.stringify({
+      fonts: { uiFamily: '', uiSize: 13.7, codeFamily: '', codeSize: 9.2 }
+    }));
+    const s = loadSettings().fonts;
+    expect(s.uiSize).toBe(14);
+    expect(s.codeSize).toBe(9);
+  });
+
   it('脏 JSON 不抛：fonts 节/字段级归位默认，不影响其余字段', () => {
     // excludedPatterns/autoRefresh 刻意非默认：若整体回落 defaults() 则断言必炸
     localStorage.setItem(

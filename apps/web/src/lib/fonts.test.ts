@@ -165,13 +165,30 @@ describe('SettingsPanel 字体节源码契约（两槽四输入 + persist 接线
     expect(src).toContain('FONT_SPECIMEN');
   });
 
-  it('字号 clamp 即时：number input min/max 绑定 settings 的 UI/CODE_SIZE_RANGE，输入经 clamp 落盘', () => {
+  it('字号 clamp 即时：number input min/max 绑定 settings 的 UI/CODE_SIZE_RANGE，输入经 clampSize 落盘', () => {
     expect(src).toContain('UI_SIZE_RANGE');
     expect(src).toContain('CODE_SIZE_RANGE');
     expect(src).toMatch(/min=\{UI_SIZE_RANGE\[0\]\}\s*max=\{UI_SIZE_RANGE\[1\]\}/);
     expect(src).toMatch(/min=\{CODE_SIZE_RANGE\[0\]\}\s*max=\{CODE_SIZE_RANGE\[1\]\}/);
     expect(src).toContain('function onSizeInput');
-    expect(src).toMatch(/Math\.min\(range\[1\], Math\.max\(range\[0\]/);
+    // 面板复用 settings.ts clampSize（终审 M-2：取整口径单源，不再面板内联 min/max）
+    expect(src).toContain("clampSize, loadSettings, saveSettings, CODE_SIZE_RANGE, UI_SIZE_RANGE");
+    expect(src).toContain('clampSize(Number(inp.value), range,');
+  });
+
+  it('字号渐进输入不被回写打断（终审 I-1）：oninput 只 clamp+persist 不写 DOM，显示规范化在 onchange', () => {
+    const inputFn = src.slice(src.indexOf('function onSizeInput'), src.indexOf('function onSizeChange'));
+    expect(inputFn).not.toBe('');
+    // oninput 段不回写输入框 value（草稿/显式回写都会打断渐进键入「16」：
+    // 中间值「1」clamp 成 10 回写、再拼成「106」clamp 成 28）
+    expect(inputFn).not.toMatch(/inp\.value\s*=/);
+    expect(inputFn).not.toMatch(/\b(uiSize|codeSize)\s*=/);
+    expect(inputFn).toContain('persistSize');
+    // 显示同步（规范化回写）只在 change：blur/回车时输入已结束，回写无打断风险
+    expect(src).toContain('function onSizeChange');
+    expect(src).toMatch(/function onSizeChange[\s\S]*?inp\.value = String\(clamped\);/);
+    expect(src.match(/onchange=\{\(e\) => onSizeChange\('ui', e\)\}/g)?.length).toBe(1);
+    expect(src.match(/onchange=\{\(e\) => onSizeChange\('code', e\)\}/g)?.length).toBe(1);
   });
 
   it('自定义/预设切换：select 值派生（自定义态显哨兵），onFamilyChange 切手输框显隐', () => {

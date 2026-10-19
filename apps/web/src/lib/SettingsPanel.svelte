@@ -13,7 +13,7 @@
   // 修改即时经 saveSettings 持久化，AppShell 经
   // onSettingsChanged 订阅刷新响应式副本（FileTree 随排除规则重建）。Esc / ✕ 关闭。
   import { DIAGRAM_TYPES, type DiagramMode } from '@vviewer/render-text/markdown/diagrams';
-  import { loadSettings, saveSettings, CODE_SIZE_RANGE, UI_SIZE_RANGE } from './stores/settings';
+  import { clampSize, loadSettings, saveSettings, CODE_SIZE_RANGE, UI_SIZE_RANGE } from './stores/settings';
   import { deleteTheme, listThemes, type ImportedTheme } from './stores/session';
   import { importThemeFiles } from './vsixImport';
   import {
@@ -258,22 +258,44 @@
     persist();
   }
 
-  /** 字号输入：即时 clamp（spec §2.1 范围）并持久化；半截/清空输入不落盘，
-   * 保留上一有效值——loadSettings 白名单兜底仅防脏 JSON，不在此重复。
-   * persist 后同步输入框显示为生效值（台账 Low-1）：clamped 与现值相等时
-   * Svelte 不重渲 value，输入框会停留原始输入（如 13.7 / 013）直至重开面板。 */
+  /** 字号渐进持久化（终审 I-1）：oninput 落盘不经 uiSize/codeSize 草稿——草稿更新会
+   * 触发 value={uiSize} 重渲回写输入框，渐进键入「16」的中间值「1」被 clamp 成 10
+   * 回写打断输入、再拼成「106」clamp 成 28。字号槽位取本次输入 clamp 值，另一槽位
+   * 取最新持久值（面板打开期间其它来源的改动不被旧草稿覆盖，同 persist 口径）。 */
+  function persistSize(slot: 'ui' | 'code', size: number): void {
+    const fresh = loadSettings();
+    fresh.fonts = {
+      uiFamily,
+      uiSize: slot === 'ui' ? size : fresh.fonts.uiSize,
+      codeFamily,
+      codeSize: slot === 'code' ? size : fresh.fonts.codeSize
+    };
+    saveSettings(fresh);
+  }
+
+  /** 字号输入（oninput）：即时 clamp（spec §2.1 范围，含取整——loadSettings 白名单
+   * 同口径）并持久化，但不写 DOM 不更新草稿（终审 I-1，见 persistSize）；半截/清空
+   * 输入不落盘（clampSize 非有限数归位当前草稿值 = 写入同值），显示规范化挪到
+   * onSizeChange（blur/回车时输入已结束，回写无打断风险）。 */
   function onSizeInput(slot: 'ui' | 'code', e: Event): void {
     const inp = e.currentTarget as HTMLInputElement;
-    const raw = inp.value;
-    if (raw.trim() === '') return;
-    const v = Number(raw);
-    if (!Number.isFinite(v)) return;
+    if (inp.value.trim() === '') return;
     const range = slot === 'ui' ? UI_SIZE_RANGE : CODE_SIZE_RANGE;
-    const clamped = Math.min(range[1], Math.max(range[0], Math.round(v)));
+    const clamped = clampSize(Number(inp.value), range, slot === 'ui' ? uiSize : codeSize);
+    persistSize(slot, clamped);
+  }
+
+  /** 字号提交（onchange，blur/回车触发）：输入框与草稿同步为规范化值（终审 I-1
+   * 显示同步——台账 Low-1 的 13.7/013 漂移在此回正），非法/空输入回落当前草稿值。 */
+  function onSizeChange(slot: 'ui' | 'code', e: Event): void {
+    const inp = e.currentTarget as HTMLInputElement;
+    const range = slot === 'ui' ? UI_SIZE_RANGE : CODE_SIZE_RANGE;
+    const cur = slot === 'ui' ? uiSize : codeSize;
+    const clamped = inp.value.trim() === '' ? cur : clampSize(Number(inp.value), range, cur);
+    inp.value = String(clamped);
     if (slot === 'ui') uiSize = clamped;
     else codeSize = clamped;
     persist();
-    inp.value = String(clamped);
   }
 
   // ---------- 网络字体管理（字体系统 spec §5 下半，Task 5） ----------
@@ -611,6 +633,7 @@
         step="1"
         value={uiSize}
         oninput={(e) => onSizeInput('ui', e)}
+        onchange={(e) => onSizeChange('ui', e)}
         aria-label="界面字号（px）"
       />
     </label>
@@ -651,6 +674,7 @@
         step="1"
         value={codeSize}
         oninput={(e) => onSizeInput('code', e)}
+        onchange={(e) => onSizeChange('code', e)}
         aria-label="代码字号（px）"
       />
     </label>

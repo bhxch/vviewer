@@ -108,7 +108,13 @@ test.describe('b-fonts 字体系统', () => {
     const pre = page.locator('.vv-code-pre');
 
     await openSettings(page);
-    await page.locator('input[aria-label="代码字号（px）"]').fill('16');
+    const codeSizeInput = page.locator('input[aria-label="代码字号（px）"]');
+    // 逐键键入（终审 I-1 防回潮）：fill('') 清场（空串不落盘）后逐键「1」「6」——
+    // oninput 若把中间值「1」clamp 成 10 回写输入框，下一位拼成「106」→ clamp 28；
+    // 渐进语义保持则终值恰为 16（输入框原样 + 注入值）
+    await codeSizeInput.fill('');
+    await codeSizeInput.pressSequentially('16');
+    await expect(codeSizeInput).toHaveValue('16');
     await expect.poll(() => fontCss(page)).toContain('--vv-code-font-size: 16px');
     await expect.poll(() => fontCss(page)).toContain('--vv-code-line-height: 24px');
     await page.keyboard.press('Escape'); // 焦点在面板输入内，Esc 关闭
