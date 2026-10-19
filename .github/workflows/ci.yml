@@ -36,6 +36,10 @@ jobs:
       - run: node tools/grammar-builder/gen-code-extensions.mjs --check
       - run: pnpm vitest run
       - run: pnpm --filter web build
+      # spec §2.6 预算门禁：dist 图表引擎 chunk（diagram-engines-*.js）总量 ≤4MB，
+      # 超限即失败——启用集取舍（减引擎回落 kroki）见 spec，门禁先行兜底
+      - name: 图表 chunk 预算门禁
+        run: node tools/diagram-budget.mjs
       # 第三方声明完整性辅助检查（warning-only，恒 exit 0；新依赖忘登记时在日志可见）
       - run: node tools/check-notices/check-notices.mjs
 

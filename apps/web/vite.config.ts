@@ -157,9 +157,60 @@ function serveIndexHtmlInPreview(): Plugin {
   };
 }
 
+// md 图表（Task 8）：四个图表引擎（graphviz/viz-js、nomnoml、mermaid、katex）
+// 确定性聚到单一 chunk，产物文件名携带 diagram-engines- 前缀——
+// （1）PWA precache 按 globPatterns 排除该命名，引擎按需加载不进预缓存；
+// （2）预算门禁 tools/diagram-budget.mjs 按文件名前缀统计体积（spec §2.6 ≤4MB）。
+//
+// 机制备案（偏离 brief 的 rollup 风格 manualChunks）：vite 8 底层为 rolldown，kit 3 在
+// environments.client.build.rolldownOptions.output 显式设 chunkFileNames 为纯哈希
+//（chunks/[hash].js，chunk 名不进文件名）。顶层 build.rollupOptions.output.manualChunks
+// 实测不生效；直接写在顶层 environments.client 也不生效——vite resolveConfig 按
+// pre → normal 顺序逐插件 mergeConfig(config, res)，kit 的 config hook 是 order 'pre'
+// 且后 merge 的函数字段覆盖先 merge 的（数组则是 concat，故顶层 groups 会生效而
+// chunkFileNames 被 kit 盖掉）。本插件用默认（normal）order 的 config hook 返回覆写，
+// 排在 kit 之后 merge，从而压过 kit：
+// - codeSplitting.groups（rolldown 原生分组，kit 自身同款 API）按包路径正则归堆；
+//   groups 数组经 concat 叠加，kit 的 sveltekit-manifest group 原样保留（重复无害）；
+// - chunkFileNames 仅对 diagram-engines 特判带名，其余 chunk 保持 kit 默认纯哈希；
+//   sveltekit-manifest 分支为 kit 内部契约（固定 _app/manifest.js 保证内容哈希稳定、
+//   避免哈希反馈循环），覆写时必须原样复刻，kit 升级若改动需同步。
+function diagramEngineChunk(): Plugin {
+  return {
+    name: 'diagram-engine-chunk',
+    config: () => ({
+      environments: {
+        client: {
+          build: {
+            rolldownOptions: {
+              output: {
+                chunkFileNames(chunkInfo) {
+                  if (chunkInfo.name === 'sveltekit-manifest') return '_app/manifest.js';
+                  if (chunkInfo.name === 'diagram-engines') return '_app/immutable/chunks/diagram-engines-[hash].js';
+                  return '_app/immutable/chunks/[hash].js';
+                },
+                codeSplitting: {
+                  groups: [
+                    { name: 'sveltekit-manifest', test: '<sveltekit:generated>/app-manifest.js' },
+                    {
+                      name: 'diagram-engines',
+                      test: /[\\/]node_modules[\\/](@viz-js[\\/]viz|nomnoml|mermaid|katex)[\\/]/
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+  };
+}
+
 export default defineConfig({
   plugins: [
     serveIndexHtmlInPreview(),
+    diagramEngineChunk(),
     sveltekit({
       adapter: adapter({ fallback: 'index.html' }),
       paths: { base: kitBase }
@@ -214,7 +265,18 @@ export default defineConfig({
         //（build/ 下无其他 html，已核实）——workbox-build 对 additional 条目不去重
         //（direct push），若 glob 也抓到 index.html 会产生同 URL 双 revision 条目，
         // SW 求值期抛 add-to-cache-list-conflicting-entries → 完全死 SW。
+        // 图表引擎 chunk（codeSplitting groups → diagram-engines-*.js）不入 precache：
+        // 体积大头（mermaid/katex/viz/nomnoml）按需加载即可，预缓存拖慢首装且
+        // 白白占满用户存储——预算门禁（tools/diagram-budget.mjs，spec §2.6）另行
+        // 约束其总量 ≤4MB。
+        // 排除必须走 globIgnores 而非 globPatterns 内嵌 '!...' 否定条目（brief 原写法
+        // 实测无效）：workbox-build 对 globPatterns 逐条独立 glob（getFileManifestEntries），
+        // 否定条目单独跑恒零匹配（且恒报 doesn't-match warning），不参与排除；文件仍被
+        // 主 pattern 收集，仅因超过 maximumFileSizeToCacheInBytes（2MiB 默认）落出清单，
+        // 同时触发 vite-plugin-pwa throwMaximumFileSizeToCacheInBytes 抛错。globIgnores
+        // 前三项为 workbox-build 默认值（覆盖式传入须显式带上），末项为本排除。
         globPatterns: ['**/*.{js,css,woff2,json}'],
+        globIgnores: ['**/node_modules/**/*', 'sw.js', 'workbox-*.js', '**/diagram-engines-*.js'],
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/^\/api\//],
         // BUG-15：vite-plugin-pwa 生成 precache manifest 的时点早于 SvelteKit
