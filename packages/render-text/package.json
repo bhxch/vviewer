@@ -25,6 +25,7 @@
   "exports": {
     ".": "./src/code.ts",
     "./markdown/markdownRenderer": "./src/markdown/markdownRenderer.ts",
+    "./markdown/export": "./src/markdown/export.ts",
     "./markdown/diagrams": "./src/markdown/diagrams.ts",
     "./html": "./src/html.ts",
     "./sanitize": "./src/markdown/sanitize.ts",

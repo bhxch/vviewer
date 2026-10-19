@@ -556,6 +556,7 @@ export const markdownRenderer: Renderer = {
     const instance: Omit<RenderedInstance, 'search'> & {
       getEngine(): MarkdownEngineState;
       getMeta(): MarkdownFileMeta;
+      getExportDocument(): Document | null;
       search(query: string, opts?: { caseSensitive?: boolean }): Promise<SearchMatch[]>;
     } = {
       destroy() {
@@ -577,7 +578,18 @@ export const markdownRenderer: Renderer = {
       search: domSearch.search,
       gotoMatch: domSearch.gotoMatch,
       getEngine: () => engine,
-      getMeta: () => ({ encoding: det.encoding, size: buffer.byteLength })
+      getMeta: () => ({ encoding: det.encoding, size: buffer.byteLength }),
+      // 导出文档快照（md-export Task 1）：挂载后 DOM 的独立克隆（含
+      // resolveRelativeImages 后的最终 src）。克隆 target 本体（保留 .vv-markdown
+      // 排版作用域类名，导出基础 CSS 与 app.css 同选择器直接生效）；跨文档 append
+      // 自动 adopt，触发壳就地装配不回写主文档。降级实例无本方法（'in' 探测为
+      // false → MetaPanel 不显示导出钮，与 getToc 同款鸭子探测）。
+      getExportDocument: () => {
+        if (destroyed) return null;
+        const out = new DOMParser().parseFromString('', 'text/html');
+        out.body.append(target.cloneNode(true));
+        return out;
+      },
     };
     return instance;
   }
