@@ -74,6 +74,7 @@
 - **失败语义**：`layout-rs` 是 dot 子集实现——子集外特性/渲染失败 → 保留 fence 由客户端引擎优雅接手，绝不出错误卡片；与 viz.js 的视觉差异属**知情差异**（不同渲染器），一致性测试只断言渲染归属，不断言视觉等价。
 - **auto 路由细化**（viewer.ts 既有规则：含普通代码 fence 的文档留本地）：仅含图表/math fence 的文档在服务端能力宣告齐备时**可路由服务端**（图表被服务端消化，无客户端高亮需求）；含普通代码 fence 的文档仍留本地（tree-sitter 高亮不变）；显式 compute 策略不受此细化影响。
 - **sanitize 连动**：服务端渲染的 SVG 需过 sanitize 入文档——放行 svg profile（DOMPurify SVG 域拦 script/事件属性/foreignObject 收口）；客户端 mermaid 路径生成于净化之后，不受影响。
+  - **勘误（2026-10-19 终审 I2，以实现为准）**：上文「放行 svg profile」与实际实现不符——svg 本就在 DOMPurify 默认允许表，无 profile 变更；真正的实现是 **style 上下文豁免**：style 移出显式禁用面（DOMPurify 3.4.16 中 FORBID_TAGS 先于钩子短路移除），`[data-vv-diagram="server"]` 容器内 style 经 CSS 转义归一化 + 危险 token 全量判定（命中即整节点丢弃），同文档片段 `url(#…)` 引用放行（svgbob marker 规则必需），容器外维持剥除。裁决理由一行：引擎/用户 Legend CSS 内联展开需 Rust 侧 DOM 级 CSS 引擎（重且脆），退化对 svgbob 不可行（线条全失），豁免与既有本地引擎 post-sanitize 注入含 style SVG 的既成事实同源，外泄面由全量判定兜住。
 - **模式设置边界**：§2.1 按语言模式（local/kroki/source）仅作用于**客户端管线**；服务端路径由 compute 策略与服务端子集宣告决定，二者正交（注记防误解）。
 
 ### 2.6 资产体积策略（审阅反馈轮二改：撤销自建拆包，全部直接引现存包）
