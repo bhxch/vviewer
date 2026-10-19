@@ -302,8 +302,8 @@ export function createDispatcher(registry: Registry): Dispatcher {
         : undefined;
     const redisplay: Redisplay = (o) =>
       headOnly
-        ? dispatch(source, null, target, { ...o, signal: optsSignal, read })
-        : dispatch(source, buffer, target, { ...o, signal: optsSignal });
+        ? dispatch(source, null, target, { ...o, signal: optsSignal, lineMetrics: opts?.lineMetrics, read })
+        : dispatch(source, buffer, target, { ...o, signal: optsSignal, lineMetrics: opts?.lineMetrics });
     let renderer: Renderer | undefined;
     // 渲染期 ctx（streaming 分支构造）：声明在 try 外——catch 的重试动作需要透传
     //（评审指令②），try 作用域变量 catch 不可见

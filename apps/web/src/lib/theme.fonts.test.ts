@@ -73,6 +73,18 @@ describe('applyFonts（注入 style#vv-font）', () => {
     expect(text).toContain(`--vv-code-font: "A", "B", ${DEFAULT_CODE_FONT_STACK};`);
   });
 
+  it('通用族关键字段不加引号（修复轮 m1）：JetBrains Mono, monospace 末段裸写——引号化即失效回退位', () => {
+    applyFonts(baseSettings({ codeFamily: 'JetBrains Mono, monospace' }));
+    const text = fontEl()?.textContent ?? '';
+    expect(text).toContain(`--vv-code-font: "JetBrains Mono", monospace, ${DEFAULT_CODE_FONT_STACK};`);
+    // 大小写不敏感（CSS 通用族关键字 case-insensitive）；原文大小写保留不改写
+    applyFonts(baseSettings({ codeFamily: 'MONOSPACE' }));
+    expect(fontEl()?.textContent).toContain(`--vv-code-font: MONOSPACE, ${DEFAULT_CODE_FONT_STACK};`);
+    // uiFamily 槽同函数：混合栈同样裸写关键字段
+    applyFonts(baseSettings({ uiFamily: 'My Font, system-ui' }));
+    expect(fontEl()?.textContent).toContain(`--vv-ui-font: "My Font", system-ui, ${DEFAULT_UI_FONT_STACK};`);
+  });
+
   it('uiFamily/uiSize 注入 body 槽变量；uiFamily 注入同样过引号转义', () => {
     applyFonts(baseSettings({ uiFamily: 'My; Font', uiSize: 22 }));
     const text = fontEl()?.textContent ?? '';

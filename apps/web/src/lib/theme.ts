@@ -360,18 +360,36 @@ function escapeFamilyName(name: string): string {
   return name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
-/**
- * family 声明值组装：自定义名不拆栈语义——用户输入的逗号栈整体作为一个 font-family
+/** CSS 通用族关键字（大小写不敏感，CSS Fonts 级联关键字语义）：命中段不加引号——
+ * 引号化（"monospace"）会变成名为 monospace 的自定义字体名，通用回退位随之失效。 */
+const GENERIC_FAMILY_KEYWORDS = new Set([
+  'serif',
+  'sans-serif',
+  'monospace',
+  'cursive',
+  'fantasy',
+  'system-ui',
+  'ui-monospace',
+  'ui-sans-serif',
+  'ui-serif',
+  'ui-rounded'
+]);
+
+/** family 声明值组装：自定义名不拆栈语义——用户输入的逗号栈整体作为一个 font-family
  * 声明值（逐段引号包裹后并排，保留多级回退次序），末尾恒接默认回退栈；空输入即默认栈。
- * 逐段引号包裹同时是注入防线：`a"b` → `"a\"b"`、`My; Font` → 引号内分号失效。
- */
+ * 逐段引号包裹同时是注入防线：`a"b` → `"a\"b"`、`My; Font` → 引号内分号失效；
+ * 通用族关键字段（monospace 等，大小写不敏感）裸写不引号。 */
 function fontFamilyValue(custom: string, fallbackStack: string): string {
   const segs = custom
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s !== '');
   if (segs.length === 0) return fallbackStack;
-  return segs.map((s) => `"${escapeFamilyName(s)}"`).join(', ') + `, ${fallbackStack}`;
+  return (
+    segs
+      .map((s) => (GENERIC_FAMILY_KEYWORDS.has(s.toLowerCase()) ? s : `"${escapeFamilyName(s)}"`))
+      .join(', ') + `, ${fallbackStack}`
+  );
 }
 
 /** 确保 style#vv-font 单节点存在（首次注入创建，后续复用；appearance 的 ensureStyleEl 同构） */

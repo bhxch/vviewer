@@ -555,6 +555,49 @@ describe('dispatch opts.lineMetrics 透传（字体系统 Task 2 协议，opts.s
       source('a.txt'), new TextEncoder().encode('hi'), document.createElement('div'));
     expect(seen).toBeUndefined(); // 第 6 参缺省（锁定：无 signal/lineMetrics 时不传 opts 形态）
   });
+
+  it('open-as 重入透传 lineMetrics：兼容路径（修复轮 M1：重入与初渲染同行尺度）', async () => {
+    const reg = createRegistry();
+    const seen: unknown[] = [];
+    reg.install({ id: 'code', label: 'code', extensions: ['txt'], render: async () => { throw new Error('boom'); } });
+    reg.install(mk('hex', [], {
+      render: async (...args: unknown[]) => { seen.push(args[5]); return { destroy() {} }; }
+    }));
+    const target = document.createElement('div');
+    const lineMetrics = { fontSize: 16, lineHeight: 24 };
+    await createDispatcher(reg).dispatch(
+      source('a.txt'), new TextEncoder().encode('hello\n'), target, { lineMetrics });
+    // 初渲染失败落错误卡片：点「以 hex 打开」触发 redisplay 重入
+    const hexBtn = [...target.querySelectorAll('.vv-error-action')]
+      .find((b) => b.textContent === '以 hex 打开') as HTMLButtonElement;
+    expect(hexBtn).toBeTruthy();
+    hexBtn.click();
+    await vi.waitFor(() => expect(seen.length).toBeGreaterThan(0));
+    // 修复前：重入 opts 缺 lineMetrics → 渲染器回落常量行高，与注入字号失配错位
+    expect(seen[0]).toEqual({ lineMetrics });
+  });
+
+  it('open-as 重入透传 lineMetrics：headOnly（null+read）分支', async () => {
+    const reg = createRegistry();
+    const seen: unknown[] = [];
+    reg.install({ id: 'code', label: 'code', extensions: ['txt'], render: async () => { throw new Error('boom'); } });
+    reg.install(mk('hex', [], {
+      render: async (...args: unknown[]) => { seen.push(args[5]); return { destroy() {} }; }
+    }));
+    const target = document.createElement('div');
+    const full = new TextEncoder().encode('hello\n');
+    await createDispatcher(reg).dispatch(
+      source('a.txt'), null, target, {
+        lineMetrics: { fontSize: 16, lineHeight: 24 },
+        read: async () => full
+      });
+    const hexBtn = [...target.querySelectorAll('.vv-error-action')]
+      .find((b) => b.textContent === '以 hex 打开') as HTMLButtonElement;
+    expect(hexBtn).toBeTruthy();
+    hexBtn.click();
+    await vi.waitFor(() => expect(seen.length).toBeGreaterThan(0));
+    expect(seen[0]).toEqual({ lineMetrics: { fontSize: 16, lineHeight: 24 } });
+  });
 });
 
 describe('dispatch 读下沉（io-streaming §3：streaming 选路 + StreamCtx 构造 + 兼容路径）', () => {
