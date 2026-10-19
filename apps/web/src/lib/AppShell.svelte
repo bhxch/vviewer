@@ -151,6 +151,20 @@
     }
   }
 
+  /** 立即收回临时态并清定时器（L1：右键置可见分支同步调用——条已常显，残留
+   * temp 类会使半透/覆盖形态滞留，残留定时器会在常显条上误触发隐藏竞态）。 */
+  function dismissTemp(bar: 'top' | 'tab'): void {
+    if (bar === 'top') {
+      if (topTempTimer !== null) clearTimeout(topTempTimer);
+      topTempTimer = null;
+      topTemp = false;
+    } else {
+      if (tabTempTimer !== null) clearTimeout(tabTempTimer);
+      tabTempTimer = null;
+      tabTemp = false;
+    }
+  }
+
   function scheduleHideTemp(bar: 'top' | 'tab'): void {
     if (bar === 'top') {
       if (topTempTimer !== null) clearTimeout(topTempTimer);
@@ -168,12 +182,8 @@
   }
 
   function clearTempTimers(): void {
-    if (topTempTimer !== null) clearTimeout(topTempTimer);
-    if (tabTempTimer !== null) clearTimeout(tabTempTimer);
-    topTempTimer = null;
-    tabTempTimer = null;
-    topTemp = false;
-    tabTemp = false;
+    dismissTemp('top');
+    dismissTemp('tab');
   }
 
   /**
@@ -213,8 +223,15 @@
   }
 
   function menuToggleVisible(bar: 'top' | 'tab'): void {
-    if (bar === 'top') updateLayout({ topBarVisible: !layout.topBarVisible });
-    else updateLayout({ tabBarVisible: !layout.tabBarVisible });
+    if (bar === 'top') {
+      const show = !layout.topBarVisible;
+      updateLayout({ topBarVisible: show });
+      if (show) dismissTemp('top'); // L1：从临时条右键重显，temp 态与定时器同步清
+    } else {
+      const show = !layout.tabBarVisible;
+      updateLayout({ tabBarVisible: show });
+      if (show) dismissTemp('tab');
+    }
   }
 
   $effect(() => {
@@ -597,6 +614,34 @@
 
   $effect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      // zen 进出（spec §3）：Ctrl+Alt+Z 切换。键位冲突复核（2026-10-19 实读取，
+      // 全仓库 rg KeyZ / ctrl+alt 组合）：既有键位仅 Ctrl/Cmd+Shift+F、Ctrl/Cmd+P、
+      // Ctrl+, 、Alt+W(KeyW)、Alt+Shift+T(KeyT)、j/k/g/G 与各面板 Esc——Ctrl+Alt+Z
+      // 无占用，浏览器亦无默认行为。
+      // 评审 L2：本分支与 Esc 分支置于 inField 判定之前（Ctrl+P 组合键放行先例
+      // 同款）——zen 快捷键/退出不被输入焦点拦截；overlay 优先级在 Esc 分支内
+      // 闭环（面板容器 keydown 先于 window 关面板，此处实读 DOM 判 closeOverlay
+      // 不叠加，语义不因前移改变）。
+      if ((e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey && e.code === 'KeyZ') {
+        e.preventDefault();
+        toggleZen();
+        return;
+      }
+      // Esc 优先级状态机（spec §3，zenEscAction 纯函数分派）：chrome 右键菜单 >
+      // overlay（设置/搜索/快速打开等，面板自带 Esc 关闭处理器在同一事件上动作，
+      // 此处不叠加）> 退 zen。overlay 判定实读面板 DOM（anyOverlayOpen 注释）。
+      if (e.key === 'Escape') {
+        if (chromeMenu !== null) {
+          chromeMenu = null;
+          return;
+        }
+        const action = zenEscAction({ overlaysOpen: anyOverlayOpen(), zen: layout.zen });
+        if (action === 'exitZen') {
+          e.preventDefault();
+          toggleZen();
+        }
+        return;
+      }
       const t = e.target as HTMLElement | null;
       const inField =
         t !== null &&
@@ -620,30 +665,6 @@
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         quickOpenOpen = !quickOpenOpen;
-        return;
-      }
-      // zen 进出（spec §3）：Ctrl+Alt+Z 切换。键位冲突复核（2026-10-19 实读取，
-      // 全仓库 rg KeyZ / ctrl+alt 组合）：既有键位仅 Ctrl/Cmd+Shift+F、Ctrl/Cmd+P、
-      // Ctrl+, 、Alt+W(KeyW)、Alt+Shift+T(KeyT)、j/k/g/G 与各面板 Esc——Ctrl+Alt+Z
-      // 无占用，浏览器亦无默认行为。
-      if ((e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey && e.code === 'KeyZ') {
-        e.preventDefault();
-        toggleZen();
-        return;
-      }
-      // Esc 优先级状态机（spec §3，zenEscAction 纯函数分派）：chrome 右键菜单 >
-      // overlay（设置/搜索/快速打开等，面板自带 Esc 关闭处理器在同一事件上动作，
-      // 此处不叠加）> 退 zen。overlay 判定实读面板 DOM（anyOverlayOpen 注释）。
-      if (e.key === 'Escape') {
-        if (chromeMenu !== null) {
-          chromeMenu = null;
-          return;
-        }
-        const action = zenEscAction({ overlaysOpen: anyOverlayOpen(), zen: layout.zen });
-        if (action === 'exitZen') {
-          e.preventDefault();
-          toggleZen();
-        }
         return;
       }
       // Alt+W 切换 tab 管理面板（T6）：浏览器无默认占用（关闭标签页是 Ctrl+W，
@@ -694,6 +715,15 @@
   <!-- 顶栏/标签栏：hidden=zen 或显式隐藏（chromeVisible 覆盖语义）；temp=边缘悬停
        临时条（半透覆盖形态）。组件保持挂载——TopBar 的 Ctrl+, 监听与 SettingsPanel
        挂点不因隐藏失效（spec §2 全件可隐但功能可达） -->
+  {#if !vis.topBar}
+    <!-- 边缘唤出热区（spec §2/§3，评审 M1）：shell flex 流内插槽锚定各自自然槽位
+         （本条在 TopBar 槽位前、tab 条在 TopBar/TabBar 之间）——单/双隐藏组合均
+         不错位，零测量。悬停唤出真实条本体（temp 形态），移开 1.5s 再隐。
+         zen 下顶栏热区即退出条入口（临时条右键菜单「退出专注模式」） -->
+    <!-- svelte-ignore a11y_no_static_element_interactions --><!-- 边缘悬停热区：纯
+         指针唤出通道，无键盘/AT 等价物（zen 退出另有 Esc/快捷键/菜单通道） -->
+    <div class="vv-edge" data-edge="top" onpointerenter={() => summonTemp('top')}></div>
+  {/if}
   <TopBar
     temp={topTemp}
     hidden={!vis.topBar && !topTemp}
@@ -704,6 +734,10 @@
       if (topTemp) scheduleHideTemp('top');
     }}
   />
+  {#if !vis.tabBar}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="vv-edge" data-edge="tab" onpointerenter={() => summonTemp('tab')}></div>
+  {/if}
   <TabBar
     tabs={activeTabs}
     sources={activeWorkspace?.sources ?? []}
@@ -753,6 +787,7 @@
         onpointermove={moveDrag}
         onpointerup={endDrag}
         onpointercancel={endDrag}
+        onlostpointercapture={endDrag}
         ondblclick={() => updateLayout({ leftWidth: DEFAULT_LAYOUT.leftWidth })}
       ></div>
     {/if}
@@ -775,6 +810,7 @@
         onpointermove={moveDrag}
         onpointerup={endDrag}
         onpointercancel={endDrag}
+        onlostpointercapture={endDrag}
         ondblclick={() => updateLayout({ rightWidth: DEFAULT_LAYOUT.rightWidth })}
       ></div>
     {/if}
@@ -804,18 +840,6 @@
   {/if}
   {#if wsPanelOpen}
     <WorkspaceTabsPanel onclose={() => (wsPanelOpen = false)} />
-  {/if}
-  {#if !vis.topBar}
-    <!-- 边缘唤出热区（spec §2/§3）：对应 chrome 隐藏（含 zen）时置于视口顶缘，
-         悬停唤出真实条本体（temp 形态），移开 1.5s 再隐（scheduleHideTemp）。
-         zen 下顶栏热区即退出条入口（临时条右键菜单「退出专注模式」） -->
-    <!-- svelte-ignore a11y_no_static_element_interactions --><!-- 边缘悬停热区：纯
-         指针唤出通道，无键盘/AT 等价物（zen 退出另有 Esc/快捷键/菜单通道） -->
-    <div class="vv-edge" data-edge="top" onpointerenter={() => summonTemp('top')}></div>
-  {/if}
-  {#if !vis.tabBar}
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="vv-edge" data-edge="tab" onpointerenter={() => summonTemp('tab')}></div>
   {/if}
   {#if chromeMenu !== null}
     {@const bar = chromeMenu.bar}

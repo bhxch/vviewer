@@ -341,19 +341,25 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
   .vv-collapse-right { left: 6px; }
 }
 /* chrome 隐藏与 zen（spec 2026-10-19 §2/§3，Task 2）：隐藏条 fixed 平移出视口顶
-   （不回流内容、组件保持挂载），临时条 fixed 半透覆盖（同真实条本体，无双实例），
-   边缘唤出热区，chrome 右键菜单。z-index 惯例：热区 45 < 条 50 < 面板外菜单 90 */
+   （不回流内容、组件保持挂载；visibility:hidden 移出 Tab 序/AT 树并停用内部
+   命中——translate 保留故 fixed 后代（.vv-tabctx 等）包含块劫持面被同点无害化：
+   off 态内部不可见不可交互），临时条 fixed 半透覆盖（同真实条本体，无双实例），
+   边缘唤出热区（shell flex 流内插槽，锚定各自自然槽位——评审 M1：fixed 硬编码
+   top 几何在单隐藏组合下错位），chrome 右键菜单。z-index 惯例：条 50 < 菜单 90 */
 .vv-topbar.vv-chrome-off, .vv-tabbar.vv-chrome-off {
   position: fixed; top: 0; left: 0; right: 0; z-index: 50;
   transform: translateY(-100%);
+  visibility: hidden;
 }
 .vv-topbar.vv-chrome-temp, .vv-tabbar.vv-chrome-temp {
   position: fixed; top: 0; left: 0; right: 0; z-index: 50;
   transform: none; opacity: .88; box-shadow: 0 2px 12px rgb(0 0 0 / 18%);
 }
-.vv-edge { position: fixed; left: 0; right: 0; z-index: 45; }
-.vv-edge[data-edge='top'] { top: 0; height: 10px; }
-.vv-edge[data-edge='tab'] { top: 10px; height: 8px; }
+/* 唤出热区：shell（flex column）流内插槽——top 隐藏时占 TopBar 槽位（视口顶），
+   tab 隐藏时占 TabBar 槽位（紧贴其上邻可见条底部），单/双隐藏组合均不错位 */
+.vv-edge { flex: none; }
+.vv-edge[data-edge='top'] { height: 10px; }
+.vv-edge[data-edge='tab'] { height: 8px; }
 .vv-chromemenu { position: fixed; z-index: 90; min-width: 10em; padding: 4px; display: flex;
   flex-direction: column; background: var(--ui-tab-active-bg); border: 1px solid var(--ui-border);
   border-radius: 6px; box-shadow: 0 4px 16px rgb(0 0 0 / 18%); }
