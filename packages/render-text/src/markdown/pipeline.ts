@@ -131,8 +131,9 @@ function effectiveModeOf(type: DiagramType, ctx: PipelineCtx): DiagramMode {
  * - kroki：视图为 img（src 经 kroki deflate+base64url 编码；error 监听仅真浏览器
  *   生效——jsdom 不派发 img load/error，单测只断言 src 形态）；
  * - local：动态引擎渲染 svg/katex HTML 注入视图，失败降级错误卡片（保留源码）。
- * mermaid 视图容器恒带 data-mermaid 源码属性（重渲染锚，Task 5 主题联动依赖；
- * 失败态同样保留——旧实现语义，渲染成功与否不影响锚存在）。
+ * mermaid 视图容器带 data-mermaid 源码属性（重渲染锚，Task 5 主题联动依赖）：
+ * local/kroki 模式带，source 模式无（未渲染无需重渲染锚）；local 失败态同样
+ * 保留——旧实现语义，渲染成功与否不影响锚存在。
  */
 async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: PipelineCtx): Promise<void> {
   const source = (code.textContent ?? '').replace(/\n$/, '');
