@@ -526,6 +526,37 @@ describe('dispatch rendererOverride (C 项)', () => {
   });
 });
 
+describe('dispatch opts.lineMetrics 透传（字体系统 Task 2 协议，opts.signal 第 6 参先例）', () => {
+  it('透传为 render 第 6 参的 lineMetrics 字段（非 streaming 路径）', async () => {
+    const reg = createRegistry();
+    let seen: unknown;
+    reg.install(mk('text', ['txt'], {
+      render: async (_b, _tg, _s, _det, _ctx, opts) => {
+        seen = opts;
+        return { destroy() {} };
+      }
+    }));
+    const lineMetrics = { fontSize: 16, lineHeight: 24 };
+    await createDispatcher(reg).dispatch(
+      source('a.txt'), new TextEncoder().encode('hi'), document.createElement('div'), { lineMetrics });
+    expect(seen).toEqual({ lineMetrics });
+  });
+
+  it('缺省不构造第 6 参（渲染器侧零感知，向后兼容）', async () => {
+    const reg = createRegistry();
+    let seen: unknown = 'unset';
+    reg.install(mk('text', ['txt'], {
+      render: async (...args: unknown[]) => {
+        seen = args[5];
+        return { destroy() {} };
+      }
+    }));
+    await createDispatcher(reg).dispatch(
+      source('a.txt'), new TextEncoder().encode('hi'), document.createElement('div'));
+    expect(seen).toBeUndefined(); // 第 6 参缺省（锁定：无 signal/lineMetrics 时不传 opts 形态）
+  });
+});
+
 describe('dispatch 读下沉（io-streaming §3：streaming 选路 + StreamCtx 构造 + 兼容路径）', () => {
   /** 构造 dispatch 级 read 闭包（区间语义 end 含；无 range = 全量），记录每次调用的 range */
   function readOf(content: Uint8Array<ArrayBuffer>, calls: Array<{ start: number; end: number } | undefined>) {

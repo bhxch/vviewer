@@ -1,4 +1,4 @@
-import type { ByteRange, Detection, FileSource, RenderedInstance, Renderer, RendererId, StreamCtx } from '../types';
+import type { ByteRange, Detection, FileSource, LineMetrics, RenderedInstance, Renderer, RendererId, StreamCtx } from '../types';
 import type { Registry } from '../registry/registry';
 import { detect } from '../detect';
 import { looksTextual, shebangLangOf } from '../detect/magic';
@@ -37,6 +37,9 @@ export interface DispatchOptions {
    * 的迟到落定校验（image 解码窗）aborted 即快速失败，由本 catch 的 abort 分类
    * 接管（no-op 不上屏）。缺省不传第 6 参，渲染器侧零感知。 */
   signal?: AbortSignal;
+  /** 行尺度（字体系统 spec §3，Task 2）：并入 render 第 6 参透传——code/hex 以之
+   * 替换行高常量（虚拟滚动装配/行占位/跳转坐标），其余渲染器不读即零感知。 */
+  lineMetrics?: LineMetrics;
 }
 
 const HEAD_SIZE = 8192;
@@ -128,9 +131,10 @@ function openAsAction(
  * （判文本 → 纯文本在前，否则 hex 在前）；当前 renderer 即 hex 时不重复给 hex。
  * streaming 渲染器重试须透传 ctx（io-streaming Task 5 评审指令②）：以原 base +
  * ctx 重跑 render，字节经 ctx.read 重读（opts.read 链）——缺省第 5 参会以裸 probe
- * 重跑，streaming 渲染器必次次失败。optsSignal 透传为 render 第 6 参（审计 R1：
- * 重试/open-as 重入与主路径同获取消信号，同型解码盲窗收口）。onRendered 接收
- * 重试/open-as 成功产出的实例，由调用方（dispatch catch）级联托管。
+ * 重跑，streaming 渲染器必次次失败。renderOpts（signal + lineMetrics）透传为
+ * render 第 6 参（审计 R1：重试/open-as 重入与主路径同获取消信号，同型解码盲窗
+ * 收口；字体系统 Task 2：重试同样保行尺度）。onRendered 接收重试/open-as 成功
+ * 产出的实例，由调用方（dispatch catch）级联托管。
  */
 function buildRenderErrorActions(
   registry: Registry,
@@ -142,10 +146,10 @@ function buildRenderErrorActions(
   onRendered: (instance: RenderedInstance) => void,
   redisplay: Redisplay,
   ctx?: StreamCtx,
-  optsSignal?: AbortSignal
+  renderOpts?: { signal?: AbortSignal; lineMetrics?: LineMetrics }
 ): ErrorCardAction[] {
   const retry = (): void => {
-    renderer.render(buffer, target, source, det, ctx, optsSignal ? { signal: optsSignal } : undefined)
+    renderer.render(buffer, target, source, det, ctx, renderOpts)
       .then(onRendered)
       .catch((err: unknown) => {
         // 取消 ≠ 重试失败（错误身份与字节映射 Task 2，与主 catch「abort 不上屏」
@@ -154,7 +158,7 @@ function buildRenderErrorActions(
         // 重试仍失败：保留错误详情，按钮随之重建（可继续重试/以其他方式打开）
         const message = err instanceof Error ? err.message : String(err);
         showErrorCard(target, message, source, {
-          actions: buildRenderErrorActions(registry, renderer, buffer, source, det, target, onRendered, redisplay, ctx, optsSignal)
+          actions: buildRenderErrorActions(registry, renderer, buffer, source, det, target, onRendered, redisplay, ctx, renderOpts)
         });
       });
   };
@@ -290,6 +294,12 @@ export function createDispatcher(registry: Registry): Dispatcher {
     // read 透传：headOnly 时重入同样以 null+read 走流式读；兼容路径保持 buffer 直传不变。
     // 审计 R1：重试/open-as 重入与主路径同获取消信号（同型解码盲窗收口）
     const optsSignal = opts?.signal;
+    // render 第 6 参（审计 R1 + 字体系统 Task 2）：signal 与 lineMetrics 同参异构
+    // 字段；双侧缺省维持「不传第 6 参」调用形态（渲染器侧零感知，向后兼容）
+    const renderOpts: { signal?: AbortSignal; lineMetrics?: LineMetrics } | undefined =
+      opts?.signal || opts?.lineMetrics
+        ? { signal: opts.signal, lineMetrics: opts.lineMetrics }
+        : undefined;
     const redisplay: Redisplay = (o) =>
       headOnly
         ? dispatch(source, null, target, { ...o, signal: optsSignal, read })
@@ -344,12 +354,9 @@ export function createDispatcher(registry: Registry): Dispatcher {
           redetectWithFull(source, head, full, det);
         }
         // 第 6 参透传（审计 R1 I-1）：render 级取消 signal——异步渲染器的迟到落定
-        // （如 image 解码 await 窗）据此快速失败，abort 身份经下方 catch no-op 不上屏
-        const instance = await renderer.render(
-          full, target, source, det,
-          undefined,
-          opts?.signal ? { signal: opts.signal } : undefined
-        );
+        // （如 image 解码 await 窗）据此快速失败，abort 身份经下方 catch no-op 不上屏；
+        // lineMetrics（字体系统 Task 2）同参透传给 code/hex
+        const instance = await renderer.render(full, target, source, det, undefined, renderOpts);
         return { instance, rendererId: renderer.id, det };
       }
       // streaming 渲染器（io-streaming §2.2）：只交付 head + StreamCtx（render 第 5 参），
@@ -383,10 +390,7 @@ export function createDispatcher(registry: Registry): Dispatcher {
             })
         }
         : { size: base.length, head: base, read: async (r) => base.subarray(r.start, r.end + 1) };
-      const instance = await renderer.render(
-        base, target, source, det, renderCtx,
-        opts?.signal ? { signal: opts.signal } : undefined
-      );
+      const instance = await renderer.render(base, target, source, det, renderCtx, renderOpts);
       return { instance, rendererId: renderer.id, det };
     } catch (err) {
       const kind = classifyDispatchError(err);
@@ -414,7 +418,7 @@ export function createDispatcher(registry: Registry): Dispatcher {
       // buffer；headOnly 时退化为 head 探测块——渲染在全量拉取前已失败，以 head 判
       // looksTextual 足够近似且零额外读（可接受的退化，非旧行为回归面）
       const actions = renderer
-        ? { actions: buildRenderErrorActions(registry, renderer, full ?? probe, source, det, target, takeOver, redisplay, renderCtx, opts?.signal) }
+        ? { actions: buildRenderErrorActions(registry, renderer, full ?? probe, source, det, target, takeOver, redisplay, renderCtx, renderOpts) }
         : { actions: buildRoutingErrorActions(registry, takeOver, redisplay) };
       const card = showErrorCard(target, message, source, actions);
       return {

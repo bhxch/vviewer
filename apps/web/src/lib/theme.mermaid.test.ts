@@ -22,6 +22,7 @@ function settings(over: Partial<Settings> = {}): Settings {
     autoRefresh: true,
     computePolicy: 'auto',
     diagrams: { krokiHost: '', modes: {} },
+    fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
     ...over
   };
 }

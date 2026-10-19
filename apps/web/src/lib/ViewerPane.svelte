@@ -11,6 +11,8 @@
   import { mergeAbortSignals } from './mergeAbortSignals';
   import { dispatcher, registry, cancelMarkdownRemote } from './viewer';
   import { cancelHighlight } from './highlightClient';
+  import { codeLineMetrics } from './theme';
+  import { loadSettings } from './stores/settings';
   import { watchHealth, statusNotice } from './openFlow.svelte';
 import SearchPanel from './SearchPanel.svelte';
 
@@ -237,11 +239,16 @@ import SearchPanel from './SearchPanel.svelte';
         // 全量字节不再由视图层预取——读策略（head 探测/≤1MB 直读/按需区间）由
         // dispatcher 接管。读失败经 dispatch 向上 reject（渲染前读错误不落错误卡片
         // 重试通道，消除「8KB head 截断渲染」活面），由下方 catch 走读取失败卡片。
+        // 行尺度（字体系统 Task 2）：codeSize 变化经 fonts 订阅 rev++ 到达本轮渲染，
+        // 每轮直读 loadSettings 现算（viewer.ts getDiagramOptions 同款模式，不持副本）
+        const lineMetrics = codeLineMetrics(loadSettings().fonts.codeSize);
         const res = await dispatcher.dispatch(current.source, null, host, {
           rendererOverride: current.overrideRenderer,
           // 渲染级取消（审计 R1）：透传给异步渲染器的迟到落定校验（image 解码窗）；
           // read 内的合并 signal 为读通道取消，两者同源不同路
           signal: effectAbort.signal,
+          // 行高联动（字体系统 spec §3）：code/hex 以此重建虚拟滚动器
+          lineMetrics,
           // signal 透传（流式硬化 + Task 5 effect 级取消）：实例级 signal 与
           // effectAbort.signal 合并（缺省直通，双侧缺省维持无 opts 调用形态）
           read: (range, signal) => {

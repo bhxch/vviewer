@@ -16,7 +16,7 @@
 // Task 6（io-streaming）：窗口模式搜索接 need/chunk 握手——worker 以 search-need
 //（1MB 步进）驱动、client 经 ctx.read 逐块回灌，超大文件不再整件预读（T5 全量
 // 回退过渡方案移除，仅存于无 Worker 降级路径）。
-import { virtualScroller, type VirtualScrollerHandle, type Detection, type FileSource, type RenderedInstance, type Renderer, type StreamCtx } from '@vviewer/core';
+import { virtualScroller, type VirtualScrollerHandle, type Detection, type FileSource, type LineMetrics, type RenderedInstance, type Renderer, type StreamCtx } from '@vviewer/core';
 import { renderHexBytes, HEX_ROW_BYTES, byteIndexAtColumn } from './hexBytes';
 import type { HexHighlight, HexRow } from './hexBytes';
 import { decodeAt, INSPECTOR_WINDOW_BYTES, type InspectorRow, type InspectorSnapshot } from './inspector';
@@ -25,7 +25,11 @@ import { scanAll } from './searchScan';
 import { createHexSource, HexSourceRangeError, type HexSource } from './hexSource';
 import { STRUCT_TAIL_BYTES, type ParseResult, type StructNode } from './struct';
 
-/** hex 行高（px）：字号 12px × 1.5 行距，与 app.css .vv-hex-dump 一致；行内样式显式锁定 */
+/** hex 行高缺省值（px）：字号 12px × 1.5 行距——保留为 opts.lineMetrics 缺省回落值
+ * （直调兼容面，跨包零破坏；hexGoto.test 钉住缺省滚动坐标）。应用内字号联动经
+ * HexDomOptions.lineMetrics（hexRenderer.render 第 6 参透传，字体系统 Task 2）：
+ * 行高来源实读形态 = 行内样式锁定字号/行高 + 本常数喂虚拟滚动/跳转坐标（非纯 CSS
+ * 派生），lineMetrics 同时替换两者保证一致。 */
 export const HEX_LINE_HEIGHT = 18;
 /** 结构树解析取头部字节数 */
 const STRUCT_HEAD_BYTES = 8192;
@@ -100,6 +104,10 @@ function nodeToDetails(node: StructNode, open: boolean): HTMLDetailsElement {
 export interface HexDomOptions {
   /** 注入 worker 创建器（测试/无 Worker 环境可替换）；默认 new Worker(binary.worker) */
   createWorker?: () => Worker | null;
+  /** 行尺度（字体系统 Task 2，spec §3）：字号+行高（px）——行内样式锁定值与虚拟
+   * 滚动/跳转坐标常数同源替换；缺省回落现值 12px/18px（HEX_LINE_HEIGHT）。应用内
+   * 由 hexRenderer.render 第 6 参透传（codeSize 归一，12px 视觉微变知情接受）。 */
+  lineMetrics?: LineMetrics;
 }
 
 /**
@@ -153,6 +161,9 @@ export function renderHex(
   }
   /** 总字节数：全量模式 = buffer.length；窗口模式 = ctx.size（行数/状态行/clamp 的事实来源） */
   const totalSize = src !== null ? src.size : buffer.length;
+  // 行尺度（字体系统 Task 2）：lm 单源供 dump 行内样式与滚动/跳转常数（二者必须
+  // 一致，见 HEX_LINE_HEIGHT 注），缺省回落现值 12/18
+  const lm = opts.lineMetrics ?? { fontSize: 12, lineHeight: HEX_LINE_HEIGHT };
   const root = document.createElement('div');
   root.className = 'vv-hex';
   const status = document.createElement('div');
@@ -163,11 +174,11 @@ export function renderHex(
   const dump = document.createElement('div');
   dump.className = 'vv-hex-dump';
   // dump 即虚拟滚动容器（.vv-virtual 由 virtualScroller 加）：自身滚动、占满 body
-  // 剩余空间，结构树出现在其后不需滚过全部行。字号/行距行内锁定（行高常量
-  // HEX_LINE_HEIGHT 依赖此值），不依赖 app.css 到位。
+  // 剩余空间，结构树出现在其后不需滚过全部行。字号/行距行内锁定（滚动常数 lm.
+  // lineHeight 依赖此值，同源替换），不依赖 app.css 到位。
   dump.style.cssText =
     'flex:1 1 auto; min-height:0; overflow:auto;' +
-    'font-family:var(--vv-code-font, monospace); font-size:12px; line-height:1.5; white-space:pre;';
+    `font-family:var(--vv-code-font, monospace); font-size:${lm.fontSize}px; line-height:${lm.lineHeight}px; white-space:pre;`;
   body.append(dump);
   // ---- 工具条（spec §2.1/§2.2）：dump 的兄弟节点而非子节点——virtualScroller 会
   // replaceChildren 滚动容器，放里面会被清掉且 spacer 定位被顶偏（code.ts 提示条
@@ -254,7 +265,7 @@ export function renderHex(
   const scroller: VirtualScrollerHandle = virtualScroller(
     dump,
     rowCount,
-    HEX_LINE_HEIGHT,
+    lm.lineHeight,
     (first, last, viewport) => {
       const start = first * HEX_ROW_BYTES;
       const end = Math.min(totalSize, (last + 1) * HEX_ROW_BYTES);
@@ -393,7 +404,7 @@ export function renderHex(
     // 滚动域上限后 scrollTop 与虚拟坐标不再恒等，直写 scrollTop 会落错位）；赋值
     // 即时生效，浏览器 scroll 事件随后到达时可视区间未变为 no-op；refresh(true)
     // 保证目标行在下面的高亮查询前已同步渲染。
-    scroller.scrollTo(Math.max(0, row * HEX_LINE_HEIGHT - dump.clientHeight / 2));
+    scroller.scrollTo(Math.max(0, row * lm.lineHeight - dump.clientHeight / 2));
     scroller.refresh(true);
     setFlash(clamped);
   }
@@ -452,7 +463,7 @@ export function renderHex(
     if (n === 0) return;
     hitIndex = ((index % n) + n) % n;
     const row = Math.floor(hitOffsets[hitIndex]! / HEX_ROW_BYTES);
-    scroller.scrollTo(Math.max(0, row * HEX_LINE_HEIGHT - dump.clientHeight / 2)); // 虚拟坐标定位（BUG-55）
+    scroller.scrollTo(Math.max(0, row * lm.lineHeight - dump.clientHeight / 2)); // 虚拟坐标定位（BUG-55）
     scroller.refresh(true); // 当前命中行以 active 档重绘
     renderSearchStatus();
   }
@@ -775,7 +786,7 @@ export const hexRenderer: Renderer = {
   // streaming（io-streaming Task 5）：dispatch 只交付 head + StreamCtx（render 第 5
   // 参），全量字节按需经 ctx.read 拉取（窗口模式），不再整文件预取
   streaming: true,
-  async render(buffer: Uint8Array, target: HTMLElement, _source: FileSource, _det: Detection, ctx?: StreamCtx): Promise<RenderedInstance> {
+  async render(buffer: Uint8Array, target: HTMLElement, _source: FileSource, _det: Detection, ctx?: StreamCtx, opts?: { signal?: AbortSignal; lineMetrics?: LineMetrics }): Promise<RenderedInstance> {
     // size 未知来源回退（spec §5）：一次全量读后走既有全量装配（=旧行为）。远端
     // Range 端点由服务端钳制返回整文件、本地 slice 越界自然钳制。读失败在此 await
     // 处 reject——dispatcher 已把 ctx.read 失败标为 DispatchReadError，直抛调用方
@@ -792,7 +803,10 @@ export const hexRenderer: Renderer = {
         } catch {
           return null;
         }
-      }
+      },
+      // 行尺度（字体系统 Task 2）：ViewerPane 按 settings.fonts.codeSize 经 dispatch
+      // 透传；缺省 undefined → renderHex 回落 12/18 现值
+      lineMetrics: opts?.lineMetrics
     }, ctx);
     await instance.structReady;
     // getInspector/setLittle 供 ViewerPane 属性面板上行/字节序下行（Task 3，鸭子

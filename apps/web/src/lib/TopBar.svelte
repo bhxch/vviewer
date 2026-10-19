@@ -14,7 +14,8 @@
   } from './openFlow.svelte';
   import { workspaceStore } from './workspaceStore';
   import { loadSettings, saveSettings, onSettingsChanged, type Settings } from './stores/settings';
-  import { applyAppearanceFromSettings, onSystemModeChange, themeOptions } from './theme';
+  import { applyAppearanceFromSettings, applyFontsFromSettings, onSystemModeChange, themeOptions } from './theme';
+  import { reactToFontsChange } from './fontsReaction';
 
   let settings = $state<Settings>(loadSettings());
   let urlValue = $state('');
@@ -103,11 +104,15 @@
   onMount(() => {
     void themeOptions().then((opts) => (codeThemeOptions = opts));
     applyAppearanceFromSettings(settings); // 首次注入：签名初值 null 必命中
+    applyFontsFromSettings(settings); // 首次字体注入（style#vv-font；返回值忽略——挂载期无活动渲染实例）
     // 订阅设置变更保持本副本最新（防本组件 saveSettings 写回旧值），同时作为
     // 注入的唯一触发通道：diff 四元组、槽相关变化才注入（spec 2026-10-12 §2.4）
     const offSettings = onSettingsChanged((s) => {
       settings = s;
       applyAppearanceFromSettings(s);
+      // fonts 变更 → style#vv-font 重注入 + 激活 tab rev++ 重渲染（行高联动，
+      // 字体系统 spec §2.3/§3，Task 2；无关字段变化零触发）
+      reactToFontsChange(s, () => tabStore.touchActiveTab());
     });
     // themeMode=system：OS 亮暗切换不经 saveSettings，effectiveMode 随之变化命中
     // diff（UI 配色由 prefers-color-scheme 媒体查询自动跟随，JS 注入变量需要这步）

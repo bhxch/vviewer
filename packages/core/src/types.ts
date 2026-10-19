@@ -130,6 +130,17 @@ export interface SearchMatch {
   end: number;            // 行内结束偏移（不含）
 }
 
+/**
+ * 行尺度（字体系统 spec 2026-10-19 §3，px）：code/hex 渲染的字号与行高——虚拟滚动
+ * 行高、行占位高度、跳转虚拟坐标共用。调用方（ViewerPane）按 settings.fonts.codeSize
+ * 与公式 lineHeight = max(16, round(codeSize × 1.5)) 计算后经 dispatch opts 透传；
+ * 渲染器缺省回落现值（code 20、hex 12/18——直调兼容面），跨包零破坏。
+ */
+export interface LineMetrics {
+  fontSize: number;
+  lineHeight: number;
+}
+
 export interface Renderer {
   id: RendererId;
   label: string;
@@ -151,6 +162,10 @@ export interface Renderer {
    * （image 解码窗）：aborted 即快速失败（abortReadError 身份），由 dispatch
    * catch 的 abort 分类接管（no-op 不上屏）。可选参，渲染器不读即零破坏；
    * 与第 5 参语义独立（code 的窗口模式仅由 ctx 触发，不受本参影响）。
+   *
+   * 第 6 参 opts.lineMetrics（字体系统 spec §3）：code/hex 的行尺度（字号+行高），
+   * 替换两渲染器的行高常量（虚拟滚动装配/行占位/跳转坐标）；缺省回落现值，
+   * 其余渲染器不读即零感知。
    */
   render(
     buffer: Uint8Array,
@@ -158,6 +173,6 @@ export interface Renderer {
     source: FileSource,
     det: Detection,
     ctx?: StreamCtx,
-    opts?: { signal?: AbortSignal }
+    opts?: { signal?: AbortSignal; lineMetrics?: LineMetrics }
   ): Promise<RenderedInstance>;
 }

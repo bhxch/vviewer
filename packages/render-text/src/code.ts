@@ -1,4 +1,4 @@
-import type { Renderer, Encoding, Detection, FileSource, RenderedInstance, SearchMatch, ComputeSource, ComputeWhere, StreamCtx } from '@vviewer/core';
+import type { Renderer, Encoding, Detection, FileSource, LineMetrics, RenderedInstance, SearchMatch, ComputeSource, ComputeWhere, StreamCtx } from '@vviewer/core';
 import { getRemoteBase, getRemoteMeta, redetectWithFull, RemoteComputeError, showErrorCard, isAbortError } from '@vviewer/core';
 import { detectLanguage, HighlightCanceledError, resolveCaptureClass, type HighlightChunk, type HighlightInterval } from '@vviewer/highlight';
 import { STREAM_MAX_BYTES, createBlockStream, isSuspiciousUtf8Block, memoizedFullRead } from './blockStream';
@@ -73,6 +73,12 @@ export const PLAIN_MAX_BYTES = 200 * 1024 * 1024;
  * 文本视图（renderDegradedCode）。 */
 export const MARKUP_MAX_BYTES = 20 * 1024 * 1024;
 export const LINE_HEIGHT = 20;
+/**
+ * 行高常量缺省值注记（字体系统 Task 2）：常量保留为 opts.lineMetrics 缺省回落值
+ * （直调兼容面，跨包零破坏）。应用内字号联动经 CodeRenderOptions.lineMetrics
+ * （codeRenderer.render 第 6 参透传）——全部行高消费点（虚拟滚动装配/行占位高度/
+ * 跳转虚拟坐标，全量与窗口两路径）一律取局部 lineHeight，不得直引本常量。
+ */
 
 export type HighlightStrategy = 'tree-sitter' | 'lazy' | 'plain';
 
@@ -673,6 +679,11 @@ export interface CodeRenderOptions {
    * 精判 + 全量重渲）并返回全量重渲实例——窗口实例的方法面转投该实例。缺省（直接
    * 调用面）不嗅探不降级，行为与现状一致。 */
   onEncodingBroken?: () => Promise<RenderCodeHandle>;
+  /** 行尺度（字体系统 Task 2，spec §3）：lineHeight 替换 LINE_HEIGHT 常量的全部
+   * 消费点（虚拟滚动装配/行占位高度/跳转虚拟坐标，全量与窗口两路径）；缺省回落
+   * LINE_HEIGHT=20（直调兼容面）。fontSize 为 cssText 侧字号语义的协议对偶
+   * （.vv-code-pre 的实际字号由 --vv-code-font-size 注入驱动）。 */
+  lineMetrics?: LineMetrics;
 }
 
 export function renderCode(
@@ -687,6 +698,9 @@ export function renderCode(
   // 同款裁决）；纯函数层（renderLineHtml/chunkRangeFor/mergeChunkLines/evict* 等）
   // 仍单源复用。
   if (opts.ctx !== undefined) return renderCodeWindowed(opts.ctx, buffer, target, opts);
+  // 行尺度（字体系统 Task 2）：局部 lineHeight 单源供全部消费点（fillRows/mount/
+  // jumpToLine 闭包捕获），缺省回落 LINE_HEIGHT
+  const lineHeight = opts.lineMetrics?.lineHeight ?? LINE_HEIGHT;
   const enc = DECODERS[opts.encoding ?? 'utf-8'];
   // CRLF/CR → LF 归一化：行索引（buildLineIndex/lineOffsets）、高亮区间偏移、搜索
   // 全部在归一化文本上计算——解码后、一切索引前做一次，保证偏移一致性（否则
@@ -800,7 +814,7 @@ export function renderCode(
     for (let i = first; i <= last; i++) {
       const row = document.createElement('div');
       row.className = 'vv-code-line';
-      row.style.height = `${LINE_HEIGHT}px`;
+      row.style.height = `${lineHeight}px`;
       row.dataset.line = String(i); // 搜索跳转按行号定位行 DOM
       const hits = searchHitsByLine.get(i);
       // BUG-18：全部命中行都有行级背景（可见范围内，由 searchState 驱动）；
@@ -827,7 +841,7 @@ export function renderCode(
 
   function mount(): void {
     if (scroller || destroyed) return;
-    scroller = virtualScroller(pre, lines.length, LINE_HEIGHT, (first, last, viewport) => {
+    scroller = virtualScroller(pre, lines.length, lineHeight, (first, last, viewport) => {
       if (strategy === 'lazy') scheduleChunks(first, last); // 可视区驱动 chunk 请求
       fillRows(first, last, viewport);
     });
@@ -1184,7 +1198,7 @@ export function renderCode(
     // 目标行滚到视口中部（clientHeight 为 0（jsdom/未布局）时回落贴顶）。
     // 经 scroller.scrollTo 以虚拟坐标定位（BUG-55：总行高超浏览器滚动域上限后
     // scrollTop 与虚拟坐标不再恒等；scroller 未挂载窗口期回落直写）
-    const center = line * LINE_HEIGHT - pre.clientHeight / 2 + LINE_HEIGHT / 2;
+    const center = line * lineHeight - pre.clientHeight / 2 + lineHeight / 2;
     if (scroller) scroller.scrollTo(Math.max(0, center));
     else pre.scrollTop = Math.max(0, center);
     scroller?.refresh(); // 按新 scrollTop 重算可视范围（范围未变则行 DOM 已在，applyHitClass 兜底）
@@ -1249,6 +1263,9 @@ function renderCodeWindowed(
   target: HTMLElement,
   opts: CodeRenderOptions
 ): RenderCodeHandle {
+  // 行尺度（字体系统 Task 2）：局部 lineHeight 单源供全部消费点（fillRows/mount/
+  // jumpToLine 闭包捕获），缺省回落 LINE_HEIGHT（全量路径同款）
+  const lineHeight = opts.lineMetrics?.lineHeight ?? LINE_HEIGHT;
   // 高亮分界（spec §4.3）：窗口模式按定义 >2MB（或 size 未知）→ lazy；highlight:false
   // 仍纯文本（renderDegradedCode/委托形态不传 ctx，此组合仅直接调用可达）
   const strategy: HighlightStrategy = opts.highlight === false ? 'plain' : 'lazy';
@@ -1448,7 +1465,7 @@ function renderCodeWindowed(
     for (let i = Math.max(0, first); i <= last; i++) {
       const row = document.createElement('div');
       row.className = 'vv-code-line';
-      row.style.height = `${LINE_HEIGHT}px`; // 占位行同款保行高
+      row.style.height = `${lineHeight}px`; // 占位行同款保行高
       row.dataset.line = String(i);
       const gutter = document.createElement('span');
       gutter.className = 'vv-code-gutter';
@@ -1692,7 +1709,7 @@ function renderCodeWindowed(
     if (scroller !== null && mountedRows === n) return;
     scroller?.destroy();
     mountedRows = n;
-    scroller = virtualScroller(pre, n, LINE_HEIGHT, onRange);
+    scroller = virtualScroller(pre, n, lineHeight, onRange);
   }
 
   /** 续读/重拉完成后的重渲：行数增长 → 重建 scroller（spacer/总数更新，构造即重渲）；
@@ -1936,7 +1953,7 @@ function renderCodeWindowed(
   function jumpToLine(line: number): void {
     if (hitTimer !== null) clearTimeout(hitTimer);
     hitLine = line;
-    const center = line * LINE_HEIGHT - pre.clientHeight / 2 + LINE_HEIGHT / 2;
+    const center = line * lineHeight - pre.clientHeight / 2 + lineHeight / 2;
     if (scroller) scroller.scrollTo(Math.max(0, center)); // 虚拟坐标定位（BUG-55，同全量引擎）
     else pre.scrollTop = Math.max(0, center);
     scroller?.refresh();
@@ -2505,7 +2522,7 @@ export const codeRenderer: Renderer = {
   // UTF-8）。回退面均在 render 内自处（下方守卫）；!rangeCapable 的全量视图 ctx 属
   // 窗口模式退化形态，BlockStream 零 IO 排空。
   streaming: true,
-  async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection, ctx?: StreamCtx) {
+  async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection, ctx?: StreamCtx, opts?: { signal?: AbortSignal; lineMetrics?: LineMetrics }) {
     // 远端文件（M5 RemoteStore）的服务端检测头纠偏：X-VV-Lang/X-VV-Encoding
     // 与 languages.json 同源，比本地扩展名表/编码启发式更准（无扩展名脚本等）。
     // opts.lang 有值时 renderCode 直接采用、跳过 detectLanguage；服务端无检测头时
@@ -2520,7 +2537,10 @@ export const codeRenderer: Renderer = {
       highlight: true,
       ext: det.ext,
       lang: meta?.lang ?? det.lang ?? undefined,
-      computeSrc
+      computeSrc,
+      // 行尺度（字体系统 Task 2）：ViewerPane 按 settings.fonts.codeSize 经 dispatch
+      // 透传；缺省 undefined → renderCode 回落 LINE_HEIGHT（降级重渲路径随展开保留）
+      lineMetrics: opts?.lineMetrics
     };
     // 窗口流式候选：ctx 存在且 UTF-8 且 size>2MB 或 size 未知（spec §4.3 高亮分界）。
     // detect 收口：窗口模式仅 UTF-8/ASCII（Encoding 无 ascii——ASCII 为 UTF-8 子集，

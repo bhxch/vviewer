@@ -487,6 +487,21 @@ class TabCollection {
     tab.rev = (tab.rev ?? 0) + 1;
     void persist(); // 与 persistScroll 同款落盘入口（saveWorkspaces 快照）
   }
+
+  /**
+   * 字体变更纯刷新（字体系统 spec §2.3，Task 2）：仅 rev++ 不 persist override——
+   * 复用 SSE 刷新的重渲染通道（ViewerPane 渲染 effect 读 rev 自增即重跑，重渲染时
+   * 以当次 settings 的行尺度重建虚拟滚动器）。仅活动 tab：非活动 tab 激活时 effect
+   * 本就以当次渲染参数重跑，无需逐个自增。不 persist：字号不在会话快照语义内。
+   * 消费方 TopBar（fonts 签名订阅回调经 reactToFontsChange 注入）；openFlow.svelte
+   * 为 runes 模块不可 vitest 直测，行为面由 fontsReaction.test（触发契约）与
+   * b-fonts e2e（Task 6）覆盖。
+   */
+  touchActiveTab(): void {
+    const t = this.list.find((x) => x.active);
+    if (!t) return;
+    t.rev = (t.rev ?? 0) + 1;
+  }
 }
 
 export const tabStore = new TabCollection();

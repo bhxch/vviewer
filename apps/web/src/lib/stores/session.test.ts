@@ -49,7 +49,7 @@ describe('session store', () => {
       diagrams: { krokiHost: '', modes: {} },
       fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 }
     });
-    saveSettings({ themeMode: 'dark', appearanceLight: 'default', appearanceDark: 'default', codeThemeLight: 'onelight', codeThemeDark: 'serika-dark', excludedPatterns: ['node_modules'], autoRefresh: false, computePolicy: 'remote', diagrams: { krokiHost: '', modes: {} } });
+    saveSettings({ themeMode: 'dark', appearanceLight: 'default', appearanceDark: 'default', codeThemeLight: 'onelight', codeThemeDark: 'serika-dark', excludedPatterns: ['node_modules'], autoRefresh: false, computePolicy: 'remote', diagrams: { krokiHost: '', modes: {} }, fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 } });
     expect(loadSettings().themeMode).toBe('dark');
     expect(loadSettings().computePolicy).toBe('remote');
   });
