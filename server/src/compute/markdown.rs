@@ -90,7 +90,11 @@ fn apply_latex_delimiters(text: &str) -> String {
     let mut in_inline = false;
     let mut math = String::new();
 
-    let lines: Vec<&str> = text.split('\n').collect();
+    // CRLF/CR 入口归一化（修复轮 1/m1，与前端 protectLatexDelimiters 同款）：按
+    // \n 切行残留的 \r 会卡死闭围栏判定（fence_of 仅容空白）；CommonMark 本就视
+    // \r\n 为换行，归一化不改渲染语义
+    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+    let lines: Vec<&str> = normalized.split('\n').collect();
     for (li, line) in lines.iter().enumerate() {
         if li > 0 {
             if in_display || in_inline {
@@ -339,5 +343,14 @@ mod tests {
         // markpad 同款：未闭合时内容回填、开定界符已消耗（不还原）
         assert_eq!(apply_latex_delimiters("未闭 \\(abc"), "未闭 $abc");
         assert_eq!(apply_latex_delimiters("跨行 \\[a\nb"), "跨行 $$a\nb");
+    }
+
+    #[test]
+    fn latex_delimiters_crlf_fences_close_and_rewrite_outside() {
+        // CRLF 残留 \r 不得卡死闭围栏判定；归一化后围栏内保留、围栏外转换
+        assert_eq!(
+            apply_latex_delimiters("```\r\n\\(x\\)\r\n```\r\n\\(a\\)"),
+            "```\n\\(x\\)\n```\n$a$"
+        );
     }
 }
