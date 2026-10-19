@@ -148,6 +148,31 @@ describe('collectExportHtml——自包含 HTML 装配', () => {
     expect(css).toContain('<script>window.__pwned=1</script>');
     expect(out.body.querySelector('.vv-markdown')).not.toBeNull();
   });
+
+  it('KaTeX 排印样式嵌入（Task 2b 全嵌上限形态）：katexCss 传入时独立 <style> 落 head', async () => {
+    const html = await collectExportHtml(richDoc(), {
+      title: '演示',
+      styleCss: '.vv-markdown { color: #123; }',
+      katexCss: '.katex .base { margin: 0; } @font-face { src: url(data:font/woff2;base64,AAA) format("woff2"); }',
+      resolveImage: resolveImageStub
+    });
+    const out = new DOMParser().parseFromString(html, 'text/html');
+    const styles = Array.from(out.querySelectorAll('head style'));
+    expect(styles).toHaveLength(2);
+    expect(styles[1]!.textContent).toContain('.katex .base');
+    expect(styles[1]!.textContent).toContain('data:font/woff2;base64,AAA');
+    expect(styles[0]!.textContent).not.toContain('.katex'); // 基础/主题样式与 katex 分离
+  });
+
+  it('KaTeX 样式缺省不嵌入：无 katexCss 选项时 head 只有基础 <style>', async () => {
+    const html = await collectExportHtml(richDoc(), {
+      title: '演示',
+      styleCss: '',
+      resolveImage: resolveImageStub
+    });
+    const out = new DOMParser().parseFromString(html, 'text/html');
+    expect(out.querySelectorAll('head style')).toHaveLength(1);
+  });
 });
 
 describe('collectPrintHtml——打印模板', () => {

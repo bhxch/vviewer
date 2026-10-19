@@ -57,6 +57,7 @@ describe('导出链路接线契约', () => {
     expect(src).toContain('resolveExportImage');
     expect(src).toContain('printDocument');
     expect(src).toContain('downloadExport');
+    expect(src).toContain("import('./katexExportCss')"); // KaTeX 排印嵌入（Task 2b，惰性 chunk）
   });
 
   it('app.css：导出动作区按钮样式（对齐既有 MetaPanel 动作形态）', () => {

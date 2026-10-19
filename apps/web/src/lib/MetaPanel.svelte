@@ -72,18 +72,20 @@
     doc.documentElement.setAttribute('data-vv-mode', mode === 'dark' ? 'dark' : 'light');
   }
 
-  /** 共享装配：实例快照 → 样式/模式标记 → 自包含 HTML；快照不可得（实例已销毁
-   * 等竞态）返回 null 并提示。 */
-  async function assembleExportHtml(): Promise<string | null> {
-    const doc = getExportDoc();
-    if (!doc) {
-      showNotice('导出快照不可用，请重新打开文件后再试');
-      return null;
-    }
+  /** 共享装配：模式标记 + 基础/主题样式 + KaTeX 排印样式（Task 2b 全嵌上限形态，
+   * 惰性 chunk 点击才加载；装配失败降级为无排印不阻断导出）→ 自包含 HTML。 */
+  async function assembleExportHtml(doc: Document): Promise<string> {
     stampMode(doc);
+    let katexCss: string | undefined;
+    try {
+      katexCss = (await import('./katexExportCss')).buildKatexExportCss();
+    } catch {
+      katexCss = undefined; // 排印样式装配失败：与修复前的无排印形态一致
+    }
     return collectExportHtml(doc, {
       title: fileMeta.name,
       styleCss: currentStyleCss(),
+      katexCss,
       resolveImage: resolveExportImage
     });
   }
@@ -92,8 +94,12 @@
     if (exportBusy) return;
     exportBusy = true;
     try {
-      const html = await assembleExportHtml();
-      if (html === null) return;
+      const doc = getExportDoc();
+      if (!doc) {
+        showNotice('导出快照不可用，请重新打开文件后再试');
+        return;
+      }
+      const html = await assembleExportHtml(doc);
       downloadExport(html, exportFileName(fileMeta.name, 'html'));
       showNotice('已导出 HTML');
     } catch (err) {
@@ -115,12 +121,7 @@
         return;
       }
       await repaintMermaidForPrint(doc);
-      stampMode(doc);
-      const printSource = await collectExportHtml(doc, {
-        title: fileMeta.name,
-        styleCss: currentStyleCss(),
-        resolveImage: resolveExportImage
-      });
+      const printSource = await assembleExportHtml(doc);
       const printHtml = collectPrintHtml(printSource, { page: 'a4' });
       printDocument(printHtml, () =>
         showNotice('当前环境无法唤起打印，请改用浏览器菜单打印并另存为 PDF')

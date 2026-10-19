@@ -99,6 +99,13 @@ export interface ExportHtmlOptions {
   /** 内联样式文本（触发壳组装：exportBaseCss + 主题变量块；'</style' 已转义防护） */
   styleCss: string;
   /**
+   * KaTeX 排印样式（spec §6，Task 2b：全嵌上限形态，按需裁剪列未来优化）。
+   * 触发壳以「woff2 字体已转 data:font/woff2 内联、woff/ttf 回退段已移除」的
+   * katex.min.css 完整文本传入（apps/web 壳侧读包内资产，本包不做 fs/资产解析，
+   * 保持纯函数性）；缺省/空串不嵌入（导出公式与预览同为无排印结构）。
+   */
+  katexCss?: string;
+  /**
    * 图片 data URI 解析回调：blob:/同源 http(s) → fetch 转 data URI；data: 已内联
    * 与外域 http(s)（CORS 不可控不强拉）返回 null 保留原 URL；抛错视同失败。
    */
@@ -206,6 +213,12 @@ export async function collectExportHtml(doc: Document, opts: ExportHtmlOptions):
   const style = doc.createElement('style');
   style.textContent = escapeStyleCss(opts.styleCss);
   doc.head.append(style);
+  // KaTeX 排印样式独立 <style>（与基础/主题样式分离，纯文本嵌入无 @import/外链）
+  if (opts.katexCss) {
+    const katexStyle = doc.createElement('style');
+    katexStyle.textContent = escapeStyleCss(opts.katexCss);
+    doc.head.append(katexStyle);
+  }
   return serializeDocument(doc);
 }
 

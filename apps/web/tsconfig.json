@@ -9,8 +9,9 @@
     "resolveJsonModule": true,
     "lib": ["esnext", "DOM", "DOM.Iterable", "DOM.AsyncIterable"],
     // kit 生成的父配置将 types 收窄为 ['$app/types']；此处补回 @types/node，
-    // 否则 include 进来的 vite.config.ts 等根文件解析不了 node 内建模块
-    "types": ["node", "$app/types"]
+    // 否则 include 进来的 vite.config.ts 等根文件解析不了 node 内建模块；
+    // vite/client 提供 ?raw/?inline 资产导入模块声明（md-export Task 2b katexExportCss）
+    "types": ["node", "$app/types", "vite/client"]
   },
   // render-text 的 vendor ambient 声明（markdown-it-task-lists/footnote 均无类型）：
   // svelte-check 经 src 模块解析跨包检查 engine.ts，须把声明文件拉进本程序才生效

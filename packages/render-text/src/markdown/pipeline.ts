@@ -403,6 +403,12 @@ async function runKatex(root: Document): Promise<void> {
   const scope: Node = root.body ?? root;
   const katex = (await import('katex').catch(() => null))?.default;
   if (!katex) return;
+  // 公式排印样式（Task 2b 预览修复）：katex JS 产物（.katex/.vlist 等 span 结构）
+  // 必须配 katex.min.css 才有排印（此前预览公式自 M3 起是无样式 HTML 的潜伏缺陷）。
+  // 动态导入随 katex 步惰性加载：vite 构建抽为独立样式 chunk 按需注入，不进主包
+  // （KatexCss 非 PWA globIgnores 的 diagram-engines 组，正常 precache）；加载失败
+  // 仅降级为无排印（与修复前现状一致），不阻断公式排版。
+  await import('katex/dist/katex.min.css').catch(() => null);
   // mhchem 宏扩展（\ce{}）：必须走 .mjs 裸子路径——CJS 副本会产生第二解析器、
   // 宏表分裂（markpad #745）；与上面同一 katex 实例共享模块图（mhchem.mjs 顶层
   // import '../katex.mjs'，vite 按同一 resolved id 去重）。导入失败静默=无 \ce
