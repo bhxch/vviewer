@@ -118,7 +118,7 @@ describe('sanitizeHtml——净化策略', () => {
   });
 
   it('mark/ins/dl/dt/dd 在 DOMPurify 默认允许表（Task 2 扩展语法 engine→sanitize 装配下不丢）', () => {
-    // mark/ins/delist 三插件的引擎输出经 sanitizeHtml 真实装配核查：默认允许表
+    // mark/ins/deflist 三插件的引擎输出经 sanitizeHtml 真实装配核查：默认允许表
     // 覆盖 <mark>/<ins>/<dl>/<dt>/<dd>，无需显式 ALLOWED_TAGS（Task 2 brief 注记）
     const { html } = renderMarkdownToHtml('==高亮==\n\n++插入++\n\n术语\n: 定义一行\n');
     const out = sanitizeHtml(html);
@@ -189,6 +189,18 @@ describe('enrichMarkdownDom——callout 转换', () => {
     title.click();
     expect(doc.querySelector('.markdown-alert-collapsed')).toBeNull();
     title.click();
+    expect(doc.querySelector('.markdown-alert-collapsed')).not.toBeNull();
+  });
+
+  it('折叠标题内锚链接点击不切换折叠（冒泡拦截），标题其余区域点击切换', () => {
+    // wikilink 步在 callout 之后运行：折叠卡片标题内 [[#目标]] 同获锚改写
+    const doc = renderEnriched('> [!note]+ 见 [[#目标]]\n> 内容\n\n## 目标\n');
+    const title = doc.querySelector('.markdown-alert-title') as HTMLElement;
+    const a = title.querySelector('a[data-wikilink="anchor"]') as HTMLElement;
+    expect(a).not.toBeNull();
+    a.click(); // 默认展开（+ 后缀）：链接点击不切换，维持无 collapsed
+    expect(doc.querySelector('.markdown-alert-collapsed')).toBeNull();
+    title.click(); // 标题空白区点击仍切换为收起
     expect(doc.querySelector('.markdown-alert-collapsed')).not.toBeNull();
   });
 

@@ -167,7 +167,10 @@ function convertCallouts(root: Document): void {
       container.classList.add('markdown-alert-foldable');
       if (fold === '-') container.classList.add('markdown-alert-collapsed');
       titleEl.classList.add('markdown-alert-fold-toggle');
-      titleEl.addEventListener('click', () => {
+      // 标题内锚链接（如 [[#…]] 转出的 a）点击按链接语义导航：冒泡到标题的
+      // click 不得切换折叠（closest 由 target 自身起算，覆盖 a 内子节点）
+      titleEl.addEventListener('click', (ev) => {
+        if ((ev.target as Element)?.closest('a')) return;
         container.classList.toggle('markdown-alert-collapsed');
       });
     }

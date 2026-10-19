@@ -274,9 +274,11 @@ describe('copyCode 步', () => {
     await runPipeline(doc2, noopCtx());
     expect(doc.querySelector('.md-code-lang')!.textContent).toBe('rust');
     expect(doc2.querySelector('.md-code-lang')!.textContent).toBe('代码');
-    // 顶栏是 pre 首子元素，复制钮迁入栏内（点击语义不并入徽标，保留单复制钮）
-    const bar = doc.querySelector('pre .md-code-bar')!;
+    // 顶栏是 pre 首子元素，复制钮迁入栏内（点击语义不并入徽标，保留单复制钮）；
+    // 元素为 span——pre 内容模型只容 phrasing content（div 无效 HTML）
+    const bar = doc.querySelector('pre .md-code-bar')! as HTMLElement;
     expect(bar).not.toBeNull();
+    expect(bar.tagName).toBe('SPAN');
     expect(doc.querySelector('pre')!.firstElementChild).toBe(bar);
     expect(bar.querySelector('button.md-copy-btn')).not.toBeNull();
   });

@@ -458,7 +458,9 @@ async function runCopyCode(root: Document, ctx: PipelineCtx): Promise<void> {
   for (const pre of Array.from(root.querySelectorAll('pre'))) {
     if (pre.hasAttribute('data-md-copy')) continue;
     pre.setAttribute('data-md-copy', '');
-    const bar = root.createElement('div');
+    // span 而非 div：HTML 内容模型里 pre 只容 phrasing content（div 无效，
+    // 浏览器容错但结构脏）；布局由 .md-code-bar 的 display:flex 规则保证
+    const bar = root.createElement('span');
     bar.className = cls(ctx, 'codeBar');
     const label = root.createElement('span');
     label.className = cls(ctx, 'codeLang');

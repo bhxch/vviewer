@@ -364,6 +364,19 @@ mod tests {
     }
 
     #[test]
+    fn description_list_renders() {
+        // 描述列表（ext.description_lists，既有开启项）：此前无锚，补双侧对称锚——
+        // 本地对偶金标：packages/render-text/test/markdownSanitize.test.ts Task 2
+        // 用例「术语\n: 定义一行」产 <dl>/<dt>/<dd>，两侧断言互为锚。探针记档：
+        // comrak 不支持 PHP Markdown Extra 的「; term」紧凑形态（分号留在 dt
+        // 文本内，实测 <dt>; 术语</dt>），锚用双端共通的 term 行 + : 定义形态。
+        let html = render("术语\n: 定义", false);
+        assert!(html.contains("<dl>"), "{html}");
+        assert!(html.contains("<dt>术语</dt>"), "{html}");
+        assert!(html.contains("<dd>定义</dd>"), "{html}");
+    }
+
+    #[test]
     fn highlight_and_insert_extensions() {
         // ==mark== / ++ins++（spec §4.1，markpad 同款）；本地对偶金标：
         // packages/render-text/test/markdownEngine.test.ts「扩展语法（Task 2）」
