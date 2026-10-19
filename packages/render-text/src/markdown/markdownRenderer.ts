@@ -28,7 +28,7 @@ import {
 } from '../code';
 import { makePreview, type SearchMatchWithPreview } from '../search';
 import type { SearchMatch } from '@vviewer/core';
-import { createMarkdownEngine, renderMarkdownToHtml, GfmAnchorizer } from './engine';
+import { createMarkdownEngine, renderMarkdownToHtml, protectLatexDelimiters, GfmAnchorizer } from './engine';
 import { parseFrontMatter } from './frontMatter';
 import { sanitizeHtml } from './sanitize';
 import { enrichMarkdownDom } from './enrich';
@@ -176,9 +176,13 @@ async function resolveRelativeImages(scope: ParentNode, source: FileSource): Pro
  * 本地 markdown-it 直渲染 body（不再剥 front matter）：apps/web 注入后端的
  * auto 回退路径用——backend 收到的 text 已剥过 front matter，二次解析会把
  * 以 `---` 开头的正文误判为 front matter。
+ * 保护必须接在同一条腿上（修复轮 1/M1）：本地来源文件、auto+非图表围栏强制
+ * 本地、远程失败回退三条真实路径全走本函数而非 renderMarkdownToHtml——漏套
+ * protectLatexDelimiters 会让双引擎对 \(..\)/\[..\] 分裂（remote 侧有
+ * apply_latex_delimiters）。入参已是剥 front matter 的 body，勿二次剥。
  */
 export function renderMarkdownBody(body: string): string {
-  return createMarkdownEngine().render(body);
+  return createMarkdownEngine().render(protectLatexDelimiters(body));
 }
 
 /**

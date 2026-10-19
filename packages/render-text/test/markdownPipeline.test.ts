@@ -9,6 +9,7 @@ vi.mock('mermaid', () => ({
 
 import { runPipeline, getPipelineSteps, runSteps, type PipelineCtx } from '../src/markdown/pipeline';
 import { renderMarkdownToHtml } from '../src/markdown/engine';
+import { renderMarkdownBody } from '../src/markdown/markdownRenderer';
 import { sanitizeHtml } from '../src/markdown/sanitize';
 import { enrichMarkdownDom } from '../src/markdown/enrich';
 
@@ -206,6 +207,17 @@ describe('katex 步', () => {
   it('\\( 与 \\[ 在代码块/既有 .katex 祖先内不触发（跳过规则复用）', async () => {
     const doc = await renderDoc('`\\(a^2\\)`');
     expect(doc.querySelector('code')!.textContent).toBe('\\(a^2\\)');
+  });
+
+  it('renderMarkdownBody 真实腿（后端注入 auto 回退）：\\(a^2\\) → katex 类（M1）', async () => {
+    // 本地来源/auto 强制本地/远程失败回退走 renderMarkdownBody 直渲染，不经
+    // renderMarkdownToHtml——保护必须接在同一条腿上，否则双引擎对 \(..\) 分裂
+    const html = renderMarkdownBody('\\(a^2\\) 公式');
+    const doc = new DOMParser().parseFromString(sanitizeHtml(html), 'text/html');
+    enrichMarkdownDom(doc);
+    await runPipeline(doc, noopCtx());
+    expect(doc.querySelector('.katex')).not.toBeNull();
+    expect(doc.body.textContent).not.toContain('\\(');
   });
 });
 

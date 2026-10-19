@@ -115,7 +115,9 @@ const sharedEngine = createMarkdownEngine();
  * 机与 markpad 同款翻转语义。继承性边界（markpad Task 14 审查补记同款，只记录不改
  * 行为）：双反引号 ``...`` 行内码翻转两次后失同步、4 空格缩进码块不跟踪，其中的
  * `\[…\]`/`\(…\)` 仍会被转换。未闭合数学：缓冲内容原样回填、开定界符已消耗
- * （markpad 同款）；闭合前的内容（含换行）原样保留。
+ * （markpad 同款）；闭合前的内容（含换行）原样保留。CRLF/CR 在入口归一化为 \n
+ * （修复轮 1/m1：split('\n') 残留 \r 会卡死闭围栏判定；CommonMark 本就视 \r\n 为
+ * 换行，归一化不改渲染语义）。
  */
 export function protectLatexDelimiters(text: string): string {
   let out = '';
@@ -126,7 +128,7 @@ export function protectLatexDelimiters(text: string): string {
   let inInlineMath = false;
   let mathContent = '';
 
-  const lines = text.split('\n');
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li]!;
     if (li > 0) {

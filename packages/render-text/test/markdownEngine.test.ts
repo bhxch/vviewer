@@ -163,6 +163,10 @@ describe('protectLatexDelimiters——LaTeX 定界符前置改写（Task 1b）',
     expect(protectLatexDelimiters('未闭 \\[abc')).toBe('未闭 $$abc');
   });
 
+  it('CRLF 输入：围栏内 \\( 保留、围栏外转换（\\r 残留不得卡死闭围栏）', () => {
+    expect(protectLatexDelimiters('```\r\n\\(x\\)\r\n```\r\n\\(a\\)')).toBe('```\n\\(x\\)\n```\n$a$');
+  });
+
   it('\\(..\\) 与 $ 字面量混排：改写不破坏 $ 语义', () => {
     expect(protectLatexDelimiters('\\(a\\) 值 $100')).toBe('$a$ 值 $100');
   });
