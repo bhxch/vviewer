@@ -19,6 +19,7 @@
 | 硬换行 | **保持 GFM**（`breaks:false`），不对齐 markpad 的 `hardbreaks:true`（编辑器场景选择；查看器以 CommonMark/GFM 语义为准） |
 | 导出 | **移植 markpad 方案**适配 web：HTML=自包含单文件（内联样式+图片 data URI+KaTeX 字体裁剪）；PDF=隐藏 iframe 打印模板（`@page` 分页保护+大图缩放），浏览器原生出 PDF，零依赖 |
 | 双引擎一致性 | 扩展语法双端同步实现（markdown-it 插件 + comrak extension 开启）+ 一致性锚测试；wikilink/callout 折叠放前端 enrich 层（引擎无关，天然一致） |
+| 图表双路径（审阅反馈轮） | **服务端渲染**对齐 markpad Rust 栈（graphviz=`layout-rs`、svgbob=`svgbob` crate，并入 `--compute`，capabilities 细分子集宣告）；**前端渲染** wasm/JS 懒加载；二进制 wasm（viz.js）自始走 grammar 同款资产链三层解析+独立 npm 包 `@bhxch/vviewer-diagrams`；auto 路由细化：仅图表/math fence 的文档可路由服务端 |
 
 ### 非目标
 
@@ -27,7 +28,7 @@
 - 不做 `~sub~`/`^sup^`/`||spoiler||`/emoji 短代码（markpad 刻意不启用，同裁决）。
 - lightbox 不做触摸捏合缩放与旋转（markpad 无；移动端用按钮缩放）。
 - 导出不含音视频媒体本体（`<video>/<audio>` 占位降级为链接，防 data URI 爆炸）。
-- 不引入服务端图表渲染能力（kroki 覆盖）。
+- 服务端图表渲染仅限 markpad Rust 栈两语言（graphviz/svgbob，§2.5）；不做服务端 kroki 代理、不做 plantuml 系服务端实现（无 Java 依赖原则）。（原「不引入服务端图表渲染」已由审阅反馈轮推翻）
 
 ## 2. 阶段一：图表矩阵
 
@@ -38,9 +39,9 @@
 | fence 语言 | 别名 | 默认模式 | 本地引擎（全懒加载） |
 | --- | --- | --- | --- |
 | mermaid | — | local | `mermaid`（已有依赖，维持 11.x 现行版本） |
-| graphviz | `dot` | local | `@viz-js/viz`（wasm） |
+| graphviz | `dot` | local | `@viz-js/viz`（wasm；**服务端原生**，见 §2.5） |
 | plantuml / c4plantuml / ditaa / blockdiag / nwdiag / actdiag / seqdiag / erd / pikchr | — | kroki | — |
-| svgbob | — | kroki | —（markpad 默认 rust 不移植） |
+| svgbob | — | kroki | —（**服务端原生** `svgbob` crate，见 §2.5；客户端默认 kroki 不移植 markpad 的本地 JS 实现） |
 | excalidraw | — | local | `@excalidraw/utils` |
 | nomnoml | — | local | `nomnoml` |
 | bpmn | — | local | `bpmn-js` |
@@ -64,7 +65,23 @@
 
 ### 2.4 PWA 体积防线
 
-本地图表引擎动态 chunk 不进 SW precache（`vite-plugin-pwa` globPatterns 排除图表 chunk 命名规则，运行时缓存承接），防止 precache 膨胀数 MB。bpmn-js/vega-embed 体积大，懒加载后首用有一次网络等待（与 mermaid 现状同语义）。
+本地图表引擎动态 chunk 不进 SW precache（`vite-plugin-pwa` globPatterns 排除图表 chunk 命名规则，运行时缓存承接），防止 precache 膨胀数 MB。bpmn-js/vega-embed 体积大，懒加载后首用有一次网络等待（与 mermaid 现状同语义）。资产分层与拆包细则见 §2.6。
+
+### 2.5 服务端渲染路径（compute 对齐 markpad Rust 栈，审阅反馈轮）
+
+- **能力位**：并入 `--compute`（服务端富渲染能力面不新增旗标组合）；health `capabilities` 细分子集宣告 `diagrams: ["graphviz","svgbob"]`——即 markpad Rust 栈同款：graphviz 走 `layout-rs`、svgbob 走 `svgbob` crate（纯 Rust，无 Java、无外部进程）。plantuml 系无服务端实现（kroki 通道不变；亦**不做服务端 kroki 代理**——客户端 `<img>` 直连无 CORS 障碍，代理仅隐私收益，列未来项）。未开 `--compute` 或未宣告子集时行为与现状完全一致。
+- **渲染流程**：`compute/markdown` 输出后处理——语言 ∈ 服务端原生集的图表 fence 渲染为内联 SVG（带 `data-vv-diagram="server"` 标记，源码存 data 属性供图/源码切换）；math fence 与非原生图表语言**保留 fence 形态**由客户端管线接手（管线引擎无关，现状语义）；高亮步跳过已渲染图表（同 mermaid 现状特判）。
+- **失败语义**：`layout-rs` 是 dot 子集实现——子集外特性/渲染失败 → 保留 fence 由客户端引擎优雅接手，绝不出错误卡片；与 viz.js 的视觉差异属**知情差异**（不同渲染器），一致性测试只断言渲染归属，不断言视觉等价。
+- **auto 路由细化**（viewer.ts 既有规则：含普通代码 fence 的文档留本地）：仅含图表/math fence 的文档在服务端能力宣告齐备时**可路由服务端**（图表被服务端消化，无客户端高亮需求）；含普通代码 fence 的文档仍留本地（tree-sitter 高亮不变）；显式 compute 策略不受此细化影响。
+- **sanitize 连动**：服务端渲染的 SVG 需过 sanitize 入文档——放行 svg profile（DOMPurify SVG 域拦 script/事件属性/foreignObject 收口）；客户端 mermaid 路径生成于净化之后，不受影响。
+- **模式设置边界**：§2.1 按语言模式（local/kroki/source）仅作用于**客户端管线**；服务端路径由 compute 策略与服务端子集宣告决定，二者正交（注记防误解）。
+
+### 2.6 资产体积与拆包发布（审阅反馈轮，tree-sitter 前例同型）
+
+- **体积分层**：图表资产两类——①纯 JS 引擎（mermaid 已有/bpmn-js/vega-embed/excalidraw/nomnoml）：vite 动态 chunk，懒加载 + SW 运行时缓存、不进 precache（§2.4 语义）；②二进制 wasm（`@viz-js/viz` 的 graphviz wasm，约 1.5MB 级）：**自始走资产链三层解析**（同源 dist → 服务端 origin → CDN），复用 grammarLayers 既有基建。
+- **拆包发布**：wasm 资产出独立 npm 包 **`@bhxch/vviewer-diagrams`**（复用 pack-npm contentHash 去重流水线——manifest 稳定字段规则同 grammar 包；布局契约同款：manifest 与 wasm 同目录），CDN jsdelivr 精确版本钉死；产物进 release workflow。资产链接入要求引擎支持 wasm 路径外置（locateFile 式 hook，viz.js 3 支持；不支持外置的引擎退回内嵌构建并计入 dist 预算）。
+- **预算门禁**：CI 断言 dist 内图表相关动态 chunk 总量 ≤4MB（估值：bpmn ~1MB + vega ~3MB + excalidraw ~1.5MB + nomnoml ~0.3MB，全上逼近超线——超限时按单件体积降序逐个评估纳入资产链，实施以实测为准，门禁先行兜底）。
+- PWA：资产链层（CDN/服务端）请求不进 precache；runtimeCaching 复用 grammar wasm 既有策略。
 
 ## 3. 阶段二：KaTeX 对齐
 
@@ -128,6 +145,8 @@
 ## 8. 测试
 
 - 单测：图表注册表分发/别名/模式回退、kroki URL 编码（pako+base64url 向量）、math 扫描器新分隔符与跳过规则、wikilink 四形态、callout 折叠、徽标、lightbox 状态机（缩放限幅/画廊收集过滤）、导出样式合成与字体裁剪、data URI 转换（blob/外域/失败降级）。
-- 一致性：4.1 双引擎金标语料。
-- e2e：图表渲染冒烟（graphviz local / plantuml kroki 走 mock host）、math 围栏、wikilink 锚跳、lightbox 键盘全交互、导出 HTML 下载内容断言（jsdom 侧 DOM 快照 + playwright 下载事件）、PDF 打印模板 iframe 结构断言。
-- PWA：preache 体积门禁（图表 chunk 排除生效）。
+- 服务端路径（§2.5）：compute 图表归属断言（原生集内联 SVG+标记/非原生与 math 保留 fence/layout-rs 失败降级保留 fence）、auto 路由细化（仅图表 fence 可服务端/含代码 fence 留本地/显式策略不受影响）、sanitize svg 放行且拦 script 与事件属性、capabilities 子集宣告与前端消化。
+- 资产链（§2.6）：viz wasm 三层解析回退（同源→服务端→CDN）、pack contentHash 稳定性（manifest 稳定字段规则）、预算门禁脚本。
+- 一致性：4.1 双引擎金标语料（每语法 ≥2 例，含与代码块/HTML 混排），本地 markdown-it 渲染 vs 服务端 comrak compute 渲染 DOM 结构等价断言（沿用 M3 双引擎测试基建）；图表仅断言渲染归属，不断言视觉等价（§2.5 知情差异）。
+- e2e：图表渲染冒烟（graphviz local / plantuml kroki 走 mock host / 服务端路径走 compute 实例）、math 围栏、wikilink 锚跳、lightbox 键盘全交互、导出 HTML 下载内容断言（jsdom 侧 DOM 快照 + playwright 下载事件）、PDF 打印模板 iframe 结构断言、资产链回退（同源缺失→服务端→CDN，GRF 域同手法）。
+- PWA：precache 体积门禁（图表 chunk 排除生效）+ §2.6 dist 预算门禁。

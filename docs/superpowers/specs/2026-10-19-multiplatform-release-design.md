@@ -38,7 +38,7 @@
 
 - 新 crate `server/core`：**框架无关请求/响应类型**（method/path/headers/body 流）+ 全部业务 handler（health/tree/file/mounts/search/ticket-events/storage 分发/鉴权 constant-time 比较），操作面全部经 `StorageBackend` trait（spec 5）。
 - axum 适配层留在 `server/`（native）：axum Request↔core 类型双向映射 + tower-http 静态伺服/压缩/CORS 薄层；**纯重构**，现有 cargo 测试全绿为行为锁。
-- cfg/feature 门控：`watch`（notify）与 `compute`（comrak/tree-sitter/build.rs grammar 编译）为 native-only feature；core 对应 handler 在无 feature 时返回能力缺失语义（404/501 + health 不宣告）——与 `--compute` 既有可选语义同形。
+- cfg/feature 门控：`watch`（notify）与 `compute`（comrak/tree-sitter/build.rs grammar 编译；含服务端图表渲染 layout-rs/svgbob——markdown 对齐 spec §2.5 并入 `--compute` 的决策）为 native-only feature；core 对应 handler 在无 feature 时返回能力缺失语义（404/501 + health 不宣告）——与 `--compute` 既有可选语义同形。
 - 本阶段不改任何对外行为；server 二进制功能与现状逐字节等价（启动校验/exit code 2 契约保留）。
 
 ## 4. 阶段三：Workers 适配（server/worker）
