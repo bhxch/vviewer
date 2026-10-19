@@ -19,6 +19,7 @@ const RICH_HTML = `<div class="vv-markdown">
 <pre data-md-copy=""><span class="md-code-bar"><span class="md-code-lang">ts</span><button type="button" class="md-copy-btn">复制</button></span><code class="language-ts"><span class="ts-keyword">const</span> x = 1;</code></pre>
 <div class="md-diagram" id="diagram-with-view"><div class="md-diagram-bar"><span class="md-diagram-lang">mermaid</span><button type="button" class="md-diagram-toggle">源码</button></div><div class="md-diagram-view" data-mermaid="graph TD; A--&gt;B"><svg id="mermaid-svg"><circle r="4"></circle></svg></div><div class="md-diagram-source" hidden=""><code>graph TD; A--&gt;B</code></div></div>
 <div class="md-diagram" id="diagram-source-only"><div class="md-diagram-bar"><span class="md-diagram-lang">plantuml</span></div><div class="md-diagram-view" hidden=""></div><div class="md-diagram-source"><code>@startuml</code></div></div>
+<div class="markdown-alert markdown-alert-note markdown-alert-foldable markdown-alert-collapsed"><p class="markdown-alert-title markdown-alert-fold-toggle"><span class="callout-title-inner">Note</span></p><div class="markdown-alert-content"><div class="content-inner"><p id="folded-content">收起态的正文内容</p></div></div></div>
 <img id="blob-img" src="blob:https://vviewer.test/abc" alt="blob">
 <img id="ext-img" src="https://example.com/x.png" alt="ext">
 <img id="data-img" src="data:image/gif;base64,R0=" alt="data">
@@ -79,6 +80,21 @@ describe('collectExportHtml——自包含 HTML 装配', () => {
     });
     const out = new DOMParser().parseFromString(html, 'text/html');
     expect(out.querySelector<HTMLImageElement>('#blob-img')?.getAttribute('src')).toBe('blob:https://vviewer.test/abc');
+  });
+
+  it('foldable callout 导出为展开态（F1）：折叠类移除，收起内容节点保留（导出无脚本可展开）', async () => {
+    const html = await collectExportHtml(richDoc(), {
+      title: '演示',
+      styleCss: '',
+      resolveImage: resolveImageStub
+    });
+    const out = new DOMParser().parseFromString(html, 'text/html');
+    const alert = out.querySelector('.markdown-alert');
+    expect(alert).not.toBeNull();
+    expect(alert!.classList.contains('markdown-alert-foldable')).toBe(false);
+    expect(alert!.classList.contains('markdown-alert-collapsed')).toBe(false);
+    // 内容节点在（collapsed 的 display:none 不会再吃掉正文）
+    expect(out.querySelector('#folded-content')?.textContent).toBe('收起态的正文内容');
   });
 
   it('音视频占位降级为源地址超链接：video/audio 元素不进导出产物', async () => {

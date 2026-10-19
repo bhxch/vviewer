@@ -112,9 +112,14 @@ export interface ExportHtmlOptions {
   resolveImage(src: string): Promise<string | null>;
 }
 
-/** 交互壳剥离清单（管线产物类名，见 pipeline.ts CLS / lightbox.ts）：复制钮、图表
+/**
+ * 交互壳剥离清单（管线产物类名，见 pipeline.ts CLS / lightbox.ts）：复制钮、图表
  * 切换钮、灯箱 overlay。源码面板不在此列——source 模式图表的唯一展示就是它，
- * 按 wrapper 内视图可见性逐个判定（stripInteractiveShells）。 */
+ * 按 wrapper 内视图可见性逐个判定（stripInteractiveShells）。口径注记（F5）：
+ * 剥离对象为类名（交互壳在本仓以类承载）；计划 Global Constraints 所列
+ * 「data-md-copy|md-lightbox|md-diagram-toggle」为语义列举（属性/类混称），
+ * 实际剥离面以类名选择器为准，data-* 属性无行为不剥离。
+ */
 const STRIP_SELECTORS = ['.md-copy-btn', '.md-diagram-toggle', '.md-lightbox-overlay'] as const;
 
 function stripInteractiveShells(root: Document): void {
@@ -128,9 +133,21 @@ function stripInteractiveShells(root: Document): void {
     const sourcePane = wrap.querySelector('.md-diagram-source');
     if (view !== null && sourcePane !== null && !view.hasAttribute('hidden')) sourcePane.remove();
   }
+  // foldable callout（enrich 折叠卡片，F1）：折叠态由标题点击切换，导出无脚本——
+  // 折叠类留着会让 exportBaseCss 的 collapsed 规则把正文永久 display:none 且不可
+  // 展开（HTML/PDF 双链路丢内容）。移除后导出形态=全部展开的普通 alert。
+  for (const alert of Array.from(root.querySelectorAll('.markdown-alert-foldable'))) {
+    alert.classList.remove('markdown-alert-foldable', 'markdown-alert-collapsed');
+  }
 }
 
-/** 音视频占位降级为源地址超链接（防 data URI 爆炸，spec §6）：无 src 直接移除。 */
+/**
+ * 音视频占位降级为源地址超链接（防 data URI 爆炸，spec §6）：无 src 直接移除。
+ * 知情留档（S5）：产物 href 可含 data:（管线内联后的媒体）或 blob:（实例存活期
+ * 生成的媒体 URL）——现代浏览器阻断顶级 data: 导航、blob: 在导出文件里是死链，
+ * 二者点击均不可达。这是「占位降级为链接」语义的惰性形态（无特权不做媒体转码
+ * 内联），知情接受。
+ */
 function demoteMediaToLinks(root: Document): void {
   for (const media of Array.from(root.querySelectorAll('video, audio'))) {
     const src = media.getAttribute('src') ?? '';
