@@ -262,7 +262,8 @@ describe('applyAppearanceFromSettings（订阅触发入口，spec 2026-10-12 §2
     codeThemeDark: 'onelight',
     excludedPatterns: [],
     autoRefresh: true,
-    computePolicy: 'auto'
+    computePolicy: 'auto',
+    diagrams: { krokiHost: '', modes: {} }
   });
 
   it('diff 命中必注入（哨兵先行把签名推离目标）', async () => {

@@ -4,8 +4,10 @@ import {
   markdownRenderer,
   setMarkdownBackend,
   setMarkdownImageResolver,
+  setDiagramOptions,
   renderMarkdownBody
 } from '@vviewer/render-text/markdown/markdownRenderer';
+import { DEFAULT_KROKI_HOST, resolveDiagramType } from '@vviewer/render-text/markdown/diagrams';
 import { htmlRenderer } from '@vviewer/render-text/html';
 import { imageRenderer } from '@vviewer/render-media';
 import { avRenderer } from '@vviewer/render-media/av';
@@ -22,6 +24,7 @@ import { ensureHighlightClient, computeRouter } from './highlightClient';
 import { routeLargeFileHighlight } from './highlightRouter';
 import { resolveImageBlobUrl } from './markdownImages';
 import { loadSettings } from './stores/settings';
+import { effectiveMode, resolveMermaidTheme } from './theme';
 
 /** M1 渲染器注册表：代码/文本、markdown、html 沙箱预览、图片（含消毒后的 SVG）、音视频。
  * M4 追加：PDF（render-doc）、hex/结构树（render-binary）、压缩包 zip/tar/7z/rar
@@ -143,6 +146,24 @@ if (browser) {
   setMarkdownImageResolver(async (src, source) =>
     resolveImageBlobUrl(source.store, source.path, src)
   );
+}
+
+// ---------- markdown 图表渲染选项注入（spec 2026-10-19 §2.1/§2.3，Task 6） ----------
+
+if (browser) {
+  // getDiagramOptions 每次 render 调用一次 → 闭包直读 loadSettings（routeMarkdown
+  // 同款模式），设置变更即时生效且 renderer 不持副本。krokiHost 空串回退注册表
+  // 默认主机；mermaid 主题与 vv:appearance-applied 派发值同源（resolveMermaidTheme，
+  // theme.ts）；模式三级回退：用户覆盖 → 注册表 defaultMode → 'local'。
+  setDiagramOptions(() => {
+    const s = loadSettings();
+    const mode = effectiveMode(s.themeMode);
+    return {
+      krokiHost: s.diagrams.krokiHost || DEFAULT_KROKI_HOST,
+      mermaidTheme: resolveMermaidTheme(mode),
+      modeOf: (lang) => s.diagrams.modes[lang] ?? resolveDiagramType(lang)?.defaultMode ?? 'local'
+    };
+  });
 }
 
 // dev-only HMR 防线（遗留 T14）：本模块是装配单例来源（registry、libarchive worker

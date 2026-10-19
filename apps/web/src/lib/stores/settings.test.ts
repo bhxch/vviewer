@@ -9,7 +9,8 @@ const BASE: Settings = {
   appearanceDark: 'default',
   excludedPatterns: [],
   autoRefresh: true,
-  computePolicy: 'auto'
+  computePolicy: 'auto',
+  diagrams: { krokiHost: '', modes: {} }
 };
 
 function aSettings(overrides: Partial<Settings>): Settings {
@@ -113,5 +114,46 @@ describe('loadSettings 外观槽格式白名单（spec 2026-10-12 §2.3）', () 
     expect(s.appearanceLight).toBe('default');
     expect(s.autoRefresh).toBe(false);
     expect(s.excludedPatterns).toEqual(['.git']);
+  });
+});
+
+describe('diagrams 设置节白名单（spec 2026-10-19 §2.1）', () => {
+  it('默认 krokiHost 空 + modes 空', () => {
+    localStorage.removeItem('vviewer:settings');
+    expect(loadSettings().diagrams).toEqual({ krokiHost: '', modes: {} });
+  });
+
+  it('krokiHost 非 http(s) 归空；modes 非法值剔除、非法键剔除', () => {
+    localStorage.setItem('vviewer:settings', JSON.stringify({
+      diagrams: { krokiHost: 'ftp://x', modes: { mermaid: 'wasm', vega: 'kroki', rust: 'local', bpmn: 'source' } }
+    }));
+    const s = loadSettings();
+    expect(s.diagrams.krokiHost).toBe('');
+    // mermaid 值非法剔除；rust 非注册表键剔除
+    expect(s.diagrams.modes).toEqual({ vega: 'kroki', bpmn: 'source' });
+  });
+
+  it('合法值原样通过：http(s) host 保留、注册表键配三枚举值保留', () => {
+    localStorage.setItem('vviewer:settings', JSON.stringify({
+      diagrams: {
+        krokiHost: 'https://kroki.example.com',
+        modes: { mermaid: 'kroki', 'vega-lite': 'source', plantuml: 'local' }
+      }
+    }));
+    const s = loadSettings();
+    expect(s.diagrams.krokiHost).toBe('https://kroki.example.com');
+    expect(s.diagrams.modes).toEqual({ mermaid: 'kroki', 'vega-lite': 'source', plantuml: 'local' });
+  });
+
+  it('diagrams 节整体缺失或脏值回落默认形态，不影响其余字段', () => {
+    // excludedPatterns/autoRefresh 刻意非默认：若整体回落 defaults() 则断言必炸
+    localStorage.setItem(
+      'vviewer:settings',
+      JSON.stringify({ diagrams: 42, excludedPatterns: ['.git'], autoRefresh: false })
+    );
+    const s = loadSettings();
+    expect(s.diagrams).toEqual({ krokiHost: '', modes: {} });
+    expect(s.excludedPatterns).toEqual(['.git']);
+    expect(s.autoRefresh).toBe(false);
   });
 });

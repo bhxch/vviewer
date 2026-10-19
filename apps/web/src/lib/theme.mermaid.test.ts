@@ -21,6 +21,7 @@ function settings(over: Partial<Settings> = {}): Settings {
     excludedPatterns: [],
     autoRefresh: true,
     computePolicy: 'auto',
+    diagrams: { krokiHost: '', modes: {} },
     ...over
   };
 }

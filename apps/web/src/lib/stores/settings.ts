@@ -1,4 +1,12 @@
 import type { ComputePolicy } from '@vviewer/core';
+import { resolveDiagramType, type DiagramMode } from '@vviewer/render-text/markdown/diagrams';
+
+/** 图表渲染设置（spec 2026-10-19 §2.1）：krokiHost 空串 = 用注册表 DEFAULT_KROKI_HOST；
+ * modes 键 = 图表类型 id/别名，值覆盖注册表 defaultMode（Task 7 面板消费）。 */
+export interface DiagramsSettings {
+  krokiHost: string;
+  modes: Record<string, DiagramMode>;
+}
 
 export interface Settings {
   themeMode: 'light' | 'dark' | 'system';
@@ -13,6 +21,7 @@ export interface Settings {
   autoRefresh: boolean;
   /** 计算策略（M6）：auto=远程文件优先远程计算（失败回退本地）；local/remote=显式指定 */
   computePolicy: ComputePolicy;
+  diagrams: DiagramsSettings;
 }
 
 const KEY = 'vviewer:settings';
@@ -24,13 +33,18 @@ const DEFAULTS: Settings = {
   codeThemeDark: 'serika-dark',
   excludedPatterns: [],
   autoRefresh: true,
-  computePolicy: 'auto'
+  computePolicy: 'auto',
+  diagrams: { krokiHost: '', modes: {} }
 };
 
 const POLICIES: readonly ComputePolicy[] = ['auto', 'local', 'remote'];
 
 function defaults(): Settings {
-  return { ...DEFAULTS, excludedPatterns: [...DEFAULTS.excludedPatterns] };
+  return {
+    ...DEFAULTS,
+    excludedPatterns: [...DEFAULTS.excludedPatterns],
+    diagrams: { krokiHost: DEFAULTS.diagrams.krokiHost, modes: { ...DEFAULTS.diagrams.modes } }
+  };
 }
 
 export function loadSettings(): Settings {
@@ -50,6 +64,17 @@ export function loadSettings(): Settings {
         s[key] = DEFAULTS[key];
       }
     }
+    // diagrams 节白名单（spec §2.1）：host 必须 http(s):// 或空；modes 键须在注册表、值须三枚举
+    const d = s.diagrams ?? DEFAULTS.diagrams;
+    s.diagrams = {
+      krokiHost: typeof d.krokiHost === 'string' && /^https?:\/\//.test(d.krokiHost) ? d.krokiHost : '',
+      modes: Object.fromEntries(
+        Object.entries(typeof d.modes === 'object' && d.modes !== null ? d.modes : {}).flatMap(([k, v]): [string, DiagramMode][] => {
+          const t = resolveDiagramType(k);
+          return t && (v === 'local' || v === 'kroki' || v === 'source') ? [[k, v]] : [];
+        })
+      )
+    };
     return s;
   } catch {
     return defaults();
@@ -71,7 +96,8 @@ const listeners = new Set<SettingsListener>();
 
 /**
  * 订阅设置变更（saveSettings 触发）；返回退订函数。
- * 回调收到的是深一层的副本（excludedPatterns 数组拷贝），订阅方改动不回灌。
+ * 回调收到的是深一层的副本（excludedPatterns 数组、diagrams.modes 均拷贝），
+ * 订阅方改动不回灌。
  */
 export function onSettingsChanged(cb: SettingsListener): () => void {
   listeners.add(cb);
@@ -79,5 +105,11 @@ export function onSettingsChanged(cb: SettingsListener): () => void {
 }
 
 function notify(s: Settings): void {
-  for (const cb of listeners) cb({ ...s, excludedPatterns: [...s.excludedPatterns] });
+  for (const cb of listeners) {
+    cb({
+      ...s,
+      excludedPatterns: [...s.excludedPatterns],
+      diagrams: { ...s.diagrams, modes: { ...s.diagrams.modes } }
+    });
+  }
 }

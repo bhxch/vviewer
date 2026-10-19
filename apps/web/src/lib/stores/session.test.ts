@@ -45,9 +45,10 @@ describe('session store', () => {
       codeThemeDark: 'serika-dark',
       excludedPatterns: [],
       autoRefresh: true,
-      computePolicy: 'auto'
+      computePolicy: 'auto',
+      diagrams: { krokiHost: '', modes: {} }
     });
-    saveSettings({ themeMode: 'dark', appearanceLight: 'default', appearanceDark: 'default', codeThemeLight: 'onelight', codeThemeDark: 'serika-dark', excludedPatterns: ['node_modules'], autoRefresh: false, computePolicy: 'remote' });
+    saveSettings({ themeMode: 'dark', appearanceLight: 'default', appearanceDark: 'default', codeThemeLight: 'onelight', codeThemeDark: 'serika-dark', excludedPatterns: ['node_modules'], autoRefresh: false, computePolicy: 'remote', diagrams: { krokiHost: '', modes: {} } });
     expect(loadSettings().themeMode).toBe('dark');
     expect(loadSettings().computePolicy).toBe('remote');
   });
