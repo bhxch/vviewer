@@ -143,7 +143,14 @@ export function openLightbox(img: HTMLImageElement, ctx: PipelineCtx, gallery: G
   const src = img.getAttribute('src') ?? '';
   const idx = gallery.findIndex((it) => it.type === 'img' && it.src === src);
   const items = idx === -1 ? [{ type: 'img' as const, src, alt: img.getAttribute('alt') ?? '' }] : gallery;
-  openers.get(overlay)!(items, idx === -1 ? 0 : idx);
+  const open = openers.get(overlay);
+  if (!open) {
+    // 防御（不裸非空断言）：同 id 陌生元素（外部 DOM 注入/序列化恢复等理论路径）
+    // 无打开表项——不复用不重建，按脏状态移除，下次点击走全新构建
+    removeLightboxOverlay(doc);
+    return;
+  }
+  open(items, idx === -1 ? 0 : idx);
   // 最后打开者即 owner（覆盖旧记号）：其后仅 owner 的 destroy 可随生命周期摘除（U3）。
   // 注意须在此处写（而非 buildOverlay 闭包）：复用单例时归属跟随本次打开者的 ctx。
   overlay.setAttribute(LIGHTBOX_OWNER_ATTR, ctx.lightboxOwner ?? '');

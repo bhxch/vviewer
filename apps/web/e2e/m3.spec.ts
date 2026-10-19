@@ -164,8 +164,13 @@ test('lightbox：开-关-复开（单例复用）-切 tab destroy 清理', async
   await img.click();
   await expect(overlay).toBeVisible();
 
-  // 关：点击 overlay 自身移除（openLightbox 的 click 监听；点中克隆图也冒泡到此监听）
-  await overlay.click();
+  // 关：Task 1 起关闭语义收敛为「点背景（overlay 本体/stage 空白）或关闭钮关，
+  // 点内容（居中克隆图）与控制件不关」——真机点 overlay 几何中心会命中克隆图、
+  // 不再触发关闭，故经 evaluate 派发 target=overlay 的 click（等同点无内容覆盖
+  // 的真空白；stage 空白分支由 render-text 侧 jsdom 用例锚定）
+  await page.evaluate(() => {
+    document.getElementById('md-lightbox-overlay')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
   await expect(overlay).toHaveCount(0);
 
   // 复开：img 监听仍存活可再开；此时再触发另一张"图"点击，overlay 仍为 1

@@ -1,6 +1,6 @@
 // lightbox.test.ts — 灯箱模块单测：缩放/平移/导航状态机纯函数直测 + jsdom DOM
 // 交互（打开/关闭语义、画廊导航、键盘集、归属代币、主题前缀）。
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { PipelineCtx } from './pipeline';
 import {
   clampZoom,
@@ -205,15 +205,26 @@ describe('画廊导航与键盘集', () => {
     expect(overlayOf(doc)).toBeNull();
   });
 
-  it('Esc 关闭后 document 级键盘监听随之摘除（重建不累积）', () => {
+  it('Esc 关闭：document 级 keydown 监听真被移除且引用匹配（spyOn 判别）', () => {
     const doc = docOf('<img src="a.png" alt="A">');
-    const press = (key: string): void => { doc.dispatchEvent(new KeyboardEvent('keydown', { key })); };
-    for (let round = 0; round < 2; round += 1) {
+    const addSpy = vi.spyOn(doc, 'addEventListener');
+    const removeSpy = vi.spyOn(doc, 'removeEventListener');
+    try {
       openLightbox(doc.querySelector('img')!, noCtx, collectGallery(doc.body));
-      press('ArrowRight');
-      expect(overlayOf(doc)!.querySelector('.md-lightbox-count')!.textContent).toBe('1/1');
-      press('Escape');
+      const added = addSpy.mock.calls.find(([type]) => type === 'keydown');
+      expect(added).toBeDefined();
+      doc.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
       expect(overlayOf(doc)).toBeNull();
+      // 监听真被摘除：removeEventListener 恰一次，且移除的正是挂入的那个引用
+      expect(removeSpy).toHaveBeenCalledTimes(1);
+      expect(removeSpy).toHaveBeenCalledWith('keydown', added![1]);
+      // 关闭后再按键无残留副作用（不重复移除、无 overlay 可操作）
+      doc.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      expect(removeSpy).toHaveBeenCalledTimes(1);
+      expect(overlayOf(doc)).toBeNull();
+    } finally {
+      addSpy.mockRestore();
+      removeSpy.mockRestore();
     }
   });
 });
