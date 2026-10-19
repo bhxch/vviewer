@@ -140,6 +140,12 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .markdown-alert-warning { border-left-color: #9a6700; }
 .markdown-alert-caution { border-left-color: #cf222e; }
 .markdown-alert-todo { border-left-color: #57606a; }
+/* callout 折叠（+/− 后缀卡片）：标题即折叠钮；collapsed 只隐藏标题外内容 */
+.markdown-alert-foldable > .markdown-alert-title { cursor: pointer; user-select: none; }
+.markdown-alert-foldable > .markdown-alert-title::after { content: '▾'; margin-left: auto;
+  font-size: .8em; color: var(--ui-fg-muted); }
+.markdown-alert-collapsed > .markdown-alert-title::after { content: '▸'; }
+.markdown-alert-collapsed > :not(.markdown-alert-title) { display: none; }
 /* html 沙箱预览（htmlRenderer）：顶部视图按钮组 + iframe/源码内容区 */
 .vv-html { display: flex; flex-direction: column; height: 100%; }
 .vv-html-toolbar { display: flex; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--ui-border); flex: none; }

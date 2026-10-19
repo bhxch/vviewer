@@ -107,8 +107,22 @@ function convertCallouts(root: Document): void {
     if (!matchResult || !lead) continue;
     const textNode = lead as Text;
 
+    // 折叠后缀（Task 5，GitHub 语义）：] 后可隔空白紧跟 + 或 -、且其后随空白/
+    // 行尾才算折叠标记——`[!note]+x` 未知语法从保守（不折叠，原文留在标题），
+    // `[!note] -5 度` 等正文负号由 (?=\s|$) 前瞻保护不误判。
+    let fold: '+' | '-' | null = null;
+    let consumed = matchResult[0].length;
+    const rest = textNode.nodeValue!.slice(consumed);
+    const foldMatch = rest.match(/^[ \t]*([+-])(?=\s|$)/);
+    if (foldMatch) {
+      fold = foldMatch[1] as '+' | '-';
+      consumed += foldMatch[0].length;
+      // 后缀与标题间的空白吞掉（与无后缀路径 ] 后 [^\S\n]* 的既有处理对齐）
+      consumed += rest.slice(foldMatch[0].length).match(/^[^\S\n]*/)![0].length;
+    }
+    textNode.nodeValue = textNode.nodeValue!.slice(consumed);
+
     const type = (matchResult[1] ?? '').toLowerCase();
-    textNode.nodeValue = textNode.nodeValue!.slice(matchResult[0].length);
 
     // 标题 = 首行剩余节点。行终止：markpad 的 <br>（comrak hardbreaks）在这里对应
     // markdown-it 软换行输出的 '\n'——含换行的文本节点按首个 '\n' 分割，
@@ -147,6 +161,16 @@ function convertCallouts(root: Document): void {
 
     const titleEl = root.createElement('p');
     titleEl.className = 'markdown-alert-title';
+    // 折叠后缀：foldable 卡片 + 按符号预置收起（+ 展开 / − 收起）；标题点击切换
+    // collapsed——节点挂载进主文档后监听随节点保留（copyBtn 先例）
+    if (fold) {
+      container.classList.add('markdown-alert-foldable');
+      if (fold === '-') container.classList.add('markdown-alert-collapsed');
+      titleEl.classList.add('markdown-alert-fold-toggle');
+      titleEl.addEventListener('click', () => {
+        container.classList.toggle('markdown-alert-collapsed');
+      });
+    }
     const titleInner = root.createElement('span');
     titleInner.className = 'callout-title-inner';
     for (const tn of titleNodes) titleInner.appendChild(tn);

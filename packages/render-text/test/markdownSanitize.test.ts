@@ -164,6 +164,34 @@ describe('enrichMarkdownDom——callout 转换', () => {
     expect(doc.querySelector('.markdown-alert')).toBeNull();
   });
 
+  it('callout 折叠后缀：+ 默认展开、- 默认收起、无后缀不变（Task 5）', () => {
+    const plus = renderEnriched('> [!note]+ 标题\n> 内容\n');
+    expect(plus.querySelector('.markdown-alert-foldable')).not.toBeNull();
+    expect(plus.querySelector('.markdown-alert-collapsed')).toBeNull();
+    const minus = renderEnriched('> [!warning]- 标题\n> 内容\n');
+    expect(minus.querySelector('.markdown-alert-collapsed')).not.toBeNull();
+    const plain = renderEnriched('> [!note] 标题\n> 内容\n');
+    expect(plain.querySelector('.markdown-alert-foldable')).toBeNull();
+    expect(plain.querySelector('.markdown-alert-collapsed')).toBeNull();
+  });
+
+  it('折叠后缀从保守：[!note]+x（后缀后随非空白）不触发折叠，标题保留原文', () => {
+    const doc = renderEnriched('> [!note]+x 标题\n> 内容\n');
+    expect(doc.querySelector('.markdown-alert-foldable')).toBeNull();
+    expect(doc.querySelector('.markdown-alert-title')!.textContent).toContain('+x 标题');
+  });
+
+  it('折叠卡片内容仍在 DOM（collapsed 只由 CSS 隐藏），标题点击切换 collapsed', () => {
+    const doc = renderEnriched('> [!note]- 标题\n> 内容段落\n');
+    const card = doc.querySelector('.markdown-alert')!;
+    expect(card.querySelector('.markdown-alert-content')!.textContent).toContain('内容段落');
+    const title = doc.querySelector('.markdown-alert-title') as HTMLElement;
+    title.click();
+    expect(doc.querySelector('.markdown-alert-collapsed')).toBeNull();
+    title.click();
+    expect(doc.querySelector('.markdown-alert-collapsed')).not.toBeNull();
+  });
+
   it('嵌套引用：内层 [!note] 转换为卡片，外层不触发保持块引用', () => {
     const doc = renderEnriched('> > [!note]\n> > 嵌套\n');
     // 外层首子元素是 blockquote 而非段落 → 外层不转换；内层按规则转卡片
