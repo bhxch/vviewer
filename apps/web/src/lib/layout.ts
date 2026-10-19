@@ -116,3 +116,20 @@ export function zenEscAction(state: { overlaysOpen: boolean; zen: boolean }): Ze
   if (state.zen) return 'exitZen';
   return 'none';
 }
+
+export type ZenPopAction = 'closeOverlay' | 'exitZen' | 'ignore';
+
+/**
+ * 返回键 popstate 分派（spec §3.1）：zenEscAction 的第二触发源（Android 返回键 /
+ * PWA standalone 手势），语义逐态一致（guardArmed=true 时等价，layout.test 锁定）。
+ * 差异只在守卫门：guardArmed=当前历史项是 AppShell 压入的 zen 守卫（{vvZen:1}）——
+ * 守卫不在场一律 ignore 放行原生回退（不劫持正常导航，含「面板开着但不经 zen」的
+ * 回退不误退）；守卫在场则面板开=closeOverlay（承接桌面「Esc 先关面板」）、无面板
+ * 且 zen=exitZen，余皆 ignore（如跨标签同步退 zen 后的残留守卫）。
+ */
+export function zenPopAction(state: { guardArmed: boolean; overlaysOpen: boolean; zen: boolean }): ZenPopAction {
+  if (!state.guardArmed) return 'ignore';
+  if (state.overlaysOpen) return 'closeOverlay';
+  if (state.zen) return 'exitZen';
+  return 'ignore';
+}

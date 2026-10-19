@@ -8,7 +8,8 @@ import {
   enterZen,
   exitZen,
   sanitizeLayout,
-  zenEscAction
+  zenEscAction,
+  zenPopAction
 } from './layout';
 
 describe('layout 纯函数（spec 2026-10-19 布局自由化 §2）', () => {
@@ -143,5 +144,42 @@ describe('zen 覆盖语义（spec 2026-10-19 布局自由化 §3）', () => {
   it('zenEscAction：无 overlay 且 zen → exitZen；否则 none', () => {
     expect(zenEscAction({ overlaysOpen: false, zen: true })).toBe('exitZen');
     expect(zenEscAction({ overlaysOpen: false, zen: false })).toBe('none');
+  });
+});
+
+describe('zenPopAction 返回键分派（spec 2026-10-19 §3.1：同一状态机双触发源）', () => {
+  it('双触发源等价性：产生实际动作的各态与桌面 Esc（zenEscAction）一致', () => {
+    // 面板开 → closeOverlay；无面板且 zen → exitZen（两态两触发源同分派）
+    expect(zenPopAction({ guardArmed: true, overlaysOpen: true, zen: true })).toBe(
+      zenEscAction({ overlaysOpen: true, zen: true })
+    );
+    expect(zenPopAction({ guardArmed: true, overlaysOpen: true, zen: false })).toBe(
+      zenEscAction({ overlaysOpen: true, zen: false })
+    );
+    expect(zenPopAction({ guardArmed: true, overlaysOpen: false, zen: true })).toBe(
+      zenEscAction({ overlaysOpen: false, zen: true })
+    );
+    // 刻意差异：空闲态（守卫在场、无面板、非 zen）Esc 侧 none，返回键侧 ignore
+    // ——popstate 的 no-op 还承担「不劫持正常导航」（放行原生回退）
+    expect(zenPopAction({ guardArmed: true, overlaysOpen: false, zen: false })).toBe('ignore');
+  });
+
+  it('popstate 分派：面板开 → closeOverlay（返回键承接「Esc 先关面板」）', () => {
+    expect(zenPopAction({ guardArmed: true, overlaysOpen: true, zen: true })).toBe('closeOverlay');
+    expect(zenPopAction({ guardArmed: true, overlaysOpen: true, zen: false })).toBe('closeOverlay');
+  });
+
+  it('popstate 分派：无面板且 zen → exitZen', () => {
+    expect(zenPopAction({ guardArmed: true, overlaysOpen: false, zen: true })).toBe('exitZen');
+  });
+
+  it('守卫不在场恒 ignore：正常导航不劫持（含面板开着但不经 zen 的回退不误退）', () => {
+    expect(zenPopAction({ guardArmed: false, overlaysOpen: true, zen: true })).toBe('ignore');
+    expect(zenPopAction({ guardArmed: false, overlaysOpen: true, zen: false })).toBe('ignore');
+    expect(zenPopAction({ guardArmed: false, overlaysOpen: false, zen: false })).toBe('ignore');
+  });
+
+  it('zen 已退但守卫残留（跨标签同步退出等边缘）：ignore 不误动作', () => {
+    expect(zenPopAction({ guardArmed: true, overlaysOpen: false, zen: false })).toBe('ignore');
   });
 });

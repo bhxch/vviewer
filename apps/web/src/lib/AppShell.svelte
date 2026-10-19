@@ -46,6 +46,7 @@
     enterZen,
     exitZen,
     zenEscAction,
+    zenPopAction,
     type LayoutSide,
     type LayoutSettings
   } from './layout';
@@ -189,15 +190,102 @@
   /**
    * zen 进出（spec §3）：enterZen/exitZen 只翻 zen 字段（正交性——其余字段不被
    * 改写，退出即还原）；持久化复用 updateLayout。切换后派发 `vv:zen-changed`
-   * 文档事件（detail {zen}）——Task 3 移动端消费（返回键拦截/浮钮显隐）。
+   * 文档事件（detail {zen}）。viaPopstate=退出由返回键 popstate 触发——守卫历史项
+   * 已被该次回退弹出，history 补偿跳过（updateZenHistory）。
    */
-  function toggleZen(): void {
+  function toggleZen(viaPopstate = false): void {
     const fresh = loadSettings();
     const zen = !fresh.layout.zen;
     fresh.layout = zen ? enterZen(fresh.layout) : exitZen(fresh.layout);
     saveSettings(fresh);
     if (!zen) clearTempTimers();
+    updateZenHistory(zen, viaPopstate);
     document.dispatchEvent(new CustomEvent('vv:zen-changed', { detail: { zen } }));
+  }
+
+  // ---------- zen 移动端（spec §3.1，Task 4）：返回键拦截 / 浮钮 / 抽屉入口 ----------
+
+  /** 抽屉断点（≤900px，与既有抽屉/调宽判定同一条件同引擎）：移动端 zen 行为
+   * （守卫压入）以此为门；浮钮/抽屉头部的视觉开关用同一断点的媒体查询（CSS，
+   * 改断点两处同步）。桌面断点不压守卫——桌面无返回键语义，history 保持纯净。 */
+  function isDrawerBreakpoint(): boolean {
+    return window.matchMedia('(max-width: 900px)').matches;
+  }
+
+  /**
+   * zen 守卫历史项（spec §3.1 返回键拦截）：移动端进 zen 时压入 {vvZen:1}，Android
+   * 返回键触发 popstate 时按 zenPopAction 分派（与桌面 Esc 同一状态机的第二触发源
+   * ——面板开先关面板、无面板退 zen）。不变式：移动断点下 zen 在场即守卫在当前
+   * 历史项——closeOverlay 消费守卫后重新压入（onPopstate）；非 popstate 通道退出
+   * （浮钮/菜单/Esc/快捷键）时 history.back() 消费之，返回键语义回归原生（不劫持
+   * 正常导航）。守卫项跨 reload 存活（history.state 持久），reload 落 zen 时由
+   * onMount 认领或补压（浮钮即在场 + 返回键仍可退出，无困死路径）。
+   */
+  let zenGuardArmed = false;
+
+  function armZenGuard(): void {
+    history.pushState({ vvZen: 1 }, '');
+    zenGuardArmed = true;
+  }
+
+  function updateZenHistory(zen: boolean, viaPopstate: boolean): void {
+    if (zen) {
+      if (isDrawerBreakpoint()) armZenGuard();
+      return;
+    }
+    if (!zenGuardArmed) return;
+    zenGuardArmed = false;
+    if (!viaPopstate) history.back(); // 守卫项仍在栈顶：回退消费（popstate 分支已弹过）
+  }
+
+  /**
+   * 关闭最上层 overlay（返回键承接桌面「Esc 先关面板」优先级，一次一个）：chrome
+   * 菜单 > AppShell 自有面板（状态直关）> 外组件面板（设置/文件内搜索/远端源等）
+   * ——后者对检测到的面板根派发合成 Esc，由各面板自带关闭处理器动作（仓库统一
+   * dialog 容器 keydown 模式；window 兜底监听经 bubbles 到达），与桌面同一关闭
+   * 通道。Svelte DOM 刷新在微任务批量落地，同步冒泡到 window 的 AppShell Esc
+   * 分支仍见面板在 DOM（zenEscAction → closeOverlay 不叠加），不会级联退 zen
+   * （桌面物理 Esc 同机制）。
+   */
+  function closeTopOverlayForZen(): void {
+    if (chromeMenu !== null) {
+      chromeMenu = null;
+      return;
+    }
+    if (globalSearchOpen) {
+      globalSearchOpen = false;
+      return;
+    }
+    if (quickOpenOpen) {
+      quickOpenOpen = false;
+      return;
+    }
+    if (wsPanelOpen) {
+      wsPanelOpen = false;
+      return;
+    }
+    document.querySelector(OVERLAY_SELECTOR)?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+    );
+  }
+
+  function onPopstate(): void {
+    // chromeMenu 不在 OVERLAY_SELECTOR（AppShell Esc 分支同序：菜单 > overlay > zen）
+    const action = zenPopAction({
+      guardArmed: zenGuardArmed,
+      overlaysOpen: anyOverlayOpen() || chromeMenu !== null,
+      zen: layout.zen
+    });
+    if (action === 'ignore') return; // 守卫不在场：正常导航，放行
+    if (action === 'exitZen') {
+      zenGuardArmed = false; // 本次回退已弹出守卫项，toggleZen 不再 history.back
+      toggleZen(true);
+      return;
+    }
+    // closeOverlay：返回键先关面板、zen 保持；守卫项已被本次回退消费，关面板后
+    // 重新压入——维持「zen 在场即守卫在顶」不变式，下次返回继续承接
+    closeTopOverlayForZen();
+    armZenGuard();
   }
 
   /** chrome 右键菜单（spec §2 隐藏入口 / §3 TopBar 布局菜单项）：bar 标识菜单
@@ -334,10 +422,19 @@
     // FontFace 并注册 document.fonts——与 dirHandle 会话恢复同层（onMount 启动期、
     // 不阻断启动）；单项失败已在 store 内 warn 不阻断，整体失败（库不可用）仅告警
     void loadEnabledFontFaces().catch((err: unknown) => console.warn('[fonts] 启动字体恢复失败', err));
+    // zen 返回键拦截（spec §3.1）：reload 落 zen 时守卫项跨 reload 存活在当前历史项
+    // （history.state 持久）——认领之；当前项无守卫（上个会话经浮钮退出后 reload 等）
+    // 且在移动断点则补压——reload 后浮钮即在场 + 返回键仍先于离页退出 zen（无困死路径）
+    if (layout.zen) {
+      if ((history.state as { vvZen?: unknown } | null)?.vvZen === 1) zenGuardArmed = true;
+      else if (isDrawerBreakpoint()) armZenGuard();
+    }
+    window.addEventListener('popstate', onPopstate);
     void restore();
     return () => {
       offSettings();
       unbindArchive();
+      window.removeEventListener('popstate', onPopstate);
       clearTempTimers(); // 临时条 1.5s 定时器不跨卸载存活（spec §2 定时器清理）
     };
   });
@@ -762,6 +859,13 @@
       </div>
     {/if}
     <aside class="vv-side" class:vv-side-off={layout.leftCollapsed} style="--vv-side-w: {leftW}px">
+      <!-- 抽屉头部「专注模式」入口（spec §3.1 移动端回落挂点：iOS Safari 不派发
+           contextmenu，长按布局菜单在 iOS 不可达）：桌面隐藏（媒体查询）；点击切
+           zen 不动抽屉开合态——zen 隐抽屉本体，退出还原进入前开合（spec「恢复原
+           开合状态」）；与桌面 chrome 菜单同源 toggleZen -->
+      <div class="vv-drawer-head">
+        <button type="button" class="vv-drawer-zen" onclick={() => toggleZen()}>专注模式</button>
+      </div>
       <button type="button" class="vv-collapse-btn vv-collapse-left" aria-label="折叠文件树"
         title="折叠文件树" onclick={() => updateLayout({ leftCollapsed: true })}>‹</button>
       {#if sources.length > 0}
@@ -832,6 +936,14 @@
   </div>
   <button class="vv-drawer-toggle" aria-label="切换侧栏" onclick={() => (drawerOpen = !drawerOpen)}>☰</button>
   <button class="vv-right-toggle" aria-label="切换目录与属性面板" onclick={() => (rightOpen = !rightOpen)}>ℹ</button>
+  {#if layout.zen}
+    <!-- zen 退出浮钮（spec §3.1 移动端）：hover 退出条的触屏替身，桌面无此钮
+         （媒体查询隐藏）。≥44px 触控标准、半透不遮内容；右下角定于状态栏上方
+         （状态栏 zen 保留，浮钮避让其高度）；z-index 低于面板层 30——面板在场时
+         返回键先关面板，浮钮被压住即「面板优先」的视觉一致 -->
+    <button type="button" class="vv-zen-exit" aria-label="退出专注模式" title="退出专注模式"
+      onclick={() => toggleZen()}>✕</button>
+  {/if}
   {#if globalSearchOpen}
     <GlobalSearchPanel {sources} onclose={() => (globalSearchOpen = false)} />
   {/if}
@@ -967,6 +1079,54 @@
         bottom: 8px;
         z-index: 20;
       }
+    }
+  }
+  /* zen 移动端（spec §3.1，Task 4）：退出浮钮 + 抽屉头部「专注模式」入口——基线
+     display:none（桌面无此钮/无此项，spec「桌面无此钮」），≤900px 抽屉断点
+     （与 isDrawerBreakpoint 同一条件，改断点两处同步）内才渲染视觉 */
+  .vv-zen-exit,
+  .vv-drawer-head {
+    display: none;
+  }
+  @media (max-width: 900px) {
+    .vv-drawer-head {
+      display: flex;
+      justify-content: flex-end;
+      padding: 4px 8px;
+      border-bottom: 1px solid var(--ui-border);
+    }
+    .vv-drawer-zen {
+      background: none;
+      border: 1px solid var(--ui-border);
+      border-radius: 6px;
+      padding: 6px 12px;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    /* 退出浮钮：44px 触控标准、半透 0.55（不遮内容，hover/聚焦提亮）；右下角
+       bottom 34px 避让状态栏（~22px 高，zen 保留，spec §3.1「浮钮定位避开状态栏」）；
+       z-index 25 低于面板层 30——面板在场时返回键先关面板的视觉一致 */
+    .vv-zen-exit {
+      display: block;
+      position: fixed;
+      right: 12px;
+      bottom: 34px;
+      z-index: 25;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 1px solid var(--ui-border);
+      background: var(--ui-tab-active-bg);
+      color: var(--ui-fg);
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      opacity: 0.55;
+    }
+    .vv-zen-exit:hover,
+    .vv-zen-exit:focus-visible {
+      opacity: 1;
     }
   }
 </style>
