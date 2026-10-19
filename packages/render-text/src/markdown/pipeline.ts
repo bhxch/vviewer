@@ -315,8 +315,9 @@ type MathSegment = { kind: 'text'; value: string } | { kind: 'math'; value: stri
 
 /**
  * 简单分隔符扫描：`$$...$$` 块级（可跨行）、`$...$` 行内（止于行尾，
- * 开定界符后与闭定界符前不允许紧邻空白——金额 $100 与 $200 不误判）。
- * 无有效公式返回空数组（原文不动）。
+ * 开定界符后与闭定界符前不允许紧邻空白——金额 $100 与 $200 不误判）、
+ * `\(...\)` 行内与 `\[...\]` 块级（markpad 对齐；成对才触发，与 $ 同样
+ * 收空内容/未闭合原文不动）。无有效公式返回空数组（原文不动）。
  */
 function scanMathSegments(text: string): MathSegment[] {
   const segments: MathSegment[] = [];
@@ -324,6 +325,28 @@ function scanMathSegments(text: string): MathSegment[] {
   let i = 0;
   while (i < text.length) {
     const ch = text[i]!;
+    if (ch === '\\' && text[i + 1] === '(') {
+      const end = text.indexOf('\\)', i + 2);
+      const inner = end === -1 ? '' : text.slice(i + 2, end).trim();
+      if (end !== -1 && inner) {
+        if (buf) segments.push({ kind: 'text', value: buf });
+        segments.push({ kind: 'math', value: inner, display: false });
+        buf = '';
+        i = end + 2;
+        continue;
+      }
+    }
+    if (ch === '\\' && text[i + 1] === '[') {
+      const end = text.indexOf('\\]', i + 2);
+      const inner = end === -1 ? '' : text.slice(i + 2, end).trim();
+      if (end !== -1 && inner) {
+        if (buf) segments.push({ kind: 'text', value: buf });
+        segments.push({ kind: 'math', value: inner, display: true });
+        buf = '';
+        i = end + 2;
+        continue;
+      }
+    }
     if (ch !== '$') {
       buf += ch;
       i += 1;
@@ -366,6 +389,11 @@ async function runKatex(root: Document): Promise<void> {
   const scope: Node = root.body ?? root;
   const katex = (await import('katex').catch(() => null))?.default;
   if (!katex) return;
+  // mhchem 宏扩展（\ce{}）：必须走 .mjs 裸子路径——CJS 副本会产生第二解析器、
+  // 宏表分裂（markpad #745）；与上面同一 katex 实例共享模块图（mhchem.mjs 顶层
+  // import '../katex.mjs'，vite 按同一 resolved id 去重）。导入失败静默=无 \ce
+  // 宏（throwOnError 保留原文），普通公式不受影响。
+  await import('katex/contrib/mhchem').catch(() => null);
 
   const walker = root.createTreeWalker(scope, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
@@ -383,7 +411,11 @@ async function runKatex(root: Document): Promise<void> {
   const targets: Text[] = [];
   let node: Node | null;
   while ((node = walker.nextNode())) {
-    if ((node.nodeValue ?? '').includes('$')) targets.push(node as Text);
+    const value = node.nodeValue ?? '';
+    // $ 之外把 \( \[ 也列为候选（含无对闭合的），真正甄别交给 scanMathSegments
+    if (value.includes('$') || value.includes('\\(') || value.includes('\\[')) {
+      targets.push(node as Text);
+    }
   }
 
   for (const target of targets) {

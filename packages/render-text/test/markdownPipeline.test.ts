@@ -10,6 +10,7 @@ vi.mock('mermaid', () => ({
 import { runPipeline, getPipelineSteps, runSteps, type PipelineCtx } from '../src/markdown/pipeline';
 import { renderMarkdownToHtml } from '../src/markdown/engine';
 import { sanitizeHtml } from '../src/markdown/sanitize';
+import { enrichMarkdownDom } from '../src/markdown/enrich';
 
 /** 引擎 → 净化 → 解析为 Document（T3 管线的真实输入形态）。 */
 function docOf(md: string): Document {
@@ -19,6 +20,14 @@ function docOf(md: string): Document {
 
 function noopCtx(overrides: Partial<PipelineCtx> = {}): PipelineCtx {
   return { highlightFence: vi.fn().mockResolvedValue(null), ...overrides };
+}
+
+/** markdownRenderer 同构装配（引擎→sanitize→enrich→管线）：katex 步断言走真实顺序。 */
+async function renderDoc(md: string): Promise<Document> {
+  const doc = docOf(md);
+  enrichMarkdownDom(doc);
+  await runPipeline(doc, noopCtx());
+  return doc;
 }
 
 beforeEach(() => {
@@ -170,6 +179,33 @@ describe('katex 步', () => {
     await runPipeline(doc, noopCtx());
     expect(doc.querySelector('.katex')).toBeNull();
     expect(doc.body.textContent).toContain('\\unknownCmdX');
+  });
+
+  it('KaTeX 分隔符扩展：\\(..\\) 行内与 \\[..\\] 块级', async () => {
+    // markdown-it 会把段落里 \( 的反斜杠当转义吞掉——作者需写 \\( 定界符才活到
+    // 文本节点（引擎级保留不在本任务范围，见任务报告）；此处走真实 markdown 路径
+    const doc = await renderDoc('行内 \\\\(a^2\\\\) 与块级：\n\n\\\\[b_2\\\\]');
+    expect(doc.body.innerHTML).toContain('katex');
+    expect(doc.querySelector('.katex')).not.toBeNull();
+    expect(doc.querySelector('.katex-display')).not.toBeNull();
+    // $ 字面量不误伤（金额语义回归）
+    expect(doc.body.textContent).not.toContain('\\(');
+  });
+
+  it('mhchem 宏：$\\ce{CO2 + C -> 2 Fe}$ 渲染含 mhchem 产物', async () => {
+    const doc = await renderDoc('$\\ce{CO2}$');
+    const html = doc.body.innerHTML;
+    expect(html).toContain('katex');
+    // mhchem 输出特征（实测 katex 0.19.0 记录）：无 mhchem 时 \ce 未知宏会 throw
+    // 保留原文、无任何 katex 标记；有 mhchem 时元素符号走直立体排版 span
+    //（<span class="mord mathrm">CO</span>），且 MathML annotation 回显 \ce 源码
+    expect(html).toContain('mord mathrm');
+    expect(doc.querySelector('annotation')?.textContent).toContain('\\ce{CO2}');
+  });
+
+  it('\\( 与 \\[ 在代码块/既有 .katex 祖先内不触发（跳过规则复用）', async () => {
+    const doc = await renderDoc('`\\(a^2\\)`');
+    expect(doc.querySelector('code')!.textContent).toBe('\\(a^2\\)');
   });
 });
 
