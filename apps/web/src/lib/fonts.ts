@@ -65,3 +65,29 @@ export function fontFamilyOptions(presets: readonly FontPreset[]): FontFamilyOpt
     { value: CUSTOM_FONT_SENTINEL, label: '自定义…' }
   ];
 }
+
+/**
+ * 两槽下拉与网络字体的合并装配（Task 5）：base 为 fontFamilyOptions 输出（哨兵
+ * 收尾），已启用网络字体名插在预设组与哨兵之间——选项值即字体记录 name（槽位
+ * 存储语义与预设一致，label 加「（网络）」标注来源）；与既有选项值撞车的名字
+ * 跳过（select 重复值会选中错位），空清单时与 base 全等（未添加字体 = 纯预设形态）。
+ */
+export function mergedFamilyOptions(
+  base: readonly FontFamilyOption[],
+  networkNames: readonly string[]
+): FontFamilyOption[] {
+  const sentinel = base.at(-1);
+  if (!sentinel) return [];
+  const taken = new Set(base.slice(0, -1).map((o) => o.value));
+  const net = networkNames
+    .filter((n) => !taken.has(n))
+    .map((n) => ({ value: n, label: `${n}（网络）` }));
+  return [...base.slice(0, -1), ...net, sentinel];
+}
+
+/** 字体文件体积显示（Task 5 管理列表行）：B / KB（整数）/ MB（一位小数）三档。 */
+export function formatFontSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}

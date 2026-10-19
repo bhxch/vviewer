@@ -11,6 +11,8 @@ import {
   FONT_SPECIMEN,
   UI_FONT_PRESETS,
   fontFamilyOptions,
+  formatFontSize,
+  mergedFamilyOptions,
   type FontPreset
 } from './fonts';
 
@@ -87,6 +89,40 @@ describe('fontFamilyOptions（两槽下拉装配：默认 + 预设组 + 自定�
   });
 });
 
+describe('mergedFamilyOptions（网络字体进下拉：Task 5 合并装配）', () => {
+  it('启用网络字体名插在预设组与哨兵之间，label 加「（网络）」标注来源', () => {
+    const base = fontFamilyOptions(UI_FONT_PRESETS);
+    const merged = mergedFamilyOptions(base, ['My Font', 'Noto Serif']);
+    expect(merged.at(-1)).toEqual({ value: CUSTOM_FONT_SENTINEL, label: '自定义…' });
+    expect(merged.at(-2)).toEqual({ value: 'Noto Serif', label: 'Noto Serif（网络）' });
+    expect(merged.at(-3)).toEqual({ value: 'My Font', label: 'My Font（网络）' });
+    // 预设组原样保留在前（默认位 + 清单序）
+    expect(merged.slice(0, base.length - 1)).toEqual(base.slice(0, -1));
+  });
+
+  it('网络字体名与预设/默认值撞车时跳过（select 重复值会选中错位），输出仍唯一', () => {
+    const base = fontFamilyOptions(CODE_FONT_PRESETS);
+    const merged = mergedFamilyOptions(base, ['JetBrains Mono', '']);
+    expect(merged.filter((o) => o.value === 'JetBrains Mono')).toHaveLength(1);
+    expect(merged.filter((o) => o.value === '')).toHaveLength(1);
+    expect(new Set(merged.map((o) => o.value)).size).toBe(merged.length);
+  });
+
+  it('空网络字体清单时与 base 全等（未添加字体 = Task 3 纯预设形态）', () => {
+    const base = fontFamilyOptions(CODE_FONT_PRESETS);
+    expect(mergedFamilyOptions(base, [])).toEqual(base);
+  });
+});
+
+describe('formatFontSize（管理列表体积显示）', () => {
+  it('三档位：B / KB（整数）/ MB（一位小数）', () => {
+    expect(formatFontSize(512)).toBe('512 B');
+    expect(formatFontSize(1024)).toBe('1 KB');
+    expect(formatFontSize(2 * 1024 * 1024)).toBe('2.0 MB');
+    expect(formatFontSize(3 * 1024 * 768)).toBe('2.3 MB'); // 2304KB = 2.25MB，四舍五入一位小数
+  });
+});
+
 describe('SettingsPanel 字体节源码契约（两槽四输入 + persist 接线 + 节序）', () => {
   const src = readSrc('src/lib/SettingsPanel.svelte');
 
@@ -141,7 +177,8 @@ describe('SettingsPanel 字体节源码契约（两槽四输入 + persist 接线
   });
 
   it('手输实时预览样张（spec §4）：fontFamilyValue 同源转义 + FONT_SPECIMEN 渲染', () => {
-    expect(src.match(/vv-settings-font-sample/g)?.length).toBe(2);
+    // 两槽手输预览 ×2 + Task 5 管理列表行样张 ×1
+    expect(src.match(/vv-settings-font-sample/g)?.length).toBe(3);
     expect(src).toContain('style:font-family={fontFamilyValue(');
     expect(src).toContain('style:font-size=');
   });

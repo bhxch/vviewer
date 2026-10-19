@@ -529,3 +529,22 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-settings-font-sample { border: 1px solid var(--ui-border); border-radius: 6px;
   padding: 4px 8px; overflow-wrap: anywhere; }
 .vv-settings-theme-row input[type='number'] { flex: none; max-width: 84px; }
+/* 设置面板「字体」区网络字体管理列表（Task 5；spec 2026-10-19 §5.2/§5.3）：
+   URL 表单复用 .vv-settings-add；行结构/删除钮惯例同已导入主题列表；
+   样张框复用 .vv-settings-font-sample（族由组件内联 style 提供） */
+.vv-settings-font-addrow { display: flex; gap: 6px; }
+.vv-settings-font-addrow input { flex: 1; min-width: 0; }
+.vv-settings-font-addrow button { font-size: 12px; }
+.vv-settings-fonts { list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 8px; }
+.vv-settings-font { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.vv-settings-font-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.vv-settings-font-toggle { display: flex; align-items: center; gap: 4px; flex: 1;
+  min-width: 0; cursor: pointer; }
+.vv-settings-font-name { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.vv-settings-font-size { flex: none; color: var(--ui-fg-muted); }
+.vv-settings-font-failed .vv-settings-font-name { color: var(--ui-danger, #d33); }
+.vv-settings-font-retry { flex: none; font-size: 12px; }
+.vv-settings-font-errmsg { color: var(--ui-danger, #d33); font-size: 12px;
+  overflow-wrap: anywhere; }

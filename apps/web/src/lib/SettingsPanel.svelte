@@ -7,8 +7,9 @@
   // onSettingsChanged 订阅 diff 触发——订阅即注入通道，本面板不直调注入，
   // spec 2026-10-12 §2.4）、图表渲染（spec 2026-10-19 §2.1：kroki host +
   // 按语言模式网格，键恒为注册表 t.id；改动不回溯重渲已打开文档，下次打开生效）、
-  // 字体（字体系统 spec 2026-10-19 §4/§5.3 上半：UI/代码两槽 picker = 预设下拉 +
-  // 「自定义…」手输框 + 字号 number input；下半网络字体管理列表为 Task 5）。
+  // 字体（字体系统 spec 2026-10-19 §4/§5：两槽 picker = 预设/网络字体下拉 +
+  // 「自定义…」手输框 + 字号 number input；下半网络字体管理列表 = URL/上传添加、
+  // 启停开关、删除（被引用槽位回落默认）、样张/体积行、错误态重试）。
   // 修改即时经 saveSettings 持久化，AppShell 经
   // onSettingsChanged 订阅刷新响应式副本（FileTree 随排除规则重建）。Esc / ✕ 关闭。
   import { DIAGRAM_TYPES, type DiagramMode } from '@vviewer/render-text/markdown/diagrams';
@@ -21,9 +22,20 @@
     FONT_SPECIMEN,
     UI_FONT_PRESETS,
     fontFamilyOptions,
+    formatFontSize,
+    mergedFamilyOptions,
     type FontPreset
   } from './fonts';
   import { DEFAULT_CODE_FONT_STACK, DEFAULT_UI_FONT_STACK, fontFamilyValue } from './theme';
+  import {
+    addFontFromFile,
+    addFontFromUrl,
+    deleteFont,
+    listFontRecords,
+    setEnabledFont,
+    stemOf,
+    type FontRecord
+  } from './stores/fontsStore';
 
   let { onclose }: { onclose(): void } = $props();
 
@@ -34,16 +46,32 @@
   let appearanceDark = $state(loadSettings().appearanceDark);
   let krokiHost = $state(loadSettings().diagrams.krokiHost);
   let diagramModes = $state<Record<string, DiagramMode>>({ ...loadSettings().diagrams.modes });
+  // ---------- 网络字体管理状态（字体系统 spec §5 下半，Task 5） ----------
+  // 列表挂载后异步填充（IndexedDB），uiCustomMode 初判时多为空——槽值命中网络
+  // 字体名的自定义态纠偏由下方 $effect 兜住
+  let fontRecords = $state<FontRecord[]>([]);
+  /** URL 添加失败暂存（spec §6 错误态 + 重试钮；url 键去重，store 不留死记录） */
+  let fontFailures = $state<{ url: string; name: string; message: string }[]>([]);
+  let fontBusy = $state(false);
+  let fontNote = $state('');
+  let fontUrlDraft = $state('');
+  let fontNameDraft = $state('');
+  let fontInputEl = $state<HTMLInputElement | null>(null);
+  /** 已启用网络字体名（两槽下拉合并源；也是「值已被选项表示」的判定集合） */
+  const enabledFontNames = $derived(fontRecords.filter((r) => r.enabled).map((r) => r.name));
+  const networkNames = $derived(new Set(enabledFontNames));
+
   // 字体节草稿（字体系统 spec §4 上半）：family '' = 默认栈；手输模式按打开时的
-  // 槽值初始化（自定义族重开面板立即可编辑，不必再点一次「自定义…」）
+  // 槽值初始化（自定义族重开面板立即可编辑，不必再点一次「自定义…」；列表未载时
+  // 网络字体名暂判自定义态，由纠偏 effect 收敛）
   let uiFamily = $state(loadSettings().fonts.uiFamily);
   let uiSize = $state(loadSettings().fonts.uiSize);
   let codeFamily = $state(loadSettings().fonts.codeFamily);
   let codeSize = $state(loadSettings().fonts.codeSize);
-  let uiCustomMode = $state(isCustomFamily(loadSettings().fonts.uiFamily, UI_FONT_PRESETS));
-  let codeCustomMode = $state(isCustomFamily(loadSettings().fonts.codeFamily, CODE_FONT_PRESETS));
-  const uiOptions = fontFamilyOptions(UI_FONT_PRESETS);
-  const codeOptions = fontFamilyOptions(CODE_FONT_PRESETS);
+  let uiCustomMode = $state(isCustomFamily(loadSettings().fonts.uiFamily, UI_FONT_PRESETS, new Set<string>()));
+  let codeCustomMode = $state(isCustomFamily(loadSettings().fonts.codeFamily, CODE_FONT_PRESETS, new Set<string>()));
+  const uiOptions = $derived(mergedFamilyOptions(fontFamilyOptions(UI_FONT_PRESETS), enabledFontNames));
+  const codeOptions = $derived(mergedFamilyOptions(fontFamilyOptions(CODE_FONT_PRESETS), enabledFontNames));
   let draft = $state('');
   let inputEl = $state<HTMLInputElement | null>(null);
   let panelEl = $state<HTMLElement | null>(null);
@@ -87,18 +115,26 @@
     return k === 'light' ? '已选主题为亮色，与当前暗色槽不匹配（仍会生效）' : '';
   });
 
-  /** 槽位 family 是否为手输值（非默认空栈、也不在预设清单内）→ select 显示「自定义…」 */
-  function isCustomFamily(f: string, presets: readonly FontPreset[]): boolean {
-    return f !== '' && !presets.some((p) => p.value === f);
+  /** 槽位 family 是否为手输值（非默认空栈、不在预设清单内、也不是已启用网络字体
+   * 名）→ select 显示「自定义…」 */
+  function isCustomFamily(f: string, presets: readonly FontPreset[], networkNames: ReadonlySet<string>): boolean {
+    return f !== '' && !presets.some((p) => p.value === f) && !networkNames.has(f);
   }
 
-  /** select 当前值：自定义态（模式开或值不在预设内）显哨兵，否则即族值本身 */
+  /** select 当前值：自定义态（模式开或值不在预设/网络字体清单内）显哨兵，否则即族值本身 */
   const uiSelectValue = $derived(
-    uiCustomMode || isCustomFamily(uiFamily, UI_FONT_PRESETS) ? CUSTOM_FONT_SENTINEL : uiFamily
+    uiCustomMode || isCustomFamily(uiFamily, UI_FONT_PRESETS, networkNames) ? CUSTOM_FONT_SENTINEL : uiFamily
   );
   const codeSelectValue = $derived(
-    codeCustomMode || isCustomFamily(codeFamily, CODE_FONT_PRESETS) ? CUSTOM_FONT_SENTINEL : codeFamily
+    codeCustomMode || isCustomFamily(codeFamily, CODE_FONT_PRESETS, networkNames) ? CUSTOM_FONT_SENTINEL : codeFamily
   );
+
+  $effect(() => {
+    // 网络字体列表载入后纠偏手输模式：初判时列表多为空，槽值命中已启用网络字体名
+    // 即退出（值已可被下拉选项表示；打字途中命中同名同语义）
+    if (networkNames.has(uiFamily)) uiCustomMode = false;
+    if (networkNames.has(codeFamily)) codeCustomMode = false;
+  });
 
   $effect(() => {
     inputEl?.focus();
@@ -207,18 +243,28 @@
     persist();
   }
 
-  /** 手输 family：即时持久化（空串 = 默认栈语义；多级回退栈原样存储，转义/拆段在注入侧） */
+  /** 手输 family：即时持久化（空串 = 默认栈语义；多级回退栈原样存储，转义/拆段在
+   * 注入侧）。清空即退出手输态回预设视图（台账 Low-2）：值已是默认栈，select 不再
+   * 停留「自定义…」。 */
   function onFamilyInput(slot: 'ui' | 'code', e: Event): void {
     const v = (e.currentTarget as HTMLInputElement).value;
-    if (slot === 'ui') uiFamily = v;
-    else codeFamily = v;
+    if (slot === 'ui') {
+      uiFamily = v;
+      if (v === '') uiCustomMode = false;
+    } else {
+      codeFamily = v;
+      if (v === '') codeCustomMode = false;
+    }
     persist();
   }
 
   /** 字号输入：即时 clamp（spec §2.1 范围）并持久化；半截/清空输入不落盘，
-   * 保留上一有效值——loadSettings 白名单兜底仅防脏 JSON，不在此重复。 */
+   * 保留上一有效值——loadSettings 白名单兜底仅防脏 JSON，不在此重复。
+   * persist 后同步输入框显示为生效值（台账 Low-1）：clamped 与现值相等时
+   * Svelte 不重渲 value，输入框会停留原始输入（如 13.7 / 013）直至重开面板。 */
   function onSizeInput(slot: 'ui' | 'code', e: Event): void {
-    const raw = (e.currentTarget as HTMLInputElement).value;
+    const inp = e.currentTarget as HTMLInputElement;
+    const raw = inp.value;
     if (raw.trim() === '') return;
     const v = Number(raw);
     if (!Number.isFinite(v)) return;
@@ -227,6 +273,134 @@
     if (slot === 'ui') uiSize = clamped;
     else codeSize = clamped;
     persist();
+    inp.value = String(clamped);
+  }
+
+  // ---------- 网络字体管理（字体系统 spec §5 下半，Task 5） ----------
+
+  $effect(() => {
+    // 网络字体列表挂载后异步填充（IndexedDB）；失败（存储不可用）留空不阻塞面板
+    // （已导入主题列表同款容错）
+    void listFontRecords()
+      .then((rs) => (fontRecords = rs))
+      .catch(() => (fontRecords = []));
+  });
+
+  /** URL 添加（spec §5.2）：store 全管线（https 白名单 / 30MB 门禁 / 先装载验证后
+   * 入库）。失败入错误态暂存（url 键去重，spec §6），重试钮复跑同管线；错误不落库
+   * （Task 4 语义），列表不留死记录。 */
+  async function onFontUrlSubmit(e: SubmitEvent): Promise<void> {
+    e.preventDefault();
+    const url = fontUrlDraft.trim();
+    if (url === '' || fontBusy) return;
+    fontBusy = true;
+    fontNote = '';
+    const explicit = fontNameDraft.trim();
+    try {
+      const rec = await addFontFromUrl(url, explicit || undefined);
+      fontRecords = [...fontRecords, rec];
+      fontUrlDraft = '';
+      fontNameDraft = '';
+      fontFailures = fontFailures.filter((f) => f.url !== url);
+      fontNote = `已添加字体「${rec.name}」`;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      fontFailures = [...fontFailures.filter((f) => f.url !== url), { url, name: explicit || stemOf(url), message }];
+    } finally {
+      fontBusy = false;
+    }
+  }
+
+  /** 本地上传（spec §5.2）：同 ArrayBuffer 路径，扩展名白名单由 input accept 把关。
+   * 文件对象一次性（选完即失效），失败直接注记不设重试态——重选文件即重试。 */
+  async function onFontFileChange(e: Event): Promise<void> {
+    const inp = e.currentTarget as HTMLInputElement;
+    const file = inp.files?.[0];
+    inp.value = ''; // 允许重复选同一文件
+    if (!file || fontBusy) return;
+    fontBusy = true;
+    fontNote = '';
+    try {
+      const rec = await addFontFromFile(file);
+      fontRecords = [...fontRecords, rec];
+      fontNote = `已添加字体「${rec.name}」`;
+    } catch (err) {
+      fontNote = err instanceof Error ? err.message : String(err);
+    } finally {
+      fontBusy = false;
+    }
+  }
+
+  /** 启停（spec §5.2）：停用注销 document.fonts（引用槽由浏览器回退显示），启用
+   * 重建注册；已启用项随 enabledFontNames 派生进/出两槽下拉。失败注记并触发行
+   * 重渲回滚开关显示（checkbox 受控于 rec.enabled）。 */
+  async function onFontToggle(rec: FontRecord, e: Event): Promise<void> {
+    const enabled = (e.currentTarget as HTMLInputElement).checked;
+    try {
+      await setEnabledFont(rec.id, enabled);
+    } catch (err) {
+      console.error(`切换网络字体「${rec.name}」失败`, err);
+      fontNote = err instanceof Error ? err.message : String(err);
+      fontRecords = [...fontRecords];
+      return;
+    }
+    fontRecords = fontRecords.map((r) => (r.id === rec.id ? { ...r, enabled } : r));
+  }
+
+  /** 删除（spec §5.2）：store 移除 + document.fonts 注销；被 uiFamily/codeFamily
+   * 引用时槽位回落默认（''）并经 saveSettings 链即时生效（已导入主题删除同款）。 */
+  async function removeFont(rec: FontRecord): Promise<void> {
+    if (!window.confirm(`删除网络字体「${rec.name}」？`)) return;
+    let gone: FontRecord | null = null;
+    try {
+      gone = await deleteFont(rec.id);
+    } catch (err) {
+      console.error(`删除网络字体「${rec.name}」失败`, err);
+      return; // 删库失败：列表/槽保持不动（removeImported 容错风格）
+    }
+    fontRecords = fontRecords.filter((x) => x.id !== rec.id);
+    if (gone === null) return;
+    const fresh = loadSettings();
+    let changed = false;
+    const fell: string[] = [];
+    if (fresh.fonts.uiFamily === gone.name) {
+      fresh.fonts.uiFamily = '';
+      uiFamily = '';
+      uiCustomMode = false;
+      changed = true;
+      fell.push('界面字体');
+    }
+    if (fresh.fonts.codeFamily === gone.name) {
+      fresh.fonts.codeFamily = '';
+      codeFamily = '';
+      codeCustomMode = false;
+      changed = true;
+      fell.push('代码字体');
+    }
+    if (changed) saveSettings(fresh);
+    fontNote = fell.length > 0 ? `已删除「${gone.name}」，${fell.join('、')}槽已回落默认字体` : `已删除「${gone.name}」`;
+  }
+
+  /** 错误态重试：复跑同 URL/名称的添加管线，成功移出暂存、失败原位更新错误信息。 */
+  async function retryFont(f: { url: string; name: string; message: string }): Promise<void> {
+    if (fontBusy) return;
+    fontBusy = true;
+    fontNote = '';
+    try {
+      const rec = await addFontFromUrl(f.url, f.name || undefined);
+      fontRecords = [...fontRecords, rec];
+      fontFailures = fontFailures.filter((x) => x.url !== f.url);
+      fontNote = `已添加字体「${rec.name}」`;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      fontFailures = fontFailures.map((x) => (x.url === f.url ? { ...x, message } : x));
+    } finally {
+      fontBusy = false;
+    }
+  }
+
+  function dismissFontFailure(f: { url: string; name: string; message: string }): void {
+    fontFailures = fontFailures.filter((x) => x.url !== f.url);
   }
 
   /** 文件选择 → 导入管线（.json 直读 / .vsix 解包全部主题）：计数通知 + 刷新列表 */
@@ -484,6 +658,90 @@
       family 支持逗号分隔多级回退（如 JetBrains Mono, monospace）；本机缺失的字体由浏览器回退。
       代码字号变更后行高联动、已打开文件自动以新行高重排。
     </div>
+    <div class="vv-settings-label">网络字体</div>
+    <div class="vv-settings-hint">
+      https 直链或本地上传 .ttf/.otf/.woff/.woff2（单文件 ≤30MB）；已启用的字体进上方两槽下拉，
+      停用即从下拉移除（已引用槽位由浏览器回退显示），删除后 IndexedDB 不再保留。
+    </div>
+    <form class="vv-settings-add" onsubmit={onFontUrlSubmit}>
+      <input
+        bind:value={fontUrlDraft}
+        placeholder="https://example.com/font.woff2"
+        aria-label="网络字体地址"
+        spellcheck="false"
+      />
+      <button type="submit" disabled={fontBusy || fontUrlDraft.trim() === ''}>添加</button>
+    </form>
+    <div class="vv-settings-font-addrow">
+      <input
+        type="text"
+        bind:value={fontNameDraft}
+        placeholder="字体名称（可选，默认取地址末段/文件名）"
+        aria-label="网络字体名称（可选）"
+        spellcheck="false"
+      />
+      <button type="button" disabled={fontBusy} onclick={() => fontInputEl?.click()}>
+        {fontBusy ? '处理中…' : '上传字体…'}
+      </button>
+      <input type="file" accept=".ttf,.otf,.woff,.woff2" hidden bind:this={fontInputEl} onchange={onFontFileChange} />
+    </div>
+    {#if fontNote}
+      <div class="vv-settings-note" role="status">{fontNote}</div>
+    {/if}
+    {#if fontRecords.length > 0 || fontFailures.length > 0}
+      <ul class="vv-settings-fonts">
+        {#each fontRecords as rec (rec.id)}
+          <li class="vv-settings-font">
+            <div class="vv-settings-font-head">
+              <label class="vv-settings-font-toggle">
+                <input
+                  type="checkbox"
+                  checked={rec.enabled}
+                  aria-label="启用网络字体 {rec.name}"
+                  onchange={(e) => void onFontToggle(rec, e)}
+                />
+                <span class="vv-settings-font-name" title={rec.name}>{rec.name}</span>
+              </label>
+              <span class="vv-settings-font-size">{formatFontSize(rec.size)}</span>
+              <button
+                type="button"
+                class="vv-settings-remove"
+                aria-label="删除网络字体 {rec.name}"
+                title="删除"
+                onclick={() => void removeFont(rec)}>✕</button
+              >
+            </div>
+            <div class="vv-settings-font-sample" style:font-family={fontFamilyValue(rec.name, DEFAULT_UI_FONT_STACK)}>
+              {FONT_SPECIMEN}
+            </div>
+          </li>
+        {/each}
+        {#each fontFailures as f (f.url)}
+          <li class="vv-settings-font vv-settings-font-failed">
+            <div class="vv-settings-font-head">
+              <span class="vv-settings-font-name" title={f.name}>{f.name}</span>
+              <button
+                type="button"
+                class="vv-settings-font-retry"
+                disabled={fontBusy}
+                aria-label="重试添加网络字体 {f.name}"
+                onclick={() => void retryFont(f)}>重试</button
+              >
+              <button
+                type="button"
+                class="vv-settings-remove"
+                aria-label="忽略网络字体 {f.name}"
+                title="忽略"
+                onclick={() => dismissFontFailure(f)}>✕</button
+              >
+            </div>
+            <div class="vv-settings-font-errmsg" role="status">{f.message}</div>
+          </li>
+        {/each}
+      </ul>
+    {:else}
+      <div class="vv-settings-empty">暂无网络字体</div>
+    {/if}
   </section>
 
   <section class="vv-settings-sec">

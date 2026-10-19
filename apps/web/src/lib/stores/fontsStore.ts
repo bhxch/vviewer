@@ -97,8 +97,9 @@ async function ensureFontFace(rec: FontRecord): Promise<FontFace> {
   return face;
 }
 
-/** 名字推导：URL 末段 / 文件名去扩展名（URI 解码；无扩展名原样）。 */
-function stemOf(pathOrName: string): string {
+/** 名字推导（export：Task 5 面板错误态显示名同源推导，不复制实现）：URL 末段 /
+ * 文件名去扩展名（URI 解码；无扩展名原样）。 */
+export function stemOf(pathOrName: string): string {
   const last = pathOrName.split('/').filter(Boolean).pop() ?? 'font';
   const dot = last.lastIndexOf('.');
   const stem = dot > 0 ? last.slice(0, dot) : last;

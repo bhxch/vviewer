@@ -40,6 +40,7 @@
   import { migrateLegacyTabs, workspaceStore, type WorkspaceSnapshotItem, type WorkspaceSource } from './workspaceStore';
   import { loadSettings, onSettingsChanged } from './stores/settings';
   import { codeLineHeight } from './theme';
+  import { loadEnabledFontFaces } from './stores/fontsStore';
 
   /** 文件树/面板的来源条目：workspace.sources（模型）× storeById（活动实例）的合成。
    * rootIndex/basePath 随模型透传（GlobalSearchPanel → globalSearch 的远程命中
@@ -127,6 +128,10 @@
     const offSettings = onSettingsChanged((s) => (settings = s));
     // render-archive 包内树点击 → addTab（递归预览通道）
     const unbindArchive = bindArchiveOpenEvents();
+    // 网络字体启动恢复（字体系统 spec §5.2，Task 5）：enabled 项从 IndexedDB 重建
+    // FontFace 并注册 document.fonts——与 dirHandle 会话恢复同层（onMount 启动期、
+    // 不阻断启动）；单项失败已在 store 内 warn 不阻断，整体失败（库不可用）仅告警
+    void loadEnabledFontFaces().catch((err: unknown) => console.warn('[fonts] 启动字体恢复失败', err));
     void restore();
     return () => {
       offSettings();
