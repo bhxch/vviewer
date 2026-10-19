@@ -33,10 +33,143 @@ pub fn render(text: &str, wikilinks: bool) -> String {
     options.render.r#unsafe = true; // raw HTML 透传——净化职责在前端管线
     options.render.hardbreaks = false;
 
-    let prepared = if wikilinks { apply_wikilinks(text) } else { text.to_string() };
+    let prepared = apply_latex_delimiters(text);
+    let prepared = if wikilinks { apply_wikilinks(&prepared) } else { prepared };
     // 服务端图表围栏后处理（spec §2.5）：原生集（graphviz/dot/svgbob）替换为内联
     // SVG div；解析失败/非原生语言原样保留（客户端管线接手）。
     crate::compute::diagrams::replace_diagram_fences(&markdown_to_html(&prepared, &options))
+}
+
+/// 行首围栏判定：Some((围栏字符, 数量))。开围栏 = 行首 ≤3 空格缩进 + 3+ 个反引号
+/// （info 串不得含反引号——否则按 CommonMark 是行内码起点，不算围栏）或 3+ 个波浪线
+/// （info 串任意）；闭围栏（open=false）= 同形态且行内仅剩空白。
+fn fence_of(body: &str, open: bool) -> Option<(char, usize)> {
+    let stripped = body.trim_start_matches(' ');
+    if body.len() - stripped.len() > 3 {
+        return None;
+    }
+    let mut chars = stripped.chars();
+    let ch = chars.next()?;
+    if ch != '`' && ch != '~' {
+        return None;
+    }
+    // 数量按字符数=字节数（`/~ 均单字节），下述切片索引安全
+    let count = 1 + chars.take_while(|&c| c == ch).count();
+    if count < 3 {
+        return None;
+    }
+    let rest = &stripped[count..];
+    if open {
+        if ch == '`' && rest.contains('`') {
+            return None;
+        }
+        Some((ch, count))
+    } else {
+        (rest.chars().all(|c| c == ' ' || c == '\t')).then_some((ch, count))
+    }
+}
+
+/// LaTeX 定界符前置改写（Task 1b，markpad local_commands.rs markdown_ext
+/// process_latex_delimiters 同款语义；前端对偶实现见
+/// packages/render-text/src/markdown/engine.ts protectLatexDelimiters）：
+/// `\(..\)`→`$..$`、`\[..\]`→`$$..$$`——comrak 按 CommonMark 消费 `\(`/`\[` 的
+/// 反斜杠转义，数学定界符到不了解析器，先于解析统一成上游 math 词汇 $/$$
+/// （数学渲染归前端管线 katex 步，本crate 数学扩展不启用）。
+///
+/// 跳过规则：围栏码块（fence_of 行语义，```/~~~）整段透传；单反引号行内码 span
+/// （状态跨行持续）内透传。继承性边界（markpad Task 14 审查补记同款，只记录不改
+/// 行为）：双反引号行内码翻转两次后失同步、4 空格缩进码块不跟踪，其中的
+/// `\[…\]`/`\(…\)` 仍会被转换。未闭合数学：缓冲内容原样回填、开定界符不还原
+/// （markpad 同款）。先于 apply_wikilinks（原始用户文本最先改写，wikilink 锚
+/// HTML 产物不被本状态机触碰）。
+fn apply_latex_delimiters(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut fence: Option<(char, usize)> = None;
+    let mut in_inline_code = false;
+    let mut in_display = false;
+    let mut in_inline = false;
+    let mut math = String::new();
+
+    let lines: Vec<&str> = text.split('\n').collect();
+    for (li, line) in lines.iter().enumerate() {
+        if li > 0 {
+            if in_display || in_inline {
+                math.push('\n');
+            } else {
+                out.push('\n');
+            }
+        }
+        match fence {
+            Some((ch, len)) => {
+                out.push_str(line);
+                if let Some((c2, n2)) = fence_of(line, false) {
+                    if c2 == ch && n2 >= len {
+                        fence = None;
+                    }
+                }
+            }
+            None => {
+                if let Some((ch, len)) = fence_of(line, true) {
+                    fence = Some((ch, len));
+                    out.push_str(line);
+                    continue;
+                }
+                // 非围栏行：` 行内码翻转 → 码内透传 → 数学进出（markpad 状态机同款）
+                let mut chars = line.chars().peekable();
+                while let Some(c) = chars.next() {
+                    if c == '`' && !in_display && !in_inline {
+                        in_inline_code = !in_inline_code;
+                        out.push('`');
+                        continue;
+                    }
+                    if in_inline_code {
+                        out.push(c);
+                        continue;
+                    }
+                    let next = chars.peek().copied();
+                    if !in_display && !in_inline {
+                        match (c, next) {
+                            ('\\', Some('[')) => {
+                                in_display = true;
+                                math.clear();
+                                out.push_str("$$");
+                                chars.next();
+                            }
+                            ('\\', Some('(')) => {
+                                in_inline = true;
+                                math.clear();
+                                out.push('$');
+                                chars.next();
+                            }
+                            _ => out.push(c),
+                        }
+                    } else if in_display {
+                        if c == '\\' && next == Some(']') {
+                            in_display = false;
+                            out.push_str(&math);
+                            out.push_str("$$");
+                            math.clear();
+                            chars.next();
+                        } else {
+                            math.push(c);
+                        }
+                    } else if c == '\\' && next == Some(')') {
+                        in_inline = false;
+                        out.push_str(&math);
+                        out.push('$');
+                        math.clear();
+                        chars.next();
+                    } else {
+                        math.push(c);
+                    }
+                }
+            }
+        }
+    }
+    if in_display || in_inline {
+        out.push_str(&math);
+    }
+    out
 }
 
 /// `[[target|text]]` / `[[target]]` → `<a class="vv-wikilink" data-target="…">text</a>`。
@@ -169,5 +302,42 @@ mod tests {
     fn render_replaces_native_diagram_fence() {
         let html = render("```dot\ndigraph { a -> b }\n```", false);
         assert!(html.contains("data-vv-diagram=\"server\""), "{html}");
+    }
+
+    #[test]
+    fn latex_delimiters_rewritten() {
+        // Task 1b：\(..\)→$..$、\[..\]→$$..$$（comrak 数学扩展未启用，改写产物为
+        // 字面文本；管线 katex 步在前端接力渲染）
+        let html = render("\\(a^2\\)\n", true);
+        assert!(html.contains("$a^2$"), "{html}");
+        assert!(!html.contains("\\("), "{html}");
+        let html = render("\\[b_2\\]\n", true);
+        assert!(html.contains("$$b_2$$"), "{html}");
+        assert!(!html.contains("\\["), "{html}");
+    }
+
+    #[test]
+    fn latex_delimiters_skip_fences_and_inline_code() {
+        let html = render("```\n\\(x\\)\n```\n", true);
+        assert!(html.contains("\\(x\\)"), "{html}");
+        assert!(!html.contains("$x$"), "{html}");
+        let html = render("~~~\n\\(x\\)\n~~~\n", true);
+        assert!(html.contains("\\(x\\)"), "{html}");
+        let html = render("前 `\\(x\\)` 后\n", true);
+        assert!(html.contains("\\(x\\)"), "{html}");
+    }
+
+    #[test]
+    fn latex_delimiters_noop_without_delimiters() {
+        let src = "价格 $100 与 $200，普通 (括号)\n";
+        assert_eq!(apply_latex_delimiters(src), src);
+        assert_eq!(apply_latex_delimiters("no math"), "no math");
+    }
+
+    #[test]
+    fn latex_delimiters_unclosed_keeps_content_without_closer() {
+        // markpad 同款：未闭合时内容回填、开定界符已消耗（不还原）
+        assert_eq!(apply_latex_delimiters("未闭 \\(abc"), "未闭 $abc");
+        assert_eq!(apply_latex_delimiters("跨行 \\[a\nb"), "跨行 $$a\nb");
     }
 }
