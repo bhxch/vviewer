@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderMarkdownToHtml } from '../src/markdown/engine';
+import { renderMarkdownToHtml, protectLatexDelimiters } from '../src/markdown/engine';
 import { parseFrontMatter } from '../src/markdown/frontMatter';
 
 describe('renderMarkdownToHtml——GFM 全家', () => {
@@ -130,5 +130,66 @@ describe('parseFrontMatter——frontMatter.ts 独立契约', () => {
     const { frontMatter, body } = parseFrontMatter('前言\n---\na: 1\n---\n');
     expect(frontMatter).toBeNull();
     expect(body).toContain('前言');
+  });
+});
+
+describe('protectLatexDelimiters——LaTeX 定界符前置改写（Task 1b）', () => {
+  it('\\(..\\) → $..$、\\[..\\] → $$..$$（markpad markdown_ext 同款语义）', () => {
+    expect(protectLatexDelimiters('行内 \\(a^2\\) 与块级 \\[b_2\\]')).toBe('行内 $a^2$ 与块级 $$b_2$$');
+  });
+
+  it('围栏码块（``` 与 ~~~）内不转换', () => {
+    expect(protectLatexDelimiters('```\n\\(x\\)\n\\[y\\]\n```')).toBe('```\n\\(x\\)\n\\[y\\]\n```');
+    expect(protectLatexDelimiters('~~~\n\\(x\\)\n~~~')).toBe('~~~\n\\(x\\)\n~~~');
+  });
+
+  it('围栏内外状态互不串扰：围栏后恢复转换', () => {
+    expect(protectLatexDelimiters('```\n```\n\\(a\\)')).toBe('```\n```\n$a$');
+  });
+
+  it('单反引号行内码内不转换', () => {
+    expect(protectLatexDelimiters('前 `\\(x\\)` 后')).toBe('前 `\\(x\\)` 后');
+    // 行内码跨行（CommonMark code span 可含换行）：状态跨行持续
+    expect(protectLatexDelimiters('`a\n\\(x\\)\nb`')).toBe('`a\n\\(x\\)\nb`');
+  });
+
+  it('无定界符与既有 $ 字面量原样不动', () => {
+    const src = '价格 $100 与 $200，普通 (括号) 与 [方括号]\n';
+    expect(protectLatexDelimiters(src)).toBe(src);
+  });
+
+  it('未闭合数学：内容原样回填、开定界符已消耗（markpad 同款）', () => {
+    expect(protectLatexDelimiters('未闭 \\(abc')).toBe('未闭 $abc');
+    expect(protectLatexDelimiters('未闭 \\[abc')).toBe('未闭 $$abc');
+  });
+
+  it('\\(..\\) 与 $ 字面量混排：改写不破坏 $ 语义', () => {
+    expect(protectLatexDelimiters('\\(a\\) 值 $100')).toBe('$a$ 值 $100');
+  });
+});
+
+describe('renderMarkdownToHtml × protectLatexDelimiters 接线（md.render 之前）', () => {
+  it('\\(a^2\\) 经引擎后输出含 $a^2$ 文本（管线 katex 步接力）', () => {
+    const { html } = renderMarkdownToHtml('行内 \\(a^2\\) 公式\n');
+    expect(html).toContain('$a^2$');
+    expect(html).not.toContain('\\(');
+  });
+
+  it('\\[..\\] 块级转 $$..$$（双行块形态按转换结果原样交引擎）', () => {
+    const { html } = renderMarkdownToHtml('\\[\nb_2\n\\]\n');
+    expect(html).toContain('$$');
+  });
+
+  it('fence 内 \\(x\\) 保留字面（引擎侧不做转换）', () => {
+    const { html } = renderMarkdownToHtml('```\n\\(x\\)\n```\n');
+    expect(html).toContain('\\(x\\)');
+    expect(html).not.toContain('$x$');
+  });
+
+  it('front matter 内不改写（只处理正文）', () => {
+    const src = '---\ndesc: \\(x\\)\n---\n\n正文\n';
+    const { frontMatter, html } = renderMarkdownToHtml(src);
+    expect(frontMatter).toEqual({ desc: '\\(x\\)' });
+    expect(html).not.toContain('$x$');
   });
 });

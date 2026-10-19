@@ -182,9 +182,9 @@ describe('katex 步', () => {
   });
 
   it('KaTeX 分隔符扩展：\\(..\\) 行内与 \\[..\\] 块级', async () => {
-    // markdown-it 会把段落里 \( 的反斜杠当转义吞掉——作者需写 \\( 定界符才活到
-    // 文本节点（引擎级保留不在本任务范围，见任务报告）；此处走真实 markdown 路径
-    const doc = await renderDoc('行内 \\\\(a^2\\\\) 与块级：\n\n\\\\[b_2\\\\]');
+    // Task 1b 起引擎层 protectLatexDelimiters 把笔记原生的 \(..\)/\[..\] 统一成
+    // $/$$ 词汇，brief 原输入即真实路径；管线步只面向 $ 词汇扫描
+    const doc = await renderDoc('行内 \\(a^2\\) 与块级：\n\n\\[b_2\\]');
     expect(doc.body.innerHTML).toContain('katex');
     expect(doc.querySelector('.katex')).not.toBeNull();
     expect(doc.querySelector('.katex-display')).not.toBeNull();

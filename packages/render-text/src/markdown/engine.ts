@@ -103,8 +103,115 @@ function installHeadingAnchors(md: MarkdownEngine): void {
 
 const sharedEngine = createMarkdownEngine();
 
+/**
+ * LaTeX 定界符前置改写（Task 1b，markpad src-tauri local_commands.rs markdown_ext
+ * process_latex_delimiters 同款语义；服务端对偶实现见 server/src/compute/markdown.rs
+ * apply_latex_delimiters）：`\(..\)`→`$..$`、`\[..\]`→`$$..$$`——markdown-it/comrak
+ * 按 CommonMark 消费 `\(`/`\[` 的反斜杠转义，数学定界符到不了解析器，先于引擎把
+ * 定界符统一成上游 math 词汇 $/$$。
+ *
+ * 跳过规则：围栏码块（行首 ≤3 空格缩进的 ```/``` 与 ~~~，闭围栏同字符且不少于开
+ * 长度、仅剩空白）整段透传；单反引号行内码 span（`` `..` ``，可跨行）内透传——状态
+ * 机与 markpad 同款翻转语义。继承性边界（markpad Task 14 审查补记同款，只记录不改
+ * 行为）：双反引号 ``...`` 行内码翻转两次后失同步、4 空格缩进码块不跟踪，其中的
+ * `\[…\]`/`\(…\)` 仍会被转换。未闭合数学：缓冲内容原样回填、开定界符已消耗
+ * （markpad 同款）；闭合前的内容（含换行）原样保留。
+ */
+export function protectLatexDelimiters(text: string): string {
+  let out = '';
+  // 围栏按行判定（CommonMark 行语义），围栏外逐字符状态机、行内码/数学状态跨行持续
+  let fence: { ch: string; len: number } | null = null;
+  let inInlineCode = false;
+  let inDisplayMath = false;
+  let inInlineMath = false;
+  let mathContent = '';
+
+  const lines = text.split('\n');
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li]!;
+    if (li > 0) {
+      if (inDisplayMath || inInlineMath) mathContent += '\n';
+      else out += '\n';
+    }
+    if (fence) {
+      out += line;
+      // 闭围栏：同字符、不少于开长度、行内仅剩空白（≤3 空格缩进）
+      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
+      if (close && close[1]![0] === fence.ch && close[1]!.length >= fence.len) fence = null;
+      continue;
+    }
+    // 开围栏：```（info 串不得含反引号——否则按 CommonMark 是行内码起点，不当围栏）
+    // 或 ~~~（info 串任意）
+    const open = /^ {0,3}((`{3,})[^`]*$|(~{3,}))/.exec(line);
+    if (open) {
+      const mark = open[2] ?? open[3]!;
+      fence = { ch: mark[0]!, len: mark.length };
+      out += line;
+      continue;
+    }
+    // 非围栏行：` 行内码翻转 → 码内透传 → 数学进出（markpad 状态机同款）
+    let i = 0;
+    while (i < line.length) {
+      const ch = line[i]!;
+      if (ch === '`' && !inDisplayMath && !inInlineMath) {
+        inInlineCode = !inInlineCode;
+        out += ch;
+        i += 1;
+        continue;
+      }
+      if (inInlineCode) {
+        out += ch;
+        i += 1;
+        continue;
+      }
+      const nxt = line[i + 1];
+      if (!inDisplayMath && !inInlineMath) {
+        if (ch === '\\' && nxt === '[') {
+          inDisplayMath = true;
+          mathContent = '';
+          out += '$$';
+          i += 2;
+          continue;
+        }
+        if (ch === '\\' && nxt === '(') {
+          inInlineMath = true;
+          mathContent = '';
+          out += '$';
+          i += 2;
+          continue;
+        }
+        out += ch;
+        i += 1;
+      } else if (inDisplayMath) {
+        if (ch === '\\' && nxt === ']') {
+          inDisplayMath = false;
+          out += mathContent + '$$';
+          mathContent = '';
+          i += 2;
+          continue;
+        }
+        mathContent += ch;
+        i += 1;
+      } else {
+        if (ch === '\\' && nxt === ')') {
+          inInlineMath = false;
+          out += mathContent + '$';
+          mathContent = '';
+          i += 2;
+          continue;
+        }
+        mathContent += ch;
+        i += 1;
+      }
+    }
+  }
+  // 未闭合数学：缓冲内容原样回填、开定界符不还原（markpad 同款）
+  if (inDisplayMath || inInlineMath) out += mathContent;
+  return out;
+}
+
 /** markdown 源 → { html, frontMatter }。front matter 解析失败/非映射时为 null 且原文整体渲染。 */
 export function renderMarkdownToHtml(src: string): MarkdownRenderResult {
   const { frontMatter, body } = parseFrontMatter(src);
-  return { html: sharedEngine.render(body), frontMatter };
+  return { html: sharedEngine.render(protectLatexDelimiters(body)), frontMatter };
 }
