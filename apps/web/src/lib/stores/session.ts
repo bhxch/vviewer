@@ -39,16 +39,21 @@ export interface ImportedTheme {
 const DB = 'vviewer';
 const STORE = 'kv';
 const THEMES = 'themes';
-/** v2：补建 themes store（v1 的 kv 存量原样保留，onupgradeneeded 按需补建）。 */
-const DB_VERSION = 2;
+/** fonts store（字体系统 spec §5.1，Task 4）：网络字体记录，CRUD 在 fontsStore.ts。 */
+export const FONTS = 'fonts';
+/** v2：补建 themes store；v3：补建 fonts store（字体系统 spec §5.1）——存量原样保留，
+ * onupgradeneeded 按需补建。 */
+const DB_VERSION = 3;
 
-function db(): Promise<IDBDatabase> {
+/** 打开（必要时升级）vviewer 库（export：同库跨 store 的兄弟模块 fontsStore 复用连接）。 */
+export function db(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB, DB_VERSION);
     req.onupgradeneeded = () => {
       const d = req.result;
       if (!d.objectStoreNames.contains(STORE)) d.createObjectStore(STORE);
       if (!d.objectStoreNames.contains(THEMES)) d.createObjectStore(THEMES);
+      if (!d.objectStoreNames.contains(FONTS)) d.createObjectStore(FONTS);
     };
     req.onsuccess = () => {
       const conn = req.result;
