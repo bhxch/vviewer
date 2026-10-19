@@ -18,6 +18,16 @@
   import { reactToFontsChange } from './fontsReaction';
 
   let settings = $state<Settings>(loadSettings());
+  /** chrome 隐藏/临时条形态（spec 2026-10-19 §2/§3，AppShell 传值）：hidden=移出
+   * 视口的隐藏态（组件保持挂载，Ctrl+, 与 SettingsPanel 挂点不失效）；temp=边缘
+   * 悬停唤出的半透条。onenter/onleave 供 AppShell 做「重入取消隐藏定时/移开 1.5s
+   * 再隐」——组件不持有 layout 状态（所有权在 AppShell）。 */
+  let {
+    temp = false,
+    hidden = false,
+    onenter,
+    onleave
+  }: { temp?: boolean; hidden?: boolean; onenter?: () => void; onleave?: () => void } = $props();
   let urlValue = $state('');
   let fileInput = $state<HTMLInputElement | null>(null);
   // 设置面板浮层开关（BUG-05）：⚙ 按钮挂载，Ctrl+comma 切换
@@ -272,7 +282,15 @@
   }
 </script>
 
-<header class="vv-topbar">
+<!-- svelte-ignore a11y_no_static_element_interactions --><!-- pointerenter/leave 是
+     视觉唤出通道（临时条），无 AT 语义，header 不宜加交互角色 -->
+<header
+  class="vv-topbar"
+  class:vv-chrome-temp={temp}
+  class:vv-chrome-off={hidden}
+  onpointerenter={() => onenter?.()}
+  onpointerleave={() => onleave?.()}
+>
   <span class="vv-brand">vviewer</span>
   <button onclick={() => fileInput?.click()}>打开文件</button>
   <input type="file" multiple hidden bind:this={fileInput} onchange={onPick} />

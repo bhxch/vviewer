@@ -340,6 +340,32 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
   .vv-collapse-left { right: 6px; }
   .vv-collapse-right { left: 6px; }
 }
+/* chrome 隐藏与 zen（spec 2026-10-19 §2/§3，Task 2）：隐藏条 fixed 平移出视口顶
+   （不回流内容、组件保持挂载），临时条 fixed 半透覆盖（同真实条本体，无双实例），
+   边缘唤出热区，chrome 右键菜单。z-index 惯例：热区 45 < 条 50 < 面板外菜单 90 */
+.vv-topbar.vv-chrome-off, .vv-tabbar.vv-chrome-off {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+  transform: translateY(-100%);
+}
+.vv-topbar.vv-chrome-temp, .vv-tabbar.vv-chrome-temp {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+  transform: none; opacity: .88; box-shadow: 0 2px 12px rgb(0 0 0 / 18%);
+}
+.vv-edge { position: fixed; left: 0; right: 0; z-index: 45; }
+.vv-edge[data-edge='top'] { top: 0; height: 10px; }
+.vv-edge[data-edge='tab'] { top: 10px; height: 8px; }
+.vv-chromemenu { position: fixed; z-index: 90; min-width: 10em; padding: 4px; display: flex;
+  flex-direction: column; background: var(--ui-tab-active-bg); border: 1px solid var(--ui-border);
+  border-radius: 6px; box-shadow: 0 4px 16px rgb(0 0 0 / 18%); }
+.vv-chromemenu button { background: none; border: none; border-radius: 4px; text-align: left;
+  padding: 4px 10px; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.vv-chromemenu button:hover { background: var(--ui-hover-bg); }
+/* zen（spec §3）：全件 chrome 覆盖——双栏/折叠竖条/调宽把手/移动端抽屉开关与抽屉
+   本体全隐（状态栏在 ViewerPane 内不受影响，保持功能可达）；特异性 0,3,0 压过
+   抽屉断点的 transform 规则与竖条 min-width 断点规则 */
+.vv-shell.zen .vv-side, .vv-shell.zen .vv-right, .vv-shell.zen .vv-strip,
+.vv-shell.zen .vv-colhandle, .vv-shell.zen .vv-collapse-btn,
+.vv-shell.zen .vv-drawer-toggle, .vv-shell.zen .vv-right-toggle { display: none; }
 /* 树 / tabs */
 .vv-topbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--ui-border); flex-wrap: wrap; }
 /* 连接服务器内联表单（TopBar 展开行）：地址/token/连接/错误。

@@ -3,8 +3,12 @@ import {
   DEFAULT_LAYOUT,
   LEFT_WIDTH_RANGE,
   RIGHT_WIDTH_RANGE,
+  chromeVisible,
   clampWidth,
-  sanitizeLayout
+  enterZen,
+  exitZen,
+  sanitizeLayout,
+  zenEscAction
 } from './layout';
 
 describe('layout 纯函数（spec 2026-10-19 布局自由化 §2）', () => {
@@ -90,5 +94,54 @@ describe('layout 纯函数（spec 2026-10-19 布局自由化 §2）', () => {
     expect(l.leftWidth).toBe(360);
     expect(l.rightWidth).toBe(DEFAULT_LAYOUT.rightWidth);
     expect(l.zen).toBe(false);
+  });
+});
+
+describe('zen 覆盖语义（spec 2026-10-19 布局自由化 §3）', () => {
+  const customized: typeof DEFAULT_LAYOUT = {
+    ...DEFAULT_LAYOUT,
+    leftCollapsed: true,
+    rightWidth: 400,
+    topBarVisible: false,
+    tabBarVisible: false
+  };
+
+  it('enterZen 只翻转 zen，不改其余字段（正交性：无独立快照存储的依据）', () => {
+    const zen = enterZen(customized);
+    expect(zen.zen).toBe(true);
+    expect(zen).toEqual({ ...customized, zen: true });
+  });
+
+  it('exitZen 还原进入前各件可见性：字段从未被改写，翻回即还原', () => {
+    const restored = exitZen(enterZen(customized));
+    expect(restored).toEqual(customized);
+  });
+
+  it('chromeVisible：zen 覆盖全部 chrome（即使底层字段要求显示）', () => {
+    expect(chromeVisible({ ...DEFAULT_LAYOUT, zen: true })).toEqual({
+      topBar: false,
+      tabBar: false,
+      left: false,
+      right: false
+    });
+  });
+
+  it('chromeVisible：非 zen 按显式字段（折叠/可见性）生效', () => {
+    expect(chromeVisible(customized)).toEqual({
+      topBar: false,
+      tabBar: false,
+      left: false, // leftCollapsed
+      right: true
+    });
+  });
+
+  it('zenEscAction 状态机三态：overlay 开 → closeOverlay（优先级最高）', () => {
+    expect(zenEscAction({ overlaysOpen: true, zen: true })).toBe('closeOverlay');
+    expect(zenEscAction({ overlaysOpen: true, zen: false })).toBe('closeOverlay');
+  });
+
+  it('zenEscAction：无 overlay 且 zen → exitZen；否则 none', () => {
+    expect(zenEscAction({ overlaysOpen: false, zen: true })).toBe('exitZen');
+    expect(zenEscAction({ overlaysOpen: false, zen: false })).toBe('none');
   });
 });

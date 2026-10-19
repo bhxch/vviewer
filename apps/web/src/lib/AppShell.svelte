@@ -39,7 +39,16 @@
   } from './stores/session';
   import { migrateLegacyTabs, workspaceStore, type WorkspaceSnapshotItem, type WorkspaceSource } from './workspaceStore';
   import { loadSettings, onSettingsChanged, saveSettings } from './stores/settings';
-  import { clampWidth, DEFAULT_LAYOUT, type LayoutSide, type LayoutSettings } from './layout';
+  import {
+    chromeVisible,
+    clampWidth,
+    DEFAULT_LAYOUT,
+    enterZen,
+    exitZen,
+    zenEscAction,
+    type LayoutSide,
+    type LayoutSettings
+  } from './layout';
   import { codeLineHeight } from './theme';
   import { loadEnabledFontFaces } from './stores/fontsStore';
 
@@ -114,6 +123,135 @@
     updateLayout(d.side === 'left' ? { leftWidth: dragW } : { rightWidth: dragW });
   }
 
+  // ---------- chrome 隐藏与 zen（spec 2026-10-19 §2/§3，Task 2） ----------
+
+  /** chrome 有效可见性（chromeVisible 纯函数）：zen 全件覆盖，非 zen 按显式字段 */
+  const vis = $derived(chromeVisible(settings.layout));
+
+  /**
+   * 顶栏/标签栏「临时条」态（spec §2 隐藏唤出 / §3 zen 退出条共用机制，取实现
+   * 简者——临时条就是真实 TopBar/TabBar 本体的半透覆盖形态，不渲染第二份组件，
+   * 避免双实例快捷键/状态漂移）：隐藏后对应边缘悬停唤出，移开 1.5s 再隐；zen 下
+   * 顶栏临时条右键菜单即退出通道。定时器在退出 zen 与组件卸载时清理。
+   */
+  let topTemp = $state(false);
+  let tabTemp = $state(false);
+  let topTempTimer: ReturnType<typeof setTimeout> | null = null;
+  let tabTempTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function summonTemp(bar: 'top' | 'tab'): void {
+    if (bar === 'top') {
+      if (topTempTimer !== null) clearTimeout(topTempTimer);
+      topTempTimer = null;
+      topTemp = true;
+    } else {
+      if (tabTempTimer !== null) clearTimeout(tabTempTimer);
+      tabTempTimer = null;
+      tabTemp = true;
+    }
+  }
+
+  function scheduleHideTemp(bar: 'top' | 'tab'): void {
+    if (bar === 'top') {
+      if (topTempTimer !== null) clearTimeout(topTempTimer);
+      topTempTimer = setTimeout(() => {
+        topTemp = false;
+        topTempTimer = null;
+      }, 1500);
+    } else {
+      if (tabTempTimer !== null) clearTimeout(tabTempTimer);
+      tabTempTimer = setTimeout(() => {
+        tabTemp = false;
+        tabTempTimer = null;
+      }, 1500);
+    }
+  }
+
+  function clearTempTimers(): void {
+    if (topTempTimer !== null) clearTimeout(topTempTimer);
+    if (tabTempTimer !== null) clearTimeout(tabTempTimer);
+    topTempTimer = null;
+    tabTempTimer = null;
+    topTemp = false;
+    tabTemp = false;
+  }
+
+  /**
+   * zen 进出（spec §3）：enterZen/exitZen 只翻 zen 字段（正交性——其余字段不被
+   * 改写，退出即还原）；持久化复用 updateLayout。切换后派发 `vv:zen-changed`
+   * 文档事件（detail {zen}）——Task 3 移动端消费（返回键拦截/浮钮显隐）。
+   */
+  function toggleZen(): void {
+    const fresh = loadSettings();
+    const zen = !fresh.layout.zen;
+    fresh.layout = zen ? enterZen(fresh.layout) : exitZen(fresh.layout);
+    saveSettings(fresh);
+    if (!zen) clearTempTimers();
+    document.dispatchEvent(new CustomEvent('vv:zen-changed', { detail: { zen } }));
+  }
+
+  /** chrome 右键菜单（spec §2 隐藏入口 / §3 TopBar 布局菜单项）：bar 标识菜单
+   * 归属（顶栏/标签栏），条目按当前 layout 状态计算显示/隐藏与 zen 标签。 */
+  let chromeMenu = $state<{ x: number; y: number; bar: 'top' | 'tab' } | null>(null);
+  let chromeMenuEl = $state<HTMLElement | null>(null);
+
+  function onShellContextMenu(e: MouseEvent): void {
+    const t = e.target as HTMLElement;
+    // 输入元素保留原生菜单（粘贴/拼写检查）；tab 行放行给 TabBar 自有右键菜单
+    if (t.closest('input, textarea, select') !== null) return;
+    const top = t.closest('.vv-topbar');
+    const tabbar = t.closest('.vv-tabbar');
+    if (top === null && tabbar === null) return;
+    if (tabbar !== null && t.closest('.vv-tab') !== null) return;
+    e.preventDefault();
+    // 视口收敛（菜单 min-width 10em / 两项 ~80px 高）
+    chromeMenu = {
+      x: Math.min(e.clientX, window.innerWidth - 170),
+      y: Math.min(e.clientY, window.innerHeight - 110),
+      bar: top !== null ? 'top' : 'tab'
+    };
+  }
+
+  function menuToggleVisible(bar: 'top' | 'tab'): void {
+    if (bar === 'top') updateLayout({ topBarVisible: !layout.topBarVisible });
+    else updateLayout({ tabBarVisible: !layout.tabBarVisible });
+  }
+
+  $effect(() => {
+    // 菜单外点关闭（TopBar ws 菜单同模式：pointerdown 命中菜单内不关，避免
+    // pointerdown 先关导致条目 click 丢失）
+    if (chromeMenu === null) return;
+    const onDown = (e: PointerEvent): void => {
+      const t = e.target as Node | null;
+      if (t !== null && chromeMenuEl?.contains(t) === true) return;
+      chromeMenu = null;
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  });
+
+  /**
+   * overlay 开合判定的最准信号（台账裁决点）：各覆盖层面板均为 {#if} 条件挂载，
+   * 在 DOM 即开——实时查询比在多处镜像 $state 布尔更准（SettingsPanel 的
+   * settingsOpen 存 TopBar 组件内、文件内搜索存 ViewerPane，AppShell 拿不到
+   * 直接引用；类名清单 = 各面板根类，新面板接入时在此追加）。
+   */
+  const OVERLAY_SELECTOR = [
+    '.vv-settings',
+    '.vv-gsearch',
+    '.vv-quickopen',
+    '.vv-wspanel',
+    '.vv-search-panel',
+    '.vv-wscreate',
+    '.vv-remotesrc',
+    '.vv-tabctx',
+    '.vv-ws-pop'
+  ].join(', ');
+
+  function anyOverlayOpen(): boolean {
+    return document.querySelector(OVERLAY_SELECTOR) !== null;
+  }
+
   /** 当前 workspace（workspacesView 为 openFlow 维护的 workspaceStore runes 镜像）。 */
   const activeWorkspace = $derived(
     workspacesView.list.find((w) => w.id === workspacesView.activeId) ?? null
@@ -183,6 +321,7 @@
     return () => {
       offSettings();
       unbindArchive();
+      clearTempTimers(); // 临时条 1.5s 定时器不跨卸载存活（spec §2 定时器清理）
     };
   });
 
@@ -483,6 +622,30 @@
         quickOpenOpen = !quickOpenOpen;
         return;
       }
+      // zen 进出（spec §3）：Ctrl+Alt+Z 切换。键位冲突复核（2026-10-19 实读取，
+      // 全仓库 rg KeyZ / ctrl+alt 组合）：既有键位仅 Ctrl/Cmd+Shift+F、Ctrl/Cmd+P、
+      // Ctrl+, 、Alt+W(KeyW)、Alt+Shift+T(KeyT)、j/k/g/G 与各面板 Esc——Ctrl+Alt+Z
+      // 无占用，浏览器亦无默认行为。
+      if ((e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey && e.code === 'KeyZ') {
+        e.preventDefault();
+        toggleZen();
+        return;
+      }
+      // Esc 优先级状态机（spec §3，zenEscAction 纯函数分派）：chrome 右键菜单 >
+      // overlay（设置/搜索/快速打开等，面板自带 Esc 关闭处理器在同一事件上动作，
+      // 此处不叠加）> 退 zen。overlay 判定实读面板 DOM（anyOverlayOpen 注释）。
+      if (e.key === 'Escape') {
+        if (chromeMenu !== null) {
+          chromeMenu = null;
+          return;
+        }
+        const action = zenEscAction({ overlaysOpen: anyOverlayOpen(), zen: layout.zen });
+        if (action === 'exitZen') {
+          e.preventDefault();
+          toggleZen();
+        }
+        return;
+      }
       // Alt+W 切换 tab 管理面板（T6）：浏览器无默认占用（关闭标签页是 Ctrl+W，
       // 与 Alt+W 无关）；inField 拦截沿用本 handler 顶部的统一判定。
       // 按 e.code 判定（T6 评审移交）：macOS Option+W 产出 e.key='∑'，按 key 判恒失效
@@ -525,12 +688,34 @@
   });
 </script>
 
-<div class="vv-shell" class:drawer={drawerOpen} class:rightopen={rightOpen}>
-  <TopBar />
+<!-- svelte-ignore a11y_no_static_element_interactions --><!-- contextmenu 为 chrome
+     布局菜单入口（shell 级代理，按 target 归属分流），shell 容器无 AT 交互角色 -->
+<div class="vv-shell" class:drawer={drawerOpen} class:rightopen={rightOpen} class:zen={layout.zen} oncontextmenu={onShellContextMenu}>
+  <!-- 顶栏/标签栏：hidden=zen 或显式隐藏（chromeVisible 覆盖语义）；temp=边缘悬停
+       临时条（半透覆盖形态）。组件保持挂载——TopBar 的 Ctrl+, 监听与 SettingsPanel
+       挂点不因隐藏失效（spec §2 全件可隐但功能可达） -->
+  <TopBar
+    temp={topTemp}
+    hidden={!vis.topBar && !topTemp}
+    onenter={() => {
+      if (!vis.topBar) summonTemp('top'); // 正常可见态的划过不置临时态
+    }}
+    onleave={() => {
+      if (topTemp) scheduleHideTemp('top');
+    }}
+  />
   <TabBar
     tabs={activeTabs}
     sources={activeWorkspace?.sources ?? []}
     onmanage={() => (wsPanelOpen = !wsPanelOpen)}
+    temp={tabTemp}
+    hidden={!vis.tabBar && !tabTemp}
+    onenter={() => {
+      if (!vis.tabBar) summonTemp('tab');
+    }}
+    onleave={() => {
+      if (tabTemp) scheduleHideTemp('tab');
+    }}
   />
   <div class="vv-body">
     {#if layout.leftCollapsed}
@@ -619,6 +804,43 @@
   {/if}
   {#if wsPanelOpen}
     <WorkspaceTabsPanel onclose={() => (wsPanelOpen = false)} />
+  {/if}
+  {#if !vis.topBar}
+    <!-- 边缘唤出热区（spec §2/§3）：对应 chrome 隐藏（含 zen）时置于视口顶缘，
+         悬停唤出真实条本体（temp 形态），移开 1.5s 再隐（scheduleHideTemp）。
+         zen 下顶栏热区即退出条入口（临时条右键菜单「退出专注模式」） -->
+    <!-- svelte-ignore a11y_no_static_element_interactions --><!-- 边缘悬停热区：纯
+         指针唤出通道，无键盘/AT 等价物（zen 退出另有 Esc/快捷键/菜单通道） -->
+    <div class="vv-edge" data-edge="top" onpointerenter={() => summonTemp('top')}></div>
+  {/if}
+  {#if !vis.tabBar}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="vv-edge" data-edge="tab" onpointerenter={() => summonTemp('tab')}></div>
+  {/if}
+  {#if chromeMenu !== null}
+    {@const bar = chromeMenu.bar}
+    <!-- chrome 右键菜单（spec §2「隐藏」入口 / §3 TopBar 布局菜单项；隐藏态临时
+         条上右键同菜单反向勾选显示）。条目随 layout 状态即时计算 -->
+    <div class="vv-chromemenu" role="menu" bind:this={chromeMenuEl} style="left:{chromeMenu.x}px; top:{chromeMenu.y}px">
+      <button
+        type="button"
+        role="menuitem"
+        onclick={() => {
+          menuToggleVisible(bar);
+          chromeMenu = null;
+        }}>
+        {bar === 'top' ? (layout.topBarVisible ? '隐藏顶栏' : '显示顶栏') : (layout.tabBarVisible ? '隐藏标签栏' : '显示标签栏')}
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        onclick={() => {
+          toggleZen();
+          chromeMenu = null;
+        }}>
+        {layout.zen ? '退出专注模式' : '进入专注模式'}
+      </button>
+    </div>
   {/if}
 </div>
 

@@ -62,3 +62,57 @@ export function sanitizeLayout(v: unknown): LayoutSettings {
     zen: boolOr(o.zen, DEFAULT_LAYOUT.zen)
   };
 }
+
+// ---------- zen（spec §3）：覆盖语义与 Esc 优先级状态机 ----------
+
+/**
+ * 进入 zen：只翻转 zen 字段。spec「zen 与显式布局配置正交」的实现即在此——
+ * 不改写其余字段，进入前的各件可见性天然留在原地，退出（exitZen）翻回即还原，
+ * 无需独立快照存储（快照还原语义由「字段从未被改写」承担，zen.test 覆盖）。
+ */
+export function enterZen(l: LayoutSettings): LayoutSettings {
+  return { ...l, zen: true };
+}
+
+/** 退出 zen：同上只翻 zen 字段（还原 = 进入前字段值）。 */
+export function exitZen(l: LayoutSettings): LayoutSettings {
+  return { ...l, zen: false };
+}
+
+export interface ChromeVisibility {
+  topBar: boolean;
+  tabBar: boolean;
+  left: boolean;
+  right: boolean;
+}
+
+/**
+ * chrome 有效可见性（AppShell 渲染消费）：zen 做全件视觉覆盖（隐 TopBar/TabBar/
+ * 双栏，仅留内容区），非 zen 按显式字段（可见性 × 折叠）生效。移动端抽屉断点
+ * 的开关不受此影响（AppShell 渲染层断点分流）。
+ */
+export function chromeVisible(l: LayoutSettings): ChromeVisibility {
+  if (l.zen) return { topBar: false, tabBar: false, left: false, right: false };
+  return {
+    topBar: l.topBarVisible,
+    tabBar: l.tabBarVisible,
+    left: !l.leftCollapsed,
+    right: !l.rightCollapsed
+  };
+}
+
+export type ZenEscAction = 'closeOverlay' | 'exitZen' | 'none';
+
+/**
+ * Esc 优先级状态机（spec §3）：设置/搜索/快速打开等 overlay 打开时 Esc 只关
+ * overlay（面板自带 Esc 处理器，AppShell 侧不动作）；无 overlay 时 Esc 退 zen；
+ * 平时 Esc 无事。同一状态机双触发源（桌面 Esc / 移动端返回键，spec §3.1）——
+ * 触发源只负责算出 overlaysOpen，分派语义集中在此纯函数。
+ * overlaysOpen 的判定信号：AppShell 实时查 overlay 面板 DOM（各面板为 {#if}
+ * 条件挂载，在 DOM 即开——比镜像多份 $state 布尔更准，见 AppShell anyOverlayOpen）。
+ */
+export function zenEscAction(state: { overlaysOpen: boolean; zen: boolean }): ZenEscAction {
+  if (state.overlaysOpen) return 'closeOverlay';
+  if (state.zen) return 'exitZen';
+  return 'none';
+}

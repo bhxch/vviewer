@@ -10,12 +10,26 @@
    * tabs：AppShell 传当前 workspace 组内过滤值（tabStore.tabsOf(activeId)，T6）——
    * TabBar 只渲染本组标签，跨组总览/触达走「管理」面板。sources：当前组已登记
    * 来源（模型）；onmanage：右端「管理」按钮回调（AppShell 切换面板）。
+   * temp/hidden/onenter/onleave：chrome 隐藏与边缘唤出临时条（spec 2026-10-19
+   * §2/§3），语义同 TopBar 同名 props（所有权在 AppShell）。
    */
   let {
     tabs,
     sources,
-    onmanage
-  }: { tabs: Tab[]; sources: WorkspaceSource[]; onmanage(): void } = $props();
+    onmanage,
+    temp = false,
+    hidden = false,
+    onenter,
+    onleave
+  }: {
+    tabs: Tab[];
+    sources: WorkspaceSource[];
+    onmanage(): void;
+    temp?: boolean;
+    hidden?: boolean;
+    onenter?: () => void;
+    onleave?: () => void;
+  } = $props();
 
   /** 行内来源徽标（T6）：逻辑在 tabBadge.ts 可单测；此处注入当前组来源集。 */
   function badgeOfFor(tab: Tab): string | null {
@@ -142,7 +156,17 @@
   }
 </script>
 
-<div class="vv-tabbar" role="tablist">
+<!-- svelte-ignore a11y_no_static_element_interactions, a11y_interactive_supports_focus --><!--
+     pointerenter/leave 为临时条唤出通道（无 AT 语义）；tablist 容器不应持有焦点
+     （键盘焦点在行内各 role=tab 的 div[tabindex=0] 上，ARIA APG tab 惯例） -->
+<div
+  class="vv-tabbar"
+  class:vv-chrome-temp={temp}
+  class:vv-chrome-off={hidden}
+  role="tablist"
+  onpointerenter={() => onenter?.()}
+  onpointerleave={() => onleave?.()}
+>
   {#each tabs as tab (tab.id)}
     {@const badge = badgeOfFor(tab)}
     <!-- 遗留 U2：激活区与关闭钮拆为兄弟节点——button 内不得再嵌 span[role=button]
