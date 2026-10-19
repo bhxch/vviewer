@@ -157,10 +157,18 @@ function serveIndexHtmlInPreview(): Plugin {
   };
 }
 
-// md 图表（Task 8）：四个图表引擎（graphviz/viz-js、nomnoml、mermaid、katex）
-// 确定性聚到单一 chunk，产物文件名携带 diagram-engines- 前缀——
-// （1）PWA precache 按 globPatterns 排除该命名，引擎按需加载不进预缓存；
+// md 图表（Task 8，控制器裁决后收窄）：本计划新增的图表引擎（graphviz/viz-js、
+// nomnoml）确定性聚到单一 chunk，产物文件名携带 diagram-engines- 前缀——
+// （1）PWA precache 按 globIgnores 排除该命名，引擎按需加载不进预缓存；
 // （2）预算门禁 tools/diagram-budget.mjs 按文件名前缀统计体积（spec §2.6 ≤4MB）。
+//
+// 裁决备案（spec §2.6 启用集本意）：mermaid/katex 是本计划之前的存量依赖——改造前
+// globPatterns '**/*.js' 把它们的默认分块一并 precache（离线可用是既有用户现状），
+// §2.4「图表引擎 chunk 不进 precache」的立法本意是防本计划新增引擎膨胀 precache，
+// 对存量引擎不适用。故本组仅收 viz+nomnoml（增量，实测 ≈1.35MB 达标）；mermaid/katex
+// 回归 SvelteKit 默认分块与 precache 地位（其分片均 < workbox maximumFileSizeToCacheInBytes
+// 默认 2MiB，进 precache 不触发插件抛错）。存量地位维持；若未来 mermaid 升级致
+// precache 膨胀（分片超 2MiB 被挤出或总体积失控），另行立项，不改本门禁。
 //
 // 机制备案（偏离 brief 的 rollup 风格 manualChunks）：vite 8 底层为 rolldown，kit 3 在
 // environments.client.build.rolldownOptions.output 显式设 chunkFileNames 为纯哈希
@@ -194,7 +202,7 @@ function diagramEngineChunk(): Plugin {
                     { name: 'sveltekit-manifest', test: '<sveltekit:generated>/app-manifest.js' },
                     {
                       name: 'diagram-engines',
-                      test: /[\\/]node_modules[\\/](@viz-js[\\/]viz|nomnoml|mermaid|katex)[\\/]/
+                      test: /[\\/]node_modules[\\/](@viz-js[\\/]viz|nomnoml)[\\/]/
                     }
                   ]
                 }
@@ -265,10 +273,11 @@ export default defineConfig({
         //（build/ 下无其他 html，已核实）——workbox-build 对 additional 条目不去重
         //（direct push），若 glob 也抓到 index.html 会产生同 URL 双 revision 条目，
         // SW 求值期抛 add-to-cache-list-conflicting-entries → 完全死 SW。
-        // 图表引擎 chunk（codeSplitting groups → diagram-engines-*.js）不入 precache：
-        // 体积大头（mermaid/katex/viz/nomnoml）按需加载即可，预缓存拖慢首装且
-        // 白白占满用户存储——预算门禁（tools/diagram-budget.mjs，spec §2.6）另行
-        // 约束其总量 ≤4MB。
+        // 图表引擎增量 chunk（codeSplitting groups → diagram-engines-*.js，仅
+        // viz+nomnoml）不入 precache：本计划新增引擎按需加载即可，防止 precache
+        // 膨胀——预算门禁（tools/diagram-budget.mjs，spec §2.6）另行约束其总量
+        // ≤4MB。mermaid/katex 为存量依赖，回归默认分块与 precache 地位（裁决见
+        // diagramEngineChunk 注释），不在此排除。
         // 排除必须走 globIgnores 而非 globPatterns 内嵌 '!...' 否定条目（brief 原写法
         // 实测无效）：workbox-build 对 globPatterns 逐条独立 glob（getFileManifestEntries），
         // 否定条目单独跑恒零匹配（且恒报 doesn't-match warning），不参与排除；文件仍被
