@@ -29,9 +29,30 @@
 ## 2. 设置页结构
 
 - **载体**：全屏 overlay（与工作区面板/全局搜索同交互模型），`Ctrl+,` 切换、Esc 关闭；不引入路由/深链。
-- **左导航分组**（自上而下）：外观（亮暗模式/亮暗双槽外观主题/代码主题）、字体（spec 2 组件整体迁入）、图表（spec 1：krokiHost/按语言渲染模式）、布局（spec 3：折叠/宽度/TopBar/TabBar/zen 重置）、搜索与排除（excludedPatterns 等）、自动刷新、计算（computePolicy）、关于（应用版本/服务端 health 摘要/开源致谢链接）。
+- **左导航分组**（自上而下）：外观（亮暗模式/亮暗双槽外观主题/代码主题）、字体（spec 2 组件整体迁入）、图表（spec 1：krokiHost/按语言渲染模式）、布局（spec 3：折叠/宽度/TopBar/TabBar/zen 重置）、搜索与排除（excludedPatterns 等）、自动刷新、计算（computePolicy）、关于（见 §2.1，项目信息+存储用量+持久化存储）。
 - **TopBar 迁移**：代码主题下拉与计算策略下拉迁入设置页（低频项）；亮暗快切保留 TopBar（高频）；TopBar 精简为 ⚙ + 亮暗 + 其余既有件。
 - 分组导航键盘可达（↑↓ 切组），右表单滚动跟随高亮。
+
+### 2.1 关于分节（项目信息、存储用量、持久化存储）
+
+**项目信息**（审阅反馈轮扩容）：
+
+- 应用名/版本：前端构建版本（package.json version 构建期注入）与服务端版本（health `version`）并列显示，双端不一致时注记；仓库链接、Apache-2.0 许可、第三方致谢（`THIRD_PARTY_NOTICES.md` 内容入口）。
+- 服务端 health 摘要：version/capabilities/searchEngine/roots（原文案并入）。
+
+**存储用量与配额**：
+
+- **聚合面**：`navigator.storage.estimate()` 的 `quota`/`usage` 为主显示；Chromium 的 `usageDetails` 存在时展示细分（indexedDB/caches/serviceWorker 等），不存在则隐藏细分行。配额标注「浏览器估算值」（Chrome 粒度粗、Firefox 按磁盘 10% 报告）。
+- **localStorage 估算**：全键值 `byteLength` 求和（UTF-16 ×2），仅 settings 与少量键，成本可忽略。
+- **IndexedDB 分 store**：`kv`/`themes`/`fonts`/`mounts` 四 store 各显示记录数；体积显示策略——fonts 用记录内已存 `size` 字段求和（spec 2 契约）、themes/kv 以序列化长度估算、mounts 略（微小）。计数走 `openKeyCursor` 一次性遍历，进入分节时加载并缓存，手动「刷新」重算（不实时轮询）。
+- 不支持 `estimate()` 的浏览器（老 WebView）隐藏配额区，仅显示本地估算行。
+
+**持久化存储**（`navigator.storage.persist`，**origin 级**——一次申请保护全源：字体/主题/会话快照/离线缓存不再被磁盘压力驱逐）：
+
+- 状态行：`navigator.storage.persisted()` 显示「已持久化 / 未持久化（best-effort，磁盘紧张时可能被清除）」。
+- 操作：「申请持久化存储」按钮（用户手势内调用 `persist()`，返回 false 时解释常见原因——Chromium 启发式未达标/已装 PWA 通常自动授予，注记引导装 PWA 即大概率自动持久化）。
+- **自动静默尝试**：字体新增成功回调处追加一次 `persist()` 尝试（数据投入时刻申请是浏览器推荐姿势；若 spec 2 已先落地则本 spec 补挂该钩子）；失败静默不打扰，仅状态行反映。
+- Safari/Firefox 支持差异注记（均支持 estimate/persist，授予策略不同），不做逐浏览器特调。
 
 ## 3. 草稿模型与双视图
 
@@ -51,4 +72,5 @@
 ## 5. 测试
 
 - 单测：草稿模型（脏态追踪/表单↔JSON 往返等价/校验错误分类）、导入合并与替换语义（含缺项保留/未知字段/版本不匹配）、导出文件结构。
-- e2e：打开/导航/Esc/`Ctrl+,`、表单改动反映到 JSON 视图、非法 JSON 阻断、应用后订阅链生效（外观+字体+布局一次提交三链路）、导入合并/替换两路径、TopBar 精简回归（亮暗快切/⚙ 入口）、脏态确认弹窗。
+- 关于分节单测：localStorage 估算求和、IndexedDB 分 store 计数（fake-indexeddb 既有基建）、usageDetails 缺失降级渲染、persist() 状态机（granted/denied/异常）与字体上传钩子触发（mock navigator.storage）。
+- e2e：打开/导航/Esc/`Ctrl+,`、表单改动反映到 JSON 视图、非法 JSON 阻断、应用后订阅链生效（外观+字体+布局一次提交三链路）、导入合并/替换两路径、TopBar 精简回归（亮暗快切/⚙ 入口）、脏态确认弹窗、关于分节用量显示与刷新钮（配额断言以 estimate mock 注入）。
