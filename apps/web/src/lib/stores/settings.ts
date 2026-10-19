@@ -8,6 +8,16 @@ export interface DiagramsSettings {
   modes: Record<string, DiagramMode>;
 }
 
+/** 字体设置（spec 2026-10-19 字体系统 §2.1）：family '' = 默认栈；字号 px，
+ * clamp 范围见 UI_SIZE_RANGE/CODE_SIZE_RANGE。双槽语义：ui* 作用于 body 继承面，
+ * code* 作用于 .vv-code-pre/.vv-hex-dump。 */
+export interface FontsSettings {
+  uiFamily: string;
+  uiSize: number;
+  codeFamily: string;
+  codeSize: number;
+}
+
 export interface Settings {
   themeMode: 'light' | 'dark' | 'system';
   /** 亮/暗模式下各自记忆的外观主题（'default' | 'vscode:…' 内置名 | 'imported:<id>'）；
@@ -22,6 +32,7 @@ export interface Settings {
   /** 计算策略（M6）：auto=远程文件优先远程计算（失败回退本地）；local/remote=显式指定 */
   computePolicy: ComputePolicy;
   diagrams: DiagramsSettings;
+  fonts: FontsSettings;
 }
 
 const KEY = 'vviewer:settings';
@@ -34,17 +45,28 @@ const DEFAULTS: Settings = {
   excludedPatterns: [],
   autoRefresh: true,
   computePolicy: 'auto',
-  diagrams: { krokiHost: '', modes: {} }
+  diagrams: { krokiHost: '', modes: {} },
+  fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 }
 };
 
 const POLICIES: readonly ComputePolicy[] = ['auto', 'local', 'remote'];
+/** 字号 clamp 范围（spec §2.1：uiSize 10–28 / codeSize 9–28） */
+export const UI_SIZE_RANGE = [10, 28] as const;
+export const CODE_SIZE_RANGE = [9, 28] as const;
 
 function defaults(): Settings {
   return {
     ...DEFAULTS,
     excludedPatterns: [...DEFAULTS.excludedPatterns],
-    diagrams: { krokiHost: DEFAULTS.diagrams.krokiHost, modes: { ...DEFAULTS.diagrams.modes } }
+    diagrams: { krokiHost: DEFAULTS.diagrams.krokiHost, modes: { ...DEFAULTS.diagrams.modes } },
+    fonts: { ...DEFAULTS.fonts }
   };
+}
+
+/** 字号 clamp（脏值 typeof 守卫后夹紧；非有限数字归位默认） */
+function clampSize(v: unknown, range: readonly [number, number] | readonly number[], dflt: number): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return dflt;
+  return Math.min(range[1]!, Math.max(range[0]!, v));
 }
 
 export function loadSettings(): Settings {
@@ -74,6 +96,15 @@ export function loadSettings(): Settings {
           return t && (v === 'local' || v === 'kroki' || v === 'source') ? [[k, v]] : [];
         })
       )
+    };
+    // fonts 节白名单（字体系统 spec §2.1）：family 非字符串归空栈；字号 clamp
+    //（uiSize 10–28 / codeSize 9–28），脏 JSON 字段级归位不抛
+    const f = s.fonts ?? DEFAULTS.fonts;
+    s.fonts = {
+      uiFamily: typeof f.uiFamily === 'string' ? f.uiFamily : DEFAULTS.fonts.uiFamily,
+      uiSize: clampSize(f.uiSize, UI_SIZE_RANGE, DEFAULTS.fonts.uiSize),
+      codeFamily: typeof f.codeFamily === 'string' ? f.codeFamily : DEFAULTS.fonts.codeFamily,
+      codeSize: clampSize(f.codeSize, CODE_SIZE_RANGE, DEFAULTS.fonts.codeSize)
     };
     return s;
   } catch {
@@ -109,7 +140,8 @@ function notify(s: Settings): void {
     cb({
       ...s,
       excludedPatterns: [...s.excludedPatterns],
-      diagrams: { ...s.diagrams, modes: { ...s.diagrams.modes } }
+      diagrams: { ...s.diagrams, modes: { ...s.diagrams.modes } },
+      fonts: { ...s.fonts }
     });
   }
 }

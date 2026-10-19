@@ -322,3 +322,103 @@ export function applyAppearanceFromSettings(settings: Settings): void {
     );
   }
 }
+
+// ---------- 字体注入（字体系统 spec 2026-10-19 §2.2/§2.3，Task 1） ----------
+//
+// 与外观注入同层的新模式：独立 style#vv-font 单节点幂等注入（fonts 变化不触碰
+// style#vv-code-theme、不派发 vv:appearance-applied，反之亦然）；纯同步（无惰性
+// 资产加载，无需弃单守卫/async 簿记）。消费契约（app.css 变量化 + Task 2 行高联动）：
+// --vv-ui-font / --vv-ui-font-size（body 继承面）、--vv-code-font / --vv-code-font-size
+// （.vv-code-pre/.vv-hex-dump）、--vv-code-line-height = max(16, round(codeSize×1.5))。
+
+const FONT_STYLE_ID = 'vv-font';
+
+/** UI 默认栈（与 app.css :root --vv-ui-font fallback 同源，theme.fonts.test 防漂移） */
+export const DEFAULT_UI_FONT_STACK = 'system-ui, -apple-system, sans-serif';
+/** 代码默认栈（与 app.css :root --vv-code-font fallback 同源，theme.fonts.test 防漂移） */
+export const DEFAULT_CODE_FONT_STACK =
+  'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
+
+/** 行高公式（spec §2.2）：现 13px→20px 的 1.538 关系归一为 ×1.5，下限 16px 保可读 */
+export function codeLineHeight(codeSize: number): number {
+  return Math.max(16, Math.round(codeSize * 1.5));
+}
+
+/** Task 2 渲染协议（opts.lineMetrics）的单一来源：ViewerPane 每次渲染按 codeSize 现算 */
+export function codeLineMetrics(codeSize: number): { fontSize: number; lineHeight: number } {
+  return { fontSize: codeSize, lineHeight: codeLineHeight(codeSize) };
+}
+
+/** fonts 四元组签名（Task 2 订阅 diff 消费；无关字段变化不改变签名） */
+export function fontSig(settings: Settings): string {
+  const f = settings.fonts;
+  return `${f.uiFamily}|${f.uiSize}|${f.codeFamily}|${f.codeSize}`;
+}
+
+/** family 名 CSS 转义：引号/反斜杠（分号/括号在双引号包裹后无语法效力） */
+function escapeFamilyName(name: string): string {
+  return name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/**
+ * family 声明值组装：自定义名不拆栈语义——用户输入的逗号栈整体作为一个 font-family
+ * 声明值（逐段引号包裹后并排，保留多级回退次序），末尾恒接默认回退栈；空输入即默认栈。
+ * 逐段引号包裹同时是注入防线：`a"b` → `"a\"b"`、`My; Font` → 引号内分号失效。
+ */
+function fontFamilyValue(custom: string, fallbackStack: string): string {
+  const segs = custom
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s !== '');
+  if (segs.length === 0) return fallbackStack;
+  return segs.map((s) => `"${escapeFamilyName(s)}"`).join(', ') + `, ${fallbackStack}`;
+}
+
+/** 确保 style#vv-font 单节点存在（首次注入创建，后续复用；appearance 的 ensureStyleEl 同构） */
+function ensureFontStyleEl(): HTMLStyleElement {
+  let el = document.getElementById(FONT_STYLE_ID) as HTMLStyleElement | null;
+  if (!el) {
+    el = document.createElement('style');
+    el.id = FONT_STYLE_ID;
+    document.head.append(el);
+  }
+  return el;
+}
+
+/**
+ * 字体设置注入（spec §2.2）：单节点 style#vv-font 整体替换，五个变量一次到位。
+ * 选择器裸 :root 即可——字体变量不在 app.css 的暗色 (0,2,0) 块中出现，文档序更后
+ * 的同特异性规则稳定胜出（THEME_ROOT_SELECTOR 的提权只服务于暗色块覆盖的变量）。
+ */
+export function applyFonts(settings: Settings): void {
+  const f = settings.fonts;
+  ensureFontStyleEl().textContent = [
+    '/* vviewer 字体设置——独立节点：字体变化不触发外观重注入，反之亦然 */',
+    ':root {',
+    `  --vv-ui-font: ${fontFamilyValue(f.uiFamily, DEFAULT_UI_FONT_STACK)};`,
+    `  --vv-ui-font-size: ${f.uiSize}px;`,
+    `  --vv-code-font: ${fontFamilyValue(f.codeFamily, DEFAULT_CODE_FONT_STACK)};`,
+    `  --vv-code-font-size: ${f.codeSize}px;`,
+    `  --vv-code-line-height: ${codeLineHeight(f.codeSize)}px;`,
+    '}'
+  ].join('\n');
+}
+
+// 上次生效的 fonts 签名（appearance 的 lastAppearanceSig 同款簿记）：初值 null 保证
+// 首个 FromSettings 调用必注入；仅在本函数同步段写入，恒等于注入真相。
+let lastFontSig: string | null = null;
+
+/**
+ * fonts 签名订阅触发入口（appearance 的 applyAppearanceFromSettings 同层模式）：
+ * 与上次签名 diff——仅 fonts 四元组相关变化才重注入 style#vv-font；无关字段变化
+ * 零注入。返回是否发生了注入（true = fonts 变化）——TopBar 订阅处据 true 级联
+ * 激活 tab 重渲染（openFlow touchActiveTab，Task 2），首次注入返回值被忽略
+ * （挂载期无活动渲染实例）。同步注入无 await，返回值即事实。
+ */
+export function applyFontsFromSettings(settings: Settings): boolean {
+  const sig = fontSig(settings);
+  if (sig === lastFontSig) return false;
+  lastFontSig = sig;
+  applyFonts(settings);
+  return true;
+}

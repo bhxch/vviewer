@@ -10,7 +10,8 @@ const BASE: Settings = {
   excludedPatterns: [],
   autoRefresh: true,
   computePolicy: 'auto',
-  diagrams: { krokiHost: '', modes: {} }
+  diagrams: { krokiHost: '', modes: {} },
+  fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 }
 };
 
 function aSettings(overrides: Partial<Settings>): Settings {
@@ -155,5 +156,63 @@ describe('diagrams 设置节白名单（spec 2026-10-19 §2.1）', () => {
     expect(s.diagrams).toEqual({ krokiHost: '', modes: {} });
     expect(s.excludedPatterns).toEqual(['.git']);
     expect(s.autoRefresh).toBe(false);
+  });
+});
+
+describe('fonts 设置节白名单/clamp（spec 2026-10-19 字体系统 §2.1）', () => {
+  it('默认：双 family 空栈（= 默认栈）+ uiSize 16 / codeSize 13', () => {
+    localStorage.removeItem('vviewer:settings');
+    expect(loadSettings().fonts).toEqual({ uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 });
+  });
+
+  it('合法值原样通过（含边界内值）', () => {
+    localStorage.setItem('vviewer:settings', JSON.stringify({
+      fonts: { uiFamily: 'Segoe UI', uiSize: 22, codeFamily: 'JetBrains Mono, monospace', codeSize: 9 }
+    }));
+    expect(loadSettings().fonts).toEqual({
+      uiFamily: 'Segoe UI', uiSize: 22, codeFamily: 'JetBrains Mono, monospace', codeSize: 9
+    });
+  });
+
+  it('字号 clamp：uiSize 10–28 / codeSize 9–28（越界夹紧）', () => {
+    localStorage.setItem('vviewer:settings', JSON.stringify({
+      fonts: { uiFamily: '', uiSize: 3, codeFamily: '', codeSize: 2 }
+    }));
+    let s = loadSettings().fonts;
+    expect(s.uiSize).toBe(10);
+    expect(s.codeSize).toBe(9);
+    localStorage.setItem('vviewer:settings', JSON.stringify({
+      fonts: { uiFamily: '', uiSize: 99, codeFamily: '', codeSize: 50 }
+    }));
+    s = loadSettings().fonts;
+    expect(s.uiSize).toBe(28);
+    expect(s.codeSize).toBe(28);
+  });
+
+  it('脏 JSON 不抛：fonts 节/字段级归位默认，不影响其余字段', () => {
+    // excludedPatterns/autoRefresh 刻意非默认：若整体回落 defaults() 则断言必炸
+    localStorage.setItem(
+      'vviewer:settings',
+      JSON.stringify({ fonts: 42, excludedPatterns: ['.git'], autoRefresh: false })
+    );
+    let s = loadSettings();
+    expect(s.fonts).toEqual({ uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 });
+    expect(s.excludedPatterns).toEqual(['.git']);
+    expect(s.autoRefresh).toBe(false);
+    localStorage.setItem(
+      'vviewer:settings',
+      JSON.stringify({ fonts: { uiFamily: 7, uiSize: 'big', codeFamily: null, codeSize: NaN } })
+    );
+    s = loadSettings();
+    expect(s.fonts).toEqual({ uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 });
+  });
+
+  it('saveSettings 订阅回调收到 fonts 副本：误改不回灌', () => {
+    const off = onSettingsChanged((s) => {
+      s.fonts.codeSize = 28; // 订阅方误改引用
+    });
+    saveSettings(aSettings({ fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 } }));
+    off();
+    expect(loadSettings().fonts.codeSize).toBe(13);
   });
 });

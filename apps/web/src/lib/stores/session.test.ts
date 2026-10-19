@@ -46,7 +46,8 @@ describe('session store', () => {
       excludedPatterns: [],
       autoRefresh: true,
       computePolicy: 'auto',
-      diagrams: { krokiHost: '', modes: {} }
+      diagrams: { krokiHost: '', modes: {} },
+      fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 }
     });
     saveSettings({ themeMode: 'dark', appearanceLight: 'default', appearanceDark: 'default', codeThemeLight: 'onelight', codeThemeDark: 'serika-dark', excludedPatterns: ['node_modules'], autoRefresh: false, computePolicy: 'remote', diagrams: { krokiHost: '', modes: {} } });
     expect(loadSettings().themeMode).toBe('dark');

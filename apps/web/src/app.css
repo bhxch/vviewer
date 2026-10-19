@@ -2,6 +2,12 @@
 :root {
   --vv-code-line-height: 20px;
   --vv-code-font: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  /* 字体系统变量（字体系统 spec §2.2）：运行时由 theme.ts applyFonts 注入 style#vv-font
+     整体替换；此处为默认值 fallback（与 theme.ts DEFAULT_*_FONT_STACK 同源防漂移，
+     theme.fonts.test 校验） */
+  --vv-ui-font: system-ui, -apple-system, sans-serif;
+  --vv-ui-font-size: 16px;
+  --vv-code-font-size: 13px;
   /* UI 主题（亮为默认） */
   --ui-bg: #ffffff; --ui-fg: #1f2328; --ui-fg-muted: #656d76; --ui-border: #d0d7de;
   --ui-accent: #0969da; --ui-side-bg: #f6f8fa; --ui-tab-bg: #f6f8fa; --ui-tab-active-bg: #ffffff;
@@ -33,7 +39,7 @@
     --hljs-number: #79c0ff; --hljs-title: #d2a8ff; --hljs-built_in: #79c0ff; --hljs-attr: #79c0ff;
   }
 }
-body { margin: 0; background: var(--ui-bg); color: var(--ui-fg); font-family: system-ui, -apple-system, sans-serif; }
+body { margin: 0; background: var(--ui-bg); color: var(--ui-fg); font-family: var(--vv-ui-font, system-ui, -apple-system, sans-serif); font-size: var(--vv-ui-font-size, 16px); }
 button { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid var(--ui-border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
 input { background: var(--ui-bg); color: var(--ui-fg); border: 1px solid var(--ui-border); border-radius: 6px; padding: 4px 8px; }
 select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid var(--ui-border); border-radius: 6px; padding: 4px 6px; }
@@ -44,7 +50,7 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .vv-virtual-viewport { position: absolute; top: 0; left: 0; right: 0; }
 /* 代码 */
 .vv-code-pre { position: relative; overflow: auto; height: 100%; background: var(--code-bg);
-  font-family: var(--vv-code-font); font-size: 13px; line-height: var(--vv-code-line-height); }
+  font-family: var(--vv-code-font); font-size: var(--vv-code-font-size, 13px); line-height: var(--vv-code-line-height); }
 .vv-code-line { display: flex; white-space: pre; }
 .vv-code-gutter { user-select: none; text-align: right; min-width: 3.5em; padding-right: 1em;
   color: var(--code-gutter); flex: none; }
@@ -207,7 +213,7 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .vv-hex-status { flex: none; padding: 4px 10px; border-bottom: 1px solid var(--ui-border);
   color: var(--ui-fg-muted); font-size: 12px; }
 .vv-hex-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; padding: 8px 10px; }
-.vv-hex-dump { font-family: var(--vv-code-font); font-size: 12px; line-height: 1.5; white-space: pre; }
+.vv-hex-dump { font-family: var(--vv-code-font); font-size: var(--vv-code-font-size, 12px); line-height: 1.5; white-space: pre; }
 /* 行宽=内容宽（fix round 1，Critical 1）：viewport（.vv-virtual-viewport absolute
    left:0 right:0）会把 block 行拉伸为容器宽，点击→字节换算的「行宽/77=字符宽」
    随之高估 2~2.5 倍；width:max-content 收回内容宽后公式成立。不可加 min-width:
