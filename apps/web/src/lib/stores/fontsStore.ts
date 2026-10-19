@@ -1,7 +1,8 @@
 /**
  * 网络字体库（字体系统 spec 2026-10-19 §5，Task 4）：IndexedDB v3 `fonts` store 上的
  * CRUD + FontFace 生命周期（document.fonts 装卸）。要点：
- * - 仅 https（mixed content 防线）；单文件 >30MB 拒收（MAX_FONT_BYTES，IndexedDB
+ * - 仅 https（mixed content 防线）；名称门禁（含逗号/与库内同名拒收——槽位与
+ *   下拉均以 name 为键，台账 Low）；单文件 >30MB 拒收（MAX_FONT_BYTES，IndexedDB
  *   配额保护）；fetch 失败/非字体内容抛错误态（信息面向 UI 列表错误态 + 重试钮）；
  * - 添加管线「先装载验证后入库」：FontFace.load reject（非字体内容）不落库，列表
  *   不留死记录；错误态记录由消费方（Task 5）暂存待重试；
@@ -110,15 +111,26 @@ export function stemOf(pathOrName: string): string {
   }
 }
 
-/** 添加共用尾段：30MB 门禁 → 先装载验证 → 入库 → 注册 document.fonts。 */
+/**
+ * 添加共用尾段（台账 Low 顺序：名称门禁在前，不合法不发起装载）：名称门禁（逗号
+ * 拒收——name 经槽位进 fontFamilyValue 会被拆成多级回退栈，语义漂移；同名拒收——
+ * 下拉/管理列表/槽位回落全部按 name 比对，重名即引用错位）→ 30MB 门禁 → 先装载
+ * 验证 → 入库 → 注册 document.fonts。
+ */
 async function addFromBuffer(
   buf: ArrayBuffer,
   meta: { kind: 'url' | 'file'; url?: string; name: string }
 ): Promise<FontRecord> {
+  const name = meta.name || 'font';
+  if (name.includes(',')) {
+    throw new Error(`字体名称不能包含逗号：「${name}」（逗号是 family 多级回退分隔符）`);
+  }
+  if ((await listFontRecords()).some((r) => r.name === name)) {
+    throw new Error(`已存在同名字体「${name}」，请改名或先删除原字体`);
+  }
   if (buf.byteLength > MAX_FONT_BYTES) {
     throw new Error(`字体文件超过 30MB 上限（${(buf.byteLength / 1024 / 1024).toFixed(1)}MB）`);
   }
-  const name = meta.name || 'font';
   const rec: FontRecord = {
     id: newFontId(),
     name,

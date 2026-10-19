@@ -175,6 +175,26 @@ describe('CRUD 与门禁', () => {
     expect(await listFontRecords()).toEqual([]);
   });
 
+  it('台账 Low：名称含逗号拒收（显式名/URL 末段推导同门禁），不入库不装载', async () => {
+    stubFetch(new Uint8Array([1]).buffer);
+    await expect(addFontFromUrl('https://f.example/x.woff2', 'A,B')).rejects.toThrow(/逗号/);
+    // URL 末段含逗号（%2C 解码后）同拒
+    await expect(addFontFromUrl('https://f.example/a%2Cb.woff2')).rejects.toThrow(/逗号/);
+    await expect(addFontFromFile(fileOf([1], 'c,d.ttf'))).rejects.toThrow(/逗号/);
+    expect(faces).toHaveLength(0); // 名称门禁在装载之前（fail fast）
+    expect(await listFontRecords()).toEqual([]);
+  });
+
+  it('台账 Low：与库内同名拒收（下拉/槽位回落均按 name 键比对），首条不受影响', async () => {
+    stubFetch(new Uint8Array([1]).buffer);
+    const first = await addFontFromFile(fileOf([1], 'Dup.ttf'));
+    stubFetch(new Uint8Array([2, 2]).buffer);
+    await expect(addFontFromUrl('https://f.example/other.woff2', 'Dup')).rejects.toThrow(/同名/);
+    const all = await listFontRecords();
+    expect(all.map((r) => r.id)).toEqual([first.id]); // 仅首条，无重复记录
+    expect(faces).toHaveLength(1); // 第二次未走到装载
+  });
+
   it('单文件超 30MB 拒收（URL 下载后 / 上传同门禁），不入库', async () => {
     const big = new Uint8Array(MAX_FONT_BYTES + 1);
     const fetchMock = vi.fn(async () => ({ ok: true, status: 200, arrayBuffer: async () => big.buffer }));

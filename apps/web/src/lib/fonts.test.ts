@@ -108,6 +108,14 @@ describe('mergedFamilyOptions（网络字体进下拉：Task 5 合并装配）',
     expect(new Set(merged.map((o) => o.value)).size).toBe(merged.length);
   });
 
+  it('台账 Low：网络字体名恰为哨兵值 __custom__ 时跳过（否则与哨兵选项重复，选中即误开手输框）', () => {
+    const base = fontFamilyOptions(UI_FONT_PRESETS);
+    const merged = mergedFamilyOptions(base, [CUSTOM_FONT_SENTINEL]);
+    expect(merged.filter((o) => o.value === CUSTOM_FONT_SENTINEL)).toHaveLength(1);
+    expect(merged.at(-1)).toEqual({ value: CUSTOM_FONT_SENTINEL, label: '自定义…' });
+    expect(new Set(merged.map((o) => o.value)).size).toBe(merged.length);
+  });
+
   it('空网络字体清单时与 base 全等（未添加字体 = Task 3 纯预设形态）', () => {
     const base = fontFamilyOptions(CODE_FONT_PRESETS);
     expect(mergedFamilyOptions(base, [])).toEqual(base);

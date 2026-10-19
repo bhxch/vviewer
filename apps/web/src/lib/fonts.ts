@@ -71,6 +71,8 @@ export function fontFamilyOptions(presets: readonly FontPreset[]): FontFamilyOpt
  * 收尾），已启用网络字体名插在预设组与哨兵之间——选项值即字体记录 name（槽位
  * 存储语义与预设一致，label 加「（网络）」标注来源）；与既有选项值撞车的名字
  * 跳过（select 重复值会选中错位），空清单时与 base 全等（未添加字体 = 纯预设形态）。
+ * 台账 Low：哨兵 value（__custom__）也在占用集内——网络字体恰名为 __custom__ 时
+ * 若放行会与哨兵选项重复，select 选中它即误开手输框。
  */
 export function mergedFamilyOptions(
   base: readonly FontFamilyOption[],
@@ -78,7 +80,7 @@ export function mergedFamilyOptions(
 ): FontFamilyOption[] {
   const sentinel = base.at(-1);
   if (!sentinel) return [];
-  const taken = new Set(base.slice(0, -1).map((o) => o.value));
+  const taken = new Set(base.map((o) => o.value));
   const net = networkNames
     .filter((n) => !taken.has(n))
     .map((n) => ({ value: n, label: `${n}（网络）` }));
