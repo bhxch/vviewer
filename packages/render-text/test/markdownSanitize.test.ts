@@ -252,6 +252,81 @@ describe('enrichMarkdownDom——媒体链接转换', () => {
   });
 });
 
+describe('enrichMarkdownDom——wikilink 四形态（Task 6）', () => {
+  it('[[#heading]] 产锚链接，href 原样 slug（remapHeadingHashLinks 统一改写收口）', () => {
+    const doc = renderEnriched('跳[[#目标]]转\n\n## 目标\n');
+    const a = doc.querySelector('a[data-wikilink="anchor"]')!;
+    expect(a).not.toBeNull();
+    expect(a.getAttribute('href')).toBe('#目标');
+  });
+
+  it('![[img]] 与尺寸段：|W 产 width、|WxH 产 width+height', () => {
+    const doc = renderEnriched('![[pic.png]] 与 ![[p2.png|100]] 与 ![[p3.png|100x50]]\n');
+    const imgs = doc.querySelectorAll('img');
+    expect(imgs.length).toBe(3);
+    expect(imgs[0]!.getAttribute('src')).toBe('pic.png');
+    expect(imgs[0]!.hasAttribute('width')).toBe(false);
+    expect(imgs[1]!.getAttribute('src')).toBe('p2.png');
+    expect(imgs[1]!.getAttribute('width')).toBe('100');
+    expect(imgs[1]!.hasAttribute('height')).toBe(false);
+    expect(imgs[2]!.getAttribute('width')).toBe('100');
+    expect(imgs[2]!.getAttribute('height')).toBe('50');
+  });
+
+  it('非法尺寸段只取首段路径、尺寸丢弃（img 仍在，未知写法从保守）', () => {
+    const doc = renderEnriched('![[p.png|abc]] 与 ![[q.png|1x2x3|尾段]]\n');
+    const imgs = doc.querySelectorAll('img');
+    expect(imgs.length).toBe(2);
+    expect(imgs[0]!.getAttribute('src')).toBe('p.png');
+    expect(imgs[0]!.hasAttribute('width')).toBe(false);
+    expect(imgs[1]!.getAttribute('src')).toBe('q.png');
+    expect(imgs[1]!.hasAttribute('width')).toBe(false);
+  });
+
+  it('[[file]] 跨文件形态降级不可点（原文保留在 span）', () => {
+    const doc = renderEnriched('见 [[Other.md]]\n');
+    const dead = doc.querySelector('.md-wikilink-dead')!;
+    expect(dead.textContent).toBe('[[Other.md]]');
+    expect(dead.getAttribute('title')).toBe('跨文件 wikilink 不支持');
+    expect(doc.querySelector('a[href="Other.md"]')).toBeNull();
+  });
+
+  it('外域绝对地址 ![[https://…]] 不产 img（BUG-17 口径：引擎 autolink 先行 + enrich 守卫双防线）', () => {
+    // 裸 URL 被引擎先转 autolink（A 祖先被扫描跳过）——外域嵌入到不了 img
+    const doc = renderEnriched('![[https://evil.example/t.png]] 与 ![[//evil.example/u.png]]\n');
+    expect(doc.querySelector('img')).toBeNull();
+    // 引擎 linkify 拆不到的形态（enrich 收到含外域 src 的完整文本节点）走
+    // isExternalMediaSrc 守卫：降级不可点原文（docOf 直喂绕开引擎 autolink）
+    const doc2 = docOf('<p>![[https://evil.example/a b.png]]</p>');
+    enrichMarkdownDom(doc2);
+    expect(doc2.querySelector('img')).toBeNull();
+    expect(doc2.querySelector('.md-wikilink-dead')?.textContent).toBe('![[https://evil.example/a b.png]]');
+  });
+
+  it('代码内 [[x]] 字面保留：行内 code 与围栏均不触发', () => {
+    const doc = renderEnriched('`[[x]]` 与\n\n```\n[[y]]\n```\n');
+    expect(doc.querySelector('code')!.textContent).toContain('[[x]]');
+    expect(doc.querySelector('pre')!.textContent).toContain('[[y]]');
+    expect(doc.querySelector('a[data-wikilink]')).toBeNull();
+    expect(doc.querySelector('.md-wikilink-dead')).toBeNull();
+  });
+
+  it('链接内不嵌套改写（A 祖先跳过）', () => {
+    const doc = renderEnriched('[文本 [[x]] 更多](https://a.example/b)\n');
+    expect(doc.querySelector('.md-wikilink-dead')).toBeNull();
+    expect(doc.querySelector('a')!.textContent).toContain('[[x]]');
+  });
+
+  it('混合段落多节点拆分：文字与两种 wikilink 交错，全文不丢字', () => {
+    const doc = renderEnriched('前 [[#a]] 中 [[Other.md]] 后\n');
+    const p = doc.querySelector('p')!;
+    expect(p.childNodes.length).toBeGreaterThanOrEqual(5);
+    expect(p.querySelector('a[data-wikilink="anchor"]')).not.toBeNull();
+    expect(p.querySelector('.md-wikilink-dead')).not.toBeNull();
+    expect(p.textContent).toBe('前 [[#a]] 中 [[Other.md]] 后');
+  });
+});
+
 describe('sanitizeHtml——外域图片拦截（BUG-17 跟踪像素防线）', () => {
   it('img 的 http(s) src 移除并打 data-vv-blocked-external 标记，title 保留域名', () => {
     const out = sanitizeHtml(

@@ -117,6 +117,16 @@ describe('markdownRenderer——渲染与 TOC', () => {
     }
   });
 
+  it('wikilink [[#标题]] 经完整装配后锚 href remap 到 user-content- 命名空间（Task 6）', async () => {
+    const md = ['## 目标页', '', '跳[[#目标页]]转。'].join('\n');
+    const { target } = await renderMd(md);
+    const a = target.querySelector('a[data-wikilink="anchor"]')!;
+    expect(a).not.toBeNull();
+    // enrich 只产 href="#slug" 原样；assignHeadingIds 定型 id 后
+    // remapHeadingHashLinks 统一改写——enrich 造的 a 与作者手写链接同收口
+    expect(a.getAttribute('href')).toBe('#user-content-目标页');
+  });
+
   it('slugifyHeading 兼容导出：GFM 基名形态（全空回退 section 不再属 id 管线）', () => {
     expect(slugifyHeading('中文 标题')).toBe('中文-标题');
     expect(slugifyHeading('!!!')).toBe('section'); // 全空 slug 回退

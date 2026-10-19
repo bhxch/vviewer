@@ -204,6 +204,97 @@ function convertCallouts(root: Document): void {
 }
 
 /**
+ * wikilink 四形态（Task 6，Obsidian 语法子集）：文本节点扫描——跳过 PRE/CODE/
+ * SCRIPT/STYLE 祖先（代码字面不触发，katex 步 MATH_SKIP_TAGS 同思路）与 A（链接
+ * 内不嵌套造链接）；已处理的降级 span 同样跳过（enrichMarkdownDom 幂等契约）。
+ * - `[[#slug]]` → a[href="#slug"][data-wikilink=anchor]：href 原样保留，由
+ *   markdownRenderer 的 remapHeadingHashLinks 在 id 定型后统一改写（enrich 在
+ *   assignHeadingIds 之前运行，拿不到最终 id，不做自己的改写）；
+ * - `![[path]]` / `![[path|W]]` / `![[path|WxH]]` → img[src=path]（width/height
+ *   按 `^\d+(?:x\d+)?$` 校验的尺寸段；src 原文相对路径，markdownRenderer 的
+ *   resolveRelativeImages 按 doc 级 img 查询解析 blob URL，enrich 造的 img 自然
+ *   被覆盖）。外域 http(s)/协议相对地址不造 img——enrich 在 sanitize 之后执行，
+ *   放行即绕过净化层的外域跟踪像素拦截（BUG-17），降级为不可点原文；
+ * - `[[file…]]` → span.md-wikilink-dead（跨文件 wikilink 不支持，原文保留不可点）。
+ * 尺寸段非法（含多段）时只取首段路径、尺寸丢弃——未知写法从保守。
+ */
+const WIKILINK_RE = /(!?)\[\[([^\[\]]+)\]\]/g;
+const WIKILINK_SKIP_TAGS = new Set(['PRE', 'CODE', 'SCRIPT', 'STYLE', 'A']);
+
+function buildWikilink(root: Document, embed: boolean, content: string, raw: string): Node {
+  if (embed) {
+    const path = (content.split('|')[0] ?? '').trim();
+    if (path !== '' && !isExternalMediaSrc(path)) {
+      const img = root.createElement('img');
+      img.setAttribute('src', path);
+      const size = content.split('|')[1]?.match(/^(\d+)(?:x(\d+))?$/);
+      if (size) {
+        img.setAttribute('width', size[1]!);
+        if (size[2] !== undefined) img.setAttribute('height', size[2]!);
+      }
+      return img;
+    }
+  } else {
+    const slug = content.trim();
+    if (slug.startsWith('#')) {
+      const a = root.createElement('a');
+      a.setAttribute('href', `#${slug.slice(1)}`);
+      a.setAttribute('data-wikilink', 'anchor');
+      a.textContent = raw;
+      return a;
+    }
+  }
+  // 跨文件 wikilink / 外域嵌入降级：不可点原文
+  const span = root.createElement('span');
+  span.className = 'md-wikilink-dead';
+  span.setAttribute('title', '跨文件 wikilink 不支持');
+  span.textContent = raw;
+  return span;
+}
+
+function convertWikilinks(root: Document): void {
+  const walker = root.createTreeWalker(root.body, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      if (parent?.classList.contains('md-wikilink-dead')) return NodeFilter.FILTER_REJECT;
+      let cur: Node | null = node.parentNode;
+      while (cur && cur !== root.body) {
+        if (cur.nodeType === 1 && WIKILINK_SKIP_TAGS.has((cur as Element).tagName)) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        cur = cur.parentNode;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+
+  // 先收集后替换：替换产生的片段含原文形态的 [[..]] 文本（在 a/span 内），
+  // 快照避免 walker 复访二次改写
+  const targets: Text[] = [];
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    if ((node.nodeValue ?? '').includes('[[')) targets.push(node as Text);
+  }
+
+  for (const target of targets) {
+    const value = target.nodeValue ?? '';
+    WIKILINK_RE.lastIndex = 0;
+    if (!WIKILINK_RE.test(value)) continue;
+    WIKILINK_RE.lastIndex = 0;
+    const frag = root.createDocumentFragment();
+    let last = 0;
+    let m: RegExpExecArray | null;
+    while ((m = WIKILINK_RE.exec(value)) !== null) {
+      if (m.index > last) frag.appendChild(root.createTextNode(value.slice(last, m.index)));
+      frag.appendChild(buildWikilink(root, m[1] === '!', m[2] ?? '', m[0]));
+      last = m.index + m[0].length;
+    }
+    if (last < value.length) frag.appendChild(root.createTextNode(value.slice(last)));
+    target.replaceWith(frag);
+  }
+}
+
+/**
  * 任务列表类名归一化：直接产 HTML 的引擎（远程 comrak tasklist）不给 li 加类，
  * 而 markdown-it-task-lists 输出 li.task-list-item——补齐保证两引擎样式一致。
  * 幂等：已有类的 li（本地路径）不重复添加。
@@ -229,9 +320,11 @@ function normalizeTaskLists(root: Document): void {
   }
 }
 
-/** 净化后 DOM 的展示性增强入口（幂等：callout/媒体替换后原元素已不复存在）。 */
+/** 净化后 DOM 的展示性增强入口（幂等：callout/媒体替换后原元素已不复存在；
+ * wikilink 扫描跳过 A/降级 span 祖先，已处理文本不二次改写）。 */
 export function enrichMarkdownDom(root: Document): void {
   convertMediaElements(root);
   convertCallouts(root);
+  convertWikilinks(root); // Task 6：注册在 callout 之后（折叠卡片标题内的 wikilink 同获改写）
   normalizeTaskLists(root);
 }

@@ -146,6 +146,8 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
   font-size: .8em; color: var(--ui-fg-muted); }
 .markdown-alert-collapsed > .markdown-alert-title::after { content: '▸'; }
 .markdown-alert-collapsed > :not(.markdown-alert-title) { display: none; }
+/* 跨文件 wikilink 降级（Task 6）：不可点原文，虚线下划线悬停提示 */
+.vv-markdown .md-wikilink-dead { border-bottom: 1px dashed var(--ui-border); cursor: default; }
 /* html 沙箱预览（htmlRenderer）：顶部视图按钮组 + iframe/源码内容区 */
 .vv-html { display: flex; flex-direction: column; height: 100%; }
 .vv-html-toolbar { display: flex; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--ui-border); flex: none; }
