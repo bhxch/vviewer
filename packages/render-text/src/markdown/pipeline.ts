@@ -199,7 +199,9 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
       toggle.textContent = '图';
     });
     view.appendChild(img);
-    view.setAttribute('data-mermaid', type.id === 'mermaid' ? source : ''); // mermaid 保留重渲染锚语义
+    // 锚仅 mermaid 视图保留（Task 5 以 [data-mermaid] 选择器做主题重渲染，空属性
+    // 同样命中选择器——plantuml/graphviz 等非 mermaid 视图不得设，否则被误重渲染）
+    if (type.id === 'mermaid') view.setAttribute('data-mermaid', source);
     return;
   }
 

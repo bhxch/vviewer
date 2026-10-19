@@ -50,6 +50,20 @@ describe('diagrams 步：注册表分发', () => {
     });
     const img = doc.querySelector('.md-diagram-view img') as HTMLImageElement;
     expect(img.getAttribute('src')!.startsWith('https://k.example.com/plantuml/svg/')).toBe(true);
+    // data-mermaid 锚仅 mermaid 视图保留（Task 5 以 [data-mermaid] 做主题重渲染，
+    // 空属性同样命中选择器）——非 mermaid 的 kroki 视图不得带该属性
+    expect(doc.querySelector('.md-diagram-view[data-mermaid]')).toBeNull();
+  });
+
+  it('kroki 模式 mermaid：视图保留 data-mermaid 源码锚（非 mermaid 不设）', async () => {
+    const doc = docWithFence('mermaid', 'graph TD; a-->b;');
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: { krokiHost: 'https://k', mermaidTheme: 'default', modeOf: () => 'kroki' }
+    });
+    const view = doc.querySelector('.md-diagram-view')!;
+    expect(view.getAttribute('data-mermaid')).toBe('graph TD; a-->b;');
+    expect(doc.querySelector('.md-diagram-view[data-mermaid]')).toBe(view);
   });
 
   it('kroki 不支持语言（math）回退 source 模式', async () => {
