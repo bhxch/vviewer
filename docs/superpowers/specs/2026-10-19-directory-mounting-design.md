@@ -35,7 +35,33 @@
 - **S3 实现**：手写 SigV4（AWS 官方测试向量校验）+ ListObjectsV2 `delimiter=/` 映射目录语义（CommonPrefixes=子目录、Contents=文件）；prefix 即挂载子路径；path-style 请求（MinIO/R2/主流 S3 兼容面），配置可切 virtual-hosted。
 - **WebDAV 实现**：PROPFIND Depth:1 解析 multistatus（轻量 XML 提取，不引重解析器）+ GET；**Range 兼容防线**：部分 dav 服务器忽略 Range → 按 content-length 与请求窗校验，不符标记该根 `rangeCapable=false`，前端走 io-streaming 既有全量切片通道。
 - **HttpTransport trait 接缝**：`async fn execute(method, url, headers, body) -> Response`；native 接线 = reqwest；**worker 侧 wasm fetch 实现留待多端发布 spec**（本 spec 只保证 trait 边界干净、不引 tokio-only 类型穿接口）。
-- **TOML 配置**：`--config <path>`；`[[mount]]` 节 `{ kind='s3'|'webdav', label, endpoint, bucket, prefix, access_key_id, secret_access_key | username, password, path_style }`；解析失败/必填缺失 exit code 2（同现状启动校验）。
+- **TOML 配置文件**：`--config <path>`，全参数配置面见 §2.1；挂载用 `[[mount]]` 节 `{ kind='s3'|'webdav', label, endpoint, bucket, prefix, access_key_id, secret_access_key | username, password, path_style }`。
+
+### 2.1 全参数 TOML 配置文件（审阅反馈轮扩容）
+
+`--config` 不只承载 mount——**serve 全部既有可配置参数一并纳入**，配置文件成为完整服务端配置面（服务端首个配置文件机制由此统一落地）：
+
+```toml
+root = ["/data/docs", "/data/books"]    # 对应 --root（数组，首个为 0 号根）
+web_dist = "./dist"                     # 对应 --web-dist
+port = 8321                             # 对应 --port
+token = "..."                           # 对应 --token（敏感项，文件权限建议 600）
+allow_lan = false                       # 对应 --allow-lan
+hidden = false                          # 对应 --hidden
+cors_origin = "https://a.example.com"   # 对应 --cors-origin
+compute = false                         # 对应 --compute
+log_file = "./vviewer.log"              # 对应 --log-file
+
+[[mount]]                               # 附加挂载（§2 原有语义）
+kind = "s3"
+```
+
+- **优先级：CLI > 配置文件**——文件提供默认值，显式 CLI 参数覆盖；`--root` 为**整体替换语义**（CLI 出现任一 `--root` 即忽略文件 `root` 数组，不合并，杜绝部分覆盖歧义）。
+- `--token-gen` 不进配置（动作型参数非配置值）；文件含 `token` 且 CLI 给 `--token-gen` 时按覆盖语义生成新 token。
+- **未知键报错 exit 2**：拼错静默忽略是安全反模式（如 `token` 误拼致无鉴权裸奔启动）；值类型不符/必填缺失同现状 exit code 2。
+- 合并后走**同一条启动校验链**（`allow_lan` 无 token 拒、CORS 通配拒、root 空拒、路径非目录拒——现有校验零改动，仅数据来源多一路）。
+- README 补配置文件示例与 600 权限建议。
+- worker 形态无文件系统：全参数配置文件为 **native-only**；worker 侧挂载仍走 `VV_MOUNTS` env JSON（结构对齐 `[[mount]]`，见多端发布 spec）。
 - **根序**：rootIndex = fs 根（--root 依序）+ 静态挂载（配置序）；单根兼容视图不变。health 扩展：`fsRoots: N`（fs 根数边界）+ 挂载根摘要（脱敏，无凭据）；per-root 能力（watch/search）随 `GET /api/mounts` 宣告。
 
 ## 3. 阶段二：后端代理挂载 API 与前端接入
@@ -74,7 +100,7 @@
 
 ## 7. 测试
 
-- Rust 单测：SigV4 AWS 官方向量、S3 list→tree 映射（delimiter/CommonPrefixes 边界）、dav multistatus 解析（含编码路径/集合尾斜杠）、Range 防线判定、TOML 解析与校验、HttpTransport mock 三后端全接口——**trait 接缝使 mock 无需真实网络**。
+- Rust 单测：SigV4 AWS 官方向量、S3 list→tree 映射（delimiter/CommonPrefixes 边界）、dav multistatus 解析（含编码路径/集合尾斜杠）、Range 防线判定、全参数 TOML 解析与校验（CLI>文件优先级合并/`--root` 整体替换/未知键报错/`--token-gen` 覆盖/合并后统一校验链）、HttpTransport mock 三后端全接口——**trait 接缝使 mock 无需真实网络**。
 - Rust 集成：LocalFs 下沉迁移后既有 file/tree/watch 测试全绿（行为零变化锚）。
 - 前端单测：直连签名向量、凭据 CRUD 与版本迁移、对账重注册幂等、`rangeCapable=false` 切片通道。
 - e2e：mock S3（本地伺服最小 S3 语义）/mock dav 伺服下管理页三组增删改查、代理挂载注册→重连幂等→删除失效帧、直连 CORS 失败文案、挂载根打开/浏览/高亮/compute 链路、watch 不可用提示。
