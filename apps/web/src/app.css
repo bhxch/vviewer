@@ -123,6 +123,9 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .vv-markdown .md-diagram-view svg { max-width: 100%; height: auto; }
 .vv-markdown .md-diagram-view img { max-width: 100%; }
 .vv-markdown .md-diagram-view.md-diagram-error { display: block; white-space: pre-wrap; color: var(--ui-fg-muted); font-family: var(--vv-code-font); font-size: 13px; }
+/* hidden 属性兜底：上方 display:flex/block 作者规则特异性压过 UA [hidden]，切换/源码
+   模式/kroki 失败态设了 hidden 视图仍可见（e2e 揭示）——末位同特异性显式 display:none */
+.vv-markdown .md-diagram-view[hidden] { display: none; }
 .vv-markdown .md-diagram-source { padding: .6rem; overflow-x: auto; }
 .vv-markdown .md-diagram-source code { font-family: var(--vv-code-font); font-size: 13px; }
 .md-lightbox-overlay { position: fixed; inset: 0; z-index: 100; background: rgb(0 0 0 / 70%);
