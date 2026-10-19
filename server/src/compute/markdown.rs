@@ -382,4 +382,18 @@ mod tests {
         assert!(html.contains("footnote-ref"), "{html}");
         assert!(html.contains("注内容"), "{html}");
     }
+
+    #[test]
+    fn inline_footnote_empty_kept_literal() {
+        // 空 ^[] / 空白 ^[ ]：comrak 0.56 保持字面（实测探针输出 <p>前^[]后</p>，
+        // 不产 footnote-ref、不产尾注节）。本地 markdown-it-footnote 同输入产出
+        // footnote-ref + 空尾注条目——双端该边界形态不同，按等价面口径（class +
+        // DOM 结构层）记档差异、各锁现状，不强行对齐（详见 Task 4 报告修复轮节）。
+        for src in ["前^[]后", "前^[ ]后"] {
+            let html = render(src, false);
+            assert!(html.contains(src), "{html}");
+            assert!(!html.contains("footnote-ref"), "{html}");
+            assert!(!html.contains("footnotes"), "{html}");
+        }
+    }
 }

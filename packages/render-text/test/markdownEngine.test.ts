@@ -154,6 +154,31 @@ describe('renderMarkdownToHtml——行内脚注 ^[note]（Task 4）', () => {
     expect(html).toContain('<code>^[x]</code>');
     expect(html).not.toContain('footnote-ref');
   });
+
+  it('空内容 ^[] / ^[ ] 产空 footnote-ref + 空尾注条目（内建现状，偏离 brief 规格处）', () => {
+    // 与 brief 规格「内容非空」的差异声明：零实现路径下无自写 rule 可拦截空内容，
+    // markdown-it-footnote footnote_inline 对空/空白照产脚注（实测产物如断言）。
+    // 双端该边界形态不同：comrak 0.56 对 ^[]/^[ ] 保持字面（Rust 侧探针单测
+    // inline_footnote_empty_kept_literal 固化）——按等价面口径（class + DOM 结构
+    // 层）记档差异、各锁现状，不强行对齐；拦截空内容需推翻零实现选型自写 rule，
+    // 收益（空脚注条目无害、不吞不丢内容）不抵成本。
+    const html = renderMarkdownToHtml('前^[]后 与 前^[ ]后').html;
+    // 两个空注按出现顺序编号（与 [^1] 同池）；尾注条目内仅剩回链、无注文本
+    expect(html).toMatch(/<sup class="footnote-ref"><a href="#fn1" id="fnref1">\[1\]<\/a><\/sup>/);
+    expect(html).toMatch(/<sup class="footnote-ref"><a href="#fn2" id="fnref2">\[2\]<\/a><\/sup>/);
+    expect(html).toContain('<section class="footnotes">');
+    expect(html).toMatch(/<li id="fn1" class="footnote-item"><p> {0,2}<a href="#fnref1" class="footnote-backref">/);
+    expect(html).toMatch(/<li id="fn2" class="footnote-item"><p> {0,2}<a href="#fnref2" class="footnote-backref">/);
+  });
+
+  it('嵌套方括号 ^[a [b] c] 按链接标签语义配对，内容整取（优于 brief 规格）', () => {
+    // footnote_inline 经 md.helpers.parseLinkLabel 取标签（括号计数配对），
+    // 内容 a [b] c 整体入注——brief 规格只写「直到 ]」，内建行为更优，顺带固化。
+    const html = renderMarkdownToHtml('前^[a [b] c]后').html;
+    expect(html).toMatch(/<sup class="footnote-ref">/);
+    expect(html).toContain('a [b] c');
+    expect(html).not.toContain('^[a [b] c]');
+  });
 });
 
 describe('renderMarkdownToHtml——front matter', () => {
