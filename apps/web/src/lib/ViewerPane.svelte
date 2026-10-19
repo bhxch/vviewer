@@ -6,7 +6,7 @@
   import type { MarkdownEngineState } from '@vviewer/render-text/markdown/markdownRenderer';
   import type { Tab } from './openFlow.svelte';
   import { persistScroll } from './openFlow.svelte';
-  import { setFileMeta, setInspector, inspectorBus, type FileOpenWith, type InspectorSnapshot } from './metaStore.svelte';
+  import { setFileMeta, setInspector, inspectorBus, setExportHandle, type FileOpenWith, type InspectorSnapshot } from './metaStore.svelte';
   import { openWithOf } from './openWith';
   import { mergeAbortSignals } from './mergeAbortSignals';
   import { dispatcher, registry, cancelMarkdownRemote } from './viewer';
@@ -284,6 +284,12 @@ import SearchPanel from './SearchPanel.svelte';
         // TOC 数据上行（Task 5）：markdown 实例提供 getToc，其余渲染器清空右栏目录
         const readToc = 'getToc' in res.instance ? res.instance.getToc : null;
         ontoc?.(readToc?.() ?? []);
+        // 导出句柄上行（md-export Task 2）：markdown 实例提供 getExportDocument
+        // （getToc 同款鸭子探测，不动 core 类型）；其余渲染器/降级实例清空——
+        // MetaPanel「导出」动作区以句柄可得性显隐（overrideRenderer 指向 markdown
+        // 时句柄可得，同样显示）
+        const readExport = (res.instance as { getExportDocument?: () => Document | null }).getExportDocument;
+        setExportHandle(typeof readExport === 'function' ? readExport.bind(res.instance) : null);
         // 滚动恢复：目录树切换回该 tab 时回到上次位置。
         // code 渲染器滚动在内部 .vv-code-pre（外层不滚动），接 getScrollHost()；其余维持外层容器。
         const inner =
@@ -312,6 +318,8 @@ import SearchPanel from './SearchPanel.svelte';
         const message = err instanceof Error ? err.message : String(err);
         live = showErrorCard(host, message, current.source);
         instance = live;
+        // 错误卡片实例无导出句柄：导出动作区随句柄清空不显示
+        setExportHandle(null);
         // 错误卡片实例无 meta：状态栏元数据段清空，属性面板保留名称/来源占位
         metaLabel = '';
         setFileMeta({ name: current.source.name, sourceLabel: current.source.storeLabel });
@@ -324,6 +332,7 @@ import SearchPanel from './SearchPanel.svelte';
       stopWatchEngine();
       stopWatchMeta(); // meta 轮询随实例销毁停止（readInstanceMeta 通道上行面）
       setFileMeta(null); // tab 切换/销毁：属性面板随之清空
+      setExportHandle(null); // tab 切换/销毁：导出动作区随句柄清空（md-export Task 2）
       ontoc?.([]); // tab 切换/销毁：右栏目录随之清空
       scrollHost?.removeEventListener('scroll', onScroll);
       scrollHost = null;

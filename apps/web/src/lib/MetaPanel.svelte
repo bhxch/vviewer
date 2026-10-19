@@ -9,8 +9,20 @@
   // （ViewerPane 轮询 hex 实例 getInspector 上行）；字节序 select 写 inspectorBus
   // （模块级 $state 总线下行，ViewerPane 探测 hex 实例 setLittle 透传——本组件
   // 无 props 是 C 项约束）。样式在 app.css（区块全局类，与 .meta-list 同层）。
-  import { fileMeta, setInspectorLittle } from './metaStore.svelte';
+  import { fileMeta, setInspectorLittle, exportState, getExportDoc } from './metaStore.svelte';
   import { tabStore } from './openFlow.svelte';
+  import {
+    collectExportHtml,
+    collectPrintHtml,
+    exportBaseCss
+  } from '@vviewer/render-text/markdown/export';
+  import {
+    downloadExport,
+    exportFileName,
+    printDocument,
+    repaintMermaidForPrint,
+    resolveExportImage
+  } from './markdownExport';
 
   /** 手选打开方式（MetaPanel 由 AppShell 渲染、非 ViewerPane 子组件，故回调
    * 经 tabStore 单例直连而非 prop 下传）：'' = 自动（清 override），其余写 override */
@@ -18,6 +30,107 @@
     const tab = tabStore.list.find((t) => t.active);
     if (!tab) return;
     tabStore.setRendererOverride(tab.id, id === '' ? null : id);
+  }
+
+  // ---------- 导出动作区（md-export Task 2，spec 2026-10-19 §6/§7） ----------
+  // 可见性走 metaStore.exportState.available（markdown 实例 getExportDocument 句柄
+  // 可得性，ViewerPane 上行）；两钮共享装配链：实例句柄取克隆 doc →（PDF 路径先
+  // mermaid 浅色重画）→ collectExportHtml 自包含 HTML → HTML 钮 Blob 下载 / PDF 钮
+  // collectPrintHtml 包打印模板经隐藏 iframe 唤起系统打印（二选一不并存的主路径，
+  // 被策略拦截经 notice 降级提示不静默）。连点防抖用 exportBusy。
+
+  let exportBusy = $state(false);
+  let exportNotice = $state('');
+
+  let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 降级/结果提示（不静默）：4s 自动消退 */
+  function showNotice(text: string): void {
+    exportNotice = text;
+    if (noticeTimer !== null) clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => {
+      exportNotice = '';
+      noticeTimer = null;
+    }, 4000);
+  }
+
+  /** 导出样式合成（spec §6）：基础排版单源常量（export.ts exportBaseCss）+ 当前
+   * 生效主题两块（style#vv-code-theme 的 --vv-ts-* 与 --hljs-* 及 UI vars，与预留
+   * 的 style#vv-font——字体系统落地后自动带上，缺节点跳过）。 */
+  function currentStyleCss(): string {
+    const parts = [exportBaseCss];
+    for (const id of ['vv-code-theme', 'vv-font']) {
+      const el = document.getElementById(id) as HTMLStyleElement | null;
+      if (el?.textContent) parts.push(el.textContent);
+    }
+    return parts.join('\n');
+  }
+
+  /** 克隆 doc 的亮暗标记（exportBaseCss 暗块键 html[data-vv-mode]）：取当前注入
+   * 的代码主题节点 dataset.mode（theme.ts applyAppearance 写入），缺失回退亮色。 */
+  function stampMode(doc: Document): void {
+    const mode = (document.getElementById('vv-code-theme') as HTMLStyleElement | null)?.dataset.mode;
+    doc.documentElement.setAttribute('data-vv-mode', mode === 'dark' ? 'dark' : 'light');
+  }
+
+  /** 共享装配：实例快照 → 样式/模式标记 → 自包含 HTML；快照不可得（实例已销毁
+   * 等竞态）返回 null 并提示。 */
+  async function assembleExportHtml(): Promise<string | null> {
+    const doc = getExportDoc();
+    if (!doc) {
+      showNotice('导出快照不可用，请重新打开文件后再试');
+      return null;
+    }
+    stampMode(doc);
+    return collectExportHtml(doc, {
+      title: fileMeta.name,
+      styleCss: currentStyleCss(),
+      resolveImage: resolveExportImage
+    });
+  }
+
+  async function onExportHtml(): Promise<void> {
+    if (exportBusy) return;
+    exportBusy = true;
+    try {
+      const html = await assembleExportHtml();
+      if (html === null) return;
+      downloadExport(html, exportFileName(fileMeta.name, 'html'));
+      showNotice('已导出 HTML');
+    } catch (err) {
+      showNotice(`导出 HTML 失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      exportBusy = false;
+    }
+  }
+
+  async function onExportPdf(): Promise<void> {
+    if (exportBusy) return;
+    exportBusy = true;
+    try {
+      // PDF 独立装配链：克隆 doc 先 mermaid 浅色重画（spec §7，HTML 导出保持当前
+      // 主题 WYSIWYG 不走此步）再 collectExportHtml → collectPrintHtml 包打印模板
+      const doc = getExportDoc();
+      if (!doc) {
+        showNotice('导出快照不可用，请重新打开文件后再试');
+        return;
+      }
+      await repaintMermaidForPrint(doc);
+      stampMode(doc);
+      const printSource = await collectExportHtml(doc, {
+        title: fileMeta.name,
+        styleCss: currentStyleCss(),
+        resolveImage: resolveExportImage
+      });
+      const printHtml = collectPrintHtml(printSource, { page: 'a4' });
+      printDocument(printHtml, () =>
+        showNotice('当前环境无法唤起打印，请改用浏览器菜单打印并另存为 PDF')
+      );
+      showNotice('已唤起系统打印，请在对话框中选择「另存为 PDF」');
+    } catch (err) {
+      showNotice(`导出 PDF 失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      exportBusy = false;
+    }
   }
 </script>
 
@@ -82,6 +195,16 @@
             </div>
           {/each}
         </dl>
+      </div>
+    {/if}
+    {#if fileMeta.name && exportState.available}
+      <div class="meta-export">
+        <span class="meta-export-title">导出</span>
+        <div class="meta-export-actions">
+          <button type="button" class="meta-export-btn" onclick={onExportHtml} disabled={exportBusy}>导出 HTML</button>
+          <button type="button" class="meta-export-btn" onclick={onExportPdf} disabled={exportBusy}>导出 PDF</button>
+        </div>
+        {#if exportNotice}<p class="meta-export-notice" role="status">{exportNotice}</p>{/if}
       </div>
     {/if}
   {:else}

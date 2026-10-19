@@ -98,3 +98,29 @@ export const inspectorBus = $state<{ little: boolean }>({ little: true });
 export function setInspectorLittle(little: boolean): void {
   inspectorBus.little = little;
 }
+
+// ---------- 导出动作区上行（md-export Task 2） ----------
+
+/**
+ * 导出能力状态（MetaPanel 据此显隐「导出」动作区）：ViewerPane 探测 markdown
+ * 实例 getExportDocument 写入（getToc/getInspector 同款鸭子探测，不动 core 类型）。
+ * 仅完整 markdown 实例有句柄——非 markdown 渲染器、超大文件降级视图、错误卡片
+ * 皆无 → 钮不显示；Tab.overrideRenderer 指向 markdown 时因句柄可得同样显示
+ * （计划 Global Constraints「以实例句柄可得性为准」）。
+ */
+export const exportState = $state<{ available: boolean }>({ available: false });
+
+/** 导出快照 getter（非响应式模块槽）：Document 克隆是点击时即取的命令式快照，
+ * 不进 $state 响应面（响应化只会让每次克隆触发无意义的面板重渲染）。 */
+let exportDocGetter: (() => Document | null) | null = null;
+
+/** 上行/清空导出句柄（实例切换由 ViewerPane 渲染 effect 的成功与清理两路调用）。 */
+export function setExportHandle(getter: (() => Document | null) | null): void {
+  exportDocGetter = getter;
+  exportState.available = getter !== null;
+}
+
+/** 取当前 markdown 实例的导出快照（无句柄/实例已销毁返回 null，调用方走降级提示）。 */
+export function getExportDoc(): Document | null {
+  return exportDocGetter?.() ?? null;
+}
