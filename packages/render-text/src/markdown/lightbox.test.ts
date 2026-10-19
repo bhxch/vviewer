@@ -217,3 +217,72 @@ describe('画廊导航与键盘集', () => {
     }
   });
 });
+
+describe('缩放平移交互（wheel/拖拽 pan/拖拽吞 click）', () => {
+  it('wheel 缩放以光标为中心且限幅（deltaY<0 放大）', () => {
+    const doc = docOf('<img src="a.png" alt="A">');
+    openLightbox(doc.querySelector('img')!, noCtx, collectGallery(doc.body));
+    const overlay = overlayOf(doc);
+    const stage = overlay.querySelector<HTMLElement>('.md-lightbox-stage')!;
+    const wheel = (deltaY: number, clientX = 150, clientY = 50): void => {
+      overlay.dispatchEvent(new WheelEvent('wheel', { deltaY, clientX, clientY, cancelable: true }));
+    };
+    // 光标 (150,50) 锚定：zoom 1→1.25，t = c − 1.25·c = (−37.5, −12.5)，光标下内容点不动
+    wheel(-120);
+    expect(viewOf(stage)).toEqual({ tx: -37.5, ty: -12.5, zoom: 1.25 });
+    // 连滚超上限 clamp 到 8；再反方向滚穿下限 clamp 到 0.2
+    for (let i = 0; i < 30; i += 1) wheel(-120);
+    expect(viewOf(stage).zoom).toBe(8);
+    for (let i = 0; i < 60; i += 1) wheel(120);
+    expect(viewOf(stage).zoom).toBe(0.2);
+  });
+
+  it('拖拽 pan：位移写入 tx/ty（增量相对按下点；恒允许，zoom=1 亦可拖），松手即停', () => {
+    const doc = docOf('<img src="a.png" alt="A">');
+    openLightbox(doc.querySelector('img')!, noCtx, collectGallery(doc.body));
+    const overlay = overlayOf(doc);
+    const stage = overlay.querySelector<HTMLElement>('.md-lightbox-stage')!;
+    const mouse = (type: string, x: number, y: number): void => {
+      const Target = type === 'mousedown' ? stage : doc;
+      Target.dispatchEvent(new MouseEvent(type, { button: 0, clientX: x, clientY: y, bubbles: true }));
+    };
+    expect(stage.classList.contains('md-lightbox-dragging')).toBe(false);
+    mouse('mousedown', 100, 100);
+    expect(stage.classList.contains('md-lightbox-dragging')).toBe(true);
+    mouse('mousemove', 160, 140);
+    expect(viewOf(stage)).toEqual({ tx: 60, ty: 40, zoom: 1 });
+    mouse('mousemove', 130, 120); // 第二段增量相对按下点，不叠加
+    expect(viewOf(stage)).toEqual({ tx: 30, ty: 20, zoom: 1 });
+    mouse('mouseup', 130, 120);
+    expect(stage.classList.contains('md-lightbox-dragging')).toBe(false);
+    mouse('mousemove', 200, 200); // 松手后不再跟随
+    expect(viewOf(stage)).toEqual({ tx: 30, ty: 20, zoom: 1 });
+  });
+
+  it('T2 裁决：拖拽（位移超阈值）后的收尾 click 不误关 overlay，随后的真点背景仍关', () => {
+    const doc = docOf('<img src="a.png" alt="A">');
+    openLightbox(doc.querySelector('img')!, noCtx, collectGallery(doc.body));
+    const overlay = overlayOf(doc);
+    const stage = overlay.querySelector<HTMLElement>('.md-lightbox-stage')!;
+    // 拖拽序列：mousedown（stage）→ 大位移 mousemove → mouseup（落点经冒泡到 overlay）
+    stage.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: 100, clientY: 100, bubbles: true }));
+    doc.dispatchEvent(new MouseEvent('mousemove', { clientX: 160, clientY: 140, bubbles: true }));
+    doc.dispatchEvent(new MouseEvent('mouseup', { clientX: 160, clientY: 140, bubbles: true }));
+    overlay.dispatchEvent(new MouseEvent('click', { bubbles: true })); // 拖拽收尾 click
+    expect(overlayOf(doc)).not.toBeNull(); // 不得意外关闭
+    overlay.dispatchEvent(new MouseEvent('click', { bubbles: true })); // 真正点背景
+    expect(overlayOf(doc)).toBeNull();
+  });
+
+  it('微动（未超阈值）不视为拖拽：收尾 click 仍按点击语义关背景', () => {
+    const doc = docOf('<img src="a.png" alt="A">');
+    openLightbox(doc.querySelector('img')!, noCtx, collectGallery(doc.body));
+    const overlay = overlayOf(doc);
+    const stage = overlay.querySelector<HTMLElement>('.md-lightbox-stage')!;
+    stage.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: 100, clientY: 100, bubbles: true }));
+    doc.dispatchEvent(new MouseEvent('mousemove', { clientX: 101, clientY: 101, bubbles: true })); // Manhattan 2 ≤ 3
+    doc.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    overlay.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(overlayOf(doc)).toBeNull();
+  });
+});
