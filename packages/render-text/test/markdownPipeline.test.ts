@@ -328,6 +328,21 @@ describe('lightbox 步', () => {
     doc.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
     expect(doc.getElementById('md-lightbox-overlay')).not.toBeNull();
   });
+
+  it('画廊点击时对 galleryScope 收集：节点收养出管线 doc 后仍全量（集成回归）', async () => {
+    // 真实挂载顺序（markdownRenderer）：管线在 DOMParser doc 上跑完，节点随后被
+    // replaceChildren 收养进挂载容器——点击发生在收养后，collectGallery 若仍对
+    // 管线期 root 查询必得空画廊（每图退化为单条，b-md-lightbox e2e 实证）
+    const doc = docOf('![a](a.png)\n\n![b](b.png)\n');
+    const mount = doc.createElement('div');
+    await runPipeline(doc, noopCtx({ galleryScope: mount }));
+    mount.append(...Array.from(doc.body.childNodes)); // 模拟挂载收养
+    expect(doc.body.querySelectorAll('img')).toHaveLength(0); // 管线期 doc 已空
+    mount.querySelector('img')!.click();
+    const overlay = doc.getElementById('md-lightbox-overlay')!;
+    expect(overlay.querySelector('.md-lightbox-count')!.textContent).toBe('1/2');
+    // 未传 galleryScope 回退 root：节点未离开 doc 的既有单测场景不翻转（上面各用例）
+  });
 });
 
 describe('themeClassPrefix 与集成', () => {

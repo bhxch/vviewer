@@ -504,7 +504,10 @@ export const markdownRenderer: Renderer = {
     await runPipeline(doc, {
       highlightFence: fenceToHtml,
       lightboxOwner,
-      diagram: getDiagramOptions() ?? undefined
+      diagram: getDiagramOptions() ?? undefined,
+      // 灯箱画廊收集域：挂载时节点收养出管线期 doc（下方 replaceChildren），
+      // 点击发生在收养后——对挂载容器活查询才能收全 img/图表 svg
+      galleryScope: target
     });
     if (destroyed) return { destroy() {} };
     // 相对图片 → 同 store 文件 URL（未注入 resolver 时原样保留，404 现状）

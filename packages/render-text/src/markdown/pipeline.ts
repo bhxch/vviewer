@@ -29,6 +29,15 @@ export interface PipelineCtx {
    */
   lightboxOwner?: string;
   /**
+   * 灯箱画廊收集域（挂载容器）：管线在 DOMParser detached doc 上运行，挂载时节点
+   * 被收养出该 doc（markdownRenderer target.replaceChildren）——点击发生在收养后，
+   * collectGallery 若仍对管线期 root 查询必得空画廊（每图退化为单条，e2e 实证）。
+   * 点击时对收集域活查询（而非管线期快照）还使 resolveRelativeImages 改写后的
+   * img src、图表主题就地重画后的 svg 外层 HTML 均取到最新值。缺省回退 root
+   * （单元测试节点未离开 doc 的场景）。
+   */
+  galleryScope?: ParentNode;
+  /**
    * 图表分发选项（注入反转，render-text 包内类型自 markdownRenderer；未注入时
    * 按注册表 defaultMode 走）：kroki host / mermaid 主题 / 语言→模式映射由
    * app 侧按 settings 解析，管线不感知 localStorage。
@@ -507,8 +516,9 @@ async function runLightbox(root: Document, ctx: PipelineCtx): Promise<void> {
     img.setAttribute('data-md-lightbox', '');
     img.addEventListener('click', (ev) => {
       ev.preventDefault();
-      // 点击时对渲染根收集画廊：同文档的 img 与图表 svg 可在灯箱内 ←/→ 连续导航
-      openLightbox(img, ctx, collectGallery(root));
+      // 点击时对收集域收集（挂载容器；未传时回退管线 root——节点仍在其内的
+      // 单测场景）：同文档的 img 与图表 svg 可在灯箱内 ←/→ 连续导航
+      openLightbox(img, ctx, collectGallery(ctx.galleryScope ?? root));
     });
   }
 }
