@@ -439,7 +439,8 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
    全局类消费 --ui-* token。槽行/导入/通知/已导入列表，复用组件内 .vv-settings-remove） */
 .vv-settings-theme-row { display: flex; align-items: center; justify-content: space-between;
   gap: 6px; font-size: 13px; }
-.vv-settings-theme-row select { flex: 1; min-width: 0; max-width: 210px; }
+.vv-settings-theme-row select,
+.vv-settings-theme-row input { flex: 1; min-width: 0; max-width: 210px; }
 .vv-settings-import { display: flex; gap: 6px; }
 .vv-settings-import button { font-size: 12px; }
 .vv-settings-import button:disabled { opacity: .5; cursor: default; }
@@ -451,3 +452,14 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
   text-overflow: ellipsis; white-space: nowrap; }
 .vv-settings-theme-src { flex: none; color: var(--ui-fg-muted); border: 1px solid var(--ui-border);
   border-radius: 8px; padding: 0 6px; font-size: 11px; }
+/* 设置面板「图表」区（SettingsPanel，界面主题节之前；spec 2026-10-19 §2.1）：
+   Kroki host 行复用 .vv-settings-theme-row（input 宽度已并入上方 select 规则）；
+   以下为按语言渲染模式网格（键恒为注册表 t.id，18 类型两列轻量布局） */
+.vv-settings-diagram-modes { display: flex; flex-direction: column; gap: 4px;
+  font-size: 13px; }
+.vv-diagram-mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
+.vv-diagram-mode-item { display: flex; align-items: center; gap: 4px; min-width: 0;
+  font-size: 12px; }
+.vv-diagram-mode-item .vv-diagram-mode-lang { flex: 1; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.vv-diagram-mode-item select { flex: none; min-width: 0; max-width: 88px; }

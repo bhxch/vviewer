@@ -5,8 +5,11 @@
   // 不受影响）、界面主题管理（spec B §2.3：亮暗双槽 select + JSON/VSIX 导入 +
   // 已导入列表删除；槽切换/删除归位只经 saveSettings 持久化，注入由 TopBar 的
   // onSettingsChanged 订阅 diff 触发——订阅即注入通道，本面板不直调注入，
-  // spec 2026-10-12 §2.4）。修改即时经 saveSettings 持久化，AppShell 经
+  // spec 2026-10-12 §2.4）、图表渲染（spec 2026-10-19 §2.1：kroki host +
+  // 按语言模式网格，键恒为注册表 t.id；改动不回溯重渲已打开文档，下次打开生效）。
+  // 修改即时经 saveSettings 持久化，AppShell 经
   // onSettingsChanged 订阅刷新响应式副本（FileTree 随排除规则重建）。Esc / ✕ 关闭。
+  import { DIAGRAM_TYPES, type DiagramMode } from '@vviewer/render-text/markdown/diagrams';
   import { loadSettings, saveSettings } from './stores/settings';
   import { deleteTheme, listThemes, type ImportedTheme } from './stores/session';
   import { importThemeFiles } from './vsixImport';
@@ -18,6 +21,8 @@
   let autoRefresh = $state(loadSettings().autoRefresh);
   let appearanceLight = $state(loadSettings().appearanceLight);
   let appearanceDark = $state(loadSettings().appearanceDark);
+  let krokiHost = $state(loadSettings().diagrams.krokiHost);
+  let diagramModes = $state<Record<string, DiagramMode>>({ ...loadSettings().diagrams.modes });
   let draft = $state('');
   let inputEl = $state<HTMLInputElement | null>(null);
   let panelEl = $state<HTMLElement | null>(null);
@@ -89,7 +94,7 @@
   });
 
   /**
-   * 保存：读最新持久值只覆盖本面板管的四个字段——面板打开期间 TopBar 若改了
+   * 保存：读最新持久值只覆盖本面板管的五个字段——面板打开期间 TopBar 若改了
    * 主题模式/计算策略，不被面板的旧草稿覆盖。
    */
   function persist(): void {
@@ -98,6 +103,7 @@
     fresh.autoRefresh = autoRefresh;
     fresh.appearanceLight = appearanceLight;
     fresh.appearanceDark = appearanceDark;
+    fresh.diagrams = { krokiHost: krokiHost.trim(), modes: { ...diagramModes } };
     saveSettings(fresh);
   }
 
@@ -130,6 +136,20 @@
     const v = (e.currentTarget as HTMLSelectElement).value;
     if (slot === 'light') appearanceLight = v;
     else appearanceDark = v;
+    persist();
+  }
+
+  /** Kroki host 输入：即时持久化。非法值（非 http(s):// 开头）由 loadSettings
+   * 白名单在下次读取时归位空串 = 默认 https://kroki.io（diagrams.ts 回落）。 */
+  function onKrokiHostInput(e: Event): void {
+    krokiHost = (e.currentTarget as HTMLInputElement).value.trim();
+    persist();
+  }
+
+  /** 按语言模式切换：键恒为注册表类型 id（t.id，不用别名）；即时持久化——
+   * 已打开文档不回溯重渲，重新打开后生效（spec 2026-10-19 §2.1）。 */
+  function onDiagramModeChange(id: string, e: Event): void {
+    diagramModes[id] = (e.currentTarget as HTMLSelectElement).value as DiagramMode;
     persist();
   }
 
@@ -261,6 +281,44 @@
     </label>
     <div class="vv-settings-hint">
       连接服务器时内容变更自动重读；关闭后目录树同步停用，可用顶栏 ↻ 手动刷新当前文件与目录树
+    </div>
+  </section>
+
+  <section class="vv-settings-sec">
+    <div class="vv-settings-label">图表</div>
+    <label class="vv-settings-theme-row">
+      <span>Kroki 服务</span>
+      <input
+        type="text"
+        placeholder="https://kroki.io"
+        value={krokiHost}
+        oninput={onKrokiHostInput}
+        aria-label="Kroki 服务地址"
+        spellcheck="false"
+      />
+    </label>
+    <div class="vv-settings-diagram-modes">
+      <span>渲染模式</span>
+      <div class="vv-diagram-mode-grid">
+        {#each DIAGRAM_TYPES as t (t.id)}
+          <label class="vv-diagram-mode-item">
+            <span class="vv-diagram-mode-lang">{t.id}</span>
+            <select
+              value={diagramModes[t.id] ?? t.defaultMode}
+              onchange={(e) => onDiagramModeChange(t.id, e)}
+              aria-label="{t.id} 渲染模式"
+            >
+              <option value="local">本地</option>
+              <option value="kroki">Kroki</option>
+              <option value="source">源码</option>
+            </select>
+          </label>
+        {/each}
+      </div>
+    </div>
+    <div class="vv-settings-hint">
+      本地引擎本期支持 mermaid/graphviz/nomnoml/公式，其余语言本地档自动回落 Kroki；Kroki 服务填
+      http(s):// 开头地址，留空用 https://kroki.io。改动对已打开文档重新打开后生效。
     </div>
   </section>
 
