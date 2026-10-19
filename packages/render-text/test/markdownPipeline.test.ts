@@ -263,6 +263,23 @@ describe('copyCode 步', () => {
       vi.useRealTimers();
     }
   });
+
+  it('语言徽标：有语言显示词、无语言显示「代码」，复制钮迁入顶栏', async () => {
+    const doc = docOf('```rust\nfn main() {}\n```\n');
+    // 无语言 fence：hljs 兜底会自动侦测语言并追加 language-* 类（实测 'plain' →
+    // language-ebnf）——徽标必须显示「代码」而非侦测语言，即取词源是高亮步记录的
+    // 围栏原始语言（data-md-lang），不是 copyCode 时的类名
+    const doc2 = docOf('```\nplain\n```\n');
+    await runPipeline(doc, noopCtx());
+    await runPipeline(doc2, noopCtx());
+    expect(doc.querySelector('.md-code-lang')!.textContent).toBe('rust');
+    expect(doc2.querySelector('.md-code-lang')!.textContent).toBe('代码');
+    // 顶栏是 pre 首子元素，复制钮迁入栏内（点击语义不并入徽标，保留单复制钮）
+    const bar = doc.querySelector('pre .md-code-bar')!;
+    expect(bar).not.toBeNull();
+    expect(doc.querySelector('pre')!.firstElementChild).toBe(bar);
+    expect(bar.querySelector('button.md-copy-btn')).not.toBeNull();
+  });
 });
 
 describe('lightbox 步', () => {

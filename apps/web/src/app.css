@@ -95,13 +95,13 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .vv-error-card { padding: 2rem; display: flex; flex-direction: column; gap: .5rem; }
 .vv-error-title { font-weight: 600; }
 .vv-error-detail { color: var(--ui-fg-muted); white-space: pre-wrap; }
-/* markdown 渲染（.vv-markdown 由 markdownRenderer 挂载；管线产物类名 md-copy-btn、md-diagram 系列、md-lightbox） */
+/* markdown 渲染（.vv-markdown 由 markdownRenderer 挂载；管线产物类名 md-code-bar/md-code-lang、md-copy-btn、md-diagram 系列、md-lightbox） */
 .vv-markdown { max-width: 60rem; padding: 1rem 1.5rem; line-height: 1.6; overflow-wrap: break-word; }
 .vv-markdown h1, .vv-markdown h2, .vv-markdown h3, .vv-markdown h4 { line-height: 1.3; margin: 1.5em 0 .5em; scroll-margin-top: .5rem; }
 .vv-markdown h1 { font-size: 1.6em; border-bottom: 1px solid var(--ui-border); padding-bottom: .3em; }
 .vv-markdown h2 { font-size: 1.35em; border-bottom: 1px solid var(--ui-border); padding-bottom: .2em; }
 .vv-markdown h3 { font-size: 1.15em; }
-.vv-markdown pre { position: relative; background: var(--code-bg); border: 1px solid var(--ui-border);
+.vv-markdown pre { background: var(--code-bg); border: 1px solid var(--ui-border);
   border-radius: 6px; padding: .75rem 1rem; overflow: auto; }
 .vv-markdown code { font-family: var(--vv-code-font); font-size: .9em; background: var(--ui-side-bg);
   border-radius: 4px; padding: .1em .35em; }
@@ -111,7 +111,15 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .vv-markdown table { border-collapse: collapse; margin: .8rem 0; }
 .vv-markdown th, .vv-markdown td { border: 1px solid var(--ui-border); padding: .3rem .65rem; }
 .vv-markdown img, .vv-markdown video, .vv-markdown audio { max-width: 100%; }
-.vv-markdown .md-copy-btn { position: absolute; top: .4rem; right: .4rem; font-size: 12px; padding: 1px 8px; opacity: 0; }
+/* 代码块顶栏（Task 7）：pre 首子行 [语言徽标 | 复制钮]，负外边距抵 pre 内边距贴边
+   成栏（视觉同 md-diagram-bar）；徽标常显、复制钮保留 hover 浮现。
+   pre overflow:auto 下长行横滚时顶栏随行滚出视野——与退役的 absolute 复制钮行为
+   一致（absolute 同样随滚动容器横滚），非本次引入的回归 */
+.vv-markdown .md-code-bar { display: flex; align-items: center; gap: .5rem;
+  margin: -.75rem -1rem .5rem; padding: .25rem .6rem; border-bottom: 1px solid var(--ui-border);
+  background: var(--ui-side-bg); }
+.vv-markdown .md-code-lang { font-size: 12px; color: var(--ui-fg-muted); text-transform: uppercase; letter-spacing: .04em; }
+.vv-markdown .md-copy-btn { margin-left: auto; font-size: 12px; padding: 1px 8px; opacity: 0; }
 .vv-markdown pre:hover .md-copy-btn { opacity: 1; }
 /* 图表 wrapper（spec §2.1）：bar 内语言徽标+切换钮，视图居中，源码面板等宽 */
 .vv-markdown .md-diagram { margin: .8rem 0; border: 1px solid var(--ui-border); border-radius: 6px; overflow: hidden; }

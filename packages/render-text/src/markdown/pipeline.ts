@@ -43,6 +43,8 @@ export interface PipelineStep {
 
 /** 生成元素的基础类名（可被 ctx.themeClassPrefix 前缀）。 */
 const CLS = {
+  codeBar: 'md-code-bar',
+  codeLang: 'md-code-lang',
   copyBtn: 'md-copy-btn',
   diagram: 'md-diagram',
   diagramBar: 'md-diagram-bar',
@@ -71,6 +73,11 @@ async function runHighlight(root: Document, ctx: PipelineCtx): Promise<void> {
     // 的高亮由 diagrams 步按注册表 highlightLang 自行调 highlightFence）
     if (resolveDiagramType(lang)) continue;
     code.setAttribute('data-md-highlight', '');
+    // 围栏原始语言记录（Task 7 copyCode 徽标取词源，小写归一与 BUG-42 同规）：无语言
+    // fence 经 hljs 兜底会被 highlightAuto 侦测并追加 language-* 类（实测 'plain' →
+    // language-ebnf），copyCode 若届时从类名取词会把侦测语言误当围栏语言——故在高亮
+    // 入口记录原始词，copyCode 只读此属性
+    code.setAttribute('data-md-lang', lang.toLowerCase());
     // 围栏内容自带格式性尾换行（markdown-it 原样保留），高亮/复制均不应带上
     const raw = (code.textContent ?? '').replace(/\n$/, '');
     // 回调抛错（如取消：tab 切换后请求作废）→ 静默跳过该块，不走 hljs 兜底
@@ -441,10 +448,27 @@ async function runKatex(root: Document): Promise<void> {
 
 // ---------- copyCode 步 ----------
 
+/**
+ * 代码块顶栏（Task 7）：pre 首子元素 .md-code-bar 内 [语言徽标 | 复制钮] 并排——
+ * spec 原案的「点击徽标=复制、无语言显示复制图标」三态交互过密，计划裁决取简：
+ * 徽标只显示语言词（无语言「代码」），点击语义保留在复制钮上（单触发面，避免
+ * 徽标点击与反馈文案互相干扰）。
+ */
 async function runCopyCode(root: Document, ctx: PipelineCtx): Promise<void> {
   for (const pre of Array.from(root.querySelectorAll('pre'))) {
     if (pre.hasAttribute('data-md-copy')) continue;
     pre.setAttribute('data-md-copy', '');
+    const bar = root.createElement('div');
+    bar.className = cls(ctx, 'codeBar');
+    const label = root.createElement('span');
+    label.className = cls(ctx, 'codeLang');
+    // 语言词取 highlight 步记录的围栏原始语言（小写）；属性缺失（步级失败等罕见
+    // 路径）回落类名提取——此时 hljs 侦测类可能已污染，仅为尽力兜底
+    const code = pre.querySelector('code');
+    const langClass = code ? Array.from(code.classList).find((c) => c.startsWith('language-')) : undefined;
+    const lang = code?.getAttribute('data-md-lang') ?? (langClass ? langClass.slice('language-'.length).toLowerCase() : '');
+    label.textContent = lang || '代码';
+    bar.appendChild(label);
     const btn = root.createElement('button');
     btn.type = 'button';
     btn.className = cls(ctx, 'copyBtn');
@@ -465,7 +489,8 @@ async function runCopyCode(root: Document, ctx: PipelineCtx): Promise<void> {
       if (p) void p.then(() => feedback('已复制'), () => feedback('复制失败'));
       else feedback('复制失败'); // 无剪贴板权限（非安全上下文等）
     });
-    pre.appendChild(btn);
+    bar.appendChild(btn);
+    pre.insertBefore(bar, pre.firstChild);
   }
 }
 
