@@ -22,6 +22,15 @@ pub fn render(text: &str, wikilinks: bool) -> String {
     ext.footnotes = true;
     ext.description_lists = true;
     ext.shortcodes = true;
+    // ==mark== / ++ins++（spec §4.1，markpad 同款）；行内脚注 ^[note]。三者均为
+    // comrak 0.56 Extension 选项（inline_footnotes 并非 Parse 选项，上游文档示例
+    // 即 options.extension.inline_footnotes）。与前端 markdown-it mark/ins/deflist
+    // 插件对齐（金标互引见 tests highlight_and_insert_extensions /
+    // inline_footnote_renders 及 packages/render-text/test/markdownEngine.test.ts
+    // Task 2 用例）。
+    ext.highlight = true;
+    ext.insert = true;
+    ext.inline_footnotes = true;
     // heading id 用 GitHub 同款前缀命名空间，避免嵌入页面时撞 DOM id。
     // header_id_prefix_in_href（BUG-39 清偿，2026-10-17）：comrak 0.56 默认自产锚
     // href 不带前缀（仿 GitHub 依赖其前端 JS 做 hash→前缀映射），本仓库前端无该
@@ -352,5 +361,25 @@ mod tests {
             apply_latex_delimiters("```\r\n\\(x\\)\r\n```\r\n\\(a\\)"),
             "```\n\\(x\\)\n```\n$a$"
         );
+    }
+
+    #[test]
+    fn highlight_and_insert_extensions() {
+        // ==mark== / ++ins++（spec §4.1，markpad 同款）；本地对偶金标：
+        // packages/render-text/test/markdownEngine.test.ts「扩展语法（Task 2）」
+        // mark/ins 用例——形态一致以两侧断言互为锚。
+        let html = render("==mark== 与 ++ins++", false);
+        assert!(html.contains("<mark>mark</mark>"), "{html}");
+        assert!(html.contains("<ins>ins</ins>"), "{html}");
+    }
+
+    #[test]
+    fn inline_footnote_renders() {
+        // 行内脚注 ^[note]（parser.inline_footnotes）；本地对偶金标：
+        // packages/render-text/test/markdownEngine.test.ts 脚注用例（[^1] 定义式，
+        // markdown-it 脚注插件）——footnote-ref 形态一致以两侧断言互为锚。
+        let html = render("正文^[注内容]续", false);
+        assert!(html.contains("footnote-ref"), "{html}");
+        assert!(html.contains("注内容"), "{html}");
     }
 }

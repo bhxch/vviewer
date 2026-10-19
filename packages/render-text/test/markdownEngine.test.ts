@@ -75,6 +75,10 @@ describe('renderMarkdownToHtml——GFM 全家', () => {
 });
 
 describe('renderMarkdownToHtml——扩展语法（Task 2：mark/ins/deflist）', () => {
+  // 金标锚（双侧互引）：comrak 对偶——server/src/compute/markdown.rs tests
+  // highlight_and_insert_extensions / inline_footnote_renders——形态一致以两侧
+  // 断言互为锚（==x==→<mark>、++x++→<ins>；行内脚注见该文件 footnote 用例）。
+
   it('==mark== 渲染 <mark>（与 comrak 扩展语法金标对齐的本地半边）', () => {
     const { html } = renderMarkdownToHtml('==高亮==');
     expect(html).toContain('<mark>高亮</mark>');
