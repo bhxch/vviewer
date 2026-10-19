@@ -47,6 +47,11 @@ export interface Tab {
   rev?: number;
   /** C 项：手选打开方式（override 渲染器 id）。缺省 = 自动路由；写进会话快照 */
   overrideRenderer?: string;
+  /** Task 3 双入口：最近一次 dispatch 的实际渲染器 id 与检出扩展名（渲染 effect
+   * 成功返回时写入，rendererCandidatesOfTab 的候选数据源）。运行时字段不进会话
+   * 快照（rev/pendingLine 同款）；未渲染过为缺省——右键子菜单以名称扩展名兜底。 */
+  lastRendererId?: string;
+  lastDetExt?: string;
 }
 
 let seq = 0;

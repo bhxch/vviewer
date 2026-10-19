@@ -499,6 +499,26 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-tabctx-item:hover { background: var(--ui-hover-bg); }
 .vv-tabctx-item[aria-disabled='true'] { color: var(--ui-fg-muted); opacity: .55; cursor: default; }
 .vv-tabctx-item[aria-disabled='true']:hover { background: none; }
+/* 「打开方式」子菜单（Task 3 壳 B）：absolute 于 .vv-tabctx（fixed 即 absolute
+   后代的包含块），坐标由组件按父项 offset 内联给出；观感与主浮层一致，当前项
+   ✓ 前缀（TabBar 组装）+ accent 着色。aria-expanded 父项保持 hover 底色。 */
+.vv-tabctx-sub { position: absolute; min-width: 12em; padding: 4px; display: flex;
+  flex-direction: column; background: var(--ui-tab-active-bg); border: 1px solid var(--ui-border);
+  border-radius: 6px; box-shadow: 0 4px 16px rgb(0 0 0 / 18%); }
+.vv-tabctx-item[aria-expanded='true'] { background: var(--ui-hover-bg); }
+/* 状态栏渲染器指示器（Task 3 壳 A）：状态栏内联按钮，观感融入文本段（继承状态栏
+   12px/淡色），hover 提示可点；候选浮层 absolute 于 .vv-viewer-pane（position:
+   relative 已有，SearchPanel 同锚）状态栏上方左对齐，z-index 对齐面板层。 */
+.vv-status-openwith { background: none; border: none; padding: 0; font: inherit;
+  font-size: 12px; color: inherit; cursor: pointer; text-align: left; }
+.vv-status-openwith:hover { color: var(--ui-accent); }
+.vv-status-picker { position: absolute; left: 8px; bottom: 26px; z-index: 30; min-width: 12em;
+  padding: 4px; display: flex; flex-direction: column; background: var(--ui-tab-active-bg);
+  border: 1px solid var(--ui-border); border-radius: 6px; box-shadow: 0 4px 16px rgb(0 0 0 / 18%); }
+.vv-status-picker-item { background: none; border: none; border-radius: 4px; text-align: left;
+  padding: 4px 10px; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.vv-status-picker-item:hover { background: var(--ui-hover-bg); }
+.vv-status-picker-item[aria-current='true'] { color: var(--ui-accent); }
 .vv-tree { list-style: none; margin: 0; padding: 0; }
 .vv-tree .vv-tree { padding-left: 14px; }
 .vv-tree-row { display: flex; gap: 4px; align-items: center; width: 100%; text-align: left;

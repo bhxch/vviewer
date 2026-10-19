@@ -4,7 +4,9 @@
   import { activateTab, closeTab, closedStackSize, reopenClosed, tabStore } from './openFlow.svelte';
   import { reorderIds } from './tabOrder';
   import { badgeOf } from './tabBadge';
-  import TabContextMenu, { type TabCtxAction } from './TabContextMenu.svelte';
+  import { registry } from './viewer';
+  import { rendererCandidatesOfTab } from './RendererPickerMenu';
+  import TabContextMenu, { type TabCtxEntry } from './TabContextMenu.svelte';
 
   /**
    * tabs：AppShell 传当前 workspace 组内过滤值（tabStore.tabsOf(activeId)，T6）——
@@ -47,12 +49,17 @@
   }
 
   /**
-   * 菜单六动作组装（随菜单开合经 $derived 重算）：置灰态按 spec §2.2——
+   * 菜单动作组装（随菜单开合经 $derived 重算）：置灰态按 spec §2.2——
    * 「关闭右侧」按「右侧无普通 tab」判定、「复制标签页」unrestorable、「重新打开
    * 已关闭标签」撤销栈空（调用时查询：菜单每次打开重组即拿到最新栈深，无需响应式）；
-   * pinned 动态换「固定 / 取消固定」标签。
+   * pinned 动态换「固定 / 取消固定」标签。末项「打开方式」（Task 3 壳 B）：候选
+   * 经 rendererCandidatesOfTab（与 MetaPanel 下拉/状态栏指示器同源同集；未渲染
+   * 过的 tab 以名称扩展名兜底），当前项 ✓ 前缀标记，选择走 setRendererOverride
+   * （'' = null 清 override，MetaPanel onOpenWith 同语义）——pinned 等既有语义不受影响。
    */
-  const ctxActions: TabCtxAction[] = $derived.by(() => {
+  // 回调显式标注返回 TabCtxEntry[]：字面量数组的联合推断会给缺省属性填
+  // `undefined` 型，过不了 $derived 泛型边界（子菜单父项无 onClick 的推断面）
+  const ctxActions: TabCtxEntry[] = $derived.by((): TabCtxEntry[] => {
     if (ctx === null) return [];
     const tab = ctx.tab;
     const at = tabs.findIndex((t) => t.id === tab.id);
@@ -73,6 +80,13 @@
         label: '重新打开已关闭标签',
         disabled: closedStackSize() === 0,
         onClick: () => reopenClosed()
+      },
+      {
+        label: '打开方式',
+        children: rendererCandidatesOfTab(registry, tab).map((c) => ({
+          label: c.current ? `✓ ${c.label}` : c.label,
+          onClick: () => tabStore.setRendererOverride(tab.id, c.id === '' ? null : c.id)
+        }))
       }
     ];
   });

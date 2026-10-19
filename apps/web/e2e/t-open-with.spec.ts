@@ -404,3 +404,46 @@ test('OPEN-07：1MB/约 5000 行首屏性能锚点（BUG-16 口径）', async ({
   );
   expect(med, '1MB/约 5000 行首屏中位达验收预算（BUG-16 口径）').toBeLessThan(budget);
 });
+
+test('OPEN-08：状态栏渲染器指示器（Task 3 双入口壳 A）——候选同源、手选 override 即时重渲染', async ({
+  page
+}) => {
+  test.setTimeout(60_000);
+  await waitAppMounted(page);
+  await dropFile(page, { name: 'statusbar.txt', type: 'text/plain', content: 'status bar body\n' });
+  await expect(page.locator('.vv-code-pre')).toContainText('status bar body', { timeout: 20_000 });
+
+  // 指示器：生效渲染器 label + 检出扩展名（txt 自动路由 code → 「代码/文本」）
+  const btn = page.locator('.vv-status-openwith');
+  await expect(btn).toContainText('打开方式: 代码/文本');
+  await expect(btn).toContainText('txt');
+
+  // 弹层候选与 MetaPanel 下拉同源（rendererCandidates 委托 openWithOf）：
+  // ✓自动 首位 + 代码/文本 + 二进制；当前项 aria-current
+  await btn.click();
+  const picker = page.locator('.vv-status-picker');
+  await expect(picker).toBeVisible();
+  await expect(picker.getByRole('menuitem', { name: '✓ 自动（按扩展名）' })).toBeVisible();
+  await expect(picker.getByRole('menuitem', { name: '代码/文本' })).toBeVisible();
+  await expect(picker.getByRole('menuitem', { name: '二进制' })).toBeVisible();
+
+  // 手选二进制：浮层关（pickRenderer 收口）、setRendererOverride rev++ 即时重渲染、
+  // 指示器跟随生效渲染器（override hex 的 label）
+  await picker.getByRole('menuitem', { name: '二进制' }).click();
+  await expect(picker).toHaveCount(0);
+  await expect(page.locator('.vv-hex')).toBeVisible({ timeout: 20_000 });
+  await expect(btn).toContainText('打开方式: 二进制');
+
+  // 指示器 aria-expanded 反映弹层态；Esc 关闭路径
+  await btn.click();
+  await expect(picker).toBeVisible();
+  await expect(btn).toHaveAttribute('aria-expanded', 'true');
+  await page.keyboard.press('Escape');
+  await expect(picker).toHaveCount(0);
+
+  // 外点关闭路径（点正文区）
+  await btn.click();
+  await expect(picker).toBeVisible();
+  await page.locator('.vv-viewer-scroll').click({ position: { x: 10, y: 10 } });
+  await expect(picker).toHaveCount(0);
+});

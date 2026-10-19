@@ -5,9 +5,10 @@
   import type { CodeEngine, CodeFileMeta } from '@vviewer/render-text';
   import type { MarkdownEngineState } from '@vviewer/render-text/markdown/markdownRenderer';
   import type { Tab } from './openFlow.svelte';
-  import { persistScroll } from './openFlow.svelte';
+  import { persistScroll, tabStore } from './openFlow.svelte';
   import { setFileMeta, setInspector, inspectorBus, setExportHandle, type FileOpenWith, type InspectorSnapshot } from './metaStore.svelte';
   import { openWithOf } from './openWith';
+  import { candidatesOf, type RendererCandidate } from './RendererPickerMenu';
   import { mergeAbortSignals } from './mergeAbortSignals';
   import { dispatcher, registry, cancelMarkdownRemote } from './viewer';
   import { cancelHighlight } from './highlightClient';
@@ -58,6 +59,55 @@ import SearchPanel from './SearchPanel.svelte';
   let metaTimer: ReturnType<typeof setInterval> | null = null;
   /** 文件内搜索面板开关（Task 6）：'/' 打开，Esc 关闭，tab 切换随之关闭 */
   let searchOpen = $state(false);
+  /** 状态栏渲染器指示器（Task 3 壳 A）：生效渲染器 label + 检出扩展名。错误卡片
+   * dispatch（rendererId 'error' 未注册）/store.read 失败为空 = 指示器隐藏（错误
+   * 卡片自带 open-as 动作，MetaPanel 下拉仍可达）；候选与 MetaPanel 下拉同源
+   * （openWithOf 一次算出双路复用），点击弹候选浮层，选择经 setRendererOverride
+   * 落持久 override（MetaPanel onOpenWith 同语义）。 */
+  let rendererLabel = $state('');
+  let detLabel = $state('');
+  let openWithCandidates = $state<RendererCandidate[]>([]);
+  let pickerOpen = $state(false);
+  let pickerEl = $state<HTMLElement | null>(null);
+  let pickerBtn = $state<HTMLElement | null>(null);
+
+  // 候选浮层关闭路径收敛（Task 3 壳 A；TabContextMenu 同款思路）：Esc / 外点 /
+  // 菜单项点击（pickRenderer）。指示器钮豁免外点：pointerdown 先于 click，不豁免
+  // 会先关后开闪层——toggle 由 click 承担。
+  $effect(() => {
+    if (!pickerOpen) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') pickerOpen = false;
+    };
+    const onDown = (e: PointerEvent): void => {
+      const t = e.target;
+      if (
+        t instanceof Node &&
+        (pickerEl?.contains(t) === true || pickerBtn?.contains(t) === true)
+      )
+        return;
+      pickerOpen = false;
+    };
+    window.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onDown);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', onDown);
+    };
+  });
+
+  function togglePicker(): void {
+    pickerOpen = !pickerOpen;
+  }
+
+  /** 双入口共用选择语义（MetaPanel onOpenWith 同款）：'' = 清除 override 回自动，
+   * 其余写持久 override——rev++ 复用渲染 effect 重跑通道即时生效。 */
+  function pickRenderer(id: string): void {
+    pickerOpen = false;
+    const t = tab;
+    if (!t) return;
+    tabStore.setRendererOverride(t.id, id === '' ? null : id);
+  }
 
   // '/' 快捷键聚焦搜索（非输入焦点时）；Esc 在面板内部处理（SearchPanel）
   $effect(() => {
@@ -273,12 +323,16 @@ import SearchPanel from './SearchPanel.svelte';
         // current 维持 ''/自动，label 不回退英文 id）。错误卡片上的「以纯文本/以 hex
         // 打开」在卡片内部以 rendererOverride 重派 dispatch、不经 setRendererOverride，
         // 故 open-as 成功后本下拉维持「自动」不跟随（临时查看不落 override）。
-        startWatchMeta(
-          res.instance,
-          current.source.name,
-          current.source.storeLabel,
-          openWithOf(registry, current.overrideRenderer, res.rendererId, res.det.ext)
-        );
+        // Task 3 双入口：候选一次算出双路复用——MetaPanel 下拉（store 上行）与
+        // 状态栏指示器（本地 $state）；Tab 运行时字段（lastRendererId/lastDetExt）
+        // 供右键子菜单（壳 B）经 rendererCandidatesOfTab 离线组装。
+        const ow = openWithOf(registry, current.overrideRenderer, res.rendererId, res.det.ext);
+        openWithCandidates = candidatesOf(ow);
+        rendererLabel = registry.byId(res.rendererId)?.label ?? ''; // 'error' 等未注册 id → 指示器隐藏
+        detLabel = res.det.ext;
+        current.lastRendererId = res.rendererId;
+        current.lastDetExt = res.det.ext;
+        startWatchMeta(res.instance, current.source.name, current.source.storeLabel, ow);
         // BUG-09：全局搜索跳转——渲染完成后定位到命中行（消费即清，tab 切换不误触发；
         // revealLine 仅 code 实例实现，markdown/HTML 等静默跳过不阻塞打开）。
         // GrepMatch.line 为 1 起，code 行号 0 起。
@@ -329,6 +383,11 @@ import SearchPanel from './SearchPanel.svelte';
         setExportHandle(null);
         // 错误卡片实例无 meta：状态栏元数据段清空，属性面板保留名称/来源占位
         metaLabel = '';
+        // 读取失败卡片：指示器/候选随实例清空（浮层一并关）
+        rendererLabel = '';
+        detLabel = '';
+        openWithCandidates = [];
+        pickerOpen = false;
         setFileMeta({ name: current.source.name, sourceLabel: current.source.storeLabel });
       }
     })();
@@ -338,6 +397,10 @@ import SearchPanel from './SearchPanel.svelte';
       cancelAnimationFrame(rafId);
       stopWatchEngine();
       stopWatchMeta(); // meta 轮询随实例销毁停止（readInstanceMeta 通道上行面）
+      rendererLabel = ''; // Task 3 指示器随实例销毁清空（候选/浮层一并复位）
+      detLabel = '';
+      openWithCandidates = [];
+      pickerOpen = false;
       setFileMeta(null); // tab 切换/销毁：属性面板随之清空
       setExportHandle(null); // tab 切换/销毁：导出动作区随句柄清空（md-export Task 2）
       ontoc?.([]); // tab 切换/销毁：右栏目录随之清空
@@ -383,9 +446,25 @@ import SearchPanel from './SearchPanel.svelte';
       }}
     />
   {/if}
-  {#if engineLabel || metaLabel || watchHealth.degraded || statusNotice.text}
+  {#if engineLabel || metaLabel || rendererLabel || watchHealth.degraded || statusNotice.text}
     <div class="vv-statusbar" role="status">
-      {#if engineLabel}{engineLabel}{#if computeWhereLabel}&nbsp;· 执行: {computeWhereLabel}{/if}{/if}{#if metaLabel}{#if engineLabel}&nbsp;·&nbsp;{/if}{metaLabel}{/if}{#if watchHealth.degraded}{#if engineLabel || metaLabel}&nbsp;·{/if} 自动刷新不可用{/if}{#if statusNotice.text}{#if engineLabel || metaLabel || watchHealth.degraded}&nbsp;·{/if} {statusNotice.text}{/if}
+      {#if rendererLabel}<button type="button" class="vv-status-openwith" bind:this={pickerBtn} aria-haspopup="menu" aria-expanded={pickerOpen} aria-label="打开方式" title="打开方式（点击切换渲染器）" onclick={togglePicker}>打开方式: {rendererLabel}{#if detLabel}&nbsp;（{detLabel}）{/if}</button>{/if}{#if engineLabel}{#if rendererLabel}&nbsp;·&nbsp;{/if}{engineLabel}{#if computeWhereLabel}&nbsp;· 执行: {computeWhereLabel}{/if}{/if}{#if metaLabel}{#if engineLabel || rendererLabel}&nbsp;·&nbsp;{/if}{metaLabel}{/if}{#if watchHealth.degraded}{#if engineLabel || metaLabel || rendererLabel}&nbsp;·{/if} 自动刷新不可用{/if}{#if statusNotice.text}{#if engineLabel || metaLabel || rendererLabel || watchHealth.degraded}&nbsp;·{/if} {statusNotice.text}{/if}
+    </div>
+  {/if}
+  {#if pickerOpen}
+    <!-- 渲染器候选浮层（Task 3 壳 A）：absolute 于 .vv-viewer-pane（position:relative
+         已有，SearchPanel 同锚），状态栏上方左对齐；项形态对齐 .vv-tabctx-item，
+         当前项以 ✓ 前缀 + aria-current 标记（右键子菜单同款） -->
+    <div class="vv-status-picker" role="menu" aria-label="打开方式" bind:this={pickerEl}>
+      {#each openWithCandidates as c (c.id)}
+        <button
+          type="button"
+          class="vv-status-picker-item"
+          role="menuitem"
+          aria-current={c.current ? 'true' : undefined}
+          onclick={() => pickRenderer(c.id)}>{c.current ? '✓ ' : ''}{c.label}</button
+        >
+      {/each}
     </div>
   {/if}
 </div>

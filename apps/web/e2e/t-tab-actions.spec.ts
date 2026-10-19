@@ -272,7 +272,8 @@ test('TA-01：右键菜单六动作逐一 + 置灰态可点击无动作', async 
 
   // ① 置灰态（栈空 + 最右 tab 右侧无普通 tab）：项齐全、置灰项可点击但无动作
   await openTabMenu(page, 'cc.txt');
-  await expect(page.locator('.vv-tabctx-item')).toHaveCount(6);
+  // Task 3：六动作 + 「打开方式」子菜单父项 = 顶层 7 项
+  await expect(page.locator('.vv-tabctx-item')).toHaveCount(7);
   await expect(menuItem(page, '关闭右侧')).toHaveAttribute('aria-disabled', 'true');
   await expect(menuItem(page, '重新打开已关闭标签')).toHaveAttribute('aria-disabled', 'true');
   await expect(menuItem(page, '关闭')).not.toHaveAttribute('aria-disabled', 'true');
@@ -620,4 +621,51 @@ test('TA-08：撤销落点——来源 workspace 已删时落当前活动组（�
   await expect(page.locator('.vv-tab.active', { hasText: 'bb.txt' })).toBeVisible();
   await expect(page.locator('.vv-code-pre')).toContainText('doomed group body', { timeout: 20_000 });
   await expect(page.locator('.vv-error-card')).toHaveCount(0);
+});
+
+// ---------------------------------------------------------------- TA-09
+
+test('TA-09：右键「打开方式」子菜单——候选同源、手选 override 即时重渲染、✓ 随 override 流转', async ({
+  page
+}) => {
+  test.setTimeout(60_000);
+  await waitAppMounted(page);
+  await openDir(page, [{ name: 'sub.txt', type: 'text/plain', content: 'submenu body\n' }]);
+  await openFile(page, 'sub.txt');
+  await expect(page.locator('.vv-code-pre')).toContainText('submenu body', { timeout: 20_000 });
+
+  // 展开子菜单（Task 3 壳 B）：子项 = ✓自动 + 代码/文本 + 二进制（候选与 MetaPanel
+  // 下拉同源，经 rendererCandidatesOfTab——与 openWithOf 同集同序）
+  await openTabMenu(page, 'sub.txt');
+  await page.getByRole('menuitem', { name: '打开方式' }).click();
+  const sub = page.locator('.vv-tabctx-sub');
+  await expect(sub).toBeVisible();
+  await expect(sub.getByRole('menuitem', { name: '✓ 自动（按扩展名）' })).toBeVisible();
+  await expect(sub.getByRole('menuitem', { name: '代码/文本' })).toBeVisible();
+  await expect(sub.getByRole('menuitem', { name: '二进制' })).toBeVisible();
+
+  // 手选二进制：菜单必关（run 语义）、setRendererOverride rev++ 即时重渲染
+  await sub.getByRole('menuitem', { name: '二进制' }).click();
+  await expect(page.locator('.vv-tabctx')).toHaveCount(0);
+  await expect(page.locator('.vv-hex')).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('.vv-code-pre')).toHaveCount(0);
+
+  // ✓ 随 override 流转：重开菜单 hex 标记当前，选回「自动」清 override 回 code 视图
+  await openTabMenu(page, 'sub.txt');
+  await page.getByRole('menuitem', { name: '打开方式' }).click();
+  await expect(sub.getByRole('menuitem', { name: '✓ 二进制' })).toBeVisible();
+  await sub.getByRole('menuitem', { name: '自动（按扩展名）' }).click();
+  await expect(page.locator('.vv-tabctx')).toHaveCount(0);
+  await expect(page.locator('.vv-hex')).toHaveCount(0);
+  await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 20_000 });
+
+  // Esc 两层收口：子菜单展开时先收子菜单、主菜单保持
+  await openTabMenu(page, 'sub.txt');
+  await page.getByRole('menuitem', { name: '打开方式' }).click();
+  await expect(sub).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(sub).toHaveCount(0);
+  await expect(page.locator('.vv-tabctx')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.vv-tabctx')).toHaveCount(0);
 });

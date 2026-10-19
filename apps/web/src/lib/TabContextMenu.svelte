@@ -1,10 +1,20 @@
 <script module lang="ts">
-  /** 菜单项形状（TabBar 组装传入）：disabled 项渲染为 aria-disabled 置灰、点击不动作 */
+  /** 菜单项形状（TabBar 组装传入）：disabled 项渲染为 aria-disabled 置灰、点击不动作。
+   * 子菜单父项（布局自由化 Task 3「打开方式」）以 children 判别（TabCtxSubmenu）：
+   * 点击展开/收起子菜单而非执行动作；子项恒为 TabCtxAction（必带 onClick），
+   * 形态与顶层项一致。 */
   export interface TabCtxAction {
     label: string;
     disabled?: boolean;
     onClick(): void;
   }
+
+  export interface TabCtxSubmenu {
+    label: string;
+    children: TabCtxAction[];
+  }
+
+  export type TabCtxEntry = TabCtxAction | TabCtxSubmenu;
 </script>
 
 <script lang="ts">
@@ -15,6 +25,9 @@
   // disabled 用 aria-disabled 而非 disabled 属性：元素保持可命中（e2e 可点击断言无
   // 动作），置灰观感由 CSS 承担。定位 fixed + 视口内收敛：测得尺寸把右/下越界拉回
   // 视口内，首帧 bind 未完成时按项数估算兜底（避免闪出边界后再跳位）。
+  // 子菜单（Task 3）：absolute 于本浮层（fixed 元素即 absolute 后代的包含块），
+  // 坐标按父项 offset 测出（首帧未测得以估算兜底，同主浮层两段式）；右侧放不下
+  // 翻折左侧。Esc 先收子菜单再关主菜单。
   import type { Tab } from './openFlow.svelte';
 
   let {
@@ -27,11 +40,35 @@
     x: number;
     y: number;
     tab: Tab;
-    actions: TabCtxAction[];
+    actions: TabCtxEntry[];
     onclose(): void;
   } = $props();
 
   let menuEl = $state<HTMLElement | null>(null);
+
+  /** 子菜单态：展开的父项序 + 其按钮（offset 基准）+ 子浮层元素（尺寸测量）。
+   * 组件随菜单开合整棵卸载（TabBar {#if} 挂载），无跨开合残留态。 */
+  let openSub = $state<number | null>(null);
+  let subAnchor = $state<HTMLElement | null>(null);
+  let subEl = $state<HTMLElement | null>(null);
+
+  /** 子浮层视口内收敛：top 贴父项（下越界拉回）；默认父项右侧弹出（主浮层右缘
+   * 略叠 6px），右侧放不下翻左侧。宽高未测得（首帧）按 170×项数估算兜底。 */
+  const subPos = $derived.by(() => {
+    if (openSub === null || subAnchor === null) return null;
+    const margin = 8;
+    const cur = actions[openSub];
+    const childCount = cur !== undefined && 'children' in cur ? cur.children.length : 0;
+    const w = subEl?.offsetWidth ?? 170;
+    const h = subEl?.offsetHeight ?? childCount * 30 + margin * 2;
+    const top = Math.max(margin, Math.min(subAnchor.offsetTop, window.innerHeight - h - margin));
+    const rightOf = subAnchor.offsetLeft + (menuEl?.offsetWidth ?? 160) - 6;
+    const left =
+      rightOf + w <= window.innerWidth - margin
+        ? rightOf
+        : Math.max(margin, subAnchor.offsetLeft - w + 6);
+    return { top, left };
+  });
 
   /** 打开动作自身滚动的宽限窗（毫秒）：溢出 TabBar 上右键裁剪目标时，动作性滚动
    * （浏览器/自动化 scrollIntoView、触屏裁剪目标自动滚入）的位移虽先于 contextmenu
@@ -58,16 +95,36 @@
     onclose(); // 菜单关闭时机：action 执行后必关（brief Step 1）
   }
 
+  /** 父项点击：展开/收起子菜单（再点另一父项直接切换）。 */
+  function toggleSub(i: number, btn: HTMLElement): void {
+    if (openSub === i) {
+      openSub = null;
+      subAnchor = null;
+      return;
+    }
+    openSub = i;
+    subAnchor = btn;
+  }
+
+  function closeSub(): void {
+    openSub = null;
+    subAnchor = null;
+  }
+
   $effect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
         e.preventDefault();
+        if (openSub !== null) {
+          closeSub(); // 先收子菜单再关主菜单（两层各一次 Esc）
+          return;
+        }
         onclose();
       }
     };
     const onDown = (e: PointerEvent): void => {
       const t = e.target;
-      if (t instanceof Node && menuEl !== null && menuEl.contains(t)) return; // 菜单内交互不关
+      if (t instanceof Node && menuEl !== null && menuEl.contains(t)) return; // 菜单内交互不关（含子浮层）
       onclose();
     };
     const onGone = (): void => {
@@ -99,13 +156,44 @@
   bind:this={menuEl}
   oncontextmenu={(e) => e.preventDefault()}
 >
-  {#each actions as action (action.label)}
-    <button
-      type="button"
-      class="vv-tabctx-item"
-      role="menuitem"
-      aria-disabled={action.disabled === true ? 'true' : undefined}
-      onclick={() => run(action)}>{action.label}</button
-    >
+  {#each actions as action, i (action.label)}
+    {#if 'children' in action}
+      <button
+        type="button"
+        class="vv-tabctx-item"
+        role="menuitem"
+        aria-haspopup="menu"
+        aria-expanded={openSub === i}
+        onclick={(e) => toggleSub(i, e.currentTarget as HTMLElement)}>{action.label} ›</button
+      >
+      {#if openSub === i && subPos !== null}
+        <div
+          class="vv-tabctx-sub"
+          role="menu"
+          aria-label={action.label}
+          style:top="{subPos.top}px"
+          style:left="{subPos.left}px"
+          bind:this={subEl}
+        >
+          {#each action.children as child (child.label)}
+            <button
+              type="button"
+              class="vv-tabctx-item"
+              role="menuitem"
+              aria-disabled={child.disabled === true ? 'true' : undefined}
+              onclick={() => run(child)}>{child.label}</button
+            >
+          {/each}
+        </div>
+      {/if}
+    {:else}
+      <button
+        type="button"
+        class="vv-tabctx-item"
+        role="menuitem"
+        aria-disabled={action.disabled === true ? 'true' : undefined}
+        onclick={() => run(action)}>{action.label}</button
+      >
+    {/if}
   {/each}
 </div>
