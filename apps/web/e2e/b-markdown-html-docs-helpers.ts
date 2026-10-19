@@ -16,6 +16,9 @@ export interface TextFileSpec {
   name: string;
   content: string;
   type?: string;
+  /** 二进制素材（像素 PNG 等）直接给 base64：给定时忽略 content 的 utf-8 编码
+   * （b-md-export 导出夹具需真 PNG 字节——相对图片须可解码才走 blob→data URI 链） */
+  b64?: string;
 }
 
 /** 文本内容 → 注入 payload（base64 规避结构化克隆对字符串数组的多余拷贝，同 m3 写法） */
@@ -25,7 +28,7 @@ function textPayloads(
   return files.map((f) => ({
     name: f.name,
     type: f.type ?? (f.name.endsWith('.md') ? 'text/markdown' : 'text/html'),
-    b64: Buffer.from(f.content, 'utf-8').toString('base64')
+    b64: f.b64 ?? Buffer.from(f.content, 'utf-8').toString('base64')
   }));
 }
 
