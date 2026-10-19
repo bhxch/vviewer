@@ -66,10 +66,16 @@
   }
 
   /** 克隆 doc 的亮暗标记（exportBaseCss 暗块键 html[data-vv-mode]）：取当前注入
-   * 的代码主题节点 dataset.mode（theme.ts applyAppearance 写入），缺失回退亮色。 */
+   * 的代码主题节点 dataset.mode（theme.ts applyAppearance 写入），缺失回退亮色。
+   * data-theme-mode 同步打标（终审 I1）：注入主题文本的选择器含
+   * :root[data-theme-mode="dark"] 提权形态（theme.ts THEME_ROOT_SELECTOR，0,2,0），
+   * 只打 data-vv-mode 时注入文本仅裸 :root（0,1,0）生效，暗色下变量会被
+   * exportBaseCss 的 (0,2,0) 暗块默认值压制——双属性使注入块以同特异性 + 文档序
+   * 在后（currentStyleCss 中 exportBaseCss 先行）稳定胜出。 */
   function stampMode(doc: Document): void {
     const mode = (document.getElementById('vv-code-theme') as HTMLStyleElement | null)?.dataset.mode;
     doc.documentElement.setAttribute('data-vv-mode', mode === 'dark' ? 'dark' : 'light');
+    doc.documentElement.setAttribute('data-theme-mode', mode === 'dark' ? 'dark' : 'light');
   }
 
   /** 共享装配：模式标记 + 基础/主题样式 + KaTeX 排印样式（Task 2b 全嵌上限形态，

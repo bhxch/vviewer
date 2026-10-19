@@ -97,6 +97,11 @@ export function printDocument(html: string, onUnavailable: PrintUnavailableNotic
   if (typeof document === 'undefined') return 'unavailable';
   const iframe = document.createElement('iframe');
   iframe.setAttribute('aria-hidden', 'true');
+  // sandbox 纵深防御（终审 M3）：导出产物结构性无 script（collectExportHtml 装配
+  // 面不含脚本，单测+e2e 锁定）。allow-same-origin 保持同源——跨源 WindowProxy 上
+  // 取 print 属性即 SecurityError，print 通道直接瘫痪；allow-modals 放行 print 对话
+  // 框（sandbox 模态旗标门控 window.print，缺省被静默忽略）。
+  iframe.setAttribute('sandbox', 'allow-same-origin allow-modals');
   // 0 尺寸 + visibility 隐藏（display:none 的 iframe 在部分内核拒绝渲染/print）
   iframe.style.position = 'fixed';
   iframe.style.right = '0';

@@ -49,6 +49,9 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .vv-code-gutter { user-select: none; text-align: right; min-width: 3.5em; padding-right: 1em;
   color: var(--code-gutter); flex: none; }
 .vv-code-body { flex: 1; color: var(--code-fg); }
+/* 代码高亮映射段（.hljs-* 与 .ts-* 类名→颜色变量）：颜色经 CSS 变量间接（亮暗双块/
+   JS 注入主题供值）。导出侧同段复制于 render-text export.ts exportBaseCss（终审 C1，
+   防漂移双向校验见 export.test.ts）——改本段规则须双端同步 */
 .hljs-keyword { color: var(--hljs-keyword); } .hljs-string { color: var(--hljs-string); }
 .hljs-comment { color: var(--hljs-comment); font-style: italic; } .hljs-number { color: var(--hljs-number); }
 .hljs-title { color: var(--hljs-title); } .hljs-built_in { color: var(--hljs-built_in); }

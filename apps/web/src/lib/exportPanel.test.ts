@@ -66,4 +66,19 @@ describe('导出链路接线契约', () => {
     expect(css).toContain('.meta-export-actions');
     expect(css).toContain('.meta-export-notice');
   });
+
+  it('MetaPanel：stampMode 双属性打标 + currentStyleCss 文档序 exportBaseCss 先于注入块（终审 I1）', () => {
+    const src = readSrc('src/lib/MetaPanel.svelte');
+    // 特异性倒挂修复：exportBaseCss 暗块 :root[data-vv-mode="dark"] 是 (0,2,0)，
+    // 注入主题文本裸 :root 仅 (0,1,0) 会被压制——data-theme-mode 激活注入文本自身
+    // 的 :root[data-theme-mode="dark"] 提权形态（theme.ts THEME_ROOT_SELECTOR）
+    expect(src).toMatch(/setAttribute\('data-vv-mode', mode === 'dark' \? 'dark' : 'light'\)/);
+    expect(src).toMatch(/setAttribute\('data-theme-mode', mode === 'dark' \? 'dark' : 'light'\)/);
+    // 同 (0,2,0) 对决靠文档序：styleCss 合成里 exportBaseCss 先行、注入块 append
+    // 在后（collectExportHtml 单 <style> 注入文本按序拼接，文档序即此序）
+    const base = src.indexOf('const parts = [exportBaseCss];');
+    const inject = src.indexOf('parts.push(el.textContent)');
+    expect(base).toBeGreaterThan(-1);
+    expect(inject).toBeGreaterThan(base);
+  });
 });

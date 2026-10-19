@@ -4,9 +4,11 @@
 // 外域图/data 图/音视频/多级标题），断言剥壳、data URI 化、媒体降级、TOC 结构、
 // 样式注入与打印模板；不重跑五步管线（管线自身行为由 pipeline*.test 覆盖）。
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { attachHighlightClient, MARKUP_MAX_BYTES } from '../code';
 import { markdownRenderer } from './markdownRenderer';
-import { collectExportHtml, collectPrintHtml } from './export';
+import { collectExportHtml, collectPrintHtml, exportBaseCss } from './export';
 
 /** 管线成品形态的富文档夹具：交互壳（复制钮/切换钮/源码面板）、图表两种形态
  * （有图可看的 toggle wrapper / source-only wrapper）、三类图片、音视频、四级标题。 */
@@ -95,6 +97,8 @@ describe('collectExportHtml——自包含 HTML 装配', () => {
     expect(alert!.classList.contains('markdown-alert-collapsed')).toBe(false);
     // 内容节点在（collapsed 的 display:none 不会再吃掉正文）
     expect(out.querySelector('#folded-content')?.textContent).toBe('收起态的正文内容');
+    // 标题标记类 markdown-alert-fold-toggle 一并剥净（终审 M2：纯监听挂载标记，无样式无行为）
+    expect(out.querySelector('.markdown-alert-fold-toggle')).toBeNull();
   });
 
   it('音视频占位降级为源地址超链接：video/audio 元素不进导出产物', async () => {
@@ -188,6 +192,47 @@ describe('collectExportHtml——自包含 HTML 装配', () => {
     });
     const out = new DOMParser().parseFromString(html, 'text/html');
     expect(out.querySelectorAll('head style')).toHaveLength(1);
+  });
+});
+
+describe('exportBaseCss——代码高亮映射段（终审 C1 回归锁 + app.css 双向对齐）', () => {
+  // app.css 从文件系统读（vitest 对 css 导入会桩化；theme.test.ts 同款双 cwd 兼容
+  // 仓库根/包内两种运行目录）。映射段缺席=导出产物代码高亮全灭（变量注入无落点）
+  const appCss = readFileSync(
+    ['apps/web/src/app.css', '../../../apps/web/src/app.css'].map((p) => resolve(p)).find((p) => existsSync(p))!,
+    'utf8'
+  );
+
+  it('回归锁：导出 styleCss 基底含 .ts-keyword 与 .hljs-keyword 映射规则', () => {
+    expect(exportBaseCss).toContain('.ts-keyword { color: var(--vv-ts-keyword, inherit); }');
+    expect(exportBaseCss).toContain('.hljs-keyword { color: var(--hljs-keyword); }');
+  });
+
+  it('双向对齐：.ts-*/.hljs-* 规则集与 app.css 该段逐一相等（防再漂移）', () => {
+    const classes = (css: string, re: RegExp) => [...css.matchAll(re)].map((m) => m[1]!).sort();
+    const ts = /\.ts-([a-z0-9-]+) \{/g;
+    const hljs = /\.hljs-([a-z0-9_]+) \{/g; // built_in 含下划线
+    const tsExport = classes(exportBaseCss, ts);
+    const hljsExport = classes(exportBaseCss, hljs);
+    expect(tsExport).toEqual(classes(appCss, ts));
+    expect(hljsExport).toEqual(classes(appCss, hljs));
+    // 规模佐证：防两端同退化成空集的假绿（app.css 现态 53 ts + 11 hljs 条）
+    expect(tsExport.length).toBeGreaterThanOrEqual(50);
+    expect(hljsExport.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('每条 .ts- 映射规则体与 app.css 同构（var(--vv-ts-<cls>, inherit) 回落继承形态）', () => {
+    for (const m of appCss.matchAll(/\.ts-([a-z0-9-]+) \{/g)) {
+      const cls = m[1]!;
+      expect(exportBaseCss, `.ts-${cls} 映射规则缺失或形态漂移`).toContain(
+        `.ts-${cls} { color: var(--vv-ts-${cls}, inherit); }`
+      );
+    }
+  });
+
+  it('交互壳死规则不回潮：折叠 foldable/collapsed 规则不进导出（终审 M2 fail-safe）', () => {
+    expect(exportBaseCss).not.toContain('markdown-alert-foldable');
+    expect(exportBaseCss).not.toContain('markdown-alert-collapsed');
   });
 });
 

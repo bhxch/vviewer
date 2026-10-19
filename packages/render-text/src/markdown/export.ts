@@ -13,11 +13,17 @@
  * 导出基础排版 CSS（单源常量，随本文件维护——md-export 台账裁决：常量单源 +
  * app.css 复制 + 双端同步注释）。内容为 app.css 的 :root 变量子集（亮/暗双块，
  * 暗块以 html[data-vv-mode="dark"] 为键——触发壳按当前生效模式在导出文档根元素
- * 打标）+ body 基线 + .vv-markdown 排版段。双端同步点：
- * - 变量值/排版规则改动须同步 apps/web/src/app.css 对应段（该段头部有同步注释）；
- * - 交互壳规则（md-copy-btn hover 等）不进导出：交互壳在装配时已剥离；
- * - 代码主题变量（--vv-ts-* 与 --hljs-* 覆盖）不在此处——由触发壳抽取 style
- *   #vv-code-theme 的当前 textContent 注入（本文档只带亮暗默认值兜底）。
+ * 打标）+ 代码高亮映射段（.hljs-* 与 .ts-* 类名→var()，app.css 对应段的复制——
+ * 映射规则缺席则注入变量无处落地，导出高亮全灭，终审 C1）+ body 基线 +
+ * .vv-markdown 排版段。双端同步点：
+ * - 变量值/排版/映射规则改动须同步 apps/web/src/app.css 对应段；映射段规则集
+ *   一致性由 export.test.ts 双向校验锁定（theme.test.ts 同款防漂移形态）；
+ * - 交互壳规则（md-copy-btn hover、alert 折叠 foldable/collapsed 等）不进导出：
+ *   交互壳在装配时已剥离；折叠规则删而不留——剥离后永不命中，留存反成
+ *   「忘剥→collapsed 正文永久 display:none」的隐患（删之 fail-safe 为普通 alert）；
+ * - 代码主题变量值（--vv-ts-* 与 --hljs-* 覆盖）不在此处——由触发壳抽取 style
+ *   #vv-code-theme 的当前 textContent 注入（本文档只带亮暗默认值兜底；变量值
+ *   需映射段先在才有落点，见上）。
  */
 export const exportBaseCss = `/* vviewer markdown 导出基础排版（与 apps/web/src/app.css 的 .vv-markdown 段同步维护） */
 :root {
@@ -35,6 +41,46 @@ export const exportBaseCss = `/* vviewer markdown 导出基础排版（与 apps/
   --hljs-keyword: #ff7b72; --hljs-string: #a5d6ff; --hljs-comment: #8b949e;
   --hljs-number: #79c0ff; --hljs-title: #d2a8ff; --hljs-built_in: #79c0ff; --hljs-attr: #79c0ff;
 }
+/* 代码高亮映射段（终审 C1 自 app.css「代码」段复制，双向校验防漂移）：类名→var()
+   映射须随导出文档自带，触发壳注入的变量值（style#vv-code-theme 的 --vv-ts- 与
+   --hljs-* 两族）才有落点——此前缺失致导出产物代码高亮全灭 */
+.hljs-keyword { color: var(--hljs-keyword); } .hljs-string { color: var(--hljs-string); }
+.hljs-comment { color: var(--hljs-comment); font-style: italic; } .hljs-number { color: var(--hljs-number); }
+.hljs-title { color: var(--hljs-title); } .hljs-built_in { color: var(--hljs-built_in); }
+.hljs-attr { color: var(--hljs-attr); } .hljs-params { color: var(--hljs-title); }
+/* --hljs-type/--hljs-variable/--hljs-tag 默认未定义（→ unset 继承默认前景），
+   仅当代码主题映射命中时生效（theme.ts HLJS_CAPTURE_TO_VAR 输出） */
+.hljs-type { color: var(--hljs-type); } .hljs-variable { color: var(--hljs-variable); }
+.hljs-tag { color: var(--hljs-tag); }
+/* tree-sitter 捕获样式：颜色取自注入的 style#vv-code-theme（--vv-ts-*），变量缺失
+   时回落继承；清单与 theme.ts CODE_CAPTURES 一一对齐（theme.test.ts 校验 app.css 侧） */
+.ts-attribute { color: var(--vv-ts-attribute, inherit); } .ts-comment { color: var(--vv-ts-comment, inherit); }
+.ts-comment-line { color: var(--vv-ts-comment-line, inherit); } .ts-comment-block { color: var(--vv-ts-comment-block, inherit); }
+.ts-constant { color: var(--vv-ts-constant, inherit); } .ts-constant-builtin { color: var(--vv-ts-constant-builtin, inherit); }
+.ts-constant-character { color: var(--vv-ts-constant-character, inherit); } .ts-constant-character-escape { color: var(--vv-ts-constant-character-escape, inherit); }
+.ts-constant-numeric { color: var(--vv-ts-constant-numeric, inherit); } .ts-constructor { color: var(--vv-ts-constructor, inherit); }
+.ts-function { color: var(--vv-ts-function, inherit); } .ts-function-builtin { color: var(--vv-ts-function-builtin, inherit); }
+.ts-function-call { color: var(--vv-ts-function-call, inherit); } .ts-function-macro { color: var(--vv-ts-function-macro, inherit); }
+.ts-function-method { color: var(--vv-ts-function-method, inherit); } .ts-keyword { color: var(--vv-ts-keyword, inherit); }
+.ts-keyword-control { color: var(--vv-ts-keyword-control, inherit); } .ts-keyword-control-conditional { color: var(--vv-ts-keyword-control-conditional, inherit); }
+.ts-keyword-control-import { color: var(--vv-ts-keyword-control-import, inherit); } .ts-keyword-control-repeat { color: var(--vv-ts-keyword-control-repeat, inherit); }
+.ts-keyword-directive { color: var(--vv-ts-keyword-directive, inherit); } .ts-keyword-function { color: var(--vv-ts-keyword-function, inherit); }
+.ts-keyword-operator { color: var(--vv-ts-keyword-operator, inherit); } .ts-label { color: var(--vv-ts-label, inherit); }
+.ts-markup-bold { color: var(--vv-ts-markup-bold, inherit); } .ts-markup-heading { color: var(--vv-ts-markup-heading, inherit); }
+.ts-markup-italic { color: var(--vv-ts-markup-italic, inherit); } .ts-markup-link { color: var(--vv-ts-markup-link, inherit); }
+.ts-markup-list { color: var(--vv-ts-markup-list, inherit); } .ts-markup-raw { color: var(--vv-ts-markup-raw, inherit); }
+.ts-module { color: var(--vv-ts-module, inherit); } .ts-namespace { color: var(--vv-ts-namespace, inherit); }
+.ts-number { color: var(--vv-ts-number, inherit); } .ts-operator { color: var(--vv-ts-operator, inherit); }
+.ts-property { color: var(--vv-ts-property, inherit); } .ts-punctuation { color: var(--vv-ts-punctuation, inherit); }
+.ts-punctuation-bracket { color: var(--vv-ts-punctuation-bracket, inherit); } .ts-punctuation-delimiter { color: var(--vv-ts-punctuation-delimiter, inherit); }
+.ts-punctuation-special { color: var(--vv-ts-punctuation-special, inherit); } .ts-special { color: var(--vv-ts-special, inherit); }
+.ts-string { color: var(--vv-ts-string, inherit); } .ts-string-escape { color: var(--vv-ts-string-escape, inherit); }
+.ts-string-special { color: var(--vv-ts-string-special, inherit); } .ts-tag { color: var(--vv-ts-tag, inherit); }
+.ts-type { color: var(--vv-ts-type, inherit); } .ts-type-builtin { color: var(--vv-ts-type-builtin, inherit); }
+.ts-type-enum-variant { color: var(--vv-ts-type-enum-variant, inherit); } .ts-variable { color: var(--vv-ts-variable, inherit); }
+.ts-variable-builtin { color: var(--vv-ts-variable-builtin, inherit); } .ts-variable-parameter { color: var(--vv-ts-variable-parameter, inherit); }
+.ts-diff-delta { color: var(--vv-ts-diff-delta, inherit); } .ts-diff-minus { color: var(--vv-ts-diff-minus, inherit); }
+.ts-diff-plus { color: var(--vv-ts-diff-plus, inherit); }
 body { margin: 0; background: var(--ui-bg); color: var(--ui-fg); font-family: system-ui, -apple-system, sans-serif; }
 .vv-markdown { max-width: 60rem; padding: 1rem 1.5rem; line-height: 1.6; overflow-wrap: break-word; }
 .vv-markdown h1, .vv-markdown h2, .vv-markdown h3, .vv-markdown h4 { line-height: 1.3; margin: 1.5em 0 .5em; scroll-margin-top: .5rem; }
@@ -75,11 +121,8 @@ body { margin: 0; background: var(--ui-bg); color: var(--ui-fg); font-family: sy
 .markdown-alert-warning { border-left-color: #9a6700; }
 .markdown-alert-caution { border-left-color: #cf222e; }
 .markdown-alert-todo { border-left-color: #57606a; }
-.markdown-alert-foldable > .markdown-alert-title { cursor: pointer; user-select: none; }
-.markdown-alert-foldable > .markdown-alert-title::after { content: '▾'; margin-left: auto;
-  font-size: .8em; color: var(--ui-fg-muted); }
-.markdown-alert-collapsed > .markdown-alert-title::after { content: '▸'; }
-.markdown-alert-collapsed > :not(.markdown-alert-title) { display: none; }
+/* 折叠规则（app.css 的 foldable/collapsed 段）不进导出（终审 M2）：剥离后永不命中，
+   删之使「忘剥→显示为普通 alert」fail-safe（留存则 collapsed 正文永久 display:none） */
 /* 导出目录（本模块生成） */
 .vv-export-toc { border: 1px solid var(--ui-border); border-radius: 6px; padding: .6rem 1rem; margin: 1rem 0; }
 .vv-export-toc-title { font-weight: 600; margin-bottom: .4rem; }
@@ -134,10 +177,15 @@ function stripInteractiveShells(root: Document): void {
     if (view !== null && sourcePane !== null && !view.hasAttribute('hidden')) sourcePane.remove();
   }
   // foldable callout（enrich 折叠卡片，F1）：折叠态由标题点击切换，导出无脚本——
-  // 折叠类留着会让 exportBaseCss 的 collapsed 规则把正文永久 display:none 且不可
-  // 展开（HTML/PDF 双链路丢内容）。移除后导出形态=全部展开的普通 alert。
+  // 折叠类留着即死类名；剥离（配合 exportBaseCss 不含折叠规则，终审 M2）使导出
+  // 形态=全部展开的普通 alert，忘剥时同样以普通 alert 呈现不丢正文。标题上的
+  // markdown-alert-fold-toggle 为 enrich 挂点击监听用的纯标记类（无样式无行为），
+  // 顺手剥净保持产物类名只余形态语义。
   for (const alert of Array.from(root.querySelectorAll('.markdown-alert-foldable'))) {
     alert.classList.remove('markdown-alert-foldable', 'markdown-alert-collapsed');
+    for (const toggle of Array.from(alert.querySelectorAll('.markdown-alert-fold-toggle'))) {
+      toggle.classList.remove('markdown-alert-fold-toggle');
+    }
   }
 }
 
