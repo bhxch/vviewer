@@ -147,6 +147,26 @@ async fn markdown_keeps_broken_diagram_fence_for_client() {
     assert!(!html.contains("data-vv-diagram"), "失败不得产出服务端 div：{html}");
 }
 
+#[tokio::test]
+async fn markdown_empty_digraph_returns_200_and_keeps_fence() {
+    // 终审 C2：零节点图 layout-rs do_it 内 assert panic——修复前无 CatchPanicLayer
+    // 下整请求连接重置；修复后判空早退 + catch_unwind 兜底 → 200 + 原 fence 保留
+    let f = fixture(true, None);
+    let app = vviewer::build_router(f.state);
+    let (status, body) = post_json(
+        app,
+        "/api/compute/markdown",
+        None,
+        json!({ "text": "前\n\n```dot\ndigraph{}\n```\n\n后\n" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "空图不得 5xx/断连：{body}");
+    let html = body["html"].as_str().unwrap();
+    assert!(html.contains("<pre><code class=\"language-dot\">digraph{}"), "空图保留原 fence：{html}");
+    assert!(!html.contains("data-vv-diagram"), "空图不得产出服务端 div：{html}");
+    assert!(html.contains("前") && html.contains("后"), "前后文不受影响：{html}");
+}
+
 // ---------- wikilinks ----------
 
 #[tokio::test]

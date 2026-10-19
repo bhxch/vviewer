@@ -1,10 +1,11 @@
 // server/src/compute/diagrams.rs — 服务端图表围栏渲染（spec 2026-10-19 §2.5）。
 // markpad Rust 栈同款：graphviz=layout-rs、svgbob=svgbob crate（纯 Rust，无 Java/进程）。
 // comrak 输出后处理：原生集围栏替换为内联 SVG div；解析失败/非原生语言原样保留
-//（客户端管线接手）。SVG 含引擎生成的 <style>（layout-rs 仅字体类、svgbob 固定描边
-// 规则，用户源码不进入 style 块），由前端 sanitize 上下文豁免承载——uponSanitizeElement
-// 钩子对 [data-vv-diagram=server] 内 style 强制保留 + 内容危险 token 中和（Task 3 落地，
-// 2026-10-19 控制器裁决）；不得用外链 img 的约束不变（实测两引擎直出均无 img）。
+//（客户端管线接手）。SVG 含引擎生成的 <style>（layout-rs 仅字体类；svgbob 固定描边
+// 规则 + 用户提供 CSS——`# Legend:` 语法 `name = {css}` 原样并入 style 块），由前端
+// sanitize 上下文豁免承载——uponSanitizeElement 钩子对 [data-vv-diagram=server] 内
+// style 按归一化危险 token 判定放行或整节点丢弃（Task 3 落地，2026-10-19 控制器裁决；
+// Legend CSS 外泄面由该全量判定兜住）；不得用外链 img 的约束不变（实测两引擎直出均无 img）。
 
 use layout::backends::svg::SVGWriter;
 use layout::gv::{DotParser, GraphBuilder};
@@ -20,9 +21,21 @@ fn render_diagram_svg(canon: &str, source: &str) -> Option<String> {
             let mut builder = GraphBuilder::new();
             builder.visit_graph(&graph);
             let mut visual_graph = builder.get();
-            let mut svg_writer = SVGWriter::new();
-            visual_graph.do_it(false, false, false, &mut svg_writer);
-            Some(svg_writer.finalize())
+            // 零节点图（`digraph{}`）解析成功但 do_it 内 assert!(!is_empty) 必 panic——
+            // 无 CatchPanicLayer 下整请求连接重置（终审 C2）。可判空先早退（保原 fence
+            // 语义），catch_unwind 兜底双保险：do_it 路径上的其他 panic 形态（上游库
+            // 版本演进）同样降级为失败保留，不出 500/连接重置。
+            if visual_graph.num_nodes() == 0 {
+                return None;
+            }
+            // do_it/finalize 为外部 crate 代码，闭包内借用了本地状态——AssertUnwindSafe
+            // 足够：panic 后这些状态即弃用（整个调用返回 None），无跨 panic 观察面。
+            let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut svg_writer = SVGWriter::new();
+                visual_graph.do_it(false, false, false, &mut svg_writer);
+                svg_writer.finalize()
+            }));
+            rendered.ok()
         }
         "svgbob" => Some(svgbob::to_svg(source)),
         _ => None,
@@ -63,7 +76,13 @@ pub fn replace_diagram_fences(html: &str) -> String {
             break;
         };
         let lang = &after_open[..lang_end_rel];
-        let Some(canon) = NATIVE.iter().find(|(n, _)| *n == lang).map(|(_, c)| *c) else {
+        // 大小写不敏感（M1）：```DOT/```Graphviz 等围栏与 ```dot 同为原生集，
+        // 不静默漏到「非原生」分支走客户端
+        let Some(canon) = NATIVE
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(lang))
+            .map(|(_, c)| *c)
+        else {
             // 非原生语言：原样拷到该 fence 之后继续扫
             let consume = OPEN.len() + lang_end_rel + 2;
             out.push_str(&rest[..start + consume]);
@@ -134,6 +153,26 @@ mod tests {
         let html = "<pre><code class=\"language-graphviz\">digraph { a -&gt;</code></pre>";
         let out = replace_diagram_fences(html);
         assert_eq!(out, html, "layout-rs 解析失败应原样保留（客户端接手）");
+    }
+
+    #[test]
+    fn empty_digraph_leaves_fence_untouched() {
+        // 终审 C2：零节点图解析成功但 do_it 内 assert panic——修复后判空早退 +
+        // catch_unwind 兜底，均降级为失败保留（原 fence 交客户端），不 panic 串请求
+        let for_dot = "<pre><code class=\"language-dot\">digraph{}</code></pre>";
+        assert_eq!(replace_diagram_fences(for_dot), for_dot);
+        let for_graphviz =
+            "<pre><code class=\"language-graphviz\">digraph { } node_in_name_only</code></pre>";
+        assert_eq!(replace_diagram_fences(for_graphviz), for_graphviz);
+    }
+
+    #[test]
+    fn uppercase_fence_language_renders_server_side() {
+        // 终审 M1：NATIVE 匹配大小写不敏感——```DOT 不再静默走非原生分支
+        let html = "<pre><code class=\"language-DOT\">digraph { a -&gt; b }</code></pre>";
+        let out = replace_diagram_fences(html);
+        assert!(out.contains("data-vv-diagram=\"server\""), "{out}");
+        assert!(out.contains("data-diagram-lang=\"DOT\""), "原文语言保留供前端注册表归一: {out}");
     }
 
     #[test]
