@@ -145,6 +145,51 @@ function sanitizeStyleAttribute(el: Element): void {
 }
 
 let dataUriHookRegistered = false;
+
+// ---------- 豁免 style 的安全判定（修复轮 1 H1/M1/L1） ----------
+//
+// 匹配在归一化副本上进行：浏览器 CSS tokenizer 对 ident/值内反斜杠转义先解码再
+// 语义化——`\75 rl(`、`u\72 l(` 在浏览器里都按 url( 生效，字面串匹配会漏（hex
+// 转义绕过可实现无交互外域 GET，击穿「零外域自动 GET」不变量）。归一化两步：
+// hex 转义（CSS 规范语义：至多 6 位 + 恰好消费一个尾随空白）→ 码点，越界回落
+// U+FFFD；字面转义（`\;` 等）→ 去反斜杠。先 hex 后字面（否则 `\75` 会被字面
+// 规则截断）。归一化仅用于匹配，不改写保留节点的文本（合法 CSS 的有意转义不动）。
+function cssEscapeNormalized(text: string): string {
+  return text
+    .replace(/\\([0-9a-fA-F]{1,6})\s?/g, (_m, hex: string) => {
+      const cp = parseInt(hex, 16);
+      // CSS 规范：越界码点（>10FFFF）按 U+FFFD 处理——不可能是任何危险 token 的组成
+      return cp > 0x10ffff ? String.fromCodePoint(0xfffd) : String.fromCodePoint(cp);
+    })
+    .replace(/\\(.)/g, '$1');
+}
+
+// 危险 token 清单（不区分大小写；无 g 旗标——RegExp.test 无 lastIndex 状态）：
+//   </style       逃逸/守卫触发向量；
+//   url(          外联加载主向量（转义变体由归一化拆除）；
+//   image-set(    字符串 URL 形态无 url(（M1：与属性层 externalRefInDeclaration
+//                 的 image-set 同口径——那里逐声明剥除，这里整节点丢弃）；
+//   @import       样式表级外联；
+//   behavior:     遗留 IE 行为绑定（L1）；
+//   -moz-binding: 遗留 XBL 绑定（L1）；
+//   expression(   遗留 IE CSS 表达式；
+//   http(s)://    绝对 URL 兜底：引擎 CSS 无外链，任何转义伪装归一化后同此命中。
+const STYLE_DEADLY: readonly RegExp[] = [
+  /<\/\s*style/i,
+  /url\(/i,
+  /image-set\(/i,
+  /@import/i,
+  /behavior\s*:/i,
+  /-moz-binding\s*:/i,
+  /expression\(/i,
+  /https?:\/\//i,
+];
+
+function styleTextIsDeadly(text: string): boolean {
+  const normalized = cssEscapeNormalized(text);
+  return STYLE_DEADLY.some((re) => re.test(normalized));
+}
+
 function registerSanitizeHooks(): void {
   if (dataUriHookRegistered) return;
   dataUriHookRegistered = true;
@@ -154,18 +199,21 @@ function registerSanitizeHooks(): void {
     // compute markdown 的服务端图表（server/src/compute/diagrams.rs）产出带引擎生成
     // <style> 的 SVG（layout-rs 仅字体规则、svgbob 固定描边规则，用户源码不进入
     // style 块）；FORBID_TAGS 一刀切会把线条样式剥没（svgbob 线全消失）。裁决：
-    // [data-vv-diagram="server"] 容器内的 style 保留 + 文本危险 token 中和；容器外
-    // 维持原剥除语义（BUG-40 防线不松动）。
+    // [data-vv-diagram="server"] 容器内的 style 经安全检查后保留；容器外维持原剥
+    // 除语义（BUG-40 防线不松动）。
+    //
+    // 威胁模型（修复轮 1 M2 落实）：该容器属性可被 markdown 作者伪造——comrak
+    // render.unsafe 透传作者原始 HTML 且 ALLOW_DATA_ATTR 保留 data-*，豁免并非
+    // 只服务端图表可达：作者可自造带属性 div 获得页面级样式注入（选择器级
+    // chrome 篡改，中危，知情接受）；「零外域自动 GET」不变量由下方危险 token
+    // 判定阻断（归一化匹配 + 命中即整节点丢弃，见 styleTextIsDeadly）。
     //
     // 机制注（DOMPurify 3.4.16 实测语义，非旧版惯用法）：FORBID_TAGS 命中在钩子
     // 载荷之外短路移除（_sanitizeDisallowedNode），uponSanitizeElement 的
     // data.allowed/allowedTags 均无法覆写。故 style 移出 FORBID_TAGS（回落默认
     // 允许表），钩子内按节点上下文二分——容器外由钩子自行摘除节点（元素连 CSS
     // 文本一并移除；DOMPurify 对钩内摘除有 _handleHookDetachedNode 正式支撑，
-    // 可观察输出与原 FORBID_TAGS+FORBID_CONTENTS 一致）；容器内中和文本后放行。
-    // DOMPurify 对保留的 style 另有 mXSS 守卫（textContent 含 `</style␠`/
-    // `</style>` 形态即整元素强删，LITERAL_TEXT_CLOSE）——`</style` 中和先行拆除
-    // 该输入，守卫不再触发。
+    // 可观察输出与原 FORBID_TAGS+FORBID_CONTENTS 一致）；容器内按判定放行或丢弃。
     if (data.tagName !== 'style' || node.nodeType !== 1) return;
     const el = node as Element;
     let inServer = false;
@@ -179,12 +227,13 @@ function registerSanitizeHooks(): void {
       el.remove(); // 容器外：维持 FORBID_TAGS 原语义（元素连内容一并移除）
       return;
     }
-    // 容器内豁免：中和危险 token 后放行。引擎生成内容不含这些 token，正常路径
-    // 零改动；纯防线（style 文本不执行脚本，url(/@import 是外联加载向量，
-    // expression( 是遗留 IE 向量，</style 是逃逸/守卫触发向量）。
-    let css = el.textContent ?? '';
-    css = css.replace(/<\/\s*style/gi, '').replace(/url\(/gi, '').replace(/@import/gi, '').replace(/expression\(/gi, '');
-    el.textContent = css;
+    // 容器内豁免：命中任一危险 token（归一化匹配，H1/M1/L1）→ 整节点丢弃——
+    // 引擎生成 CSS 永不含这些 token，凡命中即敌意输入，宁降级不冒险（不做
+    // 删除式保留：删除防不住转义重组后的二次拼接，徒留探测面）。未命中的
+    // 合法引擎 CSS 原样保留、零改动。
+    if (styleTextIsDeadly(el.textContent ?? '')) {
+      el.remove();
+    }
   });
   DOMPurify.addHook('afterSanitizeAttributes', (node) => {
     for (const attr of Array.from(node.attributes)) {

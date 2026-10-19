@@ -23,7 +23,7 @@ describe('sanitizeHtml——净化策略', () => {
     expect(out).not.toContain('alert');
   });
 
-  it('style 标签禁用（FORBID_TAGS style）', () => {
+  it('style 容器外剥除（uponSanitizeElement 钩子上下文二分：仅 server 图表容器豁免，M3 改名反映现行机制）', () => {
     const out = sanitizeHtml('<style>.titlebar{display:none}</style><p>x</p>');
     expect(out).not.toContain('<style');
     expect(out).not.toContain('titlebar');
@@ -431,25 +431,49 @@ describe('sanitizeHtml——服务端图表 style 上下文豁免（spec §2.5 �
     expect(out).toContain('.e{fill:none;stroke:red}');
   });
 
-  it('豁免 style 内危险 token 被中和：url(、@import、expression(', () => {
+  it('豁免 style 命中危险 token 整节点丢弃（url(/@import/expression(——凡命中即敌意，降级不保留）', () => {
     const out = sanitizeHtml(
       `${SRV}<style>.a{background:url(https://evil.example/b.png)}@import "x.css";p{width:expression(alert(1))}</style></div>`
     );
-    expect(out).toContain('<style');
-    expect(out).not.toContain('url(');
-    expect(out).not.toContain('@import');
+    expect(out).not.toContain('<style');
+    expect(out).not.toContain('evil.example');
     expect(out).not.toContain('expression(');
   });
 
-  it('豁免 style 内嵌入式 </style 被中和（DOMPurify mXSS 守卫输入提前拆除，元素保留）', () => {
-    // raw text 元素里 </style 后随非终止字符（"）才会留在文本内——恰好是
-    // DOMPurify LITERAL_TEXT_CLOSE 守卫会整元素强删的输入；中和先行拆除
+  it('豁免 style 嵌入式 </style 同样整节点丢弃', () => {
+    // raw text 元素里 </style 后随非终止字符（"）才会留在文本内
     const out = sanitizeHtml(`${SRV}<style>.a{content:"</style"}</style></div>`);
-    expect(out).toContain('<style');
+    expect(out).not.toContain('<style');
     const back = new DOMParser().parseFromString(out, 'text/html');
-    const styleEl = back.querySelector('div[data-vv-diagram="server"] style');
-    expect(styleEl).not.toBeNull();
-    expect(styleEl!.textContent).not.toContain('</style');
+    expect(back.querySelector('div[data-vv-diagram="server"] style')).toBeNull();
+  });
+
+  it('对抗性：CSS hex/字面转义伪装的 url( 归一化后整节点丢弃（H1）', () => {
+    // 浏览器 CSS tokenizer 先解码转义再语义化：\75 rl( 与 u\72 l( 均按 url( 生效，
+    // 字面串匹配会漏——归一化副本（hex 转义含尾随空白消费 + 字面转义）上匹配
+    const hexed = sanitizeHtml(`${SRV}<style>\\75 rl(https://evil.example/x.png)</style></div>`);
+    expect(hexed).not.toContain('<style');
+    expect(hexed).not.toContain('evil.example');
+    const literal = sanitizeHtml(`${SRV}<style>u\\72 l(https://evil.example/x.png)</style></div>`);
+    expect(literal).not.toContain('<style');
+    // 绝对 URL 的 hex 伪装（\2f→/；hex 转义须空白终止，否则后续 hex 字母并入
+    // 转义——\2fevil 是 U+02FE+vil 而非 /evil，实现与浏览器 tokenizer 同语义）
+    const slashed = sanitizeHtml(`${SRV}<style>a{background:https:\\2f\\2f evil.example/p.png}</style></div>`);
+    expect(slashed).not.toContain('<style');
+    expect(slashed).not.toContain('evil.example');
+  });
+
+  it('对抗性：image-set( 字符串 URL 形态整节点丢弃（M1，与属性层 externalRefInDeclaration 同口径）', () => {
+    const out = sanitizeHtml(`${SRV}<style>.a{background:image-set("https://evil.example/i.png" 1x)}</style></div>`);
+    expect(out).not.toContain('<style');
+    expect(out).not.toContain('evil.example');
+  });
+
+  it('合法引擎 CSS 不误杀（layout-rs/svgbob 真实 token：font-family/stroke/fill 等原样保留）', () => {
+    const engineCss = '.node_1 path{stroke:black;fill:none;stroke-width:1px;}text{font-family:"DejaVu Sans";font-size:14px;}line{stroke:gray;}';
+    const out = sanitizeHtml(`${SRV}<style>${engineCss}</style><svg/></div>`);
+    expect(out).toContain('<style>');
+    expect(out).toContain(engineCss);
   });
 
   it('普通位置的 style 仍被剥除（BUG-40 防线不松动）', () => {
