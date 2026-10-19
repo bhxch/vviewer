@@ -287,6 +287,8 @@ export function effectiveMode(themeMode: Settings['themeMode']): 'light' | 'dark
 
 /**
  * mermaid 主题映射（spec §2.3）：按生效亮暗映射 mermaid 内置主题。
+ * 仅按 effectiveMode（亮/暗）映射；appearance 主题基色细化列为未来项
+ * （spec §2.3 口径的知情简化）。
  * 单一来源：applyAppearanceFromSettings 派发 vv:appearance-applied 时计算 detail，
  * Task 6 注入器以同源值喂 markdownRenderer 的初始 ctx（render-text 不持副本）。
  */

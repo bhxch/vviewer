@@ -1,8 +1,10 @@
-// tools/diagram-budget.mjs — spec §2.6 预算门禁：dist 图表引擎 chunk 总量 ≤4MB。
-// 图表引擎（@viz-js/viz/nomnoml/mermaid/katex）经 vite.config.ts manualChunks 确定性
-// 命名为 diagram-engines-*.js（并已排除出 PWA precache）。本脚本按该前缀统计产物
-// 总体积，超预算即失败（exit 1），输出超限清单（按体积降序），提示按 spec 启用集
-// 取舍（减引擎回落 kroki）。无第三方依赖；在仓库根运行（CI 与本地一致）。
+// tools/diagram-budget.mjs — spec §2.6 预算门禁：图表引擎 chunk 总量 ≤4MB。
+// 统计口径仅本期新增引擎 @viz-js/viz + nomnoml：经 vite.config.ts diagramEngineChunk
+// 的 codeSplitting.groups 归堆 + chunkFileNames 特判命名为 diagram-engines-*.js
+//（并已排除出 PWA precache）。mermaid/katex 为存量引擎不在口径（维持 SvelteKit
+// 默认分块与 precache 地位，裁决备案见 vite.config.ts 同名注释）。本脚本按该前缀
+// 统计产物总体积，超预算即失败（exit 1），输出超限清单（按体积降序），提示按
+// spec 启用集取舍（减引擎回落 kroki）。无第三方依赖；在仓库根运行（CI 与本地一致）。
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -18,7 +20,7 @@ try {
   process.exit(1);
 }
 if (entries.length === 0) {
-  console.error('diagram-engines chunk 未找到——manualChunks 未生效？');
+  console.error('diagram-engines chunk 未找到——codeSplitting.groups/chunkFileNames 特判未生效？');
   process.exit(1);
 }
 const total = entries.reduce((sum, e) => sum + e.size, 0);
