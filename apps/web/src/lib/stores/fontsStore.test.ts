@@ -210,8 +210,12 @@ describe('CRUD 与门禁', () => {
   });
 
   it('列表按入库序（addedAt 升序）返回', async () => {
+    // addedAt 同毫秒并列时序不定（store 主键为随机 id，getAll 按键序）——受控时钟分离
+    let nowSeq = 0;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => ++nowSeq * 1000);
     const a = await addFontFromFile(fileOf([1], 'A.ttf'));
     const b = await addFontFromFile(fileOf([2], 'B.ttf'));
+    nowSpy.mockRestore();
     expect((await listFontRecords()).map((r) => r.id)).toEqual([a.id, b.id]);
   });
 });

@@ -39,6 +39,7 @@
   } from './stores/session';
   import { migrateLegacyTabs, workspaceStore, type WorkspaceSnapshotItem, type WorkspaceSource } from './workspaceStore';
   import { loadSettings, onSettingsChanged } from './stores/settings';
+  import { codeLineHeight } from './theme';
 
   /** 文件树/面板的来源条目：workspace.sources（模型）× storeById（活动实例）的合成。
    * rootIndex/basePath 随模型透传（GlobalSearchPanel → globalSearch 的远程命中
@@ -385,9 +386,9 @@
   // 快速打开、Alt+W tab 管理面板（T6）、Alt+Shift+T 撤销关闭 tab（F 项 T3）、
   // j/k 逐行滚、gg 顶、G 底。统一走 inField
   // 判定（非输入焦点才接管——与 M3 '/' 的惯例同源），组合键均 preventDefault。
-  // 行高 20px 与 render-text code.ts 的 LINE_HEIGHT 同源（计划包 5 依赖说明：
-  // 不 import 包 2 文件，常量复制需注释同源）。
-  const CODE_LINE_HEIGHT = 20;
+  // j/k 步长=代码行高：按现 settings 即时计算（codeLineHeight 纯函数与 theme.ts
+  // --vv-code-line-height 注入、render-text opts.lineMetrics 同一公式），字号设置
+  // 变更后无需重启即随动（台账 M2：原先 20px 固定常量不随字号联动）。
   /** gg 序列：上一次 g 的按下时刻（500ms 内两击判顶跳，防单 g 误触） */
   let lastGAt = 0;
 
@@ -453,8 +454,8 @@
       const target = scrollTarget();
       if (target === null) return;
       e.preventDefault();
-      if (key === 'j') target.scrollTop += CODE_LINE_HEIGHT;
-      else if (key === 'k') target.scrollTop -= CODE_LINE_HEIGHT;
+      if (key === 'j') target.scrollTop += codeLineHeight(loadSettings().fonts.codeSize);
+      else if (key === 'k') target.scrollTop -= codeLineHeight(loadSettings().fonts.codeSize);
       else if (key === 'g') {
         const now = Date.now();
         if (now - lastGAt <= 500) {
