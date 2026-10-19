@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn inline_footnote_renders() {
-        // 行内脚注 ^[note]（parser.inline_footnotes）；本地对偶金标：
+        // 行内脚注 ^[note]（ext.inline_footnotes，Extension 选项）；本地对偶金标：
         // packages/render-text/test/markdownEngine.test.ts 脚注用例（[^1] 定义式，
         // markdown-it 脚注插件）——footnote-ref 形态一致以两侧断言互为锚。
         let html = render("正文^[注内容]续", false);
