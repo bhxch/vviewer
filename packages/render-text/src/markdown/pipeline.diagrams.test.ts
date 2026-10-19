@@ -143,3 +143,36 @@ describe('diagrams 步：注册表分发', () => {
     }
   });
 });
+
+describe('diagrams 步：服务端图表 div 接回标准 wrapper（Task 3 / spec §2.5）', () => {
+  it('服务端图表 div 接回标准 wrapper（图/源码切换一致）', async () => {
+    const doc = document.implementation.createHTMLDocument('');
+    doc.body.innerHTML = '<div data-vv-diagram="server" data-diagram-lang="dot" data-diagram-src="digraph{a}"><svg viewBox="0 0 1 1"></svg></div>';
+    await runPipeline(doc, baseCtx);
+    const wrap = doc.querySelector('.md-diagram')!;
+    expect(wrap).not.toBeNull();
+    expect(wrap.querySelector('.md-diagram-view svg')).not.toBeNull();
+    expect(wrap.querySelector('.md-diagram-view[data-mermaid]')).toBeNull(); // 非 mermaid 无锚
+    const src = wrap.querySelector('.md-diagram-source code')!;
+    expect(src.textContent).toBe('digraph{a}');
+    expect((wrap.querySelector('.md-diagram-toggle') as HTMLElement)).not.toBeNull();
+  });
+
+  it('服务端 div 的 data-diagram-src 经属性反解码为原文', async () => {
+    const doc = document.implementation.createHTMLDocument('');
+    doc.body.innerHTML = '<div data-vv-diagram="server" data-diagram-lang="svgbob" data-diagram-src="a -&gt; b"><svg/></div>';
+    await runPipeline(doc, baseCtx);
+    expect(doc.querySelector('.md-diagram-source code')!.textContent).toBe('a -> b');
+  });
+
+  it('服务端 div 幂等：重入不二次包裹、契约属性不残留', async () => {
+    const doc = document.implementation.createHTMLDocument('');
+    doc.body.innerHTML = '<div data-vv-diagram="server" data-diagram-lang="dot" data-diagram-src="digraph{a}"><svg/></div>';
+    await runPipeline(doc, baseCtx);
+    expect(doc.querySelectorAll('.md-diagram')).toHaveLength(1);
+    // 模拟重入（同一 DOM 再跑一遍管线）：wrapped 标记 + 契约属性摘除防二次命中
+    await runPipeline(doc, baseCtx);
+    expect(doc.querySelectorAll('.md-diagram')).toHaveLength(1);
+    expect(doc.querySelector('.md-diagram-view [data-vv-diagram]')).toBeNull();
+  });
+});

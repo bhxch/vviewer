@@ -23,8 +23,13 @@ import { browser } from '$app/env';
 import { ensureHighlightClient, computeRouter } from './highlightClient';
 import { routeLargeFileHighlight } from './highlightRouter';
 import { resolveImageBlobUrl } from './markdownImages';
+import { hasNonDiagramFence } from './markdownFence';
 import { loadSettings } from './stores/settings';
 import { effectiveMode, resolveMermaidTheme } from './theme';
+
+// BUG-22 启发式的单测锚（实现抽在 markdownFence.ts——无 $app 依赖的纯模块，
+// markdownImages.ts 同款抽出模式；viewer.ts 转出口径一致）
+export { hasNonDiagramFence };
 
 /** M1 渲染器注册表：代码/文本、markdown、html 沙箱预览、图片（含消毒后的 SVG）、音视频。
  * M4 追加：PDF（render-doc）、hex/结构树（render-binary）、压缩包 zip/tar/7z/rar
@@ -121,10 +126,14 @@ if (browser) {
     // BUG-22：auto 下含 fenced code block 的 markdown 留本地——围栏二级高亮仍由
     // 本地 hljs 完成（markdownRenderer fenceToHtml），「远程 comrak 正文 + 本地 hljs
     // 围栏」的组合会让「渲染: 远程」指示与实际语义割裂，且违背偏差 #5 的裁决精神
-    // （带注入语言的内容留本地）。行首 ≤3 空格的 ```/~~~ 启发式检测（代码块内的
-    // 假围栏会误判为有围栏，门控只损失远程机会、不损正确性）；显式 remote 仍远程。
+    // （带注入语言的内容留本地）。spec §2.5 细化（hasNonDiagramFence，纯函数见
+    // markdownFence.ts）：仅「非图表语言或无语言」围栏才强制留本地；纯图表/math
+    // 围栏文档路由服务端——原生子集（graphviz/svgbob）服务端直出，其余图表语言
+    // 客户端管线接管，高亮语义无损（图表围栏本就跳过 hljs/tree-sitter）。行首
+    // ≤3 空格的 ```/~~~ 启发式检测（代码块内的假围栏会误判，门控只损失远程机会、
+    // 不损正确性）；显式 remote 仍远程。
     const policy = loadSettings().computePolicy;
-    const localOnly = policy === 'auto' && /^[ \t]{0,3}(?:```|~~~)/m.test(text);
+    const localOnly = policy === 'auto' && hasNonDiagramFence(text);
     const res = await computeRouter.routeMarkdown(
       src,
       text,

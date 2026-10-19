@@ -103,6 +103,9 @@ async function runHighlight(root: Document, ctx: PipelineCtx): Promise<void> {
 // ---------- diagrams 步（注册表分发：local/kroki/source，spec 2026-10-19 §2.1/§2.2） ----------
 
 async function runDiagrams(root: Document, ctx: PipelineCtx): Promise<void> {
+  // 服务端图表 div（compute markdown 后处理产物，spec §2.5）先于 fence 接回标准
+  // wrapper——契约属性 div 不是 pre>code，两个循环互不命中
+  wrapServerDiagrams(root, ctx);
   for (const code of Array.from(root.querySelectorAll('pre > code'))) {
     const langClass = Array.from(code.classList).find((c) => c.startsWith('language-'));
     if (!langClass) continue;
@@ -126,8 +129,113 @@ function effectiveModeOf(type: DiagramType, ctx: PipelineCtx): DiagramMode {
 }
 
 /**
+ * 图/源码切换接线（buildDiagramWrapper 的 withToggle 分支与服务端图表 wrapper 共享，
+ * 切换语义一致）：节点挂载进主文档后监听器随节点保留——copyBtn 同款前提。首次切到
+ * 源码时惰性高亮（图视图优先出图，源码高亮不挡首屏）：data-md-diag-src-hl 标记先行
+ * 防连点重复请求；成功才写 innerHTML，null 失败/catch 静默保留纯文本（标记已写不
+ * 重试——与 source 分支失败语义一致）。
+ */
+function wireDiagramToggle(
+  ctx: PipelineCtx,
+  toggle: HTMLButtonElement,
+  view: HTMLElement,
+  sourcePane: HTMLElement,
+  sourceCode: HTMLElement,
+  source: string,
+  highlightLang: string,
+): void {
+  toggle.addEventListener('click', () => {
+    const showSource = sourcePane.hasAttribute('hidden');
+    sourcePane.toggleAttribute('hidden', !showSource);
+    view.toggleAttribute('hidden', showSource);
+    toggle.textContent = showSource ? '图' : '源码';
+    if (showSource && highlightLang && !sourcePane.hasAttribute('data-md-diag-src-hl')) {
+      sourcePane.setAttribute('data-md-diag-src-hl', '');
+      ctx.highlightFence(source, highlightLang).then((spanHtml) => {
+        if (spanHtml) sourceCode.innerHTML = spanHtml;
+      }).catch(() => { /* 取消等：保留纯文本 */ });
+    }
+  });
+}
+
+/**
+ * wrapper 骨架构造（bar/view/sourcePane 三段；withToggle=true 附带「源码」切换钮
+ * 与共享监听，false 为 source-only 形态——无图视图可切，连 DOM 都不加，bar 只留
+ * 语言徽标）。只构造不落位：调用方决定 replaceWith 时机（fence 路径换 pre，服务端
+ * 路径先把原 div 搬进视图面板）。
+ */
+function buildDiagramWrapper(
+  doc: Document,
+  ctx: PipelineCtx,
+  opts: { langLabel: string; highlightLang: string; source: string; withToggle: boolean },
+): {
+  wrap: HTMLElement;
+  toggle: HTMLButtonElement | null;
+  view: HTMLElement;
+  sourcePane: HTMLElement;
+  sourceCode: HTMLElement;
+} {
+  const wrap = doc.createElement('div');
+  wrap.className = cls(ctx, 'diagram');
+  const bar = doc.createElement('div');
+  bar.className = cls(ctx, 'diagramBar');
+  const label = doc.createElement('span');
+  label.className = cls(ctx, 'diagramLang');
+  label.textContent = opts.langLabel;
+  bar.append(label);
+  const view = doc.createElement('div');
+  view.className = cls(ctx, 'diagramView');
+  const sourcePane = doc.createElement('div');
+  sourcePane.className = cls(ctx, 'diagramSource');
+  sourcePane.setAttribute('hidden', '');
+  const sourceCode = doc.createElement('code');
+  if (opts.highlightLang) sourceCode.className = `language-${opts.highlightLang}`;
+  sourceCode.textContent = opts.source;
+  sourcePane.appendChild(sourceCode);
+  wrap.append(bar, view, sourcePane);
+  let toggle: HTMLButtonElement | null = null;
+  if (opts.withToggle) {
+    toggle = doc.createElement('button');
+    toggle.type = 'button';
+    toggle.className = cls(ctx, 'diagramToggle');
+    toggle.textContent = '源码';
+    bar.append(toggle);
+    wireDiagramToggle(ctx, toggle, view, sourcePane, sourceCode, opts.source, opts.highlightLang);
+  }
+  return { wrap, toggle, view, sourcePane, sourceCode };
+}
+
+/**
+ * 服务端图表 div（Task 2 契约：compute markdown 后处理产物，spec §2.5）接回标准
+ * wrapper：svg 原样搬入视图面板（sanitize 上下文豁免已保其引擎 style，见
+ * sanitize.ts）；源码面板收 data-diagram-src——getAttribute 经 DOM 解析自动反解码
+ * HTML 实体为原文；图/源码切换与本地 fence 同构（buildDiagramWrapper withToggle
+ * 路径共享 wireDiagramToggle，含首次切源码惰性高亮）。双保险防二次命中：
+ * data-md-diagram-wrapped 标记 + 摘除 data-vv-diagram 契约属性。
+ */
+function wrapServerDiagrams(root: Document, ctx: PipelineCtx): void {
+  for (const el of Array.from(root.querySelectorAll('[data-vv-diagram="server"]'))) {
+    if (el.hasAttribute('data-md-diagram-wrapped')) continue;
+    el.setAttribute('data-md-diagram-wrapped', '');
+    const lang = el.getAttribute('data-diagram-lang') ?? '';
+    const source = el.getAttribute('data-diagram-src') ?? '';
+    const type = resolveDiagramType(lang);
+    const w = buildDiagramWrapper(el.ownerDocument, ctx, {
+      langLabel: lang,
+      highlightLang: type?.highlightLang ?? '',
+      source,
+      withToggle: true
+    });
+    el.replaceWith(w.wrap); // wrapper 先占位；后搬入——若先 append 后 replaceWith，
+    // 替换会相对 el 的新父节点（view）执行，wrap 嵌进自身 view 成环（HierarchyRequest）
+    w.view.appendChild(el); // svg 原样搬入视图面板（sanitize 已过）
+    el.removeAttribute('data-vv-diagram'); // 防二次命中
+  }
+}
+
+/**
  * 单个图表围栏 → wrapper（bar/view/sourcePane 三段）+ 按生效模式填充：
- * - source：不生成 toggle（无图视图可切，连 DOM 都不加），bar 只留语言徽标、
+ * - source：withToggle=false 构造（无图视图可切，不生成 toggle），bar 只留语言徽标、
  *   源码面板展开（highlightLang 命中时源码走 highlightFence）；
  * - kroki：视图为 img（src 经 kroki deflate+base64url 编码；error 监听仅真浏览器
  *   生效——jsdom 不派发 img load/error，单测只断言 src 形态）；
@@ -141,63 +249,31 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
   const host = code.closest('pre') ?? code;
   const doc = code.ownerDocument;
   const mode = effectiveModeOf(type, ctx);
+  const w = buildDiagramWrapper(doc, ctx, {
+    langLabel: type.id,
+    highlightLang: type.highlightLang,
+    source,
+    withToggle: mode !== 'source'
+  });
+  host.replaceWith(w.wrap);
 
-  const wrap = doc.createElement('div');
-  wrap.className = cls(ctx, 'diagram');
-  const bar = doc.createElement('div');
-  bar.className = cls(ctx, 'diagramBar');
-  const label = doc.createElement('span');
-  label.className = cls(ctx, 'diagramLang');
-  label.textContent = type.id;
-  bar.append(label);
-  const view = doc.createElement('div');
-  view.className = cls(ctx, 'diagramView');
-  const sourcePane = doc.createElement('div');
-  sourcePane.className = cls(ctx, 'diagramSource');
-  sourcePane.setAttribute('hidden', '');
-  const sourceCode = doc.createElement('code');
-  if (type.highlightLang) sourceCode.className = `language-${type.highlightLang}`;
-  sourceCode.textContent = source;
-  sourcePane.appendChild(sourceCode);
-  wrap.append(bar, view, sourcePane);
-  host.replaceWith(wrap);
-
-  // source 模式：无图视图可切——不生成 toggle（连 DOM 都不加，bar 只留语言徽标），
+  // source 模式：无图视图可切——不生成 toggle（构造已按 withToggle=false 跳过），
   // 源码面板直接展开、视图隐藏（空 view 容器有 padding 不隐藏仍占空条）；否则
   //「图」钮点击后只能展示约一行高的空视图条，纯假交互
   if (mode === 'source') {
-    view.setAttribute('hidden', '');
-    sourcePane.removeAttribute('hidden');
+    w.view.setAttribute('hidden', '');
+    w.sourcePane.removeAttribute('hidden');
     if (type.highlightLang) {
       try {
         const spanHtml = await ctx.highlightFence(source, type.highlightLang);
-        if (spanHtml) sourceCode.innerHTML = spanHtml;
+        if (spanHtml) w.sourceCode.innerHTML = spanHtml;
       } catch { /* 取消等：保留纯文本 */ }
     }
     return;
   }
 
-  const toggle = doc.createElement('button');
-  toggle.type = 'button';
-  toggle.className = cls(ctx, 'diagramToggle');
-  toggle.textContent = '源码';
-  bar.append(toggle);
-  // 图/源码切换（节点挂载进主文档后监听器随节点保留——copyBtn 同款前提）。
-  // 首次切到源码时惰性高亮（图视图优先出图，源码高亮不挡首屏）：data-md-diag-src-hl
-  // 标记先行防连点重复请求；成功才写 innerHTML，null 失败/catch 静默保留纯文本
-  //（标记已写不重试——与 source 分支失败语义一致）。
-  toggle.addEventListener('click', () => {
-    const showSource = sourcePane.hasAttribute('hidden');
-    sourcePane.toggleAttribute('hidden', !showSource);
-    view.toggleAttribute('hidden', showSource);
-    toggle.textContent = showSource ? '图' : '源码';
-    if (showSource && type.highlightLang && !sourcePane.hasAttribute('data-md-diag-src-hl')) {
-      sourcePane.setAttribute('data-md-diag-src-hl', '');
-      ctx.highlightFence(source, type.highlightLang).then((spanHtml) => {
-        if (spanHtml) sourceCode.innerHTML = spanHtml;
-      }).catch(() => { /* 取消等：保留纯文本 */ });
-    }
-  });
+  const { view, sourcePane, sourceCode } = w;
+  const toggle = w.toggle!; // 非 source 模式恒为 withToggle=true 构造，toggle 必在
 
   if (mode === 'kroki') {
     const img = doc.createElement('img');
