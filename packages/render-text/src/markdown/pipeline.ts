@@ -53,8 +53,6 @@ const CLS = {
   diagramView: 'md-diagram-view',
   diagramError: 'md-diagram-error',
   diagramSource: 'md-diagram-source',
-  lightbox: 'md-lightbox',
-  lightboxOverlay: 'md-lightbox-overlay',
 } as const;
 
 function cls(ctx: PipelineCtx, base: keyof typeof CLS): string {
@@ -498,58 +496,10 @@ async function runCopyCode(root: Document, ctx: PipelineCtx): Promise<void> {
 
 // ---------- lightbox 步 ----------
 
-/** body 级灯箱 overlay 的元素 id（openLightbox 创建；markdownRenderer destroy 时清理防泄漏） */
-export const LIGHTBOX_OVERLAY_ID = 'md-lightbox-overlay';
-
-/** overlay 上的打开者代币属性（openLightbox 写入、removeLightboxOverlay 校验，遗留 U3） */
-export const LIGHTBOX_OWNER_ATTR = 'data-md-lightbox-owner';
-
-/** overlay → 其 document 级 Esc 监听（removeLightboxOverlay / 点击关闭时随之摘除，防监听器累积） */
-const escHandlers = new WeakMap<HTMLElement, (ev: KeyboardEvent) => void>();
-
-/**
- * 从文档移除灯箱 overlay（markdownRenderer destroy 调用；overlay 挂在 body，不随渲染节点销毁）。
- * ownerId 传时校验打开者代币：非当前 owner 的 destroy 直接跳过（多 markdown 实例
- * 共存时互删对方正开着的灯箱，遗留 U3）；不传（Esc / overlay 点击等自有关场景）
- * 行为不变，无条件移除。
- */
-export function removeLightboxOverlay(doc: Document, ownerId?: string): void {
-  const overlay = doc.getElementById(LIGHTBOX_OVERLAY_ID);
-  if (!overlay) return;
-  if (ownerId !== undefined && overlay.getAttribute(LIGHTBOX_OWNER_ATTR) !== ownerId) return;
-  const onKey = escHandlers.get(overlay);
-  if (onKey) doc.removeEventListener('keydown', onKey);
-  escHandlers.delete(overlay);
-  overlay.remove();
-}
-
-function openLightbox(img: HTMLImageElement, ctx: PipelineCtx): void {
-  const doc = img.ownerDocument;
-  // body 级单例：首次点击创建，之后所有图共用
-  let overlay = doc.getElementById(LIGHTBOX_OVERLAY_ID);
-  if (!overlay) {
-    overlay = doc.createElement('div');
-    overlay.id = LIGHTBOX_OVERLAY_ID;
-    overlay.className = cls(ctx, 'lightboxOverlay');
-    const clone = doc.createElement('img');
-    clone.className = cls(ctx, 'lightbox');
-    overlay.appendChild(clone);
-    const onKey = (ev: KeyboardEvent): void => {
-      if (ev.key === 'Escape') removeLightboxOverlay(doc);
-    };
-    escHandlers.set(overlay, onKey);
-    doc.addEventListener('keydown', onKey);
-    overlay.addEventListener('click', () => removeLightboxOverlay(doc));
-    (doc.body ?? doc.documentElement).appendChild(overlay);
-  }
-  const clone = overlay.querySelector('img');
-  if (clone) {
-    clone.setAttribute('src', img.getAttribute('src') ?? '');
-    clone.setAttribute('alt', img.getAttribute('alt') ?? '');
-  }
-  // 最后打开者即 owner（覆盖旧记号）：其后仅 owner 的 destroy 可随生命周期摘除（U3）
-  overlay.setAttribute(LIGHTBOX_OWNER_ATTR, ctx.lightboxOwner ?? '');
-}
+// 灯箱本体（三导出 + overlay DOM/交互/状态机）已迁出至 lightbox.ts（Task 1）；
+// 此处 re-export 保住 markdownRenderer 与既有测试的 import 面：
+export { removeLightboxOverlay, LIGHTBOX_OVERLAY_ID, LIGHTBOX_OWNER_ATTR } from './lightbox';
+import { collectGallery, openLightbox } from './lightbox';
 
 async function runLightbox(root: Document, ctx: PipelineCtx): Promise<void> {
   for (const img of Array.from(root.querySelectorAll('img'))) {
@@ -557,7 +507,8 @@ async function runLightbox(root: Document, ctx: PipelineCtx): Promise<void> {
     img.setAttribute('data-md-lightbox', '');
     img.addEventListener('click', (ev) => {
       ev.preventDefault();
-      openLightbox(img, ctx);
+      // 点击时对渲染根收集画廊：同文档的 img 与图表 svg 可在灯箱内 ←/→ 连续导航
+      openLightbox(img, ctx, collectGallery(root));
     });
   }
 }

@@ -139,6 +139,24 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .md-lightbox-overlay { position: fixed; inset: 0; z-index: 100; background: rgb(0 0 0 / 70%);
   display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
 .md-lightbox { max-width: 92vw; max-height: 92vh; }
+/* 灯箱画廊（lightbox.ts）：stage 铺满 overlay 作为缩放平移变换面（origin 0 0 与
+   zoomAt 的「屏幕点 = 内容点×zoom + t」锚定数学同构），内容居中；bar 悬浮底部
+   集中导航/计数/缩放/关闭，触控目标 ≥32px。关闭语义：点背景（overlay/stage 空白）
+   或关闭钮，点内容与控制件不关（样式上 stage 接管 grab 交互面，见 cursor 规则） */
+.md-lightbox-stage { position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; transform-origin: 0 0; }
+.md-lightbox-svg { display: flex; max-width: 92vw; max-height: 92vh; }
+.md-lightbox-svg svg { max-width: 100%; max-height: 92vh; }
+/* 作者 display 规则压过 UA [hidden] 的 display:none——显式兜底（md-diagram-view 同教训） */
+.md-lightbox-stage img[hidden], .md-lightbox-svg[hidden], .md-lightbox-bar [hidden] { display: none; }
+.md-lightbox-bar { position: absolute; bottom: 1rem; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 8px; background: rgb(0 0 0 / 50%); }
+.md-lightbox-btn { display: inline-flex; align-items: center; justify-content: center;
+  min-width: 32px; min-height: 32px; padding: 0; border: none; border-radius: 6px;
+  background: transparent; color: #fff; font-size: 16px; line-height: 1; cursor: pointer; }
+.md-lightbox-btn:hover { background: rgb(255 255 255 / 20%); }
+.md-lightbox-count { min-width: 32px; display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 13px; font-variant-numeric: tabular-nums; }
 .markdown-alert { border: 1px solid var(--ui-border); border-left-width: 4px; border-radius: 6px;
   padding: .5rem 1rem; margin: .8rem 0; }
 .markdown-alert-title { display: flex; align-items: center; gap: .4rem; font-weight: 600; margin: .2rem 0; }
