@@ -20,6 +20,9 @@ tokio-util = { version = "0.7", features = ["io"] }
 clap = { version = "4", features = ["derive"] }
 # 仅库渲染：禁默认（cli/syntect-onig 语法高亮用不到）；shortcodes 为 GFM emoji 短码
 comrak = { version = "0.56.0", default-features = false, features = ["shortcodes"] }
+# 服务端图表渲染（spec 2026-10-19 §2.5，markpad Rust 栈同款）
+layout-rs = "0.1"
+svgbob = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tower = { version = "0.5", features = ["util"] }
