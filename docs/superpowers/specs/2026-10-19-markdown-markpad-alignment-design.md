@@ -102,11 +102,11 @@
 | `==mark==` | `markdown-it-mark` | `options.extension.highlight = true` | `<mark>`；sanitize 默认放行，确认即可 |
 | `++ins++` | `markdown-it-ins` | `options.extension.insert = true` | `<ins>`（Pandoc/CriticMarkup 拼法） |
 | `; term` / `: def` | `markdown-it-deflist` | `options.extension.description_lists = true` | `<dl>/<dt>/<dd>` sanitize 确认 |
-| `^[行内脚注]` | 自写 inline rule，产出与 `markdown-it-footnote` 同构节点（并入同一 footnote env 计数，防 id 撞 `[^1]`） | `options.extension.inline_footnotes = true` | 无现成插件，风险项；失败降级字面渲染并记档 |
+| `^[行内脚注]` | 自写 inline rule，产出与 `markdown-it-footnote` 同构节点（并入同一 footnote env 计数，防 id 撞 `[^1]`）〔勘误（2026-10-19 终审 I1，以实现为准）：`markdown-it-footnote` 4.0.0 原生自带 `^[...]`（footnote_inline），零自写实现〕 | `options.extension.inline_footnotes = true` | 无现成插件，风险项；失败降级字面渲染并记档〔勘误：深层形态（id/属性/尾注节）双端固有不同，等价面=class+结构层；空 `^[]` 双端分歧（本地 sup / comrak 字面）已双端探针固化〕 |
 | ```` ```math ```` | 无需（fence 原样透出） | 无需 | 阶段二前端路由，双引擎天然一致 |
 
 - comrak 版本 0.56 的 extension 字段名以实施时 API 为准（上表为 markpad 0.54 同名推断，冲突时以 cargo doc 校正）。
-- **一致性锚测试**：双引擎金标语料（每语法 ≥2 例，含与代码块/HTML 混排），本地 markdown-it 渲染 vs 服务端 comrak compute 渲染 DOM 结构等价断言（沿用 M3 双引擎测试基建）。
+- **一致性锚测试**：双引擎金标语料（每语法 ≥2 例，含与代码块/HTML 混排），本地 markdown-it 渲染 vs 服务端 comrak compute 渲染 DOM 结构等价断言（沿用 M3 双引擎测试基建）。〔勘误（2026-10-19 终审 I1，以实现为准）：实际机制=双侧金标 fixture 互锚（各侧测试断言互为锚，非跨进程实时比对）；行内脚注等价面=class+结构层〕
 
 ### 4.2 引擎无关项（enrich.ts 前端 DOM 后处理，单实现双端一致）
 
@@ -115,7 +115,7 @@
   - `[[#heading]]` → 锚链接，改写指向本页 `user-content-` id（复用 GfmAnchorizer 基名算法）；目标不存在则渲染为不可点样式；
   - `[[file]]` / `[[file#heading]]` → 按已拍板降级：渲染为链接样式的字面文本（不可点），title 注记「跨文件 wikilink 不支持」；
   - `![[img.png]]` / `![[img.png|100]]` / `![[img.png|100x50]]` → `<img>`，相对路径经 `markdownImages.resolveImageBlobUrl` 同链路解析，`|` 尺寸段转 width/height 属性（属性值转义）。
-- **代码块语言徽标**：copyCode 步补 `.lang-label`（取 `code[class*=language-]` 首词），无语言显示复制图标；点击徽标=复制（对齐 markpad 交互），现有「复制」按钮语义并入徽标。
+- **代码块语言徽标**：copyCode 步补 `.lang-label`（取 `code[class*=language-]` 首词），无语言显示复制图标；点击徽标=复制（对齐 markpad 交互），现有「复制」按钮语义并入徽标。〔勘误（2026-10-19 终审 I1，以实现为准）：知情简化——徽标纯展示 + 复制钮并排（非点击徽标复制）〕
 
 ## 5. 阶段四：lightbox 增强
 
