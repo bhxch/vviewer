@@ -4,6 +4,7 @@
 import { expect, it } from 'vitest';
 import { applyAppearanceFromSettings, resolveMermaidTheme } from './theme';
 import type { Settings } from './stores/settings';
+import { DEFAULT_LAYOUT } from './layout';
 
 it('resolveMermaidTheme 映射：dark→dark，light→default', () => {
   expect(resolveMermaidTheme('dark')).toBe('dark');
@@ -23,6 +24,7 @@ function settings(over: Partial<Settings> = {}): Settings {
     computePolicy: 'auto',
     diagrams: { krokiHost: '', modes: {} },
     fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
+    layout: { ...DEFAULT_LAYOUT },
     ...over
   };
 }

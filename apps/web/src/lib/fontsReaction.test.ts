@@ -6,6 +6,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { reactToFontsChange } from './fontsReaction';
 import type { Settings } from './stores/settings';
+import { DEFAULT_LAYOUT } from './layout';
 
 function baseSettings(fonts?: Partial<Settings['fonts']>): Settings {
   return {
@@ -18,7 +19,8 @@ function baseSettings(fonts?: Partial<Settings['fonts']>): Settings {
     autoRefresh: true,
     computePolicy: 'auto',
     diagrams: { krokiHost: '', modes: {} },
-    fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13, ...fonts }
+    fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13, ...fonts },
+    layout: { ...DEFAULT_LAYOUT }
   };
 }
 

@@ -5,6 +5,7 @@ import { describe, it, expect, vi } from 'vitest';
 import 'fake-indexeddb/auto';
 import { loadSession, saveTabs, saveDirHandle, maxTabSeqOf, tabSeqOf } from './session';
 import { loadSettings, saveSettings } from './settings';
+import { DEFAULT_LAYOUT } from '../layout';
 
 describe('session store', () => {
   it('saves and loads tabs', async () => {
@@ -47,9 +48,10 @@ describe('session store', () => {
       autoRefresh: true,
       computePolicy: 'auto',
       diagrams: { krokiHost: '', modes: {} },
-      fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 }
+      fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
+      layout: DEFAULT_LAYOUT
     });
-    saveSettings({ themeMode: 'dark', appearanceLight: 'default', appearanceDark: 'default', codeThemeLight: 'onelight', codeThemeDark: 'serika-dark', excludedPatterns: ['node_modules'], autoRefresh: false, computePolicy: 'remote', diagrams: { krokiHost: '', modes: {} }, fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 } });
+    saveSettings({ themeMode: 'dark', appearanceLight: 'default', appearanceDark: 'default', codeThemeLight: 'onelight', codeThemeDark: 'serika-dark', excludedPatterns: ['node_modules'], autoRefresh: false, computePolicy: 'remote', diagrams: { krokiHost: '', modes: {} }, fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 }, layout: DEFAULT_LAYOUT });
     expect(loadSettings().themeMode).toBe('dark');
     expect(loadSettings().computePolicy).toBe('remote');
   });

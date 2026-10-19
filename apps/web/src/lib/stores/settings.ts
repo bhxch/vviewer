@@ -1,5 +1,6 @@
 import type { ComputePolicy } from '@vviewer/core';
 import { resolveDiagramType, type DiagramMode } from '@vviewer/render-text/markdown/diagrams';
+import { DEFAULT_LAYOUT, sanitizeLayout, type LayoutSettings } from '../layout';
 
 /** 图表渲染设置（spec 2026-10-19 §2.1）：krokiHost 空串 = 用注册表 DEFAULT_KROKI_HOST；
  * modes 键 = 图表类型 id/别名，值覆盖注册表 defaultMode（Task 7 面板消费）。 */
@@ -33,6 +34,9 @@ export interface Settings {
   computePolicy: ComputePolicy;
   diagrams: DiagramsSettings;
   fonts: FontsSettings;
+  /** 布局节（spec 2026-10-19 布局自由化 §2）：折叠/宽度/chrome 可见性/zen。
+   * 类型与白名单在 lib/layout.ts（纯函数可单测）；AppShell 消费。 */
+  layout: LayoutSettings;
 }
 
 const KEY = 'vviewer:settings';
@@ -46,7 +50,8 @@ const DEFAULTS: Settings = {
   autoRefresh: true,
   computePolicy: 'auto',
   diagrams: { krokiHost: '', modes: {} },
-  fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 }
+  fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
+  layout: DEFAULT_LAYOUT
 };
 
 const POLICIES: readonly ComputePolicy[] = ['auto', 'local', 'remote'];
@@ -59,7 +64,8 @@ function defaults(): Settings {
     ...DEFAULTS,
     excludedPatterns: [...DEFAULTS.excludedPatterns],
     diagrams: { krokiHost: DEFAULTS.diagrams.krokiHost, modes: { ...DEFAULTS.diagrams.modes } },
-    fonts: { ...DEFAULTS.fonts }
+    fonts: { ...DEFAULTS.fonts },
+    layout: { ...DEFAULTS.layout }
   };
 }
 
@@ -107,6 +113,9 @@ export function loadSettings(): Settings {
       codeFamily: typeof f.codeFamily === 'string' ? f.codeFamily : DEFAULTS.fonts.codeFamily,
       codeSize: clampSize(f.codeSize, CODE_SIZE_RANGE, DEFAULTS.fonts.codeSize)
     };
+    // layout 节白名单（布局自由化 spec §2）：字段级归位 + 宽度 clamp，
+    // 校验数学在 lib/layout.ts sanitizeLayout（可单测），此处只接线
+    s.layout = sanitizeLayout(s.layout);
     return s;
   } catch {
     return defaults();
@@ -142,7 +151,8 @@ function notify(s: Settings): void {
       ...s,
       excludedPatterns: [...s.excludedPatterns],
       diagrams: { ...s.diagrams, modes: { ...s.diagrams.modes } },
-      fonts: { ...s.fonts }
+      fonts: { ...s.fonts },
+      layout: { ...s.layout }
     });
   }
 }

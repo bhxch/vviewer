@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadSettings, onSettingsChanged, saveSettings, type Settings } from './settings';
+import { DEFAULT_LAYOUT } from '../layout';
 
 const BASE: Settings = {
   themeMode: 'system',
@@ -11,7 +12,8 @@ const BASE: Settings = {
   autoRefresh: true,
   computePolicy: 'auto',
   diagrams: { krokiHost: '', modes: {} },
-  fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 }
+  fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
+  layout: { ...DEFAULT_LAYOUT }
 };
 
 function aSettings(overrides: Partial<Settings>): Settings {
@@ -223,5 +225,75 @@ describe('fonts 设置节白名单/clamp（spec 2026-10-19 字体系统 §2.1）
     saveSettings(aSettings({ fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 } }));
     off();
     expect(loadSettings().fonts.codeSize).toBe(13);
+  });
+});
+
+describe('layout 设置节白名单/clamp（spec 2026-10-19 布局自由化 §2）', () => {
+  it('默认：DEFAULT_LAYOUT（不折叠/260/230/全件可见/非 zen）', () => {
+    localStorage.removeItem('vviewer:settings');
+    expect(loadSettings().layout).toEqual(DEFAULT_LAYOUT);
+  });
+
+  it('持久化往返：saveSettings 写入 layout 后 loadSettings 读回一致', () => {
+    saveSettings(aSettings({
+      layout: {
+        leftCollapsed: true,
+        rightCollapsed: false,
+        leftWidth: 400,
+        rightWidth: 200,
+        topBarVisible: false,
+        tabBarVisible: true,
+        zen: false
+      }
+    }));
+    expect(loadSettings().layout).toEqual({
+      leftCollapsed: true,
+      rightCollapsed: false,
+      leftWidth: 400,
+      rightWidth: 200,
+      topBarVisible: false,
+      tabBarVisible: true,
+      zen: false
+    });
+  });
+
+  it('宽度越界 clamp：leftWidth 9999 → 480 / rightWidth 1 → 160', () => {
+    localStorage.setItem('vviewer:settings', JSON.stringify({
+      layout: { ...DEFAULT_LAYOUT, leftWidth: 9999, rightWidth: 1 }
+    }));
+    const l = loadSettings().layout;
+    expect(l.leftWidth).toBe(480);
+    expect(l.rightWidth).toBe(160);
+  });
+
+  it('布尔脏值字段级归位：不拖垮同节其余字段', () => {
+    localStorage.setItem('vviewer:settings', JSON.stringify({
+      layout: { ...DEFAULT_LAYOUT, leftCollapsed: 'yes', leftWidth: 360, zen: 1 }
+    }));
+    const l = loadSettings().layout;
+    expect(l.leftCollapsed).toBe(false);
+    expect(l.leftWidth).toBe(360);
+    expect(l.zen).toBe(false);
+  });
+
+  it('layout 节整体缺失/脏值回落默认，不影响其余字段', () => {
+    // excludedPatterns/autoRefresh 刻意非默认：若整体回落 defaults() 则断言必炸
+    localStorage.setItem(
+      'vviewer:settings',
+      JSON.stringify({ layout: 42, excludedPatterns: ['.git'], autoRefresh: false })
+    );
+    const s = loadSettings();
+    expect(s.layout).toEqual(DEFAULT_LAYOUT);
+    expect(s.excludedPatterns).toEqual(['.git']);
+    expect(s.autoRefresh).toBe(false);
+  });
+
+  it('订阅回调收到 layout 副本：误改不回灌', () => {
+    const off = onSettingsChanged((s) => {
+      s.layout.leftWidth = 480; // 订阅方误改引用
+    });
+    saveSettings(aSettings({ layout: { ...DEFAULT_LAYOUT } }));
+    off();
+    expect(loadSettings().layout.leftWidth).toBe(DEFAULT_LAYOUT.leftWidth);
   });
 });

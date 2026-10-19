@@ -13,6 +13,7 @@ import {
   fontSig
 } from './theme';
 import type { Settings } from './stores/settings';
+import { DEFAULT_LAYOUT } from './layout';
 
 const FONT_STYLE_ID = 'vv-font';
 
@@ -31,7 +32,8 @@ function baseSettings(fonts?: Partial<Settings['fonts']>): Settings {
     autoRefresh: true,
     computePolicy: 'auto',
     diagrams: { krokiHost: '', modes: {} },
-    fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13, ...fonts }
+    fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13, ...fonts },
+    layout: { ...DEFAULT_LAYOUT }
   };
 }
 

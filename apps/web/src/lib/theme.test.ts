@@ -20,6 +20,7 @@ import {
 } from './theme';
 import { deleteTheme, putTheme, type ImportedTheme } from './stores/session';
 import { loadSettings, type Settings } from './stores/settings';
+import { DEFAULT_LAYOUT } from './layout';
 
 const STYLE_ID = 'vv-code-theme';
 
@@ -264,7 +265,8 @@ describe('applyAppearanceFromSettings（订阅触发入口，spec 2026-10-12 §2
     autoRefresh: true,
     computePolicy: 'auto',
     diagrams: { krokiHost: '', modes: {} },
-    fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 }
+    fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
+    layout: { ...DEFAULT_LAYOUT }
   });
 
   it('diff 命中必注入（哨兵先行把签名推离目标）', async () => {

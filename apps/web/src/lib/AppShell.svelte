@@ -38,7 +38,8 @@
     type TabSnapshot
   } from './stores/session';
   import { migrateLegacyTabs, workspaceStore, type WorkspaceSnapshotItem, type WorkspaceSource } from './workspaceStore';
-  import { loadSettings, onSettingsChanged } from './stores/settings';
+  import { loadSettings, onSettingsChanged, saveSettings } from './stores/settings';
+  import { clampWidth, DEFAULT_LAYOUT, type LayoutSide, type LayoutSettings } from './layout';
   import { codeLineHeight } from './theme';
   import { loadEnabledFontFaces } from './stores/fontsStore';
 
@@ -66,6 +67,52 @@
   let quickOpenOpen = $state(false);
   /** tab 管理覆盖层面板开关（T6）：Alt+W / TabBar「管理」切换，Esc/外点面板内关闭 */
   let wsPanelOpen = $state(false);
+
+  // ---------- 布局自由化（spec 2026-10-19 §2）：折叠/调宽 ----------
+  // settings.layout 是唯一事实源：折叠/宽度变更即时 saveSettings 落盘（既有链路
+  // onSettingsChanged → settings 副本刷新），刷新/重启由 loadSettings 恢复。
+
+  const layout = $derived(settings.layout);
+
+  /** 局部合并写回 layout 节：读最新持久值只改目标字段（同 SettingsPanel.persist
+   * 惯例——TopBar 等其他订阅方管理的字段不被本组件旧副本覆盖）。 */
+  function updateLayout(patch: Partial<LayoutSettings>): void {
+    const fresh = loadSettings();
+    fresh.layout = { ...fresh.layout, ...patch };
+    saveSettings(fresh);
+  }
+
+  /** 拖拽调宽会话（null = 未拖拽）：startX/startW 锚定增量数学，dragW 为实时
+   * 预览宽（clamp 后）；松手才 updateLayout 落盘（拖拽途中学不写 localStorage）。 */
+  let drag = $state<{ side: LayoutSide; startX: number; startW: number } | null>(null);
+  let dragW = $state(0);
+
+  /** 渲染宽 = 拖拽中的预览值，否则持久值（拖拽实时预览、松手落盘，spec §2）。 */
+  const leftW = $derived(drag?.side === 'left' ? dragW : layout.leftWidth);
+  const rightW = $derived(drag?.side === 'right' ? dragW : layout.rightWidth);
+
+  function startDrag(side: LayoutSide, e: PointerEvent): void {
+    // 抽屉断点（≤900px）不调宽：与 onTreeOpen 的 matchMedia 同引擎同条件
+    if (window.matchMedia('(max-width: 900px)').matches) return;
+    e.preventDefault(); // 防拖拽启动文本选择
+    drag = { side, startX: e.clientX, startW: side === 'left' ? layout.leftWidth : layout.rightWidth };
+    dragW = drag.startW;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  function moveDrag(e: PointerEvent): void {
+    if (drag === null) return;
+    const dx = e.clientX - drag.startX;
+    // 左栏向右拖增宽、右栏向左拖增宽（同一条增量数学取反）
+    dragW = clampWidth(drag.side, drag.side === 'left' ? drag.startW + dx : drag.startW - dx);
+  }
+
+  function endDrag(): void {
+    const d = drag;
+    drag = null;
+    if (d === null) return;
+    updateLayout(d.side === 'left' ? { leftWidth: dragW } : { rightWidth: dragW });
+  }
 
   /** 当前 workspace（workspacesView 为 openFlow 维护的 workspaceStore runes 镜像）。 */
   const activeWorkspace = $derived(
@@ -486,7 +533,18 @@
     onmanage={() => (wsPanelOpen = !wsPanelOpen)}
   />
   <div class="vv-body">
-    <aside class="vv-side">
+    {#if layout.leftCollapsed}
+      <!-- 折叠竖条（spec §2：~28px，展开钮+所属面板图标），桌面断点专属（app.css）；
+           ≤900px 抽屉机制不动，竖条不渲染进视觉（display:none） -->
+      <div class="vv-strip" data-side="left">
+        <button type="button" class="vv-strip-expand" aria-label="展开文件树" title="展开文件树"
+          onclick={() => updateLayout({ leftCollapsed: false })}>»</button>
+        <span class="vv-strip-icon" aria-hidden="true">🌳</span>
+      </div>
+    {/if}
+    <aside class="vv-side" class:vv-side-off={layout.leftCollapsed} style="--vv-side-w: {leftW}px">
+      <button type="button" class="vv-collapse-btn vv-collapse-left" aria-label="折叠文件树"
+        title="折叠文件树" onclick={() => updateLayout({ leftCollapsed: true })}>‹</button>
       {#if sources.length > 0}
         <!-- 整树重建 key：源数量 | 各源数据版本 storeRevisions | 排除规则（BUG-05 通道，T4 多源化，M-2 修正，T7 分桶） -->
         {#key treeKey}
@@ -496,18 +554,60 @@
         <div class="vv-side-empty">未打开文件夹</div>
       {/if}
     </aside>
+    {#if !layout.leftCollapsed}
+      <!-- 中缝调宽把手（spec §2）：6px 热区，拖动实时预览、松手落盘、双击重置默认宽 -->
+      <div
+        class="vv-colhandle"
+        class:vv-dragging={drag?.side === 'left'}
+        data-side="left"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整文件树宽度"
+        title="拖拽调宽（双击重置）"
+        onpointerdown={(e) => startDrag('left', e)}
+        onpointermove={moveDrag}
+        onpointerup={endDrag}
+        onpointercancel={endDrag}
+        ondblclick={() => updateLayout({ leftWidth: DEFAULT_LAYOUT.leftWidth })}
+      ></div>
+    {/if}
     <main class="vv-main">
       <ViewerPane
         tab={activeTabs.find((t) => t.active) ?? null}
         ontoc={(entries) => (tocEntries = entries)}
       />
     </main>
-    <aside class="vv-right">
+    {#if !layout.rightCollapsed}
+      <div
+        class="vv-colhandle"
+        class:vv-dragging={drag?.side === 'right'}
+        data-side="right"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整属性面板宽度"
+        title="拖拽调宽（双击重置）"
+        onpointerdown={(e) => startDrag('right', e)}
+        onpointermove={moveDrag}
+        onpointerup={endDrag}
+        onpointercancel={endDrag}
+        ondblclick={() => updateLayout({ rightWidth: DEFAULT_LAYOUT.rightWidth })}
+      ></div>
+    {/if}
+    <aside class="vv-right" class:vv-right-off={layout.rightCollapsed} style="--vv-right-w: {rightW}px">
+      <button type="button" class="vv-collapse-btn vv-collapse-right" aria-label="折叠属性面板"
+        title="折叠属性面板" onclick={() => updateLayout({ rightCollapsed: true })}>›</button>
       <MetaPanel />
       {#if tocEntries.length > 0}
         <Toc entries={tocEntries} />
       {/if}
     </aside>
+    {#if layout.rightCollapsed}
+      <div class="vv-strip" data-side="right">
+        <button type="button" class="vv-strip-expand" aria-label="展开属性面板" title="展开属性面板"
+          onclick={() => updateLayout({ rightCollapsed: false })}>«</button>
+        <span class="vv-strip-icon" aria-hidden="true">ℹ</span>
+      </div>
+    {/if}
   </div>
   <button class="vv-drawer-toggle" aria-label="切换侧栏" onclick={() => (drawerOpen = !drawerOpen)}>☰</button>
   <button class="vv-right-toggle" aria-label="切换目录与属性面板" onclick={() => (rightOpen = !rightOpen)}>ℹ</button>
@@ -534,7 +634,10 @@
     min-height: 0;
   }
   .vv-side {
-    width: 260px;
+    /* 宽度经 CSS 变量（内联 --vv-side-w / --vv-right-w 供值，拖拽实时预览与持久值
+       同一通道）；≤900px 媒体查询在本文件更后处覆写 width（抽屉机制不动） */
+    width: var(--vv-side-w, 260px);
+    position: relative;
     overflow: auto;
     border-right: 1px solid var(--ui-border);
     background: var(--ui-side-bg);
@@ -546,13 +649,22 @@
     flex-direction: column;
   }
   .vv-right {
-    width: 230px;
+    width: var(--vv-right-w, 230px);
     flex: none;
+    position: relative;
     display: flex;
     flex-direction: column;
     overflow: auto;
     border-left: 1px solid var(--ui-border);
     background: var(--ui-side-bg);
+  }
+  /* 折叠态桌面隐藏本体（残留竖条由 .vv-strip 承担）；≤900px 抽屉不受折叠影响，
+     故 off 规则限定桌面断点（移动端无折叠语义，spec 非目标） */
+  @media (min-width: 901px) {
+    .vv-side.vv-side-off,
+    .vv-right.vv-right-off {
+      display: none;
+    }
   }
   .vv-side-empty {
     padding: 2rem;
