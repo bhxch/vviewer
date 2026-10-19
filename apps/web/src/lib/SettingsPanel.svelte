@@ -6,13 +6,24 @@
   // 已导入列表删除；槽切换/删除归位只经 saveSettings 持久化，注入由 TopBar 的
   // onSettingsChanged 订阅 diff 触发——订阅即注入通道，本面板不直调注入，
   // spec 2026-10-12 §2.4）、图表渲染（spec 2026-10-19 §2.1：kroki host +
-  // 按语言模式网格，键恒为注册表 t.id；改动不回溯重渲已打开文档，下次打开生效）。
+  // 按语言模式网格，键恒为注册表 t.id；改动不回溯重渲已打开文档，下次打开生效）、
+  // 字体（字体系统 spec 2026-10-19 §4/§5.3 上半：UI/代码两槽 picker = 预设下拉 +
+  // 「自定义…」手输框 + 字号 number input；下半网络字体管理列表为 Task 5）。
   // 修改即时经 saveSettings 持久化，AppShell 经
   // onSettingsChanged 订阅刷新响应式副本（FileTree 随排除规则重建）。Esc / ✕ 关闭。
   import { DIAGRAM_TYPES, type DiagramMode } from '@vviewer/render-text/markdown/diagrams';
-  import { loadSettings, saveSettings } from './stores/settings';
+  import { loadSettings, saveSettings, CODE_SIZE_RANGE, UI_SIZE_RANGE } from './stores/settings';
   import { deleteTheme, listThemes, type ImportedTheme } from './stores/session';
   import { importThemeFiles } from './vsixImport';
+  import {
+    CODE_FONT_PRESETS,
+    CUSTOM_FONT_SENTINEL,
+    FONT_SPECIMEN,
+    UI_FONT_PRESETS,
+    fontFamilyOptions,
+    type FontPreset
+  } from './fonts';
+  import { DEFAULT_CODE_FONT_STACK, DEFAULT_UI_FONT_STACK, fontFamilyValue } from './theme';
 
   let { onclose }: { onclose(): void } = $props();
 
@@ -23,6 +34,16 @@
   let appearanceDark = $state(loadSettings().appearanceDark);
   let krokiHost = $state(loadSettings().diagrams.krokiHost);
   let diagramModes = $state<Record<string, DiagramMode>>({ ...loadSettings().diagrams.modes });
+  // 字体节草稿（字体系统 spec §4 上半）：family '' = 默认栈；手输模式按打开时的
+  // 槽值初始化（自定义族重开面板立即可编辑，不必再点一次「自定义…」）
+  let uiFamily = $state(loadSettings().fonts.uiFamily);
+  let uiSize = $state(loadSettings().fonts.uiSize);
+  let codeFamily = $state(loadSettings().fonts.codeFamily);
+  let codeSize = $state(loadSettings().fonts.codeSize);
+  let uiCustomMode = $state(isCustomFamily(loadSettings().fonts.uiFamily, UI_FONT_PRESETS));
+  let codeCustomMode = $state(isCustomFamily(loadSettings().fonts.codeFamily, CODE_FONT_PRESETS));
+  const uiOptions = fontFamilyOptions(UI_FONT_PRESETS);
+  const codeOptions = fontFamilyOptions(CODE_FONT_PRESETS);
   let draft = $state('');
   let inputEl = $state<HTMLInputElement | null>(null);
   let panelEl = $state<HTMLElement | null>(null);
@@ -66,6 +87,19 @@
     return k === 'light' ? '已选主题为亮色，与当前暗色槽不匹配（仍会生效）' : '';
   });
 
+  /** 槽位 family 是否为手输值（非默认空栈、也不在预设清单内）→ select 显示「自定义…」 */
+  function isCustomFamily(f: string, presets: readonly FontPreset[]): boolean {
+    return f !== '' && !presets.some((p) => p.value === f);
+  }
+
+  /** select 当前值：自定义态（模式开或值不在预设内）显哨兵，否则即族值本身 */
+  const uiSelectValue = $derived(
+    uiCustomMode || isCustomFamily(uiFamily, UI_FONT_PRESETS) ? CUSTOM_FONT_SENTINEL : uiFamily
+  );
+  const codeSelectValue = $derived(
+    codeCustomMode || isCustomFamily(codeFamily, CODE_FONT_PRESETS) ? CUSTOM_FONT_SENTINEL : codeFamily
+  );
+
   $effect(() => {
     inputEl?.focus();
   });
@@ -94,8 +128,8 @@
   });
 
   /**
-   * 保存：读最新持久值只覆盖本面板管的五个字段——面板打开期间 TopBar 若改了
-   * 主题模式/计算策略，不被面板的旧草稿覆盖。
+   * 保存：读最新持久值只覆盖本面板管的字段（排除规则/自动刷新/外观双槽/图表/字体）——
+   * 面板打开期间 TopBar 若改了主题模式/计算策略，不被面板的旧草稿覆盖。
    */
   function persist(): void {
     const fresh = loadSettings();
@@ -104,6 +138,7 @@
     fresh.appearanceLight = appearanceLight;
     fresh.appearanceDark = appearanceDark;
     fresh.diagrams = { krokiHost: krokiHost.trim(), modes: { ...diagramModes } };
+    fresh.fonts = { uiFamily, uiSize, codeFamily, codeSize };
     saveSettings(fresh);
   }
 
@@ -150,6 +185,47 @@
    * 已打开文档不回溯重渲，重新打开后生效（spec 2026-10-19 §2.1）。 */
   function onDiagramModeChange(id: string, e: Event): void {
     diagramModes[id] = (e.currentTarget as HTMLSelectElement).value as DiagramMode;
+    persist();
+  }
+
+  /** 字体槽 picker（字体系统 spec §4）：选「自定义…」只展开手输框不改值不落盘；
+   * 选默认/预设收起手输框并即时持久化（saveSettings → Task 1 注入/Task 2 重渲染）。 */
+  function onFamilyChange(slot: 'ui' | 'code', e: Event): void {
+    const v = (e.currentTarget as HTMLSelectElement).value;
+    if (v === CUSTOM_FONT_SENTINEL) {
+      if (slot === 'ui') uiCustomMode = true;
+      else codeCustomMode = true;
+      return;
+    }
+    if (slot === 'ui') {
+      uiCustomMode = false;
+      uiFamily = v;
+    } else {
+      codeCustomMode = false;
+      codeFamily = v;
+    }
+    persist();
+  }
+
+  /** 手输 family：即时持久化（空串 = 默认栈语义；多级回退栈原样存储，转义/拆段在注入侧） */
+  function onFamilyInput(slot: 'ui' | 'code', e: Event): void {
+    const v = (e.currentTarget as HTMLInputElement).value;
+    if (slot === 'ui') uiFamily = v;
+    else codeFamily = v;
+    persist();
+  }
+
+  /** 字号输入：即时 clamp（spec §2.1 范围）并持久化；半截/清空输入不落盘，
+   * 保留上一有效值——loadSettings 白名单兜底仅防脏 JSON，不在此重复。 */
+  function onSizeInput(slot: 'ui' | 'code', e: Event): void {
+    const raw = (e.currentTarget as HTMLInputElement).value;
+    if (raw.trim() === '') return;
+    const v = Number(raw);
+    if (!Number.isFinite(v)) return;
+    const range = slot === 'ui' ? UI_SIZE_RANGE : CODE_SIZE_RANGE;
+    const clamped = Math.min(range[1], Math.max(range[0], Math.round(v)));
+    if (slot === 'ui') uiSize = clamped;
+    else codeSize = clamped;
     persist();
   }
 
@@ -319,6 +395,94 @@
     <div class="vv-settings-hint">
       本地引擎本期支持 mermaid/graphviz/nomnoml/公式，其余语言本地档自动回落 Kroki；Kroki 服务填
       http(s):// 开头地址，留空用 https://kroki.io。改动对已打开文档重新打开后生效。
+    </div>
+  </section>
+
+  <section class="vv-settings-sec">
+    <div class="vv-settings-label">字体</div>
+    <label class="vv-settings-theme-row">
+      <span>界面字体</span>
+      <select value={uiSelectValue} onchange={(e) => onFamilyChange('ui', e)} aria-label="界面字体族">
+        {#each uiOptions as o (o.value)}
+          <option value={o.value}>{o.label}</option>
+        {/each}
+      </select>
+    </label>
+    {#if uiCustomMode}
+      <label class="vv-settings-theme-row">
+        <span>界面自定义</span>
+        <input
+          type="text"
+          value={uiFamily}
+          oninput={(e) => onFamilyInput('ui', e)}
+          placeholder="Family 名，逗号分隔多级回退"
+          aria-label="自定义界面字体族"
+          spellcheck="false"
+        />
+      </label>
+      <div
+        class="vv-settings-font-sample"
+        style:font-family={fontFamilyValue(uiFamily, DEFAULT_UI_FONT_STACK)}
+        style:font-size="{uiSize}px"
+      >
+        {FONT_SPECIMEN}
+      </div>
+    {/if}
+    <label class="vv-settings-theme-row">
+      <span>界面字号</span>
+      <input
+        type="number"
+        min={UI_SIZE_RANGE[0]}
+        max={UI_SIZE_RANGE[1]}
+        step="1"
+        value={uiSize}
+        oninput={(e) => onSizeInput('ui', e)}
+        aria-label="界面字号（px）"
+      />
+    </label>
+    <label class="vv-settings-theme-row">
+      <span>代码字体</span>
+      <select value={codeSelectValue} onchange={(e) => onFamilyChange('code', e)} aria-label="代码字体族">
+        {#each codeOptions as o (o.value)}
+          <option value={o.value}>{o.label}</option>
+        {/each}
+      </select>
+    </label>
+    {#if codeCustomMode}
+      <label class="vv-settings-theme-row">
+        <span>代码自定义</span>
+        <input
+          type="text"
+          value={codeFamily}
+          oninput={(e) => onFamilyInput('code', e)}
+          placeholder="Family 名，逗号分隔多级回退"
+          aria-label="自定义代码字体族"
+          spellcheck="false"
+        />
+      </label>
+      <div
+        class="vv-settings-font-sample"
+        style:font-family={fontFamilyValue(codeFamily, DEFAULT_CODE_FONT_STACK)}
+        style:font-size="{codeSize}px"
+      >
+        {FONT_SPECIMEN}
+      </div>
+    {/if}
+    <label class="vv-settings-theme-row">
+      <span>代码字号</span>
+      <input
+        type="number"
+        min={CODE_SIZE_RANGE[0]}
+        max={CODE_SIZE_RANGE[1]}
+        step="1"
+        value={codeSize}
+        oninput={(e) => onSizeInput('code', e)}
+        aria-label="代码字号（px）"
+      />
+    </label>
+    <div class="vv-settings-hint">
+      family 支持逗号分隔多级回退（如 JetBrains Mono, monospace）；本机缺失的字体由浏览器回退。
+      代码字号变更后行高联动、已打开文件自动以新行高重排。
     </div>
   </section>
 

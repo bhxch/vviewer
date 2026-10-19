@@ -522,3 +522,10 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-diagram-mode-item .vv-diagram-mode-lang { flex: 1; min-width: 0; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
 .vv-diagram-mode-item select { flex: none; min-width: 0; max-width: 88px; }
+/* 设置面板「字体」区（SettingsPanel，图表节之后/界面主题节之前；字体系统 spec
+   2026-10-19 §4）：槽行复用 .vv-settings-theme-row；样张预览的族/字号由组件内联
+   style 提供（草稿值实时渲染，theme.ts fontFamilyValue 同源转义），此处只管框体；
+   字号 number input 收窄（整宽 number 输入框观感失衡） */
+.vv-settings-font-sample { border: 1px solid var(--ui-border); border-radius: 6px;
+  padding: 4px 8px; overflow-wrap: anywhere; }
+.vv-settings-theme-row input[type='number'] { flex: none; max-width: 84px; }

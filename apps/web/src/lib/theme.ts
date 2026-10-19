@@ -375,11 +375,12 @@ const GENERIC_FAMILY_KEYWORDS = new Set([
   'ui-rounded'
 ]);
 
-/** family 声明值组装：自定义名不拆栈语义——用户输入的逗号栈整体作为一个 font-family
+/** family 声明值组装（export：Task 3 设置面板样张预览同源消费，不复制转义实现）：
+ * 自定义名不拆栈语义——用户输入的逗号栈整体作为一个 font-family
  * 声明值（逐段引号包裹后并排，保留多级回退次序），末尾恒接默认回退栈；空输入即默认栈。
  * 逐段引号包裹同时是注入防线：`a"b` → `"a\"b"`、`My; Font` → 引号内分号失效；
  * 通用族关键字段（monospace 等，大小写不敏感）裸写不引号。 */
-function fontFamilyValue(custom: string, fallbackStack: string): string {
+export function fontFamilyValue(custom: string, fallbackStack: string): string {
   const segs = custom
     .split(',')
     .map((s) => s.trim())
