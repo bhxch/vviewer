@@ -116,6 +116,18 @@ describe('sanitizeHtml——净化策略', () => {
     expect(out).toContain('a');
     expect(out).not.toContain('b');
   });
+
+  it('mark/ins/dl/dt/dd 在 DOMPurify 默认允许表（Task 2 扩展语法 engine→sanitize 装配下不丢）', () => {
+    // mark/ins/delist 三插件的引擎输出经 sanitizeHtml 真实装配核查：默认允许表
+    // 覆盖 <mark>/<ins>/<dl>/<dt>/<dd>，无需显式 ALLOWED_TAGS（Task 2 brief 注记）
+    const { html } = renderMarkdownToHtml('==高亮==\n\n++插入++\n\n术语\n: 定义一行\n');
+    const out = sanitizeHtml(html);
+    expect(out).toContain('<mark>高亮</mark>');
+    expect(out).toContain('<ins>插入</ins>');
+    expect(out).toContain('<dl>');
+    expect(out).toContain('<dt>术语</dt>');
+    expect(out).toContain('<dd>定义一行</dd>');
+  });
 });
 
 describe('enrichMarkdownDom——callout 转换', () => {

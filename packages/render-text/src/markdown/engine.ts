@@ -6,11 +6,18 @@
 // strikethrough 默认标签由 del 改为 <s>，而远程 comrak ext.strikethrough 出 <del>
 // （server/src/compute/markdown.rs）——同文档 remote/local 双引擎 DOM 指纹必然差一个
 // 标签。renderer rule 改写回 <del>（GFM 规范推荐标签），与 comrak 对齐。
+// mark/ins/deflist（Task 2，md-katex 语法对齐计划）：扩展语法 `==x==`→<mark>、
+// `++x++`→<ins>、term/`: def`→<dl><dt><dd>——与 comrak 侧扩展语法金标的本地半边
+// 对齐，此前三语法本地引擎均输出字面文本。
 import MarkdownIt from 'markdown-it';
 import type { MarkdownIt as MarkdownItInstance } from 'markdown-it';
-// markdown-it-task-lists / markdown-it-footnote 均无类型声明，见 src/types/*.d.ts
+// markdown-it-task-lists / markdown-it-footnote / markdown-it-mark / markdown-it-ins /
+// markdown-it-deflist 均无类型声明，见 src/types/*.d.ts
 import taskLists from 'markdown-it-task-lists';
 import footnote from 'markdown-it-footnote';
+import mark from 'markdown-it-mark';
+import ins from 'markdown-it-ins';
+import deflist from 'markdown-it-deflist';
 import { parseFrontMatter } from './frontMatter';
 
 export interface MarkdownRenderResult {
@@ -25,6 +32,11 @@ export function createMarkdownEngine(): MarkdownEngine {
   const md = new MarkdownIt({ html: true, linkify: true, breaks: false });
   md.use(taskLists, { enabled: false });
   md.use(footnote);
+  // 扩展语法三插件（Task 2）：mark/ins/dl/dt/dd 均在 DOMPurify 默认允许表，
+  // sanitize 侧无需显式放行（markdownSanitize.test.ts 装配用例固化）
+  md.use(mark);
+  md.use(ins);
+  md.use(deflist);
   // 删除线输出 <del>（对齐 comrak/GFM，见文件头注释）。markdown-it v15 的
   // token 类型为 s_open/s_close（内建默认渲染 <s>），按名覆写
   md.renderer.rules.s_open = () => '<del>';

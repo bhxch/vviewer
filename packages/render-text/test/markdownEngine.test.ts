@@ -74,6 +74,25 @@ describe('renderMarkdownToHtml——GFM 全家', () => {
   });
 });
 
+describe('renderMarkdownToHtml——扩展语法（Task 2：mark/ins/deflist）', () => {
+  it('==mark== 渲染 <mark>（与 comrak 扩展语法金标对齐的本地半边）', () => {
+    const { html } = renderMarkdownToHtml('==高亮==');
+    expect(html).toContain('<mark>高亮</mark>');
+  });
+
+  it('++ins++ 渲染 <ins>', () => {
+    const { html } = renderMarkdownToHtml('++插入++');
+    expect(html).toContain('<ins>插入</ins>');
+  });
+
+  it('描述列表 term / : def 渲染 dl/dt/dd', () => {
+    const html = renderMarkdownToHtml('术语\n: 定义一行').html;
+    expect(html).toContain('<dl>');
+    expect(html).toContain('<dt>术语</dt>');
+    expect(html).toContain('<dd>');
+  });
+});
+
 describe('renderMarkdownToHtml——front matter', () => {
   it('YAML 块剥离后渲染正文，front matter 返回解析对象', () => {
     const src = '---\ntitle: Hello\ntags:\n  - a\n  - b\n---\n\n# 正文\n';

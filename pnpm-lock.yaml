@@ -194,7 +194,16 @@ importers:
       markdown-it:
         specifier: ^15.0.2
         version: 15.0.2
+      markdown-it-deflist:
+        specifier: ^4.0.0
+        version: 4.0.0
       markdown-it-footnote:
+        specifier: ^4.0.0
+        version: 4.0.0
+      markdown-it-ins:
+        specifier: ^4.0.0
+        version: 4.0.0
+      markdown-it-mark:
         specifier: ^4.0.0
         version: 4.0.0
       markdown-it-task-lists:
@@ -2359,8 +2368,17 @@ packages:
     engines: {node: '>=12.0.0'}
     hasBin: true
 
+  markdown-it-deflist@4.0.0:
+    resolution: {integrity: sha512-06186ZWDwNLg638THD70MxBeFrDMF0+nL7IWU/qwCGHGOcUIm4MTYXbfjpv0ooWnVjkSnAjW8msKaOQmNRfY6Q==}
+
   markdown-it-footnote@4.0.0:
     resolution: {integrity: sha512-WYJ7urf+khJYl3DqofQpYfEYkZKbmXmwxQV8c8mO/hGIhgZ1wOe7R4HLFNwqx7TjILbnC98fuyeSsin19JdFcQ==}
+
+  markdown-it-ins@4.0.0:
+    resolution: {integrity: sha512-sWbjK2DprrkINE4oYDhHdCijGT+MIDhEupjSHLXe5UXeVr5qmVxs/nTUVtgi0Oh/qtF+QKV0tNWDhQBEPxiMew==}
+
+  markdown-it-mark@4.0.0:
+    resolution: {integrity: sha512-YLhzaOsU9THO/cal0lUjfMjrqSMPjjyjChYM7oyj4DnyaXEzA8gnW6cVJeyCrCVeyesrY2PlEdUYJSPFYL4Nkg==}
 
   markdown-it-task-lists@2.1.1:
     resolution: {integrity: sha512-TxFAc76Jnhb2OUu+n3yz9RMu4CwGfaT788br6HhEDlvWfdeJcLUsxk1Hgw2yJio0OXsxv7pyIPmvECY7bMbluA==}
@@ -5343,7 +5361,13 @@ snapshots:
       underscore: 1.13.8
       xmlbuilder: 10.1.1
 
+  markdown-it-deflist@4.0.0: {}
+
   markdown-it-footnote@4.0.0: {}
+
+  markdown-it-ins@4.0.0: {}
+
+  markdown-it-mark@4.0.0: {}
 
   markdown-it-task-lists@2.1.1: {}
 

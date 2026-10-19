@@ -8,7 +8,10 @@
 | highlight.js | BSD-3-Clause | 代码高亮兜底 | M2 |
 | katex | MIT | LaTeX 数学公式渲染 | M3 |
 | markdown-it | MIT | markdown 解析 | M3 |
+| markdown-it-deflist | MIT | markdown 描述列表（`term`/`: def`→dl/dt/dd，comrak 扩展语法对齐本地半边） | md-katex T2 |
 | markdown-it-footnote | MIT | markdown 脚注（与 comrak 服务端 GFM 能力对齐；本地引擎，M3 挂账终审补齐） | C 批 |
+| markdown-it-ins | MIT | markdown 插入（`++x++`→ins，comrak 扩展语法对齐本地半边） | md-katex T2 |
+| markdown-it-mark | MIT | markdown 高亮（`==x==`→mark，comrak 扩展语法对齐本地半边） | md-katex T2 |
 | markdown-it-task-lists | ISC | markdown 任务列表 | M3 |
 | mermaid | MIT | mermaid 图表渲染 | M3 |
 | yaml | ISC | front-matter 解析 | M3 |
