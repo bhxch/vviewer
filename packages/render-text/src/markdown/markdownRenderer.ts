@@ -123,6 +123,28 @@ function isAbsoluteSrc(src: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith('/') || src.startsWith('#');
 }
 
+// ---------- 图表渲染选项注入（spec 2026-10-19 §2.1/§2.2/§2.3） ----------
+
+/** 图表分发选项：app 侧按 settings 解析（render-text 不感知 localStorage）。 */
+export interface DiagramRenderOptions {
+  krokiHost: string;
+  mermaidTheme: 'default' | 'dark';
+  /** 未配置语言返回注册表 defaultMode（调用方保证） */
+  modeOf: (lang: string) => import('./diagrams').DiagramMode;
+}
+
+let diagramOptions: (() => DiagramRenderOptions) | null = null;
+
+/** 应用侧注入图表选项提供器（apps/web 启动时调用；null 解绑）。 */
+export function setDiagramOptions(fn: (() => DiagramRenderOptions) | null): void {
+  diagramOptions = fn;
+}
+
+/** 当前图表选项（未注入 null——管线按注册表 defaultMode 走）。 */
+export function getDiagramOptions(): DiagramRenderOptions | null {
+  return diagramOptions?.() ?? null;
+}
+
 /**
  * 渲染前解析文档内相对图片：命中 resolver → src 换为返回的 URL（blob: URL 登记，
  * destroy 时 revoke，与渲染实例生命周期对齐）；未命中/抛错保留原 src。
@@ -474,7 +496,11 @@ export const markdownRenderer: Renderer = {
     // 引擎输出（含远程 comrak unsafe 结果）必经净化后才能入 DOM
     const doc = new DOMParser().parseFromString(sanitizeHtml(html), 'text/html');
     enrichMarkdownDom(doc);
-    await runPipeline(doc, { highlightFence: fenceToHtml, lightboxOwner });
+    await runPipeline(doc, {
+      highlightFence: fenceToHtml,
+      lightboxOwner,
+      diagram: getDiagramOptions() ?? undefined
+    });
     if (destroyed) return { destroy() {} };
     // 相对图片 → 同 store 文件 URL（未注入 resolver 时原样保留，404 现状）
     const resolvedUrls = await resolveRelativeImages(doc, source);

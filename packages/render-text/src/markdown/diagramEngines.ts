@@ -5,7 +5,7 @@ export type MermaidTheme = 'default' | 'dark';
 
 let mermaidSeq = 0;
 
-/** mermaid 单入口（全仓唯一 import('mer') 点）：失败抛错由分发层降级。 */
+/** mermaid 单入口（全仓唯一 import('mermaid') 点）：失败抛错由分发层降级。 */
 async function renderMermaid(source: string, theme: MermaidTheme): Promise<string> {
   const mermaid = await import('mermaid').then((m) => m.default).catch(() => null);
   if (!mermaid) throw new Error('mermaid 加载失败');

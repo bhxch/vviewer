@@ -109,20 +109,22 @@ describe('diagrams 步（mermaid）', () => {
     const doc = docOf(MERMAID_MD);
     await runPipeline(doc, noopCtx());
     expect(doc.querySelector('pre')).toBeNull();
-    const container = doc.querySelector('div[data-mermaid]');
+    // 契约迁移（Task 3）：md-mermaid 容器 → .md-diagram wrapper 三段结构，
+    // data-mermaid 锚移到视图容器 .md-diagram-view 上
+    const container = doc.querySelector('.md-diagram-view[data-mermaid]');
     expect(container).not.toBeNull();
     expect(container!.getAttribute('data-mermaid')).toBe('graph TD; A-->B;');
     expect(container!.querySelector('svg')).not.toBeNull();
-    expect(container!.classList.contains('md-mermaid-error')).toBe(false);
+    expect(container!.classList.contains('md-diagram-error')).toBe(false);
   });
 
   it('mermaid.render 失败：保留原文加错误类', async () => {
     mermaidMocks.render.mockRejectedValue(new Error('boom'));
     const doc = docOf(MERMAID_MD);
     await runPipeline(doc, noopCtx());
-    const container = doc.querySelector('div[data-mermaid]')!;
+    const container = doc.querySelector('.md-diagram-view')!;
     expect(container).not.toBeNull();
-    expect(container.classList.contains('md-mermaid-error')).toBe(true);
+    expect(container.classList.contains('md-diagram-error')).toBe(true);
     expect(container.textContent).toContain('graph TD; A-->B;');
   });
 
@@ -267,7 +269,7 @@ describe('themeClassPrefix 与集成', () => {
     const doc = docOf('```js\nconst a = 1;\n```\n\n```mermaid\ngraph TD;\n```\n');
     await runPipeline(doc, noopCtx({ themeClassPrefix: 'dark-' }));
     expect(doc.querySelector('button.dark-md-copy-btn')).not.toBeNull();
-    expect(doc.querySelector('div.dark-md-mermaid')).not.toBeNull();
+    expect(doc.querySelector('div.dark-md-diagram-view')).not.toBeNull();
     expect(doc.querySelector('button.md-copy-btn:not(.dark-md-copy-btn)')).toBeNull();
   });
 

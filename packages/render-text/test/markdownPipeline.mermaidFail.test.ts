@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 
 // mermaid 动态 import 失败分支（M3 deferred minor）：模块工厂抛错 →
-// pipeline 的 `await import('mermaid').catch(() => null)` 得 null →
-// 每块走无库路径：保留原文 + 错误类，不注入 svg、不抛未处理 rejection。
+// diagramEngines.renderMermaid 的 `import('mermaid').catch(() => null)` 得 null →
+// 抛错 → 分发层（pipeline renderDiagramBlock）逐块错误路径：错误卡片保留原文，
+// 不注入 svg、不抛未处理 rejection。
 // 与 markdownPipeline.test.ts 的「模块加载成功但 render 失败」分支互补。
 vi.mock('mermaid', async () => {
   throw new Error('mermaid bundle 加载失败（模拟网络/分块错误）');
@@ -18,14 +19,14 @@ function docOf(md: string): Document {
 }
 
 describe('diagrams 步：mermaid 动态 import 失败', () => {
-  it('import 失败降级为逐块错误容器：保留原文 + mermaid-error 类', async () => {
+  it('import 失败降级为逐块错误卡片：保留原文 + diagram-error 类（契约迁移：.md-diagram-view + data-mermaid）', async () => {
     const doc = docOf('```mermaid\ngraph TD; A-->B;\n```\n');
     const ctx: PipelineCtx = { highlightFence: vi.fn().mockResolvedValue(null) };
     await expect(runPipeline(doc, ctx)).resolves.toBeUndefined();
-    const container = doc.querySelector('div[data-mermaid]');
+    const container = doc.querySelector('.md-diagram-view[data-mermaid]');
     expect(container).not.toBeNull();
     expect(container!.getAttribute('data-mermaid')).toBe('graph TD; A-->B;');
-    expect(container!.classList.contains('md-mermaid-error')).toBe(true);
+    expect(container!.classList.contains('md-diagram-error')).toBe(true);
     expect(container!.textContent).toBe('graph TD; A-->B;');
     expect(container!.querySelector('svg')).toBeNull();
   });

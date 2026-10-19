@@ -1,11 +1,16 @@
 // pipeline.ts — markdown 渲染五步管线（移植自 markpad src/lib/pipeline/index.ts 的
-// 固定顺序与单步容错语义，按 vviewer M3 契约裁剪）：highlight → diagrams(mermaid)
-// → katex → copyCode → lightbox。输入是净化后的 Document（sanitize 在管线外完成）。
+// 固定顺序与单步容错语义，按 vviewer M3 契约裁剪）：highlight → diagrams → katex
+// → copyCode → lightbox。输入是净化后的 Document（sanitize 在管线外完成）。
 // - highlight 步经注入回调（依赖倒置）：render-text 不依赖 @vviewer/highlight，
 //   viewer.ts 接线 HighlightClient（tree-sitter 完整降级链），null 返回时管线内
 //   hljs 兜底（动态 import）。
-// - mermaid/katex/highlight.js 均动态 import（mermaid 必须懒加载）。
+// - diagrams 步查 diagrams.ts 注册表分发（spec 2026-10-19 §2.1/§2.2）：图表语言
+//   走 local 引擎（diagramEngines 动态 import）/ kroki img / 源码面板三分支，
+//   重库一律懒加载；katex/highlight.js 同样动态 import。
 // - 每步独立 try/catch：单步失败不阻塞后续步骤。
+
+import { resolveDiagramType, createKrokiUrl, DEFAULT_KROKI_HOST, type DiagramMode, type DiagramType } from './diagrams';
+import { renderDiagramEngine } from './diagramEngines';
 
 export interface PipelineCtx {
   /**
@@ -23,6 +28,12 @@ export interface PipelineCtx {
    * 共存时，B 实例的 destroy 不得互删 A 正开着的灯箱。
    */
   lightboxOwner?: string;
+  /**
+   * 图表分发选项（注入反转，render-text 包内类型自 markdownRenderer；未注入时
+   * 按注册表 defaultMode 走）：kroki host / mermaid 主题 / 语言→模式映射由
+   * app 侧按 settings 解析，管线不感知 localStorage。
+   */
+  diagram?: import('./markdownRenderer').DiagramRenderOptions;
 }
 
 export interface PipelineStep {
@@ -33,8 +44,13 @@ export interface PipelineStep {
 /** 生成元素的基础类名（可被 ctx.themeClassPrefix 前缀）。 */
 const CLS = {
   copyBtn: 'md-copy-btn',
-  mermaid: 'md-mermaid',
-  mermaidError: 'md-mermaid-error',
+  diagram: 'md-diagram',
+  diagramBar: 'md-diagram-bar',
+  diagramLang: 'md-diagram-lang',
+  diagramToggle: 'md-diagram-toggle',
+  diagramView: 'md-diagram-view',
+  diagramError: 'md-diagram-error',
+  diagramSource: 'md-diagram-source',
   lightbox: 'md-lightbox',
   lightboxOverlay: 'md-lightbox-overlay',
 } as const;
@@ -49,11 +65,12 @@ function cls(ctx: PipelineCtx, base: keyof typeof CLS): string {
 async function runHighlight(root: Document, ctx: PipelineCtx): Promise<void> {
   for (const code of Array.from(root.querySelectorAll('pre code'))) {
     if (code.hasAttribute('data-md-highlight')) continue;
-    // mermaid 块归 diagrams 步，不参与代码高亮
-    if (code.classList.contains('language-mermaid')) continue;
-    code.setAttribute('data-md-highlight', '');
     const langClass = Array.from(code.classList).find((c) => c.startsWith('language-'));
     const lang = langClass ? langClass.slice('language-'.length) : '';
+    // 图表语言归 diagrams 步（spec §2.1）：不 hljs 兜底不 tree-sitter（源码面板
+    // 的高亮由 diagrams 步按注册表 highlightLang 自行调 highlightFence）
+    if (resolveDiagramType(lang)) continue;
+    code.setAttribute('data-md-highlight', '');
     // 围栏内容自带格式性尾换行（markdown-it 原样保留），高亮/复制均不应带上
     const raw = (code.textContent ?? '').replace(/\n$/, '');
     // 回调抛错（如取消：tab 切换后请求作废）→ 静默跳过该块，不走 hljs 兜底
@@ -83,42 +100,118 @@ async function runHighlight(root: Document, ctx: PipelineCtx): Promise<void> {
   }
 }
 
-// ---------- diagrams（mermaid）步 ----------
-
-let mermaidSeq = 0;
+// ---------- diagrams 步（注册表分发：local/kroki/source，spec 2026-10-19 §2.1/§2.2） ----------
 
 async function runDiagrams(root: Document, ctx: PipelineCtx): Promise<void> {
-  const blocks = Array.from(root.querySelectorAll('code.language-mermaid'));
-  if (blocks.length === 0) return;
-  // 动态 import 失败按每块错误路径处理（保留原文）
-  const mermaid = await import('mermaid')
-    .then((m) => m.default)
-    .catch(() => null);
-
-  for (const code of blocks) {
-    // 围栏内容自带格式性尾换行，源码属性/错误展示均不应带上
-    const source = (code.textContent ?? '').replace(/\n$/, '');
-    const host = code.closest('pre') ?? code;
-    const container = root.createElement('div');
-    container.className = cls(ctx, 'mermaid');
-    container.setAttribute('data-mermaid', source);
-    host.replaceWith(container);
-
-    if (!mermaid) {
-      container.classList.add(cls(ctx, 'mermaidError'));
-      container.textContent = source;
-      continue;
-    }
-    try {
-      mermaid.initialize({ startOnLoad: false });
-      const { svg } = await mermaid.render(`md-mermaid-${(mermaidSeq += 1)}`, source);
-      container.innerHTML = svg;
-    } catch {
-      // 失败保留原文 + 错误样式（源码同时留在 data-mermaid 供点击重渲染/复制）
-      container.classList.add(cls(ctx, 'mermaidError'));
-      container.textContent = source;
-    }
+  for (const code of Array.from(root.querySelectorAll('pre > code'))) {
+    const langClass = Array.from(code.classList).find((c) => c.startsWith('language-'));
+    if (!langClass) continue;
+    const type = resolveDiagramType(langClass.slice('language-'.length));
+    if (!type) continue;
+    if (code.hasAttribute('data-md-diagram')) continue;
+    code.setAttribute('data-md-diagram', '');
+    await renderDiagramBlock(code as HTMLElement, type, ctx);
   }
+}
+
+/** 生效模式解析（含能力回退链）：local 未启用→kroki（krokiType 空则 source）；kroki 无类型→source。 */
+function effectiveModeOf(type: DiagramType, ctx: PipelineCtx): DiagramMode {
+  const requested = ctx.diagram?.modeOf(type.id) ?? type.defaultMode;
+  if (requested === 'local') {
+    if (type.local && type.engine) return 'local';
+    return type.krokiType ? 'kroki' : 'source';
+  }
+  if (requested === 'kroki') return type.krokiType ? 'kroki' : 'source';
+  return 'source';
+}
+
+/**
+ * 单个图表围栏 → wrapper（bar/view/sourcePane 三段）+ 按生效模式填充：
+ * - source：视图隐藏、源码面板展开（highlightLang 命中时源码走 highlightFence）；
+ * - kroki：视图为 img（src 经 kroki deflate+base64url 编码；error 监听仅真浏览器
+ *   生效——jsdom 不派发 img load/error，单测只断言 src 形态）；
+ * - local：动态引擎渲染 svg/katex HTML 注入视图，失败降级错误卡片（保留源码）。
+ * mermaid 视图容器恒带 data-mermaid 源码属性（重渲染锚，Task 5 主题联动依赖；
+ * 失败态同样保留——旧实现语义，渲染成功与否不影响锚存在）。
+ */
+async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: PipelineCtx): Promise<void> {
+  const source = (code.textContent ?? '').replace(/\n$/, '');
+  const host = code.closest('pre') ?? code;
+  const doc = code.ownerDocument;
+  const mode = effectiveModeOf(type, ctx);
+
+  const wrap = doc.createElement('div');
+  wrap.className = cls(ctx, 'diagram');
+  const bar = doc.createElement('div');
+  bar.className = cls(ctx, 'diagramBar');
+  const label = doc.createElement('span');
+  label.className = cls(ctx, 'diagramLang');
+  label.textContent = type.id;
+  const toggle = doc.createElement('button');
+  toggle.type = 'button';
+  toggle.className = cls(ctx, 'diagramToggle');
+  toggle.textContent = '源码';
+  bar.append(label, toggle);
+  const view = doc.createElement('div');
+  view.className = cls(ctx, 'diagramView');
+  const sourcePane = doc.createElement('div');
+  sourcePane.className = cls(ctx, 'diagramSource');
+  sourcePane.setAttribute('hidden', '');
+  const sourceCode = doc.createElement('code');
+  if (type.highlightLang) sourceCode.className = `language-${type.highlightLang}`;
+  sourceCode.textContent = source;
+  sourcePane.appendChild(sourceCode);
+  wrap.append(bar, view, sourcePane);
+  host.replaceWith(wrap);
+
+  // 图/源码切换（节点挂载进主文档后监听器随节点保留——copyBtn 同款前提）
+  toggle.addEventListener('click', () => {
+    const showSource = sourcePane.hasAttribute('hidden');
+    sourcePane.toggleAttribute('hidden', !showSource);
+    view.toggleAttribute('hidden', showSource);
+    toggle.textContent = showSource ? '图' : '源码';
+  });
+
+  if (mode === 'source') {
+    view.setAttribute('hidden', '');
+    sourcePane.removeAttribute('hidden');
+    toggle.textContent = '图';
+    if (type.highlightLang) {
+      try {
+        const spanHtml = await ctx.highlightFence(source, type.highlightLang);
+        if (spanHtml) sourceCode.innerHTML = spanHtml;
+      } catch { /* 取消等：保留纯文本 */ }
+    }
+    return;
+  }
+
+  if (mode === 'kroki') {
+    const img = doc.createElement('img');
+    img.setAttribute('alt', type.id);
+    img.setAttribute('src', createKrokiUrl(ctx.diagram?.krokiHost ?? DEFAULT_KROKI_HOST, type.krokiType, source));
+    // jsdom 不派发 load/error（历史教训）：onerror 只在真浏览器生效，单测断言 src 形态
+    img.addEventListener('error', () => {
+      view.classList.add(cls(ctx, 'diagramError'));
+      view.textContent = `kroki 渲染失败（${type.id}）`;
+      // 失败时展开源码兜底可读
+      view.setAttribute('hidden', '');
+      sourcePane.removeAttribute('hidden');
+      toggle.textContent = '图';
+    });
+    view.appendChild(img);
+    view.setAttribute('data-mermaid', type.id === 'mermaid' ? source : ''); // mermaid 保留重渲染锚语义
+    return;
+  }
+
+  // local
+  try {
+    const html = await renderDiagramEngine(type.engine!, source, { mermaidTheme: ctx.diagram?.mermaidTheme ?? 'default' });
+    view.innerHTML = html;
+  } catch {
+    view.classList.add(cls(ctx, 'diagramError'));
+    view.textContent = source;
+  }
+  if (type.id === 'mermaid') view.setAttribute('data-mermaid', source); // 重渲染锚（成功/失败态都在）
 }
 
 // ---------- katex 步 ----------
