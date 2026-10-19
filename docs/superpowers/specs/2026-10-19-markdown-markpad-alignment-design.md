@@ -92,6 +92,7 @@
 - **分隔符扩展**：`scanMathSegments`（pipeline.ts）在 `$..$`/`$$..$$` 之外增加 `\(...\)` 行内与 `\[...\]` 块级识别；跳过祖先规则复用（code/script/style/`.katex`）。转义 `\$` 不触发（沿用现有扫描语义）。
 - **` ```math ` 围栏**：注册表 math 槽（2.1），`katex.renderToString(displayMode:true)`；高亮步跳过清单补 `language-math`（同 mermaid 现状）。别名 `latex` 同路由。
 - 无编号体系（非目标）。
+- 〔勘误（2026-10-19 终审 I2，以实现为准）：KaTeX 排印样式 M3 起缺失——管线只产出 `.katex` DOM、从未加载 katex.min.css（e2e 只断 DOM 存在未暴露，预览公式一直是无排印 HTML）；2026-10-19 md-export Task 2b 补齐：pipeline katex 步动态加载 katex.min.css（独立样式 chunk），预览公式自此有排印〕
 
 ## 4. 阶段三：扩展语法 + 代码块语言徽标
 
@@ -132,7 +133,7 @@
 - **内容**：克隆管线完成后的 DOM（代码已高亮、公式已排版、图表已成 SVG），lightbox/复制钮等交互壳剥离。
 - **样式内联**：当前生效主题的 `--vv-*` 变量集 + 代码主题注入样式块（`</style` 转义防护）+ 基础排版样式，合成单 `<style>`。
 - **图片 data URI**：`blob:`/同源相对图 fetch→base64 内联；外域 http(s) 图保留原 URL（CORS 不可控，不强拉）；音视频占位降级为源地址超链接（非目标已声明）。
-- **KaTeX 字体裁剪**：按文档实际用到的 KaTeX 字体族嵌 `@font-face`（移植 markpad `exportFonts.ts` 思路，全嵌约 395KB，按需裁剪）。
+- **KaTeX 字体裁剪**：按文档实际用到的 KaTeX 字体族嵌 `@font-face`（移植 markpad `exportFonts.ts` 思路，全嵌约 395KB，按需裁剪）。〔勘误（2026-10-19 终审 I2，以实现为准）：实态为全嵌上限形态——katex.min.css 全文嵌入 + woff2 字体 data URI 内联（唯一裁剪=woff/ttf 回退段移除），按需裁剪列未来优化；spec 允许全嵌为上限〕
 - **TOC**：静态锚目录（标题层级列表 + 锚链接，无滚动跟踪脚本——YAGNI 裁剪，markpad 的交互 TOC 脚本不移植）。
 - front matter：按预览现状一并输出（不做导出专属形态）。
 - mermaid 保持当前主题（WYSIWYG；打印浅色主题仅 PDF 路径用）。
@@ -140,10 +141,10 @@
 ## 7. 阶段六：导出 PDF
 
 - 移植 markpad WebView 打印方案（无 puppeteer、零依赖）：隐藏 iframe 载入打印版 HTML（复用阶段五样式合成 + `@page` 规则 + `@media print` CSS），`contentWindow.print()` 由系统打印对话框出 PDF。
-- 页型：a4/a3/letter/legal/**dynamic**（单页动态高度：实测 iframe scrollHeight 后注入精确页高）。
+- 页型：a4/a3/letter/legal/**dynamic**（单页动态高度：实测 iframe scrollHeight 后注入精确页高）。〔勘误（2026-10-19 终审 I2，以实现为准）：dynamic 仅类型声明未接线（触发壳固定 a4，回写锚 `data-vv-page="dynamic"` 已备待接）；「大图按页高 95% max-height」实为 `max-height: 95vh`——打印上下文 vh 解析为页面视口高，等效页高 95%（img 百分比 max-height 对 auto 高父容器不生效）〕
 - 分页保护：PRE/TABLE/FIGURE/SVG 等不可断标签 `break-inside: avoid`；大图按页高 95% `max-height` 缩放防跨页。
 - mermaid 打印主题：PDF 路径强制浅色重画（markpad `mermaidPrint.ts` 同思路），避免暗色图在纸面不可读。
-- Chromium 下 iframe 内 `print()` 需用户手势触发（导出按钮点击链路内，天然满足）；若 iframe print 被策略拦截，降级 `window.print()` + 打印样式表作用域方案（实施时验证择一，不双轨并存）。
+- Chromium 下 iframe 内 `print()` 需用户手势触发（导出按钮点击链路内，天然满足）；若 iframe print 被策略拦截，降级 `window.print()` + 打印样式表作用域方案（实施时验证择一，不双轨并存）。〔勘误（2026-10-19 终审 I2，以实现为准）：window.print 作用域方案未实现，知情舍弃——实态为 iframe print 失败时经 onUnavailable 回调 toast 引导「改用浏览器菜单打印并另存为 PDF」（不静默降级）〕
 
 ## 8. 测试
 
