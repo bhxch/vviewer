@@ -16,6 +16,9 @@ pub struct Health {
     /// 字段整体省略。客户端清单过期/缺失时按未知处理（保持既有先试远程行为）。
     #[serde(rename = "computeLanguages", skip_serializing_if = "Option::is_none")]
     pub compute_languages: Option<Vec<&'static str>>,
+    /// 服务端图表渲染子集（spec §2.5；随 compute 门控，非 compute 省略）
+    #[serde(rename = "diagrams", skip_serializing_if = "Option::is_none")]
+    pub diagrams: Option<Vec<&'static str>>,
     /// 跨文件搜索引擎宣告（A 项）：rg/grep 择一；双缺时字段整体省略。
     /// 与 /api/search 同一选择链，测试经 rg_path/grep_path 注入覆盖。
     #[serde(rename = "searchEngine", skip_serializing_if = "Option::is_none")]
@@ -37,9 +40,11 @@ pub struct Health {
 pub async fn health(State(state): State<AppState>) -> Json<Health> {
     let mut capabilities = vec!["file-server"];
     let mut compute_languages = None;
+    let mut diagrams = None;
     if state.compute {
         capabilities.push("compute");
         compute_languages = Some(crate::compute::queries::supported_languages());
+        diagrams = Some(vec!["graphviz", "svgbob"]);
     }
     let search_engine =
         crate::routes::search::resolve_engine(&state).ok().map(|(engine, _)| engine.name());
@@ -53,6 +58,7 @@ pub async fn health(State(state): State<AppState>) -> Json<Health> {
         version: env!("CARGO_PKG_VERSION"),
         capabilities,
         compute_languages,
+        diagrams,
         search_engine,
         roots: (root_count > 1).then_some(root_count),
         root_paths,
@@ -99,6 +105,12 @@ mod tests {
         assert!(names.contains(&"rust") && names.contains(&"python"));
         // 阶段 1 收口：java 已进服务端集合（BUG-06c 时代的缺席断言翻转）
         assert!(names.contains(&"java"));
+    }
+
+    #[tokio::test]
+    async fn compute_advertises_diagram_subset() {
+        let v = health_json(base_state().with_compute(true)).await;
+        assert_eq!(v["diagrams"], serde_json::json!(["graphviz", "svgbob"]));
     }
 
     #[tokio::test]

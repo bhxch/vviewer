@@ -34,7 +34,9 @@ pub fn render(text: &str, wikilinks: bool) -> String {
     options.render.hardbreaks = false;
 
     let prepared = if wikilinks { apply_wikilinks(text) } else { text.to_string() };
-    markdown_to_html(&prepared, &options)
+    // 服务端图表围栏后处理（spec §2.5）：原生集（graphviz/dot/svgbob）替换为内联
+    // SVG div；解析失败/非原生语言原样保留（客户端管线接手）。
+    crate::compute::diagrams::replace_diagram_fences(&markdown_to_html(&prepared, &options))
 }
 
 /// `[[target|text]]` / `[[target]]` → `<a class="vv-wikilink" data-target="…">text</a>`。
@@ -161,5 +163,11 @@ mod tests {
             html.contains(r##"href="#%E4%B8%AD%E6%96%87%E6%A0%87%E9%A2%98""##),
             "{html}"
         );
+    }
+
+    #[test]
+    fn render_replaces_native_diagram_fence() {
+        let html = render("```dot\ndigraph { a -> b }\n```", false);
+        assert!(html.contains("data-vv-diagram=\"server\""), "{html}");
     }
 }

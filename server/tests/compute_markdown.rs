@@ -111,6 +111,42 @@ async fn markdown_hardbreaks_off_by_default() {
     assert!(!html.contains("<br"), "不应有硬换行: {html}");
 }
 
+// ---------- 服务端图表围栏（spec 2026-10-19 §2.5） ----------
+
+#[tokio::test]
+async fn markdown_renders_graphviz_fence_server_side() {
+    let f = fixture(true, None);
+    let app = vviewer::build_router(f.state);
+    let (status, body) = post_json(
+        app,
+        "/api/compute/markdown",
+        None,
+        json!({ "text": "```dot\ndigraph { a -> b }\n```" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let html = body["html"].as_str().unwrap();
+    assert!(html.contains(r#"data-vv-diagram="server""#), "服务端 div: {html}");
+    assert!(html.contains("<svg"), "服务端渲染出 svg: {html}");
+}
+
+#[tokio::test]
+async fn markdown_keeps_broken_diagram_fence_for_client() {
+    let f = fixture(true, None);
+    let app = vviewer::build_router(f.state);
+    let (status, body) = post_json(
+        app,
+        "/api/compute/markdown",
+        None,
+        json!({ "text": "```graphviz\ndigraph { a ->\n```" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let html = body["html"].as_str().unwrap();
+    assert!(html.contains("<pre><code class=\"language-graphviz\""), "失败保留原 fence：{html}");
+    assert!(!html.contains("data-vv-diagram"), "失败不得产出服务端 div：{html}");
+}
+
 // ---------- wikilinks ----------
 
 #[tokio::test]
