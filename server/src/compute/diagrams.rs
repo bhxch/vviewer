@@ -1,8 +1,10 @@
 // server/src/compute/diagrams.rs — 服务端图表围栏渲染（spec 2026-10-19 §2.5）。
 // markpad Rust 栈同款：graphviz=layout-rs、svgbob=svgbob crate（纯 Rust，无 Java/进程）。
 // comrak 输出后处理：原生集围栏替换为内联 SVG div；解析失败/非原生语言原样保留
-//（客户端管线接手）。SVG 不得含 <style>/外链 img（前端 sanitize 约束，layout-rs/
-// svgbob 直出均为无 style 的自包含 svg，实施时以单测锚定）。
+//（客户端管线接手）。SVG 含引擎生成的 <style>（layout-rs 仅字体类、svgbob 固定描边
+// 规则，用户源码不进入 style 块），由前端 sanitize 上下文豁免承载——uponSanitizeElement
+// 钩子对 [data-vv-diagram=server] 内 style 强制保留 + 内容危险 token 中和（Task 3 落地，
+// 2026-10-19 控制器裁决）；不得用外链 img 的约束不变（实测两引擎直出均无 img）。
 
 use layout::backends::svg::SVGWriter;
 use layout::gv::{DotParser, GraphBuilder};
@@ -146,6 +148,16 @@ mod tests {
         let out = replace_diagram_fences(html);
         assert!(out.contains("data-vv-diagram=\"server\""), "首个成功：{out}");
         assert!(out.contains("<pre><code class=\"language-graphviz\""), "第二个失败保留：{out}");
+    }
+
+    #[test]
+    fn graphviz_svg_keeps_engine_style() {
+        // spec §2.5 知情裁决（2026-10-19）：layout-rs 引擎生成的 <style> 由前端
+        // sanitize 上下文豁免承载（uponSanitizeElement 钩子对 [data-vv-diagram=server]
+        // 内 style 强制保留 + 危险 token 中和，Task 3 落地）。Rust 侧不得剥除。
+        let html = "<pre><code class=\"language-dot\">digraph{a}</code></pre>";
+        let out = replace_diagram_fences(html);
+        assert!(out.contains("<style>"), "引擎生成的 <style> 应原样保留，勿在 Rust 侧剥除：{out}");
     }
 }
 
