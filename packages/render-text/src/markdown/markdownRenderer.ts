@@ -529,7 +529,16 @@ export const markdownRenderer: Renderer = {
       const next = (ev as CustomEvent<{ mermaidTheme?: 'default' | 'dark' }>).detail?.mermaidTheme ?? currentTheme;
       for (const el of Array.from(target.querySelectorAll('[data-mermaid]'))) {
         const src = el.getAttribute('data-mermaid');
-        if (src) void renderMermaidInto(el, src, next);
+        if (!src) continue;
+        void renderMermaidInto(el, src, next).then((ok) => {
+          if (!ok) return; // 失败保留旧图（含错误态）原样
+          // 治愈：上次 local 失败态残留的错误类随旧内容一并清掉——themeClassPrefix
+          // 场景类名带前缀（cls(ctx,…) 机制），前缀值此处不可知，按 'md-diagram-error'
+          // 后缀匹配自身 classList 摘除最简可靠；视图已换新 SVG，错误样式不再适用
+          for (const c of Array.from(el.classList)) {
+            if (c.endsWith('md-diagram-error')) el.classList.remove(c);
+          }
+        });
       }
     };
     listenDoc.addEventListener('vv:appearance-applied', onAppearance);

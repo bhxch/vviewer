@@ -24,7 +24,7 @@ describe('diagrams 步：注册表分发', () => {
     expect(doc.querySelector('pre code.language-rust')).not.toBeNull();
   });
 
-  it('source 模式：wrapper + 源码面板 + 源码走 highlightFence', async () => {
+  it('source 模式：wrapper + 源码面板展开 + 无 toggle 钮 + 源码走 highlightFence', async () => {
     const doc = docWithFence('plantuml', 'a -> b');
     let highlighted = '';
     await runPipeline(doc, {
@@ -34,12 +34,38 @@ describe('diagrams 步：注册表分发', () => {
     });
     const wrap = doc.querySelector('.md-diagram')!;
     expect(wrap).not.toBeNull();
-    // source 模式初始即展开源码面板（视图隐藏）——与 brief 实现片段语义一致
+    // source 模式无图视图可切：不生成 toggle（连 DOM 都不加）——否则「图」钮点开空视图条假交互
+    expect(wrap.querySelector('.md-diagram-toggle')).toBeNull();
+    // 源码面板初始展开、视图隐藏；高亮回调已以映射语言调用
     expect(doc.querySelector('.md-diagram-source')!.hasAttribute('hidden')).toBe(false);
-    // 切换到图视图后源码面板隐藏；高亮回调已以映射语言调用
-    (wrap.querySelector('.md-diagram-toggle') as HTMLElement).click();
-    expect(doc.querySelector('.md-diagram-source')!.hasAttribute('hidden')).toBe(true);
+    expect(doc.querySelector('.md-diagram-view')!.hasAttribute('hidden')).toBe(true);
     expect(highlighted).toBe('plantuml:a -> b');
+  });
+
+  it('local/kroki 模式首次切源码：惰性 highlightFence 注入（源码面板标记防重复）', async () => {
+    const doc = docWithFence('plantuml', 'a -> b');
+    let calls = 0;
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: { krokiHost: 'https://k', mermaidTheme: 'default', modeOf: () => 'kroki' },
+      highlightFence: async (code, lang) => { calls += 1; return `<i>${lang}:${code}</i>`; }
+    });
+    const wrap = doc.querySelector('.md-diagram')!;
+    const sourceCode = doc.querySelector('.md-diagram-source code')!;
+    // 图视图优先：初始源码面板保持纯文本（未请求高亮）
+    expect(calls).toBe(0);
+    expect(sourceCode.innerHTML).not.toContain('<i>');
+    // 首次切到源码：惰性高亮注入
+    (wrap.querySelector('.md-diagram-toggle') as HTMLElement).click();
+    await new Promise((r) => setTimeout(r, 0)); // flush 微任务
+    expect(calls).toBe(1);
+    // innerHTML 实体转义：> 写作 &gt;（注入本身已生效）
+    expect(sourceCode.innerHTML).toContain('<i>plantuml:a -&gt; b</i>');
+    // 切回图再切源码：data-md-diag-src-hl 标记生效，不重复请求
+    (wrap.querySelector('.md-diagram-toggle') as HTMLElement).click();
+    (wrap.querySelector('.md-diagram-toggle') as HTMLElement).click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(calls).toBe(1);
   });
 
   it('kroki 模式：img.src 按 kroki 编码构造', async () => {

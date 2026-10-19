@@ -127,7 +127,8 @@ function effectiveModeOf(type: DiagramType, ctx: PipelineCtx): DiagramMode {
 
 /**
  * 单个图表围栏 → wrapper（bar/view/sourcePane 三段）+ 按生效模式填充：
- * - source：视图隐藏、源码面板展开（highlightLang 命中时源码走 highlightFence）；
+ * - source：不生成 toggle（无图视图可切，连 DOM 都不加），bar 只留语言徽标、
+ *   源码面板展开（highlightLang 命中时源码走 highlightFence）；
  * - kroki：视图为 img（src 经 kroki deflate+base64url 编码；error 监听仅真浏览器
  *   生效——jsdom 不派发 img load/error，单测只断言 src 形态）；
  * - local：动态引擎渲染 svg/katex HTML 注入视图，失败降级错误卡片（保留源码）。
@@ -148,11 +149,7 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
   const label = doc.createElement('span');
   label.className = cls(ctx, 'diagramLang');
   label.textContent = type.id;
-  const toggle = doc.createElement('button');
-  toggle.type = 'button';
-  toggle.className = cls(ctx, 'diagramToggle');
-  toggle.textContent = '源码';
-  bar.append(label, toggle);
+  bar.append(label);
   const view = doc.createElement('div');
   view.className = cls(ctx, 'diagramView');
   const sourcePane = doc.createElement('div');
@@ -165,18 +162,12 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
   wrap.append(bar, view, sourcePane);
   host.replaceWith(wrap);
 
-  // 图/源码切换（节点挂载进主文档后监听器随节点保留——copyBtn 同款前提）
-  toggle.addEventListener('click', () => {
-    const showSource = sourcePane.hasAttribute('hidden');
-    sourcePane.toggleAttribute('hidden', !showSource);
-    view.toggleAttribute('hidden', showSource);
-    toggle.textContent = showSource ? '图' : '源码';
-  });
-
+  // source 模式：无图视图可切——不生成 toggle（连 DOM 都不加，bar 只留语言徽标），
+  // 源码面板直接展开、视图隐藏（空 view 容器有 padding 不隐藏仍占空条）；否则
+  //「图」钮点击后只能展示约一行高的空视图条，纯假交互
   if (mode === 'source') {
     view.setAttribute('hidden', '');
     sourcePane.removeAttribute('hidden');
-    toggle.textContent = '图';
     if (type.highlightLang) {
       try {
         const spanHtml = await ctx.highlightFence(source, type.highlightLang);
@@ -185,6 +176,28 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
     }
     return;
   }
+
+  const toggle = doc.createElement('button');
+  toggle.type = 'button';
+  toggle.className = cls(ctx, 'diagramToggle');
+  toggle.textContent = '源码';
+  bar.append(toggle);
+  // 图/源码切换（节点挂载进主文档后监听器随节点保留——copyBtn 同款前提）。
+  // 首次切到源码时惰性高亮（图视图优先出图，源码高亮不挡首屏）：data-md-diag-src-hl
+  // 标记先行防连点重复请求；成功才写 innerHTML，null 失败/catch 静默保留纯文本
+  //（标记已写不重试——与 source 分支失败语义一致）。
+  toggle.addEventListener('click', () => {
+    const showSource = sourcePane.hasAttribute('hidden');
+    sourcePane.toggleAttribute('hidden', !showSource);
+    view.toggleAttribute('hidden', showSource);
+    toggle.textContent = showSource ? '图' : '源码';
+    if (showSource && type.highlightLang && !sourcePane.hasAttribute('data-md-diag-src-hl')) {
+      sourcePane.setAttribute('data-md-diag-src-hl', '');
+      ctx.highlightFence(source, type.highlightLang).then((spanHtml) => {
+        if (spanHtml) sourceCode.innerHTML = spanHtml;
+      }).catch(() => { /* 取消等：保留纯文本 */ });
+    }
+  });
 
   if (mode === 'kroki') {
     const img = doc.createElement('img');
