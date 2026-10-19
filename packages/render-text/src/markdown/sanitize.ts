@@ -1,7 +1,9 @@
 // sanitize.ts — markdown/HTML 渲染输出的唯一净化策略。
 // 移植自 markpad src/lib/utils/sanitize.ts（单一策略模块原则），按 vviewer 契约
 // 调整 URI 白名单：http/https/mailto/相对路径/data:image（data: 仅限 src/srcset，
-// 见下方钩子）；FORBID_TAGS style/meta；ALLOW_DATA_ATTR 保留 mermaid/katex 管线钩子。
+// 见下方钩子）；FORBID_TAGS meta（style 的禁用由 uponSanitizeElement 钩子按
+// [data-vv-diagram="server"] 上下文二分承载，见 registerSanitizeHooks）；
+// ALLOW_DATA_ATTR 保留 mermaid/katex 管线钩子。
 // BUG-40：外域拦截自 img src/srcset（BUG-17）扩展到五类等价加载向量——
 // video/audio poster、SVG image/use href、行内 style url()、background 属性、
 // input type=image src（见钩子内 BUG-40 各分支）。
@@ -143,9 +145,47 @@ function sanitizeStyleAttribute(el: Element): void {
 }
 
 let dataUriHookRegistered = false;
-function registerDataUriHook(): void {
+function registerSanitizeHooks(): void {
   if (dataUriHookRegistered) return;
   dataUriHookRegistered = true;
+  DOMPurify.addHook('uponSanitizeElement', (node, data) => {
+    // ---------- 服务端图表 style 上下文豁免（spec §2.5，2026-10-19 控制器裁决） ----------
+    //
+    // compute markdown 的服务端图表（server/src/compute/diagrams.rs）产出带引擎生成
+    // <style> 的 SVG（layout-rs 仅字体规则、svgbob 固定描边规则，用户源码不进入
+    // style 块）；FORBID_TAGS 一刀切会把线条样式剥没（svgbob 线全消失）。裁决：
+    // [data-vv-diagram="server"] 容器内的 style 保留 + 文本危险 token 中和；容器外
+    // 维持原剥除语义（BUG-40 防线不松动）。
+    //
+    // 机制注（DOMPurify 3.4.16 实测语义，非旧版惯用法）：FORBID_TAGS 命中在钩子
+    // 载荷之外短路移除（_sanitizeDisallowedNode），uponSanitizeElement 的
+    // data.allowed/allowedTags 均无法覆写。故 style 移出 FORBID_TAGS（回落默认
+    // 允许表），钩子内按节点上下文二分——容器外由钩子自行摘除节点（元素连 CSS
+    // 文本一并移除；DOMPurify 对钩内摘除有 _handleHookDetachedNode 正式支撑，
+    // 可观察输出与原 FORBID_TAGS+FORBID_CONTENTS 一致）；容器内中和文本后放行。
+    // DOMPurify 对保留的 style 另有 mXSS 守卫（textContent 含 `</style␠`/
+    // `</style>` 形态即整元素强删，LITERAL_TEXT_CLOSE）——`</style` 中和先行拆除
+    // 该输入，守卫不再触发。
+    if (data.tagName !== 'style' || node.nodeType !== 1) return;
+    const el = node as Element;
+    let inServer = false;
+    for (let cur: Node | null = el.parentNode; cur !== null; cur = cur.parentNode) {
+      if (cur.nodeType === 1 && (cur as Element).getAttribute('data-vv-diagram') === 'server') {
+        inServer = true;
+        break;
+      }
+    }
+    if (!inServer) {
+      el.remove(); // 容器外：维持 FORBID_TAGS 原语义（元素连内容一并移除）
+      return;
+    }
+    // 容器内豁免：中和危险 token 后放行。引擎生成内容不含这些 token，正常路径
+    // 零改动；纯防线（style 文本不执行脚本，url(/@import 是外联加载向量，
+    // expression( 是遗留 IE 向量，</style 是逃逸/守卫触发向量）。
+    let css = el.textContent ?? '';
+    css = css.replace(/<\/\s*style/gi, '').replace(/url\(/gi, '').replace(/@import/gi, '').replace(/expression\(/gi, '');
+    el.textContent = css;
+  });
   DOMPurify.addHook('afterSanitizeAttributes', (node) => {
     for (const attr of Array.from(node.attributes)) {
       if (DATA_URI_ATTRS.has(attr.name.toLowerCase())) continue;
@@ -248,14 +288,18 @@ function registerDataUriHook(): void {
   });
 }
 
-// <style> 在 DOMPurify 默认允许表内且其 CSS 不经过滤：作者样式表注入预览文档后
-// 可全局生效（隐藏 UI / background:url 外传），故禁；行内 style 属性仍允许。
+// <style> 默认在 DOMPurify 允许表内且其 CSS 不经过滤：作者样式表注入预览文档后
+// 可全局生效（隐藏 UI / background:url 外传），本应禁——现由 uponSanitizeElement
+// 钩子按上下文二分承载（见 registerSanitizeHooks 内注释）：[data-vv-diagram="server"]
+// 容器内豁免（服务端图表引擎样式），容器外钩子摘除（语义同禁）。行内 style 属性仍允许。
 // <meta> 当前虽不在 DOMPurify 默认允许表内，仍显式声明防上游默认变化
 // （http-equiv=refresh/UVG 元信息不应出现在预览片段；沙箱文档的 CSP meta 由
 // html 渲染器在净化之后自行注入，不受此禁影响）。
+// 注意 style 不得留在 FORBID_TAGS：3.4.16 中 FORBID_TAGS 命中先于钩子载荷短路
+// 移除，钩子将无从豁免（见钩子内机制注）。
 export const MARKDOWN_SANITIZE_CONFIG: Config = {
   ALLOWED_URI_REGEXP,
-  FORBID_TAGS: ['style', 'meta'],
+  FORBID_TAGS: ['meta'],
   ALLOW_DATA_ATTR: true,
 };
 
@@ -273,7 +317,7 @@ export interface SanitizeOptions {
  * 字符串（Document 输入会丢 head，此时应直接传原始字符串）。
  */
 export function sanitizeHtml(dirty: string | Document, opts: SanitizeOptions = {}): string {
-  registerDataUriHook();
+  registerSanitizeHooks();
   const html = typeof dirty === 'string' ? dirty : dirty.body.innerHTML;
   const config: Config = opts.wholeDocument
     ? { ...MARKDOWN_SANITIZE_CONFIG, WHOLE_DOCUMENT: true }

@@ -421,3 +421,46 @@ describe('sanitizeHtml——五类等价加载向量外域拦截（BUG-40）', (
     expect(html).toContain('已拦截外部图片：evil.example.com');
   });
 });
+
+describe('sanitizeHtml——服务端图表 style 上下文豁免（spec §2.5 控制器裁决）', () => {
+  const SRV = '<div data-vv-diagram="server" data-diagram-lang="dot" data-diagram-src="digraph{a}">';
+
+  it('服务端图表容器内的 style 存活（引擎线条样式不丢）', () => {
+    const out = sanitizeHtml(`${SRV}<svg><style>.e{fill:none;stroke:red}</style><path d="M0 0"/></svg></div>`);
+    expect(out).toContain('<style>');
+    expect(out).toContain('.e{fill:none;stroke:red}');
+  });
+
+  it('豁免 style 内危险 token 被中和：url(、@import、expression(', () => {
+    const out = sanitizeHtml(
+      `${SRV}<style>.a{background:url(https://evil.example/b.png)}@import "x.css";p{width:expression(alert(1))}</style></div>`
+    );
+    expect(out).toContain('<style');
+    expect(out).not.toContain('url(');
+    expect(out).not.toContain('@import');
+    expect(out).not.toContain('expression(');
+  });
+
+  it('豁免 style 内嵌入式 </style 被中和（DOMPurify mXSS 守卫输入提前拆除，元素保留）', () => {
+    // raw text 元素里 </style 后随非终止字符（"）才会留在文本内——恰好是
+    // DOMPurify LITERAL_TEXT_CLOSE 守卫会整元素强删的输入；中和先行拆除
+    const out = sanitizeHtml(`${SRV}<style>.a{content:"</style"}</style></div>`);
+    expect(out).toContain('<style');
+    const back = new DOMParser().parseFromString(out, 'text/html');
+    const styleEl = back.querySelector('div[data-vv-diagram="server"] style');
+    expect(styleEl).not.toBeNull();
+    expect(styleEl!.textContent).not.toContain('</style');
+  });
+
+  it('普通位置的 style 仍被剥除（BUG-40 防线不松动）', () => {
+    const out = sanitizeHtml('<style>.titlebar{display:none}</style><p>x</p>');
+    expect(out).not.toContain('<style');
+    expect(out).not.toContain('titlebar');
+  });
+
+  it('容器外的 svg style 同样剥除（豁免仅限容器上下文）', () => {
+    const out = sanitizeHtml('<svg><style>.g{display:none}</style><path/></svg>');
+    expect(out).not.toContain('<style');
+    expect(out).not.toContain('.g');
+  });
+});
