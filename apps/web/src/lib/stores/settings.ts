@@ -76,47 +76,57 @@ export function clampSize(v: unknown, range: readonly [number, number] | readonl
   return Math.min(range[1]!, Math.max(range[0]!, Math.round(v)));
 }
 
+/**
+ * 白名单规范化（loadSettings 的唯一实现体，Task 2 起导出共享）：未知键原样
+ * 透传不剔除（历史行为——settings.test.ts 锁定），已知字段逐个校验/归位/clamp。
+ * 消费方：loadSettings（localStorage 读回）与 settingsDraft.ts 的
+ * replaceImported/applyJson（导入与 JSON 视图的同一规范化语义）。
+ */
+export function normalizeSettings(partial: Record<string, unknown>): Settings {
+  const s = { ...defaults(), ...(partial as Partial<Settings>) };
+  // computePolicy 白名单校验：旧版本/手改 localStorage 的非法值回落默认
+  if (!POLICIES.includes(s.computePolicy)) s.computePolicy = DEFAULTS.computePolicy;
+  // 外观槽格式白名单（spec 2026-10-12 §2.3）：'default' 或 'vscode:'/'imported:'
+  // 前缀；存在性校验（内置名单/imported id）由注入期 warn+回退兜底，此处只挡格式
+  for (const key of ['appearanceLight', 'appearanceDark'] as const) {
+    const v = s[key];
+    // typeof 守卫前置：非字符串脏值（如 JSON 里的数字）走字段级归位，
+    // 否则 startsWith 抛 TypeError 被外层 try/catch 兜成整体回落 defaults()
+    if (typeof v !== 'string' || (v !== 'default' && !v.startsWith('vscode:') && !v.startsWith('imported:'))) {
+      s[key] = DEFAULTS[key];
+    }
+  }
+  // diagrams 节白名单（spec §2.1）：host 必须 http(s):// 或空；modes 键须在注册表、值须三枚举
+  const d = s.diagrams ?? DEFAULTS.diagrams;
+  s.diagrams = {
+    krokiHost: typeof d.krokiHost === 'string' && /^https?:\/\//.test(d.krokiHost) ? d.krokiHost : '',
+    modes: Object.fromEntries(
+      Object.entries(typeof d.modes === 'object' && d.modes !== null ? d.modes : {}).flatMap(([k, v]): [string, DiagramMode][] => {
+        const t = resolveDiagramType(k);
+        return t && (v === 'local' || v === 'kroki' || v === 'source') ? [[k, v]] : [];
+      })
+    )
+  };
+  // fonts 节白名单（字体系统 spec §2.1）：family 非字符串归空栈；字号 clamp
+  //（uiSize 10–28 / codeSize 9–28），脏 JSON 字段级归位不抛
+  const f = s.fonts ?? DEFAULTS.fonts;
+  s.fonts = {
+    uiFamily: typeof f.uiFamily === 'string' ? f.uiFamily : DEFAULTS.fonts.uiFamily,
+    uiSize: clampSize(f.uiSize, UI_SIZE_RANGE, DEFAULTS.fonts.uiSize),
+    codeFamily: typeof f.codeFamily === 'string' ? f.codeFamily : DEFAULTS.fonts.codeFamily,
+    codeSize: clampSize(f.codeSize, CODE_SIZE_RANGE, DEFAULTS.fonts.codeSize)
+  };
+  // layout 节白名单（布局自由化 spec §2）：字段级归位 + 宽度 clamp，
+  // 校验数学在 lib/layout.ts sanitizeLayout（可单测），此处只接线
+  s.layout = sanitizeLayout(s.layout);
+  return s;
+}
+
 export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return defaults();
-    const s = { ...defaults(), ...(JSON.parse(raw) as Partial<Settings>) };
-    // computePolicy 白名单校验：旧版本/手改 localStorage 的非法值回落默认
-    if (!POLICIES.includes(s.computePolicy)) s.computePolicy = DEFAULTS.computePolicy;
-    // 外观槽格式白名单（spec 2026-10-12 §2.3）：'default' 或 'vscode:'/'imported:'
-    // 前缀；存在性校验（内置名单/imported id）由注入期 warn+回退兜底，此处只挡格式
-    for (const key of ['appearanceLight', 'appearanceDark'] as const) {
-      const v = s[key];
-      // typeof 守卫前置：非字符串脏值（如 JSON 里的数字）走字段级归位，
-      // 否则 startsWith 抛 TypeError 被外层 try/catch 兜成整体回落 defaults()
-      if (typeof v !== 'string' || (v !== 'default' && !v.startsWith('vscode:') && !v.startsWith('imported:'))) {
-        s[key] = DEFAULTS[key];
-      }
-    }
-    // diagrams 节白名单（spec §2.1）：host 必须 http(s):// 或空；modes 键须在注册表、值须三枚举
-    const d = s.diagrams ?? DEFAULTS.diagrams;
-    s.diagrams = {
-      krokiHost: typeof d.krokiHost === 'string' && /^https?:\/\//.test(d.krokiHost) ? d.krokiHost : '',
-      modes: Object.fromEntries(
-        Object.entries(typeof d.modes === 'object' && d.modes !== null ? d.modes : {}).flatMap(([k, v]): [string, DiagramMode][] => {
-          const t = resolveDiagramType(k);
-          return t && (v === 'local' || v === 'kroki' || v === 'source') ? [[k, v]] : [];
-        })
-      )
-    };
-    // fonts 节白名单（字体系统 spec §2.1）：family 非字符串归空栈；字号 clamp
-    //（uiSize 10–28 / codeSize 9–28），脏 JSON 字段级归位不抛
-    const f = s.fonts ?? DEFAULTS.fonts;
-    s.fonts = {
-      uiFamily: typeof f.uiFamily === 'string' ? f.uiFamily : DEFAULTS.fonts.uiFamily,
-      uiSize: clampSize(f.uiSize, UI_SIZE_RANGE, DEFAULTS.fonts.uiSize),
-      codeFamily: typeof f.codeFamily === 'string' ? f.codeFamily : DEFAULTS.fonts.codeFamily,
-      codeSize: clampSize(f.codeSize, CODE_SIZE_RANGE, DEFAULTS.fonts.codeSize)
-    };
-    // layout 节白名单（布局自由化 spec §2）：字段级归位 + 宽度 clamp，
-    // 校验数学在 lib/layout.ts sanitizeLayout（可单测），此处只接线
-    s.layout = sanitizeLayout(s.layout);
-    return s;
+    return normalizeSettings(JSON.parse(raw) as Record<string, unknown>);
   } catch {
     return defaults();
   }

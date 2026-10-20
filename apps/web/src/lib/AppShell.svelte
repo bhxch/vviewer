@@ -80,8 +80,19 @@
   let wsPanelOpen = $state(false);
   /** 统一设置中心开关（settings center spec §2）：TopBar ⚙（onsettings 回调）与
    * Ctrl+, 双入口切换，Esc 面板内关闭（SettingsPanel 弹层退役，挂点归 AppShell
-   * ——与其余 overlay 面板同层，TopBar 隐藏态 Ctrl+, 可达不变式保持） */
+   * ——与其余 overlay 面板同层，TopBar 隐藏态 Ctrl+, 可达不变式保持）。
+   * settingsCenterEl 为组件实例引用：关闭统一走组件导出的 requestClose()——
+   * 脏态由组件内弹确认裁决（spec §3），Ctrl+,/⚙ 关闭路径不直翻开关绕过确认。 */
   let settingsCenterOpen = $state(false);
+  let settingsCenterEl: { requestClose(): void } | null = $state(null);
+
+  function toggleSettingsCenter(): void {
+    if (!settingsCenterOpen) {
+      settingsCenterOpen = true;
+      return;
+    }
+    settingsCenterEl?.requestClose();
+  }
 
   // ---------- 布局自由化（spec 2026-10-19 §2）：折叠/调宽 ----------
   // settings.layout 是唯一事实源：折叠/宽度变更即时 saveSettings 落盘（既有链路
@@ -779,7 +790,7 @@
       // 语义保持：非输入焦点才接管，inField 分支提前 return 已拦截输入态按键）
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === ',') {
         e.preventDefault();
-        settingsCenterOpen = !settingsCenterOpen;
+        toggleSettingsCenter();
         return;
       }
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
@@ -863,7 +874,7 @@
   <TopBar
     temp={topTemp}
     hidden={!vis.topBar && !topTemp}
-    onsettings={() => (settingsCenterOpen = !settingsCenterOpen)}
+    onsettings={() => toggleSettingsCenter()}
     onenter={() => {
       if (!vis.topBar) summonTemp('top'); // 正常可见态的划过不置临时态
     }}
@@ -999,7 +1010,7 @@
     <WorkspaceTabsPanel onclose={() => (wsPanelOpen = false)} />
   {/if}
   {#if settingsCenterOpen}
-    <SettingsCenter onclose={() => (settingsCenterOpen = false)} />
+    <SettingsCenter bind:this={settingsCenterEl} onclose={() => (settingsCenterOpen = false)} />
   {/if}
   {#if chromeMenu !== null}
     {@const bar = chromeMenu.bar}

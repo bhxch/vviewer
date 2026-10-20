@@ -20,7 +20,7 @@ describe('SettingsCenter 分组注册表（spec §2 定稿序的在 Task 1 在�
 
   it('注册表数组驱动：{ id, label, content } 形态，content 为 svelte Component（新分组零骨架改动）', () => {
     expect(src).toMatch(/interface SettingsGroup|type SettingsGroup/);
-    expect(src).toContain("import type { Component } from 'svelte'");
+    expect(src).toMatch(/import \{[^}]*type Component[^}]*\} from 'svelte'/);
     expect(src).toMatch(/content: Component<\{ draft: Settings; touch\(\): void \}>/);
     // 注册表本体是 const 数组（非 if/else 散落分支）
     expect(src).toMatch(/const groups: SettingsGroup\[\] = \[/);
@@ -84,7 +84,7 @@ describe('AppShell 接线（Ctrl+, 双入口 + overlay 判定入册）', () => {
 
   it('Ctrl+, 全局键位改指新页（AppShell onKey 内，非输入焦点才接管——原 TopBar 语义）', () => {
     expect(src).toMatch(/e\.key === ','/);
-    expect(src).toMatch(/settingsCenterOpen = !settingsCenterOpen/);
+    expect(src).toMatch(/if \(\(e\.ctrlKey \|\| e\.metaKey\) && !e\.shiftKey && !e\.altKey && e\.key === ','\)\s*\{\s*e\.preventDefault\(\);\s*toggleSettingsCenter\(\);/);
   });
 
   it('OVERLAY_SELECTOR 入册 .vv-settings-center，退役 .vv-settings（zen Esc 优先级判定依赖）', () => {
@@ -92,8 +92,57 @@ describe('AppShell 接线（Ctrl+, 双入口 + overlay 判定入册）', () => {
     expect(src).not.toMatch(/'\.vv-settings'/); // 精确旧条目不得残留（-center 前缀不算）
   });
 
-  it('⚙ 入口经 TopBar onsettings 回调切换新页', () => {
-    expect(src).toMatch(/onsettings=\{\(\) => \(settingsCenterOpen = !settingsCenterOpen\)\}/);
+  it('⚙ 入口经 TopBar onsettings 回调切换新页；关闭统一走组件实例 requestClose（脏态裁决不绕过）', () => {
+    expect(src).toMatch(/onsettings=\{\(\) => toggleSettingsCenter\(\)\}/);
+    expect(src).toMatch(/bind:this=\{settingsCenterEl\}/);
+    expect(src).toMatch(/toggleSettingsCenter[\s\S]{0,200}settingsCenterEl\?\.requestClose\(\)/);
+  });
+});
+
+describe('草稿模型与 UI/JSON 双视图接线（settings center spec §3，Task 2）', () => {
+  const src = readSrc('src/lib/SettingsCenter.svelte');
+
+  it('消费 settingsDraft 全接口：openDraft/draftToJson/applyJson/isDirty/commit', () => {
+    expect(src).toContain("from './settingsDraft'");
+    for (const fn of ['openDraft', 'draftToJson', 'applyJson', 'isDirty', 'commit']) {
+      expect(src).toMatch(new RegExp(`\\b${fn}\\(`));
+    }
+  });
+
+  it('视图切换：表单/JSON 双钮（aria-pressed），表单→JSON 即重序列化、JSON→表单先 parse+校验', () => {
+    expect(src).toMatch(/aria-pressed=\{view === 'form'\}/);
+    expect(src).toMatch(/aria-pressed=\{view === 'json'\}/);
+    // 表单→JSON：丢弃手编缓冲 = 显示 draft 的格式化序列化
+    expect(src).toMatch(/function showJson[\s\S]{0,200}jsonDirtyBuffer = null/);
+    // JSON→表单：applyJson 失败置 jsonErrors 停留（不丢文本——文本存于手编缓冲）
+    expect(src).toMatch(/function leaveJson[\s\S]{0,300}if \(!r\.ok\)\s*\{\s*jsonErrors = r\.errors;\s*return false;/);
+  });
+
+  it('JSON 视图：等宽 textarea + 行号栏，手编缓冲原样保留（非法标错不丢文本）', () => {
+    expect(src).toContain('aria-label="设置 JSON"');
+    expect(src).toContain('vv-sc-gutter');
+    expect(src).toMatch(/jsonDirtyBuffer = \(e\.currentTarget as HTMLTextAreaElement\)\.value/);
+  });
+
+  it('应用/放弃统一入口：应用走 commit（saveSettings 链）并刷新脏态基准；放弃还原 openDraft', () => {
+    expect(src).toMatch(/function doApply[\s\S]*?commit\(draft\);[\s\S]*?applied = loadSettings\(\);/);
+    expect(src).toMatch(/function doDiscard[\s\S]*?draft = openDraft\(applied\);/);
+    expect(src).toContain('disabled={!canApply}');
+  });
+
+  it('脏态关闭确认（spec §3）：requestClose 导出 + 确认条（应用并关闭/放弃并关闭）', () => {
+    expect(src).toMatch(/export function requestClose\(\): void/);
+    expect(src).toMatch(/role="alertdialog"/);
+    expect(src).toContain('应用并关闭');
+    expect(src).toContain('放弃并关闭');
+    // 全部关闭路径（✕/容器 Esc/窗兜底 Esc）均走 requestClose 而非直关
+    expect(src).toMatch(/onclick=\{requestClose\}/);
+    expect(src).toMatch(/onRootKeydown[\s\S]{0,200}requestClose\(\)/);
+    expect(src).toMatch(/!rootEl\.contains\(e\.target\)[\s\S]{0,120}requestClose\(\)/);
+  });
+
+  it('节组件 touch 契约落点：节改动只使 JSON 派生失效（不落盘），落盘统一在应用', () => {
+    expect(src).toMatch(/function touch\(\): void\s*\{\s*jsonDirtyBuffer = null;/);
   });
 });
 
