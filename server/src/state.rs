@@ -192,6 +192,15 @@ impl AppState {
     /// 失败回退原路径——与 [`AppState::new`] 同款；`root`/`root_canonical`
     /// 兼容视图同步为 0 号根。ChangeHub 重建为挂载全部根（旧 hub 随 drop 停止）。
     pub fn with_roots(mut self, roots: Vec<PathBuf>) -> Self {
+        // M4 顺序防御：本方法**整体重建** roots 为纯 fs 根列表——若此前已追加
+        // 挂载段（with_mounts 先行），挂载会被静默丢弃。以「当前 roots 全为 fs
+        // 根」为不变式在 debug 构建即炸（正常装配链 with_roots 先行，或从未
+        // with_mounts，恒满足；with_mounts 为纯追加可重复调用，无需断言）。
+        debug_assert_eq!(
+            self.fs_roots,
+            self.roots.len(),
+            "with_roots 会整体重建 fs 根列表并丢弃已追加挂载，须在 with_mounts 之前调用"
+        );
         debug_assert!(!roots.is_empty(), "roots 不得为空：至少需要一个根");
         self.roots = roots
             .into_iter()
@@ -212,7 +221,8 @@ impl AppState {
     }
 
     /// builder：追加静态挂载根（**须在 `with_roots` 之后调用**——`with_roots`
-    /// 整体重建 fs 根列表）。根序 = fs 根 + 挂载序（spec §2）；ChangeHub 不重建
+    /// 整体重建 fs 根列表；顺序契约以 debug_assert 锚定）。根序 = fs 根 + 挂载序
+    /// （spec §2）；ChangeHub 不重建
     /// （挂载根 watch 能力 = false，无事件面）。注入形态为已构造 backend + 元
     /// 信息——测试可注入 MockTransport 构造的 S3/WebDAV（与 with_roots 的既有
     /// builder 模式同款）；无调用 = 纯 fs 部署，形状零变化。

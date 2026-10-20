@@ -34,6 +34,48 @@ cargo build --release --manifest-path server/Cargo.toml
 
 配置错误一律 exit code 2 并输出 `error: ...`（空 token、`--allow-lan` 无 token、root/web-dist 不存在、端口占用等）。
 
+## 配置文件（--config）
+
+`vviewer serve --config <PATH>`：TOML 配置文件承载 serve 全部参数，是完整的服务端配置面：
+
+- **优先级 CLI > 文件**：文件提供默认值，显式 CLI 参数覆盖；`--root` 为整体替换语义（CLI 出现任一 `--root` 即忽略文件 `root` 数组，不合并）。
+- **未知键报错 exit 2**：拼错静默忽略是安全反模式（`token` 误拼致无鉴权裸奔启动）；值类型不符同此。
+- `--token-gen` 为动作型参数不进配置；文件含 `token` 且 CLI 给 `--token-gen` 时按覆盖语义生成新 token。
+- 合并产物走同一条启动校验链（`allow_lan` 无 token 拒、CORS 通配拒、root 空拒、路径非目录拒）。
+
+```toml
+# vviewer.toml —— 全参数配置面（省略的键取默认）
+root = ["/data/docs", "/data/books"]    # 对应 --root（数组，首个为 0 号根）
+web_dist = "./dist"                     # 对应 --web-dist
+port = 8321                             # 对应 --port
+token = "..."                           # 对应 --token
+allow_lan = false                       # 对应 --allow-lan
+hidden = false                          # 对应 --hidden
+cors_origin = "https://a.example.com"   # 对应 --cors-origin
+compute = false                         # 对应 --compute
+log_file = "./vviewer.log"              # 对应 --log-file
+
+[[mount]]                               # 附加挂载：S3 兼容对象存储（只读）
+kind = "s3"
+label = "docs"                          # 可选；工作区展示名
+endpoint = "http://127.0.0.1:9000"
+bucket = "b1"
+prefix = "sub"                          # 可选；缺省 = 端点根
+access_key_id = "ak"
+secret_access_key = "sk"
+path_style = true                       # 可选；缺省 true（path-style 请求）
+
+[[mount]]                               # 附加挂载：WebDAV（只读）
+kind = "webdav"
+endpoint = "https://dav.example.com"
+username = "u"
+password = "p"
+```
+
+**权限建议 600**：配置文件含 `token` 与挂载凭据（S3 密钥对 / WebDAV 密码）——
+`chmod 600 vviewer.toml`，凭据不进 CLI/env（ps 可见面）。运行时凭据不进日志、
+health/mounts 回显与错误信息（误把凭据写进 endpoint 时展示面自动剥除 userinfo）。
+
 ## HTTP API（5.10 档 1）
 
 | 端点 | 鉴权 | 说明 |

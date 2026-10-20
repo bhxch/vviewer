@@ -123,10 +123,16 @@ impl HttpTransport for ReqwestTransport {
             builder = builder.body(body);
         }
 
-        let resp = builder
-            .send()
-            .await
-            .map_err(|e| StorageError::other(format!("http transport {}: {e}", req.url)))?;
+        // 请求失败的错误消息脱敏（评审 I1，spec §6「凭据不进错误信息」——
+        // StorageError 文本经 AppError 进 500 JSON 响应体与日志）：两条通道
+        // 一并收口——本行不再拼原始 URL（改用剥除 userinfo 的展示形态）；reqwest
+        // 0.12 的错误 Display 自身会内嵌完整请求 URL（`for url (..)`，userinfo
+        // 原样），出现即替换为同一展示形态（文本不含时 replace 为无操作）。
+        let resp = builder.send().await.map_err(|e| {
+            let display = crate::display_endpoint(&req.url);
+            let text = e.to_string().replace(&req.url, &display);
+            StorageError::other(format!("http transport {display}: {text}"))
+        })?;
 
         let status = resp.status().as_u16();
         let headers: Vec<(String, String)> = resp
@@ -275,5 +281,28 @@ mod tests {
         assert!(dbg.contains("[redacted]"), "{dbg}");
         assert!(!dbg.contains("topsecret"), "{dbg}");
         assert!(dbg.contains("bytes=0-1"), "{dbg}");
+    }
+
+    /// I1：请求失败的 StorageError 消息不得携带 userinfo 凭据（错误文本经
+    /// AppError 进 500 JSON 响应体——spec §6「凭据不进错误信息」）；host 保留
+    /// 供排障定位。本机回环必定拒绝的端口（1，非特权进程无法监听）触发 send
+    /// 失败，把 reqwest 错误 Display 内嵌 URL 的渠道一并锚死。
+    #[cfg(feature = "native")]
+    #[tokio::test]
+    async fn send_failure_error_message_strips_userinfo() {
+        let t = ReqwestTransport::new().unwrap();
+        let err = t
+            .execute(HttpRequest {
+                method: "GET".into(),
+                url: "http://user:topsecret@127.0.0.1:1/x".into(),
+                headers: vec![],
+                body: None,
+            })
+            .await
+            .unwrap_err();
+        let msg = err.message();
+        assert!(!msg.contains("topsecret"), "{msg}");
+        assert!(!msg.contains("user:"), "{msg}");
+        assert!(msg.contains("127.0.0.1:1"), "{msg}");
     }
 }

@@ -280,6 +280,37 @@ pub(crate) fn sort_entries_dirs_first(entries: &mut [Entry]) {
     });
 }
 
+// ---------- 展示面 endpoint 脱敏（评审 M1/I1/I2 共用） ----------
+
+/// 展示面 endpoint 的 userinfo 剥除：`https://user:pass@host/path`
+/// → `https://host/path`。两处共用：
+/// - server 侧装配链的 MountMeta/health 回显（main.rs，评审 M1）；
+/// - [`ReqwestTransport`] 请求失败的错误消息（StorageError 文本会进 500 JSON
+///   响应体与日志——spec §6「凭据不进错误信息」，评审 I1）。
+///
+/// 识别口径（RFC 3986 §3.2 authority 语义，与 reqwest/url 解析一致）：userinfo
+/// 为 authority 段（首个 `/` 之前）内**末个** `@` 之前的部分——密码含 `@`
+/// 的形态（`https://user:p@ss@host`）按首个 `@` 剥会残留密码碎片
+/// `ss@host`（评审 I2）。path 段含 `@` 不误剥；无 scheme 形态（storage 侧按
+/// https 兜底可连）同样收口；`@` 不存在或 userinfo 为空（`https://@host`
+/// 无可泄漏物）原样返回。
+///
+/// **只影响展示面**：后端构造（S3MountConfig/WebDavMountConfig）与请求 URL
+/// 用原值——userinfo 凭据是连接所需，剥除会让挂载静默连不上。
+pub fn display_endpoint(endpoint: &str) -> String {
+    let (prefix, rest) = match endpoint.split_once("://") {
+        Some((scheme, rest)) => (format!("{scheme}://"), rest),
+        None => (String::new(), endpoint),
+    };
+    let authority = rest.split('/').next().unwrap_or(rest);
+    match authority.rsplit_once('@') {
+        Some((userinfo, host)) if !userinfo.is_empty() => {
+            format!("{prefix}{host}{}", &rest[authority.len()..])
+        }
+        _ => endpoint.to_owned(),
+    }
+}
+
 /// Debug 打印的头列表脱敏（评审 Major-1）：authorization 值替换为
 /// "[redacted]"（请求录制快照/日志常经 Debug 输出）。access_key_id/
 /// secret_access_key 字段面在 s3.rs 各结构体的手工 Debug 内处理。
@@ -455,5 +486,46 @@ mod tests {
     fn resolve_joins_relative_segments_under_root() {
         let fs = LocalFs::new(PathBuf::from("/tmp/root"), false);
         assert_eq!(fs.resolve(Path::new("a/b.txt")), PathBuf::from("/tmp/root/a/b.txt"));
+    }
+
+    // ---------- 展示面 endpoint userinfo 剥除（自 main.rs 下沉，评审 M1/I2） ----------
+
+    /// 凭据形态剥除；含评审 I2 的多 `@` 用例——末个 `@` 口径与 reqwest/url
+    /// 解析一致，密码碎片不得残留。
+    #[test]
+    fn display_endpoint_strips_userinfo_credentials() {
+        // WebDAV 已知误配置形态：凭据写在 endpoint
+        assert_eq!(
+            display_endpoint("https://user:pass@dav.example.com/dav"),
+            "https://dav.example.com/dav"
+        );
+        // path-style S3 误配置：凭据在 endpoint（无 path 段）
+        assert_eq!(
+            display_endpoint("http://AKIA:topsecret@127.0.0.1:9000"),
+            "http://127.0.0.1:9000"
+        );
+        // 无 scheme 形态（storage 侧按 https 兜底可连）同样收口
+        assert_eq!(display_endpoint("user:pass@dav.example.com"), "dav.example.com");
+        // I2：密码含 '@'——末个 @ 之后才是 host，密码整体剥除不残留
+        assert_eq!(
+            display_endpoint("https://user:p@ss@host/dav"),
+            "https://host/dav"
+        );
+    }
+
+    #[test]
+    fn display_endpoint_keeps_credential_free_endpoints() {
+        assert_eq!(display_endpoint("http://127.0.0.1:9000"), "http://127.0.0.1:9000");
+        assert_eq!(
+            display_endpoint("https://dav.example.com/dav"),
+            "https://dav.example.com/dav"
+        );
+        // path 段含 '@' 不误剥（userinfo 只在 authority 段识别）
+        assert_eq!(
+            display_endpoint("https://dav.example.com/a@b/c"),
+            "https://dav.example.com/a@b/c"
+        );
+        // 空 userinfo（https://@host）无可泄漏物，原样
+        assert_eq!(display_endpoint("https://@dav.example.com"), "https://@dav.example.com");
     }
 }

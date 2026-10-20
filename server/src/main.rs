@@ -7,6 +7,9 @@ use std::sync::Arc;
 use clap::{Parser, Subcommand};
 
 use vviewer::state::{MountMeta, MountRoot};
+// 展示面 endpoint userinfo 剥除（评审 M1/I1/I2）：实现与口径归 storage crate
+// （ReqwestTransport 错误消息同用），此处仅消费。
+use vviewer_storage::display_endpoint;
 use vviewer_storage::s3::{S3Backend, S3MountConfig};
 use vviewer_storage::transport::{HttpTransport, ReqwestTransport};
 use vviewer_storage::webdav::{WebDavBackend, WebDavMountConfig};
@@ -200,30 +203,8 @@ fn build_mount_roots(
         .collect()
 }
 
-/// 展示面 endpoint 的 userinfo 剥除（评审 M1）：`https://user:pass@host/path`
-/// → `https://host/path`——WebDAV/S3 误配置把凭据写进 endpoint 时，明文凭据
-/// 不得流入免鉴权可读的 `/api/health` 回显与 MountMeta/RootSpec 的 Debug 面。
-///
-/// 识别口径（RFC 3986 authority 语义）：userinfo 以 authority 段（首个 `/`
-/// 之前）内的首个 `@` 分隔——path 段含 `@` 不误剥；无 scheme 形态（storage
-/// 侧按 https 兜底可连）同样收口。`@` 不存在或 userinfo 为空（`https://@host`
-/// 无可泄漏物）原样返回。
-///
-/// **只影响展示面**：后端构造（S3MountConfig/WebDavMountConfig）用原值——
-/// userinfo 凭据是连接所需，剥除会让挂载静默连不上。
-fn display_endpoint(endpoint: &str) -> String {
-    let (prefix, rest) = match endpoint.split_once("://") {
-        Some((scheme, rest)) => (format!("{scheme}://"), rest),
-        None => (String::new(), endpoint),
-    };
-    let authority = rest.split('/').next().unwrap_or(rest);
-    match authority.split_once('@') {
-        Some((userinfo, host)) if !userinfo.is_empty() => {
-            format!("{prefix}{host}{}", &rest[authority.len()..])
-        }
-        _ => endpoint.to_owned(),
-    }
-}
+// 展示面脱敏函数 display_endpoint 自 storage crate 导入（上方 use）——原本地
+// 实现随评审 I1/I2 下沉：ReqwestTransport 错误消息共用同一剥除口径（末个 @）。
 
 fn build_mount(
     cfg: &MountConfig,
@@ -526,45 +507,9 @@ mod tests {
         assert!(err.contains("mount #0"), "err={err}");
     }
 
-    // ---------- 评审 M1：展示面 endpoint userinfo 剥除 ----------
-
-    #[test]
-    fn display_endpoint_strips_userinfo_credentials() {
-        // WebDAV 已知误配置形态：凭据写在 endpoint
-        assert_eq!(
-            display_endpoint("https://user:pass@dav.example.com/dav"),
-            "https://dav.example.com/dav"
-        );
-        // path-style S3 误配置：凭据在 endpoint（无 path 段）
-        assert_eq!(
-            display_endpoint("http://AKIA:topsecret@127.0.0.1:9000"),
-            "http://127.0.0.1:9000"
-        );
-        // 无 scheme 形态（storage 侧按 https 兜底可连）同样收口
-        assert_eq!(
-            display_endpoint("user:pass@dav.example.com"),
-            "dav.example.com"
-        );
-    }
-
-    #[test]
-    fn display_endpoint_keeps_credential_free_endpoints() {
-        assert_eq!(
-            display_endpoint("http://127.0.0.1:9000"),
-            "http://127.0.0.1:9000"
-        );
-        assert_eq!(
-            display_endpoint("https://dav.example.com/dav"),
-            "https://dav.example.com/dav"
-        );
-        // path 段含 '@' 不误剥（userinfo 只在 authority 段识别）
-        assert_eq!(
-            display_endpoint("https://dav.example.com/a@b/c"),
-            "https://dav.example.com/a@b/c"
-        );
-        // 空 userinfo（https://@host）无可泄漏物，原样
-        assert_eq!(display_endpoint("https://@dav.example.com"), "https://@dav.example.com");
-    }
+    // ---------- 评审 M1/I1：展示面 endpoint userinfo 剥除 ----------
+    // display_endpoint 的纯函数用例随实现下沉 storage crate（lib.rs tests）；
+    // 此处保留装配链两线分离的集成锚。
 
     /// 两条线分离核实：meta/health 展示面剥除凭据，backend 连接面仍用原
     /// endpoint（凭据是连接所需——剥了会静默连不上）。
