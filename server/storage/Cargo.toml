@@ -9,9 +9,15 @@ license = "Apache-2.0"
 # dyn 兼容 async trait（RPITIT 无法 Arc<dyn>——AppState.roots 需要 dyn 分发）
 async-trait = "0.1"
 tokio = { version = "1", features = ["fs", "io-util"] }
+# HttpTransport 接缝的 body 载体：wasm 可用的 futures-io（评审 Major-1——
+# tokio::io 类型不得穿接缝）；tokio 流互转经 tokio-util compat（Task 3 S3 侧）
+futures-io = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "macros"] }
 # 测试 mock 实现 trait 需与被测宏同版本
 async-trait = "0.1"
+# futures-io::AsyncRead 的 ext 读取（read_to_end 验证 mock body）；io 模块
+# 被 feature 门控
+futures-util = { version = "0.3", features = ["io"] }

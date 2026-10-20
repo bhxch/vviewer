@@ -231,9 +231,13 @@ async fn localfs_capabilities_watch_and_search_true() {
 }
 
 /// HttpTransport 接缝编译锚：纯 HTTP 语义（method/url/headers/body →
-/// status/headers/字节流），mock 实现可经 Arc<dyn> 调用。
+/// status/headers/字节流），mock 实现可经 Arc<dyn> 调用；body 载体为
+/// futures-io trait 对象（评审 Major-1：tokio 类型不穿接缝），本测试的
+/// 构造与读取全程不经任何 tokio IO 类型。
 #[tokio::test]
 async fn http_transport_trait_is_dyn_dispatchable() {
+    use futures_util::io::AsyncReadExt;
+
     struct MockTransport;
 
     #[async_trait]
@@ -242,7 +246,8 @@ async fn http_transport_trait_is_dyn_dispatchable() {
             Ok(HttpResponse {
                 status: 200,
                 headers: vec![("x-echo-method".to_string(), req.method)],
-                body: Box::pin(tokio::io::empty()),
+                // 'static 切片：futures-io::AsyncRead 的内建实现，零 tokio
+                body: Box::pin(&b"payload-bytes"[..]),
             })
         }
     }
@@ -259,6 +264,25 @@ async fn http_transport_trait_is_dyn_dispatchable() {
         .unwrap();
     assert_eq!(res.status, 200);
     assert_eq!(res.headers[0].1, "GET");
+    // body 经 futures-util ext 读取（非 tokio::io::AsyncReadExt）
+    let mut body = res.body;
+    let mut out = Vec::new();
+    body.read_to_end(&mut out).await.unwrap();
+    assert_eq!(out, b"payload-bytes");
+}
+
+/// 接缝类型钉死锚（编译级，评审 Major-1）：HttpResponse.body 的类型是
+/// HttpByteStream（futures-io 载体）——若换回 tokio 载体，fn 签名不匹配
+/// 即编译失败。
+#[test]
+fn http_response_body_is_futures_io_carrier() {
+    let getter: fn(HttpResponse) -> vviewer_storage::HttpByteStream = |r| r.body;
+    let res = HttpResponse {
+        status: 200,
+        headers: vec![],
+        body: Box::pin(&b"x"[..]),
+    };
+    let _ = getter(res);
 }
 
 // ---------- 下沉构件的既有语义锚 ----------

@@ -63,7 +63,9 @@ jobs:
         with:
           languages: javascript,typescript,bash,html,css,json,python,rust,java,go,c,cpp,tsx,yaml,toml
           fetch-only: 'true'
-      - run: cargo test --manifest-path server/Cargo.toml
+      # --workspace：server/ 为 workspace 根（vviewer + vviewer-storage），
+      # 单包默认不含成员 crate 测试
+      - run: cargo test --manifest-path server/Cargo.toml --workspace
 
   e2e:
     name: e2e（Playwright chromium）

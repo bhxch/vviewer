@@ -12,7 +12,11 @@
 //!   [`RangeSpec`]`{start, len}` 窗；416/多区间/If-Range 等 HTTP 语义不进本 crate；
 //! - 只读：trait 无任何写路径（Global Constraints）；能力位
 //!   [`MountCapabilities`]`{ watch, search }` 仅 LocalFs 为 true；
-//! - HttpTransport 不得让 tokio/hyper 类型穿过接口（纯 HTTP 语义）。
+//! - **HttpTransport 不得让 tokio/hyper 类型穿过接口**（纯 HTTP 语义，wasm
+//!   复用前提）：body 载体为 [`HttpByteStream`] = `futures-io::AsyncRead`
+//!   trait 对象（futures-io 无运行时依赖，wasm 可用）；[`StorageBackend`]
+//!   的 `ByteStream`（tokio 侧，native-only）不在此约束内。两态互转桥在
+//!   Task 3（S3 经 tokio-util compat 从 transport body 构造 backend 流）。
 
 use std::cmp::Ordering;
 use std::ffi::OsStr;
@@ -21,10 +25,17 @@ use std::pin::Pin;
 use std::time::UNIX_EPOCH;
 
 use async_trait::async_trait;
+use futures_io::AsyncRead as FuturesAsyncRead;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt};
 
-/// 字节流统一形态：后端产出的已定位读取器（LocalFs 为 take 后的文件句柄）。
+/// [`StorageBackend`] 产出的字节流（native-only，tokio 生态内消费——axum
+/// Body 直接受 tokio AsyncRead）。
 pub type ByteStream = Pin<Box<dyn AsyncRead + Send>>;
+
+/// [`HttpTransport`] 接缝的 body 载体：wasm 可用的 futures-io trait 对象
+/// （评审 Major-1：tokio::io 类型不得穿 HttpTransport 接缝——tokio::io 在
+/// wasm 不可用；futures-io 为纯 trait 定义，无运行时/平台依赖）。
+pub type HttpByteStream = Pin<Box<dyn FuturesAsyncRead + Send>>;
 
 // ---------- 错误 ----------
 
@@ -190,19 +201,33 @@ pub struct HttpRequest {
     pub body: Option<Vec<u8>>,
 }
 
-/// HTTP 响应描述（body 为字节流，头按出现序保留）。
+/// HTTP 响应描述（body 为 [`HttpByteStream`]——futures-io 载体，头按出现序保留）。
 pub struct HttpResponse {
     pub status: u16,
     pub headers: Vec<(String, String)>,
-    pub body: ByteStream,
+    pub body: HttpByteStream,
 }
+
+/// 接缝类型形状的编译级锚（评审 Major-1）：HttpRequest/HttpResponse 可安全
+/// Send 转移，body 字段载体钉死为 [`HttpByteStream`]（futures-io trait 对象）。
+/// 若有人把 body 换回 tokio 类型，最后的 fn 签名断言即编译失败——tokio
+/// AsyncRead 载体与 futures-io 载体非同一类型。
+#[cfg(test)]
+const _: () = {
+    const fn assert_send_static<T: Send + 'static>() {}
+    const fn assert_unpin<T: Unpin>() {}
+    assert_send_static::<HttpRequest>();
+    assert_send_static::<HttpResponse>();
+    assert_send_static::<HttpByteStream>();
+    assert_unpin::<HttpByteStream>();
+};
 
 impl std::fmt::Debug for HttpResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HttpResponse")
             .field("status", &self.status)
             .field("headers", &self.headers)
-            .field("body", &"ByteStream(..)")
+            .field("body", &"HttpByteStream(..)")
             .finish()
     }
 }
