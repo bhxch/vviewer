@@ -12,9 +12,11 @@
 
 pub mod auth;
 pub mod error;
+pub mod guard;
 pub mod health;
 pub mod mounts;
 pub mod state;
+pub mod tree;
 
 use bytes::Bytes;
 use http::{header, HeaderMap, HeaderValue, StatusCode};
