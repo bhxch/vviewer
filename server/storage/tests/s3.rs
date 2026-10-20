@@ -496,6 +496,53 @@ async fn virtual_host_style_url() {
     );
 }
 
+// ---------- 修复轮用例（评审 Minor-1/Minor-3） ----------
+
+/// 字面含 %XX 的 key 纯编码：%→%25，不做 decode 归一（归一会指向错误对象）。
+#[tokio::test]
+async fn object_url_encodes_literal_percent_key() {
+    let transport = Arc::new(
+        MockTransport::new().with_route("HEAD", "example-bucket", |_| {
+            http_response(200, &[("content-length", "3")], b"abc")
+        }),
+    );
+    let backend = backend_with(transport.clone());
+
+    backend.stat(Path::new("a%2Fb.txt")).await.unwrap();
+    let reqs = transport.recorded_requests();
+    assert!(
+        reqs[0].url.ends_with("/example-bucket/sub/a%252Fb.txt"),
+        "{}",
+        reqs[0].url
+    );
+}
+
+/// Range 防线：窗请求遭无视返 200（全量前缀流）→ 显式错误而非 take(want)
+/// 静默产出错误窗数据。
+#[tokio::test]
+async fn read_range_window_200_rejected() {
+    let transport = Arc::new(MockTransport::new().with_route("GET", "big.bin", |req: &HttpRequest| {
+        assert!(header(req, "range").is_some(), "窗/前缀请求均带 Range");
+        http_response(200, &[("content-length", "20")], BIG_BODY)
+    }));
+    let backend = backend_with(transport);
+
+    let err = backend
+        .read_range(
+            Path::new("big.bin"),
+            Some(RangeSpec { start: 10, len: 6 }),
+            8,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind(), StorageErrorKind::Other);
+    assert!(
+        err.message().contains("range"),
+        "message={}",
+        err.message()
+    );
+}
+
 // ---------- transport 基建自检 ----------
 
 #[tokio::test]

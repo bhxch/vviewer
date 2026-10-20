@@ -54,8 +54,9 @@ const URI_SET: &AsciiSet = &QUERY_SET.remove(b'/');
 // ---------- 配置与凭证 ----------
 
 /// S3 挂载配置（server 侧 config.rs 的 MountConfig 由 Task 5 装配映射到本
-/// 结构；storage crate 不反向依赖 server）。
-#[derive(Debug, Clone)]
+/// 结构；storage crate 不反向依赖 server）。Debug 手工实现：凭证字段脱敏
+///（评审 Major-1——Task 5 起启动日志 Debug 打印配置为常见形态）。
+#[derive(Clone)]
 pub struct S3MountConfig {
     /// 形如 `https://s3.us-east-1.amazonaws.com` 或 `http://127.0.0.1:9000`
     ///（尾 '/' 容忍，new 内规范化）。
@@ -70,18 +71,49 @@ pub struct S3MountConfig {
     pub path_style: bool,
 }
 
-/// SigV4 凭证。
-#[derive(Debug, Clone)]
+impl std::fmt::Debug for S3MountConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("S3MountConfig")
+            .field("endpoint", &self.endpoint)
+            .field("bucket", &self.bucket)
+            .field("prefix", &self.prefix)
+            .field("access_key_id", &"[redacted]")
+            .field("secret_access_key", &"[redacted]")
+            .field("path_style", &self.path_style)
+            .finish()
+    }
+}
+
+/// SigV4 凭证（Debug 手工实现，双字段均脱敏——评审 Major-1）。
+#[derive(Clone)]
 pub struct S3Credentials {
     pub access_key_id: String,
     pub secret_access_key: String,
 }
 
+impl std::fmt::Debug for S3Credentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("S3Credentials")
+            .field("access_key_id", &"[redacted]")
+            .field("secret_access_key", &"[redacted]")
+            .finish()
+    }
+}
+
 /// 签名产物：请求应携带的全部头（host / 调用方附加头小写化 / x-amz-date /
 /// x-amz-content-sha256 / authorization——authorization 恒在末位）。
-#[derive(Debug, Clone)]
+/// Debug 手工实现：authorization 值脱敏（评审 Major-1，含明文签名串）。
+#[derive(Clone)]
 pub struct SignedHeaders {
     pub headers: Vec<(String, String)>,
+}
+
+impl std::fmt::Debug for SignedHeaders {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SignedHeaders")
+            .field("headers", &crate::redacted_headers(&self.headers))
+            .finish()
+    }
 }
 
 impl SignedHeaders {
@@ -140,7 +172,7 @@ pub fn sign_request(
     for (name, value) in extra_headers {
         let lower = name.to_ascii_lowercase();
         headers.retain(|(k, _)| *k != lower);
-        headers.push((lower, value.trim().to_owned()));
+        headers.push((lower, canonical_header_value(value)));
     }
     headers.sort_by(|a, b| a.0.cmp(&b.0));
     let mut merged: Vec<(String, String)> = Vec::with_capacity(headers.len());
@@ -238,6 +270,27 @@ fn decode_percent(s: &str) -> String {
 
 fn encode_query(s: &str) -> String {
     utf8_percent_encode(s, QUERY_SET).to_string()
+}
+
+/// AWS SigV4 canonical headers 值形态：trim + 内部连续空白折叠为单空格
+///（签名规范步骤 4）。现调用面均为机器构造头（无多余空白），实害为零；
+/// 折叠防未来人写头形态参与签名导致 SignatureDoesNotMatch（评审 Minor-2）。
+fn canonical_header_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut pending_ws = false;
+    for c in value.chars() {
+        if c.is_whitespace() {
+            // 前导空白丢弃；内部连续空白只记一个
+            pending_ws = !out.is_empty();
+        } else {
+            if pending_ws {
+                out.push(' ');
+                pending_ws = false;
+            }
+            out.push(c);
+        }
+    }
+    out
 }
 
 fn sha256_hex(data: &[u8]) -> String {
@@ -521,11 +574,14 @@ impl S3Backend {
         }
     }
 
-    /// 对象 URL：key 逐段 UriEncode（'/' 保留），前置桶基。
+    /// 对象 URL：key 逐段 UriEncode（'/' 保留），前置桶基。纯编码不解码
+    ///（评审 Minor-1：decode→re-encode 会把字面含 %XX 的 key（a%2Fb.txt）
+    /// 解码归一指向错误对象；'%' 字面编码为 %25）。decode 归一化只留在
+    /// sign_request 的 canonical 化内（wire URL 的 %25 解码回 % 后重编码稳定）。
     fn object_url(&self, key: &str) -> String {
         let base = self.bucket_base();
-        let encoded = canonical_uri(key);
-        if encoded.is_empty() || encoded == "/" {
+        let encoded = encode_key_path(key);
+        if encoded.is_empty() {
             base
         } else {
             format!("{base}/{encoded}")
@@ -611,6 +667,15 @@ fn split_scheme_authority(endpoint: &str) -> (&str, &str) {
     let (scheme, rest) = endpoint.split_once("://").unwrap_or(("https", endpoint));
     let authority = rest.split(['/', '?']).next().unwrap_or(rest);
     (scheme, authority)
+}
+
+/// 对象 key 路径的 URL 编码：逐段 UriEncode、'/' 保留为分隔（纯编码，
+/// 不做 decode 归一——评审 Minor-1，语义注见 [`S3Backend::object_url`]）。
+fn encode_key_path(key: &str) -> String {
+    key.split('/')
+        .map(|seg| utf8_percent_encode(seg, URI_SET).to_string())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// futures-io body → tokio 流（tokio-util compat 桥，Task 2 评审明确的
@@ -775,6 +840,16 @@ impl StorageBackend for S3Backend {
             .map(|h| vec![("Range", h)])
             .unwrap_or_default();
         let resp = ensure_status(self.signed_request("GET", &url, &extra).await?).await?;
+        // Range 防线（评审 Minor-3）：窗请求必须 206——服务端无视 Range 返
+        // 200 时 body 是全量前缀流，take(want) 会静默产出错误窗数据；此处
+        // 显式报错而非静默。前缀采样 GET 不做此校验：200（Range 被忽略）时
+        // 读到的仍是文件前缀，语义不变（读幅有 head_len 上界）。
+        if window_header.is_some() && resp.status != 206 {
+            return Err(StorageError::other(format!(
+                "s3: range request not honored (http {})",
+                resp.status
+            )));
+        }
         let total_size = total_size_from(&resp)?;
         let want = range.map(|r| r.len).unwrap_or(total_size);
 
@@ -785,8 +860,7 @@ impl StorageBackend for S3Backend {
             prefix_head.unwrap_or_default()
         };
 
-        // 流：窗起点已定位（Range GET），take 窗长兜底 Range 被忽略的服务端；
-        // 窗起点 0 时采样消耗掉的前缀字节回放（链回流首）
+        // 流：窗起点已定位（206 防线保证）
         let stream: crate::ByteStream = if head_from_window {
             Box::pin(std::io::Cursor::new(head.clone()).chain(body).take(want))
         } else {
@@ -1002,5 +1076,58 @@ mod tests {
             split_scheme_authority("https://s3.us-east-1.amazonaws.com/x"),
             ("https", "s3.us-east-1.amazonaws.com")
         );
+    }
+
+    /// 凭证脱敏 Debug（评审 Major-1）：secret/access key 与明文签名串不得
+    /// 出现在 Debug 输出。
+    #[test]
+    fn debug_redacts_secrets() {
+        let cfg = S3MountConfig {
+            endpoint: "https://s3.test.example.com".into(),
+            bucket: "b".into(),
+            prefix: "sub".into(),
+            access_key_id: AK.into(),
+            secret_access_key: SK.into(),
+            path_style: true,
+        };
+        let dbg = format!("{cfg:?}");
+        assert!(dbg.contains("[redacted]"), "{dbg}");
+        assert!(!dbg.contains(AK), "{dbg}");
+        assert!(!dbg.contains(SK), "{dbg}");
+
+        let creds_dbg = format!("{:?}", creds());
+        assert!(!creds_dbg.contains(AK) && !creds_dbg.contains(SK), "{creds_dbg}");
+
+        let signed = sign_request(
+            "GET",
+            "https://x/y",
+            &[],
+            b"",
+            &creds(),
+            "us-east-1",
+            "s3",
+            "20240101T000000Z",
+        );
+        let dbg = format!("{signed:?}");
+        assert!(dbg.contains("[redacted]"), "{dbg}");
+        assert!(!dbg.contains("Signature="), "{dbg}");
+    }
+
+    /// key 路径纯编码（评审 Minor-1）：字面 '%' → %25、保留 '/'、不解码归一。
+    #[test]
+    fn encode_key_path_literal_percent() {
+        assert_eq!(encode_key_path("a%2Fb.txt"), "a%252Fb.txt");
+        assert_eq!(encode_key_path("sub/中文.txt"), "sub/%E4%B8%AD%E6%96%87.txt");
+        assert_eq!(encode_key_path("plain.txt"), "plain.txt");
+        assert_eq!(encode_key_path(""), "");
+    }
+
+    /// canonical header 值空白折叠（评审 Minor-2）：trim + 连续空白归一。
+    #[test]
+    fn canonical_header_value_folds_whitespace() {
+        assert_eq!(canonical_header_value("bytes=0-9"), "bytes=0-9");
+        assert_eq!(canonical_header_value("  bytes=0-9  "), "bytes=0-9");
+        assert_eq!(canonical_header_value("a  b\t\tc\r\nd  "), "a b c d");
+        assert_eq!(canonical_header_value("   "), "");
     }
 }

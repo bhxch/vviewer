@@ -279,6 +279,22 @@ pub(crate) fn sort_entries_dirs_first(entries: &mut [Entry]) {
     });
 }
 
+/// Debug 打印的头列表脱敏（评审 Major-1）：authorization 值替换为
+/// "[redacted]"（请求录制快照/日志常经 Debug 输出）。access_key_id/
+/// secret_access_key 字段面在 s3.rs 各结构体的手工 Debug 内处理。
+pub(crate) fn redacted_headers<'a>(headers: &'a [(String, String)]) -> Vec<(&'a str, &'a str)> {
+    headers
+        .iter()
+        .map(|(k, v)| -> (&'a str, &'a str) {
+            if k.eq_ignore_ascii_case("authorization") {
+                (k.as_str(), "[redacted]")
+            } else {
+                (k.as_str(), v.as_str())
+            }
+        })
+        .collect()
+}
+
 fn strip_leading_zeros(d: &[u8]) -> &[u8] {
     let first_non_zero = d.iter().position(|&c| c != b'0').unwrap_or(d.len());
     &d[first_non_zero..]

@@ -37,12 +37,25 @@ pub trait HttpTransport: Send + Sync {
 }
 
 /// HTTP 请求描述（纯 HTTP 语义；method 为 "GET"/"PROPFIND" 等谓词字面）。
-#[derive(Debug, Clone)]
+/// Debug 手工实现：authorization 头值脱敏（评审 Major-1 同 treatment——
+/// 请求录制快照/日志常经 Debug 输出，明文签名串属泄漏面）。
+#[derive(Clone)]
 pub struct HttpRequest {
     pub method: String,
     pub url: String,
     pub headers: Vec<(String, String)>,
     pub body: Option<Vec<u8>>,
+}
+
+impl std::fmt::Debug for HttpRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpRequest")
+            .field("method", &self.method)
+            .field("url", &self.url)
+            .field("headers", &crate::redacted_headers(&self.headers))
+            .field("body", &self.body)
+            .finish()
+    }
 }
 
 /// HTTP 响应描述（body 为 [`HttpByteStream`]——futures-io 载体，头按出现序保留）。
@@ -243,5 +256,24 @@ mod tests {
         assert_eq!(t.execute(req("GET", "https://x/bucket")).await.unwrap().status, 204);
         assert_eq!(t.execute(req("head", "https://x/bucket")).await.unwrap().status, 200);
         assert!(t.execute(req("GET", "https://x/other")).await.is_err());
+    }
+
+    /// HttpRequest Debug 脱敏（评审 Major-1 同 treatment）：authorization
+    /// 值不得出现在 Debug 输出，其余头原样。
+    #[test]
+    fn debug_redacts_authorization_header() {
+        let req = HttpRequest {
+            method: "GET".into(),
+            url: "https://x/bucket".into(),
+            headers: vec![
+                ("Authorization".into(), "AWS4-HMAC-SHA256 Signature=topsecret".into()),
+                ("range".into(), "bytes=0-1".into()),
+            ],
+            body: None,
+        };
+        let dbg = format!("{req:?}");
+        assert!(dbg.contains("[redacted]"), "{dbg}");
+        assert!(!dbg.contains("topsecret"), "{dbg}");
+        assert!(dbg.contains("bytes=0-1"), "{dbg}");
     }
 }
