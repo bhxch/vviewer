@@ -126,8 +126,12 @@
     }
     commit(draft);
     applied = loadSettings();
+    // draft 以规范化 applied 重建（评审 L6）：normalize 截掉的脏值（如非法
+    // krokiHost 落 ''）不再留在 draft——否则 applied≠draft 恒脏、确认条失实
+    draft = openDraft(applied);
     jsonDirtyBuffer = null;
     jsonErrors = null;
+    confirmClose = false; // 评审 L2：确认条开着时经头部「应用」成功，条随之复位
     return true;
   }
 

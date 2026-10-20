@@ -80,6 +80,13 @@
     return offSystem;
   });
 
+  /** 亮暗模式三态（spec §2 外观组；评审 M1 补全）：写 draft + touch——TopBar 快切
+   * 并存双写同字段（订阅链 diff 触发注入），无冲突。 */
+  function onThemeModeChange(e: Event): void {
+    draft.themeMode = (e.currentTarget as HTMLSelectElement).value as Settings['themeMode'];
+    touch();
+  }
+
   /** 槽切换：写 draft + touch——注入由 TopBar 的 onSettingsChanged 订阅 diff 触发 */
   function onAppearanceChange(slot: 'light' | 'dark', e: Event): void {
     const v = (e.currentTarget as HTMLSelectElement).value;
@@ -147,6 +154,16 @@
 </script>
 
 <section class="vv-sc-section">
+  <div class="vv-settings-label">亮暗模式</div>
+  <label class="vv-settings-theme-row">
+    <span>主题模式</span>
+    <select value={draft.themeMode} onchange={onThemeModeChange} aria-label="亮暗模式">
+      <option value="system">跟随系统</option>
+      <option value="light">亮色</option>
+      <option value="dark">暗色</option>
+    </select>
+  </label>
+  <div class="vv-settings-hint">顶栏「主题」快切按钮与本控件写入同一字段；跟随系统时按操作系统亮暗解析</div>
   <div class="vv-settings-label">界面主题</div>
   <div class="vv-settings-hint">
     VSCode 外观主题同时接管代码配色（亮/暗各自记忆，跟随顶栏主题模式）；非默认时代码主题选择停用

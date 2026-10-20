@@ -146,6 +146,30 @@ describe('草稿模型与 UI/JSON 双视图接线（settings center spec §3，T
   });
 });
 
+describe('评审带入项（Task 1+2 review：M1 必做 / L2·L6 顺手）', () => {
+  const appearance = readSrc('src/lib/settings/AppearanceSection.svelte');
+  const src = readSrc('src/lib/SettingsCenter.svelte');
+
+  it('M1：外观组亮暗模式三态控件（spec §2 外观组定义；TopBar 快切并存双写同字段）', () => {
+    expect(appearance).toContain('aria-label="亮暗模式"');
+    for (const v of ['system', 'light', 'dark']) {
+      expect(appearance).toContain(`value="${v}"`);
+    }
+    expect(appearance).toMatch(/draft\.themeMode = /); // 写 draft（非直写 saveSettings）
+    expect(appearance).toMatch(/draft\.themeMode = [^;]+;\s*touch\(\)/);
+  });
+
+  it('L2：应用成功后复位脏态关闭确认条（残留即失实）', () => {
+    // 有界匹配：确认条复位必须落在 doApply 函数体内（后文「继续编辑」钮也有
+    // confirmClose = false，无界 [\s\S]*? 会空泛命中）
+    expect(src).toMatch(/function doApply[\s\S]{0,900}?confirmClose = false;/);
+  });
+
+  it('L6：应用成功后 draft 以规范化 applied 重建（非法 krokiHost 等应用后不再永脏）', () => {
+    expect(src).toMatch(/applied = loadSettings\(\);[\s\S]{0,300}?draft = openDraft\(applied\);/);
+  });
+});
+
 describe('TopBar 精简（spec §2：⚙+亮暗快切保留，代码主题/计算策略迁出）', () => {
   const src = readSrc('src/lib/TopBar.svelte');
 
