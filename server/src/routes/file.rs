@@ -1,28 +1,21 @@
-//! `GET /api/file`：流式文件响应（单区间 Range + 服务端检测头）。
+//! `GET /api/file` 适配层：Range 头解析（HTTP 语义——计划裁决留本层：头语法/
+//! If-Range/多区间判定）+ 业务体委托 `vviewer-core::file`（多端发布阶段二
+//! Task 2 迁入：根寻址/guard/stat/MIME/编码/窗读取/响应头组装）。
 //!
 //! 文件打开/检测头/seek 定位已下沉 storage crate（`LocalFs::read_range` 单开
-//! 形态，Task 2 纯重构）；Range 头解析（parse_range/多区间/If-Range 等 HTTP
-//! 语义）与响应头组装留本层。
+//! 形态，既有纯重构）；本模块只做参数提取、Range→窗口解析与响应映射。
 
-use std::path::{Path, PathBuf};
-
-use axum::body::Body;
 use axum::extract::{Query, State};
-use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
-use tokio_util::io::ReaderStream;
 
-use vviewer_storage::{EntryKind as BackendEntryKind, RangeSpec};
+use vviewer_storage::RangeSpec;
 
-use crate::detect;
+use crate::adapt;
 use crate::error::AppError;
-use crate::guard;
 use crate::state::AppState;
-
-static X_VV_LANG: HeaderName = HeaderName::from_static("x-vv-lang");
-static X_VV_ENCODING: HeaderName = HeaderName::from_static("x-vv-encoding");
 
 #[derive(Deserialize)]
 pub struct FileQuery {
@@ -76,100 +69,6 @@ fn parse_range(h: &str, size: u64) -> Result<Option<(u64, u64)>, ()> {
     Ok(Some((start, end - start + 1)))
 }
 
-/// 扩展名 → MIME（文本类不带 charset，前端以 X-VV-Encoding 为准）。
-fn mime_for_ext(ext: &str) -> &'static str {
-    match ext {
-        "txt" | "log" | "diff" | "patch" | "text" => "text/plain",
-        "md" | "markdown" => "text/markdown",
-        "rst" => "text/x-rst",
-        "html" | "htm" => "text/html",
-        "css" => "text/css",
-        "js" | "mjs" | "cjs" => "text/javascript",
-        "json" | "jsonc" | "map" => "application/json",
-        "xml" => "application/xml",
-        "svg" => "image/svg+xml",
-        "yaml" | "yml" => "text/yaml",
-        "toml" => "text/toml",
-        "ini" | "cfg" | "conf" | "properties" | "env" => "text/plain",
-        "csv" => "text/csv",
-        "tsv" => "text/tab-separated-values",
-        "py" => "text/x-python",
-        "rb" => "text/x-ruby",
-        "rs" => "text/x-rust",
-        "go" => "text/x-go",
-        "java" => "text/x-java-source",
-        "kt" => "text/x-kotlin",
-        "swift" => "text/x-swift",
-        "c" | "h" => "text/x-c",
-        "cpp" | "cc" | "cxx" | "hpp" | "hh" => "text/x-c++",
-        "cs" => "text/x-csharp",
-        "go.mod" => "text/plain",
-        "sh" | "bash" | "zsh" | "fish" => "text/x-shellscript",
-        "ps1" => "text/x-powershell",
-        "lua" => "text/x-lua",
-        "pl" | "pm" => "text/x-perl",
-        "php" => "text/x-php",
-        "r" => "text/x-r",
-        "sql" => "text/x-sql",
-        "ts" => "text/typescript",
-        "tsx" => "text/typescript",
-        "jsx" => "text/jsx",
-        "vue" => "text/x-vue",
-        "svelte" => "text/x-svelte",
-        "vim" => "text/x-vim",
-        "hs" => "text/x-haskell",
-        "ml" | "mli" => "text/x-ocaml",
-        "ex" | "exs" => "text/x-elixir",
-        "erl" | "hrl" => "text/x-erlang",
-        "clj" | "cljs" | "edn" => "text/x-clojure",
-        "scala" => "text/x-scala",
-        "dart" => "text/x-dart",
-        "zig" => "text/x-zig",
-        "nix" => "text/x-nix",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "bmp" => "image/bmp",
-        "ico" | "cur" => "image/x-icon",
-        "avif" => "image/avif",
-        "pdf" => "application/pdf",
-        "wasm" => "application/wasm",
-        "zip" => "application/zip",
-        "tar" => "application/x-tar",
-        "gz" | "tgz" | "gzip" => "application/gzip",
-        "bz2" => "application/x-bzip2",
-        "xz" => "application/x-xz",
-        "7z" => "application/x-7z-compressed",
-        "rar" => "application/vnd.rar",
-        "zst" => "application/zstd",
-        "mp3" => "audio/mpeg",
-        "wav" => "audio/wav",
-        "ogg" | "oga" => "audio/ogg",
-        "opus" => "audio/opus",
-        "flac" => "audio/flac",
-        "m4a" => "audio/mp4",
-        "mp4" | "m4v" => "video/mp4",
-        "webm" => "video/webm",
-        "mkv" => "video/x-matroska",
-        "mov" => "video/quicktime",
-        "avi" => "video/x-msvideo",
-        "woff" => "font/woff",
-        "woff2" => "font/woff2",
-        "ttf" => "font/ttf",
-        "otf" => "font/otf",
-        "eot" => "application/vnd.ms-fontobject",
-        _ => "application/octet-stream",
-    }
-}
-
-fn mime_for_path(path: &Path) -> &'static str {
-    match path.extension().and_then(|e| e.to_str()) {
-        Some(ext) => mime_for_ext(&ext.to_ascii_lowercase()),
-        None => "application/octet-stream",
-    }
-}
-
 /// 416 统一响应：Content-Range: bytes *\/size + JSON error。
 fn range_not_satisfiable(size: u64) -> Response {
     (
@@ -180,35 +79,16 @@ fn range_not_satisfiable(size: u64) -> Response {
         .into_response()
 }
 
+/// axum 适配：定位（core，stat/目录判定前置）→ Range 解析（HTTP 语义，本层）
+/// → 窗读取与响应组装（core）→ CoreResponse 重建。
 pub async fn file(
     State(state): State<AppState>,
     Query(q): Query<FileQuery>,
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
-    let root_idx = q.root.unwrap_or(0);
-    // 静态段 + 运行时段统一寻址（阶段二）：root_at 对静态根行为与旧
-    // roots.get() 逐位一致；运行时挂载根（rootIndex ≥ roots.len()）从容器取。
-    let spec = state.root_at(root_idx).ok_or_else(|| guard::root_out_of_range(root_idx))?;
-    // fs 根：guard 全链后 strip 成 backend 相对路径；挂载根（rootIndex ≥ fs_roots，
-    // spec §2）：无 fs 语义——清洗安全面照旧，不做 fs canonicalize。
-    let rel: PathBuf = match &spec.mount {
-        None => {
-            let path = guard::resolve_at(&state, q.path.as_deref(), root_idx).await?;
-            // guard 已保证 canonical 落在根内；strip 成 backend 相对路径（字节保真）
-            path.strip_prefix(&spec.canonical).unwrap_or(Path::new("")).to_path_buf()
-        }
-        Some(_) => guard::clean_relative(Path::new(""), q.path.as_deref())?,
-    };
-
-    let entry = spec.backend.stat(&rel).await?;
-    if matches!(entry.kind, BackendEntryKind::Dir) {
-        return Err(AppError::bad_request("path is a directory"));
-    }
-    let size = entry.size.unwrap_or(0);
-    // MIME/语言按文件名扩展判定：挂载根用清洗后的相对名（与 fs 根的 canonical
-    // 绝对路径同扩展，判定结果一致）
-    let mime = mime_for_path(&rel);
-    let lang = detect::lang_for_path(&rel);
+    let located =
+        vviewer_core::file::locate(&state.core, q.root.unwrap_or(0), q.path.as_deref()).await?;
+    let size = located.size();
 
     // If-Range（BUG-47）：本服务器从不下发 ETag/Last-Modified（验证器缺失），
     // 客户端携带的任何 If-Range 值（强/弱 ETag 或 HTTP-date）都不可能匹配当前
@@ -226,51 +106,17 @@ pub async fn file(
             .filter(|h| !has_multiple_ranges(h))
             .map(|h| parse_range(h, size))
     };
+    // 已解析窗口（计划口径：core 收已解析 ResolvedRange/窗口参数）：
+    // storage RangeSpec { start, len } 即路由层 Range 解析的产物类型
     let range = match range_header {
         None => None,
         Some(Ok(r)) => r,
         Some(Err(())) => return Ok(range_not_satisfiable(size)),
     };
+    let window =
+        range.map(|(start, len)| RangeSpec { start, len });
 
-    let (status, start, len) = match range {
-        Some((start, len)) => (StatusCode::PARTIAL_CONTENT, Some(start), len),
-        None => (StatusCode::OK, None, size),
-    };
-
-    // 读取（下沉前：open → read_head 检测采样 → seek 回窗起点 → take 窗长流）；
-    // backend 单开形态，窗为路由层已解析的 (start, len)
-    let read = spec
-        .backend
-        .read_range(
-            &rel,
-            range.map(|(win_start, win_len)| RangeSpec {
-                start: win_start,
-                len: win_len,
-            }),
-            detect::ENCODING_HEAD_BYTES,
-        )
-        .await?;
-    let encoding = detect::detect_encoding(&read.head);
-    let stream = ReaderStream::new(read.stream);
-
-    let mut res = Response::builder()
-        .status(status)
-        .header(header::CONTENT_TYPE, HeaderValue::from_static(mime))
-        .header(header::ACCEPT_RANGES, "bytes")
-        .header(header::CONTENT_LENGTH, len)
-        .header(X_VV_ENCODING.clone(), HeaderValue::from_static(encoding));
-    if let Some(lang) = lang {
-        res = res.header(X_VV_LANG.clone(), HeaderValue::from_static(lang));
-    }
-    if status == StatusCode::PARTIAL_CONTENT {
-        let start = start.unwrap_or(0);
-        res = res.header(
-            header::CONTENT_RANGE,
-            format!("bytes {start}-{}/{size}", start + len - 1),
-        );
-    }
-    res.body(Body::from_stream(stream))
-        .map_err(|e| AppError::internal(e.to_string()))
+    Ok(adapt::to_axum(vviewer_core::file::read(located, window).await?))
 }
 
 #[cfg(test)]

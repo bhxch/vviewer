@@ -3,7 +3,6 @@
 pub mod adapt;
 pub mod auth;
 pub mod compute;
-pub mod detect;
 pub mod error;
 pub mod guard;
 pub mod logging;

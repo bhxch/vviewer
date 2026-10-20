@@ -121,7 +121,9 @@ mod tests {
     fn health_json(state: &CoreState) -> serde_json::Value {
         let res = handle(state);
         assert_eq!(res.status, StatusCode::OK);
-        let CoreBody::Full(bytes) = res.body;
+        // CoreBody 流变体随 Task 2 落地后的编译适配（health 恒聚合 JSON，
+        // 断言面零变化）
+        let CoreBody::Full(bytes) = res.body else { panic!("health body must be full bytes") };
         serde_json::from_slice(&bytes).expect("json")
     }
 

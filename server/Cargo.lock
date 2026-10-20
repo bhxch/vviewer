@@ -2618,11 +2618,14 @@ name = "vviewer-core"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "futures-core",
  "http",
+ "once_cell",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-util",
  "vviewer-storage",
 ]
 

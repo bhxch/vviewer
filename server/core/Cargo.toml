@@ -15,6 +15,12 @@ bytes = "1"
 http = "1"
 # guard 的 canonicalize（tokio 本体随 plan 允许入 core；重依赖门控属后续任务）
 tokio = { version = "1", features = ["fs"] }
+# CoreBody::Stream 的 chunk 流 trait（futures-core 零运行时）与文件读流的
+# AsyncRead→chunk 包装（ReaderStream）；SSE 流（Task 3）消费同形态
+futures-core = "0.3"
+tokio-util = { version = "0.7", features = ["io"] }
+# detect 的语言反查表（扩展名→语言，构建期内嵌清单）
+once_cell = "1"
 # 存储抽象（StorageBackend trait + LocalFs）：core 的 roots/挂载容器数据面
 vviewer-storage = { path = "../storage" }
 

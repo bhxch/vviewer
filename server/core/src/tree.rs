@@ -138,8 +138,8 @@ mod tests {
             res.headers.get("content-type").and_then(|v| v.to_str().ok()),
             Some("application/json")
         );
-        // CoreBody 当前仅 Full 变体（流形态随 file 域落地）；届时改 let-else
-        let CoreBody::Full(bytes) = res.body;
+        // CoreBody 双变体（流形态随 file 域落地）：树响应恒为聚合 JSON
+        let CoreBody::Full(bytes) = res.body else { panic!("tree body must be full bytes") };
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         let names: Vec<&str> =
             v["entries"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();

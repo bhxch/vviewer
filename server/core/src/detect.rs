@@ -1,5 +1,8 @@
 //! 服务端检测：扩展名→语言（X-VV-Lang）与编码采样检测（X-VV-Encoding）。
 //!
+//! 多端发布阶段二 Task 2 自适配层 src/detect.rs 原样迁入（file 域业务面；
+//! 唯一消费方即 /api/file，随域整体下沉）。
+//!
 //! 与前端 packages/core/src/detect/encoding.ts 对齐：取值 'utf-8' | 'utf-16le' |
 //! 'utf-16be' | 'gb18030'；BOM 优先，UTF-8 校验失败回退 gb18030。
 
@@ -13,7 +16,7 @@ use serde::Deserialize;
 pub const ENCODING_HEAD_BYTES: usize = 8 * 1024;
 
 /// 构建期内嵌语言清单（packages/highlight/assets/languages.json），零运行时 IO。
-const LANGUAGES_JSON: &str = include_str!("../../packages/highlight/assets/languages.json");
+const LANGUAGES_JSON: &str = include_str!("../../../packages/highlight/assets/languages.json");
 
 #[derive(Deserialize)]
 struct LangInfo {
