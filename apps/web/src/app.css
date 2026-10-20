@@ -355,6 +355,15 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
   position: fixed; top: 0; left: 0; right: 0; z-index: 50;
   transform: none; opacity: .88; box-shadow: 0 2px 12px rgb(0 0 0 / 18%);
 }
+/* 台账带入（布局 zen Task 5）：设置面板/新建工作区模态由 TopBar 组件挂载
+   （TopBar.svelte 末尾 {#if} 分支）。当前 DOM 中两者是 header.vv-topbar 的兄弟
+   节点，chrome-off 的 visibility:hidden 继承不可达（实证 2026-10-19：TopBar 隐藏态
+   Ctrl+, 面板 computed visibility=visible）；此显式 visible 是 CSS 标准逃生门
+   （子级显式声明压过父级继承）——若挂点日后移入 header 元素内（组件意义上仍属
+   TopBar），面板不致落入隐藏条的 visibility 继承域。visibility 初值即 visible，
+   对现状零行为变化，纯防御声明；e2e b-layout-zen 以「TopBar 隐藏态 Ctrl+, 面板
+   可见」断言钉住该不变式 */
+.vv-settings, .vv-wscreate { visibility: visible; }
 /* 唤出热区：shell（flex column）流内插槽——top 隐藏时占 TopBar 槽位（视口顶），
    tab 隐藏时占 TabBar 槽位（紧贴其上邻可见条底部），单/双隐藏组合均不错位 */
 .vv-edge { flex: none; }
