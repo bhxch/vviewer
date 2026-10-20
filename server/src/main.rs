@@ -200,6 +200,31 @@ fn build_mount_roots(
         .collect()
 }
 
+/// 展示面 endpoint 的 userinfo 剥除（评审 M1）：`https://user:pass@host/path`
+/// → `https://host/path`——WebDAV/S3 误配置把凭据写进 endpoint 时，明文凭据
+/// 不得流入免鉴权可读的 `/api/health` 回显与 MountMeta/RootSpec 的 Debug 面。
+///
+/// 识别口径（RFC 3986 authority 语义）：userinfo 以 authority 段（首个 `/`
+/// 之前）内的首个 `@` 分隔——path 段含 `@` 不误剥；无 scheme 形态（storage
+/// 侧按 https 兜底可连）同样收口。`@` 不存在或 userinfo 为空（`https://@host`
+/// 无可泄漏物）原样返回。
+///
+/// **只影响展示面**：后端构造（S3MountConfig/WebDavMountConfig）用原值——
+/// userinfo 凭据是连接所需，剥除会让挂载静默连不上。
+fn display_endpoint(endpoint: &str) -> String {
+    let (prefix, rest) = match endpoint.split_once("://") {
+        Some((scheme, rest)) => (format!("{scheme}://"), rest),
+        None => (String::new(), endpoint),
+    };
+    let authority = rest.split('/').next().unwrap_or(rest);
+    match authority.split_once('@') {
+        Some((userinfo, host)) if !userinfo.is_empty() => {
+            format!("{prefix}{host}{}", &rest[authority.len()..])
+        }
+        _ => endpoint.to_owned(),
+    }
+}
+
 fn build_mount(
     cfg: &MountConfig,
     transport: Arc<dyn HttpTransport>,
@@ -235,7 +260,8 @@ fn build_mount(
                 meta: MountMeta {
                     kind: "s3",
                     label: cfg.label.clone(),
-                    endpoint,
+                    // 展示面脱敏（评审 M1）；连接面（上方 backend）用原值
+                    endpoint: display_endpoint(&endpoint),
                     bucket: Some(bucket),
                     prefix,
                 },
@@ -261,7 +287,8 @@ fn build_mount(
                 meta: MountMeta {
                     kind: "webdav",
                     label: cfg.label.clone(),
-                    endpoint,
+                    // 展示面脱敏（评审 M1）；连接面（上方 backend）用原值
+                    endpoint: display_endpoint(&endpoint),
                     bucket: None,
                     prefix,
                 },
@@ -497,5 +524,85 @@ mod tests {
     fn mount_construction_error_is_indexed() {
         let err = build_mount_roots(&[s3_cfg("bucket"), s3_cfg("")]).unwrap_err();
         assert!(err.contains("mount #0"), "err={err}");
+    }
+
+    // ---------- 评审 M1：展示面 endpoint userinfo 剥除 ----------
+
+    #[test]
+    fn display_endpoint_strips_userinfo_credentials() {
+        // WebDAV 已知误配置形态：凭据写在 endpoint
+        assert_eq!(
+            display_endpoint("https://user:pass@dav.example.com/dav"),
+            "https://dav.example.com/dav"
+        );
+        // path-style S3 误配置：凭据在 endpoint（无 path 段）
+        assert_eq!(
+            display_endpoint("http://AKIA:topsecret@127.0.0.1:9000"),
+            "http://127.0.0.1:9000"
+        );
+        // 无 scheme 形态（storage 侧按 https 兜底可连）同样收口
+        assert_eq!(
+            display_endpoint("user:pass@dav.example.com"),
+            "dav.example.com"
+        );
+    }
+
+    #[test]
+    fn display_endpoint_keeps_credential_free_endpoints() {
+        assert_eq!(
+            display_endpoint("http://127.0.0.1:9000"),
+            "http://127.0.0.1:9000"
+        );
+        assert_eq!(
+            display_endpoint("https://dav.example.com/dav"),
+            "https://dav.example.com/dav"
+        );
+        // path 段含 '@' 不误剥（userinfo 只在 authority 段识别）
+        assert_eq!(
+            display_endpoint("https://dav.example.com/a@b/c"),
+            "https://dav.example.com/a@b/c"
+        );
+        // 空 userinfo（https://@host）无可泄漏物，原样
+        assert_eq!(display_endpoint("https://@dav.example.com"), "https://@dav.example.com");
+    }
+
+    /// 两条线分离核实：meta/health 展示面剥除凭据，backend 连接面仍用原
+    /// endpoint（凭据是连接所需——剥了会静默连不上）。
+    #[tokio::test]
+    async fn mount_meta_strips_userinfo_while_backend_keeps_original() {
+        use vviewer_storage::transport::{http_response, MockTransport};
+
+        let transport = Arc::new(
+            MockTransport::new().with_route("HEAD", "b1", |_| {
+                http_response(200, &[("content-length", "0")], b"")
+            }),
+        );
+        let cfg = MountConfig {
+            kind: MountKind::S3,
+            label: None,
+            endpoint: Some("http://ak:sk@127.0.0.1:9000".into()),
+            bucket: Some("b1".into()),
+            prefix: None,
+            access_key_id: Some("AKIAIOSFODNN7EXAMPLE".into()),
+            secret_access_key: Some("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".into()),
+            username: None,
+            password: None,
+            path_style: None,
+        };
+        let root = build_mount(&cfg, transport.clone()).unwrap();
+
+        // 展示面（health 摘要/Debug 的数据源）已剥除
+        assert_eq!(root.meta.endpoint, "http://127.0.0.1:9000");
+        let dbg = format!("{:?}", root.meta);
+        assert!(!dbg.contains("ak:sk"), "{dbg}");
+
+        // 连接面：stat 实际请求仍带原 endpoint（userinfo 在 URL 中）
+        root.backend.stat(std::path::Path::new("a.txt")).await.unwrap();
+        let reqs = transport.recorded_requests();
+        assert_eq!(
+            reqs[0].url,
+            "http://ak:sk@127.0.0.1:9000/b1/a.txt",
+            "backend 用原 endpoint"
+        );
     }
 }
