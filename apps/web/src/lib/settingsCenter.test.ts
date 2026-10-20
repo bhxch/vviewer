@@ -137,8 +137,8 @@ describe('草稿模型与 UI/JSON 双视图接线（settings center spec §3，T
     expect(src).toContain('放弃并关闭');
     // 全部关闭路径（✕/容器 Esc/窗兜底 Esc）均走 requestClose 而非直关
     expect(src).toMatch(/onclick=\{requestClose\}/);
-    expect(src).toMatch(/onRootKeydown[\s\S]{0,200}requestClose\(\)/);
-    expect(src).toMatch(/!rootEl\.contains\(e\.target\)[\s\S]{0,120}requestClose\(\)/);
+    expect(src).toMatch(/function onRootKeydown[\s\S]{0,600}requestClose\(\)/);
+    expect(src).toMatch(/!rootEl\.contains\(e\.target\)[\s\S]{0,400}requestClose\(\)/);
   });
 
   it('节组件 touch 契约落点：节改动只使 JSON 派生失效（不落盘），落盘统一在应用', () => {
@@ -167,6 +167,43 @@ describe('评审带入项（Task 1+2 review：M1 必做 / L2·L6 顺手）', () 
 
   it('L6：应用成功后 draft 以规范化 applied 重建（非法 krokiHost 等应用后不再永脏）', () => {
     expect(src).toMatch(/applied = loadSettings\(\);[\s\S]{0,300}?draft = openDraft\(applied\);/);
+  });
+});
+
+describe('导入/导出（settings center spec §4，Task 3）', () => {
+  const src = readSrc('src/lib/SettingsCenter.svelte');
+
+  it('消费 settingsDraft 导入导出全接口（parse/摘要/合并/替换/导出构造）', () => {
+    expect(src).toContain("from './settingsDraft'");
+    for (const fn of ['buildExportFile', 'exportFileName', 'parseImportFile', 'importGroupDiffs', 'mergeImported', 'replaceImported']) {
+      expect(src).toMatch(new RegExp(`\\b${fn}\\(`));
+    }
+  });
+
+  it('导出：Blob + a[download]（文件名出自纯函数，内容为当前生效值）', () => {
+    expect(src).toMatch(/new Blob\(/);
+    expect(src).toMatch(/\.download = exportFileName\(/);
+    expect(src).toMatch(/function onExport[\s\S]{0,400}loadSettings\(\)/);
+  });
+
+  it('导入：隐藏 file input → parseImportFile；失败报错弹层（不部分应用）、成功开摘要对话框', () => {
+    expect(src).toMatch(/type="file"[^>]*hidden/);
+    expect(src).toMatch(/aria-label="导入设置错误"/);
+    expect(src).toMatch(/aria-label="导入设置"/);
+    expect(src).toMatch(/function onImportFile[\s\S]{0,300}parseImportFile\(/);
+  });
+
+  it('导入对话框：合并/替换 radio 二选一 + 变更摘要渲染 + 内容资产注记', () => {
+    expect(src).toContain('type="radio"');
+    expect(src).toContain('合并（缺项保留现状）');
+    expect(src).toContain('替换（整体覆盖为导入值）');
+    expect(src).toMatch(/importGroupDiffs\(/);
+    expect(src).toContain('内容资产');
+  });
+
+  it('确认导入走统一应用链（doApply→commit→saveSettings）；Esc 先关导入弹层再关页', () => {
+    expect(src).toMatch(/function confirmImport[\s\S]{0,700}doApply\(\)/);
+    expect(src).toMatch(/function onRootKeydown[\s\S]{0,600}importPreview[\s\S]{0,200}requestClose\(\)/);
   });
 });
 

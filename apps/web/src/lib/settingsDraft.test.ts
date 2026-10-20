@@ -4,13 +4,18 @@
 // = loadSettings 白名单的镜像（未知字段报告、类型不符、clamp 越界提示截断）。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  SETTINGS_SCHEMA_VERSION,
   applyJson,
+  buildExportFile,
   commit,
   draftToJson,
+  exportFileName,
+  importGroupDiffs,
   isDirty,
   jsonLineOf,
   mergeImported,
   openDraft,
+  parseImportFile,
   replaceImported
 } from './settingsDraft';
 import { normalizeSettings, onSettingsChanged, type Settings } from './stores/settings';
@@ -230,6 +235,123 @@ describe('mergeImported / replaceImported（Task 3 消费的导入语义，spec 
   it('替换：非对象输入回落全默认', () => {
     expect(replaceImported(null)).toEqual(aSettings({}));
     expect(replaceImported('x')).toEqual(aSettings({}));
+  });
+
+  it('L1 顺手项：替换/合并不泄漏白名单外未知字段（规范化结果只含已知键）', () => {
+    const replaced = replaceImported({ themeMode: 'dark', who: 1, nested: { x: 2 } });
+    expect(Object.keys(replaced).sort()).toEqual(Object.keys(aSettings({})).sort());
+    const merged = mergeImported(aSettings({}), { autoRefresh: false, who: 1 });
+    expect(Object.keys(merged).sort()).toEqual(Object.keys(aSettings({})).sort());
+  });
+});
+
+describe('Task 3 导出（spec §4：schemaVersion 文件结构与文件名）', () => {
+  it('buildExportFile：{ schemaVersion: 1, exportedAt, settings }，settings 深拷贝独立', () => {
+    const src = aSettings({ excludedPatterns: ['.git'], autoRefresh: true });
+    const file = buildExportFile(src, '2026-10-19T00:00:00.000Z');
+    expect(file.schemaVersion).toBe(SETTINGS_SCHEMA_VERSION);
+    expect(SETTINGS_SCHEMA_VERSION).toBe(1);
+    expect(file.exportedAt).toBe('2026-10-19T00:00:00.000Z');
+    expect(file.settings).toEqual(src);
+    src.excludedPatterns.push('node_modules'); // 导出后改源不影响文件
+    expect(file.settings.excludedPatterns).toEqual(['.git']);
+  });
+
+  it('exportFileName：vviewer-settings-YYYYMMDD.json（本地日期，补零）', () => {
+    expect(exportFileName(new Date(2026, 0, 2))).toBe('vviewer-settings-20260102.json');
+    expect(exportFileName(new Date(2026, 9, 19))).toBe('vviewer-settings-20261019.json'); // 月份 0 起
+  });
+});
+
+describe('Task 3 导入解析（spec §4：parse → schemaVersion 检查 → 白名单校验，失败不部分应用）', () => {
+  const exported = (settings: unknown, schemaVersion: number | undefined = 1): string =>
+    JSON.stringify({ ...(schemaVersion !== undefined ? { schemaVersion } : {}), exportedAt: '2026-10-19T00:00:00.000Z', settings });
+
+  it('合法文件：ok，settings 原样透传（规范化在 merge/replace），无警告', () => {
+    const r = parseImportFile(exported({ autoRefresh: false, fonts: { uiSize: 20 } }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.settings).toEqual({ autoRefresh: false, fonts: { uiSize: 20 } });
+      expect(r.warnings).toEqual([]);
+    }
+  });
+
+  it('更高 schemaVersion：警告尽力合并并注记风险，不阻断', () => {
+    const r = parseImportFile(exported({}, 2));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.warnings).toHaveLength(1);
+      expect(r.warnings[0]).toContain('2');
+      expect(r.warnings[0]).toContain('风险');
+    }
+  });
+
+  it('缺少/非数字 schemaVersion：降级警告按当前版本处理', () => {
+    const missing = parseImportFile('{"exportedAt":"2026-10-19T00:00:00.000Z","settings":{}}');
+    expect(missing.ok).toBe(true);
+    if (missing.ok) expect(missing.warnings[0]).toContain('schemaVersion');
+    const bad = parseImportFile(JSON.stringify({ schemaVersion: 'x', exportedAt: '', settings: {} }));
+    expect(bad.ok).toBe(true);
+    if (bad.ok) expect(bad.warnings[0]).toContain('schemaVersion');
+  });
+
+  it('settings 内未知字段：警告（白名单外不落盘），不阻断', () => {
+    const r = parseImportFile(exported({ foo: 1 }));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.warnings.some((w) => w.includes('foo') && w.includes('未知'))).toBe(true);
+    const nested = parseImportFile(exported({ fonts: { typo: 1 } }));
+    expect(nested.ok).toBe(true);
+    if (nested.ok) expect(nested.warnings.some((w) => w.includes('fonts.typo'))).toBe(true);
+  });
+
+  it('校验失败（类型不符）：报错不部分应用——ok:false 且不含可应用结果', () => {
+    const r = parseImportFile(exported({ autoRefresh: 'yes' }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.map((e) => e.field)).toContain('autoRefresh');
+  });
+
+  it('缺 settings 节 / 非对象文件 / JSON 语法错误：格式级报错', () => {
+    const noSettings = parseImportFile(JSON.stringify({ schemaVersion: 1 }));
+    expect(noSettings.ok).toBe(false);
+    if (!noSettings.ok) expect(noSettings.errors[0]!.field).toBe('settings');
+    const notObj = parseImportFile('42');
+    expect(notObj.ok).toBe(false);
+    const syntax = parseImportFile('{');
+    expect(syntax.ok).toBe(false);
+    if (!syntax.ok) expect(syntax.errors[0]!.field).toBe('');
+  });
+});
+
+describe('Task 3 变更摘要（spec §4：逐组 diff 列表，仅列导入在场且有差异的组）', () => {
+  it('数组元素增删/标量修改/节内字段修改各自入列；缺项组不出现', () => {
+    const current = aSettings({ excludedPatterns: ['.git'], autoRefresh: true });
+    const diffs = importGroupDiffs(current, {
+      excludedPatterns: ['.git', 'dist'],
+      autoRefresh: false,
+      fonts: { uiSize: 20 }
+    });
+    const byKey = new Map(diffs.map((d) => [d.key, d]));
+    expect(byKey.has('themeMode')).toBe(false); // 缺项组不列
+    expect(byKey.get('excludedPatterns')!.added).toEqual(['+ dist']);
+    expect(byKey.get('excludedPatterns')!.removed).toEqual([]);
+    expect(byKey.get('autoRefresh')!.changed).toEqual(['autoRefresh: true → false']);
+    expect(byKey.get('fonts')!.changed).toContain('fonts.uiSize: 16 → 20');
+  });
+
+  it('节内嵌套二级（diagrams.modes）diff 带完整路径；无差异组不出现在摘要', () => {
+    const current = aSettings({ diagrams: { krokiHost: '', modes: { mermaid: 'local' } } });
+    const diffs = importGroupDiffs(current, {
+      diagrams: { krokiHost: '', modes: { mermaid: 'kroki' } },
+      autoRefresh: true
+    });
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0]!.key).toBe('diagrams');
+    expect(diffs[0]!.changed).toContain('diagrams.modes.mermaid: local → kroki');
+  });
+
+  it('非对象输入返回空摘要', () => {
+    expect(importGroupDiffs(aSettings({}), null)).toEqual([]);
+    expect(importGroupDiffs(aSettings({}), 42)).toEqual([]);
   });
 });
 

@@ -14,10 +14,17 @@
   import { loadSettings, type Settings } from './stores/settings';
   import {
     applyJson,
+    buildExportFile,
     commit,
     draftToJson,
+    exportFileName,
+    importGroupDiffs,
     isDirty,
+    mergeImported,
     openDraft,
+    parseImportFile,
+    replaceImported,
+    type ImportGroupDiff,
     type SettingsIssue
   } from './settingsDraft';
   import AppearanceSection from './settings/AppearanceSection.svelte';
@@ -153,6 +160,64 @@
     close();
   }
 
+  // ---------- 导入/导出（spec §4，Task 3）：左导航底部动作区 ----------
+  // 导出 = 当前生效值（loadSettings）构造 schemaVersion 文件经 Blob a[download] 下载；
+  // 导入 = file input → parseImportFile（失败报错弹层不部分应用）→ 变更摘要对话框
+  // （合并/替换二选一）→ 确认经 doApply 走统一应用链（commit→saveSettings 订阅链）。
+
+  let importInputEl = $state<HTMLInputElement | null>(null);
+  let importPreview = $state<{
+    settings: Record<string, unknown>;
+    warnings: string[];
+    diffs: ImportGroupDiff[];
+  } | null>(null);
+  let importErrors = $state<SettingsIssue[] | null>(null);
+  let importMode = $state<'merge' | 'replace'>('merge');
+
+  function onExport(): void {
+    const file = buildExportFile(loadSettings(), new Date().toISOString());
+    const blob = new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = exportFileName();
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function onImportFile(e: Event): Promise<void> {
+    const inp = e.currentTarget as HTMLInputElement;
+    const file = inp.files?.[0];
+    inp.value = ''; // 允许重复选同一文件
+    if (!file) return;
+    const r = parseImportFile(await file.text());
+    if (!r.ok) {
+      importErrors = r.errors; // 校验失败明确报错，不部分应用（spec §4）
+      importPreview = null;
+      return;
+    }
+    importErrors = null;
+    importMode = 'merge';
+    importPreview = {
+      settings: r.settings,
+      warnings: r.warnings,
+      diffs: importGroupDiffs(loadSettings(), r.settings)
+    };
+  }
+
+  /** 确认导入：合并/替换算出目标值写 draft，交 doApply 统一应用（同链同订阅广播） */
+  function confirmImport(): void {
+    if (importPreview === null) return;
+    draft =
+      importMode === 'merge'
+        ? mergeImported(applied, importPreview.settings)
+        : replaceImported(importPreview.settings);
+    jsonDirtyBuffer = null;
+    jsonErrors = null;
+    importPreview = null;
+    doApply();
+  }
+
   // ---------- 骨架（导航/焦点/Esc 通道） ----------
 
   let rootEl = $state<HTMLElement | null>(null);
@@ -172,6 +237,15 @@
         (e.target instanceof Node ? !rootEl.contains(e.target) : true)
       ) {
         e.preventDefault();
+        // 导入弹层兜底（与容器通道同语义）：焦点落页外时 Esc 也先关弹层
+        if (importPreview !== null) {
+          importPreview = null;
+          return;
+        }
+        if (importErrors !== null) {
+          importErrors = null;
+          return;
+        }
         requestClose();
       }
     };
@@ -192,6 +266,15 @@
   function onRootKeydown(e: KeyboardEvent): void {
     if (e.key === 'Escape') {
       e.preventDefault();
+      // 导入弹层在场时 Esc 先关弹层（逐层退出），不直接波及整页
+      if (importPreview !== null) {
+        importPreview = null;
+        return;
+      }
+      if (importErrors !== null) {
+        importErrors = null;
+        return;
+      }
       requestClose();
     }
   }
@@ -252,6 +335,16 @@
           {g.label}
         </button>
       {/each}
+      <!-- 导入/导出动作区（spec §4，Task 3）：非分组项，驻左导航底部 -->
+      <div class="vv-sc-navactions">
+        <button type="button" onclick={onExport} title="导出全部设置为 JSON 文件（vviewer-settings-日期.json）">
+          导出…
+        </button>
+        <button type="button" onclick={() => importInputEl?.click()} title="从 JSON 文件导入设置">
+          导入…
+        </button>
+        <input type="file" accept=".json,application/json" hidden bind:this={importInputEl} onchange={onImportFile} />
+      </div>
     </nav>
     <div class="vv-sc-content">
       {#if view === 'json'}
@@ -290,6 +383,60 @@
       {/if}
     </div>
   </div>
+  {#if importPreview !== null}
+    <!-- 导入确认对话框（spec §4：变更摘要 + 合并/替换二选一） -->
+    <div class="vv-sc-modal" role="dialog" aria-label="导入设置">
+      <div class="vv-sc-modalbox">
+        <div class="vv-sc-modaltitle">导入设置</div>
+        {#each importPreview.warnings as w (w)}
+          <div class="vv-settings-warn" role="status">{w}</div>
+        {/each}
+        {#if importPreview.diffs.length === 0}
+          <div class="vv-settings-note">导入文件与当前设置无差异</div>
+        {:else}
+          <ul class="vv-sc-importdiffs">
+            {#each importPreview.diffs as d (d.key)}
+              <li>
+                <div class="vv-sc-importkey">{d.key}</div>
+                {#each [...d.added, ...d.removed, ...d.changed] as line, i (i)}
+                  <div class="vv-sc-importline">{line}</div>
+                {/each}
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        <label class="vv-sc-importmode">
+          <input type="radio" name="vv-import-mode" value="merge" bind:group={importMode} />
+          合并（缺项保留现状）
+        </label>
+        <label class="vv-sc-importmode">
+          <input type="radio" name="vv-import-mode" value="replace" bind:group={importMode} />
+          替换（整体覆盖为导入值）
+        </label>
+        <div class="vv-settings-hint">导入不携带主题/字体等内容资产（各自已有导入通道）</div>
+        <div class="vv-sc-modalactions">
+          <button type="button" class="vv-sc-apply" onclick={confirmImport}>导入并应用</button>
+          <button type="button" onclick={() => (importPreview = null)}>取消</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+  {#if importErrors !== null}
+    <!-- 导入失败（spec §4：校验失败明确报错不部分应用） -->
+    <div class="vv-sc-modal" role="alertdialog" aria-label="导入设置错误">
+      <div class="vv-sc-modalbox">
+        <div class="vv-sc-modaltitle">导入失败（未应用任何更改）</div>
+        <div class="vv-sc-jsonerrors" role="alert">
+          {#each importErrors as e (e.field + e.message)}
+            <div class="vv-sc-jsonerror"><code>{e.field === '' ? '(JSON)' : e.field}</code> {e.message}</div>
+          {/each}
+        </div>
+        <div class="vv-sc-modalactions">
+          <button type="button" onclick={() => (importErrors = null)}>关闭</button>
+        </div>
+      </div>
+    </div>
+  {/if}
   {#if confirmClose}
     <!-- 脏态关闭确认（spec §3：应用/放弃二选一）——内联条而非原生 confirm
          （选择语义，非是非问） -->
@@ -429,6 +576,30 @@
     background: var(--ui-tab-active-bg);
     color: var(--ui-fg);
   }
+  /* 导入/导出动作区：驻导航底部（非分组项），滚动到分组清单之后 */
+  .vv-sc-navactions {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-top: 8px;
+    border-top: 1px solid var(--ui-border);
+  }
+  .vv-sc-navactions button {
+    text-align: left;
+    background: none;
+    border: 0;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    color: var(--ui-fg-muted);
+  }
+  .vv-sc-navactions button:hover {
+    background: var(--ui-hover-bg);
+    color: var(--ui-fg);
+  }
   .vv-sc-content {
     flex: 1;
     min-width: 0;
@@ -504,6 +675,70 @@
     font-size: 13px;
   }
   .vv-sc-confirm button {
+    font-size: 12px;
+  }
+  /* 导入/导出弹层（spec §4）：居中模态 + 半透明背板 */
+  .vv-sc-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 32;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgb(0 0 0 / 35%);
+    padding: 16px;
+  }
+  .vv-sc-modalbox {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-border);
+    border-radius: 10px;
+    box-shadow: 0 12px 36px rgb(0 0 0 / 30%);
+    padding: 16px 18px;
+    width: min(520px, 92vw);
+    max-height: 80vh;
+    overflow: auto;
+    font-size: 13px;
+  }
+  .vv-sc-modaltitle {
+    font-weight: 600;
+    font-size: 14px;
+  }
+  .vv-sc-importdiffs {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 32vh;
+    overflow: auto;
+    border: 1px solid var(--ui-border);
+    border-radius: 6px;
+    padding: 8px;
+  }
+  .vv-sc-importkey {
+    font-weight: 600;
+  }
+  .vv-sc-importline {
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    color: var(--ui-fg-muted);
+    overflow-wrap: anywhere;
+  }
+  .vv-sc-importmode {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .vv-sc-modalactions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+  .vv-sc-modalactions button {
     font-size: 12px;
   }
   @media (max-width: 600px) {

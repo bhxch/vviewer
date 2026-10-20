@@ -1,7 +1,7 @@
-// settingsDraft.ts — 设置草稿模型纯函数（settings center spec §3/§4，Task 2）。
+// settingsDraft.ts — 设置草稿模型纯函数（settings center spec §3/§4，Task 2/3）。
 // 无 runes 的纯 .ts 模块（vitest 直测）：深拷贝/序列化/parse+白名单镜像校验/脏态/
-// 提交/导入合并与替换。UI（SettingsCenter.svelte）持有 draft（$state 深代理）并
-// 统一在「应用」时走 commit → saveSettings 集中订阅链。
+// 提交/导入合并与替换/导出文件构造与导入解析/导入变更摘要。UI（SettingsCenter.svelte）
+// 持有 draft（$state 深代理）并统一在「应用」时走 commit → saveSettings 集中订阅链。
 //
 // 校验语义 = loadSettings 白名单的镜像（spec §3：未知字段标红不静默丢弃、类型不
 // 符标红、clamp 类越界提示将截断）——归一化实现复用 settings.normalizeSettings
@@ -36,6 +36,16 @@ const SETTINGS_KEYS: readonly (keyof Settings)[] = [
   'fonts',
   'layout'
 ];
+
+/** 白名单拣选（L1 顺手项）：导入路径只取已知键——normalizeSettings 对未知键原样
+ * 透传（loadSettings 历史行为），不拣选会让导入文件的自造字段落进 localStorage。 */
+function pickKnown(raw: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of SETTINGS_KEYS) {
+    if (k in raw) out[k] = raw[k];
+  }
+  return out;
+}
 
 const THEME_MODES: readonly string[] = ['light', 'dark', 'system'];
 const POLICIES: readonly string[] = ['auto', 'local', 'remote'];
@@ -238,7 +248,7 @@ export function commit(draft: Draft): void {
 export function mergeImported(current: Settings, imported: unknown): Settings {
   const out = deepClone(current);
   if (!isObj(imported)) return out;
-  const norm = normalizeSettings(imported);
+  const norm = normalizeSettings(pickKnown(imported));
   const target = out as unknown as Record<string, unknown>;
   const source = norm as unknown as Record<string, unknown>;
   for (const k of SETTINGS_KEYS) {
@@ -249,8 +259,167 @@ export function mergeImported(current: Settings, imported: unknown): Settings {
 
 /**
  * 导入替换（spec §4：校验通过后整体覆盖为导入规范化结果）。非对象输入回落
- * 全默认；缺项/脏字段由 normalizeSettings 补默认（「整体覆盖」语义：现状不保留）。
+ * 全默认；缺项/脏字段由 normalizeSettings 补默认（「整体覆盖」语义：现状不保留）；
+ * 白名单外未知字段拣选剔除（L1 顺手项——不落盘）。
  */
 export function replaceImported(imported: unknown): Settings {
-  return normalizeSettings(isObj(imported) ? imported : {});
+  return normalizeSettings(isObj(imported) ? pickKnown(imported) : {});
+}
+
+// ---------- 导入/导出文件（spec §4，Task 3） ----------
+
+/** 导出文件形状（spec §4：{ schemaVersion: 1, exportedAt, settings }） */
+export interface SettingsExportFile {
+  schemaVersion: number;
+  exportedAt: string;
+  settings: Settings;
+}
+
+/** 当前 schema 版本（首版；更高版本文件走「尽力合并」降级路径并警告） */
+export const SETTINGS_SCHEMA_VERSION = 1;
+
+/** 导出文件构造（纯函数；Blob 下载与 a[download] 接线在 SettingsCenter UI 层） */
+export function buildExportFile(settings: Settings, exportedAt: string): SettingsExportFile {
+  return { schemaVersion: SETTINGS_SCHEMA_VERSION, exportedAt, settings: deepClone(settings) };
+}
+
+/** 导出文件名（spec §4：vviewer-settings-YYYYMMDD.json，本地日期补零） */
+export function exportFileName(now: Date = new Date()): string {
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `vviewer-settings-${y}${m}${d}.json`;
+}
+
+export type ImportParseResult =
+  | { ok: true; settings: Record<string, unknown>; warnings: string[] }
+  | { ok: false; errors: SettingsIssue[] };
+
+/**
+ * 导入文件解析（spec §4 管线前半：parse → schemaVersion 兼容检查 → 白名单校验）。
+ * 校验口径与 JSON 视图同源（validateSettings），差异仅在未知字段：JSON 视图阻断，
+ * 导入降为警告（pickKnown 在 merge/replace 侧确保不落盘——「警告不静默丢弃」）。
+ * 类型/枚举/clamp 类问题仍阻断（校验失败不部分应用）。通过时 settings 原样透传
+ * （规范化在 merge/replace 内做），版本警告随结果携带供对话框注记。
+ */
+export function parseImportFile(text: string): ImportParseResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, errors: [{ field: '', message: `JSON 语法错误：${msg}` }] };
+  }
+  if (!isObj(parsed)) return { ok: false, errors: [{ field: '', message: '导入文件必须是 JSON 对象' }] };
+  const warnings: string[] = [];
+  const v = parsed.schemaVersion;
+  if (v === undefined) {
+    warnings.push('缺少 schemaVersion，按当前版本处理');
+  } else if (typeof v !== 'number' || !Number.isFinite(v)) {
+    warnings.push(`schemaVersion 非法（${JSON.stringify(v) ?? 'null'}），按当前版本处理`);
+  } else if (v > SETTINGS_SCHEMA_VERSION) {
+    warnings.push(
+      `导入文件版本更新（schemaVersion ${v} > ${SETTINGS_SCHEMA_VERSION}），将尽力合并，可能存在兼容风险`
+    );
+  }
+  const rawSettings = parsed.settings;
+  if (!isObj(rawSettings)) {
+    return { ok: false, errors: [{ field: 'settings', message: '导入文件缺少 settings 对象' }] };
+  }
+  const unknownPaths = new Set(collectUnknownPaths(rawSettings));
+  const issues = validateSettings(rawSettings);
+  const errors = issues.filter((i) => !unknownPaths.has(i.field));
+  for (const p of unknownPaths) warnings.push(`${p}：未知字段（白名单外，不落盘）`);
+  if (errors.length > 0) return { ok: false, errors };
+  return { ok: true, settings: rawSettings, warnings };
+}
+
+/** 白名单外字段路径收集（顶层 + 已知节的一级键 + diagrams.modes 键级），与
+ * validateSettings 的 field 记法一致——导入侧据此把未知字段降级为警告 */
+function collectUnknownPaths(raw: Record<string, unknown>): string[] {
+  const paths: string[] = [];
+  for (const k of Object.keys(raw)) {
+    if (!SETTINGS_KEYS.includes(k as keyof Settings)) paths.push(k);
+  }
+  const allowed: Record<string, readonly string[]> = {
+    diagrams: ['krokiHost', 'modes'],
+    fonts: ['uiFamily', 'uiSize', 'codeFamily', 'codeSize'],
+    layout: Object.keys(sanitizeLayout({}))
+  };
+  for (const [sec, keys] of Object.entries(allowed)) {
+    const v = raw[sec];
+    if (isObj(v)) {
+      for (const k of Object.keys(v)) {
+        if (!keys.includes(k)) paths.push(`${sec}.${k}`);
+      }
+    }
+  }
+  const modes = isObj(raw.diagrams) ? (raw.diagrams as Record<string, unknown>).modes : undefined;
+  if (isObj(modes)) {
+    for (const k of Object.keys(modes)) {
+      if (!resolveDiagramType(k)) paths.push(`diagrams.modes.${k}`);
+    }
+  }
+  return paths;
+}
+
+// ---------- 导入变更摘要（spec §4：对话框逐组 diff 列表） ----------
+
+/** 单组变更摘要：added/removed/changed 为人类可读 diff 行（UI 原样渲染） */
+export interface ImportGroupDiff {
+  key: string;
+  added: string[];
+  removed: string[];
+  changed: string[];
+}
+
+function previewValue(v: unknown): string {
+  if (typeof v === 'string') return v.length > 40 ? `${v.slice(0, 39)}…` : v;
+  const s = JSON.stringify(v) ?? 'null';
+  return s.length > 40 ? `${s.slice(0, 39)}…` : s;
+}
+
+/** 值级 diff（深度 ≤3：settings 组至多 diagrams.modes.<type> 两级嵌套） */
+function diffInto(key: string, a: unknown, b: unknown, d: ImportGroupDiff, depth: number): void {
+  if (stableStringify(a) === stableStringify(b)) return;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    const setA = new Set(a);
+    for (const x of b) if (!setA.has(x)) d.added.push(`+ ${previewValue(x)}`);
+    const setB = new Set(b);
+    for (const x of a) if (!setB.has(x)) d.removed.push(`- ${previewValue(x)}`);
+    return;
+  }
+  if (isObj(a) && isObj(b) && depth < 3) {
+    for (const sk of new Set([...Object.keys(a), ...Object.keys(b)])) {
+      const av = (a as Record<string, unknown>)[sk];
+      const bv = (b as Record<string, unknown>)[sk];
+      if (stableStringify(av) === stableStringify(bv)) continue;
+      if (av === undefined) d.added.push(`+ ${key}.${sk} = ${previewValue(bv)}`);
+      else if (bv === undefined) d.removed.push(`- ${key}.${sk}`);
+      else if (isObj(av) && isObj(bv)) diffInto(`${key}.${sk}`, av, bv, d, depth + 1);
+      else d.changed.push(`${key}.${sk}: ${previewValue(av)} → ${previewValue(bv)}`);
+    }
+    return;
+  }
+  d.changed.push(`${key}: ${previewValue(a)} → ${previewValue(b)}`);
+}
+
+/**
+ * 导入变更摘要（spec §4「逐组新增/修改计数，关键字段 diff 列表」的纯函数部分）：
+ * 仅列导入在场且与现状有差异的组；节值取白名单规范化后的结果（与确认后合并生效值
+ * 同源——摘要即所选「合并」路径的真实效果预览）。
+ */
+export function importGroupDiffs(current: Settings, importedSettings: unknown): ImportGroupDiff[] {
+  if (!isObj(importedSettings)) return [];
+  const norm = normalizeSettings(pickKnown(importedSettings));
+  const cur = current as unknown as Record<string, unknown>;
+  const next = norm as unknown as Record<string, unknown>;
+  const diffs: ImportGroupDiff[] = [];
+  for (const k of SETTINGS_KEYS) {
+    if (!(k in importedSettings)) continue;
+    const d: ImportGroupDiff = { key: k, added: [], removed: [], changed: [] };
+    diffInto(k, cur[k], next[k], d, 0);
+    if (d.added.length > 0 || d.removed.length > 0 || d.changed.length > 0) diffs.push(d);
+  }
+  return diffs;
 }
