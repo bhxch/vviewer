@@ -19,7 +19,6 @@ use crate::ServeArgs;
 pub const DEFAULT_PORT: u16 = 8321;
 
 /// `[[mount]].kind`（spec §2：s3 | webdav）。
-#[allow(dead_code)] // Task 5 挂载接线前变体仅测试读取
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MountKind {
@@ -33,9 +32,9 @@ pub enum MountKind {
 /// access_key_id, secret_access_key | username, password, path_style }`）。
 ///
 /// 除 `kind`（枚举，解析期把关合法值）外全部可选：per-kind 必填校验（S3 密钥对、
-/// WebDAV 账号对）属挂载后端构造的职责，Task 5 接线时实施；本任务只做字面解析。
-#[allow(dead_code)] // Task 5 挂载接线前字段仅测试读取
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+/// WebDAV 账号对）属挂载后端构造的职责（main.rs `build_mount`），本任务只做
+/// 字面解析。
+#[derive(Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MountConfig {
     pub kind: MountKind,
@@ -48,6 +47,28 @@ pub struct MountConfig {
     pub username: Option<String>,
     pub password: Option<String>,
     pub path_style: Option<bool>,
+}
+
+/// Debug 手工实现：凭证字段脱敏（storage 侧 S3MountConfig/WebDavMountConfig
+/// 的 Task 3 评审 Major-1 先例同款——FileConfig/ResolvedConfig 均 derive Debug，
+/// 启动日志/排障打印配置是常见形态，明文凭据不得经嵌套 Debug 外泄；脱敏值保留
+/// Some/None 存在性供排障）。非敏感字段（endpoint/bucket/prefix 等）原样。
+impl std::fmt::Debug for MountConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let redacted = |v: &Option<String>| v.as_ref().map(|_| "[redacted]");
+        f.debug_struct("MountConfig")
+            .field("kind", &self.kind)
+            .field("label", &self.label)
+            .field("endpoint", &self.endpoint)
+            .field("bucket", &self.bucket)
+            .field("prefix", &self.prefix)
+            .field("access_key_id", &redacted(&self.access_key_id))
+            .field("secret_access_key", &redacted(&self.secret_access_key))
+            .field("username", &redacted(&self.username))
+            .field("password", &redacted(&self.password))
+            .field("path_style", &self.path_style)
+            .finish()
+    }
 }
 
 /// 配置文件全参面：字段名即 TOML 键名（spec §2.1 示例块一一对应）。
@@ -83,7 +104,8 @@ pub struct ResolvedConfig {
     pub cors_origin: Option<String>,
     pub compute: bool,
     pub log_file: Option<PathBuf>,
-    #[allow(dead_code)] // Task 5 挂载接线前无消费读取点
+    /// 挂载配置原样透传（main.rs 装配链经后端构造消费——per-kind 必填校验在
+    /// `build_mount`，Debug 面脱敏见 [`MountConfig`]）。
     pub mounts: Vec<MountConfig>,
 }
 
@@ -435,27 +457,60 @@ password = "p"
         assert_eq!(r.mounts[0].kind, MountKind::S3);
     }
 
+    /// 台账①（Task 3 评审 Major-1 先例同款）：MountConfig Debug 脱敏——凭据
+    /// 不得经 FileConfig/ResolvedConfig 的嵌套 Debug 外泄，非敏感字段原样，
+    /// 存在性（Some/None）保留供排障。
+    #[test]
+    fn mount_config_debug_redacts_credentials() {
+        let m = MountConfig {
+            kind: MountKind::S3,
+            label: Some("l".into()),
+            endpoint: Some("https://s3.example.com".into()),
+            bucket: Some("b".into()),
+            prefix: Some("sub".into()),
+            access_key_id: Some("AKIAEXAMPLE".into()),
+            secret_access_key: Some("TOPSECRET-VALUE".into()),
+            username: None,
+            password: Some("PLAINPASS".into()),
+            path_style: Some(true),
+        };
+        let dbg = format!("{m:?}");
+        assert!(!dbg.contains("AKIAEXAMPLE"), "{dbg}");
+        assert!(!dbg.contains("TOPSECRET-VALUE"), "{dbg}");
+        assert!(!dbg.contains("PLAINPASS"), "{dbg}");
+        assert_eq!(dbg.matches("[redacted]").count(), 3, "{dbg}");
+        assert!(dbg.contains("https://s3.example.com"), "非敏感字段原样: {dbg}");
+        assert!(dbg.contains("Some(\"sub\")"), "存在性保留: {dbg}");
+
+        // FileConfig / ResolvedConfig 嵌套 Debug 走同一手工实现
+        let mut f = FileConfig::default();
+        f.mounts = vec![m];
+        assert!(!format!("{f:?}").contains("TOPSECRET-VALUE"));
+        let r = resolve_config(cli(&["/c1"]), Some(f)).unwrap();
+        assert!(!format!("{r:?}").contains("TOPSECRET-VALUE"));
+    }
+
     // ---------- 合并产物 → 既有启动校验链（校验链零改动，数据来源多一路） ----------
 
     #[test]
     fn file_allow_lan_without_token_rejected_via_chain() {
         let file = file_cfg(|c| c.allow_lan = Some(true));
         let a = cli(&["/tmp"]); // 根合法，隔离出 allow_lan 校验
-        assert_eq!(serve(resolve_config(a, Some(file)).unwrap().into()), Err(2));
+        assert_eq!(serve(resolve_config(a, Some(file)).unwrap().into(), Vec::new()), Err(2));
     }
 
     #[test]
     fn file_cors_wildcard_rejected_via_chain() {
         let file = file_cfg(|c| c.cors_origin = Some("*".into()));
         let a = cli(&["/tmp"]);
-        assert_eq!(serve(resolve_config(a, Some(file)).unwrap().into()), Err(2));
+        assert_eq!(serve(resolve_config(a, Some(file)).unwrap().into(), Vec::new()), Err(2));
     }
 
     #[test]
     fn empty_root_on_both_sides_rejected_via_chain() {
         let file = file_cfg(|c| c.root = vec![]);
         assert_eq!(
-            serve(resolve_config(cli(&[]), Some(file)).unwrap().into()),
+            serve(resolve_config(cli(&[]), Some(file)).unwrap().into(), Vec::new()),
             Err(2)
         );
     }

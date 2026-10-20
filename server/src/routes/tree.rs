@@ -3,7 +3,7 @@
 //! 扫描/hidden 过滤/排序/保真名已下沉 storage crate（`vviewer_storage::LocalFs`，
 //! Task 2 纯重构）；本 handler 只做 guard 解析与 backend 分发。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use axum::extract::{Query, State};
 use axum::Json;
@@ -63,10 +63,18 @@ pub async fn tree(
         .roots
         .get(root_idx)
         .ok_or_else(|| guard::root_out_of_range(root_idx))?;
-    let dir = guard::resolve_at(&state, q.path.as_deref(), root_idx).await?;
-    // guard 已保证 canonical 落在根内；strip 成 backend 相对路径（字节保真，
-    // BUG-48 非法 UTF-8 名经 canonicalize 后仍按原始字节承载）
-    let rel = dir.strip_prefix(&spec.canonical).unwrap_or(Path::new(""));
+    // fs 根：guard 全链（清洗 → canonicalize → 越界 403）后 strip 成 backend 相对
+    // 路径；挂载根（rootIndex ≥ fs_roots，spec §2）：无 fs 语义——清洗安全面照旧
+    //（绝对/`..`/NUL 拒），不做 fs canonicalize，清洗产物即 backend 相对路径。
+    let rel: PathBuf = match &spec.mount {
+        None => {
+            let dir = guard::resolve_at(&state, q.path.as_deref(), root_idx).await?;
+            // guard 已保证 canonical 落在根内；strip 成 backend 相对路径（字节保真，
+            // BUG-48 非法 UTF-8 名经 canonicalize 后仍按原始字节承载）
+            dir.strip_prefix(&spec.canonical).unwrap_or(Path::new("")).to_path_buf()
+        }
+        Some(_) => guard::clean_relative(Path::new(""), q.path.as_deref())?,
+    };
 
     // 目录判定（下沉前：metadata is_dir → 404 "not a directory"）
     let entry = spec.backend.stat(&rel).await?;

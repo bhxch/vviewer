@@ -240,7 +240,14 @@ pub async fn search(State(state): State<AppState>, Json(req): Json<SearchRequest
                 };
                 vec![dir]
             }
-            None => state.roots.iter().map(|r| r.canonical.clone()).collect(),
+            // 跨根 = 全部 **fs** 根逐个追加：rg 只对 fs 根（spec §2——挂载根无
+            // fs 路径语义，搜索走前端浏览器内降级）
+            None => state
+                .roots
+                .iter()
+                .take(state.fs_roots)
+                .map(|r| r.canonical.clone())
+                .collect(),
         },
     };
 
@@ -295,7 +302,13 @@ pub async fn search(State(state): State<AppState>, Json(req): Json<SearchRequest
             Some(r) => vec![r.canonical.clone()],
             None => return guard::root_out_of_range(i).into_response(),
         },
-        None => state.roots.iter().map(|r| r.canonical.clone()).collect(),
+        // 与 dirs 同口径：仅 fs 根（命中帧的 root 索引 = fs 根序，rootIndex 对齐）
+        None => state
+            .roots
+            .iter()
+            .take(state.fs_roots)
+            .map(|r| r.canonical.clone())
+            .collect(),
     };
     let parser = match engine {
         SearchEngine::Rg => FrameParser::Rg { roots: parser_roots },

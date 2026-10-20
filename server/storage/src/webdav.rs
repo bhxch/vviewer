@@ -6,7 +6,8 @@
 //! `<{p}response><{p}href>…</{p}href>` 与 prop 内的 `<{p}resourcetype>`（含
 //! `<{p}collection/>`）/`<{p}getcontentlength>`/`<{p}getlastmodified>`，`p`
 //! 为任意命名空间前缀（含空）——`d:`/`D:` 双形态是 dav 服务器世界的常见
-//! 两态（tests/webdav.rs 格式样本锚）；不做通用 XML 解析（不引解析器）。
+//! 两态，任意自定义前缀（`md:`）有独立样本锚（tests/webdav.rs 格式样本锚）；
+//! 不做通用 XML 解析（不引解析器）。
 //! 上游若改结构（tag 改名/嵌套变形），先改样本再改解析。
 //!
 //! ## Range 防线（spec §2——与 S3 的 206 拒绝语义不同源）
@@ -81,10 +82,14 @@ impl std::fmt::Debug for WebDavMountConfig {
 }
 
 /// Basic auth 凭证（Debug 手工实现，双字段均脱敏——同 S3Credentials 先例）。
+/// **模块私有**（台账②：无外部消费面——`WebDavBackend::new` 从 cfg 字段面构造，
+/// 集成测试只经 `WebDavMountConfig`；`pub` 会把凭据载体扩成 crate 外可触达面）。
+/// S3 侧 `S3Credentials` 因进入 `sign_request` 的 pub 纯函数签名而必须 pub，
+/// 两处不对称是有意的。
 #[derive(Clone)]
-pub struct WebDavCredentials {
-    pub username: String,
-    pub password: String,
+struct WebDavCredentials {
+    username: String,
+    password: String,
 }
 
 impl std::fmt::Debug for WebDavCredentials {

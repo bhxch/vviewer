@@ -2,11 +2,17 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 
+use vviewer::state::{MountMeta, MountRoot};
+use vviewer_storage::s3::{S3Backend, S3MountConfig};
+use vviewer_storage::transport::{HttpTransport, ReqwestTransport};
+use vviewer_storage::webdav::{WebDavBackend, WebDavMountConfig};
+
 mod config;
-use config::{DEFAULT_PORT, load_file_config, resolve_config};
+use config::{MountConfig, MountKind, DEFAULT_PORT, load_file_config, resolve_config};
 
 #[derive(Parser)]
 #[command(name = "vviewer", version, about = "vviewer local viewer server")]
@@ -92,15 +98,17 @@ fn main() {
                 compute,
                 log_file,
             };
-            let resolved = match resolve_config(cli_args, file) {
+            let mut resolved = match resolve_config(cli_args, file) {
                 Ok(r) => r,
                 Err(e) => {
                     eprintln!("error: {e}");
                     std::process::exit(2);
                 }
             };
-            // Task 5 前挂载不接线：resolved.mounts 随合并产物承载，本任务不消费
-            if let Err(code) = serve(resolved.into()) {
+            // 挂载配置随合并产物进装配链（serve 内经后端构造接线，per-kind
+            // 必填校验错误 exit 2）
+            let mounts = std::mem::take(&mut resolved.mounts);
+            if let Err(code) = serve(resolved.into(), mounts) {
                 std::process::exit(code);
             }
         }
@@ -168,8 +176,102 @@ fn validate_startup(args: &ServeArgs, token: Option<&str>) -> Result<(), String>
     Ok(())
 }
 
+/// 挂载后端构造（spec §2 装配链）： MountConfig → (backend, 元信息)。per-kind
+/// 必填校验在此（config.rs 只做字面解析，见其模块注）——错误消息含挂载序号与
+/// 字段名（与 resolve_config 的报错约定一致），serve 统一 exit 2。
+fn build_mount_roots(
+    mounts: &[MountConfig],
+) -> Result<Vec<MountRoot>, String> {
+    if mounts.is_empty() {
+        return Ok(Vec::new());
+    }
+    // reqwest transport 实例全挂载共享一个 Arc（连接池复用；无挂载不构建）
+    let transport: Arc<dyn HttpTransport> = Arc::new(
+        ReqwestTransport::new()
+            .map_err(|e| format!("http transport init: {}", e.message()))?,
+    );
+    mounts
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            build_mount(m, transport.clone())
+                .map_err(|e| format!("mount #{i}: {e}"))
+        })
+        .collect()
+}
+
+fn build_mount(
+    cfg: &MountConfig,
+    transport: Arc<dyn HttpTransport>,
+) -> Result<MountRoot, String> {
+    /// Option 字段必填校验（错误消息含字段名）。
+    fn required<T>(field: Option<T>, name: &str, kind: &str) -> Result<T, String> {
+        field.ok_or_else(|| format!("{kind} mount: missing required field `{name}`"))
+    }
+    match cfg.kind {
+        MountKind::S3 => {
+            let kind = "s3";
+            let endpoint = required(cfg.endpoint.clone(), "endpoint", kind)?;
+            let bucket = required(cfg.bucket.clone(), "bucket", kind)?;
+            let access_key_id = required(cfg.access_key_id.clone(), "access_key_id", kind)?;
+            let secret_access_key =
+                required(cfg.secret_access_key.clone(), "secret_access_key", kind)?;
+            let prefix = cfg.prefix.clone().unwrap_or_default();
+            // path_style 缺省 true（Global Constraints 的 path-style URL 形态）
+            let path_style = cfg.path_style.unwrap_or(true);
+            let backend = S3Backend::new(
+                S3MountConfig {
+                    endpoint: endpoint.clone(),
+                    bucket: bucket.clone(),
+                    prefix: prefix.clone(),
+                    access_key_id,
+                    secret_access_key,
+                    path_style,
+                },
+                transport,
+            );
+            Ok(MountRoot {
+                backend: Arc::new(backend),
+                meta: MountMeta {
+                    kind: "s3",
+                    label: cfg.label.clone(),
+                    endpoint,
+                    bucket: Some(bucket),
+                    prefix,
+                },
+            })
+        }
+        MountKind::WebDav => {
+            let kind = "webdav";
+            let endpoint = required(cfg.endpoint.clone(), "endpoint", kind)?;
+            let username = required(cfg.username.clone(), "username", kind)?;
+            let password = required(cfg.password.clone(), "password", kind)?;
+            let prefix = cfg.prefix.clone().unwrap_or_default();
+            let backend = WebDavBackend::new(
+                WebDavMountConfig {
+                    endpoint: endpoint.clone(),
+                    prefix: prefix.clone(),
+                    username,
+                    password,
+                },
+                transport,
+            );
+            Ok(MountRoot {
+                backend: Arc::new(backend),
+                meta: MountMeta {
+                    kind: "webdav",
+                    label: cfg.label.clone(),
+                    endpoint,
+                    bucket: None,
+                    prefix,
+                },
+            })
+        }
+    }
+}
+
 /// 启动服务；配置错误返回 exit code（不 panic）。
-fn serve(args: ServeArgs) -> Result<(), i32> {
+fn serve(args: ServeArgs, mounts: Vec<MountConfig>) -> Result<(), i32> {
     let generated = if args.token_gen {
         let t = vviewer::generate_token();
         println!("{t}");
@@ -192,6 +294,16 @@ fn serve(args: ServeArgs) -> Result<(), i32> {
         return Err(2);
     }
 
+    // 挂载后端构造（spec §2：per-kind 必填校验在此，配置错误 exit 2；reqwest
+    // transport 实例全挂载共享一个 Arc）
+    let mount_roots = match build_mount_roots(&mounts) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return Err(2);
+        }
+    };
+
     // bind：--allow-lan ? 0.0.0.0 : 127.0.0.1
     let ip: std::net::IpAddr = if args.allow_lan {
         std::net::Ipv4Addr::UNSPECIFIED.into()
@@ -208,6 +320,7 @@ fn serve(args: ServeArgs) -> Result<(), i32> {
         args.cors_origin,
     )
     .with_roots(roots)
+    .with_mounts(mount_roots)
     .with_compute(args.compute);
     let app = vviewer::build_router(state.clone());
     let tickets = state.tickets;
@@ -259,10 +372,33 @@ mod tests {
         }
     }
 
+    fn s3_cfg(field: &str) -> MountConfig {
+        let mut m = MountConfig {
+            kind: MountKind::S3,
+            label: Some("docs".into()),
+            endpoint: Some("http://127.0.0.1:9000".into()),
+            bucket: Some("b1".into()),
+            prefix: Some("sub".into()),
+            access_key_id: Some("ak".into()),
+            secret_access_key: Some("sk".into()),
+            username: None,
+            password: None,
+            path_style: None,
+        };
+        match field {
+            "endpoint" => m.endpoint = None,
+            "bucket" => m.bucket = None,
+            "access_key_id" => m.access_key_id = None,
+            "secret_access_key" => m.secret_access_key = None,
+            _ => {}
+        }
+        m
+    }
+
     #[test]
     fn empty_token_is_rejected() {
         // 空 token 启动即拒（exit 2），先于 root 校验（root 故意指向不存在路径）
-        assert_eq!(serve(args(Some(String::new()))), Err(2));
+        assert_eq!(serve(args(Some(String::new())), Vec::new()), Err(2));
     }
 
     #[test]
@@ -270,7 +406,7 @@ mod tests {
         // 多值 --root 后缺根同样启动即拒（exit 2）
         let mut a = args(None);
         a.root.clear();
-        assert_eq!(serve(a), Err(2));
+        assert_eq!(serve(a, Vec::new()), Err(2));
     }
 
     #[test]
@@ -280,10 +416,86 @@ mod tests {
         // args() 的 root 故意指向不存在路径，只要 Err(2) 即达验收。
         let mut a = args(None);
         a.cors_origin = Some("*".to_string());
-        assert_eq!(serve(a), Err(2));
+        assert_eq!(serve(a, Vec::new()), Err(2));
         // 通配形态变体同拒（防御不限于裸 '*'）
         let mut a = args(None);
         a.cors_origin = Some("http://*.example.com".to_string());
-        assert_eq!(serve(a), Err(2));
+        assert_eq!(serve(a, Vec::new()), Err(2));
+    }
+
+    // ---------- 挂载后端构造（per-kind 必填校验，错误消息含字段名） ----------
+
+    #[test]
+    fn s3_mount_requires_endpoint_bucket_and_keys() {
+        let transport: Arc<dyn HttpTransport> = Arc::new(
+            vviewer_storage::transport::MockTransport::new(),
+        );
+        for field in ["endpoint", "bucket", "access_key_id", "secret_access_key"] {
+            let err = build_mount(&s3_cfg(field), transport.clone()).unwrap_err();
+            assert!(err.contains(field), "field={field} err={err}");
+            assert!(err.contains("s3 mount"), "field={field} err={err}");
+        }
+        // 全字段齐备 → 构造成功，元信息齐面（凭据不入 meta）
+        let root = build_mount(&s3_cfg(""), transport).unwrap();
+        let meta = &root.meta;
+        assert_eq!(meta.kind, "s3");
+        assert_eq!(meta.label.as_deref(), Some("docs"));
+        assert_eq!(meta.bucket.as_deref(), Some("b1"));
+        assert_eq!(meta.prefix, "sub");
+        // 元信息结构面即无凭据字段（spec §2：凭据不入 health/mounts 回显/日志）
+        let dbg = format!("{meta:?}");
+        assert!(!dbg.contains("sk"), "meta 无凭据字段: {dbg}");
+        // 远端能力降级（Global Constraints）
+        let caps = root.backend.capabilities();
+        assert!(!caps.watch && !caps.search);
+    }
+
+    #[test]
+    fn webdav_mount_requires_endpoint_and_account_pair() {
+        let transport: Arc<dyn HttpTransport> = Arc::new(
+            vviewer_storage::transport::MockTransport::new(),
+        );
+        let mut cfg = MountConfig {
+            kind: MountKind::WebDav,
+            label: None,
+            endpoint: Some("https://dav.example.com".into()),
+            bucket: None,
+            prefix: None,
+            access_key_id: None,
+            secret_access_key: None,
+            username: Some("u".into()),
+            password: Some("p".into()),
+            path_style: None,
+        };
+        let root = build_mount(&cfg, transport.clone()).unwrap();
+        assert_eq!(root.meta.kind, "webdav");
+        assert_eq!(root.meta.bucket, None, "webdav 无 bucket");
+        assert_eq!(root.meta.prefix, "");
+
+        for field in ["endpoint", "username", "password"] {
+            let saved = match field {
+                "endpoint" => cfg.endpoint.take(),
+                "username" => cfg.username.take(),
+                _ => cfg.password.take(),
+            };
+            let err = build_mount(&cfg, transport.clone()).unwrap_err();
+            assert!(err.contains(field), "field={field} err={err}");
+            match field {
+                "endpoint" => cfg.endpoint = saved,
+                "username" => cfg.username = saved,
+                _ => cfg.password = saved,
+            }
+        }
+    }
+
+    #[test]
+    fn empty_mount_list_builds_nothing() {
+        assert!(build_mount_roots(&[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn mount_construction_error_is_indexed() {
+        let err = build_mount_roots(&[s3_cfg("bucket"), s3_cfg("")]).unwrap_err();
+        assert!(err.contains("mount #0"), "err={err}");
     }
 }

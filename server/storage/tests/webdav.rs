@@ -191,6 +191,35 @@ async fn list_dir_parses_upper_namespace_and_absolute_href() {
     assert_eq!(entries[1].size, Some(4096));
 }
 
+/// 台账③：任意自定义命名空间前缀（服务器自由选前缀，`d:`/`D:` 只是常见两态
+/// ——解析按「前缀无关的 local name」识别，此处锚一个非典型前缀 `md:`）。
+#[tokio::test]
+async fn list_dir_parses_arbitrary_custom_namespace_prefix() {
+    const MD_PREFIX_PAGE: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<md:multistatus xmlns:md="DAV:">
+  <md:response>
+    <md:href>/dav/sub/</md:href>
+    <md:propstat><md:prop><md:resourcetype><md:collection/></md:resourcetype></md:prop><md:status>HTTP/1.1 200 OK</md:status></md:propstat>
+  </md:response>
+  <md:response>
+    <md:href>/dav/sub/md-file.txt</md:href>
+    <md:propstat><md:prop><md:resourcetype/><md:getcontentlength>9</md:getcontentlength></md:prop><md:status>HTTP/1.1 200 OK</md:status></md:propstat>
+  </md:response>
+</md:multistatus>"#;
+    let transport = Arc::new(
+        MockTransport::new().with_route("PROPFIND", "dav.example.com", |_| {
+            http_response(207, &[], MD_PREFIX_PAGE)
+        }),
+    );
+    let backend = backend_with(transport);
+
+    let entries = backend.list_dir(Path::new("")).await.unwrap();
+    let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, vec!["md-file.txt"]);
+    assert_eq!(entries[0].kind, EntryKind::File);
+    assert_eq!(entries[0].size, Some(9));
+}
+
 #[tokio::test]
 async fn list_dir_joins_mount_prefix_with_relative_path() {
     let transport = Arc::new(

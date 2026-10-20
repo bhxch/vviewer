@@ -4,7 +4,7 @@
 //! 形态，Task 2 纯重构）；Range 头解析（parse_range/多区间/If-Range 等 HTTP
 //! 语义）与响应头组装留本层。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use axum::body::Body;
 use axum::extract::{Query, State};
@@ -190,17 +190,26 @@ pub async fn file(
         .roots
         .get(root_idx)
         .ok_or_else(|| guard::root_out_of_range(root_idx))?;
-    let path = guard::resolve_at(&state, q.path.as_deref(), root_idx).await?;
-    // guard 已保证 canonical 落在根内；strip 成 backend 相对路径（字节保真）
-    let rel = path.strip_prefix(&spec.canonical).unwrap_or(Path::new(""));
+    // fs 根：guard 全链后 strip 成 backend 相对路径；挂载根（rootIndex ≥ fs_roots，
+    // spec §2）：无 fs 语义——清洗安全面照旧，不做 fs canonicalize。
+    let rel: PathBuf = match &spec.mount {
+        None => {
+            let path = guard::resolve_at(&state, q.path.as_deref(), root_idx).await?;
+            // guard 已保证 canonical 落在根内；strip 成 backend 相对路径（字节保真）
+            path.strip_prefix(&spec.canonical).unwrap_or(Path::new("")).to_path_buf()
+        }
+        Some(_) => guard::clean_relative(Path::new(""), q.path.as_deref())?,
+    };
 
     let entry = spec.backend.stat(&rel).await?;
     if matches!(entry.kind, BackendEntryKind::Dir) {
         return Err(AppError::bad_request("path is a directory"));
     }
     let size = entry.size.unwrap_or(0);
-    let mime = mime_for_path(&path);
-    let lang = detect::lang_for_path(&path);
+    // MIME/语言按文件名扩展判定：挂载根用清洗后的相对名（与 fs 根的 canonical
+    // 绝对路径同扩展，判定结果一致）
+    let mime = mime_for_path(&rel);
+    let lang = detect::lang_for_path(&rel);
 
     // If-Range（BUG-47）：本服务器从不下发 ETag/Last-Modified（验证器缺失），
     // 客户端携带的任何 If-Range 值（强/弱 ETag 或 HTTP-date）都不可能匹配当前

@@ -45,15 +45,49 @@ impl TicketStore {
     }
 }
 
+/// 挂载根的可宣告元信息：health 摘要与阶段二 `GET /api/mounts` 的数据源。
+/// **凭据不入内**（spec §2 服务端纪律——不进 health/mounts 回显/日志），
+/// Debug 派生安全。
+#[derive(Clone, Debug)]
+pub struct MountMeta {
+    /// 后端类别字面（`"s3"` | `"webdav"`）。
+    pub kind: &'static str,
+    pub label: Option<String>,
+    pub endpoint: String,
+    /// S3 挂载的桶名；WebDAV 挂载为 None。
+    pub bucket: Option<String>,
+    /// 挂载子路径（配置原样；空串 = 端点根）。
+    pub prefix: String,
+}
+
+/// 挂载根装配产物（main 装配链产出、测试注入共用形态）：已构造 backend +
+/// 可宣告元信息。测试可注入 MockTransport 构造的后端（[`AppState::with_mounts`]）。
+pub struct MountRoot {
+    pub backend: Arc<dyn StorageBackend>,
+    pub meta: MountMeta,
+}
+
+impl std::fmt::Debug for MountRoot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // backend 为 dyn 存储（无 Debug 语义），只暴露元信息面（凭据不入 MountMeta）
+        f.debug_struct("MountRoot")
+            .field("meta", &self.meta)
+            .finish_non_exhaustive()
+    }
+}
+
 /// 单个根的规格：原始路径 + canonicalize 结果（guard 越界校验基准）+ 存储后端。
 #[derive(Clone)]
 pub struct RootSpec {
-    /// `--root` 原始路径。
+    /// `--root` 原始路径；挂载根为展示形态（`s3:label` / `s3://endpoint`，无 fs 语义）。
     pub raw: PathBuf,
-    /// canonicalize 结果（构造时一次，失败回退原路径）。
+    /// canonicalize 结果（构造时一次，失败回退原路径）；挂载根与 raw 相同
+    /// （guard 对挂载根不做 fs canonicalize，见 routes 的 mount 分支）。
     pub canonical: PathBuf,
-    /// 该根的存储后端（阶段一：fs 根恒 LocalFs；S3/WebDAV 挂载根在 Task 5 接入）。
+    /// 该根的存储后端（fs 根 LocalFs；挂载根 S3/WebDAV）。
     pub backend: Arc<dyn StorageBackend>,
+    /// 挂载元信息；None = fs 根（根序 = fs 根 + 静态挂载序，spec §2）。
+    pub mount: Option<MountMeta>,
 }
 
 impl RootSpec {
@@ -65,7 +99,18 @@ impl RootSpec {
             backend: Arc::new(LocalFs::new(canonical.clone(), hidden)),
             raw,
             canonical,
+            mount: None,
         }
+    }
+
+    /// 挂载根构造：raw/canonical 为展示形态（无 fs 语义——guard 清洗 path 后
+    /// 直接作为 backend 相对路径，不经 canonicalize/越界校验）。
+    pub fn mount(meta: MountMeta, backend: Arc<dyn StorageBackend>) -> Self {
+        let raw = match &meta.label {
+            Some(l) => PathBuf::from(format!("{}:{l}", meta.kind)),
+            None => PathBuf::from(format!("{}://{}", meta.kind, meta.endpoint)),
+        };
+        Self { raw: raw.clone(), canonical: raw, backend, mount: Some(meta) }
     }
 }
 
@@ -86,8 +131,12 @@ pub struct AppState {
     pub root: PathBuf,
     /// root 的 canonicalize 结果（构造时一次），guard 越界校验基准（兼容视图 = roots[0]）。
     pub root_canonical: PathBuf,
-    /// 多根列表（workspace 阶段 1）：单根部署时恒为 1 项，形状与历史一致。
+    /// 多根列表（workspace 阶段 1 + 挂载阶段一）：**根序 = fs 根 + 静态挂载序**
+    /// （spec §2）；单根部署时恒为 1 项，形状与历史一致。rootIndex < [`AppState::fs_roots`]
+    /// 为 fs 根，≥ 为挂载根。
     pub roots: Vec<RootSpec>,
+    /// fs 根数量（roots 前缀段长度）：挂载根寻址边界（health.fsRoots 宣告源）。
+    pub fs_roots: usize,
     /// `--web-dist` 前端静态产物目录；未指定时 `/` 返回占位页。
     pub web_dist: Option<PathBuf>,
     /// 访问令牌；None 表示免鉴权（仅默认 127.0.0.1 绑定时允许）。
@@ -126,6 +175,7 @@ impl AppState {
             root: root.clone(),
             root_canonical: root_canonical.clone(),
             roots,
+            fs_roots: 1,
             web_dist,
             token,
             hidden,
@@ -155,8 +205,23 @@ impl AppState {
             self.root = first.raw.clone();
             self.root_canonical = first.canonical.clone();
         }
+        self.fs_roots = self.roots.len();
         let canonicals: Vec<PathBuf> = self.roots.iter().map(|r| r.canonical.clone()).collect();
         self.changes = crate::watch::ChangeHub::spawn(&canonicals);
+        self
+    }
+
+    /// builder：追加静态挂载根（**须在 `with_roots` 之后调用**——`with_roots`
+    /// 整体重建 fs 根列表）。根序 = fs 根 + 挂载序（spec §2）；ChangeHub 不重建
+    /// （挂载根 watch 能力 = false，无事件面）。注入形态为已构造 backend + 元
+    /// 信息——测试可注入 MockTransport 构造的 S3/WebDAV（与 with_roots 的既有
+    /// builder 模式同款）；无调用 = 纯 fs 部署，形状零变化。
+    pub fn with_mounts(mut self, mounts: Vec<MountRoot>) -> Self {
+        self.roots.extend(
+            mounts
+                .into_iter()
+                .map(|m| RootSpec::mount(m.meta, m.backend)),
+        );
         self
     }
 

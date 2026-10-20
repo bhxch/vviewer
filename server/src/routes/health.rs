@@ -23,16 +23,40 @@ pub struct Health {
     /// 与 /api/search 同一选择链，测试经 rg_path/grep_path 注入覆盖。
     #[serde(rename = "searchEngine", skip_serializing_if = "Option::is_none")]
     pub search_engine: Option<&'static str>,
-    /// 多根宣告（workspace 阶段 1）：数据根数量；=1（单根部署，历史形状）时
-    /// 字段整体省略。客户端据命中帧的 root 索引定位所属根。
+    /// 多根宣告（workspace 阶段 1）：数据根数量（**含挂载根**——rootIndex 寻址
+    /// 面 = fs 根 + 挂载序）；=1（单根部署，历史形状）时字段整体省略。客户端据
+    /// 命中帧的 root 索引定位所属根。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub roots: Option<usize>,
-    /// 多根路径宣告（遗留项-UX）：与 roots 同门槛（多根）按序宣告 canonical
-    /// 路径，RemoteSourceModal 根选择显示真实路径而非「根 N」。仅免鉴权部署
-    /// 宣告——health 免鉴权可读，token 鉴权的局域网部署宣告路径会向未认证
-    /// 对端泄漏服务器目录结构，此时字段整体省略（旧前端/受限部署回落「根 N」）。
+    /// fs 根数边界（spec §2）：rootIndex < fsRoots 为 fs 根、≥ 为挂载根。
+    /// 无挂载部署字段整体省略（历史形状零变化）。
+    #[serde(rename = "fsRoots", skip_serializing_if = "Option::is_none")]
+    pub fs_roots: Option<usize>,
+    /// 静态挂载根摘要（spec §2，脱敏：kind/label/endpoint/bucket/prefix——
+    /// **凭据不入内**，[`crate::state::MountMeta`] 结构面即保证）。无挂载时
+    /// 整体省略。per-root 能力（watch/search）与运行时挂载的增删随阶段二
+    /// `GET /api/mounts` 宣告，本字段只读摘要。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mounts: Option<Vec<MountSummary>>,
+    /// 多根路径宣告（遗留项-UX）：与 fs 根多根同门槛按序宣告 canonical 路径，
+    /// RemoteSourceModal 根选择显示真实路径而非「根 N」。挂载根不入列（endpoint
+    /// 非 fs 路径，走 mounts 摘要通道）。仅免鉴权部署宣告——health 免鉴权可读，
+    /// token 鉴权的局域网部署宣告路径会向未认证对端泄漏服务器目录结构，此时
+    /// 字段整体省略（旧前端/受限部署回落「根 N」）。
     #[serde(rename = "rootPaths", skip_serializing_if = "Option::is_none")]
     pub root_paths: Option<Vec<String>>,
+}
+
+/// 挂载根摘要条目（脱敏面：无凭据字段——数据源 [`crate::state::MountMeta`]）。
+#[derive(Serialize)]
+pub struct MountSummary {
+    pub kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub endpoint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bucket: Option<String>,
+    pub prefix: String,
 }
 
 /// 能力宣告：`file-server` 恒有；`--compute` 时追加 `compute`
@@ -49,9 +73,28 @@ pub async fn health(State(state): State<AppState>) -> Json<Health> {
     let search_engine =
         crate::routes::search::resolve_engine(&state).ok().map(|(engine, _)| engine.name());
     let root_count = state.roots.len();
-    // 路径宣告双门槛：多根（与 roots 同）+ 免鉴权（token 部署不泄漏目录结构）
-    let root_paths = (root_count > 1 && state.token.is_none()).then(|| {
-        state.roots.iter().map(|r| r.canonical.display().to_string()).collect::<Vec<_>>()
+    let fs_count = state.fs_roots;
+    // 挂载根摘要（roots 的 fs 段之后即挂载序）：无挂载 → None（字段省略）
+    let mounts = (root_count > fs_count).then(|| {
+        state
+            .roots
+            .iter()
+            .filter_map(|r| r.mount.as_ref())
+            .map(|m| MountSummary {
+                kind: m.kind,
+                label: m.label.clone(),
+                endpoint: m.endpoint.clone(),
+                bucket: m.bucket.clone(),
+                prefix: m.prefix.clone(),
+            })
+            .collect::<Vec<_>>()
+    });
+    // 路径宣告双门槛：fs 根多根（挂载根无 fs 路径不入列）+ 免鉴权
+    let root_paths = (fs_count > 1 && state.token.is_none()).then(|| {
+        state.roots[..fs_count]
+            .iter()
+            .map(|r| r.canonical.display().to_string())
+            .collect::<Vec<_>>()
     });
     Json(Health {
         name: "vviewer",
@@ -61,6 +104,8 @@ pub async fn health(State(state): State<AppState>) -> Json<Health> {
         diagrams,
         search_engine,
         roots: (root_count > 1).then_some(root_count),
+        fs_roots: mounts.is_some().then_some(fs_count),
+        mounts,
         root_paths,
     })
 }
@@ -137,6 +182,14 @@ mod tests {
         let v = health_json(base_state()).await;
         assert!(v.get("roots").is_none(), "单根部署应省略 roots 字段: {v}");
         assert!(v.get("rootPaths").is_none(), "单根部署应省略 rootPaths 字段: {v}");
+    }
+
+    #[tokio::test]
+    async fn no_mounts_omits_fs_roots_and_mount_fields() {
+        // 无挂载部署（历史形状）：fsRoots/mounts 字段整体省略（零变化契约）
+        let v = health_json(base_state()).await;
+        assert!(v.get("fsRoots").is_none(), "{v}");
+        assert!(v.get("mounts").is_none(), "{v}");
     }
 
     #[tokio::test]
