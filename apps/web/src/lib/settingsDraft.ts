@@ -240,20 +240,43 @@ export function commit(draft: Draft): void {
 }
 
 /**
- * 导入合并（spec §4：白名单字段级覆盖，导入缺项保留现状）。字段 = 顶层字段：
- * 在场字段取导入值经 normalizeSettings 规范化后的结果（节内缺项归该节默认），
- * 非法字段同口径归默认（报错与拦截在 Task 3 导入对话框层——validateSettings），
+ * 字段级覆盖（I1 终审勘误口径，spec §4「字段级覆盖，缺项保留现状」的落地形态）：
+ * raw 在场且规范化结果在案的键取规范化值覆盖 target；raw 在场但规范化剔除的键
+ * （顶层未知字段/modes 非法值——normalizeSettings 重建节时剔除）忽略，current
+ * 保留。双方均为对象且未到深度上限时递归（节 → diagrams.modes 一层），数组与
+ * 标量整值覆盖（excludedPatterns 整组替换）。
+ */
+function mergeFields(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+  raw: Record<string, unknown>,
+  depth: number
+): void {
+  for (const k of Object.keys(raw)) {
+    if (!(k in source)) continue;
+    const rv = raw[k];
+    if (depth < 2 && isObj(rv) && isObj(source[k]) && isObj(target[k])) {
+      mergeFields(target[k] as Record<string, unknown>, source[k] as Record<string, unknown>, rv, depth + 1);
+    } else {
+      target[k] = source[k];
+    }
+  }
+}
+
+/**
+ * 导入合并（spec §4「白名单字段级覆盖，导入缺项保留现状」；2026-10-19 终审 I1
+ * 勘误：字段 = 节内字段级而非节整体——对象节内递归一层至 diagrams.modes，数组
+ * 整组覆盖，标量直接覆盖；导入缺项保留 current）。在场字段取导入值经
+ * normalizeSettings 规范化后的结果，非法字段同口径取规范化值（顶层归默认/节内
+ * clamp；modes 非法值被剔除即不覆盖——严格阻断在导入对话框层 validateSettings），
  * 未知字段忽略。
  */
 export function mergeImported(current: Settings, imported: unknown): Settings {
   const out = deepClone(current);
   if (!isObj(imported)) return out;
-  const norm = normalizeSettings(pickKnown(imported));
-  const target = out as unknown as Record<string, unknown>;
-  const source = norm as unknown as Record<string, unknown>;
-  for (const k of SETTINGS_KEYS) {
-    if (k in imported) target[k] = source[k];
-  }
+  const raw = imported as Record<string, unknown>;
+  const norm = normalizeSettings(pickKnown(raw));
+  mergeFields(out as unknown as Record<string, unknown>, norm as unknown as Record<string, unknown>, raw, 0);
   return out;
 }
 
@@ -406,19 +429,19 @@ function diffInto(key: string, a: unknown, b: unknown, d: ImportGroupDiff, depth
 
 /**
  * 导入变更摘要（spec §4「逐组新增/修改计数，关键字段 diff 列表」的纯函数部分）：
- * 仅列导入在场且与现状有差异的组；节值取白名单规范化后的结果（与确认后合并生效值
- * 同源——摘要即所选「合并」路径的真实效果预览）。
+ * 仅列导入在场且与现状有差异的组；对照值取 mergeImported 的真实合并结果（I1
+ * 字段级口径同源——摘要即所选「合并」路径的真实效果预览）。
  */
 export function importGroupDiffs(current: Settings, importedSettings: unknown): ImportGroupDiff[] {
   if (!isObj(importedSettings)) return [];
-  const norm = normalizeSettings(pickKnown(importedSettings));
+  const next = mergeImported(current, importedSettings);
   const cur = current as unknown as Record<string, unknown>;
-  const next = norm as unknown as Record<string, unknown>;
+  const nx = next as unknown as Record<string, unknown>;
   const diffs: ImportGroupDiff[] = [];
   for (const k of SETTINGS_KEYS) {
     if (!(k in importedSettings)) continue;
     const d: ImportGroupDiff = { key: k, added: [], removed: [], changed: [] };
-    diffInto(k, cur[k], next[k], d, 0);
+    diffInto(k, cur[k], nx[k], d, 0);
     if (d.added.length > 0 || d.removed.length > 0 || d.changed.length > 0) diffs.push(d);
   }
   return diffs;

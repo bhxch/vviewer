@@ -210,16 +210,40 @@ describe('mergeImported / replaceImported（Task 3 消费的导入语义，spec 
     expect(merged.autoRefresh).toBe(false); // 在场 → 覆盖
     expect(merged.excludedPatterns).toEqual(['.git', 'node_modules']); // 缺项 → 保留
     expect(merged.fonts.uiFamily).toBe('FromImport'); // 在场节字段级覆盖
-    expect(merged.fonts.uiSize).toBe(16); // 节内缺项 → 该节默认值（节整体覆盖口径）
+    expect(merged.fonts.uiSize).toBe(20); // 节内缺项 → 保留 current（I1 字段级口径；节整体覆盖口径下会归节默认 16）
+    expect(merged.fonts.codeSize).toBe(13); // 节内缺项 → 保留 current
     expect(merged.layout).toEqual(layout); // 缺项节 → 现状保留
     expect((merged as unknown as Record<string, unknown>).who).toBeUndefined();
   });
 
-  it('合并：导入字段非法时该字段归位默认（校验与报错在 Task 3 对话框层，本函数只规范化）', () => {
+  it('I1 字段级合并（终审反例）：导入 {fonts:{codeSize}} 只覆盖该字段，uiFamily 保留 current 非默认栈；数组整组覆盖', () => {
+    const current = aSettings({
+      excludedPatterns: ['.git'],
+      fonts: { uiFamily: 'MyFont, monospace', uiSize: 20, codeFamily: 'MyCode', codeSize: 13 }
+    });
+    const merged = mergeImported(current, { fonts: { codeSize: 16 } });
+    expect(merged.fonts.codeSize).toBe(16); // 在场字段覆盖
+    expect(merged.fonts.uiFamily).toBe('MyFont, monospace'); // 非默认栈保留（节整体覆盖口径下会丢）
+    expect(merged.fonts.uiSize).toBe(20);
+    expect(merged.fonts.codeFamily).toBe('MyCode');
+    const arr = mergeImported(current, { excludedPatterns: ['dist', 'build'] });
+    expect(arr.excludedPatterns).toEqual(['dist', 'build']); // 数组整组覆盖（不做元素级并集）
+  });
+
+  it('I1 节内对象递归一层：diagrams.modes 按图类型键级合并，未在场类型/host 保留 current', () => {
+    const current = aSettings({
+      diagrams: { krokiHost: 'https://k.example.com', modes: { mermaid: 'kroki', vega: 'local' } }
+    });
+    const merged = mergeImported(current, { diagrams: { modes: { mermaid: 'source' } } });
+    expect(merged.diagrams.krokiHost).toBe('https://k.example.com'); // 节内缺项保留
+    expect(merged.diagrams.modes).toEqual({ mermaid: 'source', vega: 'local' }); // 在场键覆盖、缺项键保留
+  });
+
+  it('合并：导入字段非法时该字段取规范化结果（校验与报错在 Task 3 对话框层，本函数只规范化）', () => {
     const current = aSettings({ computePolicy: 'remote' });
     const merged = mergeImported(current, { computePolicy: 'quantum', diagrams: 42 });
     expect(merged.computePolicy).toBe('auto'); // 非法 → normalizeSettings 默认，不用现状顶回
-    expect(merged.diagrams).toEqual({ krokiHost: '', modes: {} });
+    expect(merged.diagrams).toEqual({ krokiHost: '', modes: {} }); // 节值非对象 → 规范化全形节整体落位
   });
 
   it('替换：整体覆盖为规范化结果——缺项/脏字段补默认，不保留现状', () => {
