@@ -29,6 +29,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt};
 
 pub mod s3;
 pub mod transport;
+pub mod webdav;
 
 pub use transport::{HttpByteStream, HttpTransport, HttpRequest, HttpResponse};
 

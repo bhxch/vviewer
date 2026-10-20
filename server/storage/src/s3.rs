@@ -437,7 +437,9 @@ fn inner<'a>(block: &'a str, tag: &str) -> Option<&'a str> {
 }
 
 /// XML 实体反转义：五个命名实体 + 十进制/十六进制数字引用；孤立 '&' 原样。
-fn xml_unescape(s: &str) -> String {
+/// （Task 4 起 WebDAV multistatus 解析复用——共享文本助手暂居本模块，
+/// 扩散最小；后续第三实现需要时再迁 lib。）
+pub(crate) fn xml_unescape(s: &str) -> String {
     if !s.contains('&') {
         return s.to_owned();
     }
@@ -654,7 +656,8 @@ impl S3Backend {
     }
 }
 
-fn normalize_prefix(prefix: &str) -> String {
+/// 挂载子路径规范化：空串或 `xxx/`（WebDAV 后端同款语义，Task 4 复用）。
+pub(crate) fn normalize_prefix(prefix: &str) -> String {
     let trimmed = prefix.trim_matches('/');
     if trimmed.is_empty() {
         String::new()
@@ -679,8 +682,8 @@ fn encode_key_path(key: &str) -> String {
 }
 
 /// futures-io body → tokio 流（tokio-util compat 桥，Task 2 评审明确的
-/// 必做交接项）。
-fn into_tokio(body: HttpByteStream) -> impl tokio::io::AsyncRead + Unpin + Send {
+/// 必做交接项；WebDAV GET 同样接，Task 4 复用）。
+pub(crate) fn into_tokio(body: HttpByteStream) -> impl tokio::io::AsyncRead + Unpin + Send {
     tokio_util::compat::FuturesAsyncReadCompatExt::compat(body)
 }
 
@@ -701,8 +704,9 @@ async fn ensure_status(resp: crate::transport::HttpResponse) -> Result<crate::tr
     }
 }
 
-/// 循环读满 cap（容忍短读，EOF 截断）——与 LocalFs::read_head 同形态。
-async fn read_up_to<R: tokio::io::AsyncRead + Unpin>(r: &mut R, cap: usize) -> Vec<u8> {
+/// 循环读满 cap（容忍短读，EOF 截断）——与 LocalFs::read_head 同形态
+///（WebDAV 头采样/错误体采样复用）。
+pub(crate) async fn read_up_to<R: tokio::io::AsyncRead + Unpin>(r: &mut R, cap: usize) -> Vec<u8> {
     let mut buf = vec![0u8; cap];
     let mut filled = 0;
     while filled < buf.len() {
@@ -717,7 +721,11 @@ async fn read_up_to<R: tokio::io::AsyncRead + Unpin>(r: &mut R, cap: usize) -> V
     buf
 }
 
-fn header_value<'a>(resp: &'a crate::transport::HttpResponse, name: &str) -> Option<&'a str> {
+/// 大小写不敏感取响应头值（WebDAV Range 防线/total 提取复用）。
+pub(crate) fn header_value<'a>(
+    resp: &'a crate::transport::HttpResponse,
+    name: &str,
+) -> Option<&'a str> {
     resp.headers
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case(name))
@@ -739,7 +747,8 @@ fn total_size_from(resp: &crate::transport::HttpResponse) -> Result<u64, Storage
     Err(StorageError::other("s3: response missing content-length/content-range"))
 }
 
-fn dir_entry(name: &str) -> Entry {
+/// 目录条目构造（size/mtime 默认空；WebDAV stat/list 挂载根复用）。
+pub(crate) fn dir_entry(name: &str) -> Entry {
     Entry { name: name.to_owned(), kind: EntryKind::Dir, size: None, mtime: None }
 }
 
