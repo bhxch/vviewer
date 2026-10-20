@@ -24,6 +24,10 @@ impl CoreError {
         Self(StatusCode::FORBIDDEN, msg.into())
     }
 
+    pub fn unauthorized(msg: impl Into<String>) -> Self {
+        Self(StatusCode::UNAUTHORIZED, msg.into())
+    }
+
     pub fn internal(msg: impl Into<String>) -> Self {
         Self(StatusCode::INTERNAL_SERVER_ERROR, msg.into())
     }

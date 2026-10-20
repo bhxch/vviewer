@@ -18,18 +18,15 @@ use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use rand::Rng;
 use state::AppState;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
-/// 生成 32 字节随机 hex（CLI `--token-gen` 与 ticket 共用格式）。
-pub fn generate_token() -> String {
-    let mut buf = [0u8; 32];
-    rand::rng().fill_bytes(&mut buf);
-    buf.iter().map(|b| format!("{b:02x}")).collect()
-}
+// ticket 域随 Task 3 迁 vviewer-core::tickets（多端发布阶段二）——生成器原
+// 路径 re-export：`vviewer::generate_token()`（CLI --token-gen 与 ticket 共用
+// 格式）零改动。
+pub use vviewer_core::tickets::generate_token;
 
 /// ticket 定期清理周期。
 pub const TICKET_SWEEP_INTERVAL: Duration = Duration::from_secs(15);

@@ -1,63 +1,26 @@
 //! 共享应用状态与 ticket 存储。
 //!
 //! 多端发布阶段二：业务状态核已迁 vviewer-core::state（Task 1 数据类型 +
-//! Task 2 运行时挂载容器/register/unregister/root_at 与挂载配置构造面）；本
-//! 模块持有 axum 特有面（静态/前端目录、CORS、watch hub、ticket 表）并保留
-//! builder 与既有路径 re-export（调用点/测试零改动）。
+//! Task 2 运行时挂载容器/register/unregister/root_at 与挂载配置构造面）；
+//! ticket 域已迁 vviewer-core::tickets（Task 3：一次性 ticket 表 + 签发）。
+//! 本模块持有 axum 特有面（静态/前端目录、CORS、watch hub、ticket 表实例）
+//! 并保留 builder 与既有路径 re-export（调用点/测试零改动）。
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
 
 use vviewer_core::state::CoreState;
 use vviewer_storage::transport::HttpTransport;
 
-use crate::generate_token;
-
 // 业务数据类型与挂载域随 Task 1/2 core 抽取迁入 vviewer-core（多端发布阶段
-// 二）；原 `crate::state` 路径 re-export 保持既有调用点/测试零改动。
+// 二）；ticket 域随 Task 3 迁入——原 `crate::state` 路径 re-export 保持既有
+// 调用点/测试零改动。
 pub use vviewer_core::state::{MountMeta, RootSpec};
 pub use vviewer_core::mounts::{
     build_mount, mount_fingerprint, MountConfig, MountKind, MountRoot, RegistrationError,
     RuntimeMount, UnregisterError,
 };
-
-/// ticket 有效期：一次性、30s 过期（SSE 升级专用）。
-pub const TICKET_TTL: Duration = Duration::from_secs(30);
-
-/// 内存 ticket 表：Arc 包裹使 AppState 克隆共享同一份。
-#[derive(Clone, Default)]
-pub struct TicketStore(Arc<Mutex<HashMap<String, Instant>>>);
-
-impl TicketStore {
-    /// 签发：随机 32B hex，顺带惰性清理过期项。
-    pub fn issue(&self) -> String {
-        self.sweep();
-        let ticket = generate_token();
-        self.0.lock().unwrap().insert(ticket.clone(), Instant::now() + TICKET_TTL);
-        ticket
-    }
-
-    /// 一次性消费：无论有效与否都移除；过期返回 false。
-    pub fn consume(&self, ticket: &str) -> bool {
-        match self.0.lock().unwrap().remove(ticket) {
-            Some(expiry) => expiry > Instant::now(),
-            None => false,
-        }
-    }
-
-    /// 惰性清理过期项（签发时触发；另有 main 内的定期 spawn 兜底）。
-    pub fn sweep(&self) {
-        let now = Instant::now();
-        self.0.lock().unwrap().retain(|_, expiry| *expiry > now);
-    }
-
-    /// 直接注入指定过期时间的 ticket（测试专用）。
-    pub fn insert_raw(&self, ticket: String, expiry: Instant) {
-        self.0.lock().unwrap().insert(ticket, expiry);
-    }
-}
+pub use vviewer_core::tickets::TicketStore;
 
 /// 传给所有 axum handler 的共享状态（适配层面）：业务状态核 [`CoreState`]
 /// （多端发布阶段二迁入 vviewer-core）+ axum 特有面。经 Deref 直达核字段

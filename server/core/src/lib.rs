@@ -11,18 +11,20 @@
 //! [`CoreRequest`]（或直接提取已解析参数）、调用域 handler、把 [`CoreResponse`]
 //! 映射回 axum Response。对外 HTTP 行为逐字节等价（既有测试为行为锁）。
 //! Task 2 已收编 tree/file/mounts 三域（Range 头解析属 HTTP 语义留适配层，
-//! core 收已解析窗口）；Task 3 收编 search 域（NDJSON 流经 [`CoreBody::Stream`]
-//! 承载），tickets/events 随本任务后续提交收编。
+//! core 收已解析窗口）；Task 3 收编 search/tickets/events 三域（NDJSON 与 SSE
+//! 皆经 [`CoreBody::Stream`] 流形态承载）。
 
 pub mod auth;
 pub mod detect;
 pub mod error;
+pub mod events;
 pub mod file;
 pub mod guard;
 pub mod health;
 pub mod mounts;
 pub mod search;
 pub mod state;
+pub mod tickets;
 pub mod tree;
 
 use std::pin::Pin;
