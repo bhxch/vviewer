@@ -10,7 +10,8 @@
 //!   **无 token 部署三 API 免鉴权**（spec 字面口径——LAN 信任模型，写面裸奔
 //!   风险在任务报告显著记录）；
 //! - 重注册幂等：同指纹（kind+endpoint+bucket/prefix+label，无凭据）返回既有
-//!   rootIndex，不重复分配。
+//!   rootIndex，不重复分配；
+//! - POST body 显式上限 64KB（DefaultBodyLimit）：超限 413 无副作用，限值内不误伤。
 
 use std::sync::Arc;
 
@@ -459,6 +460,50 @@ async fn tokenless_deployment_allows_mount_apis_per_spec_literal() {
 
     let (status, _, _) = send(app, "DELETE", "/api/mounts/1", None, None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
+}
+
+// ---------- POST body 上限：64KB 显式限值（DefaultBodyLimit）→ 413 ----------
+
+/// tower 层限值闸门：合法可解析的 JSON 仅因体积超 64KB 被拒——证明限值确实
+/// 挂在 POST 路由（DefaultBodyLimit），而非 serde/校验层。响应体是 axum 提取器
+/// 拒绝的纯文本（非 JSON error 形状——与 compute 的 handler 层 413 不同源），
+/// 只锚状态码；并断言无副作用（超限请求不得产生任何注册）。
+#[tokio::test]
+async fn post_over_64kb_body_rejected_413_without_side_effect() {
+    let f = fixture(None);
+    let app = vviewer::build_router(f.state.clone());
+
+    // label 撑到 64KB+1：字段级合法（String 无形状限制），拒收只能来自限值层
+    let mut big = s3_body();
+    big["label"] = json!("x".repeat(64 * 1024 + 1));
+    let (status, _, _) = send(app, "POST", "/api/mounts", None, Some(big)).await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+
+    let (_, _, body) = send(
+        vviewer::build_router(f.state),
+        "GET",
+        "/api/mounts",
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(
+        json(&body)["runtimeMounts"].as_array().unwrap().len(),
+        0,
+        "超限 POST 不得产生注册副作用"
+    );
+}
+
+/// 限值边界内的常规注册体（<64KB）不受影响——限值不误伤正常形态。
+#[tokio::test]
+async fn post_under_64kb_body_accepted() {
+    let f = fixture(None);
+    let app = vviewer::build_router(f.state);
+
+    let mut normal = s3_body();
+    normal["label"] = json!("x".repeat(60 * 1024));
+    let (status, _, _) = send(app, "POST", "/api/mounts", None, Some(normal)).await;
+    assert_eq!(status, StatusCode::CREATED);
 }
 
 // ---------- 注册校验：缺必填 400、未知字段 4xx、坏 JSON 4xx；错误不携凭据 ----------

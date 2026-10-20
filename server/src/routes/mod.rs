@@ -26,6 +26,12 @@ const COMPUTE_BODY_LIMIT: usize = 6 * 1024 * 1024;
 /// 抢先 413 拿不到 JSON error body；精确 20MB 在 handler 判。
 const COMPUTE_HIGHLIGHT_BODY_LIMIT: usize = 48 * 1024 * 1024;
 
+/// /api/mounts POST 的原始请求体上限：挂载配置是字段级小型 JSON（endpoint/
+/// 凭据等十来个短字段），64KB 已超合理形态数个数量级；超限直接 413，防无界
+/// body 进入 serde 解析——POST 在无 token 部署免鉴权（spec 字面口径），显式
+/// 限值即写面闸门。GET 清单无 body，不挂限（layer 只作用于 POST 槽）。
+const MOUNTS_BODY_LIMIT: usize = 64 * 1024;
+
 /// `/api` 子路由；未匹配的 API 路径统一返回 JSON 404。
 ///
 /// 鉴权分组：tree/file/ticket/compute 在 Bearer 中间件组内；
@@ -40,7 +46,14 @@ pub fn api_router(state: crate::state::AppState) -> Router {
         // 阶段二运行时挂载三 API（spec §3）：Bearer 门与 tree/file 同组（豁免面
         // health/events 不变）；无 token 部署免鉴权 = spec 字面口径（风险注记见
         // mounts.rs 模块文档与任务报告）
-        .route("/mounts", post(mounts::register).get(mounts::manifest))
+        .route(
+            "/mounts",
+            // POST 挂显式 body 闸门（MethodRouter::layer 只包已注册方法槽，其后
+            // 链上的 .get 不受影响——axum method_routing.rs layer 映射语义）
+            post(mounts::register)
+                .layer(DefaultBodyLimit::max(MOUNTS_BODY_LIMIT))
+                .get(mounts::manifest),
+        )
         .route("/mounts/{index}", delete(mounts::remove));
     // --compute 才暴露计算端点；未启用时路径不存在（统一 JSON 404）。
     // CompressionLayer（BUG-10 收尾）：highlight intervals 响应可达十余 MB，
