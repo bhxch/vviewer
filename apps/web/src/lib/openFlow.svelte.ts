@@ -1,10 +1,12 @@
-import type { TreeStore, FileSource } from '@vviewer/core';
+import type { TreeStore, FileSource, DirectStore } from '@vviewer/core';
 import {
   createSingleFileStore,
   createUrlStore,
   createLocalFsStore,
   createLocalFilesStore,
   createRemoteStore,
+  createS3DirectStore,
+  createDavDirectStore,
   ensurePermission,
   getRemoteBase,
   isAbortError,
@@ -25,7 +27,7 @@ import { loadSettings } from './stores/settings';
 import { releaseStoreIfLast, storeRetained } from './storeRelease';
 import { saveSearchEngine } from './searchEngineCache';
 import { saveServerHealth } from './serverHealthCache';
-import { syncMountsOnConnect } from './mountsSync';
+import { syncMountsOnConnect, directConfigOf, type DirectMountRecord } from './mountsSync';
 import {
   CLOSED_STACK_MAX,
   ClosedStack,
@@ -1025,7 +1027,7 @@ export function openRemoteSource(
   token: string | null,
   rootIndex: number,
   basePath: string,
-  opts?: { file?: string; size?: number | null }
+  opts?: { file?: string; size?: number | null; label?: string }
 ): void {
   const file = opts?.file;
   const fileSize = opts?.size ?? null;
@@ -1064,7 +1066,12 @@ export function openRemoteSource(
     }
     return;
   }
-  const label = remoteSourceLabel(normBase, rootIndex, normPath, file);
+  // label 覆写（目录管理页挂载根「在树中打开」，spec §5 阶段四）：挂载根以清单
+  // label 为显示名（「host · 根N/」序号形态的替代）。label 参与 storeId hash
+  // （remote:${hash8(`${base}:${label}`)})——覆盖路径须恒传同值（管理页每行固定
+  // 取清单 label ?? 同款回落），否则同根会造出第二个 storeId（双树行）。快照恢复
+  // 链以 sources[].storeLabel 原值回环，与覆盖值天然一致（reconnectRemoteStore I-1）。
+  const label = opts?.label ?? remoteSourceLabel(normBase, rootIndex, normPath, file);
   const store = createRemoteStore(normBase, token, label, {
     rootIndex,
     ...(normPath !== '' ? { basePath: normPath } : {})
@@ -1097,6 +1104,42 @@ export function openRemoteSource(
     workspaceStore.addSource(workspaceStore.activeId, source);
     addTab(store, fileRel!, fileRel!.split('/').pop() ?? fileRel!, fileSize);
   }
+}
+
+/**
+ * 直连挂载 store 创建（目录挂载 spec §4 阶段三，评审带入①创建分派点——remote/
+ * localfs 等既有工厂分派处扩 direct 两类）：DirectMountRecord → core 工厂
+ * （配置经 mountsSync.directConfigOf 单一映射面；storeId = 记录 id）。watch 接线
+ * 与 remote 同款：DirectStore.watch 契约为立即 onError（watch 恒不支持）→ 状态栏
+ * 降级指示，与 remote watch-error 同语义；listener 直连恒不触发，仍按 remote 同款
+ * autoRefresh 过滤接线（行为面统一，未来推送面扩展零调用方改动）。
+ */
+export function createDirectMountStore(rec: DirectMountRecord): DirectStore {
+  const cfg = directConfigOf(rec);
+  const store = 'bucket' in cfg ? createS3DirectStore(cfg) : createDavDirectStore(cfg);
+  watchHealth.degraded = false; // 新实例重置降级指示（上一次连接的降级不复用，connectServer 同款）
+  store.watch(
+    (paths) => {
+      if (!loadSettings().autoRefresh) return;
+      tabStore.refreshPaths(store.id, paths);
+    },
+    () => {
+      watchHealth.degraded = true;
+      console.warn('[vviewer] 直连挂载不支持变更推送，自动刷新对该来源不可用');
+    }
+  );
+  return store;
+}
+
+/**
+ * 直连挂载在树中打开（目录管理页组②「打开」动作，spec §5 阶段四）：存活实例
+ * 复用（同 id 判定——直连 storeId = 记录 id，与 openRemoteSource 复用防线同
+ * 语义：再建会得到同 id 新实例）+ addDirStoreTab 目录 tab 通道（跨 workspace
+ * 去重激活、来源登记 sourceOf 派生 kind='direct'）。
+ */
+export function openDirectMount(rec: DirectMountRecord): void {
+  const alive = storeById(rec.id);
+  addDirStoreTab(alive ?? createDirectMountStore(rec));
 }
 
 /**

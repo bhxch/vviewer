@@ -19,6 +19,7 @@
  * 测试形态：fake-indexeddb + fetch 路由桩（mountsSync.test.ts）。
  */
 import { db, MOUNTS } from './stores/session';
+import type { DavDirectConfig, S3DirectConfig } from '@vviewer/core';
 
 /**
  * 代理挂载记录（brief 接口 schema + 实施扩展，扩展面记录任务报告）：
@@ -218,6 +219,38 @@ export function saveDirectMount(rec: DirectMountRecord): Promise<void> {
 /** 直连记录删除（deleteMount 直连侧具名漏斗）。 */
 export function deleteDirectMount(id: string): Promise<void> {
   return deleteMount(id);
+}
+
+/**
+ * 直连记录 → core 直连 store 配置（评审带入①：openFlow 创建分派与管理页测试
+ * 连接共用的单一映射面）。字段按 backend 展开为 S3DirectConfig/DavDirectConfig
+ * （username→accessKeyId/secret→secretAccessKey 或 username/password；prefix 与
+ * pathStyle 直传——归一在工厂内）。缺失字段回退空串（记录损坏防御：工厂/探测
+ * 面报错而非崩溃）；backend 不识别抛错。
+ */
+export function directConfigOf(rec: DirectMountRecord): S3DirectConfig | DavDirectConfig {
+  if (rec.backend === 's3') {
+    const cfg: S3DirectConfig = {
+      endpoint: rec.endpoint,
+      bucket: rec.bucket ?? '',
+      prefix: rec.prefix,
+      accessKeyId: rec.username ?? '',
+      secretAccessKey: rec.secret ?? '',
+      label: rec.label
+    };
+    if (rec.pathStyle !== undefined) cfg.pathStyle = rec.pathStyle;
+    return cfg;
+  }
+  if (rec.backend === 'webdav') {
+    return {
+      endpoint: rec.endpoint,
+      prefix: rec.prefix,
+      username: rec.username ?? '',
+      password: rec.secret ?? '',
+      label: rec.label
+    };
+  }
+  throw new Error(`未知直连后端: ${String((rec as { backend?: unknown }).backend)}`);
 }
 
 /** 兼容别名（既有调用面沿用 proxy 具名形态）。 */

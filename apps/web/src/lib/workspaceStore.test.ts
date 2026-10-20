@@ -5,6 +5,7 @@ import 'fake-indexeddb/auto';
 import {
   createWorkspaceState,
   migrateLegacyTabs,
+  sourceKindOf,
   workspaceStore,
   type WorkspaceSource,
   type WorkspacesSnapshot
@@ -303,5 +304,22 @@ describe('session loadWorkspaces 迁移通道', () => {
     expect(second.snapshot?.workspaces[0]!.tabs).toEqual(legacy);
     // 旧键保留不删（降级/对照兜底）
     expect(second.legacyTabs).toEqual(legacy);
+  });
+});
+
+describe('sourceKindOf（目录挂载 spec §4 阶段三：直连挂载类别，评审带入①）', () => {
+  it('s3direct:/davdirect: 前缀 → direct（openFlow 创建分派与快照恢复链路的类别依据）', () => {
+    expect(sourceKindOf('s3direct:1a2b3c4d')).toBe('direct');
+    expect(sourceKindOf('davdirect:1a2b3c4d')).toBe('direct');
+  });
+
+  it('既有前缀零变化（remote/localfs/localfiles/url/single）', () => {
+    expect(sourceKindOf('localfs:docs')).toBe('localfs');
+    expect(sourceKindOf('localfiles:docs')).toBe('localfiles');
+    expect(sourceKindOf('remote:abc')).toBe('remote');
+    expect(sourceKindOf('remote:abc:r2:def')).toBe('remote');
+    expect(sourceKindOf('url:https://x/y.txt')).toBe('url');
+    expect(sourceKindOf('single:xyz')).toBe('single');
+    expect(sourceKindOf('unknown:xyz')).toBe('single');
   });
 });

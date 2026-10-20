@@ -21,6 +21,7 @@
     bindArchiveOpenEvents,
     seedSeqFromSnapshots,
     addDirTabForRestore,
+    createDirectMountStore,
     hasUserActivity,
     loadLastServer,
     registryVersion,
@@ -53,7 +54,7 @@
   } from './layout';
   import { codeLineHeight } from './theme';
   import { loadEnabledFontFaces } from './stores/fontsStore';
-  import { syncMountsOnConnect } from './mountsSync';
+  import { syncMountsOnConnect, listDirectMounts } from './mountsSync';
 
   /** 文件树/面板的来源条目：workspace.sources（模型）× storeById（活动实例）的合成。
    * rootIndex/basePath 随模型透传（GlobalSearchPanel → globalSearch 的远程命中
@@ -481,7 +482,14 @@
    */
   async function restore(): Promise<void> {
     try {
-      const [{ snapshot, legacyTabs }, dirHandle] = await Promise.all([loadWorkspaces(), loadDirHandle()]);
+      // 直连挂载记录（目录挂载 spec §4）：快照 direct 来源按 storeId（= 记录 id）
+      // 查此表重建；库不可用回落空表（全部 direct 来源落占位，不阻断启动）
+      const [{ snapshot, legacyTabs }, dirHandle, directRecords] = await Promise.all([
+        loadWorkspaces(),
+        loadDirHandle(),
+        listDirectMounts().catch(() => [])
+      ]);
+      const directById = new Map(directRecords.map((r) => [r.id, r]));
       // 旧会话（无 'workspaces' 键）：迁移成单默认 workspace 的 v2 形状走同一恢复路径
       const snap = snapshot ?? migrateLegacyTabs(legacyTabs);
       // 决策点在 await 之后：等待期间到达的注入/用户操作同样被识别（决策到落模型
@@ -560,6 +568,30 @@
               const dirSnap = wsItem.tabs.find((t) => t.path === '' && t.storeId === src.storeId);
               if (dirSnap !== undefined) {
                 addDirTabForRestore(wsItem.id, store, { pinned: dirSnap.pinned === true });
+              }
+            }
+          } else if (src.kind === 'direct') {
+            // 直连挂载恢复（目录挂载 spec §4 阶段三，评审带入①恢复链路同点）：
+            // storeId 即 mounts store 记录 id（凭据引用）——按 id 查记录经
+            // createDirectMountStore 重建（watch 不可用降级接线在工厂内）。记录已
+            // 删除（用户删了挂载）→ 不重建，tab 落占位（既有降级链，plan 裁决预留）。
+            // 快照有目录条目则一并恢复目录 tab（remote 侧同款 M-5 语义）。
+            const rec = directById.get(src.storeId);
+            if (rec !== undefined) {
+              let store: TreeStore | null = null;
+              try {
+                store = createDirectMountStore(rec);
+              } catch (err) {
+                // 记录损坏（backend 不识别等）：落占位，不让单来源拖垮恢复
+                console.warn(`恢复直连挂载 ${src.storeId} 失败`, err);
+              }
+              if (store !== null) {
+                registerStore(store); // 恢复链入册：不依赖目录 tab 的 addTab 时序（registerStore doc）
+                rebuilt.set(src.storeId, store);
+                const dirSnap = wsItem.tabs.find((t) => t.path === '' && t.storeId === src.storeId);
+                if (dirSnap !== undefined) {
+                  addDirTabForRestore(wsItem.id, store, { pinned: dirSnap.pinned === true });
+                }
               }
             }
           }

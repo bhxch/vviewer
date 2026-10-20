@@ -10,8 +10,9 @@
  */
 import type { TabSnapshot } from './stores/session';
 
-/** 工作区来源类别：由 storeId 前缀推导（sourceKindOf）。 */
-export type WorkspaceSourceKind = 'localfs' | 'localfiles' | 'remote' | 'single' | 'url';
+/** 工作区来源类别：由 storeId 前缀推导（sourceKindOf）。'direct' = S3/WebDAV
+ * 浏览器直连挂载（目录挂载 spec §4 阶段三——s3direct:/davdirect: 前缀）。 */
+export type WorkspaceSourceKind = 'localfs' | 'localfiles' | 'remote' | 'direct' | 'single' | 'url';
 
 /**
  * 工作区内一个数据来源（目录/服务器根）。rootIndex/basePath 服务多根服务器
@@ -61,6 +62,7 @@ export function sourceKindOf(storeId: string): WorkspaceSourceKind {
   if (storeId.startsWith('localfs:')) return 'localfs';
   if (storeId.startsWith('localfiles:')) return 'localfiles';
   if (storeId.startsWith('remote:')) return 'remote';
+  if (storeId.startsWith('s3direct:') || storeId.startsWith('davdirect:')) return 'direct';
   if (storeId.startsWith('url:')) return 'url';
   return 'single';
 }

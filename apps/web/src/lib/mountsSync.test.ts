@@ -4,8 +4,11 @@
 // 与 session v3→v4 迁移用例按 brief 的 Task 2 测试清单就近收编本文件。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
+import { webcrypto } from 'node:crypto';
+import { createS3DirectStore, s3DirectStoreId, type S3DirectConfig } from '@vviewer/core';
 import {
   deleteDirectMount,
+  directConfigOf,
   displayEndpoint,
   listDirectMounts,
   listProxyMounts,
@@ -587,5 +590,82 @@ describe('isMountRootStoreId（fsRoots 边界：≥ fsRoots = 挂载根）', () 
     setHealth(1);
     expect(isMountRootStoreId('localfs:docs')).toBe(false);
     expect(isMountRootStoreId('placeholder:remote:abcd1234:r3')).toBe(false);
+  });
+});
+
+// ---------- directConfigOf（评审带入①：直连记录 → core 工厂配置，openFlow
+// 创建分派与管理页测试连接共用） ----------
+
+describe('directConfigOf', () => {
+  const s3Rec: DirectMountRecord = {
+    id: 's3direct:abcd1234',
+    kind: 'direct',
+    backend: 's3',
+    label: '样例桶',
+    endpoint: 'http://127.0.0.1:9000',
+    bucket: 'bkt',
+    prefix: 'sub',
+    username: 'AK',
+    secret: 'SK',
+    pathStyle: false,
+    createdAt: 1
+  };
+
+  it('S3 记录映射：bucket/凭据展开为 accessKeyId/secretAccessKey，prefix/pathStyle 直传（工厂内部归一）', () => {
+    expect(directConfigOf(s3Rec)).toEqual({
+      endpoint: 'http://127.0.0.1:9000',
+      bucket: 'bkt',
+      prefix: 'sub',
+      accessKeyId: 'AK',
+      secretAccessKey: 'SK',
+      pathStyle: false,
+      label: '样例桶'
+    });
+  });
+
+  it('WebDAV 记录映射：username/secret 展开为 username/password；pathStyle 不入 dav 配置面', () => {
+    const cfg = directConfigOf({
+      id: 'davdirect:abcd1234',
+      kind: 'direct',
+      backend: 'webdav',
+      label: '文献库',
+      endpoint: 'http://127.0.0.1:8333/dav',
+      prefix: 'docs',
+      username: 'u',
+      secret: 'p',
+      createdAt: 1
+    });
+    expect(cfg).toEqual({
+      endpoint: 'http://127.0.0.1:8333/dav',
+      prefix: 'docs',
+      username: 'u',
+      password: 'p',
+      label: '文献库'
+    });
+  });
+
+  it('缺失字段回退空串（记录损坏防御：工厂/探测面报错而非崩溃）；pathStyle 缺省不入配置（工厂缺省 path-style）', () => {
+    expect(directConfigOf({ ...s3Rec, bucket: undefined, username: undefined, secret: undefined, pathStyle: undefined })).toEqual({
+      endpoint: 'http://127.0.0.1:9000',
+      bucket: '',
+      prefix: 'sub',
+      accessKeyId: '',
+      secretAccessKey: '',
+      label: '样例桶'
+    });
+  });
+
+  it('未知 backend 抛错（记录损坏防御）', () => {
+    expect(() => directConfigOf({ ...s3Rec, backend: 'ftp' as DirectMountRecord['backend'] })).toThrow(/未知直连后端/);
+  });
+
+  it('与 core 工厂联动：配置直接建 store 得到的 storeId = 记录 id（id 闭环——管理页保存即以 s3DirectStoreId/davDirectStoreId 为记录 id）', async () => {
+    if (!globalThis.crypto?.subtle) vi.stubGlobal('crypto', webcrypto);
+    const rec = {
+      ...s3Rec,
+      id: s3DirectStoreId({ endpoint: s3Rec.endpoint, bucket: s3Rec.bucket!, prefix: s3Rec.prefix, pathStyle: s3Rec.pathStyle })
+    };
+    const store = createS3DirectStore(directConfigOf(rec) as S3DirectConfig);
+    expect(store.id).toBe(rec.id);
   });
 });
