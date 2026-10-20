@@ -114,7 +114,8 @@ TOML `[[mount]]` 是启动期静态装配；三 API 在**运行时**增删内存
   per-kind 必填——S3 需 `endpoint`/`bucket`/`access_key_id`/`secret_access_key`，
   WebDAV 需 `endpoint`/`username`/`password`；缺必填 400（错误消息仅含字段名）；
   未知字段 4xx（防拼错键静默忽略）；**请求体上限 64KB，超限 413**。
-- 成功 `201 {"rootIndex": N}`（N 自 fsRoots+静态挂载之后起算）；**同指纹重复注册
+- 成功 `201 {"rootIndex": N}`（N 自 fsRoots+静态挂载之后起算，**追加分配**：
+  新项恒接在活项之后，已删索引不填充复用——见 DELETE 一节）；**同指纹重复注册
   → `200` 返回既有 rootIndex，不重复分配**（幂等，面向前端对账重注册）。指纹 =
   kind+endpoint+bucket/prefix+label（各 trim 规范化），**不含凭据**——凭据轮换
   不产生新指纹。
@@ -134,17 +135,22 @@ TOML `[[mount]]` 是启动期静态装配；三 API 在**运行时**增删内存
 
 - `staticMounts`：TOML `[[mount]]` 装配项（rootIndex 自 fsRoots 起算）；
   `runtimeMounts`：本 API 注册项（接在静态段之后）；`mounts`：全量汇总
-  （静态 + 运行时，rootIndex 升序）——前端对账比对此段。
+  （静态 + 运行时，rootIndex 升序）——前端对账比对此段。**运行时段寻址起点 =
+  `fsRoots + staticMounts.length`**（静态挂载的 rootIndex 同样 ≥ fsRoots，客户端
+  区分静态/运行时归属须以该起点分界，不能单以 fsRoots 判定）。
 - 条目形态 `{rootIndex, kind, label?, endpoint, bucket?, prefix, capabilities:
   {watch, search}}`；挂载根能力恒 `watch:false, search:false`。结构面即无凭据
   字段（凭据永不回显）。
 
 ### DELETE /api/mounts/:index —— 删除
 
-- 运行时项 `204` 并移除（`rootIndex` 寻址面随即收缩；引用该根的活跃 tab 下次
-  访问自然 404）；
+- 运行时项 `204` 并删除（**tombstone 语义，不压缩**：槽位保留置空，其余项
+  `rootIndex` 不移位——删非尾项不串扰已开 tab 的旧索引；被删索引进程内恒不
+  解析：`tree`/`file` 访问返回越界 400、重复 DELETE 返回 `404`、清单不含已删
+  项；新注册不填充空洞，重启整体回收。引用该根的活跃 tab 下次访问自然失效，
+  无静默内容串扰）；
 - fs 根 / 静态 TOML 挂载 `405`（静态资源类不支持 DELETE——重启即复现，删配置
-  才是真删除）；越界 `404`。
+  才是真删除；响应带 `Allow: GET, POST` 头）；越界或已删 `404`。
 
 ## 响应压缩
 

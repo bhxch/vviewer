@@ -82,6 +82,7 @@ interface Outcome {
   status: number;
   text: string;
   json: unknown;
+  headers: Headers;
 }
 
 /** 三 API 统一通道：Bearer 按需注入；JSON body 按需序列化。 */
@@ -105,7 +106,7 @@ async function call(
   } catch {
     // 非 JSON（tower 层 413 纯文本等）：原样
   }
-  return { status: res.status, text, json };
+  return { status: res.status, text, json, headers: res.headers };
 }
 
 function errorOf(o: Outcome): string {
@@ -334,8 +335,9 @@ test('MTS-06: DELETE 矩阵——运行时 204/再删 404/静态与 fs 根 405/�
   expect(del.status).toBe(204);
   expect(del.text).toBe('');
 
-  // 删后清单收缩 + 该根寻址回归越界 400（下次访问自然 404 的前端降级已裁决：
-  // 活跃 tab 失效帧降级为「删除即成功」，见任务报告）
+  // 删后清单收缩（tombstone 空洞不进清单）+ 该根寻址 400 越界——tombstone
+  // 语义：其余项 rootIndex 不移位、被删索引进程内恒不解析（重复 DELETE 404，
+  // 见下），无移位串扰（活跃 tab 失效帧降级为「删除即成功」，见任务报告）
   const after = manifestOf(await call('GET', '/api/mounts', { bearer: TOKEN }));
   expect(after.runtimeMounts.map((e) => e.rootIndex)).not.toContain(idx);
   expect(after.mounts.map((e) => e.rootIndex)).toEqual([1, ...after.runtimeMounts.map((e) => e.rootIndex)]);
@@ -343,15 +345,17 @@ test('MTS-06: DELETE 矩阵——运行时 204/再删 404/静态与 fs 根 405/�
   expect(tree.status).toBe(400);
   expect(errorOf(tree)).toContain('root index out of range');
 
-  // 再删 → 404（运行时段越界）
+  // 再删 → 404（已删 tombstone 空洞同越界归 404）
   const again = await call('DELETE', `/api/mounts/${idx}`, { bearer: TOKEN });
   expect(again.status).toBe(404);
 
-  // 静态 TOML 挂载（1）与 fs 根（0）拒删 → 405（静态资源类不支持 DELETE）
+  // 静态 TOML 挂载（1）与 fs 根（0）拒删 → 405（静态资源类不支持 DELETE；
+  // RFC 9110 MUST：405 响应携 Allow 头）
   for (const staticIdx of [0, 1]) {
     const res = await call('DELETE', `/api/mounts/${staticIdx}`, { bearer: TOKEN });
     expect(res.status, `DELETE /api/mounts/${staticIdx}`).toBe(405);
     expect(errorOf(res)).toContain('static root');
+    expect(res.headers.get('allow')).toBe('GET, POST');
   }
 });
 

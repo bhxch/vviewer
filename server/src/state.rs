@@ -243,7 +243,8 @@ pub enum RegistrationError {
 }
 
 /// 运行时删除错误分类：Static → 405（fs 根/静态 TOML 挂载不可删——该资源类
-/// 不支持 DELETE）；NotFound → 404（运行时段越界）。
+/// 不支持 DELETE，响应补 `Allow` 头）；NotFound → 404（运行时段越界或已删
+/// tombstone 空洞）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnregisterError {
     Static,
@@ -323,9 +324,13 @@ pub struct AppState {
     /// fs 根数量（roots 前缀段长度）：挂载根寻址边界（health.fsRoots 宣告源）。
     pub fs_roots: usize,
     /// 运行时挂载容器（阶段二 spec §3）：`POST /api/mounts` 注册的内存态挂载，
-    /// 重启失效。rootIndex = `roots.len()` + 容器序（静态段之后的连续寻址段，
-    /// 经 [`AppState::root_at`] 统一寻址）。
-    pub runtime_mounts: Arc<Mutex<Vec<RuntimeMount>>>,
+    /// 重启失效。rootIndex = `roots.len()` + 槽位序（静态段之后的寻址段，经
+    /// [`AppState::root_at`] 统一寻址）。**tombstone 容器**（`Option` 槽位）：
+    /// 删除只置 `None` 不压缩——其余项 rootIndex 不移位（删非尾项不串扰已开
+    /// tab），被删索引进程内恒不解析（重复 DELETE 404、tree/file 越界 400），
+    /// 「删除后移位/复用索引串扰旧引用」两类窗口一并消灭；新注册不填充空洞
+    /// （[`AppState::register_mount`] 追加分配），重启才整体回收。
+    pub runtime_mounts: Arc<Mutex<Vec<Option<RuntimeMount>>>>,
     /// 运行时注册用的 HTTP transport（懒初始化：首次注册构建 reqwest 连接池，
     /// 全注册共享；测试经 [`AppState::with_runtime_transport`] 注入
     /// MockTransport——`AppState::new` 不付 reqwest Client 构建成本，既有测试
@@ -434,8 +439,10 @@ impl AppState {
     // ---------- 运行时挂载（阶段二 spec §3：POST/GET/DELETE /api/mounts） ----------
 
     /// rootIndex → 根规格（静态段 + 运行时段统一寻址）：tree/file 的分发入口。
-    /// 越界 None（handler 400）。RootSpec 含 Arc backend，clone 廉价；运行时段
-    /// 短暂持锁克隆即释放（锁内不做任何 IO/await）。
+    /// 越界 None（handler 400）；运行时段已删槽位（tombstone `None`）同返回
+    /// None——被删索引自然失效（下次访问 400 越界，无内容串扰）。RootSpec 含
+    /// Arc backend，clone 廉价；运行时段短暂持锁克隆即释放（锁内不做任何
+    /// IO/await）。
     pub fn root_at(&self, index: usize) -> Option<RootSpec> {
         if let Some(spec) = self.roots.get(index) {
             return Some(spec.clone());
@@ -443,13 +450,19 @@ impl AppState {
         let guard = self.runtime_mounts.lock().unwrap();
         guard
             .get(index - self.roots.len())
+            .and_then(|slot| slot.as_ref())
             .map(|m| RootSpec::mount(m.root.meta.clone(), m.root.backend.clone()))
     }
 
     /// 运行时挂载注册：backend 构造（复用 [`build_mount`]，与静态 TOML 装配
-    /// 同一函数）+ 指纹幂等 + 追加容器。返回 (rootIndex, created)——同指纹
+    /// 同一函数）+ 指纹幂等 + 容器登记。返回 (rootIndex, created)——同指纹
     /// 命中既有项返回其 rootIndex 且 created=false（handler 200），新分配
     /// created=true（handler 201）。
+    ///
+    /// 分配语义（tombstone 纪律，锁测见 tests/mounts_api.rs）：**追加分配**——
+    /// 新项恒接在容器尾，不填充已删槽位（空洞）。已删索引因此进程内恒不解析，
+    /// 「删除后新注册复用索引串扰旧引用」的复用窗口彻底消灭（递延项销账）；
+    /// 空洞由重启整体回收（运行时挂载本为内存态，重启清零）。
     ///
     /// 幂等语义注记：指纹无凭据面——同指纹换凭据的重注册返回既有项、不重建
     /// backend（凭据轮换需先 DELETE 再注册，或重启；对账场景指纹来自前端
@@ -465,36 +478,43 @@ impl AppState {
         let root = build_mount(cfg, transport).map_err(RegistrationError::Invalid)?;
         let mut guard = self.runtime_mounts.lock().unwrap();
         // 双检：构造窗口内并发注册同指纹——命中即弃置已建 backend（无全局态泄漏）
-        if let Some(pos) = guard.iter().position(|m| m.fingerprint == fingerprint) {
+        if let Some(pos) = guard
+            .iter()
+            .position(|m| m.as_ref().is_some_and(|rm| rm.fingerprint == fingerprint))
+        {
             return Ok((self.roots.len() + pos, false));
         }
-        guard.push(RuntimeMount { fingerprint, root });
+        guard.push(Some(RuntimeMount { fingerprint, root }));
         Ok((self.roots.len() + guard.len() - 1, true))
     }
 
     /// 运行时挂载删除：index 落在静态段（fs 根 + 静态 TOML 挂载）拒删
-    /// [`UnregisterError::Static`]；运行时段越界 [`UnregisterError::NotFound`]。
-    /// 成功即移除并收缩寻址面——其后运行时项 rootIndex 前移，被删 index 的
-    /// 旧引用下次访问自然越界/404（活跃 tab 失效帧降级路径：不推送 SSE 失效
-    /// 帧，挂载根本无事件面，前端凭 GET 清单对账——裁决记录任务报告）。
+    /// [`UnregisterError::Static`]；运行时段越界或已删（tombstone 空洞）
+    /// [`UnregisterError::NotFound`]。成功即**槽位置 `None` 不压缩**——其余项
+    /// rootIndex 不移位（删非尾项不串扰已开 tab 的旧 rootIndex），被删索引
+    /// 进程内恒不解析：tree/file 访问自然 400 越界、重复 DELETE 404、清单
+    /// 不含已删项（manifest 跳过空洞）。（活跃 tab 失效帧降级路径：不推送
+    /// SSE 失效帧，挂载根本无事件面，前端凭 GET 清单对账——裁决记录任务报告。）
     pub fn unregister_mount(&self, index: usize) -> Result<(), UnregisterError> {
         let mut guard = self.runtime_mounts.lock().unwrap();
         if index < self.roots.len() {
             return Err(UnregisterError::Static);
         }
         let pos = index - self.roots.len();
-        if pos >= guard.len() {
-            return Err(UnregisterError::NotFound);
+        match guard.get_mut(pos) {
+            Some(slot @ Some(_)) => {
+                *slot = None;
+                Ok(())
+            }
+            _ => Err(UnregisterError::NotFound),
         }
-        guard.remove(pos);
-        Ok(())
     }
 
     fn find_runtime(&self, fingerprint: &str) -> Option<usize> {
         let guard = self.runtime_mounts.lock().unwrap();
         guard
             .iter()
-            .position(|m| m.fingerprint == fingerprint)
+            .position(|m| m.as_ref().is_some_and(|rm| rm.fingerprint == fingerprint))
             .map(|pos| self.roots.len() + pos)
     }
 
@@ -520,9 +540,9 @@ impl AppState {
     }
 
     /// builder：预置运行时挂载项（测试注入；与 [`AppState::register_mount`]
-    /// 同一容器，rootIndex 寻址语义一致——静态段之后按容器序）。
+    /// 同一容器，rootIndex 寻址语义一致——静态段之后按槽位序）。
     pub fn with_runtime_mounts(self, mounts: Vec<RuntimeMount>) -> Self {
-        self.runtime_mounts.lock().unwrap().extend(mounts);
+        self.runtime_mounts.lock().unwrap().extend(mounts.into_iter().map(Some));
         self
     }
 

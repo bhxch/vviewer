@@ -49,17 +49,20 @@ pub async fn manifest(State(state): State<AppState>) -> Json<MountsManifest> {
         .collect();
     let (runtime_mounts, mounts) = {
         // 锁内只做克隆/构造（无 IO/await）；挂载根能力恒 {watch:false,
-        // search:false}（S3/WebDAV 后端能力位）
+        // search:false}（S3/WebDAV 后端能力位）。tombstone 空洞（已删槽位）
+        // 跳过——清单不含已删项，且条目 rootIndex 按槽位序保持原值不移位
         let guard = state.runtime_mounts.lock().unwrap();
         let runtime: Vec<MountEntry> = guard
             .iter()
             .enumerate()
-            .map(|(pos, rm)| {
-                MountEntry::new(
-                    state.roots.len() + pos,
-                    &rm.root.meta,
-                    rm.root.backend.capabilities(),
-                )
+            .filter_map(|(pos, rm)| {
+                rm.as_ref().map(|rm| {
+                    MountEntry::new(
+                        state.roots.len() + pos,
+                        &rm.root.meta,
+                        rm.root.backend.capabilities(),
+                    )
+                })
             })
             .collect();
         let mut all = static_mounts.clone();
@@ -69,20 +72,28 @@ pub async fn manifest(State(state): State<AppState>) -> Json<MountsManifest> {
     Json(MountsManifest { fs_roots: state.fs_roots, static_mounts, runtime_mounts, mounts })
 }
 
-/// DELETE /api/mounts/:index：运行时项 204 + 移除；静态项（fs 根/静态 TOML
-/// 挂载）405（该资源类不支持 DELETE——语义裁决记录任务报告）；越界 404。
+/// DELETE /api/mounts/:index：运行时项 204 + 槽位 tombstone（不压缩不移位，
+/// 见 [`crate::state::AppState::unregister_mount`]）；静态项（fs 根/静态 TOML
+/// 挂载）405（该资源类不支持 DELETE——语义裁决记录任务报告；响应补 `Allow:
+/// GET, POST` 头，RFC 9110 §15.5.5 对 405 的 MUST）；越界或已删 404。
 pub async fn remove(
     State(state): State<AppState>,
     Path(index): Path<usize>,
-) -> Result<StatusCode, AppError> {
+) -> Result<Response, AppError> {
     match state.unregister_mount(index) {
-        Ok(()) => Ok(StatusCode::NO_CONTENT),
-        Err(UnregisterError::Static) => Err(AppError(
-            StatusCode::METHOD_NOT_ALLOWED,
-            format!(
-                "root index {index} is a static root (fs root or config mount) and cannot be deleted"
-            ),
-        )),
+        Ok(()) => Ok(StatusCode::NO_CONTENT.into_response()),
+        Err(UnregisterError::Static) => {
+            let mut res = AppError(
+                StatusCode::METHOD_NOT_ALLOWED,
+                format!(
+                    "root index {index} is a static root (fs root or config mount) and cannot be deleted"
+                ),
+            )
+            .into_response();
+            res.headers_mut()
+                .insert(axum::http::header::ALLOW, axum::http::HeaderValue::from_static("GET, POST"));
+            Ok(res)
+        }
         Err(UnregisterError::NotFound) => Err(AppError::not_found(format!(
             "no runtime mount at root index {index}"
         ))),

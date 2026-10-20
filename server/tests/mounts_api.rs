@@ -5,7 +5,8 @@
 //!   tree/file 立即可用；
 //! - GET 脱敏清单：fsRoots / staticMounts / runtimeMounts / mounts（含
 //!   rootIndex/kind/label/endpoint/capabilities），响应体无凭据；
-//! - DELETE：运行时项 204 + 移除；静态项（fs 根/静态挂载）405；越界 404；
+//! - DELETE：运行时项 204 + tombstone（不移位/空洞不复用）；静态项（fs 根/
+//!   静态挂载）405（带 `Allow` 头）；越界/已删 404；
 //! - 鉴权矩阵：有 token 无 Bearer → 401（spec §3「有 token 时需 Bearer」）；
 //!   **无 token 部署三 API 免鉴权**（spec 字面口径——LAN 信任模型，写面裸奔
 //!   风险在任务报告显著记录）；
@@ -278,23 +279,29 @@ async fn delete_removes_runtime_and_rejects_static_and_out_of_range() {
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(json(&body)["rootIndex"], 1);
 
-    // 运行时项：204 + 移除（活跃 tab 失效帧降级路径：删除即成功，前端下次访问
-    // 自然 404——裁决记录在任务报告）
+    // 运行时项：204 + 槽位 tombstone（活跃 tab 失效帧降级路径：删除即成功，
+    // 引用该根的 tab 下次访问自然失效——裁决记录在任务报告）
     let (status, _, body) = send(app.clone(), "DELETE", "/api/mounts/1", None, None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert!(body.is_empty());
 
     let (_, _, body) = send(app.clone(), "GET", "/api/mounts", None, None).await;
     assert_eq!(json(&body)["runtimeMounts"].as_array().unwrap().len(), 0);
-    // 已删根回归越界 400（rootIndex 寻址面收缩）
+    // 已删根回归越界 400（tombstone 空洞不再解析）
     let (status, _, body) = send(app.clone(), "GET", "/api/tree?root=1", None, None).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(json(&body)["error"].as_str().unwrap().contains("root index out of range"));
 
-    // fs 根拒删：405（静态语义——方法对该资源类不适用）
-    let (status, _, body) = send(app.clone(), "DELETE", "/api/mounts/0", None, None).await;
+    // fs 根拒删：405（静态语义——方法对该资源类不适用）+ Allow 头（RFC 9110
+    // §15.5.5 MUST：405 响应必须宣告目标资源支持的方法集合）
+    let (status, headers, body) = send(app.clone(), "DELETE", "/api/mounts/0", None, None).await;
     assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
     assert!(json(&body)["error"].as_str().unwrap().contains("static"));
+    assert_eq!(
+        headers.get("allow").map(|v| v.to_str().unwrap()),
+        Some("GET, POST"),
+        "405 须携 Allow 头"
+    );
 
     // 越界：404
     let (status, _, body) = send(app, "DELETE", "/api/mounts/99", None, None).await;
@@ -310,7 +317,8 @@ async fn delete_rejects_static_config_mount_with_405() {
         .with_runtime_transport(s3_mock());
     let app = vviewer::build_router(state);
 
-    // 静态 TOML 挂载（rootIndex=1）拒删；fs 根（0）同拒
+    // 静态 TOML 挂载（rootIndex=1）拒删；fs 根（0）同拒（Allow 头断言在
+    // delete_removes_runtime 用例，此处不重复）
     for idx in [0, 1] {
         let (status, _, _) =
             send(app.clone(), "DELETE", &format!("/api/mounts/{idx}"), None, None).await;
@@ -322,6 +330,62 @@ async fn delete_rejects_static_config_mount_with_405() {
     assert_eq!(status, StatusCode::CREATED);
     let (status, _, _) = send(app, "DELETE", "/api/mounts/2", None, None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
+}
+
+// ---------- DELETE tombstone：非尾项删除不移位、空洞不填充 ----------
+
+/// I-1 终审锁测：删非尾项（rootIndex=2，共 1/2/3 三项）后——旧索引不再解析
+/// （tree 400 越界；旧 `Vec::remove` 压缩实现此处会把后继项静默串进该索引）、
+/// 后继项 rootIndex 不移位且照常路由、清单不含已删项、重复 DELETE 404、新
+/// POST 追加分配不填充空洞（rootIndex 复用窗口消灭，重启才回收）。
+#[tokio::test]
+async fn delete_middle_slot_tombstones_without_shifting_or_reuse() {
+    let f = fixture(None);
+    let app = vviewer::build_router(f.state.clone());
+
+    // 注册三项：rootIndex 1/2/3（label 区分指纹）
+    for label in ["m-one", "m-two", "m-three"] {
+        let mut body = s3_body();
+        body["label"] = json!(label);
+        let (status, _, _) = send(app.clone(), "POST", "/api/mounts", None, Some(body)).await;
+        assert_eq!(status, StatusCode::CREATED);
+    }
+
+    // 删非尾项（rootIndex=2，label=m-two）→ 204
+    let (status, _, _) = send(app.clone(), "DELETE", "/api/mounts/2", None, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // 旧 rootIndex=2 不再解析：400 越界（无内容串扰）
+    let (status, _, body) = send(app.clone(), "GET", "/api/tree?root=2", None, None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(json(&body)["error"].as_str().unwrap().contains("root index out of range"));
+
+    // 后继项不移位：rootIndex=3 仍是 m-three，且原索引照常路由
+    let (_, _, body) = send(app.clone(), "GET", "/api/mounts", None, None).await;
+    let v = json(&body);
+    let runtime = v["runtimeMounts"].as_array().unwrap();
+    let indexes: Vec<u64> =
+        runtime.iter().map(|e| e["rootIndex"].as_u64().unwrap()).collect();
+    assert_eq!(indexes, vec![1, 3], "空洞保留不移位: {v}");
+    assert_eq!(runtime[1]["label"], "m-three", "{v}");
+    let (status, _, _) = send(app.clone(), "GET", "/api/tree?root=3", None, None).await;
+    assert_eq!(status, StatusCode::OK, "后继项原索引照常路由");
+
+    // 重复 DELETE 已删索引 → 404（空洞即 NotFound）
+    let (status, _, _) = send(app.clone(), "DELETE", "/api/mounts/2", None, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // 新 POST 追加分配：rootIndex=4，不填充空洞
+    let mut fresh = s3_body();
+    fresh["label"] = json!("m-four");
+    let (status, _, body) = send(app.clone(), "POST", "/api/mounts", None, Some(fresh)).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(json(&body)["rootIndex"], 4, "追加分配，不填充已删空洞");
+
+    // 清单不含已删项（任何段都不出现 m-two）
+    let (_, _, body) = send(app, "GET", "/api/mounts", None, None).await;
+    let text = json(&body).to_string();
+    assert!(!text.contains("m-two"), "manifest 不含已删项: {text}");
 }
 
 // ---------- 幂等：同指纹不重复分配 ----------
