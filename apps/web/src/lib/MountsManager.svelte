@@ -42,6 +42,7 @@
     mountUsageOf,
     probeDraft,
     probeRecord,
+    proxyOffsiteOf,
     WEBDAV_CORS_HINT,
     type MountFormDraft,
     type ProbeResult
@@ -182,7 +183,9 @@
   // ---------- 组②：前端配置挂载 ----------
 
   let records = $state<MountRecord[]>([]);
-  const mountRows = $derived(assembleMountRows(records));
+  // 装配传当前连接 base（评审 M1）：proxy 注册状态徽标按 serverBase 比对——
+  // 不一致显示「注册于他机」而非误导性的「已注册 rootIndex=N」
+  const mountRows = $derived(assembleMountRows(records, last?.baseUrl ?? null));
 
   async function reloadRecords(): Promise<void> {
     try {
@@ -232,8 +235,13 @@
     resetFormFeedback();
   }
 
-  /** 测试连接：实际发一次 list_dir 探测（spec §5），结果回显在表单。 */
+  /** 测试连接：实际发一次 list_dir 探测（spec §5），结果回显在表单。先过表单
+   * 校验（评审 L3）——必填缺失/L1 userinfo 时标错返回，探测不被旁路（不发无效
+   * 请求、不产误导性「成功」回显）。 */
   async function runProbe(): Promise<void> {
+    const issues = mountFormIssues(draft);
+    formIssues = Object.keys(issues).length > 0 ? issues : null;
+    if (formIssues !== null) return;
     probing = true;
     probe = null;
     probe = await probeDraft(draft);
@@ -250,8 +258,14 @@
     try {
       if (draft.mode === 'proxy') {
         // proxy：先注册后落库（spec §5——失败不落 IndexedDB）。编辑且旧注册在
-        // 场时先注销旧 rootIndex（凭据轮换/指纹变更皆走 DELETE+POST，S-3 同款）
+        // 场时先注销旧 rootIndex（凭据轮换/指纹变更皆走 DELETE+POST，S-3 同款）。
+        // 评审 M1：编辑他机注册的记录被阻断——注销/重注册以当前连接令牌打
+        // rec.serverBase 只会 401（死锁面），须先连接该服务器。
         const old = editing !== null && editing.kind === 'proxy' ? editing : null;
+        if (old !== null && proxyOffsiteOf(old, last?.baseUrl ?? null)) {
+          formError = `该挂载注册于 ${hostOf(old.serverBase)}，与当前连接的服务器不一致——注销/重注册无法以当前令牌执行；请先连接该服务器再编辑注册。`;
+          return;
+        }
         const rec = draftToProxyRecord(draft, old ?? undefined);
         const token = last?.token ?? null;
         if (old !== null && typeof old.registeredRootIndex === 'number') {
@@ -285,10 +299,21 @@
     openDirectMount(rec);
   }
 
-  /** 代理行「打开」：仅已注册且该服务器仍为当前连接时可开（openRemoteSource
-   * 复用/去重通道与组①同一）。 */
+  /** serverBase → host 显示（解析失败退回原串，serverLabel 同款口径）。 */
+  function hostOf(base: string): string {
+    try {
+      return new URL(base).host;
+    } catch {
+      return base;
+    }
+  }
+
+  /** 代理行「打开」：仅已注册且注册在当前连接服务器上时可开（评审 M1：offsite
+   * 的 rootIndex 是他机命名空间——以当前连接 B + A 的 rootIndex 会开出 B 上完全
+   * 不同的根；offsite 行模板本就不渲染打开钮，此处为防御性二次守卫）。 */
   function openProxyRow(rec: MountRecord): void {
     if (rec.kind !== 'proxy' || last === null || typeof rec.registeredRootIndex !== 'number') return;
+    if (proxyOffsiteOf(rec, last.baseUrl)) return;
     openRemoteSource(last.baseUrl, last.token, rec.registeredRootIndex, '', {
       label: rec.label || undefined
     });
@@ -306,13 +331,26 @@
 
   async function removeRecord(rec: MountRecord): Promise<void> {
     // 删除引用回落提示（mountUsageOf）：运行中 tab 不中断（store 随最后持有者
-    // 释放），会话快照恢复将因记录缺失落占位——确认弹窗声明该后果
+    // 释放），会话快照恢复将因记录缺失落占位——确认弹窗声明该后果。
+    // 评审 M1：offsite proxy 走「强制本地删除」逃生口——注销请求以当前连接令牌
+    // 打他机服务器只会 401；服务端注册保留（可连接该服务器后再删，或待其重启
+    // 自然失效），确认文案显式声明该后果。
     const usage = mountUsageOf(rec.id, workspacesView.list);
+    const offsite = rec.kind === 'proxy' && proxyOffsiteOf(rec, last?.baseUrl ?? null);
     const detail = usage.sources > 0 ? `当前 ${usage.sources} 个工作区正在使用此挂载；` : '';
-    if (!window.confirm(`删除挂载「${rec.label}」？${detail}删除后刷新页面，相关标签页将无法自动恢复。`)) {
+    const scopeNote =
+      rec.kind === 'proxy' && offsite
+        ? `该挂载注册于服务器 ${hostOf(rec.serverBase)}，与当前连接不一致：将强制本地删除（仅删本机保存的配置，服务器上的注册保留，可连接该服务器后再删除或待其重启失效）。`
+        : '';
+    const forceLocal = rec.kind === 'proxy' && offsite;
+    if (
+      !window.confirm(
+        `删除挂载「${rec.label}」？${detail}${scopeNote}删除后刷新页面，相关标签页将无法自动恢复。${forceLocal ? '（强制本地删除）' : ''}`
+      )
+    ) {
       return;
     }
-    if (rec.kind === 'proxy' && typeof rec.registeredRootIndex === 'number') {
+    if (rec.kind === 'proxy' && !offsite && typeof rec.registeredRootIndex === 'number') {
       try {
         await unregisterProxyMount(rec, last?.token ?? null, rec.registeredRootIndex);
       } catch (err) {
@@ -449,6 +487,8 @@
               <span class="vv-mm-state" data-state={row.state.code}>
                 {#if row.state.code === 'registered'}
                   已注册 rootIndex={row.state.rootIndex}
+                {:else if row.state.code === 'offsite'}
+                  注册于他机
                 {:else if row.state.code === 'pending'}
                   待注册{row.state.error !== undefined ? `（${row.state.error}）` : ''}
                 {:else if row.state.code === 'unregistered'}
@@ -692,6 +732,9 @@
   }
   .vv-mm-state[data-state='pending'] {
     color: #b45309;
+  }
+  .vv-mm-state[data-state='offsite'] {
+    color: #6b7280; /* 注册于他机（评审 M1）：中性灰——事实提示非错误面 */
   }
   .vv-mm-state[data-state='unregistered'] {
     opacity: 0.6;

@@ -56,6 +56,24 @@ describe('MountsManager 骨架（全屏 overlay，SettingsCenter 同形态）', 
     expect(src).toMatch(/probeRecord/);
   });
 
+  it('L3：runProbe 先过表单校验（必填/L1 拦截面不被「测试连接」旁路）', () => {
+    expect(src).toMatch(/async function runProbe\(\): Promise<void> \{[\s\S]{0,300}mountFormIssues\(draft\)/);
+  });
+
+  it('M1 跨连接作用域：装配传当前连接 base、offsite 徽标「注册于他机」、打开守卫、强制本地删除逃生口、编辑注册阻断', () => {
+    expect(src).toMatch(/assembleMountRows\(records, last\?\.baseUrl \?\? null\)/);
+    expect(src).toContain('proxyOffsiteOf');
+    expect(src).toContain('注册于他机');
+    // 打开守卫（defense in depth——offsite 行模板本就不渲染打开钮）
+    expect(src).toMatch(/openProxyRow[\s\S]{0,400}proxyOffsiteOf\(rec, last\.baseUrl\)/);
+    // 删除逃生口：offsite proxy 跳过服务端注销（强制本地删除，确认文案声明）
+    expect(src).toMatch(/强制本地删除/);
+    expect(src).toMatch(/rec\.kind === 'proxy' && !offsite && typeof rec\.registeredRootIndex === 'number'/);
+    // 编辑注册阻断：offsite old → formError（当前 token 打他机只会 401）
+    expect(src).toMatch(/proxyOffsiteOf\(old, last\?\.baseUrl \?\? null\)/);
+    expect(src).toMatch(/与当前连接的服务器不一致/);
+  });
+
   it('表单 kind→字段集切换 + 必填校验（mountFormIssues 统一入口）', () => {
     expect(src).toMatch(/mountFormIssues/);
     expect(src).toMatch(/draft\.backend === 's3'/);

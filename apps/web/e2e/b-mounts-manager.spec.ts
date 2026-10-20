@@ -165,4 +165,60 @@ test.describe('b-mounts-manager 目录管理页', () => {
     await expect(page.locator('.vv-mm-form')).toHaveCount(0);
     await expect(page.getByText('暂无前端配置挂载。')).toBeVisible();
   });
+
+  test('MM-04 跨服务器作用域（M1）：他机注册记录徽标「注册于他机」、无打开钮、删除走强制本地删除逃生口', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('.vv-topbar')).toBeVisible();
+    // 装置：直写 IndexedDB v4 mounts store 预置「他机注册」代理记录
+    // （serverBase 指向另一台服务器；本会话未连接 → 恒 offsite）
+    await page.evaluate(async () => {
+      const rec = {
+        id: 'mount:offsite-e2e',
+        kind: 'proxy',
+        backend: 'webdav',
+        label: '他机挂载',
+        endpoint: 'https://dav.other.example',
+        prefix: '',
+        username: 'u',
+        secret: 'p',
+        fingerprint: 'offsite-fp',
+        serverBase: 'http://other-host:9999',
+        createdAt: 1700000000000,
+        registeredRootIndex: 7
+      };
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const req = indexedDB.open('vviewer', 4);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('mounts', 'readwrite');
+        tx.objectStore('mounts').put(rec, rec.id);
+        tx.oncomplete = () => resolve(undefined);
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+    });
+    await page.locator('button[aria-label="目录管理"]').click();
+    const row = page.locator('.vv-mm-item', { hasText: '他机挂载' });
+    await expect(row).toBeVisible();
+
+    // ② 徽标不误导：已注册 rootIndex=7 但注册在他机 → 「注册于他机」
+    await expect(row.getByText('注册于他机')).toBeVisible();
+    // ① 打开禁用：offsite 行不渲染打开钮（rootIndex 是他机命名空间）
+    await expect(row.getByRole('button', { name: '打开' })).toHaveCount(0);
+
+    // ③ 删除逃生口：确认文案声明强制本地删除（跳过服务端注销），接受后本地删除
+    const dialogText = page
+      .waitForEvent('dialog')
+      .then((d) => {
+        const t = d.message();
+        void d.accept();
+        return t;
+      });
+    await row.getByRole('button', { name: '删除' }).click();
+    expect(await dialogText).toContain('强制本地删除');
+    await expect(page.locator('.vv-mm-item', { hasText: '他机挂载' })).toHaveCount(0);
+    await expect(page.getByText('暂无前端配置挂载。')).toBeVisible();
+  });
 });

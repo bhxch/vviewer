@@ -21,6 +21,7 @@ import {
   mountUsageOf,
   probeDraft,
   probeRecord,
+  proxyOffsiteOf,
   WEBDAV_CORS_HINT,
   type MountFormDraft
 } from './mountsManager';
@@ -327,19 +328,22 @@ describe('assembleMountRows（组②：前端配置挂载状态机）', () => {
   });
 
   it('direct 行：直连徽标 + 凭据已存指示 + 展示面 endpoint', () => {
-    const [row] = assembleMountRows([direct]);
+    const [row] = assembleMountRows([direct], 'http://srv');
     expect(row!.modeLabel).toBe('直连');
     expect(row!.backendLabel).toBe('S3');
     expect(row!.hasCredential).toBe(true);
     expect(row!.state).toEqual({ code: 'direct' });
   });
 
-  it('proxy 行状态机：已注册（rootIndex）/ 待注册（pendingRetry+lastError）/ 未注册', () => {
-    const rows = assembleMountRows([
-      proxy({ registeredRootIndex: 5 }),
-      proxy({ id: 'mount:y', pendingRetry: true, lastError: 'HTTP 500' }),
-      proxy({ id: 'mount:z' })
-    ]);
+  it('proxy 行状态机：已注册（rootIndex）/ 待注册（pendingRetry+lastError）/ 未注册（同服务器）', () => {
+    const rows = assembleMountRows(
+      [
+        proxy({ registeredRootIndex: 5 }),
+        proxy({ id: 'mount:y', pendingRetry: true, lastError: 'HTTP 500' }),
+        proxy({ id: 'mount:z' })
+      ],
+      'http://srv'
+    );
     expect(rows[0]!.state).toEqual({ code: 'registered', rootIndex: 5 });
     expect(rows[0]!.modeLabel).toBe('代理');
     expect(rows[1]!.state).toEqual({ code: 'pending', error: 'HTTP 500' });
@@ -347,8 +351,57 @@ describe('assembleMountRows（组②：前端配置挂载状态机）', () => {
   });
 
   it('无凭据记录 hasCredential=false（凭据已存指示的暗态）', () => {
-    const [row] = assembleMountRows([{ ...direct, secret: undefined }]);
+    const [row] = assembleMountRows([{ ...direct, secret: undefined }], 'http://srv');
     expect(row!.hasCredential).toBe(false);
+  });
+});
+
+describe('assembleMountRows/proxyOffsiteOf 跨连接作用域（评审 M1：proxy serverBase 比对当前连接）', () => {
+  const registered: ProxyMountRecord = {
+    id: 'mount:a',
+    kind: 'proxy',
+    backend: 's3',
+    label: 'A 机挂载',
+    endpoint: 'http://s3.example.com',
+    bucket: 'b',
+    prefix: '',
+    username: 'ak',
+    secret: 'sk',
+    fingerprint: 'fa',
+    serverBase: 'http://a:8321',
+    createdAt: 1,
+    registeredRootIndex: 5
+  };
+
+  it('同服务器（matched）：registered 徽标保持、offsite 判定 false——行为不变', () => {
+    expect(assembleMountRows([registered], 'http://a:8321')[0]!.state).toEqual({
+      code: 'registered',
+      rootIndex: 5
+    });
+    expect(proxyOffsiteOf(registered, 'http://a:8321')).toBe(false);
+  });
+
+  it('他机注册（offsite）：registered 徽标改「注册于他机」、offsite 判定 true（打开/删除/重注册的拦截依据）', () => {
+    const rows = assembleMountRows([registered], 'http://b:8321');
+    expect(rows[0]!.state).toEqual({ code: 'offsite', rootIndex: 5 });
+    expect(proxyOffsiteOf(registered, 'http://b:8321')).toBe(true);
+  });
+
+  it('未连接（currentBase null）：已注册项一律视为 offsite（无安全服务端操作面）', () => {
+    expect(assembleMountRows([registered], null)[0]!.state).toEqual({ code: 'offsite', rootIndex: 5 });
+    expect(proxyOffsiteOf(registered, null)).toBe(true);
+  });
+
+  it('pending/unregistered 状态不受作用域影响（记录自身事实，非跨连接误导面）；direct 不受 currentBase 影响', () => {
+    const pending = { ...registered, registeredRootIndex: undefined, pendingRetry: true, lastError: 'HTTP 500' };
+    expect(assembleMountRows([pending], 'http://b:8321')[0]!.state).toEqual({
+      code: 'pending',
+      error: 'HTTP 500'
+    });
+    expect(assembleMountRows([pending], null)[0]!.state).toEqual({ code: 'pending', error: 'HTTP 500' });
+    expect(assembleMountRows([{ ...pending, pendingRetry: undefined, lastError: undefined }], 'http://b:8321')[0]!.state).toEqual({
+      code: 'unregistered'
+    });
   });
 });
 

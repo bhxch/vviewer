@@ -269,10 +269,12 @@ export function assembleServerMountRows(
   return rows;
 }
 
-/** 组②行状态（proxy 对账状态徽标；direct 无服务端注册面）。 */
+/** 组②行状态（proxy 对账状态徽标；direct 无服务端注册面）。offsite = 注册于
+ * 他机（serverBase 与当前连接不一致——评审 M1 跨连接作用域防线）。 */
 export type MountRowState =
   | { code: 'direct' }
   | { code: 'registered'; rootIndex: number }
+  | { code: 'offsite'; rootIndex: number }
   | { code: 'pending'; error?: string }
   | { code: 'unregistered' };
 
@@ -289,11 +291,27 @@ export interface MountRow {
 }
 
 /**
+ * proxy 记录是否「注册于他机」（相对当前连接；评审 M1 修复）：记录操作（打开/
+ * 徽标/删除/重注册）前的作用域比对依据——不一致时打开禁用（rootIndex 是他机
+ * 命名空间，以当前连接 B + A 的 rootIndex 会开出 B 上完全不同的根）、徽标改
+ * 「注册于他机」、删除走强制本地删除逃生口（服务端注销留待连接该服务器）、
+ * 编辑注册被阻断（当前 token 打他机服务器只会 401）。currentBase null（未
+ * 连接）恒视为 offsite——无连接即无安全服务端操作面。
+ */
+export function proxyOffsiteOf(rec: MountRecord, currentBase: string | null): boolean {
+  return rec.kind === 'proxy' && rec.serverBase !== currentBase;
+}
+
+/**
  * 组②装配：direct + proxy 记录混列（listMounts 已按 createdAt 升序），proxy
  * 状态机按对账字段派生——pendingRetry=true 优先（待注册/重试失败态带原因），
- * 其次 registeredRootIndex（已注册），否则未注册。
+ * 其次 registeredRootIndex（已注册；与 currentBase 不一致时为 offsite「注册于
+ * 他机」），否则未注册。currentBase = 当前连接 serverBase（last?.baseUrl ?? null）。
  */
-export function assembleMountRows(records: readonly MountRecord[]): MountRow[] {
+export function assembleMountRows(
+  records: readonly MountRecord[],
+  currentBase: string | null
+): MountRow[] {
   return records.map((record) => {
     const backendLabel = record.backend === 's3' ? ('S3' as const) : ('WebDAV' as const);
     const base = {
@@ -309,7 +327,9 @@ export function assembleMountRows(records: readonly MountRecord[]): MountRow[] {
       record.pendingRetry === true
         ? { code: 'pending', ...(record.lastError !== undefined ? { error: record.lastError } : {}) }
         : typeof record.registeredRootIndex === 'number'
-          ? { code: 'registered', rootIndex: record.registeredRootIndex }
+          ? proxyOffsiteOf(record, currentBase)
+            ? { code: 'offsite', rootIndex: record.registeredRootIndex }
+            : { code: 'registered', rootIndex: record.registeredRootIndex }
           : { code: 'unregistered' };
     return { ...base, modeLabel: '代理' as const, state };
   });
