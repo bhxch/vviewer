@@ -85,6 +85,66 @@ health/mounts 回显与错误信息（误把凭据写进 endpoint 时展示面�
 | `GET /api/file?path=` | Bearer | 文件内容（支持 `Range: bytes=a-b`，206/416）；响应头 `X-VV-Lang`（helix 语言名）/`X-VV-Encoding`（utf-8/utf-16le/utf-16be/gb18030）为服务端检测结果 |
 | `POST /api/ticket` | Bearer | 签发一次性 SSE 票据（30s 过期），供 EventSource 无法自带请求头时走 `?ticket=` 升级 |
 | `GET /api/events?ticket=` | ticket | SSE 变更推送：`data: {"type":"changed","paths":[…]}`（相对 root，500ms debounce 聚合）；15s 心跳；watcher 建立失败降级为一条 `{"type":"watch-error"}` |
+| `POST /api/mounts` | Bearer | 注册运行时挂载（内存态，重启失效）；同指纹幂等。见下节 |
+| `GET /api/mounts` | Bearer | 挂载清单（静态 TOML 段 + 运行时段 + 全量汇总，脱敏无凭据）。见下节 |
+| `DELETE /api/mounts/:index` | Bearer | 删除运行时挂载；静态项 405。见下节 |
+
+## 运行时挂载三 API
+
+TOML `[[mount]]` 是启动期静态装配；三 API 在**运行时**增删内存态挂载（重启失效，
+凭据不落盘）。鉴权与 tree/file 同一 Bearer 门：**有 token 时需 Bearer，无 token
+部署免鉴权**（spec 字面口径；无 token 部署下的写面风险见「安全注意事项」）。
+
+### POST /api/mounts —— 注册
+
+```json
+{
+  "kind": "s3",
+  "label": "docs",
+  "endpoint": "http://127.0.0.1:9000",
+  "bucket": "b1",
+  "prefix": "sub",
+  "access_key_id": "ak",
+  "secret_access_key": "sk",
+  "path_style": true
+}
+```
+
+- body 形态与 TOML `[[mount]]` 完全一致：`kind` 必填（`s3` | `webdav`），其余
+  per-kind 必填——S3 需 `endpoint`/`bucket`/`access_key_id`/`secret_access_key`，
+  WebDAV 需 `endpoint`/`username`/`password`；缺必填 400（错误消息仅含字段名）；
+  未知字段 4xx（防拼错键静默忽略）；**请求体上限 64KB，超限 413**。
+- 成功 `201 {"rootIndex": N}`（N 自 fsRoots+静态挂载之后起算）；**同指纹重复注册
+  → `200` 返回既有 rootIndex，不重复分配**（幂等，面向前端对账重注册）。指纹 =
+  kind+endpoint+bucket/prefix+label（各 trim 规范化），**不含凭据**——凭据轮换
+  不产生新指纹。
+- `endpoint` 携带 userinfo（`http://user:pass@host`）时用于连接但展示面自动剥除；
+  凭据不进清单、不进错误消息、不进日志。
+
+### GET /api/mounts —— 脱敏清单
+
+```json
+{
+  "fsRoots": 1,
+  "staticMounts": [],
+  "runtimeMounts": [],
+  "mounts": []
+}
+```
+
+- `staticMounts`：TOML `[[mount]]` 装配项（rootIndex 自 fsRoots 起算）；
+  `runtimeMounts`：本 API 注册项（接在静态段之后）；`mounts`：全量汇总
+  （静态 + 运行时，rootIndex 升序）——前端对账比对此段。
+- 条目形态 `{rootIndex, kind, label?, endpoint, bucket?, prefix, capabilities:
+  {watch, search}}`；挂载根能力恒 `watch:false, search:false`。结构面即无凭据
+  字段（凭据永不回显）。
+
+### DELETE /api/mounts/:index —— 删除
+
+- 运行时项 `204` 并移除（`rootIndex` 寻址面随即收缩；引用该根的活跃 tab 下次
+  访问自然 404）；
+- fs 根 / 静态 TOML 挂载 `405`（静态资源类不支持 DELETE——重启即复现，删配置
+  才是真删除）；越界 `404`。
 
 ## 响应压缩
 
@@ -119,6 +179,10 @@ intervals 可达十余 MB）；file/tree 等 Range 流端点不压缩——压�
 
 - **token**：无 token 配置时全部放行——仅在接受「本机其他用户可读」时使用（默认绑定
   127.0.0.1）。对外暴露必须配 `--token` 或 `--token-gen`；`--allow-lan` 无 token 会拒绝启动。
+- **运行时挂载写面（阶段二）**：`POST`/`DELETE /api/mounts` 按 spec 字面与 tree/file
+  同一 Bearer 门——**无 token 部署下是免鉴权写面**（同网段未认证对端可注册/删除
+  内存态挂载；缓解面：内存态重启即清零、凭据不落盘、请求体 64KB 闸门）。LAN 信任
+  模型部署请自行评估；不可信网络必须配 token。
 - **路径安全**：`path` 参数拒绝绝对路径与 `..` 段；canonicalize 后越出 root 一律 403
   （含 symlink 指向 root 外的情形；root 内互相 symlink 可用）。已知接受的风险：
   canonicalize 与打开文件之间存在 TOCTOU 窗口（单用户只读场景可接受，多租户不可用此模式）。
