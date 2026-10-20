@@ -5,6 +5,9 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+mod config;
+use config::{DEFAULT_PORT, load_file_config, resolve_config};
+
 #[derive(Parser)]
 #[command(name = "vviewer", version, about = "vviewer local viewer server")]
 struct Cli {
@@ -16,15 +19,18 @@ struct Cli {
 enum Command {
     /// 通过 HTTP 暴露一个本地目录
     Serve {
+        /// TOML 配置文件：serve 全参数默认值面（CLI 显式参数优先，未知键报错）
+        #[arg(long)]
+        config: Option<PathBuf>,
         /// 要暴露的根目录（可重复传入挂载多根；首个为 0 号根）
         #[arg(long)]
         root: Vec<PathBuf>,
         /// 前端构建产物目录（SvelteKit adapter-static build），挂载于 `/`
         #[arg(long)]
         web_dist: Option<PathBuf>,
-        /// 监听端口
-        #[arg(long, default_value_t = 8321)]
-        port: u16,
+        /// 监听端口（默认 8321）
+        #[arg(long)]
+        port: Option<u16>,
         /// 访问令牌，请求需带 `Authorization: Bearer <token>`
         #[arg(long)]
         token: Option<String>,
@@ -53,6 +59,7 @@ fn main() {
     let cli = Cli::parse();
     match cli.command {
         Command::Serve {
+            config,
             root,
             web_dist,
             port,
@@ -64,7 +71,16 @@ fn main() {
             compute,
             log_file,
         } => {
-            if let Err(code) = serve(ServeArgs {
+            // --config：文件先载入（配置错误 exit 2），再与 CLI 合并（优先级 CLI > 文件）
+            let file = match config.map(|p| load_file_config(&p)) {
+                None => None,
+                Some(Ok(file)) => Some(file),
+                Some(Err(e)) => {
+                    eprintln!("error: {e}");
+                    std::process::exit(2);
+                }
+            };
+            let cli_args = ServeArgs {
                 root,
                 web_dist,
                 port,
@@ -75,7 +91,16 @@ fn main() {
                 cors_origin,
                 compute,
                 log_file,
-            }) {
+            };
+            let resolved = match resolve_config(cli_args, file) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::exit(2);
+                }
+            };
+            // Task 5 前挂载不接线：resolved.mounts 随合并产物承载，本任务不消费
+            if let Err(code) = serve(resolved.into()) {
                 std::process::exit(code);
             }
         }
@@ -85,7 +110,8 @@ fn main() {
 pub struct ServeArgs {
     pub root: Vec<PathBuf>,
     pub web_dist: Option<PathBuf>,
-    pub port: u16,
+    /// CLI 显式值；None=未提供（配置文件 port 可补默认，合并见 config::resolve_config）
+    pub port: Option<u16>,
     pub token: Option<String>,
     pub token_gen: bool,
     pub allow_lan: bool,
@@ -95,24 +121,20 @@ pub struct ServeArgs {
     pub log_file: Option<PathBuf>,
 }
 
-/// 启动服务；配置错误返回 exit code（不 panic）。
-fn serve(args: ServeArgs) -> Result<(), i32> {
-    let token = if args.token_gen {
-        let t = vviewer::generate_token();
-        println!("{t}");
-        Some(t)
-    } else {
-        args.token
-    };
-
-    if token.as_deref().is_some_and(str::is_empty) {
-        eprintln!("error: --token must not be empty");
-        return Err(2);
+/// 启动校验链的纯检查部分（自 serve() 提取以便单测；错误消息与检查顺序逐字保持
+/// 既有行为，serve() 外层统一加 "error: " 前缀并映射 exit 2）。
+/// `token` 为解析后的最终令牌（--token-gen 已生成）；`--config` 合并产物经同一条
+/// 链校验——数据来源多一路，校验规则零改动（spec 2026-10-19 §2.1）。
+fn validate_startup(args: &ServeArgs, token: Option<&str>) -> Result<(), String> {
+    if token.is_some_and(str::is_empty) {
+        return Err("--token must not be empty".to_string());
     }
 
     if args.allow_lan && token.is_none() {
-        eprintln!("error: --allow-lan exposes the server to your network and requires --token or --token-gen");
-        return Err(2);
+        return Err(
+            "--allow-lan exposes the server to your network and requires --token or --token-gen"
+                .to_string(),
+        );
     }
 
     // '*'（及一切通配形态）不是合法的精确 origin：HeaderValue 校验拦不住它，
@@ -121,34 +143,49 @@ fn serve(args: ServeArgs) -> Result<(), i32> {
     // 启动即拒并指认参数与补救（通配 CORS 本就不在本服务威胁模型内，不提供替代值）。
     if let Some(origin) = &args.cors_origin {
         if origin.contains('*') {
-            eprintln!(
-                "error: --cors-origin does not support wildcard '{origin}'; pass an exact origin (e.g. http://127.0.0.1:8080)"
-            );
-            return Err(2);
+            return Err(format!(
+                "--cors-origin does not support wildcard '{origin}'; pass an exact origin (e.g. http://127.0.0.1:8080)"
+            ));
         }
     }
 
     if args.root.is_empty() {
-        eprintln!("error: at least one --root is required");
-        return Err(2);
+        return Err("at least one --root is required".to_string());
     }
 
-    let mut roots = Vec::with_capacity(args.root.len());
-    for root in args.root {
-        if root.is_dir() {
-            roots.push(root);
-        } else {
-            eprintln!("error: --root is not a directory: {}", root.display());
-            return Err(2);
+    for root in &args.root {
+        if !root.is_dir() {
+            return Err(format!("--root is not a directory: {}", root.display()));
         }
     }
 
     if let Some(dist) = &args.web_dist {
         if !dist.is_dir() {
-            eprintln!("error: --web-dist is not a directory: {}", dist.display());
-            return Err(2);
+            return Err(format!("--web-dist is not a directory: {}", dist.display()));
         }
     }
+
+    Ok(())
+}
+
+/// 启动服务；配置错误返回 exit code（不 panic）。
+fn serve(args: ServeArgs) -> Result<(), i32> {
+    let generated = if args.token_gen {
+        let t = vviewer::generate_token();
+        println!("{t}");
+        Some(t)
+    } else {
+        None
+    };
+
+    // 启动校验链（纯检查部分提取为 validate_startup；消息与检查顺序逐字保持既有行为）
+    if let Err(msg) = validate_startup(&args, generated.as_deref().or(args.token.as_deref())) {
+        eprintln!("error: {msg}");
+        return Err(2);
+    }
+    let token = generated.or(args.token);
+
+    let roots: Vec<PathBuf> = args.root;
 
     if let Err(e) = vviewer::logging::init_tracing(args.log_file.as_deref()) {
         eprintln!("error: --log-file 不可用: {e}");
@@ -161,7 +198,7 @@ fn serve(args: ServeArgs) -> Result<(), i32> {
     } else {
         std::net::Ipv4Addr::LOCALHOST.into()
     };
-    let sock = SocketAddr::new(ip, args.port);
+    let sock = SocketAddr::new(ip, args.port.unwrap_or(DEFAULT_PORT));
 
     let state = vviewer::state::AppState::new(
         roots[0].clone(),
@@ -211,7 +248,7 @@ mod tests {
         ServeArgs {
             root: vec![PathBuf::from("/nonexistent-root-for-test")],
             web_dist: None,
-            port: 8321,
+            port: None,
             token,
             token_gen: false,
             allow_lan: false,

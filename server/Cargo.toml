@@ -25,6 +25,8 @@ layout-rs = "0.1"
 svgbob = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# --config TOML 全参配置文件（spec 2026-10-19 §2.1：CLI>文件、未知键报错）
+toml = "0.9"
 tower = { version = "0.5", features = ["util"] }
 futures-core = "0.3"
 tower-http = { version = "0.7", features = ["fs", "cors", "trace", "compression-gzip"] }
