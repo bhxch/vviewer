@@ -1,6 +1,5 @@
 //! `GET /api/health`：免鉴权能力发现（业务体自适配层 routes/health.rs 原样
 //! 迁入——axum 侧只留 State 提取与响应映射）。
-
 use serde::Serialize;
 
 use crate::state::CoreState;
@@ -20,7 +19,9 @@ pub struct Health {
     #[serde(rename = "diagrams", skip_serializing_if = "Option::is_none")]
     pub diagrams: Option<Vec<&'static str>>,
     /// 跨文件搜索引擎宣告（A 项）：rg/grep 择一；双缺时字段整体省略。
-    /// 与 /api/search 同一选择链，测试经 rg_path/grep_path 注入覆盖。
+    /// 与 /api/search 同一选择链（Task 3 起 core 内直调
+    /// [`crate::search::resolve_paths`]——适配层注入缝退役），测试经
+    /// rg_path/grep_path 注入覆盖。
     #[serde(rename = "searchEngine", skip_serializing_if = "Option::is_none")]
     pub search_engine: Option<&'static str>,
     /// 多根宣告（workspace 阶段 1）：数据根数量（**含挂载根**——rootIndex 寻址
@@ -70,7 +71,9 @@ pub fn handle(state: &CoreState) -> CoreResponse {
         compute_languages = Some((state.compute_languages)());
         diagrams = Some(vec!["graphviz", "svgbob"]);
     }
-    let search_engine = (state.search_engine)(state);
+    // searchEngine 与 /api/search 消费同一选择链（Task 3 缝退役为 core 内直调）
+    let search_engine = crate::search::resolve_paths(state.rg_path.as_deref(), state.grep_path.as_deref())
+        .map(|(engine, _)| engine.name());
     let root_count = state.roots.len();
     let fs_count = state.fs_roots;
     // 挂载根摘要（roots 的 fs 段之后即挂载序）：无挂载 → None（字段省略）

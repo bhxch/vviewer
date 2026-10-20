@@ -91,12 +91,9 @@ impl std::ops::DerefMut for AppState {
     }
 }
 
-/// health `searchEngine` 宣告注入（core 依赖倒置缝的适配侧实现——rg/grep 探测
-/// 链随 search 域 Task 3 收编 core 前，宣告由适配层提供；与 /api/search 消费
-/// 同一选择链 [`crate::routes::search::announce_engine`]，零漂移）。
-fn health_search_engine(cs: &CoreState) -> Option<&'static str> {
-    crate::routes::search::announce_engine(cs.rg_path.as_deref(), cs.grep_path.as_deref())
-}
+// health `searchEngine` 宣告注入已随 Task 3 search 域收编 core 退役：
+// core::health 直调 `vviewer_core::search::resolve_paths`（与 /api/search
+// 同一选择链，零漂移）。
 
 impl AppState {
     pub fn new(
@@ -107,11 +104,11 @@ impl AppState {
         cors_origin: Option<String>,
     ) -> Self {
         let mut core = CoreState::new(root, token, hidden);
-        // health 宣告装配：版本随主 crate；两个能力缝注入适配侧实现（core 不
-        // 依赖 tree-sitter/探测链——依赖倒置方向单向）
+        // health 宣告装配：版本随主 crate；compute 语言缝注入适配侧实现（core
+        // 不依赖 tree-sitter——依赖倒置方向单向；searchEngine 缝已随 Task 3
+        // search 域收编 core 退役）
         core.version = env!("CARGO_PKG_VERSION");
         core.compute_languages = crate::compute::queries::supported_languages;
-        core.search_engine = health_search_engine;
         // 多根聚合 watch：每根一个 watcher 线程（单根即历史单 watcher 形状）
         let canonicals: Vec<PathBuf> = core.roots.iter().map(|r| r.canonical.clone()).collect();
         Self {

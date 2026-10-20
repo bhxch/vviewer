@@ -1,8 +1,9 @@
 //! path 参数安全解析——适配层包装（多端发布阶段二 Task 2）。
 //!
 //! 业务体（清洗/canonicalize 越界校验/`%XX` 解码回退）已迁
-//! `vviewer-core::guard`；tree/file 由 core 域 handler 内部直调，search/compute
-//! 等未迁移域经本模块按迁移前签名消费（AppError 面，`e.into_response()` 可用）。
+//! `vviewer-core::guard`；tree/file/search 由 core 域 handler 内部直调，
+//! compute（highlight path 模式）等未迁移域经本模块按迁移前签名消费
+//! （AppError 面，`e.into_response()` 可用）。
 
 use std::path::PathBuf;
 

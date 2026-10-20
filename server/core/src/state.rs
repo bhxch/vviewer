@@ -122,10 +122,6 @@ pub struct CoreState {
     /// core 内直接调用）：语言注册表随 tree-sitter 留在 vviewer crate，core 不
     /// 依赖重依赖——适配层注入实现，core 只消费宣告结果。
     pub compute_languages: fn() -> Vec<&'static str>,
-    /// searchEngine 宣告源（依赖倒置缝，Task 3 search 域收编 core 后退役）：
-    /// rg/grep 探测链当前在适配层 routes/search，注入实现在适配层——与
-    /// /api/search 同一选择链（零漂移），core 只消费引擎名。
-    pub search_engine: fn(&CoreState) -> Option<&'static str>,
 }
 
 impl CoreState {
@@ -149,7 +145,6 @@ impl CoreState {
             grep_path: None,
             version: "",
             compute_languages: || Vec::new(),
-            search_engine: |_| None,
         }
     }
 

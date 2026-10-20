@@ -27,6 +27,10 @@ impl CoreError {
     pub fn internal(msg: impl Into<String>) -> Self {
         Self(StatusCode::INTERNAL_SERVER_ERROR, msg.into())
     }
+
+    pub fn not_implemented(msg: impl Into<String>) -> Self {
+        Self(StatusCode::NOT_IMPLEMENTED, msg.into())
+    }
 }
 
 /// 存储后端错误 → 核心域错误（与适配层 AppError 同款分类：NotFound → 404，
