@@ -171,7 +171,7 @@ test('OPEN-03：MetaPanel 手选二进制 → override 即时重渲染 + 快照�
   await page.waitForFunction(
     () =>
       new Promise<boolean>((resolve) => {
-        const open = indexedDB.open('vviewer', 2);
+        const open = indexedDB.open('vviewer');
         open.onsuccess = () => {
           const db = open.result;
           try {
@@ -272,7 +272,7 @@ test('BUG-69 [open-with e2e]: restore 透传 overrideRenderer 生效——remote
             'vviewer-last-server',
             JSON.stringify({ baseUrl: seed.base, token: null })
           );
-          const open = indexedDB.open('vviewer', 2);
+          const open = indexedDB.open('vviewer');
           open.onupgradeneeded = () => {
             if (!open.result.objectStoreNames.contains('kv')) open.result.createObjectStore('kv');
           };

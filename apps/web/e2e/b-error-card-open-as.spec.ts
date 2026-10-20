@@ -236,7 +236,7 @@ async function seedRemoteTab(page: Page, opts: { base: string; path: string; siz
     (seed) =>
       new Promise<void>((resolve, reject) => {
         sessionStorage.setItem('vviewer-last-server', JSON.stringify({ baseUrl: seed.base, token: null }));
-        const open = indexedDB.open('vviewer', 2);
+        const open = indexedDB.open('vviewer');
         open.onupgradeneeded = () => {
           if (!open.result.objectStoreNames.contains('kv')) open.result.createObjectStore('kv');
         };
@@ -270,7 +270,7 @@ async function waitForWorkspaceTab(page: Page, name: string): Promise<void> {
   await page.waitForFunction(
     (tabName) =>
       new Promise<boolean>((resolve) => {
-        const open = indexedDB.open('vviewer', 2);
+        const open = indexedDB.open('vviewer');
         open.onsuccess = () => {
           const db = open.result;
           try {
@@ -304,7 +304,7 @@ async function readTabOverride(page: Page, name: string): Promise<string | undef
   return page.evaluate(
     (tabName) =>
       new Promise<string | undefined>((resolve) => {
-        const open = indexedDB.open('vviewer', 2);
+        const open = indexedDB.open('vviewer');
         open.onsuccess = () => {
           const db = open.result;
           try {

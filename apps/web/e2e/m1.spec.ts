@@ -78,7 +78,7 @@ test('open folder, render code with hljs and image, restore session after reload
   await page.waitForFunction(
     () =>
       new Promise<boolean>((resolve) => {
-        const open = indexedDB.open('vviewer', 2);
+        const open = indexedDB.open('vviewer');
         open.onsuccess = () => {
           const db = open.result;
           try {

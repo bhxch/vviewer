@@ -219,7 +219,7 @@ async function waitSnapshotTabs(page: Page, wanted: string[]): Promise<void> {
   await page.waitForFunction(
     (names) =>
       new Promise<boolean>((resolve) => {
-        const open = indexedDB.open('vviewer', 2);
+        const open = indexedDB.open('vviewer');
         open.onsuccess = () => {
           const db = open.result;
           try {
