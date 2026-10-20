@@ -11,7 +11,6 @@
   import {
     collectStorageInfo,
     formatBytes,
-    persistedState,
     requestPersistent,
     type StorageInfo
   } from '../storageHealth';
