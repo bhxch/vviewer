@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
+import { applySettings, closeSettings, openSettings } from './settings-center';
 
 /**
  * theme-system 域回归（docs/e2e/theme-system.md）。既有覆盖不重写：
@@ -121,19 +122,25 @@ test('THEME-02：system 模式 prefers-color-scheme 双向跟随（壳层配色 
 
 test('THEME-04：亮暗双槽位独立记忆、来回切换互不串扰、刷新恢复', async ({ page }) => {
   await page.goto('/');
-  const themeBtn = page.getByRole('button', { name: /主题：/ });
+  // 代码主题下拉自 TopBar 迁入设置中心外观组（设置中心 Task 1）：亮暗切换改经本组
+  // 「亮暗模式」三态控件驱动（与 TopBar 快切双写同字段，按钮通道由 t-theme THEME-01
+  // 覆盖）；草稿改动统一「应用」落盘注入（e2e/settings-center.ts 装置）。
+  await openSettings(page);
+  const modeSel = page.getByLabel('亮暗模式');
   const themeSelect = page.getByLabel('代码主题');
 
-  // 亮态选 A
-  await themeBtn.click(); // system → light（headless prefers light）
-  await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'light');
+  // 亮态选 A（headless prefers light，system 与 light 等效亮——显式选 light 定基线）
+  await modeSel.selectOption('light');
   await themeSelect.selectOption('github_light');
+  await applySettings(page);
+  await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'light');
   await expect.poll(() => themeComment(page)).toContain('github_light');
 
   // 暗态选 B（域文档口径：暗槽位 gruvbox）
-  await themeBtn.click(); // light → dark
-  await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'dark');
+  await modeSel.selectOption('dark');
   await themeSelect.selectOption('gruvbox');
+  await applySettings(page);
+  await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'dark');
   await expect.poll(() => themeComment(page)).toContain('gruvbox');
 
   // 双键独立存储
@@ -141,14 +148,18 @@ test('THEME-04：亮暗双槽位独立记忆、来回切换互不串扰、刷新
   expect(saved.codeThemeLight).toBe('github_light');
   expect(saved.codeThemeDark).toBe('gruvbox');
 
-  // 来回切换互不串扰（dark → system → light）：亮恒回 A、暗恒回 B
-  await themeBtn.click(); // dark → system（headless 解析为亮）
+  // 来回切换互不串扰（dark → system → light）：亮恒回 A、暗恒回 B（切槽即时改写槽，
+  // 注入经应用落盘）
+  await modeSel.selectOption('system');
+  await applySettings(page);
   await expect.poll(() => themeComment(page)).toContain('github_light');
   await expect(themeSelect).toHaveValue('github_light');
-  await themeBtn.click(); // system → light
+  await modeSel.selectOption('light');
+  await applySettings(page);
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'light');
   await expect(themeSelect).toHaveValue('github_light');
-  await themeBtn.click(); // light → dark
+  await modeSel.selectOption('dark');
+  await applySettings(page);
   await expect(themeSelect).toHaveValue('gruvbox');
   await expect.poll(() => themeComment(page)).toContain('gruvbox');
 
@@ -156,8 +167,10 @@ test('THEME-04：亮暗双槽位独立记忆、来回切换互不串扰、刷新
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'dark');
   await expect.poll(() => themeComment(page)).toContain('gruvbox');
+  await openSettings(page);
   await expect(page.getByLabel('代码主题')).toHaveValue('gruvbox');
-  await page.getByRole('button', { name: /主题：/ }).click(); // dark → system（亮）
+  await page.getByLabel('亮暗模式').selectOption('system');
+  await applySettings(page);
   await expect(page.getByLabel('代码主题')).toHaveValue('github_light');
 });
 
@@ -198,8 +211,12 @@ test('THEME-05：markdown rust 围栏与独立 .rs 同主题同色，切主题�
   expect(shared.length).toBeGreaterThan(0); // 有可比的同类 token
   for (const cls of shared) expect(mdColors[cls], `围栏 vs .rs 的 ${cls}`).toBe(rsColors[cls]);
 
-  // 切代码主题：两视图同步更新且仍一致（围栏着色联动，零重解析只换变量）
+  // 切代码主题：两视图同步更新且仍一致（围栏着色联动，零重解析只换变量；设置中心
+  // 外观组下拉+应用驱动注入，应用后关页恢复 tab 可点）
+  await openSettings(page);
   await page.getByLabel('代码主题').selectOption('catppuccin_mocha');
+  await applySettings(page);
+  await closeSettings(page);
   await expect.poll(() => themeComment(page), { timeout: 10_000 }).toContain('catppuccin_mocha');
   await page.locator('.vv-tab', { hasText: 'fence.md' }).click();
   const mdColors2 = await capture('.vv-markdown');
@@ -252,9 +269,12 @@ test('THEME-03：长 .rs 滚动 100000 后连切两主题——类名哈希不�
   expect(base.count).toBeGreaterThan(0);
 
   // 连切两个主题（含域文档点名的 catppuccin_mocha）：指纹逐字一致 + 滚动位不丢
+  //（设置中心外观组下拉+应用驱动注入；指纹/滚动位断言为页内读数，全屏页不影响）
+  await openSettings(page);
   for (const theme of ['catppuccin_mocha', 'tokyonight']) {
     const before = await stableFingerprint();
     await page.getByLabel('代码主题').selectOption(theme);
+    await applySettings(page);
     await expect.poll(() => themeComment(page), { timeout: 10_000 }).toContain(theme);
     const after = await stableFingerprint();
     expect(after.count).toBe(before.count);
@@ -305,8 +325,10 @@ test('THEME-06：hljs 整文件兜底路径 9 个 --hljs-* 变量全量跟随 + 
     });
 
   const before = await hljsVars();
-  // 换 tokyonight：9 个变量全量写入新色板（无默认残留）
+  // 换 tokyonight：9 个变量全量写入新色板（无默认残留；设置中心外观组下拉+应用）
+  await openSettings(page);
   await page.getByLabel('代码主题').selectOption('tokyonight');
+  await applySettings(page);
   await expect.poll(() => themeComment(page), { timeout: 10_000 }).toContain('tokyonight');
   const after = await hljsVars();
   for (const name of Object.keys(after)) {
@@ -359,25 +381,33 @@ test('THEME-07：切主题仅 style#vv-code-theme 变化，落 DOM 亚毫秒级�
   const base = await signature();
   expect(base.spans.length).toBeGreaterThan(0);
 
-  // 页内触发切换（改 select + change 事件，与用户切换同管线），
+  // 页内触发切换（改 select + change 事件 + 「应用」——草稿模型的注入触发点，计时
+  // 自应用点击起，与用户切换同管线），
   // MutationObserver 记录 style#vv-code-theme textContent 替换落 DOM 耗时
+  await openSettings(page); // 外观组默认激活
   const durationMs = await page.evaluate(
     () =>
       new Promise<number>((resolve, reject) => {
         const el = document.getElementById('vv-code-theme');
         const sel = document.querySelector<HTMLSelectElement>('select[aria-label="代码主题"]');
-        if (!el || !sel) {
-          reject(new Error('style#vv-code-theme 或代码主题下拉不存在'));
+        const apply = document.querySelector<HTMLButtonElement>('.vv-sc-apply');
+        if (!el || !sel || !apply) {
+          reject(new Error('style#vv-code-theme 或代码主题下拉/应用钮不存在'));
           return;
         }
-        const t0 = performance.now();
         const mo = new MutationObserver(() => {
           mo.disconnect();
           resolve(performance.now() - t0);
         });
+        let t0 = 0;
         mo.observe(el, { childList: true, subtree: true, characterData: true });
         sel.value = 'github_dark';
         sel.dispatchEvent(new Event('change', { bubbles: true }));
+        // Svelte flush 后再点「应用」（disabled 复位），计时自注入触发点起
+        setTimeout(() => {
+          t0 = performance.now();
+          apply.click();
+        }, 0);
         setTimeout(() => reject(new Error('5000ms 内未观察到主题样式落 DOM')), 5000);
       })
   );

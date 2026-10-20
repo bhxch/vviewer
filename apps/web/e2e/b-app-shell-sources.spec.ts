@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
+import { applySettings, closeSettings, gotoGroup, openSettings } from './settings-center';
 
 /**
  * app-shell-sources 域回归（docs/e2e/app-shell-sources.md）：缺陷修复用例，
@@ -231,7 +232,7 @@ test('BUG-04：媒体/图片状态栏按通用字段口径呈现（大小段，�
   await expect(page.locator('.meta-row', { hasText: '大小' })).toContainText(/字节/);
 });
 
-test('BUG-05/SHELL-09/13：设置面板排除规则预设生效，设置与开关持久化', async ({ page }) => {
+test('BUG-05/SHELL-09/13：设置中心排除规则预设生效，设置与开关持久化', async ({ page }) => {
   await page.goto('/');
   await openDir(page, [
     { name: '.git/HEALTH.txt', type: 'text/plain', content: 'x\n' },
@@ -241,23 +242,20 @@ test('BUG-05/SHELL-09/13：设置面板排除规则预设生效，设置与开�
   await expect(page.locator('.vv-tree-row', { hasText: '.git' })).toBeVisible();
   await expect(page.locator('.vv-tree-row', { hasText: 'node_modules' })).toBeVisible();
 
-  // 入口①：⚙ 按钮（修复前全量按钮穷举无一相关）
-  await page.locator('button[aria-label="设置"]').click();
-  const panel = page.locator('.vv-settings');
-  await expect(panel).toBeVisible();
-
-  // 预设一键加入 → 树即时重建（onSettingsChanged 订阅 + {#key} 通道）
-  await panel.locator('button[aria-label="加入预设排除规则 .git"]').click();
-  await panel.locator('button[aria-label="加入预设排除规则 node_modules"]').click();
+  // 入口①：⚙ 按钮（设置中心全屏页；排除规则在「搜索与排除」组）。预设一键加入
+  // 写草稿，「应用」后经 onSettingsChanged 订阅 + {#key} 通道重建树（count 断言
+  // 不受全屏页遮挡影响）
+  await openSettings(page);
+  await gotoGroup(page, '搜索与排除');
+  await page.locator('button[aria-label="加入预设排除规则 .git"]').click();
+  await page.locator('button[aria-label="加入预设排除规则 node_modules"]').click();
+  await applySettings(page);
   await expect(page.locator('.vv-tree-row', { hasText: '.git' })).toHaveCount(0);
   await expect(page.locator('.vv-tree-row', { hasText: 'node_modules' })).toHaveCount(0);
 
-  // 移动端（≤900px）先关面板再验树：设置面板 fixed 右上宽 min(340px, 100vw-16px)，
-  // 与 300px 宽抽屉投影区重叠——Task 4 抽屉头部行把树首行推入面板之下，不关面板
-  // 时抽屉内树行点击永等可操作性（b-layout-zen 回归发现；桌面面板在右侧不遮树，
-  // Esc 关闭后自动刷新段重开面板，双端语义不变）
-  await page.keyboard.press('Escape');
-  await expect(panel).toHaveCount(0);
+  // 移动端（≤900px）先关设置页再验树：全屏页覆盖抽屉投影区，树行点击须先关
+  //（桌面同序语义不变）
+  await closeSettings(page);
 
   // 树懒加载：展开 src 后确认保留文件仍在（移动端树在抽屉内，经 drawer 适配点击）
   const drawer = await openDrawerIfNarrow(page);
@@ -271,33 +269,38 @@ test('BUG-05/SHELL-09/13：设置面板排除规则预设生效，设置与开�
   );
   expect(saved.excludedPatterns).toEqual(expect.arrayContaining(['.git', 'node_modules']));
 
-  // 自动刷新开关：关闭 → autoRefresh:false 落盘；重开面板状态回显（上一步 Esc 关面板）
-  await page.locator('button[aria-label="设置"]').click();
-  await expect(panel).toBeVisible();
-  await panel.locator('.vv-settings-toggle input[type="checkbox"]').uncheck();
+  // 自动刷新开关（「自动刷新」组）：关闭 → 应用落盘 autoRefresh:false；重开状态回显
+  await openSettings(page);
+  await gotoGroup(page, '自动刷新');
+  const toggle = page.locator('.vv-settings-toggle input[type="checkbox"]');
+  await toggle.uncheck();
+  await applySettings(page);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('vviewer:settings') ?? '{}').autoRefresh)).toBe(false);
-  await page.keyboard.press('Escape');
-  await expect(panel).toHaveCount(0);
-  await page.locator('button[aria-label="设置"]').click();
-  await expect(panel.locator('.vv-settings-toggle input[type="checkbox"]')).not.toBeChecked();
-  await page.keyboard.press('Escape');
+  await closeSettings(page);
+  await openSettings(page);
+  await gotoGroup(page, '自动刷新');
+  await expect(toggle).not.toBeChecked();
+  await closeSettings(page);
 
   // 手动刷新按钮入口存在（BUG-05 验收 4 的 UI 前提；行为级验证在服务端模式 spec）
   await expect(page.locator('button[aria-label="刷新当前文件"]')).toBeVisible();
 
-  // 持久化：刷新后设置面板仍带排除规则与关闭的开关（本地 File 会话不跨刷新，树级验证走服务端模式 spec）
+  // 持久化：刷新后设置中心仍带排除规则与关闭的开关（本地 File 会话不跨刷新，树级验证走服务端模式 spec）
   await page.reload();
-  await page.locator('button[aria-label="设置"]').click();
+  await openSettings(page);
+  await gotoGroup(page, '搜索与排除');
   await expect(page.locator('.vv-settings-pattern', { hasText: '.git' })).toBeVisible();
+  await gotoGroup(page, '自动刷新');
   await expect(page.locator('.vv-settings-toggle input[type="checkbox"]')).not.toBeChecked();
 
-  // 入口②：Ctrl+comma 开合（面板打开即聚焦其输入框——inField 守卫下需先 blur 才能再次接管）
+  // 入口②：Ctrl+comma 开合（新页挂载即聚焦根元素，非输入焦点——inField 守卫不拦，
+  // 再按即关；导航按钮点击后焦点入页同语义）
   await page.keyboard.press('Escape');
   await page.keyboard.press('Control+,');
-  await expect(page.locator('.vv-settings')).toBeVisible();
-  await page.locator('.vv-shell').click({ position: { x: 10, y: 10 } });
+  await expect(page.locator('.vv-settings-center')).toBeVisible();
+  await page.locator('.vv-sc-navitem', { hasText: '外观' }).click();
   await page.keyboard.press('Control+,');
-  await expect(page.locator('.vv-settings')).toHaveCount(0);
+  await expect(page.locator('.vv-settings-center')).toHaveCount(0);
 });
 
 test('BUG-07/SHELL-03/05：无扩展名文件可预览（shebang→python、Makefile），.xyz 未知扩展名按内容探测渲染', async ({

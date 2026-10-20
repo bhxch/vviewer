@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
+import { applySettings, openSettings } from './settings-center';
 
 const samples = fileURLToPath(new URL('../../../samples/m2', import.meta.url));
 
@@ -78,8 +79,11 @@ test('sample.ts 走 tree-sitter 主路径（ts-* span），切换代码主题零
     );
   });
 
-  // 代码主题切换（TopBar select）：只整体替换 style#vv-code-theme 的 CSS 变量
+  // 代码主题切换（设置中心外观组下拉+应用，自 TopBar 迁入）：只整体替换
+  // style#vv-code-theme 的 CSS 变量
+  await openSettings(page);
   await page.getByLabel('代码主题').selectOption('github_dark');
+  await applySettings(page);
   await page.waitForFunction(
     (prev) => (document.getElementById('vv-code-theme')?.textContent ?? '') !== prev,
     before.styleText

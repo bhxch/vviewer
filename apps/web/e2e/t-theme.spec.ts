@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
+import { applySettings, openSettings } from './settings-center';
 
 /**
  * theme-system 域缺口补齐（t- 前缀标记本轮新增；README §3.2：一域一文件、
@@ -235,7 +236,8 @@ test('THEME-03/2: 代码主题下拉全量可切——option 集=themes.json 键
     timeout: 20_000
   });
 
-  // 下拉 option 全集与 themes.json 键集一一对应（TopBar themeOptions：精选置顶+全部字母序）
+  // 下拉 option 全集与 themes.json 键集一一对应（设置中心外观组 themeOptions：精选置顶+全部字母序）
+  await openSettings(page); // 外观组默认激活；草稿模型下逐项「应用」驱动订阅链注入
   const optionValues = await page.evaluate(() =>
     [
       ...document.querySelectorAll<HTMLOptionElement>('select[aria-label="代码主题"] option')
@@ -245,17 +247,26 @@ test('THEME-03/2: 代码主题下拉全量可切——option 集=themes.json 键
   expect(optionValues.length, `下拉项数=themes.json 主题数(${THEME_COUNT})`).toBe(tableNames.length);
   expect([...optionValues].sort()).toEqual([...tableNames].sort());
 
-  // 页内全量遍历（与用户切换同管线：改 select value + change 事件，THEME-07 既有手法），
-  // 逐项断言 style#vv-code-theme 注释头落上该主题名；统计 --vv-ts-keyword 去重色数证「着色即时变化」
+  // 页内全量遍历（与用户切换同管线：改 select value + change 事件 + 「应用」按钮，
+  // THEME-07 既有手法），逐项断言 style#vv-code-theme 注释头落上该主题名；统计
+  // --vv-ts-keyword 去重色数证「着色即时变化」。草稿模型：change 只写草稿，注入
+  // 由应用（commit→saveSettings→订阅链）触发，逐项等注释头到位（首项含 themes.json
+  // 动态 import，其后命中缓存）
   const result = await page.evaluate(async (names) => {
     const sel = document.querySelector<HTMLSelectElement>('select[aria-label="代码主题"]');
     const style = document.getElementById('vv-code-theme');
+    const apply = document.querySelector<HTMLButtonElement>('.vv-sc-apply');
     const missed: string[] = [];
     const kwColors = new Set<string>();
     for (const n of names) {
       sel!.value = n;
       sel!.dispatchEvent(new Event('change', { bubbles: true }));
-      await new Promise((r) => setTimeout(r, 0)); // applyCodeTheme 微任务链（loadTables 已缓存）后读
+      await new Promise((r) => setTimeout(r, 0)); // Svelte flush：「应用」钮自 disabled 复位
+      apply!.click();
+      for (let i = 0; i < 500; i++) {
+        if ((style?.textContent ?? '').includes(`代码主题：${n}（`)) break;
+        await new Promise((r) => setTimeout(r, 10));
+      }
       const text = style?.textContent ?? '';
       if (!text.includes(`代码主题：${n}（`)) missed.push(n);
       const m = /--vv-ts-keyword:\s*([^;]+);/.exec(text);
@@ -304,10 +315,13 @@ test('THEME-06/2: 9 个 --hljs-* 变量逐项等于主题表取色（tokyonight�
       return { headerOk: text.includes(`代码主题：${t}（`), vars: out };
     }, theme);
 
-  // 场景步骤③④⑤：切主题后 9 个变量逐项 === 主题表 resolveCapture 取色（严格全等，
-  // fg 缺失的变量须不输出——「无默认残留」的精确形态）；换另一主题重复
+  // 场景步骤③④⑤：切主题（设置中心外观组下拉+应用——草稿统一落盘）后 9 个变量
+  // 逐项 === 主题表 resolveCapture 取色（严格全等，fg 缺失的变量须不输出——
+  // 「无默认残留」的精确形态）；换另一主题重复
+  await openSettings(page); // 外观组默认激活
   for (const theme of ['tokyonight', 'gruvbox']) {
     await page.getByLabel('代码主题').selectOption(theme);
+    await applySettings(page);
     await expect
       .poll(() => readVars(theme), { timeout: 10_000 })
       .toEqual({ headerOk: true, vars: expectedHljsVars(theme) });
@@ -370,24 +384,32 @@ test('THEME-07/2: 3MB 懒高亮通道下切主题仅 style#vv-code-theme 变化�
   const base = await stableSignature(page);
   expect(base.spans.length, '滚动后可视区已有 ts-* span').toBeGreaterThan(0);
 
-  // 页内触发切换（与用户同管线），MutationObserver 测 style#vv-code-theme 落 DOM 耗时
+  // 页内触发切换（与用户同管线：改 select + change 事件 + 「应用」——草稿模型的
+  // 注入触发点，计时自应用点击起），MutationObserver 测 style#vv-code-theme 落 DOM 耗时
+  await openSettings(page); // 外观组默认激活（evaluate 内驱动同管线）
   const durationMs = await page.evaluate(
     () =>
       new Promise<number>((resolve, reject) => {
         const el = document.getElementById('vv-code-theme');
         const sel = document.querySelector<HTMLSelectElement>('select[aria-label="代码主题"]');
-        if (!el || !sel) {
-          reject(new Error('style#vv-code-theme 或代码主题下拉不存在'));
+        const apply = document.querySelector<HTMLButtonElement>('.vv-sc-apply');
+        if (!el || !sel || !apply) {
+          reject(new Error('style#vv-code-theme 或代码主题下拉/应用钮不存在'));
           return;
         }
-        const t0 = performance.now();
         const mo = new MutationObserver(() => {
           mo.disconnect();
           resolve(performance.now() - t0);
         });
+        let t0 = 0;
         mo.observe(el, { childList: true, subtree: true, characterData: true });
         sel.value = 'github_dark';
         sel.dispatchEvent(new Event('change', { bubbles: true }));
+        // Svelte flush 后再点「应用」（disabled 复位），计时自注入触发点起
+        setTimeout(() => {
+          t0 = performance.now();
+          apply.click();
+        }, 0);
         setTimeout(() => reject(new Error('5000ms 内未观察到主题样式落 DOM')), 5000);
       })
   );
@@ -405,8 +427,9 @@ test('THEME-07/2: 3MB 懒高亮通道下切主题仅 style#vv-code-theme 变化�
 
 // ── B 项外观主题（spec B §2.1-2.3，vscode-themes 计划 Task 5）────────────────────
 // 桌面基准（chromium project）：导入/IndexedDB/页内探针为重量级场景，同 03/2/06/2/07/2
-// 的跳非 chromium 惯例。装置走真实用户管线：设置面板（⚙）双槽 select、隐藏 file input
-// 的 setInputFiles、主题按钮三态循环切亮暗。
+// 的跳非 chromium 惯例。装置走真实用户管线：设置中心（⚙）外观组双槽 select、隐藏
+// file input 的 setInputFiles、主题按钮三态循环切亮暗；草稿改动统一「应用」后经
+// 订阅链注入（e2e/settings-center.ts 装置）。
 
 /** jszip 最窄构造面（export = 的 CJS 包，互操作形态对齐 render-archive zipStore.ts 同款：
  * ESM 下类挂 default、Node 直出 module.exports 本体，二者取其一）。 */
@@ -436,11 +459,8 @@ async function gotoInMode(page: Page, mode: 'light' | 'dark'): Promise<void> {
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', mode);
 }
 
-/** 打开设置面板（⚙ aria-label「设置」→ role=dialog）。 */
-async function openSettings(page: Page): Promise<void> {
-  await page.getByRole('button', { name: '设置' }).click();
-  await expect(page.getByRole('dialog', { name: '设置' })).toBeVisible();
-}
+// 打开设置中心用共享装置 openSettings（e2e/settings-center.ts）：⚙ → 全屏页，
+// 代码主题/双槽下拉在「外观」组=默认激活，迁移用例改动后统一「应用」落盘。
 
 /** style#vv-code-theme 注入全文（运行时 textContent，未经验练压缩，按原值断言）。 */
 function injectedStyle(page: Page): Promise<string> {
@@ -462,9 +482,10 @@ test('B-THEME-1: 暗色槽切 Dark Modern——UI token 与代码高亮联动（
   await expect(page.locator('.vv-code-pre span[class^="ts-"]').first()).toBeVisible({ timeout: 20_000 });
   expect(await uiBg(page)).toBe('#0d1117'); // 切换前基线：default 外观暗色板
 
-  // 暗色槽 → vscode:Dark Modern（面板 persist 后即时重注入）
+  // 暗色槽 → vscode:Dark Modern（草稿写槽 + 应用→订阅链重注入）
   await openSettings(page);
   await page.getByLabel('暗色界面主题').selectOption('vscode:Dark Modern');
+  await applySettings(page);
 
   // UI token：dark_modern 资产原值（12 键映射 dark 命中 8 键，取三个代表键；缺键走
   // app.css default 回退，不在断言面——README「上游现状备注」）
@@ -508,14 +529,15 @@ test('B-THEME-2: 导入 JSON 主题并应用、刷新后 IndexedDB 持久恢复'
   await gotoInMode(page, 'dark');
   await openSettings(page);
 
-  // 合法主题 JSON 经隐藏 file input 注入（真实 onchange 管线）
+  // 合法主题 JSON 经隐藏 file input 注入（真实 onchange 管线；节内 file input 以
+  // .vv-sc-section 限定——左导航底部还有导入设置的 hidden input）
   const probe = {
     name: 'Probe Dark',
     type: 'dark',
     colors: { 'editor.background': '#123456', 'sideBar.background': '#234567', focusBorder: '#ABCDEF' },
     tokenColors: [{ scope: 'comment', settings: { foreground: '#654321' } }]
   };
-  await page.locator('.vv-settings input[type="file"]').setInputFiles({
+  await page.locator('.vv-sc-section input[type="file"]').setInputFiles({
     name: 'probe-dark.json',
     mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify(probe))
@@ -523,8 +545,10 @@ test('B-THEME-2: 导入 JSON 主题并应用、刷新后 IndexedDB 持久恢复'
   await expect(page.locator('.vv-settings-note', { hasText: '已导入 1 个主题' })).toBeVisible();
   await expect(page.locator('.vv-settings-theme-name', { hasText: 'Probe Dark' })).toBeVisible();
 
-  // 暗色槽选导入主题（value 是随机 imported:<id>，按 label 选）：--ui-bg 等于注入值
+  // 暗色槽选导入主题（value 是随机 imported:<id>，按 label 选；应用后订阅链注入）：
+  // --ui-bg 等于注入值
   await page.getByLabel('暗色界面主题').selectOption({ label: 'Probe Dark（暗）' });
+  await applySettings(page);
   await expect.poll(() => uiBg(page)).toBe('#123456');
   expect(await uiVar(page, '--ui-side-bg')).toBe('#234567');
   expect(await uiVar(page, '--ui-accent')).toBe('#ABCDEF');
@@ -560,7 +584,7 @@ test('B-THEME-3: 导入合成最小 VSIX（package.json + contributes.themes + �
 
   await gotoInMode(page, 'dark');
   await openSettings(page);
-  await page.locator('.vv-settings input[type="file"]').setInputFiles({
+  await page.locator('.vv-sc-section input[type="file"]').setInputFiles({
     name: 'probe-themes.vsix',
     mimeType: 'application/octet-stream',
     buffer: vsix
@@ -569,8 +593,9 @@ test('B-THEME-3: 导入合成最小 VSIX（package.json + contributes.themes + �
   await expect(page.locator('.vv-settings-note', { hasText: '已导入 1 个主题' })).toBeVisible();
   await expect(page.locator('.vv-settings-theme', { hasText: 'Vsix Probe' })).toBeVisible();
   await expect(page.locator('.vv-settings-theme-src', { hasText: 'vsix' })).toBeVisible();
-  // 槽 select 候选同步出现（kind 徽标「暗」）；选中即应用
+  // 槽 select 候选同步出现（kind 徽标「暗」）；选中写草稿，应用后生效
   await page.getByLabel('暗色界面主题').selectOption({ label: 'Vsix Probe（暗）' });
+  await applySettings(page);
   await expect.poll(() => uiBg(page)).toBe('#246824');
 });
 
@@ -580,8 +605,9 @@ test('B-THEME-4: 外观槽切回 default——观感零变化（--ui-bg 回默�
   test.skip(testInfo.project.name !== 'chromium', '桌面基准（同 THEME-03/2 惯例）');
   await gotoInMode(page, 'light');
   await openSettings(page);
-  // 亮色槽 → Dark Modern（槽/主题亮暗不匹配不阻止）：UI token 被接管
+  // 亮色槽 → Dark Modern（槽/主题亮暗不匹配不阻止）：提醒随草稿立现，应用后 UI token 被接管
   await page.getByLabel('亮色界面主题').selectOption('vscode:Dark Modern');
+  await applySettings(page);
   await expect.poll(() => uiBg(page)).toBe('#1F1F1F');
   // 不匹配提醒（spec §2.3 终审补）：亮槽选暗色主题出现一行提醒，且选择未被阻止
   //（上一行 --ui-bg 轮询到 #1F1F1F 即证已应用）
@@ -589,10 +615,12 @@ test('B-THEME-4: 外观槽切回 default——观感零变化（--ui-bg 回默�
   // 切回匹配主题（Light Modern）：提醒消失，配色为亮色资产值
   await page.getByLabel('亮色界面主题').selectOption('vscode:Light Modern');
   await expect(page.locator('.vv-settings-warn')).toHaveCount(0);
+  await applySettings(page);
   await expect.poll(() => uiBg(page)).toBe('#FFFFFF');
   // 切回 default：--ui-bg 回亮色默认；注入文本回 legacy 形态（代码主题注释头，
   // UI vars 段消失；byte 级 legacy 等价由 theme.test.ts legacyExpectedText 单测锁定）
   await page.getByLabel('亮色界面主题').selectOption('default');
+  await applySettings(page);
   await expect.poll(() => uiBg(page)).toBe('#ffffff');
   const text = await injectedStyle(page);
   expect(text).toContain('/* vviewer 代码主题：onelight（light）');
@@ -620,16 +648,20 @@ test('BUG-49 转正: themeMode=system 下 OS 亮暗切换后下拉显示=实际�
   });
   await page.emulateMedia({ colorScheme: 'light' });
   await page.goto('/');
+  // 下拉在设置中心外观组（自 TopBar 迁入）；osDark 镜像随组件挂载闭合（原 TopBar 同款）
+  await openSettings(page);
   const select = page.getByLabel('代码主题');
   await expect(select).toHaveValue('github_light'); // 亮槽
   // OS 切暗（不刷新）：下拉显示值跟随实际生效主题（修复前仍显示 github_light，
-  // 而 style#vv-code-theme 注释头已切 gruvbox（dark）——显示与生效脱钩）
+  // 而 style#vv-code-theme 注释头已切 gruvbox（dark）——显示与生效脱钩；注入由
+  // TopBar 的 onSystemModeChange 订阅补发，不依赖草稿应用）
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(select).toHaveValue('gruvbox');
   await expect.poll(() => themeCommentHeader(page, 'gruvbox')).toBe(true);
   // 此时切主题：写入眼前暗态对应的暗槽，亮槽不受污染（修复前按陈旧 mode 写亮槽
   // codeThemeLight，且下拉值随即跳变为另一槽位主题）
   await select.selectOption('github_dark');
+  await applySettings(page);
   const saved = (await page.evaluate(() => localStorage.getItem('vviewer:settings') ?? '{}')) as string;
   const parsed = JSON.parse(saved) as { codeThemeDark?: string; codeThemeLight?: string };
   expect(parsed.codeThemeDark).toBe('github_dark');
@@ -698,8 +730,11 @@ test('BUG-50 转正: 数字/布尔/存储类关键字 token 归约着色并随�
   expect(await spanColor(page, 'ts-keyword-control', 'return')).toBe(
     hexToRgb(resolveCaptureFg(THEMES['github_light']!, 'keyword.control')!)
   );
-  // 切主题：归约 span 的计算色随注入变量整体切换（零重解析契约——类名不动只换变量）
+  // 切主题：归约 span 的计算色随注入变量整体切换（零重解析契约——类名不动只换变量；
+  // 设置中心外观组下拉 + 应用驱动订阅链注入）
+  await openSettings(page);
   await page.getByLabel('代码主题').selectOption('catppuccin_mocha');
+  await applySettings(page);
   const numFg2 = resolveCaptureFg(THEMES['catppuccin_mocha']!, 'constant.numeric')!;
   const boolFg2 = resolveCaptureFg(THEMES['catppuccin_mocha']!, 'constant.builtin')!;
   const kwFg2 = resolveCaptureFg(THEMES['catppuccin_mocha']!, 'keyword')!;

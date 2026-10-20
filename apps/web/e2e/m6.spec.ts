@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
 import { assertPortFree, startVviewerServer, stopServer, waitHealthy } from './serverHarness';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
+import { setComputePolicy } from './settings-center';
 
 /**
  * M6 E2E 验收（Task 5）：compute 模式全链路——
@@ -237,10 +238,10 @@ test('policy=remote：markdown 正文走服务端 comrak，状态栏显示「渲
 
 test('policy=local（TopBar UI 切换）：高亮回退本地，状态栏显示「本地」', async ({ page }) => {
   test.setTimeout(60_000);
-  // 默认 auto 连接后经 UI 切 local（覆盖设置 UI 通道；auto 对远程文件也会选远程，须显式 local 才恒本地）
+  // 默认 auto 连接后经 UI 切 local（覆盖设置 UI 通道；auto 对远程文件也会选远程，须显式 local 才恒本地；设置中心「计算」组+应用）
   await page.goto('/');
   await connect(page, TOKEN);
-  await page.getByLabel('计算策略').selectOption('local');
+  await setComputePolicy(page, 'local');
   await openFile(page, 'm5', 'sample.js');
 
   const statusbar = page.locator('.vv-statusbar');

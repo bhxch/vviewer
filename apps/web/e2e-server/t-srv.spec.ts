@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
 import { assertPortFree, stopServer, waitHealthy } from '../e2e/serverHarness';
+import { applySettings, closeSettings, gotoGroup, openSettings } from '../e2e/settings-center';
 
 /**
  * server-file-service 域缺口补齐（t- 前缀标记本轮新增；编号对照
@@ -357,22 +358,22 @@ test('SRV-07/2: 刷新模式 manual→auto 回切后 SSE 自动重读恢复', as
   const pre = page.locator('.vv-code-pre');
   await expect(pre).toContainText('toggle baseline', { timeout: 10_000 });
 
-  // auto → manual：关「自动刷新」（设置面板唯一 checkbox，SettingsPanel.svelte:147）
-  await page.locator('button[aria-label="设置"]').click();
-  const panel = page.locator('.vv-settings');
-  await expect(panel).toBeVisible();
-  await panel.locator('.vv-settings-toggle input[type="checkbox"]').uncheck();
-  await page.keyboard.press('Escape');
-  await expect(panel).toHaveCount(0);
+  // auto → manual：关「自动刷新」（设置中心「自动刷新」组唯一 checkbox，写草稿后
+  // 统一「应用」落盘；e2e/settings-center.ts 装置）
+  await openSettings(page);
+  await gotoGroup(page, '自动刷新');
+  const toggle = page.locator('.vv-settings-toggle input[type="checkbox"]');
+  await toggle.uncheck();
+  await applySettings(page);
+  await closeSettings(page);
 
-  // manual → auto：重开面板，开关状态被记住（未勾选），勾回
-  await page.locator('button[aria-label="设置"]').click();
-  await expect(panel).toBeVisible();
-  const toggle = panel.locator('.vv-settings-toggle input[type="checkbox"]');
+  // manual → auto：重开设置页，开关状态被记住（未勾选），勾回并应用
+  await openSettings(page);
+  await gotoGroup(page, '自动刷新');
   await expect(toggle).not.toBeChecked();
   await toggle.check();
-  await page.keyboard.press('Escape');
-  await expect(panel).toHaveCount(0);
+  await applySettings(page);
+  await closeSettings(page);
 
   // 回切后 SSE 自动重读恢复：服务端追加 → 3s 内自动出现（500ms debounce + 余量）
   const marker = `auto-restored marker ${Date.now()}`;

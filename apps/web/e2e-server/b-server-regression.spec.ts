@@ -1,5 +1,6 @@
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
+import { applySettings, closeSettings, gotoGroup, openSettings } from '../e2e/settings-center';
 
 /**
  * 服务端模式回归（docs/e2e/app-shell-sources.md + pwa-mobile-performance.md 的服务端侧验收）。
@@ -77,7 +78,7 @@ async function waitSnapshotScroll(page: Page, name: string, min: number): Promis
 /** 单次读取 kv 'workspaces' 中指定 tab 名的 scrollTop（无则 null）。 */
 function readSnapshotScroll(name: string): Promise<number | null> {
   return new Promise((resolve) => {
-    const open = indexedDB.open('vviewer', 2);
+    const open = indexedDB.open('vviewer');
     open.onsuccess = () => {
       const db = open.result;
       try {
@@ -151,11 +152,12 @@ test('BUG-05/SRV-07：关自动刷新后 SSE 不自动重读，手动刷新 ↻ 
   await openFile(page, 'b05-refresh.txt');
   await expect(page.locator('.vv-code-pre')).toContainText('marker-v1');
 
-  // 设置面板关闭自动刷新（BUG-05 验收 3：可切换）
-  await page.locator('button[aria-label="设置"]').click();
+  // 设置中心（「自动刷新」组）关闭自动刷新（BUG-05 验收 3：可切换；写草稿统一应用）
+  await openSettings(page);
+  await gotoGroup(page, '自动刷新');
   await page.locator('.vv-settings-toggle input[type="checkbox"]').uncheck();
-  await page.keyboard.press('Escape');
-  await expect(page.locator('.vv-settings')).toHaveCount(0);
+  await applySettings(page);
+  await closeSettings(page);
 
   // 外部追加 → 3.5s 内不自动出现（自动刷新已关）
   appendFileSync(`${FIXTURE}/b05-refresh.txt`, 'marker-v2-manual\n');

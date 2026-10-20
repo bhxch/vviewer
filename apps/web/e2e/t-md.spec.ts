@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { test, expect } from '@playwright/test';
 import { injectDir, openTreeFile } from './b-markdown-html-docs-helpers';
 import { assertPortFree, stopServer, waitHealthy } from './serverHarness';
+import { setComputePolicy } from './settings-center';
 
 /**
  * t-md.spec.ts — markdown-html-docs 域缺口补齐（t- 前缀标记本轮新增，不改既有文件）。
@@ -364,8 +365,8 @@ test('BUG-39 [探索]: 远程档 heading id 双引擎方案统一 user-content- 
     await expect(rpage.locator('.vv-tree-row', { hasText: 'tmd39-' }).first()).toBeVisible({
       timeout: 10_000
     });
-    // 先切策略再开文件（切策略对已打开文件不回溯，域文档 4.4-2 复核要点）
-    await rpage.getByLabel('计算策略').selectOption('remote');
+    // 先切策略再开文件（切策略对已打开文件不回溯，域文档 4.4-2 复核要点；设置中心「计算」组+应用）
+    await setComputePolicy(rpage, 'remote');
     await rpage.locator('.vv-tree-row', { hasText: 'tmd39-anchors.md' }).first().click();
     await expect(rpage.locator('.vv-tab.active', { hasText: 'tmd39-anchors.md' })).toBeVisible();
     await expect(rpage.locator('.vv-statusbar')).toContainText('渲染: 远程', { timeout: 30_000 });

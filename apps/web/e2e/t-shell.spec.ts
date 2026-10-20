@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
+import { applySettings, closeSettings, gotoGroup, openSettings } from './settings-center';
 
 /**
  * app-shell-sources 域缺口补齐（docs/e2e/app-shell-sources.md，t- 前缀标记本轮新增）。
@@ -339,14 +340,16 @@ test('SHELL-09/2：排除规则跨刷新持久——重载后重建树仍排除 
   await expect(page.locator('.vv-tree-row', { hasText: '.git' })).toBeVisible();
   await expect(page.locator('.vv-tree-row', { hasText: 'node_modules' })).toBeVisible();
 
-  // 设置面板加入预设 → 树即时重建（入口可达性本身由既有 SHELL-09 编号用例覆盖）
-  await page.locator('button[aria-label="设置"]').click();
-  const panel = page.locator('.vv-settings');
-  await expect(panel).toBeVisible();
-  await panel.locator('button[aria-label="加入预设排除规则 .git"]').click();
-  await panel.locator('button[aria-label="加入预设排除规则 node_modules"]').click();
+  // 设置中心「搜索与排除」组加入预设 → 应用经订阅链重建树（入口可达性本身由既有
+  // SHELL-09 编号用例覆盖；count 断言不受全屏页遮挡影响）
+  await openSettings(page);
+  await gotoGroup(page, '搜索与排除');
+  await page.locator('button[aria-label="加入预设排除规则 .git"]').click();
+  await page.locator('button[aria-label="加入预设排除规则 node_modules"]').click();
+  await applySettings(page);
   await expect(page.locator('.vv-tree-row', { hasText: '.git' })).toHaveCount(0);
   await expect(page.locator('.vv-tree-row', { hasText: 'node_modules' })).toHaveCount(0);
+  await closeSettings(page);
 
   // 跨刷新：重载（排除规则持久于 localStorage vviewer:settings）后重建同结构树，
   // 树级仍被排除——本地 File 会话不能跨刷新还原树，重注入是纯 web 模式下
@@ -484,8 +487,12 @@ test('SHELL-13/1：计算策略 UI 修改写入 localStorage 并跨刷新恢复�
   page
 }) => {
   await waitAppMounted(page);
-  // TopBar 计算策略下拉（aria-label="计算策略"）→ saveSettings 落盘单键对象
+  // 设置中心「计算」组下拉（自 TopBar 迁入）→ 应用 → saveSettings 落盘单键对象
+  await openSettings(page);
+  await gotoGroup(page, '计算');
   await page.getByLabel('计算策略').selectOption('local');
+  await applySettings(page);
+  await closeSettings(page);
   expect(
     await page.evaluate(
       () => JSON.parse(localStorage.getItem('vviewer:settings') ?? '{}').computePolicy
@@ -494,6 +501,8 @@ test('SHELL-13/1：计算策略 UI 修改写入 localStorage 并跨刷新恢复�
 
   // F5 刷新后恢复逐字吻合
   await page.reload();
+  await openSettings(page);
+  await gotoGroup(page, '计算');
   await expect(page.getByLabel('计算策略')).toHaveValue('local');
   expect(
     await page.evaluate(

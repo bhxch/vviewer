@@ -188,10 +188,11 @@ test.describe('布局与 zen（桌面）', () => {
     await chromeMenuItem(page, '隐藏顶栏');
     expect((await barState(page, '.vv-topbar')).cls).toContain('vv-chrome-off');
 
-    // Ctrl+, （TopBar window 级监听，隐藏不失效）→ 设置面板可见。
-    // 若面板落入隐藏条 visibility 继承域，toBeVisible（bbox + 非 visibility:hidden）在此拦截
+    // Ctrl+, （AppShell window 级监听，隐藏不失效）→ 设置中心可见（AppShell 挂点，
+    // 不在隐藏条 visibility 继承域）。若落入 chrome-off 继承域，toBeVisible
+    //（bbox + 非 visibility:hidden）在此拦截
     await page.keyboard.press('Control+,');
-    const panel = page.locator('.vv-settings');
+    const panel = page.locator('.vv-settings-center');
     await expect(panel).toBeVisible();
     expect(await panel.evaluate((el) => getComputedStyle(el).visibility)).toBe('visible');
     await page.keyboard.press('Escape');
@@ -231,11 +232,11 @@ test.describe('布局与 zen（桌面）', () => {
     // 桌面无退出浮钮（≤900px 媒体查询外）
     await expect(page.locator('.vv-zen-exit')).toBeHidden();
 
-    // Esc 面板优先：zen 中开设置面板 → Esc 只关面板、zen 保持
+    // Esc 面板优先：zen 中 Ctrl+, 开设置中心 → Esc 只关面板、zen 保持
     await page.keyboard.press('Control+,');
-    await expect(page.locator('.vv-settings')).toBeVisible();
+    await expect(page.locator('.vv-settings-center')).toBeVisible();
     await page.keyboard.press('Escape');
-    await expect(page.locator('.vv-settings')).toHaveCount(0);
+    await expect(page.locator('.vv-settings-center')).toHaveCount(0);
     await expect(page.locator('.vv-shell.zen')).toHaveCount(1);
 
     // 无面板 Esc → 退 zen
@@ -347,13 +348,13 @@ test.describe('zen 移动端（mobile project）', () => {
     // 移动断点进 zen 即压守卫历史项（{vvZen:1} 在当前项）
     expect(await page.evaluate(() => (history.state as { vvZen?: number } | null)?.vvZen)).toBe(1);
 
-    // zen 中 Ctrl+, 开设置面板（隐藏条挂点面板可见性同桌面不变式）
+    // zen 中 Ctrl+, 开设置中心（隐藏条挂点面板可见性同桌面不变式）
     await page.keyboard.press('Control+,');
-    await expect(page.locator('.vv-settings')).toBeVisible();
+    await expect(page.locator('.vv-settings-center')).toBeVisible();
 
     // 第一次返回：只关面板，zen 与守卫保持（closeOverlay 后守卫重压）
     await page.goBack();
-    await expect(page.locator('.vv-settings')).toHaveCount(0);
+    await expect(page.locator('.vv-settings-center')).toHaveCount(0);
     await expect(page.locator('.vv-shell.zen')).toHaveCount(1);
     expect(await page.evaluate(() => (history.state as { vvZen?: number } | null)?.vvZen)).toBe(1);
 

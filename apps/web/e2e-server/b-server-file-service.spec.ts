@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
 import { assertPortFree, stopServer, waitHealthy } from '../e2e/serverHarness';
+import { applySettings, closeSettings, gotoGroup, openSettings } from '../e2e/settings-center';
 
 /**
  * server-file-service 域补缺（docs/e2e/server-file-service.md 第 2/3 节）：
@@ -335,13 +336,12 @@ test.describe('SRV-07/BUG-05 手动刷新', () => {
     const pre = page.locator('.vv-code-pre');
     await expect(pre).toContainText('manual refresh baseline', { timeout: 10_000 });
 
-    // 设置面板（BUG-05 修复后入口）切手动：关「自动刷新」开关
-    await page.locator('button[aria-label="设置"]').click();
-    const panel = page.locator('.vv-settings');
-    await expect(panel).toBeVisible();
-    await panel.locator('.vv-settings-toggle input[type="checkbox"]').uncheck();
-    await page.keyboard.press('Escape');
-    await expect(panel).toHaveCount(0);
+    // 设置中心（「自动刷新」组）切手动：关开关写草稿，统一「应用」落盘
+    await openSettings(page);
+    await gotoGroup(page, '自动刷新');
+    await page.locator('.vv-settings-toggle input[type="checkbox"]').uncheck();
+    await applySettings(page);
+    await closeSettings(page);
 
     // 手动刷新按钮恒可用（BUG-05 验收 2 的 UI 前提）
     await expect(page.locator('button[aria-label="刷新当前文件"]')).toBeVisible();

@@ -6,6 +6,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { test, expect, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 import { assertPortFree, stopServer, waitHealthy } from './serverHarness';
+import { setComputePolicy } from './settings-center';
 
 /**
  * t-hl E2E（t- 前缀 = 2026-10-10 代码高亮域覆盖缺口补齐轮，不改动任何既有 spec）。
@@ -202,8 +203,8 @@ test('HL-01: 自动与本地策略下 rust 均走本地 tree-sitter 主路径（
   expect(manifest.grammars.rust?.file).toBe('rust.wasm');
   expect(manifest.grammars.rust?.sha256).toBeTruthy();
 
-  // ③ 切「本地」策略：重开已打开文件不触发重载，需换文件中转（域文档 4.4-2 复核要点）
-  await page.getByLabel('计算策略').selectOption('local');
+  // ③ 切「本地」策略（设置中心「计算」组+应用）：重开已打开文件不触发重载，需换文件中转（域文档 4.4-2 复核要点）
+  await setComputePolicy(page, 'local');
   await openFile(page, 'transit.txt');
   await openFile(page, 'rs-local.rs');
   await expect(page.locator('.vv-code-pre span[class^="ts-keyword"]').first()).toBeVisible({
@@ -492,8 +493,8 @@ test('HL-10/3: 远程策略 rs/ts/sh 三语言 POST /api/compute/highlight 对�
     await page.getByLabel('服务器地址').fill(BASE);
     await page.getByRole('button', { name: '连接', exact: true }).click();
     await expect(page.locator('.vv-tree-row', { hasText: 'thl-' }).first()).toBeVisible({ timeout: 10_000 });
-    // 先切策略再开文件（切策略对已打开文件不回溯，域文档 4.4-2 复核要点）
-    await page.getByLabel('计算策略').selectOption('remote');
+    // 先切策略再开文件（切策略对已打开文件不回溯，域文档 4.4-2 复核要点；设置中心「计算」组+应用）
+    await setComputePolicy(page, 'remote');
     for (const [name, lang] of [
       ['thl-rs.rs', 'rust'],
       ['thl-matrix.ts', 'typescript'],
