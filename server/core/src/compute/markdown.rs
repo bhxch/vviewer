@@ -1,10 +1,49 @@
-//! comrak markdown 渲染（Task 2）：GFM 全扩展 + wikilink 预处理。
+//! comrak markdown 渲染（Task 2）：GFM 全扩展 + wikilink 预处理（多端发布
+//! 阶段二 Task 3 随 compute 域自适配层迁入，native feature 门控；axum 提取壳
+//! 留适配层 routes/compute.rs）。
 //!
 //! 裁剪（M6 计划级裁决）：comrak 数学扩展（math_dollars/math_code）不启用、
 //! 无数学掩码；输出必经前端既有净化管线（DOMPurify 同类），服务端 unsafe
 //! 只是保证 raw HTML/生成的 wikilink 锚元素不被 comrak 转义。
 
 use comrak::{markdown_to_html, Options};
+use http::StatusCode;
+use serde::{Deserialize, Serialize};
+
+use crate::error::CoreError;
+use crate::CoreResponse;
+
+/// `POST /api/compute/markdown` 请求体。
+#[derive(Deserialize)]
+pub struct MarkdownRequest {
+    pub text: String,
+    #[serde(default)]
+    pub options: MarkdownOptions,
+}
+
+#[derive(Deserialize, Default)]
+pub struct MarkdownOptions {
+    #[serde(default)]
+    pub wikilinks: bool,
+}
+
+#[derive(Serialize)]
+pub struct MarkdownResponse {
+    pub html: String,
+}
+
+/// body `{text, options?: {wikilinks?}}` → `{html}`（200 JSON）。
+/// text 超过 5MB（UTF-8 字节）返回 413；原始请求体由适配层 DefaultBodyLimit 兜底。
+pub fn markdown(req: MarkdownRequest) -> Result<CoreResponse, CoreError> {
+    if req.text.len() > MARKDOWN_MAX_BYTES {
+        return Err(CoreError::payload_too_large(format!(
+            "markdown text exceeds {}MB limit",
+            MARKDOWN_MAX_BYTES / 1024 / 1024
+        )));
+    }
+    let html = render(&req.text, req.options.wikilinks);
+    Ok(CoreResponse::json(StatusCode::OK, &MarkdownResponse { html }))
+}
 
 /// markdown 渲染输入上限（UTF-8 字节）：超限请求 413。
 pub const MARKDOWN_MAX_BYTES: usize = 5 * 1024 * 1024;

@@ -2584,19 +2584,13 @@ name = "vviewer"
 version = "0.1.0"
 dependencies = [
  "axum",
- "cc",
  "clap",
- "comrak",
  "futures-core",
  "http-body-util",
- "layout-rs",
  "log",
  "notify",
- "once_cell",
- "rand 0.10.3",
  "serde",
  "serde_json",
- "svgbob",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -2606,9 +2600,6 @@ dependencies = [
  "tracing",
  "tracing-log",
  "tracing-subscriber",
- "tree-sitter",
- "tree-sitter-highlight",
- "tree-sitter-language",
  "vviewer-core",
  "vviewer-storage",
 ]
@@ -2618,16 +2609,23 @@ name = "vviewer-core"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "cc",
+ "comrak",
  "futures-core",
  "http",
+ "layout-rs",
  "once_cell",
  "rand 0.10.3",
  "serde",
  "serde_json",
+ "svgbob",
  "tempfile",
  "tokio",
  "tokio-util",
  "tracing",
+ "tree-sitter",
+ "tree-sitter-highlight",
+ "tree-sitter-language",
  "vviewer-storage",
 ]
 

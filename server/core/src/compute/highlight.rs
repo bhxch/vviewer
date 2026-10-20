@@ -1,4 +1,7 @@
-//! `POST /api/compute/highlight`（Task 3）：tree-sitter 服务端主语法高亮。
+//! `POST /api/compute/highlight`：tree-sitter 服务端主语法高亮（多端发布阶段
+//! 二 Task 3 自适配层整体迁入并 `native` feature 门控；axum 提取与响应重建留
+//! 适配层 routes/compute.rs——本模块错误面 [`CoreError`]、响应面
+//! [`CoreResponse`]）。
 //!
 //! injections 已接线（阶段 1，spec §2.2）：injection_callback 经
 //! `queries::config_ref` 从全局注册表解析注入语言的 HighlightConfiguration。
@@ -27,17 +30,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
-use axum::extract::State;
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
-use axum::Json;
+use http::StatusCode;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use tree_sitter_highlight::{HighlightEvent, Highlighter};
 
 use crate::compute::queries::{self, HIGHLIGHT_NAMES};
-use crate::error::AppError;
-use crate::state::AppState;
+use crate::error::CoreError;
+use crate::state::CoreState;
+use crate::CoreResponse;
 
 /// text/path 输入上限（UTF-8 字节）：超限 413。
 pub const HIGHLIGHT_MAX_BYTES: usize = 20 * 1024 * 1024;
@@ -148,9 +149,9 @@ impl Utf16Index {
 // ---------- 核心高亮 ----------
 
 /// 对文本执行主语法高亮并产出紧凑响应（阻塞，调用方放 spawn_blocking）。
-pub fn run_highlight(lang: &str, text: &str) -> Result<HighlightResponse, AppError> {
+pub fn run_highlight(lang: &str, text: &str) -> Result<HighlightResponse, CoreError> {
     let config = queries::config_ref(lang).ok_or_else(|| {
-        AppError::bad_request(format!(
+        CoreError::bad_request(format!(
             "unsupported language: {lang} (supported: {:?})",
             queries::supported_languages()
         ))
@@ -165,7 +166,7 @@ pub fn run_highlight(lang: &str, text: &str) -> Result<HighlightResponse, AppErr
             None, // cancellation flag：响应侧超时即放弃结果（模块注释），无需协作取消
             |injected: &str| queries::config_ref(injected),
         )
-        .map_err(|e| AppError::internal(format!("highlight query 执行失败: {e}")))?;
+        .map_err(|e| CoreError::internal(format!("highlight query 执行失败: {e}")))?;
 
     let names = &*HIGHLIGHT_NAMES;
     let mut intervals: Vec<[u64; 3]> = Vec::new();
@@ -174,7 +175,7 @@ pub fn run_highlight(lang: &str, text: &str) -> Result<HighlightResponse, AppErr
     let index = Utf16Index::new(text);
 
     for event in events {
-        let event = event.map_err(|e| AppError::internal(format!("highlight 迭代失败: {e}")))?;
+        let event = event.map_err(|e| CoreError::internal(format!("highlight 迭代失败: {e}")))?;
         match event {
             HighlightEvent::HighlightStart(h) => stack.push(h.0),
             HighlightEvent::HighlightEnd => {
@@ -189,7 +190,7 @@ pub fn run_highlight(lang: &str, text: &str) -> Result<HighlightResponse, AppErr
                 }
                 // 区间数上限：超限即断（惰性迭代器在此停止消费，解析不再推进）
                 if intervals.len() >= MAX_INTERVALS {
-                    return Err(AppError::payload_too_large(format!(
+                    return Err(CoreError::payload_too_large(format!(
                         "highlight intervals exceed {MAX_INTERVALS}"
                     )));
                 }
@@ -329,50 +330,42 @@ pub fn cache_reset() {
 
 // ---------- handler ----------
 
-fn too_large(what: &str) -> Response {
-    (
-        StatusCode::PAYLOAD_TOO_LARGE,
-        Json(serde_json::json!({
-            "error": format!("{what} exceeds {}MB limit", HIGHLIGHT_MAX_BYTES / 1024 / 1024)
-        })),
-    )
-        .into_response()
+fn too_large(what: &str) -> CoreError {
+    CoreError::payload_too_large(format!(
+        "{what} exceeds {}MB limit",
+        HIGHLIGHT_MAX_BYTES / 1024 / 1024
+    ))
 }
 
 /// 解析任务的响应侧超时包装：deadline 内未完成 → 504（解析线程不中断，见模块注释）。
 /// 独立函数便于测试注入永不完成的任务做确定性 504 断言。
 async fn parse_with_timeout(
     timeout: Duration,
-    handle: tokio::task::JoinHandle<Result<HighlightResponse, AppError>>,
-) -> Result<HighlightResponse, Response> {
+    handle: tokio::task::JoinHandle<Result<HighlightResponse, CoreError>>,
+) -> Result<HighlightResponse, CoreError> {
     match tokio::time::timeout(timeout, handle).await {
         Ok(Ok(Ok(resp))) => Ok(resp),
-        Ok(Ok(Err(e))) => Err(e.into_response()),
-        Ok(Err(join_err)) => Err(
-            AppError::internal(format!("highlight task panicked: {join_err}")).into_response()
-        ),
-        Err(_) => Err(
-            (
-                StatusCode::GATEWAY_TIMEOUT,
-                Json(serde_json::json!({
-                    "error": format!(
-                        "highlight timed out after {}ms (parsing thread finishes in background)",
-                        timeout.as_millis()
-                    )
-                })),
-            )
-                .into_response(),
-        ),
+        Ok(Ok(Err(e))) => Err(e),
+        Ok(Err(join_err)) => {
+            Err(CoreError::internal(format!("highlight task panicked: {join_err}")))
+        }
+        Err(_) => Err(CoreError(
+            StatusCode::GATEWAY_TIMEOUT,
+            format!(
+                "highlight timed out after {}ms (parsing thread finishes in background)",
+                timeout.as_millis()
+            ),
+        )),
     }
 }
 
 /// 完整高亮响应序列化（附带 `cacheId` 会话令牌）：HighlightResponse 本身不带
 /// 令牌字段（保持内部/单测形状），仅在线 Wire JSON 上合并，text 模式无缓存
 /// 条目不走此处（无令牌，向后兼容）。
-fn full_highlight_body(resp: &HighlightResponse, cache_id: &str) -> Response {
+fn full_highlight_body(resp: &HighlightResponse, cache_id: &str) -> CoreResponse {
     let mut body = serde_json::to_value(resp).expect("HighlightResponse serializes");
     body["cacheId"] = serde_json::Value::String(cache_id.to_string());
-    Json(body).into_response()
+    CoreResponse::json(StatusCode::OK, &body)
 }
 
 /// mtime → epoch 毫秒（取不到则 0，仍参与键区分大小/路径）。
@@ -455,42 +448,35 @@ async fn read_line_chunk(
 /// range 仅 path 模式接受（text+range → 400）；lineCount ∈ 1..=[`MAX_RANGE_LINES`]
 /// 否则 400；startLine ≥ 文件实际行数（含空文件）→ 400 并报实际行数；lineCount
 /// 越过文件尾 → 自然截断为实际行数（200）。
-pub async fn highlight(State(state): State<AppState>, Json(req): Json<HighlightRequest>) -> Response {
-    highlight_with_timeout(state, req, HIGHLIGHT_TIMEOUT).await
-}
-
-/// [`highlight`] 的可注入超时形态（504 自动化测试注入短 deadline；生产走
-/// [`HIGHLIGHT_TIMEOUT`]）。响应侧保护语义见模块注释：不中断已进入同步解析的线程。
-pub(crate) async fn highlight_with_timeout(
-    state: AppState,
+/// （axum 提取壳在适配层 routes/compute.rs——本函数即迁移前
+/// `highlight_with_timeout` 的业务体，State 提取换 [`CoreState`] 引用。）
+pub async fn highlight(
+    state: &CoreState,
     req: HighlightRequest,
     timeout: Duration,
-) -> Response {
+) -> Result<CoreResponse, CoreError> {
     let Some(lang) = req.lang.as_deref().filter(|l| !l.is_empty()) else {
-        return AppError::bad_request("missing lang").into_response();
+        return Err(CoreError::bad_request("missing lang"));
     };
     if !queries::is_supported(lang) {
-        return AppError::bad_request(format!(
+        return Err(CoreError::bad_request(format!(
             "unsupported language: {lang} (supported: {:?})",
             queries::supported_languages()
-        ))
-        .into_response();
+        )));
     }
 
     // range 结构校验（先于模式分流）：仅 path 模式接受（text+range → 400）
     if let Some(range) = req.range {
         if range.line_count == 0 || range.line_count > MAX_RANGE_LINES {
-            return AppError::bad_request(format!(
+            return Err(CoreError::bad_request(format!(
                 "range.lineCount must be in 1..={MAX_RANGE_LINES}, got {}",
                 range.line_count
-            ))
-            .into_response();
+            )));
         }
         if req.path.as_deref().filter(|p| !p.is_empty()).is_none() {
-            return AppError::bad_request(
+            return Err(CoreError::bad_request(
                 "range requires path mode (text + range is not supported)",
-            )
-            .into_response();
+            ));
         }
     }
 
@@ -498,22 +484,18 @@ pub(crate) async fn highlight_with_timeout(
     let mut cache_key: Option<CacheKey> = None;
     let (text, base_line): (String, u64) =
         if let Some(path) = req.path.as_deref().filter(|p| !p.is_empty()) {
-            let canonical =
-                match crate::guard::resolve_at(&state, Some(path), req.root.unwrap_or(0)).await {
-                    Ok(p) => p,
-                    Err(e) => return e.into_response(),
-                };
+            let canonical = crate::guard::resolve_at(state, Some(path), req.root.unwrap_or(0)).await?;
             let meta = match tokio::fs::metadata(&canonical).await {
                 Ok(m) if m.is_file() => m,
-                Ok(_) => return AppError::bad_request("path is not a file").into_response(),
+                Ok(_) => return Err(CoreError::bad_request("path is not a file")),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    return AppError::not_found("path not found").into_response()
+                    return Err(CoreError::not_found("path not found"))
                 }
-                Err(e) => return AppError::internal(e.to_string()).into_response(),
+                Err(e) => return Err(CoreError::internal(e.to_string())),
             };
             // 整文件模式保留 20MB 上限；range 模式流式扫行内存有界，不设上限
             if req.range.is_none() && meta.len() > HIGHLIGHT_MAX_BYTES as u64 {
-                return too_large("file");
+                return Err(too_large("file"));
             }
             // LRU 键追加 range 维度（无 range 用 (0, u64::MAX) 占位，见 CacheKey 注释）
             let (start_line, line_count) = match req.range {
@@ -527,43 +509,41 @@ pub(crate) async fn highlight_with_timeout(
                 // （intervals 由客户端会话缓存复用，17MB 级响应体不再重复传输）；
                 // 未带令牌/令牌过期（重启、另一客户端）→ 完整响应（幂等）。
                 if req.cache_id.as_deref() == Some(cached.cache_id.as_str()) {
-                    return Json(serde_json::json!({
-                        "cached": true,
-                        "cacheId": cached.cache_id,
-                        "baseLine": cached.resp.base_line,
-                    }))
-                    .into_response();
+                    return Ok(CoreResponse::json(
+                        StatusCode::OK,
+                        &serde_json::json!({
+                            "cached": true,
+                            "cacheId": cached.cache_id,
+                            "baseLine": cached.resp.base_line,
+                        }),
+                    ));
                 }
-                return full_highlight_body(&cached.resp, &cached.cache_id);
+                return Ok(full_highlight_body(&cached.resp, &cached.cache_id));
             }
             let file_text: String = match req.range {
                 Some(r) => match read_line_chunk(&canonical, r.start_line, r.line_count).await {
                     Ok(ChunkRead::Ok { chunk, .. }) => chunk,
                     // startLine ≥ 实际行数（含空文件）：400 携带实际行数
                     Ok(ChunkRead::StartBeyondEof { total }) => {
-                        return AppError::bad_request(format!(
+                        return Err(CoreError::bad_request(format!(
                             "range.startLine {} is beyond end of file: {} lines",
                             r.start_line, total
-                        ))
-                        .into_response()
+                        )))
                     }
                     // chunk 超 20MB（单行超长或多行累计）：413，与整文件路径同限
-                    Ok(ChunkRead::TooLarge) => return too_large("chunk"),
+                    Ok(ChunkRead::TooLarge) => return Err(too_large("chunk")),
                     Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
-                        return AppError::bad_request("file is not valid UTF-8").into_response()
+                        return Err(CoreError::bad_request("file is not valid UTF-8"))
                     }
-                    Err(e) => return AppError::internal(e.to_string()).into_response(),
+                    Err(e) => return Err(CoreError::internal(e.to_string())),
                 },
                 None => {
-                    let bytes = match tokio::fs::read(&canonical).await {
-                        Ok(b) => b,
-                        Err(e) => return AppError::internal(e.to_string()).into_response(),
-                    };
+                    let bytes = tokio::fs::read(&canonical)
+                        .await
+                        .map_err(|e| CoreError::internal(e.to_string()))?;
                     match String::from_utf8(bytes) {
                         Ok(t) => t,
-                        Err(_) => {
-                            return AppError::bad_request("file is not valid UTF-8").into_response()
-                        }
+                        Err(_) => return Err(CoreError::bad_request("file is not valid UTF-8")),
                     }
                 }
             };
@@ -572,11 +552,11 @@ pub(crate) async fn highlight_with_timeout(
             (file_text, base_line)
         } else if let Some(text) = req.text {
             if text.len() > HIGHLIGHT_MAX_BYTES {
-                return too_large("text");
+                return Err(too_large("text"));
             }
             (text, 0)
         } else {
-            return AppError::bad_request("path or text is required").into_response();
+            return Err(CoreError::bad_request("path or text is required"));
         };
 
     // CRLF/CR → LF 归一化（final re-review 修复）：path 模式原样读文件、text 模式
@@ -591,19 +571,16 @@ pub(crate) async fn highlight_with_timeout(
     // 同步解析：阻塞线程执行，响应侧超时（无法中断线程本身，见模块注释）
     let lang_owned = lang.to_string();
     let handle = tokio::task::spawn_blocking(move || run_highlight(&lang_owned, &text));
-    let mut result = match parse_with_timeout(timeout, handle).await {
-        Ok(resp) => resp,
-        Err(response) => return response,
-    };
+    let mut result = parse_with_timeout(timeout, handle).await?;
     // range 模式：区间相对 chunk 首行（Utf16Index 以 chunk 文本建表，不做平移），
     // baseLine 告知客户端基准行；无 range/text 模式保持 0
     result.base_line = base_line;
 
     if let Some(key) = cache_key {
         let cache_id = CACHE.insert(key, result.clone());
-        return full_highlight_body(&result, &cache_id);
+        return Ok(full_highlight_body(&result, &cache_id));
     }
-    Json(result).into_response()
+    Ok(CoreResponse::json(StatusCode::OK, &result))
 }
 
 #[cfg(test)]
@@ -759,8 +736,8 @@ fn main() {
         assert!(per100 > 0, "样例行应产出区间");
         let big = line.repeat((MAX_INTERVALS / per100 + 2) * 100);
         let err = run_highlight("rust", &big).unwrap_err();
-        assert_eq!(err.0, StatusCode::PAYLOAD_TOO_LARGE, "超限语义 413: {err}");
-        assert!(err.1.contains("intervals"), "错误指明区间超限: {err}");
+        assert_eq!(err.0, StatusCode::PAYLOAD_TOO_LARGE, "超限语义 413: {err:?}");
+        assert!(err.1.contains("intervals"), "错误指明区间超限: {err:?}");
     }
 
     #[test]
@@ -942,19 +919,22 @@ fn main() {
     /// deadline + 挂钟暂停——advance 越过 deadline 后超时分支确定触发，不依赖
     /// 真实解析耗时（直接 2.6MB 解析与 advance 的真实调度窗口存在竞态，不可靠）；
     /// 同时锁定报错文案携带真实 deadline（动态化后的格式回归）。
+    /// （随域迁移机械适配：断言面由 axum Response body 收敛为 CoreError 数据面
+    /// ——`{"error": msg}` JSON 包装与状态码映射在适配层统一完成，由既有
+    /// From<CoreError> 映射与集成测试覆盖；断言语义（504 + 文案含注入 deadline）
+    /// 零变化。）
     #[tokio::test(start_paused = true)]
     async fn parse_timeout_returns_504_with_injected_deadline() {
         let handle =
-            tokio::spawn(std::future::pending::<Result<HighlightResponse, AppError>>());
+            tokio::spawn(std::future::pending::<Result<HighlightResponse, CoreError>>());
         let task = tokio::spawn(parse_with_timeout(Duration::from_millis(200), handle));
         tokio::time::advance(Duration::from_secs(1)).await; // 虚拟时钟越过 200ms deadline
         let err = task.await.unwrap().unwrap_err();
-        assert_eq!(err.status(), StatusCode::GATEWAY_TIMEOUT);
-        let bytes = axum::body::to_bytes(err.into_body(), usize::MAX).await.unwrap();
-        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(err.0, StatusCode::GATEWAY_TIMEOUT);
         assert!(
-            v["error"].as_str().unwrap().contains("timed out after 200ms"),
-            "报错应携带注入的 deadline: {v}"
+            err.1.contains("timed out after 200ms"),
+            "报错应携带注入的 deadline: {}",
+            err.1
         );
     }
 }

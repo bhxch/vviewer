@@ -19,16 +19,21 @@ path = "src/lib.rs"
 name = "vviewer"
 path = "src/main.rs"
 
+# native feature（多端发布阶段二 Task 3，与 vviewer-core 同名共识）：watch
+# （notify）与 compute（comrak/tree-sitter/diagrams——实现体在 core，经
+# `vviewer-core/native` 转发）的门控总开关。默认开启（native 构建行为不变）；
+# worker 形态 `--no-default-features`：watch.rs/compute 路由编译不存在、
+# /api/events 不挂载（watch=false 能力缺失）、health 不宣告 compute/diagrams
+# （core::health 同名 feature 协同门控）。
+[features]
+default = ["native"]
+native = ["dep:notify", "vviewer-core/native"]
+
 [dependencies]
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["io"] }
 clap = { version = "4", features = ["derive"] }
-# 仅库渲染：禁默认（cli/syntect-onig 语法高亮用不到）；shortcodes 为 GFM emoji 短码
-comrak = { version = "0.56.0", default-features = false, features = ["shortcodes"] }
-# 服务端图表渲染（spec 2026-10-19 §2.5，markpad Rust 栈同款）
-layout-rs = "0.1"
-svgbob = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # --config TOML 全参配置文件（spec 2026-10-19 §2.1：CLI>文件、未知键报错）
@@ -36,25 +41,16 @@ toml = "0.9"
 tower = { version = "0.5", features = ["util"] }
 futures-core = "0.3"
 tower-http = { version = "0.7", features = ["fs", "cors", "trace", "compression-gzip"] }
-notify = "8"
-once_cell = "1"
-rand = "0.10"
+# root 变更监听（watch 域唯一重依赖，随 native feature 裁剪）
+notify = { version = "8", optional = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
-# 服务端语法高亮：grammar 不走 crates.io crate，由 build.rs 按源码编译
-#（grammars-manifest.json 清单 + tools/grammar-builder 产出的源树，见 build.rs）。
-tree-sitter = "0.27"
-tree-sitter-highlight = "0.27"
-tree-sitter-language = "0.1"
 # 存储抽象子 crate（StorageBackend trait + LocalFs，目录挂载阶段一）
 vviewer-storage = { path = "storage" }
-# 框架无关业务核（阶段二抽取）：handler 业务体所在，适配层单向依赖
-vviewer-core = { path = "core" }
-
-[build-dependencies]
-cc = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# 框架无关业务核（阶段二抽取）：handler 业务体所在，适配层单向依赖。
+# default-features=false + native 转发：worker 形态随本 crate 一起裁剪 core
+# 的 compute 域（重依赖不进构建图）。
+vviewer-core = { path = "core", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"

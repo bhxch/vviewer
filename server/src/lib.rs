@@ -2,12 +2,19 @@
 
 pub mod adapt;
 pub mod auth;
-pub mod compute;
+// compute 域随 Task 3 迁 vviewer-core::compute（多端发布阶段二，native feature
+// 门控）——原 `vviewer::compute::*` 路径经本 re-export 保持既有调用点/集成测试
+// （tests/compute_highlight.rs、tests/compute_markdown.rs）零改动。
+#[cfg(feature = "native")]
+pub use vviewer_core::compute;
 pub mod error;
 pub mod guard;
 pub mod logging;
 pub mod routes;
 pub mod state;
+// watch（notify）域随 native feature 门控：worker 形态（--no-default-features）
+// 编译不存在——/api/events 不挂载、ChangeHub 不构造（state.rs 协同门控）。
+#[cfg(feature = "native")]
 pub mod watch;
 
 use std::time::Duration;

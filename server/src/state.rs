@@ -37,7 +37,9 @@ pub struct AppState {
     pub cors_origin: Option<String>,
     /// 一次性 ticket 表（SSE 升级用）。
     pub tickets: TicketStore,
-    /// root 变更广播中心（启动时创建一次，共享 watcher + debounce 聚合）。
+    /// root 变更广播中心（启动时创建一次，共享 watcher + debounce 聚合）；
+    /// native feature 门控（worker 形态无此字段）。
+    #[cfg(feature = "native")]
     pub changes: Arc<crate::watch::ChangeHub>,
 }
 
@@ -67,19 +69,26 @@ impl AppState {
         cors_origin: Option<String>,
     ) -> Self {
         let mut core = CoreState::new(root, token, hidden);
-        // health 宣告装配：版本随主 crate；compute 语言缝注入适配侧实现（core
-        // 不依赖 tree-sitter——依赖倒置方向单向；searchEngine 缝已随 Task 3
-        // search 域收编 core 退役）
+        // health 宣告装配：版本随主 crate。compute/searchEngine 两个能力宣告
+        // 缝（Task 1 预埋 fn 指针）均已随 Task 3 域收编 core 退役——health 在
+        // core 内直调（native 门控），适配层零注入。
         core.version = env!("CARGO_PKG_VERSION");
-        core.compute_languages = crate::compute::queries::supported_languages;
-        // 多根聚合 watch：每根一个 watcher 线程（单根即历史单 watcher 形状）
-        let canonicals: Vec<PathBuf> = core.roots.iter().map(|r| r.canonical.clone()).collect();
+        // 多根聚合 watch：每根一个 watcher 线程（单根即历史单 watcher 形状）；
+        // watch 域随 native feature 门控（worker 形态无 watch hub、events 路由
+        // 不挂载）
+        #[cfg(feature = "native")]
+        let changes = {
+            let canonicals: Vec<PathBuf> =
+                core.roots.iter().map(|r| r.canonical.clone()).collect();
+            crate::watch::ChangeHub::spawn(&canonicals)
+        };
         Self {
             core,
             web_dist,
             cors_origin,
             tickets: TicketStore::default(),
-            changes: crate::watch::ChangeHub::spawn(&canonicals),
+            #[cfg(feature = "native")]
+            changes,
         }
     }
 
@@ -113,8 +122,13 @@ impl AppState {
             self.root_canonical = canonical;
         }
         self.fs_roots = self.roots.len();
-        let canonicals: Vec<PathBuf> = self.roots.iter().map(|r| r.canonical.clone()).collect();
-        self.changes = crate::watch::ChangeHub::spawn(&canonicals);
+        #[cfg(feature = "native")]
+        {
+            // ChangeHub 重建为挂载全部根（旧 hub 随 drop 停止）
+            let canonicals: Vec<PathBuf> =
+                self.roots.iter().map(|r| r.canonical.clone()).collect();
+            self.changes = crate::watch::ChangeHub::spawn(&canonicals);
+        }
         self
     }
 

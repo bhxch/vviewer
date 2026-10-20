@@ -6,8 +6,25 @@ description = "vviewer 框架无关业务核：纯类型请求/响应 + 领域 h
 license = "Apache-2.0"
 
 # 依赖倒置方向（plan Global Constraints）：server → core 单向；core 不依赖
-# axum/tower-http/notify/comrak。http/bytes 为框架中立类型（axum 0.8 同源
-# http 1.x / bytes 1.x），适配层映射零转换成本。
+# axum/tower-http。http/bytes 为框架中立类型（axum 0.8 同源 http 1.x / bytes
+# 1.x），适配层映射零转换成本。
+#
+# native feature（多端发布阶段二 Task 3，与适配层 vviewer 同名共识）：承载
+# comrak/tree-sitter/layout-rs/svgbob 重依赖的 compute 域（markdown/highlight/
+# diagrams）。默认开启（native 构建行为不变）；worker 形态
+# `--no-default-features` 整域裁剪——compute 模块编译不存在、build.rs 跳过
+# grammar 编译、health 不宣告 compute/diagrams。
+[features]
+default = ["native"]
+native = [
+    "dep:comrak",
+    "dep:tree-sitter",
+    "dep:tree-sitter-highlight",
+    "dep:tree-sitter-language",
+    "dep:layout-rs",
+    "dep:svgbob",
+]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -29,8 +46,28 @@ tracing = "0.1"
 rand = "0.10"
 # 存储抽象（StorageBackend trait + LocalFs）：core 的 roots/挂载容器数据面
 vviewer-storage = { path = "../storage" }
+# ---- 以下为 native（compute 域）重依赖，随 feature 裁剪 ----
+# 仅库渲染：禁默认（cli/syntect-onig 语法高亮用不到）；shortcodes 为 GFM emoji 短码
+comrak = { version = "0.56.0", default-features = false, features = ["shortcodes"], optional = true }
+# 服务端语法高亮：grammar 不走 crates.io crate，由 build.rs 按源码编译
+#（grammars-manifest.json 清单 + tools/grammar-builder 产出的源树，见 build.rs）。
+tree-sitter = { version = "0.27", optional = true }
+tree-sitter-highlight = { version = "0.27", optional = true }
+tree-sitter-language = { version = "0.1", optional = true }
+# 服务端图表渲染（spec 2026-10-19 §2.5，markpad Rust 栈同款）
+layout-rs = { version = "0.1", optional = true }
+svgbob = { version = "0.7", optional = true }
+
+[build-dependencies]
+# 构建脚本本体恒编译（build-deps 不可随 feature 裁剪）；native 门控在脚本内
+# （CARGO_FEATURE_NATIVE 检查）——worker 形态仅付出 cc/serde_json 构建脚本
+# 编译成本（秒级），grammar 源码编译完全跳过。
+cc = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [dev-dependencies]
 tempfile = "3"
-# 域 handler 锚测的异步运行时（#[tokio::test]）
-tokio = { version = "1", features = ["macros", "rt"] }
+# 域 handler 锚测的异步运行时（#[tokio::test]）；test-util 供 highlight 504
+# 超时锚测的 start_paused 挂钟暂停（随 compute 域测试迁入）
+tokio = { version = "1", features = ["macros", "rt", "test-util"] }

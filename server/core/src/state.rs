@@ -118,10 +118,6 @@ pub struct CoreState {
     /// 服务端版本宣告（health.version 数据源）：由适配层注入 vviewer 主 crate
     /// 的 `CARGO_PKG_VERSION`——health 对外版本面随主 crate，不随本 crate。
     pub version: &'static str,
-    /// compute 语言清单宣告源（依赖倒置缝，Task 3 compute 域收编 core 后退役为
-    /// core 内直接调用）：语言注册表随 tree-sitter 留在 vviewer crate，core 不
-    /// 依赖重依赖——适配层注入实现，core 只消费宣告结果。
-    pub compute_languages: fn() -> Vec<&'static str>,
 }
 
 impl CoreState {
@@ -144,7 +140,6 @@ impl CoreState {
             rg_path: None,
             grep_path: None,
             version: "",
-            compute_languages: || Vec::new(),
         }
     }
 

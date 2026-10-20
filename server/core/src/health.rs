@@ -60,15 +60,23 @@ pub struct MountSummary {
     pub prefix: String,
 }
 
-/// 能力宣告：`file-server` 恒有；`--compute` 时追加 `compute`
-/// （前端连接时缓存，compute 路由据此判定是否走远程）。
+/// 能力宣告：`file-server` 恒有；`--compute` 且 native feature 时追加
+/// `compute`（前端连接时缓存，compute 路由据此判定是否走远程）。compute 域随
+/// Task 3 收编 core，`computeLanguages` 宣告缝（Task 1 预埋 fn 指针）退役为
+/// core 内直调 [`crate::compute::queries::supported_languages`]；无 native
+/// feature（worker 形态）时即使 `--compute` 也不宣告（路由不存在，plan 门控
+/// 语义：语言表随 tree-sitter 编译裁剪）。
 pub fn handle(state: &CoreState) -> CoreResponse {
-    let mut capabilities = vec!["file-server"];
-    let mut compute_languages = None;
-    let mut diagrams = None;
+    #[cfg_attr(not(feature = "native"), allow(unused_mut))]
+    let (mut capabilities, mut compute_languages, mut diagrams) =
+        (vec!["file-server"], None, None);
+    // 双门控合一：编译期（native feature）× 运行时（--compute 旗标）。
+    // compute 域随 Task 3 收编 core，`computeLanguages` 宣告缝（Task 1 预埋
+    // fn 指针）退役为 core 内直调 [`crate::compute::queries`]。
+    #[cfg(feature = "native")]
     if state.compute {
         capabilities.push("compute");
-        compute_languages = Some((state.compute_languages)());
+        compute_languages = Some(crate::compute::queries::supported_languages());
         diagrams = Some(vec!["graphviz", "svgbob"]);
     }
     // searchEngine 与 /api/search 消费同一选择链（Task 3 缝退役为 core 内直调）

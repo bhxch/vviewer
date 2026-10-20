@@ -12,9 +12,12 @@
 //! 映射回 axum Response。对外 HTTP 行为逐字节等价（既有测试为行为锁）。
 //! Task 2 已收编 tree/file/mounts 三域（Range 头解析属 HTTP 语义留适配层，
 //! core 收已解析窗口）；Task 3 收编 search/tickets/events 三域（NDJSON 与 SSE
-//! 皆经 [`CoreBody::Stream`] 流形态承载）。
+//! 皆经 [`CoreBody::Stream`] 流形态承载）与 compute 域（`native` feature 门控
+//! ——`--no-default-features` 时编译不存在，health 不宣告 compute/diagrams）。
 
 pub mod auth;
+#[cfg(feature = "native")]
+pub mod compute;
 pub mod detect;
 pub mod error;
 pub mod events;

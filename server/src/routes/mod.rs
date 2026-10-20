@@ -1,6 +1,11 @@
-//! HTTP 路由。
+//! HTTP 路由（多端发布阶段二 Task 3：compute/events 域随 native feature 门控
+//! ——`--no-default-features` 时 compute 路由不挂（`--compute` 旗标失效于无
+//! 实现体）、/api/events 不挂载（watch=false 能力缺失）；health 宣告由
+//! core::health 同名 feature 协同门控）。
 
+#[cfg(feature = "native")]
 pub mod compute;
+#[cfg(feature = "native")]
 pub mod events;
 pub mod file;
 pub mod health;
@@ -13,17 +18,20 @@ use axum::extract::DefaultBodyLimit;
 use axum::middleware;
 use axum::routing::{delete, get, post};
 use axum::Router;
+#[cfg(feature = "native")]
 use tower_http::compression::CompressionLayer;
 
 use crate::auth;
 
 /// /api/compute/* 的原始请求体上限：略高于应用层 5MB（给 JSON 包装留余量），
 /// 超限直接 413，防止 handler 解析超大 body。text 字段的精确 5MB 判定在 handler。
+#[cfg(feature = "native")]
 const COMPUTE_BODY_LIMIT: usize = 6 * 1024 * 1024;
 
 /// /api/compute/highlight 的原始请求体上限：应用层判定是 20MB（UTF-8 字节），
 /// 但 JSON 转义最坏情况（\n、\"、\\ 各翻倍）可到 40MB+，给足余量防 tower 层
 /// 抢先 413 拿不到 JSON error body；精确 20MB 在 handler 判。
+#[cfg(feature = "native")]
 const COMPUTE_HIGHLIGHT_BODY_LIMIT: usize = 48 * 1024 * 1024;
 
 /// /api/mounts POST 的原始请求体上限：挂载配置是字段级小型 JSON（endpoint/
@@ -37,7 +45,7 @@ const MOUNTS_BODY_LIMIT: usize = 64 * 1024;
 /// 鉴权分组：tree/file/ticket/compute 在 Bearer 中间件组内；
 /// health 免认证；events 用一次性 ticket 自证（EventSource 无法带头）。
 pub fn api_router(state: crate::state::AppState) -> Router {
-    let mut protected = Router::new()
+    let protected = Router::new()
         .route("/tree", get(tree::tree))
         .route("/file", get(file::file))
         .route("/ticket", post(ticket::issue_ticket))
@@ -55,23 +63,28 @@ pub fn api_router(state: crate::state::AppState) -> Router {
                 .get(mounts::manifest),
         )
         .route("/mounts/{index}", delete(mounts::remove));
-    // --compute 才暴露计算端点；未启用时路径不存在（统一 JSON 404）。
-    // CompressionLayer（BUG-10 收尾）：highlight intervals 响应可达十余 MB，
-    // gzip 按 Accept-Encoding 协商压缩（浏览器默认携带）；仅作用于 compute 端点，
-    // 不入 file 路由——Range 流被压缩会破坏字节区间语义。
-    if state.compute {
-        protected = protected
+    // --compute 才暴露计算端点；未启用时路径不存在（统一 JSON 404）。双重门：
+    // 编译期 native feature（实现体在 vviewer-core::compute，worker 形态裁剪）
+    // × 运行时 --compute 旗标。CompressionLayer（BUG-10 收尾）：highlight
+    // intervals 响应可达十余 MB，gzip 按 Accept-Encoding 协商压缩（浏览器默认
+    // 携带）；仅作用于 compute 端点，不入 file 路由——Range 流被压缩会破坏字节
+    // 区间语义。
+    #[cfg(feature = "native")]
+    let protected = if state.compute {
+        protected
             .route(
                 "/compute/markdown",
                 post(compute::markdown).layer(DefaultBodyLimit::max(COMPUTE_BODY_LIMIT)),
             )
             .route(
                 "/compute/highlight",
-                post(crate::compute::highlight::highlight)
+                post(compute::highlight)
                     .layer(DefaultBodyLimit::max(COMPUTE_HIGHLIGHT_BODY_LIMIT)),
             )
-            .layer(CompressionLayer::new());
-    }
+            .layer(CompressionLayer::new())
+    } else {
+        protected
+    };
     let protected = protected
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -79,9 +92,12 @@ pub fn api_router(state: crate::state::AppState) -> Router {
         ))
         .with_state(state.clone());
 
-    Router::new()
-        .route("/health", get(health::health))
-        .route("/events", get(events::events))
+    let public = Router::new().route("/health", get(health::health));
+    // SSE events：ticket 自证升级流；消费 watch 广播中心（notify 域）——随
+    // native feature 门控，worker 形态（watch=false 能力缺失）该路由不存在
+    #[cfg(feature = "native")]
+    let public = public.route("/events", get(events::events));
+    public
         .merge(protected)
         .fallback(crate::api_not_found)
         .with_state(state)
