@@ -9,6 +9,7 @@ import {
   contentRangeMatches,
   createS3DirectStore,
   parseListV2,
+  rawFetch,
   s3DirectStoreId,
   signS3Get,
   type S3Credentials
@@ -339,5 +340,48 @@ describe('createS3DirectStore', () => {
     expect(onError).toHaveBeenCalledTimes(1);
     unsubscribe();
     expect(listener).not.toHaveBeenCalled();
+  });
+});
+
+describe('rawFetch 双信号合并（终审 M-1：AbortSignal.any 存在性守卫）', () => {
+  it('any 缺失（Safari 17.0–17.3 形态）回退手写桥接：源 abort 传播到合并信号，非直通', async () => {
+    const g = AbortSignal as unknown as { any?: unknown };
+    const original = g.any;
+    delete g.any;
+    try {
+      const caller = new AbortController();
+      let seen: AbortSignal | null | undefined;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+          seen = init?.signal;
+          caller.abort(); // 模拟调用方取消在请求期间到达
+          return xmlResponse('<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>');
+        })
+      );
+      await rawFetch('http://127.0.0.1:9000/bkt?list-type=2', { signal: caller.signal }, 'cors');
+      expect(seen).toBeDefined();
+      expect(seen).not.toBe(caller.signal); // 与超时信号合并（非单源直通）
+      expect(seen!.aborted).toBe(true); // 桥接传播：源 abort 即 merged abort
+    } finally {
+      if (original === undefined) delete g.any;
+      else g.any = original;
+    }
+  });
+
+  it('any 存在时走原生通道：合并信号随源 abort（超时+调用方双源在合并中）', async () => {
+    const caller = new AbortController();
+    let seen: AbortSignal | null | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        seen = init?.signal;
+        caller.abort();
+        return xmlResponse('<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>');
+      })
+    );
+    await rawFetch('http://127.0.0.1:9000/bkt?list-type=2', { signal: caller.signal }, 'cors');
+    expect(seen).toBeDefined();
+    expect(seen!.aborted).toBe(true);
   });
 });

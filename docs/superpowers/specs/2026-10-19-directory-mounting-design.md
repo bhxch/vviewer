@@ -90,6 +90,7 @@ kind = "s3"
   2. **前端配置挂载**：IndexedDB 列表（direct/proxy 徽标、kind、endpoint、凭据已存指示、健康态）——操作：新增（kind→参数表单→测试连接→保存）/编辑/删除/测试/打开；proxy 项显示「已注册 rootIndex=N / 待注册」状态。
   3. **本机授权来源**：localfs 句柄（名称+授权状态）与 localfiles 会话来源——操作：打开/清除句柄（清除后快照 localfs 恢复随之失效，提示）。
 - 新增/编辑表单按 kind 切换字段集，必填校验 + 「测试连接」实际发一次 list_dir 探测并回显根条目数与延迟。
+  - 勘误（终审 I-4）：「list_dir 探测」的字面语义（服务器出口探测）与实现不符——direct 与 proxy 的「测试连接」同为**浏览器侧探测**（直接打目标 endpoint：S3=ListObjectsV2 / WebDAV=PROPFIND，与直连挂载打开后同一条链路）。对 proxy 记录，浏览器 CORS 拦截会把「代理链路可用」误报为不可用（目标可达性≠浏览器可达性）；代理链路的真实可用性以服务器出口为准（保存注册后由对账健康探测覆盖，§3）。UI 在 proxy 模式表单固定渲染该边界文案。
 - proxy 挂载增删即时调 `POST/DELETE /api/mounts`；失败不落 IndexedDB（保持一致态）。
 
 ## 6. 安全注记

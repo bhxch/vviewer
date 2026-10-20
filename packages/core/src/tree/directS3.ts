@@ -441,6 +441,33 @@ async function signedFetch(
 }
 
 /**
+ * 双信号合并（终审 M-1：AbortSignal.any 存在性守卫——与紧邻 timeout 守卫同款
+ * 谨慎度，Safari 17.0–17.3 有 timeout 无 any）：原生 any 优先（reason 随源传播）；
+ * 缺失时手写桥接（AbortController + 一次性 abort 监听互拆，apps/web
+ * mergeAbortSignals 同款语义——已断同步传播，reason 取先断一侧）。
+ */
+function anySignal(a: AbortSignal, b: AbortSignal): AbortSignal {
+  if (typeof AbortSignal.any === 'function') return AbortSignal.any([a, b]);
+  const merged = new AbortController();
+  if (a.aborted) {
+    merged.abort(a.reason);
+    return merged.signal;
+  }
+  if (b.aborted) {
+    merged.abort(b.reason);
+    return merged.signal;
+  }
+  const onAbort = (ev: Event): void => {
+    a.removeEventListener('abort', onAbort);
+    b.removeEventListener('abort', onAbort);
+    merged.abort((ev.target as AbortSignal).reason);
+  };
+  a.addEventListener('abort', onAbort);
+  b.addEventListener('abort', onAbort);
+  return merged.signal;
+}
+
+/**
  * raw fetch 包装：30s 超时与调用方 signal 合并（RemoteStore.request 同款形态）；
  * fetch 网络层 TypeError（CORS 拦截/不可达特征）特征化为直连错误；超时与
  * AbortError（取消）原样透传。
@@ -454,7 +481,7 @@ export async function rawFetch(
     typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(REQUEST_TIMEOUT_MS) : undefined;
   const merged =
     init.signal && timeoutSignal
-      ? AbortSignal.any([timeoutSignal, init.signal])
+      ? anySignal(timeoutSignal, init.signal)
       : (init.signal ?? timeoutSignal);
   try {
     return await fetch(url, { ...init, signal: merged });
