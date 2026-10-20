@@ -126,6 +126,9 @@ async fn grammar_asset_paths_not_swallowed_by_spa_fallback() {
     assert_eq!(body.as_ref(), b"<html>spa-shell</html>");
 }
 
+// 裁剪形态（worker）断言面为死路径：--compute 不宣告（native feature 门控，
+// 修复轮 1 评审 M-1；core::health 的裁剪侧行为由 vviewer-core 锚测覆盖）。
+#[cfg(feature = "native")]
 #[tokio::test]
 async fn compute_health_advertises_sorted_language_list() {
     let dir = tempfile::tempdir().unwrap();

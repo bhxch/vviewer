@@ -165,4 +165,24 @@ mod tests {
             Some("application/json")
         );
     }
+
+    /// 裁剪形态（worker，--no-default-features）锚测（修复轮 1 评审 L1）：
+    /// `--compute` 旗标不得翻出 compute 能力/语言表/图表宣告——实现体经
+    /// native feature 编译裁剪（plan 门控语义：无 feature 时 handler 编译不
+    /// 存在、路由不挂载、health 不宣告），运行时旗标失效于无实现体。
+    /// `cargo test -p vviewer-core --no-default-features` 可跑（native 形态
+    /// 不编译本锚测，与上方 native 行为锚测互斥互补）。
+    #[cfg(not(feature = "native"))]
+    #[test]
+    fn trimmed_form_omits_compute_announcement_even_when_flagged() {
+        let mut state = base_state();
+        state.compute = true;
+        let v = health_json(&state);
+        assert_eq!(v["capabilities"], serde_json::json!(["file-server"]));
+        assert!(v.get("computeLanguages").is_none(), "裁剪形态不得宣告语言表: {v}");
+        assert!(v.get("diagrams").is_none(), "裁剪形态不得宣告图表: {v}");
+        // searchEngine 宣告链（rg/grep PATH 探测）非 native 重依赖、不随裁剪：
+        // 存在性与否随测试环境 PATH 而定（无注入时本机探测），不纳入本锚测
+        // （存在性断言由 native 侧 health 集成测试经 rg_path/grep_path 注入覆盖）
+    }
 }

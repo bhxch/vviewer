@@ -1,5 +1,8 @@
 //! Task 3 集成测试：Bearer 鉴权 / ticket 流程 / 路径穿越与 symlink / CORS。
 
+// Duration/Instant 与 req_status 仅被 native 门控的 events 流测试消费
+// （修复轮 1 评审 M-1）：裁剪形态随之门控，避免 unused 警告。
+#[cfg(feature = "native")]
 use std::time::{Duration, Instant};
 
 use axum::body::Body;
@@ -52,6 +55,7 @@ async fn req(
 }
 
 /// 只取状态码、立即丢弃 body：/api/events 是无限 SSE 流，不能收完。
+#[cfg(feature = "native")]
 async fn req_status(
     app: axum::Router,
     method: &str,
@@ -141,6 +145,10 @@ async fn ticket_requires_bearer_when_token_configured() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
+// 裁剪形态（worker）断言面为死路径：/api/events 随 native feature 不挂载
+// （修复轮 1 评审 M-1；ticket 签发/一次性/过期语义在 vviewer-core::tickets
+// 锚测两形态覆盖，本函数的 HTTP 链路仅在 native 形态运行）。
+#[cfg(feature = "native")]
 #[tokio::test]
 async fn ticket_flow_issue_consume_once_and_expiry() {
     let f = fixture(Some("tok-123"), None);

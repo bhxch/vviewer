@@ -1,3 +1,7 @@
+// 裁剪形态（worker，--no-default-features）断言面为死路径：compute 域随
+// native feature 编译裁剪（多端发布阶段二 Task 3 门控语义），本文件整体
+// 门禁化（修复轮 1 评审 M-1；断言零变化——native 形态照常全量运行）。
+#![cfg(feature = "native")]
 //! Task 2 集成测试：--compute 能力开关与 POST /api/compute/markdown（comrak）。
 
 use axum::body::Body;

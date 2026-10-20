@@ -1,3 +1,7 @@
+// 裁剪形态（worker，--no-default-features）断言面为死路径：compute 域随
+// native feature 编译裁剪（多端发布阶段二 Task 3 门控语义），本文件整体
+// 门禁化（修复轮 1 评审 M-1；断言零变化——native 形态照常全量运行）。
+#![cfg(feature = "native")]
 //! Task 3 集成测试：POST /api/compute/highlight（tree-sitter 服务端高亮）。
 //!
 //! 覆盖：text 模式区间语义、未知语言 400、20MB 上限 413、path 模式 + 缓存
