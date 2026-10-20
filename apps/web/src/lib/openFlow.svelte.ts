@@ -24,6 +24,7 @@ import { sourceKindOf, workspaceStore } from './workspaceStore';
 import { loadSettings } from './stores/settings';
 import { releaseStoreIfLast, storeRetained } from './storeRelease';
 import { saveSearchEngine } from './searchEngineCache';
+import { saveServerHealth } from './serverHealthCache';
 import {
   CLOSED_STACK_MAX,
   ClosedStack,
@@ -801,12 +802,20 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
     throw new Error(`无法连接 ${base}：网络错误或地址不可达`);
   }
   if (!res.ok) throw new Error(`服务器响应异常: HTTP ${res.status}`);
-  let caps: { capabilities?: unknown; computeLanguages?: unknown; searchEngine?: unknown };
+  let caps: {
+    version?: unknown;
+    capabilities?: unknown;
+    computeLanguages?: unknown;
+    searchEngine?: unknown;
+    roots?: unknown;
+  };
   try {
     caps = (await res.json()) as {
+      version?: unknown;
       capabilities?: unknown;
       computeLanguages?: unknown;
       searchEngine?: unknown;
+      roots?: unknown;
     };
   } catch {
     throw new Error('health 响应不是有效 JSON');
@@ -814,6 +823,9 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
   if (!Array.isArray(caps.capabilities) || !caps.capabilities.includes('file-server')) {
     throw new Error('目标不是 vviewer 文件服务器（缺少 file-server 能力）');
   }
+  // health 摘要缓存（settings center spec §2.1 关于分节）：version/capabilities/
+  // searchEngine/roots 并列显示；旧服务端缺 version 时按无记录处理（显示「未连接」）
+  saveServerHealth(caps);
   // 能力缓存（M6 compute 路由判定用）：compute 端点是否可用以连接时 health 为准
   try {
     sessionStorage.setItem(

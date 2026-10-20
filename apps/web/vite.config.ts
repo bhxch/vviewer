@@ -372,6 +372,9 @@ export default defineConfig({
   define: {
     // 构建修订号注入运行时（与 SW cacheName 同源；诊断/关于页可读）
     __BUILD_REVISION__: JSON.stringify(BUILD_REVISION),
+    // 前端版本（settings center spec §2.1 关于分节）：package.json version 单独
+    // 注入（不含修订时间戳，与服务端 CARGO_PKG_VERSION 直接可比）
+    __APP_VERSION__: JSON.stringify(pkg.version),
     // P2 资产三层解析链：CDN 层 base（grammar 资产目录前缀，以 / 结尾；空 = 不启用）。
     // highlightClient.ts 读 import.meta.env.VV_GRAMMAR_CDN——vite 默认不注入任意
     // 自定义 env，需在此显式静态替换（构建期定型，e2e/CI 以同名 env 控制）。

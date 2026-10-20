@@ -1,16 +1,17 @@
 <script lang="ts">
   // SettingsCenter.svelte — 统一设置中心（全屏 overlay，settings center spec
-  // 2026-10-19 §2/§3）：左侧分组导航 + 右侧 UI/JSON 双视图。取代 SettingsPanel
-  // 弹层（TopBar ⚙ 与 Ctrl+, 双入口均指向本页，AppShell 挂载）。分组由注册表
-  // 数组驱动（{ id, label, content }，content 为节组件）——后续分组（布局/
-  // 存储与数据/关于/导入导出）以注册项插入，零骨架改动。
+  // 2026-10-19 §2/§3/§4）：左侧分组导航 + 右侧 UI/JSON 双视图 + 导入导出。取代
+  // SettingsPanel 弹层（TopBar ⚙ 与 Ctrl+, 双入口均指向本页，AppShell 挂载）。
+  // 分组由注册表数组驱动（{ id, label, content }，content 为节组件）——九组定稿
+  // 序（外观/字体/图表/布局/搜索与排除/自动刷新/计算/存储与数据/关于）+ 左导航
+  // 底部导入/导出动作区；后续分组以注册项插入，零骨架改动。
   // 草稿语义（spec §3）：打开即 openDraft 深拷贝生效 settings；表单节组件只改
   // draft 并调 touch()（仅使 JSON 派生失效，不落盘）；「应用」统一经
   // commit()→saveSettings 走集中订阅链；JSON 视图与表单共享同一 draft——表单→
   // JSON 即格式化序列化，JSON→表单先 parse+校验（settingsDraft 白名单镜像），
   // 非法停留 JSON 视图标错不丢文本；脏态关闭走确认（requestClose，Ctrl+,/⚙ 的
   // 关闭路径同此裁决）。
-  import { untrack, type Component } from 'svelte';
+  import { setContext, untrack, type Component } from 'svelte';
   import { loadSettings, type Settings } from './stores/settings';
   import {
     applyJson,
@@ -30,9 +31,13 @@
   import AppearanceSection from './settings/AppearanceSection.svelte';
   import FontsSection from './settings/FontsSection.svelte';
   import DiagramsSection from './settings/DiagramsSection.svelte';
+  import LayoutSection from './settings/LayoutSection.svelte';
   import SearchSection from './settings/SearchSection.svelte';
   import AutoRefreshSection from './settings/AutoRefreshSection.svelte';
   import ComputeSection from './settings/ComputeSection.svelte';
+  import StorageSection from './settings/StorageSection.svelte';
+  import AboutSection from './settings/AboutSection.svelte';
+  import { SETTINGS_NAV_KEY } from './settings/nav';
 
   let { onclose }: { onclose(): void } = $props();
 
@@ -43,18 +48,26 @@
     content: Component<{ draft: Settings; touch(): void }>;
   }
 
-  // 组序（spec §2 定稿序的在 Task 1/2 在场组）：布局/存储与数据/关于由后续任务补入
+  // 组序（spec §2 定稿序：外观/字体/图表/布局/搜索与排除/自动刷新/计算/存储与数据/关于）
   const groups: SettingsGroup[] = [
     { id: 'appearance', label: '外观', content: AppearanceSection },
     { id: 'fonts', label: '字体', content: FontsSection },
     { id: 'diagrams', label: '图表', content: DiagramsSection },
+    { id: 'layout', label: '布局', content: LayoutSection },
     { id: 'search', label: '搜索与排除', content: SearchSection },
     { id: 'autorefresh', label: '自动刷新', content: AutoRefreshSection },
-    { id: 'compute', label: '计算', content: ComputeSection }
+    { id: 'compute', label: '计算', content: ComputeSection },
+    { id: 'storage', label: '存储与数据', content: StorageSection },
+    { id: 'about', label: '关于', content: AboutSection }
   ];
 
   let activeId = $state('appearance');
   const activeGroup = $derived(groups.find((g) => g.id === activeId) ?? groups[0]!);
+
+  // 节间互链跳转通道（spec §2.1/§2.2：关于 ↔ 存储与数据互链）
+  setContext(SETTINGS_NAV_KEY, (id: string) => {
+    activeId = id;
+  });
 
   // ---------- 草稿（spec §3：打开深拷贝，两视图共享） ----------
   let applied = $state<Settings>(loadSettings()); // 最近一次应用的生效值（脏态基准）

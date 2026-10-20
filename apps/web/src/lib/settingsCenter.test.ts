@@ -207,6 +207,96 @@ describe('导入/导出（settings center spec §4，Task 3）', () => {
   });
 });
 
+describe('新分组补全（settings center spec §2 定稿序，Task 4）', () => {
+  const src = readSrc('src/lib/SettingsCenter.svelte');
+
+  it('九组注册序：布局在图表/搜索之间；存储与数据在计算/关于之间', () => {
+    const ids = [
+      'appearance',
+      'fonts',
+      'diagrams',
+      'layout',
+      'search',
+      'autorefresh',
+      'compute',
+      'storage',
+      'about'
+    ];
+    const pos = ids.map((id) => src.indexOf(`id: '${id}'`));
+    for (const p of pos) expect(p).toBeGreaterThan(-1);
+    expect([...pos].sort((a, b) => a - b)).toEqual(pos);
+    const labels = ['外观', '字体', '图表', '布局', '搜索与排除', '自动刷新', '计算', '存储与数据', '关于'];
+    const lpos = labels.map((l) => src.indexOf(`label: '${l}'`));
+    for (const p of lpos) expect(p).toBeGreaterThan(-1);
+    expect([...lpos].sort((a, b) => a - b)).toEqual(lpos);
+  });
+
+  it('节间互链通道：SettingsCenter setContext 提供导航（关于↔存储与数据互链）', () => {
+    expect(src).toMatch(/setContext\(SETTINGS_NAV_KEY/);
+  });
+});
+
+describe('Task 4 新节组件契约', () => {
+  it('LayoutSection：draft/touch 契约 + 四布尔/两宽度/zen 重置（clampWidth 同口径）', () => {
+    const src = readSrc('src/lib/settings/LayoutSection.svelte');
+    expect(src).toMatch(/draft: Settings; touch\(\): void/);
+    expect(src).toMatch(/touch\(\)/);
+    for (const t of ['显示顶栏', '显示标签栏', '折叠文件树', '折叠属性面板', 'clampWidth', 'resetZen']) {
+      expect(src).toContain(t);
+    }
+  });
+
+  it('StorageSection：七分类行 + 挂载配置禁用态 + 确认面板门 + 设置/出厂后重载', () => {
+    const src = readSrc('src/lib/settings/StorageSection.svelte');
+    for (const cat of ['settings', 'sessions', 'dirhandle', 'themes', 'fonts', 'mounts', 'runtime-cache']) {
+      expect(src).toContain(`'${cat}'`);
+    }
+    expect(src).toMatch(/purgeCategory\(/);
+    expect(src).toMatch(/factoryReset\(/);
+    // 挂载配置行禁用态（Spec 5 前向兼容）
+    expect(src).toMatch(/vv-storage-cat-disabled[\s\S]{0,400}挂载配置[\s\S]{0,600}disabled/);
+    // 确认面板（红色危险调+列明后果）与重载收尾
+    expect(src).toMatch(/role="alertdialog"/);
+    expect(src).toMatch(/function confirmPurge[\s\S]{0,700}location\.reload\(\)/);
+    expect(src).toContain('此操作不可恢复');
+    // 互链跳转（关于节用量显示）
+    expect(src).toMatch(/navTo\('about'\)/);
+  });
+
+  it('AboutSection：版本并列与不一致注记 + 未连接降级 + estimate/persist + 致谢链接 + persist 钩子说明', () => {
+    const src = readSrc('src/lib/settings/AboutSection.svelte');
+    expect(src).toMatch(/appVersion\(\)/);
+    expect(src).toMatch(/loadServerHealth\(\)/);
+    expect(src).toMatch(/versionMismatch/);
+    expect(src).toContain('未连接'); // 服务端版本不可得降级
+    expect(src).toMatch(/collectStorageInfo\(/);
+    expect(src).toMatch(/persistedState|info\.persisted/);
+    expect(src).toMatch(/requestPersistent\(\)/);
+    expect(src).toContain('THIRD_PARTY_NOTICES.md');
+    expect(src).toMatch(/navTo\('storage'\)/);
+    // usageDetails 细分行存在性由数据驱动（details 非 null 渲染）
+    expect(src).toMatch(/detailEntries/);
+  });
+});
+
+describe('storageHealth 共享模块导出面（spec §2.1/§2.2 接口契约）', () => {
+  it('collectStorageInfo/purgeCategory/factoryReset/requestPersistent/persistedState/formatBytes 全量导出', async () => {
+    const mod = await import('./storageHealth');
+    for (const fn of [
+      'collectStorageInfo',
+      'purgeCategory',
+      'factoryReset',
+      'requestPersistent',
+      'persistedState',
+      'formatBytes',
+      'tryRequestPersistentSilent',
+      'isPrecacheCacheName'
+    ]) {
+      expect(typeof (mod as Record<string, unknown>)[fn]).toBe('function');
+    }
+  });
+});
+
 describe('TopBar 精简（spec §2：⚙+亮暗快切保留，代码主题/计算策略迁出）', () => {
   const src = readSrc('src/lib/TopBar.svelte');
 

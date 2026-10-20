@@ -15,6 +15,7 @@
  * fontsStore.test.ts 同文件说明）。
  */
 import { db, FONTS } from './session';
+import { tryRequestPersistentSilent } from '../storageHealth';
 
 /** 字体记录（spec §5.1 schema，键 id 无 keyPath 自管）：family = FontFace 族名
  * （创建时 = name；引号在装卸时加，不入库）。 */
@@ -145,6 +146,9 @@ async function addFromBuffer(
   const face = await ensureFontFace(rec); // 先验证后入库：非字体内容不落库（错误态可重试）
   await putFontRecord(rec);
   document.fonts.add(face);
+  // 数据投入时刻申请持久化存储（settings center spec §2.1 预授权钩子）：保护字体
+  // 不被磁盘压力驱逐；静默失败不打扰，仅持久化状态行反映
+  tryRequestPersistentSilent();
   return rec;
 }
 
