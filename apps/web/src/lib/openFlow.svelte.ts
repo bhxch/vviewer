@@ -17,6 +17,7 @@ import {
 import { ARCHIVE_OPEN_EVENT } from '@vviewer/render-archive';
 import {
   saveDirHandle,
+  loadDirHandle,
   saveWorkspaces,
   maxTabSeqOf,
   type TabSnapshot
@@ -703,8 +704,26 @@ export async function openDirectoryViaPicker(): Promise<void> {
   addDirStoreTab(createLocalFsStore(handle));
 }
 
-export function openDirectoryViaInput(files: FileList | File[]): void {
-  const all = Array.from(files);
+/**
+ * 已保存文件夹授权重开（目录管理页组③「打开」动作，spec §5 阶段四）：kv
+ * 'dirHandle' 单槽句柄经 ensurePermission 重授权后走 addDirStoreTab 目录 tab
+ * 通道（与 openDirectoryViaPicker 同一落点，免重新弹 picker）。无句柄/授权被拒
+ * 以状态栏一次性提示反馈（BUG-19 通道），不静默。
+ */
+export async function openSavedDirectory(): Promise<void> {
+  const handle = await loadDirHandle();
+  if (handle === null) {
+    showStatusNotice('没有已保存的文件夹授权');
+    return;
+  }
+  if (!(await ensurePermission(handle))) {
+    showStatusNotice('文件夹授权已失效，请重新选择');
+    return;
+  }
+  addDirStoreTab(createLocalFsStore(handle));
+}
+
+export function openDirectoryViaInput(files: FileList | File[]): void {  const all = Array.from(files);
   if (all.length === 0) {
     // 空目录（input webkitdirectory 选空文件夹 / 拖入空目录）：此前静默无反馈，
     // 状态栏一次性提示说明原因（遗留 U1）

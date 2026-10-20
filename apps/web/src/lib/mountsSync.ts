@@ -336,8 +336,7 @@ export async function probeMountRoot(
  * （含当前保存的凭据）。DELETE 404 = 服务端项已在对账间隙消失（竞态）——
  * 继续 POST 视作缺失注册；其余非 2xx 抛错（静态项 405 亦然——静态项无可
  * 轮换面，不该进本函数，防御性拒绝）。成功返回新分配的 rootIndex。
- */
-export async function reregisterMount(
+ */export async function reregisterMount(
   rec: ProxyMountRecord,
   token: string | null | undefined,
   rootIndex: number
@@ -359,6 +358,42 @@ export async function reregisterMount(
     throw new Error('重注册响应缺少 rootIndex');
   }
   return body.rootIndex;
+}
+
+/**
+ * 管理页新增代理挂载（spec §5 阶段四：proxy 增即时 POST /api/mounts；失败抛错
+ * 且不落 IndexedDB——一致态由调用方保持）。返回服务端分配的 rootIndex。
+ * 与对账链 postRegister 的分工：对账是静默自愈（失败落 pendingRetry），本面是
+ * 用户动作（失败必须可见）。
+ */
+export async function registerProxyMount(
+  rec: ProxyMountRecord,
+  token: string | null | undefined
+): Promise<number> {
+  const res = await mountsApi(rec.serverBase, token, '/api/mounts', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(postBodyOf(rec))
+  });
+  if (!res.ok) throw new Error(`注册失败：HTTP ${res.status}`);
+  const body = (await res.json()) as { rootIndex?: unknown };
+  if (typeof body.rootIndex !== 'number') throw new Error('注册响应缺少 rootIndex');
+  return body.rootIndex;
+}
+
+/**
+ * 管理页删除代理挂载（spec §5 阶段四：proxy 删即时 DELETE /api/mounts/:index）。
+ * 404 视为已不存在（幂等——服务端重启即清空运行时项）；其余非 2xx 抛错（静态
+ * 项 405 亦然——静态挂载由服务端配置承载，管理页组②不该出现其记录）。IndexedDB
+ * 记录删除由调用方处理（服务端先撤、本地后删，两步可观测）。
+ */
+export async function unregisterProxyMount(
+  rec: ProxyMountRecord,
+  token: string | null | undefined,
+  rootIndex: number
+): Promise<void> {
+  const del = await mountsApi(rec.serverBase, token, `/api/mounts/${rootIndex}`, { method: 'DELETE' });
+  if (!del.ok && del.status !== 404) throw new Error(`注销失败：HTTP ${del.status}`);
 }
 
 async function postRegister(rec: ProxyMountRecord, base: string, token: string | null): Promise<ProxyMountRecord> {

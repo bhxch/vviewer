@@ -10,6 +10,7 @@
   import QuickOpenPanel from './QuickOpenPanel.svelte';
   import WorkspaceTabsPanel from './WorkspaceTabsPanel.svelte';
   import SettingsCenter from './SettingsCenter.svelte';
+  import MountsManager from './MountsManager.svelte';
   import type { TreeStore, TocEntry } from '@vviewer/core';
   import { createRemoteStore } from '@vviewer/core';
   import {
@@ -94,6 +95,23 @@
       return;
     }
     settingsCenterEl?.requestClose();
+  }
+
+  /**
+   * 目录管理页开关（目录挂载 spec §5 阶段四）：TopBar 📁 与 Ctrl+Alt+M 双入口，
+   * SettingsCenter 同形态（.vv-mounts-manager 已入册 OVERLAY_SELECTOR——zen Esc
+   * 优先级「面板优先只关面板」判定依赖；移动端返回键承接同通道）。挂载态由组件
+   * 导出的 requestClose() 统一关闭（表单在场先关表单，组件内裁决）。
+   */
+  let mountsOpen = $state(false);
+  let mountsEl: { requestClose(): void } | null = $state(null);
+
+  function toggleMountsManager(): void {
+    if (!mountsOpen) {
+      mountsOpen = true;
+      return;
+    }
+    mountsEl?.requestClose();
   }
 
   // ---------- 布局自由化（spec 2026-10-19 §2）：折叠/调宽 ----------
@@ -362,6 +380,7 @@
    */
   const OVERLAY_SELECTOR = [
     '.vv-settings-center',
+    '.vv-mounts-manager',
     '.vv-gsearch',
     '.vv-quickopen',
     '.vv-wspanel',
@@ -799,6 +818,16 @@
         toggleZen();
         return;
       }
+      // Ctrl+Alt+M 切换目录管理页（目录挂载 spec §5 阶段四）：与 Ctrl+Alt+Z 同
+      // 位置（inField 判定之前——组合键放行先例同款，不被输入焦点拦截）。键位
+      // 冲突复核（2026-10-19 实读取，全仓库 rg KeyM / ctrl+alt 组合）：既有键位
+      // 仅 Ctrl/Cmd+Shift+F、Ctrl/Cmd+P、Ctrl+,、Alt+W、Alt+Shift+T、Ctrl+Alt+Z、
+      // j/k/g/G 与各面板 Esc——Ctrl+Alt+M 无占用（浏览器无默认行为）。
+      if ((e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey && e.code === 'KeyM') {
+        e.preventDefault();
+        toggleMountsManager();
+        return;
+      }
       // Esc 优先级状态机（spec §3，zenEscAction 纯函数分派）：chrome 右键菜单 >
       // overlay（设置/搜索/快速打开等，面板自带 Esc 关闭处理器在同一事件上动作，
       // 此处不叠加）> 退 zen。overlay 判定 = capture 相快照 escOverlayAtStart
@@ -919,6 +948,7 @@
     temp={topTemp}
     hidden={!vis.topBar && !topTemp}
     onsettings={() => toggleSettingsCenter()}
+    onmounts={() => toggleMountsManager()}
     onenter={() => {
       if (!vis.topBar) summonTemp('top'); // 正常可见态的划过不置临时态
     }}
@@ -1055,6 +1085,9 @@
   {/if}
   {#if settingsCenterOpen}
     <SettingsCenter bind:this={settingsCenterEl} onclose={() => (settingsCenterOpen = false)} />
+  {/if}
+  {#if mountsOpen}
+    <MountsManager bind:this={mountsEl} onclose={() => (mountsOpen = false)} />
   {/if}
   {#if chromeMenu !== null}
     {@const bar = chromeMenu.bar}

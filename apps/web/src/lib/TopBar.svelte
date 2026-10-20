@@ -20,14 +20,23 @@
    * 视口的隐藏态（组件保持挂载，设置中心入口回调 onsettings 不失效）；temp=边缘
    * 悬停唤出的半透条。onenter/onleave 供 AppShell 做「重入取消隐藏定时/移开 1.5s
    * 再隐」——组件不持有 layout 状态（所有权在 AppShell）。设置中心（⚙/Ctrl+,，
-   * spec 2026-10-19 设置中心 §2）开关状态归 AppShell，本组件只发回调。 */
+   * spec 2026-10-19 设置中心 §2）与目录管理页（📁/Ctrl+Alt+M，目录挂载 spec §5
+   * 阶段四）开关状态归 AppShell，本组件只发回调。 */
   let {
     temp = false,
     hidden = false,
     onenter,
     onleave,
-    onsettings
-  }: { temp?: boolean; hidden?: boolean; onenter?: () => void; onleave?: () => void; onsettings(): void } = $props();
+    onsettings,
+    onmounts
+  }: {
+    temp?: boolean;
+    hidden?: boolean;
+    onenter?: () => void;
+    onleave?: () => void;
+    onsettings(): void;
+    onmounts(): void;
+  } = $props();
   let urlValue = $state('');
   let fileInput = $state<HTMLInputElement | null>(null);
   // workspace 切换器（T5）：下拉开关 + 新建模态挂载 + 行内重命名草稿
@@ -358,6 +367,13 @@
   </button>
   <button onclick={onsettings} aria-label="设置" title="设置（Ctrl+,）：外观 / 字体 / 图表 / 搜索与排除 / 自动刷新 / 计算">
     ⚙
+  </button>
+  <button
+    onclick={onmounts}
+    aria-label="目录管理"
+    title="目录管理（Ctrl+Alt+M）：服务端挂载 / 前端直连与代理 / 本机授权"
+  >
+    📁
   </button>
 </header>
 {#if createOpen}

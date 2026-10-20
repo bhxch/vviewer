@@ -13,9 +13,11 @@ import {
   listDirectMounts,
   listProxyMounts,
   mountFingerprintOf,
+  registerProxyMount,
   saveDirectMount,
   saveProxyMount,
   syncMountsOnConnect,
+  unregisterProxyMount,
   type DirectMountRecord,
   type MountManifestEntry,
   type ProxyMountRecord
@@ -667,5 +669,56 @@ describe('directConfigOf', () => {
     };
     const store = createS3DirectStore(directConfigOf(rec) as S3DirectConfig);
     expect(store.id).toBe(rec.id);
+  });
+});
+
+// ---------- 管理页代理挂载即时注册面（spec §5 阶段四：proxy 增删即时调
+// POST/DELETE /api/mounts；失败不落 IndexedDB——一致态由调用方保持） ----------
+
+describe('registerProxyMount/unregisterProxyMount', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('registerProxyMount：POST /api/mounts 带 Bearer 与凭据 body，返回分配的 rootIndex', async () => {
+    calls = [];
+    stubFetch((method, url) => {
+      if (method === 'POST' && url === `${BASE}/api/mounts`) return jsonResponse(201, { rootIndex: 3 });
+      return undefined;
+    });
+    const idx = await registerProxyMount(recordOf(), 'tok');
+    expect(idx).toBe(3);
+    expect(calls[0]!.method).toBe('POST');
+    expect(calls[0]!.headers.authorization).toBe('Bearer tok');
+    expect(calls[0]!.body).toMatchObject({ kind: 's3', bucket: 'b1', access_key_id: 'ak', secret_access_key: 'sk' });
+  });
+
+  it('registerProxyMount：非 2xx / 缺 rootIndex 抛错（调用方捕获后不落库）', async () => {
+    stubFetch((_m, url) =>
+      url === `${BASE}/api/mounts` ? jsonResponse(500, { detail: 'boom' }) : undefined
+    );
+    await expect(registerProxyMount(recordOf(), null)).rejects.toThrow(/HTTP 500/);
+    stubFetch((_m, url) => (url === `${BASE}/api/mounts` ? jsonResponse(200, {}) : undefined));
+    await expect(registerProxyMount(recordOf(), null)).rejects.toThrow(/缺少 rootIndex/);
+  });
+
+  it('unregisterProxyMount：DELETE /api/mounts/:index；404 幂等通过；非 2xx（静态项 405）抛错', async () => {
+    calls = [];
+    stubFetch((method, url) => {
+      if (method === 'DELETE' && url === `${BASE}/api/mounts/3`) return emptyResponse(204);
+      return undefined;
+    });
+    await expect(unregisterProxyMount(recordOf(), 'tok', 3)).resolves.toBeUndefined();
+    expect(calls[0]!.headers.authorization).toBe('Bearer tok');
+    stubFetch((method, url) => {
+      if (method === 'DELETE' && url === `${BASE}/api/mounts/3`) return emptyResponse(404);
+      return undefined;
+    });
+    await expect(unregisterProxyMount(recordOf(), 'tok', 3)).resolves.toBeUndefined(); // 已不存在：幂等
+    stubFetch((method, url) => {
+      if (method === 'DELETE' && url === `${BASE}/api/mounts/3`) return emptyResponse(405);
+      return undefined;
+    });
+    await expect(unregisterProxyMount(recordOf(), 'tok', 3)).rejects.toThrow(/HTTP 405/);
   });
 });
