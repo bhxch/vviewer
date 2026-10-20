@@ -1,15 +1,17 @@
 //! 业务状态核：从 axum 侧 AppState 提取的非框架状态（配置/根列表/令牌），
-//! 以及多根寻址的数据类型（RootSpec/MountMeta）。axum 特有面（web_dist/
-//! cors_origin/watch hub/一次性 ticket 表）留在适配层 AppState。
-//!
-//! 迁移期兼容缝：适配层 AppState 经 Deref 直达本结构字段（`state.roots` 等
-//! 调用点零改动）；挂载三 API 的 register/unregister 逻辑随 Task 2 域抽取
-//! 整体迁入，本任务只迁数据类型。
+//! 以及多根寻址的数据类型（RootSpec/MountMeta）与运行时挂载容器（Task 2 域
+//! 抽取迁入：root_at 统一寻址 + register/unregister 幂等/tombstone 语义）。
+//! axum 特有面（web_dist/cors_origin/watch hub/一次性 ticket 表）留在适配层
+//! AppState。
 
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use vviewer_storage::StorageBackend;
 use vviewer_storage::LocalFs;
+use vviewer_storage::transport::{HttpTransport, ReqwestTransport};
+
+use crate::mounts::{build_mount, MountConfig, RegistrationError, RuntimeMount, UnregisterError};
 
 /// 挂载根的可宣告元信息：health 摘要与阶段二 `GET /api/mounts` 的数据源。
 /// **凭据不入内**（spec §2 服务端纪律——不进 health/mounts 回显/日志），
@@ -88,6 +90,20 @@ pub struct CoreState {
     pub roots: Vec<RootSpec>,
     /// fs 根数量（roots 前缀段长度）：挂载根寻址边界（health.fsRoots 宣告源）。
     pub fs_roots: usize,
+    /// 运行时挂载容器（阶段二 spec §3，Task 2 自适配层 AppState 迁入）：
+    /// `POST /api/mounts` 注册的内存态挂载，重启失效。rootIndex =
+    /// `roots.len()` + 槽位序（静态段之后的寻址段，经 [`CoreState::root_at`]
+    /// 统一寻址）。**tombstone 容器**（`Option` 槽位）：删除只置 `None` 不压缩
+    /// ——其余项 rootIndex 不移位（删非尾项不串扰已开 tab），被删索引进程内
+    /// 恒不解析（重复 DELETE 404、tree/file 越界 400），「删除后移位/复用索引
+    /// 串扰旧引用」两类窗口一并消灭；新注册不填充空洞
+    /// （[`CoreState::register_mount`] 追加分配），重启才整体回收。
+    pub runtime_mounts: Arc<Mutex<Vec<Option<RuntimeMount>>>>,
+    /// 运行时注册用的 HTTP transport（懒初始化：首次注册构建 reqwest 连接池，
+    /// 全注册共享；测试经适配层 AppState 的 with_runtime_transport 注入
+    /// MockTransport——装配不付 reqwest Client 构建成本，既有测试零影响）。
+    /// 私有面：仅 [`CoreState::register_mount`] 消费。
+    pub runtime_transport: Arc<Mutex<Option<Arc<dyn HttpTransport>>>>,
     /// 访问令牌；None 表示免鉴权（仅默认 127.0.0.1 绑定时允许）。
     pub token: Option<String>,
     /// `--hidden`：隐藏 dot 开头条目。
@@ -124,6 +140,8 @@ impl CoreState {
             root_canonical,
             roots,
             fs_roots: 1,
+            runtime_mounts: Arc::new(Mutex::new(Vec::new())),
+            runtime_transport: Arc::new(Mutex::new(None)),
             token,
             hidden,
             compute: false,
@@ -133,6 +151,105 @@ impl CoreState {
             compute_languages: || Vec::new(),
             search_engine: |_| None,
         }
+    }
+
+    // ---------- 运行时挂载（阶段二 spec §3：POST/GET/DELETE /api/mounts） ----------
+    //
+    // Task 2 自适配层 AppState 原样迁入（多端发布阶段二）：方法体/锁纪律
+    // （锁内不做任何 IO/await）与 tombstone/幂等语义逐语句保真。
+
+    /// rootIndex → 根规格（静态段 + 运行时段统一寻址）：tree/file 的分发入口。
+    /// 越界 None（handler 400）；运行时段已删槽位（tombstone `None`）同返回
+    /// None——被删索引自然失效（下次访问 400 越界，无内容串扰）。RootSpec 含
+    /// Arc backend，clone 廉价；运行时段短暂持锁克隆即释放（锁内不做任何
+    /// IO/await）。
+    pub fn root_at(&self, index: usize) -> Option<RootSpec> {
+        if let Some(spec) = self.roots.get(index) {
+            return Some(spec.clone());
+        }
+        let guard = self.runtime_mounts.lock().unwrap();
+        guard
+            .get(index - self.roots.len())
+            .and_then(|slot| slot.as_ref())
+            .map(|m| RootSpec::mount(m.root.meta.clone(), m.root.backend.clone()))
+    }
+
+    /// 运行时挂载注册：backend 构造（复用 [`crate::mounts::build_mount`]，与
+    /// 静态 TOML 装配同一函数）+ 指纹幂等 + 容器登记。返回 (rootIndex,
+    /// created)——同指纹命中既有项返回其 rootIndex 且 created=false（handler
+    /// 200），新分配 created=true（handler 201）。
+    ///
+    /// 分配语义（tombstone 纪律，锁测见 tests/mounts_api.rs）：**追加分配**——
+    /// 新项恒接在容器尾，不填充已删槽位（空洞）。已删索引因此进程内恒不解析，
+    /// 「删除后新注册复用索引串扰旧引用」的复用窗口彻底消灭（递延项销账）；
+    /// 空洞由重启整体回收（运行时挂载本为内存态，重启清零）。
+    ///
+    /// 幂等语义注记：指纹无凭据面——同指纹换凭据的重注册返回既有项、不重建
+    /// backend（凭据轮换需先 DELETE 再注册，或重启；对账场景指纹来自前端
+    /// IndexedDB 持久化配置，「同一挂载目标」即幂等）。注册的凭据仅存于
+    /// backend 连接面（内存），不入 meta/指纹/清单/日志（spec §6 三不纪律）。
+    pub fn register_mount(&self, cfg: &MountConfig) -> Result<(usize, bool), RegistrationError> {
+        let fingerprint = crate::mounts::mount_fingerprint(cfg);
+        if let Some(idx) = self.find_runtime(&fingerprint) {
+            return Ok((idx, false));
+        }
+        let transport = self.runtime_http_transport()?;
+        // 构造在锁外（纯同步、无共享态；失败不触容器——错误消息仅字段名）
+        let root = build_mount(cfg, transport).map_err(RegistrationError::Invalid)?;
+        let mut guard = self.runtime_mounts.lock().unwrap();
+        // 双检：构造窗口内并发注册同指纹——命中即弃置已建 backend（无全局态泄漏）
+        if let Some(pos) = guard
+            .iter()
+            .position(|m| m.as_ref().is_some_and(|rm| rm.fingerprint == fingerprint))
+        {
+            return Ok((self.roots.len() + pos, false));
+        }
+        guard.push(Some(RuntimeMount { fingerprint, root }));
+        Ok((self.roots.len() + guard.len() - 1, true))
+    }
+
+    /// 运行时挂载删除：index 落在静态段（fs 根 + 静态 TOML 挂载）拒删
+    /// [`UnregisterError::Static`]；运行时段越界或已删（tombstone 空洞）
+    /// [`UnregisterError::NotFound`]。成功即**槽位置 `None` 不压缩**——其余项
+    /// rootIndex 不移位（删非尾项不串扰已开 tab 的旧 rootIndex），被删索引
+    /// 进程内恒不解析：tree/file 访问自然 400 越界、重复 DELETE 404、清单
+    /// 不含已删项（manifest 跳过空洞）。（活跃 tab 失效帧降级路径：不推送
+    /// SSE 失效帧，挂载根本无事件面，前端凭 GET 清单对账——裁决记录任务报告。）
+    pub fn unregister_mount(&self, index: usize) -> Result<(), UnregisterError> {
+        let mut guard = self.runtime_mounts.lock().unwrap();
+        if index < self.roots.len() {
+            return Err(UnregisterError::Static);
+        }
+        let pos = index - self.roots.len();
+        match guard.get_mut(pos) {
+            Some(slot @ Some(_)) => {
+                *slot = None;
+                Ok(())
+            }
+            _ => Err(UnregisterError::NotFound),
+        }
+    }
+
+    fn find_runtime(&self, fingerprint: &str) -> Option<usize> {
+        let guard = self.runtime_mounts.lock().unwrap();
+        guard
+            .iter()
+            .position(|m| m.as_ref().is_some_and(|rm| rm.fingerprint == fingerprint))
+            .map(|pos| self.roots.len() + pos)
+    }
+
+    /// 运行时注册用 HTTP transport：懒初始化（首次注册构建 reqwest 连接池，
+    /// 全注册共享一个 Arc——与 main.rs 静态装配的共享形态同款）。
+    fn runtime_http_transport(&self) -> Result<Arc<dyn HttpTransport>, RegistrationError> {
+        let mut guard = self.runtime_transport.lock().unwrap();
+        if let Some(t) = guard.as_ref() {
+            return Ok(t.clone());
+        }
+        let t: Arc<dyn HttpTransport> = Arc::new(ReqwestTransport::new().map_err(|e| {
+            RegistrationError::Transport(format!("http transport init: {}", e.message()))
+        })?);
+        *guard = Some(t.clone());
+        Ok(t)
     }
 }
 

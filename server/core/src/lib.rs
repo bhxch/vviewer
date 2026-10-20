@@ -11,7 +11,9 @@
 //! 映射回 axum Response。对外 HTTP 行为逐字节等价（既有测试为行为锁）。
 
 pub mod auth;
+pub mod error;
 pub mod health;
+pub mod mounts;
 pub mod state;
 
 use bytes::Bytes;

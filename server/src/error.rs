@@ -72,3 +72,12 @@ impl From<vviewer_storage::StorageError> for AppError {
         }
     }
 }
+
+/// 核心域错误 → API 错误（多端发布阶段二 Task 2：域 handler 业务体迁
+/// vviewer-core 后的适配映射——状态与消息面原样，JSON 形态由本类型
+/// IntoResponse 统一构造）。
+impl From<vviewer_core::error::CoreError> for AppError {
+    fn from(e: vviewer_core::error::CoreError) -> Self {
+        Self(e.0, e.1)
+    }
+}

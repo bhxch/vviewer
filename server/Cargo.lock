@@ -2621,6 +2621,8 @@ dependencies = [
  "http",
  "serde",
  "serde_json",
+ "tempfile",
+ "tokio",
  "vviewer-storage",
 ]
 
