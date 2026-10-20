@@ -1,0 +1,17 @@
+[package]
+name = "vviewer-core"
+version = "0.1.0"
+edition = "2021"
+description = "vviewer 框架无关业务核：纯类型请求/响应 + 领域 handler（多端发布阶段二）"
+license = "Apache-2.0"
+
+# 依赖倒置方向（plan Global Constraints）：server → core 单向；core 不依赖
+# axum/tower-http/notify/comrak。http/bytes 为框架中立类型（axum 0.8 同源
+# http 1.x / bytes 1.x），适配层映射零转换成本。
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bytes = "1"
+http = "1"
+# 存储抽象（StorageBackend trait + LocalFs）：core 的 roots/挂载容器数据面
+vviewer-storage = { path = "../storage" }

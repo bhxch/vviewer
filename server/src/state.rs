@@ -6,13 +6,18 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
+use vviewer_core::state::CoreState;
 use vviewer_storage::display_endpoint;
 use vviewer_storage::s3::{S3Backend, S3MountConfig};
 use vviewer_storage::transport::{HttpTransport, ReqwestTransport};
 use vviewer_storage::webdav::{WebDavBackend, WebDavMountConfig};
-use vviewer_storage::{LocalFs, StorageBackend};
+use vviewer_storage::StorageBackend;
 
 use crate::generate_token;
+
+// 业务数据类型随 Task 1 core 抽取迁入 vviewer-core::state（多端发布阶段二）；
+// 原 `crate::state` 路径 re-export 保持既有调用点/测试零改动。
+pub use vviewer_core::state::{MountMeta, RootSpec};
 
 /// ticket 有效期：一次性、30s 过期（SSE 升级专用）。
 pub const TICKET_TTL: Duration = Duration::from_secs(30);
@@ -48,21 +53,6 @@ impl TicketStore {
     pub fn insert_raw(&self, ticket: String, expiry: Instant) {
         self.0.lock().unwrap().insert(ticket, expiry);
     }
-}
-
-/// 挂载根的可宣告元信息：health 摘要与阶段二 `GET /api/mounts` 的数据源。
-/// **凭据不入内**（spec §2 服务端纪律——不进 health/mounts 回显/日志），
-/// Debug 派生安全。
-#[derive(Clone, Debug)]
-pub struct MountMeta {
-    /// 后端类别字面（`"s3"` | `"webdav"`）。
-    pub kind: &'static str,
-    pub label: Option<String>,
-    pub endpoint: String,
-    /// S3 挂载的桶名；WebDAV 挂载为 None。
-    pub bucket: Option<String>,
-    /// 挂载子路径（配置原样；空串 = 端点根）。
-    pub prefix: String,
 }
 
 /// 挂载根装配产物（main 装配链产出、测试注入共用形态）：已构造 backend +
@@ -262,67 +252,19 @@ pub struct RuntimeMount {
     pub root: MountRoot,
 }
 
-/// 单个根的规格：原始路径 + canonicalize 结果（guard 越界校验基准）+ 存储后端。
-#[derive(Clone)]
-pub struct RootSpec {
-    /// `--root` 原始路径；挂载根为展示形态（`s3:label` / `s3://endpoint`，无 fs 语义）。
-    pub raw: PathBuf,
-    /// canonicalize 结果（构造时一次，失败回退原路径）；挂载根与 raw 相同
-    /// （guard 对挂载根不做 fs canonicalize，见 routes 的 mount 分支）。
-    pub canonical: PathBuf,
-    /// 该根的存储后端（fs 根 LocalFs；挂载根 S3/WebDAV）。
-    pub backend: Arc<dyn StorageBackend>,
-    /// 挂载元信息；None = fs 根（根序 = fs 根 + 静态挂载序，spec §2）。
-    pub mount: Option<MountMeta>,
-}
-
-impl RootSpec {
-    /// fs 根构造：LocalFs 以 canonical 路径为基——路由层把 guard 解析出的
-    /// canonical 绝对路径按根 strip 成相对路径传入，backend join 回来触达的
-    /// 绝对路径与下沉前的直读形态逐字节一致。
-    pub fn fs_root(raw: PathBuf, canonical: PathBuf, hidden: bool) -> Self {
-        Self {
-            backend: Arc::new(LocalFs::new(canonical.clone(), hidden)),
-            raw,
-            canonical,
-            mount: None,
-        }
-    }
-
-    /// 挂载根构造：raw/canonical 为展示形态（无 fs 语义——guard 清洗 path 后
-    /// 直接作为 backend 相对路径，不经 canonicalize/越界校验）。
-    pub fn mount(meta: MountMeta, backend: Arc<dyn StorageBackend>) -> Self {
-        let raw = match &meta.label {
-            Some(l) => PathBuf::from(format!("{}:{l}", meta.kind)),
-            None => PathBuf::from(format!("{}://{}", meta.kind, meta.endpoint)),
-        };
-        Self { raw: raw.clone(), canonical: raw, backend, mount: Some(meta) }
-    }
-}
-
-impl std::fmt::Debug for RootSpec {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // backend 为 dyn 存储（无 Debug 语义），只暴露路径面
-        f.debug_struct("RootSpec")
-            .field("raw", &self.raw)
-            .field("canonical", &self.canonical)
-            .finish_non_exhaustive()
-    }
-}
-
-/// 传给所有 handler 的共享状态。
+/// 传给所有 axum handler 的共享状态（适配层面）：业务状态核 [`CoreState`]
+/// （多端发布阶段二迁入 vviewer-core）+ axum 特有面。经 Deref 直达核字段
+/// （`state.roots`/`state.token` 等既有调用点零改动——迁移期兼容缝，Task 2/3
+/// 域抽取逐步把消费方迁到 core 后再评估收紧）。
 #[derive(Clone)]
 pub struct AppState {
-    /// `--root` 原始路径（兼容视图 = [`AppState::roots`][0]）。
-    pub root: PathBuf,
-    /// root 的 canonicalize 结果（构造时一次），guard 越界校验基准（兼容视图 = roots[0]）。
-    pub root_canonical: PathBuf,
-    /// 多根列表（workspace 阶段 1 + 挂载阶段一）：**根序 = fs 根 + 静态挂载序**
-    /// （spec §2）；单根部署时恒为 1 项，形状与历史一致。rootIndex < [`AppState::fs_roots`]
-    /// 为 fs 根，≥ 为挂载根。
-    pub roots: Vec<RootSpec>,
-    /// fs 根数量（roots 前缀段长度）：挂载根寻址边界（health.fsRoots 宣告源）。
-    pub fs_roots: usize,
+    /// 业务状态核（vviewer-core::state）：配置/多根容器/令牌/引擎覆盖 +
+    /// health 宣告缝注入面。
+    pub core: CoreState,
+    /// `--web-dist` 前端静态产物目录；未指定时 `/` 返回占位页。
+    pub web_dist: Option<PathBuf>,
+    /// `--cors-origin` 精确 origin；None = 不加 CORS 层。
+    pub cors_origin: Option<String>,
     /// 运行时挂载容器（阶段二 spec §3）：`POST /api/mounts` 注册的内存态挂载，
     /// 重启失效。rootIndex = `roots.len()` + 槽位序（静态段之后的寻址段，经
     /// [`AppState::root_at`] 统一寻址）。**tombstone 容器**（`Option` 槽位）：
@@ -336,25 +278,30 @@ pub struct AppState {
     /// MockTransport——`AppState::new` 不付 reqwest Client 构建成本，既有测试
     /// 零影响）。私有面：仅 [`AppState::register_mount`] 消费。
     runtime_transport: Arc<Mutex<Option<Arc<dyn HttpTransport>>>>,
-    /// `--web-dist` 前端静态产物目录；未指定时 `/` 返回占位页。
-    pub web_dist: Option<PathBuf>,
-    /// 访问令牌；None 表示免鉴权（仅默认 127.0.0.1 绑定时允许）。
-    pub token: Option<String>,
-    /// `--hidden`：隐藏 dot 开头条目。
-    pub hidden: bool,
-    /// `--cors-origin` 精确 origin；None = 不加 CORS 层。
-    pub cors_origin: Option<String>,
-    /// `--compute`：启用服务端计算端点（/api/compute/*；health 能力追加 "compute"）。
-    pub compute: bool,
-    /// rg 可执行路径覆盖：None = 请求时 PATH 探测；Some(可执行) = 直接绑定；
-    /// Some(不可执行) = rg 不可用（跳过 PATH 探测——测试模拟 rg 缺失，A 项降级链）。
-    pub rg_path: Option<String>,
-    /// grep 路径覆盖：语义同 `rg_path`（rg 不可用时的 fallback 引擎，探测链第二位）。
-    pub grep_path: Option<String>,
     /// 一次性 ticket 表（SSE 升级用）。
     pub tickets: TicketStore,
     /// root 变更广播中心（启动时创建一次，共享 watcher + debounce 聚合）。
     pub changes: Arc<crate::watch::ChangeHub>,
+}
+
+impl std::ops::Deref for AppState {
+    type Target = CoreState;
+    fn deref(&self) -> &CoreState {
+        &self.core
+    }
+}
+
+impl std::ops::DerefMut for AppState {
+    fn deref_mut(&mut self) -> &mut CoreState {
+        &mut self.core
+    }
+}
+
+/// health `searchEngine` 宣告注入（core 依赖倒置缝的适配侧实现——rg/grep 探测
+/// 链随 search 域 Task 3 收编 core 前，宣告由适配层提供；与 /api/search 消费
+/// 同一选择链 [`crate::routes::search::announce_engine`]，零漂移）。
+fn health_search_engine(cs: &CoreState) -> Option<&'static str> {
+    crate::routes::search::announce_engine(cs.rg_path.as_deref(), cs.grep_path.as_deref())
 }
 
 impl AppState {
@@ -365,25 +312,20 @@ impl AppState {
         hidden: bool,
         cors_origin: Option<String>,
     ) -> Self {
-        // main 启动前已校验目录存在；canonicalize 失败时退回原路径（保持可测）
-        let root_canonical: PathBuf = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
-        let roots = vec![RootSpec::fs_root(root.clone(), root_canonical.clone(), hidden)];
+        let mut core = CoreState::new(root, token, hidden);
+        // health 宣告装配：版本随主 crate；两个能力缝注入适配侧实现（core 不
+        // 依赖 tree-sitter/探测链——依赖倒置方向单向）
+        core.version = env!("CARGO_PKG_VERSION");
+        core.compute_languages = crate::compute::queries::supported_languages;
+        core.search_engine = health_search_engine;
         // 多根聚合 watch：每根一个 watcher 线程（单根即历史单 watcher 形状）
-        let canonicals: Vec<PathBuf> = roots.iter().map(|r| r.canonical.clone()).collect();
+        let canonicals: Vec<PathBuf> = core.roots.iter().map(|r| r.canonical.clone()).collect();
         Self {
-            root: root.clone(),
-            root_canonical: root_canonical.clone(),
-            roots,
-            fs_roots: 1,
+            core,
+            web_dist,
+            cors_origin,
             runtime_mounts: Arc::new(Mutex::new(Vec::new())),
             runtime_transport: Arc::new(Mutex::new(None)),
-            web_dist,
-            token,
-            hidden,
-            cors_origin,
-            compute: false,
-            rg_path: None,
-            grep_path: None,
             tickets: TicketStore::default(),
             changes: crate::watch::ChangeHub::spawn(&canonicals),
         }
@@ -412,8 +354,11 @@ impl AppState {
             })
             .collect();
         if let Some(first) = self.roots.first() {
-            self.root = first.raw.clone();
-            self.root_canonical = first.canonical.clone();
+            // 先克隆再赋值：字段经 DerefMut 直达核，赋值窗口内不得同时持根借用
+            let raw = first.raw.clone();
+            let canonical = first.canonical.clone();
+            self.root = raw;
+            self.root_canonical = canonical;
         }
         self.fs_roots = self.roots.len();
         let canonicals: Vec<PathBuf> = self.roots.iter().map(|r| r.canonical.clone()).collect();

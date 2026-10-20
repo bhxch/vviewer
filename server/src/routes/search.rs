@@ -120,17 +120,32 @@ fn resolve_one(over: Option<&str>, exe: &str, engine: SearchEngine) -> Option<(S
     }
 }
 
+/// 引擎选择链（路径覆盖参数面）：rg 覆盖/探测 → grep 覆盖/探测 → 双缺 None。
+/// `resolve_engine` 与 health 宣告缝（[`announce_engine`]）消费同一链，零漂移。
+fn resolve_paths(
+    rg_path: Option<&str>,
+    grep_path: Option<&str>,
+) -> Option<(SearchEngine, String)> {
+    resolve_one(rg_path, "rg", SearchEngine::Rg)
+        .or_else(|| resolve_one(grep_path, "grep", SearchEngine::Grep))
+}
+
 /// 引擎选择链：rg 覆盖/探测 → grep 覆盖/探测 → 双缺 501。
 pub(crate) fn resolve_engine(state: &AppState) -> Result<(SearchEngine, String), AppError> {
-    if let Some(found) = resolve_one(state.rg_path.as_deref(), "rg", SearchEngine::Rg) {
-        return Ok(found);
-    }
-    if let Some(found) = resolve_one(state.grep_path.as_deref(), "grep", SearchEngine::Grep) {
-        return Ok(found);
-    }
-    Err(AppError::not_implemented(
-        "cross-file search unavailable: neither ripgrep (rg) nor grep found on server",
-    ))
+    resolve_paths(state.rg_path.as_deref(), state.grep_path.as_deref()).ok_or_else(|| {
+        AppError::not_implemented(
+            "cross-file search unavailable: neither ripgrep (rg) nor grep found on server",
+        )
+    })
+}
+
+/// health `searchEngine` 宣告面（core::health 依赖倒置缝的适配侧实现，Task 3
+/// search 域收编 core 后退役）：与 [`resolve_engine`] 同一选择链，仅投影引擎名。
+pub(crate) fn announce_engine(
+    rg_path: Option<&str>,
+    grep_path: Option<&str>,
+) -> Option<&'static str> {
+    resolve_paths(rg_path, grep_path).map(|(engine, _)| engine.name())
 }
 
 #[cfg(unix)]

@@ -2609,6 +2609,18 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-highlight",
  "tree-sitter-language",
+ "vviewer-core",
+ "vviewer-storage",
+]
+
+[[package]]
+name = "vviewer-core"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "http",
+ "serde",
+ "serde_json",
  "vviewer-storage",
 ]
 

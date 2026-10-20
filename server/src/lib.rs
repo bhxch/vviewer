@@ -1,5 +1,6 @@
 //! vviewer server 库：路由构建与静态资产服务（供集成测试复用）。
 
+pub mod adapt;
 pub mod auth;
 pub mod compute;
 pub mod detect;

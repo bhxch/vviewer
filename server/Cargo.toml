@@ -5,10 +5,11 @@ edition = "2021"
 description = "vviewer local file server (axum)"
 license = "Apache-2.0"
 
-# server/ 为 workspace 根：主 crate + storage 子 crate（目录挂载阶段一存储抽象）。
+# server/ 为 workspace 根：主 crate + core（阶段二业务核）+ storage（目录挂载
+# 阶段一存储抽象）子 crate。
 # 仓库无上层 workspace（repo 根无 Cargo.toml），单 lock 落在 server/Cargo.lock。
 [workspace]
-members = ["storage"]
+members = ["core", "storage"]
 
 [lib]
 name = "vviewer"
@@ -47,6 +48,8 @@ tree-sitter-highlight = "0.27"
 tree-sitter-language = "0.1"
 # 存储抽象子 crate（StorageBackend trait + LocalFs，目录挂载阶段一）
 vviewer-storage = { path = "storage" }
+# 框架无关业务核（阶段二抽取）：handler 业务体所在，适配层单向依赖
+vviewer-core = { path = "core" }
 
 [build-dependencies]
 cc = "1"
