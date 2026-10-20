@@ -1,10 +1,11 @@
-// fontsPanel.test.ts — 字体管理 UI（SettingsPanel 字体节下半，Task 5）。
-// 根 vitest 无 svelte 插件，SettingsPanel/AppShell 无法挂载——面板层沿用「源码
-// 契约断言」先例（fonts.test.ts / exportPanel.test.ts 同形态）锁定结构与接线；
-// 运行时行为由字体系统 Task 6 的 e2e（b-fonts.spec）兜底。数据流集成以
-// fake-indexeddb + mock FontFace/document.fonts 桩（fontsStore.test.ts 同款）
-// 直走 store API × fonts.ts 纯装配，锁定面板消费的组合语义（列表渲染源/启停
-// 出列/删除回落信号）。
+// fontsPanel.test.ts — 字体管理 UI（设置中心「字体」节下半，字体系统 Task 5）。
+// 根 vitest 无 svelte 插件，设置中心组件/AppShell 无法挂载——节组件沿用「源码
+// 契约断言」先例（fonts.test.ts / exportPanel.test.ts 同形态）锁定结构与接线
+// （2026-10-19 设置中心计划 Task 1 起，SettingsPanel 字体节迁移至
+// lib/settings/FontsSection.svelte）；运行时行为由字体系统 Task 6 的 e2e
+// （b-fonts.spec）兜底。数据流集成以 fake-indexeddb + mock FontFace/document.fonts
+// 桩（fontsStore.test.ts 同款）直走 store API × fonts.ts 纯装配，锁定面板消费的
+// 组合语义（列表渲染源/启停出列/删除回落信号）。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -20,11 +21,11 @@ function readSrc(relFromWeb: string): string {
   );
 }
 
-describe('SettingsPanel 网络字体管理区源码契约（字体节下半）', () => {
-  const src = readSrc('src/lib/SettingsPanel.svelte');
+describe('FontsSection 网络字体管理区源码契约（字体节下半）', () => {
+  const src = readSrc('src/lib/settings/FontsSection.svelte');
 
   it('消费 fontsStore 全管线：列表/URL 添加/上传/启停/删除 + 名称推导同源', () => {
-    expect(src).toContain("from './stores/fontsStore'");
+    expect(src).toContain("from '../stores/fontsStore'");
     for (const fn of ['listFontRecords', 'addFontFromUrl', 'addFontFromFile', 'setEnabledFont', 'deleteFont', 'stemOf']) {
       expect(src).toContain(fn);
     }
@@ -64,11 +65,11 @@ describe('SettingsPanel 网络字体管理区源码契约（字体节下半）',
     expect(src).toContain('aria-label="忽略网络字体 {f.name}"');
   });
 
-  it('删除被引用字体：比对 deleteFont 返回记录的 name，槽位回落默认并提示（saveSettings 链）', () => {
+  it('删除被引用字体：比对 deleteFont 返回记录的 name，槽位回落默认并提示（draft+touch 链）', () => {
     expect(src).toMatch(/gone = await deleteFont\(rec\.id\)/);
-    expect(src).toMatch(/fresh\.fonts\.uiFamily === gone\.name/);
-    expect(src).toMatch(/fresh\.fonts\.codeFamily === gone\.name/);
-    expect(src).toMatch(/fresh\.fonts\.\w+ = ''/);
+    expect(src).toMatch(/draft\.fonts\.uiFamily === gone\.name/);
+    expect(src).toMatch(/draft\.fonts\.codeFamily === gone\.name/);
+    expect(src).toMatch(/draft\.fonts\.\w+ = ''/);
     expect(src).toContain('回落默认');
   });
 
@@ -81,13 +82,13 @@ describe('SettingsPanel 网络字体管理区源码契约（字体节下半）',
 
   it('网络字体名不是自定义态：isCustomFamily 认网络名，列表载入后纠偏手输模式', () => {
     expect(src).toMatch(/function isCustomFamily\([^)]*networkNames/);
-    expect(src).toMatch(/networkNames\.has\(uiFamily\)/);
-    expect(src).toMatch(/networkNames\.has\(codeFamily\)/);
+    expect(src).toMatch(/networkNames\.has\(draft\.fonts\.uiFamily\)/);
+    expect(src).toMatch(/networkNames\.has\(draft\.fonts\.codeFamily\)/);
   });
 });
 
-describe('台账顺手修（SettingsPanel 上半遗留）', () => {
-  const src = readSrc('src/lib/SettingsPanel.svelte');
+describe('台账顺手修（字体节遗留，随节迁移）', () => {
+  const src = readSrc('src/lib/settings/FontsSection.svelte');
 
   it('Low-1：字号 clamp 后同步输入框显示（clamped===现值时 Svelte 不重渲 value）', () => {
     expect(src).toMatch(/inp\.value = String\(clamped\)/);

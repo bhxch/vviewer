@@ -1,7 +1,8 @@
-// fonts.test.ts — 字体预设清单与设置面板字体节契约（字体系统 spec §4，Task 3）。
-// 根 vitest 无 svelte 插件（exportPanel.test.ts 同款约束）：SettingsPanel 无法
-// 挂载，面板部分按既有「源码契约断言」先例锁定结构/接线；运行时行为由 e2e
-// （字体系统 Task 6 b-fonts.spec）兜底。
+// fonts.test.ts — 字体预设清单与设置中心字体节契约（字体系统 spec §4，Task 3）。
+// 根 vitest 无 svelte 插件（exportPanel.test.ts 同款约束）：设置中心组件无法
+// 挂载，节组件部分按既有「源码契约断言」先例锁定结构/接线（2026-10-19 设置中心
+// 计划 Task 1 起，SettingsPanel 五节迁移至 lib/settings/FontsSection.svelte）；
+// 运行时行为由 e2e（字体系统 Task 6 b-fonts.spec）兜底。
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -131,17 +132,8 @@ describe('formatFontSize（管理列表体积显示）', () => {
   });
 });
 
-describe('SettingsPanel 字体节源码契约（两槽四输入 + persist 接线 + 节序）', () => {
-  const src = readSrc('src/lib/SettingsPanel.svelte');
-
-  it('字体节位于图表之后、界面主题之前（外观簇：图表 → 字体 → 界面主题）', () => {
-    const chart = src.indexOf('vv-settings-label">图表<');
-    const fonts = src.indexOf('vv-settings-label">字体<');
-    const theme = src.indexOf('vv-settings-label">界面主题<');
-    expect(chart).toBeGreaterThan(-1);
-    expect(fonts).toBeGreaterThan(chart);
-    expect(theme).toBeGreaterThan(fonts);
-  });
+describe('FontsSection 字体节源码契约（两槽四输入 + draft/touch 接线；节序由 settingsCenter.test 注册表锁定）', () => {
+  const src = readSrc('src/lib/settings/FontsSection.svelte');
 
   it('两槽四输入：族下拉/自定义手输/字号 number 各×2，aria-label 可寻址', () => {
     expect(src).toContain('aria-label="界面字体族"');
@@ -151,13 +143,13 @@ describe('SettingsPanel 字体节源码契约（两槽四输入 + persist 接线
     expect(src).toContain('aria-label="界面字号（px）"');
     expect(src).toContain('aria-label="代码字号（px）"');
     expect(src.match(/type="number"/g)?.length).toBe(2);
-    // 自定义手输×2（图表节的 kroki host 也有一个既有 type="text"，不计入）
-    expect(src.match(/type="text"\s*\n\s*value=\{uiFamily\}/g)?.length).toBe(1);
-    expect(src.match(/type="text"\s*\n\s*value=\{codeFamily\}/g)?.length).toBe(1);
+    // 自定义手输×2（绑定 draft.fonts 槽位）
+    expect(src.match(/type="text"\s*\n\s*value=\{draft\.fonts\.uiFamily\}/g)?.length).toBe(1);
+    expect(src.match(/type="text"\s*\n\s*value=\{draft\.fonts\.codeFamily\}/g)?.length).toBe(1);
   });
 
   it('消费 fonts.ts 装配源：预设清单/选项装配/哨兵/样张均接入', () => {
-    expect(src).toContain("from './fonts'");
+    expect(src).toContain("from '../fonts'");
     expect(src).toContain('UI_FONT_PRESETS');
     expect(src).toContain('CODE_FONT_PRESETS');
     expect(src).toContain('fontFamilyOptions');
@@ -165,44 +157,42 @@ describe('SettingsPanel 字体节源码契约（两槽四输入 + persist 接线
     expect(src).toContain('FONT_SPECIMEN');
   });
 
-  it('字号 clamp 即时：number input min/max 绑定 settings 的 UI/CODE_SIZE_RANGE，输入经 clampSize 落盘', () => {
+  it('字号 clamp：number input min/max 绑定 settings 的 UI/CODE_SIZE_RANGE，onchange 经 clampSize 写 draft', () => {
     expect(src).toContain('UI_SIZE_RANGE');
     expect(src).toContain('CODE_SIZE_RANGE');
     expect(src).toMatch(/min=\{UI_SIZE_RANGE\[0\]\}\s*max=\{UI_SIZE_RANGE\[1\]\}/);
     expect(src).toMatch(/min=\{CODE_SIZE_RANGE\[0\]\}\s*max=\{CODE_SIZE_RANGE\[1\]\}/);
-    expect(src).toContain('function onSizeInput');
-    // 面板复用 settings.ts clampSize（终审 M-2：取整口径单源，不再面板内联 min/max）
-    expect(src).toContain("clampSize, loadSettings, saveSettings, CODE_SIZE_RANGE, UI_SIZE_RANGE");
-    expect(src).toContain('clampSize(Number(inp.value), range,');
+    // 面板复用 settings.ts clampSize（终审 M-2：取整口径单源）
+    expect(src).toContain('clampSize');
+    expect(src).toContain("from '../stores/settings'");
+    expect(src).toMatch(/function onSizeChange[\s\S]*?clampSize\(Number\(inp\.value\), range,/);
   });
 
-  it('字号渐进输入不被回写打断（终审 I-1）：oninput 只 clamp+persist 不写 DOM，显示规范化在 onchange', () => {
-    const inputFn = src.slice(src.indexOf('function onSizeInput'), src.indexOf('function onSizeChange'));
-    expect(inputFn).not.toBe('');
-    // oninput 段不回写输入框 value（草稿/显式回写都会打断渐进键入「16」：
-    // 中间值「1」clamp 成 10 回写、再拼成「106」clamp 成 28）
-    expect(inputFn).not.toMatch(/inp\.value\s*=/);
-    expect(inputFn).not.toMatch(/\b(uiSize|codeSize)\s*=/);
-    expect(inputFn).toContain('persistSize');
-    // 显示同步（规范化回写）只在 change：blur/回车时输入已结束，回写无打断风险
-    expect(src).toContain('function onSizeChange');
+  it('字号输入只在 onchange 回写（终审 I-1 教训承续）：无 oninput 字号处理器，输入途中不写 draft/DOM', () => {
+    expect(src).not.toMatch(/oninput=\{\(e\) => onSizeInput/);
+    expect(src).not.toContain('function onSizeInput');
+    // 显示同步（规范化回写）在 change：blur/回车时输入已结束，回写无打断风险
     expect(src).toMatch(/function onSizeChange[\s\S]*?inp\.value = String\(clamped\);/);
     expect(src.match(/onchange=\{\(e\) => onSizeChange\('ui', e\)\}/g)?.length).toBe(1);
     expect(src.match(/onchange=\{\(e\) => onSizeChange\('code', e\)\}/g)?.length).toBe(1);
   });
 
   it('自定义/预设切换：select 值派生（自定义态显哨兵），onFamilyChange 切手输框显隐', () => {
-    expect(src.match(/CUSTOM_FONT_SENTINEL : \w+Family/g)?.length).toBe(2);
+    expect(src.match(/CUSTOM_FONT_SENTINEL\s*:\s*draft\.fonts\.\w+Family/g)?.length).toBe(2);
     expect(src).toContain('function onFamilyChange');
     expect(src).toContain('function onFamilyInput');
   });
 
-  it('保存走面板既有 persist 链：fresh.fonts 四字段写入（saveSettings 即触发 Task 1 注入/Task 2 重渲染）', () => {
-    expect(src).toMatch(/fresh\.fonts = \{ uiFamily, uiSize, codeFamily, codeSize \};/);
+  it('改动走 draft+touch 契约：字号/族写入 draft.fonts 后调 touch()（落盘时机由 SettingsCenter 决定）', () => {
+    expect(src).toMatch(/draft\.fonts\.uiSize = clamped/);
+    expect(src).toMatch(/draft\.fonts\.codeSize = clamped/);
+    expect(src).toMatch(/draft\.fonts\.uiFamily = v/);
+    expect(src).toMatch(/draft\.fonts\.codeFamily = v/);
+    expect(src).toContain('touch()');
   });
 
   it('手输实时预览样张（spec §4）：fontFamilyValue 同源转义 + FONT_SPECIMEN 渲染', () => {
-    // 两槽手输预览 ×2 + Task 5 管理列表行样张 ×1
+    // 两槽手输预览 ×2 + 管理列表行样张 ×1
     expect(src.match(/vv-settings-font-sample/g)?.length).toBe(3);
     expect(src).toContain('style:font-family={fontFamilyValue(');
     expect(src).toContain('style:font-size=');

@@ -9,6 +9,7 @@
   import GlobalSearchPanel from './GlobalSearchPanel.svelte';
   import QuickOpenPanel from './QuickOpenPanel.svelte';
   import WorkspaceTabsPanel from './WorkspaceTabsPanel.svelte';
+  import SettingsCenter from './SettingsCenter.svelte';
   import type { TreeStore, TocEntry } from '@vviewer/core';
   import { createRemoteStore } from '@vviewer/core';
   import {
@@ -77,6 +78,10 @@
   let quickOpenOpen = $state(false);
   /** tab 管理覆盖层面板开关（T6）：Alt+W / TabBar「管理」切换，Esc/外点面板内关闭 */
   let wsPanelOpen = $state(false);
+  /** 统一设置中心开关（settings center spec §2）：TopBar ⚙（onsettings 回调）与
+   * Ctrl+, 双入口切换，Esc 面板内关闭（SettingsPanel 弹层退役，挂点归 AppShell
+   * ——与其余 overlay 面板同层，TopBar 隐藏态 Ctrl+, 可达不变式保持） */
+  let settingsCenterOpen = $state(false);
 
   // ---------- 布局自由化（spec 2026-10-19 §2）：折叠/调宽 ----------
   // settings.layout 是唯一事实源：折叠/宽度变更即时 saveSettings 落盘（既有链路
@@ -335,15 +340,15 @@
 
   /**
    * overlay 开合判定的最准信号（台账裁决点）：各覆盖层面板均为 {#if} 条件挂载，
-   * 在 DOM 即开——实时查询比在多处镜像 $state 布尔更准（SettingsPanel 的
-   * settingsOpen 存 TopBar 组件内、文件内搜索存 ViewerPane，AppShell 拿不到
-   * 直接引用；类名清单 = 各面板根类，新面板接入时在此追加）。
+   * 在 DOM 即开——实时查询比在多处镜像 $state 布尔更准（设置中心 settingsCenterOpen
+   * 虽为 AppShell 自有状态、文件内搜索存 ViewerPane，判定统一走 DOM 实读更不易漂移；
+   * 类名清单 = 各面板根类，新面板接入时在此追加）。
    * 消费方：移动端 popstate（onPopstate，面板不被该事件关闭、实时读安全）与
    * 桌面 Esc 的 capture 相快照（snapOverlay——keydown 冒泡相面板已被其自带
    * handler 同步移除，实时读不可用，见 snapOverlay 注释）。
    */
   const OVERLAY_SELECTOR = [
-    '.vv-settings',
+    '.vv-settings-center',
     '.vv-gsearch',
     '.vv-quickopen',
     '.vv-wspanel',
@@ -770,6 +775,13 @@
         }
         return;
       }
+      // Ctrl+comma 切换设置中心（settings center spec §2，自 TopBar 迁入——原
+      // 语义保持：非输入焦点才接管，inField 分支提前 return 已拦截输入态按键）
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === ',') {
+        e.preventDefault();
+        settingsCenterOpen = !settingsCenterOpen;
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
         e.preventDefault();
         globalSearchOpen = !globalSearchOpen;
@@ -829,8 +841,8 @@
      布局菜单入口（shell 级代理，按 target 归属分流），shell 容器无 AT 交互角色 -->
 <div class="vv-shell" class:drawer={drawerOpen} class:rightopen={rightOpen} class:zen={layout.zen} oncontextmenu={onShellContextMenu}>
   <!-- 顶栏/标签栏：hidden=zen 或显式隐藏（chromeVisible 覆盖语义）；temp=边缘悬停
-       临时条（半透覆盖形态）。组件保持挂载——TopBar 的 Ctrl+, 监听与 SettingsPanel
-       挂点不因隐藏失效（spec §2 全件可隐但功能可达） -->
+       临时条（半透覆盖形态）。组件保持挂载——Ctrl+, 设置中心入口（AppShell 自有
+       状态）与 TopBar 的订阅注入链不因隐藏失效（spec §2 全件可隐但功能可达） -->
   {#if !vis.topBar}
     <!-- 边缘唤出热区（spec §2/§3，评审 M1）：shell flex 流内插槽锚定各自自然槽位
          （本条在 TopBar 槽位前、tab 条在 TopBar/TabBar 之间）——单/双隐藏组合均
@@ -851,6 +863,7 @@
   <TopBar
     temp={topTemp}
     hidden={!vis.topBar && !topTemp}
+    onsettings={() => (settingsCenterOpen = !settingsCenterOpen)}
     onenter={() => {
       if (!vis.topBar) summonTemp('top'); // 正常可见态的划过不置临时态
     }}
@@ -984,6 +997,9 @@
   {/if}
   {#if wsPanelOpen}
     <WorkspaceTabsPanel onclose={() => (wsPanelOpen = false)} />
+  {/if}
+  {#if settingsCenterOpen}
+    <SettingsCenter onclose={() => (settingsCenterOpen = false)} />
   {/if}
   {#if chromeMenu !== null}
     {@const bar = chromeMenu.bar}

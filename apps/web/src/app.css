@@ -355,15 +355,15 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
   position: fixed; top: 0; left: 0; right: 0; z-index: 50;
   transform: none; opacity: .88; box-shadow: 0 2px 12px rgb(0 0 0 / 18%);
 }
-/* 台账带入（布局 zen Task 5）：设置面板/新建工作区模态由 TopBar 组件挂载
-   （TopBar.svelte 末尾 {#if} 分支）。当前 DOM 中两者是 header.vv-topbar 的兄弟
-   节点，chrome-off 的 visibility:hidden 继承不可达（实证 2026-10-19：TopBar 隐藏态
-   Ctrl+, 面板 computed visibility=visible）；此显式 visible 是 CSS 标准逃生门
-   （子级显式声明压过父级继承）——若挂点日后移入 header 元素内（组件意义上仍属
-   TopBar），面板不致落入隐藏条的 visibility 继承域。visibility 初值即 visible，
-   对现状零行为变化，纯防御声明；e2e b-layout-zen 以「TopBar 隐藏态 Ctrl+, 面板
-   可见」断言钉住该不变式 */
-.vv-settings, .vv-wscreate { visibility: visible; }
+/* 台账带入（布局 zen Task 5）：新建工作区模态由 TopBar 组件挂载（TopBar.svelte
+   末尾 {#if} 分支）。当前 DOM 中它是 header.vv-topbar 的兄弟节点，chrome-off 的
+   visibility:hidden 继承不可达（实证 2026-10-19：TopBar 隐藏态 Ctrl+, 面板
+   computed visibility=visible）；此显式 visible 是 CSS 标准逃生门（子级显式声明
+   压过父级继承）。设置中心 Task 1 起改由 AppShell 挂载（.vv-settings-center，
+   与 shell 平级不在 chrome-off 继承域），无需入册；visibility 初值即 visible，
+   对现状零行为变化，纯防御声明；e2e b-layout-zen 以「TopBar 隐藏态 Ctrl+,
+   面板可见」断言钉住该不变式 */
+.vv-wscreate { visibility: visible; }
 /* 唤出热区：shell（flex column）流内插槽——top 隐藏时占 TopBar 槽位（视口顶），
    tab 隐藏时占 TabBar 槽位（紧贴其上邻可见条底部），单/双隐藏组合均不错位 */
 .vv-edge { flex: none; }
@@ -392,10 +392,8 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-server-form input:first-child { width: 220px; }
 .vv-server-form input[type='password'] { width: 150px; }
 .vv-server-error { color: var(--ui-danger, #d33); font-size: 12px; max-width: 320px; }
-/* 代码主题 select 被外观主题接管时的禁用态（SettingsPanel 界面主题区非默认） */
-.vv-topbar select:disabled { opacity: .5; cursor: default; }
 /* workspace 切换器（T5）：打开按钮组右侧下拉；≤600px 触发按钮收敛、下拉改
-   SettingsPanel 同位 fixed 浮层。z-index 30 对齐 SettingsPanel/GlobalSearchPanel 惯例 */
+   同位 fixed 浮层。z-index 30 对齐设置中心/GlobalSearchPanel 惯例 */
 .vv-ws { position: relative; }
 .vv-ws-trigger { white-space: nowrap; max-width: 22vw; overflow: hidden; text-overflow: ellipsis; }
 .vv-ws-pop { position: absolute; top: calc(100% + 4px); left: 0; min-width: 210px; max-width: 320px;
@@ -581,8 +579,12 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-jsonl-cap { flex-basis: 100%; font-size: 12px; color: var(--ui-fg-muted); }
 .vv-jsonl-expand { flex: none; margin-left: auto; font-size: 12px;
   color: var(--ui-accent); border-color: var(--ui-accent); background: none; }
-/* 设置面板「界面主题」区（SettingsPanel 第三 section；样式惯例同 jsonl 渲染器 D 项：
-   全局类消费 --ui-* token。槽行/导入/通知/已导入列表，复用组件内 .vv-settings-remove） */
+/* 设置中心全局骨架（SettingsCenter.svelte，Task 1）：节容器排布——节内容是
+   子组件（lib/settings/*Section.svelte），scoped 样式够不到，全局类承载 */
+.vv-sc-section { display: flex; flex-direction: column; gap: 6px; max-width: 640px; }
+/* 设置中心「外观」节界面主题区（原 SettingsPanel 第三 section，Task 1 迁入
+   AppearanceSection；样式惯例同 jsonl 渲染器 D 项：全局类消费 --ui-* token。
+   槽行/导入/通知/已导入列表，复用 .vv-settings-remove） */
 .vv-settings-theme-row { display: flex; align-items: center; justify-content: space-between;
   gap: 6px; font-size: 13px; }
 .vv-settings-theme-row select,
@@ -598,9 +600,10 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
   text-overflow: ellipsis; white-space: nowrap; }
 .vv-settings-theme-src { flex: none; color: var(--ui-fg-muted); border: 1px solid var(--ui-border);
   border-radius: 8px; padding: 0 6px; font-size: 11px; }
-/* 设置面板「图表」区（SettingsPanel，界面主题节之前；spec 2026-10-19 §2.1）：
-   Kroki host 行复用 .vv-settings-theme-row（input 宽度已并入上方 select 规则）；
-   以下为按语言渲染模式网格（键恒为注册表 t.id，18 类型两列轻量布局） */
+/* 设置中心「图表」节（原 SettingsPanel 区块，Task 1 迁入 DiagramsSection；
+   spec 2026-10-19 §2.1）：Kroki host 行复用 .vv-settings-theme-row（input 宽度
+   已并入上方 select 规则）；以下为按语言渲染模式网格（键恒为注册表 t.id，
+   18 类型两列轻量布局） */
 .vv-settings-diagram-modes { display: flex; flex-direction: column; gap: 4px;
   font-size: 13px; }
 .vv-diagram-mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
@@ -609,16 +612,17 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-diagram-mode-item .vv-diagram-mode-lang { flex: 1; min-width: 0; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
 .vv-diagram-mode-item select { flex: none; min-width: 0; max-width: 88px; }
-/* 设置面板「字体」区（SettingsPanel，图表节之后/界面主题节之前；字体系统 spec
-   2026-10-19 §4）：槽行复用 .vv-settings-theme-row；样张预览的族/字号由组件内联
-   style 提供（草稿值实时渲染，theme.ts fontFamilyValue 同源转义），此处只管框体；
-   字号 number input 收窄（整宽 number 输入框观感失衡） */
+/* 设置中心「字体」节（原 SettingsPanel 区块，Task 1 迁入 FontsSection；字体系统
+   spec 2026-10-19 §4）：槽行复用 .vv-settings-theme-row；样张预览的族/字号由组件
+   内联 style 提供（草稿值实时渲染，theme.ts fontFamilyValue 同源转义），此处只管
+   框体；字号 number input 收窄（整宽 number 输入框观感失衡） */
 .vv-settings-font-sample { border: 1px solid var(--ui-border); border-radius: 6px;
   padding: 4px 8px; overflow-wrap: anywhere; }
 .vv-settings-theme-row input[type='number'] { flex: none; max-width: 84px; }
-/* 设置面板「字体」区网络字体管理列表（Task 5；spec 2026-10-19 §5.2/§5.3）：
-   URL 表单复用 .vv-settings-add；行结构/删除钮惯例同已导入主题列表；
-   样张框复用 .vv-settings-font-sample（族由组件内联 style 提供） */
+/* 设置中心「字体」节网络字体管理列表（原 SettingsPanel Task 5 区块，随节迁入
+   FontsSection；spec 2026-10-19 §5.2/§5.3）：URL 表单复用 .vv-settings-add；
+   行结构/删除钮惯例同已导入主题列表；样张框复用 .vv-settings-font-sample
+   （族由组件内联 style 提供） */
 .vv-settings-font-addrow { display: flex; gap: 6px; }
 .vv-settings-font-addrow input { flex: 1; min-width: 0; }
 .vv-settings-font-addrow button { font-size: 12px; }

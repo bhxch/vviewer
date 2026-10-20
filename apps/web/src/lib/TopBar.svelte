@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import SettingsPanel from './SettingsPanel.svelte';
   import WorkspaceCreateModal from './WorkspaceCreateModal.svelte';
   import {
     openFiles,
@@ -14,24 +13,23 @@
   } from './openFlow.svelte';
   import { workspaceStore } from './workspaceStore';
   import { loadSettings, saveSettings, onSettingsChanged, type Settings } from './stores/settings';
-  import { applyAppearanceFromSettings, applyFontsFromSettings, onSystemModeChange, themeOptions } from './theme';
+  import { applyAppearanceFromSettings, applyFontsFromSettings, onSystemModeChange } from './theme';
   import { reactToFontsChange } from './fontsReaction';
 
-  let settings = $state<Settings>(loadSettings());
   /** chrome 隐藏/临时条形态（spec 2026-10-19 §2/§3，AppShell 传值）：hidden=移出
-   * 视口的隐藏态（组件保持挂载，Ctrl+, 与 SettingsPanel 挂点不失效）；temp=边缘
+   * 视口的隐藏态（组件保持挂载，设置中心入口回调 onsettings 不失效）；temp=边缘
    * 悬停唤出的半透条。onenter/onleave 供 AppShell 做「重入取消隐藏定时/移开 1.5s
-   * 再隐」——组件不持有 layout 状态（所有权在 AppShell）。 */
+   * 再隐」——组件不持有 layout 状态（所有权在 AppShell）。设置中心（⚙/Ctrl+,，
+   * spec 2026-10-19 设置中心 §2）开关状态归 AppShell，本组件只发回调。 */
   let {
     temp = false,
     hidden = false,
     onenter,
-    onleave
-  }: { temp?: boolean; hidden?: boolean; onenter?: () => void; onleave?: () => void } = $props();
+    onleave,
+    onsettings
+  }: { temp?: boolean; hidden?: boolean; onenter?: () => void; onleave?: () => void; onsettings(): void } = $props();
   let urlValue = $state('');
   let fileInput = $state<HTMLInputElement | null>(null);
-  // 设置面板浮层开关（BUG-05）：⚙ 按钮挂载，Ctrl+comma 切换
-  let settingsOpen = $state(false);
   // workspace 切换器（T5）：下拉开关 + 新建模态挂载 + 行内重命名草稿
   let wsMenuOpen = $state(false);
   let createOpen = $state(false);
@@ -39,10 +37,9 @@
   let renameDraft = $state('');
   let wsAnchorEl = $state<HTMLElement | null>(null);
   let wsPopEl = $state<HTMLElement | null>(null);
-  /** ≤600px 收进溢出：触发按钮收敛为图标、下拉改 SettingsPanel 同位 fixed 浮层 */
+  /** ≤600px 收进溢出：触发按钮收敛为图标、下拉改同位 fixed 浮层 */
   let narrow = $state(false);
-  // 主题表经动态 import 惰性加载（不进主 chunk），下拉选项挂载后异步填充
-  let codeThemeOptions = $state<Awaited<ReturnType<typeof themeOptions>>>([]);
+  let settings = $state<Settings>(loadSettings());
 
   // 连接服务器：内联展开表单（地址/token/连接/错误），不用对话框组件
   let serverOpen = $state(false);
@@ -51,21 +48,10 @@
   let serverError = $state<string | null>(null);
   let connecting = $state(false);
 
-  /** OS 亮暗响应式镜像（BUG-49）：matchMedia 非响应式信号，effectiveMode 每次实时读
-   * matchMedia 但 OS 切换不触发重算——以 change 事件写入 $state 闭合 mode 的依赖链。 */
-  let osDark = $state(
-    typeof matchMedia !== 'undefined' && matchMedia('(prefers-color-scheme: dark)').matches
-  );
-  /** 当前生效亮暗（system 按 prefers-color-scheme 解析），决定下拉读写哪个记忆槽。
-   * 不直调 effectiveMode（内部 matchMedia 读非响应式，OS 切换后 mode 陈旧——BUG-49）；
-   * 无 matchMedia 环境（jsdom/SSR）osDark 初值 false → 回落 light，与 effectiveMode 同口径。 */
-  let mode = $derived(
-    settings.themeMode === 'system' ? (osDark ? 'dark' : 'light') : settings.themeMode
-  );
-  let currentCodeTheme = $derived(mode === 'dark' ? settings.codeThemeDark : settings.codeThemeLight);
-  let currentAppearance = $derived(mode === 'dark' ? settings.appearanceDark : settings.appearanceLight);
-  /** 外观接管（spec B §2.3）：当前 mode 槽非 default 时代码配色由外观 tokenColors 决定 */
-  let appearanceTakesOver = $derived(currentAppearance !== 'default');
+  /** OS 亮暗响应式镜像（BUG-49）：matchMedia 非响应式信号——OS 切换时经
+   * onSystemModeChange 订阅在 themeMode=system 下补一发注入（UI 配色由
+   * prefers-color-scheme 媒体查询自动跟随，JS 注入变量需要这步）。高亮配色槽位
+   * 读写已迁设置中心外观节（AppearanceSection 自带同款镜像）。 */
 
   /** 当前 workspace（workspacesView 为 workspaceStore 的 runes 镜像） */
   const activeWorkspace = $derived(
@@ -112,7 +98,6 @@
   }
 
   onMount(() => {
-    void themeOptions().then((opts) => (codeThemeOptions = opts));
     applyAppearanceFromSettings(settings); // 首次注入：签名初值 null 必命中
     applyFontsFromSettings(settings); // 首次字体注入（style#vv-font；返回值忽略——挂载期无活动渲染实例）
     // 订阅设置变更保持本副本最新（防本组件 saveSettings 写回旧值），同时作为
@@ -124,10 +109,8 @@
       // 字体系统 spec §2.3/§3，Task 2；无关字段变化零触发）
       reactToFontsChange(s, () => tabStore.touchActiveTab());
     });
-    // themeMode=system：OS 亮暗切换不经 saveSettings，effectiveMode 随之变化命中
-    // diff（UI 配色由 prefers-color-scheme 媒体查询自动跟随，JS 注入变量需要这步）
-    const offSystem = onSystemModeChange((m) => {
-      osDark = m === 'dark'; // BUG-49：同步响应式镜像，mode 的 derived 随 OS 切换重算
+    // themeMode=system：OS 亮暗切换不经 saveSettings（BUG-49，见上注释）
+    const offSystem = onSystemModeChange(() => {
       if (settings.themeMode !== 'system') return;
       applyAppearanceFromSettings(settings);
     });
@@ -148,7 +131,7 @@
 
   $effect(() => {
     // 下拉外点关闭：pointerdown 落在触发按钮与浮层之外即收起（模态类浮层不做
-    // 外点关——SettingsPanel 惯例，避免误触丢输入；仅菜单性浮层外点关）
+    // 外点关——设置中心/全局搜索惯例，避免误触丢输入；仅菜单性浮层外点关）
     if (!wsMenuOpen) return;
     const onDown = (e: PointerEvent): void => {
       const t = e.target as Node | null;
@@ -191,54 +174,21 @@
     // 变化命中 diff（spec 2026-10-12 §2.4）
   }
 
-  function onCodeThemeChange(e: Event): void {
-    const name = (e.currentTarget as HTMLSelectElement).value;
-    if (mode === 'dark') settings.codeThemeDark = name;
-    else settings.codeThemeLight = name;
-    saveSettings(settings); // 注入由订阅 diff（codeTheme 变化）触发，此处不直调
-  }
-
-  /** 计算策略三态（M6）：下次高亮/渲染调用即生效（router 每次实时读 settings） */
-  function onComputePolicyChange(e: Event): void {
-    const v = (e.currentTarget as HTMLSelectElement).value;
-    if (v === 'auto' || v === 'local' || v === 'remote') settings.computePolicy = v;
-    saveSettings(settings);
-  }
-
   function onPick(e: Event): void {
     const input = e.currentTarget as HTMLInputElement;
     if (input.files) openFiles([...input.files]);
     input.value = '';
   }
 
-  /**
-   * 手动刷新（BUG-05，SRV-07）：复用 SSE 的 refreshPaths 通道（rev++ 驱动重读）。
+  /** 手动刷新（BUG-05，SRV-07）：复用 SSE 的 refreshPaths 通道（rev++ 驱动重读）。
    * 活动为文件 tab 时 [path] 同时刷新该文件与目录树（refreshPaths 对目录 tab
    * 恒自增）；活动为目录 tab 时空 paths 刷新整个 store。不受 autoRefresh 开关
-   * 限制（开关只过滤 SSE 推送，手动刷新语义即用户显式要求）。
-   */
+   * 限制（开关只过滤 SSE 推送，手动刷新语义即用户显式要求）。 */
   function manualRefresh(): void {
     const t = tabStore.list.find((x) => x.active);
     if (!t) return;
     tabStore.refreshPaths(t.source.storeId, t.source.path === '' ? [] : [t.source.path]);
   }
-
-  // Ctrl+comma 切换设置面板（BUG-05）：非输入焦点时才接管——与 Ctrl+Shift+F 的
-  // inField 判定同惯例
-  $effect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (!((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === ',')) return;
-      const t = e.target as HTMLElement | null;
-      const inField =
-        t !== null &&
-        (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
-      if (inField) return;
-      e.preventDefault();
-      settingsOpen = !settingsOpen;
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  });
 
   function submit(e: SubmitEvent): void {
     e.preventDefault();
@@ -313,7 +263,7 @@
            tabindex/方向键管理（a11y_interactive_supports_focus 警告）；aria-expanded
            已在触发按钮上表达展开态 -->
       <!-- svelte-ignore a11y_no_static_element_interactions --><!-- 容器 Esc 同仓库
-           dialog keydown 模式（SettingsPanel 等）：合成 Esc（移动端返回键
+           dialog keydown 模式（设置中心/GlobalSearchPanel 等）：合成 Esc（移动端返回键
            closeTopOverlayForZen 派发）与浮层内焦点物理 Esc 的统一关闭通道 -->
       <div
         class="vv-ws-pop"
@@ -406,38 +356,10 @@
   <button onclick={cycleTheme}>
     主题：{settings.themeMode === 'system' ? '跟随系统' : settings.themeMode === 'light' ? '亮' : '暗'}
   </button>
-  <select
-    value={settings.computePolicy}
-    onchange={onComputePolicyChange}
-    aria-label="计算策略"
-    title="计算策略：决定高亮等计算在本地还是服务器执行"
-  >
-    <option value="auto">计算: 自动</option>
-    <option value="local">计算: 本地</option>
-    <option value="remote">计算: 远程</option>
-  </select>
-  <select
-    value={currentCodeTheme}
-    onchange={onCodeThemeChange}
-    aria-label="代码主题"
-    title={appearanceTakesOver ? '由外观主题接管（设置面板界面主题区选回「默认」后可换）' : '代码主题'}
-    disabled={appearanceTakesOver}
-  >
-    {#each codeThemeOptions as { group, themes } (group)}
-      <optgroup label={group}>
-        {#each themes as t (t)}
-          <option value={t}>{t}</option>
-        {/each}
-      </optgroup>
-    {/each}
-  </select>
-  <button onclick={() => (settingsOpen = !settingsOpen)} aria-label="设置" title="设置（Ctrl+,）：排除规则 / 自动刷新 / 界面主题">
+  <button onclick={onsettings} aria-label="设置" title="设置（Ctrl+,）：外观 / 字体 / 图表 / 搜索与排除 / 自动刷新 / 计算">
     ⚙
   </button>
 </header>
-{#if settingsOpen}
-  <SettingsPanel onclose={() => (settingsOpen = false)} />
-{/if}
 {#if createOpen}
   <WorkspaceCreateModal onclose={() => (createOpen = false)} />
 {/if}
