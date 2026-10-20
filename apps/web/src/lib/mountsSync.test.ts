@@ -563,7 +563,7 @@ describe('syncMountsOnConnect（spec §3 前端对账重注册）', () => {
 
 // ---------- 挂载根 watch 态判定（ViewerPane 状态栏消费，brief 测试清单收编） ----------
 
-describe('isMountRootStoreId（fsRoots 边界：≥ fsRoots = 挂载根）', () => {
+describe('isMountRootStoreId（fsRoots 边界：≥ fsRoots = 挂载根；direct 前缀恒挂载来源）', () => {
   const KEY = 'vv:server-health';
 
   function setHealth(fsRoots: number | null): void {
@@ -581,7 +581,7 @@ describe('isMountRootStoreId（fsRoots 边界：≥ fsRoots = 挂载根）', () 
     expect(isMountRootStoreId('remote:abcd1234')).toBe(false);
   });
 
-  it('fsRoots 未宣告（null = 旧服务端/无挂载部署）恒 false', () => {
+  it('fsRoots 未宣告（null = 旧服务端/无挂载部署）对 remote id 恒 false', () => {
     setHealth(null);
     expect(isMountRootStoreId('remote:abcd1234:r9')).toBe(false);
     sessionStorage.removeItem(KEY);
@@ -592,6 +592,23 @@ describe('isMountRootStoreId（fsRoots 边界：≥ fsRoots = 挂载根）', () 
     setHealth(1);
     expect(isMountRootStoreId('localfs:docs')).toBe(false);
     expect(isMountRootStoreId('placeholder:remote:abcd1234:r3')).toBe(false);
+  });
+
+  // Task 3 收口项：直连挂载不经服务器、watch 恒不支持——判定与 fsRoots/health
+  // 缓存无关（direct tab 走 per-source「此源不支持变更推送」、搜索走浏览器内补扫）
+  it('direct 前缀（s3direct:/davdirect:）恒 true，不受 fsRoots 宣告缺省影响', () => {
+    setHealth(2);
+    expect(isMountRootStoreId('s3direct:abcd1234')).toBe(true);
+    expect(isMountRootStoreId('davdirect:abcd1234')).toBe(true);
+    setHealth(null);
+    expect(isMountRootStoreId('s3direct:abcd1234')).toBe(true);
+    sessionStorage.removeItem(KEY);
+    expect(isMountRootStoreId('davdirect:abcd1234')).toBe(true);
+  });
+
+  it('placeholder: 包装的 direct id 不识别（占位 tab 走既有错误卡片链）', () => {
+    setHealth(1);
+    expect(isMountRootStoreId('placeholder:s3direct:abcd1234')).toBe(false);
   });
 });
 

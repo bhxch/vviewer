@@ -54,7 +54,8 @@ export interface GlobalSearchResult {
 /** 挂载根来源提示文案（brief：挂载根显式 root 的 404 收敛为本文案）。 */
 export const MOUNT_SEARCH_DEGRADED_HINT = '该根不可服务端搜索，已切换浏览器内搜索';
 
-/** store 是否为挂载根来源（rootIndex ≥ fsRoots 的 remote store，spec §3）。 */
+/** store 是否为挂载来源（remote 挂载根 rootIndex ≥ fsRoots，或直连挂载
+ * s3direct:/davdirect:——均无服务端搜索面，spec §3/§4；isMountRootStoreId 单点判定）。 */
 export function isMountRootSource(s: SearchSource): boolean {
   return isMountRootStoreId(s.store.id);
 }

@@ -66,9 +66,14 @@ export function saveServerHealth(health: unknown): void {
 /**
  * 挂载根 storeId 判定（目录挂载 spec §3）：remote store 且 rootIndex ≥ fsRoots
  * （health 边界宣告——挂载根能力恒 watch/search=false，spec §2）。fsRoots 未宣告
- * （null = 旧服务端/无挂载部署）恒 false（全部根视为 fs 根，既有行为零变化）。
+ * （null = 旧服务端/无挂载部署）对 remote id 恒 false（全部根视为 fs 根，既有行为
+ * 零变化）。直连挂载（spec §4 阶段三）恒为挂载来源：s3direct:/davdirect: 前缀
+ * 不经服务器、watch 恒不支持且无服务端搜索面，与 fsRoots 边界无关——判定不过
+ * health 缓存（Task 3 收口项：direct tab 走 per-source「此源不支持变更推送」态、
+ * 搜索同口径走浏览器内补扫，而非全局 watch-error 降级语义）。
  */
 export function isMountRootStoreId(storeId: string): boolean {
+  if (storeId.startsWith('s3direct:') || storeId.startsWith('davdirect:')) return true;
   const fsRoots = loadServerHealth()?.fsRoots ?? null;
   if (fsRoots === null) return false;
   const parts = parseRemoteStoreId(storeId);

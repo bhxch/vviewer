@@ -21,10 +21,11 @@ import SearchPanel from './SearchPanel.svelte';
   let { tab, ontoc }: { tab: Tab | null; ontoc?: (entries: TocEntry[]) => void } = $props();
 
   /**
-   * 变更推送状态段（目录挂载 spec §3）：活跃 tab 属挂载根来源（rootIndex ≥
-   * fsRoots，能力位 watch=false 常量）显示「此源不支持变更推送」；否则沿用
-   * 服务端 watch-error 降级指示（自动刷新不可用）。两者按 tab 互斥——挂载根
-   * 本无推送面，服务端 fs watcher 降级与它无关。
+   * 变更推送状态段（目录挂载 spec §3）：活跃 tab 属挂载来源（remote 挂载根
+   * rootIndex ≥ fsRoots、或直连 s3direct:/davdirect:——能力位 watch=false 常量，
+   * isMountRootStoreId 单点判定）显示「此源不支持变更推送」；否则沿用服务端
+   * watch-error 降级指示（自动刷新不可用）。两者按 tab 互斥——挂载来源本无
+   * 推送面，服务端 fs watcher 降级与它无关。
    */
   const watchLabel = $derived(
     tab !== null && isMountRootStoreId(tab.source.storeId)

@@ -447,10 +447,14 @@ describe('runGlobalSearch 挂载根来源（spec §3：不参与远端、本地�
     expect(MOUNT_SEARCH_DEGRADED_HINT).toBe('该根不可服务端搜索，已切换浏览器内搜索');
   });
 
-  it('isMountRootSource：fsRoots 边界裁决（≥ 为挂载根；非 remote 恒 false）', () => {
+  it('isMountRootSource：fsRoots 边界裁决（≥ 为挂载根；非 remote 恒 false；direct 前缀恒 true——Task 3 收口）', () => {
     setFsRoots(1);
     expect(isMountRootSource({ label: 'm', store: makeStore('remote:abcd1234:r1', true), rootIndex: 1 })).toBe(true);
     expect(isMountRootSource({ label: 'f', store: makeStore('remote:srv', true) })).toBe(false);
     expect(isMountRootSource({ label: 'l', store: makeStore('localfs:x', false) })).toBe(false);
+    // 直连挂载无服务端搜索面：恒走浏览器内补扫（mountSearchDegraded 提示通道），
+    // 不再借道 base 不匹配的补扫兜底（不白发注定失败的 remote 路由）
+    expect(isMountRootSource({ label: 's', store: makeStore('s3direct:abcd1234', true) })).toBe(true);
+    expect(isMountRootSource({ label: 'd', store: makeStore('davdirect:abcd1234', true) })).toBe(true);
   });
 });
