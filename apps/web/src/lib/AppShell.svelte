@@ -431,9 +431,14 @@
 
   onMount(() => {
     document.documentElement.dataset.themeMode = settings.themeMode;
-    // 设置变更（TopBar/SettingsPanel 经 saveSettings 写入）→ 刷新响应式副本：
-    // 排除规则变化经下方 {#key} 重建 FileTree（BUG-05）
-    const offSettings = onSettingsChanged((s) => (settings = s));
+    // 设置变更（TopBar/设置中心经 saveSettings 写入）→ 刷新响应式副本 + html 打标：
+    // 排除规则变化经下方 {#key} 重建 FileTree（BUG-05）；themeMode 变化经设置中心
+    // 「亮暗模式」控件应用时，data-theme-mode 也须同步（此前唯一运行时写入点在
+    // TopBar cycleTheme——设置中心路径漏打标，壳层配色不切换，Task 5 e2e SC-03 补出）
+    const offSettings = onSettingsChanged((s) => {
+      settings = s;
+      document.documentElement.dataset.themeMode = s.themeMode;
+    });
     // render-archive 包内树点击 → addTab（递归预览通道）
     const unbindArchive = bindArchiveOpenEvents();
     // 网络字体启动恢复（字体系统 spec §5.2，Task 5）：enabled 项从 IndexedDB 重建
