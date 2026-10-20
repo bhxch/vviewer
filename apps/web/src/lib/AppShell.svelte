@@ -340,6 +340,9 @@
    * 在 DOM 即开——实时查询比在多处镜像 $state 布尔更准（SettingsPanel 的
    * settingsOpen 存 TopBar 组件内、文件内搜索存 ViewerPane，AppShell 拿不到
    * 直接引用；类名清单 = 各面板根类，新面板接入时在此追加）。
+   * 消费方：移动端 popstate（onPopstate，面板不被该事件关闭、实时读安全）与
+   * 桌面 Esc 的 capture 相快照（snapOverlay——keydown 冒泡相面板已被其自带
+   * handler 同步移除，实时读不可用，见 snapOverlay 注释）。
    */
   const OVERLAY_SELECTOR = [
     '.vv-settings',
@@ -710,6 +713,19 @@
   }
 
   $effect(() => {
+    // Escape 优先级快照（spec §3，Svelte 5 同步 flush 修正，Task 5 e2e 发现）：
+    // 面板容器的 Esc handler 关面板时 Svelte 5 把 DOM 更新同步落地（事件驱动的
+    // 更新不批量到微任务——实测面板在同一 keydown 冒泡到 window 前已被移除），
+    // 下方 onKey 冒泡相的 DOM 实读将恒 false，一次 Esc 会「关面板 + 退 zen」
+    // 双动作，违反「面板优先只关面板」。capture 相监听先于一切 target/bubble
+    // 阶段 handler 执行，在任何面板 handler 动手前记录「本事件开始时」面板是否
+    // 在 DOM，onKey 据此分派。chrome 菜单无自有 Esc handler（onKey 直读状态即可），
+    // 不入快照；移动端 popstate 通道不经 keydown（onPopstate 直读不受影响）。
+    let escOverlayAtStart = false;
+    const snapOverlay = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') escOverlayAtStart = anyOverlayOpen();
+    };
+    window.addEventListener('keydown', snapOverlay, true);
     const onKey = (e: KeyboardEvent): void => {
       // zen 进出（spec §3）：Ctrl+Alt+Z 切换。键位冲突复核（2026-10-19 实读取，
       // 全仓库 rg KeyZ / ctrl+alt 组合）：既有键位仅 Ctrl/Cmd+Shift+F、Ctrl/Cmd+P、
@@ -726,13 +742,14 @@
       }
       // Esc 优先级状态机（spec §3，zenEscAction 纯函数分派）：chrome 右键菜单 >
       // overlay（设置/搜索/快速打开等，面板自带 Esc 关闭处理器在同一事件上动作，
-      // 此处不叠加）> 退 zen。overlay 判定实读面板 DOM（anyOverlayOpen 注释）。
+      // 此处不叠加）> 退 zen。overlay 判定 = capture 相快照 escOverlayAtStart
+      // （见 snapOverlay 注释：面板 handler 同步 flush 后此处实时查询已不可见）。
       if (e.key === 'Escape') {
         if (chromeMenu !== null) {
           chromeMenu = null;
           return;
         }
-        const action = zenEscAction({ overlaysOpen: anyOverlayOpen(), zen: layout.zen });
+        const action = zenEscAction({ overlaysOpen: escOverlayAtStart, zen: layout.zen });
         if (action === 'exitZen') {
           e.preventDefault();
           toggleZen();
@@ -802,7 +819,10 @@
       }
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', snapOverlay, true);
+      window.removeEventListener('keydown', onKey);
+    };
   });
 </script>
 
