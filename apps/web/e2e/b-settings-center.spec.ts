@@ -24,7 +24,8 @@ import {
  * - SC-04 导入合并/替换两路径 + 校验失败阻断（不部分应用）
  * - SC-05 脏态关闭确认（继续编辑/放弃并关闭/应用并关闭三选一）
  * - SC-06 存储管理分类清除：字体清除 UI 回退（实时回落+列表空态）；设置清除
- *   重载回落默认；挂载配置禁用态（Spec 5 前向兼容裁决的骨架核验）
+ *   重载回落默认；挂载配置禁用态（Spec 5 前向兼容裁决的骨架核验）；I-2 外部
+ *   变更显脏 + 应用不复活已删引用（mergeDraftOnto 防护的端到端证明）
  * - SC-07 关于分节：estimate mock 用量+刷新、persist 状态行、health 摘要注入
  * - SC-08 TopBar 精简回归：代码主题/计算策略两下拉迁出、⚙ 指向设置中心、
  *   亮暗快切保留（双写同字段）
@@ -290,10 +291,16 @@ test.describe('b-settings-center 统一设置中心', () => {
     await gotoGroup(page, '字体');
     await expect(page.locator('.vv-settings-empty', { hasText: '暂无网络字体' })).toBeVisible();
 
-    // purge 不回写打开中的草稿（Task 3+4 报告 §3.5 披露）：设置页脏态基准（applied
-    // 状态）不感知外部 purge 的 saveSettings——不显式「应用」即无复活路径。收尾断言
-    // 槽位回落已持久（''），Esc 直关（无脏态确认条）
-    await closeSettings(page);
+    // I-2 终审修复后语义（更正此前「不点应用即无复活路径」披露——打开期间应用
+    // 整体写回旧 draft 正是复活路径）：外部 purge 经 onSettingsChanged 重置脏态
+    // 基准，draft 中已清除的 codeFamily='x' 相对新生效值显脏（如实显形）→ Esc 弹
+    // 确认条；「应用并关闭」走 mergeDraftOnto（draft 相对出发快照无字体引用改动
+    // → 不覆盖 purge 回落值），已删引用不复活，落盘槽位保持回落（''）
+    await page.keyboard.press('Escape');
+    const staleConfirm = page.getByRole('alertdialog', { name: '未应用的修改' });
+    await expect(staleConfirm).toBeVisible();
+    await staleConfirm.getByRole('button', { name: '应用并关闭' }).click();
+    await expect(page.locator(SETTINGS_ROOT)).toHaveCount(0);
     expect(
       ((await savedSettings(page)) as { fonts?: { codeFamily?: string } }).fonts?.codeFamily
     ).toBe('');

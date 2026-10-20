@@ -124,10 +124,20 @@ describe('草稿模型与 UI/JSON 双视图接线（settings center spec §3，T
     expect(src).toMatch(/jsonDirtyBuffer = \(e\.currentTarget as HTMLTextAreaElement\)\.value/);
   });
 
-  it('应用/放弃统一入口：应用走 commit（saveSettings 链）并刷新脏态基准；放弃还原 openDraft', () => {
-    expect(src).toMatch(/function doApply[\s\S]*?commit\(draft\);[\s\S]*?applied = loadSettings\(\);/);
+  it('应用/放弃统一入口：应用走 mergeDraftOnto→commit（saveSettings 链）并刷新脏态基准；放弃还原 openDraft', () => {
+    expect(src).toMatch(
+      /function doApply[\s\S]*?commit\(mergeDraftOnto\(loadSettings\(\), draftBase, draft\)\);[\s\S]*?applied = loadSettings\(\);/
+    );
     expect(src).toMatch(/function doDiscard[\s\S]*?draft = openDraft\(applied\);/);
     expect(src).toContain('disabled={!canApply}');
+  });
+
+  it('I-2 外部变更订阅：onSettingsChanged 重置脏态基准（applied），draft 出发快照（draftBase）独立留存供应用 diff', () => {
+    expect(src).toMatch(/onSettingsChanged\(\(s: Settings\) =>\s*\{\s*applied = s;/);
+    expect(src).toMatch(/let draftBase = \$state<Settings>\(openDraft\(/);
+    // 放弃/应用成功后出发快照同步重置（diff 基准不悬在已被替换的旧快照上）
+    expect(src).toMatch(/function doDiscard[\s\S]*?draftBase = openDraft\(applied\);/);
+    expect(src).toMatch(/draft = openDraft\(applied\);\s*draftBase = openDraft\(applied\);/);
   });
 
   it('脏态关闭确认（spec §3）：requestClose 导出 + 确认条（应用并关闭/放弃并关闭）', () => {

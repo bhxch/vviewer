@@ -1,6 +1,7 @@
 // settingsDraft.ts — 设置草稿模型纯函数（settings center spec §3/§4，Task 2/3）。
 // 无 runes 的纯 .ts 模块（vitest 直测）：深拷贝/序列化/parse+白名单镜像校验/脏态/
-// 提交/导入合并与替换/导出文件构造与导入解析/导入变更摘要。UI（SettingsCenter.svelte）
+// 提交/导入合并与替换/导出文件构造与导入解析/导入变更摘要/草稿变更合并
+// （mergeDraftOnto——I-2 复活路径防护）。UI（SettingsCenter.svelte）
 // 持有 draft（$state 深代理）并统一在「应用」时走 commit → saveSettings 集中订阅链。
 //
 // 校验语义 = loadSettings 白名单的镜像（spec §3：未知字段标红不静默丢弃、类型不
@@ -233,10 +234,54 @@ export function isDirty(draft: Draft, settings: Settings): boolean {
   return stableStringify(draft) !== stableStringify(settings);
 }
 
-/** 提交（spec §3：应用统一走 saveSettings 集中订阅链）；deep copy 入库，
- * 提交后再改 draft 不回灌已提交值 */
-export function commit(draft: Draft): void {
-  saveSettings(deepClone(draft));
+/** 提交（spec §3：应用统一走 saveSettings 集中订阅链）；deep copy 入库。
+ * 入参为完整设置值——「应用」侧以 mergeDraftOnto 先行合并（复活路径防护，I-2），
+ * 本函数只负责落盘与订阅广播。 */
+export function commit(s: Settings): void {
+  saveSettings(deepClone(s));
+}
+
+/**
+ * 把 draft 相对其出发快照（baseline）的变更字段合并到 base（提交时刻的最新生效值）
+ * 上，返回合并结果（不改动三个入参；I-2 复活路径防护的纯函数核）：
+ * - 变更判定 = 与 baseline 的深度比较（stableStringify）；变更字段取 draft 值
+ *   （数组整组、标量直接），对象节内递归一层至 diagrams.modes（depth < 2）；
+ * - 未变字段保留 base——外部在设置页打开期间经 saveSettings 落盘的变更
+ *   （如存储管理 purge 的引用回落）不被草稿中的陈旧字段复活；
+ * - base 与 baseline 相等（无外部变更）时结果恒等于 draft（原 commit(draft)
+ *   语义不变）；用户改动与外部变更撞同一字段时 draft 值胜（后写优先）。
+ */
+export function mergeDraftOnto(base: Settings, baseline: Settings, draft: Settings): Settings {
+  const out = deepClone(base);
+  mergeChanged(
+    out as unknown as Record<string, unknown>,
+    baseline as unknown as Record<string, unknown>,
+    draft as unknown as Record<string, unknown>,
+    0
+  );
+  return out;
+}
+
+/** mergeDraftOnto 的递归体：draft 相对 baseline 有差异的叶子字段写入 target。
+ * 顶层只走白名单键（draft 未知键不入结果）；节内信任 Settings 同构契约
+ * （fonts/layout 全形，diagrams.modes 任意图类型键均合法——新增键按「baseline
+ * 缺键 = 变更」落位），删键不传播（target 保留 base 的键，与 mergeImported 的
+ * modes 合并缺项保留口径对称）。 */
+function mergeChanged(
+  target: Record<string, unknown>,
+  baseline: Record<string, unknown>,
+  draft: Record<string, unknown>,
+  depth: number
+): void {
+  for (const k of depth === 0 ? SETTINGS_KEYS : Object.keys(draft)) {
+    const dv = draft[k];
+    const tv = target[k];
+    if (depth < 2 && isObj(dv) && isObj(baseline[k]) && isObj(tv)) {
+      mergeChanged(tv as Record<string, unknown>, baseline[k] as Record<string, unknown>, dv, depth + 1);
+    } else if (stableStringify(dv) !== stableStringify(baseline[k])) {
+      target[k] = dv;
+    }
+  }
 }
 
 /**

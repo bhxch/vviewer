@@ -7,12 +7,14 @@
   // 底部导入/导出动作区；后续分组以注册项插入，零骨架改动。
   // 草稿语义（spec §3）：打开即 openDraft 深拷贝生效 settings；表单节组件只改
   // draft 并调 touch()（仅使 JSON 派生失效，不落盘）；「应用」统一经
-  // commit()→saveSettings 走集中订阅链；JSON 视图与表单共享同一 draft——表单→
+  // commit(mergeDraftOnto(最新值, 出发快照, draft))→saveSettings 走集中订阅链
+  // （I-2：外部变更经 onSettingsChanged 重置脏态基准，应用按字段级 diff 合并——
+  // purge 等外部回落不被陈旧草稿复活）；JSON 视图与表单共享同一 draft——表单→
   // JSON 即格式化序列化，JSON→表单先 parse+校验（settingsDraft 白名单镜像），
   // 非法停留 JSON 视图标错不丢文本；脏态关闭走确认（requestClose，Ctrl+,/⚙ 的
   // 关闭路径同此裁决）。
   import { setContext, untrack, type Component } from 'svelte';
-  import { loadSettings, type Settings } from './stores/settings';
+  import { loadSettings, onSettingsChanged, type Settings } from './stores/settings';
   import {
     applyJson,
     buildExportFile,
@@ -21,6 +23,7 @@
     exportFileName,
     importGroupDiffs,
     isDirty,
+    mergeDraftOnto,
     mergeImported,
     openDraft,
     parseImportFile,
@@ -71,10 +74,22 @@
 
   // ---------- 草稿（spec §3：打开深拷贝，两视图共享） ----------
   let applied = $state<Settings>(loadSettings()); // 最近一次应用的生效值（脏态基准）
-  // untrack：draft 只取打开时刻的 applied 快照（此后 applied 只在应用/放弃时整体
-  // 重建，无滚动依赖可建立）
+  // untrack：draft 只取打开时刻的 applied 快照。draftBase = draft 的出发快照
+  // （I-2）：外部变更把 applied 重置为最新后，「应用」仍以 draftBase 为 diff
+  // 基准（draft 相对它才算「用户的改动」）——见 doApply 的 mergeDraftOnto。
+  let draftBase = $state<Settings>(openDraft(untrack(() => applied)));
   let draft = $state<Settings>(openDraft(untrack(() => applied)));
   const dirty = $derived(isDirty(draft, applied));
+
+  // I-2：打开期间外部 saveSettings（如存储与数据节 purge 主题/字体的引用联动
+  // 回落）把脏态基准重置为最新值——draft 不动（未应用改动不丢），脏态重算如实
+  // 显形；陈旧草稿的整体写回复活路径由 doApply 的 mergeDraftOnto 消除（此前
+  // 「不点应用即无复活路径」的披露失实：一旦应用即整体覆盖，外部回落值被复活）。
+  $effect(() => {
+    return onSettingsChanged((s: Settings) => {
+      applied = s;
+    });
+  });
 
   /** 节改动上收（draft 契约）：本阶段只使 JSON 派生失效（表单改动反映到 JSON
    * 视图），落盘统一在「应用」。 */
@@ -134,8 +149,13 @@
 
   // ---------- 应用 / 放弃 / 脏态关闭确认（spec §3） ----------
 
-  /** 应用：JSON 视图先写回校验；统一 commit(draft)→saveSettings 集中订阅链。
-   * 成功后自动清除脏态不清页（applied 刷新为持久值）。失败返回 false 停留。 */
+  /** 应用：JSON 视图先写回校验；统一 commit→saveSettings 集中订阅链。
+   * 提交值 = mergeDraftOnto(loadSettings(), draftBase, draft)（I-2）：draft 相对
+   * 出发快照的变更字段合并到提交时刻最新生效值上——打开期间外部落盘的变更
+   * （purge 引用回落等）不被草稿中未改动的陈旧字段复活；无外部变更时
+   * （base=baseline）结果恒等于 draft（原 commit(draft) 语义不变），同一字段
+   * 撞车时 draft 值胜。成功后自动清除脏态不清页（applied 刷新为持久值）。
+   * 失败返回 false 停留。 */
   function doApply(): boolean {
     if (view === 'json') {
       const r = applyJson(draft, jsonDisplay);
@@ -144,20 +164,22 @@
         return false;
       }
     }
-    commit(draft);
+    commit(mergeDraftOnto(loadSettings(), draftBase, draft));
     applied = loadSettings();
     // draft 以规范化 applied 重建（评审 L6）：normalize 截掉的脏值（如非法
     // krokiHost 落 ''）不再留在 draft——否则 applied≠draft 恒脏、确认条失实
     draft = openDraft(applied);
+    draftBase = openDraft(applied);
     jsonDirtyBuffer = null;
     jsonErrors = null;
     confirmClose = false; // 评审 L2：确认条开着时经头部「应用」成功，条随之复位
     return true;
   }
 
-  /** 放弃：draft 还原为最近应用值（JSON 缓冲与标错一并丢弃） */
+  /** 放弃：draft 还原为最近应用值（JSON 缓冲与标错一并丢弃；出发快照同步重置） */
   function doDiscard(): void {
     draft = openDraft(applied);
+    draftBase = openDraft(applied);
     jsonDirtyBuffer = null;
     jsonErrors = null;
   }

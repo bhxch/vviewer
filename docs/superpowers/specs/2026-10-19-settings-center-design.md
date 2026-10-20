@@ -32,13 +32,13 @@
 - **载体**：全屏 overlay（与工作区面板/全局搜索同交互模型），`Ctrl+,` 切换、Esc 关闭；不引入路由/深链。
 - **左导航分组**（自上而下）：外观（亮暗模式/亮暗双槽外观主题/代码主题）、字体（spec 2 组件整体迁入）、图表（spec 1：krokiHost/按语言渲染模式）、布局（spec 3：折叠/宽度/TopBar/TabBar/zen 重置）、搜索与排除（excludedPatterns 等）、自动刷新、计算（computePolicy）、存储与数据（见 §2.2，分类清除）、关于（见 §2.1，项目信息+存储用量+持久化存储）。
 - **TopBar 迁移**：代码主题下拉与计算策略下拉迁入设置页（低频项）；亮暗快切保留 TopBar（高频）；TopBar 精简为 ⚙ + 亮暗 + 其余既有件。
-- 分组导航键盘可达（↑↓ 切组），右表单滚动跟随高亮。
+- 分组导航键盘可达（↑↓ 切组），右表单滚动跟随高亮。〔勘误（2026-10-19 终审 I3，以实现为准）：右表单实态为「一次一节渲染」——注册表驱动激活组整体切换，非长列表滚动跟随高亮；键盘通道即 ↑↓ 切组本身（JSON 视图下仅移动高亮不触发解析）〕
 
 ### 2.1 关于分节（项目信息、存储用量、持久化存储）
 
 **项目信息**（审阅反馈轮扩容）：
 
-- 应用名/版本：前端构建版本（package.json version 构建期注入）与服务端版本（health `version`）并列显示，双端不一致时注记；仓库链接、Apache-2.0 许可、第三方致谢（`THIRD_PARTY_NOTICES.md` 内容入口）。
+- 应用名/版本：前端构建版本（package.json version 构建期注入）与服务端版本（health `version`）并列显示，双端不一致时注记；仓库链接、Apache-2.0 许可、第三方致谢（`THIRD_PARTY_NOTICES.md` 内容入口）。〔勘误（2026-10-19 终审 I3，以实现为准）：第三方致谢以指向 GitHub 上 `THIRD_PARTY_NOTICES.md` 的外部链接呈现——离线内嵌文件内容为简化未做〕
 - 服务端 health 摘要：version/capabilities/searchEngine/roots（原文案并入）。
 
 **存储用量与配额**：
@@ -68,7 +68,7 @@
 | 目录授权句柄 | IndexedDB kv 的 `dirHandle` 键 | 删除后 localfs 来源不再自动恢复（需重新授权）；快照恢复失败降级链照旧 |
 | 导入主题 | themes store | `clear()`；**引用联动**：settings 中 appearance 引用了 imported 主题的槽位回落 default（订阅链生效），内置主题不受影响 |
 | 网络字体 | fonts store | `clear()` + `document.fonts` 逐个注销；**引用联动**：uiFamily/codeFamily 引用已删字体的槽位回落默认栈（spec 2 单项删除语义扩到批量） |
-| 挂载配置 | mounts store | `clear()`；代理挂载逐个尝试 `DELETE /api/mounts` 清服务端运行时注册（失败静默，重启即失效） |
+| 挂载配置 | mounts store | `clear()`；代理挂载逐个尝试 `DELETE /api/mounts` 清服务端运行时注册（失败静默，重启即失效）〔勘误（2026-10-19 终审 I3，以实现为准）：mounts store 未落地（Spec 5 前向兼容）——实态为分类行禁用态 + 清除 no-op，「代理挂载 DELETE 尝试」不实现，Spec 5 落地后启用〕 |
 | 运行时缓存 | Cache Storage 非 precache 项 | `caches.delete` 逐个清除（grammar wasm/媒体等运行时缓存）；**precache 保留**（清了破坏离线，无自助重建时机）；显示缓存名清单（不显示体积——Response 尺寸遍历成本不成比例） |
 
 - 交互纪律：全部带确认弹窗（红色危险调+列明后果）；删除即时生效项（主题/字体）走既有订阅链实时回退，无需重载；「恢复出厂」独立于分类清单放分节底部——二次确认后执行**全部分类 + 注销 SW + 清全部 Cache Storage + 重载**（最高危，弹窗措辞最强）。

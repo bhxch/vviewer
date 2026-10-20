@@ -13,6 +13,7 @@ import {
   importGroupDiffs,
   isDirty,
   jsonLineOf,
+  mergeDraftOnto,
   mergeImported,
   openDraft,
   parseImportFile,
@@ -194,8 +195,58 @@ describe('commit（spec §3：应用统一走 saveSettings）', () => {
   });
 });
 
+describe('mergeDraftOnto（I-2：应用以 draft 相对出发快照的变更字段合并到最新值——陈旧草稿复活路径防护）', () => {
+  it('purge 外部回落后应用不复活已删引用：未改字段保留 base（最新值），改动字段生效', () => {
+    // 打开时刻（baseline）：codeFamily 引用字体 'x'；用户在页内只改 uiSize
+    const opened = aSettings({ fonts: { uiFamily: '', uiSize: 16, codeFamily: 'x', codeSize: 13 } });
+    const draft = openDraft(opened);
+    draft.fonts.uiSize = 20;
+    // purge 落盘后的最新生效值（base）：引用联动回落空栈
+    const afterPurge = aSettings({ fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 } });
+    const merged = mergeDraftOnto(afterPurge, opened, draft);
+    expect(merged.fonts.codeFamily).toBe(''); // 悬空引用不复活（整体写回 draft 会落 'x'）
+    expect(merged.fonts.uiSize).toBe(20); // 用户改动照常生效
+    expect(merged.fonts.codeSize).toBe(13);
+  });
+
+  it('base=baseline（无外部变更）时结果恒等于 draft——原 commit(draft) 语义不变', () => {
+    const opened = aSettings({ themeMode: 'light', autoRefresh: true, excludedPatterns: ['.git'] });
+    const draft = openDraft(opened);
+    draft.themeMode = 'dark';
+    draft.diagrams.modes.mermaid = 'kroki';
+    draft.excludedPatterns = ['.git', 'dist'];
+    expect(mergeDraftOnto(opened, opened, draft)).toEqual(draft);
+  });
+
+  it('节内字段级粒度：同节内未改动的外部回落字段不被覆盖；撞同一字段 draft 胜（后写优先）', () => {
+    const opened = aSettings({ layout: { ...DEFAULT_LAYOUT, leftWidth: 360, zen: false } });
+    const draft = openDraft(opened);
+    draft.layout.leftWidth = 400; // 用户只改宽度
+    const afterExternal = aSettings({ layout: { ...DEFAULT_LAYOUT, leftWidth: 360, zen: true } }); // 外部改 zen
+    const merged = mergeDraftOnto(afterExternal, opened, draft);
+    expect(merged.layout.leftWidth).toBe(400); // 用户改动
+    expect(merged.layout.zen).toBe(true); // 外部变更存活（节级粒度会把它冲回 false）
+
+    const draft2 = openDraft(opened);
+    draft2.layout.zen = true; // 用户与外部撞同一字段
+    expect(mergeDraftOnto(afterExternal, opened, draft2).layout.zen).toBe(true); // draft 值胜
+  });
+
+  it('diagrams.modes 键级粒度：未改动的 modes 键保留 base；三个入参不被改动', () => {
+    const opened = aSettings({ diagrams: { krokiHost: '', modes: { mermaid: 'local', vega: 'local' } } });
+    const draft = openDraft(opened);
+    draft.diagrams.modes.mermaid = 'kroki';
+    const afterExternal = aSettings({ diagrams: { krokiHost: '', modes: { mermaid: 'local', vega: 'kroki' } } });
+    const merged = mergeDraftOnto(afterExternal, opened, draft);
+    expect(merged.diagrams.modes).toEqual({ mermaid: 'kroki', vega: 'kroki' });
+    // 入参防御：base/baseline/draft 均不被触碰
+    expect(afterExternal.diagrams.modes).toEqual({ mermaid: 'local', vega: 'kroki' });
+    expect(draft.diagrams.modes).toEqual({ mermaid: 'kroki', vega: 'local' });
+  });
+});
+
 describe('mergeImported / replaceImported（Task 3 消费的导入语义，spec §4）', () => {
-  it('合并：导入缺项保留现状；在场字段级覆盖（规范化后）；未知字段忽略', () => {
+  it('合并：导入缺项保留现状；在场字段覆盖（规范化后）；未知字段忽略〔I1 勘误：字段=节内字段级，非节整体——uiSize 节内缺项保留 current 而非归节默认〕', () => {
     const layout = { ...DEFAULT_LAYOUT, leftWidth: 400, topBarVisible: false };
     const current = aSettings({
       excludedPatterns: ['.git', 'node_modules'],
