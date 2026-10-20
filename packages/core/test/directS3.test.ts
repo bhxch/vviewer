@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { webcrypto } from 'node:crypto';
 import {
+  contentRangeMatches,
   createS3DirectStore,
   parseListV2,
   s3DirectStoreId,
@@ -111,6 +112,20 @@ describe('signS3Get（AWS 官方向量交叉锚）', () => {
   it('缺省 amzDate 生成当下 UTC 形态（YYYYMMDDThhmmssZ）', async () => {
     const headers = await signS3Get('https://examplebucket.s3.amazonaws.com', CREDS);
     expect(headers['x-amz-date']).toMatch(/^\d{8}T\d{6}Z$/);
+  });
+});
+
+describe('contentRangeMatches（M1 Range 防线纯函数：206 窗响应的窗段校验）', () => {
+  it('三态：相符 true / 可读但不符 false / 不可读或不识别 null（保持 status 判定）', () => {
+    expect(contentRangeMatches('bytes 2-4/9', 2, 4)).toBe(true);
+    expect(contentRangeMatches('bytes 2-4/*', 2, 4)).toBe(true);
+    expect(contentRangeMatches('bytes  2 - 4 / 9', 2, 4)).toBe(true); // 宽松空白
+    expect(contentRangeMatches('bytes 0-4/9', 2, 4)).toBe(false);
+    expect(contentRangeMatches('bytes 2-5/9', 2, 4)).toBe(false);
+    expect(contentRangeMatches(null, 2, 4)).toBeNull(); // 头不可读（CORS 未 expose）
+    expect(contentRangeMatches('bytes */9', 2, 4)).toBeNull(); // `*` 窗段形态不识别
+    expect(contentRangeMatches('garbage', 2, 4)).toBeNull();
+    expect(contentRangeMatches('items 2-4/9', 2, 4)).toBeNull(); // 非 bytes 单位
   });
 });
 
@@ -257,6 +272,44 @@ describe('createS3DirectStore', () => {
     const bytes = await store.read('a.txt', { range: { start: 2, end: 4 } });
     expect(bytes).toEqual(new Uint8Array([3, 4, 5]));
     expect(store.rangeCapable).toBe(false);
+  });
+
+  it('read Range 206 + Content-Range 可读且窗段相符：原样交付（M1 防线零变化）', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      bytesResponse(new Uint8Array([3, 4, 5]), 206, { 'Content-Range': 'bytes 2-4/9' })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const store = testStore();
+    expect(await store.read('a.txt', { range: { start: 2, end: 4 } })).toEqual(new Uint8Array([3, 4, 5]));
+    expect(store.rangeCapable).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('read Range 206 + Content-Range 可读但窗段不符：重取全量切窗交付，rangeCapable 翻 false（M1 防线，评审带入②）', async () => {
+    // 病态服务端：206 + 谎报窗段（回体不是请求窗）
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+      (init!.headers as Record<string, string>).range !== undefined
+        ? bytesResponse(new Uint8Array([9, 9, 9]), 206, { 'Content-Range': 'bytes 0-2/9' })
+        : bytesResponse(new Uint8Array([1, 2, 3, 4, 5]), 200)
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const store = testStore();
+    const bytes = await store.read('a.txt', { range: { start: 2, end: 4 } });
+    expect(bytes).toEqual(new Uint8Array([3, 4, 5])); // 重取全量后切出正确窗
+    expect(store.rangeCapable).toBe(false); // 后续走全量切片通道
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [, init2] = fetchMock.mock.calls[1]!;
+    expect((init2!.headers as Record<string, string>).range).toBeUndefined(); // 重取无 Range
+  });
+
+  it('read Range 206 + Content-Range 不可读（CORS 未 expose）：保持 status 判定（既有行为零变化）', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      bytesResponse(new Uint8Array([3, 4, 5]), 206)
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const store = testStore();
+    expect(await store.read('a.txt', { range: { start: 2, end: 4 } })).toEqual(new Uint8Array([3, 4, 5]));
+    expect(store.rangeCapable).toBe(true);
   });
 
   it('非 2xx：抛含状态码与错误体片段的 Error', async () => {

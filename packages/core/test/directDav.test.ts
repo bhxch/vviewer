@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { webcrypto } from 'node:crypto';
 import { createDavDirectStore, davDirectStoreId, parseMultistatus } from '../src/tree/directDav';
+import { contentRangeMatches } from '../src/tree/directS3';
 
 // jsdom 环境的 crypto 可能缺 subtle（node webcrypto 兜底；与 directS3.test.ts
 // 同防线，防模块内依赖漂移）
@@ -149,6 +150,38 @@ describe('createDavDirectStore', () => {
     const bytes = await store.read('f.bin', { range: { start: 1, end: 3 } });
     expect(bytes).toEqual(new Uint8Array([8, 7, 6]));
     expect(store.rangeCapable).toBe(false);
+  });
+
+  it('read Range 206 + Content-Range 可读但窗段不符：重取全量切窗交付，rangeCapable 翻 false（M1 防线，评审带入②）', async () => {
+    // dav 部分服务器忽略/错答 Range 的病态面：206 + 窗段与请求不符（可读头）
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+      (init!.headers as Record<string, string>).range !== undefined
+        ? bytesResponse(new Uint8Array([9, 9, 9]), 206, { 'Content-Range': 'bytes 0-2/9' })
+        : bytesResponse(new Uint8Array([9, 8, 7, 6, 5]), 200)
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const store = testStore();
+    const bytes = await store.read('f.bin', { range: { start: 1, end: 3 } });
+    expect(bytes).toEqual(new Uint8Array([8, 7, 6])); // 重取全量后切出正确窗
+    expect(store.rangeCapable).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [, init2] = fetchMock.mock.calls[1]!;
+    expect((init2!.headers as Record<string, string>).range).toBeUndefined(); // 重取无 Range
+  });
+
+  it('read Range 206 + Content-Range 不可读（CORS 未 expose）：保持 status 判定（既有行为零变化）', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      bytesResponse(new Uint8Array([3, 4, 5]), 206)
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const store = testStore();
+    expect(await store.read('f.bin', { range: { start: 2, end: 4 } })).toEqual(new Uint8Array([3, 4, 5]));
+    expect(store.rangeCapable).toBe(true);
+  });
+
+  it('contentRangeMatches 复用 directS3 同一纯函数（双端同口径）', () => {
+    expect(contentRangeMatches('bytes 1-3/9', 1, 3)).toBe(true);
+    expect(contentRangeMatches(null, 1, 3)).toBeNull();
   });
 
   it('PROPFIND 401：抛含 401 与认证提示的 Error', async () => {

@@ -2,6 +2,7 @@ import type { ByteRange, TreeNode } from '../types';
 import { hash8 } from './singleFile';
 import { naturalCompare } from './localFiles';
 import {
+  contentRangeMatches,
   encodeKeyPath,
   normalizeMountPrefix,
   optInt,
@@ -229,6 +230,19 @@ export function createDavDirectStore(cfg: DavDirectConfig): DirectStore {
         // Range 防线：200 = Range 被无视——从全量切出请求窗并标记降级
         rangeOk = false;
         return buf.subarray(r.start, r.end + 1);
+      }
+      if (
+        r !== undefined &&
+        res.status === 206 &&
+        contentRangeMatches(res.headers.get('content-range'), r.start, r.end) === false
+      ) {
+        // M1 防线（directS3.contentRangeMatches doc，双端同口径）：206 但窗段与
+        // 请求不符（头可读）——窗响应不可信：本调用重取全量（无 Range）切窗交付
+        // 正确字节，并标记降级（此后走 !rangeCapable 全量切片通道）
+        rangeOk = false;
+        const full = await request('GET', resourceUrl(rel), {}, undefined, readOpts?.signal);
+        await ensureDavOk(full);
+        return new Uint8Array(await full.arrayBuffer()).subarray(r.start, r.end + 1);
       }
       return buf;
     },

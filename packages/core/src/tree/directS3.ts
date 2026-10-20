@@ -482,6 +482,23 @@ async function ensureOk(res: Response, label: string): Promise<void> {
 }
 
 /**
+ * Content-Range 窗段校验（评审 M1 Range 防线）：206 窗响应的 `Content-Range:
+ * bytes start-end/total|*` 头与请求窗逐值比对。返回：true=窗段相符；false=
+ * 头可读但窗段与请求不符（服务端窗响应不可信）；null=头不可读（CORS 未在
+ * Access-Control-Expose-Headers 放行时 headers.get 返回 null）或形态不识别
+ * （`bytes *⁠/total`、非 bytes 单位、解析失败）——调用方保持既有 status 判定。
+ * 与服务端 WebDAV Range 防线（content-length 比对）的偏差记要：直连侧 206
+ * 语义下 Content-Range 是权威窗段，浏览器无 content-length 校验点，可读即校验、
+ * 不可读退 status 判定（M1 口径「响应头可读则校验、不可读保持 status 判定」）。
+ */
+export function contentRangeMatches(header: string | null, start: number, end: number): boolean | null {
+  if (header === null) return null;
+  const m = /^bytes\s+(\d+)\s*-\s*(\d+)\s*\//.exec(header.trim());
+  if (m === null) return null;
+  return Number(m[1]) === start && Number(m[2]) === end;
+}
+
+/**
  * S3 直连 TreeStore：ListObjectsV2（delimiter=/，分页聚合全量 + 目录优先自然序）
  * 列目录 + Range GET 读文件。接口形态与 RemoteStore 同构（listChildren/read/
  * rangeCapable/watch）；凭据经参数传入（core 零持久化）。
@@ -595,6 +612,19 @@ export function createS3DirectStore(cfg: S3DirectConfig, opts?: S3DirectOptions)
         // 切出请求窗交付并标记降级（此后走 !rangeCapable 全量切片通道）
         rangeOk = false;
         return buf.subarray(r.start, r.end + 1);
+      }
+      if (
+        r !== undefined &&
+        res.status === 206 &&
+        contentRangeMatches(res.headers.get('content-range'), r.start, r.end) === false
+      ) {
+        // M1 防线（contentRangeMatches doc）：206 但窗段与请求不符（头可读）——
+        // 窗响应不可信：本调用重取全量（无 Range）切出请求窗交付正确字节，并
+        // 标记降级（此后走 !rangeCapable 全量切片通道）
+        rangeOk = false;
+        const full = await signedFetch(url, creds, { region, signal: readOpts?.signal });
+        await ensureOk(full, 'S3');
+        return new Uint8Array(await full.arrayBuffer()).subarray(r.start, r.end + 1);
       }
       return buf;
     },
