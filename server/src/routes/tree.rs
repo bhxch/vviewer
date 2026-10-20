@@ -59,10 +59,9 @@ pub async fn tree(
     Query(q): Query<TreeQuery>,
 ) -> Result<Json<TreeResponse>, AppError> {
     let root_idx = q.root.unwrap_or(0);
-    let spec = state
-        .roots
-        .get(root_idx)
-        .ok_or_else(|| guard::root_out_of_range(root_idx))?;
+    // 静态段 + 运行时段统一寻址（阶段二）：root_at 对静态根行为与旧
+    // roots.get() 逐位一致；运行时挂载根（rootIndex ≥ roots.len()）从容器取。
+    let spec = state.root_at(root_idx).ok_or_else(|| guard::root_out_of_range(root_idx))?;
     // fs 根：guard 全链（清洗 → canonicalize → 越界 403）后 strip 成 backend 相对
     // 路径；挂载根（rootIndex ≥ fs_roots，spec §2）：无 fs 语义——清洗安全面照旧
     //（绝对/`..`/NUL 拒），不做 fs canonicalize，清洗产物即 backend 相对路径。

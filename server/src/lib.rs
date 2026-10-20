@@ -139,7 +139,9 @@ pub fn build_router(state: AppState) -> Router {
         .map(|origin| {
             CorsLayer::new()
                 .allow_origin(AllowOrigin::list([origin]))
-                .allow_methods([Method::GET, Method::POST])
+                // DELETE：阶段二挂载 API（DELETE /api/mounts/:index）的跨域面——
+                // 精确 origin 配置下浏览器预检需放行该谓词
+                .allow_methods([Method::GET, Method::POST, Method::DELETE])
                 .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
                 .expose_headers([
                     header::HeaderName::from_static("x-vv-lang"),

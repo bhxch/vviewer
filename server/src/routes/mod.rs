@@ -4,13 +4,14 @@ pub mod compute;
 pub mod events;
 pub mod file;
 pub mod health;
+pub mod mounts;
 pub mod search;
 pub mod ticket;
 pub mod tree;
 
 use axum::extract::DefaultBodyLimit;
 use axum::middleware;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 use tower_http::compression::CompressionLayer;
 
@@ -35,7 +36,12 @@ pub fn api_router(state: crate::state::AppState) -> Router {
         .route("/file", get(file::file))
         .route("/ticket", post(ticket::issue_ticket))
         // 跨文件搜索：file-server 基础能力（不要求 --compute；rg 缺失时 501）
-        .route("/search", post(search::search));
+        .route("/search", post(search::search))
+        // 阶段二运行时挂载三 API（spec §3）：Bearer 门与 tree/file 同组（豁免面
+        // health/events 不变）；无 token 部署免鉴权 = spec 字面口径（风险注记见
+        // mounts.rs 模块文档与任务报告）
+        .route("/mounts", post(mounts::register).get(mounts::manifest))
+        .route("/mounts/{index}", delete(mounts::remove));
     // --compute 才暴露计算端点；未启用时路径不存在（统一 JSON 404）。
     // CompressionLayer（BUG-10 收尾）：highlight intervals 响应可达十余 MB，
     // gzip 按 Accept-Encoding 协商压缩（浏览器默认携带）；仅作用于 compute 端点，

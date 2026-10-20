@@ -18,58 +18,11 @@ use crate::ServeArgs;
 /// CLI 与文件均未提供端口时的默认监听端口（与既有 clap 默认一致）。
 pub const DEFAULT_PORT: u16 = 8321;
 
-/// `[[mount]].kind`（spec §2：s3 | webdav）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum MountKind {
-    /// S3 兼容对象存储
-    S3,
-    /// WebDAV
-    WebDav,
-}
-
-/// `[[mount]]` 节（spec §2：`{ kind, label, endpoint, bucket, prefix,
-/// access_key_id, secret_access_key | username, password, path_style }`）。
-///
-/// 除 `kind`（枚举，解析期把关合法值）外全部可选：per-kind 必填校验（S3 密钥对、
-/// WebDAV 账号对）属挂载后端构造的职责（main.rs `build_mount`），本任务只做
-/// 字面解析。
-#[derive(Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MountConfig {
-    pub kind: MountKind,
-    pub label: Option<String>,
-    pub endpoint: Option<String>,
-    pub bucket: Option<String>,
-    pub prefix: Option<String>,
-    pub access_key_id: Option<String>,
-    pub secret_access_key: Option<String>,
-    pub username: Option<String>,
-    pub password: Option<String>,
-    pub path_style: Option<bool>,
-}
-
-/// Debug 手工实现：凭证字段脱敏（storage 侧 S3MountConfig/WebDavMountConfig
-/// 的 Task 3 评审 Major-1 先例同款——FileConfig/ResolvedConfig 均 derive Debug，
-/// 启动日志/排障打印配置是常见形态，明文凭据不得经嵌套 Debug 外泄；脱敏值保留
-/// Some/None 存在性供排障）。非敏感字段（endpoint/bucket/prefix 等）原样。
-impl std::fmt::Debug for MountConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let redacted = |v: &Option<String>| v.as_ref().map(|_| "[redacted]");
-        f.debug_struct("MountConfig")
-            .field("kind", &self.kind)
-            .field("label", &self.label)
-            .field("endpoint", &self.endpoint)
-            .field("bucket", &self.bucket)
-            .field("prefix", &self.prefix)
-            .field("access_key_id", &redacted(&self.access_key_id))
-            .field("secret_access_key", &redacted(&self.secret_access_key))
-            .field("username", &redacted(&self.username))
-            .field("password", &redacted(&self.password))
-            .field("path_style", &self.path_style)
-            .finish()
-    }
-}
+/// `[[mount]]` 节类型：阶段二下沉 lib（`vviewer::state`）——运行时注册
+/// （POST /api/mounts）与静态 TOML 装配必须消费同一形态与同一后端构造
+/// （`build_mount`），此处 re-export 供 FileConfig 与 main.rs 消费
+/// （`MountKind` 随 build_mount 下沉，bin 侧不再直接使用）。
+pub use vviewer::state::MountConfig;
 
 /// 配置文件全参面：字段名即 TOML 键名（spec §2.1 示例块一一对应）。
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
@@ -174,6 +127,7 @@ mod tests {
     use super::*;
     use crate::serve;
     use std::path::Path;
+    use vviewer::state::MountKind;
 
     /// 经临时文件走 load_file_config 真实路径（tempfile 先例）。
     fn load_from_str(text: &str) -> Result<FileConfig, String> {

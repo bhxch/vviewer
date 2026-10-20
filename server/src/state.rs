@@ -5,6 +5,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use serde::Deserialize;
+use vviewer_storage::display_endpoint;
+use vviewer_storage::s3::{S3Backend, S3MountConfig};
+use vviewer_storage::transport::{HttpTransport, ReqwestTransport};
+use vviewer_storage::webdav::{WebDavBackend, WebDavMountConfig};
 use vviewer_storage::{LocalFs, StorageBackend};
 
 use crate::generate_token;
@@ -76,6 +81,186 @@ impl std::fmt::Debug for MountRoot {
     }
 }
 
+// ---------- 挂载配置与后端构造（阶段二自 bin 侧 config.rs/main.rs 下沉） ----------
+//
+// `MountKind`/`MountConfig` 原属 bin 的 config.rs、`build_mount` 原属 main.rs：
+// 运行时注册（routes/mounts.rs → [`AppState::register_mount`]）与静态 TOML 装配
+// （main.rs build_mount_roots）必须消费同一构造，否则两路 backend 行为会漂移。
+// 下沉 lib 后 config.rs/main.rs 转为 re-export/委托，静态装配行为零变化。
+
+/// `[[mount]].kind` / `POST /api/mounts` 的 `kind`（spec §2：s3 | webdav）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MountKind {
+    /// S3 兼容对象存储
+    S3,
+    /// WebDAV
+    WebDav,
+}
+
+/// 挂载配置节：TOML `[[mount]]` 与 `POST /api/mounts` 请求体同一形态（spec §3：
+/// body = 阶段一 MountConfig 形态）。除 `kind`（枚举，解析期把关合法值）外全部
+/// 可选：per-kind 必填校验在 [`build_mount`]。
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MountConfig {
+    pub kind: MountKind,
+    pub label: Option<String>,
+    pub endpoint: Option<String>,
+    pub bucket: Option<String>,
+    pub prefix: Option<String>,
+    pub access_key_id: Option<String>,
+    pub secret_access_key: Option<String>,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub path_style: Option<bool>,
+}
+
+/// Debug 手工实现：凭证字段脱敏（原 config.rs 实现原样下沉——FileConfig/
+/// ResolvedConfig 均 derive Debug，嵌套打印配置是常见排障形态，明文凭据不得
+/// 经 Debug 外泄；脱敏值保留 Some/None 存在性供排障）。非敏感字段原样。
+impl std::fmt::Debug for MountConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let redacted = |v: &Option<String>| v.as_ref().map(|_| "[redacted]");
+        f.debug_struct("MountConfig")
+            .field("kind", &self.kind)
+            .field("label", &self.label)
+            .field("endpoint", &self.endpoint)
+            .field("bucket", &self.bucket)
+            .field("prefix", &self.prefix)
+            .field("access_key_id", &redacted(&self.access_key_id))
+            .field("secret_access_key", &redacted(&self.secret_access_key))
+            .field("username", &redacted(&self.username))
+            .field("password", &redacted(&self.password))
+            .field("path_style", &self.path_style)
+            .finish()
+    }
+}
+
+/// 配置指纹（plan Global Constraints：kind+endpoint+bucket/prefix+label 规范化
+/// 串）：字段 trim 后以单元分隔符（U+001F）拼接，直接串比较（免 hash 碰撞面）。
+/// **凭据（access_key_id/secret_access_key/username/password）不入指纹**——指纹
+/// 是对账键（前端 IndexedDB 持久化配置与服务端清单比对），语义是「同一挂载
+/// 目标」而非「同一份凭据」。
+pub fn mount_fingerprint(cfg: &MountConfig) -> String {
+    let kind = match cfg.kind {
+        MountKind::S3 => "s3",
+        MountKind::WebDav => "webdav",
+    };
+    [
+        kind,
+        cfg.endpoint.as_deref().unwrap_or("").trim(),
+        cfg.bucket.as_deref().unwrap_or("").trim(),
+        cfg.prefix.as_deref().unwrap_or("").trim(),
+        cfg.label.as_deref().unwrap_or("").trim(),
+    ]
+    .join("\u{1f}")
+}
+
+/// 挂载后端构造（spec §2/§3 共用）：MountConfig → (backend, 元信息)。per-kind
+/// 必填校验在此——错误消息含字段名、不含凭据值（spec §6 错误面纪律）。静态
+/// 装配（main.rs build_mount_roots，配置错误 exit 2）与运行时注册
+/// （[`AppState::register_mount`]，配置错误 400）消费同一函数。
+pub fn build_mount(
+    cfg: &MountConfig,
+    transport: Arc<dyn HttpTransport>,
+) -> Result<MountRoot, String> {
+    /// Option 字段必填校验（错误消息含字段名）。
+    fn required<T>(field: Option<T>, name: &str, kind: &str) -> Result<T, String> {
+        field.ok_or_else(|| format!("{kind} mount: missing required field `{name}`"))
+    }
+    match cfg.kind {
+        MountKind::S3 => {
+            let kind = "s3";
+            let endpoint = required(cfg.endpoint.clone(), "endpoint", kind)?;
+            let bucket = required(cfg.bucket.clone(), "bucket", kind)?;
+            let access_key_id = required(cfg.access_key_id.clone(), "access_key_id", kind)?;
+            let secret_access_key =
+                required(cfg.secret_access_key.clone(), "secret_access_key", kind)?;
+            let prefix = cfg.prefix.clone().unwrap_or_default();
+            // path_style 缺省 true（Global Constraints 的 path-style URL 形态）
+            let path_style = cfg.path_style.unwrap_or(true);
+            let backend = S3Backend::new(
+                S3MountConfig {
+                    endpoint: endpoint.clone(),
+                    bucket: bucket.clone(),
+                    prefix: prefix.clone(),
+                    access_key_id,
+                    secret_access_key,
+                    path_style,
+                },
+                transport,
+            );
+            Ok(MountRoot {
+                backend: Arc::new(backend),
+                meta: MountMeta {
+                    kind: "s3",
+                    label: cfg.label.clone(),
+                    // 展示面脱敏（评审 M1）；连接面（上方 backend）用原值
+                    endpoint: display_endpoint(&endpoint),
+                    bucket: Some(bucket),
+                    prefix,
+                },
+            })
+        }
+        MountKind::WebDav => {
+            let kind = "webdav";
+            let endpoint = required(cfg.endpoint.clone(), "endpoint", kind)?;
+            let username = required(cfg.username.clone(), "username", kind)?;
+            let password = required(cfg.password.clone(), "password", kind)?;
+            let prefix = cfg.prefix.clone().unwrap_or_default();
+            let backend = WebDavBackend::new(
+                WebDavMountConfig {
+                    endpoint: endpoint.clone(),
+                    prefix: prefix.clone(),
+                    username,
+                    password,
+                },
+                transport,
+            );
+            Ok(MountRoot {
+                backend: Arc::new(backend),
+                meta: MountMeta {
+                    kind: "webdav",
+                    label: cfg.label.clone(),
+                    // 展示面脱敏（评审 M1）；连接面（上方 backend）用原值
+                    endpoint: display_endpoint(&endpoint),
+                    bucket: None,
+                    prefix,
+                },
+            })
+        }
+    }
+}
+
+/// 运行时注册错误分类（handler 映射 HTTP 状态）：Invalid → 400（请求侧配置
+/// 缺陷：缺必填字段，消息仅含字段名）；Transport → 500（服务端 HTTP 客户端
+/// 初始化失败，非请求方可修复）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RegistrationError {
+    Invalid(String),
+    Transport(String),
+}
+
+/// 运行时删除错误分类：Static → 405（fs 根/静态 TOML 挂载不可删——该资源类
+/// 不支持 DELETE）；NotFound → 404（运行时段越界）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnregisterError {
+    Static,
+    NotFound,
+}
+
+/// 运行时挂载项（spec §3）：`POST /api/mounts` 注册的内存态挂载，重启失效
+/// （服务端无状态、凭据不落盘——spec 已拍板决策）。fingerprint 无凭据面，
+/// Debug 派生安全。
+#[derive(Debug)]
+pub struct RuntimeMount {
+    /// [`mount_fingerprint`] 规范化串：幂等对账键（同指纹重注册返回既有项）。
+    pub fingerprint: String,
+    /// 装配产物（backend + 脱敏 meta）——root 寻址与 GET 清单共用。
+    pub root: MountRoot,
+}
+
 /// 单个根的规格：原始路径 + canonicalize 结果（guard 越界校验基准）+ 存储后端。
 #[derive(Clone)]
 pub struct RootSpec {
@@ -137,6 +322,15 @@ pub struct AppState {
     pub roots: Vec<RootSpec>,
     /// fs 根数量（roots 前缀段长度）：挂载根寻址边界（health.fsRoots 宣告源）。
     pub fs_roots: usize,
+    /// 运行时挂载容器（阶段二 spec §3）：`POST /api/mounts` 注册的内存态挂载，
+    /// 重启失效。rootIndex = `roots.len()` + 容器序（静态段之后的连续寻址段，
+    /// 经 [`AppState::root_at`] 统一寻址）。
+    pub runtime_mounts: Arc<Mutex<Vec<RuntimeMount>>>,
+    /// 运行时注册用的 HTTP transport（懒初始化：首次注册构建 reqwest 连接池，
+    /// 全注册共享；测试经 [`AppState::with_runtime_transport`] 注入
+    /// MockTransport——`AppState::new` 不付 reqwest Client 构建成本，既有测试
+    /// 零影响）。私有面：仅 [`AppState::register_mount`] 消费。
+    runtime_transport: Arc<Mutex<Option<Arc<dyn HttpTransport>>>>,
     /// `--web-dist` 前端静态产物目录；未指定时 `/` 返回占位页。
     pub web_dist: Option<PathBuf>,
     /// 访问令牌；None 表示免鉴权（仅默认 127.0.0.1 绑定时允许）。
@@ -176,6 +370,8 @@ impl AppState {
             root_canonical: root_canonical.clone(),
             roots,
             fs_roots: 1,
+            runtime_mounts: Arc::new(Mutex::new(Vec::new())),
+            runtime_transport: Arc::new(Mutex::new(None)),
             web_dist,
             token,
             hidden,
@@ -232,6 +428,101 @@ impl AppState {
                 .into_iter()
                 .map(|m| RootSpec::mount(m.meta, m.backend)),
         );
+        self
+    }
+
+    // ---------- 运行时挂载（阶段二 spec §3：POST/GET/DELETE /api/mounts） ----------
+
+    /// rootIndex → 根规格（静态段 + 运行时段统一寻址）：tree/file 的分发入口。
+    /// 越界 None（handler 400）。RootSpec 含 Arc backend，clone 廉价；运行时段
+    /// 短暂持锁克隆即释放（锁内不做任何 IO/await）。
+    pub fn root_at(&self, index: usize) -> Option<RootSpec> {
+        if let Some(spec) = self.roots.get(index) {
+            return Some(spec.clone());
+        }
+        let guard = self.runtime_mounts.lock().unwrap();
+        guard
+            .get(index - self.roots.len())
+            .map(|m| RootSpec::mount(m.root.meta.clone(), m.root.backend.clone()))
+    }
+
+    /// 运行时挂载注册：backend 构造（复用 [`build_mount`]，与静态 TOML 装配
+    /// 同一函数）+ 指纹幂等 + 追加容器。返回 (rootIndex, created)——同指纹
+    /// 命中既有项返回其 rootIndex 且 created=false（handler 200），新分配
+    /// created=true（handler 201）。
+    ///
+    /// 幂等语义注记：指纹无凭据面——同指纹换凭据的重注册返回既有项、不重建
+    /// backend（凭据轮换需先 DELETE 再注册，或重启；对账场景指纹来自前端
+    /// IndexedDB 持久化配置，「同一挂载目标」即幂等）。注册的凭据仅存于
+    /// backend 连接面（内存），不入 meta/指纹/清单/日志（spec §6 三不纪律）。
+    pub fn register_mount(&self, cfg: &MountConfig) -> Result<(usize, bool), RegistrationError> {
+        let fingerprint = mount_fingerprint(cfg);
+        if let Some(idx) = self.find_runtime(&fingerprint) {
+            return Ok((idx, false));
+        }
+        let transport = self.runtime_http_transport()?;
+        // 构造在锁外（纯同步、无共享态；失败不触容器——错误消息仅字段名）
+        let root = build_mount(cfg, transport).map_err(RegistrationError::Invalid)?;
+        let mut guard = self.runtime_mounts.lock().unwrap();
+        // 双检：构造窗口内并发注册同指纹——命中即弃置已建 backend（无全局态泄漏）
+        if let Some(pos) = guard.iter().position(|m| m.fingerprint == fingerprint) {
+            return Ok((self.roots.len() + pos, false));
+        }
+        guard.push(RuntimeMount { fingerprint, root });
+        Ok((self.roots.len() + guard.len() - 1, true))
+    }
+
+    /// 运行时挂载删除：index 落在静态段（fs 根 + 静态 TOML 挂载）拒删
+    /// [`UnregisterError::Static`]；运行时段越界 [`UnregisterError::NotFound`]。
+    /// 成功即移除并收缩寻址面——其后运行时项 rootIndex 前移，被删 index 的
+    /// 旧引用下次访问自然越界/404（活跃 tab 失效帧降级路径：不推送 SSE 失效
+    /// 帧，挂载根本无事件面，前端凭 GET 清单对账——裁决记录任务报告）。
+    pub fn unregister_mount(&self, index: usize) -> Result<(), UnregisterError> {
+        let mut guard = self.runtime_mounts.lock().unwrap();
+        if index < self.roots.len() {
+            return Err(UnregisterError::Static);
+        }
+        let pos = index - self.roots.len();
+        if pos >= guard.len() {
+            return Err(UnregisterError::NotFound);
+        }
+        guard.remove(pos);
+        Ok(())
+    }
+
+    fn find_runtime(&self, fingerprint: &str) -> Option<usize> {
+        let guard = self.runtime_mounts.lock().unwrap();
+        guard
+            .iter()
+            .position(|m| m.fingerprint == fingerprint)
+            .map(|pos| self.roots.len() + pos)
+    }
+
+    /// 运行时注册用 HTTP transport：懒初始化（首次注册构建 reqwest 连接池，
+    /// 全注册共享一个 Arc——与 main.rs 静态装配的共享形态同款）。
+    fn runtime_http_transport(&self) -> Result<Arc<dyn HttpTransport>, RegistrationError> {
+        let mut guard = self.runtime_transport.lock().unwrap();
+        if let Some(t) = guard.as_ref() {
+            return Ok(t.clone());
+        }
+        let t: Arc<dyn HttpTransport> = Arc::new(ReqwestTransport::new().map_err(|e| {
+            RegistrationError::Transport(format!("http transport init: {}", e.message()))
+        })?);
+        *guard = Some(t.clone());
+        Ok(t)
+    }
+
+    /// builder：注入运行时注册用 transport（测试注入 MockTransport，免真实
+    /// 网络；未注入时首次注册懒建 reqwest）。
+    pub fn with_runtime_transport(self, transport: Arc<dyn HttpTransport>) -> Self {
+        *self.runtime_transport.lock().unwrap() = Some(transport);
+        self
+    }
+
+    /// builder：预置运行时挂载项（测试注入；与 [`AppState::register_mount`]
+    /// 同一容器，rootIndex 寻址语义一致——静态段之后按容器序）。
+    pub fn with_runtime_mounts(self, mounts: Vec<RuntimeMount>) -> Self {
+        self.runtime_mounts.lock().unwrap().extend(mounts);
         self
     }
 

@@ -6,16 +6,11 @@ use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 
-use vviewer::state::{MountMeta, MountRoot};
-// 展示面 endpoint userinfo 剥除（评审 M1/I1/I2）：实现与口径归 storage crate
-// （ReqwestTransport 错误消息同用），此处仅消费。
-use vviewer_storage::display_endpoint;
-use vviewer_storage::s3::{S3Backend, S3MountConfig};
+use vviewer::state::{build_mount, MountRoot};
 use vviewer_storage::transport::{HttpTransport, ReqwestTransport};
-use vviewer_storage::webdav::{WebDavBackend, WebDavMountConfig};
 
 mod config;
-use config::{MountConfig, MountKind, DEFAULT_PORT, load_file_config, resolve_config};
+use config::{MountConfig, DEFAULT_PORT, load_file_config, resolve_config};
 
 #[derive(Parser)]
 #[command(name = "vviewer", version, about = "vviewer local viewer server")]
@@ -179,9 +174,9 @@ fn validate_startup(args: &ServeArgs, token: Option<&str>) -> Result<(), String>
     Ok(())
 }
 
-/// 挂载后端构造（spec §2 装配链）： MountConfig → (backend, 元信息)。per-kind
-/// 必填校验在此（config.rs 只做字面解析，见其模块注）——错误消息含挂载序号与
-/// 字段名（与 resolve_config 的报错约定一致），serve 统一 exit 2。
+/// 静态挂载装配（spec §2 启动链）：reqwest transport 建一次全挂载共享，逐项
+/// 委托 [`vviewer::state::build_mount`]（阶段二下沉——运行时注册消费同一构造；
+/// per-kind 必填校验在其内）。错误消息加挂载序号前缀，serve 统一 exit 2。
 fn build_mount_roots(
     mounts: &[MountConfig],
 ) -> Result<Vec<MountRoot>, String> {
@@ -201,81 +196,6 @@ fn build_mount_roots(
                 .map_err(|e| format!("mount #{i}: {e}"))
         })
         .collect()
-}
-
-// 展示面脱敏函数 display_endpoint 自 storage crate 导入（上方 use）——原本地
-// 实现随评审 I1/I2 下沉：ReqwestTransport 错误消息共用同一剥除口径（末个 @）。
-
-fn build_mount(
-    cfg: &MountConfig,
-    transport: Arc<dyn HttpTransport>,
-) -> Result<MountRoot, String> {
-    /// Option 字段必填校验（错误消息含字段名）。
-    fn required<T>(field: Option<T>, name: &str, kind: &str) -> Result<T, String> {
-        field.ok_or_else(|| format!("{kind} mount: missing required field `{name}`"))
-    }
-    match cfg.kind {
-        MountKind::S3 => {
-            let kind = "s3";
-            let endpoint = required(cfg.endpoint.clone(), "endpoint", kind)?;
-            let bucket = required(cfg.bucket.clone(), "bucket", kind)?;
-            let access_key_id = required(cfg.access_key_id.clone(), "access_key_id", kind)?;
-            let secret_access_key =
-                required(cfg.secret_access_key.clone(), "secret_access_key", kind)?;
-            let prefix = cfg.prefix.clone().unwrap_or_default();
-            // path_style 缺省 true（Global Constraints 的 path-style URL 形态）
-            let path_style = cfg.path_style.unwrap_or(true);
-            let backend = S3Backend::new(
-                S3MountConfig {
-                    endpoint: endpoint.clone(),
-                    bucket: bucket.clone(),
-                    prefix: prefix.clone(),
-                    access_key_id,
-                    secret_access_key,
-                    path_style,
-                },
-                transport,
-            );
-            Ok(MountRoot {
-                backend: Arc::new(backend),
-                meta: MountMeta {
-                    kind: "s3",
-                    label: cfg.label.clone(),
-                    // 展示面脱敏（评审 M1）；连接面（上方 backend）用原值
-                    endpoint: display_endpoint(&endpoint),
-                    bucket: Some(bucket),
-                    prefix,
-                },
-            })
-        }
-        MountKind::WebDav => {
-            let kind = "webdav";
-            let endpoint = required(cfg.endpoint.clone(), "endpoint", kind)?;
-            let username = required(cfg.username.clone(), "username", kind)?;
-            let password = required(cfg.password.clone(), "password", kind)?;
-            let prefix = cfg.prefix.clone().unwrap_or_default();
-            let backend = WebDavBackend::new(
-                WebDavMountConfig {
-                    endpoint: endpoint.clone(),
-                    prefix: prefix.clone(),
-                    username,
-                    password,
-                },
-                transport,
-            );
-            Ok(MountRoot {
-                backend: Arc::new(backend),
-                meta: MountMeta {
-                    kind: "webdav",
-                    label: cfg.label.clone(),
-                    // 展示面脱敏（评审 M1）；连接面（上方 backend）用原值
-                    endpoint: display_endpoint(&endpoint),
-                    bucket: None,
-                    prefix,
-                },
-            })
-        }
-    }
 }
 
 /// 启动服务；配置错误返回 exit code（不 panic）。
@@ -364,6 +284,7 @@ fn serve(args: ServeArgs, mounts: Vec<MountConfig>) -> Result<(), i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vviewer::state::MountKind;
 
     fn args(token: Option<String>) -> ServeArgs {
         ServeArgs {
