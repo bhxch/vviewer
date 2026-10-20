@@ -1047,7 +1047,7 @@ export function openRemoteSource(
   token: string | null,
   rootIndex: number,
   basePath: string,
-  opts?: { file?: string; size?: number | null; label?: string }
+  opts?: { file?: string; size?: number | null }
 ): void {
   const file = opts?.file;
   const fileSize = opts?.size ?? null;
@@ -1086,12 +1086,13 @@ export function openRemoteSource(
     }
     return;
   }
-  // label 覆写（目录管理页挂载根「在树中打开」，spec §5 阶段四）：挂载根以清单
-  // label 为显示名（「host · 根N/」序号形态的替代）。label 参与 storeId hash
-  // （remote:${hash8(`${base}:${label}`)})——覆盖路径须恒传同值（管理页每行固定
-  // 取清单 label ?? 同款回落），否则同根会造出第二个 storeId（双树行）。快照恢复
-  // 链以 sources[].storeLabel 原值回环，与覆盖值天然一致（reconnectRemoteStore I-1）。
-  const label = opts?.label ?? remoteSourceLabel(normBase, rootIndex, normPath, file);
+  // label 单一出处（终审 I-2）：label 参与 storeId hash（remote:${hash8(
+  // `${base}:${label}`)})，恒取 remoteSourceLabel 派生值——管理页「在树中打开」
+  // 与 RemoteSourceModal 打开同一 rootIndex/basePath 得到同一 storeId（覆写口
+  // 已删：异 label 会为同根造出第二个 storeId，双 SSE 流/双树行）。快照恢复链
+  // 以 sources[].storeLabel 原值回环，storeLabel 即创建时本函数的派生值，天然
+  // 一致（reconnectRemoteStore I-1）。
+  const label = remoteSourceLabel(normBase, rootIndex, normPath, file);
   const store = createRemoteStore(normBase, token, label, {
     rootIndex,
     ...(normPath !== '' ? { basePath: normPath } : {})
@@ -1129,22 +1130,24 @@ export function openRemoteSource(
 /**
  * 直连挂载 store 创建（目录挂载 spec §4 阶段三，评审带入①创建分派点——remote/
  * localfs 等既有工厂分派处扩 direct 两类）：DirectMountRecord → core 工厂
- * （配置经 mountsSync.directConfigOf 单一映射面；storeId = 记录 id）。watch 接线
- * 与 remote 同款：DirectStore.watch 契约为立即 onError（watch 恒不支持）→ 状态栏
- * 降级指示，与 remote watch-error 同语义；listener 直连恒不触发，仍按 remote 同款
- * autoRefresh 过滤接线（行为面统一，未来推送面扩展零调用方改动）。
+ * （配置经 mountsSync.directConfigOf 单一映射面；storeId = 记录 id）。
+ * watch 接线（终审 I-1）：DirectStore.watch 契约为立即 onError（watch 恒不支持）
+ * ——回调只走 console 诊断，不写 watchHealth 全局标志：direct 的 per-source
+ * 「此源不支持变更推送」由 ViewerPane 按 isMountRootStoreId 派生（本不依赖该
+ * 标志），而立即 onError 无条件置位会把健康 remote fs 根等非挂载来源 tab 一并
+ * 污染成「自动刷新不可用」（创建期 degraded=false 复位同理会抹掉 remote 的真实
+ * 降级指示）。listener 按 remote 同款 autoRefresh 过滤接线（行为面统一，未来
+ * 推送面扩展零调用方改动）。
  */
 export function createDirectMountStore(rec: DirectMountRecord): DirectStore {
   const cfg = directConfigOf(rec);
   const store = 'bucket' in cfg ? createS3DirectStore(cfg) : createDavDirectStore(cfg);
-  watchHealth.degraded = false; // 新实例重置降级指示（上一次连接的降级不复用，connectServer 同款）
   store.watch(
     (paths) => {
       if (!loadSettings().autoRefresh) return;
       tabStore.refreshPaths(store.id, paths);
     },
     () => {
-      watchHealth.degraded = true;
       console.warn('[vviewer] 直连挂载不支持变更推送，自动刷新对该来源不可用');
     }
   );
@@ -1160,6 +1163,20 @@ export function createDirectMountStore(rec: DirectMountRecord): DirectStore {
 export function openDirectMount(rec: DirectMountRecord): void {
   const alive = storeById(rec.id);
   addDirStoreTab(alive ?? createDirectMountStore(rec));
+}
+
+/**
+ * 直连凭据轮换生效（终审 I-3）：保存 direct 记录后调用。direct storeId 不含凭据
+ * （轮换不换 id，设计如此），同 id 存活实例仍持旧凭据——行内「测试」以新凭据
+ * 探测成功与已开 tab 持续 403 矛盾。关闭全部持有 tab（undoable:false——系统
+ * 替换动作豁免撤销，connectServer 同 base 重连清扫同款；direct store 无 close()，
+ * 随最后持有者自然失去引用）→ 注册表摘除后 storeById 返回 null，下次「打开」
+ * 新建实例即持新凭据。返回关闭的 tab 数（0 = 无存活实例，幂等）。
+ */
+export function releaseDirectMountStore(storeId: string): number {
+  const ids = tabStore.list.filter((t) => t.source.storeId === storeId).map((t) => t.id);
+  for (const id of ids) tabStore.close(id, { undoable: false });
+  return ids.length;
 }
 
 /**

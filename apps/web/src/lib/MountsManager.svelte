@@ -5,7 +5,7 @@
   // 三组展示：
   //   ①服务端根与挂载——GET /api/mounts 清单（Bearer 取会话 last-server）+
   //     health rootPaths 宣告；fs 根/静态/运行时徽标 + 能力位 + 「在树中打开」
-  //     （openRemoteSource 指定 rootIndex，label 覆写为清单显示名）。
+  //     （openRemoteSource 指定 rootIndex，tab 名统一 remoteSourceLabel 形态）。
   //   ②前端配置挂载——mounts store（IndexedDB v4）direct+proxy 记录混列：
   //     直连/代理徽标、kind、展示面 endpoint、凭据已存指示、proxy 对账状态
   //     （已注册 rootIndex=N / 待注册+原因 / 未注册）；操作新增（kind→字段集
@@ -53,6 +53,7 @@
     openDirectoryViaPicker,
     openRemoteSource,
     openSavedDirectory,
+    releaseDirectMountStore,
     showStatusNotice,
     workspacesView
   } from './openFlow.svelte';
@@ -172,12 +173,13 @@
     }
   }
 
-  /** 组①「在树中打开」：openRemoteSource 指定 rootIndex（fs 根/挂载根同一通道；
-   * label 覆写为清单显示名——label 参与 storeId hash，本组件恒传行标题保证同根
-   * 单 store）。 */
+  /** 组①「在树中打开」：openRemoteSource 指定 rootIndex（fs 根/挂载根同一通道）。
+   * 不覆写 label（终审 I-2）：label 参与 storeId hash，openRemoteSource 内恒取
+   * remoteSourceLabel 派生——与 RemoteSourceModal 打开同一 rootIndex 得到同一
+   * storeId（覆写会为同根造出第二个 storeId，双 SSE 流/双树行）。 */
   function openServerRoot(row: { rootIndex: number; title: string }): void {
     if (last === null) return;
-    openRemoteSource(last.baseUrl, last.token, row.rootIndex, '', { label: row.title });
+    openRemoteSource(last.baseUrl, last.token, row.rootIndex, '');
   }
 
   // ---------- 组②：前端配置挂载 ----------
@@ -280,6 +282,10 @@
         const rec = draftToDirectRecord(draft, old ?? undefined);
         if (old !== null && old.id !== rec.id) await deleteMount(old.id);
         await saveDirectMount(rec);
+        // 凭据轮换生效（终审 I-3）：direct storeId 不含凭据，同 id 存活实例仍持
+        // 旧凭据（行内「测试」新凭据成功与已开 tab 持续 403 矛盾）——保存成功即
+        // 释放该实例（关闭持有 tab），下次「打开」新建即新凭据；无存活实例为 no-op。
+        releaseDirectMountStore(rec.id);
       }
       closeForm();
       await reloadRecords();
@@ -310,13 +316,12 @@
 
   /** 代理行「打开」：仅已注册且注册在当前连接服务器上时可开（评审 M1：offsite
    * 的 rootIndex 是他机命名空间——以当前连接 B + A 的 rootIndex 会开出 B 上完全
-   * 不同的根；offsite 行模板本就不渲染打开钮，此处为防御性二次守卫）。 */
+   * 不同的根；offsite 行模板本就不渲染打开钮，此处为防御性二次守卫）。不覆写
+   * label（终审 I-2，openServerRoot 同理——同 rootIndex 单 storeId）。 */
   function openProxyRow(rec: MountRecord): void {
     if (rec.kind !== 'proxy' || last === null || typeof rec.registeredRootIndex !== 'number') return;
     if (proxyOffsiteOf(rec, last.baseUrl)) return;
-    openRemoteSource(last.baseUrl, last.token, rec.registeredRootIndex, '', {
-      label: rec.label || undefined
-    });
+    openRemoteSource(last.baseUrl, last.token, rec.registeredRootIndex, '');
   }
 
   /** 行内「测试」状态（直通行：probeRecord 同一探测面；key = 记录 id）。 */
@@ -579,6 +584,15 @@
           </div>
           {#if draft.backend === 'webdav'}
             <p class="vv-mm-hint" role="note">⚠ {WEBDAV_CORS_HINT}</p>
+          {/if}
+          {#if draft.mode === 'proxy'}
+            <!-- 终审 I-4 勘误：proxy 的「测试连接」同为浏览器侧探测（直打目标
+              endpoint），语义错签风险——目标无需 CORS 也会因浏览器拦截被误报不可
+              用；代理链路的真实可用性以服务器出口为准（保存注册后由对账健康探测
+              覆盖，spec §3）。 -->
+            <p class="vv-mm-hint" role="note">
+              「测试连接」为浏览器侧探测（直连目标端点）：被 CORS 拦截不代表代理链路不可用——代理访问以服务器出口为准，保存注册后由对账健康探测验证。
+            </p>
           {/if}
           <!-- 新增表单警示（spec §6 双处之二） -->
           <p class="vv-mm-warning" role="note">⚠ {CREDENTIAL_WARNING}</p>

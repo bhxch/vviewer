@@ -85,9 +85,21 @@ describe('MountsManager 骨架（全屏 overlay，SettingsCenter 同形态）', 
     expect(src).toMatch(/saveMount|saveDirectMount/);
   });
 
-  it('组①「在树中打开」openRemoteSource 携 label 覆写；组②直连「打开」openDirectMount', () => {
-    expect(src).toMatch(/openRemoteSource\([\s\S]{0,200}\{ label: row\.title \}/);
+  it('组①/组②「打开」openRemoteSource 不覆写 label（终审 I-2：同 rootIndex 与 RemoteSourceModal 单 storeId）；组②直连「打开」openDirectMount', () => {
+    expect(src).toMatch(/openRemoteSource\(last\.baseUrl, last\.token, row\.rootIndex, ''\)/);
+    expect(src).toMatch(/openRemoteSource\(last\.baseUrl, last\.token, rec\.registeredRootIndex, ''\)/);
+    expect(src).not.toMatch(/\{ label: row\.title \}/);
+    expect(src).not.toMatch(/label: rec\.label/);
     expect(src).toContain('openDirectMount(');
+  });
+
+  it('I-3 凭据轮换生效：direct 保存成功即释放同 id 存活实例（releaseDirectMountStore——下次打开新建即新凭据）', () => {
+    expect(src).toMatch(/saveDirectMount\(rec\);[\s\S]{0,200}releaseDirectMountStore\(rec\.id\)/);
+  });
+
+  it('I-4 proxy 探测语义勘误：表单 proxy 模式示「浏览器侧探测」文案（代理链路以服务器出口为准，CORS 拦截不误签）', () => {
+    expect(src).toMatch(/draft\.mode === 'proxy'[\s\S]{0,400}浏览器侧探测/);
+    expect(src).toMatch(/服务器出口为准/);
   });
 
   it('组③句柄动作：打开 openSavedDirectory / 清除 saveDirHandle(null)+confirm（快照恢复失效提示）', () => {

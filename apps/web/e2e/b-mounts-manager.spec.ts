@@ -431,11 +431,12 @@ test.describe('b-mounts-manager 目录管理页', () => {
     await expect(runtimeRow.getByText('运行时')).toBeVisible();
     await expect(runtimeRow.getByText(/S3 · http:\/\/127\.0\.0\.1:9000 · bkt · mnt\//)).toBeVisible();
 
-    // ③「在树中打开」挂载根 → 目录 tab + 左栏树渲染（label 覆写为清单显示名）
+    // ③「在树中打开」挂载根 → 目录 tab + 左栏树渲染（终审 I-2：不覆写 label——
+    // tab 名统一 remoteSourceLabel 形态「host · 根N/」，与 RemoteSourceModal 同根单 storeId）
     await runtimeRow.getByRole('button', { name: '在树中打开' }).click();
     await page.keyboard.press('Escape');
     await expect(page.locator('.vv-mounts-manager')).toHaveCount(0);
-    await expect(page.locator('.vv-tab.active', { hasText: 'runtime-s3' })).toBeVisible();
+    await expect(page.locator('.vv-tab.active', { hasText: '根2' })).toBeVisible();
     await seeTreeRow(page, 'notes.txt');
     await seeTreeRow(page, 'sub');
     // 挂载根 per-source watch 态（能力位 watch=false 常量——非全局降级指示）

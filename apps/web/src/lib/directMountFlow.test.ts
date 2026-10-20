@@ -25,9 +25,15 @@ describe('openFlow 直连 store 创建分派（带入①创建链路）', () => 
     expect(src).toContain('createDavDirectStore');
   });
 
-  it('watch 接线与 remote 同款：DirectStore.watch 立即 onError → watchHealth.degraded 降级指示', () => {
-    expect(src).toMatch(/createDirectMountStore[\s\S]{0,1600}watchHealth\.degraded = true/);
-    expect(src).toMatch(/直连挂载不支持变更推送/);
+  it('watch 接线（终审 I-1）：DirectStore.watch 立即 onError 只走 console 诊断——不写 watchHealth 全局标志（per-source 文案由 isMountRootStoreId 派生，本不依赖）', () => {
+    // 函数体窗口（至首个行首 `}`）内不得出现任何 watchHealth 写点/复位点：
+    // 立即 onError 置位会污染健康 remote fs 根等非挂载来源 tab，创建期复位同理
+    // 会抹掉 remote 的真实降级指示
+    const fn = src.match(
+      /export function createDirectMountStore\(rec: DirectMountRecord\): DirectStore \{[\s\S]*?\n\}/
+    )![0];
+    expect(fn).not.toMatch(/watchHealth\./);
+    expect(fn).toMatch(/直连挂载不支持变更推送/);
   });
 
   it('openDirectMount：存活实例复用（storeById(rec.id)——直连 storeId = 记录 id）+ addDirStoreTab 目录 tab 通道', () => {
@@ -36,9 +42,17 @@ describe('openFlow 直连 store 创建分派（带入①创建链路）', () => 
     expect(src).toMatch(/openDirectMount[\s\S]{0,500}addDirStoreTab/);
   });
 
-  it('openRemoteSource 支持 label 覆写（挂载根「在树中打开」显示名；label 参与 storeId hash，覆盖路径恒传同值保证单 store）', () => {
-    expect(src).toMatch(/opts\?: \{ file\?: string; size\?: number \| null; label\?: string \}/);
-    expect(src).toMatch(/opts\?\.label \?\? remoteSourceLabel\(/);
+  it('openRemoteSource label 单一出处 remoteSourceLabel（终审 I-2：label 参与 storeId hash——不设覆写口，管理页与 RemoteSourceModal 同根同 storeId）', () => {
+    expect(src).toMatch(/opts\?: \{ file\?: string; size\?: number \| null \}/);
+    expect(src).toMatch(/const label = remoteSourceLabel\(/);
+    expect(src).not.toMatch(/opts\?\.label/);
+  });
+
+  it('releaseDirectMountStore（终审 I-3）：保存轮换凭据后释放同 id 存活实例——关闭持有 tab（系统动作豁免撤销），下次打开建新 store 实例', () => {
+    expect(src).toMatch(/export function releaseDirectMountStore\(storeId: string\): number/);
+    expect(src).toMatch(
+      /releaseDirectMountStore[\s\S]{0,400}tabStore\.close\(id, \{ undoable: false \}\)/
+    );
   });
 });
 
