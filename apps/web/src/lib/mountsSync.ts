@@ -286,9 +286,12 @@ async function postRegister(rec: ProxyMountRecord, base: string, token: string |
  * 连接对账（spec §3 前端对账重注册）：连接成功后由 connectServer 挂
  * fire-and-forget。对同 serverBase 的每条保存记录：
  * - 指纹缺失 → POST 幂等注册（201 新建 / 200 服务端已有同指纹——均登记 rootIndex）；
- * - 命中运行时项（rootIndex ≥ fsRoots）→ 健康探测，失败走 reregisterMount
+ * - 命中运行时项（rootIndex ≥ 运行时段起点）→ 健康探测，失败走 reregisterMount
  *   （DELETE+POST 凭据轮换，S-3）；
  * - 命中静态项 → 只登记 rootIndex（服务端 TOML 承载，无可轮换面）。
+ * 分流边界：运行时段起点 = `fsRoots + staticMounts.length`（server 清单形态，
+ * staticMounts 段条目的 rootIndex 自 fsRoots 起算——单以 fsRoots 为界会把静态
+ * 挂载误判成运行时项：探测 500 → DELETE 405 → 永久待重试误态）。
  * 全链不抛错：清单不可达 → 全部记录静默标记待重试；单项失败只标记该项。
  */
 export async function syncMountsOnConnect(serverBase: string, token?: string | null): Promise<void> {
@@ -317,6 +320,7 @@ export async function syncMountsOnConnect(serverBase: string, token?: string | n
 
     const byFingerprint = new Map<string, MountManifestEntry>();
     for (const e of manifest.mounts) byFingerprint.set(entryFingerprint(e), e);
+    const runtimeSegmentStart = manifest.fsRoots + (manifest.staticMounts?.length ?? 0);
 
     for (const rec of records) {
       let updated: ProxyMountRecord;
@@ -328,7 +332,7 @@ export async function syncMountsOnConnect(serverBase: string, token?: string | n
           updated = failedRecord(rec, `注册失败：${errText(err)}`);
           console.warn(`[vviewer] mountsSync：「${rec.label}」${updated.lastError}`);
         }
-      } else if (entry.rootIndex >= manifest.fsRoots) {
+      } else if (entry.rootIndex >= runtimeSegmentStart) {
         // 运行时项：探测健康（S-3）——失败 = 服务端可能持过期凭据，走
         // DELETE+POST 轮换为本端保存的凭据
         if (await probeMountRoot(serverBase, tok, entry.rootIndex)) {
@@ -342,7 +346,8 @@ export async function syncMountsOnConnect(serverBase: string, token?: string | n
           }
         }
       } else {
-        // 静态挂载同指纹：目标已由服务端配置承载（DELETE 恒 405），只登记
+        // 静态挂载同指纹（含 rootIndex ≥ fsRoots 的 staticMounts 段条目）：
+        // 目标已由服务端配置承载（DELETE 恒 405），只登记
         updated = healthyRecord(rec, entry.rootIndex);
       }
       await saveProxyMount(updated);

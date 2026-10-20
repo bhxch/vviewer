@@ -111,8 +111,20 @@ function entryOf(rec: ProxyMountRecord, rootIndex: number, overrides: Partial<Mo
   };
 }
 
-function manifestJson(entries: MountManifestEntry[], fsRoots = 1): unknown {
-  return { fsRoots, staticMounts: [], runtimeMounts: entries.filter((e) => e.rootIndex >= fsRoots), mounts: entries };
+function manifestJson(
+  entries: MountManifestEntry[],
+  fsRoots = 1,
+  staticMounts: MountManifestEntry[] = []
+): unknown {
+  // 运行时段 = mounts 中不在 staticMounts 段的条目（server MountsManifest 同构：
+  // staticMounts 的 rootIndex 自 fsRoots 起算，运行时段起点 = fsRoots+staticLen）
+  const staticSet = new Set(staticMounts);
+  return {
+    fsRoots,
+    staticMounts,
+    runtimeMounts: entries.filter((e) => !staticSet.has(e)),
+    mounts: entries
+  };
 }
 
 /** 与任务 1 server 端 mount_fingerprint 对齐的期望值（手工展开断言指纹串形状）。 */
@@ -368,19 +380,52 @@ describe('syncMountsOnConnect（spec §3 前端对账重注册）', () => {
     }
   });
 
-  it('静态挂载同指纹：登记 rootIndex 但不 DELETE 不探测（静态项 DELETE 405，无可轮换面）', async () => {
+  it('静态挂载同指纹（真实形态：staticMounts 段、rootIndex ≥ fsRoots）：登记但不 DELETE 不探测（静态项 DELETE 405，无可轮换面）', async () => {
     const rec = recordOf();
     await saveProxyMount(rec);
+    // server 真实清单形态：静态 TOML 挂载 rootIndex=fsRoots（≥ fsRoots，但不
+    // 在运行时段）——分流须按 fsRoots+staticMounts.length 判定，否则此处会误
+    // 探测（500）→ DELETE 405 → 永久待重试误态
     stubFetch((method, url) => {
       if (method === 'GET' && url.endsWith('/api/mounts'))
-        return jsonResponse(200, manifestJson([entryOf(rec, 0)], 1));
+        return jsonResponse(200, manifestJson([entryOf(rec, 1)], 1, [entryOf(rec, 1)]));
       return undefined;
     });
     await syncMountsOnConnect(BASE, null);
     expect(calls.find((c) => c.method === 'GET' && c.url.includes('/api/tree'))).toBeUndefined();
     expect(calls.find((c) => c.method === 'DELETE')).toBeUndefined();
     const saved = await onlyRecord();
-    expect(saved.registeredRootIndex).toBe(0);
+    expect(saved.registeredRootIndex).toBe(1);
+    expect(saved.pendingRetry).toBe(false);
+  });
+
+  it('分流边界 = fsRoots+staticMounts.length：静态段条目不探测，运行时段起点（恰为边界值）照常探测', async () => {
+    const staticRec = recordOf({ id: 'mount:static' });
+    const runtimeRec = recordOf({ id: 'mount:rt', label: 'live', endpoint: 'http://127.0.0.1:9001' });
+    await saveProxyMount(staticRec);
+    await saveProxyMount(runtimeRec);
+    // 静态挂载 rootIndex=1（≥ fsRoots=1 但 < 1+1=2）；运行时挂载恰落在运行时段
+    // 起点 2（= fsRoots+staticLen）——边界两侧同用例锁定
+    stubFetch((method, url) => {
+      if (method === 'GET' && url.endsWith('/api/mounts'))
+        return jsonResponse(
+          200,
+          manifestJson([entryOf(staticRec, 1), entryOf(runtimeRec, 2)], 1, [entryOf(staticRec, 1)])
+        );
+      if (method === 'GET' && url.includes('/api/tree')) return jsonResponse(200, { entries: [] });
+      return undefined;
+    });
+    await syncMountsOnConnect(BASE, null);
+    expect(calls.find((c) => c.method === 'GET' && c.url.endsWith('root=1')), '静态项不探测').toBeUndefined();
+    expect(calls.find((c) => c.method === 'GET' && c.url.endsWith('root=2')), '运行时段起点探测').toBeDefined();
+    expect(calls.find((c) => c.method === 'DELETE')).toBeUndefined();
+    const all = await listProxyMounts();
+    const staticSaved = all.find((r) => r.id === 'mount:static')!;
+    expect(staticSaved.registeredRootIndex).toBe(1);
+    expect(staticSaved.pendingRetry).toBe(false);
+    const rtSaved = all.find((r) => r.id === 'mount:rt')!;
+    expect(rtSaved.registeredRootIndex).toBe(2);
+    expect(rtSaved.pendingRetry).toBe(false);
   });
 
   it('重注册失败（DELETE 抛错/POST 失败）静默标记待重试', async () => {
