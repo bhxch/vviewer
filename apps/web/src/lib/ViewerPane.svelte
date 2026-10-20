@@ -15,9 +15,24 @@
   import { codeLineMetrics } from './theme';
   import { loadSettings } from './stores/settings';
   import { watchHealth, statusNotice } from './openFlow.svelte';
+  import { isMountRootStoreId } from './serverHealthCache';
 import SearchPanel from './SearchPanel.svelte';
 
   let { tab, ontoc }: { tab: Tab | null; ontoc?: (entries: TocEntry[]) => void } = $props();
+
+  /**
+   * 变更推送状态段（目录挂载 spec §3）：活跃 tab 属挂载根来源（rootIndex ≥
+   * fsRoots，能力位 watch=false 常量）显示「此源不支持变更推送」；否则沿用
+   * 服务端 watch-error 降级指示（自动刷新不可用）。两者按 tab 互斥——挂载根
+   * 本无推送面，服务端 fs watcher 降级与它无关。
+   */
+  const watchLabel = $derived(
+    tab !== null && isMountRootStoreId(tab.source.storeId)
+      ? '此源不支持变更推送'
+      : watchHealth.degraded
+        ? '自动刷新不可用'
+        : ''
+  );
 
   /** 引擎指示器文案（F4 状态栏） */
   const ENGINE_LABELS: Record<CodeEngine, string> = {
@@ -446,9 +461,9 @@ import SearchPanel from './SearchPanel.svelte';
       }}
     />
   {/if}
-  {#if engineLabel || metaLabel || rendererLabel || watchHealth.degraded || statusNotice.text}
+  {#if engineLabel || metaLabel || rendererLabel || watchLabel || statusNotice.text}
     <div class="vv-statusbar" role="status">
-      {#if rendererLabel}<button type="button" class="vv-status-openwith" bind:this={pickerBtn} aria-haspopup="menu" aria-expanded={pickerOpen} aria-label="打开方式" title="打开方式（点击切换渲染器）" onclick={togglePicker}>打开方式: {rendererLabel}{#if detLabel}&nbsp;（{detLabel}）{/if}</button>{/if}{#if engineLabel}{#if rendererLabel}&nbsp;·&nbsp;{/if}{engineLabel}{#if computeWhereLabel}&nbsp;· 执行: {computeWhereLabel}{/if}{/if}{#if metaLabel}{#if engineLabel || rendererLabel}&nbsp;·&nbsp;{/if}{metaLabel}{/if}{#if watchHealth.degraded}{#if engineLabel || metaLabel || rendererLabel}&nbsp;·{/if} 自动刷新不可用{/if}{#if statusNotice.text}{#if engineLabel || metaLabel || rendererLabel || watchHealth.degraded}&nbsp;·{/if} {statusNotice.text}{/if}
+      {#if rendererLabel}<button type="button" class="vv-status-openwith" bind:this={pickerBtn} aria-haspopup="menu" aria-expanded={pickerOpen} aria-label="打开方式" title="打开方式（点击切换渲染器）" onclick={togglePicker}>打开方式: {rendererLabel}{#if detLabel}&nbsp;（{detLabel}）{/if}</button>{/if}{#if engineLabel}{#if rendererLabel}&nbsp;·&nbsp;{/if}{engineLabel}{#if computeWhereLabel}&nbsp;· 执行: {computeWhereLabel}{/if}{/if}{#if metaLabel}{#if engineLabel || rendererLabel}&nbsp;·&nbsp;{/if}{metaLabel}{/if}{#if watchLabel}{#if engineLabel || metaLabel || rendererLabel}&nbsp;·{/if} {watchLabel}{/if}{#if statusNotice.text}{#if engineLabel || metaLabel || rendererLabel || watchLabel}&nbsp;·{/if} {statusNotice.text}{/if}
     </div>
   {/if}
   {#if pickerOpen}

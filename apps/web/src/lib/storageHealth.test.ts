@@ -70,14 +70,15 @@ function stubCaches(names: string[]): { deleted: string[] } {
 
 async function rawOpen(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    // v3 直开 + onupgradeneeded 建三 store（session.ts 形态）：fresh IDBFactory 下
-    // 裸 open 得 v1 空库，rawPut 无处落键
-    const req = indexedDB.open('vviewer', 3);
+    // v4 直开 + onupgradeneeded 建四 store（session.ts 形态，mounts 随 Task 2 v4
+    // 顺延）：fresh IDBFactory 下裸 open 得 v1 空库，rawPut 无处落键
+    const req = indexedDB.open('vviewer', 4);
     req.onupgradeneeded = () => {
       const d = req.result;
       if (!d.objectStoreNames.contains('kv')) d.createObjectStore('kv');
       if (!d.objectStoreNames.contains('themes')) d.createObjectStore('themes');
       if (!d.objectStoreNames.contains('fonts')) d.createObjectStore('fonts');
+      if (!d.objectStoreNames.contains('mounts')) d.createObjectStore('mounts');
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);

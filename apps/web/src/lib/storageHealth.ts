@@ -9,7 +9,8 @@
  * - localStorage 全键值 UTF-16 估算（键长+值长 ×2）；vviewer:settings 键单独计；
  * - IndexedDB 分 store 计数走 openKeyCursor 一次性遍历：fonts 用记录内 size 字段
  *   求和（spec 2 契约），kv/themes 以 JSON 序列化长度 ×2 估算（与 localStorage 同
- *   口径）；mounts store Spec 5 未落地，不进 StorageInfo（UI 禁用态占位）；
+ *   口径）；mounts store 已建（目录挂载 Task 2）但记录管理仍未启用，不进
+ *   StorageInfo（UI 禁用态占位）；
  * - 缓存清单 caches.keys() 原样透传（运行时缓存行显示名称清单，不显示体积——
  *   Response 尺寸遍历成本不成比例，spec §2.2）。
  *
@@ -339,8 +340,9 @@ export async function purgeCategory(cat: StorageCategoryId): Promise<PurgeResult
       return { deleted: records.length };
     }
     case 'mounts':
-      // Spec 5（目录挂载管理）未落地：mounts store 不存在，分类行以禁用态渲染，
-      // 此处 no-op 占位（前向兼容裁决，Spec 5 落地后补 DELETE /api/mounts 尝试）
+      // 目录挂载管理页（Spec 5 / 阶段四）未落地：mounts store 已建（Task 2，
+      // 对账记录面）但清除入口 UI 仍禁用态占位，此处 no-op（前向兼容裁决，
+      // Spec 5 落地后补逐条 deleteProxyMount）
       return { deleted: 0 };
     case 'runtime-cache': {
       const names = (await cacheNames()).filter((n) => !isPrecacheCacheName(n));

@@ -82,14 +82,14 @@ describe('tab id 序号解析（openFlow seq 快照基线）', () => {
   });
 });
 
-// 注意：此用例会把 'vviewer' 库升到 v4（此后 session.ts 的 DB_VERSION=3 打开会
+// 注意：此用例会把 'vviewer' 库升到 v5（此后以 DB_VERSION=4 显式 open 会
 // VersionError），必须保持本文件最后一个用例——fake-indexeddb 的库在单文件内持久。
 describe('多标签让路（db 连接 onversionchange）', () => {
   it('既有连接收到 versionchange 自闭，他方升版不被 blocked 卡死', async () => {
-    await loadSession(); // 持有两条 v3 连接（tabs/dirHandle 各一次 kvGet→db()，session.ts 不主动关连接，即"旧标签页"）
+    await loadSession(); // 持有两条 v4 连接（tabs/dirHandle 各一次 kvGet→db()，session.ts 不主动关连接，即"旧标签页"）
     await new Promise<void>((resolve, reject) => {
-      const req = indexedDB.open('vviewer', 4); // 另一标签页的新版本先到先升
-      req.onblocked = () => reject(new Error('旧连接未让路：v4 升版被 blocked'));
+      const req = indexedDB.open('vviewer', 5); // 另一标签页的新版本先到先升（DB_VERSION=4 → 升 5）
+      req.onblocked = () => reject(new Error('旧连接未让路：v5 升版被 blocked'));
       req.onsuccess = () => {
         req.result.close();
         resolve();

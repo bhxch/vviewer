@@ -85,7 +85,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('v2→v3 迁移（session.ts DB_VERSION 2→3）', () => {
+describe('v2 存量升版迁移（session.ts DB_VERSION 现为 4）', () => {
   it('v2 库（kv/themes 存量）升 v3：fonts store 补建，存量数据原样保留', async () => {
     // 造 v2 库：kv + themes 各存一条（session.ts v2 形态）
     await new Promise<void>((resolve, reject) => {
@@ -107,13 +107,14 @@ describe('v2→v3 迁移（session.ts DB_VERSION 2→3）', () => {
       };
       req.onerror = () => reject(req.error);
     });
-    // fontsStore 以 v3 打开触发升级
+    // fontsStore 以 DB_VERSION 打开触发升级（Task 2 起 DB_VERSION=4：v2 存量
+    // 一路升到 v4，fonts/mounts 两 store 同轮补建）
     expect(await listFontRecords()).toEqual([]);
     await new Promise<void>((resolve, reject) => {
       const req = indexedDB.open('vviewer');
       req.onsuccess = () => {
         const d = req.result;
-        expect(d.version).toBe(3);
+        expect(d.version).toBe(4);
         expect(d.objectStoreNames.contains('fonts')).toBe(true);
         const tx = d.transaction(['kv', 'themes'], 'readonly');
         const kv = tx.objectStore('kv').get('tabs');

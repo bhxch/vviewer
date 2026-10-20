@@ -7,7 +7,7 @@
   import type { GrepMatch } from '@vviewer/core';
   import { matchRanges } from '@vviewer/core';
   import { addTab } from './openFlow.svelte';
-  import { runGlobalSearch, serverSearchHint, type SearchSource } from './globalSearch';
+  import { runGlobalSearch, serverSearchHint, MOUNT_SEARCH_DEGRADED_HINT, type SearchSource } from './globalSearch';
   import { loadSearchEngine } from './searchEngineCache';
 
   let { sources, onclose }: { sources: Array<SearchSource>; onclose(): void } = $props();
@@ -18,6 +18,8 @@
   let matches = $state<GrepMatch[]>([]);
   let truncated = $state(false);
   let degraded = $state(false);
+  /** 挂载根来源参与搜索（目录挂载 spec §3）：显示「该根不可服务端搜索」提示 */
+  let mountDegraded = $state(false);
   /** 状态条：搜索中 / 进度 / 摘要 / 错误 / 未打开目录 */
   let status = $state('');
   let running = $state(false);
@@ -103,6 +105,7 @@
       matches = [];
       truncated = false;
       degraded = false;
+      mountDegraded = false;
       status = sources.length > 0 ? '' : '未打开文件夹';
       return;
     }
@@ -114,6 +117,7 @@
     // 本轮进度文案（「已扫描 N 个文件…」阶段不出现「已达上限」字样）
     truncated = false;
     degraded = false;
+    mountDegraded = false;
     status = '搜索中…';
     try {
       const res = await runGlobalSearch(
@@ -131,6 +135,7 @@
       matches = res.matches;
       truncated = res.truncated;
       degraded = res.degraded;
+      mountDegraded = res.mountSearchDegraded;
       status = matches.length === 0 ? '无结果' : `${matches.length} 个命中`;
     } catch (err) {
       if (canceled()) return;
@@ -249,6 +254,11 @@
     {/if}
     {#if degraded}
       <span class="vv-gsearch-hint">服务器 ripgrep 不可用，已改用浏览器内搜索（可能较慢）</span>
+    {/if}
+    {#if mountDegraded}
+      <!-- 目录挂载 spec §3：挂载根无服务端搜索（能力边界，与上条 501 降级并存）
+           ——runGlobalSearch 对挂载根不白发远端请求，本地补扫后由此提示 -->
+      <span class="vv-gsearch-hint">{MOUNT_SEARCH_DEGRADED_HINT}</span>
     {/if}
     {#if searchEngine}
       <span

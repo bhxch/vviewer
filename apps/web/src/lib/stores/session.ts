@@ -41,9 +41,13 @@ const STORE = 'kv';
 const THEMES = 'themes';
 /** fonts store（字体系统 spec §5.1，Task 4）：网络字体记录，CRUD 在 fontsStore.ts。 */
 export const FONTS = 'fonts';
-/** v2：补建 themes store；v3：补建 fonts store（字体系统 spec §5.1）——存量原样保留，
- * onupgradeneeded 按需补建。 */
-const DB_VERSION = 3;
+/** mounts store（目录挂载 spec §3，阶段二 Task 2）：前端保存的代理挂载记录，
+ * CRUD 与连接对账在 mountsSync.ts。 */
+export const MOUNTS = 'mounts';
+/** v2：补建 themes store；v3：补建 fonts store（字体系统 spec §5.1）；
+ * v4：补建 mounts store（目录挂载 spec §3——顺延规则：fonts 已占 v3）。
+ * 存量原样保留，onupgradeneeded 按需补建。 */
+const DB_VERSION = 4;
 
 /** 打开（必要时升级）vviewer 库（export：同库跨 store 的兄弟模块 fontsStore 复用连接）。 */
 export function db(): Promise<IDBDatabase> {
@@ -54,6 +58,7 @@ export function db(): Promise<IDBDatabase> {
       if (!d.objectStoreNames.contains(STORE)) d.createObjectStore(STORE);
       if (!d.objectStoreNames.contains(THEMES)) d.createObjectStore(THEMES);
       if (!d.objectStoreNames.contains(FONTS)) d.createObjectStore(FONTS);
+      if (!d.objectStoreNames.contains(MOUNTS)) d.createObjectStore(MOUNTS);
     };
     req.onsuccess = () => {
       const conn = req.result;

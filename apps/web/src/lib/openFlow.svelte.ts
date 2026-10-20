@@ -25,6 +25,7 @@ import { loadSettings } from './stores/settings';
 import { releaseStoreIfLast, storeRetained } from './storeRelease';
 import { saveSearchEngine } from './searchEngineCache';
 import { saveServerHealth } from './serverHealthCache';
+import { syncMountsOnConnect } from './mountsSync';
 import {
   CLOSED_STACK_MAX,
   ClosedStack,
@@ -808,6 +809,7 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
     computeLanguages?: unknown;
     searchEngine?: unknown;
     roots?: unknown;
+    fsRoots?: unknown;
   };
   try {
     caps = (await res.json()) as {
@@ -816,6 +818,7 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
       computeLanguages?: unknown;
       searchEngine?: unknown;
       roots?: unknown;
+      fsRoots?: unknown;
     };
   } catch {
     throw new Error('health 响应不是有效 JSON');
@@ -865,6 +868,13 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
       authRes.status === 401 ? '鉴权失败：令牌缺失或错误（HTTP 401）' : `服务器响应异常: HTTP ${authRes.status}`
     );
   }
+
+  // 代理挂载对账（目录挂载 spec §3）：连接成功后核对本前端保存的代理挂载并
+  // 幂等重注册（指纹缺失才 POST；探测失败走 DELETE+POST 凭据轮换）。置于
+  // ticket 预检之后：覆盖新鲜连接与存活实例复用两条成功路径。fire-and-forget
+  // 不阻塞连接主链与首屏（plan 裁决）；syncMountsOnConnect 内部全量吞错（失败
+  // 静默标记待重试），此 catch 仅防御性兜底。
+  void syncMountsOnConnect(base, tok).catch(() => {});
 
   // 存活实例复用（与 openRemoteSource 同一防线）：restore 重连通道重建的同源
   // store 实例仍在注册表存活时，重复连接直接复用之——不再走「关闭同 base 全部

@@ -10,6 +10,7 @@ import {
   type TreeStore
 } from '@vviewer/core';
 import { loadLastServer } from './openFlow.svelte';
+import { isMountRootStoreId } from './serverHealthCache';
 import { loadSettings } from './stores/settings';
 
 /**
@@ -44,6 +45,18 @@ export interface GlobalSearchResult {
   where: 'local' | 'remote';
   /** auto 策略下远程 ripgrep 失败回退本地（面板据此显示降级提示条） */
   degraded: boolean;
+  /** 存在挂载根来源（目录挂载 spec §3）：服务端 ripgrep 只对 fs 根，挂载根
+   * 内容走浏览器内本地扫描（面板显示「该根不可服务端搜索」提示条）。
+   * 能力边界裁决，与 policy 无关（显式 remote 也不对挂载根白发注定失败的请求）。 */
+  mountSearchDegraded: boolean;
+}
+
+/** 挂载根来源提示文案（brief：挂载根显式 root 的 404 收敛为本文案）。 */
+export const MOUNT_SEARCH_DEGRADED_HINT = '该根不可服务端搜索，已切换浏览器内搜索';
+
+/** store 是否为挂载根来源（rootIndex ≥ fsRoots 的 remote store，spec §3）。 */
+export function isMountRootSource(s: SearchSource): boolean {
+  return isMountRootStoreId(s.store.id);
 }
 
 /** store 是否为远程服务器 store（唯一有服务端 path 语义的来源）。 */
@@ -192,6 +205,10 @@ async function grepSourcesLocal(
  * 源，其余来源（不同 base 的 remote 源 + 全部本地源）在远端路径内本地补扫合并——
  * 服务器一次请求触达不到它们，混合 workspace 不再静默漏搜本地源（本地源不依赖
  * 服务器、不受 auto 回退影响）。
+ * 挂载根（目录挂载 spec §3）：remote store 但 rootIndex ≥ fsRoots 的根无服务端
+ * 搜索（server 跨根搜索只覆盖 fs 根，显式 root 亦 404）——该类来源不进远端请求、
+ * 走本地补扫（与 501 同一「非 200 → 浏览器内」降级通道的能力边界前置形态：
+ * 不白发注定失败的请求），mountSearchDegraded 供面板显示收敛文案。
  */
 export async function runGlobalSearch(
   sources: ReadonlyArray<SearchSource>,
@@ -201,7 +218,8 @@ export async function runGlobalSearch(
   canceled: () => boolean,
   signal: AbortSignal
 ): Promise<GlobalSearchResult> {
-  const remoteSources = sources.filter((s) => isRemoteStore(s.store));
+  const remoteSources = sources.filter((s) => isRemoteStore(s.store) && !isMountRootSource(s));
+  const mountDegraded = sources.some((s) => isMountRootSource(s));
   const remote = remoteSources.length > 0;
   // path 哨兵 '/'：全局搜索作用于整个 store 而非单文件；remote store 才有
   // 服务端 path 语义，router 据此（连同 remoteFn 有无）完成裁决
@@ -226,7 +244,10 @@ export async function runGlobalSearch(
             last === null
               ? []
               : sources.filter(
-                  (s) => !isRemoteStore(s.store) || getRemoteBase(s.store.id) !== last.baseUrl
+                  (s) =>
+                    !isRemoteStore(s.store) ||
+                    isMountRootSource(s) || // 挂载根：服务端搜索不覆盖，本地补扫（spec §3）
+                    getRemoteBase(s.store.id) !== last.baseUrl
                 );
           const remoteMatches = await remoteGrep(
             remoteSources,
@@ -248,6 +269,7 @@ export async function runGlobalSearch(
     matches: res.data ?? [],
     truncated,
     where: res.where,
-    degraded: remote && res.where === 'local' && loadSettings().computePolicy === 'auto'
+    degraded: remote && res.where === 'local' && loadSettings().computePolicy === 'auto',
+    mountSearchDegraded: mountDegraded
   };
 }

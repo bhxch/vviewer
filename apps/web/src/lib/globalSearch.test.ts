@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // globalSearch.test.ts — BUG-11/CMP-11：截断引导文案的裁决纯函数 + T4 多源本地
 // grep 合并 + T7 混合来源远端路径合并。globalSearch.ts 经 openFlow.svelte.ts 间接
@@ -33,9 +33,11 @@ vi.mock('@vviewer/core', async (importOriginal) => {
 import type { GrepMatch, TreeStore, TreeNode } from '@vviewer/core';
 import {
   attributeRemoteMatches,
+  isMountRootSource,
   isRemoteStore,
   serverSearchHint,
   runGlobalSearch,
+  MOUNT_SEARCH_DEGRADED_HINT,
   SERVER_SEARCH_HINT
 } from './globalSearch';
 
@@ -333,5 +335,122 @@ describe('attributeRemoteMatches（T5 移交兑现：跨根命中按 rootIndex/b
       { storeId: 'remote:whole', path: 'x.txt' },
       { storeId: 'remote:whole', path: 'outside.txt' }
     ]);
+  });
+});
+
+// ---------- 挂载根搜索语义（目录挂载 spec §3，plan Task 2） ----------
+//
+// 挂载根（rootIndex ≥ fsRoots）无服务端搜索（server 跨根搜索只覆盖 fs 根）：
+// 该类来源不参与远端请求、走浏览器内本地扫描，结果携带 mountSearchDegraded
+// 供面板显示「该根不可服务端搜索，已切换浏览器内搜索」。fsRoots 经 health
+// 缓存（sessionStorage）注入——真实 serverHealthCache 模块 + jsdom sessionStorage。
+
+describe('runGlobalSearch 挂载根来源（spec §3：不参与远端、本地降级 + 提示位）', () => {
+  const HEALTH_KEY = 'vv:server-health';
+
+  function setFsRoots(fsRoots: number | null): void {
+    sessionStorage.setItem(
+      HEALTH_KEY,
+      JSON.stringify({ version: '1.0', capabilities: ['file-server'], fsRoots })
+    );
+  }
+
+  beforeEach(() => {
+    sessionStorage.removeItem(HEALTH_KEY);
+  });
+
+  afterEach(() => {
+    sessionStorage.removeItem(HEALTH_KEY);
+  });
+
+  it('仅挂载根来源：不发远端请求，本地扫描出命中，mountSearchDegraded 置位', async () => {
+    setFsRoots(1);
+    const mount = storeWithFiles('remote:abcd1234:r2', { 'm.txt': 'mount hit' }, true);
+    const res = await runGlobalSearch(
+      [{ label: 'srv · 根2', store: mount, rootIndex: 2 }],
+      'hit',
+      { caseSensitive: false, regex: false },
+      undefined,
+      () => false,
+      new AbortController().signal
+    );
+    expect(res.where).toBe('local');
+    expect(res.mountSearchDegraded).toBe(true);
+    expect(res.matches.map((m) => ({ storeId: m.storeId, path: m.path }))).toEqual([
+      { storeId: 'remote:abcd1234:r2', path: 'm.txt' }
+    ]);
+  });
+
+  it('fs 远端源 + 挂载根源混合：远端请求只覆盖 fs 源，挂载根本地补扫参与（不静默漏搜）', async () => {
+    setFsRoots(1);
+    mockLastServer.value = { baseUrl: 'http://srv:8321', token: null };
+    mockRemoteBases['remote:srv'] = 'http://srv:8321';
+    mockRemoteBases['remote:abcd1234:r2'] = 'http://srv:8321';
+    mockGrepRemote.value = {
+      matches: [{ storeId: 'remote:srv', path: 'fs.txt', line: 1, col: 1, preview: 'fs hit' }],
+      truncated: false
+    };
+    const res = await runGlobalSearch(
+      [
+        { label: 'srv', store: makeStore('remote:srv', true) },
+        { label: 'srv · 根2', store: storeWithFiles('remote:abcd1234:r2', { 'm.txt': 'mount hit' }, true), rootIndex: 2 }
+      ],
+      'hit',
+      { caseSensitive: false, regex: false },
+      undefined,
+      () => false,
+      new AbortController().signal
+    );
+    expect(res.where).toBe('remote');
+    expect(res.mountSearchDegraded).toBe(true);
+    // 远端命中（fs 根）在前，挂载根本地命中在后——两类内容都不缺
+    expect(res.matches.map((m) => ({ storeId: m.storeId, path: m.path }))).toEqual([
+      { storeId: 'remote:srv', path: 'fs.txt' },
+      { storeId: 'remote:abcd1234:r2', path: 'm.txt' }
+    ]);
+  });
+
+  it('无挂载根来源：mountSearchDegraded 恒 false（既有语义回归护栏）', async () => {
+    setFsRoots(1);
+    mockLastServer.value = { baseUrl: 'http://srv:8321', token: null };
+    mockRemoteBases['remote:srv'] = 'http://srv:8321';
+    mockGrepRemote.value = {
+      matches: [{ storeId: 'remote:srv', path: 'fs.txt', line: 1, col: 1, preview: 'fs hit' }],
+      truncated: false
+    };
+    const res = await runGlobalSearch(
+      [{ label: 'srv', store: makeStore('remote:srv', true) }],
+      'hit',
+      { caseSensitive: false, regex: false },
+      undefined,
+      () => false,
+      new AbortController().signal
+    );
+    expect(res.where).toBe('remote');
+    expect(res.mountSearchDegraded).toBe(false);
+  });
+
+  it('fsRoots 未宣告（旧服务端/无挂载部署）：rootIndex 形态 id 也不判挂载根', async () => {
+    const res = await runGlobalSearch(
+      [{ label: 'srv · 根2', store: storeWithFiles('remote:abcd1234:r2', { 'm.txt': 'hit' }, true), rootIndex: 2 }],
+      'hit',
+      { caseSensitive: false, regex: false },
+      undefined,
+      () => false,
+      new AbortController().signal
+    );
+    expect(res.mountSearchDegraded).toBe(false);
+    expect(res.matches).toHaveLength(1);
+  });
+
+  it('降级文案锚定（brief：挂载根显式 root 的 404 收敛为该文案）', () => {
+    expect(MOUNT_SEARCH_DEGRADED_HINT).toBe('该根不可服务端搜索，已切换浏览器内搜索');
+  });
+
+  it('isMountRootSource：fsRoots 边界裁决（≥ 为挂载根；非 remote 恒 false）', () => {
+    setFsRoots(1);
+    expect(isMountRootSource({ label: 'm', store: makeStore('remote:abcd1234:r1', true), rootIndex: 1 })).toBe(true);
+    expect(isMountRootSource({ label: 'f', store: makeStore('remote:srv', true) })).toBe(false);
+    expect(isMountRootSource({ label: 'l', store: makeStore('localfs:x', false) })).toBe(false);
   });
 });
