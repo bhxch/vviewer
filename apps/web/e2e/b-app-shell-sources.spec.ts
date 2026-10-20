@@ -251,6 +251,14 @@ test('BUG-05/SHELL-09/13：设置面板排除规则预设生效，设置与开�
   await panel.locator('button[aria-label="加入预设排除规则 node_modules"]').click();
   await expect(page.locator('.vv-tree-row', { hasText: '.git' })).toHaveCount(0);
   await expect(page.locator('.vv-tree-row', { hasText: 'node_modules' })).toHaveCount(0);
+
+  // 移动端（≤900px）先关面板再验树：设置面板 fixed 右上宽 min(340px, 100vw-16px)，
+  // 与 300px 宽抽屉投影区重叠——Task 4 抽屉头部行把树首行推入面板之下，不关面板
+  // 时抽屉内树行点击永等可操作性（b-layout-zen 回归发现；桌面面板在右侧不遮树，
+  // Esc 关闭后自动刷新段重开面板，双端语义不变）
+  await page.keyboard.press('Escape');
+  await expect(panel).toHaveCount(0);
+
   // 树懒加载：展开 src 后确认保留文件仍在（移动端树在抽屉内，经 drawer 适配点击）
   const drawer = await openDrawerIfNarrow(page);
   await page.locator('.vv-tree-row', { hasText: 'src' }).click();
@@ -263,7 +271,9 @@ test('BUG-05/SHELL-09/13：设置面板排除规则预设生效，设置与开�
   );
   expect(saved.excludedPatterns).toEqual(expect.arrayContaining(['.git', 'node_modules']));
 
-  // 自动刷新开关：关闭 → autoRefresh:false 落盘；重开面板状态回显
+  // 自动刷新开关：关闭 → autoRefresh:false 落盘；重开面板状态回显（上一步 Esc 关面板）
+  await page.locator('button[aria-label="设置"]').click();
+  await expect(panel).toBeVisible();
   await panel.locator('.vv-settings-toggle input[type="checkbox"]').uncheck();
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('vviewer:settings') ?? '{}').autoRefresh)).toBe(false);
   await page.keyboard.press('Escape');
