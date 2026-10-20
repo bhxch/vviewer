@@ -53,6 +53,7 @@
   } from './layout';
   import { codeLineHeight } from './theme';
   import { loadEnabledFontFaces } from './stores/fontsStore';
+  import { syncMountsOnConnect } from './mountsSync';
 
   /** 文件树/面板的来源条目：workspace.sources（模型）× storeById（活动实例）的合成。
    * rootIndex/basePath 随模型透传（GlobalSearchPanel → globalSearch 的远程命中
@@ -642,6 +643,12 @@
         console.warn('[vviewer] 服务器变更推送不可用，自动刷新已停用');
       }
     );
+    // 代理挂载对账（目录挂载 spec §3）：restore 重连成功同样触发幂等重注册——
+    // connectServer 已覆盖新鲜连接面，这里补「刷新恢复」面（服务端重启后前端
+    // 存档的代理挂载在重连时自动回填）。fire-and-forget 不阻塞恢复主链；内部
+    // 全量吞错（失败静默标记待重试）。同 base 多来源（多根快照）会重复触发，
+    // 对账幂等（同指纹命中即登记、服务端不重复分配）无副作用。
+    void syncMountsOnConnect(base, token).catch(() => {});
     return store;
   }
 
