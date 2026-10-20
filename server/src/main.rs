@@ -174,6 +174,13 @@ fn validate_startup(args: &ServeArgs, token: Option<&str>) -> Result<(), String>
     Ok(())
 }
 
+/// 桌面薄壳就绪行（plan 2026-10-19 Global Constraints：bind 成功后向 stdout 输出
+/// 恰好一行 `VV_READY port=<n>`，n=listener 实测端口，--port 0 时为内核分配值）。
+/// 纯净行无前缀装饰——壳侧解析器按行首精确匹配；wire 格式由单测锁定。
+fn ready_line(port: u16) -> String {
+    format!("VV_READY port={port}")
+}
+
 /// 静态挂载装配（spec §2 启动链）：reqwest transport 建一次全挂载共享，逐项
 /// 委托 [`vviewer::state::build_mount`]（阶段二下沉——运行时注册消费同一构造；
 /// per-kind 必填校验在其内）。错误消息加挂载序号前缀，serve 统一 exit 2。
@@ -273,7 +280,17 @@ fn serve(args: ServeArgs, mounts: Vec<MountConfig>) -> Result<(), i32> {
                 eprintln!("error: failed to bind {sock}: {e}");
                 2
             })?;
-        tracing::info!("vviewer listening on http://{sock}");
+        // --port 0（桌面薄壳随机端口前提）：内核分配，实测地址以 listener.local_addr
+        // 为准——listening 日志与就绪行同源，不再打印配置值 0
+        let local = listener.local_addr().map_err(|e| {
+            eprintln!("error: failed to read listener local address: {e}");
+            2
+        })?;
+        tracing::info!("vviewer listening on http://{local}");
+        // 就绪协议（plan 2026-10-19）：现有启动日志之后恰好一行 VV_READY；纯净行
+        // 无前缀。#[cfg(not(test))] 防单测噪声（取实现简者）。
+        #[cfg(not(test))]
+        println!("{}", ready_line(local.port()));
         axum::serve(listener, app).await.map_err(|e| {
             eprintln!("error: server failure: {e}");
             2
@@ -470,5 +487,16 @@ mod tests {
             "http://ak:sk@127.0.0.1:9000/b1/a.txt",
             "backend 用原 endpoint"
         );
+    }
+
+    // ---------- 就绪协议（plan 2026-10-19 Task 1） ----------
+
+    /// wire 契约锁定：壳侧（Task 2）按行首 strip_prefix("VV_READY port=") 解析，
+    /// 输出不得携带时间戳/等级等任何装饰。
+    #[test]
+    fn ready_line_wire_format_is_exact() {
+        assert_eq!(ready_line(8321), "VV_READY port=8321");
+        assert_eq!(ready_line(0), "VV_READY port=0");
+        assert_eq!(ready_line(u16::MAX), "VV_READY port=65535");
     }
 }
