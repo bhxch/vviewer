@@ -1,8 +1,12 @@
-# Release 流水线（L1）：push tag v* 触发。三路产物聚合发布：
+# Release 流水线（L1）：push tag v* 触发。四路产物聚合发布：
 #   grammar：复用 Grammar self-build（workflow_call，产出全量 wasm + manifest）
 #   web：pnpm build → dist zip
 #   server：cargo build --release（targets：x86_64-unknown-linux-gnu 起步；
 #           后续扩平台在下方 server job 注释的 matrix 上展开）
+#   desktop：Tauri 薄壳三平台 matrix（linux deb+AppImage / macOS dmg×2 aarch64+
+#           x86_64 分产物 / Windows NSIS）——server sidecar per-target 构建复制为
+#           externalBin 命名、web job dist 复用为 resources、tauri CLI 打包；未签名
+#           直出（Gatekeeper/SmartScreen 注记见 README 桌面端章节）
 #   publish-npm：grammar-wasm artifact → npm <scope>/vviewer-grammars-full（scope
 #           variable 门控、内容哈希去重（contentHash 对比线上 latest——前端-only 变更
 #           零发包、已解析版本下发 outputs.version）；scope 未配置则 npm 分发与 CDN
@@ -10,7 +14,7 @@
 # 聚合 job 以 gh CLI 建 GitHub Release 并上传：vviewer 二进制、web dist zip、
 # grammar-wasm.tar.zst。发布写权限仅授予聚合 release job（job 级 contents: write）；
 # publish-npm 另持 id-token: write（provenance，无内容写权限）；顶层 contents: read
-# 兜底，web/server job 级再显式声明 read（grammar 由被调 workflow 自身的
+# 兜底，web/server/desktop job 级再显式声明 read（grammar 由被调 workflow 自身的
 # contents: read 约束）——与实现一一对应，勿只改注释不改权限。
 name: Release
 
@@ -108,6 +112,129 @@ jobs:
           path: vviewer-linux-x86_64
           if-no-files-found: error
 
+  desktop:
+    name: 桌面端三平台打包（Tauri 薄壳 + server sidecar）
+    runs-on: ${{ matrix.os }}
+    # web dist 复用 web job 产物（grammar wasm self-build 全仓只跑一次，spec「依赖
+    # 既有 grammar/web 构建链」）；web 以 !cancelled() 常跑，publish-npm 失败不拦
+    needs: [web]
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # deb/AppImage 的 glibc 兼容面取受支持最老 LTS（webkit2gtk-4.1 可用）
+          - { os: ubuntu-22.04, triple: x86_64-unknown-linux-gnu, artifact: linux-x86_64 }
+          # macOS 双 arch 分产物 = 双 host 原生编译：server build.rs 手动 g++ 不带
+          # -arch，单 runner 交叉编 x86_64 不可行；末代 Intel runner macos-13 已于
+          # 2025-12 退役，钉定 macos-15（arm64）+ macos-15-intel（x86_64）
+          - { os: macos-15, triple: aarch64-apple-darwin, artifact: macos-aarch64 }
+          - { os: macos-15-intel, triple: x86_64-apple-darwin, artifact: macos-x86_64 }
+          - { os: windows-latest, triple: x86_64-pc-windows-msvc, artifact: windows-x64 }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+      # 双 workspace：server（sidecar 源）+ 桌面壳（独立 Cargo workspace）
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            server
+            apps/desktop/src-tauri
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # server build.rs 按 grammars-manifest.json（301 全集）源码编译 grammar：
+      # 源树由 fetch 管线产出（缺源仅 partial 告警不断链，桌面 compute 高亮须全量）
+      - uses: ./.github/actions/setup-grammars
+        with:
+          languages: all
+          fetch-only: 'true'
+      # server build.rs 以外部命令 g++/ar/objcopy 编链 C++ scanner（yaml/vue 等）。
+      # 三平台垫片：linux 预装即用；macOS objcopy 缺席（Xcode 自带 llvm-objcopy，
+      # binutils 兜底）；windows 预装 mingw64（g++/ar/objcopy 全）但不在 PATH。
+      # 校准点：mingw g++ 对象 × msvc 链接的 C++ 运行时面——CI 首跑验证（spec 实施注记）
+      - name: 工具链垫片（server build.rs 的 g++/ar/objcopy 依赖）
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            macOS)
+              mkdir -p "$RUNNER_TEMP/shim"
+              SRC="$(command -v llvm-objcopy || true)"
+              [ -z "$SRC" ] && SRC="$(xcrun -f llvm-objcopy 2>/dev/null || true)"
+              if [ -z "$SRC" ]; then
+                brew install binutils
+                SRC="$(brew --prefix binutils)/bin/objcopy"
+              fi
+              printf '#!/bin/sh\nexec "%s" "$@"\n' "$SRC" > "$RUNNER_TEMP/shim/objcopy"
+              chmod +x "$RUNNER_TEMP/shim/objcopy"
+              echo "$RUNNER_TEMP/shim" >> "$GITHUB_PATH"
+              ;;
+            Windows)
+              for d in "/c/ProgramData/mingw64/mingw64/bin" "/c/msys64/mingw64/bin"; do
+                [ -d "$d" ] && echo "$d" >> "$GITHUB_PATH"
+              done
+              ;;
+          esac
+      # 前端 dist：web job 产物 zip 内容平铺（解包即站点根），落 apps/web/build
+      # （tauri.conf.json resources "../../web/build/" 的源路径）
+      - uses: actions/download-artifact@v8
+        with:
+          name: web-dist
+          path: .
+      - name: 解包 web dist 到 resources 源路径
+        shell: bash
+        run: |
+          mkdir -p apps/web/build
+          case "$RUNNER_OS" in
+            Windows)
+              powershell.exe -NoProfile -Command \
+                "Expand-Archive -Path vviewer-web-dist.zip -DestinationPath apps/web/build -Force"
+              ;;
+            *)
+              unzip -q vviewer-web-dist.zip -d apps/web/build
+              ;;
+          esac
+      - name: 构建 server sidecar（per-target）
+        run: cargo build --release --manifest-path server/Cargo.toml --target ${{ matrix.triple }}
+      - name: 复制 sidecar 为 externalBin 命名（<名>-<target-triple>）
+        shell: bash
+        run: |
+          mkdir -p apps/desktop/src-tauri/binaries
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp "server/target/${{ matrix.triple }}/release/vviewer.exe" \
+               "apps/desktop/src-tauri/binaries/vviewer-server-${{ matrix.triple }}.exe"
+          else
+            cp "server/target/${{ matrix.triple }}/release/vviewer" \
+               "apps/desktop/src-tauri/binaries/vviewer-server-${{ matrix.triple }}"
+          fi
+      # 版本烙印：--config JSON 覆盖合并 conf（tag v1.2.3 → 产物文件名 1.2.3，而非
+      # conf 静态 0.1.0）；bundle targets 按宿主过滤，未支持目标仅告警跳过
+      - name: Tauri 打包（deb+AppImage / dmg / NSIS 按宿主）
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          pnpm --filter desktop exec tauri build \
+            --target "${{ matrix.triple }}" \
+            --config "{\"version\":\"$VERSION\"}"
+      - name: 归集安装包（平铺）
+        shell: bash
+        run: |
+          mkdir -p dist
+          find "apps/desktop/src-tauri/target/${{ matrix.triple }}/release/bundle" -type f \
+            \( -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.exe' \) \
+            -exec cp -v {} dist/ \;
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.artifact }}
+          path: dist/*
+          if-no-files-found: error
+
   publish-npm:
     name: npm 资产包发布（grammars-full）
     runs-on: ubuntu-latest
@@ -187,7 +314,7 @@ jobs:
     runs-on: ubuntu-latest
     # publish-npm 入 needs：npm 包发布成功后才值得以 tag ref 重部署 pages（CDN 注入
     # 指向该版本）；publish 失败时 pages 保持上一次部署（可重跑 publish 后重触发）。
-    needs: [grammar, web, server, publish-npm]
+    needs: [grammar, web, server, desktop, publish-npm]
     # 全工作流唯一写权限点：建 Release + 上传产物（job 级显式覆盖顶层 read 兜底）；
     # actions: write 供 gh workflow run 以 tag ref 触发 pages 部署（CDN 注入生效）
     permissions:
@@ -202,7 +329,8 @@ jobs:
           path: artifacts
       # grammar 包：全量 wasm + manifest（cli 自建 + vendored 遗留集，见 grammar.yml）
       - run: tar --zstd -cf grammar-wasm.tar.zst -C artifacts/grammar-wasm .
-      # 先建 Release 附产物；重跑（release 已存在）时降级为 upload --clobber 覆盖
+      # 先建 Release 附产物；重跑（release 已存在）时降级为 upload --clobber 覆盖。
+      # 桌面产物：desktop-* artifact 内已平铺（deb/AppImage/dmg×2/NSIS exe），逐文件并入
       - run: |
           tag="${GITHUB_REF_NAME}"
           files=(
@@ -210,6 +338,8 @@ jobs:
             "artifacts/web-dist/vviewer-web-dist.zip"
             "grammar-wasm.tar.zst"
           )
+          shopt -s nullglob
+          for f in artifacts/desktop-*/*; do files+=("$f"); done
           gh release create "$tag" --title "vviewer ${tag}" --generate-notes "${files[@]}" \
             || gh release upload "$tag" "${files[@]}" --clobber
         env:

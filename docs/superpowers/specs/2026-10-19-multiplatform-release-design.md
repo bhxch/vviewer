@@ -56,3 +56,13 @@
 - 阶段二：cargo 全量既有测试零改动全绿（行为锁）；core 单测直接以纯类型 handler 为对象（无 axum 依赖，测试更快更稳）。
 - 阶段一：CI 三平台构建产物存在性门禁；本地手动冒烟清单（spawn→导航→打开目录→退出回收）；就绪协议解析单测。
 - 阶段三：core mock-transport 单测覆盖 worker 形态能力裁剪（health 宣告/挂载读写/Range 直通）；`wrangler dev` 冒烟脚本（health/tree/file 三断言）；资产 fallback e2e（.wasm 缺失 404、路由回 index.html）；部署 canary。
+
+## 6. 阶段一实施注记（Task 2/3 落地校准，2026-10-19）
+
+实现与上文 §2 的差异与裁决记录：
+
+- **macOS 双 arch runner 映射**：原文「macos-latest〔x86_64+aarch64 分产物〕」。macos-13（末代 Intel runner）已于 2025-12 退役，落地为 `macos-15`（aarch64）+ `macos-15-intel`（x86_64）双 runner 原生编译——server build.rs 手动 g++ 链不带 `-arch`，单 runner 交叉编 x86_64 不可行，双 host 是必要而非偏好。
+- **前端 dist 复用**：desktop job 以 `needs: [web]` 下载 web job artifact 解包至 `apps/web/build`（resources 源路径），而非 job 内重建——grammar wasm self-build 全仓只跑一次，「依赖既有 grammar/web 构建链」的落实形态。
+- **tauri-action 不引入**：打包走 tauri CLI（`pnpm --filter desktop exec tauri build`），desktop 只产 artifact，聚合 release job 单一写权限点的既有结构不变；版本经 `--config '{"version":"<tag 去 v>"}'` 覆盖合并烙进产物文件名（conf 静态 0.1.0 仅本地开发用）。
+- **server build.rs 跨平台工具链垫片**：C++ scanner 手法依赖外部 g++/ar/objcopy——windows 垫片为预装 mingw64 入 PATH（mingw 对象 × msvc 链接的 C++ 运行时面是主要校准点），macOS 垫片为 Xcode llvm-objcopy（binutils 兜底）。CI 首跑校准，必要时后续小轮 build.rs cc-cpp 化收编。
+- **Linux runner 钉定 ubuntu-22.04**：deb/AppImage 的 glibc 兼容面取受支持最老 LTS（webkit2gtk-4.1 可用）。

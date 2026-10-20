@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | **纯前端** | SvelteKit 静态站点（`apps/web/build`），任意静态托管即可 | 查看本地文件（File System Access API / 拖拽），无需后端 |
 | **后端单二进制** | `vviewer serve`（Rust + axum）+ 前端静态目录（`--web-dist`） | 浏览服务器上的目录；局域网共享（token 鉴权 / `--allow-lan`） |
+| **桌面应用** | Tauri 2 薄壳（`apps/desktop`）：窗口 + 内嵌 server sidecar | 三平台装即用：无需 Node/静态托管，退出自动回收服务进程 |
 
 后端两档能力，由 `/api/health` 的 `capabilities` 宣告，前端自动适配：
 
@@ -58,6 +59,22 @@ pnpm build:all        # 前端 → apps/web/build + cargo build --release → se
 
 需要服务端计算（远程高亮/comrak 渲染）时追加 `--compute`；跨文件搜索除外：属文件服务基础能力，无需 `--compute`——rg 可选，缺失时自动降级系统 grep（差异与引擎宣告见上）。全部参数可改用 TOML 配置文件承载（`--config`，含 S3/WebDAV 附加挂载 `[[mount]]` 节）：全参示例与 600 权限建议见 [`server/README.md`](server/README.md)「配置文件」。
 
+### 桌面应用（Tauri 薄壳）
+
+tag（`v*`）推送后 release workflow 在 GitHub Release 附三平台安装包（**未签名直出**，
+安装时多一步手动放行）：
+
+| 平台 | 产物 | 安装与放行 |
+| --- | --- | --- |
+| Windows | `.exe`（NSIS 安装器） | 双击安装；SmartScreen 弹「已保护你的电脑」→ **更多信息 → 仍要运行** |
+| macOS | `.dmg`×2（Apple silicon / Intel 分产物） | 挂载拖入 Applications；首次启动被 Gatekeeper 拦截 → **右键 → 打开**（只首次需要），或「系统设置 → 隐私与安全性 → 仍要打开」 |
+| Linux | `.AppImage` / `.deb` | AppImage `chmod +x` 后直跑；deb `sudo dpkg -i *.deb` |
+
+应用为单实例薄壳：启动时内嵌 server sidecar（只绑 127.0.0.1、内核随机端口，无
+token、`--allow-lan` 未开），就绪后窗口导航本机页面，退出自动回收子进程。发布前
+按[六步手动冒烟清单](apps/desktop/README.md#手动冒烟清单六步)逐项过一遍；从源码
+本地运行/打包见 [`apps/desktop/README.md`](apps/desktop/README.md)「本地开发」。
+
 ### 纯前端（静态托管）
 
 ```bash
@@ -88,6 +105,7 @@ packages/
   render-media/     ArtPlayer/hls.js/mpegts.js、图片
   render-archive/   jszip/libarchive 包内树与递归预览
 apps/web/           SvelteKit 5 + adapter-static 壳（TopBar/FileTree/TabBar/ViewerPane）、PWA
+apps/desktop/       Tauri 2 桌面薄壳：spawn server sidecar（VV_READY 就绪导航/单实例/退出回收）
 server/             Rust axum：tree/file/events SSE/ticket/search/compute 端点，只读
 ```
 
