@@ -336,7 +336,8 @@ export async function probeMountRoot(
  * （含当前保存的凭据）。DELETE 404 = 服务端项已在对账间隙消失（竞态）——
  * 继续 POST 视作缺失注册；其余非 2xx 抛错（静态项 405 亦然——静态项无可
  * 轮换面，不该进本函数，防御性拒绝）。成功返回新分配的 rootIndex。
- */export async function reregisterMount(
+ */
+export async function reregisterMount(
   rec: ProxyMountRecord,
   token: string | null | undefined,
   rootIndex: number

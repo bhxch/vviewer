@@ -723,7 +723,8 @@ export async function openSavedDirectory(): Promise<void> {
   addDirStoreTab(createLocalFsStore(handle));
 }
 
-export function openDirectoryViaInput(files: FileList | File[]): void {  const all = Array.from(files);
+export function openDirectoryViaInput(files: FileList | File[]): void {
+  const all = Array.from(files);
   if (all.length === 0) {
     // 空目录（input webkitdirectory 选空文件夹 / 拖入空目录）：此前静默无反馈，
     // 状态栏一次性提示说明原因（遗留 U1）
