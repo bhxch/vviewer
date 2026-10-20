@@ -5,11 +5,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import {
+  deleteDirectMount,
   displayEndpoint,
+  listDirectMounts,
   listProxyMounts,
   mountFingerprintOf,
+  saveDirectMount,
   saveProxyMount,
   syncMountsOnConnect,
+  type DirectMountRecord,
   type MountManifestEntry,
   type ProxyMountRecord
 } from './mountsSync';
@@ -234,6 +238,49 @@ describe('mounts store 持久化与 v3→v4 迁移', () => {
     const { deleteProxyMount } = await import('./mountsSync');
     await deleteProxyMount('mount:a');
     expect((await listProxyMounts()).map((r) => r.id)).toEqual(['mount:b']);
+  });
+});
+
+// ---------- 直连挂载记录（spec §4 阶段四：kind 'direct'，同 store 分段） ----------
+
+describe('direct 挂载记录（kind direct 与 proxy 同 store 分段隔离）', () => {
+  function directOf(overrides: Partial<DirectMountRecord> = {}): DirectMountRecord {
+    return {
+      id: 's3direct:abcd1234',
+      kind: 'direct',
+      backend: 's3',
+      label: '直连桶',
+      endpoint: 'http://127.0.0.1:9000',
+      bucket: 'b1',
+      prefix: '',
+      username: 'ak',
+      secret: 'sk',
+      pathStyle: true,
+      createdAt: 1700000000001,
+      ...overrides
+    };
+  }
+
+  it('save/list/delete 往返；listDirectMounts 只见 direct、listProxyMounts 只见 proxy', async () => {
+    const d1 = directOf();
+    const d2 = directOf({
+      id: 'davdirect:eeee1111',
+      backend: 'webdav',
+      bucket: undefined,
+      pathStyle: undefined,
+      label: '直连 dav',
+      createdAt: 1700000000002
+    });
+    const proxy = recordOf();
+    await saveDirectMount(d1);
+    await saveDirectMount(d2);
+    await saveProxyMount(proxy);
+    expect((await listDirectMounts()).map((r) => r.id)).toEqual(['s3direct:abcd1234', 'davdirect:eeee1111']);
+    expect((await listProxyMounts()).map((r) => r.id)).toEqual(['mount:abcd1234']);
+    await deleteDirectMount('s3direct:abcd1234');
+    expect((await listDirectMounts()).map((r) => r.id)).toEqual(['davdirect:eeee1111']);
+    // proxy 记录不受 direct 删除影响
+    expect((await listProxyMounts()).map((r) => r.id)).toEqual(['mount:abcd1234']);
   });
 });
 

@@ -14,4 +14,6 @@ export * from './tree/singleFile';
 export * from './tree/localFs';
 export * from './tree/localFiles';
 export * from './tree/remote';
+export * from './tree/directS3';
+export * from './tree/directDav';
 export * from './virtualScroller';

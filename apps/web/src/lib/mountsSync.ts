@@ -1,9 +1,11 @@
 /**
- * mountsSync.ts — 代理挂载的前端持久化与连接对账（目录挂载 spec 2026-10-19 §3，
- * plan Task 2）。服务端运行时挂载是内存态（重启失效）；本前端把自己注册过的
- * 代理挂载存 IndexedDB v4 `mounts` store（session.ts DB_VERSION 顺延，fonts 已占
- * v3），connectServer 成功后对账：按配置指纹比对 `GET /api/mounts` 清单，缺失
- * 幂等 POST 重注册；注册失败静默标记待重试（不抛错、不打扰连接主链）。
+ * mountsSync.ts — 挂载记录的前端持久化与代理连接对账（目录挂载 spec 2026-10-19
+ * §3+§4，plan Task 2+阶段三 Task 1）。服务端运行时挂载是内存态（重启失效）；
+ * 本前端把注册过的代理挂载（kind 'proxy'，§3）与浏览器直连挂载（kind 'direct'，
+ * §4 阶段三）存 IndexedDB v4 `mounts` store（session.ts DB_VERSION 顺延，fonts
+ * 已占 v3），connectServer 成功后对账：按配置指纹比对 `GET /api/mounts` 清单，
+ * 缺失幂等 POST 重注册；注册失败静默标记待重试（不抛错、不打扰连接主链）。
+ * 直连记录不经服务器（无注册面），只持久化供 openFlow/管理页消费。
  * 要点：
  * - 指纹与 server `mount_fingerprint` 同算法镜像（kind+endpoint+bucket/prefix+
  *   label trim 后 U+001F 拼接，**不含凭据**）——「同一挂载目标」而非「同一份
@@ -48,6 +50,38 @@ export interface ProxyMountRecord {
   /** 最近一次已知的服务端 rootIndex（清单命中/POST 成功登记）。 */
   registeredRootIndex?: number;
 }
+
+/**
+ * 直连挂载记录（目录挂载 spec §4 阶段四，plan Task 1）：浏览器直连 S3/WebDAV
+ * 的前端持久化。要点：
+ * - 凭据（username/secret）IndexedDB **明文**存储（spec §4 拍板；管理页在新增
+ *   表单与列表详情双处固定警示面）；
+ * - id = core 直连 store 的 storeId（`s3direct:`/`davdirect:` + hash8(挂载目标
+ *   身份)，@vviewer/core s3DirectStoreId/davDirectStoreId 产出）——同配置天然
+ *   去重，凭据轮换/改名不换 id（hash 不含凭据与 label，与 proxy 指纹同口径）；
+ * - 与 proxy 记录同住 v4 `mounts` store，kind 判别（'proxy' | 'direct'）；
+ *   直连记录不参与服务端对账（不经服务器，无注册面）。
+ */
+export interface DirectMountRecord {
+  id: string;
+  kind: 'direct';
+  backend: 's3' | 'webdav';
+  label: string;
+  endpoint: string;
+  /** S3 挂载的桶名；WebDAV 挂载缺省。 */
+  bucket?: string;
+  prefix: string;
+  /** S3 = access_key_id；WebDAV = username。 */
+  username?: string;
+  /** S3 = secret_access_key；WebDAV = password。明文存储（spec §4 拍板：管理页警示面）。 */
+  secret?: string;
+  /** S3 path-style（缺省 true）；WebDAV 缺省。 */
+  pathStyle?: boolean;
+  createdAt: number;
+}
+
+/** mounts store 记录全体（kind 判别联合）。 */
+export type MountRecord = ProxyMountRecord | DirectMountRecord;
 
 /** `GET /api/mounts` 清单条目（server MountEntry HTTP 形态，凭据不在结构面）。 */
 export interface MountManifestEntry {
@@ -131,19 +165,19 @@ function compareFingerprint(rec: ProxyMountRecord): string {
 
 // ---------- mounts store CRUD（fontsStore 同模式：无 keyPath 自管 id 键） ----------
 
-/** 全量列表（createdAt 升序 = 入库序）。 */
-export async function listProxyMounts(): Promise<ProxyMountRecord[]> {
+/** 全量列表（createdAt 升序 = 入库序；proxy/direct 两 kind 混存）。 */
+export async function listMounts(): Promise<MountRecord[]> {
   const d = await db();
   return new Promise((resolve, reject) => {
     const req = d.transaction(MOUNTS, 'readonly').objectStore(MOUNTS).getAll();
     req.onsuccess = () =>
-      resolve(((req.result as ProxyMountRecord[] | undefined) ?? []).sort((a, b) => a.createdAt - b.createdAt));
+      resolve(((req.result as MountRecord[] | undefined) ?? []).sort((a, b) => a.createdAt - b.createdAt));
     req.onerror = () => reject(req.error);
   });
 }
 
-/** 入库/更新（对账状态落库同走此漏斗）。 */
-export async function saveProxyMount(rec: ProxyMountRecord): Promise<void> {
+/** 入库/更新（对账状态落库与 direct 记录同走此漏斗）。 */
+export async function saveMount(rec: MountRecord): Promise<void> {
   const d = await db();
   return new Promise((resolve, reject) => {
     const tx = d.transaction(MOUNTS, 'readwrite');
@@ -154,8 +188,8 @@ export async function saveProxyMount(rec: ProxyMountRecord): Promise<void> {
   });
 }
 
-/** 删除（阶段四管理页删除动作挂点）。 */
-export async function deleteProxyMount(id: string): Promise<void> {
+/** 删除（阶段四管理页删除动作挂点；proxy/direct 通用）。 */
+export async function deleteMount(id: string): Promise<void> {
   const d = await db();
   return new Promise((resolve, reject) => {
     const tx = d.transaction(MOUNTS, 'readwrite');
@@ -165,6 +199,30 @@ export async function deleteProxyMount(id: string): Promise<void> {
     tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'));
   });
 }
+
+/** 代理挂载记录分段列表（对账消费；direct 记录不入对账面，kind 过滤隔离）。 */
+export async function listProxyMounts(): Promise<ProxyMountRecord[]> {
+  return (await listMounts()).filter((r): r is ProxyMountRecord => r.kind === 'proxy');
+}
+
+/** 直连挂载记录分段列表（阶段四管理页消费）。 */
+export async function listDirectMounts(): Promise<DirectMountRecord[]> {
+  return (await listMounts()).filter((r): r is DirectMountRecord => r.kind === 'direct');
+}
+
+/** 直连记录入库/更新（saveMount 直连侧具名漏斗）。 */
+export function saveDirectMount(rec: DirectMountRecord): Promise<void> {
+  return saveMount(rec);
+}
+
+/** 直连记录删除（deleteMount 直连侧具名漏斗）。 */
+export function deleteDirectMount(id: string): Promise<void> {
+  return deleteMount(id);
+}
+
+/** 兼容别名（既有调用面沿用 proxy 具名形态）。 */
+export const saveProxyMount = saveMount;
+export const deleteProxyMount = deleteMount;
 
 // ---------- 对账与重注册 ----------
 
