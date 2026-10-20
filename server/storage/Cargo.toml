@@ -2,16 +2,36 @@
 name = "vviewer-storage"
 version = "0.1.0"
 edition = "2021"
-description = "vviewer 存储抽象：StorageBackend trait 与 LocalFs 等后端（目录挂载阶段一）"
+description = "vviewer 存储抽象：StorageBackend trait 与 LocalFs/S3/WebDAV 等后端（目录挂载阶段一）"
 license = "Apache-2.0"
+
+[features]
+# native transport（reqwest）实现：wasm 侧构建 default-features = false 复用
+# 纯 HTTP 语义的 HttpTransport trait（多端发布 spec 的复用前提）
+default = ["native"]
+native = ["dep:reqwest"]
 
 [dependencies]
 # dyn 兼容 async trait（RPITIT 无法 Arc<dyn>——AppState.roots 需要 dyn 分发）
 async-trait = "0.1"
 tokio = { version = "1", features = ["fs", "io-util"] }
 # HttpTransport 接缝的 body 载体：wasm 可用的 futures-io（评审 Major-1——
-# tokio::io 类型不得穿接缝）；tokio 流互转经 tokio-util compat（Task 3 S3 侧）
+# tokio::io 类型不得穿接缝）
 futures-io = "0.3"
+# transport 侧流适配（StreamExt：reqwest 字节流错误映射）
+futures-util = { version = "0.3", features = ["io"] }
+# 两态流互转桥（Task 3）：S3 响应的 futures-io body 经 FuturesAsyncReadCompatExt
+# 进 StorageBackend 的 tokio ByteStream；reqwest 字节流经 StreamReader +
+# TokioAsyncReadCompatExt 进 HttpByteStream
+tokio-util = { version = "0.7", features = ["io", "compat"] }
+# S3 SigV4 签名（Task 3）：hmac/sha2 出 HMAC-SHA256 链与 payload hash，hex 出小写十六进制
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+# S3 key 段/query 值的 percent 编解码（AWS UriEncode 语义）
+percent-encoding = "2"
+# HttpTransport 的 native 实现（feature 门控：native）
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"], optional = true }
 
 [dev-dependencies]
 tempfile = "3"
