@@ -161,8 +161,11 @@
   });
 
   $effect(() => {
-    // Esc 关闭（GlobalSearchPanel 模式）：容器 keydown 覆盖面板内焦点，window
-    // 兜底只处理 target 在浮层外的事件（同一事件只有一个 target，不会双触发）
+    // Esc 关闭（GlobalSearchPanel 模式）：容器 keydown（.vv-ws-pop onkeydown，终审
+    // I-2——此前仅 window 兜底，合成 Esc 的派发目标恰是 pop 本体被 contains 守卫
+    // 挡下，移动端返回键 closeOverlay 空转成死循环；容器通道同时修复焦点在 pop 内
+    // 时物理 Esc 无效的旧癖）覆盖浮层内焦点，window 兜底只处理 target 在浮层外的
+    // 事件（同一事件只有一个 target，不会双触发）
     if (!wsMenuOpen) return;
     const onWinKey = (e: KeyboardEvent): void => {
       if (
@@ -309,7 +312,20 @@
       <!-- 不用 role="menu"：条目均为原生 button（键盘可达），menu 角色反而要求
            tabindex/方向键管理（a11y_interactive_supports_focus 警告）；aria-expanded
            已在触发按钮上表达展开态 -->
-      <div class="vv-ws-pop" class:narrow bind:this={wsPopEl}>
+      <!-- svelte-ignore a11y_no_static_element_interactions --><!-- 容器 Esc 同仓库
+           dialog keydown 模式（SettingsPanel 等）：合成 Esc（移动端返回键
+           closeTopOverlayForZen 派发）与浮层内焦点物理 Esc 的统一关闭通道 -->
+      <div
+        class="vv-ws-pop"
+        class:narrow
+        bind:this={wsPopEl}
+        onkeydown={(e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            wsMenuOpen = false;
+          }
+        }}
+      >
         {#each workspacesView.list as w (w.id)}
           {#if renamingId === w.id}
             <form

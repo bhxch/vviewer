@@ -189,9 +189,8 @@
 
   /**
    * zen 进出（spec §3）：enterZen/exitZen 只翻 zen 字段（正交性——其余字段不被
-   * 改写，退出即还原）；持久化复用 updateLayout。切换后派发 `vv:zen-changed`
-   * 文档事件（detail {zen}）。viaPopstate=退出由返回键 popstate 触发——守卫历史项
-   * 已被该次回退弹出，history 补偿跳过（updateZenHistory）。
+   * 改写，退出即还原）；持久化复用 updateLayout。viaPopstate=退出由返回键 popstate
+   * 触发——守卫历史项已被该次回退弹出，history 补偿跳过（updateZenHistory）。
    */
   function toggleZen(viaPopstate = false): void {
     const fresh = loadSettings();
@@ -200,7 +199,6 @@
     saveSettings(fresh);
     if (!zen) clearTempTimers();
     updateZenHistory(zen, viaPopstate);
-    document.dispatchEvent(new CustomEvent('vv:zen-changed', { detail: { zen } }));
   }
 
   // ---------- zen 移动端（spec §3.1，Task 4）：返回键拦截 / 浮钮 / 抽屉入口 ----------
@@ -353,7 +351,8 @@
     '.vv-wscreate',
     '.vv-remotesrc',
     '.vv-tabctx',
-    '.vv-ws-pop'
+    '.vv-ws-pop',
+    '.vv-status-picker'
   ].join(', ');
 
   function anyOverlayOpen(): boolean {
@@ -838,8 +837,16 @@
          不错位，零测量。悬停唤出真实条本体（temp 形态），移开 1.5s 再隐。
          zen 下顶栏热区即退出条入口（临时条右键菜单「退出专注模式」） -->
     <!-- svelte-ignore a11y_no_static_element_interactions --><!-- 边缘悬停热区：纯
-         指针唤出通道，无键盘/AT 等价物（zen 退出另有 Esc/快捷键/菜单通道） -->
-    <div class="vv-edge" data-edge="top" onpointerenter={() => summonTemp('top')}></div>
+         指针唤出通道，无键盘/AT 等价物（zen 退出另有 Esc/快捷键/菜单通道）。
+         pointerleave 也是「移开」语义锚点（终审 I-1）：临时条 fixed top:0 压住可见
+         邻条时（TopBar 可见+TabBar 隐藏组合），指针从热区直入内容不经过条本体，
+         条自带 onleave 不触发——热区移开即排定 1.5s 收回，对所有隐藏组合成立 -->
+    <div
+      class="vv-edge"
+      data-edge="top"
+      onpointerenter={() => summonTemp('top')}
+      onpointerleave={() => scheduleHideTemp('top')}
+    ></div>
   {/if}
   <TopBar
     temp={topTemp}
@@ -852,8 +859,13 @@
     }}
   />
   {#if !vis.tabBar}
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="vv-edge" data-edge="tab" onpointerenter={() => summonTemp('tab')}></div>
+    <!-- svelte-ignore a11y_no_static_element_interactions --><!-- pointerleave 同上（终审 I-1） -->
+    <div
+      class="vv-edge"
+      data-edge="tab"
+      onpointerenter={() => summonTemp('tab')}
+      onpointerleave={() => scheduleHideTemp('tab')}
+    ></div>
   {/if}
   <TabBar
     tabs={activeTabs}

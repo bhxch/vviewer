@@ -12,12 +12,18 @@ import { test, expect, type Page } from '@playwright/test';
  * - LZ-05 zen：Ctrl+Alt+Z 进出、正交性（显式字段不改写）、Esc 面板优先、
  *   边缘条右键退出、桌面无浮钮
  * - LZ-06 reload 落 zen
+ * - LZ-07 TopBar 可见+TabBar 隐藏组合：临时标签条指针移入内容区 1.5s 自动收回
+ *   （终审 I-1——热区 pointerleave 是「移开」语义锚点，条 fixed top:0 压住可见
+ *   邻条时条本体 onleave 不可达）
  *
  * 移动（mobile project，375×667 触摸）：
  * - mLZ-01 ☰ 抽屉头部「专注模式」进 zen + 右下浮钮（44px 触控标准）退出
  * - mLZ-02 返回键（page.goBack）先关面板再退 zen（zenPopAction 分派）
  * - mLZ-03 reload 落 zen：浮钮在场 + 守卫项经 history.state 存活、返回键仍退 zen
  * - mLZ-04 zen 隐抽屉 toggles/本体，退出还原进入前开合态
+ * - mLZ-05 返回键先关 .vv-ws-pop 工作区菜单（终审 I-2——pop 是九类 overlay 中唯一
+ *   无容器 keydown 的，合成 Esc 派发目标即本体被 window 兜底 contains 守卫挡下，
+ *   closeOverlay 空转+守卫重压成返回键死循环；修复后通道闭合、二次返回退 zen）
  *
  * 渲染器双入口（状态栏指示器浮层/Tab 右键子菜单）已由 t-tab-actions TA-09 与
  * t-open-with OPEN-08 覆盖，本文件不重复。
@@ -250,6 +256,36 @@ test.describe('布局与 zen（桌面）', () => {
     expect(await layoutOf(page)).toMatchObject({ zen: false });
   });
 
+  test('LZ-07：TopBar 可见+TabBar 隐藏——临时标签条移开 1.5s 自动收回（终审 I-1）', async ({
+    page
+  }) => {
+    await waitApp(page);
+
+    // 右键 tabbar 非条目区（管理钮）→ 隐藏标签栏：顶栏保持可见的 T+F 组合
+    await page.locator('.vv-tabbar-manage').click({ button: 'right' });
+    await page.locator('.vv-chromemenu button', { hasText: '隐藏标签栏' }).click();
+    expect((await barState(page, '.vv-tabbar')).cls).toContain('vv-chrome-off');
+    expect((await barState(page, '.vv-topbar')).cls).not.toContain('vv-chrome-off');
+    expect(await page.locator('.vv-edge[data-edge="tab"]').count()).toBe(1);
+    expect(await layoutOf(page)).toMatchObject({ topBarVisible: true, tabBarVisible: false });
+
+    // 悬停 tab 热区（顶栏下方自然槽位）→ 临时标签条 fixed top:0 压住可见顶栏
+    const edge = (await page.locator('.vv-edge[data-edge="tab"]').boundingBox())!;
+    await page.mouse.move(400, 300);
+    await page.mouse.move(edge.x + edge.width / 2, edge.y + edge.height / 2);
+    expect((await barState(page, '.vv-tabbar')).cls).toContain('vv-chrome-temp');
+
+    // 指针从热区直入内容区（不经过条本体——条自带 onleave 不可达的原始缺陷路径）：
+    // 热区 pointerleave 排定 1.5s 收回
+    await page.mouse.move(400, 300);
+    await expect
+      .poll(async () => (await barState(page, '.vv-tabbar')).cls, { timeout: 4_000 })
+      .not.toContain('vv-chrome-temp');
+    // 收回后回归隐藏态（off 类恢复），顶栏不受牵连
+    expect((await barState(page, '.vv-tabbar')).cls).toContain('vv-chrome-off');
+    expect((await barState(page, '.vv-topbar')).cls).not.toContain('vv-chrome-temp');
+  });
+
   test('LZ-06：reload 落 zen（layout.zen 持久化，桌面无浮钮、Esc 退出）', async ({ page }) => {
     await waitApp(page);
     // 同 LZ-05：光标离开顶热区再进 zen（reload 前置态干净）
@@ -343,6 +379,34 @@ test.describe('zen 移动端（mobile project）', () => {
     expect(await page.evaluate(() => (history.state as { vvZen?: number } | null)?.vvZen)).toBe(1);
 
     // reload 后返回键仍先于离页退 zen
+    await page.goBack();
+    await expect(page.locator('.vv-shell.zen')).toHaveCount(0);
+    await expect(page.locator('.vv-topbar')).toBeVisible();
+  });
+
+  test('mLZ-05：返回键先关 .vv-ws-pop 菜单（合成 Esc 容器通道，终审 I-2 死循环回归锚）', async ({
+    page
+  }) => {
+    await page.goto('/');
+    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await enterZenViaDrawer(page);
+
+    // zen 顶栏隐藏（visibility:hidden 不可点）：顶部边缘热区唤出临时条再点触发钮
+    const topEdge = (await page.locator('.vv-edge[data-edge="top"]').boundingBox())!;
+    await page.mouse.move(180, 300);
+    await page.mouse.move(topEdge.x + 4, topEdge.y + topEdge.height / 2);
+    await expect(page.locator('.vv-topbar.vv-chrome-temp')).toBeVisible();
+    await page.locator('.vv-ws-trigger').click();
+    await expect(page.locator('.vv-ws-pop')).toBeVisible();
+
+    // 第一次返回：只关菜单，zen 与守卫保持（修复前 closeOverlay 空转+守卫重压，
+    // 菜单永不关、返回键连续无效的死循环）
+    await page.goBack();
+    await expect(page.locator('.vv-ws-pop')).toHaveCount(0);
+    await expect(page.locator('.vv-shell.zen')).toHaveCount(1);
+    expect(await page.evaluate(() => (history.state as { vvZen?: number } | null)?.vvZen)).toBe(1);
+
+    // 第二次返回：退 zen（通道未被空转消耗）
     await page.goBack();
     await expect(page.locator('.vv-shell.zen')).toHaveCount(0);
     await expect(page.locator('.vv-topbar')).toBeVisible();

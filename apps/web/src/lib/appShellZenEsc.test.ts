@@ -39,3 +39,22 @@ describe('Esc 优先级快照（spec §3：面板优先只关面板，Svelte 5 �
     expect(src).toContain("window.removeEventListener('keydown', snapOverlay, true)");
   });
 });
+
+describe('终审修复锚（2026-10-19 波）：合成 Esc 通道对全部 overlay 成立', () => {
+  const src = readSrc('src/lib/AppShell.svelte');
+
+  it('I-3：OVERLAY_SELECTOR 含 .vv-status-picker（zen 下状态栏候选浮层算 overlay——桌面 Esc 只关浮层不退 zen，移动端返回键可关不残留）', () => {
+    const sel = src.match(/const OVERLAY_SELECTOR = \[([\s\S]*?)\]\.join/);
+    expect(sel).not.toBeNull();
+    expect(sel![1]).toContain('.vv-status-picker');
+  });
+
+  it('I-2：.vv-ws-pop 容器 onkeydown Esc——合成 Esc 的派发目标恰是 pop 本体，window 兜底的 contains 守卫会挡下，容器通道是唯一到达路径', () => {
+    const topbar = readSrc('src/lib/TopBar.svelte');
+    expect(topbar).toMatch(
+      /class="vv-ws-pop"[\s\S]{0,200}onkeydown=\{\(e\) => \{\s*if \(e\.key === 'Escape'\) \{\s*e\.preventDefault\(\);\s*wsMenuOpen = false;\s*\}\s*\}\}/
+    );
+    // window 兜底保留（target 在浮层外的物理 Esc 走兜底），与容器通道按 target 互补不双触发
+    expect(topbar).toContain('!wsPopEl.contains(e.target)');
+  });
+});
