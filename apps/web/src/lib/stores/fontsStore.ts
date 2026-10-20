@@ -39,6 +39,22 @@ function newFontId(): string {
   return `font:${Math.random().toString(36).slice(2, 10).padEnd(8, '0')}`;
 }
 
+/**
+ * 配额错误文案引导（settings center spec §2.2「配额错误引导」，评审 M-1）：
+ * IndexedDB 写入路径（putFontRecord reject——添加/启停两条管线的唯一写盘漏斗）
+ * 捕获 QuotaExceededError 时错误信息附「设置→存储与数据 清理空间」引导（FontsSection
+ * 错误态展示链路渲染 message，无需另行接线）。name 以 /quota/i 匹配——覆盖标准
+ * QuotaExceededError 与 Firefox 旧变体 _quota；其余错误原样透传（同一对象）。
+ */
+export function withQuotaGuidance(err: unknown): unknown {
+  const name = typeof err === 'object' && err !== null ? (err as { name?: unknown }).name : undefined;
+  if (typeof name !== 'string' || !/quota/i.test(name)) return err;
+  const message = err instanceof Error ? err.message : String(err);
+  const wrapped = new Error(`${message}（存储空间不足：前往 设置→存储与数据 清理空间后重试）`);
+  wrapped.name = name;
+  return wrapped;
+}
+
 // ---------- store 基元 ----------
 
 /** 全量列表（addedAt 升序 = 入库序，管理列表展示序）。 */
@@ -67,8 +83,9 @@ async function putFontRecord(rec: FontRecord): Promise<void> {
     const tx = d.transaction(FONTS, 'readwrite');
     tx.objectStore(FONTS).put(rec, rec.id);
     tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'));
+    // reject 统一经配额引导包装（spec §2.2 配额错误引导，评审 M-1）
+    tx.onerror = () => reject(withQuotaGuidance(tx.error));
+    tx.onabort = () => reject(withQuotaGuidance(tx.error ?? new Error('transaction aborted')));
   });
 }
 

@@ -12,6 +12,7 @@ import {
   listFontRecords,
   loadEnabledFontFaces,
   setEnabledFont,
+  withQuotaGuidance,
   type FontRecord
 } from './fontsStore';
 
@@ -308,5 +309,24 @@ describe('loadEnabledFontFaces（启动恢复）', () => {
     expect(fontSet.added).toEqual([faces.find((f) => f.family === '"B"')]);
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(String(warnSpy.mock.calls[0])).toContain('Corrupt');
+  });
+});
+
+describe('配额错误引导（settings center spec §2.2，评审 M-1）', () => {
+  it('QuotaExceededError（含 _quota 变体）message 附「设置→存储与数据」清理引导，name 保留', () => {
+    const q = new DOMException('The quota has been exceeded', 'QuotaExceededError');
+    const wrapped = withQuotaGuidance(q) as Error;
+    expect(wrapped.message).toContain('设置→存储与数据');
+    expect(wrapped.message).toContain('清理空间');
+    expect(wrapped.name).toBe('QuotaExceededError');
+    const legacy = withQuotaGuidance(Object.assign(new Error('写入失败'), { name: '_quota' })) as Error;
+    expect(legacy.message).toContain('设置→存储与数据');
+    expect(legacy.name).toBe('_quota');
+  });
+
+  it('普通错误原样透传（同一对象返回，不含引导文案）', () => {
+    const boom = new Error('boom');
+    expect(withQuotaGuidance(boom)).toBe(boom);
+    expect((withQuotaGuidance(new DOMException('未授权', 'InvalidStateError')) as Error).message).not.toContain('设置');
   });
 });
