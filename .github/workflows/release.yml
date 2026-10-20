@@ -134,6 +134,14 @@ jobs:
           - { os: windows-latest, triple: x86_64-pc-windows-msvc, artifact: windows-x64 }
     steps:
       - uses: actions/checkout@v7
+      # Tauri Linux 构建系统依赖（官方 prerequisites 子集）：runner 不预装——
+      # webkit2gtk-4.1/rsvg 缺失时 pkg-config 在编译 src-tauri 期确定性失败；
+      # patchelf 为 AppImage 打包（linuxdeploy）所需
+      - name: 安装 Tauri Linux 系统依赖
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev patchelf
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.triple }}
@@ -150,7 +158,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # server build.rs 按 grammars-manifest.json（301 全集）源码编译 grammar：
-      # 源树由 fetch 管线产出（缺源仅 partial 告警不断链，桌面 compute 高亮须全量）
+      # 源树由 fetch 管线产出（缺源仅 partial 告警不断链）。桌面壳 spawn 不带
+      # --compute（档 1），全量非运行期所需——为与 server 单二进制同构建面（同一
+      # build.rs 全集清单，产物二进制逐字节等价）并留 compute 接入空间；若桌面产物
+      # 需裁体积，收缩点在此（partial 构建合法），非本步默认行为
       - uses: ./.github/actions/setup-grammars
         with:
           languages: all

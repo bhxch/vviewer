@@ -67,7 +67,7 @@ tag（`v*`）推送后 release workflow 在 GitHub Release 附三平台安装包
 | 平台 | 产物 | 安装与放行 |
 | --- | --- | --- |
 | Windows | `.exe`（NSIS 安装器） | 双击安装；SmartScreen 弹「已保护你的电脑」→ **更多信息 → 仍要运行** |
-| macOS | `.dmg`×2（Apple silicon / Intel 分产物） | 挂载拖入 Applications；首次启动被 Gatekeeper 拦截 → **右键 → 打开**（只首次需要），或「系统设置 → 隐私与安全性 → 仍要打开」 |
+| macOS | `.dmg`×2（Apple silicon / Intel 分产物） | 挂载拖入 Applications；首次启动被 Gatekeeper 拦截 → **系统设置 → 隐私与安全性 → 仍要打开**（只首次需要；右键 → 打开仅旧版 macOS 有效，macOS 15 起已移除） |
 | Linux | `.AppImage` / `.deb` | AppImage `chmod +x` 后直跑；deb `sudo dpkg -i *.deb` |
 
 应用为单实例薄壳：启动时内嵌 server sidecar（只绑 127.0.0.1、内核随机端口，无
