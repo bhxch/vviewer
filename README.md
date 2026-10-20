@@ -68,11 +68,12 @@ tag（`v*`）推送后 release workflow 在 GitHub Release 附三平台安装包
 | --- | --- | --- |
 | Windows | `.exe`（NSIS 安装器） | 双击安装；SmartScreen 弹「已保护你的电脑」→ **更多信息 → 仍要运行** |
 | macOS | `.dmg`×2（Apple silicon / Intel 分产物） | 挂载拖入 Applications；首次启动被 Gatekeeper 拦截 → **系统设置 → 隐私与安全性 → 仍要打开**（只首次需要；右键 → 打开仅旧版 macOS 有效，macOS 15 起已移除） |
-| Linux | `.AppImage` / `.deb` | AppImage `chmod +x` 后直跑；deb `sudo dpkg -i *.deb` |
+| Linux | `.AppImage` / `.deb` | AppImage `chmod +x` 后直跑；发行版缺 libfuse2 报「dlopen libfuse.so.2 失败」时 `sudo apt install libfuse2`，或以 `./VViewer*.AppImage --appimage-extract-and-run` 免 fuse 兜底运行；deb `sudo dpkg -i *.deb` |
 
 应用为单实例薄壳：启动时内嵌 server sidecar（只绑 127.0.0.1、内核随机端口，无
 token、`--allow-lan` 未开），就绪后窗口导航本机页面，退出自动回收子进程。发布前
-按[六步手动冒烟清单](apps/desktop/README.md#手动冒烟清单六步)逐项过一遍；从源码
+按[手动冒烟清单](apps/desktop/README.md#手动冒烟清单)（含发布前必过的故障路径
+抽查）逐项过一遍；从源码
 本地运行/打包见 [`apps/desktop/README.md`](apps/desktop/README.md)「本地开发」。
 
 ### 纯前端（静态托管）

@@ -34,6 +34,13 @@ cargo build --release --manifest-path server/Cargo.toml
 
 配置错误一律 exit code 2 并输出 `error: ...`（空 token、`--allow-lan` 无 token、root/web-dist 不存在、端口占用等）。
 
+### 就绪行（VV_READY）
+
+`serve` 绑定成功后向 stdout 输出恰好一行 `VV_READY port=<n>`（`<n>` 为实测端口，
+`--port 0` 时为内核分配值；先于该行有日志输出）。机器可读就绪信号：脚本与桌面
+薄壳据此判定可连接；CLI 直用者感知为 stdout 多一行输出，人读无碍。该行是协议
+面（桌面壳按行首精确匹配解析），勿加前缀装饰或改格式。
+
 ## 配置文件（--config）
 
 `vviewer serve --config <PATH>`：TOML 配置文件承载 serve 全部参数，是完整的服务端配置面：

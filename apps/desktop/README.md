@@ -46,15 +46,16 @@ macOS 出 .dmg / Windows 出 NSIS .exe；跨平台 targets 列表由 bundler 按
 
 | 项 | 候选序 |
 | --- | --- |
-| server sidecar | ① `<主程序目录>/vviewer-server`（release 打包形态）② `<主程序目录>/vviewer-server-<triple>` ③ `src-tauri/binaries/vviewer-server-<triple>`（dev） |
+| server sidecar | ① `<主程序目录>/vviewer-server`（手动布局兜底；bundler 实际不产出此名，安装名保留 triple+扩展名）② `<主程序目录>/vviewer-server-<triple>`（release 打包形态）③ `src-tauri/binaries/vviewer-server-<triple>`（dev）——Windows 全形态追加 `.exe` |
 | 前端产物 | ① `VV_WEB_DIST` 环境变量 ② `$RESOURCE/_up_/_up_/web/build`（resources 打包形态：`../../web/build/` 中 `..` 按官方规则净化为 `_up_`）③ 仓库内 `apps/web/build`（dev） |
 | 浏览根 | `HOME`（无则 `USERPROFILE`） |
 
 server 额外参数固定：`serve --port 0`（内核分配随机端口）。
 
-## 手动冒烟清单（六步）
+## 手动冒烟清单
 
-GUI 无法在 CI 内验证，发布前按下表人工冒烟（dev 与打包产物各过一遍）：
+六步主路径 + 故障路径抽查，GUI 无法在 CI 内验证，发布前按下表人工冒烟（dev 与
+打包产物各过一遍）：
 
 | # | 步骤 | 预期 |
 | --- | --- | --- |
@@ -65,7 +66,12 @@ GUI 无法在 CI 内验证，发布前按下表人工冒烟（dev 与打包产�
 | 5 | 不关窗，再次启动同一应用 | 不出现第二个实例，既有窗口被唤起置前（单实例） |
 | 6 | 关闭窗口退出 | `pgrep -f vviewer-server` 无残留（子进程被回收） |
 
-故障路径抽查（可选但建议）：
+故障路径抽查（**发布前必过项**，非可选）：
+
+> 这是 C1/C2 类运行期缺陷（插件未注册、平台路径解析落空等——编译期与
+> 单测均无法暴露、只在目标平台真实运行时触发）的唯一抓取手段。门禁：
+> **至少 Linux 一平台本地必过**；**Windows/macOS 每平台 CI 首跑出包后人工
+> 过一遍**（此后回归可抽查）。
 
 - 临时改名为 sidecar 缺失 → 启动弹原生错误窗（含 stderr 摘要），「重启服务」
   恢复改名后可重启成功；「退出」则应用退出且无残留进程。

@@ -70,6 +70,15 @@ impl LaunchFailure {
     }
 }
 
+/// dialog 插件注册单点：main 的 Builder 链与 C1 契约测试同源调用此函数。
+///
+/// 契约：**必须注册**——[`DialogExt`] 的取态入口（`.dialog()`）内部是
+/// `state::<Dialog<R>>()`，未注册即 panic；届时 bootstrap 的三条错误窗路径
+/// （启动失败 / 运行中崩溃 / 主窗创建失败）将全部随之崩溃，错误兜底整体失效。
+fn dialog_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri_plugin_dialog::init()
+}
+
 fn main() {
     let app = tauri::Builder::default()
         // single-instance 必须首个注册（插件要求）：二次启动参数转投既有实例，
@@ -81,6 +90,7 @@ fn main() {
                 let _ = window.set_focus();
             }
         }))
+        .plugin(dialog_plugin())
         .setup(|app| {
             app.manage(ServerState {
                 child: Mutex::new(None),
@@ -317,16 +327,21 @@ fn collect_stderr<R: Read>(mut reader: R, tail: Arc<Mutex<String>>) {
 /// sidecar 路径解析（候选序见 binaries/README.md）。
 fn resolve_sidecar() -> Result<PathBuf, String> {
     let triple = env!("VV_TARGET_TRIPLE");
-    let with_triple = format!("vviewer-server-{triple}");
+    // Windows 可执行名必须带 .exe（externalBin 落盘与探测两态一致），
+    // 其余平台无扩展名
+    let ext = if cfg!(windows) { ".exe" } else { "" };
+    let with_triple = format!("vviewer-server-{triple}{ext}");
     let mut candidates: Vec<PathBuf> = Vec::new();
-    // release：externalBin 打包后去 triple 后缀、置于主程序同目录
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            candidates.push(dir.join("vviewer-server"));
+            // 手动布局兜底（bundler 对 externalBin 实际保留 triple 命名 + 平台
+            // 扩展名——即候选②；本裸名 bundler 不产出，仅为手动拷贝形态容错）
+            candidates.push(dir.join(format!("vviewer-server{ext}")));
+            // release：externalBin 打包落盘形态（triple 命名保留，置于主程序同目录）
             candidates.push(dir.join(&with_triple));
         }
     }
-    // dev（tauri dev / cargo run）：src-tauri/binaries/<name>-<triple>
+    // dev（tauri dev / cargo run）：src-tauri/binaries/<name>-<triple>[.exe]
     let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("binaries")
         .join(&with_triple);
@@ -339,7 +354,8 @@ fn resolve_sidecar() -> Result<PathBuf, String> {
             format!(
                 "server sidecar（vviewer-server）不存在，已尝试：{}。本地开发请先 \
                  `cargo build --release --manifest-path server/Cargo.toml` 并复制为 \
-                 binaries/vviewer-server-<target-triple>（见 binaries/README.md）",
+                 binaries/vviewer-server-<target-triple>（Windows 追加 .exe，见 \
+                 binaries/README.md）",
                 candidates
                     .iter()
                     .map(|p| p.display().to_string())
@@ -384,4 +400,28 @@ fn default_root() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .filter(|p| p.is_dir())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dialog_plugin;
+    use tauri_plugin_dialog::DialogExt;
+
+    /// C1 契约锚：dialog 插件经同一 `init::<R>()`（[`dialog_plugin`]）注册后，
+    /// `DialogExt` 取态入口（错误窗三条路径的唯一入口）可取 state 不 panic——
+    /// 未注册时 `state::<Dialog<R>>()` 直接 panic，错误兜底整体失效。
+    ///
+    /// 局限（如实注记）：main 的 Builder 链无法在 mock runtime 下实例化（Wry
+    /// 需真实窗口系统），本测试锁定的是「注册后取态可用」的插件行为面；链上
+    /// 调用经 `dialog_plugin()` 单点函数约束（main 与本测试同源），删除链上
+    /// `.plugin(dialog_plugin())` 行需人工评审把关。
+    #[test]
+    fn dialog_plugin_registers_manager_state() {
+        let app = tauri::test::mock_app();
+        app.handle()
+            .plugin(dialog_plugin())
+            .expect("dialog 插件注册成功");
+        // 未注册形态下此行 panic：state::<Dialog<R>>() 缺席
+        let _dialog = app.dialog();
+    }
 }

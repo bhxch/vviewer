@@ -66,3 +66,5 @@
 - **tauri-action 不引入**：打包走 tauri CLI（`pnpm --filter desktop exec tauri build`），desktop 只产 artifact，聚合 release job 单一写权限点的既有结构不变；版本经 `--config '{"version":"<tag 去 v>"}'` 覆盖合并烙进产物文件名（conf 静态 0.1.0 仅本地开发用）。
 - **server build.rs 跨平台工具链垫片**：C++ scanner 手法依赖外部 g++/ar/objcopy——windows 垫片为预装 mingw64 入 PATH（mingw 对象 × msvc 链接的 C++ 运行时面是主要校准点），macOS 垫片为 Xcode llvm-objcopy（binutils 兜底）。CI 首跑校准，必要时后续小轮 build.rs cc-cpp 化收编。
 - **Linux runner 钉定 ubuntu-22.04**：deb/AppImage 的 glibc 兼容面取受支持最老 LTS（webkit2gtk-4.1 可用）。
+- **CSP 为显式 null**：上文「CSP 采用 Tauri 默认」字面与落地不符——Tauri 的 CSP 注入仅作用于其自有协议面（tauri:// / IPC 页面），本壳页面是 sidecar 的 http 源（`http://127.0.0.1:<port>`）直链导航，不在该注入面内，无「默认 CSP + 放行清单」可配；`tauri.conf.json` 置 `csp: null`（默认值）即如实表达「壳不施加 CSP 面」。
+- **externalBin/资源候选序（落地设计，原文未记）**：壳侧 sidecar 解析按「主程序目录裸名 → 主程序目录 triple 名 → `src-tauri/binaries` triple 名」候选序探测（Windows 全形态追加 `.exe`）；bundler 对 externalBin 落盘保留 triple 命名与平台扩展名（裸名为手动布局容错，bundler 不产出）。前端产物经 `resources` 的 `../../web/build/` 按官方净化规则落盘为 `$RESOURCE/_up_/_up_/web/build`，壳按该路径解析（源码树直跑回落仓库内路径，`VV_WEB_DIST` 显式覆盖优先）。

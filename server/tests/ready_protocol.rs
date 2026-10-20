@@ -13,9 +13,10 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// 就绪行解析（与 Task 2 shell 侧解析器同语义）：行首精确匹配 `VV_READY port=`，
-/// 尾部须为合法 u16。带任何前缀噪声的行一律不认——server 承诺输出纯净行，
-/// 解析器放宽即掩盖协议破坏。
+/// 就绪行解析（与 Task 2 shell 侧解析器同前缀契约——行首精确匹配 `VV_READY port=`；
+/// 差异：此间尾部 `u16::parse` 容忍前导 `+`，壳侧严格数字校验拒绝之。纯净性由
+/// server 输出侧锁定——本测试断言输出行恰为 `VV_READY port=<n>`，解析器放宽不
+/// 掩盖协议破坏）。
 fn parse_ready_port(line: &str) -> Option<u16> {
     line.strip_prefix("VV_READY port=")?.parse().ok()
 }
