@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use vviewer_storage::{LocalFs, StorageBackend};
+
 use crate::generate_token;
 
 /// ticket 有效期：一次性、30s 过期（SSE 升级专用）。
@@ -43,13 +45,38 @@ impl TicketStore {
     }
 }
 
-/// 单个根的规格：原始路径 + canonicalize 结果（guard 越界校验基准）。
-#[derive(Clone, Debug)]
+/// 单个根的规格：原始路径 + canonicalize 结果（guard 越界校验基准）+ 存储后端。
+#[derive(Clone)]
 pub struct RootSpec {
     /// `--root` 原始路径。
     pub raw: PathBuf,
     /// canonicalize 结果（构造时一次，失败回退原路径）。
     pub canonical: PathBuf,
+    /// 该根的存储后端（阶段一：fs 根恒 LocalFs；S3/WebDAV 挂载根在 Task 5 接入）。
+    pub backend: Arc<dyn StorageBackend>,
+}
+
+impl RootSpec {
+    /// fs 根构造：LocalFs 以 canonical 路径为基——路由层把 guard 解析出的
+    /// canonical 绝对路径按根 strip 成相对路径传入，backend join 回来触达的
+    /// 绝对路径与下沉前的直读形态逐字节一致。
+    pub fn fs_root(raw: PathBuf, canonical: PathBuf, hidden: bool) -> Self {
+        Self {
+            backend: Arc::new(LocalFs::new(canonical.clone(), hidden)),
+            raw,
+            canonical,
+        }
+    }
+}
+
+impl std::fmt::Debug for RootSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // backend 为 dyn 存储（无 Debug 语义），只暴露路径面
+        f.debug_struct("RootSpec")
+            .field("raw", &self.raw)
+            .field("canonical", &self.canonical)
+            .finish_non_exhaustive()
+    }
 }
 
 /// 传给所有 handler 的共享状态。
@@ -92,7 +119,7 @@ impl AppState {
     ) -> Self {
         // main 启动前已校验目录存在；canonicalize 失败时退回原路径（保持可测）
         let root_canonical: PathBuf = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
-        let roots = vec![RootSpec { raw: root.clone(), canonical: root_canonical.clone() }];
+        let roots = vec![RootSpec::fs_root(root.clone(), root_canonical.clone(), hidden)];
         // 多根聚合 watch：每根一个 watcher 线程（单根即历史单 watcher 形状）
         let canonicals: Vec<PathBuf> = roots.iter().map(|r| r.canonical.clone()).collect();
         Self {
@@ -121,7 +148,7 @@ impl AppState {
             .map(|raw| {
                 let canonical =
                     std::fs::canonicalize(&raw).unwrap_or_else(|_| raw.clone());
-                RootSpec { raw, canonical }
+                RootSpec::fs_root(raw, canonical, self.hidden)
             })
             .collect();
         if let Some(first) = self.roots.first() {

@@ -61,3 +61,14 @@ impl From<std::io::Error> for AppError {
         }
     }
 }
+
+/// 存储后端错误 → API 错误（与 io 直读同款分类：NotFound → 404，其余 → 500
+/// 且消息原样透传——文本面与下沉前一致）。
+impl From<vviewer_storage::StorageError> for AppError {
+    fn from(e: vviewer_storage::StorageError) -> Self {
+        match e.kind() {
+            vviewer_storage::StorageErrorKind::NotFound => Self::not_found("not found"),
+            vviewer_storage::StorageErrorKind::Other => Self::internal(e.message().to_string()),
+        }
+    }
+}

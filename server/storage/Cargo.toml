@@ -1,0 +1,17 @@
+[package]
+name = "vviewer-storage"
+version = "0.1.0"
+edition = "2021"
+description = "vviewer 存储抽象：StorageBackend trait 与 LocalFs 等后端（目录挂载阶段一）"
+license = "Apache-2.0"
+
+[dependencies]
+# dyn 兼容 async trait（RPITIT 无法 Arc<dyn>——AppState.roots 需要 dyn 分发）
+async-trait = "0.1"
+tokio = { version = "1", features = ["fs", "io-util"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "macros"] }
+# 测试 mock 实现 trait 需与被测宏同版本
+async-trait = "0.1"

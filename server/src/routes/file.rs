@@ -1,4 +1,8 @@
 //! `GET /api/file`：流式文件响应（单区间 Range + 服务端检测头）。
+//!
+//! 文件打开/检测头/seek 定位已下沉 storage crate（`LocalFs::read_range` 单开
+//! 形态，Task 2 纯重构）；Range 头解析（parse_range/多区间/If-Range 等 HTTP
+//! 语义）与响应头组装留本层。
 
 use std::path::Path;
 
@@ -8,8 +12,9 @@ use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
+
+use vviewer_storage::{EntryKind as BackendEntryKind, RangeSpec};
 
 use crate::detect;
 use crate::error::AppError;
@@ -165,22 +170,6 @@ fn mime_for_path(path: &Path) -> &'static str {
     }
 }
 
-/// 读文件头 ≤8KB（循环填满，容忍短读）。
-async fn read_head(f: &mut tokio::fs::File) -> Vec<u8> {
-    let mut buf = vec![0u8; detect::ENCODING_HEAD_BYTES];
-    let mut filled = 0;
-    while filled < buf.len() {
-        match f.read(&mut buf[filled..]).await {
-            Ok(0) => break,
-            Ok(n) => filled += n,
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(_) => break,
-        }
-    }
-    buf.truncate(filled);
-    buf
-}
-
 /// 416 统一响应：Content-Range: bytes *\/size + JSON error。
 fn range_not_satisfiable(size: u64) -> Response {
     (
@@ -196,19 +185,22 @@ pub async fn file(
     Query(q): Query<FileQuery>,
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
-    let path = guard::resolve_at(&state, q.path.as_deref(), q.root.unwrap_or(0)).await?;
+    let root_idx = q.root.unwrap_or(0);
+    let spec = state
+        .roots
+        .get(root_idx)
+        .ok_or_else(|| guard::root_out_of_range(root_idx))?;
+    let path = guard::resolve_at(&state, q.path.as_deref(), root_idx).await?;
+    // guard 已保证 canonical 落在根内；strip 成 backend 相对路径（字节保真）
+    let rel = path.strip_prefix(&spec.canonical).unwrap_or(Path::new(""));
 
-    let meta = tokio::fs::metadata(&path).await.map_err(AppError::from)?;
-    if meta.is_dir() {
+    let entry = spec.backend.stat(&rel).await?;
+    if matches!(entry.kind, BackendEntryKind::Dir) {
         return Err(AppError::bad_request("path is a directory"));
     }
-    let size = meta.len();
+    let size = entry.size.unwrap_or(0);
     let mime = mime_for_path(&path);
     let lang = detect::lang_for_path(&path);
-
-    let mut f = tokio::fs::File::open(&path).await.map_err(AppError::from)?;
-    let head = read_head(&mut f).await;
-    let encoding = detect::detect_encoding(&head);
 
     // If-Range（BUG-47）：本服务器从不下发 ETag/Last-Modified（验证器缺失），
     // 客户端携带的任何 If-Range 值（强/弱 ETag 或 HTTP-date）都不可能匹配当前
@@ -237,11 +229,21 @@ pub async fn file(
         None => (StatusCode::OK, None, size),
     };
 
-    // 读 head 消耗了读取位置（小文件可能已读空），统一回到响应起点
-    f.seek(std::io::SeekFrom::Start(start.unwrap_or(0)))
-        .await
-        .map_err(AppError::from)?;
-    let stream = ReaderStream::new(f.take(len));
+    // 读取（下沉前：open → read_head 检测采样 → seek 回窗起点 → take 窗长流）；
+    // backend 单开形态，窗为路由层已解析的 (start, len)
+    let read = spec
+        .backend
+        .read_range(
+            &rel,
+            range.map(|(win_start, win_len)| RangeSpec {
+                start: win_start,
+                len: win_len,
+            }),
+            detect::ENCODING_HEAD_BYTES,
+        )
+        .await?;
+    let encoding = detect::detect_encoding(&read.head);
+    let stream = ReaderStream::new(read.stream);
 
     let mut res = Response::builder()
         .status(status)
