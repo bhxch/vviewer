@@ -1,0 +1,27 @@
+[package]
+name = "vviewer-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "VViewer desktop thin shell (Tauri 2)"
+license = "Apache-2.0"
+
+# 独立 workspace：仓库无根 Cargo workspace（server/ 自成一处），桌面壳构建面
+# 独立——不与 server 合并，单 lock 落在本目录。
+[workspace]
+
+[[bin]]
+name = "vviewer-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# 单实例：二次启动唤起既有窗口（plan Global Constraints）
+tauri-plugin-single-instance = { version = "2", features = [] }
+# 原生错误窗（含「重启服务」按钮）；仅 Rust 侧调用，无 IPC 面
+tauri-plugin-dialog = { version = "2", features = [] }
+
+[profile.release]
+strip = true

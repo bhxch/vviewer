@@ -14,6 +14,11 @@ packages/*/dist/
 
 # Rust
 server/target/
+# 桌面壳（Tauri）：cargo 目标目录、sidecar 落位产物与构建期生成的 ACL schema
+# （tauri-build 每次 build 重新生成 gen/schemas，均不入库）
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/binaries/vviewer-server-*
+apps/desktop/src-tauri/gen/
 
 # grammar wasm 资产（构建产物，不入库）：源清单 languages.toml、aliases.json、build-list.json
 # 与构建器入库；产物由 `pnpm gen:grammars` 生成（tree-sitter-cli 自建，vendored 例外见
