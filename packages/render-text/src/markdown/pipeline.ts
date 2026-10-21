@@ -297,8 +297,9 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
     img.addEventListener('error', () => {
       view.classList.add(cls(ctx, 'diagramError'));
       view.textContent = `kroki 渲染失败（${type.id}）`;
-      // 失败时展开源码兜底可读
-      view.setAttribute('hidden', '');
+      // 失败态文案卡可见（md-diagram-error 文本样式在案）+ 源码同展兜底可读——
+      // 4-3：文案不得 hidden（66afead 补的 [hidden] display:none 兜底会把它藏掉，
+      // 退化为台账所记「只露源码无失败文案」形态）；toggle 留「图」可切回文案卡
       sourcePane.removeAttribute('hidden');
       toggle.textContent = '图';
     });
