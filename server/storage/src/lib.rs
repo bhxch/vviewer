@@ -219,7 +219,8 @@ fn encode_invalid_utf8(bytes: &[u8]) -> String {
             }
             Err(e) => {
                 let valid = e.valid_up_to();
-                // valid_up_to 保证前缀合法；unwrap 只在切片越界时不可能发生
+                // `valid_up_to` 由 `from_utf8` 契约保证 ≤ rest.len() 且指向合法
+                // 前缀终点；切片 `&rest[..valid]` 不可能越界，unwrap 不可达
                 out.push_str(std::str::from_utf8(&rest[..valid]).unwrap_or(""));
                 let bad = e.error_len().unwrap_or(rest.len() - valid);
                 for b in &rest[valid..valid + bad] {

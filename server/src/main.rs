@@ -240,6 +240,10 @@ fn default_http_transport() -> Result<Arc<dyn HttpTransport>, String> {
 /// 静态挂载缺省 transport（裁剪形态：无 reqwest，静态挂载不可用）。
 #[cfg(not(feature = "native"))]
 fn default_http_transport() -> Result<Arc<dyn HttpTransport>, String> {
+    // 1-9：裁剪形态本分支不可达（server bin 恒 native、worker 部署不经本 crate
+    // ——workers 计划终审论证在案）；运行时配置错误保留为防御性护栏，
+    // debug 构建额外断言暴露误用。
+    debug_assert!(false, "trimmed-form default_http_transport unreachable in server bin");
     Err("http transport requires the `native` feature (static mounts are native-only)".into())
 }
 

@@ -329,6 +329,8 @@ pub(crate) fn amz_date_from_epoch(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     let rem = secs % 86_400;
     let (y, m, d) = civil_from_days(days);
+    // 1-12 销账：`{:04}`/`{:02}` 的前导零是格式化器宽度语义（格式化时补齐），
+    // 非数据保真——civil_from_days 只产出整数值，历法换算不产生也不丢失前导零。
     format!(
         "{y:04}{m:02}{d:02}T{:02}{:02}{:02}Z",
         rem / 3600,
