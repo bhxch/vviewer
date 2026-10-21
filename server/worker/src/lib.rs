@@ -25,9 +25,9 @@
 //! host 目标门控（`#[cfg(not(target_family = "wasm"))]`），字节流路径保留
 //! tokio `ByteStream` 形态（纯 poll 语义，无需运行时）。
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 mod entry;
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 mod state;
 
 /// VV_TOKEN fail-closed 装配纪律的纯函数面（终审 I-1，native 单测覆盖）。
@@ -38,13 +38,13 @@ pub mod http;
 /// VV_MOUNTS env JSON 解析（纯函数，native 单测覆盖）。
 pub mod mounts;
 /// CoreResponse → worker Response 映射（native 适配层 adapt.rs 的对应物）。
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 mod response;
 /// wasm HttpTransport：worker Fetch 实现 storage 纯 HTTP 接缝。
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 mod transport;
 
 /// fetch handler 主分发（wasm only；native 编译不进——worker 类型在 host
 /// 目标只编译纯函数模块）。
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 mod dispatch;

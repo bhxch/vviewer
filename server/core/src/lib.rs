@@ -25,6 +25,10 @@ pub mod auth;
 pub mod compute;
 pub mod detect;
 pub mod error;
+/// SSE events 域：worker 形态不挂载（能力矩阵裁剪），wasm 目标整体不编译
+/// （台账 1-6：tokio broadcast/mpsc 在 wasm 可编译但驱动面有运行时 panic 触点
+/// ——不可达论证成立后按模块级门控落死）。tickets 为纯表结构不随门。
+#[cfg(not(target_family = "wasm"))]
 pub mod events;
 pub mod file;
 pub mod guard;
