@@ -334,7 +334,9 @@ async fn file_range_unsatisfiable_variants() {
     let cases: [(&str, &str); 4] = [
         ("bytes=10-", "bytes */10"),  // start == size
         ("bytes=5-2", "bytes */10"),  // 起止倒挂
-        ("bytes=abc", "bytes */10"),  // 非数字
+        // 1-2 语法前置（计划明示改锚）：非数字属语法非法，locate 前即 416，
+        // size 未知形态 `bytes */*`（原锚 bytes */10 系 locate 后判定的旧序）
+        ("bytes=abc", "bytes */*"),
         ("bytes=-0", "bytes */10"),   // suffix 0
     ];
     for (range, expect_cr) in cases {
@@ -349,6 +351,21 @@ async fn file_range_unsatisfiable_variants() {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(json["error"].is_string(), "range={range}");
     }
+}
+
+/// 1-2：双重故障错误优先级——语法非法 Range 先于 locate 失败（台账 1-2：
+/// Range 非法+打开失败并存时 416 优先，不再让 500/404 抢答）。
+#[tokio::test]
+async fn invalid_range_wins_over_missing_file() {
+    let f = fixture(false);
+    let (status, headers, _) = get_with(
+        vviewer::build_router(f.state),
+        "/api/file?path=/no/such.bin",
+        |b| b.header("range", "bytes=x-y"),
+    )
+    .await;
+    assert_eq!(status, 416);
+    assert_eq!(headers.get("content-range").unwrap(), "bytes */*");
 }
 
 #[tokio::test]

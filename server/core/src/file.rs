@@ -81,7 +81,12 @@ pub async fn read(located: Located, window: Option<RangeSpec>) -> Result<CoreRes
     let lang = detect::lang_for_path(&rel);
 
     let (status, start, len) = match window {
-        Some(w) => (StatusCode::PARTIAL_CONTENT, Some(w.start), w.len),
+        Some(w) => {
+            // 1-3：路由层解析产物不变式——窗口非空（len=0 窗是上游解析缺陷，
+            // 静默产出空 206 会污染缓存语义）
+            debug_assert!(w.len >= 1, "empty window from route layer: {w:?}");
+            (StatusCode::PARTIAL_CONTENT, Some(w.start), w.len)
+        }
         None => (StatusCode::OK, None, size),
     };
 
