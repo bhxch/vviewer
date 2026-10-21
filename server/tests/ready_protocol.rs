@@ -224,6 +224,31 @@ fn explicit_port_emits_no_ready_line() {
     );
 }
 
+/// 2-1：状态行解析失败必须携带响应原文（诊断完整性——unwrap_or(0) 使
+/// 「为何非 200」不可诊断）。
+#[test]
+fn parse_status_line_carries_diagnosis_on_failure() {
+    assert_eq!(parse_status_line("HTTP/1.1 200 OK\r\n"), Ok(200));
+    assert_eq!(
+        parse_status_line("HTTP/1.0 500 Internal Server Error\r\n"),
+        Ok(500)
+    );
+    let err = parse_status_line("garbage\r\n").unwrap_err();
+    assert!(err.contains("garbage"), "错误须携带原文: {err}");
+    assert!(parse_status_line("HTTP/1.1\r\n").is_err(), "缺状态码段");
+}
+
+/// 解析状态行第二段为状态码；失败 Err 携带响应头原文片段（2-1：诊断
+/// 完整性——明文优于魔法值 0）。
+fn parse_status_line(head: &str) -> Result<u16, String> {
+    let code = head
+        .split_whitespace()
+        .nth(1)
+        .ok_or_else(|| format!("状态行缺失码段: {head}"))?;
+    code.parse::<u16>()
+        .map_err(|_| format!("状态码非数字: {head}"))
+}
+
 /// 裸 TCP 探针：不加 HTTP 客户端 dev-dep，HTTP/1.1 + Connection: close 读到 EOF，
 /// 取状态行第二段为状态码。VV_READY 于 bind 后输出，连接理论即成；重试仅为
 /// accept 循环启动前的毫秒级窗口兜底。
@@ -238,13 +263,12 @@ fn health_status(port: u16) -> u16 {
                     b"GET /api/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
                 )
                 .unwrap();
-            let mut buf = String::new();
-            let _ = stream.read_to_string(&mut buf);
-            return buf
-                .split_whitespace()
-                .nth(1)
-                .and_then(|s| s.parse::<u16>().ok())
-                .unwrap_or(0);
+            let mut head = String::new();
+            let _ = stream.read_to_string(&mut head);
+            match parse_status_line(&head) {
+                Ok(s) => return s,
+                Err(msg) => panic!("{msg}"),
+            }
         }
         std::thread::sleep(Duration::from_millis(100));
     }
