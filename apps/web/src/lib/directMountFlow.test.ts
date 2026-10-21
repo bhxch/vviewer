@@ -93,6 +93,22 @@ describe('openFlow 直连 store 创建分派（带入①创建链路）', () => 
       /syncMountsOnConnect\(base, token, \(ms\) => applyMountRootIndexMigrations\(ms, token\)\)/
     );
   });
+
+  it('台账 3-20：目录 tab 命名消费显示名映射——addDirStoreTab 与 addDirTabForRestore 同走 dirTabNameOf（映射优先、回落 displayName），不回写 storeLabel（hash 输入零改动）', () => {
+    expect(src).toMatch(/function dirTabNameOf\(store: TreeStore\): string/);
+    expect(src).toMatch(/dirTabNameOf[\s\S]{0,200}displayLabelForStore\(store\.id, \{ storeBase: getRemoteBase\(store\.id\) \}\) \?\? store\.displayName\(\)/);
+    // 两个目录 tab 通道都经 dirTabNameOf 命名（addTab(store, '', dirTabNameOf(store))）
+    expect(src.match(/addTab\(store, '', dirTabNameOf\(store\)\)/g)?.length).toBe(2);
+    // displayName 直呼命名点不残留（挂载来源统一走映射）
+    expect(src).not.toMatch(/addTab\(store, '', store\.displayName\(\)\)/);
+  });
+
+  it('台账 3-20：来源列表显示名同走映射——AppShell sources 派生 label 映射优先、回落 storeLabel', () => {
+    const shell = readSrc('src/lib/AppShell.svelte');
+    expect(shell).toMatch(
+      /label: displayLabelForStore\(s\.storeId, \{ storeBase: s\.storeBase \}\) \?\? s\.storeLabel/
+    );
+  });
 });
 
 describe('AppShell 快照恢复直连分支（带入①恢复链路同点）', () => {

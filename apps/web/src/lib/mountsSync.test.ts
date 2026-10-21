@@ -10,11 +10,13 @@ import {
   deleteDirectMount,
   directConfigOf,
   displayEndpoint,
+  displayLabelForStore,
   listDirectMounts,
   listProxyMounts,
   mountFingerprintOf,
   probeMountRoot,
   registerProxyMount,
+  resetMountRecordCacheForTests,
   rewriteSourceForMigration,
   rewriteStoreIdRootIndex,
   saveDirectMount,
@@ -737,6 +739,85 @@ describe('syncMountsOnConnect 迁移回调（台账 3-1：换索引收集 RootIn
     expect(rewriteStoreIdRootIndex(withBase.id, 2, 4)).toBe(
       createRemoteStore(BASE, null, oldLabel, { rootIndex: 4, basePath: 'sub' }).id
     );
+  });
+});
+
+// ---------- 挂载显示名映射（台账 3-20：storeId → mount label，hash 输入零改动） ----------
+
+describe('displayLabelForStore（台账 3-20）', () => {
+  /** 真实打开路径产出的 storeId 锚：createRemoteStore 以 remoteSourceLabel 形态 label 建实例。 */
+  function openedProxyStoreId(rootIndex: number, base = BASE): string {
+    const host = new URL(base).host;
+    const label = rootIndex === 0 ? host : `${host} · 根${rootIndex}/`;
+    return createRemoteStore(base, null, label, { rootIndex }).id;
+  }
+
+  beforeEach(() => {
+    // 镜像为模块级状态（跨用例存活）：清空隔离（IndexedDB 已由文件级 beforeEach 换新库）
+    resetMountRecordCacheForTests();
+  });
+
+  it('proxy 命中：与真实打开链同源（core 工厂产出的 storeId）映射到记录 label', async () => {
+    const rec = recordOf({ registeredRootIndex: 2 });
+    await saveProxyMount(rec);
+    expect(displayLabelForStore(openedProxyStoreId(2), { storeBase: BASE })).toBe('docs');
+    // base 缺省（单候选）：同样命中
+    expect(displayLabelForStore(openedProxyStoreId(2))).toBe('docs');
+  });
+
+  it('多服务器同索引去歧义：不带 base 恒未命中（宁缺不猜），带 base 精确命中', async () => {
+    await saveProxyMount(recordOf({ registeredRootIndex: 2 }));
+    await saveProxyMount(
+      recordOf({ id: 'mount:other', endpoint: 'http://other:9000', serverBase: 'http://other:8321', registeredRootIndex: 2 })
+    );
+    expect(displayLabelForStore(openedProxyStoreId(2))).toBeUndefined();
+    expect(displayLabelForStore(openedProxyStoreId(2), { storeBase: BASE })).toBe('docs');
+    expect(displayLabelForStore(openedProxyStoreId(2), { storeBase: 'http://other:8321' })).toBe('docs');
+  });
+
+  it('3-1 迁移后的冻结 hash 形态天然兼容：匹配按 (base, index) 身份而非 hash 重算', async () => {
+    await saveProxyMount(recordOf({ registeredRootIndex: 4 }));
+    // hash 段属旧 label（deadbeef 任意）：r 段已被 3-1 改写为新索引，仍命中
+    expect(displayLabelForStore('remote:deadbeef:r4', { storeBase: BASE })).toBe('docs');
+  });
+
+  it('未注册（registeredRootIndex 缺失）/索引不匹配/非挂载 id：undefined（调用方回落旧形态）', async () => {
+    await saveProxyMount(recordOf()); // 未注册
+    expect(displayLabelForStore(openedProxyStoreId(2), { storeBase: BASE })).toBeUndefined();
+    await saveProxyMount(recordOf({ id: 'mount:r5', registeredRootIndex: 5 }));
+    expect(displayLabelForStore(openedProxyStoreId(2), { storeBase: BASE })).toBeUndefined();
+    expect(displayLabelForStore('localfs:demo', { storeBase: undefined })).toBeUndefined();
+    expect(displayLabelForStore('placeholder:remote:abcd1234:r2')).toBeUndefined();
+  });
+
+  it('direct 命中：storeId 即记录 id；label 改名经 saveMount 漏斗即时刷新镜像', async () => {
+    const rec: DirectMountRecord = {
+      id: 's3direct:abcd1234',
+      kind: 'direct',
+      backend: 's3',
+      label: '直连桶',
+      endpoint: 'http://127.0.0.1:9000',
+      bucket: 'b1',
+      prefix: '',
+      username: 'ak',
+      secret: 'sk',
+      pathStyle: true,
+      createdAt: 1
+    };
+    await saveDirectMount(rec);
+    expect(displayLabelForStore('s3direct:abcd1234')).toBe('直连桶');
+    await saveDirectMount({ ...rec, label: '改名桶' });
+    expect(displayLabelForStore('s3direct:abcd1234')).toBe('改名桶');
+    await deleteDirectMount('s3direct:abcd1234');
+    expect(displayLabelForStore('s3direct:abcd1234')).toBeUndefined();
+  });
+
+  it('proxy label 改名即时可见（镜像经 saveMount 维护，免重列）；记录未列出过（冷缓存）回落 undefined', async () => {
+    const rec = recordOf({ registeredRootIndex: 2 });
+    await saveProxyMount(rec);
+    expect(displayLabelForStore(openedProxyStoreId(2), { storeBase: BASE })).toBe('docs');
+    await saveProxyMount({ ...rec, label: '文献库' });
+    expect(displayLabelForStore(openedProxyStoreId(2), { storeBase: BASE })).toBe('文献库');
   });
 });
 

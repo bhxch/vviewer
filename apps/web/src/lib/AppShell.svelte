@@ -56,7 +56,7 @@
   } from './layout';
   import { codeLineHeight } from './theme';
   import { loadEnabledFontFaces } from './stores/fontsStore';
-  import { syncMountsOnConnect, listDirectMounts } from './mountsSync';
+  import { syncMountsOnConnect, listDirectMounts, displayLabelForStore } from './mountsSync';
 
   /** 文件树/面板的来源条目：workspace.sources（模型）× storeById（活动实例）的合成。
    * rootIndex/basePath 随模型透传（GlobalSearchPanel → globalSearch 的远程命中
@@ -429,7 +429,11 @@
       const store = storeById(s.storeId);
       if (store !== null && tabs.some((t) => t.source.storeId === s.storeId)) {
         out.push({
-          label: s.storeLabel,
+          // 来源行显示名（台账 3-20）：挂载映射优先（proxy 按 registeredRootIndex、
+          // direct 按记录 id），未命中回落 storeLabel（remoteSourceLabel 冻结形态，
+          // hash 输入零改动）——与目录 tab 命名（openFlow.dirTabNameOf）同走映射，
+          // 来源列表与 tab 不再只见「根N」序号
+          label: displayLabelForStore(s.storeId, { storeBase: s.storeBase }) ?? s.storeLabel,
           store,
           ...(s.rootIndex !== undefined ? { rootIndex: s.rootIndex } : {}),
           ...(s.basePath !== undefined ? { basePath: s.basePath } : {})

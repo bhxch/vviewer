@@ -19,7 +19,7 @@
  * 测试形态：fake-indexeddb + fetch 路由桩（mountsSync.test.ts）。
  */
 import { db, MOUNTS } from './stores/session';
-import type { DavDirectConfig, S3DirectConfig } from '@vviewer/core';
+import { parseRemoteStoreId, type DavDirectConfig, type S3DirectConfig } from '@vviewer/core';
 import type { WorkspaceSource } from './workspaceStore';
 
 /**
@@ -168,13 +168,26 @@ function compareFingerprint(rec: ProxyMountRecord): string {
 
 // ---------- mounts store CRUD（fontsStore 同模式：无 keyPath 自管 id 键） ----------
 
+/**
+ * 记录的会话内镜像（displayLabelForStore 的同步查询面，台账 3-20）：IndexedDB
+ * 是异步面，展示层（tab 命名/来源列表渲染）需要同步映射——在 list/save/delete
+ * 三个漏斗维护镜像（挂载记录量级为个位数，成本可忽略）。
+ */
+const recordCache = new Map<string, MountRecord>();
+
 /** 全量列表（createdAt 升序 = 入库序；proxy/direct 两 kind 混存）。 */
 export async function listMounts(): Promise<MountRecord[]> {
   const d = await db();
   return new Promise((resolve, reject) => {
     const req = d.transaction(MOUNTS, 'readonly').objectStore(MOUNTS).getAll();
-    req.onsuccess = () =>
-      resolve(((req.result as MountRecord[] | undefined) ?? []).sort((a, b) => a.createdAt - b.createdAt));
+    req.onsuccess = () => {
+      const all = ((req.result as MountRecord[] | undefined) ?? []).sort((a, b) => a.createdAt - b.createdAt);
+      // 镜像全量重建：IndexedDB 是唯一事实源，list 是最全的读取面——清空重建
+      // 兜住任何漏斗外的增删（防御性，生产写路径全部经 save/delete）
+      recordCache.clear();
+      for (const r of all) recordCache.set(r.id, r);
+      resolve(all);
+    };
     req.onerror = () => reject(req.error);
   });
 }
@@ -182,25 +195,27 @@ export async function listMounts(): Promise<MountRecord[]> {
 /** 入库/更新（对账状态落库与 direct 记录同走此漏斗）。 */
 export async function saveMount(rec: MountRecord): Promise<void> {
   const d = await db();
-  return new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     const tx = d.transaction(MOUNTS, 'readwrite');
     tx.objectStore(MOUNTS).put(rec, rec.id);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'));
   });
+  recordCache.set(rec.id, rec); // 镜像跟随（label 改名/索引更新即时可见）
 }
 
 /** 删除（阶段四管理页删除动作挂点；proxy/direct 通用）。 */
 export async function deleteMount(id: string): Promise<void> {
   const d = await db();
-  return new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     const tx = d.transaction(MOUNTS, 'readwrite');
     tx.objectStore(MOUNTS).delete(id);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'));
   });
+  recordCache.delete(id); // 镜像跟随
 }
 
 /** 代理挂载记录分段列表（对账消费；direct 记录不入对账面，kind 过滤隔离）。 */
@@ -221,6 +236,41 @@ export function saveDirectMount(rec: DirectMountRecord): Promise<void> {
 /** 直连记录删除（deleteMount 直连侧具名漏斗）。 */
 export function deleteDirectMount(id: string): Promise<void> {
   return deleteMount(id);
+}
+
+// ---------- 挂载显示名映射（台账 3-20：storeId → mount label，纯展示面） ----------
+
+/**
+ * storeId → 挂载显示名（proxy/direct 记录的 label；未命中 undefined，调用方回落
+ * 既有形态）。**hash 输入面零改动**：storeLabel 仍为 remoteSourceLabel 冻结值、
+ * 参与 storeId hash，本映射只服务展示名（目录 tab 标题/来源列表行），显示名与
+ * hash 输入解耦。匹配规则：
+ * - direct：storeId 即记录 id（s3direct:/davdirect: + hash8），精确命中；
+ * - proxy：storeId 反解 r 段（core parseRemoteStoreId 同源）对记录
+ *   registeredRootIndex；opts.storeBase 提供时一并限定 serverBase（多服务器同
+ *   索引去歧义——storeId 不携带 base，缺 base 且多候选时宁可未命中不猜）。
+ *   3-1 迁移后的冻结 hash 形态（hash 段属旧 label）天然兼容：匹配按
+ *   (serverBase, index) 身份而非 hash 重算，r 段已随 3-1 同步改写为新索引。
+ * 查询走 recordCache 镜像（list/save/delete 漏斗维护）——记录未被列出过/库不可
+ * 用时未命中回落，即既有展示形态（降级安全）。
+ */
+export function displayLabelForStore(storeId: string, opts?: { storeBase?: string }): string | undefined {
+  const direct = recordCache.get(storeId);
+  if (direct?.kind === 'direct') return direct.label;
+  const parts = parseRemoteStoreId(storeId);
+  if (parts === null) return undefined;
+  const candidates = [...recordCache.values()].filter(
+    (r) =>
+      r.kind === 'proxy' &&
+      r.registeredRootIndex === parts.rootIndex &&
+      (opts?.storeBase === undefined || r.serverBase === opts.storeBase)
+  );
+  return candidates.length === 1 ? candidates[0]!.label : undefined;
+}
+
+/** 测试专用：清空会话内记录镜像（用例间隔离；镜像为模块级状态，生产无调用方）。 */
+export function resetMountRecordCacheForTests(): void {
+  recordCache.clear();
 }
 
 /**

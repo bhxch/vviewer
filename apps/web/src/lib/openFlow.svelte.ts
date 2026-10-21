@@ -31,6 +31,7 @@ import { saveServerHealth } from './serverHealthCache';
 import {
   syncMountsOnConnect,
   directConfigOf,
+  displayLabelForStore,
   rewriteSourceForMigration,
   rewriteStoreIdRootIndex,
   type DirectMountRecord,
@@ -1084,6 +1085,17 @@ function sourceOf(store: TreeStore): WorkspaceSource {
   };
 }
 
+/**
+ * 目录 tab 显示名（台账 3-20）：挂载来源映射优先（displayLabelForStore——proxy
+ * 按 registeredRootIndex、direct 按记录 id 命中挂载 label），未命中回落 store
+ * displayName（remoteSourceLabel 冻结形态，即 hash 输入）。挂载 label 只入展示
+ * 面，不回写 storeLabel/source 快照——storeLabel 参与 storeId hash，回写会为同
+ * 一来源造出第二个 storeId（终审 I-2 同因）；hash 输入与 storeId 生成零改动。
+ */
+function dirTabNameOf(store: TreeStore): string {
+  return displayLabelForStore(store.id, { storeBase: getRemoteBase(store.id) }) ?? store.displayName();
+}
+
 /** 目录来源以一个"目录 tab"表达：path=''，ViewerPane 显示引导提示，文件树渲染在左栏。
  * 多根工作区（T4）：来源先登记进当前 workspace（workspace.sources 是文件树/
  * QuickOpen/全局搜索的数据锚，addSource 按 storeId 组内去重）；目录 tab 跨 workspace
@@ -1104,7 +1116,7 @@ export function addDirStoreTab(store: TreeStore, source: WorkspaceSource = sourc
     return;
   }
   workspaceStore.addSource(workspaceStore.activeId, source);
-  addTab(store, '', store.displayName());
+  addTab(store, '', dirTabNameOf(store));
 }
 
 /**
@@ -1291,7 +1303,9 @@ export function addDirTabForRestore(
 ): void {
   if (tabStore.list.some((t) => t.source.path === '' && t.source.storeId === store.id)) return;
   workspaceStore.addSource(wsId, sourceOf(store));
-  const tab = addTab(store, '', store.displayName());
+  // 目录 tab 命名与运行期 addDirStoreTab 同走显示名映射（台账 3-20：来源列表 +
+  // tab 标题两处统一——恢复的挂载 tab 与新鲜打开同名，不露「根N」形态差异）
+  const tab = addTab(store, '', dirTabNameOf(store));
   if (opts?.pinned === true) tab.pinned = true;
 }
 
