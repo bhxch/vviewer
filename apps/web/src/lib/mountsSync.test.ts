@@ -13,6 +13,7 @@ import {
   listDirectMounts,
   listProxyMounts,
   mountFingerprintOf,
+  probeMountRoot,
   registerProxyMount,
   saveDirectMount,
   saveProxyMount,
@@ -558,6 +559,37 @@ describe('syncMountsOnConnect（spec §3 前端对账重注册）', () => {
     expect(calls.find((c) => c.method === 'POST')).toBeUndefined();
     const saved = await onlyRecord();
     expect(saved.registeredRootIndex).toBe(5);
+  });
+
+  it('probe mount root uses literal empty path', async () => {
+    // 3-10：探测请求路径为字面 `path=`（encodeURIComponent('') 产物与字面同串，
+    // 属冗余编码调用面）——回归锚锁定线格式 `path=&root=N`，杜绝改道编码产物
+    stubFetch((_method, url) =>
+      url === `${BASE}/api/tree?path=&root=7` ? jsonResponse(200, { entries: [] }) : undefined
+    );
+    await expect(probeMountRoot(BASE, 'tok', 7)).resolves.toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe(`${BASE}/api/tree?path=&root=7`);
+  });
+
+  it('failed probe record clears stale registeredRootIndex', async () => {
+    // 3-11：探测失败且重注册失败 → failedRecord 不得残留旧 registeredRootIndex
+    // （挂载可能已在对账间隙被服务端撤走/轮换未遂，旧索引只指向他物——展示机
+    // 不再把它当 registered 呈现，打开与 unregister 消费点同失依据）
+    const rec = recordOf();
+    await saveProxyMount({ ...rec, registeredRootIndex: 2 });
+    stubFetch((method, url) => {
+      if (method === 'GET' && url.endsWith('/api/mounts'))
+        return jsonResponse(200, manifestJson([entryOf(rec, 2)], 1));
+      if (method === 'GET' && url.includes('/api/tree')) return new Response('', { status: 500 });
+      if (method === 'DELETE' && url.endsWith('/api/mounts/2')) return new Response('', { status: 405 });
+      return undefined;
+    });
+    await expect(syncMountsOnConnect(BASE, null)).resolves.toBeUndefined();
+    const saved = await onlyRecord();
+    expect(saved.pendingRetry).toBe(true);
+    expect(saved.lastError).toContain('405');
+    expect(saved.registeredRootIndex).toBeUndefined();
   });
 });
 

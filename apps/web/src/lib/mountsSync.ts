@@ -26,7 +26,8 @@ import type { DavDirectConfig, S3DirectConfig } from '@vviewer/core';
  * - backend：后端类别（'s3' | 'webdav'）——brief 的 `kind: 'proxy'` 标识记录
  *   类型（阶段四 direct 记录为另一 kind），POST body 的 kind 取 backend；
  * - serverBase：注册目标服务器（对账作用域，见模块注）；
- * - registeredRootIndex/pendingRetry/lastError：对账状态（健康时 lastError 键删除）。
+ * - registeredRootIndex/pendingRetry/lastError：对账状态（健康时 lastError 键删除；
+ *   失败时 registeredRootIndex 一并清除，不残留失效索引）。
  */
 export interface ProxyMountRecord {
   id: string;
@@ -304,9 +305,13 @@ function healthyRecord(rec: ProxyMountRecord, rootIndex: number): ProxyMountReco
   return copy;
 }
 
-/** 失败态记录（静默标记待重试 + 原因；spec §3「注册失败静默标记待重试」）。 */
+/** 失败态记录（静默标记待重试 + 原因；spec §3「注册失败静默标记待重试」）。
+ * registeredRootIndex 一并清除（台账 3-11）：探测/重注册失败意味着服务端项可能
+ * 已在对账间隙消失或轮换未遂，旧索引只指向他物——不清理会被展示机当 registered
+ * 呈现、并供打开与 unregister 消费失效索引。置 undefined（:52 declared type 形态，
+ * 消费点均 typeof 判定）。 */
 function failedRecord(rec: ProxyMountRecord, message: string): ProxyMountRecord {
-  return { ...rec, pendingRetry: true, lastError: message };
+  return { ...rec, pendingRetry: true, lastError: message, registeredRootIndex: undefined };
 }
 
 function errText(err: unknown): string {
@@ -324,7 +329,7 @@ export async function probeMountRoot(
   rootIndex: number
 ): Promise<boolean> {
   try {
-    const res = await mountsApi(serverBase, token, `/api/tree?path=${encodeURIComponent('')}&root=${rootIndex}`);
+    const res = await mountsApi(serverBase, token, `/api/tree?path=&root=${rootIndex}`);
     return res.ok;
   } catch {
     return false;
