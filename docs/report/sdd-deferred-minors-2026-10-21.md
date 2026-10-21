@@ -1,6 +1,7 @@
 # 六 SDD 台账递延 Minor 提取（多端发布 + 目录挂载批次）
 
 - 阶段一清偿：2026-10-22，14/14（commit 区间 6f1db69..83ba0e0；各条终态标注见一/二节，1-1 附勘误）。
+- 阶段二清偿：2026-10-22，6 修+1 核实销账（commit 区间 69d02be..4835b5b；各条终态标注见一/二节）。
 - 提取日期：2026-10-21。覆盖：上一会话六个 SDD 运行——多端发布阶段一/二/三（desktop-tauri / server-core / workers）与目录挂载阶段一/二/三四（mounts-storage / mounts-api / mounts-direct）。
 - **来源更正**：台账并不在 git 历史里。`.superpowers/sdd/.gitignore` 内容为 `*`，台账从未入库；SDD 工作区清理后盘上文件已删，git 悬空对象（fsck）中亦无。本提取从上一会话模型 IO 转录（`~/.zcode/cli/rollout/model-io-sess_8964b1e2-*.jsonl`）中的 Write 调用与 Bash heredoc 追加重放重建，六个台账全文已归档至 `docs/superpowers/sdd-archive/2026-10-19/`（唯一幸存副本）。
 - 销账核对：条目状态对照台账自身修复波记录与现行代码核实（标 ✅ 已销账附出处；⬜ 仍开放；👁 观察/校准项；📄 记录/知情接受）。
@@ -26,8 +27,8 @@
 | file::read 窗口 len>=1 debug_assert ✅ 已修（阶段一 8c5fe16）：窗口读取补 len≥1 debug 断言 | server-core 终审 | 原注「已核实 core 中无此断言」已随修复失效 |
 | CoreState.runtime_transport pub 字段跨 crate 可写 ✅ 已修（阶段一 807e3b9）：字段私有化，跨 crate 可写面收口 | server-core T2 | 原「Deref 保留+注记」（93c77b9）的临时态终结 |
 | CoreState.version 默认空串 ✅ 已修（阶段一 807e3b9）：补 debug 断言拦截旁路构造的空版本宣告 | server-core T1 | 防御性 nit 已清 |
-| health_status 解析失败 unwrap_or(0) 丢响应体 | desktop-tauri T1 | 诊断完整性可选整改 |
-| spawn_exit_monitor Err 分支子进程僵尸（罕见）/ SIGTERM 孤儿 server / 重启主线程同步冻结 15s / stderr 跨块截断观感 | desktop-tauri T2/终审 | 桌面壳进程治理四项（冻结项原注「阶段二重审条件」未见重审） |
+| ~~health_status 解析失败 unwrap_or(0) 丢响应体~~ ✅ 已修（阶段二 4835b5b）：解析失败携带响应原文，诊断不再丢面 | desktop-tauri T1 | 诊断完整性可选整改，已清 |
+| ~~spawn_exit_monitor Err 分支子进程僵尸（罕见）~~ ✅ 已修（阶段二 6e8a3cf）：kill+wait reap 同纪律 / ~~SIGTERM 孤儿 server~~ ✅ 已修（阶段二 1c26da5+603dea2）：ctrlc 回收处理器 / ~~重启主线程同步冻结 15s~~ ✅ 已修（阶段二 3963c9f）：编排异步化 / ~~stderr 跨块截断观感~~ ✅ 已修（阶段二 ca7d1c2）：跨块 UTF-8 边界保留 | desktop-tauri T2/终审 | 桌面壳进程治理四项，阶段二全清 |
 | watchHealth 复位方向跨源污染（根治任务用例面补） | mounts-direct T3 | 终审以 per-source 通道修复主体，用例面补强挂账 |
 
 ### UX 增强
@@ -49,8 +50,8 @@
 ### 小项（nit，顺手清）
 - workers：~~events.rs 未随 wasm 门控~~ ✅ 已修（阶段一 0bfcd83）：events 模块随 wasm 目标门控；~~门控谓词风格不一致~~ ✅ 已修（阶段一 0bfcd83）：统一 target_family 谓词；~~is_asset_path 大小写字面~~ ✅ 已修（阶段一 03e1a14）：资产扩展名大小写不敏感；~~裁剪形态 adapter 静态挂载面报配置错误可升 compile_error!~~ ✅ 已修（阶段一 488d106）：裁剪分支补不可达 debug 断言（运行时护栏保留）。
 - mounts-api：probeMountRoot 冗余 encodeURIComponent；failedRecord registeredRootIndex 残留展示优先级；manifestJson 引用相等过滤 cosmetic；e2e 断言分号进注释风格；README :index 表示法。
-- mounts-storage：TOCTOU 窗口（头体两测失去同源）；~~lib.rs:213 锚归属注释含混~~ ✅ 已修（阶段一 488d106）：注释订正；~~「前导零」搬运注释固有缺陷~~ ✅ 已修（阶段一 488d106）：s3 历法注释补正确说明（前导零系格式化器宽度语义，非数据保真）；解析器容忍前导 `+`（壳侧须知）；~~VV_READY 无条件输出（显式端口多一行）~~ ✅ 已修（阶段一 83ba0e0）：收窄为 --port 0 专属输出。
-- desktop-tauri：dialog 契约测试防不了 main 链删行（Wry 不可 mock，评审把关兜底——结构性弱锚）。
+- mounts-storage：TOCTOU 窗口（头体两测失去同源）；~~lib.rs:213 锚归属注释含混~~ ✅ 已修（阶段一 488d106）：注释订正；~~「前导零」搬运注释固有缺陷~~ ✅ 已修（阶段一 488d106）：s3 历法注释补正确说明（前导零系格式化器宽度语义，非数据保真）；~~解析器容忍前导 `+`（壳侧须知）~~ ✅ 已解决（spec4 桌面 T2 顺带落地，锁测 ready.rs:124-126 在案）——阶段二核实销账；~~VV_READY 无条件输出（显式端口多一行）~~ ✅ 已修（阶段一 83ba0e0）：收窄为 --port 0 专属输出。
+- desktop-tauri：~~dialog 契约测试防不了 main 链删行（Wry 不可 mock，评审把关兜底——结构性弱锚）~~ ✅ 已修（阶段二 c6c438c）：Builder 链 dialog 注册源码锚，删行防线从单人工升双保险。
 - 候选不立项：region 配置面扩展；s3⇄webdav 同名异构助手迁 lib 统一；挂载降级不可逆→健康检查重探；clippy 既有基线（48 项）。
 
 ## 二、已销账（递延后被后续任务/修复波闭合，勿重复清偿）
@@ -98,6 +99,18 @@
 | 1-12 s3 历法注释（fallback 补正确说明） | 488d106 |
 | 1-13 remote.ts:207 AbortSignal.any 收编 anySignal 守卫 | ad9c745 |
 | 1-14 VV_READY 收窄 --port 0 专属 | 83ba0e0 |
+
+### 阶段二清偿（递延清偿批，2026-10-22，6 修+1 核实销账，commit 区间 69d02be..4835b5b）
+
+| 项 | 闭合处 |
+| --- | --- |
+| 2-1 health_status 解析失败携带响应原文（诊断不再丢面） | 4835b5b |
+| 2-2 exit 监视 Err 分支 reap（kill+wait 同纪律防僵尸） | 6e8a3cf |
+| 2-3 stderr 跨块 UTF-8 边界保留（错误窗摘要不再产 U+FFFD 噪声） | ca7d1c2 |
+| 2-4 重启编排异步化（错误窗不再被 15s 就绪等待冻结） | 3963c9f |
+| 2-5 解析器前导 + 严格拒绝 | 无新 commit：spec4 桌面 T2 顺带落地，锁测 ready.rs:124-126 在案，阶段二核实销账 |
+| 2-6 dialog Builder 链源码锚（删行防线从单人工升双保险） | c6c438c |
+| 2-7 SIGTERM/SIGINT ctrlc 回收处理器（sidecar 不再孤儿化） | 1c26da5 + 603dea2（修复环 1：termination feature + 测试直调） |
 
 ### 阶段一终审新增挂账候选（2026-10-22 终审，均小项）
 
