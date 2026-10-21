@@ -348,7 +348,8 @@ pnpm install && pnpm --filter web build
 rustup target add wasm32-unknown-unknown
 cargo install worker-build
 
-# 3. 本地冒烟（workerd 本地运行时；VV_MOUNTS 临时配置放 server/worker/.dev.vars）
+# 3. 本地冒烟（workerd 本地运行时；VV_MOUNTS 与必填 VV_TOKEN 放
+#    server/worker/.dev.vars——缺 VV_TOKEN 时装配失败关闭，全部请求 500）
 cd server/worker && npx wrangler dev
 
 # 4. 部署（需 CF 账号；wrangler deploy 自动跑 [build] command）
@@ -370,7 +371,7 @@ Workers Scripts: Edit）、`CLOUDFLARE_ACCOUNT_ID`；可选 var `WORKER_URL`（c
 | 变量 | 通道 | 说明 |
 |---|---|---|
 | `VV_MOUNTS` | 建议 Secret（含凭据） | 静态挂载 JSON 数组，元素与 TOML `[[mount]]` 同构（kind/endpoint/bucket/…，见「配置文件」节示例）；读取通道 var→secret 依次兜底 |
-| `VV_TOKEN` | 建议 Secret | Bearer 鉴权；无 token 部署免鉴权——**公网部署必须配置**（运行时挂载写面同 native 纪律） |
+| `VV_TOKEN` | **必填** Secret | Bearer 鉴权（health 免鉴权）。缺失/空串 → worker 拒绝装配，全部请求 500——**fail-closed**（终审 I-1）：Workers 天然公网可达，「无 token」按误配置处理而非静默放行，与 native「`--allow-lan` 必须 token 否则拒绝启动」是等价精神的不同实现 |
 | `VV_BASE_PATH` | var | 部署形态 base 约定，见下 |
 
 ```bash

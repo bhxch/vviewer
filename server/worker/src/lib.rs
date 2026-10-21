@@ -30,6 +30,8 @@ mod entry;
 #[cfg(target_arch = "wasm32")]
 mod state;
 
+/// VV_TOKEN fail-closed 装配纪律的纯函数面（终审 I-1，native 单测覆盖）。
+pub mod env;
 /// 纯 HTTP 语义件（跨目标编译、native 单测覆盖）：Range 头解析与 base-path
 /// 裁剪——与 native 适配层 routes/file.rs 的 parse_range 语义逐行同源。
 pub mod http;

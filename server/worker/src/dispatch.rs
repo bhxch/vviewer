@@ -3,8 +3,9 @@
 //! 的 api_router（裁剪形态）对齐后按能力矩阵裁剪（见 crate 文档路由表）。
 //!
 //! 鉴权（native auth_mw 同构）：health 免鉴权；tree/file/mounts 为 Bearer 组
-//! ——有 token 时要求 `Authorization: Bearer`（constant-time 比较在
-//! core::auth），无 token 部署免鉴权；OPTIONS 预检放行。
+//! ——要求 `Authorization: Bearer`（constant-time 比较在 core::auth）；OPTIONS
+//! 预检放行。worker 形态装配 fail-closed（终审 I-1）后 core.token 恒有值，
+//! native 的「无 token 部署免鉴权」分支在 worker 不可达。
 //!
 //! 资产面（Task 3）：run_worker_first=["/api/*"] 下命中资产由平台直出、worker
 //! 不经手；进到本层的非 /api/* 请求即资产缺失（not_found_handling="none"）——
@@ -24,7 +25,7 @@ use crate::state::WorkerState;
 
 /// `POST /api/mounts` 的原始请求体上限（native MOUNTS_BODY_LIMIT 同款：
 /// 挂载配置是字段级小型 JSON，64KB 已超合理形态数个数量级；超限 413 防
-/// 无界 body 进 serde 解析——POST 在无 token 部署免鉴权，显式限值即写面闸门）。
+/// 无界 body 进 serde 解析——POST 是写面，显式限值即闸门）。
 const MOUNTS_BODY_LIMIT: usize = 64 * 1024;
 
 /// fetch 入口分发（entry.rs 调用）。
@@ -123,8 +124,8 @@ async fn assets_fallback(env: &Env, origin: &str, path: &str) -> worker::Result<
     }
 }
 
-/// Bearer 鉴权（auth_mw 同构）：无 token 配置全放行；OPTIONS 预检放行；
-/// Some(res) = 401 短路响应。
+/// Bearer 鉴权（auth_mw 同构）：OPTIONS 预检放行；Some(res) = 401 短路响应。
+/// token = None 全放行分支——装配 fail-closed（I-1）后不可达，纯类型面防御。
 fn authorize(req: &Request, core: &CoreState) -> worker::Result<Option<Response>> {
     let Some(expected) = core.token.as_deref() else {
         return Ok(None);

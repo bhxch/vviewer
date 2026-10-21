@@ -40,7 +40,8 @@ fn env_string(env: &Env, name: &str) -> worker::Result<Option<String>> {
     Ok(None)
 }
 
-/// isolate 单例取用（首请求惰性装配；配置错误 → Err 消息仅含字段名）。
+/// isolate 单例取用（首请求惰性装配；配置错误 → Err——对外响应由 entry
+/// 通用化为 500（M-3），Err 消息仅进 console，字段级字面不出访客可见面）。
 pub fn init(env: &Env) -> Result<&'static WorkerState, String> {
     if let Some(state) = STATE.get() {
         return Ok(state);
@@ -69,7 +70,11 @@ fn build_from_env(env: &Env) -> Result<WorkerState, String> {
         roots.push(RootSpec::mount(root.meta, root.backend));
     }
 
-    let mut core = CoreState::mounts_only(roots, env_str("VV_TOKEN")?)
+    // VV_TOKEN fail-closed（终审 I-1）：Workers 公网可达，无 token ≈ 误配置
+    // ——装配期拒绝而非 authorize 静默全放行（决策面 crate::env::require_token，
+    // 错误消息指引 `wrangler secret put VV_TOKEN`）
+    let token = crate::env::require_token(env_str("VV_TOKEN")?)?;
+    let mut core = CoreState::mounts_only(roots, Some(token))
         // 运行时注册（POST /api/mounts）的 transport 注入（终审 I-1 的
         // with_transport 消费面——裁剪形态无 reqwest 懒构造，不注入即配置
         // 错误；静态装配与运行时注册共享同一 FetchTransport）

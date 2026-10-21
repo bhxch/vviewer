@@ -72,10 +72,10 @@ mod tests {
     #[test]
     fn parse_error_faces_name_fields_not_values() {
         // 凭据三不纪律的解析错误面：常见配置缺陷（缺 kind/未知字段/非数组）
-        // 的错误消息只含字段名/形态描述，不含字段值。注记：字段**类型**错误
-        // （如凭据误写为数字）的 serde 消息会回显字面量——与 native TOML 配
-        // 置错误面同宽（config.rs 同为原文透传），部署面凭据按 Secret 通道
-        // 配置（state.rs env_string）即为正确形态。
+        // 的错误消息只含字段名/形态描述。注记：字段**类型**错误（如凭据误写
+        // 为数字）的 serde 消息会回显字面量——M-3 后装配错误对外统一通用 500
+        // （entry.rs），本消息仅进运行时日志（console_error），不再构成访客
+        // 可见面；凭据按 Secret 通道配置（state.rs env_string）即为正确形态。
         let err = parse_mounts_json(r#"[{"endpoint":"http://x"}]"#).unwrap_err();
         assert!(err.contains("kind"), "{err}");
         assert!(!err.contains("http://x"), "{err}");
