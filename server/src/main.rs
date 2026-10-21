@@ -131,6 +131,26 @@ pub struct ServeArgs {
     pub log_file: Option<PathBuf>,
 }
 
+// 台账 1-1：token 明文不得经 Debug 外泄（日志/panic 消息面），存在性标记
+// （Some("[redacted]")/None）保留供排障；其余字段原样。与 config.rs 的
+// FileConfig/ResolvedConfig 手工 Debug 同款纪律（同一锁测覆盖三面）。
+impl std::fmt::Debug for ServeArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServeArgs")
+            .field("root", &self.root)
+            .field("web_dist", &self.web_dist)
+            .field("port", &self.port)
+            .field("token", &self.token.as_ref().map(|_| "[redacted]"))
+            .field("token_gen", &self.token_gen)
+            .field("allow_lan", &self.allow_lan)
+            .field("hidden", &self.hidden)
+            .field("cors_origin", &self.cors_origin)
+            .field("compute", &self.compute)
+            .field("log_file", &self.log_file)
+            .finish()
+    }
+}
+
 /// 启动校验链的纯检查部分（自 serve() 提取以便单测；错误消息与检查顺序逐字保持
 /// 既有行为，serve() 外层统一加 "error: " 前缀并映射 exit 2）。
 /// `token` 为解析后的最终令牌（--token-gen 已生成）；`--config` 合并产物经同一条

@@ -25,7 +25,7 @@ pub const DEFAULT_PORT: u16 = 8321;
 pub use vviewer::state::MountConfig;
 
 /// 配置文件全参面：字段名即 TOML 键名（spec §2.1 示例块一一对应）。
-#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+#[derive(Clone, PartialEq, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FileConfig {
     #[serde(default)]
@@ -43,9 +43,29 @@ pub struct FileConfig {
     pub mounts: Vec<MountConfig>,
 }
 
+// 台账 1-1：token 明文不得经 Debug 外泄（日志/panic 消息面），存在性标记
+// （Some("[redacted]")/None）保留供排障；其余字段原样。嵌套凭据由
+// [`MountConfig`] 的手工 Debug 脱敏（姊妹实现，锁测互为邻位）。
+impl std::fmt::Debug for FileConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FileConfig")
+            .field("root", &self.root)
+            .field("web_dist", &self.web_dist)
+            .field("port", &self.port)
+            .field("token", &self.token.as_ref().map(|_| "[redacted]"))
+            .field("allow_lan", &self.allow_lan)
+            .field("hidden", &self.hidden)
+            .field("cors_origin", &self.cors_origin)
+            .field("compute", &self.compute)
+            .field("log_file", &self.log_file)
+            .field("mounts", &self.mounts)
+            .finish()
+    }
+}
+
 /// 合并产物：各字段为「CLI 显式值优先、文件补默认」后的最终值，直接喂给既有启动
 /// 校验链与 serve 流程；`mounts` 原样透传（Task 5 挂载接线前仅承载不消费）。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct ResolvedConfig {
     pub root: Vec<PathBuf>,
     pub web_dist: Option<PathBuf>,
@@ -60,6 +80,25 @@ pub struct ResolvedConfig {
     /// 挂载配置原样透传（main.rs 装配链经后端构造消费——per-kind 必填校验在
     /// `build_mount`，Debug 面脱敏见 [`MountConfig`]）。
     pub mounts: Vec<MountConfig>,
+}
+
+// 台账 1-1：同 [`FileConfig`] 的脱敏纪律——token 存在性标记保留，其余原样。
+impl std::fmt::Debug for ResolvedConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolvedConfig")
+            .field("root", &self.root)
+            .field("web_dist", &self.web_dist)
+            .field("port", &self.port)
+            .field("token", &self.token.as_ref().map(|_| "[redacted]"))
+            .field("token_gen", &self.token_gen)
+            .field("allow_lan", &self.allow_lan)
+            .field("hidden", &self.hidden)
+            .field("cors_origin", &self.cors_origin)
+            .field("compute", &self.compute)
+            .field("log_file", &self.log_file)
+            .field("mounts", &self.mounts)
+            .finish()
+    }
 }
 
 impl From<ResolvedConfig> for ServeArgs {
@@ -442,6 +481,30 @@ password = "p"
         assert!(!format!("{f:?}").contains("TOPSECRET-VALUE"));
         let r = resolve_config(cli(&["/c1"]), Some(f)).unwrap();
         assert!(!format!("{r:?}").contains("TOPSECRET-VALUE"));
+    }
+
+    /// 1-1：token 字段不得经任何配置结构 Debug 外泄（MountConfig 已脱敏的姊妹锚——
+    /// 台账 deferred 1-1 的真实残留面）。
+    #[test]
+    fn token_is_redacted_in_all_config_debug_faces() {
+        // 字面量构造（clippy field_reassign_with_default 零新增）；断言主体
+        // 与简报逐字一致。
+        let f = FileConfig { token: Some("TOPSECRET-TOKEN".into()), ..Default::default() };
+        let dbg = format!("{f:?}");
+        assert!(!dbg.contains("TOPSECRET-TOKEN"), "{dbg}");
+        assert!(dbg.contains("[redacted]"), "存在性保留: {dbg}");
+
+        let r = resolve_config(cli(&["/c1"]), Some(f)).unwrap();
+        // resolve_config 不搬 token 以外的密值；此处直接构造断言
+        let mut r2 = r.clone();
+        r2.token = Some("TOPSECRET-TOKEN".into());
+        assert!(!format!("{r2:?}").contains("TOPSECRET-TOKEN"));
+
+        let args: ServeArgs = r2.into();
+        // ServeArgs::from 透传 token；Debug 面同样脱敏
+        let mut a = args;
+        a.token = Some("TOPSECRET-TOKEN".into());
+        assert!(!format!("{a:?}").contains("TOPSECRET-TOKEN"));
     }
 
     // ---------- 合并产物 → 既有启动校验链（校验链零改动，数据来源多一路） ----------
