@@ -202,6 +202,8 @@ git commit -m "fix(web): 挂载对账失败记录重探恢复——下次对账 
 
 
 
+### Task 5: web mountsSync 小件三件——冗余编码 / failedRecord 清理 / watchHealth 用例（3-10、3-11、3-2）
+
 **定位**：冗余编码=mountsSync.ts:327 `encodeURIComponent('')`；failedRecord=:308-310 只置 pendingRetry+lastError **不清 registeredRootIndex**，展示机 assembleMountRows（mountsManager.ts:320-339）按 registeredRootIndex 判 'registered'；watchHealth 复位点=openFlow:954/1102+AppShell:688，现有测试仅源码锚（directMountFlow.test.ts:28-35），无行为用例。
 
 **Files:**
