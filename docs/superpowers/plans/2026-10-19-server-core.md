@@ -14,7 +14,7 @@
 
 - **行为锁铁律**：`cargo test --workspace` 全绿且**既有测试零改动**（允许的例外：测试内 use 路径随代码迁移的机械适配——断言逻辑零变化）；对外 HTTP 行为逐字节等价（启动校验/exit code/错误 JSON 形态/消息文本）。
 - watch（notify）与 compute（comrak/tree-sitter/diagrams/layout-rs/svgbob）为 cargo feature `native`（默认开启——native 构建 `--all-features` 或 default 行为不变；worker 形态 `--no-default-features` 裁剪）。
-- core crate 不依赖 axum/tower-http/notify/comrak——依赖倒置方向：server → core 单向。
+- core crate 不依赖 axum/tower-http/notify——依赖倒置方向：server → core 单向。compute 重依赖（comrak/tree-sitter/layout-rs/svgbob）经 `native` feature 以 optional dep 进入 core：**裁剪形态**（`--no-default-features`）零上述重依赖编译；**默认形态** compute 域实现体在 core（Task 3 Files 明列），持有重依赖为计划内有意例外。（Task 4 收口校准——原句「不依赖 comrak」仅在裁剪形态严格成立，与默认形态 compute 域入核字面冲突。）
 - 鉴权（constant-time Bearer 比较）、挂载三 API、StorageBackend 分发、启动校验逻辑全部入 core。
 - SSE events 端点：body 为流——CoreResponse.body 需支持流形态（枚举 Full(Bytes)/Stream），worker 形态该路由不挂载（watch=false 能力缺失）。
 - 每任务原子提交；任务串行（每步行为锁全量回归）；本计划为纯重构——**不新增功能、不修 bug、不顺手优化**（发现的独立问题记台账）。

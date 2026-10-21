@@ -1,10 +1,12 @@
 //! vviewer 业务核（多端发布阶段二）：框架无关的纯类型请求/响应 + 按域 handler。
 //!
 //! 依赖倒置方向：`vviewer`（axum 适配层）→ 本 crate 单向。本 crate 不依赖
-//! axum/tower-http/notify/comrak；tokio 生态仅经 `http`/`bytes` 类型面与
+//! axum/tower-http/notify；compute 重依赖（comrak/tree-sitter/layout-rs/svgbob）
+//! 经 `native` feature 以 optional dep 进入——裁剪形态（`--no-default-features`）
+//! 下零重依赖编译；默认形态 compute 域实现体在本 crate（阶段二计划内有意例外，
+//! 见 `Cargo.toml` feature 注记）。tokio 生态仅经 `http`/`bytes` 类型面与
 //! fs/IO 工具进入（axum 0.8 同源 http 1.x / bytes 1.x / tokio 1.x，适配层
-//! 映射零转换成本）。watch/compute 等重依赖的 feature 门控随阶段二后续任务
-//! 落地。
+//! 映射零转换成本）。
 //!
 //! 抽取模式（Task 1 锚定，后续域照此模式）：handler 业务体在本 crate 消费
 //! [`state::CoreState`] 产出 [`CoreResponse`]；适配层把 axum Request 映射为

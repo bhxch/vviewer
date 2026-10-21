@@ -68,3 +68,18 @@
 - **Linux runner 钉定 ubuntu-22.04**：deb/AppImage 的 glibc 兼容面取受支持最老 LTS（webkit2gtk-4.1 可用）。
 - **CSP 为显式 null**：上文「CSP 采用 Tauri 默认」字面与落地不符——Tauri 的 CSP 注入仅作用于其自有协议面（tauri:// / IPC 页面），本壳页面是 sidecar 的 http 源（`http://127.0.0.1:<port>`）直链导航，不在该注入面内，无「默认 CSP + 放行清单」可配；`tauri.conf.json` 置 `csp: null`（默认值）即如实表达「壳不施加 CSP 面」。
 - **externalBin/资源候选序（落地设计，原文未记）**：壳侧 sidecar 解析按「主程序目录裸名 → 主程序目录 triple 名 → `src-tauri/binaries` triple 名」候选序探测（Windows 全形态追加 `.exe`）；bundler 对 externalBin 落盘保留 triple 命名与平台扩展名（裸名为手动布局容错，bundler 不产出）。前端产物经 `resources` 的 `../../web/build/` 按官方净化规则落盘为 `$RESOURCE/_up_/_up_/web/build`，壳按该路径解析（源码树直跑回落仓库内路径，`VV_WEB_DIST` 显式覆盖优先）。
+
+## 7. 阶段二实施注记（vviewer-core 抽取四任务落地校准，2026-10-19）
+
+实现与 §3 的差异与裁决记录（详证见 `.superpowers/sdd/2026-10-19-server-core/` 各任务报告；行为锁 373→392 全程零翻转，13 个集成测试文件一行未动）：
+
+- **域序 = 依赖序**（原文未定序）：Task 2 按 mounts→tree→file（`root_at` 统一寻址依赖运行时挂载容器先入核）；Task 3 按 search→tickets/events→compute+feature 门控。
+- **file 域 locate/read 双段**：原文「core 收已解析 ResolvedRange」落为 `locate`（根寻址/guard/stat/目录 400，返回仅暴露 size）→ 适配层解析 Range/If-Range（HTTP 语义留适配层裁决的落实形态）→ `read(located, Option<RangeSpec>)`。窗口类型取既有 `vviewer_storage::RangeSpec`，不另造 `ResolvedRange`。既有顺序保真：目录 400 先于 Range 416。
+- **`CoreBody::Stream` 提前至 Task 2 落地**（原文挂在 Task 3 SSE 名下；Global Constraints 本明示 Full/Stream 枚举且 file 域流式读即时需要）：chunk 流形态（`Stream<Item=io::Result<Bytes>>`）同时承载文件窗流、search NDJSON、SSE。
+- **compute 域整体入核（含 build.rs grammar 编译链）**：原文「core 对应 handler 在无 feature 时返回能力缺失语义」实落为**编译期不存在**（`#[cfg(feature = "native")]`）+ 路由不挂载 + health 双重门（编译期 × `--compute` 运行时）——比 404/501 语义更强。随之「core 不依赖 comrak」约束**仅在裁剪形态严格成立**；默认形态 core 经 optional dep 持有重依赖属计划内有意例外（compute 域实现体入核是计划 Task 3 Files 明列要求），计划 Global Constraint 该行已同步改写（Task 4 收口）。
+- **SSE wire 编码 core 自产**：复刻 axum 0.8.9 `Event` 字段布局（`data: <载荷>\n\n` / `: <注释>\n\n`）；`Sse::into_response` 自带的 `cache-control: no-cache` 并入 core 头表（迁移前 routes 手工 insert 为冗余位），wire 逐字节不变。
+- **/api/ticket 与 /api/search 不随 native 裁剪**：ticket 域零 notify 依赖、search 依赖仅 tokio process——均非重依赖；阶段三 worker 的裁剪是适配层政策（不挂路由 + health 宣告另置，机制挂点即 core::health 的宣告行，与 compute 双重门同形可复制）。
+- **测试面 native 门禁化**（Task 3 修复轮 M-1）：裁剪形态下死路径的集成测试断言面以文件级/函数级 `#[cfg(feature = "native")]` 门禁（compute_highlight/compute_markdown/events 整文件；health/security 各一函数）——断言零变化，native 形态照常全量编译运行；`cargo check --workspace --all-targets --no-default-features`自此为零红新门。
+- **health 宣告缝演化**：Task 1 预埋 `compute_languages`/`search_engine` fn 指针注入缝，Task 3 域收编 core 后全部退役（core::health 直调同链，零注入；version 仍由适配层注入主 crate 版本杜绝双 crate 漂移）。
+- **AppState 拆分与缝处置**：`CoreState` 持全部业务状态（配置/多根容器/令牌/引擎覆盖/运行时挂载容器），axum 特有面（web_dist/cors_origin/watch hub/ticket 表实例）留适配层。Deref 兼容缝经 Task 4 收口裁决**保留+注记**（auth/routes 与 builder 群为真实消费方，测试面零消费）；guard.rs 适配层包装缝无消费方，**撤除**（业务体在 core::guard 单一事实源）。
+- **启动校验链留守 bin**（Global Constraints「启动校验逻辑全部入 core」未落地，偏差记录）：`validate_startup` 操作 bin 侧 `ServeArgs`（CLI/TOML 合并产物），core 无 CLI 面；worker 形态配置源独立（阶段三 env JSON），不复用该链。按「发现的独立问题记台账」纪律本阶段不改；阶段三若需共享校验再评估下沉 core。装配根职责（CLI 解析/logging/bind/就绪行）同理留守 bin，§3 未列为 core 域。

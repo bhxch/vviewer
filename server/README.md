@@ -4,6 +4,33 @@ Rust + axum 实现的本地文件服务器（M5 档 1：file-server 能力）。
 暴露给 vviewer 前端（或任何 HTTP 客户端）：目录树、Range 文件流、服务端语言/编码检测、
 SSE 变更推送、Bearer token 鉴权与路径安全。全部接口只读。
 
+## 架构：core/adapter 分层（多端发布阶段二）
+
+业务逻辑与 HTTP 框架分离，依赖倒置方向单向：`vviewer`（axum 适配层）→ `vviewer-core`
+（`server/core/`，框架无关业务核）。core 只产出纯类型响应（`CoreResponse { status,
+headers, body }`，body 为聚合字节或 chunk 流），适配层统一经 `src/adapt.rs` 重建 axum
+响应；core 不依赖 axum/tower-http/notify，compute 重依赖（comrak/tree-sitter 等）仅经
+`native` feature 进入（见下 feature 矩阵）——worker 形态（阶段三）可复用 core 而不拖入
+native 重依赖。
+
+| 层 | 位置 | 职责 |
+|---|---|---|
+| 业务核 `vviewer-core` | `server/core/src/` | 全部业务 handler：`auth`（constant-time 比较）/`health`/`tree`/`file`（MIME/编码检测+窗读取）/`mounts`（挂载配置构造+三 API 业务体）/`search`（rg/grep 探测链+NDJSON pump）/`tickets`+`events`（SSE wire 编码+驱动）/`guard`（路径安全）/`compute`（markdown/highlight/diagrams，`native` 门控）；业务状态核 `CoreState`（配置/多根容器/运行时挂载容器） |
+| 适配层 `vviewer`（lib） | `server/src/` | 路由声明与 feature 门控挂载（`routes/`，每 handler 只做参数提取→core 调用→响应重建）；HTTP 语义解析（`routes/file.rs` 的 Range/If-Range 头解析——core 收已解析窗口）；中间件（`auth.rs` 头部提取/`lib.rs` no-cache）；tower-http 层（静态 ServeDir/SPA fallback/CORS/压缩/trace）；watch 广播中心（`watch.rs`，notify 域） |
+| 装配根（bin） | `server/src/main.rs`+`config.rs` | CLI/TOML 配置解析合并、启动校验链（exit 2 契约）、bind/就绪行（`VV_READY`）、tokio runtime 装配 |
+
+feature 矩阵（`native` 默认开启；worker 形态 `--no-default-features` 裁剪）：
+
+| 能力 | native（默认） | `--no-default-features` |
+|---|---|---|
+| watch + `/api/events`（notify） | 挂载；SSE 变更推送 | `watch.rs` 编译不存在；路由不挂载（watch=false 能力缺失） |
+| compute `/api/compute/*`（comrak/tree-sitter/diagrams，core 侧同 feature） | `--compute` 时挂载 + health 宣告 compute/computeLanguages/diagrams | core compute 域编译不存在（build.rs 跳过 grammar 编译）；路由不挂载；health **即使 `--compute` 也不宣告**（编译期 × 运行时双重门） |
+| search `/api/search`（rg/grep，依赖仅 tokio process） | 两形态一致：core handler 恒在，health `searchEngine` 按探测链宣告；worker 侧裁剪为阶段三政策（适配层不挂路由 + 宣告另置，机制挂点在 core::health） | 同左 |
+| health/tree/file/mounts/ticket/auth | 恒在 | 恒在 |
+
+双形态门禁：`cargo test --workspace` + `cargo check --workspace --all-targets
+--no-default-features`（裁剪形态含测试面编译）。
+
 ## 快速开始
 
 ```bash
@@ -251,7 +278,10 @@ console.warn 跳层，不阻塞其余层。实现：`apps/web/src/lib/grammarLay
 ## 构建前置（grammar 源树）
 
 `cargo build` / `cargo test` 在构建期以源码编译全部 grammar（build.rs + cc/FFI，非
-crates.io 预编 crate），需要先备好语法源树（一次性：全量 301 仓浅取，约 3-4GB 磁盘）：
+crates.io 预编 crate），需要先备好语法源树（一次性：全量 301 仓浅取，约 3-4GB 磁盘）。
+阶段二起 grammar 编译链随 compute 域入业务核（`server/core/build.rs`）：`--no-default-features`
+（worker 形态）整体跳过 grammar 编译与 C/C++ 工具链依赖；`VV_GRAMMAR_SOURCES` 相对路径
+仍以 server crate 为基准：
 
 ```bash
 node tools/grammar-builder/build.mjs --fetch
