@@ -15,14 +15,19 @@ import {
   mountFingerprintOf,
   probeMountRoot,
   registerProxyMount,
+  rewriteSourceForMigration,
+  rewriteStoreIdRootIndex,
   saveDirectMount,
   saveProxyMount,
   syncMountsOnConnect,
   unregisterProxyMount,
   type DirectMountRecord,
   type MountManifestEntry,
-  type ProxyMountRecord
+  type ProxyMountRecord,
+  type RootIndexMove
 } from './mountsSync';
+import { createRemoteStore } from '@vviewer/core';
+import type { WorkspaceSource } from './workspaceStore';
 import { isMountRootStoreId } from './serverHealthCache';
 
 // ---------- fetch 路由桩 ----------
@@ -590,6 +595,148 @@ describe('syncMountsOnConnect（spec §3 前端对账重注册）', () => {
     expect(saved.pendingRetry).toBe(true);
     expect(saved.lastError).toContain('405');
     expect(saved.registeredRootIndex).toBeUndefined();
+  });
+});
+
+// ---------- rootIndex 迁移（台账 3-1：纯函数直测 + 迁移对收集回调） ----------
+
+describe('rewriteStoreIdRootIndex（台账 3-1 纯函数：r 段正则改写）', () => {
+  it('r 段替换：hash 段与 basePath 指纹段原样（冻结 label = storeId 恢复回环依据）', () => {
+    expect(rewriteStoreIdRootIndex('remote:abcd1234:r2', 2, 4)).toBe('remote:abcd1234:r4');
+    expect(rewriteStoreIdRootIndex('remote:abcd1234:r2:deadbeef', 2, 4)).toBe('remote:abcd1234:r4:deadbeef');
+  });
+
+  it('r 段 ≠ oldIndex / 旧格式无 r 段 / 相同索引 / 非 remote 形态：原样返回 null', () => {
+    expect(rewriteStoreIdRootIndex('remote:abcd1234:r5', 2, 4)).toBeNull();
+    expect(rewriteStoreIdRootIndex('remote:abcd1234', 0, 4)).toBeNull(); // 旧格式（根 0）无可改写段
+    expect(rewriteStoreIdRootIndex('remote:abcd1234:r2', 2, 2)).toBeNull();
+    expect(rewriteStoreIdRootIndex('localfs:demo', 2, 4)).toBeNull();
+    expect(rewriteStoreIdRootIndex('placeholder:remote:abcd1234:r2', 2, 4)).toBeNull();
+    expect(rewriteStoreIdRootIndex('s3direct:abcd1234', 2, 4)).toBeNull();
+  });
+
+  it('r 段数字不误匹配前缀（oldIndex=2 不命中 r22；oldIndex=22 精确命中）', () => {
+    expect(rewriteStoreIdRootIndex('remote:abcd1234:r22', 2, 4)).toBeNull();
+    expect(rewriteStoreIdRootIndex('remote:abcd1234:r22', 22, 4)).toBe('remote:abcd1234:r4');
+  });
+
+  it('非整数索引防御性拒绝（服务端异常值不产生改写）', () => {
+    expect(rewriteStoreIdRootIndex('remote:abcd1234:r2', Number.NaN, 4)).toBeNull();
+    expect(rewriteStoreIdRootIndex('remote:abcd1234:r2', 2, 4.5)).toBeNull();
+  });
+});
+
+describe('rewriteSourceForMigration（台账 3-1 纯函数：来源面改写）', () => {
+  const source: WorkspaceSource = {
+    kind: 'remote',
+    storeId: 'remote:abcd1234:r2',
+    storeLabel: 'srv:8321 · 根2/',
+    storeBase: BASE,
+    rootIndex: 2
+  };
+  const moves: RootIndexMove[] = [{ serverBase: BASE, oldIndex: 2, newIndex: 4 }];
+
+  it('命中：rootIndex 换新 + storeId r 段改写；storeLabel/basePath 冻结原样（hash 输入零改动）', () => {
+    expect(rewriteSourceForMigration({ ...source, basePath: 'sub' }, moves)).toEqual({
+      kind: 'remote',
+      storeId: 'remote:abcd1234:r4',
+      storeLabel: 'srv:8321 · 根2/',
+      storeBase: BASE,
+      rootIndex: 4,
+      basePath: 'sub'
+    });
+  });
+
+  it('未命中 kind/storeBase/rootIndex 与形状漂移（storeId r 段 ≠ rootIndex）：null 原样保留（不半改写）', () => {
+    expect(rewriteSourceForMigration(source, [])).toBeNull();
+    expect(rewriteSourceForMigration(source, [{ serverBase: 'http://other:1', oldIndex: 2, newIndex: 4 }])).toBeNull();
+    expect(rewriteSourceForMigration(source, [{ serverBase: BASE, oldIndex: 3, newIndex: 4 }])).toBeNull();
+    expect(rewriteSourceForMigration({ ...source, kind: 'direct' }, moves)).toBeNull();
+    expect(rewriteSourceForMigration({ ...source, storeId: 'remote:abcd1234:r9' }, moves)).toBeNull();
+  });
+
+  it('多迁移对取首个命中；rootIndex 缺省（=0）参与匹配但旧格式 id 无法改写返回 null', () => {
+    expect(rewriteSourceForMigration(source, [
+      { serverBase: BASE, oldIndex: 3, newIndex: 9 },
+      { serverBase: BASE, oldIndex: 2, newIndex: 4 }
+    ])).toEqual({ ...source, storeId: 'remote:abcd1234:r4', rootIndex: 4 });
+    expect(
+      rewriteSourceForMigration(
+        { kind: 'remote', storeId: 'remote:abcd1234', storeLabel: 'srv:8321', storeBase: BASE },
+        [{ serverBase: BASE, oldIndex: 0, newIndex: 3 }]
+      )
+    ).toBeNull();
+  });
+});
+
+describe('syncMountsOnConnect 迁移回调（台账 3-1：换索引收集 RootIndexMove）', () => {
+  it('重注册换索引（S-3 轮换）：onMigrated 收到 {serverBase, oldIndex, newIndex}', async () => {
+    const rec = recordOf({ registeredRootIndex: 2 });
+    await saveProxyMount(rec);
+    stubFetch((method, url) => {
+      if (method === 'GET' && url.endsWith('/api/mounts'))
+        return jsonResponse(200, manifestJson([entryOf(rec, 2)], 1));
+      if (method === 'GET' && url.includes('/api/tree')) return new Response('', { status: 502 });
+      if (method === 'DELETE' && url.endsWith('/api/mounts/2')) return emptyResponse(204);
+      if (method === 'POST' && url.endsWith('/api/mounts')) return jsonResponse(201, { rootIndex: 4 });
+      return undefined;
+    });
+    const seen: RootIndexMove[][] = [];
+    await expect(syncMountsOnConnect(BASE, null, (m) => seen.push(m))).resolves.toBeUndefined();
+    expect(seen).toEqual([[{ serverBase: BASE, oldIndex: 2, newIndex: 4 }]]);
+    expect((await onlyRecord()).registeredRootIndex).toBe(4);
+  });
+
+  it('指纹缺失幂等 POST 换索引（服务端重启场景）同样收集；索引不变的记录不进迁移对', async () => {
+    const moved = recordOf({ id: 'mount:moved', registeredRootIndex: 2 });
+    const stayed = recordOf({ id: 'mount:stayed', label: 'stay', endpoint: 'http://127.0.0.1:9001', registeredRootIndex: 3 });
+    await saveProxyMount(moved);
+    await saveProxyMount(stayed);
+    stubFetch((method, url, body) => {
+      if (method === 'GET' && url.endsWith('/api/mounts')) return jsonResponse(200, manifestJson([], 1));
+      if (method === 'POST' && url.endsWith('/api/mounts')) {
+        // 按 body label 区分：moved 重注册到 5，stayed 仍登记 3
+        const label = (body as { label?: string }).label;
+        return jsonResponse(201, { rootIndex: label === 'stay' ? 3 : 5 });
+      }
+      return undefined;
+    });
+    const seen: RootIndexMove[][] = [];
+    await syncMountsOnConnect(BASE, null, (m) => seen.push(m));
+    expect(seen).toEqual([[{ serverBase: BASE, oldIndex: 2, newIndex: 5 }]]);
+  });
+
+  it('回调抛错不外泄（对账全链不抛错契约；记录已落库）', async () => {
+    const rec = recordOf({ registeredRootIndex: 2 });
+    await saveProxyMount(rec);
+    stubFetch((method, url) => {
+      if (method === 'GET' && url.endsWith('/api/mounts')) return jsonResponse(200, manifestJson([], 1));
+      if (method === 'POST' && url.endsWith('/api/mounts')) return jsonResponse(201, { rootIndex: 4 });
+      return undefined;
+    });
+    await expect(
+      syncMountsOnConnect(BASE, null, () => {
+        throw new Error('boom');
+      })
+    ).resolves.toBeUndefined();
+    expect((await onlyRecord()).registeredRootIndex).toBe(4);
+  });
+
+  it('迁移对与 core 工厂联动：重建实例（冻结 label + 新 rootIndex）的 storeId = 正则改写结果', async () => {
+    // 3-1 存活 tab 面的换挂互锁锚：openFlow 以快照 storeLabel 原值 + 新索引重建，
+    // createRemoteStore 产出的 id 必须恰为 rewriteStoreIdRootIndex 的改写值
+    const rec = recordOf({ registeredRootIndex: 2 });
+    const oldLabel = 'srv:8321 · 根2/';
+    const oldStore = createRemoteStore(BASE, null, oldLabel, { rootIndex: 2 });
+    expect(oldStore.id).toMatch(/^remote:[0-9a-f]{8}:r2$/);
+    const rewritten = rewriteStoreIdRootIndex(oldStore.id, 2, 4);
+    const rebuilt = createRemoteStore(BASE, null, oldLabel, { rootIndex: 4 });
+    expect(rebuilt.id).toBe(rewritten);
+    // 带 basePath 的来源同锚（指纹段原样保留）
+    const withBase = createRemoteStore(BASE, null, oldLabel, { rootIndex: 2, basePath: 'sub' });
+    expect(rewriteStoreIdRootIndex(withBase.id, 2, 4)).toBe(
+      createRemoteStore(BASE, null, oldLabel, { rootIndex: 4, basePath: 'sub' }).id
+    );
   });
 });
 

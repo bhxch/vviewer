@@ -22,6 +22,7 @@
     bindArchiveOpenEvents,
     seedSeqFromSnapshots,
     addDirTabForRestore,
+    applyMountRootIndexMigrations,
     createDirectMountStore,
     hasUserActivity,
     loadLastServer,
@@ -698,8 +699,9 @@
     // connectServer 已覆盖新鲜连接面，这里补「刷新恢复」面（服务端重启后前端
     // 存档的代理挂载在重连时自动回填）。fire-and-forget 不阻塞恢复主链；内部
     // 全量吞错（失败静默标记待重试）。同 base 多来源（多根快照）会重复触发，
-    // 对账幂等（同指纹命中即登记、服务端不重复分配）无副作用。
-    void syncMountsOnConnect(base, token).catch(() => {});
+    // 对账幂等（同指纹命中即登记、服务端不重复分配）无副作用。迁移回调
+    // （台账 3-1）：对账换索引时三面改写已开 tab/sources，token 闭包注入。
+    void syncMountsOnConnect(base, token, (ms) => applyMountRootIndexMigrations(ms, token)).catch(() => {});
     return store;
   }
 

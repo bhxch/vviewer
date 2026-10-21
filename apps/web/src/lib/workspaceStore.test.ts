@@ -86,6 +86,28 @@ describe('createWorkspaceState', () => {
     expect(ws.list[0]!.sources).toHaveLength(1);
   });
 
+  it('rewriteSources（台账 3-1）：命中原位替换（保组内位置）、null 原样保留、全未命中不通知', () => {
+    const ws = createWorkspaceState();
+    ws.ensureNonEmpty();
+    ws.addSource('w1', src('remote:aaaa1111', { rootIndex: 2 }));
+    ws.addSource('w1', src('localfs:demo'));
+    ws.add('w2'); // 跨 workspace 一并改写
+    ws.addSource('w2', src('remote:cccc3333', { rootIndex: 2, storeBase: 'http://other' }));
+    let notified = 0;
+    ws.onWorkspacesChanged(() => notified++);
+    ws.rewriteSources((s) =>
+      s.kind === 'remote' && s.storeId === 'remote:aaaa1111'
+        ? { ...s, storeId: 'remote:aaaa1111:r4', rootIndex: 4 }
+        : null
+    );
+    expect(ws.list[0]!.sources.map((s) => s.storeId)).toEqual(['remote:aaaa1111:r4', 'localfs:demo']);
+    expect(ws.list[0]!.sources[0]!.rootIndex).toBe(4);
+    expect(ws.list[1]!.sources[0]!.storeId).toBe('remote:cccc3333'); // storeBase 不匹配：未动
+    expect(notified).toBe(1); // 有改写：恰好通知一次
+    ws.rewriteSources(() => null); // 全未命中：不通知
+    expect(notified).toBe(1);
+  });
+
   it('remove 最后一个工作区：先建默认再删，activeId 指向新默认', () => {
     const ws = createWorkspaceState();
     ws.ensureNonEmpty();

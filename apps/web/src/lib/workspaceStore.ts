@@ -115,6 +115,13 @@ export function createWorkspaceState(): {
   setActive(id: string): void;
   addSource(wsId: string, source: WorkspaceSource): WorkspaceSource;
   removeSource(wsId: string, storeId: string): void;
+  /**
+   * 来源原地改写（台账 3-1 挂载重注册迁移的 sources[] 面）：对全部 workspace 的
+   * 来源逐个调用 rewriter，返回新对象则原位替换、null 原样保留；任一改写发生才
+   * 通知一次。不经 remove+add（会丢组内位置且每条双次通知），保证迁移的
+   * 「记录 + sources + 存活 tab」三面改写在一次通知内原子呈现。
+   */
+  rewriteSources(rewriter: (s: WorkspaceSource) => WorkspaceSource | null): void;
   /** 至少一个不变式：空态建默认工作区（幂等）。 */
   ensureNonEmpty(): void;
   /** 下一工作区 id：'w1' 起序，取既有最大序号+1（快照恢复的非连续 id 安全）。 */
@@ -212,6 +219,19 @@ export function createWorkspaceState(): {
       if (!w || !w.sources.some((s) => s.storeId === storeId)) return;
       w.sources = w.sources.filter((s) => s.storeId !== storeId);
       notify();
+    },
+    rewriteSources(rewriter: (s: WorkspaceSource) => WorkspaceSource | null): void {
+      let changed = false;
+      for (const w of list) {
+        for (let i = 0; i < w.sources.length; i++) {
+          const next = rewriter(w.sources[i]!);
+          if (next !== null) {
+            w.sources[i] = next;
+            changed = true;
+          }
+        }
+      }
+      if (changed) notify();
     },
     ensureNonEmpty(): void {
       if (ensureNonEmptyInternal()) notify();

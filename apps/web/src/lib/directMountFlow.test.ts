@@ -70,6 +70,29 @@ describe('openFlow 直连 store 创建分派（带入①创建链路）', () => 
     expect(sweep).toMatch(/已关闭 \$\{staleTabIds\.length\} 个旧标签页（服务器已重新连接）/);
     expect(sweep).toMatch(/if \(staleTabIds\.length > 0\)/);
   });
+
+  it('台账 3-1：迁移消费接线 applyMountRootIndexMigrations——sources 面走 rewriteSourceForMigration，存活 tab 面重建实例换挂（registerStore + 旧实例 close）', () => {
+    expect(src).toMatch(
+      /export function applyMountRootIndexMigrations\(moves: RootIndexMove\[\], token: string \| null\): void/
+    );
+    const fn = src.match(
+      /export function applyMountRootIndexMigrations\(moves: RootIndexMove\[\], token: string \| null\): void \{[\s\S]*?\n\}/
+    )![0];
+    expect(fn).toContain('rewriteSourceForMigration');
+    expect(fn).toContain('workspaceStore.rewriteSources');
+    expect(fn).toContain('createRemoteStore'); // 冻结 label + 新 rootIndex 重建
+    expect(fn).toContain('registerStore(store)');
+    expect(fn).toMatch(/old\?\.close\?\.\(\)/); // 旧实例停 SSE + 清旧 base 登记
+    expect(fn).toContain('void persist()'); // 快照恢复面跟随改写落盘
+  });
+
+  it('台账 3-1：syncMountsOnConnect 迁移回调注入（connectServer 与 AppShell restore 重连两处，token 闭包）', () => {
+    expect(src).toMatch(/syncMountsOnConnect\(base, tok, \(ms\) => applyMountRootIndexMigrations\(ms, tok\)\)/);
+    const shell = readSrc('src/lib/AppShell.svelte');
+    expect(shell).toMatch(
+      /syncMountsOnConnect\(base, token, \(ms\) => applyMountRootIndexMigrations\(ms, token\)\)/
+    );
+  });
 });
 
 describe('AppShell 快照恢复直连分支（带入①恢复链路同点）', () => {

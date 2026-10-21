@@ -20,6 +20,7 @@
  */
 import { db, MOUNTS } from './stores/session';
 import type { DavDirectConfig, S3DirectConfig } from '@vviewer/core';
+import type { WorkspaceSource } from './workspaceStore';
 
 /**
  * 代理挂载记录（brief 接口 schema + 实施扩展，扩展面记录任务报告）：
@@ -340,13 +341,14 @@ export async function probeMountRoot(
  * 重注册（S-3：凭据轮换）：DELETE /api/mounts/:index + POST 重放保存的配置
  * （含当前保存的凭据）。DELETE 404 = 服务端项已在对账间隙消失（竞态）——
  * 继续 POST 视作缺失注册；其余非 2xx 抛错（静态项 405 亦然——静态项无可
- * 轮换面，不该进本函数，防御性拒绝）。成功返回新分配的 rootIndex。
+ * 轮换面，不该进本函数，防御性拒绝）。成功返回 old→new 索引对（台账 3-1：
+ * new ≠ old 时调用方收集迁移对，供 openFlow 改写已开 tab/sources 的 rootIndex）。
  */
 export async function reregisterMount(
   rec: ProxyMountRecord,
   token: string | null | undefined,
   rootIndex: number
-): Promise<number> {
+): Promise<{ oldIndex: number; newIndex: number }> {
   const del = await mountsApi(rec.serverBase, token, `/api/mounts/${rootIndex}`, { method: 'DELETE' });
   if (!del.ok && del.status !== 404) {
     throw new Error(`重注册 DELETE 失败：HTTP ${del.status}`);
@@ -363,7 +365,7 @@ export async function reregisterMount(
   if (typeof body.rootIndex !== 'number') {
     throw new Error('重注册响应缺少 rootIndex');
   }
-  return body.rootIndex;
+  return { oldIndex: rootIndex, newIndex: body.rootIndex };
 }
 
 /**
@@ -414,6 +416,52 @@ async function postRegister(rec: ProxyMountRecord, base: string, token: string |
   return healthyRecord(rec, body.rootIndex);
 }
 
+// ---------- rootIndex 迁移（台账 3-1：重注册换索引的三面改写数学，纯函数直测） ----------
+
+/** 单条 rootIndex 迁移对：serverBase 作用域内，服务端把该挂载从 oldIndex 挪到 newIndex。 */
+export interface RootIndexMove {
+  serverBase: string;
+  oldIndex: number;
+  newIndex: number;
+}
+
+/**
+ * storeId 的 `:r<old>` 段改写（台账 3-1，core parseRemoteStoreId 同源正则）：
+ * `remote:<hash8>:r<old>[:<hash8>]` → `remote:<hash8>:r<new>[:<hash8>]`。hash 段
+ * （base:label 冻结值）与 basePath 指纹段保持原样——与快照恢复「storeLabel 原值
+ * 回环」（AppShell.reconnectRemoteStore）一致：恢复链以冻结 label + 快照 rootIndex
+ * 重建，label 含「根N」会随索引变，重算反而断裂回环；正则只动 r 段恰与该回环
+ * 形态互锁。非 remote 形态 / r 段 ≠ oldIndex / 相同索引 → null（调用方原样保留）。
+ */
+export function rewriteStoreIdRootIndex(storeId: string, oldIndex: number, newIndex: number): string | null {
+  if (!Number.isInteger(oldIndex) || !Number.isInteger(newIndex) || oldIndex === newIndex) return null;
+  const m = new RegExp(`^remote:([0-9a-f]{8}):r${oldIndex}(?::([0-9a-f]{8}))?$`).exec(storeId);
+  if (m === null) return null;
+  return `remote:${m[1]!}:r${newIndex}${m[2] !== undefined ? `:${m[2]}` : ''}`;
+}
+
+/**
+ * 来源快照的迁移改写（台账 3-1 纯函数）：kind remote 且 storeBase+rootIndex 命中
+ * 迁移对、且 storeId 的 r 段与 rootIndex 一致（形状漂移防御：不一致不改写——半改
+ * 写会让 storeId 与 rootIndex 脱节）→ 返回新对象（rootIndex 换新 + storeId r 段
+ * 改写；storeLabel/basePath 原样冻结——storeLabel 是 hash 输入与恢复回环依据）。
+ * 未命中返回 null（调用方原样保留，不复制）。
+ */
+export function rewriteSourceForMigration(
+  source: WorkspaceSource,
+  moves: ReadonlyArray<RootIndexMove>
+): WorkspaceSource | null {
+  if (source.kind !== 'remote') return null;
+  for (const move of moves) {
+    if (source.storeBase !== move.serverBase) continue;
+    if ((source.rootIndex ?? 0) !== move.oldIndex) continue;
+    const storeId = rewriteStoreIdRootIndex(source.storeId, move.oldIndex, move.newIndex);
+    if (storeId === null) return null; // 漂移/旧格式 id：整条放弃（不半改写）
+    return { ...source, storeId, rootIndex: move.newIndex };
+  }
+  return null;
+}
+
 /**
  * 连接对账（spec §3 前端对账重注册）：连接成功后由 connectServer 挂
  * fire-and-forget。对同 serverBase 的每条保存记录：
@@ -425,8 +473,15 @@ async function postRegister(rec: ProxyMountRecord, base: string, token: string |
  * staticMounts 段条目的 rootIndex 自 fsRoots 起算——单以 fsRoots 为界会把静态
  * 挂载误判成运行时项：探测 500 → DELETE 405 → 永久待重试误态）。
  * 全链不抛错：清单不可达 → 全部记录静默标记待重试；单项失败只标记该项。
+ * 台账 3-1：登记/重注册使某记录的服务端索引变化（known registeredRootIndex ≠
+ * 新索引）时收集 RootIndexMove，循环结束后回调 onMigrated 一次（openFlow 据此
+ * 三面改写已开 tab/sources；回调异常吞掉——记录已落库，不影响对账契约）。
  */
-export async function syncMountsOnConnect(serverBase: string, token?: string | null): Promise<void> {
+export async function syncMountsOnConnect(
+  serverBase: string,
+  token?: string | null,
+  onMigrated?: (moves: RootIndexMove[]) => void
+): Promise<void> {
   try {
     const tok = token ?? null;
     const records = (await listProxyMounts()).filter((r) => r.serverBase === serverBase);
@@ -453,6 +508,7 @@ export async function syncMountsOnConnect(serverBase: string, token?: string | n
     const byFingerprint = new Map<string, MountManifestEntry>();
     for (const e of manifest.mounts) byFingerprint.set(entryFingerprint(e), e);
     const runtimeSegmentStart = manifest.fsRoots + (manifest.staticMounts?.length ?? 0);
+    const moves: RootIndexMove[] = [];
 
     for (const rec of records) {
       let updated: ProxyMountRecord;
@@ -471,7 +527,7 @@ export async function syncMountsOnConnect(serverBase: string, token?: string | n
           updated = healthyRecord(rec, entry.rootIndex);
         } else {
           try {
-            updated = healthyRecord(rec, await reregisterMount(rec, tok, entry.rootIndex));
+            updated = healthyRecord(rec, (await reregisterMount(rec, tok, entry.rootIndex)).newIndex);
           } catch (err) {
             updated = failedRecord(rec, `重注册失败：${errText(err)}`);
             console.warn(`[vviewer] mountsSync：「${rec.label}」${updated.lastError}`);
@@ -482,7 +538,22 @@ export async function syncMountsOnConnect(serverBase: string, token?: string | n
         // 目标已由服务端配置承载（DELETE 恒 405），只登记
         updated = healthyRecord(rec, entry.rootIndex);
       }
+      // 台账 3-1：登记/重注册换索引 → 收集迁移对（prev 为更新前的 registeredRootIndex，
+      // 覆盖清单命中/幂等注册/重注册三条分配新索引的路径）
+      const prevIndex = rec.registeredRootIndex;
+      const nextIndex = updated.registeredRootIndex;
+      if (typeof prevIndex === 'number' && typeof nextIndex === 'number' && prevIndex !== nextIndex) {
+        moves.push({ serverBase: rec.serverBase, oldIndex: prevIndex, newIndex: nextIndex });
+      }
       await saveProxyMount(updated);
+    }
+
+    if (moves.length > 0 && onMigrated !== undefined) {
+      try {
+        onMigrated(moves);
+      } catch (err) {
+        console.warn('[vviewer] mountsSync：迁移回调失败（记录已落库，不影响对账）', err);
+      }
     }
   } catch (err) {
     // 防御性兜底（IndexedDB 自身不可用等）：对账不抛错，不影响连接主链

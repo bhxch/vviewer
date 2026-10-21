@@ -28,7 +28,14 @@ import { loadSettings } from './stores/settings';
 import { releaseStoreIfLast, storeRetained } from './storeRelease';
 import { saveSearchEngine } from './searchEngineCache';
 import { saveServerHealth } from './serverHealthCache';
-import { syncMountsOnConnect, directConfigOf, type DirectMountRecord } from './mountsSync';
+import {
+  syncMountsOnConnect,
+  directConfigOf,
+  rewriteSourceForMigration,
+  rewriteStoreIdRootIndex,
+  type DirectMountRecord,
+  type RootIndexMove
+} from './mountsSync';
 import {
   CLOSED_STACK_MAX,
   ClosedStack,
@@ -895,8 +902,9 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
   // 幂等重注册（指纹缺失才 POST；探测失败走 DELETE+POST 凭据轮换）。置于
   // ticket 预检之后：覆盖新鲜连接与存活实例复用两条成功路径。fire-and-forget
   // 不阻塞连接主链与首屏（plan 裁决）；syncMountsOnConnect 内部全量吞错（失败
-  // 静默标记待重试），此 catch 仅防御性兜底。
-  void syncMountsOnConnect(base, tok).catch(() => {});
+  // 静默标记待重试），此 catch 仅防御性兜底。迁移回调（台账 3-1）：对账换索引
+  // 时三面改写已开 tab/sources，token 闭包注入供重建实例复用同一凭据。
+  void syncMountsOnConnect(base, tok, (ms) => applyMountRootIndexMigrations(ms, tok)).catch(() => {});
 
   // 存活实例复用（与 openRemoteSource 同一防线）：restore 重连通道重建的同源
   // store 实例仍在注册表存活时，重复连接直接复用之——不再走「关闭同 base 全部
@@ -978,6 +986,73 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
   } catch {
     // 存储不可用（隐私模式等）：连接本身不受影响
   }
+}
+
+/**
+ * 挂载重注册的 rootIndex 迁移（台账 3-1）：syncMountsOnConnect 收集的迁移对在此
+ * 消费——「记录（healthyRecord 已写新 registeredRootIndex）+ sources[] + 存活 tab」
+ * 三面同步改写，快照恢复面自然跟随本次 persist 落盘。改写数学见
+ * mountsSync.rewriteStoreIdRootIndex（r 段正则替换，hash/basePath 段与 storeLabel
+ * 冻结）。存活 tab 面据此以「冻结 storeLabel + 新 rootIndex」重建 store 实例换挂：
+ * 只改 storeId 字符串会让实例注册表/remoteBaseById 键脱节（storeById 落空 → 树行
+ * 消失；快照 getRemoteBase 缺失 → 恢复链断裂），而 createRemoteStore 以冻结 label +
+ * 新索引重建的 id 恰为正则改写结果——两形态互锁（派生不一致即放弃 tab 面，防御
+ * 快照 label 与 storeId 脱节）；旧实例在持有者全部换挂后手动 close()（停 SSE +
+ * 清旧 base 登记）。token 由调用方闭包注入（connectServer/restore 重连各持本次
+ * 凭据），重建实例复用同一凭据。
+ */
+export function applyMountRootIndexMigrations(moves: RootIndexMove[], token: string | null): void {
+  if (moves.length === 0) return;
+  // 旧 storeId → 重建实例所需的冻结元数据（须在 sources[] 改写前捕获——改写后
+  // sources 的 storeId 已是新值，rootIndex 字段同理不再指向旧索引）
+  const metaByOldId = new Map<string, { storeBase: string; storeLabel: string; basePath?: string }>();
+  for (const s of workspaceStore.list.flatMap((w) => w.sources)) {
+    if (s.storeBase === undefined) continue;
+    if (rewriteSourceForMigration(s, moves) !== null) {
+      metaByOldId.set(s.storeId, {
+        storeBase: s.storeBase,
+        storeLabel: s.storeLabel,
+        ...(s.basePath !== undefined ? { basePath: s.basePath } : {})
+      });
+    }
+  }
+  // ① sources[]（全部 workspace，rewriteSources 单次通知；快照 sources 落新值）
+  workspaceStore.rewriteSources((s) => rewriteSourceForMigration(s, moves));
+  // ② 存活 tab：按旧 storeId 分组重建实例换挂
+  for (const [oldId, meta] of metaByOldId) {
+    const holders = tabStore.list.filter((t) => t.source.storeId === oldId);
+    if (holders.length === 0) continue; // 无存活持有者：实例已释放，无需重建
+    const move = moves.find((m) => rewriteStoreIdRootIndex(oldId, m.oldIndex, m.newIndex) !== null);
+    if (move === undefined) continue; // 防御：metaByOldId 捕获与 moves 同源，理论不可达
+    const newId = rewriteStoreIdRootIndex(oldId, move.oldIndex, move.newIndex)!;
+    const store = createRemoteStore(meta.storeBase, token, meta.storeLabel, {
+      rootIndex: move.newIndex,
+      ...(meta.basePath !== undefined ? { basePath: meta.basePath } : {})
+    });
+    if (store.id !== newId) continue; // 派生不一致：放弃 tab 面（记录/sources 面已改写）
+    // SSE 接线与 connectServer 同款：autoRefresh 过滤 + watch-error 置降级指示
+    watchHealth.degraded = false;
+    store.watch(
+      (paths) => {
+        if (!loadSettings().autoRefresh) return;
+        tabStore.refreshPaths(store.id, paths);
+      },
+      () => {
+        watchHealth.degraded = true;
+        console.warn('[vviewer] 服务器变更推送不可用，自动刷新已停用');
+      }
+    );
+    for (const t of holders) {
+      t.source.store = store;
+      t.source.storeId = store.id;
+    }
+    registerStore(store); // 新实例入册（activeStores 键 = 新 id，registryVersion 随之自增）
+    const old = storeById(oldId);
+    activeStores.delete(oldId); // 旧 id 注册表项摘除（TabCollection.close 的注册表清理同款）
+    registryVersion.n++;
+    old?.close?.(); // 旧实例持有者已清空：停 SSE + 清 remoteBaseById 旧登记
+  }
+  void persist(); // 三面改写后的快照落盘（恢复面跟随）
 }
 
 /** 读取会话内上次成功连接的服务器（供连接表单预填；无记录/损坏返回 null）。 */
