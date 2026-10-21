@@ -309,23 +309,56 @@ fn stderr_summary(state: &ServerState) -> String {
 }
 
 /// stderr 收集线程：追加进环形尾部（保留最后 [`STDERR_TAIL_LIMIT`] 字节）。
+/// 2-3：不完整 UTF-8 尾字节能跨读保留（向后找块内最后边界，剩余 ≤3 字节
+/// 留待下块；EOF 时剩余 lossy 兜底）——逐块 lossy 会把被读边界撕开的
+/// 多字节字符变成 U+FFFD 观感噪声。
 fn collect_stderr<R: Read>(mut reader: R, tail: Arc<Mutex<String>>) {
     let mut buf = [0u8; 512];
+    let mut pending: Vec<u8> = Vec::new();
     loop {
         match reader.read(&mut buf) {
-            Ok(0) | Err(_) => return,
-            Ok(n) => {
+            Ok(0) | Err(_) => {
                 let mut t = tail.lock().unwrap();
-                t.push_str(&String::from_utf8_lossy(&buf[..n]));
-                let len = t.len();
-                if len > STDERR_TAIL_LIMIT {
-                    let cut = len - STDERR_TAIL_LIMIT;
-                    // UTF-8 字符边界对齐，避免摘要串撕开多字节字符
-                    let cut = (cut..len).find(|&i| t.is_char_boundary(i)).unwrap_or(len);
-                    t.drain(..cut);
+                t.push_str(&String::from_utf8_lossy(&pending));
+                trim_tail(&mut t);
+                return;
+            }
+            Ok(n) => {
+                pending.extend_from_slice(&buf[..n]);
+                // 块内最后一个 UTF-8 边界：尾部最多 3 字节可能是被切开的多字节
+                // 序列前缀；超过 3 字节仍无边界即非法序列，整块 lossy 兜底
+                let mut split = pending.len();
+                let limit = split.saturating_sub(3);
+                while split > limit && !is_char_boundary(&pending, split) {
+                    split -= 1;
                 }
+                let flushed = String::from_utf8_lossy(&pending[..split]).into_owned();
+                pending.drain(..split);
+                let mut t = tail.lock().unwrap();
+                t.push_str(&flushed);
+                trim_tail(&mut t);
             }
         }
+    }
+}
+
+/// 环形尾部裁剪（UTF-8 字符边界对齐；从 collect_stderr 各刷写点共用）。
+fn trim_tail(t: &mut String) {
+    let len = t.len();
+    if len > STDERR_TAIL_LIMIT {
+        let cut = len - STDERR_TAIL_LIMIT;
+        let cut = (cut..len).find(|&i| t.is_char_boundary(i)).unwrap_or(len);
+        t.drain(..cut);
+    }
+}
+
+/// 字节序列的 UTF-8 边界判定（std 无 `[u8]::is_char_boundary`，手写等价）：
+/// index 处非续字节（0b10xxxxxx）即边界；index == len 时须整段为合法 UTF-8
+/// 才算边界——尾部不完整前缀（被读边界撕开的多字节序列）不算，留待下块。
+fn is_char_boundary(bytes: &[u8], index: usize) -> bool {
+    match bytes.get(index) {
+        Some(&b) => (b & 0xC0) != 0x80,
+        None => std::str::from_utf8(bytes).is_ok(),
     }
 }
 
@@ -409,6 +442,10 @@ fn default_root() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Read;
+    use std::sync::{Arc, Mutex};
+
+    use super::collect_stderr;
     use super::dialog_plugin;
     use tauri_plugin_dialog::DialogExt;
 
@@ -428,5 +465,50 @@ mod tests {
             .expect("dialog 插件注册成功");
         // 未注册形态下此行 panic：state::<Dialog<R>>() 缺席
         let _dialog = app.dialog();
+    }
+
+    /// 2-3：多字节字符被读边界切开时，摘要不得出现 U+FFFD（不完整尾巴跨读保留）。
+    #[test]
+    fn collect_stderr_keeps_multibyte_chars_across_chunk_boundary() {
+        struct ChunkReader { data: Vec<u8>, pos: usize, chunk: usize }
+        impl Read for ChunkReader {
+            fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+                let end = (self.pos + self.chunk).min(self.data.len());
+                let n = end - self.pos;
+                out[..n].copy_from_slice(&self.data[self.pos..end]);
+                self.pos = end;
+                Ok(n)
+            }
+        }
+        // "中" = 3 字节，读块大小 1 强制三块拼接；前后夹 ASCII 定位边界
+        let payload = b"ok\xe4\xb8\xadend".to_vec();
+        let tail = Arc::new(Mutex::new(String::new()));
+        collect_stderr(ChunkReader { data: payload, pos: 0, chunk: 1 }, tail.clone());
+        let s = tail.lock().unwrap().clone();
+        assert_eq!(s, "ok中end", "跨块字符必须完整: {s:?}");
+    }
+
+    /// 2-3：EOF 时 pending 非空（尾巴不完整即断流）——EOF 分支 lossy 兜底，
+    /// 不完整尾字节按 U+FFFD 收尾且不吞前置完整字符（新实现的 EOF 刷写行为锚：
+    /// 缺失该刷写时尾部字节被静默丢弃，此测试即翻转）。
+    #[test]
+    fn collect_stderr_flushes_incomplete_tail_lossy_at_eof() {
+        struct ChunkReader { data: Vec<u8>, pos: usize, chunk: usize }
+        impl Read for ChunkReader {
+            fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+                let end = (self.pos + self.chunk).min(self.data.len());
+                let n = end - self.pos;
+                out[..n].copy_from_slice(&self.data[self.pos..end]);
+                self.pos = end;
+                Ok(n)
+            }
+        }
+        // "中" 的前两字节后断流：无法跨读保留，EOF lossy 兜底为单个 U+FFFD
+        let payload = b"ab\xe4\xb8".to_vec();
+        let chunk = payload.len();
+        let tail = Arc::new(Mutex::new(String::new()));
+        collect_stderr(ChunkReader { data: payload, pos: 0, chunk }, tail.clone());
+        let s = tail.lock().unwrap().clone();
+        assert_eq!(s, "ab\u{fffd}", "EOF 不完整尾巴须 lossy 兜底且不丢前置字符: {s:?}");
     }
 }
