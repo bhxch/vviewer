@@ -6,7 +6,7 @@
 
 **Architecture:** KaTeX 增强在管线 katex 步（扫描器扩展+mhchem 动态子路径导入）；扩展语法双端同步——markdown-it 插件（engine.ts 注册）+ comrak extension 开启（server markdown.rs，字段已实证存在）+ 双侧金标 fixture 交叉注记作一致性锚；引擎无关项（callout 折叠/wikilink/徽标）落 enrich/copyCode 前端单实现层。
 
-**Tech Stack:** markdown-it 15（+markdown-it-mark/ins/deflist）、comrak 0.56（`extension.highlight/insert/inline_footnotes`——均 ExtensionOptions 字段。**勘误 2026-10-21**：原文「`parser.inline_footnotes`——registry 源码 parser/options.rs:170/569/586 实证」失实：inline_footnotes 属 Extension 非 Parse 选项，行号引用亦已漂移；实证=server/core/src/compute/markdown.rs extension 配置段 `ext.inline_footnotes`）、katex contrib/mhchem、vitest/playwright。
+**Tech Stack:** markdown-it 15（+markdown-it-mark/ins/deflist）、comrak 0.56（`extension.highlight/insert/inline_footnotes`——均 Extension（`options.extension`）字段。**勘误 2026-10-21**：原文「`parser.inline_footnotes`——registry 源码 parser/options.rs:170/569/586 实证」失实：行号本身逐一精确（0.56.0 上游 :170/:569/:586 恰为该三字段），失实的是行号所锚字段的 struct 归属——inline_footnotes 属 Extension（上游 options.rs:32 `pub struct Extension`）非 Parse 侧选项；实证=server/core/src/compute/markdown.rs extension 配置段 `ext.inline_footnotes`）、katex contrib/mhchem、vitest/playwright。
 
 **Spec:** `docs/superpowers/specs/2026-10-19-markdown-markpad-alignment-design.md` §3、§4
 
@@ -212,7 +212,7 @@ Expected: FAIL
         options.extension.inline_footnotes = true; // 勘误 2026-10-21：Extension 非 Parse 选项
 ```
 
-（**勘误 2026-10-21**：原文 `options.parser.inline_footnotes` 失实——`inline_footnotes` 属 ExtensionOptions（`options.extension` 字段访问），非 ParseOptions；实证=server/core/src/compute/markdown.rs extension 配置段。）
+（**勘误 2026-10-21**：原文 `options.parser.inline_footnotes` 失实——`inline_footnotes` 属 Extension（`options.extension` 字段访问，0.56.0 上游 src/parser/options.rs:32 `pub struct Extension<'c>`），非 Parse 侧选项；实证=server/core/src/compute/markdown.rs extension 配置段。）
 
 - [ ] **Step 4: 跑测试确认通过 + 全量 cargo 回归**；engine.test.ts 金标注记：在 Task 2 三用例注释补「comrak 对偶：server/core/src/compute/markdown.rs tests highlight_and_insert_extensions / inline_footnote_renders——形态一致以两侧断言互为锚」。
 
