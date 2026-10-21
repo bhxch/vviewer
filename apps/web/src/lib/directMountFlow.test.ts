@@ -54,6 +54,22 @@ describe('openFlow 直连 store 创建分派（带入①创建链路）', () => 
       /releaseDirectMountStore[\s\S]{0,400}tabStore\.close\(id, \{ undoable: false \}\)/
     );
   });
+
+  it('台账 3-21：批量关闭接状态栏提示——挂载释放按关闭计数提示，0（无存活实例）静默', () => {
+    const fn = src.match(
+      /export function releaseDirectMountStore\(storeId: string\): number \{[\s\S]*?\n\}/
+    )![0];
+    expect(fn).toMatch(/showStatusNotice\(`已关闭 \$\{ids\.length\} 个标签页（挂载已释放）`\)/);
+    expect(fn).toMatch(/if \(ids\.length > 0\)/);
+  });
+
+  it('台账 3-21：connectServer 同 base 重连清扫旧 tab 补状态栏提示（系统替换动作的可见性）', () => {
+    const sweep = src.match(
+      /const staleTabIds = tabStore\.list[\s\S]*?for \(const id of staleTabIds\) \{[\s\S]*?\n  \}[\s\S]*?\n  \}/
+    )![0];
+    expect(sweep).toMatch(/已关闭 \$\{staleTabIds\.length\} 个旧标签页（服务器已重新连接）/);
+    expect(sweep).toMatch(/if \(staleTabIds\.length > 0\)/);
+  });
 });
 
 describe('AppShell 快照恢复直连分支（带入①恢复链路同点）', () => {

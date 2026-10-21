@@ -946,6 +946,11 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
   for (const id of staleTabIds) {
     tabStore.close(id, { undoable: false });
   }
+  // 台账 3-21：重连清扫与挂载释放同口径（状态栏一次性提示）——旧 tab 被系统替换
+  // 关闭（undoable:false 不入撤销栈）此前零反馈；0 = 首次连接/无存活实例，不提示。
+  if (staleTabIds.length > 0) {
+    showStatusNotice(`已关闭 ${staleTabIds.length} 个旧标签页（服务器已重新连接）`);
+  }
 
   const store = createRemoteStore(base, tok, serverLabel(base));
   // SSE 变更订阅：服务端推送 changed → 命中 path 的 tab 重读重渲染 + 目录 tab 自增
@@ -1176,6 +1181,9 @@ export function openDirectMount(rec: DirectMountRecord): void {
 export function releaseDirectMountStore(storeId: string): number {
   const ids = tabStore.list.filter((t) => t.source.storeId === storeId).map((t) => t.id);
   for (const id of ids) tabStore.close(id, { undoable: false });
+  // 台账 3-21：批量关闭（undoable:false 豁免撤销）此前静默——用户视角 tab 凭空消失。
+  // 状态栏一次性提示说明去向；0 = 无存活实例（幂等调用），无动作不提示。
+  if (ids.length > 0) showStatusNotice(`已关闭 ${ids.length} 个标签页（挂载已释放）`);
   return ids.length;
 }
 
