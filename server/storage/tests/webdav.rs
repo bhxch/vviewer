@@ -53,8 +53,8 @@ async fn drain(mut stream: ByteStream) -> Vec<u8> {
 
 // ---------- multistatus 格式样本（版本耦合锚：RFC 4918 §14.16 字面结构） ----------
 
-/// `d:` 小写前缀形态：集合自身 + 两个文件（含 XML 实体与 percent 编码中文）
-/// + 一个集合。**版本耦合锚**：解析只认本文件的字面形态，上游服务器若换
+/// `d:` 小写前缀形态：集合自身 + 两个文件（含 XML 实体与 percent 编码中文）+
+/// 一个集合。**版本耦合锚**：解析只认本文件的字面形态，上游服务器若换
 /// 结构（tag 改名/嵌套变形）此处样本即失效。
 const PROPFIND_PAGE_LOWER: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 <d:multistatus xmlns:d="DAV:">
@@ -170,7 +170,7 @@ async fn list_dir_parses_lower_namespace_multistatus() {
     let auth = header(req, "authorization").unwrap();
     assert!(auth.starts_with("Basic "), "auth={auth}");
     assert!(!auth.contains("s3cret") && !auth.contains("alice"), "auth={auth}");
-    assert!(req.body.as_deref().unwrap_or(b"").len() > 0, "propfind 请求体存在");
+    assert!(!req.body.as_deref().unwrap_or(b"").is_empty(), "propfind 请求体存在");
 }
 
 #[tokio::test]

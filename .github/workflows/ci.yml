@@ -65,6 +65,8 @@ jobs:
           fetch-only: 'true'
       # --workspace：server/ 为 workspace 根（vviewer + vviewer-storage），
       # 单包默认不含成员 crate 测试
+      # clippy 门禁（台账 3-19）：基线清零后 -D warnings 防回升（先于 test 失败即停）
+      - run: cargo clippy --manifest-path server/Cargo.toml --workspace --all-targets -- -D warnings
       - run: cargo test --manifest-path server/Cargo.toml --workspace
 
   e2e:

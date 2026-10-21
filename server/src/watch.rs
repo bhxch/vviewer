@@ -250,7 +250,7 @@ impl ChangeHub {
             .iter()
             .cloned()
             .zip(factories)
-            .zip(initial.into_iter())
+            .zip(initial)
             .enumerate()
         {
             let (thread_tx, thread_health, thread_stop) =
@@ -459,7 +459,7 @@ impl RetryFactory {
                 return None;
             }
             self.poll_rebuilds = self.poll_rebuilds.saturating_add(1);
-            if self.poll_rebuilds % POLL_PROBE_EVERY == 0 {
+            if self.poll_rebuilds.is_multiple_of(POLL_PROBE_EVERY) {
                 match (self.open_recommended)() {
                     Ok((keep, rx, backend)) => {
                         self.prefer_poll = false;
@@ -547,7 +547,7 @@ impl RetryFactory {
                 }
                 Err(e) => {
                     misses += 1;
-                    if misses == 1 || misses % 12 == 0 {
+                    if misses == 1 || misses.is_multiple_of(12) {
                         warn!(
                             "[watch] watcher still unavailable ({misses} failures) root={} err={e:?}",
                             self.root.display()
@@ -752,7 +752,7 @@ fn open_poll(
 /// 从 watcher 的 Debug 形式提取后端名（如 `Inotify(...)` → "Inotify"），诊断用。
 fn backend_name(w: &impl std::fmt::Debug) -> String {
     format!("{w:?}")
-        .split(|c: char| c == '(' || c == ' ')
+        .split(['(', ' '])
         .next()
         .unwrap_or("unknown")
         .to_string()
@@ -771,7 +771,7 @@ fn fs_type_of(path: &Path) -> Option<String> {
         let Some(fstype) = fields.next() else { continue };
         if target.starts_with(&mount_point) {
             let len = mount_point.as_os_str().len();
-            if best.as_ref().map_or(true, |(l, _)| len > *l) {
+            if best.as_ref().is_none_or(|(l, _)| len > *l) {
                 best = Some((len, fstype.to_string()));
             }
         }
@@ -1159,7 +1159,7 @@ mod tests {
     fn unwatchable_root_never_becomes_ok() {
         let root = PathBuf::from("/nonexistent-vviewer-watch-root-xyz");
         let hub = ChangeHub::spawn_with(
-            &[root.clone()],
+            std::slice::from_ref(&root),
             vec![RetryFactory::notify(root.clone(), fast_policy(), None)],
         );
         assert_ne!(hub.health(), WatchHealth::Ok, "首建失败即非 Ok");
@@ -1214,7 +1214,7 @@ mod tests {
         let root = dir.path().to_path_buf();
         std::fs::write(root.join("seed.txt"), "seed").unwrap();
 
-        let hub = ChangeHub::spawn(&[root.clone()]);
+        let hub = ChangeHub::spawn(std::slice::from_ref(&root));
         assert_eq!(hub.health(), WatchHealth::Ok, "真实可 watch 的 root 应为 Ok");
         let mut sub = hub.subscribe();
 
@@ -1261,7 +1261,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let root = make_root_with_escape_symlink(dir.path());
-        let hub = ChangeHub::spawn(&[root.clone()]);
+        let hub = ChangeHub::spawn(std::slice::from_ref(&root));
         assert_eq!(hub.health(), WatchHealth::Ok, "含越界 symlink 的 root 应健康 Ok");
         // 后台重试/降级稳定后仍为 Ok（不因运行期问题翻转为 Recovering/Degraded）
         std::thread::sleep(Duration::from_millis(300));

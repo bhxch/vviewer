@@ -49,7 +49,7 @@ async fn issue_ticket(state: &AppState) -> String {
 async fn connect(state: &AppState, ticket: &str) -> (StatusCode, HeaderMap, axum::body::Body) {
     let app = vviewer::build_router(state.clone());
     let req = Request::builder()
-        .uri(&format!("/api/events?ticket={ticket}"))
+        .uri(format!("/api/events?ticket={ticket}"))
         .body(Body::empty())
         .unwrap();
     let res = app.oneshot(req).await.unwrap();

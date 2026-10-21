@@ -127,9 +127,12 @@ cargo test --manifest-path server/Cargo.toml   # Rust 单元/集成测试
 cd apps/web && npx playwright test             # E2E 默认通道（chromium + mobile 双 project）
 cd apps/web && npx playwright test -c playwright.server.config.ts   # E2E 服务端通道（需先 pnpm build:all）
 pnpm typecheck                # TS 类型检查（含 svelte-check）
+cargo clippy --manifest-path server/Cargo.toml --workspace --all-targets -- -D warnings   # clippy 门（CI 同款，警告即失败）
 ```
 
 E2E 双通道（Playwright/chromium）：默认通道 `apps/web/e2e/`（桌面全量场景 + 移动视口 375×667 触摸冒烟，mock 数据经 vite preview 伺服）；服务端通道 `apps/web/e2e-server/`（release 二进制伺服真实后端）。各域场景说明见 `docs/e2e/`，历轮测试报告见 `docs/report/e2e/`。
+
+桌面 crate（`apps/desktop/src-tauri`，独立 manifest）不在 CI 门禁内（仅 release 打包触达）：涉及提交请本地跑 `cargo clippy` 自查。
 
 ## License
 

@@ -160,7 +160,7 @@ pub fn run_highlight(lang: &str, text: &str) -> Result<HighlightResponse, CoreEr
     let mut highlighter = Highlighter::new();
     let events = highlighter
         .highlight(
-            &config,
+            config,
             text.as_bytes(),
             None, // encoding：UTF-8 默认（0.27 新增参数，UTF-16LE/BE 显式传入才需要）
             None, // cancellation flag：响应侧超时即放弃结果（模块注释），无需协作取消

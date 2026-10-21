@@ -2,6 +2,9 @@
 // native feature 编译裁剪（多端发布阶段二 Task 3 门控语义），本文件整体
 // 门禁化（修复轮 1 评审 M-1；断言零变化——native 形态照常全量运行）。
 #![cfg(feature = "native")]
+// await_holding_lock：serial_lock() 是进程级响应缓存的测试串行化闸（文件头注释），
+// 守卫有意贯穿用例全程（#[tokio::test] current_thread runtime，无跨线程 yield 风险）。
+#![allow(clippy::await_holding_lock)]
 //! Task 3 集成测试：POST /api/compute/highlight（tree-sitter 服务端高亮）。
 //!
 //! 覆盖：text 模式区间语义、未知语言 400、20MB 上限 413、path 模式 + 缓存

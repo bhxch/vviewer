@@ -17,6 +17,9 @@ pub fn has_multiple_ranges(h: &str) -> bool {
 /// None = 无 Range；Err = 非法或越界（→ 416）。
 /// 语义：bytes=a-b / a- / -suffix；end 超界钳制；start ≥ size、suffix 0、
 /// 起止倒挂、非数字均不可满足。
+// result_unit_err：Err(()) 即「Range 不可满足 → 416」的既定语义（模块文档声明，
+// 无需携带信息），引入错误类型属公开 API 改形，非本任务（清零）语义。
+#[allow(clippy::result_unit_err)]
 pub fn parse_range(h: &str, size: u64) -> Result<Option<(u64, u64)>, ()> {
     let spec = h.strip_prefix("bytes=").ok_or(())?;
     let first = spec.split(',').next().ok_or(())?.trim();

@@ -478,8 +478,7 @@ password = "p"
         assert!(dbg.contains("Some(\"sub\")"), "存在性保留: {dbg}");
 
         // FileConfig / ResolvedConfig 嵌套 Debug 走同一手工实现
-        let mut f = FileConfig::default();
-        f.mounts = vec![m];
+        let f = FileConfig { mounts: vec![m], ..Default::default() };
         assert!(!format!("{f:?}").contains("TOPSECRET-VALUE"));
         let r = resolve_config(cli(&["/c1"]), Some(f)).unwrap();
         assert!(!format!("{r:?}").contains("TOPSECRET-VALUE"));

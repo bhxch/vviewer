@@ -43,6 +43,7 @@ pub fn clean_relative(root: &std::path::Path, raw: Option<&str>) -> Result<PathB
 /// - ENAMETOOLONG(Linux 36) → 400（超长名是请求侧构造）；
 /// - ELOOP(Linux 40，root 内自环 symlink) → 404（路径不可解析为可用资源）；
 /// - 其余（权限、IO 等真环境故障）保持 500。
+///
 /// 仅 [`resolve_at`] 的 host 体消费（wasm 无 fs 语义，随同门控）。
 #[cfg(not(target_family = "wasm"))]
 fn classify_canonicalize_error(e: std::io::Error) -> CoreError {

@@ -147,6 +147,9 @@ impl SignedHeaders {
 /// 向量；生产路径经 [`amz_date_now`] 生成）。
 ///
 /// 调用方若自带 `x-amz-date`/`x-amz-content-sha256`，以自带值为准（不重复注头）。
+// too_many_arguments：八要素为 AWS SigV4 签名输入的固有形态（方法/URL/头/payload/
+// 凭证/region/service/date），收敛为参数结构体属公开 API 改形，非本任务（清零）语义。
+#[allow(clippy::too_many_arguments)]
 pub fn sign_request(
     method: &str,
     url: &str,

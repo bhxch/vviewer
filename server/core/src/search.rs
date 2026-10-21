@@ -786,7 +786,7 @@ mod tests {
     #[test]
     fn grep_frame_parses_nul_line_format() {
         let root = Path::new("/tmp/root");
-        let line = "/tmp/root/sub/a.rs\012:const needle = 1;";
+        let line = "/tmp/root/sub/a.rs\x0012:const needle = 1;";
         let out: Value = serde_json::from_str(&grep_frame(line, &[root.to_path_buf()]).unwrap()).unwrap();
         assert_eq!(out["file"], "sub/a.rs");
         assert_eq!(out["line"], 12);
@@ -798,7 +798,7 @@ mod tests {
     fn grep_frame_colon_in_path_and_content_is_safe() {
         let root = Path::new("/tmp/root");
         // 文件名含冒号（NUL 分隔保护）与内容含冒号（首个冒号后全为内容）
-        let line = "/tmp/root/we:ird.txt\01:the:rest: here";
+        let line = "/tmp/root/we:ird.txt\x001:the:rest: here";
         let out: Value = serde_json::from_str(&grep_frame(line, &[root.to_path_buf()]).unwrap()).unwrap();
         assert_eq!(out["file"], "we:ird.txt");
         assert_eq!(out["line"], 1);
@@ -809,7 +809,7 @@ mod tests {
     fn grep_frame_utf8_content_and_preview_truncation() {
         let root = Path::new("/tmp/root");
         let out: Value = serde_json::from_str(
-            &grep_frame("/tmp/root/zh.txt\01:中文needle", &[root.to_path_buf()]).unwrap(),
+            &grep_frame("/tmp/root/zh.txt\x001:中文needle", &[root.to_path_buf()]).unwrap(),
         )
         .unwrap();
         assert_eq!(out["text"], "中文needle");
@@ -854,7 +854,7 @@ mod tests {
     #[test]
     fn grep_frame_tags_root_index_across_roots() {
         let roots = [PathBuf::from("/tmp/r0"), PathBuf::from("/tmp/r1")];
-        let line = "/tmp/r1/sub/a.rs\012:needle";
+        let line = "/tmp/r1/sub/a.rs\x0012:needle";
         let out: Value = serde_json::from_str(&grep_frame(line, &roots).unwrap()).unwrap();
         assert_eq!(out["file"], "sub/a.rs");
         assert_eq!(out["root"], 1);
@@ -867,9 +867,8 @@ mod tests {
     #[test]
     fn probe_rg_finds_executable_or_none() {
         // 有 rg 时返回以 rg 结尾的路径；没有则 None（都不应 panic）
-        match probe_rg() {
-            Some(p) => assert!(p.ends_with("rg")),
-            None => {}
+        if let Some(p) = probe_rg() {
+            assert!(p.ends_with("rg"));
         }
     }
 

@@ -108,7 +108,7 @@ const B64_ALPHABET: &[u8; 64] =
 
 /// RFC 4648 标准 base64（含 padding），向量锚见模块单测。
 fn base64_encode(data: &[u8]) -> String {
-    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as u32;
         let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
@@ -285,7 +285,7 @@ async fn read_body(resp: crate::transport::HttpResponse) -> Result<String, Stora
 
 /// Range 防线判定（spec §2 口径——校验响应的 content-range/长度与请求窗
 /// 一致）：无 Content-Range、窗段与 {start..start+len-1} 错位、或响应长度
-/// >请求窗 → false（降级）。无 Content-Length 的 chunked 形态放过（窗长由
+/// \>请求窗 → false（降级）。无 Content-Length 的 chunked 形态放过（窗长由
 /// take 兜底）。
 fn window_honored(resp: &crate::transport::HttpResponse, start: u64, len: u64) -> bool {
     let Some(cr) = header_value(resp, "content-range") else {

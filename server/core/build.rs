@@ -147,11 +147,9 @@ fn compile_grammar(e: &GrammarEntry, grammar_dir: &Path, out_dir: &Path) -> bool
         build.opt_level(0);
     }
     build.file(src_dir.join("parser.c"));
-    for scanner in ["scanner.c"] {
-        let p = src_dir.join(scanner);
-        if p.exists() {
-            build.file(p);
-        }
+    let p = src_dir.join("scanner.c");
+    if p.exists() {
+        build.file(p);
     }
     build
         .flag_if_supported("-std=gnu11")

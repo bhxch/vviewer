@@ -34,7 +34,7 @@ static ENTRIES: Lazy<Vec<LanguageEntry>> = Lazy::new(|| {
     let mut entries = Vec::new();
     for (name, language, highlights, injections, locals) in generated_entries() {
         let lang = Language::from(language);
-        let compile = |text: &'static str| matches!(tree_sitter::Query::new(&lang, text), Ok(_));
+        let compile = |text: &'static str| tree_sitter::Query::new(&lang, text).is_ok();
         if !compile(highlights) {
             tracing::warn!("language {name} highlights.scm 编译失败，剔除");
             continue;
