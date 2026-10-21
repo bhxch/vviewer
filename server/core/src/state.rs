@@ -112,7 +112,7 @@ pub struct CoreState {
     /// worker 形态经 [`CoreState::with_transport`]（适配层 AppState 的
     /// with_runtime_transport 同款委托）注入 MockTransport/wasm transport。
     /// 私有面：仅 [`CoreState::register_mount`] 消费。
-    pub runtime_transport: Arc<Mutex<Option<Arc<dyn HttpTransport>>>>,
+    runtime_transport: Arc<Mutex<Option<Arc<dyn HttpTransport>>>>,
     /// 访问令牌；None 表示免鉴权（仅默认 127.0.0.1 绑定时允许）。
     pub token: Option<String>,
     /// `--hidden`：隐藏 dot 开头条目。

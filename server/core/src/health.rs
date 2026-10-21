@@ -67,6 +67,9 @@ pub struct MountSummary {
 /// feature（worker 形态）时即使 `--compute` 也不宣告（路由不存在，plan 门控
 /// 语义：语言表随 tree-sitter 编译裁剪）。
 pub fn handle(state: &CoreState) -> CoreResponse {
+    // 1-5：version 由适配层装配注入（CARGO_PKG_VERSION）；空串=旁路构造，
+    // debug 构建立即暴露，release 宣告空串行为不变（既有 wire 不改）
+    debug_assert!(!state.version.is_empty(), "version 未注入（旁路构造？）");
     #[cfg_attr(not(feature = "native"), allow(unused_mut))]
     let (mut capabilities, mut compute_languages, mut diagrams) =
         (vec!["file-server"], None, None);
@@ -139,7 +142,12 @@ mod tests {
     }
 
     fn base_state() -> CoreState {
-        CoreState::new(PathBuf::from("."), None, false)
+        // 1-5 装置适配（非行为变更）：CoreState::new 是旁路构造（version=""），
+        // 真实装配点由适配层注入 CARGO_PKG_VERSION（server/src/state.rs:89、
+        // worker/src/state.rs:84 同缝）；debug_assert 上线后既有测试统一补注入。
+        let mut state = CoreState::new(PathBuf::from("."), None, false);
+        state.version = "test";
+        state
     }
 
     #[test]
@@ -164,6 +172,20 @@ mod tests {
             res.headers.get("content-type").and_then(|v| v.to_str().ok()),
             Some("application/json")
         );
+    }
+
+    /// 1-5：旁路构造的空 version 在 debug 构建即暴露（装配点必然注入的
+    /// 不变式锚；release 无断言、行为不变）。
+    /// 装置适配：盘上 `handle` 为单参 `(&CoreState)`（简报两参形态按现状
+    /// 仲裁）；`test_state_with_version` 不存在，按简报 fallback 以
+    /// `base_state()` 构造后显式置空 version。
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "version 未注入")]
+    fn health_rejects_uninjected_version_in_debug() {
+        let mut state = base_state();
+        state.version = ""; // 旁路构造：装配点未注入 version
+        let _ = handle(&state);
     }
 
     /// 裁剪形态（worker，--no-default-features）锚测（修复轮 1 评审 L1）：
