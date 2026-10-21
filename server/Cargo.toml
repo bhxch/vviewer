@@ -6,10 +6,12 @@ description = "vviewer local file server (axum)"
 license = "Apache-2.0"
 
 # server/ 为 workspace 根：主 crate + core（阶段二业务核）+ storage（目录挂载
-# 阶段一存储抽象）子 crate。
+# 阶段一存储抽象）+ worker（Workers 适配，阶段三）子 crate。
 # 仓库无上层 workspace（repo 根无 Cargo.toml），单 lock 落在 server/Cargo.lock。
+# worker 成员 native 构建（cargo test --workspace 回归面）：纯函数模块
+# （Range/VV_MOUNTS 解析）host 可测，wasm-bindgen 面按 target 门控。
 [workspace]
-members = ["core", "storage"]
+members = ["core", "storage", "worker"]
 
 [lib]
 name = "vviewer"

@@ -1,0 +1,109 @@
+//! 纯 HTTP 语义件（跨目标编译，native 单测覆盖）：Range 头解析与 base-path
+//! 裁剪。Range 解析属 HTTP 语义（计划裁决）留适配层——本模块与 native 适配层
+//! `routes/file.rs` 的 `parse_range`/`has_multiple_ranges` 逐行同源（语义锚：
+//! 该模块单测同款用例在此复刻，双向防漂移）。
+
+/// 多区间 Range 检测（BUG-47）：`bytes=` 后含多个非空区间即视为多区间。
+/// 服务器不实现 multipart/byteranges：按 RFC 9110 §14.2 允许的「忽略 Range」
+/// 回 200 全量，不再静默丢弃第二区间伪装成单区间 206。
+pub fn has_multiple_ranges(h: &str) -> bool {
+    match h.strip_prefix("bytes=") {
+        Some(spec) => spec.split(',').filter(|p| !p.trim().is_empty()).count() > 1,
+        None => false,
+    }
+}
+
+/// 解析 Range 头（单区间；多区间取第一个）→ Some((start, len))。
+/// None = 无 Range；Err = 非法或越界（→ 416）。
+/// 语义：bytes=a-b / a- / -suffix；end 超界钳制；start ≥ size、suffix 0、
+/// 起止倒挂、非数字均不可满足。
+pub fn parse_range(h: &str, size: u64) -> Result<Option<(u64, u64)>, ()> {
+    let spec = h.strip_prefix("bytes=").ok_or(())?;
+    let first = spec.split(',').next().ok_or(())?.trim();
+    let (start_s, end_s) = first.split_once('-').ok_or(())?;
+    let (start_s, end_s) = (start_s.trim(), end_s.trim());
+
+    let (start, end) = if start_s.is_empty() {
+        // -suffix
+        let suffix: u64 = end_s.parse().map_err(|_| ())?;
+        if suffix == 0 || size == 0 {
+            return Err(());
+        }
+        (size.saturating_sub(suffix), size - 1)
+    } else {
+        let start: u64 = start_s.parse().map_err(|_| ())?;
+        if start >= size {
+            return Err(());
+        }
+        if end_s.is_empty() {
+            (start, size - 1)
+        } else {
+            let end: u64 = end_s.parse().map_err(|_| ())?;
+            if start > end {
+                return Err(());
+            }
+            (start, end.min(size - 1))
+        }
+    };
+    Ok(Some((start, end - start + 1)))
+}
+
+/// base-path 裁剪（VV_BASE_PATH env，值形如 `/docs`；空串/缺省 = 不裁剪）：
+/// 请求路径命中前缀即剥去，`/docs/api/health` → `/api/health`；前缀本身
+/// （`/docs`）与未命中前缀的路径原样返回（交由后续 /api 匹配与 Assets 边界
+/// 自然 404）。仅剥完整段（`/docsx` 不误剥 `/docs`）。
+pub fn strip_base_path<'a>(base: &str, path: &'a str) -> &'a str {
+    if base.is_empty() || base == "/" {
+        return path;
+    }
+    match path.strip_prefix(base) {
+        Some("") => "/",
+        Some(rest) if rest.starts_with('/') => rest,
+        _ => path,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Range 单区间语义锁测（与 native routes/file.rs 同款用例——语义锚）。
+    #[test]
+    fn parse_range_single_range_semantics_unchanged() {
+        assert_eq!(parse_range("bytes=0-1", 256), Ok(Some((0, 2))));
+        assert_eq!(parse_range("bytes=-4", 256), Ok(Some((252, 4))));
+        assert_eq!(parse_range("bytes=250-", 256), Ok(Some((250, 6))));
+        // end 超界钳制
+        assert_eq!(parse_range("bytes=250-999", 256), Ok(Some((250, 6))));
+        // start ≥ size / suffix 0 / 倒挂 / 非法：不可满足（→ 416）
+        assert_eq!(parse_range("bytes=256-", 256), Err(()));
+        assert_eq!(parse_range("bytes=-0", 256), Err(()));
+        assert_eq!(parse_range("bytes=5-4", 256), Err(()));
+        assert_eq!(parse_range("bytes=x-y", 256), Err(()));
+        assert_eq!(parse_range("units=0-1", 256), Err(()));
+    }
+
+    /// 多区间检测锁测（BUG-47 同款用例）。
+    #[test]
+    fn multiple_range_specs_are_detected() {
+        assert!(has_multiple_ranges("bytes=0-1,3-4"));
+        assert!(has_multiple_ranges("bytes=100-105,200-205"));
+        assert!(has_multiple_ranges("bytes=0-1,,3-4"));
+        assert!(!has_multiple_ranges("bytes=0-1"));
+        assert!(!has_multiple_ranges("bytes=0-1,"));
+        assert!(!has_multiple_ranges("bytes=-4"));
+        assert!(!has_multiple_ranges("bytes=0-"));
+        assert!(!has_multiple_ranges("items=0-1,3-4"));
+    }
+
+    /// base-path 裁剪：命中剥段、未命中/近邻前缀不误剥、空与根不裁。
+    #[test]
+    fn strip_base_path_strips_exact_segment_only() {
+        assert_eq!(strip_base_path("/docs", "/docs/api/health"), "/api/health");
+        assert_eq!(strip_base_path("/docs", "/docs"), "/");
+        assert_eq!(strip_base_path("/docs", "/docsx/api"), "/docsx/api");
+        assert_eq!(strip_base_path("/docs", "/api/health"), "/api/health");
+        assert_eq!(strip_base_path("", "/api/health"), "/api/health");
+        assert_eq!(strip_base_path("/", "/api/health"), "/api/health");
+    }
+}

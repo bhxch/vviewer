@@ -45,3 +45,11 @@ apps/web/static/tree-sitter.wasm
 samples/m6/e2e-big.js
 # PWA 图标（构建期由 tools/gen-icons.mjs 生成，不入库）
 apps/web/static/icons/
+
+# Workers 本地 dev 的临时 env（凭据不入库；部署面走 Wrangler Secrets）
+server/worker/.dev.vars
+# worker-build 产物（build/；部署期生成）
+server/worker/build/
+
+# wrangler 本地 dev 状态（miniflare sqlite/tmp bundle，不入库）
+server/worker/.wrangler/

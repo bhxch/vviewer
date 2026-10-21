@@ -1,0 +1,61 @@
+[package]
+name = "vviewer-worker"
+version = "0.1.0"
+edition = "2021"
+description = "vviewer Cloudflare Workers 适配：fetch handler→core dispatch + wasm HttpTransport（多端发布阶段三 Task 2）"
+license = "Apache-2.0"
+
+# workers-rs 适配 crate（多端发布阶段三 Task 2）：
+# - `#[event(fetch)]` 入口：/api/* → 参数直提 → vviewer-core 域 handler →
+#   CoreResponse → worker Response（CoreBody::Stream 经 ReadableStream 直通）；
+#   非 /api/* 交 Assets binding（Task 3 wrangler 配置 run_worker_first，本
+#   crate 兜底 404 不可达）。
+# - wasm HttpTransport：worker Fetch 实现 storage 的纯 HTTP 接缝（阶段一
+#   预留接缝的第三个实现体，reqwest/Mock 之外）——storage 唯一来源 =
+#   VV_MOUNTS 声明的 S3/WebDAV 挂载（wasm 无 fs，LocalFs 不编译）。
+# - 能力矩阵（plan Global Constraints）：health/tree/file/mounts 三 API 可用；
+#   events（watch）与 search（rg/grep 子进程）路由不挂载，compute 随 core
+#   --no-default-features 编译不存在；health 相应不宣告（searchEngine 宣告链
+#   的 PATH 探测在 wasm 自然落空）。
+#
+# crate-type：cdylib（Workers 部署产物，worker-build 消费）+ rlib（native
+# `cargo test -p vviewer-worker` 跑纯函数单测——Range 解析/VV_MOUNTS JSON
+# 解析/base-path 裁剪与错误映射，wasm-bindgen 桩在 host 目标可编译不执行）。
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# workers-rs（0.8.7 实测校准）：tokio 以 default-features = false 进入（零
+# feature），与 core/storage 的 wasm 允许集（sync/macros/io-util/rt/time）
+# 无冲突——worker crate 无 tokio 运行时集成（experimental_tokio 仅
+# emscripten），字节流路径全部为纯 poll 语义 trait 面。
+worker = "0.8.7"
+async-trait = "0.1"
+# StreamReader 的 Buf 载体（与 storage/reqwest 链同款 Bytes 收敛；core 同源 1.x）
+bytes = "1"
+# 框架中立类型（core/http 同源 1.x）与查询串解析（worker 内部同款）
+http = "1"
+serde_urlencoded = "0.7"
+serde_json = "1"
+futures-util = { version = "0.3", features = ["io"] }
+# transport body 的流桥（与 storage ReqwestTransport 同一条 StreamReader→compat
+# 互转通路；wasm 侧无 tokio 运行时也成立——纯 poll 语义）
+tokio-util = { version = "0.7", features = ["io", "compat"] }
+# wasm 单线程语义桥：worker Fetch 的 body 流（JsValue 载体）为 !Send，而
+# storage 的 HttpByteStream 接缝钉死 Send（与 native reqwest 实现共用类型，
+# 编译锚 assert_send_static）。SendWrapper 把 JsValue 面包进 Send（跨线程
+# 访问即 panic——Workers isolate 单线程，永不触发）。native 图中本依赖不进
+# （transport.rs 整体 target 门控）。
+send_wrapper = { version = "0.6", features = ["futures"] }
+# 业务核与存储抽象（default-features = false：compute/reqwest 全家不进 wasm
+# 构建图；storage 的 S3/WebDAV + HttpTransport 接缝恒在）
+vviewer-core = { path = "../core", default-features = false }
+vviewer-storage = { path = "../storage", default-features = false }
+
+# wasm 面：出站 fetch 的 web_sys 直构（worker::Method 封闭枚举折返 Get，见
+# transport.rs「方法直通」）所需的 feature 显式声明——web-sys 方法按 feature
+# 生成，图内 feature 统一后可用
+[target.'cfg(target_family = "wasm")'.dependencies]
+web-sys = { version = "0.3", features = ["Request", "RequestInit", "Headers"] }
+js-sys = "0.3"

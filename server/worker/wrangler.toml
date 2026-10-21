@@ -1,0 +1,17 @@
+# wrangler 配置（多端发布阶段三）：Task 2 落最小可冒烟形态——fetch handler
+# 构建/本地 dev/健康探活；Task 3 扩展部署链（Assets binding + run_worker_first
+# + not_found_handling SPA fallback + 体积门禁 + deploy CI）。
+name = "vviewer-worker"
+main = "build/index.js"
+compatibility_date = "2026-09-25"
+
+# VV_MOUNTS/VV_TOKEN/VV_BASE_PATH 不在 [vars] 固化：
+# - 凭据纪律（plan Global Constraints）：含凭据的 VV_MOUNTS 整体走 Wrangler
+#   Secrets（`wrangler secret put VV_MOUNTS`）；读取通道 var→secret 依次兜底
+#   （worker/src/state.rs env_string）。
+# - 本地 dev 的临时 VV_MOUNTS 用 `.dev.vars` 文件（gitignore，不入库）。
+
+[build]
+# worker-build（workers-rs 官方构建器，自带 wasm-bindgen 供给）：cargo build
+# --target wasm32-unknown-unknown + wasm-bindgen + esbuild 打包 → build/
+command = "worker-build --release"
