@@ -598,6 +598,45 @@ describe('syncMountsOnConnect（spec §3 前端对账重注册）', () => {
     expect(saved.lastError).toContain('405');
     expect(saved.registeredRootIndex).toBeUndefined();
   });
+
+  it('降级重探（3-18）：失败记录不被短路，下次对账重发 probe，成功即转 healthy', async () => {
+    // 失败态遗留（3-11 落库形态：pendingRetry + lastError、registeredRootIndex 已清）
+    // 的记录，下次 connectServer → syncMountsOnConnect 仍照常对账并重发
+    // probeMountRoot——成功即 healthyRecord（索引落位、pendingRetry 清除、
+    // lastError 删除）。重探无任何定时器/后台轮询（spec §4-1）：驱动面只有
+    // 「下次对账」，本用例以同步两次调用模拟两次连接，不依赖 timer。
+    const rec = recordOf();
+    await saveProxyMount({ ...rec, pendingRetry: true, lastError: '重注册失败：HTTP 405' });
+    let probeHealthy = false;
+    stubFetch((method, url) => {
+      if (method === 'GET' && url.endsWith('/api/mounts'))
+        return jsonResponse(200, manifestJson([entryOf(rec, 2)], 1));
+      if (method === 'GET' && url.includes('/api/tree'))
+        return probeHealthy ? jsonResponse(200, { entries: [] }) : new Response('', { status: 502 });
+      if (method === 'DELETE' && url.endsWith('/api/mounts/2')) return new Response('', { status: 405 });
+      return undefined;
+    });
+    // 第一次对账：probe 失败 → 重注册（DELETE 405）也失败 → 仍是失败态
+    await syncMountsOnConnect(BASE, null);
+    const failed = await onlyRecord();
+    expect(failed.pendingRetry).toBe(true);
+    expect(failed.lastError).toContain('405');
+    expect(failed.registeredRootIndex).toBeUndefined();
+    // 第二次对账：失败记录未被跳过（probe 照发），此番成功 → 转 healthy
+    const beforeSecond = calls.length;
+    probeHealthy = true;
+    await syncMountsOnConnect(BASE, null);
+    const saved = await onlyRecord();
+    expect(saved.pendingRetry).toBe(false);
+    expect(saved.registeredRootIndex).toBe(2);
+    expect(saved.lastError).toBeUndefined();
+    // 全程 probe 恰两次（每对账各一次，失败记录未被短路跳过）；第二次对账窗口
+    // 内 probe 已健康 → 无 DELETE 轮换（第一次窗口的 DELETE 405 是失败对账的合法动作）
+    expect(calls.filter((c) => c.method === 'GET' && c.url.includes('/api/tree'))).toHaveLength(2);
+    const second = calls.slice(beforeSecond);
+    expect(second.filter((c) => c.method === 'GET' && c.url.includes('/api/tree'))).toHaveLength(1);
+    expect(second.find((c) => c.method === 'DELETE')).toBeUndefined();
+  });
 });
 
 // ---------- rootIndex 迁移（台账 3-1：纯函数直测 + 迁移对收集回调） ----------

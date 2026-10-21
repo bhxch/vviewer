@@ -526,6 +526,9 @@ export function rewriteSourceForMigration(
  * 台账 3-1：登记/重注册使某记录的服务端索引变化（known registeredRootIndex ≠
  * 新索引）时收集 RootIndexMove，循环结束后回调 onMigrated 一次（openFlow 据此
  * 三面改写已开 tab/sources；回调异常吞掉——记录已落库，不影响对账契约）。
+ * 台账 3-18：失败记录（pendingRetry）**不被短路**——下次对账照常按指纹比对
+ * 并重发 probe，成功即 healthyRecord 恢复（spec §4-1：重探只由「下次对账」
+ * 驱动，无定时器/后台轮询）；行为锚见 mountsSync.test.ts「降级重探」用例。
  */
 export async function syncMountsOnConnect(
   serverBase: string,
