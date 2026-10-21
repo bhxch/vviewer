@@ -2612,6 +2612,7 @@ dependencies = [
  "cc",
  "comrak",
  "futures-core",
+ "getrandom 0.4.3",
  "http",
  "layout-rs",
  "once_cell",

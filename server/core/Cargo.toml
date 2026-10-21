@@ -36,10 +36,17 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 bytes = "1"
 http = "1"
-# guard 的 canonicalize + search 域子进程 IO/pump + events 驱动任务
-# （process/io-util/sync/time/rt/macros；tokio 本体随 plan 允许入 core，
-# 重依赖门控归 native feature）
-tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt", "sync", "time"] }
+# guard 的 canonicalize + search 域子进程 IO/pump + events 驱动任务。
+# tokio 本体随 plan 允许入 core，重依赖门控归 native feature。
+# 阶段三 Task 2（wasm 实测裁决）：tokio 在 wasm32-unknown-unknown 上仅允许
+# sync/macros/io-util/rt/time（其余 feature 直接触发 tokio 的 compile_error!），
+# fs（guard canonicalize）与 process（search 域）按 host 目标追加（见文件尾部
+# target 段）——wasm 构建 feature 面收敛进允许集；两处消费点代码同步
+# `#[cfg(not(target_family = "wasm"))]` 门控（guard.rs/search.rs，worker 形态
+# 无 fs 根、search 路由不挂载）。host 目标（native/裁剪形态）feature 集与
+# 改造前一致，行为零变化。
+tokio = { version = "1", features = ["io-util", "macros", "rt", "sync", "time"] }
+
 # CoreBody::Stream 的 chunk 流 trait（futures-core 零运行时）与文件读流的
 # AsyncRead→chunk 包装（ReaderStream）；SSE 流（Task 3）消费同形态
 futures-core = "0.3"
@@ -81,3 +88,18 @@ tempfile = "3"
 # 域 handler 锚测的异步运行时（#[tokio::test]）；test-util 供 highlight 504
 # 超时锚测的 start_paused 挂钟暂停（随 compute 域测试迁入）
 tokio = { version = "1", features = ["macros", "rt", "test-util"] }
+
+# host 目标追加 tokio fs/process（guard canonicalize 与 search 域；wasm 无
+# fs/进程语义——两者在 wasm32-unknown-unknown 触发 tokio 的 compile_error! 硬
+# 门，wasm 允许集仅 sync/macros/io-util/rt/time）。段置于文件尾部：target 段
+# 声明吞掉其后所有条目，不得插入常规依赖中间。
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio = { version = "1", features = ["fs", "process"] }
+
+# wasm 目标：rand→rand_core→getrandom 的随机源后端。getrandom 0.4 在
+# wasm32-unknown-unknown 无 feature 即 compile_error!，wasm_js = 经
+# crypto.getRandomValues 取熵（Workers 运行时提供）。仅 ticket 签发链消费
+# （worker 不挂 ticket 路由，rand 仍随 core 进 wasm 构建图，feature 必须自洽）。
+# native 图中本段不生效，行为零变化。
+[target.'cfg(target_family = "wasm")'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }

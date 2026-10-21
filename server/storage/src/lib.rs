@@ -20,12 +20,18 @@
 
 use std::cmp::Ordering;
 use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+// LocalFs 专属导入（wasm 门控面同款——struct/impl 均仅 host 目标编译）
+#[cfg(not(target_family = "wasm"))]
+use std::path::PathBuf;
 use std::pin::Pin;
+#[cfg(not(target_family = "wasm"))]
 use std::time::UNIX_EPOCH;
 
 use async_trait::async_trait;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt};
+#[cfg(not(target_family = "wasm"))]
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::io::AsyncRead;
 
 pub mod s3;
 pub mod transport;
@@ -64,7 +70,8 @@ impl StorageError {
     }
 
     /// io 错误统一映射（与既有 AppError::from(io::Error) 同款分类）：
-    /// NotFound → NotFound；其余错误文本原样保留。
+    /// NotFound → NotFound；其余错误文本原样保留。仅 LocalFs 消费（同门控）。
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) fn from_io(e: std::io::Error) -> Self {
         match e.kind() {
             std::io::ErrorKind::NotFound => Self::not_found("not found"),
@@ -339,12 +346,20 @@ fn strip_leading_zeros(d: &[u8]) -> &[u8] {
 /// `root` 取构造时的 canonical 根（guard canonicalize 失败回退原路径时同款）；
 /// 路由层把 guard 解析出的 canonical 绝对路径按根 strip 成相对路径后传入，
 /// 本后端 join 回根——**实际触达的绝对路径与下沉前逐字节一致**。
+///
+/// 阶段三 Task 2：host 目标 only（`#[cfg(not(target_family = "wasm"))]`）——
+/// tokio::fs 在 wasm32-unknown-unknown 不存在（fs feature 触发 tokio 的
+/// compile_error!），worker 形态无 fs 根（core `CoreState::mounts_only` 构造
+/// 不变式），挂载根走 S3/WebDAV 后端。tokio 的 fs feature 在本 crate 的
+/// Cargo.toml 随同一目标条件追加，两侧门控互为镜像。
+#[cfg(not(target_family = "wasm"))]
 pub struct LocalFs {
     root: PathBuf,
     /// `--hidden`：列出时过滤 dot 开头条目（寻址/读取不过滤，与既有语义一致）。
     hidden: bool,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl LocalFs {
     pub fn new(root: PathBuf, hidden: bool) -> Self {
         Self { root, hidden }
@@ -381,6 +396,7 @@ impl LocalFs {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[async_trait]
 impl StorageBackend for LocalFs {
     /// 单层目录列表——自 routes/tree.rs 扫描循环原样搬运：
@@ -472,6 +488,7 @@ mod tests {
     use super::*;
 
     /// join 空相对路径 = 根自身（list_dir(Path::new("")) 的寻址前提）。
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn resolve_empty_relative_path_yields_root() {
         let fs = LocalFs::new(PathBuf::from("/tmp/root"), false);
@@ -482,6 +499,7 @@ mod tests {
     }
 
     /// resolve 拼接：相对段逐段 join，实际触达路径 = 下沉前路由直读的绝对路径。
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn resolve_joins_relative_segments_under_root() {
         let fs = LocalFs::new(PathBuf::from("/tmp/root"), false);

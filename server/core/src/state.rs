@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use vviewer_storage::StorageBackend;
+#[cfg(not(target_family = "wasm"))]
 use vviewer_storage::LocalFs;
 use vviewer_storage::transport::HttpTransport;
 // reqwest 唯一入口符号：native 门控内才存在（storage default-features = false，
@@ -51,6 +52,8 @@ impl RootSpec {
     /// fs 根构造：LocalFs 以 canonical 路径为基——路由层把 guard 解析出的
     /// canonical 绝对路径按根 strip 成相对路径传入，backend join 回来触达的
     /// 绝对路径与下沉前的直读形态逐字节一致。
+    /// wasm（worker 形态）不编译：无文件系统（storage LocalFs 同门控）。
+    #[cfg(not(target_family = "wasm"))]
     pub fn fs_root(raw: PathBuf, canonical: PathBuf, hidden: bool) -> Self {
         Self {
             backend: std::sync::Arc::new(LocalFs::new(canonical.clone(), hidden)),
@@ -129,6 +132,9 @@ pub struct CoreState {
 impl CoreState {
     /// fs 单根状态构造（与迁移前 AppState::new 的核内构造逐语句一致）。
     /// version 与两个宣告缝由适配层装配时注入。
+    /// wasm（worker 形态）不编译：无文件系统，worker 以 [`Self::mounts_only`]
+    /// 构造（本函数的 std::fs canonicalize 与 LocalFs 均为 host 语义）。
+    #[cfg(not(target_family = "wasm"))]
     pub fn new(root: PathBuf, token: Option<String>, hidden: bool) -> Self {
         // main 启动前已校验目录存在；canonicalize 失败时退回原路径（保持可测）
         let root_canonical: PathBuf = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
@@ -142,6 +148,29 @@ impl CoreState {
             runtime_transport: Arc::new(Mutex::new(None)),
             token,
             hidden,
+            compute: false,
+            rg_path: None,
+            grep_path: None,
+            version: "",
+        }
+    }
+
+    /// 纯挂载状态构造（多端发布阶段三 Task 2，worker 形态）：**无 fs 根**——
+    /// roots 全部为挂载根（静态段 = VV_MOUNTS env 装配序），fs_roots = 0，
+    /// rootIndex 寻址面从 0 起即挂载段。worker 无 `--hidden`/`--compute` 旗标，
+    /// rg/grep 探测在 wasm 无进程语义（health 的 searchEngine 宣告链 PATH
+    /// 探测自然落空不宣告，见 health.rs）。version 由 worker 适配层注入。
+    /// host 目标同样可用（无行为耦合；挂载段构造复用 [`RootSpec::mount`]）。
+    pub fn mounts_only(mounts: Vec<RootSpec>, token: Option<String>) -> Self {
+        Self {
+            root: PathBuf::new(),
+            root_canonical: PathBuf::new(),
+            roots: mounts,
+            fs_roots: 0,
+            runtime_mounts: Arc::new(Mutex::new(Vec::new())),
+            runtime_transport: Arc::new(Mutex::new(None)),
+            token,
+            hidden: false,
             compute: false,
             rg_path: None,
             grep_path: None,
@@ -304,6 +333,62 @@ mod tests {
         assert_eq!(cs.root_canonical, raw);
         assert_eq!(cs.token.as_deref(), Some("tok"));
         assert!(!cs.compute);
+    }
+
+    // ---------- worker 形态 mounts_only 构造锚测（阶段三 Task 2） ----------
+    //
+    // 无 fs 根不变式：roots 全挂载段、fs_roots=0、rootIndex 从 0 起即挂载序；
+    // 注入 transport 后运行时注册追加在静态挂载之后（root_at 统一寻址）。
+    // host 上即可运行（构造函数跨目标存在），wasm 侧由编译门覆盖。
+    mod mounts_only_form {
+        use super::*;
+        use crate::mounts::{self, MountConfig, MountKind};
+        use vviewer_storage::transport::MockTransport;
+
+        fn s3_cfg() -> MountConfig {
+            MountConfig {
+                kind: MountKind::S3,
+                label: Some("docs".into()),
+                endpoint: Some("http://127.0.0.1:9000".into()),
+                bucket: Some("b1".into()),
+                prefix: None,
+                access_key_id: Some("ak".into()),
+                secret_access_key: Some("sk".into()),
+                username: None,
+                password: None,
+                path_style: None,
+            }
+        }
+
+        fn state_with_static_mount() -> CoreState {
+            let transport: Arc<dyn HttpTransport> = Arc::new(MockTransport::new());
+            let root = mounts::build_mount(&s3_cfg(), transport).unwrap();
+            let mut cs = CoreState::mounts_only(vec![RootSpec::mount(root.meta, root.backend)], None);
+            cs.version = "0.1.0";
+            cs
+        }
+
+        #[test]
+        fn mount_only_state_has_no_fs_root_and_addresses_mounts_from_zero() {
+            let cs = state_with_static_mount();
+            assert_eq!(cs.fs_roots, 0);
+            assert_eq!(cs.roots.len(), 1);
+            assert!(cs.roots[0].mount.is_some());
+            // rootIndex 0 即首个挂载根；越界 1 → None
+            let spec = cs.root_at(0).expect("挂载根可寻址");
+            assert_eq!(spec.mount.as_ref().unwrap().kind, "s3");
+            assert!(cs.root_at(1).is_none());
+        }
+
+        #[test]
+        fn runtime_register_appends_after_static_mounts() {
+            let cs = state_with_static_mount()
+                .with_transport(Arc::new(MockTransport::new()));
+            let (idx, created) = cs.register_mount(&s3_cfg()).expect("注册应成功");
+            assert!(created);
+            assert_eq!(idx, 1, "运行时挂载 rootIndex = 静态挂载数(1) + 槽位序");
+            assert!(cs.root_at(idx).unwrap().mount.is_some());
+        }
     }
 
     // ---------- worker 形态（--no-default-features）注入构造链专测 ----------

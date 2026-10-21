@@ -14,7 +14,11 @@ native = ["dep:reqwest"]
 [dependencies]
 # dyn 兼容 async trait（RPITIT 无法 Arc<dyn>——AppState.roots 需要 dyn 分发）
 async-trait = "0.1"
-tokio = { version = "1", features = ["fs", "io-util"] }
+# fs 仅 LocalFs 消费（wasm 无文件系统——LocalFs 随 host 目标门控，见 lib.rs）；
+# wasm32-unknown-unknown 上 tokio 的 fs feature 触发 compile_error!，故按目标
+# 追加（io-util 恒在：S3/WebDAV 的 compat 桥与 take/chain 纯 poll 语义可用）。
+# 注意：target 段必须置于全部常规依赖之后（段声明吞掉其后所有条目）。
+tokio = { version = "1", features = ["io-util"] }
 # HttpTransport 接缝的 body 载体：wasm 可用的 futures-io（评审 Major-1——
 # tokio::io 类型不得穿接缝）
 futures-io = "0.3"
@@ -41,3 +45,9 @@ async-trait = "0.1"
 # futures-io::AsyncRead 的 ext 读取（read_to_end 验证 mock body）；io 模块
 # 被 feature 门控
 futures-util = { version = "0.3", features = ["io"] }
+
+# host 目标追加 tokio fs（仅 LocalFs 消费；wasm 无 fs 语义——tokio 在
+# wasm32-unknown-unknown 对 fs feature 是 compile_error! 硬门）。段置于尾部：
+# target 段声明吞掉其后所有条目，不得插入常规依赖中间。
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio = { version = "1", features = ["fs"] }

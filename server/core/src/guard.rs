@@ -43,6 +43,8 @@ pub fn clean_relative(root: &std::path::Path, raw: Option<&str>) -> Result<PathB
 /// - ENAMETOOLONG(Linux 36) → 400（超长名是请求侧构造）；
 /// - ELOOP(Linux 40，root 内自环 symlink) → 404（路径不可解析为可用资源）；
 /// - 其余（权限、IO 等真环境故障）保持 500。
+/// 仅 [`resolve_at`] 的 host 体消费（wasm 无 fs 语义，随同门控）。
+#[cfg(not(target_family = "wasm"))]
 fn classify_canonicalize_error(e: std::io::Error) -> CoreError {
     match e.kind() {
         std::io::ErrorKind::NotFound => CoreError::not_found("path not found"),
@@ -66,6 +68,8 @@ pub fn root_out_of_range(idx: usize) -> CoreError {
 }
 
 /// 十六进制位 → 数值（严格大小写混合 hex，不接受 +/- 符号）。
+/// 仅 host [`resolve_at`] 的解码回退链消费（wasm 无 fs）。
+#[cfg(not(target_family = "wasm"))]
 fn hex_val(b: u8) -> Option<u8> {
     match b {
         b'0'..=b'9' => Some(b - b'0'),
@@ -77,7 +81,8 @@ fn hex_val(b: u8) -> Option<u8> {
 
 /// 组件级 `%XX`→字节解码（BUG-48 寻址回退的构件，与 tree 列出侧
 /// `encode_invalid_utf8` 互逆）：至少成功解码一处才返回 Some；`%` 后非
-/// 严格两位 hex 的序列按字面保留。
+/// 严格两位 hex 的序列按字面保留。仅 [`percent_decoded_path`] 消费（同门控）。
+#[cfg(not(target_family = "wasm"))]
 fn percent_decode_bytes(comp: &str) -> Option<Vec<u8>> {
     let bytes = comp.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -112,7 +117,8 @@ fn percent_decode_bytes(comp: &str) -> Option<Vec<u8>> {
 /// 返回，其字面路径不存在；字面 canonicalize NotFound 后按组件解码重试。
 /// 任一组件解码结果引入路径语法（`/`、`\`、NUL）或等于 `..` → 400（否则
 /// 可借 `%2E%2E` 绕过 clean_relative 的穿越校验）。无组件可解码 → None
-/// （不重试，按原 404 报错）。
+/// （不重试，按原 404 报错）。仅 host [`resolve_at`] 体消费（wasm 无 fs）。
+#[cfg(not(target_family = "wasm"))]
 fn percent_decoded_path(p: &std::path::Path) -> Result<Option<PathBuf>, CoreError> {
     use std::os::unix::ffi::OsStringExt;
     let mut out = PathBuf::with_capacity(p.as_os_str().len());
@@ -145,6 +151,13 @@ fn percent_decoded_path(p: &std::path::Path) -> Result<Option<PathBuf>, CoreErro
 
 /// [`resolve_at`] 的多根参数化形态：按 `root_idx` 选择基准根。
 /// 越界 → 400 "root index out of range"；清洗与越界校验均对所选根。
+///
+/// 阶段三 Task 2（wasm 实测裁决）：canonicalize 是 fs 语义（tokio::fs，wasm
+/// 不可编译），函数体按目标分体——host 体即既有实现原样；wasm 体为防御性
+/// 500（worker 形态由 `CoreState::mounts_only` 构造不变式保证无 fs 根，
+/// `spec.mount` 恒 Some，本分支不可达；tree/file 的挂载根走 clean_relative，
+/// 不经此函数）。两域 handler 调用点零改动。
+#[cfg(not(target_family = "wasm"))]
 pub async fn resolve_at(
     state: &CoreState,
     raw: Option<&str>,
@@ -177,6 +190,20 @@ pub async fn resolve_at(
         return Err(CoreError::forbidden("path escapes root"));
     }
     Ok(canonical)
+}
+
+/// wasm 体（worker 形态）：无 fs 语义——见 host 体文档的不变式说明。
+/// 保留签名使 tree/file 两域 handler 的调用点跨目标零改动。
+#[cfg(target_family = "wasm")]
+pub async fn resolve_at(
+    state: &CoreState,
+    raw: Option<&str>,
+    root_idx: usize,
+) -> Result<PathBuf, CoreError> {
+    let _ = (state, raw, root_idx);
+    Err(CoreError::internal(
+        "fs roots are not available in worker form",
+    ))
 }
 
 /// 完整解析（0 号根）：清洗 → canonicalize（不存在 → 404）→ 越出 root → 403。

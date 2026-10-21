@@ -27,27 +27,44 @@
 //! `"root": <idx>`）；`root=Some(i)` = 限定单根（多根下此时才允许携带 path，
 //! 帧无 root 字段与单根部署同形状）。
 //!
-//! worker 裁剪口径（plan Interfaces）：search handler 只依赖 std/tokio process
-//! 非 native 重依赖，随 core 全形态编译；worker 侧不挂载该路由与 health 不宣告
-//! 由阶段三 worker 适配层决定，本 crate 不设 feature 门（机制存在性见计划
-//! Global Constraints）。
+//! worker 裁剪口径（阶段三 Task 2 修订）：search handler 依赖进程面
+//! （tokio::process——wasm 不允许的 feature 集），**按 host 目标编译**
+//! （`#[cfg(not(target_family = "wasm"))]`，非 feature 门——host 裁剪形态
+//! `--no-default-features` 下 search 路由与 health searchEngine 宣告照旧）。
+//! worker 侧不挂载该路由；health 不宣告由宣告链自然落空达成（wasm 无
+//! PATH/无 fs，probe 返回 None）。纯解析/参数面跨目标编译，单测不受影响。
 
+// 进程面导入（spawn rg/grep 与 pump 的行读取）：wasm（worker 形态）无进程
+// 语义且 tokio process feature 不进 wasm 允许集——随下方 search/pump 同门控
+// （阶段三 Task 2）。纯解析/参数面（SearchRequest/SearchEngine/probe/
+// resolve_paths/match_frame/grep_frame）不在此列，跨目标编译。
 use std::path::{Path, PathBuf};
+#[cfg(not(target_family = "wasm"))]
 use std::pin::Pin;
+#[cfg(not(target_family = "wasm"))]
 use std::time::Duration;
 
+#[cfg(not(target_family = "wasm"))]
 use bytes::Bytes;
+#[cfg(not(target_family = "wasm"))]
 use futures_core::Stream;
+#[cfg(not(target_family = "wasm"))]
 use http::{header, HeaderMap, HeaderValue, StatusCode};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, ChildStderr, ChildStdout, Command};
+#[cfg(not(target_family = "wasm"))]
 use tokio::sync::mpsc;
 
-use crate::error::CoreError;
+#[cfg(not(target_family = "wasm"))]
+use tokio::io::{AsyncBufReadExt, BufReader};
+#[cfg(not(target_family = "wasm"))]
+use tokio::process::{Child, ChildStderr, ChildStdout, Command};
+
+#[cfg(not(target_family = "wasm"))]
 use crate::guard;
+use crate::error::CoreError;
 use crate::state::CoreState;
+#[cfg(not(target_family = "wasm"))]
 use crate::{CoreBody, CoreResponse};
 
 /// 命中数上限：达到后 kill rg 并下发 `truncated: true` 终帧。
@@ -56,12 +73,16 @@ pub const MAX_MATCHES: usize = 1000;
 pub const MAX_PATTERN_CHARS: usize = 256;
 /// 预览行文本最大字符数（按 Unicode 标量值截断，不劈多字节字符）。
 pub const PREVIEW_MAX_CHARS: usize = 200;
-/// 跳过的文件大小上限（--max-filesize；rg 的 M = MiB）。
+/// 跳过的文件大小上限（--max-filesize；rg 的 M = MiB）。仅 rg_args 消费（同门控）。
+#[cfg(not(target_family = "wasm"))]
 const RG_MAX_FILESIZE: &str = "2M";
 /// rg 搜索总墙钟上限：防子进程挂起导致 pump 永久 await（进程+任务泄漏），
 /// 也给断连 kill 的延迟设上界。生产 60s；单测以 200ms 注入验证超时路径。
+/// 仅 search/pump 消费（wasm 随同门控）。
+#[cfg(not(target_family = "wasm"))]
 const SEARCH_TIMEOUT: Duration = Duration::from_secs(60);
 /// channel 缓冲： rg 产出快于客户端消费时的背压水位。
+#[cfg(not(target_family = "wasm"))]
 const FRAME_CHANNEL: usize = 64;
 
 #[derive(Deserialize)]
@@ -160,6 +181,8 @@ fn is_executable(p: &Path) -> bool {
 
 /// 组装 rg 参数（不含 rg 程序路径与搜索目录，便于单测断言）。
 /// 单文件命中数不设限（BUG-57）：无 --max-count，截断统一由 MAX_MATCHES 承担。
+/// 仅 search 消费（wasm 随同门控；单测 host 侧不受影响）。
+#[cfg(not(target_family = "wasm"))]
 fn rg_args(req: &SearchRequest, hidden: bool) -> Vec<String> {
     let mut args = vec![
         "--json".to_string(),
@@ -194,6 +217,7 @@ fn rg_args(req: &SearchRequest, hidden: bool) -> Vec<String> {
 /// `hidden` 无对应开关：grep -r 天然含 dot 条目、不读 ignore。
 /// --include 仅按 basename 匹配 glob（rg -g 对相对路径全程匹配），含 / 的 glob 在 grep 下语义不同；
 /// BSD grep 的 --include 为全路径匹配（* 跨 /），含 / 的 glob 两端行为不同。
+#[cfg(not(target_family = "wasm"))]
 fn grep_args(req: &SearchRequest, hidden: bool) -> Vec<String> {
     let _ = hidden;
     // 单文件命中数不设限（BUG-57 同 rg 路径）：无 -m，截断统一由 MAX_MATCHES 承担。
@@ -224,6 +248,8 @@ fn grep_args(req: &SearchRequest, hidden: bool) -> Vec<String> {
 /// （guard 清洗 + canonicalize + 越界 403）→ 引擎选择链 → spawn 子进程 → pump
 /// 任务产出 NDJSON 帧。响应 body 为流（`CoreBody::Stream`，帧逐 chunk 下发），
 /// 头序（content-type → cache-control）与迁移前 builder 链一致。
+/// host 目标 only（tokio::process；wasm 见模块文档「worker 裁剪口径」）。
+#[cfg(not(target_family = "wasm"))]
 pub async fn search(state: &CoreState, req: SearchRequest) -> Result<CoreResponse, CoreError> {
     if req.pattern.is_empty() {
         return Err(CoreError::bad_request("pattern must not be empty"));
@@ -342,6 +368,8 @@ pub async fn search(state: &CoreState, req: SearchRequest) -> Result<CoreRespons
 }
 
 /// pump 的结果（单测断言用）：client_gone = 客户端断连（已 kill 子进程）。
+/// host 目标 only（pump 同门控）。
+#[cfg(not(target_family = "wasm"))]
 pub(crate) struct PumpOutcome {
     pub client_gone: bool,
     pub truncated: bool,
@@ -350,11 +378,14 @@ pub(crate) struct PumpOutcome {
 
 /// 引擎感知的行解析：None = 跳过该行（rg 非 match 事件/二进制帧、grep 畸形行）。
 /// `roots` 为参与搜索的根（canonical）列表：长度 >1 时命中帧携带 `"root": <idx>`。
+/// 仅 pump 消费（wasm 随同门控；纯解析函数 match_frame/grep_frame 不在门内）。
+#[cfg(not(target_family = "wasm"))]
 pub(crate) enum FrameParser {
     Rg { roots: Vec<PathBuf> },
     Grep { roots: Vec<PathBuf> },
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl FrameParser {
     fn frame(&self, line: &str) -> Option<String> {
         match self {
@@ -372,6 +403,7 @@ impl FrameParser {
 
 /// 读取引擎子进程输出并经解析器下发 NDJSON 帧；客户端断连 / 截断 / 墙钟超时均
 /// kill 子进程。`timeout` 为整个读循环的总 deadline（生产 SEARCH_TIMEOUT，测试注入短时限）。
+#[cfg(not(target_family = "wasm"))]
 pub(crate) async fn pump(
     mut child: Child,
     stdout: ChildStdout,
@@ -468,6 +500,7 @@ pub(crate) async fn pump(
 /// 逐根尝试剥绝对路径前缀：命中即返回 (相对路径, 根索引)。全不中时回退
 /// (原路径, 0)（与历史单根 `unwrap_or(abs)` 行为一致；正常链路 rg/grep 回显的
 /// 就是传入目录，不会走到回退）。嵌套根（根 B 在根 A 内）按索引序首个命中为准。
+#[cfg_attr(target_family = "wasm", allow(dead_code))] // wasm: 仅测试面消费（FrameParser 已门控）
 fn strip_root<'a>(abs: &'a Path, roots: &[PathBuf]) -> (&'a Path, usize) {
     for (i, root) in roots.iter().enumerate() {
         if let Ok(rel) = abs.strip_prefix(root) {
@@ -479,6 +512,7 @@ fn strip_root<'a>(abs: &'a Path, roots: &[PathBuf]) -> (&'a Path, usize) {
 
 /// rg match 事件 → NDJSON 命中帧字符串；无法提取文本（二进制帧等）返回 None。
 /// 跨根（roots.len() > 1）时命中帧携带命中根索引 `"root": <idx>`（0 起）。
+#[cfg_attr(target_family = "wasm", allow(dead_code))] // wasm: 仅测试面消费（FrameParser 已门控）
 fn match_frame(frame: &Value, roots: &[PathBuf]) -> Option<String> {
     let data = frame.get("data")?;
     let path_text = data.get("path")?.get("text")?.as_str()?;
@@ -514,6 +548,7 @@ fn match_frame(frame: &Value, roots: &[PathBuf]) -> Option<String> {
 /// NUL 分隔文件名与行内容（文件名含冒号安全）；行号后首个冒号切出内容
 /// （内容含冒号无歧义）。grep 无列号：col 恒 1（spec §2.3 裁决）。
 /// 跨根语义与 [`match_frame`] 一致（帧携带 `"root": <idx>`）。
+#[cfg_attr(target_family = "wasm", allow(dead_code))] // wasm: 仅测试面消费（FrameParser 已门控）
 fn grep_frame(line: &str, roots: &[PathBuf]) -> Option<String> {
     let (path_text, rest) = line.split_once('\0')?;
     let (line_no_raw, content) = rest.split_once(':')?;
@@ -534,10 +569,13 @@ fn grep_frame(line: &str, roots: &[PathBuf]) -> Option<String> {
 /// mpsc Receiver → Stream 适配（tokio 未开 stream feature，手写避免新依赖）。
 /// 响应 body 被 drop 时 Receiver 随之 drop，pump 的 send 失败即触发 kill。
 /// 帧为 `io::Result<Bytes>`（`CoreBody::Stream` 错误面；String→Bytes 零拷贝）。
+/// 仅 search 消费（wasm 随同门控）。
+#[cfg(not(target_family = "wasm"))]
 struct ReceiverStream {
     rx: mpsc::Receiver<Result<String, std::io::Error>>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Stream for ReceiverStream {
     type Item = std::io::Result<Bytes>;
 
