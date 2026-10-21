@@ -83,3 +83,16 @@
 - **health 宣告缝演化**：Task 1 预埋 `compute_languages`/`search_engine` fn 指针注入缝，Task 3 域收编 core 后全部退役（core::health 直调同链，零注入；version 仍由适配层注入主 crate 版本杜绝双 crate 漂移）。
 - **AppState 拆分与缝处置**：`CoreState` 持全部业务状态（配置/多根容器/令牌/引擎覆盖/运行时挂载容器），axum 特有面（web_dist/cors_origin/watch hub/ticket 表实例）留适配层。Deref 兼容缝经 Task 4 收口裁决**保留+注记**（auth/routes 与 builder 群为真实消费方，测试面零消费）；guard.rs 适配层包装缝无消费方，**撤除**（业务体在 core::guard 单一事实源）。
 - **启动校验链留守 bin**（Global Constraints「启动校验逻辑全部入 core」未落地，偏差记录）：`validate_startup` 操作 bin 侧 `ServeArgs`（CLI/TOML 合并产物），core 无 CLI 面；worker 形态配置源独立（阶段三 env JSON），不复用该链。按「发现的独立问题记台账」纪律本阶段不改；阶段三若需共享校验再评估下沉 core。装配根职责（CLI 解析/logging/bind/就绪行）同理留守 bin，§3 未列为 core 域。
+
+## 8. 阶段三实施注记（Workers 适配四任务落地校准，2026-10-19）
+
+实现与 §4 的差异与裁决记录（详证见 `.superpowers/sdd/2026-10-19-workers/` 各任务报告；native 行为锁 392→403 全程零翻转，既有测试零改动）：
+
+- **前置项（终审 I-1）兑现形态**：`vviewer-core`/`vviewer-storage` 以 `default-features = false` 进 wasm 构建图（compute/reqwest 全家不进）；CoreState 懒构造 `ReqwestTransport::new()` 硬编码挪出为 `with_transport` 注入——worker 形态注入 wasm FetchTransport，native 构造路径行为零变化（402 测试零改动锚）。
+- **wasm 流桥裁决**（预声明关键风险实测落锤）：workers-rs 0.8.7 无 tokio 运行时集成（`experimental_tokio` 仅 emscripten 生效）；ByteStream 抽象化不必要——tokio 的 io-util/compat 面在 wasm 允许集内且纯 poll 语义，不可用的 fs/process/net 按目标收口（`#[cfg(not(target_family = "wasm"))]`）；JsValue 载体 !Send 面以 SendWrapper 在流叶端入桥（storage 接缝 `HttpByteStream` Send 锚跨目标零改动）。
+- **without_url 遗留核销**（阶段一终审遗留，本计划 Task 4「直接修」项）：rg 全仓与全历史 `without_url` 零命中——该符号不存在；其关切（错误消息携带原始 URL/凭据）已由挂载终审修复 I1/I2 收口（`display_endpoint` pub 下沉 storage crate，transport 错误路径与展示面共用剥 userinfo 口径）。无需代码改动，本条为处置记录。
+- **体积门禁实绩**：worker-build（release + wasm-opt）产物 ≈0.90MB（index_bg.wasm 889KB + index.js 24KB），<5MB 预算余量 ~5.5×；`tools/worker-budget.mjs` 为 CI 断言（deploy-worker.yml dry-run 产物后置门）。
+- **能力裁剪终态**：events（watch）与 search 路由**不挂载**（取不挂载而非 501——与阶段二 events 同形），health 相应不宣告（searchEngine 靠 wasm PATH 探测自然落空，零特判代码）；compute 随 `default-features = false` 编译期不存在（build.rs grammar 编译链整体跳过）。mounts 三 API 与 file/tree 经 S3/WebDAV 全链可用（wrangler dev 冒烟全矩阵，含 PROPFIND 谓词直通与 Range 206 流直通）。gzip 不做（§4 原文注记维持：worker 出口压缩语义归平台）。台账 Minor-1 顺带收口：HEAD /api/mounts 200（GET 路由单条件追加 Head——native axum `get()` 派生 HEAD 的对应物）。
+- **资产纪律落锤（C1 前科）**：`run_worker_first: ["/api/*"]` + `not_found_handling = "none"`——不用 single-page-application（其缺失路径无条件回 200 index.html，恰为 C1 要防的形态）；缺失路径进 worker 按扩展名分流：`.wasm`/`.scm`/`.mjs`/`.css` 404 不回 HTML（native `serve_index` 为 `.scm`/`.wasm` 双层修之 server 层，worker 侧取计划纪律全集），其余回 index.html（SPA fallback 禁缓存，BUG-15 同款）。binding fetch 两条实测校准：需绝对 URL（相对路径被 workerd fetch 语义拒绝）、返回响应头不可变（读体重建后置补头）。
+- **base 约定核实**（§4「VV_BASE_PATH 构建注入链复用」）：Workers Assets 按完整请求路径匹配资产、不做前缀剥离——worker 形态取根路径部署（workers.dev，base 全链留空）或前置剥前缀反代（前端构建注入 `VV_BASE_PATH=/前缀`，与 Pages 同一 vite 注入口）；worker 侧 env 仅服务 dispatch 剥前缀面，不与资产面混用。
+- **部署链**：`deploy-worker.yml` 手动 dispatch（ref 选择器即可选 tag），steps = web build→wasm build（dry-run 触发 worker-build）→体积门禁→wrangler deploy→canary health（断言 200 + `file-server` 宣告）；secrets `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` 未配置时 deploy/canary 两步自动跳过（构建与门禁照跑）——真实部署不在本计划范围（无 secrets），workflow 首跑校准同 grammar CI 先例口径。

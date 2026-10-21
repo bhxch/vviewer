@@ -9,13 +9,14 @@
 | **纯前端** | SvelteKit 静态站点（`apps/web/build`），任意静态托管即可 | 查看本地文件（File System Access API / 拖拽），无需后端 |
 | **后端单二进制** | `vviewer serve`（Rust + axum）+ 前端静态目录（`--web-dist`） | 浏览服务器上的目录；局域网共享（token 鉴权 / `--allow-lan`） |
 | **桌面应用** | Tauri 2 薄壳（`apps/desktop`）：窗口 + 内嵌 server sidecar | 三平台装即用：无需 Node/静态托管，退出自动回收服务进程 |
+| **Cloudflare Workers** | `server/worker`（workers-rs wasm 适配，业务核复用）+ Workers Assets 静态前端 | 无服务器部署：S3/WebDAV 挂载为文件来源（`VV_MOUNTS`）；无 watch/搜索/compute，前端自动降级 |
 
 后端两档能力，由 `/api/health` 的 `capabilities` 宣告，前端自动适配：
 
 - **档 1 file-server**：目录树、Range 文件流、服务端语言/编码检测、SSE 变更推送（文件修改自动刷新）、Bearer token 路径安全。
 - **档 2 `--compute`**：在档 1 上追加服务端计算——tree-sitter / comrak 远程高亮与渲染（`TopBar` 计算策略可切换 本地/远程/自动）。
 
-跨文件搜索依赖 ripgrep（rg）——**可选**：缺失时自动降级系统 grep（功能差异：无大文件跳过、结果顺序不保证、正则为 ERE 方言、无列定位）；两者皆缺时搜索退回浏览器内执行。`GET /api/health` 经 `searchEngine` 字段宣告实际引擎。
+跨文件搜索依赖 ripgrep（rg）——**可选**：缺失时自动降级系统 grep（功能差异：无大文件跳过、结果顺序不保证、正则为 ERE 方言、无列定位）；两者皆缺时搜索退回浏览器内执行。`GET /api/health` 经 `searchEngine` 字段宣告实际引擎。Workers 部署（配置/secrets/资产纪律/体积门禁/CI）见 [`server/README.md`](server/README.md)「Workers 部署」。
 
 ## 功能矩阵
 
