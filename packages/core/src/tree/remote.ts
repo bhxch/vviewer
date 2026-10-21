@@ -1,4 +1,5 @@
 import type { ByteRange, Encoding, TreeStore, TreeNode } from '../types';
+import { anySignal } from './signals';
 import { hash8 } from './singleFile';
 
 /**
@@ -185,8 +186,8 @@ export function createRemoteStore(
    * base 带 path 时附误粘贴提示）。挂 30s 超时：服务器失联时请求有界失败而非永久悬挂。
    * 多根：路径经 toServerPath 换算，rootIndex!=0 追加 &root=<n>（根 0 不拼，URL 形状不变）。
    * extraHeaders：调用方附加头（read 的 Range 透传），合并进 fetch headers。
-   * signal：调用方取消信号（read 的 opts.signal 透传），与 30s 超时信号 AbortSignal.any
-   * 合并；取消以 fetch 原生 AbortError reject，不转写为超时/其他错误。
+   * signal：调用方取消信号（read 的 opts.signal 透传），与 30s 超时信号 anySignal 合并；
+   * 取消以 fetch 原生 AbortError reject，不转写为超时/其他错误。
    */
   async function request(
     apiPath: string,
@@ -204,7 +205,7 @@ export function createRemoteStore(
     // 调用方 signal 与 30s 超时信号合并（任一触发即断）：预 abort 的 signal 进
     // any 后 fetch 未发出即断，取消不产生真实网络等待
     const merged =
-      signal && timeoutSignal ? AbortSignal.any([timeoutSignal, signal]) : (signal ?? timeoutSignal);
+      signal && timeoutSignal ? anySignal(timeoutSignal, signal) : (signal ?? timeoutSignal);
     let res: Response;
     try {
       res = await fetch(`${base}${apiPath}?${query}`, { headers, signal: merged });
