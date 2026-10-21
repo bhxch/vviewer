@@ -2,8 +2,9 @@
 //!
 //! 断言面：
 //! - PROPFIND Depth:1 multistatus 解析：`d:`/`D:` 命名空间双形态（版本耦合
-//!   样本锚）、文件与集合区分（尾斜杠 + resourcetype）、href percent 解码
-//!   （中文路径）、XML 实体反转义、Depth:1 自身条目跳过；
+//!   样本锚）+ 任意前缀面（台账③：自定义前缀 `md:`、默认命名空间无前缀形态
+//!   ——解析按 local name 前缀无关）、文件与集合区分（尾斜杠 + resourcetype）、
+//!   href percent 解码（中文路径）、XML 实体反转义、Depth:1 自身条目跳过；
 //! - Basic auth：Authorization 头形态（明文凭证不入 Debug 输出）；
 //! - read_range：Range 请求头与响应流（无窗/起点 0 窗/中段窗两 GET）；
 //! - **Range 防线（spec §2，降级语义）**：忽略 Range 的全量响应 / 无
@@ -218,6 +219,43 @@ async fn list_dir_parses_arbitrary_custom_namespace_prefix() {
     assert_eq!(names, vec!["md-file.txt"]);
     assert_eq!(entries[0].kind, EntryKind::File);
     assert_eq!(entries[0].size, Some(9));
+}
+
+/// 台账③补：默认命名空间形态（无前缀，`xmlns="DAV:"` 声明于根元素——RFC 4918
+/// 服务器的合法回传形态）。`open_tag` 对无冒号名走无前缀分支（闭合标签
+/// `</response>` 同不带冒号），与 `d:`/`D:`/自定义前缀同一条 local-name 匹配路；
+/// 条目数/href 提取/kind/size 断言与既有向量同款，仅命名空间形态不同。
+#[tokio::test]
+async fn list_dir_parses_default_namespace_multistatus() {
+    const DEFAULT_NS_PAGE: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<multistatus xmlns="DAV:">
+  <response>
+    <href>/dav/sub/</href>
+    <propstat><prop><resourcetype><collection/></resourcetype></prop><status>HTTP/1.1 200 OK</status></propstat>
+  </response>
+  <response>
+    <href>/dav/sub/plain.txt</href>
+    <propstat><prop><resourcetype/><getcontentlength>21</getcontentlength></prop><status>HTTP/1.1 200 OK</status></propstat>
+  </response>
+  <response>
+    <href>/dav/sub/folder/</href>
+    <propstat><prop><resourcetype><collection/></resourcetype></prop><status>HTTP/1.1 200 OK</status></propstat>
+  </response>
+</multistatus>"#;
+    let transport = Arc::new(
+        MockTransport::new().with_route("PROPFIND", "dav.example.com", |_| {
+            http_response(207, &[], DEFAULT_NS_PAGE)
+        }),
+    );
+    let backend = backend_with(transport);
+
+    let entries = backend.list_dir(Path::new("")).await.unwrap();
+    let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+    // 无前缀解析 + 自身条目跳过 + 目录优先序，与带前缀形态同款断言
+    assert_eq!(names, vec!["folder", "plain.txt"]);
+    assert_eq!(entries[0].kind, EntryKind::Dir);
+    assert_eq!(entries[1].kind, EntryKind::File);
+    assert_eq!(entries[1].size, Some(21));
 }
 
 #[tokio::test]
