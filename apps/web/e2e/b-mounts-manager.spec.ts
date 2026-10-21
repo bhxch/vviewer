@@ -20,6 +20,10 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * - MM-08 直连恢复链：快照+记录在场 → 刷新重建目录/文件 tab；记录删除 → 刷新
  *   落占位（评审带入①降级链）
  * - MM-09 代理注册→重连幂等（restore 对账 POST）→删除失效帧（DELETE 404 幂等）
+ * - MM-10 断连→恢复→重连链（AppShell 重连，台账 3-8）：桩 5xx 断连面（组①清单
+ *   获取失败+组②本地行留存）→恢复后连接服务器同 base 重连——connectServer 清扫
+ *   重建（台账 3-21 状态栏提示「已关闭 N 个旧标签页」）+ 重连对账 POST + 挂载行
+ *   恢复（已注册徽标/行打开全链再通）+ tab 内容可读
  *
  * mock 纪律（Task 2 报告坑注记）：S3 mock XML 符合 delimiter=/ 语义（次级 key/
  * 嵌套前缀会被直连 store 越层防御丢弃）；CORS 失败面用「从未成功过」的端点。
@@ -134,7 +138,9 @@ async function openManager(page: Page): Promise<void> {
 
 /** CORS 预检 + 响应头齐备的 S3 mock（浏览器直连 fetch 会被预检与 CORS 双关卡）。
  * files：对象 key → 响应体（对象 GET 分发）；authLog：ListObjectsV2 请求的
- * authorization 头采集（SigV4 存在性断言——mock 不验签）。 */
+ * authorization 头采集（SigV4 存在性断言——mock 不验签）。
+ * 未命中兜底 404（台账 3-3，与 mockDav 对齐）：不存在的对象回 200 空体是「静默
+ * 假绿」温床（读错 key 也拿到空串成功），404 让误命中显式翻红。 */
 async function mockS3(
   page: Page,
   origin: string,
@@ -160,7 +166,7 @@ async function mockS3(
         return void route.fulfill({ status: 200, headers: CORS_HEADERS, body });
       }
     }
-    return void route.fulfill({ status: 200, headers: CORS_HEADERS, body: '' });
+    return void route.fulfill({ status: 404, headers: CORS_HEADERS, body: 'not found' });
   });
 }
 
@@ -535,7 +541,10 @@ test.describe('b-mounts-manager 目录管理页', () => {
     await page.locator('.vv-tree-row', { hasText: 'one.txt' }).click();
     await closeDrawerIfOpened(page, drawer);
     await expect(page.locator('.vv-code-pre')).toContainText('const davOne');
+    // per-source watch 态负断言（台账 3-4，照 MM-06 对偶形态）：dav 直连面同样
+    // 只显 per-source 指示、不得误显全局「自动刷新不可用」降级
     await expect(page.locator('.vv-statusbar')).toContainText('此源不支持变更推送');
+    await expect(page.locator('.vv-statusbar')).not.toContainText('自动刷新不可用');
   });
 
   test('MM-08 直连恢复链：快照+记录在场重建目录/文件 tab；记录删除 → 刷新落占位', async ({ page }) => {
@@ -675,5 +684,126 @@ test.describe('b-mounts-manager 目录管理页', () => {
     await page.locator('.vv-mm-item', { hasText: 'proxy-e2e' }).getByRole('button', { name: '删除' }).click();
     await expect(page.getByText('暂无前端配置挂载。')).toBeVisible();
     expect(deleteSeen).toBe('/api/mounts/2');
+  });
+
+  test('MM-10 断连→恢复→重连链：桩 5xx 断连面→同 base 重连清扫重建（状态栏 T6 提示）→挂载行恢复+tab 内容可读', async ({
+    page
+  }) => {
+    test.setTimeout(60_000);
+    // 装置（MM-09 桩形态 + down 开关）：代理注册→打开→桩 5xx 断连→桩回正→
+    // 连接服务器同 base 重连。全程不刷新：down 期刷新会走恢复占位链（MM-08 面），
+    // 本用例锚 AppShell 运行期重连（connectServer 清扫重建）语义。
+    const API = 'http://127.0.0.1:8793';
+    await seedServerSession(page, API, null);
+    let down = false;
+    const postBodies: string[] = [];
+    await page.route(`**${API}/**`, (route) => {
+      const req = route.request();
+      if (req.method() === 'OPTIONS') return void route.fulfill({ status: 200, headers: CORS_HEADERS, body: '' });
+      if (down) return void route.fulfill({ status: 503, headers: CORS_HEADERS, body: 'server down' });
+      const path = new URL(req.url()).pathname;
+      if (path === '/api/health') return jsonFulfill(route, { version: '1.0.0-e2e', capabilities: ['file-server'] });
+      if (path === '/api/mounts' && req.method() === 'GET') {
+        return jsonFulfill(route, { fsRoots: 1, staticMounts: [], runtimeMounts: [], mounts: [] });
+      }
+      if (path === '/api/mounts' && req.method() === 'POST') {
+        postBodies.push(req.postData() ?? '');
+        return jsonFulfill(route, { rootIndex: 2 });
+      }
+      if (path === '/api/ticket') return jsonFulfill(route, { ticket: 'e2e' });
+      if (path === '/api/events') {
+        return void route.fulfill({ status: 200, headers: { ...CORS_HEADERS, 'content-type': 'text/event-stream' }, body: '' });
+      }
+      if (path === '/api/tree') {
+        // root=2（代理挂载根）：notes.txt + sub；根 0（重连后的整根 host 源）：host.txt
+        const root = new URL(req.url()).searchParams.get('root');
+        return jsonFulfill(route, {
+          entries:
+            root === '2'
+              ? [
+                  { name: 'notes.txt', kind: 'file', size: 19 },
+                  { name: 'sub', kind: 'dir' }
+                ]
+              : [{ name: 'host.txt', kind: 'file', size: 13 }]
+        });
+      }
+      if (path === '/api/file') {
+        const p = new URL(req.url()).searchParams.get('path');
+        return void route.fulfill({
+          status: 200,
+          headers: CORS_HEADERS,
+          body: p === 'notes.txt' ? 'reconnect notes body\n' : 'reconnect host body\n'
+        });
+      }
+      return void route.fulfill({ status: 404, headers: CORS_HEADERS, body: '{}' });
+    });
+
+    // ① 注册代理挂载（MM-09 ① 同款）→ 行打开：r2 目录 tab（显示名映射→挂载名）
+    // + 树渲染 + 文件读（健康基线全链）
+    await openManager(page);
+    await page.getByRole('button', { name: '＋ 新增挂载' }).click();
+    await page.locator('#vv-mm-mode').selectOption('proxy'); // 已连接服务器：代理可选
+    await page.locator('#vv-mm-label').fill('proxy-e2e');
+    await page.locator('#vv-mm-endpoint').fill('http://127.0.0.1:9005');
+    await page.locator('#vv-mm-bucket').fill('bkt');
+    await page.locator('#vv-mm-username').fill('AK');
+    await page.locator('#vv-mm-secret').fill('SK');
+    await page.locator('.vv-mm-form').getByRole('button', { name: '保存' }).click();
+    await expect(page.locator('.vv-mm-form')).toHaveCount(0);
+    expect(postBodies).toHaveLength(1); // 注册 POST
+    const row = page.locator('.vv-mm-item', { hasText: 'proxy-e2e' });
+    await expect(row.getByText('已注册 rootIndex=2')).toBeVisible();
+    await row.getByRole('button', { name: '打开' }).click();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.vv-mounts-manager')).toHaveCount(0);
+    await expect(page.locator('.vv-tab.active', { hasText: 'proxy-e2e' })).toBeVisible();
+    const drawerA = await openDrawerIfNarrow(page);
+    await page.locator('.vv-tree-row', { hasText: 'notes.txt' }).click();
+    await closeDrawerIfOpened(page, drawerA);
+    await expect(page.locator('.vv-tab.active', { hasText: 'notes.txt' })).toBeVisible();
+    await expect(page.locator('.vv-code-pre')).toContainText('reconnect notes body');
+
+    // ② 断连（桩全 5xx，不刷新）：组①清单获取失败（服务端面显式化）+ 组②本地
+    // 行留存（挂载记录在浏览器 IndexedDB——断连不掉行、注册徽标不闪断）
+    down = true;
+    await page.locator('button[aria-label="目录管理"]').click();
+    await expect(page.locator('.vv-mounts-manager')).toBeVisible();
+    await expect(page.locator('.vv-mm-error')).toContainText('清单获取失败');
+    await expect(
+      page.locator('.vv-mm-item', { hasText: 'proxy-e2e' }).getByText('已注册 rootIndex=2')
+    ).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.vv-mounts-manager')).toHaveCount(0);
+
+    // ③ 恢复（桩回正）→ 同 base 重连（连接服务器）：connectServer 走清扫重建
+    //（r2 源非根 0 不命中存活实例复用）——台账 3-21 状态栏提示按关闭计数显式化
+    //（旧 r2 目录+文件两 tab 被系统替换关闭）+ 根 0 host 目录 tab 重建 + 对账幂等
+    // POST（挂载行恢复的服务端面）
+    down = false;
+    await page.getByRole('button', { name: '连接服务器' }).click();
+    await page.getByLabel('服务器地址').fill(API);
+    await page.getByRole('button', { name: '连接', exact: true }).click();
+    await expect(page.locator('.vv-tab.active', { hasText: '127.0.0.1:8793' })).toBeVisible();
+    await expect(page.locator('.vv-statusbar')).toContainText('已关闭 2 个旧标签页（服务器已重新连接）');
+    await expect.poll(() => postBodies.length, { timeout: 10_000 }).toBe(2); // 重连对账 POST
+
+    // ④ 挂载行恢复 + tab 内容可读：host 根 0 树行读文件（新连接链路通）→ 管理页
+    // 行仍已注册 → 行打开 r2 全链再通（树行+内容——重连不损伤挂载定义面）
+    const drawerB = await openDrawerIfNarrow(page);
+    await page.locator('.vv-tree-row', { hasText: 'host.txt' }).click();
+    await closeDrawerIfOpened(page, drawerB);
+    await expect(page.locator('.vv-tab.active', { hasText: 'host.txt' })).toBeVisible();
+    await expect(page.locator('.vv-code-pre')).toContainText('reconnect host body');
+    await page.locator('button[aria-label="目录管理"]').click();
+    const rowAgain = page.locator('.vv-mm-item', { hasText: 'proxy-e2e' });
+    await expect(rowAgain.getByText('已注册 rootIndex=2')).toBeVisible();
+    await rowAgain.getByRole('button', { name: '打开' }).click();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.vv-mounts-manager')).toHaveCount(0);
+    await expect(page.locator('.vv-tab', { hasText: 'proxy-e2e' })).toBeVisible();
+    const drawerC = await openDrawerIfNarrow(page);
+    await page.locator('.vv-tree-row', { hasText: 'notes.txt' }).click();
+    await closeDrawerIfOpened(page, drawerC);
+    await expect(page.locator('.vv-code-pre')).toContainText('reconnect notes body');
   });
 });
