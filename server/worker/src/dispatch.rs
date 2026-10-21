@@ -11,6 +11,7 @@
 //! 不经手；进到本层的非 /api/* 请求即资产缺失（not_found_handling="none"）——
 //! C1 前科纪律按扩展名分流（[`crate::http::is_asset_path`]）。
 
+use futures_util::StreamExt;
 use worker::{Env, Method, Request, Response};
 
 use vviewer_core::auth;
@@ -212,10 +213,33 @@ fn range_not_satisfiable(size: u64) -> worker::Result<Response> {
 /// `POST /api/mounts`：body 闸门（64KB → 413）→ JSON 解析（失败 400）→
 /// core 注册（指纹幂等，201/200）。
 async fn mounts_register(mut req: Request, state: &'static WorkerState) -> worker::Result<Response> {
-    let body = req.text().await?;
-    if body.len() > MOUNTS_BODY_LIMIT {
-        return json_error(413, "payload too large");
+    // 1-10：显式 Content-Length 超限先拒（不读 body）；分块面走流式累计闸。
+    // worker::Headers::get 即 Result<Option<String>>（无 HeaderValue 折叠面）
+    if let Some(len) = req
+        .headers()
+        .get("content-length")?
+        .and_then(|v| v.parse::<usize>().ok())
+    {
+        if len > MOUNTS_BODY_LIMIT {
+            return json_error(413, "payload too large");
+        }
     }
+    // 流式累计闸：块到即判，超限不再先全读 body（worker 0.8.7 实测：
+    // Request::stream() → ByteStream = Stream<Item = Result<Vec<u8>>>）。
+    // stream() 对无 body 请求报错而旧 text() 面解析为空串——按无 body=空
+    // 缓冲对齐旧语义（serde 400），不 5xx 短路
+    let mut acc = 0usize;
+    let mut buf: Vec<u8> = Vec::new();
+    if let Ok(mut stream) = req.stream() {
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            if !crate::http::payload_fits(&mut acc, chunk.len(), MOUNTS_BODY_LIMIT) {
+                return json_error(413, "payload too large");
+            }
+            buf.extend_from_slice(&chunk);
+        }
+    }
+    let body = String::from_utf8_lossy(&buf).into_owned();
     let cfg: vviewer_core::mounts::MountConfig = match serde_json::from_str(&body) {
         Ok(cfg) => cfg,
         // axum Json 拒绝的 status 对齐（400）；消息含 serde 字段名（配置值

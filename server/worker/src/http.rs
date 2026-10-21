@@ -55,10 +55,18 @@ pub fn parse_range(h: &str, size: u64) -> Result<Option<(u64, u64)>, ()> {
 /// 为计划资产纪律的全集扩展，plan Global Constraints「资产缺失 404 不回
 /// HTML」）。SPA 路由（无扩展名形态）不受影响。
 pub fn is_asset_path(path: &str) -> bool {
-    path.ends_with(".wasm")
-        || path.ends_with(".scm")
-        || path.ends_with(".mjs")
-        || path.ends_with(".css")
+    // 1-8：大小写不敏感（ASCII 恒可——扩展名集全 ASCII）
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with(".wasm") || lower.ends_with(".scm")
+        || lower.ends_with(".mjs") || lower.ends_with(".css")
+}
+
+/// 1-10 累计闸：消费一块前判定，累计超 cap 即 false（调用方 413）。
+pub fn payload_fits(acc: &mut usize, chunk_len: usize, cap: usize) -> bool {
+    let next = acc.saturating_add(chunk_len);
+    if next > cap { return false; }
+    *acc = next;
+    true
 }
 
 /// base-path 裁剪（VV_BASE_PATH env，值形如 `/docs`；空串/缺省 = 不裁剪）：
@@ -137,5 +145,24 @@ mod tests {
         assert!(!is_asset_path("/wasm"));
         assert!(!is_asset_path("/file.cssx"));
         assert!(!is_asset_path("/a.wasm/b"));
+    }
+
+    /// 1-8：扩展名大小写不敏感（C1 纪律的补网——`.WASM` 误载 HTML 的同型风险）。
+    #[test]
+    fn asset_path_is_case_insensitive() {
+        for p in ["/grammars/rust.WASM", "/grammars/Rust.Wasm", "/x.SCM", "/a.Mjs", "/s.Css"] {
+            assert!(is_asset_path(p), "{p}");
+        }
+        assert!(!is_asset_path("/plain.WASMX"), "非尾扩展不算");
+    }
+
+    /// 1-10：累计闸语义——边界恰等允许、超一即拒（分块到达序无关）。
+    #[test]
+    fn payload_gate_bounds_accumulation() {
+        let mut n = 0usize;
+        assert!(payload_fits(&mut n, 100, 100) && n == 100);
+        assert!(!payload_fits(&mut n, 1, 100));
+        let mut m = 99usize;
+        assert!(payload_fits(&mut m, 1, 100) && m == 100);
     }
 }
