@@ -338,7 +338,7 @@ pub fn manifest(state: &CoreState) -> CoreResponse {
     )
 }
 
-/// `DELETE /api/mounts/:index`：运行时项 204 + 槽位 tombstone（不压缩不移位，
+/// `DELETE /api/mounts/{index}`：运行时项 204 + 槽位 tombstone（不压缩不移位，
 /// 见 [`CoreState::unregister_mount`]）；静态项（fs 根/静态 TOML 挂载）405（该
 /// 资源类不支持 DELETE——语义裁决记录任务报告；响应补 `Allow: GET, POST` 头，
 /// RFC 9110 §15.5.5 对 405 的 MUST）；越界或已删 404。
