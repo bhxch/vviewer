@@ -277,7 +277,12 @@ fn spawn_exit_monitor(app: AppHandle, generation: u64) {
             }
             Ok(None) => {}
             Err(_) => {
-                guard.take();
+                // 2-2：try_wait Err 形态也须 reap（guard.take() 裸丢弃在部分平台
+                // 留僵尸——与 kill_server 同纪律 kill+wait；kill 幂等可失败）
+                if let Some(mut child) = guard.take() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
                 drop(guard);
                 ask_restart_or_exit(&app, LaunchFailure::Exited);
             }
