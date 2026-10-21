@@ -6,7 +6,7 @@
 
 **Architecture:** KaTeX 增强在管线 katex 步（扫描器扩展+mhchem 动态子路径导入）；扩展语法双端同步——markdown-it 插件（engine.ts 注册）+ comrak extension 开启（server markdown.rs，字段已实证存在）+ 双侧金标 fixture 交叉注记作一致性锚；引擎无关项（callout 折叠/wikilink/徽标）落 enrich/copyCode 前端单实现层。
 
-**Tech Stack:** markdown-it 15（+markdown-it-mark/ins/deflist）、comrak 0.56（`extension.highlight/insert`、`parser.inline_footnotes`——registry 源码 parser/options.rs:170/569/586 实证）、katex contrib/mhchem、vitest/playwright。
+**Tech Stack:** markdown-it 15（+markdown-it-mark/ins/deflist）、comrak 0.56（`extension.highlight/insert/inline_footnotes`——均 ExtensionOptions 字段。**勘误 2026-10-21**：原文「`parser.inline_footnotes`——registry 源码 parser/options.rs:170/569/586 实证」失实：inline_footnotes 属 Extension 非 Parse 选项，行号引用亦已漂移；实证=server/core/src/compute/markdown.rs extension 配置段 `ext.inline_footnotes`）、katex contrib/mhchem、vitest/playwright。
 
 **Spec:** `docs/superpowers/specs/2026-10-19-markdown-markpad-alignment-design.md` §3、§4
 
@@ -16,6 +16,7 @@
 - 双引擎一致性机制=双侧金标 fixture：本地引擎单测断言渲染产物 == 金标（注释注明 comrak 侧对应形态，Rust 侧 markdown.rs 单测反向锚定）；不引入跨进程实时比对。
 - katex 子路径必须 `.mjs` 裸子路径（`katex/contrib/mhchem`），禁止 `dist/contrib/*.js`（CJS 副本产生第二解析器、宏表分裂——markpad #745 教训）。
 - 行内脚注 ^[note] 为风险项：无现成 markdown-it 插件，自写 inline rule 并入 markdown-it-footnote env；**降级路径**=实现失败（与 footnote env 结构冲突不可调和）则该语法保持字面渲染、双侧 spec 注记偏差，不阻塞其余交付。
+  - **勘误（2026-10-21）**：上句「无现成插件、自写 inline rule」过时——markdown-it-footnote 4.0.0 自带 footnote_inline（注册于 `md.inline.ruler.after('image')`，与 `[^1]` 共用 env.footnotes.list 并轨编号），无需自写规则，风险项未发生、降级路径未触发。实证：engine.ts 文件头注释；markdownEngine.test.ts「行内脚注（Task 4）」describe 固化。
 - wikilink 口径（spec §4.2）：`[[#heading]]` 锚跳转（href 交由既有 remapHeadingHashLinks 收口）；`[[file]]`/`[[file#heading]]` 降级不可点字面链接；`![[img]]`/`![[img|100]]`/`![[img|100x50]]` 嵌入 `<img>`（src=原文相对路径，交由既有 resolveRelativeImages 解析；尺寸段转 width/height，属性转义）。
 - 测试在仓库根跑 vitest；cargo 勿与 vitest 并发；每任务原子提交。
 
@@ -60,7 +61,7 @@ Expected: 新用例 FAIL
 
 - [ ] **Step 3: 实现**
 
-3a. scanMathSegments（pipeline.ts:136-178 的 while 循环）加两个分支（`$` 分支之前）：
+3a. scanMathSegments 的 while 循环加两个分支（`$` 分支之前）：
 
 ```ts
     if (ch === '\\' && text[i + 1] === '(') {
@@ -87,7 +88,7 @@ Expected: 新用例 FAIL
     }
 ```
 
-runKatex 的候选收集（L201）扩为：`value.includes('$') || value.includes('\\(') || value.includes('\\[')`。
+runKatex 的候选收集扩为：`value.includes('$') || value.includes('\\(') || value.includes('\\[')`。
 
 3b. runKatex 的 katex 加载后加 mhchem（同实例扩展）：
 
@@ -173,7 +174,7 @@ git commit -m "feat(md): 扩展语法本地引擎注册——mark/ins/deflist �
 ### Task 3: comrak 侧 extension 开启 + 双侧金标锚
 
 **Files:**
-- Modify: `server/src/compute/markdown.rs`（extension.highlight/insert + parser.inline_footnotes + 单测）
+- Modify: `server/core/src/compute/markdown.rs`（extension.highlight/insert + extension.inline_footnotes + 单测）
 - Modify: `packages/render-text/src/markdown/engine.test.ts`（金标注记：comrak 侧产物形态注释交叉引用）
 
 **Interfaces:**
@@ -208,23 +209,25 @@ Expected: FAIL
         // ==mark== / ++ins++（spec §4.1，markpad 同款）；行内脚注 ^[note]
         options.extension.highlight = true;
         options.extension.insert = true;
-        options.parser.inline_footnotes = true;
+        options.extension.inline_footnotes = true; // 勘误 2026-10-21：Extension 非 Parse 选项
 ```
 
-（`parser.inline_footnotes` 在 ParseOptions——options.parser 字段访问；字段名以 cargo check 报错校正。）
+（**勘误 2026-10-21**：原文 `options.parser.inline_footnotes` 失实——`inline_footnotes` 属 ExtensionOptions（`options.extension` 字段访问），非 ParseOptions；实证=server/core/src/compute/markdown.rs extension 配置段。）
 
-- [ ] **Step 4: 跑测试确认通过 + 全量 cargo 回归**；engine.test.ts 金标注记：在 Task 2 三用例注释补「comrak 对偶：server/src/compute/markdown.rs tests highlight_and_insert_extensions / inline_footnote_renders——形态一致以两侧断言互为锚」。
+- [ ] **Step 4: 跑测试确认通过 + 全量 cargo 回归**；engine.test.ts 金标注记：在 Task 2 三用例注释补「comrak 对偶：server/core/src/compute/markdown.rs tests highlight_and_insert_extensions / inline_footnote_renders——形态一致以两侧断言互为锚」。
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add server/src/compute/markdown.rs packages/render-text/src/markdown/engine.test.ts
+git add server/core/src/compute/markdown.rs packages/render-text/src/markdown/engine.test.ts
 git commit -m "feat(server): comrak highlight/insert/inline_footnotes 开启+双侧金标锚"
 ```
 
 ---
 
 ### Task 4: 行内脚注 markdown-it 自写规则（风险项）
+
+> **勘误（2026-10-21）**：本任务未按「自写规则」实施——markdown-it-footnote 4.0.0 自带 footnote_inline 直接覆盖（见 Global Constraints 勘误），无自写实现面；终态见 engine.ts 文件头注释与 markdownEngine.test.ts「行内脚注（Task 4）」describe。以下步骤为历史设想存档。
 
 **Files:**
 - Create: `packages/render-text/src/markdown/inlineFootnote.ts`（自写 md.use 插件）
