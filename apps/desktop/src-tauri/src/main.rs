@@ -123,6 +123,22 @@ fn bootstrap(app: &AppHandle) {
     }
 }
 
+/// 重启编排（2-4）：后台线程 spawn+等就绪，主线程只做窗操作（macOS 约束）。
+/// 结果两条路（建窗/再弹错误窗）各自回主线程分派；并发双重启由错误窗
+/// 模态语义天然排除（一次仅一个待选窗）。
+fn restart_async(app: AppHandle) {
+    std::thread::spawn(move || match start_and_wait(&app) {
+        Ok(port) => {
+            let h = app.clone();
+            let _ = app.run_on_main_thread(move || show_or_navigate(&h, port));
+        }
+        Err(failure) => {
+            let h = app.clone();
+            let _ = app.run_on_main_thread(move || ask_restart_or_exit(&h, failure));
+        }
+    });
+}
+
 /// spawn sidecar 并等待就绪行；成功返回实测端口。
 fn start_and_wait(app: &AppHandle) -> Result<u16, LaunchFailure> {
     let state = app.state::<ServerState>();
@@ -221,6 +237,7 @@ fn build_main_window(app: &AppHandle, port: u16) {
 /// 主线程编排（窗口创建的 macOS 约束）；退出 `app.exit(1)`（触发 RunEvent::Exit
 /// 回收子进程）。窗体不提前关闭——「关闭末窗即退出」默认语义会抢在用户选择前
 /// 杀掉应用，重启时经 [`show_or_navigate`] 原窗导航。
+/// 重启编排 2-4 起异步（restart_async），错误窗不再被 15s 等待冻结。
 fn ask_restart_or_exit(app: &AppHandle, failure: LaunchFailure) {
     let state = app.state::<ServerState>();
     let mut body = failure.describe();
@@ -244,7 +261,8 @@ fn ask_restart_or_exit(app: &AppHandle, failure: LaunchFailure) {
             if restart {
                 let h = handle.clone();
                 let h2 = h.clone();
-                let _ = h.run_on_main_thread(move || bootstrap(&h2));
+                // 2-4：重启编排出主线程——同步等待 15s 曾冻结错误窗与事件循环
+                let _ = h.run_on_main_thread(move || restart_async(h2));
             } else {
                 handle.exit(1);
             }
