@@ -199,8 +199,9 @@ fn validate_startup(args: &ServeArgs, token: Option<&str>) -> Result<(), String>
 }
 
 /// 桌面薄壳就绪行（plan 2026-10-19 Global Constraints：bind 成功后向 stdout 输出
-/// 恰好一行 `VV_READY port=<n>`，n=listener 实测端口，--port 0 时为内核分配值）。
-/// 纯净行无前缀装饰——壳侧解析器按行首精确匹配；wire 格式由单测锁定。
+/// 恰好一行 `VV_READY port=<n>`，n=listener 实测端口，--port 0 时为内核分配值；
+/// 1-14 收窄：仅 --port 0 输出，显式端口面向人读不再多一行）。纯净行无前缀
+/// 装饰——壳侧解析器按行首精确匹配；wire 格式由单测锁定。
 fn ready_line(port: u16) -> String {
     format!("VV_READY port={port}")
 }
@@ -287,7 +288,13 @@ fn serve(args: ServeArgs, mounts: Vec<MountConfig>) -> Result<(), i32> {
     } else {
         std::net::Ipv4Addr::LOCALHOST.into()
     };
-    let sock = SocketAddr::new(ip, args.port.unwrap_or(DEFAULT_PORT));
+    let resolved_port = args.port.unwrap_or(DEFAULT_PORT);
+    // 1-14：内核分配判定——解析链上 resolved_port == 0 即内核分配（显式
+    // --port 0；未提供端口默认 DEFAULT_PORT=8321 非 0，不触发）。测试构建
+    // 就绪行整体静默，判定随之免编译（免 unused 告警）。
+    #[cfg(not(test))]
+    let kernel_assigned = resolved_port == 0;
+    let sock = SocketAddr::new(ip, resolved_port);
 
     let state = vviewer::state::AppState::new(
         roots[0].clone(),
@@ -329,10 +336,12 @@ fn serve(args: ServeArgs, mounts: Vec<MountConfig>) -> Result<(), i32> {
             2
         })?;
         tracing::info!("vviewer listening on http://{local}");
-        // 就绪协议（plan 2026-10-19）：现有启动日志之后恰好一行 VV_READY；纯净行
-        // 无前缀。#[cfg(not(test))] 防单测噪声（取实现简者）。
+        // 1-14：就绪行语义收窄——仅内核分配端口（--port 0，桌面薄壳消费面）输出；
+        // 显式端口面向人读，不再多一行。wire 格式与解析契约不变（ready_line 单测锁）。
         #[cfg(not(test))]
-        println!("{}", ready_line(local.port()));
+        if kernel_assigned {
+            println!("{}", ready_line(local.port()));
+        }
         axum::serve(listener, app).await.map_err(|e| {
             eprintln!("error: server failure: {e}");
             2

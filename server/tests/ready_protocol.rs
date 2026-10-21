@@ -149,6 +149,81 @@ fn serve_port_zero_assigns_kernel_port_and_emits_ready_line() {
     assert_eq!(health_status(port), 200, "解析出的端口应已伺服 /api/health");
 }
 
+/// 1-14：显式端口路径不再输出就绪行（终审裁决：多一行仅人读噪声）——
+/// 壳侧消费面只有 --port 0，wire 契约不变。
+#[test]
+fn explicit_port_emits_no_ready_line() {
+    // 空闲端口：std TcpListener bind :0 取内核分配值后即放（取放间理论竞窗，
+    // 任务简报口径一致接受）
+    let free_port = {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.local_addr().unwrap().port()
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let child = Command::new(env!("CARGO_BIN_EXE_vviewer"))
+        .args(["serve", "--port", &free_port.to_string(), "--root"])
+        .arg(dir.path())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn vviewer serve --port <explicit>");
+    let mut child = KillOnDrop(child);
+
+    // stderr 排水线程：防管道缓冲写满阻塞子进程；内容留存供失败诊断
+    let stderr = child.0.stderr.take().unwrap();
+    let stderr_buf = Arc::new(Mutex::new(String::new()));
+    {
+        let stderr_buf = Arc::clone(&stderr_buf);
+        std::thread::spawn(move || {
+            let mut r = BufReader::new(stderr);
+            let mut buf = String::new();
+            loop {
+                buf.clear();
+                match r.read_line(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => stderr_buf.lock().unwrap().push_str(&buf),
+                }
+            }
+        });
+    }
+
+    // stdout 逐行经通道转发（读线程阻塞式，主线程超时轮询）
+    let stdout = child.0.stdout.take().unwrap();
+    let (tx, rx) = mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            match line {
+                Ok(l) => {
+                    if tx.send(l).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    // 无就绪行可等：以 /api/health 200 为伺服信号（health_status 自带连接重试
+    // 兜底）。就绪行若存在必先于 accept 循环输出且 stdout 行缓冲即刷——200
+    // 时点该行必已入通道；再宽限排水至管道静默，杜绝在途行漏读。
+    assert_eq!(
+        health_status(free_port),
+        200,
+        "显式端口应正常伺服 /api/health"
+    );
+    let mut all_lines: Vec<String> = Vec::new();
+    // Timeout 与 Disconnected 同义退出（仅断言已收行，无需区分）
+    while let Ok(line) = rx.recv_timeout(Duration::from_millis(100)) {
+        all_lines.push(line);
+    }
+
+    assert!(
+        !all_lines.iter().any(|l| l.starts_with("VV_READY port=")),
+        "显式端口路径不得输出就绪行; stdout: {all_lines:?}"
+    );
+}
+
 /// 裸 TCP 探针：不加 HTTP 客户端 dev-dep，HTTP/1.1 + Connection: close 读到 EOF，
 /// 取状态行第二段为状态码。VV_READY 于 bind 后输出，连接理论即成；重试仅为
 /// accept 循环启动前的毫秒级窗口兜底。
