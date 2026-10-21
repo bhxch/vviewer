@@ -25,9 +25,14 @@ path = "src/main.rs"
 # worker 形态 `--no-default-features`：watch.rs/compute 路由编译不存在、
 # /api/events 不挂载（watch=false 能力缺失）、health 不宣告 compute/diagrams
 # （core::health 同名 feature 协同门控）。
+# 阶段三 Task 1（终审 I-1）：转发链补 storage 的 native transport——
+# `vviewer-storage` 以 default-features = false 进入（reqwest 不随依赖边默认
+# 携带），native 总开关显式转发 `vviewer-storage/native`。裁剪形态 workspace
+# 全图零 reqwest（`cargo check --workspace --all-targets --no-default-features`
+# 即实证锚）；native 形态解析结果与改动前逐包一致（Cargo.lock 零漂移）。
 [features]
 default = ["native"]
-native = ["dep:notify", "vviewer-core/native"]
+native = ["dep:notify", "vviewer-core/native", "vviewer-storage/native"]
 
 [dependencies]
 axum = "0.8"
@@ -45,8 +50,11 @@ tower-http = { version = "0.7", features = ["fs", "cors", "trace", "compression-
 notify = { version = "8", optional = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
-# 存储抽象子 crate（StorageBackend trait + LocalFs，目录挂载阶段一）
-vviewer-storage = { path = "storage" }
+# 存储抽象子 crate（StorageBackend trait + LocalFs，目录挂载阶段一）。
+# default-features = false（阶段三 Task 1，终审 I-1）：reqwest（native
+# transport）仅经本 crate `native` feature 转发——静态挂载装配（main.rs）的
+# 缺省构造随 native 门控，裁剪形态零 reqwest。
+vviewer-storage = { path = "storage", default-features = false }
 # 框架无关业务核（阶段二抽取）：handler 业务体所在，适配层单向依赖。
 # default-features=false + native 转发：worker 形态随本 crate 一起裁剪 core
 # 的 compute 域（重依赖不进构建图）。

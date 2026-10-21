@@ -9,7 +9,12 @@ use std::sync::{Arc, Mutex};
 
 use vviewer_storage::StorageBackend;
 use vviewer_storage::LocalFs;
-use vviewer_storage::transport::{HttpTransport, ReqwestTransport};
+use vviewer_storage::transport::HttpTransport;
+// reqwest 唯一入口符号：native 门控内才存在（storage default-features = false，
+// 终审 I-1）。门控纪律由 lib.rs source_anchors 锚测强制——新增引用必须同款
+// 置于 `#[cfg(feature = "native")]` item 内。
+#[cfg(feature = "native")]
+use vviewer_storage::transport::ReqwestTransport;
 
 use crate::mounts::{build_mount, MountConfig, RegistrationError, RuntimeMount, UnregisterError};
 
@@ -99,9 +104,10 @@ pub struct CoreState {
     /// 串扰旧引用」两类窗口一并消灭；新注册不填充空洞
     /// （[`CoreState::register_mount`] 追加分配），重启才整体回收。
     pub runtime_mounts: Arc<Mutex<Vec<Option<RuntimeMount>>>>,
-    /// 运行时注册用的 HTTP transport（懒初始化：首次注册构建 reqwest 连接池，
-    /// 全注册共享；测试经适配层 AppState 的 with_runtime_transport 注入
-    /// MockTransport——装配不付 reqwest Client 构建成本，既有测试零影响）。
+    /// 运行时注册用的 HTTP transport（注入优先，缺省懒构造随 native 门控——
+    /// 见 [`CoreState::runtime_http_transport`]；全注册共享一个 Arc）。测试与
+    /// worker 形态经 [`CoreState::with_transport`]（适配层 AppState 的
+    /// with_runtime_transport 同款委托）注入 MockTransport/wasm transport。
     /// 私有面：仅 [`CoreState::register_mount`] 消费。
     pub runtime_transport: Arc<Mutex<Option<Arc<dyn HttpTransport>>>>,
     /// 访问令牌；None 表示免鉴权（仅默认 127.0.0.1 绑定时允许）。
@@ -141,6 +147,16 @@ impl CoreState {
             grep_path: None,
             version: "",
         }
+    }
+
+    /// 注入运行时注册用 transport（builder 形态；与适配层 AppState 的
+    /// with_runtime_transport 同一槽位语义——无条件覆盖）。worker 形态的构造
+    /// 路径：wasm HttpTransport 由此进入（裁剪形态无 reqwest，未注入时注册
+    /// 即配置错误）；native 形态可注入 MockTransport 免真实网络（既有测试
+    /// 零改动——适配层 builder 委托至此）。
+    pub fn with_transport(self, transport: Arc<dyn HttpTransport>) -> Self {
+        *self.runtime_transport.lock().unwrap() = Some(transport);
+        self
     }
 
     // ---------- 运行时挂载（阶段二 spec §3：POST/GET/DELETE /api/mounts） ----------
@@ -228,18 +244,42 @@ impl CoreState {
             .map(|pos| self.roots.len() + pos)
     }
 
-    /// 运行时注册用 HTTP transport：懒初始化（首次注册构建 reqwest 连接池，
-    /// 全注册共享一个 Arc——与 main.rs 静态装配的共享形态同款）。
+    /// 运行时注册用 HTTP transport 取用：注入槽位优先（[`CoreState::with_transport`]）；
+    /// 空槽时走缺省构造——native 形态懒初始化（首次注册构建 reqwest 连接池并
+    /// 缓存进槽位，全注册共享——与 main.rs 静态装配的共享形态同款，既有行为
+    /// 零变化）；worker 形态无 reqwest，空槽即配置错误（指引注入面）。
     fn runtime_http_transport(&self) -> Result<Arc<dyn HttpTransport>, RegistrationError> {
         let mut guard = self.runtime_transport.lock().unwrap();
         if let Some(t) = guard.as_ref() {
             return Ok(t.clone());
         }
+        let t = self.default_transport()?;
+        *guard = Some(t.clone());
+        Ok(t)
+    }
+
+    /// 缺省 transport 构造（native：reqwest）。core 源码内 `ReqwestTransport`
+    /// 硬编码符号的**唯一容身点**（lib.rs source_anchors 锚测强制门控纪律；
+    /// 适配层 main.rs 静态装配的同形构造为其镜像，worker 不复用本 crate 的
+    /// native 面）。
+    #[cfg(feature = "native")]
+    fn default_transport(&self) -> Result<Arc<dyn HttpTransport>, RegistrationError> {
         let t: Arc<dyn HttpTransport> = Arc::new(ReqwestTransport::new().map_err(|e| {
             RegistrationError::Transport(format!("http transport init: {}", e.message()))
         })?);
-        *guard = Some(t.clone());
         Ok(t)
+    }
+
+    /// 缺省 transport 构造（裁剪形态：无 reqwest，必须注入）——worker 形态
+    /// 以 [`CoreState::with_transport`] 注入 wasm HttpTransport 后注册链可用
+    /// （见 tests::worker_form 专测）。
+    #[cfg(not(feature = "native"))]
+    fn default_transport(&self) -> Result<Arc<dyn HttpTransport>, RegistrationError> {
+        Err(RegistrationError::Transport(
+            "http transport not configured: inject one via CoreState::with_transport \
+             (worker form builds without the native reqwest transport)"
+                .into(),
+        ))
     }
 }
 
@@ -264,5 +304,56 @@ mod tests {
         assert_eq!(cs.root_canonical, raw);
         assert_eq!(cs.token.as_deref(), Some("tok"));
         assert!(!cs.compute);
+    }
+
+    // ---------- worker 形态（--no-default-features）注入构造链专测 ----------
+    //
+    // 裁剪形态无 reqwest（终审 I-1）：运行时注册的 transport 只能来自注入
+    // （Task 2 worker 侧注入 wasm HttpTransport）。native 形态不编译本模块
+    // （native 懒构造路径由既有注册测试覆盖）；编译面由裁剪 all-targets check
+    // 锚定，`cargo test -p vviewer-core --no-default-features` 实际运行。
+    #[cfg(not(feature = "native"))]
+    mod worker_form {
+        use super::*;
+        use vviewer_storage::transport::MockTransport;
+
+        fn s3_cfg() -> MountConfig {
+            MountConfig {
+                kind: crate::mounts::MountKind::S3,
+                label: Some("docs".into()),
+                endpoint: Some("http://127.0.0.1:9000".into()),
+                bucket: Some("b1".into()),
+                prefix: None,
+                access_key_id: Some("ak".into()),
+                secret_access_key: Some("sk".into()),
+                username: None,
+                password: None,
+                path_style: None,
+            }
+        }
+
+        #[test]
+        fn with_transport_injection_enables_runtime_register() {
+            let cs = CoreState::new(PathBuf::from("/nonexistent-worker-root"), None, false)
+                .with_transport(Arc::new(MockTransport::new()));
+            let (idx, created) = cs.register_mount(&s3_cfg()).expect("注入 transport 后注册应成功");
+            assert!(created);
+            assert_eq!(idx, 1, "rootIndex = fs 根数(1) + 运行时段首槽");
+            assert_eq!(cs.root_at(idx).unwrap().mount.as_ref().unwrap().kind, "s3");
+        }
+
+        #[test]
+        fn register_without_injected_transport_reports_configuration_error() {
+            let cs = CoreState::new(PathBuf::from("/nonexistent-worker-root"), None, false);
+            let err = cs.register_mount(&s3_cfg()).expect_err("未注入 transport 应报配置错误");
+            assert_eq!(
+                err,
+                RegistrationError::Transport(
+                    "http transport not configured: inject one via CoreState::with_transport \
+                     (worker form builds without the native reqwest transport)"
+                        .into()
+                )
+            );
+        }
     }
 }

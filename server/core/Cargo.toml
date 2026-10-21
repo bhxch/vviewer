@@ -14,6 +14,11 @@ license = "Apache-2.0"
 # diagrams）。默认开启（native 构建行为不变）；worker 形态
 # `--no-default-features` 整域裁剪——compute 模块编译不存在、build.rs 跳过
 # grammar 编译、health 不宣告 compute/diagrams。
+# 阶段三 Task 1（终审 I-1）：native 同时转发 storage 的 native transport
+# （reqwest）——裁剪形态 storage 以 default-features = false 进入，reqwest
+# 全家不进 worker 依赖图；storage 本体（StorageBackend trait + LocalFs +
+# S3/WebDAV + HttpTransport 接缝）恒在依赖图（挂载三 API 与 file/tree 经
+# S3/WebDAV 是 worker 形态的保留能力，不随裁剪）。
 [features]
 default = ["native"]
 native = [
@@ -23,6 +28,7 @@ native = [
     "dep:tree-sitter-language",
     "dep:layout-rs",
     "dep:svgbob",
+    "vviewer-storage/native",
 ]
 
 [dependencies]
@@ -44,8 +50,12 @@ once_cell = "1"
 tracing = "0.1"
 # ticket 签发的 32B 随机 hex（generate_token；自适配层迁入）
 rand = "0.10"
-# 存储抽象（StorageBackend trait + LocalFs）：core 的 roots/挂载容器数据面
-vviewer-storage = { path = "../storage" }
+# 存储抽象（StorageBackend trait + LocalFs + S3/WebDAV + HttpTransport 接缝）：
+# core 的 roots/挂载容器数据面。default-features = false（阶段三 Task 1，终审
+# I-1）：reqwest（storage native transport）仅经本 crate `native` feature 转发
+# 进入——裁剪形态零 reqwest；运行时注册的 transport 缺省构造（native）与注入
+# 形态见 state.rs。
+vviewer-storage = { path = "../storage", default-features = false }
 # ---- 以下为 native（compute 域）重依赖，随 feature 裁剪 ----
 # 仅库渲染：禁默认（cli/syntect-onig 语法高亮用不到）；shortcodes 为 GFM emoji 短码
 comrak = { version = "0.56.0", default-features = false, features = ["shortcodes"], optional = true }

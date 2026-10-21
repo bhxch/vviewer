@@ -7,7 +7,11 @@ use std::sync::Arc;
 use clap::{Parser, Subcommand};
 
 use vviewer::state::{build_mount, MountRoot};
-use vviewer_storage::transport::{HttpTransport, ReqwestTransport};
+use vviewer_storage::transport::HttpTransport;
+// reqwest 唯一入口符号：native 门控内才存在（storage default-features =
+// false，终审 I-1）——与 core 侧 default_transport 同形，静态装配专用。
+#[cfg(feature = "native")]
+use vviewer_storage::transport::ReqwestTransport;
 
 mod config;
 use config::{MountConfig, DEFAULT_PORT, load_file_config, resolve_config};
@@ -191,10 +195,7 @@ fn build_mount_roots(
         return Ok(Vec::new());
     }
     // reqwest transport 实例全挂载共享一个 Arc（连接池复用；无挂载不构建）
-    let transport: Arc<dyn HttpTransport> = Arc::new(
-        ReqwestTransport::new()
-            .map_err(|e| format!("http transport init: {}", e.message()))?,
-    );
+    let transport = default_http_transport()?;
     mounts
         .iter()
         .enumerate()
@@ -203,6 +204,23 @@ fn build_mount_roots(
                 .map_err(|e| format!("mount #{i}: {e}"))
         })
         .collect()
+}
+
+/// 静态挂载缺省 transport（native：reqwest 连接池建一次全挂载共享；行为与
+/// 挪出门控前逐语句一致）。裁剪形态无 reqwest——worker 部署不经本 crate
+/// （worker 复用的是 core + storage），静态挂载面随 native 裁剪，报配置错误。
+#[cfg(feature = "native")]
+fn default_http_transport() -> Result<Arc<dyn HttpTransport>, String> {
+    Ok(Arc::new(
+        ReqwestTransport::new()
+            .map_err(|e| format!("http transport init: {}", e.message()))?,
+    ))
+}
+
+/// 静态挂载缺省 transport（裁剪形态：无 reqwest，静态挂载不可用）。
+#[cfg(not(feature = "native"))]
+fn default_http_transport() -> Result<Arc<dyn HttpTransport>, String> {
+    Err("http transport requires the `native` feature (static mounts are native-only)".into())
 }
 
 /// 启动服务；配置错误返回 exit code（不 panic）。

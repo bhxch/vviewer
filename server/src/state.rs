@@ -162,10 +162,11 @@ impl AppState {
     }
 
     /// builder：注入运行时注册用 transport（测试注入 MockTransport，免真实
-    /// 网络；未注入时首次注册懒建 reqwest）。容器在核 [`CoreState`]（Task 2
-    /// 迁入），此处经核字段注入。
-    pub fn with_runtime_transport(self, transport: Arc<dyn HttpTransport>) -> Self {
-        *self.core.runtime_transport.lock().unwrap() = Some(transport);
+    /// 网络；未注入时首次注册懒建 reqwest——native 门控，阶段三 Task 1 自 core
+    /// 挪出门控内）。容器在核 [`CoreState`]（Task 2 迁入），经核 builder
+    /// [`CoreState::with_transport`] 注入（同一槽位，委托非平行实现）。
+    pub fn with_runtime_transport(mut self, transport: Arc<dyn HttpTransport>) -> Self {
+        self.core = self.core.with_transport(transport);
         self
     }
 
