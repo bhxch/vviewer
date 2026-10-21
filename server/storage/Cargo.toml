@@ -51,3 +51,10 @@ futures-util = { version = "0.3", features = ["io"] }
 # target 段声明吞掉其后所有条目，不得插入常规依赖中间。
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 tokio = { version = "1", features = ["fs"] }
+
+# wasm 目标：S3 SigV4 签名时间戳（amz_date_now）的墙钟源——std::time::
+# SystemTime::now() 在 wasm32-unknown-unknown 直接 panic（time not implemented，
+# Task 2 wrangler dev 冒烟实证），web_time 经 JS Date 取墙钟（native 侧本依赖
+# 不进，s3.rs 按 target 别名导入，host 图零变化）。
+[target.'cfg(target_family = "wasm")'.dependencies]
+web-time = "1"

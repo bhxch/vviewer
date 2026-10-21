@@ -19,7 +19,15 @@
 
 use std::path::Path;
 use std::sync::Arc;
+
+// 墙钟（SigV4 的 x-amz-date）：host 用 std；wasm 用 web_time（JS Date 桥）——
+// std::time::SystemTime::now() 在 wasm32-unknown-unknown panic（Task 2 冒烟
+// 实证「time not implemented」），API 面（now/duration_since/UNIX_EPOCH）两者
+// 同形，消费点零改动。
+#[cfg(not(target_family = "wasm"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(target_family = "wasm")]
+use web_time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use hmac::{Hmac, Mac};
