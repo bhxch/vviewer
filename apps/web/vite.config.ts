@@ -202,7 +202,9 @@ function diagramEngineChunk(): Plugin {
                     { name: 'sveltekit-manifest', test: '<sveltekit:generated>/app-manifest.js' },
                     {
                       name: 'diagram-engines',
-                      test: /[\\/]node_modules[\\/](@viz-js[\\/]viz|nomnoml)[\\/]/
+                      // graphre 是 nomnoml 的解析器依赖（UMD require），随 nomnoml 归堆——
+                      // 否则落默认共享 chunk，与引擎组拆两包（台账 4-2）
+                      test: /[\\/]node_modules[\\/](@viz-js[\\/]viz|nomnoml|graphre)[\\/]/
                     }
                   ]
                 }
