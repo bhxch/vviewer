@@ -528,6 +528,17 @@ async function runLightbox(root: Document, ctx: PipelineCtx): Promise<void> {
       openLightbox(img, ctx, collectGallery(ctx.galleryScope ?? root));
     });
   }
+  // 图表 svg 同款接线（5-4）：collectGallery 已将 .md-diagram-view svg 入列（src 记
+  // outerHTML 供灯箱回放），点击按元素身份定位开灯箱；防重复绑定代币与 img 同款。
+  // KaTeX 产物无 .md-diagram-view 包裹，排除逻辑天然不涉 svg（照收集现状）。
+  for (const svg of Array.from(root.querySelectorAll('.md-diagram-view svg'))) {
+    if (svg.hasAttribute('data-md-lightbox')) continue;
+    svg.setAttribute('data-md-lightbox', '');
+    svg.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      openLightbox(svg, ctx, collectGallery(ctx.galleryScope ?? root));
+    });
+  }
 }
 
 // ---------- 装配与执行 ----------

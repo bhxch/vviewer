@@ -343,6 +343,21 @@ describe('lightbox 步', () => {
     expect(overlay.querySelector('.md-lightbox-count')!.textContent).toBe('1/2');
     // 未传 galleryScope 回退 root：节点未离开 doc 的既有单测场景不翻转（上面各用例）
   });
+
+  it('图表 svg 点击开灯箱（5-4 接线）：与 img 同款代币防重复绑定，按元素身份定位回放 outerHTML', async () => {
+    mermaidMocks.render.mockResolvedValue({ svg: '<svg viewBox="0 0 10 10"><circle r="4"/></svg>' });
+    const doc = docOf('```mermaid\ngraph TD; A-->B;\n```\n\n![图](pic.png)\n');
+    await runPipeline(doc, noopCtx());
+    const svg = doc.querySelector('.md-diagram-view svg')!;
+    expect(svg.hasAttribute('data-md-lightbox')).toBe(true);
+    svg.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    const overlay = doc.getElementById('md-lightbox-overlay')!;
+    expect(overlay).not.toBeNull();
+    // 画廊 img 在前 svg 在后：点 svg 定位到第 2 张，svg 宿主可见、img 宿主隐藏
+    expect(overlay.querySelector('.md-lightbox-count')!.textContent).toBe('2/2');
+    expect(overlay.querySelector('.md-lightbox-svg')!.querySelector('svg')).not.toBeNull();
+    expect(overlay.querySelector('img.md-lightbox')!.hasAttribute('hidden')).toBe(true);
+  });
 });
 
 describe('themeClassPrefix 与集成', () => {

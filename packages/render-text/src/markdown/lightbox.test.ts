@@ -1,6 +1,6 @@
 // lightbox.test.ts — 灯箱模块单测：缩放/平移/导航状态机纯函数直测 + jsdom DOM
 // 交互（打开/关闭语义、画廊导航、键盘集、归属代币、主题前缀）。
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PipelineCtx } from './pipeline';
 import {
   clampZoom,
@@ -124,6 +124,27 @@ describe('overlay 打开/关闭语义', () => {
     expect(overlay.querySelector('.md-lightbox-btn-next')!.hasAttribute('hidden')).toBe(true);
   });
 
+  it('同 src 两图点第二张：按元素身份定位开第二张（非首 src 匹配，5-5）', () => {
+    const doc = docOf('<img src="a.png" alt="first"><img src="a.png" alt="second">');
+    const imgs = doc.querySelectorAll('img');
+    openLightbox(imgs[1]!, noCtx, collectGallery(doc.body));
+    const overlay = overlayOf(doc);
+    expect(overlay.querySelector('.md-lightbox-count')!.textContent).toBe('2/2');
+    expect(overlay.querySelector('img.md-lightbox')!.getAttribute('alt')).toBe('second');
+    removeLightboxOverlay(doc);
+  });
+
+  it('svg 条目按元素身份定位：点 svg 直接开 svg（img 在前不抢位，5-4/5-5）', () => {
+    const doc = docOf('<img src="a.png" alt="A"><div class="md-diagram-view"><svg viewBox="0 0 10 10"></svg></div>');
+    openLightbox(doc.querySelector('.md-diagram-view svg')!, noCtx, collectGallery(doc.body));
+    const overlay = overlayOf(doc);
+    expect(overlay.querySelector('.md-lightbox-count')!.textContent).toBe('2/2');
+    expect(overlay.querySelector('.md-lightbox-svg')!.hasAttribute('hidden')).toBe(false);
+    expect(overlay.querySelector('.md-lightbox-svg')!.querySelector('svg')).not.toBeNull();
+    expect(overlay.querySelector('img.md-lightbox')!.hasAttribute('hidden')).toBe(true);
+    removeLightboxOverlay(doc);
+  });
+
   it('svg 画廊条目：内容容器注入 outerHTML，img/svg 宿主按条目切换', () => {
     const doc = docOf('<img src="a.png" alt="A"><div class="md-diagram-view"><svg viewBox="0 0 10 10"></svg></div>');
     openLightbox(doc.querySelector('img')!, noCtx, collectGallery(doc.body));
@@ -202,6 +223,31 @@ describe('画廊导航与键盘集', () => {
     press('Enter');
     expect(overlayOf(doc)).not.toBeNull();
     press('Escape');
+    expect(overlayOf(doc)).toBeNull();
+  });
+
+  it('输入守卫：input/contenteditable 内按键直通——不关灯箱、不导航、不缩放（5-2）', () => {
+    const doc = docOf('<img src="a.png" alt="A"><img src="b.png" alt="B"><input type="text"><div contenteditable="true"></div>');
+    openLightbox(doc.querySelector('img')!, noCtx, collectGallery(doc.body));
+    const overlay = overlayOf(doc);
+    const stage = overlay.querySelector<HTMLElement>('.md-lightbox-stage')!;
+    const input = doc.querySelector('input')!;
+    const editable = doc.querySelector('[contenteditable]')!;
+    const press = (el: Element, key: string): void => {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    };
+    press(input, 'ArrowRight');
+    expect(overlay.querySelector('.md-lightbox-count')!.textContent).toBe('1/2'); // 未导航
+    press(input, 'Escape');
+    expect(overlayOf(doc)).not.toBeNull(); // 未关闭
+    press(editable, '+');
+    expect(viewOf(stage).zoom).toBe(1); // 未缩放
+    press(editable, 'Escape');
+    expect(overlayOf(doc)).not.toBeNull();
+    // 焦点不在输入控件时键集照常（守卫仅对控件内按键直通）
+    press(doc.documentElement, 'ArrowRight');
+    expect(overlay.querySelector('.md-lightbox-count')!.textContent).toBe('2/2');
+    press(doc.documentElement, 'Escape');
     expect(overlayOf(doc)).toBeNull();
   });
 
@@ -295,5 +341,31 @@ describe('缩放平移交互（wheel/拖拽 pan/拖拽吞 click）', () => {
     doc.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
     overlay.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(overlayOf(doc)).toBeNull();
+  });
+});
+
+// a11y 基线（5-3）走全局 document：jsdom 对 defaultView 为 null 的文档（如
+// implementation.createHTMLDocument）focus 是 no-op，焦点断言须有浏览上下文
+describe('a11y 基线（role/aria-modal/焦点入出/aria-live）', () => {
+  afterEach(() => {
+    removeLightboxOverlay(document);
+    document.body.innerHTML = '';
+  });
+
+  it('overlay role=dialog + aria-modal + tabindex=-1；开启焦点入 overlay，关闭还原触发元素；计数 aria-live', () => {
+    // 触发元素带 tabindex（img/svg 默认不可聚焦，focus 还原仅对可聚焦触发元素生效）
+    const host = document.createElement('div');
+    host.innerHTML = '<img src="a.png" alt="A" tabindex="-1"><img src="b.png" alt="B">';
+    document.body.appendChild(host);
+    const trigger = host.querySelector('img')!;
+    openLightbox(trigger, noCtx, collectGallery(host));
+    const overlay = document.getElementById(LIGHTBOX_OVERLAY_ID)!;
+    expect(overlay.getAttribute('role')).toBe('dialog');
+    expect(overlay.getAttribute('aria-modal')).toBe('true');
+    expect(overlay.getAttribute('tabindex')).toBe('-1');
+    expect(document.activeElement).toBe(overlay); // 焦点入 overlay
+    expect(overlay.querySelector('.md-lightbox-count')!.getAttribute('aria-live')).toBe('polite');
+    removeLightboxOverlay(document);
+    expect(document.activeElement).toBe(trigger); // 关闭还原到触发元素
   });
 });

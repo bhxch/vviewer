@@ -10,6 +10,9 @@
 //   （overlay.click()）不受影响。
 // - 拖拽 pan 与关闭的冲突（T2 裁决）：拖拽位移超阈值置 dragMoved，吞掉 mouseup
 //   后收尾的 click（该 click 经冒泡会落在 overlay 上，否则拖完即误关）。
+// - 递延清偿（5-2/5-3/5-5）：输入控件内按键直通不劫持；overlay 具对话框语义
+//   （role/aria-modal/开启焦点入/关闭焦点还原/计数 aria-live）；画廊按元素身份定位
+//   （同 src 多图各归各位，条目纯数据 + itemEls 副表）。
 
 import type { PipelineCtx } from './pipeline';
 
@@ -19,7 +22,8 @@ export const LIGHTBOX_OVERLAY_ID = 'md-lightbox-overlay';
 /** overlay 上的打开者代币属性（openLightbox 写入、removeLightboxOverlay 校验，遗留 U3） */
 export const LIGHTBOX_OWNER_ATTR = 'data-md-lightbox-owner';
 
-/** 画廊条目：img 取 src/alt；svg（图表视图）取 outerHTML（alt 空）。 */
+/** 画廊条目：img 取 src/alt；svg（图表视图）取 outerHTML（alt 空）。保持纯数据形态，
+ * 元素身份走 itemEls 副表（WeakMap）——同 src 多图按元素引用定位，src 匹配不复用。 */
 export interface GalleryItem {
   type: 'img' | 'svg';
   src: string;
@@ -52,6 +56,10 @@ export function navigate(state: { index: number; count: number }, delta: number)
   return { index: ((state.index + delta) % state.count + state.count) % state.count };
 }
 
+/** 画廊条目 → 收集时源元素：同 src 多图按元素身份定位用。收集即注册（点击时现场
+ * 收集，引用恒新鲜）；条目为一次性对象，WeakMap 弱引用随条目回收，无泄漏面。 */
+const itemEls = new WeakMap<GalleryItem, Element>();
+
 /**
  * 收集渲染根下的画廊条目（文档序：img 在前、图表 svg 在后）：img 跳过两类——
  * 宽高属性均在且均 <32px 的微缩图（图标/表情）、KaTeX 排版产物内的 img；图表
@@ -65,10 +73,14 @@ export function collectGallery(root: ParentNode): GalleryItem[] {
     const wAttr = img.getAttribute('width');
     const hAttr = img.getAttribute('height');
     if (wAttr !== null && hAttr !== null && Number(wAttr) < 32 && Number(hAttr) < 32) continue;
-    items.push({ type: 'img', src: img.getAttribute('src') ?? '', alt: img.getAttribute('alt') ?? '' });
+    const item: GalleryItem = { type: 'img', src: img.getAttribute('src') ?? '', alt: img.getAttribute('alt') ?? '' };
+    itemEls.set(item, img);
+    items.push(item);
   }
   for (const svg of Array.from(root.querySelectorAll('.md-diagram-view svg'))) {
-    items.push({ type: 'svg', src: svg.outerHTML, alt: '' });
+    const item: GalleryItem = { type: 'svg', src: svg.outerHTML, alt: '' };
+    itemEls.set(item, svg);
+    items.push(item);
   }
   return items;
 }
@@ -104,6 +116,9 @@ const escHandlers = new WeakMap<HTMLElement, (ev: KeyboardEvent) => void>();
 /** overlay → 其打开函数（复用单例时取回闭包状态；随元素由 WeakMap 回收） */
 const openers = new WeakMap<HTMLElement, (items: GalleryItem[], index: number) => void>();
 
+/** overlay → 其触发元素（关闭时焦点还原，a11y 基线；随元素由 WeakMap 回收） */
+const origins = new WeakMap<HTMLElement, Element>();
+
 /** 缩放步进（键盘/滚轮/按钮同规） */
 const ZOOM_STEP = 1.25;
 
@@ -123,16 +138,30 @@ export function removeLightboxOverlay(doc: Document, ownerId?: string): void {
   const onKey = escHandlers.get(overlay);
   if (onKey) doc.removeEventListener('keydown', onKey);
   escHandlers.delete(overlay);
+  const origin = origins.get(overlay);
+  origins.delete(overlay);
   overlay.remove();
+  // 焦点还原到触发元素（a11y 基线）：focus 定义于 HTMLElement/SVGElement 而 Element
+  // 接口未声明，此表运行时只存 img/svg 触发元素，最小收窄安全；触发元素不可聚焦
+  // （img/svg 默认无 tabindex）或已脱离文档时 focus 为无害 no-op
+  (origin as HTMLElement | undefined)?.focus();
+}
+
+/** 未入画廊元素的退化条目（微缩图/KaTeX 内 img 等被收集规则跳过时的单开）：svg 取
+ * outerHTML 回放，img 取 src/alt。 */
+function fallbackItem(el: Element): GalleryItem {
+  return el.tagName.toLowerCase() === 'svg'
+    ? { type: 'svg', src: el.outerHTML, alt: '' }
+    : { type: 'img', src: el.getAttribute('src') ?? '', alt: el.getAttribute('alt') ?? '' };
 }
 
 /**
- * 点击图打开灯箱：定位到该图在画廊中的位置（未命中——微缩图/KaTeX 内 img 等被
- * 收集规则跳过——退化为单条画廊）。gallery 由调用方（runLightbox）点击时对渲染根
- * 收集：同一文档内的 img 与图表 svg 可在灯箱内 ←/→ 连续导航。
+ * 点击画廊元素（img 或图表 svg）打开灯箱：按收集时的元素身份定位画廊位置（同 src
+ * 多图各归各位；未命中退化为单条画廊）。gallery 由调用方（runLightbox）点击时对
+ * 渲染根收集：同一文档内的 img 与图表 svg 可在灯箱内 ←/→ 连续导航。
  */
-export function openLightbox(img: HTMLImageElement, ctx: PipelineCtx, gallery: GalleryItem[]): void {
-  const doc = img.ownerDocument;
+export function openLightbox(el: Element, ctx: PipelineCtx, gallery: GalleryItem[]): void {
+  const doc = el.ownerDocument;
   // body 级单例：首次点击创建，之后所有图共用
   let overlay = doc.getElementById(LIGHTBOX_OVERLAY_ID);
   if (!overlay) {
@@ -140,9 +169,8 @@ export function openLightbox(img: HTMLImageElement, ctx: PipelineCtx, gallery: G
     overlay = built.overlay;
     openers.set(overlay, built.open);
   }
-  const src = img.getAttribute('src') ?? '';
-  const idx = gallery.findIndex((it) => it.type === 'img' && it.src === src);
-  const items = idx === -1 ? [{ type: 'img' as const, src, alt: img.getAttribute('alt') ?? '' }] : gallery;
+  const idx = gallery.findIndex((it) => itemEls.get(it) === el);
+  const items = idx === -1 ? [fallbackItem(el)] : gallery;
   const open = openers.get(overlay);
   if (!open) {
     // 防御（不裸非空断言）：同 id 陌生元素（外部 DOM 注入/序列化恢复等理论路径）
@@ -150,6 +178,7 @@ export function openLightbox(img: HTMLImageElement, ctx: PipelineCtx, gallery: G
     removeLightboxOverlay(doc);
     return;
   }
+  origins.set(overlay, el); // 关闭时焦点还原目标（每次打开跟随最新触发元素）
   open(items, idx === -1 ? 0 : idx);
   // 最后打开者即 owner（覆盖旧记号）：其后仅 owner 的 destroy 可随生命周期摘除（U3）。
   // 注意须在此处写（而非 buildOverlay 闭包）：复用单例时归属跟随本次打开者的 ctx。
@@ -169,6 +198,10 @@ function buildOverlay(doc: Document, ctx: PipelineCtx): { overlay: HTMLElement; 
   const overlay = doc.createElement('div');
   overlay.id = LIGHTBOX_OVERLAY_ID;
   overlay.className = cls(ctx, 'lightboxOverlay');
+  // a11y 基线（5-3）：对话框语义 + 程序化聚焦宿主（Tab 序不掺入 overlay 本体）
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.tabIndex = -1;
 
   // 内容容器（stage）：缩放平移的变换面，absolute 铺满 overlay 使其坐标系与
   // zoomAt 的光标坐标同系（CSS transform-origin: 0 0）
@@ -186,6 +219,7 @@ function buildOverlay(doc: Document, ctx: PipelineCtx): { overlay: HTMLElement; 
   bar.className = cls(ctx, 'bar');
   const count = doc.createElement('span');
   count.className = cls(ctx, 'count');
+  count.setAttribute('aria-live', 'polite'); // 计数切换对读屏播报（a11y 基线）
 
   const applyState = (): void => {
     stage.style.transform = `translate(${state.tx}px, ${state.ty}px) scale(${state.zoom})`;
@@ -242,8 +276,12 @@ function buildOverlay(doc: Document, ctx: PipelineCtx): { overlay: HTMLElement; 
   bar.append(prev, next, count, zoomOut, zoomIn, reset, closeBtn);
   overlay.append(stage, bar);
 
-  // 键盘集（document 级，escHandlers 既有模式：关闭随之摘除防监听器累积）
+  // 键盘集（document 级，escHandlers 既有模式：关闭随之摘除防监听器累积）。
+  // 输入守卫（5-2）：输入控件内的按键直通（打字与原生快捷键不劫持灯箱键集）；
+  // 测试经 document 直派 keydown 时 target 是 Document（非 Element），不误拦。
   const onKey = (ev: KeyboardEvent): void => {
+    const target = ev.target;
+    if (target instanceof Element && target.closest('input,textarea,select,[contenteditable]')) return;
     if (ev.key === 'Escape') removeLightboxOverlay(doc);
     else if (ev.key === 'ArrowRight') { ev.preventDefault(); go(1); }
     else if (ev.key === 'ArrowLeft') { ev.preventDefault(); go(-1); }
@@ -312,6 +350,7 @@ function buildOverlay(doc: Document, ctx: PipelineCtx): { overlay: HTMLElement; 
       count.toggleAttribute('hidden', !multi);
       showItem();
       applyState();
+      overlay.focus(); // 焦点入灯箱（a11y 基线；复用重开亦然）
     },
   };
 }
