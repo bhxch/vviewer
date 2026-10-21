@@ -117,6 +117,7 @@
 - worker dispatch file() 的 416 前置 parity：1-2 仅落 native 适配层，worker 面（worker/src/dispatch.rs file()）仍先 locate 后 parse——语法非法 Range+缺失文件时 404 抢答（native 面 416）。
 - config.rs 三面手工 Debug 的字段清单人工同步风险：可加字段数对齐锚测兜底（终审分诊 #1 建议）。
 - workerd 对 Content-Length: 0 POST 的 body 形态 wasm e2e 实证（终审分诊 #8 建议升格为挂账前提；两分支终态已收敛一致）。
+- desktop shutdown_now×restart_async 毫秒级孤儿窄窗：重启进行中收 SIGTERM 时新 sidecar 若在 spawn 完成至槽位放回之间无人回收（阶段二终审新增；罕见+后果可控，AtomicBool 护栏可解）。
 
 ## 三、观察/校准项（等待 CI 首跑或实机，非代码债）
 
