@@ -421,6 +421,51 @@ mod tests {
         assert_eq!(serve(a, Vec::new()), Err(2));
     }
 
+    // ---------- 启动校验链直测（config 文件侧形态，台账 3-13/3-14） ----------
+
+    /// 3-13：文件侧 allow_lan=false ≡ 缺省（不做「显式拒绝」）——false 不绕过
+    /// 「allow_lan 必须 token」校验的否全面，也不新增面（config.rs 链测只锁
+    /// true 的拒绝面，此处锁 false≡缺省的合并+校验直测）。
+    #[test]
+    fn file_allow_lan_false_equals_absent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = vec![dir.path().to_path_buf()];
+        let file_false =
+            config::FileConfig { allow_lan: Some(false), ..Default::default() };
+
+        // 合并面：false 与缺省同落 allow_lan=false（不产生「显式拒绝」形态）
+        let resolved_false =
+            resolve_config(ServeArgs { root: root.clone(), ..args(None) }, Some(file_false))
+                .unwrap();
+        let resolved_absent =
+            resolve_config(ServeArgs { root: root.clone(), ..args(None) }, None).unwrap();
+        assert!(!resolved_false.allow_lan);
+        assert_eq!(resolved_false.allow_lan, resolved_absent.allow_lan);
+
+        // 校验链面：无 CLI --allow-lan、无 token——两形态同过，不因 allow_lan 拒绝
+        let a_false: ServeArgs = resolved_false.into();
+        let a_absent: ServeArgs = resolved_absent.into();
+        assert_eq!(validate_startup(&a_false, None), Ok(()));
+        assert_eq!(validate_startup(&a_absent, None), Ok(()));
+    }
+
+    /// 3-14：web_dist 指向文件（非目录）→ 校验链报错且消息含 is_dir 语义
+    /// （消息以现状为准，锁现状文案）。
+    #[test]
+    fn web_dist_pointing_at_file_is_rejected() {
+        let root_dir = tempfile::tempdir().expect("tempdir");
+        let file_tmp = tempfile::tempdir().expect("tempdir");
+        let web_dist = file_tmp.path().join("not-a-dir.txt");
+        std::fs::write(&web_dist, b"x").expect("write file");
+
+        let mut a = args(None);
+        a.root = vec![root_dir.path().to_path_buf()];
+        a.web_dist = Some(web_dist.clone());
+        let err = validate_startup(&a, None).unwrap_err();
+        assert!(err.contains("--web-dist is not a directory"), "got: {err}");
+        assert!(err.contains(web_dist.to_string_lossy().as_ref()), "got: {err}");
+    }
+
     // ---------- 挂载后端构造（per-kind 必填校验，错误消息含字段名） ----------
 
     #[test]
