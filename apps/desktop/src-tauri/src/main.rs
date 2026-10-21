@@ -474,7 +474,8 @@ mod tests {
     /// 局限（如实注记）：main 的 Builder 链无法在 mock runtime 下实例化（Wry
     /// 需真实窗口系统），本测试锁定的是「注册后取态可用」的插件行为面；链上
     /// 调用经 `dialog_plugin()` 单点函数约束（main 与本测试同源），删除链上
-    /// `.plugin(dialog_plugin())` 行需人工评审把关。
+    /// `.plugin(dialog_plugin())` 行需人工评审把关。删行防线另有
+    /// builder_chain_registers_dialog_plugin 源码锚（2-6），双保险成立。
     #[test]
     fn dialog_plugin_registers_manager_state() {
         let app = tauri::test::mock_app();
@@ -483,6 +484,22 @@ mod tests {
             .expect("dialog 插件注册成功");
         // 未注册形态下此行 panic：state::<Dialog<R>>() 缺席
         let _dialog = app.dialog();
+    }
+
+    /// 2-6 源码锚：main 的 Builder 链必须含 dialog 插件注册行。mock 契约测试
+    /// （上方）锁「注册后取态可用」，本锚锁「链上确实注册了」——Wry 不可 mock，
+    /// 删行防线=本锚+人工评审双保险（include_str 把源码烙进测试二进制，
+    /// 无盘上文件依赖）。
+    #[test]
+    fn builder_chain_registers_dialog_plugin() {
+        const SRC: &str = include_str!("main.rs");
+        // 检索串经 concat! 拼装且锚定换行+8 空格缩进：字面量若原样烙进本文件
+        // （断言自指）、或命中 mock 测试的 12 空格缩进调用 / doc 提及，contains
+        // 即恒真、锚沦为 vacuous——全文件仅 main 链上那一行可匹配，删行必红。
+        assert!(
+            SRC.contains(concat!("\n        .plugin(", "dialog_plugin())")),
+            "Builder 链缺 dialog 插件注册——错误窗三条路径将随 DialogExt state() panic 整体失效"
+        );
     }
 
     /// 2-3：多字节字符被读边界切开时，摘要不得出现 U+FFFD（不完整尾巴跨读保留）。
