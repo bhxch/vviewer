@@ -22,6 +22,8 @@ tauri = { version = "2", features = [] }
 tauri-plugin-single-instance = { version = "2", features = [] }
 # 原生错误窗（含「重启服务」按钮）；仅 Rust 侧调用，无 IPC 面
 tauri-plugin-dialog = { version = "2", features = [] }
+# SIGTERM/SIGINT 回收处理器（台账 2-7）：信号终止时回收 sidecar 后退出
+ctrlc = "3"
 
 # C1 契约测试用 mock runtime（test feature 仅测试目标启用，不进发布产物）
 [dev-dependencies]

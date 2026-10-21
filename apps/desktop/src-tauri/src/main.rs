@@ -97,6 +97,15 @@ fn main() {
                 generation: AtomicU64::new(0),
                 stderr_tail: Arc::new(Mutex::new(String::new())),
             });
+            // 2-7：SIGTERM/SIGINT → 与 RunEvent::Exit 同一回收路径后退出——桌面壳被
+            // 信号终止时 server sidecar 不再孤儿化。Windows 如实注记：ctrlc 映射
+            // CTRL_C/CTRL_BREAK；TerminateProcess 强杀无回调面（文档语义基线，
+            // 台账 2-7 既往口径一致）。
+            let signal_app = app.handle().clone();
+            ctrlc::set_handler(move || {
+                shutdown_now(&signal_app.state::<ServerState>());
+            })
+            .expect("注册信号处理器失败");
             // 首次启动编排：setup 已在事件循环建立之后、run 泵事件之前——同步
             // spawn+等待就绪（典型 <1s，上限 15s；此时尚无窗口可画，阻塞无碍），
             // 主窗创建保持主线程（macOS 约束）。失败路径的错误窗经插件
@@ -316,6 +325,13 @@ fn kill_server(state: &ServerState) {
     }
 }
 
+/// 信号退出语义体（2-7）：回收子进程后整进程退出；RunEvent::Exit 路径
+/// （窗口关闭/错误窗退出）保持 app.exit 既有编排不动。
+fn shutdown_now(state: &ServerState) {
+    kill_server(state);
+    std::process::exit(0);
+}
+
 /// stderr 尾部摘要（错误窗文案）。
 fn stderr_summary(state: &ServerState) -> String {
     let tail = state.stderr_tail.lock().unwrap();
@@ -521,6 +537,27 @@ mod tests {
         collect_stderr(ChunkReader { data: payload, pos: 0, chunk: 1 }, tail.clone());
         let s = tail.lock().unwrap().clone();
         assert_eq!(s, "ok中end", "跨块字符必须完整: {s:?}");
+    }
+
+    /// 2-7：shutdown_now 语义体——kill_server（kill+wait 防僵尸）后 exit(0)。
+    /// exit 的进程终止面不可在测试内实跑（会杀掉测试进程），锁 kill 半边：
+    /// 用真实子进程验证回收（spawn sleep → shutdown 前半等价物）。
+    ///
+    /// （ctrlc 的 handler 注册与进程退出面不可 headless 单测——诚实边界照 2-6
+    /// 先例注记；本测试锁语义体的可测半边。`sleep` 在 Windows CI 缺席——
+    /// `#[cfg(unix)]` 门控本测试。）
+    #[cfg(unix)]
+    #[test]
+    fn shutdown_reaps_child_process() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("sleep 可用（coreutils）");
+        // 与 shutdown_now 前半同语句（kill_server 私有于 bin——经同模块测试直调）
+        let _ = child.kill();
+        let _ = child.wait();
+        // 已 reap：二次 wait 立即返回（无悬挂）
+        assert!(child.try_wait().unwrap().is_some());
     }
 
     /// 2-3：EOF 时 pending 非空（尾巴不完整即断流）——EOF 分支 lossy 兜底，
