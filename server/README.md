@@ -122,7 +122,7 @@ health/mounts 回显与错误信息（误把凭据写进 endpoint 时展示面�
 | `GET /api/events?ticket=` | ticket | SSE 变更推送：`data: {"type":"changed","paths":[…]}`（相对 root，500ms debounce 聚合）；15s 心跳；watcher 建立失败降级为一条 `{"type":"watch-error"}` |
 | `POST /api/mounts` | Bearer | 注册运行时挂载（内存态，重启失效）；同指纹幂等。见下节 |
 | `GET /api/mounts` | Bearer | 挂载清单（静态 TOML 段 + 运行时段 + 全量汇总，脱敏无凭据）。见下节 |
-| `DELETE /api/mounts/:index` | Bearer | 删除运行时挂载；静态项 405。见下节 |
+| `DELETE /api/mounts/{index}` | Bearer | 删除运行时挂载；静态项 405。见下节 |
 
 ## 运行时挂载三 API
 
@@ -177,7 +177,7 @@ TOML `[[mount]]` 是启动期静态装配；三 API 在**运行时**增删内存
   {watch, search}}`；挂载根能力恒 `watch:false, search:false`。结构面即无凭据
   字段（凭据永不回显）。
 
-### DELETE /api/mounts/:index —— 删除
+### DELETE /api/mounts/{index} —— 删除
 
 - 运行时项 `204` 并删除（**tombstone 语义，不压缩**：槽位保留置空，其余项
   `rootIndex` 不移位——删非尾项不串扰已开 tab 的旧索引；被删索引进程内恒不

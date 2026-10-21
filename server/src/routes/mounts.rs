@@ -35,7 +35,7 @@ pub async fn manifest(State(state): State<AppState>) -> Response {
     adapt::to_axum(vviewer_core::mounts::manifest(&state.core))
 }
 
-/// DELETE /api/mounts/:index 适配：运行时项 204 tombstone / 静态项 405（带
+/// DELETE /api/mounts/{index} 适配：运行时项 204 tombstone / 静态项 405（带
 /// `Allow` 头）/ 越界或已删 404——分支与响应形态构造在 core::mounts::unregister。
 pub async fn remove(State(state): State<AppState>, Path(index): Path<usize>) -> Response {
     adapt::to_axum(vviewer_core::mounts::unregister(&state.core, index))

@@ -134,12 +134,15 @@ function manifestJson(
   staticMounts: MountManifestEntry[] = []
 ): unknown {
   // 运行时段 = mounts 中不在 staticMounts 段的条目（server MountsManifest 同构：
-  // staticMounts 的 rootIndex 自 fsRoots 起算，运行时段起点 = fsRoots+staticLen）
-  const staticSet = new Set(staticMounts);
+  // staticMounts 的 rootIndex 自 fsRoots 起算，运行时段起点 = fsRoots+staticLen）。
+  // 4-4：按字段判（rootIndex+endpoint，指纹的 endpoint 展示面口径）——调用侧两次
+  // entryOf 独立实例化，Set 引用判重恒不命中（cosmetic 修正）
   return {
     fsRoots,
     staticMounts,
-    runtimeMounts: entries.filter((e) => !staticSet.has(e)),
+    runtimeMounts: entries.filter(
+      (e) => !staticMounts.some((s) => s.rootIndex === e.rootIndex && s.endpoint === e.endpoint)
+    ),
     mounts: entries
   };
 }
