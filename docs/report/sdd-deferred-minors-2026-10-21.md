@@ -99,6 +99,12 @@
 | 1-13 remote.ts:207 AbortSignal.any 收编 anySignal 守卫 | ad9c745 |
 | 1-14 VV_READY 收窄 --port 0 专属 | 83ba0e0 |
 
+### 阶段一终审新增挂账候选（2026-10-22 终审，均小项）
+
+- worker dispatch file() 的 416 前置 parity：1-2 仅落 native 适配层，worker 面（worker/src/dispatch.rs file()）仍先 locate 后 parse——语法非法 Range+缺失文件时 404 抢答（native 面 416）。
+- config.rs 三面手工 Debug 的字段清单人工同步风险：可加字段数对齐锚测兜底（终审分诊 #1 建议）。
+- workerd 对 Content-Length: 0 POST 的 body 形态 wasm e2e 实证（终审分诊 #8 建议升格为挂账前提；两分支终态已收敛一致）。
+
 ## 三、观察/校准项（等待 CI 首跑或实机，非代码债）
 
 - desktop：windows build.rs mingw×msvc 链接面、macOS objcopy 垫片、bundler 下载面、release 资源落盘布局——CI 矩阵首跑校准（失败不影响其他 job）。
