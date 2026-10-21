@@ -538,7 +538,12 @@ export const markdownRenderer: Renderer = {
         const src = el.getAttribute('data-mermaid');
         if (!src) continue;
         void renderMermaidInto(el, src, next).then((ok) => {
-          if (!ok) return; // 失败保留旧图（含错误态）原样
+          // 失败保留旧图（含错误态）原样=静默保留为设计形态（renderMermaidInto 内部
+          // 吞错只回布尔，无 err 对象可带），warn 仅留诊断线索、非用户可见文案（台账 5-8）
+          if (!ok) {
+            console.warn('[md] mermaid 主题重渲失败，保留旧图');
+            return;
+          }
           // 治愈：上次 local 失败态残留的错误类随旧内容一并清掉——themeClassPrefix
           // 场景类名带前缀（cls(ctx,…) 机制），前缀值此处不可知，按 'md-diagram-error'
           // 后缀匹配自身 classList 摘除最简可靠；视图已换新 SVG，错误样式不再适用
