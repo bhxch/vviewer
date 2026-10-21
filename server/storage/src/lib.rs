@@ -133,7 +133,9 @@ pub struct MountCapabilities {
 }
 
 /// 逻辑读取窗（路由层 Range 解析的产物）：从 `start` 起读 `len` 字节。
-/// 后端信任窗在 total_size 内（既有路由 parse_range 已做钳制与 416 判定）。
+/// 后端信任窗在 total_size 内（既有路由 parse_range 已做钳制与 416 判定）；
+/// **`len >= 1` 由路由层保证，后端信任**（len=0 路由侧已拒——后端面现状为
+/// Ok + 空流，行为锚 `range_spec_zero_len_current_semantics_is_pinned`）。
 #[derive(Debug, Clone, Copy)]
 pub struct RangeSpec {
     pub start: u64,
@@ -340,6 +342,62 @@ fn strip_leading_zeros(d: &[u8]) -> &[u8] {
     &d[first_non_zero..]
 }
 
+// ---------- s3/webdav 共享响应助手（台账 3-16：全同语义面单源） ----------
+
+/// 错误响应体采样上界（排障片段）：s3/webdav 原各持一份同值常量，下沉单源。
+pub(crate) const ERROR_BODY_SNIPPET: usize = 512;
+
+/// 非 2xx 响应 → [`StorageError`]（s3/webdav 单源，台账 3-16）：2xx 原样放行；
+/// 错误体采样 ≤[`ERROR_BODY_SNIPPET`] 字节入消息。状态→语义映射：404 恒
+/// NotFound；403 恒 forbidden；401 认证失败与 5xx server error 限定 webdav
+/// 口径（S3 走兜底形态）——两侧消息逐字节保留，`backend` 为消息前缀。
+pub(crate) async fn ensure_status(
+    backend: &'static str,
+    resp: crate::transport::HttpResponse,
+) -> Result<crate::transport::HttpResponse, StorageError> {
+    if (200..300).contains(&resp.status) {
+        return Ok(resp);
+    }
+    let status = resp.status;
+    let mut body = s3::into_tokio(resp.body);
+    let snippet =
+        String::from_utf8_lossy(&s3::read_up_to(&mut body, ERROR_BODY_SNIPPET).await).into_owned();
+    match status {
+        404 => Err(StorageError::not_found(format!("{backend}: http 404 {snippet}"))),
+        403 => Err(StorageError::other(format!("{backend}: http 403 forbidden {snippet}"))),
+        401 if backend == "webdav" => Err(StorageError::other(format!(
+            "{backend}: http 401 authentication failed (check username/password) {snippet}"
+        ))),
+        n if n >= 500 && backend == "webdav" => {
+            Err(StorageError::other(format!("{backend}: http {n} server error {snippet}")))
+        }
+        n => Err(StorageError::other(format!("{backend}: http {n} {snippet}"))),
+    }
+}
+
+/// total 提取（s3/webdav 单源，台账 3-16）：206 → Content-Range 尾段总长优先
+///（'*' 不可得退 Content-Length）；非 206 → s3 恒 Content-Range 优先（对象
+/// GET 语义：CR 出现即权威）、webdav Content-Length 优先（200 体为全量、CR
+/// 视为错位残留——Range 防线降级形态）。双缺失报错（消息按 `backend` 前缀）。
+pub(crate) fn total_size_of(
+    backend: &'static str,
+    resp: &crate::transport::HttpResponse,
+) -> Result<u64, StorageError> {
+    let cr_total = s3::header_value(resp, "content-range")
+        .and_then(|cr| cr.rsplit('/').next())
+        .and_then(|t| t.trim().parse::<u64>().ok());
+    let content_length =
+        s3::header_value(resp, "content-length").and_then(|v| v.trim().parse::<u64>().ok());
+    let total = if resp.status == 206 || backend == "s3" {
+        cr_total.or(content_length)
+    } else {
+        content_length.or(cr_total)
+    };
+    total.ok_or_else(|| {
+        StorageError::other(format!("{backend}: response missing content-length/content-range"))
+    })
+}
+
 // ---------- LocalFs（自 routes/tree.rs、routes/file.rs 下沉） ----------
 
 /// 本地文件系统后端：fs 根（阶段一唯一的 fs 形态根）。
@@ -505,6 +563,27 @@ mod tests {
     fn resolve_joins_relative_segments_under_root() {
         let fs = LocalFs::new(PathBuf::from("/tmp/root"), false);
         assert_eq!(fs.resolve(Path::new("a/b.txt")), PathBuf::from("/tmp/root/a/b.txt"));
+    }
+
+    /// 3-12：RangeSpec len=0 的现状语义钉死（不变式锚——路由层 parse_range
+    /// 已拒 len 0，此处锁后端面行为防静默漂移）：LocalFs 对 len=0 窗返回
+    /// Ok + 空流（`take(0)`，不报错、total_size 不变）。len>=1 由路由层保证，
+    /// 后端信任（RangeSpec doc 同步该不变式）。
+    #[cfg(not(target_family = "wasm"))]
+    #[tokio::test]
+    async fn range_spec_zero_len_current_semantics_is_pinned() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("f.bin"), b"0123456789").unwrap();
+        let fs = LocalFs::new(dir.path().to_path_buf(), false);
+
+        let mut read = fs
+            .read_range(Path::new("f.bin"), Some(RangeSpec { start: 0, len: 0 }), 8)
+            .await
+            .expect("len=0 现状为 Ok（空流），不是 Err");
+        assert_eq!(read.total_size, 10, "total_size 不受 len=0 影响");
+        let mut buf = Vec::new();
+        read.stream.read_to_end(&mut buf).await.unwrap();
+        assert!(buf.is_empty(), "len=0 → 空流，实读 {buf:?}");
     }
 
     // ---------- 展示面 endpoint userinfo 剥除（自 main.rs 下沉，评审 M1/I2） ----------

@@ -37,8 +37,8 @@ use tokio::io::AsyncReadExt;
 
 use crate::transport::{HttpRequest, HttpByteStream};
 use crate::{
-    sort_entries_dirs_first, Entry, EntryKind, FileRead, HttpTransport, MountCapabilities,
-    RangeSpec, StorageBackend, StorageError, StorageErrorKind,
+    ensure_status, sort_entries_dirs_first, total_size_of, Entry, EntryKind, FileRead,
+    HttpTransport, MountCapabilities, RangeSpec, StorageBackend, StorageError, StorageErrorKind,
 };
 
 /// 阶段一配置面无 region 字段（spec §2 的 mount 字段集），而 SigV4 需要 region
@@ -50,8 +50,6 @@ const SERVICE: &str = "s3";
 /// 分页安全阀：单次 list_dir 最多跟随的页数（每页默认 ≤1000 键）——防御
 /// 病态服务端（IsTruncated 恒 true）把列表调用变成死循环。
 const MAX_LIST_PAGES: usize = 1000;
-/// 错误响应体采样上界（排障片段：S3 错误 XML 的 Code/Message）。
-const ERROR_BODY_SNIPPET: usize = 512;
 
 /// AWS UriEncode 的 query 字符集：unreserved（A-Za-z0-9-._~）之外全编码。
 const QUERY_SET: &AsciiSet =
@@ -656,7 +654,7 @@ impl S3Backend {
             .join("&");
         let url = format!("{}?{query}", self.bucket_base());
 
-        let resp = ensure_status(self.signed_request("GET", &url, &[]).await?).await?;
+        let resp = ensure_status("s3", self.signed_request("GET", &url, &[]).await?).await?;
         let mut body = into_tokio(resp.body);
         let mut bytes = Vec::new();
         body.read_to_end(&mut bytes)
@@ -697,23 +695,6 @@ pub(crate) fn into_tokio(body: HttpByteStream) -> impl tokio::io::AsyncRead + Un
     tokio_util::compat::FuturesAsyncReadCompatExt::compat(body)
 }
 
-/// 非 2xx → [`StorageError`]：404→NotFound、403→Other（403 字样保序），
-/// 错误体采样 ≤512B 入消息（S3 错误 XML 的 Code/Message 排障用）。
-async fn ensure_status(resp: crate::transport::HttpResponse) -> Result<crate::transport::HttpResponse, StorageError> {
-    if (200..300).contains(&resp.status) {
-        return Ok(resp);
-    }
-    let status = resp.status;
-    let mut body = into_tokio(resp.body);
-    let snippet = String::from_utf8_lossy(&read_up_to(&mut body, ERROR_BODY_SNIPPET).await)
-        .into_owned();
-    match status {
-        404 => Err(StorageError::not_found(format!("s3: http 404 {snippet}"))),
-        403 => Err(StorageError::other(format!("s3: http 403 forbidden {snippet}"))),
-        n => Err(StorageError::other(format!("s3: http {n} {snippet}"))),
-    }
-}
-
 /// 循环读满 cap（容忍短读，EOF 截断）——与 LocalFs::read_head 同形态
 ///（WebDAV 头采样/错误体采样复用）。
 pub(crate) async fn read_up_to<R: tokio::io::AsyncRead + Unpin>(r: &mut R, cap: usize) -> Vec<u8> {
@@ -740,21 +721,6 @@ pub(crate) fn header_value<'a>(
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case(name))
         .map(|(_, v)| v.as_str())
-}
-
-/// total_size：206 → Content-Range 尾段总长；200 → Content-Length
-///（Range 被忽略的服务端形态下同为总长）。
-fn total_size_from(resp: &crate::transport::HttpResponse) -> Result<u64, StorageError> {
-    if let Some(total) = header_value(resp, "content-range")
-        .and_then(|cr| cr.rsplit('/').next())
-        .and_then(|t| t.trim().parse::<u64>().ok())
-    {
-        return Ok(total);
-    }
-    if let Some(cl) = header_value(resp, "content-length").and_then(|v| v.trim().parse().ok()) {
-        return Ok(cl);
-    }
-    Err(StorageError::other("s3: response missing content-length/content-range"))
 }
 
 /// 目录条目构造（size/mtime 默认空；WebDAV stat/list 挂载根复用）。
@@ -844,7 +810,7 @@ impl StorageBackend for S3Backend {
         let prefix_head: Option<Vec<u8>> = if !head_from_window && head_len > 0 {
             let head_range = format!("bytes=0-{}", head_len - 1);
             let resp =
-                ensure_status(self.signed_request("GET", &url, &[("Range", head_range.as_str())]).await?)
+                ensure_status("s3", self.signed_request("GET", &url, &[("Range", head_range.as_str())]).await?)
                     .await?;
             let mut head_body = into_tokio(resp.body);
             Some(read_up_to(&mut head_body, head_len).await)
@@ -858,7 +824,7 @@ impl StorageBackend for S3Backend {
             .as_deref()
             .map(|h| vec![("Range", h)])
             .unwrap_or_default();
-        let resp = ensure_status(self.signed_request("GET", &url, &extra).await?).await?;
+        let resp = ensure_status("s3", self.signed_request("GET", &url, &extra).await?).await?;
         // Range 防线（评审 Minor-3）：窗请求必须 206——服务端无视 Range 返
         // 200 时 body 是全量前缀流，take(want) 会静默产出错误窗数据；此处
         // 显式报错而非静默。前缀采样 GET 不做此校验：200（Range 被忽略）时
@@ -869,7 +835,7 @@ impl StorageBackend for S3Backend {
                 resp.status
             )));
         }
-        let total_size = total_size_from(&resp)?;
+        let total_size = total_size_of("s3", &resp)?;
         let want = range.map(|r| r.len).unwrap_or(total_size);
 
         let mut body = into_tokio(resp.body);
@@ -900,7 +866,7 @@ impl StorageBackend for S3Backend {
         }
 
         let url = self.object_url(&key);
-        match ensure_status(self.signed_request("HEAD", &url, &[]).await?).await {
+        match ensure_status("s3", self.signed_request("HEAD", &url, &[]).await?).await {
             Ok(resp) => {
                 let name = key.rsplit('/').next().unwrap_or(&key).to_owned();
                 Ok(Entry {

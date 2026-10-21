@@ -219,9 +219,13 @@ impl HttpTransport for MockTransport {
         });
         match route {
             Some(r) => Ok((r.responder)(&req)),
+            // no-route 消息拼展示形态 URL（3-5，对齐 display_endpoint 纪律）：
+            // 端点误配置形态下原 URL 含 `ak:sk@host`，错误文本经 500 响应体/
+            // 日志外泄（spec §6「凭据不进错误信息」）；host/path 保留供排障。
             None => Err(StorageError::other(format!(
                 "mock transport: no route for {} {}",
-                req.method, req.url
+                req.method,
+                crate::display_endpoint(&req.url)
             ))),
         }
     }
@@ -281,6 +285,28 @@ mod tests {
         assert!(dbg.contains("[redacted]"), "{dbg}");
         assert!(!dbg.contains("topsecret"), "{dbg}");
         assert!(dbg.contains("bytes=0-1"), "{dbg}");
+    }
+
+    /// 3-5：no-route 错误消息不得携带 userinfo（对齐 display_endpoint 纪律；
+    /// 既有 send_failure_error_message_strips_userinfo 同款红线）——no-route
+    /// 消息拼请求 URL，URL 在端点误配置形态下含 `ak:sk@host` 凭据，错误文本
+    /// 会经 500 响应体/日志外泄（spec §6「凭据不进错误信息」）。
+    #[tokio::test]
+    async fn mock_no_route_error_strips_userinfo() {
+        // 路由表空 → 任意请求必走 no-route 分支
+        let t = MockTransport::new();
+        let err = t
+            .execute(HttpRequest {
+                method: "POST".into(),
+                url: "http://ak:sk@127.0.0.1:9000/x".into(),
+                headers: vec![],
+                body: None,
+            })
+            .await
+            .unwrap_err();
+        let msg = err.message();
+        assert!(msg.contains("127.0.0.1:9000/x"), "{msg}");
+        assert!(!msg.contains("ak:sk"), "{msg}");
     }
 
     /// I1：请求失败的 StorageError 消息不得携带 userinfo 凭据（错误文本经

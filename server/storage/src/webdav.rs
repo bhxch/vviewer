@@ -27,6 +27,9 @@
 //! HTTP-date 解析/XML 实体反转义/compat 桥等纯文本小助手复用 s3 模块的
 //! `pub(crate)` 实现（Task 3 落点，扩散最小）；WebDAV 侧 URL path 编码集
 //! 与 S3 key 编码集同构但独立声明（两协议语义解耦，防单边改动串扰）。
+//! 3-16 裁决：语义真异构面保持独立（S3 保留 `~`、decode 目标面不同、XML
+//! 前缀域不同），仅全同语义面单源（ensure_status/total_size_of/
+//! ERROR_BODY_SNIPPET 已下沉 lib 共享区）。
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -42,12 +45,9 @@ use crate::s3::{
 };
 use crate::transport::HttpRequest;
 use crate::{
-    sort_entries_dirs_first, ByteStream, Entry, EntryKind, FileRead, HttpTransport,
-    MountCapabilities, RangeSpec, StorageBackend, StorageError,
+    ensure_status, sort_entries_dirs_first, total_size_of, ByteStream, Entry, EntryKind, FileRead,
+    HttpTransport, MountCapabilities, RangeSpec, StorageBackend, StorageError,
 };
-
-/// 错误响应体采样上界（排障片段，与 s3 同款）。
-const ERROR_BODY_SNIPPET: usize = 512;
 
 /// PROPFIND 请求体：显式索取列表/读取所需三属性（多数服务器对空 body 走
 /// allprop，显式 prop 面更小、兼容面更稳）。
@@ -273,32 +273,6 @@ fn encode_path(path: &str) -> String {
 
 // ---------- 响应侧助手 ----------
 
-/// 非 2xx → [`StorageError`]：404→NotFound、401→认证失败语义（Other 类别
-/// ——StorageErrorKind 无独立认证档，消息携带 401 与 auth 字样）、403→
-/// forbidden、5xx→server error、其余→Other；错误体采样 ≤512B 入消息。
-async fn ensure_status(
-    resp: crate::transport::HttpResponse,
-) -> Result<crate::transport::HttpResponse, StorageError> {
-    if (200..300).contains(&resp.status) {
-        return Ok(resp);
-    }
-    let status = resp.status;
-    let mut body = into_tokio(resp.body);
-    let snippet =
-        String::from_utf8_lossy(&read_up_to(&mut body, ERROR_BODY_SNIPPET).await).into_owned();
-    match status {
-        404 => Err(StorageError::not_found(format!("webdav: http 404 {snippet}"))),
-        401 => Err(StorageError::other(format!(
-            "webdav: http 401 authentication failed (check username/password) {snippet}"
-        ))),
-        403 => Err(StorageError::other(format!("webdav: http 403 forbidden {snippet}"))),
-        n if n >= 500 => {
-            Err(StorageError::other(format!("webdav: http {n} server error {snippet}")))
-        }
-        n => Err(StorageError::other(format!("webdav: http {n} {snippet}"))),
-    }
-}
-
 /// multistatus 响应体读取（PROPFIND；207 预期，2xx 兼容）。
 async fn read_body(resp: crate::transport::HttpResponse) -> Result<String, StorageError> {
     let mut body = into_tokio(resp.body);
@@ -307,23 +281,6 @@ async fn read_body(resp: crate::transport::HttpResponse) -> Result<String, Stora
         .await
         .map_err(|e| StorageError::other(format!("webdav body: {e}")))?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
-}
-
-/// total_size：206 → Content-Range 尾段总长优先（'*' 不可得时退
-/// Content-Length）；200（含 Range 被无视形态）→ Content-Length 优先（体为
-/// 全量）、Content-Range 兜底。
-fn total_size_of(resp: &crate::transport::HttpResponse) -> Result<u64, StorageError> {
-    let cr_total = header_value(resp, "content-range")
-        .and_then(|cr| cr.rsplit('/').next())
-        .and_then(|t| t.trim().parse::<u64>().ok());
-    let content_length =
-        header_value(resp, "content-length").and_then(|v| v.trim().parse::<u64>().ok());
-    let total = if resp.status == 206 {
-        cr_total.or(content_length)
-    } else {
-        content_length.or(cr_total)
-    };
-    total.ok_or_else(|| StorageError::other("webdav: response missing content-length/content-range"))
 }
 
 /// Range 防线判定（spec §2 口径——校验响应的 content-range/长度与请求窗
@@ -481,7 +438,7 @@ impl StorageBackend for WebDavBackend {
     async fn list_dir(&self, path: &Path) -> Result<Vec<Entry>, StorageError> {
         let rel = self.rel_str(path)?;
         let url = self.collection_url(&rel);
-        let resp = ensure_status(self.propfind(&url, 1).await?).await?;
+        let resp = ensure_status("webdav", self.propfind(&url, 1).await?).await?;
         let xml = read_body(resp).await?;
         let req_path = url_path(&url);
 
@@ -535,7 +492,8 @@ impl StorageBackend for WebDavBackend {
         // 读幅有 head_len 上界——窗 GET 会给出防线结论）
         let prefix_head: Option<Vec<u8>> = if !head_from_window && head_len > 0 {
             let head_range = format!("bytes=0-{}", head_len - 1);
-            let resp = ensure_status(self.get(&url, Some(&head_range)).await?).await?;
+            let resp =
+                ensure_status("webdav", self.get(&url, Some(&head_range)).await?).await?;
             let mut head_body = into_tokio(resp.body);
             Some(read_up_to(&mut head_body, head_len).await)
         } else {
@@ -544,7 +502,8 @@ impl StorageBackend for WebDavBackend {
 
         // 窗 GET：Range 头 bytes=start-(start+len-1)；None → 全量（无 Range 头）
         let window_header = range.map(|r| format!("bytes={}-{}", r.start, r.start + r.len - 1));
-        let resp = ensure_status(self.get(&url, window_header.as_deref()).await?).await?;
+        let resp =
+            ensure_status("webdav", self.get(&url, window_header.as_deref()).await?).await?;
 
         // Range 防线（spec §2）：不符 → 降级标记（不报错）
         let honored = match (window_header.as_deref(), range) {
@@ -558,7 +517,7 @@ impl StorageBackend for WebDavBackend {
             _ => true,
         };
 
-        let total_size = total_size_of(&resp)?;
+        let total_size = total_size_of("webdav", &resp)?;
         let want = range.map(|r| r.len).unwrap_or(total_size);
 
         let mut body = into_tokio(resp.body);
@@ -593,7 +552,7 @@ impl StorageBackend for WebDavBackend {
         }
 
         let url = self.resource_url(&rel);
-        let resp = ensure_status(self.propfind(&url, 0).await?).await?;
+        let resp = ensure_status("webdav", self.propfind(&url, 0).await?).await?;
         let xml = read_body(resp).await?;
         let raw = parse_multistatus(&xml)
             .into_iter()
@@ -727,12 +686,12 @@ mod tests {
     }
 
     /// total 提取优先级：206 CR 优先；200 CL 优先；206 CR '*' 退 CL；
-    /// 双缺失报错。
+    /// 双缺失报错。（单源后按 webdav 口径消费共享 [`crate::total_size_of`]。）
     #[test]
     fn total_size_precedence() {
         let resp = |status: u16, headers: &[(&str, &str)]| http_response(status, headers, b"x");
         assert_eq!(
-            total_size_of(&resp(
+            total_size_of("webdav", &resp(
                 206,
                 &[("content-range", "bytes 0-9/20"), ("content-length", "10")]
             ))
@@ -740,13 +699,13 @@ mod tests {
             20
         );
         assert_eq!(
-            total_size_of(&resp(200, &[("content-range", "bytes 0-999/5000"), ("content-length", "1000")]))
+            total_size_of("webdav", &resp(200, &[("content-range", "bytes 0-999/5000"), ("content-length", "1000")]))
                 .unwrap(),
             1000,
             "200 体为全量：CL 优先于错位的 CR"
         );
-        assert_eq!(total_size_of(&resp(206, &[("content-range", "bytes 0-9/*"), ("content-length", "10")])).unwrap(), 10);
-        assert!(total_size_of(&resp(206, &[])).is_err());
+        assert_eq!(total_size_of("webdav", &resp(206, &[("content-range", "bytes 0-9/*"), ("content-length", "10")])).unwrap(), 10);
+        assert!(total_size_of("webdav", &resp(206, &[])).is_err());
     }
 
     /// href 归一与自身判定：绝对 path/绝对 URI/相对引用；同名嵌套子目录不误判。
