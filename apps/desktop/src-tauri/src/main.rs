@@ -477,10 +477,13 @@ fn default_root() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use std::io::Read;
+    use std::sync::atomic::AtomicU64;
     use std::sync::{Arc, Mutex};
 
     use super::collect_stderr;
     use super::dialog_plugin;
+    use super::kill_server;
+    use super::ServerState;
     use tauri_plugin_dialog::DialogExt;
 
     /// C1 契约锚：dialog 插件经同一 `init::<R>()`（[`dialog_plugin`]）注册后，
@@ -541,23 +544,38 @@ mod tests {
 
     /// 2-7：shutdown_now 语义体——kill_server（kill+wait 防僵尸）后 exit(0)。
     /// exit 的进程终止面不可在测试内实跑（会杀掉测试进程），锁 kill 半边：
-    /// 用真实子进程验证回收（spawn sleep → shutdown 前半等价物）。
+    /// 真实子进程塞进 [`ServerState`] 槽位后**直调 kill_server**（非平行实现），
+    /// 断言槽位 take 且子进程已被收尸——kill+wait 丢其一时 /proc/<pid> 条目
+    /// 仍在（丢 kill → 存活；丢 wait → zombie 悬挂），本测试即翻红。
     ///
     /// （ctrlc 的 handler 注册与进程退出面不可 headless 单测——诚实边界照 2-6
     /// 先例注记；本测试锁语义体的可测半边。`sleep` 在 Windows CI 缺席——
-    /// `#[cfg(unix)]` 门控本测试。）
+    /// `#[cfg(unix)]` 门控本测试；收尸判定走 /proc 进程表，macOS 无 /proc
+    /// 退化为槽位断言，如实注记。）
     #[cfg(unix)]
     #[test]
     fn shutdown_reaps_child_process() {
-        let mut child = std::process::Command::new("sleep")
+        let child = std::process::Command::new("sleep")
             .arg("30")
             .spawn()
             .expect("sleep 可用（coreutils）");
-        // 与 shutdown_now 前半同语句（kill_server 私有于 bin——经同模块测试直调）
-        let _ = child.kill();
-        let _ = child.wait();
-        // 已 reap：二次 wait 立即返回（无悬挂）
-        assert!(child.try_wait().unwrap().is_some());
+        let pid = child.id();
+        let state = ServerState {
+            child: Mutex::new(Some(child)),
+            generation: AtomicU64::new(0),
+            stderr_tail: Arc::new(Mutex::new(String::new())),
+        };
+        kill_server(&state);
+        // 幂等锚：child 槽位 take 后为 None（二次调用无目标）
+        assert!(state.child.lock().unwrap().is_none());
+        // 已 reap：/proc/<pid> 条目随收尸消失
+        #[cfg(target_os = "linux")]
+        assert!(
+            !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+            "子进程须已被 kill_server 收尸（/proc/{pid} 仍在即存活/zombie 悬挂）"
+        );
+        #[cfg(not(target_os = "linux"))]
+        let _ = pid;
     }
 
     /// 2-3：EOF 时 pending 非空（尾巴不完整即断流）——EOF 分支 lossy 兜底，

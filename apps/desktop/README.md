@@ -65,7 +65,7 @@ server 额外参数固定：`serve --port 0`（内核分配随机端口）。
 | 4 | `j`/`k` 上下移动条目 | 键位导航生效 |
 | 5 | 不关窗，再次启动同一应用 | 不出现第二个实例，既有窗口被唤起置前（单实例） |
 | 6 | 关闭窗口退出 | `pgrep -f vviewer-server` 无残留（子进程被回收） |
-| 7 | 启动后 `kill -TERM <壳pid>`（unix-only；Windows 的 ctrlc 只映射 CTRL_C/CTRL_BREAK，无 SIGTERM 面） | 应用退出且 `pgrep vviewer-server` 无残留（信号路径回收子进程） |
+| 7 | 启动后 `kill -TERM <壳pid>`（unix-only；Windows 的 ctrlc 只映射 CTRL_C/CTRL_BREAK，无 SIGTERM 面） | 应用退出且 `pgrep -f vviewer-server` 无残留（信号路径回收子进程） |
 
 故障路径抽查（**发布前必过项**，非可选）：
 
