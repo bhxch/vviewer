@@ -26,6 +26,20 @@ pub use vviewer_core::tickets::TicketStore;
 /// （多端发布阶段二迁入 vviewer-core）+ axum 特有面。经 Deref 直达核字段
 /// （`state.roots`/`state.token` 等既有调用点零改动——迁移期兼容缝，Task 2/3
 /// 域抽取逐步把消费方迁到 core 后再评估收紧）。
+///
+/// **Task 4 收口裁决：保留 + 注记**（「有真实消费方则保留」口径）。迁移完成后
+/// 剩余消费方全部在适配层内部，清点如下：
+/// - `auth.rs`：`state.token`（Bearer 中间件读核令牌）；
+/// - `routes/mod.rs`：`state.compute`（--compute 路由挂载门）；
+/// - 本模块 builder 群与 `AsRef<Path>`：Deref(Mut) 直改核字段（迁移期即如此，
+///   其中 `with_runtime_*` 因核 builder 为 `mut self` 形态无法经 Deref 调用，
+///   是显式桥而非缝的产物——Task 2 台账）；
+/// - 测试面零消费（集成测试只走 builder 构造 + HTTP 断言；core 单测持裸
+///   `CoreState`）。
+///
+/// 缝的收益：适配层读写核状态免 `.core` 前缀噪声；边界纪律（新业务代码不得
+/// 绕 core 域 handler 直改核字段——核字段只经 builder 与 core handler 变更）
+/// 由评审维持，不再设编译期屏障。
 #[derive(Clone)]
 pub struct AppState {
     /// 业务状态核（vviewer-core::state）：配置/多根容器/令牌/引擎覆盖 +

@@ -8,7 +8,6 @@ pub mod auth;
 #[cfg(feature = "native")]
 pub use vviewer_core::compute;
 pub mod error;
-pub mod guard;
 pub mod logging;
 pub mod routes;
 pub mod state;
