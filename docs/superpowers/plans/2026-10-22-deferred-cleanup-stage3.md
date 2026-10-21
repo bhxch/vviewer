@@ -176,7 +176,31 @@ git commit -m "test(server): 头体两测同源化+ticket 门注释定性+serve 
 
 ---
 
-### Task 5: web mountsSync 小件三件——冗余编码 / failedRecord 清理 / watchHealth 用例（3-10、3-11、3-2）
+### Task 10: 补遗两件——自定义前缀样本 / 降级重探（3-15、3-18）
+
+**定位**：WebDAV PROPFIND 解析的任意前缀面（webdav.rs `open_tag`/`blocks`/`inner`，侦察 :147-197 区）；降级重探的消费面=mountsSync 对账（syncMountsOnConnect probe 失败→failedRecord/pendingRetry，:462-474）与 openRemoteSource/connectServer 重连路径（openFlow :1102/:954）。
+
+**Files:**
+- Test: `server/storage/tests/webdav.rs`（3-15 夹具锚）
+- Modify: `apps/web/src/lib/mountsSync.ts`（3-18 重探）+ Test `mountsSync.test.ts`
+
+**Interfaces:**
+- Produces: 3-18——对账路径上失败挂载的**重探**：failedRecord 存在且非 pendingRetry 首败时，下次对账仍重发 probeMountRoot，成功即转 healthyRecord 并触发挂载行恢复呈现；**不做后台轮询、不加定时器**（spec §4-1 裁决）。
+
+- [ ] **Step 1: 3-15 夹具锚**（webdav.rs tests）——构造自定义命名空间前缀（如 `<md:response>` 包裹的 multistatus 样本）走既有解析断言路径（条目数/href 提取与既有向量同款断言，仅前缀不同）；现状若无测试样本则此为首个锚（行为应已支持，锚定防回归）。
+- [ ] **Step 2: 3-18 行为测试先行**（mountsSync.test）——首次对账 probe 失败（failedRecord/pendingRetry）→ 第二次对账 probe 成功 → 记录转 healthy（registeredRootIndex 落位、pendingRetry 清除、展示行恢复）；「不做轮询」的边界=不引入任何定时器（断言测试内无 timer 依赖即可，诚实注记）。
+- [ ] **Step 3: 红灯→实现**——核对 syncMountsOnConnect 现状：失败记录是否被「跳过 probe」短路（若现状失败后不再 probe 则补重探路径；若现状每次对账本就重 probe 则销账——实测为准，报告记录走向）。
+- [ ] **Step 4: 全量**——`cargo test -p vviewer-storage && pnpm vitest run apps/web/src/lib/ && pnpm typecheck`。
+- [ ] **Step 5: Commit（两笔原子）**
+
+```bash
+git add server/storage/tests/webdav.rs
+git commit -m "test(storage): WebDAV 任意自定义前缀 PROPFIND 解析夹具锚（台账 3-15）"
+git add apps/web/src/lib/
+git commit -m "fix(web): 挂载对账失败记录重探恢复——下次对账 probe 成功即转健康（台账 3-18）"
+```
+
+
 
 **定位**：冗余编码=mountsSync.ts:327 `encodeURIComponent('')`；failedRecord=:308-310 只置 pendingRetry+lastError **不清 registeredRootIndex**，展示机 assembleMountRows（mountsManager.ts:320-339）按 registeredRootIndex 判 'registered'；watchHealth 复位点=openFlow:954/1102+AppShell:688，现有测试仅源码锚（directMountFlow.test.ts:28-35），无行为用例。
 
