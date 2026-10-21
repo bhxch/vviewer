@@ -48,6 +48,19 @@ pub fn parse_range(h: &str, size: u64) -> Result<Option<(u64, u64)>, ()> {
     Ok(Some((start, end - start + 1)))
 }
 
+/// 资产路径判定（C1 SPA-fallback 前科纪律，Workers 面）：缺失路径按扩展名
+/// 分流——清单内资产路径缺失必须 404，不得以 200 index.html 兜底（HTML 被误
+/// 载为字节/查询资产：grammar `.scm`/`.wasm` 使 query loader 编译失败静默
+/// 降级 hljs——终审 C1 双层修之 server 层 `.scm`/`.wasm` 两类；`.mjs`/`.css`
+/// 为计划资产纪律的全集扩展，plan Global Constraints「资产缺失 404 不回
+/// HTML」）。SPA 路由（无扩展名形态）不受影响。
+pub fn is_asset_path(path: &str) -> bool {
+    path.ends_with(".wasm")
+        || path.ends_with(".scm")
+        || path.ends_with(".mjs")
+        || path.ends_with(".css")
+}
+
 /// base-path 裁剪（VV_BASE_PATH env，值形如 `/docs`；空串/缺省 = 不裁剪）：
 /// 请求路径命中前缀即剥去，`/docs/api/health` → `/api/health`；前缀本身
 /// （`/docs`）与未命中前缀的路径原样返回（交由后续 /api 匹配与 Assets 边界
@@ -105,5 +118,24 @@ mod tests {
         assert_eq!(strip_base_path("/docs", "/api/health"), "/api/health");
         assert_eq!(strip_base_path("", "/api/health"), "/api/health");
         assert_eq!(strip_base_path("/", "/api/health"), "/api/health");
+    }
+
+    /// 资产路径判定（C1 纪律锁测）：清单内扩展名命中与大小写敏感性（扩展名
+    /// 按字面比较——URL path 大小写敏感，Assets 查找同口径）、SPA 路由形态
+    /// （无扩展名/查询串不在本层——strip 前的 path 不含 query）不误判。
+    #[test]
+    fn asset_path_matches_discipline_extension_set() {
+        assert!(is_asset_path("/grammars/rust.wasm"));
+        assert!(is_asset_path("/grammars/113/injections.scm"));
+        assert!(is_asset_path("/_app/immutable/chunks/diagram.mjs"));
+        assert!(is_asset_path("/_app/immutable/assets/layout.css"));
+        // SPA 路由与目录形态不命中（应回 index.html 的面）
+        assert!(!is_asset_path("/"));
+        assert!(!is_asset_path("/workspace/docs"));
+        assert!(!is_asset_path("/grammars/manifest.json"));
+        // 近邻形态不误判（非结尾/仅词段后缀）
+        assert!(!is_asset_path("/wasm"));
+        assert!(!is_asset_path("/file.cssx"));
+        assert!(!is_asset_path("/a.wasm/b"));
     }
 }

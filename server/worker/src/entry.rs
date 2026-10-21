@@ -15,5 +15,5 @@ async fn main(req: Request, env: Env, _ctx: Context) -> worker::Result<Response>
         Ok(state) => state,
         Err(msg) => return json_error(500, msg),
     };
-    dispatch::handle(req, state).await
+    dispatch::handle(req, &env, state).await
 }

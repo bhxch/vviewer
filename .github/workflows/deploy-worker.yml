@@ -1,0 +1,101 @@
+# CF Workers 部署流水线（多端发布阶段三）：手动 dispatch 触发（UI 的 ref 选择
+# 器即可选 tag 部署）；steps = web build（可选子路径 VV_BASE_PATH 注入，与
+# Pages 同链）→ wasm build（wrangler dry-run 触发 worker-build）→ 体积门禁
+# （tools/worker-budget.mjs，<5MB）→ wrangler deploy → canary health 探活。
+# 预备 secrets/vars（无则 deploy/canary 两步自动跳过，构建与门禁照跑——占位
+# 文档见 server/README.md「Workers 部署」）：
+#   secrets.CLOUDFLARE_API_TOKEN  — CF API token（Account · Workers Scripts: Edit）
+#   secrets.CLOUDFLARE_ACCOUNT_ID — CF account id
+#   vars.WORKER_URL（可选）       — canary 默认探活地址（input 可覆盖）
+name: Workers 部署（CF Workers）
+
+on:
+  workflow_dispatch:
+    inputs:
+      vv_base_path:
+        description: '前端构建注入的子路径 base（如 /vviewer；留空=根路径部署，workers.dev 形态留空）'
+        required: false
+        default: ''
+      worker_url:
+        description: 'canary 探活地址（如 https://vviewer-worker.<subdomain>.workers.dev；留空回落 vars.WORKER_URL）'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-worker-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: 构建（web+wasm）→ 体积门禁 → deploy → canary
+    runs-on: ubuntu-latest
+    env:
+      CF_API_TOKEN_SET: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # 前端产物即 assets binding 目录（server/worker/wrangler.toml 的
+      # [assets].directory）：内置 lite 集 grammar（aliases.json 键）构建期生成，
+      # 复用 setup-grammars composite action（同 pages-deploy/release web job）
+      - uses: ./.github/actions/setup-grammars
+        with:
+          languages: lite
+      - name: 构建前端（可选子路径 base）
+        run: pnpm --filter web build
+        env:
+          VV_BASE_PATH: ${{ inputs.vv_base_path }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      # worker-build 经 wrangler.toml [build] command 由 dry-run 触发；产物落
+      # server/worker/build/（--outdir 同路径，门禁读这里）
+      - name: 构建 worker 产物（worker-build，经 wrangler dry-run）
+        working-directory: server/worker
+        run: npx wrangler deploy --dry-run --outdir=build
+      - name: 体积门禁（wasm+js 产物 <5MB）
+        run: node tools/worker-budget.mjs
+      - name: 部署前置检查（secrets 占位）
+        run: |
+          if [ "$CF_API_TOKEN_SET" != "true" ]; then
+            echo "未配置 CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID——跳过 wrangler deploy 与 canary 探活（预备清单见 server/README.md「Workers 部署」）；构建与体积门禁已通过。"
+          fi
+      - name: wrangler deploy
+        if: env.CF_API_TOKEN_SET == 'true'
+        working-directory: server/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy
+      # canary：health 200 + capabilities 含 file-server（能力宣告即业务面探活；
+      # watch/search/compute 在 worker 形态本就不宣告，file-server 恒在）
+      - name: canary health 探活
+        if: env.CF_API_TOKEN_SET == 'true'
+        run: |
+          URL="${{ inputs.worker_url }}"
+          [ -z "$URL" ] && URL="${{ vars.WORKER_URL }}"
+          if [ -z "$URL" ]; then
+            echo "未配置 canary 地址（input worker_url / vars.WORKER_URL）——跳过探活（部署本身已完成）"
+            exit 0
+          fi
+          for i in $(seq 1 12); do
+            status=$(curl -s -o /tmp/health.json -w '%{http_code}' "$URL/api/health" || true)
+            if [ "$status" = "200" ] && grep -q 'file-server' /tmp/health.json; then
+              echo "canary OK: $(cat /tmp/health.json)"
+              exit 0
+            fi
+            echo "attempt $i: status=$status，5s 重试（Workers 部署传播中）"
+            sleep 5
+          done
+          echo "canary 失败：$URL/api/health 60s 内未达 200+file-server"
+          exit 1

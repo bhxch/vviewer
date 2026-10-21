@@ -5,8 +5,12 @@
 //! 鉴权（native auth_mw 同构）：health 免鉴权；tree/file/mounts 为 Bearer 组
 //! ——有 token 时要求 `Authorization: Bearer`（constant-time 比较在
 //! core::auth），无 token 部署免鉴权；OPTIONS 预检放行。
+//!
+//! 资产面（Task 3）：run_worker_first=["/api/*"] 下命中资产由平台直出、worker
+//! 不经手；进到本层的非 /api/* 请求即资产缺失（not_found_handling="none"）——
+//! C1 前科纪律按扩展名分流（[`crate::http::is_asset_path`]）。
 
-use worker::{Method, Request, Response};
+use worker::{Env, Method, Request, Response};
 
 use vviewer_core::auth;
 use vviewer_core::error::CoreError;
@@ -14,7 +18,7 @@ use vviewer_core::state::CoreState;
 use vviewer_core::{file, health, mounts as mounts_domain, tree};
 use vviewer_storage::RangeSpec;
 
-use crate::http::{has_multiple_ranges, parse_range, strip_base_path};
+use crate::http::{has_multiple_ranges, is_asset_path, parse_range, strip_base_path};
 use crate::response::{json_error, to_worker};
 use crate::state::WorkerState;
 
@@ -24,15 +28,19 @@ use crate::state::WorkerState;
 const MOUNTS_BODY_LIMIT: usize = 64 * 1024;
 
 /// fetch 入口分发（entry.rs 调用）。
-pub async fn handle(req: Request, state: &'static WorkerState) -> worker::Result<Response> {
+pub async fn handle(req: Request, env: &Env, state: &'static WorkerState) -> worker::Result<Response> {
     let url = req.url()?;
     let path = strip_base_path(&state.base_path, url.path()).to_owned();
 
-    // 非 /api/* 交 Assets binding（Task 3 run_worker_first 后生产不可达；
-    // 本兜底供裸 worker/dev 形态）——**鉴权门之前**：资产面无鉴权语义
-    // （native 形态 ServeDir 同样在 Bearer 组之外），404 不得以 401 伪装
+    // 非 /api/* = 资产缺失面（Task 3 run_worker_first 后，命中资产平台直出、
+    // 仅缺失路径进本分支）——C1 前科纪律：按扩展名分流，SPA fallback 只服务
+    // 非资产路径。**鉴权门之前**：资产面无鉴权语义（native 形态 ServeDir 同样
+    // 在 Bearer 组之外），404 不得以 401 伪装
     if path != "/api" && !path.starts_with("/api/") {
-        return json_error(404, "not found");
+        // binding fetch 需绝对 URL（相对路径被 workerd fetch 语义拒绝——冒烟
+        // 实证）；origin 取原请求的 ASCII 序列化（url 2.5.8 的 Origin 无 Display）
+        let origin = url.origin().ascii_serialization();
+        return assets_fallback(env, &origin, &path).await;
     }
 
     // 鉴权分组：health 免认证（其余 /api 全在 Bearer 组——events/ticket/
@@ -57,7 +65,7 @@ pub async fn handle(req: Request, state: &'static WorkerState) -> worker::Result
         m if (m == Method::Get || m == Method::Head) && path == "/api/file" => {
             file(req, state).await
         }
-        m if m == Method::Get && path == "/api/mounts" => {
+        m if (m == Method::Get || m == Method::Head) && path == "/api/mounts" => {
             to_worker(mounts_domain::manifest(&state.core))
         }
         m if m == Method::Post && path == "/api/mounts" => mounts_register(req, state).await,
@@ -82,6 +90,36 @@ fn respond(res: Result<vviewer_core::CoreResponse, CoreError>) -> worker::Result
     match res {
         Ok(res) => to_worker(res),
         Err(err) => json_error(err.0.as_u16(), err.1),
+    }
+}
+
+/// 非 /api/* 的资产缺失兜底（Task 3，native `serve_index` 的 Workers 对应物）：
+/// - 资产扩展名路径（.wasm/.scm/.mjs/.css）→ 404 不回 HTML（C1 前科：query
+///   loader 只查 res.ok 误载 HTML 静默降级——200 index.html 兜底即复刻该缺陷）；
+/// - 其余缺失路径 → 经 ASSETS binding 取 index.html 回退（SPA fallback）。
+///   binding fetch 需绝对 URL（相对路径被 workerd fetch 语义拒绝——冒烟实证），
+///   origin 取自原请求。响应**读体重建**：binding 返回的 Response 头不可变
+///   （冒烟实证 TypeError），且 native 同款禁缓存纪律（BUG-15 server 子项：
+///   磁盘缓存启发式命中会让 SW 离线缺陷被新鲜窗口掩盖）必须后置补头；
+/// - 无 assets binding 的裸 worker 形态（Task 2 最小 wrangler.toml 之类）整体
+///   404 JSON（资产面错误风格与本层一致）。
+async fn assets_fallback(env: &Env, origin: &str, path: &str) -> worker::Result<Response> {
+    if is_asset_path(path) {
+        return json_error(404, "asset not found");
+    }
+    let Ok(assets) = env.assets("ASSETS") else {
+        return json_error(404, "not found");
+    };
+    match assets.fetch(format!("{origin}/index.html"), None).await {
+        Ok(mut res) if res.status_code() == 200 => {
+            let bytes = res.bytes().await?;
+            let mut res = Response::from_bytes(bytes)?;
+            res.headers_mut()
+                .set("content-type", "text/html; charset=utf-8")?;
+            res.headers_mut().set("cache-control", "no-cache")?;
+            Ok(res)
+        }
+        _ => json_error(404, "not found"),
     }
 }
 

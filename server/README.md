@@ -331,6 +331,74 @@ WantedBy=multi-user.target
 纯 API 模式（前端另托管）去掉 `--web-dist` 并加 `--cors-origin` 即可；只读服务，
 `ProtectSystem=strict` 下不需要可写目录时 `ReadWritePaths` 可删。
 
+## Workers 部署（CF Workers，多端发布阶段三）
+
+`server/worker/`（crate `vviewer-worker`）：workers-rs 适配——fetch handler→core
+dispatch，与 native 共用业务核。**能力矩阵**：health/tree/file/mounts 三 API 可用
+（存储唯一来源 = VV_MOUNTS 声明的 S3/WebDAV 挂载，wasm 无 fs）；watch（events）、
+search、compute 不挂载且 health 不宣告——前端既有逐项降级链自动生效，无需配置。
+
+### 部署步骤
+
+```bash
+# 1. 前端产物（assets binding 的目录源；子路径部署见下「base 约定」）
+pnpm install && pnpm --filter web build
+
+# 2. wasm 工具链（一次性）
+rustup target add wasm32-unknown-unknown
+cargo install worker-build
+
+# 3. 本地冒烟（workerd 本地运行时；VV_MOUNTS 临时配置放 server/worker/.dev.vars）
+cd server/worker && npx wrangler dev
+
+# 4. 部署（需 CF 账号；wrangler deploy 自动跑 [build] command）
+cd server/worker && npx wrangler deploy
+
+# 5. 体积门禁（CI 同款；<5MB 断言，产物在 server/worker/build/）
+node tools/worker-budget.mjs
+```
+
+CI：`.github/workflows/deploy-worker.yml`（手动 dispatch，ref 选择器可选 tag）。
+预备项——仓库 secrets：`CLOUDFLARE_API_TOKEN`（CF API token，权限 Account ·
+Workers Scripts: Edit）、`CLOUDFLARE_ACCOUNT_ID`；可选 var `WORKER_URL`（canary
+探活默认地址，dispatch input 可覆盖）。未配 secrets 时 deploy/canary 两步自动
+跳过（web/wasm 构建与体积门禁照跑）；探活断言 `/api/health` 200 且宣告
+`file-server`。
+
+### 配置面（env var / Wrangler Secret）
+
+| 变量 | 通道 | 说明 |
+|---|---|---|
+| `VV_MOUNTS` | 建议 Secret（含凭据） | 静态挂载 JSON 数组，元素与 TOML `[[mount]]` 同构（kind/endpoint/bucket/…，见「配置文件」节示例）；读取通道 var→secret 依次兜底 |
+| `VV_TOKEN` | 建议 Secret | Bearer 鉴权；无 token 部署免鉴权——**公网部署必须配置**（运行时挂载写面同 native 纪律） |
+| `VV_BASE_PATH` | var | 部署形态 base 约定，见下 |
+
+```bash
+wrangler secret put VV_MOUNTS   # 粘贴 JSON 数组（凭据不入 vars/wrangler.toml/代码库）
+wrangler secret put VV_TOKEN
+```
+
+### base 约定（VV_BASE_PATH 与资产面）
+
+- **根路径部署**（workers.dev / zone 根，标准形态）：`VV_BASE_PATH` 全链留空。
+- **子路径部署**：Workers Assets 按完整请求路径匹配资产，**不做前缀剥离**——
+  需前置反向代理剥前缀（worker/资产面均见剥后路径）；前端构建注入
+  `VV_BASE_PATH=/前缀`（与 Pages 同链：HTML 内的 `_app/`、grammars 资产引用带
+  前缀，代理按前缀路由到 worker）。worker 侧 env `VV_BASE_PATH` 仅供 dispatch
+  剥前缀（无剥前缀代理的 /api 面形态），资产面不支持该形态——勿混用。
+- Pages（`/<repo>/` 子路径）是 Pages 平台原生挂载，与 worker 形态互不适用。
+
+### 资产纪律（C1 SPA-fallback 前科）
+
+`wrangler.toml` 的 assets binding：命中资产平台直出（worker 不经手）；缺失路径
+进 worker 分流——`.wasm`/`.scm`/`.mjs`/`.css` 缺失 **404 不回 HTML**（终审 C1：
+query loader 只查 res.ok 误载 HTML → tree-sitter 静默降级 hljs；native 侧
+`serve_index` 为 `.scm`/`.wasm` 双层修之 server 层，worker 侧取计划纪律全集）；
+其余缺失路径回 index.html（SPA fallback，`cache-control: no-cache` 禁缓存，
+native BUG-15 同款）。`run_worker_first: ["/api/*"]` 保证 API 恒经 worker。
+不取 `not_found_handling = "single-page-application"`：其缺失路径无条件回 200
+index.html，恰为本纪律要防的形态。
+
 ## 开发
 
 ```bash

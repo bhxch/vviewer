@@ -1,6 +1,5 @@
-# wrangler 配置（多端发布阶段三）：Task 2 落最小可冒烟形态——fetch handler
-# 构建/本地 dev/健康探活；Task 3 扩展部署链（Assets binding + run_worker_first
-# + not_found_handling SPA fallback + 体积门禁 + deploy CI）。
+# wrangler 配置（多端发布阶段三）：Task 2 落最小可冒烟形态，Task 3 扩展部署
+# 链（Assets binding + run_worker_first + not_found_handling + 体积门禁 + CI）。
 name = "vviewer-worker"
 main = "build/index.js"
 compatibility_date = "2026-09-25"
@@ -15,3 +14,18 @@ compatibility_date = "2026-09-25"
 # worker-build（workers-rs 官方构建器，自带 wasm-bindgen 供给）：cargo build
 # --target wasm32-unknown-unknown + wasm-bindgen + esbuild 打包 → build/
 command = "worker-build --release"
+
+# 静态资产（Task 3，C1 SPA-fallback 前科纪律）：
+# - 前端产物目录（apps/web/build——CI/本地先 `pnpm --filter web build`；子路径
+#   部署形态的 base 约定见 server/README.md「Workers 部署」）。
+# - run_worker_first：/api/* 恒先经 worker（鉴权/业务面），平台不前置资产查找。
+# - not_found_handling = "none"：命中资产由平台直出（worker 不经手，零 CPU）；
+#   缺失路径进 worker（src/dispatch.rs assets_fallback）：.wasm/.scm/.mjs/.css
+#   缺失 404 不回 HTML；其余回 index.html（SPA fallback，禁缓存）。
+#   不取 "single-page-application"：其缺失路径无条件回 200 index.html——恰是
+#   C1 要防的「HTML 被误载为 wasm/scm 查询/字节资产」形态。
+[assets]
+directory = "../../apps/web/build"
+binding = "ASSETS"
+not_found_handling = "none"
+run_worker_first = ["/api/*"]
