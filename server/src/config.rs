@@ -443,6 +443,7 @@ password = "p"
                 username: None,
                 password: None,
                 path_style: None,
+                region: None,
             }];
         });
         let r = resolve_config(cli(&["/c1"]), Some(file)).unwrap();
@@ -466,6 +467,7 @@ password = "p"
             username: None,
             password: Some("PLAINPASS".into()),
             path_style: Some(true),
+            region: None,
         };
         let dbg = format!("{m:?}");
         assert!(!dbg.contains("AKIAEXAMPLE"), "{dbg}");

@@ -138,6 +138,7 @@ fn static_s3_mount() -> MountRoot {
                 access_key_id: ACCESS_KEY.into(),
                 secret_access_key: SECRET_KEY.into(),
                 path_style: true,
+                region: None,
             },
             Arc::new(MockTransport::new()),
         )),

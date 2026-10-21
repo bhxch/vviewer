@@ -60,6 +60,11 @@ pub struct MountConfig {
     pub username: Option<String>,
     pub password: Option<String>,
     pub path_style: Option<bool>,
+    /// S3 签名 region（台账 3-17）：None → us-east-1 现状缺省（storage 侧
+    /// `S3MountConfig` 消费）；WebDAV 挂载忽略。解析语义参数非身份面——
+    /// 不入 [`mount_fingerprint`]（同 endpoint 换 region 不改对账键）。
+    #[serde(default)]
+    pub region: Option<String>,
 }
 
 /// Debug 手工实现：凭证字段脱敏（原 config.rs 实现原样下沉——FileConfig/
@@ -79,6 +84,7 @@ impl std::fmt::Debug for MountConfig {
             .field("username", &redacted(&self.username))
             .field("password", &redacted(&self.password))
             .field("path_style", &self.path_style)
+            .field("region", &self.region)
             .finish()
     }
 }
@@ -143,6 +149,7 @@ pub fn build_mount(
             let prefix = cfg.prefix.clone().unwrap_or_default();
             // path_style 缺省 true（Global Constraints 的 path-style URL 形态）
             let path_style = cfg.path_style.unwrap_or(true);
+            // region 可选透传（台账 3-17）：None → storage 侧 us-east-1 现状缺省
             let backend = S3Backend::new(
                 S3MountConfig {
                     endpoint: endpoint.clone(),
@@ -151,6 +158,7 @@ pub fn build_mount(
                     access_key_id,
                     secret_access_key,
                     path_style,
+                    region: cfg.region.clone(),
                 },
                 transport,
             );
@@ -375,6 +383,7 @@ mod tests {
             username: Some("user-value".into()),
             password: Some("pass-value".into()),
             path_style: Some(true),
+            region: None,
         }
     }
 
@@ -439,5 +448,42 @@ mod tests {
         blank.label = Some("".into());
         blank.prefix = Some("".into());
         assert_eq!(mount_fingerprint(&absent), mount_fingerprint(&blank));
+    }
+
+    /// 3-17：region 字段 serde 往返——TOML `[[mount]]`/VV_MOUNTS JSON/POST
+    /// body 三通道同一反序列化形态：显式 region → Some；缺省 → None
+    ///（deny_unknown_fields 下新增可选字段向后兼容，既有配置零漂移）。
+    #[test]
+    fn region_field_roundtrips_via_serde() {
+        let with: MountConfig =
+            serde_json::from_str(r#"{"kind":"s3","region":"eu-central-1"}"#).unwrap();
+        assert_eq!(with.region.as_deref(), Some("eu-central-1"));
+        let without: MountConfig = serde_json::from_str(r#"{"kind":"s3"}"#).unwrap();
+        assert_eq!(without.region, None, "缺省 → None（None → us-east-1 现状）");
+    }
+
+    /// 3-17：Debug 面原样列出 region（非敏感解析参数，Global Constraints
+    /// 脱敏口径裁决），凭据字段仍 [redacted]。
+    #[test]
+    fn region_lists_plain_in_debug() {
+        let mut m = cfg(MountKind::S3);
+        m.region = Some("eu-central-1".into());
+        let dbg = format!("{m:?}");
+        assert!(dbg.contains("eu-central-1"), "{dbg}");
+        assert!(!dbg.contains("ak-value") && !dbg.contains("pass-value"), "{dbg}");
+    }
+
+    /// 3-17：指纹不含 region（裁决：region 是解析语义参数非身份面，对账幂等
+    /// 语义不变——同 endpoint 换 region 不改对账键、不触发重注册，知情接受）。
+    #[test]
+    fn region_not_in_fingerprint() {
+        let mut eu = cfg(MountKind::S3);
+        eu.region = Some("eu-central-1".into());
+        assert_eq!(mount_fingerprint(&cfg(MountKind::S3)), mount_fingerprint(&eu));
+        assert!(
+            !mount_fingerprint(&eu).contains("eu-central-1"),
+            "指纹串不含 region 值：{fp}",
+            fp = mount_fingerprint(&eu)
+        );
     }
 }

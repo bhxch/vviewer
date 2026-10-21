@@ -98,6 +98,7 @@ prefix = "sub"                          # 可选；缺省 = 端点根
 access_key_id = "ak"
 secret_access_key = "sk"
 path_style = true                       # 可选；缺省 true（path-style 请求）
+region = "us-east-1"                    # 可选；S3 签名 region，缺省 us-east-1（台账 3-17）
 
 [[mount]]                               # 附加挂载：WebDAV（只读）
 kind = "webdav"

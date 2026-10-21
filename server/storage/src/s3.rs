@@ -41,10 +41,10 @@ use crate::{
     HttpTransport, MountCapabilities, RangeSpec, StorageBackend, StorageError, StorageErrorKind,
 };
 
-/// 阶段一配置面无 region 字段（spec §2 的 mount 字段集），而 SigV4 需要 region
-/// 参与签名：默认 us-east-1——MinIO/R2/OSS/COS 等兼容实现普遍不校验 region；
-/// 对接严格按 region 校验的 AWS 真桶（非 us-east-1 区域）需扩配置面。签名
-/// 函数 [`sign_request`] 已参数化，扩展面时零改动。
+/// region 缺省值：`S3MountConfig.region` 为 None 时签名用它——MinIO/R2/OSS/
+/// COS 等兼容实现普遍不校验 region；对接严格按 region 校验的 AWS 真桶经配置
+/// 面 `region = "..."`（TOML/VV_MOUNTS/POST body，台账 3-17）指定。签名函数
+/// [`sign_request`] 已参数化，本常量只承担缺省面。
 const DEFAULT_REGION: &str = "us-east-1";
 const SERVICE: &str = "s3";
 /// 分页安全阀：单次 list_dir 最多跟随的页数（每页默认 ≤1000 键）——防御
@@ -75,6 +75,9 @@ pub struct S3MountConfig {
     /// true（Global Constraints 缺省形态）：path-style `{endpoint}/{bucket}/{key}`；
     /// false：virtual-host `{scheme}://{bucket}.{host}/{key}`。
     pub path_style: bool,
+    /// SigV4 credential scope 的 region（台账 3-17）：None → [`DEFAULT_REGION`]
+    /// 现状缺省；进 scope 与签名密钥链，非挂载身份面（core 指纹裁决）。
+    pub region: Option<String>,
 }
 
 impl std::fmt::Debug for S3MountConfig {
@@ -86,6 +89,7 @@ impl std::fmt::Debug for S3MountConfig {
             .field("access_key_id", &"[redacted]")
             .field("secret_access_key", &"[redacted]")
             .field("path_style", &self.path_style)
+            .field("region", &self.region)
             .finish()
     }
 }
@@ -532,6 +536,8 @@ pub struct S3Backend {
     prefix: String, // "" 或 "xxx/"
     creds: S3Credentials,
     path_style: bool,
+    /// SigV4 credential scope 的 region（台账 3-17）：None → DEFAULT_REGION。
+    region: Option<String>,
     http: Arc<dyn HttpTransport>,
 }
 
@@ -546,6 +552,7 @@ impl S3Backend {
                 secret_access_key: cfg.secret_access_key,
             },
             path_style: cfg.path_style,
+            region: cfg.region,
             http,
         }
     }
@@ -615,7 +622,8 @@ impl S3Backend {
             &extra_headers,
             b"",
             &self.creds,
-            DEFAULT_REGION,
+            // region 配置面（台账 3-17）：None → DEFAULT_REGION 现状缺省
+            self.region.as_deref().unwrap_or(DEFAULT_REGION),
             SERVICE,
             &amz_date_now(),
         );
@@ -937,6 +945,96 @@ mod tests {
         );
     }
 
+    /// 3-17：region 差分锚（官方向量仅 us-east-1，保持不动）：同请求同凭据，
+    /// region="eu-central-1" vs us-east-1——authorization 头的 Credential 段
+    /// scope 各含其 region 串，且两签名不同（region 参与 k_date→k_region
+    /// 密钥链）。
+    #[test]
+    fn region_flows_into_credential_scope_and_signature() {
+        let signed_eu = sign_request(
+            "GET",
+            "https://examplebucket.s3.amazonaws.com/test.txt",
+            &[],
+            b"",
+            &creds(),
+            "eu-central-1",
+            "s3",
+            "20130524T000000Z",
+        );
+        let signed_default = sign_request(
+            "GET",
+            "https://examplebucket.s3.amazonaws.com/test.txt",
+            &[],
+            b"",
+            &creds(),
+            "us-east-1",
+            "s3",
+            "20130524T000000Z",
+        );
+        let auth_eu = signed_eu.get("authorization").unwrap();
+        let auth_default = signed_default.get("authorization").unwrap();
+        assert!(
+            auth_eu.contains("Credential=AKIAIOSFODNN7EXAMPLE/20130524/eu-central-1/s3/aws4_request"),
+            "{auth_eu}"
+        );
+        assert!(
+            auth_default.contains("Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request"),
+            "{auth_default}"
+        );
+        assert_ne!(
+            signature_of(&signed_eu),
+            signature_of(&signed_default),
+            "region 进签名密钥链：两签名必不同"
+        );
+    }
+
+    /// 3-17：配置面贯通锚——`S3MountConfig.region` 经 `S3Backend` 进入实际
+    /// 请求的 credential scope（None → us-east-1 现状缺省）；消费点在
+    /// signed_request 的 `region.as_deref().unwrap_or(DEFAULT_REGION)`。
+    #[tokio::test]
+    async fn mount_config_region_flows_into_signed_requests() {
+        async fn scope_of(region: Option<&str>) -> String {
+            let t = Arc::new(
+                crate::transport::MockTransport::new().with_route("GET", "b1", |_| {
+                    crate::transport::http_response(200, &[("content-length", "0")], b"")
+                }),
+            );
+            let cfg = S3MountConfig {
+                endpoint: "https://s3.test.example.com".into(),
+                bucket: "b1".into(),
+                prefix: String::new(),
+                access_key_id: AK.into(),
+                secret_access_key: SK.into(),
+                path_style: true,
+                region: region.map(str::to_owned),
+            };
+            S3Backend::new(cfg, t.clone())
+                .list_dir(std::path::Path::new(""))
+                .await
+                .unwrap();
+            let req = &t.recorded_requests()[0];
+            let auth = &req
+                .headers
+                .iter()
+                .find(|(k, _)| k == "authorization")
+                .expect("authorization header")
+                .1;
+            auth.split("Credential=")
+                .nth(1)
+                .and_then(|s| s.split(',').next())
+                .expect("Credential segment")
+                .to_owned()
+        }
+        assert!(
+            scope_of(Some("eu-central-1")).await.contains("/eu-central-1/"),
+            "配置 region 进 scope"
+        );
+        assert!(
+            scope_of(None).await.contains("/us-east-1/"),
+            "None → DEFAULT_REGION 现状缺省"
+        );
+    }
+
     /// 官方向量「Example: GET Bucket (List Objects)」：query 输入未排序
     ///（prefix=J&max-keys=2），canonical 排序为 max-keys=2&prefix=J。
     #[test]
@@ -1074,6 +1172,7 @@ mod tests {
             access_key_id: AK.into(),
             secret_access_key: SK.into(),
             path_style: true,
+            region: None,
         };
         let dbg = format!("{cfg:?}");
         assert!(dbg.contains("[redacted]"), "{dbg}");

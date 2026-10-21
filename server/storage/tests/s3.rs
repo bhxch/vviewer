@@ -39,6 +39,7 @@ fn s3_config() -> S3MountConfig {
         access_key_id: AK.into(),
         secret_access_key: SK.into(),
         path_style: true,
+        region: None,
     }
 }
 

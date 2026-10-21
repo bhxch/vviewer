@@ -381,6 +381,7 @@ mod tests {
             username: None,
             password: None,
             path_style: None,
+            region: None,
         };
         match field {
             "endpoint" => m.endpoint = None,
@@ -463,6 +464,7 @@ mod tests {
             username: Some("u".into()),
             password: Some("p".into()),
             path_style: None,
+            region: None,
         };
         let root = build_mount(&cfg, transport.clone()).unwrap();
         assert_eq!(root.meta.kind, "webdav");
@@ -522,6 +524,7 @@ mod tests {
             username: None,
             password: None,
             path_style: None,
+            region: None,
         };
         let root = build_mount(&cfg, transport.clone()).unwrap();
 

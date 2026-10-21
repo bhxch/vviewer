@@ -357,6 +357,7 @@ mod tests {
                 username: None,
                 password: None,
                 path_style: None,
+                region: None,
             }
         }
 
@@ -414,6 +415,7 @@ mod tests {
                 username: None,
                 password: None,
                 path_style: None,
+                region: None,
             }
         }
 

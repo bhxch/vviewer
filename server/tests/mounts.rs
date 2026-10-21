@@ -117,6 +117,7 @@ fn s3_backend(transport: Arc<MockTransport>) -> Arc<dyn StorageBackend> {
             access_key_id: "AKIAIOSFODNN7EXAMPLE".into(),
             secret_access_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".into(),
             path_style: true,
+            region: None,
         },
         transport,
     ))
