@@ -1,5 +1,7 @@
 //! Task 2 集成测试：/api/tree（排序/过滤/404）与 /api/file（Range/MIME/X-VV 头）。
 
+use std::sync::OnceLock;
+
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode};
 use tower::ServiceExt;
@@ -64,6 +66,18 @@ async fn tree_json(app: axum::Router, uri: &str) -> serde_json::Value {
     let (status, _, body) = get(app, uri).await;
     assert_eq!(status, StatusCode::OK, "uri={uri}");
     serde_json::from_slice(&body).unwrap()
+}
+
+/// 3-9 同款（TOCTOU 共源）：编码变体（头面）与 Range（体面）两测共享同一
+/// fixture+router 实例——进程级构建一次，各自 oneshot（router Clone 同源）。
+fn shared_router() -> &'static axum::Router {
+    static SHARED: OnceLock<(Fixture, axum::Router)> = OnceLock::new();
+    let owned = SHARED.get_or_init(|| {
+        let f = fixture(false);
+        let app = vviewer::build_router(f.state.clone());
+        (f, app)
+    });
+    &owned.1
 }
 
 // ---------- /api/tree ----------
@@ -186,7 +200,7 @@ async fn file_xvv_lang_from_languages_json() {
 
 #[tokio::test]
 async fn file_xvv_encoding_variants() {
-    let f = fixture(false);
+    let app = shared_router();
 
     let cases = [
         ("gb.txt", "gb18030"),          // 非法 UTF-8（GBK 字节）
@@ -198,7 +212,7 @@ async fn file_xvv_encoding_variants() {
     ];
     for (name, expect) in cases {
         let (status, headers, _) = get(
-            vviewer::build_router(f.state.clone()),
+            app.clone(),
             &format!("/api/file?path={name}"),
         )
         .await;
@@ -209,9 +223,9 @@ async fn file_xvv_encoding_variants() {
 
 #[tokio::test]
 async fn file_range_bytes_a_b() {
-    let f = fixture(false);
+    let app = shared_router();
     let (status, headers, body) = get_with(
-        vviewer::build_router(f.state),
+        app.clone(),
         "/api/file?path=digits.bin",
         |b| b.header("range", "bytes=2-5"),
     )

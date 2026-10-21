@@ -352,6 +352,9 @@ fn serve(args: ServeArgs, mounts: Vec<MountConfig>) -> Result<(), i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
     use vviewer::state::MountKind;
 
     fn args(token: Option<String>) -> ServeArgs {
@@ -586,6 +589,225 @@ mod tests {
             "http://ak:sk@127.0.0.1:9000/b1/a.txt",
             "backend 用原 endpoint"
         );
+    }
+
+    // ---------- serve 全链路带挂载端到端（台账 3-6） ----------
+
+    /// 3-6：serve 全链路带挂载端到端（config→装配链→builder→router→三 API→
+    /// tree/file 经挂载根）。MockTransport 免真实网络（`:505-541` 先例）：
+    /// build_mount_roots 的缺省 transport 为 reqwest 不可注入，其逐项构造体
+    /// （build_mount，装配链构造面以「合并产物过 build_mount_roots」烟测）
+    /// 与 HTTP 面装置照既有先例以 build_mount + MockTransport 等价装配。
+    #[tokio::test]
+    async fn mounts_full_chain_config_to_router() {
+        use vviewer_storage::transport::{http_response, MockTransport};
+
+        const FULL_BODY: &[u8] = b"0123456789ABCDEFGHIJ"; // 20B
+        /// S3 mock 列表页（ListObjectsV2 字面结构，与 tests/mounts_api.rs 同源缩略）。
+        const LIST_PAGE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <IsTruncated>false</IsTruncated>
+  <Contents><Key>sub/a.txt</Key><LastModified>2019-02-19T21:48:39.000Z</LastModified><Size>20</Size></Contents>
+  <CommonPrefixes><Prefix>sub/dir/</Prefix></CommonPrefixes>
+</ListBucketResult>"#;
+
+        // config 面：TOML [[mount]] 字面形态（endpoint 携 userinfo——展示面
+        // 剥除锚；region 为 3-17 可选字段，缺省 None）
+        let file = config::FileConfig {
+            mounts: vec![MountConfig {
+                kind: MountKind::S3,
+                label: Some("docs".into()),
+                endpoint: Some("http://ak:sk@127.0.0.1:9000".into()),
+                bucket: Some("b1".into()),
+                prefix: Some("sub".into()),
+                access_key_id: Some("AKIAIOSFODNN7EXAMPLE".into()),
+                secret_access_key: Some("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".into()),
+                username: None,
+                password: None,
+                path_style: Some(true),
+                region: None,
+            }],
+            ..Default::default()
+        };
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("local.txt"), b"local-root\n").unwrap();
+        let resolved = resolve_config(
+            ServeArgs { root: vec![dir.path().to_path_buf()], ..args(None) },
+            Some(file),
+        )
+        .unwrap();
+        assert_eq!(resolved.mounts.len(), 1);
+
+        // 装配链构造面：合并产物过 build_mount_roots（构造零网络——缺省
+        // reqwest transport 建连池不发起请求，s3_cfg 缺字段先例同路径）
+        assert_eq!(build_mount_roots(&resolved.mounts).unwrap().len(), 1);
+
+        // backend 构造：build_mount（装配链逐项构造体）+ MockTransport 路由
+        let transport = Arc::new(
+            MockTransport::new()
+                .with_route("HEAD", "a.txt", |_| {
+                    http_response(
+                        200,
+                        &[
+                            ("content-length", "20"),
+                            ("last-modified", "Fri, 24 May 2013 00:00:00 GMT"),
+                        ],
+                        b"",
+                    )
+                })
+                .with_route("HEAD", "b1", |_| http_response(404, &[], b""))
+                .with_route("GET", "list-type=2", |_| {
+                    http_response(200, &[("content-type", "application/xml")], LIST_PAGE)
+                })
+                .with_route("GET", "a.txt", |req: &vviewer_storage::HttpRequest| {
+                    let range = req
+                        .headers
+                        .iter()
+                        .find(|(k, _)| k.eq_ignore_ascii_case("range"))
+                        .map(|(_, v)| v.as_str());
+                    match range {
+                        Some("bytes=2-5") => http_response(
+                            206,
+                            &[("content-range", "bytes 2-5/20"), ("content-length", "4")],
+                            b"2345",
+                        ),
+                        _ => http_response(200, &[("content-length", "20")], FULL_BODY),
+                    }
+                }),
+        );
+        let mount_root = build_mount(&resolved.mounts[0], transport.clone()).unwrap();
+        // 展示面剥 userinfo（凭据不入 meta——装配链既有锚测同断言）
+        assert_eq!(mount_root.meta.endpoint, "http://127.0.0.1:9000");
+
+        // builder→router：serve() 同序装配（with_roots 先行、with_mounts 追加）
+        let state = vviewer::state::AppState::new(
+            resolved.root[0].clone(),
+            resolved.web_dist.clone(),
+            resolved.token.clone(),
+            resolved.hidden,
+            resolved.cors_origin.clone(),
+        )
+        .with_roots(resolved.root.clone())
+        .with_mounts(vec![mount_root])
+        .with_compute(resolved.compute)
+        .with_runtime_transport(transport);
+        let app = vviewer::build_router(state);
+
+        // 三 API（无 token 部署免鉴权——spec §3 字面口径）：POST 201 注册，
+        // rootIndex 自 fsRoots+静态段起算（fs 1 + 静态 1 → 2）
+        let body = serde_json::json!({
+            "kind": "s3",
+            "label": "runtime-docs",
+            "endpoint": "http://127.0.0.1:9000",
+            "bucket": "b1",
+            "prefix": "sub",
+            "access_key_id": "ak",
+            "secret_access_key": "sk",
+            "path_style": true
+        });
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/mounts")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["rootIndex"],
+            2,
+            "{bytes:?}"
+        );
+
+        // 幂等：同指纹重注册 → 200 既有索引，不重复分配
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/mounts")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK, "幂等命中 200");
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["rootIndex"],
+            2
+        );
+
+        // GET 清单：静态段（1）+ 运行时段（2）分段、endpoint 剥 userinfo、无凭据
+        let res = app.clone().oneshot(Request::builder().uri("/api/mounts").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["fsRoots"], 1, "{v}");
+        assert_eq!(v["staticMounts"].as_array().unwrap().len(), 1, "{v}");
+        assert_eq!(v["staticMounts"][0]["rootIndex"], 1, "{v}");
+        assert_eq!(v["runtimeMounts"][0]["rootIndex"], 2, "{v}");
+        assert_eq!(v["runtimeMounts"][0]["endpoint"], "http://127.0.0.1:9000", "{v}");
+        let text = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(!text.contains("ak:sk"), "{text}");
+        assert!(!text.contains("AKIAIOSFODNN7EXAMPLE"), "{text}");
+
+        // DELETE 运行时项 → 204 + tombstone（清单不含已删项）
+        let req = Request::builder()
+            .method("DELETE")
+            .uri("/api/mounts/2")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        assert!(bytes.is_empty());
+        let res = app.clone().oneshot(Request::builder().uri("/api/mounts").body(Body::empty()).unwrap()).await.unwrap();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["runtimeMounts"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0,
+            "{bytes:?}"
+        );
+
+        // tree 经挂载根（root=1 = 静态 S3）：目录优先、prefix 拼接
+        let res = app.clone().oneshot(Request::builder().uri("/api/tree?root=1").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let tree: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let names: Vec<&str> = tree["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["dir", "a.txt"], "目录优先: {tree}");
+
+        // file 经挂载根：全量 200
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/file?root=1&path=a.txt")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(bytes.as_ref(), FULL_BODY);
+
+        // file Range：206 窗（backend 收到路由层已钳制的窗）
+        let req = Request::builder()
+            .uri("/api/file?root=1&path=a.txt")
+            .header("range", "bytes=2-5")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::PARTIAL_CONTENT);
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(bytes.as_ref(), b"2345");
     }
 
     // ---------- 就绪协议（plan 2026-10-19 Task 1） ----------

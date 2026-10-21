@@ -145,9 +145,13 @@ async fn ticket_requires_bearer_when_token_configured() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
-// 裁剪形态（worker）断言面为死路径：/api/events 随 native feature 不挂载
-// （修复轮 1 评审 M-1；ticket 签发/一次性/过期语义在 vviewer-core::tickets
-// 锚测两形态覆盖，本函数的 HTTP 链路仅在 native 形态运行）。
+// 门定性（台账 3-7）：HTTP 链路断言仅 native 形态运行——/api/events 路由
+// native-gated（裁剪形态该路由不挂载，ticket 消费链的 wire 端不存在；签发路由
+// /api/ticket 本身双形态恒在，其签发/一次性 wire 形态已由 core 锚测覆盖），
+// 本函数不存在「可双形态运行却被误门」的断言。签发/一次性/过期语义由
+// core::tickets 锚测（issue_returns_json_and_ticket_consumes_once /
+// expired_ticket_fails_and_sweep_removes_only_expired，恒编译双形态覆盖），
+// 本函数为 wire 面锚。
 #[cfg(feature = "native")]
 #[tokio::test]
 async fn ticket_flow_issue_consume_once_and_expiry() {

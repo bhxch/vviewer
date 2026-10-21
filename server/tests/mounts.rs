@@ -11,7 +11,7 @@
 //!   endpoint/bucket/prefix，无凭据）；rootPaths 仅 fs 根；
 //! - 挂载根 path 清洗：绝对路径 / `..` 照旧 400（无 fs canonicalize）。
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -140,6 +140,17 @@ fn fixture() -> Fixture {
     Fixture { _dir: dir, state, transport }
 }
 
+/// 3-9（TOCTOU 共源）：头/体两测共享同一 fixture 实例——AppState+router 进程级
+/// 构建一次，200 头面与 Range 206 体面各自 oneshot（router Clone 同源即达意）。
+fn fixture_with_mount() -> &'static (Fixture, axum::Router) {
+    static SHARED: OnceLock<(Fixture, axum::Router)> = OnceLock::new();
+    SHARED.get_or_init(|| {
+        let f = fixture();
+        let app = vviewer::build_router(f.state.clone());
+        (f, app)
+    })
+}
+
 async fn get(app: axum::Router, uri: &str) -> (StatusCode, axum::http::HeaderMap, axum::body::Bytes) {
     get_with(app, uri, |b| b).await
 }
@@ -240,9 +251,9 @@ async fn fs_root_behavior_unchanged_alongside_mounts() {
 
 #[tokio::test]
 async fn file_mount_root_full_200() {
-    let f = fixture();
+    let (_, app) = fixture_with_mount();
     let (status, headers, body) =
-        get(vviewer::build_router(f.state), "/api/file?root=1&path=a.txt").await;
+        get(app.clone(), "/api/file?root=1&path=a.txt").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_ref(), FULL_BODY);
     assert_eq!(headers["content-length"], "20");
@@ -253,9 +264,9 @@ async fn file_mount_root_full_200() {
 
 #[tokio::test]
 async fn file_mount_root_range_206() {
-    let f = fixture();
+    let (_, app) = fixture_with_mount();
     let (status, headers, body) = get_with(
-        vviewer::build_router(f.state),
+        app.clone(),
         "/api/file?root=1&path=a.txt",
         |b| b.header("range", "bytes=2-5"),
     )
