@@ -1,7 +1,6 @@
 // diagrams.ts — 图表注册表与 kroki 编码（spec 2026-10-19 §2.1/§2.2）。
 // 类型清单/别名对齐 markpad src/lib/diagrams.ts；local 启用集按 spec §2.6
 // 预算裁决仅 graphviz/nomnoml（mermaid/math 既有），其余 kroki/源码覆盖。
-import pako from 'pako';
 
 export type DiagramMode = 'local' | 'kroki' | 'source';
 
@@ -53,9 +52,13 @@ export function resolveDiagramType(lang: string): DiagramType | null {
 
 export const DEFAULT_KROKI_HOST = 'https://kroki.io';
 
-/** kroki URL：pako deflate(level 9) + base64url（无填充）。host 尾斜杠归一。 */
-export function createKrokiUrl(host: string, krokiType: string, source: string): string {
+/**
+ * kroki URL：pako deflate(level 9) + base64url（无填充）。host 尾斜杠归一。
+ * 4-1：pako 主包静态导入退役——kroki 编码惰性化，非 kroki 文档不再进主图。
+ */
+export async function createKrokiUrl(host: string, krokiType: string, source: string): Promise<string> {
   const base = (host || DEFAULT_KROKI_HOST).replace(/\/+$/, '');
+  const { default: pako } = await import('pako');
   const bytes = pako.deflate(new TextEncoder().encode(source), { level: 9 });
   let str = '';
   for (let i = 0; i < bytes.length; i += 1) str += String.fromCharCode(bytes[i]!);

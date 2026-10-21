@@ -30,18 +30,18 @@ describe('resolveDiagramType', () => {
 });
 
 describe('createKrokiUrl', () => {
-  it('默认 host 与 URL 形态', () => {
-    const url = createKrokiUrl('', 'graphviz', 'digraph{}');
+  it('默认 host 与 URL 形态', async () => {
+    const url = await createKrokiUrl('', 'graphviz', 'digraph{}');
     expect(url.startsWith(`${DEFAULT_KROKI_HOST}/graphviz/svg/`)).toBe(true);
   });
-  it('host 尾斜杠归一', () => {
-    const url = createKrokiUrl('https://k.example.com/', 'dot', 'x');
+  it('host 尾斜杠归一', async () => {
+    const url = await createKrokiUrl('https://k.example.com/', 'dot', 'x');
     // krokiType 由调用方传归一名；host 尾斜杠剥离
     expect(url.startsWith('https://k.example.com/dot/svg/')).toBe(true);
   });
-  it('base64url 编码可解码还原（deflate 往返）', () => {
+  it('base64url 编码可解码还原（deflate 往返）', async () => {
     const source = 'digraph { a -> b }';
-    const url = createKrokiUrl(DEFAULT_KROKI_HOST, 'graphviz', source);
+    const url = await createKrokiUrl(DEFAULT_KROKI_HOST, 'graphviz', source);
     const b64 = url.split('/svg/')[1]!;
     const std = b64.replace(/-/g, '+').replace(/_/g, '/');
     const bin = Buffer.from(std, 'base64');

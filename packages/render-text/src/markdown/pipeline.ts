@@ -292,7 +292,7 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
   if (mode === 'kroki') {
     const img = doc.createElement('img');
     img.setAttribute('alt', type.id);
-    img.setAttribute('src', createKrokiUrl(ctx.diagram?.krokiHost ?? DEFAULT_KROKI_HOST, type.krokiType, source));
+    img.setAttribute('src', await createKrokiUrl(ctx.diagram?.krokiHost ?? DEFAULT_KROKI_HOST, type.krokiType, source));
     // jsdom 不派发 load/error（历史教训）：onerror 只在真浏览器生效，单测断言 src 形态
     img.addEventListener('error', () => {
       view.classList.add(cls(ctx, 'diagramError'));
