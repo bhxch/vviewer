@@ -175,8 +175,30 @@
 | desktop SIGTERM×重启孤儿窄窗 | dde0c6a：restarting AtomicBool 护栏（RAII 清位）+ shutdown_now 双检等待；纳秒级残余交错知情注记在案 |
 | workerd Content-Length: 0 POST 实证 | c7f5e36：探针脚本落库挂 deploy-worker workflow 首跑（continue-on-error 非门禁）——**实证结果待 CI 窗口，回写于此** |
 
-- desktop RunEvent::Exit 路径同类出槽窄窗（apps/desktop/src-tauri/src/main.rs:126 kill_server 直调：窗口关闭恰落在重启在飞的出槽毫秒窗时新 child 无人回收）——Task 4 评审新增发现（2026-10-22）：既有窗口非本批引入，信号面（ctrlc）已由 C4 restarting 护栏覆盖，Exit 面可复用同款护栏修法，挂账后续清偿。
-- desktop/对齐边缘：alignActiveOfGroup 对「前缀快照 + 来源仍不可达」组合不命中（占位 id 与双前缀/裸 id 匹配臂均错开，修复前双前缀碰巧对齐）——终审 M-4（2026-10-22）：全错误卡退化场景的活动 tab 对齐损失，edge-of-edge，随下次该函数触碰面顺修。
+- desktop RunEvent::Exit 路径同类出槽窄窗（apps/desktop/src-tauri/src/main.rs:126 kill_server 直调：窗口关闭恰落在重启在飞的出槽毫秒窗时新 child 无人回收）——Task 4 评审新增发现（2026-10-22）：既有窗口非本批引入，信号面（ctrlc）已由 C4 restarting 护栏覆盖，Exit 面可复用同款护栏修法，挂账后续清偿。✅ 已清偿（f413f1f，见终审遗留递延项清偿节）
+- desktop/对齐边缘：alignActiveOfGroup 对「前缀快照 + 来源仍不可达」组合不命中（占位 id 与双前缀/裸 id 匹配臂均错开，修复前双前缀碰巧对齐）——终审 M-4（2026-10-22）：全错误卡退化场景的活动 tab 对齐损失，edge-of-edge，随下次该函数触碰面顺修。✅ 已清偿（1a0c6ef 实证证伪，见终审遗留递延项清偿节）
+
+### 终审遗留递延项清偿（2026-10-22 终审后清偿轮，用户拍板「除实机项全清」）
+
+| 项 | 闭合处 |
+| --- | --- |
+| Exit 路径同类出槽窄窗（挂账①） | f413f1f：shutdown_now 尾段抽 reap_after_restart_window，RunEvent::Exit 复用同款护栏（正常关闭零开销不变），单测锁组合半边 |
+| alignActiveOfGroup「前缀快照+仍不可达」组合（挂账②/M-4） | ✅ 已实证证伪：branch1（`=== want.storeId`）即命中（占位 id 与 want 同串，终审漏数 branch1）；1a0c6ef WSX-14 扩双 tab 加活动对齐断言（变异校验判别力坐实），产品零改动 |
+| IDB 注入 Promise 无 onerror/onblocked（T1-M2） | 1a0c6ef：四处手工 Promise 补 reject 分支，tx 失败清晰失败不再挂超时 |
+| contains("..") 理论假绿（T3-M1） | 1a57c8f：改 ends_with(".. }") 锚定结尾，值内 ".." 子串不再误配 |
+| RawRange 少 derive Eq + 臂括注（T2-M2） | fd2487c：与 native 逐字对齐 |
+| 探针进程树 kill / curl -sS / --max-time（T5-M1/M2/M3） | d97fe7d：pkill -P 补链、诊断不静默、就绪单探针限时 |
+| spec cargo 基线数失准（M-5） | 11ea7a1：424→实测口径（workspace 324 + desktop 24，f413f1f 后实测）+ 跑法定位 |
+| playwright 计数 666 vs 662 差（M-6） | 本 commit §五 过程注记：658 基线系 vitest 旧数误植，真实 718 + 本批 4 = 722 与 666+56skip 闭合 |
+
+### 终审遗留裁决维持项（知情接受，无动作面）
+
+- parse_range_syntax pub 无外部消费者：与 native 模块形态同构系 parity 一部分（简报 Interfaces 条款），有意 pub。
+- MockTransport use 函数体内（mounts.rs）：与 core/state.rs:346 既有先例同款，作用域最小。
+- shutdown_now 双 wait 理论上限 30s：有界防御性保险，真实阻塞仅 sidecar 挂起场景，doc 知情注记在案。
+- 探针端口 8791 固定：PROBE_PORT env 已留覆盖口，CI 并发冲突理论面由 continue-on-error 兜底。
+- 历史 commit message 口径（bb6a0c2「四处」等）与工作文档措辞（task 报告）：历史不改纪律，digest 与实码为准。
+- C5 workerd CL:0 实证：探针已落库，结果待 deploy-worker workflow 首跑（实机/CI 窗口件，唯一非本地清偿项）。
 
 ## 三、观察/校准项（等待 CI 首跑或实机，非代码债）
 
@@ -197,3 +219,4 @@ Spec 1 markdown 五 plan（会话转录已清，仅存要点）：
 
 - 重建方法：转录中控制器以 `Write` 建骨架、以 `cat >> progress.md <<'EOF'` 逐任务追加——按工具调用 id 去重后依首次出现顺序重放，六个台账与记忆中的终态引用（如「Spec 4 三阶段全部闭环」「递延：remote.ts:207」）逐一吻合，重建可信。
 - 教训：台账若需「留 git 历史」，必须显式落 `docs/`（如本次归档）；`.superpowers/sdd/` 的 `.gitignore *` 意味着该目录下的一切永不入库，「git 历史即记录」对台账本身不成立。
+- M-6 根因（2026-10-22 清偿轮）：playwright 门禁实测「666+56skip」与预期「658+4=662」差的 +4 不来自测试面变动，而是基线 658 本身失准——立项 spec（619d541）把 2026-10-10 的 vitest 基线（e5df175「`pnpm vitest run` 658/658（57 文件）」）误植为本批 playwright 默认套件基线。立项前时点（1d3547b）默认套件 worktree 实测 718（双 project 合计），本批净增 +4 = bb6a0c2 的 WSX-13/14 两用例 ×2 project（c9fb35e 扩断言、1a0c6ef 扩双 tab 均零用例增量），718+4=722 与实测 666 passed + 56 skipped 完全闭合（HEAD `playwright test --list` 复核同数，chromium/mobile 同构各 361）。
