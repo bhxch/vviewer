@@ -17,7 +17,9 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * - WS-01 只锚删除活动组与合法重命名；WSX-11 补删最后一组兜底/重名允许/空名忽略，
  *   WSX-12 补三组切换后快照组序保序与逐组 tab 归属还原（WS-04 扩展面）；
  * - WSX-13/14 补占位前缀快照（snapshot 写侧无过滤的历史产物）restore 查表剥
- *   prefix 后的复活面与单层前缀幂等锚（终审新增候选 C1，编号对照同上）。
+ *   prefix 后的复活面与单层前缀幂等锚（终审新增候选 C1，编号对照同上）；
+ *   WSX-14 另锚「前缀快照 + 来源仍不可达」组合下活动 tab 按快照 activeTabId
+ *   锚定（alignActiveOfGroup 的 M-4 实证面，双 tab 判别编排）。
  *
  * 通道：目录/文件注入走 drop（t-shell SHELL-03① 先例）；远端用 spec 内假双根
  * vviewer 服务器（t-workspace startFakeServer 扩展：health roots/rootPaths、
@@ -821,12 +823,15 @@ test('WSX-13: 占位前缀快照在来源重建后复活（文件+目录条目�
   // 构造缺陷态 = snapshot() 无过滤缺陷的真实产物形态：存活快照的文件 tab
   // storeId 全部加 placeholder: 前缀 + 注入一条占位目录条目（undo 栈窄径产物）
   await page.evaluate(() => {
-    return new Promise<void>((resolve) => {
+    return new Promise<void>((resolve, reject) => {
       const open = indexedDB.open('vviewer');
+      open.onblocked = () => reject(new Error('IDB 注入失败'));
+      open.onerror = () => reject(new Error('IDB 注入失败'));
       open.onsuccess = () => {
         const db = open.result;
         const tx = db.transaction('kv', 'readwrite');
         const get = tx.objectStore('kv').get('workspaces');
+        get.onerror = () => reject(new Error('IDB 注入失败'));
         get.onsuccess = () => {
           const snap = get.result as {
             workspaces: {
@@ -865,6 +870,8 @@ test('WSX-13: 占位前缀快照在来源重建后复活（文件+目录条目�
           }
           tx.objectStore('kv').put(snap, 'workspaces');
           tx.oncomplete = () => { db.close(); resolve(); };
+          tx.onerror = () => { db.close(); reject(new Error('IDB 注入失败')); };
+          tx.onabort = () => { db.close(); reject(new Error('IDB 注入失败')); };
         };
       };
     });
@@ -882,11 +889,19 @@ test('WSX-13: 占位前缀快照在来源重建后复活（文件+目录条目�
   await expect
     .poll(async () =>
       page.evaluate(() => {
-        return new Promise<string[]>((resolve) => {
+        return new Promise<string[]>((resolve, reject) => {
           const open = indexedDB.open('vviewer');
+          open.onblocked = () => reject(new Error('IDB 注入失败'));
+          open.onerror = () => reject(new Error('IDB 注入失败'));
           open.onsuccess = () => {
             const db = open.result;
-            const get = db.transaction('kv', 'readonly').objectStore('kv').get('workspaces');
+            const tx = db.transaction('kv', 'readonly');
+            const get = tx.objectStore('kv').get('workspaces');
+            tx.onabort = () => { db.close(); reject(new Error('IDB 注入失败')); };
+            get.onerror = () => {
+              db.close();
+              reject(new Error('IDB 注入失败'));
+            };
             get.onsuccess = () => {
               db.close();
               const snap = get.result as { workspaces: { tabs: { path: string; storeId: string }[] }[] };
@@ -902,24 +917,40 @@ test('WSX-13: 占位前缀快照在来源重建后复活（文件+目录条目�
 
 // ---------------------------------------------------------------- WSX-14
 
-test('WSX-14: 占位快照在来源仍不可达时保持单层前缀（幂等，C1）', async ({ page }) => {
+test('WSX-14: 占位快照在来源仍不可达时保持单层前缀（幂等，C1）+ 前缀快照活动 tab 锚定（M-4 实证）', async ({
+  page
+}) => {
   const fake = await startWsxFakeServer({
     rootPaths: ['/r0'],
-    files: { 0: { 'hello.txt': 'x' } }
+    files: { 0: { 'hello.txt': 'x', 'second.txt': 'y' } }
   });
   await page.goto('/');
   await connectForm(page, fake.base);
   await openDrawerIfNarrow(page);
   await page.locator('.vv-tree-row', { hasText: 'hello.txt' }).click();
-  await waitSnapshotTabs(page, ['hello.txt']);
+  await expect(page.locator('.vv-tab.active', { hasText: 'hello.txt' })).toBeVisible();
+  // 第二枚文件 tab + 回点 hello.txt 锚活动（WSX-13 同款编排）：快照 tab 序
+  // [hello.txt, second.txt]、activeTabId 指 hello.txt——多 tab 下 reload 断言
+  // 「活动 tab = 快照锚定的 hello.txt 而非组末位 second.txt」才有判别力
+  //（addTab 顺延激活恒落组末位）。二次行点击前幂等重开抽屉：首次行点击后
+  // 抽屉已自动收起（BUG-61 通道，桌面 no-op）
+  await openDrawerIfNarrow(page);
+  await page.locator('.vv-tree-row', { hasText: 'second.txt' }).click();
+  await expect(page.locator('.vv-tab.active', { hasText: 'second.txt' })).toBeVisible();
+  await page.locator('.vv-tab', { hasText: 'hello.txt' }).click();
+  await expect(page.locator('.vv-tab.active', { hasText: 'hello.txt' })).toBeVisible();
+  await waitSnapshotTabs(page, ['hello.txt', 'second.txt']);
   // 同 WSX-13 加前缀后，断连态 reload（health 探测被浏览器层掐断 → 来源不重建）
   await page.evaluate(() => {
-    return new Promise<void>((resolve) => {
+    return new Promise<void>((resolve, reject) => {
       const open = indexedDB.open('vviewer');
+      open.onblocked = () => reject(new Error('IDB 注入失败'));
+      open.onerror = () => reject(new Error('IDB 注入失败'));
       open.onsuccess = () => {
         const db = open.result;
         const tx = db.transaction('kv', 'readwrite');
         const get = tx.objectStore('kv').get('workspaces');
+        get.onerror = () => reject(new Error('IDB 注入失败'));
         get.onsuccess = () => {
           const snap = get.result as {
             workspaces: { tabs: { storeId: string; path: string }[] }[];
@@ -933,6 +964,8 @@ test('WSX-14: 占位快照在来源仍不可达时保持单层前缀（幂等，
           }
           tx.objectStore('kv').put(snap, 'workspaces');
           tx.oncomplete = () => { db.close(); resolve(); };
+          tx.onerror = () => { db.close(); reject(new Error('IDB 注入失败')); };
+          tx.onabort = () => { db.close(); reject(new Error('IDB 注入失败')); };
         };
       };
     });
@@ -942,14 +975,28 @@ test('WSX-14: 占位快照在来源仍不可达时保持单层前缀（幂等，
   // 落占位（错误卡片在场）且快照 storeId 仍为单层前缀（addPlaceholder 的
   // originStoreIdOf 防线：不得叠加成 placeholder:placeholder:）
   await expect(page.locator('.vv-error-card').first()).toBeVisible();
+  // M-4 实证断言：活动 tab = 快照 activeTabId 锚定的 hello.txt——仍不可达组合
+  // 下占位 tab 的 source.storeId（placeholder:<原 id>）与前缀快照 want.storeId
+  // 同串，alignActiveOfGroup 应命中而非活动恒落组末位 second.txt
+  await expect(page.locator('.vv-tab.active', { hasText: 'hello.txt' })).toBeVisible({
+    timeout: 15_000
+  });
   await expect
     .poll(async () =>
       page.evaluate(() => {
-        return new Promise<string[]>((resolve) => {
+        return new Promise<string[]>((resolve, reject) => {
           const open = indexedDB.open('vviewer');
+          open.onblocked = () => reject(new Error('IDB 注入失败'));
+          open.onerror = () => reject(new Error('IDB 注入失败'));
           open.onsuccess = () => {
             const db = open.result;
-            const get = db.transaction('kv', 'readonly').objectStore('kv').get('workspaces');
+            const tx = db.transaction('kv', 'readonly');
+            const get = tx.objectStore('kv').get('workspaces');
+            tx.onabort = () => { db.close(); reject(new Error('IDB 注入失败')); };
+            get.onerror = () => {
+              db.close();
+              reject(new Error('IDB 注入失败'));
+            };
             get.onsuccess = () => {
               db.close();
               const snap = get.result as { workspaces: { tabs: { storeId: string }[] }[] };
@@ -959,5 +1006,8 @@ test('WSX-14: 占位快照在来源仍不可达时保持单层前缀（幂等，
         });
       })
     )
-    .toEqual([expect.stringMatching(/^placeholder:(?!placeholder:).*$/)]);
+    .toEqual([
+      expect.stringMatching(/^placeholder:(?!placeholder:).*$/),
+      expect.stringMatching(/^placeholder:(?!placeholder:).*$/)
+    ]); // 双文件 tab 各自单层前缀（second.txt 条目 id 与 activeTabId 不冲突）
 });
