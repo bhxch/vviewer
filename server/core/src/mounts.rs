@@ -423,7 +423,10 @@ mod tests {
             assert!(dbg.contains(&format!("{name}:")), "Debug 缺字段 {name}: {dbg}");
         }
         assert!(!dbg.contains("backend:"), "backend 不得经 Debug 暴露: {dbg}");
-        assert!(dbg.contains(".."), "non_exhaustive 标记须在场: {dbg}");
+        // non_exhaustive 标记锚定结尾（实测形态 `MountRoot { meta: …, .. }`）：
+        // contains("..") 在未来某字段值恰含 ".." 子串时假绿，ends_with 只认
+        // finish_non_exhaustive 的收尾标记
+        assert!(dbg.ends_with(".. }"), "non_exhaustive 标记须在场: {dbg}");
     }
 
     /// 指纹覆盖「同一挂载目标」面（kind/endpoint/bucket/prefix/label），不含
