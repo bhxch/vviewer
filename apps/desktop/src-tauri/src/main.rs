@@ -18,7 +18,7 @@ mod ready;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -45,6 +45,9 @@ struct ServerState {
     child: Mutex<Option<Child>>,
     generation: AtomicU64,
     stderr_tail: Arc<Mutex<String>>,
+    /// C4：重启在飞护栏——start_and_wait 开场置位、槽位放回/早退清位；
+    /// shutdown_now 据此等待孤儿窗口收口后再统一 kill。
+    restarting: AtomicBool,
 }
 
 /// 启动失败的分类（错误窗文案来源）。
@@ -96,6 +99,7 @@ fn main() {
                 child: Mutex::new(None),
                 generation: AtomicU64::new(0),
                 stderr_tail: Arc::new(Mutex::new(String::new())),
+                restarting: AtomicBool::new(false),
             });
             // 2-7：SIGTERM/SIGINT → 与 RunEvent::Exit 同一回收路径后退出——桌面壳被
             // 信号终止时 server sidecar 不再孤儿化。Windows 如实注记：ctrlc 映射
@@ -151,6 +155,10 @@ fn restart_async(app: AppHandle) {
 /// spawn sidecar 并等待就绪行；成功返回实测端口。
 fn start_and_wait(app: &AppHandle) -> Result<u16, LaunchFailure> {
     let state = app.state::<ServerState>();
+    // C4：先竖护栏再出槽——孤儿窗口（kill 旧 child 至新 child 入槽）全程有
+    // 护栏覆盖；RAII 清位覆盖全部早退路径
+    state.restarting.store(true, Ordering::Release);
+    let _restart_guard = RestartGuard(&state.restarting);
     // 重启形态：先回收旧子进程；代际 +1 使旧存活监视线程退场
     kill_server(&state);
     state.generation.fetch_add(1, Ordering::SeqCst);
@@ -325,10 +333,47 @@ fn kill_server(state: &ServerState) {
     }
 }
 
-/// 信号退出语义体（2-7）：回收子进程后整进程退出；RunEvent::Exit 路径
-/// （窗口关闭/错误窗退出）保持 app.exit 既有编排不动。
+/// C4：等待重启在飞窗口收口（毫秒级）。见位自旋（2ms 步进）至护栏清位；
+/// 超上限按无窗口处置（防御性——早退路径由 RestartGuard RAII 清位，正常不触顶）。
+fn wait_restart_window(restarting: &AtomicBool, timeout: Duration) {
+    let deadline = std::time::Instant::now() + timeout;
+    while restarting.load(Ordering::Acquire) {
+        if std::time::Instant::now() >= deadline {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// C4：重启在飞护栏 RAII——置位在构造（调用方 store(true) 后包一层）、
+/// 清位在 drop：start_and_wait 的全部早退路径（Resolve 失败 / 超时 / spawn
+/// 失败）不靠逐 return 记忆。
+struct RestartGuard<'a>(&'a AtomicBool);
+
+impl Drop for RestartGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+/// C4：护栏等待上限（覆盖最慢 start_and_wait 收口；与 READY_TIMEOUT 同量级，
+/// 独立常量避免语义耦合——护栏超时是防御性保险，不是就绪等待）。
+const RESTART_WINDOW_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// 信号退出语义体（2-7；C4 护栏）：先等重启在飞窗口收口再 kill+exit——
+/// 「旧 child 已出槽（start_and_wait kill_server）、新 child 未入槽（:194 放回）」
+/// 的毫秒级窗口内收到 SIGTERM 时，新 sidecar 由本函数在窗口收口（槽位放回）
+/// 后统一回收，不再孤儿化。双检：kill 前后各查一次护栏，信号恰在重启开场
+/// 置位前后到达时复查见位即回到等待。残余窗口（知情接受）：复查通过至
+/// exit(0) 之间重启线程恰好开场的纳秒级交错——原缺陷窗口毫秒级且后果可控
+/// （孤儿 sidecar 存活至机器重启，--port 0 无端口冲突），线性化需第二标志位
+/// + 重启 bail-out，复杂度不成比例。
 fn shutdown_now(state: &ServerState) {
+    wait_restart_window(&state.restarting, RESTART_WINDOW_TIMEOUT);
     kill_server(state);
+    if state.restarting.load(Ordering::Acquire) {
+        wait_restart_window(&state.restarting, RESTART_WINDOW_TIMEOUT);
+    }
     std::process::exit(0);
 }
 
@@ -477,12 +522,14 @@ fn default_root() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use std::io::Read;
-    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
 
     use super::collect_stderr;
     use super::dialog_plugin;
     use super::kill_server;
+    use super::wait_restart_window;
+    use super::RestartGuard;
     use super::ServerState;
     use tauri_plugin_dialog::DialogExt;
 
@@ -564,6 +611,7 @@ mod tests {
             child: Mutex::new(Some(child)),
             generation: AtomicU64::new(0),
             stderr_tail: Arc::new(Mutex::new(String::new())),
+            restarting: AtomicBool::new(false),
         };
         kill_server(&state);
         // 幂等锚：child 槽位 take 后为 None（二次调用无目标）
@@ -576,6 +624,44 @@ mod tests {
         );
         #[cfg(not(target_os = "linux"))]
         let _ = pid;
+    }
+
+    /// C4：护栏等待——在飞时阻塞至清位（后台线程延时清位）。
+    #[test]
+    fn restart_window_wait_blocks_until_cleared() {
+        let flag = std::sync::Arc::new(AtomicBool::new(true));
+        let f = flag.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            f.store(false, Ordering::Release);
+        });
+        let t0 = std::time::Instant::now();
+        wait_restart_window(&flag, std::time::Duration::from_secs(5));
+        assert!(
+            t0.elapsed() >= std::time::Duration::from_millis(25),
+            "见位须等待至清位（elapsed={:?}）",
+            t0.elapsed()
+        );
+    }
+
+    /// C4：护栏等待超时上限（防御性死等保险——早退路径由 RAII 清位，正常不触顶）。
+    #[test]
+    fn restart_window_wait_times_out_defensively() {
+        let flag = AtomicBool::new(true);
+        let t0 = std::time::Instant::now();
+        wait_restart_window(&flag, std::time::Duration::from_millis(20));
+        assert!(t0.elapsed() >= std::time::Duration::from_millis(15));
+    }
+
+    /// C4：RestartGuard RAII 清位（start_and_wait 全部早退路径的防线）。
+    #[test]
+    fn restart_guard_clears_on_drop() {
+        let flag = AtomicBool::new(true);
+        {
+            let _g = RestartGuard(&flag);
+            assert!(flag.load(Ordering::Acquire));
+        }
+        assert!(!flag.load(Ordering::Acquire), "guard drop 须清位");
     }
 
     /// 2-3：EOF 时 pending 非空（尾巴不完整即断流）——EOF 分支 lossy 兜底，
