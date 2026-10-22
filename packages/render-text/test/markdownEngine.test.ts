@@ -270,6 +270,17 @@ describe('protectLatexDelimiters——LaTeX 定界符前置改写（Task 1b）',
     expect(protectLatexDelimiters('未闭 \\[abc')).toBe('未闭 $$abc');
   });
 
+  it('未闭合 \\[ 跨围栏：数学内容流式直出，围栏标记行不被缓冲拼接（保护单测）', () => {
+    // 此前数学态字符缓冲至闭合/EOF 回填——字面「\[ not a link」开屏后数十行正文
+    // 被搬进缓冲在 EOF 拼成一行，markdown 围栏整段失效（stress-test.md:679 语料
+    // 实证：60 个 text 围栏标记行拼接、数十张表并成一行）。修复后内容直出、
+    // 结构保序；闭合场景输出与旧行为逐字符一致（$$a\nb$$）。
+    const src = '\\[ not a link\n```text\nv = 1\n```\n正文段落\n';
+    expect(protectLatexDelimiters(src)).toBe('$$ not a link\n```text\nv = 1\n```\n正文段落\n');
+    // 闭合场景：多行块级公式跨行原样（行为与修复前一致）
+    expect(protectLatexDelimiters('\\[a\nb\\]\n正文\n')).toBe('$$a\nb$$\n正文\n');
+  });
+
   it('CRLF 输入：围栏内 \\( 保留、围栏外转换（\\r 残留不得卡死闭围栏）', () => {
     expect(protectLatexDelimiters('```\r\n\\(x\\)\r\n```\r\n\\(a\\)')).toBe('```\n\\(x\\)\n```\n$a$');
   });
