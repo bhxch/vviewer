@@ -101,6 +101,12 @@ jobs:
       # runner 镜像不再预装（2026-10-14 CI 实证降级 grep），显式安装保通道真实
       - run: sudo apt-get update && sudo apt-get install -y ripgrep
       - run: pnpm --filter web exec playwright install --with-deps chromium
+      # markdown 渲染语料不入库（避免上游 Markpad 许可证问题）：e2e 前经下载脚本拉取
+      # bhxch/Markpad@master 全部 *.md/*.markdown 到 apps/web/e2e/fixtures/markpad-md/
+      # （幂等，失败清单记 manifest）；github.token 提升 API 限流（匿名 60 → 1000 req/h）
+      - run: node tools/fetch-e2e-corpus.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
       # playwright.config 的 webServer 在 CI 下自行启动 vite preview（CI 环境变量内置）
       - run: pnpm --filter web exec playwright test
       # 失败用例 trace 取证（config 的 trace: retain-on-failure）：真实 fetch 时序
