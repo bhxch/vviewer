@@ -15,7 +15,11 @@ TOKEN=probe-token-cl0
 BODY_FILE=$(mktemp)
 
 cleanup() {
-  if [ -n "${WRANGLER_PID:-}" ]; then kill "$WRANGLER_PID" 2>/dev/null || true; fi
+  if [ -n "${WRANGLER_PID:-}" ]; then
+    kill "$WRANGLER_PID" 2>/dev/null || true
+    # npx→wrangler→workerd 链：kill 父不保证子回收，补进程树 TERM 防残留占口
+    pkill -TERM -P "$WRANGLER_PID" 2>/dev/null || true
+  fi
   rm -f .dev.vars "$BODY_FILE"
 }
 trap cleanup EXIT
@@ -31,7 +35,7 @@ WRANGLER_PID=$!
 # 就绪等待（health 免鉴权）
 ready=0
 for _ in $(seq 1 60); do
-  if curl -sf "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then ready=1; break; fi
+  if curl -sf --max-time 2 "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then ready=1; break; fi
   sleep 1
 done
 if [ "$ready" != "1" ]; then
@@ -40,7 +44,7 @@ if [ "$ready" != "1" ]; then
 fi
 
 # Content-Length: 0 形态：-X POST 无 -d（无 body），显式零长头
-code=$(curl -s -o "$BODY_FILE" -w '%{http_code}' -X POST \
+code=$(curl -sS -o "$BODY_FILE" -w '%{http_code}' -X POST \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Length: 0" \
   "http://127.0.0.1:${PORT}/api/mounts")
