@@ -72,14 +72,14 @@ fn resolve_range(raw: RawRange, size: u64) -> Result<Option<(u64, u64)>, ()> {
                 }
             }
         }
-        // 语法面保证形态必为 a-b/a-/-n 之一
+        // 语法面保证形态必为 a-b/a-/-n 之一（`bytes=-` 已在语法面判否）
         (None, None) => return Err(()),
     };
     Ok(Some((start, end - start + 1)))
 }
 
 /// Range 语法解析的中间形态（native RawRange 同构）。
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct RawRange {
     first: Option<u64>,
     last: Option<u64>,
