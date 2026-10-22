@@ -361,19 +361,23 @@ impl Drop for RestartGuard<'_> {
 const RESTART_WINDOW_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// 信号退出语义体（2-7；C4 护栏）：先等重启在飞窗口收口再 kill+exit——
-/// 「旧 child 已出槽（start_and_wait kill_server）、新 child 未入槽（:194 放回）」
+/// 「旧 child 已出槽（start_and_wait kill_server）、新 child 未入槽（:202 放回）」
 /// 的毫秒级窗口内收到 SIGTERM 时，新 sidecar 由本函数在窗口收口（槽位放回）
 /// 后统一回收，不再孤儿化。双检：kill 前后各查一次护栏，信号恰在重启开场
-/// 置位前后到达时复查见位即回到等待。残余窗口（知情接受）：复查通过至
-/// exit(0) 之间重启线程恰好开场的纳秒级交错——原缺陷窗口毫秒级且后果可控
-/// （孤儿 sidecar 存活至机器重启，--port 0 无端口冲突），线性化需第二标志位
-/// + 重启 bail-out，复杂度不成比例。
+/// 置位前后到达时复查见位即回到等待；wait#2 收口（含超时放行分支）后再
+/// kill 一轮（幂等）——复查路径下新 sidecar 已在槽位，在此统一回收。残余
+/// 窗口（知情接受）：末次 kill 通过至 exit(0) 之间重启线程恰好开场的纳秒级
+/// 交错——原缺陷窗口毫秒级且后果可控（孤儿 sidecar 存活至机器重启，
+/// --port 0 无端口冲突），线性化需第二标志位 + 重启 bail-out，复杂度不成比例。
 fn shutdown_now(state: &ServerState) {
     wait_restart_window(&state.restarting, RESTART_WINDOW_TIMEOUT);
     kill_server(state);
     if state.restarting.load(Ordering::Acquire) {
         wait_restart_window(&state.restarting, RESTART_WINDOW_TIMEOUT);
     }
+    // 复查/超时收口后的二次回收（幂等）：复查路径新 sidecar 已入槽，无人回收
+    // 即成孤儿——补收使 doc「窗口收口后统一回收」声明与代码一致
+    kill_server(state);
     std::process::exit(0);
 }
 

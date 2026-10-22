@@ -169,13 +169,14 @@
 
 | 项 | 闭合处 |
 | --- | --- |
-| 占位 tab snapshot 无过滤缺陷（restore 恒再落占位） | bb6a0c2+c9fb35e：restore 查表/dirSnap/exists 四处剥 `placeholder:` 前缀，来源重建即复活（文件+目录条目）；WSX-13 RED→GREEN + WSX-14 单层前缀幂等锚。维持现状注记：断连期真 id 目录条目仍丢弃（占位化不产出目录条目，pre-existing）；`TabSnapshot.kind` 对前缀误判无消费面 |
+| 占位 tab snapshot 无过滤缺陷（restore 恒再落占位） | bb6a0c2+c9fb35e：restore 查表（dirSnap×3）/exists/rebuilt.get/alignActiveOfGroup/addPlaceholderTab 七处剥 `placeholder:` 前缀，来源重建即复活（文件+目录条目）；WSX-13 RED→GREEN + WSX-14 单层前缀幂等锚。维持现状注记：断连期真 id 目录条目仍丢弃（占位化不产出目录条目，pre-existing）；`TabSnapshot.kind` 对前缀误判无消费面 |
 | worker 416 前置 parity | bb2c2ef：http.rs 拆分 syntax/resolve 对齐 native 拆分 + dispatch locate 前置语法闸（should_pre_reject_range 纯判定可锚）；416 unbounded `bytes */*` |
 | config 五面手工 Debug 字段数锚测 | af61060：字段全集字面量（编译期）+清单长度+Debug 输出逐字段名三道防线（config.rs 三面 + mounts.rs 两面） |
 | desktop SIGTERM×重启孤儿窄窗 | dde0c6a：restarting AtomicBool 护栏（RAII 清位）+ shutdown_now 双检等待；纳秒级残余交错知情注记在案 |
 | workerd Content-Length: 0 POST 实证 | c7f5e36：探针脚本落库挂 deploy-worker workflow 首跑（continue-on-error 非门禁）——**实证结果待 CI 窗口，回写于此** |
 
 - desktop RunEvent::Exit 路径同类出槽窄窗（apps/desktop/src-tauri/src/main.rs:126 kill_server 直调：窗口关闭恰落在重启在飞的出槽毫秒窗时新 child 无人回收）——Task 4 评审新增发现（2026-10-22）：既有窗口非本批引入，信号面（ctrlc）已由 C4 restarting 护栏覆盖，Exit 面可复用同款护栏修法，挂账后续清偿。
+- desktop/对齐边缘：alignActiveOfGroup 对「前缀快照 + 来源仍不可达」组合不命中（占位 id 与双前缀/裸 id 匹配臂均错开，修复前双前缀碰巧对齐）——终审 M-4（2026-10-22）：全错误卡退化场景的活动 tab 对齐损失，edge-of-edge，随下次该函数触碰面顺修。
 
 ## 三、观察/校准项（等待 CI 首跑或实机，非代码债）
 

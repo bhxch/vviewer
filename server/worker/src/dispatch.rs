@@ -167,8 +167,9 @@ fn query_tree(url: &worker::Url) -> Result<(Option<String>, usize), worker::Erro
     Ok((path, root.unwrap_or(0)))
 }
 
-/// `GET /api/file`：定位（stat/目录判定前置）→ Range 解析（HTTP 语义，本层，
-/// 与 native routes/file.rs 同序同语义）→ 窗读取与响应组装（core）→ 流直通。
+/// `GET /api/file`：头读取/If-Range → Range 语法 416 前置闸（should_pre_reject_range，
+/// 定位前拒绝非法语法，size 未知形态 `bytes */*`）→ 定位 → Range 定界 →
+/// 窗读取与响应组装（core）→ 流直通。
 async fn file(req: Request, state: &'static WorkerState) -> worker::Result<Response> {
     let url = req.url()?;
     let (p, root) = query_tree(&url)?;
