@@ -4,7 +4,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 
 /**
- * workspace 富化域恢复链/错误语义面（WSX-07~12，编号对照
+ * workspace 富化域恢复链/错误语义面（WSX-07~14，编号对照
  * docs/e2e/workspace-enrichment.md 第 2/3 节；第二轮富化 default 套件）。
  * 与既有锚点分工：
  * - WS-05/06/07 只锚 basePath 源、根 0 源 pinned、单文件源的恢复；WSX-07 补
@@ -15,7 +15,9 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * - MRF-07 只走通多根来源创建 happy-path；WSX-09/10 补 RemoteSourceModal 的
  *   断线/tree 越界 400/token 会话失效三种错误面（上轮 MRF 缺口 d）；
  * - WS-01 只锚删除活动组与合法重命名；WSX-11 补删最后一组兜底/重名允许/空名忽略，
- *   WSX-12 补三组切换后快照组序保序与逐组 tab 归属还原（WS-04 扩展面）。
+ *   WSX-12 补三组切换后快照组序保序与逐组 tab 归属还原（WS-04 扩展面）；
+ * - WSX-13/14 补占位前缀快照（snapshot 写侧无过滤的历史产物）restore 查表剥
+ *   prefix 后的复活面与单层前缀幂等锚（终审新增候选 C1，编号对照同上）。
  *
  * 通道：目录/文件注入走 drop（t-shell SHELL-03① 先例）；远端用 spec 内假双根
  * vviewer 服务器（t-workspace startFakeServer 扩展：health roots/rootPaths、
@@ -791,4 +793,160 @@ test('WSX-12：三组切换后刷新——快照组序保序、活动组还原�
     timeout: 15_000
   });
   await expect(page.locator('.vv-error-card')).toContainText('需要重新打开', { timeout: 15_000 });
+});
+
+// ---------------------------------------------------------------- WSX-13
+
+test('WSX-13: 占位前缀快照在来源重建后复活（文件+目录条目，C1）', async ({ page }) => {
+  const fake = await startWsxFakeServer({
+    rootPaths: ['/r0'],
+    files: { 0: { 'hello.txt': '占位复活验证内容' } }
+  });
+  await page.goto('/');
+  await connectForm(page, fake.base);
+  await openDrawerIfNarrow(page);
+  await page.locator('.vv-tree-row', { hasText: 'hello.txt' }).click();
+  await expect(page.locator('.vv-tab.active', { hasText: 'hello.txt' })).toBeVisible();
+  await waitSnapshotTabs(page, ['hello.txt']);
+
+  // 构造缺陷态 = snapshot() 无过滤缺陷的真实产物形态：存活快照的文件 tab
+  // storeId 全部加 placeholder: 前缀 + 注入一条占位目录条目（undo 栈窄径产物）
+  await page.evaluate(() => {
+    return new Promise<void>((resolve) => {
+      const open = indexedDB.open('vviewer');
+      open.onsuccess = () => {
+        const db = open.result;
+        const tx = db.transaction('kv', 'readwrite');
+        const get = tx.objectStore('kv').get('workspaces');
+        get.onsuccess = () => {
+          const snap = get.result as {
+            workspaces: {
+              sources: { storeId: string }[];
+              tabs: {
+                id: string;
+                storeId: string;
+                storeLabel?: string;
+                path: string;
+                name: string;
+                kind?: string;
+                scrollTop?: number;
+                active?: boolean;
+              }[];
+            }[];
+          };
+          for (const w of snap.workspaces) {
+            for (const t of w.tabs) {
+              if (t.path !== '' && !t.storeId.startsWith('placeholder:')) {
+                t.storeId = `placeholder:${t.storeId}`;
+              }
+            }
+            const srcId = w.sources[0]?.storeId;
+            if (srcId !== undefined) {
+              w.tabs.push({
+                id: 't9001',
+                storeId: `placeholder:${srcId}`,
+                storeLabel: '占位目录',
+                path: '',
+                name: 'r0',
+                kind: 'rename-only',
+                scrollTop: 0,
+                active: false
+              });
+            }
+          }
+          tx.objectStore('kv').put(snap, 'workspaces');
+          tx.oncomplete = () => { db.close(); resolve(); };
+        };
+      };
+    });
+  });
+
+  // 服务器存活 → 来源可重建；修复前前缀 tab 查表 miss 恒再落占位（RED）
+  await page.reload();
+  await expect(page.locator('.vv-tab.active', { hasText: 'hello.txt' })).toBeVisible();
+  // 文件 tab 复活：内容渲染，非错误卡片
+  await expect(page.locator('.vv-error-card')).toHaveCount(0);
+  await expect(page.getByText('占位复活验证内容')).toBeVisible();
+  // 目录条目复活：真实目录 tab 在列（修复前整条丢弃）——快照侧断言持久化形态
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        return new Promise<string[]>((resolve) => {
+          const open = indexedDB.open('vviewer');
+          open.onsuccess = () => {
+            const db = open.result;
+            const get = db.transaction('kv', 'readonly').objectStore('kv').get('workspaces');
+            get.onsuccess = () => {
+              db.close();
+              const snap = get.result as { workspaces: { tabs: { path: string; storeId: string }[] }[] };
+              const tabs = snap.workspaces.flatMap((w) => w.tabs);
+              resolve(tabs.filter((t) => t.path === '').map((t) => t.storeId));
+            };
+          };
+        });
+      })
+    )
+    .toEqual([expect.stringMatching(/^remote:/)]); // 目录条目复活且 storeId 无前缀
+});
+
+// ---------------------------------------------------------------- WSX-14
+
+test('WSX-14: 占位快照在来源仍不可达时保持单层前缀（幂等，C1）', async ({ page }) => {
+  const fake = await startWsxFakeServer({
+    rootPaths: ['/r0'],
+    files: { 0: { 'hello.txt': 'x' } }
+  });
+  await page.goto('/');
+  await connectForm(page, fake.base);
+  await openDrawerIfNarrow(page);
+  await page.locator('.vv-tree-row', { hasText: 'hello.txt' }).click();
+  await waitSnapshotTabs(page, ['hello.txt']);
+  // 同 WSX-13 加前缀后，断连态 reload（health 探测被浏览器层掐断 → 来源不重建）
+  await page.evaluate(() => {
+    return new Promise<void>((resolve) => {
+      const open = indexedDB.open('vviewer');
+      open.onsuccess = () => {
+        const db = open.result;
+        const tx = db.transaction('kv', 'readwrite');
+        const get = tx.objectStore('kv').get('workspaces');
+        get.onsuccess = () => {
+          const snap = get.result as {
+            workspaces: { tabs: { storeId: string; path: string }[] }[];
+          };
+          for (const w of snap.workspaces) {
+            for (const t of w.tabs) {
+              if (t.path !== '' && !t.storeId.startsWith('placeholder:')) {
+                t.storeId = `placeholder:${t.storeId}`;
+              }
+            }
+          }
+          tx.objectStore('kv').put(snap, 'workspaces');
+          tx.oncomplete = () => { db.close(); resolve(); };
+        };
+      };
+    });
+  });
+  await page.route('**/api/health*', (route) => route.abort());
+  await page.reload();
+  // 落占位（错误卡片在场）且快照 storeId 仍为单层前缀（addPlaceholder 的
+  // originStoreIdOf 防线：不得叠加成 placeholder:placeholder:）
+  await expect(page.locator('.vv-error-card').first()).toBeVisible();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        return new Promise<string[]>((resolve) => {
+          const open = indexedDB.open('vviewer');
+          open.onsuccess = () => {
+            const db = open.result;
+            const get = db.transaction('kv', 'readonly').objectStore('kv').get('workspaces');
+            get.onsuccess = () => {
+              db.close();
+              const snap = get.result as { workspaces: { tabs: { storeId: string }[] }[] };
+              resolve(snap.workspaces.flatMap((w) => w.tabs.map((t) => t.storeId)));
+            };
+          };
+        });
+      })
+    )
+    .toEqual([expect.stringMatching(/^placeholder:(?!placeholder:).*$/)]);
 });

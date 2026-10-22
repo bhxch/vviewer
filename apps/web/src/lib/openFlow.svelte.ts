@@ -95,8 +95,9 @@ function snapshot(t: Tab): TabSnapshot {
 /**
  * 占位 storeId（`placeholder:<原 storeId>`）剥回原 id：撤销重建占位 tab 时不叠加前缀
  * （关闭的占位 tab 快照 storeId 已带 placeholder: 前缀，直接再包一层会得到双前缀 id）。
+ * C1：AppShell.restore 的查表/dirSnap/exists/落占位四处同样消费（终审新增候选）。
  */
-function originStoreIdOf(snap: TabSnapshot): string {
+export function originStoreIdOf(snap: TabSnapshot): string {
   return snap.storeId.startsWith('placeholder:')
     ? snap.storeId.slice('placeholder:'.length)
     : snap.storeId;

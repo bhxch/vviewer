@@ -26,6 +26,7 @@
     createDirectMountStore,
     hasUserActivity,
     loadLastServer,
+    originStoreIdOf,
     registryVersion,
     registerStore,
     reopenClosed,
@@ -562,7 +563,7 @@
             if (dirHandle !== null && `localfs:${dirHandle.name}` === src.storeId) {
               // M-5：pinned 目录 tab 读回——目录条目不进文件 tab 循环，pinned 须
               // 在来源重建时经 addDirTabForRestore 一并传入
-              const dirSnap = wsItem.tabs.find((t) => t.path === '' && t.storeId === src.storeId);
+              const dirSnap = wsItem.tabs.find((t) => t.path === '' && originStoreIdOf(t) === src.storeId);
               const store = await tryRestoreDirectory(dirHandle, wsItem.id, {
                 pinned: dirSnap?.pinned === true
               });
@@ -589,7 +590,7 @@
               // M-5：快照有该来源的目录条目（path===''）则按快照忠实恢复目录 tab
               //（含 pinned 读回）——远端重连默认不弹树（BUG-08）不变，用户刷新前
               // 开着目录 tab 才重建
-              const dirSnap = wsItem.tabs.find((t) => t.path === '' && t.storeId === src.storeId);
+              const dirSnap = wsItem.tabs.find((t) => t.path === '' && originStoreIdOf(t) === src.storeId);
               if (dirSnap !== undefined) {
                 addDirTabForRestore(wsItem.id, store, { pinned: dirSnap.pinned === true });
               }
@@ -612,7 +613,7 @@
               if (store !== null) {
                 registerStore(store); // 恢复链入册：不依赖目录 tab 的 addTab 时序（registerStore doc）
                 rebuilt.set(src.storeId, store);
-                const dirSnap = wsItem.tabs.find((t) => t.path === '' && t.storeId === src.storeId);
+                const dirSnap = wsItem.tabs.find((t) => t.path === '' && originStoreIdOf(t) === src.storeId);
                 if (dirSnap !== undefined) {
                   addDirTabForRestore(wsItem.id, store, { pinned: dirSnap.pinned === true });
                 }
@@ -623,6 +624,9 @@
         // —— 再逐 tab 恢复；目录条目（path===''）已由来源重建（M-5：remote 侧
         // 快照有目录条目才重建），跳过防每次启动累积一个（与旧 restore 同款）。
         // 来源未重建成功的 tab 落占位 ——
+        // C1：占位前缀快照（snapshot() 无过滤的历史产物/断连刷新产物）查表前剥
+        // prefix——来源重建成功即内容/目录复活；仍 miss 落占位（addPlaceholderTab
+        // 内部 originStoreIdOf 防双前缀，幂等）
         for (const t of wsItem.tabs) {
           if (t.path === '') continue;
           // merge 路径快点击窗口查重：merging 判定到本循环之间有权限弹窗/重连
@@ -631,9 +635,9 @@
           // 跳过，快照条目让位于用户已开 tab（merge 契约：用户已建数据为先）
           const exists = tabStore
             .tabsOf(wsItem.id)
-            .some((t2) => t2.source.path === t.path && t2.source.storeId === t.storeId);
+            .some((t2) => t2.source.path === t.path && t2.source.storeId === originStoreIdOf(t));
           if (exists) continue;
-          const store = rebuilt.get(t.storeId);
+          const store = rebuilt.get(originStoreIdOf(t));
           if (store !== undefined) {
             // 项 3：size 读回（与运行期 addTab 同参位）——恢复的远端文件 tab 免 head
             // 探测 + size 未知路径；旧快照无该字段 → undefined → null（既有探测路径）
@@ -739,7 +743,9 @@
       ? `服务器 ${host} 的文件，重连后可恢复（会话不保留服务器文件内容）`
       : '会话中的本地文件需要重新打开（浏览器不保留文件内容）';
     const store: TreeStore = {
-      id: `placeholder:${t.storeId}`,
+      // C1：快照 storeId 已带 placeholder: 前缀（断连刷新产物）时剥后再包——
+      // 与 openFlow.addPlaceholder 的 originStoreIdOf 防线同款，幂等不叠双前缀
+      id: `placeholder:${originStoreIdOf(t)}`,
       displayName: () => t.storeLabel,
       listChildren: async () => [],
       read: async () => {
