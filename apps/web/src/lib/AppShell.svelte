@@ -715,13 +715,17 @@
 
   /** 组内活动 tab 对齐：addTab 总是激活新 tab，恢复完一组后按快照 activeTabId 对齐。
    * 恢复的 tab 不保留快照 id（新 id 顺延），按 path+storeId 匹配；占位来源的
-   * storeId 为 placeholder:${快照 storeId}，需一并匹配（沿袭旧 alignActive）。 */
+   * storeId 为 placeholder:${快照 storeId}，需一并匹配（沿袭旧 alignActive）；
+   * C1：前缀快照（want.storeId 带 placeholder:）复活为真实 tab 时 source.storeId
+   * 已剥成原 id，须按 originStoreIdOf(want) 再匹配一路，否则活动恒落组末位。 */
   function alignActiveOfGroup(wsItem: WorkspaceSnapshotItem): void {
     const want = wsItem.tabs.find((t) => t.id === wsItem.activeTabId);
     if (!want) return;
     const match = tabStore.tabsOf(wsItem.id).find(
       (t) => t.source.path === want.path
-        && (t.source.storeId === want.storeId || t.source.storeId === `placeholder:${want.storeId}`)
+        && (t.source.storeId === want.storeId ||
+            t.source.storeId === `placeholder:${want.storeId}` ||
+            t.source.storeId === originStoreIdOf(want))
     );
     if (match) activateTab(match.id);
   }

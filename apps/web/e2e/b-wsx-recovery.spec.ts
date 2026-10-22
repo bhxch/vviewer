@@ -800,14 +800,23 @@ test('WSX-12：三组切换后刷新——快照组序保序、活动组还原�
 test('WSX-13: 占位前缀快照在来源重建后复活（文件+目录条目，C1）', async ({ page }) => {
   const fake = await startWsxFakeServer({
     rootPaths: ['/r0'],
-    files: { 0: { 'hello.txt': '占位复活验证内容' } }
+    files: { 0: { 'hello.txt': '占位复活验证内容', 'second.txt': '活动锚对照内容' } }
   });
   await page.goto('/');
   await connectForm(page, fake.base);
   await openDrawerIfNarrow(page);
   await page.locator('.vv-tree-row', { hasText: 'hello.txt' }).click();
   await expect(page.locator('.vv-tab.active', { hasText: 'hello.txt' })).toBeVisible();
-  await waitSnapshotTabs(page, ['hello.txt']);
+  // 第二枚文件 tab + 回点 hello.txt 锚活动：快照 tab 序 [hello.txt, second.txt]、
+  // activeTabId=hello.txt——多 tab 下「复活后活动 tab 还原为快照记录」才有判别力
+  //（对齐缺失时恢复循环按序 addTab，活动恒落组末位的 second.txt）。
+  // 二次行点击前幂等重开抽屉：首次行点击后抽屉已自动收起（BUG-61 通道，桌面 no-op）
+  await openDrawerIfNarrow(page);
+  await page.locator('.vv-tree-row', { hasText: 'second.txt' }).click();
+  await expect(page.locator('.vv-tab.active', { hasText: 'second.txt' })).toBeVisible();
+  await page.locator('.vv-tab', { hasText: 'hello.txt' }).click();
+  await expect(page.locator('.vv-tab.active', { hasText: 'hello.txt' })).toBeVisible();
+  await waitSnapshotTabs(page, ['hello.txt', 'second.txt']);
 
   // 构造缺陷态 = snapshot() 无过滤缺陷的真实产物形态：存活快照的文件 tab
   // storeId 全部加 placeholder: 前缀 + 注入一条占位目录条目（undo 栈窄径产物）
@@ -863,6 +872,8 @@ test('WSX-13: 占位前缀快照在来源重建后复活（文件+目录条目�
 
   // 服务器存活 → 来源可重建；修复前前缀 tab 查表 miss 恒再落占位（RED）
   await page.reload();
+  // 活动 tab 还原 = 快照记录的 hello.txt（alignActiveOfGroup 按快照锚定）：复活 tab
+  // 的 source.storeId 已剥成原 id，对齐缺第三匹配分支时活动恒落组末位 second.txt
   await expect(page.locator('.vv-tab.active', { hasText: 'hello.txt' })).toBeVisible();
   // 文件 tab 复活：内容渲染，非错误卡片
   await expect(page.locator('.vv-error-card')).toHaveCount(0);

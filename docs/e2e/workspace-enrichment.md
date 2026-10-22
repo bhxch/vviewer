@@ -41,7 +41,7 @@
 | WSX-10 | default 套件；假服务器 C（tree/ticket 需 Bearer，token 运行期可轮换） | ① 以 `wsx-tok-1` 连接（访问令牌表单）→ 树可见；② 服务端 token 轮换为 `wsx-tok-2`；③ 新建工作区 → 后端路径…（health 免鉴权过 → 单根直进浏览） | ③ `.vv-remotesrc-error` 含「服务器请求失败: HTTP 401: invalid token」（状态码 + 服务端错误体 detail 透传，RemoteSourceModal.svelte:133-141）；「重试」在且重试后仍 401（凭据失效持续性）；Esc 退出后应用不受伤（TopBar 可见）——token 错误卡片语义不阻断会话 | 上轮 MRF 缺口 d（token 错误语义） |
 | WSX-11 | default 套件；纯前端（drop 注入单文件 tab） | ① drop `wsx-a.txt` 入默认组 → 删除最后一组「默认」（confirm 接受）；② 新建「组乙」+ drop `wsx-b.txt` → 切回默认 + drop `wsx-a2.txt`；③ 重命名默认 → 「组乙」（与既有组重名）；④ 切到另一「组乙」行；⑤ 对活动组重命名为空串并确认 | ① 新「默认」重建为唯一活动组（至少一个不变式，`workspaceStore.remove` 删最后一个分支）且 TabBar 清空（连带关 tab）；③ 切换器出现两行「组乙」（重名允许、id 为身份）、活动组 tab（`wsx-a2.txt`）仍在（改名不并组）；④ 切到的行 TabBar 为 `wsx-b.txt`（重名行身份独立、tab 各归各组）；⑤ 表单关闭、名称保持「组乙」不变（TopBar commitRename 空名忽略） | WS/TA 邻接边界（WS-01 只锚删除活动组与合法重命名） |
 | WSX-12 | default 套件；纯前端；三组各 drop 一枚文件 tab（默认/`wsx-d0`、甲组/`wsx-d1`、乙组/`wsx-d2`）；切换顺序 甲→默认→乙（活动=乙组） | ① 直读 IndexedDB `workspaces` 快照（组序/活动 id/tabs 归属）；② `reload()`；③ 读恢复后切换器组序与活动组；④ 逐组切换读组内活动 tab | ① 快照组序 = 登记序 [默认, 甲组, 乙组]、activeId=乙组、三枚 tab 各归各组（多组切换后快照保序——replaceAll 按 `list` 序写、activeId 独立）；③ 恢复后活动组=乙组（快照 activeId 还原）、下拉组序与快照一致（插入序不因切换重排）；④ 乙组活动 tab=`wsx-d2`（占位错误卡「需要重新打开」——single 源不跨刷新）、切甲组=`wsx-d1`、切默认=`wsx-d0`（tab→组归属逐组还原） | WS-04 扩展面（三组 + 保序 + 逐组归属） |
-| WSX-13 | default 套件；假单根服务器（rootPaths=`['/r0']`、`hello.txt`）；快照注入缺陷形态（IndexedDB 直写：文件 tab storeId 加 `placeholder:` 前缀 + 占位目录条目 `path===''`/前缀 storeId——`snapshot()` 无过滤的真实产物） | ① 连接 → 树中打开 `hello.txt` → 快照落盘；② 注入前缀化 storeId 与占位目录条目；③ `reload()`（服务器存活） | ③ 文件 tab 复活：内容渲染、`.vv-error-card` 恒 0；目录条目复活：快照 `path===''` 条目 storeId 无前缀（恰一条 `^remote:`——dirSnap/查表剥前缀命中，真实目录 tab 重建） | 终审新增候选 C1（restore 查表剥占位前缀） |
+| WSX-13 | default 套件；假单根服务器（rootPaths=`['/r0']`、`hello.txt`+`second.txt`）；快照注入缺陷形态（IndexedDB 直写：文件 tab storeId 加 `placeholder:` 前缀 + 占位目录条目 `path===''`/前缀 storeId——`snapshot()` 无过滤的真实产物）；活动锚 = 回点 `hello.txt`（tab 序 [hello, second]、activeTabId=hello） | ① 连接 → 树中开 `hello.txt`/`second.txt` → 回点 hello 锚活动 → 快照落盘；② 注入前缀化 storeId 与占位目录条目；③ `reload()`（服务器存活） | ③ 文件 tab 复活：内容渲染、`.vv-error-card` 恒 0；活动 tab 还原 = 快照记录的 `hello.txt`（alignActiveOfGroup 剥前缀匹配路，非恢复循环组末位）；目录条目复活：快照 `path===''` 条目 storeId 无前缀（恰一条 `^remote:`——dirSnap/查表剥前缀命中，真实目录 tab 重建） | 终审新增候选 C1（restore 查表剥占位前缀） |
 | WSX-14 | 同 WSX-13 前置；`page.route('**/api/health*')` 掐断 health（来源不可达，BUG-08 通道） | ① 同 WSX-13 注入前缀化 storeId（不注入目录条目）；② `reload()` | ② 落占位（`.vv-error-card` 在场）且快照 storeId 保持单层前缀（`^placeholder:(?!placeholder:)`——addPlaceholderTab 剥前缀防线，不叠双前缀的幂等锚） | 同 C1（幂等护栏面） |
 
 ## 3. 关联缺陷的验收行为
@@ -93,7 +93,7 @@
 **缺陷现状**：占位 tab 的 `placeholder:` 前缀 storeId 随 `snapshot()` 原样入快照（写侧忠实记录，不改）；restore 读侧 rebuilt 查表/dirSnap 匹配/exists 查重按原始 id 逐字比较，前缀 id 必 miss → 断连刷新过的会话恢复后文件 tab 恒再落占位、占位目录条目（undo 栈窄径产出：close 目录 tab → store 失活 → reopenClosed 落 addPlaceholder 得 `path===''`）整条丢弃。回归形态：前缀快照在服务器存活时内容/目录不复活；来源不可达时落占位叠加双前缀（`placeholder:placeholder:`，逐次刷新持续劣化）。
 
 **修复后应有行为（回归验收）**：
-1. 来源重建成功：前缀快照的文件 tab 与占位目录条目双双复活——内容渲染、目录 tab 以无前缀 `remote:` storeId 落快照（WSX-13）。
+1. 来源重建成功：前缀快照的文件 tab 与占位目录条目双双复活——内容渲染、目录 tab 以无前缀 `remote:` storeId 落快照、多 tab 会话的活动 tab 还原为快照记录（对齐按剥前缀 id 匹配）（WSX-13）。
 2. 来源不可达：落占位且快照 storeId 保持单层前缀不叠加（restore 侧 addPlaceholderTab 与 openFlow.addPlaceholder 同款 `originStoreIdOf` 防线，幂等）（WSX-14）。
 
 ## 4. 环境与数据
