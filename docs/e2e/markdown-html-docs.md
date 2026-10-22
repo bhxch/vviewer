@@ -97,3 +97,59 @@
 - `external.example.com` 为不可解析保留域名，请求 DNS 失败、无状态码；验收判据是「请求被浏览器实际发起」（网络层出现该 GET，且时序上紧跟该页 `/api/file` 请求之后），不是响应状态码。
 - 沙箱形态（偏差 #1，已裁决不计缺陷）：实现为 `sandbox="allow-same-origin"`（无 allow-scripts）而非 opaque origin，父页面可读 iframe.contentDocument——MD-10/MD-11 的 eval 统计手法依赖该形态。
 - MD-05 的判 pass 口径：hljs 兜底属预期降级链下游；本地 tree-sitter 未生效不在此重复计缺陷，验收归属 BUG-06（见第 3 节）。
+
+## 5. syntax-deep 补强场景（SY-01~SY-11，2026-10-22 第二轮 default 套件）
+
+扩展语法（KaTeX 与扩展语法域）的负路径、边界与组合交互补强，载体 `apps/web/e2e/b-syntax-deep.spec.ts`。与第 2 节分工：MD-02/MD-03/MD-08 及 b-md-syntax 已锚 happy path，本表只补缺口；夹具全部 spec 内联构造（不落 samples/，避免扰动 b-md-syntax 依赖 `samples/md/syntax-sampler.md` 的计数断言环境）。通道与 b-md-syntax 组一致（injectDir + openTreeFile，chromium/mobile 双 project）。时序契约：renderMarkdown 全管线 await 完成才挂载，`.vv-markdown` 可见即 enrich + 五步管线就绪，计数 0 断言无假绿窗口。
+
+| 编号 | 场景 | 期望（用户可见结果） | 契约依据 |
+| --- | --- | --- | --- |
+| SY-01 | callout 折叠后缀保守解析：`[!note]+x`（后缀非空白）与 `[!note] -5 度`（正文负号） | 均仍转 note 卡片但不带 foldable/collapsed，原文留在标题；点击标题无折叠切换（内容恒可见） | enrich convertCallouts 折叠后缀须 `]` 后隔空白紧跟 `+`/`-` 且后随空白/行尾，未知写法从保守 |
+| SY-02 | 未知类型 callout 兜底（MD-02 折叠组合面）：`[!custom]` 空标题 | 转 `.markdown-alert-custom` 卡片、标题回退类型大写名 `Custom`、内容区正文完好、应用不崩 | enrich 未知类型仍转卡片（默认样式类 + 大写名回退） |
+| SY-03 | 折叠方向与多卡独立：`[!warning]+` 默认展开可点击收起再展开；相邻 `[!tip]-` 保持收起 | + 卡初始展开 → 点击收起 → 再点复原；- 卡全程收起不受牵连（toggle 只作用自身卡片容器） | enrich 标题 click 监听按 container 切换 collapsed |
+| SY-04 | 折叠 callout 标题内 wikilink 锚跳组合：`> [!note]- 折叠标题含 [[#落点]]` | 标题内 `[[#落点]]` 同获改写为 a（href 经 remapHeadingHashLinks 收口 `#user-content-落点`）；点击按链接语义导航（hash 变化 + 落点 heading 入视口）且折叠态保持（不触发标题折叠切换） | enrich 先 callout 后 wikilink 的注册顺序 + 标题 click 对 `closest('a')` 的豁免 |
+| SY-05 | wikilink 上下文混排：列表项 `[[#列表落点]]` 可点；引用块内 `[[Ref.md]]` 降级；已有链接文本内 `[[#内部]]` 字面 | 列表内 a[data-wikilink] href 收口前缀且点击入视口；引用块内 `.md-wikilink-dead`（title「跨文件 wikilink 不支持」）且块内无 a；链接内字面保留不嵌套造链接（A 祖先豁免） | enrich convertWikilinks 跳过 PRE/CODE/SCRIPT/STYLE/A 祖先 + 降级 span title 注记 |
+| SY-06 | 空行内脚注边界：`前^[]后 与 前^[ ]后` | 照产 sup.footnote-ref（[1]/[2] 并轨编号）+ section.footnotes 两个空尾注条目（仅回链，`^[]` 字面不泄漏）——markdown-it-footnote 4.0 内建现状，与 comrak 字面形态的双端分歧按 vitest 等价面口径各锁现状 | markdownEngine.test「空内容 ^[]」探针的 e2e 面 |
+| SY-07 | 金额 $ 与转义 \$ 不触发公式：`$100 与 $200`、`成本 \$5。` 与真公式 `$E = mc^2$` 同段 | 金额字面全部可见（开/闭定界符紧邻空白不配对）；`\$` 转义消费为字面 `$`；全文恰一处行内 .katex、无 display 形态 | pipeline scanMathSegments 行内定界符空白规则 |
+| SY-08 | mhchem 块级组合 + 非法段：`$$\ce{SO4^2- + Ba^2+ -> BaSO4 v}$$`、`\[ \ce{2H2 + O2 -> 2H2O} \]`、`$\frac{1}{2$` | 双形态各产 .katex-display（`\[..\]` 经 protectLatexDelimiters 改写为 $$ 词汇）；非法公式整段原文保留、同文档合法段照常、不崩；`.katex` computed font-family 含 KaTeX（katex.min.css 动态加载排印生效，0d767ae） | pipeline katex 步 throwOnError 单节点容错 + katex.min.css 惰性加载 |
+| SY-09 | 代码豁免面组合：```text 围栏内 `==高亮==`/`[[#锚]]`/`$E=mc^2$`/`> [!note]-`/`\[ 非数学 \]` + 行内码同款 | 围栏与行内码内全部字面保留；文档级 mark/[data-wikilink]/.markdown-alert/.katex 计数全零；徽标取围栏原始语言 `text` | protectLatexDelimiters fence 透传 + enrich/katex 的 PRE/CODE 祖先跳过 |
+| SY-10 | 无语言代码块徽标与复制（MD-08 无语言变体，154c0c1 顶栏迁移后回归）：``` 无语言围栏 | 徽标显示「代码」（data-md-lang 空串回退，hljs 侦测类不污染取词源）；复制钮 hook clipboard.writeText，写入内容与 code textContent 去尾换行逐字符一致，反馈「已复制」 | pipeline copyCode 徽标取词源 data-md-lang + 复制语义 |
+| SY-11 | CRLF 回归锚：全 `\r\n` 行距文档含 `\[ E = h\nu \]` 块级、```rust 围栏、围栏后 `\(\alpha\)` 行内 | 围栏正常闭合（rust 徽标在、代码不含围栏后行）；围栏后行内数学渲染（全文 .katex×2、display×1）；首行标题完好——修复前 `\r` 卡死闭围栏判定会吞掉后半文档 | protectLatexDelimiters 入口 `\r\n?→\n` 归一化（1b3f43d 服务端对偶同语义的前端回归锚） |
+
+> 注：SY-08 的 katex 步容错是「文本节点」粒度——同一节点内合法与非法公式混排时合法部分一并保留原文（scanMathSegments 分段后整体 try/catch）；场景构造按独立段落规避，该粒度属设计内行为不计缺陷。
+
+## 6. lightbox-export-deep 补强场景（LE-01~LE-12，2026-10-22 第三轮 default 套件）
+
+灯箱与导出域的边界、负路径、组合交互与性能锚补强，载体 `apps/web/e2e/b-md-lightbox-export-deep.spec.ts`。与第 2 节及 b-md-lightbox / b-md-export 主路径分工：开-导航-关、缩放步进、平移、导出内容全断言、句柄门控（txt）、PDF iframe 模板已锚，本表只补缺口（5-2/5-4/5-5 修复面的 e2e 锚、a11y 基线、限幅边界、kroki img 画廊、T1 关闭语义负路径、移动端按钮链、媒体组合、暗色导出、非 markdown 视图族、时长锚）。夹具全部 spec 内联构造（同第 5 节惯例，不新增 samples/，既有采样经 readFileSync 复用不修改）；kroki 场景 settings 直写 krokiHost + page.route 伺服（b-md-diagrams 同款通道）。
+
+| 编号 | 场景 | 期望（用户可见结果） | 契约依据 |
+| --- | --- | --- | --- |
+| LE-01 | 同 src 元素身份定位：两张同 src 图点第二张/第一张 | 点第二张开 2/2、点第一张开 1/2（修复前按 src 查找恒 0，两图都开成 1/2） | lightbox openLightbox 元素引用 findIndex（itemEls 副表，5-5） |
+| LE-02 | 图表 svg 点击直开灯箱 | 点 `.md-diagram-view svg` 直开、计数 4/4 落末位、svg 宿主显示、img 克隆隐藏 | runLightbox 对 svg 同款接线（5-4，画廊共集） |
+| LE-03 | 输入守卫：raw HTML `<input>` 聚焦按 Esc/←→ | overlay 不关、计数不变；焦点移出后 Esc 恢复关闭 | lightbox onKey 输入控件直通守卫（5-2） |
+| LE-04 | a11y 基线：对话框语义与焦点管理 | role=dialog、aria-modal=true、开启后 activeElement=overlay、计数 aria-live=polite、Esc 关闭时对触发图调用 focus()（原型包装 spy，img 无 tabindex 不可经 activeElement 观察） | buildOverlay 5-3 基线 + removeLightboxOverlay 焦点还原 |
+| LE-05 | 缩放限幅边界：+ 连按/− 连按/=/f/滚轮 | + ×10 顶格 scale(8) 后不再增长、− ×17 底格 scale(0.2) 后不再缩小、= 同 +、f 复位 1:1、滚轮上/下放大缩小 | clampZoom(0.2–8) + ZOOM_STEP 键盘/滚轮同规 |
+| LE-06 | kroki img 形态画廊条目导航 | 画廊 2 条（本地图 + kroki img），next 到 kroki 条目且克隆 src 为 kroki URL | collectGallery 收所有 img（含 .md-diagram-view 内），kroki img 管线后置创建不经净化拦截 |
+| LE-07 | 点击关闭语义负路径 | 点克隆图/next/放大钮均不关（控制件生效），点 stage 空白关 | overlay click 仅 target=overlay/stage 关（T1 裁决） |
+| LE-08 | 灯箱全按钮链（移动端触达基准） | next 三步到图表条目、放大钮 scale(1.25)、重置钮 1:1、关闭钮摘除 overlay，全程无键盘 | bar 按钮组 aria-label（上一张/下一张/放大/缩小/重置视图/关闭） |
+| LE-09 | 媒体占位组合：不入画廊 + 单张收敛 + 导出降级 | video/audio 占位不进画廊（唯一 img 单张：prev/next/count 全 hidden、计数仍 1/1）；导出产物无 video/audio、媒体降级为源地址超链接（文本取 aria-label）、图片 data URI 保留 | enrich 媒体替换 + collectGallery 仅 img/svg + demoteMediaToLinks（MD-13 导出面，spec 非目标项行为锚） |
+| LE-10 | 暗色主题导出 WYSIWYG | 亮色导出根双标 light；设置中心切暗后导出根双标 dark（data-vv-mode + data-theme-mode），主题变量定义形态注入恒在，KaTeX 20 woff2 两段均嵌 | stampMode 双属性（8b7732a 暗色提权回归）+ currentStyleCss 注入链 |
+| LE-11 | 非 markdown 视图族句柄清空 | 图片 tab / 二进制 hex tab 下 `.meta-export` 消失，切回 markdown 两钮恢复（既有覆盖仅 txt） | ViewerPane cleanup setExportHandle(null) 对全部非 markdown 渲染器生效 |
+| LE-12 | 大文档导出时长锚（chromium-only，桌面基准） | 150 段落 + 20 围栏 + 8 公式 + 5 图，管线就绪后导出 60s 内完成、文件名 `<原名>.html` | collectExportHtml 装配链数量级退化防线（克隆/内联/KaTeX 排印）；上限为实测宽裕倍数，CI 负载波动不假红 |
+
+> 注：LE-04 的焦点还原断言经 `HTMLElement/SVGElement.prototype.focus` 包装 spy（addInitScript 应用脚本前注册），属观察装置不改产品行为；LE-05 限幅按当前值倍乘后钳制的实现口径，按键次数（10/17）按 1.25/0.8 幂精确推得，顶格/底格后各再按一次锚「输入被钳制」而非中间值。LE-12 仅 chromium project（性能锚桌面基准，TA-02 惯例，mobile 同断言无增量信息）。
+
+## 7. corpus-markpad 真实语料批量渲染补强场景（MC-01~MC-36，2026-10-22 第四轮 default 套件）
+
+全新测试维度：以 bhxch/Markpad 公开仓 27 个真实 md 文件（`tools/fetch-e2e-corpus.mjs` 下载至 `apps/web/e2e/fixtures/markpad-md/`，清单与 sha256 见该目录 `manifest.json`；个别文件缺失时逐用例 `fs.existsSync` 容错 skip）驱动渲染管线的稳定性与功能覆盖。载体 `apps/web/e2e/b-md-corpus-markpad.spec.ts`。规模口径：手写场景 9 个（MC-28~MC-36）；MC-01~MC-27 为域特殊设计要求的 for..of 逐文件程序化生成，每例只打开 1 个文件。注入通道与第 5/6 节一致（injectDir + openTreeFile），语料以 `readFileSync` 原始字节 → base64 注入（`TextFileSpec.b64` 直通绕过 utf-8 编码——samples/encoding-* 为 GBK/Shift-JIS/CP1252 非 UTF-8 文件，解码属产品编码层职责）；树内按 basename 拍平（27 个已核对唯一）。时序契约：`target.classList.add('vv-markdown')` 在管线完成后、`replaceChildren` 挂载前才加（markdownRenderer.ts:520），旧实例 destroy 即清空容器（:448）——`.vv-markdown` 可见即本文件挂载完成，逐文件打开无假绿窗口。kroki 环境无关化用 fulfill 而非 abort（不产生资源级 console error 污染汇总锚断言面；abort 的降级源码面板形态已由 b-md-diagrams 覆盖）。
+
+| 编号 | 场景 | 期望（用户可见结果） | 契约依据 |
+| --- | --- | --- | --- |
+| MC-01~MC-27 | 批量组：27 个真实语料逐文件打开渲染（最大 121KB stress-test） | `.vv-markdown` 可见（含 4 个非 UTF-8 编码文件——替换字符不阻断管线）；全程零 pageerror；零错误卡（语料全部 < 20MB MARKUP_MAX_BYTES，code.ts:74） | 渲染管线稳定性锚，断言只锚稳定性不锚语料内容；断言红即语料触发降级，交分诊不放宽 |
+| MC-28 | all_languages_test.md 多语言围栏高亮批量面（282 个带语言围栏，ada→zig） | `pre code` 恰 282；bash 围栏徽标 `md-code-lang`=bash 且块内有着色 span（tree-sitter 命中或 hljs 兜底均算，MD-05 判据不锚引擎） | 语料 sha 锚定于 manifest 的结构计数 + highlight 步 data-md-lang 徽标契约 |
+| MC-29 | demo_features.md 本地图表矩阵四引擎 + kroki 兜底 + front matter 剥离 | front matter（author 值 Markpad Team）不泄漏进正文；10 图表围栏 → 10 `.md-diagram`；本地四引擎出 svg×3（mermaid/graphviz-dot/nomnoml）+ math 围栏 katex-display×2；kroki 型 6 个全部出 img（fulfill svg）；全文 katex-display 恰 7；csharp 围栏、rust 徽标照常 | diagrams.ts 注册表（dot=graphviz 别名、latex=math 别名、本地启用集）+ MD-06 front matter 剥离判据 |
+| MC-30 | testfile.md GFM 全家桶 | 五种 callout（note/tip/important/warning/caution）各 1；任务列表 3 checkbox 前 2 勾选且全 disabled；表格 1 张 3 行；删除线 del×1；rust/javascript/python 围栏各 1；行内+块级公式各 1（.katex×2、display×1） | enrich convertCallouts 类型小写归一 + MD-01 表格/任务列表/删除线判据 |
+| MC-31 | stress-test.md 121KB 大文档完整性 | 脚注 sup.footnote-ref×4 编组进 section.footnotes（li×3）；`pre code` 恰 37；`.md-diagram`×3 全出本地 mermaid svg；表格 ≥5（下限锚，609 个 \| 行拆数十张，精确数无行为价值） | markdown-it-footnote 编组 + diagrams 本地渲染 + 大输入不截断 |
+| MC-32 | markdown-syntax.md wikilink 分流与脚注 | 跨文件 wikilink×2（`[[stress-test#…]]` 裸语法）降级 span.md-wikilink-dead；页内锚 wikilink×2（`[[#…]]`/`[[#^…]]`）转 a[data-wikilink]；行内码/表格内同款字样豁免；脚注 [^ref]×2 + ^[inline]×1 → sup×3 编组 li×2；mermaid×4 全出 svg | enrich convertWikilinks 的 A/PRE/CODE 祖先豁免 + 锚型/跨文件分流（SY-05 同源契约） |
+| MC-33 | encoding-gbk.md 非 UTF-8 语料稳定性 | GBK 原始字节注入后渲染容器就绪、正文列表结构可见、零 pageerror、零错误卡（产品无编码标注 UI 的稳定契约锚点，只锚稳定性） | 注入层字节无损（b64 直通）+ 渲染管线对非 UTF-8 输入不崩 |
+| MC-34~MC-36 | 汇总锚：整批 27 文件按 basename 避让分 3 批（9+9+9，单用例 ≤10 次打开）逐文件打开渲染 | 每批聚合收集页面级 console error 断言白名单外为零；pageerror 全程为零；末尾零错误卡 | 白名单三项：① kroki——MC-29/35 装置层 fulfill 的远端图表服务域（环境无关噪音）；② Failed to load resource 且 url 为图片——语料自带相对图片（export_pipeline_test.md 的 ../../pics/codeblock.png）在注入会话无宿主文件，保留原 src 走 404 是产品既有降级契约（markdownImages.ts L3-4）；③ favicon——preview 静态壳资源面（装置已 fulfill 204，双保险） |
