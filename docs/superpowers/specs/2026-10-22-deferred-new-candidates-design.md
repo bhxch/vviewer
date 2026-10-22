@@ -129,11 +129,11 @@
 ## §6 验收门禁与回归口径
 
 - typecheck 0E；vitest 仓库根全量（基线 1766+1，唯一败 = tools/grammar-builder 本机产物过期 fresh-clone skipIf，勿修）。
-- `cargo test --workspace` 全绿（基线 424）；`cargo clippy --workspace -- -D warnings` 零告警。
-- 桌面 crate 独立门：`cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml` + 该 manifest clippy 零警告。
+- `cargo test --workspace` 全绿（基线 324。勘误（2026-10-22 清偿轮）：原记 424 系 handoff 传递未对账数字，实测口径 workspace 324 + desktop 24 = 348；workspace 根在 server/，仓库根无 Cargo.toml，跑法 `cd server && cargo test --workspace`）；`cargo clippy --workspace -- -D warnings` 零告警。
+- 桌面 crate 独立门：`cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`（基线 24，f413f1f 组合单测后实测）+ 该 manifest clippy 零警告。
 - worker wasm 编译锚：`cargo check -p vviewer-worker --target wasm32-unknown-unknown --no-default-features`。
 - 前端构建：`build:e2e`（禁裸 build，防 CDN 注入冲掉）+ budget 1.36MB/4MB。
-- playwright：默认套件 658 + e2e-server 91（跑法 `cd apps/web && npx playwright test -c playwright.server.config.ts`）；增量面（C1 RED/转正用例）计划期定，既有断言零翻转。
+- playwright：默认套件基线 718 + 本批 +4 = 722（666 passed + 56 skipped。勘误（2026-10-22 清偿轮）：原记 658 系 vitest 2026-10-10 旧基线（e5df175「658/658」）误植，根因对账见 digest M-6 注记）+ e2e-server 91（跑法 `cd apps/web && npx playwright test -c playwright.server.config.ts`）；增量面（C1 RED/转正用例）计划期定，既有断言零翻转。
 - 提交：main 直行、原子 commit、Angular 中文 message；SDD 每任务独立实现者 + 任务评审 + 终审。
 
 ## §7 风险与实施注记预留
