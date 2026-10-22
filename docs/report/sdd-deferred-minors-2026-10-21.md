@@ -3,6 +3,8 @@
 - 阶段一清偿：2026-10-22，14/14（commit 区间 6f1db69..83ba0e0；各条终态标注见一/二节，1-1 附勘误）。
 - 阶段二清偿：2026-10-22，6 修+1 核实销账（commit 区间 69d02be..4835b5b；各条终态标注见一/二节）。
 - 阶段三清偿：2026-10-22，21/21（19 修+2 核实销账，commit 区间 1560c95..b2bf99a；各条终态标注见一/二节）。
+- 阶段四清偿：2026-10-22，6/6（4 修+1 翻案修+1 核实销账，commit 区间 5b3a309..726a7a4；各条终态标注见一/二节）。
+- 阶段五清偿：2026-10-22，8/8（4 修+3 核实销账+1 勘误，commit 区间 5f259db..648cdaa；各条终态标注见一/二节）。
 - 提取日期：2026-10-21。覆盖：上一会话六个 SDD 运行——多端发布阶段一/二/三（desktop-tauri / server-core / workers）与目录挂载阶段一/二/三四（mounts-storage / mounts-api / mounts-direct）。
 - **来源更正**：台账并不在 git 历史里。`.superpowers/sdd/.gitignore` 内容为 `*`，台账从未入库；SDD 工作区清理后盘上文件已删，git 悬空对象（fsck）中亦无。本提取从上一会话模型 IO 转录（`~/.zcode/cli/rollout/model-io-sess_8964b1e2-*.jsonl`）中的 Write 调用与 Bash heredoc 追加重放重建，六个台账全文已归档至 `docs/superpowers/sdd-archive/2026-10-19/`（唯一幸存副本）。
 - 销账核对：条目状态对照台账自身修复波记录与现行代码核实（标 ✅ 已销账附出处；⬜ 仍开放；👁 观察/校准项；📄 记录/知情接受）。
@@ -37,7 +39,7 @@
 | --- | --- |
 | ~~tab 名信息损失（storeId 与显示名解耦根治）~~ ✅ 已修（阶段三 419aa4a）：storeId→mount label 显示名映射，hash 输入面零改动 | mounts-direct 终审 I-2 |
 | ~~静默关闭（凭据轮换释放）无衔接提示~~ ✅ 已修（阶段三 59d96b1）：释放/重连清扫接 showStatusNotice 状态栏提示 | mounts-direct 终审 I-3 |
-| kroki 失败态只露源码无失败文案（spec 1 Plan 1，附录） | — |
+| ~~kroki 失败态只露源码无失败文案（spec 1 Plan 1，附录）~~ ✅ 已修（阶段四 06076d2，翻案修）：失败文案 11d8862 起在案，66afead 的 CSS [hidden] 兜底把带文案 view 真隐藏退化为「只露源码」——06076d2 删 error 分支 hidden 恢复可见，口径「已修」非「核实销账」 | — |
 
 ### 测试基建
 | 项 | 出处 |
@@ -50,7 +52,7 @@
 
 ### 小项（nit，顺手清）
 - workers：~~events.rs 未随 wasm 门控~~ ✅ 已修（阶段一 0bfcd83）：events 模块随 wasm 目标门控；~~门控谓词风格不一致~~ ✅ 已修（阶段一 0bfcd83）：统一 target_family 谓词；~~is_asset_path 大小写字面~~ ✅ 已修（阶段一 03e1a14）：资产扩展名大小写不敏感；~~裁剪形态 adapter 静态挂载面报配置错误可升 compile_error!~~ ✅ 已修（阶段一 488d106）：裁剪分支补不可达 debug 断言（运行时护栏保留）。
-- mounts-api：~~probeMountRoot 冗余 encodeURIComponent~~ ✅ 已修（阶段三 8aa3a61）：probe 路径字面化+线格式锚；~~failedRecord registeredRootIndex 残留展示优先级~~ ✅ 已修（阶段三 8aa3a61）：失败记录清失效索引，展示机不再当 registered；manifestJson 引用相等过滤 cosmetic；e2e 断言分号进注释风格；README :index 表示法。
+- mounts-api：~~probeMountRoot 冗余 encodeURIComponent~~ ✅ 已修（阶段三 8aa3a61）：probe 路径字面化+线格式锚；~~failedRecord registeredRootIndex 残留展示优先级~~ ✅ 已修（阶段三 8aa3a61）：失败记录清失效索引，展示机不再当 registered；~~manifestJson 引用相等过滤 cosmetic~~ ✅ 已修（阶段四 6fdcfd8）：Set 引用判重对两次独立实例化恒不命中，改 rootIndex+endpoint 字段判（58 用例零翻转）；~~e2e 断言分号进注释风格~~ ✅ 已核实销账（阶段四）：HEAD 未复现——`;//` 紧贴形态全 e2e 零命中，`; //` 均为正常行尾注释；~~README :index 表示法~~ ✅ 已修（阶段四 6fdcfd8+726a7a4）：5 处修正累计对齐 axum 0.8 实际路由 {index}，评审收尾笔含 core/mounts.rs:341。
 - mounts-storage：~~TOCTOU 窗口（头体两测失去同源）~~ ✅ 已修（阶段三 37b67d6）：头/体两测共享 fixture_with_mount 单实例（既有断言零改动）；~~lib.rs:213 锚归属注释含混~~ ✅ 已修（阶段一 488d106）：注释订正；~~「前导零」搬运注释固有缺陷~~ ✅ 已修（阶段一 488d106）：s3 历法注释补正确说明（前导零系格式化器宽度语义，非数据保真）；~~解析器容忍前导 `+`（壳侧须知）~~ ✅ 已解决（spec4 桌面 T2 顺带落地，锁测 ready.rs:124-126 在案）——阶段二核实销账；~~VV_READY 无条件输出（显式端口多一行）~~ ✅ 已修（阶段一 83ba0e0）：收窄为 --port 0 专属输出。
 - desktop-tauri：~~dialog 契约测试防不了 main 链删行（Wry 不可 mock，评审把关兜底——结构性弱锚）~~ ✅ 已修（阶段二 c6c438c）：Builder 链 dialog 注册源码锚，删行防线从单人工升双保险。
 - 候选不立项：~~region 配置面扩展~~ ✅ 已修（阶段三 87dc653）：MountConfig.region 可选字段贯通 TOML/env/API 入 SigV4 scope（指纹不含 region，裁决在案）；~~s3⇄webdav 同名异构助手迁 lib 统一~~ ✅ 已修（阶段三 08d30a6）：全同语义助手下沉 lib 单源，真异构三组保持独立（模块注裁决）；~~挂载降级不可逆→健康检查重探~~ ✅ 已核实销账：对账重探行为在案（无短路无定时器），Task 10 补跨对账行为锚（b2bf99a）；~~clippy 既有基线（48 项）~~ ✅ 已修（阶段三 9c3b9a4）：workspace 清零+CI 新门 -D warnings。
@@ -139,6 +141,30 @@
 | 3-20 tab 名信息损失（显示名解耦） | 419aa4a：storeId→mount label 显示名映射（映射优先、未命中回落旧形态），hash 输入面零改动 |
 | 3-21 静默关闭（凭据轮换释放）无衔接提示 | 59d96b1：释放/重连清扫接 showStatusNotice 状态栏提示 |
 
+### 阶段四清偿（递延清偿批，2026-10-22，6/6：4 修+1 翻案修+1 核实销账，commit 区间 5b3a309..726a7a4）
+
+| 项 | 闭合处 |
+| --- | --- |
+| 4-1 pako 主包静态导入改动态（惰性化） | 5b3a309：拆出独立 chunk。备案口径：拆出 chunk 仍进 SW precache——收益=首屏不解析执行（非安装期带宽） |
+| 4-2 graphre 未入 chunk 组 | 61cbbe3：并入 diagram-engines chunk 组 |
+| 4-3 kroki 失败态只露源码无失败文案（翻案修） | 06076d2：失败文案 11d8862 起在案，66afead 的 CSS [hidden] 兜底把带文案 view 真隐藏——删 error 分支 hidden 恢复可见。口径「已修」非「核实销账」，实现者翻案成立 |
+| 4-4 manifestJson 引用相等过滤 cosmetic | 6fdcfd8：改 rootIndex+endpoint 字段判（Set 引用判重对两次独立实例化恒不命中；58 用例零翻转） |
+| 4-5 e2e 断言分号进注释风格 | ✅ 已核实销账：HEAD 未复现——`;//` 紧贴形态全 e2e 零命中，`; //` 均为正常行尾注释 |
+| 4-6 README :index 表示法 | 6fdcfd8 + 726a7a4：5 处修正累计对齐 axum 0.8 实际路由 {index}（评审收尾笔含 core/mounts.rs:341） |
+
+### 阶段五清偿（递延清偿批，2026-10-22，8/8：4 修+3 核实销账+1 勘误，commit 区间 5f259db..648cdaa）
+
+| 项 | 闭合处 |
+| --- | --- |
+| 5-1 spec 两处未同步小勘误 | 397ebc2 + 648cdaa：勘误三处+名词两处修复 |
+| 5-2 onKey 输入元素守卫 | 5f259db |
+| 5-3 键盘可达性 a11y 基线 | 5f259db |
+| 5-4 点击图表 svg 直开灯箱 | 5f259db |
+| 5-5 画廊按元素身份定位（同 src 错位） | 5f259db |
+| 5-6 dynamic 页型未接线 | ✅ 已核实销账：类型与占位锚为设计预留，壳侧 vv-dynamic-page 全仓零命中——机制半边未实现，补全属功能立项非清偿面 |
+| 5-7 print 降级=toast 引导手动打印 | ✅ 已核实销账：MetaPanel showNotice 两态文案在案 |
+| 5-8 mermaid 浅色重画失败静默保留 | ✅ 已核实销账：重渲已走 local 引擎销账；cce179a 失败分支补 console.warn 诊断 |
+
 ### 阶段一终审新增挂账候选（2026-10-22 终审，均小项）
 
 - worker dispatch file() 的 416 前置 parity：1-2 仅落 native 适配层，worker 面（worker/src/dispatch.rs file()）仍先 locate 后 parse——语法非法 Range+缺失文件时 404 抢答（native 面 416）。
@@ -156,10 +182,10 @@
 ## 四、附录：更早四 spec 的递延要点（台账已不可恢复，据项目记忆）
 
 Spec 1 markdown 五 plan（会话转录已清，仅存要点）：
-- Plan 1 图表客户端：pako 主包静态导入待改动态；kroki 失败态只露源码无失败文案；graphre 未入 chunk 组。
-- Plan 3 katex/扩展语法：spec 两处未同步小勘误。
-- Plan 4 lightbox：后续候选——点击图表 svg 直开灯箱、画廊按元素身份定位（同 src 错位）、onKey 输入元素守卫、键盘可达性 a11y。
-- Plan 5 导出：mermaid 浅色重画失败静默保留；dynamic 页型未接线；print 降级=toast 引导手动打印。
+- Plan 1 图表客户端：~~pako 主包静态导入待改动态~~ ✅ 已修（阶段四 5b3a309）：拆出 diagram-engines 独立 chunk。备案口径：拆出 chunk 仍进 SW precache——收益=首屏不解析执行（非安装期带宽）；~~kroki 失败态只露源码无失败文案~~ ✅ 已修（阶段四 06076d2，翻案修，见一节 UX 增强行）；~~graphre 未入 chunk 组~~ ✅ 已修（阶段四 61cbbe3）：并入 diagram-engines chunk 组。
+- Plan 3 katex/扩展语法：~~spec 两处未同步小勘误~~ ✅ 已修（阶段五 397ebc2+648cdaa）：勘误三处+名词两处修复。
+- Plan 4 lightbox：后续候选——~~点击图表 svg 直开灯箱、画廊按元素身份定位（同 src 错位）、onKey 输入元素守卫、键盘可达性 a11y~~ ✅ 四项已修（阶段五 5f259db）。
+- Plan 5 导出：~~mermaid 浅色重画失败静默保留~~ ✅ 已核实销账（阶段五）：重渲已走 local 引擎销账，cce179a 失败分支补 console.warn 诊断；~~dynamic 页型未接线~~ ✅ 已核实销账（阶段五）：类型与占位锚为设计预留，壳侧 vv-dynamic-page 全仓零命中——机制半边未实现，补全属功能立项非清偿面；~~print 降级=toast 引导手动打印~~ ✅ 已核实销账（阶段五）：MetaPanel showNotice 两态文案在案。
 - Plan 2 服务端图表、Spec 2 字体、Spec 3 布局 Zen、Spec 6 设置中心：递延 Minor 明细未留存活记录（各自终审 Important 均已修复入提交）。
 
 ## 五、过程注记
