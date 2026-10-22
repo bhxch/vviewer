@@ -134,8 +134,10 @@ const sharedEngine = createMarkdownEngine();
  * 长度、仅剩空白）整段透传；单反引号行内码 span（`` `..` ``，可跨行）内透传——状态
  * 机与 markpad 同款翻转语义。继承性边界（markpad Task 14 审查补记同款，只记录不改
  * 行为）：双反引号 ``...`` 行内码翻转两次后失同步、4 空格缩进码块不跟踪，其中的
- * `\[…\]`/`\(…\)` 仍会被转换。未闭合数学：缓冲内容原样回填、开定界符已消耗
- * （markpad 同款）；闭合前的内容（含换行）原样保留。CRLF/CR 在入口归一化为 \n
+ * `\[…\]`/`\(…\)` 仍会被转换。数学态内容流式直出、闭定界符在闭合处补写：未闭合时
+ * 开定界符已消耗、内容原样保留（markpad 同款；结构保序修复 2026-10-23——此前字符
+ * 缓冲至闭合/EOF 回填，未闭合 \[ 令数百行正文搬进缓冲拼成一行，围栏/表格结构失效，
+ * stress-test.md:679 语料实证）。CRLF/CR 在入口归一化为 \n
  * （修复轮 1/m1：split('\n') 残留 \r 会卡死闭围栏判定；CommonMark 本就视 \r\n 为
  * 换行，归一化不改渲染语义）。
  */
@@ -146,15 +148,11 @@ export function protectLatexDelimiters(text: string): string {
   let inInlineCode = false;
   let inDisplayMath = false;
   let inInlineMath = false;
-  let mathContent = '';
 
   const lines = text.replace(/\r\n?/g, '\n').split('\n');
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li]!;
-    if (li > 0) {
-      if (inDisplayMath || inInlineMath) mathContent += '\n';
-      else out += '\n';
-    }
+    if (li > 0) out += '\n';
     if (fence) {
       out += line;
       // 闭围栏：同字符、不少于开长度、行内仅剩空白（≤3 空格缩进）
@@ -190,14 +188,12 @@ export function protectLatexDelimiters(text: string): string {
       if (!inDisplayMath && !inInlineMath) {
         if (ch === '\\' && nxt === '[') {
           inDisplayMath = true;
-          mathContent = '';
           out += '$$';
           i += 2;
           continue;
         }
         if (ch === '\\' && nxt === '(') {
           inInlineMath = true;
-          mathContent = '';
           out += '$';
           i += 2;
           continue;
@@ -207,28 +203,28 @@ export function protectLatexDelimiters(text: string): string {
       } else if (inDisplayMath) {
         if (ch === '\\' && nxt === ']') {
           inDisplayMath = false;
-          out += mathContent + '$$';
-          mathContent = '';
+          out += '$$';
           i += 2;
           continue;
         }
-        mathContent += ch;
+        // 数学内容流式直出（不改写即缓冲目的的全部语义）：闭定界符在闭合处补写。
+        // 此前字符缓冲至闭合/EOF 回填——未闭合/远闭合的 \[（stress-test.md:679
+        // 「\[ not a link」字面示例实证）会把数百行正文搬进缓冲在 EOF 拼成一行，
+        // markdown 结构整段失效（围栏标记行拼接、表格并入一行）。
+        out += ch;
         i += 1;
       } else {
         if (ch === '\\' && nxt === ')') {
           inInlineMath = false;
-          out += mathContent + '$';
-          mathContent = '';
+          out += '$';
           i += 2;
           continue;
         }
-        mathContent += ch;
+        out += ch;
         i += 1;
       }
     }
   }
-  // 未闭合数学：缓冲内容原样回填、开定界符不还原（markpad 同款）
-  if (inDisplayMath || inInlineMath) out += mathContent;
   return out;
 }
 

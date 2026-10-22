@@ -136,7 +136,6 @@ fn apply_latex_delimiters(text: &str) -> String {
     let mut in_inline_code = false;
     let mut in_display = false;
     let mut in_inline = false;
-    let mut math = String::new();
 
     // CRLF/CR 入口归一化（修复轮 1/m1，与前端 protectLatexDelimiters 同款）：按
     // \n 切行残留的 \r 会卡死闭围栏判定（fence_of 仅容空白）；CommonMark 本就视
@@ -145,11 +144,7 @@ fn apply_latex_delimiters(text: &str) -> String {
     let lines: Vec<&str> = normalized.split('\n').collect();
     for (li, line) in lines.iter().enumerate() {
         if li > 0 {
-            if in_display || in_inline {
-                math.push('\n');
-            } else {
-                out.push('\n');
-            }
+            out.push('\n');
         }
         match fence {
             Some((ch, len)) => {
@@ -183,13 +178,11 @@ fn apply_latex_delimiters(text: &str) -> String {
                         match (c, next) {
                             ('\\', Some('[')) => {
                                 in_display = true;
-                                math.clear();
                                 out.push_str("$$");
                                 chars.next();
                             }
                             ('\\', Some('(')) => {
                                 in_inline = true;
-                                math.clear();
                                 out.push('$');
                                 chars.next();
                             }
@@ -198,28 +191,26 @@ fn apply_latex_delimiters(text: &str) -> String {
                     } else if in_display {
                         if c == '\\' && next == Some(']') {
                             in_display = false;
-                            out.push_str(&math);
                             out.push_str("$$");
-                            math.clear();
                             chars.next();
                         } else {
-                            math.push(c);
+                            // 数学内容流式直出（不改写即缓冲目的的全部语义）：闭定界符
+                            // 在闭合处补写。此前字符缓冲至闭合/EOF 回填——未闭合/远闭合
+                            // 的 \[（stress-test.md:679「\[ not a link」字面示例实证）会
+                            // 把数百行正文搬进缓冲在 EOF 拼成一行，markdown 结构整段失效
+                            //（围栏标记行拼接、表格并入一行）。与前端同步修复。
+                            out.push(c);
                         }
                     } else if c == '\\' && next == Some(')') {
                         in_inline = false;
-                        out.push_str(&math);
                         out.push('$');
-                        math.clear();
                         chars.next();
                     } else {
-                        math.push(c);
+                        out.push(c);
                     }
                 }
             }
         }
-    }
-    if in_display || in_inline {
-        out.push_str(&math);
     }
     out
 }
@@ -388,9 +379,23 @@ mod tests {
 
     #[test]
     fn latex_delimiters_unclosed_keeps_content_without_closer() {
-        // markpad 同款：未闭合时内容回填、开定界符已消耗（不还原）
+        // markpad 同款：未闭合时开定界符已消耗（不还原）、内容原样。数学内容流式
+        // 直出后跨行块级公式输出与缓冲版逐字符一致
         assert_eq!(apply_latex_delimiters("未闭 \\(abc"), "未闭 $abc");
         assert_eq!(apply_latex_delimiters("跨行 \\[a\nb"), "跨行 $$a\nb");
+    }
+
+    #[test]
+    fn latex_delimiters_unclosed_display_keeps_fence_lines_intact() {
+        // 保护单测：字面「\[ not a link」开启 display 后，后续围栏标记行必须原样
+        // 独立成行（stress-test.md:679 语料实证的回归锚——缓冲版曾把后续正文搬进
+        // 缓冲在 EOF 拼成一行，围栏/表格结构失效）。与前端 protectLatexDelimiters
+        // 同步修复。
+        let src = "\\[ not a link\n```text\nv = 1\n```\n正文段落\n";
+        assert_eq!(
+            apply_latex_delimiters(src),
+            "$$ not a link\n```text\nv = 1\n```\n正文段落\n"
+        );
     }
 
     #[test]
