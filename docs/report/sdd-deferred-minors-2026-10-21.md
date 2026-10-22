@@ -15,9 +15,9 @@
 ### 必做/高价值
 | 项 | 出处 | 说明 |
 | --- | --- | --- |
-| 实机 MinIO/DAV smoke | mounts-storage 终审 | 台账原话「阶段二前必做」，阶段二/三均以 MockTransport/wrangler mock 完成，实机验证至今未做。SigV4/PROPFIND 真实链路只有主机形态单测锚 |
-| 桌面 windows/macOS 运行期行为 | desktop-tauri 终审 | CI 首跑+人工冒烟收口（冒烟清单已升发布门禁 I1，待下一次发版实跑） |
-| deploy-worker workflow 实跑 | workers T3+4 | 手动 dispatch 工作流从未实跑；canary/体积门禁/Assets 部署链均属首跑校准面 |
+| 实机 MinIO/DAV smoke（**实机窗口等待，非 57 项清偿范围**） | mounts-storage 终审 | 台账原话「阶段二前必做」，阶段二/三均以 MockTransport/wrangler mock 完成，实机验证至今未做。SigV4/PROPFIND 真实链路只有主机形态单测锚 |
+| 桌面 windows/macOS 运行期行为（**实机窗口等待**） | desktop-tauri 终审 | CI 首跑+人工冒烟收口（冒烟清单已升发布门禁 I1，待下一次发版实跑） |
+| deploy-worker workflow 实跑（**CI/实机窗口等待**） | workers T3+4 | 手动 dispatch 工作流从未实跑；canary/体积门禁/Assets 部署链均属首跑校准面 |
 | 3xx follow 未实证（已与 413 拆分）/ ~~413 判定时机 body 全读~~ ✅ 已修（阶段一 03e1a14）：413 判定前移至 body 全读之前，超限即 413 | workers T2 | worker fetch 链路重定向语义半边保持开放，待 CI 断言/实证；413 半边已清 |
 
 ### 根治候选（代码）
@@ -25,7 +25,7 @@
 | --- | --- | --- |
 | remote.ts:207 AbortSignal.any 同构裸用 ✅ 已修（阶段一 ad9c745）：30s 超时并流信号收编 anySignal 守卫（超时+调用方取消合并），消除裸用触点 | mounts-direct 终审 | 原守卫仅覆盖前端创建侧，此处系另一触点——已随阶段一收编 |
 | ~~MountConfig derive(Debug) 泄漏面~~ ✅ 已修（阶段一 41c6903）。**勘误**：本行原表述过时——MountConfig 手工脱敏+嵌套锁测本就到位，实际修复面=FileConfig/ResolvedConfig/ServeArgs 顶层 token 字段的手工 Debug 脱敏（锁测锚定） | mounts-storage T3 | server/src/config.rs；勘误依据见 41c6903 提交说明与阶段一台账 |
-| 双重故障错误优先级 | mounts-storage T2 | Range 非法+打开失败并存时 500 应让位 416 |
+| ~~双重故障错误优先级~~ | mounts-storage T2 | ✅ 已修（阶段一 8c5fe16）：parse_range 拆语法面/定界面，Range 语法非法在 locate 前 416（size 未知形态 `bytes */*`） |
 | ~~重注册后已开 tab 旧 rootIndex 不迁移~~ ✅ 已修（阶段三 b0a8c04）：对账重注册返回 old→new 映射，记录/sources/存活 tab storeId 段三面同步改写 | mounts-api T2/终审 | 原「阶段四收敛」，管理页已交付但迁移未做；对账重注册后旧 tab 指向失效——阶段三收口 |
 | file::read 窗口 len>=1 debug_assert ✅ 已修（阶段一 8c5fe16）：窗口读取补 len≥1 debug 断言 | server-core 终审 | 原注「已核实 core 中无此断言」已随修复失效 |
 | CoreState.runtime_transport pub 字段跨 crate 可写 ✅ 已修（阶段一 807e3b9）：字段私有化，跨 crate 可写面收口 | server-core T2 | 原「Deref 保留+注记」（93c77b9）的临时态终结 |
