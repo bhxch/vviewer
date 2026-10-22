@@ -508,6 +508,89 @@ password = "p"
         assert!(!format!("{a:?}").contains("TOPSECRET-TOKEN"));
     }
 
+    // ---------- C3：手工 Debug 字段清单同步锚（三道防线，见各常量注释） ----------
+
+    const FILE_CONFIG_DEBUG_FIELDS: &[&str] = &[
+        "root", "web_dist", "port", "token", "allow_lan",
+        "hidden", "cors_origin", "compute", "log_file", "mounts",
+    ];
+
+    #[test]
+    fn file_config_debug_field_inventory_locked() {
+        // ① 编译期字段全集锚（缺/多字段此字面量即编译失败）
+        let probe = FileConfig {
+            root: vec!["/tmp".into()],
+            web_dist: Some("dist".into()),
+            port: Some(1),
+            token: Some("t".into()),
+            allow_lan: Some(true),
+            hidden: Some(true),
+            cors_origin: Some("http://x".into()),
+            compute: Some(true),
+            log_file: Some("v.log".into()),
+            mounts: Vec::new(),
+        };
+        assert_eq!(FILE_CONFIG_DEBUG_FIELDS.len(), 10);
+        // ③ Debug 逐字段名（值选无字段名子串的形态，防误配）
+        let dbg = format!("{probe:?}");
+        for name in FILE_CONFIG_DEBUG_FIELDS {
+            assert!(dbg.contains(&format!("{name}:")), "Debug 缺字段 {name}: {dbg}");
+        }
+    }
+
+    const RESOLVED_CONFIG_DEBUG_FIELDS: &[&str] = &[
+        "root", "web_dist", "port", "token", "token_gen", "allow_lan",
+        "hidden", "cors_origin", "compute", "log_file", "mounts",
+    ];
+
+    #[test]
+    fn resolved_config_debug_field_inventory_locked() {
+        let probe = ResolvedConfig {
+            root: vec!["/tmp".into()],
+            web_dist: Some("dist".into()),
+            port: 1,
+            token: Some("t".into()),
+            token_gen: true,
+            allow_lan: true,
+            hidden: true,
+            cors_origin: Some("http://x".into()),
+            compute: true,
+            log_file: Some("v.log".into()),
+            mounts: Vec::new(),
+        };
+        assert_eq!(RESOLVED_CONFIG_DEBUG_FIELDS.len(), 11);
+        let dbg = format!("{probe:?}");
+        for name in RESOLVED_CONFIG_DEBUG_FIELDS {
+            assert!(dbg.contains(&format!("{name}:")), "Debug 缺字段 {name}: {dbg}");
+        }
+    }
+
+    const SERVE_ARGS_DEBUG_FIELDS: &[&str] = &[
+        "root", "web_dist", "port", "token", "token_gen", "allow_lan",
+        "hidden", "cors_origin", "compute", "log_file",
+    ];
+
+    #[test]
+    fn serve_args_debug_field_inventory_locked() {
+        let probe = ServeArgs {
+            root: vec!["/tmp".into()],
+            web_dist: Some("dist".into()),
+            port: Some(1),
+            token: Some("t".into()),
+            token_gen: true,
+            allow_lan: true,
+            hidden: true,
+            cors_origin: Some("http://x".into()),
+            compute: true,
+            log_file: Some("v.log".into()),
+        };
+        assert_eq!(SERVE_ARGS_DEBUG_FIELDS.len(), 10);
+        let dbg = format!("{probe:?}");
+        for name in SERVE_ARGS_DEBUG_FIELDS {
+            assert!(dbg.contains(&format!("{name}:")), "Debug 缺字段 {name}: {dbg}");
+        }
+    }
+
     // ---------- 合并产物 → 既有启动校验链（校验链零改动，数据来源多一路） ----------
 
     #[test]

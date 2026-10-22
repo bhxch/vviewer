@@ -387,6 +387,45 @@ mod tests {
         }
     }
 
+    // ---------- C3：手工 Debug 字段清单同步锚 ----------
+
+    const MOUNT_CONFIG_DEBUG_FIELDS: &[&str] = &[
+        "kind", "label", "endpoint", "bucket", "prefix", "access_key_id",
+        "secret_access_key", "username", "password", "path_style", "region",
+    ];
+
+    #[test]
+    fn mount_config_debug_field_inventory_locked() {
+        // ① 编译期字段全集锚
+        let probe = cfg(MountKind::S3);
+        assert_eq!(MOUNT_CONFIG_DEBUG_FIELDS.len(), 11);
+        // ③ 脱敏面只遮值不遮名——凭据字段名必须在场
+        let dbg = format!("{probe:?}");
+        for name in MOUNT_CONFIG_DEBUG_FIELDS {
+            assert!(dbg.contains(&format!("{name}:")), "Debug 缺字段 {name}: {dbg}");
+        }
+    }
+
+    const MOUNT_ROOT_DEBUG_FIELDS: &[&str] = &["meta"];
+
+    #[test]
+    fn mount_root_debug_field_inventory_locked() {
+        use vviewer_storage::transport::MockTransport;
+        // build_mount 通道构造（backend 为 dyn 无字面量形态）；断言面锚
+        // 「meta 在场 + backend 故意不暴露 + non_exhaustive 标记在场」——
+        // backend 的省略是 impl 注释的在案裁决，不得静默回归。
+        let transport: std::sync::Arc<dyn HttpTransport> =
+            std::sync::Arc::new(MockTransport::new());
+        let root = build_mount(&cfg(MountKind::S3), transport).unwrap();
+        let dbg = format!("{root:?}");
+        assert_eq!(MOUNT_ROOT_DEBUG_FIELDS.len(), 1);
+        for name in MOUNT_ROOT_DEBUG_FIELDS {
+            assert!(dbg.contains(&format!("{name}:")), "Debug 缺字段 {name}: {dbg}");
+        }
+        assert!(!dbg.contains("backend:"), "backend 不得经 Debug 暴露: {dbg}");
+        assert!(dbg.contains(".."), "non_exhaustive 标记须在场: {dbg}");
+    }
+
     /// 指纹覆盖「同一挂载目标」面（kind/endpoint/bucket/prefix/label），不含
     /// 凭据：仅凭据不同的两份配置同指纹；目标字段逐一区分；指纹串本身无凭据值。
     #[test]
