@@ -20,7 +20,9 @@ use vviewer_core::state::CoreState;
 use vviewer_core::{file, health, mounts as mounts_domain, tree};
 use vviewer_storage::RangeSpec;
 
-use crate::http::{has_multiple_ranges, is_asset_path, parse_range, strip_base_path};
+use crate::http::{
+    has_multiple_ranges, is_asset_path, parse_range, should_pre_reject_range, strip_base_path,
+};
 use crate::response::{json_error, to_worker};
 use crate::state::WorkerState;
 
@@ -171,6 +173,18 @@ async fn file(req: Request, state: &'static WorkerState) -> worker::Result<Respo
     let url = req.url()?;
     let (p, root) = query_tree(&url)?;
 
+    // If-Range（BUG-47）：本服务器从不下发 ETag/Last-Modified，客户端携带的
+    // 任何 If-Range 值都不可能匹配 → 按 RFC 9110 §13.1.5 忽略 Range 回 200
+    let if_range_present = req.headers().has("if-range")?;
+    let range_header = req.headers().get("range")?;
+
+    // C2 parity（native 8c5fe16）：Range 语法非法与文件存在性无关（RFC 9110
+    // §14.2 请求语法错误），locate 之前即 416——否则语法非法 + 缺失文件时 404
+    // 抢答。size 未知形态 Content-Range: bytes */*。
+    if should_pre_reject_range(if_range_present, range_header.as_deref()) {
+        return range_not_satisfiable_unbounded();
+    }
+
     let located = file::locate(&state.core, root, p.as_deref()).await;
     let located = match located {
         Ok(located) => located,
@@ -178,15 +192,10 @@ async fn file(req: Request, state: &'static WorkerState) -> worker::Result<Respo
     };
     let size = located.size();
 
-    // If-Range（BUG-47）：本服务器从不下发 ETag/Last-Modified，客户端携带的
-    // 任何 If-Range 值都不可能匹配 → 按 RFC 9110 §13.1.5 忽略 Range 回 200
-    let if_range_present = req.headers().has("if-range")?;
     let range: Option<(u64, u64)> = if if_range_present {
         None
     } else {
-        match req
-            .headers()
-            .get("range")?
+        match range_header
             .as_deref()
             .filter(|h| !has_multiple_ranges(h))
             .map(|h| parse_range(h, size))
@@ -207,6 +216,15 @@ fn range_not_satisfiable(size: u64) -> worker::Result<Response> {
     let mut res = json_error(416, "range not satisfiable")?;
     res.headers_mut()
         .set("content-range", &format!("bytes */{size}"))?;
+    Ok(res)
+}
+
+/// 416（size 未知形态，C2 parity）：语法非法在 locate 之前即判，尚无 size 可
+/// 回——Content-Range 用 RFC 9110 §14.4 的 incomplete-length 形态 `bytes */*`
+/// （native range_not_satisfiable_unbounded 同构）。
+fn range_not_satisfiable_unbounded() -> worker::Result<Response> {
+    let mut res = json_error(416, "range not satisfiable")?;
+    res.headers_mut().set("content-range", "bytes */*")?;
     Ok(res)
 }
 
