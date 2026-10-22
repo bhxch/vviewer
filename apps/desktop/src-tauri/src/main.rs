@@ -46,7 +46,8 @@ struct ServerState {
     generation: AtomicU64,
     stderr_tail: Arc<Mutex<String>>,
     /// C4：重启在飞护栏——start_and_wait 开场置位、槽位放回/早退清位；
-    /// shutdown_now 据此等待孤儿窗口收口后再统一 kill。
+    /// 退出回收（[`reap_after_restart_window`]，信号与 RunEvent::Exit 两路共用）
+    /// 据此等待孤儿窗口收口后再统一 kill。
     restarting: AtomicBool,
 }
 
@@ -121,9 +122,11 @@ fn main() {
         .expect("Tauri 应用构建失败（tauri.conf.json 结构或图标缺失）");
 
     app.run(|app, event| {
-        // 应用退出（窗口关闭 / 错误窗「退出」）：回收 server 子进程
+        // 应用退出（窗口关闭 / 错误窗「退出」）：回收 server 子进程——与信号
+        // 退出同一 C4 护栏纪律（重启在飞毫秒窗内直调 kill_server 会孤儿化新
+        // sidecar，见 reap_after_restart_window doc）
         if let RunEvent::Exit = event {
-            kill_server(&app.state::<ServerState>());
+            reap_after_restart_window(&app.state::<ServerState>());
         }
     });
 }
@@ -360,16 +363,19 @@ impl Drop for RestartGuard<'_> {
 /// 独立常量避免语义耦合——护栏超时是防御性保险，不是就绪等待）。
 const RESTART_WINDOW_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// 信号退出语义体（2-7；C4 护栏）：先等重启在飞窗口收口再 kill+exit——
-/// 「旧 child 已出槽（start_and_wait kill_server）、新 child 未入槽（:202 放回）」
-/// 的毫秒级窗口内收到 SIGTERM 时，新 sidecar 由本函数在窗口收口（槽位放回）
-/// 后统一回收，不再孤儿化。双检：kill 前后各查一次护栏，信号恰在重启开场
-/// 置位前后到达时复查见位即回到等待；wait#2 收口（含超时放行分支）后再
-/// kill 一轮（幂等）——复查路径下新 sidecar 已在槽位，在此统一回收。残余
-/// 窗口（知情接受）：末次 kill 通过至 exit(0) 之间重启线程恰好开场的纳秒级
-/// 交错——原缺陷窗口毫秒级且后果可控（孤儿 sidecar 存活至机器重启，
-/// --port 0 无端口冲突），线性化需第二标志位 + 重启 bail-out，复杂度不成比例。
-fn shutdown_now(state: &ServerState) {
+/// 退出回收尾段（C4 核心语义；信号退出与 RunEvent::Exit 两路共用）：先等重启
+/// 在飞窗口收口再 kill——「旧 child 已出槽（start_and_wait kill_server）、新
+/// child 未入槽（:202 放回）」的毫秒级窗口内触发退出时，新 sidecar 由本函数在
+/// 窗口收口（槽位放回）后统一回收，不再孤儿化。RunEvent::Exit 复用同款纪律：
+/// 直调 kill_server 在该窗口内同样孤儿化新 sidecar。双检：kill 前后各查一次
+/// 护栏，恰在重启开场置位前后到达时复查见位即回到等待；wait#2 收口（含超时
+/// 放行分支）后再 kill 一轮（幂等）——复查路径下新 sidecar 已在槽位，在此
+/// 统一回收。残余窗口（知情接受）：末次 kill 通过至调用方后续动作（exit /
+/// 事件循环终结）之间重启线程恰好开场的纳秒级交错——原缺陷窗口毫秒级且后果
+/// 可控（孤儿 sidecar 存活至机器重启，--port 0 无端口冲突），线性化需第二
+/// 标志位 + 重启 bail-out，复杂度不成比例。正常关闭（restarting=false）时
+/// wait 立即返回、kill 一轮命中一轮空转（幂等），零开销不变。
+fn reap_after_restart_window(state: &ServerState) {
     wait_restart_window(&state.restarting, RESTART_WINDOW_TIMEOUT);
     kill_server(state);
     if state.restarting.load(Ordering::Acquire) {
@@ -378,6 +384,12 @@ fn shutdown_now(state: &ServerState) {
     // 复查/超时收口后的二次回收（幂等）：复查路径新 sidecar 已入槽，无人回收
     // 即成孤儿——补收使 doc「窗口收口后统一回收」声明与代码一致
     kill_server(state);
+}
+
+/// 信号退出语义体（2-7；C4 护栏）：共用回收尾段（[`reap_after_restart_window`]）
+/// 后 exit(0)。
+fn shutdown_now(state: &ServerState) {
+    reap_after_restart_window(state);
     std::process::exit(0);
 }
 
@@ -532,6 +544,7 @@ mod tests {
     use super::collect_stderr;
     use super::dialog_plugin;
     use super::kill_server;
+    use super::reap_after_restart_window;
     use super::wait_restart_window;
     use super::RestartGuard;
     use super::ServerState;
@@ -625,6 +638,38 @@ mod tests {
         assert!(
             !std::path::Path::new(&format!("/proc/{pid}")).exists(),
             "子进程须已被 kill_server 收尸（/proc/{pid} 仍在即存活/zombie 悬挂）"
+        );
+        #[cfg(not(target_os = "linux"))]
+        let _ = pid;
+    }
+
+    /// C4：退出回收尾段组合函数（[`reap_after_restart_window`]）——正常关闭
+    /// （护栏清位）形态下两段 wait 立即返回、kill 一轮命中；信号退出与
+    /// RunEvent::Exit 两路复用同款纪律。真实 sleep 子进程塞槽后 flag=false 直调，
+    /// 断言槽位空 + 子进程已被收尸——断言形态照 [`shutdown_reaps_child_process`]
+    /// （kill+wait 丢其一时 /proc/<pid> 条目仍在，本测试即翻红；Windows CI 的
+    /// sleep 缺席与 macOS 无 /proc 的退化口径同前测）。
+    #[cfg(unix)]
+    #[test]
+    fn reap_after_restart_window_reaps_child_process() {
+        let child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("sleep 可用（coreutils）");
+        let pid = child.id();
+        let state = ServerState {
+            child: Mutex::new(Some(child)),
+            generation: AtomicU64::new(0),
+            stderr_tail: Arc::new(Mutex::new(String::new())),
+            restarting: AtomicBool::new(false),
+        };
+        reap_after_restart_window(&state);
+        assert!(state.child.lock().unwrap().is_none());
+        // 已 reap：/proc/<pid> 条目随收尸消失
+        #[cfg(target_os = "linux")]
+        assert!(
+            !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+            "子进程须已被 reap_after_restart_window 收尸（/proc/{pid} 仍在即存活/zombie 悬挂）"
         );
         #[cfg(not(target_os = "linux"))]
         let _ = pid;
