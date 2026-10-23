@@ -34,7 +34,7 @@ path = "src/main.rs"
 # 即实证锚）；native 形态解析结果与改动前逐包一致（Cargo.lock 零漂移）。
 [features]
 default = ["native"]
-native = ["dep:notify", "vviewer-core/native", "vviewer-storage/native"]
+native = ["dep:notify", "dep:reqwest", "vviewer-core/native", "vviewer-storage/native"]
 
 [dependencies]
 axum = "0.8"
@@ -50,6 +50,14 @@ futures-core = "0.3"
 tower-http = { version = "0.7", features = ["fs", "cors", "trace", "compression-gzip"] }
 # root 变更监听（watch 域唯一重依赖，随 native feature 裁剪）
 notify = { version = "8", optional = true }
+# kroki 转发域 native 传输（routes/kroki.rs 的 ReqwestKrokiHttp，spec
+# 2026-10-23 §8.2）：与 storage 同款门控纪律——reqwest 不随依赖边默认携带，
+# native 总开关显式转发（dep:reqwest）；同版本 0.12 与 vviewer-storage/native
+# 汇聚同一包（Cargo.lock 零漂移），裁剪形态 workspace 全图零 reqwest 不变。
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"], optional = true }
+# KrokiHttp 接缝的 dyn 兼容 impl 宏（core 同源 0.1；native 门控的
+# ReqwestKrokiHttp 与集成测试 mock 消费）
+async-trait = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 # 存储抽象子 crate（StorageBackend trait + LocalFs，目录挂载阶段一）。

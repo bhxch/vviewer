@@ -60,6 +60,10 @@ enum Command {
         /// 日志写文件（可选；默认 stdout），超 10MB 滚动为 <PATH>.old 单备份
         #[arg(long)]
         log_file: Option<PathBuf>,
+        /// kroki 转发上游 host（/api/kroki 的 SSRF 防线——host 只来自部署侧
+        /// 配置；默认 https://kroki.io，非法值启动即拒）
+        #[arg(long)]
+        kroki_host: Option<String>,
     },
 }
 
@@ -78,6 +82,7 @@ fn main() {
             cors_origin,
             compute,
             log_file,
+            kroki_host,
         } => {
             // --config：文件先载入（配置错误 exit 2），再与 CLI 合并（优先级 CLI > 文件）
             let file = match config.map(|p| load_file_config(&p)) {
@@ -99,6 +104,7 @@ fn main() {
                 cors_origin,
                 compute,
                 log_file,
+                kroki_host,
             };
             let mut resolved = match resolve_config(cli_args, file) {
                 Ok(r) => r,
@@ -129,6 +135,10 @@ pub struct ServeArgs {
     pub cors_origin: Option<String>,
     pub compute: bool,
     pub log_file: Option<PathBuf>,
+    /// kroki 转发上游 host（spec 2026-10-23 §8.2）：CLI 显式值；None=未提供
+    /// （文件通道与 core 缺省在 resolve_config 合并——`From<ResolvedConfig>`
+    /// 恒填 Some，合法性校验在 validate_startup）。
+    pub kroki_host: Option<String>,
 }
 
 // 台账 1-1：token 明文不得经 Debug 外泄（日志/panic 消息面），存在性标记
@@ -147,6 +157,7 @@ impl std::fmt::Debug for ServeArgs {
             .field("cors_origin", &self.cors_origin)
             .field("compute", &self.compute)
             .field("log_file", &self.log_file)
+            .field("kroki_host", &self.kroki_host)
             .finish()
     }
 }
@@ -175,6 +186,20 @@ fn validate_startup(args: &ServeArgs, token: Option<&str>) -> Result<(), String>
         if origin.contains('*') {
             return Err(format!(
                 "--cors-origin does not support wildcard '{origin}'; pass an exact origin (e.g. http://127.0.0.1:8080)"
+            ));
+        }
+    }
+
+    // kroki 转发上游 host（spec 2026-10-23 §8.2）：SSRF 防线——host 只来自
+    // 部署侧配置，形态非法启动即拒 fail-closed（不留运行时静默兜底）；CLI 与
+    // TOML [kroki] host 两通道共用本规则（合并产物经同一条链，spec §2.1）。
+    if let Some(host) = &args.kroki_host {
+        if host.trim().is_empty() {
+            return Err("--kroki-host must not be empty".to_string());
+        }
+        if !host.starts_with("http://") && !host.starts_with("https://") {
+            return Err(format!(
+                "--kroki-host must start with http:// or https:// (got \"{host}\")"
             ));
         }
     }
@@ -306,6 +331,13 @@ fn serve(args: ServeArgs, mounts: Vec<MountConfig>) -> Result<(), i32> {
     .with_roots(roots)
     .with_mounts(mount_roots)
     .with_compute(args.compute);
+    // kroki 转发装配（spec 2026-10-23 §8.2）：host 为部署侧配置的校验后值
+    // （合并已补 core 缺省），http 接缝为 native reqwest 实现；随 native
+    // feature 门控（裁剪形态 worker 部署不经本 crate，装配面不存在）。
+    #[cfg(feature = "native")]
+    let state = state.with_kroki_host(args.kroki_host.unwrap_or_else(|| {
+        vviewer_core::kroki::DEFAULT_KROKI_HOST.to_string()
+    }));
     let app = vviewer::build_router(state.clone());
     let tickets = state.tickets;
 
@@ -369,6 +401,7 @@ mod tests {
             cors_origin: None,
             compute: false,
             log_file: None,
+            kroki_host: None,
         }
     }
 
@@ -450,6 +483,32 @@ mod tests {
         let a_absent: ServeArgs = resolved_absent.into();
         assert_eq!(validate_startup(&a_false, None), Ok(()));
         assert_eq!(validate_startup(&a_absent, None), Ok(()));
+    }
+
+    // ---------- kroki host 校验（spec 2026-10-23 §8.2：非法值 fail-closed） ----------
+
+    /// kroki 上游 host 形态非法启动即拒：空白串（同 --token 空串先例）与非
+    /// http(s):// 前缀（SSRF 防线——host 只接受绝对 http(s) URL）皆 fail-closed；
+    /// 合法形态（含尾部斜杠，core 拼接时归一）通过。
+    #[test]
+    fn invalid_kroki_host_is_rejected() {
+        let mut a = args(None);
+        a.kroki_host = Some(String::new());
+        assert_eq!(validate_startup(&a, None), Err("--kroki-host must not be empty".to_string()));
+        let mut a = args(None);
+        a.kroki_host = Some("   ".into());
+        assert_eq!(validate_startup(&a, None), Err("--kroki-host must not be empty".to_string()));
+        let mut a = args(None);
+        a.kroki_host = Some("kroki.io".into());
+        let err = validate_startup(&a, None).unwrap_err();
+        assert!(err.contains("http:// or https://"), "got: {err}");
+        assert!(err.contains("kroki.io"), "got: {err}");
+        // 合法形态通过（root 须真实目录——本用例只在 kroki 校验上收口）
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut a = args(None);
+        a.root = vec![dir.path().to_path_buf()];
+        a.kroki_host = Some("https://kroki.io/".into());
+        assert_eq!(validate_startup(&a, None), Ok(()));
     }
 
     /// 3-14：web_dist 指向文件（非目录）→ 校验链报错且消息含 is_dir 语义

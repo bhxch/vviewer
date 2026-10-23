@@ -9,6 +9,11 @@ use std::sync::Arc;
 
 use crate::error::CoreError;
 
+/// 缺省上游 host（部署侧未配置时的兜底）：公开 kroki.io 服务。native
+/// `--kroki-host`/TOML `[kroki] host` 与 worker `VV_KROKI_HOST` 的缺省共同
+/// 引用本常量（SSRF 防线：客户端永不可指定上游，host 只来自部署侧配置）。
+pub const DEFAULT_KROKI_HOST: &str = "https://kroki.io";
+
 /// HTTP 传输接缝：kroki 上游转发由适配层注入（native reqwest / worker fetch），
 /// 本域只消费抽象——纯逻辑（host 拼接 / lang 白名单 / raw 透传）可脱网测试。
 /// `Arc<dyn>` dyn 分发形态与 storage 的 StorageBackend 同款（RPITIT 无法
@@ -21,7 +26,9 @@ pub trait KrokiHttp: Send + Sync {
 }
 
 /// kroki 域状态：host 仅来自部署侧配置（SSRF 防线——客户端永不可指定上游），
-/// `http` 为注入的传输接缝。
+/// `http` 为注入的传输接缝。Clone 共享同一 `Arc<dyn>`（适配层 AppState 的
+/// Clone 装配面需要——AppState 克隆不复制传输接缝）。
+#[derive(Clone)]
 pub struct KrokiState {
     pub host: String,
     pub http: Arc<dyn KrokiHttp>,

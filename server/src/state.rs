@@ -51,6 +51,14 @@ pub struct AppState {
     pub cors_origin: Option<String>,
     /// 一次性 ticket 表（SSE 升级用）。
     pub tickets: TicketStore,
+    /// kroki 转发域状态（spec 2026-10-23 §8.2）：host 仅来自部署侧配置（SSRF
+    /// 防线——客户端永不可指定上游），http 接缝为 native reqwest 实现（new 给
+    /// core 缺省 host，serve 装配链经 [`AppState::with_kroki_host`] 覆盖为校验
+    /// 后值；测试经 [`AppState::with_kroki`] 注入 mock）。随 native feature 门控
+    /// ——裁剪形态 workspace 全图零 reqwest（routes/kroki 同款门）；worker 形态
+    /// 的 kroki 装配在 worker crate（FetchKrokiHttp），不经本结构。
+    #[cfg(feature = "native")]
+    pub kroki: vviewer_core::kroki::KrokiState,
     /// root 变更广播中心（启动时创建一次，共享 watcher + debounce 聚合）；
     /// native feature 门控（worker 形态无此字段）。
     #[cfg(feature = "native")]
@@ -96,11 +104,20 @@ impl AppState {
                 core.roots.iter().map(|r| r.canonical.clone()).collect();
             crate::watch::ChangeHub::spawn(&canonicals)
         };
+        // kroki 转发域缺省装配（spec 2026-10-23 §8.2）：host 为 core 缺省，
+        // serve 装配链经 with_kroki_host 覆盖为部署侧校验后值
+        #[cfg(feature = "native")]
+        let kroki = vviewer_core::kroki::KrokiState {
+            host: vviewer_core::kroki::DEFAULT_KROKI_HOST.to_string(),
+            http: Arc::new(crate::routes::kroki::ReqwestKrokiHttp::new()),
+        };
         Self {
             core,
             web_dist,
             cors_origin,
             tickets: TicketStore::default(),
+            #[cfg(feature = "native")]
+            kroki,
             #[cfg(feature = "native")]
             changes,
         }
@@ -180,6 +197,24 @@ impl AppState {
     /// builder：`--compute` 启用服务端计算端点（new 默认 false，既有测试零改动）。
     pub fn with_compute(mut self, compute: bool) -> Self {
         self.compute = compute;
+        self
+    }
+
+    /// builder：注入 kroki 转发域整态（spec 2026-10-23 §8.2；测试经此注入
+    /// mock KrokiHttp——与 with_runtime_transport 的 MockTransport 注入同款
+    /// 缝）。host 语义见 [`AppState::with_kroki_host`]。
+    #[cfg(feature = "native")]
+    pub fn with_kroki(mut self, kroki: vviewer_core::kroki::KrokiState) -> Self {
+        self.kroki = kroki;
+        self
+    }
+
+    /// builder：覆盖 kroki 上游 host（http 接缝保持缺省 reqwest 实现）——serve
+    /// 装配链专用：传入值已过启动校验链（非空 + http(s):// 前缀，spec 2026-10-23
+    /// §8.2 的 SSRF 防线），本 builder 不再校验。
+    #[cfg(feature = "native")]
+    pub fn with_kroki_host(mut self, host: String) -> Self {
+        self.kroki.host = host;
         self
     }
 

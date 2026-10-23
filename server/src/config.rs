@@ -24,6 +24,17 @@ pub const DEFAULT_PORT: u16 = 8321;
 /// （`MountKind` 随 build_mount 下沉，bin 侧不再直接使用）。
 pub use vviewer::state::MountConfig;
 
+/// TOML `[kroki]` 节（spec 2026-10-23 §8.2）：kroki 转发上游配置（可选节）。
+/// `deny_unknown_fields` 与顶层同款纪律——拼错静默忽略是安全反模式。
+#[derive(Clone, PartialEq, Default, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KrokiSection {
+    /// kroki 上游 host（如 `https://kroki.io`）。合法性（非空 + http(s)://
+    /// 前缀）在启动校验链统一裁决——非法 fail-closed（exit 2），与 CLI 通道
+    /// 同一规则（SSRF 防线：host 只来自部署侧配置）。
+    pub host: Option<String>,
+}
+
 /// 配置文件全参面：字段名即 TOML 键名（spec §2.1 示例块一一对应）。
 #[derive(Clone, PartialEq, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -38,6 +49,8 @@ pub struct FileConfig {
     pub cors_origin: Option<String>,
     pub compute: Option<bool>,
     pub log_file: Option<String>,
+    /// TOML `[kroki]` 节（spec 2026-10-23 §8.2）：kroki 转发上游（可选）。
+    pub kroki: Option<KrokiSection>,
     /// TOML 键为 `[[mount]]`（单数）；结构体字段按任务接口契约命名 `mounts`。
     #[serde(default, rename = "mount")]
     pub mounts: Vec<MountConfig>,
@@ -58,6 +71,7 @@ impl std::fmt::Debug for FileConfig {
             .field("cors_origin", &self.cors_origin)
             .field("compute", &self.compute)
             .field("log_file", &self.log_file)
+            .field("kroki", &self.kroki)
             .field("mounts", &self.mounts)
             .finish()
     }
@@ -77,6 +91,9 @@ pub struct ResolvedConfig {
     pub cors_origin: Option<String>,
     pub compute: bool,
     pub log_file: Option<PathBuf>,
+    /// kroki 转发上游 host（spec 2026-10-23 §8.2）：合并已补 core 缺省
+    /// （DEFAULT_KROKI_HOST）——进 serve 前恒为非空串，合法性由启动校验链裁决。
+    pub kroki_host: String,
     /// 挂载配置原样透传（main.rs 装配链经后端构造消费——per-kind 必填校验在
     /// `build_mount`，Debug 面脱敏见 [`MountConfig`]）。
     pub mounts: Vec<MountConfig>,
@@ -96,6 +113,7 @@ impl std::fmt::Debug for ResolvedConfig {
             .field("cors_origin", &self.cors_origin)
             .field("compute", &self.compute)
             .field("log_file", &self.log_file)
+            .field("kroki_host", &self.kroki_host)
             .field("mounts", &self.mounts)
             .finish()
     }
@@ -115,6 +133,8 @@ impl From<ResolvedConfig> for ServeArgs {
             cors_origin: r.cors_origin,
             compute: r.compute,
             log_file: r.log_file,
+            // 合并已补 core 缺省（DEFAULT_KROKI_HOST），进 serve 前恒为 Some
+            kroki_host: Some(r.kroki_host),
         }
     }
 }
@@ -157,6 +177,11 @@ pub fn resolve_config(cli: ServeArgs, file: Option<FileConfig>) -> Result<Resolv
         cors_origin: cli.cors_origin.or(file.cors_origin),
         compute: cli.compute || file.compute.unwrap_or(false),
         log_file: cli.log_file.or(file.log_file.map(PathBuf::from)),
+        // kroki 上游 host（spec 2026-10-23 §8.2）：优先级 CLI > 文件 > core 缺省
+        kroki_host: cli
+            .kroki_host
+            .or(file.kroki.and_then(|k| k.host))
+            .unwrap_or_else(|| vviewer_core::kroki::DEFAULT_KROKI_HOST.to_string()),
         mounts: file.mounts,
     })
 }
@@ -195,6 +220,7 @@ mod tests {
             cors_origin: None,
             compute: false,
             log_file: None,
+            kroki_host: None,
         }
     }
 
@@ -213,6 +239,9 @@ hidden = true
 cors_origin = "https://a.example.com"
 compute = true
 log_file = "./vviewer.log"
+
+[kroki]
+host = "https://kroki.internal.example.com"
 
 [[mount]]
 kind = "s3"
@@ -241,6 +270,10 @@ password = "p"
         assert_eq!(cfg.cors_origin.as_deref(), Some("https://a.example.com"));
         assert_eq!(cfg.compute, Some(true));
         assert_eq!(cfg.log_file.as_deref(), Some("./vviewer.log"));
+        assert_eq!(
+            cfg.kroki.as_ref().and_then(|k| k.host.as_deref()),
+            Some("https://kroki.internal.example.com")
+        );
         assert_eq!(cfg.mounts.len(), 2);
         assert_eq!(cfg.mounts[0].kind, MountKind::S3);
         assert_eq!(cfg.mounts[0].label.as_deref(), Some("docs"));
@@ -406,6 +439,49 @@ password = "p"
         assert_eq!(r.log_file, Some(PathBuf::from("f.log")));
     }
 
+    // ---------- kroki host（spec 2026-10-23 §8.2）：优先级 CLI > 文件 > core 缺省 ----------
+
+    #[test]
+    fn cli_kroki_host_overrides_file_kroki_host() {
+        let file = file_cfg(|c| {
+            c.kroki = Some(KrokiSection { host: Some("https://file.example.com".into()) });
+        });
+        let mut a = cli(&["/c1"]);
+        a.kroki_host = Some("https://cli.example.com".into());
+        assert_eq!(
+            resolve_config(a, Some(file)).unwrap().kroki_host,
+            "https://cli.example.com"
+        );
+    }
+
+    #[test]
+    fn file_kroki_host_used_when_cli_has_none() {
+        let file = file_cfg(|c| {
+            c.kroki = Some(KrokiSection { host: Some("https://file.example.com".into()) });
+        });
+        assert_eq!(
+            resolve_config(cli(&["/c1"]), Some(file)).unwrap().kroki_host,
+            "https://file.example.com"
+        );
+    }
+
+    #[test]
+    fn kroki_host_defaults_when_neither_side_provides() {
+        assert_eq!(
+            resolve_config(cli(&["/c1"]), None).unwrap().kroki_host,
+            vviewer_core::kroki::DEFAULT_KROKI_HOST
+        );
+    }
+
+    #[test]
+    fn unknown_kroki_section_key_is_rejected_with_key_name() {
+        // [kroki] 节内未知键同顶层纪律（deny_unknown_fields 双层生效——拼错
+        // 静默忽略会让部署侧 SSRF 防线 host 落回缺省而不自知）
+        let err = load_from_str("[kroki]\nupstream = \"https://x\"").unwrap_err();
+        assert!(err.contains("unknown field"), "got: {err}");
+        assert!(err.contains("upstream"), "error must name the key: {err}");
+    }
+
     #[test]
     fn no_file_resolves_to_cli_untouched() {
         // 行为契约：无 --config 时零变化
@@ -414,6 +490,7 @@ password = "p"
         assert_eq!(r.port, DEFAULT_PORT);
         assert_eq!(r.token, None);
         assert!(!r.allow_lan && !r.hidden && !r.compute && !r.token_gen);
+        assert_eq!(r.kroki_host, vviewer_core::kroki::DEFAULT_KROKI_HOST);
         assert!(r.mounts.is_empty());
     }
 
@@ -512,7 +589,7 @@ password = "p"
 
     const FILE_CONFIG_DEBUG_FIELDS: &[&str] = &[
         "root", "web_dist", "port", "token", "allow_lan",
-        "hidden", "cors_origin", "compute", "log_file", "mounts",
+        "hidden", "cors_origin", "compute", "log_file", "kroki", "mounts",
     ];
 
     #[test]
@@ -528,9 +605,10 @@ password = "p"
             cors_origin: Some("http://x".into()),
             compute: Some(true),
             log_file: Some("v.log".into()),
+            kroki: None,
             mounts: Vec::new(),
         };
-        assert_eq!(FILE_CONFIG_DEBUG_FIELDS.len(), 10);
+        assert_eq!(FILE_CONFIG_DEBUG_FIELDS.len(), 11);
         // ③ Debug 逐字段名（值选无字段名子串的形态，防误配）
         let dbg = format!("{probe:?}");
         for name in FILE_CONFIG_DEBUG_FIELDS {
@@ -540,7 +618,7 @@ password = "p"
 
     const RESOLVED_CONFIG_DEBUG_FIELDS: &[&str] = &[
         "root", "web_dist", "port", "token", "token_gen", "allow_lan",
-        "hidden", "cors_origin", "compute", "log_file", "mounts",
+        "hidden", "cors_origin", "compute", "log_file", "kroki_host", "mounts",
     ];
 
     #[test]
@@ -556,9 +634,10 @@ password = "p"
             cors_origin: Some("http://x".into()),
             compute: true,
             log_file: Some("v.log".into()),
+            kroki_host: "https://kroki.io".into(),
             mounts: Vec::new(),
         };
-        assert_eq!(RESOLVED_CONFIG_DEBUG_FIELDS.len(), 11);
+        assert_eq!(RESOLVED_CONFIG_DEBUG_FIELDS.len(), 12);
         let dbg = format!("{probe:?}");
         for name in RESOLVED_CONFIG_DEBUG_FIELDS {
             assert!(dbg.contains(&format!("{name}:")), "Debug 缺字段 {name}: {dbg}");
@@ -567,7 +646,7 @@ password = "p"
 
     const SERVE_ARGS_DEBUG_FIELDS: &[&str] = &[
         "root", "web_dist", "port", "token", "token_gen", "allow_lan",
-        "hidden", "cors_origin", "compute", "log_file",
+        "hidden", "cors_origin", "compute", "log_file", "kroki_host",
     ];
 
     #[test]
@@ -583,8 +662,9 @@ password = "p"
             cors_origin: Some("http://x".into()),
             compute: true,
             log_file: Some("v.log".into()),
+            kroki_host: None,
         };
-        assert_eq!(SERVE_ARGS_DEBUG_FIELDS.len(), 10);
+        assert_eq!(SERVE_ARGS_DEBUG_FIELDS.len(), 11);
         let dbg = format!("{probe:?}");
         for name in SERVE_ARGS_DEBUG_FIELDS {
             assert!(dbg.contains(&format!("{name}:")), "Debug 缺字段 {name}: {dbg}");
@@ -612,6 +692,20 @@ password = "p"
         let file = file_cfg(|c| c.root = vec![]);
         assert_eq!(
             serve(resolve_config(cli(&[]), Some(file)).unwrap().into(), Vec::new()),
+            Err(2)
+        );
+    }
+
+    #[test]
+    fn file_kroki_host_invalid_rejected_via_chain() {
+        // spec 2026-10-23 §8.2：TOML [kroki] host 与 CLI 共用启动校验链——
+        // 非 http(s):// 前缀的 host 启动即拒（SSRF 防线 fail-closed）
+        let file = file_cfg(|c| {
+            c.kroki = Some(KrokiSection { host: Some("kroki.io".into()) });
+        });
+        let a = cli(&["/tmp"]);
+        assert_eq!(
+            serve(resolve_config(a, Some(file)).unwrap().into(), Vec::new()),
             Err(2)
         );
     }

@@ -32,10 +32,10 @@ pub mod error;
 pub mod events;
 pub mod file;
 pub mod guard;
+pub mod health;
 /// kroki 转发域（spec 2026-10-23 §8.2）：转发不算计算——不挂 feature 门，
 /// native/worker 双形态恒编译进。
 pub mod kroki;
-pub mod health;
 pub mod mounts;
 pub mod search;
 pub mod state;
