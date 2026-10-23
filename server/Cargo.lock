@@ -2686,6 +2686,7 @@ dependencies = [
 name = "vviewer-core"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "bytes",
  "cc",
  "comrak",

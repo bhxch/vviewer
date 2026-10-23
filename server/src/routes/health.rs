@@ -38,7 +38,8 @@ mod tests {
     #[tokio::test]
     async fn no_compute_omits_language_list() {
         let v = health_json(base_state()).await;
-        assert_eq!(v["capabilities"], serde_json::json!(["file-server"]));
+        // kroki-proxy 恒宣告（spec 2026-10-23 §8.2，转发不算计算）
+        assert_eq!(v["capabilities"], serde_json::json!(["file-server", "kroki-proxy"]));
         assert!(v.get("computeLanguages").is_none());
     }
 

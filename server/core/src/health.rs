@@ -60,19 +60,27 @@ pub struct MountSummary {
     pub prefix: String,
 }
 
-/// 能力宣告：`file-server` 恒有；`--compute` 且 native feature 时追加
-/// `compute`（前端连接时缓存，compute 路由据此判定是否走远程）。compute 域随
-/// Task 3 收编 core，`computeLanguages` 宣告缝（Task 1 预埋 fn 指针）退役为
-/// core 内直调 [`crate::compute::queries::supported_languages`]；无 native
-/// feature（worker 形态）时即使 `--compute` 也不宣告（路由不存在，plan 门控
-/// 语义：语言表随 tree-sitter 编译裁剪）。
+/// 能力宣告：`file-server` 恒有；`kroki-proxy` 恒宣告（spec 2026-10-23 §8.2
+/// ——转发不算计算，native/worker 双形态编译期即有，不挂 feature 门；上游
+/// host 缺省未配置时客户端按宣告尝试、上游可达性由转发请求本身裁决）；
+/// `--compute` 且 native feature 时追加 `compute`（前端连接时缓存，compute
+/// 路由据此判定是否走远程）。compute 域随 Task 3 收编 core，`computeLanguages`
+/// 宣告缝（Task 1 预埋 fn 指针）退役为 core 内直调
+/// [`crate::compute::queries::supported_languages`]；无 native feature（worker
+/// 形态）时即使 `--compute` 也不宣告（路由不存在，plan 门控语义：语言表随
+/// tree-sitter 编译裁剪）。
 pub fn handle(state: &CoreState) -> CoreResponse {
     // 1-5：version 由适配层装配注入（CARGO_PKG_VERSION）；空串=旁路构造，
     // debug 构建立即暴露，release 宣告空串行为不变（既有 wire 不改）
     debug_assert!(!state.version.is_empty(), "version 未注入（旁路构造？）");
+    // kroki 转发恒宣告后 capabilities 的 mut 双形态恒使用；compute_languages/
+    // diagrams 仅 native 门内赋值，裁剪形态下 allow(unused_mut) 维持既有形态
     #[cfg_attr(not(feature = "native"), allow(unused_mut))]
     let (mut capabilities, mut compute_languages, mut diagrams) =
         (vec!["file-server"], None, None);
+    // kroki 转发恒宣告（spec §8.2）：转发不算计算，worker 形态同享（编译期
+    // 即有，不挂 native 门）；服务端未配 kroki host 时转发路由自会回错
+    capabilities.push("kroki-proxy");
     // 双门控合一：编译期（native feature）× 运行时（--compute 旗标）。
     // compute 域随 Task 3 收编 core，`computeLanguages` 宣告缝（Task 1 预埋
     // fn 指针）退役为 core 内直调 [`crate::compute::queries`]。
@@ -153,7 +161,7 @@ mod tests {
     #[test]
     fn no_compute_omits_language_list() {
         let v = health_json(&base_state());
-        assert_eq!(v["capabilities"], serde_json::json!(["file-server"]));
+        assert_eq!(v["capabilities"], serde_json::json!(["file-server", "kroki-proxy"]));
         assert!(v.get("computeLanguages").is_none());
     }
 
@@ -200,7 +208,7 @@ mod tests {
         let mut state = base_state();
         state.compute = true;
         let v = health_json(&state);
-        assert_eq!(v["capabilities"], serde_json::json!(["file-server"]));
+        assert_eq!(v["capabilities"], serde_json::json!(["file-server", "kroki-proxy"]));
         assert!(v.get("computeLanguages").is_none(), "裁剪形态不得宣告语言表: {v}");
         assert!(v.get("diagrams").is_none(), "裁剪形态不得宣告图表: {v}");
         // searchEngine 宣告链（rg/grep PATH 探测）非 native 重依赖、不随裁剪：

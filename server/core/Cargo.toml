@@ -53,6 +53,9 @@ futures-core = "0.3"
 tokio-util = { version = "0.7", features = ["io"] }
 # detect 的语言反查表（扩展名→语言，构建期内嵌清单）
 once_cell = "1"
+# kroki 转发域（spec 2026-10-23 §8.2）的 KrokiHttp 接缝 trait：Arc<dyn> 分发
+# （RPITIT 无法 Arc<dyn>）——async-trait 生成 dyn 兼容形态，与 storage 同款
+async-trait = "0.1"
 # 域 handler 结局观测（search pump 结局 debug 日志等；tracing 非 axum 依赖）
 tracing = "0.1"
 # ticket 签发的 32B 随机 hex（generate_token；自适配层迁入）

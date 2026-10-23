@@ -61,7 +61,8 @@ async fn health_reports_compute_only_when_enabled() {
         .iter()
         .map(|v| v.as_str().unwrap().to_string())
         .collect();
-    assert_eq!(caps, vec!["file-server"]);
+    // kroki-proxy 恒宣告（spec 2026-10-23 §8.2，转发不算计算）
+    assert_eq!(caps, vec!["file-server", "kroki-proxy"]);
 
     let f = fixture(true, None);
     let app = vviewer::build_router(f.state);
