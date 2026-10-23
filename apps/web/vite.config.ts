@@ -361,6 +361,18 @@ export default defineConfig({
               expiration: { maxEntries: 300, purgeOnQuotaError: true },
               cacheableResponse: { statuses: [200] }
             }
+          },
+          {
+            // svgbob 前端 wasm 引擎（diagram-engines 动态 import 的同包资产，实测
+            // ~0.37MB）：内容随构建指纹恒定，CacheFirst + 修订号缓存名（跨版本陈旧
+            // 由 cacheName 兜底）
+            urlPattern: /svgbob_wasm_bg[\w.-]*\.wasm$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: `vv-diagram-svgbob-${BUILD_REVISION}`,
+              expiration: { maxEntries: 2, purgeOnQuotaError: true },
+              cacheableResponse: { statuses: [200] }
+            }
           }
         ]
       },
