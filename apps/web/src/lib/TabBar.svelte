@@ -220,7 +220,7 @@
           activateTab(tab.id);
         }
       }}>
-      <span class="vv-tab-name">{tab.source.name}</span>
+      <span class="vv-tab-name" title={tab.source.name}>{tab.source.name}</span>
       {#if badge !== null}
         <!-- 来源徽标（多源 workspace 才显示）：截短由 CSS ellipsis 承担，title 全名 -->
         <span class="vv-tab-src" title={badge}>{badge}</span>
