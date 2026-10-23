@@ -3,9 +3,12 @@ import { resolveDiagramType, type DiagramMode } from '@vviewer/render-text/markd
 import { DEFAULT_LAYOUT, sanitizeLayout, type LayoutSettings } from '../layout';
 
 /** 图表渲染设置（spec 2026-10-19 §2.1）：krokiHost 空串 = 用注册表 DEFAULT_KROKI_HOST；
- * modes 键 = 图表类型 id/别名，值覆盖注册表 defaultMode（Task 7 面板消费）。 */
+ * modes 键 = 图表类型 id/别名，值覆盖注册表 defaultMode（Task 7 面板消费）；
+ * krokiVia 为 kroki 消费通道（spec 2026-10-23 §8.3）：client=前端直连 kroki img，
+ * server=经部署侧 /api/kroki 代发（能力缺失时管线自动回落 client）。 */
 export interface DiagramsSettings {
   krokiHost: string;
+  krokiVia: 'client' | 'server';
   modes: Record<string, DiagramMode>;
 }
 
@@ -49,7 +52,7 @@ const DEFAULTS: Settings = {
   excludedPatterns: [],
   autoRefresh: true,
   computePolicy: 'auto',
-  diagrams: { krokiHost: '', modes: {} },
+  diagrams: { krokiHost: '', krokiVia: 'client', modes: {} },
   fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
   layout: DEFAULT_LAYOUT
 };
@@ -63,7 +66,7 @@ function defaults(): Settings {
   return {
     ...DEFAULTS,
     excludedPatterns: [...DEFAULTS.excludedPatterns],
-    diagrams: { krokiHost: DEFAULTS.diagrams.krokiHost, modes: { ...DEFAULTS.diagrams.modes } },
+    diagrams: { krokiHost: DEFAULTS.diagrams.krokiHost, krokiVia: DEFAULTS.diagrams.krokiVia, modes: { ...DEFAULTS.diagrams.modes } },
     fonts: { ...DEFAULTS.fonts },
     layout: { ...DEFAULTS.layout }
   };
@@ -96,14 +99,16 @@ export function normalizeSettings(partial: Record<string, unknown>): Settings {
       s[key] = DEFAULTS[key];
     }
   }
-  // diagrams 节白名单（spec §2.1）：host 必须 http(s):// 或空；modes 键须在注册表、值须三枚举
+  // diagrams 节白名单（spec §2.1）：host 必须 http(s):// 或空；krokiVia 二枚举
+  //（spec §8.3，脏值归位 client=直发现状）；modes 键须在注册表、值须四枚举
   const d = s.diagrams ?? DEFAULTS.diagrams;
   s.diagrams = {
     krokiHost: typeof d.krokiHost === 'string' && /^https?:\/\//.test(d.krokiHost) ? d.krokiHost : '',
+    krokiVia: d.krokiVia === 'server' ? 'server' : 'client',
     modes: Object.fromEntries(
       Object.entries(typeof d.modes === 'object' && d.modes !== null ? d.modes : {}).flatMap(([k, v]): [string, DiagramMode][] => {
         const t = resolveDiagramType(k);
-        return t && (v === 'local' || v === 'kroki' || v === 'source') ? [[k, v]] : [];
+        return t && (v === 'local' || v === 'kroki' || v === 'server' || v === 'source') ? [[k, v]] : [];
       })
     )
   };

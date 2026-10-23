@@ -11,6 +11,7 @@
 
 import { resolveDiagramType, createKrokiUrl, DEFAULT_KROKI_HOST, type DiagramMode, type DiagramType } from './diagrams';
 import { renderDiagramEngine } from './diagramEngines';
+import { sanitizeDiagramFragment } from './sanitize';
 
 export interface PipelineCtx {
   /**
@@ -130,15 +131,65 @@ async function runDiagrams(root: Document, ctx: PipelineCtx): Promise<void> {
   }
 }
 
-/** 生效模式解析（含能力回退链）：local 未启用→kroki（krokiType 空则 source）；kroki 无类型→source。 */
+/**
+ * 生效模式解析（含能力回退链）：local 未启用→kroki（krokiType 空则 source）；
+ * kroki 无类型→source；server（spec §8.3）按注入能力协商（serverDiagramOf），
+ * 未命中按既有链降级——恰好 graphviz/svgbob 两类都有前端本地引擎，降级链全通。
+ */
 function effectiveModeOf(type: DiagramType, ctx: PipelineCtx): DiagramMode {
   const requested = ctx.diagram?.modeOf(type.id) ?? type.defaultMode;
+  if (requested === 'server') {
+    if (ctx.diagram?.serverDiagramOf?.(type.id)) return 'server';
+    if (type.local && type.engine) return 'local';
+    return type.krokiType ? 'kroki' : 'source';
+  }
   if (requested === 'local') {
     if (type.local && type.engine) return 'local';
     return type.krokiType ? 'kroki' : 'source';
   }
   if (requested === 'kroki') return type.krokiType ? 'kroki' : 'source';
   return 'source';
+}
+
+/**
+ * 服务端单图渲染（spec 2026-10-23 §8.3）：POST /api/compute/diagram
+ * {lang, source} → {svg}，{url, headers} 经注入的 remoteCall 缝取（remoteMarkdown
+ * 同款形态；lang 为注册表归一 id，服务端 canonical_of 二次归一）。未连接/非 ok/
+ * 响应缺 svg 一律抛错，由调用方按降级链回退；svg 先经 sanitizeDiagramFragment
+ * 净化（服务端上下文 style 豁免面，同 wrapServerDiagrams 承接语义）再返回。
+ */
+async function renderServerDiagram(lang: string, source: string, ctx: PipelineCtx, doc: Document): Promise<string> {
+  const call = ctx.diagram?.remoteCall?.('/api/compute/diagram');
+  if (!call) throw new Error('未连接服务器，无法服务端渲染图表');
+  const res = await fetch(call.url, {
+    method: 'POST',
+    headers: { ...call.headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ lang, source })
+  });
+  if (!res.ok) throw new Error(`服务端图表渲染失败: HTTP ${res.status}`);
+  const data = (await res.json()) as { svg?: unknown };
+  if (typeof data.svg !== 'string' || data.svg === '') throw new Error('服务端图表渲染失败：响应缺 svg');
+  return sanitizeDiagramFragment(doc, data.svg);
+}
+
+/**
+ * kroki 服务端代发（spec 2026-10-23 §8.2/§8.3）：POST /api/kroki {lang, source} →
+ * {svg}（protected 组、不挂 native 门，kroki-proxy 恒宣告），lang 为 kroki 类型名
+ * （krokiType，与 img 直发的 URL 段一致）。失败语义与 renderServerDiagram 相同：
+ * 抛错交调用方回落 client img 直发（img error 既有路径兜错误卡）。
+ */
+async function renderKrokiViaServer(krokiType: string, source: string, ctx: PipelineCtx, doc: Document): Promise<string> {
+  const call = ctx.diagram?.remoteCall?.('/api/kroki');
+  if (!call) throw new Error('未连接服务器，无法代发 kroki 渲染');
+  const res = await fetch(call.url, {
+    method: 'POST',
+    headers: { ...call.headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ lang: krokiType, source })
+  });
+  if (!res.ok) throw new Error(`kroki 服务端代发失败: HTTP ${res.status}`);
+  const data = (await res.json()) as { svg?: unknown };
+  if (typeof data.svg !== 'string' || data.svg === '') throw new Error('kroki 服务端代发失败：响应缺 svg');
+  return sanitizeDiagramFragment(doc, data.svg);
 }
 
 /**
@@ -251,19 +302,24 @@ function wrapServerDiagrams(root: Document, ctx: PipelineCtx): void {
  * - source：withToggle=false 构造（无图视图可切，不生成 toggle），bar 只留语言徽标、
  *   源码面板展开（highlightLang 命中时源码走 highlightFence）；
  * - kroki：视图为 img（src 经 kroki deflate+base64url 编码；error 监听仅真浏览器
- *   生效——jsdom 不派发 img load/error，单测只断言 src 形态）；
+ *   生效——jsdom 不派发 img load/error，单测只断言 src 形态）；krokiVia=server 且
+ *   krokiProxy 宣告时改走 /api/kroki 服务端代发内联 svg（失败回落 img 直发）；
+ * - server（spec 2026-10-23 §8.3）：POST /api/compute/diagram 内联 svg（能力协商
+ *   命中才到这，见 effectiveModeOf）；fetch 失败按 server→local→kroki 降级链重走
+ *   分支（有本地引擎转 local、无引擎直转 kroki img）；
  * - local：动态引擎渲染 svg/katex HTML 注入视图；失败按 spec §6 回退链降级——有
  *   krokiType 先降 kroki img（kroki img error 再落错误卡），无 krokiType 直落错误卡片
  *   （保留源码）。
  * mermaid 视图容器带 data-mermaid 源码属性（重渲染锚，Task 5 主题联动依赖）：
- * local/kroki 模式带，source 模式无（未渲染无需重渲染锚）；local 失败态同样
+ * local/kroki/server 模式带，source 模式无（未渲染无需重渲染锚）；local 失败态同样
  * 保留——旧实现语义，渲染成功与否不影响锚存在。
  */
 async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: PipelineCtx): Promise<void> {
   const source = (code.textContent ?? '').replace(/\n$/, '');
   const host = code.closest('pre') ?? code;
   const doc = code.ownerDocument;
-  const mode = effectiveModeOf(type, ctx);
+  // let：server fetch 失败的降级会改写生效模式重走分支（spec §8.3 server→local→kroki）
+  let mode = effectiveModeOf(type, ctx);
   const w = buildDiagramWrapper(doc, ctx, {
     langLabel: type.id,
     highlightLang: type.highlightLang,
@@ -294,6 +350,22 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
   // 引擎失败且有 krokiType 时复用同一段降级，全 local 引擎统一语义——mermaid/
   // graphviz/nomnoml/svgbob/CDN 四类同）。抽局部函数复用，勿复制分支体。
   const appendKrokiImg = async (): Promise<void> => {
+    // krokiVia=server 分叉头部（spec §8.3）：能力协商（krokiProxy 宣告）成立先走
+    // 服务端代发内联 svg（kroki-proxy 标容器承接）；代发失败（未连接/上游不可达）
+    // 回落下方 client img 直发——img error 既有路径兜错误卡，与直发语义一致。
+    if (ctx.diagram?.krokiVia === 'server' && ctx.diagram.krokiProxy) {
+      try {
+        const html = await renderKrokiViaServer(type.krokiType, source, ctx, doc);
+        const holder = doc.createElement('div');
+        holder.setAttribute('data-vv-diagram', 'kroki-proxy');
+        holder.innerHTML = html;
+        // 回退时整体重置视图：容器承接面语义与 img replaceChildren 同构
+        view.replaceChildren(holder);
+        // mermaid 视图同带重渲染锚（kroki img 态同款语义：主题重画走 local 引擎）
+        if (type.id === 'mermaid') view.setAttribute('data-mermaid', source);
+        return;
+      } catch { /* 代发失败：回落 client img 直发（下方既有路径） */ }
+    }
     const img = doc.createElement('img');
     img.setAttribute('alt', type.id);
     img.setAttribute('src', await createKrokiUrl(ctx.diagram?.krokiHost ?? DEFAULT_KROKI_HOST, type.krokiType, source));
@@ -313,6 +385,25 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
     // 同样命中选择器——plantuml/graphviz 等非 mermaid 视图不得设，否则被误重渲染）
     if (type.id === 'mermaid') view.setAttribute('data-mermaid', source);
   };
+
+  if (mode === 'server') {
+    try {
+      const html = await renderServerDiagram(type.id, source, ctx, doc);
+      view.innerHTML = html;
+      // mermaid 若经服务端渲染（注册表宣告子集外，防御性同 kroki 态语义）保留重渲染锚
+      if (type.id === 'mermaid') view.setAttribute('data-mermaid', source);
+      return;
+    } catch {
+      // spec §8.3 降级链 server→local→kroki（错误卡由 local 分支既有路径兜底）：
+      // fetch 抛错按「有本地引擎转 local（其自带 kroki/错误卡二级回退），无引擎
+      // 直转 kroki img」重走分支——mode 已声明 let，此处改写生效模式
+      mode = type.local && type.engine ? 'local' : 'kroki';
+      if (mode === 'kroki') {
+        await appendKrokiImg();
+        return;
+      }
+    }
+  }
 
   if (mode === 'kroki') {
     await appendKrokiImg();

@@ -132,6 +132,25 @@ export interface DiagramRenderOptions {
   mermaidTheme: 'default' | 'dark';
   /** 未配置语言返回注册表 defaultMode（调用方保证） */
   modeOf: (lang: string) => import('./diagrams').DiagramMode;
+  /**
+   * kroki 消费通道（spec 2026-10-23 §8.3）：client=前端直连 kroki img（现状）；
+   * server=经部署侧 /api/kroki 代发内联 svg（krokiProxy 能力协商失败时管线
+   * 自动回落 client 直发）。缺省=client。
+   */
+  krokiVia?: 'client' | 'server';
+  /**
+   * 服务端单图渲染能力（health diagrams 子集归一后的类型 id 集合，spec §8.3）：
+   * server 模式的生效裁决依据；缺省=无能力，server 模式按降级链走 local/kroki。
+   */
+  serverDiagramOf?: (lang: string) => boolean;
+  /** 服务端 kroki 代发能力宣告（capabilities 'kroki-proxy'，恒宣告项）。 */
+  krokiProxy?: boolean;
+  /**
+   * 远程调用描述缝（computeRouter.remoteCall 透传，remoteMarkdown 同款语义）：
+   * server 模式与 kroki 代发据此取 {url, headers} 构造 fetch；缺省/返回 null=
+   * 未连接服务器，两条服务端路径按降级链回退。
+   */
+  remoteCall?: (path: string) => { url: string; headers: Record<string, string> } | null;
 }
 
 let diagramOptions: (() => DiagramRenderOptions) | null = null;

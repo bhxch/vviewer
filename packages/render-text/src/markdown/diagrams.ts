@@ -3,7 +3,7 @@
 // 前端包引擎 graphviz/nomnoml + 既有 mermaid/math + wasm svgbob（§7）+ CDN 直链
 // excalidraw/bpmn/vega/vegalite（§6），其余 kroki/源码覆盖。
 
-export type DiagramMode = 'local' | 'kroki' | 'source';
+export type DiagramMode = 'local' | 'kroki' | 'server' | 'source';
 
 export interface DiagramType {
   id: string;
@@ -18,11 +18,15 @@ export interface DiagramType {
   /** 本地引擎 id：mermaid/graphviz/nomnoml/math 前端包，svgbob wasm，
    * excalidraw/bpmn/vega/vegalite 走 jsdelivr CDN 直链（cdnEngines.ts） */
   engine?: 'mermaid' | 'graphviz' | 'nomnoml' | 'math' | 'svgbob' | 'excalidraw' | 'bpmn' | 'vega' | 'vegalite';
+  /** 服务端单图渲染端点形态（spec 2026-10-23 §8.3：/api/compute/diagram 的
+   * NATIVE 子集）；仅设置面「服务端」选项显隐消费，运行时能力以 health
+   * diagrams 子集协商为准（serverDiagramOf 注入，注册表旗标不裁决运行时）。 */
+  server?: boolean;
 }
 
 export const DIAGRAM_TYPES: readonly DiagramType[] = [
   { id: 'mermaid', aliases: [], local: true, defaultMode: 'local', krokiType: 'mermaid', highlightLang: 'mermaid', engine: 'mermaid' },
-  { id: 'graphviz', aliases: ['dot'], local: true, defaultMode: 'local', krokiType: 'graphviz', highlightLang: 'dot', engine: 'graphviz' },
+  { id: 'graphviz', aliases: ['dot'], local: true, defaultMode: 'local', krokiType: 'graphviz', highlightLang: 'dot', engine: 'graphviz', server: true },
   { id: 'plantuml', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'plantuml', highlightLang: 'plantuml' },
   { id: 'c4plantuml', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'c4plantuml', highlightLang: 'plantuml' },
   { id: 'ditaa', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'ditaa', highlightLang: '' },
@@ -32,7 +36,7 @@ export const DIAGRAM_TYPES: readonly DiagramType[] = [
   { id: 'seqdiag', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'seqdiag', highlightLang: '' },
   { id: 'erd', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'erd', highlightLang: '' },
   { id: 'pikchr', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'pikchr', highlightLang: '' },
-  { id: 'svgbob', aliases: [], local: true, defaultMode: 'local', krokiType: 'svgbob', highlightLang: '', engine: 'svgbob' },
+  { id: 'svgbob', aliases: [], local: true, defaultMode: 'local', krokiType: 'svgbob', highlightLang: '', engine: 'svgbob', server: true },
   { id: 'excalidraw', aliases: [], local: true, defaultMode: 'local', krokiType: 'excalidraw', highlightLang: 'json', engine: 'excalidraw' },
   { id: 'nomnoml', aliases: [], local: true, defaultMode: 'local', krokiType: 'nomnoml', highlightLang: '', engine: 'nomnoml' },
   { id: 'bpmn', aliases: [], local: true, defaultMode: 'local', krokiType: 'bpmn', highlightLang: 'xml', engine: 'bpmn' },

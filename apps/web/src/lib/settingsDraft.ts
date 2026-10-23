@@ -50,7 +50,7 @@ function pickKnown(raw: Record<string, unknown>): Record<string, unknown> {
 
 const THEME_MODES: readonly string[] = ['light', 'dark', 'system'];
 const POLICIES: readonly string[] = ['auto', 'local', 'remote'];
-const DIAGRAM_MODES: readonly string[] = ['local', 'kroki', 'source'];
+const DIAGRAM_MODES: readonly string[] = ['local', 'kroki', 'server', 'source'];
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -141,10 +141,13 @@ export function validateSettings(raw: unknown): SettingsIssue[] {
     } else {
       const d = raw.diagrams;
       for (const k of Object.keys(d)) {
-        if (k !== 'krokiHost' && k !== 'modes') issues.push({ field: `diagrams.${k}`, message: '未知字段（白名单外，不落盘）' });
+        if (k !== 'krokiHost' && k !== 'krokiVia' && k !== 'modes') issues.push({ field: `diagrams.${k}`, message: '未知字段（白名单外，不落盘）' });
       }
       if (d.krokiHost !== undefined && d.krokiHost !== '' && !(typeof d.krokiHost === 'string' && /^https?:\/\//.test(d.krokiHost))) {
         issues.push({ field: 'diagrams.krokiHost', message: '须为 http(s):// 开头地址或空串（空 = 默认服务）' });
+      }
+      if (d.krokiVia !== undefined && d.krokiVia !== 'client' && d.krokiVia !== 'server') {
+        issues.push({ field: 'diagrams.krokiVia', message: "须为 'client' / 'server' 之一（client=前端直连，server=服务端代发）" });
       }
       if (d.modes !== undefined) {
         if (!isObj(d.modes)) {
@@ -410,7 +413,7 @@ function collectUnknownPaths(raw: Record<string, unknown>): string[] {
     if (!SETTINGS_KEYS.includes(k as keyof Settings)) paths.push(k);
   }
   const allowed: Record<string, readonly string[]> = {
-    diagrams: ['krokiHost', 'modes'],
+    diagrams: ['krokiHost', 'krokiVia', 'modes'],
     fonts: ['uiFamily', 'uiSize', 'codeFamily', 'codeSize'],
     layout: Object.keys(sanitizeLayout({}))
   };

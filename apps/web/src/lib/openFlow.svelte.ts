@@ -807,6 +807,21 @@ const CAPABILITIES_KEY = 'vv:capabilities';
  * 服务端语言集合依据；空/缺失 = 未知，路由保持既有先试远程行为）。 */
 const COMPUTE_LANGUAGES_KEY = 'vv:compute-languages';
 
+/** 连接时 health diagrams 子集的会话缓存键（spec 2026-10-23 §8.3：图表 server
+ * 模式的能力协商依据；空/缺失 = 未知，server 模式按降级链回退）。 */
+const DIAGRAM_CAPABILITIES_KEY = 'vv:diagram-capabilities';
+
+/** 读取会话级服务端图表类型集合（spec §8.3；无记录/损坏/非数组返回 [] 表示未知）。 */
+export function loadDiagramCapabilities(): string[] {
+  try {
+    const raw = sessionStorage.getItem(DIAGRAM_CAPABILITIES_KEY);
+    const v: unknown = raw ? JSON.parse(raw) : null;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 /** 读取会话级服务端高亮语言集合（BUG-06c；无记录/损坏/非数组返回 [] 表示未知）。 */
 export function loadComputeLanguages(): string[] {
   try {
@@ -862,6 +877,7 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
     version?: unknown;
     capabilities?: unknown;
     computeLanguages?: unknown;
+    diagrams?: unknown;
     searchEngine?: unknown;
     roots?: unknown;
     fsRoots?: unknown;
@@ -871,6 +887,7 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
       version?: unknown;
       capabilities?: unknown;
       computeLanguages?: unknown;
+      diagrams?: unknown;
       searchEngine?: unknown;
       roots?: unknown;
       fsRoots?: unknown;
@@ -906,6 +923,20 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
     }
   } catch {
     // 存储不可用：路由回落既有行为，连接不受影响
+  }
+  // 服务端图表子集缓存（spec §8.3）：health 宣告则缓存，未宣告（旧服务端/非
+  // compute 部署）清除旧缓存表示未知，server 模式按降级链回退 local/kroki
+  try {
+    if (Array.isArray(caps.diagrams)) {
+      sessionStorage.setItem(
+        DIAGRAM_CAPABILITIES_KEY,
+        JSON.stringify(caps.diagrams.filter((x): x is string => typeof x === 'string'))
+      );
+    } else {
+      sessionStorage.removeItem(DIAGRAM_CAPABILITIES_KEY);
+    }
+  } catch {
+    // 存储不可用：server 模式回落 local/kroki，连接不受影响
   }
   // 搜索引擎宣告缓存（A 项）：旧服务端无字段 → 清缓存，徽标不显示
   saveSearchEngine(caps.searchEngine);

@@ -11,7 +11,7 @@ const BASE: Settings = {
   excludedPatterns: [],
   autoRefresh: true,
   computePolicy: 'auto',
-  diagrams: { krokiHost: '', modes: {} },
+  diagrams: { krokiHost: '', krokiVia: 'client', modes: {} },
   fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
   layout: { ...DEFAULT_LAYOUT }
 };
@@ -123,7 +123,7 @@ describe('loadSettings 外观槽格式白名单（spec 2026-10-12 §2.3）', () 
 describe('diagrams 设置节白名单（spec 2026-10-19 §2.1）', () => {
   it('默认 krokiHost 空 + modes 空', () => {
     localStorage.removeItem('vviewer:settings');
-    expect(loadSettings().diagrams).toEqual({ krokiHost: '', modes: {} });
+    expect(loadSettings().diagrams).toEqual({ krokiHost: '', krokiVia: 'client', modes: {} });
   });
 
   it('krokiHost 非 http(s) 归空；modes 非法值剔除、非法键剔除', () => {
@@ -155,9 +155,22 @@ describe('diagrams 设置节白名单（spec 2026-10-19 §2.1）', () => {
       JSON.stringify({ diagrams: 42, excludedPatterns: ['.git'], autoRefresh: false })
     );
     const s = loadSettings();
-    expect(s.diagrams).toEqual({ krokiHost: '', modes: {} });
+    expect(s.diagrams).toEqual({ krokiHost: '', krokiVia: 'client', modes: {} });
     expect(s.excludedPatterns).toEqual(['.git']);
     expect(s.autoRefresh).toBe(false);
+  });
+
+  it('krokiVia 白名单（spec §8.3）：server 与 modes 四枚举值原样通过、脏值归位 client', () => {
+    localStorage.setItem('vviewer:settings', JSON.stringify({
+      diagrams: { krokiVia: 'server', modes: { graphviz: 'server', svgbob: 'server', mermaid: 'wasm' } }
+    }));
+    let s = loadSettings();
+    expect(s.diagrams.krokiVia).toBe('server');
+    // modes 'server' 值合法（注册表 server 旗标面由设置 UI 门控，白名单只挡枚举外值）
+    expect(s.diagrams.modes).toEqual({ graphviz: 'server', svgbob: 'server' });
+    localStorage.setItem('vviewer:settings', JSON.stringify({ diagrams: { krokiVia: 'p2p' } }));
+    s = loadSettings();
+    expect(s.diagrams.krokiVia).toBe('client');
   });
 });
 

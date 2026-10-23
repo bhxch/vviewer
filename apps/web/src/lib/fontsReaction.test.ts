@@ -18,7 +18,7 @@ function baseSettings(fonts?: Partial<Settings['fonts']>): Settings {
     excludedPatterns: [],
     autoRefresh: true,
     computePolicy: 'auto',
-    diagrams: { krokiHost: '', modes: {} },
+    diagrams: { krokiHost: '', krokiVia: 'client', modes: {} },
     fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13, ...fonts },
     layout: { ...DEFAULT_LAYOUT }
   };

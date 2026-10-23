@@ -2,7 +2,9 @@
 // 三分支、模式回退链、wrapper DOM 契约（.md-diagram* 系列 + data-mermaid 锚）。
 // jsdom 无真实图表引擎视觉度量能力：mermaid/nomnoml 走引擎失败错误路径或桩
 // （断言两类终态均可观察）；kroki 只断言 img.src 形态（jsdom 不派发 img load/error）。
-import { describe, expect, it } from 'vitest';
+// spec §8.3（Task 5）：server 模式与 krokiVia=server 代发——fetch 注入走 global
+// stub（vi.stubGlobal，highlightRouter.test.ts 同款），remoteCall 走注入缝桩。
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runPipeline, type PipelineCtx } from './pipeline';
 
 function docWithFence(lang: string, body: string): Document {
@@ -190,5 +192,136 @@ describe('diagrams 步：服务端图表 div 接回标准 wrapper（Task 3 / spe
     await runPipeline(doc, baseCtx);
     expect(doc.querySelectorAll('.md-diagram')).toHaveLength(1);
     expect(doc.querySelector('.md-diagram-view [data-vv-diagram]')).toBeNull();
+  });
+});
+
+describe('diagrams 步：server 模式与 krokiVia=server 代发（Task 5 / spec §8.3）', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** 200 JSON 响应桩（{svg} 形态，/api/compute/diagram 与 /api/kroki 共用）。
+   * mock 按 fetch 签名类型化（highlightRouter.test.ts 同款），calls 元组可索引。 */
+  const svgResponse = (svg: string) =>
+    async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> =>
+      new Response(JSON.stringify({ svg }), { status: 200 });
+
+  it('modes=server 且 serverDiagramOf 命中：走服务端 fetch 并 sanitize（引擎 style 豁免保留、危险 style 丢弃）', async () => {
+    const fetchMock = vi.fn(svgResponse(
+      '<svg viewBox="0 0 1 1"><style>text { fill: red }</style><style>@import url(https://evil.example/x.css)</style><circle r="1"/></svg>'
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    const doc = docWithFence('dot', 'digraph { a -> b }'); // 别名归一：fence dot → type.id graphviz
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: {
+        krokiHost: 'https://k',
+        mermaidTheme: 'default',
+        modeOf: () => 'server',
+        serverDiagramOf: (lang) => lang === 'graphviz',
+        krokiProxy: true,
+        remoteCall: () => ({ url: 'http://s:8321/api/compute/diagram', headers: { authorization: 'Bearer t' } })
+      }
+    });
+    const view = doc.querySelector('.md-diagram-view')!;
+    expect(view.querySelector('svg circle')).not.toBeNull();
+    expect(view.querySelector('img')).toBeNull();
+    // sanitize 豁免面（服务端上下文同款）：合法引擎 style 保留，危险 token（@import）整节点丢弃
+    const styles = Array.from(view.querySelectorAll('style')).map((s) => s.textContent ?? '');
+    expect(styles).toContain('text { fill: red }');
+    expect(styles.some((t) => t.includes('@import'))).toBe(false);
+    // fetch 形态：remoteCall 取 {url, headers}，POST JSON {lang, source}（lang 为归一 id）
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]! as [RequestInfo | URL, RequestInit];
+    expect(String(url)).toBe('http://s:8321/api/compute/diagram');    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ lang: 'graphviz', source: 'digraph { a -> b }' });
+    expect(init.headers).toMatchObject({ authorization: 'Bearer t', 'content-type': 'application/json' });
+  });
+
+  it('modes=server 未命中能力：降级链首站 local（graphviz 本地引擎出图或 kroki img），零 fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const doc = docWithFence('dot', 'digraph { a -> b }');
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: {
+        krokiHost: 'https://k',
+        mermaidTheme: 'default',
+        modeOf: () => 'server',
+        serverDiagramOf: () => false,
+        krokiProxy: false,
+        remoteCall: () => null
+      }
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    // serverDiagramOf 未命中 → type.local && type.engine → local：viz 可用时出 svg，
+    // 引擎失败走 spec §6 既有回退落 kroki img——两终态皆合法，但必不落 source 空视图
+    const view = doc.querySelector('.md-diagram-view')!;
+    expect(view.querySelector('svg, img')).not.toBeNull();
+  });
+
+  it('modes=server fetch 失败（非 ok）：按「fetch 抛错转 Kroki 回退」落 kroki img（无本地引擎类型）', async () => {
+    const fetchMock = vi.fn(async () => new Response('boom', { status: 500 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const doc = docWithFence('plantuml', 'a -> b'); // plantuml 无本地引擎：降级链直落 kroki
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: {
+        krokiHost: 'https://k',
+        mermaidTheme: 'default',
+        modeOf: () => 'server',
+        serverDiagramOf: () => true,
+        krokiProxy: true,
+        remoteCall: () => ({ url: 'http://s:8321/api/compute/diagram', headers: {} })
+      }
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const img = doc.querySelector('.md-diagram-view img') as HTMLImageElement;
+    expect(img.getAttribute('src')!.startsWith('https://k/plantuml/svg/')).toBe(true);
+  });
+
+  it('krokiVia=server→POST /api/kroki 内联 svg（非 img src，kroki-proxy 容器承接）', async () => {
+    const fetchMock = vi.fn(svgResponse('<svg viewBox="0 0 1 1"><circle r="1"/></svg>'));
+    vi.stubGlobal('fetch', fetchMock);
+    const doc = docWithFence('plantuml', 'a -> b');
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: {
+        krokiHost: 'https://k',
+        mermaidTheme: 'default',
+        modeOf: () => 'kroki',
+        krokiVia: 'server',
+        krokiProxy: true,
+        remoteCall: () => ({ url: 'http://s:8321/api/kroki', headers: { authorization: 'Bearer t' } })
+      }
+    });
+    const view = doc.querySelector('.md-diagram-view')!;
+    expect(view.querySelector('svg circle')).not.toBeNull();
+    expect(view.querySelector('img')).toBeNull();
+    expect(view.querySelector('[data-vv-diagram="kroki-proxy"]')).not.toBeNull();
+    const [url, init] = fetchMock.mock.calls[0]! as [RequestInfo | URL, RequestInit];
+    expect(String(url)).toBe('http://s:8321/api/kroki');
+    expect(JSON.parse(init.body as string)).toEqual({ lang: 'plantuml', source: 'a -> b' });
+    expect(init.headers).toMatchObject({ authorization: 'Bearer t' });
+  });
+
+  it('krokiVia=server 而 krokiProxy=false：回落既有 client img 直发路径，零 fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const doc = docWithFence('plantuml', 'a -> b');
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: {
+        krokiHost: 'https://k',
+        mermaidTheme: 'default',
+        modeOf: () => 'kroki',
+        krokiVia: 'server',
+        krokiProxy: false,
+        remoteCall: () => null
+      }
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    const img = doc.querySelector('.md-diagram-view img') as HTMLImageElement;
+    expect(img.getAttribute('src')!.startsWith('https://k/plantuml/svg/')).toBe(true);
   });
 });

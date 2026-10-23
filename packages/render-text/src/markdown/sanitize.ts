@@ -367,6 +367,27 @@ export interface SanitizeOptions {
 }
 
 /**
+ * 服务端获取的图表 SVG 片段净化（spec 2026-10-23 §8.3）：server 模式
+ * （/api/compute/diagram）与 krokiVia=server（/api/kroki 代发）两分支共用的
+ * 承接面——片段包进 [data-vv-diagram="server"] 壳后整串走 sanitizeHtml，
+ * uponSanitizeElement 钩子按壳上下文放行引擎 <style>（危险 token 全量归一化
+ * 判定兜底，url(# 同文档片段引用既有放行），与 compute markdown 后处理产物的
+ * wrapServerDiagrams 承接面同一豁免语义。壳须留在净化输入串内（钩子按串内
+ * 祖先上下文二分），净化后剥壳取回内层——敌意内容若截断壳，截出部分落容器外
+ * → style 豁免不适用（fail-closed，且整串仍经 DOMPurify 全量净化）。
+ */
+export function sanitizeDiagramFragment(root: Document, html: string): string {
+  const probe = root.createElement('div');
+  probe.setAttribute('data-vv-diagram', 'server');
+  // 先在管线期 detached doc 内解析归一（innerHTML 不执行脚本），再嵌壳净化——
+  // 与 sanitizeHtml 的 Document 输入两步语义一致
+  probe.innerHTML = html;
+  const holder = root.createElement('div');
+  holder.innerHTML = sanitizeHtml(`<div data-vv-diagram="server">${probe.innerHTML}</div>`);
+  return holder.firstElementChild?.innerHTML ?? '';
+}
+
+/**
  * 不可信渲染 HTML 过唯一共享策略。string 与 Document 输入统一返回字符串
  * （SDD Ruling：T3 管线以字符串为统一出口，自行 innerHTML 成 DOM）。
  * Document 输入取 body 内容净化（DOMPurify 无法导入文档节点本身；本管线

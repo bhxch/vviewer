@@ -25,6 +25,7 @@ import { routeLargeFileHighlight } from './highlightRouter';
 import { resolveImageBlobUrl } from './markdownImages';
 import { hasNonDiagramFence } from './markdownFence';
 import { loadSettings } from './stores/settings';
+import { loadCapabilities, loadDiagramCapabilities } from './openFlow.svelte';
 import { effectiveMode, resolveMermaidTheme } from './theme';
 
 // BUG-22 启发式的单测锚（实现抽在 markdownFence.ts——无 $app 依赖的纯模块，
@@ -164,12 +165,20 @@ if (browser) {
   // 同款模式），设置变更即时生效且 renderer 不持副本。krokiHost 空串回退注册表
   // 默认主机；mermaid 主题与 vv:appearance-applied 派发值同源（resolveMermaidTheme，
   // theme.ts）；模式三级回退：用户覆盖 → 注册表 defaultMode → 'local'。
+  // spec §8.3（Task 5）能力消费同样闭包内现读（连接发生在模块装载后，顶层快照
+  // 会把连接前的空集永久钉死）：serverDiagramOf 按 health diagrams 子集（类型 id
+  // 归一后比对），krokiProxy 按 capabilities 'kroki-proxy' 恒宣告项；remoteCall
+  // 透传 computeRouter 缝（remoteMarkdown 同款 {url, headers} 形态）。
   setDiagramOptions(() => {
     const s = loadSettings();
     const mode = effectiveMode(s.themeMode);
     return {
       krokiHost: s.diagrams.krokiHost || DEFAULT_KROKI_HOST,
       mermaidTheme: resolveMermaidTheme(mode),
+      krokiVia: s.diagrams.krokiVia,
+      serverDiagramOf: (lang) => loadDiagramCapabilities().includes(resolveDiagramType(lang)?.id ?? lang),
+      krokiProxy: loadCapabilities().includes('kroki-proxy'),
+      remoteCall: (path) => computeRouter.remoteCall(path),
       modeOf: (lang) => s.diagrams.modes[lang] ?? resolveDiagramType(lang)?.defaultMode ?? 'local'
     };
   });
