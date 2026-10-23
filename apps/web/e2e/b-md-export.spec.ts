@@ -7,8 +7,8 @@ import { injectDir, openTreeFile, PIXEL_PNG_B64, type TextFileSpec } from './b-m
  * b-md-export 导出链路冒烟（md-export 计划 Task 3）：
  * - 导出 HTML：playwright download 事件抓 Blob 下载，文件名 <原名>.html；内容经
  *   浏览器 DOMParser 结构断言——图片 data URI 化（相对图 blob→data）、TOC 静态锚
- *   （nav.vv-export-toc 与标题 id 一一对应）、交互壳剥离（.md-copy-btn/
- *   .md-diagram-toggle/foldable 折叠类不残留且收起正文在）、KaTeX 排印全嵌
+ *   （nav.vv-export-toc 与标题 id 一一对应）、交互壳剥离（徽标 button.md-code-lang
+ *   转 span/`.md-diagram-toggle`/foldable 折叠类不残留且收起正文在）、KaTeX 排印全嵌
  *   （20 个 woff2 data URI、fonts/ 相对引用归零）、mermaid 图为 svg 成品；
  * - 导出区显隐：markdown tab 显示两钮，切非 markdown tab 句柄清空钮消失，切回恢复；
  * - 导出 PDF：print 系统对话框不可断言——printDocument 排入的隐藏 srcdoc iframe
@@ -32,7 +32,7 @@ async function openSampler(page: Page): Promise<void> {
   await openTreeFile(page, 'export-sampler.md');
   const md = page.locator('.vv-markdown');
   await expect(md).toBeVisible({ timeout: 20_000 });
-  await expect(md.locator('.md-copy-btn').first()).toBeAttached({ timeout: 20_000 });
+  await expect(md.locator('.md-code-lang').first()).toBeAttached({ timeout: 20_000 });
   await expect(md.locator('.katex')).toHaveCount(2, { timeout: 30_000 });
   await expect(md.locator('.md-diagram-view svg')).toBeVisible({ timeout: 30_000 });
   await expect(md.locator('img[alt="像素图"][src^="blob:"]')).toBeAttached({ timeout: 20_000 });
@@ -57,7 +57,8 @@ async function openExportArea(page: Page): Promise<void> {
 interface ExportProbe {
   doctype: boolean;
   title: string;
-  copyBtn: number;
+  copyBadgeBtn: number;
+  copyBadgeSpan: number;
   toggle: number;
   foldable: number;
   alertText: string;
@@ -81,7 +82,10 @@ async function probeExportHtml(page: Page, html: string): Promise<ExportProbe> {
     return {
       doctype: src.startsWith('<!DOCTYPE html>'),
       title: doc.title,
-      copyBtn: doc.querySelectorAll('.md-copy-btn').length,
+      // spec 2026-10-23 §5：导出侧徽标 button 转 span（flattenCodeLangBadge）——
+      // 交互面 button 归零、语言词以 span 徽标保留
+      copyBadgeBtn: doc.querySelectorAll('button.md-code-lang').length,
+      copyBadgeSpan: doc.querySelectorAll('.md-code-lang').length,
       toggle: doc.querySelectorAll('.md-diagram-toggle').length,
       foldable: doc.querySelectorAll('.markdown-alert-foldable, .markdown-alert-collapsed').length,
       alertText: doc.querySelector('.markdown-alert-content')?.textContent ?? '',
@@ -119,8 +123,10 @@ test.describe('b-md-export 导出链路', () => {
 
     expect(probe.doctype).toBe(true);
     expect(probe.title).toBe('export-sampler.md');
-    // 交互壳剥离：复制钮/图表切换钮不残留，foldable 折叠类剥净且收起正文以展开形态在
-    expect(probe.copyBtn).toBe(0);
+    // 交互壳剥离：徽标 button 交互面不残留（flattenCodeLangBadge 转纯 span，语言词
+    // 保留）、图表切换钮不残留，foldable 折叠类剥净且收起正文以展开形态在
+    expect(probe.copyBadgeBtn).toBe(0);
+    expect(probe.copyBadgeSpan).toBeGreaterThan(0); // rust 围栏徽标以 span 形态保留
     expect(probe.toggle).toBe(0);
     expect(probe.foldable).toBe(0);
     expect(probe.alertText).toContain('收起 callout 的正文');

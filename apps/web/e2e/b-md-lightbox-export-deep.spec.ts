@@ -475,9 +475,9 @@ test.describe('b-md-lightbox-export-deep 灯箱与导出补强', () => {
     for (let i = 0; i < 8; i++) parts.push(`行内公式 ${i}：$a_{${i}} + b_{${i}} = c_{${i}}$`);
     for (let i = 0; i < 5; i++) parts.push(`![锚图${i}](data:image/png;base64,${PIXEL_PNG_B64})`);
     await openDocs(page, [{ name: 'deep-big.md', content: parts.join('\n\n') + '\n' }], 'deep-big.md');
-    // 管线异步面全部落定（复制钮 20 = copyCode 步完成；katex 8 = 排印步完成）再计时，
-    // 排除渲染耗时对导出计时的污染
-    await expect(page.locator('.vv-markdown .md-copy-btn')).toHaveCount(20, { timeout: 30_000 });
+    // 管线异步面全部落定（语言徽标按钮 20 = copyCode 步完成，spec 2026-10-23 §5
+    // 徽标即复制单入口；katex 8 = 排印步完成）再计时，排除渲染耗时对导出计时的污染
+    await expect(page.locator('.vv-markdown .md-code-lang')).toHaveCount(20, { timeout: 30_000 });
     await expect(page.locator('.vv-markdown .katex')).toHaveCount(8, { timeout: 30_000 });
     await openExportArea(page);
 

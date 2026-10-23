@@ -133,10 +133,11 @@ test('MD-04 mermaid：合法块 svg 渲染，非法块错误样式保留原文�
   await expect(badView).toHaveAttribute('data-mermaid', /A\[ --> B/);
   await expect(badView).toContainText('A[ --> B');
 
-  // 不阻塞后续管线：其后的 js 围栏仍产出复制按钮（copyCode 步正常执行）
-  const copyBtn = md.locator('pre .md-copy-btn');
-  await expect(copyBtn).toHaveCount(1, { timeout: 20_000 });
-  await expect(copyBtn).toBeVisible();
+  // 不阻塞后续管线：其后的 js 围栏仍产出语言徽标按钮（copyCode 步正常执行；
+  // spec 2026-10-23 §5 徽标即复制单入口）
+  const badge = md.locator('pre .md-code-lang');
+  await expect(badge).toHaveCount(1, { timeout: 20_000 });
+  await expect(badge).toBeVisible();
 });
 
 test('MD-06 front matter：合法映射剥离元数据不进正文，非法样例原文渲染不崩', async ({

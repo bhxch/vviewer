@@ -12,7 +12,7 @@ import { injectDir, openTreeFile } from './b-markdown-html-docs-helpers';
  *   （列表锚 / 引用 dead title 注记 / 链接内字面豁免）；SY-06 空 ^[] 本地脚注边界
  *   （markdownEngine.test 同口径）；SY-07 金额 $ 与转义 \$ 空白规则；SY-08 mhchem 块级
  *   $$ 与 \[ 形态组合 + 非法段保留 + katex.min.css 排印（0d767ae）；SY-09 代码块/行内码
- *   豁免面组合；SY-10 无语言「代码」徽标 + 复制语义（154c0c1 顶栏迁移后回归）；
+ *   豁免面组合；SY-10 无语言「复制」徽标即复制单按钮语义（spec 2026-10-23 §5）；
  *   SY-11 CRLF 围栏 + \[\] 闭围栏回归锚（1b3f43d 的前端对偶语义）；
  * - 服务端 comrak 通道不在本轮（default 套件纯 web），双端一致性归 vitest 金标锚。
  * 时序锚：renderMarkdown 全管线 await 完成才 replaceChildren 挂载（渲染主流程中
@@ -289,16 +289,17 @@ test.describe('b-syntax-deep 扩展语法补强', () => {
     await expect(md.locator('.katex')).toHaveCount(0);
   });
 
-  // 无语言围栏徽标回退取词源契约 + MD-08 复制语义在 154c0c1 顶栏迁移后的无语言变体回归
-  test('SY-10 无语言代码块「代码」徽标与复制钮语义回归', async ({ page }) => {
+  // 无语言围栏徽标回退取词源契约 + 复制语义无语言变体回归（spec 2026-10-23 §5
+  // 徽标即复制单入口：原独立复制钮退役，徽标本体即复制钮）
+  test('SY-10 无语言代码块「复制」徽标即复制单按钮语义回归', async ({ page }) => {
     test.setTimeout(60_000);
     const content = ['```', '无语言围栏行一', '行二 const x = 1;', '```', ''].join('\n');
     await openMd(page, 'code-no-lang.md', content);
     const md = page.locator('.vv-markdown');
-    // 无语言 fence：data-md-lang 为空串 → 徽标回退「代码」（hljs 侦测类不污染取词源）
+    // 无语言 fence：data-md-lang 为空串 → 徽标回退「复制」（spec §5 无语言判词改判；
+    // hljs 侦测类不污染取词源）
     const bar = md.locator('.md-code-bar');
-    await expect(bar.locator('.md-code-lang')).toHaveText('代码');
-    const btn = bar.locator('.md-copy-btn');
+    const btn = bar.locator('button'); // codeBar 内唯一 button = 徽标本体（spec §5）
     await expect(btn).toHaveText('复制');
     // 复制语义（MD-08 同口径）：hook 剪贴板写入，内容与代码块 textContent 去尾换行一致
     await page.evaluate(() => {

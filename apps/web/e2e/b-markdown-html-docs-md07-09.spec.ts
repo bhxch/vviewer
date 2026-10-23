@@ -72,8 +72,10 @@ test('MD-08 代码复制：hook clipboard.writeText，写入内容与代码块 t
     }
   });
 
-  const btn = md.locator('pre .md-copy-btn');
+  // 徽标即复制单入口（spec 2026-10-23 §5）：js 围栏徽标本体即复制钮（词=js）
+  const btn = md.locator('pre .md-code-lang');
   await expect(btn).toHaveCount(1, { timeout: 20_000 });
+  await expect(btn).toHaveText('js');
   await btn.click();
 
   // 反馈文案翻转证明 writeText 的 Promise 走到 then（复制成功分支）

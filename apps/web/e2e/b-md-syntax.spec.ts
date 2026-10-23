@@ -9,7 +9,7 @@ import { injectDir, openTreeFile } from './b-markdown-html-docs-helpers';
  * - callout 折叠后缀：[!note]- 默认收起（markdown-alert-collapsed）→ 标题点击展开；
  * - wikilink：[[#目标]] 锚跳（remapHeadingHashLinks 改写 href 为 user-content- 前缀，
  *   点击后 hash 变化且目标 heading 滚入视口）+ ![[img|宽]] 嵌入 img 元素；
- * - 代码块语言徽标 .md-code-lang 可见（.md-code-bar 内与复制钮并排）；
+ * - 代码块语言徽标 .md-code-lang 可见（.md-code-bar 内唯一 button，徽标即复制）；
  * - 数学四形态渲染 .katex：$..$ 行内、\(..\) 行内与 \[..\] 块级（前置改写为 $
  *   词汇，引擎层语义——本地/远程引擎同效）、\ce{} mhchem（宏缺失时该段抛错保留
  *   原文，katex 计数即宏存在性证明，markdownPipeline.test.ts 同口径）。
@@ -79,11 +79,12 @@ test.describe('b-md-syntax 扩展语法', () => {
     test.setTimeout(60_000);
     await openSampler(page);
     const md = page.locator('.vv-markdown');
-    // 徽标：pre 顶栏 .md-code-bar 内 [语言词 | 复制钮]
+    // 徽标即复制单入口（spec 2026-10-23 §5）：pre 顶栏 .md-code-bar 内唯一 button
+    // 即语言徽标本体（rust），点击复制、无独立复制钮
     const bar = md.locator('.md-code-bar').first();
     await expect(bar.locator('.md-code-lang')).toHaveText('rust');
     await expect(bar.locator('.md-code-lang')).toBeVisible();
-    await expect(bar.locator('.md-copy-btn')).toBeAttached();
+    await expect(bar.locator('button')).toHaveCount(1);
     // 四形态各产 .katex：$..$、\ce{}（mhchem）、\(..\)（前置改写）、\[..\]（块级）
     await expect(md.locator('.katex')).toHaveCount(4, { timeout: 30_000 });
     await expect(md.locator('.katex-display .katex')).toHaveCount(1);
