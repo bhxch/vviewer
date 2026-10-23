@@ -15,6 +15,7 @@
   import { fileMeta, setInspectorLittle, exportState, getExportDoc } from './metaStore.svelte';
   import { tabStore } from './openFlow.svelte';
   import { rendererCandidatesOfTab } from './RendererPickerMenu';
+  import { detectableLanguageNames } from '@vviewer/highlight';
   import { registry } from './viewer';
   import {
     collectExportHtml,
@@ -52,6 +53,35 @@
       manual: tab.overrideRenderer !== undefined
     };
   });
+
+  // ---------- 语言行（renderer-lang-override spec §4.2，Task 5）：手动高亮语言主入口 ----------
+  // datalist 候选（detectableLanguageNames，grammar 清单 canonical 名字典序）随组件
+  // 一次性取值——语言表静态，非响应式；宽松透传不校验（引擎链自兜底）。显示值/
+  // 「（手动）」徽标自激活 tab 的 overrideLang 派生（openWithUi 同款 tab 侧直读，
+  // 不随 meta 实例出现/消失）；提交走 setHighlightLang（'' = null 清除回自动检测，
+  // rev++ 复用渲染 effect 重跑通道）。highlightAuto 嗅探结果不回写本行（既有现状，
+  // spec 注记不动）——fileMeta.lang 仅作 placeholder 回显自动检测值。
+
+  /** datalist 候选集（一次性）：语言表静态，无响应式需求 */
+  const langNames = detectableLanguageNames();
+
+  /** 语言行显示值/徽标（激活 tab 侧派生，openWithUi 同款）：无 override 时 input
+   * 留空，placeholder 回显自动检测语言（fileMeta.lang，嗅探不回写面） */
+  const langOverrideUi = $derived.by(() => {
+    const tab = tabStore.list.find((t) => t.active);
+    return {
+      value: tab?.overrideLang ?? '',
+      active: tab?.overrideLang !== undefined
+    };
+  });
+
+  /** 语言行提交（Task 5）：trim 为空 = 清 override 回自动检测（null），否则原值
+   * 宽松透传（不校验候选集——datalist 仅建议，引擎链对未知语言自兜底） */
+  function onLangCommit(raw: string): void {
+    const tab = tabStore.list.find((t) => t.active);
+    if (!tab) return;
+    tabStore.setHighlightLang(tab.id, raw.trim() === '' ? null : raw);
+  }
 
   // ---------- 导出动作区（md-export Task 2，spec 2026-10-19 §6/§7） ----------
   // 可见性走 metaStore.exportState.available（markdown 实例 getExportDocument 句柄
@@ -191,9 +221,24 @@
       {#if fileMeta.encoding}
         <div class="meta-row"><dt>编码</dt><dd>{fileMeta.encoding}</dd></div>
       {/if}
-      {#if fileMeta.lang}
-        <div class="meta-row"><dt>语言</dt><dd>{fileMeta.lang}</dd></div>
-      {/if}
+      <div class="meta-row">
+        <dt>语言</dt>
+        <dd>
+          <input
+            class="meta-lang-input"
+            list="vv-lang-datalist"
+            value={langOverrideUi.value}
+            placeholder={fileMeta.lang ? `自动（${fileMeta.lang}）` : '自动'}
+            onchange={(e) => onLangCommit((e.currentTarget as HTMLInputElement).value)}
+            aria-label="高亮语言（留空自动检测）"
+            spellcheck="false"
+          />
+          <datalist id="vv-lang-datalist">
+            {#each langNames as n (n)}<option value={n}></option>{/each}
+          </datalist>
+          {#if langOverrideUi.active}<span class="meta-openwith-manual">（手动）</span>{/if}
+        </dd>
+      </div>
       {#if fileMeta.lines !== null}
         <div class="meta-row"><dt>行数</dt><dd>{fileMeta.lines}</dd></div>
       {/if}
@@ -271,6 +316,13 @@
   .meta-openwith {
     font: inherit;
     max-width: 100%;
+  }
+  .meta-lang-input {
+    /* 语言行 datalist 输入（Task 5）：与打开方式 select 同排版（font 继承随右栏），
+       宽度随 dd 余量收缩（窄面板不溢出） */
+    font: inherit;
+    max-width: 100%;
+    width: 12em;
   }
   .meta-openwith-manual {
     color: var(--ui-fg-muted);

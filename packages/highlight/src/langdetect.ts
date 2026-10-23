@@ -59,3 +59,13 @@ export function detectLanguage(ext: string, text?: string): string | null {
   }
   return null;
 }
+
+/** 语言手动指定候选集（spec §4.2）：canonical 名（grammar 字段优先，缺省键名），
+ * 字典序去重——datalist 建议用，非校验用（宽松透传，引擎链自兜底）。 */
+export function detectableLanguageNames(): string[] {
+  const names = new Set<string>();
+  for (const [name, entry] of Object.entries(languagesTable as Record<string, LangEntry>)) {
+    names.add(entry.grammar ?? name);
+  }
+  return [...names].sort();
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectLanguage } from '../src/langdetect';
+import { detectLanguage, detectableLanguageNames } from '../src/langdetect';
 
 describe('detectLanguage（fileTypes 精确表）', () => {
   it('rs → rust', () => {
@@ -68,5 +68,19 @@ describe('detectLanguage（shebang 首行检测）', () => {
 
   it('shebang 带空行前缀不算（正则锚定行首）', () => {
     expect(detectLanguage('xyzzy', '\n#!/bin/bash\n')).toBeNull();
+  });
+});
+
+describe('detectableLanguageNames（手动指定候选集，spec §4.2）', () => {
+  it('detectableLanguageNames 返回 canonical 名字典序去重集', () => {
+    const names = detectableLanguageNames();
+    expect(names).toContain('rust');
+    expect(names).toEqual([...new Set(names)].sort());
+  });
+
+  it('grammar 字段优先于语言键名（common-lisp 条目给 commonlisp 不给 common-lisp）', () => {
+    const names = detectableLanguageNames();
+    expect(names).toContain('commonlisp');
+    expect(names).not.toContain('common-lisp');
   });
 });

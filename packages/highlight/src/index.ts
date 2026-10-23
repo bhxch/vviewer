@@ -6,7 +6,7 @@ export {
   type QueryAssets,
   type QueryFile,
 } from './queries';
-export { detectLanguage } from './langdetect';
+export { detectLanguage, detectableLanguageNames } from './langdetect';
 export {
   CODE_CAPTURES,
   captureToCssClass,
