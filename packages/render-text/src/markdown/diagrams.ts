@@ -14,7 +14,7 @@ export interface DiagramType {
   krokiType: string;
   /** 源码模式/图源切换的高亮语言（'' = 不高亮） */
   highlightLang: string;
-  engine?: 'mermaid' | 'graphviz' | 'nomnoml' | 'math';
+  engine?: 'mermaid' | 'graphviz' | 'nomnoml' | 'math' | 'svgbob';
 }
 
 export const DIAGRAM_TYPES: readonly DiagramType[] = [
@@ -29,7 +29,7 @@ export const DIAGRAM_TYPES: readonly DiagramType[] = [
   { id: 'seqdiag', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'seqdiag', highlightLang: '' },
   { id: 'erd', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'erd', highlightLang: '' },
   { id: 'pikchr', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'pikchr', highlightLang: '' },
-  { id: 'svgbob', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'svgbob', highlightLang: '' },
+  { id: 'svgbob', aliases: [], local: true, defaultMode: 'local', krokiType: 'svgbob', highlightLang: '', engine: 'svgbob' },
   { id: 'excalidraw', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'excalidraw', highlightLang: 'json' },
   { id: 'nomnoml', aliases: [], local: true, defaultMode: 'local', krokiType: 'nomnoml', highlightLang: '', engine: 'nomnoml' },
   { id: 'bpmn', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'bpmn', highlightLang: 'xml' },

@@ -34,7 +34,6 @@ jobs:
       - run: pnpm typecheck
       # C 项：生成扩展名物入库（运行时装配依赖）——与 languages.json 失同步即失败，防入库漂移
       - run: node tools/grammar-builder/gen-code-extensions.mjs --check
-      - run: pnpm vitest run
       # wasm-bindgen CLI 供给缓存（runner 不预装 CLI）：构建脚本自供给下载官方预编译
       # 二进制到 ~/.cache/svgbob/wasm-bindgen-cli（镜像 grammar 工具链 binaryen 的
       # 「预编译 + ~/.cache 缓存」形态），此处仅承载缓存；键按 crate Cargo.toml 失效，
@@ -43,9 +42,11 @@ jobs:
         with:
           path: ~/.cache/svgbob/wasm-bindgen-cli
           key: wasm-bindgen-cli-${{ runner.os }}-${{ hashFiles('tools/svgbob-wasm/Cargo.toml') }}
-      # svgbob wasm 引擎产物不入库（spec §7）：web build 前构建期生成。wasm32 target
-      # 经 dtolnay 一步安装；cargo 编译缓存按 Cargo.lock 失效（Swatinem）；wasm-opt
-      # 复用 setup-grammars 已缓存的 binaryen（~/.cache/tree-sitter），缺则脚本自行降级
+      # svgbob wasm 引擎产物不入库（spec §7）：单测（diagramEngines.test.ts 对 gen 产物
+      # 真渲染，缺产物即 skip——gen 步前移到 vitest 之前保证 CI 真跑非 skip）与 web
+      # build 前构建期生成。wasm32 target 经 dtolnay 一步安装；cargo 编译缓存按
+      # Cargo.lock 失效（Swatinem）；wasm-opt 复用 setup-grammars 已缓存的 binaryen
+      #（~/.cache/tree-sitter），缺则脚本自行降级
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
@@ -53,6 +54,7 @@ jobs:
         with:
           workspaces: tools/svgbob-wasm
       - run: pnpm gen:svgbob-wasm
+      - run: pnpm vitest run
       - run: pnpm --filter web build
       # spec §2.6 预算门禁：dist 图表引擎 chunk（diagram-engines-*.js）总量 ≤4MB，
       # 超限即失败——启用集取舍（减引擎回落 kroki）见 spec，门禁先行兜底

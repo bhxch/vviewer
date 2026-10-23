@@ -31,8 +31,21 @@ async function renderMathFence(source: string): Promise<string> {
   return katex.renderToString(source, { displayMode: true, throwOnError: true });
 }
 
+export type DiagramEngineId = 'mermaid' | 'graphviz' | 'nomnoml' | 'math' | 'svgbob';
+
+/** svgbob wasm 引擎（spec §7）：glue 构建期生成（gen:svgbob-wasm），init 幂等缓存。 */
+let svgbobInit: Promise<{ render: (s: string) => string }> | null = null;
+async function renderSvgbob(source: string): Promise<string> {
+  svgbobInit ??= import('./svgbob-wasm-gen/svgbob_wasm.js').then(async (m) => {
+    await m.default();
+    return m;
+  }).catch((e: unknown) => { svgbobInit = null; throw e; });
+  const mod = await svgbobInit;
+  return mod.render(source);
+}
+
 export async function renderDiagramEngine(
-  engine: 'mermaid' | 'graphviz' | 'nomnoml' | 'math',
+  engine: DiagramEngineId,
   source: string,
   opts?: { mermaidTheme?: MermaidTheme }
 ): Promise<string> {
@@ -45,6 +58,8 @@ export async function renderDiagramEngine(
       return renderNomnoml(source);
     case 'math':
       return renderMathFence(source);
+    case 'svgbob':
+      return renderSvgbob(source);
   }
 }
 

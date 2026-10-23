@@ -22,10 +22,16 @@ describe('resolveDiagramType', () => {
       expect(resolveDiagramType(id), id).not.toBeNull();
     }
   });
-  it('本期 local 启用集 = mermaid/graphviz/nomnoml/math，其余 kroki 兜底', () => {
+  it('本期 local 启用集 = mermaid/graphviz/nomnoml/math/svgbob（spec §7 翻转），其余 kroki 兜底', () => {
     const localIds = DIAGRAM_TYPES.filter((t) => t.local).map((t) => t.id).sort();
-    expect(localIds).toEqual(['graphviz', 'math', 'mermaid', 'nomnoml']);
+    expect(localIds).toEqual(['graphviz', 'math', 'mermaid', 'nomnoml', 'svgbob']);
     expect(resolveDiagramType('vega')!.defaultMode).toBe('kroki');
+  });
+  it('svgbob 注册表翻转 local 默认（spec §7）', () => {
+    const t = resolveDiagramType('svgbob')!;
+    expect(t.local).toBe(true);
+    expect(t.engine).toBe('svgbob');
+    expect(t.defaultMode).toBe('local');
   });
 });
 
