@@ -6,6 +6,7 @@
   import { badgeOf } from './tabBadge';
   import { registry } from './viewer';
   import { rendererCandidatesOfTab } from './RendererPickerMenu';
+  import { requestMetaLangFocus } from './metaLangFocus';
   import TabContextMenu, { type TabCtxEntry } from './TabContextMenu.svelte';
 
   /**
@@ -36,6 +37,17 @@
   /** 行内来源徽标（T6）：逻辑在 tabBadge.ts 可单测；此处注入当前组来源集。 */
   function badgeOfFor(tab: Tab): string | null {
     return badgeOf(sources, tab);
+  }
+
+  /**
+   * 语言轻入口标签（Task 6，spec §4.2）：被右键 tab 的 overrideLang 优先（手动
+   * 标注），否则「自动」——非激活 tab 无 meta 实例对应面，fileMeta.lang（激活
+   * tab 的检测语言上行）不适用于此，故无检测值回显。文案只读，动作走
+   * requestMetaLangFocus 单一跳转通道（metaLangFocus.ts）：属性面板聚焦语言行
+   * 由 AppShell 裁决，本组件不复制展开/聚焦逻辑。
+   */
+  function langLabelOf(tab: Tab): string {
+    return tab.overrideLang !== undefined ? `${tab.overrideLang}（手动）` : '自动';
   }
 
   // ---------- F 项 T2：右键菜单 / 中键关闭 / 拖拽重排 / pinned 态 ----------
@@ -87,6 +99,12 @@
           label: c.current ? `✓ ${c.label}` : c.label,
           onClick: () => tabStore.setRendererOverride(tab.id, c.id === '' ? null : c.id)
         }))
+      },
+      {
+        // 语言轻入口（Task 6）：只读文案 + 跳转（属性面板聚焦语言行，AppShell 监听
+        // 侧展开/开抽屉），非候选菜单——语言手动指定的编辑面唯一在 MetaPanel 语言行
+        label: `语言：${langLabelOf(tab)}（在属性面板中修改）`,
+        onClick: () => requestMetaLangFocus()
       }
     ];
   });

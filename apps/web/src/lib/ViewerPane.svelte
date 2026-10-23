@@ -6,7 +6,8 @@
   import type { MarkdownEngineState } from '@vviewer/render-text/markdown/markdownRenderer';
   import type { Tab } from './openFlow.svelte';
   import { persistScroll, tabStore } from './openFlow.svelte';
-  import { setFileMeta, setInspector, inspectorBus, setExportHandle, type FileOpenWith, type InspectorSnapshot } from './metaStore.svelte';
+  import { setFileMeta, setInspector, inspectorBus, setExportHandle, fileMeta, type FileOpenWith, type InspectorSnapshot } from './metaStore.svelte';
+  import { requestMetaLangFocus } from './metaLangFocus';
   import { openWithOf } from './openWith';
   import { candidatesOf, type RendererCandidate } from './RendererPickerMenu';
   import { mergeAbortSignals } from './mergeAbortSignals';
@@ -123,6 +124,27 @@ import SearchPanel from './SearchPanel.svelte';
     const t = tab;
     if (!t) return;
     tabStore.setRendererOverride(t.id, id === '' ? null : id);
+  }
+
+  // ---------- 语言轻入口（renderer-lang-override spec §4.2，Task 6） ----------
+  // 状态栏浮层尾部的「语言」项：文案只读（激活 tab overrideLang 优先，否则自动
+  // 检测回显），点击走 requestMetaLangFocus 单一跳转通道（metaLangFocus.ts）——
+  // 展开右栏/开移动端抽屉/聚焦语言行由 AppShell 侧裁决，本组件不复制聚焦逻辑；
+  // 语言候选计算不在此发生（本项非候选菜单，openWithOf 单机制不变量不受影响）。
+
+  /** 浮层「语言」项文案（Task 6）：激活 tab 有 overrideLang → 「rust（手动）」；
+   * 否则「自动（检测 …）」——检测语言从 fileMeta.lang 读（readInstanceMeta 上行，
+   * 嗅探不回写面），缺省「自动」。 */
+  const langOverrideText = $derived.by(() => {
+    const t = tabStore.list.find((x) => x.active);
+    if (t?.overrideLang) return `${t.overrideLang}（手动）`;
+    return fileMeta.lang ? `自动（检测 ${fileMeta.lang}）` : '自动';
+  });
+
+  /** 浮层「语言」项点击：轻入口只派发跳转事件（AppShell 监听，metaLangFocus 单通道） */
+  function focusMetaLang(): void {
+    pickerOpen = false;
+    requestMetaLangFocus();
   }
 
   // '/' 快捷键聚焦搜索（非输入焦点时）；Esc 在面板内部处理（SearchPanel）
@@ -484,6 +506,11 @@ import SearchPanel from './SearchPanel.svelte';
           onclick={() => pickRenderer(c.id)}>{c.current ? '✓ ' : ''}{c.label}</button
         >
       {/each}
+      <!-- 语言轻入口（Task 6）：浮层尾部固定项（非候选菜单项，openWithCandidates 之外），
+           点击跳转属性面板聚焦语言行（requestMetaLangFocus 单通道，metaLangFocus.ts） -->
+      <button type="button" class="vv-status-picker-lang" role="menuitem" onclick={focusMetaLang}>
+        语言：{langOverrideText}
+      </button>
     </div>
   {/if}
 </div>

@@ -44,6 +44,7 @@
   } from './stores/session';
   import { migrateLegacyTabs, workspaceStore, type WorkspaceSnapshotItem, type WorkspaceSource } from './workspaceStore';
   import { loadSettings, onSettingsChanged, saveSettings } from './stores/settings';
+  import { VV_FOCUS_META_LANG } from './metaLangFocus';
   import {
     chromeVisible,
     clampWidth,
@@ -161,6 +162,26 @@
     if (d === null) return;
     updateLayout(d.side === 'left' ? { leftWidth: dragW } : { rightWidth: dragW });
   }
+
+  // ---------- 语言轻入口跳转消费（renderer-lang-override spec §4.2，Task 6） ----------
+  // 状态栏浮层/Tab 右键「语言」项经 requestMetaLangFocus（document CustomEvent
+  // 单通道，metaLangFocus.ts）到此：桌面右栏折叠先展开（updateLayout 走持久链），
+  // 移动端（≤600px 断点，右栏收进抽屉的同一媒体查询条件）先开抽屉；随后聚焦
+  // MetaPanel 语言行 input[list="vv-lang-datalist"]（Task 5 契约 id，MetaPanel
+  // 唯一持有）。展开是响应式 DOM 更新——焦点查询等一帧再取节点（Svelte 5 事件
+  // 驱动更新同步落地，rAF 在其后必见新 DOM；未在场（无 tab）时 querySelector
+  // 落空静默跳过）。
+  $effect(() => {
+    const onFocusMetaLang = (): void => {
+      if (window.matchMedia('(max-width: 600px)').matches) rightOpen = true; // 移动端先开抽屉
+      else if (layout.rightCollapsed) updateLayout({ rightCollapsed: false }); // 桌面折叠先展开
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLInputElement>('input[list="vv-lang-datalist"]')?.focus();
+      });
+    };
+    document.addEventListener(VV_FOCUS_META_LANG, onFocusMetaLang);
+    return () => document.removeEventListener(VV_FOCUS_META_LANG, onFocusMetaLang);
+  });
 
   // ---------- chrome 隐藏与 zen（spec 2026-10-19 §2/§3，Task 2） ----------
 

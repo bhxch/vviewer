@@ -526,9 +526,9 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-status-picker { position: absolute; left: 8px; bottom: 26px; z-index: 30; min-width: 12em;
   padding: 4px; display: flex; flex-direction: column; background: var(--ui-tab-active-bg);
   border: 1px solid var(--ui-border); border-radius: 6px; box-shadow: 0 4px 16px rgb(0 0 0 / 18%); }
-.vv-status-picker-item { background: none; border: none; border-radius: 4px; text-align: left;
+.vv-status-picker-item, .vv-status-picker-lang { background: none; border: none; border-radius: 4px; text-align: left;
   padding: 4px 10px; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
-.vv-status-picker-item:hover { background: var(--ui-hover-bg); }
+.vv-status-picker-item:hover, .vv-status-picker-lang:hover { background: var(--ui-hover-bg); }
 .vv-status-picker-item[aria-current='true'] { color: var(--ui-accent); }
 .vv-tree { list-style: none; margin: 0; padding: 0; }
 .vv-tree .vv-tree { padding-left: 14px; }
