@@ -23,6 +23,10 @@ pub struct WorkerState {
     /// VV_BASE_PATH env（如 `/docs`；空串 = 不裁剪）。dispatch 入口先剥
     /// 前缀再路由（base-path 部署的 /<base>/api/* 请求归位）。
     pub base_path: String,
+    /// kroki 转发域状态（spec 2026-10-23 §8.2）：host 来自 VV_KROKI_HOST
+    /// （部署侧配置——SSRF 防线，缺省 `DEFAULT_KROKI_HOST`，显式无效值装配期
+    /// 失败关闭），http 接缝为 binding fetch 实现（`FetchKrokiHttp`）。
+    pub kroki: vviewer_core::kroki::KrokiState,
 }
 
 static STATE: OnceLock<WorkerState> = OnceLock::new();
@@ -84,5 +88,14 @@ fn build_from_env(env: &Env) -> Result<WorkerState, String> {
     core.version = env!("CARGO_PKG_VERSION");
 
     let base_path = env_str("VV_BASE_PATH")?.unwrap_or_default();
-    Ok(WorkerState { core, base_path })
+
+    // VV_KROKI_HOST（spec 2026-10-23 §8.2）：上游 host 只来自部署侧配置——
+    // 缺省 `DEFAULT_KROKI_HOST`，显式无效值（空白/非 http(s)://）装配期失败
+    // 关闭（crate::env::resolve_kroki_host，fail-closed 先例 = VV_TOKEN I-1）；
+    // http 接缝为 binding fetch 实现（native ReqwestKrokiHttp 的对应物）
+    let kroki = vviewer_core::kroki::KrokiState {
+        host: crate::env::resolve_kroki_host(env_str("VV_KROKI_HOST")?)?,
+        http: Arc::new(crate::kroki::FetchKrokiHttp),
+    };
+    Ok(WorkerState { core, base_path, kroki })
 }

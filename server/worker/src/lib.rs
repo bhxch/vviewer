@@ -14,6 +14,7 @@
 //! | GET /api/events | 不挂载（watch=false） | 不挂载（feature 门） |
 //! | POST /api/ticket | 不挂载（ticket 仅服务 SSE 升级） | ✓ |
 //! | /api/compute/* | 不挂载（core 裁剪） | `--compute` 时挂载 |
+//! | POST /api/kroki | ✓（Bearer 组；转发不算计算） | ✓（native 门控） |
 //!
 //! 数据面：**无 fs 根**（[`CoreState::mounts_only`] 构造不变式）——全部根 =
 //! `VV_MOUNTS` env JSON 声明的 S3/WebDAV 挂载（静态段，rootIndex 从 0 起），
@@ -35,6 +36,10 @@ pub mod env;
 /// 纯 HTTP 语义件（跨目标编译、native 单测覆盖）：Range 头解析与 base-path
 /// 裁剪——与 native 适配层 routes/file.rs 的 parse_range 语义逐行同源。
 pub mod http;
+/// kroki 转发的 wasm 传输实现（spec 2026-10-23 §8.2，binding fetch 接缝——
+/// native routes/kroki.rs 的对应物；wasm only，与 transport 同款门控）。
+#[cfg(target_family = "wasm")]
+mod kroki;
 /// VV_MOUNTS env JSON 解析（纯函数，native 单测覆盖）。
 pub mod mounts;
 /// CoreResponse → worker Response 映射（native 适配层 adapt.rs 的对应物）。

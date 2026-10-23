@@ -38,8 +38,9 @@ use vviewer_storage::StorageError;
 use worker::{js_sys, wasm_bindgen, web_sys, Fetch, Request};
 
 /// JsValue 异常 → 字符串（web_sys 裸调用返回 JsValue；取 message 或字符串
-/// 化——错误面仅进脱敏后的 StorageError 文本）。
-fn js_err(e: wasm_bindgen::JsValue) -> String {
+/// 化——错误面仅进脱敏后的 StorageError 文本）。`pub(crate)`：kroki 转发域的
+/// wasm 传输（kroki.rs）复用同一 JsValue 错误字符串化。
+pub(crate) fn js_err(e: wasm_bindgen::JsValue) -> String {
     use wasm_bindgen::JsCast;
     match e.dyn_into::<js_sys::Error>() {
         Ok(err) => err.to_string().into(),

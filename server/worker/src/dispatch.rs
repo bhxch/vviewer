@@ -17,7 +17,7 @@ use worker::{Env, Method, Request, Response};
 use vviewer_core::auth;
 use vviewer_core::error::CoreError;
 use vviewer_core::state::CoreState;
-use vviewer_core::{file, health, mounts as mounts_domain, tree};
+use vviewer_core::{file, health, kroki as kroki_domain, mounts as mounts_domain, tree};
 use vviewer_storage::RangeSpec;
 
 use crate::http::{
@@ -30,6 +30,11 @@ use crate::state::WorkerState;
 /// 挂载配置是字段级小型 JSON，64KB 已超合理形态数个数量级；超限 413 防
 /// 无界 body 进 serde 解析——POST 是写面，显式限值即闸门）。
 const MOUNTS_BODY_LIMIT: usize = 64 * 1024;
+
+/// `POST /api/kroki` 的原始请求体上限（native KROKI_BODY_LIMIT 同款，spec
+/// 2026-10-23 §8.2）：图源码文本 1MB 已超合理形态数个数量级；超限 413 防
+/// 无界 body 转发上游。
+const KROKI_BODY_LIMIT: usize = 1024 * 1024;
 
 /// fetch 入口分发（entry.rs 调用）。
 pub async fn handle(req: Request, env: &Env, state: &'static WorkerState) -> worker::Result<Response> {
@@ -73,6 +78,9 @@ pub async fn handle(req: Request, env: &Env, state: &'static WorkerState) -> wor
             to_worker(mounts_domain::manifest(&state.core))
         }
         m if m == Method::Post && path == "/api/mounts" => mounts_register(req, state).await,
+        // kroki 转发（spec 2026-10-23 §8.2）：转发不算计算——Bearer 组内
+        // （鉴权门在 dispatch 入口统一），上游 host 只来自部署侧 VV_KROKI_HOST
+        m if m == Method::Post && path == "/api/kroki" => kroki_proxy(req, state).await,
         m if m == Method::Delete && path.starts_with("/api/mounts/") => {
             let index = path["/api/mounts/".len()..]
                 .parse::<usize>()
@@ -266,4 +274,52 @@ async fn mounts_register(mut req: Request, state: &'static WorkerState) -> worke
         Err(e) => return json_error(400, format!("invalid mount config: {e}")),
     };
     respond(mounts_domain::register(&state.core, cfg))
+}
+
+/// `POST /api/kroki`（spec 2026-10-23 §8.2）：body 闸门（1MB → 413，
+/// mounts_register 同款双闸）→ JSON 解析 `{lang, source}`（失败 400）→ core
+/// 转发（lang 白名单 + host 拼接 + binding fetch，见 [`crate::kroki`]）→
+/// JSON `{svg}`；core 错误出口 `json_error` 形态（状态与消息面原样，与
+/// `respond` 的 `From<CoreError>` 映射同构）。
+async fn kroki_proxy(mut req: Request, state: &'static WorkerState) -> worker::Result<Response> {
+    // body 闸门（mounts_register 同款：显式 Content-Length 超限先拒 + 流式累计闸）
+    if let Some(len) = req
+        .headers()
+        .get("content-length")?
+        .and_then(|v| v.parse::<usize>().ok())
+    {
+        if len > KROKI_BODY_LIMIT {
+            return json_error(413, "payload too large");
+        }
+    }
+    let mut acc = 0usize;
+    let mut buf: Vec<u8> = Vec::new();
+    if let Ok(mut stream) = req.stream() {
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            if !crate::http::payload_fits(&mut acc, chunk.len(), KROKI_BODY_LIMIT) {
+                return json_error(413, "payload too large");
+            }
+            buf.extend_from_slice(&chunk);
+        }
+    }
+    let body = String::from_utf8_lossy(&buf).into_owned();
+    let parsed: crate::kroki::KrokiRequest = match serde_json::from_str(&body) {
+        Ok(parsed) => parsed,
+        // axum Json 拒绝的 status 对齐（400）；消息含 serde 字段名（源码本体
+        // 不回显——与 mounts 的凭据不回显同纪律）
+        Err(e) => return json_error(400, format!("invalid kroki request: {e}")),
+    };
+    let rendered =
+        kroki_domain::render(&state.kroki, &parsed.lang, parsed.source.as_bytes()).await;
+    let svg = match rendered {
+        Ok(svg) => svg,
+        Err(err) => return json_error(err.0.as_u16(), err.1),
+    };
+    // 上游 SVG 字节即响应面：非 UTF-8 以 500 短路（native handler 同款消息）
+    let svg = match String::from_utf8(svg) {
+        Ok(svg) => svg,
+        Err(_) => return json_error(500, "kroki 响应非 UTF-8"),
+    };
+    Response::from_json(&serde_json::json!({ "svg": svg }))
 }

@@ -58,6 +58,7 @@ cargo build --release --manifest-path server/Cargo.toml
 | `--hidden` | — | 目录列表隐藏 dot 开头条目（默认显示全部） |
 | `--cors-origin <URL>` | 无 | 允许来自该精确 origin 的跨域 API 访问（见下文 CORS）；省略时不加 CORS 层 |
 | `--log-file <PATH>` | stdout | 日志写文件（ANSI 关闭），超 10MB 滚动为 `<PATH>.old` 单备份；不可用则拒绝启动（exit 2） |
+| `--kroki-host <URL>` | `https://kroki.io` | kroki 转发上游 host（`POST /api/kroki` 的服务端代发）。仅接受非空 `http(s)://` 绝对 URL，非法值拒绝启动（exit 2）——SSRF 防线：上游只来自部署侧配置 |
 
 配置错误一律 exit code 2 并输出 `error: ...`（空 token、`--allow-lan` 无 token、root/web-dist 不存在、端口占用等）。
 
@@ -88,6 +89,9 @@ hidden = false                          # 对应 --hidden
 cors_origin = "https://a.example.com"   # 对应 --cors-origin
 compute = false                         # 对应 --compute
 log_file = "./vviewer.log"              # 对应 --log-file
+
+[kroki]                                 # kroki 转发上游（节可选；对应 --kroki-host）
+host = "https://kroki.io"               # 非空 http(s):// URL，非法值拒绝启动
 
 [[mount]]                               # 附加挂载：S3 兼容对象存储（只读）
 kind = "s3"
@@ -123,6 +127,7 @@ health/mounts 回显与错误信息（误把凭据写进 endpoint 时展示面�
 | `POST /api/mounts` | Bearer | 注册运行时挂载（内存态，重启失效）；同指纹幂等。见下节 |
 | `GET /api/mounts` | Bearer | 挂载清单（静态 TOML 段 + 运行时段 + 全量汇总，脱敏无凭据）。见下节 |
 | `DELETE /api/mounts/{index}` | Bearer | 删除运行时挂载；静态项 405。见下节 |
+| `POST /api/kroki` | Bearer | 图表渲染代发：`{"lang":"svgbob","source":"…"}` → `{"svg":"…"}`。上游 = `--kroki-host`（默认 https://kroki.io），lang 白名单 `[a-z0-9-]`，body 上限 1MB；转发不算计算（不要求 `--compute`），上游错误按 4xx→400/5xx→500 透传消息前 200 字节 |
 
 ## 运行时挂载三 API
 
@@ -336,8 +341,10 @@ WantedBy=multi-user.target
 
 `server/worker/`（crate `vviewer-worker`）：workers-rs 适配——fetch handler→core
 dispatch，与 native 共用业务核。**能力矩阵**：health/tree/file/mounts 三 API 可用
-（存储唯一来源 = VV_MOUNTS 声明的 S3/WebDAV 挂载，wasm 无 fs）；watch（events）、
-search、compute 不挂载且 health 不宣告——前端既有逐项降级链自动生效，无需配置。
+（存储唯一来源 = VV_MOUNTS 声明的 S3/WebDAV 挂载，wasm 无 fs）；`POST /api/kroki`
+转发可用（上游 = VV_KROKI_HOST，缺省 https://kroki.io，health 宣告 kroki-proxy）；
+watch（events）、search、compute 不挂载且 health 不宣告——前端既有逐项降级链自动
+生效，无需配置。
 
 ### 部署步骤
 
@@ -374,6 +381,7 @@ Workers Scripts: Edit）、`CLOUDFLARE_ACCOUNT_ID`；可选 var `WORKER_URL`（c
 | `VV_MOUNTS` | 建议 Secret（含凭据） | 静态挂载 JSON 数组，元素与 TOML `[[mount]]` 同构（kind/endpoint/bucket/…，见「配置文件」节示例）；读取通道 var→secret 依次兜底 |
 | `VV_TOKEN` | **必填** Secret | Bearer 鉴权（health 免鉴权）。缺失/空串 → worker 拒绝装配，全部请求 500——**fail-closed**（终审 I-1）：Workers 天然公网可达，「无 token」按误配置处理而非静默放行，与 native「`--allow-lan` 必须 token 否则拒绝启动」是等价精神的不同实现 |
 | `VV_BASE_PATH` | var | 部署形态 base 约定，见下 |
+| `VV_KROKI_HOST` | var | kroki 转发上游 host（`POST /api/kroki`；默认 `https://kroki.io`）。仅接受非空 `http(s)://` 绝对 URL，显式非法值（空白串/缺前缀）→ worker 拒绝装配（全部请求 500）——fail-closed 与 VV_TOKEN 同纪律（SSRF 防线：上游只来自部署侧配置） |
 
 ```bash
 wrangler secret put VV_MOUNTS   # 粘贴 JSON 数组（凭据不入 vars/wrangler.toml/代码库）
