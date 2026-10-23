@@ -21,14 +21,18 @@
    * 悬停唤出的半透条。onenter/onleave 供 AppShell 做「重入取消隐藏定时/移开 1.5s
    * 再隐」——组件不持有 layout 状态（所有权在 AppShell）。设置中心（⚙/Ctrl+,，
    * spec 2026-10-19 设置中心 §2）与目录管理页（📁/Ctrl+Alt+M，目录挂载 spec §5
-   * 阶段四）开关状态归 AppShell，本组件只发回调。 */
+   * 阶段四）开关状态归 AppShell，本组件只发回调。zen/onToggleZen（专注模式可见
+   * 入口）：zen 态展示与切换回调同归 AppShell（toggleZen 所在地），本组件只发
+   * 回调——zen 下顶栏隐藏但热区唤出的临时条上按钮仍可点（退出通道之一）。 */
   let {
     temp = false,
     hidden = false,
     onenter,
     onleave,
     onsettings,
-    onmounts
+    onmounts,
+    zen = false,
+    onToggleZen
   }: {
     temp?: boolean;
     hidden?: boolean;
@@ -36,6 +40,8 @@
     onleave?: () => void;
     onsettings(): void;
     onmounts(): void;
+    zen?: boolean;
+    onToggleZen(): void;
   } = $props();
   let urlValue = $state('');
   let fileInput = $state<HTMLInputElement | null>(null);
@@ -374,6 +380,17 @@
     title="目录管理（Ctrl+Alt+M）：服务端挂载 / 前端直连与代理 / 本机授权"
   >
     📁
+  </button>
+  <!-- 专注模式可见入口：tooltip 写明进出双方式（快捷键 + zen 内退出通道），
+       文案随 zen 态切换（zen 下经热区唤出的临时条上即「退出」钮） -->
+  <button
+    onclick={() => onToggleZen()}
+    aria-label={zen ? '退出专注模式' : '进入专注模式'}
+    title={zen
+      ? '退出专注模式（Esc 或 Ctrl+Alt+Z）'
+      : '专注模式（Ctrl+Alt+Z）：隐藏顶栏/标签栏与两侧面板，进入后按 Esc 或 Ctrl+Alt+Z 退出'}
+  >
+    {zen ? '退出专注' : '专注'}
   </button>
 </header>
 {#if createOpen}

@@ -217,6 +217,15 @@ test.describe('布局与 zen（桌面）', () => {
     // 补发 pointerenter 唤出临时条（真实行为）——中性区起点避免误唤出
     await page.mouse.move(400, 300);
 
+    // 可见入口（2026-10-23）：TopBar「专注」按钮进 zen，tooltip 写明进出双方式；
+    // 临时条形态（zen 下热区唤出）上同钮即「退出专注」
+    const zenBtn = page.locator('.vv-topbar button', { hasText: '专注' });
+    await expect(zenBtn).toHaveAttribute('title', /进入后按 Esc 或 Ctrl\+Alt\+Z 退出/);
+    await zenBtn.click();
+    await expect(page.locator('.vv-shell.zen')).toHaveCount(1);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.vv-shell.zen')).toHaveCount(0);
+
     // 进入：shell 挂 zen 类、双条 chrome-off、落盘；正交性——显式字段不被改写
     await page.keyboard.press('Control+Alt+z');
     await expect(page.locator('.vv-shell.zen')).toHaveCount(1);
@@ -231,6 +240,10 @@ test.describe('布局与 zen（桌面）', () => {
     });
     // 桌面无退出浮钮（≤900px 媒体查询外）
     await expect(page.locator('.vv-zen-exit')).toBeHidden();
+    // 进入 toast（退出通道发现性，2026-10-23）：文案含桌面退出方式，4.5s 自动消退
+    const toast = page.locator('.vv-toast');
+    await expect(toast).toBeVisible();
+    await expect(toast).toHaveText('已进入专注模式：按 Esc 或 Ctrl+Alt+Z 退出');
 
     // Esc 面板优先：zen 中 Ctrl+, 开设置中心 → Esc 只关面板、zen 保持
     await page.keyboard.press('Control+,');
@@ -239,9 +252,10 @@ test.describe('布局与 zen（桌面）', () => {
     await expect(page.locator('.vv-settings-center')).toHaveCount(0);
     await expect(page.locator('.vv-shell.zen')).toHaveCount(1);
 
-    // 无面板 Esc → 退 zen
+    // 无面板 Esc → 退 zen（toast 随 zen 态条件渲染一并移除）
     await page.keyboard.press('Escape');
     await expect(page.locator('.vv-shell.zen')).toHaveCount(0);
+    await expect(page.locator('.vv-toast')).toHaveCount(0);
     expect(await layoutOf(page)).toMatchObject({ zen: false, topBarVisible: true });
 
     // 再进 zen：顶边缘热区唤出临时条 → 右键 → 退出专注模式（无 temp 残留）

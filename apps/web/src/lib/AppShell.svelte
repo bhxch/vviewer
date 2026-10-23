@@ -229,13 +229,45 @@
    * zen 进出（spec §3）：enterZen/exitZen 只翻 zen 字段（正交性——其余字段不被
    * 改写，退出即还原）；持久化复用 updateLayout。viaPopstate=退出由返回键 popstate
    * 触发——守卫历史项已被该次回退弹出，history 补偿跳过（updateZenHistory）。
+   * 进入时弹 toast 告知退出通道（桌面 Esc/Ctrl+Alt+Z，移动端浮钮/返回键）——
+   * zen 覆盖全部 chrome，无此提示退出通道不可发现（移动端有常驻浮钮，桌面全凭
+   * 快捷键）。
    */
+  let zenToast = $state('');
+  let zenToastTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function showZenToast(text: string): void {
+    zenToast = text;
+    if (zenToastTimer !== null) clearTimeout(zenToastTimer);
+    zenToastTimer = setTimeout(() => {
+      zenToast = '';
+      zenToastTimer = null;
+    }, 4500);
+  }
+
+  /** 立即收回 toast（退出 zen 时调用——提示语义只属于 zen 在场期间，退出后残留
+   * 到 timer 到点会盖在恢复的 chrome 上） */
+  function dismissZenToast(): void {
+    if (zenToastTimer !== null) clearTimeout(zenToastTimer);
+    zenToastTimer = null;
+    zenToast = '';
+  }
+
   function toggleZen(viaPopstate = false): void {
     const fresh = loadSettings();
     const zen = !fresh.layout.zen;
     fresh.layout = zen ? enterZen(fresh.layout) : exitZen(fresh.layout);
     saveSettings(fresh);
-    if (!zen) clearTempTimers();
+    if (zen) {
+      showZenToast(
+        isDrawerBreakpoint()
+          ? '已进入专注模式：点右下角 ✕ 或按返回键退出'
+          : '已进入专注模式：按 Esc 或 Ctrl+Alt+Z 退出'
+      );
+    } else {
+      clearTempTimers();
+      dismissZenToast();
+    }
     updateZenHistory(zen, viaPopstate);
   }
 
@@ -478,6 +510,12 @@
     if (layout.zen) {
       if ((history.state as { vvZen?: unknown } | null)?.vvZen === 1) zenGuardArmed = true;
       else if (isDrawerBreakpoint()) armZenGuard();
+      // reload 落 zen：同样提示退出通道（恢复态用户与首次进入同样需要发现性）
+      showZenToast(
+        isDrawerBreakpoint()
+          ? '已进入专注模式：点右下角 ✕ 或按返回键退出'
+          : '已进入专注模式：按 Esc 或 Ctrl+Alt+Z 退出'
+      );
     }
     window.addEventListener('popstate', onPopstate);
     void restore();
@@ -486,6 +524,7 @@
       unbindArchive();
       window.removeEventListener('popstate', onPopstate);
       clearTempTimers(); // 临时条 1.5s 定时器不跨卸载存活（spec §2 定时器清理）
+      dismissZenToast(); // zen toast 定时器同上
     };
   });
 
@@ -965,6 +1004,8 @@
     hidden={!vis.topBar && !topTemp}
     onsettings={() => toggleSettingsCenter()}
     onmounts={() => toggleMountsManager()}
+    zen={layout.zen}
+    onToggleZen={() => toggleZen()}
     onenter={() => {
       if (!vis.topBar) summonTemp('top'); // 正常可见态的划过不置临时态
     }}
@@ -1089,6 +1130,13 @@
          返回键先关面板，浮钮被压住即「面板优先」的视觉一致 -->
     <button type="button" class="vv-zen-exit" aria-label="退出专注模式" title="退出专注模式"
       onclick={() => toggleZen()}>✕</button>
+  {/if}
+  {#if zenToast}
+    <!-- zen 进入提示（Toast）：退出通道告知——zen 覆盖全部 chrome，无此提示
+         桌面退出全凭快捷键不可发现。role=status 供 AT 播报；4.5s 自动消退，
+         顶部居中避开顶部热区（0-10px）与临时条（fixed top:0），z-index 60 低于
+         右键菜单 90（zen 内紧接的菜单操作不被遮挡） -->
+    <div class="vv-toast" role="status">{zenToast}</div>
   {/if}
   {#if globalSearchOpen}
     <GlobalSearchPanel {sources} onclose={() => (globalSearchOpen = false)} />
@@ -1239,6 +1287,35 @@
   .vv-zen-exit,
   .vv-drawer-head {
     display: none;
+  }
+  /* zen 进入提示（Toast）：全断点通用——桌面/移动退出通道不同，文案在组件内
+     按断点分支，样式不分断。顶部居中 40px 锚定（组件内注释：避开热区/临时条） */
+  .vv-toast {
+    position: fixed;
+    top: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 60;
+    max-width: min(80vw, 480px);
+    padding: 8px 16px;
+    border: 1px solid var(--ui-border);
+    border-radius: 8px;
+    background: var(--ui-tab-active-bg);
+    color: var(--ui-fg);
+    font-size: 13px;
+    box-shadow: 0 4px 16px rgb(0 0 0 / 18%);
+    animation: vv-toast-in 0.18s ease-out;
+    pointer-events: none; /* 纯告知条：不拦截其下元素点击（快速连操作不被拖住） */
+  }
+  @keyframes vv-toast-in {
+    from {
+      opacity: 0;
+      transform: translate(-50%, -6px);
+    }
+    to {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
   }
   @media (max-width: 900px) {
     .vv-drawer-head {
