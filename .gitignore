@@ -37,6 +37,10 @@ apps/web/static/libarchive/
 apps/web/static/vv-sw-cleanup.js
 # web-tree-sitter runtime wasm（构建期由 gen:grammars 从 node_modules 拷贝，不入库；版本随 packages/highlight 的 lockfile 锁定）
 apps/web/static/tree-sitter.wasm
+# svgbob wasm 引擎产物（构建期由 gen:svgbob-wasm 从 tools/svgbob-wasm 生成，不入库；
+# svgbob_wasm.d.ts 手写入库仅类型声明）。*.wasm 已被全局规则覆盖，.js 显式排除防 glue 混入
+packages/render-text/src/markdown/svgbob-wasm-gen/*.js
+packages/render-text/src/markdown/svgbob-wasm-gen/*.wasm
 
 # 系统
 .DS_Store
