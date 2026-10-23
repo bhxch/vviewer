@@ -600,6 +600,59 @@ describe('dispatch opts.lineMetrics 透传（字体系统 Task 2 协议，opts.s
   });
 });
 
+describe('dispatch opts.langOverride 透传（spec §4.1 手动高亮语言，lineMetrics 第 6 参先例）', () => {
+  it('透传为 render 第 6 参的 langOverride 字段（非 streaming 路径）', async () => {
+    const reg = createRegistry();
+    let seen: unknown;
+    reg.install(mk('text', ['txt'], {
+      render: async (_b, _tg, _s, _det, _ctx, opts) => {
+        seen = opts;
+        return { destroy() {} };
+      }
+    }));
+    await createDispatcher(reg).dispatch(
+      source('a.txt'), new TextEncoder().encode('hi'), document.createElement('div'), { langOverride: 'python' });
+    expect(seen).toEqual({ langOverride: 'python' });
+  });
+
+  it('open-as 重入透传 langOverride：兼容路径（错误卡片重入与初渲染同语言）', async () => {
+    const reg = createRegistry();
+    const seen: unknown[] = [];
+    reg.install({ id: 'code', label: 'code', extensions: ['txt'], render: async () => { throw new Error('boom'); } });
+    reg.install(mk('hex', [], {
+      render: async (...args: unknown[]) => { seen.push(args[5]); return { destroy() {} }; }
+    }));
+    const target = document.createElement('div');
+    await createDispatcher(reg).dispatch(
+      source('a.txt'), new TextEncoder().encode('hello\n'), target, { langOverride: 'python' });
+    const hexBtn = [...target.querySelectorAll('.vv-error-action')]
+      .find((b) => b.textContent === '以 hex 打开') as HTMLButtonElement;
+    expect(hexBtn).toBeTruthy();
+    hexBtn.click();
+    await vi.waitFor(() => expect(seen.length).toBeGreaterThan(0));
+    expect(seen[0]).toEqual({ langOverride: 'python' });
+  });
+
+  it('open-as 重入透传 langOverride：headOnly（null+read）分支', async () => {
+    const reg = createRegistry();
+    const seen: unknown[] = [];
+    reg.install({ id: 'code', label: 'code', extensions: ['txt'], render: async () => { throw new Error('boom'); } });
+    reg.install(mk('hex', [], {
+      render: async (...args: unknown[]) => { seen.push(args[5]); return { destroy() {} }; }
+    }));
+    const target = document.createElement('div');
+    const full = new TextEncoder().encode('hello\n');
+    await createDispatcher(reg).dispatch(
+      source('a.txt'), null, target, { langOverride: 'python', read: async () => full });
+    const hexBtn = [...target.querySelectorAll('.vv-error-action')]
+      .find((b) => b.textContent === '以 hex 打开') as HTMLButtonElement;
+    expect(hexBtn).toBeTruthy();
+    hexBtn.click();
+    await vi.waitFor(() => expect(seen.length).toBeGreaterThan(0));
+    expect(seen[0]).toEqual({ langOverride: 'python' });
+  });
+});
+
 describe('dispatch 读下沉（io-streaming §3：streaming 选路 + StreamCtx 构造 + 兼容路径）', () => {
   /** 构造 dispatch 级 read 闭包（区间语义 end 含；无 range = 全量），记录每次调用的 range */
   function readOf(content: Uint8Array<ArrayBuffer>, calls: Array<{ start: number; end: number } | undefined>) {

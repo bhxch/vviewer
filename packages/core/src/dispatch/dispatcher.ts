@@ -30,6 +30,9 @@ export interface DispatchOptions {
    * 跳过探测链（resolveInitialRenderer）与 BUG-13 magic 预检，且不置
    * reclassifiedFrom（改派语义只属于自动识别）；id 未命中静默走正常链。 */
   rendererOverride?: RendererId;
+  /** 手动高亮语言（spec §4.1）：仅 code 渲染器消费（opts.lang 注入口，有值跳过
+   * detectLanguage）；其余渲染器不读即零感知。 */
+  langOverride?: string;
   /** 流式读闭包：buffer === null 时必填（全量字节不预取，head 探测与按需读都经它）；
    * buffer 直传（兼容路径）时省略，dispatch 不触发任何 store 读。 */
   read?: DispatchRead;
@@ -294,16 +297,17 @@ export function createDispatcher(registry: Registry): Dispatcher {
     // read 透传：headOnly 时重入同样以 null+read 走流式读；兼容路径保持 buffer 直传不变。
     // 审计 R1：重试/open-as 重入与主路径同获取消信号（同型解码盲窗收口）
     const optsSignal = opts?.signal;
-    // render 第 6 参（审计 R1 + 字体系统 Task 2）：signal 与 lineMetrics 同参异构
-    // 字段；双侧缺省维持「不传第 6 参」调用形态（渲染器侧零感知，向后兼容）
-    const renderOpts: { signal?: AbortSignal; lineMetrics?: LineMetrics } | undefined =
-      opts?.signal || opts?.lineMetrics
-        ? { signal: opts.signal, lineMetrics: opts.lineMetrics }
+    // render 第 6 参（审计 R1 + 字体系统 Task 2 + spec §4.1）：signal 与 lineMetrics、
+    // langOverride 同参异构字段；双侧缺省维持「不传第 6 参」调用形态（渲染器侧零感知，
+    // 向后兼容）
+    const renderOpts: { signal?: AbortSignal; lineMetrics?: LineMetrics; langOverride?: string } | undefined =
+      opts?.signal || opts?.lineMetrics || opts?.langOverride
+        ? { signal: opts.signal, lineMetrics: opts.lineMetrics, langOverride: opts.langOverride }
         : undefined;
     const redisplay: Redisplay = (o) =>
       headOnly
-        ? dispatch(source, null, target, { ...o, signal: optsSignal, lineMetrics: opts?.lineMetrics, read })
-        : dispatch(source, buffer, target, { ...o, signal: optsSignal, lineMetrics: opts?.lineMetrics });
+        ? dispatch(source, null, target, { ...o, signal: optsSignal, lineMetrics: opts?.lineMetrics, langOverride: opts?.langOverride, read })
+        : dispatch(source, buffer, target, { ...o, signal: optsSignal, lineMetrics: opts?.lineMetrics, langOverride: opts?.langOverride });
     let renderer: Renderer | undefined;
     // 渲染期 ctx（streaming 分支构造）：声明在 try 外——catch 的重试动作需要透传
     //（评审指令②），try 作用域变量 catch 不可见

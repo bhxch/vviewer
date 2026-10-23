@@ -2568,11 +2568,13 @@ export const codeRenderer: Renderer = {
   // UTF-8）。回退面均在 render 内自处（下方守卫）；!rangeCapable 的全量视图 ctx 属
   // 窗口模式退化形态，BlockStream 零 IO 排空。
   streaming: true,
-  async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection, ctx?: StreamCtx, opts?: { signal?: AbortSignal; lineMetrics?: LineMetrics }) {
+  async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection, ctx?: StreamCtx, opts?: { signal?: AbortSignal; lineMetrics?: LineMetrics; langOverride?: string }) {
     // 远端文件（M5 RemoteStore）的服务端检测头纠偏：X-VV-Lang/X-VV-Encoding
     // 与 languages.json 同源，比本地扩展名表/编码启发式更准（无扩展名脚本等）。
     // opts.lang 有值时 renderCode 直接采用、跳过 detectLanguage；服务端无检测头时
     // 回落 det.lang（dispatcher 的 extless 回退链写入的 shebang 语言，握手点 1）。
+    // 手动高亮语言（spec §4.1，opts.langOverride）再优先于服务端检测头：用户显式
+    // 指定 ≠ 一切自动识别，故置于 meta.lang 之前。
     const meta = getRemoteMeta(source.storeId, source.path);
     // M6 compute 路由：只有远程 store 的文件带服务端 path（auto 策略据此走远程高亮）
     const computeSrc: ComputeSource | undefined =
@@ -2582,7 +2584,7 @@ export const codeRenderer: Renderer = {
       encoding,
       highlight: true,
       ext: det.ext,
-      lang: meta?.lang ?? det.lang ?? undefined,
+      lang: opts?.langOverride ?? meta?.lang ?? det.lang ?? undefined,
       computeSrc,
       // 行尺度（字体系统 Task 2）：ViewerPane 按 settings.fonts.codeSize 经 dispatch
       // 透传；缺省 undefined → renderCode 回落 LINE_HEIGHT（降级重渲路径随展开保留）

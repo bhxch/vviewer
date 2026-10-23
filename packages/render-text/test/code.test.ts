@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import hljs from 'highlight.js';
 import { HighlightCanceledError } from '@vviewer/highlight';
-import { RemoteComputeError, type ComputeWhere, type FileSource, type RenderedInstance, type StreamCtx } from '@vviewer/core';
+import { RemoteComputeError, createRemoteStore, type ComputeWhere, type FileSource, type RenderedInstance, type StreamCtx } from '@vviewer/core';
 import { isAbortError as coreIsAbortError } from '@vviewer/core';
 import { STREAM_MAX_BYTES } from '../src/blockStream';
 import * as searchModule from '../src/search';
@@ -695,6 +695,81 @@ describe('renderCode getMeta（BUG-04：状态栏/属性面板元数据）', () 
     const noExt = renderCode(new TextEncoder().encode('text\n'), host, { highlight: false });
     expect(noExt.getMeta().lang).toBeNull();
     noExt.destroy();
+  });
+});
+
+describe('codeRenderer.render 的 langOverride 注入口（spec §4.1：手动高亮语言）', () => {
+  afterEach(() => {
+    attachHighlightClient(null);
+    attachHighlightRouter(null);
+    document.body.innerHTML = '';
+    vi.unstubAllGlobals();
+  });
+
+  function stubResizeObserver(): void {
+    vi.stubGlobal('ResizeObserver', class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    });
+  }
+
+  /** 服务端检测头桩（treeRemote.test.ts 同款 fetch 桩形态）：createRemoteStore read
+   * 一次即种下 remoteMeta（X-VV-Lang: rust）——meta.lang 中间项无需真实远端服务。 */
+  async function sourceWithServerLang(path: string): Promise<FileSource> {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+      headers: { get: (name: string) => (name.toLowerCase() === 'x-vv-lang' ? 'rust' : null) }
+    })));
+    const store = createRemoteStore('http://lang-override.test:8321', null, 'langsrv');
+    await store.read(path);
+    return { storeId: store.id, storeLabel: 'langsrv', path, name: path, store };
+  }
+
+  it('langOverride 优先于服务端检测头：meta.lang=rust 桩仍 python（langOverride ?? meta.lang ?? det.lang 首项）', async () => {
+    stubResizeObserver();
+    attachHighlightClient({ highlight: async () => [{ start: 0, end: 5, capture: 'keyword' }] });
+    const src = await sourceWithServerLang('a.py');
+    const host = newHost();
+    // det.lang 垫底项给非期望值：langOverride 缺席时会错误地落到 rust，防伪绿
+    const inst = (await codeRenderer.render(
+      new TextEncoder().encode('let x = 1'), host, src,
+      { ext: '', encoding: 'utf-8', lang: 'javascript' },
+      undefined, { langOverride: 'python' }
+    )) as CodeInstance;
+    expect(inst.getMeta().lang).toBe('python');
+    inst.destroy();
+  });
+
+  it('无 langOverride 回落 meta.lang（服务端头）；meta 缺省回落 det.lang（既有链保持）', async () => {
+    stubResizeObserver();
+    attachHighlightClient({ highlight: async () => [{ start: 0, end: 5, capture: 'keyword' }] });
+    // 服务端检测头在位：lang=rust（opts.langOverride 缺省不翻转既有优先级）
+    const src = await sourceWithServerLang('b.py');
+    const host = newHost();
+    const inst = (await codeRenderer.render(
+      new TextEncoder().encode('let x = 1'), host, src,
+      { ext: '', encoding: 'utf-8', lang: 'javascript' },
+      undefined, {}
+    )) as CodeInstance;
+    expect(inst.getMeta().lang).toBe('rust');
+    inst.destroy();
+
+    // 非 remote source：remoteMeta 缺省 → det.lang（优先级链尾项）
+    const localSrc: FileSource = {
+      storeId: 'local-lang-lo', storeLabel: 'local', path: '/c.js', name: 'c.js',
+      store: {} as FileSource['store']
+    };
+    const host2 = newHost();
+    const inst2 = (await codeRenderer.render(
+      new TextEncoder().encode('let x = 1'), host2, localSrc,
+      { ext: 'js', encoding: 'utf-8', lang: 'javascript' },
+      undefined, {}
+    )) as CodeInstance;
+    expect(inst2.getMeta().lang).toBe('javascript');
+    inst2.destroy();
   });
 });
 

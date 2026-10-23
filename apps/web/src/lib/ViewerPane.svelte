@@ -310,6 +310,9 @@ import SearchPanel from './SearchPanel.svelte';
         const lineMetrics = codeLineMetrics(loadSettings().fonts.codeSize);
         const res = await dispatcher.dispatch(current.source, null, host, {
           rendererOverride: current.overrideRenderer,
+          // 手动高亮语言（spec §4.1）：Task 3 setHighlightLang 写入 Tab.overrideLang，
+          // 仅 code 渲染器消费（opts.lang 注入口），其余渲染器不读即零感知
+          langOverride: current.overrideLang,
           // 渲染级取消（审计 R1）：透传给异步渲染器的迟到落定校验（image 解码窗）；
           // read 内的合并 signal 为读通道取消，两者同源不同路
           signal: effectAbort.signal,
