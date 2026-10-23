@@ -98,7 +98,10 @@ async function dropFile(page: Page, payload: DropPayload): Promise<void> {
       new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })
     );
   }, payload);
-  await expect(page.locator('.vv-tab.active', { hasText: payload.name })).toBeVisible();
+  // tab 激活放宽 20s（t-open-with dropFile 同批注记）：并发负载下瞬态超时兜底
+  await expect(page.locator('.vv-tab.active', { hasText: payload.name })).toBeVisible({
+    timeout: 20_000
+  });
 }
 
 // ---------------------------------------------------------------- 桌面（chromium）
@@ -398,6 +401,8 @@ test.describe('渲染器双入口接力（chromium + mobile）', () => {
     await btn.click();
     const picker = page.locator('.vv-status-picker');
     await expect(picker.getByRole('menuitem', { name: '✓ 自动（按扩展名）' })).toBeVisible();
+    // spec 2026-10-23 §3.1 markdown 恒兜底：jsonl 类候选同样在 code 与 hex 间含 Markdown
+    await expect(picker.getByRole('menuitem', { name: 'Markdown' })).toBeVisible();
     await picker.getByRole('menuitem', { name: '代码/文本' }).click();
     await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 20_000 });
     await expect(btn).toContainText('打开方式: 代码/文本');

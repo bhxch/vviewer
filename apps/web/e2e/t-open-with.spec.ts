@@ -58,7 +58,11 @@ async function dropFile(page: Page, payload: DropPayload): Promise<void> {
       new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })
     );
   }, payload);
-  await expect(page.locator('.vv-tab.active', { hasText: payload.name })).toBeVisible();
+  // tab 激活放宽 20s（与文件内其它等待一致）：3 worker 并发负载下 drop → 建链
+  // 渲染可超默认 5s（OPEN-05/08 实测瞬态，2026-10-23 OWX 批注记）
+  await expect(page.locator('.vv-tab.active', { hasText: payload.name })).toBeVisible({
+    timeout: 20_000
+  });
 }
 
 /** ≤600px 断点右栏（MetaPanel）收进抽屉（b-app-shell-sources/t-shell 同款本文件先例） */
@@ -419,12 +423,14 @@ test('OPEN-08：状态栏渲染器指示器（Task 3 双入口壳 A）——候�
   await expect(btn).toContainText('txt');
 
   // 弹层候选与 MetaPanel 下拉同源（rendererCandidates 委托 openWithOf）：
-  // ✓自动 首位 + 代码/文本 + 二进制；当前项 aria-current
+  // ✓自动 首位 + 代码/文本 + Markdown + 二进制；当前项 aria-current
   await btn.click();
   const picker = page.locator('.vv-status-picker');
   await expect(picker).toBeVisible();
   await expect(picker.getByRole('menuitem', { name: '✓ 自动（按扩展名）' })).toBeVisible();
   await expect(picker.getByRole('menuitem', { name: '代码/文本' })).toBeVisible();
+  // spec 2026-10-23 §3.1 markdown 恒兜底：.txt 类候选在 code 与 hex 之间插 Markdown
+  await expect(picker.getByRole('menuitem', { name: 'Markdown' })).toBeVisible();
   await expect(picker.getByRole('menuitem', { name: '二进制' })).toBeVisible();
 
   // 手选二进制：浮层关（pickRenderer 收口）、setRendererOverride rev++ 即时重渲染、

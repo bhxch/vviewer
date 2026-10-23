@@ -194,7 +194,15 @@ test('BUG-04/SHELL-12：状态栏「语言/编码/大小/行」段 + 属性面�
   await openRightIfNarrow(page);
   await expect(page.locator('.meta-name')).toHaveText('code-301.js');
   await expect(page.locator('.meta-row', { hasText: '编码' })).toContainText('utf-8');
-  await expect(page.locator('.meta-row', { hasText: '语言' })).toContainText('javascript');
+  // 语言行（spec 2026-10-23 §4.2 Task 5 改 datalist input）：检测语言回显进 placeholder
+  //（自动（javascript）），手动指定走 input value +（手动）徽标——旧 dd 文本断言随批翻转
+  await expect(page.locator('.meta-lang-input')).toHaveAttribute(
+    'placeholder',
+    '自动（javascript）'
+  );
+  await expect(
+    page.locator('.meta-row', { hasText: '语言' }).locator('.meta-openwith-manual')
+  ).toHaveCount(0); // 自动态无（手动）徽标
   await expect(page.locator('.meta-row', { hasText: '行数' })).toContainText('301');
   await expect(page.locator('.meta-row', { hasText: '大小' })).toContainText(/字节/);
   if (await page.evaluate(() => window.innerWidth <= 600)) {

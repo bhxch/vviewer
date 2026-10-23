@@ -272,8 +272,9 @@ test('TA-01：右键菜单六动作逐一 + 置灰态可点击无动作', async 
 
   // ① 置灰态（栈空 + 最右 tab 右侧无普通 tab）：项齐全、置灰项可点击但无动作
   await openTabMenu(page, 'cc.txt');
-  // Task 3：六动作 + 「打开方式」子菜单父项 = 顶层 7 项
-  await expect(page.locator('.vv-tabctx-item')).toHaveCount(7);
+  // Task 3：六动作 + 「打开方式」子菜单父项 = 顶层 7 项；spec 2026-10-23 §4.2 增
+  // 「语言：…（在属性面板中修改）」只读跳转项（AppShell 聚焦语言行）→ 顶层 8 项
+  await expect(page.locator('.vv-tabctx-item')).toHaveCount(8);
   await expect(menuItem(page, '关闭右侧')).toHaveAttribute('aria-disabled', 'true');
   await expect(menuItem(page, '重新打开已关闭标签')).toHaveAttribute('aria-disabled', 'true');
   await expect(menuItem(page, '关闭')).not.toHaveAttribute('aria-disabled', 'true');
@@ -634,14 +635,16 @@ test('TA-09：右键「打开方式」子菜单——候选同源、手选 overr
   await openFile(page, 'sub.txt');
   await expect(page.locator('.vv-code-pre')).toContainText('submenu body', { timeout: 20_000 });
 
-  // 展开子菜单（Task 3 壳 B）：子项 = ✓自动 + 代码/文本 + 二进制（候选与 MetaPanel
-  // 下拉同源，经 rendererCandidatesOfTab——与 openWithOf 同集同序）
+  // 展开子菜单（Task 3 壳 B）：子项 = ✓自动 + 代码/文本 + Markdown + 二进制（候选与
+  // MetaPanel 下拉同源，经 rendererCandidatesOfTab——与 openWithOf 同集同序）
   await openTabMenu(page, 'sub.txt');
   await page.getByRole('menuitem', { name: '打开方式' }).click();
   const sub = page.locator('.vv-tabctx-sub');
   await expect(sub).toBeVisible();
   await expect(sub.getByRole('menuitem', { name: '✓ 自动（按扩展名）' })).toBeVisible();
   await expect(sub.getByRole('menuitem', { name: '代码/文本' })).toBeVisible();
+  // spec 2026-10-23 §3.1 markdown 恒兜底：.txt 类候选在 code 与 hex 之间插 Markdown
+  await expect(sub.getByRole('menuitem', { name: 'Markdown' })).toBeVisible();
   await expect(sub.getByRole('menuitem', { name: '二进制' })).toBeVisible();
 
   // 手选二进制：菜单必关（run 语义）、setRendererOverride rev++ 即时重渲染
