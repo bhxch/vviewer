@@ -9,7 +9,7 @@
 //! 路由挂载在适配层 routes::api_router 的 Bearer 组内，且仅当 `--compute` 启用
 //! （运行时旗标）+ native feature（编译期门）；未启用时路径不存在（统一 JSON 404）。
 
-mod diagrams;
+pub mod diagrams;
 pub mod highlight;
 pub mod markdown;
 pub mod queries;

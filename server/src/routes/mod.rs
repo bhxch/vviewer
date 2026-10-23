@@ -26,7 +26,9 @@ use tower_http::compression::CompressionLayer;
 use crate::auth;
 
 /// /api/compute/* 的原始请求体上限：略高于应用层 5MB（给 JSON 包装留余量），
-/// 超限直接 413，防止 handler 解析超大 body。text 字段的精确 5MB 判定在 handler。
+/// 超限直接 413，防止 handler 解析超大 body。text 字段的精确 5MB 判定在
+/// markdown handler；diagram（Task 4，spec 2026-10-23 §8.1）无应用层判定，
+/// 本限值即其唯一闸门（图源码 6MB 远超合理形态）。
 #[cfg(feature = "native")]
 const COMPUTE_BODY_LIMIT: usize = 6 * 1024 * 1024;
 
@@ -74,9 +76,9 @@ pub fn api_router(state: crate::state::AppState) -> Router {
     // --compute 才暴露计算端点；未启用时路径不存在（统一 JSON 404）。双重门：
     // 编译期 native feature（实现体在 vviewer-core::compute，worker 形态裁剪）
     // × 运行时 --compute 旗标。CompressionLayer（BUG-10 收尾）：highlight
-    // intervals 响应可达十余 MB，gzip 按 Accept-Encoding 协商压缩（浏览器默认
-    // 携带）；仅作用于 compute 端点，不入 file 路由——Range 流被压缩会破坏字节
-    // 区间语义。
+    // intervals / diagram svg（Task 4）响应可达十余 MB，gzip 按 Accept-Encoding
+    // 协商压缩（浏览器默认携带）；仅作用于 compute 端点，不入 file 路由——
+    // Range 流被压缩会破坏字节区间语义。
     #[cfg(feature = "native")]
     let protected = if state.compute {
         protected
@@ -88,6 +90,12 @@ pub fn api_router(state: crate::state::AppState) -> Router {
                 "/compute/highlight",
                 post(compute::highlight)
                     .layer(DefaultBodyLimit::max(COMPUTE_HIGHLIGHT_BODY_LIMIT)),
+            )
+            // 单图渲染（spec §8.1）：与 markdown 同 6MB body 闸门；组内
+            // CompressionLayer 自动覆盖
+            .route(
+                "/compute/diagram",
+                post(compute::diagram).layer(DefaultBodyLimit::max(COMPUTE_BODY_LIMIT)),
             )
             .layer(CompressionLayer::new())
     } else {
