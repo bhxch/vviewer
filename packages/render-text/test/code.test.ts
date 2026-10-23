@@ -458,6 +458,44 @@ describe('renderCode（tree-sitter 主路径，fake client）', () => {
     handle.destroy();
   });
 
+  it('getEngine：无语言线索（auto 采样未检出）落 plain 终态，不留 pending', async () => {
+    stubResizeObserver();
+    attachHighlightClient(null); // failed 相位：waitForAttachedClient 即刻 null → hljsWholeFile auto 路径
+    const host = document.createElement('div');
+    document.body.append(host);
+    // 纯空白文本采样检不出任何语言（hljs highlightAuto 无命中 → language undefined）
+    const handle = renderCode(new TextEncoder().encode('   \n  \n'), host, { ext: 'txt' });
+    await vi.waitFor(() => expect(handle.getEngine()).not.toBe('pending'));
+    expect(handle.getEngine()).toBe('plain');
+    handle.destroy();
+  });
+
+  it('病态长重复 token（MM-17 冻结语料）：纯文本先上屏且 auto 检测限时落终态', async () => {
+    stubResizeObserver();
+    attachHighlightClient(null); // failed 相位 → hljsWholeFile auto 路径（txt 无语言映射）
+    const host = document.createElement('div');
+    document.body.append(host);
+    // 40KB 无换行重复 token：旧全量 highlightAuto 灾难回溯实测 >40s（abnf 规则名
+    // 正则），主线程同步冻结——MM-17 CI 挂死的直接根因
+    const text = 'RANGEFAIL-HEAD;' + 'x'.repeat(40_000) + ';RANGEFAIL-TAIL';
+    const handle = renderCode(new TextEncoder().encode(text), host, { ext: 'txt' });
+    // mount 先行：纯文本上屏不依赖高亮完成，首尾哨兵完整可见
+    await vi.waitFor(
+      () => {
+        const body = host.querySelector('.vv-code-body')?.textContent ?? '';
+        expect(body).toContain('RANGEFAIL-HEAD');
+        expect(body).toContain('RANGEFAIL-TAIL');
+      },
+      { timeout: 5_000 }
+    );
+    // 采样防线：auto 检测限时收敛落终态（hljs=采样命中后全量线性高亮 / plain=未检出）
+    await vi.waitFor(() => expect(handle.getEngine()).not.toBe('pending'), { timeout: 5_000 });
+    expect(['hljs', 'plain']).toContain(handle.getEngine());
+    // 终态后内容仍完整（高亮重绘不丢行）
+    expect(host.querySelector('.vv-code-body')?.textContent).toContain('RANGEFAIL-TAIL');
+    handle.destroy();
+  });
+
   it('getEngine 实时反映引擎：pending → tree-sitter', async () => {
     stubResizeObserver();
     let resolveHighlight!: (v: HighlightInterval[]) => void;

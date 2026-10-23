@@ -60,6 +60,37 @@ export function resolveHljsLang(hljs: HLJS, lang: string | null): string | null 
   return mapped !== undefined && hljs.getLanguage(mapped) ? mapped : null;
 }
 
+/**
+ * highlightAuto 灾难输入采样防线（MM-17 flaky 根因修复）：hljs 的 highlightAuto
+ * 对全量输入遍历全部语言评分，长重复 token 输入（base64/minified/填充串——40KB
+ * 实测 minified 2.4s、base64 >35s，abnf 规则名正则灾难回溯）在主线程同步冻结页面。
+ * 检测只需语言特征，head 采样足够（512B 实测 ≤24ms）；命中后按指定语言全量高亮，
+ * 指定语言路径为线性耗时（abnf 40KB 实测 4ms）。
+ */
+export const HLJS_AUTO_PROBE_BYTES = 512;
+
+/** 采样检测语言：head 采样喂 highlightAuto 取语言 id；未检出/异常返回 null。 */
+export function highlightAutoDetect(hljs: HLJS, text: string): string | null {
+  const probe = text.length > HLJS_AUTO_PROBE_BYTES ? text.slice(0, HLJS_AUTO_PROBE_BYTES) : text;
+  try {
+    return hljs.highlightAuto(probe).language ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** 采样检测 + 指定语言全量高亮（highlightAuto 的安全替身）：返回完整行数的高亮
+ * HTML；未检出语言/高亮异常返回 null（调用方回落纯文本面，与 auto 未命中同义）。 */
+export function highlightAutoSafe(hljs: HLJS, text: string): string | null {
+  const language = highlightAutoDetect(hljs, text);
+  if (language === null) return null;
+  try {
+    return hljs.highlight(text, { language, ignoreIllegals: true }).value;
+  } catch {
+    return null;
+  }
+}
+
 /** 降级链阈值：≤2MB tree-sitter 整文件；≤200MB lazy（可视区 chunk 懒高亮）；更大纯文本。
  * tree-sitter 阈值 2MB 的依据：实测 ~2.1-2.4s/MB，2MB≈4-5s，与移动端预算同量级，
  * 据 spec 5.11 预算校准。plain 上限 200MB：lazy 化后不再有整文件解析成本，上限只防
@@ -851,16 +882,23 @@ export function renderCode(
   async function hljsWholeFile(lang: string | null): Promise<void> {
     hljs ??= (await import('highlight.js')).default;
     if (destroyed) return;
-    const language = resolveHljsLang(hljs, lang); // 别名桥接（如 c-sharp→csharp）；查不到回落 auto
-    let value: string;
-    try {
-      value = language
-        ? hljs.highlight(text, { language, ignoreIllegals: true }).value
-        : hljs.highlightAuto(text).value;
-    } catch {
-      value = hljs.highlightAuto(text).value; // 指定语言高亮异常（罕见）仍兜住
+    const language = resolveHljsLang(hljs, lang); // 别名桥接（如 c-sharp→csharp）；查不到 auto 采样检测
+    let value: string | null;
+    if (language !== null) {
+      try {
+        value = hljs.highlight(text, { language, ignoreIllegals: true }).value;
+      } catch {
+        value = highlightAutoSafe(hljs, text); // 指定语言高亮异常（罕见）仍兜 auto（采样防线版）
+      }
+    } else {
+      value = highlightAutoSafe(hljs, text);
     }
     if (destroyed) return;
+    if (value === null) {
+      // 采样未检出语言（纯文本面）：engine 落 plain 终态不留「解析中」，hlLines 不产出
+      engine = 'plain';
+      return;
+    }
     engine = 'hljs';
     computeWhere = 'local'; // hljs 兜底是本地引擎：执行位置随之回本地
     hlLines = splitHighlightedLines(value, lines.length);
@@ -1031,27 +1069,32 @@ export function renderCode(
   async function hljsChunk(startLine: number, lineCount: number, subLines: string[]): Promise<void> {
     hljs ??= (await import('highlight.js')).default;
     if (destroyed) return;
-    hljsLang = hljsLang ?? resolveHljsLang(hljs, lang); // 别名桥接；null → highlightAuto
+    hljsLang = hljsLang ?? resolveHljsLang(hljs, lang) ?? highlightAutoDetect(hljs, subLines.join('\n'));
+    // 采样检测命中即实例级锁定：后续 chunk 同语言线性高亮，不再逐块重探；未命中
+    // （纯文本 chunk）保持 null，下个 chunk 重探（特征后置文本仍可检出）
     const chunkText = subLines.join('\n');
-    let value: string;
-    try {
-      value = hljsLang
-        ? hljs.highlight(chunkText, { language: hljsLang, ignoreIllegals: true }).value
-        : hljs.highlightAuto(chunkText).value;
-    } catch {
-      value = hljs.highlightAuto(chunkText).value; // 指定语言高亮异常（罕见）仍兜住
+    let value: string | null = null;
+    if (hljsLang !== null) {
+      try {
+        value = hljs.highlight(chunkText, { language: hljsLang, ignoreIllegals: true }).value;
+      } catch {
+        value = null; // 指定语言高亮异常（罕见）：该块保持纯文本，不再叠加 auto 重探
+      }
     }
     if (destroyed) return;
-    const parts = splitHighlightedLines(value, lineCount);
-    const byLine = new Map<number, string>();
-    for (let k = 0; k < parts.length; k++) byLine.set(startLine + k, parts[k] ?? '');
-    hljsChunkCache.set(startLine, byLine);
-    evictChunksByLines(hljsChunkCache, CHUNK_CACHE_MAX_LINES);
+    if (value !== null) {
+      const parts = splitHighlightedLines(value, lineCount);
+      const byLine = new Map<number, string>();
+      for (let k = 0; k < parts.length; k++) byLine.set(startLine + k, parts[k] ?? '');
+      hljsChunkCache.set(startLine, byLine);
+      evictChunksByLines(hljsChunkCache, CHUNK_CACHE_MAX_LINES);
+    }
     if (engine !== 'tree-sitter') {
-      // 产出仍是 hljs（首个 chunk 即兜底/无 client）→ engine=hljs 本地；
-      // 已有 tree-sitter chunk 产出则保持主导引擎不变（混合 chunk 不回退指示）
-      engine = 'hljs';
-      computeWhere = 'local';
+      // 产出 hljs（首个 chunk 即兜底/无 client）→ engine=hljs 本地；chunk 全程未检出
+      // 语言 → plain 终态（不留「解析中」）。已有 tree-sitter chunk 产出则保持主导
+      // 引擎不变（混合 chunk 不回退指示）
+      engine = value !== null ? 'hljs' : 'plain';
+      computeWhere = value !== null ? 'local' : computeWhere;
     }
   }
 
@@ -1665,31 +1708,34 @@ function renderCodeWindowed(
     await hljsChunk(startLine, lineCount, subLines); // 无 client/lang：hljs highlightAuto chunk
   }
 
-  /** 行级 hljs 兜底：单 chunk 主线程高亮（200 行）写 hljsChunkCache（全量路径同款） */
+  /** 行级 hljs 兜底：单 chunk 主线程高亮（200 行）写 hljsChunkCache（全量路径同款，
+   * auto 检测同走采样防线——chunk 级病态输入同样冻结主线程） */
   async function hljsChunk(startLine: number, lineCount: number, subLines: string[]): Promise<void> {
     hljs ??= (await import('highlight.js')).default;
     if (destroyed) return;
-    hljsLang = hljsLang ?? resolveHljsLang(hljs, lang);
+    hljsLang = hljsLang ?? resolveHljsLang(hljs, lang) ?? highlightAutoDetect(hljs, subLines.join('\n'));
     const chunkText = subLines.join('\n');
-    let value: string;
-    try {
-      value = hljsLang
-        ? hljs.highlight(chunkText, { language: hljsLang, ignoreIllegals: true }).value
-        : hljs.highlightAuto(chunkText).value;
-    } catch {
-      value = hljs.highlightAuto(chunkText).value;
+    let value: string | null = null;
+    if (hljsLang !== null) {
+      try {
+        value = hljs.highlight(chunkText, { language: hljsLang, ignoreIllegals: true }).value;
+      } catch {
+        value = null; // 指定语言高亮异常（罕见）：该块保持纯文本，不再叠加 auto 重探
+      }
     }
     if (destroyed) return;
-    const parts = splitHighlightedLines(value, lineCount);
-    const byLine = new Map<number, string>();
-    for (let k = 0; k < parts.length; k++) byLine.set(startLine + k, parts[k] ?? '');
-    hljsChunkCache.set(startLine, byLine);
-    chunkCoverage.set(startLine, lineCount);
-    capChunkCoverage(chunkCoverage); // R-1 加界：与 chunk 缓存逐出联动（见常量注）
-    evictChunksByLines(hljsChunkCache, CHUNK_CACHE_MAX_LINES);
+    if (value !== null) {
+      const parts = splitHighlightedLines(value, lineCount);
+      const byLine = new Map<number, string>();
+      for (let k = 0; k < parts.length; k++) byLine.set(startLine + k, parts[k] ?? '');
+      hljsChunkCache.set(startLine, byLine);
+      chunkCoverage.set(startLine, lineCount);
+      capChunkCoverage(chunkCoverage); // R-1 加界：与 chunk 缓存逐出联动（见常量注）
+      evictChunksByLines(hljsChunkCache, CHUNK_CACHE_MAX_LINES);
+    }
     if (engine !== 'tree-sitter') {
-      engine = 'hljs';
-      computeWhere = 'local';
+      engine = value !== null ? 'hljs' : 'plain';
+      computeWhere = value !== null ? 'local' : computeWhere;
     }
   }
 
