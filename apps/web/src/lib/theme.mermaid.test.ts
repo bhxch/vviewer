@@ -22,7 +22,7 @@ function settings(over: Partial<Settings> = {}): Settings {
     excludedPatterns: [],
     autoRefresh: true,
     computePolicy: 'auto',
-    diagrams: { krokiHost: '', krokiVia: 'client', modes: {} },
+    diagrams: { krokiHost: '', krokiVia: 'client', modes: {}, renderers: {} },
     fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
     layout: { ...DEFAULT_LAYOUT },
     ...over

@@ -325,3 +325,40 @@ describe('diagrams 步：server 模式与 krokiVia=server 代发（Task 5 / spec
     expect(img.getAttribute('src')!.startsWith('https://k/plantuml/svg/')).toBe(true);
   });
 });
+
+// graphviz 双渲染器（Task 6 / spec 2026-10-23 §9.1）：rendererOf 注入值经管线透传
+// renderDiagramEngine opts.renderer——vi.mock 拦 cdnEngines 模块边界观察 hpcc 分流
+//（文件级 mock 对上方用例无影响：均不触 CDN 引擎路径）；默认（未注入 rendererOf）
+// 走既有 viz 路径零变化（viz 真渲染环境相关，容差断言）。
+vi.mock('./cdnEngines', async (importOriginal) => {
+  const real = await importOriginal<Record<string, unknown>>();
+  return { ...real, renderGraphvizHpcc: vi.fn(async () => '<svg><circle r="1"/></svg>') };
+});
+
+describe('diagrams 步：graphviz 渲染器透传（Task 6 / spec §9.1）', () => {
+  it('rendererOf=hpcc：hpcc CDN 引擎出图注入视图（非 kroki img 非错误卡）', async () => {
+    const doc = docWithFence('graphviz', 'digraph { a -> b }');
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: { krokiHost: 'https://k', mermaidTheme: 'default', modeOf: () => 'local', rendererOf: () => 'hpcc' }
+    });
+    const view = doc.querySelector('.md-diagram-view')!;
+    expect(view.innerHTML).toContain('<circle');
+    expect(view.querySelector('img')).toBeNull();
+    expect(view.classList.contains('md-diagram-error')).toBe(false);
+  });
+
+  it('未注入 rendererOf：默认 viz 路径（hpcc mock 零调用），失败照旧降级 kroki img', async () => {
+    const { renderGraphvizHpcc } = await import('./cdnEngines');
+    const hpccMock = vi.mocked(renderGraphvizHpcc);
+    const doc = docWithFence('graphviz', 'digraph { a ->');
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: { krokiHost: 'https://k', mermaidTheme: 'default', modeOf: () => 'local' }
+    });
+    expect(renderGraphvizHpcc).not.toHaveBeenCalled();
+    // 既有回退链不受 renderer 字段影响：viz 失败 → kroki img
+    const img = doc.querySelector('.md-diagram-view img') as HTMLImageElement | null;
+    expect(img?.getAttribute('src')?.startsWith('https://k/graphviz/svg/') ?? true).toBe(true);
+  });
+});

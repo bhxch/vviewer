@@ -411,9 +411,14 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
   }
 
   // local：spec §6 回退链——引擎失败且有 krokiType 先降级 kroki img（kroki 也失败，
-  // img error 既有路径，才落错误卡+源码）；无 krokiType（math）直落错误卡保留源码
+  // img error 既有路径，才落错误卡+源码）；无 krokiType（math）直落错误卡保留源码。
+  // renderer 透传（spec §9.1）：多渲染器类型（graphviz）按 rendererOf 注入选择，
+  // 缺省 undefined = 注册表默认渲染器（viz-js）。
   try {
-    const html = await renderDiagramEngine(type.engine!, source, { mermaidTheme: ctx.diagram?.mermaidTheme ?? 'default' });
+    const html = await renderDiagramEngine(type.engine!, source, {
+      mermaidTheme: ctx.diagram?.mermaidTheme ?? 'default',
+      renderer: ctx.diagram?.rendererOf?.(type.id)
+    });
     view.innerHTML = html;
   } catch {
     if (type.krokiType) {

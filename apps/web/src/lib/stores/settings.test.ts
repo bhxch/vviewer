@@ -11,7 +11,7 @@ const BASE: Settings = {
   excludedPatterns: [],
   autoRefresh: true,
   computePolicy: 'auto',
-  diagrams: { krokiHost: '', krokiVia: 'client', modes: {} },
+  diagrams: { krokiHost: '', krokiVia: 'client', modes: {}, renderers: {} },
   fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
   layout: { ...DEFAULT_LAYOUT }
 };
@@ -121,9 +121,9 @@ describe('loadSettings 外观槽格式白名单（spec 2026-10-12 §2.3）', () 
 });
 
 describe('diagrams 设置节白名单（spec 2026-10-19 §2.1）', () => {
-  it('默认 krokiHost 空 + modes 空', () => {
+  it('默认 krokiHost 空 + modes/renderers 空', () => {
     localStorage.removeItem('vviewer:settings');
-    expect(loadSettings().diagrams).toEqual({ krokiHost: '', krokiVia: 'client', modes: {} });
+    expect(loadSettings().diagrams).toEqual({ krokiHost: '', krokiVia: 'client', modes: {}, renderers: {} });
   });
 
   it('krokiHost 非 http(s) 归空；modes 非法值剔除、非法键剔除', () => {
@@ -155,7 +155,7 @@ describe('diagrams 设置节白名单（spec 2026-10-19 §2.1）', () => {
       JSON.stringify({ diagrams: 42, excludedPatterns: ['.git'], autoRefresh: false })
     );
     const s = loadSettings();
-    expect(s.diagrams).toEqual({ krokiHost: '', krokiVia: 'client', modes: {} });
+    expect(s.diagrams).toEqual({ krokiHost: '', krokiVia: 'client', modes: {}, renderers: {} });
     expect(s.excludedPatterns).toEqual(['.git']);
     expect(s.autoRefresh).toBe(false);
   });
@@ -171,6 +171,28 @@ describe('diagrams 设置节白名单（spec 2026-10-19 §2.1）', () => {
     localStorage.setItem('vviewer:settings', JSON.stringify({ diagrams: { krokiVia: 'p2p' } }));
     s = loadSettings();
     expect(s.diagrams.krokiVia).toBe('client');
+  });
+
+  it('renderers 白名单（spec 2026-10-23 §9.1）：合法值原样通过、非法值/非注册表键/无多渲染器类型剔除', () => {
+    localStorage.setItem('vviewer:settings', JSON.stringify({
+      diagrams: { renderers: { graphviz: 'hpcc', mermaid: 'hpcc', graphvizx: 'viz-js' } }
+    }));
+    // graphviz=hpcc 命中注册表选择面保留；mermaid 无 renderers 剔除（per-type 而非
+    // 扁平枚举——hpcc 仅 graphviz 合法）；未知键剔除
+    expect(loadSettings().diagrams.renderers).toEqual({ graphviz: 'hpcc' });
+    localStorage.setItem('vviewer:settings', JSON.stringify({
+      diagrams: { renderers: { graphviz: 'wasm' } }
+    }));
+    expect(loadSettings().diagrams.renderers).toEqual({}); // 选择面外值剔除 = 默认 viz-js
+  });
+
+  it('renderers 非对象值（数字）字段级归位默认空，不拖垮同节其余字段', () => {
+    localStorage.setItem('vviewer:settings', JSON.stringify({
+      diagrams: { renderers: 42, krokiVia: 'server' }
+    }));
+    const s = loadSettings();
+    expect(s.diagrams.renderers).toEqual({});
+    expect(s.diagrams.krokiVia).toBe('server');
   });
 });
 

@@ -9,6 +9,8 @@
   // 门控=graphviz/svgbob；运行时能力协商以 health diagrams 子集为准，见 viewer.ts
   // 注入）。krokiProxy 组件挂载时读会话缓存（loadCapabilities try/catch 对 SSR/
   // 无记录安全，RemoteSourceModal loadLastServer 同款先例）。
+  // spec 2026-10-23 §9.1（Task 6）：多渲染器类型第二列渲染器 select（注册表
+  // t.renderers 门控=graphviz: viz-js/hpcc；缺省显示注册表首项 viz-js）。
   import { DIAGRAM_TYPES, type DiagramMode } from '@vviewer/render-text/markdown/diagrams';
   import { loadCapabilities } from '../openFlow.svelte';
   import type { Settings } from '../stores/settings';
@@ -35,6 +37,13 @@
    * 重渲，重新打开后生效。 */
   function onDiagramModeChange(id: string, e: Event): void {
     draft.diagrams.modes = { ...draft.diagrams.modes, [id]: (e.currentTarget as HTMLSelectElement).value as DiagramMode };
+    touch();
+  }
+
+  /** 按语言渲染器切换（spec §9.1）：键恒为注册表类型 id；值经 loadSettings 白名单
+   * （注册表 renderers 选择面）裁决，未配置/空 = 注册表默认渲染器。 */
+  function onDiagramRendererChange(id: string, e: Event): void {
+    draft.diagrams.renderers = { ...draft.diagrams.renderers, [id]: (e.currentTarget as HTMLSelectElement).value };
     touch();
   }
 </script>
@@ -65,6 +74,16 @@
       {#each DIAGRAM_TYPES as t (t.id)}
         <label class="vv-diagram-mode-item">
           <span class="vv-diagram-mode-lang">{t.id}</span>
+          {#if t.renderers?.length}
+            <select
+              class="vv-diagram-renderer"
+              value={draft.diagrams.renderers[t.id] ?? t.renderers[0]}
+              onchange={(e) => onDiagramRendererChange(t.id, e)}
+              aria-label="{t.id} 渲染器"
+            >
+              {#each t.renderers as r (r)}<option value={r}>{r}</option>{/each}
+            </select>
+          {/if}
           <select
             value={draft.diagrams.modes[t.id] ?? t.defaultMode}
             onchange={(e) => onDiagramModeChange(t.id, e)}
@@ -84,6 +103,6 @@
     其余语言本地档自动回落 Kroki；Kroki 服务填 http(s):// 开头地址，留空用 https://kroki.io。
     「服务端」模式把图交给所连服务器渲染（当前支持 graphviz/svgbob），未连接或不支持时自动回落本地/Kroki；
     Kroki 通道选「服务端代发」需部署侧启用 kroki 转发（未连接或能力缺失时该选项禁用，已选也会回落前端直连）。
-    改动对已打开文档重新打开后生效。
+    graphviz 可选渲染器（viz-js 默认 / hpcc 经 CDN 按需加载）；改动对已打开文档重新打开后生效。
   </div>
 </section>

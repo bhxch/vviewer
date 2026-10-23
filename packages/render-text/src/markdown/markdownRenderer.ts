@@ -139,6 +139,12 @@ export interface DiagramRenderOptions {
    */
   krokiVia?: 'client' | 'server';
   /**
+   * 图表类型 → 本地渲染器覆盖（spec 2026-10-23 §9.1 graphviz 双渲染器）：仅注册表
+   * 宣告 renderers 的类型有多渲染器（graphviz: viz-js/hpcc）；缺省/未命中返回
+   * undefined = 注册表默认渲染器（viz-js），管线原样透传给 renderDiagramEngine。
+   */
+  rendererOf?: (lang: string) => string | undefined;
+  /**
    * 服务端单图渲染能力（health diagrams 子集归一后的类型 id 集合，spec §8.3）：
    * server 模式的生效裁决依据；缺省=无能力，server 模式按降级链走 local/kroki。
    */

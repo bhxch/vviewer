@@ -74,6 +74,25 @@ describe('五节组件契约（既有 SettingsPanel 五节片段组件化，统�
   }
 });
 
+describe('DiagramsSection 渲染器第二列（spec 2026-10-23 §9.1，Task 6）', () => {
+  const src = readSrc('src/lib/settings/DiagramsSection.svelte');
+
+  it('渲染器 select 按行门控：{#if t.renderers?.length} 包裹（graphviz 行有、mermaid 等单渲染器行无）', () => {
+    // 根 vitest 无 svelte 插件不可挂载，源码契约锚形态（本文件既有先例）；注册表侧
+    // 「仅 graphviz 宣告 renderers」由 packages/render-text diagrams.test.ts 锁定
+    expect(src).toMatch(/\{#if t\.renderers\?\.length\}\s*<select/);
+    expect(src).toContain('aria-label="{t.id} 渲染器"');
+    // 渲染器 select 必须先于模式 select 出现（同一 label 行内第二列），且模式 select 不被吞并
+    expect(src).toMatch(/aria-label="\{t\.id\} 渲染器"[\s\S]*?aria-label="\{t\.id\} 渲染模式"/);
+  });
+
+  it('绑定 draft.diagrams.renderers[t.id]（缺省回注册表首项=默认渲染器），改动走 touch', () => {
+    expect(src).toContain('draft.diagrams.renderers[t.id] ?? t.renderers[0]');
+    expect(src).toMatch(/function onDiagramRendererChange[\s\S]*?touch\(\)/);
+    expect(src).toContain('aria-label="{t.id} 渲染器"');
+  });
+});
+
 describe('AppShell 接线（Ctrl+, 双入口 + overlay 判定入册）', () => {
   const src = readSrc('src/lib/AppShell.svelte');
 

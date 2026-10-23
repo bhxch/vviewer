@@ -70,3 +70,19 @@ export async function renderVegaCdn(source: string): Promise<string> {
   if (!svg) throw new Error('vega 渲染失败');
   return svg.outerHTML;
 }
+
+/** graphviz hpcc 渲染器（spec 2026-10-23 §9.1）：@hpcc-js/wasm-graphviz@1.30.0
+ *（wasm 内嵌单文件，jsdelivr +esm 直链可用——2026-10-23 HEAD 200 实证；spec §9.1
+ * 的「wasm-graphograf」为笔误，计划已勘误）。Graphviz.load() 拿实例后
+ * layout(source, 'svg', 'dot')，finally dispose 释放 wasm 实例（失败同样释放）。 */
+export async function renderGraphvizHpcc(source: string): Promise<string> {
+  const mod = (await loader(`${CDN}/@hpcc-js/wasm-graphviz@1.30.0/+esm`)) as {
+    Graphviz: { load: () => Promise<{ layout: (src: string, fmt?: string, engine?: string) => Promise<string>; dispose: () => void }> };
+  };
+  const g = await mod.Graphviz.load();
+  try {
+    return await g.layout(source, 'svg', 'dot');
+  } finally {
+    g.dispose();
+  }
+}

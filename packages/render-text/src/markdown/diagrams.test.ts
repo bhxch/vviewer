@@ -43,6 +43,15 @@ describe('resolveDiagramType', () => {
       expect(t.defaultMode, id).toBe('local');
     }
   });
+  it('多渲染器选择面（spec 2026-10-23 §9.1）：graphviz viz-js/hpcc 且首项为默认；其余类型单渲染器', () => {
+    const g = resolveDiagramType('graphviz')!;
+    expect(g.renderers).toEqual(['viz-js', 'hpcc']); // 首项 viz-js = 默认渲染器
+    expect(g.renderers![0]).toBe('viz-js');
+    // 无 renderers 的类型（如 mermaid）undefined——设置面不显示渲染器列、白名单拒绝任何值
+    expect(resolveDiagramType('mermaid')!.renderers).toBeUndefined();
+    const withRenderers = DIAGRAM_TYPES.filter((t) => t.renderers?.length).map((t) => t.id);
+    expect(withRenderers).toEqual(['graphviz']); // 本期仅 graphviz 双渲染器
+  });
 });
 
 describe('createKrokiUrl', () => {

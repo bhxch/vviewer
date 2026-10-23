@@ -22,11 +22,15 @@ export interface DiagramType {
    * NATIVE 子集）；仅设置面「服务端」选项显隐消费，运行时能力以 health
    * diagrams 子集协商为准（serverDiagramOf 注入，注册表旗标不裁决运行时）。 */
   server?: boolean;
+  /** 多渲染器选择面（spec 2026-10-23 §9.1）：本地引擎可选实现 id 列表，首项为
+   * 默认渲染器（settings.diagrams.renderers 空/未命中即首项语义）。undefined/空 =
+   * 单渲染器（设置面不显示渲染器列，settings 白名单按本表裁决值合法性）。 */
+  renderers?: readonly string[];
 }
 
 export const DIAGRAM_TYPES: readonly DiagramType[] = [
   { id: 'mermaid', aliases: [], local: true, defaultMode: 'local', krokiType: 'mermaid', highlightLang: 'mermaid', engine: 'mermaid' },
-  { id: 'graphviz', aliases: ['dot'], local: true, defaultMode: 'local', krokiType: 'graphviz', highlightLang: 'dot', engine: 'graphviz', server: true },
+  { id: 'graphviz', aliases: ['dot'], local: true, defaultMode: 'local', krokiType: 'graphviz', highlightLang: 'dot', engine: 'graphviz', server: true, renderers: ['viz-js', 'hpcc'] },
   { id: 'plantuml', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'plantuml', highlightLang: 'plantuml' },
   { id: 'c4plantuml', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'c4plantuml', highlightLang: 'plantuml' },
   { id: 'ditaa', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'ditaa', highlightLang: '' },

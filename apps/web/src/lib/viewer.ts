@@ -179,7 +179,11 @@ if (browser) {
       serverDiagramOf: (lang) => loadDiagramCapabilities().includes(resolveDiagramType(lang)?.id ?? lang),
       krokiProxy: loadCapabilities().includes('kroki-proxy'),
       remoteCall: (path) => computeRouter.remoteCall(path),
-      modeOf: (lang) => s.diagrams.modes[lang] ?? resolveDiagramType(lang)?.defaultMode ?? 'local'
+      modeOf: (lang) => s.diagrams.modes[lang] ?? resolveDiagramType(lang)?.defaultMode ?? 'local',
+      // 本地渲染器覆盖（spec §9.1）：键归一为注册表 id（别名 dot 同命中 graphviz），
+      // 值经 loadSettings 白名单（仅注册表 renderers 选择面）；未配置返回 undefined
+      // = 注册表默认渲染器 viz-js。
+      rendererOf: (lang) => s.diagrams.renderers[resolveDiagramType(lang)?.id ?? lang]
     };
   });
 }

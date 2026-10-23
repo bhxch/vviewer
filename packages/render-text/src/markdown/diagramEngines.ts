@@ -14,7 +14,12 @@ async function renderMermaid(source: string, theme: MermaidTheme): Promise<strin
   return svg;
 }
 
-async function renderGraphviz(source: string): Promise<string> {
+/** graphviz 本地引擎（spec 2026-10-23 §9.1 双渲染器）：renderer==='hpcc' 走
+ * CDN 直链 @hpcc-js/wasm-graphviz（cdnEngines 恒懒加载不进主 chunk）；缺省/其余值
+ * 走既有 @viz-js/viz 路径——默认 settings.diagrams.renderers 为空 → rendererOf
+ * 返回 undefined → viz，渲染结果零变化。 */
+async function renderGraphviz(source: string, renderer?: string): Promise<string> {
+  if (renderer === 'hpcc') return (await import('./cdnEngines')).renderGraphvizHpcc(source);
   const viz = await import('@viz-js/viz');
   const inst = await viz.instance();
   return inst.renderSVGElement(source).outerHTML;
@@ -58,13 +63,13 @@ async function renderSvgbob(source: string): Promise<string> {
 export async function renderDiagramEngine(
   engine: DiagramEngineId,
   source: string,
-  opts?: { mermaidTheme?: MermaidTheme }
+  opts?: { mermaidTheme?: MermaidTheme; renderer?: string }
 ): Promise<string> {
   switch (engine) {
     case 'mermaid':
       return renderMermaid(source, opts?.mermaidTheme ?? 'default');
     case 'graphviz':
-      return renderGraphviz(source);
+      return renderGraphviz(source, opts?.renderer);
     case 'nomnoml':
       return renderNomnoml(source);
     case 'math':

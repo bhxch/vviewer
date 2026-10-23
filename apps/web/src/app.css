@@ -618,6 +618,9 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-diagram-mode-item .vv-diagram-mode-lang { flex: 1; min-width: 0; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
 .vv-diagram-mode-item select { flex: none; min-width: 0; max-width: 88px; }
+/* 渲染器第二列（spec 2026-10-23 §9.1，仅 graphviz 行在）：双 select 同行需收窄，
+   值只有 viz-js/hpcc 短词，60px 足够；lang 词溢出由上方 ellipsis 规则兜底 */
+.vv-diagram-mode-item .vv-diagram-renderer { max-width: 60px; }
 /* 设置中心「字体」节（原 SettingsPanel 区块，Task 1 迁入 FontsSection；字体系统
    spec 2026-10-19 §4）：槽行复用 .vv-settings-theme-row；样张预览的族/字号由组件
    内联 style 提供（草稿值实时渲染，theme.ts fontFamilyValue 同源转义），此处只管

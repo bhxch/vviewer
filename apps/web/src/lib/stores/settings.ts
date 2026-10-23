@@ -5,11 +5,14 @@ import { DEFAULT_LAYOUT, sanitizeLayout, type LayoutSettings } from '../layout';
 /** 图表渲染设置（spec 2026-10-19 §2.1）：krokiHost 空串 = 用注册表 DEFAULT_KROKI_HOST；
  * modes 键 = 图表类型 id/别名，值覆盖注册表 defaultMode（Task 7 面板消费）；
  * krokiVia 为 kroki 消费通道（spec 2026-10-23 §8.3）：client=前端直连 kroki img，
- * server=经部署侧 /api/kroki 代发（能力缺失时管线自动回落 client）。 */
+ * server=经部署侧 /api/kroki 代发（能力缺失时管线自动回落 client）；
+ * renderers 键 = 图表类型 id，值 = 本地渲染器覆盖（spec 2026-10-23 §9.1，仅注册表
+ * 宣告 renderers 的类型——graphviz: viz-js/hpcc；空/未命中 = 注册表默认 viz-js）。 */
 export interface DiagramsSettings {
   krokiHost: string;
   krokiVia: 'client' | 'server';
   modes: Record<string, DiagramMode>;
+  renderers: Record<string, string>;
 }
 
 /** 字体设置（spec 2026-10-19 字体系统 §2.1）：family '' = 默认栈；字号 px，
@@ -52,7 +55,7 @@ const DEFAULTS: Settings = {
   excludedPatterns: [],
   autoRefresh: true,
   computePolicy: 'auto',
-  diagrams: { krokiHost: '', krokiVia: 'client', modes: {} },
+  diagrams: { krokiHost: '', krokiVia: 'client', modes: {}, renderers: {} },
   fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
   layout: DEFAULT_LAYOUT
 };
@@ -66,7 +69,12 @@ function defaults(): Settings {
   return {
     ...DEFAULTS,
     excludedPatterns: [...DEFAULTS.excludedPatterns],
-    diagrams: { krokiHost: DEFAULTS.diagrams.krokiHost, krokiVia: DEFAULTS.diagrams.krokiVia, modes: { ...DEFAULTS.diagrams.modes } },
+    diagrams: {
+      krokiHost: DEFAULTS.diagrams.krokiHost,
+      krokiVia: DEFAULTS.diagrams.krokiVia,
+      modes: { ...DEFAULTS.diagrams.modes },
+      renderers: { ...DEFAULTS.diagrams.renderers }
+    },
     fonts: { ...DEFAULTS.fonts },
     layout: { ...DEFAULTS.layout }
   };
@@ -100,7 +108,9 @@ export function normalizeSettings(partial: Record<string, unknown>): Settings {
     }
   }
   // diagrams 节白名单（spec §2.1）：host 必须 http(s):// 或空；krokiVia 二枚举
-  //（spec §8.3，脏值归位 client=直发现状）；modes 键须在注册表、值须四枚举
+  //（spec §8.3，脏值归位 client=直发现状）；modes 键须在注册表、值须四枚举；
+  // renderers（spec §9.1）键须在注册表、值须命中该类型注册表 renderers 选择面
+  //（per-type 数据驱动而非扁平枚举——hpcc 仅 graphviz 合法），非法键值剔除=默认 viz-js
   const d = s.diagrams ?? DEFAULTS.diagrams;
   s.diagrams = {
     krokiHost: typeof d.krokiHost === 'string' && /^https?:\/\//.test(d.krokiHost) ? d.krokiHost : '',
@@ -109,6 +119,12 @@ export function normalizeSettings(partial: Record<string, unknown>): Settings {
       Object.entries(typeof d.modes === 'object' && d.modes !== null ? d.modes : {}).flatMap(([k, v]): [string, DiagramMode][] => {
         const t = resolveDiagramType(k);
         return t && (v === 'local' || v === 'kroki' || v === 'server' || v === 'source') ? [[k, v]] : [];
+      })
+    ),
+    renderers: Object.fromEntries(
+      Object.entries(typeof d.renderers === 'object' && d.renderers !== null ? d.renderers : {}).flatMap(([k, v]): [string, string][] => {
+        const t = resolveDiagramType(k);
+        return typeof v === 'string' && t?.renderers?.includes(v) ? [[k, v]] : [];
       })
     )
   };
@@ -165,7 +181,7 @@ function notify(s: Settings): void {
     cb({
       ...s,
       excludedPatterns: [...s.excludedPatterns],
-      diagrams: { ...s.diagrams, modes: { ...s.diagrams.modes } },
+      diagrams: { ...s.diagrams, modes: { ...s.diagrams.modes }, renderers: { ...s.diagrams.renderers } },
       fonts: { ...s.fonts },
       layout: { ...s.layout }
     });

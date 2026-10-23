@@ -141,7 +141,9 @@ export function validateSettings(raw: unknown): SettingsIssue[] {
     } else {
       const d = raw.diagrams;
       for (const k of Object.keys(d)) {
-        if (k !== 'krokiHost' && k !== 'krokiVia' && k !== 'modes') issues.push({ field: `diagrams.${k}`, message: '未知字段（白名单外，不落盘）' });
+        if (k !== 'krokiHost' && k !== 'krokiVia' && k !== 'modes' && k !== 'renderers') {
+          issues.push({ field: `diagrams.${k}`, message: '未知字段（白名单外，不落盘）' });
+        }
       }
       if (d.krokiHost !== undefined && d.krokiHost !== '' && !(typeof d.krokiHost === 'string' && /^https?:\/\//.test(d.krokiHost))) {
         issues.push({ field: 'diagrams.krokiHost', message: '须为 http(s):// 开头地址或空串（空 = 默认服务）' });
@@ -157,6 +159,21 @@ export function validateSettings(raw: unknown): SettingsIssue[] {
             if (!resolveDiagramType(k)) issues.push({ field: `diagrams.modes.${k}`, message: '未知图表类型（注册表外）' });
             else if (!DIAGRAM_MODES.includes(v as string)) {
               issues.push({ field: `diagrams.modes.${k}`, message: `渲染模式须为 ${DIAGRAM_MODES.join(' / ')} 之一` });
+            }
+          }
+        }
+      }
+      // renderers 白名单镜像（spec §9.1）：键同 modes 口径（注册表），值须命中该
+      // 类型注册表 renderers 选择面（per-type——与 normalizeSettings 同源单表裁决）
+      if (d.renderers !== undefined) {
+        if (!isObj(d.renderers)) {
+          issues.push({ field: 'diagrams.renderers', message: '应为对象' });
+        } else {
+          for (const [k, v] of Object.entries(d.renderers)) {
+            const t = resolveDiagramType(k);
+            if (!t) issues.push({ field: `diagrams.renderers.${k}`, message: '未知图表类型（注册表外）' });
+            else if (!t.renderers || !t.renderers.includes(v as string)) {
+              issues.push({ field: `diagrams.renderers.${k}`, message: '该类型不支持此渲染器' });
             }
           }
         }
@@ -267,9 +284,9 @@ export function mergeDraftOnto(base: Settings, baseline: Settings, draft: Settin
 
 /** mergeDraftOnto 的递归体：draft 相对 baseline 有差异的叶子字段写入 target。
  * 顶层只走白名单键（draft 未知键不入结果）；节内信任 Settings 同构契约
- * （fonts/layout 全形，diagrams.modes 任意图类型键均合法——新增键按「baseline
- * 缺键 = 变更」落位），删键不传播（target 保留 base 的键，与 mergeImported 的
- * modes 合并缺项保留口径对称）。 */
+ * （fonts/layout 全形，diagrams.modes/renderers 任意图类型键均合法——新增键按
+ * 「baseline 缺键 = 变更」落位），删键不传播（target 保留 base 的键，与
+ * mergeImported 的 modes 合并缺项保留口径对称）。 */
 function mergeChanged(
   target: Record<string, unknown>,
   baseline: Record<string, unknown>,
@@ -413,7 +430,7 @@ function collectUnknownPaths(raw: Record<string, unknown>): string[] {
     if (!SETTINGS_KEYS.includes(k as keyof Settings)) paths.push(k);
   }
   const allowed: Record<string, readonly string[]> = {
-    diagrams: ['krokiHost', 'krokiVia', 'modes'],
+    diagrams: ['krokiHost', 'krokiVia', 'modes', 'renderers'],
     fonts: ['uiFamily', 'uiSize', 'codeFamily', 'codeSize'],
     layout: Object.keys(sanitizeLayout({}))
   };
@@ -429,6 +446,12 @@ function collectUnknownPaths(raw: Record<string, unknown>): string[] {
   if (isObj(modes)) {
     for (const k of Object.keys(modes)) {
       if (!resolveDiagramType(k)) paths.push(`diagrams.modes.${k}`);
+    }
+  }
+  const renderers = isObj(raw.diagrams) ? (raw.diagrams as Record<string, unknown>).renderers : undefined;
+  if (isObj(renderers)) {
+    for (const k of Object.keys(renderers)) {
+      if (!resolveDiagramType(k)) paths.push(`diagrams.renderers.${k}`);
     }
   }
   return paths;

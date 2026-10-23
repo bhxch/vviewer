@@ -11,12 +11,13 @@ vi.mock('./cdnEngines', async (importOriginal) => {
     ...real,
     renderExcalidrawCdn: vi.fn(async () => '<svg>exc-via-switch</svg>'),
     renderBpmnCdn: vi.fn(async () => '<svg>bpmn-via-switch</svg>'),
-    renderVegaCdn: vi.fn(async () => '<svg>vega-via-switch</svg>')
+    renderVegaCdn: vi.fn(async () => '<svg>vega-via-switch</svg>'),
+    renderGraphvizHpcc: vi.fn(async () => '<svg>hpcc-via-switch</svg>')
   };
 });
 
 // 真函数：直测组走 mock loader，不触网
-const { __setCdnLoaderForTest, renderExcalidrawCdn, renderBpmnCdn, renderVegaCdn } = await vi.importActual<
+const { __setCdnLoaderForTest, renderExcalidrawCdn, renderBpmnCdn, renderVegaCdn, renderGraphvizHpcc } = await vi.importActual<
   typeof import('./cdnEngines')
 >('./cdnEngines');
 
@@ -144,11 +145,69 @@ describe('CDN 引擎直测（mock loader）', () => {
   });
 });
 
+describe('graphviz hpcc 渲染器（spec 2026-10-23 §9.1，mock loader）', () => {
+  it('精确版本 URL + Graphviz.load() → layout(source, svg, dot) 产物', async () => {
+    const calls: string[] = [];
+    __setCdnLoaderForTest(async (url) => {
+      seen.push(url);
+      return {
+        Graphviz: {
+          load: async () => {
+            calls.push('load');
+            return {
+              layout: async (src: string, fmt?: string, engine?: string) => {
+                calls.push(`layout:${src}:${fmt}:${engine}`);
+                return '<svg>hpcc</svg>';
+              },
+              dispose: () => {
+                calls.push('dispose');
+              }
+            };
+          }
+        }
+      };
+    });
+    expect(await renderGraphvizHpcc('digraph { a -> b }')).toBe('<svg>hpcc</svg>');
+    expect(seen).toEqual(['https://cdn.jsdelivr.net/npm/@hpcc-js/wasm-graphviz@1.30.0/+esm']);
+    expect(calls).toEqual(['load', 'layout:digraph { a -> b }:svg:dot', 'dispose']);
+  });
+
+  it('layout 失败仍 dispose（finally），错误上抛', async () => {
+    const calls: string[] = [];
+    __setCdnLoaderForTest(async () => ({
+      Graphviz: {
+        load: async () => ({
+          layout: async () => {
+            throw new Error('bad dot');
+          },
+          dispose: () => {
+            calls.push('dispose');
+          }
+        })
+      }
+    }));
+    await expect(renderGraphvizHpcc('digraph { a ->')).rejects.toThrow('bad dot');
+    expect(calls).toEqual(['dispose']);
+  });
+});
+
 describe('分发委派：renderDiagramEngine 四新 engine 走 cdnEngines', () => {
   it('excalidraw/bpmn/vega/vegalite 分别委派对应 CDN 函数', async () => {
     expect(await renderDiagramEngine('excalidraw', 'x')).toBe('<svg>exc-via-switch</svg>');
     expect(await renderDiagramEngine('bpmn', 'x')).toBe('<svg>bpmn-via-switch</svg>');
     expect(await renderDiagramEngine('vega', 'x')).toBe('<svg>vega-via-switch</svg>');
     expect(await renderDiagramEngine('vegalite', 'x')).toBe('<svg>vega-via-switch</svg>');
+  });
+
+  it('graphviz renderer=hpcc 委派 renderGraphvizHpcc；缺省/viz-js 不委派（既有 viz 路径，spec §9.1）', async () => {
+    const { renderGraphvizHpcc } = await import('./cdnEngines');
+    const hpccMock = vi.mocked(renderGraphvizHpcc);
+    expect(await renderDiagramEngine('graphviz', 'x', { renderer: 'hpcc' })).toBe('<svg>hpcc-via-switch</svg>');
+    expect(hpccMock).toHaveBeenCalledTimes(1);
+    // 缺省（rendererOf undefined = settings.renderers 空）与显式 viz-js 均走 viz 路径
+    //（viz 真渲染环境相关，失败容差——断言只看 hpcc mock 零追加调用）
+    await renderDiagramEngine('graphviz', 'x').catch(() => {});
+    await renderDiagramEngine('graphviz', 'x', { renderer: 'viz-js' }).catch(() => {});
+    expect(hpccMock).toHaveBeenCalledTimes(1);
   });
 });
