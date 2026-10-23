@@ -2,15 +2,20 @@
   // 元数据面板（BUG-04 兑付 M4 占位）：读 metaStore 的模块级状态展示当前活动
   // 文件的名称/大小/编码/语言/行数/来源。数据由 ViewerPane 渲染实例的 getMeta
   // 写入（code 含行列；媒体/图片等渲染器至少大小与编码），错误卡片/tab 空时显示占位。
-  // 「打开方式」下拉（C 项入口 B）：候选与选中态来自 fileMeta.openWith（ViewerPane
-  // 渲染成功时上行）；change 经 tabStore.setRendererOverride 写 override（选「自动」
-  // = null 清 override 回自动路由）——rev++ 复用渲染 effect 重跑通道即时生效。
+  // 「打开方式」下拉（C 项入口 B）：候选与选中态自激活 tab 直接计算（TabBar 同款
+  // rendererCandidatesOfTab，spec 2026-10-23 §3.2 常驻）——不随 meta 实例出现/消失，
+  // 无 meta 实例路径（store.read 失败卡片、清理空态）恒可用；change 经
+  // tabStore.setRendererOverride 写 override（选「自动」= null 清 override 回自动
+  // 路由）——rev++ 复用渲染 effect 重跑通道即时生效。metaStore 的 fileMeta.openWith
+  // 上行通道保留仅作回显兜底，本组件 UI 不再读它。
   // 「数据检查器」区块（hex 增强 Task 3）：值表与光标偏移来自 fileMeta.inspector
   // （ViewerPane 轮询 hex 实例 getInspector 上行）；字节序 select 写 inspectorBus
   // （模块级 $state 总线下行，ViewerPane 探测 hex 实例 setLittle 透传——本组件
   // 无 props 是 C 项约束）。样式在 app.css（区块全局类，与 .meta-list 同层）。
   import { fileMeta, setInspectorLittle, exportState, getExportDoc } from './metaStore.svelte';
   import { tabStore } from './openFlow.svelte';
+  import { rendererCandidatesOfTab } from './RendererPickerMenu';
+  import { registry } from './viewer';
   import {
     collectExportHtml,
     collectPrintHtml,
@@ -31,6 +36,22 @@
     if (!tab) return;
     tabStore.setRendererOverride(tab.id, id === '' ? null : id);
   }
+
+  /** 打开方式候选（spec §3.2 常驻）：自激活 tab 直接计算（TabBar 同款），不随
+   * meta 实例出现/消失——metaStore 上行仅作回显兜底。rendererCandidatesOfTab
+   * 返回候选数组，此处聚合成 select 所需的 {current, manual, options} 形状：
+   * current 取候选中的 current 项（override id 未注册被守卫滤除时落「自动」），
+   * manual 沿用 openWithOf 语义（override 存在即手动，含未注册 id 场景）。 */
+  const openWithUi = $derived.by(() => {
+    const tab = tabStore.list.find((t) => t.active);
+    if (!tab) return null;
+    const candidates = rendererCandidatesOfTab(registry, tab);
+    return {
+      options: candidates,
+      current: candidates.find((c) => c.current)?.id ?? '',
+      manual: tab.overrideRenderer !== undefined
+    };
+  });
 
   // ---------- 导出动作区（md-export Task 2，spec 2026-10-19 §6/§7） ----------
   // 可见性走 metaStore.exportState.available（markdown 实例 getExportDocument 句柄
@@ -146,24 +167,24 @@
   {#if fileMeta.name}
     <dl class="meta-list">
       <div class="meta-row"><dt>名称</dt><dd class="meta-name">{fileMeta.name}</dd></div>
-      {#if fileMeta.openWith}
-        <div class="meta-row">
-          <dt>打开方式</dt>
-          <dd>
+      <div class="meta-row">
+        <dt>打开方式</dt>
+        <dd>
+          {#if openWithUi}
             <select
               class="meta-openwith"
               aria-label="打开方式"
-              value={fileMeta.openWith.current}
+              value={openWithUi.current}
               onchange={(e) => onOpenWith(e.currentTarget.value)}
             >
-              {#each fileMeta.openWith.options as opt (opt.id)}
+              {#each openWithUi.options as opt (opt.id)}
                 <option value={opt.id}>{opt.label}</option>
               {/each}
             </select>
-            {#if fileMeta.openWith.manual}<span class="meta-openwith-manual">（手动）</span>{/if}
-          </dd>
-        </div>
-      {/if}
+            {#if openWithUi.manual}<span class="meta-openwith-manual">（手动）</span>{/if}
+          {/if}
+        </dd>
+      </div>
       {#if fileMeta.size !== null}
         <div class="meta-row"><dt>大小</dt><dd>{fileMeta.size} 字节</dd></div>
       {/if}
