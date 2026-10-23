@@ -1,7 +1,11 @@
 // diagramEngines.ts — 本地图表引擎适配（spec §2.1 启用集 + §2.6 standalone 形态）。
 // API 用法对齐 markpad src/lib/localRenderers.ts；全部动态 import（不进主包），
 // import 失败不缓存负结果（允许重试）。CDN 直链四类委派 cdnEngines.ts（spec §6）。
-export type MermaidTheme = 'default' | 'dark';
+// MermaidTheme（spec 2026-10-23 §9.2 Task 7）：五值为 mermaid 原生主题枚举
+//（initialize { theme } 直透）；settings.diagrams.mermaidTheme 的 'auto'（跟随
+// 亮暗）在 app 侧解析为本联合，render-text 侧只见具体值。
+export const MERMAID_THEMES = ['default', 'dark', 'neutral', 'forest', 'base'] as const;
+export type MermaidTheme = (typeof MERMAID_THEMES)[number];
 
 let mermaidSeq = 0;
 

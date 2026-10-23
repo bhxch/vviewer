@@ -17,7 +17,7 @@ describe('j/k 步长联动（台账 M2：CODE_LINE_HEIGHT 常量退役）', () =
   const src = readSrc('src/lib/AppShell.svelte');
 
   it('j/k 键处理器即时同源读取：codeLineHeight(loadSettings().fonts.codeSize)，常量已移除', () => {
-    expect(src).toContain("import { codeLineHeight } from './theme';");
+    expect(src).toMatch(/import \{[^}]*\bcodeLineHeight\b[^}]*\} from '\.\/theme';/s); // 同行导入随 Task 7 扩 effectiveMode/resolveMermaidTheme
     expect(src.match(/codeLineHeight\(loadSettings\(\)\.fonts\.codeSize\)/g)?.length).toBe(2); // j 与 k 各一处
     expect(src).not.toContain('CODE_LINE_HEIGHT'); // 常量声明与消费点均退役（e2e 注释引用除外）
   });

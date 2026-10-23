@@ -174,7 +174,10 @@ if (browser) {
     const mode = effectiveMode(s.themeMode);
     return {
       krokiHost: s.diagrams.krokiHost || DEFAULT_KROKI_HOST,
-      mermaidTheme: resolveMermaidTheme(mode),
+      // mermaid 主题（spec §9.2）：'auto' = 跟随外观亮暗（resolveMermaidTheme，外观
+      // 切换经 vv:appearance-applied 即时重画）；显式五枚举原样——settings 保存路径
+      // 的显式变更经 vv:diagram-settings-applied 即时重画（AppShell 派发）。
+      mermaidTheme: s.diagrams.mermaidTheme === 'auto' ? resolveMermaidTheme(mode) : s.diagrams.mermaidTheme,
       krokiVia: s.diagrams.krokiVia,
       serverDiagramOf: (lang) => loadDiagramCapabilities().includes(resolveDiagramType(lang)?.id ?? lang),
       krokiProxy: loadCapabilities().includes('kroki-proxy'),

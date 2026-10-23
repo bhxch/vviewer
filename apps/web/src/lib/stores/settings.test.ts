@@ -11,7 +11,7 @@ const BASE: Settings = {
   excludedPatterns: [],
   autoRefresh: true,
   computePolicy: 'auto',
-  diagrams: { krokiHost: '', krokiVia: 'client', modes: {}, renderers: {} },
+  diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} },
   fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
   layout: { ...DEFAULT_LAYOUT }
 };
@@ -121,9 +121,23 @@ describe('loadSettings 外观槽格式白名单（spec 2026-10-12 §2.3）', () 
 });
 
 describe('diagrams 设置节白名单（spec 2026-10-19 §2.1）', () => {
-  it('默认 krokiHost 空 + modes/renderers 空', () => {
+  it('默认 krokiHost 空 + mermaidTheme auto + modes/renderers 空', () => {
     localStorage.removeItem('vviewer:settings');
-    expect(loadSettings().diagrams).toEqual({ krokiHost: '', krokiVia: 'client', modes: {}, renderers: {} });
+    expect(loadSettings().diagrams).toEqual({ krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} });
+  });
+
+  it('mermaidTheme 白名单（spec §9.2）：五枚举与 auto 原样通过、脏值字段级归位 auto', () => {
+    for (const v of ['auto', 'default', 'neutral', 'dark', 'forest', 'base']) {
+      localStorage.setItem('vviewer:settings', JSON.stringify({ diagrams: { mermaidTheme: v } }));
+      expect(loadSettings().diagrams.mermaidTheme).toBe(v);
+    }
+    // 枚举外字符串与脏 JSON 类型（数字）均归位 'auto'（= 跟随亮暗现状语义）
+    localStorage.setItem('vviewer:settings', JSON.stringify({ diagrams: { mermaidTheme: 'solarized' } }));
+    expect(loadSettings().diagrams.mermaidTheme).toBe('auto');
+    localStorage.setItem('vviewer:settings', JSON.stringify({ diagrams: { mermaidTheme: 42, krokiVia: 'server' } }));
+    const s = loadSettings();
+    expect(s.diagrams.mermaidTheme).toBe('auto');
+    expect(s.diagrams.krokiVia).toBe('server'); // 字段级归位不拖垮同节其余字段
   });
 
   it('krokiHost 非 http(s) 归空；modes 非法值剔除、非法键剔除', () => {
@@ -155,7 +169,7 @@ describe('diagrams 设置节白名单（spec 2026-10-19 §2.1）', () => {
       JSON.stringify({ diagrams: 42, excludedPatterns: ['.git'], autoRefresh: false })
     );
     const s = loadSettings();
-    expect(s.diagrams).toEqual({ krokiHost: '', krokiVia: 'client', modes: {}, renderers: {} });
+    expect(s.diagrams).toEqual({ krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} });
     expect(s.excludedPatterns).toEqual(['.git']);
     expect(s.autoRefresh).toBe(false);
   });

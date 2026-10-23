@@ -264,7 +264,7 @@ describe('applyAppearanceFromSettings（订阅触发入口，spec 2026-10-12 §2
     excludedPatterns: [],
     autoRefresh: true,
     computePolicy: 'auto',
-    diagrams: { krokiHost: '', krokiVia: 'client', modes: {}, renderers: {} },
+    diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} },
     fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
     layout: { ...DEFAULT_LAYOUT }
   });

@@ -9,7 +9,8 @@
 // （同一白名单单源），此处只负责「报告」；三类问题同为阻断错误（校验失败不部分
 // 应用，spec §4 导入同纪律），修复后应用时经 normalizeSettings 规范化落值。
 import { resolveDiagramType } from '@vviewer/render-text/markdown/diagrams';
-import { clampSize, CODE_SIZE_RANGE, normalizeSettings, saveSettings, UI_SIZE_RANGE, type Settings } from './stores/settings';
+import { clampSize, CODE_SIZE_RANGE, MERMAID_THEME_VALUES, normalizeSettings, saveSettings, UI_SIZE_RANGE, type Settings } from './stores/settings';
+import type { MermaidTheme } from '@vviewer/render-text/markdown/diagramEngines';
 import { sanitizeLayout } from './layout';
 
 /** 校验问题（field 为顶层字段名或 `节.字段` 点径；'' = JSON 整体语法/形态错误） */
@@ -141,7 +142,7 @@ export function validateSettings(raw: unknown): SettingsIssue[] {
     } else {
       const d = raw.diagrams;
       for (const k of Object.keys(d)) {
-        if (k !== 'krokiHost' && k !== 'krokiVia' && k !== 'modes' && k !== 'renderers') {
+        if (k !== 'krokiHost' && k !== 'krokiVia' && k !== 'mermaidTheme' && k !== 'modes' && k !== 'renderers') {
           issues.push({ field: `diagrams.${k}`, message: '未知字段（白名单外，不落盘）' });
         }
       }
@@ -150,6 +151,11 @@ export function validateSettings(raw: unknown): SettingsIssue[] {
       }
       if (d.krokiVia !== undefined && d.krokiVia !== 'client' && d.krokiVia !== 'server') {
         issues.push({ field: 'diagrams.krokiVia', message: "须为 'client' / 'server' 之一（client=前端直连，server=服务端代发）" });
+      }
+      // mermaidTheme 白名单镜像（spec §9.2）：'auto' + 五枚举（与 normalizeSettings
+      // 同源单表 MERMAID_THEME_VALUES 裁决）
+      if (d.mermaidTheme !== undefined && !MERMAID_THEME_VALUES.includes(d.mermaidTheme as MermaidTheme | 'auto')) {
+        issues.push({ field: 'diagrams.mermaidTheme', message: "须为 'auto'（跟随亮暗）或 default / neutral / dark / forest / base 之一" });
       }
       if (d.modes !== undefined) {
         if (!isObj(d.modes)) {
@@ -430,7 +436,7 @@ function collectUnknownPaths(raw: Record<string, unknown>): string[] {
     if (!SETTINGS_KEYS.includes(k as keyof Settings)) paths.push(k);
   }
   const allowed: Record<string, readonly string[]> = {
-    diagrams: ['krokiHost', 'krokiVia', 'modes', 'renderers'],
+    diagrams: ['krokiHost', 'krokiVia', 'mermaidTheme', 'modes', 'renderers'],
     fonts: ['uiFamily', 'uiSize', 'codeFamily', 'codeSize'],
     layout: Object.keys(sanitizeLayout({}))
   };

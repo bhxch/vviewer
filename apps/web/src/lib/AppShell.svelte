@@ -56,7 +56,7 @@
     type LayoutSide,
     type LayoutSettings
   } from './layout';
-  import { codeLineHeight } from './theme';
+  import { codeLineHeight, effectiveMode, resolveMermaidTheme } from './theme';
   import { loadEnabledFontFaces } from './stores/fontsStore';
   import { syncMountsOnConnect, listDirectMounts, displayLabelForStore } from './mountsSync';
 
@@ -516,8 +516,22 @@
     // 「亮暗模式」控件应用时，data-theme-mode 也须同步（此前唯一运行时写入点在
     // TopBar cycleTheme——设置中心路径漏打标，壳层配色不切换，Task 5 e2e SC-03 补出）
     const offSettings = onSettingsChanged((s) => {
+      // mermaid 主题即时生效（spec 2026-10-23 §9.2，Task 7）：仅 diagrams.mermaidTheme
+      // 实际变化才派发 vv:diagram-settings-applied（无关设置保存零重画）；detail 恒
+      // 为已解析具体主题（'auto' 按当前亮暗映射，与 viewer.ts 注入器同公式），挂载的
+      // markdown 实例据此就地重画（markdownRenderer per-instance 监听）。auto 态的
+      // 亮暗联动走 vv:appearance-applied 既有路径（theme.ts），此处不重复派发。
+      const prevMermaidTheme = settings.diagrams.mermaidTheme; // 旧值捕获须先于副本赋值
       settings = s;
       document.documentElement.dataset.themeMode = s.themeMode;
+      if (s.diagrams.mermaidTheme !== prevMermaidTheme) {
+        const t = s.diagrams.mermaidTheme;
+        document.dispatchEvent(
+          new CustomEvent('vv:diagram-settings-applied', {
+            detail: { mermaidTheme: t === 'auto' ? resolveMermaidTheme(effectiveMode(s.themeMode)) : t }
+          })
+        );
+      }
     });
     // render-archive 包内树点击 → addTab（递归预览通道）
     const unbindArchive = bindArchiveOpenEvents();

@@ -1,16 +1,24 @@
 import type { ComputePolicy } from '@vviewer/core';
 import { resolveDiagramType, type DiagramMode } from '@vviewer/render-text/markdown/diagrams';
+import { MERMAID_THEMES, type MermaidTheme } from '@vviewer/render-text/markdown/diagramEngines';
 import { DEFAULT_LAYOUT, sanitizeLayout, type LayoutSettings } from '../layout';
+
+/** mermaid 主题设置白名单（spec 2026-10-23 §9.2）：'auto' 跟随外观亮暗（现状语义，
+ * 消费侧 viewer.ts 注入器/AppShell 派发经 resolveMermaidTheme 解析），其余为 mermaid
+ * 原生主题显式固定。 */
+export const MERMAID_THEME_VALUES: readonly (MermaidTheme | 'auto')[] = ['auto', ...MERMAID_THEMES];
 
 /** 图表渲染设置（spec 2026-10-19 §2.1）：krokiHost 空串 = 用注册表 DEFAULT_KROKI_HOST；
  * modes 键 = 图表类型 id/别名，值覆盖注册表 defaultMode（Task 7 面板消费）；
  * krokiVia 为 kroki 消费通道（spec 2026-10-23 §8.3）：client=前端直连 kroki img，
  * server=经部署侧 /api/kroki 代发（能力缺失时管线自动回落 client）；
  * renderers 键 = 图表类型 id，值 = 本地渲染器覆盖（spec 2026-10-23 §9.1，仅注册表
- * 宣告 renderers 的类型——graphviz: viz-js/hpcc；空/未命中 = 注册表默认 viz-js）。 */
+ * 宣告 renderers 的类型——graphviz: viz-js/hpcc；空/未命中 = 注册表默认 viz-js）；
+ * mermaidTheme 为 mermaid 主题（spec 2026-10-23 §9.2）：'auto'=跟随外观亮暗。 */
 export interface DiagramsSettings {
   krokiHost: string;
   krokiVia: 'client' | 'server';
+  mermaidTheme: 'auto' | MermaidTheme;
   modes: Record<string, DiagramMode>;
   renderers: Record<string, string>;
 }
@@ -55,7 +63,7 @@ const DEFAULTS: Settings = {
   excludedPatterns: [],
   autoRefresh: true,
   computePolicy: 'auto',
-  diagrams: { krokiHost: '', krokiVia: 'client', modes: {}, renderers: {} },
+  diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} },
   fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
   layout: DEFAULT_LAYOUT
 };
@@ -72,6 +80,7 @@ function defaults(): Settings {
     diagrams: {
       krokiHost: DEFAULTS.diagrams.krokiHost,
       krokiVia: DEFAULTS.diagrams.krokiVia,
+      mermaidTheme: DEFAULTS.diagrams.mermaidTheme,
       modes: { ...DEFAULTS.diagrams.modes },
       renderers: { ...DEFAULTS.diagrams.renderers }
     },
@@ -108,13 +117,17 @@ export function normalizeSettings(partial: Record<string, unknown>): Settings {
     }
   }
   // diagrams 节白名单（spec §2.1）：host 必须 http(s):// 或空；krokiVia 二枚举
-  //（spec §8.3，脏值归位 client=直发现状）；modes 键须在注册表、值须四枚举；
+  //（spec §8.3，脏值归位 client=直发现状）；mermaidTheme 六值白名单（spec §9.2，
+  // 脏值归位 'auto'=跟随亮暗现状）；modes 键须在注册表、值须四枚举；
   // renderers（spec §9.1）键须在注册表、值须命中该类型注册表 renderers 选择面
   //（per-type 数据驱动而非扁平枚举——hpcc 仅 graphviz 合法），非法键值剔除=默认 viz-js
   const d = s.diagrams ?? DEFAULTS.diagrams;
   s.diagrams = {
     krokiHost: typeof d.krokiHost === 'string' && /^https?:\/\//.test(d.krokiHost) ? d.krokiHost : '',
     krokiVia: d.krokiVia === 'server' ? 'server' : 'client',
+    mermaidTheme: MERMAID_THEME_VALUES.includes(d.mermaidTheme as MermaidTheme | 'auto')
+      ? (d.mermaidTheme as MermaidTheme | 'auto')
+      : 'auto',
     modes: Object.fromEntries(
       Object.entries(typeof d.modes === 'object' && d.modes !== null ? d.modes : {}).flatMap(([k, v]): [string, DiagramMode][] => {
         const t = resolveDiagramType(k);

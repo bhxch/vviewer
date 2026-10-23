@@ -33,7 +33,7 @@ import { parseFrontMatter } from './frontMatter';
 import { sanitizeHtml } from './sanitize';
 import { enrichMarkdownDom } from './enrich';
 import { runPipeline, removeLightboxOverlay, LIGHTBOX_OVERLAY_ID } from './pipeline';
-import { renderMermaidInto } from './diagramEngines';
+import { renderMermaidInto, type MermaidTheme } from './diagramEngines';
 
 /**
  * 围栏代码高亮回调（pipeline 的 highlightFence 实现）：HighlightClient 区间
@@ -129,7 +129,9 @@ function isAbsoluteSrc(src: string): boolean {
 /** 图表分发选项：app 侧按 settings 解析（render-text 不感知 localStorage）。 */
 export interface DiagramRenderOptions {
   krokiHost: string;
-  mermaidTheme: 'default' | 'dark';
+  /** mermaid 主题（spec §2.3 亮暗联动 + §9.2 用户显式设置）：'auto' 已在 app 侧
+   * （viewer.ts 注入器）解析为具体主题——render-text 只见 mermaid 原生五枚举。 */
+  mermaidTheme: MermaidTheme;
   /** 未配置语言返回注册表 defaultMode（调用方保证） */
   modeOf: (lang: string) => import('./diagrams').DiagramMode;
   /**
@@ -549,20 +551,21 @@ export const markdownRenderer: Renderer = {
     // 解析文档 → 挂载（节点被主文档收养，管线加的复制按钮/灯箱监听随节点保留）
     target.replaceChildren(...Array.from(doc.body.childNodes));
     const toc = extractToc(target);
-    // 图表外观联动（spec §2.3）：mermaid 配色烘焙进 SVG 不可反演，外观变化就地重画。
-    // per-instance 文档监听（destroy 随实例摘除），查询锚定在本实例 target 内——
-    // 多实例共存只刷自己的容器。主题快照自本次 render 的 ctx（未注入/事件缺 detail
-    // 时兜底）；kroki 态 mermaid 视图同带锚，重渲染走 local 引擎（主题即时生效、
-    // 消除远端 kroki 依赖——可接受语义）。
+    // 图表外观联动（spec §2.3）与主题设置即时生效（spec 2026-10-23 §9.2，Task 7）：
+    // mermaid 配色烘焙进 SVG 不可反演，主题变化就地重画。per-instance 文档监听
+    //（destroy 随实例摘除），查询锚定在本实例 target 内——多实例共存只刷自己的
+    // 容器。主题快照自本次 render 的 ctx（未注入/事件缺 detail 时兜底）；kroki 态
+    // mermaid 视图同带锚，重渲染走 local 引擎（主题即时生效、消除远端 kroki 依赖
+    // ——可接受语义）。两事件同构：vv:appearance-applied（外观亮暗联动，auto 语义）
+    // 与 vv:diagram-settings-applied（settings 保存路径仅 mermaidTheme 变化时派发）。
     const currentTheme = getDiagramOptions()?.mermaidTheme ?? 'default';
     const listenDoc = target.ownerDocument;
-    const onAppearance = (ev: Event): void => {
-      if (destroyed) return;
-      const next = (ev as CustomEvent<{ mermaidTheme?: 'default' | 'dark' }>).detail?.mermaidTheme ?? currentTheme;
+    // 重画本体（两监听共用）：detail 缺省回退渲染时快照
+    const rerenderMermaid = (theme: MermaidTheme): void => {
       for (const el of Array.from(target.querySelectorAll('[data-mermaid]'))) {
         const src = el.getAttribute('data-mermaid');
         if (!src) continue;
-        void renderMermaidInto(el, src, next).then((ok) => {
+        void renderMermaidInto(el, src, theme).then((ok) => {
           // 失败保留旧图（含错误态）原样=静默保留为设计形态（renderMermaidInto 内部
           // 吞错只回布尔，无 err 对象可带），warn 仅留诊断线索、非用户可见文案（台账 5-8）
           if (!ok) {
@@ -578,7 +581,18 @@ export const markdownRenderer: Renderer = {
         });
       }
     };
+    const onAppearance = (ev: Event): void => {
+      if (destroyed) return;
+      rerenderMermaid((ev as CustomEvent<{ mermaidTheme?: MermaidTheme }>).detail?.mermaidTheme ?? currentTheme);
+    };
+    // settings 主题即时生效（Task 7）：detail 恒为已解析具体主题（AppShell 派发侧
+    // 解析 'auto'），缺 detail 兜底渲染时快照
+    const onDiagramSettings = (ev: Event): void => {
+      if (destroyed) return;
+      rerenderMermaid((ev as CustomEvent<{ mermaidTheme?: MermaidTheme }>).detail?.mermaidTheme ?? currentTheme);
+    };
     listenDoc.addEventListener('vv:appearance-applied', onAppearance);
+    listenDoc.addEventListener('vv:diagram-settings-applied', onDiagramSettings);
     // 渲染视图搜索（Task 6）：root 即挂载后的 target；destroyed 闭包供防御
     const domSearch = createDomSearcher(target, () => destroyed);
     // getEngine 供 ViewerPane 状态栏显示正文引擎（M7：渲染: 本地/远程），复用 code 实例的轮询模式；
@@ -591,8 +605,9 @@ export const markdownRenderer: Renderer = {
     } = {
       destroy() {
         destroyed = true;
-        // 外观联动监听随实例摘除（per-instance 文档监听不得跨实例泄漏）
+        // 外观/主题设置联动监听随实例摘除（per-instance 文档监听不得跨实例泄漏）
         listenDoc.removeEventListener('vv:appearance-applied', onAppearance);
+        listenDoc.removeEventListener('vv:diagram-settings-applied', onDiagramSettings);
         domSearch.restore(); // 还原搜索 mark，避免把包裹态节点留在 DOM（虽随即清空，保持对称）
         // 相对图片解析产出的 blob: URL 随实例释放（渲染重跑会重新解析，不复用旧 URL）
         for (const url of resolvedUrls) {

@@ -35,7 +35,7 @@ describe('openDraft（spec §3：打开深拷贝）', () => {
   it('draft 与源深度独立：含 diagrams.modes/fonts/layout 等嵌套节互不影响', () => {
     const src = aSettings({
       excludedPatterns: ['.git'],
-      diagrams: { krokiHost: 'https://k.example.com', krokiVia: 'client', modes: { mermaid: 'kroki' }, renderers: {} },
+      diagrams: { krokiHost: 'https://k.example.com', krokiVia: 'client', mermaidTheme: 'auto', modes: { mermaid: 'kroki' }, renderers: {} },
       fonts: { uiFamily: 'X', uiSize: 20, codeFamily: 'Y', codeSize: 15 }
     });
     const draft = openDraft(src);
@@ -55,7 +55,7 @@ describe('往返等价（表单 draft ↔ JSON 文本）', () => {
     const src = aSettings({
       themeMode: 'dark',
       excludedPatterns: ['dist'],
-      diagrams: { krokiHost: 'https://k.example.com', krokiVia: 'client', modes: { mermaid: 'source', vega: 'kroki' }, renderers: {} },
+      diagrams: { krokiHost: 'https://k.example.com', krokiVia: 'client', mermaidTheme: 'auto', modes: { mermaid: 'source', vega: 'kroki' }, renderers: {} },
       layout: { ...DEFAULT_LAYOUT, leftWidth: 400, zen: false }
     });
     const draft = openDraft(src);
@@ -258,10 +258,10 @@ describe('mergeDraftOnto（I-2：应用以 draft 相对出发快照的变更字�
   });
 
   it('diagrams.modes 键级粒度：未改动的 modes 键保留 base；三个入参不被改动', () => {
-    const opened = aSettings({ diagrams: { krokiHost: '', krokiVia: 'client', modes: { mermaid: 'local', vega: 'local' }, renderers: {} } });
+    const opened = aSettings({ diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: { mermaid: 'local', vega: 'local' }, renderers: {} } });
     const draft = openDraft(opened);
     draft.diagrams.modes.mermaid = 'kroki';
-    const afterExternal = aSettings({ diagrams: { krokiHost: '', krokiVia: 'client', modes: { mermaid: 'local', vega: 'kroki' }, renderers: {} } });
+    const afterExternal = aSettings({ diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: { mermaid: 'local', vega: 'kroki' }, renderers: {} } });
     const merged = mergeDraftOnto(afterExternal, opened, draft);
     expect(merged.diagrams.modes).toEqual({ mermaid: 'kroki', vega: 'kroki' });
     // 入参防御：base/baseline/draft 均不被触碰
@@ -308,7 +308,7 @@ describe('mergeImported / replaceImported（Task 3 消费的导入语义，spec 
 
   it('I1 节内对象递归一层：diagrams.modes 按图类型键级合并，未在场类型/host 保留 current', () => {
     const current = aSettings({
-      diagrams: { krokiHost: 'https://k.example.com', krokiVia: 'client', modes: { mermaid: 'kroki', vega: 'local' }, renderers: {} }
+      diagrams: { krokiHost: 'https://k.example.com', krokiVia: 'client', mermaidTheme: 'auto', modes: { mermaid: 'kroki', vega: 'local' }, renderers: {} }
     });
     const merged = mergeImported(current, { diagrams: { modes: { mermaid: 'source' } } });
     expect(merged.diagrams.krokiHost).toBe('https://k.example.com'); // 节内缺项保留
@@ -319,7 +319,7 @@ describe('mergeImported / replaceImported（Task 3 消费的导入语义，spec 
     const current = aSettings({ computePolicy: 'remote' });
     const merged = mergeImported(current, { computePolicy: 'quantum', diagrams: 42 });
     expect(merged.computePolicy).toBe('auto'); // 非法 → normalizeSettings 默认，不用现状顶回
-    expect(merged.diagrams).toEqual({ krokiHost: '', krokiVia: 'client', modes: {}, renderers: {} }); // 节值非对象 → 规范化全形节整体落位
+    expect(merged.diagrams).toEqual({ krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} }); // 节值非对象 → 规范化全形节整体落位
   });
 
   it('替换：整体覆盖为规范化结果——缺项/脏字段补默认，不保留现状', () => {
@@ -439,7 +439,7 @@ describe('Task 3 变更摘要（spec §4：逐组 diff 列表，仅列导入在�
   });
 
   it('节内嵌套二级（diagrams.modes）diff 带完整路径；无差异组不出现在摘要', () => {
-    const current = aSettings({ diagrams: { krokiHost: '', krokiVia: 'client', modes: { mermaid: 'local' }, renderers: {} } });
+    const current = aSettings({ diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: { mermaid: 'local' }, renderers: {} } });
     const diffs = importGroupDiffs(current, {
       diagrams: { krokiHost: '', modes: { mermaid: 'kroki' }, renderers: {} },
       autoRefresh: true
@@ -464,7 +464,7 @@ describe('normalizeSettings 导出（loadSettings 白名单的共享规范化入
     });
     expect(s.fonts.uiSize).toBe(10);
     // renderers 同单源口径：graphviz=hpcc 命中注册表选择面保留，mermaid 无选择面剔除
-    expect(s.diagrams).toEqual({ krokiHost: '', krokiVia: 'client', modes: { vega: 'kroki' }, renderers: { graphviz: 'hpcc' } });
+    expect(s.diagrams).toEqual({ krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: { vega: 'kroki' }, renderers: { graphviz: 'hpcc' } });
     expect(s.autoRefresh).toBe(false);
     // 缺项补默认（Settings 全形返回）
     expect(Object.keys(s).sort()).toEqual(Object.keys(aSettings({})).sort());

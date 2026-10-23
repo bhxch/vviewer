@@ -33,6 +33,13 @@
     touch();
   }
 
+  /** mermaid 主题切换（spec §9.2）：'auto'=跟随外观亮暗（现状语义）；显式五枚举
+   * 经 settings 保存路径派发 vv:diagram-settings-applied 即时重画已打开文档。 */
+  function onMermaidThemeChange(e: Event): void {
+    draft.diagrams.mermaidTheme = (e.currentTarget as HTMLSelectElement).value as Settings['diagrams']['mermaidTheme'];
+    touch();
+  }
+
   /** 按语言模式切换：键恒为注册表类型 id（t.id，不用别名）——已打开文档不回溯
    * 重渲，重新打开后生效。 */
   function onDiagramModeChange(id: string, e: Event): void {
@@ -66,6 +73,17 @@
     <select value={draft.diagrams.krokiVia} onchange={onKrokiViaChange} aria-label="Kroki 通道">
       <option value="client">前端直连</option>
       <option value="server" disabled={!krokiProxy}>服务端代发</option>
+    </select>
+  </label>
+  <label class="vv-settings-theme-row">
+    <span>Mermaid 主题</span>
+    <select value={draft.diagrams.mermaidTheme} onchange={onMermaidThemeChange} aria-label="Mermaid 主题">
+      <option value="auto">自动（跟随亮暗）</option>
+      <option value="default">默认</option>
+      <option value="neutral">中性</option>
+      <option value="dark">暗色</option>
+      <option value="forest">森林</option>
+      <option value="base">基础</option>
     </select>
   </label>
   <div class="vv-settings-diagram-modes">
@@ -103,6 +121,7 @@
     其余语言本地档自动回落 Kroki；Kroki 服务填 http(s):// 开头地址，留空用 https://kroki.io。
     「服务端」模式把图交给所连服务器渲染（当前支持 graphviz/svgbob），未连接或不支持时自动回落本地/Kroki；
     Kroki 通道选「服务端代发」需部署侧启用 kroki 转发（未连接或能力缺失时该选项禁用，已选也会回落前端直连）。
-    graphviz 可选渲染器（viz-js 默认 / hpcc 经 CDN 按需加载）；改动对已打开文档重新打开后生效。
+    graphviz 可选渲染器（viz-js 默认 / hpcc 经 CDN 按需加载）；Mermaid 主题选「自动」跟随亮暗模式，显式主题立即重画已打开文档；
+    其余改动对已打开文档重新打开后生效。
   </div>
 </section>

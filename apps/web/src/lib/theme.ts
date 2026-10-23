@@ -305,9 +305,12 @@ export function resolveMermaidTheme(mode: 'light' | 'dark'): 'default' | 'dark' 
  * effective 签名——同一非法槽值重复触发会幂等重注入一次，无害。签名初值
  * null 仅保证首个 FromSettings 调用必注入；其他入口先直调 applyAppearance /
  * applyCodeTheme 不破坏正确性（其写入的签名即注入文本真相），onMount 无时序特权。
- * 注入提交后派发 vv:appearance-applied（detail.mermaidTheme = resolveMermaidTheme(mode)）：
- * markdownRenderer 的挂载实例据此就地重画 mermaid（spec §2.3，Task 5）；派发只在
- * 签名 diff 通过后发生（无冗余重画），browser 域模块仍加 document 守卫防 jsdom/SSR。
+ * 注入提交后派发 vv:appearance-applied（detail.mermaidTheme = 生效主题）：'auto'
+ * （settings.diagrams.mermaidTheme 缺省）解析为 resolveMermaidTheme(mode)——外观
+ * 亮暗联动语义不变；用户显式五枚举原样派发（spec 2026-10-23 §9.2：显式设置不被
+ * 亮暗联动覆盖回 default/dark）。markdownRenderer 的挂载实例据此就地重画 mermaid
+ * （spec §2.3，Task 5）；派发只在签名 diff 通过后发生（无冗余重画），browser 域
+ * 模块仍加 document 守卫防 jsdom/SSR。
  */
 export function applyAppearanceFromSettings(settings: Settings): void {
   const mode = effectiveMode(settings.themeMode);
@@ -317,8 +320,11 @@ export function applyAppearanceFromSettings(settings: Settings): void {
   if (sig === lastAppearanceSig) return;
   void applyAppearance(appearance, mode, codeTheme);
   if (typeof document !== 'undefined') {
+    const userTheme = settings.diagrams.mermaidTheme;
     document.dispatchEvent(
-      new CustomEvent('vv:appearance-applied', { detail: { mermaidTheme: resolveMermaidTheme(mode) } })
+      new CustomEvent('vv:appearance-applied', {
+        detail: { mermaidTheme: userTheme === 'auto' ? resolveMermaidTheme(mode) : userTheme }
+      })
     );
   }
 }

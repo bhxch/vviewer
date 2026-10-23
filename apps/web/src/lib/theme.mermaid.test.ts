@@ -3,6 +3,7 @@
 // 注入通道透传断言见 packages/render-text/src/markdown/pipeline.mermaidTheme.test.ts。
 import { expect, it } from 'vitest';
 import { applyAppearanceFromSettings, resolveMermaidTheme } from './theme';
+import type { MermaidTheme } from '@vviewer/render-text/markdown/diagramEngines';
 import type { Settings } from './stores/settings';
 import { DEFAULT_LAYOUT } from './layout';
 
@@ -22,7 +23,7 @@ function settings(over: Partial<Settings> = {}): Settings {
     excludedPatterns: [],
     autoRefresh: true,
     computePolicy: 'auto',
-    diagrams: { krokiHost: '', krokiVia: 'client', modes: {}, renderers: {} },
+    diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} },
     fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
     layout: { ...DEFAULT_LAYOUT },
     ...over
@@ -30,9 +31,9 @@ function settings(over: Partial<Settings> = {}): Settings {
 }
 
 it('applyAppearanceFromSettings 派发 vv:appearance-applied：detail.mermaidTheme 随生效亮暗（Task 6 注入器/markdownRenderer 同源消费）', () => {
-  const seen: Array<'default' | 'dark' | undefined> = [];
+  const seen: Array<MermaidTheme | undefined> = [];
   const on = (ev: Event): void => {
-    seen.push((ev as CustomEvent<{ mermaidTheme?: 'default' | 'dark' }>).detail?.mermaidTheme);
+    seen.push((ev as CustomEvent<{ mermaidTheme?: MermaidTheme }>).detail?.mermaidTheme);
   };
   document.addEventListener('vv:appearance-applied', on);
   try {
@@ -40,6 +41,20 @@ it('applyAppearanceFromSettings 派发 vv:appearance-applied：detail.mermaidThe
     expect(seen).toEqual(['dark']);
     applyAppearanceFromSettings(settings({ themeMode: 'light' }));
     expect(seen).toEqual(['dark', 'default']);
+  } finally {
+    document.removeEventListener('vv:appearance-applied', on);
+  }
+});
+
+it('用户显式 mermaidTheme（非 auto）：外观切换派发用户主题值（spec §9.2，显式设置不被亮暗联动覆盖回 default/dark）', () => {
+  const seen: Array<MermaidTheme | undefined> = [];
+  const on = (ev: Event): void => {
+    seen.push((ev as CustomEvent<{ mermaidTheme?: MermaidTheme }>).detail?.mermaidTheme);
+  };
+  document.addEventListener('vv:appearance-applied', on);
+  try {
+    applyAppearanceFromSettings(settings({ themeMode: 'dark', diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'forest', modes: {}, renderers: {} } }));
+    expect(seen).toEqual(['forest']);
   } finally {
     document.removeEventListener('vv:appearance-applied', on);
   }
