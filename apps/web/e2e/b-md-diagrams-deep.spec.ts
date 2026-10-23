@@ -8,10 +8,12 @@ import { injectDir, openTreeFile } from './b-markdown-html-docs-helpers';
  * - DM-01 kroki img 真实 error 事件（404）→ 错误卡 + 源码同展 + 可切回（4-3 可见化回归锚）；
  * - DM-02 settings 白名单负注入：非法 krokiHost 归空回默认、非法 modes 键/值剔除（mermaid 'wasm'
  *   若未被剔除会落 source 模式无 svg——归一语义的行为级甄别）；
- * - DM-03 diagram-engines chunk 动态 import 失败（route abort）→ md-diagram-error 保留源码，
- *   同文档 mermaid（另一 chunk）不受累——负路径 + chunk 边界；阻断 SW 保证同源 chunk 网络面可拦截
+ * - DM-03 diagram-engines chunk 动态 import 失败（route abort）→ spec §6 运行时回退链
+ *   降级 kroki img（f807636，fulfill 确定性接管），同文档 mermaid（另一 chunk）不受累
+ *   ——负路径 + chunk 边界；阻断 SW 保证同源 chunk 网络面可拦截
  *  （page.route 拦不到经 SW 的请求，b-grammar-layers 备案同源）；
- * - DM-04 别名归一：```dot/```latex/```vega-lite → 徽标 graphviz/math/vegalite + 各走其通道；
+ * - DM-04 别名归一：```dot/```latex/```vega-lite → 徽标 graphviz/math/vegalite + 各走其通道
+ *  （vegalite kroki 断言面经 settings 强制 kroki 保留——defaultMode 已翻 CDN local，spec §6）；
  * - DM-05 effectiveModeOf 回退链：plantuml 强制 local（无本地引擎）→ 回退 kroki img；
  *   math 强制 kroki（krokiType 空）→ 回退 source（无假交互钮）；
  * - DM-06 图/源码切换惰性高亮：vega-lite 切源码后 code.language-json 产出高亮 span；
@@ -124,6 +126,9 @@ test.describe('b-md-diagrams-deep 图表三通道矩阵补强', () => {
   // 别名围栏与主 id 渲染必须同权：徽标显示归一后的注册表 id，通道按 id 各自分发
   test('DM-04 别名归一：```dot/```latex/```vega-lite 徽标落注册表 id 且各走其通道', async ({ page }) => {
     test.setTimeout(60_000);
+    // spec §6 翻转注记：vegalite defaultMode 已翻 CDN local——krokiType 归一断言面（kroki
+    // 段 URL 形态）经 settings 强制 kroki 保留，离线稳定（真网 CDN 实渲染由 CDN-01 锚定）
+    injectSettings(page, { diagrams: { modes: { vegalite: 'kroki' } } });
     await page.route('**/vegalite/svg/*', (route) =>
       route.fulfill({ contentType: 'image/svg+xml', body: SVG_BODY })
     );
@@ -192,6 +197,9 @@ test.describe('b-md-diagrams-deep 图表三通道矩阵补强', () => {
   // 图视图优先出图，源码高亮只在首次切换时惰性发生且按注册表 highlightLang 命中
   test('DM-06 图/源码切换惰性高亮：vega-lite 切源码后 language-json 产出高亮 span', async ({ page }) => {
     test.setTimeout(60_000);
+    // spec §6 翻转注记：vegalite defaultMode 已翻 CDN local——img 出图锚经 settings 强制
+    // kroki 保留（离线稳定；CDN local 通道由 CDN-01 锚定）
+    injectSettings(page, { diagrams: { modes: { vegalite: 'kroki' } } });
     await page.route('**/vegalite/svg/*', (route) =>
       route.fulfill({ contentType: 'image/svg+xml', body: SVG_BODY })
     );
@@ -348,11 +356,16 @@ test.describe('DM-03 引擎 chunk 失败负路径（阻断 SW 保证同源 chunk
   // 请求必经页面网络栈，abort 才能确定性地令动态 import 失败
   test.use({ serviceWorkers: 'block' });
 
-  test('DM-03 diagram-engines chunk 加载失败：graphviz 落 md-diagram-error 保留源码，同文档 mermaid 不受累', async ({
+  test('DM-03 diagram-engines chunk 加载失败：graphviz 按 spec §6 回退链降级 kroki img，同文档 mermaid 不受累', async ({
     page
   }) => {
     test.setTimeout(60_000);
     await page.route('**/chunks/diagram-engines-*.js', (route) => route.abort());
+    // spec §6 翻转注记：运行时回退（f807636）后 graphviz 引擎 chunk 失败不再落错误卡，
+    // 有 krokiType 先降 kroki img——fulfill 确定性接管（离线稳定，img error 不触发）
+    await page.route('**/kroki.io/**', (route) =>
+      route.fulfill({ contentType: 'image/svg+xml', body: SVG_BODY })
+    );
     await openDoc(
       page,
       'dd-03-chunk-fail.md',
@@ -365,15 +378,18 @@ test.describe('DM-03 引擎 chunk 失败负路径（阻断 SW 保证同源 chunk
         ''
       ].join('\n')
     );
-    // graphviz：viz 动态 import 被打断 → 引擎渲染抛错 → 错误卡 + 原文保留（回退链终点）
+    // graphviz：viz 动态 import 被打断 → 引擎渲染抛错 → 回退链第一跳 kroki img
+    //（fulfill 加载成功：无错误卡、view 内无引擎 svg 产物）
     const gvWrap = wrapByLang(page, 'graphviz');
     const gvView = gvWrap.locator('.md-diagram-view');
-    await expect(gvView).toHaveClass(/md-diagram-error/, { timeout: 30_000 });
-    await expect(gvView).toContainText('digraph { chunkfail -> kept }');
+    await expect(
+      gvView.locator('img[src^="https://kroki.io/graphviz/svg/"]')
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(gvView).not.toHaveClass(/md-diagram-error/);
     await expect(gvView.locator('svg')).toHaveCount(0);
     // chunk 边界：mermaid 在独立 chunk（kit 默认分块），不受 graphviz 引擎失败牵连
     await expect(wrapByLang(page, 'mermaid').locator('.md-diagram-view svg')).toBeVisible({ timeout: 30_000 });
-    // 错误态 toggle 仍在（可切源码复核原文），徽标仍为归一 id
+    // 徽标仍为归一 id；toggle 留「源码」可切源码复核原文
     await expect(gvWrap.locator('.md-diagram-lang')).toHaveText('graphviz');
     await expect(gvWrap.locator('.md-diagram-toggle')).toHaveText('源码');
   });

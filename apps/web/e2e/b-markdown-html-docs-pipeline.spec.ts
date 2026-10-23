@@ -6,7 +6,8 @@ import { injectDir, openTreeFile } from './b-markdown-html-docs-helpers';
  * - MD-02 callout 全类型矩阵（已知 ≥5 类型各异色边框 + caution + 未知类型灰色兜底不崩）
  *   ——m3.spec 只覆盖 [!note] 单类型，多类型色与未知兜底缺位；
  * - MD-03 非法公式原文保留（m3 只覆盖合法 katex）；
- * - MD-04 非法 mermaid 错误样式且不阻塞后续管线（复制按钮仍产出，m3 只覆盖合法块）；
+ * - MD-04 非法 mermaid 本地失败经 spec §6 回退链（f807636）降级 kroki（mock abort 确定性
+ *   落错误态）且不阻塞后续管线（复制按钮仍产出，m3 只覆盖合法块）；
  * - MD-06 front matter 合法剥离元数据 / 非法原文渲染（完全缺位）；
  * - MD-13 媒体链接增强 .mp4/.mp3 → 内联 video/audio 且原 a 不保留（完全缺位）。
  * 场景来源：docs/e2e/markdown-html-docs.md 第 2 节场景清单表。
@@ -98,10 +99,13 @@ test('MD-03 katex：行内 + 块级渲染，非法公式原文保留不崩', asy
   await expect(md.locator('.katex')).toHaveCount(2);
 });
 
-test('MD-04 mermaid：合法块 svg 渲染，非法块错误样式保留原文且不阻塞复制按钮', async ({
+test('MD-04 mermaid：合法块 svg 渲染，非法块本地失败降级 kroki 终态错误样式保留原文且不阻塞复制按钮', async ({
   page
 }) => {
   test.setTimeout(60_000);
+  // spec §6 翻转注记：非法块本地渲染失败后有 krokiType 先降 kroki img（f807636 运行时
+  // 回退）——abort kroki 确定性令 img error，错误卡+源码同展不依赖真网往返时序
+  await page.route('**/kroki.io/**', (route) => route.abort());
   const content = [
     `${FENCE}mermaid`,
     'graph TD; A[合法图] --> B[渲染];',
@@ -127,11 +131,18 @@ test('MD-04 mermaid：合法块 svg 渲染，非法块错误样式保留原文�
   await expect(okView).toHaveCount(1, { timeout: 30_000 });
   await expect(okView.locator('svg')).toBeVisible({ timeout: 30_000 });
 
-  // 非法块：视图错误态（md-diagram-error）+ 原文保留（data-mermaid 与文本）
+  // 非法块：本地失败→kroki 降级也失败（abort→img error）→ 视图错误态（md-diagram-error）
+  // + data-mermaid 保留 + 原文同展于源码面板（66afead：失败态文案与源码不得 hidden）
+  const badWrap = md
+    .locator('.md-diagram')
+    .filter({ has: page.locator('.md-diagram-lang', { hasText: 'mermaid' }) })
+    .filter({ has: page.locator('.md-diagram-view.md-diagram-error') });
   const badView = md.locator('.md-diagram-view.md-diagram-error');
   await expect(badView).toHaveCount(1);
   await expect(badView).toHaveAttribute('data-mermaid', /A\[ --> B/);
-  await expect(badView).toContainText('A[ --> B');
+  await expect(badView).toHaveText('kroki 渲染失败（mermaid）');
+  await expect(badWrap.locator('.md-diagram-source')).toBeVisible();
+  await expect(badWrap.locator('.md-diagram-source code')).toContainText('A[ --> B');
 
   // 不阻塞后续管线：其后的 js 围栏仍产出语言徽标按钮（copyCode 步正常执行；
   // spec 2026-10-23 §5 徽标即复制单入口）

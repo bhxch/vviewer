@@ -30,10 +30,12 @@ import { injectDir, openTreeFile, type TextFileSpec } from './b-markdown-html-do
  * （27 个 basename 已核对全仓唯一），渲染管线只消费内容字节，目录结构不参与契约。
  * 容错：逐用例 fs.existsSync 判断，语料缺失（fetch 轮未落地）test.skip。
  *
- * kroki 环境无关化：MC-29 / MC-35 挂 page.route('**kroki.io/**') fulfill svg（demo_features.md
- * 的 plantuml/vegalite/bpmn/svgbob/excalidraw/ditaa 6 个 kroki 型围栏）——fulfill 而非
- * abort：img 加载成功，不产生资源级 console error 污染汇总锚断言面（abort 的降级源码
- * 面板形态已由 b-md-diagrams 覆盖，本组不重复）。favicon 同理 fulfill 204 去噪。
+ * kroki 环境无关化：MC-29 / MC-35 挂 page.route('**kroki.io/**') fulfill svg——demo_features.md
+ * 的围栏经 spec §6 注册表翻转后分两组：仍 kroki 型 plantuml/ditaa ×2（fulfill 出 img），
+ * local 型 vegalite/bpmn/svgbob/excalidraw ×4（CDN/本地 wasm 引擎，产物口径见 MC-29 用例
+ * 注记）。fulfill 而非 abort：img 加载成功，不产生资源级 console error 污染汇总锚断言面
+ * （abort 的降级源码面板形态已由 b-md-diagrams 覆盖，本组不重复）。favicon 同理 fulfill
+ * 204 去噪。
  */
 
 /** 语料目录与 27 文件清单（顺序即汇总锚分批顺序，manifest.json 为 sha 权威） */
@@ -169,15 +171,18 @@ test('MC-28 · all_languages_test.md 多语言围栏全部进入高亮管线（2
 test('MC-29 · demo_features.md 本地图表矩阵四引擎齐出 + kroki 型兜底 img + front matter 剥离', async ({
   page
 }) => {
-  // 语料实有（12 个图表围栏）：本地引擎 mermaid/graphviz(dot 别名)/nomnoml ×3 产 svg +
+  // 语料实有（12 个图表围栏）：本地引擎 mermaid/graphviz(dot 别名)/nomnoml/svgbob ×4 产 svg +
   // math 通道 ×3（```math ×2 与 ```latex——math 的注册表别名，diagrams.ts:39）产 katex
-  // display；kroki 型 plantuml/vegalite/bpmn/svgbob/excalidraw/ditaa ×6。
-  // 锚：每围栏一个 .md-diagram 容器；kroki 型经 fulfill 全部出 img（环境无关，不锚图内容）；
-  // front matter（title/author/tags）不泄漏进渲染正文（MD-06 判据，author 值
+  // display；仍 kroki 型 plantuml/ditaa ×2（spec §6 翻转注记：原 kroki 型 6 个中
+  // vegalite/bpmn/excalidraw 已翻 CDN local，svgbob 翻本地 wasm——引擎产物口径见下）。
+  // 锚：每围栏一个 .md-diagram 容器；仍 kroki 型经 fulfill 出 img（环境无关，不锚图内容）；
+  // local 型出引擎产物——svgbob 本地 wasm svg 恒定，CDN 三类（vegalite/bpmn/excalidraw）
+  // 真网出 svg、离线降级 kroki img（f807636 运行时回退），按「svg 或 img 终态产物」断言
+  // 网络无关；front matter（title/author/tags）不泄漏进渲染正文（MD-06 判据，author 值
   // 'Markpad Team' 仅存在于 front matter）。csharp/rust 围栏照常高亮（图表语言除外）。
   test.setTimeout(150_000);
   const rel = 'docs/demo/demo_features.md';
-  test.skip(!existsSync(join(CORPUS_DIR, rel)), '语料文件缺失，对 manifest 清单容错');
+  test.skip(!existsSync(join(CORPUS_DIR, rel)), '语料文件缺失（fetch 轮未落地），对 manifest 清单容错');
   await mockExternalNoise(page);
   const pageErrors = collectPageErrors(page);
   await openCorpus(page, rel, 30_000);
@@ -186,20 +191,37 @@ test('MC-29 · demo_features.md 本地图表矩阵四引擎齐出 + kroki 型兜
   // front matter 剥离：author 值不得出现在渲染正文
   await expect(md.getByText('Markpad Team')).toHaveCount(0);
 
-  // 图表容器全量：12 围栏 → 12 .md-diagram；kroki 型 6 个全部出 img（fulfill svg）
+  // 图表容器全量：12 围栏 → 12 .md-diagram
   await expect(md.locator('.md-diagram')).toHaveCount(12);
-  await expect(md.locator('.md-diagram-view img')).toHaveCount(6);
 
-  // 本地引擎产物：mermaid / graphviz(dot) / nomnoml 各一 svg（按 wrapper 归属断言——
-  // math 通道 katex 产物的 stretchy 定界符装饰性 svg 会混入裸 svg 计数）；math 通道
-  //（math×2+latex）出 katex display
-  for (const lang of ['mermaid', 'graphviz', 'nomnoml']) {
+  // 仍 kroki 型 ×2：fulfill svg 出 img（环境无关）
+  for (const lang of ['plantuml', 'ditaa']) {
+    await expect(
+      md
+        .locator('.md-diagram')
+        .filter({ has: page.locator('.md-diagram-lang', { hasText: lang }) })
+        .locator('.md-diagram-view img')
+    ).toHaveCount(1, { timeout: 30_000 });
+  }
+
+  // local 型：svgbob 本地 wasm svg 恒定（不依赖外网）；CDN 三类 svg 或 img 皆可
+  //（真网 CDN 引擎产物 svg / 离线降级 kroki img——终态不得停在空视图或错误卡）
+  for (const lang of ['mermaid', 'graphviz', 'nomnoml', 'svgbob']) {
     await expect(
       md
         .locator('.md-diagram')
         .filter({ has: page.locator('.md-diagram-lang', { hasText: lang }) })
         .locator('.md-diagram-view svg')
     ).toHaveCount(1, { timeout: 30_000 });
+  }
+  for (const lang of ['vegalite', 'bpmn', 'excalidraw']) {
+    await expect(
+      md
+        .locator('.md-diagram')
+        .filter({ has: page.locator('.md-diagram-lang', { hasText: lang }) })
+        .locator('.md-diagram-view svg, .md-diagram-view img')
+        .first()
+    ).toBeVisible({ timeout: 60_000 });
   }
   await expect(md.locator('.md-diagram-view .katex-display')).toHaveCount(3);
 
@@ -348,7 +370,10 @@ test('MC-33 · encoding-gbk.md 非 UTF-8 语料：GBK 字节注入后渲染容�
  *    export_pipeline_test.md 的 ../../pics/codeblock.png）在注入会话中无宿主文件，
  *    产品契约即保留原 src 让浏览器 404 降级（markdownImages.ts L3-4「404 现状」），
  *    属数据缺失而非渲染缺陷。
- * 3. favicon —— vite preview 静态壳资源面，装置层已 fulfill 204，此条为双保险兜底。 */
+ * 3. favicon —— vite preview 静态壳资源面，装置层已 fulfill 204，此条为双保险兜底。
+ * 4. cdn.jsdelivr.net —— spec §6 四类 local CDN 图表引擎的加载面：离线/被墙环境下动态
+ *    import 的资源级失败属回退链设计内路径（local→kroki 降级，f807636），非渲染缺陷；
+ *    真网环境无此条命中。 */
 function collectConsoleErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on('console', (msg) => {
@@ -356,6 +381,7 @@ function collectConsoleErrors(page: Page): string[] {
     const text = msg.text();
     const url = msg.location()?.url ?? '';
     if (/kroki/i.test(url) || /kroki/i.test(text)) return;
+    if (/cdn\.jsdelivr\.net/i.test(url) || /cdn\.jsdelivr\.net/i.test(text)) return;
     if (text.includes('Failed to load resource') && /\.(png|jpe?g|gif|webp|svg|ico)([?#]|$)/i.test(url)) {
       return;
     }
