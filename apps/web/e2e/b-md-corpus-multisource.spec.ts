@@ -10,7 +10,7 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  *
  * 语料：tools/fetch-e2e-corpus.mjs 按 manifest（e2e/fixtures/corpus/manifest.json，sha256
  * 权威）从各上游公开仓钉定 commit 下载至 e2e/fixtures/corpus/<source-id>/<仓库内相对路径>
- * （基建全 8 源）。
+ * （基建共 7 源）。
  * 本 spec 只覆盖三个 md 源——mermaid-docs（mermaid-js/mermaid@6d8921f，docs/ 前 70 个）、
  * katex-docs（KaTeX/KaTeX@8f0d9bc，docs/ 全 13 个）、k8s-docs（kubernetes/website@6c42e26，
  * content/en/docs/concepts/workloads 全 38 个）；markpad-md 已有 MC 系覆盖不重复，
