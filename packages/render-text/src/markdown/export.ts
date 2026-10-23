@@ -18,8 +18,9 @@
  * .vv-markdown 排版段。双端同步点：
  * - 变量值/排版/映射规则改动须同步 apps/web/src/app.css 对应段；映射段规则集
  *   一致性由 export.test.ts 双向校验锁定（theme.test.ts 同款防漂移形态）；
- * - 交互壳规则（md-copy-btn hover、alert 折叠 foldable/collapsed 等）不进导出：
- *   交互壳在装配时已剥离；折叠规则删而不留——剥离后永不命中，留存反成
+ * - 交互壳规则（徽标复制入口 hover/点击态、alert 折叠 foldable/collapsed 等）不进
+ *   导出：交互壳在装配时已剥离（徽标 button 已转纯 span）；折叠规则删而不留——
+ *   剥离后永不命中，留存反成
  *   「忘剥→collapsed 正文永久 display:none」的隐患（删之 fail-safe 为普通 alert）；
  * - 代码主题变量值（--vv-ts-* 与 --hljs-* 覆盖）不在此处——由触发壳抽取 style
  *   #vv-code-theme 的当前 textContent 注入（本文档只带亮暗默认值兜底；变量值
@@ -156,19 +157,32 @@ export interface ExportHtmlOptions {
 }
 
 /**
- * 交互壳剥离清单（管线产物类名，见 pipeline.ts CLS / lightbox.ts）：复制钮、图表
- * 切换钮、灯箱 overlay。源码面板不在此列——source 模式图表的唯一展示就是它，
+ * 交互壳剥离清单（管线产物类名，见 pipeline.ts CLS / lightbox.ts）：图表切换钮、
+ * 灯箱 overlay。语言徽标（button.md-code-lang，spec 2026-10-23 §5 徽标即复制单入口）
+ * 在此列但按形态转换处理——导出无脚本，button 交互面转纯 span，语言词保留（见
+ * flattenCodeLangBadge）。源码面板不在此列——source 模式图表的唯一展示就是它，
  * 按 wrapper 内视图可见性逐个判定（stripInteractiveShells）。口径注记（F5）：
  * 剥离对象为类名（交互壳在本仓以类承载）；计划 Global Constraints 所列
  * 「data-md-copy|md-lightbox|md-diagram-toggle」为语义列举（属性/类混称），
  * 实际剥离面以类名选择器为准，data-* 属性无行为不剥离。
  */
-const STRIP_SELECTORS = ['.md-copy-btn', '.md-diagram-toggle', '.md-lightbox-overlay'] as const;
+const STRIP_SELECTORS = ['.md-diagram-toggle', '.md-lightbox-overlay'] as const;
+
+/** 语言徽标 button→span 定向转换：语言词（类名含主题前缀变体）与文本保留，title 等交互属性消失。 */
+function flattenCodeLangBadge(root: Document): void {
+  for (const btn of Array.from(root.querySelectorAll('button.md-code-lang'))) {
+    const span = root.createElement('span');
+    span.className = btn.className;
+    span.textContent = btn.textContent;
+    btn.replaceWith(span);
+  }
+}
 
 function stripInteractiveShells(root: Document): void {
   for (const sel of STRIP_SELECTORS) {
     for (const el of Array.from(root.querySelectorAll(sel))) el.remove();
   }
+  flattenCodeLangBadge(root);
   // 图表 wrapper 内源码面板：视图可见（有图可看）时是切换备胎 → 剥离；视图隐藏
   // （source 模式 / kroki 失败态）时是唯一内容 → 保留（剥离即丢内容）
   for (const wrap of Array.from(root.querySelectorAll('.md-diagram'))) {

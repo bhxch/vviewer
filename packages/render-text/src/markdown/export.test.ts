@@ -10,7 +10,7 @@ import { attachHighlightClient, MARKUP_MAX_BYTES } from '../code';
 import { markdownRenderer } from './markdownRenderer';
 import { collectExportHtml, collectPrintHtml, exportBaseCss } from './export';
 
-/** 管线成品形态的富文档夹具：交互壳（复制钮/切换钮/源码面板）、图表两种形态
+/** 管线成品形态的富文档夹具：交互壳（徽标复制钮/切换钮/源码面板）、图表两种形态
  * （有图可看的 toggle wrapper / source-only wrapper）、三类图片、音视频、四级标题。 */
 const RICH_HTML = `<div class="vv-markdown">
 <h1 id="user-content-top">总览</h1>
@@ -18,7 +18,7 @@ const RICH_HTML = `<div class="vv-markdown">
 <h3 id="user-content-advanced">进阶</h3>
 <h4 id="user-content-notes">附注</h4>
 <p>公式 <span class="katex"><span class="katex-mathml">E=mc^2</span></span> 行内。</p>
-<pre data-md-copy=""><span class="md-code-bar"><span class="md-code-lang">ts</span><button type="button" class="md-copy-btn">复制</button></span><code class="language-ts"><span class="ts-keyword">const</span> x = 1;</code></pre>
+<pre data-md-copy=""><span class="md-code-bar"><button type="button" class="md-code-lang" title="点击复制代码">ts</button></span><code class="language-ts"><span class="ts-keyword">const</span> x = 1;</code></pre>
 <div class="md-diagram" id="diagram-with-view"><div class="md-diagram-bar"><span class="md-diagram-lang">mermaid</span><button type="button" class="md-diagram-toggle">源码</button></div><div class="md-diagram-view" data-mermaid="graph TD; A--&gt;B"><svg id="mermaid-svg"><circle r="4"></circle></svg></div><div class="md-diagram-source" hidden=""><code>graph TD; A--&gt;B</code></div></div>
 <div class="md-diagram" id="diagram-source-only"><div class="md-diagram-bar"><span class="md-diagram-lang">plantuml</span></div><div class="md-diagram-view" hidden=""></div><div class="md-diagram-source"><code>@startuml</code></div></div>
 <div class="markdown-alert markdown-alert-note markdown-alert-foldable markdown-alert-collapsed"><p class="markdown-alert-title markdown-alert-fold-toggle"><span class="callout-title-inner">Note</span></p><div class="markdown-alert-content"><div class="content-inner"><p id="folded-content">收起态的正文内容</p></div></div></div>
@@ -39,14 +39,13 @@ async function resolveImageStub(src: string): Promise<string | null> {
 }
 
 describe('collectExportHtml——自包含 HTML 装配', () => {
-  it('交互壳剥离：复制钮/切换钮移除，正文与高亮 code 保留；有图 wrapper 源码面板剥离、source-only wrapper 源码面板保留', async () => {
+  it('交互壳剥离：切换钮移除，正文与高亮 code 保留；有图 wrapper 源码面板剥离、source-only wrapper 源码面板保留', async () => {
     const html = await collectExportHtml(richDoc(), {
       title: '演示',
       styleCss: '',
       resolveImage: resolveImageStub
     });
     const out = new DOMParser().parseFromString(html, 'text/html');
-    expect(out.querySelector('.md-copy-btn')).toBeNull();
     expect(out.querySelector('.md-diagram-toggle')).toBeNull();
     expect(out.querySelector('.md-lightbox-overlay')).toBeNull();
     // 正文与高亮成品不动
@@ -57,6 +56,21 @@ describe('collectExportHtml——自包含 HTML 装配', () => {
     expect(out.querySelector('#diagram-with-view .md-diagram-source')).toBeNull();
     // source-only wrapper（视图隐藏）：源码面板是唯一展示 → 保留
     expect(out.querySelector('#diagram-source-only .md-diagram-source')).not.toBeNull();
+  });
+
+  it('语言徽标转纯 span（spec §5 徽标即复制）：语言词保留、button 交互面移除', async () => {
+    const html = await collectExportHtml(richDoc(), {
+      title: '演示',
+      styleCss: '',
+      resolveImage: resolveImageStub
+    });
+    const out = new DOMParser().parseFromString(html, 'text/html');
+    // 导出无脚本：管线内即复制入口的 button.md-code-lang 转纯 span，语言词形态保留
+    const lang = out.querySelector('.md-code-lang')!;
+    expect(lang).not.toBeNull();
+    expect(lang.tagName).toBe('SPAN');
+    expect(lang.textContent).toBe('ts');
+    expect(out.querySelector('pre button')).toBeNull();
   });
 
   it('图片 data URI 化：blob 图走 resolveImage 换 data URI；外域图/data 图原样保留', async () => {

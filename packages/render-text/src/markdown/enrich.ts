@@ -162,7 +162,7 @@ function convertCallouts(root: Document): void {
     const titleEl = root.createElement('p');
     titleEl.className = 'markdown-alert-title';
     // 折叠后缀：foldable 卡片 + 按符号预置收起（+ 展开 / − 收起）；标题点击切换
-    // collapsed——节点挂载进主文档后监听随节点保留（copyBtn 先例）
+    // collapsed——节点挂载进主文档后监听随节点保留（语言徽标按钮先例）
     if (fold) {
       container.classList.add('markdown-alert-foldable');
       if (fold === '-') container.classList.add('markdown-alert-collapsed');

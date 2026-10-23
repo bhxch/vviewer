@@ -54,7 +54,6 @@ export interface PipelineStep {
 const CLS = {
   codeBar: 'md-code-bar',
   codeLang: 'md-code-lang',
-  copyBtn: 'md-copy-btn',
   diagram: 'md-diagram',
   diagramBar: 'md-diagram-bar',
   diagramLang: 'md-diagram-lang',
@@ -144,7 +143,7 @@ function effectiveModeOf(type: DiagramType, ctx: PipelineCtx): DiagramMode {
 
 /**
  * 图/源码切换接线（buildDiagramWrapper 的 withToggle 分支与服务端图表 wrapper 共享，
- * 切换语义一致）：节点挂载进主文档后监听器随节点保留——copyBtn 同款前提。首次切到
+ * 切换语义一致）：节点挂载进主文档后监听器随节点保留——徽标按钮同款前提。首次切到
  * 源码时惰性高亮（图视图优先出图，源码高亮不挡首屏）：data-md-diag-src-hl 标记先行
  * 防连点重复请求；成功才写 innerHTML，null 失败/catch 静默保留纯文本（标记已写不
  * 重试——与 source 分支失败语义一致）。
@@ -463,10 +462,11 @@ async function runKatex(root: Document): Promise<void> {
 // ---------- copyCode 步 ----------
 
 /**
- * 代码块顶栏（Task 7）：pre 首子元素 .md-code-bar 内 [语言徽标 | 复制钮] 并排——
- * spec 原案的「点击徽标=复制、无语言显示复制图标」三态交互过密，计划裁决取简：
- * 徽标只显示语言词（无语言「代码」），点击语义保留在复制钮上（单触发面，避免
- * 徽标点击与反馈文案互相干扰）。
+ * 代码块顶栏（Task 7；spec 2026-10-23 §5 重开拍板：徽标即复制单入口，markpad
+ * copyCode.ts 对齐）：pre 首子元素 .md-code-bar 内单 button.md-code-lang——有语言
+ * 显示语言词、无语言显示「复制」，点击即复制 code 文本（去尾换行），反馈文案
+ * 1.5s 后回原词。原案「徽标只展示语言词、点击语义在右下角独立复制钮」的
+ * 双触发面结构就此退役（右下角复制钮删除）。
  */
 async function runCopyCode(root: Document, ctx: PipelineCtx): Promise<void> {
   for (const pre of Array.from(root.querySelectorAll('pre'))) {
@@ -476,27 +476,26 @@ async function runCopyCode(root: Document, ctx: PipelineCtx): Promise<void> {
     // 浏览器容错但结构脏）；布局由 .md-code-bar 的 display:flex 规则保证
     const bar = root.createElement('span');
     bar.className = cls(ctx, 'codeBar');
-    const label = root.createElement('span');
-    label.className = cls(ctx, 'codeLang');
     // 语言词取 highlight 步记录的围栏原始语言（小写）；属性缺失（步级失败等罕见
     // 路径）回落类名提取——此时 hljs 侦测类可能已污染，仅为尽力兜底
     const code = pre.querySelector('code');
     const langClass = code ? Array.from(code.classList).find((c) => c.startsWith('language-')) : undefined;
     const lang = code?.getAttribute('data-md-lang') ?? (langClass ? langClass.slice('language-'.length).toLowerCase() : '');
-    label.textContent = lang || '代码';
-    bar.appendChild(label);
     const btn = root.createElement('button');
     btn.type = 'button';
-    btn.className = cls(ctx, 'copyBtn');
-    btn.textContent = '复制';
-    // 复制反馈：成功/失败改 1.5s 文案（连点时重置计时，避免旧计时提前还原）
+    btn.className = cls(ctx, 'codeLang');
+    btn.title = '点击复制代码';
+    const baseLabel = lang || '复制';
+    btn.textContent = baseLabel;
+    // 复制反馈：成功/失败改 1.5s 文案，回徽标原词（连点时重置计时，避免旧计时
+    // 提前还原）
     let revertTimer: ReturnType<typeof setTimeout> | null = null;
-    const feedback = (label: string): void => {
-      btn.textContent = label;
+    const feedback = (text: string): void => {
+      btn.textContent = text;
       if (revertTimer !== null) clearTimeout(revertTimer);
       revertTimer = setTimeout(() => {
         revertTimer = null;
-        btn.textContent = '复制';
+        btn.textContent = baseLabel;
       }, 1500);
     };
     btn.addEventListener('click', () => {

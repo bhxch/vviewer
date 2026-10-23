@@ -285,11 +285,11 @@ export function extractToc(scope: ParentNode): TocEntry[] {
 
 // ---------- 文件内搜索（Task 6） ----------
 
-/** 搜索跳过的祖先元素：脚本/样式内容不是可读文本，复制按钮是 UI 而非文档内容 */
+/** 搜索跳过的祖先元素：脚本/样式内容不是可读文本，语言徽标（复制入口）是 UI 而非文档内容 */
 const SEARCH_SKIP_TAGS = new Set(['SCRIPT', 'STYLE']);
 
 /**
- * 收集 scope 下可搜索的文本节点（文档序）：祖先含 SCRIPT/STYLE/md-copy-btn 的拒绝。
+ * 收集 scope 下可搜索的文本节点（文档序）：祖先含 SCRIPT/STYLE/md-code-lang 的拒绝。
  * 独立导出便于单测（walk 逻辑与包裹/还原解耦）。
  */
 export function collectTextNodes(scope: HTMLElement): Text[] {
@@ -300,7 +300,7 @@ export function collectTextNodes(scope: HTMLElement): Text[] {
       while (cur && cur !== scope) {
         if (cur.nodeType === 1) {
           const el = cur as Element;
-          if (SEARCH_SKIP_TAGS.has(el.tagName) || el.classList.contains('md-copy-btn')) {
+          if (SEARCH_SKIP_TAGS.has(el.tagName) || el.classList.contains('md-code-lang')) {
             return NodeFilter.FILTER_REJECT;
           }
         }

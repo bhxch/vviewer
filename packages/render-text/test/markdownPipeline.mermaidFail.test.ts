@@ -31,10 +31,10 @@ describe('diagrams 步：mermaid 动态 import 失败', () => {
     expect(container!.querySelector('svg')).toBeNull();
   });
 
-  it('import 失败不阻塞后续步骤：同文档 js 块仍有复制按钮', async () => {
+  it('import 失败不阻塞后续步骤：同文档 js 块仍有可复制的语言徽标', async () => {
     const doc = docOf('```mermaid\ngraph TD; A-->B;\n```\n\n```js\nconst a = 1;\n```\n');
     const ctx: PipelineCtx = { highlightFence: vi.fn().mockResolvedValue(null) };
     await runPipeline(doc, ctx);
-    expect(doc.querySelector('button.md-copy-btn')).not.toBeNull();
+    expect(doc.querySelector('button.md-code-lang')).not.toBeNull();
   });
 });

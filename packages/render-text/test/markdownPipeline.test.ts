@@ -138,12 +138,12 @@ describe('diagrams 步（mermaid）', () => {
     expect(container.textContent).toContain('graph TD; A-->B;');
   });
 
-  it('mermaid 失败不阻塞 copyCode——同文档 js 块仍有复制按钮', async () => {
+  it('mermaid 失败不阻塞 copyCode——同文档 js 块仍有可复制的语言徽标', async () => {
     mermaidMocks.render.mockRejectedValue(new Error('boom'));
     const doc = docOf('```mermaid\ngraph TD; A-->B;\n```\n\n```js\nconst a = 1;\n```\n');
     await runPipeline(doc, noopCtx());
     expect(doc.querySelector('pre [data-md-copy]') ?? doc.querySelector('pre[data-md-copy]')).not.toBeNull();
-    expect(doc.querySelectorAll('button.md-copy-btn').length).toBe(1);
+    expect(doc.querySelectorAll('button.md-code-lang').length).toBe(1);
   });
 });
 
@@ -245,10 +245,10 @@ describe('katex 步', () => {
 });
 
 describe('copyCode 步', () => {
-  it('每个 pre 追加复制按钮，点击写入剪贴板', async () => {
+  it('徽标即复制：点击语言徽标写入剪贴板（去尾换行）', async () => {
     const doc = docOf('```js\nconst a = 1;\n```\n');
     await runPipeline(doc, noopCtx());
-    const btn = doc.querySelector<HTMLElement>('button.md-copy-btn')!;
+    const btn = doc.querySelector<HTMLElement>('button.md-code-lang')!;
     expect(btn).not.toBeNull();
     btn.click();
     await Promise.resolve();
@@ -260,50 +260,82 @@ describe('copyCode 步', () => {
     const ctx = noopCtx();
     await runPipeline(doc, ctx);
     await runPipeline(doc, ctx);
-    expect(doc.querySelectorAll('button.md-copy-btn').length).toBe(1);
+    expect(doc.querySelectorAll('button.md-code-lang').length).toBe(1);
   });
 
-  it('复制成功/失败反馈：文案变化 1.5s 后还原', async () => {
+  it('复制成功/失败反馈：文案变化 1.5s 后回徽标原词', async () => {
     vi.useFakeTimers();
     try {
       const doc = docOf('```js\nconst a = 1;\n```\n');
       await runPipeline(doc, noopCtx());
-      const btn = doc.querySelector<HTMLElement>('button.md-copy-btn')!;
-      // 成功路径
+      const btn = doc.querySelector<HTMLElement>('button.md-code-lang')!;
+      // 成功路径：反馈 1.5s 后还原为记录的原始 label（语言词，非「复制」）
       btn.click();
       await vi.advanceTimersByTimeAsync(0);
       expect(btn.textContent).toBe('已复制');
       await vi.advanceTimersByTime(1500);
-      expect(btn.textContent).toBe('复制');
+      expect(btn.textContent).toBe('js');
       // 失败路径
       (navigator.clipboard.writeText as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('denied'));
       btn.click();
       await vi.advanceTimersByTimeAsync(0);
       expect(btn.textContent).toBe('复制失败');
       await vi.advanceTimersByTime(1500);
-      expect(btn.textContent).toBe('复制');
+      expect(btn.textContent).toBe('js');
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('语言徽标：有语言显示词、无语言显示「代码」，复制钮迁入顶栏', async () => {
+  it('徽标即复制：bar 为单 button，点击复制代码且 1.5s 后回原词（spec §5）', async () => {
+    vi.useFakeTimers();
+    try {
+      const doc = docOf('```rust\nfn main() {}\n```\n');
+      await runPipeline(doc, noopCtx());
+      const bar = doc.querySelector('pre .md-code-bar')!;
+      const btn = bar.querySelector('button')!;
+      expect(btn.textContent).toBe('rust');
+      expect(bar.querySelectorAll('button')).toHaveLength(1); // 复制钮退役
+      btn.click();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(btn.textContent).toBe('已复制');
+      vi.advanceTimersByTime(1500);
+      expect(btn.textContent).toBe('rust');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('无语言块徽标显示「复制」且可点（spec §5）', async () => {
+    const doc = docOf('```\nplain\n```\n');
+    await runPipeline(doc, noopCtx());
+    const btn = doc.querySelector<HTMLElement>('button.md-code-lang')!;
+    expect(btn.textContent).toBe('复制');
+    btn.click();
+    await Promise.resolve();
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('plain');
+  });
+
+  it('语言徽标：有语言显示词、无语言显示「复制」，徽标本身即单复制入口（spec §5）', async () => {
     const doc = docOf('```rust\nfn main() {}\n```\n');
     // 无语言 fence：hljs 兜底会自动侦测语言并追加 language-* 类（实测 'plain' →
-    // language-ebnf）——徽标必须显示「代码」而非侦测语言，即取词源是高亮步记录的
+    // language-ebnf）——徽标必须显示「复制」而非侦测语言，即取词源是高亮步记录的
     // 围栏原始语言（data-md-lang），不是 copyCode 时的类名
     const doc2 = docOf('```\nplain\n```\n');
     await runPipeline(doc, noopCtx());
     await runPipeline(doc2, noopCtx());
     expect(doc.querySelector('.md-code-lang')!.textContent).toBe('rust');
-    expect(doc2.querySelector('.md-code-lang')!.textContent).toBe('代码');
-    // 顶栏是 pre 首子元素，复制钮迁入栏内（点击语义不并入徽标，保留单复制钮）；
-    // 元素为 span——pre 内容模型只容 phrasing content（div 无效 HTML）
+    expect(doc2.querySelector('.md-code-lang')!.textContent).toBe('复制');
+    // 顶栏是 pre 首子元素；spec 2026-10-23 §5 重开拍板：徽标即复制单入口——bar 内
+    // 唯一 button 就是徽标本体（右下角独立复制钮退役）；bar 元素为 span——pre 内容
+    // 模型只容 phrasing content（div 无效 HTML）
     const bar = doc.querySelector('pre .md-code-bar')! as HTMLElement;
     expect(bar).not.toBeNull();
     expect(bar.tagName).toBe('SPAN');
     expect(doc.querySelector('pre')!.firstElementChild).toBe(bar);
-    expect(bar.querySelector('button.md-copy-btn')).not.toBeNull();
+    const btn = bar.querySelector('button.md-code-lang')!;
+    expect(btn.getAttribute('title')).toBe('点击复制代码');
+    expect(bar.querySelectorAll('button')).toHaveLength(1);
   });
 });
 
@@ -388,9 +420,9 @@ describe('themeClassPrefix 与集成', () => {
     mermaidMocks.render.mockRejectedValue(new Error('boom'));
     const doc = docOf('```js\nconst a = 1;\n```\n\n```mermaid\ngraph TD;\n```\n');
     await runPipeline(doc, noopCtx({ themeClassPrefix: 'dark-' }));
-    expect(doc.querySelector('button.dark-md-copy-btn')).not.toBeNull();
+    expect(doc.querySelector('button.dark-md-code-lang')).not.toBeNull();
     expect(doc.querySelector('div.dark-md-diagram-view')).not.toBeNull();
-    expect(doc.querySelector('button.md-copy-btn:not(.dark-md-copy-btn)')).toBeNull();
+    expect(doc.querySelector('button.md-code-lang:not(.dark-md-code-lang)')).toBeNull();
   });
 
   it('集成：一次管线同时完成高亮/mermaid/公式/复制/灯箱', async () => {
@@ -415,7 +447,7 @@ describe('themeClassPrefix 与集成', () => {
     expect(doc.querySelector('.ts-kw')).not.toBeNull();
     expect(doc.querySelector('div[data-mermaid] svg')).not.toBeNull();
     expect(doc.querySelector('.katex')).not.toBeNull();
-    expect(doc.querySelector('button.md-copy-btn')).not.toBeNull();
+    expect(doc.querySelector('button.md-code-lang')).not.toBeNull();
     doc.querySelector('img')!.click();
     expect(doc.getElementById('md-lightbox-overlay')).not.toBeNull();
   });

@@ -104,7 +104,7 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .vv-error-card { padding: 2rem; display: flex; flex-direction: column; gap: .5rem; }
 .vv-error-title { font-weight: 600; }
 .vv-error-detail { color: var(--ui-fg-muted); white-space: pre-wrap; }
-/* markdown 渲染（.vv-markdown 由 markdownRenderer 挂载；管线产物类名 md-code-bar/md-code-lang、md-copy-btn、md-diagram 系列、md-lightbox）。
+/* markdown 渲染（.vv-markdown 由 markdownRenderer 挂载；管线产物类名 md-code-bar/md-code-lang（徽标即复制入口 button）、md-diagram 系列、md-lightbox）。
    漂移裁决（md-export 台账）：本段基础排版为 render-text export.ts exportBaseCss
    常量（导出单源）的运行时复制——改排版/图表/alert 规则须双端同步（导出侧另含
    :root 变量块与 .vv-export-toc，交互壳规则不进导出） */
@@ -123,16 +123,18 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .vv-markdown table { border-collapse: collapse; margin: .8rem 0; }
 .vv-markdown th, .vv-markdown td { border: 1px solid var(--ui-border); padding: .3rem .65rem; }
 .vv-markdown img, .vv-markdown video, .vv-markdown audio { max-width: 100%; }
-/* 代码块顶栏（Task 7）：pre 首子行 [语言徽标 | 复制钮]，负外边距抵 pre 内边距贴边
-   成栏（视觉同 md-diagram-bar）；徽标常显、复制钮保留 hover 浮现。
+/* 代码块顶栏（Task 7；spec 2026-10-23 §5 重开拍板：徽标即复制单入口）：pre 首子行
+   单个语言徽标按钮（有语言=语言词、无语言=「复制」），负外边距抵 pre 内边距贴边
+   成栏（视觉同 md-diagram-bar）。原 [语言徽标 | 右下角复制钮] 双元素结构退役。
    pre overflow:auto 下长行横滚时顶栏随行滚出视野——与退役的 absolute 复制钮行为
    一致（absolute 同样随滚动容器横滚），非本次引入的回归 */
 .vv-markdown .md-code-bar { display: flex; align-items: center; gap: .5rem;
   margin: -.75rem -1rem .5rem; padding: .25rem .6rem; border-bottom: 1px solid var(--ui-border);
   background: var(--ui-side-bg); }
-.vv-markdown .md-code-lang { font-size: 12px; color: var(--ui-fg-muted); text-transform: uppercase; letter-spacing: .04em; }
-.vv-markdown .md-copy-btn { margin-left: auto; font-size: 12px; padding: 1px 8px; opacity: 0; }
-.vv-markdown pre:hover .md-copy-btn { opacity: 1; }
+.vv-markdown .md-code-lang { font: inherit; font-size: 12px; color: var(--ui-fg-muted); text-transform: uppercase; letter-spacing: .04em;
+  background: none; border: none; padding: 0; cursor: pointer; user-select: none; }
+/* button 形态 reset（background/border/padding/font）为运行时专有——导出侧徽标
+   已转纯 span 无默认样式，exportBaseCss 的 .md-code-lang 不含这一截与点击态 */
 /* 图表 wrapper（spec §2.1）：bar 内语言徽标+切换钮，视图居中，源码面板等宽 */
 .vv-markdown .md-diagram { margin: .8rem 0; border: 1px solid var(--ui-border); border-radius: 6px; overflow: hidden; }
 .vv-markdown .md-diagram-bar { display: flex; align-items: center; gap: .5rem; padding: .25rem .6rem; border-bottom: 1px solid var(--ui-border); background: var(--ui-side-bg); }
