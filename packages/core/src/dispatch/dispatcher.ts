@@ -134,8 +134,8 @@ function openAsAction(
  * （判文本 → 纯文本在前，否则 hex 在前）；当前 renderer 即 hex 时不重复给 hex。
  * streaming 渲染器重试须透传 ctx（io-streaming Task 5 评审指令②）：以原 base +
  * ctx 重跑 render，字节经 ctx.read 重读（opts.read 链）——缺省第 5 参会以裸 probe
- * 重跑，streaming 渲染器必次次失败。renderOpts（signal + lineMetrics）透传为
- * render 第 6 参（审计 R1：重试/open-as 重入与主路径同获取消信号，同型解码盲窗
+ * 重跑，streaming 渲染器必次次失败。renderOpts（signal + lineMetrics + langOverride）
+ * 透传为 render 第 6 参（审计 R1：重试/open-as 重入与主路径同获取消信号，同型解码盲窗
  * 收口；字体系统 Task 2：重试同样保行尺度）。onRendered 接收重试/open-as 成功
  * 产出的实例，由调用方（dispatch catch）级联托管。
  */
@@ -149,7 +149,7 @@ function buildRenderErrorActions(
   onRendered: (instance: RenderedInstance) => void,
   redisplay: Redisplay,
   ctx?: StreamCtx,
-  renderOpts?: { signal?: AbortSignal; lineMetrics?: LineMetrics }
+  renderOpts?: { signal?: AbortSignal; lineMetrics?: LineMetrics; langOverride?: string }
 ): ErrorCardAction[] {
   const retry = (): void => {
     renderer.render(buffer, target, source, det, ctx, renderOpts)

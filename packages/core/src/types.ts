@@ -166,6 +166,10 @@ export interface Renderer {
    * 第 6 参 opts.lineMetrics（字体系统 spec §3）：code/hex 的行尺度（字号+行高），
    * 替换两渲染器的行高常量（虚拟滚动装配/行占位/跳转坐标）；缺省回落现值，
    * 其余渲染器不读即零感知。
+   *
+   * 第 6 参 opts.langOverride（spec §4.1）：手动高亮语言，仅 code 渲染器消费
+   * （opts.lang 注入口，有值跳过 detectLanguage）；与 signal/lineMetrics 同参异构
+   * 先例一致，其余渲染器不读即零感知。
    */
   render(
     buffer: Uint8Array,
@@ -173,6 +177,6 @@ export interface Renderer {
     source: FileSource,
     det: Detection,
     ctx?: StreamCtx,
-    opts?: { signal?: AbortSignal; lineMetrics?: LineMetrics }
+    opts?: { signal?: AbortSignal; lineMetrics?: LineMetrics; langOverride?: string }
   ): Promise<RenderedInstance>;
 }
