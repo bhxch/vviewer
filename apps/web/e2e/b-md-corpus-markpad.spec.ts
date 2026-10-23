@@ -8,7 +8,7 @@ import { injectDir, openTreeFile, type TextFileSpec } from './b-markdown-html-do
  * b-md-corpus-markpad —— Markpad 真实语料批量渲染域（MC-01~MC-36，2026-10-22 default 套件）。
  *
  * 维度：bhxch/Markpad 公开仓 27 个真实 md 文件（tools/fetch-e2e-corpus.mjs 下载至
- * e2e/fixtures/markpad-md/，清单与 sha256 见该目录 manifest.json）驱动渲染管线的
+ * e2e/fixtures/corpus/markpad-md/，清单与 sha256 见 corpus/manifest.json）驱动渲染管线的
  * 稳定性与功能覆盖——区别于既有 spec 的内联构造夹具，本组用真实世界语料作载体。
  *
  * 用例组织（规模口径：手写场景 9 个 = 深断言 6 + 汇总锚 3，落 6~12 规模；
@@ -37,7 +37,7 @@ import { injectDir, openTreeFile, type TextFileSpec } from './b-markdown-html-do
  */
 
 /** 语料目录与 27 文件清单（顺序即汇总锚分批顺序，manifest.json 为 sha 权威） */
-const CORPUS_DIR = fileURLToPath(new URL('./fixtures/markpad-md', import.meta.url));
+const CORPUS_DIR = fileURLToPath(new URL('./fixtures/corpus/markpad-md', import.meta.url));
 const CORPUS: readonly string[] = [
   // 批 1（根 5 + docs/plans 2 + docs/demo 2）
   'AGENTS.md',

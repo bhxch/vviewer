@@ -43,10 +43,10 @@ apps/web/static/tree-sitter.wasm
 # E2E 大文件兜底：m6.spec 已把 BIG_FILE 写到 os.tmpdir() fixture（不碰 tracked 树），
 # 此条防旧运行残留/回归时把 ≈1.5MB 生成文件带进 tracked 树
 samples/m6/e2e-big.js
-# E2E markdown 语料（bhxch/Markpad@master 真实文件）：经 tools/fetch-e2e-corpus.mjs 下载到
-# apps/web/e2e/fixtures/markpad-md/ 供 markdown 渲染测试使用；语料不入库以避免上游许可证
-# 问题，下载脚本（本地与 CI 同步执行）即初始化测试环境的一步
-apps/web/e2e/fixtures/markpad-md/
+# E2E 多源语料（SOURCES 表各上游仓固定 commit 的真实文件）：经 tools/fetch-e2e-corpus.mjs
+# 下载到 apps/web/e2e/fixtures/corpus/<source-id>/ 供 markdown/代码高亮渲染测试使用；多源
+# 语料不入库避免许可证问题，下载脚本（本地与 CI 同步执行）即初始化测试环境的一步
+apps/web/e2e/fixtures/corpus/
 # PWA 图标（构建期由 tools/gen-icons.mjs 生成，不入库）
 apps/web/static/icons/
 
