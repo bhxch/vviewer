@@ -88,7 +88,8 @@ function genSwCleanup(): Plugin {
     const current = [
       `vv-grammars-${BUILD_REVISION}`,
       `vv-runtime-${BUILD_REVISION}`,
-      `vv-queries-${BUILD_REVISION}`
+      `vv-queries-${BUILD_REVISION}`,
+      `vv-diagram-svgbob-${BUILD_REVISION}`
     ];
     writeFileSync(
       SW_CLEANUP_DEST,
@@ -104,7 +105,7 @@ self.addEventListener('activate', (event) => {
         const names = await self.caches.keys();
         await Promise.all(
           names
-            .filter((n) => /^(vv-grammars|vv-runtime|vv-queries)-/.test(n) && !current.includes(n))
+            .filter((n) => /^(vv-grammars|vv-runtime|vv-queries|vv-diagram-svgbob)-/.test(n) && !current.includes(n))
             .map((n) => self.caches.delete(n))
         );
       } catch {
