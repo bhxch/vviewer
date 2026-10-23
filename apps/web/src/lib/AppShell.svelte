@@ -683,6 +683,7 @@
             const tab = addTab(store, t.path, t.name, t.size ?? null);
             tab.scrollTop = t.scrollTop;
             if (t.overrideRenderer !== undefined) tab.overrideRenderer = t.overrideRenderer; // C 项读回
+            if (t.overrideLang !== undefined) tab.overrideLang = t.overrideLang; // spec §4.1 读回
             if (t.pinned) tab.pinned = true; // F 项读回：快照序 pinned 靠左，add 顺序保持区不变式
             continue;
           }

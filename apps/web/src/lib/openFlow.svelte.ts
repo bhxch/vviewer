@@ -60,6 +60,9 @@ export interface Tab {
   rev?: number;
   /** C 项：手选打开方式（override 渲染器 id）。缺省 = 自动路由；写进会话快照 */
   overrideRenderer?: string;
+  /** spec §4.1：手动高亮语言（canonical 名，setHighlightLang 写入）。缺省 = 自动检测；
+   * 写进会话快照，随 dispatch.langOverride 注入 code 渲染（其余渲染器零感知）。 */
+  overrideLang?: string;
   /** Task 3 双入口：最近一次 dispatch 的实际渲染器 id 与检出扩展名（渲染 effect
    * 成功返回时写入，rendererCandidatesOfTab 的候选数据源）。运行时字段不进会话
    * 快照（rev/pendingLine 同款）；未渲染过为缺省——右键子菜单以名称扩展名兜底。 */
@@ -88,6 +91,7 @@ function snapshot(t: Tab): TabSnapshot {
     // 下方 overrideRenderer/pinned 的「仅置位写入」风格
     ...(t.source.size != null ? { size: t.source.size } : {}),
     ...(t.overrideRenderer !== undefined ? { overrideRenderer: t.overrideRenderer } : {}),
+    ...(t.overrideLang !== undefined ? { overrideLang: t.overrideLang } : {}),
     ...(t.pinned ? { pinned: true } : {})
   };
 }
@@ -354,6 +358,7 @@ class TabCollection {
     const tab = this.add(src.source.store, src.source.path, src.source.name, src.source.size);
     if (src.pinned) tab.pinned = true;
     if (src.overrideRenderer !== undefined) tab.overrideRenderer = src.overrideRenderer;
+    if (src.overrideLang !== undefined) tab.overrideLang = src.overrideLang; // spec §4.1 读回
     this.list.splice(this.list.indexOf(tab), 1);
     this.list.splice(this.list.indexOf(src) + 1, 0, tab);
     void persist(); // add 已按组尾序落盘；归位后再落一次保序
@@ -412,6 +417,7 @@ class TabCollection {
         : this.addPlaceholder(snap);
     tab.scrollTop = snap.scrollTop;
     if (snap.overrideRenderer !== undefined) tab.overrideRenderer = snap.overrideRenderer;
+    if (snap.overrideLang !== undefined) tab.overrideLang = snap.overrideLang; // spec §4.1 读回
     if (snap.pinned) {
       tab.pinned = true;
       this.regroupAfterPinFlip(tab, true); // 组尾落位会破 pinned 区不变式：归位区尾
@@ -505,6 +511,24 @@ class TabCollection {
     else tab.overrideRenderer = rendererId;
     tab.rev = (tab.rev ?? 0) + 1;
     void persist(); // 与 persistScroll 同款落盘入口（saveWorkspaces 快照）
+  }
+
+  /** spec §4.1：手动高亮语言（canonical 名，MetaPanel 语言行 Task 5 接线）。随
+   * dispatch.langOverride 注入 code 渲染（opts.lang，有值跳过 detectLanguage）；
+   * null 清除回落自动检测。rev++ 复用 SSE 刷新的重渲染通道；persist 落快照。
+   * 值未变化（同为空或同名）时提前返回：setRendererOverride 同款防无意义重渲染与写盘。 */
+  setHighlightLang(tabId: string, lang: string | null): void {
+    const tab = this.list.find((t) => t.id === tabId);
+    if (!tab) return;
+    const unchanged =
+      lang === null
+        ? tab.overrideLang === undefined
+        : tab.overrideLang === lang;
+    if (unchanged) return;
+    if (lang === null) delete tab.overrideLang;
+    else tab.overrideLang = lang;
+    tab.rev = (tab.rev ?? 0) + 1;
+    void persist(); // 与 setRendererOverride 同款落盘入口（saveWorkspaces 快照）
   }
 
   /**
