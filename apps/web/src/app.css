@@ -333,12 +333,13 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
   .vv-colhandle::after { content: ''; position: absolute; top: 0; bottom: 0; left: 2px;
     width: 2px; background: transparent; }
   .vv-colhandle:hover::after, .vv-colhandle.vv-dragging::after { background: var(--ui-accent); }
-  /* 面板折叠钮：面板左上/右上角浮置（不占布局流），默认低透明度 hover 实起 */
+  /* 面板折叠钮：面板右上角浮置（不占布局流），默认低透明度 hover 实起。
+     双栏统一右上角（VS Code 侧栏动作位惯例）：右栏若放左上角会压住 MetaPanel
+     首行「属性」标题（均为 ~6px 锚点的浮层/文本叠放），右上角是标题行右侧空白 */
   .vv-collapse-btn { display: block; position: absolute; top: 6px; z-index: 5;
     width: 22px; height: 22px; padding: 0; font-size: 12px; line-height: 1; opacity: .35; }
   .vv-collapse-btn:hover { opacity: 1; }
-  .vv-collapse-left { right: 6px; }
-  .vv-collapse-right { left: 6px; }
+  .vv-collapse-left, .vv-collapse-right { right: 6px; }
 }
 /* chrome 隐藏与 zen（spec 2026-10-19 §2/§3，Task 2）：隐藏条 fixed 平移出视口顶
    （不回流内容、组件保持挂载；visibility:hidden 移出 Tab 序/AT 树并停用内部
