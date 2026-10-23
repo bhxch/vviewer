@@ -6,6 +6,7 @@ import {
   fenceToHtml,
   slugifyHeading,
   assignHeadingIds,
+  collectTextNodes,
   setMarkdownBackend,
   getMarkdownBackend,
   setMarkdownImageResolver,
@@ -512,5 +513,45 @@ describe('markdownRenderer——灯箱 overlay 归属（遗留 U3：多实例互
     expect(overlay()).not.toBeNull();
     b.instance.destroy();
     expect(overlay()).toBeNull();
+  });
+});
+
+describe('collectTextNodes——搜索索引跳过清单（终审 I-2 锁定）', () => {
+  /** 管线成品形态夹具：徽标即复制单入口（pipeline.runCopyCode，spec 2026-10-23 §5）
+   * 的 pre 顶栏 button.md-code-lang——语言词/无语言「复制」/1.5s 反馈文案（已复制、
+   * 复制失败）都落在同一按钮的 textContent（类名不变），类级拒绝应一并覆盖。 */
+  const SEARCH_FIXTURE = [
+    '<p>正文段落 alpha</p>',
+    '<h2>章节标题 beta</h2>',
+    '<pre data-md-copy=""><span class="md-code-bar">',
+    '<button type="button" class="md-code-lang" title="点击复制代码">rust</button>',
+    '</span><code class="language-rust">fn main() {}</code></pre>',
+    '<pre data-md-copy=""><span class="md-code-bar">',
+    '<button type="button" class="md-code-lang">已复制</button>',
+    '</span><code class="language-">plain body</code></pre>',
+    '<script>alert("skip-js")</script>',
+    '<style>.skip-css { color: red }</style>'
+  ].join('');
+
+  it('语言徽标与复制反馈不进索引：md-code-lang/SCRIPT/STYLE 祖先全拒，普通文本与徽标外代码体保留', () => {
+    const host = document.createElement('div');
+    host.innerHTML = SEARCH_FIXTURE;
+    const texts = collectTextNodes(host).map((t) => t.nodeValue ?? '');
+    const joined = texts.join('\n');
+    // 徽标语言词 + 复制反馈文案 + 脚本/样式内容不进搜索索引
+    expect(joined).not.toContain('rust');
+    expect(joined).not.toContain('已复制');
+    expect(joined).not.toContain('alert');
+    expect(joined).not.toContain('.skip-css');
+    // 普通文本保留；拒绝按祖先元素粒度——徽标所在 pre 的代码体不被株连
+    expect(joined).toContain('正文段落 alpha');
+    expect(joined).toContain('章节标题 beta');
+    expect(joined).toContain('fn main() {}');
+    expect(joined).toContain('plain body');
+    // 拒绝面精确性：输出节点不含任何落在跳过元素内的节点（逐节点复核）
+    for (const t of collectTextNodes(host)) {
+      const el = t.parentElement;
+      expect(el?.closest('.md-code-lang, script, style')).toBeNull();
+    }
   });
 });

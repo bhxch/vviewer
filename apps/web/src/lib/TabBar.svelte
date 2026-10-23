@@ -102,9 +102,17 @@
       },
       {
         // 语言轻入口（Task 6）：只读文案 + 跳转（属性面板聚焦语言行，AppShell 监听
-        // 侧展开/开抽屉），非候选菜单——语言手动指定的编辑面唯一在 MetaPanel 语言行
+        // 侧展开/开抽屉），非候选菜单——语言手动指定的编辑面唯一在 MetaPanel 语言行。
+        // 终审 I-1：label 读的是被右键 tab 的 overrideLang（langLabelOf(tab)），onClick
+        // 须先激活同一 tab 再派发聚焦——否则右键非激活 tab 时文案与落点跨 tab 错位
+        //（聚焦落到原激活 tab 的语言行）。监听在 AppShell document 级 $effect（无
+        // 响应式依赖，激活重渲不摘除），先激活后派发即兼容；新 tab meta 异步上行
+        // 期间 rAF 聚焦落空按既有静默跳过语义（AppShell onFocusMetaLang 注）。
         label: `语言：${langLabelOf(tab)}（在属性面板中修改）`,
-        onClick: () => requestMetaLangFocus()
+        onClick: () => {
+          activateTab(tab.id);
+          requestMetaLangFocus();
+        }
       }
     ];
   });

@@ -6,10 +6,11 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 
 /**
  * 手动高亮语言（overrideLang）全链 e2e（renderer-lang-override spec §4.1/§4.2，b- 前缀）。
- * 场景（LANG-01~05）：属性面板语言行（MetaPanel datalist input，Task 5）设语言 →
+ * 场景（LANG-01~06）：属性面板语言行（MetaPanel datalist input，Task 5）设语言 →
  * code 渲染按指定语言重渲染（setHighlightLang rev++ 复用渲染 effect 通道）→ 置空回
  * 自动 → 快照恢复（reload 后 Tab.overrideLang 读回）→ duplicate 继承 → 状态栏轻入口
- * 跳转聚焦（AppShell 单通道，metaLangFocus.ts）。
+ * 跳转聚焦（AppShell 单通道，metaLangFocus.ts）→ Tab 右键「语言」项文案与落点同 tab
+ * （非激活 tab 点击后先激活被右键 tab，终审 I-1）。
  *
  * 断言锚口径：
  * - 本地注入路径（LANG-01/02/04）「按 rust 高亮」= `.vv-code-pre span[class^="ts-"]`
@@ -361,4 +362,38 @@ test('LANG-05 状态栏轻入口「语言：…」→ 跳转属性面板聚焦�
   await expect(picker.locator('.vv-status-picker-lang')).toContainText('语言：自动');
   await picker.locator('.vv-status-picker-lang').click();
   await expect(langInput).toBeFocused();
+});
+
+// ---------------------------------------------------------------- LANG-06
+
+test('LANG-06 Tab 右键「语言」项作用于被右键 tab：点击后该 tab 先激活（终审 I-1）', async ({
+  page
+}) => {
+  test.setTimeout(60_000);
+  await waitAppMounted(page);
+  await openDir(page, [
+    { name: 'left-lang.txt', type: 'text/plain', content: RUST_SNIPPET },
+    { name: 'plain-right.txt', type: 'text/plain', content: 'plain body\n' }
+  ]);
+  // 开序先开后设（TAX-13 同款）：rust 写在 left-lang 上，再开第二个 tab 让激活态离开
+  await openFile(page, 'left-lang.txt');
+  await expect(page.locator('.vv-code-pre')).toContainText('fn main()', { timeout: 20_000 });
+  await openRightIfNarrow(page);
+  await setLang(page, 'rust');
+  await openFile(page, 'plain-right.txt');
+  await expect(page.locator('.vv-tab.active', { hasText: 'plain-right.txt' })).toBeVisible();
+
+  // 右键非激活 tab：菜单「语言」项文案读被右键 tab 的 overrideLang（rust（手动）），
+  // 而非激活 tab 的「自动」——文案 tab 与落点 tab 同源的前置证据
+  await openTabMenu(page, 'left-lang.txt');
+  const langItemName = '语言：rust（手动）（在属性面板中修改）';
+  await expect(page.getByRole('menuitem', { name: langItemName })).toBeVisible();
+
+  // 点击 → 被右键 tab 变激活（终审 I-1 契约：文案 tab == 聚焦落点 tab，修复前
+  // 只派发聚焦，激活态留在 plain-right，此断言必失败）
+  await runMenuItem(page, langItemName);
+  await expect(page.locator('.vv-tab.active', { hasText: 'left-lang.txt' })).toBeVisible();
+  // 属性面板语言行随激活切换回显被右键 tab 的 overrideLang（meta 异步上行，poll 收口；
+  // rAF 聚焦在新 tab meta 未上行期间按 AppShell 静默跳过语义，不作焦点断言）
+  await expect(page.locator('.meta-lang-input')).toHaveValue('rust', { timeout: 20_000 });
 });

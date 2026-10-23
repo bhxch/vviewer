@@ -84,13 +84,18 @@ describe('ViewerPane 状态栏浮层语言项（Task 6 源码契约锚）', () =
 describe('TabBar 右键语言项（Task 6 源码契约锚）', () => {
   const src = readSrc('src/lib/TabBar.svelte');
 
-  it('ctxActions 末项：label「语言：…（在属性面板中修改）」+ onClick 走单通道', () => {
+  it('ctxActions 末项：label「语言：…（在属性面板中修改）」+ onClick 先激活被右键 tab 再走单通道（终审 I-1）', () => {
     const entry = fnWindow(
       src,
       /\{\n        \/\/ 语言轻入口（Task 6）[\s\S]*?\n      \}/
     );
     expect(entry).toContain('语言：${langLabelOf(tab)}（在属性面板中修改）');
-    expect(entry).toContain('onClick: () => requestMetaLangFocus()');
+    // 文案读被右键 tab（langLabelOf(tab)），落点须同 tab：先 activateTab 再聚焦——
+    // 只派发聚焦会落到原激活 tab 的语言行（右键非激活 tab 时跨 tab 错位）
+    expect(entry).toContain('activateTab(tab.id);');
+    expect(entry.indexOf('requestMetaLangFocus();')).toBeGreaterThan(
+      entry.indexOf('activateTab(tab.id);')
+    );
   });
 
   it('langLabelOf：被右键 tab 的 overrideLang → 「（手动）」，否则「自动」（无检测值回显面）', () => {
