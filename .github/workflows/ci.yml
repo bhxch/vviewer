@@ -35,6 +35,16 @@ jobs:
       # C 项：生成扩展名物入库（运行时装配依赖）——与 languages.json 失同步即失败，防入库漂移
       - run: node tools/grammar-builder/gen-code-extensions.mjs --check
       - run: pnpm vitest run
+      # svgbob wasm 引擎产物不入库（spec §7）：web build 前构建期生成。wasm32 target
+      # 经 dtolnay 一步安装；cargo 编译缓存按 Cargo.lock 失效（Swatinem）；wasm-opt
+      # 复用 setup-grammars 已缓存的 binaryen（~/.cache/tree-sitter），缺则脚本自行降级
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/svgbob-wasm
+      - run: pnpm gen:svgbob-wasm
       - run: pnpm --filter web build
       # spec §2.6 预算门禁：dist 图表引擎 chunk（diagram-engines-*.js）总量 ≤4MB，
       # 超限即失败——启用集取舍（减引擎回落 kroki）见 spec，门禁先行兜底
@@ -94,6 +104,16 @@ jobs:
           languages: javascript,typescript,bash,html,css,json,python,rust,java,yaml
       # b-grammar-layers 用例要求构建期注入 CDN 层 base（mock CDN，不依赖外网）；
       # 与 spec 内 mock 的路由前缀严格一致（base 同时容纳 manifest.json 与 *.wasm）
+      # svgbob wasm 引擎产物不入库（spec §7）：web build 前构建期生成（接线形态与
+      # web job 一致：dtolnay 装 wasm32 target + Swatinem cargo 缓存 + wasm-opt 沿
+      # setup-grammars 缓存的 binaryen，缺则脚本自行降级）
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/svgbob-wasm
+      - run: pnpm gen:svgbob-wasm
       - run: pnpm --filter web build
         env:
           VV_GRAMMAR_CDN: https://cdn.grammars.test/grammars/
