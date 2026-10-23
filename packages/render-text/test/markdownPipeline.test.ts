@@ -182,6 +182,29 @@ describe('katex 步', () => {
     expect(doc.body.textContent).toContain('\\unknownCmdX');
   });
 
+  it('表格 $$ 块内 LaTeX 换行 \\\\ 被 CommonMark 转义折叠为 \\，非法公式保留原文', async () => {
+    // KaTeX 官方 supported.md 语料形态（e2e MS 深断言实证口径）：td 内
+    // $$\begin{alignat}{2}…\\3…\end{alignat}$$ —— \\ 经 CommonMark 反斜杠转义折叠成
+    // 字面 \，\3 成未定义控制序列，katex throwOnError 保留原文不产出 display；同格
+    // 对照（无 \\ 的 $$x^2$$）正常产出 display。这是转义层 × throwOnError 容错两条
+    // 既有语义的组合结果，管线不改写 $ 定界内文本（改写将波及 \$、\\{ 全部语义）。
+    const doc = await renderDoc(
+      '|h|h|\n|---|---|\n'
+      + String.raw`|$$\begin{alignat}{2}10&x+&3&y=2\\3&x+&13&y=4\end{alignat}$$|$$x^2$$|`
+      + '\n'
+    );
+    const tds = doc.querySelectorAll('td');
+    expect(tds.length).toBe(2);
+    // 对照格：无 \\ 的块级公式正常排印且住在 td 内
+    expect(doc.querySelectorAll('td .katex-display').length).toBe(1);
+    expect(tds[1]!.querySelector('.katex-display')).not.toBeNull();
+    // 非法格：原文保留（$$ 定界与折叠后的 \3 原样）、无 katex 标记
+    expect(tds[0]!.querySelector('.katex')).toBeNull();
+    expect(tds[0]!.textContent).toBe(
+      '$$\\begin{alignat}{2}10&x+&3&y=2\\3&x+&13&y=4\\end{alignat}$$'
+    );
+  });
+
   it('KaTeX 分隔符扩展：\\(..\\) 行内与 \\[..\\] 块级', async () => {
     // Task 1b 起引擎层 protectLatexDelimiters 把笔记原生的 \(..\)/\[..\] 统一成
     // $/$$ 词汇，brief 原输入即真实路径；管线步只面向 $ 词汇扫描
