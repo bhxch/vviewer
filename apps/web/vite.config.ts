@@ -380,13 +380,13 @@ export default defineConfig({
             // CDN 图表引擎（spec §6：excalidraw/bpmn/vega/vegalite 经 jsdelivr +esm
             // 精确版本动态 import，新 CDN 类型同吃此规则）：CacheFirst 后二次访问
             // 近似离线；版本进 URL，跨版本陈旧天然免疫（修订号仅缓存名换代用）。
-            // bpmn-js 子路径 +esm 会级联拉取数十个依赖分片（每片均精确版本化），
-            // maxEntries 24 覆盖常用集，超出按 LRU 逐出
+            // bpmn-js 子路径 +esm 会级联拉取数十个依赖分片（每片均精确版本化，实测
+            // bpmn 依赖图 35 片），maxEntries 48 覆盖常用集不半途 LRU 逐出打折扣
             urlPattern: /^https:\/\/cdn\.jsdelivr\.net\/npm\/.*/,
             handler: 'CacheFirst',
             options: {
               cacheName: `vv-cdn-engines-${BUILD_REVISION}`,
-              expiration: { maxEntries: 24, purgeOnQuotaError: true },
+              expiration: { maxEntries: 48, purgeOnQuotaError: true },
               cacheableResponse: { statuses: [200] }
             }
           }

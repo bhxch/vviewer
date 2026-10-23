@@ -252,7 +252,9 @@ function wrapServerDiagrams(root: Document, ctx: PipelineCtx): void {
  *   源码面板展开（highlightLang 命中时源码走 highlightFence）；
  * - kroki：视图为 img（src 经 kroki deflate+base64url 编码；error 监听仅真浏览器
  *   生效——jsdom 不派发 img load/error，单测只断言 src 形态）；
- * - local：动态引擎渲染 svg/katex HTML 注入视图，失败降级错误卡片（保留源码）。
+ * - local：动态引擎渲染 svg/katex HTML 注入视图；失败按 spec §6 回退链降级——有
+ *   krokiType 先降 kroki img（kroki img error 再落错误卡），无 krokiType 直落错误卡片
+ *   （保留源码）。
  * mermaid 视图容器带 data-mermaid 源码属性（重渲染锚，Task 5 主题联动依赖）：
  * local/kroki 模式带，source 模式无（未渲染无需重渲染锚）；local 失败态同样
  * 保留——旧实现语义，渲染成功与否不影响锚存在。
@@ -288,7 +290,10 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
   const { view, sourcePane, sourceCode } = w;
   const toggle = w.toggle!; // 非 source 模式恒为 withToggle=true 构造，toggle 必在
 
-  if (mode === 'kroki') {
+  // kroki img 构造（spec §6 回退链 local→kroki→错误卡+源码：kroki 模式直走；local
+  // 引擎失败且有 krokiType 时复用同一段降级，全 local 引擎统一语义——mermaid/
+  // graphviz/nomnoml/svgbob/CDN 四类同）。抽局部函数复用，勿复制分支体。
+  const appendKrokiImg = async (): Promise<void> => {
     const img = doc.createElement('img');
     img.setAttribute('alt', type.id);
     img.setAttribute('src', await createKrokiUrl(ctx.diagram?.krokiHost ?? DEFAULT_KROKI_HOST, type.krokiType, source));
@@ -302,20 +307,30 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
       sourcePane.removeAttribute('hidden');
       toggle.textContent = '图';
     });
-    view.appendChild(img);
+    // 回退时整体重置视图：引擎半成品不得残留（replaceChildren 替换非追加）
+    view.replaceChildren(img);
     // 锚仅 mermaid 视图保留（Task 5 以 [data-mermaid] 选择器做主题重渲染，空属性
     // 同样命中选择器——plantuml/graphviz 等非 mermaid 视图不得设，否则被误重渲染）
     if (type.id === 'mermaid') view.setAttribute('data-mermaid', source);
+  };
+
+  if (mode === 'kroki') {
+    await appendKrokiImg();
     return;
   }
 
-  // local
+  // local：spec §6 回退链——引擎失败且有 krokiType 先降级 kroki img（kroki 也失败，
+  // img error 既有路径，才落错误卡+源码）；无 krokiType（math）直落错误卡保留源码
   try {
     const html = await renderDiagramEngine(type.engine!, source, { mermaidTheme: ctx.diagram?.mermaidTheme ?? 'default' });
     view.innerHTML = html;
   } catch {
-    view.classList.add(cls(ctx, 'diagramError'));
-    view.textContent = source;
+    if (type.krokiType) {
+      await appendKrokiImg();
+    } else {
+      view.classList.add(cls(ctx, 'diagramError'));
+      view.textContent = source;
+    }
   }
   if (type.id === 'mermaid') view.setAttribute('data-mermaid', source); // 重渲染锚（成功/失败态都在）
 }

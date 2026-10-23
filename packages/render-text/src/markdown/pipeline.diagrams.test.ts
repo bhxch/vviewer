@@ -108,19 +108,35 @@ describe('diagrams 步：注册表分发', () => {
       ...baseCtx,
       diagram: { krokiHost: 'https://k', mermaidTheme: 'default', modeOf: () => 'local' }
     });
-    // 未装 nomnoml 真渲染也要求错误路径可观察；真环境断言 svg：
+    // 未装 nomnoml 真渲染也要求错误路径可观察；真环境断言 svg。spec §6 回退链后
+    // 失败终态为 kroki img——容差一并认 img（测试环境 nomnoml 实装，走 svg 分支）
     const view = doc.querySelector('.md-diagram-view')!;
-    expect(view.classList.contains('md-diagram-error') || view.querySelector('svg')).toBeTruthy();
+    expect(
+      view.classList.contains('md-diagram-error') || view.querySelector('svg') || view.querySelector('img')
+    ).toBeTruthy();
   });
 
-  it('local 引擎失败：错误卡片保留源码', async () => {
+  it('local 引擎失败且有 krokiType：spec §6 回退链降级 kroki img（src 形态断言）', async () => {
     const doc = docWithFence('graphviz', 'digraph { a ->');
     await runPipeline(doc, {
       ...baseCtx,
       diagram: { krokiHost: 'https://k', mermaidTheme: 'default', modeOf: () => 'local' }
     });
+    // jsdom 不派 img error（既有口径）：断言 src 形态；错误卡仅真浏览器 img error 后出现
+    const img = doc.querySelector('.md-diagram-view img') as HTMLImageElement;
+    expect(img.getAttribute('src')!.startsWith('https://k/graphviz/svg/')).toBe(true);
+    expect(doc.querySelector('.md-diagram-error')).toBeNull();
+  });
+
+  it('local 引擎失败且无 krokiType（math）：spec §6 回退链终点，仍错误卡保留源码', async () => {
+    const doc = docWithFence('math', '\\notacommand'); // katex throwOnError 抛 ParseError
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: { krokiHost: 'https://k', mermaidTheme: 'default', modeOf: () => 'local' }
+    });
     expect(doc.querySelector('.md-diagram-error')).not.toBeNull();
-    expect(doc.querySelector('.md-diagram-error')!.textContent).toContain('digraph');
+    expect(doc.querySelector('.md-diagram-error')!.textContent).toContain('\\notacommand');
+    expect(doc.querySelector('.md-diagram-view img')).toBeNull(); // 无 krokiType 不降级 img
   });
 
   it('math 围栏 local：katex display HTML', async () => {

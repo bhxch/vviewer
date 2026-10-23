@@ -21,7 +21,7 @@ export async function renderExcalidrawCdn(source: string): Promise<string> {
   };
   const data = JSON.parse(source) as {
     elements?: unknown[];
-    appState?: Record<string, unknown>;
+    appState?: { viewBackgroundColor?: string } & Record<string, unknown>;
     files?: Record<string, unknown> | null;
   };
   const appState = data.appState ?? {};
@@ -31,8 +31,7 @@ export async function renderExcalidrawCdn(source: string): Promise<string> {
       appState: {
         ...appState,
         exportBackground: true,
-        viewBackgroundColor:
-          typeof appState.viewBackgroundColor === 'string' ? appState.viewBackgroundColor : '#ffffff'
+        viewBackgroundColor: appState.viewBackgroundColor || '#ffffff' // markpad 对齐：空串同回退
       },
       files: data.files ?? null
     }

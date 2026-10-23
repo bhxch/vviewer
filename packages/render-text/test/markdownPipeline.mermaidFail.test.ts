@@ -2,8 +2,9 @@ import { describe, it, expect, vi } from 'vitest';
 
 // mermaid 动态 import 失败分支（M3 deferred minor）：模块工厂抛错 →
 // diagramEngines.renderMermaid 的 `import('mermaid').catch(() => null)` 得 null →
-// 抛错 → 分发层（pipeline renderDiagramBlock）逐块错误路径：错误卡片保留原文，
-// 不注入 svg、不抛未处理 rejection。
+// 抛错 → 分发层（pipeline renderDiagramBlock）spec §6 回退链：有 krokiType 先降级
+// kroki img（jsdom 不派 img error，单测断言 src 形态），kroki 也失败（真浏览器 img
+// error）才落错误卡片保留原文。
 // 与 markdownPipeline.test.ts 的「模块加载成功但 render 失败」分支互补。
 vi.mock('mermaid', async () => {
   throw new Error('mermaid bundle 加载失败（模拟网络/分块错误）');
@@ -19,15 +20,17 @@ function docOf(md: string): Document {
 }
 
 describe('diagrams 步：mermaid 动态 import 失败', () => {
-  it('import 失败降级为逐块错误卡片：保留原文 + diagram-error 类（契约迁移：.md-diagram-view + data-mermaid）', async () => {
+  it('import 失败按 spec §6 回退链降级 kroki img：data-mermaid 锚保留 + src 形态（jsdom 不派 img error，错误卡仅真浏览器 img error 后出现）', async () => {
     const doc = docOf('```mermaid\ngraph TD; A-->B;\n```\n');
     const ctx: PipelineCtx = { highlightFence: vi.fn().mockResolvedValue(null) };
     await expect(runPipeline(doc, ctx)).resolves.toBeUndefined();
     const container = doc.querySelector('.md-diagram-view[data-mermaid]');
     expect(container).not.toBeNull();
     expect(container!.getAttribute('data-mermaid')).toBe('graph TD; A-->B;');
-    expect(container!.classList.contains('md-diagram-error')).toBe(true);
-    expect(container!.textContent).toBe('graph TD; A-->B;');
+    // 回退 img：src 走注册表 krokiType（mermaid）+ 默认 kroki host
+    const img = container!.querySelector('img');
+    expect(img?.getAttribute('src')?.startsWith('https://kroki.io/mermaid/svg/')).toBe(true);
+    expect(container!.classList.contains('md-diagram-error')).toBe(false);
     expect(container!.querySelector('svg')).toBeNull();
   });
 

@@ -128,14 +128,17 @@ describe('diagrams 步（mermaid）', () => {
     expect(container!.classList.contains('md-diagram-error')).toBe(false);
   });
 
-  it('mermaid.render 失败：保留原文加错误类', async () => {
+  it('mermaid.render 失败：spec §6 回退链降级 kroki img（jsdom 不派 img error，不落错误卡）', async () => {
     mermaidMocks.render.mockRejectedValue(new Error('boom'));
     const doc = docOf(MERMAID_MD);
     await runPipeline(doc, noopCtx());
     const container = doc.querySelector('.md-diagram-view')!;
     expect(container).not.toBeNull();
-    expect(container.classList.contains('md-diagram-error')).toBe(true);
-    expect(container.textContent).toContain('graph TD; A-->B;');
+    // 回退 img：src 走注册表 krokiType（mermaid）+ 默认 kroki host；错误卡仅真浏览器
+    // img error 后出现（jsdom 不派发，既有口径）
+    const img = container.querySelector('img');
+    expect(img?.getAttribute('src')?.startsWith('https://kroki.io/mermaid/svg/')).toBe(true);
+    expect(container.classList.contains('md-diagram-error')).toBe(false);
   });
 
   it('mermaid 失败不阻塞 copyCode——同文档 js 块仍有可复制的语言徽标', async () => {

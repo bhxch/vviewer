@@ -54,7 +54,7 @@ describe('CDN 引擎直测（mock loader）', () => {
     expect(data.appState).toMatchObject({ viewBackgroundColor: '#fff', exportBackground: true });
   });
 
-  it('excalidraw：空/缺省源仍包出合法 data（viewBackgroundColor 默认白）', async () => {
+  it('excalidraw：空/缺省源仍包出合法 data（viewBackgroundColor 空串同回退白——markpad || 对齐）', async () => {
     const seenOpts: { data: Record<string, unknown> }[] = [];
     __setCdnLoaderForTest(async () => ({
       exportToSvg: async (opts: { data: Record<string, unknown> }) => {
@@ -62,7 +62,7 @@ describe('CDN 引擎直测（mock loader）', () => {
         return { outerHTML: '<svg/>' };
       }
     }));
-    await renderExcalidrawCdn('{}');
+    await renderExcalidrawCdn('{"appState":{"viewBackgroundColor":""}}');
     const data = seenOpts[0]!.data as { elements: unknown[]; appState: Record<string, unknown> };
     expect(data.elements).toEqual([]);
     expect(data.appState).toEqual({ exportBackground: true, viewBackgroundColor: '#ffffff' });
