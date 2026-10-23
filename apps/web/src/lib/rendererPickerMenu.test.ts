@@ -99,9 +99,9 @@ describe('rendererCandidatesOfTab（右键壳的 Tab 入口）', () => {
     expect(cands.map((c) => c.id)).toEqual(['', 'markdown', 'code', 'hex']);
   });
 
-  it('名称亦无扩展名：跳过扩展名候选，恒兜底 code/hex', () => {
+  it('名称亦无扩展名：跳过扩展名候选，恒兜底 code/markdown/hex', () => {
     const cands = rendererCandidatesOfTab(makeRegistry(), { source: { name: 'README' } });
-    expect(cands.map((c) => c.id)).toEqual(['', 'code', 'hex']);
+    expect(cands.map((c) => c.id)).toEqual(['', 'code', 'markdown', 'hex']); // spec 2026-10-23 §3.1 markdown 恒兜底
   });
 
   it('override 随 tab：手选态 current 落在 override 候选上', () => {

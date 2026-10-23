@@ -5,11 +5,11 @@
 import type { Registry } from '@vviewer/core';
 import type { FileOpenWith } from './metaStore.svelte';
 
-/** 候选 =「自动」+ 生效渲染器 ∪ 扩展名注册渲染器 ∪ code/hex（去重）。
+/** 候选 =「自动」+ 生效渲染器 ∪ 扩展名注册渲染器 ∪ code/markdown/hex（去重）。
  * 存在性守卫：registry.byId 未命中的 id 一律不进候选——dispatch 渲染失败返回的
  * 'error' id（registry 无此渲染器）由此滤除，label 不回退英文 id；错误卡片场景
  * current 维持 ''（自动）。detExt 为 ''（无扩展名/选路失败纠偏后仍空）时跳过
- * 扩展名候选，恒兜底 code/hex。 */
+ * 扩展名候选，恒兜底 code/markdown/hex。 */
 export function openWithOf(
   registry: Pick<Registry, 'byId' | 'all'>,
   overrideRenderer: string | undefined,
@@ -30,6 +30,7 @@ export function openWithOf(
     if (detExt !== '' && r.extensions.includes(detExt)) push(r.id);
   }
   push('code');
+  push('markdown'); // markdown 恒兜底（spec §3.1）：任何文件值得试 markdown 渲染，先例=hex 对 .md 出现
   push('hex');
   return { current: overrideRenderer ?? '', manual: overrideRenderer !== undefined, options };
 }
