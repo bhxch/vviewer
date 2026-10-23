@@ -68,7 +68,8 @@ for (const [name] of [
   ['vv-grammars'],
   ['vv-queries'],
   ['vv-runtime'], // BUG-06 配套：/tree-sitter.wasm 的 CacheFirst（主线程预热通道）
-  ['vv-diagram-svgbob'] // spec §7：svgbob 前端 wasm 引擎 CacheFirst（重构丢规则时构建期拦截）
+  ['vv-diagram-svgbob'], // spec §7：svgbob 前端 wasm 引擎 CacheFirst（重构丢规则时构建期拦截）
+  ['vv-cdn-engines'] // spec §6：CDN 图表引擎（jsdelivr +esm）CacheFirst（同上拦截）
 ]) {
   if (!sw.includes(`cacheName:"${name}-`)) fail(`sw.js 缺少运行时缓存 ${name}-<revision>`);
 }

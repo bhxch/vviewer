@@ -1,20 +1,23 @@
 // diagrams.ts — 图表注册表与 kroki 编码（spec 2026-10-19 §2.1/§2.2）。
-// 类型清单/别名对齐 markpad src/lib/diagrams.ts；local 启用集按 spec §2.6
-// 预算裁决仅 graphviz/nomnoml（mermaid/math 既有），其余 kroki/源码覆盖。
+// 类型清单/别名对齐 markpad src/lib/diagrams.ts；local 启用集按 spec §2.6/§7/§6：
+// 前端包引擎 graphviz/nomnoml + 既有 mermaid/math + wasm svgbob（§7）+ CDN 直链
+// excalidraw/bpmn/vega/vegalite（§6），其余 kroki/源码覆盖。
 
 export type DiagramMode = 'local' | 'kroki' | 'source';
 
 export interface DiagramType {
   id: string;
   aliases: readonly string[];
-  /** 本期是否内置本地引擎依赖（Global Constraints 启用集） */
+  /** 本期是否内置本地引擎依赖（Global Constraints 启用集；spec §6 起含 CDN 直链四类） */
   local: boolean;
   defaultMode: DiagramMode;
   /** kroki 服务端类型名；'' = kroki 不支持（如 math） */
   krokiType: string;
   /** 源码模式/图源切换的高亮语言（'' = 不高亮） */
   highlightLang: string;
-  engine?: 'mermaid' | 'graphviz' | 'nomnoml' | 'math' | 'svgbob';
+  /** 本地引擎 id：mermaid/graphviz/nomnoml/math 前端包，svgbob wasm，
+   * excalidraw/bpmn/vega/vegalite 走 jsdelivr CDN 直链（cdnEngines.ts） */
+  engine?: 'mermaid' | 'graphviz' | 'nomnoml' | 'math' | 'svgbob' | 'excalidraw' | 'bpmn' | 'vega' | 'vegalite';
 }
 
 export const DIAGRAM_TYPES: readonly DiagramType[] = [
@@ -30,11 +33,11 @@ export const DIAGRAM_TYPES: readonly DiagramType[] = [
   { id: 'erd', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'erd', highlightLang: '' },
   { id: 'pikchr', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'pikchr', highlightLang: '' },
   { id: 'svgbob', aliases: [], local: true, defaultMode: 'local', krokiType: 'svgbob', highlightLang: '', engine: 'svgbob' },
-  { id: 'excalidraw', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'excalidraw', highlightLang: 'json' },
+  { id: 'excalidraw', aliases: [], local: true, defaultMode: 'local', krokiType: 'excalidraw', highlightLang: 'json', engine: 'excalidraw' },
   { id: 'nomnoml', aliases: [], local: true, defaultMode: 'local', krokiType: 'nomnoml', highlightLang: '', engine: 'nomnoml' },
-  { id: 'bpmn', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'bpmn', highlightLang: 'xml' },
-  { id: 'vega', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'vega', highlightLang: 'json' },
-  { id: 'vegalite', aliases: ['vega-lite'], local: false, defaultMode: 'kroki', krokiType: 'vegalite', highlightLang: 'json' },
+  { id: 'bpmn', aliases: [], local: true, defaultMode: 'local', krokiType: 'bpmn', highlightLang: 'xml', engine: 'bpmn' },
+  { id: 'vega', aliases: [], local: true, defaultMode: 'local', krokiType: 'vega', highlightLang: 'json', engine: 'vega' },
+  { id: 'vegalite', aliases: ['vega-lite'], local: true, defaultMode: 'local', krokiType: 'vegalite', highlightLang: 'json', engine: 'vegalite' },
   { id: 'math', aliases: ['latex'], local: true, defaultMode: 'local', krokiType: '', highlightLang: 'latex', engine: 'math' }
 ];
 

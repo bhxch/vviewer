@@ -22,16 +22,26 @@ describe('resolveDiagramType', () => {
       expect(resolveDiagramType(id), id).not.toBeNull();
     }
   });
-  it('本期 local 启用集 = mermaid/graphviz/nomnoml/math/svgbob（spec §7 翻转），其余 kroki 兜底', () => {
+  it('本期 local 启用集 = 前端包 4 类 + wasm svgbob + CDN 四类（spec §7/§6 翻转），其余 kroki 兜底', () => {
     const localIds = DIAGRAM_TYPES.filter((t) => t.local).map((t) => t.id).sort();
-    expect(localIds).toEqual(['graphviz', 'math', 'mermaid', 'nomnoml', 'svgbob']);
-    expect(resolveDiagramType('vega')!.defaultMode).toBe('kroki');
+    expect(localIds).toEqual([
+      'bpmn', 'excalidraw', 'graphviz', 'math', 'mermaid', 'nomnoml', 'svgbob', 'vega', 'vegalite'
+    ]);
+    expect(resolveDiagramType('plantuml')!.defaultMode).toBe('kroki');
   });
   it('svgbob 注册表翻转 local 默认（spec §7）', () => {
     const t = resolveDiagramType('svgbob')!;
     expect(t.local).toBe(true);
     expect(t.engine).toBe('svgbob');
     expect(t.defaultMode).toBe('local');
+  });
+  it('CDN 四类注册表翻转 local 默认（spec §6）：excalidraw/bpmn/vega/vegalite', () => {
+    for (const id of ['excalidraw', 'bpmn', 'vega', 'vegalite']) {
+      const t = resolveDiagramType(id)!;
+      expect(t.local, id).toBe(true);
+      expect(t.engine, id).toBe(id);
+      expect(t.defaultMode, id).toBe('local');
+    }
   });
 });
 

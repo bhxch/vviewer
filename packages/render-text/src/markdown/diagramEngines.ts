@@ -1,6 +1,6 @@
 // diagramEngines.ts — 本地图表引擎适配（spec §2.1 启用集 + §2.6 standalone 形态）。
 // API 用法对齐 markpad src/lib/localRenderers.ts；全部动态 import（不进主包），
-// import 失败不缓存负结果（允许重试）。
+// import 失败不缓存负结果（允许重试）。CDN 直链四类委派 cdnEngines.ts（spec §6）。
 export type MermaidTheme = 'default' | 'dark';
 
 let mermaidSeq = 0;
@@ -31,7 +31,18 @@ async function renderMathFence(source: string): Promise<string> {
   return katex.renderToString(source, { displayMode: true, throwOnError: true });
 }
 
-export type DiagramEngineId = 'mermaid' | 'graphviz' | 'nomnoml' | 'math' | 'svgbob';
+export type DiagramEngineId =
+  | 'mermaid'
+  | 'graphviz'
+  | 'nomnoml'
+  | 'math'
+  | 'svgbob'
+  // CDN 直链四类（spec §6）：实现另置 cdnEngines.ts（jsdelivr +esm 精确版本），
+  // 经下方 switch 动态 import 委派——cdnEngines 恒懒加载不进主 chunk
+  | 'excalidraw'
+  | 'bpmn'
+  | 'vega'
+  | 'vegalite';
 
 /** svgbob wasm 引擎（spec §7）：glue 构建期生成（gen:svgbob-wasm），init 幂等缓存。 */
 let svgbobInit: Promise<{ render: (s: string) => string }> | null = null;
@@ -60,6 +71,13 @@ export async function renderDiagramEngine(
       return renderMathFence(source);
     case 'svgbob':
       return renderSvgbob(source);
+    case 'excalidraw':
+      return (await import('./cdnEngines')).renderExcalidrawCdn(source);
+    case 'bpmn':
+      return (await import('./cdnEngines')).renderBpmnCdn(source);
+    case 'vega':
+    case 'vegalite':
+      return (await import('./cdnEngines')).renderVegaCdn(source);
   }
 }
 

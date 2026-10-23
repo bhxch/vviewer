@@ -57,7 +57,8 @@
     </div>
   </div>
   <div class="vv-settings-hint">
-    本地引擎本期支持 mermaid/graphviz/nomnoml/公式，其余语言本地档自动回落 Kroki；Kroki 服务填
-    http(s):// 开头地址，留空用 https://kroki.io。改动对已打开文档重新打开后生效。
+    本地引擎支持 mermaid/graphviz/nomnoml/公式/svgbob 与 excalidraw/bpmn/vega/vegalite（CDN 按需加载），
+    其余语言本地档自动回落 Kroki；Kroki 服务填 http(s):// 开头地址，留空用 https://kroki.io。
+    改动对已打开文档重新打开后生效。
   </div>
 </section>

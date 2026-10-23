@@ -89,7 +89,8 @@ function genSwCleanup(): Plugin {
       `vv-grammars-${BUILD_REVISION}`,
       `vv-runtime-${BUILD_REVISION}`,
       `vv-queries-${BUILD_REVISION}`,
-      `vv-diagram-svgbob-${BUILD_REVISION}`
+      `vv-diagram-svgbob-${BUILD_REVISION}`,
+      `vv-cdn-engines-${BUILD_REVISION}`
     ];
     writeFileSync(
       SW_CLEANUP_DEST,
@@ -105,7 +106,7 @@ self.addEventListener('activate', (event) => {
         const names = await self.caches.keys();
         await Promise.all(
           names
-            .filter((n) => /^(vv-grammars|vv-runtime|vv-queries|vv-diagram-svgbob)-/.test(n) && !current.includes(n))
+            .filter((n) => /^(vv-grammars|vv-runtime|vv-queries|vv-diagram-svgbob|vv-cdn-engines)-/.test(n) && !current.includes(n))
             .map((n) => self.caches.delete(n))
         );
       } catch {
@@ -372,6 +373,20 @@ export default defineConfig({
             options: {
               cacheName: `vv-diagram-svgbob-${BUILD_REVISION}`,
               expiration: { maxEntries: 2, purgeOnQuotaError: true },
+              cacheableResponse: { statuses: [200] }
+            }
+          },
+          {
+            // CDN 图表引擎（spec §6：excalidraw/bpmn/vega/vegalite 经 jsdelivr +esm
+            // 精确版本动态 import，新 CDN 类型同吃此规则）：CacheFirst 后二次访问
+            // 近似离线；版本进 URL，跨版本陈旧天然免疫（修订号仅缓存名换代用）。
+            // bpmn-js 子路径 +esm 会级联拉取数十个依赖分片（每片均精确版本化），
+            // maxEntries 24 覆盖常用集，超出按 LRU 逐出
+            urlPattern: /^https:\/\/cdn\.jsdelivr\.net\/npm\/.*/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: `vv-cdn-engines-${BUILD_REVISION}`,
+              expiration: { maxEntries: 24, purgeOnQuotaError: true },
               cacheableResponse: { statuses: [200] }
             }
           }
