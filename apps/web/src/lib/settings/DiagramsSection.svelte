@@ -117,8 +117,8 @@
     </div>
   </div>
   <div class="vv-settings-hint">
-    本地引擎支持 mermaid/graphviz/nomnoml/公式/svgbob 与 excalidraw/bpmn/vega/vegalite（CDN 按需加载），
-    其余语言本地档自动回落 Kroki；Kroki 服务填 http(s):// 开头地址，留空用 https://kroki.io。
+    本地引擎支持 mermaid/graphviz/nomnoml/公式/svgbob 与 excalidraw/bpmn/vega/vegalite/wavedrom/bytefield/dbml/d2
+    （CDN 按需加载；d2 引擎较重，默认走 Kroki），其余语言本地档自动回落 Kroki；Kroki 服务填 http(s):// 开头地址，留空用 https://kroki.io。
     「服务端」模式把图交给所连服务器渲染（当前支持 graphviz/svgbob），未连接或不支持时自动回落本地/Kroki；
     Kroki 通道选「服务端代发」需部署侧启用 kroki 转发（未连接或能力缺失时该选项禁用，已选也会回落前端直连）。
     graphviz 可选渲染器（viz-js 默认 / hpcc 经 CDN 按需加载）；Mermaid 主题选「自动」跟随亮暗模式，显式主题立即重画已打开文档；

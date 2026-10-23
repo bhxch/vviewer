@@ -362,3 +362,47 @@ describe('diagrams 步：graphviz 渲染器透传（Task 6 / spec §9.1）', () 
     expect(img?.getAttribute('src')?.startsWith('https://k/graphviz/svg/') ?? true).toBe(true);
   });
 });
+
+// per-block 兜底（P2 终审移交 M2）：renderDiagramBlock 内部 catch 兜引擎失败，此处兜
+// appendKrokiImg 外溢错误（kroki 编码内 btoa/pako 惰性 import 失败等）——单块失败不得
+// 中断后续块。注入缝：vi.stubGlobal('btoa', throw) 使 createKrokiUrl 必炸（同文件上方
+// kroki img 用例不受影响——btoa 桩按用例内 stub/unstub 作用域隔离）。
+describe('diagrams 步：runDiagrams per-block 兜底（M2）', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('首块 kroki 编码外溢失败：console.warn 落错且后续块照常渲染', async () => {
+    vi.stubGlobal('btoa', () => {
+      throw new Error('btoa 桩：kroki 编码外溢失败');
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const doc = document.implementation.createHTMLDocument('');
+    for (const [lang, body] of [['plantuml', 'a -> b'], ['math', 'c^2']] as const) {
+      const pre = doc.createElement('pre');
+      const code = doc.createElement('code');
+      code.className = `language-${lang}`;
+      code.textContent = body;
+      pre.appendChild(code);
+      doc.body.appendChild(pre);
+    }
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: {
+        krokiHost: 'https://k',
+        mermaidTheme: 'default',
+        modeOf: (lang) => (lang === 'plantuml' ? 'kroki' : 'local') // math local → katex
+      }
+    });
+    // 无兜底时循环在首块中断，math 围栏保持裸 pre>code；兜底后两块均出 wrapper
+    expect(doc.querySelectorAll('.md-diagram')).toHaveLength(2);
+    // 首块失败态留 wrapper 半成品（视图已建、img 无 src——编码在 src 赋值前抛出）
+    const firstView = doc.querySelectorAll('.md-diagram-view')[0]!;
+    expect(firstView.querySelector('img[src]')).toBeNull();
+    // 后续块（math local katex）照常出图
+    expect(doc.querySelectorAll('.md-diagram-view')[1]!.innerHTML).toContain('katex');
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(String(warnSpy.mock.calls[0]![0])).toContain('diagram 块渲染失败');
+  });
+});

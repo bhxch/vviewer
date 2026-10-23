@@ -46,12 +46,16 @@ export type DiagramEngineId =
   | 'nomnoml'
   | 'math'
   | 'svgbob'
-  // CDN 直链四类（spec §6）：实现另置 cdnEngines.ts（jsdelivr +esm 精确版本），
+  // CDN 直链八类（spec §6/§10）：实现另置 cdnEngines.ts（jsdelivr +esm 精确版本），
   // 经下方 switch 动态 import 委派——cdnEngines 恒懒加载不进主 chunk
   | 'excalidraw'
   | 'bpmn'
   | 'vega'
-  | 'vegalite';
+  | 'vegalite'
+  | 'wavedrom'
+  | 'bytefield'
+  | 'dbml'
+  | 'd2';
 
 /** svgbob wasm 引擎（spec §7）：glue 构建期生成（gen:svgbob-wasm），init 幂等缓存。 */
 let svgbobInit: Promise<{ render: (s: string) => string }> | null = null;
@@ -87,6 +91,14 @@ export async function renderDiagramEngine(
     case 'vega':
     case 'vegalite':
       return (await import('./cdnEngines')).renderVegaCdn(source);
+    case 'wavedrom':
+      return (await import('./cdnEngines')).renderWavedromCdn(source);
+    case 'bytefield':
+      return (await import('./cdnEngines')).renderBytefieldCdn(source);
+    case 'dbml':
+      return (await import('./cdnEngines')).renderDbmlCdn(source);
+    case 'd2':
+      return (await import('./cdnEngines')).renderD2Cdn(source);
   }
 }
 

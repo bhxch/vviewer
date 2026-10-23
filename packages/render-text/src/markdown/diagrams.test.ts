@@ -22,10 +22,10 @@ describe('resolveDiagramType', () => {
       expect(resolveDiagramType(id), id).not.toBeNull();
     }
   });
-  it('本期 local 启用集 = 前端包 4 类 + wasm svgbob + CDN 四类（spec §7/§6 翻转），其余 kroki 兜底', () => {
+  it('本期 local 启用集 = 前端包 4 类 + wasm svgbob + CDN 八类（spec §7/§6/§10 翻转），其余 kroki 兜底', () => {
     const localIds = DIAGRAM_TYPES.filter((t) => t.local).map((t) => t.id).sort();
     expect(localIds).toEqual([
-      'bpmn', 'excalidraw', 'graphviz', 'math', 'mermaid', 'nomnoml', 'svgbob', 'vega', 'vegalite'
+      'bpmn', 'bytefield', 'd2', 'dbml', 'excalidraw', 'graphviz', 'math', 'mermaid', 'nomnoml', 'svgbob', 'vega', 'vegalite', 'wavedrom'
     ]);
     expect(resolveDiagramType('plantuml')!.defaultMode).toBe('kroki');
   });
@@ -51,6 +51,59 @@ describe('resolveDiagramType', () => {
     expect(resolveDiagramType('mermaid')!.renderers).toBeUndefined();
     const withRenderers = DIAGRAM_TYPES.filter((t) => t.renderers?.length).map((t) => t.id);
     expect(withRenderers).toEqual(['graphviz']); // 本期仅 graphviz 双渲染器
+  });
+});
+
+describe('注册表扩容 30 类（spec 2026-10-23 §10）', () => {
+  it('总数 30（kroki v0.33.0 官方注册表对齐；diagramsnet/lini/protobuf 不注册）', () => {
+    expect(DIAGRAM_TYPES).toHaveLength(30);
+    for (const id of ['wavedrom', 'bytefield', 'dbml', 'd2', 'packetdiag', 'rackdiag', 'goat', 'wireviz', 'structurizr', 'symbolator', 'tikz', 'umlet']) {
+      expect(resolveDiagramType(id), id).not.toBeNull();
+    }
+    expect(resolveDiagramType('diagramsnet')).toBeNull();
+    expect(resolveDiagramType('lini')).toBeNull();
+    expect(resolveDiagramType('protobuf')).toBeNull();
+  });
+
+  it('四个新本地引擎行：local:true、defaultMode local（d2 例外 kroki）、engine 同 id', () => {
+    for (const id of ['wavedrom', 'bytefield', 'dbml', 'd2']) {
+      const t = resolveDiagramType(id)!;
+      expect(t.local, id).toBe(true);
+      expect(t.engine, id).toBe(id);
+      expect(t.krokiType, id).toBe(id); // krokiType=id（spec §10）
+    }
+    expect(resolveDiagramType('wavedrom')!.defaultMode).toBe('local');
+    expect(resolveDiagramType('bytefield')!.defaultMode).toBe('local');
+    expect(resolveDiagramType('dbml')!.defaultMode).toBe('local');
+    // d2：官方 wasm 11.5MB 太重不做默认本地档（spec §10 拍板）
+    expect(resolveDiagramType('d2')!.defaultMode).toBe('kroki');
+  });
+
+  it('kroki-only 八行：无引擎、defaultMode kroki、krokiType=id', () => {
+    for (const id of ['packetdiag', 'rackdiag', 'goat', 'wireviz', 'structurizr', 'symbolator', 'tikz', 'umlet']) {
+      const t = resolveDiagramType(id)!;
+      expect(t.local, id).toBe(false);
+      expect(t.engine, id).toBeUndefined();
+      expect(t.defaultMode, id).toBe('kroki');
+      expect(t.krokiType, id).toBe(id);
+    }
+  });
+
+  it('highlightLang 逐值（spec §10）：wavedrom json/bytefield clojure/dbml sql/tikz latex/wireviz yaml/structurizr groovy，d2 等余量空串', () => {
+    expect(resolveDiagramType('wavedrom')!.highlightLang).toBe('json');
+    expect(resolveDiagramType('bytefield')!.highlightLang).toBe('clojure');
+    expect(resolveDiagramType('dbml')!.highlightLang).toBe('sql');
+    expect(resolveDiagramType('tikz')!.highlightLang).toBe('latex');
+    expect(resolveDiagramType('wireviz')!.highlightLang).toBe('yaml');
+    expect(resolveDiagramType('structurizr')!.highlightLang).toBe('groovy');
+    for (const id of ['d2', 'goat', 'symbolator', 'umlet', 'packetdiag', 'rackdiag']) {
+      expect(resolveDiagramType(id)!.highlightLang, id).toBe('');
+    }
+  });
+
+  it('aliases 无新增（kroki 无额外官方别名）：别名集仍仅 dot/vega-lite/latex', () => {
+    const withAliases = DIAGRAM_TYPES.filter((t) => t.aliases.length > 0).map((t) => `${t.id}:${t.aliases.join(',')}`);
+    expect(withAliases).toEqual(['graphviz:dot', 'vegalite:vega-lite', 'math:latex']);
   });
 });
 

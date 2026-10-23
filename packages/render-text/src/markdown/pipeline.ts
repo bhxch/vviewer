@@ -127,7 +127,14 @@ async function runDiagrams(root: Document, ctx: PipelineCtx): Promise<void> {
     if (!type) continue;
     if (code.hasAttribute('data-md-diagram')) continue;
     code.setAttribute('data-md-diagram', '');
-    await renderDiagramBlock(code as HTMLElement, type, ctx);
+    // per-block 兜底（P2 终审移交 M2）：renderDiagramBlock 内部 catch 已兜引擎失败与
+    // 回退链，此处兜其外溢错误（如 kroki 编码内 pako 惰性 import 失败）——单块失败
+    // 不得中断后续块；该块保留 wrapper 半成品或原 pre 形态，负结果不缓存
+    try {
+      await renderDiagramBlock(code as HTMLElement, type, ctx);
+    } catch (e) {
+      console.warn('diagram 块渲染失败（不中断后续块）', e);
+    }
   }
 }
 
