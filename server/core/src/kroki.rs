@@ -14,6 +14,43 @@ use crate::error::CoreError;
 /// 引用本常量（SSRF 防线：客户端永不可指定上游，host 只来自部署侧配置）。
 pub const DEFAULT_KROKI_HOST: &str = "https://kroki.io";
 
+/// `POST /api/kroki` 的原始请求体上限（BE-2 双适配层共享闸门常量单源，spec
+/// 2026-10-23 §8.2）：图源码文本 1MB 已超合理形态数个数量级；超限直接 413，
+/// 防无界 body 转发上游（本服务即上游的敞开代理面）。
+pub const KROKI_BODY_LIMIT: usize = 1024 * 1024;
+
+/// body `{lang, source}`（BE-2 双份 DTO 合一；serde 未知字段默认忽略）。
+#[derive(serde::Deserialize)]
+pub struct KrokiRequest {
+    pub lang: String,
+    pub source: String,
+}
+
+/// 消息截断（前 200 字节，字符边界安全——直接按字节切片可能在多字节字符中间
+/// panic）。
+pub fn trunc_200(s: &str) -> &str {
+    let mut end = s.len().min(200);
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+/// 上游错误映射单源（BE-2，双传输实现共用）：非 2xx 状态 + 响应体 →
+/// [`CoreError`]——4xx → bad_request、其余（5xx/3xx 等）→ internal；消息
+/// `kroki {status}: {body 前 200 字节}`（与两侧传输实现原产出逐字节同形：
+/// native 侧 `status.as_u16()`、worker 侧 `status: u16` 在各自调用点收敛为
+/// u16 后输出一致）。
+pub fn upstream_error(status: u16, body: &[u8]) -> CoreError {
+    let msg = String::from_utf8_lossy(body);
+    let text = format!("kroki {}: {}", status, trunc_200(&msg));
+    if (400..500).contains(&status) {
+        CoreError::bad_request(text)
+    } else {
+        CoreError::internal(text)
+    }
+}
+
 /// HTTP 传输接缝：kroki 上游转发由适配层注入（native reqwest / worker fetch），
 /// 本域只消费抽象——纯逻辑（host 拼接 / lang 白名单 / raw 透传）可脱网测试。
 /// `Arc<dyn>` dyn 分发形态与 storage 的 StorageBackend 同款（RPITIT 无法
@@ -57,7 +94,7 @@ pub async fn render(state: &KrokiState, lang: &str, source: &[u8]) -> Result<Vec
 mod tests {
     use std::sync::Arc;
 
-    use super::{KrokiHttp, KrokiState, render};
+    use super::{KrokiHttp, KrokiState, render, trunc_200, upstream_error};
     use crate::error::CoreError;
 
     struct MockHttp {
@@ -95,5 +132,31 @@ mod tests {
         for bad in ["../etc", "graphviz?x=1", "", "PlantUml"] {
             assert!(render(&st, bad, b"src").await.is_err());
         }
+    }
+
+    /// trunc_200 字符边界截断锁测（BE-2 下沉补测）：多字节字符中间安全——
+    /// 截断点回退到最近边界，不 panic、不产生撕裂半字符；ASCII 恰 200 与
+    /// 短串原样。
+    #[test]
+    fn trunc_200_截断在字符边界() {
+        assert_eq!(trunc_200("abc"), "abc");
+        // 300 字节的连续 3 字节字符：200 落在第 67 个字符中间 → 退到 198
+        let s = "中".repeat(100);
+        assert_eq!(trunc_200(&s), "中".repeat(66));
+        // ASCII 恰取 200
+        let a = "a".repeat(250);
+        assert_eq!(trunc_200(&a).len(), 200);
+    }
+
+    /// upstream_error 分类锁测（BE-2 下沉补测）：4xx → bad_request、其余 →
+    /// internal；消息 `kroki {status}: {body}` 与双侧传输实现原产出同形。
+    #[test]
+    fn upstream_error_4xx_bad_request_其余_internal() {
+        let e = upstream_error(400, b"bad lang");
+        assert_eq!(e.0, http::StatusCode::BAD_REQUEST);
+        assert_eq!(e.1, "kroki 400: bad lang");
+        let e = upstream_error(502, b"upstream down");
+        assert_eq!(e.0, http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(e.1, "kroki 502: upstream down");
     }
 }

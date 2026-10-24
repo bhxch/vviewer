@@ -15,8 +15,9 @@
 //! `CoreRequest` 因八域 handler 全部消费已解析参数、零消费方而删除（阶段二
 //! 终审 Minor-2 处置，阶段三 Task 1 落锤：worker 适配沿同模式直提参数，见
 //! `docs/superpowers/plans/2026-10-19-workers.md` 风险裁决）。
-//! Task 2 已收编 tree/file/mounts 三域（Range 头解析属 HTTP 语义留适配层，
-//! core 收已解析窗口）；Task 3 收编 search/tickets/events 三域（NDJSON 与 SSE
+//! Task 2 已收编 tree/file/mounts 三域（Range 头解析曾按计划裁决留适配层、
+//! core 收已解析窗口；BE-2 后 Range 家族已收敛本 crate `range` 模块单源）；
+//! Task 3 收编 search/tickets/events 三域（NDJSON 与 SSE
 //! 皆经 [`CoreBody::Stream`] 流形态承载）与 compute 域（`native` feature 门控
 //! ——`--no-default-features` 时编译不存在，health 不宣告 compute/diagrams）。
 
@@ -37,6 +38,9 @@ pub mod health;
 /// native/worker 双形态恒编译进。
 pub mod kroki;
 pub mod mounts;
+/// Range 头解析域（BE-2 单源收敛）：自双适配层同源复刻合并，纯字符串解析
+/// 零框架依赖。
+pub mod range;
 pub mod search;
 pub mod state;
 pub mod tickets;

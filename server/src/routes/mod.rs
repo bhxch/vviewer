@@ -38,17 +38,16 @@ const COMPUTE_BODY_LIMIT: usize = 6 * 1024 * 1024;
 #[cfg(feature = "native")]
 const COMPUTE_HIGHLIGHT_BODY_LIMIT: usize = 48 * 1024 * 1024;
 
-/// /api/mounts POST 的原始请求体上限：挂载配置是字段级小型 JSON（endpoint/
-/// 凭据等十来个短字段），64KB 已超合理形态数个数量级；超限直接 413，防无界
-/// body 进入 serde 解析——POST 在无 token 部署免鉴权（spec 字面口径），显式
-/// 限值即写面闸门。GET 清单无 body，不挂限（layer 只作用于 POST 槽）。
-const MOUNTS_BODY_LIMIT: usize = 64 * 1024;
+// /api/mounts POST 的 body 闸门常量（BE-2 下沉 core 单源：语义注记见
+// `vviewer_core::mounts::MOUNTS_BODY_LIMIT`；GET 清单无 body，不挂限——
+// layer 只作用于 POST 槽）。
+use vviewer_core::mounts::MOUNTS_BODY_LIMIT;
 
-/// /api/kroki POST 的原始请求体上限（spec 2026-10-23 §8.2）：图源码文本 1MB
-/// 已超合理形态数个数量级；超限直接 413，防无界 body 转发上游（本服务即
-/// 上游的敞开代理面）。随 kroki 路由同 native 门控。
+// /api/kroki POST 的 body 闸门常量（BE-2 下沉 core 单源，spec 2026-10-23
+// §8.2：语义注记见 `vviewer_core::kroki::KROKI_BODY_LIMIT`）。随 kroki 路由
+// 同 native 门控。
 #[cfg(feature = "native")]
-const KROKI_BODY_LIMIT: usize = 1024 * 1024;
+use vviewer_core::kroki::KROKI_BODY_LIMIT;
 
 /// `/api` 子路由；未匹配的 API 路径统一返回 JSON 404。
 ///

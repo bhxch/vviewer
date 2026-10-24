@@ -4,26 +4,20 @@
 //! 实现。整体随 native feature 门控（reqwest 门控纪律：裁剪形态 workspace
 //! 全图零 reqwest，与 compute/events 同款）。
 //!
-//! 错误映射（评审承接项：core 无 `upstream` 构造器——简报草稿的 502 语义由
-//! 本适配层自行落）：网络错/上游 5xx → internal，上游 4xx → bad_request；
-//! 消息透传上游 body 前 200 字节（UTF-8 字符边界安全截断，非字节硬切）。
+//! 错误映射（BE-2 单源）：上游非 2xx 经 [`vviewer_core::kroki::upstream_error`]
+//! （4xx → bad_request、其余 → internal，消息透传上游 body 前 200 字节——
+//! UTF-8 字符边界安全截断）；网络错/读体错映射（消息源不同构）留本传输侧。
 
 use std::time::Duration;
 
 use axum::extract::State;
 use axum::Json;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use vviewer_core::error::CoreError;
+use vviewer_core::kroki::KrokiRequest;
 
 use crate::error::AppError;
 use crate::state::AppState;
-
-/// body `{lang, source}`（serde 未知字段默认忽略——与 compute 请求面同语义）。
-#[derive(Deserialize)]
-pub struct KrokiRequest {
-    pub lang: String,
-    pub source: String,
-}
 
 /// 响应 `{svg}`。
 #[derive(Serialize)]
@@ -43,16 +37,6 @@ pub async fn proxy(
     let svg = String::from_utf8(bytes)
         .map_err(|_| CoreError::internal("kroki 响应非 UTF-8"))?;
     Ok(Json(KrokiResponse { svg }))
-}
-
-/// 消息截断（前 200 字节，字符边界安全——直接按字节切片可能在多字节字符中间
-/// panic；worker 适配层同款实现，两侧语义一致）。
-fn trunc_200(s: &str) -> &str {
-    let mut end = s.len().min(200);
-    while !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
 }
 
 /// [`vviewer_core::kroki::KrokiHttp`] 的 native 实现（reqwest + rustls）：30s
@@ -100,14 +84,7 @@ impl vviewer_core::kroki::KrokiHttp for ReqwestKrokiHttp {
             .await
             .map_err(|e| CoreError::internal(format!("kroki 读响应失败: {e}")))?;
         if !status.is_success() {
-            let msg = String::from_utf8_lossy(&bytes);
-            let text =
-                format!("kroki {}: {}", status.as_u16(), trunc_200(&msg));
-            return Err(if status.is_client_error() {
-                CoreError::bad_request(text)
-            } else {
-                CoreError::internal(text)
-            });
+            return Err(vviewer_core::kroki::upstream_error(status.as_u16(), &bytes));
         }
         Ok(bytes.to_vec())
     }

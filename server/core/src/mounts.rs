@@ -32,6 +32,13 @@ use crate::error::CoreError;
 use crate::state::{CoreState, MountMeta};
 use crate::{CoreBody, CoreResponse};
 
+/// `POST /api/mounts` 的原始请求体上限（BE-2 双适配层共享闸门常量单源：native
+/// DefaultBodyLimit 与 worker 流式累计闸同值引用）：挂载配置是字段级小型 JSON
+/// （endpoint/凭据等十来个短字段），64KB 已超合理形态数个数量级；超限直接
+/// 413，防无界 body 进入 serde 解析——POST 在无 token 部署免鉴权（spec 字面
+/// 口径），显式限值即写面闸门。GET 清单无 body，不挂限。
+pub const MOUNTS_BODY_LIMIT: usize = 64 * 1024;
+
 // ---------- 挂载配置与后端构造 ----------
 
 /// `[[mount]].kind` / `POST /api/mounts` 的 `kind`（spec §2：s3 | webdav）。

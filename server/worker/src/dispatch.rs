@@ -16,25 +16,21 @@ use worker::{Env, Method, Request, Response};
 
 use vviewer_core::auth;
 use vviewer_core::error::CoreError;
+use vviewer_core::range::{
+    has_multiple_ranges, parse_range, should_pre_reject_range,
+};
 use vviewer_core::state::CoreState;
 use vviewer_core::{file, health, kroki as kroki_domain, mounts as mounts_domain, tree};
 use vviewer_storage::RangeSpec;
 
-use crate::http::{
-    has_multiple_ranges, is_asset_path, parse_range, should_pre_reject_range, strip_base_path,
-};
+use crate::http::{is_asset_path, strip_base_path};
 use crate::response::{json_error, to_worker};
 use crate::state::WorkerState;
 
-/// `POST /api/mounts` 的原始请求体上限（native MOUNTS_BODY_LIMIT 同款：
-/// 挂载配置是字段级小型 JSON，64KB 已超合理形态数个数量级；超限 413 防
-/// 无界 body 进 serde 解析——POST 是写面，显式限值即闸门）。
-const MOUNTS_BODY_LIMIT: usize = 64 * 1024;
-
-/// `POST /api/kroki` 的原始请求体上限（native KROKI_BODY_LIMIT 同款，spec
-/// 2026-10-23 §8.2）：图源码文本 1MB 已超合理形态数个数量级；超限 413 防
-/// 无界 body 转发上游。
-const KROKI_BODY_LIMIT: usize = 1024 * 1024;
+// body 闸门常量（BE-2 下沉 core 单源——native DefaultBodyLimit 与本层流式
+// 累计闸同值引用；语义注记见各 core 常量）
+use kroki_domain::KROKI_BODY_LIMIT;
+use mounts_domain::MOUNTS_BODY_LIMIT;
 
 /// fetch 入口分发（entry.rs 调用）。
 pub async fn handle(req: Request, env: &Env, state: &'static WorkerState) -> worker::Result<Response> {
@@ -304,7 +300,7 @@ async fn kroki_proxy(mut req: Request, state: &'static WorkerState) -> worker::R
         }
     }
     let body = String::from_utf8_lossy(&buf).into_owned();
-    let parsed: crate::kroki::KrokiRequest = match serde_json::from_str(&body) {
+    let parsed: kroki_domain::KrokiRequest = match serde_json::from_str(&body) {
         Ok(parsed) => parsed,
         // axum Json 拒绝的 status 对齐（400）；消息含 serde 字段名（源码本体
         // 不回显——与 mounts 的凭据不回显同纪律）

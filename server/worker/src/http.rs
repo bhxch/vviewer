@@ -1,105 +1,7 @@
-//! 纯 HTTP 语义件（跨目标编译，native 单测覆盖）：Range 头解析与 base-path
-//! 裁剪。Range 解析属 HTTP 语义（计划裁决）留适配层——本模块与 native 适配层
-//! `routes/file.rs` 的 `parse_range`/`has_multiple_ranges` 逐行同源（语义锚：
-//! 该模块单测同款用例在此复刻，双向防漂移）。native 8c5fe16 后已把 parse_range
-//! 拆为 `parse_range_syntax`（语法面，不依赖 size）+ `resolve_range`（定界面，
-//! 依赖 size）——本模块随之同构拆分（逐行同源），Range 语法非法在 locate 前即
-//! 可判（C2 parity 的判定基础）。
-
-/// 多区间 Range 检测（BUG-47）：`bytes=` 后含多个非空区间即视为多区间。
-/// 服务器不实现 multipart/byteranges：按 RFC 9110 §14.2 允许的「忽略 Range」
-/// 回 200 全量，不再静默丢弃第二区间伪装成单区间 206。
-pub fn has_multiple_ranges(h: &str) -> bool {
-    match h.strip_prefix("bytes=") {
-        Some(spec) => spec.split(',').filter(|p| !p.trim().is_empty()).count() > 1,
-        None => false,
-    }
-}
-
-/// Range 语法面（C2 parity，不依赖 size）：`bytes=` 前缀 + 首段 `a-b`/`a-`/`-n`
-/// 数字解析。Err = 语法非法（RFC 9110 §14.2 请求语法错误，locate 前即可判
-/// 416）；Ok(None) = 空串（无 Range 头形态由调用方保证非空，防御性放行）。
-/// native routes/file.rs parse_range_syntax 逐行同源。
-#[allow(clippy::result_unit_err)]
-pub fn parse_range_syntax(h: &str) -> Result<Option<RawRange>, ()> {
-    if h.is_empty() {
-        return Ok(None);
-    }
-    let spec = h.strip_prefix("bytes=").ok_or(())?;
-    let first = spec.split(',').next().ok_or(())?.trim();
-    let (start_s, end_s) = first.split_once('-').ok_or(())?;
-    let (start_s, end_s) = (start_s.trim(), end_s.trim());
-
-    let raw = if start_s.is_empty() {
-        // -suffix：后缀形态 first=None
-        RawRange { first: None, last: Some(end_s.parse().map_err(|_| ())?) }
-    } else {
-        let first = Some(start_s.parse().map_err(|_| ())?);
-        let last = if end_s.is_empty() {
-            // a-：开区间 last=None
-            None
-        } else {
-            Some(end_s.parse().map_err(|_| ())?)
-        };
-        RawRange { first, last }
-    };
-    Ok(Some(raw))
-}
-
-/// Range 定界面（C2 parity，依赖 size）：钳制与不可满足判定——suffix 0 /
-/// size 0 后缀 / start ≥ size / 起止倒挂均不可满足。native resolve_range 同源。
-fn resolve_range(raw: RawRange, size: u64) -> Result<Option<(u64, u64)>, ()> {
-    let (start, end) = match (raw.first, raw.last) {
-        // -suffix
-        (None, Some(suffix)) => {
-            if suffix == 0 || size == 0 {
-                return Err(());
-            }
-            (size.saturating_sub(suffix), size - 1)
-        }
-        (Some(start), last) => {
-            if start >= size {
-                return Err(());
-            }
-            match last {
-                // a-
-                None => (start, size - 1),
-                Some(end) => {
-                    if start > end {
-                        return Err(());
-                    }
-                    (start, end.min(size - 1))
-                }
-            }
-        }
-        // 语法面保证形态必为 a-b/a-/-n 之一（`bytes=-` 已在语法面判否）
-        (None, None) => return Err(()),
-    };
-    Ok(Some((start, end - start + 1)))
-}
-
-/// Range 语法解析的中间形态（native RawRange 同构）。
-#[derive(Debug, PartialEq, Eq)]
-pub struct RawRange {
-    first: Option<u64>,
-    last: Option<u64>,
-}
-
-/// 解析 Range 头（单区间；多区间取第一个）→ Some((start, len))。
-/// None = 无 Range；Err = 非法或越界（→ 416）。
-/// 语义：bytes=a-b / a- / -suffix；end 超界钳制；start ≥ size、suffix 0、
-/// 起止倒挂、非数字均不可满足。
-// result_unit_err：Err(()) 即「Range 不可满足 → 416」的既定语义（模块文档声明，
-// 无需携带信息），引入错误类型属公开 API 改形，非本任务（清零）语义。
-#[allow(clippy::result_unit_err)]
-pub fn parse_range(h: &str, size: u64) -> Result<Option<(u64, u64)>, ()> {
-    // C2：syntax + resolve 组合（与 native 拆分对齐）；空串防御性 None 与旧
-    // strip_prefix 失败同型 Err
-    match parse_range_syntax(h)? {
-        None => Err(()),
-        Some(raw) => resolve_range(raw, size),
-    }
-}
+//! worker 单侧 HTTP 语义件（BE-2 后 Range 家族已收敛
+//! `vviewer_core::range` 单源，本模块只留 Workers 形态特有的资产路径判定 /
+//! base-path 裁剪 / 流式累计闸）：is_asset_path 的扩展名集是 worker 部署形态
+//! 的有意分叉面（native 侧 ServeDir 兜底层仅 `.scm/.wasm` 两类），不合并。
 
 /// 资产路径判定（C1 SPA-fallback 前科纪律，Workers 面）：缺失路径按扩展名
 /// 分流——清单内资产路径缺失必须 404，不得以 200 index.html 兜底（HTML 被误
@@ -137,47 +39,9 @@ pub fn strip_base_path<'a>(base: &str, path: &'a str) -> &'a str {
     }
 }
 
-/// C2 parity：locate 前置语法闸纯判定（native routes/file.rs file() 同序同语义）。
-/// dispatch 面被 wasm 门控、不可 host 单测——判定式抽纯函数使次序语义可锚。
-pub fn should_pre_reject_range(if_range_present: bool, range_header: Option<&str>) -> bool {
-    match range_header {
-        Some(h) => !if_range_present && !has_multiple_ranges(h) && parse_range_syntax(h).is_err(),
-        None => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Range 单区间语义锁测（与 native routes/file.rs 同款用例——语义锚）。
-    #[test]
-    fn parse_range_single_range_semantics_unchanged() {
-        assert_eq!(parse_range("bytes=0-1", 256), Ok(Some((0, 2))));
-        assert_eq!(parse_range("bytes=-4", 256), Ok(Some((252, 4))));
-        assert_eq!(parse_range("bytes=250-", 256), Ok(Some((250, 6))));
-        // end 超界钳制
-        assert_eq!(parse_range("bytes=250-999", 256), Ok(Some((250, 6))));
-        // start ≥ size / suffix 0 / 倒挂 / 非法：不可满足（→ 416）
-        assert_eq!(parse_range("bytes=256-", 256), Err(()));
-        assert_eq!(parse_range("bytes=-0", 256), Err(()));
-        assert_eq!(parse_range("bytes=5-4", 256), Err(()));
-        assert_eq!(parse_range("bytes=x-y", 256), Err(()));
-        assert_eq!(parse_range("units=0-1", 256), Err(()));
-    }
-
-    /// 多区间检测锁测（BUG-47 同款用例）。
-    #[test]
-    fn multiple_range_specs_are_detected() {
-        assert!(has_multiple_ranges("bytes=0-1,3-4"));
-        assert!(has_multiple_ranges("bytes=100-105,200-205"));
-        assert!(has_multiple_ranges("bytes=0-1,,3-4"));
-        assert!(!has_multiple_ranges("bytes=0-1"));
-        assert!(!has_multiple_ranges("bytes=0-1,"));
-        assert!(!has_multiple_ranges("bytes=-4"));
-        assert!(!has_multiple_ranges("bytes=0-"));
-        assert!(!has_multiple_ranges("items=0-1,3-4"));
-    }
 
     /// base-path 裁剪：命中剥段、未命中/近邻前缀不误剥、空与根不裁。
     #[test]
@@ -226,42 +90,5 @@ mod tests {
         assert!(!payload_fits(&mut n, 1, 100));
         let mut m = 99usize;
         assert!(payload_fits(&mut m, 1, 100) && m == 100);
-    }
-
-    /// C2 parity：语法面锁测（native routes/file.rs 同款用例——非法集逐项 +
-    /// 三形态合法集 + 空串防御 None）。
-    #[test]
-    fn parse_range_syntax_faces_mirror_native() {
-        assert!(parse_range_syntax("bytes=x-y").is_err());
-        assert!(parse_range_syntax("units=0-1").is_err());
-        assert!(parse_range_syntax("bytes=-").is_err());
-        assert_eq!(
-            parse_range_syntax("bytes=0-1"),
-            Ok(Some(RawRange { first: Some(0), last: Some(1) }))
-        );
-        assert_eq!(
-            parse_range_syntax("bytes=-4"),
-            Ok(Some(RawRange { first: None, last: Some(4) }))
-        );
-        assert_eq!(
-            parse_range_syntax("bytes=250-"),
-            Ok(Some(RawRange { first: Some(250), last: None }))
-        );
-        assert_eq!(parse_range_syntax(""), Ok(None));
-    }
-
-    /// C2 parity：前置闸纯判定——语法非法即拒（与文件存在性无关，native
-    /// invalid_range_wins_over_missing_file 的判定式）；if-range 在场 / 多区间 /
-    /// 无头 / 越界合法语法均不拒（后三者交 locate 后既有链）。
-    #[test]
-    fn should_pre_reject_range_gates_syntax_only() {
-        assert!(should_pre_reject_range(false, Some("bytes=x-y")));
-        assert!(should_pre_reject_range(false, Some("units=0-1")));
-        assert!(!should_pre_reject_range(false, Some("bytes=0-1")));
-        // 越界是 size 相关判定：语法合法不前置拒（416 带 size 由 locate 后路径答）
-        assert!(!should_pre_reject_range(false, Some("bytes=999999-")));
-        assert!(!should_pre_reject_range(true, Some("bytes=x-y")));
-        assert!(!should_pre_reject_range(false, Some("bytes=0-1,3-4")));
-        assert!(!should_pre_reject_range(false, None));
     }
 }

@@ -1,6 +1,7 @@
-//! `GET /api/file` 适配层：Range 头解析（HTTP 语义——计划裁决留本层：头语法/
-//! If-Range/多区间判定）+ 业务体委托 `vviewer-core::file`（多端发布阶段二
-//! Task 2 迁入：根寻址/guard/stat/MIME/编码/窗读取/响应头组装）。
+//! `GET /api/file` 适配层：Range 头解析（BE-2 起单源 `vviewer-core::range`
+//! ——本层只做头提取与 416 响应构造）+ 业务体委托 `vviewer-core::file`
+//! （多端发布阶段二 Task 2 迁入：根寻址/guard/stat/MIME/编码/窗读取/响应头
+//! 组装）。
 //!
 //! 文件打开/检测头/seek 定位已下沉 storage crate（`LocalFs::read_range` 单开
 //! 形态，既有纯重构）；本模块只做参数提取、Range→窗口解析与响应映射。
@@ -11,6 +12,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
 
+use vviewer_core::range::{has_multiple_ranges, parse_range, parse_range_syntax};
 use vviewer_storage::RangeSpec;
 
 use crate::adapt;
@@ -22,96 +24,6 @@ pub struct FileQuery {
     pub path: Option<String>,
     /// 多根索引（缺省 0 号根；越界 400）。
     pub root: Option<usize>,
-}
-
-/// 多区间 Range 检测（BUG-47）：`bytes=` 后含多个非空区间即视为多区间。
-/// 服务器不实现 multipart/byteranges：按 RFC 9110 §14.2 允许的「忽略 Range」
-/// 回 200 全量，不再静默丢弃第二区间伪装成单区间 206。
-fn has_multiple_ranges(h: &str) -> bool {
-    match h.strip_prefix("bytes=") {
-        Some(spec) => spec.split(',').filter(|p| !p.trim().is_empty()).count() > 1,
-        None => false,
-    }
-}
-
-/// Range 语法产物（1-2）：first/last 的 None 语义——`bytes=a-` 开区间
-/// last=None；`bytes=-n` 后缀形态 first=None。
-#[derive(Debug, PartialEq, Eq)]
-struct RawRange {
-    first: Option<u64>,
-    last: Option<u64>,
-}
-
-/// Range 语法面（1-2，不依赖 size）：`bytes=` 前缀 + 首段 `a-b`/`a-`/`-n`
-/// 数字解析。Err = 语法非法（RFC 9110 §14.2 请求语法错误，locate 前即可判
-/// 416）；Ok(None) = 空串（无 Range 头形态由调用方保证非空，防御性放行）。
-fn parse_range_syntax(h: &str) -> Result<Option<RawRange>, ()> {
-    if h.is_empty() {
-        return Ok(None);
-    }
-    let spec = h.strip_prefix("bytes=").ok_or(())?;
-    let first = spec.split(',').next().ok_or(())?.trim();
-    let (start_s, end_s) = first.split_once('-').ok_or(())?;
-    let (start_s, end_s) = (start_s.trim(), end_s.trim());
-
-    let raw = if start_s.is_empty() {
-        // -suffix：后缀形态 first=None
-        RawRange { first: None, last: Some(end_s.parse().map_err(|_| ())?) }
-    } else {
-        let first = Some(start_s.parse().map_err(|_| ())?);
-        let last = if end_s.is_empty() {
-            // a-：开区间 last=None
-            None
-        } else {
-            Some(end_s.parse().map_err(|_| ())?)
-        };
-        RawRange { first, last }
-    };
-    Ok(Some(raw))
-}
-
-/// Range 定界面（1-2，依赖 size）：钳制与不可满足判定照搬既有 parse_range
-/// 分支——suffix 0 / size 0 后缀 / start ≥ size / 起止倒挂均不可满足。
-fn resolve_range(raw: RawRange, size: u64) -> Result<Option<(u64, u64)>, ()> {
-    let (start, end) = match (raw.first, raw.last) {
-        // -suffix
-        (None, Some(suffix)) => {
-            if suffix == 0 || size == 0 {
-                return Err(());
-            }
-            (size.saturating_sub(suffix), size - 1)
-        }
-        (Some(start), last) => {
-            if start >= size {
-                return Err(());
-            }
-            match last {
-                // a-
-                None => (start, size - 1),
-                Some(end) => {
-                    if start > end {
-                        return Err(());
-                    }
-                    (start, end.min(size - 1))
-                }
-            }
-        }
-        // 语法面保证形态必为 a-b/a-/-n 之一（`bytes=-` 已在语法面判否）
-        (None, None) => return Err(()),
-    };
-    Ok(Some((start, end - start + 1)))
-}
-
-/// 解析 Range 头（单区间；多区间取第一个）→ Some((start, len))。
-/// None = 无 Range；Err = 非法或越界（→ 416）。
-/// 语义：bytes=a-b / a- / -suffix；end 超界钳制；start ≥ size、suffix 0、
-/// 起止倒挂、非数字均不可满足。
-fn parse_range(h: &str, size: u64) -> Result<Option<(u64, u64)>, ()> {
-    // syntax + resolve 组合（1-2）；空串防御性 None 与旧 strip_prefix 失败同型 Err
-    match parse_range_syntax(h)? {
-        None => Err(()),
-        Some(raw) => resolve_range(raw, size),
-    }
 }
 
 /// 416 统一响应：Content-Range: bytes *\/size + JSON error。
@@ -183,49 +95,3 @@ pub async fn file(
     Ok(adapt::to_axum(vviewer_core::file::read(located, window).await?))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// BUG-47 多区间检测锁测：两段/中置空段均视为多区间；单区间、尾逗号
-    /// （仅一个有效区间，与 parse_range 取首区间兼容）、非 bytes 单位不算多区间。
-    #[test]
-    fn multiple_range_specs_are_detected() {
-        assert!(has_multiple_ranges("bytes=0-1,3-4"));
-        assert!(has_multiple_ranges("bytes=100-105,200-205"));
-        assert!(has_multiple_ranges("bytes=0-1,,3-4"));
-        assert!(!has_multiple_ranges("bytes=0-1"));
-        assert!(!has_multiple_ranges("bytes=0-1,"));
-        assert!(!has_multiple_ranges("bytes=-4"));
-        assert!(!has_multiple_ranges("bytes=0-"));
-        assert!(!has_multiple_ranges("items=0-1,3-4"));
-    }
-
-    /// 单区间解析既有语义锁测（BUG-47 修复的护栏：多区间/If-Range 改在
-    /// handler 层忽略，parse_range 自身行为不变）。
-    #[test]
-    fn parse_range_single_range_semantics_unchanged() {
-        assert_eq!(parse_range("bytes=0-1", 256), Ok(Some((0, 2))));
-        assert_eq!(parse_range("bytes=-4", 256), Ok(Some((252, 4))));
-        assert_eq!(parse_range("bytes=250-", 256), Ok(Some((250, 6))));
-        // end 超界钳制
-        assert_eq!(parse_range("bytes=250-999", 256), Ok(Some((250, 6))));
-        // start ≥ size / suffix 0 / 倒挂 / 非法：不可满足（→ 416）
-        assert_eq!(parse_range("bytes=256-", 256), Err(()));
-        assert_eq!(parse_range("bytes=-0", 256), Err(()));
-        assert_eq!(parse_range("bytes=5-4", 256), Err(()));
-        assert_eq!(parse_range("bytes=x-y", 256), Err(()));
-        assert_eq!(parse_range("units=0-1", 256), Err(()));
-    }
-
-    /// 1-2：语法判定与 size 无关——非法语法在 locate 前即可判 416。
-    #[test]
-    fn range_syntax_is_checkable_without_size() {
-        assert!(parse_range_syntax("bytes=x-y").is_err());
-        assert!(parse_range_syntax("units=0-1").is_err());
-        assert_eq!(parse_range_syntax("bytes=0-1"), Ok(Some(RawRange { first: Some(0), last: Some(1) })));
-        assert_eq!(parse_range_syntax("bytes=-4"), Ok(Some(RawRange { first: None, last: Some(4) })));
-        assert_eq!(parse_range_syntax("bytes=250-"), Ok(Some(RawRange { first: Some(250), last: None })));
-        assert_eq!(parse_range_syntax(""), Ok(None), "无 Range 头形态由调用方保证非空");
-    }
-}

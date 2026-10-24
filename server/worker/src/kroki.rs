@@ -4,10 +4,10 @@
 //! 出站 fetch 构造与错误映射。wasm 门控：binding fetch 类型面仅 wasm 可编译
 //! （transport.rs 同款）。
 //!
-//! ## 错误映射（评审承接项：core 无 upstream 构造器——与 native 适配层同一
-//! 自定映射）
-//! 网络错/上游 5xx → internal，上游 4xx → bad_request；消息透传上游 body 前
-//! 200 字节（字符边界安全截断，native `trunc_200` 同款实现，两侧语义一致）。
+//! ## 错误映射（BE-2 单源）
+//! 上游非 2xx 经 core [`vviewer_core::kroki::upstream_error`]（与 native 传输
+//! 共用：4xx → bad_request、其余 → internal，消息透传上游 body 前 200 字节
+//! ——字符边界安全截断）；网络错/构造错映射（消息源不同构）留本传输侧。
 //!
 //! ## 超时语义
 //! workers-rs 出站 fetch 无请求级超时面——30s 兜底归 workerd 侧 fetch 语义
@@ -21,23 +21,6 @@ use vviewer_core::error::CoreError;
 use vviewer_core::kroki::KrokiHttp;
 
 use crate::transport::js_err;
-
-/// body `{lang, source}`（serde 未知字段默认忽略——native KrokiRequest 同语义）。
-#[derive(serde::Deserialize)]
-pub struct KrokiRequest {
-    pub lang: String,
-    pub source: String,
-}
-
-/// 消息截断（前 200 字节，字符边界安全——直接按字节切片可能在多字节字符中间
-/// panic；native routes/kroki.rs `trunc_200` 同款实现）。
-fn trunc_200(s: &str) -> &str {
-    let mut end = s.len().min(200);
-    while !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
-}
 
 /// [`KrokiHttp`] 的 wasm 实现（binding fetch；unit struct 无状态——连接池由
 /// Workers 运行时的 fetch 管线承担）。
@@ -78,13 +61,7 @@ impl KrokiHttp for FetchKrokiHttp {
         if !(200..300).contains(&status) {
             // 错误消息透传上游 body 前 200 字节；读体失败以空串兜底（状态码已足锚）
             let bytes = bytes_fut.await.unwrap_or_default();
-            let msg = String::from_utf8_lossy(&bytes);
-            let text = format!("kroki {}: {}", status, trunc_200(&msg));
-            return Err(if (400..500).contains(&status) {
-                CoreError::bad_request(text)
-            } else {
-                CoreError::internal(text)
-            });
+            return Err(vviewer_core::kroki::upstream_error(status, &bytes));
         }
         bytes_fut
             .await
