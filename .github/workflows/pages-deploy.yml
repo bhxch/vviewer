@@ -53,6 +53,22 @@ jobs:
       - uses: ./.github/actions/setup-grammars
         with:
           languages: lite
+      # svgbob wasm 引擎产物不入库（spec §7）：web build 期 Rolldown 静态解析
+      # diagramEngines 的动态 import，产物缺失即 UNRESOLVED_IMPORT 构建失败——
+      # 接线形态与 ci.yml web job 逐字一致（dtolnay 装 wasm32 target + wasm-bindgen
+      # CLI 缓存 + Swatinem cargo 缓存 + 构建前 gen；wasm-opt 沿 setup-grammars
+      # 缓存的 binaryen，缺则脚本自行降级）
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/svgbob/wasm-bindgen-cli
+          key: wasm-bindgen-cli-${{ runner.os }}-${{ hashFiles('tools/svgbob-wasm/Cargo.toml') }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/svgbob-wasm
+      - run: pnpm gen:svgbob-wasm
       # Pages base：项目站点 /<repo>/；用户站点（<owner>.github.io）按根路径
       - name: 计算 Pages base 路径
         id: base
