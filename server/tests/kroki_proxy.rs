@@ -271,3 +271,41 @@ async fn reqwest_kroki_http_maps_upstream_status_to_core_error() {
     let svg = upstream_once("HTTP/1.1 200 OK", "<svg/>").await.unwrap();
     assert_eq!(svg, b"<svg/>");
 }
+
+// ---------- 重定向禁跟随锁死（redirect Policy::none，终审加固） ----------
+
+/// 上游 302 + Location：reqwest 禁重定向下 302 原样回流、不得跟随（防
+/// 302→GET 改写出站目标构成内网响应中继面——部署侧上游是唯一合法目标，
+/// 重定向即异常）。走完整 /api/kroki 端点锁死对外可观测面：302 非成功态
+/// 也非 client_error → internal 500，消息透传上游状态（kroki 302）。
+#[tokio::test]
+async fn post_kroki_does_not_follow_upstream_redirect() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let mut buf = [0u8; 4096];
+        let _ = sock.read(&mut buf).await; // 请求头/体不校验（同 upstream_once）
+        // 302 指向另一内网目标：默认重定向策略会改发 GET 至 Location——
+        // 禁跟随后该响应原样回流，出站面不变
+        let resp = "HTTP/1.1 302 Found\r\nlocation: http://127.0.0.1:9/intranet\r\ncontent-length: 0\r\n\r\n";
+        sock.write_all(resp.as_bytes()).await.unwrap();
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let state = AppState::new(dir.path().to_path_buf(), None, None, false, None).with_kroki(
+        KrokiState { host: format!("http://{addr}"), http: Arc::new(ReqwestKrokiHttp::new()) },
+    );
+    let app = vviewer::build_router(state);
+
+    let (status, _, body) = send(
+        app,
+        "POST",
+        "/api/kroki",
+        None,
+        Some(kroki_body("svgbob", "+-->+")),
+    )
+    .await;
+    server.await.unwrap();
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body:?}");
+    assert!(String::from_utf8_lossy(&body).contains("kroki 302"), "{body:?}");
+}

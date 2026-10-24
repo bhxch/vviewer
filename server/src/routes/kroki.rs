@@ -56,15 +56,23 @@ fn trunc_200(s: &str) -> &str {
 }
 
 /// [`vviewer_core::kroki::KrokiHttp`] 的 native 实现（reqwest + rustls）：30s
-/// 请求级超时；非 2xx/网络错映射 CoreError（4xx → bad_request、5xx/网络错 →
-/// internal，消息透传上游 body 前 200 字节）。
+/// 请求级超时；禁跟随重定向（[`reqwest::redirect::Policy::none`]）——部署侧
+/// 上游是唯一合法出站目标，重定向即异常：默认策略会把 302→GET 改写重发出站
+/// 目标，构成内网响应中继面，故 3xx 一律不跟随、按非 2xx 错误面落地（非成功
+/// 态且非 4xx → internal，消息透传上游状态与 body 前 200 字节）；非 2xx/
+/// 网络错映射 CoreError（4xx → bad_request、5xx/网络错 → internal）。
 pub struct ReqwestKrokiHttp {
     client: reqwest::Client,
 }
 
 impl ReqwestKrokiHttp {
     pub fn new() -> Self {
-        Self { client: reqwest::Client::new() }
+        Self {
+            client: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("reqwest Client 构建不可失败（仅设 redirect 策略）"),
+        }
     }
 }
 

@@ -31,7 +31,7 @@ import { stopServer, waitHealthy } from '../e2e/serverHarness';
  * 拓扑（b-compute-diagrams 同款 beforeAll spawn / afterAll stop，端口错开
  * 既有 4174/4178-4182/4185）：同源 compute 实例 :4186（--compute +
  * --kroki-host http://127.0.0.1:4187）；mock kroki 上游 :4187（node http，
- * POST {lang}/svg 恒 200 svg，GET /dsv-mock-ping 供幂等复用探测）。夹具
+ * POST {lang}/svg 恒 200 svg，每轮必重建不幂等复用）。夹具
  * dsv- 前缀写入共享 fixture 根。
  */
 

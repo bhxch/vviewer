@@ -119,7 +119,7 @@ health/mounts 回显与错误信息（误把凭据写进 endpoint 时展示面�
 
 | 端点 | 鉴权 | 说明 |
 |---|---|---|
-| `GET /api/health` | 免 | 能力发现：`{"name":"vviewer","version":"…","capabilities":["file-server"]}`；`--compute` 时 capabilities 追加 `"compute"` 并宣告 `computeLanguages`（服务端高亮支持的 canonical 语言排序清单，客户端 auto 策略据此路由：server-served 文件不限大小走服务端高亮、本地来源 >2MB 恒本地分块，语言未在宣告集合内时 auto 零请求直落本地；显式 remote 不做集合门控） |
+| `GET /api/health` | 免 | 能力发现：`{"name":"vviewer","version":"…","capabilities":["file-server","kroki-proxy"]}`；`--compute` 时 capabilities 追加 `"compute"` 并宣告 `computeLanguages`（服务端高亮支持的 canonical 语言排序清单，客户端 auto 策略据此路由：server-served 文件不限大小走服务端高亮、本地来源 >2MB 恒本地分块，语言未在宣告集合内时 auto 零请求直落本地；显式 remote 不做集合门控） |
 | `GET /api/tree?path=` | Bearer | 单层目录列表 `{entries:[{name,kind,size?,mtime?}]}`；目录优先 + 名称自然排序 |
 | `GET /api/file?path=` | Bearer | 文件内容（支持 `Range: bytes=a-b`，206/416）；响应头 `X-VV-Lang`（helix 语言名）/`X-VV-Encoding`（utf-8/utf-16le/utf-16be/gb18030）为服务端检测结果 |
 | `POST /api/ticket` | Bearer | 签发一次性 SSE 票据（30s 过期），供 EventSource 无法自带请求头时走 `?ticket=` 升级 |
@@ -128,6 +128,9 @@ health/mounts 回显与错误信息（误把凭据写进 endpoint 时展示面�
 | `GET /api/mounts` | Bearer | 挂载清单（静态 TOML 段 + 运行时段 + 全量汇总，脱敏无凭据）。见下节 |
 | `DELETE /api/mounts/{index}` | Bearer | 删除运行时挂载；静态项 405。见下节 |
 | `POST /api/kroki` | Bearer | 图表渲染代发：`{"lang":"svgbob","source":"…"}` → `{"svg":"…"}`。上游 = `--kroki-host`（默认 https://kroki.io），lang 白名单 `[a-z0-9-]`，body 上限 1MB；转发不算计算（不要求 `--compute`），上游错误按 4xx→400/5xx→500 透传消息前 200 字节 |
+| `POST /api/compute/markdown` | Bearer | Markdown → HTML 服务端整篇渲染（需 `--compute`）：`{"text":"…","options":{"wikilinks":true?}}` → `{"html":"…"}`；text 应用层上限 5MB（413），路由原始 body 闸门 6MB |
+| `POST /api/compute/highlight` | Bearer | 服务端语法高亮（需 `--compute`）：`{"path?":"…","text?":"…","lang":"…","range?":[a,b],"cacheId?":"…"}` → `{"intervals":[…],"captures":[…],"baseLine":n,"cacheId?":"…"}`；text 应用层上限 20MB（413），处理超时 504；响应按 Accept-Encoding 协商 gzip |
+| `POST /api/compute/diagram` | Bearer | 图表单图渲染（需 `--compute`）：`{"lang":"…","source":"…"}` → `{"svg":"…"}`。NATIVE 子集 graphviz/svgbob；非 NATIVE/渲染失败 400；body 闸门 6MB |
 
 ## 运行时挂载三 API
 

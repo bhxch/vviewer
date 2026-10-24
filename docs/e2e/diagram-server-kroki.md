@@ -40,7 +40,7 @@ DSV-04/06 是本 spec 仅有的真网依赖用例（执行环境无外网时 ski
 
 ## 3. mock 策略记档（kroki 上游）
 
-**page.route 拦不到 kroki.io 上游请求**：DSV-02 的出站段是 vviewer 服务端进程的 reqwest 请求，不经过浏览器网络栈——`page.route('**/kroki.io/**')` 只能拦浏览器侧（img 直发）请求。上游离线模拟的唯一通道是**部署侧配置**：`--kroki-host http://127.0.0.1:4187` 指向 spec 内自起的 node http mock（POST `{lang}/svg` 恒 200 `image/svg+xml`；GET `/dsv-mock-ping` 供幂等复用探测）。该形态顺带真实穿过 SSRF 防线（host 只来自部署侧、lang 白名单、raw 源码透传——core kroki.rs 语义），mock 侧命中台账（路径+body）是转发链发生的直接观测面。
+**page.route 拦不到 kroki.io 上游请求**：DSV-02 的出站段是 vviewer 服务端进程的 reqwest 请求，不经过浏览器网络栈——`page.route('**/kroki.io/**')` 只能拦浏览器侧（img 直发）请求。上游离线模拟的唯一通道是**部署侧配置**：`--kroki-host http://127.0.0.1:4187` 指向 spec 内自起的 node http mock（POST `{lang}/svg` 恒 200 `image/svg+xml`，每轮必重建、不幂等复用——无探测端点）。该形态顺带真实穿过 SSRF 防线（host 只来自部署侧、lang 白名单、raw 源码透传——core kroki.rs 语义），mock 侧命中台账（路径+body）是转发链发生的直接观测面。
 
 前端消费面单独离线验证不依赖上游：DSV-03b 直接拦 `/plantuml/svg/*`（浏览器 img 面）；DSV-02 的前端消费断言（kroki-proxy 容器内联 svg 非 img）在 mock 上游应答上成立，与真实 kroki 应答同构（均为 svg 文本）。
 
