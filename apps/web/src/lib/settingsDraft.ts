@@ -9,7 +9,7 @@
 // （同一白名单单源），此处只负责「报告」；三类问题同为阻断错误（校验失败不部分
 // 应用，spec §4 导入同纪律），修复后应用时经 normalizeSettings 规范化落值。
 import { resolveDiagramType } from '@vviewer/render-text/markdown/diagrams';
-import { clampSize, CODE_SIZE_RANGE, MERMAID_THEME_VALUES, normalizeSettings, saveSettings, UI_SIZE_RANGE, type Settings } from './stores/settings';
+import { clampSize, CODE_SIZE_RANGE, DEFAULTS, MERMAID_THEME_VALUES, normalizeSettings, saveSettings, UI_SIZE_RANGE, type Settings } from './stores/settings';
 import type { MermaidTheme } from '@vviewer/render-text/markdown/diagramEngines';
 import { sanitizeLayout } from './layout';
 
@@ -24,20 +24,14 @@ export type Draft = Settings;
 
 export type JsonApplyResult = { ok: true } | { ok: false; errors: SettingsIssue[] };
 
-/** 已知顶层字段（白名单；未新增字段——layout/diagrams/fonts 均已在库） */
-const SETTINGS_KEYS: readonly (keyof Settings)[] = [
-  'themeMode',
-  'appearanceLight',
-  'appearanceDark',
-  'codeThemeLight',
-  'codeThemeDark',
-  'excludedPatterns',
-  'autoRefresh',
-  'computePolicy',
-  'diagrams',
-  'fonts',
-  'layout'
-];
+/**
+ * 已知顶层字段白名单（FE-3 起自 DEFAULTS 派生，非手工清单）：DEFAULTS: Settings
+ * 已被 TS 静态锁全键（缺键编译错、多键不可能），Object.keys(DEFAULTS) 即键集的
+ * 运行时唯一真相——「新增字段忘登记白名单 → 导入静默丢字段（用户数据丢失类
+ * 缺陷）」自派生起不可再发生。键序 = DEFAULTS 字面量插入序（与原手工清单逐键
+ * 一致，pickKnown 输出键序不变，localStorage 落盘字节面零漂移）。
+ */
+const SETTINGS_KEYS: readonly (keyof Settings)[] = Object.keys(DEFAULTS) as (keyof Settings)[];
 
 /** 白名单拣选（L1 顺手项）：导入路径只取已知键——normalizeSettings 对未知键原样
  * 透传（loadSettings 历史行为），不拣选会让导入文件的自造字段落进 localStorage。 */

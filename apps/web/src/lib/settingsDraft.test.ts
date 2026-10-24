@@ -17,9 +17,10 @@ import {
   mergeImported,
   openDraft,
   parseImportFile,
-  replaceImported
+  replaceImported,
+  validateSettings
 } from './settingsDraft';
-import { normalizeSettings, onSettingsChanged, type Settings } from './stores/settings';
+import { DEFAULTS, normalizeSettings, onSettingsChanged, type Settings } from './stores/settings';
 import { DEFAULT_LAYOUT } from './layout';
 
 const BASE: Settings = normalizeSettings({});
@@ -468,5 +469,17 @@ describe('normalizeSettings 导出（loadSettings 白名单的共享规范化入
     expect(s.autoRefresh).toBe(false);
     // 缺项补默认（Settings 全形返回）
     expect(Object.keys(s).sort()).toEqual(Object.keys(aSettings({})).sort());
+  });
+});
+
+describe('SETTINGS_KEYS DEFAULTS 派生（FE-3：白名单对账机械化）', () => {
+  it('DEFAULTS 全键经派生白名单：openDraft(DEFAULTS) 全量序列化-校验零 unknown 报告（退回手工清单/漏登记即红）；对照探针仍报告（非恒真）', () => {
+    // DEFAULTS 键集 = Object.keys(DEFAULTS) 派生的白名单：全量序列化产物经
+    // validateSettings 必零报告（含零「未知字段」）——未来 Settings 新增字段若
+    // 白名单退回手工清单漏登记，DEFAULTS 全键序列化里的该字段即被报未知而红
+    const issues = validateSettings(JSON.parse(draftToJson(openDraft(DEFAULTS))));
+    expect(issues).toEqual([]);
+    // 对照断言（防校验器恒返空的假绿）：白名单外探针字段仍被报告为未知字段
+    expect(validateSettings({ ...DEFAULTS, __probe: 1 }).map((i) => i.field)).toContain('__probe');
   });
 });

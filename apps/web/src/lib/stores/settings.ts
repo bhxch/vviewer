@@ -54,7 +54,13 @@ export interface Settings {
 }
 
 const KEY = 'vviewer:settings';
-const DEFAULTS: Settings = {
+/**
+ * 全字段默认值（键集 = Settings 键集，TS 静态锁全键——缺键编译错、多键不可能）。
+ * FE-3 起导出：settingsDraft 的白名单 SETTINGS_KEYS 以 Object.keys(DEFAULTS)
+ * 派生（键集运行时唯一真相，「新增字段忘登记白名单→导入静默丢字段」不可再发生）；
+ * 键序与原手工清单逐键一致（localStorage 落盘字节面零漂移）。
+ */
+export const DEFAULTS: Settings = {
   themeMode: 'system',
   appearanceLight: 'default',
   appearanceDark: 'default',
