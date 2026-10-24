@@ -1,38 +1,11 @@
-//! root 变更监听（notify 递归 watch）与 500ms debounce 聚合广播，含故障自愈。
-//!
-//! watcher 在服务器启动时由 `ChangeHub::spawn` 创建一次（挂在 AppState 内），
-//! 而非每个 SSE 连接各建一个：workspace 多根下每根一个 watcher 线程（各自
-//! notify 实例 + 自愈状态机，共享 broadcast 通道与 stop 标志；健康为每根
-//! 槽位、读取时聚合，见 `HealthSlots`），
-//! notify 事件 → std mpsc → 聚合线程把 500ms 窗口内的多事件按根合并为
-//! `{"type":"changed","paths":[...]}`（相对所在根、排序去重；多根时帧携带
-//! `"root": <idx>`，单根形状不变）→ tokio broadcast 分发给所有订阅的 SSE 连接。
-//!
-//! 自愈（BUG-02）：启动失败保留 Err 经 tracing 记日志（含 OS 错误码与 root 路径）
-//! 并在后台线程退避重试，连续失败降级 `PollWatcher`（轮询，跨文件系统可用）继续
-//! 广播 changed，之后周期性探试 recommended（暂时性故障解除后回归实时）；运行期
-//! 错误丢弃当前 watcher 重建，恢复实时监听后广播 `{"type":"watch-recovered"}`。
-//! 健康状态 `Ok / Recovering / Degraded` 经 `ChangeHub::health` 暴露（每根一个
-//! 槽位，读取时取 worst-of 聚合——任一根 Recovering → Recovering，否则任一根
-//! Degraded → Degraded），SSE 建连
-//! 按快照发降级帧（非 Ok 统一 `watch-degraded`——`watch-error` 在前端是终态
-//! 语义，见 `snapshot_frame`；运行期错误同样不广播它，自愈经状态帧与恢复的
-//! changed 表达）。
-//!
-//! 全同步实现（聚合走 std 线程 + `recv_timeout`，watcher 重建同在聚合线程内）：
-//! `AppState::new` 无需 tokio runtime 也可构造（main 在进入 runtime 前构造
-//! state，测试在任意上下文构造）。
-//!
-//! 扫描不跟随 symlink（BUG-68）：notify 8.2 默认 `follow_symlinks=true` 会使
-//! 递归扫描深入 root 外 symlink（如 → /etc），权限错误致建监听失败降级
-//! PollWatcher 后，周期重扫每轮对每个被拒路径刷 WARN（实测 ≈47GB/天）。
-//! `with_follow_symlinks(false)` 后两级后端都只在 root 内扫描；越界 symlink
-//! 目标内的变更本就在 root 外（collect_event 既有口径剔除），语义不变。
+//! 自愈状态机与聚合会话循环（BE-3 目录化自 watch.rs 迁入）：错误日志限频、
+//! watcher 建立工厂（recommended 退避重试 → PollWatcher 降级 → 探试回归）、
+//! 每根聚合/自愈主循环与 debounce 窗口聚合。
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use notify::{
@@ -42,6 +15,9 @@ use notify::{
 use serde_json::json;
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
+
+use super::health::{HealthSlots, WatchHealth};
+use super::inspect::collect_event;
 
 /// 运行期错误日志限频（BUG-68 抑制层）：同窗口内错误只记首条，过期后输出
 /// 一条「n 条已抑制」摘要（n=0 时不输出空摘要，直接按新窗口首条），避免
@@ -95,191 +71,10 @@ impl ErrorLogGate {
 /// debounce 聚合窗口：首个事件到达后等这么久，窗口内的后续事件并入同一条 changed。
 pub const DEBOUNCE_WINDOW: Duration = Duration::from_millis(500);
 
-/// broadcast 队列深度：慢连接积压超过后直接丢帧（Lagged），客户端下次刷新自愈。
-const CHANNEL_CAPACITY: usize = 64;
-
-/// watcher 健康状态：SSE 建连快照帧与运行期状态帧的依据。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WatchHealth {
-    /// 实时 watcher 正常，changed 实时推送。
-    Ok,
-    /// watcher 故障，正在退避重建（期间 watch-error 只广播一次）。
-    Recovering,
-    /// 实时 watcher 不可用，已降级 PollWatcher 轮询（changed 仍广播，非实时）。
-    Degraded,
-}
-
-impl WatchHealth {
-    fn to_u8(self) -> u8 {
-        self as u8
-    }
-
-    fn from_u8(v: u8) -> Self {
-        match v {
-            0 => WatchHealth::Ok,
-            1 => WatchHealth::Recovering,
-            _ => WatchHealth::Degraded,
-        }
-    }
-
-    /// SSE 建连快照帧 type：Ok 无帧；Recovering/Degraded 均发 `watch-degraded`。
-    /// 不可用 `watch-error`：前端 remote.ts 对其按终态处理（断开且不重连），
-    /// 会令 Recovering 窗口内建连的 tab 永久失联、服务端随后的
-    /// watch-recovered/changed 全部无效。`watch-degraded` 是前端未知 type，
-    /// 天然忽略、连接保持：服务端自愈后 changed 自然恢复流动，同时留作
-    /// 诊断线索与未来客户端展示降级/恢复提示的挂点。
-    pub fn snapshot_frame(self) -> Option<&'static str> {
-        match self {
-            WatchHealth::Ok => None,
-            WatchHealth::Recovering | WatchHealth::Degraded => Some("watch-degraded"),
-        }
-    }
-}
-
-/// 共享变更广播中心：每根一个 watcher 线程 + 各自聚合循环，服务全部 SSE 连接。
-/// watcher 句柄移入各自聚合线程（自愈重建需在错误现场执行），销毁经 stop 标志。
-pub struct ChangeHub {
-    tx: broadcast::Sender<String>,
-    /// 每根一个健康槽位（线程各写各的），[`ChangeHub::health`] 读取时聚合。
-    health: Arc<HealthSlots>,
-    /// ChangeHub 销毁（最后一个 Arc 释放）时置位：各聚合线程停止建 watch 并退出。
-    stop: Arc<AtomicBool>,
-}
-
-impl Drop for ChangeHub {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-    }
-}
-
-/// 每根一个健康槽位，读取时聚合（worst-of）。多根下各 watcher 线程只写自己的
-/// 槽位：共享单标量会被任一线程的成功转换覆写——首建部分失败时成功根首轮翻
-/// Ok（坏根重试窗口内新连接拿不到降级快照、其变更静默），反向同理（先恢复的
-/// 根置 Ok 会掩盖仍在重建窗口内的另一根）。槽位隔离让聚合在读取时计算，
-/// 两类竞态一并消除。
-struct HealthSlots {
-    slots: Vec<AtomicU8>,
-}
-
-impl HealthSlots {
-    /// 按各根首建结果初始化（建会话 → Ok；失败 → Recovering）。
-    fn new(initial: &[WatchHealth]) -> Self {
-        Self { slots: initial.iter().map(|h| AtomicU8::new(h.to_u8())).collect() }
-    }
-
-    fn set(&self, root_idx: usize, v: WatchHealth) {
-        self.slots[root_idx].store(v.to_u8(), Ordering::SeqCst);
-    }
-
-    fn get(&self, root_idx: usize) -> WatchHealth {
-        WatchHealth::from_u8(self.slots[root_idx].load(Ordering::SeqCst))
-    }
-
-    /// 聚合（worst-of）：任一根 Recovering（无 watcher、无事件）→ Recovering；
-    /// 否则任一根 Degraded（轮询、事件非实时）→ Degraded；全 Ok → Ok。
-    /// 快照帧只分 Ok / 非 Ok（watch-degraded），聚合序与帧语义一致。
-    fn aggregate(&self) -> WatchHealth {
-        let mut worst = WatchHealth::Ok;
-        for slot in &self.slots {
-            match WatchHealth::from_u8(slot.load(Ordering::SeqCst)) {
-                WatchHealth::Recovering => return WatchHealth::Recovering,
-                WatchHealth::Degraded => worst = WatchHealth::Degraded,
-                WatchHealth::Ok => {}
-            }
-        }
-        worst
-    }
-}
-
-impl ChangeHub {
-    /// 为每个根创建递归 watcher 并启动聚合线程（每根一个 watcher 线程，共享
-    /// broadcast / health / stop）；失败不降级为永久静默（后台自愈接管）。
-    /// `VV_WATCH_FAULT` 环境变量激活故障注入（见 [`WatchFault`]，仅 e2e 使用）。
-    pub fn spawn(roots: &[PathBuf]) -> Arc<Self> {
-        let fault = WatchFault::from_env();
-        let factories: Vec<RetryFactory> = roots
-            .iter()
-            .map(|root| RetryFactory::notify(root.clone(), RetryPolicy::default(), fault))
-            .collect();
-        Self::spawn_with(roots, factories)
-    }
-
-    /// 注入工厂的 spawn：每根同步首建一次（不重试），spawn 返回时健康状态即确定
-    /// （各根槽位按首建结果写入，任一根失败整体聚合为 Recovering），SSE 建连
-    /// 快照无竞态；启动失败的退避重试与 PollWatcher 降级移交各自后台线程，
-    /// 不拖慢服务器启动。测试注入 mock opener 驱动状态机各分支。
-    fn spawn_with(roots: &[PathBuf], mut factories: Vec<RetryFactory>) -> Arc<Self> {
-        debug_assert_eq!(roots.len(), factories.len(), "每根一个工厂");
-        let (tx, _) = broadcast::channel(CHANNEL_CAPACITY);
-        let stop = Arc::new(AtomicBool::new(false));
-
-        // 同步首建（每根一次）：各根槽位按首建结果初始化（不互相覆写）
-        let mut initial: Vec<Option<WatchSession>> = Vec::with_capacity(roots.len());
-        let mut initial_health: Vec<WatchHealth> = Vec::with_capacity(roots.len());
-        for (root, factory) in roots.iter().zip(factories.iter_mut()) {
-            // 诊断补丁（BUG-02）：数据根的文件系统类型，便于 e2e 环境判读（如 btrfs）
-            info!(
-                "[watch] root={} fstype={}",
-                root.display(),
-                fs_type_of(root).unwrap_or_else(|| "unknown".into())
-            );
-            match (factory.open_recommended)() {
-                Ok((keep, rx, backend)) => {
-                    info!("[watch] watcher established backend={backend} root={}", root.display());
-                    initial.push(Some(WatchSession::new(keep, rx, backend, false)));
-                    initial_health.push(WatchHealth::Ok);
-                }
-                Err(e) => {
-                    // 含 OS 错误码（Debug 格式的 Os { code: .. }）与 root 路径
-                    error!(
-                        "[watch] watcher startup FAILED root={} err={e:?}; retrying in background (backoff x{}, then PollWatcher fallback)",
-                        root.display(),
-                        factory.policy.attempts
-                    );
-                    initial.push(None);
-                    initial_health.push(WatchHealth::Recovering);
-                }
-            }
-        }
-        let health = Arc::new(HealthSlots::new(&initial_health));
-
-        // 每根一个聚合/自愈线程：不持有 JoinHandle，ChangeHub drop → stop 置位后
-        // 线程自行退出。多根时 changed 帧携带根索引，单根保持历史形状（无 root）。
-        let total_roots = roots.len();
-        for (root_idx, ((root, factory), session)) in roots
-            .iter()
-            .cloned()
-            .zip(factories)
-            .zip(initial)
-            .enumerate()
-        {
-            let (thread_tx, thread_health, thread_stop) =
-                (tx.clone(), health.clone(), stop.clone());
-            std::thread::spawn(move || {
-                run_loop(
-                    session, factory, thread_tx, thread_health, thread_stop, root, root_idx,
-                    total_roots,
-                )
-            });
-        }
-        Arc::new(Self { tx, health, stop })
-    }
-
-    /// SSE 连接订阅：返回的 Receiver 被 drop 即代表连接断开、自动清理。
-    pub fn subscribe(&self) -> broadcast::Receiver<String> {
-        self.tx.subscribe()
-    }
-
-    /// 当前 watcher 健康状态（SSE 建连快照用）：各根槽位的 worst-of 聚合。
-    pub fn health(&self) -> WatchHealth {
-        self.health.aggregate()
-    }
-}
-
-type RawEvent = Result<NotifyEvent, NotifyError>;
+pub(super) type RawEvent = Result<NotifyEvent, NotifyError>;
 
 /// 一次成功建立的 watcher 会话：事件接收端 + 保活句柄（drop 即断流）。
-struct WatchSession {
+pub(super) struct WatchSession {
     /// notify watcher（或 mock 的发送端）：保活 raw channel；drop 后 rx Disconnected。
     _keepalive: Box<dyn Send>,
     rx: std::sync::mpsc::Receiver<RawEvent>,
@@ -290,7 +85,7 @@ struct WatchSession {
 }
 
 impl WatchSession {
-    fn new(
+    pub(super) fn new(
         keepalive: Box<dyn Send>,
         rx: std::sync::mpsc::Receiver<RawEvent>,
         backend: String,
@@ -301,19 +96,20 @@ impl WatchSession {
 }
 
 /// 建立 watcher 的结果：保活句柄 + 事件接收端 + 后端名。
-type OpenOutcome = Result<(Box<dyn Send>, std::sync::mpsc::Receiver<RawEvent>, String), NotifyError>;
-type Opener = Box<dyn FnMut() -> OpenOutcome + Send>;
+pub(super) type OpenOutcome =
+    Result<(Box<dyn Send>, std::sync::mpsc::Receiver<RawEvent>, String), NotifyError>;
+pub(super) type Opener = Box<dyn FnMut() -> OpenOutcome + Send>;
 
 /// 重试策略（启动失败与运行期重建共用）。
-struct RetryPolicy {
+pub(super) struct RetryPolicy {
     /// recommended watcher 重试次数（不含 `ChangeHub::spawn` 的同步首建）。
-    attempts: u32,
+    pub(super) attempts: u32,
     /// 第 n 次重试前的退避时长（按索引取，越界视为不再等待）。
-    backoffs: Vec<Duration>,
+    pub(super) backoffs: Vec<Duration>,
     /// 降级 PollWatcher 的轮询间隔（≥2s，权衡 CPU）。
-    poll_interval: Duration,
+    pub(super) poll_interval: Duration,
     /// PollWatcher 也失败后的兜底无限重试间隔。
-    fallback_backoff: Duration,
+    pub(super) fallback_backoff: Duration,
 }
 
 impl Default for RetryPolicy {
@@ -346,13 +142,13 @@ const POLL_PROBE_EVERY: u32 = 5;
 ///   watch-recovered（自愈路径）。e2e 用 `4:3000` 完整走通「降级→降级中
 ///   changed 流动→探试回归实时」三段，无需依赖不可移植的 chmod/errno 手法。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct WatchFault {
+pub(super) struct WatchFault {
     rec_open_fails: u32,
     poll_err_ms: u64,
 }
 
 impl WatchFault {
-    fn from_env() -> Option<Self> {
+    pub(super) fn from_env() -> Option<Self> {
         let spec = std::env::var("VV_WATCH_FAULT").ok()?;
         let (fails, err_ms) = spec.split_once(':')?;
         Some(Self {
@@ -366,22 +162,22 @@ impl WatchFault {
 /// 每 POLL_PROBE_EVERY 次重建探试一次 recommended）→ 兜底无限重试（root 暂时
 /// 不可达时，条件移除后自愈）。opener 可注入（测试用 mock 会话替换真实 notify
 /// 构建）。
-struct RetryFactory {
-    root: PathBuf,
-    policy: RetryPolicy,
+pub(super) struct RetryFactory {
+    pub(super) root: PathBuf,
+    pub(super) policy: RetryPolicy,
     /// 上次降级成功后优先重试 PollWatcher，避免每次重建空耗 recommended 重试窗口；
     /// 探试周期见 `POLL_PROBE_EVERY`。
-    prefer_poll: bool,
+    pub(super) prefer_poll: bool,
     /// prefer_poll 生效期间经历的重建次数（探试计数）。
-    poll_rebuilds: u32,
-    open_recommended: Opener,
-    open_poll: Opener,
+    pub(super) poll_rebuilds: u32,
+    pub(super) open_recommended: Opener,
+    pub(super) open_poll: Opener,
 }
 
 impl RetryFactory {
     /// 生产 opener 组装：recommended（inotify 等）与固定间隔 PollWatcher。
     /// `fault` 非 None 时包装注入（[`WatchFault`]）。
-    fn notify(root: PathBuf, policy: RetryPolicy, fault: Option<WatchFault>) -> Self {
+    pub(super) fn notify(root: PathBuf, policy: RetryPolicy, fault: Option<WatchFault>) -> Self {
         let rec_root = root.clone();
         let poll_root = root.clone();
         let poll_interval = policy.poll_interval;
@@ -569,7 +365,7 @@ impl RetryFactory {
 /// 计算，任一根的建立/故障不覆写其余根），changed 帧按 `root_idx` 标注
 /// （`total_roots` = 1 时保持历史形状，不带 root 字段）。
 #[allow(clippy::too_many_arguments)]
-fn run_loop(
+pub(super) fn run_loop(
     initial: Option<WatchSession>,
     mut factory: RetryFactory,
     tx: broadcast::Sender<String>,
@@ -758,37 +554,11 @@ fn backend_name(w: &impl std::fmt::Debug) -> String {
         .to_string()
 }
 
-/// Linux：读 /proc/self/mounts 取覆盖 root 的最长挂载点文件系统类型（诊断用）。
-#[cfg(target_os = "linux")]
-fn fs_type_of(path: &Path) -> Option<String> {
-    let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let mounts = std::fs::read_to_string("/proc/self/mounts").ok()?;
-    let mut best: Option<(usize, String)> = None;
-    for line in mounts.lines() {
-        let mut fields = line.split_whitespace();
-        let Some(_device) = fields.next() else { continue };
-        let Some(mount_point) = fields.next().and_then(unescape_mount) else { continue };
-        let Some(fstype) = fields.next() else { continue };
-        if target.starts_with(&mount_point) {
-            let len = mount_point.as_os_str().len();
-            if best.as_ref().is_none_or(|(l, _)| len > *l) {
-                best = Some((len, fstype.to_string()));
-            }
-        }
-    }
-    best.map(|(_, t)| t)
-}
-
-#[cfg(not(target_os = "linux"))]
-fn fs_type_of(_path: &Path) -> Option<String> {
-    None
-}
-
 /// /proc/self/mounts 的挂载点含八进制转义（\040 空格等），解码为原始路径。
 /// 内核输出的是 UTF-8 字节序列转义（如 é 为 \303\251 两个字节），故按字节
 /// 累积、行结束后整体按 UTF-8 还原（非 UTF-8 字节经 lossy 替换，仅诊断用途）。
 #[cfg(target_os = "linux")]
-fn unescape_mount(s: &str) -> Option<PathBuf> {
+pub(super) fn unescape_mount(s: &str) -> Option<PathBuf> {
     let bytes = s.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
     let mut i = 0;
@@ -812,105 +582,21 @@ fn unescape_mount(s: &str) -> Option<PathBuf> {
     Some(PathBuf::from(String::from_utf8_lossy(&out).into_owned()))
 }
 
-/// notify 事件（成功态）→ 按根归组的相对路径集合（'/' 分隔，排序去重由
-/// BTreeSet 保证；键 = 事件所属根索引）。窗口关闭时逐根发帧（见 session_loop）。
-fn collect_event(
-    ev: &NotifyEvent,
-    root_idx: usize,
-    root: &Path,
-    out: &mut BTreeMap<usize, BTreeSet<String>>,
-) {
-    // Access（打开/读取）不改变内容：过滤掉 watcher 自身的初始目录扫描事件，
-    // 也避免 SSE 客户端查看文件（读操作）反过来触发一次无意义的变更推送
-    if matches!(ev.kind, notify::EventKind::Access(_)) {
-        return;
-    }
-    for p in &ev.paths {
-        // 根外路径不进 changed 帧（防止绝对路径泄露给客户端）：直接跳过
-        let Ok(rel) = p.strip_prefix(root) else { continue };
-        // Windows 分隔符统一为 '/'，与 /api/tree、/api/file 的 path 参数一致
-        out.entry(root_idx).or_default().insert(rel.to_string_lossy().replace('\\', "/"));
-    }
-}
-
-/// 原始通道事件（含 Err）：错误事件不产生路径（由 session_loop 触发重建自愈）。
-#[cfg(test)]
-fn collect_paths(
-    ev: &RawEvent,
-    root_idx: usize,
-    root: &Path,
-    out: &mut BTreeMap<usize, BTreeSet<String>>,
-) {
-    let Ok(ev) = ev else { return };
-    collect_event(ev, root_idx, root, out);
-}
-
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc::{Receiver, Sender};
-    use std::sync::atomic::AtomicUsize;
-    use std::time::Instant;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
 
+    use notify::Error as NotifyError;
+
+    use super::super::ChangeHub;
+    use super::super::testkit::{
+        endless_ok_opener, factory, fail_n_then_ok_opener, fast_policy, scripted_opener,
+    };
+    #[cfg(unix)]
+    use super::super::testkit::make_root_with_escape_symlink;
     use super::*;
-    use notify::event::{AccessKind, AccessMode, CreateKind, EventKind};
-
-    /// 构造带路径的 notify 事件（测试 collect_paths 的过滤语义）。
-    fn ev(kind: EventKind, paths: &[&str]) -> RawEvent {
-        let mut e = NotifyEvent::new(kind);
-        for p in paths {
-            e = e.add_path(PathBuf::from(p));
-        }
-        Ok(e)
-    }
-
-    #[test]
-    fn access_events_and_out_of_root_paths_are_dropped() {
-        let root = PathBuf::from("/srv/root");
-        let mut out: BTreeMap<usize, BTreeSet<String>> = BTreeMap::new();
-
-        // Access 事件（如 watcher 自身初始扫描 / 客户端读文件）不构成变更
-        collect_paths(
-            &ev(
-                EventKind::Access(AccessKind::Open(AccessMode::Any)),
-                &["/srv/root/a.txt"],
-            ),
-            0,
-            &root,
-            &mut out,
-        );
-        assert!(out.is_empty(), "Access 事件应被过滤");
-
-        // 根内路径转相对、归入对应根索引；根外绝对路径跳过（不泄露给客户端）
-        collect_paths(
-            &ev(
-                EventKind::Create(CreateKind::File),
-                &["/srv/root/sub/b.txt", "/etc/passwd"],
-            ),
-            0,
-            &root,
-            &mut out,
-        );
-        assert_eq!(
-            out,
-            BTreeMap::from([(0, BTreeSet::from(["sub/b.txt".to_string()]))])
-        );
-    }
-
-    #[test]
-    fn snapshot_frame_matches_health_semantics() {
-        assert_eq!(WatchHealth::Ok.snapshot_frame(), None);
-        // Recovering/Degraded 统一发 watch-degraded：watch-error 在前端是终态
-        // 语义（断开不重连），不得用于建连快照
-        assert_eq!(WatchHealth::Recovering.snapshot_frame(), Some("watch-degraded"));
-        assert_eq!(WatchHealth::Degraded.snapshot_frame(), Some("watch-degraded"));
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn fs_type_of_resolves_mount_of_tmp() {
-        let fstype = fs_type_of(Path::new("/tmp")).expect("/tmp 应有挂载点条目");
-        assert!(!fstype.is_empty(), "fstype 应非空: {fstype}");
-    }
 
     /// 限频器：窗口首条直记（First）；窗口内后续静默累计（Suppressed）；窗口过期后
     /// 的首条以摘要形式输出累计数（Summary(n)）并重开窗口（该条即新窗口首条语义）。
@@ -940,143 +626,6 @@ mod tests {
         // 重开的窗口内继续静默累计，摘要数值正确
         assert!(matches!(gate.admit(t0 + Duration::from_secs(62)), Admission::Suppressed));
         assert!(matches!(gate.admit(t0 + Duration::from_secs(125)), Admission::Summary(1)));
-    }
-
-    /// 极短退避：mock/真实故障注入测试毫秒级完成，不拖慢套件。
-    fn fast_policy() -> RetryPolicy {
-        RetryPolicy {
-            attempts: 3,
-            backoffs: vec![],
-            poll_interval: Duration::from_millis(50),
-            fallback_backoff: Duration::from_millis(2),
-        }
-    }
-
-    /// 脚本式 opener：依次返回预置 mock 会话（事件通道 + 后端名）；脚本耗尽后
-    /// 恒失败并计数（断言重试确有发生）。
-    fn scripted_opener(
-        sessions: Vec<(Sender<RawEvent>, Receiver<RawEvent>, &'static str)>,
-        fails: Arc<AtomicUsize>,
-    ) -> Opener {
-        let mut queue = sessions.into_iter();
-        Box::new(move || {
-            if let Some((keep, rx, backend)) = queue.next() {
-                return Ok((Box::new(keep) as Box<dyn Send>, rx, backend.to_string()));
-            }
-            fails.fetch_add(1, Ordering::SeqCst);
-            Err(NotifyError::io(std::io::Error::other("mock session exhausted")))
-        })
-    }
-
-    fn factory(open_recommended: Opener, open_poll: Opener) -> RetryFactory {
-        RetryFactory {
-            root: PathBuf::from("/srv/root"),
-            policy: fast_policy(),
-            prefer_poll: false,
-            poll_rebuilds: 0,
-            open_recommended,
-            open_poll,
-        }
-    }
-
-    async fn next_frame(sub: &mut broadcast::Receiver<String>) -> String {
-        tokio::time::timeout(Duration::from_secs(5), sub.recv())
-            .await
-            .expect("等待帧超时")
-            .expect("broadcast 接收失败")
-    }
-
-    /// 每次调用都成功的 opener：每次新建事件通道（测试无需消费会话事件）。
-    fn endless_ok_opener(backend: &'static str) -> Opener {
-        Box::new(move || {
-            let (tx, rx) = std::sync::mpsc::channel();
-            Ok((Box::new(tx) as Box<dyn Send>, rx, backend.to_string()))
-        })
-    }
-
-    /// 前 `n` 次调用失败并计数，之后返回预置 mock 会话（探试成功路径用）。
-    fn fail_n_then_ok_opener(
-        n: usize,
-        keep: Sender<RawEvent>,
-        rx: Receiver<RawEvent>,
-        backend: &'static str,
-        fails: Arc<AtomicUsize>,
-    ) -> Opener {
-        let mut rx = Some(rx);
-        Box::new(move || {
-            if fails.fetch_add(1, Ordering::SeqCst) < n {
-                return Err(NotifyError::io(std::io::Error::other("mock not ready yet")));
-            }
-            let Some(rx) = rx.take() else {
-                return Err(NotifyError::io(std::io::Error::other("mock session exhausted")));
-            };
-            Ok((Box::new(keep.clone()) as Box<dyn Send>, rx, backend.to_string()))
-        })
-    }
-
-    /// 运行期错误 → 重建成功 → watch-recovered → changed 照常。不广播
-    /// watch-error（前端终态语义，会令存量连接永久断开）。
-    #[tokio::test]
-    async fn runtime_error_recovers_via_rebuilt_watcher() {
-        let (tx1, rx1) = std::sync::mpsc::channel();
-        let (tx2, rx2) = std::sync::mpsc::channel();
-        let factory = factory(
-            scripted_opener(
-                vec![(tx1.clone(), rx1, "mock-a"), (tx2.clone(), rx2, "mock-b")],
-                Arc::new(AtomicUsize::new(0)),
-            ),
-            scripted_opener(vec![], Arc::new(AtomicUsize::new(0))),
-        );
-        let hub = ChangeHub::spawn_with(&[PathBuf::from("/srv/root")], vec![factory]);
-        assert_eq!(hub.health(), WatchHealth::Ok);
-        let mut sub = hub.subscribe();
-
-        tx1.send(Err(NotifyError::io(std::io::Error::other("watch removed")))).unwrap();
-
-        // 会话错误不发帧（连接保持）；重建（mock-b）成功 → recovered（携带
-        // 后端名）→ 健康回 Ok。health 的 Recovering 中间态窗口极短（mock 重建
-        // 毫秒级完成），不在此断言——稳定停留 Recovering 由持续失败用例覆盖。
-        let f1 = next_frame(&mut sub).await;
-        assert!(f1.contains("watch-recovered"), "应收到恢复帧: {f1}");
-        assert!(!f1.contains("watch-error"), "不得广播前端终态的 watch-error: {f1}");
-        assert!(f1.contains("mock-b"), "恢复帧应携带新后端名: {f1}");
-        assert_eq!(hub.health(), WatchHealth::Ok);
-
-        // 恢复后 changed 照常广播（自愈不是降级）
-        tx2.send(ev(EventKind::Create(CreateKind::File), &["/srv/root/a.txt"])).unwrap();
-        let f2 = next_frame(&mut sub).await;
-        assert!(f2.contains("changed") && f2.contains("a.txt"), "恢复后应照常 changed: {f2}");
-    }
-
-    /// 重建持续失败：不广播任何帧（watch-error 前端终态语义；Recovering 经
-    /// health 快照表达），健康停留 Recovering，recommended 重试与 PollWatcher
-    /// 降级尝试确有发生。
-    #[tokio::test]
-    async fn repeated_build_failures_stay_silent_in_recovering() {
-        let (tx1, rx1) = std::sync::mpsc::channel();
-        let rec_fails = Arc::new(AtomicUsize::new(0));
-        let poll_fails = Arc::new(AtomicUsize::new(0));
-        let factory = factory(
-            scripted_opener(vec![(tx1.clone(), rx1, "mock-a")], rec_fails.clone()),
-            scripted_opener(vec![], poll_fails.clone()),
-        );
-        let hub = ChangeHub::spawn_with(&[PathBuf::from("/srv/root")], vec![factory]);
-        assert_eq!(hub.health(), WatchHealth::Ok);
-        let mut sub = hub.subscribe();
-
-        tx1.send(Err(NotifyError::io(std::io::Error::other("watch removed")))).unwrap();
-
-        // 300ms 内（fast_policy 兜底循环 2ms 一轮，重试几十次）连接保持静默：
-        // 存量连接不断开，服务端恢复后 changed 自然恢复流动
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        assert!(sub.try_recv().is_err(), "Recovering 期间不应广播任何帧");
-        assert_eq!(hub.health(), WatchHealth::Recovering);
-        assert!(
-            rec_fails.load(Ordering::SeqCst) >= 3,
-            "recommended 应至少重试 attempts 次: {}",
-            rec_fails.load(Ordering::SeqCst)
-        );
-        assert!(poll_fails.load(Ordering::SeqCst) >= 1, "应尝试过 PollWatcher 降级");
     }
 
     /// 降级后每 POLL_PROBE_EVERY 次重建探试一次 recommended：探试失败回落
@@ -1126,33 +675,6 @@ mod tests {
         // 此后重建走 recommended 正常分支（与 build#1 同一代码路径，不再断言）
     }
 
-    /// recommended 持续失败 → 降级 PollWatcher：健康 Degraded、发 watch-degraded 帧、
-    /// 轮询会话的变更照常聚合为 changed 帧。
-    #[tokio::test]
-    async fn poll_fallback_marks_degraded_and_keeps_changed_flow() {
-        let rec_fails = Arc::new(AtomicUsize::new(0));
-        let (txp, rxp) = std::sync::mpsc::channel();
-        let factory = factory(
-            scripted_opener(vec![], rec_fails.clone()),
-            scripted_opener(vec![(txp.clone(), rxp, "mock-poll")], Arc::new(AtomicUsize::new(0))),
-        );
-        let hub = ChangeHub::spawn_with(&[PathBuf::from("/srv/root")], vec![factory]);
-        assert_ne!(hub.health(), WatchHealth::Ok, "首建失败不应为 Ok");
-        let mut sub = hub.subscribe();
-
-        // 重建：recommended 3 连败 → PollWatcher 降级成功 → watch-degraded 帧
-        let f1 = next_frame(&mut sub).await;
-        assert!(f1.contains("watch-degraded"), "降级应发 watch-degraded 帧: {f1}");
-        assert!(f1.contains("mock-poll"), "降级帧应携带后端名: {f1}");
-        assert_eq!(hub.health(), WatchHealth::Degraded);
-
-        // 降级模式下变更照常广播（自动刷新实际可用，非实时）
-        txp.send(ev(EventKind::Create(CreateKind::File), &["/srv/root/a.txt"])).unwrap();
-        let f2 = next_frame(&mut sub).await;
-        assert!(f2.contains("changed") && f2.contains("a.txt"), "降级后仍应 changed: {f2}");
-        assert!(rec_fails.load(Ordering::SeqCst) >= 3, "降级前应重试完 recommended");
-    }
-
     /// 真实不可 watch 的 root：同步首建失败 → health 非 Ok；后台重试/降级全败后
     /// 仍不得转为 Ok（兜底无限重试接管）。
     #[test]
@@ -1166,110 +688,6 @@ mod tests {
         std::thread::sleep(Duration::from_millis(300));
         assert_ne!(hub.health(), WatchHealth::Ok, "不可 watch 的 root 不应转为 Ok");
         // drop 触发 stop：兜底无限重试循环随之退出（不 join，随进程回收）
-    }
-
-    /// 双根部分失败（I-1 回归）：一根可 watch、一根不可。坏根的整个后台重试
-    /// 窗口内共享健康必须保持非 Ok（新 SSE 连接拿得到 watch-degraded 快照），
-    /// 好根的变更照常推送。撤修复（首建成功线程以共享标量为 prev 并无条件
-    /// 覆写 Ok）时本用例红：好根首轮即翻 Ok 并伪发 watch-recovered。
-    #[tokio::test]
-    async fn partial_root_failure_keeps_shared_health_non_ok_and_good_root_flows() {
-        let good = tempfile::tempdir().unwrap();
-        let root = good.path().to_path_buf();
-        std::fs::write(root.join("seed.txt"), "seed").unwrap();
-        let bad = PathBuf::from("/nonexistent-vviewer-watch-root-xyz");
-
-        let hub = ChangeHub::spawn(&[root.clone(), bad]);
-        assert_ne!(hub.health(), WatchHealth::Ok, "任一根首建失败整体应为非 Ok");
-        let mut sub = hub.subscribe();
-
-        // 失败窗口内好根事件照常推送（坏根静默只属失败根自身，不牵连好根）
-        std::fs::write(root.join("seed.txt"), "changed").unwrap();
-        let frame = tokio::time::timeout(Duration::from_secs(3), sub.recv())
-            .await
-            .expect("好根变更应在失败窗口内照常推送")
-            .expect("broadcast 接收失败");
-        assert!(
-            frame.contains("changed") && frame.contains("seed.txt"),
-            "失败窗口内首帧应为好根 changed（不得被伪 watch-recovered 占先）: {frame}"
-        );
-
-        // 好根线程首建成功不得把共享健康覆写为 Ok（坏根仍在重试窗口）
-        std::thread::sleep(Duration::from_millis(300));
-        assert_ne!(hub.health(), WatchHealth::Ok, "坏根重试窗口内共享健康应保持非 Ok");
-        assert_eq!(
-            hub.health().snapshot_frame(),
-            Some("watch-degraded"),
-            "失败窗口内建连应拿到降级快照帧"
-        );
-        // drop 触发 stop：坏根兜底无限重试线程退出（不 join，随进程回收）
-    }
-
-    /// 真实文件系统端到端：inotify watcher 建立（健康 Ok）→ 写文件 → 3s 内
-    /// 广播 changed（相对路径）。本机 tmpfs/ext4 对照回归（验收 3）。
-    /// 单根形状逐字节等价：changed 帧只有 type/paths 两个键（无 root 字段）。
-    #[tokio::test]
-    async fn real_fs_change_broadcasts_changed() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().to_path_buf();
-        std::fs::write(root.join("seed.txt"), "seed").unwrap();
-
-        let hub = ChangeHub::spawn(std::slice::from_ref(&root));
-        assert_eq!(hub.health(), WatchHealth::Ok, "真实可 watch 的 root 应为 Ok");
-        let mut sub = hub.subscribe();
-
-        std::fs::write(root.join("seed.txt"), "changed").unwrap();
-        let frame = tokio::time::timeout(Duration::from_secs(3), sub.recv())
-            .await
-            .expect("3s 内应收到 changed 帧")
-            .expect("broadcast 接收失败");
-        assert!(
-            frame.contains("changed") && frame.contains("seed.txt"),
-            "changed 帧应含相对路径 seed.txt: {frame}"
-        );
-        let v: serde_json::Value = serde_json::from_str(&frame).unwrap();
-        let obj = v.as_object().expect("changed 帧应为 JSON 对象");
-        assert_eq!(
-            obj.len(),
-            2,
-            "单根 changed 帧只有 type/paths 两个键（逐字节等价 = 不新增字段）: {frame}"
-        );
-        assert!(obj.contains_key("type") && obj.contains_key("paths"));
-    }
-
-    /// 构造「root 内含指向外部目录的 symlink，目标含 0o000 子目录」的场景。
-    /// 修复前：inotify 建 watch 的 walkdir 深入 symlink 遇 EACCES → 建监听失败
-    /// → 健康非 Ok（BUG-68 现场形态）；修复后（follow_symlinks=false）不深入 → Ok。
-    /// chmod 0o000 仅对非 root 生效，测试以非 root 运行。
-    #[cfg(unix)]
-    fn make_root_with_escape_symlink(dir: &Path) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-        let root = dir.join("root");
-        let target = dir.join("outside");
-        std::fs::create_dir_all(target.join("locked")).unwrap();
-        std::fs::set_permissions(target.join("locked"), PermissionsExt::from_mode(0o000)).unwrap();
-        std::fs::create_dir_all(&root).unwrap();
-        std::os::unix::fs::symlink(&target, root.join("escape")).unwrap();
-        root
-    }
-
-    /// BUG-68 根因回归：root 含越界 symlink（目标含不可读目录）时 watcher 健康应为
-    /// Ok——扫描不深入 symlink，不再因目标内权限错误致建监听失败。
-    #[cfg(unix)]
-    #[test]
-    fn escape_symlink_root_watches_ok() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let root = make_root_with_escape_symlink(dir.path());
-        let hub = ChangeHub::spawn(std::slice::from_ref(&root));
-        assert_eq!(hub.health(), WatchHealth::Ok, "含越界 symlink 的 root 应健康 Ok");
-        // 后台重试/降级稳定后仍为 Ok（不因运行期问题翻转为 Recovering/Degraded）
-        std::thread::sleep(Duration::from_millis(300));
-        assert_eq!(hub.health(), WatchHealth::Ok);
-        drop(hub); // stop 置位，聚合线程退出
-        // 恢复权限便于 tempdir 清理
-        std::fs::set_permissions(dir.path().join("outside/locked"), PermissionsExt::from_mode(0o700))
-            .ok();
     }
 
     /// 降级路径（PollWatcher）同样不深入 symlink：强制降级后，root 内真实文件的
