@@ -1,0 +1,277 @@
+{
+  "note": "abi 字段为构建元数据占位（恒 null）；加载侧无 ABI 门控，兼容性由 web-tree-sitter 运行时加载校验兜底",
+  "generatedAt": "2026-10-24T16:26:34.282Z",
+  "source": "self-built",
+  "grammars": {
+    "bash": {
+      "file": "bash.wasm",
+      "abi": null,
+      "sha256": "f0270796c32f9acfc180e6068d6bef6614b983107b679a247fb63b200c6346e7",
+      "aliases": [
+        "sh",
+        "shell",
+        "zsh"
+      ]
+    },
+    "c-sharp": {
+      "file": "c-sharp.wasm",
+      "abi": null,
+      "sha256": "a4b053f6fdedfc9c94876b415441ea953c0046ef83d45e0cbc4d9b8938ae6cbc",
+      "aliases": [
+        "csharp",
+        "cs",
+        "c#"
+      ]
+    },
+    "c": {
+      "file": "c.wasm",
+      "abi": null,
+      "sha256": "2030a766fa6c6fe18039524008e52fd4a4995bdd9ed07fc4a73ec892450d2f4a",
+      "aliases": [
+        "h"
+      ]
+    },
+    "cpp": {
+      "file": "cpp.wasm",
+      "abi": null,
+      "sha256": "ab9e891709f5dc88fd6b1b4d33f110fb23e5ddc5e64296caf4a41d0a3e585ebe",
+      "aliases": [
+        "c++",
+        "cc",
+        "hpp"
+      ]
+    },
+    "css": {
+      "file": "css.wasm",
+      "abi": null,
+      "sha256": "f0fa4c3171f3322560e3a56445989f2da9d77c38bae61e9f07ae0b3e01d88b36",
+      "aliases": []
+    },
+    "dart": {
+      "file": "dart.wasm",
+      "abi": null,
+      "sha256": "7febba2da741ecf0a216fe0a96b4f580ad18be8fe3383c266e2b3fb330b4b900",
+      "aliases": []
+    },
+    "elisp": {
+      "file": "elisp.wasm",
+      "abi": null,
+      "sha256": "61fe68b20457c7c23f915301ec6cc2615516185c7683ca64f32b03be2128ee01",
+      "aliases": [
+        "emacs-lisp",
+        "el"
+      ]
+    },
+    "elixir": {
+      "file": "elixir.wasm",
+      "abi": null,
+      "sha256": "33f71c86131d02eab80841e4142005ccaa54bcc06bcc3a7e8dc6a9a8a0ca5e94",
+      "aliases": [
+        "ex",
+        "exs"
+      ]
+    },
+    "elm": {
+      "file": "elm.wasm",
+      "abi": null,
+      "sha256": "de4c3d805c2b3a33f19837de0426c8c5f6845957116f53334b0c277393c68fbb",
+      "aliases": []
+    },
+    "embedded-template": {
+      "file": "embedded-template.wasm",
+      "abi": null,
+      "sha256": "2d7dfbb768ed912bfdb6127797cbc6c39bb91be199bf0a169f91801b0eb9bcf8",
+      "aliases": [
+        "erb",
+        "ejs"
+      ]
+    },
+    "go": {
+      "file": "go.wasm",
+      "abi": null,
+      "sha256": "058a4f6c7cb7156c599c2ca07af9645f03b3f655b84bced9c72816e755c7030b",
+      "aliases": [
+        "golang"
+      ]
+    },
+    "html": {
+      "file": "html.wasm",
+      "abi": null,
+      "sha256": "11960fcc4fe3a01930de6bbae9b2c5c4d0a6c16012a5d20cc2069fa5b78d3bbd",
+      "aliases": [
+        "htm",
+        "xhtml"
+      ]
+    },
+    "java": {
+      "file": "java.wasm",
+      "abi": null,
+      "sha256": "6476728734128931bd50de2d1e5e9c75c506b51e278f54eaf709836a0de35759",
+      "aliases": []
+    },
+    "javascript": {
+      "file": "javascript.wasm",
+      "abi": null,
+      "sha256": "7ccbce5ba189363aee524c4be7f3a0bdb25b961d4c6d2472a8f3aeb526eecbfe",
+      "aliases": [
+        "js",
+        "node",
+        "jsx"
+      ]
+    },
+    "json": {
+      "file": "json.wasm",
+      "abi": null,
+      "sha256": "564e489724cbcf9b4563cd758a7fb7f355f896b11127819ae9e8ef71e7c15e60",
+      "aliases": [
+        "jsonc"
+      ]
+    },
+    "kotlin": {
+      "file": "kotlin.wasm",
+      "abi": null,
+      "sha256": "ecc177d59fe5421cff6df7058bcd2d79769e3875a378cc4adff4e15bb1755440",
+      "aliases": [
+        "kt",
+        "kts"
+      ]
+    },
+    "lua": {
+      "file": "lua.wasm",
+      "abi": null,
+      "sha256": "43db0f3e64ffd4ed1ada7a77e4489e54afa5afd7b5aa013679d8284d4ea0f074",
+      "aliases": []
+    },
+    "ocaml": {
+      "file": "ocaml.wasm",
+      "abi": null,
+      "sha256": "0d047c2f8972a0638d9060436f0d58894c0485a400dab6100b56d772861fc3db",
+      "aliases": [
+        "ml",
+        "mli"
+      ]
+    },
+    "php": {
+      "file": "php.wasm",
+      "abi": null,
+      "sha256": "c2399b082f2f791a847c0ebfc27f80f4c93937bb7bc06967e33d260f6b069488",
+      "aliases": [
+        "inc"
+      ]
+    },
+    "python": {
+      "file": "python.wasm",
+      "abi": null,
+      "sha256": "3523e4dc3d12894bbb2f7ea4b86b50eec69aed321c3d9b49271d82ed9f5f79b0",
+      "aliases": [
+        "py",
+        "python3"
+      ]
+    },
+    "ql": {
+      "file": "ql.wasm",
+      "abi": null,
+      "sha256": "4a5978dbdc64554d1894051a39fd2528824bb1007a306bbd99292ed14eba3ad4",
+      "aliases": [
+        "codeql"
+      ]
+    },
+    "rescript": {
+      "file": "rescript.wasm",
+      "abi": null,
+      "sha256": "12967d1fa93a332a474fb20638520c81eb649d0b4a7d148a1990bb0038ae3996",
+      "aliases": [
+        "res",
+        "resi"
+      ]
+    },
+    "ruby": {
+      "file": "ruby.wasm",
+      "abi": null,
+      "sha256": "e255f2dd39812e9730a824f85e4f5c8660426bd8e8d9a4790e8e7e6e41da3761",
+      "aliases": [
+        "rb"
+      ]
+    },
+    "rust": {
+      "file": "rust.wasm",
+      "abi": null,
+      "sha256": "158bd555055271ba754f52574fc12c8d5c6aa7316fefeddd3fa563297f50d5c8",
+      "aliases": [
+        "rs"
+      ]
+    },
+    "scala": {
+      "file": "scala.wasm",
+      "abi": null,
+      "sha256": "5a822524018de31f8a9fe2c7ed66fb857493bfb788c524be73f412165141bb05",
+      "aliases": [
+        "sc"
+      ]
+    },
+    "solidity": {
+      "file": "solidity.wasm",
+      "abi": null,
+      "sha256": "7ae2d8aff2ec119ff8706667f45f5ff0d4edea901acef86e227664de83c6df51",
+      "aliases": [
+        "sol"
+      ]
+    },
+    "swift": {
+      "file": "swift.wasm",
+      "abi": null,
+      "sha256": "9d3980fb1b5ae434c43ec7f7d8c47ba1a7001204bde4cb5d9187a018cc9204b5",
+      "aliases": []
+    },
+    "tlaplus": {
+      "file": "tlaplus.wasm",
+      "abi": null,
+      "sha256": "924effbfa0017710d099e3c6227e581f7c616e8cf5aafb85f18282f2a1342c1f",
+      "aliases": [
+        "tla",
+        "pluscal"
+      ]
+    },
+    "toml": {
+      "file": "toml.wasm",
+      "abi": null,
+      "sha256": "057f48e81072cb0eb5969632a7cf032fc6d33cd4ba3198c3f58227346c012d97",
+      "aliases": []
+    },
+    "tsx": {
+      "file": "tsx.wasm",
+      "abi": null,
+      "sha256": "3c6cb1c86cecc6d8c99b3a7dfc0aba8b838e2adf036bb23f384d6d8be395ae30",
+      "aliases": []
+    },
+    "typescript": {
+      "file": "typescript.wasm",
+      "abi": null,
+      "sha256": "d24392183c75c103feafb827c9c086de00c30198e27f362cc971fbca6e91a87f",
+      "aliases": [
+        "ts"
+      ]
+    },
+    "vue": {
+      "file": "vue.wasm",
+      "abi": null,
+      "sha256": "6244521bb3fb60f34ce5f677f2af81facb2c38691193985ca5fa85e1b6f29250",
+      "aliases": [],
+      "source": "vendored"
+    },
+    "yaml": {
+      "file": "yaml.wasm",
+      "abi": null,
+      "sha256": "f89cf2a8ccd4f29292e502f1c37efb4f1dead281246605e0a890c697d4db88c7",
+      "aliases": [
+        "yml"
+      ]
+    },
+    "zig": {
+      "file": "zig.wasm",
+      "abi": null,
+      "sha256": "f53118252d053dca6a65ab116a76176bf87cb728fece995e6e833f5f6504a440",
+      "aliases": []
+    }
+  }
+}
