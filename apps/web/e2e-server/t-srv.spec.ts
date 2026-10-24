@@ -10,7 +10,7 @@ import { applySettings, closeSettings, gotoGroup, openSettings } from '../e2e/se
 /**
  * server-file-service 域缺口补齐（t- 前缀标记本轮新增；编号对照
  * docs/e2e/server-file-service.md 第 2/3 节）：
- * - SRV-01：release 二进制冒烟补全——首页 200 + capabilities=[file-server] +
+ * - SRV-01：release 二进制冒烟补全——首页 200 + capabilities=[file-server, kroki-proxy] +
  *   目录树懒加载展开（smoke.spec.ts 只断言壳渲染，无树展开半）；
  * - SRV-03：无 token / token 两形态连接 + 树懒加载 + 凭据存 sessionStorage
  *   （偏差 #2；行为原散落 m5.spec.ts / b-markdown-html-docs-server.spec.ts
@@ -152,7 +152,7 @@ async function expandRow(page: Page, name: string, parent?: string): Promise<voi
   await row.click({ timeout: 10_000 });
 }
 
-test('SRV-01: release 二进制冒烟——首页 200、capabilities=[file-server]、目录树懒加载展开', async ({
+test('SRV-01: release 二进制冒烟——首页 200、capabilities=[file-server, kroki-proxy]、目录树懒加载展开', async ({
   page
 }) => {
   // ① health（主实例即 release 二进制，无 --compute 形态）
@@ -160,7 +160,7 @@ test('SRV-01: release 二进制冒烟——首页 200、capabilities=[file-serve
   expect(health.status()).toBe(200);
   const body = (await health.json()) as { name: string; capabilities: string[] };
   expect(body.name).toBe('vviewer');
-  expect(body.capabilities).toEqual(['file-server']);
+  expect(body.capabilities).toEqual(['file-server', 'kroki-proxy']); // kroki-proxy 恒宣告（spec 2026-10-23 §8.2，Task 9 承接同步锚）
 
   // ② 首页 200 + 应用壳
   const home = await page.goto('/');

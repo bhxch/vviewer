@@ -140,7 +140,7 @@ test('CMP-01/2: --compute 实例 health computeLanguages 宣告 301 条（排序
     capabilities: string[];
     computeLanguages?: string[];
   };
-  expect(withCompute.capabilities).toEqual(['file-server', 'compute']);
+  expect(withCompute.capabilities).toEqual(['file-server', 'kroki-proxy', 'compute']);
   const langs = withCompute.computeLanguages;
   expect(Array.isArray(langs)).toBe(true);
   expect(langs).toHaveLength(301); // 与 server/src/compute/queries.rs:288 单测同源锚定（设计文档 L125）
@@ -149,9 +149,9 @@ test('CMP-01/2: --compute 实例 health computeLanguages 宣告 301 条（排序
     expect(langs).toContain(name);
   }
 
-  // ② 对照（:4174 主实例，无 --compute）：仅 file-server，computeLanguages 字段整体省略
+  // ② 对照（:4174 主实例，无 --compute）：kroki-proxy 恒宣告、无 compute，computeLanguages 字段整体省略
   const bare = (await (await fetch(`${BASE}/api/health`)).json()) as Record<string, unknown>;
-  expect(bare['capabilities']).toEqual(['file-server']);
+  expect(bare['capabilities']).toEqual(['file-server', 'kroki-proxy']);
   expect('computeLanguages' in bare).toBe(false);
 });
 

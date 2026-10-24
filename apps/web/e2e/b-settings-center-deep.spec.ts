@@ -109,10 +109,12 @@ test.describe('b-settings-center-deep 设置中心补强', () => {
     await openSettings(page);
     await gotoGroup(page, '图表');
 
-    // 18 语言模式网格（DIAGRAM_TYPES 注册表全量），行=注册表 id、select 恒三档；
-    // plantuml 默认 kroki（defaultMode），graphviz/mermaid/math 默认 local
+    // 30 类型模式网格（DIAGRAM_TYPES 注册表全量，spec §10 扩容 18→30），行=注册表
+    // id；graphviz 行带渲染器 select（spec §9.1）且含「服务端」档（server 旗标），
+    // 其余恒 本地/Kroki/源码 三档；plantuml/d2 默认 kroki（defaultMode），mermaid/
+    // math/wavedrom 默认 local（Task 9 承接：扩容后网格行数锚同步 18→30）
     const grid = page.locator('.vv-diagram-mode-grid');
-    await expect(grid.locator('.vv-diagram-mode-item')).toHaveCount(18);
+    await expect(grid.locator('.vv-diagram-mode-item')).toHaveCount(30);
     for (const id of ['mermaid', 'graphviz', 'plantuml', 'math']) {
       // 锚定整词：hasText 子串匹配会把 c4plantuml 误收进 'plantuml'（strict violation）
       await expect(
@@ -122,14 +124,28 @@ test.describe('b-settings-center-deep 设置中心补强', () => {
     await expect(page.locator('select[aria-label="plantuml 渲染模式"]')).toHaveValue('kroki');
     await expect(page.locator('select[aria-label="graphviz 渲染模式"]')).toHaveValue('local');
 
-    // UI 改 host+plantuml→source：应用后按注册表 id 键落盘（白名单合法形态）
+    // UI 改 host+plantuml→source：应用后按注册表 id 键落盘（白名单合法形态）。
+    // spec §8.3/§9.2 起 diagrams 节落盘含全形五键（krokiVia/mermaidTheme 恒默认
+    // 归一值、renderers 空 = 注册表默认）——toEqual 全形断言（Task 9 承接补全）
     await page.getByLabel('Kroki 服务地址').fill('http://kroki.mock');
     await page.locator('select[aria-label="plantuml 渲染模式"]').selectOption('source');
     await applySettings(page);
     const saved = (await savedSettings(page)) as {
-      diagrams?: { krokiHost?: string; modes?: Record<string, string> };
+      diagrams?: {
+        krokiHost?: string;
+        krokiVia?: string;
+        mermaidTheme?: string;
+        modes?: Record<string, string>;
+        renderers?: Record<string, string>;
+      };
     };
-    expect(saved.diagrams).toEqual({ krokiHost: 'http://kroki.mock', modes: { plantuml: 'source' } });
+    expect(saved.diagrams).toEqual({
+      krokiHost: 'http://kroki.mock',
+      krokiVia: 'client',
+      mermaidTheme: 'auto',
+      modes: { plantuml: 'source' },
+      renderers: {}
+    });
     await closeSettings(page);
 
     // 文档级生效（重开文档管线）：source 模式=无切换钮+源码面板展开+视图隐藏无 img

@@ -133,14 +133,16 @@ async function expandRow(page: Page, name: string): Promise<void> {
 }
 
 test.describe('SRV-02/04/08/09 接口契约', () => {
-  test('SRV-02：capabilities 随 --compute 变化（无 compute 仅 file-server，有 compute 尾部追加）', async () => {
+  test('SRV-02：capabilities 随 --compute 变化（kroki-proxy 恒宣告，compute 尾部追加）', async () => {
+    // spec 2026-10-23 §8.2 起 kroki-proxy 恒宣告（core/health.rs capabilities 双
+    // 形态 [file-server, kroki-proxy] / 尾部追加 compute）——Task 9 承接同步锚
     const bare = (await (await fetch(`${BASE}/api/health`)).json()) as { capabilities: string[] };
-    expect(bare.capabilities).toEqual(['file-server']);
+    expect(bare.capabilities).toEqual(['file-server', 'kroki-proxy']);
 
     const withCompute = (await (await fetch(`http://127.0.0.1:${PORT_COMPUTE}/api/health`)).json()) as {
       capabilities: string[];
     };
-    expect(withCompute.capabilities).toEqual(['file-server', 'compute']); // compute 追加于尾部
+    expect(withCompute.capabilities).toEqual(['file-server', 'kroki-proxy', 'compute']); // compute 追加于尾部
   });
 
   test('SRV-04（接口半）：错误 token → 401 + www-authenticate + unauthorized（前端表单半见 m5.spec）', async () => {
@@ -162,11 +164,16 @@ test.describe('SRV-02/04/08/09 接口契约', () => {
     expect(ok.headers.get('content-range')).toBe(`bytes 0-5/${size}`);
     expect((await ok.arrayBuffer()).byteLength).toBe(6);
 
-    // 非法 Range（起点越界 / 非数字）：严格 416 + bytes */size
-    for (const bad of [`bytes=${size}-1000`, 'bytes=abc']) {
+    // 非法 Range 双形态（8c5fe16 台账 1-2 起双重故障分诊，Task 9 承接同步锚）：
+    // 语法非法（非数字）在 stat 前即 416，size 未知 → bytes */*（RFC 9110 §14.4
+    // incomplete-length）；起点越界语法合法但不可满足 → bytes */size
+    for (const [bad, cr] of [
+      [`bytes=${size}-1000`, `bytes */${size}`],
+      ['bytes=abc', 'bytes */*']
+    ] as const) {
       const res = await fetch(file, { headers: { range: bad } });
       expect(res.status).toBe(416);
-      expect(res.headers.get('content-range')).toBe(`bytes */${size}`);
+      expect(res.headers.get('content-range')).toBe(cr);
     }
 
     const suffix = await fetch(file, { headers: { range: 'bytes=-2' } });

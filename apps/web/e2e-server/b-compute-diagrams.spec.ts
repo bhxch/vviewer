@@ -22,7 +22,9 @@ import { stopServer, waitHealthy } from '../e2e/serverHarness';
  *   DOM 解析反解码服务端 escape_attr 实体）、视图隐藏、钮变「图」；
  * ③ 解析失败围栏客户端接手——非法 dot 服务端保留 fence（diagrams.rs 失败保留语义，
  *   parse_failure_leaves_fence_untouched 同源）→ 客户端管线 local 引擎（viz wasm）
- *   渲染失败 → .md-diagram-view.md-diagram-error + 原文（与 Plan 1 本地失败语义一致）；
+ *   渲染失败 → f807636 运行时回退链降 kroki img（abort kroki 定态化，Task 9 承接）
+ *   → .md-diagram-view.md-diagram-error「kroki 渲染失败（graphviz）」+ 源码面板同展
+ *   原文（DM-01/CDN-02 终点同构）；
  *   「渲染: 远程」仍在——证明文档确实走了远程、失败发生在客户端接手段。
  * ④ svgbob 真实引擎直出 style 端到端存活（终审 C1 钉子）——svgbob 0.7.6 恒在 style
  *   写 `marker-start: url(#arrow)` 等片段引用（修复前 sanitize「含 url( 即整节点丢弃」
@@ -212,10 +214,15 @@ test('服务端图表②: 服务端 svg + 图/源码切换——toggle 展示原
   await expect(toggle).toHaveText('源码');
 });
 
-test('服务端图表③: 非法 dot 解析失败服务端保留 fence→客户端 local 引擎接手失败→md-diagram-error + 原文', async ({
+test('服务端图表③: 非法 dot 解析失败服务端保留 fence→客户端 local 引擎接手失败降 kroki img→错误卡+源码同展', async ({
   page
 }) => {
   test.setTimeout(120_000);
+  // 回退链终点定态化（Task 9 承接，MD-04 同款注记）：viz 失败后有 krokiType 降级
+  // kroki img——本环境浏览器网络栈对 kroki.io 黑洞（连接挂起不回包不报错，实测
+  // img 3 分钟无 onload/onerror），真网往返时序不可依赖；abort kroki 确定性令
+  // img error 落错误卡，锚定「local 接手失败→错误卡+原文」的测试本意
+  await page.route('**/kroki.io/**', (route) => route.abort());
   await connectSameOriginCompute(page, 'auto');
   await openFile(page, 'bcd-invalid.md');
 
@@ -226,11 +233,17 @@ test('服务端图表③: 非法 dot 解析失败服务端保留 fence→客户�
 
   // 服务端失败保留 → 无契约 div/无 wrapped 标记；客户端 fence 路径构造 wrapper
   //（语言徽标为注册表 type.id=graphviz——别名 dot 已归一，与服务端路径的原文
-  // data-diagram-lang=dot 相区分）→ local 引擎 viz 渲染非法 dot 抛错 → 错误视图 + 原文
+  // data-diagram-lang=dot 相区分）→ local 引擎 viz 渲染非法 dot 抛错 → 降级 kroki
+  // img（abort 即 error）→ 错误卡；原文同展于源码面板（f807636 运行时回退链后
+  // 失败终点 = kroki 文案卡 + 源码同展，DM-01/CDN-02 终点同构——Task 9 承接同步锚）
   await expect(page.locator('[data-md-diagram-wrapped]')).toHaveCount(0);
   const errView = page.locator('.md-diagram-view.md-diagram-error');
   await expect(errView).toBeVisible({ timeout: 30_000 });
-  await expect(errView).toContainText('digraph { broken ->');
+  await expect(errView).toHaveText('kroki 渲染失败（graphviz）');
+  const wrap = page.locator('.vv-markdown .md-diagram').first();
+  await expect(wrap.locator('.md-diagram-source')).toBeVisible();
+  await expect(wrap.locator('.md-diagram-source')).toContainText('digraph { broken ->');
+  await expect(wrap.locator('.md-diagram-toggle')).toHaveText('图');
   await expect(page.locator('.md-diagram-lang', { hasText: 'graphviz' })).toBeVisible();
 });
 
