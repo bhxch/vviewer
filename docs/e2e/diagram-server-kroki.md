@@ -61,7 +61,7 @@ DSV-04/06 是本 spec 仅有的真网依赖用例（执行环境无外网时 ski
 
 | 锚 | 扩容/新增前 | 承接后 |
 | --- | --- | --- |
-| SC-10（b-settings-center-deep，默认通道） | 模式网格 `toHaveCount(18)`；落盘 `toEqual({ krokiHost, modes })` 两键 | spec §10 扩容后注册表 30 类——`toHaveCount(30)`；diagrams 节落盘含全形五键（§8.3/§9.2 起 krokiVia/mermaidTheme 恒默认归一值、renderers 空 = 注册表默认），toEqual 补全 `{ krokiHost, krokiVia: 'client', mermaidTheme: 'auto', modes, renderers: {} }`。全量门禁实跑暴露（实锤 30≠18 一处红），断言口径同步，产品代码零改动 |
+| SC-10（b-settings-center-deep，默认通道） | 模式网格 `toHaveCount(18)`；落盘 `toEqual({ krokiHost, modes })` 两键 | spec §10 扩容后注册表 30 类——`toHaveCount(30)`；diagrams 节落盘含全形五键（§8.3/§9.2 起 krokiVia/mermaidTheme 恒默认归一值、renderers 空 = 注册表默认），toEqual 补全 `{ krokiHost, krokiVia: 'client', mermaidTheme: 'auto', modes, renderers: {} }`。全量门禁实跑暴露（实锤 30≠18 一处红），断言口径同步，产品代码零改动。2026-10-24 CI 收口补笔：mobile project 下 graphviz 行 `vv-diagram-mode-lang` 被 0 宽折叠（双 select 行在 ≤600px 半宽列放不下，flex:1 min-width:0 标签挤没）——app.css 网格 ≤600px 降单列（产品响应式修复，本轮唯一产品代码变更） |
 | SRV-01（t-srv）/SRV-02（b-server-file-service）/CMP-01/2（t-cmp，server 通道） | health `capabilities` 断言 `['file-server']` / `['file-server', 'compute']` | §8.2 起 `kroki-proxy` 恒宣告（core/health.rs：`[file-server, kroki-proxy]`，compute 尾部追加为三元素）——五处 toEqual 同步。实跑暴露，断言口径同步，产品代码零改动 |
 | SRV-08（b-server-file-service，server 通道） | 非法 Range 两 case（越界/非数字）同断 `Content-Range: bytes */size` | 8c5fe16（台账 1-2）起双重故障分诊：语法非法在 stat 前即 416（size 未知 → RFC 9110 §14.4 `bytes */*`）、起点越界语法合法 → `bytes */size`——按形态分拆断言。实跑暴露，断言口径同步，产品代码零改动 |
 | 服务端图表③（b-compute-diagrams，server 通道） | viz 失败降级 kroki img 依赖真网 kroki.io 快速报错落错误卡 | 本环境浏览器网络栈对 kroki.io 黑洞（连接挂起，img 无 onload/onerror，实测 3 分钟无终态）——abort kroki（`**/kroki.io/**`）确定性令 img error 落错误卡（MD-04 同款注记），锚定「local 接手失败→错误卡+原文」本意。环境依赖定态化，产品代码零改动 |
