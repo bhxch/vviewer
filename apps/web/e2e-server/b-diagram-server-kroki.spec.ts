@@ -51,7 +51,6 @@ const krokiUpstreamHits: Array<{ path: string; body: string }> = [];
 
 let computeServer: ChildProcess | null = null;
 let mockUpstream: Server | null = null;
-let mockOwned = false;
 
 function spawnServe(port: number, extraArgs: string[]): ChildProcess {
   return spawn(
@@ -73,23 +72,15 @@ test.beforeAll(async () => {
     ['# kroki 代发', '', '```plantuml', 'Alice -> Bob: dsv', '```', ''].join('\n')
   );
 
-  // ---- mock kroki 上游 :4187（幂等复用：前轮残留 ping 通即不重复 listen） ----
-  try {
-    const res = await fetch(`http://127.0.0.1:${PORT_KROKI_MOCK}/dsv-mock-ping`);
-    if (res.ok) return;
-  } catch {
-    // 端口空闲：起 mock
-  }
+  // ---- mock kroki 上游 :4187（每轮必重建，不幂等复用——T9 评审收口：命中台账
+  // krokiUpstreamHits 是本进程内存态，异进程残留 mock 复用会让台账必空致 DSV-02
+  // 假红；playwright 全程单 worker 无并发抢口，close 后 listen 无残留风险） ----
   mockUpstream = createServer((req, res) => {
     let body = '';
     req.on('data', (c: Buffer) => {
       body += c.toString('utf-8');
     });
     req.on('end', () => {
-      if (req.method === 'GET' && req.url === '/dsv-mock-ping') {
-        res.writeHead(200).end('ok');
-        return;
-      }
       krokiUpstreamHits.push({ path: req.url ?? '', body });
       res.writeHead(200, { 'content-type': 'image/svg+xml' });
       res.end(MOCK_SVG);
@@ -98,7 +89,6 @@ test.beforeAll(async () => {
   await new Promise<void>((ok, err) =>
     mockUpstream!.once('error', err).listen(PORT_KROKI_MOCK, '127.0.0.1', () => ok())
   );
-  mockOwned = true;
 
   // ---- 同源 compute 实例 :4186（--compute + --kroki-host 指向 mock；重试安全复用） ----
   try {
@@ -116,7 +106,8 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await stopServer(computeServer, 'dsv-compute');
-  if (mockOwned && mockUpstream) await new Promise<void>((ok) => mockUpstream!.close(() => ok()));
+  const upstream = mockUpstream;
+  if (upstream) await new Promise<void>((ok) => upstream.close(() => ok()));
 });
 
 /**
@@ -222,7 +213,12 @@ test.describe('b-diagram-server-kroki 服务端图表与 kroki 代发（spec §8
     await page.locator('.vv-sc-navitem', { hasText: '图表' }).click();
     const via = page.locator('select[aria-label="Kroki 通道"]');
     await expect(via).toHaveValue('client');
-    await expect(via.locator('option[value="server"]')).toBeEnabled();
+    const serverOpt = via.locator('option[value="server"]');
+    // enabled 面双锚（T9 评审收口：toBeEnabled 在 option 上有失真前科——镜像
+    // DSV-03a 的 toHaveJSProperty + 属性锚）：已连接 krokiProxy=true，Svelte 应
+    // 摘除 disabled 属性
+    await expect(serverOpt).toHaveJSProperty('disabled', false);
+    await expect(serverOpt).toBeEnabled();
     // 注册表 server 旗标（graphviz/svgbob）的 UI 投影：模式行含「服务端」option；
     // 非旗标类型（plantuml）恒无该档
     await expect(page.locator('select[aria-label="graphviz 渲染模式"] option[value="server"]')).toHaveCount(1);
