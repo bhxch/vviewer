@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use vviewer_core::compute::highlight::{HighlightRequest, HIGHLIGHT_TIMEOUT};
 use vviewer_core::compute::markdown::MarkdownRequest;
+use vviewer_core::error::CoreError;
 
 use crate::adapt;
 use crate::error::AppError;
@@ -64,8 +65,8 @@ pub async fn diagram(
     Json(req): Json<DiagramRequest>,
 ) -> Result<Json<DiagramResponse>, AppError> {
     let canon = vviewer_core::compute::diagrams::canonical_of(&req.lang)
-        .ok_or_else(|| AppError::bad_request("非服务端原生图表语言"))?;
+        .ok_or_else(|| CoreError::bad_request("非服务端原生图表语言"))?;
     let svg = vviewer_core::compute::diagrams::render_diagram_svg(canon, &req.source)
-        .ok_or_else(|| AppError::bad_request("图表渲染失败"))?;
+        .ok_or_else(|| CoreError::bad_request("图表渲染失败"))?;
     Ok(Json(DiagramResponse { svg }))
 }

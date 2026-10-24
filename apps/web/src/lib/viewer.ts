@@ -25,7 +25,7 @@ import { routeLargeFileHighlight } from './highlightRouter';
 import { resolveImageBlobUrl } from './markdownImages';
 import { hasNonDiagramFence } from './markdownFence';
 import { loadSettings } from './stores/settings';
-import { loadCapabilities, loadDiagramCapabilities } from './openFlow.svelte';
+import { loadCapabilities, loadDiagramCapabilities } from './serverCapsCache';
 import { effectiveMode, resolveMermaidTheme } from './theme';
 
 // BUG-22 启发式的单测锚（实现抽在 markdownFence.ts——无 $app 依赖的纯模块，

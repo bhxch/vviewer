@@ -1,13 +1,14 @@
 // overrideLang.test.ts — renderer-lang-override Task 3：Tab.overrideLang 状态与持久化链
-// （spec §4.1）。openFlow.svelte.ts 为 runes 模块，根 vitest 无 svelte 插件不可编译
-// （watchHealth.test.ts 同因同形态）：setHighlightLang/snapshot/duplicate/restore 的
+// （spec §4.1）。Tab 模型域为 runes 模块（FE-1 起在 tabsModel.svelte.ts），根 vitest
+// 无 svelte 插件不可编译（watchHealth.test.ts 同因同形态）：setHighlightLang/snapshot/duplicate/restore 的
 // 行为直测不可达，按既有「源码契约断言」先例钉住触点与 setter 语义；运行期行为由
 // Task 6/8 的 UI 接线与 e2e 收口。持久层（stores/session.ts）为纯 TS 模块，快照回环
 // 以 fake-indexeddb 行为直测（session.test.ts 同款装置）。
 //
 // 契约面（与 overrideRenderer 持久化链完全同形态，触点经 rg 找齐防漏面）：
 // ① session.ts TabSnapshot.overrideLang 字段声明（overrideRenderer 旁）；
-// ② openFlow.svelte.ts Tab 声明 + snapshot 仅置位写入（条件 spread，缺省不产字段）；
+// ② Tab 声明 + snapshot 仅置位写入（条件 spread，缺省不产字段）——FE-1 拆分后
+//    随 Tab 模型域迁入 tabsModel.svelte.ts（锚随迁，断言原文不动）；
 // ③ duplicate 读回（复制继承）+ reopenClosed 读回（撤销重建）+ AppShell restore 读回
 //    （页面重载恢复链，AppShell 的 overrideRenderer C 项读回同位）；
 // ④ setHighlightLang：未变化早退 / null 清除（delete）/ rev 自增 / persist
@@ -55,8 +56,8 @@ describe('overrideLang 快照持久层（session.ts 行为直测）', () => {
   });
 });
 
-describe('openFlow.svelte.ts 触点契约（runes 模块源码锚）', () => {
-  const src = readSrc('src/lib/openFlow.svelte.ts');
+describe('tabsModel.svelte.ts 触点契约（runes 模块源码锚；FE-1 自 openFlow.svelte.ts 随迁）', () => {
+  const src = readSrc('src/lib/tabsModel.svelte.ts');
 
   it('Tab 声明含 overrideLang（overrideRenderer 同位）', () => {
     const tabDecl = fnWindow(src, /export interface Tab \{[\s\S]*?\n\}/);

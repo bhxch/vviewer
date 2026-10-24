@@ -41,7 +41,7 @@ pub async fn proxy(
     let bytes =
         vviewer_core::kroki::render(&state.kroki, &req.lang, req.source.as_bytes()).await?;
     let svg = String::from_utf8(bytes)
-        .map_err(|_| AppError::internal("kroki 响应非 UTF-8"))?;
+        .map_err(|_| CoreError::internal("kroki 响应非 UTF-8"))?;
     Ok(Json(KrokiResponse { svg }))
 }
 

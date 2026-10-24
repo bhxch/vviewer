@@ -51,3 +51,22 @@ impl From<vviewer_storage::StorageError> for CoreError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `From<StorageError>` 分类锁测（BE-1 补）：NotFound → 404 "not found"、
+    /// Other → 500 且消息原样透传——适配层错误壳（AppError）单源依赖此映射，
+    /// 对外 JSON `{"error": msg}` 形态与状态码的行为锚。
+    #[test]
+    fn from_storage_error_maps_not_found_and_passes_other_through() {
+        let e: CoreError = vviewer_storage::StorageError::not_found("missing dir").into();
+        assert_eq!(e.0, StatusCode::NOT_FOUND);
+        assert_eq!(e.1, "not found");
+
+        let e: CoreError = vviewer_storage::StorageError::other("boom: disk").into();
+        assert_eq!(e.0, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(e.1, "boom: disk");
+    }
+}
