@@ -35,8 +35,35 @@ interface DropPayload {
 
 /** 等应用挂载（svelte:window 的 drop 监听与 TopBar 就绪；t-shell waitAppMounted 同款） */
 async function waitAppMounted(page: Page): Promise<void> {
+  // window drop 监听就绪探针（EventTarget 包装置位，测试侧装置；先于一切页面脚本注册）：
+  // 应用的 svelte:window drop 监听挂载即置位——waitAppMounted 契约（首行注释）的实测锚。
+  await page.addInitScript(() => {
+    const w = window as unknown as Record<string, unknown>;
+    w.__vvDropListenerReady = false;
+    const orig = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function (type: string, ...rest: unknown[]) {
+      if (this === window && type === 'drop') w.__vvDropListenerReady = true;
+      return (orig as (...a: unknown[]) => void).apply(this, [type, ...rest]);
+    };
+  });
   await page.goto('/');
   await expect(page.locator('.vv-topbar')).toBeVisible();
+  // drop 监听就绪锚（OPEN-01/02/06 轮流 flaky 的根治点）：3 worker 负载下 topbar 入 DOM
+  // 可先于 svelte:window drop 监听挂载（2026-10-24 插桩实测：失败现场派发时
+  // pre={topbar:true, listeners:1, openDir:undefined, sw:null}——合成 drop 仅自设探针
+  // 收到、应用零感知，应用监听在 20s 断言窗口内才挂上、tab 恒 0——drop 落入空窗即永久
+  // 丢失，后续断言时限救不回）。以「window 上出现 drop 监听」为就绪锚再派发；20s 同
+  // 文件负载口径（:61-62 dropFile 批注先例）。expect.poll 口径（b-override-lang 先例：
+  // 单评估即放行的 waitForFunction 不用）。
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () => (window as unknown as Record<string, unknown>).__vvDropListenerReady === true
+        ),
+      { timeout: 20_000, message: 'svelte:window drop 监听未挂载（应用 boot 未完成）' }
+    )
+    .toBe(true);
 }
 
 /** 合成 drop 注入单文件并等 tab 激活（先例 t-shell.spec.ts L145-155） */
@@ -132,7 +159,7 @@ test('OPEN-01：未知扩展名 probe.foo + PNG 签名内容 → 签名改派 im
   await waitAppMounted(page);
   await dropFile(page, { name: 'probe.foo', type: 'application/octet-stream', b64: PNG_1PX_B64 });
   // .foo 不在任何扩展名清单：可渲染只能来自内容探测链 ① 签名改派（png → image）
-  await expect(page.locator('.vv-error-card')).toHaveCount(0);
+  await expect(page.locator('.vv-error-card')).toHaveCount(0, { timeout: 20_000 });
   await expect(page.locator('.vv-image img')).toBeVisible({ timeout: 20_000 });
 });
 
@@ -142,9 +169,11 @@ test('OPEN-02：未知扩展名 bin.foo（NUL 二进制）→ 探测链 hex 兜�
   // 00 01 ff fe 7f 00 09：NUL 即二进制（looksTextual 与 git 同口径），且无已知签名
   // → 探测链 ③ hex 兜底（旧行为是「不支持的扩展名 ".foo"」错误卡片）
   await dropFile(page, { name: 'bin.foo', type: 'application/octet-stream', b64: 'AAH//n8ACQ==' });
-  await expect(page.locator('.vv-error-card')).toHaveCount(0);
-  await expect(page.locator('.vv-hex')).toBeVisible();
-  await expect(page.locator('.vv-hex-row').first()).toBeVisible();
+  await expect(page.locator('.vv-error-card')).toHaveCount(0, { timeout: 20_000 });
+  // hex 视图挂载与行渲染放宽 20s（同 dropFile 负载口径）：hex worker spawn + wasm init
+  // 在 3 worker 并发下可超默认 5s（OPEN-02 实测瞬态；下行 .vv-hex-status 的 20s 同款先例）
+  await expect(page.locator('.vv-hex')).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('.vv-hex-row').first()).toBeVisible({ timeout: 20_000 });
   // 无已知签名 → 结构树不出现，状态行落「未知二进制」（struct 解析完成后改写）
   await expect(page.locator('.vv-hex-status')).toContainText('未知二进制', { timeout: 20_000 });
 });
@@ -162,8 +191,9 @@ test('OPEN-03：MetaPanel 手选二进制 → override 即时重渲染 + 快照�
   const openWith = page.locator('.meta-openwith');
   await expect(openWith).toBeVisible();
   await openWith.selectOption('hex');
-  // rev++ 复用渲染 effect 重跑通道：code 退场、hex 上位（override 路径跳过探测链）
-  await expect(page.locator('.vv-hex')).toBeVisible();
+  // rev++ 复用渲染 effect 重跑通道：code 退场、hex 上位（override 路径跳过探测链）。
+  // hex 挂载放宽 20s（OPEN-02 同款负载口径，OPEN-08 先例）
+  await expect(page.locator('.vv-hex')).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.vv-code-pre')).toHaveCount(0);
   await expect(openWith).toHaveValue('hex');
   await expect(page.locator('.meta-openwith-manual')).toBeVisible(); // （手动）标记
@@ -172,40 +202,49 @@ test('OPEN-03：MetaPanel 手选二进制 → override 即时重渲染 + 快照�
   // overrideRenderer:'hex'（确定性等待异步写，m1.spec.ts 轮询先例）。
   // 旧语义→新语义（workspace T3）：快照键 'tabs'（扁平数组）→ 'workspaces'
   // （{activeId, workspaces:[{tabs:[…]}]} 按组分桶；旧键双写已移除），DB 版本 2。
-  await page.waitForFunction(
-    () =>
-      new Promise<boolean>((resolve) => {
-        const open = indexedDB.open('vviewer');
-        open.onsuccess = () => {
-          const db = open.result;
-          try {
-            const get = db.transaction('kv', 'readonly').objectStore('kv').get('workspaces');
-            get.onsuccess = () => {
-              const snap = get.result as
-                | { workspaces?: { tabs?: { name?: string; overrideRenderer?: string }[] }[] }
-                | undefined;
-              const tabs = Array.isArray(snap?.workspaces)
-                ? snap.workspaces.flatMap((w) => w.tabs ?? [])
-                : [];
-              resolve(
-                tabs.some((t) => t.name === 'manual.txt' && t.overrideRenderer === 'hex')
-              );
-              db.close();
-            };
-            get.onerror = () => {
-              resolve(false);
-              db.close();
-            };
-          } catch {
-            resolve(false);
-            db.close();
-          }
-        };
-        open.onerror = () => resolve(false);
-      }),
-    undefined,
-    { polling: 50 }
-  );
+  // expect.poll 口径（b-override-lang 先例：单评估即放行的 waitForFunction 不用）；
+  // 20s 负载口径——IDB 写入排队在渲染链后，默认 5s 在 3 worker 并发下可瞬态不足。
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () =>
+            new Promise<boolean>((resolve) => {
+              const open = indexedDB.open('vviewer');
+              open.onsuccess = () => {
+                const db = open.result;
+                try {
+                  const get = db.transaction('kv', 'readonly').objectStore('kv').get('workspaces');
+                  get.onsuccess = () => {
+                    const snap = get.result as
+                      | { workspaces?: { tabs?: { name?: string; overrideRenderer?: string }[] }[] }
+                      | undefined;
+                    const tabs = Array.isArray(snap?.workspaces)
+                      ? snap.workspaces.flatMap((w) => w.tabs ?? [])
+                      : [];
+                    resolve(
+                      tabs.some((t) => t.name === 'manual.txt' && t.overrideRenderer === 'hex')
+                    );
+                    db.close();
+                  };
+                  get.onerror = () => {
+                    resolve(false);
+                    db.close();
+                  };
+                } catch {
+                  resolve(false);
+                  db.close();
+                }
+              };
+              open.onerror = () => resolve(false);
+            })
+        ),
+      {
+        timeout: 20_000,
+        message: 'override 落盘：workspaces 快照应含 manual.txt overrideRenderer=hex'
+      }
+    )
+    .toBe(true);
 
   // 刷新：本地注入 File 内容不跨刷新（m1.spec.ts:102 先例）——tab 以占位恢复（名称保留），
   // 内容侧错误卡片。override 的 UI 级刷新恢复走 BUG-69 用例（需 remote 快照通道）。
@@ -338,10 +377,15 @@ test('OPEN-04：jsonl → 专有 JSON Lines 卡片视图（jsonlRenderer 装配�
   await waitAppMounted(page);
   const jsonl = '{"id":1,"label":"first"}\n{"id":2,"label":"second"}\n';
   await dropFile(page, { name: 'notes.jsonl', type: 'application/jsonl', content: jsonl });
-  await expect(page.locator('.vv-error-card')).toHaveCount(0);
+  await expect(page.locator('.vv-error-card')).toHaveCount(0, { timeout: 20_000 });
   await expect(page.locator('.vv-jsonl')).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator('.vv-jsonl-card', { hasText: 'first' })).toBeVisible();
-  await expect(page.locator('.vv-jsonl-card', { hasText: 'second' })).toBeVisible();
+  // 卡片随首窗渲染放宽 20s（jsonl 首卡在 3 worker 负载下可超默认 5s，OPEN-06 同款口径）
+  await expect(page.locator('.vv-jsonl-card', { hasText: 'first' })).toBeVisible({
+    timeout: 20_000
+  });
+  await expect(page.locator('.vv-jsonl-card', { hasText: 'second' })).toBeVisible({
+    timeout: 20_000
+  });
 });
 
 test('OPEN-05：解析失败行徽标与折叠（混合合法/非法行）', async ({ page }) => {
@@ -353,15 +397,20 @@ test('OPEN-05：解析失败行徽标与折叠（混合合法/非法行）', asy
     JSON.stringify({ id: 3 })
   ].join('\n');
   await dropFile(page, { name: 'mixed.jsonl', type: 'application/jsonl', content: lines });
-  await expect(page.locator('.vv-jsonl-card-failed')).toHaveCount(1);
-  await expect(page.locator('.vv-jsonl-status')).toContainText('1 行解析失败');
+  // 首卡/状态条放宽 20s（jsonl 首窗渲染在 3 worker 负载下可超默认 5s，OPEN-06 同款口径）
+  await expect(page.locator('.vv-jsonl-card-failed')).toHaveCount(1, { timeout: 20_000 });
+  await expect(page.locator('.vv-jsonl-status')).toContainText('1 行解析失败', {
+    timeout: 20_000
+  });
 });
 
 test('OPEN-06：打开方式往返 jsonl↔code（override）', async ({ page }) => {
   test.setTimeout(60_000);
   await waitAppMounted(page);
   await dropFile(page, { name: 'r.jsonl', type: 'application/jsonl', content: '{"a":1}\n' });
-  await expect(page.locator('.vv-jsonl-card')).toHaveCount(1);
+  // jsonl 首卡挂载放宽 20s（同 dropFile 负载口径）：drop → tab 激活占用预算大头后，
+  // 首窗渲染仍可能超默认 5s（OPEN-06 实测瞬态；OPEN-04 卡片断言同款）
+  await expect(page.locator('.vv-jsonl-card')).toHaveCount(1, { timeout: 20_000 });
   await openRightIfNarrow(page); // 移动断点右栏在抽屉里（OPEN-03 同款）
   // 切 code（候选含 code，经 C 项 openWithOf 自动出现）
   await page.locator('.meta-openwith').selectOption('code');
