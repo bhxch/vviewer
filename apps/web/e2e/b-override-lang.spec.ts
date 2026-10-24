@@ -116,6 +116,21 @@ async function openRightIfNarrow(page: Page): Promise<boolean> {
   return true;
 }
 
+/** ≤600px 断点右抽屉关闭（openRightIfNarrow 配对）：右抽屉 fixed 全高（inset: 0 0 0 auto）
+ * 与左抽屉同 z-index，开态压住 tab 条与树行中心命中点（2026-10-24 elementFromPoint
+ * 实证命中 MetaPanel dd），后继 tab/树交互前必须先关——双抽屉独立开合是 SHELL-10/2
+ * 钉死的产品语义，开合时序由用例自行编排。判态读 .vv-shell 的 rightopen 类（按钮点击
+ * 即时翻转）而非 computed transform：0.2s 开抽屉过渡在途时 matrix ≠ none 会被误读为
+ * 「未开」而漏关（openRightIfNarrow 点击后紧接 fill+blur 的窄窗口实证） */
+async function closeRightIfOpened(page: Page): Promise<void> {
+  const narrow = await page.evaluate(() => window.innerWidth <= 600);
+  if (!narrow) return;
+  const open = await page.evaluate(
+    () => document.querySelector('.vv-shell')?.classList.contains('rightopen') ?? false
+  );
+  if (open) await page.locator('.vv-right-toggle').click();
+}
+
 /** MetaPanel「语言」行（.meta-lang-input 所在 meta-row）：手动徽标按行圈定——
  * 「打开方式」手选后的（手动）徽标同类名，根级定位会双计 */
 function langRow(page: Page): Locator {
@@ -326,6 +341,9 @@ test('LANG-04 duplicate 继承 overrideLang：新 tab 语言行 rust 且渲染�
   await expect
     .poll(() => page.locator('.vv-code-pre span[class^="ts-"]').count(), { timeout: 30_000 })
     .toBeGreaterThan(0);
+  // 右抽屉关闭后再碰 tab：mobile 断点右抽屉全高压住 tab 条命中点（closeRightIfOpened
+  // 批注），后继 duplicate 菜单链路在抽屉关态进行；语言行回显断言读 DOM 值，不需面板可见
+  await closeRightIfOpened(page);
 
   // TA-04 装置：右键「复制标签页」→ 新 tab 激活于原 tab 右侧
   await openTabMenu(page, 'dup-lang.txt');
@@ -380,6 +398,10 @@ test('LANG-06 Tab 右键「语言」项作用于被右键 tab：点击后该 tab
   await expect(page.locator('.vv-code-pre')).toContainText('fn main()', { timeout: 20_000 });
   await openRightIfNarrow(page);
   await setLang(page, 'rust');
+  // 右抽屉关闭后再碰树/tab：mobile 断点右抽屉全高压住树行与 tab 条中心命中点
+  //（closeRightIfOpened 批注），后继 openFile/openTabMenu 在抽屉关态进行；末位
+  // 语言行回显断言读 DOM 值，不需面板可见
+  await closeRightIfOpened(page);
   await openFile(page, 'plain-right.txt');
   await expect(page.locator('.vv-tab.active', { hasText: 'plain-right.txt' })).toBeVisible();
 
