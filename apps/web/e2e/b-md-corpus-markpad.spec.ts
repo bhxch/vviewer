@@ -40,6 +40,14 @@ import { injectDir, openTreeFile, type TextFileSpec } from './b-markdown-html-do
 
 /** 语料目录与 27 文件清单（顺序即汇总锚分批顺序，manifest.json 为 sha 权威） */
 const CORPUS_DIR = fileURLToPath(new URL('./fixtures/corpus/markpad-md', import.meta.url));
+
+// SW 阻断（CDN-02/03/04 + DM-03 备案同源）：SW 接管后经 SW fetch 的请求不走页面
+// 网络栈，page.route 拦不到——SW runtimeCaching 的 jsdelivr CacheFirst（vite.config.ts
+// vv-cdn-engines 规则）会吞掉下方 mockExternalNoise 的 abort 拦截面，且 SW 是否在
+// 图表渲染前完成接管存在固有时序差（同套件 chromium 过 / mobile 挂的实测分叉根因）。
+// 阻断后全部请求必经页面栈，mock 拦截确定性成立；本组无 SW 依赖面（纯本地管线）。
+test.use({ serviceWorkers: 'block' });
+
 const CORPUS: readonly string[] = [
   // 批 1（根 5 + docs/plans 2 + docs/demo 2）
   'AGENTS.md',
@@ -100,11 +108,20 @@ async function openCorpus(page: Page, rel: string, visibleTimeout = 30_000): Pro
   await expect(page.locator('.vv-markdown')).toBeVisible({ timeout: visibleTimeout });
 }
 
-/** kroki/favicon/grammar-CDN 去噪 route：须在 goto 前注册（demo_features kroki 围栏随渲染即发起）
+/** kroki/jsdelivr/favicon/grammar-CDN 去噪 route：须在 goto 前注册（demo_features
+ *  kroki 围栏随渲染即发起；CDN 直链引擎的 jsdelivr +esm 模块图动辄百级请求，
+ *  vega-embed 实测 27s+，语料锚不做真网测速——真网语义由 b-cdn-diagram-engines
+ *  CDN-01 专锚承接）。
  *  CDN 层：门禁构建注入 VV_GRAMMAR_CDN=https://cdn.grammars.test/grammars/（ci.yml:99），三层链
  *  每次页面加载都会发 CDN manifest 请求——不 mock 会打真实 socket，资源级 console error
  *  （net::ERR_CONNECTION_CLOSED）污染 MC-34~36 汇总锚。fulfill 合法空清单（b-grammar-spa-fallback
- *  GRF-05 同惯例）：CDN 层成功返回空表，语言跳层 hljs 兜底，无 warn 无资源错误。 */
+ *  GRF-05 同惯例）：CDN 层成功返回空表，语言跳层 hljs 兜底，无 warn 无资源错误。
+ *  jsdelivr 层：abort 使 CDN 直链引擎（excalidraw/bpmn/vega/vegalite/wavedrom/
+ *  bytefield/dbml/d2）动态 import 确定性即时失败——管线按 f807636 回退链降级 kroki
+ *  img（同被 fulfill，环境无关），「离线降级 kroki img」由可能慢网变确定性离线，
+ *  .vv-markdown 时限不再为真网模块图埋单（2026-10-24 CI 实证：真网 27-30s 级导入
+ *  顶穿 30s 渲染时限，MC-15/29/35 稳定挂）。aborted fetch 的资源级 console error
+ *  URL 含 cdn.jsdelivr.net，仍走 MC-35 白名单 jsdelivr 条目，汇总锚零污染。 */
 async function mockExternalNoise(page: Page): Promise<void> {
   await page.route('**kroki.io/**', (route) =>
     route.fulfill({
@@ -112,6 +129,7 @@ async function mockExternalNoise(page: Page): Promise<void> {
       body: '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>'
     })
   );
+  await page.route('**/cdn.jsdelivr.net/**', (route) => route.abort());
   await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204 }));
   await page.route('**/cdn.grammars.test/**', (route) =>
     route.fulfill({
@@ -133,6 +151,7 @@ for (const [i, rel] of CORPUS.entries()) {
     test.setTimeout(120_000);
     const abs = join(CORPUS_DIR, rel);
     test.skip(!existsSync(abs), '语料文件缺失（fetch 轮未落地），对 manifest 清单容错');
+    await mockExternalNoise(page);
     const pageErrors = collectPageErrors(page);
     await openCorpus(page, rel);
     expect(pageErrors).toEqual([]);
@@ -142,23 +161,26 @@ for (const [i, rel] of CORPUS.entries()) {
 
 // ─────────────────────────── 深断言组 MC-28~MC-33 ───────────────────────────
 
-test('MC-28 · all_languages_test.md 多语言围栏全部进入高亮管线（279 代码块计数 + bash 徽标着色）', async ({
+test('MC-28 · all_languages_test.md 多语言围栏全部进入高亮管线（278 代码块计数 + bash 徽标着色）', async ({
   page
 }) => {
   // 语料实有：282 个带语言围栏（ada→zig，564 行 ``` 标记 / 2），其中 dot/latex/mermaid
-  // 各 1 走图表通道（resolveDiagramType 注册表接管，不产普通 pre code）——普通代码围栏
-  // 279 全量进入高亮管线。锚：pre code 全量计数（语料结构，sha 锚定于 manifest）+ 图表
-  // 容器恰 3；bash 徽标文本与着色 span（tree-sitter 命中或 hljs 兜底均产出 span，
-  // MD-05 判据「获得语法着色」不锚引擎）。
+  // 各 1 + dbml 1（2026-10-23 spec §10 扩容入册）走图表通道（resolveDiagramType 注册表
+  // 接管，不产普通 pre code）——普通代码围栏 278 全量进入高亮管线。锚：pre code 全量
+  // 计数（语料结构，sha 锚定于 manifest）+ 图表容器恰 4；bash 徽标文本与着色 span
+  //（tree-sitter 命中或 hljs 兜底均产出 span，MD-05 判据「获得语法着色」不锚引擎）。
+  // dbml 围栏经 mockExternalNoise 的 jsdelivr abort 走 kroki img 终态（环境无关，
+  // 与「CDN 引擎成功出 svg」口径同等合法——终态不得停在空视图或错误卡由 MC-35 汇总锚）。
   test.setTimeout(150_000);
   const rel = 'docs/demo/all_languages_test.md';
   test.skip(!existsSync(join(CORPUS_DIR, rel)), '语料文件缺失，对 manifest 清单容错');
+  await mockExternalNoise(page);
   const pageErrors = collectPageErrors(page);
   await openCorpus(page, rel, 30_000);
   const md = page.locator('.vv-markdown');
 
-  await expect(md.locator('pre code')).toHaveCount(279);
-  await expect(md.locator('.md-diagram')).toHaveCount(3);
+  await expect(md.locator('pre code')).toHaveCount(278);
+  await expect(md.locator('.md-diagram')).toHaveCount(4);
   const bash = md.locator('pre code.language-bash').first();
   await expect(bash).toBeVisible();
   await expect(md.locator('.md-code-lang', { hasText: 'bash' }).first()).toHaveText('bash');

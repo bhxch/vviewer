@@ -2,7 +2,7 @@
 
 > 来源：plan `docs/superpowers/plans/2026-10-23-renderer-lang-override-p2-diagram-engines.md` Task 5。spec 依据：`docs/superpowers/specs/2026-10-23-renderer-lang-override-markpad-alignment-design.md` §6（四类图表 CDN 直链本地引擎 + 回退链 CDN→kroki→source）与 §7（svgbob 前端 wasm 引擎，唯一本地打包例外）。运行时回退链由 f807636 落地（local 引擎失败且有 krokiType 先降 kroki img，kroki img error 再落错误卡+源码）。CDN-04（graphviz hpcc 渲染器真渲染，spec §9.1 双渲染器）为 P3 后续批次承接 `docs/e2e/diagram-server-kroki.md` §6 留档候选落地。
 >
-> 脚本：`apps/web/e2e/b-cdn-diagram-engines.spec.ts`（CDN-01~04，chromium project）。旧锚承接（同 Task 5 收口，spec §6 翻转注记）：`b-md-diagrams-deep.spec.ts` DM-04/DM-06（vegalite kroki 断言面改经 settings 强制 kroki 保留）、`b-md-corpus-markpad.spec.ts` MC-29（demo_features 口径改「仍 kroki 型出 img + local 型出引擎产物」）/MC-35（console error 白名单补 cdn.jsdelivr.net 条目）。
+> 脚本：`apps/web/e2e/b-cdn-diagram-engines.spec.ts`（CDN-01~04，chromium project）。旧锚承接（同 Task 5 收口，spec §6 翻转注记）：`b-md-diagrams-deep.spec.ts` DM-04/DM-06（vegalite kroki 断言面改经 settings 强制 kroki 保留）、`b-md-corpus-markpad.spec.ts` MC-29（demo_features 口径改「仍 kroki 型出 img + local 型出引擎产物」）/MC-35（console error 白名单补 cdn.jsdelivr.net 条目）。2026-10-24 CI 收口补注：语料组 mockExternalNoise 追加 jsdelivr abort（含 MC 循环全组接入）——CDN 直链引擎 +esm 模块图真网加载 27-30s 级顶穿 `.vv-markdown` 30s 时限（MC-15/29/35 CI 稳定挂），语料锚确定性走降级链，真网成功语义仍由 CDN-01 专锚；dbml 入册（P3）后 MC-28 计数 279→278、`.md-diagram` 3→4。
 
 ## 1. 目的与来源
 
