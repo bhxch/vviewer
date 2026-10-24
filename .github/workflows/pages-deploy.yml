@@ -22,6 +22,7 @@ on:
       - 'apps/web/**'
       - 'packages/**'
       - 'tools/grammar-builder/**'
+      - 'tools/svgbob-wasm/**'
       - 'pnpm-lock.yaml'
       - '.github/actions/setup-grammars/**'
       - '.github/workflows/pages-deploy.yml'
