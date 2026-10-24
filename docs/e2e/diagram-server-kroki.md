@@ -68,5 +68,5 @@ DSV-04/06 是本 spec 仅有的真网依赖用例（执行环境无外网时 ski
 
 ## 6. 未覆盖面记档
 
-- **graphviz hpcc 渲染器真网 e2e（T6 申报候选）**：viz-js 默认档已有本地出图面（b-md-diagrams/b-cdn-diagram-engines CDN-03），hpcc 档真渲染（@hpcc-js/wasm-graphviz CDN 加载→Graphviz.load→layout）未落 e2e——T8 台账「真渲染待 e2e 真实网承接（同 hpcc 先例）」中 d2 已由 DSV-06 收口，hpcc 同形态可按 DSV-06 模式（settings 预设 `renderers.graphviz='hpcc'` + skipIf offline）后续补，本轮未加（承接清单未列，量力留档）。
+- **graphviz hpcc 渲染器真网 e2e（T6 申报候选）——已落地（P3 后续批次）**：viz-js 默认档已有本地出图面（b-md-diagrams/b-cdn-diagram-engines CDN-03），hpcc 档真渲染（@hpcc-js/wasm-graphviz CDN 加载→Graphviz.load→layout）按 DSV-06 模式（settings 预设 `renderers.graphviz='hpcc'` + skipIf offline）由 `b-cdn-diagram-engines.spec.ts` **CDN-04** 收口（因果锚：renderers 设置 + @hpcc-js/wasm-graphviz CDN 请求在案排除 viz-js 默认档巧合出图），场景记档见 `docs/e2e/cdn-diagram-engines.md` §2。
 - **d2 默认 kroki 档**：defaultMode=kroki 的 img 直发面与 plantuml 同构（DSV-03b 已锚 kroki img 通道），不重复加。
