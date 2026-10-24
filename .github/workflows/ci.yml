@@ -72,6 +72,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: server
+          # 2026-10-24 rust job 二连败取证键：02:33 通过 run 保存的缓存之后每次恢复
+          # 都在 cargo test 33s 内 fast-fail（保存者绿、恢复者红、失败不回写缓存），
+          # 缓存投毒与镜像迁移两假设并存——bust 后冷构建二选一裁决；绿跑回写新缓存
+          key: rust-ci-bust-20261024
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -87,7 +91,23 @@ jobs:
       # 单包默认不含成员 crate 测试
       # clippy 门禁（台账 3-19）：基线清零后 -D warnings 防回升（先于 test 失败即停）
       - run: cargo clippy --manifest-path server/Cargo.toml --workspace --all-targets -- -D warnings
-      - run: cargo test --manifest-path server/Cargo.toml --workspace
+      # tee 全量留档 /tmp，控制台只留尾部防日志过长；pipefail 保 cargo 失败即步失败
+      - name: cargo test（workspace 全量）
+        run: |
+          set -o pipefail
+          cargo test --manifest-path server/Cargo.toml --workspace 2>&1 | tee /tmp/cargo-test.log | tail -n 40
+      # 失败日志尾部落 job summary：run summary 页对公开仓匿名可读，是本仓唯一
+      # 免凭证取证面（api logs/artifact 均需 auth）——2026-10-24 rust job 连续
+      # 32s 级 fast-fail（保存者自身绿、恢复者必红）取证用；绿跑零输出零成本
+      - name: cargo test 失败日志尾部落 summary
+        if: failure()
+        run: |
+          {
+            echo '## cargo test 失败尾部（最近 120 行）'
+            echo '```'
+            tail -n 120 /tmp/cargo-test.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   e2e:
     name: e2e（Playwright chromium）
