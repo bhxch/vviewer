@@ -13,16 +13,16 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::ServeArgs;
+use crate::assembly::ServeArgs;
 
 /// CLI 与文件均未提供端口时的默认监听端口（与既有 clap 默认一致）。
 pub const DEFAULT_PORT: u16 = 8321;
 
 /// `[[mount]]` 节类型：阶段二下沉 lib（`vviewer::state`）——运行时注册
 /// （POST /api/mounts）与静态 TOML 装配必须消费同一形态与同一后端构造
-/// （`build_mount`），此处 re-export 供 FileConfig 与 main.rs 消费
+/// （`build_mount`），此处 re-export 供 FileConfig 与 assembly 装配链消费
 /// （`MountKind` 随 build_mount 下沉，bin 侧不再直接使用）。
-pub use vviewer::state::MountConfig;
+pub use crate::state::MountConfig;
 
 /// TOML `[kroki]` 节（spec 2026-10-23 §8.2）：kroki 转发上游配置（可选节）。
 /// `deny_unknown_fields` 与顶层同款纪律——拼错静默忽略是安全反模式。
@@ -94,7 +94,7 @@ pub struct ResolvedConfig {
     /// kroki 转发上游 host（spec 2026-10-23 §8.2）：合并已补 core 缺省
     /// （DEFAULT_KROKI_HOST）——进 serve 前恒为非空串，合法性由启动校验链裁决。
     pub kroki_host: String,
-    /// 挂载配置原样透传（main.rs 装配链经后端构造消费——per-kind 必填校验在
+    /// 挂载配置原样透传（assembly 装配链经后端构造消费——per-kind 必填校验在
     /// `build_mount`，Debug 面脱敏见 [`MountConfig`]）。
     pub mounts: Vec<MountConfig>,
 }
@@ -189,9 +189,9 @@ pub fn resolve_config(cli: ServeArgs, file: Option<FileConfig>) -> Result<Resolv
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::serve;
+    use crate::assembly::serve;
     use std::path::Path;
-    use vviewer::state::MountKind;
+    use crate::state::MountKind;
 
     /// 经临时文件走 load_file_config 真实路径（tempfile 先例）。
     fn load_from_str(text: &str) -> Result<FileConfig, String> {

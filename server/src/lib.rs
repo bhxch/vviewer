@@ -1,12 +1,19 @@
 //! vviewer server 库：路由构建与静态资产服务（供集成测试复用）。
 
 pub mod adapt;
+// serve 装配链升 lib 面（装配可测化）：启动校验链/静态挂载装配/缺省
+// transport（native 门控双版本）/serve 编排自 bin main.rs 整体迁入，bin 只留
+// clap 解析薄壳——装配行为经 lib 面供单元/集成测试直达（断言随迁零改动）。
+pub mod assembly;
 pub mod auth;
 // compute 域随 Task 3 迁 vviewer-core::compute（多端发布阶段二，native feature
 // 门控）——原 `vviewer::compute::*` 路径经本 re-export 保持既有调用点/集成测试
 // （tests/compute_highlight.rs、tests/compute_markdown.rs）零改动。
 #[cfg(feature = "native")]
 pub use vviewer_core::compute;
+// --config TOML 解析合并随装配链升 lib 面：原 bin 模块（main.rs 的
+// `mod config;`）改经 lib 声明，解析/合并语义与锁测零改动。
+pub mod config;
 pub mod error;
 pub mod logging;
 pub mod routes;

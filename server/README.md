@@ -16,8 +16,8 @@ native 重依赖。
 | 层 | 位置 | 职责 |
 |---|---|---|
 | 业务核 `vviewer-core` | `server/core/src/` | 全部业务 handler：`auth`（constant-time 比较）/`health`/`tree`/`file`（MIME/编码检测+窗读取）/`mounts`（挂载配置构造+三 API 业务体）/`search`（rg/grep 探测链+NDJSON pump）/`tickets`+`events`（SSE wire 编码+驱动）/`guard`（路径安全）/`compute`（markdown/highlight/diagrams，`native` 门控）；业务状态核 `CoreState`（配置/多根容器/运行时挂载容器） |
-| 适配层 `vviewer`（lib） | `server/src/` | 路由声明与 feature 门控挂载（`routes/`，每 handler 只做参数提取→core 调用→响应重建）；HTTP 语义解析（`routes/file.rs` 的 Range/If-Range 头解析——core 收已解析窗口）；中间件（`auth.rs` 头部提取/`lib.rs` no-cache）；tower-http 层（静态 ServeDir/SPA fallback/CORS/压缩/trace）；watch 广播中心（`watch.rs`，notify 域） |
-| 装配根（bin） | `server/src/main.rs`+`config.rs` | CLI/TOML 配置解析合并、启动校验链（exit 2 契约）、bind/就绪行（`VV_READY`）、tokio runtime 装配 |
+| 适配层 `vviewer`（lib） | `server/src/` | 路由声明与 feature 门控挂载（`routes/`，每 handler 只做参数提取→core 调用→响应重建）；HTTP 语义解析（Range 家族单源在 `vviewer-core::range`，适配层仅构造 416/304 响应）；中间件（`auth.rs` 头部提取/`lib.rs` no-cache）；tower-http 层（静态 ServeDir/SPA fallback/CORS/压缩/trace）；watch 广播中心（`watch/` 目录：hub/health/recovery/inspect，notify 域） |
+| 装配根（lib） | `server/src/assembly.rs`+`config.rs`（bin 薄壳 `main.rs` 仅 clap CLI 解析） | CLI/TOML 配置解析合并、启动校验链（exit 2 契约）、bind/就绪行（`VV_READY`）、tokio runtime 装配——升 lib 面可测（单测随迁 + `tests/assembly.rs` 冒烟） |
 
 feature 矩阵（`native` 默认开启；worker 形态 `--no-default-features` 裁剪）：
 
