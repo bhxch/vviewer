@@ -12,29 +12,31 @@
   import SettingsCenter from './SettingsCenter.svelte';
   import MountsManager from './MountsManager.svelte';
   import type { TreeStore, TocEntry } from '@vviewer/core';
-  import { createRemoteStore } from '@vviewer/core';
+  // FE-2 导入改道：tab 模型/连接域符号自 openFlow façade 改直引域模块（依赖单向
+  // tabsModel ← serverConnect，无环）；openFlow 退役为纯打开通道，AppShell 仅剩
+  // 恢复句柄/归档桥/direct 挂载/快点击竞态判定四符号仍经 façade（其它消费方不动）
   import {
     tabStore,
     addTab,
     activateTab,
     closeTab,
-    tryRestoreDirectory,
-    bindArchiveOpenEvents,
     seedSeqFromSnapshots,
     addDirTabForRestore,
-    applyMountRootIndexMigrations,
-    createDirectMountStore,
-    hasUserActivity,
-    loadLastServer,
     originStoreIdOf,
     registryVersion,
     registerStore,
     reopenClosed,
-    showStatusNotice,
     storeById,
     storeRevisions,
-    workspacesView,
-    watchHealth
+    workspacesView
+  } from './tabsModel.svelte';
+  import { reconnectRemoteStore, showStatusNotice } from './serverConnect.svelte';
+  import { loadLastServer } from './serverCapsCache';
+  import {
+    tryRestoreDirectory,
+    bindArchiveOpenEvents,
+    createDirectMountStore,
+    hasUserActivity
   } from './openFlow.svelte';
   import {
     loadDirHandle,
@@ -58,7 +60,19 @@
   } from './layout';
   import { codeLineHeight, effectiveMode, resolveMermaidTheme } from './theme';
   import { loadEnabledFontFaces } from './stores/fontsStore';
-  import { syncMountsOnConnect, listDirectMounts, displayLabelForStore } from './mountsSync';
+  import { listDirectMounts, displayLabelForStore } from './mountsSync';
+  // FE-2 纯模块抽出（root vitest 可直测，各带 *.test.ts 锁状态转移）：zen 守卫
+  // 历史项状态机 / chrome 临时条 1.5s 可见性状态机 / 移动端双抽屉开合状态机
+  import { ZenHistoryGuard } from './zenGuard';
+  import { TempBarVisibility } from './tempBar';
+  import {
+    DRAWERS_CLOSED,
+    toggleLeftDrawer,
+    toggleRightDrawer,
+    drawersAfterTreeOpen,
+    openRightDrawerForMetaLang,
+    type ShellDrawersState
+  } from './shellDrawers';
 
   /** 文件树/面板的来源条目：workspace.sources（模型）× storeById（活动实例）的合成。
    * rootIndex/basePath 随模型透传（GlobalSearchPanel → globalSearch 的远程命中
@@ -73,9 +87,11 @@
   // 响应式副本：onSettingsChanged 订阅刷新（BUG-05）。此前是非响应式快照，
   // 设置面板改排除规则后 FileTree 拿不到新值
   let settings = $state(loadSettings());
-  let drawerOpen = $state(false);
-  /** 右栏（MetaPanel/TOC）抽屉开关：仅 ≤600px 断点生效（见样式媒体查询） */
-  let rightOpen = $state(false);
+  /** 移动端双抽屉开合（状态机在 shellDrawers.ts 纯模块，FE-2 抽出）：左=文件树
+   *（≤900px 抽屉断点，shell .drawer 类）、右=MetaPanel/TOC（≤600px，.rightopen
+   * 类，见样式媒体查询）——双抽屉独立开合（e937d05 钉死语义），断点门在事件侧
+   * matchMedia 求值后经状态机转移。 */
+  let drawers = $state<ShellDrawersState>(DRAWERS_CLOSED);
   /** 活动渲染实例的目录（ViewerPane ontoc 回调上行；markdown tab 有数据，其余为空） */
   let tocEntries = $state<TocEntry[]>([]);
   /** 全局搜索面板开关（M6 T4）：Ctrl+Shift+F 打开，Esc 面板内关闭 */
@@ -173,7 +189,7 @@
   // 落空静默跳过）。
   $effect(() => {
     const onFocusMetaLang = (): void => {
-      if (window.matchMedia('(max-width: 600px)').matches) rightOpen = true; // 移动端先开抽屉
+      if (window.matchMedia('(max-width: 600px)').matches) drawers = openRightDrawerForMetaLang(drawers); // 移动端先开抽屉
       else if (layout.rightCollapsed) updateLayout({ rightCollapsed: false }); // 桌面折叠先展开
       requestAnimationFrame(() => {
         document.querySelector<HTMLInputElement>('input[list="vv-lang-datalist"]')?.focus();
@@ -196,49 +212,24 @@
    */
   let topTemp = $state(false);
   let tabTemp = $state(false);
-  let topTempTimer: ReturnType<typeof setTimeout> | null = null;
-  let tabTempTimer: ReturnType<typeof setTimeout> | null = null;
+  // 状态机在 tempBar.ts 纯模块（FE-2 抽出，tempBar.test.ts 锁状态转移）：可见性
+  // 经 onChange 回调上行（$state 副本供 TopBar/TabBar 的 temp/hidden props 消费），
+  // 1.5s 收回/排定窗口内重唤重置计时/立即收回清定时器语义单点在模块内
+  const topTempBar = new TempBarVisibility((v) => (topTemp = v));
+  const tabTempBar = new TempBarVisibility((v) => (tabTemp = v));
 
   function summonTemp(bar: 'top' | 'tab'): void {
-    if (bar === 'top') {
-      if (topTempTimer !== null) clearTimeout(topTempTimer);
-      topTempTimer = null;
-      topTemp = true;
-    } else {
-      if (tabTempTimer !== null) clearTimeout(tabTempTimer);
-      tabTempTimer = null;
-      tabTemp = true;
-    }
+    (bar === 'top' ? topTempBar : tabTempBar).summon();
   }
 
   /** 立即收回临时态并清定时器（L1：右键置可见分支同步调用——条已常显，残留
    * temp 类会使半透/覆盖形态滞留，残留定时器会在常显条上误触发隐藏竞态）。 */
   function dismissTemp(bar: 'top' | 'tab'): void {
-    if (bar === 'top') {
-      if (topTempTimer !== null) clearTimeout(topTempTimer);
-      topTempTimer = null;
-      topTemp = false;
-    } else {
-      if (tabTempTimer !== null) clearTimeout(tabTempTimer);
-      tabTempTimer = null;
-      tabTemp = false;
-    }
+    (bar === 'top' ? topTempBar : tabTempBar).dismiss();
   }
 
   function scheduleHideTemp(bar: 'top' | 'tab'): void {
-    if (bar === 'top') {
-      if (topTempTimer !== null) clearTimeout(topTempTimer);
-      topTempTimer = setTimeout(() => {
-        topTemp = false;
-        topTempTimer = null;
-      }, 1500);
-    } else {
-      if (tabTempTimer !== null) clearTimeout(tabTempTimer);
-      tabTempTimer = setTimeout(() => {
-        tabTemp = false;
-        tabTempTimer = null;
-      }, 1500);
-    }
+    (bar === 'top' ? topTempBar : tabTempBar).scheduleHide();
   }
 
   function clearTempTimers(): void {
@@ -249,7 +240,7 @@
   /**
    * zen 进出（spec §3）：enterZen/exitZen 只翻 zen 字段（正交性——其余字段不被
    * 改写，退出即还原）；持久化复用 updateLayout。viaPopstate=退出由返回键 popstate
-   * 触发——守卫历史项已被该次回退弹出，history 补偿跳过（updateZenHistory）。
+   * 触发——守卫历史项已被该次回退弹出，history 补偿跳过（zenGuard.update）。
    * 进入时弹 toast 告知退出通道（桌面 Esc/Ctrl+Alt+Z，移动端浮钮/返回键）——
    * zen 覆盖全部 chrome，无此提示退出通道不可发现（移动端有常驻浮钮，桌面全凭
    * 快捷键）。
@@ -289,7 +280,7 @@
       clearTempTimers();
       dismissZenToast();
     }
-    updateZenHistory(zen, viaPopstate);
+    zenGuard.update(zen, viaPopstate, isDrawerBreakpoint());
   }
 
   // ---------- zen 移动端（spec §3.1，Task 4）：返回键拦截 / 浮钮 / 抽屉入口 ----------
@@ -302,30 +293,16 @@
   }
 
   /**
-   * zen 守卫历史项（spec §3.1 返回键拦截）：移动端进 zen 时压入 {vvZen:1}，Android
-   * 返回键触发 popstate 时按 zenPopAction 分派（与桌面 Esc 同一状态机的第二触发源
+   * zen 守卫历史项状态机（spec §3.1 返回键拦截，FE-2 抽在 zenGuard.ts 纯模块——
+   * zenGuard.test.ts 锁状态转移）：移动端进 zen 时压入 {vvZen:1}，Android 返回键
+   * 触发 popstate 时按 zenPopAction 分派（与桌面 Esc 同一状态机的第二触发源
    * ——面板开先关面板、无面板退 zen）。不变式：移动断点下 zen 在场即守卫在当前
    * 历史项——closeOverlay 消费守卫后重新压入（onPopstate）；非 popstate 通道退出
    * （浮钮/菜单/Esc/快捷键）时 history.back() 消费之，返回键语义回归原生（不劫持
    * 正常导航）。守卫项跨 reload 存活（history.state 持久），reload 落 zen 时由
    * onMount 认领或补压（浮钮即在场 + 返回键仍可退出，无困死路径）。
    */
-  let zenGuardArmed = false;
-
-  function armZenGuard(): void {
-    history.pushState({ vvZen: 1 }, '');
-    zenGuardArmed = true;
-  }
-
-  function updateZenHistory(zen: boolean, viaPopstate: boolean): void {
-    if (zen) {
-      if (isDrawerBreakpoint()) armZenGuard();
-      return;
-    }
-    if (!zenGuardArmed) return;
-    zenGuardArmed = false;
-    if (!viaPopstate) history.back(); // 守卫项仍在栈顶：回退消费（popstate 分支已弹过）
-  }
+  const zenGuard = new ZenHistoryGuard(() => history);
 
   /**
    * 关闭最上层 overlay（返回键承接桌面「Esc 先关面板」优先级，一次一个）：chrome
@@ -361,20 +338,20 @@
   function onPopstate(): void {
     // chromeMenu 不在 OVERLAY_SELECTOR（AppShell Esc 分支同序：菜单 > overlay > zen）
     const action = zenPopAction({
-      guardArmed: zenGuardArmed,
+      guardArmed: zenGuard.isArmed,
       overlaysOpen: anyOverlayOpen() || chromeMenu !== null,
       zen: layout.zen
     });
     if (action === 'ignore') return; // 守卫不在场：正常导航，放行
     if (action === 'exitZen') {
-      zenGuardArmed = false; // 本次回退已弹出守卫项，toggleZen 不再 history.back
+      zenGuard.consume(); // 本次回退已弹出守卫项，toggleZen 不再 history.back
       toggleZen(true);
       return;
     }
     // closeOverlay：返回键先关面板、zen 保持；守卫项已被本次回退消费，关面板后
     // 重新压入——维持「zen 在场即守卫在顶」不变式，下次返回继续承接
     closeTopOverlayForZen();
-    armZenGuard();
+    zenGuard.arm();
   }
 
   /** chrome 右键菜单（spec §2 隐藏入口 / §3 TopBar 布局菜单项）：bar 标识菜单
@@ -543,8 +520,7 @@
     // （history.state 持久）——认领之；当前项无守卫（上个会话经浮钮退出后 reload 等）
     // 且在移动断点则补压——reload 后浮钮即在场 + 返回键仍先于离页退出 zen（无困死路径）
     if (layout.zen) {
-      if ((history.state as { vvZen?: unknown } | null)?.vvZen === 1) zenGuardArmed = true;
-      else if (isDrawerBreakpoint()) armZenGuard();
+      if (!zenGuard.claimReloaded() && isDrawerBreakpoint()) zenGuard.arm();
       // reload 落 zen：同样提示退出通道（恢复态用户与首次进入同样需要发现性）
       showZenToast(
         isDrawerBreakpoint()
@@ -735,58 +711,11 @@
   }
 
   /**
-   * BUG-08：restore 期自动重连（connectServer 的精简恢复路径）——health 探测
-   * 3s 超时判可达，可达即 createRemoteStore + SSE watch 订阅接线（与 connectServer
-   * 同模式：autoRefresh 关闭时回调过滤、watch-error 置降级指示）；不可达返回 null
-   * 交由调用方落占位。不发目录 tab（不自动弹树），只服务快照 tab 的内容恢复。
-   * 多根（T4）：rootIndex/basePath 由调用方从快照 sources[] 显式传入——storeId 的
-   * basePath 段是 32 位 FNV 指纹不可反解（T3 评审约束），恢复链路绝不从 storeId 反解。
-   * label 回环（T5 评审 I-1）：label 参与 storeId hash（hash8(`${base}:${label}`)），
-   * 必须用快照 sources[].storeLabel 原值重建——与运行期 createRemoteStore 用同一
-   * 字符串才能精确复现快照 storeId；重算 host 会使多根/basePath 来源（label 为
-   * 尾段/文件名/「host · 根N/x」形态）得到不同 storeId，恢复链 storeId 回环断裂
-   * （树行消失/tab 分叉/二次重启落占位/来源复用防线失效）。
+   * BUG-08：restore 期自动重连（reconnectRemoteStore，FE-2 迁 serverConnect.svelte.ts
+   * 并归 wireStoreWatch 家族）——health 探测 3s 超时判可达、SSE 接线/挂载对账/label
+   * 回环（I-1）语义与其 doc 单点维护；AppShell 经下方 reconnectOf 消费（同 base+
+   * root+basePath 只探测一次，多 workspace 共享同一来源时复用实例，避免同 id 双流）。
    */
-  async function reconnectRemoteStore(
-    base: string,
-    token: string | null,
-    storeLabel: string,
-    opts?: { rootIndex?: number; basePath?: string }
-  ): Promise<TreeStore | null> {
-    const headers: Record<string, string> = {};
-    if (token) headers.authorization = `Bearer ${token}`;
-    try {
-      const res = await fetch(`${base}/api/health`, {
-        headers,
-        signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(3000) : undefined
-      });
-      if (!res.ok) return null;
-    } catch {
-      return null; // 网络不可达/超时：恢复降级为占位，不阻塞启动
-    }
-    // 不重算 host：label 用快照原值（见函数 doc——label 参与 storeId hash）
-    const store = createRemoteStore(base, token, storeLabel, opts);
-    registerStore(store); // 重连即入册：不依赖其 tab 的 addTab 时序（registerStore doc）
-    watchHealth.degraded = false;
-    store.watch(
-      (paths) => {
-        if (!loadSettings().autoRefresh) return; // 与 connectServer 的 SSE 回调同口径
-        tabStore.refreshPaths(store.id, paths);
-      },
-      () => {
-        watchHealth.degraded = true;
-        console.warn('[vviewer] 服务器变更推送不可用，自动刷新已停用');
-      }
-    );
-    // 代理挂载对账（目录挂载 spec §3）：restore 重连成功同样触发幂等重注册——
-    // connectServer 已覆盖新鲜连接面，这里补「刷新恢复」面（服务端重启后前端
-    // 存档的代理挂载在重连时自动回填）。fire-and-forget 不阻塞恢复主链；内部
-    // 全量吞错（失败静默标记待重试）。同 base 多来源（多根快照）会重复触发，
-    // 对账幂等（同指纹命中即登记、服务端不重复分配）无副作用。迁移回调
-    // （台账 3-1）：对账换索引时三面改写已开 tab/sources，token 闭包注入。
-    void syncMountsOnConnect(base, token, (ms) => applyMountRootIndexMigrations(ms, token)).catch(() => {});
-    return store;
-  }
 
   /** 组内活动 tab 对齐：addTab 总是激活新 tab，恢复完一组后按快照 activeTabId 对齐。
    * 恢复的 tab 不保留快照 id（新 id 顺延），按 path+storeId 匹配；占位来源的
@@ -855,8 +784,8 @@
     // BUG-61：≤900px 抽屉断点下点树文件后自动收起抽屉——固定定位的 300px 抽屉
     // 会继续遮挡主阅读区，此前唯一收起途径是再点 ☰。断点经 matchMedia 求值，
     // 与下方 @media (max-width: 900px) 同引擎同一条件（e2e/drawer.ts 同款约定，
-    // 改断点两处同步）。
-    if (drawerOpen && window.matchMedia('(max-width: 900px)').matches) drawerOpen = false;
+    // 改断点两处同步）。转移在 shellDrawers.drawersAfterTreeOpen（右抽屉不联动）。
+    drawers = drawersAfterTreeOpen(drawers, window.matchMedia('(max-width: 900px)').matches);
   }
 
   // 全局键位（BUG-03，场景 SHELL-11）：Ctrl+Shift+F 全局搜索（既有）、Ctrl+P
@@ -1014,7 +943,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions --><!-- contextmenu 为 chrome
      布局菜单入口（shell 级代理，按 target 归属分流），shell 容器无 AT 交互角色 -->
-<div class="vv-shell" class:drawer={drawerOpen} class:rightopen={rightOpen} class:zen={layout.zen} oncontextmenu={onShellContextMenu}>
+<div class="vv-shell" class:drawer={drawers.leftOpen} class:rightopen={drawers.rightOpen} class:zen={layout.zen} oncontextmenu={onShellContextMenu}>
   <!-- 顶栏/标签栏：hidden=zen 或显式隐藏（chromeVisible 覆盖语义）；temp=边缘悬停
        临时条（半透覆盖形态）。组件保持挂载——Ctrl+, 设置中心入口（AppShell 自有
        状态）与 TopBar 的订阅注入链不因隐藏失效（spec §2 全件可隐但功能可达） -->
@@ -1157,8 +1086,8 @@
       </div>
     {/if}
   </div>
-  <button class="vv-drawer-toggle" aria-label="切换侧栏" onclick={() => (drawerOpen = !drawerOpen)}>☰</button>
-  <button class="vv-right-toggle" aria-label="切换目录与属性面板" onclick={() => (rightOpen = !rightOpen)}>ℹ</button>
+  <button class="vv-drawer-toggle" aria-label="切换侧栏" onclick={() => (drawers = toggleLeftDrawer(drawers))}>☰</button>
+  <button class="vv-right-toggle" aria-label="切换目录与属性面板" onclick={() => (drawers = toggleRightDrawer(drawers))}>ℹ</button>
   {#if layout.zen}
     <!-- zen 退出浮钮（spec §3.1 移动端）：hover 退出条的触屏替身，桌面无此钮
          （媒体查询隐藏）。≥44px 触控标准、半透不遮内容；右下角定于状态栏上方

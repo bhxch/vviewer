@@ -4,10 +4,12 @@
  * 迁移，与 remote 创建链的 SSE watch 接线归一 helper wireStoreWatch。依赖单向
  * tabsModel ← serverConnect ← openFlow façade（无环）；能力/lastServer 的
  * sessionStorage 读写抽在 serverCapsCache.ts（纯模块）。
+ * FE-2：AppShell 的 reconnectRemoteStore（restore 期恢复重连）迁入本模块并归
+ * wireStoreWatch 家族——remote 创建链第四处调用点，复位/置位写点收敛单点。
  * direct 链（createDirectMountStore）的 watch 接线有意不经 wireStoreWatch——
  * 见 openFlow.svelte.ts 该函数注释（双锚测锁死的有意分叉）。
  */
-import { createRemoteStore, getRemoteBase, normalizeServerBase } from '@vviewer/core';
+import { createRemoteStore, getRemoteBase, normalizeServerBase, type TreeStore } from '@vviewer/core';
 import { loadSettings } from './stores/settings';
 import { workspaceStore } from './workspaceStore';
 import {
@@ -284,4 +286,50 @@ export function applyMountRootIndexMigrations(moves: RootIndexMove[], token: str
     old?.close?.(); // 旧实例持有者已清空：停 SSE + 清 remoteBaseById 旧登记
   }
   void persist(); // 三面改写后的快照落盘（恢复面跟随）
+}
+
+/**
+ * BUG-08：restore 期自动重连（connectServer 的精简恢复路径）——health 探测
+ * 3s 超时判可达，可达即 createRemoteStore + SSE watch 订阅接线（与 connectServer
+ * 同模式：autoRefresh 关闭时回调过滤、watch-error 置降级指示）；不可达返回 null
+ * 交由调用方落占位。不发目录 tab（不自动弹树），只服务快照 tab 的内容恢复。
+ * 多根（T4）：rootIndex/basePath 由调用方从快照 sources[] 显式传入——storeId 的
+ * basePath 段是 32 位 FNV 指纹不可反解（T3 评审约束），恢复链路绝不从 storeId 反解。
+ * label 回环（T5 评审 I-1）：label 参与 storeId hash（hash8(`${base}:${label}`)），
+ * 必须用快照 sources[].storeLabel 原值重建——与运行期 createRemoteStore 用同一
+ * 字符串才能精确复现快照 storeId；重算 host 会使多根/basePath 来源（label 为
+ * 尾段/文件名/「host · 根N/x」形态）得到不同 storeId，恢复链 storeId 回环断裂
+ *（树行消失/tab 分叉/二次重启落占位/来源复用防线失效）。
+ * FE-2 自 AppShell.svelte 迁入本模块（AppShell.restore 的 reconnectOf 消费），
+ * SSE 接线同步归一 wireStoreWatch（复位/置位写点与 connectServer 家族收敛单点）。
+ */
+export async function reconnectRemoteStore(
+  base: string,
+  token: string | null,
+  storeLabel: string,
+  opts?: { rootIndex?: number; basePath?: string }
+): Promise<TreeStore | null> {
+  const headers: Record<string, string> = {};
+  if (token) headers.authorization = `Bearer ${token}`;
+  try {
+    const res = await fetch(`${base}/api/health`, {
+      headers,
+      signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(3000) : undefined
+    });
+    if (!res.ok) return null;
+  } catch {
+    return null; // 网络不可达/超时：恢复降级为占位，不阻塞启动
+  }
+  // 不重算 host：label 用快照原值（见函数 doc——label 参与 storeId hash）
+  const store = createRemoteStore(base, token, storeLabel, opts);
+  registerStore(store); // 重连即入册：不依赖其 tab 的 addTab 时序（registerStore doc）
+  wireStoreWatch(store); // SSE 接线归一（FE-2）：创建期复位降级指示 + autoRefresh 过滤 + watch-error 置位
+  // 代理挂载对账（目录挂载 spec §3）：restore 重连成功同样触发幂等重注册——
+  // connectServer 已覆盖新鲜连接面，这里补「刷新恢复」面（服务端重启后前端
+  // 存档的代理挂载在重连时自动回填）。fire-and-forget 不阻塞恢复主链；内部
+  // 全量吞错（失败静默标记待重试）。同 base 多来源（多根快照）会重复触发，
+  // 对账幂等（同指纹命中即登记、服务端不重复分配）无副作用。迁移回调
+  //（台账 3-1）：对账换索引时三面改写已开 tab/sources，token 闭包注入。
+  void syncMountsOnConnect(base, token, (ms) => applyMountRootIndexMigrations(ms, token)).catch(() => {});
+  return store;
 }

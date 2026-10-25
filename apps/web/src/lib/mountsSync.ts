@@ -479,7 +479,7 @@ export interface RootIndexMove {
  * storeId 的 `:r<old>` 段改写（台账 3-1，core parseRemoteStoreId 同源正则）：
  * `remote:<hash8>:r<old>[:<hash8>]` → `remote:<hash8>:r<new>[:<hash8>]`。hash 段
  * （base:label 冻结值）与 basePath 指纹段保持原样——与快照恢复「storeLabel 原值
- * 回环」（AppShell.reconnectRemoteStore）一致：恢复链以冻结 label + 快照 rootIndex
+ * 回环」（serverConnect.reconnectRemoteStore，FE-2 自 AppShell 迁入）一致：恢复链以冻结 label + 快照 rootIndex
  * 重建，label 含「根N」会随索引变，重算反而断裂回环；正则只动 r 段恰与该回环
  * 形态互锁。非 remote 形态 / r 段 ≠ oldIndex / 相同索引 → null（调用方原样保留）。
  */

@@ -1,6 +1,8 @@
 // watchHealth.test.ts — SSE 变更推送健康旗标的复位方向契约（台账 3-2，终审 I-1
 // 修复的测试面收尾；FE-1 拆分锚随迁：watchHealth 与 wireStoreWatch 归一接线在
-// serverConnect.svelte.ts，openRemoteSource 调用点在 openFlow.svelte.ts façade）。
+// serverConnect.svelte.ts，openRemoteSource 调用点在 openFlow.svelte.ts façade；
+// FE-2：AppShell 的 reconnectRemoteStore 迁入 serverConnect.svelte.ts 并归一
+// wireStoreWatch——remote 创建链第四处调用点，未归一接线窗口清零）。
 // watchHealth 是连接域模块级 runes $state（全局单旗标），根 vitest 无 svelte 插件
 // 不可挂载 runes 模块/组件——行为直测不可达，按既有「源码契约断言」先例
 // （directMountFlow.test.ts 同因同形态）锁定 remote 创建链接线写点与顺序；运行期
@@ -12,8 +14,9 @@
 //   与全局降级指示按 tab 互斥）。全局旗标的复位方向 = 复位只发生在「新建 store
 //   实例」时序（createRemoteStore 之后、store.watch 接线之前）——新连接的降级
 //   指示不复用上一次连接的；存活实例复用路径早退不触旗标（各函数仅单一复位点）。
-//   FE-1 起 remote 创建链三处接线归一进 wireStoreWatch（复位/置位写点各唯一），
-//   三调用点仍在各自 createRemoteStore 之后（创建期复位的调用位置语义）。
+//   FE-1 起 remote 创建链接线归一进 wireStoreWatch（复位/置位写点各唯一），全部
+//   调用点仍在各自 createRemoteStore 之后（创建期复位的调用位置语义）——复位/
+//   置位顺序与单一写点断言逐字保留在 wireStoreWatch 函数窗口用例。
 // - direct 创建链不入全局通道：createDirectMountStore 立即 onError 只走 console
 //   诊断、创建期亦不复位（否则会抹掉 remote 的真实降级指示）——防线锚
 //   directMountFlow.test.ts「watch 接线（终审 I-1）」用例，本文件作跨文件桥锚。
@@ -36,35 +39,14 @@ function fnWindow(src: string, signature: RegExp): string {
   return fn![0];
 }
 
-/**
- * 复位方向断言（含 createRemoteStore 的未归一接线窗口用——FE-1 后仅 AppShell
- * 的 reconnectRemoteStore）：createRemoteStore → 复位 degraded=false →
- * store.watch 接线 → onError 置 degraded=true；置位写点全函数唯一（只经
- * onError 回调，不散落）。顺序即方向：复位在创建期（新连接不复用旧降级），
- * 置位在推送故障期。
- */
-function expectResetDirection(fn: string): void {
-  const create = fn.indexOf('createRemoteStore(');
-  const reset = fn.indexOf('watchHealth.degraded = false;');
-  const wiring = fn.indexOf('store.watch(');
-  const setDegraded = fn.indexOf('watchHealth.degraded = true;');
-  expect(create).toBeGreaterThan(-1);
-  expect(reset).toBeGreaterThan(-1); // 复位写点在位（缺失时顺序断言会假绿，先钉存在性）
-  expect(wiring).toBeGreaterThan(-1);
-  expect(reset).toBeGreaterThan(create); // 复位在新建实例之后（复用早退路径不触旗标）
-  expect(wiring).toBeGreaterThan(reset); // 复位先于 watch 接线（创建期，非错误后补）
-  expect(setDegraded).toBeGreaterThan(wiring); // 置位只在 onError 回调内
-  expect(fn.indexOf('watchHealth.degraded = true;', setDegraded + 1)).toBe(-1); // 单一写点
-}
-
 describe('watchHealth 复位方向（台账 3-2：remote 创建链接线写点与顺序）', () => {
   const ofSrc = readSrc('src/lib/openFlow.svelte.ts');
   const scSrc = readSrc('src/lib/serverConnect.svelte.ts');
-  const shellSrc = readSrc('src/lib/AppShell.svelte');
 
   it('wireStoreWatch（remote 创建链接线归一，FE-1）：创建期复位先于 store.watch 接线，置位只经 onError 且为唯一写点', () => {
     // connectServer/openRemoteSource 两例的复位方向断言随接线归一迁至本函数窗口
-    //（复位先于 store.watch 接线、置位唯一写点在 onError 回调内——原样迁移）
+    //（复位先于 store.watch 接线、置位唯一写点在 onError 回调内——原样迁移；
+    //   FE-2 起 reconnectRemoteStore 的未归一窗口清零，复位/置位语义单点在此）
     const fn = fnWindow(
       scSrc,
       /export function wireStoreWatch\(store: ReturnType<typeof createRemoteStore>\): void \{[\s\S]*?\n\}/
@@ -94,12 +76,14 @@ describe('watchHealth 复位方向（台账 3-2：remote 创建链接线写点�
     expect(ors.indexOf('wireStoreWatch(')).toBeGreaterThan(ors.indexOf('createRemoteStore('));
   });
 
-  it('reconnectRemoteStore（AppShell 恢复重连）：与 connectServer 同款创建期复位/置位', () => {
-    expectResetDirection(
-      // Svelte 组件 script 块内函数缩进 2 空格：窗口取至首个列 2 闭合 `  }`（体内
-      // 块均 ≥4 缩进，首个列 2 闭合即本函数尾）
-      fnWindow(shellSrc, /async function reconnectRemoteStore\(\n[\s\S]*?\n  \}/)
+  it('reconnectRemoteStore（restore 恢复重连，FE-2 迁 serverConnect 并归一 wireStoreWatch）：createRemoteStore 之后调 wireStoreWatch（创建期复位；复位/置位顺序与单一写点经上方 wireStoreWatch 窗口用例逐字锁定）', () => {
+    // FE-2 锚随迁：readSrc 目标 AppShell → serverConnect.svelte.ts，内联接线窗口
+    //（原 expectResetDirection 断言面）随归一收敛进 wireStoreWatch 单点
+    const fn = fnWindow(
+      scSrc,
+      /export async function reconnectRemoteStore\(\n[\s\S]*?\n\}/
     );
+    expect(fn.indexOf('wireStoreWatch(')).toBeGreaterThan(fn.indexOf('createRemoteStore('));
   });
 
   it('direct 链不入全局通道（「只置本源」构成面）：createDirectMountStore 零 watchHealth 写点；per-source 文案由 isMountRootStoreId 派生', () => {

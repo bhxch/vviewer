@@ -31,10 +31,9 @@ describe('zen 进入提示 Toast（退出通道发现性）', () => {
   });
 
   it('reload 落 zen 同样提示（恢复态用户与首次进入同样需要发现性）', () => {
-    // onMount 的 layout.zen 分支（zenGuard 认领之后）同样走 showZenToast
-    expect(src).toMatch(
-      /else if \(isDrawerBreakpoint\(\)\) armZenGuard\(\);[\s\S]{0,200}showZenToast\(/
-    );
+    // onMount 的 layout.zen 分支（zenGuard 认领/补压之后——FE-2：armZenGuard 归
+    // zenGuard 状态机）同样走 showZenToast
+    expect(src).toMatch(/zenGuard\.arm\(\);[\s\S]{0,200}showZenToast\(/);
   });
 
   it('toast 渲染块：role=status（AT 播报）、4.5s 自动消退、定时器随卸载清理', () => {

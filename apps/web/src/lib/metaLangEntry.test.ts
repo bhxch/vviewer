@@ -122,9 +122,10 @@ describe('AppShell 跳转消费（Task 6 源码契约锚）', () => {
 
   it('移动端先开抽屉（≤600px 同一媒体查询）→ 桌面折叠先展开 → rAF 后聚焦语言行', () => {
     const handler = fnWindow(src, /const onFocusMetaLang = \(\): void => \{[\s\S]*?\n    \};/);
-    const drawer = handler.indexOf('rightOpen = true;');
+    // FE-2：抽屉开合转移抽在 shellDrawers.ts（openRightDrawerForMetaLang 置位开右抽屉）
+    const drawer = handler.indexOf('openRightDrawerForMetaLang(drawers)');
     const expand = handler.indexOf("updateLayout({ rightCollapsed: false })");
-    const focus = handler.indexOf("querySelector<HTMLInputElement>('input[list=\"vv-lang-datalist\"]')");
+    const focus = handler.indexOf('querySelector<HTMLInputElement>(\'input[list="vv-lang-datalist"]\')');
     expect(drawer).toBeGreaterThan(-1); // 移动端：先开右栏抽屉（≤600px 断点条件）
     expect(handler).toContain("window.matchMedia('(max-width: 600px)')");
     expect(expand).toBeGreaterThan(-1); // 桌面：折叠先展开（updateLayout 持久链）

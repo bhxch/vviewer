@@ -15,24 +15,29 @@ function readSrc(relFromWeb: string): string {
 
 describe('zen 返回键拦截（spec §3.1：进入 pushState 守卫，popstate 同一状态机分派）', () => {
   const src = readSrc('src/lib/AppShell.svelte');
+  // FE-2 拆分锚随迁：守卫历史项状态机（pushState 守卫/back 消费/reload 认领）抽在
+  // zenGuard.ts 纯模块（状态转移由 zenGuard.test.ts 直测锁定），AppShell 保留
+  // popstate 事件接线——锚定对象迁至新位置的，readSrc 改指新位置、断言逐字保留
+  const guard = readSrc('src/lib/zenGuard.ts');
 
   it('进入 zen 压入 {vvZen:1} 守卫，且以抽屉断点（≤900px）为门——桌面 history 不动', () => {
     expect(src).toContain('zenPopAction'); // popstate 与桌面 Esc（zenEscAction）同源分派
-    expect(src).toContain("history.pushState({ vvZen: 1 }, '')");
+    expect(guard).toContain("history.pushState({ vvZen: 1 }, '')");
     expect(src).toContain("'(max-width: 900px)'"); // 守卫门 = 既有抽屉断点
     // 非 popstate 通道退出（浮钮/菜单/Esc/快捷键）：回退消费守卫项，返回键语义回归原生
-    expect(src).toContain('history.back()');
+    expect(guard).toContain('history.back()');
   });
 
   it('popstate 监听在场：exitZen 分支标记经 popstate（不再 history.back）、closeOverlay 分支关面板后重压守卫', () => {
     expect(src).toContain("window.addEventListener('popstate', onPopstate)");
     expect(src).toContain("window.removeEventListener('popstate', onPopstate)");
     expect(src).toMatch(/action === 'exitZen'[\s\S]{0,200}toggleZen\(true\)/);
-    expect(src).toMatch(/closeTopOverlayForZen\(\);\s*armZenGuard\(\)/);
+    // FE-2：armZenGuard 归 zenGuard 状态机（zenGuard.arm），关面板后重压语义不变
+    expect(src).toMatch(/closeTopOverlayForZen\(\);\s*zenGuard\.arm\(\)/);
   });
 
   it('reload 落 zen：认领跨 reload 存活的守卫项（history.state.vvZen），无困死路径', () => {
-    expect(src).toMatch(/history\.state[\s\S]{0,80}vvZen/);
+    expect(guard).toMatch(/history\.state[\s\S]{0,80}vvZen/);
   });
 });
 

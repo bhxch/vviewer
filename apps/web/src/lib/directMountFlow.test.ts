@@ -91,10 +91,11 @@ describe('openFlow 直连 store 创建分派（带入①创建链路）', () => 
     expect(fn).toContain('void persist()'); // 快照恢复面跟随改写落盘
   });
 
-  it('台账 3-1：syncMountsOnConnect 迁移回调注入（connectServer 与 AppShell restore 重连两处，token 闭包）', () => {
+  it('台账 3-1：syncMountsOnConnect 迁移回调注入（connectServer 与 restore 重连两处，token 闭包）', () => {
     expect(scSrc).toMatch(/syncMountsOnConnect\(base, tok, \(ms\) => applyMountRootIndexMigrations\(ms, tok\)\)/);
-    const shell = readSrc('src/lib/AppShell.svelte');
-    expect(shell).toMatch(
+    // FE-2 锚随迁：reconnectRemoteStore 自 AppShell 迁入 serverConnect.svelte.ts——
+    // readSrc 目标随迁，断言逐字保留
+    expect(scSrc).toMatch(
       /syncMountsOnConnect\(base, token, \(ms\) => applyMountRootIndexMigrations\(ms, token\)\)/
     );
   });
