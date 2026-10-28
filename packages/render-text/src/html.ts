@@ -13,8 +13,8 @@
 // + 提示卡（renderDegradedCode；降级而非拒绝）。
 import type { Renderer, RenderedInstance, Detection, FileSource, SearchMatch } from '@vviewer/core';
 import { ALLOWED_URI_REGEXP, sanitizeHtml } from './markdown/sanitize';
+import { decodeText } from './decodeText';
 import {
-  DECODERS,
   MARKUP_MAX_BYTES,
   renderCode,
   renderDegradedCode,
@@ -111,7 +111,7 @@ export const htmlRenderer: Renderer = {
     /** BUG-44：视图切换订阅（搜索面板重扫）；destroy 清空防迟滞回调 */
     const viewListeners = new Set<() => void>();
 
-    const raw = new TextDecoder(DECODERS[det.encoding ?? 'utf-8'], { fatal: false }).decode(buffer);
+    const raw = decodeText(buffer, det.encoding);
     const srcdoc = buildSandboxedSrcdoc(raw);
 
     const toolbar = document.createElement('div');

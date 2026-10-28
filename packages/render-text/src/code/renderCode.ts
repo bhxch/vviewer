@@ -11,7 +11,6 @@ import { virtualScroller, type VirtualScrollerHandle } from '../virtualScroller'
 import { searchCode } from '../search';
 import {
   LINE_HEIGHT,
-  DECODERS,
   resolveStrategy,
   HLJS_MAX_BYTES,
   PLAIN_MAX_BYTES,
@@ -20,6 +19,7 @@ import {
   highlightAutoDetect,
   type HLJS
 } from './strategy';
+import { decodeText } from '../decodeText';
 import {
   CHUNK_LINES,
   CHUNK_CACHE_MAX_LINES,
@@ -65,11 +65,10 @@ export function renderCode(
   // 行尺度（字体系统 Task 2）：局部 lineHeight 单源供全部消费点（fillRows/mount/
   // jumpToLine 闭包捕获），缺省回落 LINE_HEIGHT
   const lineHeight = opts.lineMetrics?.lineHeight ?? LINE_HEIGHT;
-  const enc = DECODERS[opts.encoding ?? 'utf-8'];
   // CRLF/CR → LF 归一化：行索引（buildLineIndex/lineOffsets）、高亮区间偏移、搜索
   // 全部在归一化文本上计算——解码后、一切索引前做一次，保证偏移一致性（否则
   // \r 计入前一行长度，区间错位一行；tree-sitter/hljs 的输出同样按归一化文本对齐）
-  const text = new TextDecoder(enc, { fatal: false }).decode(buffer).replace(/\r\n?/g, '\n');
+  const text = decodeText(buffer, opts.encoding).replace(/\r\n?/g, '\n');
   const lines = buildLineIndex(text);
   const lineOffsets = buildLineOffsets(lines);
   const byteLineOffsets = buildByteLineOffsets(buffer); // 字节域行索引（lineAtByteOffset 用，post-BOM）

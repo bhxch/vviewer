@@ -64,7 +64,7 @@ export interface TreeStore {
   close?(): void;
 }
 
-export type Encoding = 'utf-8' | 'utf-16le' | 'utf-16be' | 'gb18030';
+export type Encoding = 'utf-8' | 'utf-16le' | 'utf-16be' | 'utf-32le' | 'utf-32be' | 'gb18030';
 
 export interface Detection {
   ext: string;            // 小写无点；无扩展名为 ''（签名纠偏后为规范扩展名）

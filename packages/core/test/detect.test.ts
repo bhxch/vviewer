@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detect, sniffSignature } from '../src/detect';
+import { detect, sniffSignature, detectEncoding } from '../src/detect';
 import { signatureRouteOf } from '../src/dispatch/dispatcher';
 
 describe('detect chain', () => {
@@ -90,5 +90,19 @@ describe('议题二：签名表扩容', () => {
     expect(signatureRouteOf('ogg')).toEqual({ rendererId: 'av', ext: 'ogg' });
     expect(signatureRouteOf('bmp')).toEqual({ rendererId: 'image', ext: 'bmp' });
     expect(signatureRouteOf('ole')).toBeNull();
+  });
+});
+
+describe('议题三：BOM 扩充', () => {
+  it('UTF-32LE BOM 优先于 UTF-16LE（前缀包含）', () => {
+    expect(detectEncoding(new Uint8Array([0xff, 0xfe, 0x00, 0x00, 0x41, 0, 0, 0]))).toBe('utf-32le');
+  });
+  it('UTF-32BE BOM 识别', () => {
+    expect(detectEncoding(new Uint8Array([0x00, 0x00, 0xfe, 0xff, 0, 0, 0x41]))).toBe('utf-32be');
+  });
+  it('既有 BOM 判定不回归', () => {
+    expect(detectEncoding(new Uint8Array([0xef, 0xbb, 0xbf, 0x41]))).toBe('utf-8');
+    expect(detectEncoding(new Uint8Array([0xff, 0xfe, 0x41, 0]))).toBe('utf-16le');
+    expect(detectEncoding(new Uint8Array([0xfe, 0xff, 0, 0x41]))).toBe('utf-16be');
   });
 });

@@ -112,8 +112,9 @@ export function resolveStrategy(size: number): HighlightStrategy {
   return 'plain';
 }
 
-/** Encoding → TextDecoder 标签（code/markdown/html 渲染器共用；导出避免重复表） */
-export const DECODERS: Record<Encoding, string> = {
+/** Encoding → TextDecoder 标签（decodeText 消费；UTF-32 不在表内——WHATWG TextDecoder
+ * 不支持，decodeText 自带定长解码器分流）。议题三扩列由本 Record 编译期强制同步。 */
+export const DECODERS: Record<Exclude<Encoding, 'utf-32le' | 'utf-32be'>, string> = {
   'utf-8': 'utf-8',
   'utf-16le': 'utf-16le',
   'utf-16be': 'utf-16be',

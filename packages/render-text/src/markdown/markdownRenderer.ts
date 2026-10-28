@@ -15,7 +15,6 @@ import type { Renderer, RenderedInstance, Detection, FileSource, TocEntry, Compu
 import { getRemoteBase } from '@vviewer/core';
 import { HighlightCanceledError, type HighlightInterval } from '@vviewer/highlight';
 import {
-  DECODERS,
   MARKUP_MAX_BYTES,
   waitForAttachedClient,
   buildLineIndex,
@@ -26,6 +25,7 @@ import {
   renderDegradedCode,
   type RenderCodeHandle
 } from '../code';
+import { decodeText } from '../decodeText';
 import { makePreview, type SearchMatchWithPreview } from '../search';
 import type { SearchMatch } from '@vviewer/core';
 import { createMarkdownEngine, renderMarkdownToHtml, protectLatexDelimiters, GfmAnchorizer } from './engine';
@@ -507,7 +507,7 @@ export const markdownRenderer: Renderer = {
     let destroyed = false;
     // U3：灯箱 owner 代币——destroy 只摘自己实例打开的 body 级 overlay
     const lightboxOwner = `md-render-${++lightboxOwnerSeq}`;
-    const text = new TextDecoder(DECODERS[det.encoding ?? 'utf-8'], { fatal: false }).decode(buffer);
+    const text = decodeText(buffer, det.encoding);
     // M7 正文引擎裁决：注入后端优先（路由策略与回退全在 apps/web 侧的 fn 内），
     // 未注入走本地 markdown-it（现状）。远程 comrak 不识别 front matter——交给
     // 后端前先剥掉；本地路径保持 renderMarkdownToHtml 原语义（内部解析 front matter）。

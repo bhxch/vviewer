@@ -81,7 +81,6 @@ import { createTextWindow, type BlockTextEntry } from '../textWindow';
 import {
   assignIntervalsToLines,
   buildLineOffsets,
-  DECODERS,
   getHighlightClient,
   isAbortError,
   PLAIN_MAX_BYTES,
@@ -89,6 +88,7 @@ import {
   renderLineHtml,
   type CodeFileMeta
 } from '../code';
+import { decodeText } from '../decodeText';
 import {
   collapseFor,
   JSONL_COLLAPSE_LINES,
@@ -617,10 +617,10 @@ export async function renderJsonl(
     return renderJsonlWindowed(ctx, target, det, downgrade);
   }
   // —— 全量模式（现状路径，行为不动）——
-  // 解码 + 归一（code.ts L537 同款：DECODERS 表 + fatal:false；标签异常容错回落 utf-8）
+  // 解码 + 归一（code.ts L537 同款：decodeText 单源 + fatal:false；坏字节替换符）
   let text: string;
   try {
-    text = new TextDecoder(DECODERS[det.encoding ?? 'utf-8'], { fatal: false }).decode(buffer);
+    text = decodeText(buffer, det.encoding);
   } catch {
     text = new TextDecoder('utf-8', { fatal: false }).decode(buffer);
   }

@@ -3,6 +3,8 @@ import type { Encoding } from '../types';
 function hasUtf8Bom(b: Uint8Array) { return b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf; }
 function hasUtf16leBom(b: Uint8Array) { return b[0] === 0xff && b[1] === 0xfe; }
 function hasUtf16beBom(b: Uint8Array) { return b[0] === 0xfe && b[1] === 0xff; }
+function hasUtf32leBom(b: Uint8Array) { return b[0] === 0xff && b[1] === 0xfe && b[2] === 0 && b[3] === 0; }
+function hasUtf32beBom(b: Uint8Array) { return b[0] === 0 && b[1] === 0 && b[2] === 0xfe && b[3] === 0xff; }
 
 /** 严格校验 UTF-8 序列（RFC 3629，含 overlong/代理对拒绝） */
 export function isStrictUtf8(b: Uint8Array): boolean {
@@ -27,8 +29,11 @@ export function isStrictUtf8(b: Uint8Array): boolean {
   return true;
 }
 
-/** 编码检测：BOM 优先，UTF-8 严格校验失败回退 gb18030 */
+/** 编码检测：BOM 优先，UTF-8 严格校验失败回退 gb18030。UTF-32 两判必须在 UTF-16LE
+ * 之前——FF FE 00 00 是 FF FE 的前缀包含，顺序颠倒会误判 utf-16le。 */
 export function detectEncoding(bytes: Uint8Array): Encoding {
+  if (hasUtf32leBom(bytes)) return 'utf-32le';
+  if (hasUtf32beBom(bytes)) return 'utf-32be';
   if (hasUtf8Bom(bytes)) return 'utf-8';
   if (hasUtf16leBom(bytes)) return 'utf-16le';
   if (hasUtf16beBom(bytes)) return 'utf-16be';
