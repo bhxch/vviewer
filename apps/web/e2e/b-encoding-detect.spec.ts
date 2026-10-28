@@ -1,5 +1,5 @@
-import { test, expect, type Locator, type Page } from '@playwright/test';
-import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
+import { test, expect, type Page } from '@playwright/test';
+import { openDirBytes, openFile, openRightIfNarrow, waitAppMounted } from './helpers';
 
 /**
  * 编码探测升级 e2e（议题三，ENC-01~02）：Task 7（d5915e2）UTF-32 BOM 识别 +
@@ -27,13 +27,11 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * ③ ENC-02 的 utf-32le 精判无关（refineEncoding 门控仅 gb18030）：BOM 直判即定案，
  *   decodeText 剥 BOM 后按 4 字节码元定长解码，非法码点才落 U+FFFD——'AB' 正常。
  *
- * 通道：目录注入经 __vvOpenDirImpl 只建目录 tab（Task 4 经验）——文件 tab 须补树
- * 行点击打开（b-file-detect-signature / b-open-with-more 同款装置）；≤900px 文件
- * 树、≤600px 右栏（MetaPanel）各收进抽屉，经 drawer.ts / openRightIfNarrow 适配；
- * default 套件 chromium+mobile 双 project 全跑。
+ * 通道：目录注入经 __vvOpenDirImpl 只建目录 tab（helpers.ts openDirBytes，组名 enc）
+ * ——文件 tab 须补树行点击打开（helpers.ts openFile）；≤900px 文件树、≤600px 右栏
+ * （MetaPanel）各收进抽屉，经 helpers openFile/openRightIfNarrow 适配；default 套件
+ * chromium+mobile 双 project 全跑。
  */
-
-const REG_SPECIAL = /[.*+?^${}()|[\]\\]/g;
 
 /** 「日本語のテキスト。// comment\n」×3 的 Shift-JIS（cp932）字节（87B）——与
  * encodingRefine.test.ts sjisBytes 同源；Task 8 probe 实测 analyse[0] =
@@ -49,56 +47,10 @@ function sjisBytes(): Uint8Array {
   ]);
 }
 
-/** 等应用挂载（__vvOpenDirImpl 注入钩子 + TopBar 就绪；b-file-detect-signature 同款） */
-async function waitAppMounted(page: Page): Promise<void> {
-  await page.goto('/');
-  await page.waitForFunction(
-    () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
-  );
-  await expect(page.locator('.vv-topbar')).toBeVisible();
-}
-
-/** 目录注入通道（__vvOpenDirImpl；webkitRelativePath 首段 = 组名，只建目录 tab） */
-async function openDir(page: Page, name: string, bytes: Uint8Array): Promise<void> {
-  await page.evaluate(
-    ({ n, b }) => {
-      const f = new File([new Uint8Array(b)], n, { type: 'application/octet-stream' });
-      Object.defineProperty(f, 'webkitRelativePath', { value: `enc/${n}` });
-      return (window as unknown as { __vvOpenDirImpl: (f: File[]) => void }).__vvOpenDirImpl([f]);
-    },
-    { n: name, b: Array.from(bytes) }
-  );
-}
-
-/** 精确名 tab 定位（t-tab-actions tabNamed 同款：.vv-tab-name 子元素锚定） */
-function tabNamed(page: Page, name: string): Locator {
-  return page
-    .locator('.vv-tab')
-    .filter({
-      has: page.locator('.vv-tab-name', { hasText: new RegExp(`^${name.replace(REG_SPECIAL, '\\$&')}$`) })
-    });
-}
-
-/** 树行点击打开文件 tab（≤900px 抽屉断点适配，b-file-detect-signature 同款） */
-async function openFile(page: Page, name: string): Promise<void> {
-  const drawer = await openDrawerIfNarrow(page);
-  await page.locator('.vv-tree-row', { hasText: name }).click();
-  await closeDrawerIfOpened(page, drawer);
-  await expect(tabNamed(page, name)).toBeVisible({ timeout: 20_000 });
-}
-
-/** ≤600px 断点右栏（MetaPanel）收进抽屉（b-file-detect-signature 同款） */
-async function openRightIfNarrow(page: Page): Promise<boolean> {
-  const narrow = await page.evaluate(() => window.innerWidth <= 600);
-  if (!narrow) return false;
-  await page.locator('.vv-right-toggle').click();
-  return true;
-}
-
 /** 注入 → 开文件 tab → 断言编码行与解码内容（20s 与套件负载口径一致） */
 async function openAndAssert(page: Page, name: string, bytes: Uint8Array, encoding: string, content: string): Promise<void> {
   await waitAppMounted(page);
-  await openDir(page, name, bytes);
+  await openDirBytes(page, 'enc', name, bytes);
   await openFile(page, name);
   await openRightIfNarrow(page);
   await expect(page.locator('.meta-panel')).toContainText(encoding, { timeout: 20_000 });

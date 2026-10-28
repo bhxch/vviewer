@@ -1,5 +1,5 @@
-import { test, expect, type Locator, type Page } from '@playwright/test';
-import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
+import { test, expect, type Page } from '@playwright/test';
+import { openDirBytes, openFile, openRightIfNarrow, waitAppMounted } from './helpers';
 
 /**
  * 签名改派扩表 e2e（议题二，SIG-01~04）：Task 5（7c22ddf）13 个新 magic 签名的
@@ -27,13 +27,11 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * ③ 载荷为垃圾字节：av/image/archive 的运行期错误卡片（无法播放/解码失败/无法识别
  *   压缩包）与本锚无关，可能异步出现，不断言（简报口径）。
  *
- * 通道：目录注入经 __vvOpenDirImpl 只建目录 tab（Task 4 经验）——文件 tab 须补树行
- * 点击打开（b-open-with-more openDir+openFile 同款装置）；≤900px 文件树、≤600px 右栏
- * （MetaPanel）各收进抽屉，经 drawer.ts / openRightIfNarrow 适配；default 套件
+ * 通道：目录注入经 __vvOpenDirImpl 只建目录 tab（helpers.ts openDirBytes，组名 sig）
+ * ——文件 tab 须补树行点击打开（helpers.ts openFile）；≤900px 文件树、≤600px 右栏
+ * （MetaPanel）各收进抽屉，经 helpers openFile/openRightIfNarrow 适配；default 套件
  * chromium+mobile 双 project 全跑。
  */
-
-const REG_SPECIAL = /[.*+?^${}()|[\]\\]/g;
 
 /** 最小 ftyp-isom 头（垃圾负载，仅锚选路） */
 function mp4ish(): Uint8Array {
@@ -43,56 +41,10 @@ function mp4ish(): Uint8Array {
   return b;
 }
 
-/** 等应用挂载（__vvOpenDirImpl 注入钩子 + TopBar 就绪；b-open-with-more 同款） */
-async function waitAppMounted(page: Page): Promise<void> {
-  await page.goto('/');
-  await page.waitForFunction(
-    () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
-  );
-  await expect(page.locator('.vv-topbar')).toBeVisible();
-}
-
-/** 目录注入通道（__vvOpenDirImpl；webkitRelativePath 首段 = 组名，只建目录 tab） */
-async function openDir(page: Page, name: string, bytes: Uint8Array): Promise<void> {
-  await page.evaluate(
-    ({ n, b }) => {
-      const f = new File([new Uint8Array(b)], n, { type: 'application/octet-stream' });
-      Object.defineProperty(f, 'webkitRelativePath', { value: `sig/${n}` });
-      return (window as unknown as { __vvOpenDirImpl: (f: File[]) => void }).__vvOpenDirImpl([f]);
-    },
-    { n: name, b: Array.from(bytes) }
-  );
-}
-
-/** 精确名 tab 定位（t-tab-actions tabNamed 同款：.vv-tab-name 子元素锚定） */
-function tabNamed(page: Page, name: string): Locator {
-  return page
-    .locator('.vv-tab')
-    .filter({
-      has: page.locator('.vv-tab-name', { hasText: new RegExp(`^${name.replace(REG_SPECIAL, '\\$&')}$`) })
-    });
-}
-
-/** 树行点击打开文件 tab（≤900px 抽屉断点适配，b-open-with-more 同款） */
-async function openFile(page: Page, name: string): Promise<void> {
-  const drawer = await openDrawerIfNarrow(page);
-  await page.locator('.vv-tree-row', { hasText: name }).click();
-  await closeDrawerIfOpened(page, drawer);
-  await expect(tabNamed(page, name)).toBeVisible({ timeout: 20_000 });
-}
-
-/** ≤600px 断点右栏（MetaPanel）收进抽屉（b-open-with-more 同款） */
-async function openRightIfNarrow(page: Page): Promise<boolean> {
-  const narrow = await page.evaluate(() => window.innerWidth <= 600);
-  if (!narrow) return false;
-  await page.locator('.vv-right-toggle').click();
-  return true;
-}
-
 /** 注入 → 开文件 tab → 断言改派锚（头注校准①②：候选面 rendererId option + value 自动） */
 async function openAndAssert(page: Page, name: string, bytes: Uint8Array, rendererId: string): Promise<void> {
   await waitAppMounted(page);
-  await openDir(page, name, bytes);
+  await openDirBytes(page, 'sig', name, bytes);
   await openFile(page, name);
   await openRightIfNarrow(page);
   const sel = page.locator('.meta-openwith');

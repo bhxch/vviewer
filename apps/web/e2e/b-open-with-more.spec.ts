@@ -1,5 +1,5 @@
-import { test, expect, type Locator, type Page } from '@playwright/test';
-import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
+import { test, expect } from '@playwright/test';
+import { openDirText, openFile, openRightIfNarrow, tabNamed, waitAppMounted } from './helpers';
 
 /**
  * 打开方式「更多渲染器」展开三入口 e2e（议题一，域文档条目 OWM-01~03）：
@@ -31,58 +31,10 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * toHaveValue('archive') 校准为「错误卡片上位（重渲染产物）+ 回退自动 + 徽标」，
  * OWM-02/03 同理断言徽标 + 重渲染产物而非 select value。
  *
- * 通道：目录注入经 __vvOpenDirImpl（b-binary-hex-archive :48-67 同款）+ 树行点击开
- * 文件 tab（openDir 只建目录 store tab，文件 tab 须树行打开——t-tab-actions 同款）。
- * default 套件双 project 全跑，窄视口经 drawer.ts / openRightIfNarrow 适配。
+ * 通道：目录注入经 __vvOpenDirImpl（helpers.ts openDirText，组名 owm）+ 树行点击开
+ * 文件 tab（helpers.ts openFile——只建目录 store tab，文件 tab 须树行打开）。
+ * default 套件双 project 全跑，窄视口经 helpers openFile/openRightIfNarrow 适配。
  */
-
-const REG_SPECIAL = /[.*+?^${}()|[\]\\]/g;
-
-/** 等应用挂载（__vvOpenDirImpl 注入钩子 + TopBar 就绪；t-tab-actions 同款） */
-async function waitAppMounted(page: Page): Promise<void> {
-  await page.goto('/');
-  await page.waitForFunction(
-    () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
-  );
-  await expect(page.locator('.vv-topbar')).toBeVisible();
-}
-
-/** 目录注入通道（__vvOpenDirImpl；label = webkitRelativePath 首段，只建目录 store tab） */
-async function openDir(page: Page): Promise<void> {
-  await page.waitForFunction(
-    () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
-  );
-  await page.evaluate(() => {
-    const f = new File(['hello vviewer'], 'aa.txt', { type: 'text/plain' });
-    Object.defineProperty(f, 'webkitRelativePath', { value: `owm/${f.name}` });
-    return (window as unknown as { __vvOpenDirImpl: (f: File[]) => void }).__vvOpenDirImpl([f]);
-  });
-}
-
-/** 精确名 tab 定位（t-tab-actions tabNamed 同款：.vv-tab-name 子元素锚定） */
-function tabNamed(page: Page, name: string): Locator {
-  return page
-    .locator('.vv-tab')
-    .filter({
-      has: page.locator('.vv-tab-name', { hasText: new RegExp(`^${name.replace(REG_SPECIAL, '\\$&')}$`) })
-    });
-}
-
-/** 树行点击打开文件 tab（≤900px 抽屉断点适配，t-tab-actions openFile 同款） */
-async function openFile(page: Page, name: string): Promise<void> {
-  const drawer = await openDrawerIfNarrow(page);
-  await page.locator('.vv-tree-row', { hasText: name }).click();
-  await closeDrawerIfOpened(page, drawer);
-  await expect(tabNamed(page, name)).toBeVisible();
-}
-
-/** ≤600px 断点右栏（MetaPanel）收进抽屉（t-open-with openRightIfNarrow 同款） */
-async function openRightIfNarrow(page: Page): Promise<boolean> {
-  const narrow = await page.evaluate(() => window.innerWidth <= 600);
-  if (!narrow) return false;
-  await page.locator('.vv-right-toggle').click();
-  return true;
-}
 
 test.describe('打开方式「更多渲染器」展开（OWM）', () => {
   test('OWM-01 MetaPanel：受限候选尾有「更多渲染器…」，激活后展开全量并可选 archive', async ({
@@ -90,7 +42,7 @@ test.describe('打开方式「更多渲染器」展开（OWM）', () => {
   }) => {
     test.setTimeout(60_000);
     await waitAppMounted(page);
-    await openDir(page);
+    await openDirText(page, 'owm', 'aa.txt', 'hello vviewer');
     await openFile(page, 'aa.txt');
     await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 20_000 });
 
@@ -138,7 +90,7 @@ test.describe('打开方式「更多渲染器」展开（OWM）', () => {
   test('OWM-02 状态栏浮层：「更多渲染器…」就地展开，选 JSON Lines 生效', async ({ page }) => {
     test.setTimeout(60_000);
     await waitAppMounted(page);
-    await openDir(page);
+    await openDirText(page, 'owm', 'aa.txt', 'hello vviewer');
     await openFile(page, 'aa.txt');
     await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 20_000 });
 
@@ -172,7 +124,7 @@ test.describe('打开方式「更多渲染器」展开（OWM）', () => {
   test('OWM-03 Tab 右键：打开方式 ▸ 更多渲染器 二级子菜单可选 PDF', async ({ page }) => {
     test.setTimeout(60_000);
     await waitAppMounted(page);
-    await openDir(page);
+    await openDirText(page, 'owm', 'aa.txt', 'hello vviewer');
     await openFile(page, 'aa.txt');
     await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 20_000 });
 
