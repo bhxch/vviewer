@@ -26,6 +26,8 @@
 
 三入口尾部各加「更多渲染器…」项，激活后在**原控件内就地展开**为「自动 + 全量渲染器」列表（附「收起附加候选」回受限视图）。选就地展开的理由：MetaPanel 用原生 `<select>` 无子菜单能力，就地展开是三壳（下拉/状态栏浮层/Tab 右键）可统一复用的唯一形态，零新组件。
 
+> 实施勘误：TabBar 壳因菜单项点击即关菜单，就地展开不可行，改为 TabCtxEntry 原生 children 二级子菜单（计划 Task 3 形态裁决），语义不变。
+
 - 展开态为各壳 UI 局部状态，**不持久化**（会话快照只存 override 本身，零新增）。
 - 选择任意渲染器（含展开项）= 既有 `setRendererOverride`（`tabsModel.svelte.ts:457`）同语义：per-tab、跳过探测链、（手动）徽标、进会话快照。**零新机制**。
 - e2e 锚更新：OWX 系候选项数变化逐锚更新（2026-10-23 spec 先例），涉及 `t-open-with.spec.ts`、`b-error-card-open-as.spec.ts` 等。
