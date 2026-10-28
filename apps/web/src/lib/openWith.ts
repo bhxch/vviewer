@@ -32,5 +32,6 @@ export function openWithOf(
   push('code');
   push('markdown'); // markdown 恒兜底（spec §3.1）：任何文件值得试 markdown 渲染，先例=hex 对 .md 出现
   push('hex');
-  return { current: overrideRenderer ?? '', manual: overrideRenderer !== undefined, options };
+  const all = registry.all().map((r) => ({ id: r.id, label: r.label }));
+  return { current: overrideRenderer ?? '', manual: overrideRenderer !== undefined, options, all };
 }

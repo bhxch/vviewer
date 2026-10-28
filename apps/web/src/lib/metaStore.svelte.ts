@@ -11,6 +11,9 @@ export interface FileOpenWith {
   manual: boolean;
   /** 候选项（去重后；头部恒有 { id: '', label: '自动（按扩展名）' }） */
   options: { id: string; label: string }[];
+  /** 全量渲染器候选（议题一 §2.1）：registry.all() 注册序，与受限 options 同点
+   * 算出；「更多渲染器」展开面数据源。error 未注册天然不在。 */
+  all: { id: string; label: string }[];
 }
 
 /** 数据检查器单行（render-binary decodeAt 输出的结构镜像——web 侧不依赖包内部

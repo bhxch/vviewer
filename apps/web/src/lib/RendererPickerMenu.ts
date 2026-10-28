@@ -8,6 +8,11 @@ import type { Registry } from '@vviewer/core';
 import type { FileOpenWith } from './metaStore.svelte';
 import { openWithOf } from './openWith';
 
+/** 「更多/收起附加候选」哨兵 id（议题一）：纯 UI 语义项，不进 FileOpenWith 数据面，
+ * 三壳渲染「更多渲染器…」/「收起」时作 option id 使用，选择处拦截面见各壳。 */
+export const MORE_RENDERER_ID = '__more__';
+export const LESS_RENDERER_ID = '__less__';
+
 /** 候选项：id '' = 「自动」（两壳选择即 tabStore.setRendererOverride(tabId, null)
  * 清除 override，MetaPanel onOpenWith 同语义）；current = 该候选当前生效。 */
 export interface RendererCandidate {

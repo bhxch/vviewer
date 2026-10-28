@@ -48,6 +48,14 @@ describe('openWithOf 存在性守卫（终审 Important 1）', () => {
     const noExt = openWithOf(makeRegistry(), undefined, 'code', '');
     expect(noExt.options.map((o) => o.id)).toEqual(['', 'code', 'markdown', 'hex']); // spec 2026-10-23 §3.1 markdown 恒兜底
   });
+
+  it('all = registry 全量（注册序），与受限 options 同点算出', () => {
+    const res = openWithOf(makeRegistry(), undefined, 'image', 'png');
+    // makeRegistry 安装序：code, markdown, image, hex
+    expect(res.all.map((o) => o.id)).toEqual(['code', 'markdown', 'image', 'hex']);
+    // 受限 options 不变（.png 命中 image，markdown/hex 恒兜底）
+    expect(res.options.map((o) => o.id)).toEqual(['', 'image', 'code', 'markdown', 'hex']);
+  });
 });
 
 describe('openWithOf markdown 恒兜底（spec 2026-10-23 §3.1）', () => {
