@@ -61,4 +61,22 @@ describe('refineEncoding 精判分层（议题三 §4.3）', () => {
     vi.doUnmock('chardet');
     vi.resetModules();
   });
+
+  it('GB18030 自匹配守卫：高置信 GB18030 在列时维持现状（fix round 1）', async () => {
+    vi.resetModules(); // 先清模块缓存（连带 chardetPromise 单例），mock 才能注入
+    // sbcs 错配居首（windows-1252:98）但 GB18030 高置信在列——真 GB18030 已被
+    // chardet 确认，现状解码正确，任何改写都是「今天正确 → 明天 mojibake」
+    vi.doMock('chardet', () => ({
+      analyse: () => [
+        { confidence: 98, name: 'windows-1252', lang: 'pt' },
+        { confidence: 95, name: 'GB18030', lang: 'zh' }
+      ]
+    }));
+    const { refineEncoding: refineMocked } = await import('../src/detect/encodingRefine');
+    const d = det();
+    await refineMocked(sjisBytes(), d);
+    expect(d.encoding).toBe('gb18030');
+    vi.doUnmock('chardet');
+    vi.resetModules();
+  });
 });
