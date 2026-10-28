@@ -20,6 +20,7 @@
 | jszip | MIT OR GPL-3.0（取 MIT） | zip 解析（render-archive 包） | M4 |
 | libarchive.js | MIT | tar/tgz/tbz2/xz/7z/rar 解析（render-archive 包，wasm+worker 静态资产） | M4 |
 | artplayer | MIT | 视频播放器（render-media 包，动态 import 不进主包） | M4 |
+| chardet | MIT | 文件编码重探测（core 精判分层，动态 import 不进主包） | 议题三 T8 |
 | hls.js | Apache-2.0 | HLS 流播放（render-media 包，仅 .m3u8 时动态 import） | M4 |
 | mpegts.js | Apache-2.0 | FLV/TS 流播放（render-media 包，仅 .flv/.ts 时动态 import） | M4 |
 | mammoth | BSD-2-Clause | docx 转 HTML（render-doc 包，动态 import 不进主包） | M4 |

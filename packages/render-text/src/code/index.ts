@@ -103,7 +103,7 @@ export const codeRenderer: Renderer = {
         // 该层可见；head 样本取 ctx.head（dispatcher 交付的探测头，与入口回退同源）
         onEncodingBroken: async () => {
           const full = await memoizedFullRead(ctx);
-          redetectWithFull(source, ctx.head, full, det);
+          await redetectWithFull(source, ctx.head, full, det);
           return renderCode(full, target, { ...renderOpts, encoding: det.encoding });
         }
       });
@@ -125,7 +125,7 @@ export const codeRenderer: Renderer = {
         // 截断多字节可双向误判（误判 gb18030 直接解码即整文件 mojibake）——以全量
         // 重算翻转（dispatcher redetectWithFull 同款共享 helper），encoding 随之重取
         //（服务端 X-VV-Encoding 头仍最优先），下游 renderCode 以现值解码
-        redetectWithFull(source, head, buffer, det);
+        await redetectWithFull(source, head, buffer, det);
         encoding = meta?.encoding ?? det.encoding;
         renderOpts.encoding = encoding;
       }

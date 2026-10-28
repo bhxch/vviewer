@@ -114,7 +114,11 @@ importers:
         specifier: ^7.4.1
         version: 7.4.1
 
-  packages/core: {}
+  packages/core:
+    dependencies:
+      chardet:
+        specifier: ^2.2.0
+        version: 2.2.0
 
   packages/highlight:
     dependencies:
@@ -1613,6 +1617,9 @@ packages:
   chai@6.3.0:
     resolution: {integrity: sha512-XWAtwJ6OHO+tj0EKCs0Y2UamnyOxseZWltU4x2U2wh8g4AigdjwvtUjvLP2tqkA/avxHEtzxNaqGq/YGNwckKg==}
     engines: {node: '>=18'}
+
+  chardet@2.2.0:
+    resolution: {integrity: sha512-rddelWYNPRrXq6PtNEN2S3f6t9ILzvqaN5pVgi4kqt9jHQaXIial9PznB5iSPVlQSLNaaH22ItWz3EJtQ10+OA==}
 
   chevrotain@13.2.0:
     resolution: {integrity: sha512-GTouk5YzgBxlTPCaDn5q0q2EJKkrYmnPF+HmF8v0Qo4r3iyPG7HJivkN1wthCXZcm3sIcZFpGTRovLPNdJNRCA==}
@@ -4601,6 +4608,8 @@ snapshots:
   caniuse-lite@1.0.30001815: {}
 
   chai@6.3.0: {}
+
+  chardet@2.2.0: {}
 
   chevrotain@13.2.0:
     dependencies:

@@ -271,7 +271,7 @@ function padLines(n: number, lineBytes: number): string {
 }
 
 /** gb18030 字节串构造（测试专用极简表：'中'=0xd6 0xd0，其余字符走 UTF-8 直通——
- * 仅用于构造「非 UTF-8 探测头」形态的假字节，解码侧由被测代码的 DECODERS 表承担） */
+ * 仅用于构造「非 UTF-8 探测头」形态的假字节，解码侧由被测代码的 decodeText 承担） */
 function gbBytes(rows: string[]): Uint8Array<ArrayBuffer> {
   const parts: number[] = [];
   for (const row of rows) {

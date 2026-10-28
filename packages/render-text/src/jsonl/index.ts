@@ -975,7 +975,7 @@ export const jsonlRenderer: Renderer = {
       // 多字节可双向误判（误判 gb18030 直接解码即整文件 mojibake）——以全量重算翻转
       // （dispatcher redetectWithFull 同款共享 helper）。误判 gb18030 翻转 utf-8 后，
       // 下方 renderJsonl 以 det.encoding 现值裁决 → 自然落窗口模式（渐进、正确解码）
-      redetectWithFull(source, head, buffer, det);
+      await redetectWithFull(source, head, buffer, det);
     }
     if (shouldDelegateToCode(buffer.byteLength)) {
       // >200MB：JSONL 逐行解析/逐卡高亮的内存与主线程成本失控，委托 code 纯文本
@@ -993,7 +993,7 @@ export const jsonlRenderer: Renderer = {
       // 探测头，与入口回退的 redetect 样本同源）
       onEncodingBroken: async () => {
         const full = await memoizedFullRead(ctx);
-        redetectWithFull(source, ctx.head, full, det);
+        await redetectWithFull(source, ctx.head, full, det);
         if (shouldDelegateToCode(full.byteLength)) {
           return renderCode(full, target, { encoding: det.encoding, ext: det.ext, highlight: false, oversizeNotice: true });
         }

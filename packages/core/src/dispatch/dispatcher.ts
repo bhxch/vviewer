@@ -1,6 +1,7 @@
 import type { ByteRange, Detection, FileSource, LineMetrics, RenderedInstance, Renderer, RendererId, StreamCtx } from '../types';
 import type { Registry } from '../registry/registry';
 import { detect } from '../detect';
+import { refineEncoding } from '../detect/encodingRefine';
 import { looksTextual, shebangLangOf } from '../detect/magic';
 import {
   errorRenderer,
@@ -56,16 +57,19 @@ const FULL_LIMIT = 1 << 20;
  * sniff/改派阶段纠偏（签名改派/extless/lang），整对象替换会回退纠偏；head/name 未变
  * → 其余字段复算值与初算一致（detect 纯函数可重入）。凡「补拉全量后解码」的入口
  * （本文件两处 + 渲染器守卫补拉）一律经此，防第五次遗漏。
+ * 议题三：合并后追加 chardet 精判（detect/encodingRefine，仅仍为 gb18030 才触发，
+ * 门控在 refineEncoding 内）——严格 UTF-8 失败文本的编码重探测定案于全量样本。
  */
-export function redetectWithFull(
+export async function redetectWithFull(
   source: FileSource,
   head: Uint8Array,
   full: Uint8Array,
   det: Detection
-): void {
+): Promise<void> {
   const redet = detect({ name: source.name, head, full });
   det.encoding = redet.encoding;
   det.binary = redet.binary;
+  await refineEncoding(full, det);
 }
 
 /** 签名 → 规范改派目标（BUG-13 与 BUG-07 无扩展名回退链共用的改派表）。
@@ -306,6 +310,10 @@ export function createDispatcher(registry: Registry): Dispatcher {
     }
     const head = probe.slice(0, HEAD_SIZE);
     const det = detect({ name: source.name, head, full: full !== null && full.length <= FULL_LIMIT ? full : undefined });
+    // 议题三初始精判：buffer 直传 >1MB 与 streaming-capable 永不补拉全量两路径的
+    // 编码在此定案；head-only→补拉路径后续 redetectWithFull 会再精判（gb18030 门控
+    // 抑制重复采纳，chardet 8KB 级毫秒成本）
+    if (det.encoding === 'gb18030') await refineEncoding(full ?? probe, det);
     // C 项：override 先于 byExtension 拦截：命中即用；id 未命中静默走正常探测链
     const override = opts?.rendererOverride === undefined ? undefined : registry.byId(opts.rendererOverride);
     // C 项：错误卡片 open-as 动作的重入闭包（同一 source/buffer/target 重派）。
@@ -370,7 +378,7 @@ export function createDispatcher(registry: Registry): Dispatcher {
           // 终审 F2：headOnly（size 未知）时 det 仅以 8KB head 短样本判编码（旧
           // 「≤1MB full 精判」退化面）——全量到手后重算恢复精判（共享 helper 见
           // redetectWithFull doc）。streaming 分支不动（io-streaming 计划 2 处理）。
-          redetectWithFull(source, head, full, det);
+          await redetectWithFull(source, head, full, det);
         }
         // 第 6 参透传（审计 R1 I-1）：render 级取消 signal——异步渲染器的迟到落定
         // （如 image 解码 await 窗）据此快速失败，abort 身份经下方 catch no-op 不上屏；
@@ -387,7 +395,7 @@ export function createDispatcher(registry: Registry): Dispatcher {
         // 终审 F2 镜像（T4 评审指令）：headOnly（size 未知/超限）streaming 降级路径的
         // det 同样仅以 8KB head 短样本判编码——降级全量到手后重算回填（openUrl 打开
         // url jsonl 可达；head 误判 utf-8 时尾部 mojibake）。共享 helper 见其 doc。
-        redetectWithFull(source, head, full, det);
+        await redetectWithFull(source, head, full, det);
       }
       // buffer 形参 = full ?? probe：capable 且 size 未知/超限 → head 探测块；否则全量
       const base = full ?? probe;
