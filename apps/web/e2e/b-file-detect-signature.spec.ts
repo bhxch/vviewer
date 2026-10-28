@@ -20,8 +20,10 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  *   - render 抛错（dispatch catch 返回 rendererId 'error'）：'error' 被 openWithOf
  *     存在性守卫滤除，但签名路由已纠偏 det.ext（mp4/webp/gz/7z），该渲染器经扩展名
  *     候选同面出现——无时序分叉。
- * ② 判别力：无扩展名文件在扩表前 signature=null → hex 兜底且 det.ext 恒 ''（无扩展名
- *   候选）→ 候选面必无 av/image/archive option；本锚只在 Task 5 扩表后转绿。
+ * ② 判别力：无扩展名文件在扩表前 signature=null → 探测链兜底（SIG-01/03/04 载荷含
+ *   NUL 落 hex；SIG-02 载荷全可打印 ASCII，looksTextual 判文本落 code）且 det.ext
+ *   恒 ''（无扩展名候选）→ 候选面必无 av/image/archive option；本锚只在 Task 5 扩表
+ *   后转绿。
  * ③ 载荷为垃圾字节：av/image/archive 的运行期错误卡片（无法播放/解码失败/无法识别
  *   压缩包）与本锚无关，可能异步出现，不断言（简报口径）。
  *
