@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { detect } from '../src/detect';
+import { detect, sniffSignature } from '../src/detect';
+import { signatureRouteOf } from '../src/dispatch/dispatcher';
 
 describe('detect chain', () => {
   it('extension + text', () => {
@@ -33,5 +34,61 @@ describe('detect chain', () => {
     const d = detect({ name: 'blob.dat', head: new Uint8Array([0xd6,0xd0,0xce,0xc4]) });
     expect(d.binary).toBe(true);
     expect(d.encoding).toBeUndefined();
+  });
+});
+
+describe('议题二：签名表扩容', () => {
+  const head = (bytes: number[]): Uint8Array => new Uint8Array(bytes);
+
+  it('ftyp 品牌分派：isom→mp4、M4A →m4a、avif→avif、未知品牌不命中', () => {
+    const mk = (brand: string): Uint8Array => {
+      const b = new Uint8Array(12);
+      b.set([0x00, 0x00, 0x00, 0x18], 0);
+      b.set(new TextEncoder().encode('ftyp'), 4);
+      b.set(new TextEncoder().encode(brand), 8);
+      return b;
+    };
+    expect(sniffSignature(mk('isom'))).toBe('mp4');
+    expect(sniffSignature(mk('mp42'))).toBe('mp4');
+    expect(sniffSignature(mk('M4A '))).toBe('m4a');
+    expect(sniffSignature(mk('avif'))).toBe('avif');
+    expect(sniffSignature(mk('avis'))).toBe('avif');
+    expect(sniffSignature(mk('xxxx'))).toBeNull();
+  });
+
+  it('强签名族逐值命中', () => {
+    expect(sniffSignature(head([0x1a, 0x45, 0xdf, 0xa3]))).toBe('webm');
+    expect(sniffSignature(new TextEncoder().encode('RIFF0000WEBP') as unknown as Uint8Array)).toBe('webp');
+    expect(sniffSignature(new TextEncoder().encode('RIFF0000WAVE') as unknown as Uint8Array)).toBe('wav');
+    expect(sniffSignature(head([0, 0, 1, 0, 0, 0]))).toBe('ico');
+    expect(sniffSignature(head([0x1f, 0x8b, 0x08, 0x00]))).toBe('gz');
+    expect(sniffSignature(head([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]))).toBe('7z');
+    expect(sniffSignature(head([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00]))).toBe('rar');
+    expect(sniffSignature(new TextEncoder().encode('fLaC') as unknown as Uint8Array)).toBe('flac');
+    expect(sniffSignature(new TextEncoder().encode('OggS') as unknown as Uint8Array)).toBe('ogg');
+  });
+
+  it('bmp 保留字段强校验：BM+保留四字节非零不命中（文本 "BM…" 防误伤）', () => {
+    const bmp = head([0x42, 0x4d, 0x46, 0x00, 0x00, 0x00, 0, 0, 0, 0, 0, 0]);
+    expect(sniffSignature(bmp)).toBe('bmp');
+    const fake = new TextEncoder().encode('BMW M4 文档') as unknown as Uint8Array;
+    expect(sniffSignature(fake)).toBeNull();
+  });
+
+  it('SIGNATURE_ROUTES 全新值有路由且 ext 纠偏正确（ole 维持无路由）', () => {
+    expect(signatureRouteOf('mp4')).toEqual({ rendererId: 'av', ext: 'mp4' });
+    expect(signatureRouteOf('m4a')).toEqual({ rendererId: 'av', ext: 'm4a' });
+    expect(signatureRouteOf('avif')).toEqual({ rendererId: 'image', ext: 'avif' });
+    expect(signatureRouteOf('webm')).toEqual({ rendererId: 'av', ext: 'webm' });
+    expect(signatureRouteOf('webp')).toEqual({ rendererId: 'image', ext: 'webp' });
+    expect(signatureRouteOf('wav')).toEqual({ rendererId: 'av', ext: 'wav' });
+    expect(signatureRouteOf('ico')).toEqual({ rendererId: 'image', ext: 'ico' });
+    expect(signatureRouteOf('gz')).toEqual({ rendererId: 'archive', ext: 'gz' });
+    expect(signatureRouteOf('7z')).toEqual({ rendererId: 'archive', ext: '7z' });
+    expect(signatureRouteOf('rar')).toEqual({ rendererId: 'archive', ext: 'rar' });
+    expect(signatureRouteOf('flac')).toEqual({ rendererId: 'av', ext: 'flac' });
+    expect(signatureRouteOf('ogg')).toEqual({ rendererId: 'av', ext: 'ogg' });
+    expect(signatureRouteOf('bmp')).toEqual({ rendererId: 'image', ext: 'bmp' });
+    expect(signatureRouteOf('ole')).toBeNull();
   });
 });

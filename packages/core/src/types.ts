@@ -79,7 +79,8 @@ export interface Detection {
   /** C 项探测改派标记：内容探测/签名改派生效时记录原扩展名（原生无扩展名不置位（保持 undefined））；
    * 渲染器/错误卡片据此显示「已按内容识别」提示。原生路由不置位。 */
   reclassifiedFrom?: string;
-  signature?: 'zip' | 'ole' | 'png' | 'jpeg' | 'gif' | 'pdf' | 'mpegts' | null;
+  signature?: 'zip' | 'ole' | 'png' | 'jpeg' | 'gif' | 'pdf' | 'mpegts'
+    | 'mp4' | 'm4a' | 'avif' | 'webm' | 'webp' | 'wav' | 'ico' | 'gz' | '7z' | 'rar' | 'flac' | 'ogg' | 'bmp' | null;
 }
 
 export type RendererId = string;

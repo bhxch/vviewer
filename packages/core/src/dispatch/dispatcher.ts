@@ -82,7 +82,22 @@ const SIGNATURE_ROUTES: Partial<Record<NonNullable<Detection['signature']>, Sign
   jpeg: { rendererId: 'image', ext: 'jpg' },
   gif: { rendererId: 'image', ext: 'gif' },
   pdf: { rendererId: 'pdf', ext: 'pdf' },
-  mpegts: { rendererId: 'av', ext: 'ts' }
+  mpegts: { rendererId: 'av', ext: 'ts' },
+  // 议题二扩表（spec §3.2）：ext 为渲染器内部分派/错误文案纠偏值，与 av VIDEO_EXTS/
+  // image/archive 扩展名声明对齐；ole 无专用渲染器维持不改派（既有裁决）
+  mp4: { rendererId: 'av', ext: 'mp4' },
+  m4a: { rendererId: 'av', ext: 'm4a' },
+  avif: { rendererId: 'image', ext: 'avif' },
+  webm: { rendererId: 'av', ext: 'webm' },
+  webp: { rendererId: 'image', ext: 'webp' },
+  wav: { rendererId: 'av', ext: 'wav' },
+  ico: { rendererId: 'image', ext: 'ico' },
+  gz: { rendererId: 'archive', ext: 'gz' },
+  '7z': { rendererId: 'archive', ext: '7z' },
+  rar: { rendererId: 'archive', ext: 'rar' },
+  flac: { rendererId: 'av', ext: 'flac' },
+  ogg: { rendererId: 'av', ext: 'ogg' },
+  bmp: { rendererId: 'image', ext: 'bmp' }
 };
 
 /** 签名的规范改派目标；无签名或无路由签名（ole）返回 null */
