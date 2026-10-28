@@ -121,8 +121,10 @@ import SearchPanel from './SearchPanel.svelte';
   }
 
   /** 浮层项列表（议题一 §2.2）：收起态 = 受限候选 +「更多渲染器…」哨兵；展开态 =
-   * 全量候选 +「收起附加候选」哨兵，就地切换。哨兵仅 UI 语义（不进数据面），
-   * 选择处 pickRenderer 拦截，项形态与受限候选同构（✓/aria-current 标记复用）。 */
+   * 「自动」头项 + 全量候选 +「收起附加候选」哨兵，就地切换（头项与 MetaPanel
+   * openWithOptions 展开分支对称，current 为 '' 时 ✓ 落在自动项）。哨兵仅 UI
+   * 语义（不进数据面），选择处 pickRenderer 拦截，项形态与受限候选同构
+   * （✓/aria-current 标记复用）。 */
   const pickerItems = $derived.by(() => {
     const ow = openWithFull;
     if (!ow) return [];
@@ -130,7 +132,11 @@ import SearchPanel from './SearchPanel.svelte';
       id: o.id, label: o.label, current: o.id === ow.current
     });
     return pickerExpanded
-      ? [...ow.all.map(mark), { id: LESS_RENDERER_ID, label: '收起附加候选', current: false }]
+      ? [
+          { id: '', label: '自动（按扩展名）', current: ow.current === '' },
+          ...ow.all.map(mark),
+          { id: LESS_RENDERER_ID, label: '收起附加候选', current: false }
+        ]
       : [...openWithCandidates, { id: MORE_RENDERER_ID, label: '更多渲染器…', current: false }];
   });
 
