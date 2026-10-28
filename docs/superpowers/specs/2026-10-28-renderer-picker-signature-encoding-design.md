@@ -47,7 +47,7 @@
 
 | 签名 | 字节（head 偏移） | 改派目标（det.ext 纠偏） | 强度说明 |
 |---|---|---|---|
-| mp4 系列 | `[4..7]=ftyp` + 品牌表（isom/mp42/msi→av('mp4')；m4a→av('m4a')；avif/avis→image('avif')） | 见品牌列 | ftyp box 强；品牌字节收窄分派；**未列品牌不命中**（保守落探测链） |
+| mp4 系列 | `[4..7]=ftyp` + 品牌表（isom/iso2/mp41/mp42/msnv/'m4v '→av('mp4')；'M4A '→av('m4a')；avif/avis→image('avif')） | 见品牌列 | ftyp box 强；品牌字节收窄分派；**未列品牌不命中**（保守落探测链） |
 | webm/mkv | `1A 45 DF A3` | av('webm') | 4 字节强 |
 | webp | `RIFF` + `[8..11]=WEBP` | image('webp') | 8 字节强 |
 | wav | `RIFF` + `[8..11]=WAVE` | av('wav') | 8 字节强 |
