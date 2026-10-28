@@ -513,8 +513,9 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-tabctx-item[aria-disabled='true'] { color: var(--ui-fg-muted); opacity: .55; cursor: default; }
 .vv-tabctx-item[aria-disabled='true']:hover { background: none; }
 /* 「打开方式」子菜单（Task 3 壳 B）：absolute 于 .vv-tabctx（fixed 即 absolute
-   后代的包含块），坐标由组件按父项 offset 内联给出；观感与主浮层一致，当前项
-   ✓ 前缀（TabBar 组装）+ accent 着色。aria-expanded 父项保持 hover 底色。 */
+   后代的包含块；「更多渲染器」二级子菜单同理 absolute 于上一层 .vv-tabctx-sub），
+   坐标由组件按父项 offset（锚按钮 offsetParent 即宿层）内联给出；观感与主浮层一致，
+   当前项 ✓ 前缀（TabBar 组装）。aria-expanded 父项保持 hover 底色。 */
 .vv-tabctx-sub { position: absolute; min-width: 12em; padding: 4px; display: flex;
   flex-direction: column; background: var(--ui-tab-active-bg); border: 1px solid var(--ui-border);
   border-radius: 6px; box-shadow: 0 4px 16px rgb(0 0 0 / 18%); }

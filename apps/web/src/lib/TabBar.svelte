@@ -67,7 +67,9 @@
    * pinned 动态换「固定 / 取消固定」标签。末项「打开方式」（Task 3 壳 B）：候选
    * 经 rendererCandidatesOfTab（与 MetaPanel 下拉/状态栏指示器同源同集；未渲染
    * 过的 tab 以名称扩展名兜底），当前项 ✓ 前缀标记，选择走 setRendererOverride
-   * （'' = null 清 override，MetaPanel onOpenWith 同语义）——pinned 等既有语义不受影响。
+   * （'' = null 清 override，MetaPanel onOpenWith 同语义）——pinned 等既有语义不受
+   * 影响。其中「更多渲染器」二级子菜单（TabCtxEntry children 递归）= registry 全量
+   * （语义不变：默认受限、更多=任意），✓ 按显式 overrideRenderer 回显。
    */
   // 回调显式标注返回 TabCtxEntry[]：字面量数组的联合推断会给缺省属性填
   // `undefined` 型，过不了 $derived 泛型边界（子菜单父项无 onClick 的推断面）
@@ -95,10 +97,22 @@
       },
       {
         label: '打开方式',
-        children: rendererCandidatesOfTab(registry, tab).map((c) => ({
-          label: c.current ? `✓ ${c.label}` : c.label,
-          onClick: () => tabStore.setRendererOverride(tab.id, c.id === '' ? null : c.id)
-        }))
+        children: [
+          ...rendererCandidatesOfTab(registry, tab).map((c) => ({
+            label: c.current ? `✓ ${c.label}` : c.label,
+            onClick: () => tabStore.setRendererOverride(tab.id, c.id === '' ? null : c.id)
+          })),
+          {
+            label: '更多渲染器',
+            children: registry.all().map((r) => ({
+              label:
+                tab.overrideRenderer !== undefined && r.id === tab.overrideRenderer
+                  ? `✓ ${r.label}`
+                  : r.label,
+              onClick: () => tabStore.setRendererOverride(tab.id, r.id)
+            }))
+          }
+        ]
       },
       {
         // 语言轻入口（Task 6）：只读文案 + 跳转（属性面板聚焦语言行，AppShell 监听
