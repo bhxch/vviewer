@@ -68,8 +68,10 @@
    * 经 rendererCandidatesOfTab（与 MetaPanel 下拉/状态栏指示器同源同集；未渲染
    * 过的 tab 以名称扩展名兜底），当前项 ✓ 前缀标记，选择走 setRendererOverride
    * （'' = null 清 override，MetaPanel onOpenWith 同语义）——pinned 等既有语义不受
-   * 影响。其中「更多渲染器」二级子菜单（TabCtxEntry children 递归）= registry 全量
-   * （语义不变：默认受限、更多=任意），✓ 按显式 overrideRenderer 回显。
+   * 影响。其中「更多渲染器」二级子菜单（TabCtxEntry children 递归）= 「自动」头项
+   * + registry 全量（语义不变：默认受限、更多=任意），✓ 按显式 overrideRenderer
+   * 回显（头项在 overrideRenderer === undefined 时打 ✓——自动路由无显式 override，
+   * 与受限面/展开面的「自动」头项同形；终审 M-1 补齐缺落的头项）。
    */
   // 回调显式标注返回 TabCtxEntry[]：字面量数组的联合推断会给缺省属性填
   // `undefined` 型，过不了 $derived 泛型边界（子菜单父项无 onClick 的推断面）
@@ -104,13 +106,23 @@
           })),
           {
             label: '更多渲染器',
-            children: registry.all().map((r) => ({
-              label:
-                tab.overrideRenderer !== undefined && r.id === tab.overrideRenderer
-                  ? `✓ ${r.label}`
-                  : r.label,
-              onClick: () => tabStore.setRendererOverride(tab.id, r.id)
-            }))
+            children: [
+              // 「自动」头项（终审 M-1，受限面/状态栏浮层展开面同形）：✓ 按
+              // overrideRenderer === undefined 打标（未显式 override 即自动路由），
+              // 点击清 override 回自动（onOpenWith 选「自动」= null 同语义）
+              {
+                label:
+                  tab.overrideRenderer === undefined ? '✓ 自动（按扩展名）' : '自动（按扩展名）',
+                onClick: () => tabStore.setRendererOverride(tab.id, null)
+              },
+              ...registry.all().map((r) => ({
+                label:
+                  tab.overrideRenderer !== undefined && r.id === tab.overrideRenderer
+                    ? `✓ ${r.label}`
+                    : r.label,
+                onClick: () => tabStore.setRendererOverride(tab.id, r.id)
+              }))
+            ]
           }
         ]
       },

@@ -59,6 +59,15 @@
   /** 展开态（议题一 §2.2）：select 内就地切换受限候选 ↔ 全量候选，组件局部不持久化 */
   let openWithExpanded = $state(false);
 
+  // 展开态随激活 tab 切换复位（终审 M-5）：展开面是「当前 tab 全量候选」的临时
+  // 视图，切 tab 不复位会把上一 tab 的展开态残留到下一 tab。effect 依赖=激活 tab
+  // id（runes 下读 tabStore 深代理自动追踪），复位写的是非依赖的展开态——无自读
+  // 自写环；挂载首跑即复位为 false（初值同值，零副作用）。
+  $effect(() => {
+    void tabStore.list.find((t) => t.active)?.id;
+    openWithExpanded = false;
+  });
+
   const openWithOptions = $derived.by(() => {
     const ow = openWithUi;
     if (!ow) return [];

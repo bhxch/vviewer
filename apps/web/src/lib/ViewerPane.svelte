@@ -91,6 +91,14 @@ import SearchPanel from './SearchPanel.svelte';
   let pickerEl = $state<HTMLElement | null>(null);
   let pickerBtn = $state<HTMLElement | null>(null);
 
+  // 浮层展开态随激活 tab 切换复位（终审 M-5，MetaPanel openWithExpanded 同款）：
+  // 依赖=激活 tab id（tabStore 深代理读自动追踪），复位写非依赖的展开态——无自读
+  // 自写环。展开视图经 pickerItems 随 tab 派生重建，复位仅消除跨 tab 残留语义。
+  $effect(() => {
+    void tabStore.list.find((x) => x.active)?.id;
+    pickerExpanded = false;
+  });
+
   // 候选浮层关闭路径收敛（Task 3 壳 A；TabContextMenu 同款思路）：Esc / 外点 /
   // 菜单项点击（pickRenderer）。指示器钮豁免外点：pointerdown 先于 click，不豁免
   // 会先关后开闪层——toggle 由 click 承担。
