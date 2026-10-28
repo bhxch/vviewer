@@ -62,6 +62,8 @@ export async function refineEncoding(bytes: Uint8Array, det: Detection): Promise
     // 评审），防「今天正确 → 明天 mojibake」
     if (matches.some((m) => m.name.toLowerCase() === 'gb18030' && m.confidence >= CONFIDENCE_MIN)) return;
     const label = LABELS[best.name.toLowerCase()];
+    // label !== 'gb18030' 为防御性条件：LABELS 现无该键（GB18030 走自匹配守卫前置
+    // return），未来误加键时此条件兜底
     if (label !== undefined && label !== 'gb18030') det.encoding = label;
   } catch {
     // 探测器加载/分析失败：维持 gb18030（永不比今天更差）
