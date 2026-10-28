@@ -65,17 +65,25 @@ export interface TreeStore {
 }
 
 /**
+ * Encoding 值单源（终审 I-1）：联合类型由本常量数组派生，需「全量编码值清单」的
+ * 运行时消费点（remote.ts X-VV-Encoding 响应头白名单等）直接 import 本数组，
+ * 扩列时不再出现「类型扩了、运行时白名单漏跟」的静默丢弃。
+ */
+export const ENCODING_VALUES = [
+  'utf-8', 'utf-16le', 'utf-16be', 'utf-32le', 'utf-32be', 'gb18030',
+  'shift_jis', 'euc-jp', 'iso-2022-jp', 'euc-kr', 'big5',
+  'windows-1250', 'windows-1251', 'windows-1252', 'windows-1253', 'windows-1254',
+  'windows-1255', 'windows-1256', 'windows-1257', 'windows-1258',
+  'koi8-r', 'ibm866', 'iso-8859-2', 'iso-8859-5', 'iso-8859-7', 'iso-8859-15',
+  'x-mac-cyrillic'
+] as const;
+
+/**
  * 议题三扩列（§4.3）：追加 chardet 精判白名单标签——仅「严格 UTF-8 失败的文本」经
  * 精判分层（detect/encodingRefine）采纳，置信度 + 白名单双闸，映射外维持 gb18030。
  * 消费面：strategy.ts DECODERS（TextDecoder 标签表，编译期强制同步）与 decodeText。
  */
-export type Encoding =
-  | 'utf-8' | 'utf-16le' | 'utf-16be' | 'utf-32le' | 'utf-32be' | 'gb18030'
-  | 'shift_jis' | 'euc-jp' | 'iso-2022-jp' | 'euc-kr' | 'big5'
-  | 'windows-1250' | 'windows-1251' | 'windows-1252' | 'windows-1253' | 'windows-1254'
-  | 'windows-1255' | 'windows-1256' | 'windows-1257' | 'windows-1258'
-  | 'koi8-r' | 'ibm866' | 'iso-8859-2' | 'iso-8859-5' | 'iso-8859-7' | 'iso-8859-15'
-  | 'x-mac-cyrillic';
+export type Encoding = typeof ENCODING_VALUES[number];
 
 export interface Detection {
   ext: string;            // 小写无点；无扩展名为 ''（签名纠偏后为规范扩展名）

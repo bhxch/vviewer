@@ -1,4 +1,5 @@
 import type { ByteRange, Encoding, TreeStore, TreeNode } from '../types';
+import { ENCODING_VALUES } from '../types';
 import { anySignal } from './signals';
 import { hash8 } from './singleFile';
 
@@ -85,7 +86,10 @@ export function normalizeServerBase(input: string): string {
   return withScheme.replace(/^([a-z][a-z0-9+.-]*:\/\/[^/]+)\/api$/i, '$1');
 }
 
-const ENCODINGS: readonly string[] = ['utf-8', 'utf-16le', 'utf-16be', 'gb18030'];
+// 单源自 ENCODING_VALUES（终审 I-1）：本表曾独立维护 4 值白名单，Encoding 扩列后
+// 新标签（shift_jis 等）经 asEncoding 被静默丢弃——现随 types.ts 派生数组同步，扩列
+// 单点生效。
+const ENCODINGS: readonly string[] = ENCODING_VALUES;
 
 /**
  * 实例身份令牌（storeRelease 的代理免疫比较用）：Svelte $state 深代理的

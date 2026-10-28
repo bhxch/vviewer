@@ -128,6 +128,18 @@ describe('createRemoteStore', () => {
     expect(getRemoteMeta(store.id, 'plain.txt')).toBeUndefined();
   });
 
+  // 终审 I-1：X-VV-Encoding 白名单单源自 ENCODING_VALUES 后，扩列值不再被静默丢弃
+  //（shift_jis 曾不在白名单内，asEncoding 返回 undefined）
+  it('read with expanded encoding header (shift_jis) stores meta', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => fileResponse(new Uint8Array([9]), { 'x-vv-encoding': 'shift_jis' }))
+    );
+    const store = createRemoteStore('http://127.0.0.1:8321', null, 'sjis-srv');
+    await store.read('log.txt');
+    expect(getRemoteMeta(store.id, 'log.txt')).toEqual({ encoding: 'shift_jis' });
+  });
+
   it('read with lang-only header stores partial meta', async () => {
     vi.stubGlobal(
       'fetch',
