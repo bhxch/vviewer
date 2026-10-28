@@ -14,7 +14,7 @@
   // 无 props 是 C 项约束）。样式在 app.css（区块全局类，与 .meta-list 同层）。
   import { fileMeta, setInspectorLittle, exportState, getExportDoc } from './metaStore.svelte';
   import { tabStore } from './openFlow.svelte';
-  import { rendererCandidatesOfTab } from './RendererPickerMenu';
+  import { MORE_RENDERER_ID, LESS_RENDERER_ID, rendererCandidatesOfTab } from './RendererPickerMenu';
   import { detectableLanguageNames } from '@vviewer/highlight';
   import { registry } from './viewer';
   import {
@@ -40,9 +40,10 @@
 
   /** 打开方式候选（spec §3.2 常驻）：自激活 tab 直接计算（TabBar 同款），不随
    * meta 实例出现/消失——metaStore 上行仅作回显兜底。rendererCandidatesOfTab
-   * 返回候选数组，此处聚合成 select 所需的 {current, manual, options} 形状：
+   * 返回候选数组，此处聚合成 select 所需的 {current, manual, options, all} 形状：
    * current 取候选中的 current 项（override id 未注册被守卫滤除时落「自动」），
-   * manual 沿用 openWithOf 语义（override 存在即手动，含未注册 id 场景）。 */
+   * manual 沿用 openWithOf 语义（override 存在即手动，含未注册 id 场景）；
+   * all 为 registry 全量（本组件不经 openWithOf，就地补「更多渲染器」展开面）。 */
   const openWithUi = $derived.by(() => {
     const tab = tabStore.list.find((t) => t.active);
     if (!tab) return null;
@@ -50,9 +51,32 @@
     return {
       options: candidates,
       current: candidates.find((c) => c.current)?.id ?? '',
-      manual: tab.overrideRenderer !== undefined
+      manual: tab.overrideRenderer !== undefined,
+      all: registry.all().map((r) => ({ id: r.id, label: r.label }))
     };
   });
+
+  /** 展开态（议题一 §2.2）：select 内就地切换受限候选 ↔ 全量候选，组件局部不持久化 */
+  let openWithExpanded = $state(false);
+
+  const openWithOptions = $derived.by(() => {
+    const ow = openWithUi;
+    if (!ow) return [];
+    if (openWithExpanded) {
+      return [
+        { id: '', label: '自动（按扩展名）' },
+        ...ow.all,
+        { id: LESS_RENDERER_ID, label: '收起附加候选' }
+      ];
+    }
+    return [...ow.options, { id: MORE_RENDERER_ID, label: '更多渲染器…' }];
+  });
+
+  function onOpenWithChange(id: string): void {
+    if (id === MORE_RENDERER_ID) { openWithExpanded = true; return; }
+    if (id === LESS_RENDERER_ID) { openWithExpanded = false; return; }
+    onOpenWith(id);
+  }
 
   // ---------- 语言行（renderer-lang-override spec §4.2，Task 5）：手动高亮语言主入口 ----------
   // datalist 候选（detectableLanguageNames，grammar 清单 canonical 名字典序）随组件
@@ -205,9 +229,9 @@
               class="meta-openwith"
               aria-label="打开方式"
               value={openWithUi.current}
-              onchange={(e) => onOpenWith(e.currentTarget.value)}
+              onchange={(e) => onOpenWithChange(e.currentTarget.value)}
             >
-              {#each openWithUi.options as opt (opt.id)}
+              {#each openWithOptions as opt (opt.id)}
                 <option value={opt.id}>{opt.label}</option>
               {/each}
             </select>

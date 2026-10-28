@@ -9,7 +9,7 @@
   import { setFileMeta, setInspector, inspectorBus, setExportHandle, fileMeta, type FileOpenWith, type InspectorSnapshot } from './metaStore.svelte';
   import { requestMetaLangFocus } from './metaLangFocus';
   import { openWithOf } from './openWith';
-  import { candidatesOf, type RendererCandidate } from './RendererPickerMenu';
+  import { candidatesOf, MORE_RENDERER_ID, LESS_RENDERER_ID, type RendererCandidate } from './RendererPickerMenu';
   import { mergeAbortSignals } from './mergeAbortSignals';
   import { dispatcher, registry, cancelMarkdownRemote } from './viewer';
   import { cancelHighlight } from './highlightClient';
@@ -84,6 +84,9 @@ import SearchPanel from './SearchPanel.svelte';
   let rendererLabel = $state('');
   let detLabel = $state('');
   let openWithCandidates = $state<RendererCandidate[]>([]);
+  // 候选浮层数据（议题一）：受限候选照旧，另持 openWithOf 全量结果供展开面
+  let openWithFull = $state<FileOpenWith | null>(null);
+  let pickerExpanded = $state(false);
   let pickerOpen = $state(false);
   let pickerEl = $state<HTMLElement | null>(null);
   let pickerBtn = $state<HTMLElement | null>(null);
@@ -117,9 +120,25 @@ import SearchPanel from './SearchPanel.svelte';
     pickerOpen = !pickerOpen;
   }
 
+  /** 浮层项列表（议题一 §2.2）：收起态 = 受限候选 +「更多渲染器…」哨兵；展开态 =
+   * 全量候选 +「收起附加候选」哨兵，就地切换。哨兵仅 UI 语义（不进数据面），
+   * 选择处 pickRenderer 拦截，项形态与受限候选同构（✓/aria-current 标记复用）。 */
+  const pickerItems = $derived.by(() => {
+    const ow = openWithFull;
+    if (!ow) return [];
+    const mark = (o: { id: string; label: string }) => ({
+      id: o.id, label: o.label, current: o.id === ow.current
+    });
+    return pickerExpanded
+      ? [...ow.all.map(mark), { id: LESS_RENDERER_ID, label: '收起附加候选', current: false }]
+      : [...openWithCandidates, { id: MORE_RENDERER_ID, label: '更多渲染器…', current: false }];
+  });
+
   /** 双入口共用选择语义（MetaPanel onOpenWith 同款）：'' = 清除 override 回自动，
    * 其余写持久 override——rev++ 复用渲染 effect 重跑通道即时生效。 */
   function pickRenderer(id: string): void {
+    if (id === MORE_RENDERER_ID) { pickerExpanded = true; return; }
+    if (id === LESS_RENDERER_ID) { pickerExpanded = false; return; }
     pickerOpen = false;
     const t = tab;
     if (!t) return;
@@ -369,6 +388,7 @@ import SearchPanel from './SearchPanel.svelte';
         // 供右键子菜单（壳 B）经 rendererCandidatesOfTab 离线组装。
         const ow = openWithOf(registry, current.overrideRenderer, res.rendererId, res.det.ext);
         openWithCandidates = candidatesOf(ow);
+        openWithFull = ow;
         rendererLabel = registry.byId(res.rendererId)?.label ?? ''; // 'error' 等未注册 id → 指示器隐藏
         detLabel = res.det.ext;
         current.lastRendererId = res.rendererId;
@@ -428,6 +448,7 @@ import SearchPanel from './SearchPanel.svelte';
         rendererLabel = '';
         detLabel = '';
         openWithCandidates = [];
+        openWithFull = null;
         pickerOpen = false;
         setFileMeta({ name: current.source.name, sourceLabel: current.source.storeLabel });
       }
@@ -441,6 +462,7 @@ import SearchPanel from './SearchPanel.svelte';
       rendererLabel = ''; // Task 3 指示器随实例销毁清空（候选/浮层一并复位）
       detLabel = '';
       openWithCandidates = [];
+      openWithFull = null;
       pickerOpen = false;
       setFileMeta(null); // tab 切换/销毁：属性面板随之清空
       setExportHandle(null); // tab 切换/销毁：导出动作区随句柄清空（md-export Task 2）
@@ -497,7 +519,7 @@ import SearchPanel from './SearchPanel.svelte';
          已有，SearchPanel 同锚），状态栏上方左对齐；项形态对齐 .vv-tabctx-item，
          当前项以 ✓ 前缀 + aria-current 标记（右键子菜单同款） -->
     <div class="vv-status-picker" role="menu" aria-label="打开方式" bind:this={pickerEl}>
-      {#each openWithCandidates as c (c.id)}
+      {#each pickerItems as c (c.id)}
         <button
           type="button"
           class="vv-status-picker-item"
@@ -506,7 +528,7 @@ import SearchPanel from './SearchPanel.svelte';
           onclick={() => pickRenderer(c.id)}>{c.current ? '✓ ' : ''}{c.label}</button
         >
       {/each}
-      <!-- 语言轻入口（Task 6）：浮层尾部固定项（非候选菜单项，openWithCandidates 之外），
+      <!-- 语言轻入口（Task 6）：浮层尾部固定项（非候选菜单项，pickerItems 之外），
            点击跳转属性面板聚焦语言行（requestMetaLangFocus 单通道，metaLangFocus.ts） -->
       <button type="button" class="vv-status-picker-lang" role="menuitem" onclick={focusMetaLang}>
         语言：{langOverrideText}
