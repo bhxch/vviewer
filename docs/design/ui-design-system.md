@@ -13,12 +13,12 @@
 1. **不改 DOM 结构与既有类名**。`.vv-*` / `.meta-*` / `.md-*` / `.vv-sc-*` 等类名是 e2e 主锚点，只允许改样式规则本身，不得改名、删除、合并元素。高频锚（rg 实测）：`.vv-code-pre`、`.vv-tab`、`.vv-error-card`、`.vv-tree-row`、`.vv-markdown`、`.vv-statusbar`、`.vv-topbar`、`.vv-search-count`、`.vv-shell.zen` 等。
 2. **overlay 根类名是运行时行为通道**：`AppShell.svelte:413-425` 的 `OVERLAY_SELECTOR`（`.vv-settings-center` / `.vv-mounts-manager` / `.vv-gsearch` / `.vv-quickopen` / `.vv-wspanel` / `.vv-search-panel` / `.vv-wscreate` / `.vv-remotesrc` / `.vv-tabctx` / `.vv-ws-pop` / `.vv-status-picker`）被 Esc 优先级与 zen 返回键判定实读 DOM 消费，改名破坏功能。
 3. **data-\* 锚点不可动**：`data-theme-mode`（e2e 38 处亮暗断言）、`data-pinned` + `.vv-tab-pinned` 双锚点（app.css:497-499 注释约定）、`data-drop-before`（tab 拖拽插入线方向）、`data-side`/`data-edge`（折叠三件套几何，b-layout-zen boundingBox 断言）、`data-line`（代码行定位）。
-4. **抽屉实现语义被 e2e 反向依赖**：`apps/web/e2e/drawer.ts:25-30` 以 `.vv-side` 的 computed `transform === 'none'` 判开合；`drawer.ts:25` 的 `DRAWER_MEDIA_QUERY = '(max-width: 900px)'` 与 AppShell `@media` 同一条件。**≤900 / ≤600 断点冻结**；确需调整须 JS（AppShell/TopBar matchMedia）+ CSS + e2e 三处同步。
+4. **抽屉实现语义被 e2e 反向依赖**：`apps/web/e2e/drawer.ts:28-33` 以 `.vv-side` 的 computed `transform === 'none'` 判开合；`drawer.ts:19` 的 `DRAWER_MEDIA_QUERY = '(max-width: 900px)'` 与 AppShell `@media` 同一条件。**≤900 / ≤600 断点冻结**；确需调整须 JS（AppShell/TopBar matchMedia）+ CSS + e2e 三处同步。
 5. **字号/字体联动链路不可断**：`--vv-ui-font-size` / `--vv-code-font-size` / `--vv-code-font` / `--vv-code-line-height` 由 `theme.ts applyFonts`（theme.ts:420-432）经 `style#vv-font` 注入，优先级高于 app.css；j/k 滚动步长经 `codeLineHeight(codeSize)` 联动（AppShell.svelte:795-797）。新字阶**必须 calc 派生自这两个变量**，禁止新增第三套硬编码 px 字号。
 6. **default 外观零漂移**：token 增量（§12.1）的默认值必须等于现状渲染值；`style#vv-code-theme` 注入体（`THEME_ROOT_SELECTOR` 四形态选择器，theme.ts:121-122）、`applyAppearance` / `applyFonts` 签名 diff 机制一律不触碰。痛点修复带来的**明示视觉变更**（如硬编码色换令牌、孤值收敛）不算漂移，但必须在 §12.2 逐项声明「变更」。
 7. **双端同步段不可单边修改**：app.css:107-110 明示 `.vv-markdown` 基础排版 / `.md-code-bar` / `.md-code-lang` / `.markdown-alert` 与 `render-text` 侧 `exportBaseCss` 是运行时复制关系（markdownExport.test.ts / export.test.ts 双向校验）；app.css:58-60 `.hljs-*` 段同；`.ts-*` 类清单与 `theme.ts CODE_CAPTURES` 一一对齐（theme.test.ts 校验）。动这些段落须双端同步。
 8. **丢失类以「新增全局类定义」补回**：`.vv-settings-label/hint/warn/empty/add/remove/toggle/patterns/pattern/presets` 被十个设置节组件模板引用、e2e 按现 DOM 断言（SearchSection preset 按钮的 aria-label 等），在 app.css 增补定义即可全量生效，**不得改为 scoped、不得改名迁移**（痛点审计 G4 红线）。
-9. **tab 定位语义**：`apps/web/e2e/helpers.ts:44-50` `tabNamed` 以 `.vv-tab-name` 子元素文本精确匹配定位 tab。换关闭字形、调 DOM 时不得让 `.vv-tab-name` 文本语义变化，不得把关闭钮并进 `.vv-tab-name`。
+9. **tab 定位语义**：`apps/web/e2e/helpers.ts:54-60` `tabNamed` 以 `.vv-tab-name` 子元素文本精确匹配定位 tab。换关闭字形、调 DOM 时不得让 `.vv-tab-name` 文本语义变化，不得把关闭钮并进 `.vv-tab-name`。
 10. **不改测试与依赖**；不引入外部 CSS 框架、CSS-in-JS、样式依赖。
 11. **`__vv*` 运行时探针通道不可删**（`__vvHighlightClient` / `__vvPaintProbe` / `__vvCopied` 等，e2e 与单测注入观测点）。
 
@@ -61,12 +61,12 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 
 - 三态 `data-theme-mode`（light/dark/system）写在 `<html>`，app.html:7-25 内联脚本首帧前预置（BUG-51 防 FOUC）；app.css 以 `:root` 默认（:2-21）、`:root[data-theme-mode="dark"]`（:22-30）、`@media (prefers-color-scheme: dark)` 内 `:root[data-theme-mode="system"]`（:31-41）三块级联。
 - **新增 `--ui-*` token 必须三块同写**（亮默认 + 暗 + system 媒体块内同暗值），漏一块即复现 `.vv-pdf-page-label` 事故（app.css:210-211 固定亮色 chip，暗色下刺眼白块——本轮必修）。
-- **新增 `--vv-*` 效果色默认双主题同值**（现状命中黄系即如此）；若某效果色在暗色下确实需要不同值，须升级为 `--ui-*` 并走三块。
+- **新增 `--vv-*` 效果色默认双主题同值**（现状命中黄系即如此）；若暗色下确需不同值，允许在暗色两块内显式覆盖，并在 §12.1/§12.2 声明理由与实测依据（先例：`--vv-hit-active`，见 §2.3 高亮组合表），不必强行升级为 `--ui-*`。
 - 修复：`.vv-pdf-page-label` 改 `color: var(--ui-fg-muted); background: color-mix(in srgb, var(--ui-bg) 80%, transparent)`（变更：暗色下不再白块）；`.vv-html-frame` 的 `background: #fff`（app.css:197）保留——沙箱内文档自身多为白底，属物理媒介色，但补 `outline` 由 `--ui-border` 承担边界的可见性。
 
 ### 2.3 WCAG AA 对比度底线
 
-底线（正文/控件文本 4.5:1；≥18.66px 粗体或 ≥24px 文本 3:1；边框/焦点环/图标等非文本 3:1；disabled 豁免）。
+口径声明：本规范对比度一律按 **WCAG 2.1 AA**（正文/控件文本 4.5:1；≥18.66px 粗体或 ≥24px 文本 3:1；边框/焦点环/图标等非文本 3:1；disabled 豁免）；触控目标口径见 §6.4（以 WCAG 2.2 AA 2.5.8 为底线）。**高亮背景 × 其上文字同属文本组合**，受 4.5:1 约束，实测见下方第二张表。
 
 **现有令牌实测（node 脚本，本会话运行）——全部达标，构成「安全底色板」：**
 
@@ -87,7 +87,15 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 | MountsManager.svelte:800/809/848 `.vv-mm-error` 等 | `#b91c1c` | 暗色 bg 上 2.92:1 | → `var(--ui-danger)` |
 | MountsManager.svelte:748/786 `.vv-mm-state[pending]` / `.vv-mm-warning` | `#b45309` | 暗色 bg 上 3.77:1 | → `var(--ui-warning)` |
 | MountsManager.svelte:751 `.vv-mm-state[offsite]` | `#6b7280` | 暗色 bg 上 3.91:1 | → `var(--ui-fg-muted)` |
-| 全库 `var(--ui-danger, #d33)` 死回退（app.css:397/573/578/585/655/657、SettingsCenter.svelte:688/693、StorageSection.svelte:297/306/315 等） | `#d33` | 白上 4.57:1 过、暗色上 4.14:1 不过 | `--ui-danger` 在亮暗两块恒被定义（app.css:16/26/36），回退永不生效——统一清掉 `#d33` 回退，裸写 `var(--ui-danger)` |
+| 全库 `var(--ui-danger, #d33)` 死回退（rg 全量 14 处声明：app.css:397/462/573/578/585/655/657、SettingsCenter.svelte:688/693、StorageSection.svelte:299/300/310/317、RemoteSourceModal.svelte:436） | `#d33` | 白上 4.57:1 过、暗色上 4.14:1 不过 | `--ui-danger` 在亮暗两块恒被定义（app.css:16/26/36），回退永不生效——统一清掉 `#d33` 回退，裸写 `var(--ui-danger)` |
+
+**高亮背景 × 其上文字组合实测（node 脚本，单层混入代码底后再对比 code-fg；本会话运行）：**
+
+| 组合 | 亮色 | 暗色 | 处置 |
+| --- | --- | --- | --- |
+| `mark.vv-search-hit-active`（rgb(255 160 0 / 80%)，app.css:313）× code-fg | 8.84:1 ✓ | **2.58:1 ✗** | 待处置：暗色两块覆盖 `--vv-hit-active: rgb(255 160 0 / 35%)`（实测 7.63:1 ✓）+ 1px inset 描边保「当前命中」区分度；mark 叠在 hit-line 之上为双层合成，实施后按叠加值复测 |
+| `.vv-gsearch-preview mark`（rgb(255 213 0 / 55%)，GlobalSearchPanel.svelte:394）× code-fg | — | **3.44:1 ✗** | 收敛为 `--vv-hit-bg` 45%（实测 4.61:1 ✓；§12.2-G3 变更） |
+| `mark.vv-search-hit` 45% / 行级 18% / 行级 active 35% × code-fg | 13.26 / — / —:1 ✓ | 4.61 / 10.61 / 7.63:1 ✓ | 保留 |
 
 **规则**：新写任何 `color`，候选只允许令牌；确需新色先入 §12.1 增量表。opacity 弱化（`opacity: .6/.7/.75`）禁止用于文本弱化（混合底色后对比度不可控）——一律 `color: var(--ui-fg-muted)`（MountsManager.svelte:680/738/754/758/791/795 六处待改）。
 
@@ -127,8 +135,8 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 规则：
 
 1. 全库硬编码 px 字号（rg 实测 114 处声明：12px×73、13px×23、11px×9、16px×3、15px×2、14px×2、18px×1、10px×1）**只允许收敛到上表 token**，逐一映射：12px→`--vv-fs-xs`、13px→`--vv-fs-sm`、11px→`--vv-fs-2xs`、15/14px 标题→`--vv-fs-md`。
-2. 孤值处置：15px 与 14px 全库各仅 1 处（SettingsCenter 标题/弹层标题，rg 实测），并入 `--vv-fs-md`；18px（zen 退出钮字形 AppShell.svelte:1316）与 16px（`.vv-sc-close` :573、灯箱钮 app.css:171）是**图形字形尺寸**，归 §6 图标字号档（12/14/16），不算文字字阶。
-3. 代码语义的 13px 硬编码改 `var(--vv-code-font-size, 13px)`：`.md-diagram-error`（app.css:147）、`.md-diagram-source code`（:152）、`.vv-hex-struct`（:227）、`.vv-xlsx-tab`（:271）、`.vv-xlsx-sheet`（:274）——代码面跟随用户代码字号，与 `.vv-hex-dump`（:218 已是变量）同法。
+2. 孤值处置（rg 复核：15px×2、14px×2，各含一处非 chrome 语义）：SettingsCenter.svelte:526 `15px`（`.vv-sc-title`）与 :742 `14px`（`.vv-sc-modaltitle`）并入 `--vv-fs-md`；app.css:258 `15px` 是 `.vv-docx-content` 渲染器文档正文字号，**不入 chrome 字阶**——改 `0.9375em` 相对继承字号，U=16px 时 15px 等值零漂移，且与 `.vv-markdown` 正文口径归一（同随用户字号联动）；app.css:330 `14px` 是 `.vv-strip-icon` 图形字形，归 §6 图标字号档。18px（zen 退出钮字形 AppShell.svelte:1316）与 16px（`.vv-sc-close` :573、灯箱钮 app.css:171）同为图形字形尺寸。
+3. 代码语义的 13px 硬编码改 `var(--vv-code-font-size, 13px)`：`.md-diagram-error`（app.css:147）、`.md-diagram-source code`（:152）、`.vv-hex-struct`（:227）、`.vv-xlsx-tab`（:271）、`.vv-xlsx-sheet`（:274）——代码面跟随用户代码字号，与 `.vv-hex-dump`（:218 已是变量）同法。**其中 `.md-diagram-error` 与 `.md-diagram-source code` 两规则位于 app.css:107-110 声明的导出复制域（图表段；packages/render-text/src/markdown/export.ts:111/114 逐字含同段），属双端同步义务：改须同步 render-text 侧 exportBaseCss，并跑 markdownExport.test.ts / export.test.ts（与 §2.4 markdown-alert 标注口径一致）。**
 4. **禁止**在组件 scoped style 再写裸 px 字号；e2e 若断言字号（现无）应锚 token 消费而非 px 值。
 
 ### 3.3 行高
@@ -166,7 +174,7 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 | 标准（表单行） | ≥28px | 设置节表单行、meta 行 | `--vv-sp-6` 纵向 gap，控件高 ≈ fs-sm + 2×4px |
 | 宽松（文档正文） | 1.6 | markdown/docx | 现状，勿动 |
 
-**三面板行密度统一**（痛点：quickopen `3px 10px` QuickOpenPanel.svelte:225-236 / gsearch `2px 10px 2px 18px` GlobalSearchPanel.svelte:366-377 / wspanel `3px 10px 3px 20px` app.css:449）：统一为 `padding: 3px 10px`；gsearch 的 18px 与 wspanel 的 20px 缩进改为行内前缀列（固定宽元素）承担，不再用不对称 padding。hover 底统一 `var(--ui-hover-bg)`——现状 side-bg 与 hover-bg 亮暗同值（#f6f8fa/#161b22，app.css:13-15 与 23-25），纯语义写法归一，**零视觉漂移**。
+**三面板行密度统一**（痛点：quickopen `3px 10px` QuickOpenPanel.svelte:225-236 / gsearch `2px 10px 2px 18px` GlobalSearchPanel.svelte:366-377 / wspanel `3px 10px 3px 20px` app.css:449）：统一为 `padding: 3px 10px`；缩进一律由**既有元素或纯 CSS 手段**承担，不新增 DOM（红线 1 无「装饰元素」豁免）——gsearch 已有固定宽前缀列 `.vv-gsearch-lncol`（84px，GlobalSearchPanel.svelte:381-387）可承接其 18px；wspanel 的 20px 缩进用伪元素定宽占位或 `text-indent` 纯 CSS 承接。hover 底统一 `var(--ui-hover-bg)`——现状 side-bg 与 hover-bg 亮暗同值（#f6f8fa/#161b22，app.css:13-15 与 23-25），纯语义写法归一，**零视觉漂移**。
 
 ### 4.4 z-index 惯例（现状实测，冻结为表）
 
@@ -228,8 +236,10 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 1. **单色字形白名单**（唯一允许集）：`✕`(U+2715 关闭) `✎`(U+270E 重命名) `✓`(U+2713 确认) `＋`(U+FF0B 新建) `↻`(U+21BB 刷新) `☰`(U+2630 抽屉) `ℹ`(U+2139 信息) `▸▾`(U+25B8/25BE 折叠) `⚙`(U+2699 设置)。**禁用彩色 emoji**：`🌳`（多数平台彩色渲染，与单色字形混排漂移）→ 折叠竖条文件树项改用白名单内 `▾`/`▸` 不合适，改用文本「树」（`.vv-strip-icon` 14px、竖条 28px 宽内可容纳 2 字）；`📁`（TopBar.svelte:382）同理改「目录」。`🔒` 退役：pinned 语义由斜体（app.css:499）+ title 承担，app.css:500 `::before` 的 `'🔒 '` content 置空、WorkspaceTabsPanel.svelte:243 span 内字符删除（改模板文本，非结构变更；e2e 锚定的是 `data-pinned`/`.vv-tab-pinned`，不锚字符）。
 2. **字形统一**：TabBar.svelte:287 的关闭钮 `×`(U+00D7) → `✕`(U+2715)，与全库其余 12 处关闭钮同码位（变更：宽度与视觉重量归一；`.vv-tab-name` 文本语义不变，红线 9 满足）。
 3. **尺寸与对齐**：图标字形所在元素 `line-height: 1`、`display: inline-flex; align-items: center`；字号三档——内联随文 12px、独立小钮 14px、浮钮 16px（zen 退出钮现 18px AppShell.svelte:1316 → 16px，44px 触控面不变）。纯图标钮必须带 `aria-label`（现状已合规，保持）。
-4. **触控目标**：指针环境可交互目标 ≥22px（`.vv-collapse-btn` 现 22px app.css:341-342）；触屏断点（≤900px）≥32px（灯箱钮现 32px app.css:169-171）；浮层主控钮（zen 退出、抽屉开关）44px（AppShell.svelte:1310-1311 现值，冻结）。TopBar ⚙/📁/↻ 字形钮以 padding 补足 ≥32px 高（≤600px 档）。
+4. **触控目标**（口径：以 WCAG 2.2 AA 2.5.8 的 24px 为底线，32/44px 为内部增强档）：指针环境 ≥24px（`.vv-collapse-btn` 现 22px app.css:341-342 → 补足 24px，变更）；触屏断点（≤900px）≥32px（灯箱钮现 32px app.css:169-171 ✓）。**44px 现值仅 `.vv-zen-exit` 成立**（AppShell.svelte:1310-1311，冻结）——`.vv-drawer-toggle`/`.vv-right-toggle` 无任何宽高/padding 声明（AppShell.svelte:1214-1220 实测读码），触控面=全局 button 默认约 24px 高，未达移动端入口标准：≤900px 断点内补 `min-width/min-height: 32px`（变更：~24→32px，§12.2-G1）。TopBar ⚙/📁/↻ 字形钮以 padding 补足 ≥32px 高（≤600px 档，变更）。
 5. **未来项（本轮不做）**：若立项真 SVG 图标，须满足——单色 `currentColor`、16×16 viewBox 网格、线宽 1.5px、圆帽、经 `<symbol>` sprite 内联（零依赖）；届时 gen-icons.mjs 之外新建 `apps/web/src/lib/icons.ts` 单点管理，逐步替换字形白名单。
+
+**边界（packages 渲染产物）**：以上白名单与禁用 emoji 仅适用 `apps/web` 模板与 app.css；packages 渲染产物中的既有彩色 emoji 为登记在案的既有项，本轮不处置——render-archive 以 `🔒 ${label}` 渲染加密条目（packages/render-archive/src/archive.ts:102，落在红线 1 锚点 `.vv-tree-row` 内），被 zip 单测（packages/render-archive/test/zip.test.ts:302 断言 `toContain('🔒')`）与 e2e BIN-08（apps/web/e2e/b-binary-hex-archive.spec.ts:116/130 断言 `toContainText('🔒')`）双重锁定，清理须随上游独立立项。
 
 ---
 
@@ -239,7 +249,7 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 
 | 状态 | 规则 | 备注 |
 | --- | --- | --- |
-| hover | 可点行/菜单项 `background: var(--ui-hover-bg)`；文字钮 `color: var(--ui-fg)` 或 `--ui-accent`；**不得只动 opacity** | 补 `.vv-tab:hover { background: var(--ui-hover-bg); }`（非激活 tab 现零响应，app.css:479-488 实证无 hover 规则；激活 tab 由 `.active` 底色覆盖无需 hover） |
+| hover | 可点行/菜单项 `background: var(--ui-hover-bg)`；文字钮 `color: var(--ui-fg)` 或 `--ui-accent`；**不得只动 opacity** | 补 `.vv-tab:hover { background: color-mix(in srgb, var(--ui-hover-bg) 60%, var(--ui-border)); }`——**直用 hover-bg 无效**：`--ui-tab-bg` 与 `--ui-hover-bg` 亮暗各为同值（#f6f8fa/#161b22，app.css:13,15 与 24,25 实测读码），须 color-mix 向 border 方向派生一档可感知差异（亮色变深、暗色变浅）。非激活 tab 现零响应（app.css:479-488 实证无 hover 规则），激活 tab 由 `.active` 底色覆盖无需 hover；变更声明 §12.2-G1 |
 | active（按下） | 不做位移/缩放（保持零漂移）；列表选中态用 `.active` 类：文字 `--ui-accent` + 可选 600 字重（`.vv-ws-item.active .vv-ws-name` app.css:409 现法） | — |
 | focus-visible | **全局统一焦点环**（新增至 app.css 基础层）：`:where(button, input, select, summary, [tabindex]):focus-visible { outline: 2px solid var(--ui-accent); outline-offset: -1px; }`（offset 负值防浮层贴边裁剪）；已显式处理的（AppShell.svelte:1322 zen-exit）保留 | 键盘可达性的兜底保障；`:focus`（鼠标按下）不触发环 |
 | 专属揭示的键盘等价 | hover 才显现的控件必须同时被 `:focus-within`/`:focus-visible` 显现：`.vv-ws-actions`（app.css:413-414 已有 focus-within ✓）、`.vv-wspanel-close`（:461 ✓）、`.vv-collapse-btn` opacity .35 → 补 `.vv-collapse-btn:focus-visible { opacity: 1 }`（现 hover 提亮 app.css:343，键盘聚焦恒 0.35 近乎不可见）、`.vv-tab-close` 同法（:486-488） | — |
@@ -300,13 +310,13 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 
 ### G1 壳层与导航条（AppShell / TopBar / TabBar / TabContextMenu / +page.svelte）
 
-- **Tab hover 补齐**：`.vv-tab:hover { background: var(--ui-hover-bg); }`（app.css:479 后插入；`.active` 规则已在后，特异性同级靠序覆盖，激活 tab 不受影响）。
+- **Tab hover 补齐**：`.vv-tab:hover { background: color-mix(in srgb, var(--ui-hover-bg) 60%, var(--ui-border)); }`（app.css:479 后插入；`--ui-tab-bg` 与 `--ui-hover-bg` 亮暗同值，直用 hover-bg 零视觉响应——必须 color-mix 派生，见 §7；`.active` 规则已在后靠序覆盖，激活 tab 不受影响；变更声明 §12.2-G1）。
 - **关闭字形** ×→✕（TabBar.svelte:287）；**pinned 🔒 退役**（§6.1）。
 - **焦点态**：全局 focus-visible 环（§7）落地后，`.vv-collapse-btn`/`.vv-tab-close` 补 `:focus-visible { opacity: 1 }`。
 - **图标字形**：⚙ 保留，📁→「目录」、🌳→「树」、🔒 退役；↻/☰/ℹ 保留（§6）。
 - **抽屉过渡**：`transition: transform 0.2s`（AppShell.svelte:1206/1232）改 `var(--vv-dur-med) ease-out`（200ms 等值零漂移）；toast `0.18s`（:1272）并入 `var(--vv-dur-med)`（变更 20ms 级）；`.vv-ws-actions` opacity `.12s`（app.css:413）改 `var(--vv-dur-fast)`。
 - **chrome temp 条阴影** `0 2px 12px`→`--vv-shadow-2`（app.css:359）。
-- **zen 退出钮**：44px/浮钮规格冻结（AppShell.svelte:1304-1324）；focus-visible 已有保留。
+- **zen 退出钮**：44px/浮钮规格冻结（AppShell.svelte:1304-1324）；focus-visible 已有保留。抽屉/右栏开关钮（`.vv-drawer-toggle`/`.vv-right-toggle`，无宽高声明现 ~24px 高）在 ≤900px 断点内补 `min-width/min-height: 32px`（§6.4，变更）。
 - +page.svelte 拖拽壳无样式改动，仅随组 review。
 
 ### G2 阅读区与侧栏面板（ViewerPane / SearchPanel / MetaPanel / Toc / FileTree / TreeNodeRow）
@@ -319,7 +329,7 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 
 ### G3 检索与工作区浮层（GlobalSearchPanel / QuickOpenPanel / WorkspaceTabsPanel / WorkspaceCreateModal / RemoteSourceModal）
 
-- **行密度统一** `padding: 3px 10px`，缩进改前缀列（§4.3）；hover/active 统一 `--ui-hover-bg` + accent 文字。
+- **行密度统一** `padding: 3px 10px`，缩进由既有前缀列（`.vv-gsearch-lncol`）或纯 CSS（伪元素/text-indent）承接、不新增 DOM（§4.3，红线 1）；hover/active 统一 `--ui-hover-bg` + accent 文字。
 - **`.vv-gsearch-hint`** `#b58900`→`var(--ui-warning)`（§2.3）。
 - **主钮单点化**：三面板内主操作按 §8.1 primary 形态挂（gsearch/wspanel 无表单主钮则不动；wscreate「创建」已有 `.vv-wscreate-primary` 对齐基准）。
 - **wscreate 交互补齐**：保持同位浮层形态（与 ws-pop/tabctx 同族，**不加背板**——模态背板是 sc-modal 专属语义）；补**外点关闭**（JS 事件层，宿主已有 pointerdown 关闭通道模式，不改 DOM 结构）；面板阴影已是 `--vv-shadow-3` 档。
@@ -340,7 +350,7 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 
 - **硬编码色换令牌**（§2.3 表）：#b91c1c→`--ui-danger`、#b45309→`--ui-warning`、#6b7280→`--ui-fg-muted`；`--ui-text` 误写改正为 `var(--ui-fg)`（MountsManager.svelte:659）。
 - **opacity 弱化换令牌色**：.vv-mm-sub .65（:680）、.vv-mm-meta .7（:738）、.vv-mm-state[unregistered] .6（:754）、.vv-mm-caps .55（:758）、.vv-mm-hint .75（:791）、.vv-mm-empty .6（:795）→ `color: var(--ui-fg-muted)`、删 opacity。
-- **em 碎阶收敛**（rg 实测 17 处 → px token，按 U=16px 实测值就近归档）：1.15em(18.4px 标题)→600 字重 + `--vv-fs-md`；0.95em(15.2)→`--vv-fs-sm`；0.85em(13.6)/0.82em(13.1)→`--vv-fs-sm`；0.8em(12.8)/0.78em(12.5)/0.75em(12)→`--vv-fs-xs`；0.72em(11.5 徽标/caps)→`--vv-fs-2xs`；`1em` 组名→`--vv-fs-sm` 600。同行距 `em` gap（.4/.5/.6em）换 `--vv-sp-*` 对应档。
+- **em 碎阶收敛**（rg 实测 17 处 → px token，按 U=16px 实测值就近归档）：1.15em(18.4px 标题)→600 字重 + `--vv-fs-md`；0.95em(15.2px，MountsManager.svelte:820-823 `.vv-mm-form h3`)→`--vv-fs-sm` 600（例外注明：几何就近应为 fs-md，此处按语义档位优先——表单框内节标题对齐 `.vv-settings-label` 的 fs-sm+600 档）；0.85em(13.6)/0.82em(13.1)→`--vv-fs-sm`；0.8em(12.8)/0.78em(12.5)/0.75em(12)→`--vv-fs-xs`；0.72em(11.5 徽标/caps)→`--vv-fs-2xs`；`1em` 组名→`--vv-fs-sm` 600。同行距 `em` gap（.4/.5/.6em）换 `--vv-sp-*` 对应档。
 - **徽标圆角**：`.vv-mm-badge` 999px→`--vv-radius-full`（已是值，改引 token）；按钮 5px 圆角→`--vv-radius-md`。
 - 表单控件禁用态补齐（§7 disabled）；hover `color-mix(border 35%)` 保留（§2.4 派生法范本）。
 - 回归口径：`.vv-mm-item/.vv-mm-form/.vv-mm-state`（e2e 26/20/8 处）为锚点类，不动名。
@@ -370,7 +380,7 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 }
 ```
 
-（hex flash 与 toast 在 reduced-motion 下瞬显瞬隐，信息不丢失。）
+（reduced-motion 下 hex 跳转辅助闪烁被压至瞬时且恒为终态透明——**完全省略**而非瞬显瞬隐，跳转仅剩滚动定位表达；toast 入场瞬显。定位功能不受影响，辅助性动效的降级可接受。）
 
 - 不新增 loading spinner/骨架屏动画；面板开合（overlay 族）保持瞬显（现状），不引入进出动画——浮层高频开关，动效成本大于收益（Linear 取舍项）。
 
@@ -391,8 +401,8 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 
 | # | 名称 | 默认值（亮=暗） | 用途 |
 | --- | --- | --- | --- |
-| 3 | `--vv-hit-bg` | `rgb(255 213 0 / 45%)` | 搜索字符命中 mark（app.css:312 现 45%；GlobalSearchPanel.svelte:394 现 55% → 收敛本值，变更） |
-| 4 | `--vv-hit-active` | `rgb(255 160 0 / 80%)` | 当前命中（app.css:313） |
+| 3 | `--vv-hit-bg` | `rgb(255 213 0 / 45%)`（暗同值） | 搜索字符命中 mark（app.css:312 现 45%；GlobalSearchPanel.svelte:394 现 55% → 收敛本值，变更；修复暗色 3.44→4.61:1，见 §2.3） |
+| 4 | `--vv-hit-active` | 亮 `rgb(255 160 0 / 80%)`；**暗色两块覆盖 `rgb(255 160 0 / 35%)`** | 当前命中（app.css:313）。全表唯一分值 token：80% 暗色对 code-fg 仅 2.58:1（§2.3 实测 FAIL），35% 达 7.63:1；「当前命中」区分度由 1px inset 描边补足 |
 | 5 | `--vv-hit-line` | `rgb(255 213 0 / 18%)` | 命中行底（app.css:314） |
 | 6 | `--vv-hit-line-active` | `rgb(255 160 0 / 35%)` | 当前命中行底（app.css:316） |
 | 7 | `--vv-hex-hit` | `rgba(255, 176, 0, .22)` | hex 命中（app.css:234） |
@@ -438,12 +448,12 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 
 ### 12.2 分组实施要点（可执行项速览）
 
-- **G1**：tab hover；✕ 统一；🔒/🌳/📁 字形处置；focus-visible 环 + opacity 揭示键盘等价；抽屉/toast 时长 token 化。变更声明：×→✕、字形替换、temp 条阴影归档。
+- **G1**：tab hover；✕ 统一；🔒/🌳/📁 字形处置；focus-visible 环 + opacity 揭示键盘等价；抽屉/toast 时长 token 化。变更声明：×→✕、字形替换（⚙ 保留，📁→「目录」、🌳→「树」、🔒 退役）、temp 条阴影归档 `--vv-shadow-2`、**tab hover 零响应→color-mix 可感知底色**、**disabled 归一（pdf 工具条 .4→.5 app.css:203、tabctx .55→.5 app.css:513）**、**抽屉/右栏 toggle 钮 ≤900px 补 32px（~24→32）**、TopBar 字形钮 ≤600px 补 ≥32px 高、toast 0.18s→200ms。
 - **G2**：dt 4em；状态栏/搜索/TOC/meta 字号 token 化；hover 语义归一（零漂移）；阴影 token 化（值不变）。
-- **G3**：三面板行 `3px 10px` + hover/active 统一（视觉变更：gsearch 行 2px→3px、缩进改前缀列）；gsearch-hint 换 `--ui-warning`；badge pill 化；wscreate 补外点关闭（JS 层）。
+- **G3**：三面板行 `3px 10px` + hover/active 统一（视觉变更：gsearch 行 2px→3px、缩进改纯 CSS 承接）；gsearch-hint 换 `--ui-warning`；badge pill 化；**gsearch mark 55%→`--vv-hit-bg` 45%（修复暗色 3.44→4.61:1）**；wscreate 补外点关闭（JS 层）。
 - **G4**：十类全局类恢复（§9 表即实施文案）；fs-md 收敛（15→14px 变更）；`var(--vv-code-font)` 四处替换；`.vv-sc-apply` primary 化（灰→accent 描边变更）；modalbox 阴影/圆角归档。
 - **G5**：色/弱化/em/圆角四张映射表照 §10-G5 执行；`--ui-text`→`--ui-fg`。
-- **基础层（随组先行，一次到位）**：§12.1 token 块；`button,input,select` 补 `font-family: inherit; font-size: var(--vv-fs-sm);`；全局 focus-visible 规则；`checkbox accent-color`；`prefers-reduced-motion` 块；`#d33` 死回退清理；`.vv-pdf-page-label` 暗色修复；markdown-alert 七色→令牌（**双端同步段，须同步 exportBaseCss**）。
+- **基础层（随组先行，一次到位）**：§12.1 token 块；`button,input,select` 补 `font-family: inherit; font-size: var(--vv-fs-sm);`；全局 focus-visible 规则；`checkbox accent-color`；`prefers-reduced-motion` 块；`#d33` 死回退清理；`.vv-pdf-page-label` 暗色修复；markdown-alert 七色→令牌（**双端同步段，须同步 exportBaseCss**）；`--vv-hit-active` 暗色覆盖（修复 2.58→7.63:1）；`.vv-collapse-btn` 22→24px；`.vv-docx-content` 15px→`0.9375em`（U=16 等值零漂移）；小圆角并档（pdf 页码 chip 3px app.css:211、gsearch mark 2px GlobalSearchPanel.svelte:396 → `--vv-radius-sm`；G5 按钮 5px → `--vv-radius-md`）。
 
 ### 12.3 回归检查单
 
@@ -451,11 +461,12 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 2. 字号联动：设置中心把 UI 字号调至 20px、代码字号 18px，验证 chrome 字阶随动（fs token 生效）且 `--vv-code-line-height` 联动（j/k 步长不破）。
 3. e2e 全量（mobile project 375px 视口跑全套为既有口径）；重点盯 b-settings-center（脏态文案/九组导航）、b-layout-zen（几何 boundingBox：colhandle 6px 热区、edge 10/8px、zen-exit 44px）、drawer（transform 判定）。
 4. theme.test.ts / theme.fonts.test.ts / markdownExport.test.ts / export.test.ts 四个防漂移测试必须全绿（任何红灯=踩了双端同步段或注入格式）。
-5. 对比度抽检：替换后的 G5/G3 文本色在暗色下重跑 §2.3 node 脚本，全部 ≥4.5:1。
+5. 对比度抽检：替换后的 G5/G3 文本色**与 mark×前景组合**（hit-active 暗、gsearch mark 暗，含 mark 叠在 hit-line 之上的双层叠加值）在暗色下重跑 §2.3 node 脚本，全部 ≥4.5:1。
+6. **wscreate 外点关闭回归**：该行为为 G3 新增（JS 层）。rg 实测既有引用面 5 个 spec 共 10 处 `.vv-wscreate`（t-tab-actions 1 / t-workspace 3 / b-wsx-recovery 4 / b-layout-zen 1 / b-filetree-src-remove 1，均为面板内操作路径）——回归确认外点关闭不误伤面板内点击；为新行为补一条 e2e 用例（新增用例不触碰既有断言，符合红线 10 的「不改测试」）。
 
 ---
 
 ### 附：本规范的证据清单
 
 - 实读：`apps/web/src/app.css`（全文 658 行）、`apps/web/src/lib/theme.ts`（全文 452 行）、`tools/gen-icons.mjs`、`packages/highlight/src/vscode.ts:270-310`、`apps/web/e2e/helpers.ts` / `drawer.ts` / `settings-center.ts`、`MountsManager.svelte:640-869`、`SettingsCenter.svelte:502-784`、`GlobalSearchPanel.svelte:296-405`、`QuickOpenPanel.svelte:182-254`、`MetaPanel.svelte:221-363`、`AppShell.svelte:1148-1326`、`TopBar.svelte:259-398`、`TabBar.svelte:276-309`、`SearchSection.svelte`、`AutoRefreshSection.svelte`、`WorkspaceCreateModal.svelte:195-275`、`StorageSection.svelte:251-344`、`AboutSection.svelte:186-215`、`FileTree.svelte:79-110`、`ViewerPane.svelte:554-578`；旧底稿 `git show 8e32a43~1:apps/web/src/lib/SettingsPanel.svelte`（style 837-938 行）。
-- 实测（本会话运行）：WCAG 对比度 node 脚本（§2.3 两张表全部数值）；rg 统计——硬编码 px 字号 114 处分布、MountsManager em 字号 17 处、border-radius 十档分布、box-shadow 七式、transition/animation 5 处、focus-visible 2 处、`background:none` 31 处、关闭字形 ×/✕ 分布、`.vv-settings-*` 十类零 CSS 定义、`.vv-tab` 无 hover 规则、`--ui-text` 误写唯一处。
+- 实测（本会话运行）：WCAG 对比度 node 脚本（§2.3 两张表全部数值，含 mark×前景组合：hit-active 80% 暗 2.58:1、gsearch 55% 暗 3.44:1、45% 4.61:1、暗覆盖候选 35% 7.63:1）；rg 统计——硬编码 px 字号 114 处分布（含 15px/14px 逐处定位：app.css:258/330 与 SettingsCenter.svelte:526/742）、MountsManager em 字号 17 处、border-radius 十档分布、box-shadow 七式、transition/animation 5 处、focus-visible 2 处、`background:none` 31 处、关闭字形 ×/✕ 分布、`#d33` 死回退 14 处声明全量定位、`.vv-settings-*` 十类零 CSS 定义、`.vv-tab` 无 hover 规则、`--ui-text` 误写唯一处、wscreate e2e 引用分布（5 spec 共 10 处）；e2e 行号复核（drawer.ts:19/:28-33、helpers.ts:54-60）；export.ts:111/114 图表段复核；archive.ts:102 + zip.test.ts:302 + b-binary-hex-archive.spec.ts:116/130 锁形字符断言复核；AppShell.svelte:1214-1220 抽屉钮无宽高声明复核。
