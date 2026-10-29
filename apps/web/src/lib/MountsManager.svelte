@@ -655,29 +655,33 @@
     z-index: 30; /* 面板层（设置中心同层） */
     display: flex;
     flex-direction: column;
-    background: var(--ui-bg, #fff);
-    color: var(--ui-text, #1a1a1a);
+    /* §10-G5：--ui-text 系误写（全库无此令牌，恒走回退），改正 --ui-fg；
+       --ui-bg/--ui-fg 亮暗三块恒被定义，死回退一并清除（§2.3 同理） */
+    background: var(--ui-bg);
+    color: var(--ui-fg);
     outline: none;
     overflow: auto;
   }
   .vv-mm-head {
     display: flex;
     align-items: baseline;
-    gap: 0.75em;
+    gap: var(--vv-sp-12); /* 0.75em@16px=12px，零漂移入档 */
     padding: 0.9em 1.2em;
-    border-bottom: 1px solid var(--ui-border, #ddd);
+    border-bottom: 1px solid var(--ui-border);
     position: sticky;
     top: 0;
     background: inherit;
   }
+  /* §10-G5：1.15em(18.4px) 页题收敛 fs-md，600 字重保持 */
   .vv-mm-title {
-    font-size: 1.15em;
+    font-size: var(--vv-fs-md);
     font-weight: 600;
   }
+  /* §2.3：opacity 弱化禁用于文本——一律 fg-muted 令牌色 */
   .vv-mm-sub {
     flex: 1;
-    font-size: 0.85em;
-    opacity: 0.65;
+    font-size: var(--vv-fs-sm);
+    color: var(--ui-fg-muted);
   }
   .vv-mm-body {
     display: flex;
@@ -689,12 +693,14 @@
     margin: 0 auto;
     box-sizing: border-box;
   }
+  /* §10-G5：组名 1em→fs-sm+600（对齐表单标签档）；margin/gap 入 --vv-sp 档 */
   .vv-mm-group h2 {
-    font-size: 1em;
-    margin: 0 0 0.5em;
+    font-size: var(--vv-fs-sm);
+    font-weight: 600;
+    margin: 0 0 var(--vv-sp-8);
     display: flex;
     align-items: center;
-    gap: 0.75em;
+    gap: var(--vv-sp-12);
   }
   .vv-mm-list {
     list-style: none;
@@ -702,27 +708,28 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.4em;
+    gap: var(--vv-sp-6);
   }
   .vv-mm-item {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 0.5em;
+    gap: var(--vv-sp-8);
     padding: 0.45em 0.6em;
-    border: 1px solid var(--ui-border, #ddd);
-    border-radius: 6px;
+    border: 1px solid var(--ui-border);
+    border-radius: var(--vv-radius-md);
   }
+  /* §10-G5：徽标字号入 fs-2xs 档；999px 改引 --vv-radius-full（值=现值） */
   .vv-mm-badge {
-    font-size: 0.72em;
+    font-size: var(--vv-fs-2xs);
     padding: 0.1em 0.5em;
-    border-radius: 999px;
-    border: 1px solid var(--ui-border, #ccc);
+    border-radius: var(--vv-radius-full);
+    border: 1px solid var(--ui-border);
     white-space: nowrap;
   }
   .vv-mm-badge[data-seg='runtime'],
   .vv-mm-badge[data-mode='proxy'] {
-    background: color-mix(in srgb, var(--ui-border, #ccc) 40%, transparent);
+    background: color-mix(in srgb, var(--ui-border) 40%, transparent);
   }
   .vv-mm-name {
     font-weight: 600;
@@ -734,125 +741,138 @@
   .vv-mm-meta {
     flex: 1;
     min-width: 8em;
-    font-size: 0.8em;
-    opacity: 0.7;
+    font-size: var(--vv-fs-xs);
+    color: var(--ui-fg-muted);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .vv-mm-state {
-    font-size: 0.75em;
+    font-size: var(--vv-fs-xs);
     white-space: nowrap;
   }
+  /* §2.3 违规硬编码表：#b45309/#6b7280/#b91c1c 暗色对比不达 AA，换语义令牌 */
   .vv-mm-state[data-state='pending'] {
-    color: #b45309;
+    color: var(--ui-warning);
   }
   .vv-mm-state[data-state='offsite'] {
-    color: #6b7280; /* 注册于他机（评审 M1）：中性灰——事实提示非错误面 */
+    color: var(--ui-fg-muted); /* 注册于他机（评审 M1）：中性灰——事实提示非错误面 */
   }
   .vv-mm-state[data-state='unregistered'] {
-    opacity: 0.6;
+    color: var(--ui-fg-muted); /* 原 opacity .6 弱化改令牌色（§2.3） */
   }
   .vv-mm-caps {
-    font-size: 0.72em;
-    opacity: 0.55;
+    font-size: var(--vv-fs-2xs);
+    color: var(--ui-fg-muted);
     white-space: nowrap;
   }
   .vv-mm-actions {
     display: flex;
-    gap: 0.4em;
+    gap: var(--vv-sp-6);
     margin-left: auto;
   }
+  /* §10-G5：0.8em 入 fs-xs 档；5px 圆角并入 --vv-radius-md（§5.1） */
   .vv-mm-actions button,
   .vv-mm-add,
   .vv-mm-form-actions button {
     font: inherit;
-    font-size: 0.8em;
+    font-size: var(--vv-fs-xs);
     padding: 0.2em 0.7em;
-    border: 1px solid var(--ui-border, #ccc);
-    border-radius: 5px;
+    border: 1px solid var(--ui-border);
+    border-radius: var(--vv-radius-md);
     background: transparent;
     color: inherit;
     cursor: pointer;
   }
-  .vv-mm-actions button:hover,
+  /* hover color-mix(border 35%) 派生法保留（§2.4 范本）；disabled 抑制 hover（§7） */
+  .vv-mm-actions button:hover:not(:disabled),
   .vv-mm-add:hover,
-  .vv-mm-form-actions button:hover {
-    background: color-mix(in srgb, var(--ui-border, #ccc) 35%, transparent);
+  .vv-mm-form-actions button:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--ui-border) 35%, transparent);
   }
   .vv-mm-warning {
-    margin: 0 0 0.5em;
-    font-size: 0.8em;
-    color: #b45309;
+    margin: 0 0 var(--vv-sp-6);
+    font-size: var(--vv-fs-xs);
+    color: var(--ui-warning);
   }
   .vv-mm-hint {
     margin: 0;
-    font-size: 0.78em;
-    opacity: 0.75;
+    font-size: var(--vv-fs-xs);
+    color: var(--ui-fg-muted);
   }
   .vv-mm-empty {
-    font-size: 0.85em;
-    opacity: 0.6;
+    font-size: var(--vv-fs-sm);
+    color: var(--ui-fg-muted);
     margin: 0;
   }
   .vv-mm-error {
-    font-size: 0.85em;
-    color: #b91c1c;
+    font-size: var(--vv-fs-sm);
+    color: var(--ui-danger);
     margin: 0;
   }
   .vv-mm-probe {
     flex-basis: 100%;
     margin: 0;
-    font-size: 0.78em;
+    font-size: var(--vv-fs-xs);
   }
   .vv-mm-probe-err {
-    color: #b91c1c;
+    color: var(--ui-danger);
   }
   .vv-mm-form {
     display: flex;
     flex-direction: column;
-    gap: 0.6em;
-    border: 1px solid var(--ui-border, #ddd);
-    border-radius: 8px;
+    gap: var(--vv-sp-10);
+    border: 1px solid var(--ui-border);
+    border-radius: var(--vv-radius-lg);
     padding: 0.9em;
-    margin-top: 0.6em;
+    margin-top: var(--vv-sp-10);
   }
+  /* §10-G5 例外：0.95em(15.2px) 几何就近应为 fs-md，按语义档优先对齐
+     .vv-settings-label 的 fs-sm+600（表单框内节标题） */
   .vv-mm-form h3 {
-    font-size: 0.95em;
+    font-size: var(--vv-fs-sm);
+    font-weight: 600;
     margin: 0;
   }
   .vv-mm-field {
     display: flex;
     align-items: center;
-    gap: 0.6em;
+    gap: var(--vv-sp-10);
   }
   .vv-mm-field label {
     width: 11em;
     flex-shrink: 0;
-    font-size: 0.82em;
+    font-size: var(--vv-fs-sm);
   }
   .vv-mm-field input:not([type='checkbox']),
   .vv-mm-field select {
     flex: 1;
     min-width: 0;
     font: inherit;
-    font-size: 0.85em;
+    font-size: var(--vv-fs-sm);
     padding: 0.25em 0.5em;
-    border: 1px solid var(--ui-border, #ccc);
-    border-radius: 5px;
-    background: transparent;
-    color: inherit;
+    border: 1px solid var(--ui-border);
+    border-radius: var(--vv-radius-md);
+  }
+  /* §7 禁用态统一口径（opacity .5 + cursor default，抑制 hover）：表单控件与
+     可禁用按钮补齐（现全组件无任何 disabled 样式） */
+  .vv-mm-actions button:disabled,
+  .vv-mm-form-actions button:disabled,
+  .vv-mm-field input:disabled,
+  .vv-mm-field select:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
   .vv-mm-issue {
-    font-size: 0.75em;
-    color: #b91c1c;
+    font-size: var(--vv-fs-xs);
+    color: var(--ui-danger);
     flex-basis: 100%;
     margin-left: 11em;
   }
   .vv-mm-form-actions {
     display: flex;
     align-items: center;
-    gap: 0.6em;
+    gap: var(--vv-sp-10);
   }
   @media (max-width: 600px) {
     .vv-mm-field {
