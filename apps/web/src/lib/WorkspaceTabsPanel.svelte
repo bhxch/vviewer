@@ -254,7 +254,7 @@
                 onclick={(e) => {
                   e.stopPropagation(); // 快捷关闭不触发行激活/不切组
                   closeTab(tab.id);
-                }}>×</button>
+                }}>✕</button>
             </div>
           {/each}
           {#if group.rows.length === 0}
@@ -281,3 +281,25 @@
     <input type="file" multiple hidden bind:this={fileInputEl} onchange={onFilesPick} />
   {/if}
 </div>
+
+<style>
+  /* G3 三面板行密度统一（设计系统 §4.3/§10-G3）：结果行 padding 统一 3px 10px。
+     原 app.css 的 20px 左缩进由伪元素定宽占位承接（行 display:flex，text-indent
+     不可用）——行 gap 8px，故伪元素宽 2px：10(padding) + 2(::before) + 8(gap) =
+     20px，行内容起点与现状逐像素对位，零漂移。scoped 规则带哈希类，特异性
+     (0,2,0) 压过 app.css 同名单类规则（公共层本组不编辑，见组交付 notes）。 */
+  .vv-wspanel-row {
+    padding: 3px 10px;
+  }
+  .vv-wspanel-row::before {
+    content: '';
+    flex: none;
+    width: 2px;
+  }
+  /* 来源徽标 pill 化（§10-G3/§5.1：--vv-radius-full）+ 徽标字号随 chrome 字阶
+     （§12.1 #27：--vv-fs-2xs，U=16px 时 11px 与现值等值） */
+  .vv-wspanel-badge {
+    border-radius: var(--vv-radius-full);
+    font-size: var(--vv-fs-2xs);
+  }
+</style>

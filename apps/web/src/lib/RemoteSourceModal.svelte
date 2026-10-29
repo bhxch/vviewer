@@ -313,7 +313,7 @@
   .vv-remotesrc {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--vv-sp-8);
     min-height: 0;
   }
   .vv-remotesrc-head {
@@ -329,30 +329,30 @@
     background: none;
     color: var(--ui-fg-muted);
     cursor: pointer;
-    padding: 0 4px;
+    padding: 0 var(--vv-sp-4);
   }
   .vv-remotesrc-close:hover {
     color: var(--ui-fg);
   }
   .vv-remotesrc-hint {
     color: var(--ui-fg-muted);
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
   }
   .vv-remotesrc-roots {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--vv-sp-6);
   }
   .vv-remotesrc-rootback {
     align-self: flex-start;
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
   }
   .vv-remotesrc-crumbs {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 2px;
-    font-size: 13px;
+    gap: var(--vv-sp-2);
+    font-size: var(--vv-fs-sm);
   }
   .vv-remotesrc-crumb {
     border: 0;
@@ -361,7 +361,7 @@
     cursor: pointer;
     padding: 1px 3px;
     font: inherit;
-    font-size: 13px;
+    font-size: var(--vv-fs-sm);
     max-width: 12em;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -377,7 +377,7 @@
   }
   .vv-remotesrc-pickcurrent {
     align-self: flex-start;
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
   }
   .vv-remotesrc-list {
     list-style: none;
@@ -389,8 +389,8 @@
   .vv-remotesrc-row {
     display: flex;
     align-items: center;
-    gap: 4px;
-    border-radius: 4px;
+    gap: var(--vv-sp-4);
+    border-radius: var(--vv-radius-sm);
   }
   .vv-remotesrc-row:hover {
     background: var(--ui-hover-bg);
@@ -418,8 +418,8 @@
     border: 1px solid var(--ui-border);
     background: var(--ui-side-bg);
     color: var(--ui-fg);
-    border-radius: 6px;
-    font-size: 12px;
+    border-radius: var(--vv-radius-md);
+    font-size: var(--vv-fs-xs);
     padding: 1px 8px;
     cursor: pointer;
   }
@@ -429,14 +429,15 @@
   }
   .vv-remotesrc-empty {
     color: var(--ui-fg-muted);
-    font-size: 13px;
-    padding: 8px 2px;
+    font-size: var(--vv-fs-sm);
+    padding: var(--vv-sp-8) var(--vv-sp-2);
   }
+  /* §2.3 死回退清理：--ui-danger 亮暗三块恒定义，#d33 回退永不生效且暗色不达 AA */
   .vv-remotesrc-error {
-    color: var(--ui-danger, #d33);
-    font-size: 12px;
+    color: var(--ui-danger);
+    font-size: var(--vv-fs-xs);
     display: flex;
-    gap: 8px;
+    gap: var(--vv-sp-8);
     align-items: baseline;
     overflow-wrap: anywhere;
   }

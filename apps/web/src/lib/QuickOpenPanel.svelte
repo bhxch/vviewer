@@ -180,6 +180,7 @@
 </div>
 
 <style>
+  /* 同位面板族（设计系统 §5.1/§5.3）：圆角/阴影走档位 token（值=现值，零漂移） */
   .vv-quickopen {
     position: fixed;
     top: 44px;
@@ -191,15 +192,15 @@
     flex-direction: column;
     background: var(--ui-bg);
     border: 1px solid var(--ui-border);
-    border-radius: 8px;
-    box-shadow: 0 8px 28px rgb(0 0 0 / 22%);
+    border-radius: var(--vv-radius-lg);
+    box-shadow: var(--vv-shadow-3);
     z-index: 30;
     overflow: hidden;
   }
   .vv-quickopen-bar {
     display: flex;
-    gap: 6px;
-    padding: 8px 10px;
+    gap: var(--vv-sp-6);
+    padding: var(--vv-sp-8) var(--vv-sp-10);
     border-bottom: 1px solid var(--ui-border);
     flex: none;
   }
@@ -208,9 +209,9 @@
     min-width: 0;
   }
   .vv-quickopen-status {
-    padding: 4px 10px;
+    padding: var(--vv-sp-4) var(--vv-sp-10);
     color: var(--ui-fg-muted);
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
     min-height: 1.4em;
     border-bottom: 1px solid var(--ui-border);
     flex: none;
@@ -218,13 +219,13 @@
   .vv-quickopen-list {
     list-style: none;
     margin: 0;
-    padding: 4px 0;
+    padding: var(--vv-sp-4) 0;
     overflow: auto;
     min-height: 0;
   }
   .vv-quickopen-row {
     display: flex;
-    gap: 8px;
+    gap: var(--vv-sp-8);
     width: 100%;
     border: 0;
     background: none;
@@ -234,8 +235,14 @@
     color: var(--ui-fg);
     border-radius: 0;
   }
+  /* §4.3/§7：选中行与 wspanel 同构同法——hover-bg 底 + accent 文字（side-bg 与
+     hover-bg 亮暗同值，底色零漂移；accent 名称为规范声明变更） */
   .vv-quickopen-row.active {
-    background: var(--ui-side-bg);
+    background: var(--ui-hover-bg);
+  }
+  .vv-quickopen-row.active .vv-quickopen-name {
+    color: var(--ui-accent);
+    font-weight: 600;
   }
   .vv-quickopen-name {
     flex: none;
@@ -246,7 +253,7 @@
   }
   .vv-quickopen-path {
     color: var(--ui-fg-muted);
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

@@ -145,6 +145,21 @@
     return () => window.removeEventListener('keydown', onWinKey);
   });
 
+  $effect(() => {
+    // 外点关闭（设计系统 §10-G3 交互补齐）：WorkspaceTabsPanel 同款 pointerdown
+    // 通道，落点在面板外即关闭。本模态无取消语义，退出路径与 Esc/✕ 同走 finish；
+    // 打开它的「＋ 新建工作区…」点击先于挂载（pointerdown 时监听尚未附上），
+    // 无 toggle 竞态；内嵌 RemoteSourceModal 是面板 DOM 子树，contains 天然豁免。
+    const onDown = (e: PointerEvent): void => {
+      const t = e.target as Node | null;
+      if (t === null || panelEl === null) return;
+      if (panelEl.contains(t)) return;
+      finish();
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  });
+
   function close(): void {
     // 关闭前记录焦点：卸载后还原（与 GlobalSearchPanel 同模式）
     const prev = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -196,7 +211,7 @@
   .vv-wscreate {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--vv-sp-8);
   }
   .vv-wscreate-head {
     display: flex;
@@ -211,7 +226,7 @@
     background: none;
     color: var(--ui-fg-muted);
     cursor: pointer;
-    padding: 0 4px;
+    padding: 0 var(--vv-sp-4);
   }
   .vv-wscreate-close:hover {
     color: var(--ui-fg);
@@ -219,8 +234,8 @@
   .vv-wscreate-name {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 13px;
+    gap: var(--vv-sp-8);
+    font-size: var(--vv-fs-sm);
   }
   .vv-wscreate-name input {
     flex: 1;
@@ -228,28 +243,32 @@
   }
   .vv-wscreate-label {
     font-weight: 600;
-    font-size: 13px;
+    font-size: var(--vv-fs-sm);
   }
   .vv-wscreate-sources {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--vv-sp-6);
   }
   .vv-wscreate-hint {
     color: var(--ui-fg-muted);
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
   }
   .vv-wscreate-note {
     color: var(--ui-accent);
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
     overflow-wrap: anywhere;
   }
   .vv-wscreate-actions {
     display: flex;
     justify-content: flex-end;
   }
+  /* 主钮 primary 形态（§8.1，本钮即基准）：描边 accent，hover 补 hover-bg 底 */
   .vv-wscreate-primary {
     color: var(--ui-accent);
     border-color: var(--ui-accent);
+  }
+  .vv-wscreate-primary:hover {
+    background: var(--ui-hover-bg);
   }
 </style>

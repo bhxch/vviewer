@@ -294,6 +294,7 @@
 </div>
 
 <style>
+  /* 同位面板族（设计系统 §5.1/§5.3）：圆角/阴影走档位 token（值=现值，零漂移） */
   .vv-gsearch {
     position: fixed;
     top: 44px;
@@ -305,15 +306,15 @@
     flex-direction: column;
     background: var(--ui-bg);
     border: 1px solid var(--ui-border);
-    border-radius: 8px;
-    box-shadow: 0 8px 28px rgb(0 0 0 / 22%);
+    border-radius: var(--vv-radius-lg);
+    box-shadow: var(--vv-shadow-3);
     z-index: 30;
     overflow: hidden;
   }
   .vv-gsearch-bar {
     display: flex;
-    gap: 6px;
-    padding: 8px 10px;
+    gap: var(--vv-sp-6);
+    padding: var(--vv-sp-8) var(--vv-sp-10);
     border-bottom: 1px solid var(--ui-border);
     flex: none;
   }
@@ -327,11 +328,11 @@
   }
   .vv-gsearch-status {
     display: flex;
-    gap: 12px;
+    gap: var(--vv-sp-12);
     align-items: baseline;
-    padding: 4px 10px;
+    padding: var(--vv-sp-4) var(--vv-sp-10);
     color: var(--ui-fg-muted);
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
     border-bottom: 1px solid var(--ui-border);
     flex: none;
     min-height: 1.4em;
@@ -339,20 +340,21 @@
   .vv-gsearch-status .running {
     color: var(--ui-accent);
   }
+  /* §2.3：#b58900 白上 3.21:1 不达 AA（12px），换 --ui-warning 令牌色（变更声明） */
   .vv-gsearch-hint {
-    color: #b58900;
+    color: var(--ui-warning);
   }
   .vv-gsearch-results {
     overflow: auto;
     min-height: 0;
-    padding-bottom: 6px;
+    padding-bottom: var(--vv-sp-6);
   }
   .vv-gsearch-file {
     display: flex;
     justify-content: space-between;
-    gap: 8px;
-    padding: 6px 10px 2px;
-    font-size: 12px;
+    gap: var(--vv-sp-8);
+    padding: var(--vv-sp-6) var(--vv-sp-10) var(--vv-sp-2);
+    font-size: var(--vv-fs-xs);
     color: var(--ui-fg-muted);
     position: sticky;
     top: 0;
@@ -363,26 +365,29 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* §4.3 三面板行密度统一：结果行 padding 3px 10px（原 2px 10px 2px 18px）；
+     18px 缩进由既有前缀列承接——lncol 补 8px 内左距，行号字形位与预览起点不变 */
   .vv-gsearch-row {
     display: flex;
-    gap: 8px;
+    gap: var(--vv-sp-8);
     width: 100%;
     border: 0;
     background: none;
     text-align: left;
-    padding: 2px 10px 2px 18px;
+    padding: 3px 10px;
     font: inherit;
     color: var(--ui-fg);
     border-radius: 0;
   }
   .vv-gsearch-row:hover {
-    background: var(--ui-side-bg);
+    background: var(--ui-hover-bg);
   }
   .vv-gsearch-lncol {
     flex: none;
     width: 84px;
+    padding-left: 8px;
     color: var(--ui-fg-muted);
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
     font-variant-numeric: tabular-nums;
   }
   .vv-gsearch-preview {
@@ -390,15 +395,17 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* §2.3/§12.1 #3：55% 暗色对 code-fg 3.44:1 不达 AA，收敛 --vv-hit-bg 45%
+     （实测 4.61:1）；2px 圆角并入 --vv-radius-sm（§5.1） */
   .vv-gsearch-preview mark {
-    background: rgb(255 213 0 / 55%);
+    background: var(--vv-hit-bg);
     color: inherit;
-    border-radius: 2px;
+    border-radius: var(--vv-radius-sm);
     padding: 0 1px;
   }
   .vv-gsearch-more {
-    padding: 6px 10px;
+    padding: var(--vv-sp-6) var(--vv-sp-10);
     color: var(--ui-fg-muted);
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
   }
 </style>
