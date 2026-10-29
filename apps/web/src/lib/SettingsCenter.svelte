@@ -516,29 +516,30 @@
     display: flex;
     justify-content: flex-start;
     align-items: center;
-    gap: 10px;
+    gap: var(--vv-sp-10);
     padding: 8px 16px;
     border-bottom: 1px solid var(--ui-border);
     flex: none;
   }
+  /* 面板标题 fs-md（§3.2 孤值收敛：15px→--vv-fs-md，变更声明 §12.2-G4） */
   .vv-sc-title {
     font-weight: 600;
-    font-size: 15px;
+    font-size: var(--vv-fs-md);
   }
   .vv-sc-views {
     display: flex;
-    gap: 2px;
+    gap: var(--vv-sp-2);
     border: 1px solid var(--ui-border);
-    border-radius: 6px;
+    border-radius: var(--vv-radius-md);
     padding: 2px;
   }
   .vv-sc-viewbtn {
     background: none;
     border: 0;
-    border-radius: 4px;
+    border-radius: var(--vv-radius-sm);
     padding: 2px 10px;
     font: inherit;
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
     cursor: pointer;
     color: var(--ui-fg-muted);
   }
@@ -551,18 +552,26 @@
   }
   .vv-sc-dirty {
     color: var(--ui-warning);
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
   }
+  /* 主钮 primary 形态（§8.1，变更：灰钮→accent 描边）：accent 文字+描边、hover
+     提底；disabled 抑制 hover（§7），opacity .5 维持现值 */
   .vv-sc-apply {
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
+    color: var(--ui-accent);
+    border-color: var(--ui-accent);
+  }
+  .vv-sc-apply:hover:not(:disabled) {
+    background: var(--ui-hover-bg);
   }
   .vv-sc-apply:disabled,
   .vv-sc-discard:disabled {
     opacity: 0.5;
     cursor: default;
   }
+  /* 「放弃」保持既有形态（§12.2-G4 未列变更，零漂移不动） */
   .vv-sc-discard {
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
     background: none;
   }
   .vv-sc-close {
@@ -586,7 +595,7 @@
     flex: none;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--vv-sp-2);
     padding: 10px 8px;
     border-right: 1px solid var(--ui-border);
     overflow: auto;
@@ -595,10 +604,10 @@
     text-align: left;
     background: none;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--vv-radius-md);
     padding: 6px 10px;
     font: inherit;
-    font-size: 13px;
+    font-size: var(--vv-fs-sm);
     cursor: pointer;
     color: var(--ui-fg-muted);
     white-space: nowrap;
@@ -616,7 +625,7 @@
     margin-top: auto;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--vv-sp-2);
     padding-top: 8px;
     border-top: 1px solid var(--ui-border);
   }
@@ -624,10 +633,10 @@
     text-align: left;
     background: none;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--vv-radius-md);
     padding: 6px 10px;
     font: inherit;
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
     cursor: pointer;
     color: var(--ui-fg-muted);
   }
@@ -646,7 +655,7 @@
   .vv-sc-jsonwrap {
     display: flex;
     border: 1px solid var(--ui-border);
-    border-radius: 6px;
+    border-radius: var(--vv-radius-md);
     overflow: hidden;
     height: calc(100vh - 190px);
     min-height: 200px;
@@ -660,8 +669,9 @@
     color: var(--ui-fg-muted);
     background: var(--ui-side-bg);
     border-right: 1px solid var(--ui-border);
-    font-family: ui-monospace, monospace;
-    font-size: 12px;
+    /* 等宽令牌（§3.1）：跟随用户代码字体设置（裸 ui-monospace 退役） */
+    font-family: var(--vv-code-font);
+    font-size: var(--vv-fs-xs);
     line-height: 1.5;
     user-select: none;
   }
@@ -674,8 +684,8 @@
     border: 0;
     border-radius: 0;
     resize: none;
-    font-family: ui-monospace, monospace;
-    font-size: 12px;
+    font-family: var(--vv-code-font);
+    font-size: var(--vv-fs-xs);
     line-height: 1.5;
     padding: 6px 8px;
     white-space: pre;
@@ -685,12 +695,12 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
-    color: var(--ui-danger, #d33);
-    font-size: 12px;
+    color: var(--ui-danger);
+    font-size: var(--vv-fs-xs);
     overflow-wrap: anywhere;
   }
   .vv-sc-jsonerror code {
-    color: var(--ui-danger, #d33);
+    color: var(--ui-danger);
   }
   /* 脏态关闭确认条（底部悬浮） */
   .vv-sc-confirm {
@@ -701,18 +711,18 @@
     z-index: 31;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--vv-sp-10);
     background: var(--ui-bg);
     border: 1px solid var(--ui-warning);
-    border-radius: 8px;
-    box-shadow: 0 8px 28px rgb(0 0 0 / 22%);
+    border-radius: var(--vv-radius-lg);
+    box-shadow: var(--vv-shadow-3);
     padding: 10px 14px;
-    font-size: 13px;
+    font-size: var(--vv-fs-sm);
   }
   .vv-sc-confirm button {
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
   }
-  /* 导入/导出弹层（spec §4）：居中模态 + 半透明背板 */
+  /* 导入/导出弹层（spec §4）：居中模态 + 半透明背板（--vv-scrim 令牌，§12.1 #10） */
   .vv-sc-modal {
     position: fixed;
     inset: 0;
@@ -720,26 +730,27 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgb(0 0 0 / 35%);
+    background: var(--vv-scrim);
     padding: 16px;
   }
+  /* 阴影归档 --vv-shadow-3、圆角 10px 并入 --vv-radius-lg（§10-G4，变更声明） */
   .vv-sc-modalbox {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--vv-sp-8);
     background: var(--ui-bg);
     border: 1px solid var(--ui-border);
-    border-radius: 10px;
-    box-shadow: 0 12px 36px rgb(0 0 0 / 30%);
+    border-radius: var(--vv-radius-lg);
+    box-shadow: var(--vv-shadow-3);
     padding: 16px 18px;
     width: min(520px, 92vw);
     max-height: 80vh;
     overflow: auto;
-    font-size: 13px;
+    font-size: var(--vv-fs-sm);
   }
   .vv-sc-modaltitle {
     font-weight: 600;
-    font-size: 14px;
+    font-size: var(--vv-fs-md);
   }
   .vv-sc-importdiffs {
     list-style: none;
@@ -747,34 +758,34 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--vv-sp-6);
     max-height: 32vh;
     overflow: auto;
     border: 1px solid var(--ui-border);
-    border-radius: 6px;
+    border-radius: var(--vv-radius-md);
     padding: 8px;
   }
   .vv-sc-importkey {
     font-weight: 600;
   }
   .vv-sc-importline {
-    font-family: ui-monospace, monospace;
-    font-size: 12px;
+    font-family: var(--vv-code-font);
+    font-size: var(--vv-fs-xs);
     color: var(--ui-fg-muted);
     overflow-wrap: anywhere;
   }
   .vv-sc-importmode {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--vv-sp-6);
   }
   .vv-sc-modalactions {
     display: flex;
-    gap: 8px;
+    gap: var(--vv-sp-8);
     justify-content: flex-end;
   }
   .vv-sc-modalactions button {
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
   }
   @media (max-width: 600px) {
     .vv-sc-nav {

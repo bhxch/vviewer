@@ -255,16 +255,16 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--vv-sp-4);
   }
   .vv-storage-cat {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--vv-sp-10);
     border: 1px solid var(--ui-border);
-    border-radius: 6px;
+    border-radius: var(--vv-radius-md);
     padding: 6px 10px;
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
   }
   .vv-storage-cat-disabled {
     opacity: 0.55;
@@ -274,7 +274,7 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--vv-sp-2);
   }
   .vv-storage-catname {
     font-weight: 600;
@@ -283,10 +283,11 @@
     color: var(--ui-fg-muted);
     overflow-wrap: anywhere;
   }
+  /* 等宽令牌（§3.1 四处点名之一）：跟随用户代码字体设置 */
   .vv-storage-cachenames {
     display: block;
-    font-family: ui-monospace, monospace;
-    font-size: 11px;
+    font-family: var(--vv-code-font);
+    font-size: var(--vv-fs-2xs);
   }
   .vv-storage-catsize {
     flex: none;
@@ -295,48 +296,51 @@
     color: var(--ui-fg-muted);
     font-variant-numeric: tabular-nums;
   }
+  /* danger 形态（§8.1 现法为基准）：死回退 #d33 清理（§2.3，--ui-danger 三块恒定义） */
   .vv-storage-danger {
-    color: var(--ui-danger, #d33);
-    border-color: var(--ui-danger, #d33);
+    color: var(--ui-danger);
+    border-color: var(--ui-danger);
   }
   .vv-storage-danger:disabled {
     opacity: 0.5;
     cursor: default;
   }
+  /* 危险确认框（§5.2 强调边框语义）：死回退清理 + 阴影/圆角入档（零漂移） */
   .vv-storage-confirm {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    border: 1px solid var(--ui-danger, #d33);
-    border-radius: 8px;
+    gap: var(--vv-sp-6);
+    border: 1px solid var(--ui-danger);
+    border-radius: var(--vv-radius-lg);
     padding: 10px 12px;
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
   }
   .vv-storage-confirmlabel {
     font-weight: 600;
-    color: var(--ui-danger, #d33);
+    color: var(--ui-danger);
   }
   .vv-storage-confirmtext {
     overflow-wrap: anywhere;
   }
   .vv-storage-confirmrow {
     display: flex;
-    gap: 8px;
+    gap: var(--vv-sp-8);
   }
   .vv-storage-confirmrow button {
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
   }
   .vv-storage-loading {
     color: var(--ui-fg-muted);
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
     align-self: center;
   }
+  /* linklike 形态（§8.1 基准现法）：仅字号挂 --vv-fs-xs，其余保持 */
   .vv-sc-linklike {
     background: none;
     border: 0;
     padding: 0;
     font: inherit;
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
     color: var(--ui-accent);
     cursor: pointer;
     text-decoration: underline;

@@ -187,8 +187,8 @@
   .vv-about-row {
     display: flex;
     align-items: baseline;
-    gap: 10px;
-    font-size: 12px;
+    gap: var(--vv-sp-10);
+    font-size: var(--vv-fs-xs);
   }
   .vv-about-key {
     flex: none;
@@ -200,14 +200,15 @@
     overflow-wrap: anywhere;
   }
   .vv-about-detail {
-    padding-left: 10px;
+    padding-left: var(--vv-sp-10);
   }
+  /* linklike 形态（§8.1 基准现法）：仅字号挂 --vv-fs-xs，其余保持 */
   .vv-sc-linklike {
     background: none;
     border: 0;
     padding: 0;
     font: inherit;
-    font-size: 12px;
+    font-size: var(--vv-fs-xs);
     color: var(--ui-accent);
     cursor: pointer;
     text-decoration: underline;
