@@ -364,10 +364,10 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
 /* 文件内搜索（Task 6）：ViewerPane 右上浮层面板 + code/markdown 命中高亮 */
 .vv-search-panel { position: absolute; top: 8px; right: 16px; z-index: 60; display: flex; gap: 6px;
   align-items: center; background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 6px;
-  padding: 4px 8px; box-shadow: 0 2px 8px rgb(0 0 0 / 15%); }
+  padding: 4px 8px; box-shadow: var(--vv-shadow-1); }
 .vv-search-input { width: 16rem; }
-.vv-search-count { font-size: 12px; color: var(--ui-fg-muted); white-space: nowrap; user-select: none; }
-.vv-search-btn { padding: 2px 8px; font-size: 12px; }
+.vv-search-count { font-size: var(--vv-fs-xs); color: var(--ui-fg-muted); white-space: nowrap; user-select: none; }
+.vv-search-btn { padding: 2px 8px; font-size: var(--vv-fs-xs); }
 mark.vv-search-hit { background: var(--vv-hit-bg); color: inherit; }
 mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .vv-code-line.vv-search-hit-line { background: var(--vv-hit-line); }
@@ -533,7 +533,7 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 /* 内嵌后端路径浏览层（RemoteSourceModal 无自带定位，由本层承担） */
 .vv-wspanel-remote { padding: 10px 12px; overflow: auto; min-height: 0; }
 /* 引擎状态条（ViewerPane 底部，code 渲染器专用） */
-.vv-statusbar { flex: none; padding: 2px 10px; font-size: 12px; color: var(--ui-fg-muted);
+.vv-statusbar { flex: none; padding: 2px 10px; font-size: var(--vv-fs-xs); color: var(--ui-fg-muted);
   border-top: 1px solid var(--ui-border); background: var(--ui-tab-bg); user-select: none; }
 .vv-brand { font-weight: 700; margin-right: 8px; }
 .vv-tabbar { display: flex; overflow-x: auto; background: var(--ui-tab-bg); border-bottom: 1px solid var(--ui-border); }
@@ -584,14 +584,14 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
   border-radius: 6px; box-shadow: 0 4px 16px rgb(0 0 0 / 18%); }
 .vv-tabctx-item[aria-expanded='true'] { background: var(--ui-hover-bg); }
 /* 状态栏渲染器指示器（Task 3 壳 A）：状态栏内联按钮，观感融入文本段（继承状态栏
-   12px/淡色），hover 提示可点；候选浮层 absolute 于 .vv-viewer-pane（position:
+   字号 --vv-fs-xs/淡色），hover 提示可点；候选浮层 absolute 于 .vv-viewer-pane（position:
    relative 已有，SearchPanel 同锚）状态栏上方左对齐，z-index 对齐面板层。 */
 .vv-status-openwith { background: none; border: none; padding: 0; font: inherit;
-  font-size: 12px; color: inherit; cursor: pointer; text-align: left; }
+  font-size: var(--vv-fs-xs); color: inherit; cursor: pointer; text-align: left; }
 .vv-status-openwith:hover { color: var(--ui-accent); }
 .vv-status-picker { position: absolute; left: 8px; bottom: 26px; z-index: 30; min-width: 12em;
   padding: 4px; display: flex; flex-direction: column; background: var(--ui-tab-active-bg);
-  border: 1px solid var(--ui-border); border-radius: 6px; box-shadow: 0 4px 16px rgb(0 0 0 / 18%); }
+  border: 1px solid var(--ui-border); border-radius: 6px; box-shadow: var(--vv-shadow-2); }
 .vv-status-picker-item, .vv-status-picker-lang { background: none; border: none; border-radius: 4px; text-align: left;
   padding: 4px 10px; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
 .vv-status-picker-item:hover, .vv-status-picker-lang:hover { background: var(--ui-hover-bg); }
@@ -600,18 +600,18 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .vv-tree .vv-tree { padding-left: 14px; }
 .vv-tree-row { display: flex; gap: 4px; align-items: center; width: 100%; text-align: left;
   background: none; border: none; padding: 2px 6px; border-radius: 4px; }
-.vv-tree-row:hover { background: var(--ui-side-bg); }
+.vv-tree-row:hover { background: var(--ui-hover-bg); }
 .vv-tree-caret { width: 1em; flex: none; }
 .vv-tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 右栏（目录 + 元数据面板）：MetaPanel 空壳在顶，TOC 占剩余高度滚动 */
 .meta-panel { padding: .65rem .75rem; border-bottom: 1px solid var(--ui-border); flex: none; }
-.meta-title { margin: 0 0 .3rem; font-size: 11px; font-weight: 600; letter-spacing: .05em;
+.meta-title { margin: 0 0 .3rem; font-size: var(--vv-fs-2xs); font-weight: 600; letter-spacing: .05em;
   text-transform: uppercase; color: var(--ui-fg-muted); }
 .meta-empty { margin: 0; font-size: 12px; color: var(--ui-fg-muted); }
 /* 导出动作区（md-export Task 2）：仅 markdown 渲染 tab（实例句柄可得）显示；
    按钮对齐既有 MetaPanel 动作形态（全局 12px 小钮 + side-bg） */
 .meta-export { margin-top: .55rem; display: flex; flex-direction: column; gap: .3rem; }
-.meta-export-title { font-size: 11px; font-weight: 600; letter-spacing: .05em;
+.meta-export-title { font-size: var(--vv-fs-2xs); font-weight: 600; letter-spacing: .05em;
   text-transform: uppercase; color: var(--ui-fg-muted); }
 .meta-export-actions { display: flex; gap: 6px; }
 .meta-export-btn { flex: 1; font-size: 12px; padding: 3px 8px; }
@@ -620,7 +620,7 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .toc { flex: 1; min-height: 0; overflow: auto; padding: .65rem .5rem; }
 .toc ul { list-style: none; margin: 0; padding: 0; }
 .toc button { display: block; width: 100%; text-align: left; background: none; border: none;
-  padding: 3px 6px; border-radius: 4px; color: var(--ui-fg-muted); font-size: 13px; line-height: 1.4;
+  padding: 3px 6px; border-radius: 4px; color: var(--ui-fg-muted); font-size: var(--vv-fs-sm); line-height: 1.4;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .toc button:hover { color: var(--ui-fg); background: var(--ui-tab-bg); }
 .toc button.active { color: var(--ui-accent); background: var(--ui-tab-bg); }
@@ -651,34 +651,61 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
   color: var(--ui-accent); border-color: var(--ui-accent); background: none; }
 /* 设置中心全局骨架（SettingsCenter.svelte，Task 1）：节容器排布——节内容是
    子组件（lib/settings/*Section.svelte），scoped 样式够不到，全局类承载 */
-.vv-sc-section { display: flex; flex-direction: column; gap: 6px; max-width: 640px; }
+.vv-sc-section { display: flex; flex-direction: column; gap: var(--vv-sp-6); max-width: 640px; }
+/* 设置节表单原语（设计系统 §9/§10-G4）：补回丢失的十个全局类——旧 SettingsPanel
+   （8e32a43~1 style 底稿）令牌化改写；被九个节组件模板与 SettingsCenter 引用、
+   e2e 按现 DOM 断言，必须全局定义（§0 红线 8：不得 scoped/不得改名迁移），恢复后
+   各节脱离 UA 默认渲染。字号挂 --vv-fs-* 随用户字号联动；chip 内 <code> 消费
+   --vv-code-font（§3.1 等宽令牌）；chip 圆角 12px 归 pill 档（§5.1，同视觉） */
+.vv-settings-label { font-weight: 600; font-size: var(--vv-fs-sm); }
+.vv-settings-hint { color: var(--ui-fg-muted); font-size: var(--vv-fs-xs); }
+.vv-settings-warn { color: var(--ui-warning); font-size: var(--vv-fs-xs); }
+.vv-settings-empty { color: var(--ui-fg-muted); font-size: var(--vv-fs-xs); }
+.vv-settings-remove { border: 0; background: none; padding: 0 3px; cursor: pointer;
+  color: var(--ui-fg-muted); }
+.vv-settings-remove:hover { color: var(--ui-fg); }
+.vv-settings-add { display: flex; gap: var(--vv-sp-6); }
+.vv-settings-add input { flex: 1; min-width: 0; }
+.vv-settings-presets { display: flex; gap: var(--vv-sp-6); }
+.vv-settings-presets button { font-size: var(--vv-fs-xs); }
+.vv-settings-presets button:disabled { opacity: .5; cursor: default; }
+.vv-settings-toggle { display: flex; align-items: center; gap: var(--vv-sp-6);
+  font-size: var(--vv-fs-sm); cursor: pointer; }
+.vv-settings-patterns { list-style: none; margin: 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: var(--vv-sp-6); }
+.vv-settings-pattern { display: inline-flex; align-items: center; gap: var(--vv-sp-4);
+  border: 1px solid var(--ui-border); border-radius: var(--vv-radius-full);
+  padding: 1px 4px 1px 8px; font-size: var(--vv-fs-xs); }
+.vv-settings-pattern code { font-family: var(--vv-code-font); }
 /* 设置中心「外观」节界面主题区（原 SettingsPanel 第三 section，Task 1 迁入
    AppearanceSection；样式惯例同 jsonl 渲染器 D 项：全局类消费 --ui-* token。
    槽行/导入/通知/已导入列表，复用 .vv-settings-remove） */
 .vv-settings-theme-row { display: flex; align-items: center; justify-content: space-between;
-  gap: 6px; font-size: 13px; }
+  gap: var(--vv-sp-6); font-size: var(--vv-fs-sm); }
 .vv-settings-theme-row select,
 .vv-settings-theme-row input { flex: 1; min-width: 0; max-width: 210px; }
-.vv-settings-import { display: flex; gap: 6px; }
-.vv-settings-import button { font-size: 12px; }
+.vv-settings-import { display: flex; gap: var(--vv-sp-6); }
+.vv-settings-import button { font-size: var(--vv-fs-xs); }
 .vv-settings-import button:disabled { opacity: .5; cursor: default; }
-.vv-settings-note { color: var(--ui-accent); font-size: 12px; overflow-wrap: anywhere; }
+.vv-settings-note { color: var(--ui-accent); font-size: var(--vv-fs-xs); overflow-wrap: anywhere; }
 .vv-settings-themes { list-style: none; margin: 0; padding: 0;
-  display: flex; flex-direction: column; gap: 4px; }
-.vv-settings-theme { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  display: flex; flex-direction: column; gap: var(--vv-sp-4); }
+.vv-settings-theme { display: flex; align-items: center; gap: var(--vv-sp-6); font-size: var(--vv-fs-xs); }
 .vv-settings-theme-name { flex: 1; min-width: 0; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
+/* 来源徽标 pill 化（§5.1：8px 徽标并入 --vv-radius-full，变更） */
 .vv-settings-theme-src { flex: none; color: var(--ui-fg-muted); border: 1px solid var(--ui-border);
-  border-radius: 8px; padding: 0 6px; font-size: 11px; }
+  border-radius: var(--vv-radius-full); padding: 0 6px; font-size: var(--vv-fs-2xs); }
 /* 设置中心「图表」节（原 SettingsPanel 区块，Task 1 迁入 DiagramsSection；
    spec 2026-10-19 §2.1）：Kroki host 行复用 .vv-settings-theme-row（input 宽度
    已并入上方 select 规则）；以下为按语言渲染模式网格（键恒为注册表 t.id，
    18 类型两列轻量布局） */
-.vv-settings-diagram-modes { display: flex; flex-direction: column; gap: 4px;
-  font-size: 13px; }
-.vv-diagram-mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
-.vv-diagram-mode-item { display: flex; align-items: center; gap: 4px; min-width: 0;
-  font-size: 12px; }
+.vv-settings-diagram-modes { display: flex; flex-direction: column; gap: var(--vv-sp-4);
+  font-size: var(--vv-fs-sm); }
+.vv-diagram-mode-grid { display: grid; grid-template-columns: 1fr 1fr;
+  gap: var(--vv-sp-4) var(--vv-sp-10); }
+.vv-diagram-mode-item { display: flex; align-items: center; gap: var(--vv-sp-4); min-width: 0;
+  font-size: var(--vv-fs-xs); }
 .vv-diagram-mode-item .vv-diagram-mode-lang { flex: 1; min-width: 0; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
 .vv-diagram-mode-item select { flex: none; min-width: 0; max-width: 88px; }
@@ -696,26 +723,26 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
    spec 2026-10-19 §4）：槽行复用 .vv-settings-theme-row；样张预览的族/字号由组件
    内联 style 提供（草稿值实时渲染，theme.ts fontFamilyValue 同源转义），此处只管
    框体；字号 number input 收窄（整宽 number 输入框观感失衡） */
-.vv-settings-font-sample { border: 1px solid var(--ui-border); border-radius: 6px;
+.vv-settings-font-sample { border: 1px solid var(--ui-border); border-radius: var(--vv-radius-md);
   padding: 4px 8px; overflow-wrap: anywhere; }
 .vv-settings-theme-row input[type='number'] { flex: none; max-width: 84px; }
 /* 设置中心「字体」节网络字体管理列表（原 SettingsPanel Task 5 区块，随节迁入
    FontsSection；spec 2026-10-19 §5.2/§5.3）：URL 表单复用 .vv-settings-add；
    行结构/删除钮惯例同已导入主题列表；样张框复用 .vv-settings-font-sample
    （族由组件内联 style 提供） */
-.vv-settings-font-addrow { display: flex; gap: 6px; }
+.vv-settings-font-addrow { display: flex; gap: var(--vv-sp-6); }
 .vv-settings-font-addrow input { flex: 1; min-width: 0; }
-.vv-settings-font-addrow button { font-size: 12px; }
+.vv-settings-font-addrow button { font-size: var(--vv-fs-xs); }
 .vv-settings-fonts { list-style: none; margin: 0; padding: 0;
-  display: flex; flex-direction: column; gap: 8px; }
-.vv-settings-font { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
-.vv-settings-font-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.vv-settings-font-toggle { display: flex; align-items: center; gap: 4px; flex: 1;
+  display: flex; flex-direction: column; gap: var(--vv-sp-8); }
+.vv-settings-font { display: flex; flex-direction: column; gap: var(--vv-sp-4); font-size: var(--vv-fs-xs); }
+.vv-settings-font-head { display: flex; align-items: center; gap: var(--vv-sp-6); min-width: 0; }
+.vv-settings-font-toggle { display: flex; align-items: center; gap: var(--vv-sp-4); flex: 1;
   min-width: 0; cursor: pointer; }
 .vv-settings-font-name { min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }
 .vv-settings-font-size { flex: none; color: var(--ui-fg-muted); }
 .vv-settings-font-failed .vv-settings-font-name { color: var(--ui-danger); }
-.vv-settings-font-retry { flex: none; font-size: 12px; }
-.vv-settings-font-errmsg { color: var(--ui-danger); font-size: 12px;
+.vv-settings-font-retry { flex: none; font-size: var(--vv-fs-xs); }
+.vv-settings-font-errmsg { color: var(--ui-danger); font-size: var(--vv-fs-xs);
   overflow-wrap: anywhere; }

@@ -323,18 +323,19 @@
     margin: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    font-size: 12px;
+    gap: var(--vv-sp-2);
+    font-size: var(--vv-fs-xs);
   }
   .meta-row {
     display: flex;
-    gap: 6px;
+    gap: var(--vv-sp-6);
     min-width: 0;
   }
   .meta-row dt {
     color: var(--ui-fg-muted);
     flex: none;
-    width: 2.6em;
+    /* 列宽按最长标签「打开方式」（4 字 = 48px@fs-xs）校准：2.6em 曾迫使 dt 折行（§9） */
+    width: 4em;
   }
   .meta-row dd {
     margin: 0;

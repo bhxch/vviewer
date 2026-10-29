@@ -82,9 +82,9 @@
   .vv-tree-src {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 4px 6px 2px;
-    font-size: 12px;
+    gap: var(--vv-sp-4);
+    padding: var(--vv-sp-4) var(--vv-sp-6) var(--vv-sp-2);
+    font-size: var(--vv-fs-xs);
     color: var(--ui-fg-muted);
   }
   .vv-tree-src-label {
@@ -101,14 +101,14 @@
     background: none;
     color: var(--ui-fg-muted);
     font: inherit;
-    font-size: 11px;
-    padding: 0 4px;
-    border-radius: 4px;
+    font-size: var(--vv-fs-2xs);
+    padding: 0 var(--vv-sp-4);
+    border-radius: var(--vv-radius-sm);
     cursor: pointer;
   }
   .vv-tree-src-remove:hover {
     color: var(--ui-fg);
-    background: var(--ui-side-bg);
+    background: var(--ui-hover-bg); /* 与树行 hover 同语义（亮暗均与 side-bg 同值，零漂移） */
   }
   .vv-tree-group {
     list-style: none;
