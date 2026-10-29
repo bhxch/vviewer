@@ -8,22 +8,56 @@
   --vv-ui-font: system-ui, -apple-system, sans-serif;
   --vv-ui-font-size: 16px;
   --vv-code-font-size: 13px;
+  /* 字阶四档（设计系统 §3.2/§12.1 #27-30）：calc 派生自 --vv-ui-font-size，
+     style#vv-font 注入值自动生效；U=16px 时 11/12/13/14px。chrome 硬编码 px 字号
+     只允许收敛到本表，禁新增第三套字号 */
+  --vv-fs-2xs: calc(var(--vv-ui-font-size) * 0.6875);
+  --vv-fs-xs: calc(var(--vv-ui-font-size) * 0.75);
+  --vv-fs-sm: calc(var(--vv-ui-font-size) * 0.8125);
+  --vv-fs-md: calc(var(--vv-ui-font-size) * 0.875);
   /* UI 主题（亮为默认） */
   --ui-bg: #ffffff; --ui-fg: #1f2328; --ui-fg-muted: #656d76; --ui-border: #d0d7de;
   --ui-accent: #0969da; --ui-side-bg: #f6f8fa; --ui-tab-bg: #f6f8fa; --ui-tab-active-bg: #ffffff;
   /* 外观型注入可覆盖的 6 扩展 token（vscode.ts colorsToUiVars 白名单；缺键回退此处默认值） */
   --ui-input-bg: #ffffff; --ui-hover-bg: #f6f8fa; --ui-selection-bg: #add6ff;
   --ui-statusbar-bg: #f6f8fa; --ui-danger: #cf222e; --ui-warning: #9a6700;
+  /* 恒默认语义色（§12.1 #1/#2）：不在 colorsToUiVars 12 键白名单（§2.4 冻结，
+     外观接管时保持默认）；亮值=markdown-alert tip/important 现值，零漂移。
+     三块级联同写（§2.2：漏块即复现 pdf-page-label 式事故） */
+  --ui-success: #1a7f37; --ui-accent-2: #8250df;
   /* 代码主题变量（亮） */
   --code-bg: #ffffff; --code-fg: #1f2328; --code-gutter: #8c959f;
   --hljs-keyword: #cf222e; --hljs-string: #0a3069; --hljs-comment: #6e7781;
   --hljs-number: #0550ae; --hljs-title: #8250df; --hljs-built_in: #0550ae; --hljs-attr: #0550ae;
+  /* 固定效果色（§12.1 #3-10）：双主题同值=现状（零漂移）；唯一分值例外 --vv-hit-active
+     由暗色两块覆盖 35%（§2.3 实测：80% 对 code-fg 暗 2.58:1 不达 AA，35% 达 7.63:1，
+     「当前命中」区分度由拖拽内嵌线同款 inset 描边语义补足） */
+  --vv-hit-bg: rgb(255 213 0 / 45%); --vv-hit-active: rgb(255 160 0 / 80%);
+  --vv-hit-line: rgb(255 213 0 / 18%); --vv-hit-line-active: rgb(255 160 0 / 35%);
+  --vv-hex-hit: rgba(255, 176, 0, .22); --vv-hex-hit-active: rgba(255, 120, 0, .55);
+  --vv-hex-flash: rgba(255, 176, 0, .4);
+  --vv-scrim: rgb(0 0 0 / 35%); /* 模态背板（SettingsCenter 现值）；灯箱 70% 黑为物理遮罩特例不入档 */
+  /* 浮层阴影三档（§5.3）：黑基色，暗色下同样成立；抽屉泛光/PDF 纸张为特例就地保留 */
+  --vv-shadow-1: 0 2px 8px rgb(0 0 0 / 15%);
+  --vv-shadow-2: 0 4px 16px rgb(0 0 0 / 18%);
+  --vv-shadow-3: 0 8px 28px rgb(0 0 0 / 22%);
+  /* 圆角四档（§5.1）：现状十档收敛；0/50% 贴边融合与圆形钮按元素语义不入档 */
+  --vv-radius-sm: 4px; --vv-radius-md: 6px; --vv-radius-lg: 8px; --vv-radius-full: 999px;
+  /* 间距七档（§4.1）：值=名；2px 基单位偶数递增，10px 为现状高频半档 */
+  --vv-sp-2: 2px; --vv-sp-4: 4px; --vv-sp-6: 6px; --vv-sp-8: 8px;
+  --vv-sp-10: 10px; --vv-sp-12: 12px; --vv-sp-16: 16px;
+  /* 动效两档（§11）：只动 opacity/transform/颜色，禁 spring/回弹 */
+  --vv-dur-fast: 120ms; --vv-dur-med: 200ms;
 }
 :root[data-theme-mode="dark"] {
   --ui-bg: #0d1117; --ui-fg: #e6edf3; --ui-fg-muted: #8b949e; --ui-border: #30363d;
   --ui-accent: #2f81f7; --ui-side-bg: #161b22; --ui-tab-bg: #161b22; --ui-tab-active-bg: #0d1117;
   --ui-input-bg: #0d1117; --ui-hover-bg: #161b22; --ui-selection-bg: #264f78;
   --ui-statusbar-bg: #161b22; --ui-danger: #f85149; --ui-warning: #d29922;
+  /* 令牌增量暗值（§12.1）：success/accent-2 取 GitHub dark 系（恒默认 token 三块同写）；
+     hit-active 暗覆盖 35%（§12.1 #4 唯一分值 token，漏写即暗色 2.58:1 回归） */
+  --ui-success: #3fb950; --ui-accent-2: #a371f7;
+  --vv-hit-active: rgb(255 160 0 / 35%);
   --code-bg: #0d1117; --code-fg: #e6edf3; --code-gutter: #6e7681;
   --hljs-keyword: #ff7b72; --hljs-string: #a5d6ff; --hljs-comment: #8b949e;
   --hljs-number: #79c0ff; --hljs-title: #d2a8ff; --hljs-built_in: #79c0ff; --hljs-attr: #79c0ff;
@@ -34,15 +68,36 @@
     --ui-accent: #2f81f7; --ui-side-bg: #161b22; --ui-tab-bg: #161b22; --ui-tab-active-bg: #0d1117;
     --ui-input-bg: #0d1117; --ui-hover-bg: #161b22; --ui-selection-bg: #264f78;
     --ui-statusbar-bg: #161b22; --ui-danger: #f85149; --ui-warning: #d29922;
+    /* 令牌增量暗值（§12.1）：success/accent-2 取 GitHub dark 系（恒默认 token 三块同写）；
+       hit-active 暗覆盖 35%（§12.1 #4 唯一分值 token，漏写即暗色 2.58:1 回归） */
+    --ui-success: #3fb950; --ui-accent-2: #a371f7;
+    --vv-hit-active: rgb(255 160 0 / 35%);
     --code-bg: #0d1117; --code-fg: #e6edf3; --code-gutter: #6e7681;
     --hljs-keyword: #ff7b72; --hljs-string: #a5d6ff; --hljs-comment: #8b949e;
     --hljs-number: #79c0ff; --hljs-title: #d2a8ff; --hljs-built_in: #79c0ff; --hljs-attr: #79c0ff;
   }
 }
 body { margin: 0; background: var(--ui-bg); color: var(--ui-fg); font-family: var(--vv-ui-font, system-ui, -apple-system, sans-serif); font-size: var(--vv-ui-font-size, 16px); }
-button { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid var(--ui-border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
-input { background: var(--ui-bg); color: var(--ui-fg); border: 1px solid var(--ui-border); border-radius: 6px; padding: 4px 8px; }
-select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid var(--ui-border); border-radius: 6px; padding: 4px 6px; }
+/* §3.1 基础层修复：控件继承字体族并挂 chrome 字阶（原回落 UA 13.33px 且不继承
+   字体族，各组件被迫零散 font: inherit 补偿）。收敛变更 13.33→13px（§12.2 声明）；
+   已有显式 font-size / font: inherit 的组件规则以更高特异性照旧压过本规则 */
+button { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid var(--ui-border); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-family: inherit; font-size: var(--vv-fs-sm); }
+input { background: var(--ui-bg); color: var(--ui-fg); border: 1px solid var(--ui-border); border-radius: 6px; padding: 4px 8px; font-family: inherit; font-size: var(--vv-fs-sm); }
+select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid var(--ui-border); border-radius: 6px; padding: 4px 6px; font-family: inherit; font-size: var(--vv-fs-sm); }
+/* §7 全局统一焦点环（键盘可达性兜底）：:where 零特异性，已显式处理者
+   （AppShell zen-exit 等）不受影响；offset 负值防浮层贴边裁剪；:focus（鼠标按下）不触发 */
+:where(button, input, select, summary, [tabindex]):focus-visible { outline: 2px solid var(--ui-accent); outline-offset: -1px; }
+/* §8.2：全站 checkbox 统一着色（基础层一行，零 DOM 变更） */
+input[type='checkbox'] { accent-color: var(--ui-accent); }
+/* §11 prefers-reduced-motion 全局适配（rg 实测现零适配）：辅助性动效压至瞬时——
+   hex 跳转闪烁完全省略（恒为终态透明）、toast 瞬显；滚动定位等功能表达不受影响 */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
 
 /* 虚拟滚动 */
 .vv-virtual { position: relative; overflow: auto; }
@@ -207,8 +262,10 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
   gap: 12px; padding: 12px; }
 .vv-pdf-page { position: relative; flex: none; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 30%); }
 .vv-pdf-page canvas { display: block; }
-.vv-pdf-page-label { position: absolute; right: 6px; bottom: 6px; font-size: 11px; color: #666;
-  background: rgb(255 255 255 / 80%); border-radius: 3px; padding: 0 4px; }
+/* §2.2 修复（§12.2 基础层）：亮色字面量换令牌——暗色下不再「刺眼白块」（变更）；
+   3px 圆角并入 --vv-radius-sm（§5.1 并档，变更） */
+.vv-pdf-page-label { position: absolute; right: 6px; bottom: 6px; font-size: 11px; color: var(--ui-fg-muted);
+  background: color-mix(in srgb, var(--ui-bg) 80%, transparent); border-radius: var(--vv-radius-sm); padding: 0 4px; }
 .vv-pdf-page-hit { outline: 3px solid var(--ui-accent); outline-offset: -3px; }
 /* hex 渲染（render-binary hexRenderer）：状态行 + 三列 dump + 可折叠结构树 */
 .vv-hex { display: flex; flex-direction: column; height: 100%; }
@@ -231,11 +288,11 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 /* hex 高亮四档（render-binary hex.ts；Task 3 自运行时 <style> 注入收编至此）：
    命中两档 + 光标（选区色，主题自适应）+ 跳转目标 1s 衰减（keyframes 渐隐，
    摘除由 hex.ts 定时重绘完成） */
-.vv-hex-hit { background-color: rgba(255, 176, 0, .22); }
-.vv-hex-hit-active { background-color: rgba(255, 120, 0, .55); }
+.vv-hex-hit { background-color: var(--vv-hex-hit); }
+.vv-hex-hit-active { background-color: var(--vv-hex-hit-active); }
 .vv-hex-cursor { background-color: var(--ui-selection-bg); }
 @keyframes vv-hex-flash-fade {
-  from { background-color: rgba(255, 176, 0, .4); }
+  from { background-color: var(--vv-hex-flash); }
   to { background-color: transparent; }
 }
 .vv-hex-goto-flash { animation: vv-hex-flash-fade 1s ease-out forwards; }
@@ -254,8 +311,10 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .vv-archive details[open] > summary .vv-tree-caret { display: inline-block; transform: rotate(90deg); }
 /* docx 渲染（render-doc docxRenderer）：mammoth→净化 HTML 的文档排版视图 */
 .vv-docx { height: 100%; overflow: auto; }
+/* §3.2 孤值收敛：15px 是渲染器文档正文字号，不入 chrome 字阶——0.9375em 相对继承
+   字号（U=16px 时 15px 等值零漂移），随用户字号联动，与 .vv-markdown 正文口径归一 */
 .vv-docx-content { max-width: 46rem; margin: 0 auto; padding: 1.5rem 2rem; line-height: 1.65;
-  font-size: 15px; }
+  font-size: 0.9375em; }
 .vv-docx-content h1, .vv-docx-content h2, .vv-docx-content h3, .vv-docx-content h4 {
   margin: 1.2em 0 .5em; line-height: 1.3; }
 .vv-docx-content p { margin: .6em 0; }
@@ -309,11 +368,12 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 .vv-search-input { width: 16rem; }
 .vv-search-count { font-size: 12px; color: var(--ui-fg-muted); white-space: nowrap; user-select: none; }
 .vv-search-btn { padding: 2px 8px; font-size: 12px; }
-mark.vv-search-hit { background: rgb(255 213 0 / 45%); color: inherit; }
-mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
-.vv-code-line.vv-search-hit-line { background: rgb(255 213 0 / 18%); }
-/* BUG-18/09：当前命中/跳转行在命中行背景之上加深区分（1.5s 后消退） */
-.vv-code-line.vv-search-hit-line-active { background: rgb(255 160 0 / 35%); }
+mark.vv-search-hit { background: var(--vv-hit-bg); color: inherit; }
+mark.vv-search-hit-active { background: var(--vv-hit-active); }
+.vv-code-line.vv-search-hit-line { background: var(--vv-hit-line); }
+/* BUG-18/09：当前命中/跳转行在命中行背景之上加深区分（1.5s 后消退）；
+   --vv-hit-active 暗色两块覆盖 35%（§12.1 #4：修复暗色 2.58→7.63:1） */
+.vv-code-line.vv-search-hit-line-active { background: var(--vv-hit-line-active); }
 /* BUG-23：文件内搜索面板的 Aa 开关激活态（对齐全局面板按钮） */
 .vv-search-btn.active { color: var(--ui-accent); border-color: var(--ui-accent); }
 /* 布局自由化（spec 2026-10-19 §2）：折叠竖条 / 中缝调宽把手 / 面板折叠钮。
@@ -339,7 +399,7 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
      双栏统一右上角（VS Code 侧栏动作位惯例）：右栏若放左上角会压住 MetaPanel
      首行「属性」标题（均为 ~6px 锚点的浮层/文本叠放），右上角是标题行右侧空白 */
   .vv-collapse-btn { display: block; position: absolute; top: 6px; z-index: 5;
-    width: 22px; height: 22px; padding: 0; font-size: 12px; line-height: 1; opacity: .35; }
+    width: 24px; height: 24px; padding: 0; font-size: 12px; line-height: 1; opacity: .35; }
   .vv-collapse-btn:hover { opacity: 1; }
   .vv-collapse-left, .vv-collapse-right { right: 6px; }
 }
@@ -394,7 +454,10 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-server-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .vv-server-form input:first-child { width: 220px; }
 .vv-server-form input[type='password'] { width: 150px; }
-.vv-server-error { color: var(--ui-danger, #d33); font-size: 12px; max-width: 320px; }
+/* §2.3 死回退清理：--ui-danger 在亮暗三块恒被定义（app.css 亮/暗/system），var 回退
+   永不生效；#d33 白上 4.57:1 勉强过、暗色上 4.14:1 不达 AA。裸写 var(--ui-danger)
+   即可（本文件 7 行 8 处；组件侧 7 处由各组清理） */
+.vv-server-error { color: var(--ui-danger); font-size: 12px; max-width: 320px; }
 /* workspace 切换器（T5）：打开按钮组右侧下拉；≤600px 触发按钮收敛、下拉改
    同位 fixed 浮层。z-index 30 对齐设置中心/GlobalSearchPanel 惯例 */
 .vv-ws { position: relative; }
@@ -459,7 +522,7 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-wspanel-close { flex: none; background: none; border: none; border-radius: 0; color: var(--ui-fg-muted);
   font: inherit; opacity: 0; padding: 0 3px; cursor: pointer; }
 .vv-wspanel-row:hover .vv-wspanel-close, .vv-wspanel-row:focus-within .vv-wspanel-close { opacity: 1; }
-.vv-wspanel-close:hover { color: var(--ui-danger, #d33); }
+.vv-wspanel-close:hover { color: var(--ui-danger); }
 @media (max-width: 600px) { .vv-wspanel-close { opacity: 1; } }
 .vv-wspanel-empty { padding: 4px 10px 6px 20px; color: var(--ui-fg-muted); font-size: 12px; }
 .vv-wspanel-addbtn { display: block; margin: 2px 10px 4px 20px; background: none; border: 0; border-radius: 4px;
@@ -570,19 +633,19 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-jsonl { display: flex; flex-direction: column; height: 100%; }
 .vv-jsonl-status { flex: none; padding: 4px 10px; border-bottom: 1px solid var(--ui-border);
   color: var(--ui-fg-muted); font-size: 12px; }
-.vv-jsonl-status-failed { color: var(--ui-danger, #d33); }
+.vv-jsonl-status-failed { color: var(--ui-danger); }
 .vv-jsonl-scroll { position: relative; flex: 1; min-height: 0; overflow: auto; }
 .vv-jsonl-card { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 .6em;
   margin: .4rem .6rem; padding: .4rem .6rem; border: 1px solid var(--ui-border); border-radius: 6px;
   background: var(--code-bg); }
-.vv-jsonl-card-failed { border-color: var(--ui-danger, #d33); }
+.vv-jsonl-card-failed { border-color: var(--ui-danger); }
 .vv-jsonl-gutter { user-select: none; min-width: 2.2em; text-align: right;
   color: var(--ui-fg-muted); flex: none; }
 .vv-jsonl-body { flex: 1; min-width: 0; overflow-x: auto; margin: 0; white-space: pre;
   font-family: var(--vv-code-font); font-size: var(--vv-code-font-size, 13px); line-height: var(--vv-code-line-height);
   color: var(--code-fg); }
 .vv-jsonl-badge { flex: none; align-self: center; font-size: 12px; padding: 0 .4em;
-  border: 1px solid var(--ui-danger, #d33); border-radius: 4px; color: var(--ui-danger, #d33); }
+  border: 1px solid var(--ui-danger); border-radius: 4px; color: var(--ui-danger); }
 .vv-jsonl-cap { flex-basis: 100%; font-size: 12px; color: var(--ui-fg-muted); }
 .vv-jsonl-expand { flex: none; margin-left: auto; font-size: 12px;
   color: var(--ui-accent); border-color: var(--ui-accent); background: none; }
@@ -652,7 +715,7 @@ mark.vv-search-hit-active { background: rgb(255 160 0 / 80%); }
 .vv-settings-font-name { min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }
 .vv-settings-font-size { flex: none; color: var(--ui-fg-muted); }
-.vv-settings-font-failed .vv-settings-font-name { color: var(--ui-danger, #d33); }
+.vv-settings-font-failed .vv-settings-font-name { color: var(--ui-danger); }
 .vv-settings-font-retry { flex: none; font-size: 12px; }
-.vv-settings-font-errmsg { color: var(--ui-danger, #d33); font-size: 12px;
+.vv-settings-font-errmsg { color: var(--ui-danger); font-size: 12px;
   overflow-wrap: anywhere; }
