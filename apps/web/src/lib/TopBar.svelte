@@ -379,7 +379,7 @@
     aria-label="目录管理"
     title="目录管理（Ctrl+Alt+M）：服务端挂载 / 前端直连与代理 / 本机授权"
   >
-    📁
+    目录
   </button>
   <!-- 专注模式可见入口：tooltip 写明进出双方式（快捷键 + zen 内退出通道），
        文案随 zen 态切换（zen 下经热区唤出的临时条上即「退出」钮） -->
@@ -396,3 +396,19 @@
 {#if createOpen}
   <WorkspaceCreateModal onclose={() => (createOpen = false)} />
 {/if}
+
+<style>
+  /* 字形钮触控目标（§6.4/§10-G1，≤600px 档，变更 ~26→≥32px 高）：↻/⚙/目录 三钮
+     无类名、DOM 零变更红线不可加类，按 aria-label 选取（e2e 同锚稳定：
+     button[aria-label="设置"] settings-center.ts、button[aria-label="目录管理"]
+     b-mounts-manager.spec.ts:135）。全局 button padding-block 4px 下钮高 ~26px，
+     补至 8px 使触控高 ≥32px（13px 字号 + normal 行高 ≈ 33.6px）；随用户字号
+     --vv-ui-font-size 联动增大，恒过线。桌面断点不适用，零漂移 */
+  @media (max-width: 600px) {
+    .vv-topbar button[aria-label='刷新当前文件'],
+    .vv-topbar button[aria-label='设置'],
+    .vv-topbar button[aria-label='目录管理'] {
+      padding-block: 8px;
+    }
+  }
+</style>

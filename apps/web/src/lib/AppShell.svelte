@@ -1007,7 +1007,7 @@
       <div class="vv-strip" data-side="left">
         <button type="button" class="vv-strip-expand" aria-label="展开文件树" title="展开文件树"
           onclick={() => updateLayout({ leftCollapsed: false })}>»</button>
-        <span class="vv-strip-icon" aria-hidden="true">🌳</span>
+        <span class="vv-strip-icon" aria-hidden="true">树</span>
       </div>
     {/if}
     <aside class="vv-side" class:vv-side-off={layout.leftCollapsed} style="--vv-side-w: {leftW}px">
@@ -1203,10 +1203,12 @@
       inset: 0 auto 0 0;
       width: min(80vw, 300px);
       transform: translateX(-100%);
-      transition: transform 0.2s;
+      /* 时长 token（§11/§10-G1）：0.2s→--vv-dur-med 等值零漂移；缓动 ease-out
+         入场档。reduced-motion 由 app.css 全局块压至瞬时（transition-duration） */
+      transition: transform var(--vv-dur-med) ease-out;
       z-index: 10;
       background: var(--ui-bg);
-      box-shadow: 0 0 12px rgb(0 0 0 / 25%);
+      box-shadow: 0 0 12px rgb(0 0 0 / 25%); /* 抽屉泛光特例（§5.3），就地保留 */
     }
     .vv-shell.drawer .vv-side {
       transform: none;
@@ -1217,6 +1219,11 @@
       left: 8px;
       bottom: 8px;
       z-index: 20;
+      /* 触控目标（§6.4/§10-G1，变更 ~24→32px）：浮钮原无宽高声明，触控面仅全局
+         button 默认；移动端入口补足 32px 底线档（button UA 为 border-box，
+         min-* 即含 padding/border 的总尺寸） */
+      min-width: 32px;
+      min-height: 32px;
     }
     /* 平板段（601-900px）只把文件树收进抽屉：右栏（230px 固定宽）保留在主区
        流式布局内——原先两栏同时滑入抽屉、单按钮同开同关，600px 档两栏合计
@@ -1229,10 +1236,10 @@
         inset: 0 0 0 auto;
         width: min(80vw, 300px);
         transform: translateX(100%);
-        transition: transform 0.2s;
+        transition: transform var(--vv-dur-med) ease-out;
         z-index: 10;
         background: var(--ui-bg);
-        box-shadow: 0 0 12px rgb(0 0 0 / 25%);
+        box-shadow: 0 0 12px rgb(0 0 0 / 25%); /* 抽屉泛光特例（§5.3），就地保留 */
       }
       .vv-shell.rightopen .vv-right {
         transform: none;
@@ -1243,6 +1250,10 @@
         right: 8px;
         bottom: 8px;
         z-index: 20;
+        /* 触控目标（§6.4/§10-G1，变更 ~24→32px）：同 .vv-drawer-toggle；本钮仅
+           ≤600px 档可见（display:block 所在嵌套断点），min-* 与显示规则同处内聚 */
+        min-width: 32px;
+        min-height: 32px;
       }
     }
   }
@@ -1268,8 +1279,11 @@
     background: var(--ui-tab-active-bg);
     color: var(--ui-fg);
     font-size: 13px;
-    box-shadow: 0 4px 16px rgb(0 0 0 / 18%);
-    animation: vv-toast-in 0.18s ease-out;
+    /* 阴影归档（§5.3）：0 4px 16px rgb(0 0 0 / 18%) 等值换 --vv-shadow-2（toast
+       入册该档），零视觉漂移；时长并入 --vv-dur-med（0.18s→200ms，§11/§10-G1
+       变更声明；reduced-motion 由 app.css 全局块压 animation 至瞬时） */
+    box-shadow: var(--vv-shadow-2);
+    animation: vv-toast-in var(--vv-dur-med) ease-out;
     pointer-events: none; /* 纯告知条：不拦截其下元素点击（快速连操作不被拖住） */
   }
   @keyframes vv-toast-in {
@@ -1313,7 +1327,8 @@
       border: 1px solid var(--ui-border);
       background: var(--ui-tab-active-bg);
       color: var(--ui-fg);
-      font-size: 18px;
+      /* 字号 18→16px（§6.3/§10-G1 变更声明）：字形收敛至浮钮档，44px 触控面冻结不变 */
+      font-size: 16px;
       line-height: 1;
       cursor: pointer;
       opacity: 0.55;
@@ -1322,5 +1337,12 @@
     .vv-zen-exit:focus-visible {
       opacity: 1;
     }
+  }
+  /* 折叠钮键盘等价（§7/§10-G1）：hover 提亮（app.css min-width:901px 块内
+     .vv-collapse-btn:hover opacity 1）的 focus-visible 对应项——否则键盘聚焦恒
+     0.35 近乎不可见。app.css 不可编辑（实施红线），规则落组件 scoped 层；
+     ≤900px 段本钮 display:none 不可聚焦，全断点声明无副作用 */
+  .vv-collapse-btn:focus-visible {
+    opacity: 1;
   }
 </style>
