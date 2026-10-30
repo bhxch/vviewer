@@ -1,6 +1,6 @@
 # svgbob wasm 引擎产物（构建期由 pnpm gen:svgbob-wasm 生成，不入库；svgbob_wasm.d.ts
 # 手写入库仅类型声明）。*.wasm 已被根 .gitignore 全局规则覆盖，glue .js 必须在此显式
-# 排除防混入。根 .gitignore 现有条目仍指 render-text 旧路径（切包阶段统一改指本包，
-# 与 ci.yml 缓存键同批），本文件为包内兜底。
+# 排除防混入。根 .gitignore 条目已同步改指本包（svgbob-wasm-gen/*.{js,wasm}），本
+# 文件为包内独立兜底（包单独复制/发布时不依赖根级规则）。
 svgbob_wasm.js
 svgbob_wasm_bg.wasm
