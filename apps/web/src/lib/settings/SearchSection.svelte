@@ -35,7 +35,7 @@
 
 <section class="vv-sc-section">
   <div class="vv-settings-label">排除规则</div>
-  <div class="vv-settings-hint">命中名称的文件/目录不显示在文件树与快速打开中（如 .git、node_modules；*.log 排除所有 .log 文件）</div>
+  <div class="vv-settings-hint">命中名称的文件/目录不显示在文件树与快速打开中（如 .git、node_modules；*.log 排除所有 .log 文件）。</div>
   {#if patterns.length > 0}
     <ul class="vv-settings-patterns">
       {#each patterns as p (p)}

@@ -257,6 +257,7 @@
 
 <section class="vv-sc-section">
   <div class="vv-settings-label">字体</div>
+  <div class="vv-settings-hint">family 支持逗号分隔多级回退（如 JetBrains Mono, monospace）；本机缺失的字体由浏览器回退。</div>
   <label class="vv-settings-theme-row">
     <span>界面字体</span>
     <select value={uiSelectValue} onchange={(e) => onFamilyChange('ui', e)} aria-label="界面字体族">
@@ -337,10 +338,7 @@
       aria-label="代码字号（px）"
     />
   </label>
-  <div class="vv-settings-hint">
-    family 支持逗号分隔多级回退（如 JetBrains Mono, monospace）；本机缺失的字体由浏览器回退。
-    代码字号变更后行高联动、已打开文件自动以新行高重排。
-  </div>
+  <div class="vv-settings-hint">代码字号变更后行高联动、已打开文件自动以新行高重排。</div>
   <div class="vv-settings-label">网络字体</div>
   <div class="vv-settings-hint">
     https 直链或本地上传 .ttf/.otf/.woff/.woff2（单文件 ≤30MB）；已启用的字体进上方两槽下拉，

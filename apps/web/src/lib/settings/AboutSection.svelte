@@ -170,13 +170,13 @@
   {:else}
     <div class="vv-settings-hint">当前浏览器不支持持久化存储查询。</div>
   {/if}
+  <div class="vv-settings-hint">
+    持久化为 origin 级：一次申请保护全源（字体/主题/会话快照/离线缓存）；字体新增成功时也会静默尝试一次。
+  </div>
   <div class="vv-settings-import">
     <button type="button" disabled={requesting} onclick={() => void onRequestPersist()}>
       申请持久化存储
     </button>
-  </div>
-  <div class="vv-settings-hint">
-    持久化为 origin 级：一次申请保护全源（字体/主题/会话快照/离线缓存）；字体新增成功时也会静默尝试一次。
   </div>
   {#if persistNote}
     <div class="vv-settings-note" role="status">{persistNote}</div>

@@ -163,10 +163,10 @@
       <option value="dark">暗色</option>
     </select>
   </label>
-  <div class="vv-settings-hint">顶栏「主题」快切按钮与本控件写入同一字段；跟随系统时按操作系统亮暗解析</div>
+  <div class="vv-settings-hint">顶栏「主题」快切按钮与本控件写入同一字段；跟随系统时按操作系统亮暗解析。</div>
   <div class="vv-settings-label">界面主题</div>
   <div class="vv-settings-hint">
-    VSCode 外观主题同时接管代码配色（亮/暗各自记忆，跟随顶栏主题模式）；非默认时代码主题选择停用
+    VSCode 外观主题同时接管代码配色（亮/暗各自记忆，跟随顶栏主题模式）；非默认时代码主题选择停用。
   </div>
   <label class="vv-settings-theme-row">
     <span>亮色</span>
