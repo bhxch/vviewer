@@ -27,8 +27,10 @@ async function openSampler(page: Parameters<typeof injectDir>[0]): Promise<void>
 test.describe('b-md-diagrams 图表矩阵', () => {
   test('graphviz 本地渲染 svg + 图/源码切换', async ({ page }) => {
     test.setTimeout(60_000);
-    // plantuml 默认 kroki 模式：拦掉真实 kroki.io，环境无关（error 降级不进断言面）
+    // plantuml 默认 kroki 模式：拦掉真实 kroki.io 与 fallback 档官方服务器
+    //（2026-10-30：kroki 失败会自动换 plantuml.com 重试，双 abort 保环境无关）
     await page.route('**kroki.io/**', (route) => route.abort());
+    await page.route('**plantuml.com/**', (route) => route.abort());
     await openSampler(page);
     const wrap = page.locator('.vv-markdown .md-diagram').first();
     // 采样文档首个围栏是 graphviz（lang 标签实证 first() 指向），viz-js 本地渲染真实 svg
@@ -76,7 +78,9 @@ test.describe('b-md-diagrams 图表矩阵', () => {
 
   test('math 围栏渲染 katex', async ({ page }) => {
     test.setTimeout(60_000);
+    // 双 abort 同首用例：sampler 的 plantuml 围栏 kroki 失败后不得外发 fallback 档
     await page.route('**kroki.io/**', (route) => route.abort());
+    await page.route('**plantuml.com/**', (route) => route.abort());
     await openSampler(page);
     // math 围栏 displayMode 渲染：.katex-display 包 .katex（区别于 $...$ 行内公式的 katex 步）
     const view = page.locator('.vv-markdown .md-diagram-view').filter({ has: page.locator('.katex') });

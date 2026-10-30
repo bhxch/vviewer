@@ -5,7 +5,8 @@ import { injectDir, openTreeFile } from './b-markdown-html-docs-helpers';
 /**
  * b-md-diagrams-deep 图表三通道矩阵补强（DM-01~DM-10，不与 b-md-diagrams /
  * e2e-server b-compute-diagrams 既有覆盖重复）：
- * - DM-01 kroki img 真实 error 事件（404）→ 错误卡 + 源码同展 + 可切回（4-3 可见化回归锚）；
+ * - DM-01 kroki img 真实 error 事件（kroki/官方服务器 404 双跳全失败）→ 错误卡 + 源码
+ *  同展 + 可切回（4-3 可见化回归锚，jsdom 外专属面；fallback 成功跳锚在 DM-11）；
  * - DM-02 settings 白名单负注入：非法 krokiHost 归空回默认、非法 modes 键/值剔除（mermaid 'wasm'
  *   若未被剔除会落 source 模式无 svg——归一语义的行为级甄别）；
  * - DM-03 diagram-engines chunk 动态 import 失败（route abort）→ spec §6 运行时回退链
@@ -23,6 +24,9 @@ import { injectDir, openTreeFile } from './b-markdown-html-docs-helpers';
  * - DM-09 多图表文档性能锚：12 围栏（6 本地 + 6 kroki）45s 内全终态、引擎 chunk 只加载一次、
  *   kroki 每围栏恰一次请求；
  * - DM-10 纯 web auto 策略（无服务端）：纯图表文档恒本地通道——「渲染: 本地」+ 零 compute POST。
+ * - DM-11 plantuml 官方服务器 fallback 档（2026-10-30）：kroki 404 → src 换官方服务器
+ *  URL 出图（注册表 officialFallback + krokiHost 公共默认双判据，jsdom 手派 error 的
+ *  单测面之外的真实网络跳）；自建 host 不回落为单测裁决面（隐私防线，无网络面）。
  *
  * 契约锚：注册表/别名 packages/render-text/src/markdown/diagrams.ts:20-39；生效模式回退链
  * pipeline.ts:135-143；kroki error 同展兜底 pipeline.ts:297-305；source 模式无 toggle
@@ -62,12 +66,18 @@ function wrapByLang(page: Page, lang: string): ReturnType<Page['locator']> {
 
 test.describe('b-md-diagrams-deep 图表三通道矩阵补强', () => {
   // kroki 渲染失败必须用户可见：错误卡文案 + 源码同展 + toggle 可切回（4-3 修复的回归锚，jsdom 外专属面）
-  test('DM-01 kroki img 真实 error 事件（404）：错误卡可见 + 源码同展兜底 + 可切回文案卡（4-3 回归锚）', async ({
+  // fallback 档语义（DM-11 承接成功跳）：plantuml kroki 失败先换官方服务器重试，两跳
+  // 全败才落错误卡——本用例按 host 分路由双 404，终态文案标注两跳
+  test('DM-01 kroki img 真实 error 事件（kroki+官方双跳全失败）：两跳文案错误卡 + 源码同展兜底 + 可切回（4-3 回归锚）', async ({
     page
   }) => {
     test.setTimeout(60_000);
-    // 404 触发真浏览器 img error 事件（jsdom 不派发——单测只断 src 形态，此为 e2e 专属面）
-    await page.route('**/plantuml/svg/*', (route) =>
+    // 404 触发真浏览器 img error 事件（jsdom 不派发——单测手派事件，此为 e2e 专属面）；
+    // 两条路由按 host 分开拦截：kroki 第一跳与官方服务器第二跳各自命中
+    await page.route('**kroki.io/plantuml/svg/*', (route) =>
+      route.fulfill({ status: 404, contentType: 'text/plain', body: 'nope' })
+    );
+    await page.route('**plantuml.com/plantuml/svg/*', (route) =>
       route.fulfill({ status: 404, contentType: 'text/plain', body: 'nope' })
     );
     await openDoc(
@@ -76,10 +86,11 @@ test.describe('b-md-diagrams-deep 图表三通道矩阵补强', () => {
       ['# kroki 失败', '', fence('plantuml', '@startuml\nA -> B\n@enduml'), ''].join('\n')
     );
     const wrap = wrapByLang(page, 'plantuml');
-    // 错误卡：md-diagram-error + 文案带类型 id（不得 hidden——4-3 修复的可见化判据）
+    // 错误卡：md-diagram-error + 文案带类型 id（不得 hidden——4-3 修复的可见化判据）；
+    // fallback 档后文案标注两跳全败（kroki 与官方服务器）
     const errView = wrap.locator('.md-diagram-view.md-diagram-error');
     await expect(errView).toBeVisible({ timeout: 30_000 });
-    await expect(errView).toHaveText('kroki 渲染失败（plantuml）');
+    await expect(errView).toHaveText('kroki 与官方服务器渲染失败（plantuml）');
     // 源码同展兜底：面板展开、原文可读（缺陷态只露源码无失败文案）
     const sourcePane = wrap.locator('.md-diagram-source');
     await expect(sourcePane).toBeVisible();
@@ -348,6 +359,38 @@ test.describe('b-md-diagrams-deep 图表三通道矩阵补强', () => {
     await expect(page.locator('.vv-statusbar')).toContainText('渲染: 本地', { timeout: 30_000 });
     // 零计算卸载请求：无服务端连接时 auto 不发 POST /api/compute/markdown
     expect(mdPosts).toHaveLength(0);
+  });
+
+  // plantuml 官方服务器 fallback 档真实网络跳：kroki 404 → 同一 img 换官方服务器
+  // URL 出图（无错误卡）。kroki.io abort / 官方 fulfill 按 host 分路由（**/plantuml/svg/*
+  // 通配会双命中，分 host 才能单跳定向失败）；全 route mock 离线稳定，编码正确性由
+  // 单测官方向量锚 + DM-01 双跳往返锚承接
+  test('DM-11 plantuml 官方服务器 fallback 档：kroki 失败后 src 换官方 URL 出图无错误卡', async ({
+    page
+  }) => {
+    test.setTimeout(60_000);
+    await page.route('**kroki.io/plantuml/svg/*', (route) =>
+      route.fulfill({ status: 404, contentType: 'text/plain', body: 'nope' })
+    );
+    await page.route('**plantuml.com/plantuml/svg/*', (route) =>
+      route.fulfill({ contentType: 'image/svg+xml', body: SVG_BODY })
+    );
+    await openDoc(
+      page,
+      'dd-11-official-fallback.md',
+      ['# 官方回落', '', fence('plantuml', '@startuml\nA -> B\n@enduml'), ''].join('\n')
+    );
+    const wrap = wrapByLang(page, 'plantuml');
+    const view = wrap.locator('.md-diagram-view');
+    // fallback 成功跳：src 换官方服务器 URL 段（编码为官方字母表），img 出图
+    const img = view.locator('img[src^="https://www.plantuml.com/plantuml/svg/"]');
+    await expect(img).toBeVisible({ timeout: 30_000 });
+    expect(await img.getAttribute('src')).toMatch(
+      /^https:\/\/www\.plantuml\.com\/plantuml\/svg\/[0-9A-Za-z_-]+$/
+    );
+    // 无错误卡无降级：官方跳接管后失败态不出现
+    await expect(view).not.toHaveClass(/md-diagram-error/);
+    await expect(wrap.locator('.md-diagram-toggle')).toHaveText('源码');
   });
 });
 
