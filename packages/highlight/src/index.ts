@@ -8,6 +8,8 @@ export {
 } from './queries';
 export { detectLanguage, detectableLanguageNames } from './langdetect';
 export {
+  CAPTURE_CLASS_PREFIX,
+  CAPTURE_VAR_PREFIX,
   CODE_CAPTURES,
   captureToCssClass,
   captureToCssVar,
@@ -17,6 +19,19 @@ export {
   type ThemeStyle,
   type ThemeTable,
 } from './theme';
+export {
+  assignIntervalsToLines,
+  escapeHtml,
+  flattenIntervals,
+  lineOf,
+  mergeChunkLines,
+  overlaySearchHits,
+  renderLineHtml,
+  splitHighlightedLines,
+  type LineAssignment,
+  type LineSeg,
+  type SearchHitOverlayOptions,
+} from './lines';
 export type {
   HighlightChunk,
   HighlightContext,
