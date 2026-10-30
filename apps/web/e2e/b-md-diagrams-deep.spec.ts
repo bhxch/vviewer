@@ -25,8 +25,10 @@ import { injectDir, openTreeFile } from './b-markdown-html-docs-helpers';
  *   kroki 每围栏恰一次请求；
  * - DM-10 纯 web auto 策略（无服务端）：纯图表文档恒本地通道——「渲染: 本地」+ 零 compute POST。
  * - DM-11 plantuml 官方服务器 fallback 档（2026-10-30）：kroki 404 → src 换官方服务器
- *  URL 出图（注册表 officialFallback + krokiHost 公共默认双判据，jsdom 手派 error 的
+ *  URL 出图（注册表 officialServer + krokiHost 公共默认双判据，jsdom 手派 error 的
  *  单测面之外的真实网络跳）；自建 host 不回落为单测裁决面（隐私防线，无网络面）。
+ * - DM-12 官方服务器显式第五档：modes.plantuml='official' 直连官方 URL 出图且零
+ *  kroki.io 请求（通道纯净性；kroki abort 兜底令误回落必被计数锚抓到）。
  *
  * 契约锚：注册表/别名 packages/render-text/src/markdown/diagrams.ts:20-39；生效模式回退链
  * pipeline.ts:135-143；kroki error 同展兜底 pipeline.ts:297-305；source 模式无 toggle
@@ -391,6 +393,36 @@ test.describe('b-md-diagrams-deep 图表三通道矩阵补强', () => {
     // 无错误卡无降级：官方跳接管后失败态不出现
     await expect(view).not.toHaveClass(/md-diagram-error/);
     await expect(wrap.locator('.md-diagram-toggle')).toHaveText('源码');
+  });
+
+  // 官方服务器显式第五档（2026-10-30）：settings UI modes.plantuml='official' →
+  // img 直连官方服务器 URL、零 kroki.io 请求。kroki.io abort 兜底：若实现误回落
+  // kroki（img error → fallback 档换官方），请求计数锚必现非零——终态图一样时
+  // 通道纯净性仍被锁死
+  test('DM-12 官方服务器显式档：modes.plantuml=official 直连官方 URL 出图且零 kroki 请求', async ({
+    page
+  }) => {
+    test.setTimeout(60_000);
+    const krokiHits: string[] = [];
+    page.on('request', (r) => {
+      if (/kroki\.io/.test(r.url())) krokiHits.push(r.url());
+    });
+    await page.route('**kroki.io/**', (route) => route.abort());
+    await page.route('**plantuml.com/plantuml/svg/*', (route) =>
+      route.fulfill({ contentType: 'image/svg+xml', body: SVG_BODY })
+    );
+    injectSettings(page, { diagrams: { modes: { plantuml: 'official' } } });
+    await openDoc(
+      page,
+      'dd-12-official-mode.md',
+      ['# 官方档', '', fence('plantuml', '@startuml\nA -> B\n@enduml'), ''].join('\n')
+    );
+    const view = wrapByLang(page, 'plantuml').locator('.md-diagram-view');
+    await expect(view.locator('img[src^="https://www.plantuml.com/plantuml/svg/"]')).toBeVisible({
+      timeout: 30_000
+    });
+    await expect(view).not.toHaveClass(/md-diagram-error/);
+    expect(krokiHits).toHaveLength(0);
   });
 });
 

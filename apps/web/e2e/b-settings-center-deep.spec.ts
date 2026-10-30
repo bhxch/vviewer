@@ -111,8 +111,9 @@ test.describe('b-settings-center-deep 设置中心补强', () => {
 
     // 30 类型模式网格（DIAGRAM_TYPES 注册表全量，spec §10 扩容 18→30），行=注册表
     // id；graphviz 行带渲染器 select（spec §9.1）且含「服务端」档（server 旗标），
-    // 其余恒 本地/Kroki/源码 三档；plantuml/d2 默认 kroki（defaultMode），mermaid/
-    // math/wavedrom 默认 local（Task 9 承接：扩容后网格行数锚同步 18→30）
+    // plantuml 行含「官方服务器」档（officialServer 旗标，2026-10-30 第五档），
+    // 其余类型按旗标出 本地/Kroki/源码 档集；plantuml/d2 默认 kroki（defaultMode），
+    // mermaid/math/wavedrom 默认 local（Task 9 承接：扩容后网格行数锚同步 18→30）
     const grid = page.locator('.vv-diagram-mode-grid');
     await expect(grid.locator('.vv-diagram-mode-item')).toHaveCount(30);
     for (const id of ['mermaid', 'graphviz', 'plantuml', 'math']) {
@@ -123,6 +124,13 @@ test.describe('b-settings-center-deep 设置中心补强', () => {
     }
     await expect(page.locator('select[aria-label="plantuml 渲染模式"]')).toHaveValue('kroki');
     await expect(page.locator('select[aria-label="graphviz 渲染模式"]')).toHaveValue('local');
+    // 官方服务器档仅 officialServer 旗标类型出 option（plantuml 有、mermaid 无）
+    await expect(
+      page.locator('select[aria-label="plantuml 渲染模式"] option[value="official"]')
+    ).toHaveCount(1);
+    await expect(
+      page.locator('select[aria-label="mermaid 渲染模式"] option[value="official"]')
+    ).toHaveCount(0);
 
     // UI 改 host+plantuml→source：应用后按注册表 id 键落盘（白名单合法形态）。
     // spec §8.3/§9.2 起 diagrams 节落盘含全形五键（krokiVia/mermaidTheme 恒默认
