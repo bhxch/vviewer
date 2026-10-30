@@ -1338,11 +1338,4 @@
       opacity: 1;
     }
   }
-  /* 折叠钮键盘等价（§7/§10-G1）：hover 提亮（app.css min-width:901px 块内
-     .vv-collapse-btn:hover opacity 1）的 focus-visible 对应项——否则键盘聚焦恒
-     0.35 近乎不可见。app.css 不可编辑（实施红线），规则落组件 scoped 层；
-     ≤900px 段本钮 display:none 不可聚焦，全断点声明无副作用 */
-  .vv-collapse-btn:focus-visible {
-    opacity: 1;
-  }
 </style>

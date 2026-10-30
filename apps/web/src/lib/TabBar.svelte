@@ -307,28 +307,3 @@
     />
   {/if}
 </div>
-
-<style>
-  /* tab hover（§10-G1/§7）：非激活 tab 补可感知 hover 底——--ui-tab-bg 与
-     --ui-hover-bg 亮暗各为同值（app.css:20/22 与 54/55），直用 hover-bg 零视觉
-     响应，须 color-mix 向 border 方向派生一档（亮变深/暗变浅）。:not(.active)
-     显式排除激活 tab（其底色由全局 .vv-tab.active 承担、无需 hover），同时使本
-     规则特异性 (0,4,0) 稳压 .vv-tab.active (0,2,0)，不依赖源序。公共层 app.css
-     不可编辑（实施红线），规则落组件 scoped 层（svelte-hash 类编译器自动附加，
-     DOM/类名零变更） */
-  .vv-tab:not(.active):hover {
-    background: color-mix(in srgb, var(--ui-hover-bg) 60%, var(--ui-border));
-  }
-  /* 关闭钮键盘等价（§7）：hover 提亮（全局 .vv-tab-close:hover opacity 1）的
-     focus-visible 对应项；否则键盘聚焦恒 0.6 半透近乎不可见。全局焦点环已由
-     app.css :where(...) focus-visible 规则覆盖 */
-  .vv-tab-close:focus-visible {
-    opacity: 1;
-  }
-  /* 来源徽标圆角 pill 化（§5.1/§10-G3）：8px→--vv-radius-full（999px），与
-     wspanel/settings-src/jsonl 四种徽标归一同语义（§12.2 变更声明）。全局规则
-     .vv-tab-src border-radius 8px 在 app.css（公共层不可编辑），scoped 覆盖生效 */
-  .vv-tab-src {
-    border-radius: var(--vv-radius-full);
-  }
-</style>
