@@ -28,13 +28,18 @@ export interface DiagramType {
    * 默认渲染器（settings.diagrams.renderers 空/未命中即首项语义）。undefined/空 =
    * 单渲染器（设置面不显示渲染器列，settings 白名单按本表裁决值合法性）。 */
   renderers?: readonly string[];
+  /** kroki img 失败可回落 PlantUML 官方服务器（2026-10-30 fallback 档）：仅官方
+   * 服务器原生承接的 kroki 类型（plantuml/c4plantuml——同语法族，官方 stdlib 内置
+   * C4 标准库）。回落只在 krokiHost 为公共默认 kroki.io 时启用（自建地址不外发
+   * 用户源码，隐私防线），裁决在 pipeline.ts appendKrokiImg。 */
+  officialFallback?: boolean;
 }
 
 export const DIAGRAM_TYPES: readonly DiagramType[] = [
   { id: 'mermaid', aliases: [], local: true, defaultMode: 'local', krokiType: 'mermaid', highlightLang: 'mermaid', engine: 'mermaid' },
   { id: 'graphviz', aliases: ['dot'], local: true, defaultMode: 'local', krokiType: 'graphviz', highlightLang: 'dot', engine: 'graphviz', server: true, renderers: ['viz-js', 'hpcc'] },
-  { id: 'plantuml', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'plantuml', highlightLang: 'plantuml' },
-  { id: 'c4plantuml', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'c4plantuml', highlightLang: 'plantuml' },
+  { id: 'plantuml', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'plantuml', highlightLang: 'plantuml', officialFallback: true },
+  { id: 'c4plantuml', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'c4plantuml', highlightLang: 'plantuml', officialFallback: true },
   { id: 'ditaa', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'ditaa', highlightLang: '' },
   { id: 'blockdiag', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'blockdiag', highlightLang: '' },
   { id: 'nwdiag', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'nwdiag', highlightLang: '' },
@@ -80,6 +85,32 @@ export function resolveDiagramType(lang: string): DiagramType | null {
 }
 
 export const DEFAULT_KROKI_HOST = 'https://kroki.io';
+
+/** PlantUML 官方 Web Server（fallback 档目标，2026-10-30 调查实测）：GET
+ * /plantuml/svg/{encoded} 免 key、响应带 access-control-allow-origin: *、缓存
+ * max-age 5 天；无 SLA 仅作 kroki 失败后的尽力跳。端点只认 PlantUML 语法
+ * （c4plantuml 源经 stdlib C4 同样承接，版本差异失败则落错误卡）。 */
+export const DEFAULT_PLANTUML_HOST = 'https://www.plantuml.com/plantuml';
+
+// PlantUML 编码 = 标准 base64 位打包 + 自定义字母表（0-9A-Za-z-_）；两表同长 64，
+// 逐字符按标准表索引映射即可（btoa 剥填充后长度/位序与官方 encode64 一致）
+const PLANTUML_B64 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_';
+const STD_B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/**
+ * PlantUML 官方服务器 URL：raw deflate（无 zlib 头尾，pako.deflateRaw）+ PlantUML
+ * 自定义 base64。与 kroki 编码（deflate+zlib 头、base64url）三处差异：raw 流、
+ * 字母表重排、无填充——编码向量已对官方服务器实测锚定（2026-10-30）。
+ */
+export async function createPlantumlUrl(source: string): Promise<string> {
+  const { default: pako } = await import('pako');
+  const bytes = pako.deflateRaw(new TextEncoder().encode(source), { level: 9 });
+  let str = '';
+  for (let i = 0; i < bytes.length; i += 1) str += String.fromCharCode(bytes[i]!);
+  const b64 = btoa(str).replace(/=+$/, '');
+  const enc = b64.replace(/[A-Za-z0-9+/]/g, (c) => PLANTUML_B64[STD_B64.indexOf(c)]!);
+  return `${DEFAULT_PLANTUML_HOST}/svg/${enc}`;
+}
 
 /**
  * kroki URL：pako deflate(level 9) + base64url（无填充）。host 尾斜杠归一。

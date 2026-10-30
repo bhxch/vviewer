@@ -9,7 +9,7 @@
 //   重库一律懒加载；katex/highlight.js 同样动态 import。
 // - 每步独立 try/catch：单步失败不阻塞后续步骤。
 
-import { resolveDiagramType, createKrokiUrl, DEFAULT_KROKI_HOST, type DiagramMode, type DiagramType } from './diagrams';
+import { resolveDiagramType, createKrokiUrl, createPlantumlUrl, DEFAULT_KROKI_HOST, type DiagramMode, type DiagramType } from './diagrams';
 import { renderDiagramEngine } from './diagramEngines';
 import { sanitizeDiagramFragment } from './sanitize';
 
@@ -309,8 +309,10 @@ function wrapServerDiagrams(root: Document, ctx: PipelineCtx): void {
  * - source：withToggle=false 构造（无图视图可切，不生成 toggle），bar 只留语言徽标、
  *   源码面板展开（highlightLang 命中时源码走 highlightFence）；
  * - kroki：视图为 img（src 经 kroki deflate+base64url 编码；error 监听仅真浏览器
- *   生效——jsdom 不派发 img load/error，单测只断言 src 形态）；krokiVia=server 且
- *   krokiProxy 宣告时改走 /api/kroki 服务端代发内联 svg（失败回落 img 直发）；
+ *   生效——jsdom 需手动派发 error 事件断言）。plantuml/c4plantuml 带 fallback 档：
+ *   error 且 krokiHost 为公共默认时换 PlantUML 官方服务器重试一跳，再失败落错误
+ *   卡（文案标注两跳；自建 host 不回落）；krokiVia=server 且 krokiProxy 宣告时改
+ *   走 /api/kroki 服务端代发内联 svg（失败回落 img 直发，fallback 档同样承接）；
  * - server（spec 2026-10-23 §8.3）：POST /api/compute/diagram 内联 svg（能力协商
  *   命中才到这，见 effectiveModeOf）；fetch 失败按 server→local→kroki 降级链重走
  *   分支（有本地引擎转 local、无引擎直转 kroki img）；
@@ -376,15 +378,34 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
     const img = doc.createElement('img');
     img.setAttribute('alt', type.id);
     img.setAttribute('src', await createKrokiUrl(ctx.diagram?.krokiHost ?? DEFAULT_KROKI_HOST, type.krokiType, source));
-    // jsdom 不派发 load/error（历史教训）：onerror 只在真浏览器生效，单测断言 src 形态
+    // 官方服务器 fallback 档（2026-10-30 调查实测锚）：kroki img error 且类型在
+    // 注册表 officialFallback（plantuml/c4plantuml）且 kroki 上游为公共默认
+    // kroki.io 时，src 换 PlantUML 官方服务器 URL（createPlantumlUrl）重试一次
+    // ——同一 img/监听器承接两跳（换 src 后再 error 走错误卡）；自建 krokiHost
+    // 不回落（用户明确指定的服务端不得把源码静默扩散到第三方，隐私防线），
+    // 直接落错误卡与既有形态一致。
+    let officialTried = false;
     img.addEventListener('error', () => {
-      view.classList.add(cls(ctx, 'diagramError'));
-      view.textContent = `kroki 渲染失败（${type.id}）`;
-      // 失败态文案卡可见（md-diagram-error 文本样式在案）+ 源码同展兜底可读——
-      // 4-3：文案不得 hidden（66afead 补的 [hidden] display:none 兜底会把它藏掉，
-      // 退化为台账所记「只露源码无失败文案」形态）；toggle 留「图」可切回文案卡
-      sourcePane.removeAttribute('hidden');
-      toggle.textContent = '图';
+      const showErrorCard = () => {
+        view.classList.add(cls(ctx, 'diagramError'));
+        view.textContent = `${officialTried ? 'kroki 与官方服务器渲染失败' : 'kroki 渲染失败'}（${type.id}）`;
+        // 失败态文案卡可见（md-diagram-error 文本样式在案）+ 源码同展兜底可读——
+        // 4-3：文案不得 hidden（66afead 补的 [hidden] display:none 兜底会把它藏掉，
+        // 退化为台账所记「只露源码无失败文案」形态）；toggle 留「图」可切回文案卡
+        sourcePane.removeAttribute('hidden');
+        toggle.textContent = '图';
+      };
+      if (
+        type.officialFallback &&
+        !officialTried &&
+        (ctx.diagram?.krokiHost || DEFAULT_KROKI_HOST).replace(/\/+$/, '') === DEFAULT_KROKI_HOST
+      ) {
+        officialTried = true;
+        // 编码外溢失败（pako/btoa 桩炸）直落错误卡；URL 构造成功才换 src
+        createPlantumlUrl(source).then((url) => img.setAttribute('src', url)).catch(showErrorCard);
+        return;
+      }
+      showErrorCard();
     });
     // 回退时整体重置视图：引擎半成品不得残留（replaceChildren 替换非追加）
     view.replaceChildren(img);

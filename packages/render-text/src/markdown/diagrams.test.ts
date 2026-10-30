@@ -1,7 +1,7 @@
 // packages/render-text/src/markdown/diagrams.test.ts
 import { describe, expect, it } from 'vitest';
-import { inflateSync } from 'node:zlib';
-import { DIAGRAM_TYPES, DEFAULT_KROKI_HOST, createKrokiUrl, resolveDiagramType } from './diagrams';
+import { inflateRawSync, inflateSync } from 'node:zlib';
+import { DIAGRAM_TYPES, DEFAULT_KROKI_HOST, DEFAULT_PLANTUML_HOST, createKrokiUrl, createPlantumlUrl, resolveDiagramType } from './diagrams';
 
 describe('resolveDiagramType', () => {
   it('主名命中（大小写归一）', () => {
@@ -124,5 +124,42 @@ describe('createKrokiUrl', () => {
     const std = b64.replace(/-/g, '+').replace(/_/g, '/');
     const bin = Buffer.from(std, 'base64');
     expect(inflateSync(new Uint8Array(bin)).toString()).toBe(source);
+  });
+});
+
+describe('createPlantumlUrl（官方服务器 fallback 档，2026-10-30）', () => {
+  it('URL 形态：官方 host + /svg/ 段 + PlantUML 自定义字母表（非 base64url 的 -_ 语义重排）', async () => {
+    const url = await createPlantumlUrl('@startuml\nA -> B\n@enduml');
+    expect(url.startsWith(`${DEFAULT_PLANTUML_HOST}/svg/`)).toBe(true);
+    // 官方字母表 0-9A-Za-z-_：段内字符集同 base64url 无填充形态，但编码值不同
+    //（kroki 的 base64url 与官方编码对同源恒异串，此处以实锚向量守卫）
+    const seg = url.split('/svg/')[1]!;
+    expect(seg).toMatch(/^[0-9A-Za-z_-]+$/);
+  });
+
+  it('编码实锚向量：官方服务器同款源 → 官方文档经典编码串（2026-10-30 curl 200+svg 实测）', async () => {
+    // 尾换行的 fence 源（管线 kroki 步剥尾换行同款载荷）经 deflateRaw+自定义 base64
+    const url = await createPlantumlUrl('@startuml\nBob -> Alice : hello\n@enduml\n');
+    expect(url).toBe(`${DEFAULT_PLANTUML_HOST}/svg/SoWkIImgAStDuNBAJrBGjLDmpCbCJbMmKiX8pSd9vt98pKi1IG80`);
+  });
+
+  it('raw deflate 往返：自定义字母表逆映射 → inflateRaw 还原原文（无 zlib 头）', async () => {
+    const source = 'Bob -> Alice : fallback';
+    const seg = (await createPlantumlUrl(source)).split('/svg/')[1]!;
+    // 逆映射：官方字母表索引 → 标准字母表字符 → base64 解码（需补回填充）
+    const PLANTUML_B64 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_';
+    const STD_B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const std = seg.replace(/[0-9A-Za-z_-]/g, (c) => STD_B64[PLANTUML_B64.indexOf(c)]!);
+    const bin = Buffer.from(std, 'base64');
+    expect(inflateRawSync(new Uint8Array(bin)).toString()).toBe(source);
+  });
+
+  it('官方可承接类型带 officialFallback 旗标，其余类型不带（含 mermaid/kroki-only）', () => {
+    expect(resolveDiagramType('plantuml')!.officialFallback).toBe(true);
+    expect(resolveDiagramType('c4plantuml')!.officialFallback).toBe(true);
+    for (const id of ['mermaid', 'graphviz', 'ditaa', 'd2', 'structurizr', 'tikz']) {
+      expect(resolveDiagramType(id)!.officialFallback, id).toBeUndefined();
+    }
+    expect(DIAGRAM_TYPES.filter((t) => t.officialFallback).map((t) => t.id)).toEqual(['plantuml', 'c4plantuml']);
   });
 });

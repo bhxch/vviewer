@@ -5,6 +5,7 @@
 // spec §8.3（Task 5）：server 模式与 krokiVia=server 代发——fetch 注入走 global
 // stub（vi.stubGlobal，highlightRouter.test.ts 同款），remoteCall 走注入缝桩。
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_KROKI_HOST } from './diagrams';
 import { runPipeline, type PipelineCtx } from './pipeline';
 
 function docWithFence(lang: string, body: string): Document {
@@ -404,5 +405,88 @@ describe('diagrams 步：runDiagrams per-block 兜底（M2）', () => {
     expect(doc.querySelectorAll('.md-diagram-view')[1]!.innerHTML).toContain('katex');
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(String(warnSpy.mock.calls[0]![0])).toContain('diagram 块渲染失败');
+  });
+});
+
+// plantuml 官方服务器 fallback 档（2026-10-30）：kroki img error → 换官方 URL 重试
+// 一跳 → 再失败落两跳文案错误卡；裁决面（officialFallback 旗标 × krokiHost 归一）
+// 纯逻辑单测覆盖。jsdom 不自动派发 img error（既有口径）——手动 dispatchEvent 模拟
+// 真浏览器失败跳，fallback 的 src 换写经微任务（pako 惰性 import）落地，flush 后断言。
+describe('diagrams 步：plantuml 官方服务器 fallback 档', () => {
+  /** jsdom 手动派发 img error（真浏览器由加载失败自动触发） */
+  const fireError = (img: HTMLImageElement): void => {
+    img.dispatchEvent(new Event('error'));
+  };
+  const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+  it('krokiHost 默认 + plantuml：error 后 src 换官方服务器 URL，未落错误卡', async () => {
+    const doc = docWithFence('plantuml', 'a -> b');
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: { krokiHost: DEFAULT_KROKI_HOST, mermaidTheme: 'default', modeOf: () => 'kroki' }
+    });
+    const img = doc.querySelector('.md-diagram-view img') as HTMLImageElement;
+    expect(img.getAttribute('src')!.startsWith('https://kroki.io/plantuml/svg/')).toBe(true);
+    fireError(img);
+    await flush();
+    expect(img.getAttribute('src')!.startsWith('https://www.plantuml.com/plantuml/svg/')).toBe(true);
+    expect(doc.querySelector('.md-diagram-error')).toBeNull();
+  });
+
+  it('官方服务器再失败：错误卡文案标注两跳（kroki 与官方服务器渲染失败）+ 源码同展', async () => {
+    const doc = docWithFence('plantuml', 'a -> b');
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: { krokiHost: DEFAULT_KROKI_HOST, mermaidTheme: 'default', modeOf: () => 'kroki' }
+    });
+    const img = doc.querySelector('.md-diagram-view img') as HTMLImageElement;
+    fireError(img); // 第一跳 kroki 失败 → 换官方 URL
+    await flush();
+    fireError(img); // 第二跳官方服务器失败 → 错误卡
+    await flush();
+    const errView = doc.querySelector('.md-diagram-error')!;
+    expect(errView.textContent).toBe('kroki 与官方服务器渲染失败（plantuml）');
+    expect(doc.querySelector('.md-diagram-source')!.hasAttribute('hidden')).toBe(false);
+    expect((doc.querySelector('.md-diagram-toggle') as HTMLElement).textContent).toBe('图');
+  });
+
+  it('c4plantuml 同族回落：error 后 src 换官方服务器 URL（同编码，无 krokiType 段）', async () => {
+    const doc = docWithFence('c4plantuml', 'a -> b');
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: { krokiHost: DEFAULT_KROKI_HOST, mermaidTheme: 'default', modeOf: () => 'kroki' }
+    });
+    const img = doc.querySelector('.md-diagram-view img') as HTMLImageElement;
+    expect(img.getAttribute('src')!.startsWith('https://kroki.io/c4plantuml/svg/')).toBe(true);
+    fireError(img);
+    await flush();
+    expect(img.getAttribute('src')!.startsWith('https://www.plantuml.com/plantuml/svg/')).toBe(true);
+    expect(doc.querySelector('.md-diagram-error')).toBeNull();
+  });
+
+  it('自建 krokiHost：error 直落错误卡不外发官方服务器（隐私防线），文案单跳', async () => {
+    const doc = docWithFence('plantuml', 'a -> b');
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: { krokiHost: 'https://k.example.com', mermaidTheme: 'default', modeOf: () => 'kroki' }
+    });
+    const img = doc.querySelector('.md-diagram-view img') as HTMLImageElement;
+    fireError(img);
+    await flush();
+    expect(img.getAttribute('src')!.startsWith('https://k.example.com/plantuml/svg/')).toBe(true);
+    expect(doc.querySelector('.md-diagram-error')!.textContent).toBe('kroki 渲染失败（plantuml）');
+  });
+
+  it('非 fallback 家族（graphviz）：默认 krokiHost 下 error 仍直落错误卡，src 不动', async () => {
+    const doc = docWithFence('graphviz', 'digraph { a -> }');
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: { krokiHost: DEFAULT_KROKI_HOST, mermaidTheme: 'default', modeOf: () => 'local' }
+    });
+    const img = doc.querySelector('.md-diagram-view img') as HTMLImageElement;
+    fireError(img);
+    await flush();
+    expect(img.getAttribute('src')!.startsWith('https://kroki.io/graphviz/svg/')).toBe(true);
+    expect(doc.querySelector('.md-diagram-error')!.textContent).toBe('kroki 渲染失败（graphviz）');
   });
 });

@@ -82,7 +82,7 @@
       spellcheck="false"
     />
   </label>
-  <div class="vv-settings-hint">http(s):// 开头地址；留空用默认 https://kroki.io。</div>
+  <div class="vv-settings-hint">http(s):// 开头地址；留空用默认 https://kroki.io。默认服务失败时 plantuml/C4 自动回落 PlantUML 官方服务器，自建地址不回落。</div>
   <label class="vv-settings-theme-row">
     <span>Kroki 通道</span>
     <select value={draft.diagrams.krokiVia} onchange={onKrokiViaChange} aria-label="Kroki 通道">
