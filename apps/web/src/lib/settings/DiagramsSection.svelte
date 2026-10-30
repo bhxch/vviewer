@@ -9,9 +9,11 @@
   // 门控=graphviz/svgbob；运行时能力协商以 health diagrams 子集为准，见 viewer.ts
   // 注入）。krokiProxy 组件挂载时读会话缓存（loadCapabilities try/catch 对 SSR/
   // 无记录安全，RemoteSourceModal loadLastServer 同款先例）。
-  // spec 2026-10-23 §9.1（Task 6）：多渲染器类型第二列渲染器 select（注册表
-  // t.renderers 门控=graphviz: viz-js/hpcc；缺省显示注册表首项 viz-js）。
-  import { DIAGRAM_TYPES, type DiagramMode } from '@vviewer/render-text/markdown/diagrams';
+ // spec 2026-10-23 §9.1（Task 6）：多渲染器类型第二列渲染器 select（注册表
+ // t.renderers 门控=graphviz: viz-js/hpcc；缺省显示注册表首项 viz-js）。
+ // 模式档位按注册表能力门控（本地=t.local、Kroki=t.krokiType，同「服务端」
+ // t.server 先例只列实际可用的档位）；遗留脏档经 displayMode 按回落链如实显示。
+  import { DIAGRAM_TYPES, type DiagramMode, type DiagramType } from '@vviewer/render-text/markdown/diagrams';
   import { loadCapabilities } from '../openFlow.svelte';
   import type { Settings } from '../stores/settings';
 
@@ -38,6 +40,18 @@
   function onMermaidThemeChange(e: Event): void {
     draft.diagrams.mermaidTheme = (e.currentTarget as HTMLSelectElement).value as Settings['diagrams']['mermaidTheme'];
     touch();
+  }
+
+  /** 模式下拉的显示值：注册表不支持的档位不渲染 option（本地/Kroki 门控与
+   * 「服务端」t.server 同款先例），遗留脏档（旧版本地为不可本地语言存过 local、
+   * 手改 JSON 为 math 存过 kroki 等）按管线 effectiveModeOf 的回落链如实显示，
+   * 避免选中值落在隐藏 option 上显示成空。 */
+  function displayMode(t: DiagramType): DiagramMode {
+    const stored = draft.diagrams.modes[t.id] ?? t.defaultMode;
+    if (stored === 'local' && !t.local) return t.krokiType ? 'kroki' : 'source';
+    if (stored === 'kroki' && !t.krokiType) return 'source';
+    if (stored === 'server' && !t.server) return t.local ? 'local' : t.krokiType ? 'kroki' : 'source';
+    return stored;
   }
 
   /** 按语言模式切换：键恒为注册表类型 id（t.id，不用别名）——已打开文档不回溯
@@ -68,6 +82,7 @@
       spellcheck="false"
     />
   </label>
+  <div class="vv-settings-hint">http(s):// 开头地址；留空用默认 https://kroki.io。</div>
   <label class="vv-settings-theme-row">
     <span>Kroki 通道</span>
     <select value={draft.diagrams.krokiVia} onchange={onKrokiViaChange} aria-label="Kroki 通道">
@@ -75,6 +90,7 @@
       <option value="server" disabled={!krokiProxy}>服务端代发</option>
     </select>
   </label>
+  <div class="vv-settings-hint">「服务端代发」需部署侧启用 kroki 转发：未连接或能力缺失时该选项禁用，已选也会回落「前端直连」。</div>
   <label class="vv-settings-theme-row">
     <span>Mermaid 主题</span>
     <select value={draft.diagrams.mermaidTheme} onchange={onMermaidThemeChange} aria-label="Mermaid 主题">
@@ -86,6 +102,7 @@
       <option value="base">基础</option>
     </select>
   </label>
+  <div class="vv-settings-hint">「自动」跟随外观亮暗；显式主题立即重画已打开文档。</div>
   <div class="vv-settings-diagram-modes">
     <span>渲染模式</span>
     <div class="vv-diagram-mode-grid">
@@ -103,13 +120,13 @@
             </select>
           {/if}
           <select
-            value={draft.diagrams.modes[t.id] ?? t.defaultMode}
+            value={displayMode(t)}
             onchange={(e) => onDiagramModeChange(t.id, e)}
             aria-label="{t.id} 渲染模式"
           >
-            <option value="local">本地</option>
+            {#if t.local}<option value="local">本地</option>{/if}
             {#if t.server}<option value="server">服务端</option>{/if}
-            <option value="kroki">Kroki</option>
+            {#if t.krokiType}<option value="kroki">Kroki</option>{/if}
             <option value="source">源码</option>
           </select>
         </label>
@@ -117,11 +134,8 @@
     </div>
   </div>
   <div class="vv-settings-hint">
-    本地引擎支持 mermaid/graphviz/nomnoml/公式/svgbob 与 excalidraw/bpmn/vega/vegalite/wavedrom/bytefield/dbml/d2
-    （CDN 按需加载；d2 引擎较重，默认走 Kroki），其余语言本地档自动回落 Kroki；Kroki 服务填 http(s):// 开头地址，留空用 https://kroki.io。
-    「服务端」模式把图交给所连服务器渲染（当前支持 graphviz/svgbob），未连接或不支持时自动回落本地/Kroki；
-    Kroki 通道选「服务端代发」需部署侧启用 kroki 转发（未连接或能力缺失时该选项禁用，已选也会回落前端直连）。
-    graphviz 可选渲染器（viz-js 默认 / hpcc 经 CDN 按需加载）；Mermaid 主题选「自动」跟随亮暗模式，显式主题立即重画已打开文档；
-    其余改动对已打开文档重新打开后生效。
+    每种语言只列出其实际支持的档位（无对应引擎/通道的选项不出现）。
+    本地引擎按需经 CDN 加载（d2 引擎较重，默认走 Kroki）；「服务端」把图交给所连服务器渲染，未连接或不支持时自动回落本地/Kroki。
+    graphviz 可选渲染器（viz-js 默认 / hpcc）；除 Mermaid 主题即时重画外，其余改动对已打开文档重新打开后生效。
   </div>
 </section>
