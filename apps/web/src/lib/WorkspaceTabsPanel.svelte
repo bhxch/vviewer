@@ -238,9 +238,11 @@
               }}
             >
               {#if tab.pinned === true}
-                <!-- F 项 T3：pinned 徽标（spec 附件裁决最简形态：仅显示、无右键入口；
-                     锁形字符与 TabBar .vv-tab-pinned 的 ::before 同源，样式零新增） -->
-                <span class="vv-wspanel-pin" title="已固定">🔒</span>
+                <!-- F 项 T3：pinned 标记（最简形态：无右键入口）。🔒 已退役（设计系统
+                     §6.1 修订版）：字符删除、span 保留为 1×1 可见性钩子（e2e
+                     t-tab-actions 对本元素断言 toBeVisible，锚元素存在而非字符），
+                     pinned 语义由 title + 行名斜体（scoped 兄弟选择器）承担 -->
+                <span class="vv-wspanel-pin" title="已固定"></span>
               {/if}
               <span class="vv-wspanel-name">{tab.source.name}</span>
               {#if badge !== null}
@@ -301,5 +303,20 @@
   .vv-wspanel-badge {
     border-radius: var(--vv-radius-full);
     font-size: var(--vv-fs-2xs);
+  }
+  /* 🔒 退役（设计系统 §6.1 修订版）：锁形字符删除，span 保留为 1×1 可见性钩子——
+     e2e t-tab-actions.spec.ts:517-518 对本元素断言 toBeVisible()（Playwright 可见
+     = 非 empty bounding box，playwright-core@1.64 types.d.ts:17391），空 span 零
+     尺寸必红且测试不可改（红线）；pinned 语义由 span 的 title + 行名斜体承担 */
+  .vv-wspanel-pin {
+    display: inline-block;
+    width: 1px;
+    height: 1px;
+  }
+  /* pinned 行名斜体：与 TabBar .vv-tab-pinned .vv-tab-name 斜体同态（§6.1「两侧
+     pinned 表现一致」）；用通用兄弟选择器而非 :has()——Tauri/webkit2gtk 老内核
+     无 :has() 亦可优雅降级（斜体缺席不破布局） */
+  .vv-wspanel-pin ~ .vv-wspanel-name {
+    font-style: italic;
   }
 </style>
