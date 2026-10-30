@@ -266,8 +266,10 @@
     padding: 6px 10px;
     font-size: var(--vv-fs-xs);
   }
+  /* disabled 归一（§7：五套口径统一 .5，复核意见从严执行）；行内 :disabled 钮
+     自身 opacity .5 与行级叠加语义保持（双层叠加处置无变更声明，不擅自改） */
   .vv-storage-cat-disabled {
-    opacity: 0.55;
+    opacity: 0.5;
   }
   .vv-storage-catinfo {
     flex: 1;

@@ -574,12 +574,17 @@
     font-size: var(--vv-fs-xs);
     background: none;
   }
+  /* ✕ 图形字形（§6.3）：line-height:1 + inline-flex 居中，字号 16px 图形字形档
+     （§3.2 规则 2）不变 */
   .vv-sc-close {
+    display: inline-flex;
+    align-items: center;
     border: 0;
     background: none;
     cursor: pointer;
     color: var(--ui-fg-muted);
     font-size: 16px;
+    line-height: 1;
     padding: 2px 6px;
   }
   .vv-sc-close:hover {
@@ -694,7 +699,7 @@
   .vv-sc-jsonerrors {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--vv-sp-2);
     color: var(--ui-danger);
     font-size: var(--vv-fs-xs);
     overflow-wrap: anywhere;
