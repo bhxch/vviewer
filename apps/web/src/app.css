@@ -92,8 +92,10 @@ button { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 input { background: var(--ui-bg); color: var(--ui-fg); border: 1px solid var(--ui-border); border-radius: 6px; padding: 4px 8px; font-family: inherit; font-size: var(--vv-fs-sm); }
 select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid var(--ui-border); border-radius: 6px; padding: 4px 6px; font-family: inherit; font-size: var(--vv-fs-sm); }
 /* §7 全局统一焦点环（键盘可达性兜底）：:where 零特异性，已显式处理者
-   （AppShell zen-exit 等）不受影响；offset 负值防浮层贴边裁剪；:focus（鼠标按下）不触发 */
-:where(button, input, select, summary, [tabindex]):focus-visible { outline: 2px solid var(--ui-accent); outline-offset: -1px; }
+   （AppShell zen-exit 等）不受影响；offset 负值防浮层贴边裁剪；:focus（鼠标按下）不触发。
+   a[href] 补档（走查 medium）：链接此前仅 UA auto 环（暗色 #0d1117 上不可辨识），
+   含 markdown 标题锚点（body 失焦后首个 Tab 停留点，WCAG 2.4.7） */
+:where(button, input, select, summary, [tabindex], a[href]):focus-visible { outline: 2px solid var(--ui-accent); outline-offset: -1px; }
 /* §8.2：全站 checkbox 统一着色（基础层一行，零 DOM 变更） */
 input[type='checkbox'] { accent-color: var(--ui-accent); }
 /* §11 prefers-reduced-motion 全局适配（rg 实测现零适配）：辅助性动效压至瞬时——
@@ -256,6 +258,12 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
 .markdown-alert-collapsed > :not(.markdown-alert-title) { display: none; }
 /* 跨文件 wikilink 降级（Task 6）：不可点原文，虚线下划线悬停提示 */
 .vv-markdown .md-wikilink-dead { border-bottom: 1px dashed var(--ui-border); cursor: default; }
+/* 标题锚点（engine.ts heading_close 产物 a.anchor，空内容 0 宽）：0 宽盒上焦点环
+   左右边缘重合无从辨识——键盘聚焦时揭示链接字符，配合 §7 a[href] 补档的 accent 环
+   令首个 Tab 停留点可见（走查 medium，WCAG 2.4.7）。平时零内容零视觉（零漂移）；
+   交互壳规则不进导出（exportBaseCss 无此段，与徽标 hover/点击态同类） */
+.vv-markdown a.anchor { color: var(--ui-accent); text-decoration: none; }
+.vv-markdown a.anchor:focus-visible::before { content: '#'; }
 /* html 沙箱预览（htmlRenderer）：顶部视图按钮组 + iframe/源码内容区 */
 .vv-html { display: flex; flex-direction: column; height: 100%; }
 .vv-html-toolbar { display: flex; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--ui-border); flex: none; }
@@ -556,12 +564,20 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 /* 引擎状态条（ViewerPane 底部，code 渲染器专用） */
 .vv-statusbar { flex: none; padding: 2px 10px; font-size: var(--vv-fs-xs); color: var(--ui-fg-muted);
   border-top: 1px solid var(--ui-border); background: var(--ui-tab-bg); user-select: none; }
+/* ≤600px 手机档（走查 medium）：抽屉/右栏浮钮（.vv-drawer-toggle/.vv-right-toggle，
+   fixed left/right:8px bottom:8px 32×32，AppShell.svelte ≤600px 档，z-index 20）与
+   全宽状态栏同带叠压——375×667 实测左右钮各压住行首/行尾 ~30px（「打开方式:」被截）。
+   两侧各让 40px = 浮钮 8px + 32px 触控面，文本区不再入钮下 */
+@media (max-width: 600px) {
+  .vv-statusbar { padding-left: 40px; padding-right: 40px; }
+}
 .vv-brand { font-weight: 700; margin-right: 8px; }
 .vv-tabbar { display: flex; overflow-x: auto; background: var(--ui-tab-bg); border-bottom: 1px solid var(--ui-border); }
 /* .vv-tab 为 div[role=tab]（U2：激活区与关闭钮拆为兄弟节点，button 内不再嵌交互元素）；
-   cursor 需自带（原先由全局 button 规则提供）。 */
+   cursor 与 font-size 需自带（原先由全局 button 规则提供——U2 去 button 化后 div
+   回落 body 的 16px，字号脱档；§3.2 「tab 名」归 --vv-fs-sm 档，走查 medium）。 */
 .vv-tab { display: inline-flex; align-items: center; gap: 6px; border: none; border-right: 1px solid var(--ui-border);
-  background: var(--ui-tab-bg); padding: 6px 10px; border-radius: 0; cursor: pointer; }
+  background: var(--ui-tab-bg); padding: 6px 10px; border-radius: 0; cursor: pointer; font-size: var(--vv-fs-sm); }
 /* 非激活 tab hover（§7/§10-G1，变更：原零响应）。置于 .active 规则之前——同特异性
    (0,2,0) 靠序覆盖，激活 tab 保持 active 底色不受 hover 影响。--ui-tab-bg 与
    --ui-hover-bg 亮暗各为同值（:root:20/22、暗:54/55），直用 hover-bg 零视觉响应，
