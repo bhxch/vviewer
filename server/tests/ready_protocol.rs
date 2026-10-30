@@ -106,35 +106,40 @@ fn serve_port_zero_assigns_kernel_port_and_emits_ready_line() {
         "listening 日志应使用实测端口（非配置值 0）; 已读 {pre_ready_lines:?}"
     );
 
-    assert_eq!(health_status(port), 200, "解析出的端口应已伺服 /api/health");
+    assert!(
+        wait_health_ok(port, Duration::from_secs(15)),
+        "解析出的端口应已伺服 /api/health"
+    );
 }
 
 /// 1-14：显式端口路径不再输出就绪行（终审裁决：多一行仅人读噪声）——
-/// 壳侧消费面只有 --port 0，wire 契约不变。
+/// 壳侧消费面只有 --port 0，wire 契约不变。判据照反向锚：health 200 证明
+/// 就绪行打印点已过（此测试即无 flag 静默语义的唯一断言点，宽限排水取 500ms
+/// 上限——原两例 100ms/500ms 仅排水窗之差，终审留置项合并为一）。
 #[test]
 fn explicit_port_emits_no_ready_line() {
     let free_port = pick_free_port();
     let dir = tempfile::tempdir().unwrap();
-    // _child 仅 RAII 持有（KillOnDrop 保进程至测试结束），stderr_buf 仅诊断留存
-    let (_child, rx, _stderr_buf) = spawn_serve(dir.path(), &free_port.to_string(), false);
+    // _child 仅 RAII 持有（KillOnDrop 保进程至测试结束），stderr_buf 供断言诊断
+    let (_child, rx, stderr_buf) = spawn_serve(dir.path(), &free_port.to_string(), false);
 
-    // 无就绪行可等：以 /api/health 200 为伺服信号（health_status 自带连接重试
-    // 兜底）。就绪行若存在必先于 accept 循环输出且 stdout 行缓冲即刷——200
-    // 时点该行必已入通道；再宽限排水至管道静默，杜绝在途行漏读。
-    assert_eq!(
-        health_status(free_port),
-        200,
+    // 无就绪行可等：以 /api/health 200 为伺服信号（wait_health_ok 自带 deadline
+    // 内连接重试兜底）。就绪行若存在必先于 accept 循环输出且 stdout 行缓冲即刷——
+    // 200 时点该行必已入通道；再宽限排水至管道静默（500ms），杜绝在途行漏读。
+    assert!(
+        wait_health_ok(free_port, Duration::from_secs(15)),
         "显式端口应正常伺服 /api/health"
     );
     let mut all_lines: Vec<String> = Vec::new();
     // Timeout 与 Disconnected 同义退出（仅断言已收行，无需区分）
-    while let Ok(line) = rx.recv_timeout(Duration::from_millis(100)) {
+    while let Ok(line) = rx.recv_timeout(Duration::from_millis(500)) {
         all_lines.push(line);
     }
 
     assert!(
         !all_lines.iter().any(|l| l.starts_with("VV_READY port=")),
-        "显式端口路径不得输出就绪行; stdout: {all_lines:?}"
+        "显式端口路径不得输出就绪行; stdout: {all_lines:?}; stderr:\n{}",
+        stderr_buf.lock().unwrap()
     );
 }
 
@@ -182,38 +187,9 @@ fn serve_explicit_port_with_flag_emits_ready_line() {
         format!("VV_READY port={port}"),
         "就绪行必须纯净且端口与 --port 实参一致"
     );
-    assert_eq!(
-        health_status(port),
-        200,
-        "带 flag 的显式端口应正常伺服 /api/health"
-    );
-}
-
-/// Task 1 反向锚：无 flag 的显式端口保持 1-14 静默——存量调用面输出零变化
-/// （判据同 explicit_port_emits_no_ready_line：health 200 证明就绪行打印点已过）。
-#[test]
-fn serve_explicit_port_without_flag_stays_silent() {
-    let port = pick_free_port();
-    let dir = tempfile::tempdir().unwrap();
-    // _child 仅 RAII 持有（KillOnDrop 保进程至测试结束）
-    let (_child, rx, stderr_buf) = spawn_serve(dir.path(), &port.to_string(), false);
-
-    assert_eq!(
-        health_status(port),
-        200,
-        "显式端口应正常伺服 /api/health"
-    );
-    // 宽限排水 500ms 至管道静默，杜绝在途行漏读
-    let mut all_lines: Vec<String> = Vec::new();
-    // Timeout 与 Disconnected 同义退出（仅断言已收行，无需区分）
-    while let Ok(line) = rx.recv_timeout(Duration::from_millis(500)) {
-        all_lines.push(line);
-    }
-
     assert!(
-        !all_lines.iter().any(|l| l.starts_with("VV_READY port=")),
-        "无 flag 的显式端口不得输出就绪行; stdout: {all_lines:?}; stderr:\n{}",
-        stderr_buf.lock().unwrap()
+        wait_health_ok(port, Duration::from_secs(15)),
+        "带 flag 的显式端口应正常伺服 /api/health"
     );
 }
 
@@ -312,10 +288,13 @@ fn spawn_serve(
 }
 
 /// 裸 TCP 探针：不加 HTTP 客户端 dev-dep，HTTP/1.1 + Connection: close 读到 EOF，
-/// 取状态行第二段为状态码。VV_READY 于 bind 后输出，连接理论即成；重试仅为
-/// accept 循环启动前的毫秒级窗口兜底。
-fn health_status(port: u16) -> u16 {
-    for _ in 0..50 {
+/// 取状态行判定 200。VV_READY 于 bind 后输出，连接理论即成；deadline 内每
+/// 100ms 一探的重试仅为 accept 循环启动前的毫秒级窗口兜底（显式截止上限，
+/// 替代原 50×100ms 固定循环）。deadline 内未连通返回 false；连通但状态行解析
+/// 失败/非 200 即 panic——协议破坏是确定性失败，重试无意义（2-1 诊断完整性）。
+fn wait_health_ok(port: u16, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
         if let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) {
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
@@ -328,11 +307,14 @@ fn health_status(port: u16) -> u16 {
             let mut head = String::new();
             let _ = stream.read_to_string(&mut head);
             match parse_status_line(&head) {
-                Ok(s) => return s,
+                Ok(200) => return true,
+                Ok(other) => panic!("health 返回非 200 状态码 {other}; 响应头: {head}"),
                 Err(msg) => panic!("{msg}"),
             }
         }
+        if Instant::now() >= deadline {
+            return false;
+        }
         std::thread::sleep(Duration::from_millis(100));
     }
-    panic!("无法连接 127.0.0.1:{port}");
 }
