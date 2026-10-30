@@ -55,6 +55,7 @@ struct ServerState {
 }
 
 /// 启动失败的分类（错误窗文案来源）。
+#[derive(Debug, PartialEq, Eq)]
 enum LaunchFailure {
     /// sidecar / web-dist / 浏览根解析落空。
     Resolve(String),
@@ -75,6 +76,19 @@ impl LaunchFailure {
             Self::Exited => "服务进程在就绪前退出。".into(),
         }
     }
+}
+
+/// 单次尝试（[`attempt_start`]）的失败形态：Wait = 进程起来了但未就绪
+/// （Timeout/Ended 两态，语义见 [`WaitFailure`]）；Spawn = spawn 系统调用本身
+/// 失败，进程从未存在。终审裁决反转此前折叠（spawn 失败按 Ended 归一并向
+/// stderr 摘要写假行）：Ended 的错误窗文案「服务进程在就绪前退出。」对从未
+/// 启动的进程有误导——恢复 [`LaunchFailure::Spawn`] 准确文案通路
+/// 「无法启动服务进程：<路径>：<os error>」，编排核（[`orchestrate_sticky`]）
+/// 据此判 Spawn 不回退。
+enum AttemptFailure {
+    Wait(WaitFailure),
+    /// 携带「<sidecar 路径>：<os error>」诊断串。
+    Spawn(String),
 }
 
 /// dialog 插件注册单点：main 的 Builder 链与 C1 契约测试同源调用此函数。
@@ -158,10 +172,43 @@ fn restart_async(app: AppHandle) {
     });
 }
 
+/// 粘性编排决策核（纯函数，headless 可测）：粘性优先、Ended 恰回退一次 "0"、
+/// Timeout/Spawn 不回退（D4；Spawn 非端口问题，重试必同败），成功端口原样
+/// 上交（写回由调用方统一收口，D6）。粘性 0 占位视同无粘性（read_sticky_port
+/// 已滤，此处二次防线覆盖直调形态）。回退语义的 headless 证据 = 本函数单测。
+fn orchestrate_sticky(
+    sticky: Option<u16>,
+    mut attempt: impl FnMut(&str) -> Result<u16, AttemptFailure>,
+) -> Result<u16, LaunchFailure> {
+    let outcome = match sticky.filter(|&p| p != 0) {
+        Some(port) => {
+            let sticky_arg = port.to_string();
+            match attempt(&sticky_arg) {
+                Ok(port) => Ok(port),
+                // Timeout 不回退：挂起子进程已由 attempt_start 自行 kill
+                Err(AttemptFailure::Wait(WaitFailure::Timeout)) => {
+                    return Err(LaunchFailure::Timeout)
+                }
+                // 退出形态回退 `--port 0` 一次（粘性端口被占是最典型来源）
+                Err(AttemptFailure::Wait(WaitFailure::Ended)) => attempt("0"),
+                // Spawn 不回退：非端口问题，重试必同败
+                Err(AttemptFailure::Spawn(msg)) => return Err(LaunchFailure::Spawn(msg)),
+            }
+        }
+        None => attempt("0"),
+    };
+    match outcome {
+        Ok(port) => Ok(port),
+        Err(AttemptFailure::Wait(WaitFailure::Timeout)) => Err(LaunchFailure::Timeout),
+        Err(AttemptFailure::Wait(WaitFailure::Ended)) => Err(LaunchFailure::Exited),
+        Err(AttemptFailure::Spawn(msg)) => Err(LaunchFailure::Spawn(msg)),
+    }
+}
+
 /// spawn sidecar 并等待就绪行；成功返回实测端口。启动编排（D3-D6）：组件解析
 /// 一次性早退（不重试）；粘性端口（AppConfigDir 下 [`sticky::STICKY_FILE`]）优先
-/// 尝试；Ended（bind 失败 exit 2 → stdout EOF 等）回退 `--port 0` 一次；Timeout
-/// 不回退（防最坏 15s×2 启动等待）。任一尝试成功即写回粘性端口（D6，写侧静默吞错）。
+/// 尝试；回退/不回退决策核在 [`orchestrate_sticky`]（headless 单测锁定）。任一
+/// 尝试成功即写回粘性端口（D6，写侧静默吞错）。
 fn start_and_wait(app: &AppHandle) -> Result<u16, LaunchFailure> {
     let state = app.state::<ServerState>();
     // C4：先竖护栏再出槽——孤儿窗口（attempt_start 开场 kill 旧 child 至新
@@ -190,56 +237,41 @@ fn start_and_wait(app: &AppHandle) -> Result<u16, LaunchFailure> {
 
     // 尝试序列：粘性端口先行（读取失败/0 占位一律 None → 直接 `--port 0`）
     let sticky_port = sticky_dir.as_deref().and_then(sticky::read_sticky_port);
-    let outcome = match sticky_port {
-        Some(port) => {
-            let sticky_arg = port.to_string();
-            match attempt_start(app, &sticky_arg, &sidecar, &web_dist, &root) {
-                Ok(port) => Ok(port),
-                // Timeout 不回退：挂起子进程已由 attempt_start 自行 kill
-                Err(WaitFailure::Timeout) => return Err(LaunchFailure::Timeout),
-                // 退出形态回退 `--port 0` 一次（粘性端口被占是最典型来源）
-                Err(WaitFailure::Ended) => {
-                    attempt_start(app, "0", &sidecar, &web_dist, &root)
-                }
-            }
+    let outcome = orchestrate_sticky(sticky_port, |port_arg| {
+        attempt_start(app, port_arg, &sidecar, &web_dist, &root)
+    });
+    if let Ok(port) = outcome {
+        // D6：成功即写回（粘性/回退两路同待遇；写侧静默吞错，落盘失败只损失
+        // 下次粘性，不影响本次已实测成功的端口）
+        if let Some(dir) = sticky_dir.as_deref() {
+            sticky::write_sticky_port(dir, port);
         }
-        None => attempt_start(app, "0", &sidecar, &web_dist, &root),
-    };
-
-    match outcome {
-        Ok(port) => {
-            // D6：成功即写回（粘性/回退两路同待遇；写侧静默吞错，落盘失败只损失
-            // 下次粘性，不影响本次已实测成功的端口）
-            if let Some(dir) = sticky_dir.as_deref() {
-                sticky::write_sticky_port(dir, port);
-            }
-            spawn_exit_monitor(app.clone(), generation);
-            Ok(port)
-        }
-        Err(WaitFailure::Timeout) => Err(LaunchFailure::Timeout),
-        Err(WaitFailure::Ended) => Err(LaunchFailure::Exited),
+        spawn_exit_monitor(app.clone(), generation);
     }
+    outcome
 }
 
 /// 单次 spawn+等就绪（port_arg 为 "--port" 的值："0" 或粘性端口十进制串）。
 /// 开场 kill_server 出旧槽 + stderr_tail 重置；Timeout 自行 kill 后回 Err。
 ///
-/// 错误面仅 Timeout/Ended 两态（回退判定只需区分「可重试的退出」与「不可重试
-/// 的超时」）：spawn 系统调用失败按 Ended 归一——回退 `--port 0` 重试一次对
-/// 瞬时性失败（资源耗尽等）是纯收益，持久性失败两次同因即 Exited 收场；OS 错误
-/// 落入 stderr 摘要通道（错误窗 Exited 文案附摘要），诊断信息不丢失。
+/// 错误面两态（回退判定只需区分「可重试的退出」与「不可重试的超时/失败」）：
+/// Wait 归 [`crate::ready::WaitFailure`]；spawn 系统调用本身失败单独成
+/// [`AttemptFailure::Spawn`]——终审裁决反转此前「按 Ended 归一 + stderr 摘要写
+/// 假行」的折叠：Ended 文案「服务进程在就绪前退出。」对从未启动的进程有误导，
+/// 恢复 [`LaunchFailure::Spawn`] 准确文案通路（「无法启动服务进程：<路径>：
+/// <os error>」，编排层不回退）。
 fn attempt_start(
     app: &AppHandle,
     port_arg: &str,
     sidecar: &std::path::Path,
     web_dist: &std::path::Path,
     root: &std::path::Path,
-) -> Result<u16, crate::ready::WaitFailure> {
+) -> Result<u16, AttemptFailure> {
     let state = app.state::<ServerState>();
     // 出旧槽（kill+wait 防僵尸）：回退形态下前次尝试的死 child 仍在槽位，不出槽
     // 即被下方 `= Some(child)` 裸覆盖丢弃（丢 wait 留僵尸）
     kill_server(&state);
-    // stderr 摘要归零：尾部语义 = 最近一次尝试（spawn 失败亦然，见错误分支）
+    // stderr 摘要归零：尾部语义 = 最近一次尝试
     *state.stderr_tail.lock().unwrap() = String::new();
 
     let mut child = Command::new(sidecar)
@@ -256,11 +288,7 @@ fn attempt_start(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| {
-            *state.stderr_tail.lock().unwrap() =
-                format!("（壳侧）无法启动服务进程：{}：{e}", sidecar.display());
-            WaitFailure::Ended
-        })?;
+        .map_err(|e| AttemptFailure::Spawn(format!("{}：{e}", sidecar.display())))?;
 
     // stderr 摘要收集（尾部环形，供错误窗引用）
     let stderr_tail = state.stderr_tail.clone();
@@ -284,9 +312,9 @@ fn attempt_start(
         Err(WaitFailure::Timeout) => {
             // 挂起子进程（可能仍在启动）——kill 后回 Err（编排层不回退超时）
             kill_server(&state);
-            Err(WaitFailure::Timeout)
+            Err(AttemptFailure::Wait(WaitFailure::Timeout))
         }
-        Err(WaitFailure::Ended) => Err(WaitFailure::Ended),
+        Err(WaitFailure::Ended) => Err(AttemptFailure::Wait(WaitFailure::Ended)),
     }
 }
 
@@ -619,10 +647,15 @@ mod tests {
     use super::collect_stderr;
     use super::dialog_plugin;
     use super::kill_server;
+    use super::orchestrate_sticky;
     use super::reap_after_restart_window;
     use super::wait_restart_window;
+    use super::AttemptFailure;
+    use super::LaunchFailure;
     use super::RestartGuard;
     use super::ServerState;
+    use super::WaitFailure;
+    use std::collections::VecDeque;
     use tauri_plugin_dialog::DialogExt;
 
     /// C1 契约锚：dialog 插件经同一 `init::<R>()`（[`dialog_plugin`]）注册后，
@@ -661,13 +694,105 @@ mod tests {
     }
 
     /// 粘性编排源码锚：read/write 接线与 attempt_start 抽取缺失任一即红。
-    /// 回退尝试 "0" 的语义 headless 不可锚（传参形态随实现者裁量），GUI 冒烟 9 承载。
+    /// 回退尝试 "0" 的语义另经 [`orchestrate_sticky`] 纯函数单测 headless 锁定
+    /// （实参序列直证回退形态）；GUI 冒烟 9 承载端到端面。
     #[test]
     fn orchestration_wires_sticky_read_write_and_attempt_start() {
         const SRC: &str = include_str!("main.rs");
         assert!(SRC.contains(concat!("sticky::", "read_sticky_port")), "缺粘性读取");
         assert!(SRC.contains(concat!("sticky::", "write_sticky_port")), "缺成功写回（D6）");
         assert!(SRC.contains(concat!("fn attempt_", "start(")), "缺单次尝试抽取（回退载体）");
+    }
+
+    /// [`orchestrate_sticky`] 单测的脚本化 attempt：按序弹出预置结果并记录实参
+    /// 序列（实参序列即「是否回退、回退实参形态」的直接证据）。脚本耗尽即 panic
+    /// ——「恰回退一次」由脚本长度与实参序列共同锁定。
+    struct AttemptRecorder {
+        args: Vec<String>,
+        script: VecDeque<Result<u16, AttemptFailure>>,
+    }
+
+    impl AttemptRecorder {
+        fn attempt(&mut self, port_arg: &str) -> Result<u16, AttemptFailure> {
+            self.args.push(port_arg.to_string());
+            self.script
+                .pop_front()
+                .expect("脚本结果数与 attempt 调用次数一致（多余调用即回退语义破坏）")
+        }
+    }
+
+    /// 粘性命中：不回退，实参 = 粘性端口十进制串，端口原样上交。
+    #[test]
+    fn orchestrate_sticky_hit_serves_sticky_port_without_fallback() {
+        let mut rec =
+            AttemptRecorder { args: Vec::new(), script: VecDeque::from(vec![Ok(7000)]) };
+        let outcome = orchestrate_sticky(Some(7000), |arg| rec.attempt(arg));
+        assert_eq!(outcome, Ok(7000));
+        assert_eq!(rec.args, ["7000"], "粘性命中不得回退，实参须为粘性端口串");
+    }
+
+    /// Wait(Ended)：恰回退一次 `--port 0`（第二次实参 "0"），第二次结果上交。
+    #[test]
+    fn orchestrate_sticky_falls_back_to_zero_exactly_once_on_ended() {
+        let mut rec = AttemptRecorder {
+            args: Vec::new(),
+            script: VecDeque::from(vec![
+                Err(AttemptFailure::Wait(WaitFailure::Ended)),
+                Ok(1234),
+            ]),
+        };
+        let outcome = orchestrate_sticky(Some(7000), |arg| rec.attempt(arg));
+        assert_eq!(outcome, Ok(1234));
+        assert_eq!(rec.args, ["7000", "0"], "Ended 恰回退一次且第二次实参为 \"0\"");
+    }
+
+    /// Wait(Timeout)：不回退（挂起子进程已自 kill，防最坏 15s×2 启动等待）。
+    #[test]
+    fn orchestrate_sticky_does_not_fall_back_on_timeout() {
+        let mut rec = AttemptRecorder {
+            args: Vec::new(),
+            script: VecDeque::from(vec![Err(AttemptFailure::Wait(WaitFailure::Timeout))]),
+        };
+        let outcome = orchestrate_sticky(Some(7000), |arg| rec.attempt(arg));
+        assert_eq!(outcome, Err(LaunchFailure::Timeout));
+        assert_eq!(rec.args, ["7000"], "Timeout 不得回退");
+    }
+
+    /// Spawn：不回退（非端口问题，重试必同败），诊断串原样上交 Spawn 文案通路。
+    #[test]
+    fn orchestrate_sticky_does_not_fall_back_on_spawn_failure() {
+        let msg = "/x/vviewer-server：No such file or directory";
+        let mut rec = AttemptRecorder {
+            args: Vec::new(),
+            script: VecDeque::from(vec![Err(AttemptFailure::Spawn(msg.into()))]),
+        };
+        let outcome = orchestrate_sticky(Some(7000), |arg| rec.attempt(arg));
+        assert_eq!(outcome, Err(LaunchFailure::Spawn(msg.into())));
+        assert_eq!(rec.args, ["7000"], "Spawn 不得回退");
+    }
+
+    /// 无粘性：直走 `--port 0`，不做首次粘性尝试。
+    #[test]
+    fn orchestrate_sticky_without_sticky_goes_straight_to_zero() {
+        let mut rec = AttemptRecorder {
+            args: Vec::new(),
+            script: VecDeque::from(vec![Ok(4321)]),
+        };
+        let outcome = orchestrate_sticky(None, |arg| rec.attempt(arg));
+        assert_eq!(outcome, Ok(4321));
+        assert_eq!(rec.args, ["0"], "无粘性应直接尝试 \"0\"");
+    }
+
+    /// 粘性 0 占位：视同无粘性（read_sticky_port 已滤，此处锁决策核自防御）。
+    #[test]
+    fn orchestrate_sticky_treats_sticky_zero_as_no_sticky() {
+        let mut rec = AttemptRecorder {
+            args: Vec::new(),
+            script: VecDeque::from(vec![Ok(4321)]),
+        };
+        let outcome = orchestrate_sticky(Some(0), |arg| rec.attempt(arg));
+        assert_eq!(outcome, Ok(4321));
+        assert_eq!(rec.args, ["0"], "粘性 0 占位视同无粘性，直走 \"0\"");
     }
 
     /// 2-3：多字节字符被读边界切开时，摘要不得出现 U+FFFD（不完整尾巴跨读保留）。
