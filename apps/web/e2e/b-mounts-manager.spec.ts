@@ -86,11 +86,20 @@ async function seedServerSession(page: Page, base: string, fsRoots: number | nul
   );
 }
 
-/** IndexedDB 直写装置（MM-04 先例形态）：v4 `mounts` store 预置记录。 */
+/** IndexedDB 直写装置（MM-04 先例形态；b-mounts-deep seedMountRecord 同款补建）：
+ * v4 `mounts` store 预置记录。onupgradeneeded 自带四 store 补建——goto 后产品建库
+ * 是异步的，若本 evaluate 先到，open('vviewer',4) 触发升级而无补建处理器会落成
+ * 空库，transaction('mounts') 抛 NotFoundError（MM-04 failed / MM-08 flaky 根因）。 */
 async function seedMountRecord(page: Page, rec: Record<string, unknown>): Promise<void> {
   await page.evaluate(async (rec) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const req = indexedDB.open('vviewer', 4);
+      req.onupgradeneeded = () => {
+        const d = req.result;
+        for (const s of ['kv', 'themes', 'fonts', 'mounts']) {
+          if (!d.objectStoreNames.contains(s)) d.createObjectStore(s);
+        }
+      };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     });
@@ -104,11 +113,17 @@ async function seedMountRecord(page: Page, rec: Record<string, unknown>): Promis
   }, rec);
 }
 
-/** IndexedDB 直写 kv 'workspaces' 快照（restore 装置——seed 后 reload 走恢复链）。 */
+/** IndexedDB 直写 kv 'workspaces' 快照（restore 装置——seed 后 reload 走恢复链；补建同 seedMountRecord）。 */
 async function seedSnapshot(page: Page, snap: Record<string, unknown>): Promise<void> {
   await page.evaluate(async (snap) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const req = indexedDB.open('vviewer', 4);
+      req.onupgradeneeded = () => {
+        const d = req.result;
+        for (const s of ['kv', 'themes', 'fonts', 'mounts']) {
+          if (!d.objectStoreNames.contains(s)) d.createObjectStore(s);
+        }
+      };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     });
@@ -312,34 +327,21 @@ test.describe('b-mounts-manager 目录管理页', () => {
     await page.goto('/');
     await expect(page.locator('.vv-topbar')).toBeVisible();
     // 装置：直写 IndexedDB v4 mounts store 预置「他机注册」代理记录
-    // （serverBase 指向另一台服务器；本会话未连接 → 恒 offsite）
-    await page.evaluate(async () => {
-      const rec = {
-        id: 'mount:offsite-e2e',
-        kind: 'proxy',
-        backend: 'webdav',
-        label: '他机挂载',
-        endpoint: 'https://dav.other.example',
-        prefix: '',
-        username: 'u',
-        secret: 'p',
-        fingerprint: 'offsite-fp',
-        serverBase: 'http://other-host:9999',
-        createdAt: 1700000000000,
-        registeredRootIndex: 7
-      };
-      const db = await new Promise<IDBDatabase>((resolve, reject) => {
-        const req = indexedDB.open('vviewer', 4);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-      });
-      await new Promise((resolve, reject) => {
-        const tx = db.transaction('mounts', 'readwrite');
-        tx.objectStore('mounts').put(rec, rec.id);
-        tx.oncomplete = () => resolve(undefined);
-        tx.onerror = () => reject(tx.error);
-      });
-      db.close();
+    // （serverBase 指向另一台服务器；本会话未连接 → 恒 offsite；seedMountRecord
+    // 自带四 store 补建——本 evaluate 先于产品建库到时的空库竞态见其注释）
+    await seedMountRecord(page, {
+      id: 'mount:offsite-e2e',
+      kind: 'proxy',
+      backend: 'webdav',
+      label: '他机挂载',
+      endpoint: 'https://dav.other.example',
+      prefix: '',
+      username: 'u',
+      secret: 'p',
+      fingerprint: 'offsite-fp',
+      serverBase: 'http://other-host:9999',
+      createdAt: 1700000000000,
+      registeredRootIndex: 7
     });
     await page.locator('button[aria-label="目录管理"]').click();
     const row = page.locator('.vv-mm-item', { hasText: '他机挂载' });
@@ -592,10 +594,17 @@ test.describe('b-mounts-manager 目录管理页', () => {
     // 恢复的直连 tab 同走 per-source watch 态
     await expect(page.locator('.vv-statusbar')).toContainText('此源不支持变更推送');
 
-    // 记录删除（用户删了挂载）→ 刷新：来源不重建，文件 tab 落占位（既有降级链）
+    // 记录删除（用户删了挂载）→ 刷新：来源不重建，文件 tab 落占位（既有降级链）；
+    // open 带四 store 补建（同 seedMountRecord——补建对既有库是 no-op，纯防御）
     await page.evaluate(async (id) => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
         const req = indexedDB.open('vviewer', 4);
+        req.onupgradeneeded = () => {
+          const d = req.result;
+          for (const s of ['kv', 'themes', 'fonts', 'mounts']) {
+            if (!d.objectStoreNames.contains(s)) d.createObjectStore(s);
+          }
+        };
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error);
       });

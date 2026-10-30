@@ -76,8 +76,15 @@ test.describe('QuickOpen 多源扫描（QO-01..04）', () => {
       await connectForm(page, fake.base);
       await openQuickOpen(page);
       await page.keyboard.type('hello-remote');
+      // 扫描异步：结果行就绪后再 Enter（QuickOpenPanel oninputkey 对空 results
+      // 静默落空——3 worker 负载下扫描晚于按键到齐时 Enter 无效果，tab 永不出现）
+      await expect(page.locator('.vv-quickopen-row', { hasText: 'hello-remote.txt' })).toBeVisible();
       await page.keyboard.press('Enter');
-      await expect(page.locator('.vv-tab.active', { hasText: 'hello-remote.txt' })).toBeVisible();
+      // tab 激活放宽 20s（t-open-with dropFile 同批负载口径）：Enter → remote store
+      // 建链 → 读文件 → tab 激活，并发负载下可瞬态超默认 5s（QO-02 flaky 实测形态）
+      await expect(page.locator('.vv-tab.active', { hasText: 'hello-remote.txt' })).toBeVisible({
+        timeout: 20_000
+      });
       // 内容来自 remote store（fake server body），非本地同名文件
       await expect(page.locator('.vv-viewer-host')).toContainText('marker-42');
     } finally {
