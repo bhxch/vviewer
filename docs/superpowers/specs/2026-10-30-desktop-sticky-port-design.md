@@ -68,7 +68,7 @@
 
 ### server 侧（`--emit-ready-line`）
 
-- clap `Serve` 子命令新增 `#[arg(long)] emit_ready_line: bool`，进 `ServeArgs`；TOML config 文件键 `emit-ready-line` 同名可用（合并优先级 CLI > 文件，既有链路）。
+- clap `Serve` 子命令新增 `#[arg(long)] emit_ready_line: bool`，进 `ServeArgs`；TOML config 文件键 `emit_ready_line` 可用（合并优先级 CLI > 文件，既有链路）。
 - `assembly.rs` 就绪行门：`if kernel_assigned || args.emit_ready_line`（测试构建整体静默的 `#[cfg(not(test))]` 语义不变）。
 - 不加 flag 的存量调用（人读 CLI、脚本、e2e、既有测试）输出零变化。
 
@@ -107,3 +107,4 @@
 - D3 的 flag 命名从裁量区移除已定（`--emit-ready-line`，D8 接受版本耦合）；
 - 冒烟 8/9 预期按 D6/D7 修正（原稿「stderr/日志可见同端口复用」无观察通道、「该次设置不跨下次保留」与 D6 写回语义矛盾）；
 - 实现者自行决定的已确认面：壳 crate 需补 `serde_json` 直依赖（现无）；集成测试沿用 `server/tests/ready_protocol.rs` 的 spawn 先例；回退两次 spawn 间的僵尸回收沿用既有 `kill_server` 纪律。
+- TOML 键名笔误修正：计划期核对 FileConfig 命名约定（字段名即 TOML 键名，蛇形）后修正——`emit-ready-line` → `emit_ready_line`（clap flag 仍为 kebab-case `--emit-ready-line`，与文件键非同名，故上句「同名」一并去除）。

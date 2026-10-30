@@ -46,3 +46,11 @@ cp server/target/release/vviewer.exe `
    （`pnpm tauri dev` / `cargo run`；Windows 带 .exe）。
 
 全部落空 → 原生错误窗（含「重启服务」按钮）。
+
+## 版本配套（壳 ↔ sidecar）
+
+sidecar 须与本壳同代：本壳恒传 `--emit-ready-line`（粘性端口形态的就绪行
+前提），旧版 sidecar（无此 flag）启动即 exit 2 → 粘性与回退双双启动失败 →
+既有错误窗，stderr 尾部可见 `unexpected argument '--emit-ready-line'` 即
+此症（设计文档 D8 裁决：不做针对性文案）。发布形态壳与 sidecar 同包分发，
+无此问题；混装仅限 dev 手动拷贝旧二进制的形态。

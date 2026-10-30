@@ -50,11 +50,12 @@ macOS 出 .dmg / Windows 出 NSIS .exe；跨平台 targets 列表由 bundler 按
 | 前端产物 | ① `VV_WEB_DIST` 环境变量 ② `$RESOURCE/_up_/_up_/web/build`（resources 打包形态：`../../web/build/` 中 `..` 按官方规则净化为 `_up_`）③ 仓库内 `apps/web/build`（dev） |
 | 浏览根 | `HOME`（无则 `USERPROFILE`） |
 
-server 额外参数固定：`serve --port 0`（内核分配随机端口）。
+server 额外参数固定：`serve --port <粘性|0> --emit-ready-line`（粘性=上次成功
+端口，应用配置目录下 `desktop-shell.json`；被占回退内核分配）。
 
 ## 手动冒烟清单
 
-七步主路径 + 故障路径抽查，GUI 无法在 CI 内验证，发布前按下表人工冒烟（dev 与
+九步主路径 + 故障路径抽查，GUI 无法在 CI 内验证，发布前按下表人工冒烟（dev 与
 打包产物各过一遍）：
 
 | # | 步骤 | 预期 |
@@ -66,6 +67,8 @@ server 额外参数固定：`serve --port 0`（内核分配随机端口）。
 | 5 | 不关窗，再次启动同一应用 | 不出现第二个实例，既有窗口被唤起置前（单实例） |
 | 6 | 关闭窗口退出 | `pgrep -f vviewer-server` 无残留（子进程被回收） |
 | 7 | 启动后 `kill -TERM <壳pid>`（unix-only；Windows 的 ctrlc 只映射 CTRL_C/CTRL_BREAK，无 SIGTERM 面） | 应用退出且 `pgrep -f vviewer-server` 无残留（信号路径回收子进程） |
+| 8 | 改一项设置 → 完全退出 → 重启 | 设置保留（origin 稳定生效）；`ss -tlnp`/`lsof -iTCP -sTCP:LISTEN`（Windows 用 `netstat -ano`）可见 vviewer-server 监听端口与上次一致 |
+| 9 | 人为占用粘性端口（如 `nc -l 127.0.0.1 <port>`）→ 启动 | 应用正常可用（回退随机端口）、无错误窗；旧粘性端口的既往设置本次不可见；本会话新改的设置在下次启动保留（回退端口已写回成为新粘性，D6） |
 
 故障路径抽查（**发布前必过项**，非可选）：
 
