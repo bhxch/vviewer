@@ -3,8 +3,10 @@
 //! 薄壳纪律（plan 2026-10-19 Global Constraints）：无 IPC/无原生菜单/无托盘/
 //! 无自动更新。职责仅四件：
 //!
-//! 1. spawn server sidecar（`serve --port 0 --web-dist <resource> --root <home>`，
-//!    绑 127.0.0.1、无 token）；
+//! 1. spawn server sidecar（`serve --port <n> --web-dist <resource> --root <home>`，
+//!    绑 127.0.0.1、无 token）：端口粘性优先（上次成功值，[`sticky`]），失败回退
+//!    `--port 0`；恒传 `--emit-ready-line`——显式粘性端口无此 flag 即静默无就绪行
+//!    （Task 1 server 侧语义）；
 //! 2. 15s 内逐行解析 stdout 就绪行 `VV_READY port=<n>`（协议见 [`ready`]）；
 //! 3. 就绪 → 主窗导航 `http://127.0.0.1:<n>/`；失败/运行中退出 → 原生错误窗
 //!    （含 stderr 摘要与「重启服务」按钮）；
@@ -156,15 +158,17 @@ fn restart_async(app: AppHandle) {
     });
 }
 
-/// spawn sidecar 并等待就绪行；成功返回实测端口。
+/// spawn sidecar 并等待就绪行；成功返回实测端口。启动编排（D3-D6）：组件解析
+/// 一次性早退（不重试）；粘性端口（AppConfigDir 下 [`sticky::STICKY_FILE`]）优先
+/// 尝试；Ended（bind 失败 exit 2 → stdout EOF 等）回退 `--port 0` 一次；Timeout
+/// 不回退（防最坏 15s×2 启动等待）。任一尝试成功即写回粘性端口（D6，写侧静默吞错）。
 fn start_and_wait(app: &AppHandle) -> Result<u16, LaunchFailure> {
     let state = app.state::<ServerState>();
-    // C4：先竖护栏再出槽——孤儿窗口（kill 旧 child 至新 child 入槽）全程有
-    // 护栏覆盖；RAII 清位覆盖全部早退路径
+    // C4：先竖护栏再出槽——孤儿窗口（attempt_start 开场 kill 旧 child 至新
+    // child 入槽）全程有护栏覆盖；RAII 清位覆盖全部早退路径
     state.restarting.store(true, Ordering::Release);
     let _restart_guard = RestartGuard(&state.restarting);
-    // 重启形态：先回收旧子进程；代际 +1 使旧存活监视线程退场
-    kill_server(&state);
+    // 代际 +1 使旧存活监视线程退场（跨两次尝试生效——回退仍是同一次启动编排）
     state.generation.fetch_add(1, Ordering::SeqCst);
     let generation = state.generation.load(Ordering::SeqCst);
 
@@ -175,22 +179,92 @@ fn start_and_wait(app: &AppHandle) -> Result<u16, LaunchFailure> {
         LaunchFailure::Resolve("未找到用户家目录（HOME/USERPROFILE），无法确定浏览根".into())
     })?;
 
-    let mut child = Command::new(&sidecar)
+    // 粘性端口文件：AppConfigDir 下 desktop-shell.json，读写目录取文件全路径的
+    // parent；路径解析失败 = 无粘性（回落 `--port 0`，与读侧静默降级同纪律）
+    // （Tauri 2 枚举变体名为 AppConfig，语义即 AppConfigDir）
+    let sticky_dir = app
+        .path()
+        .resolve(sticky::STICKY_FILE, BaseDirectory::AppConfig)
+        .ok()
+        .and_then(|p| p.parent().map(std::path::Path::to_path_buf));
+
+    // 尝试序列：粘性端口先行（读取失败/0 占位一律 None → 直接 `--port 0`）
+    let sticky_port = sticky_dir.as_deref().and_then(sticky::read_sticky_port);
+    let outcome = match sticky_port {
+        Some(port) => {
+            let sticky_arg = port.to_string();
+            match attempt_start(app, generation, &sticky_arg, &sidecar, &web_dist, &root) {
+                Ok(port) => Ok(port),
+                // Timeout 不回退：挂起子进程已由 attempt_start 自行 kill
+                Err(WaitFailure::Timeout) => return Err(LaunchFailure::Timeout),
+                // 退出形态回退 `--port 0` 一次（粘性端口被占是最典型来源）
+                Err(WaitFailure::Ended) => {
+                    attempt_start(app, generation, "0", &sidecar, &web_dist, &root)
+                }
+            }
+        }
+        None => attempt_start(app, generation, "0", &sidecar, &web_dist, &root),
+    };
+
+    match outcome {
+        Ok(port) => {
+            // D6：成功即写回（粘性/回退两路同待遇；写侧静默吞错，落盘失败只损失
+            // 下次粘性，不影响本次已实测成功的端口）
+            if let Some(dir) = sticky_dir.as_deref() {
+                sticky::write_sticky_port(dir, port);
+            }
+            spawn_exit_monitor(app.clone(), generation);
+            Ok(port)
+        }
+        Err(WaitFailure::Timeout) => Err(LaunchFailure::Timeout),
+        Err(WaitFailure::Ended) => Err(LaunchFailure::Exited),
+    }
+}
+
+/// 单次 spawn+等就绪（port_arg 为 "--port" 的值："0" 或粘性端口十进制串）。
+/// 开场 kill_server 出旧槽 + stderr_tail 重置；Timeout 自行 kill 后回 Err。
+///
+/// 错误面仅 Timeout/Ended 两态（回退判定只需区分「可重试的退出」与「不可重试
+/// 的超时」）：spawn 系统调用失败按 Ended 归一——回退 `--port 0` 重试一次对
+/// 瞬时性失败（资源耗尽等）是纯收益，持久性失败两次同因即 Exited 收场；OS 错误
+/// 落入 stderr 摘要通道（错误窗 Exited 文案附摘要），诊断信息不丢失。
+fn attempt_start(
+    app: &AppHandle,
+    generation: u64,
+    port_arg: &str,
+    sidecar: &std::path::Path,
+    web_dist: &std::path::Path,
+    root: &std::path::Path,
+) -> Result<u16, crate::ready::WaitFailure> {
+    let state = app.state::<ServerState>();
+    // 出旧槽（kill+wait 防僵尸）：回退形态下前次尝试的死 child 仍在槽位，不出槽
+    // 即被下方 `= Some(child)` 裸覆盖丢弃（丢 wait 留僵尸）
+    kill_server(&state);
+    // stderr 摘要归零：尾部语义 = 最近一次尝试（spawn 失败亦然，见错误分支）
+    *state.stderr_tail.lock().unwrap() = String::new();
+
+    let mut child = Command::new(sidecar)
         .arg("serve")
         .arg("--port")
-        .arg("0")
+        .arg(port_arg)
+        // 恒传（Task 1 server 侧语义）：显式粘性端口无此 flag 即静默无就绪行；
+        // `--port 0` 形态下 server 本就输出，flag 冗余无害
+        .arg("--emit-ready-line")
         .arg("--web-dist")
-        .arg(&web_dist)
+        .arg(web_dist)
         .arg("--root")
-        .arg(&root)
+        .arg(root)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| LaunchFailure::Spawn(format!("{}：{e}", sidecar.display())))?;
+        .map_err(|e| {
+            *state.stderr_tail.lock().unwrap() =
+                format!("（壳侧）无法启动服务进程：{}：{e}", sidecar.display());
+            WaitFailure::Ended
+        })?;
 
     // stderr 摘要收集（尾部环形，供错误窗引用）
     let stderr_tail = state.stderr_tail.clone();
-    *stderr_tail.lock().unwrap() = String::new();
     if let Some(stderr) = child.stderr.take() {
         std::thread::spawn(move || collect_stderr(stderr, stderr_tail));
     }
@@ -207,15 +281,17 @@ fn start_and_wait(app: &AppHandle) -> Result<u16, LaunchFailure> {
 
     match wait_for_ready(&rx, READY_TIMEOUT) {
         Ok(port) => {
+            // 退出监视挂在尝试的 Ok 臂（非编排层最终收口）：回退仅发生于 Ended，
+            // 两次尝试至多一个 Ok——监视仍恰 spawn 一次，代际沿用本次启动的值
             spawn_exit_monitor(app.clone(), generation);
             Ok(port)
         }
         Err(WaitFailure::Timeout) => {
-            // 挂起子进程（可能仍在启动）——kill 后报超时
+            // 挂起子进程（可能仍在启动）——kill 后回 Err（编排层不回退超时）
             kill_server(&state);
-            Err(LaunchFailure::Timeout)
+            Err(WaitFailure::Timeout)
         }
-        Err(WaitFailure::Ended) => Err(LaunchFailure::Exited),
+        Err(WaitFailure::Ended) => Err(WaitFailure::Ended),
     }
 }
 
@@ -373,7 +449,8 @@ const RESTART_WINDOW_TIMEOUT: Duration = Duration::from_secs(15);
 /// 放行分支）后再 kill 一轮（幂等）——复查路径下新 sidecar 已在槽位，在此
 /// 统一回收。残余窗口（知情接受）：末次 kill 通过至调用方后续动作（exit /
 /// 事件循环终结）之间重启线程恰好开场的纳秒级交错——原缺陷窗口毫秒级且后果
-/// 可控（孤儿 sidecar 存活至机器重启，--port 0 无端口冲突），线性化需第二
+/// 可控（孤儿 sidecar 存活至机器重启；粘性端口若被孤儿占用，下次启动经
+/// Ended 回退 `--port 0` 兜底，见 start_and_wait），线性化需第二
 /// 标志位 + 重启 bail-out，复杂度不成比例。正常关闭（restarting=false）时
 /// wait 立即返回、kill 一轮命中一轮空转（幂等），零开销不变。
 fn reap_after_restart_window(state: &ServerState) {
@@ -584,6 +661,16 @@ mod tests {
             SRC.contains(concat!("\n        .plugin(", "dialog_plugin())")),
             "Builder 链缺 dialog 插件注册——错误窗三条路径将随 DialogExt state() panic 整体失效"
         );
+    }
+
+    /// 粘性编排源码锚：read/write 接线与 attempt_start 抽取缺失任一即红。
+    /// 回退尝试 "0" 的语义 headless 不可锚（传参形态随实现者裁量），GUI 冒烟 9 承载。
+    #[test]
+    fn orchestration_wires_sticky_read_write_and_attempt_start() {
+        const SRC: &str = include_str!("main.rs");
+        assert!(SRC.contains(concat!("sticky::", "read_sticky_port")), "缺粘性读取");
+        assert!(SRC.contains(concat!("sticky::", "write_sticky_port")), "缺成功写回（D6）");
+        assert!(SRC.contains(concat!("fn attempt_", "start(")), "缺单次尝试抽取（回退载体）");
     }
 
     /// 2-3：多字节字符被读边界切开时，摘要不得出现 U+FFFD（不完整尾巴跨读保留）。

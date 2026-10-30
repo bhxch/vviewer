@@ -1,16 +1,12 @@
 //! 粘性端口持久化（plan 2026-10-30 桌面粘性端口 Task 2）：壳侧把上次成功端口
-//! 落盘到 AppConfigDir 下的 [`STICKY_FILE`]，供下次启动优先复用（Task 3 编排
-//! 消费），减少 `--port 0` 随机端口的漂移。
+//! 落盘到 AppConfigDir 下的 [`STICKY_FILE`]，供下次启动优先复用（壳启动编排
+//! start_and_wait 消费），减少 `--port 0` 随机端口的漂移。
 //!
 //! 容错纪律：持久化是优化不是依赖——读侧任何异常形态（文件缺失/JSON 损坏/
 //! 字段缺失/端口 0 占位）一律 `None` 静默降级，调用方回落 `--port 0` 形态；
 //! 写侧任何 IO/序列化错误同样静默吞（无日志无 panic）：落盘失败只损失下次的
 //! 端口粘性，不影响本次已实测成功的端口。纯函数面：不持状态、不感知 Tauri
 //! （AppConfigDir 由调用方解析后传入），真实文件系统行为由七例单测锁定。
-
-// Task 3 编排接线前的临时防线：本模块 pub 面在 bin 目标内暂无消费方（仅测试
-// 目标经单测消费），dead_code 逐项误报——接线后本 allow 即成 no-op，届时可删。
-#![allow(dead_code)]
 
 /// 粘性端口落盘文件名（AppConfigDir 下）。
 pub const STICKY_FILE: &str = "desktop-shell.json";
