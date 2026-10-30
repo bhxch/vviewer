@@ -11,11 +11,21 @@
 #           variable 门控、内容哈希去重（contentHash 对比线上 latest——前端-only 变更
 #           零发包、已解析版本下发 outputs.version）；scope 未配置则 npm 分发与 CDN
 #           env 均不启用；--provenance 签名需 job 级 id-token: write）
+#   publish-packages：六新源码包（detect/sanitize/markdown-engine/lightbox/highlight/
+#           render-diagram）随 tag 逐包上 npm：清单单一来源 = tools/pack-packages.mjs
+#           的 PACKAGES 常量（--list 供构建/发布两循环共用）；逐包 tsc emit → 打包
+#           （非 emit 资产复制 + 发布版 package.json + 相对 specifier 补显式扩展名 +
+#           contentHash）→ 内容哈希去重逐包三分支同 publish-npm（零变化跳过复用线上
+#           latest / tag 重跑幂等 / 否则发布）→ npm publish --provenance。render-diagram
+#           第二批：发布前以 rust 链（同 ci.yml web job）跑 gen:svgbob-wasm 出 svgbob
+#           glue 产物；outputs.published 下发已发布 {pkg: version} JSON。scope 门控/
+#           OIDC trusted publishing 形态与 publish-npm 完全一致（npm 侧逐包页配
+#           Trusted Publisher）
 # 聚合 job 以 gh CLI 建 GitHub Release 并上传：vviewer 二进制、web dist zip、
 # grammar-wasm.tar.zst。发布写权限仅授予聚合 release job（job 级 contents: write）；
-# publish-npm 另持 id-token: write（provenance，无内容写权限）；顶层 contents: read
-# 兜底，web/server/desktop job 级再显式声明 read（grammar 由被调 workflow 自身的
-# contents: read 约束）——与实现一一对应，勿只改注释不改权限。
+# publish-npm 与 publish-packages 另持 id-token: write（provenance，无内容写权限）；
+# 顶层 contents: read 兜底，web/server/desktop job 级再显式声明 read（grammar 由被调
+# workflow 自身的 contents: read 约束）——与实现一一对应，勿只改注释不改权限。
 name: Release
 
 on:
@@ -320,12 +330,114 @@ jobs:
           npm --version
           npm publish ./dist-npm --access public --provenance
 
+  publish-packages:
+    name: npm 源码包发布（六新包）
+    runs-on: ubuntu-latest
+    # 与 publish-npm 同形：scope variable 门控（未配置则源码包分发未启用、job 跳过）、
+    # OIDC trusted publishing（id-token: write 供 npm 换短时发布凭据与 --provenance
+    # 签名；无 NODE_AUTH_TOKEN、不配 registry-url）——npm 侧须逐包在包页配 Trusted
+    # Publisher（bhxch/vviewer/release.yml + 允许 npm publish，同 publish-npm 注记）。
+    # 与 grammar/publish-npm 无产物依赖（六包构建不消费 grammar-wasm），并行跑、不设
+    # needs；发布面不在 web/CDN 链路上（pages-deploy 的 CDN env 仅指 vviewer-grammars-full）
+    if: vars.NPM_SCOPE != ''
+    permissions:
+      contents: read
+      id-token: write
+    # 已发布 {pkg: version} JSON（内容零变化 → 线上 latest；tag 重跑 → 同版本），供
+    # 聚合 release job 消费（needs 收录本 job 后可读）
+    outputs:
+      published: ${{ steps.gate.outputs.published }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      # 不配 registry-url（同 publish-npm）：无 NODE_AUTH_TOKEN 时 .npmrc 空 authToken
+      # 会干扰 OIDC 换凭据
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # —— render-diagram（第二批）发布前置：svgbob wasm glue 不入库（spec §7），构建
+      # 期生成。rust 链照抄 ci.yml web job（wasm-bindgen CLI 缓存 + dtolnay 装 wasm32
+      # target + Swatinem cargo 缓存；wasm-opt 沿 setup-grammars 缓存的 binaryen，缺则
+      # 脚本自行降级）
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/svgbob/wasm-bindgen-cli
+          key: wasm-bindgen-cli-${{ runner.os }}-${{ hashFiles('packages/render-diagram/tools/svgbob-wasm/Cargo.toml') }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/render-diagram/tools/svgbob-wasm
+      - run: pnpm gen:svgbob-wasm
+      # —— 打包：清单单一来源 = pack-packages.mjs 的 PACKAGES 常量（--list 输出，构建/
+      # 发布两循环共用，不在 YAML 重复维护）。逐包 tsc emit（tsconfig.build.json：include
+      # src 排除 *.test.ts、rootDir src；highlight 因 src/langdetect.ts 跨 rootDir 引
+      # ../assets/languages.json 而 rootDir=包根）→ pack-packages.mjs 复制非 emit 资产
+      # （highlight assets/ 整目录、markdown-engine 垫片 d.ts 并回注 /// reference 到
+      # dist/index.d.ts——tsc d.ts emit 会丢弃该指令、render-diagram svgbob gen 产物）、
+      # 相对 specifier 补显式扩展名（node 原生 ESM 可解析）并产出发布版 package.json
+      # （private:false、files 白名单按 dist 实际布局、contentHash=sha256 前 16 hex）
+      - name: 逐包构建（tsc emit dist）
+        run: |
+          for pkg in $(node tools/pack-packages.mjs --list); do
+            pnpm exec tsc -p "packages/$pkg/tsconfig.build.json"
+          done
+      - name: 打包发布面（非 emit 资产复制 + dist package.json）
+        env:
+          NPM_SCOPE: ${{ vars.NPM_SCOPE }}
+        run: |
+          # 版本归一与 publish-npm 同法同值（tag v1.2.3 → npm 版本 1.2.3，无 v 前缀）
+          export VV_NPM_PACKAGE_VERSION="${GITHUB_REF_NAME#v}"
+          node tools/pack-packages.mjs
+      # 内容去重门（逐包三分支，复用 publish-npm gate 语义）：① 本地 contentHash ==
+      # 线上 latest 的 contentHash → 跳过（内容零变化零发包，复用已发布版本）；
+      # ② 同版本已存在于线上 → 跳过（tag 重跑幂等）；③ 否则发布。published JSON 聚合
+      # 各包 resolved version（跳过者取线上 latest/同版本）
+      - name: 内容去重门 + npm publish（逐包，OIDC trusted publishing）
+        id: gate
+        env:
+          NPM_SCOPE: ${{ vars.NPM_SCOPE }}
+        run: |
+          # OIDC 发布要求 npm CLI ≥ 11.5.1（node 22 自带 10.x，须显式升级；同 publish-npm）
+          npm install -g npm@^11.5.1
+          npm --version
+          VERSION="${GITHUB_REF_NAME#v}"
+          PUBLISHED='{}'
+          for pkg in $(node tools/pack-packages.mjs --list); do
+            DIST="packages/$pkg/dist"
+            PKG=$(node -p "require('$GITHUB_WORKSPACE/$DIST/package.json').name")
+            H_NEW=$(node -p "require('$GITHUB_WORKSPACE/$DIST/package.json').contentHash")
+            H_LATEST=$(npm view "$PKG" contentHash 2>/dev/null || true)
+            VER_LATEST=$(npm view "$PKG" version 2>/dev/null || true)
+            if [ -n "$H_LATEST" ] && [ "$H_NEW" = "$H_LATEST" ]; then
+              VER="$VER_LATEST"
+              echo "$pkg: 内容未变化（$H_NEW）：跳过发布，复用已发布版本 $VER"
+            elif npm view "$PKG@$VERSION" version >/dev/null 2>&1; then
+              VER="$VERSION"
+              echo "$pkg: 同版本已存在：跳过发布（tag 重跑）"
+            else
+              # --provenance：供应链签名，发布页展示 "Published with provenance"（同
+              # publish-npm；npm 侧 Trusted Publisher 须勾选允许 npm publish）
+              npm publish "./$DIST" --access public --provenance
+              VER="$VERSION"
+              echo "$pkg: 内容变化（$H_NEW ≠ 线上 ${H_LATEST:-无}）：发布 $VER"
+            fi
+            PUBLISHED=$(node -p "const j = JSON.parse(process.argv[1]); j['$pkg'] = '$VER'; JSON.stringify(j)" "$PUBLISHED")
+          done
+          echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
+
   release:
     name: 聚合发布 GitHub Release
     runs-on: ubuntu-latest
     # publish-npm 入 needs：npm 包发布成功后才值得以 tag ref 重部署 pages（CDN 注入
     # 指向该版本）；publish 失败时 pages 保持上一次部署（可重跑 publish 后重触发）。
-    needs: [grammar, web, server, desktop, publish-npm]
+    # publish-packages 同入 needs：六源码包与 GitHub Release 同批出闸（发布失败同样
+    # 阻断聚合，语义与 publish-npm 一致）；其 outputs.published 为已发布 {pkg: version}
+    # JSON，本 job 及后续步骤可消费
+    needs: [grammar, web, server, desktop, publish-npm, publish-packages]
     # 全工作流唯一写权限点：建 Release + 上传产物（job 级显式覆盖顶层 read 兜底）；
     # actions: write 供 gh workflow run 以 tag ref 触发 pages 部署（CDN 注入生效）
     permissions:
