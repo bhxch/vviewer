@@ -1,5 +1,5 @@
 // enrich.ts — 净化后 DOM 的展示性增强：callout 卡片与音视频媒体占位。
-import { hostOf, isExternalMediaSrc } from './sanitize';
+import { hostOf, isExternalMediaSrc } from '@vviewer/sanitize';
 // 移植自 markpad src/lib/utils/markdown.ts 的 processMarkdownHtml（callout 块引用
 // pass 与 img/a 媒体替换 pass），剥离 Tauri invoke/convertFileSrc、fold 状态、
 // sourcepos 携带与 YouTube 替换（不在 vviewer M3 契约内）。

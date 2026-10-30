@@ -13,7 +13,7 @@
  // t.renderers 门控=graphviz: viz-js/hpcc；缺省显示注册表首项 viz-js）。
  // 模式档位按注册表能力门控（本地=t.local、Kroki=t.krokiType，同「服务端」
  // t.server 先例只列实际可用的档位）；遗留脏档经 displayMode 按回落链如实显示。
-  import { DIAGRAM_TYPES, type DiagramMode, type DiagramType } from '@vviewer/render-text/markdown/diagrams';
+  import { DIAGRAM_TYPES, type DiagramMode, type DiagramType } from '@vviewer/render-diagram';
   import { loadCapabilities } from '../openFlow.svelte';
   import type { Settings } from '../stores/settings';
 

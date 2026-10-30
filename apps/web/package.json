@@ -15,6 +15,7 @@
     "@vviewer/highlight": "workspace:*",
     "@vviewer/render-archive": "workspace:*",
     "@vviewer/render-binary": "workspace:*",
+    "@vviewer/render-diagram": "workspace:*",
     "@vviewer/render-doc": "workspace:*",
     "@vviewer/render-media": "workspace:*",
     "@vviewer/render-text": "workspace:*",

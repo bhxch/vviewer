@@ -1,7 +1,7 @@
 // markdownFence.ts — markdown 正文 compute 路由的围栏启发式（BUG-22 细化，spec §2.5）。
 // 从 viewer.ts 抽出为无 $app 依赖的纯模块：除接线外可被 vitest 直测
 // （markdownImages.ts 同款抽出模式）；viewer.ts 转出口径一致 re-export。
-import { resolveDiagramType } from '@vviewer/render-text/markdown/diagrams';
+import { resolveDiagramType } from '@vviewer/render-diagram';
 
 /**
  * BUG-22 启发式（细化后，spec §2.5）：存在「非图表语言或无语言」的围栏 → true

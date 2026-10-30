@@ -61,6 +61,9 @@ importers:
       '@vviewer/render-binary':
         specifier: workspace:*
         version: link:../../packages/render-binary
+      '@vviewer/render-diagram':
+        specifier: workspace:*
+        version: link:../../packages/render-diagram
       '@vviewer/render-doc':
         specifier: workspace:*
         version: link:../../packages/render-doc
@@ -116,6 +119,12 @@ importers:
 
   packages/core:
     dependencies:
+      '@vviewer/detect':
+        specifier: workspace:*
+        version: link:../detect
+
+  packages/detect:
+    dependencies:
       chardet:
         specifier: ^2.2.0
         version: 2.2.0
@@ -125,6 +134,32 @@ importers:
       web-tree-sitter:
         specifier: ~0.25.10
         version: 0.25.10
+
+  packages/lightbox: {}
+
+  packages/markdown-engine:
+    dependencies:
+      markdown-it:
+        specifier: ^15.0.2
+        version: 15.0.2
+      markdown-it-deflist:
+        specifier: ^4.0.0
+        version: 4.0.0
+      markdown-it-footnote:
+        specifier: ^4.0.0
+        version: 4.0.0
+      markdown-it-ins:
+        specifier: ^4.0.0
+        version: 4.0.0
+      markdown-it-mark:
+        specifier: ^4.0.0
+        version: 4.0.0
+      markdown-it-task-lists:
+        specifier: ^2.1.1
+        version: 2.1.1
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
 
   packages/render-archive:
     dependencies:
@@ -148,14 +183,36 @@ importers:
         specifier: ^3.10.2
         version: 3.10.2
 
+  packages/render-diagram:
+    dependencies:
+      '@viz-js/viz':
+        specifier: ^3.31.0
+        version: 3.31.0
+      katex:
+        specifier: ^0.19.0
+        version: 0.19.0
+      mermaid:
+        specifier: ^12.1.0
+        version: 12.1.0
+      nomnoml:
+        specifier: ^1.7.0
+        version: 1.7.0
+      pako:
+        specifier: ^2.2.0
+        version: 2.2.0
+    devDependencies:
+      '@types/pako':
+        specifier: ^2.0.4
+        version: 2.0.4
+
   packages/render-doc:
     dependencies:
       '@vviewer/core':
         specifier: workspace:*
         version: link:../core
-      '@vviewer/render-text':
+      '@vviewer/sanitize':
         specifier: workspace:*
-        version: link:../render-text
+        version: link:../sanitize
       jszip:
         specifier: ^3.10.2
         version: 3.10.2
@@ -186,58 +243,36 @@ importers:
 
   packages/render-text:
     dependencies:
-      '@viz-js/viz':
-        specifier: ^3.31.0
-        version: 3.31.0
       '@vviewer/core':
         specifier: workspace:*
         version: link:../core
       '@vviewer/highlight':
         specifier: workspace:*
         version: link:../highlight
-      dompurify:
-        specifier: ^3.4.16
-        version: 3.4.16
+      '@vviewer/lightbox':
+        specifier: workspace:*
+        version: link:../lightbox
+      '@vviewer/markdown-engine':
+        specifier: workspace:*
+        version: link:../markdown-engine
+      '@vviewer/render-diagram':
+        specifier: workspace:*
+        version: link:../render-diagram
+      '@vviewer/sanitize':
+        specifier: workspace:*
+        version: link:../sanitize
       highlight.js:
         specifier: ^11.12.0
         version: 11.12.0
       katex:
         specifier: ^0.19.0
         version: 0.19.0
-      markdown-it:
-        specifier: ^15.0.2
-        version: 15.0.2
-      markdown-it-deflist:
-        specifier: ^4.0.0
-        version: 4.0.0
-      markdown-it-footnote:
-        specifier: ^4.0.0
-        version: 4.0.0
-      markdown-it-ins:
-        specifier: ^4.0.0
-        version: 4.0.0
-      markdown-it-mark:
-        specifier: ^4.0.0
-        version: 4.0.0
-      markdown-it-task-lists:
-        specifier: ^2.1.1
-        version: 2.1.1
-      mermaid:
-        specifier: ^12.1.0
-        version: 12.1.0
-      nomnoml:
-        specifier: ^1.7.0
-        version: 1.7.0
-      pako:
-        specifier: ^2.2.0
-        version: 2.2.0
-      yaml:
-        specifier: ^2.9.1
-        version: 2.9.1
-    devDependencies:
-      '@types/pako':
-        specifier: ^2.0.4
-        version: 2.0.4
+
+  packages/sanitize:
+    dependencies:
+      dompurify:
+        specifier: ^3.4.16
+        version: 3.4.16
 
 packages:
 

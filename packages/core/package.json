@@ -10,6 +10,6 @@
   },
   "license": "Apache-2.0",
   "dependencies": {
-    "chardet": "^2.2.0"
+    "@vviewer/detect": "workspace:*"
   }
 }

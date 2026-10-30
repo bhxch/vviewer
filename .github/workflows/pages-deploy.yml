@@ -22,7 +22,7 @@ on:
       - 'apps/web/**'
       - 'packages/**'
       - 'tools/grammar-builder/**'
-      - 'tools/svgbob-wasm/**'
+      - 'packages/render-diagram/tools/svgbob-wasm/**'
       - 'pnpm-lock.yaml'
       - '.github/actions/setup-grammars/**'
       - '.github/workflows/pages-deploy.yml'
@@ -65,10 +65,10 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: ~/.cache/svgbob/wasm-bindgen-cli
-          key: wasm-bindgen-cli-${{ runner.os }}-${{ hashFiles('tools/svgbob-wasm/Cargo.toml') }}
+          key: wasm-bindgen-cli-${{ runner.os }}-${{ hashFiles('packages/render-diagram/tools/svgbob-wasm/Cargo.toml') }}
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: tools/svgbob-wasm
+          workspaces: packages/render-diagram/tools/svgbob-wasm
       - run: pnpm gen:svgbob-wasm
       # Pages base：项目站点 /<repo>/；用户站点（<owner>.github.io）按根路径
       - name: 计算 Pages base 路径

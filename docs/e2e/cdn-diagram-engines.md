@@ -39,7 +39,7 @@
 | graphviz 最小有向图 | `digraph { cdn04 -> hpcc }`（server 单测同款 digraph 形态） | CDN-04 |
 | kroki fulfill 应答 | 最小 `<svg>` body（与 b-md-diagrams SVG_BODY 同串） | CDN-02 第一跳 |
 
-断言锚对照（源码契约）：注册表翻转 `packages/render-text/src/markdown/diagrams.ts`（五类 `local: true, defaultMode: 'local'`）；回退链 `packages/render-text/src/markdown/pipeline.ts` `renderDiagramBlock`（`appendKrokiImg` 局部函数，local catch → krokiType 存在先降 kroki img → img error 落错误卡+源码）；CDN 引擎 `packages/render-text/src/markdown/cdnEngines.ts`（excalidraw `exportToSvg({ data })` 归一化重组）。
+断言锚对照（源码契约）：注册表翻转 `packages/render-diagram/src/markdown/diagrams.ts`（五类 `local: true, defaultMode: 'local'`）；回退链 `packages/render-text/src/markdown/pipeline.ts` `renderDiagramBlock`（`appendKrokiImg` 局部函数，local catch → krokiType 存在先降 kroki img → img error 落错误卡+源码）；CDN 引擎 `packages/render-diagram/src/markdown/cdnEngines.ts`（excalidraw `exportToSvg({ data })` 归一化重组）。
 
 ## 4. 旧锚承接明细（spec §6 翻转注记）
 

@@ -38,7 +38,7 @@ import {
   mergeChunkLines,
   overlaySearchHits,
   renderLineHtml
-} from './lines';
+} from '@vviewer/highlight/lines';
 import {
   type CodeEngine,
   type CodeRenderOptions,

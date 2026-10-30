@@ -1,8 +1,6 @@
 import type { ByteRange, Detection, FileSource, LineMetrics, RenderedInstance, Renderer, RendererId, StreamCtx } from '../types';
 import type { Registry } from '../registry/registry';
-import { detect } from '../detect';
-import { refineEncoding } from '../detect/encodingRefine';
-import { looksTextual, shebangLangOf } from '../detect/magic';
+import { detect, refineEncoding, looksTextual, shebangLangOf } from '@vviewer/detect';
 import {
   errorRenderer,
   setHexFallbackRenderer,

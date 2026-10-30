@@ -1,16 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// mermaid 全文件 mock：jsdom 无法真实渲染（依赖视觉度量），按裁决 mock 模块，
-// 分别验证成功路径与失败容错路径。
+// mermaid 引擎包边界 mock：jsdom 无法真实渲染（依赖视觉度量）。mermaid 迁出为
+// @vviewer/render-diagram 后 render-text 依赖图无 mermaid 说明符（shamefully-hoist
+// 关闭下 mock 注册期即 Cannot find module），改桩包边界 renderDiagramEngine——管线
+// 仅经该函数触达引擎，成功/失败容错语义不变；引擎内部加载失败真载分支由该包
+// test/mermaidFail.test.ts 承接。spread real 保留注册表/编码等其余导出。
 const mermaidMocks = vi.hoisted(() => ({ render: vi.fn() }));
-vi.mock('mermaid', () => ({
-  default: { initialize: () => {}, render: mermaidMocks.render },
-}));
+vi.mock('@vviewer/render-diagram', async (importOriginal) => {
+  const real = await importOriginal<Record<string, unknown>>();
+  return { ...real, renderDiagramEngine: mermaidMocks.render };
+});
 
 import { runPipeline, getPipelineSteps, runSteps, type PipelineCtx } from '../src/markdown/pipeline';
-import { renderMarkdownToHtml } from '../src/markdown/engine';
+import { renderMarkdownToHtml } from '@vviewer/markdown-engine';
 import { renderMarkdownBody } from '../src/markdown/markdownRenderer';
-import { sanitizeHtml } from '../src/markdown/sanitize';
+import { sanitizeHtml } from '@vviewer/sanitize';
 import { enrichMarkdownDom } from '../src/markdown/enrich';
 
 /** 引擎 → 净化 → 解析为 Document（T3 管线的真实输入形态）。 */
@@ -115,7 +119,7 @@ describe('diagrams 步（mermaid）', () => {
   const MERMAID_MD = '```mermaid\ngraph TD; A-->B;\n```\n';
 
   it('code.language-mermaid 替换为容器 div（data-mermaid 源码）并注入 svg', async () => {
-    mermaidMocks.render.mockResolvedValue({ svg: '<svg><g/></svg>' });
+    mermaidMocks.render.mockResolvedValue('<svg><g/></svg>');
     const doc = docOf(MERMAID_MD);
     await runPipeline(doc, noopCtx());
     expect(doc.querySelector('pre')).toBeNull();
@@ -403,7 +407,7 @@ describe('lightbox 步', () => {
   });
 
   it('图表 svg 点击开灯箱（5-4 接线）：与 img 同款代币防重复绑定，按元素身份定位回放 outerHTML', async () => {
-    mermaidMocks.render.mockResolvedValue({ svg: '<svg viewBox="0 0 10 10"><circle r="4"/></svg>' });
+    mermaidMocks.render.mockResolvedValue('<svg viewBox="0 0 10 10"><circle r="4"/></svg>');
     const doc = docOf('```mermaid\ngraph TD; A-->B;\n```\n\n![图](pic.png)\n');
     await runPipeline(doc, noopCtx());
     const svg = doc.querySelector('.md-diagram-view svg')!;
@@ -429,7 +433,7 @@ describe('themeClassPrefix 与集成', () => {
   });
 
   it('集成：一次管线同时完成高亮/mermaid/公式/复制/灯箱', async () => {
-    mermaidMocks.render.mockResolvedValue({ svg: '<svg/>' });
+    mermaidMocks.render.mockResolvedValue('<svg/>');
     const doc = docOf(
       [
         '```js',

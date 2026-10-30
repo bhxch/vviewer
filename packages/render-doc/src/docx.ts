@@ -1,12 +1,12 @@
 // docx.ts — Word 渲染器（M4 Task 5）。mammoth 动态 import（重依赖不进主包）：
 // convertToHtml 输入按运行时形态选择——Node（vitest/SSR 侧测试）用 Buffer，
 // 浏览器构建（package.json browser 字段换用 browser/unzip.js）用 arrayBuffer。
-// 输出 HTML 必经 sanitizeHtml（复用 @vviewer/render-text 的唯一净化策略，
-// 依赖方向 render-doc → render-text，SDD 裁决）。mammoth 图片默认内联为
+// 输出 HTML 必经 sanitizeHtml（@vviewer/sanitize 唯一净化出口，依赖方向
+// render-doc → sanitize，SDD 裁决）。mammoth 图片默认内联为
 // data:image/* base64，净化白名单已放行 img src 的 data:image。
 // OOXML 预检语义见 ooxml.ts：render 侧 ZIP 签名早失败，sniff 永不改派。
 import type { Detection, FileSource, RenderedInstance, Renderer } from '@vviewer/core';
-import { sanitizeHtml } from '@vviewer/render-text/sanitize';
+import { sanitizeHtml } from '@vviewer/sanitize';
 import { assertZipSignature, sniffOoxml } from './ooxml';
 
 type MammothModule = typeof import('mammoth');

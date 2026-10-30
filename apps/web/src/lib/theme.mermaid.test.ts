@@ -3,7 +3,7 @@
 // 注入通道透传断言见 packages/render-text/src/markdown/pipeline.mermaidTheme.test.ts。
 import { expect, it } from 'vitest';
 import { applyAppearanceFromSettings, resolveMermaidTheme } from './theme';
-import type { MermaidTheme } from '@vviewer/render-text/markdown/diagramEngines';
+import type { MermaidTheme } from '@vviewer/render-diagram';
 import type { Settings } from './stores/settings';
 import { DEFAULT_LAYOUT } from './layout';
 

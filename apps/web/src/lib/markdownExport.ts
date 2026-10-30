@@ -3,7 +3,7 @@
 // 本模块持浏览器副作用面：图片 data URI 解析策略、Blob 下载、隐藏 iframe 打印、
 // PDF 前置 mermaid 浅色重画。除 iframe print（jsdom 无 srcdoc load，e2e 承担）外
 // 均可 vitest 直测。
-import { renderMermaidInto } from '@vviewer/render-text/markdown/diagramEngines';
+import { renderMermaidInto } from '@vviewer/render-diagram';
 
 /**
  * 导出文件名（计划 Global Constraints：`<原名>.html`）：剥单一扩展名，无名回退

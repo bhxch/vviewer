@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./lines": "./src/lines.ts",
+    "./worker": "./src/worker.ts",
     "./assets/*": "./assets/*"
   },
   "//": "web-tree-sitter 运行时锁 ~0.25.10：grammar wasm 已改为 tree-sitter-cli 0.27 自建（产物含 dylink.0 节，实测 0.25 运行时可加载解析）；0.27 运行时强制要求 dylink.0 且运行时文件更名 web-tree-sitter.wasm，升级另行评估。发布（首批上 npm）：exports 的 './assets/*' 两态路径一致——monorepo 态指包根 assets/、发布态指 dist 内同结构 assets/；tsc 只 emit js/d.ts，assets 进 dist 需 pack-packages.mjs 显式 cp -r assets dist/，private 去除亦由该脚本在发布版 package.json 产出（同 tools/grammar-builder/pack-npm.mjs 惯例）",

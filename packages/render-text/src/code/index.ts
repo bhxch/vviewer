@@ -28,7 +28,7 @@ import type { CodeEngine, CodeFileMeta, RenderCodeHandle } from './client';
 
 export * from './strategy';
 export * from './chunks';
-export * from './lines';
+export * from '@vviewer/highlight/lines';
 export * from './client';
 export * from './renderCode';
 export * from './renderCodeWindowed';

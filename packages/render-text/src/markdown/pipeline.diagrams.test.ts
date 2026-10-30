@@ -5,7 +5,7 @@
 // spec §8.3（Task 5）：server 模式与 krokiVia=server 代发——fetch 注入走 global
 // stub（vi.stubGlobal，highlightRouter.test.ts 同款），remoteCall 走注入缝桩。
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_KROKI_HOST } from './diagrams';
+import { DEFAULT_KROKI_HOST } from '@vviewer/render-diagram';
 import { runPipeline, type PipelineCtx } from './pipeline';
 
 function docWithFence(lang: string, body: string): Document {
@@ -327,37 +327,45 @@ describe('diagrams 步：server 模式与 krokiVia=server 代发（Task 5 / spec
   });
 });
 
-// graphviz 双渲染器（Task 6 / spec 2026-10-23 §9.1）：rendererOf 注入值经管线透传
-// renderDiagramEngine opts.renderer——vi.mock 拦 cdnEngines 模块边界观察 hpcc 分流
-//（文件级 mock 对上方用例无影响：均不触 CDN 引擎路径）；默认（未注入 rendererOf）
-// 走既有 viz 路径零变化（viz 真渲染环境相关，容差断言）。
-vi.mock('./cdnEngines', async (importOriginal) => {
-  const real = await importOriginal<Record<string, unknown>>();
-  return { ...real, renderGraphvizHpcc: vi.fn(async () => '<svg><circle r="1"/></svg>') };
+// graphviz 双渲染器（Task 6 / spec 2026-10-23 §9.1）：cdnEngines 迁出为
+// @vviewer/render-diagram 包内模块后，跨包无法只 mock 引擎内 renderGraphvizHpcc
+// 分流——引擎侧分流本体（hpcc URL 构造/reject/委派）由该包 cdnEngines.test.ts 直测
+//（移交）；此处保留管线侧 rendererOf 注入值 → renderDiagramEngine opts.renderer 的
+// 透传断言：包边界 spy 包装 real（行为不变，其余用例不受影响），用例内
+// mockImplementationOnce 替换出图。
+vi.mock('@vviewer/render-diagram', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@vviewer/render-diagram')>();
+  return { ...real, renderDiagramEngine: vi.fn(real.renderDiagramEngine) };
 });
 
 describe('diagrams 步：graphviz 渲染器透传（Task 6 / spec §9.1）', () => {
-  it('rendererOf=hpcc：hpcc CDN 引擎出图注入视图（非 kroki img 非错误卡）', async () => {
+  it('rendererOf=hpcc：注入值透传 opts.renderer，出图注入视图（非 kroki img 非错误卡）', async () => {
+    const { renderDiagramEngine } = await import('@vviewer/render-diagram');
+    const engineSpy = vi.mocked(renderDiagramEngine);
+    engineSpy.mockImplementationOnce(async () => '<svg><circle r="1"/></svg>');
     const doc = docWithFence('graphviz', 'digraph { a -> b }');
     await runPipeline(doc, {
       ...baseCtx,
       diagram: { krokiHost: 'https://k', mermaidTheme: 'default', modeOf: () => 'local', rendererOf: () => 'hpcc' }
     });
+    expect(engineSpy).toHaveBeenCalledWith('graphviz', 'digraph { a -> b }',
+      expect.objectContaining({ renderer: 'hpcc' }));
     const view = doc.querySelector('.md-diagram-view')!;
     expect(view.innerHTML).toContain('<circle');
     expect(view.querySelector('img')).toBeNull();
     expect(view.classList.contains('md-diagram-error')).toBe(false);
   });
 
-  it('未注入 rendererOf：默认 viz 路径（hpcc mock 零调用），失败照旧降级 kroki img', async () => {
-    const { renderGraphvizHpcc } = await import('./cdnEngines');
-    const hpccMock = vi.mocked(renderGraphvizHpcc);
+  it('未注入 rendererOf：opts.renderer 为 undefined（注册表默认渲染器），失败照旧降级 kroki img', async () => {
+    const { renderDiagramEngine } = await import('@vviewer/render-diagram');
+    const engineSpy = vi.mocked(renderDiagramEngine);
     const doc = docWithFence('graphviz', 'digraph { a ->');
     await runPipeline(doc, {
       ...baseCtx,
       diagram: { krokiHost: 'https://k', mermaidTheme: 'default', modeOf: () => 'local' }
     });
-    expect(renderGraphvizHpcc).not.toHaveBeenCalled();
+    expect(engineSpy).toHaveBeenCalledWith('graphviz', 'digraph { a ->',
+      expect.objectContaining({ renderer: undefined }));
     // 既有回退链不受 renderer 字段影响：viz 失败 → kroki img
     const img = doc.querySelector('.md-diagram-view img') as HTMLImageElement | null;
     expect(img?.getAttribute('src')?.startsWith('https://k/graphviz/svg/') ?? true).toBe(true);

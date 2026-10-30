@@ -7,7 +7,7 @@ import {
   setDiagramOptions,
   renderMarkdownBody
 } from '@vviewer/render-text/markdown/markdownRenderer';
-import { DEFAULT_KROKI_HOST, resolveDiagramType } from '@vviewer/render-text/markdown/diagrams';
+import { DEFAULT_KROKI_HOST, resolveDiagramType } from '@vviewer/render-diagram';
 import { htmlRenderer } from '@vviewer/render-text/html';
 import { imageRenderer } from '@vviewer/render-media';
 import { avRenderer } from '@vviewer/render-media/av';

@@ -5,10 +5,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { markdownRenderer } from './markdownRenderer';
 import { setDiagramOptions, getDiagramOptions } from './markdownRenderer';
-import { renderMermaidInto } from './diagramEngines';
+import { renderMermaidInto } from '@vviewer/render-diagram';
 import { attachHighlightClient } from '../code';
 
-vi.mock('./diagramEngines', async (importOriginal) => {
+vi.mock('@vviewer/render-diagram', async (importOriginal) => {
   const real = await importOriginal<Record<string, unknown>>();
   return {
     ...real,
@@ -48,7 +48,7 @@ const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
 describe('vv:diagram-settings-applied 即时重画（spec §9.2）', () => {
   it('派发事件触发 [data-mermaid] 重画为设置主题（renderMermaidInto 以 forest 调）', async () => {
-    const { renderMermaidInto: intoMock } = await import('./diagramEngines');
+    const { renderMermaidInto: intoMock } = await import('@vviewer/render-diagram');
     const target = document.createElement('div');
     const instance = await markdownRenderer.render(new TextEncoder().encode(MERMAID_DOC), target, SOURCE, DET);
     expect(target.querySelector('[data-mermaid]')).not.toBeNull();
@@ -66,7 +66,7 @@ describe('vv:diagram-settings-applied 即时重画（spec §9.2）', () => {
   });
 
   it('destroy 后派发不再重画（per-instance 文档监听随实例摘除）', async () => {
-    const { renderMermaidInto: intoMock } = await import('./diagramEngines');
+    const { renderMermaidInto: intoMock } = await import('@vviewer/render-diagram');
     const target = document.createElement('div');
     const instance = await markdownRenderer.render(new TextEncoder().encode(MERMAID_DOC), target, SOURCE, DET);
     instance.destroy();
@@ -79,7 +79,7 @@ describe('vv:diagram-settings-applied 即时重画（spec §9.2）', () => {
   });
 
   it('外观事件既有路径回归：vv:appearance-applied detail 仍驱动重画（两监听并存互不挤占）', async () => {
-    const { renderMermaidInto: intoMock } = await import('./diagramEngines');
+    const { renderMermaidInto: intoMock } = await import('@vviewer/render-diagram');
     const target = document.createElement('div');
     const instance = await markdownRenderer.render(new TextEncoder().encode(MERMAID_DOC), target, SOURCE, DET);
     document.dispatchEvent(
@@ -93,7 +93,7 @@ describe('vv:diagram-settings-applied 即时重画（spec §9.2）', () => {
   it('事件缺 detail 时回退渲染时 ctx 快照（注入通道透传）', async () => {
     setDiagramOptions(() => ({ krokiHost: '', mermaidTheme: 'base', modeOf: () => 'local' }));
     expect(getDiagramOptions()?.mermaidTheme).toBe('base');
-    const { renderMermaidInto: intoMock } = await import('./diagramEngines');
+    const { renderMermaidInto: intoMock } = await import('@vviewer/render-diagram');
     const target = document.createElement('div');
     const instance = await markdownRenderer.render(new TextEncoder().encode(MERMAID_DOC), target, SOURCE, DET);
     document.dispatchEvent(new CustomEvent('vv:diagram-settings-applied'));

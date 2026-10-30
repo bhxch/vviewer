@@ -5,10 +5,10 @@
 //（下载断言由 e2e 承担，print 可用性仅测特性检测函数）。
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { exportFileName, printAvailable, repaintMermaidForPrint, resolveExportImage } from './markdownExport';
-import { renderMermaidInto } from '@vviewer/render-text/markdown/diagramEngines';
+import { renderMermaidInto } from '@vviewer/render-diagram';
 
 // mermaid 真渲染是重浏览器面（jsdom 不承载）：以桩隔离，只断言重画调度
-vi.mock('@vviewer/render-text/markdown/diagramEngines', () => ({
+vi.mock('@vviewer/render-diagram', () => ({
   renderMermaidInto: vi.fn(async () => true)
 }));
 

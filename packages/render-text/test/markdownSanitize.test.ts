@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeHtml } from '../src/markdown/sanitize';
+import { sanitizeHtml } from '@vviewer/sanitize';
 import { enrichMarkdownDom } from '../src/markdown/enrich';
-import { renderMarkdownToHtml } from '../src/markdown/engine';
+import { renderMarkdownToHtml } from '@vviewer/markdown-engine';
 
 function docOf(html: string): Document {
   return new DOMParser().parseFromString(html, 'text/html');

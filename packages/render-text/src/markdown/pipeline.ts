@@ -9,9 +9,8 @@
 //   重库一律懒加载；katex/highlight.js 同样动态 import。
 // - 每步独立 try/catch：单步失败不阻塞后续步骤。
 
-import { resolveDiagramType, createKrokiUrl, createPlantumlUrl, DEFAULT_KROKI_HOST, type DiagramMode, type DiagramType } from './diagrams';
-import { renderDiagramEngine } from './diagramEngines';
-import { sanitizeDiagramFragment } from './sanitize';
+import { resolveDiagramType, createKrokiUrl, createPlantumlUrl, DEFAULT_KROKI_HOST, type DiagramMode, type DiagramType, renderDiagramEngine } from '@vviewer/render-diagram';
+import { sanitizeDiagramFragment } from '@vviewer/sanitize';
 
 export interface PipelineCtx {
   /**
@@ -688,8 +687,8 @@ async function runCopyCode(root: Document, ctx: PipelineCtx): Promise<void> {
 
 // 灯箱本体（三导出 + overlay DOM/交互/状态机）已迁出至 lightbox.ts（Task 1）；
 // 此处 re-export 保住 markdownRenderer 与既有测试的 import 面：
-export { removeLightboxOverlay, LIGHTBOX_OVERLAY_ID, LIGHTBOX_OWNER_ATTR } from './lightbox';
-import { collectGallery, openLightbox } from './lightbox';
+export { removeLightboxOverlay, LIGHTBOX_OVERLAY_ID, LIGHTBOX_OWNER_ATTR } from '@vviewer/lightbox';
+import { collectGallery, openLightbox } from '@vviewer/lightbox';
 
 async function runLightbox(root: Document, ctx: PipelineCtx): Promise<void> {
   for (const img of Array.from(root.querySelectorAll('img'))) {

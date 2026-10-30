@@ -1,6 +1,6 @@
 import type { ComputePolicy } from '@vviewer/core';
-import { resolveDiagramType, type DiagramMode } from '@vviewer/render-text/markdown/diagrams';
-import { MERMAID_THEMES, type MermaidTheme } from '@vviewer/render-text/markdown/diagramEngines';
+import { resolveDiagramType, type DiagramMode } from '@vviewer/render-diagram';
+import { MERMAID_THEMES, type MermaidTheme } from '@vviewer/render-diagram';
 import { DEFAULT_LAYOUT, sanitizeLayout, type LayoutSettings } from '../layout';
 
 /** mermaid 主题设置白名单（spec 2026-10-23 §9.2）：'auto' 跟随外观亮暗（现状语义，

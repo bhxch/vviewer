@@ -35,7 +35,7 @@ import {
   escapeHtml,
   splitHighlightedLines,
   mergeChunkLines
-} from './lines';
+} from '@vviewer/highlight/lines';
 import {
   type CodeEngine,
   type CodeRenderOptions,

@@ -47,18 +47,18 @@ jsdelivr `+esm` 精确版本运行时拼 URL（`@vite-ignore` 防静态打包）
 ## svgbob wasm 构建链（发布前置）
 
 glue（`svgbob_wasm.js` / `svgbob_wasm_bg.wasm`）为构建期产物，不入库（本目录内嵌
-.gitignore 排除；根 .gitignore 条目在切包阶段统一改指本包）；`svgbob_wasm.d.ts`
-手写入库保证 typecheck 不依赖构建时序。构建：`pnpm gen:svgbob-wasm` →
-`tools/build-svgbob-wasm.mjs`（仓库根运行）→ Rust crate `tools/svgbob-wasm`
+.gitignore 排除；根 .gitignore 条目已同步改指本包）；`svgbob_wasm.d.ts`
+手写入库保证 typecheck 不依赖构建时序。构建：`pnpm gen:svgbob-wasm`（根脚本）→
+`packages/render-diagram/tools/build-svgbob-wasm.mjs` → Rust crate
+`packages/render-diagram/tools/svgbob-wasm`
 （svgbob =0.7.6 / wasm-bindgen =0.2.129，release opt-level=s + lto，wasm-opt 有则
 -Oz，bindgen --target web）。前置 rust toolchain + wasm32-unknown-unknown target +
 wasm-bindgen CLI（脚本三级自供给：PATH → ~/.cache/svgbob → 官方 release 下载）。
 
 发布本包必须前置 gen 并把 js/wasm 产物复制进 dist（pack 脚本职责，同 highlight
 assets 先例），故列第二批发布。CI 侧 wasm-bindgen 缓存键
-（ci.yml `hashFiles('tools/svgbob-wasm/Cargo.toml')`）与 rust-cache workspaces
-在切包阶段同步改指 `packages/render-diagram/tools/svgbob-wasm`，否则缓存键退化、
-rust 缓存永久 miss。
+（ci.yml/pages-deploy.yml `hashFiles('packages/render-diagram/tools/svgbob-wasm/Cargo.toml')`）
+与 rust-cache workspaces 已同步改指本包 crate 路径。
 
 ## 测试布局
 

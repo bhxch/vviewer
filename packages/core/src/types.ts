@@ -65,31 +65,17 @@ export interface TreeStore {
 }
 
 /**
- * Encoding 值单源（终审 I-1）：联合类型由本常量数组派生，需「全量编码值清单」的
- * 运行时消费点（remote.ts X-VV-Encoding 响应头白名单等）直接 import 本数组，
- * 扩列时不再出现「类型扩了、运行时白名单漏跟」的静默丢弃。
+ * Encoding 值与 Detection 基础形状已随文件级判别层迁出为 @vviewer/detect 包
+ * （判别器是可独立复用的通用能力）。core 侧转发导出保持既有 import 路径零改动：
+ * ENCODING_VALUES 是运行时值（remote.ts X-VV-Encoding 白名单等直接消费），
+ * Encoding/BaseDetection 为类型面；扩列改 @vviewer/detect 单源。
  */
-export const ENCODING_VALUES = [
-  'utf-8', 'utf-16le', 'utf-16be', 'utf-32le', 'utf-32be', 'gb18030',
-  'shift_jis', 'euc-jp', 'iso-2022-jp', 'euc-kr', 'big5',
-  'windows-1250', 'windows-1251', 'windows-1252', 'windows-1253', 'windows-1254',
-  'windows-1255', 'windows-1256', 'windows-1257', 'windows-1258',
-  'koi8-r', 'ibm866', 'iso-8859-2', 'iso-8859-5', 'iso-8859-7', 'iso-8859-15',
-  'x-mac-cyrillic'
-] as const;
+import type { BaseDetection } from '@vviewer/detect';
 
-/**
- * 议题三扩列（§4.3）：追加 chardet 精判白名单标签——仅「严格 UTF-8 失败的文本」经
- * 精判分层（detect/encodingRefine）采纳，置信度 + 白名单双闸，映射外维持 gb18030。
- * 消费面：strategy.ts DECODERS（TextDecoder 标签表，编译期强制同步）与 decodeText。
- */
-export type Encoding = typeof ENCODING_VALUES[number];
+export { ENCODING_VALUES } from '@vviewer/detect';
+export type { Encoding, BaseDetection } from '@vviewer/detect';
 
-export interface Detection {
-  ext: string;            // 小写无点；无扩展名为 ''（签名纠偏后为规范扩展名）
-  lang?: string;          // 代码语言（helix 名，M2 接入 languages.json；无扩展名回退链写入 shebang 语言）
-  encoding?: Encoding;
-  binary?: boolean;       // magic 或编码检测判定
+export interface Detection extends BaseDetection {
   /**
    * 无扩展名回退链命中标记（BUG-07）：ext 为空、经文本性探测交 code 渲染器时置位；
    * 此后 ext 可能已被签名纠偏为规范扩展名，本标记保留"原始无扩展名"事实。
@@ -98,8 +84,6 @@ export interface Detection {
   /** C 项探测改派标记：内容探测/签名改派生效时记录原扩展名（原生无扩展名不置位（保持 undefined））；
    * 渲染器/错误卡片据此显示「已按内容识别」提示。原生路由不置位。 */
   reclassifiedFrom?: string;
-  signature?: 'zip' | 'ole' | 'png' | 'jpeg' | 'gif' | 'pdf' | 'mpegts'
-    | 'mp4' | 'm4a' | 'avif' | 'webm' | 'webp' | 'wav' | 'ico' | 'gz' | '7z' | 'rar' | 'flac' | 'ogg' | 'bmp' | null;
 }
 
 export type RendererId = string;

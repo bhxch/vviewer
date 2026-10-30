@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@vviewer/core": "workspace:*",
-    "@vviewer/render-text": "workspace:*",
+    "@vviewer/sanitize": "workspace:*",
     "jszip": "^3.10.2",
     "mammoth": "^1.13.0",
     "pdfjs-dist": "^6.4.299",

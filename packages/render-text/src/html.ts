@@ -12,7 +12,7 @@
 // 超大输入（>20MB）：净化/DOM 遍历无分块能力，跳过沙箱管线降级为源码视图
 // + 提示卡（renderDegradedCode；降级而非拒绝）。
 import type { Renderer, RenderedInstance, Detection, FileSource, SearchMatch } from '@vviewer/core';
-import { ALLOWED_URI_REGEXP, sanitizeHtml } from './markdown/sanitize';
+import { ALLOWED_URI_REGEXP, sanitizeHtml } from '@vviewer/sanitize';
 import { decodeText } from './decodeText';
 import {
   MARKUP_MAX_BYTES,

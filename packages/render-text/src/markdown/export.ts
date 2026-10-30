@@ -7,6 +7,8 @@
 // 文档——markdownRenderer 实例 getExportDocument 返回的克隆），就地装配不额外
 // 克隆；每张图片解析失败/返回 null 均降级原 URL，单点故障不阻塞整篇导出。
 
+import { LIGHTBOX_OVERLAY_ID } from '@vviewer/lightbox';
+
 // ---------- 基础排版样式（md-export Task 2 触发壳消费） ----------
 
 /**
@@ -173,7 +175,7 @@ export interface ExportHtmlOptions {
  * 「data-md-copy|md-lightbox|md-diagram-toggle」为语义列举（属性/类混称），
  * 实际剥离面以类名选择器为准，data-* 属性无行为不剥离。
  */
-const STRIP_SELECTORS = ['.md-diagram-toggle', '.md-lightbox-overlay'] as const;
+const STRIP_SELECTORS = ['.md-diagram-toggle', `.${LIGHTBOX_OVERLAY_ID}`] as const;
 
 /** 语言徽标 button→span 定向转换：语言词（类名含主题前缀变体）与文本保留，title 等交互属性消失。 */
 function flattenCodeLangBadge(root: Document): void {

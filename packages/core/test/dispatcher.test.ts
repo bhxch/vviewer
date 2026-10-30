@@ -247,6 +247,24 @@ describe('dispatcher magic 预检改派（BUG-13/BUG-01.3）', () => {
     expect(signatureRouteOf('mpegts')).toEqual({ rendererId: 'av', ext: 'ts' });
     expect(signatureRouteOf(null)).toBeNull();
   });
+  // 自 core/test/detect.test.ts 拆分归并（包化迁移）：纯 detect/编码/magic 断言随
+  // 判别层迁 @vviewer/detect 包测试，SIGNATURE_ROUTES 路由表用例留守 core（本文件）。
+  it('SIGNATURE_ROUTES 全新值有路由且 ext 纠偏正确（ole 维持无路由）', () => {
+    expect(signatureRouteOf('mp4')).toEqual({ rendererId: 'av', ext: 'mp4' });
+    expect(signatureRouteOf('m4a')).toEqual({ rendererId: 'av', ext: 'm4a' });
+    expect(signatureRouteOf('avif')).toEqual({ rendererId: 'image', ext: 'avif' });
+    expect(signatureRouteOf('webm')).toEqual({ rendererId: 'av', ext: 'webm' });
+    expect(signatureRouteOf('webp')).toEqual({ rendererId: 'image', ext: 'webp' });
+    expect(signatureRouteOf('wav')).toEqual({ rendererId: 'av', ext: 'wav' });
+    expect(signatureRouteOf('ico')).toEqual({ rendererId: 'image', ext: 'ico' });
+    expect(signatureRouteOf('gz')).toEqual({ rendererId: 'archive', ext: 'gz' });
+    expect(signatureRouteOf('7z')).toEqual({ rendererId: 'archive', ext: '7z' });
+    expect(signatureRouteOf('rar')).toEqual({ rendererId: 'archive', ext: 'rar' });
+    expect(signatureRouteOf('flac')).toEqual({ rendererId: 'av', ext: 'flac' });
+    expect(signatureRouteOf('ogg')).toEqual({ rendererId: 'av', ext: 'ogg' });
+    expect(signatureRouteOf('bmp')).toEqual({ rendererId: 'image', ext: 'bmp' });
+    expect(signatureRouteOf('ole')).toBeNull();
+  });
 });
 
 describe('dispatcher 无扩展名回退链（BUG-07）', () => {

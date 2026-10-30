@@ -28,12 +28,11 @@ import {
 import { decodeText } from '../decodeText';
 import { makePreview, type SearchMatchWithPreview } from '../search';
 import type { SearchMatch } from '@vviewer/core';
-import { createMarkdownEngine, renderMarkdownToHtml, protectLatexDelimiters, GfmAnchorizer } from './engine';
-import { parseFrontMatter } from './frontMatter';
-import { sanitizeHtml } from './sanitize';
+import { createMarkdownEngine, renderMarkdownToHtml, protectLatexDelimiters, GfmAnchorizer, parseFrontMatter } from '@vviewer/markdown-engine';
+import { sanitizeHtml } from '@vviewer/sanitize';
 import { enrichMarkdownDom } from './enrich';
 import { runPipeline, removeLightboxOverlay, LIGHTBOX_OVERLAY_ID } from './pipeline';
-import { renderMermaidInto, type MermaidTheme } from './diagramEngines';
+import { renderMermaidInto, type MermaidTheme } from '@vviewer/render-diagram';
 
 /**
  * 围栏代码高亮回调（pipeline 的 highlightFence 实现）：HighlightClient 区间
@@ -133,7 +132,7 @@ export interface DiagramRenderOptions {
    * （viewer.ts 注入器）解析为具体主题——render-text 只见 mermaid 原生五枚举。 */
   mermaidTheme: MermaidTheme;
   /** 未配置语言返回注册表 defaultMode（调用方保证） */
-  modeOf: (lang: string) => import('./diagrams').DiagramMode;
+  modeOf: (lang: string) => import('@vviewer/render-diagram').DiagramMode;
   /**
    * kroki 消费通道（spec 2026-10-23 §8.3）：client=前端直连 kroki img（现状）；
    * server=经部署侧 /api/kroki 代发内联 svg（krokiProxy 能力协商失败时管线

@@ -4,7 +4,7 @@ export * from './compute/types';
 export * from './compute/router';
 export * from './compute/remote';
 export * from './compute/search';
-export * from './detect';
+export * from '@vviewer/detect';
 export * from './registry/registry';
 export * from './registry/generated-extensions';
 export * from './dispatch/dispatcher';
