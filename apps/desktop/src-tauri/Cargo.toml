@@ -27,6 +27,8 @@ tauri-plugin-dialog = { version = "2", features = [] }
 # 整体在其 feature 门内（评审翻车实证：缺 feature 时 kill -TERM 走默认
 # disposition 直接终止，handler 不触发）
 ctrlc = { version = "3", features = ["termination"] }
+# 粘性端口落盘（sticky.rs）：AppConfigDir 下 {"port": n} JSON 读写的序列化面
+serde_json = "1"
 
 # C1 契约测试用 mock runtime（test feature 仅测试目标启用，不进发布产物）
 [dev-dependencies]

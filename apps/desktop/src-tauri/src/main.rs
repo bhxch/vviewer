@@ -14,6 +14,7 @@
 //! 以 `--web-dist` 伺服，窗口直接外链 localhost——无 tauri:// 面，无 IPC 面。
 
 mod ready;
+mod sticky;
 
 use std::io::Read;
 use std::path::PathBuf;
