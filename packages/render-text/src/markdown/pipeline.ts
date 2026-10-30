@@ -141,12 +141,19 @@ async function runDiagrams(root: Document, ctx: PipelineCtx): Promise<void> {
 /**
  * 生效模式解析（含能力回退链）：local 未启用→kroki（krokiType 空则 source）；
  * kroki 无类型→source；server（spec §8.3）按注入能力协商（serverDiagramOf），
- * 未命中按既有链降级——恰好 graphviz/svgbob 两类都有前端本地引擎，降级链全通。
+ * 未命中按既有链降级——恰好 graphviz/svgbob 两类都有前端本地引擎，降级链全通；
+ * official（官方服务器第五档）仅注册表 officialServer 两类可生效，不支持类型按
+ * server 同款链降级（local→kroki→source）。
  */
 function effectiveModeOf(type: DiagramType, ctx: PipelineCtx): DiagramMode {
   const requested = ctx.diagram?.modeOf(type.id) ?? type.defaultMode;
   if (requested === 'server') {
     if (ctx.diagram?.serverDiagramOf?.(type.id)) return 'server';
+    if (type.local && type.engine) return 'local';
+    return type.krokiType ? 'kroki' : 'source';
+  }
+  if (requested === 'official') {
+    if (type.officialServer) return 'official';
     if (type.local && type.engine) return 'local';
     return type.krokiType ? 'kroki' : 'source';
   }
@@ -316,6 +323,8 @@ function wrapServerDiagrams(root: Document, ctx: PipelineCtx): void {
  * - server（spec 2026-10-23 §8.3）：POST /api/compute/diagram 内联 svg（能力协商
  *   命中才到这，见 effectiveModeOf）；fetch 失败按 server→local→kroki 降级链重走
  *   分支（有本地引擎转 local、无引擎直转 kroki img）；
+ * - official（官方服务器第五档）：img 直连官方服务器（不经 kroki），失败按
+ *   official→kroki 降级链转 appendKrokiImg（其 fallback 档对官方 URL 再试一跳）；
  * - local：动态引擎渲染 svg/katex HTML 注入视图；失败按 spec §6 回退链降级——有
  *   krokiType 先降 kroki img（kroki img error 再落错误卡），无 krokiType 直落错误卡片
  *   （保留源码）。
@@ -379,7 +388,7 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
     img.setAttribute('alt', type.id);
     img.setAttribute('src', await createKrokiUrl(ctx.diagram?.krokiHost ?? DEFAULT_KROKI_HOST, type.krokiType, source));
     // 官方服务器 fallback 档（2026-10-30 调查实测锚）：kroki img error 且类型在
-    // 注册表 officialFallback（plantuml/c4plantuml）且 kroki 上游为公共默认
+    // 注册表 officialServer（plantuml/c4plantuml）且 kroki 上游为公共默认
     // kroki.io 时，src 换 PlantUML 官方服务器 URL（createPlantumlUrl）重试一次
     // ——同一 img/监听器承接两跳（换 src 后再 error 走错误卡）；自建 krokiHost
     // 不回落（用户明确指定的服务端不得把源码静默扩散到第三方，隐私防线），
@@ -396,7 +405,7 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
         toggle.textContent = '图';
       };
       if (
-        type.officialFallback &&
+        type.officialServer &&
         !officialTried &&
         (ctx.diagram?.krokiHost || DEFAULT_KROKI_HOST).replace(/\/+$/, '') === DEFAULT_KROKI_HOST
       ) {
@@ -436,6 +445,33 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
   if (mode === 'kroki') {
     await appendKrokiImg();
     return;
+  }
+
+  // official（官方服务器第五档，plantuml/c4plantuml 专属）：img 直连官方服务器 URL
+  //（createPlantumlUrl 编码，不经 kroki）。失败降级链 official→kroki——降级后
+  // appendKrokiImg 的 fallback 档对刚失败的官方 URL 再试一跳（容忍瞬态故障），两跳
+  // 全败落错误卡（文案「kroki 与官方服务器渲染失败」如实）。
+  if (mode === 'official') {
+    try {
+      const img = doc.createElement('img');
+      img.setAttribute('alt', type.id);
+      img.setAttribute('src', await createPlantumlUrl(source));
+      // 编码外溢失败（pako/btoa 炸）由 catch 兜 kroki img；img error 降级链如上。
+      // appendKrokiImg 自身再抛（kroki 编码双异常环境）定卡收尾不留静默死 img
+      img.addEventListener('error', () => {
+        void appendKrokiImg().catch(() => {
+          view.classList.add(cls(ctx, 'diagramError'));
+          view.textContent = `官方服务器渲染失败（${type.id}）`;
+          sourcePane.removeAttribute('hidden');
+          toggle.textContent = '图';
+        });
+      });
+      view.replaceChildren(img);
+      return;
+    } catch {
+      await appendKrokiImg();
+      return;
+    }
   }
 
   // local：spec §6 回退链——引擎失败且有 krokiType 先降级 kroki img（kroki 也失败，

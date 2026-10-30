@@ -43,14 +43,15 @@
   }
 
   /** 模式下拉的显示值：注册表不支持的档位不渲染 option（本地/Kroki 门控与
-   * 「服务端」t.server 同款先例），遗留脏档（旧版本地为不可本地语言存过 local、
-   * 手改 JSON 为 math 存过 kroki 等）按管线 effectiveModeOf 的回落链如实显示，
-   * 避免选中值落在隐藏 option 上显示成空。 */
+   * 「服务端」t.server、「官方服务器」t.officialServer 同款先例），遗留脏档
+   * （旧版本地为不可本地语言存过 local、手改 JSON 为 math 存过 kroki/official 等）
+   * 按管线 effectiveModeOf 的回落链如实显示，避免选中值落在隐藏 option 上显示成空。 */
   function displayMode(t: DiagramType): DiagramMode {
     const stored = draft.diagrams.modes[t.id] ?? t.defaultMode;
     if (stored === 'local' && !t.local) return t.krokiType ? 'kroki' : 'source';
     if (stored === 'kroki' && !t.krokiType) return 'source';
     if (stored === 'server' && !t.server) return t.local ? 'local' : t.krokiType ? 'kroki' : 'source';
+    if (stored === 'official' && !t.officialServer) return t.local ? 'local' : t.krokiType ? 'kroki' : 'source';
     return stored;
   }
 
@@ -127,6 +128,7 @@
             {#if t.local}<option value="local">本地</option>{/if}
             {#if t.server}<option value="server">服务端</option>{/if}
             {#if t.krokiType}<option value="kroki">Kroki</option>{/if}
+            {#if t.officialServer}<option value="official">官方服务器</option>{/if}
             <option value="source">源码</option>
           </select>
         </label>
@@ -135,7 +137,8 @@
   </div>
   <div class="vv-settings-hint">
     每种语言只列出其实际支持的档位（无对应引擎/通道的选项不出现）。
-    本地引擎按需经 CDN 加载（d2 引擎较重，默认走 Kroki）；「服务端」把图交给所连服务器渲染，未连接或不支持时自动回落本地/Kroki。
+    本地引擎按需经 CDN 加载（d2 引擎较重，默认走 Kroki）；「服务端」把图交给所连服务器渲染，未连接或不支持时自动回落本地/Kroki；
+    「官方服务器」（plantuml/C4 专属）直连 PlantUML 官方服务器渲染，失败自动回落 Kroki。
     graphviz 可选渲染器（viz-js 默认 / hpcc）；除 Mermaid 主题即时重画外，其余改动对已打开文档重新打开后生效。
   </div>
 </section>

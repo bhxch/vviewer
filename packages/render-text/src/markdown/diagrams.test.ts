@@ -154,12 +154,12 @@ describe('createPlantumlUrl（官方服务器 fallback 档，2026-10-30）', () 
     expect(inflateRawSync(new Uint8Array(bin)).toString()).toBe(source);
   });
 
-  it('官方可承接类型带 officialFallback 旗标，其余类型不带（含 mermaid/kroki-only）', () => {
-    expect(resolveDiagramType('plantuml')!.officialFallback).toBe(true);
-    expect(resolveDiagramType('c4plantuml')!.officialFallback).toBe(true);
+  it('官方服务器可承接类型带 officialServer 旗标（显式档+回落目标双消费面），其余类型不带', () => {
+    expect(resolveDiagramType('plantuml')!.officialServer).toBe(true);
+    expect(resolveDiagramType('c4plantuml')!.officialServer).toBe(true);
     for (const id of ['mermaid', 'graphviz', 'ditaa', 'd2', 'structurizr', 'tikz']) {
-      expect(resolveDiagramType(id)!.officialFallback, id).toBeUndefined();
+      expect(resolveDiagramType(id)!.officialServer, id).toBeUndefined();
     }
-    expect(DIAGRAM_TYPES.filter((t) => t.officialFallback).map((t) => t.id)).toEqual(['plantuml', 'c4plantuml']);
+    expect(DIAGRAM_TYPES.filter((t) => t.officialServer).map((t) => t.id)).toEqual(['plantuml', 'c4plantuml']);
   });
 });

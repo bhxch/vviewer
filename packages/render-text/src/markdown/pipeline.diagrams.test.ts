@@ -409,7 +409,7 @@ describe('diagrams 步：runDiagrams per-block 兜底（M2）', () => {
 });
 
 // plantuml 官方服务器 fallback 档（2026-10-30）：kroki img error → 换官方 URL 重试
-// 一跳 → 再失败落两跳文案错误卡；裁决面（officialFallback 旗标 × krokiHost 归一）
+// 一跳 → 再失败落两跳文案错误卡；裁决面（officialServer 旗标 × krokiHost 归一）
 // 纯逻辑单测覆盖。jsdom 不自动派发 img error（既有口径）——手动 dispatchEvent 模拟
 // 真浏览器失败跳，fallback 的 src 换写经微任务（pako 惰性 import）落地，flush 后断言。
 describe('diagrams 步：plantuml 官方服务器 fallback 档', () => {
@@ -488,5 +488,72 @@ describe('diagrams 步：plantuml 官方服务器 fallback 档', () => {
     await flush();
     expect(img.getAttribute('src')!.startsWith('https://kroki.io/graphviz/svg/')).toBe(true);
     expect(doc.querySelector('.md-diagram-error')!.textContent).toBe('kroki 渲染失败（graphviz）');
+  });
+});
+
+// 官方服务器显式第五档（2026-10-30）：modes.plantuml='official' → img 直连官方服务器
+// URL（不经 kroki）；img error 按 official→kroki 降级链转 kroki img；不支持类型经
+// effectiveModeOf 按 server 同款链降级。fireError/flush 装置与 fallback 档 describe 同款。
+describe('diagrams 步：官方服务器显式档（official）', () => {
+  const fireError = (img: HTMLImageElement): void => {
+    img.dispatchEvent(new Event('error'));
+  };
+  const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+  it('modes=official：img.src 为官方服务器 URL 形态（非 kroki 段）', async () => {
+    const doc = docWithFence('plantuml', 'a -> b');
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: { krokiHost: DEFAULT_KROKI_HOST, mermaidTheme: 'default', modeOf: () => 'official' }
+    });
+    const img = doc.querySelector('.md-diagram-view img') as HTMLImageElement;
+    expect(img.getAttribute('src')!.startsWith('https://www.plantuml.com/plantuml/svg/')).toBe(true);
+    expect(doc.querySelector('.md-diagram-error')).toBeNull();
+  });
+
+  it('official img error：official→kroki 降级链，src 换 kroki 段重试（其 fallback 档保留）', async () => {
+    const doc = docWithFence('plantuml', 'a -> b');
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: { krokiHost: DEFAULT_KROKI_HOST, mermaidTheme: 'default', modeOf: () => 'official' }
+    });
+    const img = doc.querySelector('.md-diagram-view img') as HTMLImageElement;
+    fireError(img); // 官方档失败 → 降级 kroki img（appendKrokiImg 重置视图）
+    await flush();
+    const krokiImg = doc.querySelector('.md-diagram-view img') as HTMLImageElement;
+    expect(krokiImg.getAttribute('src')!.startsWith('https://kroki.io/plantuml/svg/')).toBe(true);
+    expect(doc.querySelector('.md-diagram-error')).toBeNull();
+    // 降级后的 kroki img 仍带 fallback 档：再 error 换官方 URL（同 img 两跳语义不变）
+    fireError(krokiImg);
+    await flush();
+    expect((doc.querySelector('.md-diagram-view img') as HTMLImageElement).getAttribute('src')!.startsWith('https://www.plantuml.com/plantuml/svg/')).toBe(true);
+  });
+
+  it('不支持 official 的类型（math）：effectiveModeOf 按 server 同款链降级 source', async () => {
+    const doc = docWithFence('latex', 'E = mc^2');
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: { krokiHost: 'https://k', mermaidTheme: 'default', modeOf: () => 'official' }
+    });
+    expect(doc.querySelector('.md-diagram-view img')).toBeNull();
+    expect(doc.querySelector('.md-diagram-source code')).not.toBeNull();
+  });
+
+  it('首跳编码即炸（btoa 桩）：catch 直转 kroki img，kroki 编码再炸由 per-block 兜底、无死 img', async () => {
+    vi.stubGlobal('btoa', () => {
+      throw new Error('btoa 桩：官方档编码外溢失败');
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const doc = docWithFence('plantuml', 'a -> b');
+    await runPipeline(doc, {
+      ...baseCtx,
+      diagram: { krokiHost: DEFAULT_KROKI_HOST, mermaidTheme: 'default', modeOf: () => 'official' }
+    });
+    // 首跳 createPlantumlUrl 即炸 → official 分支 catch 直转 appendKrokiImg → kroki
+    // 编码同样炸 → 抛出由 runDiagrams per-block 兜底 warn（M2 契约），wrapper 半成品
+    // 无带 src 死 img（setAttribute 未达）
+    expect(doc.querySelector('.md-diagram-view img[src]')).toBeNull();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(String(warnSpy.mock.calls[0]![0])).toContain('diagram 块渲染失败');
   });
 });

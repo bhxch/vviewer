@@ -124,7 +124,9 @@ export function normalizeSettings(partial: Record<string, unknown>): Settings {
   }
   // diagrams 节白名单（spec §2.1）：host 必须 http(s):// 或空；krokiVia 二枚举
   //（spec §8.3，脏值归位 client=直发现状）；mermaidTheme 六值白名单（spec §9.2，
-  // 脏值归位 'auto'=跟随亮暗现状）；modes 键须在注册表、值须四枚举；
+  // 脏值归位 'auto'=跟随亮暗现状）；modes 键须在注册表、值须五枚举（'official'
+  // 官方服务器档，2026-10-30——注册表能力门控面由设置 UI 按 officialServer 旗标出
+  // option，白名单只挡枚举外值，与 'server' 同款先例）；
   // renderers（spec §9.1）键须在注册表、值须命中该类型注册表 renderers 选择面
   //（per-type 数据驱动而非扁平枚举——hpcc 仅 graphviz 合法），非法键值剔除=默认 viz-js
   const d = s.diagrams ?? DEFAULTS.diagrams;
@@ -137,7 +139,7 @@ export function normalizeSettings(partial: Record<string, unknown>): Settings {
     modes: Object.fromEntries(
       Object.entries(typeof d.modes === 'object' && d.modes !== null ? d.modes : {}).flatMap(([k, v]): [string, DiagramMode][] => {
         const t = resolveDiagramType(k);
-        return t && (v === 'local' || v === 'kroki' || v === 'server' || v === 'source') ? [[k, v]] : [];
+        return t && (v === 'local' || v === 'kroki' || v === 'server' || v === 'official' || v === 'source') ? [[k, v]] : [];
       })
     ),
     renderers: Object.fromEntries(

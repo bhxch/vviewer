@@ -4,7 +4,7 @@
 // + wasm svgbob（§7）+ CDN 直链 excalidraw/bpmn/vega/vegalite/wavedrom/bytefield/dbml/d2
 //（§6/§10），其余 kroki/源码覆盖。
 
-export type DiagramMode = 'local' | 'kroki' | 'server' | 'source';
+export type DiagramMode = 'local' | 'kroki' | 'server' | 'official' | 'source';
 
 export interface DiagramType {
   id: string;
@@ -28,18 +28,19 @@ export interface DiagramType {
    * 默认渲染器（settings.diagrams.renderers 空/未命中即首项语义）。undefined/空 =
    * 单渲染器（设置面不显示渲染器列，settings 白名单按本表裁决值合法性）。 */
   renderers?: readonly string[];
-  /** kroki img 失败可回落 PlantUML 官方服务器（2026-10-30 fallback 档）：仅官方
-   * 服务器原生承接的 kroki 类型（plantuml/c4plantuml——同语法族，官方 stdlib 内置
-   * C4 标准库）。回落只在 krokiHost 为公共默认 kroki.io 时启用（自建地址不外发
-   * 用户源码，隐私防线），裁决在 pipeline.ts appendKrokiImg。 */
-  officialFallback?: boolean;
+  /** PlantUML 官方服务器可承接（2026-10-30 调查实测）：plantuml/c4plantuml——同语法
+   * 族，官方 stdlib 内置 C4 标准库。双消费面：①渲染模式第五档 'official' 显式可选
+   * （settings 模式网格按本旗标出「官方服务器」option，裁决在 pipeline.ts
+   * effectiveModeOf/renderDiagramBlock）；②kroki img 失败的 fallback 档回落目标
+   * （仅 krokiHost 为公共默认 kroki.io 时启用——自建地址不外发用户源码，隐私防线）。 */
+  officialServer?: boolean;
 }
 
 export const DIAGRAM_TYPES: readonly DiagramType[] = [
   { id: 'mermaid', aliases: [], local: true, defaultMode: 'local', krokiType: 'mermaid', highlightLang: 'mermaid', engine: 'mermaid' },
   { id: 'graphviz', aliases: ['dot'], local: true, defaultMode: 'local', krokiType: 'graphviz', highlightLang: 'dot', engine: 'graphviz', server: true, renderers: ['viz-js', 'hpcc'] },
-  { id: 'plantuml', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'plantuml', highlightLang: 'plantuml', officialFallback: true },
-  { id: 'c4plantuml', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'c4plantuml', highlightLang: 'plantuml', officialFallback: true },
+  { id: 'plantuml', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'plantuml', highlightLang: 'plantuml', officialServer: true },
+  { id: 'c4plantuml', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'c4plantuml', highlightLang: 'plantuml', officialServer: true },
   { id: 'ditaa', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'ditaa', highlightLang: '' },
   { id: 'blockdiag', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'blockdiag', highlightLang: '' },
   { id: 'nwdiag', aliases: [], local: false, defaultMode: 'kroki', krokiType: 'nwdiag', highlightLang: '' },

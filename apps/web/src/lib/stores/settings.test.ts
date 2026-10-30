@@ -174,14 +174,15 @@ describe('diagrams 设置节白名单（spec 2026-10-19 §2.1）', () => {
     expect(s.autoRefresh).toBe(false);
   });
 
-  it('krokiVia 白名单（spec §8.3）：server 与 modes 四枚举值原样通过、脏值归位 client', () => {
+  it('krokiVia 白名单（spec §8.3）：server 与 modes 五枚举值原样通过（含 official 官方档）、脏值归位 client', () => {
     localStorage.setItem('vviewer:settings', JSON.stringify({
-      diagrams: { krokiVia: 'server', modes: { graphviz: 'server', svgbob: 'server', mermaid: 'wasm' } }
+      diagrams: { krokiVia: 'server', modes: { graphviz: 'server', svgbob: 'server', plantuml: 'official', mermaid: 'wasm' } }
     }));
     let s = loadSettings();
     expect(s.diagrams.krokiVia).toBe('server');
-    // modes 'server' 值合法（注册表 server 旗标面由设置 UI 门控，白名单只挡枚举外值）
-    expect(s.diagrams.modes).toEqual({ graphviz: 'server', svgbob: 'server' });
+    // modes 'server'/'official' 值合法（注册表 server/officialServer 旗标面由设置 UI
+    // 门控，白名单只挡枚举外值）
+    expect(s.diagrams.modes).toEqual({ graphviz: 'server', svgbob: 'server', plantuml: 'official' });
     localStorage.setItem('vviewer:settings', JSON.stringify({ diagrams: { krokiVia: 'p2p' } }));
     s = loadSettings();
     expect(s.diagrams.krokiVia).toBe('client');
