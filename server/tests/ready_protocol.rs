@@ -108,7 +108,7 @@ fn serve_port_zero_assigns_kernel_port_and_emits_ready_line() {
 
     assert!(
         wait_health_ok(port, Duration::from_secs(15)),
-        "解析出的端口应已伺服 /api/health"
+        "解析出的端口应已伺服 /api/health（127.0.0.1:{port}）"
     );
 }
 
@@ -128,7 +128,7 @@ fn explicit_port_emits_no_ready_line() {
     // 200 时点该行必已入通道；再宽限排水至管道静默（500ms），杜绝在途行漏读。
     assert!(
         wait_health_ok(free_port, Duration::from_secs(15)),
-        "显式端口应正常伺服 /api/health"
+        "显式端口应正常伺服 /api/health（127.0.0.1:{free_port}）"
     );
     let mut all_lines: Vec<String> = Vec::new();
     // Timeout 与 Disconnected 同义退出（仅断言已收行，无需区分）
@@ -189,7 +189,7 @@ fn serve_explicit_port_with_flag_emits_ready_line() {
     );
     assert!(
         wait_health_ok(port, Duration::from_secs(15)),
-        "带 flag 的显式端口应正常伺服 /api/health"
+        "带 flag 的显式端口应正常伺服 /api/health（127.0.0.1:{port}）"
     );
 }
 
