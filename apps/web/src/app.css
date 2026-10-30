@@ -29,9 +29,10 @@
   --code-bg: #ffffff; --code-fg: #1f2328; --code-gutter: #8c959f;
   --hljs-keyword: #cf222e; --hljs-string: #0a3069; --hljs-comment: #6e7781;
   --hljs-number: #0550ae; --hljs-title: #8250df; --hljs-built_in: #0550ae; --hljs-attr: #0550ae;
-  /* 固定效果色（§12.1 #3-10）：双主题同值=现状（零漂移）；唯一分值例外 --vv-hit-active
-     由暗色两块覆盖 35%（§2.3 实测：80% 对 code-fg 暗 2.58:1 不达 AA，35% 达 7.63:1，
-     「当前命中」区分度由拖拽内嵌线同款 inset 描边语义补足） */
+  /* 固定效果色（§12.1 #3-10）：亮值=现状（零漂移）；hit 系四项在暗色两块覆盖
+     （§2.3/§12.3.5 叠加复测闭环，node 实测：亮值 mark45/line18/line-active35 双层叠
+     code-fg 暗仅 3.46/2.95:1 不达 AA——暗 37/35/8/11 后含双层在内六组合全 ≥4.94:1；
+     亮块六组合 12.82/11.59/8.74/8.43 全过） */
   --vv-hit-bg: rgb(255 213 0 / 45%); --vv-hit-active: rgb(255 160 0 / 80%);
   --vv-hit-line: rgb(255 213 0 / 18%); --vv-hit-line-active: rgb(255 160 0 / 35%);
   --vv-hex-hit: rgba(255, 176, 0, .22); --vv-hex-hit-active: rgba(255, 120, 0, .55);
@@ -55,9 +56,12 @@
   --ui-input-bg: #0d1117; --ui-hover-bg: #161b22; --ui-selection-bg: #264f78;
   --ui-statusbar-bg: #161b22; --ui-danger: #f85149; --ui-warning: #d29922;
   /* 令牌增量暗值（§12.1）：success/accent-2 取 GitHub dark 系（恒默认 token 三块同写）；
-     hit-active 暗覆盖 35%（§12.1 #4 唯一分值 token，漏写即暗色 2.58:1 回归） */
+     hit 系暗覆盖（§12.3.5 叠加复测闭环，实测依据见 :root 注释；漏块即叠加失守） */
   --ui-success: #3fb950; --ui-accent-2: #a371f7;
+  --vv-hit-bg: rgb(255 213 0 / 37%);
   --vv-hit-active: rgb(255 160 0 / 35%);
+  --vv-hit-line: rgb(255 213 0 / 8%);
+  --vv-hit-line-active: rgb(255 160 0 / 11%);
   --code-bg: #0d1117; --code-fg: #e6edf3; --code-gutter: #6e7681;
   --hljs-keyword: #ff7b72; --hljs-string: #a5d6ff; --hljs-comment: #8b949e;
   --hljs-number: #79c0ff; --hljs-title: #d2a8ff; --hljs-built_in: #79c0ff; --hljs-attr: #79c0ff;
@@ -69,9 +73,12 @@
     --ui-input-bg: #0d1117; --ui-hover-bg: #161b22; --ui-selection-bg: #264f78;
     --ui-statusbar-bg: #161b22; --ui-danger: #f85149; --ui-warning: #d29922;
     /* 令牌增量暗值（§12.1）：success/accent-2 取 GitHub dark 系（恒默认 token 三块同写）；
-       hit-active 暗覆盖 35%（§12.1 #4 唯一分值 token，漏写即暗色 2.58:1 回归） */
+       hit 系暗覆盖（§12.3.5 叠加复测闭环，实测依据见 :root 注释；漏块即叠加失守） */
     --ui-success: #3fb950; --ui-accent-2: #a371f7;
+    --vv-hit-bg: rgb(255 213 0 / 37%);
     --vv-hit-active: rgb(255 160 0 / 35%);
+    --vv-hit-line: rgb(255 213 0 / 8%);
+    --vv-hit-line-active: rgb(255 160 0 / 11%);
     --code-bg: #0d1117; --code-fg: #e6edf3; --code-gutter: #6e7681;
     --hljs-keyword: #ff7b72; --hljs-string: #a5d6ff; --hljs-comment: #8b949e;
     --hljs-number: #79c0ff; --hljs-title: #d2a8ff; --hljs-built_in: #79c0ff; --hljs-attr: #79c0ff;
@@ -186,25 +193,25 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
 .vv-markdown .md-code-bar { display: flex; align-items: center; gap: .5rem;
   margin: -.75rem -1rem .5rem; padding: .25rem .6rem; border-bottom: 1px solid var(--ui-border);
   background: var(--ui-side-bg); }
-.vv-markdown .md-code-lang { font: inherit; font-size: 12px; color: var(--ui-fg-muted); text-transform: uppercase; letter-spacing: .04em;
+.vv-markdown .md-code-lang { font: inherit; font-size: var(--vv-fs-xs, 12px); color: var(--ui-fg-muted); text-transform: uppercase; letter-spacing: .04em;
   background: none; border: none; padding: 0; cursor: pointer; user-select: none; }
 /* button 形态 reset（background/border/padding/font）为运行时专有——导出侧徽标
    已转纯 span 无默认样式，exportBaseCss 的 .md-code-lang 不含这一截与点击态 */
 /* 图表 wrapper（spec §2.1）：bar 内语言徽标+切换钮，视图居中，源码面板等宽 */
 .vv-markdown .md-diagram { margin: .8rem 0; border: 1px solid var(--ui-border); border-radius: 6px; overflow: hidden; }
 .vv-markdown .md-diagram-bar { display: flex; align-items: center; gap: .5rem; padding: .25rem .6rem; border-bottom: 1px solid var(--ui-border); background: var(--ui-side-bg); }
-.vv-markdown .md-diagram-lang { font-size: 12px; color: var(--ui-fg-muted); text-transform: uppercase; letter-spacing: .04em; }
-.vv-markdown .md-diagram-toggle { margin-left: auto; font-size: 12px; padding: 1px 8px; border: 1px solid var(--ui-border); border-radius: 4px; background: transparent; color: var(--ui-fg); cursor: pointer; }
+.vv-markdown .md-diagram-lang { font-size: var(--vv-fs-xs, 12px); color: var(--ui-fg-muted); text-transform: uppercase; letter-spacing: .04em; }
+.vv-markdown .md-diagram-toggle { margin-left: auto; font-size: var(--vv-fs-xs, 12px); padding: 1px 8px; border: 1px solid var(--ui-border); border-radius: 4px; background: transparent; color: var(--ui-fg); cursor: pointer; }
 .vv-markdown .md-diagram-toggle:hover { background: var(--ui-border); }
 .vv-markdown .md-diagram-view { display: flex; justify-content: center; padding: .6rem; overflow-x: auto; }
 .vv-markdown .md-diagram-view svg { max-width: 100%; height: auto; }
 .vv-markdown .md-diagram-view img { max-width: 100%; }
-.vv-markdown .md-diagram-view.md-diagram-error { display: block; white-space: pre-wrap; color: var(--ui-fg-muted); font-family: var(--vv-code-font); font-size: 13px; }
+.vv-markdown .md-diagram-view.md-diagram-error { display: block; white-space: pre-wrap; color: var(--ui-fg-muted); font-family: var(--vv-code-font); font-size: var(--vv-code-font-size, 13px); }
 /* hidden 属性兜底：上方 display:flex/block 作者规则特异性压过 UA [hidden]，切换/源码
    模式/kroki 失败态设了 hidden 视图仍可见（e2e 揭示）——末位同特异性显式 display:none */
 .vv-markdown .md-diagram-view[hidden] { display: none; }
 .vv-markdown .md-diagram-source { padding: .6rem; overflow-x: auto; }
-.vv-markdown .md-diagram-source code { font-family: var(--vv-code-font); font-size: 13px; }
+.vv-markdown .md-diagram-source code { font-family: var(--vv-code-font); font-size: var(--vv-code-font-size, 13px); }
 .md-lightbox-overlay { position: fixed; inset: 0; z-index: 100; background: rgb(0 0 0 / 70%);
   display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
 .md-lightbox { max-width: 92vw; max-height: 92vh; }
@@ -226,16 +233,21 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
   background: transparent; color: #fff; font-size: 16px; line-height: 1; cursor: pointer; }
 .md-lightbox-btn:hover { background: rgb(255 255 255 / 20%); }
 .md-lightbox-count { min-width: 32px; display: inline-flex; align-items: center; justify-content: center;
-  color: #fff; font-size: 13px; font-variant-numeric: tabular-nums; }
+  color: #fff; font-size: var(--vv-fs-sm); font-variant-numeric: tabular-nums; }
 .markdown-alert { border: 1px solid var(--ui-border); border-left-width: 4px; border-radius: 6px;
   padding: .5rem 1rem; margin: .8rem 0; }
 .markdown-alert-title { display: flex; align-items: center; gap: .4rem; font-weight: 600; margin: .2rem 0; }
-.markdown-alert-note, .markdown-alert-info, .markdown-alert-faq, .markdown-alert-question { border-left-color: #0969da; }
-.markdown-alert-tip { border-left-color: #1a7f37; }
-.markdown-alert-important, .markdown-alert-example { border-left-color: #8250df; }
-.markdown-alert-warning { border-left-color: #9a6700; }
-.markdown-alert-caution { border-left-color: #cf222e; }
-.markdown-alert-todo { border-left-color: #57606a; }
+/* callout 七色语义→令牌（§2.4/§12.2 基础层）：note/info/faq/question→accent、
+   tip→success（新）、important/example→accent-2（新）、warning→warning、
+   caution→danger、todo→fg-muted。亮值全部等于原字面值（零漂移）；暗色下 callout
+   边随暗色令牌（§2.2 暗色补漏，变更）。双端同步段：exportBaseCss 同段逐字镜像，
+   改须同步 packages/render-text/src/markdown/export.ts 并跑防漂移测试 */
+.markdown-alert-note, .markdown-alert-info, .markdown-alert-faq, .markdown-alert-question { border-left-color: var(--ui-accent); }
+.markdown-alert-tip { border-left-color: var(--ui-success); }
+.markdown-alert-important, .markdown-alert-example { border-left-color: var(--ui-accent-2); }
+.markdown-alert-warning { border-left-color: var(--ui-warning); }
+.markdown-alert-caution { border-left-color: var(--ui-danger); }
+.markdown-alert-todo { border-left-color: var(--ui-fg-muted); }
 /* callout 折叠（+/− 后缀卡片）：标题即折叠钮；collapsed 只隐藏标题外内容 */
 .markdown-alert-foldable > .markdown-alert-title { cursor: pointer; user-select: none; }
 .markdown-alert-foldable > .markdown-alert-title::after { content: '▾'; margin-left: auto;
@@ -255,22 +267,22 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
 .vv-pdf-toolbar { display: flex; align-items: center; gap: 8px; padding: 4px 10px;
   border-bottom: 1px solid var(--ui-border); flex: none; }
 .vv-pdf-toolbar button { min-width: 1.8em; }
-.vv-pdf-toolbar button:disabled { opacity: .4; cursor: default; }
+.vv-pdf-toolbar button:disabled { opacity: .5; cursor: default; }
 .vv-pdf-zoom-label { min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; }
-.vv-pdf-page-indicator { margin-left: auto; color: var(--ui-fg-muted); font-size: 12px; }
+.vv-pdf-page-indicator { margin-left: auto; color: var(--ui-fg-muted); font-size: var(--vv-fs-xs); }
 .vv-pdf-pages { flex: 1; overflow: auto; display: flex; flex-direction: column; align-items: center;
   gap: 12px; padding: 12px; }
 .vv-pdf-page { position: relative; flex: none; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 30%); }
 .vv-pdf-page canvas { display: block; }
 /* §2.2 修复（§12.2 基础层）：亮色字面量换令牌——暗色下不再「刺眼白块」（变更）；
    3px 圆角并入 --vv-radius-sm（§5.1 并档，变更） */
-.vv-pdf-page-label { position: absolute; right: 6px; bottom: 6px; font-size: 11px; color: var(--ui-fg-muted);
+.vv-pdf-page-label { position: absolute; right: 6px; bottom: 6px; font-size: var(--vv-fs-2xs); color: var(--ui-fg-muted);
   background: color-mix(in srgb, var(--ui-bg) 80%, transparent); border-radius: var(--vv-radius-sm); padding: 0 4px; }
 .vv-pdf-page-hit { outline: 3px solid var(--ui-accent); outline-offset: -3px; }
 /* hex 渲染（render-binary hexRenderer）：状态行 + 三列 dump + 可折叠结构树 */
 .vv-hex { display: flex; flex-direction: column; height: 100%; }
 .vv-hex-status { flex: none; padding: 4px 10px; border-bottom: 1px solid var(--ui-border);
-  color: var(--ui-fg-muted); font-size: 12px; }
+  color: var(--ui-fg-muted); font-size: var(--vv-fs-xs); }
 .vv-hex-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; padding: 8px 10px; }
 .vv-hex-dump { font-family: var(--vv-code-font); font-size: var(--vv-code-font-size, 12px); line-height: 1.5; white-space: pre; }
 /* 行宽=内容宽（fix round 1，Critical 1）：viewport（.vv-virtual-viewport absolute
@@ -281,7 +293,7 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
    点击不再命中行元素（=不定位，与 vscode-hexeditor 点击空白语义一致） */
 .vv-hex-row { width: max-content; }
 .vv-hex-more { margin: 8px auto; display: block; }
-.vv-hex-struct { margin: 12px 0; font-size: 13px; }
+.vv-hex-struct { margin: 12px 0; font-size: var(--vv-code-font-size, 13px); }
 .vv-hex-struct summary { cursor: pointer; list-style: revert; font-weight: 600; }
 .vv-hex-children { padding-left: 1.2em; }
 .vv-hex-node-value { color: var(--ui-fg-muted); }
@@ -297,11 +309,11 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
 }
 .vv-hex-goto-flash { animation: vv-hex-flash-fade 1s ease-out forwards; }
 /* 数据检查器（MetaPanel Task 3 区块）：光标处解码值表 + 字节序切换 */
-.meta-inspector { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.meta-inspector { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; font-size: var(--vv-fs-xs); }
 .meta-inspector-head { display: flex; align-items: center; gap: 6px; }
 .meta-inspector-title { font-weight: 600; }
 .meta-inspector-offset { color: var(--ui-fg-muted); font-family: var(--vv-code-font); }
-.meta-inspector-little { margin-left: auto; font-size: 12px; }
+.meta-inspector-little { margin-left: auto; font-size: var(--vv-fs-xs); }
 .meta-inspector .meta-unavailable { color: var(--ui-fg-muted); }
 /* zip 包内树（render-archive archiveRenderer）：主区内的 .vv-tree 容器 */
 .vv-archive { padding: .75rem 1rem; overflow: auto; }
@@ -327,25 +339,25 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
 .vv-xlsx { height: 100%; display: flex; flex-direction: column; }
 .vv-xlsx-tabbar { flex: none; display: flex; gap: 4px; padding: 6px 10px; overflow-x: auto;
   border-bottom: 1px solid var(--ui-border); }
-.vv-xlsx-tab { padding: 2px 10px; font-size: 13px; }
+.vv-xlsx-tab { padding: 2px 10px; font-size: var(--vv-code-font-size, 13px); }
 .vv-xlsx-tab.active { color: var(--ui-accent); border-color: var(--ui-accent); }
 .vv-xlsx-sheet { flex: 1; min-height: 0; overflow: auto; padding: 8px 10px; }
-.vv-xlsx-sheet table { border-collapse: collapse; font-size: 13px; }
+.vv-xlsx-sheet table { border-collapse: collapse; font-size: var(--vv-code-font-size, 13px); }
 .vv-xlsx-sheet td { border: 1px solid var(--ui-border); padding: .25rem .6rem; min-width: 3em;
   max-width: 32em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vv-xlsx-sheet tr:first-child td { font-weight: 600; background: var(--ui-tab-bg); }
-.vv-xlsx-truncated { margin: .6rem 0; padding: .35rem .8rem; font-size: 12px;
+.vv-xlsx-truncated { margin: .6rem 0; padding: .35rem .8rem; font-size: var(--vv-fs-xs);
   color: var(--ui-fg-muted); border: 1px dashed var(--ui-border); border-radius: 6px;
   display: inline-block; }
 /* pptx 渲染（render-doc pptxRenderer，文本提纲降级）：提示条 + 逐页卡片列表 */
 .vv-pptx { height: 100%; overflow: auto; padding: 10px 14px; }
-.vv-pptx-notice { margin-bottom: 10px; padding: .35rem .8rem; font-size: 12px;
+.vv-pptx-notice { margin-bottom: 10px; padding: .35rem .8rem; font-size: var(--vv-fs-xs);
   color: var(--ui-fg-muted); border: 1px dashed var(--ui-border); border-radius: 6px;
   display: inline-block; }
 .vv-pptx-slides { display: flex; flex-direction: column; gap: 12px; }
 .vv-pptx-slide { position: relative; border: 1px solid var(--ui-border); border-radius: 8px;
   padding: .9rem 1.1rem; background: var(--ui-tab-bg); max-width: 46rem; }
-.vv-pptx-slide-no { position: absolute; top: 6px; right: 10px; font-size: 11px;
+.vv-pptx-slide-no { position: absolute; top: 6px; right: 10px; font-size: var(--vv-fs-2xs);
   color: var(--ui-fg-muted); }
 .vv-pptx-slide p { margin: .35em 0; line-height: 1.55; overflow-wrap: anywhere; }
 .vv-pptx-slide p:first-of-type { font-weight: 600; }
@@ -386,7 +398,7 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
     width: 28px; flex: none; padding: 8px 0; background: var(--ui-side-bg);
     border-right: 1px solid var(--ui-border); }
   .vv-strip[data-side='right'] { border-right: 0; border-left: 1px solid var(--ui-border); }
-  .vv-strip-expand { width: 22px; padding: 2px 0; font-size: 12px; line-height: 1.4; }
+  .vv-strip-expand { width: 22px; padding: 2px 0; font-size: var(--vv-fs-xs); line-height: 1.4; }
   .vv-strip-icon { font-size: 14px; color: var(--ui-fg-muted); line-height: 1; }
   /* 中缝调宽把手：6px 热区（视觉 2px accent 线 hover/拖拽中显现）；
      touch-action none 防触屏拖拽被滚动接管 */
@@ -399,8 +411,10 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
      双栏统一右上角（VS Code 侧栏动作位惯例）：右栏若放左上角会压住 MetaPanel
      首行「属性」标题（均为 ~6px 锚点的浮层/文本叠放），右上角是标题行右侧空白 */
   .vv-collapse-btn { display: block; position: absolute; top: 6px; z-index: 5;
-    width: 24px; height: 24px; padding: 0; font-size: 12px; line-height: 1; opacity: .35; }
+    width: 24px; height: 24px; padding: 0; font-size: var(--vv-fs-xs); line-height: 1; opacity: .35; }
   .vv-collapse-btn:hover { opacity: 1; }
+  /* hover 揭示的键盘等价（§7/§10-G1）：否则键盘聚焦恒 0.35 近乎不可见 */
+  .vv-collapse-btn:focus-visible { opacity: 1; }
   .vv-collapse-left, .vv-collapse-right { right: 6px; }
 }
 /* chrome 隐藏与 zen（spec 2026-10-19 §2/§3，Task 2）：隐藏条 fixed 平移出视口顶
@@ -416,7 +430,9 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 }
 .vv-topbar.vv-chrome-temp, .vv-tabbar.vv-chrome-temp {
   position: fixed; top: 0; left: 0; right: 0; z-index: 50;
-  transform: none; opacity: .88; box-shadow: 0 2px 12px rgb(0 0 0 / 18%);
+  /* 阴影归档（§5.3/§10-G1）：0 2px 12px/18% 并入 --vv-shadow-2（变更：4px 级
+     模糊差，与 toast/菜单同档） */
+  transform: none; opacity: .88; box-shadow: var(--vv-shadow-2);
 }
 /* 台账带入（布局 zen Task 5）：新建工作区模态由 TopBar 组件挂载（TopBar.svelte
    末尾 {#if} 分支）。当前 DOM 中它是 header.vv-topbar 的兄弟节点，chrome-off 的
@@ -434,9 +450,9 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .vv-edge[data-edge='tab'] { height: 8px; }
 .vv-chromemenu { position: fixed; z-index: 90; min-width: 10em; padding: 4px; display: flex;
   flex-direction: column; background: var(--ui-tab-active-bg); border: 1px solid var(--ui-border);
-  border-radius: 6px; box-shadow: 0 4px 16px rgb(0 0 0 / 18%); }
+  border-radius: 6px; box-shadow: var(--vv-shadow-2); }
 .vv-chromemenu button { background: none; border: none; border-radius: 4px; text-align: left;
-  padding: 4px 10px; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
+  padding: 4px 10px; font: inherit; font-size: var(--vv-fs-sm); white-space: nowrap; cursor: pointer; }
 .vv-chromemenu button:hover { background: var(--ui-hover-bg); }
 /* zen（spec §3）：全件 chrome 覆盖——双栏/折叠竖条/调宽把手/移动端抽屉开关与抽屉
    本体全隐（状态栏在 ViewerPane 内不受影响，保持功能可达）；特异性 0,3,0 压过
@@ -457,7 +473,7 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 /* §2.3 死回退清理：--ui-danger 在亮暗三块恒被定义（app.css 亮/暗/system），var 回退
    永不生效；#d33 白上 4.57:1 勉强过、暗色上 4.14:1 不达 AA。裸写 var(--ui-danger)
    即可（本文件 7 行 8 处；组件侧 7 处由各组清理） */
-.vv-server-error { color: var(--ui-danger); font-size: 12px; max-width: 320px; }
+.vv-server-error { color: var(--ui-danger); font-size: var(--vv-fs-xs); max-width: 320px; }
 /* workspace 切换器（T5）：打开按钮组右侧下拉；≤600px 触发按钮收敛、下拉改
    同位 fixed 浮层。z-index 30 对齐设置中心/GlobalSearchPanel 惯例 */
 .vv-ws { position: relative; }
@@ -465,71 +481,76 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .vv-ws-pop { position: absolute; top: calc(100% + 4px); left: 0; min-width: 210px; max-width: 320px;
   max-height: 60vh; overflow: auto; display: flex; flex-direction: column; gap: 2px; padding: 4px;
   background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 8px;
-  box-shadow: 0 8px 28px rgb(0 0 0 / 22%); z-index: 30; }
+  box-shadow: var(--vv-shadow-3); z-index: 30; }
 .vv-ws-pop.narrow { position: fixed; top: 44px; right: 8px; left: auto; min-width: 230px; }
 .vv-ws-item { display: flex; align-items: center; gap: 2px; border-radius: 6px; }
 .vv-ws-item:hover, .vv-ws-item:focus-within { background: var(--ui-hover-bg); }
 .vv-ws-item.active .vv-ws-name { color: var(--ui-accent); font-weight: 600; }
 .vv-ws-name { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 5px 8px;
   font: inherit; color: var(--ui-fg); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* hover 出重命名/删除图标（触屏段 ≤600px 常显——无 hover） */
-.vv-ws-actions { display: inline-flex; gap: 2px; opacity: 0; transition: opacity .12s; }
+/* hover 出重命名/删除图标（触屏段 ≤600px 常显——无 hover）；时长 token（§11/
+   §10-G1）：.12s→--vv-dur-fast 等值零漂移 */
+.vv-ws-actions { display: inline-flex; gap: 2px; opacity: 0; transition: opacity var(--vv-dur-fast); }
 .vv-ws-item:hover .vv-ws-actions, .vv-ws-item:focus-within .vv-ws-actions { opacity: 1; }
 @media (max-width: 600px) { .vv-ws-actions { opacity: 1; } }
-.vv-ws-act { border: 0; background: none; padding: 2px 5px; color: var(--ui-fg-muted); font-size: 12px; cursor: pointer; border-radius: 4px; }
+.vv-ws-act { border: 0; background: none; padding: 2px 5px; color: var(--ui-fg-muted); font-size: var(--vv-fs-xs); cursor: pointer; border-radius: 4px; }
 .vv-ws-act:hover { color: var(--ui-fg); }
 .vv-ws-new { margin-top: 2px; border-top: 1px solid var(--ui-border); border-radius: 0; background: none;
   text-align: left; padding: 6px 8px; font: inherit; color: var(--ui-accent); cursor: pointer; }
 .vv-ws-new:hover { background: var(--ui-hover-bg); }
 .vv-ws-rename { display: flex; gap: 4px; padding: 2px 4px; }
 .vv-ws-rename input { flex: 1; min-width: 0; }
-.vv-ws-rename button { padding: 2px 8px; font-size: 12px; }
+.vv-ws-rename button { padding: 2px 8px; font-size: var(--vv-fs-xs); }
 /* 新建工作区模态（WorkspaceCreateModal 面板定位；组件内只管内容布局）：
    GlobalSearchPanel 同位（top 44px 居中）、z-index 30 惯例 */
 .vv-wscreate-panel { position: fixed; top: 44px; left: 50%; transform: translateX(-50%);
   width: min(420px, calc(100vw - 16px)); max-height: min(75vh, 560px); overflow: auto; padding: 10px 12px;
   background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 8px;
-  box-shadow: 0 8px 28px rgb(0 0 0 / 22%); z-index: 30; }
+  box-shadow: var(--vv-shadow-3); z-index: 30; }
 /* tab 管理覆盖层面板（WorkspaceTabsPanel，T6）：GlobalSearchPanel 同位浮层、
    z-index 30 惯例；半屏限高。类名即 brief 指定：.vv-wspanel / -search / -group / -row，
    全部消费 --ui-* token */
 .vv-wspanel { position: fixed; top: 44px; left: 50%; transform: translateX(-50%);
   width: min(640px, calc(100vw - 24px)); max-height: min(50vh, 560px); display: flex; flex-direction: column;
   background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 8px;
-  box-shadow: 0 8px 28px rgb(0 0 0 / 22%); z-index: 30; overflow: hidden; }
+  box-shadow: var(--vv-shadow-3); z-index: 30; overflow: hidden; }
 .vv-wspanel-search { display: flex; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--ui-border); flex: none; }
 .vv-wspanel-search input { flex: 1; min-width: 0; }
 .vv-wspanel-body { flex: 1; min-height: 0; overflow: auto; padding: 2px 0 6px; }
 .vv-wspanel-group { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
   background: var(--ui-side-bg); border: 0; border-radius: 0; padding: 5px 10px 3px; font: inherit;
-  font-weight: 600; font-size: 12px; color: var(--ui-fg-muted); cursor: pointer;
+  font-weight: 600; font-size: var(--vv-fs-xs); color: var(--ui-fg-muted); cursor: pointer;
   position: sticky; top: 0; }
 .vv-wspanel-group:hover { color: var(--ui-fg); }
 .vv-wspanel-group.active .vv-wspanel-gname { color: var(--ui-accent); }
 .vv-wspanel-caret { flex: none; width: 1em; }
 .vv-wspanel-gname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vv-wspanel-gcount { flex: none; font-variant-numeric: tabular-nums; }
-.vv-wspanel-row { display: flex; align-items: center; gap: 8px; padding: 3px 10px 3px 20px; cursor: pointer; }
+/* 行密度终态收口（§4.3/§10-G3）：3px 10px——20px 缩进由组件 ::before 定宽占位承接
+   （scoped 同值，此处对齐公共层孤值，消除双层定义） */
+.vv-wspanel-row { display: flex; align-items: center; gap: 8px; padding: 3px 10px; cursor: pointer; }
 .vv-wspanel-row:hover, .vv-wspanel-row:focus-visible { background: var(--ui-hover-bg); }
 .vv-wspanel-row.active .vv-wspanel-name { color: var(--ui-accent); font-weight: 600; }
 .vv-wspanel-name { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 徽标两属性对齐 scoped 终态（§3.2 --vv-fs-2xs/§5.1 pill）：公共层与组件 scoped
+   同 token，消除双层孤值（同语义 .vv-tab-src/.vv-settings-theme-src 已 pill 化） */
 .vv-wspanel-badge { flex: none; max-width: 10em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 11px; color: var(--ui-fg-muted); border: 1px solid var(--ui-border); border-radius: 8px;
+  font-size: var(--vv-fs-2xs); color: var(--ui-fg-muted); border: 1px solid var(--ui-border); border-radius: var(--vv-radius-full);
   padding: 0 5px; }
 .vv-wspanel-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: var(--ui-fg-muted); font-size: 12px; }
+  color: var(--ui-fg-muted); font-size: var(--vv-fs-xs); }
 /* 行悬停/键盘聚焦出快捷关闭钮（触屏段 ≤600px 常显——无 hover） */
 .vv-wspanel-close { flex: none; background: none; border: none; border-radius: 0; color: var(--ui-fg-muted);
   font: inherit; opacity: 0; padding: 0 3px; cursor: pointer; }
 .vv-wspanel-row:hover .vv-wspanel-close, .vv-wspanel-row:focus-within .vv-wspanel-close { opacity: 1; }
 .vv-wspanel-close:hover { color: var(--ui-danger); }
 @media (max-width: 600px) { .vv-wspanel-close { opacity: 1; } }
-.vv-wspanel-empty { padding: 4px 10px 6px 20px; color: var(--ui-fg-muted); font-size: 12px; }
+.vv-wspanel-empty { padding: 4px 10px 6px 20px; color: var(--ui-fg-muted); font-size: var(--vv-fs-xs); }
 .vv-wspanel-addbtn { display: block; margin: 2px 10px 4px 20px; background: none; border: 0; border-radius: 4px;
-  text-align: left; padding: 3px 6px; font: inherit; font-size: 12px; color: var(--ui-accent); cursor: pointer; }
+  text-align: left; padding: 3px 6px; font: inherit; font-size: var(--vv-fs-xs); color: var(--ui-accent); cursor: pointer; }
 .vv-wspanel-addbtn:hover { background: var(--ui-hover-bg); }
 .vv-wspanel-add { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 10px 6px 20px; }
-.vv-wspanel-add button { font-size: 12px; }
+.vv-wspanel-add button { font-size: var(--vv-fs-xs); }
 /* 内嵌后端路径浏览层（RemoteSourceModal 无自带定位，由本层承担） */
 .vv-wspanel-remote { padding: 10px 12px; overflow: auto; min-height: 0; }
 /* 引擎状态条（ViewerPane 底部，code 渲染器专用） */
@@ -541,6 +562,11 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
    cursor 需自带（原先由全局 button 规则提供）。 */
 .vv-tab { display: inline-flex; align-items: center; gap: 6px; border: none; border-right: 1px solid var(--ui-border);
   background: var(--ui-tab-bg); padding: 6px 10px; border-radius: 0; cursor: pointer; }
+/* 非激活 tab hover（§7/§10-G1，变更：原零响应）。置于 .active 规则之前——同特异性
+   (0,2,0) 靠序覆盖，激活 tab 保持 active 底色不受 hover 影响。--ui-tab-bg 与
+   --ui-hover-bg 亮暗各为同值（:root:20/22、暗:54/55），直用 hover-bg 零视觉响应，
+   须 color-mix 向 border 方向派生一档（亮变深/暗变浅） */
+.vv-tab:hover { background: color-mix(in srgb, var(--ui-hover-bg) 60%, var(--ui-border)); }
 .vv-tab.active { background: var(--ui-tab-active-bg); color: var(--ui-accent); }
 /* tab 名超长截断（成熟编辑器惯例：单 tab 定宽上限 + ellipsis，全名走 title）：
    上限 200px（VS Code ~240px 档位取紧），否则长文件名单 tab 即撑满整个标签栏 */
@@ -549,18 +575,23 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .vv-tab-close { background: none; border: none; border-radius: 0; color: inherit; font: inherit;
   opacity: .6; padding: 0 2px; }
 .vv-tab-close:hover { opacity: 1; }
-/* 来源徽标（T6）：仅多源 workspace 显示（TabBar badgeOf），截短走 ellipsis（title 全名） */
+/* hover 揭示的键盘等价（§7/§10-G1）；焦点环由 :where(...) focus-visible 全局规则承担 */
+.vv-tab-close:focus-visible { opacity: 1; }
+/* 来源徽标（T6）：仅多源 workspace 显示（TabBar badgeOf），截短走 ellipsis（title 全名）；
+   圆角 pill 化（§5.1/§10-G3，变更）：8px→--vv-radius-full，与 wspanel/settings-src
+   等同语义徽标归一 */
 .vv-tab-src { flex: none; max-width: 9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 11px; line-height: 1.5; color: var(--ui-fg-muted); border: 1px solid var(--ui-border);
-  border-radius: 8px; padding: 0 5px; }
+  font-size: var(--vv-fs-2xs); line-height: 1.5; color: var(--ui-fg-muted); border: 1px solid var(--ui-border);
+  border-radius: var(--vv-radius-full); padding: 0 5px; }
 /* 「管理」按钮（T6）：推到右端、不随横向滚动挤压；融入标签栏观感 */
 .vv-tabbar-manage { flex: none; margin-left: auto; border: 0; border-left: 1px solid var(--ui-border);
-  border-radius: 0; background: var(--ui-tab-bg); font-size: 12px; }
+  border-radius: 0; background: var(--ui-tab-bg); font-size: var(--vv-fs-xs); }
 .vv-tabbar-manage:hover { background: var(--ui-hover-bg); }
-/* pinned tab（F 项 T2）：斜体标签 + 锁形字符图标（伪元素承载，DOM 零新增节点）；
-   data-pinned 与 .vv-tab-pinned 双锚点（plan DOM 锚点约定）供 e2e 与样式选择 */
+/* pinned tab（F 项 T2）：斜体标签；data-pinned 与 .vv-tab-pinned 双锚点（plan DOM
+   锚点约定）供 e2e 与样式选择。§6.1 🔒 退役（彩色 emoji 与单色字形白名单冲突，
+   §12.2-G1 变更）：pinned 语义由斜体 + title 承担，锁形伪元素规则整体删除
+   （content 置空效果等价且不留死样式；其 font-size 10px 孤值随 §3.2 一并消除） */
 .vv-tab-pinned .vv-tab-name { font-style: italic; }
-.vv-tab-pinned .vv-tab-name::before { content: '🔒 '; font-size: 10px; }
 /* 拖拽插入点指示（T2）：目标行中点前/后沿 2px accent 内嵌线（data-drop-before 定边）；
    禁止落点（pinned 区内等）不置指示类，配合 dropEffect='none' 的禁止光标 */
 .vv-tab.vv-tab-dragover { box-shadow: inset 2px 0 0 var(--ui-accent); }
@@ -569,11 +600,13 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
    z-index 90 高于面板层 30（菜单为瞬态操作面，不被任何浮层压住） */
 .vv-tabctx { position: fixed; z-index: 90; min-width: 11em; padding: 4px; display: flex;
   flex-direction: column; background: var(--ui-tab-active-bg); border: 1px solid var(--ui-border);
-  border-radius: 6px; box-shadow: 0 4px 16px rgb(0 0 0 / 18%); }
+  border-radius: 6px; box-shadow: var(--vv-shadow-2); }
 .vv-tabctx-item { background: none; border: none; border-radius: 4px; text-align: left;
-  padding: 4px 10px; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
+  padding: 4px 10px; font: inherit; font-size: var(--vv-fs-sm); white-space: nowrap; cursor: pointer; }
 .vv-tabctx-item:hover { background: var(--ui-hover-bg); }
-.vv-tabctx-item[aria-disabled='true'] { color: var(--ui-fg-muted); opacity: .55; cursor: default; }
+/* disabled 归一（§7/§12.2-G1，变更）：.55→.5 与全库唯一档一致；弱化色保留、
+   aria-disabled 保持可聚焦语义（TabContextMenu 组件注释约定） */
+.vv-tabctx-item[aria-disabled='true'] { color: var(--ui-fg-muted); opacity: .5; cursor: default; }
 .vv-tabctx-item[aria-disabled='true']:hover { background: none; }
 /* 「打开方式」子菜单（Task 3 壳 B）：absolute 于 .vv-tabctx（fixed 即 absolute
    后代的包含块；「更多渲染器」二级子菜单同理 absolute 于上一层 .vv-tabctx-sub），
@@ -581,7 +614,7 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
    当前项 ✓ 前缀（TabBar 组装）。aria-expanded 父项保持 hover 底色。 */
 .vv-tabctx-sub { position: absolute; min-width: 12em; padding: 4px; display: flex;
   flex-direction: column; background: var(--ui-tab-active-bg); border: 1px solid var(--ui-border);
-  border-radius: 6px; box-shadow: 0 4px 16px rgb(0 0 0 / 18%); }
+  border-radius: 6px; box-shadow: var(--vv-shadow-2); }
 .vv-tabctx-item[aria-expanded='true'] { background: var(--ui-hover-bg); }
 /* 状态栏渲染器指示器（Task 3 壳 A）：状态栏内联按钮，观感融入文本段（继承状态栏
    字号 --vv-fs-xs/淡色），hover 提示可点；候选浮层 absolute 于 .vv-viewer-pane（position:
@@ -593,7 +626,7 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
   padding: 4px; display: flex; flex-direction: column; background: var(--ui-tab-active-bg);
   border: 1px solid var(--ui-border); border-radius: 6px; box-shadow: var(--vv-shadow-2); }
 .vv-status-picker-item, .vv-status-picker-lang { background: none; border: none; border-radius: 4px; text-align: left;
-  padding: 4px 10px; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
+  padding: 4px 10px; font: inherit; font-size: var(--vv-fs-sm); white-space: nowrap; cursor: pointer; }
 .vv-status-picker-item:hover, .vv-status-picker-lang:hover { background: var(--ui-hover-bg); }
 .vv-status-picker-item[aria-current='true'] { color: var(--ui-accent); }
 .vv-tree { list-style: none; margin: 0; padding: 0; }
@@ -607,32 +640,34 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .meta-panel { padding: .65rem .75rem; border-bottom: 1px solid var(--ui-border); flex: none; }
 .meta-title { margin: 0 0 .3rem; font-size: var(--vv-fs-2xs); font-weight: 600; letter-spacing: .05em;
   text-transform: uppercase; color: var(--ui-fg-muted); }
-.meta-empty { margin: 0; font-size: 12px; color: var(--ui-fg-muted); }
+.meta-empty { margin: 0; font-size: var(--vv-fs-xs); color: var(--ui-fg-muted); }
 /* 导出动作区（md-export Task 2）：仅 markdown 渲染 tab（实例句柄可得）显示；
    按钮对齐既有 MetaPanel 动作形态（全局 12px 小钮 + side-bg） */
 .meta-export { margin-top: .55rem; display: flex; flex-direction: column; gap: .3rem; }
 .meta-export-title { font-size: var(--vv-fs-2xs); font-weight: 600; letter-spacing: .05em;
   text-transform: uppercase; color: var(--ui-fg-muted); }
 .meta-export-actions { display: flex; gap: 6px; }
-.meta-export-btn { flex: 1; font-size: 12px; padding: 3px 8px; }
+.meta-export-btn { flex: 1; font-size: var(--vv-fs-xs); padding: 3px 8px; }
 .meta-export-btn:disabled { opacity: .5; cursor: default; }
-.meta-export-notice { margin: 0; font-size: 12px; line-height: 1.4; color: var(--ui-fg-muted); }
+.meta-export-notice { margin: 0; font-size: var(--vv-fs-xs); line-height: 1.4; color: var(--ui-fg-muted); }
 .toc { flex: 1; min-height: 0; overflow: auto; padding: .65rem .5rem; }
 .toc ul { list-style: none; margin: 0; padding: 0; }
 .toc button { display: block; width: 100%; text-align: left; background: none; border: none;
   padding: 3px 6px; border-radius: 4px; color: var(--ui-fg-muted); font-size: var(--vv-fs-sm); line-height: 1.4;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.toc button:hover { color: var(--ui-fg); background: var(--ui-tab-bg); }
-.toc button.active { color: var(--ui-accent); background: var(--ui-tab-bg); }
+/* hover/active 底色语义归一（§7/§10-G2）：--ui-tab-bg→--ui-hover-bg（亮暗同值零漂移，
+   与树行 .vv-tree-row:hover 同法） */
+.toc button:hover { color: var(--ui-fg); background: var(--ui-hover-bg); }
+.toc button.active { color: var(--ui-accent); background: var(--ui-hover-bg); }
 .toc .level-1 button { color: var(--ui-fg); font-weight: 600; }
 .toc .level-3 { padding-left: 12px; }
 .toc .level-4 { padding-left: 24px; }
-.toc-empty { margin: 0; padding: .25rem .5rem; font-size: 12px; color: var(--ui-fg-muted); }
+.toc-empty { margin: 0; padding: .25rem .5rem; font-size: var(--vv-fs-xs); color: var(--ui-fg-muted); }
 /* JSON Lines 渲染器（jsonl/index.ts：状态条 + .vv-jsonl-scroll 可变高度虚拟滚动 +
    行卡片；spacer/viewport 复用 .vv-virtual-* 惯例类，容器自身承担 position:relative） */
 .vv-jsonl { display: flex; flex-direction: column; height: 100%; }
 .vv-jsonl-status { flex: none; padding: 4px 10px; border-bottom: 1px solid var(--ui-border);
-  color: var(--ui-fg-muted); font-size: 12px; }
+  color: var(--ui-fg-muted); font-size: var(--vv-fs-xs); }
 .vv-jsonl-status-failed { color: var(--ui-danger); }
 .vv-jsonl-scroll { position: relative; flex: 1; min-height: 0; overflow: auto; }
 .vv-jsonl-card { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 .6em;
@@ -644,10 +679,10 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .vv-jsonl-body { flex: 1; min-width: 0; overflow-x: auto; margin: 0; white-space: pre;
   font-family: var(--vv-code-font); font-size: var(--vv-code-font-size, 13px); line-height: var(--vv-code-line-height);
   color: var(--code-fg); }
-.vv-jsonl-badge { flex: none; align-self: center; font-size: 12px; padding: 0 .4em;
+.vv-jsonl-badge { flex: none; align-self: center; font-size: var(--vv-fs-xs); padding: 0 .4em;
   border: 1px solid var(--ui-danger); border-radius: 4px; color: var(--ui-danger); }
-.vv-jsonl-cap { flex-basis: 100%; font-size: 12px; color: var(--ui-fg-muted); }
-.vv-jsonl-expand { flex: none; margin-left: auto; font-size: 12px;
+.vv-jsonl-cap { flex-basis: 100%; font-size: var(--vv-fs-xs); color: var(--ui-fg-muted); }
+.vv-jsonl-expand { flex: none; margin-left: auto; font-size: var(--vv-fs-xs);
   color: var(--ui-accent); border-color: var(--ui-accent); background: none; }
 /* 设置中心全局骨架（SettingsCenter.svelte，Task 1）：节容器排布——节内容是
    子组件（lib/settings/*Section.svelte），scoped 样式够不到，全局类承载 */

@@ -31,6 +31,8 @@ export const exportBaseCss = `/* vviewer markdown 导出基础排版（与 apps/
   --vv-code-font: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   --ui-bg: #ffffff; --ui-fg: #1f2328; --ui-fg-muted: #656d76; --ui-border: #d0d7de;
   --ui-accent: #0969da; --ui-side-bg: #f6f8fa;
+  /* 语义色（§2.4 alert 七色令牌化同步）：app.css :root 同值镜像——callout 边色落点 */
+  --ui-danger: #cf222e; --ui-warning: #9a6700; --ui-success: #1a7f37; --ui-accent-2: #8250df;
   --code-bg: #ffffff; --code-fg: #1f2328;
   --hljs-keyword: #cf222e; --hljs-string: #0a3069; --hljs-comment: #6e7781;
   --hljs-number: #0550ae; --hljs-title: #8250df; --hljs-built_in: #0550ae; --hljs-attr: #0550ae;
@@ -38,6 +40,8 @@ export const exportBaseCss = `/* vviewer markdown 导出基础排版（与 apps/
 :root[data-vv-mode="dark"] {
   --ui-bg: #0d1117; --ui-fg: #e6edf3; --ui-fg-muted: #8b949e; --ui-border: #30363d;
   --ui-accent: #2f81f7; --ui-side-bg: #161b22;
+  /* app.css 暗块同值镜像（§2.2 暗色补漏：callout 边随暗色令牌） */
+  --ui-danger: #f85149; --ui-warning: #d29922; --ui-success: #3fb950; --ui-accent-2: #a371f7;
   --code-bg: #0d1117; --code-fg: #e6edf3;
   --hljs-keyword: #ff7b72; --hljs-string: #a5d6ff; --hljs-comment: #8b949e;
   --hljs-number: #79c0ff; --hljs-title: #d2a8ff; --hljs-built_in: #79c0ff; --hljs-attr: #79c0ff;
@@ -101,27 +105,30 @@ body { margin: 0; background: var(--ui-bg); color: var(--ui-fg); font-family: sy
 .vv-markdown .md-code-bar { display: flex; align-items: center; gap: .5rem;
   margin: -.75rem -1rem .5rem; padding: .25rem .6rem; border-bottom: 1px solid var(--ui-border);
   background: var(--ui-side-bg); }
-.vv-markdown .md-code-lang { font-size: 12px; color: var(--ui-fg-muted); text-transform: uppercase; letter-spacing: .04em; }
+/* 字号挂 chrome 字阶 token（§3.2/§10-G1 同步）；等值回退保导出文档未定义变量时
+   视觉零漂移（app.css 同款回退形式，双端一致） */
+.vv-markdown .md-code-lang { font-size: var(--vv-fs-xs, 12px); color: var(--ui-fg-muted); text-transform: uppercase; letter-spacing: .04em; }
 .vv-markdown .md-diagram { margin: .8rem 0; border: 1px solid var(--ui-border); border-radius: 6px; overflow: hidden; }
 .vv-markdown .md-diagram-bar { display: flex; align-items: center; gap: .5rem; padding: .25rem .6rem; border-bottom: 1px solid var(--ui-border); background: var(--ui-side-bg); }
-.vv-markdown .md-diagram-lang { font-size: 12px; color: var(--ui-fg-muted); text-transform: uppercase; letter-spacing: .04em; }
+.vv-markdown .md-diagram-lang { font-size: var(--vv-fs-xs, 12px); color: var(--ui-fg-muted); text-transform: uppercase; letter-spacing: .04em; }
 .vv-markdown .md-diagram-view { display: flex; justify-content: center; padding: .6rem; overflow-x: auto; }
 .vv-markdown .md-diagram-view svg { max-width: 100%; height: auto; }
 .vv-markdown .md-diagram-view img { max-width: 100%; }
-.vv-markdown .md-diagram-view.md-diagram-error { display: block; white-space: pre-wrap; color: var(--ui-fg-muted); font-family: var(--vv-code-font); font-size: 13px; }
+.vv-markdown .md-diagram-view.md-diagram-error { display: block; white-space: pre-wrap; color: var(--ui-fg-muted); font-family: var(--vv-code-font); font-size: var(--vv-code-font-size, 13px); }
 .vv-markdown .md-diagram-view[hidden] { display: none; }
 .vv-markdown .md-diagram-source { padding: .6rem; overflow-x: auto; }
-.vv-markdown .md-diagram-source code { font-family: var(--vv-code-font); font-size: 13px; }
+.vv-markdown .md-diagram-source code { font-family: var(--vv-code-font); font-size: var(--vv-code-font-size, 13px); }
 .vv-markdown .md-wikilink-dead { border-bottom: 1px dashed var(--ui-border); cursor: default; }
 .markdown-alert { border: 1px solid var(--ui-border); border-left-width: 4px; border-radius: 6px;
   padding: .5rem 1rem; margin: .8rem 0; }
 .markdown-alert-title { display: flex; align-items: center; gap: .4rem; font-weight: 600; margin: .2rem 0; }
-.markdown-alert-note, .markdown-alert-info, .markdown-alert-faq, .markdown-alert-question { border-left-color: #0969da; }
-.markdown-alert-tip { border-left-color: #1a7f37; }
-.markdown-alert-important, .markdown-alert-example { border-left-color: #8250df; }
-.markdown-alert-warning { border-left-color: #9a6700; }
-.markdown-alert-caution { border-left-color: #cf222e; }
-.markdown-alert-todo { border-left-color: #57606a; }
+/* callout 七色→令牌（§2.4）：与 app.css 同段逐字镜像（双端同步段） */
+.markdown-alert-note, .markdown-alert-info, .markdown-alert-faq, .markdown-alert-question { border-left-color: var(--ui-accent); }
+.markdown-alert-tip { border-left-color: var(--ui-success); }
+.markdown-alert-important, .markdown-alert-example { border-left-color: var(--ui-accent-2); }
+.markdown-alert-warning { border-left-color: var(--ui-warning); }
+.markdown-alert-caution { border-left-color: var(--ui-danger); }
+.markdown-alert-todo { border-left-color: var(--ui-fg-muted); }
 /* 折叠规则（app.css 的 foldable/collapsed 段）不进导出（终审 M2）：剥离后永不命中，
    删之使「忘剥→显示为普通 alert」fail-safe（留存则 collapsed 正文永久 display:none） */
 /* 导出目录（本模块生成） */
