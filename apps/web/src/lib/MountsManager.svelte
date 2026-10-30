@@ -853,6 +853,8 @@
     padding: 0.25em 0.5em;
     border: 1px solid var(--ui-border);
     border-radius: var(--vv-radius-md);
+    background: transparent;
+    color: inherit;
   }
   /* §7 禁用态统一口径（opacity .5 + cursor default，抑制 hover）：表单控件与
      可禁用按钮补齐（现全组件无任何 disabled 样式） */
