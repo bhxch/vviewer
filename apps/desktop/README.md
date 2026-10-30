@@ -1,8 +1,9 @@
 # VViewer Desktop（Tauri 2 薄壳）
 
-三平台桌面端：Rust 壳 spawn server sidecar（随机端口）→ 解析 `VV_READY port=<n>`
-就绪行 → 窗口导航 `http://127.0.0.1:<n>/`。前端构建产物以 Tauri resource 打包，
-启动时经 `--web-dist` 传给 server；单实例；退出回收子进程。
+三平台桌面端：Rust 壳 spawn server sidecar（端口粘性优先——复用上次成功端口；
+被占或无记录回退内核分配随机端口）→ 解析 `VV_READY port=<n>` 就绪行 → 窗口
+导航 `http://127.0.0.1:<n>/`。前端构建产物以 Tauri resource 打包，启动时经
+`--web-dist` 传给 server；单实例；退出回收子进程。
 
 薄壳纪律：无 IPC、无原生菜单、无托盘、无自动更新；sidecar 只绑 127.0.0.1、
 无 token。前端页面由 server 伺服（非 tauri:// 协议面）。
@@ -18,6 +19,7 @@ apps/desktop/
     ├── build.rs            # tauri-build + 注入 VV_TARGET_TRIPLE
     ├── src/main.rs         # 启动编排（spawn/就绪/导航/错误窗/单实例/回收）
     ├── src/ready.rs        # 就绪协议解析与等待（TDD 单测 15 例）
+    ├── src/sticky.rs       # 粘性端口持久化读/写（AppConfigDir 下 desktop-shell.json）
     ├── binaries/           # sidecar 落位（见其 README.md；产物不入库）
     └── icons/              # 占位图标（正式图标可用 `pnpm tauri icon` 重制）
 ```
@@ -61,7 +63,7 @@ server 额外参数固定：`serve --port <粘性|0> --emit-ready-line`（粘性
 | # | 步骤 | 预期 |
 | --- | --- | --- |
 | 1 | 启动应用（`pnpm --filter desktop dev` 或安装产物后启动） | 窗口出现并加载页面；启动期间无空白卡死（就绪上限 15s） |
-| 2 | 观察窗口地址内容 | 页面来自 `http://127.0.0.1:<随机端口>/`，标题 VViewer |
+| 2 | 观察窗口地址内容 | 页面来自 `http://127.0.0.1:<端口>/`（端口=粘性复用或内核分配），标题 VViewer |
 | 3 | 在页面中打开一个本地目录 | 目录列表正常渲染（浏览根=家目录） |
 | 4 | `j`/`k` 上下移动条目 | 键位导航生效 |
 | 5 | 不关窗，再次启动同一应用 | 不出现第二个实例，既有窗口被唤起置前（单实例） |

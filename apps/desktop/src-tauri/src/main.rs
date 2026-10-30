@@ -193,17 +193,17 @@ fn start_and_wait(app: &AppHandle) -> Result<u16, LaunchFailure> {
     let outcome = match sticky_port {
         Some(port) => {
             let sticky_arg = port.to_string();
-            match attempt_start(app, generation, &sticky_arg, &sidecar, &web_dist, &root) {
+            match attempt_start(app, &sticky_arg, &sidecar, &web_dist, &root) {
                 Ok(port) => Ok(port),
                 // Timeout 不回退：挂起子进程已由 attempt_start 自行 kill
                 Err(WaitFailure::Timeout) => return Err(LaunchFailure::Timeout),
                 // 退出形态回退 `--port 0` 一次（粘性端口被占是最典型来源）
                 Err(WaitFailure::Ended) => {
-                    attempt_start(app, generation, "0", &sidecar, &web_dist, &root)
+                    attempt_start(app, "0", &sidecar, &web_dist, &root)
                 }
             }
         }
-        None => attempt_start(app, generation, "0", &sidecar, &web_dist, &root),
+        None => attempt_start(app, "0", &sidecar, &web_dist, &root),
     };
 
     match outcome {
@@ -230,7 +230,6 @@ fn start_and_wait(app: &AppHandle) -> Result<u16, LaunchFailure> {
 /// 落入 stderr 摘要通道（错误窗 Exited 文案附摘要），诊断信息不丢失。
 fn attempt_start(
     app: &AppHandle,
-    generation: u64,
     port_arg: &str,
     sidecar: &std::path::Path,
     web_dist: &std::path::Path,
@@ -280,12 +279,8 @@ fn attempt_start(
     *state.child.lock().unwrap() = Some(child);
 
     match wait_for_ready(&rx, READY_TIMEOUT) {
-        Ok(port) => {
-            // 退出监视挂在尝试的 Ok 臂（非编排层最终收口）：回退仅发生于 Ended，
-            // 两次尝试至多一个 Ok——监视仍恰 spawn 一次，代际沿用本次启动的值
-            spawn_exit_monitor(app.clone(), generation);
-            Ok(port)
-        }
+        // 退出监视不在此 spawn——统一由 start_and_wait 最终 Ok 收口恰 spawn 一次
+        Ok(port) => Ok(port),
         Err(WaitFailure::Timeout) => {
             // 挂起子进程（可能仍在启动）——kill 后回 Err（编排层不回退超时）
             kill_server(&state);
@@ -367,6 +362,8 @@ fn ask_restart_or_exit(app: &AppHandle, failure: LaunchFailure) {
 }
 
 /// 起子进程存活监视线程：运行中退出 → 错误窗（重启/退出）。代际不符即退场。
+/// 唯一调用点为 start_and_wait 最终 Ok 收口——每次启动编排恰 spawn 一个监视
+/// （每代一个，旧代经代际比对退场），运行中退出恰弹一次错误窗。
 fn spawn_exit_monitor(app: AppHandle, generation: u64) {
     std::thread::spawn(move || loop {
         std::thread::sleep(EXIT_POLL_INTERVAL);
@@ -441,8 +438,8 @@ impl Drop for RestartGuard<'_> {
 const RESTART_WINDOW_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// 退出回收尾段（C4 核心语义；信号退出与 RunEvent::Exit 两路共用）：先等重启
-/// 在飞窗口收口再 kill——「旧 child 已出槽（start_and_wait kill_server）、新
-/// child 未入槽（:202 放回）」的毫秒级窗口内触发退出时，新 sidecar 由本函数在
+/// 在飞窗口收口再 kill——「旧 child 已出槽（attempt_start 开场 kill_server）、新
+/// child 未入槽（:279 放回）」的毫秒级窗口内触发退出时，新 sidecar 由本函数在
 /// 窗口收口（槽位放回）后统一回收，不再孤儿化。RunEvent::Exit 复用同款纪律：
 /// 直调 kill_server 在该窗口内同样孤儿化新 sidecar。双检：kill 前后各查一次
 /// 护栏，恰在重启开场置位前后到达时复查见位即回到等待；wait#2 收口（含超时
