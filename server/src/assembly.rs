@@ -23,6 +23,10 @@ pub struct ServeArgs {
     pub web_dist: Option<PathBuf>,
     /// CLI 显式值；None=未提供（配置文件 port 可补默认，合并见 config::resolve_config）
     pub port: Option<u16>,
+    /// 就绪行显式 opt-in（1-14 修订，桌面薄壳粘性端口前提）：显式端口默认不输出，
+    /// 置 true 即输出 `VV_READY port=<n>`（--port 0 内核分配路径恒输出）。布尔
+    /// 开关无显式 false 通道，与文件值 OR 合并（allow_lan 先例，resolve_config）。
+    pub emit_ready_line: bool,
     pub token: Option<String>,
     pub token_gen: bool,
     pub allow_lan: bool,
@@ -45,6 +49,7 @@ impl std::fmt::Debug for ServeArgs {
             .field("root", &self.root)
             .field("web_dist", &self.web_dist)
             .field("port", &self.port)
+            .field("emit_ready_line", &self.emit_ready_line)
             .field("token", &self.token.as_ref().map(|_| "[redacted]"))
             .field("token_gen", &self.token_gen)
             .field("allow_lan", &self.allow_lan)
@@ -120,8 +125,9 @@ pub fn validate_startup(args: &ServeArgs, token: Option<&str>) -> Result<(), Str
 
 /// 桌面薄壳就绪行（plan 2026-10-19 Global Constraints：bind 成功后向 stdout 输出
 /// 恰好一行 `VV_READY port=<n>`，n=listener 实测端口，--port 0 时为内核分配值；
-/// 1-14 收窄：仅 --port 0 输出，显式端口面向人读不再多一行）。纯净行无前缀
-/// 装饰——壳侧解析器按行首精确匹配；wire 格式由单测锁定。
+/// 1-14 收窄 + 粘性端口修订：--port 0 恒输出，显式端口默认静默、经
+/// `--emit-ready-line` 显式 opt-in）。纯净行无前缀装饰——壳侧解析器按行首
+/// 精确匹配；wire 格式由单测锁定。
 fn ready_line(port: u16) -> String {
     format!("VV_READY port={port}")
 }
@@ -263,10 +269,12 @@ pub fn serve(args: ServeArgs, mounts: Vec<MountConfig>) -> Result<(), i32> {
             2
         })?;
         tracing::info!("vviewer listening on http://{local}");
-        // 1-14：就绪行语义收窄——仅内核分配端口（--port 0，桌面薄壳消费面）输出；
-        // 显式端口面向人读，不再多一行。wire 格式与解析契约不变（ready_line 单测锁）。
+        // 1-14 修订（桌面薄壳粘性端口前提）：就绪行输出门——内核分配端口
+        // （--port 0，壳消费面）恒输出；显式端口面向人读默认静默，`--emit-ready-line`
+        // 为显式 opt-in 通道（存量调用面不加 flag 输出零变化）。wire 格式与解析
+        // 契约不变（ready_line 单测锁）。
         #[cfg(not(test))]
-        if kernel_assigned {
+        if kernel_assigned || args.emit_ready_line {
             println!("{}", ready_line(local.port()));
         }
         axum::serve(listener, app).await.map_err(|e| {
@@ -290,6 +298,7 @@ mod tests {
             root: vec![PathBuf::from("/nonexistent-root-for-test")],
             web_dist: None,
             port: None,
+            emit_ready_line: false,
             token,
             token_gen: false,
             allow_lan: false,

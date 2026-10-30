@@ -33,6 +33,9 @@ enum Command {
         /// 监听端口（默认 8321）
         #[arg(long)]
         port: Option<u16>,
+        /// 输出 VV_READY port=<n> 就绪行（桌面薄壳消费；显式端口默认不输出，1-14）
+        #[arg(long)]
+        emit_ready_line: bool,
         /// 访问令牌，请求需带 `Authorization: Bearer <token>`
         #[arg(long)]
         token: Option<String>,
@@ -69,6 +72,7 @@ fn main() {
             root,
             web_dist,
             port,
+            emit_ready_line,
             token,
             token_gen,
             allow_lan,
@@ -91,6 +95,7 @@ fn main() {
                 root,
                 web_dist,
                 port,
+                emit_ready_line,
                 token,
                 token_gen,
                 allow_lan,

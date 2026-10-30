@@ -43,6 +43,9 @@ pub struct FileConfig {
     pub root: Vec<String>,
     pub web_dist: Option<String>,
     pub port: Option<u16>,
+    /// 就绪行 opt-in（1-14 修订，桌面薄壳粘性端口前提）：显式端口下也输出
+    /// `VV_READY port=<n>`；布尔开关无显式 false 通道，OR 合并同 allow_lan。
+    pub emit_ready_line: Option<bool>,
     pub token: Option<String>,
     pub allow_lan: Option<bool>,
     pub hidden: Option<bool>,
@@ -65,6 +68,7 @@ impl std::fmt::Debug for FileConfig {
             .field("root", &self.root)
             .field("web_dist", &self.web_dist)
             .field("port", &self.port)
+            .field("emit_ready_line", &self.emit_ready_line)
             .field("token", &self.token.as_ref().map(|_| "[redacted]"))
             .field("allow_lan", &self.allow_lan)
             .field("hidden", &self.hidden)
@@ -84,6 +88,8 @@ pub struct ResolvedConfig {
     pub root: Vec<PathBuf>,
     pub web_dist: Option<PathBuf>,
     pub port: u16,
+    /// 就绪行 opt-in（CLI flag ∥ 文件键 OR 合并产物）——语义见 [`crate::assembly::ServeArgs`]。
+    pub emit_ready_line: bool,
     pub token: Option<String>,
     pub token_gen: bool,
     pub allow_lan: bool,
@@ -106,6 +112,7 @@ impl std::fmt::Debug for ResolvedConfig {
             .field("root", &self.root)
             .field("web_dist", &self.web_dist)
             .field("port", &self.port)
+            .field("emit_ready_line", &self.emit_ready_line)
             .field("token", &self.token.as_ref().map(|_| "[redacted]"))
             .field("token_gen", &self.token_gen)
             .field("allow_lan", &self.allow_lan)
@@ -126,6 +133,7 @@ impl From<ResolvedConfig> for ServeArgs {
             web_dist: r.web_dist,
             // 合并已补默认（DEFAULT_PORT），进 serve 前恒为 Some
             port: Some(r.port),
+            emit_ready_line: r.emit_ready_line,
             token: r.token,
             token_gen: r.token_gen,
             allow_lan: r.allow_lan,
@@ -152,8 +160,8 @@ pub fn load_file_config(path: &Path) -> Result<FileConfig, String> {
 /// 合并 CLI 参数与配置文件（纯函数）：优先级 CLI > 文件（spec §2.1）。
 ///
 /// - `--root` 整体替换：CLI 出现任一根即整体忽略文件 `root` 数组，不合并。
-/// - 布尔开关（allow_lan/hidden/compute）CLI 为 SetTrue 语义、无显式 false 通道，
-///   与文件值按 OR 合并（文件 true + CLI 未给 = true）。
+/// - 布尔开关（allow_lan/hidden/compute/emit_ready_line）CLI 为 SetTrue 语义、
+///   无显式 false 通道，与文件值按 OR 合并（文件 true + CLI 未给 = true）。
 /// - `token_gen` 不参与合并（动作型参数），原样透传。
 ///
 /// 返回 `Result` 为任务接口契约（Task 5 挂载接线后合并期可产出错误）；
@@ -170,6 +178,7 @@ pub fn resolve_config(cli: ServeArgs, file: Option<FileConfig>) -> Result<Resolv
         root,
         web_dist: cli.web_dist.or(file.web_dist.map(PathBuf::from)),
         port: cli.port.or(file.port).unwrap_or(DEFAULT_PORT),
+        emit_ready_line: cli.emit_ready_line || file.emit_ready_line.unwrap_or(false),
         token: cli.token.or(file.token),
         token_gen: cli.token_gen,
         allow_lan: cli.allow_lan || file.allow_lan.unwrap_or(false),
@@ -213,6 +222,7 @@ mod tests {
             root: root.iter().map(PathBuf::from).collect(),
             web_dist: None,
             port: None,
+            emit_ready_line: false,
             token: None,
             token_gen: false,
             allow_lan: false,
@@ -411,9 +421,10 @@ password = "p"
             c.allow_lan = Some(true);
             c.hidden = Some(true);
             c.compute = Some(true);
+            c.emit_ready_line = Some(true);
         });
         let r = resolve_config(cli(&["/c1"]), Some(file)).unwrap();
-        assert!(r.allow_lan && r.hidden && r.compute);
+        assert!(r.allow_lan && r.hidden && r.compute && r.emit_ready_line);
     }
 
     #[test]
@@ -489,7 +500,7 @@ password = "p"
         assert_eq!(r.root, vec![PathBuf::from("/only")]);
         assert_eq!(r.port, DEFAULT_PORT);
         assert_eq!(r.token, None);
-        assert!(!r.allow_lan && !r.hidden && !r.compute && !r.token_gen);
+        assert!(!r.allow_lan && !r.hidden && !r.compute && !r.emit_ready_line && !r.token_gen);
         assert_eq!(r.kroki_host, vviewer_core::kroki::DEFAULT_KROKI_HOST);
         assert!(r.mounts.is_empty());
     }
@@ -588,7 +599,7 @@ password = "p"
     // ---------- C3：手工 Debug 字段清单同步锚（三道防线，见各常量注释） ----------
 
     const FILE_CONFIG_DEBUG_FIELDS: &[&str] = &[
-        "root", "web_dist", "port", "token", "allow_lan",
+        "root", "web_dist", "port", "emit_ready_line", "token", "allow_lan",
         "hidden", "cors_origin", "compute", "log_file", "kroki", "mounts",
     ];
 
@@ -599,6 +610,7 @@ password = "p"
             root: vec!["/tmp".into()],
             web_dist: Some("dist".into()),
             port: Some(1),
+            emit_ready_line: Some(true),
             token: Some("t".into()),
             allow_lan: Some(true),
             hidden: Some(true),
@@ -608,7 +620,7 @@ password = "p"
             kroki: None,
             mounts: Vec::new(),
         };
-        assert_eq!(FILE_CONFIG_DEBUG_FIELDS.len(), 11);
+        assert_eq!(FILE_CONFIG_DEBUG_FIELDS.len(), 12);
         // ③ Debug 逐字段名（值选无字段名子串的形态，防误配）
         let dbg = format!("{probe:?}");
         for name in FILE_CONFIG_DEBUG_FIELDS {
@@ -617,7 +629,7 @@ password = "p"
     }
 
     const RESOLVED_CONFIG_DEBUG_FIELDS: &[&str] = &[
-        "root", "web_dist", "port", "token", "token_gen", "allow_lan",
+        "root", "web_dist", "port", "emit_ready_line", "token", "token_gen", "allow_lan",
         "hidden", "cors_origin", "compute", "log_file", "kroki_host", "mounts",
     ];
 
@@ -627,6 +639,7 @@ password = "p"
             root: vec!["/tmp".into()],
             web_dist: Some("dist".into()),
             port: 1,
+            emit_ready_line: true,
             token: Some("t".into()),
             token_gen: true,
             allow_lan: true,
@@ -637,7 +650,7 @@ password = "p"
             kroki_host: "https://kroki.io".into(),
             mounts: Vec::new(),
         };
-        assert_eq!(RESOLVED_CONFIG_DEBUG_FIELDS.len(), 12);
+        assert_eq!(RESOLVED_CONFIG_DEBUG_FIELDS.len(), 13);
         let dbg = format!("{probe:?}");
         for name in RESOLVED_CONFIG_DEBUG_FIELDS {
             assert!(dbg.contains(&format!("{name}:")), "Debug 缺字段 {name}: {dbg}");
@@ -645,7 +658,7 @@ password = "p"
     }
 
     const SERVE_ARGS_DEBUG_FIELDS: &[&str] = &[
-        "root", "web_dist", "port", "token", "token_gen", "allow_lan",
+        "root", "web_dist", "port", "emit_ready_line", "token", "token_gen", "allow_lan",
         "hidden", "cors_origin", "compute", "log_file", "kroki_host",
     ];
 
@@ -655,6 +668,7 @@ password = "p"
             root: vec!["/tmp".into()],
             web_dist: Some("dist".into()),
             port: Some(1),
+            emit_ready_line: true,
             token: Some("t".into()),
             token_gen: true,
             allow_lan: true,
@@ -664,7 +678,7 @@ password = "p"
             log_file: Some("v.log".into()),
             kroki_host: None,
         };
-        assert_eq!(SERVE_ARGS_DEBUG_FIELDS.len(), 11);
+        assert_eq!(SERVE_ARGS_DEBUG_FIELDS.len(), 12);
         let dbg = format!("{probe:?}");
         for name in SERVE_ARGS_DEBUG_FIELDS {
             assert!(dbg.contains(&format!("{name}:")), "Debug 缺字段 {name}: {dbg}");

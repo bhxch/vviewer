@@ -16,6 +16,7 @@ fn cli_args(root: std::path::PathBuf) -> ServeArgs {
         root: vec![root],
         web_dist: None,
         port: None,
+        emit_ready_line: false,
         token: None,
         token_gen: false,
         allow_lan: false,
