@@ -95,8 +95,8 @@ describe('packNpm（npm 单包布局：manifest 与 wasm 同目录的统一 base
     const f = fixture();
     const r = packNpm(ARGS(f)) as { files: number; bytes: number };
     const walked = walkOut(f.outDir);
-    expect(r.files).toBe(walked.length); // package.json + GRAMMAR_LICENSES.md + manifest.json + 2 wasm + 3 scm = 8
-    expect(r.files).toBe(8);
+    expect(r.files).toBe(walked.length); // package.json + README + GRAMMAR_LICENSES.md + manifest.json + 2 wasm + 3 scm = 9
+    expect(r.files).toBe(9);
     expect(r.bytes).toBe(walked.reduce((s, x) => s + x.bytes, 0));
   });
 
@@ -208,7 +208,7 @@ describe('main()（CLI 入口：Task 5 publish job 经 env 驱动）', () => {
       VV_GRAMMARS_OUT: f.grammars,
       VV_QUERIES_DIR: f.queries,
     })) as { files: number; bytes: number };
-    expect(r.files).toBe(8); // license 文件走默认路径（仓库根 server/GRAMMAR_LICENSES.md，入库稳定存在）
+    expect(r.files).toBe(9); // README 参与打包（GRAMMARS-NPM-README.md）；license 文件走默认路径（仓库根 server/GRAMMAR_LICENSES.md，入库稳定存在）
     const pkg = JSON.parse(readFileSync(path.join(f.outDir, 'package.json'), 'utf8')) as PkgJson;
     expect(pkg.name).toBe('@scope/vviewer-grammars-full');
     expect(pkg.version).toBe('1.2.3');
