@@ -83,7 +83,7 @@ describe('packNpm（npm 单包布局：manifest 与 wasm 同目录的统一 base
     expect(existsSync(path.join(f.outDir, 'grammars', 'manifest.json'))).toBe(true);
     expect(existsSync(path.join(f.outDir, 'manifest.json'))).toBe(false);
     expect(readdirSync(path.join(f.outDir, 'grammars')).sort()).toEqual(['javascript.wasm', 'manifest.json', 'swift.wasm']);
-    expect(readdirSync(f.outDir).sort()).toEqual(['GRAMMAR_LICENSES.md', 'grammars', 'package.json', 'queries']);
+    expect(readdirSync(f.outDir).sort()).toEqual(['GRAMMAR_LICENSES.md', 'README.md', 'grammars', 'package.json', 'queries']);
     expect(existsSync(path.join(f.outDir, 'queries', 'javascript', 'highlights.scm'))).toBe(true);
     expect(existsSync(path.join(f.outDir, 'queries', 'javascript', 'injections.scm'))).toBe(true);
     expect(existsSync(path.join(f.outDir, 'queries', 'c', 'highlights.scm'))).toBe(true);
