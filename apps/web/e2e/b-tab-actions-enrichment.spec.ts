@@ -786,11 +786,13 @@ test('TAX-11：溢出 TabBar 右键菜单不被打开动作自身滚动秒关；
     names.map((n, i) => ({ name: n, type: 'text/plain', content: `overflow ${i}\n` }))
   );
   for (const n of names) await openFile(page, n);
-  // 自证非空转：22 长名 tab + 管理钮远超 1280px 视口，TabBar 横向溢出
+  // 自证非空转：22 长名 tab + 管理钮远超 1280px 视口，TabBar 横向溢出。滚动容器
+  // 是内层 .vv-tabbar-tabs（顶栏退役 Task 2 嵌套化：外层 .vv-tabbar 改 overflow:
+  // visible 供浮层逃逸，scrollWidth 恒等于 clientWidth），锚随迁内层
   await expect
     .poll(() =>
       page.evaluate(() => {
-        const bar = document.querySelector('.vv-tabbar');
+        const bar = document.querySelector('.vv-tabbar-tabs');
         return bar !== null && bar.scrollWidth > bar.clientWidth + 1;
       })
     )
@@ -803,9 +805,9 @@ test('TAX-11：溢出 TabBar 右键菜单不被打开动作自身滚动秒关；
   await page.waitForTimeout(300); // 越过宽限窗：菜单仍开（缺陷态在此前已被秒关）
   await expect(menu).toBeVisible();
 
-  // 宽限窗后的容器滚动仍关闭
+  // 宽限窗后的容器滚动仍关闭（锚 .vv-tabbar-tabs 同上——外层 scrollTo 已无处可滚）
   await page.evaluate(() => {
-    (document.querySelector('.vv-tabbar') as HTMLElement).scrollTo({ left: 0 });
+    (document.querySelector('.vv-tabbar-tabs') as HTMLElement).scrollTo({ left: 0 });
   });
   await expect(menu).toHaveCount(0);
 });
