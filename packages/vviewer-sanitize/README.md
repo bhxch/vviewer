@@ -4,6 +4,12 @@
 `data:` 按属性收窄、外域加载向量拦截、服务端图表 SVG 片段净化。所有不可信渲染
 HTML 必须经本包出口进入 DOM，调用方不得各自直连 DOMPurify 或另设净化规则。
 
+## 安装
+
+```bash
+npm install @bhxch/vviewer-sanitize
+```
+
 ## 导出面
 
 | 导出 | 用途 | 既有消费点 |
@@ -50,3 +56,8 @@ HTML 必须经本包出口进入 DOM，调用方不得各自直连 DOMPurify 或
 自 `packages/vviewer-render-text/src/markdown/sanitize.ts` 迁入（零内部依赖、仅
 dompurify）。过渡期原位置保留，render-text 内部消费方与 render-doc 改指
 `@bhxch/vviewer-sanitize` 后移除原位置与 render-text 的 `./sanitize` 子路径导出。
+
+## 仓库与许可
+
+- 仓库：[bhxch/vviewer](https://github.com/bhxch/vviewer)，源码位于 `packages/vviewer-sanitize/`
+- 许可：Apache-2.0；第三方依赖许可见仓库 `THIRD_PARTY_NOTICES.md`

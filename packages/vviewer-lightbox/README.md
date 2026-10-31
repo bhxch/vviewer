@@ -6,6 +6,12 @@
 样式由宿主按类名约定自备（web 端示例见 `apps/web/src/app.css` 的 `.md-lightbox-*`
 规则组，app.css:217-237）。
 
+## 安装
+
+```bash
+npm install @bhxch/vviewer-lightbox
+```
+
 ## 公共导出面（`src/index.ts`）
 
 | 符号 | 说明 |
@@ -52,3 +58,8 @@ body 级 overlay 是跨渲染实例的单例：宿主每次 render 生成唯一 
   （相对形式不变）。零第三方依赖、无资产文件，无需额外拷贝步骤。
 - `LIGHTBOX_OVERLAY_ID` / 类名基名是跨端契约面：发布版与宿主样式、导出剥离逻辑
   必须同步演进。
+
+## 仓库与许可
+
+- 仓库：[bhxch/vviewer](https://github.com/bhxch/vviewer)，源码位于 `packages/vviewer-lightbox/`
+- 许可：Apache-2.0；第三方依赖许可见仓库 `THIRD_PARTY_NOTICES.md`

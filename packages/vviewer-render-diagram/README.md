@@ -15,6 +15,12 @@ PlantUML 官方服务器 URL 编码。自 render-text markdown 管线迁出的�
 - 全部第三方引擎为动态 import（mermaid/@viz-js/viz/nomnoml/katex/pako 惰性加载），
   对消费方主 bundle 零增量。
 
+## 安装
+
+```bash
+npm install @bhxch/vviewer-render-diagram
+```
+
 ## 公共导出面（`src/index.ts`）
 
 | 符号 | 说明 |
@@ -70,3 +76,8 @@ assets 先例），故列第二批发布。CI 侧 wasm-bindgen 缓存键
   markdownPipeline.mermaidFail.test.ts 随管线留守 render-text 后移交的语义。
 - svgbob 真渲染用例缺 gen 产物时 skipIf 兜底；根 vitest include 同时覆盖
   `packages/*/src/**/*.test.ts` 与 `packages/*/test/**/*.test.ts` 两形态。
+
+## 仓库与许可
+
+- 仓库：[bhxch/vviewer](https://github.com/bhxch/vviewer)，源码位于 `packages/vviewer-render-diagram/`
+- 许可：Apache-2.0；第三方依赖许可见仓库 `THIRD_PARTY_NOTICES.md`

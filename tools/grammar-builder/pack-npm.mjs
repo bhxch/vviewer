@@ -155,6 +155,10 @@ export function packNpm({
   });
   fs.copyFileSync(licenseFile, path.join(outDir, 'GRAMMAR_LICENSES.md'));
 
+  // README（npm 页）：包级说明（布局契约/CDN 引用/配套运行时），源 GRAMMARS-NPM-README.md。
+  // 参与内容哈希——README 变更即触发该包随 tag 发新版本（与 pack-packages 同口径）。
+  fs.copyFileSync(path.join(here, 'GRAMMARS-NPM-README.md'), path.join(outDir, 'README.md'));
+
   const repository = readRepository(repoPkgJson);
   const contentHash = contentHashOf(outDir);
   const pkg = {

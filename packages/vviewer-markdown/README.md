@@ -8,6 +8,12 @@ markdown 完整渲染组合包：一行装配「markdown 引擎 → sanitize →
 默认等价；本包不依赖 `@bhxch/vviewer-core`、`apps/*` 或 render-text（宿主侧 core 值以
 结构类型直接传入）。
 
+## 安装
+
+```bash
+npm install @bhxch/vviewer-markdown
+```
+
 ## 快速上手
 
 ```ts
@@ -206,3 +212,8 @@ setHighlightFence(async (code, lang) => {
   client 改为包一层 `HighlightFence`（区间 → `assignIntervalsToLines` +
   `renderLineHtml` → 行 HTML）经 `setHighlightFence` / `options.highlightFence`
   注入；`HighlightCanceledError` 抛出语义（管线静默跳过该块）保持有效。
+
+## 仓库与许可
+
+- 仓库：[bhxch/vviewer](https://github.com/bhxch/vviewer)，源码位于 `packages/vviewer-markdown/`
+- 许可：Apache-2.0；第三方依赖许可见仓库 `THIRD_PARTY_NOTICES.md`

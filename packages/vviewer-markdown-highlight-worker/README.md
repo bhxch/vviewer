@@ -6,6 +6,12 @@
 批量取消）与区间→行 HTML 装配全部现成，宿主只写一行接入。worker 失败链与包内
 默认高亮器一致：该块降级 hljs → 原文；取消（tab 切换）静默跳过。
 
+## 安装
+
+```bash
+npm install @bhxch/vviewer-markdown-highlight-worker
+```
+
 ## 快速上手
 
 ```ts
@@ -65,3 +71,8 @@ worker 必须是独立 JS 文件，本包以源码形态提供（`src/worker.js`
   兜底）；同语言并发请求由 client 去重（取消前一个未完成者）。
 - 本包不含 wasm 资产；grammar/查询/runtime 来源由 `init` 决定（默认 jsdelivr
   CDN 的 `@bhxch/vviewer-grammars-full`）。
+
+## 仓库与许可
+
+- 仓库：[bhxch/vviewer](https://github.com/bhxch/vviewer)，源码位于 `packages/vviewer-markdown-highlight-worker/`
+- 许可：Apache-2.0；第三方依赖许可见仓库 `THIRD_PARTY_NOTICES.md`

@@ -4,6 +4,12 @@
 chunk 子文本解析、worker 化）+ capture→CSS 绑定核（capture 归约/类名/变量名映射层）
 + 区间→行 HTML（嵌套区间展平、按行分配、搜索命中叠加）。
 
+## 安装
+
+```bash
+npm install @bhxch/vviewer-highlight
+```
+
 ## 子路径导出
 
 | 路径 | 内容 |
@@ -51,3 +57,8 @@ tree-sitter-cli 0.27 自建（产物含 dylink.0 节，实测 0.25 运行时可�
   惯例），workspace 态保持 `private: true`。
 - assets 体积 ~5.3M（queries 307 语言目录为头部）；`queries/` 各语言 `.scm` 与
   `LICENSE-README.md` 的分发义务见其内说明。
+
+## 仓库与许可
+
+- 仓库：[bhxch/vviewer](https://github.com/bhxch/vviewer)，源码位于 `packages/vviewer-highlight/`
+- 许可：Apache-2.0；第三方依赖许可见仓库 `THIRD_PARTY_NOTICES.md`

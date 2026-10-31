@@ -6,6 +6,12 @@ tasklists/footnote/mark/ins/deflist 插件 + linkify、`html:true`）、GFM slug
 （`protectLatexDelimiters`）、front matter 定位解析（`parseFrontMatter`）。
 面向任何 markdown-it 项目的即插预设。
 
+## 安装
+
+```bash
+npm install @bhxch/vviewer-markdown-engine
+```
+
 ## 公共导出面（`src/index.ts`）
 
 | 符号 | 说明 |
@@ -50,3 +56,8 @@ markdown-it-task-lists / -footnote / -mark / -ins / -deflist 均无自带类型�
   （其为本包 dependencies），消费方无需垫片。
 - 依赖清单中 markdown-it + 五插件 + yaml 全量为运行时依赖（frontend 无 node 端独占
   依赖），license 均为 MIT/ISC，见仓库 `THIRD_PARTY_NOTICES.md`。
+
+## 仓库与许可
+
+- 仓库：[bhxch/vviewer](https://github.com/bhxch/vviewer)，源码位于 `packages/vviewer-markdown-engine/`
+- 许可：Apache-2.0；第三方依赖许可见仓库 `THIRD_PARTY_NOTICES.md`
