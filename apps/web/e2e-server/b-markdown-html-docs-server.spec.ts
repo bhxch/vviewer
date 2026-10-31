@@ -1,3 +1,4 @@
+import { overflowConnectServer } from '../e2e/tabbar-actions';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,10 +40,10 @@ test.beforeAll(() => {
   writeFileSync(join(FIXTURE, 'bmd-danger.md'), DANGER_MD);
 });
 
-/** TopBar 连接表单：无 token 启动的 server 全放行（server/src/auth.rs 无 token 配置全放行） */
+/** ⋯ 菜单连接表单：无 token 启动的 server 全放行（server/src/auth.rs 无 token 配置全放行） */
 async function connectSameOrigin(page: Page): Promise<void> {
   await page.goto('/');
-  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
+  await overflowConnectServer(page);
   await page.getByLabel('服务器地址').fill(BASE_URL);
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await expect(page.locator('.vv-tree-row', { hasText: 'bmd-danger.html' })).toBeVisible({

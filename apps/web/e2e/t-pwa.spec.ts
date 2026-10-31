@@ -1,3 +1,4 @@
+import { overflowConnectServer } from './tabbar-actions';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type CDPSession, type Page } from '@playwright/test';
@@ -238,10 +239,10 @@ test('PWA-02/2: 断网后经地址栏重新导航呈现完整应用壳（URL/ori
     // 修复前即可用，验收 3 要求保持
     await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 10_000 });
     expect(new URL(page.url()).pathname, 'location 保持本源（不落 chrome-error）').toBe('/');
-    await expect(page.locator('.vv-brand')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('.vv-tabbar')).toBeVisible({ timeout: 10_000 });
     const controlled = await safeEval(page, () => navigator.serviceWorker.controller !== null);
     expect(controlled).toBe(true);
-    await expect(page.locator('header, .vv-topbar').first()).toBeVisible();
+    await expect(page.locator('.vv-tabbar').first()).toBeVisible();
   } finally {
     await page.context().setOffline(false);
   }
@@ -252,7 +253,7 @@ test('PWA-02/3: 在线 reload 基线正常（BUG-15 验收 3 回归护栏）', a
   await page.goto('/');
   await waitSwActivated(page);
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await expect(page.locator('.vv-brand')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.vv-tabbar')).toBeVisible({ timeout: 10_000 });
   const controlled = await safeEval(page, () => navigator.serviceWorker.controller !== null);
   expect(controlled, '在线 reload 后 SW 仍控制页面').toBe(true);
 });
@@ -606,7 +607,7 @@ test(
     // 在线 reload 后 controller 自文档起在位，新 worker 受控，queries/剩余资产
     // 全部经 CacheFirst 入缓存（真实「曾访问过」用户的确定化预热路径）。
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(page.locator('.vv-brand')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('.vv-tabbar')).toBeVisible({ timeout: 10_000 });
     await openTDir(page, [{ name: 'bug58-a2.rs', type: 'text/plain', bytes: RS_SRC_1 }]);
     await openAndWaitTreeSitter(page, 'bug58-a2.rs');
     await expect
@@ -624,7 +625,7 @@ test(
     await page.context().setOffline(true);
     try {
       await page.reload({ waitUntil: 'domcontentloaded' });
-      await expect(page.locator('.vv-brand')).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('.vv-tabbar')).toBeVisible({ timeout: 10_000 });
 
       // 离线注入同语言文件并打开（openTDir 仅注入目录来源，文件须经树行点击打开；
       // openFileViaTree 内置窄视口抽屉适配，chromium/mobile 两 project 通用）
@@ -706,7 +707,7 @@ test(
     await page.context().setOffline(true);
     try {
       await page.reload({ waitUntil: 'domcontentloaded' });
-      await expect(page.locator('.vv-brand')).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('.vv-tabbar')).toBeVisible({ timeout: 10_000 });
       // 离线注入（独立目录标签 tpwa2：与恢复快照的 tpwa 来源 storeId 不同，规避
       // 恢复 merge 窗口的同 storeId 去重覆盖——注入行被快照来源非确定替换的实测竞态）
       await openTDir(
@@ -938,7 +939,7 @@ test(
 );
 
 test(
-  'BUG-62 [已修复 2026-10-17]: 375px isMobile 视口「连接服务器」表单不折行——layout viewport 被撑宽到 465px，提交按钮屏外且页面无法横向滚动',
+  'BUG-62 [已修复 2026-10-17]: 375px isMobile 视口「连接服务器」菜单表单不折行——layout viewport 被撑宽到 465px，提交按钮屏外且页面无法横向滚动',
   async ({ page }, testInfo) => {
     test.skip(
       testInfo.project.name !== 'mobile',
@@ -969,7 +970,7 @@ test(
     // 输入与提交钮窄视口折行，layout viewport 不再被撑宽；宽视口不触发折行。
     test.setTimeout(60_000);
     await page.goto('/');
-    await page.locator('header button', { hasText: '连接服务器' }).click();
+    await overflowConnectServer(page);
     const form = page.locator('.vv-server-form');
     await expect(form).toBeVisible();
     // 修复判据 1（几何）：提交按钮完全在 375px 视口内（缺陷态 x=418.4、right=465，

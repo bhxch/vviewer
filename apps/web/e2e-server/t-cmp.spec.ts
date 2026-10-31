@@ -1,3 +1,4 @@
+import { overflowConnectServer } from '../e2e/tabbar-actions';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -122,7 +123,7 @@ async function connectSameOriginCompute(page: Page, policy: 'auto' | 'remote' | 
     localStorage.setItem('vviewer:settings', JSON.stringify({ computePolicy: p }));
   }, policy);
   await page.goto(COMPUTE_BASE + '/');
-  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
+  await overflowConnectServer(page);
   await page.getByLabel('服务器地址').fill(COMPUTE_BASE);
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await expect(page.locator('.vv-tree-row', { hasText: 'tcmp-' }).first()).toBeVisible({ timeout: 10_000 });

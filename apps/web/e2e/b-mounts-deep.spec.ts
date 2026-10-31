@@ -137,7 +137,7 @@ async function clickTreeRow(page: Page, text: string): Promise<void> {
 
 async function openManager(page: Page): Promise<void> {
   await page.goto('/');
-  await expect(page.locator('.vv-topbar')).toBeVisible();
+  await expect(page.locator('.vv-tabbar')).toBeVisible();
   await page.locator('button[aria-label="目录管理"]').click();
   await expect(page.locator('.vv-mounts-manager')).toBeVisible();
 }
@@ -252,7 +252,7 @@ test.describe('b-mounts-deep 目录挂载补强', () => {
     // ① 刷新前：pendingRetry 记录（注册失败遗留）→ 徽标「待注册（原因）」，
     // 不残留「已注册」误导、无打开钮（3-11：失败记录清失效索引，展示机不供打开消费）
     await page.goto('/');
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
     await seedMountRecord(page, {
       id: 'mount:mm11',
       kind: 'proxy',
@@ -299,7 +299,7 @@ test.describe('b-mounts-deep 目录挂载补强', () => {
       ]
     });
     await page.reload();
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
     await expect.poll(() => mountsGet, { timeout: 15_000 }).toBeGreaterThan(0);
     await expect.poll(() => root2Probe, { timeout: 15_000 }).toBeGreaterThan(0); // probe 已飞行
     await page.locator('button[aria-label="目录管理"]').click();
@@ -352,7 +352,7 @@ test.describe('b-mounts-deep 目录挂载补强', () => {
     });
 
     await page.goto('/');
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
     // storeLabel 是 remoteSourceLabel 冻结形态（hash 输入，恢复链原值回环）；
     // displayLabelForStore 按（registeredRootIndex, serverBase）命中挂载 label
     const storeLabel = '127.0.0.1:8795 · 根2/';
@@ -429,7 +429,7 @@ test.describe('b-mounts-deep 目录挂载补强', () => {
       return void route.fulfill({ status: 404, headers: CORS_HEADERS, body: 'not found' });
     });
     await page.goto('/');
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
     await seedMountRecord(page, rec);
     await seedSnapshot(page, {
       activeId: 'w1',
@@ -489,7 +489,7 @@ test.describe('b-mounts-deep 目录挂载补强', () => {
       files: { 'one.txt': 'namespace-free body\n' }
     });
     await page.goto('/');
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
     await seedMountRecord(page, rec);
     await seedSnapshot(page, {
       activeId: 'w1',
@@ -560,7 +560,7 @@ test.describe('b-mounts-deep 目录挂载补强', () => {
       return void route.fulfill({ status: 404, headers: CORS_HEADERS, body: 'not found' });
     });
     await page.goto('/');
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
     await seedMountRecord(page, rec);
     await seedSnapshot(page, {
       activeId: 'w1',
@@ -621,7 +621,7 @@ test.describe('b-mounts-deep 目录挂载补强', () => {
       return void route.fulfill({ status: 404, headers: CORS_HEADERS, body: 'not found' });
     });
     await page.goto('/');
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
     await seedMountRecord(page, rec);
     await seedSnapshot(page, {
       activeId: 'w1',
@@ -674,7 +674,7 @@ test.describe('b-mounts-deep 目录挂载补强', () => {
       readLog
     });
     await page.goto('/');
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
     await seedMountRecord(page, rec);
     await seedSnapshot(page, {
       activeId: 'w1',
@@ -731,10 +731,10 @@ test.describe('b-mounts-deep 目录挂载补强', () => {
       authLog
     });
     await page.goto('/');
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
     await seedMountRecord(page, rec);
     await page.reload();
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
 
     // ① 打开全链：目录 tab + 文件读（Basic pass-1）
     await page.locator('button[aria-label="目录管理"]').click();

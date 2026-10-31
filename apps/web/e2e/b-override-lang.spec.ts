@@ -45,13 +45,13 @@ interface Payload {
 
 const REG_SPECIAL = /[.*+?^${}()|[\]\\]/g;
 
-/** 等应用挂载（svelte:window drop 监听与 TopBar 就绪；t-tab-actions 同款） */
+/** 等应用挂载（svelte:window drop 监听与 TabBar 就绪；t-tab-actions 同款） */
 async function waitAppMounted(page: Page): Promise<void> {
   await page.goto('/');
   await page.waitForFunction(
     () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
   );
-  await expect(page.locator('.vv-topbar')).toBeVisible();
+  await expect(page.locator('.vv-tabbar')).toBeVisible();
 }
 
 /** 目录注入通道（t-tab-actions openDir 同款；label = webkitRelativePath 首段） */

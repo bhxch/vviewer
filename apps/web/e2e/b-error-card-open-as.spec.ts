@@ -65,10 +65,10 @@ interface SpecFile {
   bytes: Uint8Array;
 }
 
-/** 等应用挂载（TopBar 就绪；t-open-with waitAppMounted 同款） */
+/** 等应用挂载（TabBar 就绪；t-open-with waitAppMounted 同款） */
 async function waitAppMounted(page: Page): Promise<void> {
   await page.goto('/');
-  await expect(page.locator('.vv-topbar')).toBeVisible();
+  await expect(page.locator('.vv-tabbar')).toBeVisible();
 }
 
 /** 页面内构造 File 经 __vvOpenDirImpl 注入目录（b-media-office-viewer openDir 同款） */

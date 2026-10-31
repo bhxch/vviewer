@@ -94,11 +94,11 @@ test('BUG-15：SW activated 后断网 reload 呈现完整应用壳（非 chrome-
   try {
     await page.reload({ waitUntil: 'domcontentloaded', timeout: 10_000 });
     // 完整应用壳：品牌控件渲染（chrome-error 页面无任何 vv-* 元素）且 SW 控制在位
-    await expect(page.locator('.vv-brand')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('.vv-tabbar')).toBeVisible({ timeout: 10_000 });
     const controlled = await safeEval(page, () => navigator.serviceWorker.controller !== null);
     expect(controlled).toBe(true);
-    // 壳内交互就绪：TopBar 可见（应用而非静态残页）
-    await expect(page.locator('header, .vv-topbar').first()).toBeVisible();
+    // 壳内交互就绪：TabBar 可见（应用而非静态残页）
+    await expect(page.locator('.vv-tabbar').first()).toBeVisible();
   } finally {
     await page.context().setOffline(false);
   }

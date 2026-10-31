@@ -168,7 +168,7 @@ test.describe('b-fonts 字体系统', () => {
   test('预设切换生效：style#vv-font 变量内容断言', async ({ page }) => {
     test.setTimeout(60_000);
     await page.goto('/');
-    // 默认空栈语义：直接回落默认栈原文（poll 等 TopBar 挂载首次注入）
+    // 默认空栈语义：直接回落默认栈原文（poll 等 AppShell 挂载首次注入）
     await expect.poll(() => fontCss(page)).toContain('--vv-ui-font: system-ui, -apple-system, sans-serif');
     await expect.poll(() => fontCss(page)).toContain(
       '--vv-code-font: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'

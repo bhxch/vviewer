@@ -1,3 +1,4 @@
+import { openOverflowMenu, overflowConnectServer } from '../e2e/tabbar-actions';
 import { createServer, type Server } from 'node:http';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
@@ -119,7 +120,7 @@ async function connectWithSettings(page: Page, settings: Record<string, unknown>
     localStorage.setItem('vviewer:settings', JSON.stringify(s));
   }, settings);
   await page.goto(COMPUTE_BASE + '/');
-  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
+  await overflowConnectServer(page);
   await page.getByLabel('服务器地址').fill(COMPUTE_BASE);
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await expect(page.locator('.vv-tree-row', { hasText: 'dsv-' }).first()).toBeVisible({
@@ -209,7 +210,8 @@ test.describe('b-diagram-server-kroki 服务端图表与 kroki 代发（spec §8
     await connectWithSettings(page, { computePolicy: 'local' });
 
     // 连接后开设置中心（DiagramsSection 挂载时读会话缓存 capabilities）
-    await page.locator('button[aria-label="设置"]').click();
+    await openOverflowMenu(page);
+    await page.locator('.vv-tbact-pop').getByRole('button', { name: '设置', exact: true }).click();
     await page.locator('.vv-sc-navitem', { hasText: '图表' }).click();
     const via = page.locator('select[aria-label="Kroki 通道"]');
     await expect(via).toHaveValue('client');

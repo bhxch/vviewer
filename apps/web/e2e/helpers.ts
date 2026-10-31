@@ -11,13 +11,13 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 
 const REG_SPECIAL = /[.*+?^${}()|[\]\\]/g;
 
-/** 等应用挂载：__vvOpenDirImpl 注入钩子就绪 + TopBar 可见 */
+/** 等应用挂载：__vvOpenDirImpl 注入钩子就绪 + TabBar 可见 */
 export async function waitAppMounted(page: Page): Promise<void> {
   await page.goto('/');
   await page.waitForFunction(
     () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
   );
-  await expect(page.locator('.vv-topbar')).toBeVisible();
+  await expect(page.locator('.vv-tabbar')).toBeVisible();
 }
 
 /**

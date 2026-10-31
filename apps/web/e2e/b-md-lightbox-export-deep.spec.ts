@@ -1,3 +1,4 @@
+import { openOverflowMenu } from './tabbar-actions';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
@@ -406,7 +407,7 @@ test.describe('b-md-lightbox-export-deep 灯箱与导出补强', () => {
     expect(lightProbe.katexFonts).toBe(20);
 
     // 切暗（设置中心外观组 UI 通道，SC-03 同款）：订阅链生效后导出。
-    // mobile 抽屉形态：右抽屉开着会遮 TopBar ⚙（click 等 actionability 直至超时）——
+    // mobile 抽屉形态：右抽屉开着会遮 ⋯ 菜单触发钮（click 等 actionability 直至超时）——
     // 先收抽屉；设置完成后 openExportArea 幂等拉出兜底
     const drawerOpen = await page.evaluate(() => {
       if (!window.matchMedia('(max-width: 600px)').matches) return false;
@@ -414,7 +415,8 @@ test.describe('b-md-lightbox-export-deep 灯箱与导出补强', () => {
       return el !== null && getComputedStyle(el).transform === 'none';
     });
     if (drawerOpen) await page.locator('.vv-right-toggle').click();
-    await page.locator('button[aria-label="设置"]').click();
+    await openOverflowMenu(page);
+    await page.locator('.vv-tbact-pop').getByRole('button', { name: '设置', exact: true }).click();
     await expect(page.locator('.vv-settings-center')).toBeVisible();
     await page.getByLabel('亮暗模式').selectOption('dark');
     await page.locator('.vv-sc-apply').click();

@@ -1,3 +1,4 @@
+import { overflowConnectServer } from './tabbar-actions';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test, expect, type Locator, type Page } from '@playwright/test';
@@ -42,13 +43,13 @@ interface Payload {
 
 const REG_SPECIAL = /[.*+?^${}()|[\]\\]/g;
 
-/** 等应用挂载（svelte:window drop 监听与 TopBar 就绪；t-shell 同款） */
+/** 等应用挂载（svelte:window drop 监听与 TabBar 就绪；t-shell 同款） */
 async function waitAppMounted(page: Page): Promise<void> {
   await page.goto('/');
   await page.waitForFunction(
     () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
   );
-  await expect(page.locator('.vv-topbar')).toBeVisible();
+  await expect(page.locator('.vv-tabbar')).toBeVisible();
 }
 
 /** 目录注入通道（t-shell openDir 同款；label = webkitRelativePath 首段 = store 名） */
@@ -140,7 +141,7 @@ async function expectActiveWorkspace(page: Page, name: string): Promise<void> {
   await expect(page.locator('.vv-ws-pop')).toHaveCount(0);
 }
 
-/** 切换工作区（TopBar switchTo 选中即关下拉） */
+/** 切换工作区（WorkspaceSwitcher switchTo 选中即关下拉） */
 async function switchWorkspace(page: Page, name: string): Promise<void> {
   await page.locator('.vv-ws-trigger').click();
   await page.locator('.vv-ws-name', { hasText: name }).click();
@@ -250,7 +251,7 @@ async function startFakeServer(
 
 /** 连接表单提交（token 留空；t-workspace connectForm 同款） */
 async function connectForm(page: Page, base: string): Promise<void> {
-  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
+  await overflowConnectServer(page);
   await page.getByLabel('服务器地址').fill(base);
   await page.getByRole('button', { name: '连接', exact: true }).click();
 }

@@ -18,7 +18,7 @@ import {
  * （IO-01~11）只覆盖「rangeCapable + Range 服务器 + size 已知」的窗口流式正路，本
  * spec 锚定其余矩阵行：
  * - DEG-01/09：url store（!rangeCapable，size null）→ dispatcher 全量 ctx（=现状），
- *   TopBar「粘贴文件 URL」+ page.route 拦截（t-shell SHELL-04 先例）；
+ *   ＋ 菜单「粘贴 URL」+ page.route 拦截（t-shell SHELL-04 先例）；
  * - DEG-02：Range-less 200-only 服务器正锚——探针即全量、head 已含全量 → 块全预置
  *   （夹具 3MB ≤ 块表 LRU 16×256KB=4MB，超限逐出面见 DEG-03 的回退语义）、恰 1 请求、
  *   滚动零新增（「200 全量是允许形态」的正向用例，b-io-streaming:213 自认缺口）；
@@ -148,7 +148,7 @@ function activeHexHitRow(page: Page) {
 
 // ---------------------------------------------------------------- DEG-01
 
-test('DEG-01：url store（!rangeCapable）全量 ctx——TopBar URL 打开 jsonl 恰 1 请求无 Range、全量形态', async ({
+test('DEG-01：url store（!rangeCapable）全量 ctx——＋ 菜单 URL 打开 jsonl 恰 1 请求无 Range、全量形态', async ({
   page
 }) => {
   test.setTimeout(60_000);

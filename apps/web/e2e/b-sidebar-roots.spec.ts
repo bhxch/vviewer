@@ -9,7 +9,7 @@ import { closeDrawerIfOpened, isDrawerViewport, openDrawerIfNarrow } from './dra
  * - SRC-03：行右让位几何（§2.2 重叠修复）——侧栏折叠钮 .vv-collapse-left 与首个
  *   移除钮 boundingBox 手写相交判定（桌面视口锚；抽屉断点无中缝重叠面跳过）
  * - SRC-04：0 目录空态引导区（§2.3）——三入口控件可见可用、连接服务器就地展开
- *   ServerConnectForm；空态控件与 TopBar 同名同屏，定位一律限定 .vv-side-empty
+ *   ServerConnectForm；空态控件与 ⋯ 菜单同名同屏，定位一律限定 .vv-side-empty
  *   容器（不含真实连接/打开动作）
  *
  * 装置：本地源走 __vvOpenDirImpl 注入（b-filetree-src-remove 同款通道，label 决定
@@ -21,7 +21,7 @@ async function waitAppMounted(page: Page): Promise<void> {
   await page.waitForFunction(
     () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
   );
-  await expect(page.locator('.vv-topbar')).toBeVisible();
+  await expect(page.locator('.vv-tabbar')).toBeVisible();
 }
 
 async function openLocalDir(
@@ -113,7 +113,7 @@ test.describe('侧栏多根源头行（SRC-01..04）', () => {
     await expect(openBtn).toBeVisible();
     await expect(openBtn).toBeEnabled();
     await expect(empty.getByLabel('文件 URL')).toBeVisible();
-    // 空态「连接服务器」与 TopBar 同名同屏：限定 .vv-side-empty 容器
+    // 空态「连接服务器」与 ⋯ 菜单同名同屏：限定 .vv-side-empty 容器
     await empty.getByRole('button', { name: '连接服务器' }).click();
     await expect(empty.locator('.vv-server-form')).toBeVisible();
   });

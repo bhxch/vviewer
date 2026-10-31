@@ -1,3 +1,4 @@
+import { overflowConnectServer } from '../e2e/tabbar-actions';
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -19,7 +20,7 @@ import { test, expect } from '@playwright/test';
  * buildHlsConfig 收紧重试（34b310f）后分片 404 数秒升级 fatal 走错误卡片，
  * 已转正为文件末尾正式用例。
  * 夹具：beforeAll 以 ffmpeg（libopenh264）生成 HLS 切片组/flv/ts 写入 server fixture
- * 根（与基础夹具及其他域用例文件名不重叠），生成后经 TopBar
+ * 根（与基础夹具及其他域用例文件名不重叠），生成后经 ⋯ 菜单
  * 连接服务器从真实目录树打开。服务端模式单 worker（playwright.server.config.ts），
  * 夹具文件名与 b-binary-hex-archive 服务端用例不相交，workers=2 下亦无竞争。
  */
@@ -64,9 +65,9 @@ test.beforeAll(() => {
   );
 });
 
-/** 展开 TopBar 连接表单并提交（服务器无 token 配置，令牌留空） */
+/** 展开 ⋯ 菜单连接表单并提交（服务器无 token 配置，令牌留空） */
 async function connect(page: import('@playwright/test').Page): Promise<void> {
-  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
+  await overflowConnectServer(page);
   await page.getByLabel('服务器地址').fill(BASE);
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await expect(page.locator('.vv-tree')).toBeVisible({ timeout: 15_000 });

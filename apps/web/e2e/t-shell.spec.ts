@@ -1,3 +1,4 @@
+import { overflowConnectServer, plusOpenUrl } from './tabbar-actions';
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -72,13 +73,13 @@ async function openRightIfNarrow(page: Page): Promise<boolean> {
   return true;
 }
 
-/** 等待应用挂载完成（svelte:window 的 drop 监听与 TopBar 均就绪） */
+/** 等待应用挂载完成（svelte:window 的 drop 监听与 TabBar 均就绪） */
 async function waitAppMounted(page: Page): Promise<void> {
   await page.goto('/');
   await page.waitForFunction(
     () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
   );
-  await expect(page.locator('.vv-topbar')).toBeVisible();
+  await expect(page.locator('.vv-tabbar')).toBeVisible();
 }
 
 /** 根层树名按 DOM 顺序读取（workspace T4 多源后顶层为 div[role=tree] 包逐源
@@ -184,8 +185,7 @@ test('SHELL-04/valid：文件 URL 有效路径正确渲染内容', async ({ page
     route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: 'url-ok-marker' })
   );
   await waitAppMounted(page);
-  await page.locator('.vv-topbar').getByLabel('文件 URL').fill('http://127.0.0.1:4173/vv-e2e-ok.txt');
-  await page.locator('.vv-topbar').getByLabel('文件 URL').press('Enter');
+  await plusOpenUrl(page, 'http://127.0.0.1:4173/vv-e2e-ok.txt');
   await expect(page.locator('.vv-tab.active', { hasText: 'vv-e2e-ok.txt' })).toBeVisible();
   await expect(page.locator('.vv-code-pre')).toContainText('url-ok-marker', { timeout: 20_000 });
 });
@@ -195,8 +195,7 @@ test('SHELL-04/404：文件 URL 404 给出含失败原因的明确提示', async
     route.fulfill({ status: 404, contentType: 'text/plain', body: 'no' })
   );
   await waitAppMounted(page);
-  await page.locator('.vv-topbar').getByLabel('文件 URL').fill('http://127.0.0.1:4173/vv-e2e-missing.txt');
-  await page.locator('.vv-topbar').getByLabel('文件 URL').press('Enter');
+  await plusOpenUrl(page, 'http://127.0.0.1:4173/vv-e2e-missing.txt');
   await expect(page.locator('.vv-error-card')).toBeVisible({ timeout: 10_000 });
   // 错误卡片：标题 + 详情（createUrlStore 的 HTTP ${status} 文案，singleFile.ts）+ 文件名
   await expect(page.locator('.vv-error-card')).toContainText('无法预览此文件');
@@ -218,8 +217,7 @@ test('SHELL-04/cors：文件 URL 跨源被 CORS 拒绝给出明确提示', async
   const port = (server.address() as AddressInfo).port;
   try {
     await waitAppMounted(page);
-    await page.locator('.vv-topbar').getByLabel('文件 URL').fill(`http://127.0.0.1:${port}/vv-e2e-cors.txt`);
-    await page.locator('.vv-topbar').getByLabel('文件 URL').press('Enter');
+    await plusOpenUrl(page, `http://127.0.0.1:${port}/vv-e2e-cors.txt`);
     await expect(page.locator('.vv-error-card')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('.vv-error-card')).toContainText('无法预览此文件');
     await expect(page.locator('.vv-error-detail')).toContainText('Failed to fetch');
@@ -307,7 +305,7 @@ test('SHELL-06：3 tab 切换内容跟随、逐个关闭递减、全部关闭后
   await dirTab2.locator('.vv-tab-close').click();
   await dirTab.locator('.vv-tab-close').click();
   await expect(page.locator('.vv-tab')).toHaveCount(0);
-  // ViewerPane.svelte：无 tab 时 .vv-empty「拖入文件/文件夹，或使用顶栏打开」
+  // ViewerPane.svelte：无 tab 时 .vv-empty「拖入文件/文件夹，或用标签栏 ＋ 打开」
   const empty = page.locator('.vv-empty');
   await expect(empty).toBeVisible();
   await expect(empty).toContainText('拖入文件/文件夹');
@@ -542,8 +540,7 @@ test(
       })
     );
     await waitAppMounted(page);
-    await page.locator('.vv-topbar').getByLabel('文件 URL').fill('http://127.0.0.1:4173/vv-fallback-bare.js');
-    await page.locator('.vv-topbar').getByLabel('文件 URL').press('Enter');
+    await plusOpenUrl(page, 'http://127.0.0.1:4173/vv-fallback-bare.js');
     // tab 照常创建（openUrl 层无失败信息），内容由读取失败错误卡片呈现
     await expect(page.locator('.vv-tab.active', { hasText: 'vv-fallback-bare.js' })).toBeVisible();
     await expect(page.locator('.vv-error-card')).toBeVisible({ timeout: 10_000 });
@@ -614,8 +611,8 @@ test(
     const port = (server.address() as AddressInfo).port;
     try {
       await waitAppMounted(page);
-      // 连接服务器（TopBar 内联表单）；目录 tab 出现即连接成功
-      await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
+      // 连接服务器（⋯ 菜单内联表单）；目录 tab 出现即连接成功
+      await overflowConnectServer(page);
       await page.getByLabel('服务器地址').fill(`http://127.0.0.1:${port}`);
       await page.locator('.vv-server-form').getByRole('button', { name: '连接', exact: true }).click();
       await expect(page.locator('.vv-tab')).not.toHaveCount(0, { timeout: 10_000 });
@@ -709,8 +706,7 @@ test(
       route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: 'never' })
     );
     await waitAppMounted(page);
-    await page.locator('.vv-topbar').getByLabel('文件 URL').fill('http://127.0.0.1:4173/samples/m1/');
-    await page.locator('.vv-topbar').getByLabel('文件 URL').press('Enter');
+    await plusOpenUrl(page, 'http://127.0.0.1:4173/samples/m1/');
     // 不产出任何 tab（修复前：空名 tab 激活 + 「目录来源」空态）
     await expect(page.locator('.vv-tab')).toHaveCount(0);
     // 状态栏明确提示（showStatusNotice 4s 自动清除，紧跟提交断言）

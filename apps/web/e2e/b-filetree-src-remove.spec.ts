@@ -1,3 +1,4 @@
+import { overflowConnectServer } from './tabbar-actions';
 import { test, expect, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 import { startFakeFileServer } from './fake-file-server';
@@ -18,7 +19,7 @@ async function waitAppMounted(page: Page): Promise<void> {
   await page.waitForFunction(
     () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
   );
-  await expect(page.locator('.vv-topbar')).toBeVisible();
+  await expect(page.locator('.vv-tabbar')).toBeVisible();
 }
 
 async function openLocalDir(page: Page, files: Array<{ name: string; content: string }>, label: string): Promise<void> {
@@ -33,7 +34,7 @@ async function openLocalDir(page: Page, files: Array<{ name: string; content: st
 }
 
 async function connectForm(page: Page, base: string): Promise<void> {
-  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
+  await overflowConnectServer(page);
   await page.getByLabel('服务器地址').fill(base);
   await page.getByRole('button', { name: '连接', exact: true }).click();
 }

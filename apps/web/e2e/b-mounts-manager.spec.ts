@@ -1,3 +1,4 @@
+import { overflowConnectServer } from './tabbar-actions';
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 
@@ -146,7 +147,7 @@ async function seeTreeRow(page: Page, text: string): Promise<void> {
 
 async function openManager(page: Page): Promise<void> {
   await page.goto('/');
-  await expect(page.locator('.vv-topbar')).toBeVisible();
+  await expect(page.locator('.vv-tabbar')).toBeVisible();
   await page.locator('button[aria-label="目录管理"]').click();
   await expect(page.locator('.vv-mounts-manager')).toBeVisible();
 }
@@ -325,7 +326,7 @@ test.describe('b-mounts-manager 目录管理页', () => {
 
   test('MM-04 跨服务器作用域（M1）：他机注册记录徽标「注册于他机」、无打开钮、删除走强制本地删除逃生口', async ({ page }) => {
     await page.goto('/');
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
     // 装置：直写 IndexedDB v4 mounts store 预置「他机注册」代理记录
     // （serverBase 指向另一台服务器；本会话未连接 → 恒 offsite；seedMountRecord
     // 自带四 store 补建——本 evaluate 先于产品建库到时的空库竞态见其注释）
@@ -567,7 +568,7 @@ test.describe('b-mounts-manager 目录管理页', () => {
     };
     await mockS3(page, 'http://127.0.0.1:9004', { 'a.txt': 'restored direct body\n' });
     await page.goto('/');
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
     await seedMountRecord(page, rec);
     await seedSnapshot(page, {
       activeId: 'w1',
@@ -683,7 +684,7 @@ test.describe('b-mounts-manager 目录管理页', () => {
       ]
     });
     await page.reload();
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
     await expect.poll(() => postBodies.length, { timeout: 10_000 }).toBe(2); // 对账幂等 POST
     await page.locator('button[aria-label="目录管理"]').click();
     await expect(page.locator('.vv-mm-item', { hasText: 'proxy-e2e' }).getByText('已注册 rootIndex=2')).toBeVisible();
@@ -789,7 +790,7 @@ test.describe('b-mounts-manager 目录管理页', () => {
     //（旧 r2 目录+文件两 tab 被系统替换关闭）+ 根 0 host 目录 tab 重建 + 对账幂等
     // POST（挂载行恢复的服务端面）
     down = false;
-    await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
+    await overflowConnectServer(page);
     await page.getByLabel('服务器地址').fill(API);
     await page.getByRole('button', { name: '连接', exact: true }).click();
     await expect(page.locator('.vv-tab.active', { hasText: '127.0.0.1:8793' })).toBeVisible();

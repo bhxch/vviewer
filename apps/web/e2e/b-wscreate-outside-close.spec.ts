@@ -10,13 +10,13 @@ import { test, expect, type Page } from '@playwright/test';
  *   （触发器 → 「＋ 新建工作区…」，两个 project 视口同径）。
  */
 
-/** 等应用挂载（t-workspace waitAppMounted 同款：__vvOpenDirImpl 就绪 + TopBar 可见） */
+/** 等应用挂载（t-workspace waitAppMounted 同款：__vvOpenDirImpl 就绪 + TabBar 可见） */
 async function waitAppMounted(page: Page): Promise<void> {
   await page.goto('/');
   await page.waitForFunction(
     () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
   );
-  await expect(page.locator('.vv-topbar')).toBeVisible();
+  await expect(page.locator('.vv-tabbar')).toBeVisible();
 }
 
 test('WS-OC：wscreate 外点关闭——面板内点击不受误伤、面板外 pointerdown 关闭', async ({

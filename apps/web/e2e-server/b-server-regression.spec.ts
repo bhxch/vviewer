@@ -1,3 +1,4 @@
+import { overflowConnectServer } from '../e2e/tabbar-actions';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 import { applySettings, closeSettings, gotoGroup, openSettings } from '../e2e/settings-center';
@@ -39,10 +40,10 @@ test.beforeAll(() => {
   writeFileSync(`${FIXTURE}/srv-utf16le.txt`, bytes);
 });
 
-/** TopBar 连接表单（同 m5 惯例）→ 目录树可见 */
+/** ⋯ 菜单连接表单（同 m5 惯例）→ 目录树可见 */
 async function connectServer(page: Page): Promise<void> {
   await page.goto('/');
-  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
+  await overflowConnectServer(page);
   await page.getByLabel('服务器地址').fill(BASE);
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await expect(page.locator('.vv-tree-row', { hasText: 'hello.js' })).toBeVisible({

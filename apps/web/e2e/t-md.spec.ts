@@ -1,3 +1,4 @@
+import { overflowConnectServer } from './tabbar-actions';
 import { readFileSync } from 'node:fs';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -359,7 +360,7 @@ test('BUG-39 [探索]: 远程档 heading id 双引擎方案统一 user-content- 
     await waitHealthy(REMOTE);
     const rpage = await browser.newPage();
     await rpage.goto(`${REMOTE}/`);
-    await rpage.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
+    await overflowConnectServer(rpage);
     await rpage.getByLabel('服务器地址').fill(REMOTE);
     await rpage.getByRole('button', { name: '连接', exact: true }).click();
     await expect(rpage.locator('.vv-tree-row', { hasText: 'tmd39-' }).first()).toBeVisible({

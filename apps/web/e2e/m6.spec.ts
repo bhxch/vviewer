@@ -1,3 +1,4 @@
+import { overflowConnectServer } from './tabbar-actions';
 import type { ChildProcess } from 'node:child_process';
 import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -15,7 +16,7 @@ import { setComputePolicy } from './settings-center';
  * policy=remote（localStorage 注入 settings JSON）下打开远程文件，状态栏出现
  * 执行位置「远程」（小文件与大文件各一）→ Ctrl+Shift+F 全局搜索 "inner" 命中
  * m5/sub/inner.txt（远程 ripgrep 路径），点击结果打开该文件 → markdown 表格/
- * 任务列表渲染 + comrak 端点直连断言 → policy=local（TopBar UI 切换）回退状态栏「本地」。
+ * 任务列表渲染 + comrak 端点直连断言 → policy=local（设置中心 UI 切换）回退状态栏「本地」。
  *
  * server 生命周期：复用共享 harness（serverHarness.ts）——cargo build（增量）+
  * spawn 预编译二进制 + /api/health 轮询就绪 + 端口预检 + SIGTERM→SIGKILL 兜底停止。
@@ -74,9 +75,9 @@ test.afterAll(async () => {
   if (fixtureRoot !== null) await rm(fixtureRoot, { recursive: true, force: true });
 });
 
-/** 展开 TopBar 连接表单并提交（同 m5：每次测试用新 page，存储互不影响） */
+/** 展开 ⋯ 菜单连接表单并提交（同 m5：每次测试用新 page，存储互不影响） */
 async function connect(page: Page, token: string): Promise<void> {
-  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
+  await overflowConnectServer(page);
   await page.getByLabel('服务器地址').fill(BASE);
   await page.getByLabel('访问令牌').fill(token);
   await page.getByRole('button', { name: '连接', exact: true }).click();
@@ -236,7 +237,7 @@ test('policy=remote：markdown 正文走服务端 comrak，状态栏显示「渲
   await expect(md.locator('li.task-list-item')).toHaveCount(2);
 });
 
-test('policy=local（TopBar UI 切换）：高亮回退本地，状态栏显示「本地」', async ({ page }) => {
+test('policy=local（设置中心 UI 切换）：高亮回退本地，状态栏显示「本地」', async ({ page }) => {
   test.setTimeout(60_000);
   // 默认 auto 连接后经 UI 切 local（覆盖设置 UI 通道；auto 对远程文件也会选远程，须显式 local 才恒本地；设置中心「计算」组+应用）
   await page.goto('/');

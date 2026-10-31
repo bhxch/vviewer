@@ -1,3 +1,4 @@
+import { overflowConnectServer, plusOpenUrl } from '../e2e/tabbar-actions';
 import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,9 +31,9 @@ test.beforeAll(() => {
   copyFileSync(join(repoRoot, 'samples/m4/sample.zip'), join(BIN_DIR, 'zip-as-txt.txt'));
 });
 
-/** 展开 TopBar 连接表单并提交（服务器无 token 配置，令牌留空） */
+/** 展开 ⋯ 菜单连接表单并提交（服务器无 token 配置，令牌留空） */
 async function connect(page: import('@playwright/test').Page): Promise<void> {
-  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
+  await overflowConnectServer(page);
   await page.getByLabel('服务器地址').fill(BASE);
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await expect(page.locator('.vv-tree')).toBeVisible({ timeout: 15_000 });
@@ -64,9 +65,8 @@ test('BIN-10/BUG-13：改名 zip 两入口均重定向压缩包渲染器，判�
   await expect(pane.locator('.vv-tree-row', { hasText: 'hello.txt' })).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.vv-code-pre')).toHaveCount(0);
 
-  // ---- 入口二（TopBar 文件 URL）：createUrlStore 无扩展名文件名，签名改派链路由压缩包 ----
-  await page.locator('.vv-topbar').getByLabel('文件 URL').fill(`${BASE}/api/file?path=zip-as-txt.txt`);
-  await page.locator('.vv-topbar').getByLabel('文件 URL').press('Enter');
+  // ---- 入口二（＋ 菜单「粘贴 URL」）：createUrlStore 无扩展名文件名，签名改派链路由压缩包 ----
+  await plusOpenUrl(page, `${BASE}/api/file?path=zip-as-txt.txt`);
   await expect(page.locator('.vv-tab.active', { hasText: 'file' })).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.vv-archive .vv-tree-row', { hasText: 'hello.txt' })).toBeVisible({
     timeout: 20_000

@@ -1,3 +1,4 @@
+import { overflowConnectServer, plusOpenUrl } from './tabbar-actions';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { expect, type Page } from '@playwright/test';
@@ -10,7 +11,7 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  *
  * - IoStats：/api/file 响应计量（Range 请求头 + 响应体字节数；b-io-streaming 同口径）。
  * - UrlStats：URL 打开通道（url store 直连 fetch，不经 /api/file）的请求计量，
- *   以调用方给的 URL 谓词过滤（TopBar「粘贴文件 URL」→ createUrlStore 场景）。
+ *   以调用方给的 URL 谓词过滤（＋ 菜单「粘贴 URL」→ createUrlStore 场景）。
  * - startStreamFakeServer：内存字节表假 vviewer 服务器（t-workspace 先例扩展版）：
  *   /api/tree 带 size（条目可省略 size = size 未知形态）、/api/file 支持 Range
  *   （206 精确切片），可组合：
@@ -477,18 +478,18 @@ export async function startStreamFakeServer(
 
 // ---------------- 页面流装置（b-io-streaming 同名物的复制适配） ----------------
 
-/** 等应用挂载（__vvOpenDirImpl 注入钩子 + 顶栏可见） */
+/** 等应用挂载（__vvOpenDirImpl 注入钩子 + 标签栏可见） */
 export async function waitAppMounted(page: Page): Promise<void> {
   await page.goto('/');
   await page.waitForFunction(
     () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
   );
-  await expect(page.locator('.vv-topbar')).toBeVisible();
+  await expect(page.locator('.vv-tabbar')).toBeVisible();
 }
 
 /** 连接表单提交（token 留空） */
 export async function connectForm(page: Page, base: string): Promise<void> {
-  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
+  await overflowConnectServer(page);
   await page.getByLabel('服务器地址').fill(base);
   await page.getByRole('button', { name: '连接', exact: true }).click();
 }
@@ -516,11 +517,10 @@ export async function openRemoteFile(
   await openTreeFile(page, name);
 }
 
-/** TopBar「粘贴文件 URL」打开（url store）：表单填入回车 → 活动 tab 可见 */
+/** ＋ 菜单「粘贴 URL」打开（url store）：表单填入回车 → 活动 tab 可见 */
 export async function openUrlFile(page: Page, url: string, tabName: string): Promise<void> {
   await waitAppMounted(page);
-  await page.locator('.vv-topbar').getByLabel('文件 URL').fill(url);
-  await page.locator('.vv-topbar').getByLabel('文件 URL').press('Enter');
+  await plusOpenUrl(page, url);
   await expect(page.locator('.vv-tab.active', { hasText: tabName })).toBeVisible();
 }
 

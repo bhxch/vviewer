@@ -61,7 +61,7 @@ test('hljs 近似映射真实级联：暗色下 computed --hljs-keyword 取代�
 }) => {
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.goto('/');
-  // 等注入节点出现（AppShell/TopBar 挂载后异步加载 themes.json 再 applyCodeTheme），
+  // 等注入节点出现（AppShell 挂载后异步加载 themes.json 再 applyCodeTheme），
   // 然后取 :root 上 --hljs-keyword 的最终级联值；空串/重载窗口一律重试
   await expect
     .poll(

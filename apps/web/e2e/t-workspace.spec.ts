@@ -1,3 +1,4 @@
+import { overflowConnectServer } from './tabbar-actions';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test, expect, type Page } from '@playwright/test';
@@ -27,13 +28,13 @@ interface Payload {
   content?: string;
 }
 
-/** 等应用挂载（svelte:window drop 监听与 TopBar 就绪；t-shell waitAppMounted 同款） */
+/** 等应用挂载（svelte:window drop 监听与 TabBar 就绪；t-shell waitAppMounted 同款） */
 async function waitAppMounted(page: Page): Promise<void> {
   await page.goto('/');
   await page.waitForFunction(
     () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
   );
-  await expect(page.locator('.vv-topbar')).toBeVisible();
+  await expect(page.locator('.vv-tabbar')).toBeVisible();
 }
 
 /** 目录注入通道（t-shell openDir 同款；label = webkitRelativePath 首段 = store 名） */
@@ -167,14 +168,14 @@ async function startFakeServer(
 
 /** 连接表单提交（t-srv connectForm 同款；token 留空） */
 async function connectForm(page: Page, base: string): Promise<void> {
-  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
+  await overflowConnectServer(page);
   await page.getByLabel('服务器地址').fill(base);
   await page.getByRole('button', { name: '连接', exact: true }).click();
 }
 
 /**
  * 断言活动工作区名为 name。宽视口直读触发钮文案（`${name} ▾`）；窄视口
- * （≤600px，TopBar 断点 spec E §2.3）触发钮恒显「工作区 ▾」不含组名——经下拉内
+ * （≤600px，标签栏断点 spec E §2.3）触发钮恒显「工作区 ▾」不含组名——经下拉内
  * 活动行（.vv-ws-item.active）核对，断言后 Esc 还原关闭态。
  */
 const WS_TRIGGER_NARROW_MQ = '(max-width: 600px)';

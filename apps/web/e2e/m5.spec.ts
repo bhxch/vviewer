@@ -1,3 +1,4 @@
+import { overflowConnectServer } from './tabbar-actions';
 import { appendFileSync } from 'node:fs';
 import type { ChildProcess } from 'node:child_process';
 import { cp, mkdtemp, rm } from 'node:fs/promises';
@@ -10,7 +11,7 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 
 /**
  * M5 E2E 验收（Task 6）：server 模式全链路——
- * TopBar 连接表单（地址+token）→ health 校验 → 目录树（RemoteStore）→ 打开 sample.js
+ * ⋯ 菜单连接表单（地址+token）→ health 校验 → 目录树（RemoteStore）→ 打开 sample.js
  * → code tab 高亮 → SSE 变更推送驱动 tab 自动刷新（外部 fs 追加 → ≤3s 出现新文本）
  * → 错误 token 连接被拒（表单内错误提示）。
  *
@@ -68,9 +69,9 @@ test.afterAll(async () => {
   if (fixtureRoot !== null) await rm(fixtureRoot, { recursive: true, force: true });
 });
 
-/** 展开 TopBar 连接表单并提交（每次测试用新 page，sessionStorage 互不影响） */
+/** 展开 ⋯ 菜单连接表单并提交（每次测试用新 page，sessionStorage 互不影响） */
 async function connect(page: import('@playwright/test').Page, token: string): Promise<void> {
-  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
+  await overflowConnectServer(page);
   await page.getByLabel('服务器地址').fill(BASE);
   await page.getByLabel('访问令牌').fill(token);
   await page.getByRole('button', { name: '连接', exact: true }).click();

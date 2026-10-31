@@ -1,3 +1,4 @@
+import { overflowConnectServer } from '../e2e/tabbar-actions';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import * as os from 'node:os';
@@ -208,7 +209,7 @@ function hitFrames(outcome: SearchOutcome): SearchFrame[] {
 
 /** 连接表单提交（t-srv/b-io-streaming connectForm 同款；token 留空）。 */
 async function connectForm(page: Page, base: string): Promise<void> {
-  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
+  await overflowConnectServer(page);
   await page.getByLabel('服务器地址').fill(base);
   await page.getByRole('button', { name: '连接', exact: true }).click();
 }

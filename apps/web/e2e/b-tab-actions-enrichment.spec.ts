@@ -1,3 +1,4 @@
+import { overflowConnectServer } from './tabbar-actions';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test, expect, type Locator, type Page } from '@playwright/test';
@@ -46,13 +47,13 @@ const REG_SPECIAL = /[.*+?^${}()|[\]\\]/g;
 
 const UNDO_NOTICE = '没有可重新打开的标签页';
 
-/** 等应用挂载（svelte:window drop 监听与 TopBar 就绪；t-shell 同款） */
+/** 等应用挂载（svelte:window drop 监听与 TabBar 就绪；t-shell 同款） */
 async function waitAppMounted(page: Page): Promise<void> {
   await page.goto('/');
   await page.waitForFunction(
     () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
   );
-  await expect(page.locator('.vv-topbar')).toBeVisible();
+  await expect(page.locator('.vv-tabbar')).toBeVisible();
 }
 
 /** 目录注入通道（__vvOpenDirImpl；label = webkitRelativePath 首段 = store 名 = dir tab 名） */
@@ -205,9 +206,9 @@ async function startFakeServer(
   };
 }
 
-/** 连接表单提交（TopBar 内联表单；token 缺省留空——留空/有值决定重连清扫 vs 实例复用） */
+/** 连接表单提交（⋯ 菜单内联表单；token 缺省留空——留空/有值决定重连清扫 vs 实例复用） */
 async function connectForm(page: Page, base: string, token = ''): Promise<void> {
-  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
+  await overflowConnectServer(page);
   await page.getByLabel('服务器地址').fill(base);
   if (token !== '') await page.getByLabel('访问令牌').fill(token);
   await page.getByRole('button', { name: '连接', exact: true }).click();

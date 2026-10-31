@@ -33,7 +33,7 @@ interface DropPayload {
   b64?: string;
 }
 
-/** 等应用挂载（svelte:window 的 drop 监听与 TopBar 就绪；t-shell waitAppMounted 同款） */
+/** 等应用挂载（svelte:window 的 drop 监听与 TabBar 就绪；t-shell waitAppMounted 同款） */
 async function waitAppMounted(page: Page): Promise<void> {
   // window drop 监听就绪探针（EventTarget 包装置位，测试侧装置；先于一切页面脚本注册）：
   // 应用的 svelte:window drop 监听挂载即置位——waitAppMounted 契约（首行注释）的实测锚。
@@ -47,7 +47,7 @@ async function waitAppMounted(page: Page): Promise<void> {
     };
   });
   await page.goto('/');
-  await expect(page.locator('.vv-topbar')).toBeVisible();
+  await expect(page.locator('.vv-tabbar')).toBeVisible();
   // drop 监听就绪锚（OPEN-01/02/06 轮流 flaky 的根治点）：3 worker 负载下 topbar 入 DOM
   // 可先于 svelte:window drop 监听挂载（2026-10-24 插桩实测：失败现场派发时
   // pre={topbar:true, listeners:1, openDir:undefined, sw:null}——合成 drop 仅自设探针

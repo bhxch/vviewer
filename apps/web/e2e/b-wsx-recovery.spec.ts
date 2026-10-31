@@ -1,3 +1,4 @@
+import { overflowConnectServer } from './tabbar-actions';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test, expect, type Page } from '@playwright/test';
@@ -36,13 +37,13 @@ interface Payload {
   content?: string;
 }
 
-/** 等应用挂载（svelte:window drop 监听与 TopBar 就绪；t-shell waitAppMounted 同款） */
+/** 等应用挂载（svelte:window drop 监听与 TabBar 就绪；t-shell waitAppMounted 同款） */
 async function waitAppMounted(page: Page): Promise<void> {
   await page.goto('/');
   await page.waitForFunction(
     () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
   );
-  await expect(page.locator('.vv-topbar')).toBeVisible();
+  await expect(page.locator('.vv-tabbar')).toBeVisible();
 }
 
 /** 合成 drop 注入单文件并等 tab 激活（t-shell SHELL-03① 同款通道） */
@@ -74,7 +75,7 @@ async function createWorkspace(page: Page, name: string): Promise<void> {
 
 /** 连接表单提交（t-srv connectForm 同款；token 留空——带 token 用例自行填访问令牌） */
 async function connectForm(page: Page, base: string): Promise<void> {
-  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
+  await overflowConnectServer(page);
   await page.getByLabel('服务器地址').fill(base);
   await page.getByRole('button', { name: '连接', exact: true }).click();
 }
@@ -624,7 +625,7 @@ test('WSX-10：RemoteSourceModal token 会话失效 401——状态码与服务�
   try {
     await waitAppMounted(page);
     // 带 token 连接（访问令牌表单；ticket 鉴权预检 + tree 均过）
-    await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
+    await overflowConnectServer(page);
     await page.getByLabel('服务器地址').fill(fake.base);
     await page.getByLabel('访问令牌').fill('wsx-tok-1');
     await page.getByRole('button', { name: '连接', exact: true }).click();
@@ -653,7 +654,7 @@ test('WSX-10：RemoteSourceModal token 会话失效 401——状态码与服务�
     await expect(browse).toHaveCount(0);
     await page.keyboard.press('Escape');
     await expect(modal).toHaveCount(0);
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
   } finally {
     await fake.close();
   }
