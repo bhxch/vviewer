@@ -88,16 +88,17 @@ async function seedServerSession(page: Page, base: string, fsRoots: number | nul
 }
 
 /** IndexedDB 直写装置（MM-04 先例形态；b-mounts-deep seedMountRecord 同款补建）：
- * v4 `mounts` store 预置记录。onupgradeneeded 自带四 store 补建——goto 后产品建库
- * 是异步的，若本 evaluate 先到，open('vviewer',4) 触发升级而无补建处理器会落成
- * 空库，transaction('mounts') 抛 NotFoundError（MM-04 failed / MM-08 flaky 根因）。 */
+ * `mounts` store 预置记录。onupgradeneeded 自带五 store 幂等补建——goto 后产品建库
+ * 是异步的，若本 evaluate 先到，免版本 open 也触发升级（空库 v0→v1）而无补建处理器
+ * 会落成空库，transaction('mounts') 抛 NotFoundError（MM-04 failed / MM-08 flaky 根因）；
+ * 免版本而非钉死版本号——产品 db() 先升满版后，显式旧版本 open 会 VersionError。 */
 async function seedMountRecord(page: Page, rec: Record<string, unknown>): Promise<void> {
   await page.evaluate(async (rec) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const req = indexedDB.open('vviewer', 4);
+      const req = indexedDB.open('vviewer');
       req.onupgradeneeded = () => {
         const d = req.result;
-        for (const s of ['kv', 'themes', 'fonts', 'mounts']) {
+        for (const s of ['kv', 'themes', 'fonts', 'mounts', 'iconThemes']) {
           if (!d.objectStoreNames.contains(s)) d.createObjectStore(s);
         }
       };
@@ -118,10 +119,10 @@ async function seedMountRecord(page: Page, rec: Record<string, unknown>): Promis
 async function seedSnapshot(page: Page, snap: Record<string, unknown>): Promise<void> {
   await page.evaluate(async (snap) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const req = indexedDB.open('vviewer', 4);
+      const req = indexedDB.open('vviewer');
       req.onupgradeneeded = () => {
         const d = req.result;
-        for (const s of ['kv', 'themes', 'fonts', 'mounts']) {
+        for (const s of ['kv', 'themes', 'fonts', 'mounts', 'iconThemes']) {
           if (!d.objectStoreNames.contains(s)) d.createObjectStore(s);
         }
       };
@@ -603,13 +604,13 @@ test.describe('b-mounts-manager 目录管理页', () => {
     await expect(page.locator('.vv-statusbar')).toContainText('此源不支持变更推送');
 
     // 记录删除（用户删了挂载）→ 刷新：来源不重建，文件 tab 落占位（既有降级链）；
-    // open 带四 store 补建（同 seedMountRecord——补建对既有库是 no-op，纯防御）
+    // open 带五 store 补建（同 seedMountRecord——补建对既有库是 no-op，纯防御）
     await page.evaluate(async (id) => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
-        const req = indexedDB.open('vviewer', 4);
+        const req = indexedDB.open('vviewer');
         req.onupgradeneeded = () => {
           const d = req.result;
-          for (const s of ['kv', 'themes', 'fonts', 'mounts']) {
+          for (const s of ['kv', 'themes', 'fonts', 'mounts', 'iconThemes']) {
             if (!d.objectStoreNames.contains(s)) d.createObjectStore(s);
           }
         };

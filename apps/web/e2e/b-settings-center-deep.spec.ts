@@ -50,10 +50,10 @@ function exportFile(settings: Record<string, unknown>, schemaVersion = 1): Buffe
 function kvKeys(page: Page): Promise<string[]> {
   return page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const open = indexedDB.open('vviewer', 4);
+      const open = indexedDB.open('vviewer');
       open.onupgradeneeded = () => {
         const d = open.result;
-        for (const s of ['kv', 'themes', 'fonts', 'mounts']) {
+        for (const s of ['kv', 'themes', 'fonts', 'mounts', 'iconThemes']) {
           if (!d.objectStoreNames.contains(s)) d.createObjectStore(s);
         }
       };
@@ -72,14 +72,15 @@ function kvKeys(page: Page): Promise<string[]> {
   });
 }
 
-/** kv 直构种子（页面加载后 evaluate 写入；b-wsx-recovery 同通道，自带补建防早挂载竞态） */
+/** kv 直构种子（页面加载后 evaluate 写入；b-wsx-recovery 同通道，自带五 store 幂等
+ * 补建防早挂载竞态；免版本 open——产品 db() 先升满版后显式旧版本会 VersionError） */
 async function seedKv(page: Page, entries: Record<string, unknown>): Promise<void> {
   await page.evaluate(async (es) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const open = indexedDB.open('vviewer', 4);
+      const open = indexedDB.open('vviewer');
       open.onupgradeneeded = () => {
         const d = open.result;
-        for (const s of ['kv', 'themes', 'fonts', 'mounts']) {
+        for (const s of ['kv', 'themes', 'fonts', 'mounts', 'iconThemes']) {
           if (!d.objectStoreNames.contains(s)) d.createObjectStore(s);
         }
       };

@@ -1,7 +1,7 @@
 // mountsSync.test.ts — 代理挂载前端持久化与连接对账（目录挂载 spec 2026-10-19 §3，
 // plan Task 2）。IndexedDB 用 fake-indexeddb（每用例全新库），网络面 stub 全局
 // fetch 按 method+URL 路由；挂载根 watch 态判定（serverHealthCache.isMountRootStoreId）
-// 与 session v3→v4 迁移用例按 brief 的 Task 2 测试清单就近收编本文件。
+// 与 session v3 存量升版迁移用例按 brief 的 Task 2 测试清单就近收编本文件。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { webcrypto } from 'node:crypto';
@@ -198,10 +198,10 @@ describe('displayEndpoint（server display_endpoint 镜像：展示面 userinfo 
   });
 });
 
-// ---------- v3→v4 迁移（session.ts DB_VERSION 顺延） ----------
+// ---------- v3 存量升版迁移（session.ts DB_VERSION 顺延，现升 v5：mounts/iconThemes 同轮补建） ----------
 
-describe('mounts store 持久化与 v3→v4 迁移', () => {
-  it('v3 库（kv/themes/fonts 存量）打开升 v4：mounts store 补建，存量原样保留', async () => {
+describe('mounts store 持久化与 v3 存量升版迁移', () => {
+  it('v3 库（kv/themes/fonts 存量）打开升最新版：mounts store 补建，存量原样保留', async () => {
     // 造 v3 库：三 store 各存一条（session.ts v3 形态）
     await new Promise<void>((resolve, reject) => {
       const req = indexedDB.open('vviewer', 3);
@@ -227,9 +227,10 @@ describe('mounts store 持久化与 v3→v4 迁移', () => {
     const rec = recordOf();
     await saveProxyMount(rec);
     expect(await listProxyMounts()).toEqual([rec]);
-    // 存量 fonts 数据原样保留（迁移不清洗）
+    // 存量 fonts 数据原样保留（迁移不清洗；免版本 open——库已被 db() 升满版，
+    // 显式旧版本 open 会 VersionError）
     const kept = await new Promise<unknown>((resolve, reject) => {
-      const req = indexedDB.open('vviewer', 4);
+      const req = indexedDB.open('vviewer');
       req.onsuccess = () => {
         const d = req.result;
         const tx = d.transaction('fonts', 'readonly');

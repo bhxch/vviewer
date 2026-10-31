@@ -1,4 +1,4 @@
-import type { VscodeThemeJson } from '@bhxch/vviewer-highlight';
+import type { NormalizedIconTheme, VscodeThemeJson } from '@bhxch/vviewer-highlight';
 import type { WorkspacesSnapshot } from '../workspaceStore';
 
 export interface TabSnapshot {
@@ -46,10 +46,14 @@ export const FONTS = 'fonts';
 /** mounts store（目录挂载 spec §3，阶段二 Task 2）：前端保存的代理挂载记录，
  * CRUD 与连接对账在 mountsSync.ts。 */
 export const MOUNTS = 'mounts';
+/** iconThemes store（图标主题 spec §2.3，Task 2）：导入的图标主题记录
+ * （ImportedIconTheme），CRUD 在本文件、导入管线在 vsixImport.ts。 */
+export const ICON_THEMES = 'iconThemes';
 /** v2：补建 themes store；v3：补建 fonts store（字体系统 spec §5.1）；
- * v4：补建 mounts store（目录挂载 spec §3——顺延规则：fonts 已占 v3）。
+ * v4：补建 mounts store（目录挂载 spec §3——顺延规则：fonts 已占 v3）；
+ * v5：补建 iconThemes store（图标主题 spec §2.3——顺延规则：mounts 已占 v4）。
  * 存量原样保留，onupgradeneeded 按需补建。 */
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 /** 打开（必要时升级）vviewer 库（export：同库跨 store 的兄弟模块 fontsStore 复用连接）。 */
 export function db(): Promise<IDBDatabase> {
@@ -61,6 +65,7 @@ export function db(): Promise<IDBDatabase> {
       if (!d.objectStoreNames.contains(THEMES)) d.createObjectStore(THEMES);
       if (!d.objectStoreNames.contains(FONTS)) d.createObjectStore(FONTS);
       if (!d.objectStoreNames.contains(MOUNTS)) d.createObjectStore(MOUNTS);
+      if (!d.objectStoreNames.contains(ICON_THEMES)) d.createObjectStore(ICON_THEMES);
     };
     req.onsuccess = () => {
       const conn = req.result;
@@ -150,6 +155,65 @@ export async function deleteTheme(id: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = d.transaction(THEMES, 'readwrite');
     tx.objectStore(THEMES).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'));
+  });
+}
+
+/** 图标主题记录内的单字体文件（图标主题 spec §2.3）：path 为主题 fonts[].src 的
+ * 基名（导入按基名关联，防 './' 前缀差异）；format 从扩展名推断（woff/woff2/
+ * ttf/otf，形态外省略——FontFace 注册按 buffer 自解析，format 仅元数据）；data
+ * 为字体原始字节。 */
+export interface ImportedIconThemeFont {
+  path: string;
+  format?: string;
+  data: ArrayBuffer;
+}
+
+/**
+ * 导入图标主题（图标主题 spec §2.3）：id='imported:<随机8>'；manifest 存 T1
+ * validateVscodeIconTheme 的归一化查表产物（五 Map + 回退键，structured clone
+ * 原生保形，put/get 免重建）；fonts 为主题声明的字体文件原始字节（导入时同批
+ * 关联落齐）。origin 为 Open VSX 来源元数据（T5 写入，本地导入无此字段）。
+ */
+export interface ImportedIconTheme {
+  id: string;
+  name: string;
+  manifest: NormalizedIconTheme;
+  fonts: ImportedIconThemeFont[];
+  source: 'json' | 'vsix';
+  origin?: { publisher: string; extension: string; version: string; checkedAt: number };
+  addedAt: number;
+}
+
+/** 图标主题库列表（图标主题 spec §2.3）。 */
+export async function listIconThemes(): Promise<ImportedIconTheme[]> {
+  const d = await db();
+  return new Promise((resolve, reject) => {
+    const req = d.transaction(ICON_THEMES, 'readonly').objectStore(ICON_THEMES).getAll();
+    req.onsuccess = () => resolve((req.result as ImportedIconTheme[] | undefined) ?? []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/** 入库/更新（iconThemes store 无 keyPath，自管 id 键，同 putTheme 口径）。 */
+export async function putIconTheme(t: ImportedIconTheme): Promise<void> {
+  const d = await db();
+  return new Promise((resolve, reject) => {
+    const tx = d.transaction(ICON_THEMES, 'readwrite');
+    tx.objectStore(ICON_THEMES).put(t, t.id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'));
+  });
+}
+
+export async function deleteIconTheme(id: string): Promise<void> {
+  const d = await db();
+  return new Promise((resolve, reject) => {
+    const tx = d.transaction(ICON_THEMES, 'readwrite');
+    tx.objectStore(ICON_THEMES).delete(id);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'));

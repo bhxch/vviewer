@@ -361,7 +361,7 @@ test('MTS-06: DELETE 矩阵——运行时 204/再删 404/静态与 fs 根 405/�
 
 // ---------------------------------------------------------------- MTS-IDB
 
-test('MTS-IDB: 真实浏览器 IDB v3→v4 迁移——fonts 存量保留 + mounts store 补建 + 共存读写', async ({
+test('MTS-IDB: 真实浏览器 IDB v3→v5 迁移——fonts 存量保留 + mounts/iconThemes 补建 + 共存读写', async ({
   page
 }) => {
   test.setTimeout(90_000);
@@ -407,12 +407,12 @@ test('MTS-IDB: 真实浏览器 IDB v3→v4 迁移——fonts 存量保留 + moun
     });
   });
 
-  // ② 进应用：AppShell onMount（restore/loadEnabledFontFaces）→ db() 以 v4 open
-  //    现有 v3 库 → 真实 onupgradeneeded 补建 mounts
+  // ② 进应用：AppShell onMount（restore/loadEnabledFontFaces）→ db() 以 v5 open
+  //    现有 v3 库 → 真实 onupgradeneeded 补建 mounts/iconThemes
   await page.goto('/');
 
   // ③ 探针：免版本 open 观察实际形态（轮询等待应用侧升级完成；免版本 open
-  //    自身绝不触发升级——读到 4 只能来自应用的 v4 open）
+  //    自身绝不触发升级——读到 5 只能来自应用的 v5 open）
   const probe = await page.evaluate(async () => {
     const open = (): Promise<{ version: number; stores: string[]; conn: IDBDatabase }> =>
       new Promise((resolve, reject) => {
@@ -424,7 +424,7 @@ test('MTS-IDB: 真实浏览器 IDB v3→v4 迁移——fonts 存量保留 + moun
         req.onerror = () => reject(req.error);
       });
     let state = await open();
-    for (let i = 0; i < 100 && state.version !== 4; i++) {
+    for (let i = 0; i < 100 && state.version !== 5; i++) {
       state.conn.close();
       await new Promise((r) => setTimeout(r, 100));
       state = await open();
@@ -437,7 +437,7 @@ test('MTS-IDB: 真实浏览器 IDB v3→v4 迁移——fonts 存量保留 + moun
         req.onsuccess = () => resolve(req.result ?? null);
         req.onerror = () => reject(req.error);
       });
-    // mounts 写读回环（v4 新 store 可写）+ fonts 存量读回（迁移不丢数据）
+    // mounts 写读回环（v4 补建的 store 可写）+ fonts 存量读回（迁移不丢数据）
     const roundtrip = await new Promise<unknown>((resolve, reject) => {
       const tx = conn.transaction('mounts', 'readwrite');
       tx.objectStore('mounts').put(
@@ -452,10 +452,10 @@ test('MTS-IDB: 真实浏览器 IDB v3→v4 迁移——fonts 存量保留 + moun
     return { version, stores, font, roundtrip };
   });
 
-  expect(probe.version).toBe(4); // 应用侧 v4 open 已完成升级
+  expect(probe.version).toBe(5); // 应用侧 v5 open 已完成升级
   // objectStoreNames 按字典序返回（DOMStringList 排序语义）：恰为 v3 三 store +
-  // v4 补建 mounts，无多余
-  expect(probe.stores.slice().sort()).toEqual(['fonts', 'kv', 'mounts', 'themes']);
+  // v4 补建 mounts + v5 补建 iconThemes，无多余
+  expect(probe.stores.slice().sort()).toEqual(['fonts', 'iconThemes', 'kv', 'mounts', 'themes']);
   expect(probe.font).toMatchObject({ id: 'font:e2e-mig', name: 'E2E 迁移字体', enabled: false, size: 24 }) // v3 fonts 存量迁移后原样保留;
   expect(probe.roundtrip).toMatchObject({ id: 'probe-1', kind: 'proxy', backend: 'webdav' }) // mounts store 迁移后可写可读;
 });

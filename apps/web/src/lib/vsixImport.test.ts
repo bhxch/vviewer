@@ -1,13 +1,21 @@
 // apps/web/src/lib/vsixImport.test.ts — 主题库存储 + JSON/VSIX 导入解析单测。
 // zip 构造用真实 jszip（devDependency，与 render-archive 的 ^3.10.1 对齐）；
 // IndexedDB 用 fake-indexeddb/auto（session.test.ts 同款先例）。
-// 注意：fake-indexeddb 的 'vviewer' 库在本文件内持久，故 v1→v2 迁移用例
-// 必须最先声明执行（后续用例再开 v2 时不再触发 upgrade）。
+// 注意：fake-indexeddb 的 'vviewer' 库在本文件内持久，故 v1 升版迁移用例
+// 必须最先声明执行（后续用例再开新版时不再触发 upgrade）。
 import 'fake-indexeddb/auto';
 import { describe, expect, it } from 'vitest';
 import JSZip from 'jszip';
-import { deleteTheme, listThemes as listImportedThemes, loadSession, putTheme, type ImportedTheme } from './stores/session';
-import { importThemeFiles, listVsixThemes, MAX_THEME_JSON_BYTES } from './vsixImport';
+import {
+  deleteTheme,
+  listIconThemes,
+  listThemes as listImportedThemes,
+  loadSession,
+  putTheme,
+  type ImportedTheme
+} from './stores/session';
+import { MAX_FONT_BYTES } from './stores/fontsStore';
+import { importIconThemeFiles, importThemeFiles, listVsixThemes, MAX_THEME_JSON_BYTES } from './vsixImport';
 
 const NIGHT_OWL = JSON.stringify({
   name: 'Night Owl',
@@ -178,5 +186,101 @@ describe('importThemeFiles', () => {
     expect(errors.length).toBe(2);
     expect(errors[0]).toContain('bad.json');
     expect(errors[1]).toContain('readme.txt');
+  });
+});
+
+// ---------- importIconThemeFiles（图标主题 json/vsix 双通道，字体同批校验） ----------
+
+// 图标主题夹具：fontCharacter 经 JSON 转义落为单字符 U+E001；fonts[].src 为带
+// './' 前缀的相对路径（导入按基名关联，brief 定口径，防前缀差异）
+const ICON_THEME = JSON.stringify({
+  iconDefinitions: { file: { fontCharacter: '\\e001' } },
+  fonts: [{ id: 'seti', src: ['./seti.woff'] }],
+  fileExtensions: { js: 'file' }
+});
+const FONT_BYTES = 'FAKE-FONT-BYTES';
+const ICON_PKG = (iconThemes: unknown): string => JSON.stringify({ name: 'owl-icons', contributes: { iconThemes } });
+
+describe('importIconThemeFiles', () => {
+  it('①json+woff 同批：入库成功，fonts.data 为 ArrayBuffer 且按基名关联', async () => {
+    const { imported, errors } = await importIconThemeFiles([
+      new File([ICON_THEME], 'my-icons.json'),
+      new File([FONT_BYTES], 'seti.woff')
+    ]);
+    expect(errors).toEqual([]);
+    expect(imported).toMatchObject([{ name: 'my-icons', source: 'json' }]);
+    expect(imported[0]!.fonts).toEqual([{ path: 'seti.woff', format: 'woff', data: expect.any(ArrayBuffer) }]);
+    expect(new TextDecoder().decode(imported[0]!.fonts[0]!.data)).toBe(FONT_BYTES);
+    expect(imported[0]!.manifest.fileExtensions.get('js')).toMatchObject({ char: '\ue001' });
+    expect((await listIconThemes()).map((t) => t.id)).toContain(imported[0]!.id);
+  });
+
+  it('②缺字体：主题整条拒绝（不部分入库），errors 含主题文件名与缺失字体名', async () => {
+    const before = (await listIconThemes()).length;
+    const { imported, errors } = await importIconThemeFiles([new File([ICON_THEME], 'my-icons.json')]);
+    expect(imported).toEqual([]);
+    expect(errors.length).toBe(1);
+    expect(errors[0]).toContain('my-icons.json');
+    expect(errors[0]).toContain('seti.woff');
+    expect((await listIconThemes()).length).toBe(before);
+  });
+
+  it('③vsix 内 contributes.iconThemes 完整流：包内字体按基名关联入库', async () => {
+    const entries = {
+      'extension/package.json': ICON_PKG([{ label: 'Owl Icons', path: './icons/owl.json' }]),
+      'extension/icons/owl.json': ICON_THEME,
+      'extension/icons/seti.woff': FONT_BYTES
+    };
+    const { imported, errors } = await importIconThemeFiles([await zipToVsixFile(entries)]);
+    expect(errors).toEqual([]);
+    expect(imported).toMatchObject([{ name: 'Owl Icons', source: 'vsix' }]);
+    expect(imported[0]!.fonts[0]).toMatchObject({ path: 'seti.woff', format: 'woff' });
+    expect(imported[0]!.fonts[0]!.data.byteLength).toBe(FONT_BYTES.length);
+  });
+
+  it('④vsix 只有 contributes.themes（颜色主题）→「扩展包内未找到图标主题」', async () => {
+    const { imported, errors } = await importIconThemeFiles([await zipToVsixFile(GOOD_VSIX_ENTRIES)]);
+    expect(imported).toEqual([]);
+    expect(errors.length).toBe(1);
+    expect(errors[0]).toContain('未找到图标主题');
+  });
+
+  it('⑤多主题 vsix：全导入并列（各自字体独立关联）', async () => {
+    const themeA = JSON.stringify({
+      iconDefinitions: { file: { fontCharacter: '\\e001' } },
+      fonts: [{ id: 'a', src: ['./a.woff'] }]
+    });
+    const themeB = JSON.stringify({
+      iconDefinitions: { folder: { fontCharacter: '\\e002' } },
+      fonts: [{ id: 'b', src: ['b.woff'] }]
+    });
+    const entries = {
+      'extension/package.json': ICON_PKG([
+        { label: 'Icons A', path: './icons/a.json' },
+        { label: 'Icons B', path: './icons/b.json' }
+      ]),
+      'extension/icons/a.json': themeA,
+      'extension/icons/a.woff': FONT_BYTES,
+      'extension/icons/b.json': themeB,
+      'extension/icons/b.woff': 'FONT-B-BYTES'
+    };
+    const { imported, errors } = await importIconThemeFiles([await zipToVsixFile(entries)]);
+    expect(errors).toEqual([]);
+    expect(imported.map((t) => t.name)).toEqual(['Icons A', 'Icons B']);
+    expect(imported[0]!.fonts[0]!.path).toBe('a.woff');
+    expect(imported[1]!.fonts[0]!.path).toBe('b.woff');
+  });
+
+  it('⑥字体超 30MB：该主题整条拒绝且 errors 含字体名（30MB 闸逐字体生效）', async () => {
+    const big = new Uint8Array(MAX_FONT_BYTES + 1);
+    const { imported, errors } = await importIconThemeFiles([
+      new File([ICON_THEME], 'my-icons.json'),
+      new File([big], 'seti.woff')
+    ]);
+    expect(imported).toEqual([]);
+    expect(errors.length).toBe(1);
+    expect(errors[0]).toContain('my-icons.json');
+    expect(errors[0]).toContain('seti.woff');
+    expect(errors[0]).toContain('30MB');
   });
 });

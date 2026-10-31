@@ -72,17 +72,18 @@ async function seedServerSession(page: Page, base: string, fsRoots: number | nul
   );
 }
 
-/** IndexedDB 直写 v4 mounts store 记录（应用首导航建库后调用）。onupgradeneeded
- *  自带四 store 补建（b-settings-center-deep seedKv 同款）：goto 后产品建库是异步的，
- *  若本 evaluate 先到，open('vviewer',4) 触发升级而无补建处理器会落成空库，
- *  transaction('mounts') 抛 NotFoundError（MM-17/18 flaky 根因）。 */
+/** IndexedDB 直写 mounts store 记录（应用首导航建库后调用）。onupgradeneeded
+ *  自带五 store 幂等补建（b-settings-center-deep seedKv 同款）：goto 后产品建库是
+ *  异步的，若本 evaluate 先到，免版本 open 也触发升级（空库 v0→v1）而无补建处理器
+ *  会落成空库，transaction('mounts') 抛 NotFoundError（MM-17/18 flaky 根因）；免版本
+ *  而非钉死版本号——产品 db() 先升满版后，显式旧版本 open 会 VersionError。 */
 async function seedMountRecord(page: Page, rec: Record<string, unknown>): Promise<void> {
   await page.evaluate(async (rec) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const req = indexedDB.open('vviewer', 4);
+      const req = indexedDB.open('vviewer');
       req.onupgradeneeded = () => {
         const d = req.result;
-        for (const s of ['kv', 'themes', 'fonts', 'mounts']) {
+        for (const s of ['kv', 'themes', 'fonts', 'mounts', 'iconThemes']) {
           if (!d.objectStoreNames.contains(s)) d.createObjectStore(s);
         }
       };
@@ -103,10 +104,10 @@ async function seedMountRecord(page: Page, rec: Record<string, unknown>): Promis
 async function seedSnapshot(page: Page, snap: Record<string, unknown>): Promise<void> {
   await page.evaluate(async (snap) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const req = indexedDB.open('vviewer', 4);
+      const req = indexedDB.open('vviewer');
       req.onupgradeneeded = () => {
         const d = req.result;
-        for (const s of ['kv', 'themes', 'fonts', 'mounts']) {
+        for (const s of ['kv', 'themes', 'fonts', 'mounts', 'iconThemes']) {
           if (!d.objectStoreNames.contains(s)) d.createObjectStore(s);
         }
       };

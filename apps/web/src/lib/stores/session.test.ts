@@ -3,7 +3,18 @@ import { describe, it, expect, vi } from 'vitest';
 
 // fake-indexeddb 提供 IDB 实现
 import 'fake-indexeddb/auto';
-import { loadSession, saveTabs, saveDirHandle, maxTabSeqOf, tabSeqOf } from './session';
+import { normalizeIconTheme } from '@bhxch/vviewer-highlight';
+import {
+  deleteIconTheme,
+  listIconThemes,
+  loadSession,
+  putIconTheme,
+  saveTabs,
+  saveDirHandle,
+  maxTabSeqOf,
+  tabSeqOf,
+  type ImportedIconTheme
+} from './session';
 import { loadSettings, saveSettings } from './settings';
 import { DEFAULT_LAYOUT } from '../layout';
 
@@ -82,14 +93,48 @@ describe('tab id 序号解析（openFlow seq 快照基线）', () => {
   });
 });
 
-// 注意：此用例会把 'vviewer' 库升到 v5（此后以 DB_VERSION=4 显式 open 会
+// 图标主题库（IndexedDB v5 `iconThemes` store，图标主题 spec Task 2）：manifest 为
+// T1 归一化查表实体（Map 经 structured clone 保形）、fonts 存字体原始字节、origin
+// 为 Open VSX 来源元数据（T5 写入，本任务只管形状与 round-trip）。须在多标签
+// 升版用例前执行（同文件内库持久，升满版后 db() 不再可用——见文件尾注释）。
+describe('iconThemes store（v5 CRUD round-trip）', () => {
+  it('putIconTheme/listIconThemes/deleteIconTheme：manifest Map 保形 + origin 字段保留', async () => {
+    const manifest = normalizeIconTheme({
+      iconDefinitions: { file: { fontCharacter: '\\e001', fontColor: '#5f7a61' } },
+      fileExtensions: { JS: 'file' }
+    });
+    const t: ImportedIconTheme = {
+      id: 'imported:icontest',
+      name: 'Icon Test',
+      manifest,
+      fonts: [{ path: 'seti.woff', format: 'woff', data: new TextEncoder().encode('wOFF-bytes').buffer as ArrayBuffer }],
+      source: 'json',
+      origin: { publisher: 'pub', extension: 'ext', version: '1.2.3', checkedAt: 42 },
+      addedAt: 1
+    };
+    await putIconTheme(t);
+    const loaded = (await listIconThemes()).find((x) => x.id === t.id);
+    expect(loaded?.name).toBe('Icon Test');
+    expect(loaded?.source).toBe('json');
+    expect(loaded?.origin).toEqual({ publisher: 'pub', extension: 'ext', version: '1.2.3', checkedAt: 42 });
+    expect(loaded?.fonts[0]).toMatchObject({ path: 'seti.woff', format: 'woff' });
+    expect(loaded?.fonts[0]?.data.byteLength).toBe(10);
+    // manifest 归一化实体：Map 经 IndexedDB structured clone 保形，键落表已 lowercase
+    expect(loaded?.manifest.fileExtensions).toBeInstanceOf(Map);
+    expect(loaded?.manifest.fileExtensions.get('js')).toMatchObject({ char: '\ue001', color: '#5f7a61' });
+    await deleteIconTheme(t.id);
+    expect((await listIconThemes()).some((x) => x.id === t.id)).toBe(false);
+  });
+});
+
+// 注意：此用例会把 'vviewer' 库升到 v6（此后以 DB_VERSION=5 显式 open 会
 // VersionError），必须保持本文件最后一个用例——fake-indexeddb 的库在单文件内持久。
 describe('多标签让路（db 连接 onversionchange）', () => {
   it('既有连接收到 versionchange 自闭，他方升版不被 blocked 卡死', async () => {
-    await loadSession(); // 持有两条 v4 连接（tabs/dirHandle 各一次 kvGet→db()，session.ts 不主动关连接，即"旧标签页"）
+    await loadSession(); // 持有两条 v5 连接（tabs/dirHandle 各一次 kvGet→db()，session.ts 不主动关连接，即"旧标签页"）
     await new Promise<void>((resolve, reject) => {
-      const req = indexedDB.open('vviewer', 5); // 另一标签页的新版本先到先升（DB_VERSION=4 → 升 5）
-      req.onblocked = () => reject(new Error('旧连接未让路：v5 升版被 blocked'));
+      const req = indexedDB.open('vviewer', 6); // 另一标签页的新版本先到先升（DB_VERSION=5 → 升 6）
+      req.onblocked = () => reject(new Error('旧连接未让路：v6 升版被 blocked'));
       req.onsuccess = () => {
         req.result.close();
         resolve();

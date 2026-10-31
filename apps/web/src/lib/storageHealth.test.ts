@@ -70,15 +70,16 @@ function stubCaches(names: string[]): { deleted: string[] } {
 
 async function rawOpen(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    // v4 直开 + onupgradeneeded 建四 store（session.ts 形态，mounts 随 Task 2 v4
-    // 顺延）：fresh IDBFactory 下裸 open 得 v1 空库，rawPut 无处落键
-    const req = indexedDB.open('vviewer', 4);
+    // 免版本 open + onupgradeneeded 幂等补建五 store（session.ts 形态镜像，v5 起
+    // 含 iconThemes）：fresh IDBFactory 下裸 open 得空库，rawPut 无处落键。免版本
+    // 而非钉死版本号——产品 db() 先到升满版后，显式旧版本 open 会 VersionError
+    // （purge 字体等「先 db() 后 rawKeys」的用例顺序）
+    const req = indexedDB.open('vviewer');
     req.onupgradeneeded = () => {
       const d = req.result;
-      if (!d.objectStoreNames.contains('kv')) d.createObjectStore('kv');
-      if (!d.objectStoreNames.contains('themes')) d.createObjectStore('themes');
-      if (!d.objectStoreNames.contains('fonts')) d.createObjectStore('fonts');
-      if (!d.objectStoreNames.contains('mounts')) d.createObjectStore('mounts');
+      for (const s of ['kv', 'themes', 'fonts', 'mounts', 'iconThemes']) {
+        if (!d.objectStoreNames.contains(s)) d.createObjectStore(s);
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
