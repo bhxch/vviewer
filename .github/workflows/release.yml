@@ -11,9 +11,10 @@
 #           variable 门控、内容哈希去重（contentHash 对比线上 latest——前端-only 变更
 #           零发包、已解析版本下发 outputs.version）；scope 未配置则 npm 分发与 CDN
 #           env 均不启用；--provenance 签名需 job 级 id-token: write）
-#   publish-packages：六新源码包（detect/sanitize/markdown-engine/lightbox/highlight/
-#           render-diagram）随 tag 逐包上 npm：清单单一来源 = tools/pack-packages.mjs
-#           的 PACKAGES 常量（--list 供构建/发布两循环共用）；逐包 tsc emit → 打包
+#   publish-packages：源码包（vviewer-detect/sanitize/markdown-engine/markdown/
+#           markdown-highlight-worker/lightbox/highlight/render-diagram 八个）随 tag
+#           逐包上 npm：清单单一来源 = tools/pack-packages.mjs 的 PACKAGES 常量
+#           （--list 供构建/发布两循环共用）；逐包 tsc emit → 打包
 #           （非 emit 资产复制 + 发布版 package.json + 相对 specifier 补显式扩展名 +
 #           contentHash）→ 内容哈希去重逐包三分支同 publish-npm（零变化跳过复用线上
 #           latest / tag 重跑幂等 / 否则发布）→ npm publish --provenance。render-diagram
@@ -331,7 +332,7 @@ jobs:
           npm publish ./dist-npm --access public --provenance
 
   publish-packages:
-    name: npm 源码包发布（六新包）
+    name: npm 源码包发布（清单动态）
     runs-on: ubuntu-latest
     # 与 publish-npm 同形：scope variable 门控（未配置则源码包分发未启用、job 跳过）、
     # OIDC trusted publishing（id-token: write 供 npm 换短时发布凭据与 --provenance
