@@ -48,7 +48,7 @@
     type TabSnapshot
   } from './stores/session';
   import { migrateLegacyTabs, workspaceStore, type WorkspaceSnapshotItem, type WorkspaceSource } from './workspaceStore';
-  import { loadSettings, onSettingsChanged, saveSettings } from './stores/settings';
+  import { loadSettings, onSettingsChanged, saveSettings, type Settings } from './stores/settings';
   import { VV_FOCUS_META_LANG } from './metaLangFocus';
   import {
     chromeVisible,
@@ -134,6 +134,23 @@
       return;
     }
     mountsEl?.requestClose();
+  }
+
+  /**
+   * 主题循环切换（顶栏退役 Task 2 自 TopBar 迁入：全局动作簇 TabBarActions 的
+   * oncycletheme 宿主实现；TopBar 同名函数保留不动——双入口过渡态，T4 退役时随删）。
+   * 逻辑同源：order 三态循环 → 本组件 settings 响应式副本上变更 → saveSettings 落盘
+   * （副本经 onSettingsChanged 订阅与持久层恒同步，TopBar 原形态等价）→ html
+   * data-theme-mode 打标（设置中心「亮暗模式」路径同款，订阅内亦会同步打标）。
+   * 'system' 模式的暗色由 app.css @media prefers-color-scheme 处理，无需 JS；注入
+   * 不在此直调：saveSettings → onSettingsChanged 订阅 → effectiveMode 变化命中
+   * diff（spec 2026-10-12 §2.4）。
+   */
+  function cycleTheme(): void {
+    const order: Settings['themeMode'][] = ['system', 'light', 'dark'];
+    settings.themeMode = order[(order.indexOf(settings.themeMode) + 1) % 3]!;
+    saveSettings(settings);
+    document.documentElement.dataset.themeMode = settings.themeMode;
   }
 
   /**
@@ -448,6 +465,9 @@
     '.vv-wscreate',
     '.vv-remotesrc',
     '.vv-tabctx',
+    // 顶栏退役 Task 2：TabBar 左端动作簇浮层菜单（瞬态菜单同 .vv-tabctx 语义——
+    // 桌面 Esc 只关菜单不退 zen，移动端返回键可关不残留）
+    '.vv-tbact-pop',
     '.vv-ws-pop',
     '.vv-status-picker'
   ].join(', ');
@@ -1019,6 +1039,12 @@
     tabs={activeTabs}
     sources={activeWorkspace?.sources ?? []}
     onmanage={() => (wsPanelOpen = !wsPanelOpen)}
+    themeMode={settings.themeMode}
+    oncycletheme={cycleTheme}
+    onsettings={() => toggleSettingsCenter()}
+    onmounts={() => toggleMountsManager()}
+    zen={layout.zen}
+    onToggleZen={() => toggleZen()}
     temp={tabTemp}
     hidden={!vis.tabBar && !tabTemp}
     onenter={() => {

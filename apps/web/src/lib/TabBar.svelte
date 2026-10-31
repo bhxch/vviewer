@@ -8,6 +8,8 @@
   import { rendererCandidatesOfTab } from './RendererPickerMenu';
   import { requestMetaLangFocus } from './metaLangFocus';
   import TabContextMenu, { type TabCtxEntry } from './TabContextMenu.svelte';
+  import TabBarActions from './TabBarActions.svelte';
+  import type { Settings } from './stores/settings';
 
   /**
    * tabs：AppShell 传当前 workspace 组内过滤值（tabStore.tabsOf(activeId)，T6）——
@@ -15,6 +17,9 @@
    * 来源（模型）；onmanage：右端「管理」按钮回调（AppShell 切换面板）。
    * temp/hidden/onenter/onleave：chrome 隐藏与边缘唤出临时条（spec 2026-10-19
    * §2/§3），语义同 TopBar 同名 props（所有权在 AppShell）。
+   * themeMode/oncycletheme/onsettings/onmounts/zen/onToggleZen（顶栏退役 Task 2）：
+   * 左端全局动作簇（TabBarActions）六项透传——订阅链/设置中心/目录管理/zen 状态
+   * 所有权均在 AppShell，本组件只作 DOM 宿主（TopBar 同名 props 同语义）。
    */
   let {
     tabs,
@@ -23,7 +28,13 @@
     temp = false,
     hidden = false,
     onenter,
-    onleave
+    onleave,
+    themeMode,
+    oncycletheme,
+    onsettings,
+    onmounts,
+    zen,
+    onToggleZen
   }: {
     tabs: Tab[];
     sources: WorkspaceSource[];
@@ -32,6 +43,12 @@
     hidden?: boolean;
     onenter?: () => void;
     onleave?: () => void;
+    themeMode: Settings['themeMode'];
+    oncycletheme(): void;
+    onsettings(): void;
+    onmounts(): void;
+    zen: boolean;
+    onToggleZen(): void;
   } = $props();
 
   /** 行内来源徽标（T6；多根 Task 1 同名跨源消歧）：逻辑在 tabBadge.ts 可单测；
@@ -234,60 +251,68 @@
   onpointerenter={() => onenter?.()}
   onpointerleave={() => onleave?.()}
 >
-  {#each tabs as tab (tab.id)}
-    {@const badge = badgeOfFor(tab)}
-    <!-- 遗留 U2：激活区与关闭钮拆为兄弟节点——button 内不得再嵌 span[role=button]
-         （嵌套交互元素违反 a11y 嵌套交互规则）。外层 div[role=tab][tabindex] 键盘可达，
-         Enter/Space 激活需手动接线（ARIA APG 的 tab 键盘约定）；关闭钮为真实 button，
-         Tab 可达、Enter 原生触发。 -->
-    <div
-      class="vv-tab"
-      class:active={tab.active}
-      class:vv-tab-pinned={tab.pinned === true}
-      data-pinned={tab.pinned === true ? 'true' : undefined}
-      class:vv-tab-dragover={dragOver?.id === tab.id}
-      data-drop-before={dragOver?.id === tab.id ? String(dragOver.before) : undefined}
-      role="tab"
-      tabindex="0"
-      aria-selected={tab.active}
-      draggable="true"
-      onclick={() => activateTab(tab.id)}
-      oncontextmenu={(e) => openMenu(e, tab)}
-      onauxclick={(e) => onaux(e, tab)}
-      onmousedown={(e) => {
-        // 中键自动滚动由 mousedown 默认行为启动（auxclick 的 preventDefault 已迟）——
-        // 仅拦中键，左键默认（聚焦/文本选择）不动；auxclick 仍照常派发，关闭在其上接线
-        if (e.button === 1) e.preventDefault();
-      }}
-      ondragstart={(e) => ondragstart(e, tab)}
-      ondragover={(e) => ondragover(e, tab)}
-      ondragleave={(e) => ondragleave(e, tab)}
-      ondrop={(e) => ondrop(e, tab)}
-      ondragend={ondragend}
-      onkeydown={(e) => {
-        // 快捷键只认行本身：Enter/Space 聚焦在行内关闭钮上时不得被行吞掉
-        //（按钮原生触发 closeTab，行级 preventDefault 会截胡——T6 评审移交）
-        if (e.target !== e.currentTarget) return;
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          activateTab(tab.id);
-        }
-      }}>
-      <span class="vv-tab-name" title={tab.source.name}>{tab.source.name}</span>
-      {#if badge !== null}
-        <!-- 来源徽标（多源 workspace 才显示）：截短由 CSS ellipsis 承担，title 全名 -->
-        <span class="vv-tab-src" title={badge}>{badge}</span>
-      {/if}
-      <button
-        type="button"
-        class="vv-tab-close"
-        aria-label="关闭 {tab.source.name}"
-        onclick={(e) => {
-          e.stopPropagation();
-          closeTab(tab.id);
-        }}>✕</button>
-    </div>
-  {/each}
+  <!-- 顶栏退役 Task 2：嵌套滚动结构——左端全局动作簇（flex:none 定宽不随滚动）+
+       tabs 横向滚动容器（overflow-x 收进内层）+ 既有管理钮。role=tablist 留守
+       .vv-tabbar（tab 行仍为其后代，DOM 契约 .vv-tab 不变） -->
+  <div class="vv-tabbar-actions">
+    <TabBarActions {themeMode} {oncycletheme} {onsettings} {onmounts} {zen} {onToggleZen} />
+  </div>
+  <div class="vv-tabbar-tabs">
+    {#each tabs as tab (tab.id)}
+      {@const badge = badgeOfFor(tab)}
+      <!-- 遗留 U2：激活区与关闭钮拆为兄弟节点——button 内不得再嵌 span[role=button]
+           （嵌套交互元素违反 a11y 嵌套交互规则）。外层 div[role=tab][tabindex] 键盘可达，
+           Enter/Space 激活需手动接线（ARIA APG 的 tab 键盘约定）；关闭钮为真实 button，
+           Tab 可达、Enter 原生触发。 -->
+      <div
+        class="vv-tab"
+        class:active={tab.active}
+        class:vv-tab-pinned={tab.pinned === true}
+        data-pinned={tab.pinned === true ? 'true' : undefined}
+        class:vv-tab-dragover={dragOver?.id === tab.id}
+        data-drop-before={dragOver?.id === tab.id ? String(dragOver.before) : undefined}
+        role="tab"
+        tabindex="0"
+        aria-selected={tab.active}
+        draggable="true"
+        onclick={() => activateTab(tab.id)}
+        oncontextmenu={(e) => openMenu(e, tab)}
+        onauxclick={(e) => onaux(e, tab)}
+        onmousedown={(e) => {
+          // 中键自动滚动由 mousedown 默认行为启动（auxclick 的 preventDefault 已迟）——
+          // 仅拦中键，左键默认（聚焦/文本选择）不动；auxclick 仍照常派发，关闭在其上接线
+          if (e.button === 1) e.preventDefault();
+        }}
+        ondragstart={(e) => ondragstart(e, tab)}
+        ondragover={(e) => ondragover(e, tab)}
+        ondragleave={(e) => ondragleave(e, tab)}
+        ondrop={(e) => ondrop(e, tab)}
+        ondragend={ondragend}
+        onkeydown={(e) => {
+          // 快捷键只认行本身：Enter/Space 聚焦在行内关闭钮上时不得被行吞掉
+          //（按钮原生触发 closeTab，行级 preventDefault 会截胡——T6 评审移交）
+          if (e.target !== e.currentTarget) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            activateTab(tab.id);
+          }
+        }}>
+        <span class="vv-tab-name" title={tab.source.name}>{tab.source.name}</span>
+        {#if badge !== null}
+          <!-- 来源徽标（多源 workspace 才显示）：截短由 CSS ellipsis 承担，title 全名 -->
+          <span class="vv-tab-src" title={badge}>{badge}</span>
+        {/if}
+        <button
+          type="button"
+          class="vv-tab-close"
+          aria-label="关闭 {tab.source.name}"
+          onclick={(e) => {
+            e.stopPropagation();
+            closeTab(tab.id);
+          }}>✕</button>
+      </div>
+    {/each}
+  </div>
   <!-- T6：tab 管理面板入口。data-vv-wspanel-trigger 供面板外点关闭豁免
        （pointerdown 先关 + click 切换会打架，见 WorkspaceTabsPanel 头注释） -->
   <button
