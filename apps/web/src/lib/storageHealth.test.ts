@@ -224,6 +224,9 @@ describe('collectStorageInfo（spec §2.1 口径）', () => {
     // 判定用 duck-typing：jsdom 测试环境 IDB 往返跨 realm，instanceof 失真）
     const isBuf = (x: unknown): boolean =>
       typeof x === 'object' && x !== null && typeof (x as { byteLength?: unknown }).byteLength === 'number';
+    // 估算口径镜像实现（同 replacer 同款序列化），非独立常数 oracle——实现与断言
+    // 共同误判的风险已接受（T4 评审备案，T5 携修补记）：Map 展开/buffer 剥除规则
+    // 若双方同步走偏，此用例不会变红，须靠 storageHealth.ts 头注口径描述兜底
     const metaLen = JSON.stringify(rec, (_k, x) =>
       x instanceof Map ? Object.fromEntries(x) : isBuf(x) ? undefined : x
     )!.length;

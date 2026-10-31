@@ -9,6 +9,8 @@ import { applySettings, closeSettings, gotoGroup, openSettings } from './setting
  *
  * - ICON-01 seti 预置默认作用域（仅文件树）：文件行 .vv-file-icon 非空字形；Seti
  *   上游无 folder 图标（见 vendor README）→ 源头行零渲染、tab 无图标（零位移语义）。
+ *   T5 携修补 tabs 开关双向断言（开 tabs + 有打开 tab → tab 图标在场；关 tabs →
+ *   tab 零图标——原「tab 无图标」断言无打开 tab 时是空洞）。
  * - ICON-02 scopes 门控：关 tree 开 tabs → 树零图标 / tab 图标在场。
  * - ICON-03 scopes quickOpen/search：行首/文件头行首图标。
  * - ICON-04 导入 json+字体同批（Mini 夹具：folder 图标 + hidesExplorerArrows）→
@@ -107,12 +109,13 @@ async function importMini(page: Page): Promise<void> {
   await expect(page.locator('.vv-settings-theme-name', { hasText: 'Mini' })).toBeVisible();
 }
 
-test('ICON-01：seti 预置默认仅文件树——文件行非空字形，源头行/tab 零图标', async ({ page }) => {
+test('ICON-01：seti 预置默认仅文件树——文件行非空字形，源头行/tab 零图标（tabs 开关双向）', async ({ page }) => {
   await page.goto('/');
   await openDir(page, [
     { name: 'app.ts', content: 'const a = 1;\n' },
     { name: 'readme.md', content: '# t\n' }
   ]);
+  await openTreeFile(page, 'app.ts'); // 先开一个文件 tab：tab 零图标断言非空洞
   await expect(page.locator('.vv-tree-row').first()).toBeVisible();
 
   await setIconTheme(page, 'seti');
@@ -126,8 +129,16 @@ test('ICON-01：seti 预置默认仅文件树——文件行非空字形，源�
     await expect(row.locator('.vv-file-icon')).not.toHaveText('');
   }
   // 上游 Seti 无 folder 图标（vendor README 备注）：源头行零渲染（零位移）；
-  // 默认 scopes.tree 仅树——tab 无图标（无打开的文件 tab，抽屉断点下亦无树外图标）
+  // 默认 scopes.tree 仅树——有打开的文件 tab 亦零图标（默认关 tabs 的真断言）
   await expect(page.locator('.vv-tree-src .vv-file-icon')).toHaveCount(0);
+  await expect(page.locator('.vv-tab .vv-file-icon')).toHaveCount(0);
+
+  // 方向补（T5 携修）：开 tabs + 有打开 tab → tab 图标在场且非空；再关 tabs →
+  // tab 零图标（scopes 门控双向）
+  await setIconTheme(page, 'seti', { tabs: true });
+  await expect(page.locator('.vv-tab .vv-file-icon')).toHaveCount(1);
+  await expect(page.locator('.vv-tab.active .vv-file-icon')).not.toHaveText('');
+  await setIconTheme(page, 'seti', { tabs: false });
   await expect(page.locator('.vv-tab .vv-file-icon')).toHaveCount(0);
 });
 
