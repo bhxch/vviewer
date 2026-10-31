@@ -50,6 +50,13 @@
     };
   });
 
+  /** 源级折叠（本 spec §2.1）：storeId → 是否折叠；局部 state 不持久化，
+   *  {#key treeKey} 整树重建时随组件重建重置（TreeNodeRow 展开态同先例） */
+  let collapsed = $state<Record<string, boolean>>({});
+  function toggleCollapse(storeId: string): void {
+    collapsed = { ...collapsed, [storeId]: !collapsed[storeId] };
+  }
+
   function requestRemove(store: TreeStore): void {
     if (!confirm(`将关闭该来源下全部 tab，并从当前工作区移除来源「${store.displayName()}」，确定？`)) return;
     onremove?.(store);
@@ -59,6 +66,9 @@
 <div class="vv-tree" role="tree">
   {#each roots as src (src.storeId)}
     <div class="vv-tree-src">
+      <button type="button" class="vv-tree-src-toggle" aria-label="折叠/展开 {src.label}"
+        aria-expanded={!collapsed[src.storeId]}
+        onclick={() => toggleCollapse(src.storeId)}>{collapsed[src.storeId] ? '▸' : '▾'}</button>
       <span class="vv-tree-src-label" title={src.label}>{src.label}</span>
       <button
         type="button"
@@ -68,11 +78,13 @@
         onclick={() => requestRemove(src.store)}
       >✕</button>
     </div>
-    <ul class="vv-tree-group" role="group">
-      {#each src.nodes as node (node.path)}
-        <TreeNodeRow store={src.store} {excludedPatterns} {node} depth={0} onopen={(e) => onopen({ ...e, store: src.store })} />
-      {/each}
-    </ul>
+    {#if !collapsed[src.storeId]}
+      <ul class="vv-tree-group" role="group">
+        {#each src.nodes as node (node.path)}
+          <TreeNodeRow store={src.store} {excludedPatterns} {node} depth={0} onopen={(e) => onopen({ ...e, store: src.store })} />
+        {/each}
+      </ul>
+    {/if}
   {/each}
 </div>
 
@@ -84,8 +96,21 @@
     align-items: center;
     gap: var(--vv-sp-4);
     padding: var(--vv-sp-4) var(--vv-sp-6) var(--vv-sp-2);
+    /* 行右让位（本 spec 重叠修复本体）：侧栏折叠钮 .vv-collapse-left 在 app.css
+       为 absolute top:6 right:6 24×24，浮置于本行右上；右 padding 预留
+       24px 命中区 + 10px 间隙，行内内容（移除钮）不再压进其命中区 */
+    padding-right: 34px;
     font-size: var(--vv-fs-xs);
     color: var(--ui-fg-muted);
+  }
+  .vv-tree-src-toggle {
+    flex: none;
+    border: 0;
+    background: none;
+    font: inherit;
+    padding: 0;
+    cursor: pointer;
+    color: var(--ui-fg-muted); /* 与 label 同色 */
   }
   .vv-tree-src-label {
     flex: 1;
@@ -105,7 +130,11 @@
     padding: 0 var(--vv-sp-4);
     border-radius: var(--vv-radius-sm);
     cursor: pointer;
+    opacity: 0; /* hover 揭示；键盘等价见 :focus-within */
+    transition: opacity .12s;
   }
+  .vv-tree-src:hover .vv-tree-src-remove,
+  .vv-tree-src:focus-within .vv-tree-src-remove { opacity: 1; }
   .vv-tree-src-remove:hover {
     color: var(--ui-fg);
     background: var(--ui-hover-bg); /* 与树行 hover 同语义（亮暗均与 side-bg 同值，零漂移） */
