@@ -402,3 +402,41 @@ describe('VSCODE_LANG_EXT（vendored 反向表锚点）', () => {
     }
   });
 });
+
+// ── vendor Seti 资产（assets/vscode-icons/seti/，Task 4 Step 1）──
+// 「预置 Seti 校验必须过 validateVscodeIconTheme（vendor 件入库前 JSONC 规范化）
+// ——单测直接 import vendor JSON 断言 ok」（plan Review Focus）。
+
+import seti from '../assets/vscode-icons/seti/seti-icon-theme.json';
+
+describe('vendored Seti（vscode 1.141.0 theme-seti）', () => {
+  it('validateVscodeIconTheme 直接 ok；字体 src 字符串形态且 format 上提', () => {
+    const r = validateVscodeIconTheme(seti);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.theme.fonts).toHaveLength(1);
+    const font = r.theme.fonts[0]!;
+    expect(font.id).toBe('seti');
+    expect(font.src).toEqual(['./seti.woff']);
+    expect(font.format).toBe('woff');
+    expect(r.theme.fileExtensions.size).toBe(238);
+    expect(r.theme.fileNames.size).toBe(101);
+    expect(r.theme.languageIds.size).toBe(83);
+    expect(r.theme._file).toBeDefined(); // 顶层 file 关联 → _file 别名（vendor 修改③）
+    expect(r.theme.hidesExplorerArrows).toBe(false); // 上游无此键（README 备注）
+  });
+
+  it('匹配向量：常见扩展命中、无匹配回退 _file、目录无图标（纯 caret 语义）', () => {
+    const t = normalizeIconTheme(seti);
+    expect(matchIconTheme(t, { kind: 'file', name: 'app.js' })).not.toBeNull();
+    expect(matchIconTheme(t, { kind: 'file', name: 'main.ts' })).not.toBeNull();
+    expect(matchIconTheme(t, { kind: 'file', name: 'README.md' })).not.toBeNull();
+    // 回退链终点：未知扩展 → _file（顶层 file 关联的别名定义）
+    const unknown = matchIconTheme(t, { kind: 'file', name: 'no-match.xyz' });
+    expect(unknown).not.toBeNull();
+    expect(unknown).toEqual(t._file);
+    // 上游无 folder 关联：目录不产图标（caret 规则落「维持现状」分支）
+    expect(matchIconTheme(t, { kind: 'folder', name: 'src' })).toBeNull();
+    expect(matchIconTheme(t, { kind: 'folderExpanded', name: 'src' })).toBeNull();
+  });
+});

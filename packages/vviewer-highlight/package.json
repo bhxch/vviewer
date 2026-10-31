@@ -21,6 +21,7 @@
     "assets/languages.json",
     "assets/themes.json",
     "assets/vscode",
+    "assets/vscode-icons",
     "assets/LICENSE-README.md"
   ],
   "dependencies": {
