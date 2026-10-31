@@ -111,6 +111,83 @@ view.destroy();
 `setMarkdownImageResolver` / `setDiagramOptions`（各有对应 getter；传 null 解绑）。
 视图路径的 `options.*` 优先于模块缝（`resolveImage`/`resolveRemoteBase` 仅实例选项）。
 
+## 自带 Worker 高亮（独立使用进阶，可选）
+
+默认高亮器在主线程逐块 parse（单块有界，常规文档无感）。若代码块偏大/偏多，
+不想占主线程，可自建 worker 版高亮器经注入缝接入——**worker 文件只有两行**：
+tree-sitter 引擎、消息协议（init 握手/请求去重/批量取消/看门狗）、区间→行 HTML
+的原料全部是 `@vviewer/highlight` 的公开导出，第三方只写 RPC 壳（合计约 40 行，
+vviewer 本体 apps/web/src/lib/ts-worker.ts + render-text `fenceToHtml` 即同款）。
+
+**worker 文件**（`md-highlight.worker.ts`，由宿主打包器编译）：
+
+```ts
+import { serveWorker } from '@vviewer/highlight';
+
+serveWorker(); // 非 worker 环境调用是 no-op；引擎配置经 client 的 init 握手带来
+```
+
+**主线程**（一次性装配；失败链与默认高亮器一致——`null` → 该块降级 hljs → 原文）：
+
+```ts
+import { setHighlightFence } from '@vviewer/markdown';
+import {
+  HighlightClient,
+  HighlightCanceledError,
+  assignIntervalsToLines,
+  renderLineHtml,
+  type HighlightInterval,
+} from '@vviewer/highlight';
+
+const client = new HighlightClient(
+  new Worker(new URL('./md-highlight.worker.ts', import.meta.url), { type: 'module' }),
+  {
+    // 必须以 /grammars/ 结尾（manifest 与 wasm 同目录的发布布局契约）；离线形态
+    // 改传 table/queries 直传（见「默认高亮器选项」）
+    grammarsBase: 'https://cdn.jsdelivr.net/npm/@bhxch/vviewer-grammars-full@0.1.0/grammars/',
+    runtimeDir: 'https://cdn.jsdelivr.net/npm/web-tree-sitter@0.25/',
+  },
+);
+
+/** 行表构建（wc -l 口径）：'a\nb\n' → ['a','b']；空文件 '' → []。 */
+const buildLineIndex = (text: string): string[] => {
+  if (text === '') return [];
+  const lines = text.split('\n');
+  return lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines;
+};
+/** 行起始偏移（UTF-16，含前序换行符）：'ab\ncd' → [0, 3]。 */
+const buildLineOffsets = (lines: string[]): number[] => {
+  const offsets: number[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    offsets.push(offset);
+    offset += line.length + 1;
+  }
+  return offsets;
+};
+
+setHighlightFence(async (code, lang) => {
+  let intervals: HighlightInterval[];
+  try {
+    intervals = await client.highlight(code, lang); // init 完成前请求由 worker 侧排队
+  } catch (err) {
+    if (err instanceof HighlightCanceledError) throw err; // 取消：管线静默跳过该块
+    return null; // worker 失败/未知语言：该块降级 hljs
+  }
+  const lines = buildLineIndex(code);
+  const byLine = new Map(
+    assignIntervalsToLines(intervals, buildLineOffsets(lines)).map((a) => [a.line, a.segs]),
+  );
+  return lines.map((line, i) => renderLineHtml(line, byLine.get(i))).join('\n');
+});
+// 逐视图注入则改用 createMarkdownView(el, { highlightFence })
+```
+
+注意事项：打包器需支持 `new Worker(new URL(...), { type: 'module' })` 模式
+（Vite/webpack 5/Rollup 原生支持）；站点 CSP 需放行 `worker-src`；从 CDN 直接
+`import` 本包（无自有 worker 文件）的场景，worker URL 与页面跨域会被浏览器禁止，
+需 fetch→Blob→`createObjectURL` 包装或自托管 worker 文件。
+
 ## 应用侧迁移注记（render-text → 本包）
 
 - **getRemoteBase 切断**：原 `getRemoteBase(source.storeId)` 判定改为
