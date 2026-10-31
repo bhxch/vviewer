@@ -54,7 +54,18 @@ const PACKAGES = [
   { dir: 'detect' },
   { dir: 'sanitize' },
   { dir: 'markdown-engine', copies: [{ from: 'src/types', to: 'types' }] },
-  { dir: 'markdown', copies: [{ from: 'src/markdown.css', to: 'markdown.css' }] },
+  { dir: 'markdown', copies: [{ from: 'src/markdown.css', to: 'markdown.css' }, { from: 'src/types', to: 'types' }] },
+  // worker.js 双写：dist/worker.js 供 dist/main.js 的相对 URL（new Worker(new
+  // URL('./worker.js', import.meta.url))）解析；dist/src/worker.js 供发布 exports
+  // './worker.js' 子路径（源 exports './src/worker.js' 非 *.ts 形态按原样透传）。
+  // 同一文件三处同源（src/ 源形态 + 两处发布形态），改 worker 入口只需改 src/。
+  {
+    dir: 'markdown-highlight-worker',
+    copies: [
+      { from: 'src/worker.js', to: 'worker.js' },
+      { from: 'src/worker.js', to: 'src/worker.js' },
+    ],
+  },
   { dir: 'lightbox' },
   {
     dir: 'highlight',
@@ -251,20 +262,29 @@ function checkDistClosure(pkgName, distRoot) {
   return problems;
 }
 
-/** 源 exports → 发布 exports：'./src/X.ts' 按 emitRoot 改写为 {types,default}；非 src 映射原样 */
+/** 源 exports → 发布 exports：'./src/X.ts' 按 emitRoot 改写为 {types,default}；
+ *  './src/X.css' 同法改写为字符串（非 emit 资产由 copies 复制到 dist 同层级）；
+ *  其余 ./src/ 形态（如 .js 直引）原样——dist 内须有同路径副本（copies 承载）。 */
 function buildExports(srcPkg, emitRoot) {
   const raw = srcPkg.exports ?? { '.': srcPkg.main };
   const out = {};
   for (const [key, val] of Object.entries(raw)) {
     if (typeof val !== 'string') fail(`${srcPkg.name}: exports.${key} 非字符串形态，脚本不支持`);
     const spec = val.startsWith('./') ? val : `./${val}`;
-    if (!spec.startsWith('./src/') || !spec.endsWith('.ts')) {
+    if (!spec.startsWith('./src/')) {
       out[key] = spec;
       continue;
     }
-    const base = spec.slice('./src/'.length).replace(/\.ts$/, '');
+    const base = spec.slice('./src/'.length);
     const prefix = emitRoot === 'src' ? './src/' : './';
-    out[key] = { types: `${prefix}${base}.d.ts`, default: `${prefix}${base}.js` };
+    if (spec.endsWith('.ts')) {
+      const stem = base.replace(/\.ts$/, '');
+      out[key] = { types: `${prefix}${stem}.d.ts`, default: `${prefix}${stem}.js` };
+    } else if (spec.endsWith('.css')) {
+      out[key] = `${prefix}${base}`;
+    } else {
+      out[key] = spec;
+    }
   }
   return out;
 }
@@ -284,12 +304,15 @@ function checkExportsTargets(pkgName, distRoot, exports) {
   return problems;
 }
 
-/** dependencies 携带：workspace:* → 发布版本（通用路径；当前清单零内依赖 no-op） */
-function mapDependencies(deps, version) {
+/** dependencies 携带：workspace:* → 发布版本；@vviewer/* 依赖名改写为发布名
+ *  （发布名统一 @bhxch/vviewer- 前缀，见 packOne 的 npmName——依赖名不改写则
+ *  指向 npm 上不存在的包）。第三方依赖原样。 */
+function mapDependencies(deps, version, scope) {
   if (!deps) return undefined;
   const out = {};
   for (const [k, v] of Object.entries(deps)) {
-    out[k] = v === 'workspace:*' ? version : v.startsWith('workspace:') ? v.slice('workspace:'.length) : v;
+    const name = k.startsWith('@vviewer/') ? `${scope}/vviewer-${k.slice('@vviewer/'.length)}` : k;
+    out[name] = v === 'workspace:*' ? version : v.startsWith('workspace:') ? v.slice('workspace:'.length) : v;
   }
   return out;
 }
@@ -326,6 +349,10 @@ function packOne({ dir, emitRoot = '.', copies = [] }, { scope, version }) {
   if (!srcPkg.name.startsWith('@') || !srcPkg.name.includes('/')) fail(`${dir}: 源包名须为 @scope/name 形态: ${srcPkg.name}`);
   const suffix = srcPkg.name.split('/')[1];
   if (suffix !== dir) fail(`${dir}: 源包名后缀 ${suffix} 与清单目录不一致（发布清单漂移）`);
+  // 发布名统一 @bhxch/vviewer- 前缀（与 vviewer-grammars-full 同款；@bhxch scope
+  // 混有非本项目包，vviewer- 前缀做归属消歧）。monorepo 内部名与目录保持
+  // @vviewer/<dir> 不动——前缀规则单点收敛在本脚本，不改任何目录与 import。
+  const npmName = `${scope}/vviewer-${suffix}`;
 
   // outDir fail-fast（同 pack-npm ledger H8）：已含打包产物时拒跑，防陈旧混包
   if (fs.existsSync(path.join(distRoot, 'package.json'))) {
@@ -386,7 +413,7 @@ function packOne({ dir, emitRoot = '.', copies = [] }, { scope, version }) {
   const typesPath = typeof dotEntry === 'string' ? undefined : dotEntry.types;
   const repository = readRepository();
   const pkg = {
-    name: `${scope}/${suffix}`,
+    name: npmName,
     version,
     private: false,
     type: 'module',
@@ -397,7 +424,7 @@ function packOne({ dir, emitRoot = '.', copies = [] }, { scope, version }) {
     ...(srcPkg.description ? { description: srcPkg.description } : {}),
     ...(repository ? { repository: { ...repository, directory: `packages/${dir}` } } : {}),
     ...(srcPkg.license ? { license: srcPkg.license } : {}),
-    ...(srcPkg.dependencies ? { dependencies: mapDependencies(srcPkg.dependencies, version) } : {}),
+    ...(srcPkg.dependencies ? { dependencies: mapDependencies(srcPkg.dependencies, version, scope) } : {}),
     contentHash: contentHashOf(distRoot),
   };
   fs.writeFileSync(path.join(distRoot, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');

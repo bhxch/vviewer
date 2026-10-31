@@ -188,6 +188,15 @@ importers:
         specifier: ^2.9.1
         version: 2.9.1
 
+  packages/markdown-highlight-worker:
+    dependencies:
+      '@vviewer/highlight':
+        specifier: workspace:*
+        version: link:../highlight
+      '@vviewer/markdown':
+        specifier: workspace:*
+        version: link:../markdown
+
   packages/render-archive:
     dependencies:
       '@vviewer/core':

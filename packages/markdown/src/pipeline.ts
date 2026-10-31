@@ -1,3 +1,8 @@
+/// <reference path="./types/katex-min-css.d.ts" />
+// （ambient 模块声明随本指令进入每个拉入 pipeline 源的编译单元——ambient declare
+// module 不随 import 图传播，reference 指令是唯一收进通道，markdown-engine 五垫片
+// 同款；发布态由 pack copies 复制到 dist/types/ 并回注 dist/index.d.ts。）
+
 // pipeline.ts — markdown 渲染五步管线（移植自 markpad src/lib/pipeline/index.ts 的
 // 固定顺序与单步容错语义，按 vviewer M3 契约裁剪）：highlight → diagrams → katex
 // → copyCode → lightbox。输入是净化后的 Document（sanitize 在管线外完成）。

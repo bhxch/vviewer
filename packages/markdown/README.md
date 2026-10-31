@@ -114,7 +114,11 @@ view.destroy();
 ## 自带 Worker 高亮（独立使用进阶，可选）
 
 默认高亮器在主线程逐块 parse（单块有界，常规文档无感）。若代码块偏大/偏多，
-不想占主线程，可自建 worker 版高亮器经注入缝接入——**worker 文件只有两行**：
+不想占主线程：**优先用现成包 `@vviewer/markdown-highlight-worker`**——
+`attachMarkdownHighlightWorker({ init: { grammarsBase, runtimeDir } })` 一行接入
+（worker 入口/协议端/取消语义全现成，dispose 回落默认高亮器），见该包 README。
+
+以下为自托管 worker 文件或想自建协议端时的手工配方——**worker 文件只有两行**：
 tree-sitter 引擎、消息协议（init 握手/请求去重/批量取消/看门狗）、区间→行 HTML
 的原料全部是 `@vviewer/highlight` 的公开导出，第三方只写 RPC 壳（合计约 40 行，
 vviewer 本体 apps/web/src/lib/ts-worker.ts + render-text `fenceToHtml` 即同款）。
