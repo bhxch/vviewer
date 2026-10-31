@@ -279,21 +279,47 @@ test('WS-02：远端来源连接入组 + localfiles 注入第二来源——来�
       timeout: 10_000
     });
 
-    // 第二来源：localfiles 注入通道（纯前端套件域内第二来源的最小构造）
-    await openDir(page, [{ name: 'note.md', type: 'text/markdown', content: '# 本地\n' }], '本地夹');
+    // 第二来源：localfiles 注入通道（纯前端套件域内第二来源的最小构造）；本地
+    // hello.js 与远端文件同名——徽标「同名跨源才显」消歧语义的触发面构造
+    await openDir(
+      page,
+      [
+        { name: 'note.md', type: 'text/markdown', content: '# 本地\n' },
+        { name: 'hello.js', type: 'text/javascript', content: 'const wsLocal = 2;\n' }
+      ],
+      '本地夹'
+    );
     await expect(page.locator('.vv-tab', { hasText: '本地夹' })).toBeVisible();
-    // 多源 workspace：来源徽标出现（TabBar badgeOf——单源省略，多源才显示）
-    await expect(page.locator('.vv-tab-src')).toHaveCount(2);
+    // 徽标消歧（Task 1 语义翻转）：两目录 tab 名互不相同（host / 本地夹）→ 无同名
+    // 冲突零徽标（旧「多源恒显」断言随翻转更新；显示面见本用例末段同名构造）
+    await expect(page.locator('.vv-tab-src')).toHaveCount(0);
     // 树两个来源分组（FileTree 逐源标签行）
     await expect(page.locator('.vv-tree-src-label')).toHaveCount(2);
 
-    // tab 归组：远端文件 tab 与两目录 tab 同组并存（同一 workspace 的 TabBar）
+    // tab 归组：远端文件 tab 与两目录 tab 同组并存（同一 workspace 的 TabBar）；
+    // 两源各有 hello.js 树行，定位须限定来源分组的相邻组行
     const drawer = await openDrawerIfNarrow(page);
-    await page.locator('.vv-tree-row', { hasText: 'hello.js' }).click();
+    await page
+      .locator(`.vv-tree-src:has-text("${fake.host}") + .vv-tree-group`)
+      .locator('.vv-tree-row', { hasText: 'hello.js' })
+      .click();
     await closeDrawerIfOpened(page, drawer);
     await expect(page.locator('.vv-tab.active', { hasText: 'hello.js' })).toBeVisible();
     await expect(page.locator('.vv-code-pre')).toContainText('wsRemote', { timeout: 20_000 });
-    await expect(page.locator('.vv-tab-src')).toHaveCount(3); // 目录×2 + 文件×1 均带来源徽标
+    // 同名单个 hello.js 不构成跨源冲突：仍零徽标
+    await expect(page.locator('.vv-tab-src')).toHaveCount(0);
+    const drawer2 = await openDrawerIfNarrow(page);
+    await page
+      .locator('.vv-tree-src:has-text("本地夹") + .vv-tree-group')
+      .locator('.vv-tree-row', { hasText: 'hello.js' })
+      .click();
+    await closeDrawerIfOpened(page, drawer2);
+    await expect(page.locator('.vv-code-pre')).toContainText('wsLocal', { timeout: 20_000 });
+    // 同名 hello.js 跨源并存（远端 + 本地）：两文件 tab 均以 storeLabel 徽标消歧；
+    // 目录 tab 名唯一不带 → 徽标恰 2 处、文本各归其源
+    await expect(page.locator('.vv-tab-src')).toHaveCount(2);
+    await expect(page.locator('.vv-tab-src', { hasText: fake.host })).toBeVisible();
+    await expect(page.locator('.vv-tab-src', { hasText: '本地夹' })).toBeVisible();
   } finally {
     await fake.close();
   }

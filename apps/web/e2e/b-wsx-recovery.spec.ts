@@ -474,17 +474,16 @@ test('WSX-08：面板「＋ 添加来源」并入根1 源——双根双源并�
     await page.keyboard.press('Escape'); // 关面板（来源已入组）
     await expect(panel).toHaveCount(0);
 
-    // 同组双源并存：两目录 tab、树两源分组、tab 来源徽标×2（多源才显示）。
-    // root1 定位须排除文件 tab——多源下文件 tab 也带「· 根1/」来源徽标文本
-    const root1Tab = page
-      .locator('.vv-tab', { hasText: '根1' })
-      .filter({ hasNotText: 'hello-r1.txt' });
+    // 同组双源并存：两目录 tab、树两源分组。徽标消歧（Task 1 语义翻转）：两目录
+    // tab 名互不相同（host / host · 根1/）、文件名唯一 → 无同名冲突零徽标；同名
+    // 冲突的显示面由 t-workspace WS-02 同名构造锚定，本用例徽标断言随之归零
+    const root1Tab = page.locator('.vv-tab', { hasText: '根1' });
     await expect(root1Tab).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('.vv-tree-src-label', { hasText: '根1' })).toBeVisible({
       timeout: 10_000
     });
     await expect(page.locator('.vv-tree-src-label')).toHaveCount(2);
-    await expect(page.locator('.vv-tab-src')).toHaveCount(2);
+    await expect(page.locator('.vv-tab-src')).toHaveCount(0);
 
     // 右键固定根 1 目录 tab（跨根 pinned）；根 0 host tab 不固定（对照）。
     // 窄视口下双 tab + 管理钮溢出 tabbar：先滚入并等滚动安静——TabContextMenu
@@ -517,9 +516,7 @@ test('WSX-08：面板「＋ 添加来源」并入根1 源——双根双源并�
     await expect(
       page.locator('.vv-tab', { hasText: fake.host }).filter({ hasNotText: '根1' })
     ).toBeVisible({ timeout: 15_000 });
-    const restoredRoot1 = page
-      .locator('.vv-tab', { hasText: '根1' })
-      .filter({ hasNotText: 'hello-r1.txt' });
+    const restoredRoot1 = page.locator('.vv-tab', { hasText: '根1' });
     await expect(restoredRoot1).toBeVisible({ timeout: 15_000 });
     await expect(restoredRoot1).toHaveAttribute('data-pinned', 'true'); // M-5 根 1 读回
     await expect(
