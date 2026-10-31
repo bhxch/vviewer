@@ -563,10 +563,11 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .vv-tree-caret { width: 1em; flex: none; }
 .vv-tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 图标主题字形位（图标主题 spec §3.2，Task 3）：inline-flex 基线 + line-height 1
-   防字形撑行、禁选中（复制文件名不带图标字符）；margin-right 同 caret 间距族
-   （.vv-tree-row gap 4px），宽度不固定（字形自然宽）——各消费点行高/间距微调在
-   Task 4 接线时对齐 */
-.vv-file-icon { display: inline-flex; line-height: 1; user-select: none; margin-right: 4px; }
+   防字形撑行、禁选中（复制文件名不带图标字符）；宽度不固定（字形自然宽）。与名称
+   的间距不设 margin——五个消费点的父行均为 flex gap 布局（树行 4px/tab 6px/面板行
+   8px），margin-right 会与行 gap 叠出 8px 双间距（Task 4 接线时消掉，间距单一来源
+   归父行 gap） */
+.vv-file-icon { display: inline-flex; line-height: 1; user-select: none; }
 /* 右栏（目录 + 元数据面板）：MetaPanel 空壳在顶，TOC 占剩余高度滚动 */
 .meta-panel { padding: .65rem .75rem; border-bottom: 1px solid var(--ui-border); flex: none; }
 .meta-title { margin: 0 0 .3rem; font-size: var(--vv-fs-2xs); font-weight: 600; letter-spacing: .05em;
@@ -662,6 +663,11 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 /* 来源徽标 pill 化（§5.1：8px 徽标并入 --vv-radius-full，变更） */
 .vv-settings-theme-src { flex: none; color: var(--ui-fg-muted); border: 1px solid var(--ui-border);
   border-radius: var(--vv-radius-full); padding: 0 6px; font-size: var(--vv-fs-2xs); }
+/* 设置中心「外观」节图标主题分区（图标主题 spec §3.1，Task 4）：四 scopes 复选行
+   ——flex wrap 单行排布，复选框+中文标签（aria-label 由模板内联） */
+.vv-settings-scopes { display: flex; flex-wrap: wrap; gap: var(--vv-sp-4) var(--vv-sp-10);
+  font-size: var(--vv-fs-xs); }
+.vv-settings-scope { display: inline-flex; align-items: center; gap: var(--vv-sp-4); cursor: pointer; }
 /* 设置中心「图表」节（原 SettingsPanel 区块，Task 1 迁入 DiagramsSection；
    spec 2026-10-19 §2.1）：Kroki host 行复用 .vv-settings-theme-row（input 宽度
    已并入上方 select 规则）；以下为按语言渲染模式网格（键恒为注册表 t.id，

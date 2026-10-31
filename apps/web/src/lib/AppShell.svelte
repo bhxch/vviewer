@@ -73,6 +73,9 @@
   // 图标主题运行时（图标主题 spec §3.5，Task 3）：首调入口 + 订阅联动（sig diff）
   import { applyIconsFromSettings } from './iconTheme.svelte';
   import { reactToIconsChange } from './iconReaction';
+  // builtin 图标主题 loader 注册（Task 4）：模块顶层 setBuiltinIconThemeLoader
+  // 注入 'seti' vendor 实现——静态 import 保证注册先于 onMount 首调
+  import './iconThemeBuiltins';
   import { loadEnabledFontFaces } from './stores/fontsStore';
   import { listDirectMounts, displayLabelForStore } from './mountsSync';
   // FE-2 纯模块抽出（root vitest 可直测，各带 *.test.ts 锁状态转移）：zen 守卫
@@ -1043,6 +1046,7 @@
     onmounts={() => toggleMountsManager()}
     zen={layout.zen}
     onToggleZen={() => toggleZen()}
+    iconTabs={settings.iconThemes.scopes.tabs}
     temp={tabTemp}
     hidden={!vis.tabBar && !tabTemp}
     onenter={() => {
@@ -1075,7 +1079,7 @@
       {#if sources.length > 0}
         <!-- 整树重建 key：源数量 | 各源数据版本 storeRevisions | 排除规则（BUG-05 通道，T4 多源化，M-2 修正，T7 分桶） -->
         {#key treeKey}
-          <FileTree {sources} excludedPatterns={settings.excludedPatterns} onopen={onTreeOpen} onremove={removeSource} />
+          <FileTree {sources} excludedPatterns={settings.excludedPatterns} iconTree={settings.iconThemes.scopes.tree} onopen={onTreeOpen} onremove={removeSource} />
         {/key}
       {:else}
         <!-- 0 目录空态引导区（spec §2.3）：三入口动作与标签栏动作簇同源（openFlow façade

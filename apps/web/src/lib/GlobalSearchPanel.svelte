@@ -9,8 +9,15 @@
   import { addTab } from './openFlow.svelte';
   import { runGlobalSearch, serverSearchHint, MOUNT_SEARCH_DEGRADED_HINT, type SearchSource } from './globalSearch';
   import { loadSearchEngine } from './searchEngineCache';
+  import { loadSettings } from './stores/settings';
+  import FileIcon from './FileIcon.svelte';
 
   let { sources, onclose }: { sources: Array<SearchSource>; onclose(): void } = $props();
+
+  /** 图标主题 search 作用域门（图标主题 spec §3.1/§3.3，Task 4）：loadSettings
+   * 一次性读（QuickOpenPanel 同款——面板短命挂载，重开取新值）；仅文件头行加
+   * 图标，命中行不加 */
+  const iconSearch = loadSettings().iconThemes.scopes.search;
 
   let query = $state('');
   let caseSensitive = $state(false);
@@ -274,6 +281,11 @@
       {#each rows as row (row.m.storeId + ':' + row.m.path + ':' + row.m.line + ':' + row.m.col)}
         {#if row.header}
           <div class="vv-gsearch-file">
+            {#if iconSearch}
+              <!-- 文件头行首图标位（图标主题 spec §3.3 search 作用域）：按基名查表
+                   （path 含目录段，fileNames/fileExtensions 均按基名匹配） -->
+              <FileIcon kind="file" name={row.m.path.split('/').pop() ?? row.m.path} />
+            {/if}
             <span class="vv-gsearch-file-path">{row.m.path}</span>
             <span class="vv-gsearch-file-count">{counts.get(row.m.storeId + ':' + row.m.path)}</span>
           </div>

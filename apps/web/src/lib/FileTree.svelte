@@ -1,12 +1,17 @@
 <script lang="ts">
   import type { TreeStore, TreeNode } from '@bhxch/vviewer-core';
   import TreeNodeRow from './TreeNodeRow.svelte';
+  import FileIcon from './FileIcon.svelte';
   import { showStatusNotice } from './openFlow.svelte';
 
-  let { sources, excludedPatterns = [], onopen, onremove }: {
+  let { sources, excludedPatterns = [], iconTree = false, onopen, onremove }: {
     /** 当前 workspace 的全部可渲染来源（AppShell 由 workspace.sources × 活动实例解析） */
     sources: Array<{ label: string; store: TreeStore }>;
     excludedPatterns?: string[];
+    /** 图标主题 tree 作用域门（图标主题 spec §3.1/§3.3，Task 4）：本组件无 settings
+     * 访问路径，AppShell 传 settings.iconThemes.scopes.tree 布尔——源头行 folder
+     * 图标位与 TreeNodeRow 逐层下传同用此门 */
+    iconTree?: boolean;
     /** TreeNodeRow 上行的打开事件附带命中来源的 store（AppShell 按源 addTab）；
      * size 随事件透传（io-streaming Task 4）写入 Tab.source.size */
     onopen: (e: { path: string; name: string; size?: number; store: TreeStore }) => void;
@@ -69,6 +74,11 @@
       <button type="button" class="vv-tree-src-toggle" aria-label="折叠/展开 {src.label}"
         aria-expanded={!collapsed[src.storeId]}
         onclick={() => toggleCollapse(src.storeId)}>{collapsed[src.storeId] ? '▸' : '▾'}</button>
+      {#if iconTree}
+        <!-- 源头行 folder 图标位（图标主题 spec §3.3 tree 作用域）：来源名入查表
+             （无命中且无 _folder 回退 → null 不渲染，行零位移） -->
+        <FileIcon kind="folder" name={src.label} />
+      {/if}
       <span class="vv-tree-src-label" title={src.label}>{src.label}</span>
       <button
         type="button"
@@ -81,7 +91,7 @@
     {#if !collapsed[src.storeId]}
       <ul class="vv-tree-group" role="group">
         {#each src.nodes as node (node.path)}
-          <TreeNodeRow store={src.store} {excludedPatterns} {node} depth={0} onopen={(e) => onopen({ ...e, store: src.store })} />
+          <TreeNodeRow store={src.store} {excludedPatterns} {node} depth={0} iconEnabled={iconTree} onopen={(e) => onopen({ ...e, store: src.store })} />
         {/each}
       </ul>
     {/if}

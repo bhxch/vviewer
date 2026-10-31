@@ -9,6 +9,7 @@
   import { requestMetaLangFocus } from './metaLangFocus';
   import TabContextMenu, { type TabCtxEntry } from './TabContextMenu.svelte';
   import TabBarActions from './TabBarActions.svelte';
+  import FileIcon from './FileIcon.svelte';
   import type { Settings } from './stores/settings';
 
   /**
@@ -34,7 +35,8 @@
     onsettings,
     onmounts,
     zen,
-    onToggleZen
+    onToggleZen,
+    iconTabs = false
   }: {
     tabs: Tab[];
     sources: WorkspaceSource[];
@@ -49,6 +51,9 @@
     onmounts(): void;
     zen: boolean;
     onToggleZen(): void;
+    /** 图标主题 tabs 作用域门（图标主题 spec §3.1/§3.3，Task 4）：AppShell 传
+     * settings.iconThemes.scopes.tabs 布尔（本组件无 settings 访问路径） */
+    iconTabs?: boolean;
   } = $props();
 
   /** 行内来源徽标（T6；多根 Task 1 同名跨源消歧）：逻辑在 tabBadge.ts 可单测；
@@ -297,6 +302,11 @@
             activateTab(tab.id);
           }
         }}>
+        {#if iconTabs}
+          <!-- tab 图标位（图标主题 spec §3.3 tabs 作用域）：文件 tab kind=file、
+               目录 tab（path===''，目录挂载/恢复通道）kind=folder -->
+          <FileIcon kind={tab.source.path === '' ? 'folder' : 'file'} name={tab.source.name} />
+        {/if}
         <span class="vv-tab-name" title={tab.source.name}>{tab.source.name}</span>
         {#if badge !== null}
           <!-- 来源徽标（多源 workspace 才显示）：截短由 CSS ellipsis 承担，title 全名 -->

@@ -9,8 +9,14 @@
   import { addTab } from './openFlow.svelte';
   import { loadSettings } from './stores/settings';
   import { fileNameOf, filterFiles, listFilesRecursively, type ScannedFile } from './quickOpen';
+  import FileIcon from './FileIcon.svelte';
 
   let { sources, onclose }: { sources: Array<{ label: string; store: TreeStore }>; onclose(): void } = $props();
+
+  /** 图标主题 quickOpen 作用域门（图标主题 spec §3.1/§3.3，Task 4）：现有 settings
+   * 访问路径 loadSettings 一次性读——面板为短命挂载（Ctrl+P 打开即建），挂载期
+   * settings 变更不回灌本门（FileIcon 对 runtime 变化仍响应式，重开面板取新值） */
+  const iconQuickOpen = loadSettings().iconThemes.scopes.quickOpen;
 
   let query = $state('');
   let files = $state<ScannedFile[]>([]);
@@ -170,6 +176,10 @@
             onclick={() => open(f)}
             onmousemove={() => (active = i)}
           >
+            {#if iconQuickOpen}
+              <!-- 行首文件图标位（图标主题 spec §3.3 quickOpen 作用域）：文件行专属 -->
+              <FileIcon kind="file" name={fileNameOf(f.path)} />
+            {/if}
             <span class="vv-quickopen-name">{fileNameOf(f.path)}</span>
             <span class="vv-quickopen-path">{labelOf(f.storeId)} / {f.path}</span>
           </button>

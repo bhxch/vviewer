@@ -6,10 +6,17 @@
   // 槽改动写 draft 后调 touch()——落盘与注入时机由 SettingsCenter 统一决定
   // （注入由壳层 AppShell 的 onSettingsChanged 订阅 diff 触发，spec 2026-10-12 §2.4）。
   import { onMount } from 'svelte';
-  import { deleteTheme, listThemes, type ImportedTheme } from '../stores/session';
-  import { importThemeFiles } from '../vsixImport';
+  import {
+    deleteIconTheme,
+    deleteTheme,
+    listIconThemes,
+    listThemes,
+    type ImportedIconTheme,
+    type ImportedTheme
+  } from '../stores/session';
+  import { importIconThemeFiles, importThemeFiles } from '../vsixImport';
   import { onSystemModeChange, themeOptions } from '../theme';
-  import type { Settings } from '../stores/settings';
+  import { ICON_THEME_SCOPE_KEYS, type Settings } from '../stores/settings';
 
   let { draft, touch }: { draft: Settings; touch(): void } = $props();
 
@@ -19,6 +26,21 @@
   let importNote = $state('');
   let importErrors = $state<string[]>([]);
   let themeInputEl = $state<HTMLInputElement | null>(null);
+
+  /** 已导入图标主题（图标主题 spec §3.1，Task 4）：挂载后异步填充，导入/删除后
+   * 刷新；importNote/importErrors 与颜色主题导入共用同一显示通道（后动作覆盖
+   * 前者文案，单一 note 面语义） */
+  let iconImported = $state<ImportedIconTheme[]>([]);
+  let iconImporting = $state(false);
+  let iconInputEl = $state<HTMLInputElement | null>(null);
+
+  /** 四 scopes 中文标签（ICON_THEME_SCOPE_KEYS 键序即渲染序，draft 值经键索引读写） */
+  const ICON_SCOPE_LABELS: Record<(typeof ICON_THEME_SCOPE_KEYS)[number], string> = {
+    tree: '文件树',
+    tabs: '标签栏',
+    quickOpen: '快速打开',
+    search: '全局搜索'
+  };
 
   // 主题表经动态 import 惰性加载（不进主 chunk，TopBar 旧实现同款），选项挂载后异步填充
   let codeThemeOptions = $state<Awaited<ReturnType<typeof themeOptions>>>([]);
@@ -69,6 +91,10 @@
     void listThemes()
       .then((ts) => (imported = ts.sort((a, b) => a.name.localeCompare(b.name) || a.addedAt - b.addedAt)))
       .catch(() => (imported = []));
+    // 图标主题库同上（图标主题 spec §3.1）
+    void listIconThemes()
+      .then((ts) => (iconImported = ts.sort((a, b) => a.name.localeCompare(b.name) || a.addedAt - b.addedAt)))
+      .catch(() => (iconImported = []));
     void themeOptions().then((opts) => (codeThemeOptions = opts));
   });
 
@@ -152,6 +178,62 @@
     }
     imported = imported.filter((x) => x.id !== t.id);
   }
+
+  // ---------- 图标主题分区（图标主题 spec §3.1，Task 4） ----------
+
+  /** 主题单选（不随亮暗切换，spec §3.1）：'none'/'seti'/已导入 id 三态写 draft */
+  function onIconThemeChange(e: Event): void {
+    draft.iconThemes.theme = (e.currentTarget as HTMLSelectElement).value as Settings['iconThemes']['theme'];
+    touch();
+  }
+
+  /** scopes 四开关：逐键写 draft（normalizeSettings 白名单口径在落盘侧兜底） */
+  function onScopeToggle(key: (typeof ICON_THEME_SCOPE_KEYS)[number], e: Event): void {
+    draft.iconThemes.scopes[key] = (e.currentTarget as HTMLInputElement).checked;
+    touch();
+  }
+
+  /** 图标主题导入（.json 直读要求字体同批选中 / .vsix 解包——importIconThemeFiles
+   * 管线）：计数通知复用 importNote/importErrors 通道 + 刷新图标列表 */
+  async function onIconImportChange(e: Event): Promise<void> {
+    const inp = e.currentTarget as HTMLInputElement;
+    const files = Array.from(inp.files ?? []); // FileList 非可迭代（该 tsconfig lib 下）→ Array.from
+    inp.value = ''; // 允许重复选同一文件
+    if (files.length === 0) return;
+    iconImporting = true;
+    importNote = '';
+    importErrors = [];
+    try {
+      const { imported: ok, errors } = await importIconThemeFiles(files);
+      importErrors = errors;
+      importNote = errors.length === 0 ? `已导入 ${ok.length} 个图标主题` : `已导入 ${ok.length} 个，失败 ${errors.length} 个`;
+      iconImported = [...(await listIconThemes())].sort(
+        (a, b) => a.name.localeCompare(b.name) || a.addedAt - b.addedAt
+      );
+    } catch (err) {
+      importErrors = [err instanceof Error ? err.message : String(err)];
+      importNote = '导入失败';
+    } finally {
+      iconImporting = false;
+    }
+  }
+
+  /** 删除已导入图标主题：确认后删库；仍被主题槽引用的回 'none'（引用回落语义，
+   * 颜色主题删除同款；spec §3.5）。删库失败只记 console.error，列表/槽保持不动。 */
+  async function removeIconImported(t: ImportedIconTheme): Promise<void> {
+    if (!window.confirm(`删除已导入图标主题「${t.name}」？`)) return;
+    try {
+      await deleteIconTheme(t.id);
+    } catch (err) {
+      console.error(`删除已导入图标主题「${t.name}」失败`, err);
+      return;
+    }
+    if (draft.iconThemes.theme === t.id) {
+      draft.iconThemes.theme = 'none';
+      touch();
+    }
+    iconImported = iconImported.filter((x) => x.id !== t.id);
+  }
 </script>
 
 <section class="vv-sc-section">
@@ -226,6 +308,64 @@
     </ul>
   {:else}
     <div class="vv-settings-empty">暂无已导入主题</div>
+  {/if}
+  <div class="vv-settings-label">图标主题</div>
+  <label class="vv-settings-theme-row">
+    <span>主题</span>
+    <select value={draft.iconThemes.theme} onchange={onIconThemeChange} aria-label="图标主题">
+      <option value="none">无</option>
+      <option value="seti">Seti (VSCode)</option>
+      {#each iconImported as t (t.id)}
+        <option value={t.id}>{t.name}（{t.source}）</option>
+      {/each}
+    </select>
+  </label>
+  <div class="vv-settings-hint">单选且不随亮暗切换；出现范围默认仅文件树。</div>
+  <div class="vv-settings-scopes" role="group" aria-label="图标主题出现范围">
+    {#each ICON_THEME_SCOPE_KEYS as key (key)}
+      <label class="vv-settings-scope">
+        <input
+          type="checkbox"
+          checked={draft.iconThemes.scopes[key]}
+          onchange={(e) => onScopeToggle(key, e)}
+          aria-label="图标主题出现范围：{ICON_SCOPE_LABELS[key]}"
+        />
+        {ICON_SCOPE_LABELS[key]}
+      </label>
+    {/each}
+  </div>
+  <div class="vv-settings-import">
+    <button type="button" disabled={iconImporting} onclick={() => iconInputEl?.click()}>
+      {iconImporting ? '导入中…' : '导入图标主题…'}
+    </button>
+    <input
+      type="file"
+      multiple
+      accept=".json,.woff,.woff2,.ttf,.otf,.vsix"
+      hidden
+      bind:this={iconInputEl}
+      onchange={onIconImportChange}
+    />
+  </div>
+  <div class="vv-settings-hint">JSON 导入须将主题清单与字体文件（woff/woff2/ttf/otf）同批选中；VSIX 自动解包。</div>
+  {#if iconImported.length > 0}
+    <ul class="vv-settings-themes">
+      {#each iconImported as t (t.id)}
+        <li class="vv-settings-theme">
+          <span class="vv-settings-theme-name" title={t.name}>{t.name}</span>
+          <span class="vv-settings-theme-src">{t.source}</span>
+          <button
+            type="button"
+            class="vv-settings-remove"
+            aria-label="删除已导入图标主题 {t.name}"
+            title="删除"
+            onclick={() => void removeIconImported(t)}>✕</button
+          >
+        </li>
+      {/each}
+    </ul>
+  {:else}
+    <div class="vv-settings-empty">暂无已导入图标主题</div>
   {/if}
   <div class="vv-settings-label">代码主题</div>
   <label class="vv-settings-theme-row">
