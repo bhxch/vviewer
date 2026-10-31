@@ -73,9 +73,10 @@ async function chromeMenuItem(page: Page, label: string): Promise<void> {
 
 /** 把指针从内容区移入标签栏边缘热区（两段移动保证 pointerenter 触发） */
 async function hoverTabEdge(page: Page): Promise<void> {
-  const edge = (await page.locator('.vv-edge[data-edge="tab"]').boundingBox())!;
+  const edge = await page.locator('.vv-edge[data-edge="tab"]').boundingBox();
+  expect(edge).not.toBeNull(); // 热区未挂载时在此快速失败，不拿 null 算 NaN 坐标
   await page.mouse.move(400, 300);
-  await page.mouse.move(edge.x + edge.width / 2, edge.y + edge.height / 2);
+  await page.mouse.move(edge!.x + edge!.width / 2, edge!.y + edge!.height / 2);
 }
 
 // ---------------------------------------------------------------- 桌面（chromium）
@@ -231,7 +232,12 @@ test.describe('布局与 zen（桌面）', () => {
     // TopBar「专注」钮），tooltip 写明进出双方式；临时条形态（zen 下热区唤出）
     // 右键菜单同通道即「退出专注」
     await openOverflowMenu(page);
-    const zenBtn = page.locator('.vv-tbact-pop').getByRole('button', { name: '专注', exact: true });
+    // exact 按 accessible name 全等——按钮 aria-label 是「进入专注模式」（TabBarActions），
+    // 按钮可见文本「专注」只是非 aria 的内联文案，不能作 name 锚
+    const zenBtn = page.locator('.vv-tbact-pop').getByRole('button', {
+      name: '进入专注模式',
+      exact: true
+    });
     await expect(zenBtn).toHaveAttribute('title', /进入后按 Esc 或 Ctrl\+Alt\+Z 退出/);
     await zenBtn.click();
     await expect(page.locator('.vv-shell.zen')).toHaveCount(1);

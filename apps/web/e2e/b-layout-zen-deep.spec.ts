@@ -69,9 +69,10 @@ async function chromeMenuItem(page: Page, label: string): Promise<void> {
 
 /** 把指针从内容区移入标签栏边缘热区（两段移动保证 pointerenter 触发） */
 async function hoverTabEdge(page: Page): Promise<void> {
-  const edge = (await page.locator('.vv-edge[data-edge="tab"]').boundingBox())!;
+  const edge = await page.locator('.vv-edge[data-edge="tab"]').boundingBox();
+  expect(edge).not.toBeNull(); // 热区未挂载时在此快速失败，不拿 null 算 NaN 坐标
   await page.mouse.move(400, 300);
-  await page.mouse.move(edge.x + edge.width / 2, edge.y + edge.height / 2);
+  await page.mouse.move(edge!.x + edge!.width / 2, edge!.y + edge!.height / 2);
 }
 
 /** 中缝把手拖拽（桌面断点）：dx>0 左栏增宽 / 右栏减宽（同一条增量数学取反） */

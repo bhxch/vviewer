@@ -196,7 +196,8 @@ test('THEME-01: 三态循环（跟随系统→亮→暗→跟随系统）、整�
   expect(bgLight).toBe('#ffffff'); // headless 默认 prefers light
 
   // ① system → 亮：按钮文案、data-theme-mode、整壳配色、localStorage 单键同步
-  await openMenu();
+  // （菜单在条目点击前保持开——初始态轮已 openMenu，此处勿重复点触发钮，会把
+  // 已开弹层 toggle 收起）
   await themeBtn.click();
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'light');
   await expect(themeBtn).toHaveText('主题：亮');
