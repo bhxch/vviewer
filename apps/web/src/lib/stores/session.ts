@@ -27,6 +27,19 @@ export interface TabSnapshot {
   size?: number | null;
 }
 
+/**
+ * Open VSX 来源元数据（图标主题+Open VSX spec §6.2，T5）：记录经 openVsx.ts 通道
+ * 安装/更新时写入；手动 json/vsix 导入无此字段、天然无更新通道（§6.3）。IndexedDB
+ * 无 schema 变更（object store 无 keyPath，加可选字段免版本升级，TabSnapshot 仅置
+ * 位同款先例）。
+ */
+export interface ThemeOrigin {
+  publisher: string;
+  extension: string;
+  version: string;
+  checkedAt: number;
+}
+
 /** 导入主题（spec B §2.3）：id='imported:<随机8>'，applyAppearance 按 id 解析注入。 */
 export interface ImportedTheme {
   id: string;
@@ -35,6 +48,8 @@ export interface ImportedTheme {
   colors: Record<string, string>;
   tokenColors: VscodeThemeJson['tokenColors'];
   source: 'json' | 'vsix';
+  /** Open VSX 来源（T5；本地导入无此字段）。 */
+  origin?: ThemeOrigin;
   addedAt: number;
 }
 
@@ -175,7 +190,8 @@ export interface ImportedIconThemeFont {
  * 导入图标主题（图标主题 spec §2.3）：id='imported:<随机8>'；manifest 存 T1
  * validateVscodeIconTheme 的归一化查表产物（五 Map + 回退键，structured clone
  * 原生保形，put/get 免重建）；fonts 为主题声明的字体文件原始字节（导入时同批
- * 关联落齐）。origin 为 Open VSX 来源元数据（T5 写入，本地导入无此字段）。
+ * 关联落齐）。origin 为 Open VSX 来源元数据（T5 写入，本地导入无此字段，
+ * ThemeOrigin 同款）。
  */
 export interface ImportedIconTheme {
   id: string;
@@ -183,7 +199,7 @@ export interface ImportedIconTheme {
   manifest: NormalizedIconTheme;
   fonts: ImportedIconThemeFont[];
   source: 'json' | 'vsix';
-  origin?: { publisher: string; extension: string; version: string; checkedAt: number };
+  origin?: ThemeOrigin;
   addedAt: number;
 }
 

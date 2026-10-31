@@ -223,6 +223,18 @@ function injectAppearance(appearance: string, mode: 'light' | 'dark', json: Vsco
 let appearanceCallSeq = 0;
 let lastAppearanceSig: string | null = null;
 
+/**
+ * 归零签名强制下次 applyAppearanceFromSettings 必重注入（T5 Open VSX 更新通道）：
+ * appearanceSig 只含 (mode, appearance, codeTheme) 槽位、不含记录内容——同 id
+ * 覆盖写后槽位不变、diff 必 no-op，注入不会自行刷新。调用方（AppearanceSection
+ * 颜色主题更新流程）随后手动 applyAppearanceFromSettings(loadSettings()) 完成
+ * 重应用（图标主题同款缝隙 → iconTheme.svelte.ts invalidateIcons，两通道一并
+ * 处置，对应 spec §6.3「设置引用零断链 + 内容替换」承诺）。
+ */
+export function invalidateAppearance(): void {
+  lastAppearanceSig = null;
+}
+
 function appearanceSig(mode: 'light' | 'dark', appearance: string, codeTheme: string): string {
   return `${mode}|${appearance}|${codeTheme}`;
 }

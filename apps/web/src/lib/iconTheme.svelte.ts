@@ -162,8 +162,7 @@ let applyChain: Promise<void> = Promise.resolve();
 export function applyIconsFromSettings(s: Settings): Promise<void> {
   const run = async (): Promise<void> => {
     const sig = iconSig(s);
-    if (sig === iconThemeState.sig) return;
-    const themeKey = s.iconThemes.theme;
+    if (sig === iconThemeState.sig) return;    const themeKey = s.iconThemes.theme;
     let manifest: NormalizedIconTheme | null = null;
     let datas: readonly ({ data: ArrayBuffer } | undefined)[] = [];
     if (themeKey.startsWith('imported:')) {
@@ -197,4 +196,20 @@ export function applyIconsFromSettings(s: Settings): Promise<void> {
   const next = applyChain.then(run, run);
   applyChain = next.catch(() => {}); // 链尾吞错：run 自不抛，防御意外同步异常毒化链
   return next;
+}
+
+/**
+ * 归零签名强制下次 applyIconsFromSettings 必命中（T5 Open VSX 更新通道，spec
+ * §6.3）：iconSig 只含 theme id + scopes（iconReaction.ts），不含记录内容——同 id
+ * 覆盖写后 settings 引用不变、diff 必 no-op，运行时不会自行刷新（T3 备案 → T5
+ * 裁决二选一取「sig 归零」而非「sig 拼记录版本戳」：sig 公式单源在 iconReaction.ts
+ * 纯模块且语义是 settings 视图，拼入记录内容会破坏「无关字段零参与」契约）。调用
+ * 方（AppearanceSection 更新流程）随后手动 applyIconsFromSettings(loadSettings())
+ * 完成重应用——applyIconsFromSettings 每次全量重读 IndexedDB 记录，归零后自然
+ * 取到覆盖后的新 manifest/fonts。归零同时使 reactToIconsChange 的下一次 settings
+ * 变更必命中（幂等无害）。颜色主题槽位签名的同款缝隙 → theme.ts
+ * invalidateAppearance（两通道一并处置）。
+ */
+export function invalidateIcons(): void {
+  iconThemeState.sig = '';
 }

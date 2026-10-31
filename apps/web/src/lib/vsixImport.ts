@@ -16,11 +16,20 @@ import {
   putTheme,
   type ImportedIconTheme,
   type ImportedIconThemeFont,
-  type ImportedTheme
+  type ImportedTheme,
+  type ThemeOrigin
 } from './stores/session';
 
 /** 单主题 JSON 字节上限（brief 定值 1MB）。 */
 export const MAX_THEME_JSON_BYTES = 1024 * 1024;
+
+/**
+ * 导入附加元数据（T5 Open VSX 通道）：origin 写入本批每条记录（多主题包全部并列
+ * 同 origin，spec §6.2）；本地手动导入不传（无 origin = 天然无更新通道，§6.3）。
+ */
+export interface ImportOpts {
+  origin?: ThemeOrigin;
+}
 
 /** VSIX contributes 清单条目（themes/iconThemes 通用；预览列举与导入共用；path 已归一化）。 */
 export interface VsixThemeEntry {
@@ -113,7 +122,8 @@ async function importThemeText(
   nameFallback: string,
   source: ImportedTheme['source'],
   imported: ImportedTheme[],
-  errors: string[]
+  errors: string[],
+  origin?: ThemeOrigin
 ): Promise<void> {
   const parsed = parseJson(text);
   if (!parsed.ok) {
@@ -137,11 +147,12 @@ async function importThemeText(
     source,
     addedAt: Date.now()
   };
+  if (origin !== undefined) t.origin = origin; // fontsStore rec.url 同款：缺省不落键
   await putTheme(t);
   imported.push(t);
 }
 
-async function importVsixFile(file: File, imported: ImportedTheme[], errors: string[]): Promise<void> {
+async function importVsixFile(file: File, imported: ImportedTheme[], errors: string[], origin?: ThemeOrigin): Promise<void> {
   const store = await createZipStore(new Uint8Array(await file.arrayBuffer()));
   const entries = await readVsixContributions(store, 'themes'); // 「未找到主题」→ 外层 catch 记 errors
   for (const { label, path } of entries) {
@@ -151,33 +162,34 @@ async function importVsixFile(file: File, imported: ImportedTheme[], errors: str
         errors.push(`${label}: 主题 JSON 超过 1MB 上限，已跳过`);
         continue;
       }
-      await importThemeText(new TextDecoder().decode(bytes), label, label, 'vsix', imported, errors);
+      await importThemeText(new TextDecoder().decode(bytes), label, label, 'vsix', imported, errors, origin);
     } catch (err) {
       errors.push(`${label}: ${errText(err)}`); // 单条损坏跳过，其余主题继续
     }
   }
 }
 
-async function importJsonFile(file: File, imported: ImportedTheme[], errors: string[]): Promise<void> {
+async function importJsonFile(file: File, imported: ImportedTheme[], errors: string[], origin?: ThemeOrigin): Promise<void> {
   if (file.size > MAX_THEME_JSON_BYTES) {
     errors.push(`${file.name}: 主题 JSON 超过 1MB 上限，已跳过`);
     return;
   }
-  await importThemeText(await file.text(), file.name, basename(file.name).replace(/\.json$/i, ''), 'json', imported, errors);
+  await importThemeText(await file.text(), file.name, basename(file.name).replace(/\.json$/i, ''), 'json', imported, errors, origin);
 }
 
 /**
  * 批量导入主题文件：.json 直读校验入库、.vsix 解包逐主题导入。
  * 返回成功入库列表与逐条错误（含文件名/主题名前缀）；单文件级失败（解包失败、
- * 包超限、清单缺失）只记 errors，不中断同批。
+ * 包超限、清单缺失）只记 errors，不中断同批。opts.origin（T5 Open VSX 通道）写入
+ * 本批每条记录；本地手动导入不传。
  */
-export async function importThemeFiles(files: File[]): Promise<{ imported: ImportedTheme[]; errors: string[] }> {
+export async function importThemeFiles(files: File[], opts: ImportOpts = {}): Promise<{ imported: ImportedTheme[]; errors: string[] }> {
   const imported: ImportedTheme[] = [];
   const errors: string[] = [];
   for (const file of files) {
     try {
-      if (/\.json$/i.test(file.name)) await importJsonFile(file, imported, errors);
-      else if (/\.vsix$/i.test(file.name)) await importVsixFile(file, imported, errors);
+      if (/\.json$/i.test(file.name)) await importJsonFile(file, imported, errors, opts.origin);
+      else if (/\.vsix$/i.test(file.name)) await importVsixFile(file, imported, errors, opts.origin);
       else errors.push(`${file.name}: 不支持的文件类型（仅 .json / .vsix）`);
     } catch (err) {
       errors.push(`${file.name}: ${errText(err)}`);
@@ -237,7 +249,8 @@ async function importIconThemeText(
   source: ImportedIconTheme['source'],
   resolveFont: FontResolver,
   imported: ImportedIconTheme[],
-  errors: string[]
+  errors: string[],
+  origin?: ThemeOrigin
 ): Promise<void> {
   const parsed = parseJson(text);
   if (!parsed.ok) {
@@ -279,6 +292,7 @@ async function importIconThemeText(
     source,
     addedAt: Date.now()
   };
+  if (origin !== undefined) t.origin = origin;
   await putIconTheme(t);
   imported.push(t);
 }
@@ -287,7 +301,8 @@ async function importIconJsonFile(
   file: File,
   batchFonts: ReadonlyMap<string, File>,
   imported: ImportedIconTheme[],
-  errors: string[]
+  errors: string[],
+  origin?: ThemeOrigin
 ): Promise<void> {
   if (file.size > MAX_THEME_JSON_BYTES) {
     errors.push(`${file.name}: 主题 JSON 超过 1MB 上限，已跳过`);
@@ -304,11 +319,17 @@ async function importIconJsonFile(
     'json',
     resolveFont,
     imported,
-    errors
+    errors,
+    origin
   );
 }
 
-async function importIconVsixFile(file: File, imported: ImportedIconTheme[], errors: string[]): Promise<void> {
+async function importIconVsixFile(
+  file: File,
+  imported: ImportedIconTheme[],
+  errors: string[],
+  origin?: ThemeOrigin
+): Promise<void> {
   const store = await createZipStore(new Uint8Array(await file.arrayBuffer()));
   const entries = await readVsixContributions(store, 'iconThemes'); // 「未找到图标主题」→ 外层 catch 记 errors
   // 包内字体索引（基名 → 条目路径，先到先得）：主题 fonts[].src 相对路径按基名
@@ -332,7 +353,7 @@ async function importIconVsixFile(file: File, imported: ImportedIconTheme[], err
         errors.push(`${label}: 主题 JSON 超过 1MB 上限，已跳过`);
         continue;
       }
-      await importIconThemeText(new TextDecoder().decode(bytes), label, label, 'vsix', resolveFont, imported, errors);
+      await importIconThemeText(new TextDecoder().decode(bytes), label, label, 'vsix', resolveFont, imported, errors, origin);
     } catch (err) {
       errors.push(`${label}: ${errText(err)}`); // 单条损坏跳过，其余主题继续
     }
@@ -345,9 +366,13 @@ async function importIconVsixFile(file: File, imported: ImportedIconTheme[], err
  * → 该主题整条拒绝）、.vsix 解包逐主题导入（contributes.iconThemes，字体在包内
  * 按基名关联）；字体文件（woff/woff2/ttf/otf）本身不入库，只作同批 .json 的关联
  * 资源（未被引用则静默忽略）。返回成功入库列表与逐条错误（含文件名/主题名前缀）；
- * 单文件级失败（解包失败、清单缺失）只记 errors，不中断同批。
+ * 单文件级失败（解包失败、清单缺失）只记 errors，不中断同批。opts.origin（T5
+ * Open VSX 通道）写入本批每条记录；本地手动导入不传。
  */
-export async function importIconThemeFiles(files: File[]): Promise<{ imported: ImportedIconTheme[]; errors: string[] }> {
+export async function importIconThemeFiles(
+  files: File[],
+  opts: ImportOpts = {}
+): Promise<{ imported: ImportedIconTheme[]; errors: string[] }> {
   const imported: ImportedIconTheme[] = [];
   const errors: string[] = [];
   // 字体资源预收集（基名 → File，先到先得）：.json 可能先于字体文件出现在同批，
@@ -361,8 +386,8 @@ export async function importIconThemeFiles(files: File[]): Promise<{ imported: I
   }
   for (const file of files) {
     try {
-      if (/\.json$/i.test(file.name)) await importIconJsonFile(file, batchFonts, imported, errors);
-      else if (/\.vsix$/i.test(file.name)) await importIconVsixFile(file, imported, errors);
+      if (/\.json$/i.test(file.name)) await importIconJsonFile(file, batchFonts, imported, errors, opts.origin);
+      else if (/\.vsix$/i.test(file.name)) await importIconVsixFile(file, imported, errors, opts.origin);
       else if (!batchFonts.has(basename(file.name)))
         errors.push(`${file.name}: 不支持的文件类型（仅 .json / .vsix / 字体文件）`);
     } catch (err) {
