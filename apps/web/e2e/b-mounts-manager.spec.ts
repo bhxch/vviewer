@@ -1,4 +1,4 @@
-import { overflowConnectServer } from './tabbar-actions';
+import { openOverflowMenu, overflowConnectServer } from './tabbar-actions';
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 
@@ -145,11 +145,18 @@ async function seeTreeRow(page: Page, text: string): Promise<void> {
   await closeDrawerIfOpened(page, drawer);
 }
 
+/** ⋯ 菜单通道打开目录管理页（顶栏退役：📁 钮随 TopBar 整行删除，条目入 ⋯ 菜单——
+ * 点击即收菜单并 toggle 面板；本装置仅在面板关态调用，开态直点会 toggle 关闭） */
+async function openMountsPanel(page: Page): Promise<void> {
+  await openOverflowMenu(page);
+  await page.locator('button[aria-label="目录管理"]').click();
+  await expect(page.locator('.vv-mounts-manager')).toBeVisible();
+}
+
 async function openManager(page: Page): Promise<void> {
   await page.goto('/');
   await expect(page.locator('.vv-tabbar')).toBeVisible();
-  await page.locator('button[aria-label="目录管理"]').click();
-  await expect(page.locator('.vv-mounts-manager')).toBeVisible();
+  await openMountsPanel(page);
 }
 
 /** CORS 预检 + 响应头齐备的 S3 mock（浏览器直连 fetch 会被预检与 CORS 双关卡）。
@@ -344,7 +351,7 @@ test.describe('b-mounts-manager 目录管理页', () => {
       createdAt: 1700000000000,
       registeredRootIndex: 7
     });
-    await page.locator('button[aria-label="目录管理"]').click();
+    await openMountsPanel(page);
     const row = page.locator('.vv-mm-item', { hasText: '他机挂载' });
     await expect(row).toBeVisible();
 
@@ -686,7 +693,7 @@ test.describe('b-mounts-manager 目录管理页', () => {
     await page.reload();
     await expect(page.locator('.vv-tabbar')).toBeVisible();
     await expect.poll(() => postBodies.length, { timeout: 10_000 }).toBe(2); // 对账幂等 POST
-    await page.locator('button[aria-label="目录管理"]').click();
+    await openMountsPanel(page);
     await expect(page.locator('.vv-mm-item', { hasText: 'proxy-e2e' }).getByText('已注册 rootIndex=2')).toBeVisible();
 
     // ③ 删除失效帧：服务端注册已消失（404）→ 幂等视为成功，本地记录照常删除
@@ -776,7 +783,7 @@ test.describe('b-mounts-manager 目录管理页', () => {
     // ② 断连（桩全 5xx，不刷新）：组①清单获取失败（服务端面显式化）+ 组②本地
     // 行留存（挂载记录在浏览器 IndexedDB——断连不掉行、注册徽标不闪断）
     down = true;
-    await page.locator('button[aria-label="目录管理"]').click();
+    await openMountsPanel(page);
     await expect(page.locator('.vv-mounts-manager')).toBeVisible();
     await expect(page.locator('.vv-mm-error')).toContainText('清单获取失败');
     await expect(
@@ -804,7 +811,7 @@ test.describe('b-mounts-manager 目录管理页', () => {
     await closeDrawerIfOpened(page, drawerB);
     await expect(page.locator('.vv-tab.active', { hasText: 'host.txt' })).toBeVisible();
     await expect(page.locator('.vv-code-pre')).toContainText('reconnect host body');
-    await page.locator('button[aria-label="目录管理"]').click();
+    await openMountsPanel(page);
     const rowAgain = page.locator('.vv-mm-item', { hasText: 'proxy-e2e' });
     await expect(rowAgain.getByText('已注册 rootIndex=2')).toBeVisible();
     await rowAgain.getByRole('button', { name: '打开' }).click();

@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
+import { openOverflowMenu } from './tabbar-actions';
 
 /**
  * b-mounts-deep 目录挂载补强（MM-11~MM-19，续 b-mounts-manager MM-01~10；
@@ -135,11 +136,18 @@ async function clickTreeRow(page: Page, text: string): Promise<void> {
   await closeDrawerIfOpened(page, drawer);
 }
 
+/** ⋯ 菜单通道打开目录管理页（顶栏退役：📁 钮随 TopBar 整行删除，条目入 ⋯ 菜单——
+ * 点击即收菜单并 toggle 面板；本装置仅在面板关态调用，开态直点会 toggle 关闭） */
+async function openMountsPanel(page: Page): Promise<void> {
+  await openOverflowMenu(page);
+  await page.locator('button[aria-label="目录管理"]').click();
+  await expect(page.locator('.vv-mounts-manager')).toBeVisible();
+}
+
 async function openManager(page: Page): Promise<void> {
   await page.goto('/');
   await expect(page.locator('.vv-tabbar')).toBeVisible();
-  await page.locator('button[aria-label="目录管理"]').click();
-  await expect(page.locator('.vv-mounts-manager')).toBeVisible();
+  await openMountsPanel(page);
 }
 
 /** multistatus 构造（命名空间变体参数化）：entries 含集合自身（isSelf 跳过）。
@@ -269,7 +277,7 @@ test.describe('b-mounts-deep 目录挂载补强', () => {
       pendingRetry: true,
       lastError: '注册失败：HTTP 500'
     });
-    await page.locator('button[aria-label="目录管理"]').click();
+    await openMountsPanel(page);
     const row = page.locator('.vv-mm-item', { hasText: '重探桶' });
     await expect(row.locator('.vv-mm-state')).toContainText('待注册（注册失败：HTTP 500）');
     await expect(row.locator('.vv-mm-state')).not.toContainText('已注册');
@@ -302,7 +310,7 @@ test.describe('b-mounts-deep 目录挂载补强', () => {
     await expect(page.locator('.vv-tabbar')).toBeVisible();
     await expect.poll(() => mountsGet, { timeout: 15_000 }).toBeGreaterThan(0);
     await expect.poll(() => root2Probe, { timeout: 15_000 }).toBeGreaterThan(0); // probe 已飞行
-    await page.locator('button[aria-label="目录管理"]').click();
+    await openMountsPanel(page);
     await expect(page.locator('.vv-mm-item', { hasText: '重探桶' }).locator('.vv-mm-state')).toContainText(
       '已注册 rootIndex=2'
     );
@@ -454,7 +462,7 @@ test.describe('b-mounts-deep 目录挂载补强', () => {
     await expect(page.locator('.vv-tab', { hasText: '新名桶' })).toBeVisible();
     await expect(page.locator('.vv-tab', { hasText: '老名桶' })).toHaveCount(0);
     // 管理页行同为新名（记录 label 单一事实源）
-    await page.locator('button[aria-label="目录管理"]').click();
+    await openMountsPanel(page);
     await expect(page.locator('.vv-mm-item', { hasText: '新名桶' })).toBeVisible();
     await page.keyboard.press('Escape');
     await seeTreeRow(page, 'a.txt');
@@ -516,7 +524,7 @@ test.describe('b-mounts-deep 目录挂载补强', () => {
 
     // ② 自定义前缀（R: + xmlns:R="DAV:"）：行内「测试」走同一探测链 → 前缀无关解析
     flavor = 'custom-prefix';
-    await page.locator('button[aria-label="目录管理"]').click();
+    await openMountsPanel(page);
     const row = page.locator('.vv-mm-item', { hasText: 'ns桶' });
     await expect(row).toBeVisible();
     await row.getByRole('button', { name: '测试', exact: true }).click();
@@ -737,7 +745,7 @@ test.describe('b-mounts-deep 目录挂载补强', () => {
     await expect(page.locator('.vv-tabbar')).toBeVisible();
 
     // ① 打开全链：目录 tab + 文件读（Basic pass-1）
-    await page.locator('button[aria-label="目录管理"]').click();
+    await openMountsPanel(page);
     await page.locator('.vv-mm-item', { hasText: '轮换桶' }).getByRole('button', { name: '打开' }).click();
     await page.keyboard.press('Escape');
     await expect(page.locator('.vv-tab.active', { hasText: '轮换桶' })).toBeVisible();
@@ -747,7 +755,7 @@ test.describe('b-mounts-deep 目录挂载补强', () => {
 
     // ② 编辑表单：secret 明文回填（管理页即凭据管理面）→ 改密保存 → 释放持有
     // 实例（目录+文件两 tab 系统替换关闭，状态栏计数提示）
-    await page.locator('button[aria-label="目录管理"]').click();
+    await openMountsPanel(page);
     await page.locator('.vv-mm-item', { hasText: '轮换桶' }).getByRole('button', { name: '编辑' }).click();
     await expect(page.locator('.vv-mm-form')).toBeVisible();
     await expect(page.getByRole('heading', { name: '编辑挂载：轮换桶' })).toBeVisible();
@@ -760,7 +768,7 @@ test.describe('b-mounts-deep 目录挂载补强', () => {
     await expect(page.locator('.vv-mounts-manager')).toHaveCount(0);
 
     // ③ 重开：存活实例已释放 → 新实例持新凭据（Basic pass-2 晚于全部 pass-1 请求）
-    await page.locator('button[aria-label="目录管理"]').click();
+    await openMountsPanel(page);
     await page.locator('.vv-mm-item', { hasText: '轮换桶' }).getByRole('button', { name: '打开' }).click();
     await page.keyboard.press('Escape');
     await clickTreeRow(page, 'one.txt');
@@ -850,7 +858,7 @@ test.describe('b-mounts-deep 目录挂载补强', () => {
         void d.accept();
         return t;
       });
-    await page.locator('button[aria-label="目录管理"]').click();
+    await openMountsPanel(page);
     await page.locator('.vv-mm-item', { hasText: '使用中挂载' }).getByRole('button', { name: '删除' }).click();
     expect(await dialogText).toContain('删除挂载「使用中挂载」');
     await expect(page.getByText('暂无前端配置挂载。')).toBeVisible();
