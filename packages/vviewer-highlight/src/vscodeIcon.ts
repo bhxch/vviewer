@@ -73,8 +73,8 @@ export interface IconThemeFont {
 /**
  * 预编译查表形态（spec Interfaces 固化，T2/T3/T4 消费面）：五 Map 值为已解析
  * 字形（坏定义剔除、悬空引用连带剔除后仅剩可解析条目）；`_file`/`_folder`/
- * `_folder_open` 为 VSCode 主题惯例的回退定义键。Map 键按主题原文存储，查表
- * 侧 lowercase（对齐 VSCode 查前小写语义）。
+ * `_folder_open` 为 VSCode 主题惯例的回退定义键。Map 键存储侧即 lowercase
+ * （sanitizeGlyphTable 落表归一，对齐 VSCode 查前小写语义）。
  */
 export interface NormalizedIconTheme {
   name: string;
