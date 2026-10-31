@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import type { Detection, FileSource, RenderedInstance, TreeStore } from '@vviewer/core';
 import { HighlightCanceledError, type HighlightInterval } from '@vviewer/highlight';
 import {
   markdownRenderer,
   fenceToHtml,
+  setHighlightFence,
   slugifyHeading,
   assignHeadingIds,
   collectTextNodes,
@@ -44,10 +45,20 @@ function tocOf(instance: RenderedInstance): { level: number; text: string; id: s
   return instance.getToc();
 }
 
+// 渲染器实现已在 @vviewer/markdown 组合包：围栏高亮自注入缝（setHighlightFence）
+// 读取，未注入时走包内默认主线程高亮器（jsdom 无 CDN 资产，ts-* 集成断言必挂）。
+// 本文件的渲染集成用例依赖 attachHighlightClient 注入的 worker client 桥
+// （fenceToHtml）——每例前接线、afterEach 解绑，与 apps/web viewer.ts 的装配同构
+//（同一实例单一路径，不与包内默认实现双轨）。
+beforeEach(() => {
+  setHighlightFence(fenceToHtml);
+});
+
 afterEach(() => {
   attachHighlightClient(null);
   setMarkdownBackend(null);
   setMarkdownImageResolver(null);
+  setHighlightFence(null);
   document.body.innerHTML = '';
 });
 

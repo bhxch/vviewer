@@ -406,22 +406,42 @@ describe('captureToCssClass 与 code.ts 类名对齐', () => {
   });
 });
 
-describe('app.css 与 CODE_CAPTURES 对齐（.ts-* 规则双向覆盖）', () => {
+describe('.ts-*/.hljs-* 映射段随 @vviewer/markdown/markdown.css 单源（app.css 切换事实锁定）', () => {
+  // markdown 渲染样式段（含 .ts-*/.hljs-* 高亮映射）已收进 @vviewer/markdown 的
+  // markdown.css（app.css 顶部 @import 引入；对齐细节由包内 cssMirror.test.ts 锁定
+  // ——.ts-* 默认色与 onelight 主题逐条等价、镜像与 MARKDOWN_CSS 逐字节等价）。
+  // 此处锁 app.css 侧的切换事实：映射段不再双持，运行时规则由包 CSS 提供。
   // vitest 会把 ?raw 的 css 导入桩成空串，故从文件系统读（根目录或 apps/web 两种 cwd 均可）
   const css = readFileSync(
     ['apps/web/src/app.css', 'src/app.css'].map((p) => resolve(p)).find((p) => existsSync(p))!,
     'utf8'
   );
+  const markdownCss = readFileSync(
+    [
+      'packages/markdown/src/markdown.css',
+      'node_modules/@vviewer/markdown/src/markdown.css',
+      '../../packages/markdown/src/markdown.css'
+    ]
+      .map((p) => resolve(p))
+      .find((p) => existsSync(p))!,
+    'utf8'
+  );
 
-  it('每个 CODE_CAPTURES capture 都有 .ts-<class> 颜色规则（回落 inherit）', () => {
+  it('app.css 不再持有 .ts-*/.hljs-* 映射规则（包 CSS 单源，避免双份漂移）', () => {
+    expect(css).not.toMatch(/\.ts-[a-z0-9-]+ \{/);
+    expect(css).not.toMatch(/\.hljs-[a-z0-9-]+ \{/);
+    expect(markdownCss).toMatch(/\.ts-keyword \{/);
+  });
+
+  it('包 CSS：每个 CODE_CAPTURES capture 都有 .ts-<class> 颜色规则（var 缺省值由包内 onelight 锁定）', () => {
     for (const c of CODE_CAPTURES) {
       const cls = captureToCssClass(c);
-      expect(css, `缺少 .ts-${cls} 规则`).toContain(`.ts-${cls} { color: var(--vv-ts-${cls}, inherit); }`);
+      expect(markdownCss, `缺少 .ts-${cls} 规则`).toContain(`.ts-${cls} { color: var(--vv-ts-${cls},`);
     }
   });
 
-  it('app.css 中每个 .ts- 规则都来自 CODE_CAPTURES（无漂移）', () => {
-    const rules = [...css.matchAll(/\.ts-([a-z0-9-]+) \{/g)].map((m) => m[1]!);
+  it('包 CSS 中每个 .ts- 规则都来自 CODE_CAPTURES（无漂移）', () => {
+    const rules = [...markdownCss.matchAll(/\.ts-([a-z0-9-]+) \{/g)].map((m) => m[1]!);
     const expected = new Set(CODE_CAPTURES.map((c) => captureToCssClass(c)));
     for (const r of rules) expect(expected.has(r), `.ts-${r} 不在 CODE_CAPTURES`).toBe(true);
     expect(rules.length).toBe(expected.size);

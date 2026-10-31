@@ -102,7 +102,8 @@ pnpm workspace monorepo：
 packages/
   core/             TreeStore/TabStore 抽象、格式派发器与流式读上下文（StreamCtx）、编码检测（框架无关）
   highlight/        web-tree-sitter Worker 管线、helix 查询继承/injection、语法资产三层解析链（同源→服务端→CDN）、主题
-  render-text/      代码（虚拟滚动/降级链/窗口流式）、markdown 管线、HTML 沙箱、文件内搜索
+  markdown/         markdown 完整渲染组合包：五步管线（高亮/图表/KaTeX/复制/灯箱）+ enrich + 导出装配 + CSS 单源（引入即完整效果）
+  render-text/      代码（虚拟滚动/降级链/窗口流式）、markdown 转出口（实现迁 @vviewer/markdown）、HTML 沙箱、文件内搜索
   render-doc/       pdfjs、docx/xlsx/pptx
   render-binary/    hex dump（窗口流式/搜索/检查器）、结构树
   render-media/     ArtPlayer/hls.js/mpegts.js、图片

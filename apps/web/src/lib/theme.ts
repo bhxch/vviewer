@@ -51,8 +51,10 @@ export const DEFAULT_CODE_THEME: Record<'light' | 'dark', string> = {
 /**
  * 代码高亮常用捕获全集（顶层 + 常用子捕获，53 个）：清单本体与 span 类名归约函数
  * （resolveCaptureClass）在 @vviewer/highlight（BUG-50 后单一来源，渲染端 renderLineHtml
- * 同消费）。app.css 的 .ts-* 颜色规则与此列表一一对齐（theme.test.ts 双向校验）；
- * 注入变量范围 = 此清单（themeToCssVars），归约保证渲染类名 ⊂ 清单。
+ * 同消费）。.ts-* 颜色规则随 markdown 渲染样式单源在 @vviewer/markdown/markdown.css
+ * （app.css 顶部 @import 引入；与列表一一对齐由 theme.test.ts 双向校验、包内
+ * cssMirror.test.ts 锁默认色）；注入变量范围 = 此清单（themeToCssVars），归约保证
+ * 渲染类名 ⊂ 清单。
  */
 export { CODE_CAPTURES };
 
@@ -64,7 +66,8 @@ export async function listThemes(): Promise<string[]> {
 /**
  * hljs 兜底近似映射（M7 Task 3）：helix 主题 capture → hljs CSS 变量。
  * 近似同名语义映射（非精确对应，注释声明近似）：hljs 兜底路径（tree-sitter
- * 不可用/超限降级）的着色由 app.css 的 .hljs-* 规则消费这些变量，Q11 的
+ * 不可用/超限降级）的着色由 .hljs-* 规则消费这些变量（规则单源在
+ * @vviewer/markdown/markdown.css，app.css @import 引入），Q11 的
  * "独立双主题"升级为"近似跟随当前代码主题"。
  */
 export const HLJS_CAPTURE_TO_VAR: readonly (readonly [string, string])[] = [

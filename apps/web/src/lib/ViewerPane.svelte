@@ -4,6 +4,7 @@
   import { isAbortError } from '@vviewer/render-text';
   import type { CodeEngine, CodeFileMeta } from '@vviewer/render-text';
   import type { MarkdownEngineState } from '@vviewer/render-text/markdown/markdownRenderer';
+  import type { MermaidTheme } from '@vviewer/render-diagram';
   import type { Tab } from './openFlow.svelte';
   import { persistScroll, tabStore } from './openFlow.svelte';
   import { setFileMeta, setInspector, inspectorBus, setExportHandle, fileMeta, type FileOpenWith, type InspectorSnapshot } from './metaStore.svelte';
@@ -345,6 +346,8 @@ import SearchPanel from './SearchPanel.svelte';
     const current = tab;
     void current.rev; // SSE 变更刷新：读入 rev 使 effect 依赖它，自增即重跑（重读+重渲染）
     let cancelled = false;
+    // markdown 图表主题桥的解绑句柄（异步装配成功才有值；cleanup 同步清偿）
+    let offThemeBridge: (() => void) | null = null;
     // effect 级取消（deferred 清偿 Task 5）：覆盖「rev++ 早于实例 resolve」的
     // pre-instance 窗口——旧 render 在飞读无实例可 destroy，此前只能等读超时（30s）；
     // cleanup 时 abort 使在飞读即刻 reject。实例级 signal（dispatcher 渲染链透传，
@@ -389,6 +392,29 @@ import SearchPanel from './SearchPanel.svelte';
         }
         live = res.instance;
         instance = res.instance;
+        // markdown 图表主题桥接（@vviewer/markdown 切换）：包内不再监听 vv:* 事件，
+        // 联动改为实例 API applyTheme——此处把 theme.ts（vv:appearance-applied，外观
+        // 亮暗联动）与 AppShell（vv:diagram-settings-applied，mermaid 主题设置保存）
+        // 派发的两事件桥接到本存活实例，就地重画 [data-mermaid]（detail 缺省时
+        // applyTheme 回落渲染时快照，与原 per-instance 监听语义等价）。鸭子探测：
+        // 非 markdown/降级/错误卡实例无 applyTheme 不挂监听；监听随本 effect 清理
+        // 摘除（offThemeBridge），实例销毁另有 applyTheme 内部 destroyed 守卫双保险。
+        const applyTheme = (
+          res.instance as { applyTheme?: (opts?: { mermaidTheme?: MermaidTheme }) => void }
+        ).applyTheme;
+        if (typeof applyTheme === 'function') {
+          const onThemeEvent = (ev: Event): void => {
+            applyTheme.call(res.instance, {
+              mermaidTheme: (ev as CustomEvent<{ mermaidTheme?: MermaidTheme }>).detail?.mermaidTheme
+            });
+          };
+          document.addEventListener('vv:appearance-applied', onThemeEvent);
+          document.addEventListener('vv:diagram-settings-applied', onThemeEvent);
+          offThemeBridge = () => {
+            document.removeEventListener('vv:appearance-applied', onThemeEvent);
+            document.removeEventListener('vv:diagram-settings-applied', onThemeEvent);
+          };
+        }
         // BUG-04：实例元数据 → 状态栏「编码/语言/大小/行」段 + 右栏属性面板。
         // 项 4（M-3 同族）：首读 + 250ms 周期重读（窗口流式实例的行数/大小随加载
         // 动态增长，一次性读取停在首帧值）。
@@ -470,6 +496,8 @@ import SearchPanel from './SearchPanel.svelte';
     return () => {
       cancelled = true;
       effectAbort.abort(); // effect 级取消：pre-instance 在飞读即刻 reject（见上注）
+      offThemeBridge?.(); // 图表主题桥随实例销毁摘除（applyTheme 通道，不跨实例泄漏）
+      offThemeBridge = null;
       cancelAnimationFrame(rafId);
       stopWatchEngine();
       stopWatchMeta(); // meta 轮询随实例销毁停止（readInstanceMeta 通道上行面）

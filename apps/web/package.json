@@ -13,6 +13,7 @@
   "dependencies": {
     "@vviewer/core": "workspace:*",
     "@vviewer/highlight": "workspace:*",
+    "@vviewer/markdown": "workspace:*",
     "@vviewer/render-archive": "workspace:*",
     "@vviewer/render-binary": "workspace:*",
     "@vviewer/render-diagram": "workspace:*",

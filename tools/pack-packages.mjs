@@ -54,6 +54,7 @@ const PACKAGES = [
   { dir: 'detect' },
   { dir: 'sanitize' },
   { dir: 'markdown-engine', copies: [{ from: 'src/types', to: 'types' }] },
+  { dir: 'markdown', copies: [{ from: 'src/markdown.css', to: 'markdown.css' }] },
   { dir: 'lightbox' },
   {
     dir: 'highlight',

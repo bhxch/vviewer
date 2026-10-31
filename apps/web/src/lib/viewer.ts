@@ -1,12 +1,20 @@
-import { createRegistry, createDispatcher, GENERATED_EXTENSIONS, type Dispatcher, type Registry } from '@vviewer/core';
+import { createRegistry, createDispatcher, GENERATED_EXTENSIONS, getRemoteBase, type Dispatcher, type Registry, type FileSource } from '@vviewer/core';
 import { codeRenderer, attachHighlightRouter } from '@vviewer/render-text';
+// markdown 渲染组合包（@vviewer/markdown）：渲染器与注入缝的实现单源。装配语义
+// 与 render-text 转出口时期一致（render-text/markdown/* 现为对组合包的纯转出口）。
 import {
   markdownRenderer,
   setMarkdownBackend,
   setMarkdownImageResolver,
   setDiagramOptions,
+  setHighlightFence,
+  setResolveRemoteBase,
   renderMarkdownBody
-} from '@vviewer/render-text/markdown/markdownRenderer';
+} from '@vviewer/markdown';
+// 围栏高亮桥（HighlightClient worker 单例 → 围栏 HTML）：实现留在 render-text
+// （client attach 于其 code 模块，桥必须与 attach 同包），经组合包 setHighlightFence
+// 注入——同一实例只走这一条路径，包内默认主线程高亮器不参与（不双轨化）。
+import { fenceToHtml } from '@vviewer/render-text/markdown/markdownRenderer';
 import { DEFAULT_KROKI_HOST, resolveDiagramType } from '@vviewer/render-diagram';
 import { htmlRenderer } from '@vviewer/render-text/html';
 import { imageRenderer } from '@vviewer/render-media';
@@ -76,6 +84,23 @@ if (browser) {
   // auto 不限大小走服务端，本地来源恒 hljs 分块零 POST；裁决注释见 highlightRouter.ts）
   attachHighlightRouter(routeLargeFileHighlight);
 }
+
+// ---------- markdown 渲染组合包接线（@vviewer/markdown，自 render-text 转出口切换） ----------
+
+// 围栏高亮单一路径：app 的 tree-sitter worker client（highlightClient create →
+// attachHighlightClient 注入 render-text code 模块）经 fenceToHtml 桥为组合包的
+// HighlightFence。SSR/测试环境不渲染 markdown，不注入即保持包内默认值（不触达）。
+if (browser) {
+  setHighlightFence(fenceToHtml);
+}
+
+// 远程计算来源决策注入缝（组合包不依赖 @vviewer/core 的 getRemoteBase）：远程
+// store 文件（core 远程注册表有 remote base）向注入后端传 {path, storeId}，本地
+// 恒 null——原 markdownRenderer 渲染路径内联判断的等价形态。纯注册表查询无
+// 浏览器依赖，不入 browser 门（与渲染期原行为一致：任何环境都可裁决）。
+setResolveRemoteBase((source) =>
+  getRemoteBase(source.storeId) !== undefined ? { path: source.path, storeId: source.storeId } : null
+);
 
 // ---------- markdown 正文引擎接入 compute 路由（M7 Task 2，M6 遗留） ----------
 
@@ -154,7 +179,9 @@ if (browser) {
   // 捕获后保留原 src（404 现状）；URL 随渲染实例 destroy 释放（renderer 侧 revoke）。
   // 解析逻辑（路径规范 + 大小上限）抽在 markdownImages.ts（无 $app 依赖，可单测）。
   setMarkdownImageResolver(async (src, source) =>
-    resolveImageBlobUrl(source.store, source.path, src)
+    // 组合包 resolver 形参为 FileSourceLike（结构子集，无 store 字段）；Renderer
+    // 路径透传的实参恒为完整 FileSource（含 store），收窄取用。
+    resolveImageBlobUrl((source as FileSource).store, source.path, src)
   );
 }
 

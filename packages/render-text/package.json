@@ -8,11 +8,11 @@
     "@vviewer/core": "workspace:*",
     "@vviewer/highlight": "workspace:*",
     "@vviewer/lightbox": "workspace:*",
+    "@vviewer/markdown": "workspace:*",
     "@vviewer/markdown-engine": "workspace:*",
     "@vviewer/render-diagram": "workspace:*",
     "@vviewer/sanitize": "workspace:*",
-    "highlight.js": "^11.12.0",
-    "katex": "^0.19.0"
+    "highlight.js": "^11.12.0"
   },
   "exports": {
     ".": "./src/code.ts",

@@ -1,4 +1,10 @@
 /* apps/web/src/app.css —— 主题三层框架（M1 版：UI 暗亮 + hljs 双主题 + 代码字体栈） */
+/* markdown 渲染样式单源（@vviewer/markdown 组合包）：.hljs-* 与 .ts-* 高亮映射、
+   .vv-markdown 排版、代码顶栏/图表/callout/灯箱/锚点/外域占位等段已收进包 CSS
+   （vite 构建期在此内联展开；镜像与 MARKDOWN_CSS 常量逐字节等价由包内
+   cssMirror.test.ts 锁定，.ts-* 清单对齐同处校验）。本文件不再持有这些段——
+   交互壳规则（徽标 hover/折叠/锚点揭示）与导出专有段由包内 CSS 分工承载 */
+@import '@vviewer/markdown/markdown.css';
 :root {
   --vv-code-line-height: 20px;
   --vv-code-font: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
@@ -119,46 +125,6 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
 .vv-code-gutter { user-select: none; text-align: right; min-width: 3.5em; padding-right: 1em;
   color: var(--code-gutter); flex: none; }
 .vv-code-body { flex: 1; color: var(--code-fg); }
-/* 代码高亮映射段（.hljs-* 与 .ts-* 类名→颜色变量）：颜色经 CSS 变量间接（亮暗双块/
-   JS 注入主题供值）。导出侧同段复制于 render-text export.ts exportBaseCss（终审 C1，
-   防漂移双向校验见 export.test.ts）——改本段规则须双端同步 */
-.hljs-keyword { color: var(--hljs-keyword); } .hljs-string { color: var(--hljs-string); }
-.hljs-comment { color: var(--hljs-comment); font-style: italic; } .hljs-number { color: var(--hljs-number); }
-.hljs-title { color: var(--hljs-title); } .hljs-built_in { color: var(--hljs-built_in); }
-.hljs-attr { color: var(--hljs-attr); } .hljs-params { color: var(--hljs-title); }
-/* M7：以下变量默认未定义（→ unset 继承默认前景），仅当代码主题映射命中时生效
-   （theme.ts HLJS_CAPTURE_TO_VAR 输出 --hljs-type/--hljs-variable/--hljs-tag） */
-.hljs-type { color: var(--hljs-type); } .hljs-variable { color: var(--hljs-variable); }
-.hljs-tag { color: var(--hljs-tag); }
-/* tree-sitter 捕获样式：颜色取自 JS 注入的 style#vv-code-theme（--vv-ts-*，见 src/lib/theme.ts），
-   变量缺失时回落继承——切主题零重解析。清单与 theme.ts 的 CODE_CAPTURES 一一对齐（theme.test.ts 校验） */
-.ts-attribute { color: var(--vv-ts-attribute, inherit); } .ts-comment { color: var(--vv-ts-comment, inherit); }
-.ts-comment-line { color: var(--vv-ts-comment-line, inherit); } .ts-comment-block { color: var(--vv-ts-comment-block, inherit); }
-.ts-constant { color: var(--vv-ts-constant, inherit); } .ts-constant-builtin { color: var(--vv-ts-constant-builtin, inherit); }
-.ts-constant-character { color: var(--vv-ts-constant-character, inherit); } .ts-constant-character-escape { color: var(--vv-ts-constant-character-escape, inherit); }
-.ts-constant-numeric { color: var(--vv-ts-constant-numeric, inherit); } .ts-constructor { color: var(--vv-ts-constructor, inherit); }
-.ts-function { color: var(--vv-ts-function, inherit); } .ts-function-builtin { color: var(--vv-ts-function-builtin, inherit); }
-.ts-function-call { color: var(--vv-ts-function-call, inherit); } .ts-function-macro { color: var(--vv-ts-function-macro, inherit); }
-.ts-function-method { color: var(--vv-ts-function-method, inherit); } .ts-keyword { color: var(--vv-ts-keyword, inherit); }
-.ts-keyword-control { color: var(--vv-ts-keyword-control, inherit); } .ts-keyword-control-conditional { color: var(--vv-ts-keyword-control-conditional, inherit); }
-.ts-keyword-control-import { color: var(--vv-ts-keyword-control-import, inherit); } .ts-keyword-control-repeat { color: var(--vv-ts-keyword-control-repeat, inherit); }
-.ts-keyword-directive { color: var(--vv-ts-keyword-directive, inherit); } .ts-keyword-function { color: var(--vv-ts-keyword-function, inherit); }
-.ts-keyword-operator { color: var(--vv-ts-keyword-operator, inherit); } .ts-label { color: var(--vv-ts-label, inherit); }
-.ts-markup-bold { color: var(--vv-ts-markup-bold, inherit); } .ts-markup-heading { color: var(--vv-ts-markup-heading, inherit); }
-.ts-markup-italic { color: var(--vv-ts-markup-italic, inherit); } .ts-markup-link { color: var(--vv-ts-markup-link, inherit); }
-.ts-markup-list { color: var(--vv-ts-markup-list, inherit); } .ts-markup-raw { color: var(--vv-ts-markup-raw, inherit); }
-.ts-module { color: var(--vv-ts-module, inherit); } .ts-namespace { color: var(--vv-ts-namespace, inherit); }
-.ts-number { color: var(--vv-ts-number, inherit); } .ts-operator { color: var(--vv-ts-operator, inherit); }
-.ts-property { color: var(--vv-ts-property, inherit); } .ts-punctuation { color: var(--vv-ts-punctuation, inherit); }
-.ts-punctuation-bracket { color: var(--vv-ts-punctuation-bracket, inherit); } .ts-punctuation-delimiter { color: var(--vv-ts-punctuation-delimiter, inherit); }
-.ts-punctuation-special { color: var(--vv-ts-punctuation-special, inherit); } .ts-special { color: var(--vv-ts-special, inherit); }
-.ts-string { color: var(--vv-ts-string, inherit); } .ts-string-escape { color: var(--vv-ts-string-escape, inherit); }
-.ts-string-special { color: var(--vv-ts-string-special, inherit); } .ts-tag { color: var(--vv-ts-tag, inherit); }
-.ts-type { color: var(--vv-ts-type, inherit); } .ts-type-builtin { color: var(--vv-ts-type-builtin, inherit); }
-.ts-type-enum-variant { color: var(--vv-ts-type-enum-variant, inherit); } .ts-variable { color: var(--vv-ts-variable, inherit); }
-.ts-variable-builtin { color: var(--vv-ts-variable-builtin, inherit); } .ts-variable-parameter { color: var(--vv-ts-variable-parameter, inherit); }
-.ts-diff-delta { color: var(--vv-ts-diff-delta, inherit); } .ts-diff-minus { color: var(--vv-ts-diff-minus, inherit); }
-.ts-diff-plus { color: var(--vv-ts-diff-plus, inherit); }
 /* 图片 / 音视频 / 错误卡 */
 .vv-image { height: 100%; overflow: auto; display: flex; align-items: flex-start; }
 .vv-image img { transform-origin: 0 0; max-width: none; }
@@ -168,102 +134,6 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
 .vv-error-card { padding: 2rem; display: flex; flex-direction: column; gap: .5rem; }
 .vv-error-title { font-weight: 600; }
 .vv-error-detail { color: var(--ui-fg-muted); white-space: pre-wrap; }
-/* markdown 渲染（.vv-markdown 由 markdownRenderer 挂载；管线产物类名 md-code-bar/md-code-lang（徽标即复制入口 button）、md-diagram 系列、md-lightbox）。
-   漂移裁决（md-export 台账）：本段基础排版为 render-text export.ts exportBaseCss
-   常量（导出单源）的运行时复制——改排版/图表/alert 规则须双端同步（导出侧另含
-   :root 变量块与 .vv-export-toc，交互壳规则不进导出） */
-.vv-markdown { max-width: 60rem; padding: 1rem 1.5rem; line-height: 1.6; overflow-wrap: break-word; }
-.vv-markdown h1, .vv-markdown h2, .vv-markdown h3, .vv-markdown h4 { line-height: 1.3; margin: 1.5em 0 .5em; scroll-margin-top: .5rem; }
-.vv-markdown h1 { font-size: 1.6em; border-bottom: 1px solid var(--ui-border); padding-bottom: .3em; }
-.vv-markdown h2 { font-size: 1.35em; border-bottom: 1px solid var(--ui-border); padding-bottom: .2em; }
-.vv-markdown h3 { font-size: 1.15em; }
-.vv-markdown pre { background: var(--code-bg); border: 1px solid var(--ui-border);
-  border-radius: 6px; padding: .75rem 1rem; overflow: auto; }
-.vv-markdown code { font-family: var(--vv-code-font); font-size: .9em; background: var(--ui-side-bg);
-  border-radius: 4px; padding: .1em .35em; }
-.vv-markdown pre code { background: none; padding: 0; }
-.vv-markdown blockquote { margin: .8rem 0; padding: .1rem 1rem; color: var(--ui-fg-muted);
-  border-left: 4px solid var(--ui-border); }
-.vv-markdown table { border-collapse: collapse; margin: .8rem 0; }
-.vv-markdown th, .vv-markdown td { border: 1px solid var(--ui-border); padding: .3rem .65rem; }
-.vv-markdown img, .vv-markdown video, .vv-markdown audio { max-width: 100%; }
-/* 代码块顶栏（Task 7；spec 2026-10-23 §5 重开拍板：徽标即复制单入口）：pre 首子行
-   单个语言徽标按钮（有语言=语言词、无语言=「复制」），负外边距抵 pre 内边距贴边
-   成栏（视觉同 md-diagram-bar）。原 [语言徽标 | 右下角复制钮] 双元素结构退役。
-   pre overflow:auto 下长行横滚时顶栏随行滚出视野——与退役的 absolute 复制钮行为
-   一致（absolute 同样随滚动容器横滚），非本次引入的回归 */
-.vv-markdown .md-code-bar { display: flex; align-items: center; gap: .5rem;
-  margin: -.75rem -1rem .5rem; padding: .25rem .6rem; border-bottom: 1px solid var(--ui-border);
-  background: var(--ui-side-bg); }
-.vv-markdown .md-code-lang { font: inherit; font-size: var(--vv-fs-xs, 12px); color: var(--ui-fg-muted); text-transform: uppercase; letter-spacing: .04em;
-  background: none; border: none; padding: 0; cursor: pointer; user-select: none; }
-/* button 形态 reset（background/border/padding/font）为运行时专有——导出侧徽标
-   已转纯 span 无默认样式，exportBaseCss 的 .md-code-lang 不含这一截与点击态 */
-/* 图表 wrapper（spec §2.1）：bar 内语言徽标+切换钮，视图居中，源码面板等宽 */
-.vv-markdown .md-diagram { margin: .8rem 0; border: 1px solid var(--ui-border); border-radius: 6px; overflow: hidden; }
-.vv-markdown .md-diagram-bar { display: flex; align-items: center; gap: .5rem; padding: .25rem .6rem; border-bottom: 1px solid var(--ui-border); background: var(--ui-side-bg); }
-.vv-markdown .md-diagram-lang { font-size: var(--vv-fs-xs, 12px); color: var(--ui-fg-muted); text-transform: uppercase; letter-spacing: .04em; }
-.vv-markdown .md-diagram-toggle { margin-left: auto; font-size: var(--vv-fs-xs, 12px); padding: 1px 8px; border: 1px solid var(--ui-border); border-radius: 4px; background: transparent; color: var(--ui-fg); cursor: pointer; }
-.vv-markdown .md-diagram-toggle:hover { background: var(--ui-border); }
-.vv-markdown .md-diagram-view { display: flex; justify-content: center; padding: .6rem; overflow-x: auto; }
-.vv-markdown .md-diagram-view svg { max-width: 100%; height: auto; }
-.vv-markdown .md-diagram-view img { max-width: 100%; }
-.vv-markdown .md-diagram-view.md-diagram-error { display: block; white-space: pre-wrap; color: var(--ui-fg-muted); font-family: var(--vv-code-font); font-size: var(--vv-code-font-size, 13px); }
-/* hidden 属性兜底：上方 display:flex/block 作者规则特异性压过 UA [hidden]，切换/源码
-   模式/kroki 失败态设了 hidden 视图仍可见（e2e 揭示）——末位同特异性显式 display:none */
-.vv-markdown .md-diagram-view[hidden] { display: none; }
-.vv-markdown .md-diagram-source { padding: .6rem; overflow-x: auto; }
-.vv-markdown .md-diagram-source code { font-family: var(--vv-code-font); font-size: var(--vv-code-font-size, 13px); }
-.md-lightbox-overlay { position: fixed; inset: 0; z-index: 100; background: rgb(0 0 0 / 70%);
-  display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
-.md-lightbox { max-width: 92vw; max-height: 92vh; }
-/* 灯箱画廊（lightbox.ts）：stage 铺满 overlay 作为缩放平移变换面（origin 0 0 与
-   zoomAt 的「屏幕点 = 内容点×zoom + t」锚定数学同构），内容居中；bar 悬浮底部
-   集中导航/计数/缩放/关闭，触控目标 ≥32px。关闭语义：点背景（overlay/stage 空白）
-   或关闭钮，点内容与控制件不关（样式上 stage 接管 grab 交互面，见 cursor 规则） */
-.md-lightbox-stage { position: absolute; inset: 0; display: flex; align-items: center;
-  justify-content: center; transform-origin: 0 0; cursor: grab; }
-.md-lightbox-stage.md-lightbox-dragging { cursor: grabbing; }
-.md-lightbox-svg { display: flex; max-width: 92vw; max-height: 92vh; }
-.md-lightbox-svg svg { max-width: 100%; max-height: 92vh; }
-/* 作者 display 规则压过 UA [hidden] 的 display:none——显式兜底（md-diagram-view 同教训） */
-.md-lightbox-stage img[hidden], .md-lightbox-svg[hidden], .md-lightbox-bar [hidden] { display: none; }
-.md-lightbox-bar { position: absolute; bottom: 1rem; left: 50%; transform: translateX(-50%);
-  display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 8px; background: rgb(0 0 0 / 50%); }
-.md-lightbox-btn { display: inline-flex; align-items: center; justify-content: center;
-  min-width: 32px; min-height: 32px; padding: 0; border: none; border-radius: 6px;
-  background: transparent; color: #fff; font-size: 16px; line-height: 1; cursor: pointer; }
-.md-lightbox-btn:hover { background: rgb(255 255 255 / 20%); }
-.md-lightbox-count { min-width: 32px; display: inline-flex; align-items: center; justify-content: center;
-  color: #fff; font-size: var(--vv-fs-sm); font-variant-numeric: tabular-nums; }
-.markdown-alert { border: 1px solid var(--ui-border); border-left-width: 4px; border-radius: 6px;
-  padding: .5rem 1rem; margin: .8rem 0; }
-.markdown-alert-title { display: flex; align-items: center; gap: .4rem; font-weight: 600; margin: .2rem 0; }
-/* callout 七色语义→令牌（§2.4/§12.2 基础层）：note/info/faq/question→accent、
-   tip→success（新）、important/example→accent-2（新）、warning→warning、
-   caution→danger、todo→fg-muted。亮值全部等于原字面值（零漂移）；暗色下 callout
-   边随暗色令牌（§2.2 暗色补漏，变更）。双端同步段：exportBaseCss 同段逐字镜像，
-   改须同步 packages/render-text/src/markdown/export.ts 并跑防漂移测试 */
-.markdown-alert-note, .markdown-alert-info, .markdown-alert-faq, .markdown-alert-question { border-left-color: var(--ui-accent); }
-.markdown-alert-tip { border-left-color: var(--ui-success); }
-.markdown-alert-important, .markdown-alert-example { border-left-color: var(--ui-accent-2); }
-.markdown-alert-warning { border-left-color: var(--ui-warning); }
-.markdown-alert-caution { border-left-color: var(--ui-danger); }
-.markdown-alert-todo { border-left-color: var(--ui-fg-muted); }
-/* callout 折叠（+/− 后缀卡片）：标题即折叠钮；collapsed 只隐藏标题外内容 */
-.markdown-alert-foldable > .markdown-alert-title { cursor: pointer; user-select: none; }
-.markdown-alert-foldable > .markdown-alert-title::after { content: '▾'; margin-left: auto;
-  font-size: .8em; color: var(--ui-fg-muted); }
-.markdown-alert-collapsed > .markdown-alert-title::after { content: '▸'; }
-.markdown-alert-collapsed > :not(.markdown-alert-title) { display: none; }
-/* 跨文件 wikilink 降级（Task 6）：不可点原文，虚线下划线悬停提示 */
-.vv-markdown .md-wikilink-dead { border-bottom: 1px dashed var(--ui-border); cursor: default; }
-/* 标题锚点（engine.ts heading_close 产物 a.anchor，空内容 0 宽）：0 宽盒上焦点环
-   左右边缘重合无从辨识——键盘聚焦时揭示链接字符，配合 §7 a[href] 补档的 accent 环
-   令首个 Tab 停留点可见（走查 medium，WCAG 2.4.7）。平时零内容零视觉（零漂移）；
-   交互壳规则不进导出（exportBaseCss 无此段，与徽标 hover/点击态同类） */
-.vv-markdown a.anchor { color: var(--ui-accent); text-decoration: none; }
-.vv-markdown a.anchor:focus-visible::before { content: '#'; }
 /* html 沙箱预览（htmlRenderer）：顶部视图按钮组 + iframe/源码内容区 */
 .vv-html { display: flex; flex-direction: column; height: 100%; }
 .vv-html-toolbar { display: flex; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--ui-border); flex: none; }
@@ -378,9 +248,6 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
 .vv-code-oversize { display: flex; flex-direction: column; height: 100%; }
 .vv-code-oversize .vv-oversize-card { flex: none; padding: 1rem 1.5rem; border-bottom: 1px solid var(--ui-border); }
 .vv-code-oversize .vv-code-pre { flex: 1; min-height: 0; height: auto; }
-/* BUG-17：被拦截的外域图片占位（markdown 渲染视图；html 沙箱内由 srcdoc 行内样式承担） */
-.vv-markdown img[data-vv-blocked-external] { display: inline-block; min-width: 96px; min-height: 40px;
-  border: 1px dashed #b58900; border-radius: 4px; background: rgb(181 137 0 / 8%); }
 /* 文件内搜索（Task 6）：ViewerPane 右上浮层面板 + code/markdown 命中高亮 */
 .vv-search-panel { position: absolute; top: 8px; right: 16px; z-index: 60; display: flex; gap: 6px;
   align-items: center; background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 6px;
