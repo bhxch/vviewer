@@ -27,6 +27,24 @@ const FONT_SIZE_RE = /^[0-9.]+(px|em|rem|%)$/;
  */
 const FONT_CHARACTER_FORBIDDEN_RE = /[\u0000-\u001F\u007F-\u009F"'\\]/;
 
+/**
+ * CSS 转义形态（官方图标主题惯例：JSON 里 "\u005CE003" 解析为 5 字符串 `\E003`）：
+ * 解码为真实码点字符；码点非法（> U+10FFFF 或落代理区，fromCodePoint 会抛）返回
+ * undefined 由调用方剔定义。JSON 转义（\uE003）经 JSON.parse 天然是单字符，不进
+ * 本分支原样放行。
+ */
+const CSS_ESCAPE_RE = /^\\([0-9a-fA-F]{1,6})$/;
+
+function decodeFontCharacter(raw: string): string | undefined {
+  const m = CSS_ESCAPE_RE.exec(raw);
+  if (m === null) return raw;
+  const hex = m[1];
+  if (hex === undefined) return undefined;
+  const cp = parseInt(hex, 16);
+  if (cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) return undefined;
+  return String.fromCodePoint(cp);
+}
+
 /** fonts[].id 会拼进 @font-face font-family 注入文本：限安全字符集（真实主题 id 均为此形态）。 */
 const FONT_ID_RE = /^[A-Za-z0-9_.-]+$/;
 
@@ -39,6 +57,8 @@ export interface IconGlyph {
   char: string;
   color?: string;
   fontSize?: string;
+  /** 命中定义的 fontId（多字体主题渲染须 per-definition font-family，查 fontsById）。 */
+  fontId?: string;
 }
 
 /** fonts 元数据：src 归一化为相对路径数组（VSCode 主题允许单字符串形态）。 */
@@ -68,6 +88,8 @@ export interface NormalizedIconTheme {
   _folder_open?: IconGlyph;
   hidesExplorerArrows: boolean;
   fonts: IconThemeFont[];
+  /** 按字体 id 索引的元数据（与 fonts 同源冗余，供 glyph.fontId 直查，渲染免线性扫描）。 */
+  fontsById: Map<string, Omit<IconThemeFont, 'id'>>;
 }
 
 /**
@@ -208,11 +230,13 @@ function sanitizeFonts(fonts: unknown): IconThemeFont[] {
 
 /**
  * iconDefinitions 逐条过滤（容错优先，坏条目剔除不炸整体）：
- * - fontCharacter 非单字符（[...str].length !== 1，码点安全：emoji 代理对算一）
- *   → 剔该定义；再过注入兜底闸（控制符/引号/反斜杠）。
+ * - fontCharacter 先解 CSS 转义形态（`\E003` → U+E003，官方主题惯例；非法码点剔），
+ *   再验单字符（[...str].length === 1，码点安全：emoji 代理对算一），再过注入
+ *   兜底闸（控制符/引号/反斜杠）——glyph.char 存解码后的真实字符。
  * - fontColor/fontSize 存在但不合法 → 整条剔（同 validateVscodeTheme 规则级口径：
  *   值会原样拼进注入文本，半残定义不如整条剔除）。
- * - fontId 引用完整性：存在则必须命中 fonts[].id，悬空剔该定义。
+ * - fontId 引用完整性：存在则必须命中 fonts[].id，悬空剔该定义；合法则随 glyph
+ *   透出（matchIconTheme 返回值带 fontId，配合 fontsById 得 per-definition 字体）。
  */
 function sanitizeIconDefinitions(defs: unknown, fontIds: ReadonlySet<string>): Map<string, IconGlyph> {
   const out = new Map<string, IconGlyph>();
@@ -220,8 +244,10 @@ function sanitizeIconDefinitions(defs: unknown, fontIds: ReadonlySet<string>): M
   for (const [id, def] of Object.entries(defs as Record<string, unknown>)) {
     if (typeof def !== 'object' || def === null || Array.isArray(def)) continue;
     const d = def as Record<string, unknown>;
-    const char = d.fontCharacter;
-    if (typeof char !== 'string' || [...char].length !== 1 || FONT_CHARACTER_FORBIDDEN_RE.test(char)) continue;
+    const raw = d.fontCharacter;
+    if (typeof raw !== 'string') continue;
+    const char = decodeFontCharacter(raw);
+    if (char === undefined || [...char].length !== 1 || FONT_CHARACTER_FORBIDDEN_RE.test(char)) continue;
     const color = d.fontColor;
     if (color !== undefined && !(typeof color === 'string' && COLOR_VALUE_RE.test(color))) continue;
     const fontSize = d.fontSize;
@@ -231,6 +257,7 @@ function sanitizeIconDefinitions(defs: unknown, fontIds: ReadonlySet<string>): M
     const glyph: IconGlyph = { char };
     if (typeof color === 'string') glyph.color = color;
     if (typeof fontSize === 'string') glyph.fontSize = fontSize;
+    if (typeof fontId === 'string') glyph.fontId = fontId;
     out.set(id, glyph);
   }
   return out;
@@ -257,6 +284,11 @@ function sanitizeIconTheme(raw: unknown): { theme: NormalizedIconTheme; definiti
   const fonts = sanitizeFonts(source.fonts);
   const defs = sanitizeIconDefinitions(source.iconDefinitions, new Set(fonts.map((f) => f.id)));
   const name = typeof source.name === 'string' && source.name.trim() !== '' ? source.name : '';
+  const fontsById = new Map<string, Omit<IconThemeFont, 'id'>>();
+  for (const font of fonts) {
+    const { id, ...meta } = font;
+    fontsById.set(id, meta);
+  }
   const theme: NormalizedIconTheme = {
     name,
     fileNames: sanitizeGlyphTable(source.fileNames, defs),
@@ -266,6 +298,7 @@ function sanitizeIconTheme(raw: unknown): { theme: NormalizedIconTheme; definiti
     folderNamesExpanded: sanitizeGlyphTable(source.folderNamesExpanded, defs),
     hidesExplorerArrows: source.hidesExplorerArrows === true,
     fonts,
+    fontsById,
   };
   const file = defs.get('_file');
   if (file !== undefined) theme._file = file;
@@ -308,7 +341,8 @@ export function normalizeIconTheme(raw: unknown): NormalizedIconTheme {
  * （最长优先，'foo.d.ts' 先试 'd.ts' 再 'ts'）> languageIds 反向表（EXT_TO_
  * LANGS 未收录的扩展静默跳过，不给猜测图标）> _file 回退；folder/folderExpanded
  * 各查己表后回退 _folder/_folder_open。查表键大小写不敏感（对齐 VSCode：查前
- * lowercase）。任何一层未命中且无回退键 → null。
+ * lowercase）。任何一层未命中且无回退键 → null。命中字形含 fontId（定义声明了
+ * fontId 时），配合 fontsById 取该字体的 src/format 元数据渲染 font-family。
  */
 export function matchIconTheme(
   theme: NormalizedIconTheme,

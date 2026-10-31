@@ -40,7 +40,7 @@ describe('validateVscodeIconTheme', () => {
       }),
     );
     expect(t.name).toBe('Test Icons');
-    expect(t.fileExtensions.get('ts')).toEqual({ char: c(4), color: '#519aba', fontSize: '16px' });
+    expect(t.fileExtensions.get('ts')).toEqual({ char: c(4), color: '#519aba', fontSize: '16px', fontId: 'testfont' });
     expect(t.fileExtensions.get('js')?.char).toBe(c(5));
     expect(t.fileNames.get('package.json')?.char).toBe(c(6));
     expect(t.languageIds.get('typescript')?.char).toBe(c(4));
@@ -52,6 +52,7 @@ describe('validateVscodeIconTheme', () => {
     expect(t.hidesExplorerArrows).toBe(true);
     // src 单字符串形态归一化为数组
     expect(t.fonts).toEqual([{ id: 'testfont', src: ['./fonts/test.woff2'], format: 'woff2' }]);
+    expect(t.fontsById.get('testfont')).toEqual({ src: ['./fonts/test.woff2'], format: 'woff2' });
   });
 
   it('② 缺 iconDefinitions / 形状垃圾 / 定义全坏 → 拒', () => {
@@ -80,34 +81,63 @@ describe('validateVscodeIconTheme', () => {
     expect(t.fileExtensions.get('a')?.color).toBe('#519aba');
   });
 
-  it('④ fontCharacter 非单字符拒该定义；码点安全（emoji 代理对算单字符）', () => {
+  it('④ fontCharacter 非单字符拒该定义；码点安全（emoji 代理对算单字符）；CSS 转义解码；非法码点拒', () => {
     const t = ok(
       validateVscodeIconTheme({
         iconDefinitions: {
           good: { fontCharacter: c(1) },
           emoji: { fontCharacter: '😀' }, // U+1F600 代理对 → [...str].length === 1 → 合法
+          cssEscape: { fontCharacter: '\\E003' }, // 官方主题转义文本形态 → 解码 U+E003 → 合法
           multi: { fontCharacter: 'ab' }, // 两字符 → 剔
-          escapeText: { fontCharacter: '\\e001' }, // 官方主题的转义文本形态（5 字符）→ 剔
           empty: { fontCharacter: '' }, // 空 → 剔
           num: { fontCharacter: 42 }, // 非 string → 剔
           quote: { fontCharacter: '"' }, // content:"…" 串内可截断 CSS → 注入兜底剔
           backslash: { fontCharacter: '\\' }, // 同上
           ctrl: { fontCharacter: '\n' }, // 控制符 → 剔
+          overflow: { fontCharacter: '\\110000' }, // 码点 > U+10FFFF → 非法 → 剔
+          surrogate: { fontCharacter: '\\D800' }, // 码点落代理区 → 非法 → 剔
         },
         fileExtensions: {
           good: 'good',
           emoji: 'emoji',
+          cssEscape: 'cssEscape',
           multi: 'multi',
-          escapeText: 'escapeText',
           empty: 'empty',
           num: 'num',
           quote: 'quote',
           backslash: 'backslash',
           ctrl: 'ctrl',
+          overflow: 'overflow',
+          surrogate: 'surrogate',
         },
       }),
     );
-    expect([...t.fileExtensions.keys()].sort()).toEqual(['emoji', 'good']);
+    expect([...t.fileExtensions.keys()].sort()).toEqual(['cssEscape', 'emoji', 'good']);
+    expect(t.fileExtensions.get('cssEscape')?.char).toBe('\u{E003}'); // 解码为真实字符存储
+  });
+
+  it('④b CSS 转义解码：小写 hex/1 位 hex 命中，非法码点（超界/代理区）拒', () => {
+    const t = ok(
+      validateVscodeIconTheme({
+        iconDefinitions: {
+          lower: { fontCharacter: '\\e0ab' }, // 小写 hex → U+E0AB
+          oneDigit: { fontCharacter: '\\A' }, // 1 位 → U+000A 换行 → 解码后控制符 → 注入兜底拒
+          sixDigit: { fontCharacter: '\\10FFFF' }, // 上界本身合法
+          over: { fontCharacter: '\\110000' }, // 超界拒
+          surrogate: { fontCharacter: '\\DFFF' }, // 代理区拒
+        },
+        fileExtensions: {
+          lower: 'lower',
+          oneDigit: 'oneDigit',
+          sixDigit: 'sixDigit',
+          over: 'over',
+          surrogate: 'surrogate',
+        },
+      }),
+    );
+    expect(t.fileExtensions.get('lower')?.char).toBe('\u{E0AB}');
+    expect(t.fileExtensions.get('sixDigit')?.char).toBe('\u{10FFFF}');
+    expect([...t.fileExtensions.keys()].sort()).toEqual(['lower', 'sixDigit']); // oneDigit/over/surrogate 剔
   });
 
   it('⑤ fonts.src 绝对路径/协议前缀拒：逐 src 过滤、全坏剔字体、fontId 悬空连带剔定义', () => {
@@ -134,6 +164,29 @@ describe('validateVscodeIconTheme', () => {
       { id: 'fmt', src: ['./f.woff2'] },
     ]);
     expect([...t.fileExtensions.keys()].sort()).toEqual(['a', 'e']);
+  });
+
+  it('⑤b 双字体主题：glyph.fontId 随命中定义透出，fontsById 按字体 id 索引元数据', () => {
+    const t = ok(
+      validateVscodeIconTheme({
+        iconDefinitions: {
+          a: { fontCharacter: c(1), fontId: 'f1' },
+          b: { fontCharacter: c(2), fontId: 'f2' },
+        },
+        fonts: [
+          { id: 'f1', src: './fonts/one.woff2', format: 'woff2' },
+          { id: 'f2', src: ['./fonts/two.woff'], weight: 'bold' },
+        ],
+        fileExtensions: { a: 'a', b: 'b' },
+      }),
+    );
+    expect(t.fontsById.get('f1')).toEqual({ src: ['./fonts/one.woff2'], format: 'woff2' });
+    expect(t.fontsById.get('f2')).toEqual({ src: ['./fonts/two.woff'], weight: 'bold' });
+    expect(t.fontsById.size).toBe(2);
+    const hitA = matchIconTheme(t, { kind: 'file', name: 'x.a' });
+    const hitB = matchIconTheme(t, { kind: 'file', name: 'y.b' });
+    expect(hitA).toMatchObject({ char: c(1), fontId: 'f1' }); // per-definition font-family 依据
+    expect(hitB).toMatchObject({ char: c(2), fontId: 'f2' });
   });
 });
 
@@ -258,6 +311,7 @@ describe('normalizeIconTheme（IndexedDB 记录端重建入口）', () => {
     expect(t._folder_open).toBeUndefined();
     expect(t.hidesExplorerArrows).toBe(false);
     expect(t.fonts).toEqual([]);
+    expect(t.fontsById.size).toBe(0);
   });
   it('hidesExplorerArrows 非 true 一律归 false；与 validate 产形一致', () => {
     const raw = {
