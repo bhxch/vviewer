@@ -9,7 +9,7 @@
 ## 快速上手
 
 ```ts
-import { attachMarkdownHighlightWorker } from '@vviewer/markdown-highlight-worker';
+import { attachMarkdownHighlightWorker } from '@bhxch/vviewer-markdown-highlight-worker';
 
 const handle = attachMarkdownHighlightWorker({
   init: {
@@ -51,7 +51,7 @@ worker 必须是独立 JS 文件，本包以源码形态提供（`src/worker.js`
    Vite 会识别该模式并以 worker 形态编译依赖内文件。
 2. **自管构造**：`createMarkdownHighlightFence(new MyWorker(), …)`，worker 由
    宿主打包器语法自建，如 Vite 的
-   `import MdWorker from '@vviewer/markdown-highlight-worker/worker.js?worker'`。
+   `import MdWorker from '@bhxch/vviewer-markdown-highlight-worker/worker.js?worker'`。
 3. **webpack/其它**：标准 `new Worker(new URL(…, import.meta.url), { type: 'module' })`
    指向本包 `worker.js`（经 makeWorker 覆盖传入）。
 

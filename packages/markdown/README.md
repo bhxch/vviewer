@@ -1,5 +1,9 @@
 # @vviewer/markdown
 
+<!-- npm 发布名：@bhxch/vviewer-markdown。全部发布包统一 @bhxch/vviewer- 前缀，
+     规则单点在 tools/pack-packages.mjs；monorepo 内部名保持 @vviewer/（workspace
+     源码形态），下文示例一律用发布名。 -->
+
 markdown 完整渲染组合包：一行装配「markdown 引擎 → sanitize → enrich → 五步管线
 （highlight / diagrams / katex / copyCode / lightbox）→ 挂载 → heading id → TOC →
 导出装配」。自 `@vviewer/render-text` 的 `src/markdown/` 迁出参数化而成，渲染行为
@@ -9,8 +13,8 @@ markdown 完整渲染组合包：一行装配「markdown 引擎 → sanitize →
 ## 快速上手
 
 ```ts
-import { createMarkdownView } from '@vviewer/markdown';
-import '@vviewer/markdown/markdown.css'; // 完整排版/高亮映射/图表/灯箱样式
+import { createMarkdownView } from '@bhxch/vviewer-markdown';
+import '@bhxch/vviewer-markdown/markdown.css'; // 完整排版/高亮映射/图表/灯箱样式
 
 const view = createMarkdownView(document.querySelector('#doc')!);
 await view.render('# 标题\n\n```ts\nconst x = 1;\n```\n');
@@ -126,7 +130,7 @@ vviewer 本体 apps/web/src/lib/ts-worker.ts + render-text `fenceToHtml` 即同�
 **worker 文件**（`md-highlight.worker.ts`，由宿主打包器编译）：
 
 ```ts
-import { serveWorker } from '@vviewer/highlight';
+import { serveWorker } from '@bhxch/vviewer-highlight';
 
 serveWorker(); // 非 worker 环境调用是 no-op；引擎配置经 client 的 init 握手带来
 ```
@@ -134,14 +138,14 @@ serveWorker(); // 非 worker 环境调用是 no-op；引擎配置经 client 的 
 **主线程**（一次性装配；失败链与默认高亮器一致——`null` → 该块降级 hljs → 原文）：
 
 ```ts
-import { setHighlightFence } from '@vviewer/markdown';
+import { setHighlightFence } from '@bhxch/vviewer-markdown';
 import {
   HighlightClient,
   HighlightCanceledError,
   assignIntervalsToLines,
   renderLineHtml,
   type HighlightInterval,
-} from '@vviewer/highlight';
+} from '@bhxch/vviewer-highlight';
 
 const client = new HighlightClient(
   new Worker(new URL('./md-highlight.worker.ts', import.meta.url), { type: 'module' }),
