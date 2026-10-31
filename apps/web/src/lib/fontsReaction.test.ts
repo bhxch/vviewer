@@ -20,6 +20,7 @@ function baseSettings(fonts?: Partial<Settings['fonts']>): Settings {
     computePolicy: 'auto',
     diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} },
     fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13, ...fonts },
+    iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } },
     layout: { ...DEFAULT_LAYOUT }
   };
 }

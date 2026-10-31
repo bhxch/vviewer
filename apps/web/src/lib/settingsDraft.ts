@@ -9,7 +9,7 @@
 // （同一白名单单源），此处只负责「报告」；三类问题同为阻断错误（校验失败不部分
 // 应用，spec §4 导入同纪律），修复后应用时经 normalizeSettings 规范化落值。
 import { resolveDiagramType } from '@bhxch/vviewer-render-diagram';
-import { clampSize, CODE_SIZE_RANGE, DEFAULTS, MERMAID_THEME_VALUES, normalizeSettings, saveSettings, UI_SIZE_RANGE, type Settings } from './stores/settings';
+import { clampSize, CODE_SIZE_RANGE, DEFAULTS, ICON_THEME_SCOPE_KEYS, MERMAID_THEME_VALUES, normalizeSettings, saveSettings, UI_SIZE_RANGE, type Settings } from './stores/settings';
 import type { MermaidTheme } from '@bhxch/vviewer-render-diagram';
 import { sanitizeLayout } from './layout';
 
@@ -79,6 +79,12 @@ export function jsonLineOf(text: string, position: number): number {
 
 function appearanceFormatOk(v: unknown): boolean {
   return typeof v === 'string' && (v === 'default' || v.startsWith('vscode:') || v.startsWith('imported:'));
+}
+
+/** iconThemes.theme 白名单镜像（图标主题 spec §3.1）：'none' / 'seti' / 'imported:' 前缀
+ * 形态，与 normalizeSettings 的归位闸同口径。 */
+function iconThemeValueOk(v: unknown): boolean {
+  return v === 'none' || v === 'seti' || (typeof v === 'string' && v.startsWith('imported:'));
 }
 
 /** clamp 类数值检查：范围内（含四舍五入可入界的小数）合法；越界报目标截断值 */
@@ -195,6 +201,36 @@ export function validateSettings(raw: unknown): SettingsIssue[] {
       }
       checkClampedNumber(issues, 'fonts.uiSize', f.uiSize, UI_SIZE_RANGE);
       checkClampedNumber(issues, 'fonts.codeSize', f.codeSize, CODE_SIZE_RANGE);
+    }
+  }
+  // iconThemes 白名单镜像（图标主题 spec §3.1，Task 3）：theme 三态 / scopes 四键
+  // 布尔，与 normalizeSettings 归位闸同口径（未知键 = 白名单外不落盘）
+  if (raw.iconThemes !== undefined) {
+    if (!isObj(raw.iconThemes)) {
+      issues.push({ field: 'iconThemes', message: '应为对象' });
+    } else {
+      const it = raw.iconThemes;
+      for (const k of Object.keys(it)) {
+        if (k !== 'theme' && k !== 'scopes') {
+          issues.push({ field: `iconThemes.${k}`, message: '未知字段（白名单外，不落盘）' });
+        }
+      }
+      if (it.theme !== undefined && !iconThemeValueOk(it.theme)) {
+        issues.push({ field: 'iconThemes.theme', message: "须为 'none' / 'seti' / 'imported:<id>' 之一" });
+      }
+      if (it.scopes !== undefined) {
+        if (!isObj(it.scopes)) {
+          issues.push({ field: 'iconThemes.scopes', message: '应为对象' });
+        } else {
+          for (const [k, v] of Object.entries(it.scopes)) {
+            if (!(ICON_THEME_SCOPE_KEYS as readonly string[]).includes(k)) {
+              issues.push({ field: `iconThemes.scopes.${k}`, message: '未知字段（白名单外，不落盘）' });
+            } else if (typeof v !== 'boolean') {
+              issues.push({ field: `iconThemes.scopes.${k}`, message: '应为布尔值' });
+            }
+          }
+        }
+      }
     }
   }
   if (raw.layout !== undefined) {
@@ -432,6 +468,7 @@ function collectUnknownPaths(raw: Record<string, unknown>): string[] {
   const allowed: Record<string, readonly string[]> = {
     diagrams: ['krokiHost', 'krokiVia', 'mermaidTheme', 'modes', 'renderers'],
     fonts: ['uiFamily', 'uiSize', 'codeFamily', 'codeSize'],
+    iconThemes: ['theme', 'scopes'],
     layout: Object.keys(sanitizeLayout({}))
   };
   for (const [sec, keys] of Object.entries(allowed)) {
@@ -440,6 +477,13 @@ function collectUnknownPaths(raw: Record<string, unknown>): string[] {
       for (const k of Object.keys(v)) {
         if (!keys.includes(k)) paths.push(`${sec}.${k}`);
       }
+    }
+  }
+  // iconThemes.scopes 键级（与 diagrams.modes 键级同款二级路径记法）
+  const iconScopes = isObj(raw.iconThemes) ? (raw.iconThemes as Record<string, unknown>).scopes : undefined;
+  if (isObj(iconScopes)) {
+    for (const k of Object.keys(iconScopes)) {
+      if (!(ICON_THEME_SCOPE_KEYS as readonly string[]).includes(k)) paths.push(`iconThemes.scopes.${k}`);
     }
   }
   const modes = isObj(raw.diagrams) ? (raw.diagrams as Record<string, unknown>).modes : undefined;

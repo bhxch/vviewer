@@ -70,6 +70,9 @@
   } from './theme';
   // 外观/字体注入反应（原 TopBar onMount 订阅链迁入，顶栏退役 Task 3）
   import { reactToFontsChange } from './fontsReaction';
+  // 图标主题运行时（图标主题 spec §3.5，Task 3）：首调入口 + 订阅联动（sig diff）
+  import { applyIconsFromSettings } from './iconTheme.svelte';
+  import { reactToIconsChange } from './iconReaction';
   import { loadEnabledFontFaces } from './stores/fontsStore';
   import { listDirectMounts, displayLabelForStore } from './mountsSync';
   // FE-2 纯模块抽出（root vitest 可直测，各带 *.test.ts 锁状态转移）：zen 守卫
@@ -527,6 +530,11 @@
     // 初值 null 必命中；字体 style#vv-font 首注入（返回值忽略——挂载期无活动渲染实例）
     applyAppearanceFromSettings(settings);
     applyFontsFromSettings(settings);
+    // 图标主题首应用（图标主题 spec §3.5，Task 3）：sig 初值 '' 必命中。async 与
+    // fonts 的同步形态差异——IndexedDB/fetch 解析在 await 后落位，fire-and-forget
+    // void；换装完成时 iconThemeState.runtime 的 $state 写入自然驱动 FileIcon 等
+    // 响应式消费面重渲，挂载期无 rev++ 联动对象故不走 reactToIconsChange
+    void applyIconsFromSettings(settings);
     // 设置变更（设置中心/标签栏动作簇经 saveSettings 写入）→ 刷新响应式副本 + html 打标：
     // 排除规则变化经下方 {#key} 重建 FileTree（BUG-05）；themeMode 变化经设置中心
     // 「亮暗模式」控件应用时，data-theme-mode 也须同步（此前唯一运行时写入点在
@@ -547,6 +555,12 @@
       // fonts 变更 → style#vv-font 重注入 + 激活 tab rev++ 重渲染（行高联动，
       // 字体系统 spec §2.3/§3，Task 2；无关字段变化零触发）
       reactToFontsChange(s, () => tabStore.touchActiveTab());
+      // icons 变更 → 字体装卸/runtime 换装 + 激活 tab rev++ 重渲染（图标主题
+      // spec §3.5，Task 3；无关字段变化零触发）。async 与 fonts 的同步形态差异：
+      // IndexedDB/fetch 解析在 await 后落位，fire-and-forget void 承接——换装
+      // 完成由 iconThemeState.runtime $state 写入驱动响应式消费面，rev++ 回调
+      // 与 fonts 同款注入
+      void reactToIconsChange(s, () => tabStore.touchActiveTab());
       if (s.diagrams.mermaidTheme !== prevMermaidTheme) {
         const t = s.diagrams.mermaidTheme;
         document.dispatchEvent(

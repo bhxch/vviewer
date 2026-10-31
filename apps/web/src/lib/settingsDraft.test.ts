@@ -472,6 +472,82 @@ describe('normalizeSettings 导出（loadSettings 白名单的共享规范化入
   });
 });
 
+describe('iconThemes 设置节（图标主题 spec §3.1，Task 3）', () => {
+  it('合法值原样通过：theme 三态 + scopes 四键布尔逐键落位', () => {
+    const draft = openDraft(aSettings({}));
+    const r = applyJson(
+      draft,
+      JSON.stringify({ iconThemes: { theme: 'imported:abc12345', scopes: { tree: true, tabs: true, quickOpen: false, search: true } } })
+    );
+    expect(r).toEqual({ ok: true });
+    expect(draft.iconThemes).toEqual({
+      theme: 'imported:abc12345',
+      scopes: { tree: true, tabs: true, quickOpen: false, search: true }
+    });
+    expect(applyJson(openDraft(aSettings({})), JSON.stringify({ iconThemes: { theme: 'seti' } })).ok).toBe(true);
+  });
+
+  it('脏 theme：validateSettings 阻断报告；normalizeSettings 静默归位 none（白名单外不落盘）', () => {
+    const draft = openDraft(aSettings({}));
+    const r = applyJson(draft, JSON.stringify({ iconThemes: { theme: 'bogus' } }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.map((e) => e.field)).toContain('iconThemes.theme');
+    const s = normalizeSettings({ iconThemes: { theme: 'bogus' } });
+    expect(s.iconThemes.theme).toBe('none');
+    expect(normalizeSettings({ iconThemes: { theme: 'vscode:x' } }).iconThemes.theme).toBe('none'); // 外观槽前缀形态不越权
+  });
+
+  it('脏 scopes：未知键/非布尔值阻断报告；normalizeSettings 只落四键布尔（未知键剔除、缺键补默认）', () => {
+    const draft = openDraft(aSettings({}));
+    const r = applyJson(draft, JSON.stringify({ iconThemes: { scopes: { tree: true, bogus: 1, tabs: 'yes' } } }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      const fields = r.errors.map((e) => e.field);
+      expect(fields).toContain('iconThemes.scopes.bogus');
+      expect(fields).toContain('iconThemes.scopes.tabs');
+    }
+    const s = normalizeSettings({ iconThemes: { scopes: { tree: false, bogus: 1, tabs: 'yes' } } });
+    expect(s.iconThemes.scopes).toEqual({ tree: false, tabs: false, quickOpen: false, search: false });
+  });
+
+  it('节整体脏值（iconThemes: 42）按类型不符报告不抛异常；normalizeSettings 回落默认', () => {
+    const draft = openDraft(aSettings({}));
+    const r = applyJson(draft, JSON.stringify({ iconThemes: 42 }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.map((e) => e.field)).toContain('iconThemes');
+    expect(normalizeSettings({ iconThemes: 42 }).iconThemes).toEqual({
+      theme: 'none',
+      scopes: { tree: true, tabs: false, quickOpen: false, search: false }
+    });
+  });
+
+  it('导出导入 round-trip：iconThemes 节深度保形', () => {
+    const src = aSettings({
+      iconThemes: { theme: 'seti', scopes: { tree: true, tabs: false, quickOpen: false, search: false } }
+    });
+    const file = buildExportFile(src, '2026-10-31T00:00:00.000Z');
+    const parsed = parseImportFile(JSON.stringify(file));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(replaceImported(parsed.settings).iconThemes).toEqual(src.iconThemes);
+  });
+
+  it('导入文件侧：scopes 未知键降级警告（白名单外不落盘），类型不符仍阻断', () => {
+    const file = JSON.stringify({
+      schemaVersion: 1,
+      exportedAt: '2026-10-31T00:00:00.000Z',
+      settings: { iconThemes: { scopes: { tree: true, bogus: 1 } } }
+    });
+    const r = parseImportFile(file);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.warnings.some((w) => w.includes('iconThemes.scopes.bogus'))).toBe(true);
+    const bad = parseImportFile(
+      JSON.stringify({ schemaVersion: 1, exportedAt: '', settings: { iconThemes: { scopes: { tabs: 'yes' } } } })
+    );
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.errors.map((e) => e.field)).toContain('iconThemes.scopes.tabs');
+  });
+});
+
 describe('SETTINGS_KEYS DEFAULTS 派生（FE-3：白名单对账机械化）', () => {
   it('DEFAULTS 全键经派生白名单：openDraft(DEFAULTS) 全量序列化-校验零 unknown 报告（退回手工清单/漏登记即红）；对照探针仍报告（非恒真）', () => {
     // DEFAULTS 键集 = Object.keys(DEFAULTS) 派生的白名单：全量序列化产物经

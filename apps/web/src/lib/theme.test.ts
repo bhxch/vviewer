@@ -266,6 +266,7 @@ describe('applyAppearanceFromSettings（订阅触发入口，spec 2026-10-12 §2
     computePolicy: 'auto',
     diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} },
     fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
+    iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } },
     layout: { ...DEFAULT_LAYOUT }
   });
 

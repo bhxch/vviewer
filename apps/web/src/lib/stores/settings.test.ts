@@ -13,6 +13,7 @@ const BASE: Settings = {
   computePolicy: 'auto',
   diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} },
   fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
+  iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } },
   layout: { ...DEFAULT_LAYOUT }
 };
 

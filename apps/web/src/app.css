@@ -562,6 +562,11 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .vv-tree-row:hover { background: var(--ui-hover-bg); }
 .vv-tree-caret { width: 1em; flex: none; }
 .vv-tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 图标主题字形位（图标主题 spec §3.2，Task 3）：inline-flex 基线 + line-height 1
+   防字形撑行、禁选中（复制文件名不带图标字符）；margin-right 同 caret 间距族
+   （.vv-tree-row gap 4px），宽度不固定（字形自然宽）——各消费点行高/间距微调在
+   Task 4 接线时对齐 */
+.vv-file-icon { display: inline-flex; line-height: 1; user-select: none; margin-right: 4px; }
 /* 右栏（目录 + 元数据面板）：MetaPanel 空壳在顶，TOC 占剩余高度滚动 */
 .meta-panel { padding: .65rem .75rem; border-bottom: 1px solid var(--ui-border); flex: none; }
 .meta-title { margin: 0 0 .3rem; font-size: var(--vv-fs-2xs); font-weight: 600; letter-spacing: .05em;

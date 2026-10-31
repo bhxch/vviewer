@@ -33,6 +33,18 @@ export interface FontsSettings {
   codeSize: number;
 }
 
+/** 图标主题出现范围键（图标主题 spec §3.1）：settingsDraft 的白名单镜像
+ * （validateSettings 节块 + collectUnknownPaths 键级）同源消费。 */
+export const ICON_THEME_SCOPE_KEYS = ['tree', 'tabs', 'quickOpen', 'search'] as const;
+
+/** 图标主题设置（图标主题 spec §3.1，Task 3）：theme 单选且不随亮暗切换
+ * （'none' 关闭 = 现状无图标 / 'seti' 内置预置 / 'imported:<id>' 导入记录 id）；
+ * scopes 为出现范围四开关（默认仅文件树开启）。 */
+export interface IconThemesSettings {
+  theme: 'none' | 'seti' | `imported:${string}`;
+  scopes: Record<(typeof ICON_THEME_SCOPE_KEYS)[number], boolean>;
+}
+
 export interface Settings {
   themeMode: 'light' | 'dark' | 'system';
   /** 亮/暗模式下各自记忆的外观主题（'default' | 'vscode:…' 内置名 | 'imported:<id>'）；
@@ -48,6 +60,9 @@ export interface Settings {
   computePolicy: ComputePolicy;
   diagrams: DiagramsSettings;
   fonts: FontsSettings;
+  /** 图标主题节（图标主题 spec §3.1，Task 3）：单选主题 + 出现范围四开关，
+   * AppShell 单订阅联动（reactToIconsChange）+ FileIcon 消费。 */
+  iconThemes: IconThemesSettings;
   /** 布局节（spec 2026-10-19 布局自由化 §2）：折叠/宽度/chrome 可见性/zen。
    * 类型与白名单在 lib/layout.ts（纯函数可单测）；AppShell 消费。 */
   layout: LayoutSettings;
@@ -71,6 +86,7 @@ export const DEFAULTS: Settings = {
   computePolicy: 'auto',
   diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} },
   fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
+  iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } },
   layout: DEFAULT_LAYOUT
 };
 
@@ -91,6 +107,7 @@ function defaults(): Settings {
       renderers: { ...DEFAULTS.diagrams.renderers }
     },
     fonts: { ...DEFAULTS.fonts },
+    iconThemes: { theme: DEFAULTS.iconThemes.theme, scopes: { ...DEFAULTS.iconThemes.scopes } },
     layout: { ...DEFAULTS.layout }
   };
 }
@@ -158,6 +175,26 @@ export function normalizeSettings(partial: Record<string, unknown>): Settings {
     codeFamily: typeof f.codeFamily === 'string' ? f.codeFamily : DEFAULTS.fonts.codeFamily,
     codeSize: clampSize(f.codeSize, CODE_SIZE_RANGE, DEFAULTS.fonts.codeSize)
   };
+  // iconThemes 节白名单（图标主题 spec §3.1，Task 3）：theme 三态白名单（'none'/
+  // 'seti'/'imported:' 前缀，脏值归 'none' = 无图标现状语义，仿 appearance 槽的
+  // 格式白名单口径）；scopes 四键逐键布尔化归位（未知键剔除不落盘、非布尔归位
+  // 默认——同 fonts 节「脏 JSON 字段级归位不抛」口径）
+  const it = typeof s.iconThemes === 'object' && s.iconThemes !== null ? s.iconThemes : DEFAULTS.iconThemes;
+  // scopes 二级防御（节脏值 42 后 it.scopes 为 undefined 不可再取键）：非对象回落
+  // 默认同型值（false 分支不落 {}，免联合类型属性访问报错）
+  const its = typeof it.scopes === 'object' && it.scopes !== null ? it.scopes : DEFAULTS.iconThemes.scopes;
+  s.iconThemes = {
+    theme:
+      it.theme === 'none' || it.theme === 'seti' || (typeof it.theme === 'string' && it.theme.startsWith('imported:'))
+        ? (it.theme as IconThemesSettings['theme'])
+        : DEFAULTS.iconThemes.theme,
+    scopes: {
+      tree: typeof its.tree === 'boolean' ? its.tree : DEFAULTS.iconThemes.scopes.tree,
+      tabs: typeof its.tabs === 'boolean' ? its.tabs : DEFAULTS.iconThemes.scopes.tabs,
+      quickOpen: typeof its.quickOpen === 'boolean' ? its.quickOpen : DEFAULTS.iconThemes.scopes.quickOpen,
+      search: typeof its.search === 'boolean' ? its.search : DEFAULTS.iconThemes.scopes.search
+    }
+  };
   // layout 节白名单（布局自由化 spec §2）：字段级归位 + 宽度 clamp，
   // 校验数学在 lib/layout.ts sanitizeLayout（可单测），此处只接线
   s.layout = sanitizeLayout(s.layout);
@@ -204,6 +241,7 @@ function notify(s: Settings): void {
       excludedPatterns: [...s.excludedPatterns],
       diagrams: { ...s.diagrams, modes: { ...s.diagrams.modes }, renderers: { ...s.diagrams.renderers } },
       fonts: { ...s.fonts },
+      iconThemes: { theme: s.iconThemes.theme, scopes: { ...s.iconThemes.scopes } },
       layout: { ...s.layout }
     });
   }
