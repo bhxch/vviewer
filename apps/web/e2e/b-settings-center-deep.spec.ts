@@ -366,7 +366,7 @@ test.describe('b-settings-center-deep 设置中心补强', () => {
 
     // 外观节导入主题+暗色槽引用（t-theme 同通道；为存储清除提供引用回落前驱）
     await gotoGroup(page, '外观');
-    await page.locator('.vv-sc-section input[type="file"]').setInputFiles({
+    await page.locator('.vv-sc-section input[type="file"][accept=".json,.vsix"]').setInputFiles({
       name: 'probe16.json',
       mimeType: 'application/json',
       buffer: Buffer.from(
@@ -387,7 +387,10 @@ test.describe('b-settings-center-deep 设置中心补强', () => {
 
     // 存储节：导入主题 1 条→清除→引用实时回落 default（订阅链，无需重载）+store 空
     await gotoGroup(page, '存储与数据');
-    const themesCat = page.locator('.vv-storage-cat', { hasText: '导入主题' });
+    // name span 精确匹配：hasText 子串会同时命中新增的「导入图标主题」分类行（Task 4）
+    const themesCat = page
+      .locator('.vv-storage-cat')
+      .filter({ has: page.locator('.vv-storage-catname', { hasText: /^导入主题$/ }) });
     await expect(themesCat).toContainText('（1 条）'); // 全角括号锚定避免「10 条」子串误配（产品渲染全角，StorageSection）
     await themesCat.getByRole('button', { name: '清除' }).click();
     const confirmThemes = page.getByRole('alertdialog', { name: '删除导入主题确认' });
