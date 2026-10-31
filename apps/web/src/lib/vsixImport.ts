@@ -311,9 +311,13 @@ async function importIconJsonFile(
 async function importIconVsixFile(file: File, imported: ImportedIconTheme[], errors: string[]): Promise<void> {
   const store = await createZipStore(new Uint8Array(await file.arrayBuffer()));
   const entries = await readVsixContributions(store, 'iconThemes'); // 「未找到图标主题」→ 外层 catch 记 errors
-  // 包内字体索引（基名 → 条目路径，先到先得）：主题 fonts[].src 相对路径按基名关联
+  // 包内字体索引（基名 → 条目路径，先到先得）：主题 fonts[].src 相对路径按基名
+  // 关联；条目过字体扩展名白名单（与 json 通道 batchFonts 收集口径对称）——防
+  // src 点名包内非字体条目（如 package.json）把任意字节入库，失败推迟到 FontFace
+  // 解析期才暴露
   const byBase = new Map<string, string>();
   for (const p of await listZipFilePaths(store)) {
+    if (!/\.(woff2?|ttf|otf)$/i.test(p)) continue;
     const base = basename(p);
     if (!byBase.has(base)) byBase.set(base, p);
   }

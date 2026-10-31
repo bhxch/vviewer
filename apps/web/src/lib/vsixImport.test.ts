@@ -271,7 +271,24 @@ describe('importIconThemeFiles', () => {
     expect(imported[1]!.fonts[0]!.path).toBe('b.woff');
   });
 
-  it('⑥字体超 30MB：该主题整条拒绝且 errors 含字体名（30MB 闸逐字体生效）', async () => {
+  it('⑥vsix 内 src 点名非字体条目（package.json）→ 不作字体关联，缺字体拒绝', async () => {
+    const theme = JSON.stringify({
+      iconDefinitions: { file: { fontCharacter: '\\e001' } },
+      fonts: [{ id: 'x', src: ['../package.json'] }]
+    });
+    const entries = {
+      'extension/package.json': ICON_PKG([{ label: 'Bad Src', path: './icons/bad.json' }]),
+      'extension/icons/bad.json': theme
+    };
+    const { imported, errors } = await importIconThemeFiles([await zipToVsixFile(entries)]);
+    expect(imported).toEqual([]);
+    expect(errors.length).toBe(1);
+    expect(errors[0]).toContain('Bad Src');
+    expect(errors[0]).toContain('package.json');
+    expect(errors[0]).toContain('缺少字体');
+  });
+
+  it('⑦字体超 30MB：该主题整条拒绝且 errors 含字体名（30MB 闸逐字体生效）', async () => {
     const big = new Uint8Array(MAX_FONT_BYTES + 1);
     const { imported, errors } = await importIconThemeFiles([
       new File([ICON_THEME], 'my-icons.json'),
