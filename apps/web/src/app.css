@@ -457,11 +457,11 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .vv-tabbar { display: flex; overflow: visible; background: var(--ui-tab-bg); border-bottom: 1px solid var(--ui-border); }
 .vv-tabbar-tabs { display: flex; overflow-x: auto; flex: 1; min-width: 0; }
 .vv-tabbar-actions { flex: none; display: flex; align-items: center; gap: 2px; border-right: 1px solid var(--ui-border); padding: 0 4px; }
-/* 簇内图标钮基类（TabBarActions ＋/⟳/⋯）：borderless 复用全局 button 基座
+/* 簇内图标钮基类（TabBarActions ＋/↻/⋯）：borderless 复用全局 button 基座
    （背景/字色/字号/内边距），去边框圆角贴条观感 */
 .vv-tbact { background: none; border: 0; border-radius: 0; }
 /* 簇内工作区触发钮收窄（TopBar 侧仍 22vw——双入口过渡态零漂移，T4 退役归一）：
-   簇四件（切换器/＋/⟳/⋯）同行共存，375px 档实测算 16vw≈60px 时簇宽 ~174px
+   簇四件（切换器/＋/↻/⋯）同行共存，375px 档实测算 16vw≈60px 时簇宽 ~174px
    （≈46vw），tabs 滚动区余 ~54vw 不被挤爆，故取 16vw */
 .vv-tabbar-actions .vv-ws-trigger { max-width: 16vw; }
 /* 簇浮层菜单（＋ 打开 / ⋯ 更多）：chrome 菜单观感（.vv-chromemenu/.vv-tabctx 同

@@ -141,7 +141,7 @@
   class="vv-tbact"
   aria-label="刷新当前文件"
   title="手动刷新当前文件与目录树（快捷键 Ctrl+, 打开设置可关自动刷新）"
-  onclick={manualRefresh}>⟳</button
+  onclick={manualRefresh}>↻</button
 >
 <button
   type="button"
