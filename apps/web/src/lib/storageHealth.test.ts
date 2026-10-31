@@ -197,6 +197,39 @@ describe('collectStorageInfo（spec §2.1 口径）', () => {
     expect(info.fonts).toEqual({ records: 2, bytes: 350 });
   });
 
+  it('iconThemes 分 store：字体 data 字节精确求和，manifest Map 展开序列化估算（Task 4 补课）', async () => {
+    const fontData = new ArrayBuffer(300);
+    const rec = {
+      id: 'imported:a',
+      name: 'Mini',
+      manifest: {
+        name: 'Mini',
+        fileNames: new Map([['karma.conf.js', { char: '\uea0c' }]]),
+        fileExtensions: new Map(),
+        languageIds: new Map(),
+        folderNames: new Map(),
+        folderNamesExpanded: new Map(),
+        hidesExplorerArrows: false,
+        fonts: [{ id: 'm', src: ['./m.woff'] }],
+        fontsById: new Map()
+      },
+      fonts: [{ path: 'm.woff', data: fontData }],
+      source: 'json',
+      addedAt: 1
+    };
+    await rawPut('iconThemes', 'imported:a', rec);
+    const info = await collectStorageInfo();
+    expect(info.iconThemes.records).toBe(1);
+    // 字体字节精确 + 元数据估算（Map 展开为对象后序列化 ×2，data 键剥除——
+    // 判定用 duck-typing：jsdom 测试环境 IDB 往返跨 realm，instanceof 失真）
+    const isBuf = (x: unknown): boolean =>
+      typeof x === 'object' && x !== null && typeof (x as { byteLength?: unknown }).byteLength === 'number';
+    const metaLen = JSON.stringify(rec, (_k, x) =>
+      x instanceof Map ? Object.fromEntries(x) : isBuf(x) ? undefined : x
+    )!.length;
+    expect(info.iconThemes.bytes).toBe(300 + metaLen * 2);
+  });
+
   it('cacheNames 列运行时缓存清单（caches 缺失为空数组）', async () => {
     expect((await collectStorageInfo()).cacheNames).toEqual([]);
     stubCaches(['workbox-precache-v2-x', 'vv-queries-1']);
@@ -290,6 +323,26 @@ describe('purgeCategory 七分类删除语义（spec §2.2 表格逐行）', () 
     expect(JSON.parse(localStorage.getItem('vviewer:settings')!).appearanceLight).toBe('default');
   });
 
+  it('导入图标主题：iconThemes clear + theme 引用回落 none（Task 4 补课），内置引用不动', async () => {
+    await rawPut('iconThemes', 'imported:abc', { id: 'imported:abc' });
+    await rawPut('iconThemes', 'imported:def', { id: 'imported:def' });
+    localStorage.setItem(
+      'vviewer:settings',
+      JSON.stringify({ iconThemes: { theme: 'imported:abc', scopes: { tree: true, tabs: false, quickOpen: false, search: false } } })
+    );
+    const r = await purgeCategory('icon-themes');
+    expect(r.deleted).toBe(2);
+    expect(await rawKeys('iconThemes')).toEqual([]);
+    const s = loadSettings();
+    expect(s.iconThemes.theme).toBe('none'); // imported 引用回落（spec §3.5 删除回退语义）
+    expect(JSON.parse(localStorage.getItem('vviewer:settings')!).iconThemes.theme).toBe('none');
+    // 内置（'seti'）引用不受影响
+    localStorage.setItem('vviewer:settings', JSON.stringify({ iconThemes: { theme: 'seti' } }));
+    await rawPut('iconThemes', 'imported:abc', { id: 'imported:abc' });
+    await purgeCategory('icon-themes');
+    expect(loadSettings().iconThemes.theme).toBe('seti');
+  });
+
   it('网络字体：fonts 逐个删除（document.fonts 注销）+ uiFamily/codeFamily 引用回落默认栈', async () => {
     await addFontFromFile(fileOf('Foo.ttf'));
     await addFontFromFile(fileOf('Bar.ttf'));
@@ -326,13 +379,14 @@ describe('purgeCategory 七分类删除语义（spec §2.2 表格逐行）', () 
 });
 
 describe('恢复出厂（spec §2.2：全部分类+注销 SW+清全部 Cache Storage）', () => {
-  it('全序列：设置/快照/句柄/主题/字体全清；全部缓存（含 precache）清除；SW 注销', async () => {
+  it('全序列：设置/快照/句柄/主题/图标主题/字体全清；全部缓存（含 precache）清除；SW 注销', async () => {
     localStorage.setItem('vviewer:settings', '{"themeMode":"dark"}');
     localStorage.setItem('other:key', 'keep-unrelated? no—kv 清库即可');
     await rawPut('kv', 'tabs', []);
     await rawPut('kv', 'workspaces', { activeId: 'w', workspaces: [] });
     await rawPut('kv', 'dirHandle', { name: 'docs' });
     await rawPut('themes', 'imported:abc', { id: 'imported:abc' });
+    await rawPut('iconThemes', 'imported:abc', { id: 'imported:abc' });
     await addFontFromFile(fileOf('Foo.ttf'));
     const { deleted } = stubCaches(['workbox-precache-v2-x', 'vv-queries-abc']);
     const unregister = vi.fn(async () => true);
@@ -344,6 +398,7 @@ describe('恢复出厂（spec §2.2：全部分类+注销 SW+清全部 Cache Sto
     expect(localStorage.getItem('vviewer:settings')).toBeNull();
     expect(await rawKeys('kv')).toEqual([]);
     expect(await rawKeys('themes')).toEqual([]);
+    expect(await rawKeys('iconThemes')).toEqual([]);
     expect(await rawKeys('fonts')).toEqual([]);
     expect(deleted.sort()).toEqual(['vv-queries-abc', 'workbox-precache-v2-x']); // 全部含 precache
     expect(unregister).toHaveBeenCalledTimes(1);

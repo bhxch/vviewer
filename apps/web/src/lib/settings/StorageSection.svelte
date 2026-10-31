@@ -1,6 +1,7 @@
 <script lang="ts">
   // StorageSection.svelte — 设置中心「存储与数据」节（settings center spec §2.2，
-  // Task 4）：七分类级精细化删除 + 恢复出厂。分类行 = 名称+说明+占用估算（复用
+  // Task 4）：八分类级精细化删除 + 恢复出厂（导入图标主题分类随 iconThemes store
+  // 接入补列，图标主题 spec Task 4）。分类行 = 名称+说明+占用估算（复用
   // §2.1 collectStorageInfo 共享模块）+「清除」钮；全部删除带确认面板（红色危险
   // 调+列明后果）；删除即时生效项（主题/字体）经 saveSettings 订阅链实时回退；
   // 设置删除与恢复出厂后 location.reload()（回落 DEFAULTS/全新会话）。
@@ -57,6 +58,8 @@
         return formatBytes(info.kvDirHandleBytes);
       case 'themes':
         return formatBytes(info.themes.bytes);
+      case 'icon-themes':
+        return formatBytes(info.iconThemes.bytes);
       case 'fonts':
         return formatBytes(info.fonts.bytes);
       case 'mounts':
@@ -68,15 +71,16 @@
 
   /** 确认面板文案（spec §2.2：列明后果；恢复出厂措辞最强） */
   const CONSEQUENCES: Record<StorageCategoryId | 'factory', string> = {
-    settings: '删除全部设置并重载页面：亮暗模式/外观/代码主题/字体/图表/布局/排除规则/自动刷新/计算策略全部回落默认值。',
+    settings: '删除全部设置并重载页面：亮暗模式/外观/代码主题/图标主题/字体/图表/布局/排除规则/自动刷新/计算策略全部回落默认值。',
     sessions: '删除标签页与工作区快照：当前内存会话不受影响，下次启动为空会话；目录授权句柄保留。',
     dirhandle: '删除目录授权句柄：localfs 来源下次启动不再自动恢复，需重新授权；快照恢复失败降级链照旧。',
     themes: '删除全部已导入主题：引用这些主题的外观槽位回落「默认」（实时生效，无需重载）；内置主题不受影响。单项删除在「外观」节。',
+    'icon-themes': '删除全部已导入图标主题：引用的主题槽位回落「无」（实时生效，无需重载）；内置 Seti 不受影响。单项删除在「外观」节。',
     fonts: '删除全部网络字体并注销加载：引用字体的槽位回落默认字体栈（实时生效）。单项删除在「字体」节。',
     mounts: '挂载配置管理尚未启用（目录挂载管理页后续提供）。',
     'runtime-cache': '清除运行时缓存（语法 wasm/媒体等）：precache 保留，离线能力不受影响。',
     factory:
-      '恢复出厂：删除全部设置、会话快照、目录授权、导入主题、网络字体，清除全部缓存（含离线 precache），注销 Service Worker 并重载页面。此操作不可恢复。'
+      '恢复出厂：删除全部设置、会话快照、目录授权、导入主题、导入图标主题、网络字体，清除全部缓存（含离线 precache），注销 Service Worker 并重载页面。此操作不可恢复。'
   };
 
   const PURGE_LABELS: Record<StorageCategoryId, string> = {
@@ -84,6 +88,7 @@
     sessions: '清除会话快照',
     dirhandle: '清除目录授权',
     themes: '删除导入主题',
+    'icon-themes': '删除导入图标主题',
     fonts: '删除网络字体',
     mounts: '清除挂载配置',
     'runtime-cache': '清除运行时缓存'
@@ -176,6 +181,16 @@
       </div>
       <span class="vv-storage-catsize">{usageOf('themes')}</span>
       <button type="button" class="vv-storage-danger" disabled={purging} onclick={() => (pending = 'themes')}>
+        清除
+      </button>
+    </li>
+    <li class="vv-storage-cat">
+      <div class="vv-storage-catinfo">
+        <span class="vv-storage-catname">导入图标主题</span>
+        <span class="vv-storage-catdesc">IndexedDB iconThemes（{info?.iconThemes.records ?? 0} 条）</span>
+      </div>
+      <span class="vv-storage-catsize">{usageOf('icon-themes')}</span>
+      <button type="button" class="vv-storage-danger" disabled={purging} onclick={() => (pending = 'icon-themes')}>
         清除
       </button>
     </li>

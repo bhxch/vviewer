@@ -9,7 +9,9 @@
  * - localStorage 全键值 UTF-16 估算（键长+值长 ×2）；vviewer:settings 键单独计；
  * - IndexedDB 分 store 计数走 openKeyCursor 一次性遍历：fonts 用记录内 size 字段
  *   求和（spec 2 契约），kv/themes 以 JSON 序列化长度 ×2 估算（与 localStorage 同
- *   口径）；mounts store 已建（目录挂载 Task 2）但记录管理仍未启用，不进
+ *   口径）；iconThemes（图标主题 spec §2.3，T2 跟踪项 Task 4 补课）= 字体 data
+ *   ArrayBuffer 字节精确求和 + manifest 五 Map（Map 序列化展开）与元数据估算；
+ *   mounts store 已建（目录挂载 Task 2）但记录管理仍未启用，不进
  *   StorageInfo（UI 禁用态占位）；
  * - 缓存清单 caches.keys() 原样透传（运行时缓存行显示名称清单，不显示体积——
  *   Response 尺寸遍历成本不成比例，spec §2.2）。
@@ -17,14 +19,16 @@
  * 删除语义（spec §2.2 表格逐行）：设置=localStorage 键删除（重载由 UI 层承担，
  * 回落 DEFAULTS）；会话快照=kv 的 tabs/workspaces（保留 dirHandle）；目录授权句柄
  * =kv 的 dirHandle；导入主题=themes clear + appearance 槽位 imported 引用回落
- * default（saveSettings 订阅链生效）；网络字体=fonts 逐个 deleteFont（复用单项
- * 语义：document.fonts 注销）+ uiFamily/codeFamily 引用回落默认栈；挂载配置=
- * Spec 5 前占位 no-op；运行时缓存=非 precache 项逐个 caches.delete（precache
- * 保留——清了破坏离线且无自助重建时机）。恢复出厂=以上全部 + 清全部 Cache +
- * 注销 SW（重载由 UI 层承担）。persist 封装：requestPersistent/persistedState/
- * tryRequestPersistentSilent（字体新增成功回调的预授权钩子，失败静默）。
+ * default（saveSettings 订阅链生效）；导入图标主题=iconThemes clear +
+ * iconThemes.theme imported 引用回落 'none'（同款订阅链，Task 4 补课）；网络字体
+ * =fonts 逐个 deleteFont（复用单项语义：document.fonts 注销）+ uiFamily/codeFamily
+ * 引用回落默认栈；挂载配置=Spec 5 前占位 no-op；运行时缓存=非 precache 项逐个
+ * caches.delete（precache 保留——清了破坏离线且无自助重建时机）。恢复出厂=以上
+ * 全部 + 清全部 Cache + 注销 SW（重载由 UI 层承担）。persist 封装：
+ * requestPersistent/persistedState/tryRequestPersistentSilent（字体新增成功回调的
+ * 预授权钩子，失败静默）。
  */
-import { db, FONTS } from './stores/session';
+import { db, FONTS, ICON_THEMES } from './stores/session';
 import { deleteFont, listFontRecords } from './stores/fontsStore';
 import { loadSettings, saveSettings } from './stores/settings';
 
@@ -55,6 +59,8 @@ export interface StorageInfo {
   settingsBytes: number;
   kv: StoreStat;
   themes: StoreStat;
+  /** 图标主题库（图标主题 spec §2.3，Task 4 补课：分类统计纳入） */
+  iconThemes: StoreStat;
   fonts: StoreStat;
   /** kv 内会话快照两键（tabs+workspaces）字节和（分类行占用估算） */
   kvSnapshotBytes: number;
@@ -68,6 +74,7 @@ export type StorageCategoryId =
   | 'sessions'
   | 'dirhandle'
   | 'themes'
+  | 'icon-themes'
   | 'fonts'
   | 'mounts'
   | 'runtime-cache';
@@ -151,6 +158,31 @@ const fontRecordBytes = (v: unknown): number =>
     ? (v as { size: number }).size
     : 0;
 
+/** buffer 判定（duck-typing，不用 instanceof——IDB cursor 值在 jsdom 测试环境跨
+ * realm，instanceof 对 Node 侧 ArrayBuffer 失真；byteLength 数字形态判定稳健） */
+const isBufferLike = (x: unknown): x is ArrayBuffer =>
+  typeof x === 'object' && x !== null && typeof (x as { byteLength?: unknown }).byteLength === 'number';
+
+/**
+ * iconThemes 记录体积（Task 4 补课）：字体 data（ArrayBuffer）字节精确求和；
+ * 其余（manifest 五 Map + 元数据）序列化估算——JSON.stringify 对 Map 落 `{}`，
+ * replacer 先把 Map 展开为对象（structured clone 保形的查表结构可枚举还原）；
+ * data 键经同 replacer 剥除（字节面已精确计入，避免混入 `{}` 占位）。
+ */
+const iconThemeRecordBytes = (v: unknown): number => {
+  if (typeof v !== 'object' || v === null) return serializedBytes(v);
+  let fontBytes = 0;
+  const fonts = (v as { fonts?: unknown }).fonts;
+  if (Array.isArray(fonts)) {
+    for (const f of fonts) {
+      const data = (f as { data?: unknown } | null)?.data;
+      if (isBufferLike(data)) fontBytes += data.byteLength;
+    }
+  }
+  const meta = JSON.stringify(v, (_k, x) => (x instanceof Map ? Object.fromEntries(x) : isBufferLike(x) ? undefined : x));
+  return fontBytes + (meta?.length ?? 0) * UTF16;
+};
+
 /** kv 单键字节（分类行占用估算；键缺失为 0） */
 async function kvKeyBytes(key: string): Promise<number> {
   try {
@@ -193,9 +225,10 @@ export async function collectStorageInfo(): Promise<StorageInfo> {
       persisted = null;
     }
   }
-  const [kv, themes, fonts, snapshotBytes, dirHandleBytes] = await Promise.all([
+  const [kv, themes, iconThemes, fonts, snapshotBytes, dirHandleBytes] = await Promise.all([
     storeStat('kv', serializedBytes),
     storeStat('themes', serializedBytes),
+    storeStat(ICON_THEMES, iconThemeRecordBytes),
     storeStat(FONTS, fontRecordBytes),
     kvKeyBytes('tabs').then(async (tabs) => tabs + (await kvKeyBytes('workspaces'))),
     kvKeyBytes(DIR_HANDLE_KEY)
@@ -213,6 +246,7 @@ export async function collectStorageInfo(): Promise<StorageInfo> {
     settingsBytes: settingsKeyBytes(),
     kv,
     themes,
+    iconThemes,
     fonts,
     kvSnapshotBytes: snapshotBytes,
     kvDirHandleBytes: dirHandleBytes,
@@ -320,6 +354,17 @@ export async function purgeCategory(cat: StorageCategoryId): Promise<PurgeResult
       if (changed) saveSettings(s);
       return { deleted };
     }
+    case 'icon-themes': {
+      // 图标主题库（Task 4 补课，themes 同款语义）：clear + iconThemes.theme 的
+      // imported 引用回落 'none'（运行时悬空 id 本有 warn 回退，设置同步归位）
+      const deleted = await storeClear(ICON_THEMES);
+      const s = loadSettings();
+      if (s.iconThemes.theme.startsWith('imported:')) {
+        s.iconThemes.theme = 'none';
+        saveSettings(s);
+      }
+      return { deleted };
+    }
     case 'fonts': {
       // 复用单项删除语义扩到批量（spec §2.2）：deleteFont 负责 document.fonts
       // 注销；uiFamily/codeFamily 引用已删字体的槽位回落默认栈（空串）
@@ -367,6 +412,7 @@ export async function factoryReset(): Promise<FactoryResetResult> {
   await purgeCategory('sessions');
   await purgeCategory('dirhandle');
   await purgeCategory('themes');
+  await purgeCategory('icon-themes');
   await purgeCategory('fonts');
   localStorage.removeItem(SETTINGS_KEY);
   let cachesCleared = 0;

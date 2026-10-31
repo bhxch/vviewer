@@ -150,6 +150,10 @@
     <span>{info === null ? '…' : `${info.themes.records} 条 · ${formatBytes(info.themes.bytes)}`}</span>
   </div>
   <div class="vv-about-row">
+    <span class="vv-about-key">IndexedDB · iconThemes（导入图标主题）</span>
+    <span>{info === null ? '…' : `${info.iconThemes.records} 条 · ${formatBytes(info.iconThemes.bytes)}`}</span>
+  </div>
+  <div class="vv-about-row">
     <span class="vv-about-key">IndexedDB · fonts（网络字体）</span>
     <span>{info === null ? '…' : `${info.fonts.records} 条 · ${formatBytes(info.fonts.bytes)}`}</span>
   </div>
