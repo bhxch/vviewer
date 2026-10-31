@@ -11,6 +11,7 @@
   import WorkspaceTabsPanel from './WorkspaceTabsPanel.svelte';
   import SettingsCenter from './SettingsCenter.svelte';
   import MountsManager from './MountsManager.svelte';
+  import ServerConnectForm from './ServerConnectForm.svelte';
   import type { TreeStore, TocEntry } from '@bhxch/vviewer-core';
   // FE-2 导入改道：tab 模型/连接域符号自 openFlow façade 改直引域模块（依赖单向
   // tabsModel ← serverConnect，无环）；openFlow 退役为纯打开通道，AppShell 仅剩
@@ -36,7 +37,9 @@
     tryRestoreDirectory,
     bindArchiveOpenEvents,
     createDirectMountStore,
-    hasUserActivity
+    hasUserActivity,
+    openDirectoryViaPicker,
+    openUrl
   } from './openFlow.svelte';
   import {
     loadDirHandle,
@@ -131,6 +134,24 @@
       return;
     }
     mountsEl?.requestClose();
+  }
+
+  /**
+   * 0 目录空态引导区（侧栏多根 spec §2.3）：sources.length===0 时侧栏以引导区
+   * 替代纯文案——「连接服务器」就地展开 ServerConnectForm（连接成功 onconnected
+   * 收起）、「粘贴 URL」行内提交 openUrl。「打开文件夹」恒可用不做禁用态
+   * （Global Constraints：openDirectoryViaPicker 已内建 input fallback）。
+   */
+  let emptyServerOpen = $state(false);
+  let emptyUrl = $state('');
+
+  function submitEmptyUrl(e: SubmitEvent): void {
+    e.preventDefault();
+    const url = emptyUrl.trim();
+    if (url !== '') {
+      openUrl(url);
+      emptyUrl = '';
+    }
   }
 
   // ---------- 布局自由化（spec 2026-10-19 §2）：折叠/调宽 ----------
@@ -1010,7 +1031,7 @@
         <span class="vv-strip-icon" aria-hidden="true">树</span>
       </div>
     {/if}
-    <aside class="vv-side" class:vv-side-off={layout.leftCollapsed} style="--vv-side-w: {leftW}px">
+    <aside class="vv-side" class:vv-side-off={layout.leftCollapsed} class:vv-side-blank={sources.length === 0} style="--vv-side-w: {leftW}px">
       <!-- 抽屉头部「专注模式」入口（spec §3.1 移动端回落挂点：iOS Safari 不派发
            contextmenu，长按布局菜单在 iOS 不可达）：桌面隐藏（媒体查询）；点击切
            zen 不动抽屉开合态——zen 隐抽屉本体，退出还原进入前开合（spec「恢复原
@@ -1026,7 +1047,19 @@
           <FileTree {sources} excludedPatterns={settings.excludedPatterns} onopen={onTreeOpen} onremove={removeSource} />
         {/key}
       {:else}
-        <div class="vv-side-empty">未打开文件夹</div>
+        <!-- 0 目录空态引导区（spec §2.3）：三入口动作与顶栏同源（openFlow façade
+             现有函数），不新建打开通道；按钮不加禁用态（打开文件夹 fallback 恒可用） -->
+        <div class="vv-side-empty">
+          <p class="vv-side-empty-title">未打开文件夹</p>
+          <button type="button" onclick={() => void openDirectoryViaPicker()}>打开文件夹</button>
+          <button type="button" onclick={() => (emptyServerOpen = !emptyServerOpen)}>连接服务器</button>
+          {#if emptyServerOpen}<ServerConnectForm onconnected={() => (emptyServerOpen = false)} />{/if}
+          <form class="vv-side-empty-url" onsubmit={submitEmptyUrl}>
+            <input placeholder="粘贴文件 URL" bind:value={emptyUrl} aria-label="文件 URL" />
+            <button type="submit">打开</button>
+          </form>
+          <p class="vv-side-empty-hint">也可直接拖入文件/文件夹</p>
+        </div>
       {/if}
     </aside>
     {#if !layout.leftCollapsed}
@@ -1189,9 +1222,42 @@
       display: none;
     }
   }
+  /* 0 目录空态引导区（侧栏多根 spec §2.3）：竖排居中——aside 空态加 .vv-side-blank
+     （flex column），引导区 flex:1 撑满余高精确垂直居中（桌面无头部、≤900px 抽屉
+     头部占位均自适应，免 min-height calc 魔数）；间距/字号走 ui-design-system
+     令牌（字阶 §3.2），hint 用 muted 层级；按钮复用 app.css 全局 button 基座，
+     「打开文件夹」恒可用不加禁用态（openDirectoryViaPicker 内建 input fallback） */
+  .vv-side-blank {
+    display: flex;
+    flex-direction: column;
+  }
   .vv-side-empty {
-    padding: 2rem;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--vv-sp-8);
+    padding: var(--vv-sp-16);
+    text-align: center;
+    font-size: var(--vv-fs-sm);
+  }
+  .vv-side-empty-title {
+    margin: 0;
+    color: var(--ui-fg);
+    font-size: var(--vv-fs-md);
+  }
+  .vv-side-empty-url {
+    display: flex;
+    gap: var(--vv-sp-6);
+  }
+  .vv-side-empty-url input {
+    width: 11rem;
+  }
+  .vv-side-empty-hint {
+    margin: 0;
     color: var(--ui-fg-muted);
+    font-size: var(--vv-fs-xs);
   }
   .vv-drawer-toggle,
   .vv-right-toggle {

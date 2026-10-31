@@ -1,12 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import WorkspaceCreateModal from './WorkspaceCreateModal.svelte';
+  import ServerConnectForm from './ServerConnectForm.svelte';
   import {
     openFiles,
     openDirectoryViaPicker,
     openUrl,
-    connectServer,
-    loadLastServer,
     closeTab,
     tabStore,
     workspacesView
@@ -56,12 +55,9 @@
   let narrow = $state(false);
   let settings = $state<Settings>(loadSettings());
 
-  // 连接服务器：内联展开表单（地址/token/连接/错误），不用对话框组件
+  // 连接服务器：内联展开开关（表单本体已抽 ServerConnectForm 共享组件——
+  // 侧栏多根 spec Task 3，与空态引导区共用；本组件只持开合，预填/连接/错误归组件）
   let serverOpen = $state(false);
-  let serverUrl = $state('');
-  let serverToken = $state('');
-  let serverError = $state<string | null>(null);
-  let connecting = $state(false);
 
   /** OS 亮暗响应式镜像（BUG-49）：matchMedia 非响应式信号——OS 切换时经
    * onSystemModeChange 订阅在 themeMode=system 下补一发注入（UI 配色由
@@ -216,37 +212,6 @@
 
   function toggleServerPanel(): void {
     serverOpen = !serverOpen;
-    serverError = null;
-    // 展开时用会话内上次成功连接的服务器预填（本期不做自动重连）
-    if (serverOpen && serverUrl === '') {
-      const last = loadLastServer();
-      if (last) {
-        serverUrl = last.baseUrl;
-        serverToken = last.token ?? '';
-      }
-    }
-  }
-
-  async function connect(e: SubmitEvent): Promise<void> {
-    e.preventDefault();
-    if (connecting) return;
-    const url = serverUrl.trim();
-    if (!url) {
-      serverError = '请输入服务器地址';
-      return;
-    }
-    connecting = true;
-    serverError = null;
-    try {
-      await connectServer(url, serverToken.trim() === '' ? null : serverToken.trim());
-      serverOpen = false;
-      serverUrl = '';
-      serverToken = '';
-    } catch (err) {
-      serverError = err instanceof Error ? err.message : String(err);
-    } finally {
-      connecting = false;
-    }
   }
 </script>
 
@@ -349,24 +314,7 @@
   <button onclick={toggleServerPanel}>连接服务器</button>
   <button onclick={manualRefresh} aria-label="刷新当前文件" title="手动刷新当前文件与目录树（快捷键 Ctrl+, 打开设置可关自动刷新）">↻</button>
   {#if serverOpen}
-    <form class="vv-server-form" onsubmit={connect}>
-      <input
-        placeholder="http://127.0.0.1:8321"
-        bind:value={serverUrl}
-        aria-label="服务器地址"
-        spellcheck="false"
-      />
-      <input
-        type="password"
-        placeholder="访问令牌（可空）"
-        bind:value={serverToken}
-        aria-label="访问令牌"
-      />
-      <button type="submit" disabled={connecting}>{connecting ? '连接中…' : '连接'}</button>
-      {#if serverError}
-        <span class="vv-server-error" role="alert">{serverError}</span>
-      {/if}
-    </form>
+    <ServerConnectForm onconnected={() => (serverOpen = false)} />
   {/if}
   <button onclick={cycleTheme}>
     主题：{settings.themeMode === 'system' ? '跟随系统' : settings.themeMode === 'light' ? '亮' : '暗'}
