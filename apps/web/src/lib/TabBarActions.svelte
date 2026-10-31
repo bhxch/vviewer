@@ -4,8 +4,9 @@
   // WorkspaceSwitcher 自持）＋ 打开菜单（内容二：打开文件/打开文件夹/粘贴 URL）＋
   // 手动刷新（内容三）＋ 更多菜单（内容四：连接服务器/主题/目录管理/设置/专注）。
   // themeMode/回调由 AppShell 持有——订阅链所有权在壳层，本组件只消费。
-  // aria-label/title 逐字沿用退役前 TopBar 原文（e2e 锚红线：设置/目录管理/
-  // 刷新当前文件/zen 文案随态/文件 URL）。
+  // aria-label 逐字沿用退役前 TopBar 原文（e2e 锚红线：设置/目录管理/刷新当前
+  // 文件/zen 文案随态/文件 URL）；title 同沿原文，唯一例外＝专注条目随退役删
+  // 「隐藏顶栏」字样（fixwave 终审 4 裁决，appShellZenToast 契约锚同步）。
   // 浮层菜单通道 = 外点 pointerdown + Esc + fixed 视口收敛（chrome 菜单模式，无
   // scroll-close）；fixed 坐标开合时从触发钮 rect 取一次，不追滚动/缩放。
   import ServerConnectForm from './ServerConnectForm.svelte';
