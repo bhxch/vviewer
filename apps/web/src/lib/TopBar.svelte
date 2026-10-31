@@ -1,16 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import WorkspaceCreateModal from './WorkspaceCreateModal.svelte';
   import ServerConnectForm from './ServerConnectForm.svelte';
-  import {
-    openFiles,
-    openDirectoryViaPicker,
-    openUrl,
-    closeTab,
-    tabStore,
-    workspacesView
-  } from './openFlow.svelte';
-  import { workspaceStore } from './workspaceStore';
+  // 工作区切换器（顶栏退役 spec Task 1 自本文件内联块抽取，切换器逻辑/DOM 契约
+  // 归 WorkspaceSwitcher 自持，本组件只消费——顶栏退役第一步降耦）
+  import WorkspaceSwitcher from './WorkspaceSwitcher.svelte';
+  import { openFiles, openDirectoryViaPicker, openUrl, tabStore } from './openFlow.svelte';
   import { loadSettings, saveSettings, onSettingsChanged, type Settings } from './stores/settings';
   import { applyAppearanceFromSettings, applyFontsFromSettings, onSystemModeChange } from './theme';
   import { reactToFontsChange } from './fontsReaction';
@@ -44,15 +38,6 @@
   } = $props();
   let urlValue = $state('');
   let fileInput = $state<HTMLInputElement | null>(null);
-  // workspace 切换器（T5）：下拉开关 + 新建模态挂载 + 行内重命名草稿
-  let wsMenuOpen = $state(false);
-  let createOpen = $state(false);
-  let renamingId = $state<string | null>(null);
-  let renameDraft = $state('');
-  let wsAnchorEl = $state<HTMLElement | null>(null);
-  let wsPopEl = $state<HTMLElement | null>(null);
-  /** ≤600px 收进溢出：触发按钮收敛为图标、下拉改同位 fixed 浮层 */
-  let narrow = $state(false);
   let settings = $state<Settings>(loadSettings());
 
   // 连接服务器：内联展开开关（表单本体已抽 ServerConnectForm 共享组件——
@@ -64,50 +49,6 @@
    * onSystemModeChange 订阅在 themeMode=system 下补一发注入（UI 配色由
    * prefers-color-scheme 媒体查询自动跟随，JS 注入变量需要这步）。高亮配色槽位
    * 读写已迁设置中心外观节（AppearanceSection 自带同款镜像）。 */
-
-  /** 当前 workspace（workspacesView 为 workspaceStore 的 runes 镜像） */
-  const activeWorkspace = $derived(
-    workspacesView.list.find((w) => w.id === workspacesView.activeId) ?? null
-  );
-
-  // ---------- workspace 切换器（T5） ----------
-
-  function switchTo(id: string): void {
-    workspaceStore.setActive(id);
-    wsMenuOpen = false;
-  }
-
-  function startRename(id: string, current: string): void {
-    renamingId = id;
-    renameDraft = current;
-  }
-
-  function commitRename(): void {
-    if (renamingId !== null) {
-      const v = renameDraft.trim();
-      if (v !== '') workspaceStore.rename(renamingId, v);
-    }
-    renamingId = null;
-  }
-
-  function cancelRename(): void {
-    renamingId = null;
-  }
-
-  /** 删除工作区：confirm → 关闭其全部 tab → remove（ensureNonEmpty 兜底，删最后
-   * 一个自动建默认；删活动组时 remove 内部切到剩余组首）。 */
-  function removeWorkspace(id: string, name: string): void {
-    if (!window.confirm(`删除工作区「${name}」？将关闭其全部 tab。`)) return;
-    for (const t of [...tabStore.tabsOf(id)]) closeTab(t.id);
-    workspaceStore.remove(id);
-    workspaceStore.ensureNonEmpty();
-    if (renamingId === id) renamingId = null;
-  }
-
-  function openCreate(): void {
-    wsMenuOpen = false;
-    createOpen = true;
-  }
 
   onMount(() => {
     applyAppearanceFromSettings(settings); // 首次注入：签名初值 null 必命中
@@ -126,54 +67,10 @@
       if (settings.themeMode !== 'system') return;
       applyAppearanceFromSettings(settings);
     });
-    // ≤600px 断点（spec E §2.3 切换器收进溢出）：matchMedia 驱动渲染分支；
-    // 断点跨越时仅切换触发器形态，已展开的列表不强行收起
-    const mq = window.matchMedia('(max-width: 600px)');
-    const applyNarrow = (): void => {
-      narrow = mq.matches;
-    };
-    applyNarrow();
-    mq.addEventListener('change', applyNarrow);
     return () => {
       offSettings();
       offSystem();
-      mq.removeEventListener('change', applyNarrow);
     };
-  });
-
-  $effect(() => {
-    // 下拉外点关闭：pointerdown 落在触发按钮与浮层之外即收起（模态类浮层不做
-    // 外点关——设置中心/全局搜索惯例，避免误触丢输入；仅菜单性浮层外点关）
-    if (!wsMenuOpen) return;
-    const onDown = (e: PointerEvent): void => {
-      const t = e.target as Node | null;
-      if (t === null) return;
-      if (wsAnchorEl?.contains(t) === true || wsPopEl?.contains(t) === true) return;
-      wsMenuOpen = false;
-    };
-    document.addEventListener('pointerdown', onDown);
-    return () => document.removeEventListener('pointerdown', onDown);
-  });
-
-  $effect(() => {
-    // Esc 关闭（GlobalSearchPanel 模式）：容器 keydown（.vv-ws-pop onkeydown，终审
-    // I-2——此前仅 window 兜底，合成 Esc 的派发目标恰是 pop 本体被 contains 守卫
-    // 挡下，移动端返回键 closeOverlay 空转成死循环；容器通道同时修复焦点在 pop 内
-    // 时物理 Esc 无效的旧癖）覆盖浮层内焦点，window 兜底只处理 target 在浮层外的
-    // 事件（同一事件只有一个 target，不会双触发）
-    if (!wsMenuOpen) return;
-    const onWinKey = (e: KeyboardEvent): void => {
-      if (
-        e.key === 'Escape' &&
-        wsPopEl !== null &&
-        (e.target instanceof Node ? !wsPopEl.contains(e.target) : true)
-      ) {
-        e.preventDefault();
-        wsMenuOpen = false;
-      }
-    };
-    window.addEventListener('keydown', onWinKey);
-    return () => window.removeEventListener('keydown', onWinKey);
   });
 
   function cycleTheme(): void {
@@ -229,86 +126,7 @@
   <button onclick={() => fileInput?.click()}>打开文件</button>
   <input type="file" multiple hidden bind:this={fileInput} onchange={onPick} />
   <button onclick={() => void openDirectoryViaPicker()}>打开文件夹</button>
-  <div class="vv-ws" bind:this={wsAnchorEl}>
-    <button
-      class="vv-ws-trigger"
-      onclick={() => (wsMenuOpen = !wsMenuOpen)}
-      aria-label="切换工作区"
-      aria-expanded={wsMenuOpen}
-      title="切换工作区（新建 / 重命名 / 删除）"
-    >
-      {narrow ? '工作区 ▾' : `${activeWorkspace?.name ?? '工作区'} ▾`}
-    </button>
-    {#if wsMenuOpen}
-      <!-- 不用 role="menu"：条目均为原生 button（键盘可达），menu 角色反而要求
-           tabindex/方向键管理（a11y_interactive_supports_focus 警告）；aria-expanded
-           已在触发按钮上表达展开态 -->
-      <!-- svelte-ignore a11y_no_static_element_interactions --><!-- 容器 Esc 同仓库
-           dialog keydown 模式（设置中心/GlobalSearchPanel 等）：合成 Esc（移动端返回键
-           closeTopOverlayForZen 派发）与浮层内焦点物理 Esc 的统一关闭通道 -->
-      <div
-        class="vv-ws-pop"
-        class:narrow
-        bind:this={wsPopEl}
-        onkeydown={(e) => {
-          if (e.key === 'Escape') {
-            e.preventDefault();
-            wsMenuOpen = false;
-          }
-        }}
-      >
-        {#each workspacesView.list as w (w.id)}
-          {#if renamingId === w.id}
-            <form
-              class="vv-ws-rename"
-              onsubmit={(e) => {
-                e.preventDefault();
-                commitRename();
-              }}
-            >
-              <input
-                bind:value={renameDraft}
-                aria-label="重命名工作区"
-                spellcheck="false"
-                onkeydown={(e) => {
-                  if (e.key === 'Escape') {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    cancelRename();
-                  }
-                }}
-              />
-              <button type="submit" aria-label="确认重命名" title="确认（Enter）">✓</button>
-              <button type="button" aria-label="取消重命名" title="取消（Esc）" onclick={cancelRename}>✕</button>
-            </form>
-          {:else}
-            <div class="vv-ws-item" class:active={w.id === workspacesView.activeId}>
-              <button type="button" class="vv-ws-name" title={w.name} onclick={() => switchTo(w.id)}>
-                {w.name}
-              </button>
-              <span class="vv-ws-actions">
-                <button
-                  type="button"
-                  class="vv-ws-act"
-                  aria-label="重命名工作区 {w.name}"
-                  title="重命名"
-                  onclick={() => startRename(w.id, w.name)}>✎</button
-                >
-                <button
-                  type="button"
-                  class="vv-ws-act"
-                  aria-label="删除工作区 {w.name}"
-                  title="删除（将关闭其全部 tab）"
-                  onclick={() => removeWorkspace(w.id, w.name)}>✕</button
-                >
-              </span>
-            </div>
-          {/if}
-        {/each}
-        <button type="button" class="vv-ws-new" onclick={openCreate}>＋ 新建工作区…</button>
-      </div>
-    {/if}
-  </div>
+  <WorkspaceSwitcher />
   <form onsubmit={submit}>
     <input placeholder="粘贴文件 URL" bind:value={urlValue} aria-label="文件 URL" />
   </form>
@@ -346,9 +164,6 @@
     {zen ? '退出专注' : '专注'}
   </button>
 </header>
-{#if createOpen}
-  <WorkspaceCreateModal onclose={() => (createOpen = false)} />
-{/if}
 
 <style>
   /* 字形钮触控目标（§6.4/§10-G1，≤600px 档，变更 ~26→≥32px 高）：↻/⚙/目录 三钮
