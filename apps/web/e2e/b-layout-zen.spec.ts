@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { openOverflowMenu } from './tabbar-actions';
 
 /**
  * 布局自由化与 zen mode 冒烟（spec 2026-10-19 §2/§3/§3.1，plan Task 5）。
@@ -6,15 +7,17 @@ import { test, expect, type Page } from '@playwright/test';
  * 桌面（chromium project）：
  * - LZ-01 双栏折叠/展开 + reload 保持（layout 节持久化）
  * - LZ-02 中缝拖拽调宽 + clamp（180–480/160–420）+ 双击重置
- * - LZ-03 TopBar 右键隐藏 → 边缘热区唤出临时条 → 右键重显（无 temp 残留）
- * - LZ-04 TopBar 隐藏态 Ctrl+, 设置面板/新建工作区模态仍可见（台账带入断言：
+ * - LZ-03 标签栏右键隐藏 → 边缘热区唤出临时条 → 右键重显（无 temp 残留；
+ *   顶栏退役 Task 4 前 TopBar 通道同理，退役后标签栏为唯一可隐 chrome 条，
+ *   LZ-10 双条组合矩阵失去载体移除、其全量还原锚并入本用例）
+ * - LZ-04 标签栏隐藏态 Ctrl+, 设置面板/新建工作区模态仍可见（台账带入断言：
  *   visibility 逃生门，b-layout-zen 钉住「隐藏条不影响挂点面板」不变式）
- * - LZ-05 zen：Ctrl+Alt+Z 进出、正交性（显式字段不改写）、Esc 面板优先、
- *   边缘条右键退出、桌面无浮钮
+ * - LZ-05 zen：⋯ 菜单「专注」/Ctrl+Alt+Z 进出、正交性（显式字段不改写）、
+ *   Esc 面板优先、边缘条右键退出、桌面无浮钮
  * - LZ-06 reload 落 zen
- * - LZ-07 TopBar 可见+TabBar 隐藏组合：临时标签条指针移入内容区 1.5s 自动收回
- *   （终审 I-1——热区 pointerleave 是「移开」语义锚点，条 fixed top:0 压住可见
- *   邻条时条本体 onleave 不可达）
+ * - LZ-07 标签栏隐藏：临时标签条指针移入内容区 1.5s 自动收回
+ *   （终审 I-1——热区 pointerleave 是「移开」语义锚点，条 fixed top:0 压住
+ *   内容区时条本体 onleave 不可达）
  *
  * 移动（mobile project，375×667 触摸）：
  * - mLZ-01 ☰ 抽屉头部「专注模式」进 zen + 右下浮钮（44px 触控标准）退出
@@ -32,6 +35,8 @@ import { test, expect, type Page } from '@playwright/test';
  * visibility:hidden（translateY 保留非空包围盒，isVisible 不适用——用 evaluate 查
  * computed visibility / className）；边缘热区用裸 page.mouse.move 进区（不用
  * locator.hover 的可操作性重试），唤出移动先落到内容区再进热区以触发 pointerenter。
+ * 顶栏退役（Task 3）随迁：topBarVisible 字段与顶边热区删除，chrome 菜单只剩
+ * 标签栏显隐 + 专注进出两项（右键 .vv-tabbar 非条目区触发）。
  */
 
 /** 读取持久化 layout 节（vviewer:settings） */
@@ -52,22 +57,25 @@ function barState(page: Page, selector: string): Promise<{ cls: string; visibili
   }, selector);
 }
 
-/** 等应用挂载（AppShell 渲染出顶栏） */
+/** 等应用挂载（AppShell 渲染出标签栏；顶栏退役 Task 3 后壳锚唯一） */
 async function waitApp(page: Page): Promise<void> {
   await page.goto('/');
-  await expect(page.locator('.vv-topbar')).toBeVisible();
+  await expect(page.locator('.vv-tabbar')).toBeVisible();
 }
 
-/** 右键顶栏空白处（.vv-brand）打开 chrome 菜单并点指定条目 */
+/** 右键标签栏非条目区（.vv-tabbar-manage，onShellContextMenu 排除 .vv-tab/input）
+ * 打开 chrome 菜单并点指定条目——顶栏退役后 chrome 菜单唯一触发面（AppShell
+ * shell 级代理，条目 = 隐藏/显示标签栏 + 专注进出；LZ-07 先例挂点） */
 async function chromeMenuItem(page: Page, label: string): Promise<void> {
-  await page.locator('.vv-brand').click({ button: 'right' });
+  await page.locator('.vv-tabbar-manage').click({ button: 'right' });
   await page.locator('.vv-chromemenu button', { hasText: label }).click();
 }
 
-/** 把指针从内容区移入顶边缘热区（两段移动保证 pointerenter 触发） */
-async function hoverTopEdge(page: Page): Promise<void> {
+/** 把指针从内容区移入标签栏边缘热区（两段移动保证 pointerenter 触发） */
+async function hoverTabEdge(page: Page): Promise<void> {
+  const edge = (await page.locator('.vv-edge[data-edge="tab"]').boundingBox())!;
   await page.mouse.move(400, 300);
-  await page.mouse.move(640, 4);
+  await page.mouse.move(edge.x + edge.width / 2, edge.y + edge.height / 2);
 }
 
 // ---------------------------------------------------------------- 桌面（chromium）
@@ -151,42 +159,44 @@ test.describe('布局与 zen（桌面）', () => {
     expect(await layoutOf(page)).toMatchObject({ rightWidth: 230 });
   });
 
-  test('LZ-03：TopBar 右键隐藏 → 边缘热区唤出临时条 → 右键重显（无 temp 残留）', async ({
+  test('LZ-03：标签栏右键隐藏 → 边缘热区唤出临时条 → 右键重显（无 temp 残留）', async ({
     page
   }) => {
     await waitApp(page);
 
-    // 右键顶栏 → 隐藏顶栏：chrome-off（translateY + visibility:hidden，不用 isVisible）
-    await chromeMenuItem(page, '隐藏顶栏');
-    let st = await barState(page, '.vv-topbar');
+    // 右键标签栏 → 隐藏标签栏：chrome-off（translateY + visibility:hidden，不用 isVisible）
+    await chromeMenuItem(page, '隐藏标签栏');
+    let st = await barState(page, '.vv-tabbar');
     expect(st.cls).toContain('vv-chrome-off');
     expect(st.visibility).toBe('hidden');
-    expect(await page.locator('.vv-edge[data-edge="top"]').count()).toBe(1);
-    expect(await layoutOf(page)).toMatchObject({ topBarVisible: false });
+    expect(await page.locator('.vv-edge[data-edge="tab"]').count()).toBe(1);
+    expect(await layoutOf(page)).toMatchObject({ tabBarVisible: false });
 
     // 边缘热区悬停 → 唤出临时条（真实条本体半透形态，visibility 恢复 visible）
-    await hoverTopEdge(page);
-    st = await barState(page, '.vv-topbar');
+    await hoverTabEdge(page);
+    st = await barState(page, '.vv-tabbar');
     expect(st.cls).toContain('vv-chrome-temp');
     expect(st.visibility).toBe('visible');
 
-    // 临时条右键 → 显示顶栏；L1：重显后无 temp/off 残留类
-    await chromeMenuItem(page, '显示顶栏');
+    // 临时条右键 → 显示标签栏；L1：重显后无 temp/off 残留类（原 LZ-03 顶栏通道
+    // 随 TopBar 退役改标签栏通道——唯一可隐 chrome 条；LZ-10 双条组合矩阵失去
+    // 载体移除，其「全量还原」终态锚由本用例末段承接）
+    await chromeMenuItem(page, '显示标签栏');
     await expect(page.locator('.vv-chromemenu')).toHaveCount(0);
-    st = await barState(page, '.vv-topbar');
+    st = await barState(page, '.vv-tabbar');
     expect(st.cls).not.toContain('vv-chrome-off');
     expect(st.cls).not.toContain('vv-chrome-temp');
     expect(st.visibility).toBe('visible');
-    expect(await layoutOf(page)).toMatchObject({ topBarVisible: true });
-    expect(await page.locator('.vv-edge[data-edge="top"]').count()).toBe(0);
+    expect(await layoutOf(page)).toMatchObject({ tabBarVisible: true });
+    expect(await page.locator('.vv-edge').count()).toBe(0);
   });
 
-  test('LZ-04：TopBar 隐藏态 Ctrl+, 设置面板与热区唤出打开的新建工作区模态仍可见（台账）', async ({
+  test('LZ-04：标签栏隐藏态 Ctrl+, 设置面板与热区唤出打开的新建工作区模态仍可见（台账）', async ({
     page
   }) => {
     await waitApp(page);
-    await chromeMenuItem(page, '隐藏顶栏');
-    expect((await barState(page, '.vv-topbar')).cls).toContain('vv-chrome-off');
+    await chromeMenuItem(page, '隐藏标签栏');
+    expect((await barState(page, '.vv-tabbar')).cls).toContain('vv-chrome-off');
 
     // Ctrl+, （AppShell window 级监听，隐藏不失效）→ 设置中心可见（AppShell 挂点，
     // 不在隐藏条 visibility 继承域）。若落入 chrome-off 继承域，toBeVisible
@@ -198,8 +208,8 @@ test.describe('布局与 zen（桌面）', () => {
     await page.keyboard.press('Escape');
     await expect(panel).toHaveCount(0);
 
-    // 热区唤出临时条 → 工作区菜单 → 新建工作区模态（TopBar 内挂点第二面板根）同不变式
-    await hoverTopEdge(page);
+    // 热区唤出临时条 → 工作区菜单 → 新建工作区模态（TabBar 内挂点第二面板根）同不变式
+    await hoverTabEdge(page);
     await page.locator('.vv-ws-trigger').click();
     await page.locator('.vv-ws-new').click();
     const modal = page.locator('.vv-wscreate');
@@ -217,23 +227,23 @@ test.describe('布局与 zen（桌面）', () => {
     // 补发 pointerenter 唤出临时条（真实行为）——中性区起点避免误唤出
     await page.mouse.move(400, 300);
 
-    // 可见入口（2026-10-23）：TopBar「专注」按钮进 zen，tooltip 写明进出双方式；
-    // 临时条形态（zen 下热区唤出）上同钮即「退出专注」
-    const zenBtn = page.locator('.vv-topbar button', { hasText: '专注' });
+    // 可见入口（2026-10-23）：⋯ 菜单「专注」条目进 zen（顶栏退役 Task 4 前为
+    // TopBar「专注」钮），tooltip 写明进出双方式；临时条形态（zen 下热区唤出）
+    // 右键菜单同通道即「退出专注」
+    await openOverflowMenu(page);
+    const zenBtn = page.locator('.vv-tbact-pop').getByRole('button', { name: '专注', exact: true });
     await expect(zenBtn).toHaveAttribute('title', /进入后按 Esc 或 Ctrl\+Alt\+Z 退出/);
     await zenBtn.click();
     await expect(page.locator('.vv-shell.zen')).toHaveCount(1);
     await page.keyboard.press('Escape');
     await expect(page.locator('.vv-shell.zen')).toHaveCount(0);
 
-    // 进入：shell 挂 zen 类、双条 chrome-off、落盘；正交性——显式字段不被改写
+    // 进入：shell 挂 zen 类、标签栏 chrome-off、落盘；正交性——显式字段不被改写
     await page.keyboard.press('Control+Alt+z');
     await expect(page.locator('.vv-shell.zen')).toHaveCount(1);
-    expect((await barState(page, '.vv-topbar')).cls).toContain('vv-chrome-off');
     expect((await barState(page, '.vv-tabbar')).cls).toContain('vv-chrome-off');
     expect(await layoutOf(page)).toMatchObject({
       zen: true,
-      topBarVisible: true,
       tabBarVisible: true,
       leftCollapsed: false,
       rightCollapsed: false
@@ -256,35 +266,34 @@ test.describe('布局与 zen（桌面）', () => {
     await page.keyboard.press('Escape');
     await expect(page.locator('.vv-shell.zen')).toHaveCount(0);
     await expect(page.locator('.vv-toast')).toHaveCount(0);
-    expect(await layoutOf(page)).toMatchObject({ zen: false, topBarVisible: true });
+    expect(await layoutOf(page)).toMatchObject({ zen: false });
 
-    // 再进 zen：顶边缘热区唤出临时条 → 右键 → 退出专注模式（无 temp 残留）
+    // 再进 zen：标签栏边缘热区唤出临时条 → 右键 → 退出专注模式（无 temp 残留）
     await page.keyboard.press('Control+Alt+z');
     await expect(page.locator('.vv-shell.zen')).toHaveCount(1);
-    await hoverTopEdge(page);
-    expect((await barState(page, '.vv-topbar')).cls).toContain('vv-chrome-temp');
+    await hoverTabEdge(page);
+    expect((await barState(page, '.vv-tabbar')).cls).toContain('vv-chrome-temp');
     await chromeMenuItem(page, '退出专注模式');
     await expect(page.locator('.vv-shell.zen')).toHaveCount(0);
-    const st = await barState(page, '.vv-topbar');
+    const st = await barState(page, '.vv-tabbar');
     expect(st.cls).not.toContain('vv-chrome-temp');
     expect(st.visibility).toBe('visible');
     expect(await layoutOf(page)).toMatchObject({ zen: false });
   });
 
-  test('LZ-07：TopBar 可见+TabBar 隐藏——临时标签条移开 1.5s 自动收回（终审 I-1）', async ({
+  test('LZ-07：标签栏隐藏——临时标签条移开 1.5s 自动收回（终审 I-1）', async ({
     page
   }) => {
     await waitApp(page);
 
-    // 右键 tabbar 非条目区（管理钮）→ 隐藏标签栏：顶栏保持可见的 T+F 组合
+    // 右键 tabbar 非条目区（管理钮）→ 隐藏标签栏（顶栏退役后唯一可隐 chrome 条）
     await page.locator('.vv-tabbar-manage').click({ button: 'right' });
     await page.locator('.vv-chromemenu button', { hasText: '隐藏标签栏' }).click();
     expect((await barState(page, '.vv-tabbar')).cls).toContain('vv-chrome-off');
-    expect((await barState(page, '.vv-topbar')).cls).not.toContain('vv-chrome-off');
     expect(await page.locator('.vv-edge[data-edge="tab"]').count()).toBe(1);
-    expect(await layoutOf(page)).toMatchObject({ topBarVisible: true, tabBarVisible: false });
+    expect(await layoutOf(page)).toMatchObject({ tabBarVisible: false });
 
-    // 悬停 tab 热区（顶栏下方自然槽位）→ 临时标签条 fixed top:0 压住可见顶栏
+    // 悬停 tab 热区（壳顶部自然槽位）→ 临时标签条 fixed top:0
     const edge = (await page.locator('.vv-edge[data-edge="tab"]').boundingBox())!;
     await page.mouse.move(400, 300);
     await page.mouse.move(edge.x + edge.width / 2, edge.y + edge.height / 2);
@@ -296,9 +305,8 @@ test.describe('布局与 zen（桌面）', () => {
     await expect
       .poll(async () => (await barState(page, '.vv-tabbar')).cls, { timeout: 4_000 })
       .not.toContain('vv-chrome-temp');
-    // 收回后回归隐藏态（off 类恢复），顶栏不受牵连
+    // 收回后回归隐藏态（off 类恢复）
     expect((await barState(page, '.vv-tabbar')).cls).toContain('vv-chrome-off');
-    expect((await barState(page, '.vv-topbar')).cls).not.toContain('vv-chrome-temp');
   });
 
   test('LZ-06：reload 落 zen（layout.zen 持久化，桌面无浮钮、Esc 退出）', async ({ page }) => {
@@ -310,7 +318,7 @@ test.describe('布局与 zen（桌面）', () => {
 
     await page.reload();
     await expect(page.locator('.vv-shell.zen')).toHaveCount(1);
-    expect((await barState(page, '.vv-topbar')).cls).toContain('vv-chrome-off');
+    expect((await barState(page, '.vv-tabbar')).cls).toContain('vv-chrome-off');
     expect(await layoutOf(page)).toMatchObject({ zen: true });
     await expect(page.locator('.vv-zen-exit')).toBeHidden();
 
@@ -335,7 +343,7 @@ test.describe('zen 移动端（mobile project）', () => {
 
   test('mLZ-01：☰ 抽屉头部进 zen + 右下浮钮（44px）退出', async ({ page }) => {
     await page.goto('/');
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
     await enterZenViaDrawer(page);
     expect(await layoutOf(page)).toMatchObject({ zen: true });
     await expect(page.locator('.vv-drawer-toggle')).toBeHidden();
@@ -356,7 +364,7 @@ test.describe('zen 移动端（mobile project）', () => {
     page
   }) => {
     await page.goto('/');
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
     await enterZenViaDrawer(page);
 
     // 移动断点进 zen 即压守卫历史项（{vvZen:1} 在当前项）
@@ -376,14 +384,14 @@ test.describe('zen 移动端（mobile project）', () => {
     await page.goBack();
     await expect(page.locator('.vv-shell.zen')).toHaveCount(0);
     expect(await layoutOf(page)).toMatchObject({ zen: false });
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
   });
 
   test('mLZ-03：reload 落 zen——浮钮在场、守卫项经 history.state 存活、返回键仍退 zen', async ({
     page
   }) => {
     await page.goto('/');
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
     await enterZenViaDrawer(page);
 
     await page.reload();
@@ -396,21 +404,21 @@ test.describe('zen 移动端（mobile project）', () => {
     // reload 后返回键仍先于离页退 zen
     await page.goBack();
     await expect(page.locator('.vv-shell.zen')).toHaveCount(0);
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
   });
 
   test('mLZ-05：返回键先关 .vv-ws-pop 菜单（合成 Esc 容器通道，终审 I-2 死循环回归锚）', async ({
     page
   }) => {
     await page.goto('/');
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
     await enterZenViaDrawer(page);
 
-    // zen 顶栏隐藏（visibility:hidden 不可点）：顶部边缘热区唤出临时条再点触发钮
-    const topEdge = (await page.locator('.vv-edge[data-edge="top"]').boundingBox())!;
+    // zen 标签栏隐藏（visibility:hidden 不可点）：标签栏边缘热区唤出临时条再点触发钮
+    const tabEdge = (await page.locator('.vv-edge[data-edge="tab"]').boundingBox())!;
     await page.mouse.move(180, 300);
-    await page.mouse.move(topEdge.x + 4, topEdge.y + topEdge.height / 2);
-    await expect(page.locator('.vv-topbar.vv-chrome-temp')).toBeVisible();
+    await page.mouse.move(tabEdge.x + 4, tabEdge.y + tabEdge.height / 2);
+    await expect(page.locator('.vv-tabbar.vv-chrome-temp')).toBeVisible();
     await page.locator('.vv-ws-trigger').click();
     await expect(page.locator('.vv-ws-pop')).toBeVisible();
 
@@ -424,12 +432,12 @@ test.describe('zen 移动端（mobile project）', () => {
     // 第二次返回：退 zen（通道未被空转消耗）
     await page.goBack();
     await expect(page.locator('.vv-shell.zen')).toHaveCount(0);
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
   });
 
   test('mLZ-04：zen 隐抽屉 toggles/本体，浮钮退出还原进入前开合态', async ({ page }) => {
     await page.goto('/');
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
 
     // 进入前左抽屉开着（还原基准）；抽屉头部入口直接进 zen
     // （勿再走 enterZenViaDrawer——其会再点一次 ☰ 把已开的抽屉关上，

@@ -225,7 +225,7 @@
 
   {#if phase === 'no-server'}
     <div class="vv-remotesrc-empty">
-      尚未连接服务器。请先在顶栏「连接服务器」建立连接，再添加后端路径来源。
+      尚未连接服务器。请先在标签栏 ⋯ 菜单「连接服务器」建立连接，再添加后端路径来源。
     </div>
   {:else if phase === 'roots'}
     <div class="vv-remotesrc-hint">该服务器有多数据根，请先选择根：</div>

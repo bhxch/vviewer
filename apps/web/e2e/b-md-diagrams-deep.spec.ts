@@ -1,6 +1,7 @@
 import { inflateSync } from 'node:zlib';
 import { expect, test, type Page } from '@playwright/test';
 import { injectDir, openTreeFile } from './b-markdown-html-docs-helpers';
+import { openOverflowMenu } from './tabbar-actions';
 
 /**
  * b-md-diagrams-deep 图表三通道矩阵补强（DM-01~DM-10，不与 b-md-diagrams /
@@ -19,7 +20,7 @@ import { injectDir, openTreeFile } from './b-markdown-html-docs-helpers';
  *   math 强制 kroki（krokiType 空）→ 回退 source（无假交互钮）；
  * - DM-06 图/源码切换惰性高亮：vega-lite 切源码后 code.language-json 产出高亮 span；
  * - DM-07 大源码 kroki URL：deflate+base64url 编码形态（无填充/无 +/）+ node zlib inflate 往返一致；
- * - DM-08 mermaid 主题联动端到端：亮→暗（TopBar 主题钮→saveSettings→vv:appearance-applied）
+ * - DM-08 mermaid 主题联动端到端：亮→暗（⋯ 菜单主题条目→saveSettings→vv:appearance-applied）
  *   svg 就地重画且内容变化（真浏览器才可测面）；
  * - DM-09 多图表文档性能锚：12 围栏（6 本地 + 6 kroki）45s 内全终态、引擎 chunk 只加载一次、
  *   kroki 每围栏恰一次请求；
@@ -290,11 +291,15 @@ test.describe('b-md-diagrams-deep 图表三通道矩阵补强', () => {
     const snap = () =>
       page.evaluate(() => document.querySelector('.vv-markdown .md-diagram-view[data-mermaid]')?.outerHTML ?? '');
     const before = await snap();
-    // TopBar 主题快切（与设置中心同一 themeMode 字段）→ saveSettings → 订阅派发事件
-    const themeBtn = page.getByRole('button', { name: /主题：/ });
-    await expect(themeBtn).toHaveText('主题：亮');
-    await themeBtn.click();
-    await expect(themeBtn).toHaveText('主题：暗');
+    // ⋯ 菜单主题快切（与设置中心同一 themeMode 字段）→ saveSettings → 订阅派发事件；
+    // 条目点击即收菜单，每轮重开（顶栏退役 Task 4）
+    const themeItem = page.locator('.vv-tbact-pop').getByRole('button', { name: /主题：/ });
+    await openOverflowMenu(page);
+    await expect(themeItem).toHaveText('主题：亮');
+    await themeItem.click();
+    await openOverflowMenu(page);
+    await expect(themeItem).toHaveText('主题：暗');
+    await themeItem.click();
     // 事件驱动 [data-mermaid] 容器就地重画：外层 HTML 变化（新 svg 节点/新主题配色）且不重开 tab
     await expect(view).toBeVisible();
     await expect.poll(snap, { timeout: 30_000, message: 'mermaid 应随主题就地重画' }).not.toBe(before);

@@ -261,7 +261,7 @@
           {/each}
           {#if group.rows.length === 0}
             <div class="vv-wspanel-empty">
-              暂无标签 · 已登记来源 {group.ws.sources.length} 个。用下方「＋ 添加来源」，或顶栏「打开文件 / 打开文件夹 / 连接服务器」添加。
+              暂无标签 · 已登记来源 {group.ws.sources.length} 个。用下方「＋ 添加来源」，或标签栏 ＋/⋯ 菜单「打开文件 / 打开文件夹 / 连接服务器」添加。
             </div>
           {/if}
           <button type="button" class="vv-wspanel-addbtn" onclick={() => toggleAdd(group.ws)}>

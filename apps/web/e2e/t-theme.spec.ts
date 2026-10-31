@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 import { applySettings, openSettings } from './settings-center';
+import { openOverflowMenu } from './tabbar-actions';
 
 /**
  * theme-system 域缺口补齐（t- 前缀标记本轮新增；README §3.2：一域一文件、
@@ -182,16 +183,20 @@ test('THEME-01: 三态循环（跟随系统→亮→暗→跟随系统）、整�
   page
 }) => {
   await page.goto('/');
-  const themeBtn = page.getByRole('button', { name: /主题：/ });
+  // ⋯ 菜单主题条目（顶栏退役 Task 4 前为 TopBar 主题钮）；点击即收菜单，每轮重开
+  const themeBtn = page.locator('.vv-tbact-pop').getByRole('button', { name: /主题：/ });
   const mode = () => page.locator('html').getAttribute('data-theme-mode');
+  const openMenu = () => openOverflowMenu(page);
 
   // 初始态：settings 默认 themeMode=system（settings.ts DEFAULTS）
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'system');
+  await openMenu();
   await expect(themeBtn).toHaveText('主题：跟随系统');
   const bgLight = await uiBg(page);
   expect(bgLight).toBe('#ffffff'); // headless 默认 prefers light
 
   // ① system → 亮：按钮文案、data-theme-mode、整壳配色、localStorage 单键同步
+  await openMenu();
   await themeBtn.click();
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'light');
   await expect(themeBtn).toHaveText('主题：亮');
@@ -199,6 +204,7 @@ test('THEME-01: 三态循环（跟随系统→亮→暗→跟随系统）、整�
   expect(await uiBg(page)).toBe(bgLight); // 亮态壳层配色不变（light 亮色板）
 
   // ② 亮 → 暗：整壳 UI 配色可见变化 + 单键更新
+  await openMenu();
   await themeBtn.click();
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'dark');
   await expect(themeBtn).toHaveText('主题：暗');
@@ -206,20 +212,24 @@ test('THEME-01: 三态循环（跟随系统→亮→暗→跟随系统）、整�
   await expect.poll(uiBg.bind(null, page)).toBe('#0d1117'); // 与亮态实际不同色
 
   // ③ 暗 → 跟随系统：循环闭环，配色还原亮色板（headless system 解析为亮）
+  await openMenu();
   await themeBtn.click();
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'system');
   await expect(themeBtn).toHaveText('主题：跟随系统');
   await expect.poll(uiBg.bind(null, page)).toBe(bgLight);
 
   // ④ 暗态 F5 刷新：主题态与刷新前一致（持久于 localStorage 并恢复）
+  await openMenu();
   await themeBtn.click(); // system → light
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'light');
+  await openMenu();
   await themeBtn.click(); // light → dark
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'dark');
   expect(await savedThemeMode(page)).toBe('dark');
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'dark');
-  await expect(page.getByRole('button', { name: /主题：/ })).toHaveText('主题：暗');
+  await openMenu();
+  await expect(page.locator('.vv-tbact-pop').getByRole('button', { name: /主题：/ })).toHaveText('主题：暗');
   await expect.poll(() => savedThemeMode(page)).toBe('dark');
   await expect.poll(uiBg.bind(null, page)).toBe('#0d1117');
 });
@@ -449,13 +459,17 @@ async function makeVsix(files: Record<string, string>): Promise<Buffer> {
 }
 
 /** 主题按钮三态循环到目标亮暗（新 context 的 localStorage 为默认 system；headless
- * prefers light，故 light 一次点击、dark 两次——THEME-01 同通道）。 */
+ * prefers light，故 light 一次点击、dark 两次——THEME-01 同通道；顶栏退役 Task 4
+ * 后经 ⋯ 菜单主题条目，点击即收需逐次重开）。 */
 async function gotoInMode(page: Page, mode: 'light' | 'dark'): Promise<void> {
   await page.goto('/');
-  const themeBtn = page.getByRole('button', { name: /主题：/ });
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'system');
-  await themeBtn.click();
-  if (mode === 'dark') await themeBtn.click();
+  await openOverflowMenu(page);
+  await page.locator('.vv-tbact-pop').getByRole('button', { name: /主题：/ }).click();
+  if (mode === 'dark') {
+    await openOverflowMenu(page);
+    await page.locator('.vv-tbact-pop').getByRole('button', { name: /主题：/ }).click();
+  }
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', mode);
 }
 
@@ -497,7 +511,7 @@ test('B-THEME-1: 暗色槽切 Dark Modern——UI token 与代码高亮联动（
   expect(text).toContain('/* vviewer 外观主题：vscode:Dark Modern（dark）');
   expect(text).toContain('--ui-bg: #1F1F1F;');
   expect(text).toContain('--vv-ts-comment: #6A9955;');
-  // 代码主题下拉被接管禁用（TopBar appearanceTakesOver）
+  // 代码主题下拉被接管禁用（appearanceTakesOver）
   await expect(page.getByLabel('代码主题')).toBeDisabled();
 
   // 视口探针（THEME-06/2 同手法泛化）：每个出现过的 ts-* 类，其注入变量
@@ -648,7 +662,7 @@ test('BUG-49 转正: themeMode=system 下 OS 亮暗切换后下拉显示=实际�
   });
   await page.emulateMedia({ colorScheme: 'light' });
   await page.goto('/');
-  // 下拉在设置中心外观组（自 TopBar 迁入）；osDark 镜像随组件挂载闭合（原 TopBar 同款）
+  // 下拉在设置中心外观组（自 TopBar 迁入）；osDark 镜像随组件挂载闭合（TopBar 时代同款）
   await openSettings(page);
   const select = page.getByLabel('代码主题');
   await expect(select).toHaveValue('github_light'); // 亮槽
@@ -778,7 +792,7 @@ test('BUG-51 转正: colorScheme:dark 首帧即暗——预置脚本先于 JS bu
   await sampleFirstFrames(page, null); // 无快照 → loadSettings 默认 themeMode=system
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.goto('/');
-  await expect(page.locator('.vv-topbar')).toBeVisible(); // 应用已挂载（采样窗口覆盖挂载前后）
+  await expect(page.locator('.vv-tabbar')).toBeVisible(); // 应用已挂载（采样窗口覆盖挂载前后）
   const [first] = await firstFrames(page);
   expect(first!.mode).toBe('system');
   expect(first!.bg).toBe('rgb(13, 17, 23)'); // 首帧即暗（修复前 rgb(255,255,255) 且 mode=null）
@@ -787,7 +801,7 @@ test('BUG-51 转正: colorScheme:dark 首帧即暗——预置脚本先于 JS bu
 test('BUG-51 转正: 显式 themeMode=dark 在 colorScheme:light 下首帧即暗', async ({ page }) => {
   await sampleFirstFrames(page, { themeMode: 'dark' });
   await page.goto('/'); // OS 偏好 light：显式 dark 槽优先，预置脚本同样命中
-  await expect(page.locator('.vv-topbar')).toBeVisible();
+  await expect(page.locator('.vv-tabbar')).toBeVisible();
   const [first] = await firstFrames(page);
   expect(first!.mode).toBe('dark');
   expect(first!.bg).toBe('rgb(13, 17, 23)');
@@ -796,7 +810,7 @@ test('BUG-51 转正: 显式 themeMode=dark 在 colorScheme:light 下首帧即暗
 test('BUG-51 转正: light 对照组首帧即亮、采样帧全程无暗色闪烁', async ({ page }) => {
   await sampleFirstFrames(page, { themeMode: 'light' });
   await page.goto('/');
-  await expect(page.locator('.vv-topbar')).toBeVisible();
+  await expect(page.locator('.vv-tabbar')).toBeVisible();
   const frames = await firstFrames(page);
   expect(frames.length).toBeGreaterThan(0);
   for (const f of frames) {

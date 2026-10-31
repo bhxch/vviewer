@@ -2,13 +2,14 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type CDPSession, type Page } from '@playwright/test';
 import { closeDrawerIfOpened } from './drawer';
+import { openOverflowMenu } from './tabbar-actions';
 
 /**
  * M7 Task 4：移动视口（375×667 触摸）冒烟——
  * 1. 抽屉开合：≤900px 断点下文件树/右栏收进抽屉，drawer-toggle 按钮开合生效；
  * 2. 文件夹打开 → 树 → 打开 md → 渲染（经抽屉内树行点击的移动端真实路径）；
  * 3. 触摸滚动：CDP Input.dispatchTouchEvent 滑动 markdown 正文，scrollTop 前移；
- * 4. 主题切换：TopBar 主题按钮三态循环，html data-theme-mode 随之变化；
+ * 4. 主题切换：⋯ 菜单主题条目三态循环，html data-theme-mode 随之变化；
  * 5. 视频播放页不崩：ArtPlayer 容器挂载、video 无 error（headless codec 宽松断言）；
  * 6. 手机右栏入口：ℹ toggle 开合 TOC/属性抽屉（≤600px 断点，终审 M7 补入口）。
  *
@@ -118,16 +119,19 @@ test('触摸滑动 markdown 正文：scrollTop 前移', async ({ page }) => {
     .toBeGreaterThan(0);
 });
 
-test('主题切换：TopBar 按钮三态循环写入 data-theme-mode', async ({ page }) => {
+test('主题切换：⋯ 菜单主题条目三态循环写入 data-theme-mode', async ({ page }) => {
   await page.goto('/');
-  const themeBtn = page.locator('.vv-topbar button', { hasText: '主题：' });
-  await expect(themeBtn).toBeVisible();
+  const themeItem = page.locator('.vv-tbact-pop').getByRole('button', { name: /主题：/ });
+  await expect(themeItem).toBeHidden(); // 浮层未开（触发通道迁移后经 ⋯ 菜单两段点击）
+  await openOverflowMenu(page);
 
-  // system → light → dark → system 循环（AppShell onMount 写初始 system）
+  // system → light → dark → system 循环（AppShell onMount 写初始 system）；
+  // 条目点击即收菜单，每轮重新开 ⋯
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'system');
-  await themeBtn.click();
+  await themeItem.click();
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'light');
-  await themeBtn.click();
+  await openOverflowMenu(page);
+  await themeItem.click();
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'dark');
   // 刷新后持久化（localStorage）
   await page.reload();

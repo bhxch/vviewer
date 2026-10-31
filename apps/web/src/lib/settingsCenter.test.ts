@@ -270,7 +270,7 @@ describe('Task 4 新节组件契约', () => {
     const src = readSrc('src/lib/settings/LayoutSection.svelte');
     expect(src).toMatch(/draft: Settings; touch\(\): void/);
     expect(src).toMatch(/touch\(\)/);
-    for (const t of ['显示顶栏', '显示标签栏', '折叠文件树', '折叠属性面板', 'clampWidth', 'resetZen']) {
+    for (const t of ['显示标签栏', '折叠文件树', '折叠属性面板', 'clampWidth', 'resetZen']) {
       expect(src).toContain(t);
     }
   });

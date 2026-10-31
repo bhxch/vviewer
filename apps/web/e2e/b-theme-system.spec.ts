@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
+import { openOverflowMenu } from './tabbar-actions';
 import { applySettings, closeSettings, openSettings } from './settings-center';
 
 /**
@@ -91,7 +92,8 @@ test('THEME-02：system 模式 prefers-color-scheme 双向跟随（壳层配色 
   await page.emulateMedia({ colorScheme: 'light' });
   await page.goto('/');
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'system');
-  const themeBtn = page.getByRole('button', { name: /主题：/ });
+  const themeBtn = page.locator('.vv-tbact-pop').getByRole('button', { name: /主题：/ });
+  await openOverflowMenu(page);
   await expect(themeBtn).toHaveText('主题：跟随系统');
   // vite8 起默认 CSS 压缩器由 esbuild 换为 Lightning CSS：#ffffff 被等价缩短为 #fff
   // （产物实测 --ui-bg:#fff）。自定义属性 getPropertyValue 取的是原始声明值（浏览器
@@ -123,7 +125,7 @@ test('THEME-02：system 模式 prefers-color-scheme 双向跟随（壳层配色 
 test('THEME-04：亮暗双槽位独立记忆、来回切换互不串扰、刷新恢复', async ({ page }) => {
   await page.goto('/');
   // 代码主题下拉自 TopBar 迁入设置中心外观组（设置中心 Task 1）：亮暗切换改经本组
-  // 「亮暗模式」三态控件驱动（与 TopBar 快切双写同字段，按钮通道由 t-theme THEME-01
+  // 「亮暗模式」三态控件驱动（与 ⋯ 菜单主题条目双写同字段，按钮通道由 t-theme THEME-01
   // 覆盖）；草稿改动统一「应用」落盘注入（e2e/settings-center.ts 装置）。
   await openSettings(page);
   const modeSel = page.getByLabel('亮暗模式');

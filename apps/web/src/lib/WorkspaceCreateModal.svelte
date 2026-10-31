@@ -195,7 +195,7 @@
       <button type="button" onclick={pickFiles}>本地文件…</button>
       <button type="button" onclick={openRemote}>后端路径…</button>
     </div>
-    <div class="vv-wscreate-hint">来源将加入本工作区；创建后也可用顶栏「打开文件夹 / 连接服务器」继续添加。</div>
+    <div class="vv-wscreate-hint">来源将加入本工作区；创建后也可用标签栏 ＋/⋯ 菜单「打开文件夹 / 连接服务器」继续添加。</div>
     {#if note}
       <div class="vv-wscreate-note" role="status">{note}</div>
     {/if}

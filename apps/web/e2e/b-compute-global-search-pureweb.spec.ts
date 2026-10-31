@@ -106,7 +106,7 @@ test('CMP-11/BUG-11：2050 文件触达 2000 上限——止点正确、出现�
   await openGlobalSearch(page, 'bulkword');
   const status = page.locator('.vv-gsearch-status');
   await expect(status).toContainText('40 个命中（结果不完整，已达上限）', { timeout: 60_000 });
-  await expect(page.locator('.vv-gsearch-hint')).toContainText('建议在顶栏连接服务器', { timeout: 5_000 });
+  await expect(page.locator('.vv-gsearch-hint')).toContainText('建议在标签栏连接服务器', { timeout: 5_000 });
 
   const groups = page.locator('.vv-gsearch-file-path');
   await expect(groups.filter({ hasText: 'bulk-2000.txt' })).toHaveCount(1); // 第 2000 个文件的命中在列
@@ -136,5 +136,5 @@ test('CMP-11/BUG-11：2050 文件触达 2000 上限——止点正确、出现�
   }
   // 第二轮终态：无结果但同样触达上限 → 截断提示与引导均在
   await expect(status).toContainText('无结果（结果不完整，已达上限）');
-  await expect(page.locator('.vv-gsearch-hint')).toContainText('建议在顶栏连接服务器');
+  await expect(page.locator('.vv-gsearch-hint')).toContainText('建议在标签栏连接服务器');
 });

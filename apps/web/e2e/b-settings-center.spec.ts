@@ -1,3 +1,4 @@
+import { openOverflowMenu } from './tabbar-actions';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -16,7 +17,7 @@ import {
 
 /**
  * b-settings-center 统一设置中心冒烟（settings center spec 2026-10-19，plan Task 5）：
- * - SC-01 骨架与双入口：⚙/Ctrl+, 开合、九组定稿序、切组、Esc 关闭
+ * - SC-01 骨架与双入口：⋯ 菜单「设置」/Ctrl+, 开合、九组定稿序、切组、Esc 关闭
  * - SC-02 表单↔JSON 双视图：表单改动即时反映 JSON、非法 JSON 阻断（停留标错+
  *   文本不丢+应用拦截）、合法 JSON 应用落盘
  * - SC-03 应用订阅链三线生效：外观+字体+布局一次提交（订阅链 diff 注入语义）；
@@ -27,7 +28,7 @@ import {
  *   重载回落默认；挂载配置禁用态（Spec 5 前向兼容裁决的骨架核验）；I-2 外部
  *   变更显脏 + 应用不复活已删引用（mergeDraftOnto 防护的端到端证明）
  * - SC-07 关于分节：estimate mock 用量+刷新、persist 状态行、health 摘要注入
- * - SC-08 TopBar 精简回归：代码主题/计算策略两下拉迁出、⚙ 指向设置中心、
+ * - SC-08 常驻条精简回归：代码主题/计算策略两下拉迁出、⋯ 菜单「设置」指向设置中心、
  *   亮暗快切保留（双写同字段）
  * - SC-09 恢复出厂（**本文件最后**；且跑在独立 origin——spawn release server :4183，
  *   chromium-only，无二进制跳过）：SW 注销+清缓存会破坏共享源后续用例，独立
@@ -52,12 +53,13 @@ function exportFileBuffer(settings: Record<string, unknown>): Buffer {
 }
 
 test.describe('b-settings-center 统一设置中心', () => {
-  test('SC-01 骨架与双入口：⚙/Ctrl+, 开合、九组定稿序、切组、Esc 关闭', async ({ page }) => {
+  test('SC-01 骨架与双入口：⋯ 菜单「设置」/Ctrl+, 开合、九组定稿序、切组、Esc 关闭', async ({ page }) => {
     await page.goto('/');
-    await expect(page.locator('.vv-topbar')).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
 
-    // 入口① ⚙：全屏页 + role=dialog 双通道
-    await page.locator('button[aria-label="设置"]').click();
+    // 入口① ⋯ 菜单「设置」条目（顶栏退役后 ⚙ 宿主迁标签栏按钮簇）：全屏页 + role=dialog 双通道
+    await openOverflowMenu(page);
+    await page.locator('.vv-tbact-pop').getByRole('button', { name: '设置', exact: true }).click();
     const root = page.locator(SETTINGS_ROOT);
     await expect(root).toBeVisible();
     await expect(page.getByRole('dialog', { name: '设置' })).toBeVisible();
@@ -125,28 +127,28 @@ test.describe('b-settings-center 统一设置中心', () => {
     await page.goto('/');
     await openSettings(page);
 
-    // 三组各改一笔（草稿不落盘）：外观暗色 / 字体代码字号 16 / 布局隐藏顶栏
+    // 三组各改一笔（草稿不落盘）：外观暗色 / 字体代码字号 16 / 布局隐藏标签栏
     await page.getByLabel('亮暗模式').selectOption('dark');
     await gotoGroup(page, '字体');
     await page.locator('input[aria-label="代码字号（px）"]').fill('16');
     await page.locator('input[aria-label="代码字号（px）"]').press('Enter');
     await gotoGroup(page, '布局');
-    await page.locator('input[aria-label="显示顶栏"]').uncheck();
+    await page.locator('input[aria-label="显示标签栏"]').uncheck();
     await expect(page.locator('.vv-sc-dirty')).toHaveText('未应用'); // 切组不丢草稿
 
     // 一次提交三线生效（统一 saveSettings 订阅链，diff 分发各注入器）
     await applySettings(page);
     await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'dark');
     await expect.poll(() => fontCss(page)).toContain('--vv-code-font-size: 16px');
-    await expect(page.locator('.vv-topbar')).toBeHidden(); // chrome-off = visibility:hidden
+    await expect(page.locator('.vv-tabbar')).toBeHidden(); // chrome-off = visibility:hidden
     const saved = (await savedSettings(page)) as {
       themeMode?: string;
       fonts?: { codeSize?: number };
-      layout?: { topBarVisible?: boolean };
+      layout?: { tabBarVisible?: boolean };
     };
     expect(saved.themeMode).toBe('dark');
     expect(saved.fonts?.codeSize).toBe(16);
-    expect(saved.layout?.topBarVisible).toBe(false);
+    expect(saved.layout?.tabBarVisible).toBe(false);
 
     // chromium 另断：宽度 number input 应用后生效（LZ-02 拖拽通道互补的表单半；
     // bbox 含 1px 边框故 400→401，精确值以持久化字段断言）
@@ -389,22 +391,27 @@ test.describe('b-settings-center 统一设置中心', () => {
     await expect(usageRow).toContainText('1.4 MB');
   });
 
-  test('SC-08 TopBar 精简回归：两下拉迁出、⚙ 指向设置中心、亮暗快切保留', async ({ page }) => {
+  test('SC-08 常驻条精简回归：两下拉迁出、⋯ 菜单「设置」指向设置中心、亮暗快切保留', async ({
+    page
+  }) => {
     await page.goto('/');
-    const topbar = page.locator('.vv-topbar');
-    await expect(topbar).toBeVisible();
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
 
-    // 代码主题/计算策略下拉迁出设置中心（设置中心 Task 1）
-    await expect(topbar.locator('select[aria-label="代码主题"]')).toHaveCount(0);
-    await expect(topbar.locator('select[aria-label="计算策略"]')).toHaveCount(0);
+    // 代码主题/计算策略下拉迁出设置中心（设置中心 Task 1；常驻条无表单控件，
+    // 未开设置中心时全局无这两个 select）
+    await expect(page.locator('select[aria-label="代码主题"]')).toHaveCount(0);
+    await expect(page.locator('select[aria-label="计算策略"]')).toHaveCount(0);
 
-    // ⚙ 指向设置中心
-    await topbar.locator('button[aria-label="设置"]').click();
+    // ⋯ 菜单「设置」条目指向设置中心
+    await openOverflowMenu(page);
+    await page.locator('.vv-tbact-pop').getByRole('button', { name: '设置', exact: true }).click();
     await expect(page.locator(SETTINGS_ROOT)).toBeVisible();
     await closeSettings(page);
 
-    // 亮暗快切保留（cycleTheme 与设置中心亮暗模式控件双写同字段）
-    const themeBtn = page.getByRole('button', { name: /主题：/ });
+    // 亮暗快切保留（⋯ 菜单主题条目与设置中心亮暗模式控件双写同字段；点击即收，
+    // 再切需重开菜单）
+    await openOverflowMenu(page);
+    const themeBtn = page.locator('.vv-tbact-pop').getByRole('button', { name: /主题：/ });
     await expect(themeBtn).toHaveText('主题：跟随系统');
     await themeBtn.click();
     await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'light');
@@ -434,7 +441,7 @@ test.describe('b-settings-center 统一设置中心', () => {
     try {
       await waitHealthy(BASE);
       await page.goto(`${BASE}/`);
-      await expect(page.locator('.vv-topbar')).toBeVisible();
+      await expect(page.locator('.vv-tabbar')).toBeVisible();
 
       // 预置三面脏数据：SW 激活 + 设置落盘 + 伪造运行时缓存
       await expect

@@ -55,7 +55,7 @@ describe('serverSearchHint（BUG-11 截断引导裁决；T4 起作用于来源�
   it('纯前端（本地）来源：返回服务器模式引导文案', () => {
     const sources = [{ label: 'a', store: makeStore('localfs:x', false) }];
     expect(serverSearchHint(sources)).toBe(SERVER_SEARCH_HINT);
-    expect(SERVER_SEARCH_HINT).toContain('建议在顶栏连接服务器');
+    expect(SERVER_SEARCH_HINT).toContain('建议在标签栏连接服务器');
     expect(SERVER_SEARCH_HINT).toContain('2000');
     expect(SERVER_SEARCH_HINT).toContain('200MB');
   });
