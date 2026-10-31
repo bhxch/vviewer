@@ -11,7 +11,6 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[derive(serde::Deserialize)]
 struct GrammarEntry {
@@ -63,7 +62,7 @@ fn main() {
         }
         // grammar_dir = 源仓库根（不含 subpath），subpath 由 compile_grammar 内部拼接
         // （Markpad 原版契约；否则 ocaml 等带 subpath 语言路径双拼）
-        if compile_grammar(e, &sources_root.join(&e.dir), &out_dir) {
+        if compile_grammar(e, &sources_root.join(&e.dir)) {
             cpp_scanners += 1;
         }
         built.push(e);
@@ -128,7 +127,7 @@ fn copy_queries(out_dir: &Path) {
 /// 编译单个 grammar：parser.c + scanner.c 走 cc；C++ scanner 手动 g++（gnu++17 +
 /// -include cstdint，见 Markpad 注释），vue 内嵌 html scanner 符号 objcopy localize。
 /// 返回是否编译了 C++ scanner（供 main 决定 C++ 标准库链接指令）。
-fn compile_grammar(e: &GrammarEntry, grammar_dir: &Path, out_dir: &Path) -> bool {
+fn compile_grammar(e: &GrammarEntry, grammar_dir: &Path) -> bool {
     let src_dir = if e.subpath.is_empty() { grammar_dir.join("src") } else { grammar_dir.join(&e.subpath).join("src") };
     let lib_name = format!("tree_sitter_{}", e.name.replace('-', "_"));
     println!("cargo:rerun-if-changed={}", src_dir.join("parser.c").display());
@@ -166,59 +165,52 @@ fn compile_grammar(e: &GrammarEntry, grammar_dir: &Path, out_dir: &Path) -> bool
         return false;
     }
     println!("cargo:rerun-if-changed={}", scanner_cc.display());
-    let obj = out_dir.join(format!("{lib_name}_scanner.o"));
-    let status = Command::new("g++")
-        .args([
-            "-std=gnu++17",
-            "-include",
-            "cstdint",
-            "-Os",
-            "-fPIC",
-            "-ffunction-sections",
-            "-fdata-sections",
-            "-c",
-            "-w",
-            &format!("-I{}", src_dir.display()),
-            &format!("-I{}", grammar_dir.display()),
-            &format!("-I{}", src_dir.parent().unwrap().display()),
-            "-o",
-        ])
-        .arg(&obj)
-        .arg(&scanner_cc)
-        .status()
-        .expect("g++ 运行失败（C++ scanner 编译）");
-    assert!(status.success(), "C++ scanner 编译失败: {}", e.name);
-
-    // vue scanner.cc 内嵌 html scanner 未重命名符号 → 降级本地符号避免静态链接重定义
+    // C++ scanner 统一走 cc（平台原生 C++ 编译器：windows-msvc cl / macos clang++ /
+    // linux g++）——原「手动 g++ + objcopy localize + ar 合并」（Markpad 移植手法）
+    // 在 v0.1.1 桌面首跑双翻车：macos 的 objcopy 改写 mach-o 产坏对象（apple ld 报
+    // "not mach-o"）；windows 的 mingw COFF 被 msvc link.exe 拒收（LNK1143 COMDAT
+    // 损坏）。cc 按目标平台自选编译器与归档工具，产物天然被本平台链接器接纳。
+    //
+    // vue scanner.cc 内嵌 html scanner 未改名符号（与独立 html grammar 的 scanner
+    // 静态库重定义冲突）改为编译期 -D 改名：定义与内部引用同 TU 一致改名，外置
+    // 扫描器经 TSLanguage 函数指针调用、无跨对象符号引用，改名零副作用，
+    // 不再依赖 objcopy 局部化。
+    let mut cpp = cc::Build::new();
+    cpp.cpp(true)
+        .file(&scanner_cc)
+        .flag_if_supported("-std=gnu++17")
+        .warnings(false)
+        .opt_level_str("s")
+        .include(&src_dir)
+        .include(grammar_dir)
+        .include(src_dir.parent().unwrap());
+    // -include cstdint（Markpad 注释：scanner 依赖 int32_t 而不自含头）：
+    // gcc/clang 用 -include，msvc 用 /FI——两族强制包含旗标不通用，按 target 分发
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+    if target_env == "msvc" {
+        cpp.flag("/FIcstdint");
+    } else {
+        cpp.flag("-include").flag("cstdint");
+    }
     if e.name == "vue" {
-        for sym in [
+        // define 的 &str 借用需存活到 compile，改名值先物化为具主字符串
+        let renames: Vec<(&str, String)> = [
             "tree_sitter_html_external_scanner_create",
             "tree_sitter_html_external_scanner_destroy",
             "tree_sitter_html_external_scanner_scan",
             "tree_sitter_html_external_scanner_serialize",
             "tree_sitter_html_external_scanner_deserialize",
-        ] {
-            let st = Command::new("objcopy")
-                .arg(format!("--localize-symbol={sym}"))
-                .arg(&obj)
-                .status()
-                .expect("objcopy 运行失败");
-            assert!(st.success(), "objcopy localize 失败: {}", e.name);
+        ]
+        .iter()
+        .map(|sym| (*sym, format!("vviewer_vue_{sym}")))
+        .collect();
+        for (sym, renamed) in &renames {
+            cpp.define(sym, renamed.as_str());
         }
     }
-
-    let main_lib = out_dir.join(format!("lib{lib_name}.a"));
-    let st = Command::new("ar")
-        .arg("rs")
-        .arg(&main_lib)
-        .arg(&obj)
-        .current_dir(out_dir)
-        .status()
-        .expect("ar 运行失败");
-    assert!(st.success(), "ar 合并失败: {}", e.name);
-    let _ = fs::remove_file(&obj);
-
-    println!("cargo:rustc-link-lib=static={lib_name}");
+    // cc 自动产出 lib{lib_name}_scanner.a 并发 rustc-link-lib/search 指令；链接序在
+    // 主 C 库之后（C 库的 language 结构经函数指针调 scanner，无符号级反向依赖）
+    cpp.compile(&format!("{lib_name}_scanner"));
     true
 }
 
