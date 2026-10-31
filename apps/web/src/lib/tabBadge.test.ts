@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import type { FileSource } from '@bhxch/vviewer-core';
 import type { Tab } from './openFlow.svelte';
 import type { WorkspaceSource } from './workspaceStore';
 import { badgeOf } from './tabBadge';
@@ -12,8 +13,22 @@ const src = (storeId: string, storeLabel: string): WorkspaceSource => ({
   storeLabel
 });
 
-const tabOf = (storeId: string, name: string, path = '') =>
-  ({ source: { storeId, name, path } }) as Tab;
+/**
+ * badgeOf 判定面的最小 tab 形状：仅 source.{storeId,name,path}（Pick<FileSource,…>
+ * 锚定字段名——FileSource 字段更名/收窄时此处编译错，杜绝静默漂移）。
+ */
+type BadgeTab = { source: Pick<FileSource, 'storeId' | 'name' | 'path'> };
+
+/**
+ * tabOf：全用例共用的最小 tab 构造，as Tab 断言集中此一处、禁止用例内散落强转。
+ * 取舍——不补齐 Tab 常用字段：badgeOf 仅消费 tab.source.*（storeId/name/path），
+ * 其余字段（id/scrollTop/active…）与 FileSource.store: TreeStore 等重对象同判定
+ * 无关，补齐需伪造 store、徒增噪声；最小形状经 BadgeTab 类型校验后再集中断言。
+ */
+const tabOf = (storeId: string, name: string, path = ''): Tab => {
+  const minimal: BadgeTab = { source: { storeId, name, path } };
+  return minimal as Tab;
+};
 
 describe('badgeOf', () => {
   it('单源 workspace：不显示徽标（不变）', () => {
@@ -58,6 +73,18 @@ describe('badgeOf', () => {
     const tabs = [tabA1, tabA2];
     expect(badgeOf(sources, tabs, tabA1)).toBeNull();
     expect(badgeOf(sources, tabs, tabA2)).toBeNull();
+  });
+
+  it('A 源 duplicate 同名两 tab + 该名同存于 B 源：跨源冲突成立，两个 A 源 tab 均得徽标', () => {
+    const sources = [src('remote:a', 'data'), src('remote:b', '备份')];
+    const tabA1 = tabOf('remote:a', 'notes.txt');
+    const tabA2 = tabOf('remote:a', 'notes.txt');
+    const tabB = tabOf('remote:b', 'notes.txt');
+    const tabs = [tabA1, tabA2, tabB];
+    // 同源重复不妨碍跨源冲突判定：A 源两个 tab 均以 storeLabel 区分
+    expect(badgeOf(sources, tabs, tabA1)).toBe('data');
+    expect(badgeOf(sources, tabs, tabA2)).toBe('data');
+    expect(badgeOf(sources, tabs, tabB)).toBe('备份');
   });
 
   it('同名冲突 + remote 单文件来源抑制：该 tab 无徽标、对手 tab 正常（不对称成立）', () => {
