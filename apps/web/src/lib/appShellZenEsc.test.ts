@@ -50,11 +50,13 @@ describe('终审修复锚（2026-10-19 波）：合成 Esc 通道对全部 overl
   });
 
   it('I-2：.vv-ws-pop 容器 onkeydown Esc——合成 Esc 的派发目标恰是 pop 本体，window 兜底的 contains 守卫会挡下，容器通道是唯一到达路径', () => {
-    const topbar = readSrc('src/lib/TopBar.svelte');
-    expect(topbar).toMatch(
+    // 顶栏退役 Task 1：切换器自 TopBar 内联块抽取为独立组件，.vv-ws-pop 容器通道
+    // 锚随迁读新宿主源（DOM 契约零变化）
+    const wsSwitcher = readSrc('src/lib/WorkspaceSwitcher.svelte');
+    expect(wsSwitcher).toMatch(
       /class="vv-ws-pop"[\s\S]{0,200}onkeydown=\{\(e\) => \{\s*if \(e\.key === 'Escape'\) \{\s*e\.preventDefault\(\);\s*wsMenuOpen = false;\s*\}\s*\}\}/
     );
     // window 兜底保留（target 在浮层外的物理 Esc 走兜底），与容器通道按 target 互补不双触发
-    expect(topbar).toContain('!wsPopEl.contains(e.target)');
+    expect(wsSwitcher).toContain('!wsPopEl.contains(e.target)');
   });
 });
