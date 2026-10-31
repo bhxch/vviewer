@@ -15,8 +15,15 @@
     type ImportedTheme
   } from '../stores/session';
   import { importIconThemeFiles, importThemeFiles } from '../vsixImport';
-  import { onSystemModeChange, themeOptions } from '../theme';
-  import { ICON_THEME_SCOPE_KEYS, type Settings } from '../stores/settings';
+  import {
+    applyAppearanceFromSettings,
+    invalidateAppearance,
+    onSystemModeChange,
+    themeOptions
+  } from '../theme';
+  import { applyIconsFromSettings, invalidateIcons } from '../iconTheme.svelte';
+  import { checkUpdate, installFromOpenVsx, updateTheme } from '../openVsx';
+  import { ICON_THEME_SCOPE_KEYS, loadSettings, type Settings } from '../stores/settings';
 
   let { draft, touch }: { draft: Settings; touch(): void } = $props();
 
@@ -234,6 +241,131 @@
     }
     iconImported = iconImported.filter((x) => x.id !== t.id);
   }
+
+  // ---------- Open VSX 安装与更新通道（图标主题 spec §6.2/§6.3，Task 5） ----------
+  //
+  // 两个导入区各加单行安装输入（三形态解析在 openVsx.ts）；两列表行显示
+  // origin.version + 逐条「检查更新」+ 有更新时「更新到 x.y.z」+ 列表头「全部检查」
+  // 串行。错误/通知全部复用 importNote/importErrors 通道（后动作覆盖前者文案）。
+
+  let ovxThemeInput = $state('');
+  let ovxThemeBusy = $state(false);
+  let ovxIconInput = $state('');
+  let ovxIconBusy = $state(false);
+  /** 逐条通道簿记（id → 值；$state Record 需整体重赋值触发）：检查/更新忙态与
+   * 已检 latest 版本（更新成功后写回新版本 → 行内自然回到「检查更新」态）。 */
+  let ovxCheckBusy = $state<Record<string, boolean>>({});
+  let ovxUpdateBusy = $state<Record<string, boolean>>({});
+  let ovxLatest = $state<Record<string, string>>({});
+  let ovxCheckAllBusy = $state<Record<'theme' | 'icon', boolean>>({ theme: false, icon: false });
+
+  /** 两列表统一刷新（安装按 manifest 预检自动分流，落任一通道都可能）。 */
+  async function refreshImportedLists(): Promise<void> {
+    const [ts, its] = await Promise.all([listThemes(), listIconThemes()]);
+    const byName = (a: { name: string; addedAt: number }, b: { name: string; addedAt: number }): number =>
+      a.name.localeCompare(b.name) || a.addedAt - b.addedAt;
+    imported = [...ts].sort(byName);
+    iconImported = [...its].sort(byName);
+  }
+
+  /** 安装（openVsx.installFromOpenVsx 共用管线）：错误/结果走 importNote 通道；
+   * 管线前失败（解析/网络/预检/超限）的抛错文案直接上 note——预检快错与断网
+   * 引导（spec §6.4）需要可见。 */
+  async function onOvxInstall(channel: 'theme' | 'icon'): Promise<void> {
+    const input = (channel === 'theme' ? ovxThemeInput : ovxIconInput).trim();
+    if (input === '') return;
+    if (channel === 'theme') ovxThemeBusy = true;
+    else ovxIconBusy = true;
+    importNote = '';
+    importErrors = [];
+    try {
+      const { imported: ok, errors } = await installFromOpenVsx(input);
+      importErrors = errors;
+      importNote =
+        errors.length === 0 ? `已从 Open VSX 安装 ${ok.length} 个主题` : `已安装 ${ok.length} 个，失败 ${errors.length} 个`;
+      if (channel === 'theme') ovxThemeInput = '';
+      else ovxIconInput = '';
+      await refreshImportedLists();
+    } catch (err) {
+      importErrors = [err instanceof Error ? err.message : String(err)];
+      importNote = importErrors[0] ?? 'Open VSX 安装失败';
+    } finally {
+      if (channel === 'theme') ovxThemeBusy = false;
+      else ovxIconBusy = false;
+    }
+  }
+
+  /** 逐条「检查更新」（spec §6.3）：latest 记入 ovxLatest，行内据其切换更新钮。 */
+  async function ovxCheckOne(t: ImportedTheme | ImportedIconTheme): Promise<void> {
+    if (t.origin === undefined) return;
+    ovxCheckBusy = { ...ovxCheckBusy, [t.id]: true };
+    importNote = '';
+    importErrors = [];
+    try {
+      const { latest, hasUpdate } = await checkUpdate(t.origin);
+      ovxLatest = { ...ovxLatest, [t.id]: latest };
+      importNote = hasUpdate
+        ? `「${t.name}」有更新：${t.origin.version} → ${latest}`
+        : `「${t.name}」已是最新（${latest}）`;
+    } catch (err) {
+      importErrors = [err instanceof Error ? err.message : String(err)];
+      importNote = importErrors[0] ?? '检查更新失败';
+    } finally {
+      ovxCheckBusy = { ...ovxCheckBusy, [t.id]: false };
+    }
+  }
+
+  /** 「全部检查」（列表头）：逐条串行 GET（spec §6.3——记录数量级小，无并发风暴）。 */
+  async function ovxCheckAll(channel: 'theme' | 'icon'): Promise<void> {
+    const targets = (channel === 'theme' ? imported : iconImported).filter((t) => t.origin !== undefined);
+    if (targets.length === 0) {
+      importNote = '无 Open VSX 来源的主题（本地导入无更新通道）';
+      return;
+    }
+    ovxCheckAllBusy = { ...ovxCheckAllBusy, [channel]: true };
+    importNote = '';
+    importErrors = [];
+    let updatable = 0;
+    try {
+      for (const t of targets) {
+        await ovxCheckOne(t);
+        if (t.origin !== undefined && ovxLatest[t.id] !== undefined && ovxLatest[t.id] !== t.origin.version) updatable++;
+      }
+      importNote = `全部检查完成（${targets.length} 条）：${updatable} 条可更新`;
+    } finally {
+      ovxCheckAllBusy = { ...ovxCheckAllBusy, [channel]: false };
+    }
+  }
+
+  /** 更新执行（openVsx.updateTheme 同 id 覆盖写入）后运行时强制重应用：iconSig /
+   * appearanceSig 均不含记录内容（T3 备案），同 id 覆盖后 diff 必 no-op——归零
+   * 签名再手动触发一次应用（spec §6.3「设置引用零断链 + 内容替换」的本实现达成
+   * 形态，两通道一并处置）。重应用读 loadSettings()（已落盘设置）而非 draft：
+   * 未应用的草稿改动不应被提前注入；两槽 id 与覆盖前一致，语义不变。 */
+  async function ovxUpdateOne(channel: 'theme' | 'icon', t: ImportedTheme | ImportedIconTheme): Promise<void> {
+    ovxUpdateBusy = { ...ovxUpdateBusy, [t.id]: true };
+    importNote = '';
+    importErrors = [];
+    try {
+      const updated = await updateTheme(t);
+      if (channel === 'icon') {
+        iconImported = iconImported.map((x) => (x.id === updated.id ? (updated as ImportedIconTheme) : x));
+        invalidateIcons();
+        void applyIconsFromSettings(loadSettings());
+      } else {
+        imported = imported.map((x) => (x.id === updated.id ? (updated as ImportedTheme) : x));
+        invalidateAppearance();
+        applyAppearanceFromSettings(loadSettings());
+      }
+      ovxLatest = { ...ovxLatest, [t.id]: updated.origin?.version ?? '' };
+      importNote = `已更新「${updated.name}」到 v${updated.origin?.version ?? '?'}`;
+    } catch (err) {
+      importErrors = [err instanceof Error ? err.message : String(err)];
+      importNote = importErrors[0] ?? 'Open VSX 更新失败';
+    } finally {
+      ovxUpdateBusy = { ...ovxUpdateBusy, [t.id]: false };
+    }
+  }
 </script>
 
 <section class="vv-sc-section">
@@ -285,17 +417,68 @@
     </button>
     <input type="file" multiple accept=".json,.vsix" hidden bind:this={themeInputEl} onchange={onImportChange} />
   </div>
+  <form
+    class="vv-settings-ovx"
+    onsubmit={(e) => {
+      e.preventDefault();
+      void onOvxInstall('theme');
+    }}
+  >
+    <input
+      type="text"
+      bind:value={ovxThemeInput}
+      placeholder="从 Open VSX 安装：publisher.extension 或粘贴链接"
+      aria-label="从 Open VSX 安装颜色主题"
+    />
+    <button type="submit" disabled={ovxThemeBusy || ovxThemeInput.trim() === ''}>
+      {ovxThemeBusy ? '安装中…' : '安装'}
+    </button>
+  </form>
   {#if importNote}
     <div class="vv-settings-note" title={importErrors.length > 0 ? importErrors.join('\n') : undefined} role="status">
       {importNote}
     </div>
   {/if}
   {#if imported.length > 0}
+    <div class="vv-settings-themes-head">
+      <span>已导入（{imported.length}）</span>
+      <button
+        type="button"
+        class="vv-settings-ovx-btn"
+        disabled={ovxCheckAllBusy.theme}
+        onclick={() => void ovxCheckAll('theme')}
+        aria-label="全部检查颜色主题更新">全部检查</button
+      >
+    </div>
     <ul class="vv-settings-themes">
       {#each imported as t (t.id)}
         <li class="vv-settings-theme">
           <span class="vv-settings-theme-name" title={t.name}>{t.name}</span>
           <span class="vv-settings-theme-src">{t.source}</span>
+          {#if t.origin}
+            <span class="vv-settings-theme-src" title="Open VSX：{t.origin.publisher}.{t.origin.extension}">
+              v{t.origin.version}
+            </span>
+            {#if ovxLatest[t.id] !== undefined && ovxLatest[t.id] !== t.origin.version}
+              <button
+                type="button"
+                class="vv-settings-ovx-btn"
+                disabled={ovxUpdateBusy[t.id] === true}
+                onclick={() => void ovxUpdateOne('theme', t)}
+                aria-label="更新主题 {t.name} 到 {ovxLatest[t.id]}">
+                {ovxUpdateBusy[t.id] === true ? '更新中…' : `更新到 ${ovxLatest[t.id]}`}
+              </button>
+            {:else}
+              <button
+                type="button"
+                class="vv-settings-ovx-btn"
+                disabled={ovxCheckBusy[t.id] === true}
+                onclick={() => void ovxCheckOne(t)}
+                aria-label="检查更新主题 {t.name}">
+                {ovxCheckBusy[t.id] === true ? '检查中…' : '检查更新'}
+              </button>
+            {/if}
+          {/if}
           <button
             type="button"
             class="vv-settings-remove"
@@ -347,13 +530,64 @@
       onchange={onIconImportChange}
     />
   </div>
+  <form
+    class="vv-settings-ovx"
+    onsubmit={(e) => {
+      e.preventDefault();
+      void onOvxInstall('icon');
+    }}
+  >
+    <input
+      type="text"
+      bind:value={ovxIconInput}
+      placeholder="从 Open VSX 安装：publisher.extension 或粘贴链接"
+      aria-label="从 Open VSX 安装图标主题"
+    />
+    <button type="submit" disabled={ovxIconBusy || ovxIconInput.trim() === ''}>
+      {ovxIconBusy ? '安装中…' : '安装'}
+    </button>
+  </form>
   <div class="vv-settings-hint">JSON 导入须将主题清单与字体文件（woff/woff2/ttf/otf）同批选中；VSIX 自动解包。</div>
   {#if iconImported.length > 0}
+    <div class="vv-settings-themes-head">
+      <span>已导入（{iconImported.length}）</span>
+      <button
+        type="button"
+        class="vv-settings-ovx-btn"
+        disabled={ovxCheckAllBusy.icon}
+        onclick={() => void ovxCheckAll('icon')}
+        aria-label="全部检查图标主题更新">全部检查</button
+      >
+    </div>
     <ul class="vv-settings-themes">
       {#each iconImported as t (t.id)}
         <li class="vv-settings-theme">
           <span class="vv-settings-theme-name" title={t.name}>{t.name}</span>
           <span class="vv-settings-theme-src">{t.source}</span>
+          {#if t.origin}
+            <span class="vv-settings-theme-src" title="Open VSX：{t.origin.publisher}.{t.origin.extension}">
+              v{t.origin.version}
+            </span>
+            {#if ovxLatest[t.id] !== undefined && ovxLatest[t.id] !== t.origin.version}
+              <button
+                type="button"
+                class="vv-settings-ovx-btn"
+                disabled={ovxUpdateBusy[t.id] === true}
+                onclick={() => void ovxUpdateOne('icon', t)}
+                aria-label="更新图标主题 {t.name} 到 {ovxLatest[t.id]}">
+                {ovxUpdateBusy[t.id] === true ? '更新中…' : `更新到 ${ovxLatest[t.id]}`}
+              </button>
+            {:else}
+              <button
+                type="button"
+                class="vv-settings-ovx-btn"
+                disabled={ovxCheckBusy[t.id] === true}
+                onclick={() => void ovxCheckOne(t)}
+                aria-label="检查更新图标主题 {t.name}">
+                {ovxCheckBusy[t.id] === true ? '检查中…' : '检查更新'}
+              </button>
+            {/if}
+          {/if}
           <button
             type="button"
             class="vv-settings-remove"

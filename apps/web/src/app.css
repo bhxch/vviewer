@@ -663,6 +663,17 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 /* 来源徽标 pill 化（§5.1：8px 徽标并入 --vv-radius-full，变更） */
 .vv-settings-theme-src { flex: none; color: var(--ui-fg-muted); border: 1px solid var(--ui-border);
   border-radius: var(--vv-radius-full); padding: 0 6px; font-size: var(--vv-fs-2xs); }
+/* 设置中心「外观」节 Open VSX 安装与更新通道（图标主题 spec §6.2/§6.3，Task 5）：
+   单行安装输入（复用 theme-row 输入宽度口径）+ 列表头「全部检查」+ 行内检查/更新
+   小钮（版本 pill 复用 .vv-settings-theme-src） */
+.vv-settings-ovx { display: flex; align-items: center; gap: var(--vv-sp-6); }
+.vv-settings-ovx input { flex: 1; min-width: 0; max-width: 210px; font-size: var(--vv-fs-xs); }
+.vv-settings-ovx button { font-size: var(--vv-fs-xs); }
+.vv-settings-ovx button:disabled { opacity: .5; cursor: default; }
+.vv-settings-themes-head { display: flex; align-items: center; justify-content: space-between;
+  font-size: var(--vv-fs-xs); color: var(--ui-fg-muted); }
+.vv-settings-ovx-btn { flex: none; font-size: var(--vv-fs-2xs); cursor: pointer; }
+.vv-settings-ovx-btn:disabled { opacity: .5; cursor: default; }
 /* 设置中心「外观」节图标主题分区（图标主题 spec §3.1，Task 4）：四 scopes 复选行
    ——flex wrap 单行排布，复选框+中文标签（aria-label 由模板内联） */
 .vv-settings-scopes { display: flex; flex-wrap: wrap; gap: var(--vv-sp-4) var(--vv-sp-10);
