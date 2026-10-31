@@ -156,7 +156,7 @@ jobs:
           # macOS 双 arch 分产物 = 双 host 原生编译：server build.rs 手动 g++ 不带
           # -arch，单 runner 交叉编 x86_64 不可行；末代 Intel runner macos-13 已于
           # 2025-12 退役，钉定 macos-15（arm64）+ macos-15-intel（x86_64）
-          - { os: macos-15, triple: aarch64-apple-darwin, artifact: macos-aarch64 }
+          - { os: macos-15, triple: aarch64-apple-darwin, artifact: macos-aarch64, rustflags: '-C link-arg=-Wl,-ld_classic' }
           - { os: macos-15-intel, triple: x86_64-apple-darwin, artifact: macos-x86_64 }
           - { os: windows-latest, triple: x86_64-pc-windows-msvc, artifact: windows-x64 }
     steps:
@@ -239,6 +239,11 @@ jobs:
               ;;
           esac
       - name: 构建 server sidecar（per-target）
+        # macOS arm64 新版 ld 对 cc 编译的 tree-sitter scanner 目标文件报
+        # __compact_unwind 段对齐错误（v0.1.1 首跑实测）——经典链接器绕过；
+        # 其余腿不带（macos-intel/ubuntu/windows 本轮实测通过，不变更已绿面）
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags || '' }}
         run: cargo build --release --manifest-path server/Cargo.toml --target ${{ matrix.triple }}
       - name: 复制 sidecar 为 externalBin 命名（<名>-<target-triple>）
         shell: bash

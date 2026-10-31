@@ -121,6 +121,7 @@ fn percent_decode_bytes(comp: &str) -> Option<Vec<u8>> {
 /// （不重试，按原 404 报错）。仅 host [`resolve_at`] 体消费（wasm 无 fs）。
 #[cfg(not(target_family = "wasm"))]
 fn percent_decoded_path(p: &std::path::Path) -> Result<Option<PathBuf>, CoreError> {
+    #[cfg(unix)]
     use std::os::unix::ffi::OsStringExt;
     let mut out = PathBuf::with_capacity(p.as_os_str().len());
     let mut changed = false;
@@ -139,7 +140,15 @@ fn percent_decoded_path(p: &std::path::Path) -> Result<Option<PathBuf>, CoreErro
                         ));
                     }
                     changed = true;
+                    // unix：字节直转（OsStringExt::from_vec，非 UTF-8 名保真）；
+                    // windows：OsString 无字节构造面，解码字节按 RFC 3986 恒为
+                    // UTF-8 序列，lossy 收敛（穿越校验已在字节域先行完成）。
+                    #[cfg(unix)]
                     out.push(std::ffi::OsString::from_vec(decoded));
+                    #[cfg(not(unix))]
+                    out.push(std::ffi::OsString::from(
+                        String::from_utf8_lossy(&decoded).into_owned(),
+                    ));
                 } else {
                     out.push(os);
                 }
