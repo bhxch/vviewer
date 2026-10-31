@@ -195,32 +195,34 @@ test('THEME-01: 三态循环（跟随系统→亮→暗→跟随系统）、整�
   const bgLight = await uiBg(page);
   expect(bgLight).toBe('#ffffff'); // headless 默认 prefers light
 
-  // ① system → 亮：按钮文案、data-theme-mode、整壳配色、localStorage 单键同步
-  // （菜单在条目点击前保持开——初始态轮已 openMenu，此处勿重复点触发钮，会把
-  // 已开弹层 toggle 收起）
+  // 主题条目 onclick 即收菜单（TabBarActions：oncycletheme 后 menu=null，与连接
+  // 服务器「保持开」不同；TopBar 时代按钮常驻，点击后可直接读文案）——三态循环
+  // 统一节拍「重开菜单读文案 → 点击切换 → 断言状态」，段落间菜单恒收，文案
+  // 断言一条不少，且不依赖上一段遗留的开合态
+  // ① system → 亮：data-theme-mode、整壳配色、localStorage 单键同步
   await themeBtn.click();
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'light');
-  await expect(themeBtn).toHaveText('主题：亮');
   await expect.poll(() => savedThemeMode(page)).toBe('light');
   expect(await uiBg(page)).toBe(bgLight); // 亮态壳层配色不变（light 亮色板）
 
   // ② 亮 → 暗：整壳 UI 配色可见变化 + 单键更新
   await openMenu();
+  await expect(themeBtn).toHaveText('主题：亮');
   await themeBtn.click();
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'dark');
-  await expect(themeBtn).toHaveText('主题：暗');
   await expect.poll(() => savedThemeMode(page)).toBe('dark');
   await expect.poll(uiBg.bind(null, page)).toBe('#0d1117'); // 与亮态实际不同色
 
   // ③ 暗 → 跟随系统：循环闭环，配色还原亮色板（headless system 解析为亮）
   await openMenu();
+  await expect(themeBtn).toHaveText('主题：暗');
   await themeBtn.click();
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'system');
-  await expect(themeBtn).toHaveText('主题：跟随系统');
   await expect.poll(uiBg.bind(null, page)).toBe(bgLight);
 
   // ④ 暗态 F5 刷新：主题态与刷新前一致（持久于 localStorage 并恢复）
   await openMenu();
+  await expect(themeBtn).toHaveText('主题：跟随系统');
   await themeBtn.click(); // system → light
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'light');
   await openMenu();
