@@ -34,9 +34,10 @@
     onleave?: () => void;
   } = $props();
 
-  /** 行内来源徽标（T6）：逻辑在 tabBadge.ts 可单测；此处注入当前组来源集。 */
+  /** 行内来源徽标（T6；多根 Task 1 同名跨源消歧）：逻辑在 tabBadge.ts 可单测；
+   * 此处注入当前组来源集与本组 tabs（消歧冲突名册）。 */
   function badgeOfFor(tab: Tab): string | null {
-    return badgeOf(sources, tab);
+    return badgeOf(sources, tabs, tab);
   }
 
   /**
