@@ -337,14 +337,18 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .vv-shell.zen .vv-drawer-toggle, .vv-shell.zen .vv-right-toggle { display: none; }
 /* 树 / tabs */
 .vv-topbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--ui-border); flex-wrap: wrap; }
-/* 连接服务器内联表单（TopBar 展开行）：地址/token/连接/错误。
+/* 连接服务器内联表单（TopBar 展开行 + 空态引导区共用，ServerConnectForm）：
+ * 地址/token/连接/错误。
  * BUG-62：flex-wrap 允许窄视口（375px）下固定宽输入（220/150px）与提交钮折行——
  * 此前内容宽 465px 溢出，isMobile（Chrome Android）下 layout viewport 被撑宽到
  * 465px、整页约缩 20% 渲染且无法横滚，提交按钮完全屏外不可点。宽视口下不触发
- * 折行，行为不变。 */
+ * 折行，行为不变。
+ * max-width:100%（终审 Minor）：表单消费点含侧栏空态引导区（.vv-side-empty 内，
+ * 宽度随拖拽侧栏宽走）——极窄侧栏下固定宽输入溢出容器，clamp 回容器宽（宽容器
+ * 不约束，TopBar 行为零漂移）。 */
 .vv-server-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.vv-server-form input:first-child { width: 220px; }
-.vv-server-form input[type='password'] { width: 150px; }
+.vv-server-form input:first-child { width: 220px; max-width: 100%; }
+.vv-server-form input[type='password'] { width: 150px; max-width: 100%; }
 /* §2.3 死回退清理：--ui-danger 在亮暗三块恒被定义（app.css 亮/暗/system），var 回退
    永不生效；#d33 白上 4.57:1 勉强过、暗色上 4.14:1 不达 AA。裸写 var(--ui-danger)
    即可（本文件 7 行 8 处；组件侧 7 处由各组清理） */

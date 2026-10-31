@@ -254,8 +254,9 @@ test('SHELL-06：3 tab 切换内容跟随、逐个关闭递减、全部关闭后
   const dirTab = page.locator('.vv-tab').filter({
     has: page.locator('.vv-tab-name', { hasText: /^tshell$/ })
   });
-  // 文件 tab 同经 .vv-tab-name 锚定排除：多源 workspace（T4）下每个 tab 织入来源
-  // 徽标（.vv-tab-src 文本=来源名），根级 hasNotText 'tshell' 会把文件 tab 一并排除
+  // 文件 tab 同经 .vv-tab-name 锚定排除：多源 workspace 下仅同名冲突 tab 显来源
+  // 徽标（.vv-tab-src 文本=来源名；badgeOf 消歧新语义——无冲突不显），根级
+  // hasNotText 'tshell' 会把文件 tab 一并排除
   const fileTabs = page.locator('.vv-tab').filter({
     has: page.locator('.vv-tab-name', { hasNotText: /^tshell/ })
   });

@@ -56,7 +56,8 @@
   let settings = $state<Settings>(loadSettings());
 
   // 连接服务器：内联展开开关（表单本体已抽 ServerConnectForm 共享组件——
-  // 侧栏多根 spec Task 3，与空态引导区共用；本组件只持开合，预填/连接/错误归组件）
+  // 侧栏多根 spec Task 3，与空态引导区共用；本组件只持开合，预填/连接/错误归组件。
+  // 消费形态为常驻挂载+hidden 控制（终审 Minor）：收起不卸载，未提交输入再展开保留）
   let serverOpen = $state(false);
 
   /** OS 亮暗响应式镜像（BUG-49）：matchMedia 非响应式信号——OS 切换时经
@@ -311,11 +312,15 @@
   <form onsubmit={submit}>
     <input placeholder="粘贴文件 URL" bind:value={urlValue} aria-label="文件 URL" />
   </form>
-  <button onclick={toggleServerPanel}>连接服务器</button>
+  <button onclick={toggleServerPanel} aria-expanded={serverOpen}>连接服务器</button>
   <button onclick={manualRefresh} aria-label="刷新当前文件" title="手动刷新当前文件与目录树（快捷键 Ctrl+, 打开设置可关自动刷新）">↻</button>
-  {#if serverOpen}
+  <!-- 常驻挂载+hidden 控制（终审 Minor，替代 {#if}）：收起仅隐藏不卸载——未提交
+       输入/错误态在收起再展开后保留；组件 onMount 预填语义不变（启动即预填、
+       展开时可见，行为等价）。hidden 用原生属性（app.css 无 .hidden 类，class
+       指令无样式支撑；本 div 无 display 规则不覆盖 UA [hidden]） -->
+  <div hidden={!serverOpen}>
     <ServerConnectForm onconnected={() => (serverOpen = false)} />
-  {/if}
+  </div>
   <button onclick={cycleTheme}>
     主题：{settings.themeMode === 'system' ? '跟随系统' : settings.themeMode === 'light' ? '亮' : '暗'}
   </button>

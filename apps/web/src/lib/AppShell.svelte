@@ -145,6 +145,13 @@
   let emptyServerOpen = $state(false);
   let emptyUrl = $state('');
 
+  // 陈旧态复位（终审 Minor）：来源 0→>0 跳变（连接/打开文件夹/拖入成功）时空态
+  // 分支整体卸载，emptyServerOpen 残留 true——回到 0 态会「自动展开表单」，此处
+  // 归零；只在真展开时写 state（其余跳变零触发）
+  $effect(() => {
+    if (sources.length > 0 && emptyServerOpen) emptyServerOpen = false;
+  });
+
   function submitEmptyUrl(e: SubmitEvent): void {
     e.preventDefault();
     const url = emptyUrl.trim();
@@ -1052,7 +1059,7 @@
         <div class="vv-side-empty">
           <p class="vv-side-empty-title">未打开文件夹</p>
           <button type="button" onclick={() => void openDirectoryViaPicker()}>打开文件夹</button>
-          <button type="button" onclick={() => (emptyServerOpen = !emptyServerOpen)}>连接服务器</button>
+          <button type="button" aria-expanded={emptyServerOpen} onclick={() => (emptyServerOpen = !emptyServerOpen)}>连接服务器</button>
           {#if emptyServerOpen}<ServerConnectForm onconnected={() => (emptyServerOpen = false)} />{/if}
           <form class="vv-side-empty-url" onsubmit={submitEmptyUrl}>
             <input placeholder="粘贴文件 URL" bind:value={emptyUrl} aria-label="文件 URL" />
@@ -1253,6 +1260,8 @@
   }
   .vv-side-empty-url input {
     width: 11rem;
+    /* 终审 Minor：极窄侧栏（拖拽下限）不溢出（.vv-server-form 输入同款处理） */
+    max-width: 100%;
   }
   .vv-side-empty-hint {
     margin: 0;
