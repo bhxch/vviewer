@@ -1,7 +1,7 @@
 // settingsCenter.test.ts — 统一设置中心骨架与既有节迁移（settings center spec §2）。
 // 根 vitest 无 svelte 插件，SettingsCenter/各节组件不可挂载——按既有「源码契约断言」
 // 先例（fonts.test.ts / appShellZenEsc.test.ts 同形态）锁定分组注册表形状、组序、
-// 五节组件 props 契约与 AppShell/TopBar 接线；运行时行为由 Task 5 e2e
+// 五节组件 props 契约与 AppShell/标签栏动作簇接线；运行时行为由 Task 5 e2e
 // b-settings-center.spec 收口。
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
@@ -326,30 +326,31 @@ describe('storageHealth 共享模块导出面（spec §2.1/§2.2 接口契约）
   });
 });
 
-describe('TopBar 精简（spec §2：⚙+亮暗快切保留，代码主题/计算策略迁出）', () => {
-  const src = readSrc('src/lib/TopBar.svelte');
+describe('TopBar 退役宿主迁移（顶栏退役 Task 3：原 TopBar 精简面接续）', () => {
+  const shell = readSrc('src/lib/AppShell.svelte');
+  const actions = readSrc('src/lib/TabBarActions.svelte');
 
-  it('SettingsPanel 挂点退役：不再 import/挂载，Ctrl+, 监听移除（职责归 AppShell）', () => {
-    expect(src).not.toContain('SettingsPanel');
-    expect(src).not.toMatch(/settingsOpen/);
-    expect(src).not.toMatch(/e\.key === ','/);
+  it('TopBar.svelte 已删除（退役组件文件不存在，rg 零残留口径锁定）', () => {
+    expect(existsSync(resolve('apps/web/src/lib/TopBar.svelte'))).toBe(false);
   });
 
-  it('代码主题下拉与计算策略下拉迁出（aria-label 不再出现于 TopBar）', () => {
-    expect(src).not.toContain('计算策略');
-    expect(src).not.toContain('代码主题');
-    expect(src).not.toContain('themeOptions');
+  it('亮暗快切与注入订阅链保留并归壳层（cycleTheme + applyAppearance/applyFonts + fonts reaction）；onSettingsChanged 单订阅不双挂', () => {
+    expect(shell).toContain('function cycleTheme');
+    expect(shell).toContain('applyAppearanceFromSettings');
+    expect(shell).toContain('applyFontsFromSettings');
+    expect(shell).toContain('reactToFontsChange');
+    expect(shell.match(/onSettingsChanged\(/g)?.length).toBe(1);
   });
 
-  it('亮暗快切与注入订阅链保留（cycleTheme + applyAppearance/applyFonts + fonts reaction）', () => {
-    expect(src).toContain('function cycleTheme');
-    expect(src).toContain('applyAppearanceFromSettings');
-    expect(src).toContain('applyFontsFromSettings');
-    expect(src).toContain('reactToFontsChange');
+  it('代码主题下拉与计算策略下拉不回迁（aria-label 仅在设置中心各节出现）', () => {
+    expect(shell).not.toContain('计算策略');
+    expect(actions).not.toContain('计算策略');
+    expect(actions).not.toContain('代码主题');
+    expect(actions).not.toContain('themeOptions');
   });
 
-  it('⚙ 按钮改走 onsettings 回调（props 声明）', () => {
-    expect(src).toMatch(/onsettings\(\): void/);
-    expect(src).toMatch(/aria-label="设置"[\s\S]{0,80}onclick=\{onsettings\}|onclick=\{onsettings\}[\s\S]{0,80}aria-label="设置"/);
+  it('⚙ 按钮走 onsettings 回调（宿主 TabBarActions，props 声明；菜单项 onclick 体内经 menu=null 后回调）', () => {
+    expect(actions).toMatch(/onsettings\(\): void/);
+    expect(actions).toMatch(/aria-label="设置"[\s\S]{0,200}onsettings\(\)/);
   });
 });

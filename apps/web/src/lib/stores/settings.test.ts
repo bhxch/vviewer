@@ -284,14 +284,13 @@ describe('layout 设置节白名单/clamp（spec 2026-10-19 布局自由化 §2�
     expect(loadSettings().layout).toEqual(DEFAULT_LAYOUT);
   });
 
-  it('持久化往返：saveSettings 写入 layout 后 loadSettings 读回一致', () => {
+  it('持久化往返：saveSettings 写入 layout 后 loadSettings 读回一致（顶栏显隐字段已随顶栏退役删除，Task 3）', () => {
     saveSettings(aSettings({
       layout: {
         leftCollapsed: true,
         rightCollapsed: false,
         leftWidth: 400,
         rightWidth: 200,
-        topBarVisible: false,
         tabBarVisible: true,
         zen: false
       }
@@ -301,7 +300,6 @@ describe('layout 设置节白名单/clamp（spec 2026-10-19 布局自由化 §2�
       rightCollapsed: false,
       leftWidth: 400,
       rightWidth: 200,
-      topBarVisible: false,
       tabBarVisible: true,
       zen: false
     });

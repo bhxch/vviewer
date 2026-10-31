@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import TopBar from './TopBar.svelte';
   import TabBar from './TabBar.svelte';
   import ViewerPane from './ViewerPane.svelte';
   import FileTree from './FileTree.svelte';
@@ -61,7 +60,16 @@
     type LayoutSide,
     type LayoutSettings
   } from './layout';
-  import { codeLineHeight, effectiveMode, resolveMermaidTheme } from './theme';
+  import {
+    applyAppearanceFromSettings,
+    applyFontsFromSettings,
+    codeLineHeight,
+    effectiveMode,
+    onSystemModeChange,
+    resolveMermaidTheme
+  } from './theme';
+  // 外观/字体注入反应（原 TopBar onMount 订阅链迁入，顶栏退役 Task 3）
+  import { reactToFontsChange } from './fontsReaction';
   import { loadEnabledFontFaces } from './stores/fontsStore';
   import { listDirectMounts, displayLabelForStore } from './mountsSync';
   // FE-2 纯模块抽出（root vitest 可直测，各带 *.test.ts 锁状态转移）：zen 守卫
@@ -103,9 +111,9 @@
   let quickOpenOpen = $state(false);
   /** tab 管理覆盖层面板开关（T6）：Alt+W / TabBar「管理」切换，Esc/外点面板内关闭 */
   let wsPanelOpen = $state(false);
-  /** 统一设置中心开关（settings center spec §2）：TopBar ⚙（onsettings 回调）与
-   * Ctrl+, 双入口切换，Esc 面板内关闭（SettingsPanel 弹层退役，挂点归 AppShell
-   * ——与其余 overlay 面板同层，TopBar 隐藏态 Ctrl+, 可达不变式保持）。
+  /** 统一设置中心开关（settings center spec §2）：标签栏动作簇 ⚙（onsettings
+   * 回调）与 Ctrl+, 双入口切换，Esc 面板内关闭（SettingsPanel 弹层退役，挂点归
+   * AppShell——与其余 overlay 面板同层，标签栏隐藏态 Ctrl+, 可达不变式保持）。
    * settingsCenterEl 为组件实例引用：关闭统一走组件导出的 requestClose()——
    * 脏态由组件内弹确认裁决（spec §3），Ctrl+,/⚙ 关闭路径不直翻开关绕过确认。 */
   let settingsCenterOpen = $state(false);
@@ -120,8 +128,8 @@
   }
 
   /**
-   * 目录管理页开关（目录挂载 spec §5 阶段四）：TopBar 📁 与 Ctrl+Alt+M 双入口，
-   * SettingsCenter 同形态（.vv-mounts-manager 已入册 OVERLAY_SELECTOR——zen Esc
+   * 目录管理页开关（目录挂载 spec §5 阶段四）：标签栏动作簇「目录」与 Ctrl+Alt+M
+   * 双入口，SettingsCenter 同形态（.vv-mounts-manager 已入册 OVERLAY_SELECTOR——zen Esc
    * 优先级「面板优先只关面板」判定依赖；移动端返回键承接同通道）。挂载态由组件
    * 导出的 requestClose() 统一关闭（表单在场先关表单，组件内裁决）。
    */
@@ -138,13 +146,12 @@
 
   /**
    * 主题循环切换（顶栏退役 Task 2 自 TopBar 迁入：全局动作簇 TabBarActions 的
-   * oncycletheme 宿主实现；TopBar 同名函数保留不动——双入口过渡态，T4 退役时随删）。
-   * 逻辑同源：order 三态循环 → 本组件 settings 响应式副本上变更 → saveSettings 落盘
-   * （副本经 onSettingsChanged 订阅与持久层恒同步，TopBar 原形态等价）→ html
-   * data-theme-mode 打标（设置中心「亮暗模式」路径同款，订阅内亦会同步打标）。
-   * 'system' 模式的暗色由 app.css @media prefers-color-scheme 处理，无需 JS；注入
-   * 不在此直调：saveSettings → onSettingsChanged 订阅 → effectiveMode 变化命中
-   * diff（spec 2026-10-12 §2.4）。
+   * oncycletheme 宿主实现；Task 3 随 TopBar 退役成为唯一入口）：order 三态循环 →
+   * 本组件 settings 响应式副本上变更 → saveSettings 落盘（副本经 onSettingsChanged
+   * 订阅与持久层恒同步）→ html data-theme-mode 打标（设置中心「亮暗模式」路径同款，
+   * 订阅内亦会同步打标）。'system' 模式的暗色由 app.css @media prefers-color-scheme
+   * 处理，无需 JS；注入不在此直调：saveSettings → onSettingsChanged 订阅 →
+   * effectiveMode 变化命中 diff（spec 2026-10-12 §2.4）。
    */
   function cycleTheme(): void {
     const order: Settings['themeMode'][] = ['system', 'light', 'dark'];
@@ -185,7 +192,7 @@
   const layout = $derived(settings.layout);
 
   /** 局部合并写回 layout 节：读最新持久值只改目标字段（同 SettingsPanel.persist
-   * 惯例——TopBar 等其他订阅方管理的字段不被本组件旧副本覆盖）。 */
+   * 惯例——设置中心等其他订阅方管理的字段不被本组件旧副本覆盖）。 */
   function updateLayout(patch: Partial<LayoutSettings>): void {
     const fresh = loadSettings();
     fresh.layout = { ...fresh.layout, ...patch };
@@ -250,36 +257,21 @@
   const vis = $derived(chromeVisible(settings.layout));
 
   /**
-   * 顶栏/标签栏「临时条」态（spec §2 隐藏唤出 / §3 zen 退出条共用机制，取实现
-   * 简者——临时条就是真实 TopBar/TabBar 本体的半透覆盖形态，不渲染第二份组件，
-   * 避免双实例快捷键/状态漂移）：隐藏后对应边缘悬停唤出，移开 1.5s 再隐；zen 下
-   * 顶栏临时条右键菜单即退出通道。定时器在退出 zen 与组件卸载时清理。
+   * 标签栏「临时条」态（spec §2 隐藏唤出 / §3 zen 退出条共用机制，取实现
+   * 简者——临时条就是真实 TabBar 本体的半透覆盖形态，不渲染第二份组件，
+   * 避免双实例快捷键/状态漂移）：隐藏后顶边悬停唤出，移开 1.5s 再隐；zen 下
+   * 临时条右键菜单即退出通道之一（通道全集：Esc/Ctrl+Alt+Z/移动端浮钮/返回键/
+   * 临时条右键菜单——顶边热区随 TopBar 退役删除，Task 3）。定时器在退出 zen
+   * 与组件卸载时清理。
    */
-  let topTemp = $state(false);
   let tabTemp = $state(false);
   // 状态机在 tempBar.ts 纯模块（FE-2 抽出，tempBar.test.ts 锁状态转移）：可见性
-  // 经 onChange 回调上行（$state 副本供 TopBar/TabBar 的 temp/hidden props 消费），
+  // 经 onChange 回调上行（$state 副本供 TabBar 的 temp/hidden props 消费），
   // 1.5s 收回/排定窗口内重唤重置计时/立即收回清定时器语义单点在模块内
-  const topTempBar = new TempBarVisibility((v) => (topTemp = v));
   const tabTempBar = new TempBarVisibility((v) => (tabTemp = v));
 
-  function summonTemp(bar: 'top' | 'tab'): void {
-    (bar === 'top' ? topTempBar : tabTempBar).summon();
-  }
-
-  /** 立即收回临时态并清定时器（L1：右键置可见分支同步调用——条已常显，残留
-   * temp 类会使半透/覆盖形态滞留，残留定时器会在常显条上误触发隐藏竞态）。 */
-  function dismissTemp(bar: 'top' | 'tab'): void {
-    (bar === 'top' ? topTempBar : tabTempBar).dismiss();
-  }
-
-  function scheduleHideTemp(bar: 'top' | 'tab'): void {
-    (bar === 'top' ? topTempBar : tabTempBar).scheduleHide();
-  }
-
   function clearTempTimers(): void {
-    dismissTemp('top');
-    dismissTemp('tab');
+    tabTempBar.dismiss();
   }
 
   /**
@@ -399,38 +391,33 @@
     zenGuard.arm();
   }
 
-  /** chrome 右键菜单（spec §2 隐藏入口 / §3 TopBar 布局菜单项）：bar 标识菜单
-   * 归属（顶栏/标签栏），条目按当前 layout 状态计算显示/隐藏与 zen 标签。 */
-  let chromeMenu = $state<{ x: number; y: number; bar: 'top' | 'tab' } | null>(null);
+  /** chrome 右键菜单（spec §2 隐藏入口 / §3 布局菜单项）：条目 =「隐藏/显示标签栏」
+   * + zen 进出，按当前 layout 状态即时计算。顶栏菜单归属标识（bar 字段）随 TopBar
+   * 退役删除——标签栏临时条（含 zen 态）右键同此菜单。 */
+  let chromeMenu = $state<{ x: number; y: number } | null>(null);
   let chromeMenuEl = $state<HTMLElement | null>(null);
 
   function onShellContextMenu(e: MouseEvent): void {
     const t = e.target as HTMLElement;
     // 输入元素保留原生菜单（粘贴/拼写检查）；tab 行放行给 TabBar 自有右键菜单
     if (t.closest('input, textarea, select') !== null) return;
-    const top = t.closest('.vv-topbar');
     const tabbar = t.closest('.vv-tabbar');
-    if (top === null && tabbar === null) return;
-    if (tabbar !== null && t.closest('.vv-tab') !== null) return;
+    if (tabbar === null) return;
+    if (t.closest('.vv-tab') !== null) return;
     e.preventDefault();
     // 视口收敛（菜单 min-width 10em / 两项 ~80px 高）
     chromeMenu = {
       x: Math.min(e.clientX, window.innerWidth - 170),
-      y: Math.min(e.clientY, window.innerHeight - 110),
-      bar: top !== null ? 'top' : 'tab'
+      y: Math.min(e.clientY, window.innerHeight - 110)
     };
   }
 
-  function menuToggleVisible(bar: 'top' | 'tab'): void {
-    if (bar === 'top') {
-      const show = !layout.topBarVisible;
-      updateLayout({ topBarVisible: show });
-      if (show) dismissTemp('top'); // L1：从临时条右键重显，temp 态与定时器同步清
-    } else {
-      const show = !layout.tabBarVisible;
-      updateLayout({ tabBarVisible: show });
-      if (show) dismissTemp('tab');
-    }
+  function menuToggleVisible(): void {
+    const show = !layout.tabBarVisible;
+    updateLayout({ tabBarVisible: show });
+    // L1：从临时条右键重显，temp 态与定时器同步清——条已常显，残留 temp 类会使
+    // 半透/覆盖形态滞留，残留定时器会在常显条上误触发隐藏竞态
+    if (show) tabTempBar.dismiss();
   }
 
   $effect(() => {
@@ -536,10 +523,16 @@
 
   onMount(() => {
     document.documentElement.dataset.themeMode = settings.themeMode;
-    // 设置变更（TopBar/设置中心经 saveSettings 写入）→ 刷新响应式副本 + html 打标：
+    // 首次注入（原 TopBar onMount 迁入，顶栏退役 Task 3）：外观四元组 diff 签名
+    // 初值 null 必命中；字体 style#vv-font 首注入（返回值忽略——挂载期无活动渲染实例）
+    applyAppearanceFromSettings(settings);
+    applyFontsFromSettings(settings);
+    // 设置变更（设置中心/标签栏动作簇经 saveSettings 写入）→ 刷新响应式副本 + html 打标：
     // 排除规则变化经下方 {#key} 重建 FileTree（BUG-05）；themeMode 变化经设置中心
     // 「亮暗模式」控件应用时，data-theme-mode 也须同步（此前唯一运行时写入点在
-    // TopBar cycleTheme——设置中心路径漏打标，壳层配色不切换，Task 5 e2e SC-03 补出）
+    // TopBar cycleTheme——设置中心路径漏打标，壳层配色不切换，Task 5 e2e SC-03 补出）。
+    // 外观/字体注入同挂本回调（原 TopBar 订阅链并入单订阅，顶栏退役 Task 3——
+    // 双订阅会重复 diff 注入，spec 2026-10-12 §2.4 注入触发通道单点化）
     const offSettings = onSettingsChanged((s) => {
       // mermaid 主题即时生效（spec 2026-10-23 §9.2，Task 7）：仅 diagrams.mermaidTheme
       // 实际变化才派发 vv:diagram-settings-applied（无关设置保存零重画）；detail 恒
@@ -549,6 +542,11 @@
       const prevMermaidTheme = settings.diagrams.mermaidTheme; // 旧值捕获须先于副本赋值
       settings = s;
       document.documentElement.dataset.themeMode = s.themeMode;
+      // 注入通道（spec 2026-10-12 §2.4）：diff 四元组、槽相关变化才注入
+      applyAppearanceFromSettings(s);
+      // fonts 变更 → style#vv-font 重注入 + 激活 tab rev++ 重渲染（行高联动，
+      // 字体系统 spec §2.3/§3，Task 2；无关字段变化零触发）
+      reactToFontsChange(s, () => tabStore.touchActiveTab());
       if (s.diagrams.mermaidTheme !== prevMermaidTheme) {
         const t = s.diagrams.mermaidTheme;
         document.dispatchEvent(
@@ -557,6 +555,14 @@
           })
         );
       }
+    });
+    // themeMode=system：OS 亮暗切换不经 saveSettings（BUG-49）——matchMedia 非响应式
+    // 信号，OS 切换时在 system 模式下补一发外观注入（UI 配色由 prefers-color-scheme
+    // 媒体查询自动跟随，JS 注入变量需要这步。高亮配色槽位读写已迁设置中心外观节，
+    // AppearanceSection 自带同款镜像）
+    const offSystem = onSystemModeChange(() => {
+      if (settings.themeMode !== 'system') return;
+      applyAppearanceFromSettings(settings);
     });
     // render-archive 包内树点击 → addTab（递归预览通道）
     const unbindArchive = bindArchiveOpenEvents();
@@ -580,6 +586,7 @@
     void restore();
     return () => {
       offSettings();
+      offSystem();
       unbindArchive();
       window.removeEventListener('popstate', onPopstate);
       clearTempTimers(); // 临时条 1.5s 定时器不跨卸载存活（spec §2 定时器清理）
@@ -992,47 +999,24 @@
 <!-- svelte-ignore a11y_no_static_element_interactions --><!-- contextmenu 为 chrome
      布局菜单入口（shell 级代理，按 target 归属分流），shell 容器无 AT 交互角色 -->
 <div class="vv-shell" class:drawer={drawers.leftOpen} class:rightopen={drawers.rightOpen} class:zen={layout.zen} oncontextmenu={onShellContextMenu}>
-  <!-- 顶栏/标签栏：hidden=zen 或显式隐藏（chromeVisible 覆盖语义）；temp=边缘悬停
+  <!-- 标签栏：hidden=zen 或显式隐藏（chromeVisible 覆盖语义）；temp=顶边悬停
        临时条（半透覆盖形态）。组件保持挂载——Ctrl+, 设置中心入口（AppShell 自有
-       状态）与 TopBar 的订阅注入链不因隐藏失效（spec §2 全件可隐但功能可达） -->
-  {#if !vis.topBar}
-    <!-- 边缘唤出热区（spec §2/§3，评审 M1）：shell flex 流内插槽锚定各自自然槽位
-         （本条在 TopBar 槽位前、tab 条在 TopBar/TabBar 之间）——单/双隐藏组合均
-         不错位，零测量。悬停唤出真实条本体（temp 形态），移开 1.5s 再隐。
-         zen 下顶栏热区即退出条入口（临时条右键菜单「退出专注模式」） -->
+       状态）与外观/字体订阅注入链（AppShell onMount）不因隐藏失效（spec §2 全件
+       可隐但功能可达；顶栏行随 TopBar 退役删除，Task 3） -->
+  {#if !vis.tabBar}
+    <!-- 边缘唤出热区（spec §2/§3，评审 M1）：shell flex 流内插槽锚定自然槽位——
+         悬停唤出真实条本体（temp 形态），移开 1.5s 再隐。zen 下临时条右键菜单
+         即退出通道之一。顶边热区随 TopBar 退役删除（Task 3），此为唯一热区 -->
     <!-- svelte-ignore a11y_no_static_element_interactions --><!-- 边缘悬停热区：纯
          指针唤出通道，无键盘/AT 等价物（zen 退出另有 Esc/快捷键/菜单通道）。
-         pointerleave 也是「移开」语义锚点（终审 I-1）：临时条 fixed top:0 压住可见
-         邻条时（TopBar 可见+TabBar 隐藏组合），指针从热区直入内容不经过条本体，
-         条自带 onleave 不触发——热区移开即排定 1.5s 收回，对所有隐藏组合成立 -->
-    <div
-      class="vv-edge"
-      data-edge="top"
-      onpointerenter={() => summonTemp('top')}
-      onpointerleave={() => scheduleHideTemp('top')}
-    ></div>
-  {/if}
-  <TopBar
-    temp={topTemp}
-    hidden={!vis.topBar && !topTemp}
-    onsettings={() => toggleSettingsCenter()}
-    onmounts={() => toggleMountsManager()}
-    zen={layout.zen}
-    onToggleZen={() => toggleZen()}
-    onenter={() => {
-      if (!vis.topBar) summonTemp('top'); // 正常可见态的划过不置临时态
-    }}
-    onleave={() => {
-      if (topTemp) scheduleHideTemp('top');
-    }}
-  />
-  {#if !vis.tabBar}
-    <!-- svelte-ignore a11y_no_static_element_interactions --><!-- pointerleave 同上（终审 I-1） -->
+         pointerleave 是「移开」语义锚点（终审 I-1）：临时条 fixed top:0 压住可见
+         邻条时，指针从热区直入内容不经过条本体，条自带 onleave 不触发——热区
+         移开即排定 1.5s 收回 -->
     <div
       class="vv-edge"
       data-edge="tab"
-      onpointerenter={() => summonTemp('tab')}
-      onpointerleave={() => scheduleHideTemp('tab')}
+      onpointerenter={() => tabTempBar.summon()}
+      onpointerleave={() => tabTempBar.scheduleHide()}
     ></div>
   {/if}
   <TabBar
@@ -1048,10 +1032,10 @@
     temp={tabTemp}
     hidden={!vis.tabBar && !tabTemp}
     onenter={() => {
-      if (!vis.tabBar) summonTemp('tab');
+      if (!vis.tabBar) tabTempBar.summon(); // 正常可见态的划过不置临时态
     }}
     onleave={() => {
-      if (tabTemp) scheduleHideTemp('tab');
+      if (tabTemp) tabTempBar.scheduleHide();
     }}
   />
   <div class="vv-body">
@@ -1080,7 +1064,7 @@
           <FileTree {sources} excludedPatterns={settings.excludedPatterns} onopen={onTreeOpen} onremove={removeSource} />
         {/key}
       {:else}
-        <!-- 0 目录空态引导区（spec §2.3）：三入口动作与顶栏同源（openFlow façade
+        <!-- 0 目录空态引导区（spec §2.3）：三入口动作与标签栏动作簇同源（openFlow façade
              现有函数），不新建打开通道；按钮不加禁用态（打开文件夹 fallback 恒可用） -->
         <div class="vv-side-empty">
           <p class="vv-side-empty-title">未打开文件夹</p>
@@ -1185,18 +1169,17 @@
     <MountsManager bind:this={mountsEl} onclose={() => (mountsOpen = false)} />
   {/if}
   {#if chromeMenu !== null}
-    {@const bar = chromeMenu.bar}
-    <!-- chrome 右键菜单（spec §2「隐藏」入口 / §3 TopBar 布局菜单项；隐藏态临时
+    <!-- chrome 右键菜单（spec §2「隐藏」入口 / §3 布局菜单项；隐藏态临时
          条上右键同菜单反向勾选显示）。条目随 layout 状态即时计算 -->
     <div class="vv-chromemenu" role="menu" bind:this={chromeMenuEl} style="left:{chromeMenu.x}px; top:{chromeMenu.y}px">
       <button
         type="button"
         role="menuitem"
         onclick={() => {
-          menuToggleVisible(bar);
+          menuToggleVisible();
           chromeMenu = null;
         }}>
-        {bar === 'top' ? (layout.topBarVisible ? '隐藏顶栏' : '显示顶栏') : (layout.tabBarVisible ? '隐藏标签栏' : '显示标签栏')}
+        {layout.tabBarVisible ? '隐藏标签栏' : '显示标签栏'}
       </button>
       <button
         type="button"

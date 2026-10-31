@@ -530,7 +530,7 @@ import SearchPanel from './SearchPanel.svelte';
 <div class="vv-viewer-pane">
   <div class="vv-viewer-scroll" onscroll={onScroll}>
     {#if !tab}
-      <div class="vv-empty">拖入文件/文件夹，或使用顶栏打开</div>
+      <div class="vv-empty">拖入文件/文件夹，或用标签栏 ＋ 打开</div>
     {:else if tab.unrestorable && tab.source.path === ''}
       <div class="vv-empty">此来源无法自动恢复，请重新打开文件夹</div>
     {:else if tab.source.path === ''}

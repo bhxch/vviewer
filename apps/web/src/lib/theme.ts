@@ -441,7 +441,8 @@ let lastFontSig: string | null = null;
 /**
  * fonts 签名订阅触发入口（appearance 的 applyAppearanceFromSettings 同层模式）：
  * 与上次签名 diff——仅 fonts 四元组相关变化才重注入 style#vv-font；无关字段变化
- * 零注入。返回是否发生了注入（true = fonts 变化）——TopBar 订阅处据 true 级联
+ * 零注入。返回是否发生了注入（true = fonts 变化）——壳层订阅处（原 TopBar，
+ * 顶栏退役 Task 3 起归 AppShell）据 true 级联
  * 激活 tab 重渲染（openFlow touchActiveTab，Task 2），首次注入返回值被忽略
  * （挂载期无活动渲染实例）。同步注入无 await，返回值即事实。
  */

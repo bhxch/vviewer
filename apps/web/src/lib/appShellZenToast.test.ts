@@ -1,7 +1,7 @@
 // appShellZenToast.test.ts — zen 专注模式可见入口与进入提示（Toast）源码契约。
 // 背景（2026-10-23 用户反馈）：桌面进 zen 只有快捷键 Ctrl+Alt+Z 与右键菜单，退出
-// 通道（Esc）不可发现——补 TopBar 可见按钮（tooltip 写明进出双方式）+ 进入时
-// Toast 告知退出通道。根 vitest 无 svelte 插件，AppShell/TopBar 不可挂载——按既有
+// 通道（Esc）不可发现——补可见按钮（tooltip 写明进出双方式）+ 进入时 Toast 告知
+// 退出通道。根 vitest 无 svelte 插件，AppShell/TabBarActions 不可挂载——按既有
 // 「源码契约断言」先例（appShellZenMobile.test.ts/appShellZenEsc.test.ts）锁定接线；
 // 进出场行为由 e2e b-layout-zen 收口。
 import { describe, expect, it } from 'vitest';
@@ -53,12 +53,12 @@ describe('zen 进入提示 Toast（退出通道发现性）', () => {
   });
 });
 
-describe('TopBar 专注模式可见入口（进出双提示）', () => {
-  const src = readSrc('src/lib/TopBar.svelte');
+describe('标签栏动作簇专注模式可见入口（进出双提示；TopBar 退役 Task 3 后宿主为 TabBarActions）', () => {
+  const src = readSrc('src/lib/TabBarActions.svelte');
   const shell = readSrc('src/lib/AppShell.svelte');
 
   it('props 接线：zen 态与切换回调归 AppShell（toggleZen 所在地），本组件只发回调', () => {
-    expect(src).toMatch(/zen = false,\s*onToggleZen/);
+    expect(src).toMatch(/zen: boolean;\s*onToggleZen\(\): void;/);
     expect(shell).toContain('zen={layout.zen}');
     expect(shell).toContain('onToggleZen={() => toggleZen()}');
   });

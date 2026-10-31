@@ -297,25 +297,25 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
    命中——translate 保留故 fixed 后代（.vv-tabctx 等）包含块劫持面被同点无害化：
    off 态内部不可见不可交互），临时条 fixed 半透覆盖（同真实条本体，无双实例），
    边缘唤出热区（shell flex 流内插槽，锚定各自自然槽位——评审 M1：fixed 硬编码
-   top 几何在单隐藏组合下错位），chrome 右键菜单。z-index 惯例：条 50 < 菜单 90 */
-.vv-topbar.vv-chrome-off, .vv-tabbar.vv-chrome-off {
+   top 几何在单隐藏组合下错位），chrome 右键菜单。z-index 惯例：条 50 < 菜单 90。
+   顶栏选择器随 TopBar 退役删除（Task 3），隐藏/临时条语义单落在 .vv-tabbar */
+.vv-tabbar.vv-chrome-off {
   position: fixed; top: 0; left: 0; right: 0; z-index: 50;
   transform: translateY(-100%);
   visibility: hidden;
 }
-.vv-topbar.vv-chrome-temp, .vv-tabbar.vv-chrome-temp {
+.vv-tabbar.vv-chrome-temp {
   position: fixed; top: 0; left: 0; right: 0; z-index: 50;
   /* 阴影归档（§5.3/§10-G1）：0 2px 12px/18% 并入 --vv-shadow-2（变更：4px 级
      模糊差，与 toast/菜单同档） */
   transform: none; opacity: .88; box-shadow: var(--vv-shadow-2);
 }
-/* 台账带入（布局 zen Task 5）：新建工作区模态由切换器链路挂载（顶栏退役 Task 1
-   起 WorkspaceSwitcher 自持挂点——原 TopBar.svelte 末尾 {#if} 兄弟节点随抽取变为
-   header.vv-topbar 内后代）。chrome-off 的 visibility:hidden 继承域由此显式
-   visible 压过（CSS 标准逃生门：子级显式声明压过父级继承）——抽取前对现状零
-   行为变化（纯防御），抽取后为实拦；e2e b-layout-zen LZ-04 以「TopBar 隐藏态
-   热区唤出打开的新建工作区模态可见」断言钉住该不变式。fixed 包含块面（量化）：
-   chrome-off 的 translateY(-100%) 劫持 fixed 后代包含块后，模态（.vv-wscreate-panel
+/* 台账带入（布局 zen Task 5）：新建工作区模态由切换器链路挂载（WorkspaceSwitcher
+   自持挂点，顶栏退役 Task 1 抽取、Task 3 起宿主为 TabBar 左端动作簇内——
+   chrome-off 的 visibility:hidden 继承域覆盖）。显式 visible 压过父级继承
+   （CSS 标准逃生门：子级显式声明压过父级继承）——TabBar 隐藏态热区唤出的临时条
+   上打开新建工作区模态仍可见。fixed 包含块面（量化）：chrome-off 的
+   translateY(-100%) 劫持 fixed 后代包含块后，模态（.vv-wscreate-panel
    top:44px，原按条高硬编码）净落点 = −条高 + 44px——两量同源天然近抵消，相对
    视口顶偏移 ≈ |条高−44|px：桌面条高 ~43px → ~+1px，窄屏换行条高 ~50px →
    ~−6px（顶缘略截），模态不出视口；该近抵消正是不做 portal 化亦可接受的依据
@@ -324,10 +324,9 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
    transform:none 不劫持。设置中心 Task 1 起改由 AppShell 挂载
    （.vv-settings-center，与 shell 平级不在 chrome-off 继承域），无需入册 */
 .vv-wscreate { visibility: visible; }
-/* 唤出热区：shell（flex column）流内插槽——top 隐藏时占 TopBar 槽位（视口顶），
-   tab 隐藏时占 TabBar 槽位（紧贴其上邻可见条底部），单/双隐藏组合均不错位 */
+/* 唤出热区：shell（flex column）流内插槽——tab 隐藏时占 TabBar 槽位（视口顶，
+   其上邻条已随 TopBar 退役不存在，Task 3 后为唯一热区） */
 .vv-edge { flex: none; }
-.vv-edge[data-edge='top'] { height: 10px; }
 .vv-edge[data-edge='tab'] { height: 8px; }
 .vv-chromemenu { position: fixed; z-index: 90; min-width: 10em; padding: 4px; display: flex;
   flex-direction: column; background: var(--ui-tab-active-bg); border: 1px solid var(--ui-border);
@@ -342,8 +341,7 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .vv-shell.zen .vv-colhandle, .vv-shell.zen .vv-collapse-btn,
 .vv-shell.zen .vv-drawer-toggle, .vv-shell.zen .vv-right-toggle { display: none; }
 /* 树 / tabs */
-.vv-topbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--ui-border); flex-wrap: wrap; }
-/* 连接服务器内联表单（TopBar 展开行 + 空态引导区共用，ServerConnectForm）：
+/* 连接服务器内联表单（标签栏动作簇 ⋯ 菜单展开行 + 空态引导区共用，ServerConnectForm）：
  * 地址/token/连接/错误。
  * BUG-62：flex-wrap 允许窄视口（375px）下固定宽输入（220/150px）与提交钮折行——
  * 此前内容宽 465px 溢出，isMobile（Chrome Android）下 layout viewport 被撑宽到
@@ -351,7 +349,7 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
  * 折行，行为不变。
  * max-width:100%（终审 Minor）：表单消费点含侧栏空态引导区（.vv-side-empty 内，
  * 宽度随拖拽侧栏宽走）——极窄侧栏下固定宽输入溢出容器，clamp 回容器宽（宽容器
- * 不约束，TopBar 行为零漂移）。 */
+ * 不约束，展开行零漂移）。 */
 .vv-server-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .vv-server-form input:first-child { width: 220px; max-width: 100%; }
 .vv-server-form input[type='password'] { width: 150px; max-width: 100%; }
@@ -450,7 +448,6 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 @media (max-width: 600px) {
   .vv-statusbar { padding-left: 40px; padding-right: 40px; }
 }
-.vv-brand { font-weight: 700; margin-right: 8px; }
 /* 顶栏退役 Task 2：.vv-tabbar 改嵌套滚动结构——overflow-x:auto 收进内层
    .vv-tabbar-tabs（左端动作簇与「管理」钮不随滚动挤压/位移），本层 overflow:
    visible 供簇内浮层（.vv-ws-pop 下拉 / .vv-tbact-pop 菜单）逃逸裁剪 */
@@ -460,9 +457,10 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 /* 簇内图标钮基类（TabBarActions ＋/↻/⋯）：borderless 复用全局 button 基座
    （背景/字色/字号/内边距），去边框圆角贴条观感 */
 .vv-tbact { background: none; border: 0; border-radius: 0; }
-/* 簇内工作区触发钮收窄（TopBar 侧仍 22vw——双入口过渡态零漂移，T4 退役归一）：
-   簇四件（切换器/＋/↻/⋯）同行共存，375px 档实测算 16vw≈60px 时簇宽 ~174px
-   （≈46vw），tabs 滚动区余 ~54vw 不被挤爆，故取 16vw */
+/* 簇内工作区触发钮收窄（顶栏退役 Task 3 后为唯一消费形态；基座 .vv-ws-trigger
+   的 22vw 上限仅剩历史语义，本覆盖为生效值）：簇四件（切换器/＋/↻/⋯）同行共存，
+   375px 档实测算 16vw≈60px 时簇宽 ~174px（≈46vw），tabs 滚动区余 ~54vw 不被挤爆，
+   故取 16vw */
 .vv-tabbar-actions .vv-ws-trigger { max-width: 16vw; }
 /* 簇浮层菜单（＋ 打开 / ⋯ 更多）：chrome 菜单观感（.vv-chromemenu/.vv-tabctx 同
    token），fixed + 视口收敛内联坐标（开合时从触发钮 rect 一次计算）；z-index 90

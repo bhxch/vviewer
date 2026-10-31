@@ -5,14 +5,14 @@
  * 渲染语义（折叠竖条/拖拽把手/zen 覆盖）在 AppShell.svelte 消费。
  */
 
-/** 布局设置节（spec §2）。宽度为 px；折叠态栏宽归零残留 28px 竖条；
+/** 布局设置节（spec §2；顶栏退役 Task 3 删顶栏显隐字段——顶栏整行随 TopBar
+ * 组件退役，标签栏显隐仍归此节）。宽度为 px；折叠态栏宽归零残留 28px 竖条；
  * zen 与其余字段正交（只做视觉覆盖，不改底层字段，见 chromeVisible）。 */
 export interface LayoutSettings {
   leftCollapsed: boolean;
   rightCollapsed: boolean;
   leftWidth: number;
   rightWidth: number;
-  topBarVisible: boolean;
   tabBarVisible: boolean;
   zen: boolean;
 }
@@ -22,7 +22,6 @@ export const DEFAULT_LAYOUT: LayoutSettings = {
   rightCollapsed: false,
   leftWidth: 260,
   rightWidth: 230,
-  topBarVisible: true,
   tabBarVisible: true,
   zen: false
 };
@@ -57,7 +56,6 @@ export function sanitizeLayout(v: unknown): LayoutSettings {
     rightCollapsed: boolOr(o.rightCollapsed, DEFAULT_LAYOUT.rightCollapsed),
     leftWidth: clampWidth('left', typeof o.leftWidth === 'number' ? o.leftWidth : NaN),
     rightWidth: clampWidth('right', typeof o.rightWidth === 'number' ? o.rightWidth : NaN),
-    topBarVisible: boolOr(o.topBarVisible, DEFAULT_LAYOUT.topBarVisible),
     tabBarVisible: boolOr(o.tabBarVisible, DEFAULT_LAYOUT.tabBarVisible),
     zen: boolOr(o.zen, DEFAULT_LAYOUT.zen)
   };
@@ -80,21 +78,19 @@ export function exitZen(l: LayoutSettings): LayoutSettings {
 }
 
 export interface ChromeVisibility {
-  topBar: boolean;
   tabBar: boolean;
   left: boolean;
   right: boolean;
 }
 
 /**
- * chrome 有效可见性（AppShell 渲染消费）：zen 做全件视觉覆盖（隐 TopBar/TabBar/
+ * chrome 有效可见性（AppShell 渲染消费）：zen 做全件视觉覆盖（隐 TabBar/
  * 双栏，仅留内容区），非 zen 按显式字段（可见性 × 折叠）生效。移动端抽屉断点
  * 的开关不受此影响（AppShell 渲染层断点分流）。
  */
 export function chromeVisible(l: LayoutSettings): ChromeVisibility {
-  if (l.zen) return { topBar: false, tabBar: false, left: false, right: false };
+  if (l.zen) return { tabBar: false, left: false, right: false };
   return {
-    topBar: l.topBarVisible,
     tabBar: l.tabBarVisible,
     left: !l.leftCollapsed,
     right: !l.rightCollapsed

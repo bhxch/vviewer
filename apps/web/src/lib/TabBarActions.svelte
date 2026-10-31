@@ -1,11 +1,11 @@
 <script lang="ts">
   // TabBarActions.svelte — TabBar 左端全局动作按钮簇（顶栏退役 spec Task 2）。
-  // 顶栏全局动作的新宿主：工作区切换（内容一，WorkspaceSwitcher 自持）＋ 打开菜单
-  // （内容二：打开文件/打开文件夹/粘贴 URL）＋ 手动刷新（内容三）＋ 更多菜单（内容
-  // 四：连接服务器/主题/目录管理/设置/专注）。themeMode/回调由 AppShell 持有——
-  // 订阅链所有权在壳层，本组件只消费（同 TopBar 的 onsettings/onmounts/zen 形态）。
-  // aria-label/title 逐字沿用 TopBar 原文（e2e 锚红线：设置/目录管理/刷新当前文件/
-  // zen 文案随态/文件 URL）；TopBar 同款按钮暂并存（双入口过渡态，T4 退役时随删）。
+  // 全局动作唯一宿主（Task 3 随 TopBar 组件退役）：工作区切换（内容一，
+  // WorkspaceSwitcher 自持）＋ 打开菜单（内容二：打开文件/打开文件夹/粘贴 URL）＋
+  // 手动刷新（内容三）＋ 更多菜单（内容四：连接服务器/主题/目录管理/设置/专注）。
+  // themeMode/回调由 AppShell 持有——订阅链所有权在壳层，本组件只消费。
+  // aria-label/title 逐字沿用退役前 TopBar 原文（e2e 锚红线：设置/目录管理/
+  // 刷新当前文件/zen 文案随态/文件 URL）。
   // 浮层菜单通道 = 外点 pointerdown + Esc + fixed 视口收敛（chrome 菜单模式，无
   // scroll-close）；fixed 坐标开合时从触发钮 rect 取一次，不追滚动/缩放。
   import ServerConnectForm from './ServerConnectForm.svelte';
@@ -29,7 +29,7 @@
     onToggleZen(): void;
   } = $props();
 
-  // ---------- 内容二：hidden file input（常驻挂载，菜单收合不丢）+ onPick 自 TopBar 迁 ----------
+  // ---------- 内容二：hidden file input（常驻挂载，菜单收合不丢）+ onPick 自 TopBar 迁（Task 2） ----------
 
   let fileInput = $state<HTMLInputElement | null>(null);
 

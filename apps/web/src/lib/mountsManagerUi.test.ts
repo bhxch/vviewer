@@ -2,7 +2,7 @@
 // 源码契约。根 vitest 无 svelte 插件，MountsManager.svelte 不可挂载——按既有
 // 「源码契约断言」先例（settingsCenter.test.ts / appShellZenEsc.test.ts /
 // directMountFlow.test.ts 同形态）锁定骨架、三组、警示双处、测试连接回显与
-// AppShell/TopBar 接线；纯逻辑在 mountsManager.test.ts 直测，行为由 e2e
+// AppShell/标签栏动作簇接线；纯逻辑在 mountsManager.test.ts 直测，行为由 e2e
 // b-mounts-manager 兜底（plan Task 3 深矩阵扩展）。
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
@@ -110,7 +110,7 @@ describe('MountsManager 骨架（全屏 overlay，SettingsCenter 同形态）', 
   });
 });
 
-describe('AppShell/TopBar 接线（Ctrl+Alt+M + 📁 双入口 + overlay 判定入册）', () => {
+describe('AppShell/标签栏动作簇接线（Ctrl+Alt+M + 📁 双入口 + overlay 判定入册）', () => {
   const shell = readSrc('src/lib/AppShell.svelte');
 
   it('OVERLAY_SELECTOR 含 .vv-mounts-manager（zen Esc 优先级判定依赖——设置中心 .vv-settings-center 先例）', () => {
@@ -132,11 +132,11 @@ describe('AppShell/TopBar 接线（Ctrl+Alt+M + 📁 双入口 + overlay 判定�
     );
   });
 
-  it('TopBar 目录管理按钮（aria-label=目录管理，title 提示 Ctrl+Alt+M），回调经 onmounts 注入', () => {
-    const topbar = readSrc('src/lib/TopBar.svelte');
-    expect(topbar).toMatch(/onmounts/);
-    expect(topbar).toMatch(/aria-label="目录管理"/);
-    expect(topbar).toMatch(/Ctrl\+Alt\+M/);
+  it('标签栏动作簇目录管理按钮（aria-label=目录管理，title 提示 Ctrl+Alt+M；TopBar 退役 Task 3 后宿主为 TabBarActions），回调经 onmounts 注入', () => {
+    const actions = readSrc('src/lib/TabBarActions.svelte');
+    expect(actions).toMatch(/onmounts/);
+    expect(actions).toMatch(/aria-label="目录管理"/);
+    expect(actions).toMatch(/Ctrl\+Alt\+M/);
     expect(shell).toMatch(/onmounts=\{\(\) => toggleMountsManager\(\)\}/);
   });
 });

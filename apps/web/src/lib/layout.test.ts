@@ -13,13 +13,12 @@ import {
 } from './layout';
 
 describe('layout 纯函数（spec 2026-10-19 布局自由化 §2）', () => {
-  it('DEFAULT_LAYOUT：双栏默认宽 260/230，全件可见不折叠非 zen', () => {
+  it('DEFAULT_LAYOUT：双栏默认宽 260/230，全件可见不折叠非 zen（顶栏显隐字段已随顶栏退役删除，Task 3）', () => {
     expect(DEFAULT_LAYOUT).toEqual({
       leftCollapsed: false,
       rightCollapsed: false,
       leftWidth: 260,
       rightWidth: 230,
-      topBarVisible: true,
       tabBarVisible: true,
       zen: false
     });
@@ -56,7 +55,6 @@ describe('layout 纯函数（spec 2026-10-19 布局自由化 §2）', () => {
       rightCollapsed: false,
       leftWidth: 400,
       rightWidth: 200,
-      topBarVisible: false,
       tabBarVisible: true,
       zen: true
     };
@@ -64,7 +62,7 @@ describe('layout 纯函数（spec 2026-10-19 布局自由化 §2）', () => {
   });
 
   it('sanitizeLayout：宽度越界 clamp、小数取整', () => {
-    const l = sanitizeLayout({ leftWidth: 9999, rightWidth: 1, leftCollapsed: false, rightCollapsed: false, topBarVisible: true, tabBarVisible: true, zen: false });
+    const l = sanitizeLayout({ leftWidth: 9999, rightWidth: 1, leftCollapsed: false, rightCollapsed: false, tabBarVisible: true, zen: false });
     expect(l.leftWidth).toBe(480);
     expect(l.rightWidth).toBe(160);
     expect(sanitizeLayout({ ...DEFAULT_LAYOUT, leftWidth: 260.6 }).leftWidth).toBe(261);
@@ -76,7 +74,6 @@ describe('layout 纯函数（spec 2026-10-19 布局自由化 §2）', () => {
       rightCollapsed: 'yes',
       leftWidth: 'wide',
       rightWidth: null,
-      topBarVisible: undefined,
       tabBarVisible: 0,
       zen: 'true'
     });
@@ -103,7 +100,6 @@ describe('zen 覆盖语义（spec 2026-10-19 布局自由化 §3）', () => {
     ...DEFAULT_LAYOUT,
     leftCollapsed: true,
     rightWidth: 400,
-    topBarVisible: false,
     tabBarVisible: false
   };
 
@@ -120,7 +116,6 @@ describe('zen 覆盖语义（spec 2026-10-19 布局自由化 §3）', () => {
 
   it('chromeVisible：zen 覆盖全部 chrome（即使底层字段要求显示）', () => {
     expect(chromeVisible({ ...DEFAULT_LAYOUT, zen: true })).toEqual({
-      topBar: false,
       tabBar: false,
       left: false,
       right: false
@@ -129,7 +124,6 @@ describe('zen 覆盖语义（spec 2026-10-19 布局自由化 §3）', () => {
 
   it('chromeVisible：非 zen 按显式字段（折叠/可见性）生效', () => {
     expect(chromeVisible(customized)).toEqual({
-      topBar: false,
       tabBar: false,
       left: false, // leftCollapsed
       right: true

@@ -1,6 +1,6 @@
 /**
  * tempBar.ts — chrome 临时条可见性状态机（spec 2026-10-19 §2 隐藏唤出 / §3 zen
- * 退出条，FE-2 自 AppShell.svelte 抽出的纯模块）：隐藏后的顶栏/标签栏边缘悬停
+ * 退出条，FE-2 自 AppShell.svelte 抽出的纯模块）：隐藏后的标签栏边缘悬停
  * 唤出（summon），移开 1.5s 再隐（scheduleHide，重进重置计时）；立即收回
  *（dismiss）同步清定时器——常显分支调用时残留 temp 态会使半透/覆盖形态滞留，
  * 残留定时器会在常显条上误触发隐藏竞态（L1）。

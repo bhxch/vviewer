@@ -273,7 +273,7 @@ describe('mergeDraftOnto（I-2：应用以 draft 相对出发快照的变更字�
 
 describe('mergeImported / replaceImported（Task 3 消费的导入语义，spec §4）', () => {
   it('合并：导入缺项保留现状；在场字段覆盖（规范化后）；未知字段忽略〔I1 勘误：字段=节内字段级，非节整体——uiSize 节内缺项保留 current 而非归节默认〕', () => {
-    const layout = { ...DEFAULT_LAYOUT, leftWidth: 400, topBarVisible: false };
+    const layout = { ...DEFAULT_LAYOUT, leftWidth: 400, tabBarVisible: false };
     const current = aSettings({
       excludedPatterns: ['.git', 'node_modules'],
       autoRefresh: true,

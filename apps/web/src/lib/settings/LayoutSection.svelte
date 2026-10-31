@@ -1,7 +1,8 @@
 <script lang="ts">
   // LayoutSection.svelte — 设置中心「布局」节（布局自由化 spec 2026-10-19 §2，
-  // settings center spec §2 分组定稿位：图表与搜索之间）。顶栏/标签栏显示、
-  // 左右栏折叠与宽度、zen 状态重置。与其他节同契约：写 draft.layout 后 touch()，
+  // settings center spec §2 分组定稿位：图表与搜索之间）。标签栏显示、
+  // 左右栏折叠与宽度、zen 状态重置（「显示顶栏」行随 TopBar 退役删除，Task 3）。
+  // 与其他节同契约：写 draft.layout 后 touch()，
   // 落盘统一在「应用」（应用经 saveSettings 订阅链刷新 AppShell 布局副本即时生效；
   // zen 覆盖语义不动其余字段——layout.ts enterZen/exitZen 正交性）。
   // 与 AppShell 即时通道（拖拽调宽/折叠钮/右键菜单）并存：同一 schema 字段两个
@@ -12,7 +13,7 @@
 
   let { draft, touch }: { draft: Settings; touch(): void } = $props();
 
-  type CheckField = 'leftCollapsed' | 'rightCollapsed' | 'topBarVisible' | 'tabBarVisible';
+  type CheckField = 'leftCollapsed' | 'rightCollapsed' | 'tabBarVisible';
 
   /** 布尔字段：checkbox 写 draft + touch */
   function onCheck(field: CheckField, e: Event): void {
@@ -43,15 +44,6 @@
   <div class="vv-settings-hint">
     改动写入草稿，点右上「应用」后生效（订阅链刷新整个界面）；左右栏折叠与拖拽调宽在界面内即时生效，与本节同一存储字段。
   </div>
-  <label class="vv-settings-theme-row">
-    <span>显示顶栏</span>
-    <input
-      type="checkbox"
-      checked={draft.layout.topBarVisible}
-      onchange={(e) => onCheck('topBarVisible', e)}
-      aria-label="显示顶栏"
-    />
-  </label>
   <label class="vv-settings-theme-row">
     <span>显示标签栏</span>
     <input
@@ -105,7 +97,7 @@
   </label>
   <div class="vv-settings-label">专注模式（zen）</div>
   {#if draft.layout.zen}
-    <div class="vv-settings-note" role="status">当前草稿为专注模式（覆盖顶栏/标签栏/双栏显示），其余布局字段保持原值。</div>
+    <div class="vv-settings-note" role="status">当前草稿为专注模式（覆盖标签栏/双栏显示），其余布局字段保持原值。</div>
     <div class="vv-settings-import">
       <button type="button" onclick={resetZen} aria-label="重置专注模式">重置专注模式（应用后生效）</button>
     </div>

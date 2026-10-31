@@ -4,7 +4,7 @@
   // 代码主题下拉自 TopBar 迁入（设置中心 Task 1，低频项收进设置页）——同 schema
   // 字段同绑定语义，写入当前生效亮暗槽（system 按 prefers-color-scheme 解析）。
   // 槽改动写 draft 后调 touch()——落盘与注入时机由 SettingsCenter 统一决定
-  // （注入由 TopBar 的 onSettingsChanged 订阅 diff 触发，spec 2026-10-12 §2.4）。
+  // （注入由壳层 AppShell 的 onSettingsChanged 订阅 diff 触发，spec 2026-10-12 §2.4）。
   import { onMount } from 'svelte';
   import { deleteTheme, listThemes, type ImportedTheme } from '../stores/session';
   import { importThemeFiles } from '../vsixImport';
@@ -80,14 +80,15 @@
     return offSystem;
   });
 
-  /** 亮暗模式三态（spec §2 外观组；评审 M1 补全）：写 draft + touch——TopBar 快切
-   * 并存双写同字段（订阅链 diff 触发注入），无冲突。 */
+  /** 亮暗模式三态（spec §2 外观组；评审 M1 补全）：写 draft + touch——快切通道
+   * （顶栏退役 Task 3 后为 TabBarActions 主题钮）双写同字段（订阅链 diff 触发注入），
+   * 无冲突。 */
   function onThemeModeChange(e: Event): void {
     draft.themeMode = (e.currentTarget as HTMLSelectElement).value as Settings['themeMode'];
     touch();
   }
 
-  /** 槽切换：写 draft + touch——注入由 TopBar 的 onSettingsChanged 订阅 diff 触发 */
+  /** 槽切换：写 draft + touch——注入由壳层 AppShell 的 onSettingsChanged 订阅 diff 触发 */
   function onAppearanceChange(slot: 'light' | 'dark', e: Event): void {
     const v = (e.currentTarget as HTMLSelectElement).value;
     if (slot === 'light') draft.appearanceLight = v;
@@ -146,7 +147,7 @@
       changed = true;
     }
     if (changed) {
-      // 槽归位只写 draft：注入由 TopBar 订阅 diff 触发（spec 2026-10-12 §2.4）
+      // 槽归位只写 draft：注入由壳层 AppShell 订阅 diff 触发（spec 2026-10-12 §2.4）
       touch();
     }
     imported = imported.filter((x) => x.id !== t.id);
