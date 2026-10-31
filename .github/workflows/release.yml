@@ -76,6 +76,22 @@ jobs:
           VERSION: ${{ needs['publish-npm'].outputs.version }}
         run: |
           echo "VV_GRAMMAR_CDN=https://cdn.jsdelivr.net/npm/${NPM_SCOPE}/vviewer-grammars-full@${VERSION}/grammars/" >> "$GITHUB_ENV"
+      # —— svgbob wasm glue 不入库（spec §7）：构建期生成。v0.1.0 时代 svbob 走 kroki
+      # 无此需求，P2 引入 wasm glue 后 ci.yml web job / pages-deploy 均已接线、本 job
+      # 漏接——v0.1.1 首个踩中的 release（vite 静态解析动态 import，缺产物即构建失败）。
+      # rust 链照抄 publish-packages job（wasm-bindgen CLI 缓存 + dtolnay wasm32 +
+      # Swatinem；wasm-opt 沿 setup-grammars 缓存的 binaryen，缺则脚本自行降级）
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/svgbob/wasm-bindgen-cli
+          key: wasm-bindgen-cli-${{ runner.os }}-${{ hashFiles('packages/vviewer-render-diagram/tools/svgbob-wasm/Cargo.toml') }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/vviewer-render-diagram/tools/svgbob-wasm
+      - run: pnpm gen:svgbob-wasm
       - run: pnpm --filter web build
       # adapter-static 产物在 apps/web/build；zip 内容平铺（解包即站点根），落仓库根供上传
       - run: zip -qr "$GITHUB_WORKSPACE/vviewer-web-dist.zip" .
