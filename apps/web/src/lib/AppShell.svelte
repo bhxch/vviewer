@@ -1290,7 +1290,11 @@
       /* 时长 token（§11/§10-G1）：0.2s→--vv-dur-med 等值零漂移；缓动 ease-out
          入场档。reduced-motion 由 app.css 全局块压至瞬时（transition-duration） */
       transition: transform var(--vv-dur-med) ease-out;
-      z-index: 10;
+      /* z 20 > ArtPlayer .art-video（上游默认 absolute z-index:10）：同层时 DOM 序
+         在后的 .vv-main 会盖住抽屉——视频/音频渲染器在场时抽屉树行命中测试全落
+         video 上，点行无效（PWA-09/2、MEDIA-11 mobile 挂死实证）。与抽屉浮钮
+         （z 20）同带，仍低于面板层 30/条 50/菜单 90 */
+      z-index: 20;
       background: var(--ui-bg);
       box-shadow: 0 0 12px rgb(0 0 0 / 25%); /* 抽屉泛光特例（§5.3），就地保留 */
     }
@@ -1321,7 +1325,9 @@
         width: min(80vw, 300px);
         transform: translateX(100%);
         transition: transform var(--vv-dur-med) ease-out;
-        z-index: 10;
+        /* z 20 同 .vv-side：压过 ArtPlayer .art-video（absolute z-index:10），
+           依据见上方 .vv-side 注 */
+        z-index: 20;
         background: var(--ui-bg);
         box-shadow: 0 0 12px rgb(0 0 0 / 25%); /* 抽屉泛光特例（§5.3），就地保留 */
       }
