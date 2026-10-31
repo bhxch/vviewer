@@ -1149,7 +1149,7 @@
   {#if zenToast}
     <!-- zen 进入提示（Toast）：退出通道告知——zen 覆盖全部 chrome，无此提示
          桌面退出全凭快捷键不可发现。role=status 供 AT 播报；4.5s 自动消退，
-         顶部居中避开顶部热区（0-10px）与临时条（fixed top:0），z-index 60 低于
+         顶部居中避开 tab 热区（8px；顶边热区随 TopBar 退役删除）与临时条（fixed top:0），z-index 60 低于
          右键菜单 90（zen 内紧接的菜单操作不被遮挡） -->
     <div class="vv-toast" role="status">{zenToast}</div>
   {/if}

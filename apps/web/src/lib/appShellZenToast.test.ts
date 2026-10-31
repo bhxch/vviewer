@@ -48,7 +48,7 @@ describe('zen 进入提示 Toast（退出通道发现性）', () => {
     expect(rule).not.toBeNull();
     const body = rule![1] ?? '';
     expect(body).toContain('position: fixed');
-    expect(body).toContain('top: 40px'); // 热区 0-10px / 临时条 fixed top:0 之下
+    expect(body).toContain('top: 40px'); // tab 热区 8px（顶边热区随 TopBar 退役删除）/ 临时条 fixed top:0 之下
     expect(body).toContain('pointer-events: none');
   });
 });
