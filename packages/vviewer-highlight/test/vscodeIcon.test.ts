@@ -112,8 +112,8 @@ describe('validateVscodeIconTheme', () => {
         },
       }),
     );
-    expect([...t.fileExtensions.keys()].sort()).toEqual(['cssEscape', 'emoji', 'good']);
-    expect(t.fileExtensions.get('cssEscape')?.char).toBe('\u{E003}'); // 解码为真实字符存储
+    expect([...t.fileExtensions.keys()].sort()).toEqual(['cssescape', 'emoji', 'good']); // 表键已 lowercase
+    expect(t.fileExtensions.get('cssescape')?.char).toBe('\u{E003}'); // 解码为真实字符存储
   });
 
   it('④b CSS 转义解码：小写 hex/1 位 hex 命中，非法码点（超界/代理区）拒', () => {
@@ -136,8 +136,16 @@ describe('validateVscodeIconTheme', () => {
       }),
     );
     expect(t.fileExtensions.get('lower')?.char).toBe('\u{E0AB}');
-    expect(t.fileExtensions.get('sixDigit')?.char).toBe('\u{10FFFF}');
-    expect([...t.fileExtensions.keys()].sort()).toEqual(['lower', 'sixDigit']); // oneDigit/over/surrogate 剔
+    expect(t.fileExtensions.get('sixdigit')?.char).toBe('\u{10FFFF}'); // 表键 lowercase
+    expect([...t.fileExtensions.keys()].sort()).toEqual(['lower', 'sixdigit']); // oneDigit/over/surrogate 剔
+    // CSS 规范的尾随空白终结形态（"\E003 "）同样解码，空格被吃
+    const trail = ok(
+      validateVscodeIconTheme({
+        iconDefinitions: { t: { fontCharacter: '\\E003 ' } },
+        fileExtensions: { t: 't' },
+      }),
+    );
+    expect(trail.fileExtensions.get('t')?.char).toBe('\u{E003}');
   });
 
   it('⑤ fonts.src 绝对路径/协议前缀拒：逐 src 过滤、全坏剔字体、fontId 悬空连带剔定义', () => {
@@ -187,6 +195,24 @@ describe('validateVscodeIconTheme', () => {
     const hitB = matchIconTheme(t, { kind: 'file', name: 'y.b' });
     expect(hitA).toMatchObject({ char: c(1), fontId: 'f1' }); // per-definition font-family 依据
     expect(hitB).toMatchObject({ char: c(2), fontId: 'f2' });
+  });
+
+  it('⑤c src 注入面负向闸：引号/分号/括号/花括号/反斜杠/空白/尖括号等字符 → 该 src 拒', () => {
+    const t = ok(
+      validateVscodeIconTheme({
+        iconDefinitions: {
+          ok: { fontCharacter: c(1), fontId: 'ok' },
+          m: { fontCharacter: c(2), fontId: 'evil' }, // evil 字体仅剩坏 src → 悬空 → 连带剔
+        },
+        fonts: [
+          { id: 'ok', src: 'fonts/ok.woff2' },
+          { id: 'evil', src: ['f";x.woff', 'f(x).woff', 'f{x}.woff', 'a b.woff', 'f\\x.woff', 'f<x>.woff'] },
+        ],
+        fileExtensions: { ok: 'ok', m: 'm' },
+      }),
+    );
+    expect(t.fonts).toEqual([{ id: 'ok', src: ['fonts/ok.woff2'] }]);
+    expect([...t.fileExtensions.keys()]).toEqual(['ok']);
   });
 });
 
@@ -246,6 +272,39 @@ describe('matchIconTheme', () => {
     expect(matchIconTheme(t, { kind: 'folder', name: 'other' })?.char).toBe(c(3));
     expect(matchIconTheme(t, { kind: 'folderExpanded', name: 'other' })?.char).toBe(c(4));
     expect(matchIconTheme(t, { kind: 'folder', name: 'SRC' })?.char).toBe(c(1)); // 查表大小写不敏感
+  });
+
+  it('⑧b 简装主题展开态跨向回退：folderNamesExpanded 缺 → folderNames → _folder（对齐 VSCode）', () => {
+    const t = ok(
+      validateVscodeIconTheme({
+        iconDefinitions: {
+          srcDir: { fontCharacter: c(1) },
+          _folder: { fontCharacter: c(2) },
+        },
+        folderNames: { src: 'srcDir' },
+      }),
+    );
+    expect(matchIconTheme(t, { kind: 'folder', name: 'src' })?.char).toBe(c(1));
+    expect(matchIconTheme(t, { kind: 'folderExpanded', name: 'src' })?.char).toBe(c(1)); // expanded miss → folderNames
+    expect(matchIconTheme(t, { kind: 'folderExpanded', name: 'other' })?.char).toBe(c(2)); // → _folder_open miss → _folder
+  });
+
+  it('③b 主题侧大写键 lowercase 存储（对齐 VSCode），查询侧命中', () => {
+    const t = ok(
+      validateVscodeIconTheme({
+        iconDefinitions: {
+          ts: { fontCharacter: c(1) },
+          dir: { fontCharacter: c(2) },
+        },
+        fileExtensions: { TS: 'ts' },
+        folderNames: { SRC: 'dir' },
+      }),
+    );
+    expect(t.fileExtensions.get('ts')?.char).toBe(c(1)); // 键已小写
+    expect(t.fileExtensions.has('TS')).toBe(false);
+    expect(t.folderNames.get('src')?.char).toBe(c(2));
+    expect(matchIconTheme(t, { kind: 'file', name: 'a.ts' })?.char).toBe(c(1));
+    expect(matchIconTheme(t, { kind: 'folder', name: 'src' })?.char).toBe(c(2));
   });
 
   it('⑨ languageIds 反向表命中；表外扩展/表外语言静默跳过', () => {

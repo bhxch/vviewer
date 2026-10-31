@@ -29,11 +29,11 @@ const FONT_CHARACTER_FORBIDDEN_RE = /[\u0000-\u001F\u007F-\u009F"'\\]/;
 
 /**
  * CSS 转义形态（官方图标主题惯例：JSON 里 "\u005CE003" 解析为 5 字符串 `\E003`）：
- * 解码为真实码点字符；码点非法（> U+10FFFF 或落代理区，fromCodePoint 会抛）返回
- * undefined 由调用方剔定义。JSON 转义（\uE003）经 JSON.parse 天然是单字符，不进
- * 本分支原样放行。
+ * 解码为真实码点字符，尾随单个空白按 CSS 规范作终结符吃掉（`\E003 ` 同法）；
+ * 码点非法（> U+10FFFF 或落代理区，fromCodePoint 会抛）返回 undefined 由调用方
+ * 剔定义。JSON 转义（\uE003）经 JSON.parse 天然是单字符，不进本分支原样放行。
  */
-const CSS_ESCAPE_RE = /^\\([0-9a-fA-F]{1,6})$/;
+const CSS_ESCAPE_RE = /^\\([0-9a-fA-F]{1,6})\s?$/;
 
 function decodeFontCharacter(raw: string): string | undefined {
   const m = CSS_ESCAPE_RE.exec(raw);
@@ -189,17 +189,22 @@ function* fileSuffixes(lowerName: string): Generator<string> {
   }
 }
 
+/** src 注入面负向闸：url() 文本内可截断/逃逸的字符（空白、引号、反斜杠、括号、分号、花括号、尖括号、控制符）一律拒——真实字体路径不含这些字符。 */
+const FONT_SRC_FORBIDDEN_RE = /[\s'"\\;(){}<>\u0000-\u001F\u007F-\u009F]/;
+
 /**
  * 字体 src 相对路径白名单：src 会被拼进 @font-face url() 注入文本。绝对路径
  * （/、\\、盘符）、任意协议前缀（http:/https:/data:/file:/blob: 等 scheme 形态）
  * 与协议相对（//）一律拒——主题字体应随包分发，指外 src 既有注入面又有外联
- * 泄露面。'./x'、'../x'、'fonts/x.woff' 合法。
+ * 泄露面；再过注入面负向字符集闸（与 fontColor/fontSize 的白名单口径对齐）。
+ * './x'、'../x'、'fonts/x.woff' 合法。
  */
 function isRelativeFontSrc(src: string): boolean {
   if (src === '') return false;
   if (src.startsWith('/') || src.startsWith('\\') || src.startsWith('//')) return false;
   if (/^[A-Za-z]:/.test(src)) return false; // Windows 盘符（C:\ 与 C:/ 皆覆盖）
   if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(src)) return false; // scheme
+  if (FONT_SRC_FORBIDDEN_RE.test(src)) return false; // url() 注入面字符
   return true;
 }
 
@@ -265,7 +270,8 @@ function sanitizeIconDefinitions(defs: unknown, fontIds: ReadonlySet<string>): M
 
 /**
  * 五张映射表逐条归一：键须非空 string、值须 string 且命中合法定义（被剔定义或
- * 拼错的引用 → 条目不落表）。键按主题原文存储，大小写归一在查表侧。
+ * 拼错的引用 → 条目不落表）。键主题侧即 lowercase（对齐 VSCode 查前小写语义，
+ * 与查询侧双侧归一；大小写变体键碰撞时后写覆盖先写）。
  */
 function sanitizeGlyphTable(table: unknown, defs: ReadonlyMap<string, IconGlyph>): Map<string, IconGlyph> {
   const out = new Map<string, IconGlyph>();
@@ -273,7 +279,7 @@ function sanitizeGlyphTable(table: unknown, defs: ReadonlyMap<string, IconGlyph>
   for (const [key, ref] of Object.entries(table as Record<string, unknown>)) {
     if (key === '' || typeof ref !== 'string') continue;
     const glyph = defs.get(ref);
-    if (glyph !== undefined) out.set(key, glyph);
+    if (glyph !== undefined) out.set(key.toLowerCase(), glyph);
   }
   return out;
 }
@@ -339,8 +345,10 @@ export function normalizeIconTheme(raw: unknown): NormalizedIconTheme {
 /**
  * 字形匹配。优先级（spec 固化）：fileNames 精确名 > fileExtensions 多级后缀
  * （最长优先，'foo.d.ts' 先试 'd.ts' 再 'ts'）> languageIds 反向表（EXT_TO_
- * LANGS 未收录的扩展静默跳过，不给猜测图标）> _file 回退；folder/folderExpanded
- * 各查己表后回退 _folder/_folder_open。查表键大小写不敏感（对齐 VSCode：查前
+ * LANGS 未收录的扩展静默跳过，不给猜测图标）> _file 回退；folder 查 folderNames
+ * 回退 _folder，folderExpanded 查 folderNamesExpanded 后跨向回落
+ * folderNames/_folder_open/_folder（对齐 VSCode：展开态缺省回落未展开图标）。
+ * 查表键大小写不敏感（对齐 VSCode：查前
  * lowercase）。任何一层未命中且无回退键 → null。命中字形含 fontId（定义声明了
  * fontId 时），配合 fontsById 取该字体的 src/format 元数据渲染 font-family。
  */
@@ -352,7 +360,11 @@ export function matchIconTheme(
   const name = target.name.toLowerCase();
   if (target.kind === 'folder') return theme.folderNames.get(name) ?? theme._folder ?? null;
   if (target.kind === 'folderExpanded') {
-    return theme.folderNamesExpanded.get(name) ?? theme._folder_open ?? null;
+    // 跨向回退对齐 VSCode：展开态专属映射/图标缺省时回落未展开图标（简装主题
+    // 仅配 folderNames 也能给展开文件夹图标）
+    return (
+      theme.folderNamesExpanded.get(name) ?? theme.folderNames.get(name) ?? theme._folder_open ?? theme._folder ?? null
+    );
   }
   const byName = theme.fileNames.get(name);
   if (byName !== undefined) return byName;
