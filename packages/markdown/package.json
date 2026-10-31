@@ -1,0 +1,26 @@
+{
+  "name": "@vviewer/markdown",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./markdown.css": "./src/markdown.css"
+  },
+  "//": "markdown 完整渲染组合包：五步管线（highlight/diagrams/katex/copyCode/lightbox）+ enrich + 导出装配 + CSS 单源自 render-text/src/markdown 迁出参数化。第三方依赖版本照抄 render-text 现值（highlight.js/katex）；注入缝（MarkdownBackend/highlightFence/diagram 选项/图片 resolver/远程来源决策）见 README「选项全集」。",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vviewer/highlight": "workspace:*",
+    "@vviewer/lightbox": "workspace:*",
+    "@vviewer/markdown-engine": "workspace:*",
+    "@vviewer/render-diagram": "workspace:*",
+    "@vviewer/sanitize": "workspace:*",
+    "highlight.js": "^11.12.0",
+    "katex": "^0.19.0"
+  },
+  "license": "Apache-2.0"
+}
