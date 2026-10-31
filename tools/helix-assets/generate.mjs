@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // helix 资产生成器：从本机 helix-editor/helix 与 markpad-aio 源资产生成
-// packages/highlight/assets/{languages.json,themes.json,queries/}（溯源见 tools/helix-assets/README.md）。
+// packages/vviewer-highlight/assets/{languages.json,themes.json,queries/}（溯源见 tools/helix-assets/README.md）。
 // 用法：node tools/helix-assets/generate.mjs（可重复执行，产物幂等）
 import { parse } from 'smol-toml';
 import fs from 'node:fs';
@@ -20,7 +20,7 @@ export const SOURCES = {
   themesDir:
     process.env.VV_THEMES_DIR ??
     '/share/rw/repo/github/helix-editor/helix/runtime/themes',
-  outDir: process.env.VV_ASSETS_OUT ?? path.join(repoRoot, 'packages/highlight/assets'),
+  outDir: process.env.VV_ASSETS_OUT ?? path.join(repoRoot, 'packages/vviewer-highlight/assets'),
 };
 
 // helix 内置 palette（helix-view/src/theme.rs ThemePalette::default）的兜底色名。

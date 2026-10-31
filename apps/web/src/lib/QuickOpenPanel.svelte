@@ -5,7 +5,7 @@
   // Enter 经 addTab 打开 → Esc/✕ 关闭。浮层/焦点管理对齐 GlobalSearchPanel。
   // workspace 多根（T4）：扫描当前 workspace 全部来源，结果行带「源名 / path」
   // 前缀、打开按结果的 storeId 定位来源。
-  import type { TreeStore } from '@vviewer/core';
+  import type { TreeStore } from '@bhxch/vviewer-core';
   import { addTab } from './openFlow.svelte';
   import { loadSettings } from './stores/settings';
   import { fileNameOf, filterFiles, listFilesRecursively, type ScannedFile } from './quickOpen';

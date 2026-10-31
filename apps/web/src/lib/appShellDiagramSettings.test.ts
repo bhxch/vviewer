@@ -1,7 +1,7 @@
 // appShellDiagramSettings.test.ts — mermaid theme 设置即时生效派发源码契约（spec §9.2）。
 // 背景：根 vitest 无 svelte 插件，AppShell 不可挂载——按既有「源码契约断言」先例
 //（appShellZenMobile.test.ts/appShellZenEsc.test.ts）锁定 onSettingsChanged 回调内的
-// 派发接线；重画行为由 packages/render-text markdownRenderer.mermaidTheme.test.ts
+// 派发接线；重画行为由 packages/vviewer-render-text markdownRenderer.mermaidTheme.test.ts
 // 挂载实例级单测收口。
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';

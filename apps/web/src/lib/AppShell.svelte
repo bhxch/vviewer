@@ -11,7 +11,7 @@
   import WorkspaceTabsPanel from './WorkspaceTabsPanel.svelte';
   import SettingsCenter from './SettingsCenter.svelte';
   import MountsManager from './MountsManager.svelte';
-  import type { TreeStore, TocEntry } from '@vviewer/core';
+  import type { TreeStore, TocEntry } from '@bhxch/vviewer-core';
   // FE-2 导入改道：tab 模型/连接域符号自 openFlow façade 改直引域模块（依赖单向
   // tabsModel ← serverConnect，无环）；openFlow 退役为纯打开通道，AppShell 仅剩
   // 恢复句柄/归档桥/direct 挂载/快点击竞态判定四符号仍经 façade（其它消费方不动）

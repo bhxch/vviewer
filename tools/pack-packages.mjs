@@ -6,7 +6,7 @@
 //     markdown-engine 的 declare module 垫片 d.ts、highlight 的 assets/ 整目录（含
 //     LICENSE-README.md）、render-diagram 的 svgbob gen 产物 js+wasm——需先
 //     pnpm gen:svgbob-wasm）；另复制包 README.md 与仓库根 LICENSE（npm 页与许可随包）。
-//   dist/package.json：name=${NPM_SCOPE}/<源包名后缀>、version=VV_NPM_PACKAGE_VERSION
+//   dist/package.json：name=源包名（统一 @bhxch/vviewer- 前缀，内部名=发布名）、version=VV_NPM_PACKAGE_VERSION
 //     （tag v1.2.3 归一为 1.2.3，与 publish-npm 同法）、private:false、type:module、
 //     main/types/exports 由源 exports 改写指 dist 实际层级——emitRoot='.' 的五包
 //     './src/X.ts'→{types:'./X.d.ts',default:'./X.js'}；highlight 的 emit rootDir=包根
@@ -34,7 +34,7 @@
 //   必误报）。
 // 用法：
 //   node tools/pack-packages.mjs --list            # 打印包目录清单（空格分隔，workflow 构建与发布两循环共用）
-//   NPM_SCOPE=@vviewer VV_NPM_PACKAGE_VERSION=0.0.0 node tools/pack-packages.mjs
+//   NPM_SCOPE=@bhxch VV_NPM_PACKAGE_VERSION=0.0.0 node tools/pack-packages.mjs
 // 发布包清单单一来源 = 下方 PACKAGES 常量；workflow 经 --list 取清单，不在 YAML 重复
 // 维护（吸取 vviewer-grammars-full 包名硬编码三处的教训）。
 import fs from 'node:fs';
@@ -51,29 +51,29 @@ const repoRoot = path.resolve(here, '..');
  * copies=非 emit 资产复制（from 相对包根，to 相对 dist；expect 为复制前存在性断言）。
  */
 const PACKAGES = [
-  { dir: 'detect' },
-  { dir: 'sanitize' },
-  { dir: 'markdown-engine', copies: [{ from: 'src/types', to: 'types' }] },
-  { dir: 'markdown', copies: [{ from: 'src/markdown.css', to: 'markdown.css' }, { from: 'src/types', to: 'types' }] },
+  { dir: 'vviewer-detect' },
+  { dir: 'vviewer-sanitize' },
+  { dir: 'vviewer-markdown-engine', copies: [{ from: 'src/types', to: 'types' }] },
+  { dir: 'vviewer-markdown', copies: [{ from: 'src/markdown.css', to: 'markdown.css' }, { from: 'src/types', to: 'types' }] },
   // worker.js 双写：dist/worker.js 供 dist/main.js 的相对 URL（new Worker(new
   // URL('./worker.js', import.meta.url))）解析；dist/src/worker.js 供发布 exports
   // './worker.js' 子路径（源 exports './src/worker.js' 非 *.ts 形态按原样透传）。
   // 同一文件三处同源（src/ 源形态 + 两处发布形态），改 worker 入口只需改 src/。
   {
-    dir: 'markdown-highlight-worker',
+    dir: 'vviewer-markdown-highlight-worker',
     copies: [
       { from: 'src/worker.js', to: 'worker.js' },
       { from: 'src/worker.js', to: 'src/worker.js' },
     ],
   },
-  { dir: 'lightbox' },
+  { dir: 'vviewer-lightbox' },
   {
-    dir: 'highlight',
+    dir: 'vviewer-highlight',
     emitRoot: 'src',
     copies: [{ from: 'assets', to: 'assets' }],
   },
   {
-    dir: 'render-diagram',
+    dir: 'vviewer-render-diagram',
     copies: [
       {
         from: 'src/markdown/svgbob-wasm-gen',
@@ -304,15 +304,13 @@ function checkExportsTargets(pkgName, distRoot, exports) {
   return problems;
 }
 
-/** dependencies 携带：workspace:* → 发布版本；@vviewer/* 依赖名改写为发布名
- *  （发布名统一 @bhxch/vviewer- 前缀，见 packOne 的 npmName——依赖名不改写则
- *  指向 npm 上不存在的包）。第三方依赖原样。 */
-function mapDependencies(deps, version, scope) {
+/** dependencies 携带：workspace:* → 发布版本（包名已统一 @bhxch/vviewer-，
+ *  内部名=发布名，无需名字改写）。第三方依赖原样。 */
+function mapDependencies(deps, version) {
   if (!deps) return undefined;
   const out = {};
   for (const [k, v] of Object.entries(deps)) {
-    const name = k.startsWith('@vviewer/') ? `${scope}/vviewer-${k.slice('@vviewer/'.length)}` : k;
-    out[name] = v === 'workspace:*' ? version : v.startsWith('workspace:') ? v.slice('workspace:'.length) : v;
+    out[k] = v === 'workspace:*' ? version : v.startsWith('workspace:') ? v.slice('workspace:'.length) : v;
   }
   return out;
 }
@@ -349,10 +347,13 @@ function packOne({ dir, emitRoot = '.', copies = [] }, { scope, version }) {
   if (!srcPkg.name.startsWith('@') || !srcPkg.name.includes('/')) fail(`${dir}: 源包名须为 @scope/name 形态: ${srcPkg.name}`);
   const suffix = srcPkg.name.split('/')[1];
   if (suffix !== dir) fail(`${dir}: 源包名后缀 ${suffix} 与清单目录不一致（发布清单漂移）`);
-  // 发布名统一 @bhxch/vviewer- 前缀（与 vviewer-grammars-full 同款；@bhxch scope
-  // 混有非本项目包，vviewer- 前缀做归属消歧）。monorepo 内部名与目录保持
-  // @vviewer/<dir> 不动——前缀规则单点收敛在本脚本，不改任何目录与 import。
-  const npmName = `${scope}/vviewer-${suffix}`;
+  // 发布名 = 源包名（统一 @bhxch/vviewer- 前缀，与 vviewer-grammars-full 同款；
+  // @bhxch scope 混有非本项目包，vviewer- 前缀做归属消歧）。monorepo 内部名与
+  // 发布名一致（单名方案），NPM_SCOPE 仅作命名守卫（env 与包名 scope 不符即 fail）。
+  if (!srcPkg.name.startsWith(`${scope}/vviewer-`)) {
+    fail(`${dir}: 源包名 ${srcPkg.name} 与发布 scope ${scope} 不符（统一 @bhxch/vviewer- 命名）`);
+  }
+  const npmName = srcPkg.name;
 
   // outDir fail-fast（同 pack-npm ledger H8）：已含打包产物时拒跑，防陈旧混包
   if (fs.existsSync(path.join(distRoot, 'package.json'))) {
@@ -424,7 +425,7 @@ function packOne({ dir, emitRoot = '.', copies = [] }, { scope, version }) {
     ...(srcPkg.description ? { description: srcPkg.description } : {}),
     ...(repository ? { repository: { ...repository, directory: `packages/${dir}` } } : {}),
     ...(srcPkg.license ? { license: srcPkg.license } : {}),
-    ...(srcPkg.dependencies ? { dependencies: mapDependencies(srcPkg.dependencies, version, scope) } : {}),
+    ...(srcPkg.dependencies ? { dependencies: mapDependencies(srcPkg.dependencies, version) } : {}),
     contentHash: contentHashOf(distRoot),
   };
   fs.writeFileSync(path.join(distRoot, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');

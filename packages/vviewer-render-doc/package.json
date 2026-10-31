@@ -1,0 +1,23 @@
+{
+  "name": "@bhxch/vviewer-render-doc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/pdf.ts",
+  "types": "src/pdf.ts",
+  "exports": {
+    ".": "./src/pdf.ts",
+    "./docx": "./src/docx.ts",
+    "./xlsx": "./src/xlsx.ts",
+    "./pptx": "./src/pptx.ts"
+  },
+  "dependencies": {
+    "@bhxch/vviewer-core": "workspace:*",
+    "@bhxch/vviewer-sanitize": "workspace:*",
+    "jszip": "^3.10.2",
+    "mammoth": "^1.13.0",
+    "pdfjs-dist": "^6.4.299",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "license": "Apache-2.0"
+}

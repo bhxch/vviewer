@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // globalSearch.test.ts — BUG-11/CMP-11：截断引导文案的裁决纯函数 + T4 多源本地
 // grep 合并 + T7 混合来源远端路径合并。globalSearch.ts 经 openFlow.svelte.ts 间接
 // 依赖 svelte runes（$state），vitest 无 svelte 插件无法编译该模块——以 vi.mock
-// 隔离 openFlow；远端链路另经 @vviewer/core 部分覆写注入（getRemoteBase 映射 base、
+// 隔离 openFlow；远端链路另经 @bhxch/vviewer-core 部分覆写注入（getRemoteBase 映射 base、
 // grepRemote 返回注入帧），不发真实网络（真实 ripgrep 链路由 e2e CMP-08~11 覆盖）。
 
 /** loadLastServer 注入值（默认 null = 未连接；远端路径用例覆写）。 */
@@ -21,8 +21,8 @@ const mockGrepRemote: { value: { matches: GrepMatch[]; truncated: boolean } } = 
   value: { matches: [], truncated: false }
 };
 
-vi.mock('@vviewer/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@vviewer/core')>();
+vi.mock('@bhxch/vviewer-core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@bhxch/vviewer-core')>();
   return {
     ...actual,
     getRemoteBase: (storeId: string) => mockRemoteBases[storeId],
@@ -30,7 +30,7 @@ vi.mock('@vviewer/core', async (importOriginal) => {
   };
 });
 
-import type { GrepMatch, TreeStore, TreeNode } from '@vviewer/core';
+import type { GrepMatch, TreeStore, TreeNode } from '@bhxch/vviewer-core';
 import {
   attributeRemoteMatches,
   isMountRootSource,

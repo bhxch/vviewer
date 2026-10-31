@@ -4,7 +4,7 @@
 // 不动，候选面经 openWithOf 委托保持同集同序。纯函数无 runes/DOM——根 vitest 无
 // svelte 插件不可直测 .svelte.ts 运行时模块（openWith.ts 同款约束），类型经
 // metaStore 结构镜像、Tab 形状以结构化入参承接（不引 openFlow.svelte 运行时）。
-import type { Registry } from '@vviewer/core';
+import type { Registry } from '@bhxch/vviewer-core';
 import type { FileOpenWith } from './metaStore.svelte';
 import { openWithOf } from './openWith';
 

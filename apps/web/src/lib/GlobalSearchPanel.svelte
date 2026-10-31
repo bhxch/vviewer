@@ -4,8 +4,8 @@
   // 前端内存 grep）→ 按文件分组列表（行内 query 高亮）→ 点击 addTab 打开文件
   // （打开后行内定位为 P2）；Esc/✕ 关闭。代际防护：新输入使旧结果作废，
   // 本地 grep 经 canceled 提前自弃、远程经 AbortController 断流。
-  import type { GrepMatch } from '@vviewer/core';
-  import { matchRanges } from '@vviewer/core';
+  import type { GrepMatch } from '@bhxch/vviewer-core';
+  import { matchRanges } from '@bhxch/vviewer-core';
   import { addTab } from './openFlow.svelte';
   import { runGlobalSearch, serverSearchHint, MOUNT_SEARCH_DEGRADED_HINT, type SearchSource } from './globalSearch';
   import { loadSearchEngine } from './searchEngineCache';

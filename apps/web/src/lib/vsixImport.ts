@@ -5,8 +5,8 @@
  * （brief 定值；Markpad 为 2MB，此处从 brief）、清单缺主题/坏 JSON/超限均报错
  * 跳过该条，不中断同批其余文件。
  */
-import { validateVscodeTheme } from '@vviewer/highlight';
-import { createZipStore } from '@vviewer/render-archive/zipStore';
+import { validateVscodeTheme } from '@bhxch/vviewer-highlight';
+import { createZipStore } from '@bhxch/vviewer-render-archive/zipStore';
 import { putTheme, type ImportedTheme } from './stores/session';
 
 /** 单主题 JSON 字节上限（brief 定值 1MB）。 */

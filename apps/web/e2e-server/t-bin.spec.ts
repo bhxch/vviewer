@@ -10,7 +10,7 @@ import { test, expect } from '@playwright/test';
  *   前端本地解包架构不变，加密判定仍在前端解析阶段）——web 套件为纯前端 File 注入不经
  *   /api/file，该护栏此前无自动化
  * - BIN-10 验收②：「签名不符时只重定向一次」的签名不符分支——扩展名命中压缩包但头部
- *   非 ZIP 签名时，按裁决（packages/core/src/dispatch/dispatcher.ts:44-47）非文本类
+ *   非 ZIP 签名时，按裁决（packages/vviewer-core/src/dispatch/dispatcher.ts:44-47）非文本类
  *   渲染器不参与改派，由 archive 渲染失败错误卡片兜底；断言明确落点 + 该文件字节仅
  *   拉取有限次（无循环改派请求风暴）
  * 夹具：beforeAll 写入 fixture 根（服务端文件树默认不展开子目录），文件名 t- 前缀

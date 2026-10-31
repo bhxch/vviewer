@@ -22,14 +22,14 @@ import { applySettings, openSettings } from './settings-center';
  *   （IndexedDB）恢复、合成最小 VSIX 导入、切回 default 观感零变化 + 槽/主题亮暗
  *   不匹配提醒出现/消失（spec §2.3 终审补）。桌面基准
  *   （chromium project，同 03/2/06/2/07/2 惯例）。期望值唯一来源：
- *   packages/highlight/assets/vscode/*.json 资产原值（大小写混杂，注入文本为运行时
+ *   packages/vviewer-highlight/assets/vscode/*.json 资产原值（大小写混杂，注入文本为运行时
  *   textContent 不经构建压缩，按原值断言；#1F1F1F 等保持大写）。
  */
 
-// ── Node 侧主题表与 resolveCapture 复刻（期望值唯一来源：@vviewer/highlight 资产） ──
+// ── Node 侧主题表与 resolveCapture 复刻（期望值唯一来源：@bhxch/vviewer-highlight 资产） ──
 
 const THEMES_PATH = fileURLToPath(
-  new URL('../../../packages/highlight/assets/themes.json', import.meta.url)
+  new URL('../../../packages/vviewer-highlight/assets/themes.json', import.meta.url)
 );
 const THEMES = JSON.parse(readFileSync(THEMES_PATH, 'utf8')) as Record<
   string,
@@ -37,7 +37,7 @@ const THEMES = JSON.parse(readFileSync(THEMES_PATH, 'utf8')) as Record<
 >;
 const THEME_COUNT = Object.keys(THEMES).length; // 实测 214
 
-/** resolveCapture 逐级去 `.后缀` 回退（packages/highlight/src/theme.ts 同款实现）。 */
+/** resolveCapture 逐级去 `.后缀` 回退（packages/vviewer-highlight/src/theme.ts 同款实现）。 */
 function resolveCaptureFg(theme: Record<string, { fg?: string }>, capture: string): string | null {
   let key = capture;
   for (;;) {

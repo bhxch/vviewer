@@ -7,7 +7,7 @@ import { BUILTIN_PALETTE, collectThemes, parseLanguages, parseTheme, QUERY_PATCH
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../..');
-const assetsDir = path.join(repoRoot, 'packages/highlight/assets');
+const assetsDir = path.join(repoRoot, 'packages/vviewer-highlight/assets');
 
 describe('parseLanguages（languages.toml 纯解析）', () => {
   const sample = `
@@ -111,7 +111,7 @@ describe('collectThemes（主题目录解析，inherits 链上 palette 递归合
   });
 });
 
-describe('生成产物（packages/highlight/assets）', () => {
+describe('生成产物（packages/vviewer-highlight/assets）', () => {
   it('languages.json 为纯 JSON（可直接 import），含 rust 契约', () => {
     const langs = JSON.parse(readFileSync(path.join(assetsDir, 'languages.json'), 'utf8'));
     const rust = langs['rust'] as Record<string, unknown> | undefined;

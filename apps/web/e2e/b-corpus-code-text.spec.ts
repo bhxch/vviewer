@@ -104,7 +104,7 @@ function corpusSpec(sourceId: string, rel: string): TextFileSpec {
 
 /**
  * 扩展名 → 预期状态栏语言（detectLanguage 扩展名精确表，内容无关）。
- * 实证方式：node 直查 packages/highlight/assets/languages.json（fileTypes 排序
+ * 实证方式：node 直查 packages/vviewer-highlight/assets/languages.json（fileTypes 排序
  * first-wins，langdetect.ts:27-44 同算法），写作时逐项跑过——yaml/yml→yaml、toml→toml、
  * csv→csv、json→json、xml→xml、rs→rust、py→python、java→java、c→c、cpp→cpp、
  * ts→typescript、tsx→tsx、go→go、php→php、rb→ruby、sh→bash。

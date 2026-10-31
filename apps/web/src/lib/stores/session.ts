@@ -1,4 +1,4 @@
-import type { VscodeThemeJson } from '@vviewer/highlight';
+import type { VscodeThemeJson } from '@bhxch/vviewer-highlight';
 import type { WorkspacesSnapshot } from '../workspaceStore';
 
 export interface TabSnapshot {

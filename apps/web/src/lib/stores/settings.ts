@@ -1,6 +1,6 @@
-import type { ComputePolicy } from '@vviewer/core';
-import { resolveDiagramType, type DiagramMode } from '@vviewer/render-diagram';
-import { MERMAID_THEMES, type MermaidTheme } from '@vviewer/render-diagram';
+import type { ComputePolicy } from '@bhxch/vviewer-core';
+import { resolveDiagramType, type DiagramMode } from '@bhxch/vviewer-render-diagram';
+import { MERMAID_THEMES, type MermaidTheme } from '@bhxch/vviewer-render-diagram';
 import { DEFAULT_LAYOUT, sanitizeLayout, type LayoutSettings } from '../layout';
 
 /** mermaid 主题设置白名单（spec 2026-10-23 §9.2）：'auto' 跟随外观亮暗（现状语义，
@@ -39,7 +39,7 @@ export interface Settings {
    * 非 default 时代码槽由外观的 tokenColors 表接管（theme.ts applyAppearance） */
   appearanceLight: string;
   appearanceDark: string;
-  /** 亮/暗模式下各自记忆的代码主题（键名需存在于 @vviewer/highlight 的 themes.json） */
+  /** 亮/暗模式下各自记忆的代码主题（键名需存在于 @bhxch/vviewer-highlight 的 themes.json） */
   codeThemeLight: string;
   codeThemeDark: string;
   excludedPatterns: string[];

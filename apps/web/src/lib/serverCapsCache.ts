@@ -8,11 +8,11 @@
  * highlightClient / globalSearch（经 openFlow façade 再导出，消费方导入面
  * 零改动）。
  */
-import { SESSION_LAST_SERVER_KEY, type LastServerRecord } from '@vviewer/core';
+import { SESSION_LAST_SERVER_KEY, type LastServerRecord } from '@bhxch/vviewer-core';
 
 /**
  * 会话内上次成功连接的服务器（sessionStorage，不做持久）。
- * 键名与值形状的权威定义在 @vviewer/core（SESSION_LAST_SERVER_KEY/LastServerRecord）：
+ * 键名与值形状的权威定义在 @bhxch/vviewer-core（SESSION_LAST_SERVER_KEY/LastServerRecord）：
  * render-media av.ts 的 HLS 直连 XHR 鉴权读同一键，形状改动须走 core 单点。
  */
 export type LastServer = LastServerRecord;

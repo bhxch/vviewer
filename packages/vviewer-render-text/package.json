@@ -1,0 +1,25 @@
+{
+  "name": "@bhxch/vviewer-render-text",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/code.ts",
+  "dependencies": {
+    "@bhxch/vviewer-core": "workspace:*",
+    "@bhxch/vviewer-highlight": "workspace:*",
+    "@bhxch/vviewer-lightbox": "workspace:*",
+    "@bhxch/vviewer-markdown": "workspace:*",
+    "@bhxch/vviewer-markdown-engine": "workspace:*",
+    "@bhxch/vviewer-render-diagram": "workspace:*",
+    "@bhxch/vviewer-sanitize": "workspace:*",
+    "highlight.js": "^11.12.0"
+  },
+  "exports": {
+    ".": "./src/code.ts",
+    "./markdown/markdownRenderer": "./src/markdown/markdownRenderer.ts",
+    "./markdown/export": "./src/markdown/export.ts",
+    "./html": "./src/html.ts",
+    "./jsonl": "./src/jsonl/index.ts"
+  },
+  "license": "Apache-2.0"
+}

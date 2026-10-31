@@ -1,4 +1,4 @@
-# @vviewer/grammar-builder
+# @bhxch/vviewer-grammar-builder
 
 grammar wasm 资产管线：为语法高亮生成 `apps/web/static/grammars/{manifest.json, *.wasm}`
 与 runtime `apps/web/static/tree-sitter.wasm`。**产物一律不入库**（构建期生成，
@@ -78,7 +78,7 @@ node tools/grammar-builder/pack-npm.mjs
 
 - **输入**：`VV_GRAMMARS_OUT`（默认 `apps/web/static/grammars`——本地即 lite 集 34
   wasm；CI publish 下载 `grammar.yml` 的 `grammar-wasm` artifact，为全量集）+
-  `VV_QUERIES_DIR`（默认 `packages/highlight/assets/queries`）+ 仓库根
+  `VV_QUERIES_DIR`（默认 `packages/vviewer-highlight/assets/queries`）+ 仓库根
   `server/GRAMMAR_LICENSES.md`（缺失即抛错，许可证聚合必须随包）。
 - **包布局**（与客户端三层装配 `apps/web/src/lib/grammarLayers.ts` 的 base 契约同构）：
 

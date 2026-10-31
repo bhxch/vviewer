@@ -11,15 +11,15 @@ importers:
         version: 5.9.0
   apps/web:
     dependencies:
-      '@vviewer/core':
+      '@bhxch/vviewer-core':
         specifier: workspace:*
-        version: link:../../packages/core
+        version: link:../../packages/vviewer-core
       libarchive.js:
         specifier: ^2.0.2
         version: 2.0.2
-  packages/render-media:
+  packages/vviewer-render-media:
     dependencies:
-      '@vviewer/core':
+      '@bhxch/vviewer-core':
         specifier: workspace:*
         version: link:../core
       artplayer:
@@ -71,7 +71,7 @@ describe('parseNoticesNames / isRegistered', () => {
 
 describe('readLicense / findLicense', () => {
   it('readLicense 读 importer 就近的 node_modules（render-archive 的 jszip）', () => {
-    expect(readLicense('packages/render-archive', 'jszip')).toContain('MIT');
+    expect(readLicense('packages/vviewer-render-archive', 'jszip')).toContain('MIT');
   });
 
   it('findLicense 跨根与 workspace 找真实安装包（jszip）', () => {

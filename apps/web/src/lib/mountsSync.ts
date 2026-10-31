@@ -19,7 +19,7 @@
  * 测试形态：fake-indexeddb + fetch 路由桩（mountsSync.test.ts）。
  */
 import { db, MOUNTS } from './stores/session';
-import { parseRemoteStoreId, type DavDirectConfig, type S3DirectConfig } from '@vviewer/core';
+import { parseRemoteStoreId, type DavDirectConfig, type S3DirectConfig } from '@bhxch/vviewer-core';
 import type { WorkspaceSource } from './workspaceStore';
 
 /**
@@ -60,7 +60,7 @@ export interface ProxyMountRecord {
  * - 凭据（username/secret）IndexedDB **明文**存储（spec §4 拍板；管理页在新增
  *   表单与列表详情双处固定警示面）；
  * - id = core 直连 store 的 storeId（`s3direct:`/`davdirect:` + hash8(挂载目标
- *   身份)，@vviewer/core s3DirectStoreId/davDirectStoreId 产出）——同配置天然
+ *   身份)，@bhxch/vviewer-core s3DirectStoreId/davDirectStoreId 产出）——同配置天然
  *   去重，凭据轮换/改名不换 id（hash 不含凭据与 label，与 proxy 指纹同口径）；
  * - 与 proxy 记录同住 v4 `mounts` store，kind 判别（'proxy' | 'direct'）；
  *   直连记录不参与服务端对账（不经服务器，无注册面）。

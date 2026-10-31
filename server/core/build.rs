@@ -102,7 +102,7 @@ fn main() {
 /// 对新出现/已消失的路径无从追踪）；逐文件指令感知深层内容修改（目录级指令
 /// 不感知）。双层并存，cargo 对重复路径去重。
 fn copy_queries(out_dir: &Path) {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/highlight/assets/queries");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/vviewer-highlight/assets/queries");
     for dir in fs::read_dir(&root).expect("queries 资产目录") {
         let dir = dir.unwrap().path();
         if !dir.is_dir() {

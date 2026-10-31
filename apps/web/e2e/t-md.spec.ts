@@ -21,7 +21,7 @@ import { setComputePolicy } from './settings-center';
  * - MD-10 落编号用例：sandbox 形态/脚本不执行/行内样式保留/双视图切换
  *   （m3.spec.ts 旧用例无编号且未断言行内样式保留）；
  * - MD-12 拆两个子场景：源码视图搜索（计数 n/N 推进 + 当前命中行级高亮）与
- *   渲染视图搜索恒空——后者为设计行为（packages/render-text/src/html.ts:186，
+ *   渲染视图搜索恒空——后者为设计行为（packages/vviewer-render-text/src/html.ts:186，
  *   渲染视图是沙箱 iframe 不做跨文档搜索，search 恒返回 []）。
  * 注入通道复用 b-markdown-html-docs-helpers.ts（__vvOpenDirImpl，与既有套件同口径）；
  * 选择器出处：.vv-code-line[data-line] 与 vv-search-hit-line(-active)（render-text/src/code.ts
@@ -87,7 +87,7 @@ test('MD-01/2 [CAND-md-F1]: 删除线文本渲染为 del 元素（GFM strikethro
   page
 }) => {
   // CAND-md-F1（产品缺陷，2026-10-10 分诊转 fixme，断言不放宽）：
-  // 本地 markdown-it 15.0.2（packages/render-text/package.json:13）把 ~~x~~ 渲染为
+  // 本地 markdown-it 15.0.2（packages/vviewer-render-text/package.json:13）把 ~~x~~ 渲染为
   // <s> 而非 <del>（markdown-it v13 起 strikethrough 默认标签 del→s；本仓库 node
   // 实测 renderMarkdownToHtml 同配置输出 <s>删除线文本</s>，e2e 实测 .vv-markdown
   // 内 del 0 个），违反场景文档 §2 MD-01 判据「删除线文本渲染为 del 元素（视觉删除线）」。
@@ -243,7 +243,7 @@ test('BUG-66 [探索]: 本地 markdown-it 路径删除线渲染为 s 而非 del�
   // = CAND-md-F1 的复核定论缺陷库编号（2026-10-10 复核确认，low）；与本文件上方
   // MD-01/2 [CAND-md-F1] 用例（本轮既有，按「只追加不改」保留）同缺陷同判据，本用例
   // 挂缺陷库编号供修复 PR 转正对照，两用例一并转正。
-  // 源码：packages/render-text/src/markdown/engine.ts:20-24 markdown-it 15.0.2 同配置
+  // 源码：packages/vviewer-render-text/src/markdown/engine.ts:20-24 markdown-it 15.0.2 同配置
   // （html/linkify/breaks:false + taskLists + footnote）把 ~~x~~ 渲染为 <s>（node 实测
   // "<p>正文含 <s>删除线文本</s> 与正常文本。</p>"）；远程 comrak 出 <del>
   // （server/src/compute/markdown.rs:19 ext.strikethrough，:126-127 单测断言
@@ -272,7 +272,7 @@ test('BUG-66 [探索]: 本地 markdown-it 路径删除线渲染为 s 而非 del�
 // 复核定档后编号偏移：探索 BUG-37→BUG-39（heading id 死链）、BUG-39→BUG-40（净化
 // 向量）、BUG-38→BUG-42（围栏大小写）、BUG-40→BUG-41（worker 看门狗）、BUG-66 不变。
 // 编号偏移的两条 md 域缺陷在此挂确认编号占位（同缺陷同判据），避免修复 PR 按确认编号
-// 检索命中错位用例；BUG-42/BUG-41 根因属 hl（packages/highlight），按一域一文件落
+// 检索命中错位用例；BUG-42/BUG-41 根因属 hl（packages/vviewer-highlight），按一域一文件落
 // t-hl.spec.ts；BUG-66 编号未偏移（上方用例即挂确认编号），不再重复。
 // 【2026-10-10 占位整理更新】worker 看门狗缺陷按 hl 域权威清单定档 BUG-35（fsearch 域
 // 整理轮曾按其清单记 BUG-43，编号勘误轮以内容配对归一为 BUG-35）：原探索期
@@ -287,7 +287,7 @@ test('BUG-66 [探索]: 本地 markdown-it 路径删除线渲染为 s 而非 del�
 // 该条，按 BUG-66 检索请落上方 'BUG-66 [探索]'。同轮唯一锚点收编：上方原探索期
 // 'BUG-37 [探索]'/'BUG-39 [探索]'（净化向量）两份旧编号占位已删除，唯一锚点为下方
 // 'BUG-39 [探索]'/'BUG-40 [探索]'；围栏大小写原 'BUG-38 [探索]' 本域份删除，唯一锚点
-// 为 t-hl.spec.ts 'BUG-42 [探索]'（根因 packages/highlight/src/core-parse.ts）。
+// 为 t-hl.spec.ts 'BUG-42 [探索]'（根因 packages/vviewer-highlight/src/core-parse.ts）。
 
 test('BUG-39 [探索]: 远程档 heading id 双引擎方案统一 user-content- 命名空间——页内锚可跳转、锚 href/id 自一致、双引擎同型', async ({
   page,
@@ -439,12 +439,12 @@ test('BUG-40 [探索]: markdown 渲染视图净化放行五类等价加载向量
   // = 探索期编号 BUG-39（原同文件 'BUG-39 [探索]' 占位，已按唯一锚点收编删除）复核
   // 定档后的缺陷库确认编号，同缺陷同判据；本条挂确认编号供修复 PR 按 BUG-40 检索。
   // 复核成立、范围校准为 md 档（medium）：净化钩子
-  // （packages/render-text/src/markdown/sanitize.ts:54-116，仅覆盖 IMG 的 src/srcset 与
+  // （packages/vviewer-render-text/src/markdown/sanitize.ts:54-116，仅覆盖 IMG 的 src/srcset 与
   // VIDEO/AUDIO/SOURCE 的 src）放行 video/audio poster、SVG <image href/xlink:href>、
   // 行内 style url(...)、table background 属性、input type=image src 五类等价加载向量，
   // DOM 属性全保留且浏览器真实发起外域请求（md 档与纯前端档各 6 条 GET，failures 均为
   // net::ERR_EMPTY_RESPONSE 即已进网络栈——跟踪像素可回传 IP/会话）。html 沙箱档属性
-  // 同样保留但被 srcdoc 内 CSP meta（packages/render-text/src/html.ts:27-28、68-71）在
+  // 同样保留但被 srcdoc 内 CSP meta（packages/vviewer-render-text/src/html.ts:27-28、68-71）在
   // 网络栈之前拦死（failures='csp'，对照实验证实 meta CSP 在 srcdoc 正常执行），不在本
   // 缺陷范围。
   // 证据（复核轮独立取得）：/tmp/vv-repro-cand-md-e2/repro.mjs（request/requestfailed/

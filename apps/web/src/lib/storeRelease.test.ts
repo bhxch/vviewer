@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { STORE_UID, type TreeStore } from '@vviewer/core';
+import { STORE_UID, type TreeStore } from '@bhxch/vviewer-core';
 import { releaseStoreIfLast, sameStoreInstance, storeRetained } from './storeRelease';
 
 /** 构造带/不带 close 的 store 桩：close 记录调用次数。 */

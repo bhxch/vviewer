@@ -10,7 +10,7 @@ import { test, expect } from '@playwright/test';
  * video-hls.m3u8 经 hls.js 起播后「readyState≥3、currentTime 推进、**可播完**」——
  * 既有 e2e-server/b-media-office-viewer.spec.ts:100 已断言就绪与推进（currentTime>1），
  * 未断言「播完」（ended）；本文件补该子项（标题按 README §3.2 携带编号后缀）。
- * HLS 要求 remote store 直连（packages/render-media/src/av.ts:120-128 resolveHlsDirect
+ * HLS 要求 remote store 直连（packages/vviewer-render-media/src/av.ts:120-128 resolveHlsDirect
  * 仅对服务端 base 生效），故必须跑 playwright.server.config.ts（4174）。
  * 夹具：beforeAll 以 ffmpeg（libopenh264）生成 2s HLS（2×~1s 分片，总时长取最小
  * 以缩短播完等待），文件名 t-hls-done.m3u8 / t-seg%d.ts 与 b-media 夹具

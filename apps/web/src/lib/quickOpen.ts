@@ -1,4 +1,4 @@
-import type { TreeStore } from '@vviewer/core';
+import type { TreeStore } from '@bhxch/vviewer-core';
 
 /**
  * QuickOpenPanel（BUG-03 Ctrl+P 快速打开）的可单测纯逻辑：

@@ -9,9 +9,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 
 export const SOURCES = {
   languages: process.env.VV_LANGUAGES_JSON
-    ?? join(here, '../../packages/highlight/assets/languages.json'),
+    ?? join(here, '../../packages/vviewer-highlight/assets/languages.json'),
   outFile: process.env.VV_GENERATED_EXTENSIONS
-    ?? join(here, '../../packages/core/src/registry/generated-extensions.ts'),
+    ?? join(here, '../../packages/vviewer-core/src/registry/generated-extensions.ts'),
 };
 
 /** normalize→过滤→去重→升序。可作扩展名的 token 才收（glob 形排除）。 */
@@ -28,7 +28,7 @@ export function collectExtensions(languages) {
 
 export function toModule(exts) {
   return `// 由 tools/grammar-builder/gen-code-extensions.mjs 生成（C 项）；勿手改，CI --check 校验。\n` +
-    `// 来源：packages/highlight/assets/languages.json 的 fileTypes 全集。\n` +
+    `// 来源：packages/vviewer-highlight/assets/languages.json 的 fileTypes 全集。\n` +
     `export const GENERATED_EXTENSIONS: readonly string[] = ${JSON.stringify(exts)};\n`;
 }
 

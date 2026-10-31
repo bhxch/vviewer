@@ -35,7 +35,7 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  *   b-pwa PWA-08 断言放宽（<1000/<1500/<5000ms）防抖动，此处按修复后复测
  *   实测余量（桌面 35~50ms/移动 262~275ms）收紧。
  * - PWA-09/2：验收「打开到起播 <1s」按真实可起播口径收紧——readyState ≥
- *   HAVE_FUTURE_DATA(3)（ArtPlayer autoplay:false，packages/render-media/src/
+ *   HAVE_FUTURE_DATA(3)（ArtPlayer autoplay:false，packages/vviewer-render-media/src/
  *   av.ts:63，currentTime 前进不适用；既有 b-pwa PWA-09 为 readyState≥1 + <5s）。
  * 通道同既有：纯前端 preview（无服务端，auto 策略落本地 tree-sitter worker），
  * 文件经 __vvOpenDirImpl 页内注入；移动触摸按域文档 §4.3 以 CDP dispatchTouchEvent。
@@ -517,7 +517,7 @@ test('PWA-09/2: mp4/wav 打开到可起播（readyState≥HAVE_FUTURE_DATA）<1s
   );
 
   // 「可起播」= HAVE_FUTURE_DATA(3)：当前播放位置有可用帧且可推进——autoplay:false
-  // （packages/render-media/src/av.ts:63）下 currentTime 前进不适用，比既有
+  // （packages/vviewer-render-media/src/av.ts:63）下 currentTime 前进不适用，比既有
   // readyState≥1 口径更贴近验收「起播」语义
   const openAndPlayable = async (name: string, selector: string): Promise<number> => {
     const t0 = Date.now();
@@ -654,7 +654,7 @@ test(
     // libarchive.wasm（约 1MB，实测 HTTP 200 / 1002547 bytes）既不在 precache
     // （vite.config.ts:153 globPatterns 不含 .wasm）也无 runtimeCaching 路由
     // （:170-207 仅 grammars/tree-sitter/queries 三条）——断网后 libarchive worker
-    // 初始化取不到 wasm，OPEN_TIMEOUT_MS=20_000（packages/render-archive/src/
+    // 初始化取不到 wasm，OPEN_TIMEOUT_MS=20_000（packages/vviewer-render-archive/src/
     // libarchiveStore.ts:89）超时弹错误卡片「打开压缩包超时（20s）：libarchive
     // worker 初始化失败或格式解析卡死」（:168-169）。tar/tgz/tbz2/xz/7z/rar 全走
     // 该 wasm 通道（libarchiveStore.ts:1-2），zip 为 JS 解包不受影响（离线对照

@@ -15,7 +15,7 @@
   },
   // render-text 留守的 vendor ambient 声明（katex-dist-css：pipeline 动态 import
   // 'katex/dist/katex.min.css' 无类型）；markdown-it 五插件垫片已随引擎迁
-  // @vviewer/markdown-engine（经其 engine.ts 的 /// reference 随解析自动进程序）
-  "include": ["src", "test", "*", "../../packages/render-text/src/types"],
+  // @bhxch/vviewer-markdown-engine（经其 engine.ts 的 /// reference 随解析自动进程序）
+  "include": ["src", "test", "*", "../../packages/vviewer-render-text/src/types"],
   "exclude": ["src/service-worker"]
 }

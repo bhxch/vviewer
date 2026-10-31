@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createRegistry, type Renderer } from '@vviewer/core';
+import { createRegistry, type Renderer } from '@bhxch/vviewer-core';
 // openWith.test.ts — 终审 Important 1：openWithOf 存在性守卫。
 // 纯函数（无 runes/DOM），真 registry 注入即可单测；钉住「dispatch 渲染失败返回的
 // 'error' id（registry 未注册）不得进入下拉 options（错误卡片 current 维持 ''/自动）」。

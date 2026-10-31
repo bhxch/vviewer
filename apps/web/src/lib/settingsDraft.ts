@@ -8,9 +8,9 @@
 // 符标红、clamp 类越界提示将截断）——归一化实现复用 settings.normalizeSettings
 // （同一白名单单源），此处只负责「报告」；三类问题同为阻断错误（校验失败不部分
 // 应用，spec §4 导入同纪律），修复后应用时经 normalizeSettings 规范化落值。
-import { resolveDiagramType } from '@vviewer/render-diagram';
+import { resolveDiagramType } from '@bhxch/vviewer-render-diagram';
 import { clampSize, CODE_SIZE_RANGE, DEFAULTS, MERMAID_THEME_VALUES, normalizeSettings, saveSettings, UI_SIZE_RANGE, type Settings } from './stores/settings';
-import type { MermaidTheme } from '@vviewer/render-diagram';
+import type { MermaidTheme } from '@bhxch/vviewer-render-diagram';
 import { sanitizeLayout } from './layout';
 
 /** 校验问题（field 为顶层字段名或 `节.字段` 点径；'' = JSON 整体语法/形态错误） */

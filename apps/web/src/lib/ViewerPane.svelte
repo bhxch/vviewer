@@ -1,10 +1,10 @@
 <script lang="ts">
-  import type { RenderedInstance, TocEntry, ComputeWhere } from '@vviewer/core';
-  import { showErrorCard } from '@vviewer/core';
-  import { isAbortError } from '@vviewer/render-text';
-  import type { CodeEngine, CodeFileMeta } from '@vviewer/render-text';
-  import type { MarkdownEngineState } from '@vviewer/render-text/markdown/markdownRenderer';
-  import type { MermaidTheme } from '@vviewer/render-diagram';
+  import type { RenderedInstance, TocEntry, ComputeWhere } from '@bhxch/vviewer-core';
+  import { showErrorCard } from '@bhxch/vviewer-core';
+  import { isAbortError } from '@bhxch/vviewer-render-text';
+  import type { CodeEngine, CodeFileMeta } from '@bhxch/vviewer-render-text';
+  import type { MarkdownEngineState } from '@bhxch/vviewer-render-text/markdown/markdownRenderer';
+  import type { MermaidTheme } from '@bhxch/vviewer-render-diagram';
   import type { Tab } from './openFlow.svelte';
   import { persistScroll, tabStore } from './openFlow.svelte';
   import { setFileMeta, setInspector, inspectorBus, setExportHandle, fileMeta, type FileOpenWith, type InspectorSnapshot } from './metaStore.svelte';
@@ -392,7 +392,7 @@ import SearchPanel from './SearchPanel.svelte';
         }
         live = res.instance;
         instance = res.instance;
-        // markdown 图表主题桥接（@vviewer/markdown 切换）：包内不再监听 vv:* 事件，
+        // markdown 图表主题桥接（@bhxch/vviewer-markdown 切换）：包内不再监听 vv:* 事件，
         // 联动改为实例 API applyTheme——此处把 theme.ts（vv:appearance-applied，外观
         // 亮暗联动）与 AppShell（vv:diagram-settings-applied，mermaid 主题设置保存）
         // 派发的两事件桥接到本存活实例，就地重画 [data-mermaid]（detail 缺省时

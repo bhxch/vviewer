@@ -29,19 +29,19 @@ tools/grammar-builder/out/
 !tools/grammar-builder/fixtures/*.wasm
 # static/grammars 整目录（*.wasm 与生成的 manifest.json，构建产物）
 apps/web/static/grammars/
-# tree-sitter 查询静态资产（构建期由 vite 插件从 packages/highlight/assets/queries 拷贝，不入库）
+# tree-sitter 查询静态资产（构建期由 vite 插件从 packages/vviewer-highlight/assets/queries 拷贝，不入库）
 apps/web/static/queries/
 # libarchive.js worker bundle 与 wasm（构建期由 vite 插件从 node_modules 拷贝，不入库）
 apps/web/static/libarchive/
 # BUG-60：vv-* 运行时缓存跨版本清理脚本（构建期由 vite 插件生成、烘焙 BUILD_REVISION，不入库）
 apps/web/static/vv-sw-cleanup.js
-# web-tree-sitter runtime wasm（构建期由 gen:grammars 从 node_modules 拷贝，不入库；版本随 packages/highlight 的 lockfile 锁定）
+# web-tree-sitter runtime wasm（构建期由 gen:grammars 从 node_modules 拷贝，不入库；版本随 packages/vviewer-highlight 的 lockfile 锁定）
 apps/web/static/tree-sitter.wasm
-# svgbob wasm 引擎产物（构建期由 gen:svgbob-wasm 从 @vviewer/render-diagram 包内
+# svgbob wasm 引擎产物（构建期由 gen:svgbob-wasm 从 @bhxch/vviewer-render-diagram 包内
 # tools/svgbob-wasm crate 生成，不入库；svgbob_wasm.d.ts 手写入库仅类型声明）。
 # *.wasm 已被全局规则覆盖，.js 显式排除防 glue 混入
-packages/render-diagram/src/markdown/svgbob-wasm-gen/*.js
-packages/render-diagram/src/markdown/svgbob-wasm-gen/*.wasm
+packages/vviewer-render-diagram/src/markdown/svgbob-wasm-gen/*.js
+packages/vviewer-render-diagram/src/markdown/svgbob-wasm-gen/*.wasm
 
 # 系统
 .DS_Store

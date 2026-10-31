@@ -9,7 +9,7 @@
  * direct 链（createDirectMountStore）的 watch 接线有意不经 wireStoreWatch——
  * 见 openFlow.svelte.ts 该函数注释（双锚测锁死的有意分叉）。
  */
-import { createRemoteStore, getRemoteBase, normalizeServerBase, type TreeStore } from '@vviewer/core';
+import { createRemoteStore, getRemoteBase, normalizeServerBase, type TreeStore } from '@bhxch/vviewer-core';
 import { loadSettings } from './stores/settings';
 import { workspaceStore } from './workspaceStore';
 import {

@@ -19,7 +19,7 @@
 //   VV_NPM_PACKAGE_NAME=@scope/vviewer-grammars-full \
 //   VV_NPM_PACKAGE_VERSION=0.0.0 VV_NPM_OUT=/tmp/dist-npm node tools/grammar-builder/pack-npm.mjs
 // 输入路径可覆写：VV_GRAMMARS_OUT（默认 apps/web/static/grammars，与 build.mjs 同名同义）、
-// VV_QUERIES_DIR（默认 packages/highlight/assets/queries）。outDir 应指向空目录（脚本不清理既有内容；
+// VV_QUERIES_DIR（默认 packages/vviewer-highlight/assets/queries）。outDir 应指向空目录（脚本不清理既有内容；
 // 已含打包产物时 fail-fast 拒跑——ledger H8）。
 import fs from 'node:fs';
 import path from 'node:path';
@@ -39,7 +39,7 @@ export const MANIFEST_ENTRY_BASE = './';
 export function resolvePathsFrom(env = process.env) {
   return {
     grammarsDir: env.VV_GRAMMARS_OUT ?? path.join(repoRoot, 'apps/web/static/grammars'),
-    queriesDir: env.VV_QUERIES_DIR ?? path.join(repoRoot, 'packages/highlight/assets/queries'),
+    queriesDir: env.VV_QUERIES_DIR ?? path.join(repoRoot, 'packages/vviewer-highlight/assets/queries'),
     outDir: env.VV_NPM_OUT,
     repoPkgJson: path.join(repoRoot, 'package.json'),
     licenseFile: path.join(repoRoot, 'server/GRAMMAR_LICENSES.md'),

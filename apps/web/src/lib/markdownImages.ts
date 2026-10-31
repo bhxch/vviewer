@@ -2,7 +2,7 @@
 // 从 viewer.ts 抽出为无 $app 依赖的纯模块：除接线外可被 vitest 直测。
 // 遗留清理批次 1（L4）：解析前加大小上限——>IMAGE_MAX_BYTES 的图片跳过并保留
 // 原 src（404 现状），避免渲染一篇文档时把超大图片整读进内存/生成巨型 blob。
-import type { TreeStore } from '@vviewer/core';
+import type { TreeStore } from '@bhxch/vviewer-core';
 
 /** 相对图片解析大小上限（与富文本渲染降级阈值 MARKUP_MAX_BYTES 同量级） */
 export const IMAGE_MAX_BYTES = 20 * 1024 * 1024;

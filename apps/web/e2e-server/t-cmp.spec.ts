@@ -266,7 +266,7 @@ test(
     // 根因是本地 markdown-it 15.0.2 把 ~~x~~ 渲染为 <s>（v13 起默认 del→s）而远程
     // comrak 出 <del>（server/src/compute/markdown.rs ext.strikethrough），双引擎
     // DOM 指纹必然差一个标签。修复：本地引擎 renderer rule 把 strikethrough_open/
-    // close 输出 <del>（packages/render-text/src/markdown/engine.ts，GFM 规范推荐
+    // close 输出 <del>（packages/vviewer-render-text/src/markdown/engine.ts，GFM 规范推荐
     // 标签，与 comrak 对齐）；sanitize 为 DOMPurify 默认标签表（del/s 均在表内）、
     // enrich 无 del/s 归一需求——标签级对齐后指纹一致。
     // 跨域编号对照（勿再互改）：同一删除线缺陷按 md 域权威清单定档 BUG-66——锚点
@@ -388,7 +388,7 @@ test(
     // （状态栏「高亮: 解析中…」永久驻留）且 computeWhere 停留请求期回填的
     // 'remote'（:242 补出「执行: 远程」不自愈）——与大文件 chunk 失败路径
     // （engine='plain' + computeWhere=null，状态栏「纯文本」、无执行段）口径不一。
-    // 修复：packages/render-text/src/code.ts 整文件 tree-sitter 主路径
+    // 修复：packages/vviewer-render-text/src/code.ts 整文件 tree-sitter 主路径
     // RemoteComputeError catch 分支补置终值（engine='plain' + computeWhere=null，
     // 错误卡片语义不变）。转正判据即下方末条断言：失败后状态栏不停留「解析中」。
     test.setTimeout(60_000);

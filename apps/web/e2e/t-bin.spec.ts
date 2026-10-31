@@ -168,7 +168,7 @@ test('BUG-55：hex 虚拟滚动 >28.44MiB .bin 滚动到底即达末行（spacer
   // 错误偏移（40MB 实测可视末行 0x01c71d10，真实末行 0x027ffff0，约 28.9% 尾部
   // 不可查看）。修复期补充实证：Chromium 可滚动区域本身亦在 2^25px 钳制——多元素
   // 分段 spacer 不解除，故修复走「spacer 钳上限 + 滚动域↔虚拟域线性映射」
-  // （packages/core/src/virtualScroller.ts SCROLL_PX_CAP/toVirtual/toScroll）。
+  // （packages/vviewer-core/src/virtualScroller.ts SCROLL_PX_CAP/toVirtual/toScroll）。
   // 大 buffer 手法：40MB 在页面内构造（40MB Uint8Array 走 evaluate 参数会经 CDP
   // JSON 序列化，不可用）；内容全零即可——断言只看偏移列，与字节值无关。
   await page.waitForFunction(

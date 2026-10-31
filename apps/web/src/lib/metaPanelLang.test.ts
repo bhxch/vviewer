@@ -2,7 +2,7 @@
 // （input + datalist，spec §4.2）。MetaPanel.svelte 为 runes 组件，根 vitest 无
 // svelte 插件不可挂载（watchHealth.test.ts 同因同形态）：UI 行为直测不可达，按
 // 「源码契约断言」先例钉住语言行的结构面与提交语义；langdetect 候选集行为在
-// packages/highlight/test/langdetect.test.ts 行为直测，运行期交互由 e2e 收口。
+// packages/vviewer-highlight/test/langdetect.test.ts 行为直测，运行期交互由 e2e 收口。
 //
 // 契约面：
 // ① datalist 结构配对：input[list="vv-lang-datalist"] + <datalist id="vv-lang-datalist">

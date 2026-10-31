@@ -8,7 +8,7 @@ import {
   type GrepMatch,
   type RemoteStore,
   type TreeStore
-} from '@vviewer/core';
+} from '@bhxch/vviewer-core';
 import { loadLastServer } from './openFlow.svelte';
 import { isMountRootStoreId } from './serverHealthCache';
 import { loadSettings } from './stores/settings';

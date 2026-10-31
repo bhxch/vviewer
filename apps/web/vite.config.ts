@@ -16,7 +16,7 @@ const base = process.env.VV_BASE_PATH ?? '';
 //（吞掉漏写/重复的前导斜杠），与下方 PWA manifest 同源取 kitBase。
 const kitBase: '' | `/${string}` = base === '' ? '' : `/${base.replace(/^\/+/, '')}`;
 
-const QUERIES_SRC = fileURLToPath(new URL('../../packages/highlight/assets/queries', import.meta.url));
+const QUERIES_SRC = fileURLToPath(new URL('../../packages/vviewer-highlight/assets/queries', import.meta.url));
 const QUERIES_DEST = fileURLToPath(new URL('./static/queries', import.meta.url));
 
 // 构建修订号（final review A4）：package.json version + 启动分钟级时间戳（36 进制截断），

@@ -216,11 +216,11 @@ describe('main()（CLI 入口：Task 5 publish job 经 env 驱动）', () => {
     await expect(main({})).rejects.toThrow(/VV_NPM_PACKAGE_NAME/);
   });
 
-  it('默认输入路径指向仓库现势资产（apps/web/static/grammars 与 packages/highlight/assets/queries）', async () => {
+  it('默认输入路径指向仓库现势资产（apps/web/static/grammars 与 packages/vviewer-highlight/assets/queries）', async () => {
     const { resolvePathsFrom } = await import('../pack-npm.mjs');
     const p = resolvePathsFrom({}) as Record<string, string>;
     expect(p.grammarsDir).toBe(path.join(repoRoot, 'apps/web/static/grammars'));
-    expect(p.queriesDir).toBe(path.join(repoRoot, 'packages/highlight/assets/queries'));
+    expect(p.queriesDir).toBe(path.join(repoRoot, 'packages/vviewer-highlight/assets/queries'));
     expect(p.repoPkgJson).toBe(path.join(repoRoot, 'package.json'));
   });
 });

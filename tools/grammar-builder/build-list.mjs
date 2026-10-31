@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 自建语法清单生成器：汇总 helix 语言键（packages/highlight/assets/languages.json）与
+// 自建语法清单生成器：汇总 helix 语言键（packages/vviewer-highlight/assets/languages.json）与
 // markpad 的 grammar_info.json subpath 表，逐一探测 grammar 源目录 src/parser.c 是否存在，
 // 产出 tools/grammar-builder/build-list.json（--self-build 模式的输入）。
 // 用法：node tools/grammar-builder/build-list.mjs
@@ -13,7 +13,7 @@ const repoRoot = path.resolve(here, '../..');
 export const SOURCES = {
   languagesJson:
     process.env.VV_LANGUAGES_JSON ??
-    path.join(repoRoot, 'packages/highlight/assets/languages.json'),
+    path.join(repoRoot, 'packages/vviewer-highlight/assets/languages.json'),
   grammarInfoJson:
     process.env.VV_GRAMMAR_INFO ??
     '/share/rw/repo/markpad-aio/Markpad/src-tauri/grammar_info.json',

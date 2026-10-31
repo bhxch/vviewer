@@ -14,7 +14,7 @@ import { openDirBytes, openFile, openRightIfNarrow, waitAppMounted } from './hel
  *   高度重复字节上 chardet 2.2.0 analyse[0] 实为 windows-1252:98（sbcs Latin
  *   ngram 误报，置信度 0–100 量纲），mbcs Shift_JIS 弱匹配仅 10 分垫底——精判
  *   不会采纳，该 fixture 下断言 shift_jis 必败。改用「日本語のテキスト。
- *   // comment\n」×3 的 cp932 字节（87B，与 packages/core/test/encodingRefine.test.ts
+ *   // comment\n」×3 的 cp932 字节（87B，与 packages/vviewer-core/test/encodingRefine.test.ts
  *   sjisBytes 同源），实测 analyse[0] = Shift_JIS:100 居首（次位 windows-1252:60），
  *   ≥ CONFIDENCE_MIN(90) 且在白名单 → det.encoding 翻转 shift_jis。
  * ② 断言锚：编码行走 .meta-panel 宽锚 toContainText（MetaPanel.svelte 编码行

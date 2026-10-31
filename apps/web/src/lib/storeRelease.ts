@@ -1,4 +1,4 @@
-import { storeInstanceUid, type TreeStore } from '@vviewer/core';
+import { storeInstanceUid, type TreeStore } from '@bhxch/vviewer-core';
 
 /**
  * worker 型 store 的释放接线（M4 T7）：被关 tab 持有的 store 若实现了 close()

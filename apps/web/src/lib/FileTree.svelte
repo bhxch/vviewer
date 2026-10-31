@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { TreeStore, TreeNode } from '@vviewer/core';
+  import type { TreeStore, TreeNode } from '@bhxch/vviewer-core';
   import TreeNodeRow from './TreeNodeRow.svelte';
   import { showStatusNotice } from './openFlow.svelte';
 

@@ -1,7 +1,7 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test, expect, type Page } from '@playwright/test';
-import { hash8 } from '@vviewer/core';
+import { hash8 } from '@bhxch/vviewer-core';
 
 /**
  * open-with 域回归（C 项「格式覆盖自动化」Task 7）：探测链与打开方式 override 的

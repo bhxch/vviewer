@@ -9,7 +9,7 @@ import { stopServer, waitHealthy } from '../e2e/serverHarness';
  * 服务端图表 e2e（spec 2026-10-19 §2.5，计划 Task 4）：--compute 实例 comrak 后处理
  * （server/src/compute/diagrams.rs replace_diagram_fences）把原生图表围栏（graphviz/
  * dot/svgbob）替换为契约 div（data-vv-diagram="server" + data-diagram-lang/src，内联
- * 引擎 SVG 含 style），前端管线 wrapServerDiagrams（packages/render-text
+ * 引擎 SVG 含 style），前端管线 wrapServerDiagrams（packages/vviewer-render-text
  * markdown/pipeline.ts）把它接回 .md-diagram 标准 wrapper——view 收 svg、source 收
  * 原文、切换钮与本地 fence 同构；容器带 data-md-diagram-wrapped（服务端产物的唯一
  * DOM 指纹——本地 fence 路径的 wrapper 不带该属性）。

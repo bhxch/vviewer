@@ -54,7 +54,7 @@ interface BuildListEntry {
 
 const aliases = JSON.parse(readFileSync(path.join(repoRoot, 'tools/grammar-builder/aliases.json'), 'utf8')) as Aliases;
 const languages = JSON.parse(
-  readFileSync(path.join(repoRoot, 'packages/highlight/assets/languages.json'), 'utf8'),
+  readFileSync(path.join(repoRoot, 'packages/vviewer-highlight/assets/languages.json'), 'utf8'),
 ) as Record<string, unknown>;
 
 describe('aliases.json（lite 集键表：helix 语言名 → grammar 名/别名）', () => {

@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { webcrypto } from 'node:crypto';
-import { createS3DirectStore, s3DirectStoreId, type S3DirectConfig } from '@vviewer/core';
+import { createS3DirectStore, s3DirectStoreId, type S3DirectConfig } from '@bhxch/vviewer-core';
 import {
   deleteDirectMount,
   directConfigOf,
@@ -28,7 +28,7 @@ import {
   type ProxyMountRecord,
   type RootIndexMove
 } from './mountsSync';
-import { createRemoteStore } from '@vviewer/core';
+import { createRemoteStore } from '@bhxch/vviewer-core';
 import type { WorkspaceSource } from './workspaceStore';
 import { isMountRootStoreId } from './serverHealthCache';
 

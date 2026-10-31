@@ -364,13 +364,13 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: ~/.cache/svgbob/wasm-bindgen-cli
-          key: wasm-bindgen-cli-${{ runner.os }}-${{ hashFiles('packages/render-diagram/tools/svgbob-wasm/Cargo.toml') }}
+          key: wasm-bindgen-cli-${{ runner.os }}-${{ hashFiles('packages/vviewer-render-diagram/tools/svgbob-wasm/Cargo.toml') }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: packages/render-diagram/tools/svgbob-wasm
+          workspaces: packages/vviewer-render-diagram/tools/svgbob-wasm
       - run: pnpm gen:svgbob-wasm
       # —— 打包：清单单一来源 = pack-packages.mjs 的 PACKAGES 常量（--list 输出，构建/
       # 发布两循环共用，不在 YAML 重复维护）。逐包 tsc emit（tsconfig.build.json：include

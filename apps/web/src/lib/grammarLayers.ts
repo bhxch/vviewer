@@ -1,4 +1,4 @@
-import type { GrammarTable } from '@vviewer/highlight';
+import type { GrammarTable } from '@bhxch/vviewer-highlight';
 
 /**
  * grammar 资产三层解析链（spec §3）：同源 → 服务端 → CDN，逐层 fetch 各自的

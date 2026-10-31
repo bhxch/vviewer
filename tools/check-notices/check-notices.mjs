@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // check-notices.mjs — THIRD_PARTY_NOTICES 完整性辅助检查（warning-only，恒 exit 0）。
-// 汇总 pnpm-lock importers 的运行时直接依赖（dependencies 段；跳过 @vviewer/* workspace
+// 汇总 pnpm-lock importers 的运行时直接依赖（dependencies 段；跳过 @bhxch/vviewer-* workspace
 // 链接与 devDependencies——后者不随运行时分发），从 node_modules/<pkg>/package.json 读
 // license 字段，与 NOTICES 表格登记名对比，缺登记者列出。作为 ci.yml web job 末尾
 // 辅助步骤输出提示，不阻断（引入新运行时依赖忘登记时在 CI 日志可见）。
@@ -21,7 +21,7 @@ export const PATHS = {
 /**
  * pnpm-lock importers 段的运行时直接依赖去重清单。
  * 只认 `dependencies:` 段 6 空格缩进的条目（8 空格的 specifier/version 字段天然不匹配）；
- * @vviewer/* workspace 链接不是第三方，跳过。
+ * @bhxch/vviewer-* workspace 链接不是第三方，跳过。
  */
 export function collectRuntimeDeps(lockText) {
   const m = lockText.match(/\nimporters:\n(.*?)\n\npackages:/s);
@@ -44,7 +44,7 @@ export function collectRuntimeDeps(lockText) {
     const d = line.match(/^ {6}'?([^\s:]+)'?:/);
     if (d && section === 'runtime') {
       const name = d[1];
-      if (name.startsWith('@vviewer/')) continue;
+      if (name.startsWith('@bhxch/vviewer-')) continue;
       if (!out.includes(name)) out.push(name);
     }
   }

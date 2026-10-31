@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createComputeRouter, RemoteComputeError, type HighlightInterval } from '@vviewer/core';
+import { createComputeRouter, RemoteComputeError, type HighlightInterval } from '@bhxch/vviewer-core';
 import { resolveHighlightResult } from './computeResult';
 
 /**

@@ -12,7 +12,7 @@
  * 归档事件桥/e2e 钩子）；direct 挂载群的 watch 接线为有意分叉（不经 wireStoreWatch，
  * 见 createDirectMountStore 注释与 watchHealth/directMountFlow 双锚测）。
  */
-import type { TreeStore, DirectStore } from '@vviewer/core';
+import type { TreeStore, DirectStore } from '@bhxch/vviewer-core';
 import {
   createSingleFileStore,
   createUrlStore,
@@ -24,8 +24,8 @@ import {
   ensurePermission,
   isAbortError,
   normalizeServerBase
-} from '@vviewer/core';
-import { ARCHIVE_OPEN_EVENT } from '@vviewer/render-archive';
+} from '@bhxch/vviewer-core';
+import { ARCHIVE_OPEN_EVENT } from '@bhxch/vviewer-render-archive';
 import { saveDirHandle, loadDirHandle } from './stores/session';
 import type { WorkspaceSource } from './workspaceStore';
 import { workspaceStore } from './workspaceStore';

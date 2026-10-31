@@ -7,7 +7,7 @@
  * 供 watch 能力态与搜索降级消费。
  */
 
-import { parseRemoteStoreId } from '@vviewer/core';
+import { parseRemoteStoreId } from '@bhxch/vviewer-core';
 
 const KEY = 'vv:server-health';
 

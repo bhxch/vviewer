@@ -14,7 +14,7 @@ import {
   remoteLanguageAdvertised,
   type ComputeSource,
   type HighlightInterval
-} from '@vviewer/core';
+} from '@bhxch/vviewer-core';
 import { computeRouter } from './highlightClient';
 import { loadCapabilities, loadComputeLanguages } from './openFlow.svelte';
 import { loadSettings } from './stores/settings';

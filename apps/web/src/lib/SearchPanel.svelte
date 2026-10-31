@@ -5,7 +5,7 @@
   // Aa 开关（BUG-23）：caseSensitive 透传实例 search，切换即重搜（跳过防抖，对齐
   // 全局面板 toggleOption 惯例）。实例不带 search（如图片/音视频渲染器）时显示
   // "此视图不支持搜索"。
-  import type { RenderedInstance, SearchMatch } from '@vviewer/core';
+  import type { RenderedInstance, SearchMatch } from '@bhxch/vviewer-core';
 
   /** search 契约的 caseSensitive 扩展（BUG-23；结构化收窄，不动 core 类型）+ 视图
    * 切换订阅（BUG-44：html 渲染器内部重挂载切换源码/渲染视图，可达性随视图变化） */

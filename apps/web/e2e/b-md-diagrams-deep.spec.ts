@@ -30,7 +30,7 @@ import { injectDir, openTreeFile } from './b-markdown-html-docs-helpers';
  * - DM-12 官方服务器显式第五档：modes.plantuml='official' 直连官方 URL 出图且零
  *  kroki.io 请求（通道纯净性；kroki abort 兜底令误回落必被计数锚抓到）。
  *
- * 契约锚：注册表/别名 packages/render-text/src/markdown/diagrams.ts:20-39；生效模式回退链
+ * 契约锚：注册表/别名 packages/vviewer-render-text/src/markdown/diagrams.ts:20-39；生效模式回退链
  * pipeline.ts:135-143；kroki error 同展兜底 pipeline.ts:297-305；source 模式无 toggle
  * pipeline.ts:274-287；惰性高亮 pipeline.ts:152-173；mermaid 锚与重渲染 markdownRenderer.ts:527-556；
  * settings 归一 apps/web/src/lib/stores/settings.ts:99-109；主题派发 theme.ts:312-324。

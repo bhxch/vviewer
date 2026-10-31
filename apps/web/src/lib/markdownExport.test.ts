@@ -1,14 +1,14 @@
 // markdownExport.test.ts — 导出触发壳可测辅助（md-export Task 2）：图片 data URI
 // 解析策略（外域不强拉/失败降级）、PDF 前置 mermaid 浅色重画、导出文件名、print
-// 特性检测。装配本体在 @vviewer/render-text/markdown/export（Task 1 纯函数，
+// 特性检测。装配本体在 @bhxch/vviewer-render-text/markdown/export（Task 1 纯函数，
 // 已有独立单测）；Blob 下载与 iframe print 为纯浏览器副作用面，vitest 不真跑
 //（下载断言由 e2e 承担，print 可用性仅测特性检测函数）。
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { exportFileName, printAvailable, repaintMermaidForPrint, resolveExportImage } from './markdownExport';
-import { renderMermaidInto } from '@vviewer/render-diagram';
+import { renderMermaidInto } from '@bhxch/vviewer-render-diagram';
 
 // mermaid 真渲染是重浏览器面（jsdom 不承载）：以桩隔离，只断言重画调度
-vi.mock('@vviewer/render-diagram', () => ({
+vi.mock('@bhxch/vviewer-render-diagram', () => ({
   renderMermaidInto: vi.fn(async () => true)
 }));
 

@@ -15,7 +15,7 @@ import {
   davDirectStoreId,
   type DavDirectConfig,
   type S3DirectConfig
-} from '@vviewer/core';
+} from '@bhxch/vviewer-core';
 import {
   directConfigOf,
   displayEndpoint,

@@ -1,10 +1,10 @@
 /* apps/web/src/app.css —— 主题三层框架（M1 版：UI 暗亮 + hljs 双主题 + 代码字体栈） */
-/* markdown 渲染样式单源（@vviewer/markdown 组合包）：.hljs-* 与 .ts-* 高亮映射、
+/* markdown 渲染样式单源（@bhxch/vviewer-markdown 组合包）：.hljs-* 与 .ts-* 高亮映射、
    .vv-markdown 排版、代码顶栏/图表/callout/灯箱/锚点/外域占位等段已收进包 CSS
    （vite 构建期在此内联展开；镜像与 MARKDOWN_CSS 常量逐字节等价由包内
    cssMirror.test.ts 锁定，.ts-* 清单对齐同处校验）。本文件不再持有这些段——
    交互壳规则（徽标 hover/折叠/锚点揭示）与导出专有段由包内 CSS 分工承载 */
-@import '@vviewer/markdown/markdown.css';
+@import '@bhxch/vviewer-markdown/markdown.css';
 :root {
   --vv-code-line-height: 20px;
   --vv-code-font: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;

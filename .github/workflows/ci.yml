@@ -41,7 +41,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: ~/.cache/svgbob/wasm-bindgen-cli
-          key: wasm-bindgen-cli-${{ runner.os }}-${{ hashFiles('packages/render-diagram/tools/svgbob-wasm/Cargo.toml') }}
+          key: wasm-bindgen-cli-${{ runner.os }}-${{ hashFiles('packages/vviewer-render-diagram/tools/svgbob-wasm/Cargo.toml') }}
       # svgbob wasm 引擎产物不入库（spec §7）：单测（diagramEngines.test.ts 对 gen 产物
       # 真渲染，缺产物即 skip——gen 步前移到 vitest 之前保证 CI 真跑非 skip）与 web
       # build 前构建期生成。wasm32 target 经 dtolnay 一步安装；cargo 编译缓存按
@@ -52,7 +52,7 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: packages/render-diagram/tools/svgbob-wasm
+          workspaces: packages/vviewer-render-diagram/tools/svgbob-wasm
       - run: pnpm gen:svgbob-wasm
       - run: pnpm vitest run
       - run: pnpm --filter web build
@@ -138,7 +138,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: ~/.cache/svgbob/wasm-bindgen-cli
-          key: wasm-bindgen-cli-${{ runner.os }}-${{ hashFiles('packages/render-diagram/tools/svgbob-wasm/Cargo.toml') }}
+          key: wasm-bindgen-cli-${{ runner.os }}-${{ hashFiles('packages/vviewer-render-diagram/tools/svgbob-wasm/Cargo.toml') }}
       # svgbob wasm 引擎产物不入库（spec §7）：web build 前构建期生成（接线形态与
       # web job 一致：dtolnay 装 wasm32 target + Swatinem cargo 缓存 + wasm-opt 沿
       # setup-grammars 缓存的 binaryen，缺则脚本自行降级）
@@ -147,7 +147,7 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: packages/render-diagram/tools/svgbob-wasm
+          workspaces: packages/vviewer-render-diagram/tools/svgbob-wasm
       - run: pnpm gen:svgbob-wasm
       - run: pnpm --filter web build
         env:

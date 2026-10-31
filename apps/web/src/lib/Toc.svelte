@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { TocEntry } from '@vviewer/core';
+  import type { TocEntry } from '@bhxch/vviewer-core';
 
   /** 目录组件（Task 5）：entries 由 ViewerPane 从渲染实例 getToc() 流入（AppShell 中转）。
    * 点击滚动到 heading（scrollIntoView，markdown 的滚动容器是外层 .vv-viewer-scroll）；

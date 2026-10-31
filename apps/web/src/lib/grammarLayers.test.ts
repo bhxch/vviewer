@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GrammarTable } from '@vviewer/highlight';
+import type { GrammarTable } from '@bhxch/vviewer-highlight';
 import {
   assembleGrammarLayers,
   fetchGrammarManifest,

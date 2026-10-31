@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TreeStore, TreeNode } from '@vviewer/core';
+import type { TreeStore, TreeNode } from '@bhxch/vviewer-core';
 import { excludedName, fileNameOf, filterFiles, listFilesRecursively } from './quickOpen';
 
 /** 测试树：路径 → 子节点。listChildren(path) 查表返回。 */

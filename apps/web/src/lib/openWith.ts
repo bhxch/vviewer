@@ -2,7 +2,7 @@
 // 自 ViewerPane 提取为纯函数（无 runes/DOM 依赖）以便单测；registry 由调用方
 // （ViewerPane）传入，Tab.overrideRenderer 以标量入参传递——避免引入 .svelte.ts
 // 运行时模块（根 vitest 无 svelte 插件，先例见 metaStore.test.ts）。
-import type { Registry } from '@vviewer/core';
+import type { Registry } from '@bhxch/vviewer-core';
 import type { FileOpenWith } from './metaStore.svelte';
 
 /** 候选 =「自动」+ 生效渲染器 ∪ 扩展名注册渲染器 ∪ code/markdown/hex（去重）。

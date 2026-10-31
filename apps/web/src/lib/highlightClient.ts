@@ -5,8 +5,8 @@ import { browser } from '$app/env';
 // 「<base>/」前缀（base='' 时为 '/'，子路径托管时为 '/<base>/'），静态资产
 // URL（grammars/queries/runtime wasm）由它拼接，语义与 kit2 的 `${base}/...` 一致。
 const baseUrl = resolve('/');
-import { HighlightClient, HighlightCanceledError } from '@vviewer/highlight';
-import { attachHighlightClient, type CodeHighlightClient, type HighlightCallContext } from '@vviewer/render-text';
+import { HighlightClient, HighlightCanceledError } from '@bhxch/vviewer-highlight';
+import { attachHighlightClient, type CodeHighlightClient, type HighlightCallContext } from '@bhxch/vviewer-render-text';
 import {
   createComputeRouter,
   decodeHighlightResponse,
@@ -15,7 +15,7 @@ import {
   type ComputeRouter,
   type ComputeSource,
   type HighlightInterval
-} from '@vviewer/core';
+} from '@bhxch/vviewer-core';
 import { resolveHighlightResult } from './computeResult';
 import {
   assembleGrammarLayers,
@@ -264,7 +264,7 @@ async function create(): Promise<HighlightClient> {
     {
       grammars,
       grammarsBase: `${baseUrl}grammars/`, // 第 1 层缺省 base；合并表每条已带 base，实际不再回落
-      queriesBase: `${baseUrl}queries/`, // vite 启动时从 packages/highlight/assets/queries 拷贝到 static/queries
+      queriesBase: `${baseUrl}queries/`, // vite 启动时从 packages/vviewer-highlight/assets/queries 拷贝到 static/queries
       // runtime 随 base：子路径托管（Pages）下 worker 内 Parser.init 按
       // locateFile(joinPath(runtimeDir, file)) 取 /<base>/tree-sitter.wasm，
       // 根绝对 '/' 在子路径下 404 → init 失败 → 全部高亮静默回退 hljs

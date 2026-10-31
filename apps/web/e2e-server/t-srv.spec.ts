@@ -198,7 +198,7 @@ test('SRV-03: 无 token 与 token 两形态连接成功、树懒加载展开、�
   await expandRow(page, 'token-tree');
   await expect(treeRow(page, 'top.txt')).toBeVisible({ timeout: 10_000 });
 
-  // ③ 偏差 #2：凭据存 sessionStorage（键 vviewer-last-server，packages/core/src/tree/remote.ts:58，
+  // ③ 偏差 #2：凭据存 sessionStorage（键 vviewer-last-server，packages/vviewer-core/src/tree/remote.ts:58，
   //    值形状 {baseUrl, token}，openFlow.svelte.ts:385-387 写入），会话内可预填、重连需手动
   const last = await page.evaluate(() =>
     sessionStorage.getItem('vviewer-last-server')

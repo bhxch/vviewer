@@ -12,7 +12,7 @@ import { setComputePolicy } from './settings-center';
  * t-hl E2E（t- 前缀 = 2026-10-10 代码高亮域覆盖缺口补齐轮，不改动任何既有 spec）。
  * 场景来源：docs/e2e/code-highlight-degrade.md——第 2 节 HL-01~11、第 3 节 BUG-06 验收判据、
  * 第 6 节阶段 4 三态降级链（≤2MiB tree-sitter 整文件 / ≤200MiB 可视区懒高亮 chunk /
- * >200MiB 纯文本；阈值出处 packages/render-text/src/code.ts:57-60）。
+ * >200MiB 纯文本；阈值出处 packages/vviewer-render-text/src/code.ts:57-60）。
  * 只补缺口分析（2026-10-10）认定未覆盖的面，与既有护栏分工：
  * - HL-01：自动/本地两策略主路径对照 + manifest 门控信息（fix-pwa「BUG-06」用例只断本地单路径）；
  * - HL-01/2：BUG-06 验收 2 后半——缓存就绪后断网打开未开过的同语言文件仍 tree-sitter；
@@ -632,7 +632,7 @@ test('BUG-35: tree-sitter worker init 成功零回包——页面静置 >15s 看
 // ── 探索复核确认缺陷回归占位：发现于 Markdown 渲染域、根因属 hl（2026-10-10；README
 // §3.2.1 一域一文件按根因归属落位，§3.2.4 修复合入前 test.fixme 占位、修复 PR 转正）──
 // 本缺陷（BUG-42）上一轮按探索期编号 BUG-38 落在 t-md.spec.ts；缺陷库定档编号为 BUG-42
-// 且根因在 packages/highlight，按根因迁入本域文件，修复 PR 以本节为转正载体（t-md 侧
+// 且根因在 packages/vviewer-highlight，按根因迁入本域文件，修复 PR 以本节为转正载体（t-md 侧
 // 探索期编号占位一并转正）。同批探索期编号 BUG-40（worker 看门狗，md 围栏视角）与本文件
 // 原 BUG-41 占位系上方 BUG-35（原探索期编号 BUG-43，编号勘误轮定档）同一缺陷的重复锚点，
 // 已按权威编号收编删除（2026-10-10 整理）。
@@ -640,7 +640,7 @@ test('BUG-35: tree-sitter worker init 成功零回包——页面静置 >15s 看
 test('BUG-42 [探索]: 围栏代码块语言标识大小写不归一——Rust 大写写法静默丢失 tree-sitter 降级 hljs 兜底', async ({
   page
 }) => {
-  // 发现于 Markdown 渲染域、根因属 hl（packages/highlight/src/core-parse.ts）；复核成立
+  // 发现于 Markdown 渲染域、根因属 hl（packages/vviewer-highlight/src/core-parse.ts）；复核成立
   // （low）。= 探索期编号 BUG-38（t-md.spec.ts 'BUG-38 [探索]' 用例，同一缺陷同判据，
   // t-md 侧占位已按根因收编删除，本条为唯一锚点）。
   // 根因（已修 2026-10-16，Wave 2）：canonicalLang 两级查找（grammar 清单键/别名表）
@@ -707,7 +707,7 @@ test('BUG-42 [探索]: 围栏代码块语言标识大小写不归一——Rust �
 // §3.2.1 一域一文件、§3.2.4 修复合入前 test.fixme 占位、修复 PR 转正）──
 // 其中 BUG-33（djot SIGSEGV）/ BUG-36（单行大文本 O(n²)）根因在 server/src/compute/
 // highlight.rs（服务端 compute 高亮链路），按根因归属改落 e2e-server/t-cmp.spec.ts（见
-// 该文件同批次节注释）；以下五条根因在 packages/highlight / packages/render-text 前端
+// 该文件同批次节注释）；以下五条根因在 packages/vviewer-highlight / packages/vviewer-render-text 前端
 // 高亮与代码查看链路，落本文件。各用例注释给出复核结论、最小复现步骤、证据路径与源码定位。
 
 test('BUG-34 [探索]: codeRenderer 扩展名白名单未跟随 301 语言全量重构——zig/hs/ex/erl/clj/scala/djot 等 7 类文件打开即「无法预览此文件」', async ({
@@ -719,7 +719,7 @@ test('BUG-34 [探索]: codeRenderer 扩展名白名单未跟随 301 语言全量
   // clj/scala/dj(ot) 且未知扩展名直接报错。C 项两步收口：① 选路层——dispatcher
   // resolveInitialRenderer 放宽（未知扩展名不再直接报错，与无扩展名同走内容探测链，
   // looksTextual → code 渲染器，链尾 hex 兜底）；② 注册层——viewer.ts 装配
-  // installFallbackExtensions('code', GENERATED_EXTENSIONS)，packages/core/src/registry/
+  // installFallbackExtensions('code', GENERATED_EXTENSIONS)，packages/vviewer-core/src/registry/
   // generated-extensions.ts（tools/grammar-builder/gen-code-extensions.mjs 从
   // languages.json 342 条 fileTypes 生成的全集，CI --check 校验新鲜度）把手工清单
   // 之外的语法类扩展名全部补注册到 code（专有渲染器冲突跳过）。7 类缺口扩展名两步
@@ -849,7 +849,7 @@ test('BUG-38 [探索]: 以 \\n 结尾文件 buildLineIndex 多出末尾虚行—
   page
 }) => {
   // 复核确认（low）。已修（2026-10-16，Wave 2）：缺陷态 text.split('\n')
-  // （packages/render-text/src/code.ts buildLineIndex）对以 \n 结尾的文本多出末尾
+  // （packages/vviewer-render-text/src/code.ts buildLineIndex）对以 \n 结尾的文本多出末尾
   // 空串元素，虚拟滚动以 lines.length 挂载遂多渲染一条不存在空行，而 getMeta 按
   // wc -l 口径减 1——渲染行数与状态栏行数自相矛盾。服务端档加重面：滚到底时
   // wantedChunkKeys/highlightChunk 以虚行行号发出 {startLine:N, lineCount:1}，服务端
@@ -897,7 +897,7 @@ test('BUG-65: .pl 前端语言首表误识 prolog——hljs 以 prolog 语法着
   // 判据 = HL-02 原断言（hljs-keyword 到达 + 零 ts-* + 无错误卡片 + 内容真实渲染）+
   // 状态栏「语言:」段标注专项补强，判据出处 docs/e2e/code-highlight-degrade.md:38
   // HL-02（hljs-keyword=19、hljs-*=50）。
-  // 根因（已修 2026-10-16，Wave 2）：packages/highlight/src/langdetect.ts buildTables
+  // 根因（已修 2026-10-16，Wave 2）：packages/vviewer-highlight/src/langdetect.ts buildTables
   // 首表 first-wins 按插入序迭代，'pl' 命中 languages.json 中先出现的 prolog 条目
   // （fileTypes ["pl","prolog"]，perl 条目在后），hljs 整文件兜底遂以 prolog 语法着色
   // Perl 源——实测 hljs-keyword=0、hljs-*=9、ts-*=0、状态栏「高亮: hljs 兜底 · 执行:

@@ -2,7 +2,7 @@
 # grammar 清单带验证过的 rev/subpath），供 tools/grammar-builder/build.mjs --fetch 在
 # CI（无本机 markpad 目录）定位 grammar 源。MPL-2.0（文件级）：修改仅为追加本头部说明，
 # 内容未改动；上游更新后重新拷贝时保留本头。许可与溯源声明见
-# packages/highlight/assets/LICENSE-README.md 与 THIRD_PARTY_NOTICES.md。
+# packages/vviewer-highlight/assets/LICENSE-README.md 与 THIRD_PARTY_NOTICES.md。
 
 # Language support configuration.
 # See the languages documentation: https://docs.helix-editor.com/master/languages.html

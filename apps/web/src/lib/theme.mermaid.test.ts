@@ -1,9 +1,9 @@
 // theme.mermaid.test.ts — mermaid 主题映射与外观派发（Task 5，spec §2.3）。
 // 映射纯函数主测在此（apps/web/src/lib/theme.ts 单一来源）；render-text 侧不持副本，
-// 注入通道透传断言见 packages/render-text/src/markdown/pipeline.mermaidTheme.test.ts。
+// 注入通道透传断言见 packages/vviewer-render-text/src/markdown/pipeline.mermaidTheme.test.ts。
 import { expect, it } from 'vitest';
 import { applyAppearanceFromSettings, resolveMermaidTheme } from './theme';
-import type { MermaidTheme } from '@vviewer/render-diagram';
+import type { MermaidTheme } from '@bhxch/vviewer-render-diagram';
 import type { Settings } from './stores/settings';
 import { DEFAULT_LAYOUT } from './layout';
 

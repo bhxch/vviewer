@@ -146,7 +146,7 @@ for (const [i, rel] of CORPUS.entries()) {
   const id = `MC-${String(i + 1).padStart(2, '0')}`;
   test(`${id} · 批量渲染 ${rel}：渲染容器出现、无未捕获错误、无错误卡`, async ({ page }) => {
     // 真实语料逐文件稳定性锚（特殊设计：for..of 逐文件一例）；不锚语料具体内容。
-    // 语料全部 < 20MB MARKUP_MAX_BYTES（packages/render-text/src/code.ts:74），合法
+    // 语料全部 < 20MB MARKUP_MAX_BYTES（packages/vviewer-render-text/src/code.ts:74），合法
     // 会话不该出现错误卡；断言红即语料触发了渲染降级，交门禁分诊而非放宽。
     test.setTimeout(120_000);
     const abs = join(CORPUS_DIR, rel);

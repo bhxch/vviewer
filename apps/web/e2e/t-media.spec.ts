@@ -11,7 +11,7 @@ import { goodPng } from './png-fixture';
  * 06/07/11，m4.spec.ts 已覆盖 office 三件套行为；本文件只补缺口分析指出的弱断言与
  * 无编号用例（每条对应一个场景编号，标题以编号开头）：
  * - MEDIA-01 逐次断言 1.1×/0.9× 步进倍率（b- 仅断收敛终态 scale(10/0.1/1)，任何
- *   ≥1.1 的乘法步进都能通过；步进实现见 packages/render-media/src/image.ts:39），
+ *   ≥1.1 的乘法步进都能通过；步进实现见 packages/vviewer-render-media/src/image.ts:39），
  *   并补「初始倍率 1×」记录与限位/复位复核；
  * - MEDIA-03 断言 readyState=4 与「video 元素出现耗时」（b- 仅断 err=0 + 推进或
  *   ended；m4 放宽为 loadedmetadata 或无 error；135ms 为报告域内实测参考值，
@@ -20,7 +20,7 @@ import { goodPng } from './png-fixture';
  *   首段文本；w:t 文本经 unzip -p samples/m4/sample.docx word/document.xml 实提）；
  * - MEDIA-09 多 sheet 页签切换逐格核对各 sheet 内容 + 250 行恰渲染前 200 行与精确
  *   截断提示（补编号化用例；源内容经 SheetJS 读 samples/m4/sample*.xlsx 实提，
- *   单元格文本 = cell.w ?? String(v)，见 packages/render-doc/src/xlsx.ts:40）；
+ *   单元格文本 = cell.w ?? String(v)，见 packages/vviewer-render-doc/src/xlsx.ts:40）；
  * - MEDIA-10 提纲卡片页码齐全（.vv-pptx-slide-no「第 N 页」，pptx.ts:46-47）且各卡
  *   文本与源 slide XML 的 a:p 段落一一对照（m4 仅抽样断 2 卡片与两处文本）。
  * 通道同 m4/b-：页面内构造 File 经 __vvOpenDirImpl 注入（纯前端本地 store）；
@@ -162,7 +162,7 @@ test('MEDIA-03：mp4 ArtPlayer 挂载、video readyState=4、播放推进', asyn
 test('MEDIA-08：docx 正文 p 与源 document.xml 的 w:t 一一对应（数量/顺序/文本）', async ({ page }) => {
   test.setTimeout(60_000);
   // 源基准（2026-10-10 实提）：unzip -p samples/m4/sample.docx word/document.xml | grep -o '<w:t[^>]*>[^<]*</w:t>'
-  // 恰 4 个 w:t，每个独立成段；mammoth 一段一 <p>（packages/render-doc/src/docx.ts:37-43）
+  // 恰 4 个 w:t，每个独立成段；mammoth 一段一 <p>（packages/vviewer-render-doc/src/docx.ts:37-43）
   const W_T_TEXTS = [
     'vviewer docx 样例',
     '此文件由 tools/gen-samples.mjs 手工构造为最小 OOXML 包（无 Word 依赖），供 E2E 与人工预览。',
@@ -243,7 +243,7 @@ test('MEDIA-09：xlsx 多 sheet 页签切换逐格核对 + 250 行仅渲染前 2
 test('MEDIA-10：pptx 提纲卡片页码齐全且文本与源 slide XML 一致', async ({ page }) => {
   test.setTimeout(60_000);
   // 源基准（2026-10-10 实提）：unzip -p samples/m4/sample.pptx ppt/slides/slide{1,2}.xml
-  // 的 <a:p> 段落；extractSlideLines 一段一行（packages/render-doc/src/pptxText.ts:35-45），
+  // 的 <a:p> 段落；extractSlideLines 一段一行（packages/vviewer-render-doc/src/pptxText.ts:35-45），
   // 卡片页码 head.textContent = `第 ${idx + 1} 页`（pptx.ts:46-47）。
   const SLIDE_LINES = [
     ['vviewer pptx 样例', '第一张幻灯片要点'],
@@ -277,7 +277,7 @@ test('MEDIA-10：pptx 提纲卡片页码齐全且文本与源 slide XML 一致',
 // ── 媒体与 Office 域探索复核确认缺陷回归（2026-10-10 轮）——已全部转正 ─────────────────
 // README §3.2.4 第 4 条：修复合入前以 test.fixme 落占位，缺陷修复 PR 中转为正式断言。
 // BUG-52（音频分支无 error 监听）/ BUG-53（图片解码失败无兜底）/ BUG-54（ArtPlayer 重连
-// 清空 video.error 致文案映射不可达）三条根因均在本域 packages/render-media 渲染链路，
+// 清空 video.error 致文案映射不可达）三条根因均在本域 packages/vviewer-render-media 渲染链路，
 // 产品修复已先后合入（音频 error 兜底、图片同步解码校验 throw、video:error 同步点缓存
 // code），占位用例已转为正式断言（截断 mp3 / 垃圾 jpg / 截断 mp4 载体，经本文件页内
 // File 注入装置构造，无需服务端实例）。原始现象/复现步骤/证据路径见缺陷库 BUG-52/53/54。

@@ -1,7 +1,7 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { hash8 } from '@vviewer/core';
+import { hash8 } from '@bhxch/vviewer-core';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 
 /**

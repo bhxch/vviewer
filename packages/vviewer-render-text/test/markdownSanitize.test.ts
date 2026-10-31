@@ -1,0 +1,681 @@
+import { describe, it, expect } from 'vitest';
+import { sanitizeHtml } from '@bhxch/vviewer-sanitize';
+import { enrichMarkdownDom } from '../src/markdown/enrich';
+import { renderMarkdownToHtml } from '@bhxch/vviewer-markdown-engine';
+
+function docOf(html: string): Document {
+  return new DOMParser().parseFromString(html, 'text/html');
+}
+
+/** 引擎输出 → 净化 → 增强，返回增强后 DOM（贴近 Task 4 renderer 的真实顺序）。 */
+function renderEnriched(md: string): Document {
+  const { html } = renderMarkdownToHtml(md);
+  const doc = docOf(sanitizeHtml(html));
+  enrichMarkdownDom(doc);
+  return doc;
+}
+
+describe('sanitizeHtml——净化策略', () => {
+  it('script 标签剥除', () => {
+    const out = sanitizeHtml('<p>ok</p><script>alert(1)</script>');
+    expect(out).toContain('<p>ok</p>');
+    expect(out).not.toContain('script');
+    expect(out).not.toContain('alert');
+  });
+
+  it('style 容器外剥除（uponSanitizeElement 钩子上下文二分：仅 server 图表容器豁免，M3 改名反映现行机制）', () => {
+    const out = sanitizeHtml('<style>.titlebar{display:none}</style><p>x</p>');
+    expect(out).not.toContain('<style');
+    expect(out).not.toContain('titlebar');
+  });
+
+  it('javascript: URI 剥除', () => {
+    const out = sanitizeHtml('<a href="javascript:alert(1)">点我</a>');
+    expect(out).toContain('点我');
+    expect(out).not.toContain('javascript:');
+  });
+
+  it('on* 事件属性剥除', () => {
+    const out = sanitizeHtml('<img src="a.png" onerror="alert(1)">');
+    expect(out).toContain('a.png');
+    expect(out).not.toContain('onerror');
+  });
+
+  it('iframe/object/embed 危险标签剥除', () => {
+    const out = sanitizeHtml('<iframe src="https://evil.example"></iframe><object></object><p>x</p>');
+    expect(out).not.toContain('iframe');
+    expect(out).not.toContain('object');
+  });
+
+  it('data-* 属性保留（mermaid/katex 钩子依赖）', () => {
+    const out = sanitizeHtml('<div data-mermaid="graph TD">x</div>');
+    expect(out).toContain('data-mermaid="graph TD"');
+  });
+
+  it('URI 白名单：http/https/mailto/相对路径/data:image 保留', () => {
+    const out = sanitizeHtml(
+      [
+        '<a href="https://a.example/b">1</a>',
+        '<a href="http://a.example/b">2</a>',
+        '<a href="mailto:a@b.example">3</a>',
+        '<a href="./notes/other.md">4</a>',
+        '<a href="#anchor">5</a>',
+        '<img src="data:image/png;base64,iVBOR">',
+      ].join(''),
+    );
+    expect(out).toContain('href="https://a.example/b"');
+    expect(out).toContain('href="http://a.example/b"');
+    expect(out).toContain('href="mailto:a@b.example"');
+    expect(out).toContain('href="./notes/other.md"');
+    expect(out).toContain('href="#anchor"');
+    expect(out).toContain('data:image/png;base64');
+  });
+
+  it('白名单外 URI 剥除：data:text/html、vbscript:', () => {
+    const out = sanitizeHtml('<a href="data:text/html;base64,PHNjcmlwdD4=">x</a><a href="vbscript:msgbox(1)">y</a>');
+    expect(out).toContain('x');
+    expect(out).not.toContain('data:text/html');
+    expect(out).not.toContain('vbscript:');
+  });
+
+  it('data: 仅放行 src/srcset：a[href] 上的 data:image 剥除（导航至 SVG data URL 可执行脚本）', () => {
+    const out = sanitizeHtml('<a href="data:image/svg+xml,%3Csvg onload=alert(1)%3E">x</a><a href="#d">y</a>');
+    expect(out).toContain('y');
+    expect(out).not.toContain('data:image');
+    expect(out).not.toContain('href="data:');
+  });
+
+  it('data: 仅放行 src/srcset：img 的 src/srcset data:image 保留（内嵌图片）', () => {
+    const out = sanitizeHtml(
+      '<img src="data:image/png;base64,iVBOR" srcset="data:image/png;base64,iVBOR 2x" alt="嵌入图">'
+    );
+    expect(out).toContain('src="data:image/png;base64,iVBOR"');
+    expect(out).toContain('srcset="data:image/png;base64,iVBOR 2x"');
+  });
+
+  it('data: 仅放行 src/srcset：action/formaction 等其余 URI 属性一并剥除', () => {
+    const out = sanitizeHtml(
+      '<form action="data:image/svg+xml,x"><button formaction="data:image/svg+xml,y">go</button></form>'
+    );
+    expect(out).not.toContain('action=');
+    expect(out).not.toContain('formaction=');
+  });
+
+  it('meta 标签显式禁用（防 DOMPurify 上游默认变化）', () => {
+    const out = sanitizeHtml(
+      '<meta http-equiv="refresh" content="0;url=https://evil.example"><p>x</p>'
+    );
+    expect(out).not.toContain('<meta');
+    expect(out).not.toContain('evil.example');
+  });
+
+  it('接受 Document 输入，返回净化字符串', () => {
+    const doc = docOf('<p>a</p><script>b</script>');
+    const out = sanitizeHtml(doc);
+    expect(typeof out).toBe('string');
+    expect(out).toContain('a');
+    expect(out).not.toContain('b');
+  });
+
+  it('mark/ins/dl/dt/dd 在 DOMPurify 默认允许表（Task 2 扩展语法 engine→sanitize 装配下不丢）', () => {
+    // mark/ins/deflist 三插件的引擎输出经 sanitizeHtml 真实装配核查：默认允许表
+    // 覆盖 <mark>/<ins>/<dl>/<dt>/<dd>，无需显式 ALLOWED_TAGS（Task 2 brief 注记）
+    const { html } = renderMarkdownToHtml('==高亮==\n\n++插入++\n\n术语\n: 定义一行\n');
+    const out = sanitizeHtml(html);
+    expect(out).toContain('<mark>高亮</mark>');
+    expect(out).toContain('<ins>插入</ins>');
+    expect(out).toContain('<dl>');
+    expect(out).toContain('<dt>术语</dt>');
+    expect(out).toContain('<dd>定义一行</dd>');
+  });
+});
+
+describe('enrichMarkdownDom——callout 转换', () => {
+  it('[!note] 块引用转为样式化卡片（标题 + 内容）', () => {
+    const doc = renderEnriched('> [!note] 标题行\n> 内容段落\n');
+    const card = doc.querySelector('.markdown-alert.markdown-alert-note');
+    expect(card).not.toBeNull();
+    expect(card!.querySelector('.markdown-alert-title')!.textContent).toContain('标题行');
+    expect(card!.querySelector('.markdown-alert-content')!.textContent).toContain('内容段落');
+    expect(doc.querySelector('blockquote')).toBeNull();
+  });
+
+  it('无标题 callout 用类型大写名作默认标题', () => {
+    const doc = renderEnriched('> [!tip]\n> 提示内容\n');
+    const title = doc.querySelector('.markdown-alert-tip .markdown-alert-title');
+    expect(title!.textContent).toBe('Tip');
+  });
+
+  it('已知类型 ≥6 个各自带类型类', () => {
+    for (const type of ['note', 'tip', 'warning', 'caution', 'important', 'info', 'example']) {
+      const doc = renderEnriched(`> [!${type}] t\n> c\n`);
+      expect(doc.querySelector(`.markdown-alert-${type}`), type).not.toBeNull();
+    }
+  });
+
+  it('未知类型用默认样式类仍转卡片', () => {
+    const doc = renderEnriched('> [!custom-kind] t\n> c\n');
+    expect(doc.querySelector('.markdown-alert.markdown-alert-custom-kind')).not.toBeNull();
+  });
+
+  it('普通块引用不受影响', () => {
+    const doc = renderEnriched('> 普通引用\n');
+    expect(doc.querySelector('blockquote')).not.toBeNull();
+    expect(doc.querySelector('.markdown-alert')).toBeNull();
+  });
+
+  it('callout 折叠后缀：+ 默认展开、- 默认收起、无后缀不变（Task 5）', () => {
+    const plus = renderEnriched('> [!note]+ 标题\n> 内容\n');
+    expect(plus.querySelector('.markdown-alert-foldable')).not.toBeNull();
+    expect(plus.querySelector('.markdown-alert-collapsed')).toBeNull();
+    const minus = renderEnriched('> [!warning]- 标题\n> 内容\n');
+    expect(minus.querySelector('.markdown-alert-collapsed')).not.toBeNull();
+    const plain = renderEnriched('> [!note] 标题\n> 内容\n');
+    expect(plain.querySelector('.markdown-alert-foldable')).toBeNull();
+    expect(plain.querySelector('.markdown-alert-collapsed')).toBeNull();
+  });
+
+  it('折叠后缀从保守：[!note]+x（后缀后随非空白）不触发折叠，标题保留原文', () => {
+    const doc = renderEnriched('> [!note]+x 标题\n> 内容\n');
+    expect(doc.querySelector('.markdown-alert-foldable')).toBeNull();
+    expect(doc.querySelector('.markdown-alert-title')!.textContent).toContain('+x 标题');
+  });
+
+  it('折叠卡片内容仍在 DOM（collapsed 只由 CSS 隐藏），标题点击切换 collapsed', () => {
+    const doc = renderEnriched('> [!note]- 标题\n> 内容段落\n');
+    const card = doc.querySelector('.markdown-alert')!;
+    expect(card.querySelector('.markdown-alert-content')!.textContent).toContain('内容段落');
+    const title = doc.querySelector('.markdown-alert-title') as HTMLElement;
+    title.click();
+    expect(doc.querySelector('.markdown-alert-collapsed')).toBeNull();
+    title.click();
+    expect(doc.querySelector('.markdown-alert-collapsed')).not.toBeNull();
+  });
+
+  it('折叠标题内锚链接点击不切换折叠（冒泡拦截），标题其余区域点击切换', () => {
+    // wikilink 步在 callout 之后运行：折叠卡片标题内 [[#目标]] 同获锚改写
+    const doc = renderEnriched('> [!note]+ 见 [[#目标]]\n> 内容\n\n## 目标\n');
+    const title = doc.querySelector('.markdown-alert-title') as HTMLElement;
+    const a = title.querySelector('a[data-wikilink="anchor"]') as HTMLElement;
+    expect(a).not.toBeNull();
+    a.click(); // 默认展开（+ 后缀）：链接点击不切换，维持无 collapsed
+    expect(doc.querySelector('.markdown-alert-collapsed')).toBeNull();
+    title.click(); // 标题空白区点击仍切换为收起
+    expect(doc.querySelector('.markdown-alert-collapsed')).not.toBeNull();
+  });
+
+  it('嵌套引用：内层 [!note] 转换为卡片，外层不触发保持块引用', () => {
+    const doc = renderEnriched('> > [!note]\n> > 嵌套\n');
+    // 外层首子元素是 blockquote 而非段落 → 外层不转换；内层按规则转卡片
+    const outer = doc.querySelector('blockquote');
+    expect(outer).not.toBeNull();
+    expect(doc.querySelectorAll('blockquote')).toHaveLength(1); // 仅剩外层
+    const card = doc.querySelector('.markdown-alert.markdown-alert-note');
+    expect(card).not.toBeNull();
+    expect(outer!.contains(card!)).toBe(true); // 卡片留在外层引用内
+    expect(card!.querySelector('.markdown-alert-title')!.textContent).toBe('Note');
+  });
+});
+
+describe('enrichMarkdownDom——媒体链接转换', () => {
+  it('img 指向 .mp4 转 video 占位（controls）', () => {
+    const doc = renderEnriched('![演示](movie.mp4)\n');
+    const video = doc.querySelector('video');
+    expect(video).not.toBeNull();
+    expect(video!.getAttribute('src')).toBe('movie.mp4');
+    expect(video!.hasAttribute('controls')).toBe(true);
+    expect(doc.querySelector('img')).toBeNull();
+  });
+
+  it('img 指向 .webm/.ogg 同样转 video', () => {
+    for (const ext of ['webm', 'ogg']) {
+      const doc = renderEnriched(`![v](a.${ext})\n`);
+      expect(doc.querySelector('video'), ext).not.toBeNull();
+    }
+  });
+
+  it('a 链接指向音频扩展名转 audio 占位', () => {
+    for (const ext of ['mp3', 'wav', 'flac', 'm4a']) {
+      const doc = renderEnriched(`[听](song.${ext})\n`);
+      const audio = doc.querySelector('audio');
+      expect(audio, ext).not.toBeNull();
+      expect(audio!.getAttribute('src')).toBe(`song.${ext}`);
+      expect(audio!.hasAttribute('controls')).toBe(true);
+    }
+  });
+
+  it('带查询串/锚点的媒体地址仍识别', () => {
+    const doc = renderEnriched('[听](song.mp3?t=1#x)\n');
+    expect(doc.querySelector('audio')).not.toBeNull();
+  });
+
+  it('普通图片与普通链接不受影响', () => {
+    const doc = renderEnriched('![图](photo.png) [文](page.md)\n');
+    expect(doc.querySelector('img')).not.toBeNull();
+    expect(doc.querySelector('a')).not.toBeNull();
+    expect(doc.querySelector('video')).toBeNull();
+    expect(doc.querySelector('audio')).toBeNull();
+  });
+
+  it('转出的媒体元素保留 alt 语义（aria-label）', () => {
+    const doc = renderEnriched('![演示视频](movie.mp4)\n');
+    const video = doc.querySelector('video')!;
+    expect(video.getAttribute('aria-label')).toBe('演示视频');
+  });
+});
+
+describe('enrichMarkdownDom——wikilink 四形态（Task 6）', () => {
+  it('[[#heading]] 产锚链接，href 原样 slug（remapHeadingHashLinks 统一改写收口）', () => {
+    const doc = renderEnriched('跳[[#目标]]转\n\n## 目标\n');
+    const a = doc.querySelector('a[data-wikilink="anchor"]')!;
+    expect(a).not.toBeNull();
+    expect(a.getAttribute('href')).toBe('#目标');
+  });
+
+  it('![[img]] 与尺寸段：|W 产 width、|WxH 产 width+height', () => {
+    const doc = renderEnriched('![[pic.png]] 与 ![[p2.png|100]] 与 ![[p3.png|100x50]]\n');
+    const imgs = doc.querySelectorAll('img');
+    expect(imgs.length).toBe(3);
+    expect(imgs[0]!.getAttribute('src')).toBe('pic.png');
+    expect(imgs[0]!.hasAttribute('width')).toBe(false);
+    expect(imgs[1]!.getAttribute('src')).toBe('p2.png');
+    expect(imgs[1]!.getAttribute('width')).toBe('100');
+    expect(imgs[1]!.hasAttribute('height')).toBe(false);
+    expect(imgs[2]!.getAttribute('width')).toBe('100');
+    expect(imgs[2]!.getAttribute('height')).toBe('50');
+  });
+
+  it('非法尺寸段只取首段路径、尺寸丢弃（img 仍在，未知写法从保守）', () => {
+    const doc = renderEnriched('![[p.png|abc]] 与 ![[q.png|1x2x3|尾段]]\n');
+    const imgs = doc.querySelectorAll('img');
+    expect(imgs.length).toBe(2);
+    expect(imgs[0]!.getAttribute('src')).toBe('p.png');
+    expect(imgs[0]!.hasAttribute('width')).toBe(false);
+    expect(imgs[1]!.getAttribute('src')).toBe('q.png');
+    expect(imgs[1]!.hasAttribute('width')).toBe(false);
+  });
+
+  it('[[file]] 跨文件形态降级不可点（原文保留在 span）', () => {
+    const doc = renderEnriched('见 [[Other.md]]\n');
+    const dead = doc.querySelector('.md-wikilink-dead')!;
+    expect(dead.textContent).toBe('[[Other.md]]');
+    expect(dead.getAttribute('title')).toBe('跨文件 wikilink 不支持');
+    expect(doc.querySelector('a[href="Other.md"]')).toBeNull();
+  });
+
+  it('外域绝对地址 ![[https://…]] 不产 img（BUG-17 口径：引擎 autolink 先行 + enrich 守卫双防线）', () => {
+    // 裸 URL 被引擎先转 autolink（A 祖先被扫描跳过）——外域嵌入到不了 img
+    const doc = renderEnriched('![[https://evil.example/t.png]] 与 ![[//evil.example/u.png]]\n');
+    expect(doc.querySelector('img')).toBeNull();
+    // 引擎 linkify 拆不到的形态（enrich 收到含外域 src 的完整文本节点）走
+    // isExternalMediaSrc 守卫：降级不可点原文（docOf 直喂绕开引擎 autolink）
+    const doc2 = docOf('<p>![[https://evil.example/a b.png]]</p>');
+    enrichMarkdownDom(doc2);
+    expect(doc2.querySelector('img')).toBeNull();
+    expect(doc2.querySelector('.md-wikilink-dead')?.textContent).toBe('![[https://evil.example/a b.png]]');
+  });
+
+  it('代码内 [[x]] 字面保留：行内 code 与围栏均不触发', () => {
+    const doc = renderEnriched('`[[x]]` 与\n\n```\n[[y]]\n```\n');
+    expect(doc.querySelector('code')!.textContent).toContain('[[x]]');
+    expect(doc.querySelector('pre')!.textContent).toContain('[[y]]');
+    expect(doc.querySelector('a[data-wikilink]')).toBeNull();
+    expect(doc.querySelector('.md-wikilink-dead')).toBeNull();
+  });
+
+  it('链接内不嵌套改写（A 祖先跳过）', () => {
+    const doc = renderEnriched('[文本 [[x]] 更多](https://a.example/b)\n');
+    expect(doc.querySelector('.md-wikilink-dead')).toBeNull();
+    expect(doc.querySelector('a')!.textContent).toContain('[[x]]');
+  });
+
+  it('混合段落多节点拆分：文字与两种 wikilink 交错，全文不丢字', () => {
+    const doc = renderEnriched('前 [[#a]] 中 [[Other.md]] 后\n');
+    const p = doc.querySelector('p')!;
+    expect(p.childNodes.length).toBeGreaterThanOrEqual(5);
+    expect(p.querySelector('a[data-wikilink="anchor"]')).not.toBeNull();
+    expect(p.querySelector('.md-wikilink-dead')).not.toBeNull();
+    expect(p.textContent).toBe('前 [[#a]] 中 [[Other.md]] 后');
+  });
+});
+
+describe('sanitizeHtml——外域图片拦截（BUG-17 跟踪像素防线）', () => {
+  it('img 的 http(s) src 移除并打 data-vv-blocked-external 标记，title 保留域名', () => {
+    const out = sanitizeHtml(
+      '<img src="https://tracker.example.com/track.png" alt="x"><img src="http://evil.example/p.gif">'
+    );
+    expect(out).not.toContain('src="https://tracker.example.com');
+    expect(out).not.toContain('src="http://evil.example');
+    expect(out).toContain('data-vv-blocked-external="1"');
+    expect(out).toContain('已拦截外部图片：tracker.example.com');
+    expect(out).toContain('已拦截外部图片：evil.example');
+    expect(out).toContain('alt="x"'); // 其余属性不受影响
+  });
+
+  it('协议相对（//host/…）同样拦截', () => {
+    const out = sanitizeHtml('<img src="//tracker.example.net/p.png">');
+    expect(out).not.toContain('src="//');
+    expect(out).toContain('data-vv-blocked-external="1"');
+    expect(out).toContain('已拦截外部图片：tracker.example.net');
+  });
+
+  it('相对路径 / data:image 不拦截（markdown 相对图片解析与内嵌图不受损）', () => {
+    // 注：blob: 不在 DOMPurify 既有白名单内（markdown 相对图片解析为 blob URL
+    // 发生在净化之后、不经本管线），不在此用例范围
+    const out = sanitizeHtml(
+      '<img src="photo.png"><img src="./a/b.jpg"><img src="data:image/png;base64,iVBOR">'
+    );
+    expect(out).toContain('src="photo.png"');
+    expect(out).toContain('src="./a/b.jpg"');
+    expect(out).toContain('src="data:image/png;base64,iVBOR"');
+    expect(out).not.toContain('data-vv-blocked-external');
+  });
+
+  it('srcset 外域候选同样拦截：无 src 时整体移除并置标记（无 src 浏览器按 srcset 加载）', () => {
+    const out = sanitizeHtml('<img srcset="https://t.example/b.png 1x, /local-c.png 2x">');
+    expect(out).not.toContain('t.example');
+    expect(out).toContain('srcset="/local-c.png 2x"'); // 非外域候选保留
+    expect(out).not.toContain('data-vv-blocked-external'); // 仍有本地候选可用，不置标记
+  });
+
+  it('srcset 全部候选外域且无 src：移除 srcset 并置拦截标记', () => {
+    const out = sanitizeHtml('<img srcset="https://t.example/b.png 1x, //t.example/c.png 2x">');
+    expect(out).not.toContain('srcset=');
+    expect(out).toContain('data-vv-blocked-external="1"');
+    expect(out).toContain('已拦截外部图片：t.example');
+  });
+
+  it('src 配合外域 srcset：src 被拦 + srcset 外域候选全滤（data:image 候选保留）', () => {
+    const out = sanitizeHtml(
+      '<img src="https://t.example/a.png" srcset="https://t.example/b.png 1x, data:image/png;base64,iVBOR 2x">'
+    );
+    expect(out).not.toContain('src="https://t.example');
+    // 注：DOMPurify 序列化时对 srcset 候选做规范化（base64 逗号后补空格），按子串断言
+    expect(out).toContain('srcset="data:image/png;base64');
+    // 外域 URL 形态不得残留在加载属性中（title 里的被拦域名属预期提示）
+    expect(out).not.toContain('t.example/');
+    expect(out).not.toContain('src="https://t.example');
+    expect(out).toContain('data-vv-blocked-external="1"'); // src 已拦，标记已置
+  });
+
+  it('链接 <a href> 外链不拦（用户主动导航，与图片的被动加载区分）', () => {
+    const out = sanitizeHtml('<a href="https://external.example/x">外链</a>');
+    expect(out).toContain('href="https://external.example/x"');
+    expect(out).not.toContain('data-vv-blocked-external');
+  });
+});
+
+describe('外域媒体自动加载防线（BUG-17/MD-13 延伸）', () => {
+  it('裸 HTML video/audio：外域 src 保留但强制 preload=none 并去 autoplay', () => {
+    const html = sanitizeHtml(
+      '<video controls autoplay src="https://evil.example.com/clip.mp4"></video>' +
+        '<audio controls src="https://evil.example.com/a.mp3"></audio>'
+    );
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    const video = div.querySelector('video')!;
+    expect(video.getAttribute('src')).toBe('https://evil.example.com/clip.mp4');
+    expect(video.getAttribute('preload')).toBe('none');
+    expect(video.hasAttribute('autoplay')).toBe(false);
+    expect(div.querySelector('audio')!.getAttribute('preload')).toBe('none');
+  });
+
+  it('内部相对 src 的 video 不受影响（preload 不被强改）', () => {
+    const html = sanitizeHtml('<video controls src="sample.mp4"></video>');
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    const video = div.querySelector('video')!;
+    expect(video.getAttribute('src')).toBe('sample.mp4');
+    expect(video.hasAttribute('preload')).toBe(false);
+  });
+
+  it('source 外域候选剥除 src；内部候选保留', () => {
+    const html = sanitizeHtml(
+      '<video controls><source src="https://evil.example.com/a.mp4"><source src="local.mp4"></video>'
+    );
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    const sources = Array.from(div.querySelectorAll('source'));
+    expect(sources).toHaveLength(2);
+    expect(sources[0]!.getAttribute('src')).toBeNull();
+    expect(sources[1]!.getAttribute('src')).toBe('local.mp4');
+  });
+});
+
+describe('enrich 媒体替换的外域守卫（a/img → video/audio，MD-13）', () => {
+  it('a 链接外域 mp4 → video 带 preload=none 与域名 title 提示', () => {
+    const doc = docOf('<p><a href="https://evil.example.com/clip.mp4">视频</a></p>');
+    enrichMarkdownDom(doc);
+    const v = doc.querySelector('video')!;
+    expect(v.getAttribute('src')).toBe('https://evil.example.com/clip.mp4');
+    expect(v.getAttribute('preload')).toBe('none');
+    expect(v.getAttribute('title')).toContain('evil.example.com');
+  });
+
+  it('img 内域 mp4 → 正常 video，无 preload 强改', () => {
+    const doc = docOf('<p><img src="sample.mp4" alt="clip"></p>');
+    enrichMarkdownDom(doc);
+    const v = doc.querySelector('video')!;
+    expect(v.getAttribute('src')).toBe('sample.mp4');
+    expect(v.hasAttribute('preload')).toBe(false);
+  });
+});
+
+describe('sanitizeHtml——五类等价加载向量外域拦截（BUG-40）', () => {
+  it('① video/audio 的外域 poster 移除并打标记（poster 随渲染即拉取，preload 拦不住）', () => {
+    const html = sanitizeHtml(
+      '<video controls poster="https://evil.example.com/p.jpg" src="local.mp4"></video>' +
+        '<audio controls poster="//evil.example.net/a.jpg"></audio>'
+    );
+    expect(html).not.toContain('poster='); // 两形态全剥（http 绝对 + 协议相对）
+    expect(html).not.toContain('evil.example.com/p.jpg');
+    expect(html).not.toContain('evil.example.net/a.jpg');
+    expect(html).toContain('data-vv-blocked-external="1"');
+    expect(html).toContain('已拦截外部图片：evil.example.com');
+    // src 语义不受影响（MD-13：preload=none 点播放才请求）
+    expect(html).toContain('src="local.mp4"');
+  });
+
+  it('① 内域/相对 poster 保留（data: poster 由既有 data: 收窄分支剥除）', () => {
+    const html = sanitizeHtml(
+      '<video controls poster="local.jpg" src="local.mp4"></video>' +
+        '<video controls poster="data:image/png;base64,iVBOR"></video>'
+    );
+    expect(html).toContain('poster="local.jpg"');
+    expect(html).not.toContain('poster="data:'); // data: 收窄（非 BUG-40 判据，不置拦截标记）
+    expect(html).not.toContain('data-vv-blocked-external');
+  });
+
+  it('② SVG image 的 href/xlink:href 外域移除并打标记，内域保留', () => {
+    const html = sanitizeHtml(
+      '<svg><image href="https://evil.example.com/s.png"></image>' +
+        '<image xlink:href="https://evil.example.net/t.png"></image>' +
+        '<image href="local.png"></image></svg>'
+    );
+    expect(html).not.toContain('evil.example.com/s.png');
+    expect(html).not.toContain('evil.example.net/t.png');
+    expect(html).toContain('href="local.png"');
+    expect(html).toContain('data-vv-blocked-external="1"');
+    expect(html).toContain('已拦截外部图片：evil.example.com');
+  });
+
+  it('③ 行内 style 外域 url() 剥声明：其余声明保留，全部外域时整属性移除', () => {
+    const html = sanitizeHtml(
+      '<div style="color:red;background:url(https://evil.example.com/bg.png)">x</div>' +
+        '<div style="background:url(//evil.example.net/bg.png)">y</div>' +
+        '<div style="background:url(https://evil.example.com/only.png)">z</div>'
+    );
+    expect(html).toContain('style="color:red"'); // 外域声明剥除、其余保留
+    expect(html).not.toContain('evil.example.com/bg.png');
+    expect(html).not.toContain('evil.example.net/bg.png');
+    expect(html).not.toContain('style="background:'); // 仅外域声明 → 整属性移除
+    expect(html).toContain('data-vv-blocked-external="1"');
+    expect(html).toContain('已拦截外部图片：evil.example.com');
+  });
+
+  it('③ 行内 style 相对/data url 与无 url 声明不受损（image-set 字符串 URL 同拦）', () => {
+    const html = sanitizeHtml(
+      '<div style="color: crimson;background:url(./a.png);list-style-image:url(data:image/png;base64,iVBOR)">x</div>' +
+        '<div style="background:image-set(&quot;https://evil.example.com/i.png&quot; 1x)">y</div>'
+    );
+    expect(html).toContain('color: crimson');
+    expect(html).toContain('url(./a.png)');
+    expect(html).toContain('data:image/png;base64');
+    expect(html).not.toContain('image-set'); // 外域 image-set 声明整体剥除
+    expect(html).not.toContain('evil.example.com/i.png');
+    expect(html).toContain('data-vv-blocked-external="1"');
+  });
+
+  it('④ table background 属性外域移除并打标记，内域保留', () => {
+    const html = sanitizeHtml(
+      '<table background="https://evil.example.com/tbg.png"><tr><td>a</td></tr></table>' +
+        '<table background="tbg-local.png"><tr><td>b</td></tr></table>'
+    );
+    expect(html).not.toContain('evil.example.com/tbg.png');
+    expect(html).toContain('background="tbg-local.png"');
+    expect(html).toContain('data-vv-blocked-external="1"');
+    expect(html).toContain('已拦截外部图片：evil.example.com');
+  });
+
+  it('⑤ input type=image 的外域 src 移除并打标记，checkbox 等其余 input 不受影响', () => {
+    const html = sanitizeHtml(
+      '<input type="image" src="https://evil.example.com/i.png" alt="x">' +
+        '<input type="checkbox" checked><input type="text">'
+    );
+    expect(html).not.toContain('evil.example.com/i.png');
+    expect(html).toContain('type="checkbox"');
+    expect(html).toContain('data-vv-blocked-external="1"');
+    expect(html).toContain('已拦截外部图片：evil.example.com');
+  });
+});
+
+describe('sanitizeHtml——服务端图表 style 上下文豁免（spec §2.5 控制器裁决）', () => {
+  const SRV = '<div data-vv-diagram="server" data-diagram-lang="dot" data-diagram-src="digraph{a}">';
+
+  it('服务端图表容器内的 style 存活（引擎线条样式不丢）', () => {
+    const out = sanitizeHtml(`${SRV}<svg><style>.e{fill:none;stroke:red}</style><path d="M0 0"/></svg></div>`);
+    expect(out).toContain('<style>');
+    expect(out).toContain('.e{fill:none;stroke:red}');
+  });
+
+  it('豁免 style 命中危险 token 整节点丢弃（url(/@import/expression(——凡命中即敌意，降级不保留）', () => {
+    const out = sanitizeHtml(
+      `${SRV}<style>.a{background:url(https://evil.example/b.png)}@import "x.css";p{width:expression(alert(1))}</style></div>`
+    );
+    expect(out).not.toContain('<style');
+    expect(out).not.toContain('evil.example');
+    expect(out).not.toContain('expression(');
+  });
+
+  it('豁免 style 嵌入式 </style 同样整节点丢弃', () => {
+    // raw text 元素里 </style 后随非终止字符（"）才会留在文本内
+    const out = sanitizeHtml(`${SRV}<style>.a{content:"</style"}</style></div>`);
+    expect(out).not.toContain('<style');
+    const back = new DOMParser().parseFromString(out, 'text/html');
+    expect(back.querySelector('div[data-vv-diagram="server"] style')).toBeNull();
+  });
+
+  it('对抗性：CSS hex/字面转义伪装的 url( 归一化后整节点丢弃（H1）', () => {
+    // 浏览器 CSS tokenizer 先解码转义再语义化：\75 rl( 与 u\72 l( 均按 url( 生效，
+    // 字面串匹配会漏——归一化副本（hex 转义含尾随空白消费 + 字面转义）上匹配
+    const hexed = sanitizeHtml(`${SRV}<style>\\75 rl(https://evil.example/x.png)</style></div>`);
+    expect(hexed).not.toContain('<style');
+    expect(hexed).not.toContain('evil.example');
+    const literal = sanitizeHtml(`${SRV}<style>u\\72 l(https://evil.example/x.png)</style></div>`);
+    expect(literal).not.toContain('<style');
+    // 绝对 URL 的 hex 伪装（\2f→/；hex 转义须空白终止，否则后续 hex 字母并入
+    // 转义——\2fevil 是 U+02FE+vil 而非 /evil，实现与浏览器 tokenizer 同语义）
+    const slashed = sanitizeHtml(`${SRV}<style>a{background:https:\\2f\\2f evil.example/p.png}</style></div>`);
+    expect(slashed).not.toContain('<style');
+    expect(slashed).not.toContain('evil.example');
+  });
+
+  it('对抗性：image-set( 字符串 URL 形态整节点丢弃（M1，与属性层 externalRefInDeclaration 同口径）', () => {
+    const out = sanitizeHtml(`${SRV}<style>.a{background:image-set("https://evil.example/i.png" 1x)}</style></div>`);
+    expect(out).not.toContain('<style');
+    expect(out).not.toContain('evil.example');
+  });
+
+  it('合法引擎 CSS 不误杀（layout-rs/svgbob 真实 token：font-family/stroke/fill 等原样保留）', () => {
+    const engineCss = '.node_1 path{stroke:black;fill:none;stroke-width:1px;}text{font-family:"DejaVu Sans";font-size:14px;}line{stroke:gray;}';
+    const out = sanitizeHtml(`${SRV}<style>${engineCss}</style><svg/></div>`);
+    expect(out).toContain('<style>');
+    expect(out).toContain(engineCss);
+  });
+
+  // ---- 终审 C1：真实引擎输出 fixture 三向固化（终审实证缺口：此前误杀回归用例为
+  // 自造近似样本。以下两段夹具分别自 layout-rs 0.1.3 与 svgbob 0.7.6 对代表性输入
+  // 的直出 <style> 逐字提取——svgbob 恒含 marker-start/end: url(#arrow) 等片段引用，
+  // 修复前「含 url( 即整节点丢弃」把全部 svgbob 服务端图杀掉） ----
+
+  /** svgbob 0.7.6 直出 style 片段（`svgbob::to_svg("+---+\n|a|")` 逐字提取，承载描边与箭头 marker 规则） */
+  const SVGBOB_STYLE_076 = `.svgbob line, .svgbob path, .svgbob circle, .svgbob rect, .svgbob polygon {
+  stroke: black;
+  stroke-width: 2;
+  stroke-opacity: 1;
+  fill-opacity: 1;
+  stroke-linecap: round;
+  stroke-linejoin: miter;
+}
+
+.svgbob text {
+  white-space: pre;
+  fill: black;
+  font-family: Iosevka Fixed, monospace;
+  font-size: 14px;
+}
+
+.svgbob .end_marked_arrow {
+  marker-end: url(#arrow);
+}
+
+.svgbob .start_marked_arrow {
+  marker-start: url(#arrow);
+}`;
+
+  it('真实引擎 fixture：svgbob 0.7.6 style（含 url(#arrow) 片段引用）存活——整杀即线条消失（C1）', () => {
+    const out = sanitizeHtml(`${SRV}<svg><style>${SVGBOB_STYLE_076}</style><line class="solid"/></svg></div>`);
+    expect(out).toContain('<style>');
+    expect(out).toContain('stroke: black');
+    expect(out).toContain('marker-end: url(#arrow)');
+    expect(out).toContain('marker-start: url(#arrow)');
+  });
+
+  it('真实引擎 fixture：layout-rs 0.1.3 style（字体类规则）存活', () => {
+    const out = sanitizeHtml(`${SRV}<svg><style>.a14 { font-size: 14px; font-family: Times, serif; }</style><ellipse/></svg></div>`);
+    expect(out).toContain('<style>');
+    expect(out).toContain('.a14 { font-size: 14px; font-family: Times, serif; }');
+  });
+
+  it('敌意 style 整节点丢弃后容器与 svg 仍在（降级不炸图，仅样式没了）', () => {
+    const hostile = [
+      // 归一化伪装的 url(（hex 转义 → url(https://…）
+      '\\75 rl(https://evil.example/x.png)',
+      // 直写非片段 url(（绝对 URL——片段放行规则的另一半：非 # 形态仍杀）
+      'background:url(https://evil.example/b.png)',
+      // image-set 引号 URL（无 url( 形态的字符串 URL 向量）
+      'background:image-set("https://evil.example/i.png" 1x)',
+    ];
+    for (const css of hostile) {
+      const out = sanitizeHtml(`${SRV}<svg><style>.a{${css}}</style><line/></svg></div>`);
+      expect(out).not.toContain('<style');
+      expect(out).not.toContain('evil.example');
+      // 丢弃仅限 style 节点：容器 div 与 svg 图元保留（图降级为无线条，不整块消失）
+      const back = new DOMParser().parseFromString(out, 'text/html');
+      expect(back.querySelector('div[data-vv-diagram="server"]')).not.toBeNull();
+      expect(back.querySelector('div[data-vv-diagram="server"] svg line')).not.toBeNull();
+    }
+  });
+
+  it('普通位置的 style 仍被剥除（BUG-40 防线不松动）', () => {
+    const out = sanitizeHtml('<style>.titlebar{display:none}</style><p>x</p>');
+    expect(out).not.toContain('<style');
+    expect(out).not.toContain('titlebar');
+  });
+
+  it('容器外的 svg style 同样剥除（豁免仅限容器上下文）', () => {
+    const out = sanitizeHtml('<svg><style>.g{display:none}</style><path/></svg>');
+    expect(out).not.toContain('<style');
+    expect(out).not.toContain('.g');
+  });
+});

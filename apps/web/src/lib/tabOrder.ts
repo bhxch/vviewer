@@ -4,7 +4,7 @@
  * （仅 type 引 TabSnapshot），由 tabActions.test.ts 直测；openFlow.svelte.ts 的
  * TabCollection 方法消费这些函数再落 $state。
  */
-import type { TreeStore } from '@vviewer/core';
+import type { TreeStore } from '@bhxch/vviewer-core';
 import type { TabSnapshot } from './stores/session';
 
 // ---------- pinned 区拆分与重排 ----------

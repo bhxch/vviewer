@@ -1,6 +1,6 @@
 // markdownImages.test.ts — 相对图片解析（路径规范 + L4 大小上限）单测。
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { TreeNode, TreeStore } from '@vviewer/core';
+import type { TreeNode, TreeStore } from '@bhxch/vviewer-core';
 import { IMAGE_MAX_BYTES, resolveImageBlobUrl, resolveInStorePath } from './markdownImages';
 
 // jsdom 无 URL.createObjectURL/revokeObjectURL：补桩（blob 语义不在本测范围）；

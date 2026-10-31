@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createRegistry, type Renderer } from '@vviewer/core';
+import { createRegistry, type Renderer } from '@bhxch/vviewer-core';
 // rendererPickerMenu.test.ts — 布局自由化 Task 3：渲染器自选双入口（状态栏指示器 +
 // tab 右键子菜单）共享候选构造的单测。纯函数无 runes/DOM（openWith.test.ts 同款），
 // 钉住四条源码契约：

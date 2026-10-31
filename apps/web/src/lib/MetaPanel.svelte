@@ -15,13 +15,13 @@
   import { fileMeta, setInspectorLittle, exportState, getExportDoc } from './metaStore.svelte';
   import { tabStore } from './openFlow.svelte';
   import { MORE_RENDERER_ID, LESS_RENDERER_ID, rendererCandidatesOfTab } from './RendererPickerMenu';
-  import { detectableLanguageNames } from '@vviewer/highlight';
+  import { detectableLanguageNames } from '@bhxch/vviewer-highlight';
   import { registry } from './viewer';
   import {
     collectExportHtml,
     collectPrintHtml,
     exportBaseCss
-  } from '@vviewer/render-text/markdown/export';
+  } from '@bhxch/vviewer-render-text/markdown/export';
   import {
     downloadExport,
     exportFileName,

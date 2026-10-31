@@ -6,8 +6,8 @@
  * 单向：tabsModel ← serverConnect ← openFlow façade，无环）。
  * 关闭邻位/批量对齐算法抽在 tabNeighbors.ts（纯函数，root vitest 可直测）。
  */
-import type { TreeStore, FileSource } from '@vviewer/core';
-import { getRemoteBase } from '@vviewer/core';
+import type { TreeStore, FileSource } from '@bhxch/vviewer-core';
+import { getRemoteBase } from '@bhxch/vviewer-core';
 import {
   saveWorkspaces,
   maxTabSeqOf,

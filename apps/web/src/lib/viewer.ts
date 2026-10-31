@@ -1,6 +1,6 @@
-import { createRegistry, createDispatcher, GENERATED_EXTENSIONS, getRemoteBase, type Dispatcher, type Registry, type FileSource } from '@vviewer/core';
-import { codeRenderer, attachHighlightRouter } from '@vviewer/render-text';
-// markdown 渲染组合包（@vviewer/markdown）：渲染器与注入缝的实现单源。装配语义
+import { createRegistry, createDispatcher, GENERATED_EXTENSIONS, getRemoteBase, type Dispatcher, type Registry, type FileSource } from '@bhxch/vviewer-core';
+import { codeRenderer, attachHighlightRouter } from '@bhxch/vviewer-render-text';
+// markdown 渲染组合包（@bhxch/vviewer-markdown）：渲染器与注入缝的实现单源。装配语义
 // 与 render-text 转出口时期一致（render-text/markdown/* 现为对组合包的纯转出口）。
 import {
   markdownRenderer,
@@ -10,23 +10,23 @@ import {
   setHighlightFence,
   setResolveRemoteBase,
   renderMarkdownBody
-} from '@vviewer/markdown';
+} from '@bhxch/vviewer-markdown';
 // 围栏高亮桥（HighlightClient worker 单例 → 围栏 HTML）：实现留在 render-text
 // （client attach 于其 code 模块，桥必须与 attach 同包），经组合包 setHighlightFence
 // 注入——同一实例只走这一条路径，包内默认主线程高亮器不参与（不双轨化）。
-import { fenceToHtml } from '@vviewer/render-text/markdown/markdownRenderer';
-import { DEFAULT_KROKI_HOST, resolveDiagramType } from '@vviewer/render-diagram';
-import { htmlRenderer } from '@vviewer/render-text/html';
-import { imageRenderer } from '@vviewer/render-media';
-import { avRenderer } from '@vviewer/render-media/av';
-import { pdfRenderer } from '@vviewer/render-doc';
-import { docxRenderer } from '@vviewer/render-doc/docx';
-import { xlsxRenderer } from '@vviewer/render-doc/xlsx';
-import { pptxRenderer } from '@vviewer/render-doc/pptx';
-import { hexRenderer } from '@vviewer/render-binary';
-import { archiveRenderer } from '@vviewer/render-archive';
-import { configureLibarchive } from '@vviewer/render-archive/libarchiveStore';
-import { jsonlRenderer } from '@vviewer/render-text/jsonl';
+import { fenceToHtml } from '@bhxch/vviewer-render-text/markdown/markdownRenderer';
+import { DEFAULT_KROKI_HOST, resolveDiagramType } from '@bhxch/vviewer-render-diagram';
+import { htmlRenderer } from '@bhxch/vviewer-render-text/html';
+import { imageRenderer } from '@bhxch/vviewer-render-media';
+import { avRenderer } from '@bhxch/vviewer-render-media/av';
+import { pdfRenderer } from '@bhxch/vviewer-render-doc';
+import { docxRenderer } from '@bhxch/vviewer-render-doc/docx';
+import { xlsxRenderer } from '@bhxch/vviewer-render-doc/xlsx';
+import { pptxRenderer } from '@bhxch/vviewer-render-doc/pptx';
+import { hexRenderer } from '@bhxch/vviewer-render-binary';
+import { archiveRenderer } from '@bhxch/vviewer-render-archive';
+import { configureLibarchive } from '@bhxch/vviewer-render-archive/libarchiveStore';
+import { jsonlRenderer } from '@bhxch/vviewer-render-text/jsonl';
 import { browser } from '$app/env';
 import { ensureHighlightClient, computeRouter } from './highlightClient';
 import { routeLargeFileHighlight } from './highlightRouter';
@@ -85,7 +85,7 @@ if (browser) {
   attachHighlightRouter(routeLargeFileHighlight);
 }
 
-// ---------- markdown 渲染组合包接线（@vviewer/markdown，自 render-text 转出口切换） ----------
+// ---------- markdown 渲染组合包接线（@bhxch/vviewer-markdown，自 render-text 转出口切换） ----------
 
 // 围栏高亮单一路径：app 的 tree-sitter worker client（highlightClient create →
 // attachHighlightClient 注入 render-text code 模块）经 fenceToHtml 桥为组合包的
@@ -94,7 +94,7 @@ if (browser) {
   setHighlightFence(fenceToHtml);
 }
 
-// 远程计算来源决策注入缝（组合包不依赖 @vviewer/core 的 getRemoteBase）：远程
+// 远程计算来源决策注入缝（组合包不依赖 @bhxch/vviewer-core 的 getRemoteBase）：远程
 // store 文件（core 远程注册表有 remote base）向注入后端传 {path, storeId}，本地
 // 恒 null——原 markdownRenderer 渲染路径内联判断的等价形态。纯注册表查询无
 // 浏览器依赖，不入 browser 门（与渲染期原行为一致：任何环境都可裁决）。

@@ -317,11 +317,11 @@ export function writeManifest(outDir, manifestOut, aliases = loadAliases(), vend
 
 /**
  * web-tree-sitter 运行时 wasm（tree-sitter.wasm）就位到 static/ 根：runtime.test 与 dev
- * 服务器直接读文件系统，不经 vite（依赖版本由 packages/highlight 的 pnpm-lock 锁定）。
+ * 服务器直接读文件系统，不经 vite（依赖版本由 packages/vviewer-highlight 的 pnpm-lock 锁定）。
  */
 export function ensureRuntimeWasm(outDir = PATHS.outDir) {
   // web-tree-sitter 的 exports 不含 ./package.json，从主入口（包根下的 .cjs）反推包目录
-  const require = createRequire(path.join(repoRoot, 'packages/highlight/package.json'));
+  const require = createRequire(path.join(repoRoot, 'packages/vviewer-highlight/package.json'));
   const wtsDir = path.dirname(require.resolve('web-tree-sitter'));
   const dest = path.join(path.dirname(outDir), 'tree-sitter.wasm');
   fs.copyFileSync(path.join(wtsDir, 'tree-sitter.wasm'), dest);

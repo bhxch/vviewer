@@ -10,7 +10,7 @@
   // 创建：组已建则 rename 为最终名（无取消语义，「可跳过」= 不加来源直接完成）。
   // Esc 双 handler 仿 GlobalSearchPanel（容器 keydown + window 兜底）；焦点在浏览
   // 层时由内层 handler 先关浏览层（target 互斥不双触发）。
-  import { createLocalFsStore, isAbortError } from '@vviewer/core';
+  import { createLocalFsStore, isAbortError } from '@bhxch/vviewer-core';
   import {
     addDirStoreTab,
     openDirectoryViaInput,

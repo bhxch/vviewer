@@ -1,5 +1,5 @@
-import { isCanceledMessage, RemoteComputeError, type ComputeResult, type HighlightInterval } from '@vviewer/core';
-import { HighlightCanceledError } from '@vviewer/highlight';
+import { isCanceledMessage, RemoteComputeError, type ComputeResult, type HighlightInterval } from '@bhxch/vviewer-core';
+import { HighlightCanceledError } from '@bhxch/vviewer-highlight';
 
 /**
  * ComputeResult<HighlightInterval[]> → 区间数组或类型化错误（withDebug 的收敛点，

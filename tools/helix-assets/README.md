@@ -1,6 +1,6 @@
 # helix-assets 生成器
 
-从本机 helix-editor/helix 与 markpad-aio 的源资产生成 `packages/highlight/assets/` 下的三件资产：
+从本机 helix-editor/helix 与 markpad-aio 的源资产生成 `packages/vviewer-highlight/assets/` 下的三件资产：
 
 | 产物 | 来源 | 说明 |
 | --- | --- | --- |

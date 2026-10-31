@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import 'fake-indexeddb/auto';
-import { captureToCssClass, resolveCapture, themeToCssVars } from '@vviewer/highlight';
-import { renderLineHtml } from '@vviewer/render-text';
+import { captureToCssClass, resolveCapture, themeToCssVars } from '@bhxch/vviewer-highlight';
+import { renderLineHtml } from '@bhxch/vviewer-render-text';
 import {
   applyAppearance,
   applyAppearanceFromSettings,
@@ -406,8 +406,8 @@ describe('captureToCssClass 与 code.ts 类名对齐', () => {
   });
 });
 
-describe('.ts-*/.hljs-* 映射段随 @vviewer/markdown/markdown.css 单源（app.css 切换事实锁定）', () => {
-  // markdown 渲染样式段（含 .ts-*/.hljs-* 高亮映射）已收进 @vviewer/markdown 的
+describe('.ts-*/.hljs-* 映射段随 @bhxch/vviewer-markdown/markdown.css 单源（app.css 切换事实锁定）', () => {
+  // markdown 渲染样式段（含 .ts-*/.hljs-* 高亮映射）已收进 @bhxch/vviewer-markdown 的
   // markdown.css（app.css 顶部 @import 引入；对齐细节由包内 cssMirror.test.ts 锁定
   // ——.ts-* 默认色与 onelight 主题逐条等价、镜像与 MARKDOWN_CSS 逐字节等价）。
   // 此处锁 app.css 侧的切换事实：映射段不再双持，运行时规则由包 CSS 提供。
@@ -418,9 +418,9 @@ describe('.ts-*/.hljs-* 映射段随 @vviewer/markdown/markdown.css 单源（app
   );
   const markdownCss = readFileSync(
     [
-      'packages/markdown/src/markdown.css',
-      'node_modules/@vviewer/markdown/src/markdown.css',
-      '../../packages/markdown/src/markdown.css'
+      'packages/vviewer-markdown/src/markdown.css',
+      'node_modules/@bhxch/vviewer-markdown/src/markdown.css',
+      '../../packages/vviewer-markdown/src/markdown.css'
     ]
       .map((p) => resolve(p))
       .find((p) => existsSync(p))!,

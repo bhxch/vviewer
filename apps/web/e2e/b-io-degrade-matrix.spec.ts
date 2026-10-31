@@ -13,8 +13,8 @@ import {
 
 /**
  * IO 流式公共防线降级矩阵 e2e（DEG-01~09；docs/e2e/io-degrade-matrix.md）：
- * dispatcher 读策略（packages/core/src/dispatch/dispatcher.ts）与 BlockStream 回退
- * 语义（packages/render-text/src/blockStream.ts）的降级矩阵整行锚点——b-io-streaming
+ * dispatcher 读策略（packages/vviewer-core/src/dispatch/dispatcher.ts）与 BlockStream 回退
+ * 语义（packages/vviewer-render-text/src/blockStream.ts）的降级矩阵整行锚点——b-io-streaming
  * （IO-01~11）只覆盖「rangeCapable + Range 服务器 + size 已知」的窗口流式正路，本
  * spec 锚定其余矩阵行：
  * - DEG-01/09：url store（!rangeCapable，size null）→ dispatcher 全量 ctx（=现状），

@@ -49,7 +49,7 @@ describe('导出动作区可见性契约（仅 markdown 渲染 tab 显示）', (
 describe('导出链路接线契约', () => {
   it('MetaPanel 消费 Task 1 纯函数与触发壳辅助：装配/打印模板/浅色重画/图片解析', () => {
     const src = readSrc('src/lib/MetaPanel.svelte');
-    expect(src).toContain("from '@vviewer/render-text/markdown/export'");
+    expect(src).toContain("from '@bhxch/vviewer-render-text/markdown/export'");
     expect(src).toContain('collectExportHtml');
     expect(src).toContain('collectPrintHtml');
     expect(src).toContain('exportBaseCss');

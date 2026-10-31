@@ -27,7 +27,7 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  *   (a) 运行时扫描：spec 内置语料状态机扫描器（见下方扫描器节）从磁盘语料实算围栏/
  *       表格/标题数作下限，语料漂移时自动跟随；
  *   (b) 预检实证常量：以仓内同版本权威引擎离线预检后写死的数值，逐处注释注明实证方式：
- *       · mermaid：mermaid@12.1.0（产品同版本，packages/render-text/package.json:20）
+ *       · mermaid：mermaid@12.1.0（产品同版本，packages/vviewer-render-text/package.json:20）
  *         mermaid.parse + jsdom DOM 垫片，2026-10-23 实测 70 文件共 54 个顶层 mermaid
  *         围栏、52 个 parse 通过，仅 2 个真失败（MERMAID_PARSE_INVALID 修正表）；
  *         注意按嵌套围栏状态机 + 精确语言计数——naive 行计数会把 49 个 ```mermaid-example
