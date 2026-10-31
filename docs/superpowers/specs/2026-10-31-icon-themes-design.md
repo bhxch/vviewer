@@ -1,7 +1,7 @@
-# VSCode 图标主题支持（icon theme 格式 + Seti 预置）设计
+# VSCode 图标主题支持（icon theme 格式 + Seti 预置）+ Open VSX 安装更新通道 设计
 
 - 日期：2026-10-31
-- 状态：已批准（brainstorming 六需求批量立项之一）
+- 状态：已批准（brainstorming 六需求批量立项之一；§6 Open VSX 通道为审阅轮追加）
 - 上游：`2026-10-11-vscode-themes-design.md`（颜色主题导入/存储/解析基建）、`2026-10-19-settings-center-design.md`（设置中心外观分组）
 
 ## 1. 背景与动机
@@ -92,8 +92,8 @@ settings.iconThemes 变更 → 注册字体 + 计算 `iconSig`（theme id + scop
 ## 4. 触达面
 
 - **packages/vviewer-highlight**：`vscodeIcon.ts`（校验+归一化+glyph 匹配）、Seti vendor 资产、单测（Seti 向量：常见扩展名/目录/回退链逐点断言）。
-- **apps/web**：`vsixImport.ts`（icon 导入函数）、`stores/session.ts`（v5 + CRUD）、`settings/AppearanceSection.svelte`（UI）、`settingsDraft.ts`（白名单/规范化/导入导出）、`iconReaction.ts`（sig 联动，仿 fontsReaction）、四个消费组件、`stores/settings.ts`（默认值）、app.css。
-- **e2e**：ICON-01..——Seti 预置默认树图标渲染；scopes 四开关逐点显隐；VSIX 导入第三方主题生效；删除主题回退；tab/quickOpen/search 作用域开启后锚点。
+- **apps/web**：`vsixImport.ts`（icon 导入函数）、`openVsx.ts`（输入解析/API/下载/更新，§6）、`stores/session.ts`（v5 + CRUD + origin 字段）、`settings/AppearanceSection.svelte`（导入 UI + 更新 UI）、`settingsDraft.ts`（白名单/规范化/导入导出）、`iconReaction.ts`（sig 联动，仿 fontsReaction）、四个消费组件、`stores/settings.ts`（默认值）、app.css。
+- **e2e**：ICON-01..——Seti 预置默认树图标渲染；scopes 四开关逐点显隐；VSIX 导入第三方主题生效；删除主题回退；tab/quickOpen/search 作用域开启后锚点。OVX-01..（§6.5）。
 
 ## 5. 非目标与边界
 
@@ -101,3 +101,40 @@ settings.iconThemes 变更 → 注册字体 + 计算 `iconSig`（theme id + scop
 - 彩色 emoji 字体类主题（字体本身多色）按 FontFace 原样渲染，`fontColor` 不覆盖彩色字形——行为等价 VSCode，不做特殊处理。
 - 会话快照不新增字段（theme/scopes 全在 settings，跨会话天然恢复）。
 - 字体文件体积核验在实施期入库时做（预期 woff 数十 KB 级；若 vendor 件超预算，回退 ttf→woff 转换或裁字形子集，builder 裁决并记档）。
+- Open VSX 通道（§6）非目标：自托管实例自定义 base URL（base 收敛单点常量留缝）、自动后台更新、Visual Studio Marketplace（ms 官方市场，CORS 不放行 + 使用条款限制直拉）。
+
+## 6. Open VSX 安装与更新通道（颜色主题 + 图标主题共用，审阅轮追加）
+
+### 6.1 可行性实测锚（2026-10-31，本机 curl）
+
+- **全链 CORS 放行，浏览器直拉成立**：API 元数据端点 `GET /api/{p}/{e}` → `access-control-allow-origin: *`；vsix/manifest 文件端点 302 自身 `*` → 重定向落点 CDN `openvsx.eclipsecontent.org` 亦 `*`（`curl -sIL -H Origin` 实测三跳逐级确认——浏览器 fetch 跟随重定向后以最终落点为准，故第三跳才是决定性证据）。
+- **元数据形状**（以 `PKief/material-icon-theme` 实测）：`version`（latest）、`allVersions`（版本号→元数据字典，实测 90 项）、`files.download`（vsix 直链）、`files.manifest`（package.json 单文件直链——**免整包预检**的通道）。
+- 仓内无 CSP/connect-src 限制（rg 零命中）；跨源 fetch 先例现成（网络字体、CDN 图表引擎、jsdelivr grammar）。PWA 混合内容：open-vsx.org 恒 https 无冲突。服务端零改动。
+
+### 6.2 安装流程
+
+- 入口：设置中心外观组的两个导入区（颜色主题/图标主题）各加「从 Open VSX 安装」——单行输入，三形态：
+  - 页面 URL：`https://open-vsx.org/extension/{p}/{e}[/version]`
+  - identifier：`{p}.{e}` 与 `{p}.{e}@{version}`
+  - vsix 直链（`files.download` 形态 URL）
+- 解析 → `GET /api/{p}/{e}/{v}`（v 缺省取元数据 `version`）→ **先 `GET files.manifest` 预检**（`contributes.themes` 与 `contributes.iconThemes` 至少一项存在才下整包，否则「该扩展不含主题」快速报错，省多 MB 下载）→ `GET files.download` 拉 vsix → **复用既有导入管线内核**（VSIX 解包/校验/限额，与 `importThemeFiles`/`importIconThemeFiles` 同一底层函数，不复制实现）→ 入库。
+- 记录增可选字段 `origin?: { publisher, extension, version, checkedAt }`（`ImportedTheme` 与 `ImportedIconTheme` 同款）。IndexedDB 无 schema 变更（object store 无 keyPath、加字段免版本升级，TabSnapshot 仅置位同款先例）。
+- 多主题 VSIX（contributes 多条目）：全部导入为并列记录、各带同 origin——与手动导入多条目行为保持一致（builder 核实现状并对齐）。
+- 下载大小上限复用字体导入 30MB 先例口径（常量，builder 定值）；超限报错不部分入库。
+
+### 6.3 更新流程
+
+- 「检查更新」：`GET /api/{p}/{e}` 读 latest `version`，与 `origin.version` 不等即行内提示「更新到 x.y.z」（不引 semver 库，段比较足够；`deprecated` 元数据展示提示但不阻止安装——builder 细节）。
+- 更新执行：重拉 vsix → 校验 → **复用原记录 id 覆盖写入**（manifest/fonts 替换、`version`/`checkedAt` 刷新）——设置引用（`settings.appearance` / `iconThemes.theme` 指向 `imported:<id>`）零断链，fontsSig/iconSig 联动自然重渲染。
+- 「全部检查」批量入口：逐条串行 GET（记录数量级小，无并发风暴）。
+- **不做自动后台更新**（v1）；手动 JSON/VSIX 导入的记录无 origin，天然无更新通道。更新不保留旧版本历史（回退 = 按 `@version` 重装旧版）。
+
+### 6.4 失败面与安全边界
+
+- 网络/解析/非主题/超限 → 复用导入错误 UI 通道；断网类文案引导「可改用手动导入 vsix」。
+- 信任域与手动导入完全相同（用户主动拉取 + 校验链不变），无启动期/后台自动请求。
+- v1 固定 open-vsx.org 公共实例。
+
+### 6.5 e2e
+
+OVX-01..——mock `page.route` 假 open-vsx API/文件响应 + 小型 vsix 夹具（CI 离线确定性）；真网冒烟一条（skipIf offline，CDN-04 先例）：真拉一个小主题安装成功；非主题扩展快速报错（manifest 预检）；更新闭环（装 v1 假件 → 线上 v2 → 检查 → 更新 → 设置引用不断、旧内容替换）；大小超限错误卡。
