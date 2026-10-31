@@ -97,8 +97,9 @@
     gap: var(--vv-sp-4);
     padding: var(--vv-sp-4) var(--vv-sp-6) var(--vv-sp-2);
     /* 行右让位（本 spec 重叠修复本体）：侧栏折叠钮 .vv-collapse-left 在 app.css
-       为 absolute top:6 right:6 24×24，浮置于本行右上；右 padding 预留
-       24px 命中区 + 10px 间隙，行内内容（移除钮）不再压进其命中区 */
+       为 absolute top:6 right:6 24×24，浮置于本行右上——右缘 6px 偏移的
+       24px 命中区，命中区左缘距行右缘 30px，34px 让位留 4px 余量，
+       行内内容（移除钮）不再压进其命中区 */
     padding-right: 34px;
     font-size: var(--vv-fs-xs);
     color: var(--ui-fg-muted);
@@ -135,6 +136,11 @@
   }
   .vv-tree-src:hover .vv-tree-src-remove,
   .vv-tree-src:focus-within .vv-tree-src-remove { opacity: 1; }
+  /* 触屏无 hover（评审 Minor 2）：hover 媒介查询不触发的环境恒显，
+     hover 设备仍走上方 hover/focus-within 揭示 */
+  @media (hover: none) {
+    .vv-tree-src-remove { opacity: 1; }
+  }
   .vv-tree-src-remove:hover {
     color: var(--ui-fg);
     background: var(--ui-hover-bg); /* 与树行 hover 同语义（亮暗均与 side-bg 同值，零漂移） */
