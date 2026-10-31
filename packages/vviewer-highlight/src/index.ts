@@ -57,6 +57,15 @@ export {
   type VscodeThemeJson,
 } from './vscode';
 export {
+  matchIconTheme,
+  normalizeIconTheme,
+  validateVscodeIconTheme,
+  VSCODE_LANG_EXT,
+  type IconGlyph,
+  type IconThemeFont,
+  type NormalizedIconTheme,
+} from './vscodeIcon';
+export {
   createHandler,
   initWorker,
   serveWorker,
