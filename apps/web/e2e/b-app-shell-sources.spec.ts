@@ -373,7 +373,7 @@ test('BUG-19/25/SHELL-01/08：打开文件夹两通道均有可见反馈（取�
       return orig(o);
     };
   });
-  await page.getByRole('button', { name: '打开文件夹' }).click();
+  await page.locator('.vv-topbar').getByRole('button', { name: '打开文件夹' }).click();
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { __vvPickerCalls?: number }).__vvPickerCalls))
     .toBe(1);
@@ -393,7 +393,7 @@ test('BUG-19/25/SHELL-01/08：打开文件夹两通道均有可见反馈（取�
       return el;
     }) as typeof document.createElement;
   });
-  await page.getByRole('button', { name: '打开文件夹' }).click();
+  await page.locator('.vv-topbar').getByRole('button', { name: '打开文件夹' }).click();
   await expect
     .poll(
       () =>

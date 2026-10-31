@@ -184,8 +184,8 @@ test('SHELL-04/valid：文件 URL 有效路径正确渲染内容', async ({ page
     route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: 'url-ok-marker' })
   );
   await waitAppMounted(page);
-  await page.getByLabel('文件 URL').fill('http://127.0.0.1:4173/vv-e2e-ok.txt');
-  await page.getByLabel('文件 URL').press('Enter');
+  await page.locator('.vv-topbar').getByLabel('文件 URL').fill('http://127.0.0.1:4173/vv-e2e-ok.txt');
+  await page.locator('.vv-topbar').getByLabel('文件 URL').press('Enter');
   await expect(page.locator('.vv-tab.active', { hasText: 'vv-e2e-ok.txt' })).toBeVisible();
   await expect(page.locator('.vv-code-pre')).toContainText('url-ok-marker', { timeout: 20_000 });
 });
@@ -195,8 +195,8 @@ test('SHELL-04/404：文件 URL 404 给出含失败原因的明确提示', async
     route.fulfill({ status: 404, contentType: 'text/plain', body: 'no' })
   );
   await waitAppMounted(page);
-  await page.getByLabel('文件 URL').fill('http://127.0.0.1:4173/vv-e2e-missing.txt');
-  await page.getByLabel('文件 URL').press('Enter');
+  await page.locator('.vv-topbar').getByLabel('文件 URL').fill('http://127.0.0.1:4173/vv-e2e-missing.txt');
+  await page.locator('.vv-topbar').getByLabel('文件 URL').press('Enter');
   await expect(page.locator('.vv-error-card')).toBeVisible({ timeout: 10_000 });
   // 错误卡片：标题 + 详情（createUrlStore 的 HTTP ${status} 文案，singleFile.ts）+ 文件名
   await expect(page.locator('.vv-error-card')).toContainText('无法预览此文件');
@@ -218,8 +218,8 @@ test('SHELL-04/cors：文件 URL 跨源被 CORS 拒绝给出明确提示', async
   const port = (server.address() as AddressInfo).port;
   try {
     await waitAppMounted(page);
-    await page.getByLabel('文件 URL').fill(`http://127.0.0.1:${port}/vv-e2e-cors.txt`);
-    await page.getByLabel('文件 URL').press('Enter');
+    await page.locator('.vv-topbar').getByLabel('文件 URL').fill(`http://127.0.0.1:${port}/vv-e2e-cors.txt`);
+    await page.locator('.vv-topbar').getByLabel('文件 URL').press('Enter');
     await expect(page.locator('.vv-error-card')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('.vv-error-card')).toContainText('无法预览此文件');
     await expect(page.locator('.vv-error-detail')).toContainText('Failed to fetch');
@@ -541,8 +541,8 @@ test(
       })
     );
     await waitAppMounted(page);
-    await page.getByLabel('文件 URL').fill('http://127.0.0.1:4173/vv-fallback-bare.js');
-    await page.getByLabel('文件 URL').press('Enter');
+    await page.locator('.vv-topbar').getByLabel('文件 URL').fill('http://127.0.0.1:4173/vv-fallback-bare.js');
+    await page.locator('.vv-topbar').getByLabel('文件 URL').press('Enter');
     // tab 照常创建（openUrl 层无失败信息），内容由读取失败错误卡片呈现
     await expect(page.locator('.vv-tab.active', { hasText: 'vv-fallback-bare.js' })).toBeVisible();
     await expect(page.locator('.vv-error-card')).toBeVisible({ timeout: 10_000 });
@@ -614,7 +614,7 @@ test(
     try {
       await waitAppMounted(page);
       // 连接服务器（TopBar 内联表单）；目录 tab 出现即连接成功
-      await page.getByRole('button', { name: '连接服务器' }).click();
+      await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
       await page.getByLabel('服务器地址').fill(`http://127.0.0.1:${port}`);
       await page.locator('.vv-server-form').getByRole('button', { name: '连接', exact: true }).click();
       await expect(page.locator('.vv-tab')).not.toHaveCount(0, { timeout: 10_000 });
@@ -708,8 +708,8 @@ test(
       route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: 'never' })
     );
     await waitAppMounted(page);
-    await page.getByLabel('文件 URL').fill('http://127.0.0.1:4173/samples/m1/');
-    await page.getByLabel('文件 URL').press('Enter');
+    await page.locator('.vv-topbar').getByLabel('文件 URL').fill('http://127.0.0.1:4173/samples/m1/');
+    await page.locator('.vv-topbar').getByLabel('文件 URL').press('Enter');
     // 不产出任何 tab（修复前：空名 tab 激活 + 「目录来源」空态）
     await expect(page.locator('.vv-tab')).toHaveCount(0);
     // 状态栏明确提示（showStatusNotice 4s 自动清除，紧跟提交断言）

@@ -789,7 +789,7 @@ test.describe('b-mounts-manager 目录管理页', () => {
     //（旧 r2 目录+文件两 tab 被系统替换关闭）+ 根 0 host 目录 tab 重建 + 对账幂等
     // POST（挂载行恢复的服务端面）
     down = false;
-    await page.getByRole('button', { name: '连接服务器' }).click();
+    await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
     await page.getByLabel('服务器地址').fill(API);
     await page.getByRole('button', { name: '连接', exact: true }).click();
     await expect(page.locator('.vv-tab.active', { hasText: '127.0.0.1:8793' })).toBeVisible();

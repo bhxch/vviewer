@@ -488,7 +488,7 @@ export async function waitAppMounted(page: Page): Promise<void> {
 
 /** 连接表单提交（token 留空） */
 export async function connectForm(page: Page, base: string): Promise<void> {
-  await page.getByRole('button', { name: '连接服务器' }).click();
+  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
   await page.getByLabel('服务器地址').fill(base);
   await page.getByRole('button', { name: '连接', exact: true }).click();
 }
@@ -519,8 +519,8 @@ export async function openRemoteFile(
 /** TopBar「粘贴文件 URL」打开（url store）：表单填入回车 → 活动 tab 可见 */
 export async function openUrlFile(page: Page, url: string, tabName: string): Promise<void> {
   await waitAppMounted(page);
-  await page.getByLabel('文件 URL').fill(url);
-  await page.getByLabel('文件 URL').press('Enter');
+  await page.locator('.vv-topbar').getByLabel('文件 URL').fill(url);
+  await page.locator('.vv-topbar').getByLabel('文件 URL').press('Enter');
   await expect(page.locator('.vv-tab.active', { hasText: tabName })).toBeVisible();
 }
 

@@ -70,7 +70,7 @@ test.afterAll(async () => {
 
 /** 展开 TopBar 连接表单并提交（每次测试用新 page，sessionStorage 互不影响） */
 async function connect(page: import('@playwright/test').Page, token: string): Promise<void> {
-  await page.getByRole('button', { name: '连接服务器' }).click();
+  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
   await page.getByLabel('服务器地址').fill(BASE);
   await page.getByLabel('访问令牌').fill(token);
   await page.getByRole('button', { name: '连接', exact: true }).click();

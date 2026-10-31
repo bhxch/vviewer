@@ -42,7 +42,7 @@ test.beforeAll(() => {
 /** TopBar 连接表单（同 m5 惯例）→ 目录树可见 */
 async function connectServer(page: Page): Promise<void> {
   await page.goto('/');
-  await page.getByRole('button', { name: '连接服务器' }).click();
+  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
   await page.getByLabel('服务器地址').fill(BASE);
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await expect(page.locator('.vv-tree-row', { hasText: 'hello.js' })).toBeVisible({

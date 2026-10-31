@@ -74,7 +74,7 @@ async function createWorkspace(page: Page, name: string): Promise<void> {
 
 /** 连接表单提交（t-srv connectForm 同款；token 留空——带 token 用例自行填访问令牌） */
 async function connectForm(page: Page, base: string): Promise<void> {
-  await page.getByRole('button', { name: '连接服务器' }).click();
+  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
   await page.getByLabel('服务器地址').fill(base);
   await page.getByRole('button', { name: '连接', exact: true }).click();
 }
@@ -627,7 +627,7 @@ test('WSX-10：RemoteSourceModal token 会话失效 401——状态码与服务�
   try {
     await waitAppMounted(page);
     // 带 token 连接（访问令牌表单；ticket 鉴权预检 + tree 均过）
-    await page.getByRole('button', { name: '连接服务器' }).click();
+    await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
     await page.getByLabel('服务器地址').fill(fake.base);
     await page.getByLabel('访问令牌').fill('wsx-tok-1');
     await page.getByRole('button', { name: '连接', exact: true }).click();

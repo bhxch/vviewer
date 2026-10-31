@@ -51,7 +51,7 @@ test.beforeAll(() => {
 /** 服务端模式连接（同源 :4174，release server 无 --token 配置 → 访问令牌留空） */
 async function connectServerMode(page: Page): Promise<void> {
   await page.goto('/');
-  await page.getByRole('button', { name: '连接服务器' }).click();
+  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
   await page.getByLabel('服务器地址').fill(BASE);
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await expect(page.locator('.vv-tree-row').first()).toBeVisible({ timeout: 10_000 });

@@ -119,7 +119,7 @@ async function connectWithSettings(page: Page, settings: Record<string, unknown>
     localStorage.setItem('vviewer:settings', JSON.stringify(s));
   }, settings);
   await page.goto(COMPUTE_BASE + '/');
-  await page.getByRole('button', { name: '连接服务器' }).click();
+  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
   await page.getByLabel('服务器地址').fill(COMPUTE_BASE);
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await expect(page.locator('.vv-tree-row', { hasText: 'dsv-' }).first()).toBeVisible({

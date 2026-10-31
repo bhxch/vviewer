@@ -250,7 +250,7 @@ async function startFakeServer(
 
 /** 连接表单提交（token 留空；t-workspace connectForm 同款） */
 async function connectForm(page: Page, base: string): Promise<void> {
-  await page.getByRole('button', { name: '连接服务器' }).click();
+  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
   await page.getByLabel('服务器地址').fill(base);
   await page.getByRole('button', { name: '连接', exact: true }).click();
 }

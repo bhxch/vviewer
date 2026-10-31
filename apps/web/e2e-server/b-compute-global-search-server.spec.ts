@@ -158,7 +158,7 @@ test.afterAll(async () => {
 /** 连接服务器：任意同源实例（无 token；4174 主实例 / 4180 同源 compute 实例共用） */
 async function connectSameOriginAt(page: Page, base: string): Promise<void> {
   await page.goto(base + '/');
-  await page.getByRole('button', { name: '连接服务器' }).click();
+  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
   await page.getByLabel('服务器地址').fill(base);
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await expect(page.locator('.vv-tree-row', { hasText: 'cg-' }).first()).toBeVisible({ timeout: 10_000 });
@@ -175,7 +175,7 @@ async function connectCompute(page: Page, policy: 'auto' | 'remote' | 'local'): 
     localStorage.setItem('vviewer:settings', JSON.stringify({ computePolicy: p }));
   }, policy);
   await page.goto('/');
-  await page.getByRole('button', { name: '连接服务器' }).click();
+  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
   await page.getByLabel('服务器地址').fill(`http://127.0.0.1:${PORT_COMPUTE}`);
   await page.getByLabel('访问令牌').fill(CG_TOKEN);
   await page.getByRole('button', { name: '连接', exact: true }).click();
@@ -518,7 +518,7 @@ test.describe('CMP-09 无 rg 降级', () => {
 
     // ② 前端：降级提示条 + 结果仍可用（本地 grep 经远程 store 逐文件读取）
     await page.goto('/');
-    await page.getByRole('button', { name: '连接服务器' }).click();
+    await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
     await page.getByLabel('服务器地址').fill(`http://127.0.0.1:${PORT_NORG}`);
     await page.getByRole('button', { name: '连接', exact: true }).click();
     await expect(page.locator('.vv-tree-row', { hasText: 'cg-needle.txt' })).toBeVisible({ timeout: 10_000 });

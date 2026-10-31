@@ -207,7 +207,7 @@ async function startFakeServer(
 
 /** 连接表单提交（TopBar 内联表单；token 缺省留空——留空/有值决定重连清扫 vs 实例复用） */
 async function connectForm(page: Page, base: string, token = ''): Promise<void> {
-  await page.getByRole('button', { name: '连接服务器' }).click();
+  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
   await page.getByLabel('服务器地址').fill(base);
   if (token !== '') await page.getByLabel('访问令牌').fill(token);
   await page.getByRole('button', { name: '连接', exact: true }).click();

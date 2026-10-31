@@ -42,7 +42,7 @@ test.beforeAll(() => {
 /** TopBar 连接表单：无 token 启动的 server 全放行（server/src/auth.rs 无 token 配置全放行） */
 async function connectSameOrigin(page: Page): Promise<void> {
   await page.goto('/');
-  await page.getByRole('button', { name: '连接服务器' }).click();
+  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
   await page.getByLabel('服务器地址').fill(BASE_URL);
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await expect(page.locator('.vv-tree-row', { hasText: 'bmd-danger.html' })).toBeVisible({

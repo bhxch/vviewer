@@ -32,7 +32,7 @@ test.beforeAll(() => {
 
 /** 展开 TopBar 连接表单并提交（服务器无 token 配置，令牌留空） */
 async function connect(page: import('@playwright/test').Page): Promise<void> {
-  await page.getByRole('button', { name: '连接服务器' }).click();
+  await page.locator('.vv-topbar').getByRole('button', { name: '连接服务器' }).click();
   await page.getByLabel('服务器地址').fill(BASE);
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await expect(page.locator('.vv-tree')).toBeVisible({ timeout: 15_000 });
@@ -65,8 +65,8 @@ test('BIN-10/BUG-13：改名 zip 两入口均重定向压缩包渲染器，判�
   await expect(page.locator('.vv-code-pre')).toHaveCount(0);
 
   // ---- 入口二（TopBar 文件 URL）：createUrlStore 无扩展名文件名，签名改派链路由压缩包 ----
-  await page.getByLabel('文件 URL').fill(`${BASE}/api/file?path=zip-as-txt.txt`);
-  await page.getByLabel('文件 URL').press('Enter');
+  await page.locator('.vv-topbar').getByLabel('文件 URL').fill(`${BASE}/api/file?path=zip-as-txt.txt`);
+  await page.locator('.vv-topbar').getByLabel('文件 URL').press('Enter');
   await expect(page.locator('.vv-tab.active', { hasText: 'file' })).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.vv-archive .vv-tree-row', { hasText: 'hello.txt' })).toBeVisible({
     timeout: 20_000
