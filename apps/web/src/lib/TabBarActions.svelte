@@ -249,14 +249,15 @@
       }}>
       设置
     </button>
-    <!-- 专注模式菜单项：aria-label/title 沿用 TopBar 原文，文案随 zen 态切换 -->
+    <!-- 专注模式菜单项：aria-label 沿用 TopBar 原文，title 随顶栏退役删「隐藏顶栏」字样，
+         文案随 zen 态切换 -->
     <button
       type="button"
       class="vv-tbact-item"
       aria-label={zen ? '退出专注模式' : '进入专注模式'}
       title={zen
         ? '退出专注模式（Esc 或 Ctrl+Alt+Z）'
-        : '专注模式（Ctrl+Alt+Z）：隐藏顶栏/标签栏与两侧面板，进入后按 Esc 或 Ctrl+Alt+Z 退出'}
+        : '专注模式（Ctrl+Alt+Z）：隐藏标签栏与两侧面板，进入后按 Esc 或 Ctrl+Alt+Z 退出'}
       onclick={() => {
         menu = null;
         onToggleZen();

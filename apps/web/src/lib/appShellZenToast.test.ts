@@ -64,7 +64,7 @@ describe('标签栏动作簇专注模式可见入口（进出双提示；TopBar 
   });
 
   it('按钮 title 同时写明进入与退出方式（快捷键 + zen 内退出通道），文案随 zen 态切换', () => {
-    expect(src).toContain('专注模式（Ctrl+Alt+Z）：隐藏顶栏/标签栏与两侧面板，进入后按 Esc 或 Ctrl+Alt+Z 退出');
+    expect(src).toContain('专注模式（Ctrl+Alt+Z）：隐藏标签栏与两侧面板，进入后按 Esc 或 Ctrl+Alt+Z 退出');
     expect(src).toContain('退出专注模式（Esc 或 Ctrl+Alt+Z）');
     expect(src).toMatch(/\{zen \? '退出专注' : '专注'\}/);
   });
