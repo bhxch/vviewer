@@ -36,7 +36,9 @@ export async function openOverflowMenu(page: Page): Promise<void> {
 }
 
 /** ＋ 菜单「打开文件」：filechooser 通道喂 files（hidden input 常驻挂载，
- * 菜单条目点击后 menu 收起再弹原生选择器，事件先注册后点击） */
+ * 菜单条目点击后 menu 收起再弹原生选择器，事件先注册后点击）。
+ * 暂无调用者（备用装置，filechooser 通道）——打开文件用例改直点流后保留，
+ * 供后续 filechooser 负路径/多文件用例取用 */
 export async function plusOpenFile(page: Page, files: string | string[]): Promise<void> {
   const chooser = page.waitForEvent('filechooser');
   await openPlusMenu(page);
@@ -58,7 +60,7 @@ export async function plusOpenFolder(page: Page): Promise<void> {
 }
 
 /** ＋ 菜单「粘贴 URL」：行内展开单行表单并提交（input aria-label=「文件 URL」
- * 沿用 TopBar 原文；回车提交，打开后浮层随条目流自动收起） */
+ * 沿用 TopBar 原文；回车提交，提交后展开行收起、＋ 菜单保持开） */
 export async function plusOpenUrl(page: Page, url: string): Promise<void> {
   await openPlusMenu(page);
   await page.locator(PLUS_ITEMS).getByRole('button', { name: '粘贴 URL' }).click();
