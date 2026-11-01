@@ -189,28 +189,33 @@ describe('pairsToOutline（capture 配对纯函数，synthetic 构造）', () =>
     expect(pairsToOutline([])).toEqual([]);
   });
 
-  it('千级条目时限：2000 条（1000 层嵌套链 + 1000 兄弟）< 500ms（防 O(n²) 退化）', () => {
+  it('十万级条目时限：1e5 条（5e4 层嵌套链 + 5e4 兄弟）< 500ms（防 O(n²) 退化）', () => {
+    // 1e5 量级下 O(n²) ≈ 1e10 次操作（数十秒起）与线性实现（实测几十 ms）差距
+    // 三个数量级，500ms 上限既不误报也真实区分退化（千级断言对 O(n²) 已不敏感：
+    // 2000² = 4e6 与线性同落毫秒窗）
+    const N = 100_000;
+    const half = N / 2;
     const matches: OutlineMatch[] = [];
-    // 1000 层全嵌套链：start 递增、end 递减
-    for (let i = 0; i < 1000; i++) {
+    // 5e4 层全嵌套链：start 递增、end 递减
+    for (let i = 0; i < half; i++) {
       matches.push([
         cap('name', i, i + 1, `n${i}`),
-        cap('definition.function', i, 20_000 - i, `fn n${i} {...}`),
+        cap('definition.function', i, 2 * half - i, `fn n${i} {...}`),
       ]);
     }
-    // 1000 个兄弟（与嵌套链不重叠）
-    for (let i = 0; i < 1000; i++) {
-      const s = 30_000 + i * 10;
+    // 5e4 个兄弟（与嵌套链不重叠）
+    for (let i = 0; i < half; i++) {
+      const s = 3 * half + i * 10;
       matches.push([cap('name', s + 3, s + 5, `b${i}`), cap('definition.class', s, s + 8, `class b${i}`)]);
     }
     const t0 = performance.now();
     const out = pairsToOutline(matches);
     const elapsed = performance.now() - t0;
-    expect(out).toHaveLength(2000);
+    expect(out).toHaveLength(N);
     expect(elapsed).toBeLessThan(500);
     // 栈式 depth 抽查：嵌套链第 i 条 depth=i；兄弟段 depth=0
-    expect(out[500]?.depth).toBe(500);
-    expect(out[1000]?.depth).toBe(0);
+    expect(out[half - 1]?.depth).toBe(half - 1);
+    expect(out[half]?.depth).toBe(0);
   });
 });
 

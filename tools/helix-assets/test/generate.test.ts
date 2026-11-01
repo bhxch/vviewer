@@ -192,8 +192,10 @@ describe('copyTags（tags 补源，helix 检出上游）', () => {
 });
 
 describe('tags 资产（代码大纲补源产物，helix pin ba40e547）', () => {
-  // 基线：markpad 源原带 50 份 + Task 1 补源新增 7 份（typescript/tsx/bash/zig/_typescript/_javascript，
-  // 上游缺 _jsx/json/shell；实拷 8——lua/c 为覆盖更新不计新增目录）。仅统计一层目录。
+  // 基线（git 实测 d7cfa5c 全树）：53 份 tags.scm（一层目录 51 + 嵌套 2：
+  // glimmer-javascript/glimmer_javascript、matlab/neovim）；Task 1 补源新增 6 份目录
+  // （typescript/tsx/bash/zig/_typescript/_javascript，上游缺 _jsx/json/shell；lua/c
+  // 为 helix 新版覆盖更新不计新增）→ 总 59 份 / 一层 57。本断言仅统计一层目录。
   const tagsBaseline = 57;
 
   it('queries/ 下含 tags.scm 的目录数 ≥ 基线', () => {

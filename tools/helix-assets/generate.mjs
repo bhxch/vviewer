@@ -210,6 +210,9 @@ export function collectThemes(themesDir) {
  * （_typescript/_javascript/_jsx——typescript 声明 `; inherits: _typescript,ecma`、
  * tsx 声明 `; inherits: _jsx,_typescript,ecma`，父目录无 tags.scm 时链断）；
  * 上游缺 json/shell（helix runtime/queries 实测无此二语言 tags.scm，shell 由 bash 覆盖），如实缺补。
+ * _javascript 如实备案：helix 的 javascript/tags.scm 是自含实体查询（非 inherits 声明，
+ * 不经 _javascript），现资产树无任何语言继承它——该目录当前零消费者，纯冗余留源
+ * （资产树若引入 inherits: _javascript 形态即生效），拷贝成本一条文件忽略不计。
  */
 export const TAGS_SOURCES = {
   queriesDir: process.env.VV_TAGS_QUERIES_DIR ?? '/share/rw/repo/github/helix-editor/helix/runtime/queries',
