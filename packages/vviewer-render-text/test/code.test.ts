@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import hljs from 'highlight.js';
 import { HighlightCanceledError } from '@bhxch/vviewer-highlight';
-import { RemoteComputeError, createRemoteStore, type ComputeWhere, type FileSource, type RenderedInstance, type StreamCtx } from '@bhxch/vviewer-core';
+import { RemoteComputeError, createRemoteStore, type ComputeWhere, type FileSource, type OutlineEntry, type RenderedInstance, type StreamCtx } from '@bhxch/vviewer-core';
 import { isAbortError as coreIsAbortError } from '@bhxch/vviewer-core';
 import { STREAM_MAX_BYTES } from '../src/blockStream';
 import * as searchModule from '../src/search';
@@ -39,6 +39,7 @@ import {
   type CodeEngine,
   type CodeFileMeta,
   type HighlightInterval,
+  type RenderCodeHandle,
 } from '../src/code';
 
 // 模块求值期捕获原始函数值（任何 spyOn 之前 → 必为原函数；ES import 声明提升，
@@ -1182,6 +1183,209 @@ describe('renderCode lineAtByteOffset（错误身份与字节映射 Task 4：字
     handle.destroy();
   });
 });
+
+// ---------- 2026-10-31 code-outline Task 2：大纲触发 + 鸭子契约 ----------
+
+describe('renderCode getOutline/firstVisibleLine（code-outline Task 2）', () => {
+  afterEach(() => {
+    attachHighlightClient(null);
+    attachHighlightRouter(null);
+    document.body.innerHTML = '';
+    vi.unstubAllGlobals();
+  });
+
+  function stubResizeObserver(): void {
+    vi.stubGlobal('ResizeObserver', class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    });
+  }
+
+  // 鸭子探测形态（lineAtOffsetOf 同款先例：契约锚落库时类型面尚以可选扩展演进）
+  function outlineOf(handle: ReturnType<typeof renderCode>): (() => OutlineEntry[]) | undefined {
+    return (handle as { getOutline?: () => OutlineEntry[] }).getOutline;
+  }
+  function firstLineOf(handle: ReturnType<typeof renderCode>): (() => number) | undefined {
+    return (handle as { firstVisibleLine?: () => number }).firstVisibleLine;
+  }
+
+  // 契约编译期锚（tsc 强制；运行时零行为）：①RenderCodeHandle 可选方法可由
+  // OutlineEntry 闭包满足；②core 的 RenderedInstance.getOutline 契约与
+  // RenderCodeHandle 侧同构（OutlineEntry 单源 highlight 包、core type-only 再导出）
+  const _handleOutline: NonNullable<RenderCodeHandle['getOutline']> = () => [];
+  const _instOutline: NonNullable<RenderedInstance['getOutline']> = () => [];
+  const _handleFirstLine: NonNullable<RenderCodeHandle['firstVisibleLine']> = () => 0;
+  void _handleOutline;
+  void _instOutline;
+  void _handleFirstLine;
+
+  it('tree-sitter parse 成功后投递一次 outline（在飞返回 []，落地后返回缓存）', async () => {
+    stubResizeObserver();
+    const order: string[] = [];
+    let resolveOutline!: (entries: OutlineEntry[]) => void;
+    const outlineSpy = vi.fn((_text: string, _lang: string) => {
+      order.push('outline');
+      return new Promise<OutlineEntry[]>((resolve) => {
+        resolveOutline = resolve;
+      });
+    });
+    attachHighlightClient({
+      highlight: async () => {
+        order.push('highlight');
+        return [{ start: 0, end: 3, capture: 'keyword' }];
+      },
+      outline: outlineSpy
+    });
+    const handle = renderCode(enc('let x'), newHost(), { ext: 'rs', lang: 'rust' });
+    await vi.waitFor(() => expect(order).toContain('outline'));
+    // 触发时机：parse（client.highlight await）完成之后才投递，全文一次
+    expect(order).toStrictEqual(['highlight', 'outline']);
+    expect(outlineSpy).toHaveBeenCalledTimes(1);
+    expect(outlineSpy).toHaveBeenCalledWith('let x', 'rust');
+    const getOutline = outlineOf(handle);
+    expect(getOutline, '全量 handle 应提供 getOutline').toBeTypeOf('function');
+    if (getOutline === undefined) return;
+    expect(getOutline.call(handle)).toEqual([]); // 请求在飞：[]
+    resolveOutline([
+      { name: 'x', kind: 'definition.function', line: 0, byteStart: 0, byteEnd: 5, depth: 0 }
+    ]);
+    await vi.waitFor(() => expect(getOutline.call(handle)).toHaveLength(1));
+    expect(getOutline.call(handle)).toEqual([
+      { name: 'x', kind: 'definition.function', line: 0, byteStart: 0, byteEnd: 5, depth: 0 }
+    ]);
+    handle.destroy();
+  });
+
+  it('highlight 失败落 hljs 兜底：不投递 outline（hljs 分支无大纲）', async () => {
+    stubResizeObserver();
+    const outlineSpy = vi.fn(async () => [] as OutlineEntry[]);
+    attachHighlightClient({
+      highlight: async () => {
+        throw new Error('boom');
+      },
+      outline: outlineSpy
+    });
+    const handle = renderCode(enc('const a = 1'), newHost(), { ext: 'js', lang: 'javascript' });
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('hljs'));
+    expect(outlineSpy).not.toHaveBeenCalled();
+    expect(outlineOf(handle)!.call(handle)).toEqual([]);
+    handle.destroy();
+  });
+
+  it('plain 分支（highlight:false）不投递 outline，getOutline 恒 []', async () => {
+    stubResizeObserver();
+    const outlineSpy = vi.fn(async () => [] as OutlineEntry[]);
+    attachHighlightClient({ highlight: async () => [], outline: outlineSpy });
+    const handle = renderCode(enc('let x'), newHost(), { highlight: false, ext: 'rs' });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(handle.getEngine()).toBe('plain');
+    expect(outlineSpy).not.toHaveBeenCalled();
+    expect(outlineOf(handle)!.call(handle)).toEqual([]);
+    handle.destroy();
+  });
+
+  it('outline 请求失败：静默保持 []，不影响已上屏高亮（独立于高亮失败面）', async () => {
+    stubResizeObserver();
+    attachHighlightClient({
+      highlight: async () => [{ start: 0, end: 3, capture: 'keyword' }],
+      outline: async () => {
+        throw new Error('outline boom');
+      }
+    });
+    const host = newHost();
+    const handle = renderCode(enc('let x'), host, { ext: 'rs', lang: 'rust' });
+    await vi.waitFor(() => expect(host.querySelector('.ts-keyword')).not.toBeNull());
+    await new Promise((r) => setTimeout(r, 10)); // outline rejection 已被 then 双参消化
+    expect(outlineOf(handle)!.call(handle)).toEqual([]);
+    handle.destroy();
+  });
+
+  it('firstVisibleLine 仅全量提供：scrollTop/行高换算（lineMetrics 尊重）+ 越界钳制', () => {
+    stubResizeObserver();
+    // 100 行 × 20 字节全量 plain：不走高亮面，专测视口几何
+    const handle = renderCode(enc(codeLines(100, 20)), newHost(), {
+      highlight: false,
+      lineMetrics: { fontSize: 14, lineHeight: 25 }
+    });
+    const f = firstLineOf(handle);
+    expect(f, '全量模式 handle 应提供 firstVisibleLine').toBeTypeOf('function');
+    if (f === undefined) return;
+    expect(f.call(handle)).toBe(0); // scrollTop=0 → 首行
+    handle.setScrollTop(250);
+    expect(f.call(handle)).toBe(10); // 250/25 = 行 10（与 virtualScroller 同款算式）
+    handle.setScrollTop(99_999);
+    expect(f.call(handle)).toBe(99); // 越界钳末行
+    handle.destroy();
+  });
+
+  it('空文件 firstVisibleLine 钳 0（0 行文件无负行号）', () => {
+    stubResizeObserver();
+    const handle = renderCode(enc(''), newHost(), { highlight: false });
+    const f = firstLineOf(handle);
+    expect(f, '空文件（全量模式）同样应提供 firstVisibleLine').toBeTypeOf('function');
+    if (f !== undefined) expect(f.call(handle)).toBe(0);
+    handle.destroy();
+  });
+
+  it('窗口流式模式：getOutline 契约在位恒空、firstVisibleLine 缺席（鸭子探测 false）', async () => {
+    stubResizeObserver();
+    const outlineSpy = vi.fn(async () => [] as OutlineEntry[]);
+    attachHighlightClient({ highlight: async () => [], outline: outlineSpy });
+    const content = enc(codeLines(40)); // 60KB：单块窗口
+    const host = newHost();
+    const handle = renderCode(content.slice(0, 8192), host, {
+      ext: 'js',
+      lang: 'javascript',
+      ctx: streamCtx({ size: content.length, content, head: content.slice(0, 8192) })
+    });
+    await vi.waitFor(() => expect(bodyText(host, 0)).toBeDefined());
+    const g = outlineOf(handle);
+    expect(g, '窗口 handle 亦有 getOutline（契约在位，鸭子探测不出错）').toBeTypeOf('function');
+    expect(g!.call(handle)).toEqual([]); // 不产大纲：恒空
+    expect(outlineSpy).not.toHaveBeenCalled();
+    expect('firstVisibleLine' in handle, '窗口模式 firstVisibleLine 缺席（Step 1③ 契约锚）').toBe(false);
+    handle.destroy();
+  });
+
+  it('codeRenderer 实例装配：getOutline 转投 inst、firstVisibleLine 存在性透传', async () => {
+    stubResizeObserver();
+    attachHighlightClient({
+      highlight: async () => [{ start: 0, end: 3, capture: 'keyword' }],
+      outline: async () => [
+        { name: 'top_fn', kind: 'definition.function', line: 0, byteStart: 0, byteEnd: 5, depth: 0 }
+      ]
+    });
+    const host = newHost();
+    const inst = (await codeRenderer.render(
+      enc('let x'), host,
+      { storeId: 'local-ol', storeLabel: 'local', path: '/a.rs', name: 'a.rs', store: {} as FileSource['store'] },
+      { ext: 'rs', encoding: 'utf-8', lang: 'rust' },
+      undefined, {}
+    )) as CodeInstance & { getOutline(): OutlineEntry[]; firstVisibleLine?(): number };
+    await vi.waitFor(() => expect(inst.getOutline()).toHaveLength(1)); // 实例经 inst 缓存转投
+    expect(inst.getOutline()![0]!.name).toBe('top_fn');
+    expect(inst.firstVisibleLine, '全量实例透传 firstVisibleLine（Task 3 滚动跟随消费面）').toBeTypeOf('function');
+    expect(inst.firstVisibleLine!()).toBe(0);
+    inst.destroy();
+
+    // 窗口实例：getOutline 恒空、firstVisibleLine 缺席（存在性不虚标）。
+    // codeRenderer.render 的窗口门限为 >2MB（≤2MB 走全量守卫补拉）——内容取 1500 行
+    // × 1500B = 2.25MB 越过 TREE_SITTER_MAX_BYTES
+    const content = enc(codeLines(1500));
+    const winHost = newHost();
+    const winInst = (await codeRenderer.render(
+      content.slice(0, 8192), winHost, winSource,
+      { ext: 'js', encoding: 'utf-8', lang: 'javascript' },
+      streamCtx({ size: content.length, content, head: content.slice(0, 8192) }), {}
+    )) as CodeInstance & { getOutline(): OutlineEntry[]; firstVisibleLine?(): number };
+    await vi.waitFor(() => expect(bodyText(winHost, 0)).toBeDefined());
+    expect(winInst.getOutline()).toEqual([]);
+    expect(winInst.firstVisibleLine).toBeUndefined();
+    winInst.destroy();
+  });
+});
+
 
 // ---------- 阶段 4：lazy 路径（>2MB 可视区 chunk 懒高亮） ----------
 

@@ -14,7 +14,7 @@ import type {
   StreamCtx,
   LineMetrics
 } from '@bhxch/vviewer-core';
-import type { HighlightChunk, HighlightInterval } from '@bhxch/vviewer-highlight';
+import type { HighlightChunk, HighlightInterval, OutlineEntry } from '@bhxch/vviewer-highlight';
 
 /** 单次高亮调用的路由上下文（M6 compute 路由 + 阶段 4 chunk 标注；不参与渲染结果本身） */
 export interface HighlightCallContext {
@@ -27,9 +27,12 @@ export interface HighlightCallContext {
   chunk?: HighlightChunk;
 }
 
-/** tree-sitter 高亮客户端最小接口（HighlightClient 结构兼容；测试可注 fake） */
+/** tree-sitter 高亮客户端最小接口（HighlightClient 结构兼容；测试可注 fake）。
+ * outline 为可选鸭子面（2026-10-31 code-outline Task 2）：真实 HighlightClient 均有
+ * （独立 pending 面，T1），测试 fake 可缺省——renderCode 全量路径经 `?.` 触达。 */
 export interface CodeHighlightClient {
   highlight(text: string, lang: string, ctx?: HighlightCallContext): Promise<HighlightInterval[]>;
+  outline?(text: string, lang: string): Promise<OutlineEntry[]>;
 }
 
 let attachedClient: CodeHighlightClient | null = null;
@@ -183,6 +186,18 @@ export interface RenderCodeHandle {
    * 索引 offsets 在 \r\n/\n 文件上逐字节同基，委托锚行映射的精确通道。仅全量模式
    * 提供（窗口模式无全量索引，缺席）；消费方鸭子探测（三级回退首级）。 */
   lineAtByteOffset?(offset: number): number;
+  /** 代码大纲（2026-10-31 code-outline Task 2，可选扩展）：全量路径 tree-sitter
+   * parse 成功后 fire-and-forget `client.outline(text, lang)` 一次，条目缓存实例
+   * 闭包——请求在飞/失败/hljs 兜底/plain 分支均返回 []（大纲为锦上添花，独立于
+   * 高亮失败面）。条目 line 为 0 起行号、kind 为 capture 全名（渲染端自行剥前缀
+   * 映射并按 `kind.startsWith('reference.')` 过滤引用）。窗口路径契约在位但恒空
+   * （不产大纲——消费方鸭子探测不出错）；hljs/plain 分支同返回 []。 */
+  getOutline?(): OutlineEntry[];
+  /** 当前视口首可视行（0 起，可选扩展；Task 3 大纲滚动跟随用）：全量模式从虚拟
+   * 滚动容器 scrollTop 换算（与 virtualScroller 同款 scrollTop/行高算式，含
+   * BUG-55 超限压缩域的虚拟坐标还原），越界钳 [0, 行数-1]。仅全量模式提供——
+   * 窗口模式行高不定（块流式），鸭子探测缺席即回退（消费方不读 DOM）。 */
+  firstVisibleLine?(): number;
 }
 
 /** renderCode 选项（双模式共用）：全量模式（现状）与窗口流式模式的差异全部经

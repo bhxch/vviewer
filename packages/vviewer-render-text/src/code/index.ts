@@ -19,7 +19,8 @@ import {
   type Encoding,
   type ComputeSource,
   type ComputeWhere,
-  type SearchMatch
+  type SearchMatch,
+  type OutlineEntry
 } from '@bhxch/vviewer-core';
 import { memoizedFullRead } from '../blockStream';
 import { TREE_SITTER_MAX_BYTES, MARKUP_MAX_BYTES } from './strategy';
@@ -145,8 +146,10 @@ export const codeRenderer: Renderer = {
     }
     // getScrollHost/getEngine 供 ViewerPane 接滚动持久化与引擎指示器；
     // getComputeWhere 供状态栏执行位置指示（M6）；search/gotoMatch 供 SearchPanel（Task 6）；
-    // getMeta 供状态栏/属性面板元数据（BUG-04）；revealLine 供全局搜索跳转（BUG-09）。
-    // 结构化扩展 RenderedInstance（Omit 去旧 search 签名避免交叉双签名冲突），不动 core。
+    // getMeta 供状态栏/属性面板元数据（BUG-04）；revealLine 供全局搜索跳转（BUG-09）；
+    // getOutline/firstVisibleLine 供大纲右面板（2026-10-31 code-outline Task 3，
+    // 鸭子探测形态同 getToc——窗口 inst 恒空 []/缺席，结构化扩展按存在性透传）。
+    // 结构化扩展 RenderedInstance（Omit 去旧 search 签名避免交叉双签名冲突）。
     const instance: Omit<RenderedInstance, 'search'> & {
       getScrollHost(): HTMLElement;
       getEngine(): CodeEngine;
@@ -155,6 +158,8 @@ export const codeRenderer: Renderer = {
       search(query: string, opts?: { caseSensitive?: boolean }): Promise<SearchMatch[]>;
       gotoMatch(index: number): void;
       revealLine(line: number, col?: number): void;
+      getOutline(): OutlineEntry[];
+      firstVisibleLine?(): number;
     } = {
       destroy() {
         inst.destroy();
@@ -179,7 +184,13 @@ export const codeRenderer: Renderer = {
       },
       revealLine(line, col) {
         inst.revealLine(line, col);
-      }
+      },
+      getOutline() {
+        return inst.getOutline?.() ?? [];
+      },
+      // 存在性透传：仅全量 inst 有 firstVisibleLine（窗口 inst 缺席——消费方鸭子
+      // 探测 `'firstVisibleLine' in inst` 保持 false）
+      ...(inst.firstVisibleLine ? { firstVisibleLine: () => inst.firstVisibleLine!() } : {})
     };
     return instance;
   }

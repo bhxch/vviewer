@@ -1326,7 +1326,13 @@ export function renderCodeWindowed(
         if (line >= rows()) return; // 停机面未达/越出 EOF：静默兜底不跳转
         jumpToLine(line);
       })();
-    }
+    },
+    // 大纲（2026-10-31 code-outline Task 2）：窗口路径不产大纲（>2MB/流式无全量
+    // parse，无 tree-sitter tags 产出）——契约在位恒空，消费方鸭子探测不出错；
+    // firstVisibleLine 缺席（窗口模式行高不定，见 RenderCodeHandle 契约注）。
+    // 降级重渲（fullInst）后亦不转投：降级态本属窗口实例生命周期，大纲面板
+    // 以恒空对待（与 OUT-04「窗口不出大纲」口径一致）。
+    getOutline: () => []
   };
   // 首拉完成面：codeRenderer.render await 它——首块/本地化排空失败 → 销毁半装配实例
   // 后 rethrow（渲染期读失败面）；resolve 后实例已 mount，滚动期失败走自兜底（上方闩）。

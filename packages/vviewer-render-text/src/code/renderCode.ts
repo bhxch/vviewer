@@ -5,8 +5,14 @@
  * attachedClient/attachedRouter 的读取经 client.getHighlightClient/getHighlightRouter
  * （行为等价的读取面，拆分前为同模块直读）。
  */
-import { RemoteComputeError, showErrorCard, type ComputeWhere, type SearchMatch } from '@bhxch/vviewer-core';
-import { detectLanguage, HighlightCanceledError } from '@bhxch/vviewer-highlight';
+import {
+  RemoteComputeError,
+  SCROLL_PX_CAP,
+  showErrorCard,
+  type ComputeWhere,
+  type SearchMatch
+} from '@bhxch/vviewer-core';
+import { detectLanguage, HighlightCanceledError, type OutlineEntry } from '@bhxch/vviewer-highlight';
 import { virtualScroller, type VirtualScrollerHandle } from '../virtualScroller';
 import { searchCode } from '../search';
 import {
@@ -127,6 +133,9 @@ export function renderCode(
   let searchHitsByLine = new Map<number, Array<{ start: number; end: number }>>();
   let hitLine = -1;
   let hitTimer: ReturnType<typeof setTimeout> | null = null;
+  // 代码大纲缓存（2026-10-31 code-outline Task 2）：tree-sitter parse 成功后一次性
+  // fire-and-forget 填充；请求在飞/失败/hljs 兜底/plain 分支保持 []（getOutline 直读）
+  let outlineEntries: OutlineEntry[] = [];
 
   /**
    * 把 hitLine 的行级类同步到已渲染行 DOM（refresh 范围未变时 fillRows 不重跑，
@@ -457,6 +466,20 @@ export function renderCode(
         engine = 'tree-sitter';
         lineSegs = new Map(assignIntervalsToLines(intervals, lineOffsets).map((a) => [a.line, a.segs]));
         scroller?.refresh(true);
+        // 大纲（code-outline Task 2）：parse 成功完成后一次性 fire-and-forget——
+        // 独立于高亮失败面（此处已达，outline 失败亦不影响已上屏渲染面，catch 静默
+        // 空数组终态）；同 lang 重复请求由 client 独立 pending 面自取消，实例只发一次。
+        // hljs 兜底（本 catch 下方）与 plain 分支不投递：无 tree-sitter parse 即无大纲。
+        // 第二个 ?. 为 fake client 缺 outline 方法面兜底（真实 HighlightClient 恒有）。
+        void client.outline?.(text, lang)?.then(
+          (entries) => {
+            if (destroyed) return;
+            outlineEntries = entries;
+          },
+          () => {
+            /* outline 失败静默：保持 []，不重试（锦上添花，非错误面） */
+          }
+        );
       } catch (err) {
         if (destroyed || err instanceof HighlightCanceledError) return; // tab 已切换：静默
         if (err instanceof RemoteComputeError) {
@@ -563,6 +586,20 @@ export function renderCode(
     // 字节域行索引二分（域与边界语义见 RenderCodeHandle.lineAtByteOffset 注）
     lineAtByteOffset(offset: number) {
       return lineOf(byteLineOffsets, offset);
+    },
+    // 大纲缓存直读（2026-10-31 code-outline Task 2）：请求在飞/失败/hljs 兜底/plain
+    // 分支均为 []（缓存初始值，语义见 RenderCodeHandle.getOutline 注）
+    getOutline: () => outlineEntries,
+    // 视口首可视行（Task 3 滚动跟随消费）：scrollTop → 虚拟坐标与 virtualScroller
+    // 同款算式（未超限恒等；BUG-55 超限压缩域线性还原），floor 后钳 [0, 行数-1]
+    firstVisibleLine() {
+      const total = lines.length * lineHeight;
+      let virtualY = pre.scrollTop;
+      if (total > SCROLL_PX_CAP) {
+        const scrollable = Math.max(1, SCROLL_PX_CAP - pre.clientHeight);
+        virtualY = (virtualY / scrollable) * Math.max(1, total - pre.clientHeight);
+      }
+      return Math.min(Math.max(0, lines.length - 1), Math.max(0, Math.floor(virtualY / lineHeight)));
     }
   };
 

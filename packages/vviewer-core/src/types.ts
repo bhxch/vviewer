@@ -75,6 +75,14 @@ import type { BaseDetection } from '@bhxch/vviewer-detect';
 export { ENCODING_VALUES } from '@bhxch/vviewer-detect';
 export type { Encoding, BaseDetection } from '@bhxch/vviewer-detect';
 
+/**
+ * OutlineEntry（代码大纲条目）单源在 @bhxch/vviewer-highlight（T1 裁决：tags.scm
+ * 协议面随 highlight 包产出，core 不重复定义）。core 侧仅 type-only 引用声明
+ * RenderedInstance 契约（devDependency，零运行时依赖——import type 编译期擦除）。
+ */
+import type { OutlineEntry } from '@bhxch/vviewer-highlight';
+export type { OutlineEntry };
+
 export interface Detection extends BaseDetection {
   /**
    * 无扩展名回退链命中标记（BUG-07）：ext 为空、经文本性探测交 code 渲染器时置位；
@@ -114,6 +122,13 @@ export interface RenderedInstance {
   search?(query: string): Promise<SearchMatch[]>;
   /** 可选：跳转到第 index 个搜索命中（0 起，配合 search 的返回序） */
   gotoMatch?(index: number): void;
+  /**
+   * 可选：代码大纲（code 渲染器 Task 2，2026-10-31 code-outline spec §2.3）。全量
+   * 路径 tree-sitter parse 完成后异步产出；请求在飞/无大纲（hljs 兜底、plain、窗口
+   * 路径、无 tags 语言）返回 []——鸭子探测不出错，消费方（Task 3 右面板）以
+   * `inst.getOutline?.() ?? []` 触达。条目形状与过滤语义见 highlight 包 OutlineEntry。
+   */
+  getOutline?(): OutlineEntry[];
 }
 
 /** 目录条目（getToc 输出；core 定义避免各渲染器重复形状） */

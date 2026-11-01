@@ -125,6 +125,10 @@ importers:
       '@bhxch/vviewer-detect':
         specifier: workspace:*
         version: link:../vviewer-detect
+    devDependencies:
+      '@bhxch/vviewer-highlight':
+        specifier: workspace:*
+        version: link:../vviewer-highlight
 
   packages/vviewer-detect:
     dependencies:
