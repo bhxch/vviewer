@@ -181,9 +181,9 @@ describe('T3 操作：file-log / blob-at / blame（真 isogit + 两提交链）'
     expect(full.truncated).toBe(false);
     expect(full.entries.map((e) => e.oid)).toEqual([commit2.oid, commit.oid]);
     // log 详情消费面（spec §3.4）：committer 与 author 可异（夹具 U/V）
-    expect(full.entries[0].author).toBe('U');
-    expect(full.entries[0].committer).toBe('V');
-    expect(full.entries[0].committerTimestamp).toBe(1700002000);
+    expect(full.entries[0]!.author).toBe('U');
+    expect(full.entries[0]!.committer).toBe('V');
+    expect(full.entries[0]!.committerTimestamp).toBe(1700002000);
     // b.txt 只在 c1 变过：单条
     const bLog = await client.fileLog('', 'b.txt', 50);
     expect(bLog.entries.map((e) => e.oid)).toEqual([commit.oid]);
@@ -218,11 +218,11 @@ describe('T3 操作：file-log / blob-at / blame（真 isogit + 两提交链）'
     expect(r.lines[0]).toMatchObject({ sha: commit2.oid, line: 0, numLines: 1, author: 'U' });
     // 工作区改写（归一后不等）：未提交哨兵
     const dirty = await client.blame('', 'a.txt', enc.encode('hello git v2 more\n'));
-    expect(dirty.lines[0].sha).toBe('');
-    expect(dirty.lines[0].author).toBe('（未提交）');
+    expect(dirty.lines[0]!.sha).toBe('');
+    expect(dirty.lines[0]!.author).toBe('（未提交）');
     // CRLF 工作区字节归一后与 HEAD blob 同域：归属保持 HEAD 提交（行号域与渲染
     // data-line 对齐的集成锚）
     const crlf = await client.blame('', 'a.txt', enc.encode('hello git v2\r\n'));
-    expect(crlf.lines[0].sha).toBe(commit2.oid);
+    expect(crlf.lines[0]!.sha).toBe(commit2.oid);
   });
 });

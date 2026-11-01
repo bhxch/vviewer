@@ -131,8 +131,8 @@ function myersCapped(
     trace.push(v.slice());
     for (let k = -d; k <= d; k += 2) {
       let x: number;
-      if (k === -d || (k !== d && v[max + k - 1] < v[max + k + 1])) x = v[max + k + 1];
-      else x = v[max + k - 1] + 1;
+      if (k === -d || (k !== d && v[max + k - 1]! < v[max + k + 1]!)) x = v[max + k + 1]!;
+      else x = v[max + k - 1]! + 1;
       let y = x - k;
       while (x < n && y < m && a[lo + x] === b[lo + y]) {
         x++;
@@ -163,12 +163,12 @@ function backtrack(
   let x = n;
   let y = m;
   for (let d = dFinal; d >= 1; d--) {
-    const v = trace[d];
+    const v = trace[d]!;
     const k = x - y;
     let prevK: number;
-    if (k === -d || (k !== d && v[max + k - 1] < v[max + k + 1])) prevK = k + 1;
+    if (k === -d || (k !== d && v[max + k - 1]! < v[max + k + 1]!)) prevK = k + 1;
     else prevK = k - 1;
-    const prevX = v[max + prevK];
+    const prevX = v[max + prevK]!;
     const prevY = prevX - prevK;
     while (x > prevX && y > prevY) {
       x--;
@@ -236,21 +236,21 @@ export function unifiedDiff(
   const hunks: Array<[number, number]> = [];
   let i = 0;
   while (i < ops.length) {
-    if (ops[i].type === 'eq') {
+    if (ops[i]!.type === 'eq') {
       i++;
       continue;
     }
     let lastChange = i;
     let j = i;
     while (j < ops.length) {
-      if (ops[j].type !== 'eq') {
+      if (ops[j]!.type !== 'eq') {
         lastChange = j;
         j++;
         continue;
       }
       let run = 0;
       let k2 = j;
-      while (k2 < ops.length && ops[k2].type === 'eq') {
+      while (k2 < ops.length && ops[k2]!.type === 'eq') {
         run++;
         k2++;
       }
@@ -267,7 +267,7 @@ export function unifiedDiff(
   let bytes = 0;
   outer: for (const [s, e] of hunks) {
     for (let k = s; k < e; k++) {
-      const op = ops[k];
+      const op = ops[k]!;
       const row: DiffRow =
         op.type === 'eq'
           ? { type: 'ctx', oldLine: op.a, newLine: op.b, text: aLines[op.a] ?? '' }
@@ -336,21 +336,22 @@ export function blameWalk(
   truncated: boolean
 ): BlameWalkResult {
   if (history.length === 0) return { lines: [], truncated };
-  let attr: number[] = new Array<number>(history[0].lines.length).fill(0);
+  const first = history[0]!;
+  let attr: number[] = new Array<number>(first.lines.length).fill(0);
   for (let i = 1; i < history.length; i++) {
-    const ops = diffOps(history[i - 1].lines, history[i].lines);
-    const next: number[] = new Array<number>(history[i].lines.length).fill(i);
+    const ops = diffOps(history[i - 1]!.lines, history[i]!.lines);
+    const next: number[] = new Array<number>(history[i]!.lines.length).fill(i);
     for (const op of ops) {
-      if (op.type === 'eq') next[op.b] = attr[op.a];
+      if (op.type === 'eq') next[op.b] = attr[op.a]!;
     }
     attr = next;
   }
-  let domain: readonly string[] = history[history.length - 1].lines;
+  let domain: readonly string[] = history[history.length - 1]!.lines;
   if (worktreeLines !== null) {
     const ops = diffOps(domain, worktreeLines);
     const next: number[] = new Array<number>(worktreeLines.length).fill(-1);
     for (const op of ops) {
-      if (op.type === 'eq') next[op.b] = attr[op.a];
+      if (op.type === 'eq') next[op.b] = attr[op.a]!;
     }
     attr = next;
     domain = worktreeLines;
@@ -360,7 +361,7 @@ export function blameWalk(
   const nowSec = Math.floor(Date.now() / 1000);
   let i = 0;
   while (i < attr.length) {
-    const v = attr[i];
+    const v = attr[i]!;
     let j = i + 1;
     while (j < attr.length && attr[j] === v) j++;
     if (v === -1) {
@@ -373,7 +374,7 @@ export function blameWalk(
         message: ''
       });
     } else {
-      const c = history[v];
+      const c = history[v]!;
       groups.push({ sha: c.oid, line: i, numLines: j - i, author: c.author, timestamp: c.timestamp, message: c.message });
     }
     i = j;

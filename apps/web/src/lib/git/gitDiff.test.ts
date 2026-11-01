@@ -24,12 +24,12 @@ function rebuild(a: readonly string[], b: readonly string[], ops: readonly DiffO
   for (const op of ops) {
     if (op.type === 'eq') {
       expect(a[op.a]).toBe(b[op.b]);
-      out.push(a[op.a]);
+      out.push(a[op.a]!);
     } else if (op.type === 'del') {
       expect(op.b).toBe(-1);
     } else {
       expect(op.a).toBe(-1);
-      out.push(b[op.b]);
+      out.push(b[op.b]!);
     }
   }
   return out;
@@ -198,7 +198,7 @@ describe('blameWalk（行归属推进）', () => {
     const r = blameWalk([c1], ['a', 'b', 'new'], false);
     expect(r.lines).toEqual([
       { sha: 'head', line: 0, numLines: 2, author: 'a', timestamp: 1700000000, message: 'head msg' },
-      { sha: UNCOMMITTED_SHA, line: 2, numLines: 1, author: '（未提交）', timestamp: r.lines[1].timestamp, message: '' }
+      { sha: UNCOMMITTED_SHA, line: 2, numLines: 1, author: '（未提交）', timestamp: r.lines[1]!.timestamp, message: '' }
     ]);
   });
 
@@ -211,7 +211,7 @@ describe('blameWalk（行归属推进）', () => {
       { sha: 'crlf', line: 0, numLines: 3, author: 'a', timestamp: 1700000000, message: 'crlf msg' }
     ]);
     // 尾行号 = 行数-1（与 data-line 域一致）
-    expect(r.lines[0].line + r.lines[0].numLines - 1).toBe(2);
+    expect(r.lines[0]!.line + r.lines[0]!.numLines - 1).toBe(2);
   });
 
   it('截断透传 + 窗外最老提交兜底归属（历史超上限语义）', () => {
@@ -220,7 +220,7 @@ describe('blameWalk（行归属推进）', () => {
     const c2 = entry('c2', ['base1', 'base2', 'base3', 'c2 line']);
     const r = blameWalk([c1, c2], null, true);
     expect(r.truncated).toBe(true);
-    expect(r.lines[0].sha).toBe('c1'); // 窗外历史的行落到窗内最老提交
+    expect(r.lines[0]!.sha).toBe('c1'); // 窗外历史的行落到窗内最老提交
     expect(r.lines.map((g) => g.sha)).not.toContain('c0');
   });
 
