@@ -23,8 +23,12 @@
 // - stat 的存在性探测靠 err.code ∈ {ENOENT, ENOTDIR, *ENS*}（isNotFoundError）；
 //   isogit 自己的 NotFoundError.code === 'NotFoundError' 另成一族——store.read 失败
 //   统一转写为 code:'ENOENT'，供「松散对象缺失 → 回落包读取」的 isogit 内部链路消化。
+//   该码经 fs 反向通道显式透传（回帧 payload.code → worker 侧 frameError 重建挂回），
+//   通道任一端剥码即断回落链（评审 C1：packed 仓库 last-commit/status/log 全废）。
 // - discoverGitdir 原生处理 `.git` 为文件的 worktree 形态（stat 判 isFile 后读内容
-//   跟随 'gitdir: ' 指向）——适配层无需特判，与 gitProbe 的可达性判定天然对齐。
+//   跟随 'gitdir: ' 指向）——适配层无需特判。但探测侧（gitProbe）按前缀模型保守
+//   挡掉模型外 worktree（gitdir 指向 store 他处，评审 I1 裁决：adapter 单根前缀
+//   表达不了，判不可用），能到本适配层的 gitdir: 形态均指向 repoDir 子树内实体。
 
 import type { TreeStore } from '@bhxch/vviewer-core';
 

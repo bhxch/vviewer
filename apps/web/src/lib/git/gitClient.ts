@@ -21,7 +21,9 @@
 // 剔除）——下次 ensureGitClient 重建新 worker（T2 段内重试钮消费）；与 highlight 单例
 // 「失败保持 rejected 不重试」不同，git chunk 拉取失败可重试（该 chunk 不进 precache，
 // 首次离线激活失败属预期路径）。
-import { browser } from '$app/env';
+//
+// 无 $app 依赖的纯模块（markdownImages.ts:2 先例——vitest 直测的解析前提）：SSR
+// 守卫以 window 存在性替代 $app/env 的 browser（ensureGitClient 内，见该处注释）。
 import type { TreeStore } from '@bhxch/vviewer-core';
 import { GitFsAdapter } from './gitFs';
 
@@ -91,12 +93,14 @@ export type GitWorkerOut =
   | { kind: 'fs'; requestId: number; fsId: number; op: 'read' | 'readdir' | 'stat' | 'readlink'; path: string };
 
 /** fs 反向请求的回帧载荷（与 kind:'fs-result' 同帧发送；error 与成功载荷互斥）。
- *  entries 为目录名单 string[]（isogit readdir 消费形状，GitPackIndex 包发现用）。 */
+ *  entries 为目录名单 string[]（isogit readdir 消费形状，GitPackIndex 包发现用）。
+ *  error 可携 code（评审 C1）：GitFsAdapter 的 ENOENT 转写必须原样过通道——isogit
+ *  松散对象读 miss 靠 err.code==='ENOENT' 判「不在此处」回落包读取，剥码即断链。 */
 export type FsReplyPayload =
   | { data: Uint8Array }
   | { entries: string[] }
   | { stat: { type: 'file' | 'dir'; size: number } }
-  | { error: string };
+  | { error: string; code?: string };
 
 interface Pending {
   resolve: (value: unknown) => void;
@@ -232,13 +236,15 @@ export class GitClient {
     for (const id of [...this.pending.keys()]) this.cancelById(id);
   }
 
-  /** 终止 worker（会话释放面；后续请求短路拒绝）。 */
+  /** 终止 worker（会话释放面；后续请求短路拒绝）。单例同步剔除（评审 Minor②，与
+   *  failWorker 对齐）——disposed 短路仅挡本实例，ensureGitClient 下次重建新 worker。 */
   dispose(): void {
     this.disposed = true;
     this.cancelAll();
     this.worker.terminate();
     this.stores.clear();
     this.adapters.clear();
+    onClientDead(this);
   }
 
   // ---------- 内部 ----------
@@ -259,7 +265,12 @@ export class GitClient {
       };
       this.pending.set(id, { resolve, reject, cleanup });
       signal?.addEventListener('abort', onAbort, { once: true });
-      this.worker.postMessage(build(id));
+      // 投递失败（worker 已终止等）：登记面已建，必须就地结算 reject——否则 pending
+      // 永不落空（评审 Minor③ 泄漏面）
+      if (!this.safePost(build(id))) {
+        this.settle(id);
+        reject(new Error('git worker 不可用：postMessage 失败（worker 已终止？）'));
+      }
     });
   }
 
@@ -296,7 +307,13 @@ export class GitClient {
     try {
       payload = await this.computeFs(msg);
     } catch (e) {
-      payload = { error: e instanceof Error ? e.message : String(e) };
+      // code 透传（评审 C1）：适配层的 ENOENT 转写必须在回帧中保留，worker 侧重建
+      // Error 时挂回——isogit 的 miss 回落链靠该码分流
+      const code = (e as { code?: unknown } | null)?.code;
+      payload = {
+        error: e instanceof Error ? e.message : String(e),
+        ...(typeof code === 'string' ? { code } : {})
+      };
     }
     this.safePost({ kind: 'fs-result', requestId: msg.requestId, fsId: msg.fsId, ...payload });
   }
@@ -327,11 +344,13 @@ export class GitClient {
     return { error: 'git fs readlink 不可用' };
   }
 
-  private safePost(msg: GitWorkerIn): void {
+  /** 投递帧；false = worker 已终止等 postMessage 失败（调用方各自兜底结算）。 */
+  private safePost(msg: GitWorkerIn): boolean {
     try {
       this.worker.postMessage(msg);
+      return true;
     } catch {
-      // worker 已终止等场景：结算路径已各自 reject，此处静默
+      return false;
     }
   }
 }
@@ -365,7 +384,10 @@ async function create(): Promise<GitClient> {
  * 失败（离线首用）属可重试路径。
  */
 export function ensureGitClient(): Promise<GitClient> | null {
-  if (!browser) return null;
+  // SSR 守卫：window 存在性判定（冻结面「SSR 返 null」的同步语义 + 本模块「无 $app
+  // 依赖纯模块」可直测前提，二者兼得）。kit 客户端构建 window 恒在、服务端渲染恒无
+  // ——与 $app/env 的 browser 等价（highlightClient 静态 import 形态的等价替换）。
+  if (typeof window === 'undefined') return null;
   if (!clientPromise) {
     clientPromise = create().catch((e: unknown) => {
       clientPromise = null;

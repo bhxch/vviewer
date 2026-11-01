@@ -85,28 +85,49 @@ describe('probeGitAvailability .git 为文件（worktree gitdir: 形态）', () 
   beforeEach(() => clearGitProbeCache());
   afterEach(() => clearGitProbeCache());
 
-  it('gitdir: 相对目标 store 内可达 → 可用（repoDir 为 .git 文件所在目录）', async () => {
+  it('gitdir: 模型内相对目标（.git 所在目录子树内）store 可达 → 可用', async () => {
     const store = makeProbeStore(11, {
-      'wt/.git/HEAD': 'gitdir: ../main/.git/worktrees/wt\n',
-      'main/.git/worktrees/wt/HEAD': HEAD
+      'wt/.git/HEAD': 'gitdir: real\n',
+      'wt/real/HEAD': HEAD
     });
     const hit = await probeGitAvailability(store, 'wt/code.ts');
     expect(hit).toEqual({ repoDir: 'wt' });
-    expect(store.reads).toEqual(['wt/.git/HEAD', 'main/.git/worktrees/wt/HEAD']);
+    expect(store.reads).toEqual(['wt/.git/HEAD', 'wt/real/HEAD']);
   });
 
-  it('gitdir: 绝对目标按 store 根相对解释，可达 → 可用', async () => {
+  it('gitdir: store 根仓库（dir 根前缀恒涵盖）指向根内实体 → 可用', async () => {
+    const store = makeProbeStore(21, {
+      '.git/HEAD': 'gitdir: realgit\n',
+      'realgit/HEAD': HEAD
+    });
+    expect(await probeGitAvailability(store, 'code.ts')).toEqual({ repoDir: '' });
+    expect(store.reads).toEqual(['.git/HEAD', 'realgit/HEAD']);
+  });
+
+  it('gitdir: 模型外（../ 指向 store 他处）→ 本级不可用，不触达目标读取', async () => {
+    // 评审 I1 保守对齐：目标即便 store 内可达，GitFsAdapter 单根前缀（wt/）表达不了
+    // ——按不可用处理（spec §2.2 v1「外链不可达则判定不可用」同款精神）
     const store = makeProbeStore(12, {
+      'wt/.git/HEAD': 'gitdir: ../main/.git/worktrees/wt\n',
+      'main/.git/worktrees/wt/HEAD': HEAD
+    });
+    expect(await probeGitAvailability(store, 'wt/code.ts')).toBeNull();
+    expect(store.reads).toEqual(['wt/.git/HEAD', '.git/HEAD']);
+  });
+
+  it('gitdir: 绝对目标按 store 根相对解释，模型外（dir 非根）→ 本级不可用', async () => {
+    const store = makeProbeStore(22, {
       'wt/.git/HEAD': 'gitdir: /main/.git/worktrees/wt\n',
       'main/.git/worktrees/wt/HEAD': HEAD
     });
-    expect(await probeGitAvailability(store, 'wt/code.ts')).toEqual({ repoDir: 'wt' });
+    expect(await probeGitAvailability(store, 'wt/code.ts')).toBeNull();
+    expect(store.reads).toEqual(['wt/.git/HEAD', '.git/HEAD']);
   });
 
-  it('gitdir: 不可达 → 本级不可用，继续向上直至未命中', async () => {
-    const store = makeProbeStore(13, { 'wt/.git/HEAD': 'gitdir: ../nowhere\n' });
+  it('gitdir: 模型内但 store 不可达 → 本级不可用，继续向上直至未命中', async () => {
+    const store = makeProbeStore(13, { 'wt/.git/HEAD': 'gitdir: real\n' });
     expect(await probeGitAvailability(store, 'wt/code.ts')).toBeNull();
-    expect(store.reads).toEqual(['wt/.git/HEAD', 'nowhere/HEAD', '.git/HEAD']);
+    expect(store.reads).toEqual(['wt/.git/HEAD', 'wt/real/HEAD', '.git/HEAD']);
   });
 
   it('gitdir: 路径逃逸（.. 出根）→ 不可达', async () => {

@@ -65,6 +65,9 @@ interface FsWaiter {
 
 const fsWaiters = new Map<number, FsWaiter>();
 const abortedOps = new Set<number>();
+/** 在途操作登记：cancel 帧的守卫（评审 Minor①）——迟到取消（操作已结算/未知 id）
+ *  不再入 abortedOps，杜绝 Set 无限累积；runOp finally 与 cancel 守卫双端收口。 */
+const activeOps = new Set<number>();
 let nextFsId = 1;
 
 /** 会话级对象字节缓存：.git/objects 下非 .pack（松散对象/idx 不可变；.pack 由 isogit
@@ -85,6 +88,14 @@ function repoCache(repoDir: string): Record<string, unknown> {
 function canceled(): Error {
   const e = new Error('git 请求已取消');
   e.name = 'GitCanceled';
+  return e;
+}
+
+/** fs 回帧错误重建：code 原样挂回（评审 C1）——适配层 ENOENT 转写经通道到这里不能
+ *  剥码，isogit 松散对象/ref 的 miss 回落链（err.code==='ENOENT' 分流）靠它闭合。 */
+function frameError(r: { error: string; code?: string }): Error {
+  const e = new Error(r.error);
+  if (r.code !== undefined) (e as { code?: string }).code = r.code;
   return e;
 }
 
@@ -118,7 +129,7 @@ function makeFs(requestId: number, post: (m: GitWorkerOut) => void): { promises:
     const hit = cacheableObjectPath(key) ? objectBytes.get(key) : undefined;
     if (hit) return hit;
     const r = await ask('read', key);
-    if ('error' in r) throw new Error(r.error);
+    if ('error' in r) throw frameError(r);
     if (!('data' in r)) throw new Error('fs read 回帧缺 data');
     if (cacheableObjectPath(key)) objectBytes.set(key, r.data);
     return r.data;
@@ -135,7 +146,10 @@ function makeFs(requestId: number, post: (m: GitWorkerOut) => void): { promises:
       const raw = await readRaw(path);
       const encoding = typeof opts === 'string' ? opts : (opts?.encoding ?? undefined);
       if (encoding === 'utf8' || encoding === 'utf-8') return decoder.decode(raw);
-      return raw;
+      if (encoding === undefined || encoding === null) return raw;
+      // isogit 只产 utf8/无编码两形（1.44.8 实测）；未知 encoding 硬失败，与主线程
+      // 适配层同款行为（评审 Minor④ 一致性），避免静默按原始字节歧义
+      throw new Error(`git fs readFile 不支持的 encoding: ${String(encoding)}`);
     },
     writeFile: writeBan('writeFile'),
     mkdir: writeBan('mkdir'),
@@ -144,7 +158,7 @@ function makeFs(requestId: number, post: (m: GitWorkerOut) => void): { promises:
     symlink: writeBan('symlink'),
     stat: async (path: string) => {
       const r = await ask('stat', canonPath(path));
-      if ('error' in r) throw new Error(r.error);
+      if ('error' in r) throw frameError(r);
       if (!('stat' in r)) throw new Error('fs stat 回帧缺 stat');
       const { type, size } = r.stat;
       return {
@@ -157,7 +171,7 @@ function makeFs(requestId: number, post: (m: GitWorkerOut) => void): { promises:
     },
     lstat: async (path: string) => {
       const r = await ask('stat', canonPath(path));
-      if ('error' in r) throw new Error(r.error);
+      if ('error' in r) throw frameError(r);
       if (!('stat' in r)) throw new Error('fs stat 回帧缺 stat');
       const { type, size } = r.stat;
       return {
@@ -170,13 +184,13 @@ function makeFs(requestId: number, post: (m: GitWorkerOut) => void): { promises:
     },
     readdir: async (path: string): Promise<string[]> => {
       const r = await ask('readdir', canonPath(path));
-      if ('error' in r) throw new Error(r.error);
+      if ('error' in r) throw frameError(r);
       if (!('entries' in r)) throw new Error('fs readdir 回帧缺 entries');
       return r.entries;
     },
     readlink: async (path: string) => {
       const r = await ask('readlink', canonPath(path));
-      if ('error' in r) throw new Error(r.error);
+      if ('error' in r) throw frameError(r);
       throw new Error('git fs readlink 不可用');
     }
     }
@@ -219,9 +233,16 @@ async function handleOp(isoGit: IsoGit, msg: GitOpRequest, fs: { promises: Promi
       }
     }
     case 'last-commit': {
-      const commits = await isoGit.log({ fs, ...ISO_ARGS, filepath: msg.filepath, depth: 1, cache });
-      const first = commits[0];
-      return { commit: first ? toCommitInfo(first) : null };
+      try {
+        const commits = await isoGit.log({ fs, ...ISO_ARGS, filepath: msg.filepath, depth: 1, cache });
+        const first = commits[0];
+        return { commit: first ? toCommitInfo(first) : null };
+      } catch (e) {
+        // 路径在 HEAD 无历史（untracked/新文件）→ isogit log 抛 NotFoundError——
+        // 口径同「无历史 → commit:null」（注释头既定），T2 信息卡对未跟踪文件消费
+        if (isIsoNotFound(e)) return { commit: null };
+        throw e;
+      }
     }
     case 'status': {
       // 原始字节比对（Global Constraints）：hashBlob(工作区字节) vs HEAD blob oid——
@@ -251,6 +272,7 @@ async function handleOp(isoGit: IsoGit, msg: GitOpRequest, fs: { promises: Promi
 // ---------- serve 骨架（仿 highlight serveWorker：排队/报错/迟到帧落空） ----------
 
 async function runOp(msg: GitOpRequest, post: (m: GitWorkerOut) => void): Promise<void> {
+  activeOps.add(msg.requestId); // cancel 守卫基线：iso 拉取期间到达的取消也能对上号
   try {
     const isoGit = await ensureIso(); // 拉取失败 → error 帧；下一次操作重新 import
     if (abortedOps.has(msg.requestId)) return;
@@ -261,6 +283,7 @@ async function runOp(msg: GitOpRequest, post: (m: GitWorkerOut) => void): Promis
     if (abortedOps.has(msg.requestId)) return;
     post({ kind: 'error', requestId: msg.requestId, op: msg.kind, error: e instanceof Error ? e.message : String(e) });
   } finally {
+    activeOps.delete(msg.requestId);
     abortedOps.delete(msg.requestId);
   }
 }
@@ -274,11 +297,16 @@ export function serveGitWorker(): void {
       const w = fsWaiters.get(msg.fsId);
       if (!w) return;
       fsWaiters.delete(msg.fsId);
-      if ('error' in msg) w.reject(new Error(msg.error));
+      // C1：error 帧走 reject 路径——重建时必须挂回 code（适配层 ENOENT 转写经此
+      // 抵达 isogit 的 FileSystem.read → isNotFoundError → null 语义），裸 new Error
+      // 剥码即断「松散对象 miss → 回落」与可选文件（shallow/packed-refs）容错链
+      if ('error' in msg) w.reject(frameError(msg));
       else w.resolve(msg);
       return;
     }
     if (msg.kind === 'cancel') {
+      // 迟到取消（操作已结算或未知 id）：不入 abortedOps（评审 Minor① 泄漏面收口）
+      if (!activeOps.has(msg.requestId)) return;
       abortedOps.add(msg.requestId);
       // 在途 fs 反向调用立即 reject → isogit promise 链 unwind（长操作在下一跳 fs 读断开）
       for (const [fsId, w] of [...fsWaiters]) {

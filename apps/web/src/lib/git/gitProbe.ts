@@ -7,8 +7,11 @@
 //
 // `.git` 为文件的 worktree 形态（Global Constraints v1）：读 `gitdir: <path>` 指向并
 // 在 store 内可达（指向目录下再读 HEAD 成功）才判可用；不可达/路径逃逸 → 本级不命中
-// 继续向上（外层可能是独立仓库）。isogit 的 discoverGitdir 对该形态原生支持，worker
-// 侧无需特判。
+// 继续向上（外层可能是独立仓库）。保守对齐（评审 I1，spec §2.2 v1「外链不可达则判定
+// 不可用」同款精神）：gitdir 实体还必须落在 `.git` 所在目录的前缀模型内——GitFsAdapter
+// 以 repoDir 为单根前缀供数（isogit dir:'/' 的全部 fs 路径映射进该前缀），指向 store
+// 他处（../main/.git 之类）即便可达，worker 链的路径映射也表达不了（越界 throw）。
+// 模型内形态（指向自身子树内实体）isogit 的 discoverGitdir 原生跟随，worker 侧无需特判。
 //
 // 来源天然不可用推演（补充上下文实测口径）：url/single 来源的 path 无目录层级（文件
 // 自身目录 = 根），probe 在根读 `.git/HEAD`——single/url store 只对自身唯一文件可读，
@@ -54,7 +57,8 @@ function gitHeadPath(dir: string): string {
   return dir === '' ? '.git/HEAD' : `${dir}/.git/HEAD`;
 }
 
-/** 目录读 HEAD；`.git` 为文件时解析 gitdir: 指向并验证 store 内可达，否则判可用。 */
+/** 目录读 HEAD；`.git` 为文件时解析 gitdir: 指向并验证「前缀模型内 + store 内可达」，
+ *  否则本级不可用（继续向上）。 */
 async function probeDir(store: TreeStore, dir: string): Promise<GitProbeHit | null> {
   let head: Uint8Array;
   try {
@@ -66,6 +70,10 @@ async function probeDir(store: TreeStore, dir: string): Promise<GitProbeHit | nu
   if (!text.startsWith('gitdir:')) return { repoDir: dir };
   const target = resolveGitdirTarget(dir, text.slice('gitdir:'.length).trim());
   if (target === null) return null;
+  // 前缀模型判定（评审 I1 保守对齐）：gitdir 实体须在 .git 所在目录子树内——这是
+  // GitFsAdapter 单根前缀供数能表达的域；dir=''（store 根仓库）时根前缀恒涵盖。
+  // 判定在读可达性之前：模型外不产生第二次读取。
+  if (dir !== '' && !target.startsWith(`${dir}/`)) return null;
   try {
     await store.read(target === '' ? 'HEAD' : `${target}/HEAD`);
   } catch {
@@ -77,7 +85,8 @@ async function probeDir(store: TreeStore, dir: string): Promise<GitProbeHit | nu
 /**
  * gitdir: 目标 → store 相对路径：相对目标以 `.git` 文件所在目录为基；绝对目标（宿主
  * 绝对路径在 store 内无意义）以 store 根为基。逐段消 '.'/'..'（与 gitFs 的
- * resolveRelPath 同构），逃出基链 → null（不可达）。
+ * resolveRelPath 同构），逃出基链 → null（不可达）。结果是否落在 `.git` 所在目录的
+ * 前缀模型内（adapter 可表达域）由 probeDir 消费侧判定——本函数只管路径归一。
  */
 function resolveGitdirTarget(dir: string, target: string): string | null {
   const trimmed = target.replace(/\/+$/, '');
