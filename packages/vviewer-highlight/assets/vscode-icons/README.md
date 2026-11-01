@@ -26,7 +26,7 @@ vendor 基准 tag：**1.141.0**（2026-11-01 经 raw.githubusercontent.com 抓�
 ## 许可
 
 theme-seti 扩展为 MIT（其 package.json `license: "MIT"`）；MIT 全文见上游仓库
-根 LICENSE，本仓库级汇总登记见根目录 `THIRD_PARTY_NOTICES.md`（由计划 Task 5 增补条目）。
+根 LICENSE，本仓库级汇总登记见根目录 `THIRD_PARTY_NOTICES.md`（由计划 Task 4 增补条目——vendor 属 Task 4）。
 本文件即二进制资产（woff）无法内嵌声明的统一声明载体（惯例同上级 `../vscode/README.md`）。
 
 vendor 转换脚本（src 对象形式改写/`_file` 别名/亮色变体剪除）为一次性操作，未随

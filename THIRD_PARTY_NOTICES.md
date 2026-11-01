@@ -27,5 +27,6 @@
 | xlsx（SheetJS community） | Apache-2.0 | Excel 解析/表格渲染（render-doc 包，动态 import 不进主包） | M4 |
 | helix-editor/helix | MPL-2.0 | `packages/vviewer-highlight/assets/themes.json`（214 主题派生自 `runtime/themes`，格式转换修改）与 `languages.json`（派生自 `languages.toml`）、`packages/vviewer-highlight/assets/queries/`（vendored 拷贝）；溯源见 `tools/helix-assets/README.md` | M2 |
 | microsoft/vscode | MIT | `packages/vviewer-highlight/assets/vscode/dark_modern.json`、`light_modern.json`（theme-defaults 扩展主题，JSONC 规范化与 include 内联后 vendor，色值未改动） | B |
+| microsoft/vscode（extensions/theme-seti） | MIT | `packages/vviewer-highlight/assets/vscode-icons/seti/`（Seti 图标主题，清单 JSONC 规范化与格式改写后 vendor、`seti.woff` 原样拷贝；字形上游 jesseweed/seti-ui 同 MIT），溯源与修改明细见 `packages/vviewer-highlight/assets/vscode-icons/README.md` | 图标主题 T4 |
 
 各组件的完整许可文本随其 npm 包分发（`node_modules/<pkg>/LICENSE`），构建产物不含许可文本裁剪。
