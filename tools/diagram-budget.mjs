@@ -21,6 +21,10 @@ const dir = 'apps/web/build/_app/immutable/chunks';
 let entries;
 try {
   entries = readdirSync(dir)
+    // 备案（评审 Minor⑤）：vite codeSplitting 组正则与 isogit 传递依赖表手工耦合
+    //（vite.config.ts git-engine 组），升级 isomorphic-git 引入新独占依赖时需同步续表；
+    // pako@1/readable-stream@2 与 jszip 共享，由 rolldown 按共享度内联进默认 chunk
+    //（不在正则内亦不误伤——2026-11 build 实测），不会以 git-engine 前缀落盘。
     .filter((f) => f.startsWith('diagram-engines') || f.startsWith('git-engine'))
     .map((f) => ({ file: f, size: statSync(join(dir, f)).size }));
   // spec §7：svgbob wasm 资产计入口径。正则按 svgbob 前缀 + .wasm 后缀匹配，
