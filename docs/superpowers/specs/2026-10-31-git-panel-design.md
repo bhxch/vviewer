@@ -91,7 +91,7 @@ apps/web（git-worker、GitFsAdapter、gitClient 封装、MetaPanel 侧 `.vv-rig
 
 ### 8.1 I1 域收紧：worktree 形态须落 .git 所在目录子树内
 
-`.git` 为文件（worktree/submodule）时，`gitdir: <path>` 指向的实体**必须落在 `.git` 所在目录的前缀模型内**（相对目标以 `.git` 所在目录为基、绝对目标以 store 根为基，逐段消解；逃逸或指向 store 他处——`../main/.git` 之类——即便可达也判不可用，本级不命中继续向上）。原因：GitFsAdapter 以 repoDir 为单根前缀供数，isogit `dir:'/'` 的全部 fs 路径映射进该前缀，模型外路径 worker 链表达不了（越界 throw）。模型内形态（指向自身子树内实体）isogit 的 discoverGitdir 原生跟随，worker 侧无需特判。实现与测试：gitProbe.ts 头注释「保守对齐」节 + gitFs.test.ts 四态用例（相对/绝对/不可达/逃逸）。
+`.git` 为文件（worktree/submodule）时，`gitdir: <path>` 指向的实体**必须落在 `.git` 所在目录的前缀模型内**（相对目标以 `.git` 所在目录为基、绝对目标以 store 根为基，逐段消解；逃逸或指向 store 他处——`../main/.git` 之类——即便可达也判不可用，本级不命中继续向上）。原因：GitFsAdapter 以 repoDir 为单根前缀供数，isogit `dir:'/'` 的全部 fs 路径映射进该前缀，模型外路径 worker 链表达不了（越界 throw）。模型内形态（指向自身子树内实体）isogit 的 discoverGitdir 原生跟随，worker 侧无需特判。实现与测试：gitProbe.ts 头注释「保守对齐」节 + gitProbe.test.ts 的 worktree `gitdir:` 形态用例组（相对/绝对/不可达/逃逸四态）。
 
 ### 8.2 §3.4 逐提交 diff 基线 = log 前条目（与 git log -p 的 merge 语义 differ）
 
