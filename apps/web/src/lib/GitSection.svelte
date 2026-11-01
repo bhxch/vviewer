@@ -19,7 +19,7 @@
   // 误伤（展开 diff 时拉 log 不互相打断）。
   import type { TreeStore } from '@bhxch/vviewer-core';
   import { ensureGitClient, type GitCommitInfo, type GitStatus } from './git/gitClient';
-  import { LOG_MAX_ENTRIES, normalizeBlobText, splitLines, unifiedDiff } from './git/gitDiff';
+  import { BLAME_MAX_COMMITS, LOG_MAX_ENTRIES, normalizeBlobText, splitLines, unifiedDiff } from './git/gitDiff';
   import { calendarTime, relativeDate, repoRelPath, subjectOf } from './git/gitUi';
   import GitDiffView, { type GitDiffUiState } from './GitDiffView.svelte';
 
@@ -395,7 +395,7 @@
     </dl>
     {#if phase.commit !== null}
       <!-- blame 说明行（spec §4）：hover 即查提示 + 200 截断标注（仅对有历史的文件） -->
-      <p class="vv-git-note vv-git-blame-hint">悬停代码行可查看提交归属；文件历史超 200 提交仅最近 200 参与归属。</p>
+      <p class="vv-git-note vv-git-blame-hint">悬停代码行可查看提交归属；文件历史超 {BLAME_MAX_COMMITS} 提交仅最近 {BLAME_MAX_COMMITS} 参与归属。</p>
     {/if}
     <!-- diff 折叠区（spec §3.3）：默认收起，展开即拉；模式标注随状态三态 -->
     <div class="vv-git-fold">

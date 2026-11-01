@@ -186,6 +186,17 @@
     rightView = tocEntries.length > 0 || outlineDefinitions.length > 0 ? 'toc' : 'meta';
   });
 
+  // toc 空态回落校正（终审 Minor）：touched 后切到无目录数据文件，切换器目录钮随
+  // 数据消失，rightView 停留 'toc' 落入下方渲染分支的 MetaPanel 兜底空态——「属
+  // 性面板在场但无钮 active」失真。此处归位 'meta'（不置 touched：台账只记用户显
+  // 式选择，默认落位 effect 维持关闭）；写值即出条件（'meta' 不再命中首行门），无
+  // 自读自写环。模板表达式禁写 state，故校正以 effect 承载（与上方落位同族）。
+  $effect(() => {
+    if (rightView !== 'toc') return;
+    if (tocEntries.length > 0 || outlineDefinitions.length > 0) return;
+    rightView = 'meta';
+  });
+
   // 滚动跟随节流循环（code-outline Task 3）：激活实例为 code 全量模式时 metaStore
   // 总线持有 firstVisibleLine 句柄（窗口路径缺席 → 静默不启用，spec §3）。节流取
   // 200ms interval 而非 rAF 滚动监听：实例句柄无滚动事件上行面（命令式快照读数），
@@ -195,11 +206,12 @@
   $effect(() => {
     const defs = outlineDefinitions;
     if (defs.length === 0) return;
-    // 属性视图门（fixwave 终审 Minor）：rightView='meta' 时大纲不可见，高亮值无人
-    // 消费——跳过 200ms 轮询的读句柄+二分空转（约 200ms/次）；翻回目录视图由本
-    // effect 对 rightView 的依赖重启轮询（cleanup 归零 activeOutlineLine，首 tick
-    // 内恢复），读 state 写 state 无自读自写环。
-    if (rightView === 'meta') return;
+    // 目录视图门（终审 Minor）：'toc' 是大纲唯一在场视图——旧 'meta' 门在 spec ⑤
+    // 引入 'git' 视图后放行了 Git 视图（OutlineView 不在场，高亮值无人消费，读句
+    // 柄+二分约 200ms/次空转）；翻回目录视图由本 effect 对 rightView 的依赖重启
+    // 轮询（cleanup 归零 activeOutlineLine，首 tick 内恢复），读 state 写 state 无
+    // 自读自写环。
+    if (rightView !== 'toc') return;
     const timer = setInterval(() => {
       const line = firstOutlineVisibleLine();
       if (line === null) return;
@@ -1333,7 +1345,7 @@
         <!-- 目录视图互斥渲染（code-outline Task 3）：实例互斥保证 md TOC 与代码
             大纲不同时有数据——outlineDefinitions 在场渲染大纲（引用已过滤的显示
              集），否则 md TOC；两者皆空（用户点过切换器后切到无数据文件）回落属性
-             面板兜底空态。 -->
+             面板兜底空态（右栏校正 effect 随即归位 'meta'，见其注释）。 -->
         {#if outlineDefinitions.length > 0}
           <OutlineView entries={outlineDefinitions} activeLine={activeOutlineLine ?? undefined} onclick={onOutlineJump} />
         {:else if tocEntries.length > 0}
