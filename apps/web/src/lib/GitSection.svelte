@@ -95,18 +95,24 @@
     // probe 命中后登记 repoDir → store 的 fs 供数（同 repoDir 换源以最新 store 为
     // 准——bindFs 内部换源强制重建 adapter）
     client.bindFs(rd, st);
+    // 仓库相对路径（isogit 树内寻址口径）：lastCommit/statusOf 的 filepath 经 isogit
+    // 直接在 HEAD 树内查址——不经 fs 反向通道，GitFsAdapter 的 repoDir 前缀映射管不
+    // 到它，必须由调用方剥掉 store 前缀。剥前缀差了一致性就会出现「树内查无此路径」
+    // 的 clean 误报 untracked（e2e GIT-01/02 首跑实证：T1 集成测试全用 repoDir=''
+    // （仓库在 store 根）形态，store 路径与树内路径重合掩盖了前缀差）。
+    const relPath = rd === '' ? fp : fp.startsWith(`${rd}/`) ? fp.slice(rd.length + 1) : fp;
     try {
       // 并发三路：分支 / 末次提交 / 工作区原始字节（原始通道全量——渲染归一文本
       // 不回读，CRLF 红线由字节直读保证）。字节读失败（文件已被删等）→ status
       // 无法比对，状态行降级显示「不可用」而非误报三态之一。
       const [head, last, workBytes] = await Promise.all([
         client.probeHead(rd, fd, signal),
-        client.lastCommit(rd, fp, signal),
+        client.lastCommit(rd, relPath, signal),
         st.read(fp).catch(() => null)
       ]);
       let status: GitStatus | null = null;
       if (workBytes !== null) {
-        status = (await client.statusOf(rd, fp, workBytes, signal)).status;
+        status = (await client.statusOf(rd, relPath, workBytes, signal)).status;
       }
       if (stale()) return;
       phase = {

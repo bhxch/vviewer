@@ -1281,20 +1281,24 @@
       {#if tocEntries.length > 0 || outlineDefinitions.length > 0 || gitInfo !== null}
         <!-- 「目录 | 属性 | Git」分段切换器（code-outline Task 3 二元 + git-panel
              Task 2 扩三元）：目录数据非空或 git 探测可用时渲染（均无维持纯属性现状
-             ——spec §4 显隐合并）；aria-pressed 表激活段。Git 钮显隐 = gitInfo 非
-             null（后台 probe 可用才出现）；激活 Git 置 rightViewTouched（用户显式
-             选择），默认落位 effect 永不选 'git'（下方注释）。 -->
+             ——spec §4 显隐合并）；aria-pressed 表激活段。**段级显隐各自独立**：
+             目录钮 = 有目录数据（有大纲文件才有，无大纲文件的 [属性|Git] 双钮形态
+             不出现空目录段）；Git 钮 = gitInfo 非 null（后台 probe 可用才出现）；
+             激活任一段置 rightViewTouched（用户显式选择），默认落位 effect 永不选
+             'git'（下方注释）。 -->
         <div class="vv-right-switch" role="group" aria-label="右面板视图切换">
-          <button
-            type="button"
-            class="vv-right-switch-btn"
-            class:active={rightView === 'toc'}
-            aria-pressed={rightView === 'toc'}
-            onclick={() => {
-              rightViewTouched = true;
-              rightView = 'toc';
-            }}>目录</button
-          >
+          {#if tocEntries.length > 0 || outlineDefinitions.length > 0}
+            <button
+              type="button"
+              class="vv-right-switch-btn"
+              class:active={rightView === 'toc'}
+              aria-pressed={rightView === 'toc'}
+              onclick={() => {
+                rightViewTouched = true;
+                rightView = 'toc';
+              }}>目录</button
+            >
+          {/if}
           <button
             type="button"
             class="vv-right-switch-btn"
