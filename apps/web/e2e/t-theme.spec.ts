@@ -546,15 +546,16 @@ test('B-THEME-2: 导入 JSON 主题并应用、刷新后 IndexedDB 持久恢复'
   await gotoInMode(page, 'dark');
   await openSettings(page);
 
-  // 合法主题 JSON 经隐藏 file input 注入（真实 onchange 管线；节内 file input 以
-  // .vv-sc-section 限定——左导航底部还有导入设置的 hidden input）
+  // 合法主题 JSON 经隐藏 file input 注入（真实 onchange 管线；accept=".json,.vsix"
+  // 限定颜色主题导入口——图标主题 spec 后节内同现图标主题 file input，泛选会 strict
+  // 撞双元素；左导航底部还有导入设置的 hidden input）
   const probe = {
     name: 'Probe Dark',
     type: 'dark',
     colors: { 'editor.background': '#123456', 'sideBar.background': '#234567', focusBorder: '#ABCDEF' },
     tokenColors: [{ scope: 'comment', settings: { foreground: '#654321' } }]
   };
-  await page.locator('.vv-sc-section input[type="file"]').setInputFiles({
+  await page.locator('.vv-sc-section input[type="file"][accept=".json,.vsix"]').setInputFiles({
     name: 'probe-dark.json',
     mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify(probe))
@@ -601,7 +602,7 @@ test('B-THEME-3: 导入合成最小 VSIX（package.json + contributes.themes + �
 
   await gotoInMode(page, 'dark');
   await openSettings(page);
-  await page.locator('.vv-sc-section input[type="file"]').setInputFiles({
+  await page.locator('.vv-sc-section input[type="file"][accept=".json,.vsix"]').setInputFiles({
     name: 'probe-themes.vsix',
     mimeType: 'application/octet-stream',
     buffer: vsix
