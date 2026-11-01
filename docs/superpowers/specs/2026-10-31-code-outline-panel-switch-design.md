@@ -31,6 +31,7 @@
 
 - code 渲染器实例新增鸭子方法 `getOutline()`（仿 `getToc`，`client.ts:173` 契约模式）→ `ViewerPane` 读取上行（`ViewerPane.svelte:446-448` 链路并列扩展，AppShell 新 state `outlineEntries`，`:511` tab 切换清空同款）。
 - **数据形状（builder check 收敛，替代原「TocEntry 归一」口径）**：大纲不并入 `TocEntry`——其 `id` 是真 DOM heading 元素 id，`Toc.svelte` 的 key/`getElementById` 点击/IntersectionObserver 三处机制全依赖此事实，大纲条目无 DOM 锚点却需要 `line`/`depth` 载荷，硬并会让两边都变形。新类型 `OutlineEntry { name, kind, line（0 起）, byteStart, byteEnd, depth }` 落 `packages/vviewer-core/src/types.ts`；`Toc.svelte`/`TocEntry` 零改动，目录视图 = md 分支（Toc 现状）与 code 分支（新 Outline 视图组件，缩进树渲染）在切换器下按数据源互斥渲染。
+  - **实施偏差注记（fixwave 终审回写）**：`OutlineEntry` 单源实落 `packages/vviewer-highlight/src/types.ts`（协议/提取/条目形状同包共演，T1 裁决），core 仅 type-only 再导出（`vviewer-core/src/types.ts:83-84`）维持本条「落 vviewer-core」的消费面口径。含义：core 未来独立发布时其消费侧需可解析 `@bhxch/vviewer-highlight`（type-only import 编译期擦除、devDependency 不随发布物携带）——当前 workspace 全 private 无碍，独立发布前需复核。
 - 点击通道（builder check 收敛）：code 大纲项点击 → `Object.assign(tab, { pendingLine: line + 1 })` 复用既有通道（GlobalSearchPanel `:160-168` 写入、ViewerPane `:438-446` 消费的同款），零新契约、零实例引用注入。md 分支维持组件内 DOM id 滚动现状。
 
 ## 3. 交互面：右面板切换（已定）
@@ -40,11 +41,12 @@
   - **实现语义（Task 3 评审对齐）**：用户手动切换过视图（含语言轻入口落位属性面板）后跨文件保持其选择；未动过则每次按有无大纲默认落位——「不跨文件记忆」据此修正为「未动过时跟随默认落位」。
 - 大纲渲染：缩进树列表（depth → 缩进层级，深度钳制防深嵌套爆版面——builder 定钳制值）；kind 是否以小徽标展示列为 builder 细节（v1 允许纯缩进+名）。
 - 点击跳转：`revealLine(line + 1)`（`client.ts:173` 契约 / `renderCodeWindowed.ts:1284` 含未加载行续读已备；ViewerPane `pendingLine` 通道同款）。
+  - **行为备案（fixwave 终审回写）**：大纲点击落在本已渲染的激活 tab 上，`pendingLine` 消费需自带重跑触发器——走 `tabStore.touchActiveTab()` rev++ 通道（与全局搜索跳转同代价：全量重渲染换新实例），非 md TOC 的组件内 DOM 滚动零重渲路径。rev 重渲窗口的右栏大纲面板**豁免同 tab 清空**（ViewerPane 三处 onoutline 清空点以 tab 身份门控：渲染 effect cleanup / 新实例一次性鸭子读 / 轮询 effect cleanup+初读；旧 entries 存活到新实例 outline 到货整体替换，跨 tab 切换照旧清空）——否则点击即自清空重建面板（默认落位 effect 翻 'meta' → 数百 ms 后翻回、滚动位归零）。代价：同 tab 窗口内 outline 真消亡（tree-sitter 中途降级 hljs/plain、提取失败恒 []）时无 length 跳变信号、旧 entries 残留至下一次跨 tab 清空路径（cosmetic；instance API 无「已定空」信号可辨，维持项）。
 - 滚动跟随（纳入，便宜版；builder check 收敛接线）：`RenderCodeHandle` 增**可选方法** `firstVisibleLine()`——仅全量模式提供（`lineAtOffset` 同款「仅全量」契约先例，`client.ts:179`），实现从虚拟滚动容器取数；节流循环持在 AppShell（读激活 tab 渲染 handle → 二分 `outlineEntries` → activeOutlineLine 下行给目录视图高亮）。窗口/流式路径缺席该方法 → 跟随静默不启用。若实施实测成本超预期，降级为「仅点击后高亮当前项」，降级记档。md 侧维持 IntersectionObserver 现状（`Toc.svelte:16-52`）。
 
 ## 4. 触达面
 
-packages/vviewer-highlight（QueryFile/装载器/协议/engine outline/tags 资产+generate.mjs）、packages/vviewer-render-text（code 实例 getOutline + 渲染路径挂钩 + `firstVisibleLine()` 可选契约）、packages/vviewer-core（OutlineEntry 新类型）、apps/web（ViewerPane 上行/AppShell 切换器与 state/新 Outline 视图组件/app.css）。e2e：OUT-01..——python/typescript 大纲渲染与 depth、点击跳转（pendingLine 通道）、切换器显隐（有/无大纲）、>2MB 不出大纲、md TOC 回归、无 tags 语言（如 ada）无切换器。
+packages/vviewer-highlight（QueryFile/装载器/协议/engine outline/tags 资产+generate.mjs）、packages/vviewer-render-text（code 实例 getOutline + 渲染路径挂钩 + `firstVisibleLine()` 可选契约）、packages/vviewer-core（OutlineEntry 新类型；**实施偏差**：类型单源在 vviewer-highlight，core 为 type-only 再导出——见 §2.3 偏差注记）、apps/web（ViewerPane 上行/AppShell 切换器与 state/新 Outline 视图组件/app.css）。e2e：OUT-01..——python/typescript 大纲渲染与 depth、点击跳转（pendingLine 通道）、切换器显隐（有/无大纲）、>2MB 不出大纲、md TOC 回归、无 tags 语言（如 ada）无切换器。
 
 ## 5. 非目标
 
