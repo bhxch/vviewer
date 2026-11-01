@@ -76,14 +76,25 @@ interface IoRecord {
   bytes: number | null;
 }
 
-/** /api/file 响应计量（page.on('response') 过滤）：body 异步补齐，settled() 等齐后读数 */
+/** git 探测通道请求判定（与 b-stream-resilience-helpers.isGitProbeFileRequest 同口径）：
+ * probeGitAvailability 对远端来源逐级读 `.git/HEAD`（rangeless、无仓库 404 收场）属
+ * 探测通道语义，与业务文件流式选路无关，不入计量（git 面板 T4 全量门禁定性）。`.git/`
+ * 精确段匹配，`.gitignore` 等 `.git*` 同名文件不误伤。 */
+function isGitProbeFileRequest(url: URL): boolean {
+  const p = url.searchParams.get('path') ?? '';
+  return p === '.git' || p.startsWith('.git/') || p.includes('/.git/');
+}
+
+/** 业务文件 /api/file 响应计量（page.on('response') 过滤，git 探测请求剥离）：body
+ * 异步补齐，settled() 等齐后读数 */
 class IoStats {
   readonly records: IoRecord[] = [];
   private pending: Promise<void>[] = [];
 
   attach(page: Page): void {
     page.on('response', (res) => {
-      if (new URL(res.url()).pathname !== '/api/file') return;
+      const url = new URL(res.url());
+      if (url.pathname !== '/api/file' || isGitProbeFileRequest(url)) return;
       const rec: IoRecord = { range: res.request().headers()['range'] ?? null, bytes: null };
       this.records.push(rec);
       this.pending.push(

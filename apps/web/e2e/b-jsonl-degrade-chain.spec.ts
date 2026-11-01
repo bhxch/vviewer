@@ -128,8 +128,18 @@ interface IoRecord {
   status: number;
 }
 
-/** /api/file 计量：response 级（Range 头/状态码/字节数）+ request 级在途记录。
- * request 级为 stall 门场景必备：挂起应答不产生 response 事件，夹持断言观测请求本身。 */
+/** git 探测通道请求判定（与 b-stream-resilience-helpers.isGitProbeFileRequest 同口径）：
+ * probeGitAvailability 对远端来源逐级读 `.git/HEAD`（rangeless、无仓库 404 收场）属
+ * 探测通道语义，与业务文件流式选路无关，不入计量（git 面板 T4 全量门禁定性）。`.git/`
+ * 精确段匹配，`.gitignore` 等 `.git*` 同名文件不误伤。 */
+function isGitProbeFileRequest(url: URL): boolean {
+  const p = url.searchParams.get('path') ?? '';
+  return p === '.git' || p.startsWith('.git/') || p.includes('/.git/');
+}
+
+/** 业务文件 /api/file 计量：response 级（Range 头/状态码/字节数）+ request 级在途记录，
+ * git 探测请求两级同剥离。request 级为 stall 门场景必备：挂起应答不产生 response 事件，
+ * 夹持断言观测请求本身。 */
 class IoStats {
   readonly records: IoRecord[] = [];
   readonly requestRanges: string[] = [];
@@ -137,11 +147,13 @@ class IoStats {
 
   attach(page: Page): void {
     page.on('request', (req) => {
-      if (new URL(req.url()).pathname !== '/api/file') return;
+      const url = new URL(req.url());
+      if (url.pathname !== '/api/file' || isGitProbeFileRequest(url)) return;
       this.requestRanges.push(req.headers()['range'] ?? '');
     });
     page.on('response', (res) => {
-      if (new URL(res.url()).pathname !== '/api/file') return;
+      const url = new URL(res.url());
+      if (url.pathname !== '/api/file' || isGitProbeFileRequest(url)) return;
       const rec: IoRecord = {
         range: res.request().headers()['range'] ?? null,
         bytes: null,

@@ -90,15 +90,27 @@ export interface IoRecord {
   bytes: number | null;
 }
 
-/** /api/file 响应计量（page.on('response') 过滤）：body 异步补齐，settled() 等齐后读数。
- * attach 必须先于 goto（不漏请求）。 */
+/** git 探测通道请求判定：probeGitAvailability（ViewerPane 文件打开即探测，spec §2
+ * 前端化探测）对远端来源逐级向上读 `.git/HEAD`（worktree gitdir 目标同为 `.git/`
+ * 段内寻址），无 Range 全量拉取、无 git 仓库时 404 收场——属探测通道语义，与业务
+ * 文件的流式选路无关，不属本计量被测面（2026-11-01 git 面板 T4 全量门禁定性：
+ * 计量不剥离则「无全量拉取」家族断言全数误翻红）。`.git/` 精确段匹配，`.gitignore`
+ * 等 `.git*` 同名文件不误伤。 */
+export function isGitProbeFileRequest(url: URL): boolean {
+  const p = url.searchParams.get('path') ?? '';
+  return p === '.git' || p.startsWith('.git/') || p.includes('/.git/');
+}
+
+/** 业务文件 /api/file 响应计量（page.on('response') 过滤，git 探测请求剥离）：
+ * body 异步补齐，settled() 等齐后读数。attach 必须先于 goto（不漏请求）。 */
 export class IoStats {
   readonly records: IoRecord[] = [];
   private pending: Promise<void>[] = [];
 
   attach(page: Page): void {
     page.on('response', (res) => {
-      if (new URL(res.url()).pathname !== '/api/file') return;
+      const url = new URL(res.url());
+      if (url.pathname !== '/api/file' || isGitProbeFileRequest(url)) return;
       const rec: IoRecord = {
         range: res.request().headers()['range'] ?? null,
         status: res.status(),
