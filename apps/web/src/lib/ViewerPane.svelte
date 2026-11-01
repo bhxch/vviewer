@@ -17,6 +17,9 @@
   import { dispatcher, registry, cancelMarkdownRemote } from './viewer';
   import { cancelHighlight } from './highlightClient';
   import { probeGitAvailability, dirOf } from './git/gitProbe';
+  import { ensureGitClient, type GitBlameLine } from './git/gitClient';
+  import { BLAME_MAX_COMMITS, UNCOMMITTED_SHA } from './git/gitDiff';
+  import { relativeDate, repoRelPath, subjectOf } from './git/gitUi';
   import { codeLineMetrics } from './theme';
   import { loadSettings } from './stores/settings';
   import { watchHealth, statusNotice } from './openFlow.svelte';
@@ -27,12 +30,16 @@ import SearchPanel from './SearchPanel.svelte';
     tab,
     ontoc,
     onoutline,
-    ongitAvailable
+    ongitAvailable,
+    gitRepoDir
   }: {
     tab: Tab | null;
     ontoc?: (entries: TocEntry[]) => void;
     onoutline?: (entries: OutlineEntry[]) => void;
     ongitAvailable?: (a: { repoDir: string; fileDir: string } | null) => void;
+    /** 非 null = Git 段激活且探测可用（blame hover 委托挂载条件，git-panel Task 3
+     *  裁决：ViewerPane 侧委托，不动 render-text 包）；null = 解绑 + 浮层即收 */
+    gitRepoDir?: string | null;
   } = $props();
 
   /**
@@ -279,6 +286,156 @@ import SearchPanel from './SearchPanel.svelte';
     if (!inst) return;
     const setLittle = (inst as { setLittle?: (v: boolean) => void }).setLittle;
     if (typeof setLittle === 'function') setLittle.call(inst, little);
+  });
+
+  // ---------- blame hover 浮层（git-panel Task 3，spec §3.2） ----------
+  // 挂载裁决：ViewerPane 侧事件委托，不动 render-text 包——行 DOM 每次滚动整批
+  // 重建（renderCode fillRows 的 viewport.replaceChildren），行级监听必死；委托
+  // 在 getScrollHost() 容器（.vv-code-pre）上 pointerover → closest('[data-line]')
+  // → dataset.line（归一域 0 起）→ blame 缓存按行查询 → fixed 浮层。
+  // 仅全量 code 实例：firstVisibleLine 契约面（render-text client.ts——窗口实例
+  // 缺席，与大纲滚动跟随同款「仅全量」先例；markdown/hex/错误卡无此 API 同门排除）
+  // 且 ≤2MB（tree-sitter 整文件域上限——spec §3.2「仅全量 parse 路径（≤2MB）」，>2MB
+  // lazy 路径无 hover；常量与 render-text strategy.ts 的 TREE_SITTER_MAX_BYTES 同值，
+  // 包面不改故就地复制，报告备案）。
+  // 懒查：首次 hover 触发全文件 blame（worker 计算 + busy 态 + 实例级缓存）；缓存
+  // 生命周期 = 渲染实例（rev 重渲染换实例即失效，内容代一致性免 HEAD 比对）。
+  // 收层：scrollHost scroll 捕获即收 / 指针离场 / Git 段退出与 tab 切换随本 effect
+  // 清理解绑。
+  type BlameTip =
+    | { s: 'loading'; x: number; y: number; below: boolean; line: number }
+    | {
+        s: 'ready';
+        x: number;
+        y: number;
+        below: boolean;
+        author: string;
+        date: string;
+        subject: string;
+        sha: string;
+        note: string | null;
+      };
+  let blameTip = $state<BlameTip | null>(null);
+
+  $effect(() => {
+    const repoDir = gitRepoDir ?? null;
+    const inst = instance;
+    if (repoDir === null || inst === null) return;
+    const firstLine = (inst as { firstVisibleLine?: unknown }).firstVisibleLine;
+    if (typeof firstLine !== 'function') return;
+    const readMeta = (inst as { getMeta?: () => { size?: number } }).getMeta;
+    const size = typeof readMeta === 'function' ? readMeta.call(inst)?.size : undefined;
+    if (typeof size !== 'number' || size > 2 * 1024 * 1024) return;
+    const pre = (inst as RenderedInstance & { getScrollHost(): HTMLElement }).getScrollHost();
+    if (!pre) return;
+    const t0 = tab;
+    if (t0 === null) return;
+    const srcPath = t0.source.path;
+    const srcStore = t0.source.store;
+
+    let cache: Map<number, GitBlameLine> | null = null;
+    let cachePromise: Promise<Map<number, GitBlameLine>> | null = null;
+    let truncatedNote: string | null = null;
+    const ac = new AbortController();
+    let hoverTimer: ReturnType<typeof setTimeout> | null = null;
+
+    /** 全文件 blame 单飞（首 hover 触发，后续 hover 读缓存）；失败缓存空表——本
+     *  实例内不重试，错误面收敛为「无浮层」（取消亦然）。 */
+    const fetchBlame = (): Promise<Map<number, GitBlameLine>> => {
+      if (cachePromise !== null) return cachePromise;
+      cachePromise = (async () => {
+        try {
+          const ensure = ensureGitClient();
+          if (ensure === null) return new Map<number, GitBlameLine>();
+          const client = await ensure;
+          // 工作区字节走 store.read 原始通道（store 寻址，与 GitSection 同轨）；
+          // 读失败（文件已删）→ undefined，blame 落 HEAD 域
+          const bytes = await srcStore.read(srcPath).catch(() => undefined);
+          const res = await client.blame(repoDir, repoRelPath(repoDir, srcPath), bytes, ac.signal);
+          const map = new Map<number, GitBlameLine>();
+          for (const g of res.lines) {
+            for (let k = 0; k < g.numLines; k++) map.set(g.line + k, g);
+          }
+          cache = map;
+          truncatedNote = res.truncated
+            ? `文件历史超 ${BLAME_MAX_COMMITS} 提交，仅最近 ${BLAME_MAX_COMMITS} 个参与归属`
+            : null;
+          return map;
+        } catch {
+          cache = cache ?? new Map<number, GitBlameLine>();
+          return cache;
+        }
+      })();
+      return cachePromise;
+    };
+
+    const hideTip = (): void => {
+      if (hoverTimer !== null) {
+        clearTimeout(hoverTimer);
+        hoverTimer = null;
+      }
+      blameTip = null;
+    };
+
+    /** 视口定位：默认悬于行上方（translateY(-100%)），上方空间不足翻行下方。 */
+    const tipPos = (rect: DOMRect): { x: number; y: number; below: boolean } => {
+      const below = rect.top < 120;
+      return { x: rect.left, y: below ? rect.bottom + 6 : rect.top - 6, below };
+    };
+
+    const readyTip = (g: GitBlameLine, pos: { x: number; y: number; below: boolean }): BlameTip => ({
+      s: 'ready',
+      x: pos.x,
+      y: pos.y,
+      below: pos.below,
+      author: g.author,
+      date: g.sha === UNCOMMITTED_SHA ? '工作区未提交改动' : relativeDate(g.timestamp),
+      subject: subjectOf(g.message),
+      sha: g.sha === UNCOMMITTED_SHA ? '' : g.sha.slice(0, 7),
+      note: truncatedNote
+    });
+
+    const showTip = async (line: number, rect: DOMRect): Promise<void> => {
+      const pos = tipPos(rect);
+      if (cache === null) {
+        blameTip = { s: 'loading', x: pos.x, y: pos.y, below: pos.below, line };
+        const map = await fetchBlame();
+        if (ac.signal.aborted) return;
+        // 计算期间滚走/换行/已收层（scroll 即收）→ 不再弹出
+        if (blameTip === null || blameTip.s !== 'loading' || blameTip.line !== line) return;
+        const g = map.get(line);
+        blameTip = g === undefined ? null : readyTip(g, pos);
+        return;
+      }
+      const g = cache.get(line);
+      blameTip = g === undefined ? null : readyTip(g, pos);
+    };
+
+    const onOver = (e: PointerEvent): void => {
+      const target = e.target as Element | null;
+      const row = target !== null ? target.closest('[data-line]') : null;
+      if (row === null || !pre.contains(row)) return;
+      const line = Number((row as HTMLElement).dataset.line);
+      if (!Number.isInteger(line) || line < 0) return;
+      const rect = (row as HTMLElement).getBoundingClientRect();
+      if (hoverTimer !== null) clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(() => {
+        hoverTimer = null;
+        void showTip(line, rect);
+      }, 300); // spec §3.2「~300ms 延迟」
+    };
+
+    pre.addEventListener('pointerover', onOver);
+    pre.addEventListener('pointerleave', hideTip);
+    pre.addEventListener('scroll', hideTip, { capture: true, passive: true }); // 滚动即收（捕获：内部滚动也收）
+    return () => {
+      ac.abort();
+      if (hoverTimer !== null) clearTimeout(hoverTimer);
+      pre.removeEventListener('pointerover', onOver);
+      pre.removeEventListener('pointerleave', hideTip);
+      pre.removeEventListener('scroll', hideTip, { capture: true });
+      blameTip = null;
+    };
   });
 
   function watchEngine(inst: RenderedInstance): void {
@@ -661,6 +818,26 @@ import SearchPanel from './SearchPanel.svelte';
         searchOpen = false;
       }}
     />
+  {/if}
+  {#if blameTip !== null}
+    <!-- blame hover 浮层（git-panel Task 3）：fixed 定位随 hovered 行视口坐标
+         （行 DOM 重建由委托层消化，浮层在行外自持）；pointer-events:none 不挡
+         代码区 hover；上方空间不足时翻行下方（-below 修饰类去 translateY） -->
+    <div
+      class="vv-git-blame-pop"
+      class:vv-git-blame-pop-below={blameTip.below}
+      role="tooltip"
+      style:left="{blameTip.x}px"
+      style:top="{blameTip.y}px"
+    >
+      {#if blameTip.s === 'loading'}
+        <span class="vv-git-blame-pop-meta">正在计算行归属…</span>
+      {:else}
+        <span class="vv-git-blame-pop-meta">{blameTip.author} · {blameTip.date}{blameTip.sha !== '' ? ` · ${blameTip.sha}` : ''}</span>
+        <span class="vv-git-blame-pop-subject">{blameTip.subject}</span>
+        {#if blameTip.note !== null}<span class="vv-git-blame-pop-note">{blameTip.note}</span>{/if}
+      {/if}
+    </div>
   {/if}
   {#if engineLabel || metaLabel || rendererLabel || watchLabel || statusNotice.text}
     <div class="vv-statusbar" role="status">

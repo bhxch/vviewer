@@ -1256,6 +1256,7 @@
         ontoc={(entries) => (tocEntries = entries)}
         onoutline={pushOutlineEntries}
         ongitAvailable={pushGitInfo}
+        gitRepoDir={rightView === 'git' && gitInfo !== null ? gitInfo.repoDir : null}
       />
     </main>
     {#if !layout.rightCollapsed}
