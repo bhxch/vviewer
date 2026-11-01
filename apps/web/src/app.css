@@ -595,6 +595,27 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .toc .level-3 { padding-left: 12px; }
 .toc .level-4 { padding-left: 24px; }
 .toc-empty { margin: 0; padding: .25rem .5rem; font-size: var(--vv-fs-xs); color: var(--ui-fg-muted); }
+/* 右面板「目录|属性」分段切换器（code-outline Task 3）：AppShell 门控（目录数据
+   非空才渲染）；右侧留白避开 .vv-collapse-right 绝对定位钮（top 6 right 6 24px 宽），
+   active 段与 .toc button.active 同色语义（§7/§10-G2 --ui-hover-bg） */
+.vv-right-switch { display: flex; flex: none; gap: 4px; padding: 6px 34px 6px 10px;
+  border-bottom: 1px solid var(--ui-border); }
+.vv-right-switch-btn { flex: 1; font-size: var(--vv-fs-xs); padding: 3px 8px;
+  border-radius: 4px; color: var(--ui-fg-muted); }
+.vv-right-switch-btn:hover { color: var(--ui-fg); background: var(--ui-hover-bg); }
+.vv-right-switch-btn.active { color: var(--ui-accent); background: var(--ui-hover-bg); }
+/* 代码大纲视图（code-outline Task 3 OutlineView）：缩进树（depth 钳 8，行内
+   padding-left 12px/层由组件内联注入）；kind 徽标 muted 小字，滚动跟随/悬停与
+   .toc 同色语义；容器 flex:1 自滚动（.vv-right 列内与 .toc 同位） */
+.vv-outline { flex: 1; min-height: 0; overflow: auto; padding: .65rem .5rem; }
+.vv-outline ul { list-style: none; margin: 0; padding: 0; }
+.vv-outline button { display: flex; align-items: baseline; gap: 6px; width: 100%; text-align: left;
+  background: none; border: none; padding: 3px 6px; border-radius: 4px; color: var(--ui-fg-muted);
+  font-size: var(--vv-fs-sm); line-height: 1.4; white-space: nowrap; overflow: hidden; }
+.vv-outline button:hover { color: var(--ui-fg); background: var(--ui-hover-bg); }
+.vv-outline button.active { color: var(--ui-accent); background: var(--ui-hover-bg); }
+.vv-outline-kind { flex: none; font-size: var(--vv-fs-2xs); color: var(--ui-fg-muted); }
+.vv-outline-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* JSON Lines 渲染器（jsonl/index.ts：状态条 + .vv-jsonl-scroll 可变高度虚拟滚动 +
    行卡片；spacer/viewport 复用 .vv-virtual-* 惯例类，容器自身承担 position:relative） */
 .vv-jsonl { display: flex; flex-direction: column; height: 100%; }

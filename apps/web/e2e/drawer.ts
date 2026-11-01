@@ -47,3 +47,27 @@ export async function openDrawerIfNarrow(page: Page): Promise<boolean> {
 export async function closeDrawerIfOpened(page: Page, opened: boolean): Promise<void> {
   if (opened && (await isDrawerOpen(page))) await page.locator('.vv-drawer-toggle').click();
 }
+
+/**
+ * ≤600px 断点右抽屉幂等开合（openDrawerIfNarrow 的右栏对应面，transform 口径与
+ * isDrawerOpen 同源）：.vv-right 开合带 0.2s transform 过渡，瞬时采样会在过渡
+ * 中段把「开」误读为「关」（matrix 中间值非 none）——期望状态未落定前重试
+ * toggle，防双 flip（BUG-61 盲目 toggle 教训的右抽屉同款规避）。桌面视口
+ * （>600px）no-op。code-outline Task 3 起 b-code-outline（切换器断言）/md-export
+ * 系（属性段切换）共用。
+ */
+export async function ensureRightDrawer(page: Page, wantOpen: boolean): Promise<void> {
+  const narrow = await page.evaluate(() => window.matchMedia('(max-width: 600px)').matches);
+  if (!narrow) return;
+  const readOpen = (): Promise<boolean> =>
+    page.evaluate(() => {
+      const el = document.querySelector('.vv-right');
+      return el !== null && getComputedStyle(el).transform === 'none';
+    });
+  let open = await readOpen();
+  for (let i = 0; i < 10 && open !== wantOpen; i++) {
+    await page.locator('.vv-right-toggle').click();
+    await page.waitForTimeout(250); // > --vv-dur-med（0.2s）：过渡落定再采样
+    open = await readOpen();
+  }
+}

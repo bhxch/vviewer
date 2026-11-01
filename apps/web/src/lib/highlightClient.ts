@@ -237,6 +237,17 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
           }
           return resolveHighlightResult(res);
         });
+    },
+    // 大纲/撤销面直连本地 worker client（code-outline Task 3 接线补齐）：T2 渲染端
+    // 契约「真实 HighlightClient 均有 outline/cancelOutline」的前提是 attach 面透传
+    // ——本包装此前只转发 highlight，可选鸭子被拆穿成恒 undefined → 大纲静默 []。
+    // spec §2 非目标裁决「服务端大纲（compute 通道）不做」：不经 computeRouter 远程
+    // 路由，与 highlight 的调试计时/预热面解耦，直通本地 worker 即终态。
+    outline(text, lang) {
+      return client.outline(text, lang);
+    },
+    cancelOutline(lang) {
+      client.cancelOutline(lang);
     }
   };
 }

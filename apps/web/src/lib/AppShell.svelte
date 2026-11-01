@@ -4,6 +4,7 @@
   import ViewerPane from './ViewerPane.svelte';
   import FileTree from './FileTree.svelte';
   import Toc from './Toc.svelte';
+  import OutlineView from './OutlineView.svelte';
   import MetaPanel from './MetaPanel.svelte';
   import GlobalSearchPanel from './GlobalSearchPanel.svelte';
   import QuickOpenPanel from './QuickOpenPanel.svelte';
@@ -12,6 +13,7 @@
   import MountsManager from './MountsManager.svelte';
   import ServerConnectForm from './ServerConnectForm.svelte';
   import type { TreeStore, TocEntry } from '@bhxch/vviewer-core';
+  import type { OutlineEntry } from '@bhxch/vviewer-highlight';
   // FE-2 导入改道：tab 模型/连接域符号自 openFlow façade 改直引域模块（依赖单向
   // tabsModel ← serverConnect，无环）；openFlow 退役为纯打开通道，AppShell 仅剩
   // 恢复句柄/归档桥/direct 挂载/快点击竞态判定四符号仍经 façade（其它消费方不动）
@@ -48,6 +50,8 @@
   } from './stores/session';
   import { migrateLegacyTabs, workspaceStore, type WorkspaceSnapshotItem, type WorkspaceSource } from './workspaceStore';
   import { loadSettings, onSettingsChanged, saveSettings, type Settings } from './stores/settings';
+  // 大纲滚动跟随句柄（code-outline Task 3）：ViewerPane 上行 firstVisibleLine 命令式快照
+  import { firstOutlineVisibleLine } from './metaStore.svelte';
   import { VV_FOCUS_META_LANG } from './metaLangFocus';
   import {
     chromeVisible,
@@ -111,6 +115,89 @@
   let drawers = $state<ShellDrawersState>(DRAWERS_CLOSED);
   /** 活动渲染实例的目录（ViewerPane ontoc 回调上行；markdown tab 有数据，其余为空） */
   let tocEntries = $state<TocEntry[]>([]);
+  /** 活动渲染实例的代码大纲（code-outline Task 3：ViewerPane onoutline 回调上行；
+   * code 全量实例 tags.scm 提取异步到货，窗口/hljs 兜底/无 tags 语言为空数组） */
+  let outlineEntries = $state<OutlineEntry[]>([]);
+  /**
+   * 右面板视图（code-outline Task 3）：'toc' = 目录视图（md TOC / 代码大纲互斥，
+   * 实例互斥保证两者不同时有数据），'meta' = 属性面板。初始 'meta'（mount 时无
+   * 数据）；数据到达时未被用户动过则按「有目录默认目录」落位（下方 effect），
+   * 点过切换器后保持用户选择（rightViewTouched 旗标，台账语义——文件切换不强行
+   * 跳回默认视图）。会话内不持久化（spec §3，零快照/零 settings）。
+   */
+  let rightView = $state<'toc' | 'meta'>('meta');
+  /** 用户是否手动点过切换器（含子视图内语义性选择；轮询/重渲染不置位） */
+  let rightViewTouched = $state(false);
+  /** 滚动跟随激活行（0 起大纲条目 line；null = 跟随未启用/视口前无符号） */
+  let activeOutlineLine = $state<number | null>(null);
+
+  /** ViewerPane onoutline 接线（稳定函数引用）：outline 轮询 effect 以此为闭包，
+   * 内联箭头会随父重渲染换新引用触发无谓的轮询重启—— ontoc 现状（仅在回调时点
+   * 调用）不受影响，onoutline 消费面在轮询 effect 内须稳定。 */
+  function pushOutlineEntries(entries: OutlineEntry[]): void {
+    outlineEntries = entries;
+  }
+
+  /**
+   * 大纲点击跳转（code-outline Task 3）：pendingLine 既有通道（GlobalSearchPanel
+   * BUG-09 同款对象扩展字段，不进 Tab 接口与会话快照）——写激活 tab 一次性
+   * pendingLine（1 起），ViewerPane 渲染 effect 重跑消费（revealLine 定位）。
+   * 与 GlobalSearchPanel 的差异：搜索恒经 addTab 新建 tab（tab prop 换引用即重跑），
+   * 大纲点击落在本已渲染的激活 tab 上——渲染 effect 对 pendingLine 的读取在异步段
+   * （await dispatch 之后）不被 track，须自带重跑触发器；setRendererOverride /
+   * setHighlightLang 的 rev++ 同款直写通道（rev 为 effect 同步段 tracked 读）。
+   * line 0 起 → 通道 1 起。
+   */
+  function onOutlineJump(line: number): void {
+    const tab = activeTabs.find((t) => t.active);
+    if (!tab) return;
+    Object.assign(tab, { pendingLine: line + 1 });
+    tab.rev = (tab.rev ?? 0) + 1;
+  }
+
+  // 右面板默认落位（code-outline Task 3 裁决）：rightView 初始 'meta'，数据到达
+  // 时未被用户动过则按「有目录默认目录」落位——文件切换后新文件有目录数据（md
+  // TOC 或代码大纲）即跟随 'toc'，无数据回落 'meta'（含切换器消失的空态归位）；
+  // rightViewTouched 后本 effect 不再写（保持用户选择）。读 entries 写 rightView，
+  // 无自读自写环。
+  $effect(() => {
+    if (rightViewTouched) return;
+    rightView = tocEntries.length > 0 || outlineEntries.length > 0 ? 'toc' : 'meta';
+  });
+
+  // 滚动跟随节流循环（code-outline Task 3）：激活实例为 code 全量模式时 metaStore
+  // 总线持有 firstVisibleLine 句柄（窗口路径缺席 → 静默不启用，spec §3）。节流取
+  // 200ms interval 而非 rAF 滚动监听：实例句柄无滚动事件上行面（命令式快照读数），
+  // 轮询是唯一触达通道，与既有 250ms 轮询家族（watchEngine/getInspector/meta）同制；
+  // 读侧在 tick 内做 defs 二分（引用条目不参与——大纲视图不显示引用，激活行语义
+  // 一致），值不变不写（避免无谓的 OutlineView 重渲染）。
+  $effect(() => {
+    const defs = outlineEntries.filter((e) => !e.kind.startsWith('reference.'));
+    if (defs.length === 0) return;
+    const timer = setInterval(() => {
+      const line = firstOutlineVisibleLine();
+      if (line === null) return;
+      // 二分：最后一个 line ≤ 首可视行的条目（文档序 = line 升序，T1 输出契约）
+      let lo = 0;
+      let hi = defs.length - 1;
+      let found = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (defs[mid]!.line <= line) {
+          found = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      const next = found >= 0 ? defs[found]!.line : null;
+      if (next !== activeOutlineLine) activeOutlineLine = next;
+    }, 200);
+    return () => {
+      clearInterval(timer);
+      activeOutlineLine = null;
+    };
+  });
   /** 全局搜索面板开关（M6 T4）：Ctrl+Shift+F 打开，Esc 面板内关闭 */
   let globalSearchOpen = $state(false);
   /** 快速打开面板开关（BUG-03）：Ctrl+P 切换，Esc 面板内关闭 */
@@ -247,6 +334,13 @@
   // 落空静默跳过）。
   $effect(() => {
     const onFocusMetaLang = (): void => {
+      // 语言行在属性视图（code-outline Task 3 切换器）：先落位 'meta' 再展开/聚焦，
+      // 否则目录视图在场时 input 不在 DOM 落空。轻入口是用户对属性视图的显式选择
+      // → 一并置 rightViewTouched（否则大纲稍后到货的默认落位 effect 会把视图翻回
+      // 「目录」，刚聚焦的语言行再次离场——LANG-06 实证竞态），后续文件切换保持
+      // 用户选择（台账语义同切换器点击）。
+      rightViewTouched = true;
+      rightView = 'meta';
       if (window.matchMedia('(max-width: 600px)').matches) drawers = openRightDrawerForMetaLang(drawers); // 移动端先开抽屉
       else if (layout.rightCollapsed) updateLayout({ rightCollapsed: false }); // 桌面折叠先展开
       requestAnimationFrame(() => {
@@ -1119,6 +1213,7 @@
       <ViewerPane
         tab={activeTabs.find((t) => t.active) ?? null}
         ontoc={(entries) => (tocEntries = entries)}
+        onoutline={pushOutlineEntries}
       />
     </main>
     {#if !layout.rightCollapsed}
@@ -1141,9 +1236,45 @@
     <aside class="vv-right" class:vv-right-off={layout.rightCollapsed} style="--vv-right-w: {rightW}px">
       <button type="button" class="vv-collapse-btn vv-collapse-right" aria-label="折叠属性面板"
         title="折叠属性面板" onclick={() => updateLayout({ rightCollapsed: true })}>›</button>
-      <MetaPanel />
-      {#if tocEntries.length > 0}
-        <Toc entries={tocEntries} />
+      {#if tocEntries.length > 0 || outlineEntries.length > 0}
+        <!-- 「目录 | 属性」分段切换器（code-outline Task 3）：仅目录数据非空渲染
+             （无大纲文件维持纯属性现状——spec §3）；aria-pressed 表激活段。 -->
+        <div class="vv-right-switch" role="group" aria-label="右面板视图切换">
+          <button
+            type="button"
+            class="vv-right-switch-btn"
+            class:active={rightView === 'toc'}
+            aria-pressed={rightView === 'toc'}
+            onclick={() => {
+              rightViewTouched = true;
+              rightView = 'toc';
+            }}>目录</button
+          >
+          <button
+            type="button"
+            class="vv-right-switch-btn"
+            class:active={rightView === 'meta'}
+            aria-pressed={rightView === 'meta'}
+            onclick={() => {
+              rightViewTouched = true;
+              rightView = 'meta';
+            }}>属性</button
+          >
+        </div>
+      {/if}
+      {#if rightView === 'toc'}
+        <!-- 目录视图互斥渲染（code-outline Task 3）：实例互斥保证 md TOC 与代码
+             大纲不同时有数据——outlineEntries 在场渲染大纲，否则 md TOC；两者皆空
+             （用户点过切换器后切到无数据文件）回落属性面板兜底空态。 -->
+        {#if outlineEntries.length > 0}
+          <OutlineView entries={outlineEntries} activeLine={activeOutlineLine ?? undefined} onclick={onOutlineJump} />
+        {:else if tocEntries.length > 0}
+          <Toc entries={tocEntries} />
+        {:else}
+          <MetaPanel />
+        {/if}
+      {:else}
+        <MetaPanel />
       {/if}
     </aside>
     {#if layout.rightCollapsed}

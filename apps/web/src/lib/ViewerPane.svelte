@@ -1,13 +1,15 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import type { RenderedInstance, TocEntry, ComputeWhere } from '@bhxch/vviewer-core';
   import { showErrorCard } from '@bhxch/vviewer-core';
   import { isAbortError } from '@bhxch/vviewer-render-text';
   import type { CodeEngine, CodeFileMeta } from '@bhxch/vviewer-render-text';
+  import type { OutlineEntry } from '@bhxch/vviewer-highlight';
   import type { MarkdownEngineState } from '@bhxch/vviewer-render-text/markdown/markdownRenderer';
   import type { MermaidTheme } from '@bhxch/vviewer-render-diagram';
   import type { Tab } from './openFlow.svelte';
   import { persistScroll, tabStore } from './openFlow.svelte';
-  import { setFileMeta, setInspector, inspectorBus, setExportHandle, fileMeta, type FileOpenWith, type InspectorSnapshot } from './metaStore.svelte';
+  import { setFileMeta, setInspector, inspectorBus, setExportHandle, setOutlineLineHandle, fileMeta, type FileOpenWith, type InspectorSnapshot } from './metaStore.svelte';
   import { requestMetaLangFocus } from './metaLangFocus';
   import { openWithOf } from './openWith';
   import { candidatesOf, MORE_RENDERER_ID, LESS_RENDERER_ID, type RendererCandidate } from './RendererPickerMenu';
@@ -20,7 +22,15 @@
   import { isMountRootStoreId } from './serverHealthCache';
 import SearchPanel from './SearchPanel.svelte';
 
-  let { tab, ontoc }: { tab: Tab | null; ontoc?: (entries: TocEntry[]) => void } = $props();
+  let {
+    tab,
+    ontoc,
+    onoutline
+  }: {
+    tab: Tab | null;
+    ontoc?: (entries: TocEntry[]) => void;
+    onoutline?: (entries: OutlineEntry[]) => void;
+  } = $props();
 
   /**
    * 变更推送状态段（目录挂载 spec §3）：活跃 tab 属挂载来源（remote 挂载根
@@ -219,6 +229,32 @@ import SearchPanel from './SearchPanel.svelte';
     return () => {
       clearInterval(timer);
       setInspector(null);
+    };
+  });
+
+  // 代码大纲异步到货上行（code-outline Task 3）：outline 请求在 renderCode 全量
+  // parse 完成后才 fire-and-forget 填充（Task 2 契约），渲染返回时点的一次性读取
+  // （下方渲染 effect 内 getToc 同位读）恒 []——数据检查器持续上行同款（getInspector
+  // 轮询 effect 先例）：250ms 轮询 getOutline，条目数变化才上行（大纲单文件只经历
+  // [] → 全量一次跳变，length 比对即足够；rev++ 重渲染换新实例由 effect 依赖重启）。
+  // 无 getOutline 实例（markdown/降级/错误卡片）不启动轮询；实例销毁/切换随 cleanup
+  // 清空（渲染 effect cleanup 的 ontoc?.([]) 清空同款语义，双路清空幂等）。
+  $effect(() => {
+    const inst = instance;
+    const read = (inst as { getOutline?: () => OutlineEntry[] } | null)?.getOutline;
+    if (typeof read !== 'function') return;
+    let lastLen = -1;
+    const tick = (): void => {
+      const entries = read.call(inst) ?? [];
+      if (entries.length === lastLen) return;
+      lastLen = entries.length;
+      onoutline?.(entries);
+    };
+    untrack(tick); // 初读只依赖 instance：onoutline props 引用不进依赖（AppShell 侧换引用不重启轮询）
+    const timer = setInterval(tick, 250);
+    return () => {
+      clearInterval(timer);
+      onoutline?.([]); // tab 切换/销毁：右栏大纲随之清空
     };
   });
 
@@ -446,12 +482,27 @@ import SearchPanel from './SearchPanel.svelte';
         // TOC 数据上行（Task 5）：markdown 实例提供 getToc，其余渲染器清空右栏目录
         const readToc = 'getToc' in res.instance ? res.instance.getToc : null;
         ontoc?.(readToc?.() ?? []);
+        // 大纲数据上行（code-outline Task 3）：getToc 同款鸭子探测并列扩展。code
+        // 全量实例恒有 getOutline（请求在飞/hljs 兜底/plain 为 []，Task 2 契约），
+        // 窗口/降级/错误卡实例缺席 → []；异步到货面（parse 完成后填充）由上方
+        // outline 轮询 effect 承担，此处与 TOC 同位的一次性读覆盖「实例同步可给数」
+        // 的形态并保证非 code 渲染器也显式清空一轮。
+        const readOutline = 'getOutline' in res.instance ? res.instance.getOutline : null;
+        onoutline?.(readOutline?.() ?? []);
         // 导出句柄上行（md-export Task 2）：markdown 实例提供 getExportDocument
         // （getToc 同款鸭子探测，不动 core 类型）；其余渲染器/降级实例清空——
         // MetaPanel「导出」动作区以句柄可得性显隐（overrideRenderer 指向 markdown
         // 时句柄可得，同样显示）
         const readExport = (res.instance as { getExportDocument?: () => Document | null }).getExportDocument;
         setExportHandle(typeof readExport === 'function' ? readExport.bind(res.instance) : null);
+        // 大纲滚动跟随句柄上行（code-outline Task 3）：getExportDocument 同款鸭子
+        // 探测——仅全量实例有 firstVisibleLine（存在性透传，窗口 inst 缺席，Task 2
+        // 契约），缺席/非函数即清空（窗口/降级路径跟随静默不启用）。AppShell 节流
+        // 循环经 metaStore 总线消费（导出句柄同款命令式快照形态）。
+        const readFirstLine = (res.instance as { firstVisibleLine?: () => number }).firstVisibleLine;
+        setOutlineLineHandle(
+          typeof readFirstLine === 'function' ? () => readFirstLine.call(res.instance) : null
+        );
         // 滚动恢复：目录树切换回该 tab 时回到上次位置。
         // code 渲染器滚动在内部 .vv-code-pre（外层不滚动），接 getScrollHost()；其余维持外层容器。
         const inner =
@@ -482,6 +533,10 @@ import SearchPanel from './SearchPanel.svelte';
         instance = live;
         // 错误卡片实例无导出句柄：导出动作区随句柄清空不显示
         setExportHandle(null);
+        // 错误卡片实例无大纲/首行句柄（code-outline Task 3）：右栏大纲清空（无
+        // 切换器纯属性）+ 跟随句柄撤除——鸭子缺席路径上行 []，不抛错
+        onoutline?.([]);
+        setOutlineLineHandle(null);
         // 错误卡片实例无 meta：状态栏元数据段清空，属性面板保留名称/来源占位
         metaLabel = '';
         // 读取失败卡片：指示器/候选随实例清空（浮层一并关）
@@ -509,6 +564,8 @@ import SearchPanel from './SearchPanel.svelte';
       setFileMeta(null); // tab 切换/销毁：属性面板随之清空
       setExportHandle(null); // tab 切换/销毁：导出动作区随句柄清空（md-export Task 2）
       ontoc?.([]); // tab 切换/销毁：右栏目录随之清空
+      onoutline?.([]); // tab 切换/销毁：右栏大纲随之清空（code-outline Task 3 同款）
+      setOutlineLineHandle(null); // tab 切换/销毁：滚动跟随句柄撤除（轮询 effect cleanup 双路幂等）
       scrollHost?.removeEventListener('scroll', onScroll);
       scrollHost = null;
       cancelHighlight(); // 取消未完成的 tree-sitter 高亮请求（Worker 不做无用功）

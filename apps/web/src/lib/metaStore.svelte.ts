@@ -127,3 +127,24 @@ export function setExportHandle(getter: (() => Document | null) | null): void {
 export function getExportDoc(): Document | null {
   return exportDocGetter?.() ?? null;
 }
+
+// ---------- 大纲滚动跟随句柄上行（code-outline Task 3） ----------
+
+/**
+ * 首可视行句柄（非响应式模块槽，setExportHandle 同款命令式快照形态）：ViewerPane
+ * 探测 code 全量实例 firstVisibleLine 上行（存在性透传——窗口 inst 缺席，Task 2
+ * 契约），AppShell 滚动跟随节流循环消费。窗口/降级/错误卡路径与实例切换一律清空
+ * → 跟随静默不启用（spec §3「缺席 → 跟随静默不启用」）。句柄值本身是随滚动变化
+ * 的命令式读数，不进 $state 响应面（响应化只会制造无意义的重渲染——导出句柄同裁决）。
+ */
+let outlineLineGetter: (() => number) | null = null;
+
+/** 上行/清空首可视行句柄（实例挂载与清理/失败三路由 ViewerPane 渲染 effect 调用）。 */
+export function setOutlineLineHandle(getter: (() => number) | null): void {
+  outlineLineGetter = getter;
+}
+
+/** 读当前实例首可视行（0 起；无句柄/实例已销毁返回 null——跟随未启用）。 */
+export function firstOutlineVisibleLine(): number | null {
+  return outlineLineGetter?.() ?? null;
+}

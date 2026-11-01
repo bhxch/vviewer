@@ -403,7 +403,9 @@ test.describe('SHELL-10 800px 平板段（601-900）', () => {
     expect(rightBox).not.toBeNull();
     expect(rightBox!.x).toBeGreaterThanOrEqual(0);
     expect(rightBox!.x + rightBox!.width).toBeLessThanOrEqual(800);
-    // 属性面板内容直接内联可见（无需任何 toggle）
+    // 属性面板内容直接内联可见（无需任何 toggle）；code-outline Task 3 起目录/属性
+    // 互斥渲染，带标题 md 默认目录视图——先切「属性」段再锚属性面板
+    await right.locator('.vv-right-switch-btn', { hasText: '属性' }).click();
     await expect(right.locator('.meta-title')).toBeVisible();
   });
 });
@@ -433,6 +435,8 @@ test.describe('SHELL-10 550px 手机段（≤600）', () => {
     await rightToggle.click();
     await expect(page.locator('.vv-shell.rightopen')).toHaveCount(1);
     await expect(page.locator('.vv-shell.drawer')).toHaveCount(1);
+    // code-outline Task 3 起目录/属性互斥渲染（带标题 md 默认目录）——先切「属性」段
+    await page.locator('.vv-right').locator('.vv-right-switch-btn', { hasText: '属性' }).click();
     await expect(page.locator('.vv-right').locator('.meta-title')).toBeVisible();
 
     // 关左抽屉：rightopen 保持

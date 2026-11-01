@@ -185,7 +185,11 @@ test('手机右栏入口：ℹ toggle 开合 TOC/属性抽屉（终审 M7：TOC 
   await expect
     .poll(async () => (await right.boundingBox())?.x ?? 999, { timeout: 3_000 })
     .toBeLessThan(187); // 滑入即越过视口中线（实测 74-75，关闭态为 370+）
+  // code-outline Task 3：目录/属性两视图互斥渲染（切换器默认目录），两面板经
+  // 分段切换器可达性即原「同时可见」断言的等价形态
+  await expect(right.locator('.vv-right-switch')).toBeVisible();
   await expect(right.locator('nav.toc')).toBeVisible();
+  await right.locator('.vv-right-switch-btn', { hasText: '属性' }).click();
   await expect(right.locator('.meta-title')).toBeVisible();
 
   // 关：滑回视口外

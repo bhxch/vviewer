@@ -2,7 +2,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { hash8 } from '@bhxch/vviewer-core';
-import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
+import { closeDrawerIfOpened, ensureRightDrawer, openDrawerIfNarrow } from './drawer';
 
 /**
  * 手动高亮语言（overrideLang）全链 e2e（renderer-lang-override spec §4.1/§4.2，b- 前缀）。
@@ -131,6 +131,17 @@ async function closeRightIfOpened(page: Page): Promise<void> {
   if (open) await page.locator('.vv-right-toggle').click();
 }
 
+/** 属性视图落位（code-outline Task 3 切换器适配）：手动语言使无检测语文件（.txt）
+ * 走 tree-sitter 渲染 → 大纲到货 → 切换器出现且默认「目录」视图（默认落位裁决），
+ * 属性面板随之离场——语言行断言/操作前先拉右抽屉并轮询切换器（2.5s 内到场即切
+ * 「属性」，rightViewTouched 置位后文件/渲染切换保持用户选择）；无切换器（hljs
+ * 自动路径）即属性视图在场的 no-op（catch 吞超时）。 */
+async function ensureMetaView(page: Page): Promise<void> {
+  await ensureRightDrawer(page, true);
+  const sw = page.locator('.vv-right-switch-btn', { hasText: '属性' });
+  await sw.click({ timeout: 2_500 }).catch(() => {});
+}
+
 /** MetaPanel「语言」行（.meta-lang-input 所在 meta-row）：手动徽标按行圈定——
  * 「打开方式」手选后的（手动）徽标同类名，根级定位会双计 */
 function langRow(page: Page): Locator {
@@ -168,6 +179,9 @@ test('LANG-01 属性面板设语言 → 重渲染按指定语言高亮（tree-si
     .toBeGreaterThan(0);
   // getMeta.lang 以 opts.langOverride 为单源 → 状态栏语言段显式落「语言: rust」
   await expect(page.locator('.vv-statusbar')).toContainText('语言: rust');
+  // tree-sitter rust 渲染会投递大纲 → 切换器默认「目录」视图（code-outline Task 3），
+  // 语言行断言前先落位属性视图
+  await ensureMetaView(page);
   // （手动）徽标现于语言行（spec §4.2 生效态标识）
   await expect(langRow(page).locator('.meta-openwith-manual')).toBeVisible();
 });
@@ -186,6 +200,8 @@ test('LANG-02 置空回自动：手动徽标消失、高亮回落 hljs 自动兜
   await expect
     .poll(() => page.locator('.vv-code-pre span[class^="ts-"]').count(), { timeout: 30_000 })
     .toBeGreaterThan(0);
+  // tree-sitter rust 渲染投递大纲 → 默认「目录」视图，置空操作与断言前落位属性视图
+  await ensureMetaView(page);
   await expect(langRow(page).locator('.meta-openwith-manual')).toBeVisible();
 
   // 置空提交（spec §4.2：'' = null 清除回自动检测）
@@ -351,6 +367,9 @@ test('LANG-04 duplicate 继承 overrideLang：新 tab 语言行 rust 且渲染�
   await expect.poll(() => tabNames(page)).toEqual(['olang', 'dup-lang.txt', 'dup-lang.txt']);
   await expect(page.locator('.vv-tab.active', { hasText: 'dup-lang.txt' })).toBeVisible();
 
+  // 副本 tree-sitter rust 渲染投递大纲 → 默认「目录」视图（rightViewTouched 未置位
+  // ——本用例不经切换器/轻入口），meta 断言前落位属性视图
+  await ensureMetaView(page);
   // 副本语言行回显 rust（openFlow.duplicate 读回拷贝，spec §4.1）+（手动）徽标
   await expect(page.locator('.meta-lang-input')).toHaveValue('rust');
   await expect(langRow(page).locator('.meta-openwith-manual')).toBeVisible();

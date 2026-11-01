@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 import { injectDir, openTreeFile, PIXEL_PNG_B64, type TextFileSpec } from './b-markdown-html-docs-helpers';
+import { ensureRightDrawer } from './drawer';
 
 /**
  * b-md-lightbox-export-deep 灯箱与导出域补强（LE-01~LE-12）：六批主路径
@@ -53,16 +54,14 @@ async function openDocs(page: Page, files: TextFileSpec[], name: string): Promis
   await expect(page.locator('.vv-markdown')).toBeVisible({ timeout: 20_000 });
 }
 
-/** 确保导出区可交互：≤600px 视口右栏在抽屉内，先点 toggle 拉出（b-md-export 同款） */
+/** 确保导出区可交互：≤600px 视口右栏在抽屉内，先点 toggle 拉出（b-md-export 同款）；
+ * code-outline Task 3 起目录/属性互斥渲染，切换器在场先切「属性」段（同款吞超时） */
 async function openExportArea(page: Page): Promise<void> {
-  const inDrawer = await page.evaluate(() => window.matchMedia('(max-width: 600px)').matches);
-  if (inDrawer) {
-    const opened = await page.evaluate(() => {
-      const el = document.querySelector('.vv-right');
-      return el !== null && getComputedStyle(el).transform === 'none';
-    });
-    if (!opened) await page.locator('.vv-right-toggle').click();
-  }
+  await ensureRightDrawer(page, true);
+  await page
+    .locator('.vv-right-switch-btn', { hasText: '属性' })
+    .click({ timeout: 3_000 })
+    .catch(() => {});
   await expect(page.locator('.meta-export-btn', { hasText: '导出 HTML' })).toBeVisible();
 }
 
@@ -445,8 +444,12 @@ test.describe('b-md-lightbox-export-deep 灯箱与导出补强', () => {
       { name: 'deep-pixel.png', type: 'image/png', b64: PIXEL_PNG_B64, content: '' },
       { name: 'deep-blob.bin', type: 'application/octet-stream', b64: BIN_B64, content: '' }
     ]);
-    // markdown tab：句柄上行两钮在
+    // markdown tab：句柄上行两钮在（code-outline Task 3 起目录/属性互斥渲染，
+    // 带标题 md 默认目录视图——先切「属性」段，touched 后测试内切 tab 保持属性视图）
     await openTreeFile(page, 'deep-handle.md');
+    await ensureRightDrawer(page, true); // mobile 抽屉内元素 offscreen 不可点：拉出再切「属性」段
+    await page.locator('.vv-right-switch-btn', { hasText: '属性' }).click();
+    await ensureRightDrawer(page, false); // 还内容区：后续树行点击不被双抽屉热区拦截
     await expect(page.locator('.meta-export-btn', { hasText: '导出 HTML' })).toBeAttached({ timeout: 20_000 });
     await expect(page.locator('.meta-export-btn', { hasText: '导出 PDF' })).toBeAttached();
 

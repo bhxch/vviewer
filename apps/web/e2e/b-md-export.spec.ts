@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 import { injectDir, openTreeFile, PIXEL_PNG_B64, type TextFileSpec } from './b-markdown-html-docs-helpers';
+import { ensureRightDrawer } from './drawer';
 
 /**
  * b-md-export 导出链路冒烟（md-export 计划 Task 3）：
@@ -40,16 +41,15 @@ async function openSampler(page: Page): Promise<void> {
   await expect(md.locator('.markdown-alert-foldable')).toHaveCount(1);
 }
 
-/** 确保 MetaPanel 可交互：≤600px 视口右栏在抽屉内（transform 未复位），先点 toggle 拉出 */
+/** 确保 MetaPanel 可交互：≤600px 视口右栏在抽屉内（transform 未复位），先点 toggle 拉出；
+ * code-outline Task 3 起目录/属性互斥渲染（导出样例有标题 → 默认目录视图），
+ * 切换器在场先切「属性」段（无切换器文件属性行本就在场，超时吞掉即 no-op） */
 async function openExportArea(page: Page): Promise<void> {
-  const inDrawer = await page.evaluate(() => window.matchMedia('(max-width: 600px)').matches);
-  if (inDrawer) {
-    const opened = await page.evaluate(() => {
-      const el = document.querySelector('.vv-right');
-      return el !== null && getComputedStyle(el).transform === 'none';
-    });
-    if (!opened) await page.locator('.vv-right-toggle').click();
-  }
+  await ensureRightDrawer(page, true);
+  await page
+    .locator('.vv-right-switch-btn', { hasText: '属性' })
+    .click({ timeout: 3_000 })
+    .catch(() => {});
   await expect(page.locator('.meta-export-btn', { hasText: '导出 HTML' })).toBeVisible();
   await expect(page.locator('.meta-export-btn', { hasText: '导出 PDF' })).toBeVisible();
 }
@@ -154,8 +154,13 @@ test.describe('b-md-export 导出链路', () => {
       { name: 'export-note.txt', content: 'plain text for non-markdown tab' }
     ]);
     // 显隐断言取 DOM 面（attached/count）：mobile project 下右栏在抽屉内，可视面
-    // 属抽屉开合职责（AppShell 既有用例）；本用例锁定的是句柄门控语义本身
+    // 属抽屉开合职责（AppShell 既有用例）；本用例锁定的是句柄门控语义本身。
+    // code-outline Task 3 起目录/属性互斥渲染：先切「属性」段（带标题 md 默认目录
+    // 视图），touched 后测试内切 tab 保持属性视图，attached 断言不受视图切换影响
     await openTreeFile(page, 'export-sampler.md');
+    await ensureRightDrawer(page, true); // mobile 抽屉内元素 offscreen 不可点：拉出再切「属性」段
+    await page.locator('.vv-right-switch-btn', { hasText: '属性' }).click();
+    await ensureRightDrawer(page, false); // 还内容区：后续树行点击不被双抽屉热区拦截
     await expect(page.locator('.meta-export-btn', { hasText: '导出 HTML' })).toBeAttached({ timeout: 20_000 });
     await expect(page.locator('.meta-export-btn', { hasText: '导出 PDF' })).toBeAttached();
     // 切非 markdown 文件：导出句柄清空（ViewerPane cleanup setExportHandle(null)），动作区消失
