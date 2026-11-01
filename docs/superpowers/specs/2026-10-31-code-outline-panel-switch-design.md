@@ -37,6 +37,7 @@
 
 - `.vv-right` 顶部新增**分段切换器 `[目录 | 属性]`**，**仅当目录数据非空时渲染**（`tocEntries.length > 0` 或 `outlineEntries.length > 0`）；无大纲文件维持现状纯属性（检查器/导出区块留在属性视图内，MetaPanel 不动）。
 - 视图状态 `rightView: 'toc' | 'meta'`：**默认 = 有目录时 'toc'**（用户拍板），会话内切换不持久化、不跨文件记忆（每次打开有大纲的文件回到目录视图）。零快照/零 settings 新增。
+  - **实现语义（Task 3 评审对齐）**：用户手动切换过视图（含语言轻入口落位属性面板）后跨文件保持其选择；未动过则每次按有无大纲默认落位——「不跨文件记忆」据此修正为「未动过时跟随默认落位」。
 - 大纲渲染：缩进树列表（depth → 缩进层级，深度钳制防深嵌套爆版面——builder 定钳制值）；kind 是否以小徽标展示列为 builder 细节（v1 允许纯缩进+名）。
 - 点击跳转：`revealLine(line + 1)`（`client.ts:173` 契约 / `renderCodeWindowed.ts:1284` 含未加载行续读已备；ViewerPane `pendingLine` 通道同款）。
 - 滚动跟随（纳入，便宜版；builder check 收敛接线）：`RenderCodeHandle` 增**可选方法** `firstVisibleLine()`——仅全量模式提供（`lineAtOffset` 同款「仅全量」契约先例，`client.ts:179`），实现从虚拟滚动容器取数；节流循环持在 AppShell（读激活 tab 渲染 handle → 二分 `outlineEntries` → activeOutlineLine 下行给目录视图高亮）。窗口/流式路径缺席该方法 → 跟随静默不启用。若实施实测成本超预期，降级为「仅点击后高亮当前项」，降级记档。md 侧维持 IntersectionObserver 现状（`Toc.svelte:16-52`）。

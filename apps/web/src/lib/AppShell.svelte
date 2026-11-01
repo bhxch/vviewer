@@ -115,8 +115,10 @@
   let drawers = $state<ShellDrawersState>(DRAWERS_CLOSED);
   /** 活动渲染实例的目录（ViewerPane ontoc 回调上行；markdown tab 有数据，其余为空） */
   let tocEntries = $state<TocEntry[]>([]);
-  /** 活动渲染实例的代码大纲（code-outline Task 3：ViewerPane onoutline 回调上行；
-   * code 全量实例 tags.scm 提取异步到货，窗口/hljs 兜底/无 tags 语言为空数组） */
+  /** 活动渲染实例的代码大纲全量条目（code-outline Task 3：ViewerPane onoutline 回调
+   * 上行，T1 协议保真 kind 全名含 reference.*；code 全量实例 tags.scm 提取异步到货，
+   * 窗口/hljs 兜底/无 tags 语言为空数组）。UI 消费一律走下方 outlineDefinitions
+   * 单源过滤值（评审 Minor 2），本态仅为过滤源。 */
   let outlineEntries = $state<OutlineEntry[]>([]);
   /**
    * 右面板视图（code-outline Task 3）：'toc' = 目录视图（md TOC / 代码大纲互斥，
@@ -138,41 +140,46 @@
     outlineEntries = entries;
   }
 
+  /** 代码大纲定义条目（引用过滤单源，code-outline Task 3 评审 Minor 2）：切换器
+   * 显隐/默认落位/OutlineView 传参/跟随二分四处统一消费——纯引用 outline（无
+   * definition 配对的形态）不显示切换器与大纲视图，避免空列表视图与跟随空转。 */
+  const outlineDefinitions = $derived(outlineEntries.filter((e) => !e.kind.startsWith('reference.')));
+
   /**
    * 大纲点击跳转（code-outline Task 3）：pendingLine 既有通道（GlobalSearchPanel
    * BUG-09 同款对象扩展字段，不进 Tab 接口与会话快照）——写激活 tab 一次性
    * pendingLine（1 起），ViewerPane 渲染 effect 重跑消费（revealLine 定位）。
    * 与 GlobalSearchPanel 的差异：搜索恒经 addTab 新建 tab（tab prop 换引用即重跑），
    * 大纲点击落在本已渲染的激活 tab 上——渲染 effect 对 pendingLine 的读取在异步段
-   * （await dispatch 之后）不被 track，须自带重跑触发器；setRendererOverride /
-   * setHighlightLang 的 rev++ 同款直写通道（rev 为 effect 同步段 tracked 读）。
-   * line 0 起 → 通道 1 起。
+   * （await dispatch 之后）不被 track，须自带重跑触发器：tabStore.touchActiveTab()
+   * 既有通道（字体/图标变更链同消费方，评审 Minor 1 收编内联 rev++）。line 0 起 →
+   * 通道 1 起。
    */
   function onOutlineJump(line: number): void {
     const tab = activeTabs.find((t) => t.active);
     if (!tab) return;
     Object.assign(tab, { pendingLine: line + 1 });
-    tab.rev = (tab.rev ?? 0) + 1;
+    tabStore.touchActiveTab();
   }
 
   // 右面板默认落位（code-outline Task 3 裁决）：rightView 初始 'meta'，数据到达
   // 时未被用户动过则按「有目录默认目录」落位——文件切换后新文件有目录数据（md
-  // TOC 或代码大纲）即跟随 'toc'，无数据回落 'meta'（含切换器消失的空态归位）；
-  // rightViewTouched 后本 effect 不再写（保持用户选择）。读 entries 写 rightView，
-  // 无自读自写环。
+  // TOC 或代码大纲定义条目，与切换器显隐同源 outlineDefinitions）即跟随 'toc'，
+  // 无数据回落 'meta'（含切换器消失的空态归位）；rightViewTouched 后本 effect 不
+  // 再写（保持用户选择）。读 entries 写 rightView，无自读自写环。
   $effect(() => {
     if (rightViewTouched) return;
-    rightView = tocEntries.length > 0 || outlineEntries.length > 0 ? 'toc' : 'meta';
+    rightView = tocEntries.length > 0 || outlineDefinitions.length > 0 ? 'toc' : 'meta';
   });
 
   // 滚动跟随节流循环（code-outline Task 3）：激活实例为 code 全量模式时 metaStore
   // 总线持有 firstVisibleLine 句柄（窗口路径缺席 → 静默不启用，spec §3）。节流取
   // 200ms interval 而非 rAF 滚动监听：实例句柄无滚动事件上行面（命令式快照读数），
   // 轮询是唯一触达通道，与既有 250ms 轮询家族（watchEngine/getInspector/meta）同制；
-  // 读侧在 tick 内做 defs 二分（引用条目不参与——大纲视图不显示引用，激活行语义
-  // 一致），值不变不写（避免无谓的 OutlineView 重渲染）。
+  // 二分吃 outlineDefinitions 单源过滤值（评审 Minor 2，与 OutlineView 显示集一致），
+  // 值不变不写（避免无谓的 OutlineView 重渲染）。
   $effect(() => {
-    const defs = outlineEntries.filter((e) => !e.kind.startsWith('reference.'));
+    const defs = outlineDefinitions;
     if (defs.length === 0) return;
     const timer = setInterval(() => {
       const line = firstOutlineVisibleLine();
@@ -1236,9 +1243,10 @@
     <aside class="vv-right" class:vv-right-off={layout.rightCollapsed} style="--vv-right-w: {rightW}px">
       <button type="button" class="vv-collapse-btn vv-collapse-right" aria-label="折叠属性面板"
         title="折叠属性面板" onclick={() => updateLayout({ rightCollapsed: true })}>›</button>
-      {#if tocEntries.length > 0 || outlineEntries.length > 0}
+      {#if tocEntries.length > 0 || outlineDefinitions.length > 0}
         <!-- 「目录 | 属性」分段切换器（code-outline Task 3）：仅目录数据非空渲染
-             （无大纲文件维持纯属性现状——spec §3）；aria-pressed 表激活段。 -->
+             （无大纲文件维持纯属性现状——spec §3；大纲按定义条目计，outlineDefinitions
+             单源——评审 Minor 2）；aria-pressed 表激活段。 -->
         <div class="vv-right-switch" role="group" aria-label="右面板视图切换">
           <button
             type="button"
@@ -1264,10 +1272,11 @@
       {/if}
       {#if rightView === 'toc'}
         <!-- 目录视图互斥渲染（code-outline Task 3）：实例互斥保证 md TOC 与代码
-             大纲不同时有数据——outlineEntries 在场渲染大纲，否则 md TOC；两者皆空
-             （用户点过切换器后切到无数据文件）回落属性面板兜底空态。 -->
-        {#if outlineEntries.length > 0}
-          <OutlineView entries={outlineEntries} activeLine={activeOutlineLine ?? undefined} onclick={onOutlineJump} />
+             大纲不同时有数据——outlineDefinitions 在场渲染大纲（引用已过滤的显示
+             集），否则 md TOC；两者皆空（用户点过切换器后切到无数据文件）回落属性
+             面板兜底空态。 -->
+        {#if outlineDefinitions.length > 0}
+          <OutlineView entries={outlineDefinitions} activeLine={activeOutlineLine ?? undefined} onclick={onOutlineJump} />
         {:else if tocEntries.length > 0}
           <Toc entries={tocEntries} />
         {:else}

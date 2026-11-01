@@ -487,16 +487,21 @@ class TabCollection {
   }
 
   /**
-   * 字体变更纯刷新（字体系统 spec §2.3，Task 2）：仅 rev++ 不 persist override——
-   * 复用 SSE 刷新的重渲染通道（ViewerPane 渲染 effect 读 rev 自增即重跑，重渲染时
-   * 以当次 settings 的行尺度重建虚拟滚动器）。仅活动 tab：非活动 tab 激活时 effect
-   * 本就以当次渲染参数重跑，无需逐个自增。不 persist：字号不在会话快照语义内。
-   * 消费方 AppShell（chrome 订阅链迁入，fonts 签名订阅回调经 reactToFontsChange 注入）；本模块为
-   * runes 模块不可 vitest 直测，行为面由 fontsReaction.test（触发契约）与
-   * b-fonts e2e（Task 6）覆盖。
+   * 活动 tab 纯刷新（rev++ 不 persist）：复用 SSE 刷新的重渲染通道（ViewerPane
+   * 渲染 effect 读 rev 自增即重跑）。消费方二：字体/图标变更链（字体系统 spec §2.3
+   * Task 2，AppShell chrome 订阅回调注入——非活动 tab 激活时 effect 本就以当次渲染
+   * 参数重跑，无需逐个自增）；大纲点击跳转（code-outline Task 3，AppShell 写激活
+   * tab pendingLine 后经本通道触发重跑消费——渲染 effect 对 pendingLine 的读取在
+   * 异步段不被 track，须显式触发器）。不 persist：rev 与 pendingLine 均不进会话
+   * 快照（Tab 运行时字段同款）。本模块为 runes 模块不可 vitest 直测，行为面由
+   * fontsReaction.test（触发契约）与 b-fonts e2e（Task 6）覆盖。
    */
   touchActiveTab(): void {
-    const t = this.list.find((x) => x.active);
+    // 活动工作区作用域（workspacesView.activeId 镜像，ViewerPane 渲染的同一 tab
+    // 判定源）：activate 是组内作用域、他组活动保持记忆，全局 find(x => x.active)
+    // 在多工作区下会命中非渲染 tab（列表序靠前的他组活动 tab）——rev++ 落空于
+    // 隐藏 tab。单工作区行为不变。
+    const t = this.tabsOf(workspacesView.activeId).find((x) => x.active);
     if (!t) return;
     t.rev = (t.rev ?? 0) + 1;
   }

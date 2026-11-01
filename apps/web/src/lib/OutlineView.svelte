@@ -2,16 +2,17 @@
   import type { OutlineEntry } from '@bhxch/vviewer-highlight';
 
   /**
-   * 代码大纲视图（code-outline Task 3）：entries 由 AppShell 从 ViewerPane
-   * onoutline 上行流入（code 全量实例 tags.scm 提取，T1/T2 契约）。
-   * - reference.* 条目不显示（引用不进大纲视图——T1 协议保真 kind 全名，渲染端过滤）
+   * 代码大纲视图（code-outline Task 3）：entries 由 AppShell 传入——ViewerPane
+   * onoutline 上行（code 全量实例 tags.scm 提取，T1/T2 契约）经 AppShell
+   * outlineDefinitions 单源过滤（评审 Minor 2：reference.* 不进大纲视图，本组件
+   * 直接吃过滤后定义条目，不重复过滤）。
    * - kind 展示名剥 definition. 前缀映射常用中文（未收录显示原词）
    * - depth 缩进树（钳制 8 层防深嵌套爆版面——spec §3 builder 裁决，12px/层）
-   * - 点击经 onclick(line) 上抛：AppShell 写激活 tab pendingLine（1 起）复用既有
-   *   跳转通道（GlobalSearchPanel 同款），本组件零实例依赖（tab 从父层来）
+   * - 点击经 onclick(line) 上抛：AppShell 写激活 tab pendingLine（1 起）+ rev++
+   *   触发重跑消费（GlobalSearchPanel 同款通道），本组件零实例依赖（tab 从父层来）
    * - activeLine = AppShell 滚动跟随节流循环二分得的激活条目 line（0 起）；同行
    *   多条目（同位双捕获，罕见）一并高亮，不放宽为猜测单选
-   * - 空 entries 由父层门控（目录视图仅在 outlineEntries.length > 0 时切到本组件）
+   * - 空 entries 由父层门控（目录视图仅在 outlineDefinitions.length > 0 时切到本组件）
    */
   let {
     entries,
@@ -48,9 +49,7 @@
     name: '符号'
   };
 
-  /** 引用条目过滤（T1 裁决：reference. 前缀条目不上大纲视图） */
-  const visible = $derived(entries.filter((e) => !e.kind.startsWith('reference.')));
-
+  /** 引用条目已由 AppShell outlineDefinitions 单源过滤（props 契约），本组件直吃 */
   function kindLabel(kind: string): string {
     const short = kind.startsWith('definition.') ? kind.slice('definition.'.length) : kind;
     return KIND_LABELS[short] ?? short;
@@ -64,7 +63,7 @@
 
 <nav class="vv-outline" aria-label="代码大纲">
   <ul>
-    {#each visible as e, i (e.byteStart + ':' + i)}
+    {#each entries as e, i (e.byteStart + ':' + i)}
       <li style="padding-left: {depthOf(e) * 12}px">
         <button
           type="button"
