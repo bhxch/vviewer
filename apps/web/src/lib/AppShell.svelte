@@ -1348,7 +1348,6 @@
              竞态兜底窗口（清空后新探测未上行）同此门。 -->
         <GitSection
           repoDir={gitInfo.repoDir}
-          fileDir={gitInfo.fileDir}
           store={gitStore}
           filePath={gitPath}
           rev={gitRev}

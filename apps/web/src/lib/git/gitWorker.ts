@@ -271,7 +271,9 @@ async function handleOp(isoGit: IsoGit, msg: GitOpRequest, fs: { promises: Promi
   switch (msg.kind) {
     case 'probe-head': {
       // HEAD 可读性已在主线程 probe 判定；此处解析分支名（detached → ok:true 无 branch；
-      // HEAD 悬挂/仓库半损坏 → ok:false，段内显示不可用而非报错卡）。
+      // HEAD 悬挂/仓库半损坏 → ok:false，段内显示不可用而非报错卡）。请求面仅 repoDir
+      // ——isogit 调用走 ISO_ARGS 固定寻址，repoDir 由 fs 适配层前缀映射消化（主线程
+      // 侧死参数 fileDir 已随 fixwave 终审 Minor 删除）。
       // currentBranch/resolveRef 仅读 refs（无对象库访问），isogit API 无 cache 参数。
       try {
         const branch = await isoGit.currentBranch({ fs, ...ISO_ARGS, fullname: false });

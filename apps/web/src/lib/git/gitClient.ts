@@ -77,7 +77,7 @@ export interface GitBlobAtResult {
 export type GitOpKind = 'probe-head' | 'last-commit' | 'status' | 'blame' | 'file-log' | 'blob-at';
 
 export type GitOpRequest =
-  | { kind: 'probe-head'; requestId: number; repoDir: string; fileDir: string }
+  | { kind: 'probe-head'; requestId: number; repoDir: string }
   | { kind: 'last-commit'; requestId: number; repoDir: string; filepath: string }
   | { kind: 'status'; requestId: number; repoDir: string; filepath: string; headBytes: Uint8Array }
   | { kind: 'blame'; requestId: number; repoDir: string; filepath: string; worktreeBytes?: Uint8Array }
@@ -167,12 +167,14 @@ export class GitClient {
 
   // ---------- 六操作（brief 冻结方法面；尾参 signal 为取消口） ----------
 
-  /** HEAD 分支探测（worker 侧 isogit currentBranch；detached HEAD → ok:true 无 branch）。 */
-  probeHead(repoDir: string, fileDir: string, signal?: AbortSignal): Promise<{ ok: boolean; branch?: string }> {
+  /** HEAD 分支探测（worker 侧 isogit currentBranch；detached HEAD → ok:true 无 branch）。
+   *  isogit 调用只吃 ISO_ARGS 固定寻址（dir:'/' + gitdir:'.git'），repoDir 由 fs 适配
+   *  层前缀映射消化——无目录参数面（fixwave 终审 Minor：fileDir 死参数趁触达清噪）。 */
+  probeHead(repoDir: string, signal?: AbortSignal): Promise<{ ok: boolean; branch?: string }> {
     return this.request(
       'probe-head',
       repoDir,
-      (id) => ({ kind: 'probe-head' as const, requestId: id, repoDir, fileDir }),
+      (id) => ({ kind: 'probe-head' as const, requestId: id, repoDir }),
       signal
     ) as Promise<{ ok: boolean; branch?: string }>;
   }

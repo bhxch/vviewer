@@ -25,15 +25,12 @@
 
   let {
     repoDir,
-    fileDir,
     store,
     filePath,
     rev
   }: {
     /** 仓库根的 store 相对路径（probe 上行，GitFsAdapter 前缀映射消费） */
     repoDir: string;
-    /** 文件目录前缀（probeHead 的探测基点） */
-    fileDir: string;
     /** 文件来源 store（bindFs 登记 + 工作区原始字节读取） */
     store: TreeStore;
     /** 当前文件的 store 相对路径（lastCommit/statusOf 的 filepath） */
@@ -111,7 +108,7 @@
     ac?.abort();
   }
 
-  async function load(rd: string, fd: string, st: TreeStore, fp: string): Promise<void> {
+  async function load(rd: string, st: TreeStore, fp: string): Promise<void> {
     inFlight?.abort();
     diffSeq++; // 作废在途 diff/log/详情（其 AC 随下方各自 abort）
     logSeq++;
@@ -155,7 +152,7 @@
       // 不回读，CRLF 红线由字节直读保证）。字节读失败（文件已被删等）→ status
       // 无法比对，状态行降级显示「不可用」而非误报三态之一。
       const [head, last, work] = await Promise.all([
-        client.probeHead(rd, fd, signal),
+        client.probeHead(rd, signal),
         client.lastCommit(rd, relPath, signal),
         st.read(fp).catch(() => null)
       ]);
@@ -185,7 +182,7 @@
   /** 重试钮（错误态）：重跑 load——ensureGitClient 单例已被 failWorker/创建失败
    *  路径剔除，重试即重建 worker + 重新拉 isogit chunk（可重试语义）。 */
   function retry(): void {
-    void load(repoDir, fileDir, store, filePath);
+    void load(repoDir, store, filePath);
   }
 
   // ---------- diff 折叠区（spec §3.3：未提交 → 工作区 vs HEAD；clean → HEAD vs
@@ -352,11 +349,10 @@
   // load 体内不触响应式面。
   $effect(() => {
     const rd = repoDir;
-    const fd = fileDir;
     const st = store;
     const fp = filePath;
     const rv = rev ?? 0; // 仅依赖接入：rev 变化重启本 effect 即重拉
-    void load(rd, fd, st, fp);
+    void load(rd, st, fp);
     return () => {
       runSeq++;
       diffSeq++;

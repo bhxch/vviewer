@@ -43,7 +43,8 @@ export function clearGitProbeCache(): void {
 }
 
 /** 文件路径 → 目录前缀（i<=0 归 ''：根目录文件/无层级 path）。导出单源：ViewerPane
- *  probe 上行的 fileDir 字段同式计算（gitClient probeHead 的 fileDir 参数消费面）。 */
+ *  probe 上行的 fileDir 字段同式计算（探测向上逐级的基点；worker 协议面的 probe-head
+ *  帧无目录参数——isogit 调用走固定寻址，死参数 fileDir 已随 fixwave 终审 Minor 删除）。 */
 export function dirOf(filePath: string): string {
   const i = filePath.lastIndexOf('/');
   return i <= 0 ? '' : filePath.slice(0, i);
