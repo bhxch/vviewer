@@ -27,7 +27,8 @@
     repoDir,
     fileDir,
     store,
-    filePath
+    filePath,
+    rev
   }: {
     /** 仓库根的 store 相对路径（probe 上行，GitFsAdapter 前缀映射消费） */
     repoDir: string;
@@ -37,6 +38,9 @@
     store: TreeStore;
     /** 当前文件的 store 相对路径（lastCommit/statusOf 的 filepath） */
     filePath: string;
+    /** 激活 tab 的渲染代（tab.rev，可选）：SSE changed/手动刷新/外部修改链 rev++
+     *  即重拉信息卡（徽标/末次提交/状态随工作区更新）；不传则只在 props 变化时拉。 */
+    rev?: number;
   } = $props();
 
   type Phase =
@@ -341,14 +345,17 @@
     }
   }
 
-  // props 任一变化（组件被复用于不同 tab 的窗口期）即重拉；cleanup（props 切换或
-  // 组件卸载同径）abort 全部在途 + 推进代数使迟到上行失效。读 props 进局部量再传
-  // load：effect 依赖收集显式化，load 体内不触响应式面。
+  // props 任一变化（组件被复用于不同 tab 的窗口期）即重拉；rev 接入（fixwave 终审
+  // Minor）：激活 tab 渲染代 rev++（SSE changed/手动刷新 watch 链）同径重拉——文件被
+  // 外部修改/提交后信息卡徽标更新。cleanup（props 切换或组件卸载同径）abort 全部在途
+  // + 推进代数使迟到上行失效。读 props 进局部量再传 load：effect 依赖收集显式化，
+  // load 体内不触响应式面。
   $effect(() => {
     const rd = repoDir;
     const fd = fileDir;
     const st = store;
     const fp = filePath;
+    const rv = rev ?? 0; // 仅依赖接入：rev 变化重启本 effect 即重拉
     void load(rd, fd, st, fp);
     return () => {
       runSeq++;

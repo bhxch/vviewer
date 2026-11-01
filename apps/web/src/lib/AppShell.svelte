@@ -617,6 +617,11 @@
    *  双保险（防御式，激活 tab 缺席时 GitSection 不上屏）。 */
   const gitStore = $derived(activeTabs.find((t) => t.active)?.source.store ?? null);
   const gitPath = $derived(activeTabs.find((t) => t.active)?.source.path ?? '');
+  /** Git 段刷新代（fixwave 终审 Minor）：激活 tab 的 rev——SSE changed/手动刷新链
+   *  （refreshPaths）/字体图标重渲通道 rev++，透传 GitSection 重拉信息卡（外部修改
+   *  /提交后徽标更新；tab 身份切换由 gitInfo 清空 + props 变化自有链覆盖，rev 与
+   *  两者并存幂等）。 */
+  const gitRev = $derived(activeTabs.find((t) => t.active)?.rev ?? 0);
 
   /**
    * 左栏文件树的来源列表（多根 T4）：当前 workspace 的每个来源解析出活动 store
@@ -1346,6 +1351,7 @@
           fileDir={gitInfo.fileDir}
           store={gitStore}
           filePath={gitPath}
+          rev={gitRev}
         />
       {:else}
         <MetaPanel />
