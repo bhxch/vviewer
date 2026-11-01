@@ -20,8 +20,9 @@ import { ensureRightDrawer } from './drawer';
  *   → hljs 兜底路径（OUT-04 的降级载体）。
  * - 上行：ViewerPane 渲染 effect 一次性读（getToc :446 同位并列）+ 250ms 轮询 effect
  *   （异步到货面，getInspector 先例）；渲染失败/清理双路清空 → 切换器消失不抛错。
- * - 切换器：显隐 = tocEntries/outlineEntries 任一非空；默认落位「有目录默认目录」
- *   （未点过切换器时随数据面跟随）；互斥渲染 OutlineView/Toc/MetaPanel。
+ * - 切换器：显隐 = tocEntries 与 outlineDefinitions（过滤 reference. 后）任一非空；
+ *   默认落位「有目录默认目录」（未点过切换器时随数据面跟随）；互斥渲染
+ *   OutlineView/Toc/MetaPanel。
  * - 滚动跟随：AppShell 200ms interval 读 metaStore 总线的 firstVisibleLine 句柄
  *   （仅全量实例）二分大纲表 → activeLine 下行高亮（窗口路径缺席静默不启用）。
  * - 点击跳转：OutlineView onclick(line) → AppShell 写激活 tab pendingLine（1 起）
