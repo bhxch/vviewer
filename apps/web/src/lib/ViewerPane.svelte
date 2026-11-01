@@ -411,12 +411,21 @@ import SearchPanel from './SearchPanel.svelte';
       blameTip = g === undefined ? null : readyTip(g, pos);
     };
 
+    // pointerover 去重：滚动/行 DOM 整批重建（fillRows replaceChildren）后 Chrome 会
+    // 对静止光标重放 pointerover（同坐标）——重放不得重臂定时器，否则「滚动即收」
+    // 被重放吞掉（真实移动物理坐标必变；同行内 gutter→body 的同坐标切换重臂同内容
+    // 浮层，无害）。
+    let lastPointerX = -1;
+    let lastPointerY = -1;
     const onOver = (e: PointerEvent): void => {
+      if (e.clientX === lastPointerX && e.clientY === lastPointerY) return;
       const target = e.target as Element | null;
       const row = target !== null ? target.closest('[data-line]') : null;
       if (row === null || !pre.contains(row)) return;
       const line = Number((row as HTMLElement).dataset.line);
       if (!Number.isInteger(line) || line < 0) return;
+      lastPointerX = e.clientX;
+      lastPointerY = e.clientY;
       const rect = (row as HTMLElement).getBoundingClientRect();
       if (hoverTimer !== null) clearTimeout(hoverTimer);
       hoverTimer = setTimeout(() => {
@@ -425,15 +434,18 @@ import SearchPanel from './SearchPanel.svelte';
       }, 300); // spec §3.2「~300ms 延迟」
     };
 
+    // 命名句柄：add/removeEventListener 必须同引用（effect 重绑时旧监听才真正摘除）
+    const onLeave = (): void => hideTip();
+    const onScroll = (): void => hideTip(); // 滚动即收（capture：内部滚动也收）
     pre.addEventListener('pointerover', onOver);
-    pre.addEventListener('pointerleave', hideTip);
-    pre.addEventListener('scroll', hideTip, { capture: true, passive: true }); // 滚动即收（捕获：内部滚动也收）
+    pre.addEventListener('pointerleave', onLeave);
+    pre.addEventListener('scroll', onScroll, { capture: true, passive: true });
     return () => {
       ac.abort();
       if (hoverTimer !== null) clearTimeout(hoverTimer);
       pre.removeEventListener('pointerover', onOver);
-      pre.removeEventListener('pointerleave', hideTip);
-      pre.removeEventListener('scroll', hideTip, { capture: true });
+      pre.removeEventListener('pointerleave', onLeave);
+      pre.removeEventListener('scroll', onScroll, { capture: true });
       blameTip = null;
     };
   });
