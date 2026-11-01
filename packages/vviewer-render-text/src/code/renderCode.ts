@@ -134,8 +134,11 @@ export function renderCode(
   let hitLine = -1;
   let hitTimer: ReturnType<typeof setTimeout> | null = null;
   // 代码大纲缓存（2026-10-31 code-outline Task 2）：tree-sitter parse 成功后一次性
-  // fire-and-forget 填充；请求在飞/失败/hljs 兜底/plain 分支保持 []（getOutline 直读）
+  // fire-and-forget 填充；请求在飞/失败/hljs 兜底/plain 分支保持 []（getOutline 直读）。
+  // outlineCancel 为在飞撤销句柄（destroy 调用 → client.cancelOutline(lang)），落地/
+  // 取消/失败即置 null——非空即在飞
   let outlineEntries: OutlineEntry[] = [];
+  let outlineCancel: (() => void) | null = null;
 
   /**
    * 把 hitLine 的行级类同步到已渲染行 DOM（refresh 范围未变时 fillRows 不重跑，
@@ -467,19 +470,28 @@ export function renderCode(
         lineSegs = new Map(assignIntervalsToLines(intervals, lineOffsets).map((a) => [a.line, a.segs]));
         scroller?.refresh(true);
         // 大纲（code-outline Task 2）：parse 成功完成后一次性 fire-and-forget——
-        // 独立于高亮失败面（此处已达，outline 失败亦不影响已上屏渲染面，catch 静默
-        // 空数组终态）；同 lang 重复请求由 client 独立 pending 面自取消，实例只发一次。
-        // hljs 兜底（本 catch 下方）与 plain 分支不投递：无 tree-sitter parse 即无大纲。
-        // 第二个 ?. 为 fake client 缺 outline 方法面兜底（真实 HighlightClient 恒有）。
-        void client.outline?.(text, lang)?.then(
-          (entries) => {
-            if (destroyed) return;
-            outlineEntries = entries;
-          },
-          () => {
-            /* outline 失败静默：保持 []，不重试（锦上添花，非错误面） */
-          }
-        );
+        // 独立于高亮失败面（此处已达，outline 失败亦不影响已上屏渲染面，rejection
+        // 静默空数组终态）；同 lang 重复请求由 client 独立 pending 面自取消，实例只
+        // 发一次。hljs 兜底（本 catch 下方）与 plain 分支不投递：无 tree-sitter
+        // parse 即无大纲。
+        // Promise.resolve().then 隔离：client.outline 实现的同步 throw（病态 fake/
+        // 未来直连实现）必须转成异步 rejection 落下方 onErr——同步抛出会落本函数
+        // 外层 catch 走 hljsWholeFile，把已成功的 tree-sitter 渲染翻成 hljs（评审
+        // Minor：「独立于高亮失败面」须真实成立）。末位 ?. 为 fake 缺方法兜底。
+        outlineCancel = () => client.cancelOutline?.(lang);
+        void Promise.resolve()
+          .then(() => client.outline?.(text, lang))
+          .then(
+            (entries) => {
+              outlineCancel = null;
+              if (destroyed || entries === undefined) return;
+              outlineEntries = entries;
+            },
+            () => {
+              outlineCancel = null;
+              /* outline 取消/失败静默：保持 []，不重试（锦上添花，非错误面） */
+            }
+          );
       } catch (err) {
         if (destroyed || err instanceof HighlightCanceledError) return; // tab 已切换：静默
         if (err instanceof RemoteComputeError) {
@@ -505,6 +517,8 @@ export function renderCode(
     destroy() {
       destroyed = true;
       if (hitTimer !== null) clearTimeout(hitTimer);
+      outlineCancel?.(); // 撤在飞 outline（reject HighlightCanceledError，onErr 静默收尾）
+      outlineCancel = null;
       wantedChunks = []; // 队列作废；在-flight chunk 的回写在各 await 点被 destroyed 拦截
       scroller?.destroy();
       scroller = null;

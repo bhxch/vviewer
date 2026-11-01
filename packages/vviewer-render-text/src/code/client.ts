@@ -28,11 +28,14 @@ export interface HighlightCallContext {
 }
 
 /** tree-sitter 高亮客户端最小接口（HighlightClient 结构兼容；测试可注 fake）。
- * outline 为可选鸭子面（2026-10-31 code-outline Task 2）：真实 HighlightClient 均有
- * （独立 pending 面，T1），测试 fake 可缺省——renderCode 全量路径经 `?.` 触达。 */
+ * outline/cancelOutline 为可选鸭子面（2026-10-31 code-outline Task 2）：真实
+ * HighlightClient 均有（独立 pending 面，T1；cancelOutline 按 lang 撤在飞），测试
+ * fake 可缺省——renderCode 全量路径经 `?.` 触达。 */
 export interface CodeHighlightClient {
   highlight(text: string, lang: string, ctx?: HighlightCallContext): Promise<HighlightInterval[]>;
   outline?(text: string, lang: string): Promise<OutlineEntry[]>;
+  /** 按 lang 取消在飞 outline 请求（destroy 撤销消费；缺省 fake 无在飞可撤） */
+  cancelOutline?(lang: string): void;
 }
 
 let attachedClient: CodeHighlightClient | null = null;

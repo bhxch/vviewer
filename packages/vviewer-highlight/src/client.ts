@@ -188,7 +188,7 @@ export class HighlightClient {
   cancelAll(): void {
     for (const id of [...this.pending.keys()]) this.cancel(id);
     this.pendingByLang.clear();
-    for (const id of [...this.pendingOutline.keys()]) this.cancelOutline(id);
+    for (const id of [...this.pendingOutline.keys()]) this.cancelOutlineById(id);
     this.pendingOutlineByLang.clear();
   }
 
@@ -210,7 +210,7 @@ export class HighlightClient {
     p.reject(new HighlightCanceledError());
   }
 
-  private cancelOutline(id: number): void {
+  private cancelOutlineById(id: number): void {
     const p = this.pendingOutline.get(id);
     if (!p) return;
     this.pendingOutline.delete(id);
@@ -228,12 +228,24 @@ export class HighlightClient {
       return Promise.reject(new Error(`highlight worker 不可用：${this.initFailureReason}`));
     }
     const prevId = this.pendingOutlineByLang.get(lang);
-    if (prevId !== undefined) this.cancelOutline(prevId);
+    if (prevId !== undefined) this.cancelOutlineById(prevId);
     const id = this.nextId++;
     this.pendingOutlineByLang.set(lang, id);
     return new Promise<OutlineEntry[]>((resolve, reject) => {
       this.pendingOutline.set(id, { resolve, reject });
       this.worker.postMessage({ kind: 'outline', id, text, lang });
     });
+  }
+
+  /**
+   * 按 lang 取消在飞 outline 请求（T2 renderCode destroy 撤销面；Promise.reject
+   * HighlightCanceledError）。粒度为 lang 级（pendingOutlineByLang 只记最新一个）——
+   * 同 lang 后发请求已自带取消语义，本方法是「无后发时显式撤回」的补口。无在飞
+   * 请求时 no-op 不抛。签名与 highlight/highlightCancel 家族解耦：不动 outline()
+   * 既有 Promise 签名（T1/T3 消费面零改动）。
+   */
+  cancelOutline(lang: string): void {
+    const id = this.pendingOutlineByLang.get(lang);
+    if (id !== undefined) this.cancelOutlineById(id);
   }
 }

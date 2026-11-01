@@ -401,4 +401,22 @@ describe('HighlightClient.outline（独立 pending 面）', () => {
     await expect(client.outline('x', 'python')).rejects.toThrow('outline 失败');
     client.dispose();
   });
+
+  it('cancelOutline(lang)：按 lang 撤在飞（HighlightCanceledError reject）；无在飞 no-op；撤销后同 lang 新请求照常', async () => {
+    const { worker, client } = fake();
+    worker.responder = () => {}; // 全挂起
+    const o = client.outline('a=1', 'bash');
+    await vi.waitFor(() => expect(worker.requests.length).toBe(1));
+    client.cancelOutline('bash');
+    await expect(o).rejects.toThrow();
+    expect(() => client.cancelOutline('bash')).not.toThrow(); // 已无在飞：no-op 不抛
+    expect(() => client.cancelOutline('python')).not.toThrow(); // 从未在飞的 lang：no-op
+    // 撤销后同 lang 新请求正常服务（pending 表已清，不短路）
+    worker.responder = (_req, reply) =>
+      reply({ ok: true, entries: [{ name: 'n', kind: 'name', line: 0, byteStart: 0, byteEnd: 1, depth: 0 }] });
+    await expect(client.outline('b=2', 'bash')).resolves.toEqual([
+      { name: 'n', kind: 'name', line: 0, byteStart: 0, byteEnd: 1, depth: 0 },
+    ]);
+    client.dispose();
+  });
 });

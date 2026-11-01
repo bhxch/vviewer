@@ -1301,6 +1301,57 @@ describe('renderCode getOutline/firstVisibleLine（code-outline Task 2）', () =
     handle.destroy();
   });
 
+  it('outline 实现同步 throw：隔离为异步 rejection 静默，不翻转已成功的 tree-sitter 渲染', async () => {
+    stubResizeObserver();
+    attachHighlightClient({
+      highlight: async () => [{ start: 0, end: 3, capture: 'keyword' }],
+      outline: () => {
+        // 病态实现同步抛：修复前会落 start() 外层 catch 走 hljsWholeFile，
+        // 把已上屏的 tree-sitter 结果翻成 hljs（评审 Minor 1 回归锚）
+        throw new Error('sync boom');
+      }
+    });
+    const host = newHost();
+    const handle = renderCode(enc('let x'), host, { ext: 'rs', lang: 'rust' });
+    await vi.waitFor(() => expect(host.querySelector('.ts-keyword')).not.toBeNull());
+    await new Promise((r) => setTimeout(r, 20)); // 同步 throw 的 rejection 已在微任务落地
+    expect(handle.getEngine()).toBe('tree-sitter'); // 引擎不被翻转
+    expect(host.querySelectorAll('[class*="hljs-"]').length).toBe(0); // 未走 hljs 兜底
+    expect(outlineOf(handle)!.call(handle)).toEqual([]);
+    handle.destroy();
+  });
+
+  it('destroy 撤在飞 outline：经 cancelOutline(lang) 句柄；落地后句柄已清不再撤', async () => {
+    stubResizeObserver();
+    // 在飞挂起：destroy 触发一次 cancelOutline(lang)
+    const cancelOutline = vi.fn();
+    attachHighlightClient({
+      highlight: async () => [{ start: 0, end: 3, capture: 'keyword' }],
+      outline: () => new Promise<OutlineEntry[]>(() => {}), // 永挂起（在飞形态）
+      cancelOutline
+    });
+    const handle = renderCode(enc('let x'), newHost(), { ext: 'rs', lang: 'rust' });
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('tree-sitter'));
+    expect(cancelOutline).not.toHaveBeenCalled(); // 未销毁不撤
+    handle.destroy();
+    expect(cancelOutline).toHaveBeenCalledTimes(1);
+    expect(cancelOutline).toHaveBeenCalledWith('rust');
+
+    // 已落地：句柄清空，destroy 不再撤
+    const cancelOutline2 = vi.fn();
+    attachHighlightClient({
+      highlight: async () => [{ start: 0, end: 3, capture: 'keyword' }],
+      outline: async () => [
+        { name: 'x', kind: 'definition.function', line: 0, byteStart: 0, byteEnd: 5, depth: 0 }
+      ],
+      cancelOutline: cancelOutline2
+    });
+    const handle2 = renderCode(enc('let x'), newHost(), { ext: 'rs', lang: 'rust' });
+    await vi.waitFor(() => expect(outlineOf(handle2)!.call(handle2)).toHaveLength(1));
+    handle2.destroy();
+    expect(cancelOutline2).not.toHaveBeenCalled();
+  });
+
   it('firstVisibleLine 仅全量提供：scrollTop/行高换算（lineMetrics 尊重）+ 越界钳制', () => {
     stubResizeObserver();
     // 100 行 × 20 字节全量 plain：不走高亮面，专测视口几何
