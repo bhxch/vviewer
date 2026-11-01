@@ -302,6 +302,11 @@ export class GitClient {
     for (const [, p] of [...this.pending]) p.reject(err);
     this.pending.clear();
     this.opRepos.clear();
+    // 终止失败 worker（fixwave 终审 Minor，与 dispose:248 对齐）：死亡标记只短路本
+    // 实例的新请求，不 terminate 则崩溃中的 worker 若持续 onerror 重入，其内的
+    // objectBytes/repoCaches 会话缓存无人释放——terminate 即回收，新实例由下次
+    // ensureGitClient 重建。
+    this.worker.terminate();
     onClientDead(this);
   }
 
