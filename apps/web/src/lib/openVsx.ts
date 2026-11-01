@@ -155,7 +155,9 @@ function metaOf(publisher: string, extension: string, version: string | undefine
 async function downloadVsix(url: string, networkPrefix: string, failPrefix: string): Promise<ArrayBuffer> {
   const buf = await fetchBytes(url, networkPrefix, failPrefix);
   if (buf.byteLength > MAX_VSIX_BYTES) {
-    throw new Error(`${failPrefix}：vsix 超过 30MB 上限（${(buf.byteLength / 1024 / 1024).toFixed(1)}MB）`);
+    throw new Error(
+      `${failPrefix}：vsix 超过 ${MAX_VSIX_BYTES / (1024 * 1024)}MB 上限（${(buf.byteLength / 1024 / 1024).toFixed(1)}MB）`
+    );
   }
   return buf;
 }
@@ -206,10 +208,16 @@ export async function installFromOpenVsx(
   if (typeof meta.files?.download !== 'string') {
     throw new Error(`${FAIL}：元数据缺少 vsix 下载地址：${publisher}.${extension}`);
   }
+  // 版本号落 origin：元数据 version 优先，回落用户显式 @version；两者皆缺即抛错
+  //（评审 Minor 4：'latest' 死值兜底会让 checkUpdate 对 'latest' 恒报有更新——
+  // 死循环提示，诚实抛错优于假版本入库）
   const version = typeof meta.version === 'string' && meta.version !== '' ? meta.version : (parsed.version ?? '');
+  if (version === '') {
+    throw new Error(`${FAIL}：元数据缺少版本号：${publisher}.${extension}`);
+  }
   const buf = await downloadVsix(meta.files.download, NET, FAIL);
-  const file = new File([buf], `${publisher}.${extension}-${version || 'latest'}.vsix`); // .vsix 后缀 = 管线分发依据
-  const origin: ThemeOrigin = { publisher, extension, version: version || 'latest', checkedAt: Date.now() };
+  const file = new File([buf], `${publisher}.${extension}-${version}.vsix`); // .vsix 后缀 = 管线分发依据
+  const origin: ThemeOrigin = { publisher, extension, version, checkedAt: Date.now() };
   const imported: (ImportedTheme | ImportedIconTheme)[] = [];
   const errors: string[] = [];
   if (hasColor) {

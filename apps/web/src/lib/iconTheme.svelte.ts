@@ -162,7 +162,9 @@ let applyChain: Promise<void> = Promise.resolve();
 export function applyIconsFromSettings(s: Settings): Promise<void> {
   const run = async (): Promise<void> => {
     const sig = iconSig(s);
-    if (sig === iconThemeState.sig) return;    const themeKey = s.iconThemes.theme;
+    if (sig === iconThemeState.sig) return;
+
+    const themeKey = s.iconThemes.theme;
     let manifest: NormalizedIconTheme | null = null;
     let datas: readonly ({ data: ArrayBuffer } | undefined)[] = [];
     if (themeKey.startsWith('imported:')) {

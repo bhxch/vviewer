@@ -272,6 +272,24 @@ describe('installFromOpenVsx（mock fetch 管线）', () => {
     mockFetch({});
     await expect(installFromOpenVsx('not an id')).rejects.toThrow('无法识别');
   });
+
+  it('元数据缺 version 且输入无 @version → 抛「元数据缺少版本号」（评审 Minor 4：不落 latest 死循环提示）', async () => {
+    const routes: Record<string, MockRoute> = {
+      [`${OVX}/api/${PUB}/${EXT}`]: {
+        body: JSON.stringify({
+          files: {
+            manifest: `${OVX}/api/${PUB}/${EXT}/1.0.0/file/${PUB}.${EXT}-1.0.0.manifest`,
+            download: `${OVX}/api/${PUB}/${EXT}/1.0.0/file/${PUB}.${EXT}-1.0.0.vsix`
+          }
+        })
+      },
+      [`${OVX}/api/${PUB}/${EXT}/1.0.0/file/${PUB}.${EXT}-1.0.0.manifest`]: {
+        body: JSON.stringify({ name: EXT, contributes: { iconThemes: [{ label: 'x', path: './i.json' }] } })
+      }
+    };
+    mockFetch(routes);
+    await expect(installFromOpenVsx('pub.mini-icons')).rejects.toThrow('元数据缺少版本号');
+  });
 });
 
 describe('checkUpdate / updateTheme（mock fetch 更新闭环）', () => {

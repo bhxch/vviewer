@@ -12,7 +12,8 @@
     listIconThemes,
     listThemes,
     type ImportedIconTheme,
-    type ImportedTheme
+    type ImportedTheme,
+    type ThemeOrigin
   } from '../stores/session';
   import { importIconThemeFiles, importThemeFiles } from '../vsixImport';
   import {
@@ -295,27 +296,42 @@
     }
   }
 
-  /** 逐条「检查更新」（spec §6.3）：latest 记入 ovxLatest，行内据其切换更新钮。 */
+  /** 检查单条原语（不写全局 note/errors——单条钮与「全部检查」两调用方各自决定
+   * 呈现形态）：latest 记入 ovxLatest 供行内切换更新钮；失败返回 error 文案。 */
+  async function ovxCheckOnce(
+    t: ImportedTheme | ImportedIconTheme,
+    origin: ThemeOrigin
+  ): Promise<{ latest: string; error?: undefined } | { latest?: undefined; error: string }> {
+    try {
+      const { latest } = await checkUpdate(origin);
+      ovxLatest = { ...ovxLatest, [t.id]: latest };
+      return { latest };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /** 逐条「检查更新」钮（spec §6.3）：单条结果直接上 note（失败文案即 note）。 */
   async function ovxCheckOne(t: ImportedTheme | ImportedIconTheme): Promise<void> {
     if (t.origin === undefined) return;
     ovxCheckBusy = { ...ovxCheckBusy, [t.id]: true };
     importNote = '';
     importErrors = [];
-    try {
-      const { latest, hasUpdate } = await checkUpdate(t.origin);
-      ovxLatest = { ...ovxLatest, [t.id]: latest };
-      importNote = hasUpdate
-        ? `「${t.name}」有更新：${t.origin.version} → ${latest}`
-        : `「${t.name}」已是最新（${latest}）`;
-    } catch (err) {
-      importErrors = [err instanceof Error ? err.message : String(err)];
-      importNote = importErrors[0] ?? '检查更新失败';
-    } finally {
-      ovxCheckBusy = { ...ovxCheckBusy, [t.id]: false };
+    const r = await ovxCheckOnce(t, t.origin);
+    if (r.error !== undefined) {
+      importErrors = [r.error];
+      importNote = r.error;
+    } else if (r.latest !== t.origin.version) {
+      importNote = `「${t.name}」有更新：${t.origin.version} → ${r.latest}`;
+    } else {
+      importNote = `「${t.name}」已是最新（${r.latest}）`;
     }
+    ovxCheckBusy = { ...ovxCheckBusy, [t.id]: false };
   }
 
-  /** 「全部检查」（列表头）：逐条串行 GET（spec §6.3——记录数量级小，无并发风暴）。 */
+  /** 「全部检查」（列表头）：逐条串行 GET（spec §6.3——记录数量级小，无并发风暴）。
+   * 失败条目逐条收集进 importErrors（note 的 title tooltip 可见「{name}: 原因」），
+   * 成功汇总照旧上 note——单条失败不再被下一条的 note 覆盖丢失（评审 Minor 2）。 */
   async function ovxCheckAll(channel: 'theme' | 'icon'): Promise<void> {
     const targets = (channel === 'theme' ? imported : iconImported).filter((t) => t.origin !== undefined);
     if (targets.length === 0) {
@@ -326,12 +342,21 @@
     importNote = '';
     importErrors = [];
     let updatable = 0;
+    const failures: string[] = [];
     try {
       for (const t of targets) {
-        await ovxCheckOne(t);
-        if (t.origin !== undefined && ovxLatest[t.id] !== undefined && ovxLatest[t.id] !== t.origin.version) updatable++;
+        if (t.origin === undefined) continue; // filter 已保证；仅供类型收窄
+        ovxCheckBusy = { ...ovxCheckBusy, [t.id]: true };
+        const r = await ovxCheckOnce(t, t.origin);
+        ovxCheckBusy = { ...ovxCheckBusy, [t.id]: false };
+        if (r.error !== undefined) failures.push(`${t.name}: ${r.error}`);
+        else if (r.latest !== t.origin.version) updatable++;
       }
-      importNote = `全部检查完成（${targets.length} 条）：${updatable} 条可更新`;
+      importErrors = failures;
+      importNote =
+        failures.length > 0
+          ? `全部检查完成（${targets.length} 条）：${updatable} 条可更新，失败 ${failures.length} 条`
+          : `全部检查完成（${targets.length} 条）：${updatable} 条可更新`;
     } finally {
       ovxCheckAllBusy = { ...ovxCheckAllBusy, [channel]: false };
     }
