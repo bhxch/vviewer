@@ -9,8 +9,9 @@ import { closeDrawerIfOpened, ensureRightDrawer, openDrawerIfNarrow } from './dr
 import { overflowConnectServer } from './tabbar-actions';
 
 /**
- * b-git-panel —— 右面板 Git 段基础信息卡 + 三元切换器（2026-10-31 git-panel Task 2，
- * GIT 域）。spec：docs/superpowers/specs/2026-10-31-git-panel-design.md。
+ * b-git-panel —— 右面板 Git 段：基础信息卡 + 三元切换器（Task 2，GIT-01..04）+
+ * diff 视图 / 文件历史 log / 行级 blame hover（Task 3，GIT-05..08）。
+ * spec：docs/superpowers/specs/2026-10-31-git-panel-design.md。
  *
  * 链路事实（源码锚，写作时已读）：
  * - 探测：ViewerPane 渲染完成 fire-and-forget probeGitAvailability（gitProbe.ts：
@@ -26,13 +27,19 @@ import { overflowConnectServer } from './tabbar-actions';
  *   字节通道端到端：CRLF 原样入 hash——**CRLF 文件必须 clean**（Review Focus 误报
  *   红线：渲染归一文本 CRLF→LF 的比对通道会误报 modified）。HEAD 树无此路径 →
  *   lastCommit null + status untracked（worker 分流，T1 验通）。
+ * - T3：diff 折叠区（未提交 → worktree vs HEAD；clean → HEAD vs HEAD^——blobAt
+ *   'HEAD^' 首父；显示层归一 BOM 剥+CRLF→LF，与状态判定的原始字节 hash 通道分轨）；
+ *   文件历史 ≤50（isogit log filepath）；blame hover（ViewerPane 对 .vv-code-pre
+ *   pointerover 委托 → closest('[data-line]') → 首 hover 触发全文件 blame worker
+ *   计算 + 300ms 延迟 + fixed 浮层；firstVisibleLine+≤2MB 探门限全量域；滚动即收）。
  * - 负缓存（GIT-04）：probeCache 键 = store.id + 目录；server remote store 的 id 由
  *   base+label 派生（确定性），同连接同目录二次打开命中缓存——零新增 .git 请求，
  *   以 page.route 拦截 /api/file 计数断言（server 模式下 store.read 即网络请求）。
  *
  * 夹具（新先例：真实 git 仓库）：mkdtemp + execSync git init -b main/config（user +
- * core.autocrlf false 钉死字节原样入库）/两次 commit（第二次含 CRLF 文件）/一次
- * 未提交改动（a.txt）+ untracked 新文件（new.txt）+ 无 .git 对照目录（nogit/）。
+ * core.autocrlf false 钉死字节原样入库）/三 commit 两作者（c3 经 `git -c user.name=…
+ * -c user.email=…` 切作者，author+committer 同为 author2）/一次未提交改动（a.txt
+ * 第 3 行）+ untracked 新文件（new.txt）+ 无 .git 对照目录（nogit/）。
  * server 生命周期复用 serverHarness（m6 先例：--root 指向夹具，preview :4173 前端
  * 跨源连接）；打开文件走树点击真实全链路（连接→树→store→渲染→probe→GitSection）。
  * 双 project（chromium/mobile）：mobile 右栏在 ≤600px 抽屉内，断言前 ensureRightDrawer。
@@ -48,8 +55,11 @@ const PREVIEW_ORIGIN = 'http://127.0.0.1:4173';
 
 let server: ReturnType<typeof startVviewerServer> | null = null;
 let fixtureRoot: string | null = null;
-/** HEAD 提交完整 oid（GIT-01 断言信息卡短 hash = 前 7 位与仓库实际一致） */
-let HEAD_OID = '';
+/** crlf.txt 末次提交（c2）完整 oid——GIT-01 信息卡短 hash 断言锚（filepath 过滤
+ *  口径：信息卡「末次提交」是**该文件**的末次提交，非仓库 HEAD） */
+let CRLF_OID = '';
+/** a.txt 末次提交（c3 = 仓库 HEAD）完整 oid——GIT-07 log 展开的 full hash 断言锚 */
+let A_LAST_OID = '';
 
 /** 构建真实 git 仓库夹具（同步 execSync——beforeAll 装置期，CI runner 自带 git）。 */
 function buildGitFixture(root: string): void {
@@ -63,6 +73,11 @@ function buildGitFixture(root: string): void {
   git('config core.autocrlf false');
   writeFileSync(join(repo, 'readme.txt'), 'readme v1\n');
   writeFileSync(join(repo, 'a.txt'), 'alpha line 1\nalpha line 2\n');
+  // blame 滚动载体（GIT-08）：c1 引入 30 行（>桌面视口高，.vv-code-pre 可真滚动）
+  writeFileSync(
+    join(repo, 'story.txt'),
+    Array.from({ length: 30 }, (_, i) => `story v1 line ${i + 1}`).join('\n') + '\n'
+  );
   git('add -A');
   git('commit -m "first: add readme and a"');
   writeFileSync(join(repo, 'a.txt'), 'alpha line 1\nalpha line 2\nalpha line 3 committed\n');
@@ -71,9 +86,29 @@ function buildGitFixture(root: string): void {
   writeFileSync(join(repo, 'crlf.txt'), 'crlf line one\r\ncrlf line two\r\n');
   git('add -A');
   git('commit -m "second: update a.txt and add crlf"');
-  HEAD_OID = git('rev-parse HEAD').trim();
-  // 未提交改动（GIT-02 modified 载体）：工作区 ≠ HEAD blob
-  writeFileSync(join(repo, 'a.txt'), 'alpha line 1\nalpha line 2\nalpha line 3 working tree\n');
+  CRLF_OID = git('rev-parse HEAD').trim();
+  // c3 第二作者（brief 裁决：`git -c user.email/user.name` 逐提交切换，author 与
+  // committer 同落 author2）——readme.txt 改写（GIT-06 clean 模式 HEAD^ 对比载体）
+  // + a.txt 追加第 4 行（GIT-07 多条 log / GIT-08 blame 两作者向量）+ story.txt
+  // 追加 30 行（author2 归属段）
+  writeFileSync(join(repo, 'readme.txt'), 'readme v2\n');
+  writeFileSync(join(repo, 'a.txt'), 'alpha line 1\nalpha line 2\nalpha line 3 committed\nalpha line 4 by author2\n');
+  writeFileSync(
+    join(repo, 'story.txt'),
+    Array.from({ length: 60 }, (_, i) => (i < 30 ? `story v1 line ${i + 1}` : `story line ${i + 1} by author2`)).join('\n') + '\n'
+  );
+  git('add -A');
+  execSync('git -c user.name=author2 -c user.email=author2@vviewer.local commit -m "third: author2 appends line 4"', {
+    cwd: repo,
+    encoding: 'utf8'
+  });
+  A_LAST_OID = git('rev-parse HEAD').trim();
+  // 未提交改动（GIT-02 modified / GIT-05 diff 载体）：第 3 行工作区改写（首尾与
+  // 追加行保持 → diff 恰 1 del + 1 add，计数断言可钉死）
+  writeFileSync(
+    join(repo, 'a.txt'),
+    'alpha line 1\nalpha line 2\nalpha line 3 working tree\nalpha line 4 by author2\n'
+  );
   // untracked（GIT-03 载体）：工作区在、HEAD 树无
   writeFileSync(join(repo, 'new.txt'), 'brand new file\n');
   // 无 .git 对照目录（GIT-04 载体）：root 本身也无 .git，向上两级皆 404
@@ -166,8 +201,8 @@ test('GIT-01 · git 仓库文件：第三钮显隐、默认落位属性、信息
   // Review Focus 红线：CRLF 文件状态必须 clean（原始字节通道端到端验证）
   await expect(card.locator('.vv-git-row', { hasText: '状态' })).toContainText('无改动');
   await expect(card.locator('.vv-git-dot-clean')).toBeVisible();
-  // 末次提交四件（spec §3.1）：短 hash 与仓库实际 HEAD 一致 / 作者 / 相对时间 / subject
-  await expect(card.locator('.vv-git-row', { hasText: '末次提交' })).toContainText(HEAD_OID.slice(0, 7));
+  // 末次提交四件（spec §3.1）：短 hash 与该文件末次提交（c2）一致 / 作者 / 相对时间 / subject
+  await expect(card.locator('.vv-git-row', { hasText: '末次提交' })).toContainText(CRLF_OID.slice(0, 7));
   await expect(card.locator('.vv-git-row', { hasText: '作者' })).toContainText('e2e');
   await expect(card.locator('.vv-git-row', { hasText: '时间' })).toContainText(/刚刚|分钟前|小时前/);
   await expect(card.locator('.vv-git-row', { hasText: '说明' })).toContainText('second: update a.txt and add crlf');
@@ -234,4 +269,145 @@ test('GIT-04 · 无 .git 来源：无 Git 段 + probe 负缓存（二次打开�
   await page.waitForTimeout(1_500);
   expect(gitReads.length).toBe(2);
   await expect(page.locator('.vv-right-switch')).toHaveCount(0);
+});
+
+/** 打开文件并激活 Git 段（T3 公共前缀：信息卡 ready 即 diff/log 数据链全通），
+ *  返回 Git 段容器 locator。**保持右抽屉展开**：GIT-05..07 的后续交互全部发生在
+ *  段内（mobile ≤600px 抽屉收起即移出视口，段内 click 永挂 actionability——首跑
+ *  实证）；需要操作代码区（GIT-08 hover）的用例自行 ensureRightDrawer(page, false)。 */
+async function openGitSection(page: Page, name: string): Promise<Locator> {
+  await connect(page);
+  await openFile(page, 'repo1', name);
+  await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 30_000 });
+  const gitBtn = await waitGitButton(page);
+  await gitBtn.click();
+  const section = page.locator('.vv-git');
+  await expect(section).toBeVisible({ timeout: 30_000 });
+  await expect(section.locator('.vv-git-log-list .vv-git-log-item').first()).toBeVisible({ timeout: 30_000 });
+  return section;
+}
+
+test('GIT-05 · diff modified 模式：工作区 vs HEAD，+/- 行着色计数钉死', async ({ page }) => {
+  test.setTimeout(90_000);
+  const section = await openGitSection(page, 'a.txt');
+  // 折叠默认收起（spec §4），展开即拉（modified → worktree vs HEAD）
+  const foldBtn = section.locator('.vv-git-fold-btn');
+  await expect(foldBtn).toContainText('工作区 vs HEAD');
+  await foldBtn.click();
+  const diff = section.locator('.vv-git-diff');
+  await expect(diff).toBeVisible({ timeout: 30_000 });
+  // 夹具钉死口径：仅第 3 行改写 → 恰 1 add + 1 del（统计行与着色行双计数）
+  await expect(section.locator('.vv-git-diff-stat')).toContainText('+1');
+  await expect(section.locator('.vv-git-diff-stat')).toContainText('−1');
+  await expect(diff.locator('.vv-git-diff-row-add')).toHaveCount(1);
+  await expect(diff.locator('.vv-git-diff-row-del')).toHaveCount(1);
+  await expect(diff.locator('.vv-git-diff-row-add')).toContainText('alpha line 3 working tree');
+  await expect(diff.locator('.vv-git-diff-row-del')).toContainText('alpha line 3 committed');
+  // 上下文行（ctx）在场且不着色
+  await expect(diff.locator('.vv-git-diff-row', { hasText: 'alpha line 1' })).toBeVisible();
+  await expect(diff.locator('.vv-git-diff-trunc')).toHaveCount(0);
+});
+
+test('GIT-06 · diff clean 模式：HEAD^ vs HEAD（末次提交的改动）', async ({ page }) => {
+  test.setTimeout(90_000);
+  const section = await openGitSection(page, 'readme.txt');
+  // readme.txt clean（c3 改写后工作区同字节）→ 模式标注 HEAD^ vs HEAD
+  const foldBtn = section.locator('.vv-git-fold-btn');
+  await expect(foldBtn).toContainText('HEAD^ vs HEAD');
+  await foldBtn.click();
+  const diff = section.locator('.vv-git-diff');
+  await expect(diff).toBeVisible({ timeout: 30_000 });
+  // c3 对 readme.txt 的改动：v1 → v2（blobAt HEAD^ 首父链路端到端）
+  await expect(section.locator('.vv-git-diff-stat')).toContainText('+1');
+  await expect(section.locator('.vv-git-diff-stat')).toContainText('−1');
+  await expect(diff.locator('.vv-git-diff-row-add')).toHaveCount(1);
+  await expect(diff.locator('.vv-git-diff-row-del')).toHaveCount(1);
+  await expect(diff.locator('.vv-git-diff-row-add')).toContainText('readme v2');
+  await expect(diff.locator('.vv-git-diff-row-del')).toContainText('readme v1');
+});
+
+test('GIT-07 · 文件历史：≤50 列表 + 点击展开详情（full hash/两时间戳/逐提交 diff）', async ({ page }) => {
+  test.setTimeout(90_000);
+  const section = await openGitSection(page, 'a.txt');
+  const items = section.locator('.vv-git-log-list .vv-git-log-item');
+  // 夹具三提交全触 a.txt：c3（author2）/c2/c1 新旧序
+  await expect(items).toHaveCount(3);
+  await expect(items.nth(0)).toContainText('author2');
+  await expect(items.nth(0)).toContainText('third: author2 appends line 4');
+  await expect(items.nth(1)).toContainText('second: update a.txt and add crlf');
+  await expect(items.nth(2)).toContainText('first: add readme and a');
+  // 展开首条目：full hash（40 位与仓库一致）+ author/committer 双行（夹具 U/V 异体
+  // 置换在 c3 同体）+ 完整 message + 该提交该文件 diff（基线 = 文件史前一条目）
+  await items.nth(0).locator('.vv-git-log-btn').click();
+  const detail = section.locator('.vv-git-log-detail');
+  await expect(detail).toBeVisible();
+  await expect(detail).toContainText(A_LAST_OID);
+  await expect(detail).toContainText('author2');
+  await expect(detail).toContainText('提交者');
+  await expect(detail).toContainText('third: author2 appends line 4');
+  const diff = section.locator('.vv-git-log-diff .vv-git-diff');
+  await expect(diff).toBeVisible({ timeout: 30_000 });
+  await expect(diff.locator('.vv-git-diff-row-add', { hasText: 'alpha line 4 by author2' })).toHaveCount(1);
+  // 单开互斥：再点收起
+  await items.nth(0).locator('.vv-git-log-btn').click();
+  await expect(detail).toHaveCount(0);
+});
+
+test('GIT-08 · blame hover：浮层字段（作者/日期/subject/未提交哨兵）+ 滚动即收', async ({ page }) => {
+  test.setTimeout(120_000);
+  await connect(page);
+  await openFile(page, 'repo1', 'a.txt');
+  await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 30_000 });
+  const gitBtn = await waitGitButton(page);
+  await gitBtn.click();
+  await expect(page.locator('.vv-git')).toBeVisible({ timeout: 30_000 });
+  await ensureRightDrawer(page, false);
+  const pop = page.locator('.vv-git-blame-pop');
+  // a.txt 归属预期（blame 推进）：行 0 ← c1（e2e）、行 2 ← 工作区未提交改写（哨兵）
+  await page.hover('.vv-code-line[data-line="0"]');
+  await expect(pop).toBeVisible({ timeout: 30_000 });
+  await expect(pop).toContainText('e2e');
+  await expect(pop).toContainText('first: add readme and a');
+  await expect(pop).toContainText(/刚刚|分钟前|小时前/);
+  await page.hover('.vv-code-line[data-line="2"]');
+  await expect(pop).toContainText('（未提交）');
+  await expect(pop).toContainText('工作区未提交改动');
+
+  // 切 60 行的 story.txt（切 tab 后 touched 台账保持 Git 段，probe 缓存命中速回）：
+  // c3 归属段 + 真滚动（a.txt 仅 4 行滚不动，滚动即收需可滚容器）
+  await switchFile(page, 'story.txt');
+  await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 30_000 });
+  await ensureRightDrawer(page, true);
+  await expect(page.locator('.vv-git')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('.vv-git-log-list .vv-git-log-item').first()).toBeVisible({ timeout: 30_000 });
+  await ensureRightDrawer(page, false);
+  // 先滚动定位再悬停（真实用户两段式路径）：hover 手势内嵌的 scrollIntoView 会先
+  // pointerover 后补发 scroll——scroll 即收语义掐掉已 arm 的定时器（调试实证），
+  // 先滚动后移动才与应用「滚动即收 + 移动即查」语义同构。scrollTop=440 使行 40
+  // （y≈800）落在双 project 视口内。
+  await page.locator('.vv-code-pre').evaluate((el) => {
+    el.scrollTop = 440;
+  });
+  await expect(page.locator('.vv-code-line[data-line="40"]')).toBeVisible({ timeout: 30_000 });
+  // 新实例新缓存：首 hover 重触发 worker blame；行 40 ∈ c3 段（30..59）
+  await page.hover('.vv-code-line[data-line="40"]');
+  await expect(pop).toBeVisible({ timeout: 30_000 });
+  await expect(pop).toContainText('author2');
+  await expect(pop).toContainText('third: author2 appends line 4');
+
+  // 滚动即收（scrollHost scroll 捕获——行 DOM 整批重建也不残留浮层）；回滚到顶后
+  // 再 hover 复现（缓存已热，浮层字段即时；scrollTop=560 时行 1 不在虚拟滚动渲染
+  // 窗内，须先滚回）
+  await page.locator('.vv-code-pre').evaluate((el) => {
+    el.scrollTop += 120;
+  });
+  await expect(pop).toHaveCount(0);
+  await page.locator('.vv-code-pre').evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  await expect(page.locator('.vv-code-line[data-line="1"]')).toBeVisible({ timeout: 30_000 });
+  await page.hover('.vv-code-line[data-line="1"]');
+  await expect(pop).toBeVisible({ timeout: 30_000 });
+  await expect(pop).toContainText('e2e');
+  await expect(pop).toContainText('first: add readme and a');
 });
