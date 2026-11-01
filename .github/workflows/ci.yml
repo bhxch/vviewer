@@ -128,10 +128,12 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       # e2e 高亮断言依赖真实 wasm（m1 js / m2 ts+rs / m3 围栏 ts+bash）；
       # java 供 b-grammar-layers 分层链用例（同源缺失 → CDN 层兜底）的资产来源；
-      # yaml 供 t-hl BUG-37 用例（yaml 外置 scanner 修复后需真 yaml wasm）
+      # yaml 供 t-hl BUG-37 用例（yaml 外置 scanner 修复后需真 yaml wasm）；
+      # ocaml 供 b-code-outline OUT-05（无 tags.scm 语言的零大纲锚——须 wasm 在场
+      # 走真 parse 路径，缺失会 hljs 兜底使前置锚假红）
       - uses: ./.github/actions/setup-grammars
         with:
-          languages: javascript,typescript,bash,html,css,json,python,rust,java,yaml
+          languages: javascript,typescript,bash,html,css,json,python,rust,java,yaml,ocaml
       # b-grammar-layers 用例要求构建期注入 CDN 层 base（mock CDN，不依赖外网）；
       # 与 spec 内 mock 的路由前缀严格一致（base 同时容纳 manifest.json 与 *.wasm）
       # wasm-bindgen CLI 供给缓存（同 web job：脚本自供给官方预编译二进制，此处仅承载缓存）
