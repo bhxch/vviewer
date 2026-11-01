@@ -288,7 +288,10 @@ export default defineConfig({
         // 主 pattern 收集，仅因超过 maximumFileSizeToCacheInBytes（2MiB 默认）落出清单，
         // 同时触发 vite-plugin-pwa throwMaximumFileSizeToCacheInBytes 抛错。globIgnores
         // 前三项为 workbox-build 默认值（覆盖式传入须显式带上），末项为本排除。
-        globPatterns: ['**/*.{js,css,woff2,json}'],
+        // seti.woff（T4 备案裁决：离线首用图标字体可用）走精确路径而非把 woff 加进
+        // 泛化组——客户端产物内另有 katex 20 件 KaTeX_*.woff（~330KB），泛化 woff 会
+        // 全数误收进 precache。`*` 覆盖 vite hash 中缀（seti.<hash>.woff）。
+        globPatterns: ['**/*.{js,css,woff2,json}', '**/seti.*.woff'],
         globIgnores: ['**/node_modules/**/*', 'sw.js', 'workbox-*.js', '**/diagram-engines-*.js'],
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/^\/api\//],
