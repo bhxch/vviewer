@@ -369,7 +369,13 @@ import SearchPanel from './SearchPanel.svelte';
       return cachePromise;
     };
 
+    // pointerover 去重基线（评审 Minor③）：hideTip 时重置——收层后光标原位再入
+    // （同坐标）视为新 hover，不被去重丢弃
+    let lastPointerX = -1;
+    let lastPointerY = -1;
     const hideTip = (): void => {
+      lastPointerX = -1;
+      lastPointerY = -1;
       if (hoverTimer !== null) {
         clearTimeout(hoverTimer);
         hoverTimer = null;
@@ -415,8 +421,6 @@ import SearchPanel from './SearchPanel.svelte';
     // 对静止光标重放 pointerover（同坐标）——重放不得重臂定时器，否则「滚动即收」
     // 被重放吞掉（真实移动物理坐标必变；同行内 gutter→body 的同坐标切换重臂同内容
     // 浮层，无害）。
-    let lastPointerX = -1;
-    let lastPointerY = -1;
     const onOver = (e: PointerEvent): void => {
       if (e.clientX === lastPointerX && e.clientY === lastPointerY) return;
       const target = e.target as Element | null;

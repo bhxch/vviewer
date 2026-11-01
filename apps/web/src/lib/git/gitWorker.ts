@@ -309,9 +309,19 @@ async function handleOp(isoGit: IsoGit, msg: GitOpRequest, fs: { promises: Promi
     case 'file-log': {
       // 文件历史（spec §3.4）：isogit log filepath 过滤。截断探测用 depth+1 探针——
       // log 恰好返回 depth 条时无法区分「恰好」与「还有」，多取一条即精确。
+      // force: true（评审 Minor①）：文件「删除后同路径重建」的历史，无 force 时
+      // isogit _log 走到删除提交读 blob NotFound 即 throw（被下方分流吞成空历史）——
+      // force 使删除轮次照常入列（1.44.8 实源取证）。
       try {
         const want = Math.max(1, Math.min(msg.depth, 200));
-        const commits = await isoGit.log({ fs, ...ISO_ARGS, filepath: msg.filepath, depth: want + 1, cache });
+        const commits = await isoGit.log({
+          fs,
+          ...ISO_ARGS,
+          filepath: msg.filepath,
+          depth: want + 1,
+          force: true,
+          cache
+        });
         const truncated = commits.length > want;
         const entries = commits.slice(0, want).map(toCommitInfo);
         return { entries, truncated } satisfies GitFileLogResult;
@@ -341,13 +351,15 @@ async function handleOp(isoGit: IsoGit, msg: GitOpRequest, fs: { promises: Promi
       // 注释：blob 与工作区字节都先 normalizeBlobText（BOM 剥+CRLF→LF，渲染行域），
       // 输出行号与渲染 data-line 同域——hover 按 dataset.line 直查。工作区字节在场
       // （调用方经 store.read 原始通道取得）时最终域 = 工作区，新增行落「未提交」
-      // 哨兵。untracked（HEAD 无此路径）→ 空归属。
+      // 哨兵。untracked（HEAD 无此路径）→ 空归属。force: true 同 file-log（删除后
+      // 重建的历史无 force 即 throw 被吞成空归属）。
       try {
         const commits = await isoGit.log({
           fs,
           ...ISO_ARGS,
           filepath: msg.filepath,
           depth: BLAME_MAX_COMMITS + 1,
+          force: true,
           cache
         });
         const truncated = commits.length > BLAME_MAX_COMMITS;
@@ -355,13 +367,22 @@ async function handleOp(isoGit: IsoGit, msg: GitOpRequest, fs: { promises: Promi
         if (walked.length === 0) return { lines: [], truncated } satisfies GitBlameResult;
         const history: BlameHistoryEntry[] = [];
         for (const c of [...walked].reverse()) {
-          const blob = await isoGit.readBlob({ fs, ...ISO_ARGS, oid: c.oid, filepath: msg.filepath, cache });
+          // force 历史含删除轮：该提交树内无此路径（readBlob NotFound）→ 视为空
+          // blob 入 walk——归属推进自然清空，后续重建轮整段归重建提交（git blame
+          // 同语义）；其余错误照常上抛。
+          let lines: string[] = [];
+          try {
+            const blob = await isoGit.readBlob({ fs, ...ISO_ARGS, oid: c.oid, filepath: msg.filepath, cache });
+            lines = splitLines(normalizeBlobText(blob.blob));
+          } catch (e) {
+            if (!isIsoNotFound(e)) throw e;
+          }
           history.push({
             oid: c.oid,
             author: c.commit.author.name,
             timestamp: c.commit.author.timestamp,
             message: c.commit.message,
-            lines: splitLines(normalizeBlobText(blob.blob))
+            lines
           });
         }
         const worktreeLines =

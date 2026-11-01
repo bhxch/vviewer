@@ -125,6 +125,9 @@ function myersCapped(
 ): DiffOp[] | null {
   const max = maxD;
   const v = new Int32Array(2 * max + 1);
+  // trace 快照栈内存备案（评审 Minor④）：每轮 v.slice() 一份，峰值 ≤ dFinal ×
+  // (2·maxD+1) × 4B ≈ 8MB（maxD=1000 封顶）——瞬态有界，函数 return 即整栈可回收；
+  // 仅 D 贴近上限的病态输入触顶（相邻版本 diff 常态远低于此），worker/主线程均可承担。
   const trace: Int32Array[] = [];
   let found = -1;
   for (let d = 0; d <= max; d++) {

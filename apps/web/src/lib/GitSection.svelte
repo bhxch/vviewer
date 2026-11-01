@@ -101,6 +101,11 @@
     return e instanceof Error ? e.message : String(e);
   }
 
+  /** 经参数读取（绕开 TS 对组件作用域 let 的闭包收窄——cleanup 处被误窄为 null）。 */
+  function abortAC(ac: AbortController | null): void {
+    ac?.abort();
+  }
+
   async function load(rd: string, fd: string, st: TreeStore, fp: string): Promise<void> {
     inFlight?.abort();
     diffSeq++; // 作废在途 diff/log/详情（其 AC 随下方各自 abort）
@@ -331,9 +336,9 @@
     }
   }
 
-  // props 任一变化（组件被复用于不同 tab 的窗口期）即重拉；cleanup abort 在途 +
-  // 推进代数使迟到上行失效。读 props 进局部量再传 load：effect 依赖收集显式化，
-  // load 体内不触响应式面。
+  // props 任一变化（组件被复用于不同 tab 的窗口期）即重拉；cleanup（props 切换或
+  // 组件卸载同径）abort 全部在途 + 推进代数使迟到上行失效。读 props 进局部量再传
+  // load：effect 依赖收集显式化，load 体内不触响应式面。
   $effect(() => {
     const rd = repoDir;
     const fd = fileDir;
@@ -342,7 +347,11 @@
     void load(rd, fd, st, fp);
     return () => {
       runSeq++;
+      diffSeq++;
+      logSeq++;
       inFlight?.abort();
+      abortAC(diffAC);
+      abortAC(logAC);
     };
   });
 </script>
