@@ -236,6 +236,42 @@ export async function deleteIconTheme(id: string): Promise<void> {
   });
 }
 
+/**
+ * updateTheme 收尾原子原语（评审 Minor 3，openVsx.ts 专用）：单 readwrite 事务内
+ * 「批量删临时记录 + 覆盖写 updated」一次完成；updated 传 null = 纯批量清理（同名
+ * 命中失败收尾）。分立事务时中途失败会残留临时记录；事务化后任一步失败整体回滚，
+ * 既有记录不受影响、无残记录。removeIds 含 updated.id 亦安全（先删后写，put 为准）。
+ */
+async function atomicWriteInStore(
+  store: string,
+  updated: ImportedTheme | ImportedIconTheme | null,
+  removeIds: string[]
+): Promise<void> {
+  const d = await db();
+  return new Promise((resolve, reject) => {
+    const tx = d.transaction(store, 'readwrite');
+    const os = tx.objectStore(store);
+    for (const id of removeIds) os.delete(id);
+    if (updated !== null) os.put(updated, updated.id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'));
+  });
+}
+
+/** 颜色主题收尾原语（themes store）：临时记录清理 + 原 id 覆盖写原子完成。 */
+export async function replaceThemeAtomic(updated: ImportedTheme | null, tempIds: string[]): Promise<void> {
+  await atomicWriteInStore(THEMES, updated, tempIds);
+}
+
+/** 图标主题收尾原语（iconThemes store，同上）。 */
+export async function replaceIconThemeAtomic(
+  updated: ImportedIconTheme | null,
+  tempIds: string[]
+): Promise<void> {
+  await atomicWriteInStore(ICON_THEMES, updated, tempIds);
+}
+
 export async function loadSession(): Promise<{ tabs: TabSnapshot[]; lastDirHandle: FileSystemDirectoryHandle | null }> {
   const [tabs, lastDirHandle] = await Promise.all([kvGet<TabSnapshot[]>('tabs'), kvGet<FileSystemDirectoryHandle>('dirHandle')]);
   return { tabs: tabs ?? [], lastDirHandle: lastDirHandle ?? null };

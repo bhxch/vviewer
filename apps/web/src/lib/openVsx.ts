@@ -23,10 +23,8 @@
  */
 import { MAX_FONT_BYTES } from './stores/fontsStore';
 import {
-  deleteIconTheme,
-  deleteTheme,
-  putIconTheme,
-  putTheme,
+  replaceIconThemeAtomic,
+  replaceThemeAtomic,
   type ImportedIconTheme,
   type ImportedTheme,
   type ThemeOrigin
@@ -262,7 +260,9 @@ export async function checkUpdate(origin: ThemeOrigin): Promise<{ latest: string
  * 「未找到主题」错误兜底）。
  * 多主题包更新语义：管线按包全量导入为临时记录，取与原记录同名条目（回落唯一
  * 条目；包内已无同名且非唯一时报错）写到原 id，其余临时记录清理——只就地更新被
- * 操作的一条，同包其余记录不受影响（回退 = 按 @version 重装旧版，§6.3）。
+ * 操作的一条，同包其余记录不受影响（回退 = 按 @version 重装旧版，§6.3）。收尾
+ * 「清理临时记录 + 覆盖写」单 readwrite 事务原子完成（评审 Minor 3）：任一步失败
+ * 整体回滚，原记录保持不变、无临时残记录。
  */
 export async function updateTheme(record: ImportedTheme | ImportedIconTheme): Promise<ImportedTheme | ImportedIconTheme> {
   if (!record.origin) {
@@ -288,25 +288,23 @@ export async function updateTheme(record: ImportedTheme | ImportedIconTheme): Pr
   const fresh =
     r.imported.find((t) => t.name === record.name) ?? (r.imported.length === 1 ? r.imported[0] : undefined);
   if (fresh === undefined) {
-    // 清理本次管线已落库的临时记录，不留半截状态
-    for (const t of r.imported) {
-      if (isIcon) await deleteIconTheme(t.id);
-      else await deleteTheme(t.id);
-    }
+    // 清理本次管线已落库的临时记录：单事务原子批量删（评审 Minor 3），不留半截状态
+    const tempIds = r.imported.map((t) => t.id);
+    if (isIcon) await replaceIconThemeAtomic(null, tempIds);
+    else await replaceThemeAtomic(null, tempIds);
     const detail =
       r.errors.length > 0
         ? `：${r.errors.join('；')}`
         : `：包内未找到同名主题「${record.name}」（上游可能已改名，可删除后重装）`;
     throw new Error(`Open VSX 更新失败${detail}`);
   }
-  for (const t of r.imported) {
-    if (isIcon) await deleteIconTheme(t.id);
-    else await deleteTheme(t.id);
-  }
   const updated: ImportedTheme | ImportedIconTheme = isIcon
     ? { ...(fresh as ImportedIconTheme), id: record.id }
     : { ...(fresh as ImportedTheme), id: record.id };
-  if (isIcon) await putIconTheme(updated as ImportedIconTheme);
-  else await putTheme(updated as ImportedTheme);
+  // 临时记录清理 + 原 id 覆盖写同事务原子完成（评审 Minor 3）：任一步失败整体回滚，
+  // 原记录保持不变、无临时残记录（putTheme/putIconTheme 分立写不再使用）
+  const tempIds = r.imported.map((t) => t.id);
+  if (isIcon) await replaceIconThemeAtomic(updated as ImportedIconTheme, tempIds);
+  else await replaceThemeAtomic(updated as ImportedTheme, tempIds);
   return updated;
 }

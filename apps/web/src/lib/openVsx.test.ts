@@ -69,6 +69,36 @@ async function colorVsix(v: string, bg: string): Promise<Uint8Array> {
   return zip.generateAsync({ type: 'uint8array' });
 }
 
+/** 双图标主题 vsix（多主题包更新语义用例）：包内两条主题按 nameA/nameB 命名。 */
+async function multiIconVsix(na: string, nb: string): Promise<Uint8Array> {
+  const zip = new JSZip();
+  zip.file(
+    'extension/package.json',
+    JSON.stringify({
+      name: EXT,
+      contributes: {
+        iconThemes: [
+          { label: na, path: './icons/a.json' },
+          { label: nb, path: './icons/b.json' }
+        ]
+      }
+    })
+  );
+  for (const [file, name] of [['a', na], ['b', nb]] as const) {
+    zip.file(
+      `extension/icons/${file}.json`,
+      JSON.stringify({
+        name,
+        iconDefinitions: { file: { fontCharacter: '\\e001' } },
+        fonts: [{ id: 'm', src: ['./m.woff'] }],
+        fileExtensions: { ts: 'file' }
+      })
+    );
+  }
+  zip.file('extension/icons/m.woff', 'FONT');
+  return zip.generateAsync({ type: 'uint8array' });
+}
+
 interface MockRoute {
   status?: number;
   body: string | Uint8Array;
@@ -374,6 +404,42 @@ describe('checkUpdate / updateTheme（mock fetch 更新闭环）', () => {
     const all = await listThemes();
     expect(all).toHaveLength(before);
     expect(all.find((t) => t.id === v1.id)).toMatchObject({ name: 'OVX Night' });
+  });
+
+  it('updateTheme：包内无同名且临时条目非唯一 → 原子清理临时记录 + errors 透出（评审 Minor 3）', async () => {
+    // v1 装 A/B 双主题包
+    mockFetch({
+      [`${OVX}/api/${PUB}/${EXT}`]: { body: metaJson('1.0.0') },
+      [`${OVX}/api/${PUB}/${EXT}/1.0.0/file/${PUB}.${EXT}-1.0.0.manifest`]: {
+        body: JSON.stringify({
+          name: EXT,
+          contributes: {
+            iconThemes: [
+              { label: 'A', path: './icons/a.json' },
+              { label: 'B', path: './icons/b.json' }
+            ]
+          }
+        })
+      },
+      [`${OVX}/api/${PUB}/${EXT}/1.0.0/file/${PUB}.${EXT}-1.0.0.vsix`]: {
+        body: await multiIconVsix('A', 'B'),
+        contentType: 'application/octet-stream'
+      }
+    });
+    const { imported } = await installFromOpenVsx('pub.mini-icons');
+    expect(imported).toHaveLength(2);
+    const before = (await listIconThemes()).length;
+    // v2 上游改名 C/D：与原记录均不同名且临时条目非唯一 → 更新失败
+    mockFetch({
+      [`${OVX}/api/${PUB}/${EXT}`]: { body: metaJson('2.0.0') },
+      [`${OVX}/api/${PUB}/${EXT}/2.0.0/file/${PUB}.${EXT}-2.0.0.vsix`]: {
+        body: await multiIconVsix('C', 'D'),
+        contentType: 'application/octet-stream'
+      }
+    });
+    await expect(updateTheme(imported[0]!)).rejects.toThrow('包内未找到同名主题「A」');
+    // 临时记录已清理、原记录不动（单事务原子收尾，无残记录）
+    expect(await listIconThemes()).toHaveLength(before);
   });
 
   it('updateTheme：无 origin（本地导入）→ 报错拒绝', async () => {

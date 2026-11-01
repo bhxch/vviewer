@@ -9,6 +9,7 @@ import {
   listIconThemes,
   loadSession,
   putIconTheme,
+  replaceIconThemeAtomic,
   saveTabs,
   saveDirHandle,
   maxTabSeqOf,
@@ -125,6 +126,36 @@ describe('iconThemes store（v5 CRUD round-trip）', () => {
     expect(loaded?.manifest.fileExtensions.get('js')).toMatchObject({ char: '\ue001', color: '#5f7a61' });
     await deleteIconTheme(t.id);
     expect((await listIconThemes()).some((x) => x.id === t.id)).toBe(false);
+  });
+
+  it('replaceIconThemeAtomic：批量删临时+覆盖写单事务完成；null=纯清理（评审 Minor 3）', async () => {
+    const manifest = normalizeIconTheme({ iconDefinitions: { file: { fontCharacter: '\\e001' } } });
+    const mk = (id: string, name: string, source: 'json' | 'vsix'): ImportedIconTheme => ({
+      id,
+      name,
+      manifest,
+      fonts: [],
+      source,
+      addedAt: 1
+    });
+    const tempA = mk('imported:tmpa', 'TmpA', 'vsix');
+    const tempB = mk('imported:tmpb', 'TmpB', 'vsix');
+    const keep = mk('imported:keep', 'Keep', 'json');
+    await putIconTheme(tempA);
+    await putIconTheme(tempB);
+    await putIconTheme(keep);
+    // 失败收尾路径：updated=null 纯批量清理，无关记录不动
+    await replaceIconThemeAtomic(null, [tempA.id, tempB.id]);
+    let all = await listIconThemes();
+    expect(all.some((x) => x.id === tempA.id)).toBe(false);
+    expect(all.some((x) => x.id === tempB.id)).toBe(false);
+    expect(all.some((x) => x.id === keep.id)).toBe(true);
+    // 成功收尾路径：临时清理 + 原 id 覆盖写一次调用完成（旧内容被刷新、无临时残留）
+    const merged = { ...tempB, id: keep.id, name: 'KeepNew' };
+    await replaceIconThemeAtomic(merged, [tempA.id, tempB.id]);
+    all = await listIconThemes();
+    expect(all.filter((x) => [tempA.id, tempB.id, keep.id].includes(x.id))).toHaveLength(1);
+    expect(all.find((x) => x.id === keep.id)).toMatchObject({ name: 'KeepNew' });
   });
 });
 
