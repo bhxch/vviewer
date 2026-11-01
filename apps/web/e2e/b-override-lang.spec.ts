@@ -133,13 +133,23 @@ async function closeRightIfOpened(page: Page): Promise<void> {
 
 /** 属性视图落位（code-outline Task 3 切换器适配）：手动语言使无检测语文件（.txt）
  * 走 tree-sitter 渲染 → 大纲到货 → 切换器出现且默认「目录」视图（默认落位裁决），
- * 属性面板随之离场——语言行断言/操作前先拉右抽屉并轮询切换器（2.5s 内到场即切
- * 「属性」，rightViewTouched 置位后文件/渲染切换保持用户选择）；无切换器（hljs
- * 自动路径）即属性视图在场的 no-op（catch 吞超时）。 */
+ * 属性面板随之离场——语言行断言/操作前先拉右抽屉，轮询等切换器可见后必点「属性」
+ * 段（rightViewTouched 置位后文件/渲染切换保持用户选择）。轮询式（fixwave 终审
+ * Minor，LANG-06 同族残余修法）：替代固定 2.5s 单次 try——大纲到货时点在冷启动下
+ * 不定，2.5s 内未到即漏点、后续语言行断言落空；waitFor 轮询 30s 窗（waitOutlineReady
+ * 同款）覆盖冷启动时序。无切换器（hljs 自动路径，永不出现大纲数据）= 属性视图本在
+ * 场的 no-op：等待超时后以「属性面板在场」验收 no-op 前提，属性面板也缺席即真失败
+ * 不吞（原 catch 全吞会掩盖真断链）。 */
 async function ensureMetaView(page: Page): Promise<void> {
   await ensureRightDrawer(page, true);
   const sw = page.locator('.vv-right-switch-btn', { hasText: '属性' });
-  await sw.click({ timeout: 2_500 }).catch(() => {});
+  try {
+    await sw.waitFor({ state: 'visible', timeout: 30_000 });
+  } catch {
+    await expect(page.locator('.meta-panel')).toBeVisible({ timeout: 30_000 });
+    return;
+  }
+  await sw.click();
 }
 
 /** MetaPanel「语言」行（.meta-lang-input 所在 meta-row）：手动徽标按行圈定——
