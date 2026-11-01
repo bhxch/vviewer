@@ -123,8 +123,39 @@ test('OUT-02 · 大纲点击跳转：pendingLine 既有通道消费，目标行�
   await openCodeFile(page, { name: 'calc.py', content: PY_OUTLINE }, 'calc.py');
   await waitOutlineReady(page);
 
+  // fixwave 豁免锚（同 tab rev 重渲不清空大纲面板）：点击走 rev++ 全量重渲染通道，
+  // 大纲面板不得自清空重建。先给首项 DOM 打标 + 读滚动位——面板若在重渲窗口闪空
+  // （OutlineView 卸载重挂），键控 each 也救不回旧节点，标记必失，poll 短窗即红；
+  // 即时断言（无 sleep）卡闪变发生点。5 项大纲在测试视口无溢出，scrollTop 恒 0，
+  // 滚动位锚为字面稳定位，重建检测主证是 DOM 标记。
+  const outlineBody = page.locator('.vv-outline');
+  const firstItem = page.locator('.vv-outline li').first();
+  await expect(firstItem).toContainText('Calculator');
+  const scrollTopBefore = await outlineBody.evaluate((el) => el.scrollTop);
+  await firstItem.evaluate((el) => {
+    (el as HTMLElement & { __vvOutAnchor?: number }).__vvOutAnchor = 1;
+  });
+
   // 点击 helper 行（0 起第 12 行）→ pendingLine 13 → 渲染 effect 重跑消费 revealLine(12)
   await outlineRow(page, 'helper').locator('button').click();
+
+  // 即时断言（微任务 flush 已落地，协议往返远大于之）：右栏仍处目录视图（闪 meta
+  // 即红）、大纲在场、首项未变
+  await expect(page.locator('.vv-right-switch-btn', { hasText: '目录' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(outlineBody).toBeVisible();
+  await expect(firstItem).toContainText('Calculator');
+
+  // expect.poll 短窗确认不闪变：标记存活 = 点击后全程无卸载重建（闪变回翻窗口数百
+  // ms，2s 窗覆盖）；滚动位同窗稳定（重建归零必红）
+  await expect
+    .poll(
+      () =>
+        firstItem.evaluate((el) => (el as HTMLElement & { __vvOutAnchor?: number }).__vvOutAnchor ?? 0),
+      { timeout: 2_000 }
+    )
+    .toBe(1);
+  await expect.poll(() => outlineBody.evaluate((el) => el.scrollTop), { timeout: 2_000 }).toBe(scrollTopBefore);
+
   // jumpToLine 目标行加 vv-search-hit-line-active（BUG-09 跳转同款行级高亮），data-line 0 起
   await expect(page.locator('.vv-code-line.vv-search-hit-line-active')).toHaveAttribute(
     'data-line',
