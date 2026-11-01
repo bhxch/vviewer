@@ -181,6 +181,11 @@
   $effect(() => {
     const defs = outlineDefinitions;
     if (defs.length === 0) return;
+    // 属性视图门（fixwave 终审 Minor）：rightView='meta' 时大纲不可见，高亮值无人
+    // 消费——跳过 200ms 轮询的读句柄+二分空转（约 200ms/次）；翻回目录视图由本
+    // effect 对 rightView 的依赖重启轮询（cleanup 归零 activeOutlineLine，首 tick
+    // 内恢复），读 state 写 state 无自读自写环。
+    if (rightView === 'meta') return;
     const timer = setInterval(() => {
       const line = firstOutlineVisibleLine();
       if (line === null) return;
