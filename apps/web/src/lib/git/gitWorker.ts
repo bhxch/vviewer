@@ -19,12 +19,21 @@
 import type { PromiseFsClient } from 'isomorphic-git';
 import type {
   FsReplyPayload,
+  GitBlameResult,
   GitCommitInfo,
+  GitFileLogResult,
   GitOpRequest,
   GitStatus,
   GitWorkerIn,
   GitWorkerOut
 } from './gitClient';
+import {
+  BLAME_MAX_COMMITS,
+  blameWalk,
+  normalizeBlobText,
+  splitLines,
+  type BlameHistoryEntry
+} from './gitDiff';
 
 /** isogit 命名空间（经 gitIso 懒加载边界的 re-export 形状）。 */
 type IsoGit = typeof import('./gitIso');
@@ -197,8 +206,9 @@ function makeFs(requestId: number, post: (m: GitWorkerOut) => void): { promises:
   };
 }
 
-// ---------- 操作实现（T2 消费面：probe-head/last-commit/status；blame/file-log/blob-at
-// 的 worker 逻辑在 Task 3 落位，当前到达即结构化报错——管线已端到端贯通） ----------
+// ---------- 操作实现（六操作齐备：T2 probe-head/last-commit/status + T3
+// blame/file-log/blob-at——diff 视图的两侧字节由调用方经 blob-at 取得后主线程
+// unifiedDiff，diff 不设 op） ----------
 
 function isIsoNotFound(e: unknown): boolean {
   return (e as { code?: string }).code === 'NotFoundError' || (e as { name?: string }).name === 'NotFoundError';
@@ -206,17 +216,55 @@ function isIsoNotFound(e: unknown): boolean {
 
 function toCommitInfo(entry: {
   oid: string;
-  commit: { message: string; author: { name: string; timestamp: number } };
+  commit: {
+    message: string;
+    author: { name: string; timestamp: number };
+    committer: { name: string; timestamp: number };
+  };
 }): GitCommitInfo {
   return {
     oid: entry.oid,
     author: entry.commit.author.name,
     timestamp: entry.commit.author.timestamp,
-    message: entry.commit.message
+    message: entry.commit.message,
+    // Task 3 增补（log 展开详情消费 author+committer 时间戳）；接口可选字段，旧
+    // 消费面零感知
+    committer: entry.commit.committer.name,
+    committerTimestamp: entry.commit.committer.timestamp
   };
 }
 
 const ISO_ARGS = { dir: '/' as const, gitdir: '.git' as const };
+
+/**
+ * blob-at 的 ref 解析：'HEAD' / 40 位完整 oid / '<base>^'（首父——'<base>' 为空或
+ * 'HEAD' 时解析 HEAD；否则按完整 oid 取 commit）。根提交无父 → null（clean 模式下
+ * 意为「文件由末次提交新增」，调用方以空基线 diff）。ref 不可解析（iso NotFound）
+ * → null。
+ */
+async function resolveRefish(
+  isoGit: IsoGit,
+  fs: { promises: PromiseFsClient['promises'] },
+  cache: Record<string, unknown>,
+  ref: string
+): Promise<string | null> {
+  if (ref.endsWith('^')) {
+    const base = ref.slice(0, -1);
+    const baseOid =
+      base === '' || base === 'HEAD'
+        ? await isoGit.resolveRef({ fs, ...ISO_ARGS, ref: 'HEAD' })
+        : base;
+    const commit = await isoGit.readCommit({ fs, ...ISO_ARGS, oid: baseOid, cache });
+    return commit.commit.parent[0] ?? null;
+  }
+  if (/^[0-9a-f]{40}$/i.test(ref)) return ref.toLowerCase();
+  try {
+    return await isoGit.resolveRef({ fs, ...ISO_ARGS, ref });
+  } catch (e) {
+    if (isIsoNotFound(e)) return null;
+    throw e;
+  }
+}
 
 async function handleOp(isoGit: IsoGit, msg: GitOpRequest, fs: { promises: PromiseFsClient['promises'] }): Promise<unknown> {
   const cache = repoCache(msg.repoDir);
@@ -258,10 +306,72 @@ async function handleOp(isoGit: IsoGit, msg: GitOpRequest, fs: { promises: Promi
         throw e;
       }
     }
-    case 'blame':
-    case 'file-log':
-    case 'blob-at':
-      throw new Error(`git 通道 ${msg.kind} 在 Task 3 实现（diff/log/blame）`);
+    case 'file-log': {
+      // 文件历史（spec §3.4）：isogit log filepath 过滤。截断探测用 depth+1 探针——
+      // log 恰好返回 depth 条时无法区分「恰好」与「还有」，多取一条即精确。
+      try {
+        const want = Math.max(1, Math.min(msg.depth, 200));
+        const commits = await isoGit.log({ fs, ...ISO_ARGS, filepath: msg.filepath, depth: want + 1, cache });
+        const truncated = commits.length > want;
+        const entries = commits.slice(0, want).map(toCommitInfo);
+        return { entries, truncated } satisfies GitFileLogResult;
+      } catch (e) {
+        if (isIsoNotFound(e)) return { entries: [], truncated: false } satisfies GitFileLogResult; // untracked：无历史
+        throw e;
+      }
+    }
+    case 'blob-at': {
+      // ref 下某路径的 blob（diff 基准面）：ref 支持 'HEAD'、40 位完整 oid、'<ref>^'
+      // （首父，clean 模式 HEAD^ 对比与 log 首条目的逐提交 diff 消费）；树内无此路径
+      // 或 ref 不可解析 → null（调用方以「该时点无此文件」分流，如末次提交新增文件
+      // 的 HEAD^ 侧 = 空）。
+      try {
+        const oid = await resolveRefish(isoGit, fs, cache, msg.ref);
+        if (oid === null) return null;
+        const blob = await isoGit.readBlob({ fs, ...ISO_ARGS, oid, filepath: msg.filepath, cache });
+        return { oid: blob.oid, bytes: blob.blob };
+      } catch (e) {
+        if (isIsoNotFound(e)) return null;
+        throw e;
+      }
+    }
+    case 'blame': {
+      // 行级 blame（spec §3.2，自研）：log(filepath, depth=上限+1 探针) 逆序（旧→新）
+      // 逐提交 readBlob，归一切行后 blameWalk 推进行归属。归一口径见 gitDiff.ts 头
+      // 注释：blob 与工作区字节都先 normalizeBlobText（BOM 剥+CRLF→LF，渲染行域），
+      // 输出行号与渲染 data-line 同域——hover 按 dataset.line 直查。工作区字节在场
+      // （调用方经 store.read 原始通道取得）时最终域 = 工作区，新增行落「未提交」
+      // 哨兵。untracked（HEAD 无此路径）→ 空归属。
+      try {
+        const commits = await isoGit.log({
+          fs,
+          ...ISO_ARGS,
+          filepath: msg.filepath,
+          depth: BLAME_MAX_COMMITS + 1,
+          cache
+        });
+        const truncated = commits.length > BLAME_MAX_COMMITS;
+        const walked = commits.slice(0, BLAME_MAX_COMMITS);
+        if (walked.length === 0) return { lines: [], truncated } satisfies GitBlameResult;
+        const history: BlameHistoryEntry[] = [];
+        for (const c of [...walked].reverse()) {
+          const blob = await isoGit.readBlob({ fs, ...ISO_ARGS, oid: c.oid, filepath: msg.filepath, cache });
+          history.push({
+            oid: c.oid,
+            author: c.commit.author.name,
+            timestamp: c.commit.author.timestamp,
+            message: c.commit.message,
+            lines: splitLines(normalizeBlobText(blob.blob))
+          });
+        }
+        const worktreeLines =
+          msg.worktreeBytes !== undefined ? splitLines(normalizeBlobText(msg.worktreeBytes)) : null;
+        return blameWalk(history, worktreeLines, truncated);
+      } catch (e) {
+        if (isIsoNotFound(e)) return { lines: [], truncated: false } satisfies GitBlameResult;
+        throw e;
+      }
+    }
     default: {
       const k: string = (msg as { kind: string }).kind;
       throw new Error(`未知 git 请求 kind: ${k}`);

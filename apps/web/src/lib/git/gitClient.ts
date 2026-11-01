@@ -37,6 +37,10 @@ export interface GitCommitInfo {
   timestamp: number;
   /** 完整 message（subject = 首行） */
   message: string;
+  /** Task 3 增补（可选）：committer 名与时间戳——log 条目展开详情消费（spec §3.4
+   *  「author+committer 时间戳」）；可选字段，last-commit 旧消费面零感知。 */
+  committer?: string;
+  committerTimestamp?: number;
 }
 
 export type GitStatus = 'clean' | 'modified' | 'untracked';

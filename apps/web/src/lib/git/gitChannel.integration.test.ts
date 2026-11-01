@@ -1,11 +1,12 @@
 // gitChannel.integration.test.ts — fs 反向通道端到端集成测试（评审 C1 防回归锚点）：
 // 真 isomorphic-git（经 gitIso 懒加载边界）+ 内存 fake store + 假双端 worker 通道
 //（serveGitWorker 绑 globalThis.self.stub + GitClient 鸭子 Worker），全消息协议跑通
-// last-commit/status。锚定「code 透传后 isogit 的 isNotFoundError 消费链通」：loose
-// blob miss → 回帧 code:'ENOENT' → isogit 判「对象不在此处」回落 pack → pack 亦无 →
-// NotFoundError → worker isIsoNotFound 分流 status:'untracked'。通道任一端剥码则该
-// 路径以裸 fs 错误中断，本用例失败。
-// 夹具：手工字节序列构造最小 loose 仓库（sha1+zlib，无 pack 解析——评审允许简化）。
+// last-commit/status + T3 file-log/blob-at/blame。锚定「code 透传后 isogit 的
+// isNotFoundError 消费链通」：loose blob miss → 回帧 code:'ENOENT' → isogit 判「对象
+// 不在此处」回落 pack → pack 亦无 → NotFoundError → worker isIsoNotFound 分流
+// status:'untracked'。通道任一端剥码则该路径以裸 fs 错误中断，本用例失败。
+// 夹具：手工字节序列构造最小 loose 仓库（sha1+zlib，无 pack 解析——评审允许简化），
+// Task 3 扩两提交链（commit2 挂 parent 指回 commit1）供 log/blame/HEAD^ 向量。
 import { createHash } from 'node:crypto';
 import { deflateSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -31,6 +32,8 @@ function looseObject(type: 'blob' | 'tree' | 'commit', body: Uint8Array): { oid:
 
 const blobA = looseObject('blob', enc.encode('hello git\n'));
 const blobB = looseObject('blob', enc.encode('brave new\n'));
+// Task 3：a.txt 的第二版（commit2 改写）与 CRLF 工作区向量（归一后与 blobC 同行域）
+const blobC = looseObject('blob', enc.encode('hello git v2\n'));
 
 const treeEntry = (mode: string, name: string, oid: string): Uint8Array => {
   const head = enc.encode(`${mode} ${name}\u0000`);
@@ -50,6 +53,16 @@ const commitMessage = 'initial commit\n';
 const commitBody = `tree ${tree.oid}\nauthor T <t@t> 1700000000 +0000\ncommitter T <t@t> 1700000000 +0000\n\n${commitMessage}`;
 const commit = looseObject('commit', enc.encode(commitBody));
 
+// Task 3 两提交链：tree2 只改写 a.txt → blobC（b.txt 保持 blobB，log filepath 过滤向量）
+const tree2Body = new Uint8Array(treeEntry('100644', 'a.txt', blobC.oid).length + treeEntry('100644', 'b.txt', blobB.oid).length);
+tree2Body.set(treeEntry('100644', 'a.txt', blobC.oid));
+tree2Body.set(treeEntry('100644', 'b.txt', blobB.oid), treeEntry('100644', 'a.txt', blobC.oid).length);
+const tree2 = looseObject('tree', tree2Body);
+
+const commit2Message = 'second commit\n';
+const commit2Body = `tree ${tree2.oid}\nparent ${commit.oid}\nauthor U <u@t> 1700001000 +0000\ncommitter V <v@t> 1700002000 +0000\n\n${commit2Message}`;
+const commit2 = looseObject('commit', enc.encode(commit2Body));
+
 function makeFiles(): Map<string, Uint8Array<ArrayBuffer>> {
   const map = new Map<string, Uint8Array<ArrayBuffer>>();
   const put = (k: string, v: string | Uint8Array<ArrayBuffer>): void => {
@@ -57,11 +70,14 @@ function makeFiles(): Map<string, Uint8Array<ArrayBuffer>> {
   };
   put('.git/HEAD', 'ref: refs/heads/main\n');
   put('.git/config', '[core]\n\trepositoryformatversion = 0\n\tfilemode = false\n\tbare = false\n');
-  put('.git/refs/heads/main', `${commit.oid}\n`);
+  put('.git/refs/heads/main', `${commit2.oid}\n`);
   put(looseKey(blobA.oid), blobA.bytes);
   put(looseKey(blobB.oid), blobB.bytes);
+  put(looseKey(blobC.oid), blobC.bytes);
   put(looseKey(tree.oid), tree.bytes);
+  put(looseKey(tree2.oid), tree2.bytes);
   put(looseKey(commit.oid), commit.bytes);
+  put(looseKey(commit2.oid), commit2.bytes);
   return map;
 }
 
@@ -130,16 +146,21 @@ beforeAll(() => {
 });
 
 describe('fs 反向通道端到端（真 isogit + loose 仓库夹具）', () => {
-  it('last-commit：HEAD→ref→commit→tree 全 loose 读链通', async () => {
-    const { commit: info } = await client.lastCommit('', 'a.txt');
-    expect(info).not.toBeNull();
-    expect(info!.oid).toBe(commit.oid);
-    expect(info!.message).toBe(commitMessage);
-    expect(info!.author).toBe('T');
+  it('last-commit：HEAD→ref→commit→tree 全 loose 读链通（filepath 过滤各自末次）', async () => {
+    // a.txt 末次 = commit2（两提交链），b.txt 末次 = c1（commit2 未触）——filepath
+    // 过滤在链上正确落点
+    const a = await client.lastCommit('', 'a.txt');
+    expect(a.commit).not.toBeNull();
+    expect(a.commit!.oid).toBe(commit2.oid);
+    expect(a.commit!.message).toBe(commit2Message);
+    expect(a.commit!.author).toBe('U');
+    const b = await client.lastCommit('', 'b.txt');
+    expect(b.commit!.oid).toBe(commit.oid);
+    expect(b.commit!.author).toBe('T');
   });
 
   it('status：工作区字节 == HEAD blob → clean', async () => {
-    await expect(client.statusOf('', 'a.txt', enc.encode('hello git\n'))).resolves.toEqual({ status: 'clean' });
+    await expect(client.statusOf('', 'a.txt', enc.encode('hello git v2\n'))).resolves.toEqual({ status: 'clean' });
   });
 
   it('last-commit 无历史路径 → commit:null（isogit 返空即 null 口径）', async () => {
@@ -151,5 +172,57 @@ describe('fs 反向通道端到端（真 isogit + loose 仓库夹具）', () => 
     // 「loose miss（ENOENT）→ pack 亦无 → NotFoundError → untracked」回落链
     files.delete(looseKey(blobB.oid));
     await expect(client.statusOf('', 'b.txt', enc.encode('brave new\n'))).resolves.toEqual({ status: 'untracked' });
+  });
+});
+
+describe('T3 操作：file-log / blob-at / blame（真 isogit + 两提交链）', () => {
+  it('file-log：filepath 过滤 + 新旧序 + committer 增补 + 截断探针', async () => {
+    const full = await client.fileLog('', 'a.txt', 50);
+    expect(full.truncated).toBe(false);
+    expect(full.entries.map((e) => e.oid)).toEqual([commit2.oid, commit.oid]);
+    // log 详情消费面（spec §3.4）：committer 与 author 可异（夹具 U/V）
+    expect(full.entries[0].author).toBe('U');
+    expect(full.entries[0].committer).toBe('V');
+    expect(full.entries[0].committerTimestamp).toBe(1700002000);
+    // b.txt 只在 c1 变过：单条
+    const bLog = await client.fileLog('', 'b.txt', 50);
+    expect(bLog.entries.map((e) => e.oid)).toEqual([commit.oid]);
+    // depth 1 命中截断（链上有 2 条）
+    const cut = await client.fileLog('', 'a.txt', 1);
+    expect(cut.entries.map((e) => e.oid)).toEqual([commit2.oid]);
+    expect(cut.truncated).toBe(true);
+    // untracked：空列表非错误
+    await expect(client.fileLog('', 'missing.txt', 50)).resolves.toEqual({ entries: [], truncated: false });
+  });
+
+  it('blob-at：HEAD / 完整 oid / ^ 首父 / 无路径 null', async () => {
+    const head = await client.blobAt('', 'HEAD', 'a.txt');
+    expect(head).not.toBeNull();
+    expect(head!.oid).toBe(blobC.oid);
+    expect(new TextDecoder().decode(head!.bytes)).toBe('hello git v2\n');
+    // 40 位 oid 直取（log 展开的逐提交 diff 通道）
+    const atC1 = await client.blobAt('', commit.oid, 'a.txt');
+    expect(atC1!.oid).toBe(blobA.oid);
+    // HEAD^ 首父（clean 模式对比面）
+    const parent = await client.blobAt('', 'HEAD^', 'a.txt');
+    expect(parent!.oid).toBe(blobA.oid);
+    // 该时点树内无此路径 → null（「文件由后提交新增」分流）
+    await expect(client.blobAt('', 'HEAD^', 'missing.txt')).resolves.toBeNull();
+  });
+
+  it('blame：HEAD 域归属 + 未提交哨兵 + CRLF 归一行域对齐', async () => {
+    // 无工作区字节：单行文件全归 commit2（旧版行被改写）
+    const r = await client.blame('', 'a.txt');
+    expect(r.truncated).toBe(false);
+    expect(r.lines).toHaveLength(1);
+    expect(r.lines[0]).toMatchObject({ sha: commit2.oid, line: 0, numLines: 1, author: 'U' });
+    // 工作区改写（归一后不等）：未提交哨兵
+    const dirty = await client.blame('', 'a.txt', enc.encode('hello git v2 more\n'));
+    expect(dirty.lines[0].sha).toBe('');
+    expect(dirty.lines[0].author).toBe('（未提交）');
+    // CRLF 工作区字节归一后与 HEAD blob 同域：归属保持 HEAD 提交（行号域与渲染
+    // data-line 对齐的集成锚）
+    const crlf = await client.blame('', 'a.txt', enc.encode('hello git v2\r\n'));
+    expect(crlf.lines[0].sha).toBe(commit2.oid);
   });
 });
