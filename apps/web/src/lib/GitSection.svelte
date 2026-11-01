@@ -93,7 +93,8 @@
   let diffAC: AbortController | null = null;
   let logSeq = 0;
   let logAC: AbortController | null = null;
-  let detailRun = 0; // 条目 diff 借 runSeq 判代（量级小，不设独立 AC）
+  let detailRun = 0; // 条目 diff 借 runSeq 判代（量级小，不设独立代数）
+  let detailAC: AbortController | null = null; // 条目 diff 的取消面（fixwave 终审 Minor，对齐 diffAC——fs 反向通道唯一无取消面收口）
   /** 工作区原始字节暂存（load 读得后供 diff modified 模式复用；store 寻址原始通道） */
   let workBytes: Uint8Array | null = null;
 
@@ -113,6 +114,7 @@
     detailRun = runSeq + 1; // 借「未来代」使旧 detail 回包必 stale
     diffAC?.abort();
     logAC?.abort();
+    detailAC?.abort();
     const my = ++runSeq;
     const ac = new AbortController();
     inFlight = ac;
@@ -304,6 +306,9 @@
     const rd = repoDir;
     const relPath = repoRelPath(repoDir, filePath);
     const my = ++detailRun;
+    const ac = new AbortController();
+    detailAC = ac;
+    const stale = (): boolean => my !== detailRun || ac.signal.aborted;
     commitDiffs = { ...commitDiffs, [i]: { s: 'loading' } };
     const ensure = ensureGitClient();
     if (ensure === null) {
@@ -313,10 +318,10 @@
     try {
       const client = await ensure;
       const [base, target] = await Promise.all([
-        client.blobAt(rd, baseRef, relPath),
-        client.blobAt(rd, entry.oid, relPath)
+        client.blobAt(rd, baseRef, relPath, ac.signal),
+        client.blobAt(rd, entry.oid, relPath, ac.signal)
       ]);
-      if (my !== detailRun) return;
+      if (stale()) return;
       if (target === null) {
         commitDiffs = { ...commitDiffs, [i]: { s: 'empty', note: '该提交树内无此文件' } };
         return;
@@ -332,7 +337,7 @@
         }
       };
     } catch (e) {
-      if (my === detailRun) commitDiffs = { ...commitDiffs, [i]: { s: 'error', message: errMsg(e) } };
+      if (!stale()) commitDiffs = { ...commitDiffs, [i]: { s: 'error', message: errMsg(e) } };
     }
   }
 
@@ -352,6 +357,7 @@
       inFlight?.abort();
       abortAC(diffAC);
       abortAC(logAC);
+      abortAC(detailAC);
     };
   });
 </script>
