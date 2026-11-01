@@ -29,11 +29,6 @@ import { configureLibarchive } from '@bhxch/vviewer-render-archive/libarchiveSto
 import { jsonlRenderer } from '@bhxch/vviewer-render-text/jsonl';
 import { browser } from '$app/env';
 import { ensureHighlightClient, computeRouter } from './highlightClient';
-// git 信息面板（Task 1 基座）：打包图锚点——gitClient 链路（gitWorker entry → isogit
-// 引擎 chunk）需进入模块图才会随构建 emit（worker 经 new URL 引用，无消费点即被
-// tree-shake，四件套验证无产物）。ensureGitClient 保持惰性（Git 段激活才调用，isogit
-// chunk 不随启动拉取）；本引用零运行时开销，Task 2 GitSection 接线后由真实消费取代。
-import { ensureGitClient } from './git/gitClient';
 import { routeLargeFileHighlight } from './highlightRouter';
 import { resolveImageBlobUrl } from './markdownImages';
 import { hasNonDiagramFence } from './markdownFence';
@@ -78,10 +73,6 @@ if (browser) {
 }
 
 export const dispatcher: Dispatcher = createDispatcher(registry);
-
-// Task 1 打包图锚点的消费语句（见顶部 import 注释）：仅引用不调用——worker 创建与
-// isogit chunk 拉取仍由首次 ensureGitClient() 调用触发（T2 Git 段激活）。
-void ensureGitClient;
 
 // M2：应用启动即预热 tree-sitter 高亮 Worker（握手 + 资产就绪早于首个 code tab；
 // 失败只告警一次，渲染端对 code.ts 的 attachHighlightClient 保持未注入 → 降级 hljs）

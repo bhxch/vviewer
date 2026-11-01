@@ -16,6 +16,7 @@
   import { mergeAbortSignals } from './mergeAbortSignals';
   import { dispatcher, registry, cancelMarkdownRemote } from './viewer';
   import { cancelHighlight } from './highlightClient';
+  import { probeGitAvailability, dirOf } from './git/gitProbe';
   import { codeLineMetrics } from './theme';
   import { loadSettings } from './stores/settings';
   import { watchHealth, statusNotice } from './openFlow.svelte';
@@ -25,11 +26,13 @@ import SearchPanel from './SearchPanel.svelte';
   let {
     tab,
     ontoc,
-    onoutline
+    onoutline,
+    ongitAvailable
   }: {
     tab: Tab | null;
     ontoc?: (entries: TocEntry[]) => void;
     onoutline?: (entries: OutlineEntry[]) => void;
+    ongitAvailable?: (a: { repoDir: string; fileDir: string } | null) => void;
   } = $props();
 
   /**
@@ -531,6 +534,26 @@ import SearchPanel from './SearchPanel.svelte';
         const readFirstLine = (res.instance as { firstVisibleLine?: () => number }).firstVisibleLine;
         setOutlineLineHandle(
           typeof readFirstLine === 'function' ? () => readFirstLine.call(res.instance) : null
+        );
+        // git 可用性探测上行（git-panel Task 2）：渲染完成后 fire-and-forget——
+        // probe 自带目录级缓存/负缓存（同目录重复打开零 store 请求，gitProbe.ts），
+        // 一切读取失败按探测口径收敛 null（Git 段不出现且负缓存不重试，头注释既定
+        // 取舍）；url/zip/single 来源的 store.read 对 .git/HEAD 自然 throw → null。
+        // 同 tab rev 重渲染随本 effect 重跑：probe 缓存命中零 store 成本，结果幂等
+        // 上行。迟至上行由 cancelled 守卫（tab 切换/卸载后的迟到探测不误导右栏）。
+        void probeGitAvailability(current.source.store, current.source.path).then(
+          (hit) => {
+            if (cancelled) return;
+            ongitAvailable?.(
+              hit === null
+                ? null
+                : { repoDir: hit.repoDir, fileDir: dirOf(current.source.path) }
+            );
+          },
+          () => {
+            if (cancelled) return;
+            ongitAvailable?.(null);
+          }
         );
         // 滚动恢复：目录树切换回该 tab 时回到上次位置。
         // code 渲染器滚动在内部 .vv-code-pre（外层不滚动），接 getScrollHost()；其余维持外层容器。

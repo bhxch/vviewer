@@ -604,6 +604,27 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
   border-radius: 4px; color: var(--ui-fg-muted); }
 .vv-right-switch-btn:hover { color: var(--ui-fg); background: var(--ui-hover-bg); }
 .vv-right-switch-btn.active { color: var(--ui-accent); background: var(--ui-hover-bg); }
+/* Git 信息段（git-panel Task 2 GitSection）：信息卡形态对齐 MetaPanel（.meta-panel
+   同款 padding/标题小字），dl 两列 dt/dd；三态徽标圆点——clean 绿/modified 黄/
+   untracked 灰（§10-G2 语义色令牌，亮暗主题自动跟随）；容器 flex:none（信息卡
+   固有高度，Task 3 的 diff/log 滚动区再自挂 flex:1） */
+.vv-git { padding: .65rem .75rem; border-bottom: 1px solid var(--ui-border); flex: none; }
+.vv-git-title { margin: 0 0 .3rem; font-size: var(--vv-fs-2xs); font-weight: 600; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--ui-fg-muted); }
+.vv-git-note { margin: 0; font-size: var(--vv-fs-xs); color: var(--ui-fg-muted); }
+.vv-git-error { margin: 0 0 .4rem; font-size: var(--vv-fs-xs); color: var(--ui-danger);
+  line-height: 1.4; word-break: break-word; }
+.vv-git-retry { font-size: var(--vv-fs-xs); padding: 3px 10px; }
+.vv-git-list { margin: 0; }
+.vv-git-row { display: flex; gap: 8px; padding: 2px 0; font-size: var(--vv-fs-xs); line-height: 1.5; }
+.vv-git-row dt { flex: none; width: 4.5em; color: var(--ui-fg-muted); }
+.vv-git-row dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.vv-git-mono { font-family: var(--vv-code-font, monospace); }
+.vv-git-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  margin-right: 5px; vertical-align: baseline; }
+.vv-git-dot-clean { background: var(--ui-success); }
+.vv-git-dot-modified { background: var(--ui-warning); }
+.vv-git-dot-untracked { background: var(--ui-fg-muted); }
 /* 代码大纲视图（code-outline Task 3 OutlineView）：缩进树（depth 钳 8，行内
    padding-left 12px/层由组件内联注入）；kind 徽标 muted 小字，滚动跟随/悬停与
    .toc 同色语义；容器 flex:1 自滚动（.vv-right 列内与 .toc 同位） */

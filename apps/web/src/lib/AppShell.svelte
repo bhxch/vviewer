@@ -6,6 +6,7 @@
   import Toc from './Toc.svelte';
   import OutlineView from './OutlineView.svelte';
   import MetaPanel from './MetaPanel.svelte';
+  import GitSection from './GitSection.svelte';
   import GlobalSearchPanel from './GlobalSearchPanel.svelte';
   import QuickOpenPanel from './QuickOpenPanel.svelte';
   import WorkspaceTabsPanel from './WorkspaceTabsPanel.svelte';
@@ -127,9 +128,16 @@
    * 点过切换器后保持用户选择（rightViewTouched 旗标，台账语义——文件切换不强行
    * 跳回默认视图）。会话内不持久化（spec §3，零快照/零 settings）。
    */
-  let rightView = $state<'toc' | 'meta'>('meta');
+  let rightView = $state<'toc' | 'meta' | 'git'>('meta');
   /** 用户是否手动点过切换器（含子视图内语义性选择；轮询/重渲染不置位） */
   let rightViewTouched = $state(false);
+  /**
+   * git 可用性（git-panel Task 2）：ViewerPane ongitAvailable 上行的 per-tab 探测
+   * 结果（repoDir/fileDir；null = 不可用/未探测到）。语义随激活 tab——tab 身份变化
+   * 即清空（下方 effect），新 tab 渲染完成后的后台 probe 异步再上行；Git 第三钮
+   * 显隐 = gitInfo !== null（探测可用才出现，spec §4）。
+   */
+  let gitInfo = $state<{ repoDir: string; fileDir: string } | null>(null);
   /** 滚动跟随激活行（0 起大纲条目 line；null = 跟随未启用/视口前无符号） */
   let activeOutlineLine = $state<number | null>(null);
 
@@ -138,6 +146,12 @@
    * 调用）不受影响，onoutline 消费面在轮询 effect 内须稳定。 */
   function pushOutlineEntries(entries: OutlineEntry[]): void {
     outlineEntries = entries;
+  }
+
+  /** ViewerPane ongitAvailable 接线（稳定函数引用，pushOutlineEntries 同款理由）：
+   *  probe 为 fire-and-forget 异步上行，回调仅在到达时点被调用。 */
+  function pushGitInfo(a: { repoDir: string; fileDir: string } | null): void {
+    gitInfo = a;
   }
 
   /** 代码大纲定义条目（引用过滤单源，code-outline Task 3 评审 Minor 2）：切换器
@@ -588,6 +602,21 @@
    * 必须一致指向当前组）。单 workspace 时与全量过滤等价（组即全集）。
    */
   const activeTabs = $derived(tabStore.tabsOf(workspacesView.activeId));
+
+  // gitInfo 的 per-tab 清空（git-panel Task 2）：读激活 tab id 写 gitInfo（非依赖，
+  // 无自读自写环）——tab 身份变化即清空，旧 tab 的探测结果不串新 tab；同 tab 内
+  // rev 重渲染 id 不变不重跑（probe 幂等上行覆盖）。清空先于新 tab 渲染完成的异步
+  // probe 上行（probe 至少一个 store.read 微任务之后才返回），顺序天然正确。
+  $effect(() => {
+    void activeTabs.find((t) => t.active)?.id;
+    gitInfo = null;
+  });
+
+  /** Git 段消费面（git-panel Task 2）：激活 tab 的 store/path——gitInfo 与本派生
+   *  同源同代（上行/清空/消费都锚定激活 tab），渲染分支再以 gitStore 非 null 门控
+   *  双保险（防御式，激活 tab 缺席时 GitSection 不上屏）。 */
+  const gitStore = $derived(activeTabs.find((t) => t.active)?.source.store ?? null);
+  const gitPath = $derived(activeTabs.find((t) => t.active)?.source.path ?? '');
 
   /**
    * 左栏文件树的来源列表（多根 T4）：当前 workspace 的每个来源解析出活动 store
@@ -1226,6 +1255,7 @@
         tab={activeTabs.find((t) => t.active) ?? null}
         ontoc={(entries) => (tocEntries = entries)}
         onoutline={pushOutlineEntries}
+        ongitAvailable={pushGitInfo}
       />
     </main>
     {#if !layout.rightCollapsed}
@@ -1248,10 +1278,12 @@
     <aside class="vv-right" class:vv-right-off={layout.rightCollapsed} style="--vv-right-w: {rightW}px">
       <button type="button" class="vv-collapse-btn vv-collapse-right" aria-label="折叠属性面板"
         title="折叠属性面板" onclick={() => updateLayout({ rightCollapsed: true })}>›</button>
-      {#if tocEntries.length > 0 || outlineDefinitions.length > 0}
-        <!-- 「目录 | 属性」分段切换器（code-outline Task 3）：仅目录数据非空渲染
-             （无大纲文件维持纯属性现状——spec §3；大纲按定义条目计，outlineDefinitions
-             单源——评审 Minor 2）；aria-pressed 表激活段。 -->
+      {#if tocEntries.length > 0 || outlineDefinitions.length > 0 || gitInfo !== null}
+        <!-- 「目录 | 属性 | Git」分段切换器（code-outline Task 3 二元 + git-panel
+             Task 2 扩三元）：目录数据非空或 git 探测可用时渲染（均无维持纯属性现状
+             ——spec §4 显隐合并）；aria-pressed 表激活段。Git 钮显隐 = gitInfo 非
+             null（后台 probe 可用才出现）；激活 Git 置 rightViewTouched（用户显式
+             选择），默认落位 effect 永不选 'git'（下方注释）。 -->
         <div class="vv-right-switch" role="group" aria-label="右面板视图切换">
           <button
             type="button"
@@ -1273,11 +1305,23 @@
               rightView = 'meta';
             }}>属性</button
           >
+          {#if gitInfo !== null}
+            <button
+              type="button"
+              class="vv-right-switch-btn"
+              class:active={rightView === 'git'}
+              aria-pressed={rightView === 'git'}
+              onclick={() => {
+                rightViewTouched = true;
+                rightView = 'git';
+              }}>Git</button
+            >
+          {/if}
         </div>
       {/if}
       {#if rightView === 'toc'}
         <!-- 目录视图互斥渲染（code-outline Task 3）：实例互斥保证 md TOC 与代码
-             大纲不同时有数据——outlineDefinitions 在场渲染大纲（引用已过滤的显示
+            大纲不同时有数据——outlineDefinitions 在场渲染大纲（引用已过滤的显示
              集），否则 md TOC；两者皆空（用户点过切换器后切到无数据文件）回落属性
              面板兜底空态。 -->
         {#if outlineDefinitions.length > 0}
@@ -1287,6 +1331,17 @@
         {:else}
           <MetaPanel />
         {/if}
+      {:else if rightView === 'git' && gitInfo !== null && gitStore !== null}
+        <!-- Git 段（git-panel Task 2）：探测可用才渲染（gitInfo null 时即使
+             rightView 停留 'git'——用户选过 Git 后切到无 git 文件、touched 台账
+             语义保持选择——也回落属性面板兜底，与 toc 空态回落同款形态）；probe
+             竞态兜底窗口（清空后新探测未上行）同此门。 -->
+        <GitSection
+          repoDir={gitInfo.repoDir}
+          fileDir={gitInfo.fileDir}
+          store={gitStore}
+          filePath={gitPath}
+        />
       {:else}
         <MetaPanel />
       {/if}

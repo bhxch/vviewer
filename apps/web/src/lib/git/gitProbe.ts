@@ -42,7 +42,9 @@ export function clearGitProbeCache(): void {
   probeCache.clear();
 }
 
-function dirOf(filePath: string): string {
+/** 文件路径 → 目录前缀（i<=0 归 ''：根目录文件/无层级 path）。导出单源：ViewerPane
+ *  probe 上行的 fileDir 字段同式计算（gitClient probeHead 的 fileDir 参数消费面）。 */
+export function dirOf(filePath: string): string {
   const i = filePath.lastIndexOf('/');
   return i <= 0 ? '' : filePath.slice(0, i);
 }
