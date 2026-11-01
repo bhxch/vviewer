@@ -15,6 +15,7 @@ import { applySettings, closeSettings, gotoGroup, openSettings } from './setting
  * - ICON-03 scopes quickOpen/search：行首/文件头行首图标。
  * - ICON-04 导入 json+字体同批（Mini 夹具：folder 图标 + hidesExplorerArrows）→
  *   源头行/目录行 folder 图标 + caret 替代（展开变体）；删除回退 none（引用回落）。
+ *   附：损坏字体导入（非字体字节 woff）→ fontsOk=false 回退纯 caret（评审 Minor）。
  * - ICON-05 无匹配文件零位移：无 _file 回退的主题下，未命中行无图标元素且行高不变。
  *
  * 域内偏差备案（plan ICON-01 原文「seti hidesExplorerArrows=true 的 caret 替代」）：
@@ -22,22 +23,24 @@ import { applySettings, closeSettings, gotoGroup, openSettings } from './setting
  * 替代移至 ICON-04 用导入夹具覆盖（语义等价：规则本体与主题来源无关）。
  */
 
-/** Mini 夹具：单字体（复用 vendor seti.woff 字节）+ folder 回退键 + hidesExplorerArrows；
- * 无 _file（ICON-05 的「无匹配零位移」需要回退链终点落空） */
-const MINI_JSON = JSON.stringify({
-  name: 'Mini',
-  fonts: [{ id: 'm', src: ['./m.woff'], format: 'woff' }],
-  iconDefinitions: {
-    // fontCharacter 用 CSS 转义形（\ea0b，无 'u' 前缀——官方主题惯例，T1
-    // decodeFontCharacter 的解码口径）；JSON.parse 后落单字符
-    _folder: { fontCharacter: '\\ea0b', fontColor: '#8a9199' },
-    _folder_open: { fontCharacter: '\\ea0c', fontColor: '#8a9199' },
-    ts: { fontCharacter: '\\e6e4', fontColor: '#519aba' }
-  },
-  fileExtensions: { ts: 'ts' },
-  folderNames: { pkg: '_folder' },
-  hidesExplorerArrows: true
-});
+/** Mini 夹具生成器：单字体（默认复用 vendor seti.woff 字节）+ folder 回退键 +
+ * hidesExplorerArrows；无 _file（ICON-05 的「无匹配零位移」需要回退链终点落空） */
+function miniJson(name: string): string {
+  return JSON.stringify({
+    name,
+    fonts: [{ id: 'm', src: ['./m.woff'], format: 'woff' }],
+    iconDefinitions: {
+      // fontCharacter 用 CSS 转义形（\ea0b，无 'u' 前缀——官方主题惯例，T1
+      // decodeFontCharacter 的解码口径）；JSON.parse 后落单字符
+      _folder: { fontCharacter: '\\ea0b', fontColor: '#8a9199' },
+      _folder_open: { fontCharacter: '\\ea0c', fontColor: '#8a9199' },
+      ts: { fontCharacter: '\\e6e4', fontColor: '#519aba' }
+    },
+    fileExtensions: { ts: 'ts' },
+    folderNames: { pkg: '_folder' },
+    hidesExplorerArrows: true
+  });
+}
 
 const WOFF_PATH = new URL('../../../packages/vviewer-highlight/assets/vscode-icons/seti/seti.woff', import.meta.url);
 
@@ -97,16 +100,20 @@ async function setIconTheme(
   await closeSettings(page);
 }
 
-/** 图标主题导入（Mini 夹具：json + woff 同批——缺字体整条拒绝的管线契约） */
-async function importMini(page: Page): Promise<void> {
+/** 图标主题导入（Mini 夹具：json + woff 同批——缺字体整条拒绝的管线契约）。
+ * opts：name 换主题名（下拉 label `{name}（json）`）、woff 换字体字节（损坏字体
+ * 回退用例传非字体字节——导入管线不验内容，FontFace.load 时才 reject）。 */
+async function importMini(page: Page, opts: { name?: string; woff?: Buffer } = {}): Promise<string> {
+  const name = opts.name ?? 'Mini';
   await openSettings(page);
   await gotoGroup(page, '外观');
   await page.locator('.vv-settings-center input[type="file"][accept*="woff"]').setInputFiles([
-    { name: 'mini.json', mimeType: 'application/json', buffer: Buffer.from(MINI_JSON) },
-    { name: 'm.woff', mimeType: 'font/woff', buffer: readFileSync(WOFF_PATH) }
+    { name: 'mini.json', mimeType: 'application/json', buffer: Buffer.from(miniJson(name)) },
+    { name: 'm.woff', mimeType: 'font/woff', buffer: opts.woff ?? readFileSync(WOFF_PATH) }
   ]);
   await expect(page.locator('.vv-settings-note')).toHaveText('已导入 1 个图标主题');
-  await expect(page.locator('.vv-settings-theme-name', { hasText: 'Mini' })).toBeVisible();
+  await expect(page.locator('.vv-settings-theme-name', { hasText: name })).toBeVisible();
+  return `${name}（json）`;
 }
 
 test('ICON-01：seti 预置默认仅文件树——文件行非空字形，源头行/tab 零图标（tabs 开关双向）', async ({ page }) => {
@@ -258,4 +265,24 @@ test('ICON-05：无匹配文件零位移——未命中行无图标元素且行�
   const after = (await oddRow.boundingBox())?.height ?? 0;
   await closeDrawerIfOpened(page, drawer2);
   expect(Math.abs(after - before), 'odd.zzz 行高启用主题前后一致').toBeLessThan(0.5);
+});
+
+test('ICON-04 附：损坏字体导入——fontsOk=false 回退纯 caret（展开指示不丢）', async ({ page }) => {
+  await page.goto('/');
+  await openDir(page, [
+    { name: 'pkg/app.ts', content: 'const a = 1;\n' },
+    { name: 'notes.md', content: '# t\n' }
+  ]);
+  // 损坏 woff 夹具（非字体字节）：导入管线不验字体内容（仅扩展名白名单），
+  // FontFace.load 在换装时才 reject → runtime.fontsOk=false
+  const label = await importMini(page, { name: 'MiniBad', woff: Buffer.from('not-a-font-bytes') });
+  await page.getByLabel('图标主题', { exact: true }).selectOption({ label });
+  await applySettings(page);
+  await closeSettings(page);
+
+  // caret 替代回退（评审 Minor）：字体残缺主题（hidesExplorerArrows + folderNames
+  // 本可替代）不替代——目录行 caret 在场（折叠 ▸），宁保守不丢展开指示。
+  // 对照 ICON-04 同形态好字体主题：dirRow caret count=0（替代发生）
+  const dirRow = treeRowByName(page, 'pkg');
+  await expect(dirRow.locator('.vv-tree-caret')).toHaveText('▸');
 });

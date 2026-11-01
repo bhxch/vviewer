@@ -28,11 +28,14 @@
    * 纯 caret）且 hidesExplorerArrows=true 时，目录行 caret（▾/▸）由 folder/
    * folderExpanded 图标替代——展开态已知（本地 $state），变体双向直出；本行名字
    * 无匹配字形 → 回退纯 caret（防替代后空槽丢失展开指示，零位移原则同源）。
+   * fontsOk 旗标（评审 Minor）：主题任一字体 FontFace 注册失败（解析损坏/缺字节）
+   * → 字形栈残缺，folder 替代可能落空丢展开指示，整体回退纯 caret。
    */
   const caretReplaced = $derived.by(() => {
     if (!iconEnabled || node.kind !== 'dir' || iconThemeState.runtime === null) return false;
     const t = iconThemeState.runtime;
     if (!t.hidesExplorerArrows || (t.folderNames.size === 0 && t._folder === undefined)) return false;
+    if (t.fontsOk === false) return false;
     return matchIconTheme(t, { kind: expanded ? 'folderExpanded' : 'folder', name: node.name }) !== null;
   });
 

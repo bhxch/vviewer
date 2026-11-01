@@ -1,8 +1,8 @@
 /**
  * iconTheme.svelte.ts — 图标主题运行时（图标主题 spec §3.2/§3.5，Task 3）。
  *
- * 职责：iconThemeState 单例（$state：sig 签名 / runtime 当前生效归一化主题 /
- * ready 首次应用完成旗标）+ applyIconsFromSettings（设置侧唯一应用入口：diff sig
+ * 职责：iconThemeState 单例（$state：sig 签名 / runtime 当前生效归一化主题 + fontsOk
+ * 运行时旗标——评审 Minor / ready 首次应用完成旗标）+ applyIconsFromSettings（设置侧唯一应用入口：diff sig
  * → FontFace 注册/注销 + runtime 换装，无变化零操作；'none' → runtime null）+
  * setBuiltinIconThemeLoader（builtin 主题解析缝——Task 4 vendor Seti 后注册真实
  * 实现，本任务单测以 fake 注入）+ fontFamilyOf（per-definition fontId → 注册家族
@@ -20,10 +20,17 @@ import { listIconThemes } from './stores/session';
 import type { Settings } from './stores/settings';
 import { iconSig } from './iconReaction';
 
+/** 运行时生效主题：归一化清单 + fontsOk 运行时旗标（评审 Minor：主题全部字体
+ * FontFace 注册成功才 true，任一缺字节/解析失败/注册抛错即 false——TreeNodeRow
+ * caret 替代据此回退纯 caret，防字形残缺主题丢失展开指示）。 */
+export interface IconThemeRuntime extends NormalizedIconTheme {
+  fontsOk: boolean;
+}
+
 /** 当前生效主题三元组：sig 供 iconReaction diff（初值 '' 保证首调必命中）；
- * runtime null = 无图标（'none' / 引用落空 / 加载失败回退）；ready = 首次
- * applyIconsFromSettings 完成过一次（e2e 轮询锚，运行中消费面无需读）。 */
-export const iconThemeState = $state<{ sig: string; runtime: NormalizedIconTheme | null; ready: boolean }>({
+ * runtime null = 无图标（'none' / 引用落空 / 加载失败回退），非 null 恒携 fontsOk；
+ * ready = 首次 applyIconsFromSettings 完成过一次（e2e 轮询锚，运行中消费面无需读）。 */
+export const iconThemeState = $state<{ sig: string; runtime: IconThemeRuntime | null; ready: boolean }>({
   sig: '',
   runtime: null,
   ready: false
@@ -96,14 +103,16 @@ function resolveImportedFontDatas(
  * FontFace 换装：新主题字体逐个 load（坏字体 warn 跳过不炸整体，fontsStore 先例）
  * → 先 add 新后 delete 旧（切换空窗期字形不闪回默认栈）→ 簿记翻新。manifest null
  * （'none'/引用落空）= 纯注销。delete 包 try/catch：对未注册/已注销实例与异常
- * document.fonts 实现按约安全。
+ * document.fonts 实现按约安全。返回 fontsOk 旗标（评审 Minor）：全部字体注册成功
+ * 才 true，任一缺字节/解析失败/注册抛错即 false（TreeNodeRow caret 替代回退依据）。
  */
 async function swapFaces(
   themeKey: string,
   manifest: NormalizedIconTheme | null,
   datas: readonly ({ data: ArrayBuffer } | undefined)[]
-): Promise<void> {
+): Promise<boolean> {
   const faces: FontFace[] = [];
+  let fontsOk = true;
   if (manifest !== null) {
     for (let i = 0; i < manifest.fonts.length; i++) {
       const meta = manifest.fonts[i];
@@ -111,6 +120,7 @@ async function swapFaces(
       const entry = datas[i];
       if (entry === undefined) {
         console.warn(`[icons] 主题「${manifest.name || themeKey}」字体 ${meta.id} 缺字节，该字体字形回退系统字体`);
+        fontsOk = false;
         continue;
       }
       const descriptors: FontFaceDescriptors = {};
@@ -121,6 +131,7 @@ async function swapFaces(
         await face.load();
       } catch (err) {
         console.warn(`[icons] 字体 ${meta.id} 解析失败（内容不是有效字体？）`, err);
+        fontsOk = false;
         continue;
       }
       faces.push(face);
@@ -131,6 +142,7 @@ async function swapFaces(
       document.fonts.add(face);
     } catch (err) {
       console.warn('[icons] FontFace 注册失败', err);
+      fontsOk = false;
     }
   }
   const old = activeFaces;
@@ -143,6 +155,7 @@ async function swapFaces(
     }
   }
   activeThemeKey = themeKey;
+  return fontsOk;
 }
 
 /** 'seti' 无 loader 仅告警一次（T4 接入前 reload 重复触发不刷屏）。 */
@@ -190,8 +203,10 @@ export function applyIconsFromSettings(s: Settings): Promise<void> {
       }
     }
     // 'none' 与其余脏键：白名单已挡，此处 manifest 恒 null = 纯注销
-    await swapFaces(themeKey, manifest, datas);
-    iconThemeState.runtime = manifest;
+    const fontsOk = await swapFaces(themeKey, manifest, datas);
+    // runtime 恒携 fontsOk 旗标（评审 Minor）：spread 注入而非改写 NormalizedIconTheme
+    // 实体——记录本体（IndexedDB）不带运行时面
+    iconThemeState.runtime = manifest === null ? null : { ...manifest, fontsOk };
     iconThemeState.sig = sig;
     iconThemeState.ready = true;
   };
