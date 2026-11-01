@@ -1,4 +1,11 @@
-import type { HighlightContext, HighlightInterval, HighlightRequest, HighlightResponse } from './types';
+import type {
+  HighlightContext,
+  HighlightInterval,
+  HighlightRequest,
+  HighlightResponse,
+  OutlineEntry,
+  OutlineResponse,
+} from './types';
 import type { InitMessage, InitProgressFrame, WorkerInit } from './worker';
 
 /** 取消的请求 reject 此错误（name 为 HighlightCanceled）。 */
@@ -9,8 +16,8 @@ export class HighlightCanceledError extends Error {
   }
 }
 
-interface Pending {
-  resolve: (intervals: HighlightInterval[]) => void;
+interface Pending<T> {
+  resolve: (value: T) => void;
   reject: (e: unknown) => void;
 }
 
@@ -25,8 +32,11 @@ export const INIT_TIMEOUT_MS = 15_000;
  */
 export class HighlightClient {
   private readonly worker: Worker;
-  private readonly pending = new Map<number, Pending>();
+  private readonly pending = new Map<number, Pending<HighlightInterval[]>>();
   private readonly pendingByLang = new Map<string, number>();
+  /** outline 独立 pending 面（id 与 highlight 共享单调空间，各自分流）；三层失效同款。 */
+  private readonly pendingOutline = new Map<number, Pending<OutlineEntry[]>>();
+  private readonly pendingOutlineByLang = new Map<string, number>();
   private nextId = 1;
   private disposed = false;
   /** worker 曾回过任何消息（含 init 失败的报错）：看门狗即解除 */
@@ -47,7 +57,7 @@ export class HighlightClient {
   constructor(worker: Worker, init?: WorkerInit & { debug?: boolean }, onWorkerError?: (reason: string) => void) {
     this.worker = worker;
     this.onWorkerError = onWorkerError;
-    this.worker.onmessage = (ev: MessageEvent<HighlightResponse>) => {
+    this.worker.onmessage = (ev: MessageEvent<HighlightResponse | OutlineResponse>) => {
       const res = ev.data;
       // init-progress 探针帧（spike）：早退分流——不进 pending 表，也不 markWorkerAlive
       // （进度帧不计为存活证据，看门狗语义不变）；帧仅在 init 握手携带 debug 开关时出现
@@ -60,14 +70,26 @@ export class HighlightClient {
         return;
       }
       this.markWorkerAlive();
+      // highlight 响应分流（id 与 outline 共享单调空间，先查 highlight 表再查 outline 表）
       const p = this.pending.get(res.id);
-      if (!p) return;
-      this.pending.delete(res.id);
-      for (const [lang, id] of this.pendingByLang) {
-        if (id === res.id) this.pendingByLang.delete(lang);
+      if (p) {
+        this.pending.delete(res.id);
+        for (const [lang, id] of this.pendingByLang) {
+          if (id === res.id) this.pendingByLang.delete(lang);
+        }
+        if (res.ok) p.resolve((res as HighlightResponse).intervals ?? []);
+        else p.reject(new Error(res.error ?? 'highlight 失败'));
+        return;
       }
-      if (res.ok) p.resolve(res.intervals ?? []);
-      else p.reject(new Error(res.error ?? 'highlight 失败'));
+      // outline 响应分流（同款去重表清理）
+      const po = this.pendingOutline.get(res.id);
+      if (!po) return; // 未知 id 帧安全落空（init-ok 等无 id 帧同路径）
+      this.pendingOutline.delete(res.id);
+      for (const [lang, id] of this.pendingOutlineByLang) {
+        if (id === res.id) this.pendingOutlineByLang.delete(lang);
+      }
+      if (res.ok) po.resolve((res as OutlineResponse).entries ?? []);
+      else po.reject(new Error(res.error ?? 'outline 失败'));
     };
     // worker 脚本 404/MIME 异常/运行期崩溃：onerror 触发后 worker 不会再回包，
     // 与看门狗同语义收敛到 failWorker（reject 在途 + 上报 + 短路后续请求）
@@ -135,6 +157,9 @@ export class HighlightClient {
     for (const [, p] of [...this.pending]) p.reject(err);
     this.pending.clear();
     this.pendingByLang.clear();
+    for (const [, po] of [...this.pendingOutline]) po.reject(err);
+    this.pendingOutline.clear();
+    this.pendingOutlineByLang.clear();
   }
 
   /**
@@ -163,6 +188,8 @@ export class HighlightClient {
   cancelAll(): void {
     for (const id of [...this.pending.keys()]) this.cancel(id);
     this.pendingByLang.clear();
+    for (const id of [...this.pendingOutline.keys()]) this.cancelOutline(id);
+    this.pendingOutlineByLang.clear();
   }
 
   /** 取消全部请求并终止 worker。 */
@@ -181,5 +208,32 @@ export class HighlightClient {
     if (!p) return;
     this.pending.delete(id);
     p.reject(new HighlightCanceledError());
+  }
+
+  private cancelOutline(id: number): void {
+    const p = this.pendingOutline.get(id);
+    if (!p) return;
+    this.pendingOutline.delete(id);
+    p.reject(new HighlightCanceledError());
+  }
+
+  /**
+   * 代码大纲。与 highlight 同款三层失效（disposed/initFailed 短路 + 同 lang 未完成请求取消）
+   * 但独立 pending 面：大纲请求不取消高亮请求、反之亦然（fire-and-forget 消费，T2 renderCode
+   * parse 完成后投递一次）。worker 报错或请求被取消时 Promise reject（调用方 catch 静默空）。
+   */
+  outline(text: string, lang: string): Promise<OutlineEntry[]> {
+    if (this.disposed) return Promise.reject(new HighlightCanceledError());
+    if (this.initFailed) {
+      return Promise.reject(new Error(`highlight worker 不可用：${this.initFailureReason}`));
+    }
+    const prevId = this.pendingOutlineByLang.get(lang);
+    if (prevId !== undefined) this.cancelOutline(prevId);
+    const id = this.nextId++;
+    this.pendingOutlineByLang.set(lang, id);
+    return new Promise<OutlineEntry[]>((resolve, reject) => {
+      this.pendingOutline.set(id, { resolve, reject });
+      this.worker.postMessage({ kind: 'outline', id, text, lang });
+    });
   }
 }

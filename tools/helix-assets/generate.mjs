@@ -202,6 +202,40 @@ export function collectThemes(themesDir) {
 }
 
 /**
+ * tags 补源表（代码大纲查询，2026-10-31 code-outline Task 1）：与 themesDir 同源的 helix
+ * 检出为上游（本机直接拷贝，零网络零缓存——commit 仅记录源时点供溯源）。
+ * nvim-treesitter 不可作为 tags 上游：master（cf12346a，2026-11-01 实测）已整体移除
+ * tags.scm 且 git 历史不可及（commits?path=... 返回空，疑 force-push 重写）。
+ * langs 为大纲首版目标语言（typescript/tsx/bash/zig/lua/c）+ 其继承父共享目录
+ * （_typescript/_javascript/_jsx——typescript 声明 `; inherits: _typescript,ecma`、
+ * tsx 声明 `; inherits: _jsx,_typescript,ecma`，父目录无 tags.scm 时链断）；
+ * 上游缺 json/shell（helix runtime/queries 实测无此二语言 tags.scm，shell 由 bash 覆盖），如实缺补。
+ */
+export const TAGS_SOURCES = {
+  queriesDir: process.env.VV_TAGS_QUERIES_DIR ?? '/share/rw/repo/github/helix-editor/helix/runtime/queries',
+  commit: 'ba40e547426b0f9896c8bdc699a4ab11f2b37dbc',
+  langs: ['typescript', 'tsx', '_typescript', '_javascript', '_jsx', 'bash', 'zig', 'lua', 'c'],
+};
+
+/**
+ * 拷贝 tags.scm 到产物 queries/{lang}/（存在即拷覆盖、缺目录静默跳过）。
+ * 必须在 copyQueries 之后调用（其 rmSync 全量重建会清掉已拷文件）。
+ * 返回实拷语言清单（守门测试与日志用）。
+ */
+export function copyTags(srcQueriesDir = TAGS_SOURCES.queriesDir, outDir = SOURCES.outDir, langs = TAGS_SOURCES.langs) {
+  const copied = [];
+  for (const lang of langs) {
+    const src = path.join(srcQueriesDir, lang, 'tags.scm');
+    if (!fs.existsSync(src)) continue; // 上游缺该语言：静默跳过（如实缺补，不阻塞生成）
+    const destDir = path.join(outDir, 'queries', lang);
+    fs.mkdirSync(destDir, { recursive: true });
+    fs.copyFileSync(src, path.join(destDir, 'tags.scm'));
+    copied.push(lang);
+  }
+  return copied;
+}
+
+/**
  * 查询补丁：markpad queries 原样拷贝后的针对性修正（源更新导致 find 失配时 copyQueries
  * 报错退出、提醒人工复核，不静默跳过）。每项 { file, reason, find, replace }，find 须唯一命中。
  *
@@ -265,11 +299,13 @@ export function generateAll({
   writeJson(path.join(outDir, 'themes.json'), themes);
 
   const queryDirCount = copyQueries(queriesDir, outDir);
+  // tags 补源须在 copyQueries 之后（全量重建会清掉已拷文件）
+  const copiedTags = copyTags(TAGS_SOURCES.queriesDir, outDir);
 
   console.log(
-    `[helix-assets] 生成完成: languages=${Object.keys(languages).length} themes=${Object.keys(themes).length} queryDirs=${queryDirCount} -> ${outDir}`,
+    `[helix-assets] 生成完成: languages=${Object.keys(languages).length} themes=${Object.keys(themes).length} queryDirs=${queryDirCount} tags=${copiedTags.length} -> ${outDir}`,
   );
-  return { languages: Object.keys(languages).length, themes: Object.keys(themes).length, queryDirCount };
+  return { languages: Object.keys(languages).length, themes: Object.keys(themes).length, queryDirCount, copiedTags };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

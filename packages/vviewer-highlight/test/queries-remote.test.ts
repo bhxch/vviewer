@@ -184,12 +184,14 @@ describe.skipIf(!grammarAssetsReady)('init 探针细口径（debug：query 逐�
       // init 四阶段依序（探针通道本身不因细口径改变）
       expect(events.slice(0, 4).map((e) => e.stage)).toEqual(['wasm-fetch', 'parser-init', 'assets', 'ready']);
       // 首次高亮触发 query 资产远程加载：每份文件 fetch 完成一帧（sh 别名规范化为 bash；
-      // bash 无 inherits，恰好两文件）。并发完成顺序不保证，按集合比较
+      // bash 无 inherits，白名单三文件——tags.scm 404 也出帧，语义是「fetch 已完成」）。
+      // 并发完成顺序不保证，按集合比较
       const r = await handler({ id: 1, text: 'echo "hello"', lang: 'sh' });
       expect(r.ok).toBe(true);
       expect(events.filter((e) => e.stage === 'query-loaded').map((e) => e.detail).sort()).toEqual([
         'bash/highlights.scm',
         'bash/injections.scm',
+        'bash/tags.scm',
       ]);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -294,5 +296,70 @@ describe.skipIf(!grammarAssetsReady)('remoteQueryLoader（200 text/html 兜底�
       engine.dispose();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  }, 30_000);
+});
+
+/**
+ * engine.outline（tags 查询 → 大纲条目）真实链路：queriesDir 目录扫描白名单含 tags.scm
+ * （python 现盘有 tags.scm，bash 无），Query 编译 + matches + pairsToOutline 配对全真实代码。
+ */
+describe.skipIf(!grammarAssetsReady)('TreeSitterEngine.outline（tags 查询 → 大纲条目）', () => {
+  let engine: TreeSitterEngine;
+
+  beforeAll(async () => {
+    engine = await TreeSitterEngine.create({
+      queriesDir: queriesAssetDir,
+      grammarsDir: path.join(staticDir, 'grammars'),
+      runtimeDir: staticDir,
+    });
+  }, 60_000);
+
+  afterAll(() => {
+    engine.dispose();
+  });
+
+  it('python 大纲：@definition 配对、line（0 起）、depth 栈式嵌套', async () => {
+    const src = 'CONST = 1\n\nclass Foo:\n    def method(self):\n        pass\n\ndef top_fn():\n    return 1\n';
+    const r = await engine.outline(src, 'python');
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const defs = r.entries.filter((e) => e.kind.startsWith('definition.'));
+    const row = (name: string) => defs.find((e) => e.name === name);
+    expect(defs.map((e) => [e.name, e.kind, e.line])).toContainEqual(['CONST', 'definition.constant', 0]);
+    expect(row('Foo')).toMatchObject({ kind: 'definition.class', line: 2, depth: 0 });
+    expect(row('method')).toMatchObject({ kind: 'definition.function', line: 3, depth: 1 });
+    expect(row('top_fn')).toMatchObject({ kind: 'definition.function', line: 6, depth: 0 });
+    // method 的 byte 范围嵌套于 Foo 的 class 定义内
+    expect(row('method')!.byteStart).toBeGreaterThan(row('Foo')!.byteStart);
+    expect(row('method')!.byteEnd).toBeLessThanOrEqual(row('Foo')!.byteEnd);
+  }, 30_000);
+
+  it('typescript 大纲：inherits 链（_typescript）展开后 @name 配对（helix 源形态：API 签名面）', async () => {
+    const src = 'interface Shape {\n  area(): number;\n}\n\nfunction impl(): void {}\n';
+    const r = await engine.outline(src, 'typescript');
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // helix 上游 typescript tags 本体为纯继承声明（实体在 _typescript）：interface 声明与
+    // 方法签名出条目；函数实现（function_declaration 非签名 pattern）不出——上游形态如实
+    const iface = r.entries.find((e) => e.name === 'Shape');
+    expect(iface).toMatchObject({ kind: 'definition.interface', line: 0, depth: 0 });
+    const area = r.entries.find((e) => e.name === 'area');
+    expect(area).toMatchObject({ kind: 'definition.method', line: 1, depth: 1 });
+  }, 30_000);
+
+  it('无 tags 查询的语言（bash）：ok:true + 空 entries，不阻断高亮', async () => {
+    const r = await engine.outline('echo "hello"', 'bash');
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.entries).toEqual([]);
+    const h = await engine.highlight('echo "hello"', 'bash');
+    expect(h.ok).toBe(true);
+  }, 30_000);
+
+  it('未知语言：ok:false（错误信息带语言名）', async () => {
+    const r = await engine.outline('x', '__no_such_lang__');
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error).toContain('__no_such_lang__');
   }, 30_000);
 });

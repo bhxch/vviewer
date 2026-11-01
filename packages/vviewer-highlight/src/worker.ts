@@ -1,6 +1,6 @@
 import { TreeSitterEngine, type EngineInitProgress, type GrammarTable } from './core-parse';
 import type { QueryFile } from './queries';
-import type { HighlightRequest, HighlightResponse } from './types';
+import type { HighlightRequest, HighlightResponse, OutlineRequest, OutlineResponse } from './types';
 
 /** Worker 初始化参数：核心引擎的全部配置（Node 传目录路径，浏览器可传 fetch 基础路径/虚拟映射/清单）。 */
 export interface WorkerInit {
@@ -14,13 +14,26 @@ export interface WorkerInit {
   maxInjectionDepth?: number;
 }
 
-/** 请求处理器：HighlightRequest → HighlightResponse（engine 固定 'tree-sitter'）。 */
-export type RequestHandler = (req: HighlightRequest) => Promise<HighlightResponse>;
+/** 请求处理器：HighlightRequest/OutlineRequest → HighlightResponse/OutlineResponse（engine 固定 'tree-sitter'）。 */
+export type RequestHandler = (req: HighlightRequest | OutlineRequest) => Promise<HighlightResponse | OutlineResponse>;
 
-/** 由引擎配置构造请求处理器（Worker 与测试共用）。 */
+/** 由引擎配置构造请求处理器（Worker 与测试共用）。kind=outline 分流 engine.outline；
+ *  未知 kind 不崩：回 ok:false 错误响应（不透传 engine）。 */
 export async function createHandler(engine: TreeSitterEngine): Promise<RequestHandler> {
   return async (req) => {
-    const r = await engine.highlight(req.text, req.lang, req.injectionsDepth ?? 0, req.chunk);
+    if ((req as { kind?: string }).kind === 'outline') {
+      const r = await engine.outline(req.text, req.lang);
+      return r.ok ? { id: req.id, ok: true, entries: r.entries } : { id: req.id, ok: false, error: r.error };
+    }
+    if ((req as { kind?: string }).kind !== undefined) {
+      return { id: req.id, ok: false, error: `未知请求 kind: ${(req as { kind: string }).kind}` };
+    }
+    const r = await engine.highlight(
+      req.text,
+      req.lang,
+      (req as HighlightRequest).injectionsDepth ?? 0,
+      (req as HighlightRequest).chunk,
+    );
     return r.ok
       ? { id: req.id, ok: true, intervals: r.intervals, engine: 'tree-sitter' }
       : { id: req.id, ok: false, error: r.error, engine: 'tree-sitter' };
@@ -69,7 +82,7 @@ export interface InitOkFrame {
 /** Worker 上下文（仅真实 Worker/jsdom 环境存在 self）。 */
 type WorkerCtx = {
   onmessage: ((ev: MessageEvent) => void) | null;
-  postMessage: (msg: HighlightResponse | InitProgressFrame | InitOkFrame) => void;
+  postMessage: (msg: HighlightResponse | OutlineResponse | InitProgressFrame | InitOkFrame) => void;
 };
 
 /** client → worker 的首条握手消息（与 serveWorker 协议对齐）。 */
@@ -97,9 +110,9 @@ export function serveWorker(): void {
   const ctx = workerCtx();
   if (!ctx) return;
   let handler: Promise<RequestHandler> | null = null;
-  const queued: HighlightRequest[] = [];
+  const queued: Array<HighlightRequest | OutlineRequest> = [];
 
-  const postError = (req: HighlightRequest, e: unknown): void => {
+  const postError = (req: HighlightRequest | OutlineRequest, e: unknown): void => {
     ctx.postMessage({
       id: req.id,
       ok: false,
@@ -107,7 +120,7 @@ export function serveWorker(): void {
       engine: 'tree-sitter',
     });
   };
-  const dispatch = async (req: HighlightRequest, h: RequestHandler): Promise<void> => {
+  const dispatch = async (req: HighlightRequest | OutlineRequest, h: RequestHandler): Promise<void> => {
     try {
       ctx.postMessage(await h(req));
     } catch (e) {
@@ -116,7 +129,7 @@ export function serveWorker(): void {
   };
 
   ctx.onmessage = (ev: MessageEvent) => {
-    const data = ev.data as { kind?: string; debug?: boolean } & HighlightRequest & WorkerInit;
+    const data = ev.data as { kind?: string; debug?: boolean; id?: number; text?: string; lang?: string } & WorkerInit;
     if (data.kind === 'init') {
       if (handler) return; // 忽略重复 init
       // init-progress 探针（Task 9 spike 取证面）：data 解构为 init 配置与 debug 开关两份，
@@ -164,7 +177,7 @@ export function serveWorker(): void {
       void handler.catch(() => {});
       return;
     }
-    const req = data as HighlightRequest;
+    const req = data as unknown as HighlightRequest | OutlineRequest;
     if (handler) void handler.then((h) => dispatch(req, h)).catch((e: unknown) => postError(req, e));
     else queued.push(req);
   };

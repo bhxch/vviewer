@@ -1,6 +1,7 @@
 import { Parser, Language, Query, type Tree } from 'web-tree-sitter';
 import { expandQuery, expandQueryAsync, type AsyncQuerySource, type ExpandedQuery, type QueryAssets, type QueryFile } from './queries';
-import type { HighlightChunk, HighlightInterval } from './types';
+import { pairsToOutline } from './outline';
+import type { HighlightChunk, HighlightInterval, OutlineEntry } from './types';
 
 /**
  * 浏览器可打包：本模块零顶层 node 内建 import。
@@ -21,6 +22,11 @@ export type GrammarTable = Record<string, { file: string; aliases?: string[]; ba
 /** highlight 的结果：成功带全量区间（调用方负责去重叠渲染），失败带错误信息。 */
 export type HighlightResult =
   | { ok: true; intervals: HighlightInterval[] }
+  | { ok: false; error: string };
+
+/** outline 的结果：成功带大纲条目（无 tags 查询的语言为空数组，非错误），失败带错误信息。 */
+export type OutlineResult =
+  | { ok: true; entries: OutlineEntry[] }
   | { ok: false; error: string };
 
 /**
@@ -58,11 +64,12 @@ export interface EngineOptions {
   maxInjectionDepth?: number;
 }
 
-/** 单语言就绪后的查询资产（惰性编译，随 engine 生命周期缓存）。 */
+/** 单语言就绪后的查询资产（惰性编译，随 engine 生命周期缓存）。tags 为大纲查询（无 tags 语言为 null）。 */
 interface PreparedLanguage {
   language: Language;
   highlights: Query | null;
   injections: Query | null;
+  tags: Query | null;
 }
 
 /** Node fs 的最小结构类型（避免依赖 @types/node；运行时经变量化动态 import 获取）。 */
@@ -255,6 +262,43 @@ export class TreeSitterEngine {
   }
 
   /**
+   * 代码大纲：全文本 parse 一次 → tags 查询 matches → capture 配对纯函数（pairsToOutline）。
+   * 与 highlight 相互独立（大纲为锦上添花：语言不可用/无 tags 查询/查询失败均不抛出——
+   * ok:false 或空 entries，由调用方 fire-and-forget 静默空）。
+   * - 无 tags 查询（tags.scm 缺失或展开为空）→ ok:true + 空数组（可解析但无大纲）。
+   * - 行号（0 起）在 engine 侧按全文线性扫行填入（全文已知，见 pairsToOutline）。
+   * - lang 可传 manifest 别名（js/sh/py 等），与 highlight 同款规范化。
+   */
+  async outline(text: string, lang: string): Promise<OutlineResult> {
+    try {
+      const prepared = await this.prepare(lang);
+      if (!prepared) return { ok: false, error: `语言 ${lang} 无可用 grammar 或查询` };
+      if (!prepared.tags) return { ok: true, entries: [] };
+
+      const parser = this.parser;
+      parser.setLanguage(prepared.language);
+      const tree = parser.parse(text);
+      if (!tree) return { ok: false, error: `语言 ${lang} 解析失败` };
+      try {
+        // matches 先投影为解耦形态（capture 仅取 name/node 三字段），再交纯函数配对；
+        // 投影须在 tree.delete() 前（wasm 节点访问失效前取值）
+        const matches = prepared.tags.matches(tree.rootNode, { timeoutMicros: queryBudget(text) });
+        const decoupled = matches.map((m) =>
+          m.captures.map((c) => ({
+            name: c.name,
+            node: { startIndex: c.node.startIndex, endIndex: c.node.endIndex, text: c.node.text },
+          })),
+        );
+        return { ok: true, entries: pairsToOutline(decoupled, text) };
+      } finally {
+        tree.delete();
+      }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /**
    * 注入递归：injections 查询匹配 → 解析子语言 → 子文本递归高亮 → 偏移合并。
    * 未知语言前置短路（warn 每语言一次）：缺失 grammar 的注入目标（如 comment/jsdoc/graphql）
    * 在真实文件里逐注释出现，递归失败路径的逐次告警会刷屏。
@@ -300,6 +344,7 @@ export class TreeSitterEngine {
       void p.then((lang) => {
         lang?.highlights?.delete();
         lang?.injections?.delete();
+        lang?.tags?.delete();
       });
     }
     this.prepared.clear();
@@ -350,7 +395,12 @@ export class TreeSitterEngine {
       if (scm.trim() === '') return null;
       return new Query(language, scm);
     };
-    return { language, highlights: toQuery(expanded.highlights), injections: toQuery(expanded.injections) };
+    return {
+      language,
+      highlights: toQuery(expanded.highlights),
+      injections: toQuery(expanded.injections),
+      tags: toQuery(expanded.tags),
+    };
   }
 
   /** 语言名 → grammar 清单条目（别名路径同样返回条目，含 base）：精确键 → aliases → null。 */
@@ -389,7 +439,8 @@ function shebangLanguage(text: string): string | null {
 }
 
 /**
- * fetch 版查询来源（浏览器 Worker 端）：按需请求 `${base}${lang}/highlights.scm` 与 `injections.scm`。
+ * fetch 版查询来源（浏览器 Worker 端）：按需请求 `${base}${lang}/highlights.scm`、
+ * `injections.scm` 与 `tags.scm`（tags 为大纲查询，缺失时 undefined，不阻断高亮）。
  * 目录布局与 assets/queries 一致；请求结果（含 404 的 null）按语言缓存，语言不变则只请求一次。
  * onLoaded（可选，Task 4 细口径）：每份文件 fetch 完成上报一次（`${lang}/${name}`，含
  * 404/SPA 兜底缺失/网络失败——帧语义是「fetch 已完成」，缺席才是悬挂）；缺省 undefined
@@ -417,8 +468,11 @@ function remoteQueryLoader(base: string, onLoaded?: (file: string) => void): Asy
           onLoaded?.(`${lang}/${name}`);
         }
       };
-      p = Promise.all([read('highlights.scm'), read('injections.scm')]).then(([highlights, injections]) =>
-        highlights === undefined && injections === undefined ? null : { highlights, injections },
+      p = Promise.all([read('highlights.scm'), read('injections.scm'), read('tags.scm')]).then(
+        ([highlights, injections, tags]) =>
+          highlights === undefined && injections === undefined && tags === undefined
+            ? null
+            : { highlights, injections, tags },
       );
       cache.set(lang, p);
     }
@@ -426,7 +480,7 @@ function remoteQueryLoader(base: string, onLoaded?: (file: string) => void): Asy
   };
 }
 
-/** 目录扫描构建查询资产：子目录名即语言名，读 highlights.scm / injections.scm（Node 专用）。 */
+/** 目录扫描构建查询资产：子目录名即语言名，读 highlights.scm / injections.scm / tags.scm（Node 专用）。 */
 async function loadQueriesFromDir(dir: string): Promise<QueryAssets> {  const fs = await getFs();
   const assets: QueryAssets = new Map();
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -435,7 +489,11 @@ async function loadQueriesFromDir(dir: string): Promise<QueryAssets> {  const fs
       const p = joinPath(joinPath(dir, entry.name), name);
       return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : undefined;
     };
-    assets.set(entry.name, { highlights: read('highlights.scm'), injections: read('injections.scm') });
+    assets.set(entry.name, {
+      highlights: read('highlights.scm'),
+      injections: read('injections.scm'),
+      tags: read('tags.scm'),
+    });
   }
   return assets;
 }

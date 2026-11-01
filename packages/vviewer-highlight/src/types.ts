@@ -37,3 +37,36 @@ export interface HighlightResponse {
   error?: string;
   engine?: 'tree-sitter' | 'hljs';
 }
+
+/**
+ * 代码大纲条目（tags.scm capture 配对产物，T2/T3 消费契约）：
+ * - name/kind：符号名与 capture 全名（'definition.function' / 'reference.call'；
+ *   信息无损，渲染端自行映射短名与过滤引用）。
+ * - line：0 起，从 byteStart 对行号（engine 侧全文已知，线性扫行）。
+ * - byteStart/byteEnd：UTF-16 偏移，取 definition/reference 节点范围（左闭右开）。
+ * - depth：栈式嵌套深度（class 0 / 其内 function 1），供缩进树渲染。
+ */
+export interface OutlineEntry {
+  name: string;
+  kind: string;
+  line: number;
+  byteStart: number;
+  byteEnd: number;
+  depth: number;
+}
+
+/** outline 请求（kind 判别字段，与 init/HighlightRequest 共用同一消息通道；id 与 highlight 共享单调空间）。 */
+export interface OutlineRequest {
+  kind: 'outline';
+  id: number;
+  text: string;
+  lang: string;
+}
+
+/** outline 响应。ok:false 时 error 有值（大纲为锦上添花，调用方 catch 静默空）。 */
+export interface OutlineResponse {
+  id: number;
+  ok: boolean;
+  entries?: OutlineEntry[];
+  error?: string;
+}

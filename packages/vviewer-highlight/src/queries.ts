@@ -1,7 +1,8 @@
-/** 单个语言目录的查询资产（正文文本，含头部注释）。 */
+/** 单个语言目录的查询资产（正文文本，含头部注释）。tags 为代码大纲查询（可选，无大纲语言缺省）。 */
 export interface QueryFile {
   highlights?: string;
   injections?: string;
+  tags?: string;
 }
 
 /** 语言名 → 查询资产（expandQuery 的 assets 参数类型）。 */
@@ -11,6 +12,7 @@ export type QueryAssets = Map<string, QueryFile>;
 export interface ExpandedQuery {
   highlights: string;
   injections: string;
+  tags: string;
 }
 
 interface ParsedHeader {
@@ -69,7 +71,7 @@ export function expandQuery(assets: Map<string, QueryFile>, lang: string): Expan
     const cached = cache.get(name);
     if (cached) return cached;
     const file = assets.get(name);
-    if (!file) return { highlights: '', injections: '' };
+    if (!file) return { highlights: '', injections: '', tags: '' };
     if (onPath.has(name)) throw new Error('循环继承');
 
     const path = new Set(onPath);
@@ -78,7 +80,11 @@ export function expandQuery(assets: Map<string, QueryFile>, lang: string): Expan
     // inherits 声明优先读 highlights 头部，缺省再看 injections 头部
     const injectionHeader = parseHeader(file.injections);
     const parents = header.parents.length > 0 ? header.parents : injectionHeader.parents;
+    // tags 继承链：tags 头部自有声明最优先；无声明回落 highlights/injections 链的展开结果
+    // （typescript 无自有 tags 时沿链继承 javascript 的 tags；复用 parts 不重复递归/告警）
+    const tagsHeader = parseHeader(file.tags);
     const parts: ExpandedQuery[] = [];
+    const tagsParts: ExpandedQuery[] = [];
     for (const parent of parents) {
       if (!assets.has(parent)) {
         console.warn(`[highlight] 缺少父查询目录: ${parent}（被 ${name} 继承，已跳过）`);
@@ -86,12 +92,23 @@ export function expandQuery(assets: Map<string, QueryFile>, lang: string): Expan
       }
       parts.push(resolve(parent, path));
     }
+    for (const parent of tagsHeader.parents) {
+      if (!assets.has(parent)) {
+        console.warn(`[highlight] 缺少父查询目录: ${parent}（被 ${name} 的 tags 继承，已跳过）`);
+        continue;
+      }
+      tagsParts.push(resolve(parent, path));
+    }
+    const tagsSource = tagsHeader.parents.length > 0 ? tagsParts : parts;
 
     const merged: ExpandedQuery = {
       highlights: [...parts.map((p) => p.highlights), header.body]
         .filter((s) => s !== '')
         .join('\n'),
       injections: [...parts.map((p) => p.injections), injectionHeader.body]
+        .filter((s) => s !== '')
+        .join('\n'),
+      tags: [...tagsSource.map((p) => p.tags), tagsHeader.body]
         .filter((s) => s !== '')
         .join('\n'),
     };
@@ -132,12 +149,16 @@ export async function expandQueryAsync(get: AsyncQuerySource, lang: string): Pro
     path.add(name);
     const promise = (async (): Promise<ExpandedQuery> => {
       const file = await loadFile(name);
-      if (!file) return { highlights: '', injections: '' };
+      if (!file) return { highlights: '', injections: '', tags: '' };
 
       const header = parseHeader(file.highlights);
       const injectionHeader = parseHeader(file.injections);
       const parents = header.parents.length > 0 ? header.parents : injectionHeader.parents;
+      // tags 继承链（与同步版一致）：tags 头部自有声明最优先；无声明回落 highlights/injections
+      // 链的展开结果（复用 parts 不重复递归/告警）
+      const tagsHeader = parseHeader(file.tags);
       const parts: ExpandedQuery[] = [];
+      const tagsParts: ExpandedQuery[] = [];
       for (const parent of parents) {
         if (!(await loadFile(parent))) {
           console.warn(`[highlight] 缺少父查询目录: ${parent}（被 ${name} 继承，已跳过）`);
@@ -145,12 +166,23 @@ export async function expandQueryAsync(get: AsyncQuerySource, lang: string): Pro
         }
         parts.push(await resolve(parent, path));
       }
+      for (const parent of tagsHeader.parents) {
+        if (!(await loadFile(parent))) {
+          console.warn(`[highlight] 缺少父查询目录: ${parent}（被 ${name} 的 tags 继承，已跳过）`);
+          continue;
+        }
+        tagsParts.push(await resolve(parent, path));
+      }
+      const tagsSource = tagsHeader.parents.length > 0 ? tagsParts : parts;
 
       return {
         highlights: [...parts.map((p) => p.highlights), header.body]
           .filter((s) => s !== '')
           .join('\n'),
         injections: [...parts.map((p) => p.injections), injectionHeader.body]
+          .filter((s) => s !== '')
+          .join('\n'),
+        tags: [...tagsSource.map((p) => p.tags), tagsHeader.body]
           .filter((s) => s !== '')
           .join('\n'),
       };

@@ -38,13 +38,18 @@ export type {
   HighlightInterval,
   HighlightRequest,
   HighlightResponse,
+  OutlineEntry,
+  OutlineRequest,
+  OutlineResponse,
 } from './types';
+export { pairsToOutline, type OutlineCapture, type OutlineMatch } from './outline';
 export {
   TreeSitterEngine,
   type EngineInitProgress,
   type EngineOptions,
   type GrammarTable,
   type HighlightResult,
+  type OutlineResult,
   type VirtualQueries,
 } from './core-parse';
 export { HighlightClient, HighlightCanceledError } from './client';

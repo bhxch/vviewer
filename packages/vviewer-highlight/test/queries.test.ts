@@ -40,7 +40,7 @@ describe('expandQuery（查询继承展开器）', () => {
       ['p', { highlights: 'PH', injections: 'PI' }],
       ['c', { highlights: '; inherits: p\nCH', injections: '; inherits: p\nCI' }],
     ]);
-    expect(expandQuery(assets, 'c')).toEqual({ highlights: 'PH\nCH', injections: 'PI\nCI' });
+    expect(expandQuery(assets, 'c')).toEqual({ highlights: 'PH\nCH', injections: 'PI\nCI', tags: '' });
   });
 
   it('环继承抛 Error("循环继承")', () => {
@@ -97,7 +97,7 @@ describe('expandQueryAsync（fetch 版查询来源）', () => {
       ['typescript', { highlights: '; inherits: ecma\nTS', injections: '; inherits: ecma\nTI' }],
     ]);
     const out = await expandQueryAsync(asyncSource(assets), 'typescript');
-    expect(out).toEqual({ highlights: 'E\nTS', injections: 'EI\nTI' });
+    expect(out).toEqual({ highlights: 'E\nTS', injections: 'EI\nTI', tags: '' });
   });
 
   it('环继承抛 Error("循环继承")', async () => {

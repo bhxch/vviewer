@@ -1,9 +1,18 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { readFileSync, readdirSync, existsSync, statSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, statSync, mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BUILTIN_PALETTE, collectThemes, parseLanguages, parseTheme, QUERY_PATCHES, applyQueryPatches } from '../generate.mjs';
+import {
+  BUILTIN_PALETTE,
+  collectThemes,
+  copyTags,
+  parseLanguages,
+  parseTheme,
+  QUERY_PATCHES,
+  TAGS_SOURCES,
+  applyQueryPatches,
+} from '../generate.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../..');
@@ -160,6 +169,58 @@ describe('生成产物（packages/vviewer-highlight/assets）', () => {
     // ecma 是继承根（首行为普通注释）；其子 typescript 在头部注释区声明 inherits
     const tsHead = readFileSync(path.join(queriesDir, 'typescript/highlights.scm'), 'utf8').split('\n', 5);
     expect(tsHead.some((l) => l.trim().startsWith(';') && l.includes('inherits:'))).toBe(true);
+  });
+});
+
+describe('copyTags（tags 补源，helix 检出上游）', () => {
+  it('上游存在即拷覆盖，缺目录静默跳过（json/shell/_jsx 上游无 tags.scm）', () => {
+    const srcDir = mkdtempSync(path.join(tmpdir(), 'vv-tags-src-'));
+    const outDir = mkdtempSync(path.join(tmpdir(), 'vv-tags-out-'));
+    for (const lang of ['typescript', 'bash']) {
+      mkdirSync(path.join(srcDir, lang), { recursive: true });
+      writeFileSync(path.join(srcDir, lang, 'tags.scm'), `// tags of ${lang}\n`);
+    }
+    // 目标目录不存在（typescript 首拷）与已存在（bash 覆盖）两态
+    mkdirSync(path.join(outDir, 'queries', 'bash'), { recursive: true });
+    writeFileSync(path.join(outDir, 'queries', 'bash', 'tags.scm'), 'old');
+
+    const copied = copyTags(srcDir, outDir, ['typescript', 'bash', 'json', 'shell']);
+    expect(copied).toEqual(['typescript', 'bash']);
+    expect(readFileSync(path.join(outDir, 'queries', 'typescript', 'tags.scm'), 'utf8')).toBe('// tags of typescript\n');
+    expect(readFileSync(path.join(outDir, 'queries', 'bash', 'tags.scm'), 'utf8')).toBe('// tags of bash\n');
+  });
+});
+
+describe('tags 资产（代码大纲补源产物，helix pin ba40e547）', () => {
+  // 基线：markpad 源原带 50 份 + Task 1 补源新增 7 份（typescript/tsx/bash/zig/_typescript/_javascript，
+  // 上游缺 _jsx/json/shell；实拷 8——lua/c 为覆盖更新不计新增目录）。仅统计一层目录。
+  const tagsBaseline = 57;
+
+  it('queries/ 下含 tags.scm 的目录数 ≥ 基线', () => {
+    const queriesDir = path.join(assetsDir, 'queries');
+    const tagsDirs = readdirSync(queriesDir).filter((d) =>
+      existsSync(path.join(queriesDir, d, 'tags.scm')),
+    );
+    expect(tagsDirs.length).toBeGreaterThanOrEqual(tagsBaseline);
+  });
+
+  it('抽查 typescript：inherits 头（_typescript,ecma）+ 继承父 _typescript 的捕获形态', () => {
+    const text = readFileSync(path.join(assetsDir, 'queries/typescript/tags.scm'), 'utf8');
+    // typescript/tags.scm 本体是纯继承声明文件（body 空），实体查询在父目录 _typescript
+    const head = text.split('\n', 6);
+    expect(head.some((l) => l.trim().startsWith(';') && l.includes('inherits:'))).toBe(true);
+    const parent = readFileSync(path.join(assetsDir, 'queries/_typescript/tags.scm'), 'utf8');
+    expect(parent).toContain('@name');
+    expect(parent).toContain('@definition.function');
+  });
+
+  it('抽查 bash：@definition.function 捕获形态（上游自含无继承）', () => {
+    const text = readFileSync(path.join(assetsDir, 'queries/bash/tags.scm'), 'utf8');
+    expect(text).toContain('@definition.function');
+  });
+
+  it('TAGS_SOURCES pin commit 固定（禁分支名，溯源用）', () => {
+    expect(TAGS_SOURCES.commit).toMatch(/^[0-9a-f]{40}$/);
   });
 });
 
