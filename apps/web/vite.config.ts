@@ -189,6 +189,31 @@ function diagramEngineChunk(): Plugin {
   return {
     name: 'diagram-engine-chunk',
     config: () => ({
+      // worker 构建图（vite 独立 rolldown 构建）：gitWorker 入口内的 isomorphic-git
+      // 动态 import——client 侧 codeSplitting groups 够不到 worker 图，分组/带名须在
+      // 此复刻。git-engine 特判落 _app/immutable/chunks/（与 client 侧 git-engine 同位：
+      // immutable 缓存头 + tools/diagram-budget.mjs 只扫该目录 + globIgnores 排除
+      // precache），实测 kit3 默认 worker chunk 基座为 _app/immutable/workers/chunks/
+      //（build/index.js:275）——默认分支原样复刻，避免其余 worker chunk 偏离 kit 约定
+      //（本函数整体替换 kit 默认，必须自兜底）。
+      worker: {
+        rolldownOptions: {
+          output: {
+            chunkFileNames(chunkInfo) {
+              if (chunkInfo.name === 'git-engine') return '_app/immutable/chunks/git-engine-[hash].js';
+              return '_app/immutable/workers/chunks/[hash].js';
+            },
+            codeSplitting: {
+              groups: [
+                {
+                  name: 'git-engine',
+                  test: /[\\/]node_modules[\\/](isomorphic-git|async-lock|clean-git-ref|crc-32|diff3|ignore|minimisted|pify|sha\.js|simple-get|buffer)[\\/]/
+                }
+              ]
+            }
+          }
+        }
+      },
       environments: {
         client: {
           build: {
@@ -197,6 +222,10 @@ function diagramEngineChunk(): Plugin {
                 chunkFileNames(chunkInfo) {
                   if (chunkInfo.name === 'sveltekit-manifest') return '_app/manifest.js';
                   if (chunkInfo.name === 'diagram-engines') return '_app/immutable/chunks/diagram-engines-[hash].js';
+                  // git 信息面板（2026-10-31 spec）：isomorphic-git 引擎 chunk（worker 内
+                  // 动态 import 拉取），带名特判同 diagram-engines——precache 排除与预算
+                  // 门禁（tools/diagram-budget.mjs）按该前缀识别
+                  if (chunkInfo.name === 'git-engine') return '_app/immutable/chunks/git-engine-[hash].js';
                   return '_app/immutable/chunks/[hash].js';
                 },
                 codeSplitting: {
@@ -207,6 +236,18 @@ function diagramEngineChunk(): Plugin {
                       // graphre 是 nomnoml 的解析器依赖（UMD require），随 nomnoml 归堆——
                       // 否则落默认共享 chunk，与引擎组拆两包（台账 4-2）
                       test: /[\\/]node_modules[\\/](@viz-js[\\/]viz|nomnoml|graphre)[\\/]/
+                    },
+                    {
+                      name: 'git-engine',
+                      // isomorphic-git 及其独占传递依赖归堆（pnpm-lock 2026-11 实测：表中
+                      // 各包仅 isogit 一家消费）。pako@1.0.11 与 readable-stream@2 为
+                      // jszip（zip 渲染路径 vviewer-render-archive/doc）共享——绝不可入组：
+                      // 组产物 git-engine-*.js 不进 precache，jszip 静态依赖连坐会把 zip
+                      // 路径绑到非 precache chunk 上（离线 zip 打开断链）；二者留默认共享
+                      // chunk 维持 precache 地位（增量 ~40KB，build 后 rg 复核落组）。
+                      // buffer 为 gitIso.ts 的 Buffer shim 独占依赖（isogit 浏览器构建引用
+                      // 裸 Buffer），随组懒加载不进 precache。
+                      test: /[\\/]node_modules[\\/](isomorphic-git|async-lock|clean-git-ref|crc-32|diff3|ignore|minimisted|pify|sha\.js|simple-get|buffer)[\\/]/
                     }
                   ]
                 }
@@ -292,7 +333,10 @@ export default defineConfig({
         // 泛化组——客户端产物内另有 katex 20 件 KaTeX_*.woff（~330KB），泛化 woff 会
         // 全数误收进 precache。`*` 覆盖 vite hash 中缀（seti.<hash>.woff）。
         globPatterns: ['**/*.{js,css,woff2,json}', '**/seti.*.woff'],
-        globIgnores: ['**/node_modules/**/*', 'sw.js', 'workbox-*.js', '**/diagram-engines-*.js'],
+        // 末项为 git 引擎 chunk 排除（2026-10-31 git 信息面板 spec）：isomorphic-git 经
+        // codeSplitting groups 落 git-engine-*.js，按需加载不进 precache（同
+        // diagram-engines 语义，膨胀防护 + 预算门禁 tools/diagram-budget.mjs 计账）。
+        globIgnores: ['**/node_modules/**/*', 'sw.js', 'workbox-*.js', '**/diagram-engines-*.js', '**/git-engine-*.js'],
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/^\/api\//],
         // BUG-15：vite-plugin-pwa 生成 precache manifest 的时点早于 SvelteKit

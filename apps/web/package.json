@@ -20,6 +20,8 @@
     "@bhxch/vviewer-render-doc": "workspace:*",
     "@bhxch/vviewer-render-media": "workspace:*",
     "@bhxch/vviewer-render-text": "workspace:*",
+    "buffer": "^6.0.3",
+    "isomorphic-git": "^1.44.8",
     "katex": "^0.19.0",
     "libarchive.js": "^2.0.2"
   },
