@@ -2,7 +2,7 @@
   import { untrack } from 'svelte';
   import type { RenderedInstance, TocEntry, ComputeWhere } from '@bhxch/vviewer-core';
   import { showErrorCard } from '@bhxch/vviewer-core';
-  import { isAbortError } from '@bhxch/vviewer-render-text';
+  import { isAbortError, TREE_SITTER_MAX_BYTES } from '@bhxch/vviewer-render-text';
   import type { CodeEngine, CodeFileMeta } from '@bhxch/vviewer-render-text';
   import type { OutlineEntry } from '@bhxch/vviewer-highlight';
   import type { MarkdownEngineState } from '@bhxch/vviewer-render-text/markdown/markdownRenderer';
@@ -295,9 +295,10 @@ import SearchPanel from './SearchPanel.svelte';
   // → dataset.line（归一域 0 起）→ blame 缓存按行查询 → fixed 浮层。
   // 仅全量 code 实例：firstVisibleLine 契约面（render-text client.ts——窗口实例
   // 缺席，与大纲滚动跟随同款「仅全量」先例；markdown/hex/错误卡无此 API 同门排除）
-  // 且 ≤2MB（tree-sitter 整文件域上限——spec §3.2「仅全量 parse 路径（≤2MB）」，>2MB
-  // lazy 路径无 hover；常量与 render-text strategy.ts 的 TREE_SITTER_MAX_BYTES 同值，
-  // 包面不改故就地复制，报告备案）。
+// 且 ≤2MB（tree-sitter 整文件域上限——spec §3.2「仅全量 parse 路径（≤2MB）」，>2MB
+// lazy 路径无 hover；常量单源 render-text strategy.ts 的 TREE_SITTER_MAX_BYTES——经
+// 包入口 façade 的 export * 链已在 "." 导出面上，fixwave 终审 Minor 收敛 import，
+// 就地复制常量作废）。
   // 懒查：首次 hover 触发全文件 blame（worker 计算 + busy 态 + 实例级缓存）；缓存
   // 生命周期 = 渲染实例（rev 重渲染换实例即失效，内容代一致性免 HEAD 比对）。
   // 收层：scrollHost scroll 捕获即收 / 指针离场 / Git 段退出与 tab 切换随本 effect
@@ -325,7 +326,7 @@ import SearchPanel from './SearchPanel.svelte';
     if (typeof firstLine !== 'function') return;
     const readMeta = (inst as { getMeta?: () => { size?: number } }).getMeta;
     const size = typeof readMeta === 'function' ? readMeta.call(inst)?.size : undefined;
-    if (typeof size !== 'number' || size > 2 * 1024 * 1024) return;
+    if (typeof size !== 'number' || size > TREE_SITTER_MAX_BYTES) return;
     const pre = (inst as RenderedInstance & { getScrollHost(): HTMLElement }).getScrollHost();
     if (!pre) return;
     const t0 = tab;
