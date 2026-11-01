@@ -16,7 +16,7 @@
   import { mergeAbortSignals } from './mergeAbortSignals';
   import { dispatcher, registry, cancelMarkdownRemote } from './viewer';
   import { cancelHighlight } from './highlightClient';
-  import { probeGitAvailability, dirOf } from './git/gitProbe';
+  import { probeGitAvailability } from './git/gitProbe';
   import { ensureGitClient, type GitBlameLine } from './git/gitClient';
   import { BLAME_MAX_COMMITS, UNCOMMITTED_SHA } from './git/gitDiff';
   import { relativeDate, repoRelPath, subjectOf } from './git/gitUi';
@@ -36,7 +36,7 @@ import SearchPanel from './SearchPanel.svelte';
     tab: Tab | null;
     ontoc?: (entries: TocEntry[]) => void;
     onoutline?: (entries: OutlineEntry[]) => void;
-    ongitAvailable?: (a: { repoDir: string; fileDir: string } | null) => void;
+    ongitAvailable?: (a: { repoDir: string } | null) => void;
     /** 非 null = Git 段激活且探测可用（blame hover 委托挂载条件，git-panel Task 3
      *  裁决：ViewerPane 侧委托，不动 render-text 包）；null = 解绑 + 浮层即收 */
     gitRepoDir?: string | null;
@@ -295,10 +295,10 @@ import SearchPanel from './SearchPanel.svelte';
   // → dataset.line（归一域 0 起）→ blame 缓存按行查询 → fixed 浮层。
   // 仅全量 code 实例：firstVisibleLine 契约面（render-text client.ts——窗口实例
   // 缺席，与大纲滚动跟随同款「仅全量」先例；markdown/hex/错误卡无此 API 同门排除）
-// 且 ≤2MB（tree-sitter 整文件域上限——spec §3.2「仅全量 parse 路径（≤2MB）」，>2MB
-// lazy 路径无 hover；常量单源 render-text strategy.ts 的 TREE_SITTER_MAX_BYTES——经
-// 包入口 façade 的 export * 链已在 "." 导出面上，fixwave 终审 Minor 收敛 import，
-// 就地复制常量作废）。
+  // 且 ≤2MB（tree-sitter 整文件域上限——spec §3.2「仅全量 parse 路径（≤2MB）」，>2MB
+  // lazy 路径无 hover；常量单源 render-text strategy.ts 的 TREE_SITTER_MAX_BYTES——经
+  // 包入口 façade 的 export * 链已在 "." 导出面上，fixwave 终审 Minor 收敛 import，
+  // 就地复制常量作废）。
   // 懒查：首次 hover 触发全文件 blame（worker 计算 + busy 态 + 实例级缓存）；缓存
   // 生命周期 = 渲染实例（rev 重渲染换实例即失效，内容代一致性免 HEAD 比对）。
   // 收层：scrollHost scroll 捕获即收 / 指针离场 / Git 段退出与 tab 切换随本 effect
@@ -718,11 +718,7 @@ import SearchPanel from './SearchPanel.svelte';
         void probeGitAvailability(current.source.store, current.source.path).then(
           (hit) => {
             if (cancelled) return;
-            ongitAvailable?.(
-              hit === null
-                ? null
-                : { repoDir: hit.repoDir, fileDir: dirOf(current.source.path) }
-            );
+            ongitAvailable?.(hit === null ? null : { repoDir: hit.repoDir });
           },
           () => {
             if (cancelled) return;

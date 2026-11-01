@@ -133,11 +133,11 @@
   let rightViewTouched = $state(false);
   /**
    * git 可用性（git-panel Task 2）：ViewerPane ongitAvailable 上行的 per-tab 探测
-   * 结果（repoDir/fileDir；null = 不可用/未探测到）。语义随激活 tab——tab 身份变化
+   * 结果（repoDir；null = 不可用/未探测到）。语义随激活 tab——tab 身份变化
    * 即清空（下方 effect），新 tab 渲染完成后的后台 probe 异步再上行；Git 第三钮
    * 显隐 = gitInfo !== null（探测可用才出现，spec §4）。
    */
-  let gitInfo = $state<{ repoDir: string; fileDir: string } | null>(null);
+  let gitInfo = $state<{ repoDir: string } | null>(null);
   /** 滚动跟随激活行（0 起大纲条目 line；null = 跟随未启用/视口前无符号） */
   let activeOutlineLine = $state<number | null>(null);
 
@@ -150,7 +150,7 @@
 
   /** ViewerPane ongitAvailable 接线（稳定函数引用，pushOutlineEntries 同款理由）：
    *  probe 为 fire-and-forget 异步上行，回调仅在到达时点被调用。 */
-  function pushGitInfo(a: { repoDir: string; fileDir: string } | null): void {
+  function pushGitInfo(a: { repoDir: string } | null): void {
     gitInfo = a;
   }
 
