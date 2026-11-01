@@ -84,3 +84,22 @@ apps/web（git-worker、GitFsAdapter、gitClient 封装、MetaPanel 侧 `.vv-rig
 ## 7. 实施顺序
 
 五 spec 中最后（体量最大、独立域不与他人冲突；依赖 spec 大纲的切换器形态先行落地为二元版，本 spec 扩三元是纯增量）。
+
+## 8. 实现裁决记档（2026-11-01 fixwave 终审汇档）
+
+终审（HEAD 22b4a1f，0C/0I/7M）时点与实施各轮已定案的裁决、既有备案汇总——均为知情取舍非缺陷，实现以本节与源码注释为准（出处随注）。
+
+### 8.1 I1 域收紧：worktree 形态须落 .git 所在目录子树内
+
+`.git` 为文件（worktree/submodule）时，`gitdir: <path>` 指向的实体**必须落在 `.git` 所在目录的前缀模型内**（相对目标以 `.git` 所在目录为基、绝对目标以 store 根为基，逐段消解；逃逸或指向 store 他处——`../main/.git` 之类——即便可达也判不可用，本级不命中继续向上）。原因：GitFsAdapter 以 repoDir 为单根前缀供数，isogit `dir:'/'` 的全部 fs 路径映射进该前缀，模型外路径 worker 链表达不了（越界 throw）。模型内形态（指向自身子树内实体）isogit 的 discoverGitdir 原生跟随，worker 侧无需特判。实现与测试：gitProbe.ts 头注释「保守对齐」节 + gitFs.test.ts 四态用例（相对/绝对/不可达/逃逸）。
+
+### 8.2 §3.4 逐提交 diff 基线 = log 前条目（与 git log -p 的 merge 语义 differ）
+
+log 条目展开的逐提交 diff：基线侧 = 文件历史上**相邻前一条目**（isogit log filepath 过滤保证相邻条目即此文件的前一变更点）；首条目无前条才回落 `oid^`（git 首父；无父/该时点无文件 → 空基线全 +）。与 `git log -p` 在 **merge 提交处语义可 differ**：`log -p` 取首父对 diff（merge 提交显示的是对首父的整体变化，filepath 过滤后可能为空），本实现取 filepath 过滤的相邻变更条目——对单文件视图后者更准（跳过不触该文件的 merge 轮次），线性历史二者等价。v1 口径备案（Task 3 ruling）。
+
+### 8.3 既有备案四项汇总（task 1–3 报告与源码注释原样归档）
+
+1. **探测负缓存无恢复口**：probe 把一切读取失败（404/解析失败/store 瞬态失联）并入「此处无 .git」，目录负缓存同会话不重试；store 恢复后重开同目录文件也不重探，需刷新会话（gitProbe.ts 失败口径注释；`clearGitProbeCache` 已导出未接 UI，重试 UI 诉求出现时再消费）。
+2. **离线首用降级重试**：isomorphic-git 动态 chunk 不进 precache（4MB 预算门禁），首次激活 Git 段才拉取；离线首用拉取失败 → 段内报错 + 重试钮重建 worker（创建失败不缓存 rejected promise、failWorker 后单例剔除，均可重试语义；gitClient.ts ensureGitClient 注释）。
+3. **非 UTF-8 blame 行域**：blame 归一固定 UTF-8 TextDecoder（gitDiff.ts normalizeBlobText），渲染链路按检测编码解码——非 UTF-8 文件（GBK 等）多字节行数理论可漂移（hover 行号对位随行数漂移）。仓库文本默认 UTF-8，v1 接受（gitDiff.ts normalize 注释备案；e2e 夹具未含非 UTF-8 仓库形态）。
+4. **objectBytes 无 LRU**：worker 侧会话级对象字节缓存（`.git/objects` 下松散对象/idx，不可变）无 LRU 上限，有界性 = worker 生命周期即会话；`.pack` 与解析态 idx 由 isogit 共享 cache 持有避免双份（gitWorker.ts 缓存注释 + §2.1/§5 大仓边界）。崩溃路径兜底：failWorker 现在 terminate 回收（2026-11-01 终审 Minor 修复，与 dispose 对齐）。
