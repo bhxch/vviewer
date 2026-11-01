@@ -40,6 +40,10 @@ export const OPEN_VSX_BASE = 'https://open-vsx.org';
  * 30MB 先例」；MAX_FONT_BYTES 现值 30MB，rg 核对后沿用）。 */
 export const MAX_VSIX_BYTES = MAX_FONT_BYTES;
 
+/** 网络请求硬超时（评审 Minor：无超时 fetch 在网络 busy 时悬挂 UI——60s 上限，
+ * AbortError 归入既有 networkPrefix 失败面文案；fontsStore URL 通道同值对齐）。 */
+const FETCH_TIMEOUT_MS = 60_000;
+
 // fetch 注入缝（cdnEngines __setCdnLoaderForTest 同形态）：生产路径恒原生 fetch
 //（+ https 校验在 parseOpenVsxInput）；单测传 mock，传 null 还原生产实现。
 type FetchImpl = typeof fetch;
@@ -110,13 +114,14 @@ function errText(err: unknown): string {
 }
 
 /**
- * GET URL → Response。网络层失败（含 CORS/断网/DNS）按 networkPrefix 报错并引导
- * 「可改用手动导入 vsix」（§6.4 断网类文案）；HTTP 非 2xx 按 httpPrefix 报错带状态码。
+ * GET URL → Response。网络层失败（含 CORS/断网/DNS/超时——FETCH_TIMEOUT_MS 硬上限，
+ * 评审 Minor busy 悬挂防线，fontsStore URL 通道同款对齐）按 networkPrefix 报错并
+ * 引导「可改用手动导入 vsix」（§6.4 断网类文案）；HTTP 非 2xx 按 httpPrefix 报错带状态码。
  */
 async function fetchResponse(url: string, networkPrefix: string, httpPrefix: string): Promise<Response> {
   let res: Response;
   try {
-    res = await fetchImpl(url);
+    res = await fetchImpl(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   } catch (err) {
     throw new Error(`${networkPrefix}：${errText(err)}`);
   }

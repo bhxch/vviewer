@@ -273,6 +273,16 @@ describe('installFromOpenVsx（mock fetch 管线）', () => {
     await expect(installFromOpenVsx('not an id')).rejects.toThrow('无法识别');
   });
 
+  it('fetch 注入缝透传 RequestInit.signal（60s 超时旗标，评审 Minor busy 悬挂防线）', async () => {
+    let seen: RequestInit | undefined;
+    __setFetchImplForTest((async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen = init;
+      return new Response(metaJson('1.0.0'), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch);
+    await checkUpdate({ publisher: PUB, extension: EXT, version: '1.0.0', checkedAt: 1 });
+    expect(seen?.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it('元数据缺 version 且输入无 @version → 抛「元数据缺少版本号」（评审 Minor 4：不落 latest 死循环提示）', async () => {
     const routes: Record<string, MockRoute> = {
       [`${OVX}/api/${PUB}/${EXT}`]: {

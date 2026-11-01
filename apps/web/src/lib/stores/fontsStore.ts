@@ -34,6 +34,10 @@ export interface FontRecord {
 /** 单文件体积上限（spec §5.2：>30MB 拒收） */
 export const MAX_FONT_BYTES = 30 * 1024 * 1024;
 
+/** URL 通道 fetch 硬超时（评审 Minor，与 openVsx.ts fetchResponse 两通道一致对齐）：
+ * 无超时 fetch 在网络 busy 时悬挂添加流程，60s 上限 AbortError 归入既有 CORS 失败面。 */
+const FETCH_TIMEOUT_MS = 60_000;
+
 /** id（`font:<随机8>`，vsixImport 的 imported:<随机8> 同形态） */
 function newFontId(): string {
   return `font:${Math.random().toString(36).slice(2, 10).padEnd(8, '0')}`;
@@ -183,7 +187,8 @@ export async function addFontFromUrl(url: string, name?: string): Promise<FontRe
   if (parsed.protocol !== 'https:') throw new Error('仅支持 https 字体地址（混合内容防线）');
   let buf: ArrayBuffer;
   try {
-    const res = await fetch(url);
+    // 60s 硬超时：对齐 openVsx.ts fetchResponse（两通道一致，评审 Minor busy 悬挂防线）
+    const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     buf = await res.arrayBuffer();
   } catch (err) {
