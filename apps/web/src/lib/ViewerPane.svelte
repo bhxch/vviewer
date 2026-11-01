@@ -237,37 +237,34 @@ import SearchPanel from './SearchPanel.svelte';
   // （下方渲染 effect 内 getToc 同位读）恒 []——数据检查器持续上行同款（getInspector
   // 轮询 effect 先例）：250ms 轮询 getOutline，条目数变化才上行（大纲单文件只经历
   // [] → 全量一次跳变，length 比对即足够；rev++ 重渲染换新实例由 effect 依赖重启）。
-  // 无 getOutline 实例（markdown/降级/错误卡片）不启动轮询；实例销毁/切换随 cleanup
-  // 清空（渲染 effect cleanup 的 ontoc?.([]) 清空同款语义，双路清空幂等）。
-  // 同 tab rev 重渲染豁免（fixwave 终审 Important）：rev++ 重渲染换新实例时 outline
-  // 请求重投在飞（getOutline 暂 []），此窗口不清空旧 entries——旧 entries 存活到新
-  // 实例 outline 到货（length 跳变整体替换，AppShell pushOutlineEntries 幂等），右栏
-  // 大纲面板不再闪空重建（点击大纲项自清空、滚动位归零的根因之一）。tab 身份门控：
-  // myTab 经 untrack 捕获（tab 不进依赖——tab 切换必伴随 instance 变化重启本 effect），
-  // cleanup 时实时比对当前 tab，跨 tab 切换/销毁照旧清空（渲染 effect cleanup 门控
-  // 清空为主路，双路幂等）；初读 []（请求在飞）同 tab 一并豁免——否则初读上行 [] 仍
-  // 闪空。代价备案：同 tab 窗口内 outline 真消亡（tree-sitter 引擎中途降级 hljs/plain、
-  // outline 提取失败保持 []）时无 length 跳变、旧 entries 残留到下一次跨 tab 清空路径
-  // （cosmetic，instance API 无「已定空」信号可辨，spec §3 行为备案）。
+  // 无 getOutline 实例（markdown/降级/错误卡片）不启动轮询；清空职责收敛到渲染
+  // effect 的跨 tab 门（见下），本 effect 与其 cleanup 均不再上行 []。
+  // 空 [] 不上行（fixwave 终审 Important 的必要面）：rev++ 重渲染换新实例时 outline
+  // 请求重投在飞（getOutline 暂 []），初读 [] 上行即自清空旧 entries——右栏大纲面板
+  // 闪空重建（点击大纲项滚动位归零的根因之一）。旧 entries 存活到新实例 outline 到货
+  // （length 跳变整体替换，AppShell pushOutlineEntries 幂等）。代价备案：同 tab 窗口
+  // 内 outline 真消亡（tree-sitter 中途降级 hljs/plain、提取失败恒 []）无 length 跳变
+  // 信号、旧 entries 残留至下一次跨 tab 清空（cosmetic，instance API 无「已定空」信号
+  // 可辨，spec §3 行为备案）。
+  // 注意（SHELL-06 e2e 实证，禁读 prop）：本 effect 的重跑发生在渲染 effect 写
+  // instance 的同一 flush 内——此刻读 tab prop 会经 props getter 拉取 AppShell 侧
+  // user_derived（activeTabs.find 派生），中断 flush 信号传播、吞掉渲染 effect 的
+  // 重跑（tab 切换后渲染 effect 永不再执行）。effect 全程只读 instance。
   $effect(() => {
     const inst = instance;
     const read = (inst as { getOutline?: () => OutlineEntry[] } | null)?.getOutline;
     if (typeof read !== 'function') return;
-    const myTab = untrack(() => tab);
     let lastLen = -1;
     const tick = (): void => {
       const entries = read.call(inst) ?? [];
       if (entries.length === lastLen) return;
       lastLen = entries.length;
-      if (entries.length === 0 && tab === myTab) return; // 同 tab rev 重渲初读 []（在飞）豁免
+      if (entries.length === 0) return; // 空 [] 不经轮询上行：跨 tab 清空由渲染 body 门承担
       onoutline?.(entries);
     };
     untrack(tick); // 初读只依赖 instance：onoutline props 引用不进依赖（AppShell 侧换引用不重启轮询）
     const timer = setInterval(tick, 250);
-    return () => {
-      clearInterval(timer);
-      if (tab !== myTab) onoutline?.([]); // 跨 tab 切换/销毁清空；同 tab rev 重渲豁免
-    };
+    return () => clearInterval(timer);
   });
 
   // 字节序下行（Task 3 裁决）：MetaPanel select 写 inspectorBus（模块级 $state），
@@ -389,7 +386,22 @@ import SearchPanel from './SearchPanel.svelte';
     }, 250);
   }
 
+  /** 渲染 effect 上次见到的 tab（plain 非响应式，仅 body 内读写）：跨 tab 清空门的
+   * 比对基准，语义见渲染 effect 首注释（fixwave） */
+  let lastSeenTab: Tab | null = null;
+
   $effect(() => {
+    // 跨 tab 清空门（fixwave 终审 Important）：tab 身份变化（跨 tab 切换/关闭回落/
+    // 恢复首渲染）即上一 tab 的大纲不再属于当前视图，在 body 开头清空——effect 上下文
+    // 内读 prop 安全；同 tab rev 重渲染（rev++/渲染器与语言 override 换实例）tab 引用
+    // 不变，旧 entries 存活到新实例 outline 到货（轮询 length 跳变整体替换，
+    // pushOutlineEntries 幂等），右栏大纲面板不自清空重建。清空不放 cleanup：Svelte 5
+    // teardown 内读 tab prop 经 props getter 拉取 AppShell 侧 user_derived（activeTabs
+    // .find 派生），中断 flush 信号传播、吞掉渲染 effect 自身的重跑（SHELL-06 e2e 实证
+    // ——切换后 effect 链死亡、内容不跟随）；组件卸载仅发生在 AppShell 整体销毁，无
+    // 残留面。错误卡路径在 catch 独立清空（不受豁免）。
+    if (tab !== lastSeenTab) onoutline?.([]);
+    lastSeenTab = tab;
     if (!host || !tab || tab.source.path === '') return;
     const current = tab;
     void current.rev; // SSE 变更刷新：读入 rev 使 effect 依赖它，自增即重跑（重读+重渲染）
@@ -581,11 +593,9 @@ import SearchPanel from './SearchPanel.svelte';
       setFileMeta(null); // tab 切换/销毁：属性面板随之清空
       setExportHandle(null); // tab 切换/销毁：导出动作区随句柄清空（md-export Task 2）
       ontoc?.([]); // tab 切换/销毁：右栏目录随之清空
-      // 大纲清空带 tab 身份门（fixwave 终审 Important）：同 tab rev 重渲染（rev++/
-      // 渲染器与语言 override 变更换新实例）豁免——旧 entries 存活到新实例 outline
-      // 到货（轮询上行整体替换），右栏大纲面板不自清空；跨 tab 切换/销毁（cleanup
-      // 时 tab prop 已换引用）照旧清空，与轮询 effect cleanup 的门控清空双路幂等。
-      if (tab !== current) onoutline?.([]);
+      // 大纲清空不在此处（fixwave）：跨 tab 清空由 body 开头的 lastSeenTab 门承担，
+      // cleanup 内读 tab prop 有 flush 中断危害（见 body 首注释）；同 tab rev 重渲
+      // 豁免不清空，组件卸载仅随 AppShell 整体销毁。
       setOutlineLineHandle(null); // tab 切换/销毁：滚动跟随句柄撤除（轮询 effect cleanup 双路幂等）
       scrollHost?.removeEventListener('scroll', onScroll);
       scrollHost = null;
