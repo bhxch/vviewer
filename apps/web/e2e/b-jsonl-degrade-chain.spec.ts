@@ -3,6 +3,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
+import { isGitProbeFileRequest } from './b-stream-resilience-helpers';
 
 /**
  * jsonl 窗口降级链与回看 e2e（b- 前缀；场景文档 docs/e2e/jsonl-degrade-chain.md，
@@ -128,14 +129,8 @@ interface IoRecord {
   status: number;
 }
 
-/** git 探测通道请求判定（与 b-stream-resilience-helpers.isGitProbeFileRequest 同口径）：
- * probeGitAvailability 对远端来源逐级读 `.git/HEAD`（rangeless、无仓库 404 收场）属
- * 探测通道语义，与业务文件流式选路无关，不入计量（git 面板 T4 全量门禁定性）。`.git/`
- * 精确段匹配，`.gitignore` 等 `.git*` 同名文件不误伤。 */
-function isGitProbeFileRequest(url: URL): boolean {
-  const p = url.searchParams.get('path') ?? '';
-  return p === '.git' || p.startsWith('.git/') || p.includes('/.git/');
-}
+// git 探测通道请求判定（isGitProbeFileRequest）收敛 import 自 b-stream-resilience-helpers
+// （fixwave 终审 Minor：三处同文单源；probe 通道不入计量的定性记档见该 helper 注释）。
 
 /** 业务文件 /api/file 计量：response 级（Range 头/状态码/字节数）+ request 级在途记录，
  * git 探测请求两级同剥离。request 级为 stall 门场景必备：挂起应答不产生 response 事件，

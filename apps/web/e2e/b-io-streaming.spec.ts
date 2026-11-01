@@ -3,6 +3,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
+import { isGitProbeFileRequest } from './b-stream-resilience-helpers';
 
 /**
  * IO 流式字节计量 e2e（b- 前缀；io-streaming 计划 1 Task 7，spec §6 验收口径）：
@@ -76,14 +77,8 @@ interface IoRecord {
   bytes: number | null;
 }
 
-/** git 探测通道请求判定（与 b-stream-resilience-helpers.isGitProbeFileRequest 同口径）：
- * probeGitAvailability 对远端来源逐级读 `.git/HEAD`（rangeless、无仓库 404 收场）属
- * 探测通道语义，与业务文件流式选路无关，不入计量（git 面板 T4 全量门禁定性）。`.git/`
- * 精确段匹配，`.gitignore` 等 `.git*` 同名文件不误伤。 */
-function isGitProbeFileRequest(url: URL): boolean {
-  const p = url.searchParams.get('path') ?? '';
-  return p === '.git' || p.startsWith('.git/') || p.includes('/.git/');
-}
+// git 探测通道请求判定（isGitProbeFileRequest）收敛 import 自 b-stream-resilience-helpers
+// （fixwave 终审 Minor：三处同文单源；probe 通道不入计量的定性记档见该 helper 注释）。
 
 /** 业务文件 /api/file 响应计量（page.on('response') 过滤，git 探测请求剥离）：body
  * 异步补齐，settled() 等齐后读数 */
