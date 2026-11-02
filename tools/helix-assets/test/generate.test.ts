@@ -195,8 +195,10 @@ describe('tags 资产（代码大纲补源产物，helix pin ba40e547）', () =>
   // 基线（git 实测 d7cfa5c 全树）：53 份 tags.scm（一层目录 51 + 嵌套 2：
   // glimmer-javascript/glimmer_javascript、matlab/neovim）；Task 1 补源新增 6 份目录
   // （typescript/tsx/bash/zig/_typescript/_javascript，上游缺 _jsx/json/shell；lua/c
-  // 为 helix 新版覆盖更新不计新增）→ 总 59 份 / 一层 57。本断言仅统计一层目录。
-  const tagsBaseline = 57;
+  // 为 helix 新版覆盖更新不计新增）→ 总 59 份 / 一层 57；其后 _javascript/tags.scm
+  // 作死资产移除（无任何 tags.scm 继承 _javascript，见 generate.mjs TAGS_SOURCES 注释）
+  // → 总 58 份 / 一层 56。本断言仅统计一层目录。
+  const tagsBaseline = 56;
 
   it('queries/ 下含 tags.scm 的目录数 ≥ 基线', () => {
     const queriesDir = path.join(assetsDir, 'queries');
@@ -204,6 +206,15 @@ describe('tags 资产（代码大纲补源产物，helix pin ba40e547）', () =>
       existsSync(path.join(queriesDir, d, 'tags.scm')),
     );
     expect(tagsDirs.length).toBeGreaterThanOrEqual(tagsBaseline);
+  });
+
+  it('移除守门：_javascript tags 死资产不复活且目录活资产保留（langs 回加/误删整目录均在此报红）', () => {
+    // langs 回加 '_javascript' 并重跑生成会静默复活死资产（基线 ≥ 断言对此零感知，故显式锁定）
+    expect(TAGS_SOURCES.langs).not.toContain('_javascript');
+    expect(existsSync(path.join(assetsDir, 'queries/_javascript/tags.scm'))).toBe(false);
+    // 目录本身是活资产（javascript 的 highlights/locals 经 `; inherits: _javascript` 继承），不得误删
+    expect(existsSync(path.join(assetsDir, 'queries/_javascript/highlights.scm'))).toBe(true);
+    expect(existsSync(path.join(assetsDir, 'queries/_javascript/locals.scm'))).toBe(true);
   });
 
   it('抽查 typescript：inherits 头（_typescript,ecma）+ 继承父 _typescript 的捕获形态', () => {

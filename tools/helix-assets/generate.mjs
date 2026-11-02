@@ -207,17 +207,18 @@ export function collectThemes(themesDir) {
  * nvim-treesitter 不可作为 tags 上游：master（cf12346a，2026-11-01 实测）已整体移除
  * tags.scm 且 git 历史不可及（commits?path=... 返回空，疑 force-push 重写）。
  * langs 为大纲首版目标语言（typescript/tsx/bash/zig/lua/c）+ 其继承父共享目录
- * （_typescript/_javascript/_jsx——typescript 声明 `; inherits: _typescript,ecma`、
+ * （_typescript/_jsx——typescript 声明 `; inherits: _typescript,ecma`、
  * tsx 声明 `; inherits: _jsx,_typescript,ecma`，父目录无 tags.scm 时链断）；
  * 上游缺 json/shell（helix runtime/queries 实测无此二语言 tags.scm，shell 由 bash 覆盖），如实缺补。
- * _javascript 如实备案：helix 的 javascript/tags.scm 是自含实体查询（非 inherits 声明，
- * 不经 _javascript），现资产树无任何语言继承它——该目录当前零消费者，纯冗余留源
- * （资产树若引入 inherits: _javascript 形态即生效），拷贝成本一条文件忽略不计。
+ * _javascript 已移除（死资产清理）：helix 的 javascript/tags.scm 是自含实体查询（非 inherits
+ * 声明，不经 _javascript），资产树无任何 tags.scm 继承 _javascript——该 tags 零消费者，不再
+ * 拷贝。_javascript 目录本身保留（highlights/locals 仍被 javascript 继承，活资产）；
+ * 资产树若日后引入 `; inherits: _javascript` 形态的 tags.scm，再把 '_javascript' 加回 langs。
  */
 export const TAGS_SOURCES = {
   queriesDir: process.env.VV_TAGS_QUERIES_DIR ?? '/share/rw/repo/github/helix-editor/helix/runtime/queries',
   commit: 'ba40e547426b0f9896c8bdc699a4ab11f2b37dbc',
-  langs: ['typescript', 'tsx', '_typescript', '_javascript', '_jsx', 'bash', 'zig', 'lua', 'c'],
+  langs: ['typescript', 'tsx', '_typescript', '_jsx', 'bash', 'zig', 'lua', 'c'],
 };
 
 /**
