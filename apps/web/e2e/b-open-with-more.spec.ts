@@ -1,4 +1,7 @@
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { test, expect } from '@playwright/test';
+import { hash8 } from '@bhxch/vviewer-core';
 import { openDirText, openFile, openRightIfNarrow, tabNamed, waitAppMounted } from './helpers';
 
 /**
@@ -34,6 +37,38 @@ import { openDirText, openFile, openRightIfNarrow, tabNamed, waitAppMounted } fr
  * 通道：目录注入经 __vvOpenDirImpl（helpers.ts openDirText，组名 owm）+ 树行点击开
  * 文件 tab（helpers.ts openFile——只建目录 store tab，文件 tab 须树行打开）。
  * default 套件双 project 全跑，窄视口经 helpers openFile/openRightIfNarrow 适配。
+ *
+ * OWM-04..07（域文档测绘差距新增锚，2026-11-03 核对源码的断言口径）：
+ * - OWM-04 三入口收起对称性：__more__/__less__ 是纯 UI 哨兵（RendererPickerMenu.ts
+ *   :13-14），收起必须精确还原受限面——MetaPanel option 逐项 toHaveText 对照 OWM-01
+ *   受限序；浮层 LESS 分支只复位展开态不关浮层（ViewerPane.svelte:176 pickRenderer
+ *   的 __less__ 拦截 return，不写 pickerOpen）；TabCtx 二级 = 「✓ 自动（按扩展名）」
+ *   头项 + registry 全量 12 = 13 项、无「收起附加候选」（形态差异，TabBar.svelte
+ *   :136-148 无 LESS 哨兵——回受限由菜单重开承担，OWM-05①）。受限面 label 序统一
+ *   以词落 toHaveText（hex label=「二进制」，openWithOf 兜底序 自动/code/markdown/hex，
+ *   openWith.ts:32-34）；浮层计数用 .vv-status-picker-item（避开尾部语言项
+ *   .vv-status-picker-lang 同 role=menuitem，ViewerPane.svelte:876）。
+ * - OWM-05 展开态生命周期（434e6a4 修复面）：TabContextMenu 随 {#if ctx !== null}
+ *   整棵卸载（TabBar.svelte:335）、关闭路径收敛 onclose（TabContextMenu.svelte:24），
+ *   openPath 组件局部新实例空起步 → 重开即受限头面（一级 5 项 = 受限 4 + 「更多
+ *   渲染器 ›」父项）；切 tab 的 pointerdown 走外点关菜单（TabContextMenu.svelte:148）
+ *   → 重开二级 = 13 项不残留；状态栏浮层展开态随激活 tab id 复位（ViewerPane
+ *   .svelte:118-121 复位 effect，MetaPanel :66-69 同款）→ 切 tab 重开浮层回受限面。
+ *   备案（非断言）：同 tab 内关浮层再开不复位——pickerExpanded 写点仅 MORE/LESS
+ *   拦截与 tab 复位 effect 两类，spec §2.2「不持久化」指不进快照/设置，非浮层开关复位。
+ * - OWM-06 override 会话恢复：**场景文档前置「目录注入」对本断言不可达**（2026-11-03
+ *   实测核对）——本地注入目录（openDirectoryViaInput 内存 File store）不在 restore
+ *   重建范围（AppShell.svelte:872/:886/:907 仅 localfs 句柄/remote/direct 三类），
+ *   reload 落 addPlaceholderTab（:960）：占位 store read 即抛错且不读回
+ *   overrideRenderer（:1018-1024，t-open-with OPEN-03「本地注入内容不跨刷新」同源
+ *   语义），jsonl 视图/徽标/指示器三锚均不可能出现。故沿 BUG-69（t-open-with
+ *   .spec.ts:258）的测试内假 vviewer 服务器 remote 来源通道：remote 来源 reload 后
+ *   可重连重建并读回 overrideRenderer（AppShell.svelte:953-955），验收语义（运行期
+ *   浮层选择 → 快照落盘 → reload 恢复三锚同帧）不变。语料全本地（127.0.0.1 测试内
+ *   http 服务 + /api/file 内联合法 jsonl 两行），零外网面。
+ * - OWM-07 双向回显（MetaPanel 主入口 → 状态栏指示器，OWM-02 只锚反向）：受限内
+ *   选择 markdown 与候选集匹配 → select 不回退自动（与 OWM-01 受限外回退分叉）；
+ *   指示器 label 以 registry label 全文断言（'Markdown' 非 id，ViewerPane.svelte:669）。
  */
 
 test.describe('打开方式「更多渲染器」展开（OWM）', () => {
@@ -167,5 +202,373 @@ test.describe('打开方式「更多渲染器」展开（OWM）', () => {
     // 语义，OWM-02 注同源）；窄视口右栏在抽屉里，先断言菜单面后开抽屉
     await openRightIfNarrow(page);
     await expect(page.locator('.meta-openwith-manual')).toBeVisible();
+  });
+
+  test('OWM-04 三入口收起对称性：MetaPanel __less__ / 浮层「收起附加候选」/ TabCtx 二级无收起项', async ({
+    page
+  }) => {
+    test.setTimeout(60_000);
+    await waitAppMounted(page);
+    await openDirText(page, 'owm', 'aa.txt', 'hello vviewer');
+    await openFile(page, 'aa.txt');
+    await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 20_000 });
+
+    // ① MetaPanel：__more__ 展开后 __less__ 收起 → option 面精确还原受限 5 项
+    await openRightIfNarrow(page);
+    const sel = page.locator('.meta-openwith');
+    await expect(sel).toBeVisible();
+    await sel.selectOption('__more__');
+    await expect(sel.locator('option')).toHaveCount(14);
+    await sel.selectOption('__less__');
+    await expect(sel.locator('option')).toHaveCount(5);
+    await expect(sel.locator('option')).toHaveText([
+      '自动（按扩展名）',
+      '代码/文本',
+      'Markdown',
+      '二进制',
+      '更多渲染器…'
+    ]);
+    // 哨兵文案复位（收起把 __more__ 项重新放回受限尾，非残留展开态）
+    await expect(sel.locator('option[value="__more__"]')).toHaveText('更多渲染器…');
+    // 收起动作不触碰 override：current 回显自动
+    await expect(sel).toHaveValue('');
+
+    // ② 浮层：「更多渲染器…」→「收起附加候选」→ 浮层不关、menuitem 面回受限 5 项
+    const btn = page.locator('.vv-status-openwith');
+    await btn.click();
+    const picker = page.locator('.vv-status-picker');
+    await expect(picker).toBeVisible();
+    await picker.getByRole('menuitem', { name: '更多渲染器…' }).click();
+    await expect(picker.locator('.vv-status-picker-item')).toHaveCount(14);
+    await picker.getByRole('menuitem', { name: '收起附加候选' }).click();
+    // LESS 分支只复位展开态（pickRenderer 拦截 return）：浮层仍开
+    await expect(picker).toBeVisible();
+    await expect(picker.locator('.vv-status-picker-item')).toHaveCount(5);
+    await expect(picker.locator('.vv-status-picker-item')).toHaveText([
+      '✓ 自动（按扩展名）',
+      '代码/文本',
+      'Markdown',
+      '二进制',
+      '更多渲染器…'
+    ]);
+    // 收起不封死重开路径：再次「更多渲染器…」就地展开全量仍可用
+    await picker.getByRole('menuitem', { name: '更多渲染器…' }).click();
+    await expect(picker.locator('.vv-status-picker-item')).toHaveCount(14);
+    await page.keyboard.press('Escape'); // 收尾关浮层（Esc 关闭路径，无 override 落盘）
+    await expect(picker).toHaveCount(0);
+
+    // ③ TabCtx 二级子菜单静态形态：「✓ 自动」头项 + 全量 12 = 13 项，无「收起附加候选」
+    await tabNamed(page, 'aa.txt').click({ button: 'right' });
+    await expect(page.locator('.vv-tabctx')).toBeVisible();
+    await page.getByRole('menuitem', { name: '打开方式' }).click();
+    await page.getByRole('menuitem', { name: '更多渲染器' }).click();
+    const sub = page.locator('.vv-tabctx-sub[aria-label="更多渲染器"]');
+    await expect(sub).toBeVisible();
+    await expect(sub.locator('.vv-tabctx-item')).toHaveCount(13);
+    await expect(sub.locator('.vv-tabctx-item')).toHaveText([
+      '✓ 自动（按扩展名）',
+      '代码/文本',
+      'Markdown',
+      'HTML 预览',
+      '图片',
+      '音视频',
+      'PDF',
+      'Word 文档',
+      'Excel 表格',
+      'PowerPoint（文本提纲）',
+      '二进制',
+      '压缩包',
+      'JSON Lines'
+    ]);
+    await expect(sub.locator('.vv-tabctx-item', { hasText: '收起附加候选' })).toHaveCount(0);
+    // Esc 逐层收（二级 → 一级 → 主菜单，OWM-03 同款三层语义）
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.vv-tabctx')).toHaveCount(0);
+  });
+
+  test('OWM-05 展开态生命周期：TabCtx 重开即新实例 / 切 tab 二级不残留 / 浮层随激活 tab 复位', async ({
+    page
+  }) => {
+    test.setTimeout(60_000);
+    await waitAppMounted(page);
+    // 一次注入两文件（同组 owm）：openDirText 单文件通道两次调用会各建目录 store
+    // （addDirStoreTab 按 store.id 去重，同 label 不同 store 不合并）——本 spec 局部
+    // 双文件变体（helpers openDirText 同构 evaluate，Files 数组一次注入）
+    await page.evaluate(
+      ({ g, files }) => {
+        const fs = files.map(
+          ({ n, t }) =>
+            Object.defineProperty(new File([t], n, { type: 'text/plain' }), 'webkitRelativePath', {
+              value: `${g}/${n}`
+            }) as File
+        );
+        return (window as unknown as { __vvOpenDirImpl: (f: File[]) => void }).__vvOpenDirImpl(fs);
+      },
+      { g: 'owm', files: [{ n: 'aa.txt', t: 'hello vviewer' }, { n: 'bb.txt', t: 'another text' }] }
+    );
+    await openFile(page, 'aa.txt');
+    await openFile(page, 'bb.txt');
+    await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 20_000 });
+
+    // ① 重开即新实例：展开二级 → Esc 逐层收尽 → 再右键同 tab 直接读一级面
+    await tabNamed(page, 'bb.txt').click({ button: 'right' });
+    await expect(page.locator('.vv-tabctx')).toBeVisible();
+    await page.getByRole('menuitem', { name: '打开方式' }).click();
+    await page.getByRole('menuitem', { name: '更多渲染器' }).click();
+    await expect(page.locator('.vv-tabctx-sub[aria-label="更多渲染器"]')).toBeVisible();
+    await page.keyboard.press('Escape'); // 收二级
+    await page.keyboard.press('Escape'); // 收一级
+    await page.keyboard.press('Escape'); // 关主菜单
+    await expect(page.locator('.vv-tabctx')).toHaveCount(0);
+    await tabNamed(page, 'bb.txt').click({ button: 'right' });
+    await expect(page.locator('.vv-tabctx')).toBeVisible();
+    await page.getByRole('menuitem', { name: '打开方式' }).click();
+    // 新实例 openPath 空起步：一级 = 受限 4 + 「更多渲染器 ›」父项 = 5 项，二级未展开
+    const firstSub = page.locator('.vv-tabctx-sub[aria-label="打开方式"]');
+    await expect(firstSub).toBeVisible();
+    await expect(firstSub.locator('.vv-tabctx-item')).toHaveCount(5);
+    await expect(firstSub.locator('.vv-tabctx-item')).toHaveText([
+      '✓ 自动（按扩展名）',
+      '代码/文本',
+      'Markdown',
+      '二进制',
+      '更多渲染器 ›'
+    ]);
+    await expect(page.locator('.vv-tabctx-sub[aria-label="更多渲染器"]')).toHaveCount(0);
+    // 一级子菜单已展开（点过「打开方式」openPath=[idx]）→ Esc 一层一次：先收一级
+    // 子菜单，再关主菜单（TabContextMenu.svelte:139-143，二级展开态三次的同构少一层）
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.vv-tabctx')).toHaveCount(0);
+
+    // ② 切 tab 二级不残留（434e6a4 修复面）：二级展开态下点另一 tab（pointerdown
+    // 外点先关旧菜单 + activateTab）→ 重开二级 = ✓ 自动头项 + 全量 12 = 13 项
+    await tabNamed(page, 'bb.txt').click({ button: 'right' });
+    await expect(page.locator('.vv-tabctx')).toBeVisible();
+    await page.getByRole('menuitem', { name: '打开方式' }).click();
+    await page.getByRole('menuitem', { name: '更多渲染器' }).click();
+    await expect(page.locator('.vv-tabctx-sub[aria-label="更多渲染器"]')).toBeVisible();
+    await tabNamed(page, 'aa.txt').click(); // 外点关菜单 + 切激活 tab
+    await expect(page.locator('.vv-tabctx')).toHaveCount(0);
+    await tabNamed(page, 'aa.txt').click({ button: 'right' });
+    await expect(page.locator('.vv-tabctx')).toBeVisible();
+    await page.getByRole('menuitem', { name: '打开方式' }).click();
+    await page.getByRole('menuitem', { name: '更多渲染器' }).click();
+    const subAgain = page.locator('.vv-tabctx-sub[aria-label="更多渲染器"]');
+    await expect(subAgain).toBeVisible();
+    await expect(subAgain.locator('.vv-tabctx-item')).toHaveCount(13);
+    await expect(subAgain.locator('.vv-tabctx-item').first()).toHaveText('✓ 自动（按扩展名）');
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.vv-tabctx')).toHaveCount(0);
+
+    // ③ 状态栏浮层随激活 tab 复位：展开态下切 tab（渲染 effect cleanup 关浮层 +
+    // 复位 effect 翻 pickerExpanded）→ 重开浮层回受限 5 项（非展开 14 项）
+    await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 20_000 }); // aa.txt 渲染完成
+    const btn = page.locator('.vv-status-openwith');
+    await btn.click();
+    const picker = page.locator('.vv-status-picker');
+    await expect(picker).toBeVisible();
+    await picker.getByRole('menuitem', { name: '更多渲染器…' }).click();
+    await expect(picker.locator('.vv-status-picker-item')).toHaveCount(14);
+    await tabNamed(page, 'bb.txt').click(); // 切 tab：浮层随实例切换关闭
+    await expect(picker).toHaveCount(0);
+    await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 20_000 }); // bb.txt 渲染完成
+    await btn.click();
+    await expect(picker).toBeVisible();
+    await expect(picker.locator('.vv-status-picker-item')).toHaveCount(5);
+    await expect(picker.locator('.vv-status-picker-item').first()).toHaveText('✓ 自动（按扩展名）');
+    await page.keyboard.press('Escape');
+    await expect(picker).toHaveCount(0);
+  });
+
+  test('OWM-06 override 会话恢复：浮层选 JSON Lines 快照落盘 → reload 后视图/徽标/指示器三锚同帧', async ({
+    page
+  }) => {
+    test.setTimeout(60_000);
+    // 假 vviewer 文件服务器（BUG-69 / t-open-with.spec.ts:258 同款通道）：remote 来源
+    // reload 后可重连重建并读回 overrideRenderer（AppShell.svelte:953-955）——场景文档
+    // 前置「目录注入」不可恢复内容（头注 OWM-06 段），验收语义（运行期浮层选择 →
+    // 落盘 → reload 恢复）不变。/api/file 返回合法 jsonl 两行，恢复后卡片可断言内容。
+    const jsonlBody = '{"id":1,"label":"first"}\n{"id":2,"label":"second"}\n';
+    const server = http.createServer((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://localhost');
+      const cors = { 'Access-Control-Allow-Origin': '*' };
+      if (url.pathname === '/api/health') {
+        res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ capabilities: ['file-server'] }));
+        return;
+      }
+      if (url.pathname === '/api/file') {
+        res.writeHead(200, { ...cors, 'Content-Type': 'application/jsonl' });
+        res.end(jsonlBody);
+        return;
+      }
+      if (url.pathname === '/api/ticket') {
+        res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ticket: 'e2e' }));
+        return;
+      }
+      if (url.pathname === '/api/events') {
+        res.writeHead(200, { ...cors, 'Content-Type': 'text/event-stream' });
+        return; // 保持打开、无数据帧：SSE 挂起即可（测试结束统一断连）
+      }
+      res.writeHead(404, cors);
+      res.end();
+    });
+    await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+    const port = (server.address() as AddressInfo).port;
+    const base = `http://127.0.0.1:${port}`;
+    try {
+      await waitAppMounted(page);
+      // 预置 remote 会话（无 override，BUG-69 同款快照形态）：目录条目派生来源 + 文件 tab
+      const remoteId = `remote:${hash8(`${base}:e2e-fake`)}`;
+      const baseTab = {
+        storeId: remoteId,
+        storeLabel: 'e2e-fake',
+        storeBase: base,
+        kind: 'rename-only' as const,
+        scrollTop: 0
+      };
+      await page.evaluate(
+        (seed) =>
+          new Promise<void>((resolve, reject) => {
+            sessionStorage.setItem(
+              'vviewer-last-server',
+              JSON.stringify({ baseUrl: seed.base, token: null })
+            );
+            const open = indexedDB.open('vviewer');
+            open.onupgradeneeded = () => {
+              if (!open.result.objectStoreNames.contains('kv')) open.result.createObjectStore('kv');
+            };
+            open.onsuccess = () => {
+              const db = open.result;
+              const tx = db.transaction('kv', 'readwrite');
+              tx.objectStore('kv').put(
+                [
+                  { ...seed.baseTab, id: 't0', path: '', name: 'e2e-fake', active: false },
+                  { ...seed.baseTab, id: 't1', path: 'notes.txt', name: 'notes.txt', active: true }
+                ],
+                'tabs'
+              );
+              tx.oncomplete = () => {
+                db.close();
+                resolve();
+              };
+              tx.onerror = () => {
+                db.close();
+                reject(tx.error);
+              };
+            };
+            open.onerror = () => reject(open.error);
+          }),
+        { base, baseTab }
+      );
+      await page.reload(); // 第一次 reload：remote 会话恢复（自动路由 code 视图）
+      await expect(tabNamed(page, 'notes.txt')).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 20_000 });
+
+      // ① 状态栏浮层展开选 JSON Lines（受限外选择，OWM-02 同链）：jsonl 专有视图 +
+      // （手动）徽标 + 指示器 label 跟随
+      const btn = page.locator('.vv-status-openwith');
+      await btn.click();
+      const picker = page.locator('.vv-status-picker');
+      await expect(picker).toBeVisible();
+      await picker.getByRole('menuitem', { name: '更多渲染器…' }).click();
+      await picker.getByRole('menuitem', { name: 'JSON Lines' }).click();
+      await expect(picker).toHaveCount(0);
+      await expect(page.locator('.vv-jsonl')).toBeVisible({ timeout: 20_000 });
+      await openRightIfNarrow(page);
+      await expect(page.locator('.meta-openwith-manual')).toBeVisible();
+      await expect(btn).toContainText('JSON Lines');
+
+      // ② 等快照落盘（v2 workspaces 键含 notes.txt overrideRenderer='jsonl'，
+      // OPEN-03 轮询先例：异步 debounce 写勿用固定 sleep）
+      await expect
+        .poll(
+          () =>
+            page.evaluate(
+              () =>
+                new Promise<boolean>((resolve) => {
+                  const open = indexedDB.open('vviewer');
+                  open.onsuccess = () => {
+                    const db = open.result;
+                    try {
+                      const get = db.transaction('kv', 'readonly').objectStore('kv').get('workspaces');
+                      get.onsuccess = () => {
+                        const snap = get.result as
+                          | { workspaces?: { tabs?: { name?: string; overrideRenderer?: string }[] }[] }
+                          | undefined;
+                        const tabs = Array.isArray(snap?.workspaces)
+                          ? snap.workspaces.flatMap((w) => w.tabs ?? [])
+                          : [];
+                        resolve(
+                          tabs.some((t) => t.name === 'notes.txt' && t.overrideRenderer === 'jsonl')
+                        );
+                        db.close();
+                      };
+                      get.onerror = () => {
+                        resolve(false);
+                        db.close();
+                      };
+                    } catch {
+                      resolve(false);
+                      db.close();
+                    }
+                  };
+                  open.onerror = () => resolve(false);
+                })
+            ),
+          {
+            timeout: 20_000,
+            message: 'override 落盘：workspaces 快照应含 notes.txt overrideRenderer=jsonl'
+          }
+        )
+        .toBe(true);
+
+      // ③ reload → 会话恢复三锚同帧：override 读回（AppShell.svelte:953-955）→
+      // jsonl 视图（非 code 视图）+ 内容卡 + 指示器 label 随恢复的 override 重建
+      await page.reload();
+      await expect(tabNamed(page, 'notes.txt')).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('.vv-jsonl')).toBeVisible({ timeout: 20_000 });
+      await expect(page.locator('.vv-code-pre')).toHaveCount(0);
+      await expect(page.locator('.vv-jsonl-card', { hasText: 'first' })).toBeVisible({
+        timeout: 20_000
+      });
+      await expect(page.locator('.vv-status-openwith')).toContainText('JSON Lines');
+      await openRightIfNarrow(page); // reload 后抽屉复位，重开右栏断徽标
+      await expect(page.locator('.meta-openwith-manual')).toBeVisible();
+    } finally {
+      server.close();
+      server.closeAllConnections(); // /api/events 长连接不 end：close() 需配套断连
+    }
+  });
+
+  test('OWM-07 MetaPanel 主入口 → 状态栏指示器回显：受限内选 Markdown 不回退自动', async ({
+    page
+  }) => {
+    test.setTimeout(60_000);
+    await waitAppMounted(page);
+    await openDirText(page, 'owm', 'aa.txt', 'hello vviewer');
+    await openFile(page, 'aa.txt');
+    await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 20_000 });
+
+    await openRightIfNarrow(page);
+    const sel = page.locator('.meta-openwith');
+    await expect(sel).toBeVisible();
+    // 受限内选择（.txt 候选含 markdown）：override 与候选集匹配 → select 保持
+    // markdown 不回退（与 OWM-01 受限外选择回退自动分叉）
+    await sel.selectOption('markdown');
+    await expect(sel).toHaveValue('markdown');
+    await expect(page.locator('.meta-openwith-manual')).toBeVisible();
+    // setRendererOverride rev++ 重派：markdown 专有视图上位（code 退场）
+    await expect(page.locator('.vv-markdown')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('.vv-code-pre')).toHaveCount(0);
+    // 双向回显主锚：状态栏指示器 label 以 registry label 全文重建（'Markdown' 非 id，
+    // ViewerPane.svelte:669 rendererLabel = registry.byId(res.rendererId)?.label）
+    await expect(page.locator('.vv-status-openwith')).toContainText('Markdown');
   });
 });
