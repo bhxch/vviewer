@@ -15,6 +15,8 @@
   import ServerConnectForm from './ServerConnectForm.svelte';
   import type { TreeStore, TocEntry } from '@bhxch/vviewer-core';
   import type { OutlineEntry } from '@bhxch/vviewer-highlight';
+  // 大纲门限截断（>2000 条折叠 + 展开全部）：门限/文案常量与切片纯函数单点在册
+  import { OUTLINE_TRUNCATE_LIMIT, outlineDisplaySlice } from './outlineTruncate';
   // FE-2 导入改道：tab 模型/连接域符号自 openFlow façade 改直引域模块（依赖单向
   // tabsModel ← serverConnect，无环）；openFlow 退役为纯打开通道，AppShell 仅剩
   // 恢复句柄/归档桥/direct 挂载/快点击竞态判定四符号仍经 façade（其它消费方不动）
@@ -156,8 +158,40 @@
 
   /** 代码大纲定义条目（引用过滤单源，code-outline Task 3 评审 Minor 2）：切换器
    * 显隐/默认落位/OutlineView 传参/跟随二分四处统一消费——纯引用 outline（无
-   * definition 配对的形态）不显示切换器与大纲视图，避免空列表视图与跟随空转。 */
+   * definition 配对的形态）不显示切换器与大纲视图，避免空列表视图与跟随空转。
+   * 2MB python 可产数千定义条目，本值仍为全集（显隐判定只看非空与截断正交），
+   * 渲染/跟随消费走下方 outlineDisplayed 显示集。 */
   const outlineDefinitions = $derived(outlineEntries.filter((e) => !e.kind.startsWith('reference.')));
+
+  /**
+   * 大纲展开态（门限截断 >2000 条折叠 + 「全部展开」）：false = 截断态（显示集取
+   * 前 OUTLINE_TRUNCATE_LIMIT 条），true = 全量。tab 身份变化即重置折叠——新文件
+   * 重新从截断态开始；同 tab 的 outline 轮询上行 / rev++ 重渲染 id 不变不重置
+   * （OUT-02「同 tab 重渲不清空大纲面板」豁免通道的截断态版本）。读 tab id 写
+   * state，非依赖无自读自写环（下方 gitInfo 清空同款模式）。重置粒度精确口径：
+   * effect 依赖是 activeTabs 派生（tabsOf 每次 filter 产新数组），后台 tab 关闭/
+   * 重排等任意 list 突变都会重跑并把已展开态拍回截断——与 gitInfo 清空同款粗粒
+   * 度（一致性优先，未做 id 比对收窄；激活 tab 不变的 list 突变属罕见路径）。
+   */
+  let outlineExpanded = $state(false);
+
+  $effect(() => {
+    void activeTabs.find((t) => t.active)?.id;
+    outlineExpanded = false;
+  });
+
+  /** 大纲显示集（outlineTruncate 单点切片）：OutlineView 渲染与跟随二分同吃
+   * 此值——截断态下二分落点恒在显示前缀内，必有对应渲染行可挂（设计警示：只改
+   * 渲染端会让 >门限条目的跟随高亮无行对应）。展开后透传全集。 */
+  const outlineDisplayed = $derived(outlineDisplaySlice(outlineDefinitions, outlineExpanded));
+
+  /** 截断态旗标（提示条 + 「全部展开」在场与否）：恰等于门限不截断 */
+  const outlineTruncated = $derived(!outlineExpanded && outlineDefinitions.length > OUTLINE_TRUNCATE_LIMIT);
+
+  /** 「全部展开」动作（OutlineView onexpandall 上抛）：翻展开态，显示集切片取消 */
+  function expandOutlineAll(): void {
+    outlineExpanded = true;
+  }
 
   /**
    * 大纲点击跳转（code-outline Task 3）：pendingLine 既有通道（GlobalSearchPanel
@@ -201,10 +235,11 @@
   // 总线持有 firstVisibleLine 句柄（窗口路径缺席 → 静默不启用，spec §3）。节流取
   // 200ms interval 而非 rAF 滚动监听：实例句柄无滚动事件上行面（命令式快照读数），
   // 轮询是唯一触达通道，与既有 250ms 轮询家族（watchEngine/getInspector/meta）同制；
-  // 二分吃 outlineDefinitions 单源过滤值（评审 Minor 2，与 OutlineView 显示集一致），
-  // 值不变不写（避免无谓的 OutlineView 重渲染）。
+  // 二分吃 outlineDisplayed 显示集（评审 Minor 2 单源过滤 × 门限截断切片，与
+  // OutlineView 渲染集同源——截断态高亮不落到无渲染行的门限外条目），值不变不写
+  // （避免无谓的 OutlineView 重渲染）。
   $effect(() => {
-    const defs = outlineDefinitions;
+    const defs = outlineDisplayed;
     if (defs.length === 0) return;
     // 目录视图门（终审 Minor）：'toc' 是大纲唯一在场视图——旧 'meta' 门在 spec ⑤
     // 引入 'git' 视图后放行了 Git 视图（OutlineView 不在场，高亮值无人消费，读句
@@ -1347,7 +1382,13 @@
              集），否则 md TOC；两者皆空（用户点过切换器后切到无数据文件）回落属性
              面板兜底空态（右栏校正 effect 随即归位 'meta'，见其注释）。 -->
         {#if outlineDefinitions.length > 0}
-          <OutlineView entries={outlineDefinitions} activeLine={activeOutlineLine ?? undefined} onclick={onOutlineJump} />
+          <OutlineView
+            entries={outlineDisplayed}
+            activeLine={activeOutlineLine ?? undefined}
+            onclick={onOutlineJump}
+            truncated={outlineTruncated}
+            onexpandall={expandOutlineAll}
+          />
         {:else if tocEntries.length > 0}
           <Toc entries={tocEntries} />
         {:else}

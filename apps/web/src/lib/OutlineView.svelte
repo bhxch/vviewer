@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { OutlineEntry } from '@bhxch/vviewer-highlight';
+  import { OUTLINE_EXPAND_ALL_TEXT, OUTLINE_TRUNCATE_TEXT } from './outlineTruncate';
 
   /**
    * 代码大纲视图（code-outline Task 3）：entries 由 AppShell 传入——ViewerPane
@@ -13,15 +14,23 @@
    * - activeLine = AppShell 滚动跟随节流循环二分得的激活条目 line（0 起）；同行
    *   多条目（同位双捕获，罕见）一并高亮，不放宽为猜测单选
    * - 空 entries 由父层门控（目录视图仅在 outlineDefinitions.length > 0 时切到本组件）
+   * - 门限截断（>2000 条折叠 + 展开全部）：entries 是 AppShell outlineDisplayed
+   *   显示集（未展开时前 OUTLINE_TRUNCATE_LIMIT 条，切片口径单点在 outlineTruncate），
+   *   本组件零截断逻辑；truncated 在场渲染提示条 + 「全部展开」（onexpandall 上抛
+   *   AppShell 翻展开态），展开后 entries 变全量、提示条随 truncated 消失
    */
   let {
     entries,
     activeLine,
-    onclick
+    onclick,
+    truncated = false,
+    onexpandall
   }: {
     entries: OutlineEntry[];
     activeLine?: number;
     onclick?: (line: number) => void;
+    truncated?: boolean;
+    onexpandall?: () => void;
   } = $props();
 
   /** kind 短名 → 展示名（tags.scm 高频捕获实测枚举：现盘全量 @definition.* grep
@@ -62,6 +71,17 @@
 </script>
 
 <nav class="vv-outline" aria-label="代码大纲">
+  {#if truncated}
+    <!-- 门限截断提示条（文案/门限常量单点 outlineTruncate）：置列表顶部——容器
+         overflow:auto，置尾部初始不可见须滚 2000 条才能发现；「全部展开」经
+         onexpandall 上抛 AppShell 翻展开态（显示集切片取消，entries 变全量） -->
+    <div class="vv-outline-truncate" role="note">
+      <span class="vv-outline-truncate-text">{OUTLINE_TRUNCATE_TEXT}</span>
+      <button type="button" class="vv-outline-expand" onclick={() => onexpandall?.()}>
+        {OUTLINE_EXPAND_ALL_TEXT}
+      </button>
+    </div>
+  {/if}
   <ul>
     {#each entries as e, i (e.byteStart + ':' + i)}
       <li style="padding-left: {depthOf(e) * 12}px">
@@ -78,3 +98,36 @@
     {/each}
   </ul>
 </nav>
+
+<style>
+  /* 截断提示条（组件内 scoped——落点约简，app.css 全局段不加规则；特异性
+     (0,2,0) 压过 .vv-outline button (0,1,1) 的全局钮基座，展开钮形态自持）。
+     提示条在滚动流顶部：初始未滚动窗口恒可见——置尾部则须滚过全部条目才能发现 */
+  .vv-outline-truncate {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px 8px;
+    font-size: var(--vv-fs-xs);
+    color: var(--ui-fg-muted);
+  }
+  .vv-outline-truncate-text {
+    min-width: 0;
+  }
+  .vv-outline-expand {
+    flex: none;
+    /* width:auto / font-size:inherit 压过全局钮基座（app.css .vv-outline button 的
+       width:100% 与 --vv-fs-sm）：width:100% 未覆写时 basis:auto 取全宽且 shrink:0
+       横贯整条，同排文案 span（shrink:1）被压塌到 0 宽 */
+    width: auto;
+    padding: 2px 10px;
+    border: 1px solid var(--ui-border);
+    border-radius: var(--vv-radius-sm, 4px);
+    color: var(--ui-fg);
+    font-size: inherit;
+    cursor: pointer;
+  }
+  .vv-outline-expand:hover {
+    background: var(--ui-hover-bg);
+  }
+</style>

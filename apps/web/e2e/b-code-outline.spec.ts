@@ -24,7 +24,9 @@ import { ensureRightDrawer } from './drawer';
  *   默认落位「有目录默认目录」（未点过切换器时随数据面跟随）；互斥渲染
  *   OutlineView/Toc/MetaPanel。
  * - 滚动跟随：AppShell 200ms interval 读 metaStore 总线的 firstVisibleLine 句柄
- *   （仅全量实例）二分大纲表 → activeLine 下行高亮（窗口路径缺席静默不启用）。
+ *   （仅全量实例）二分大纲表 → activeLine 下行高亮（窗口路径缺席静默不启用）；
+ *   门限截断（OUT-11）后二分吃 outlineDisplayed 显示集（与 OutlineView 渲染端
+ *   同源切片，outlineTruncate.ts 单点），截断态高亮恒有对应行。
  * - 点击跳转：OutlineView onclick(line) → AppShell 写激活 tab pendingLine（1 起）
  *   → ViewerPane 既有通道消费（revealLine → jumpToLine：目标行滚至视口中部 +
  *   vv-search-hit-line-active 行级临时高亮——GlobalSearchPanel BUG-09 同通道）。
@@ -73,6 +75,16 @@ const TS_OUTLINE = [
 
 /** OUT-06 载体：60 个同级 def（fn_i 首行 = 3i，0 起），视口数倍高度供滚动跟随 */
 const PY_MANY_FNS = Array.from({ length: 60 }, (_, i) => `def fn${String(i).padStart(2, '0')}():\n    pass\n`).join('\n');
+
+/** OUT-11 载体：2400 个同级 def（> OUTLINE_TRUNCATE_LIMIT 2000，门限常量由
+ * outlineTruncate.test.ts 锁死），紧凑两行块（块内 join，块间 join('\n') 无空行
+ * ——PY_MANY_FNS 式带尾换行块会插出空行使 fn_i 首行 = 3i，首轮红根因），fn_i
+ * 首行 = 2i（0 起），总 4800 行；显示集末项 fn1999（line 3998）为截断态跟随
+ * 口径断言的数学锚。通道如实：Node 侧模块常量经 injectDir → page.evaluate
+ * base64 跨进程拷贝（b-markdown-html-docs-helpers.ts），90KB 体量无拷贝负担；
+ * ≈2MB 尺度锚不走此通道——见 OUT-07 页内构造（HL-03/OUT-04 先例） */
+const PY_TRUNCATED_FNS =
+  Array.from({ length: 2400 }, (_, i) => `def fn${String(i).padStart(4, '0')}():\n    pass`).join('\n') + '\n';
 
 /** 打开文件并等代码渲染容器就绪（渲染入口走通后才有实例鸭子面） */
 async function openCodeFile(page: Page, spec: TextFileSpec | TextFileSpec[], name: string): Promise<void> {
@@ -276,4 +288,113 @@ test('OUT-06 · 滚动跟随：滚动后激活高亮项随首可视行二分迁�
   await expect
     .poll(() => page.locator('.vv-outline button.active').textContent(), { timeout: 30_000 })
     .toContain('fn13');
+});
+
+test('OUT-07 · ≈2MB python 全量+大纲同窗性能锚（场景档钉值）：首屏 ≤20s / 截断大纲到货 ≤30s 恰 2000 行 / 打开窗口内可滚动', async ({ page }) => {
+  test.setTimeout(180_000);
+  // 载体页内构造（HL-03/OUT-04 先例：__vvOpenDirImpl 免大参数跨 evaluate 拷贝
+  // ——≈2MB 经 base64 evaluate 拷贝不可取）。80,000 def × 24B/def（紧凑两行块）=
+  // 1,920,000B < 2MiB 窗口阈值（TREE_SITTER_MAX_BYTES = 2*1024*1024，
+  // vviewer-render-text strategy.ts:89）→ 全量实例路径（≥ 阈值落窗口模式 outline
+  // 恒 []，OUT-04 契约）；大纲条目 8 万（万级）——未截断前全量 li 渲染正是卡顿
+  // 源，截断后渲染恒 2000。fn_i 首行 = 2i，总 16 万行。
+  await page.goto('/');
+  await page.waitForFunction(
+    () => typeof (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl === 'function'
+  );
+  const builtBytes = await page.evaluate((defs) => {
+    const chunks: string[] = [];
+    let buf = '';
+    for (let i = 0; i < defs; i++) {
+      buf += `def fn${String(i).padStart(5, '0')}():\n    pass\n`;
+      if (buf.length > 262_144) {
+        chunks.push(buf);
+        buf = '';
+      }
+    }
+    chunks.push(buf);
+    const f = new File(chunks, 'perf-2mb.py', { type: 'text/plain' });
+    Object.defineProperty(f, 'webkitRelativePath', { value: 'bout/perf-2mb.py' });
+    (window as unknown as { __vvOpenDirImpl: (f: File[]) => void }).__vvOpenDirImpl([f]);
+    return f.size;
+  }, 80_000);
+  // ≈2MB 尺度实证（场景档 §4：判定按构造后字节数）——防构造退化成小文件假绿
+  expect(builtBytes).toBeGreaterThan(1_900_000);
+
+  // ① 首屏时限锚（场景档钉值 ≤20s：全量渲染先行，outline worker fire-and-forget
+  // 不阻塞首屏——spec §2.2 架构承诺的行为级表达；不用 openCodeFile 的 30s 口径）
+  await openTreeFile(page, 'perf-2mb.py');
+  await expect(page.locator('.vv-code-pre .vv-code-line').first()).toBeVisible({ timeout: 20_000 });
+
+  // ② 截断大纲到货锚（≤30s）：切换器出现 = 上行链路全通；截断后渲染恒 2000
+  //（计数便宜——场景档「禁万级计数」顾虑已被截断化解）+ 提示条可见
+  await waitOutlineReady(page);
+  await expect(page.locator('.vv-outline li').first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('.vv-outline li')).toHaveCount(2000, { timeout: 30_000 });
+  await expect(page.locator('.vv-outline-truncate-text')).toHaveText('大纲超过 2000 条，仅显示前 2000 条');
+
+  // ③ 打开窗口内代码可滚动（主线程无长任务佐证，场景档③）：scrollTop 写入生效
+  // + 可视行内容自洽更新到底段 fn799xx——虚拟行 DOM 随滚动换窗（未虚拟化则此
+  // 断言在打开完成时即已满足，同为自洽）。滚到底 DOM 自洽锚（scrollHeight-
+  // clientHeight，不做行高换算）；'fn799' 前缀覆盖 fn79900-fn79999，首可视 def
+  // = 80000 - 视口行数/2（≈79981-79988），落带内且与其余四位段不撞
+  await page.locator('.vv-code-pre').evaluate((el) => {
+    el.scrollTop = el.scrollHeight - el.clientHeight;
+  });
+  await expect
+    .poll(() => page.locator('.vv-code-pre .vv-code-line').first().textContent(), { timeout: 30_000 })
+    .toContain('fn799');
+});
+
+test('OUT-11 · 门限截断机械面（2400 def）：折叠恰 2000 行 + 提示条在视口内且布局不塌 + 「全部展开」全量 + 截断态二分限显示集', async ({ page }) => {
+  test.setTimeout(180_000);
+  // 时限面（打开至就绪无超时）由 ≈2MB 真尺度锚 OUT-07 承担；本用例锚截断机制
+  // 本身的机械行为：门限计数/提示条/展开钮/二分口径（2400 def ≈90KB 小尺度下
+  // 行为与万级一致——切片逻辑与体量正交，OUTLINE_TRUNCATE_LIMIT 单点）
+  await openCodeFile(page, { name: 'many-trunc.py', content: PY_TRUNCATED_FNS }, 'many-trunc.py');
+  await waitOutlineReady(page);
+
+  // ① 截断态渲染行数恰为门限（2000 = OUTLINE_TRUNCATE_LIMIT）
+  await expect(page.locator('.vv-outline li')).toHaveCount(2000, { timeout: 30_000 });
+  // ② 提示条真实可见（toBeVisible 校验非空盒 + 无裁剪，强于 toHaveText 的纯
+  //    textContent 读取）+ 文案精确锁死（含门限数值插值面）
+  const bar = page.locator('.vv-outline-truncate');
+  await expect(bar).toBeVisible();
+  await expect(page.locator('.vv-outline-truncate-text')).toHaveText('大纲超过 2000 条，仅显示前 2000 条');
+  // ②b 布局不塌（boundingBox 实测）：展开钮未被全局钮基座 width:100% 撑成横贯
+  // 整条（scoped width:auto 压过 app.css .vv-outline button）——钮宽显著小于
+  // 提示条容器宽，且文案 span 未被压塌（bar 宽 > 钮宽即证 span 占有剩余空间）
+  const barBox = await bar.boundingBox();
+  const btnBox = await page.locator('.vv-outline-expand').boundingBox();
+  expect(barBox).not.toBeNull();
+  expect(btnBox).not.toBeNull();
+  expect(btnBox!.width).toBeLessThan(barBox!.width);
+  expect(btnBox!.width).toBeLessThan(barBox!.width / 2);
+
+  // 截断态跟随口径（设计警示同步约定「二分限显示集」）：滚到容器底（DOM 自洽锚
+  // ——scrollHeight-clientHeight 不做行高换算：e2e 行高并非精确 20px，OUT-06 仅
+  // 证明 h∈(19.05,20.51]；4800 行 ×20px 虚拟总高远小于 SCROLL_PX_CAP
+  // （virtualScroller.ts:21，33_554_428），未进压缩域，直映语义成立）。到底后首
+  // 可视行 ≈ 4760-4790（随视口高浮动，≫ fn1999 line 3998）：限显示集二分得末项
+  // fn1999（显示集最大 line，恒为落点）；若二分仍吃全集，激活项将是 fn23xx
+  // （line ≈ 首可视行的切片外条目），不含 fn1999，本断言即红。
+  await page.locator('.vv-code-pre').evaluate((el) => {
+    el.scrollTop = el.scrollHeight - el.clientHeight;
+  });
+  await expect
+    .poll(() => page.locator('.vv-outline button.active').textContent(), { timeout: 30_000 })
+    .toContain('fn1999');
+
+  // ③「全部展开」→ 全量渲染 2400 行、提示条消失、切片外末项在册
+  await page.locator('.vv-outline-expand').click();
+  await expect(page.locator('.vv-outline li')).toHaveCount(2400, { timeout: 30_000 });
+  await expect(page.locator('.vv-outline li').last()).toContainText('fn2399');
+  await expect(page.locator('.vv-outline-truncate-text')).toHaveCount(0);
+
+  // 展开后跟随恢复全集口径（scrollTop 未动仍在底部，首可视行 ≈ 4760-4790）：
+  // 显示集翻全集后二分落点迁移到切片外条目 fn23xx——'fn2' 前缀断言容忍视口高
+  // 浮动（落点恒 ≥ fn2000 line 4000，而显示集落点上限恒 fn1999，二者不相交）
+  await expect
+    .poll(() => page.locator('.vv-outline button.active').textContent(), { timeout: 30_000 })
+    .toContain('fn2');
 });
