@@ -352,7 +352,7 @@ import SearchPanel from './SearchPanel.svelte';
           // 工作区字节走 store.read 原始通道（store 寻址，与 GitSection 同轨）；
           // 读失败（文件已删）→ undefined，blame 落 HEAD 域
           const bytes = await srcStore.read(srcPath).catch(() => undefined);
-          const res = await client.blame(repoDir, repoRelPath(repoDir, srcPath), bytes, ac.signal);
+          const res = await client.blame(repoDir, repoRelPath(repoDir, srcPath), bytes, srcStore, ac.signal);
           const map = new Map<number, GitBlameLine>();
           for (const g of res.lines) {
             for (let k = 0; k < g.numLines; k++) map.set(g.line + k, g);

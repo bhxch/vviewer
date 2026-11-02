@@ -5,7 +5,8 @@
 // 架构：isomorphic-git 全部计算在 worker（gitWorker.ts 动态 import，主线程零静态
 // isogit 依赖——本文件对 isogit 零感知，保证主线程 chunk 不被 isogit 拖累）。store
 // 实例只活在主线程——worker 内 isogit 的每次 fs 调用经反向帧 `{kind:'fs'}` 回主线程，
-// 由 bindFs 登记的 GitFsAdapter（store + repoDir 路径映射）供数后回帧放行。
+// 由请求发起时按传入 store 捕获的 GitFsAdapter（store + repoDir 路径映射）供数后
+// 回帧放行；路由正确性唯一住在该 per-request 捕获（换源后各请求供数互不串）。
 //
 // 消息面（brief 冻结：全部 { kind, requestId, … } + AbortController 取消）：
 // - 主 → worker：六操作请求（probe-head/last-commit/status/blame/file-log/blob-at）、
@@ -122,10 +123,14 @@ export class GitCanceledError extends Error {
 export class GitClient {
   private readonly worker: Worker;
   private readonly pending = new Map<number, Pending>();
-  /** requestId → repoDir：fs 反向帧路由到 bindFs 登记的适配器（worker 不传 store）。 */
-  private readonly opRepos = new Map<number, string>();
-  private readonly stores = new Map<string, TreeStore>();
-  private readonly adapters = new Map<string, GitFsAdapter>();
+  /**
+   * requestId → 请求发起时捕获的 fs 供数适配器：fs 反向帧按此路由（worker 不传
+   * store）。捕获制（供数身份随请求冻结）——换源后新请求携新 store 建新适配器，
+   * 在途请求的 fs 帧仍路由到发起时的旧源，跨 tab 同 repoDir 不同源不串（备案修点；
+   * 旧实现的 requestId→repoDir 单键查表在此构造下必串）。请求结算即除名（settle/
+   * failWorker），适配器随请求生命周期，无会话级积累。
+   */
+  private readonly opAdapters = new Map<number, GitFsAdapter>();
   private nextId = 1;
   private disposed = false;
   /** worker 致命失败（脚本加载/消息反序列化）：reject 在途 + 短路后续请求。 */
@@ -156,34 +161,28 @@ export class GitClient {
     };
   }
 
-  /**
-   * 登记 repoDir → store 的 fs 供数（T2 probe 命中后调用；同 repoDir 重复登记以最新
-   * store 为准——同仓库多 tab 换源场景）。GitFsAdapter 懒建并复用（路径映射无状态）。
-   */
-  bindFs(repoDir: string, store: TreeStore): void {
-    this.stores.set(repoDir, store);
-    this.adapters.delete(repoDir); // 换源强制重建（store 实例身份变化）
-  }
-
-  // ---------- 六操作（brief 冻结方法面；尾参 signal 为取消口） ----------
+  // ---------- 六操作（brief 冻结方法面；store 参携带供数绑定——fs 反向帧按请求
+  // 发起时捕获的适配器供数，repoDir 保留为消息回显字段；尾参 signal 仍为取消口） ----------
 
   /** HEAD 分支探测（worker 侧 isogit currentBranch；detached HEAD → ok:true 无 branch）。
    *  isogit 调用只吃 ISO_ARGS 固定寻址（dir:'/' + gitdir:'.git'），repoDir 由 fs 适配
    *  层前缀映射消化——无目录参数面（fixwave 终审 Minor：fileDir 死参数趁触达清噪）。 */
-  probeHead(repoDir: string, signal?: AbortSignal): Promise<{ ok: boolean; branch?: string }> {
+  probeHead(repoDir: string, store: TreeStore, signal?: AbortSignal): Promise<{ ok: boolean; branch?: string }> {
     return this.request(
       'probe-head',
       repoDir,
+      store,
       (id) => ({ kind: 'probe-head' as const, requestId: id, repoDir }),
       signal
     ) as Promise<{ ok: boolean; branch?: string }>;
   }
 
   /** 文件末次提交（filepath 过滤的 log depth 1；无历史 → commit:null——untracked 等）。 */
-  lastCommit(repoDir: string, filepath: string, signal?: AbortSignal): Promise<{ commit: GitCommitInfo | null }> {
+  lastCommit(repoDir: string, filepath: string, store: TreeStore, signal?: AbortSignal): Promise<{ commit: GitCommitInfo | null }> {
     return this.request(
       'last-commit',
       repoDir,
+      store,
       (id) => ({ kind: 'last-commit' as const, requestId: id, repoDir, filepath }),
       signal
     ) as Promise<{ commit: GitCommitInfo | null }>;
@@ -193,10 +192,17 @@ export class GitClient {
    * 工作区状态三态。headBytes 为工作区文件原始字节（store.read(path) 原始通道全量——
    * 原始字节 hash 对比 HEAD blob，CRLF 不误报；参数名沿用 brief 冻结面）。
    */
-  statusOf(repoDir: string, filepath: string, headBytes: Uint8Array, signal?: AbortSignal): Promise<{ status: GitStatus }> {
+  statusOf(
+    repoDir: string,
+    filepath: string,
+    headBytes: Uint8Array,
+    store: TreeStore,
+    signal?: AbortSignal
+  ): Promise<{ status: GitStatus }> {
     return this.request(
       'status',
       repoDir,
+      store,
       (id) => ({ kind: 'status' as const, requestId: id, repoDir, filepath, headBytes }),
       signal
     ) as Promise<{ status: GitStatus }>;
@@ -206,32 +212,36 @@ export class GitClient {
   blame(
     repoDir: string,
     filepath: string,
-    worktreeBytes?: Uint8Array,
+    worktreeBytes: Uint8Array | undefined,
+    store: TreeStore,
     signal?: AbortSignal
   ): Promise<GitBlameResult> {
     return this.request(
       'blame',
       repoDir,
+      store,
       (id) => ({ kind: 'blame' as const, requestId: id, repoDir, filepath, worktreeBytes }),
       signal
     ) as Promise<GitBlameResult>;
   }
 
   /** 文件历史 log（depth ≤50 由调用方约束；Task 3 实现 worker 逻辑）。 */
-  fileLog(repoDir: string, filepath: string, depth: number, signal?: AbortSignal): Promise<GitFileLogResult> {
+  fileLog(repoDir: string, filepath: string, depth: number, store: TreeStore, signal?: AbortSignal): Promise<GitFileLogResult> {
     return this.request(
       'file-log',
       repoDir,
+      store,
       (id) => ({ kind: 'file-log' as const, requestId: id, repoDir, filepath, depth }),
       signal
     ) as Promise<GitFileLogResult>;
   }
 
   /** ref 下某路径的 blob（diff/blame 的 HEAD^ 对比面；Task 3 实现 worker 逻辑）。 */
-  blobAt(repoDir: string, ref: string, filepath: string, signal?: AbortSignal): Promise<GitBlobAtResult | null> {
+  blobAt(repoDir: string, ref: string, filepath: string, store: TreeStore, signal?: AbortSignal): Promise<GitBlobAtResult | null> {
     return this.request(
       'blob-at',
       repoDir,
+      store,
       (id) => ({ kind: 'blob-at' as const, requestId: id, repoDir, ref, filepath }),
       signal
     ) as Promise<GitBlobAtResult | null>;
@@ -248,19 +258,26 @@ export class GitClient {
     this.disposed = true;
     this.cancelAll();
     this.worker.terminate();
-    this.stores.clear();
-    this.adapters.clear();
     onClientDead(this);
   }
 
   // ---------- 内部 ----------
 
-  private request(op: GitOpKind, repoDir: string, build: (id: number) => GitOpRequest, signal?: AbortSignal): Promise<unknown> {
+  private request(
+    op: GitOpKind,
+    repoDir: string,
+    store: TreeStore,
+    build: (id: number) => GitOpRequest,
+    signal?: AbortSignal
+  ): Promise<unknown> {
     if (this.disposed) return Promise.reject(new GitCanceledError());
     if (this.dead) return Promise.reject(new Error(`git worker 不可用：${this.deadReason}`));
     if (signal?.aborted) return Promise.reject(new GitCanceledError());
     const id = this.nextId++;
-    this.opRepos.set(id, repoDir);
+    // 供数身份随请求捕获（冻结）：适配器持传入 store + repoDir 前缀映射（无状态，
+    // 构造轻量），请求结算即随 opAdapters 除名。fs 帧路由只认本捕获——换源（后续
+    // 请求传入新 store）不影响在途请求的供数来源（旧 repoDir 单键查表则必串）
+    this.opAdapters.set(id, new GitFsAdapter(store, repoDir));
     return new Promise<unknown>((resolve, reject) => {
       const onAbort = (): void => {
         this.cancelById(id);
@@ -292,7 +309,7 @@ export class GitClient {
   private settle(id: number): void {
     this.pending.get(id)?.cleanup();
     this.pending.delete(id);
-    this.opRepos.delete(id);
+    this.opAdapters.delete(id);
   }
 
   private failWorker(reason: string): void {
@@ -303,7 +320,7 @@ export class GitClient {
     const err = new Error(`git worker 不可用：${reason}`);
     for (const [, p] of [...this.pending]) p.reject(err);
     this.pending.clear();
-    this.opRepos.clear();
+    this.opAdapters.clear();
     // 终止失败 worker（fixwave 终审 Minor，与 dispose:248 对齐）：死亡标记只短路本
     // 实例的新请求，不 terminate 则崩溃中的 worker 若持续 onerror 重入，其内的
     // objectBytes/repoCaches 会话缓存无人释放——terminate 即回收，新实例由下次
@@ -312,7 +329,7 @@ export class GitClient {
     onClientDead(this);
   }
 
-  /** fs 反向供数：worker 的 isogit fs 调用 → bindFs 登记的适配器 → 回帧。 */
+  /** fs 反向供数：worker 的 isogit fs 调用 → 请求发起时捕获的适配器 → 回帧。 */
   private async serveFs(msg: Extract<GitWorkerOut, { kind: 'fs' }>): Promise<void> {
     let payload: FsReplyPayload;
     try {
@@ -330,15 +347,12 @@ export class GitClient {
   }
 
   private async computeFs(msg: Extract<GitWorkerOut, { kind: 'fs' }>): Promise<FsReplyPayload> {
-    const repoDir = this.opRepos.get(msg.requestId);
-    const store = repoDir !== undefined ? this.stores.get(repoDir) : undefined;
-    if (!store || repoDir === undefined) {
-      throw new Error(`fs 供数无登记：repoDir 未绑定（requestId=${msg.requestId}）`);
-    }
-    let adapter = this.adapters.get(repoDir);
+    // 捕获制路由：请求发起时冻结的适配器（换源不追改在途请求的供数来源）
+    const adapter = this.opAdapters.get(msg.requestId);
     if (!adapter) {
-      adapter = new GitFsAdapter(store, repoDir);
-      this.adapters.set(repoDir, adapter);
+      // 每请求自建适配器，「无登记」只可能是迟到/未知 requestId 的 fs 帧
+      //（请求已 settle 除名或 worker 死亡清表后到达）
+      throw new Error(`fs 供数无登记：请求已结算或未知（requestId=${msg.requestId}）`);
     }
     if (msg.op === 'read') {
       // fs 'read' 恒为原始字节：encoding 由 worker 侧 stub 消化（缓存/解码单点）

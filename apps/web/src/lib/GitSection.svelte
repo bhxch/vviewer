@@ -3,7 +3,7 @@
   // T3 blame 说明行 / diff 折叠区 / 文件历史 log 列表。
   //
   // 数据链：激活时 ensureGitClient（worker 单例，isogit chunk 首次激活即拉）→
-  // bindFs 登记 repoDir→store 供数 → 并发拉 probeHead（分支）/ lastCommit（末次
+  // 六操作携 store 发请求（fs 反向帧按请求发起时捕获的适配器供数）→ 并发拉 probeHead（分支）/ lastCommit（末次
   // 提交）/ store.read（工作区原始字节）→ statusOf（worker 内 hashBlob(工作区字节)
   // vs HEAD blob oid——原始字节通道，CRLF/BOM 原样入 hash 不误报，spec 红线）。
   // HEAD 树无此路径 → lastCommit null + status 'untracked'（worker 分流口径，
@@ -31,7 +31,7 @@
   }: {
     /** 仓库根的 store 相对路径（probe 上行，GitFsAdapter 前缀映射消费） */
     repoDir: string;
-    /** 文件来源 store（bindFs 登记 + 工作区原始字节读取） */
+    /** 文件来源 store（git 六操作的供数绑定 + 工作区原始字节读取） */
     store: TreeStore;
     /** 当前文件的 store 相对路径（lastCommit/statusOf 的 filepath） */
     filePath: string;
@@ -140,9 +140,6 @@
       phase = { s: 'error', message: errMsg(e) };
       return;
     }
-    // probe 命中后登记 repoDir → store 的 fs 供数（同 repoDir 换源以最新 store 为
-    // 准——bindFs 内部换源强制重建 adapter）
-    client.bindFs(rd, st);
     // 仓库相对路径（isogit 树内寻址口径）：log/blobAt/blame 的 filepath 经 isogit
     // 直接在树内查址——不经 fs 反向通道，GitFsAdapter 的 repoDir 前缀映射管不
     // 到它（gitUi.repoRelPath 单源，T2 实证 bug 的防回归锚）。
@@ -152,13 +149,13 @@
       // 不回读，CRLF 红线由字节直读保证）。字节读失败（文件已被删等）→ status
       // 无法比对，状态行降级显示「不可用」而非误报三态之一。
       const [head, last, work] = await Promise.all([
-        client.probeHead(rd, signal),
-        client.lastCommit(rd, relPath, signal),
+        client.probeHead(rd, st, signal),
+        client.lastCommit(rd, relPath, st, signal),
         st.read(fp).catch(() => null)
       ]);
       let status: GitStatus | null = null;
       if (work !== null) {
-        status = (await client.statusOf(rd, relPath, work, signal)).status;
+        status = (await client.statusOf(rd, relPath, work, st, signal)).status;
       }
       if (stale()) return;
       workBytes = work; // diff modified 模式的 worktree 侧（原始字节，显示层再归一）
@@ -171,8 +168,8 @@
       };
       // 文件历史 eager 拉取（spec §4 布局固定段；≤50 条有界）；diff 折叠若开着
       //（跨文件台账）随新文件重拉
-      void loadLog(client, rd, relPath, signal);
-      if (diffOpen) void loadDiff(client, rd, relPath);
+      void loadLog(client, rd, relPath, st, signal);
+      if (diffOpen) void loadDiff(client, rd, relPath, st);
     } catch (e) {
       if (stale()) return;
       phase = { s: 'error', message: errMsg(e) };
@@ -201,7 +198,7 @@
       return Promise.resolve();
     }
     return ensure.then(
-      (client) => loadDiff(client, repoDir, repoRelPath(repoDir, filePath)),
+      (client) => loadDiff(client, repoDir, repoRelPath(repoDir, filePath), store),
       (e: unknown) => {
         diffState = { s: 'error', message: errMsg(e) };
       }
@@ -211,7 +208,8 @@
   async function loadDiff(
     client: Awaited<NonNullable<ReturnType<typeof ensureGitClient>>>,
     rd: string,
-    relPath: string
+    relPath: string,
+    st: TreeStore
   ): Promise<void> {
     const my = ++diffSeq;
     const stale = (): boolean => my !== diffSeq;
@@ -225,7 +223,7 @@
     if (phase.s === 'ready' && phase.status === 'modified' && workBytes !== null) {
       diffState = { s: 'loading' };
       try {
-        const head = await client.blobAt(rd, 'HEAD', relPath, ac.signal);
+        const head = await client.blobAt(rd, 'HEAD', relPath, st, ac.signal);
         if (stale()) return;
         if (head === null) {
           diffState = { s: 'empty', note: 'HEAD 树无此路径' };
@@ -248,8 +246,8 @@
     diffState = { s: 'loading' };
     try {
       const [parent, head] = await Promise.all([
-        client.blobAt(rd, 'HEAD^', relPath, ac.signal),
-        client.blobAt(rd, 'HEAD', relPath, ac.signal)
+        client.blobAt(rd, 'HEAD^', relPath, st, ac.signal),
+        client.blobAt(rd, 'HEAD', relPath, st, ac.signal)
       ]);
       if (stale()) return;
       if (head === null) {
@@ -274,12 +272,13 @@
     client: Awaited<NonNullable<ReturnType<typeof ensureGitClient>>>,
     rd: string,
     relPath: string,
+    st: TreeStore,
     signal: AbortSignal
   ): Promise<void> {
     const my = ++logSeq;
     const stale = (): boolean => my !== logSeq || signal.aborted;
     try {
-      const res = await client.fileLog(rd, relPath, LOG_MAX_ENTRIES, signal);
+      const res = await client.fileLog(rd, relPath, LOG_MAX_ENTRIES, st, signal);
       if (stale()) return;
       logPhase = { s: 'ready', entries: res.entries, truncated: res.truncated };
     } catch (e) {
@@ -293,13 +292,13 @@
       return;
     }
     expandedLog = i;
-    if (commitDiffs[i] === undefined) void loadCommitDiff(i);
+    if (commitDiffs[i] === undefined) void loadCommitDiff(i, store);
   }
 
   /** 该提交该文件的 diff（复用 diff 通道）：目标侧恒为该提交 oid 的 blob；基线侧
    *  = 文件历史上前一状态（log filepath 过滤保证相邻条目即此文件的前一变更点），
    *  首条目无前条 → oid^（git 首父；无父/该时点无文件 → 空基线全 +）。 */
-  async function loadCommitDiff(i: number): Promise<void> {
+  async function loadCommitDiff(i: number, st: TreeStore): Promise<void> {
     if (logPhase.s !== 'ready') return;
     const entry = logPhase.entries[i];
     if (entry === undefined) return;
@@ -319,8 +318,8 @@
     try {
       const client = await ensure;
       const [base, target] = await Promise.all([
-        client.blobAt(rd, baseRef, relPath, ac.signal),
-        client.blobAt(rd, entry.oid, relPath, ac.signal)
+        client.blobAt(rd, baseRef, relPath, st, ac.signal),
+        client.blobAt(rd, entry.oid, relPath, st, ac.signal)
       ]);
       if (stale()) return;
       if (target === null) {
