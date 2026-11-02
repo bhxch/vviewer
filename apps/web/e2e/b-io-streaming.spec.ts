@@ -2,6 +2,7 @@ import { overflowConnectServer } from './tabbar-actions';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test, expect, type Locator, type Page } from '@playwright/test';
+import { STREAM_MAX_BYTES } from '@bhxch/vviewer-render-text/blockStream';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 import { isGitProbeFileRequest } from './b-stream-resilience-helpers';
 
@@ -966,7 +967,9 @@ test('IO-11：>512MB 构造即知超限——零读停机（仅探针）+ 流式
     // 零读停机 + 非失败态提示条（spec §4.3 防线换代：解释停机而非报错，建议 hex）
     const notice = page.locator('.vv-code-oversize-card');
     await expect(notice).toBeVisible({ timeout: 20_000 });
-    await expect(notice).toHaveText('文件超过 512MB，已达流式渲染上限（索引停止推进），建议以 hex 打开');
+    await expect(notice).toHaveText(
+      `文件超过 ${STREAM_MAX_BYTES / MB}MB，已达流式渲染上限（索引停止推进），建议以 hex 打开`
+    );
     await stats.settled();
     await page.waitForTimeout(300);
     await stats.settled();

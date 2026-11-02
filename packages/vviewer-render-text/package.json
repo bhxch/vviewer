@@ -19,7 +19,8 @@
     "./markdown/markdownRenderer": "./src/markdown/markdownRenderer.ts",
     "./markdown/export": "./src/markdown/export.ts",
     "./html": "./src/html.ts",
-    "./jsonl": "./src/jsonl/index.ts"
+    "./jsonl": "./src/jsonl/index.ts",
+    "./blockStream": "./src/blockStream.ts"
   },
   "license": "Apache-2.0"
 }

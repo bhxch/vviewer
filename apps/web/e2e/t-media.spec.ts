@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
+import { MAX_ROWS_PER_SHEET } from '@bhxch/vviewer-render-doc/xlsx';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 import { goodPng } from './png-fixture';
 
@@ -230,7 +231,7 @@ test('MEDIA-09：xlsx 多 sheet 页签切换逐格核对 + 250 行仅渲染前 2
   // ② 250 行 > 200：精确截断提示 + 恰 200 行 + 截断边界两行内容（首数据行/末渲染行）
   await openFile(page, 't-large.xlsx');
   await expect(page.locator('.vv-xlsx-truncated')).toHaveText(
-    '内容较长：共 250 行，仅显示前 200 行',
+    `内容较长：共 250 行，仅显示前 ${MAX_ROWS_PER_SHEET} 行`,
     { timeout: 20_000 }
   );
   await expect(activeSheet.locator('table tr')).toHaveCount(200);

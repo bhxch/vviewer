@@ -91,7 +91,7 @@ const CODE_PUMP_WAIT_MS = 50;
 /** 流式上限提示条（spec §4.3 防线换代：非失败态，不复用错误卡片；建议 hex 与 jsonl
  * STREAM_LIMIT_NOTICE 同口径） */
 const CODE_STREAM_LIMIT_NOTICE =
-  '文件超过 512MB，已达流式渲染上限（索引停止推进），建议以 hex 打开';
+  `文件超过 ${STREAM_MAX_BYTES / 1024 / 1024}MB，已达流式渲染上限（索引停止推进），建议以 hex 打开`;
 
 /** internal：renderCode 的 ctx 分派入口（拆分前为 code.ts 模块内私有函数） */
 export function renderCodeWindowed(
