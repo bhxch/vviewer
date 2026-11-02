@@ -1,4 +1,4 @@
-import { overflowConnectServer } from './tabbar-actions';
+import { TABBAR_ACTIONS, openPlusMenu, overflowConnectServer } from './tabbar-actions';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test, expect, type Locator, type Page } from '@playwright/test';
@@ -868,4 +868,63 @@ test('TAX-13：duplicate×overrideRenderer——手选 hex 的 tab 复制后副�
   await expect.poll(() => tabNames(page)).toEqual(['ttab', 'plain.txt', 'ov-src.txt', 'ov-src.txt']);
   await expect(page.locator('.vv-tab.active', { hasText: 'ov-src.txt' })).toBeVisible();
   await expect(page.locator('.vv-hex')).toBeVisible();
+});
+
+// ---------------------------------------------------------------- TAX-14
+
+// A2 交接锚（壳层动作域「TabBar 按钮簇与右键互斥」；编号自 TAX-14 续编落本域——
+// 场景文档 docs/e2e/sidebar-shell-actions.md §1 明示 SRC 域不为按钮簇另立编号）。
+// 按钮簇浮层（.vv-tbact-pop）与 tab 右键菜单（.vv-tabctx）同为 .vv-tabbar 后代的
+// 瞬态浮层，「同刻至多一个」由三处独立机制合成：TabBarActions 簇内 menu 单槽状态
+// （＋/⋯ 开一个收另一个，TabBarActions.svelte:46/66-78）、TabContextMenu 外点
+// pointerdown 关闭（TabContextMenu.svelte:146-150，无 stopPropagation）、
+// TabBarActions 外点 pointerdown 关闭（:92-99）。右键与左键的 pointerdown →
+// contextmenu/click 事件序使接管成立，本锚双向锁定 + 簇内切换互斥 + Esc 全收。
+test('TAX-14：TabBar 按钮簇浮层与 tab 右键菜单互斥——双向接管同刻至多一个，＋/⋯ 簇内切换互斥', async ({
+  page
+}) => {
+  test.setTimeout(60_000);
+  await waitAppMounted(page);
+  // 注入空目录会被 openDirectoryViaInput「所选文件夹为空」拒收（不建组无 tab）——
+  // 载荷不可省；右键载体用开档的 mutex.txt 文件 tab（右键菜单主场景形态）
+  await openDir(page, [{ name: 'mutex.txt', type: 'text/plain', content: 'mutex body\n' }]);
+  await openFile(page, 'mutex.txt');
+  const targetTab = tabNamed(page, 'mutex.txt');
+  const pop = page.locator('.vv-tbact-pop');
+  const ctx = page.locator('.vv-tabctx');
+  const overlayCount = async (): Promise<number> =>
+    page.locator('.vv-tbact-pop, .vv-tabctx').count();
+
+  // ① ＋ 菜单开 → 右键 tab：pointerdown(button 2) 落 pop 外先关簇浮层，
+  //    contextmenu 再挂右键菜单——右键接管（互斥正向）
+  await openPlusMenu(page);
+  await expect(pop).toBeVisible();
+  await targetTab.click({ button: 'right' });
+  await expect(ctx).toBeVisible();
+  await expect(pop).toHaveCount(0);
+  expect(await overlayCount()).toBe(1);
+
+  // ② 右键菜单开 → 点 ＋：外点 pointerdown 关右键菜单、click toggle 开 ＋ 菜单（互斥反向）
+  await openPlusMenu(page);
+  await expect(ctx).toHaveCount(0);
+  await expect(pop).toBeVisible();
+  expect(await overlayCount()).toBe(1);
+
+  // ③ ＋ 开 → 点 ⋯：簇内 menu 单槽切换互斥（开一个收另一个），触发钮 aria-expanded 随翻
+  await page.locator(`${TABBAR_ACTIONS} [aria-label="更多"]`).click();
+  await expect(pop).toBeVisible(); // ⋯ 浮层与 ＋ 浮层同类名，同刻至多一个
+  await expect(page.locator(`${TABBAR_ACTIONS} [aria-label="打开"]`)).toHaveAttribute(
+    'aria-expanded',
+    'false'
+  );
+  await expect(page.locator(`${TABBAR_ACTIONS} [aria-label="更多"]`)).toHaveAttribute(
+    'aria-expanded',
+    'true'
+  );
+  expect(await overlayCount()).toBe(1);
+
+  // ④ Esc 收 ⋯：全部瞬态浮层零残留
+  await page.keyboard.press('Escape');
+  await expect(pop).toHaveCount(0);
+  await expect(ctx).toHaveCount(0);
 });
