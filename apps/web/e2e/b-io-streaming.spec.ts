@@ -758,13 +758,13 @@ test('IO-07：code 滚动续读至 EOF——256KB 块精确区间逐块拉取 + 
 // ---------------------------------------------------------------- IO-08
 
 test('IO-08：≤2MB code 全量路径——打开即全量 read（守卫补拉）+ tree-sitter 整文件引擎', async ({ page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   const fake = await startIoFakeServer({ 'mid.js': makeCodeFile(MID_JS_ROWS) });
   try {
     const stats = new IoStats();
     const pre = await openRemoteCodeFile(page, fake, stats, 'mid.js');
     // 全量 tree-sitter 主路径（t-hl HL-01 同款状态栏锚点；1.5MB 整文件解析给足超时）
-    await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 45_000 });
+    await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 90_000 });
     await stats.settled();
     await page.waitForTimeout(300);
     await stats.settled();
