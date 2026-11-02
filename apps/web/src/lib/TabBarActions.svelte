@@ -156,14 +156,20 @@
 <input type="file" multiple hidden bind:this={fileInput} onchange={onPick} />
 {#if menu === 'open'}
   <!-- ＋ 打开菜单：fixed 定位内联坐标（开合时一次计算）；oncontextmenu 防壳层布局
-       菜单叠入（TabContextMenu 同款） -->
+       菜单叠入（TabContextMenu / WorkspaceSwitcher 同款）：stopPropagation 截断冒泡——
+       浮层 DOM 为 .vv-tabbar 后代，壳层 .vv-shell 的 onShellContextMenu 仅对 .vv-tab
+       放行，否则右键条目会叠开 chrome 菜单；preventDefault 只对非输入元素（输入元素
+       保留原生粘贴/拼写检查菜单，AppShell 同款守卫） -->
   <!-- svelte-ignore a11y_no_static_element_interactions --><!-- 静态容器的
-       contextmenu 仅阻止默认菜单，非交互语义 -->
+       contextmenu 仅截断冒泡/阻止默认菜单，非交互语义 -->
   <div
     class="vv-tbact-pop"
     style="left:{popPos.left}px; top:{popPos.top}px"
     bind:this={popEl}
-    oncontextmenu={(e) => e.preventDefault()}
+    oncontextmenu={(e) => {
+      e.stopPropagation();
+      if ((e.target as HTMLElement).closest('input, textarea, select') === null) e.preventDefault();
+    }}
   >
     <button
       type="button"
@@ -199,12 +205,15 @@
   <!-- ⋯ 更多菜单：条目序按 brief（连接服务器/主题/目录管理/设置/专注）；
        目录管理/设置/主题/专注点击即收后回调（brief 裁决），连接服务器切换内联表单不收 -->
   <!-- svelte-ignore a11y_no_static_element_interactions --><!-- 静态容器的
-       contextmenu 仅阻止默认菜单，非交互语义 -->
+       contextmenu 仅截断冒泡/阻止默认菜单（同上 ＋ 菜单），非交互语义 -->
   <div
     class="vv-tbact-pop"
     style="left:{popPos.left}px; top:{popPos.top}px"
     bind:this={popEl}
-    oncontextmenu={(e) => e.preventDefault()}
+    oncontextmenu={(e) => {
+      e.stopPropagation();
+      if ((e.target as HTMLElement).closest('input, textarea, select') === null) e.preventDefault();
+    }}
   >
     <button type="button" class="vv-tbact-item" aria-expanded={srvOpen} onclick={() => (srvOpen = !srvOpen)}>
       连接服务器

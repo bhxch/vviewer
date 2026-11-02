@@ -1,4 +1,4 @@
-import { overflowConnectServer, plusOpenUrl } from './tabbar-actions';
+import { openPlusMenu, overflowConnectServer, plusOpenUrl } from './tabbar-actions';
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -719,6 +719,56 @@ test(
     const empty = page.locator('.vv-empty');
     await expect(empty).toBeVisible();
     await expect(empty).toContainText('拖入文件/文件夹');
+  }
+);
+
+test(
+  'A2：弹层条目右键不叠开壳层 chrome 菜单且弹层不关——ws-pop / tbact-pop / tabctx 三家族一致',
+  async ({ page }) => {
+    // 交接待办 A2（2026-11-03，contextmenu stopPropagation 家族统一）：三弹层 DOM 均为
+    // .vv-tabbar 后代且不在 .vv-tab 内，壳层 .vv-shell 的 onShellContextMenu（AppShell）
+    // 把条目右键当 tabbar 空白——preventDefault 后叠开 chrome 菜单（tbact/tabctx 原仅
+    // preventDefault 不截冒泡，ws-pop 无任何防护）。修复：三容器 oncontextmenu 统一
+    // stopPropagation 截断冒泡（preventDefault 仅非输入元素，AppShell 同款守卫）。
+    // 本锚三家族各断一处（一致性即本条目标）；末段右键管理钮做正路径对照，证明同一
+    // click 手法确实派发 contextmenu 且壳层通道仍活——前三段负断言非假绿。
+    await waitAppMounted(page);
+    await openDir(page, [{ name: 'a2.txt', type: 'text/plain', content: 'ctx\n' }]);
+    const chrome = page.locator('.vv-chromemenu');
+
+    // ① ws-pop：右键工作区条目名（ensureNonEmpty 保证至少一条）
+    await page.locator('.vv-tabbar-actions [aria-label="切换工作区"]').click();
+    const wsPop = page.locator('.vv-ws-pop');
+    await expect(wsPop).toBeVisible();
+    await wsPop.locator('.vv-ws-name').first().click({ button: 'right' });
+    await expect(chrome, 'ws-pop 条目右键不得叠开 chrome 菜单').toHaveCount(0);
+    await expect(wsPop, 'ws-pop 右键条目后保持展开').toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(wsPop).toHaveCount(0);
+
+    // ② tbact-pop：右键 ＋ 打开菜单「打开文件」条目
+    await openPlusMenu(page);
+    const tbactPop = page.locator('.vv-tbact-pop');
+    await tbactPop.getByRole('button', { name: '打开文件', exact: true }).click({ button: 'right' });
+    await expect(chrome, 'tbact-pop 条目右键不得叠开 chrome 菜单').toHaveCount(0);
+    await expect(tbactPop, 'tbact-pop 右键条目后保持展开').toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(tbactPop).toHaveCount(0);
+
+    // ③ tabctx：右键 tab 开菜单，再右键菜单顶层首条目（右键不派发 click，条目不动作）
+    await openFile(page, 'a2.txt');
+    await page.locator('.vv-tab.active').click({ button: 'right' });
+    const tabctx = page.locator('.vv-tabctx');
+    await expect(tabctx).toBeVisible();
+    await tabctx.locator('.vv-tabctx-item').first().click({ button: 'right' });
+    await expect(chrome, 'tabctx 条目右键不得叠开 chrome 菜单').toHaveCount(0);
+    await expect(tabctx, 'tabctx 右键条目后保持展开').toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(tabctx).toHaveCount(0);
+
+    // 正路径对照：tabbar 非条目区（管理钮）右键仍开 chrome 菜单（b-layout-zen 同手法）
+    await page.locator('.vv-tabbar-manage').click({ button: 'right' });
+    await expect(chrome, '壳层 chrome 菜单通道本身仍活（负断言的对照）').toBeVisible();
   }
 );
 

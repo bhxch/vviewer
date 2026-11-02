@@ -167,6 +167,9 @@
   });
 </script>
 
+<!-- oncontextmenu（TabBarActions / WorkspaceSwitcher 同款）：本浮层挂在 .vv-tabbar 根下、
+     不在 .vv-tab 内，壳层 .vv-shell onShellContextMenu 的放行判定不命中——右键条目会
+     叠开 chrome 菜单，stopPropagation 截断冒泡；preventDefault 只对非输入元素 -->
 <div
   class="vv-tabctx"
   role="menu"
@@ -175,7 +178,10 @@
   style:left="{pos.left}px"
   style:top="{pos.top}px"
   bind:this={menuEl}
-  oncontextmenu={(e) => e.preventDefault()}
+  oncontextmenu={(e) => {
+    e.stopPropagation();
+    if ((e.target as HTMLElement).closest('input, textarea, select') === null) e.preventDefault();
+  }}
 >
   <!-- 项渲染抽成递归 snippet（Task 3 壳 B 二级嵌套）：父项（有 children）点击
        展开子浮层，子浮层内递归渲染同形项；叶子项点击 run（执行动作 + 必关）。

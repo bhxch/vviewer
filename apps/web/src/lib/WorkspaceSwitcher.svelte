@@ -156,12 +156,20 @@
          已在触发按钮上表达展开态 -->
     <!-- svelte-ignore a11y_no_static_element_interactions --><!-- 容器 Esc 同仓库
          dialog keydown 模式（设置中心/GlobalSearchPanel 等）：合成 Esc（移动端返回键
-         closeTopOverlayForZen 派发）与浮层内焦点物理 Esc 的统一关闭通道 -->
+         closeTopOverlayForZen 派发）与浮层内焦点物理 Esc 的统一关闭通道。
+         oncontextmenu（TabBarActions / TabContextMenu 同款）：浮层为 .vv-tabbar 后代，
+         壳层 onShellContextMenu 会把右键条目当 tabbar 空白叠开 chrome 菜单——
+         stopPropagation 截断冒泡；preventDefault 只对非输入元素（重命名框保留原生
+         粘贴菜单，AppShell 同款守卫） -->
     <div
       class="vv-ws-pop"
       class:narrow
       style={wsPopStyle}
       bind:this={wsPopEl}
+      oncontextmenu={(e) => {
+        e.stopPropagation();
+        if ((e.target as HTMLElement).closest('input, textarea, select') === null) e.preventDefault();
+      }}
       onkeydown={(e) => {
         if (e.key === 'Escape') {
           e.preventDefault();
