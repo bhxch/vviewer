@@ -21,6 +21,7 @@
  * 留缝即此常量）；生产路径恒原生 fetch，open-vsx.org 恒 https（三形态解析对 URL
  * 形态强制 https，混合内容无冲突；全链 CORS 放行实测见 §6.1）。
  */
+import { FETCH_TIMEOUT_MS } from './fetchTimeout';
 import { MAX_FONT_BYTES } from './stores/fontsStore';
 import {
   replaceIconThemeAtomic,
@@ -37,10 +38,6 @@ export const OPEN_VSX_BASE = 'https://open-vsx.org';
 /** vsix 整包下载上限：对齐字体单文件 30MB 先例口径（spec §6.2「复用字体导入
  * 30MB 先例」；MAX_FONT_BYTES 现值 30MB，rg 核对后沿用）。 */
 export const MAX_VSIX_BYTES = MAX_FONT_BYTES;
-
-/** 网络请求硬超时（评审 Minor：无超时 fetch 在网络 busy 时悬挂 UI——60s 上限，
- * AbortError 归入既有 networkPrefix 失败面文案；fontsStore URL 通道同值对齐）。 */
-const FETCH_TIMEOUT_MS = 60_000;
 
 // fetch 注入缝（cdnEngines __setCdnLoaderForTest 同形态）：生产路径恒原生 fetch
 //（+ https 校验在 parseOpenVsxInput）；单测传 mock，传 null 还原生产实现。
@@ -113,8 +110,8 @@ function errText(err: unknown): string {
 
 /**
  * GET URL → Response。网络层失败（含 CORS/断网/DNS/超时——FETCH_TIMEOUT_MS 硬上限，
- * 评审 Minor busy 悬挂防线，fontsStore URL 通道同款对齐）按 networkPrefix 报错并
- * 引导「可改用手动导入 vsix」（§6.4 断网类文案）；HTTP 非 2xx 按 httpPrefix 报错带状态码。
+ * 单源见 fetchTimeout.ts）按 networkPrefix 报错并引导「可改用手动导入 vsix」
+ * （§6.4 断网类文案）；HTTP 非 2xx 按 httpPrefix 报错带状态码。
  */
 async function fetchResponse(url: string, networkPrefix: string, httpPrefix: string): Promise<Response> {
   let res: Response;
@@ -238,10 +235,40 @@ export async function installFromOpenVsx(
 
 // ---------- 更新（spec §6.3） ----------
 
+/** 纯数字段（semver-lite 数值序判定：仅整段均为纯数字才走数值比较）。 */
+const NUM_SEG_RE = /^\d+$/;
+
 /**
- * 检查更新：GET /api/{p}/{e} 读 latest version，与 origin.version 不等即
- * hasUpdate（§6.3：不引 semver 库，相等性比较足够——显式 @version 装到比 latest
- * 更新的版本时会提示「降级」，属罕见路径，按 spec 字面口径处理）。
+ * semver-lite 段比较（§6.3「不引 semver 库」）：按 '.' 切段逐段比较——纯数字段走
+ * 数值序（'9.0' < '10.0'），缺段补 0（'1.2' 与 '1.2.0' 等价），含非数值段的对按
+ * 字符串字典序兜底（'1.0.0-a' < '1.0.0-b'；不解析预发布语义的简化口径）。返回
+ * 负数 / 0 / 正数 = a 低于 / 等于 / 高于 b。导出供 UI 层文案与按钮显隐同源复用。
+ */
+export function compareVersions(a: string, b: string): number {
+  const as = a.split('.');
+  const bs = b.split('.');
+  const len = Math.max(as.length, bs.length);
+  for (let i = 0; i < len; i++) {
+    const sa = as[i] ?? '0';
+    const sb = bs[i] ?? '0';
+    const c =
+      NUM_SEG_RE.test(sa) && NUM_SEG_RE.test(sb)
+        ? Number(sa) - Number(sb)
+        : sa < sb
+          ? -1
+          : sa > sb
+            ? 1
+            : 0;
+    if (c !== 0) return c;
+  }
+  return 0;
+}
+
+/**
+ * 检查更新：GET /api/{p}/{e} 读 latest version，semver-lite 段比较（
+ * compareVersions）**高于** origin.version 才 hasUpdate（§6.3：不引 semver 库，
+ * 段比较足够——显式 @version 装到比 latest 更新的版本是降级而非更新，latest 不
+ * 高于已装版本（平版/降级）一律不提示）。
  */
 export async function checkUpdate(origin: ThemeOrigin): Promise<{ latest: string; hasUpdate: boolean }> {
   const NET = 'Open VSX 检查更新失败（需网络与 CORS）';
@@ -250,7 +277,7 @@ export async function checkUpdate(origin: ThemeOrigin): Promise<{ latest: string
   if (typeof meta.version !== 'string' || meta.version === '') {
     throw new Error(`${FAIL}：元数据缺少 version：${origin.publisher}.${origin.extension}`);
   }
-  return { latest: meta.version, hasUpdate: meta.version !== origin.version };
+  return { latest: meta.version, hasUpdate: compareVersions(meta.version, origin.version) > 0 };
 }
 
 /**
