@@ -26,14 +26,14 @@
 | 编号 | 前置条件 | 步骤 | 期望 |
 | --- | --- | --- | --- |
 | ICON-06 | Mini 夹具变体：`iconDefinitions { x: charX, y: charY }` + `fileNames { 'app.ts': 'x' }` + `fileExtensions { ts: 'y' }`（两字形不同码点）；注入含 `app.ts` 目录 | 选主题应用 → 读 `app.ts` 树行 `.vv-file-icon` 字形 | 命中 **x**（精确名压过扩展名）：fileNames 全名精确命中即短路返回（`vscodeIcon.ts:368-369` 在后缀枚举之前）——`.vv-file-icon` toHaveText charX，非 fileExtensions 的 charY |
-| ICON-07/lang | Mini 夹具变体：`iconDefinitions { t: charT }` + `languageIds { typescript: 't' }`（无 fileExtensions）；注入 `app.ts` | 选主题应用 → 读树行字形 | 命中 t：反向表匹配输入 = 文件名扩展名本身（`.ts` → `EXT_TO_LANGS` → 'typescript'，`vscodeIcon.ts:375-380`），零 detect 依赖——四作用域（含未打开文件的树）一致生效 |
+| ICON-07/lang | Mini 夹具变体：`iconDefinitions { t: charT }` + `languageIds { typescript: 't' }`（无 fileExtensions）；注入 `app.ts` | 选主题应用 → 读树行字形 | 树行命中 t（`.vv-file-icon` toHaveText charT）：反向表匹配输入 = 文件名扩展名本身（`.ts` → `EXT_TO_LANGS` → 'typescript'，`vscodeIcon.ts:375-380`），零 detect 依赖。机制注：树是默认唯一开启作用域、文件未打开时 detect 链不参与——「四作用域一致生效」由该零 detect 依赖直接推得，作用域开关显隐面归 ICON-02/03 既有锚，本行不逐作用域重复布点 |
 | ICON-07/表外 | 同夹具追加 `languageIds { zig: 'z' }`；注入 `code.zig` | 读 `code.zig` 树行 | 表外 id 静默零渲染：`.vv-file-icon` 计数 0 且无 `_file` 回退时不渲染元素（`vscodeIcon.ts:380` 尾回退 null）、零位移（ICON-05 同锚）、无报错无 console error |
 | ICON-08 | Mini 夹具变体：`iconDefinitions { dt: charDT, ts: charTS }` + `fileExtensions { 'd.ts': 'dt', ts: 'ts' }`；注入 `a.d.ts` 与 `b.ts` | 选主题应用 → 分别读两行字形 | `a.d.ts` 命中 **charDT**：多级扩展名全后缀尝试最长优先（`fileSuffixes('a.d.ts')` = ['d.ts','ts']，`:181-182`；先试 `.d.ts` 再 `.ts`）——专属字形非单级 `.ts` 字形；`b.ts` 对照命中 charTS（单级路径不回归） |
 | ICON-09 | jszip Node 侧构造含 `contributes.iconThemes[].path` + 字体的小 vsix 夹具（`b-openvsx.spec.ts:35-52` iconVsix 同构） | 图标主题导入区 file input `setInputFiles([xxx.vsix])`（`AppearanceSection.svelte:550-552` accept 含 .vsix）→ 选新主题应用 → 读树字形与已导入列表 | 导入生效：`.vv-settings-note`「已导入 1 个图标主题」、select label 带「（vsix）」后缀（source 投影，OVX-01 `:171` 同锚）、树行字形在场；记录 `source='vsix'`（`session.ts:50`）——与 OVX-01 网络路产物同型（同一 `importIconVsixFile` 内核），区别仅在 vsix 由本机 file input 直供 |
 
 ## 3. 验收行为
 
-- **ICON-06..08 匹配链**：三锚共同锁「VSCode 语义优先级」（spec §3.2 匹配链首位）在真实 DOM 渲染层生效，字形断言用 `toHaveText(码点字符)` 精确比对（Mini 夹具各定义码点互异，禁用「有无图标」的弱断言——弱断言区分不了命中层级）。回归护栏：ICON-05 零位移锚（夹具均无 `_file` 时未命中行零元素）与 ICON-01 seti 面零翻转。
+- **ICON-06..08 匹配链**：三锚共同锁「VSCode 语义优先级」（spec §3.2 匹配链首位）在真实 DOM 渲染层生效，字形断言用 `toHaveText(码点字符)` 精确比对（Mini 夹具各定义码点互异，禁用「有无图标」的弱断言——弱断言区分不了命中层级）。**编号落法备案**：ICON-07 无本体行——正反两面（命中/表外静默）无共同断言面，按 README §3.2 条 3 后缀约定拆 `ICON-07/lang`、`ICON-07/表外` 双行落（与 SRC-05 本体+双变体的落法不同源，特此注记）；编号段口径 ICON-01~09 不变。回归护栏：ICON-05 零位移锚（夹具均无 `_file` 时未命中行零元素）与 ICON-01 seti 面零翻转。
 - **ICON-07/表外静默**：断言面为「零渲染 + 零报错」（无 console error、无错误卡），对齐 spec §3.4「表外 id 无匹配（静默，不报错）」。
 - **ICON-09**：与 OVX-01 的分界 = vsix 来源通道（file input vs Open VSX 下载），导入内核/校验链/入库记录同一（spec §6.2「复用既有导入管线内核」）——本锚只断通道入口与产物等价性，不重复 OVX-01 的预检/下载断言。
 - **回归护栏**：ICON-04 附损坏字体回退（`b-icon-themes.spec.ts:270`）与 OVX-02 预检快错为负路径既有基准，匹配链改动后定向复跑。

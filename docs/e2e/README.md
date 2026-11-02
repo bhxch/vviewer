@@ -38,7 +38,7 @@
 | 图标主题与 Open VSX 通道 | [icon-themes-openvsx.md](icon-themes-openvsx.md) | ICON-01~09、OVX-01~05 | 2026-10-31-icon-themes-design.md |
 | 代码大纲与右面板切换 | [code-outline-panel-switch.md](code-outline-panel-switch.md) | OUT-01~10 | 2026-10-31-code-outline-panel-switch-design.md |
 | Git 信息面板 | [git-panel.md](git-panel.md) | GIT-01~12 | 2026-10-31-git-panel-design.md |
-| 图表官方服务器档与 kroki 回落（diagram 域续编） | [diagram-server-kroki.md](diagram-server-kroki.md)（既有文档补节，不新建） | DSV-07~10 + DM-11/12 落库承接 | 2026-10-23-renderer-lang-override-markpad-alignment-design.md §8 |
+| 图表官方服务器档与 kroki 回落（diagram 域续编） | [diagram-server-kroki.md](diagram-server-kroki.md)（既有文档补节，不新建） | DSV-07a/07b、08~10（07 = DM-11/12 落库承接拆行） | 2026-10-23-renderer-lang-override-markpad-alignment-design.md §8 |
 
 首轮之后落库的其余特性域文档（cdn-diagram-engines、code-scan-resilience、error-card-open-as、filetree-src-remove、grammar-spa-fallback、io-degrade-matrix、jsonl-degrade-chain、multiroot-file-channel、override-lang、quickopen-multisource、susp-verification、tab-actions-enrichment、workspace-enrichment）：出处与编号段见各文档头注与 §2 场景清单，不在此重复转录。
 

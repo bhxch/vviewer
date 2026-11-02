@@ -42,6 +42,6 @@
 ## 4. 环境与数据
 
 - **通道**：default 套件双 project；本地源注入 `__vvOpenDirImpl`（`b-sidebar-roots.spec.ts:27-40` openLocalDir 同构，label 决定 `localfiles:<label>` storeId）；空态用 Playwright 每用例新 context 零来源天然形态；remote 源走共享单根假服务 `fake-file-server`（FTSRC 装置），url 单文件来源走 openUrl 通道（quickopen/error-card 域既有装置）。
-- **同 label 跨源构造**（SRC-05c）：localfiles 同 label 二次注入会路由回原组（FTSRC-04 裁决，`docs/e2e/filetree-src-remove.md` §4）——同名目录 tab 须 **local + remote 异 storeId 同 label** 构造，不能用双本地同 label；落脚本时以 fake-file-server 实际暴露的来源 label 为准核对 storeLabel 相等性。
+- **同 label 跨源构造**（SRC-05/dir）：localfiles 同 label 二次注入会路由回原组（FTSRC-04 裁决，`docs/e2e/filetree-src-remove.md` §4）——同名目录 tab 须 **local + remote 异 storeId 同 label** 构造，不能用双本地同 label；落脚本时以 fake-file-server 实际暴露的来源 label 为准核对 storeLabel 相等性。
 - **移动端形态**：375px 树区在抽屉内——树行点击与徽标断言前 `openDrawerIfNarrow`/断言后 `closeDrawerIfOpened`（SRC-01..04 同款适配）；SRC-03 几何锚在抽屉断点 skip 既有口径不变。
 - **数据清单**：src-a/src-b 两组最小目录（同名 readme.md + 异名 a1.txt/b1.txt + 大小写对 A.md/a.md），内容任意非空文本；无预置仓库资产依赖，构建前置仅 `pnpm --filter web build:e2e`。

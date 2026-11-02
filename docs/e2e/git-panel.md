@@ -28,14 +28,14 @@
 | 编号 | 前置条件 | 步骤 | 期望 |
 | --- | --- | --- | --- |
 | GIT-09 | 夹具 repo 追加 `git checkout --detach`（beforeAll 装置期对独立小 repo 或专用文件执行，不污染 GIT-01..08 的 main 分支载体）→ 连接打开该 repo 文件 → 激活 Git 段 | 读信息卡分支位 | detached HEAD（spec §3.1）：分支位显示「（游离 HEAD）」非分支名（`gitWorker.ts:276` currentBranch detached → `{ok:true}` 无 branch → `GitSection.svelte:379` 兜底文案——**注：实现为固定文案，非任务简报所拟「短 hash 标注」，以实读为准**）；状态/末次提交行不受游离态影响（clean + 短 hash 照常） |
-| GIT-10 | 夹具 repo3：单文件 201 次快提交（`execSync` 循环 append+commit，beforeAll 一次性构造；末次提交后文件 clean）→ 打开该文件激活 Git 段 | ① 读 blame 说明行；② hover 任一行读浮层包围盒 | ① 说明行文案含「文件历史超 200 提交仅最近 200 参与归属」（`GitSection.svelte:398` 插值 `{BLAME_MAX_COMMITS}`=200，gitDiff.ts:24）；② hover 浮层不越窗：fixed 定位浮层 boundingBox 完整落在视口内（四边 ≤ 视口边界，spec §3.2 浮层不越窗） |
+| GIT-10 | 夹具 repo3：单文件 201 次快提交（`execSync` 循环 append+commit，beforeAll 一次性构造；末次提交后文件 clean）→ 打开该文件激活 Git 段 | ① 读 blame 说明行；② hover 任一行读浮层包围盒；③ 对照：切 GIT-01 夹具的 crlf.txt（2 提交，未超限）读同一说明行 | ① 说明行文案含「文件历史超 200 提交仅最近 200 参与归属」（`GitSection.svelte:398` 插值 `{BLAME_MAX_COMMITS}`=200，gitDiff.ts:24）；② hover 浮层不越窗：fixed 定位浮层 boundingBox 完整落在视口内（四边 ≤ 视口边界，spec §3.2 浮层不越窗）；③ **常驻模板对照**：未超限文件同文案在场——说明行为固定模板非条件文案（渲染条件仅 `phase.commit !== null`，`:397`），「超 200」措辞为模板常量、不随当前文件历史数变化 |
 | GIT-11 | 夹具 repo4：文件首提交少量行 + 第二提交追加 >2000 行（如 2500 行）未提交（modified）→ 打开激活 Git 段展开 diff | ① 读折叠钮与 diff 区；② 对比 `.vv-git-diff-stat` 计数与着色行计数 | 截断尾注可见：`.vv-git-diff-trunc` 含「diff 过大已截断（上限 2000 行」（gitDiff.ts:291-293 + DIFF_MAX_ROWS:20）；`+/−` 计数按**窗内**钉死：`.vv-git-diff-stat` 数字与 `.vv-git-diff-row-add`/`-del` 实际着色行数一致（截断后统计=显示集口径，非全 diff 口径）；渲染行数 ≤2000 有界 |
 | GIT-12 | GIT-03 装置（untracked `new.txt`）→ 打开激活 Git 段 | ① 读 diff 折叠钮文案；② 点开折叠区读内容 | ① 折叠钮标注「（未跟踪文件无 diff）」（`GitSection.svelte:80` diffLabel `commit === null` 分支）；② 展开后为提示态非空 diff：`.vv-git-diff-row-add`/`-del` 计数 0、note「未跟踪文件无 diff（HEAD 树无此路径）」可见（`GitSection.svelte:222` empty 态）——无截断尾注、无报错卡 |
 
 ## 3. 验收行为
 
 - **GIT-09**：游离 HEAD 是只读探测的合法形态（`ok:true` 非 error），分支位文案为行为级验收基准；回归护栏：GIT-01 分支名 main 锚零翻转（同函数正常分支路径）。
-- **GIT-10**：截断标注必须**恒显**于 blame 说明行（非仅超限时）——说明行本身是常驻元素（`:397` 注释「仅对有历史的文件」），超限仓库下插值语义为真值呈现；浮层不越窗为 spec §3.2 几何承诺。夹具规模备案：201 commit `execSync` 循环在装置期秒级完成（CI runner 自带 git），单 repo 独立构造防污染既有夹具的 oid 断言（GIT-01/07 短 hash 锚）。
+- **GIT-10**：截断标注的验收形态是「常驻模板」——说明行渲染条件仅为有历史（`phase.commit !== null`，`GitSection.svelte:397`），文案固定含「超 200…仅最近 200」措辞，**不随当前文件真实历史数变化**：超限 repo3 文件与未超限 crlf.txt 对照（步骤③）读同一文案，两处同时在场即为「恒显」的可执行落点（若未来改为真值插值——未超限时措辞变化或行隐藏——本锚按行为变化处置并回写本文档）。浮层不越窗为 spec §3.2 几何承诺。夹具规模备案：201 commit `execSync` 循环在装置期秒级完成（CI runner 自带 git），单 repo 独立构造防污染既有夹具的 oid 断言（GIT-01/07 短 hash 锚）。
 - **GIT-11**：截断是渲染层有界承诺（spec §3.3「>2000 行或 >200KB 截断 + 尾注」），计数窗内钉死防「统计全量、显示截断」的错位；2500 行载体只触发行数门（≈80KB < 200KB），bytes 门由单测向量覆盖不在 e2e 重复。
 - **GIT-12**：提示态替代空 diff（spec §3.3「untracked 文件无 diff（提示态）」）；回归护栏：GIT-03 状态行锚、GIT-05/06 两模式折叠钮文案锚零翻转（diffLabel 三分支互斥）。
 - **全域回归护栏**：右面板三元切换器为 OUT/GIT 两域共享组件——本文档任何锚落地后与 `b-code-outline` 定向同跑（切换器显隐合并与 touched 台账双域互证）。

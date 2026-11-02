@@ -26,13 +26,13 @@
 | 编号 | 前置条件 | 步骤 | 期望 |
 | --- | --- | --- | --- |
 | OUT-07 | 页内构造 ≈2MB python（HL-03 先例：`__vvOpenDirImpl` 免大参数跨 evaluate 拷贝——约 2.9 万行 `def fnNNNNN():\n    pass`，每符号可在 tags 捕获面内） | ① 打开文件起表：`.vv-code-pre` 首行可见时刻；② 等切换器/大纲首项到货；③ 打开窗口内驱动滚动（`scrollTop` 写入 + 首行内容断言） | ① 首屏时限锚：`.vv-code-pre` 可见 ≤20s（套装负载口径，OUT-04 30s 上界参照；大纲 worker 独立 parse 不阻塞首屏——全量渲染完成先行、outline fire-and-forget 后置）；② 大纲到货 ≤30s 且首项可见（切换器出现 = 上行链路全通）；③ 打开窗口内代码可滚动（`scrollTop` 生效、行号/内容自洽）= 主线程无长任务佐证（HL-11 交互响应性先例的轻量替代锚） |
-| OUT-08 | 双有大纲文件（calc.py + shape.ts）+ plain.txt 注入；新 context（rightViewTouched 初值 false） | ① 打开 calc.py → 默认落「目录」（aria-pressed）；② 手动点「属性」钮（置 touched，`AppShell.svelte:1340-1346`）；③ 切 shape.ts（有大纲）读落位；④ 对照：另一新 context 直接打开 calc.py | ②③ **touched 台账跨文件保持**：shape.ts 大纲在（切换器在场）但落位仍「属性」——默认落位 effect 因 touched 不写（`AppShell.svelte:216-217`）；④ 新 context 未 touched → 直接落「目录」（默认落位语义）；plain.txt 无大纲文件在 touched 后维持属性现状（OUT-03 既有面不重复） |
+| OUT-08 | 双有大纲文件（calc.py + shape.ts）注入；新 context（rightViewTouched 初值 false） | ① 打开 calc.py → 默认落「目录」（aria-pressed）；② 手动点「属性」钮（置 touched，`AppShell.svelte:1340-1346`）；③ 切 shape.ts（有大纲）读落位；④ 对照：另一新 context 直接打开 calc.py 读落位 | ②③ **touched 台账跨文件保持**：shape.ts 大纲在（切换器在场）但落位仍「属性」——默认落位 effect 因 touched 不写（`AppShell.svelte:216-217`）；④ 新 context 未 touched → 直接落「目录」（默认落位语义）。无大纲文件面归 OUT-03 既有锚（无大纲纯属性矩阵），本行不重复布点 |
 | OUT-09 | 页内构造 10+ 层嵌套 python（`class A0:` 起逐层缩进嵌套 `class A1:`…`class A10:` + 末层 `def deep()`——tags class 捕获 byte range 包含栈式推导 depth） | 打开 → 等大纲到货 → 读各条目 `paddingLeft` 与容器溢出 | 缩进钳制有界：条目 paddingLeft ≤ 96px（`Math.min(depth, 8)` × 12px/层，`OutlineView.svelte:67-70`）——深层条目（depth ≥8）缩进钉死同值不随层数增长；`.vv-outline` 容器 `scrollWidth ≤ clientWidth`（无横向溢出爆版面） |
 | OUT-10 | calc.py（大纲体积大到到货需数百 ms——加大行数或函数量）+ plain.txt 注入 | ① 点开 calc.py 后**立即**（不等切换器）切 plain.txt；② 读右栏；③ 切回 calc.py | ② plain.txt 激活时：`.vv-right-switch` 与 `.vv-outline` 计数 0——calc.py 的 outline 响应不串台（响应回来时读的是 plain.txt 实例：鸭子缺席 → 上行空 []；跨 tab 清空由 `ViewerPane.svelte:580` lastSeenTab 门承担；在飞请求按 id 失效丢弃，`client.ts:37-38/213-231`）；③ 切回 calc.py 大纲重建（切换器重现 + 条目数回归——同 tab rev 未变实例缓存命中，轮询上行 length 跳变） |
 
 ## 3. 验收行为
 
-- **OUT-07 性能面**：时限锚为套装负载下的上界口径（非严格 perf budget），首跑校准后钉值；「首屏不等大纲」是 spec §2.2 的架构承诺（全量 parse 后 fire-and-forget、worker 独立 parse），首屏锚与大纲到货锚分离计时即为其行为级表达。回归护栏：OUT-04（>2MB 无大纲）与 HL-03（3MB 错位面）零翻转。
+- **OUT-07 性能面**：时限锚为**当前钉值 20s/30s**（§2.2 场景行所载即运行判据，超时即红）——首跑若超时，先复跑定性环境负载；确属套装环境慢则**在本行改数并注记环境与日期**，不做运行时豁免口（非严格 perf budget，但判过否以行内现值为准，不两读）。钉值维护口径即此一条。「首屏不等大纲」是 spec §2.2 的架构承诺（全量 parse 后 fire-and-forget、worker 独立 parse），首屏锚与大纲到货锚分离计时即为其行为级表达。回归护栏：OUT-04（>2MB 无大纲）与 HL-03（3MB 错位面）零翻转。
 - **OUT-08 交互语义**：按 spec §3 修正语义（「不跨文件记忆」修正为「未动过时跟随默认落位、动过保持」）断言两向——touched 保持 + 新 context 默认落位。回归护栏：OUT-03 默认落位矩阵、GIT-02 的 touched 面（Git 段激活同置 touched，`git-panel` 域互证）。
 - **OUT-09 边界**：钳制防深嵌套爆版面（spec §3 builder 定钳制值 8 层）；kind 徽标与条目排序不在本锚（OUT-01 已锚）。
 - **OUT-10 竞态负路径**：不串台的判定锚是「切走后的右栏终态」+「切回重建」两点，不锚中间帧；与 OUT-02 的 rev 重渲豁免锚互斥（OUT-10 是跨 tab 清空路径，OUT-02 是同 tab 保持路径）。回归护栏：OUT-02、OUT-06 零翻转。
