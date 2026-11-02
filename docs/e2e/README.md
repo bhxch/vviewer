@@ -25,7 +25,24 @@
 | PWA、移动端与性能预算（M7） | [pwa-mobile-performance.md](pwa-mobile-performance.md) | 9（PWA-01~09） | BUG-06、BUG-15、BUG-16、BUG-24、BUG-26 |
 | **合计** | 10 份 | **107**（报告 106 测试点 + 续编 SHELL-14） | BUG-01~BUG-26 全部 26 条 |
 
-域排序沿用源报告 §8 附录顺序；场景编号一律沿用报告测试点编号。跨域归属说明（按各域文档第 1 节口径）：
+域排序沿用源报告 §8 附录顺序；场景编号一律沿用报告测试点编号。首轮 10 域之外，后续特性 spec 驱动的域文档同落本目录（场景编号自成体系、与首轮测试点编号不连续，各域文档第 1 节载明 spec/plan 出处与现状脚本，体例同为「目的与来源 / 场景清单 / 验收行为 / 环境与数据」），不并入上表口径。
+
+### 2.1 特性域文档（spec 驱动续编）
+
+本轮测绘差距落库（2026-11-03）新增/补节的六域：
+
+| 域 | 文档 | 场景编号 | 来源 spec |
+| --- | --- | --- | --- |
+| 渲染器自选与内容探测（更多渲染器/签名改派/编码精判） | [renderer-picker-signature-encoding.md](renderer-picker-signature-encoding.md) | OWM-01~07、SIG-01~04、ENC-01~02 | 2026-10-28-renderer-picker-signature-encoding-design.md |
+| 侧栏多根与壳层动作（源头行/空态引导/徽标消歧） | [sidebar-shell-actions.md](sidebar-shell-actions.md) | SRC-01~08（FTSRC-01~04 既有域另收） | 2026-10-31-sidebar-roots-design.md |
+| 图标主题与 Open VSX 通道 | [icon-themes-openvsx.md](icon-themes-openvsx.md) | ICON-01~09、OVX-01~05 | 2026-10-31-icon-themes-design.md |
+| 代码大纲与右面板切换 | [code-outline-panel-switch.md](code-outline-panel-switch.md) | OUT-01~10 | 2026-10-31-code-outline-panel-switch-design.md |
+| Git 信息面板 | [git-panel.md](git-panel.md) | GIT-01~12 | 2026-10-31-git-panel-design.md |
+| 图表官方服务器档与 kroki 回落（diagram 域续编） | [diagram-server-kroki.md](diagram-server-kroki.md)（既有文档补节，不新建） | DSV-07~10 + DM-11/12 落库承接 | 2026-10-23-renderer-lang-override-markpad-alignment-design.md §8 |
+
+首轮之后落库的其余特性域文档（cdn-diagram-engines、code-scan-resilience、error-card-open-as、filetree-src-remove、grammar-spa-fallback、io-degrade-matrix、jsonl-degrade-chain、multiroot-file-channel、override-lang、quickopen-multisource、susp-verification、tab-actions-enrichment、workspace-enrichment）：出处与编号段见各文档头注与 §2 场景清单，不在此重复转录。
+
+跨域归属说明（按各域文档第 1 节口径）：
 
 - **BUG-04 / BUG-05 / BUG-06 / BUG-07** 为跨域合并条目，在多个域文档各有一节「本域视角」的验收小节；根因全貌以报告 §5 对应条目为准。
 - **BUG-16** 主体在 pwa-mobile-performance（PWA-08）；binary-hex-archive 第 3 节单列其 hex 视图跨域回归验收，本域矩阵行不计。
@@ -65,4 +82,4 @@
 
 ---
 
-*本索引只做汇总与导航，不新增事实；场景数、缺陷归属、结果分布均转录自 `docs/report/e2e/e2e-test-report-2026-10-08.md` 与本目录 10 份域文档。*
+*本索引只做汇总与导航，不新增事实；首轮 10 域的场景数、缺陷归属、结果分布均转录自 `docs/report/e2e/e2e-test-report-2026-10-08.md` 与本目录 10 份域文档；§2.1 特性域文档的场景编号与来源转录自各域文档本体。*

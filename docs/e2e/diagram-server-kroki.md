@@ -2,7 +2,7 @@
 
 > 来源：plan `.superpowers/sdd/2026-10-23-renderer-lang-override-p3-server-types/`（Task 9）。spec 依据：`docs/superpowers/specs/2026-10-23-renderer-lang-override-markpad-alignment-design.md` §8（图表 server 模式、/api/compute/diagram、/api/kroki 服务端代发、krokiVia 设置与能力协商）+ §9.2（mermaid 主题即时重画，Task 7 承接）+ §10（kroki 类型扩容 30 类与新 CDN 引擎，DSV-04/06 为 Task 8 申报的真网承接）。服务端契约单测面（diagrams.rs/kroki.rs/core）不在本档——此处只收浏览器端到端面。
 >
-> 脚本：`apps/web/e2e/b-diagram-server-kroki.spec.ts`（DSV-03/04/06 + T7，默认通道双 project）与 `apps/web/e2e-server/b-diagram-server-kroki.spec.ts`（DSV-01/02/05，server 通道 chromium）。旧锚承接：`b-settings-center-deep.spec.ts` SC-10（30 类扩容后网格行数锚 18→30 + diagrams 节落盘 toEqual 补全五键，见 §5）。
+> 脚本：`apps/web/e2e/b-diagram-server-kroki.spec.ts`（DSV-03/04/06 + T7，默认通道双 project）与 `apps/web/e2e-server/b-diagram-server-kroki.spec.ts`（DSV-01/02/05，server 通道 chromium）。旧锚承接：`b-settings-center-deep.spec.ts` SC-10（30 类扩容后网格行数锚 18→30 + diagrams 节落盘 toEqual 补全五键，见 §5）。官方服务器档续编（DSV-07..10 + DM-11/12 落库承接）见 §2 末节，实现锚 fd0987f/e43080a，现状脚本 `apps/web/e2e/b-md-diagrams-deep.spec.ts`。
 
 ## 1. 目的与来源
 
@@ -34,9 +34,19 @@ Task 4（b-compute-diagrams.spec.ts）已锚「服务端 markdown 后处理」�
 | DSV-06 | 真网可达（同上）+ localStorage 预设 `modes.d2='local'` | 打开 ```d2 围栏 md | `.md-diagram-view svg` **first()** 可见（180s 上界——@d2lang/d2 wasm 11.5MB）；无错误态；kroki.io 请求为零 | 是（skipIf offline） |
 | T7 | localStorage 预设 themeMode=light；`page.route('**kroki.io/**')` abort（mermaid 本地引擎，环境无关） | 打开 ```mermaid 围栏 md → 出图后走设置中心 UI 管线（图表组 → Mermaid 主题 forest → 应用） | 重画锚：svg 根 `id="md-mermaid-N"`（diagramEngines `mermaidSeq` 每渲染递增）poll 必异于初始 id；重画后 svg 可见、`[data-mermaid]` 锚保留、无错误类 | 否 |
 
-### skipIf 策略
+### 官方服务器档（2026-10-30 续编，DSV-07 落库承接 + DSV-08..10）
 
-DSV-04/06 是本 spec 仅有的真网依赖用例（执行环境无外网时 skip，不假红）；DSV-01/02/05/T7 与 DSV-03a/b 离线稳定（server 通道服务端真引擎/mock 上游皆 127.0.0.1，默认通道全 route mock 或本地引擎）。
+> 实现来源：fd0987f（kroki 失败回落官方服务器 fallback 档）+ e43080a（official 升渲染模式显式第五档，注册表旗标 `officialServer`）。契约锚：注册表 `packages/vviewer-render-diagram/src/markdown/diagrams.ts:42-43`（plantuml/c4plantuml 双类型 officialServer:true）、降级链 `packages/vviewer-markdown/src/pipeline.ts:441-472`（appendKrokiImg error → fallback 档判据）与 `:504-529`（official 直连 + official→kroki 降级）。现状脚本：`apps/web/e2e/b-md-diagrams-deep.spec.ts:375-431`（DM-11/12）——本节把两场景行落库（此前 docs/e2e 无 DM-11/12 行，补 §3.2「docs/e2e 统一依据」口径缺口），DSV-08..10 为同族新锚。
+
+| 编号 | 前置条件 | 步骤 | 期望 | 依赖网络 |
+| --- | --- | --- | --- | --- |
+| DM-11（落库承接，DSV-07） | 默认通道（无服务端）；`page.route` 按 host 分路由：kroki.io 404 + plantuml.com fulfill svg | 打开 ```plantuml 围栏 md | fallback 档成功跳：`img[src^="https://www.plantuml.com/plantuml/svg/"]` 可见且 src 匹配官方编码字母表（`[0-9A-Za-z_-]+$`）；`.md-diagram-error` 不在场、toggle 留「源码」 | 否（全 mock） |
+| DM-12（落库承接，DSV-07） | localStorage 预设 `modes.plantuml='official'`；kroki.io abort 兜底（误回落必被计数锚抓到）+ plantuml.com fulfill svg；kroki 请求计数器 | 打开 ```plantuml 围栏 md | 显式第五档直连：官方 URL img 可见出图、无错误卡；kroki.io 请求计数 **0**（通道纯净性） | 否（全 mock） |
+| DSV-08 | DM-12 同款（`modes.c4plantuml='official'`）+ c4plantuml 围栏（```c4plantuml，官方 stdlib 内置 C4 同语法族） | 打开该 md | c4plantuml 直连官方 URL 出图（注册表 officialServer 双类型之二，diagrams.ts:43）；无错误卡、kroki 零请求——现 e2e 仅 plantuml 一类型锚，同族第二类型零锚 | 否（全 mock） |
+| DSV-09 | localStorage 预设 `diagrams.krokiHost` 自建（非 `https://kroki.io` 任意值，如 `http://127.0.0.1:9`）；`page.route` 拦该自建 host 的 `/plantuml/svg/*` 404；官方 host 请求计数器 | 打开 ```plantuml 围栏 md | 隐私防线（fd0987f 双判据之 host 门，pipeline.ts:461-465：krokiHost 须等于公共默认才回落）：直落错误卡、文案为**单跳**形态「kroki 渲染失败（plantuml）」（非「kroki 与官方服务器渲染失败」两跳文案）；官方 URL **零请求**（自建服务端指定的源码不得静默扩散到第三方）；源码同展兜底在场 | 否（全 mock） |
+| DSV-10 | DM-12 预设 + 路由反转：plantuml.com 404 + kroki.io fulfill svg | 打开 ```plantuml 围栏 md | 降级链 official→kroki 成功跳（pipeline.ts:515-522：official img error → appendKrokiImg）：`img[src^="https://kroki.io/plantuml/svg/"]` 接管出图、无错误卡（DM-01 只锚双跳全败错误卡终态，本锚补中间成功跳） | 否（全 mock） |
+
+DSV-08..10 与 DM-11/12 同离线稳定（全 route mock）；DSV-09 的自建 krokiHost 走浏览器 img 直发通道（client 通道，`page.route` 可拦——与 DSV-03b 同理；服务端代发 krokiVia=server 的 host 来自部署侧 `--kroki-host`，不经浏览器栈，见 §3 记档）。
 
 ## 3. mock 策略记档（kroki 上游）
 
@@ -51,6 +61,8 @@ DSV-04/06 是本 spec 仅有的真网依赖用例（执行环境无外网时 ski
 | `dsv-01-server-mode.md` | 标题+段落+```dot `digraph { dsv -> ok }`（server 单测同款最小 digraph） | DSV-01 |
 | `dsv-02-kroki-proxy.md` | 标题+```plantuml `Alice -> Bob: dsv` | DSV-02 |
 | `dsv-03-fallback.md` / `dsv-04-wavedrom.md` / `dsv-06-d2.md` / `t7-mermaid-theme.md` | 默认通道 spec 内联构造（injectDir，不落 samples） | DSV-03b/04/06/T7 |
+| `dd-11-official-fallback.md` / `dd-12-official-mode.md` | ```plantuml `@startuml A -> B @enduml` 围栏（`b-md-diagrams-deep.spec.ts` 内联构造，同款不落 samples） | DM-11/12 |
+| `dsv-08-c4-official.md` / `dsv-09-selfhost-nofallback.md` / `dsv-10-official-failover.md` | ```c4plantuml / ```plantuml 最小围栏（官方档续编，构造同 dd-1x 先例） | DSV-08/09/10 |
 | wavedrom wavejson | `{"signal":[{"name":"clk","wave":"p..."},{"name":"dat","wave":"x3.4x","data":["A","B"]}]}`（经典入门样例裁剪） | DSV-04 |
 | d2 源 | `x -> y`（最小有向边） | DSV-06 |
 | mock 上游应答 | 最小 `<svg><rect/></svg>`（data-* 是否穿过客户端 sanitize 不进断言面） | DSV-02 |
