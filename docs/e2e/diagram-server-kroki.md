@@ -36,7 +36,7 @@ Task 4（b-compute-diagrams.spec.ts）已锚「服务端 markdown 后处理」�
 
 ### 官方服务器档（2026-10-30 续编，DSV-07 落库承接 + DSV-08..10）
 
-> 实现来源：fd0987f（kroki 失败回落官方服务器 fallback 档）+ e43080a（official 升渲染模式显式第五档，注册表旗标 `officialServer`）。契约锚：注册表 `packages/vviewer-render-diagram/src/markdown/diagrams.ts:42-43`（plantuml/c4plantuml 双类型 officialServer:true）、降级链 `packages/vviewer-markdown/src/pipeline.ts:441-472`（appendKrokiImg error → fallback 档判据）与 `:504-529`（official 直连 + official→kroki 降级）。现状脚本：`apps/web/e2e/b-md-diagrams-deep.spec.ts:375-431`（DM-11/12）——本节把两场景行落库（此前 docs/e2e 无 DM-11/12 行，补 §3.2「docs/e2e 统一依据」口径缺口），DSV-08..10 为同族新锚。**编号备案（README §3.2 条 3 后缀约定）**：DSV-07 为「DM-11/12 落库承接」行动号，其行为面拆两行落——DM-11 = DSV-07a（现状脚本既有锚的文档行）、DM-12 = DSV-07b（同前），落 Playwright 时标题 `DM-11 (DSV-07a)`/`DM-12 (DSV-07b)` 双号反查；DSV-08..10 为独立新号。
+> 实现来源：fd0987f（kroki 失败回落官方服务器 fallback 档）+ e43080a（official 升渲染模式显式第五档，注册表旗标 `officialServer`）。契约锚：注册表 `packages/vviewer-render-diagram/src/markdown/diagrams.ts:42-43`（plantuml/c4plantuml 双类型 officialServer:true）、降级链 `packages/vviewer-markdown/src/pipeline.ts:441-472`（appendKrokiImg error → fallback 档判据）与 `:504-529`（official 直连 + official→kroki 降级）。现状脚本：`apps/web/e2e/b-md-diagrams-deep.spec.ts`（2026-11-03 落 Playwright：DM-11/12 双号标题 `:389`/`:421` + DSV-08/09/10 新锚 `:451`/`:495`/`:538`，全 route mock 离线）——本节把两场景行落库（此前 docs/e2e 无 DM-11/12 行，补 §3.2「docs/e2e 统一依据」口径缺口），DSV-08..10 为同族新锚。**编号备案（README §3.2 条 3 后缀约定）**：DSV-07 为「DM-11/12 落库承接」行动号，其行为面拆两行落——DM-11 = DSV-07a（现状脚本既有锚的文档行）、DM-12 = DSV-07b（同前），落 Playwright 时标题 `DM-11 (DSV-07a)`/`DM-12 (DSV-07b)` 双号反查；DSV-08..10 为独立新号。
 
 | 编号 | 前置条件 | 步骤 | 期望 | 依赖网络 |
 | --- | --- | --- | --- | --- |
@@ -44,7 +44,7 @@ Task 4（b-compute-diagrams.spec.ts）已锚「服务端 markdown 后处理」�
 | DM-12（= DSV-07b 落库行） | localStorage 预设 `modes.plantuml='official'`；kroki.io abort 兜底（误回落必被计数锚抓到）+ plantuml.com fulfill svg；kroki 请求计数器 | 打开 ```plantuml 围栏 md | 显式第五档直连：官方 URL img 可见出图、无错误卡；kroki.io 请求计数 **0**（通道纯净性） | 否（全 mock） |
 | DSV-08 | DM-12 同款（`modes.c4plantuml='official'`）+ c4plantuml 围栏（```c4plantuml，官方 stdlib 内置 C4 同语法族） | 打开该 md | c4plantuml 直连官方 URL 出图（注册表 officialServer 双类型之二，diagrams.ts:43）；无错误卡、kroki 零请求——现 e2e 仅 plantuml 一类型锚，同族第二类型零锚 | 否（全 mock） |
 | DSV-09 | localStorage 预设 `diagrams.krokiHost` 自建（非 `https://kroki.io` 任意值，如 `http://127.0.0.1:9`）；`page.route` 拦该自建 host 的 `/plantuml/svg/*` 404；官方 host 请求计数器 | 打开 ```plantuml 围栏 md | 隐私防线（fd0987f 双判据之 host 门，pipeline.ts:461-465：krokiHost 须等于公共默认才回落）：直落错误卡、文案为**单跳**形态「kroki 渲染失败（plantuml）」（非「kroki 与官方服务器渲染失败」两跳文案）；官方 URL **零请求**（自建服务端指定的源码不得静默扩散到第三方）；源码同展兜底在场 | 否（全 mock） |
-| DSV-10 | DM-12 预设 + 路由反转：plantuml.com 404 + kroki.io fulfill svg | 打开 ```plantuml 围栏 md | 降级链 official→kroki 成功跳（pipeline.ts:515-522：official img error → appendKrokiImg）：`img[src^="https://kroki.io/plantuml/svg/"]` 接管出图、无错误卡（DM-01 只锚双跳全败错误卡终态，本锚补中间成功跳） | 否（全 mock） |
+| DSV-10 | DM-12 预设 + 官方 host 请求计数器 + 路由反转：plantuml.com 404 + kroki.io fulfill svg | 打开 ```plantuml 围栏 md | 降级链 official→kroki 成功跳（pipeline.ts:515-522：official img error → appendKrokiImg）：`img[src^="https://kroki.io/plantuml/svg/"]` 接管出图、无错误卡；**官方 URL 请求计数恰 1**（official 跳确曾发生——effectiveModeOf 静默降级路径下 kroki img 同样可见，唯此计数锚可甄别）；toggle 留「源码」（DM-01 只锚双跳全败错误卡终态，本锚补中间成功跳） | 否（全 mock） |
 
 DSV-08..10 与 DM-11/12 同离线稳定（全 route mock）；DSV-09 的自建 krokiHost 走浏览器 img 直发通道（client 通道，`page.route` 可拦——与 DSV-03b 同理；服务端代发 krokiVia=server 的 host 来自部署侧 `--kroki-host`，不经浏览器栈，见 §3 记档）。
 

@@ -25,16 +25,33 @@ import { openOverflowMenu } from './tabbar-actions';
  * - DM-09 多图表文档性能锚：12 围栏（6 本地 + 6 kroki）45s 内全终态、引擎 chunk 只加载一次、
  *   kroki 每围栏恰一次请求；
  * - DM-10 纯 web auto 策略（无服务端）：纯图表文档恒本地通道——「渲染: 本地」+ 零 compute POST。
- * - DM-11 plantuml 官方服务器 fallback 档（2026-10-30）：kroki 404 → src 换官方服务器
- *  URL 出图（注册表 officialServer + krokiHost 公共默认双判据，jsdom 手派 error 的
- *  单测面之外的真实网络跳）；自建 host 不回落为单测裁决面（隐私防线，无网络面）。
- * - DM-12 官方服务器显式第五档：modes.plantuml='official' 直连官方 URL 出图且零
- *  kroki.io 请求（通道纯净性；kroki abort 兜底令误回落必被计数锚抓到）。
+ * - DM-11 (DSV-07a) plantuml 官方服务器 fallback 档（2026-10-30）：kroki 404 → src 换
+ *  官方服务器 URL 出图（注册表 officialServer + krokiHost 公共默认双判据，jsdom 手派
+ *  error 的单测面之外的真实网络跳）；自建 host 不回落为 DSV-09 浏览器面锚（隐私防线）。
+ * - DM-12 (DSV-07b) 官方服务器显式第五档：modes.plantuml='official' 直连官方 URL 出图
+ *  且零 kroki.io 请求（通道纯净性；kroki abort 兜底令误回落必被计数锚抓到）。
+ *  双号反查备案：DM-11/12 即 docs/e2e/diagram-server-kroki.md §2 官方档节 DSV-07a/b
+ *  落库行（场景表唯一依据，DM 号不再外扩）。
+ * - DSV-08 官方档第二类型：modes.c4plantuml='official' 同族直连（注册表 officialServer
+ *  双类型之二，diagrams.ts:43；徽标 c4plantuml 精确锚类型分发未被归并 plantuml）。
+ * - DSV-09 自建 krokiHost 隐私防线（fd0987f 双判据之 host 门）：fallback 判据要求
+ *  krokiHost 归一后等于公共默认 kroki.io——自建地址 kroki 404 直落单跳文案错误卡 +
+ *  官方 host 零请求（用户指定服务端的源码不得静默扩散到第三方）。
+ * - DSV-10 official→kroki 降级链中间成功跳：官方 404 → kroki img 接管出图（官方请求
+ *  计数恰 1 锚 official 跳确曾发生，非 effectiveModeOf 静默降级；DM-01 只锚双跳全败
+ *  终态，本锚补中间成功跳）。
  *
- * 契约锚：注册表/别名 packages/vviewer-render-text/src/markdown/diagrams.ts:20-39；生效模式回退链
- * pipeline.ts:135-143；kroki error 同展兜底 pipeline.ts:297-305；source 模式无 toggle
- * pipeline.ts:274-287；惰性高亮 pipeline.ts:152-173；mermaid 锚与重渲染 markdownRenderer.ts:527-556；
- * settings 归一 apps/web/src/lib/stores/settings.ts:99-109；主题派发 theme.ts:312-324。
+ * 契约锚：注册表/别名 packages/vviewer-render-diagram/src/markdown/diagrams.ts:39 起
+ * DIAGRAM_TYPES（officialServer 双类型 :42-43、DEFAULT_PLANTUML_HOST :94）；生效模式
+ * 回退链 effectiveModeOf packages/vviewer-markdown/src/pipeline.ts:200（official 分支
+ * :207-211）；kroki error 同展兜底 showErrorCard pipeline.ts:452-459；source 模式无
+ * toggle withToggle 分叉 pipeline.ts:399（source 注记 :403）；图/源码切换惰性高亮
+ * wireDiagramToggle pipeline.ts:283-287（runDiagrams :171 起）；mermaid 锚与重渲染
+ * AppShell.svelte:736-757 派发 → ViewerPane.svelte:649 监听 → diagramEngines.ts:10/:17
+ * mermaidSeq id；settings 归一 apps/web/src/lib/stores/settings.ts normalizeSettings :128
+ * 起（krokiHost ^https?:// 白名单 :151、defaults() :97-113）；主题派发 theme.ts:323-345
+ *（vv:appearance-applied :340）。官方档（fd0987f/e43080a）：fallback 判据
+ * pipeline.ts:444-470、official 直连分支 :504-529、createPlantumlUrl diagrams.ts:106-113。
  * 移动端形态：树行点击经 openTreeFile（drawer 自适配），其余断言全 DOM 化，双 project 同参。
  * 注入通道与 b-md-diagrams 一致（injectDir + openTreeFile，夹具内联构造，不另落 samples）。
  */
@@ -372,7 +389,7 @@ test.describe('b-md-diagrams-deep 图表三通道矩阵补强', () => {
   // URL 出图（无错误卡）。kroki.io abort / 官方 fulfill 按 host 分路由（**/plantuml/svg/*
   // 通配会双命中，分 host 才能单跳定向失败）；全 route mock 离线稳定，编码正确性由
   // 单测官方向量锚 + DM-01 双跳往返锚承接
-  test('DM-11 plantuml 官方服务器 fallback 档：kroki 失败后 src 换官方 URL 出图无错误卡', async ({
+  test('DM-11 (DSV-07a) plantuml 官方服务器 fallback 档：kroki 失败后 src 换官方 URL 出图无错误卡', async ({
     page
   }) => {
     test.setTimeout(60_000);
@@ -404,7 +421,7 @@ test.describe('b-md-diagrams-deep 图表三通道矩阵补强', () => {
   // img 直连官方服务器 URL、零 kroki.io 请求。kroki.io abort 兜底：若实现误回落
   // kroki（img error → fallback 档换官方），请求计数锚必现非零——终态图一样时
   // 通道纯净性仍被锁死
-  test('DM-12 官方服务器显式档：modes.plantuml=official 直连官方 URL 出图且零 kroki 请求', async ({
+  test('DM-12 (DSV-07b) 官方服务器显式档：modes.plantuml=official 直连官方 URL 出图且零 kroki 请求', async ({
     page
   }) => {
     test.setTimeout(60_000);
@@ -428,6 +445,137 @@ test.describe('b-md-diagrams-deep 图表三通道矩阵补强', () => {
     });
     await expect(view).not.toHaveClass(/md-diagram-error/);
     expect(krokiHits).toHaveLength(0);
+  });
+
+  // 官方档第二类型（docs/e2e/diagram-server-kroki.md §2 DSV-08）：c4plantuml 同族
+  // 直连——注册表 officialServer 双类型之二（diagrams.ts:43），既有 e2e 仅 plantuml
+  // 一类型锚（DM-12），c4 零锚。全 mock 离线（官方 fulfill + kroki abort 兜底），
+  // effectiveModeOf 的 officialServer 门与官方编码通道按类型独立生效
+  test('DSV-08 c4plantuml 官方档：modes.c4plantuml=official 直连官方 URL 出图且零 kroki 请求（注册表双类型之二）', async ({
+    page
+  }) => {
+    test.setTimeout(60_000);
+    const krokiHits: string[] = [];
+    page.on('request', (r) => {
+      if (/kroki\.io/.test(r.url())) krokiHits.push(r.url());
+    });
+    await page.route('**kroki.io/**', (route) => route.abort());
+    await page.route('**plantuml.com/plantuml/svg/*', (route) =>
+      route.fulfill({ contentType: 'image/svg+xml', body: SVG_BODY })
+    );
+    injectSettings(page, { diagrams: { modes: { c4plantuml: 'official' } } });
+    await openDoc(
+      page,
+      'dsv-08-c4-official.md',
+      [
+        '# c4 官方档',
+        '',
+        fence('c4plantuml', '@startuml\n!include <C4/C4_Context>\nPerson(u, "用户", "DSV-08")\n@enduml'),
+        ''
+      ].join('\n')
+    );
+    // 类型分发锚：徽标精确全等 c4plantuml（若围栏被归并 plantuml，此处必红——
+    // wrapByLang 的 hasText 子串匹配对 plantuml/c4plantuml 互相命中，须全等锚甄别）
+    const wrap = wrapByLang(page, 'c4plantuml');
+    await expect(wrap.locator('.md-diagram-lang')).toHaveText('c4plantuml');
+    const view = wrap.locator('.md-diagram-view');
+    // 直连面：官方 URL img 出图，编码走同一 createPlantumlUrl 通道（官方字母表，
+    // diagrams.ts:106-113 host/段单源不分公司类型）
+    const img = view.locator('img[src^="https://www.plantuml.com/plantuml/svg/"]');
+    await expect(img).toBeVisible({ timeout: 30_000 });
+    expect(await img.getAttribute('src')).toMatch(
+      /^https:\/\/www\.plantuml\.com\/plantuml\/svg\/[0-9A-Za-z_-]+$/
+    );
+    await expect(view).not.toHaveClass(/md-diagram-error/);
+    expect(krokiHits).toHaveLength(0);
+  });
+
+  // 隐私防线浏览器面（DSV-09，fd0987f 双判据之 host 门）：自建 krokiHost 时 fallback
+  // 判据不命中（pipeline.ts:461-465 krokiHost 归一后须等于公共默认 kroki.io）——
+  // kroki 404 直落单跳文案错误卡（officialTried 恒 false），官方 host 零请求。自建
+  // host 的 kroki img 走浏览器直发通道，page.route 可拦（DSV-03b 同理）；注入值经
+  // settings ^https?:// 白名单放行（settings.ts:151，'ftp://x' 才归空——DM-02 对照）
+  test('DSV-09 自建 krokiHost 不回落官方：单跳文案错误卡 + 官方 host 零请求（隐私防线）', async ({
+    page
+  }) => {
+    test.setTimeout(60_000);
+    const selfHits: string[] = [];
+    const officialHits: string[] = [];
+    page.on('request', (r) => {
+      if (r.url().startsWith('http://127.0.0.1:9/')) selfHits.push(r.url());
+      if (r.url().startsWith('https://www.plantuml.com/')) officialHits.push(r.url());
+    });
+    // 默认 host abort 兜底（DM-12/DSV-08 kroki abort 同构）：host 门失效回归时源码
+    // 不得经测试自身真实外发 plantuml.com（隐私锚不制造它要防的外泄），krokiHost 被
+    // 归一吃掉回默认 kroki.io 的设置面回归同样快速确定红——page.on('request') 在
+    // abort 下照常计数，officialHits 零请求与单跳文案断言语义不变
+    await page.route('**plantuml.com/**', (route) => route.abort());
+    await page.route('**kroki.io/**', (route) => route.abort());
+    await page.route('**127.0.0.1:9/plantuml/svg/*', (route) =>
+      route.fulfill({ status: 404, contentType: 'text/plain', body: 'nope' })
+    );
+    injectSettings(page, { diagrams: { krokiHost: 'http://127.0.0.1:9' } });
+    await openDoc(
+      page,
+      'dsv-09-selfhost-nofallback.md',
+      ['# 自建不回落', '', fence('plantuml', '@startuml\nA -> B\n@enduml'), ''].join('\n')
+    );
+    const wrap = wrapByLang(page, 'plantuml');
+    // 直发通道自建 host 落地：kroki 编码请求确实打向用户指定的服务端（非归一吃掉
+    // 回默认 kroki.io——那样本锚整体假红，属设置面回归而非本场景红）
+    await expect
+      .poll(() => selfHits.length, { timeout: 30_000, message: 'kroki 直发应命中自建 host' })
+      .toBeGreaterThanOrEqual(1);
+    expect(selfHits[0]).toMatch(/^http:\/\/127\.0\.0\.1:9\/plantuml\/svg\/[0-9A-Za-z_-]+$/);
+    // 错误卡为单跳形态：host 门不命中，文案精确全等（DM-01 双跳全败文案
+    // 「kroki 与官方服务器渲染失败（plantuml）」在此必须不出现）
+    const errView = wrap.locator('.md-diagram-view.md-diagram-error');
+    await expect(errView).toBeVisible({ timeout: 30_000 });
+    await expect(errView).toHaveText('kroki 渲染失败（plantuml）');
+    // 源码同展兜底在场（4-3 可见化判据：失败态文案卡与源码面板并存）
+    const sourcePane = wrap.locator('.md-diagram-source');
+    await expect(sourcePane).toBeVisible();
+    await expect(sourcePane.locator('code')).toContainText('@startuml');
+    // 隐私防线核心锚：官方服务器零请求（kroki 自建失败不外发第三方）
+    expect(officialHits).toHaveLength(0);
+  });
+
+  // 降级链中间成功跳（DSV-10）：显式 official 档官方 404 → appendKrokiImg 接管出图
+  //（pipeline.ts:504-529 error 监听降级链）。官方请求计数恰 1 是「official 跳确曾
+  // 发生」的直接证据——若 effectiveModeOf 误把 official 降级直走 kroki，kroki img
+  // 同样可见但官方零请求；DM-01 只锚双跳全败终态，本锚补中间成功跳
+  test('DSV-10 official→kroki 降级链：官方 404 后 kroki img 接管出图无错误卡（中间成功跳）', async ({
+    page
+  }) => {
+    test.setTimeout(60_000);
+    const officialHits: string[] = [];
+    page.on('request', (r) => {
+      if (r.url().startsWith('https://www.plantuml.com/')) officialHits.push(r.url());
+    });
+    // 路由反转（对 DM-11）：官方第一跳 404 触发降级，kroki 第二跳 fulfill 接管
+    await page.route('**plantuml.com/plantuml/svg/*', (route) =>
+      route.fulfill({ status: 404, contentType: 'text/plain', body: 'nope' })
+    );
+    await page.route('**kroki.io/plantuml/svg/*', (route) =>
+      route.fulfill({ contentType: 'image/svg+xml', body: SVG_BODY })
+    );
+    injectSettings(page, { diagrams: { modes: { plantuml: 'official' } } });
+    await openDoc(
+      page,
+      'dsv-10-official-failover.md',
+      ['# 官方失败降级', '', fence('plantuml', '@startuml\nA -> B\n@enduml'), ''].join('\n')
+    );
+    const wrap = wrapByLang(page, 'plantuml');
+    const view = wrap.locator('.md-diagram-view');
+    // 接管面：kroki img 出图、无错误卡
+    await expect(view.locator('img[src^="https://kroki.io/plantuml/svg/"]')).toBeVisible({
+      timeout: 30_000
+    });
+    await expect(view).not.toHaveClass(/md-diagram-error/);
+    // 降级链证据：official 直连跳恰一次（编码请求先于 error 事件，此处同步断安全）
+    expect(officialHits).toHaveLength(1);
+    // 成功态交互面：toggle 留「源码」（错误卡态为「图」，DM-01 对照）
+    await expect(wrap.locator('.md-diagram-toggle')).toHaveText('源码');
   });
 });
 
