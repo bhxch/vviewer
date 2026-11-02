@@ -1,0 +1,68 @@
+# 桌面构建探针：在分支上真跑 release.yml 桌面矩阵的失败高发步（server sidecar
+# 全量 301 grammar 编译，含 build.rs 的 C++ scanner cc 路径），绿了再烧 tag——
+# 避免删 tag/重触发循环（v0.1.1 期间桌面双腿连败两轮的教训）。与桌面 job 的差异
+# 仅省略 web dist 解包与 tauri 打包（失败面不在其中，且由兄弟腿实测背书）。
+# 触发：push 到 main 且涉及 build.rs/guard.rs/本文件（tag 推送不跑）；或手动 dispatch。
+name: Desktop Build Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/desktop-build-probe.yml'
+      - 'server/core/build.rs'
+      - 'server/core/src/guard.rs'
+      - 'server/Cargo.toml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sidecar:
+    name: sidecar 构建探针（${{ matrix.os }}）
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15, triple: aarch64-apple-darwin, rustflags: '-C link-arg=-Wl,-ld_classic' }
+          - { os: windows-latest, triple: x86_64-pc-windows-msvc, rustflags: '' }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # build.rs 按 301 全集源码编译 grammar（fetch 管线产源树，缺源 partial 告警
+      # 不断链）——与 release 桌面 job 同构建面
+      - uses: ./.github/actions/setup-grammars
+        with:
+          languages: all
+          fetch-only: 'true'
+      # 被验证的失败步本体：RUSTFLAGS 与 release 桌面矩阵逐字一致（arm64 经典链接器）
+      - name: 构建 server sidecar（per-target）
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: cargo build --release --manifest-path server/Cargo.toml --target ${{ matrix.triple }}
+      - name: sidecar 产物断言
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            test -f "server/target/${{ matrix.triple }}/release/vviewer.exe"
+          else
+            test -f "server/target/${{ matrix.triple }}/release/vviewer"
+          fi
+          echo "sidecar OK: ${{ matrix.triple }}"
