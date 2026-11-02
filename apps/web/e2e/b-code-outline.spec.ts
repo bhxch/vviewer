@@ -32,6 +32,15 @@ import { ensureRightDrawer } from './drawer';
  * - 点击跳转：OutlineView onclick(line) → AppShell 写激活 tab pendingLine（1 起）
  *   → ViewerPane 既有通道消费（revealLine → jumpToLine：目标行滚至视口中部 +
  *   vv-search-hit-line-active 行级临时高亮——GlobalSearchPanel BUG-09 同通道）。
+ * - 默认落位/touched 台账：rightView/rightViewTouched（AppShell.svelte:133-135）——
+ *   默认落位 effect 读数据写视图、touched 后不写（:218-221），段级点击置 touched
+ *   （:1349-1374）；OUT-08 锚 touched 跨文件保持 + 未 touched 新页对照。
+ * - depth 钳制：OutlineView 渲染端 outlineLogicalDepths 重算逻辑深度，钳制单点
+ *   OUTLINE_DEPTH_CLAMP=8（outlineDepth.ts:23，12px/层 → 上界 96px）；OUT-09 锚
+ *   11 层嵌套钉界与容器无横向溢出。
+ * - 在飞 outline 失效面：实例 destroy 撤在飞（renderCode.ts:520 → client.cancelOutline
+ *   lang 级，client.ts:247-250）+ 迟到 resolve 被 destroyed 拦截（renderCode.ts:487）+
+ *   ViewerPane lastSeenTab 跨 tab 清空门（:580）；OUT-10 锚切走零串台 + 切回重建。
  *
  * 注入通道：injectDir（b-markdown-html-docs-helpers，__vvOpenDirImpl + webkitRelativePath，
  * 纯前端本地管线）；3MB 载体按 HL-03 先例页内构造（免大参数跨 evaluate 拷贝）。
@@ -130,6 +139,32 @@ const JS_SIBLING_REF = [
   '});',
   ''
 ].join('\n');
+
+/** OUT-09 载体：11 层嵌套 class（A0 起逐层嵌套至 A10，raw depth 0..10）+ 末层
+ * def deep()（raw 11）。python tags.scm 的 @definition.class 锚整个 class_definition
+ * 节点（assets/queries/python/tags.scm:3-4），byte 区间含嵌套 body → 提取端
+ * byteEnd 开放栈逐层 +1（outline.ts:79-89）；12 条目全 definition，无引用过滤面，
+ * 文档序 = li 序（A0…A10、deep），缩进断言按序全读。 */
+const PY_DEEP_NEST = (() => {
+  const lines: string[] = [];
+  for (let i = 0; i <= 10; i++) lines.push(`${'    '.repeat(i)}class A${i}:`);
+  lines.push(`${'    '.repeat(11)}def deep():`);
+  lines.push(`${'    '.repeat(12)}pass`);
+  return `${lines.join('\n')}\n`;
+})();
+
+/** OUT-10 载体：1500 def × 8 行体（15,000 行 ≈195KB）——条目 < 门限 2000 不触
+ * 截断（OUT-11 机械面不掺入，恰值计数可精确断言），体量使 worker outline 到货
+ * 窗口达数百 ms 量级（场景档时序控制：切换动作落窗内）；函数体内 assignment 非
+ * module 直子、不入 python tags constant 捕获（tags.scm:1 结构限定）→ 条目恰
+ * 1500 无漂移。 */
+const PY_RACE_FNS = Array.from({ length: 1500 }, (_, i) =>
+  [
+    `def fn${String(i).padStart(4, '0')}():`,
+    ...Array.from({ length: 8 }, (_, j) => `    v${j} = ${j}`),
+    ''
+  ].join('\n')
+).join('\n');
 
 /** 打开文件并等代码渲染容器就绪（渲染入口走通后才有实例鸭子面） */
 async function openCodeFile(page: Page, spec: TextFileSpec | TextFileSpec[], name: string): Promise<void> {
@@ -389,6 +424,126 @@ test('OUT-07 · ≈2MB python 全量+大纲同窗性能锚（场景档钉值）�
   await expect
     .poll(() => page.locator('.vv-code-pre .vv-code-line').first().textContent(), { timeout: 30_000 })
     .toContain('fn799');
+});
+
+test('OUT-08 · rightViewTouched 台账跨文件保持：手动落「属性」后切有大纲文件仍「属性」，未 touched 新页对照默认「目录」', async ({ page }) => {
+  test.setTimeout(120_000);
+  await injectDir(page, [
+    { name: 'calc.py', content: PY_OUTLINE },
+    { name: 'shape.ts', content: TS_OUTLINE }
+  ]);
+  const tocBtn = page.locator('.vv-right-switch-btn', { hasText: '目录' });
+  const metaBtn = page.locator('.vv-right-switch-btn', { hasText: '属性' });
+
+  // ① 默认落位基线：calc.py 大纲到货、未 touched → 默认落位 effect 落「目录」
+  await openTreeFile(page, 'calc.py');
+  await waitOutlineReady(page);
+  await expect(tocBtn).toHaveAttribute('aria-pressed', 'true');
+  await expect(metaBtn).toHaveAttribute('aria-pressed', 'false');
+
+  // ② 手动点「属性」：段级点击置 rightViewTouched（AppShell.svelte:1360-1363 用户
+  //    显式选择，台账语义——轮询/重渲染不置位），MetaPanel 互斥在场
+  await metaBtn.click();
+  await expect(metaBtn).toHaveAttribute('aria-pressed', 'true');
+  await expect(tocBtn).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.meta-panel')).toBeVisible();
+  await expect(page.locator('.vv-outline')).toHaveCount(0);
+  await ensureRightDrawer(page, false);
+
+  // ③ 切 shape.ts（有大纲）：目录钮重新在场 = outlineDefinitions 非空（新文件大纲
+  //    已到货），但落位仍「属性」——默认落位 effect 因 touched 不写（AppShell
+  //    .svelte:218-221）。跨文件回默认落位的修前行为此处必红
+  await openTreeFile(page, 'shape.ts');
+  await ensureRightDrawer(page, true);
+  await expect(tocBtn).toBeVisible({ timeout: 30_000 });
+  await expect(metaBtn).toHaveAttribute('aria-pressed', 'true');
+  await expect(tocBtn).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.meta-panel')).toBeVisible();
+  await expect(page.locator('.vv-outline')).toHaveCount(0);
+  await ensureRightDrawer(page, false);
+
+  // ④ 对照（场景档：另一新 context，rightViewTouched 初值 false）：同 context 新页
+  //    继承 project 视口且 sessionStorage 不共享；rightView/touched 为组件态零持久
+  //    化（AppShell.svelte:130-131，零快照/零 settings）→ 新页即初值 false，直接
+  //    打开有大纲文件落「目录」（默认落位语义，与 ③ 形成单变量对照）
+  const page2 = await page.context().newPage();
+  await injectDir(page2, [{ name: 'calc.py', content: PY_OUTLINE }]);
+  await openTreeFile(page2, 'calc.py');
+  await ensureRightDrawer(page2, true);
+  const tocBtn2 = page2.locator('.vv-right-switch-btn', { hasText: '目录' });
+  await expect(tocBtn2).toBeVisible({ timeout: 30_000 });
+  await expect(tocBtn2).toHaveAttribute('aria-pressed', 'true');
+  await expect(page2.locator('.vv-outline li')).toHaveCount(5, { timeout: 30_000 });
+  await page2.close();
+});
+
+test('OUT-09 · 深嵌套缩进钳制：11 层嵌套 paddingLeft 钉死 96px 上界（min(depth,8)×12px），容器无横向溢出', async ({ page }) => {
+  test.setTimeout(90_000);
+  await openCodeFile(page, { name: 'deep-nest.py', content: PY_DEEP_NEST }, 'deep-nest.py');
+  // 先锚 tree-sitter 路径（OUT-05/12 同款：防 hljs 降级凑出空/伪大纲假绿）
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 30_000 });
+  await waitOutlineReady(page);
+
+  // 12 条目 = 11 class + 末层 def（全 definition，无引用过滤面）
+  await expect(page.locator('.vv-outline li')).toHaveCount(12, { timeout: 30_000 });
+
+  // 缩进精确序列：raw depth [0..10, 11] → 逻辑深度 min(d, OUTLINE_DEPTH_CLAMP=8)
+  // （outlineDepth.ts:30，OutlineView.svelte:76 渲染端单点）× 12px/层。深层四项
+  // （raw 8,9,10,11）钉死同值 96px——无钳制实现落 96/108/120/132px 必红
+  const pads = await page
+    .locator('.vv-outline li')
+    .evaluateAll((els) => els.map((el) => parseFloat(getComputedStyle(el).paddingLeft)));
+  expect(pads).toEqual([0, 12, 24, 36, 48, 60, 72, 84, 96, 96, 96, 96]);
+
+  // 场景档上界不变量（序列断言的独立表达）：所有条目 ≤ 96px
+  for (const p of pads) expect(p).toBeLessThanOrEqual(96);
+
+  // 容器无横向溢出爆版面（.vv-outline overflow:auto，app.css:681——钮内 nowrap+
+  // ellipsis 剪裁，钳制后缩进不把内容推出容器）
+  const box = await page
+    .locator('.vv-outline')
+    .evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
+  expect(box.scrollWidth).toBeLessThanOrEqual(box.clientWidth);
+});
+
+test('OUT-10 · 在飞 outline 跨 tab 失效：开 calc.py 渲染就绪即切 plain.txt 右栏零串台，切回大纲重建', async ({ page }) => {
+  test.setTimeout(120_000);
+  await injectDir(page, [
+    { name: 'calc.py', content: PY_RACE_FNS },
+    { name: 'plain.txt', content: 'plain body\n' }
+  ]);
+
+  // ① 打开 calc.py（全量 parse 完成 = fire-and-forget 投递 outline，renderCode.ts
+  //    :481-494），不等切换器立即切 plain.txt——在飞响应若在切走后到达，实例已
+  //    destroy：destroy 撤在飞（renderCode.ts:520 → client.cancelOutline lang 级，
+  //    client.ts:247-250）+ 迟到 resolve 被 destroyed 拦截（renderCode.ts:487）+
+  //    ViewerPane lastSeenTab 跨 tab 清空门（ViewerPane.svelte:580）。先锚
+  //    tree-sitter 路径（OUT-05 同款：防 hljs 降级使大纲恒 [] 的假绿通路）
+  await openTreeFile(page, 'calc.py');
+  await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 30_000 });
+  await openTreeFile(page, 'plain.txt');
+  // plain 渲染就绪先行（场景档口径），随后开抽屉读右栏终态
+  await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 30_000 });
+  await ensureRightDrawer(page, true);
+
+  // ② 轮询窗口后（OUT-04 同款 1.2s = 多轮 250ms tick）右栏终态零串台：calc.py 的
+  //    outline 响应不得在 plain.txt 激活期出现在右栏——切走后终态锚（场景档：不锚
+  //    中间帧；中间态无论已到/在飞，三层失效都使 plain 实例期右栏无大纲）
+  await page.waitForTimeout(1_200);
+  await expect(page.locator('.vv-right-switch')).toHaveCount(0);
+  await expect(page.locator('.vv-outline')).toHaveCount(0);
+  await expect(page.locator('.meta-panel')).toBeVisible();
+  await ensureRightDrawer(page, false);
+
+  // ③ 切回 calc.py：大纲重建——切换器重现（上行链路重通）+ 条目数回归恰 1500
+  //    （重渲染新实例重提取，dispatcher 每次派发新建实例销毁旧实例；跨文件切回
+  //    与 OUT-03 同通路）；untouched 默认落位「目录」；< 门限无截断提示条
+  await openTreeFile(page, 'calc.py');
+  await waitOutlineReady(page);
+  await expect(page.locator('.vv-outline li')).toHaveCount(1500, { timeout: 30_000 });
+  await expect(page.locator('.vv-outline-truncate-text')).toHaveCount(0);
+  await expect(page.locator('.vv-right-switch-btn', { hasText: '目录' })).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('OUT-11 · 门限截断机械面（2400 def）：折叠恰 2000 行 + 提示条在视口内且布局不塌 + 「全部展开」全量 + 截断态二分限显示集', async ({ page }) => {
