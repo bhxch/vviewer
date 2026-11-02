@@ -333,15 +333,35 @@ describe('installFromOpenVsx（mock fetch 管线）', () => {
 });
 
 describe('checkUpdate / updateTheme（mock fetch 更新闭环）', () => {
-  it('checkUpdate：latest ≠ origin.version → hasUpdate；相等 → false', async () => {
-    mockFetch({ [`${OVX}/api/${PUB}/${EXT}`]: { body: metaJson('2.0.0') } });
-    expect(
-      await checkUpdate({ publisher: PUB, extension: EXT, version: '1.0.0', checkedAt: 1 })
-    ).toEqual({ latest: '2.0.0', hasUpdate: true });
-    mockFetch({ [`${OVX}/api/${PUB}/${EXT}`]: { body: metaJson('1.0.0') } });
-    expect(
-      await checkUpdate({ publisher: PUB, extension: EXT, version: '1.0.0', checkedAt: 1 })
-    ).toEqual({ latest: '1.0.0', hasUpdate: false });
+  /** checkUpdate 黑盒驱动：mock latest 元数据 → 以给定已装版本检查（semver-lite 口径）。 */
+  async function checkWith(originVersion: string, latest: string) {
+    mockFetch({ [`${OVX}/api/${PUB}/${EXT}`]: { body: metaJson(latest) } });
+    return checkUpdate({ publisher: PUB, extension: EXT, version: originVersion, checkedAt: 1 });
+  }
+
+  it('checkUpdate：latest > origin → hasUpdate；相等 → false', async () => {
+    expect(await checkWith('1.0.0', '2.0.0')).toEqual({ latest: '2.0.0', hasUpdate: true });
+    expect(await checkWith('1.0.0', '1.0.0')).toEqual({ latest: '1.0.0', hasUpdate: false });
+  });
+
+  it('checkUpdate：latest < origin（降级）→ 不提示（备案：显式 @version 装到比 latest 新的版本）', async () => {
+    expect(await checkWith('2.0.0', '1.0.0')).toEqual({ latest: '1.0.0', hasUpdate: false });
+  });
+
+  it('checkUpdate：数值序——9.0 → 10.0 是升级（纯字符串比较会误判 \'10\' < \'9\'）', async () => {
+    expect(await checkWith('9.0.0', '10.0.0')).toEqual({ latest: '10.0.0', hasUpdate: true });
+    expect(await checkWith('10.0.0', '9.0.0')).toEqual({ latest: '9.0.0', hasUpdate: false });
+  });
+
+  it('checkUpdate：段数不齐——缺段补 0（1.2 与 1.2.0 等价；1.2 → 1.2.1 是升级）', async () => {
+    expect(await checkWith('1.2', '1.2.0')).toEqual({ latest: '1.2.0', hasUpdate: false });
+    expect(await checkWith('1.2.0', '1.2')).toEqual({ latest: '1.2', hasUpdate: false });
+    expect(await checkWith('1.2', '1.2.1')).toEqual({ latest: '1.2.1', hasUpdate: true });
+  });
+
+  it('checkUpdate：非数值段——字符串字典序兜底（1.0.0-a → 1.0.0-b 是升级，反向是降级）', async () => {
+    expect(await checkWith('1.0.0-a', '1.0.0-b')).toEqual({ latest: '1.0.0-b', hasUpdate: true });
+    expect(await checkWith('1.0.0-b', '1.0.0-a')).toEqual({ latest: '1.0.0-a', hasUpdate: false });
   });
 
   it('updateTheme 图标主题：重拉 v2 → 同 id 覆盖写入（version/内容刷新、无临时残留）', async () => {

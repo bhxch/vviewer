@@ -124,7 +124,7 @@ settings.iconThemes 变更 → 注册字体 + 计算 `iconSig`（theme id + scop
 
 ### 6.3 更新流程
 
-- 「检查更新」：`GET /api/{p}/{e}` 读 latest `version`，与 `origin.version` 不等即行内提示「更新到 x.y.z」（不引 semver 库，段比较足够；`deprecated` 元数据展示提示但不阻止安装——builder 细节）。
+- 「检查更新」：`GET /api/{p}/{e}` 读 latest `version`，与 `origin.version` 做 semver-lite 段比较（`split('.')` 逐段数值比较、缺段补 0、非数值段字符串兜底；不引 semver 库），仅 latest **高于** `origin.version` 才行内提示「更新到 x.y.z」；latest 不高于已装版本——平版、以及显式 `@version` 装到比 latest 更新的降级场景——一律不提示（`deprecated` 元数据展示提示但不阻止安装——builder 细节）。
 - 更新执行：重拉 vsix → 校验 → **复用原记录 id 覆盖写入**（manifest/fonts 替换、`version`/`checkedAt` 刷新）——设置引用（`settings.appearance` / `iconThemes.theme` 指向 `imported:<id>`）零断链，fontsSig/iconSig 联动自然重渲染。
 - 「全部检查」批量入口：逐条串行 GET（记录数量级小，无并发风暴）。
 - **不做自动后台更新**（v1）；手动 JSON/VSIX 导入的记录无 origin，天然无更新通道。更新不保留旧版本历史（回退 = 按 `@version` 重装旧版）。
