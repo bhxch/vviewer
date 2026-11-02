@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { OutlineEntry } from '@bhxch/vviewer-highlight';
   import { OUTLINE_EXPAND_ALL_TEXT, OUTLINE_TRUNCATE_TEXT } from './outlineTruncate';
+  import { outlineLogicalDepths } from './outlineDepth';
 
   /**
    * 代码大纲视图（code-outline Task 3）：entries 由 AppShell 传入——ViewerPane
@@ -8,7 +9,8 @@
    * outlineDefinitions 单源过滤（评审 Minor 2：reference.* 不进大纲视图，本组件
    * 直接吃过滤后定义条目，不重复过滤）。
    * - kind 展示名剥 definition. 前缀映射常用中文（未收录显示原词）
-   * - depth 缩进树（钳制 8 层防深嵌套爆版面——spec §3 builder 裁决，12px/层）
+   * - depth 缩进树（过滤后栈重算逻辑深度——单点 outlineDepth.ts；钳制 8 层防深嵌套
+   *   爆版面——spec §3 builder 裁决，12px/层）
    * - 点击经 onclick(line) 上抛：AppShell 写激活 tab pendingLine（1 起）+ rev++
    *   触发重跑消费（GlobalSearchPanel 同款通道），本组件零实例依赖（tab 从父层来）
    * - activeLine = AppShell 滚动跟随节流循环二分得的激活条目 line（0 起）；同行
@@ -64,10 +66,14 @@
     return KIND_LABELS[short] ?? short;
   }
 
-  /** 缩进层级（spec §3：depth 钳制 8 层） */
-  function depthOf(e: OutlineEntry): number {
-    return Math.min(e.depth, 8);
-  }
+  /**
+   * 缩进层级重归一（栈重算）单点 outlineDepth.ts：提取端 depth 按全量 raw 口径栈深计
+   * （highlight 包 outline.ts pairsToOutline，reference.* 同样入栈），AppShell 过滤
+   * 引用后直读会缩进跳层。byte 区间开放栈重跑提取端同款循环 = 显示集真实祖先计数
+   * （算法与 raw depth 栈的区别证据见 outlineDepth.test.ts real·SIBLING 用例）。
+   * 只依赖 entries（activeLine 变化不重算，OUT-11 性能面一致）。
+   */
+  const depths = $derived(outlineLogicalDepths(entries));
 </script>
 
 <nav class="vv-outline" aria-label="代码大纲">
@@ -84,7 +90,7 @@
   {/if}
   <ul>
     {#each entries as e, i (e.byteStart + ':' + i)}
-      <li style="padding-left: {depthOf(e) * 12}px">
+      <li style="padding-left: {(depths[i] ?? 0) * 12}px">
         <button
           type="button"
           class:active={activeLine !== undefined && e.line === activeLine}

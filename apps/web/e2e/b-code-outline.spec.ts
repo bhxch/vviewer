@@ -17,7 +17,9 @@ import { ensureRightDrawer } from './drawer';
  *   （function_declaration/method_definition）不在捕获内，接口签名面即 API 面（T1 实测）；
  *   ocaml 有 wasm（static/grammars 34 语集）但 queries/ocaml/ 无 tags.scm → 真实
  *   tree-sitter parse 路径零大纲（OUT-05 的「无 tags 语言」载体）；perl（.pl）无 wasm
- *   → hljs 兜底路径（OUT-04 的降级载体）。
+ *   → hljs 兜底路径（OUT-04 的降级载体）；javascript tags.scm = 具名 function_expression /
+ *   function_declaration / class / method 等 definition.* + reference.call（锚整个
+ *   call_expression，调用实参内的具名函数表达式即「被过滤 ref 内存活 def」——OUT-12 载体）。
  * - 上行：ViewerPane 渲染 effect 一次性读（getToc :446 同位并列）+ 250ms 轮询 effect
  *   （异步到货面，getInspector 先例）；渲染失败/清理双路清空 → 切换器消失不抛错。
  * - 切换器：显隐 = tocEntries 与 outlineDefinitions（过滤 reference. 后）任一非空；
@@ -85,6 +87,49 @@ const PY_MANY_FNS = Array.from({ length: 60 }, (_, i) => `def fn${String(i).padS
  * ≈2MB 尺度锚不走此通道——见 OUT-07 页内构造（HL-03/OUT-04 先例） */
 const PY_TRUNCATED_FNS =
   Array.from({ length: 2400 }, (_, i) => `def fn${String(i).padStart(4, '0')}():\n    pass`).join('\n') + '\n';
+
+/** OUT-12 载体 1（嵌于存活 def 内）：被过滤引用节点内存活的定义。js tags：
+ * `(call_expression function: (identifier) @name) @reference.call` 锚整个调用表达式，
+ * `(function_expression name: (identifier) @name) @definition.function` 捕获具名函数
+ * 表达式——实参内的 alpha/beta 在 byte 范围上嵌于 register 调用内。python 的 def/class
+ * 不能出现在调用表达式内，构造不出此形态。真实 javascript.wasm + tags.scm 实测 raw
+ * depth（outline.ts pairsToOutline 全量口径栈深，reference.* 同样入栈）：outer 0 /
+ * register（reference.call）1 / alpha 2 / beta 2 / gamma 1 / tail 0。AppShell 过滤
+ * register 后 alpha/beta 仍带 raw 2，显示集内却无 depth 1 父行——直读即跳层。 */
+const JS_NESTED_REF = [
+  'function outer() {',
+  '    register(function alpha() {',
+  '        return 1;',
+  '    }, function beta() {',
+  '        return 2;',
+  '    });',
+  '    function gamma() {',
+  '        return 3;',
+  '    }',
+  '}',
+  'function tail() {',
+  '    return 4;',
+  '}',
+  ''
+].join('\n');
+
+/** OUT-12 载体 2（顶层引用兄弟，复审 Blocking 2 区分口径锚）：setup 与
+ * describe(ref)>it(ref)>namedTest 为顶层兄弟——describe/it 均具名标识符调用
+ * （tags.scm `(call_expression function: (identifier) @name) @reference.call` 锚整个
+ * call_expression 被过滤），匿名 function 无 name 不捕获（`name:` 必选）。真实 grammar
+ * 实测过滤集 [setup raw0 [0,19), namedTest raw2 [68,114)]：namedTest 的 byte 范围不在
+ * setup 内，真值 0px。载体 1 对「raw depth 栈」与「byte 区间栈」两法同值（[0,1,1,1,0]），
+ * 对近似实现盲；本载体 raw 栈法把 namedTest 误挂为 setup 子项（12px）——唯 byte 区间
+ * 栈（outline.ts 同款重跑）得 0px，锁死重算口径本身。 */
+const JS_SIBLING_REF = [
+  'function setup() {}',
+  "describe('suite', function () {",
+  "    it('works', function namedTest() {",
+  '        return 1;',
+  '    });',
+  '});',
+  ''
+].join('\n');
 
 /** 打开文件并等代码渲染容器就绪（渲染入口走通后才有实例鸭子面） */
 async function openCodeFile(page: Page, spec: TextFileSpec | TextFileSpec[], name: string): Promise<void> {
@@ -397,4 +442,43 @@ test('OUT-11 · 门限截断机械面（2400 def）：折叠恰 2000 行 + 提�
   await expect
     .poll(() => page.locator('.vv-outline button.active').textContent(), { timeout: 30_000 })
     .toContain('fn2');
+});
+
+test('OUT-12 · reference 过滤后 depth 栈重算：被过滤引用内的定义行不跳层（嵌于存活 def 内齐层），顶层引用兄弟不误挂为前一 def 子项', async ({ page }) => {
+  test.setTimeout(90_000);
+  await injectDir(page, [
+    { name: 'nested.js', content: JS_NESTED_REF },
+    { name: 'siblings.js', content: JS_SIBLING_REF }
+  ]);
+  const padsOf = (): Promise<number[]> =>
+    page
+      .locator('.vv-outline li')
+      .evaluateAll((els) => els.map((el) => parseFloat(getComputedStyle(el).paddingLeft)));
+
+  // ① 载体 1（引用嵌于存活 def 内）：先锚 tree-sitter 路径（OUT-05 同款：防 hljs
+  // 降级凑出空大纲/假绿）
+  await openTreeFile(page, 'nested.js');
+  await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 30_000 });
+  await waitOutlineReady(page);
+
+  // 引用过滤：全量 6 条（5 definition.function + 1 reference.call）只出 5 行，register 不在场
+  await expect(page.locator('.vv-outline li')).toHaveCount(5);
+  await expect(outlineRow(page, 'register')).toHaveCount(0);
+
+  // 栈重算（outlineDepth.ts）：alpha/beta（raw 2，父 reference.call 已过滤）与 gamma
+  // （raw 1）同为 outer 的真实子层 → 三者齐 12px；直读 raw depth 则 alpha/beta 24px
+  // 而显示集内无 12px 父行（跳层，修前 [0,24,24,12,0] 必红）。outer/tail 顶层 0px。
+  expect(await padsOf()).toEqual([0, 12, 12, 12, 0]);
+  await ensureRightDrawer(page, false);
+
+  // ② 载体 2（顶层引用兄弟）：过滤后恰 2 行（describe/it 均被过滤）。namedTest 的
+  // byte 范围不在 setup 内 → 0px；raw depth 栈近似法在此形态得 12px（误挂为 setup
+  // 子项）即红——载体 1 对两法同值，唯本形态锁死「byte 区间栈重跑提取端」口径
+  await openTreeFile(page, 'siblings.js');
+  await waitOutlineReady(page);
+  await expect(page.locator('.vv-outline li')).toHaveCount(2);
+  await expect(outlineRow(page, 'setup')).toHaveCount(1);
+  await expect(outlineRow(page, 'namedTest')).toHaveCount(1);
+  expect(await padsOf()).toEqual([0, 0]);
 });
