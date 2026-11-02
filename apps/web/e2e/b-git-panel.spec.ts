@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +10,9 @@ import { overflowConnectServer } from './tabbar-actions';
 
 /**
  * b-git-panel —— 右面板 Git 段：基础信息卡 + 三元切换器（Task 2，GIT-01..04）+
- * diff 视图 / 文件历史 log / 行级 blame hover（Task 3，GIT-05..08）。
+ * diff 视图 / 文件历史 log / 行级 blame hover（Task 3，GIT-05..08）+
+ * 测绘差距新增锚（GIT-09..12：detached HEAD / blame 200 截断 / diff 截断上限 /
+ * untracked 无 diff 提示态，场景文档 docs/e2e/git-panel.md §2.2）。
  * spec：docs/superpowers/specs/2026-10-31-git-panel-design.md。
  *
  * 链路事实（源码锚，写作时已读）：
@@ -60,6 +62,9 @@ let fixtureRoot: string | null = null;
 let CRLF_OID = '';
 /** a.txt 末次提交（c3 = 仓库 HEAD）完整 oid——GIT-07 log 展开的 full hash 断言锚 */
 let A_LAST_OID = '';
+/** repo2 单提交完整 oid（checkout --detach 后 HEAD 即指向它）——GIT-09 末次提交
+ *  短 hash 断言锚（游离态下 last-commit 走 log(filepath)，与分支解析无关） */
+let DETACHED_OID = '';
 
 /** 构建真实 git 仓库夹具（同步 execSync——beforeAll 装置期，CI runner 自带 git）。 */
 function buildGitFixture(root: string): void {
@@ -111,6 +116,53 @@ function buildGitFixture(root: string): void {
   );
   // untracked（GIT-03 载体）：工作区在、HEAD 树无
   writeFileSync(join(repo, 'new.txt'), 'brand new file\n');
+
+  // ── GIT-09..11 夹具扩展（场景文档 §4：各 repo 独立 HEAD/对象库，互不共享，
+  // 不污染 repo1 的 oid 断言锚 GIT-01/07）──
+  const mkRepo = (name: string): ((cmd: string) => string) => {
+    const dir = join(root, name);
+    mkdirSync(dir, { recursive: true });
+    const run = (cmd: string): string => execSync(`git ${cmd}`, { cwd: dir, encoding: 'utf8' });
+    run('init -b main');
+    run('config user.email e2e@vviewer.local');
+    run('config user.name e2e');
+    run('config core.autocrlf false');
+    return run;
+  };
+  // repo2（GIT-09 detached 载体）：单 commit + checkout --detach——.git/HEAD 变裸
+  // oid（gitProbe.ts:73 非 'gitdir:' 前缀照常命中），isogit currentBranch 返回
+  // undefined（gitWorker.ts:272-280 detached → ok:true 无 branch → GitSection
+  // 分支位兜底文案「（游离 HEAD）」）。subject 避开 'main'，供分支行负断言排除误显
+  const git2 = mkRepo('repo2');
+  writeFileSync(join(root, 'repo2', 'head.txt'), 'detached head carrier\n');
+  git2('add -A');
+  git2('commit -m "detach carrier commit"');
+  DETACHED_OID = git2('rev-parse HEAD').trim();
+  git2('checkout --detach');
+  // repo3（GIT-10 blame 截断载体）：e2e-blame.txt 201 提交——首提交建文件 + 循环
+  // 200 次追加一行提交（须改文件内容才计入 filepath 过滤 log——--allow-empty 不改
+  // 文件不计，场景文档 §4 注意项）。末态全提交 = 文件 clean。execSync 循环装置期
+  // 秒级完成（CI runner 自带 git，场景文档备案）
+  const git3 = mkRepo('repo3');
+  const blameFile = join(root, 'repo3', 'e2e-blame.txt');
+  writeFileSync(blameFile, 'blame base line\n');
+  git3('add -A');
+  git3('commit -m "blame base commit"');
+  for (let i = 1; i <= 200; i++) {
+    appendFileSync(blameFile, `blame appended line ${i}\n`);
+    git3(`commit -am "blame append ${i}"`);
+  }
+  // repo4（GIT-11 diff 截断载体）：首提交 1 行、工作区追加 2500 行保持未提交
+  // （modified → diff 走工作区 vs HEAD）。行数门载体：≈40KB < 200KB 不触 bytes 门
+  // （场景文档验收：bytes 门由 gitDiff 单测向量覆盖，不在 e2e 重复）
+  const git4 = mkRepo('repo4');
+  writeFileSync(join(root, 'repo4', 'big-diff.txt'), 'head line 1\n');
+  git4('add -A');
+  git4('commit -m "big diff base commit"');
+  writeFileSync(
+    join(root, 'repo4', 'big-diff.txt'),
+    'head line 1\n' + Array.from({ length: 2500 }, (_, i) => `big diff line ${i + 2}`).join('\n') + '\n'
+  );
   // 无 .git 对照目录（GIT-04 载体）：root 本身也无 .git，向上两级皆 404
   const nogit = join(root, 'nogit');
   mkdirSync(nogit, { recursive: true });
@@ -276,8 +328,15 @@ test('GIT-04 · 无 .git 来源：无 Git 段 + probe 负缓存（二次打开�
  *  段内（mobile ≤600px 抽屉收起即移出视口，段内 click 永挂 actionability——首跑
  *  实证）；需要操作代码区（GIT-08 hover）的用例自行 ensureRightDrawer(page, false)。 */
 async function openGitSection(page: Page, name: string): Promise<Locator> {
+  return openGitSectionIn(page, 'repo1', name);
+}
+
+/** openGitSection 的带目录变体（GIT-09..11 夹具扩 repo2/repo3/repo4 后续用；前缀
+ *  流与 openGitSection 同一：信息卡 ready + log 列表首条可见即 diff/log 数据链全通。
+ *  注意 untracked 文件 log 空列表不适用本前缀——GIT-12 手写等 .vv-git 可见即收） */
+async function openGitSectionIn(page: Page, dir: string, name: string): Promise<Locator> {
   await connect(page);
-  await openFile(page, 'repo1', name);
+  await openFile(page, dir, name);
   await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 30_000 });
   const gitBtn = await waitGitButton(page);
   await gitBtn.click();
@@ -410,4 +469,184 @@ test('GIT-08 · blame hover：浮层字段（作者/日期/subject/未提交哨�
   await expect(pop).toBeVisible({ timeout: 30_000 });
   await expect(pop).toContainText('e2e');
   await expect(pop).toContainText('first: add readme and a');
+});
+
+// ───────────── GIT-09..12 测绘差距新增锚（场景文档 §2.2）─────────────
+
+/** 环境去噪 route（b-md-corpus-markpad mockExternalNoise 同款，须先于 goto 注册）：
+ *  GIT 域全链零网络（isomorphic-git 纯前端读 .git 字节，spec §2.1），本层不为被断
+ *  断言链路服务，只把门禁构建注入的 grammar CDN manifest / favicon / CDN 直链面
+ *  定态化——fulfill 合法空清单 / 204 / abort，防真网 socket 的资源级 console 噪声。
+ *  kroki fulfill、jsdelivr abort、grammars 空清单三面与 markpad 逐字对齐。 */
+async function mockGitNoise(page: Page): Promise<void> {
+  await page.route('**kroki.io/**', (route) =>
+    route.fulfill({
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>'
+    })
+  );
+  await page.route('**/cdn.jsdelivr.net/**', (route) => route.abort());
+  await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204 }));
+  await page.route('**/cdn.grammars.test/**', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      headers: { 'access-control-allow-origin': '*' },
+      body: '{"grammars":{}}'
+    })
+  );
+}
+
+test.describe('GIT-09..12（SW 阻断 + 外噪 mock 定态化）', () => {
+  // SW 接管后请求经 SW fetch 不走页面网络栈，page.route 拦不到（b-md-corpus-markpad
+  // 同源备案）；本组无 SW 依赖面（纯本地 git 管线 + serverHarness 文件通道），阻断后
+  // mockGitNoise 拦截确定性成立。describe 级 test.use 只作用于本组，GIT-01..08 环境
+  // 不动。
+  test.use({ serviceWorkers: 'block' });
+
+  test('GIT-09 · detached HEAD：分支位「（游离 HEAD）」+ 末次提交/状态不受游离态影响', async ({ page }) => {
+    test.setTimeout(90_000);
+    await mockGitNoise(page);
+    const section = await openGitSectionIn(page, 'repo2', 'head.txt');
+    // 分支位（GitSection.svelte:378）：probe 命中（gitProbe.ts:73 裸 oid 非 'gitdir:'
+    // 前缀 → headOk:true），worker probe-head detached → 无 branch（gitWorker.ts:272-280）
+    // → 固定兜底文案（实现为固定文案，非短 hash 标注——场景文档 §2.2 以实读为准注）
+    await expect(section.locator('.vv-git-row', { hasText: '分支' })).toContainText('（游离 HEAD）');
+    // 负断言：checkout --detach 后 main 分支仍存在但 HEAD 不指它——若游离态误显
+    // 分支名即在此红；subject 已避开 'main' 措辞（夹具 'detach carrier commit'）
+    await expect(section.locator('.vv-git-row', { hasText: '分支' })).not.toContainText('main');
+    // 游离态不影响信息卡其余面：状态 clean（gitProbe/gitWorker 链路均与分支无关）+
+    // 末次提交 = repo2 唯一提交（last-commit 走 log(filepath)，gitWorker.ts:287）
+    await expect(section.locator('.vv-git-dot-clean')).toBeVisible({ timeout: 30_000 });
+    await expect(section.locator('.vv-git-row', { hasText: '状态' })).toContainText('无改动');
+    await expect(section.locator('.vv-git-row', { hasText: '末次提交' })).toContainText(DETACHED_OID.slice(0, 7));
+    await expect(section.locator('.vv-git-row', { hasText: '说明' })).toContainText('detach carrier commit');
+  });
+
+  test('GIT-10 · blame 200 截断：说明行常驻模板 + 浮层截断真值 + 浮层不越窗（未超限对照）', async ({ page }) => {
+    test.setTimeout(150_000);
+    await mockGitNoise(page);
+    const section = await openGitSectionIn(page, 'repo3', 'e2e-blame.txt');
+
+    // ① 说明行（GitSection.svelte:397，插值 BLAME_MAX_COMMITS=200，gitDiff.ts:24）：
+    //    渲染条件仅 phase.commit !== null（:396），措辞为模板常量——toHaveText 全串
+    //    钉死（「超 200」措辞在场不随当前文件真实历史数变化，步骤③同串对照）
+    const hint = section.locator('.vv-git-blame-hint');
+    await expect(hint).toHaveText('悬停代码行可查看提交归属；文件历史超 200 提交仅最近 200 参与归属。');
+
+    // ② hover 浮层：201 提交文件 blame worker 计算（log depth 201 探针，gitWorker.ts:363-367
+    //    → truncated:true）→ 浮层 note 真值在场（ViewerPane.svelte:361-363 → :851）
+    await ensureRightDrawer(page, false);
+    const pop = page.locator('.vv-git-blame-pop');
+    await page.hover('.vv-code-line[data-line="0"]');
+    await expect(pop).toBeVisible({ timeout: 60_000 });
+    await expect(pop.locator('.vv-git-blame-pop-note')).toContainText('仅最近 200 个参与归属', { timeout: 60_000 });
+    // 几何（场景文档 §2.2 ②）：fixed 浮层 boundingBox 完整落在视口内（四边 ≤ 视口
+    // 边界；mobile 375×667 更易越窗，双 project 同断）。夹具语料短 subject/短 note，
+    // 浮层实际宽 ≈260px < 视口——备案：实现浮层无视口 clamp（x=行左缘，max-width
+    // 24rem 上限，app.css:670-672），本锚钉的是夹具语料下的完整可视几何
+    const box = await pop.boundingBox();
+    const vp = page.viewportSize();
+    expect(box).not.toBeNull();
+    expect(vp).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.y).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(vp!.width);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(vp!.height);
+
+    // ③ 常驻模板对照（场景文档 §2.2 ③/§3）：切未超限文件（repo1/crlf.txt，2 提交）
+    //    ——说明行同串在场（模板恒显非真值插值；若未来改真值插值/行隐藏，本锚红即
+    //    行为变化回写场景文档）。跨目录切换（本 page 只展开过 repo3，repo1 目录行
+    //    从未展开——switchFile 只在已展开目录内点文件行，crlf 载体须先展开 repo1；
+    //    本 page 未展开过 → 点一次即展开，无「再点折叠」风险）：mobile 左抽屉经
+    //    openDrawerIfNarrow 开（BUG-61 点文件后自动收，closeDrawerIfOpened 兜底）
+    const drawer = await openDrawerIfNarrow(page);
+    await page.locator('.vv-tree-row', { hasText: 'repo1' }).first().click();
+    await page.locator('.vv-tree-row', { hasText: 'crlf.txt' }).click();
+    await closeDrawerIfOpened(page, drawer);
+    await expect(page.locator('.vv-tab.active', { hasText: 'crlf.txt' })).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 30_000 });
+    await ensureRightDrawer(page, true);
+    // 切 tab 后 gitInfo 清空重 probe（repo1 目录本 page 未探过 → 真实探测 + worker
+    // 链路），hint 渲染条件 phase.commit !== null——30s 与 GIT-02 等待口径一致
+    await expect(page.locator('.vv-git-blame-hint')).toHaveText(
+      '悬停代码行可查看提交归属；文件历史超 200 提交仅最近 200 参与归属。',
+      { timeout: 30_000 }
+    );
+    // 浮层 note 为真值面（与说明行模板面互补）：未超限文件 blame truncated:false
+    // （gitWorker.ts:367）→ 无 note span——超限/未超限两文件「说明行恒显 + 浮层
+    // note 真值」双面齐断
+    await ensureRightDrawer(page, false);
+    await page.hover('.vv-code-line[data-line="0"]');
+    await expect(pop).toBeVisible({ timeout: 60_000 });
+    await expect(pop).toContainText('second: update a.txt and add crlf', { timeout: 60_000 });
+    await expect(pop.locator('.vv-git-blame-pop-note')).toHaveCount(0);
+  });
+
+  test('GIT-11 · diff 截断上限：2500 行追加 → 截断尾注 + stat 全量口径钉死 + 渲染集有界 2000', async ({ page }) => {
+    test.setTimeout(120_000);
+    await mockGitNoise(page);
+    const section = await openGitSectionIn(page, 'repo4', 'big-diff.txt');
+    // HEAD 1 行 vs 工作区 2501 行（首行相同）→ modified 模式（GitSection.svelte:84-85）
+    const foldBtn = section.locator('.vv-git-fold-btn');
+    await expect(foldBtn).toContainText('工作区 vs HEAD');
+    await foldBtn.click();
+    const diff = section.locator('.vv-git-diff');
+    await expect(diff).toBeVisible({ timeout: 30_000 });
+    // 截断尾注（gitDiff.ts:291-293 note 拼装，DIFF_MAX_ROWS=2000 gitDiff.ts:20）
+    await expect(section.locator('.vv-git-diff-trunc')).toContainText('diff 过大已截断（上限 2000 行');
+    await expect(section.locator('.vv-git-diff-trunc')).toContainText('仅显示前段');
+    // stat = 全量口径（gitDiff.ts:210「全量统计（含截断未显示部分——git diff --stat
+    // 同口径）」+ :220「统计为全量（不受截断影响）」）：夹具构造全量 +2500/−0 可预知
+    // 钉死。**注意与场景文档 GIT-11 期望②「stat=窗内着色行数」不同**：实读实现为
+    // 全量统计知情裁决（git diff --stat 同口径），本锚按实读行为落地——stat 全量
+    // 2500 与窗内着色 1999 刻意不等，两面各自钉死；若未来实现改窗内口径，本锚红
+    // 即行为变化回写场景文档（文档 §3 GIT-10 同款处置原则）
+    await expect(section.locator('.vv-git-diff-stat')).toContainText('+2500');
+    await expect(section.locator('.vv-git-diff-stat')).toContainText('−0');
+    // 渲染集有界（spec §3.3 渲染层承诺）：恰 2000 行 = 1 ctx（首行同）+ 1999 add
+    // （hunk 前扩 3 context 由 op0 起步，行数门恰在第 2000 行收口）+ 0 del；
+    // ≈34KB < 200KB bytes 门不参与（纯行数门截断）
+    await expect(diff.locator('.vv-git-diff-row')).toHaveCount(2000);
+    await expect(diff.locator('.vv-git-diff-row-add')).toHaveCount(1999);
+    await expect(diff.locator('.vv-git-diff-row-del')).toHaveCount(0);
+    // 窗内内容抽验：首行 ctx 与首个 add 行文本（前段内容 = 夹具构造序）
+    await expect(diff.locator('.vv-git-diff-row', { hasText: 'head line 1' })).toBeVisible();
+    await expect(diff.locator('.vv-git-diff-row-add').first()).toContainText('big diff line 2');
+  });
+
+  test('GIT-12 · untracked diff 提示态：折叠钮「（未跟踪文件无 diff）」+ 展开为 empty note 非空 diff', async ({ page }) => {
+    test.setTimeout(90_000);
+    await mockGitNoise(page);
+    // untracked 文件 log 空列表，openGitSectionIn 的 log 前缀不适用（其注释）——
+    // 手写前缀：GIT-03 同款 openFile + 等 .vv-git 可见即数据链全通
+    await connect(page);
+    await openFile(page, 'repo1', 'new.txt');
+    await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 30_000 });
+    const gitBtn = await waitGitButton(page);
+    await gitBtn.click();
+    const section = page.locator('.vv-git');
+    await expect(section).toBeVisible({ timeout: 30_000 });
+
+    // ① 折叠钮三分支互斥（GitSection.svelte:81-85 diffLabel）：untracked 分支标注。
+    //    30s 显式等待 phase ready（diffLabel 在 phase 非 ready 时返回 ''，:82）——本
+    //    用例是手写前缀（untracked log 空，无 openGitSectionIn 的 log 前缀隐式等到
+    //    phase ready），折叠钮文案要等 isogit chunk 首拉 + worker probe-head/
+    //    last-commit 往返，30s 与 GIT-02/GIT-03 的 phase-ready 等待口径一致
+    const foldBtn = section.locator('.vv-git-fold-btn');
+    await expect(foldBtn).toContainText('（未跟踪文件无 diff）', { timeout: 30_000 });
+    await expect(foldBtn).not.toContainText('工作区 vs HEAD');
+    await expect(foldBtn).not.toContainText('HEAD^ vs HEAD');
+    // ② 展开即提示态（GitSection.svelte:220 同步 empty note，无 worker 调用即现）：
+    //    note 文案精确钉死（GitDiffView.svelte:27-28 直显）
+    await foldBtn.click();
+    const body = section.locator('.vv-git-fold-body');
+    await expect(body).toBeVisible();
+    await expect(body.locator('.vv-git-note')).toHaveText('未跟踪文件无 diff（HEAD 树无此路径）');
+    // 非空 diff 面（场景文档 §2.2 ②）：无 diff 渲染集/着色行/截断尾注、无报错卡——
+    // 提示态替代空 diff（spec §3.3），GIT-05/06 正常分支文案锚零翻转
+    await expect(body.locator('.vv-git-diff')).toHaveCount(0);
+    await expect(body.locator('.vv-git-diff-row')).toHaveCount(0);
+    await expect(body.locator('.vv-git-diff-trunc')).toHaveCount(0);
+    await expect(body.locator('.vv-git-error')).toHaveCount(0);
+  });
 });

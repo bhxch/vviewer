@@ -14,14 +14,14 @@
 
 | 编号 | 落点 | 锚要 |
 | --- | --- | --- |
-| GIT-01 | `b-git-panel.spec.ts:184` | 信息卡字段（分支 main / CRLF 文件状态 clean 红线 / 末次提交短 hash=c2 该文件口径 / 作者 / 相对时间 / subject）+ 三元切换器显隐合并、默认落位属性 |
-| GIT-02 | `b-git-panel.spec.ts:211` | touched 保持 + modified 黄点（切文件 Git 段随行） |
-| GIT-03 | `b-git-panel.spec.ts:230` | untracked：灰点 + 「未跟踪」+ 末次提交「无（未跟踪文件）」 |
-| GIT-04 | `b-git-panel.spec.ts:242` | 无 .git 来源：切换器整体不出现 + probe 负缓存（二次打开零新增 .git 请求，route 计数=2） |
-| GIT-05 | `b-git-panel.spec.ts:290` | diff modified 模式：工作区 vs HEAD，+/− 行着色计数钉死（1+1−） |
-| GIT-06 | `b-git-panel.spec.ts:311` | diff clean 模式：HEAD^ vs HEAD（blobAt 首父链） |
-| GIT-07 | `b-git-panel.spec.ts:329` | 文件历史 ≤50 列表 + 展开详情（full hash / 提交者 / 逐提交 diff 基线=文件史前条目）+ 单开互斥 |
-| GIT-08 | `b-git-panel.spec.ts:356` | blame hover 浮层字段（作者/日期/subject/未提交哨兵）+ 滚动即收 + 先滚后悬两段式 |
+| GIT-01 | `b-git-panel.spec.ts:236` | 信息卡字段（分支 main / CRLF 文件状态 clean 红线 / 末次提交短 hash=c2 该文件口径 / 作者 / 相对时间 / subject）+ 三元切换器显隐合并、默认落位属性 |
+| GIT-02 | `b-git-panel.spec.ts:263` | touched 保持 + modified 黄点（切文件 Git 段随行） |
+| GIT-03 | `b-git-panel.spec.ts:282` | untracked：灰点 + 「未跟踪」+ 末次提交「无（未跟踪文件）」 |
+| GIT-04 | `b-git-panel.spec.ts:294` | 无 .git 来源：切换器整体不出现 + probe 负缓存（二次打开零新增 .git 请求，route 计数=2） |
+| GIT-05 | `b-git-panel.spec.ts:349` | diff modified 模式：工作区 vs HEAD，+/− 行着色计数钉死（1+1−） |
+| GIT-06 | `b-git-panel.spec.ts:370` | diff clean 模式：HEAD^ vs HEAD（blobAt 首父链） |
+| GIT-07 | `b-git-panel.spec.ts:388` | 文件历史 ≤50 列表 + 展开详情（full hash / 提交者 / 逐提交 diff 基线=文件史前条目）+ 单开互斥 |
+| GIT-08 | `b-git-panel.spec.ts:415` | blame hover 浮层字段（作者/日期/subject/未提交哨兵）+ 滚动即收 + 先滚后悬两段式 |
 
 ### 2.2 新增面（测绘差距锚）
 
@@ -29,14 +29,14 @@
 | --- | --- | --- | --- |
 | GIT-09 | 夹具 repo 追加 `git checkout --detach`（beforeAll 装置期对独立小 repo 或专用文件执行，不污染 GIT-01..08 的 main 分支载体）→ 连接打开该 repo 文件 → 激活 Git 段 | 读信息卡分支位 | detached HEAD（spec §3.1）：分支位显示「（游离 HEAD）」非分支名（`gitWorker.ts:276` currentBranch detached → `{ok:true}` 无 branch → `GitSection.svelte:379` 兜底文案——**注：实现为固定文案，非任务简报所拟「短 hash 标注」，以实读为准**）；状态/末次提交行不受游离态影响（clean + 短 hash 照常） |
 | GIT-10 | 夹具 repo3：单文件 201 次快提交（`execSync` 循环 append+commit，beforeAll 一次性构造；末次提交后文件 clean）→ 打开该文件激活 Git 段 | ① 读 blame 说明行；② hover 任一行读浮层包围盒；③ 对照：切 GIT-01 夹具的 crlf.txt（2 提交，未超限）读同一说明行 | ① 说明行文案含「文件历史超 200 提交仅最近 200 参与归属」（`GitSection.svelte:398` 插值 `{BLAME_MAX_COMMITS}`=200，gitDiff.ts:24）；② hover 浮层不越窗：fixed 定位浮层 boundingBox 完整落在视口内（四边 ≤ 视口边界，spec §3.2 浮层不越窗）；③ **常驻模板对照**：未超限文件同文案在场——说明行为固定模板非条件文案（渲染条件仅 `phase.commit !== null`，`:397`），「超 200」措辞为模板常量、不随当前文件历史数变化 |
-| GIT-11 | 夹具 repo4：文件首提交少量行 + 第二提交追加 >2000 行（如 2500 行）未提交（modified）→ 打开激活 Git 段展开 diff | ① 读折叠钮与 diff 区；② 对比 `.vv-git-diff-stat` 计数与着色行计数 | 截断尾注可见：`.vv-git-diff-trunc` 含「diff 过大已截断（上限 2000 行」（gitDiff.ts:291-293 + DIFF_MAX_ROWS:20）；`+/−` 计数按**窗内**钉死：`.vv-git-diff-stat` 数字与 `.vv-git-diff-row-add`/`-del` 实际着色行数一致（截断后统计=显示集口径，非全 diff 口径）；渲染行数 ≤2000 有界 |
+| GIT-11 | 夹具 repo4：文件首提交少量行 + 第二提交追加 >2000 行（如 2500 行）未提交（modified）→ 打开激活 Git 段展开 diff | ① 读折叠钮与 diff 区；② 读 `.vv-git-diff-stat` 统计与着色行计数 | 截断尾注可见：`.vv-git-diff-trunc` 含「diff 过大已截断（上限 2000 行」（gitDiff.ts:291-293 + DIFF_MAX_ROWS:20）；stat 按**全量口径**钉死（gitDiff.ts:210/220「全量统计（含截断未显示部分——git diff --stat 同口径）」知情裁决）：夹具全量 +2500/−0 与窗内着色 1999 add **刻意不等，两面各自钉死**（2026-11-03 复审回写：原拟「stat=窗内着色行数」期望与实现矛盾，e2e 按实读行为落地，实现改窗内口径时本锚红即再回写）；渲染行数 ≤2000 有界 |
 | GIT-12 | GIT-03 装置（untracked `new.txt`）→ 打开激活 Git 段 | ① 读 diff 折叠钮文案；② 点开折叠区读内容 | ① 折叠钮标注「（未跟踪文件无 diff）」（`GitSection.svelte:80` diffLabel `commit === null` 分支）；② 展开后为提示态非空 diff：`.vv-git-diff-row-add`/`-del` 计数 0、note「未跟踪文件无 diff（HEAD 树无此路径）」可见（`GitSection.svelte:222` empty 态）——无截断尾注、无报错卡 |
 
 ## 3. 验收行为
 
 - **GIT-09**：游离 HEAD 是只读探测的合法形态（`ok:true` 非 error），分支位文案为行为级验收基准；回归护栏：GIT-01 分支名 main 锚零翻转（同函数正常分支路径）。
 - **GIT-10**：截断标注的验收形态是「常驻模板」——说明行渲染条件仅为有历史（`phase.commit !== null`，`GitSection.svelte:397`），文案固定含「超 200…仅最近 200」措辞，**不随当前文件真实历史数变化**：超限 repo3 文件与未超限 crlf.txt 对照（步骤③）读同一文案，两处同时在场即为「恒显」的可执行落点（若未来改为真值插值——未超限时措辞变化或行隐藏——本锚按行为变化处置并回写本文档）。浮层不越窗为 spec §3.2 几何承诺。夹具规模备案：201 commit `execSync` 循环在装置期秒级完成（CI runner 自带 git），单 repo 独立构造防污染既有夹具的 oid 断言（GIT-01/07 短 hash 锚）。
-- **GIT-11**：截断是渲染层有界承诺（spec §3.3「>2000 行或 >200KB 截断 + 尾注」），计数窗内钉死防「统计全量、显示截断」的错位；2500 行载体只触发行数门（≈80KB < 200KB），bytes 门由单测向量覆盖不在 e2e 重复。
+- **GIT-11**：截断是渲染层有界承诺（spec §3.3「>2000 行或 >200KB 截断 + 尾注」），stat 统计为全量口径（gitDiff.ts:210/220「全量统计（含截断未显示部分——git diff --stat 同口径）」知情裁决；2026-11-03 复审回写：原「计数窗内钉死防『统计全量、显示截断』错位」期望与实现矛盾——全量统计是实现的备案语义非错位，e2e 按 stat +2500/−0 全量与窗内着色 1999 两面各自钉死落地）；2500 行载体只触发行数门（工作区 ≈47KB < 200KB），bytes 门由单测向量覆盖不在 e2e 重复。
 - **GIT-12**：提示态替代空 diff（spec §3.3「untracked 文件无 diff（提示态）」）；回归护栏：GIT-03 状态行锚、GIT-05/06 两模式折叠钮文案锚零翻转（diffLabel 三分支互斥）。
 - **全域回归护栏**：右面板三元切换器为 OUT/GIT 两域共享组件——本文档任何锚落地后与 `b-code-outline` 定向同跑（切换器显隐合并与 touched 台账双域互证）。
 
