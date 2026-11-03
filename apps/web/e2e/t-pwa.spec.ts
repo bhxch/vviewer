@@ -1,4 +1,4 @@
-import { overflowConnectServer } from './tabbar-actions';
+import { menuConnectServer } from './tabbar-menu';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type CDPSession, type Page } from '@playwright/test';
@@ -970,7 +970,7 @@ test(
     // 输入与提交钮窄视口折行，layout viewport 不再被撑宽；宽视口不触发折行。
     test.setTimeout(60_000);
     await page.goto('/');
-    await overflowConnectServer(page);
+    await menuConnectServer(page);
     const form = page.locator('.vv-server-form');
     await expect(form).toBeVisible();
     // 修复判据 1（几何）：提交按钮完全在 375px 视口内（缺陷态 x=418.4、right=465，

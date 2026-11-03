@@ -1,4 +1,4 @@
-import { overflowConnectServer } from '../e2e/tabbar-actions';
+import { menuConnectServer } from '../e2e/tabbar-menu';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { appendFileSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -122,7 +122,7 @@ test.afterAll(async () => {
 /** 主实例同源连接（无 token，全放行，同 b-markdown-html-docs-server.spec.ts 前例） */
 async function connectSameOrigin(page: Page): Promise<void> {
   await page.goto('/');
-  await overflowConnectServer(page);
+  await menuConnectServer(page);
   await page.getByLabel('服务器地址').fill(BASE);
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await expect(page.locator('.vv-tree-row', { hasText: 'srv-fs' })).toBeVisible({ timeout: 10_000 });

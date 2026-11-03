@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { assertPortFree, startVviewerServer, stopServer, waitHealthy } from './serverHarness';
 import { closeDrawerIfOpened, ensureRightDrawer, openDrawerIfNarrow } from './drawer';
-import { overflowConnectServer } from './tabbar-actions';
+import { menuConnectServer } from './tabbar-menu';
 
 /**
  * b-git-panel —— 右面板 Git 段：基础信息卡 + 三元切换器（Task 2，GIT-01..04）+
@@ -200,7 +200,7 @@ test.afterAll(async () => {
 /** ⋯ 菜单连接表单提交并等树挂载（m6 connect 先例：每 test 新 page） */
 async function connect(page: Page): Promise<void> {
   await page.goto('/');
-  await overflowConnectServer(page);
+  await menuConnectServer(page);
   await page.getByLabel('服务器地址').fill(BASE);
   await page.getByLabel('访问令牌').fill(TOKEN);
   await page.getByRole('button', { name: '连接', exact: true }).click();

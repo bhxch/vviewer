@@ -1,4 +1,4 @@
-import { openOverflowMenu } from './tabbar-actions';
+import { MENU_POP, openMenu } from './tabbar-menu';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
@@ -414,8 +414,8 @@ test.describe('b-md-lightbox-export-deep 灯箱与导出补强', () => {
       return el !== null && getComputedStyle(el).transform === 'none';
     });
     if (drawerOpen) await page.locator('.vv-right-toggle').click();
-    await openOverflowMenu(page);
-    await page.locator('.vv-tbact-pop').getByRole('button', { name: '设置', exact: true }).click();
+    await openMenu(page);
+    await page.locator(MENU_POP).getByRole('button', { name: '设置', exact: true }).click();
     await expect(page.locator('.vv-settings-center')).toBeVisible();
     await page.getByLabel('亮暗模式').selectOption('dark');
     await page.locator('.vv-sc-apply').click();

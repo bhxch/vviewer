@@ -1,4 +1,4 @@
-import { plusOpenFolder } from './tabbar-actions';
+import { MENU_POP, menuOpenFolder, openMenu } from './tabbar-menu';
 import { test, expect, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 import { applySettings, closeSettings, gotoGroup, openSettings } from './settings-center';
@@ -291,8 +291,12 @@ test('BUG-05/SHELL-09/13：设置中心排除规则预设生效，设置与开�
   await expect(toggle).not.toBeChecked();
   await closeSettings(page);
 
-  // 手动刷新按钮入口存在（BUG-05 验收 4 的 UI 前提；行为级验证在服务端模式 spec）
-  await expect(page.locator('button[aria-label="刷新当前文件"]')).toBeVisible();
+  // 手动刷新入口存在（BUG-05 验收 4 的 UI 前提；行为级验证在服务端模式 spec）——
+  // 标签栏收敛 Task 1 后入口入融合菜单：开浮层断言条目在场再收（aria-label 红线逐字）
+  await openMenu(page);
+  await expect(page.locator(MENU_POP).locator('button[aria-label="刷新当前文件"]')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator(MENU_POP)).toHaveCount(0);
 
   // 持久化：刷新后设置中心仍带排除规则与关闭的开关（本地 File 会话不跨刷新，树级验证走服务端模式 spec）
   await page.reload();
@@ -374,7 +378,7 @@ test('BUG-19/25/SHELL-01/08：打开文件夹两通道均有可见反馈（取�
       return orig(o);
     };
   });
-  await plusOpenFolder(page);
+  await menuOpenFolder(page);
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { __vvPickerCalls?: number }).__vvPickerCalls))
     .toBe(1);
@@ -394,7 +398,7 @@ test('BUG-19/25/SHELL-01/08：打开文件夹两通道均有可见反馈（取�
       return el;
     }) as typeof document.createElement;
   });
-  await plusOpenFolder(page);
+  await menuOpenFolder(page);
   await expect
     .poll(
       () =>

@@ -8,7 +8,7 @@
   import { rendererCandidatesOfTab } from './RendererPickerMenu';
   import { requestMetaLangFocus } from './metaLangFocus';
   import TabContextMenu, { type TabCtxEntry } from './TabContextMenu.svelte';
-  import TabBarActions from './TabBarActions.svelte';
+  import TabBarMenu from './TabBarMenu.svelte';
   import FileIcon from './FileIcon.svelte';
   import type { Settings } from './stores/settings';
 
@@ -18,9 +18,10 @@
    * 来源（模型）；onmanage：右端「管理」按钮回调（AppShell 切换面板）。
    * temp/hidden/onenter/onleave：chrome 隐藏与边缘唤出临时条（spec 2026-10-19
    * §2/§3），语义同 TopBar 同名 props（所有权在 AppShell）。
-   * themeMode/oncycletheme/onsettings/onmounts/zen/onToggleZen（顶栏退役 Task 2）：
-   * 左端全局动作簇（TabBarActions）六项透传——订阅链/设置中心/目录管理/zen 状态
-   * 所有权均在 AppShell，本组件只作 DOM 宿主（TopBar 同名 props 同语义）。
+   * themeMode/onsettheme/onsettings/onmounts/zen/onToggleZen（顶栏退役 Task 2，
+   * 标签栏收敛 Task 1 换签名）：左端融合菜单（TabBarMenu）六项透传——订阅链/
+   * 设置中心/目录管理/zen 状态所有权均在 AppShell，本组件只作 DOM 宿主；
+   * onsettheme 为显式三显项入参（主题轮换 oncycletheme 退役，spec §8）。
    */
   let {
     tabs,
@@ -31,7 +32,7 @@
     onenter,
     onleave,
     themeMode,
-    oncycletheme,
+    onsettheme,
     onsettings,
     onmounts,
     zen,
@@ -46,7 +47,7 @@
     onenter?: () => void;
     onleave?: () => void;
     themeMode: Settings['themeMode'];
-    oncycletheme(): void;
+    onsettheme(mode: Settings['themeMode']): void;
     onsettings(): void;
     onmounts(): void;
     zen: boolean;
@@ -258,9 +259,10 @@
 >
   <!-- 顶栏退役 Task 2：嵌套滚动结构——左端全局动作簇（flex:none 定宽不随滚动）+
        tabs 横向滚动容器（overflow-x 收进内层）+ 既有管理钮。role=tablist 留守
-       .vv-tabbar（tab 行仍为其后代，DOM 契约 .vv-tab 不变） -->
-  <div class="vv-tabbar-actions">
-    <TabBarActions {themeMode} {oncycletheme} {onsettings} {onmounts} {zen} {onToggleZen} />
+       .vv-tabbar（tab 行仍为其后代，DOM 契约 .vv-tab 不变）。标签栏收敛 Task 1：
+       簇内四件收敛为融合菜单单钮（.vv-tabbar-actions → .vv-tabbar-menu） -->
+  <div class="vv-tabbar-menu">
+    <TabBarMenu {themeMode} {onsettheme} {onsettings} {onmounts} {zen} {onToggleZen} />
   </div>
   <div class="vv-tabbar-tabs">
     {#each tabs as tab (tab.id)}

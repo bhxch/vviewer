@@ -1,4 +1,4 @@
-import { overflowConnectServer } from '../e2e/tabbar-actions';
+import { menuConnectServer } from '../e2e/tabbar-menu';
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -67,7 +67,7 @@ test.beforeAll(() => {
 
 /** 展开 ⋯ 菜单连接表单并提交（服务器无 token 配置，令牌留空） */
 async function connect(page: import('@playwright/test').Page): Promise<void> {
-  await overflowConnectServer(page);
+  await menuConnectServer(page);
   await page.getByLabel('服务器地址').fill(BASE);
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await expect(page.locator('.vv-tree')).toBeVisible({ timeout: 15_000 });

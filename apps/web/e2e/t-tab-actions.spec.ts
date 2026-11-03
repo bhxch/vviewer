@@ -1,4 +1,4 @@
-import { overflowConnectServer } from './tabbar-actions';
+import { MENU_POP, menuConnectServer, openSubmenu, TRIGGER } from './tabbar-menu';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test, expect, type Locator, type Page } from '@playwright/test';
@@ -114,9 +114,9 @@ async function runMenuItem(page: Page, label: string): Promise<void> {
   await expect(page.locator('.vv-tabctx')).toHaveCount(0);
 }
 
-/** 新建工作区并激活（t-workspace createWorkspace 同款） */
+/** 新建工作区并激活（t-workspace createWorkspace 同款；经「工作区」子菜单） */
 async function createWorkspace(page: Page, name: string): Promise<void> {
-  await page.locator('.vv-ws-trigger').click();
+  await openSubmenu(page, '工作区');
   await page.getByRole('button', { name: '＋ 新建工作区…' }).click();
   const modal = page.locator('.vv-wscreate');
   await expect(modal).toBeVisible();
@@ -126,26 +126,16 @@ async function createWorkspace(page: Page, name: string): Promise<void> {
   await expectActiveWorkspace(page, name);
 }
 
-/** 断言活动工作区名（t-workspace 同款：窄视口触发钮无组名，经下拉活动行核对） */
-const WS_TRIGGER_NARROW_MQ = '(max-width: 600px)';
-
+/** 断言活动工作区名（t-workspace 同款；窄视口分支随融合菜单 narrow 退役——触发钮恒显组名） */
 async function expectActiveWorkspace(page: Page, name: string): Promise<void> {
-  const narrow = await page.evaluate((q) => window.matchMedia(q).matches, WS_TRIGGER_NARROW_MQ);
-  if (!narrow) {
-    await expect(page.locator('.vv-ws-trigger')).toContainText(name);
-    return;
-  }
-  await page.locator('.vv-ws-trigger').click();
-  await expect(page.locator('.vv-ws-item.active .vv-ws-name', { hasText: name })).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(page.locator('.vv-ws-pop')).toHaveCount(0);
+  await expect(page.locator(TRIGGER)).toContainText(name);
 }
 
-/** 切换工作区（WorkspaceSwitcher switchTo 选中即关下拉） */
+/** 切换工作区（WorkspaceList switchTo 选中即关浮层；经「工作区」子菜单） */
 async function switchWorkspace(page: Page, name: string): Promise<void> {
-  await page.locator('.vv-ws-trigger').click();
+  await openSubmenu(page, '工作区');
   await page.locator('.vv-ws-name', { hasText: name }).click();
-  await expect(page.locator('.vv-ws-pop')).toHaveCount(0);
+  await expect(page.locator(MENU_POP)).toHaveCount(0);
 }
 
 /** 等 workspaces 快照落盘（IndexedDB 'workspaces' 键；异步 persist 的确定性等待，
@@ -251,7 +241,7 @@ async function startFakeServer(
 
 /** 连接表单提交（token 留空；t-workspace connectForm 同款） */
 async function connectForm(page: Page, base: string): Promise<void> {
-  await overflowConnectServer(page);
+  await menuConnectServer(page);
   await page.getByLabel('服务器地址').fill(base);
   await page.getByRole('button', { name: '连接', exact: true }).click();
 }
@@ -602,13 +592,13 @@ test('TA-08：撤销落点——来源 workspace 已删时落当前活动组（�
   // 已知副作用（progress.md 记档）：removeWorkspace 对剩余 tab 的批量关闭照常
   // 入栈——栈自顶向下 [ttab2, bb]，第一次撤销先弹目录 tab
   page.on('dialog', (d) => void d.accept());
-  await page.locator('.vv-ws-trigger').click();
+  await openSubmenu(page, '工作区');
   await page.getByRole('button', { name: '删除工作区 待删组' }).click();
-  // 删组后下拉保持展开（removeWorkspace 不复位 wsMenuOpen，WS-01 同款）：直接断言
+  // 删组后浮层保持展开（removeWorkspace 不关浮层，WS-01 同款）：直接断言
   // 活动行切到剩余组首（默认组），Escape 关闭
   await expect(page.locator('.vv-ws-item.active .vv-ws-name', { hasText: '默认' })).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.locator('.vv-ws-pop')).toHaveCount(0);
+  await expect(page.locator(MENU_POP)).toHaveCount(0);
   await expect(page.locator('.vv-tab')).toHaveCount(2);
 
   // Alt+Shift+T #1：ttab2 目录 tab——workspaceId 指向已删组 → 落当前活动组组尾

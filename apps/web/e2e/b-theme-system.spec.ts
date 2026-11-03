@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
-import { openOverflowMenu } from './tabbar-actions';
+import { MENU_POP, openSubmenu } from './tabbar-menu';
 import { applySettings, closeSettings, openSettings } from './settings-center';
 
 /**
@@ -92,9 +92,11 @@ test('THEME-02：system 模式 prefers-color-scheme 双向跟随（壳层配色 
   await page.emulateMedia({ colorScheme: 'light' });
   await page.goto('/');
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'system');
-  const themeBtn = page.locator('.vv-tbact-pop').getByRole('button', { name: /主题：/ });
-  await openOverflowMenu(page);
-  await expect(themeBtn).toHaveText('主题：跟随系统');
+  // 主题三显式项子菜单（标签栏收敛 Task 1：轮换退役，当前项 ✓ 前缀回显）
+  await openSubmenu(page, '主题');
+  await expect(page.locator(MENU_POP).getByRole('button', { name: '跟随系统' })).toHaveText(
+    '✓ 跟随系统'
+  );
   // vite8 起默认 CSS 压缩器由 esbuild 换为 Lightning CSS：#ffffff 被等价缩短为 #fff
   // （产物实测 --ui-bg:#fff）。自定义属性 getPropertyValue 取的是原始声明值（浏览器
   // 不做颜色归一化），断言前先把 3 位 hex 展开为 6 位再比较——断言语义不变，且不

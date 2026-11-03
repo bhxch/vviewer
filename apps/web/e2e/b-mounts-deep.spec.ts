@@ -1,6 +1,6 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
-import { openOverflowMenu } from './tabbar-actions';
+import { openMenu } from './tabbar-menu';
 
 /**
  * b-mounts-deep 目录挂载补强（MM-11~MM-19，续 b-mounts-manager MM-01~10；
@@ -137,10 +137,10 @@ async function clickTreeRow(page: Page, text: string): Promise<void> {
   await closeDrawerIfOpened(page, drawer);
 }
 
-/** ⋯ 菜单通道打开目录管理页（顶栏退役：📁 钮随 TopBar 整行删除，条目入 ⋯ 菜单——
+/** 融合菜单通道打开目录管理页（顶栏退役：📁 钮随 TopBar 整行删除，条目入菜单——
  * 点击即收菜单并 toggle 面板；本装置仅在面板关态调用，开态直点会 toggle 关闭） */
 async function openMountsPanel(page: Page): Promise<void> {
-  await openOverflowMenu(page);
+  await openMenu(page);
   await page.locator('button[aria-label="目录管理"]').click();
   await expect(page.locator('.vv-mounts-manager')).toBeVisible();
 }
@@ -867,8 +867,10 @@ test.describe('b-mounts-deep 目录挂载补强', () => {
     await expect(page.locator('.vv-mounts-manager')).toHaveCount(0);
 
     // ③ 运行中 tab 不中断：已载入内容留存；手动刷新树对已注销根 404 → 状态栏显式化
+    // （刷新入口入融合菜单：先开菜单再点条目——点击即收菜单，aria-label 红线逐字）
     await expect(page.locator('.vv-tab.active', { hasText: 'notes.txt' })).toBeVisible();
     await expect(page.locator('.vv-code-pre')).toContainText('still alive body');
+    await openMenu(page);
     await page.locator('button[aria-label="刷新当前文件"]').click();
     await expect(page.locator('.vv-statusbar')).toContainText(/加载失败.*HTTP 404/, { timeout: 15_000 });
   });

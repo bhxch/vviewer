@@ -115,8 +115,8 @@
   });
 
   /** 亮暗模式三态（spec §2 外观组；评审 M1 补全）：写 draft + touch——快切通道
-   * （顶栏退役 Task 3 后为 TabBarActions 主题钮）双写同字段（订阅链 diff 触发注入），
-   * 无冲突。 */
+   * （标签栏收敛 Task 1 后为融合菜单 TabBarMenu 主题子菜单）双写同字段（订阅链
+   * diff 触发注入），无冲突。 */
   function onThemeModeChange(e: Event): void {
     draft.themeMode = (e.currentTarget as HTMLSelectElement).value as Settings['themeMode'];
     touch();

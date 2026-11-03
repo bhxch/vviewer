@@ -363,7 +363,11 @@ test.describe('打开方式「更多渲染器」展开（OWM）', () => {
     await page.getByRole('menuitem', { name: '打开方式' }).click();
     await page.getByRole('menuitem', { name: '更多渲染器' }).click();
     await expect(page.locator('.vv-tabctx-sub[aria-label="更多渲染器"]')).toBeVisible();
-    await tabNamed(page, 'aa.txt').click(); // 外点关菜单 + 切激活 tab
+    // 外点关菜单 + 切激活 tab。点 tab 上半沿（position y=6 < tab 行中线）：ctx 菜单
+    // 自右键点（tab 行中线 y）向下铺开，tab 上半沿恒在浮层覆盖带之外——标签栏收敛
+    // Task 1 左簇收窄使 aa.txt tab 左移入浮层 x 覆盖带，中心点（=行中线）恰被浮层
+    // 上缘截住（基线布局的亚像素侥幸），改点上半沿保语义不依赖布局巧合
+    await tabNamed(page, 'aa.txt').click({ position: { x: 30, y: 6 } });
     await expect(page.locator('.vv-tabctx')).toHaveCount(0);
     await tabNamed(page, 'aa.txt').click({ button: 'right' });
     await expect(page.locator('.vv-tabctx')).toBeVisible();

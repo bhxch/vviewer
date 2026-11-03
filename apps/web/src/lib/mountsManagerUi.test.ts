@@ -132,11 +132,11 @@ describe('AppShell/标签栏动作簇接线（Ctrl+Alt+M + 📁 双入口 + over
     );
   });
 
-  it('标签栏动作簇目录管理按钮（aria-label=目录管理，title 提示 Ctrl+Alt+M；TopBar 退役 Task 3 后宿主为 TabBarActions），回调经 onmounts 注入', () => {
-    const actions = readSrc('src/lib/TabBarActions.svelte');
-    expect(actions).toMatch(/onmounts/);
-    expect(actions).toMatch(/aria-label="目录管理"/);
-    expect(actions).toMatch(/Ctrl\+Alt\+M/);
+  it('融合菜单目录管理条目（aria-label=目录管理，title 提示 Ctrl+Alt+M；标签栏收敛 Task 1 后宿主为 TabBarMenu），回调经 onmounts 注入', () => {
+    const menu = readSrc('src/lib/TabBarMenu.svelte');
+    expect(menu).toMatch(/onmounts/);
+    expect(menu).toMatch(/aria-label="目录管理"/);
+    expect(menu).toMatch(/Ctrl\+Alt\+M/);
     expect(shell).toMatch(/onmounts=\{\(\) => toggleMountsManager\(\)\}/);
   });
 });

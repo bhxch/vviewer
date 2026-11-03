@@ -1,4 +1,4 @@
-import { openPlusMenu, overflowConnectServer, plusOpenUrl } from './tabbar-actions';
+import { MENU_POP, menuConnectServer, menuOpenUrl, openSubmenu } from './tabbar-menu';
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -185,7 +185,7 @@ test('SHELL-04/valid：文件 URL 有效路径正确渲染内容', async ({ page
     route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: 'url-ok-marker' })
   );
   await waitAppMounted(page);
-  await plusOpenUrl(page, 'http://127.0.0.1:4173/vv-e2e-ok.txt');
+  await menuOpenUrl(page, 'http://127.0.0.1:4173/vv-e2e-ok.txt');
   await expect(page.locator('.vv-tab.active', { hasText: 'vv-e2e-ok.txt' })).toBeVisible();
   await expect(page.locator('.vv-code-pre')).toContainText('url-ok-marker', { timeout: 20_000 });
 });
@@ -195,7 +195,7 @@ test('SHELL-04/404：文件 URL 404 给出含失败原因的明确提示', async
     route.fulfill({ status: 404, contentType: 'text/plain', body: 'no' })
   );
   await waitAppMounted(page);
-  await plusOpenUrl(page, 'http://127.0.0.1:4173/vv-e2e-missing.txt');
+  await menuOpenUrl(page, 'http://127.0.0.1:4173/vv-e2e-missing.txt');
   await expect(page.locator('.vv-error-card')).toBeVisible({ timeout: 10_000 });
   // 错误卡片：标题 + 详情（createUrlStore 的 HTTP ${status} 文案，singleFile.ts）+ 文件名
   await expect(page.locator('.vv-error-card')).toContainText('无法预览此文件');
@@ -217,7 +217,7 @@ test('SHELL-04/cors：文件 URL 跨源被 CORS 拒绝给出明确提示', async
   const port = (server.address() as AddressInfo).port;
   try {
     await waitAppMounted(page);
-    await plusOpenUrl(page, `http://127.0.0.1:${port}/vv-e2e-cors.txt`);
+    await menuOpenUrl(page, `http://127.0.0.1:${port}/vv-e2e-cors.txt`);
     await expect(page.locator('.vv-error-card')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('.vv-error-card')).toContainText('无法预览此文件');
     await expect(page.locator('.vv-error-detail')).toContainText('Failed to fetch');
@@ -544,7 +544,7 @@ test(
       })
     );
     await waitAppMounted(page);
-    await plusOpenUrl(page, 'http://127.0.0.1:4173/vv-fallback-bare.js');
+    await menuOpenUrl(page, 'http://127.0.0.1:4173/vv-fallback-bare.js');
     // tab 照常创建（openUrl 层无失败信息），内容由读取失败错误卡片呈现
     await expect(page.locator('.vv-tab.active', { hasText: 'vv-fallback-bare.js' })).toBeVisible();
     await expect(page.locator('.vv-error-card')).toBeVisible({ timeout: 10_000 });
@@ -616,7 +616,7 @@ test(
     try {
       await waitAppMounted(page);
       // 连接服务器（⋯ 菜单内联表单）；目录 tab 出现即连接成功
-      await overflowConnectServer(page);
+      await menuConnectServer(page);
       await page.getByLabel('服务器地址').fill(`http://127.0.0.1:${port}`);
       await page.locator('.vv-server-form').getByRole('button', { name: '连接', exact: true }).click();
       await expect(page.locator('.vv-tab')).not.toHaveCount(0, { timeout: 10_000 });
@@ -710,7 +710,7 @@ test(
       route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: 'never' })
     );
     await waitAppMounted(page);
-    await plusOpenUrl(page, 'http://127.0.0.1:4173/samples/m1/');
+    await menuOpenUrl(page, 'http://127.0.0.1:4173/samples/m1/');
     // 不产出任何 tab（修复前：空名 tab 激活 + 「目录来源」空态）
     await expect(page.locator('.vv-tab')).toHaveCount(0);
     // 状态栏明确提示（showStatusNotice 4s 自动清除，紧跟提交断言）
@@ -723,37 +723,37 @@ test(
 );
 
 test(
-  'A2：弹层条目右键不叠开壳层 chrome 菜单且弹层不关——ws-pop / tbact-pop / tabctx 三家族一致',
+  'A2：弹层条目右键不叠开壳层 chrome 菜单且弹层不关——tbmenu-pop（工作区条目/打开条目两处）/ tabctx 家族一致',
   async ({ page }) => {
-    // 交接待办 A2（2026-11-03，contextmenu stopPropagation 家族统一）：三弹层 DOM 均为
+    // 交接待办 A2（2026-11-03，contextmenu stopPropagation 家族统一）：弹层 DOM 均为
     // .vv-tabbar 后代且不在 .vv-tab 内，壳层 .vv-shell 的 onShellContextMenu（AppShell）
-    // 把条目右键当 tabbar 空白——preventDefault 后叠开 chrome 菜单（tbact/tabctx 原仅
-    // preventDefault 不截冒泡，ws-pop 无任何防护）。修复：三容器 oncontextmenu 统一
+    // 把条目右键当 tabbar 空白——preventDefault 后叠开 chrome 菜单（tabctx 原仅
+    // preventDefault 不截冒泡，旧 ws-pop 无任何防护）。修复：各容器 oncontextmenu 统一
     // stopPropagation 截断冒泡（preventDefault 仅非输入元素，AppShell 同款守卫）。
-    // 本锚三家族各断一处（一致性即本条目标）；末段右键管理钮做正路径对照，证明同一
-    // click 手法确实派发 contextmenu 且壳层通道仍活——前三段负断言非假绿。
+    // 标签栏收敛 Task 1：ws-pop/tbact-pop 双浮层并入 .vv-tbmenu-pop 单浮层（工作区
+    // 列表降为子菜单）——本锚改断该浮层内两类条目各一处 + tabctx（一致性即本条目标）；
+    // 末段右键管理钮做正路径对照，证明同一 click 手法确实派发 contextmenu 且壳层
+    // 通道仍活——前三段负断言非假绿。
     await waitAppMounted(page);
     await openDir(page, [{ name: 'a2.txt', type: 'text/plain', content: 'ctx\n' }]);
     const chrome = page.locator('.vv-chromemenu');
 
-    // ① ws-pop：右键工作区条目名（ensureNonEmpty 保证至少一条）
-    await page.locator('.vv-tabbar-actions [aria-label="切换工作区"]').click();
-    const wsPop = page.locator('.vv-ws-pop');
-    await expect(wsPop).toBeVisible();
-    await wsPop.locator('.vv-ws-name').first().click({ button: 'right' });
-    await expect(chrome, 'ws-pop 条目右键不得叠开 chrome 菜单').toHaveCount(0);
-    await expect(wsPop, 'ws-pop 右键条目后保持展开').toBeVisible();
+    // ① tbmenu-pop：右键「工作区」子菜单条目名（ensureNonEmpty 保证至少一条）
+    await openSubmenu(page, '工作区');
+    const menuPop = page.locator(MENU_POP);
+    await menuPop.locator('.vv-ws-name').first().click({ button: 'right' });
+    await expect(chrome, 'tbmenu-pop 工作区条目右键不得叠开 chrome 菜单').toHaveCount(0);
+    await expect(menuPop, 'tbmenu-pop 右键条目后保持展开').toBeVisible();
     await page.keyboard.press('Escape');
-    await expect(wsPop).toHaveCount(0);
+    await expect(menuPop).toHaveCount(0);
 
-    // ② tbact-pop：右键 ＋ 打开菜单「打开文件」条目
-    await openPlusMenu(page);
-    const tbactPop = page.locator('.vv-tbact-pop');
-    await tbactPop.getByRole('button', { name: '打开文件', exact: true }).click({ button: 'right' });
-    await expect(chrome, 'tbact-pop 条目右键不得叠开 chrome 菜单').toHaveCount(0);
-    await expect(tbactPop, 'tbact-pop 右键条目后保持展开').toBeVisible();
+    // ② tbmenu-pop：右键「打开」子菜单「打开文件」条目
+    await openSubmenu(page, '打开');
+    await menuPop.getByRole('button', { name: '打开文件', exact: true }).click({ button: 'right' });
+    await expect(chrome, 'tbmenu-pop 打开条目右键不得叠开 chrome 菜单').toHaveCount(0);
+    await expect(menuPop, 'tbmenu-pop 右键条目后保持展开').toBeVisible();
     await page.keyboard.press('Escape');
-    await expect(tbactPop).toHaveCount(0);
+    await expect(menuPop).toHaveCount(0);
 
     // ③ tabctx：右键 tab 开菜单，再右键菜单顶层首条目（右键不派发 click，条目不动作）
     await openFile(page, 'a2.txt');

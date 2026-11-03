@@ -1,4 +1,4 @@
-import { TABBAR_ACTIONS, openPlusMenu, overflowConnectServer } from './tabbar-actions';
+import { MENU_POP, TABBAR_MENU, menuConnectServer, openMenu } from './tabbar-menu';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test, expect, type Locator, type Page } from '@playwright/test';
@@ -206,9 +206,9 @@ async function startFakeServer(
   };
 }
 
-/** 连接表单提交（⋯ 菜单内联表单；token 缺省留空——留空/有值决定重连清扫 vs 实例复用） */
+/** 连接表单提交（融合菜单内联表单；token 缺省留空——留空/有值决定重连清扫 vs 实例复用） */
 async function connectForm(page: Page, base: string, token = ''): Promise<void> {
-  await overflowConnectServer(page);
+  await menuConnectServer(page);
   await page.getByLabel('服务器地址').fill(base);
   if (token !== '') await page.getByLabel('访问令牌').fill(token);
   await page.getByRole('button', { name: '连接', exact: true }).click();
@@ -874,13 +874,15 @@ test('TAX-13：duplicate×overrideRenderer——手选 hex 的 tab 复制后副�
 
 // A2 交接锚（壳层动作域「TabBar 按钮簇与右键互斥」；编号自 TAX-14 续编落本域——
 // 场景文档 docs/e2e/sidebar-shell-actions.md §1 明示 SRC 域不为按钮簇另立编号）。
-// 按钮簇浮层（.vv-tbact-pop）与 tab 右键菜单（.vv-tabctx）同为 .vv-tabbar 后代的
-// 瞬态浮层，「同刻至多一个」由三处独立机制合成：TabBarActions 簇内 menu 单槽状态
-// （＋/⋯ 开一个收另一个，TabBarActions.svelte:46/66-78）、TabContextMenu 外点
-// pointerdown 关闭（TabContextMenu.svelte:146-150，无 stopPropagation）、
-// TabBarActions 外点 pointerdown 关闭（:92-99）。右键与左键的 pointerdown →
-// contextmenu/click 事件序使接管成立，本锚双向锁定 + 簇内切换互斥 + Esc 全收。
-test('TAX-14：TabBar 按钮簇浮层与 tab 右键菜单互斥——双向接管同刻至多一个，＋/⋯ 簇内切换互斥', async ({
+// 融合菜单浮层（.vv-tbmenu-pop）与 tab 右键菜单（.vv-tabctx）同为 .vv-tabbar 后代的
+// 瞬态浮层，「同刻至多一个」由外点关闭通道自然合成：TabContextMenu 外点 pointerdown
+// 关闭（TabContextMenu.svelte:146-150，无 stopPropagation）、TabBarMenu 外点
+// pointerdown 关闭 + window 兜底 Esc。右键与左键的 pointerdown → contextmenu/click
+// 事件序使接管成立，本锚双向锁定 + 触发钮 aria-expanded 契约 + Esc 全收。
+// 标签栏收敛 Task 1：旧 ＋/⋯ 双触发钮随四件簇退役——簇内切换互斥（开一个收另一
+// 个）随双浮层结构消失，单触发钮 + 单浮层 + menuOpen 单状态下「同刻至多一个」
+// 天然成立，③ 改锚触发钮 aria-expanded 随开合翻转。
+test('TAX-14：TabBar 融合菜单浮层与 tab 右键菜单互斥——双向接管同刻至多一个', async ({
   page
 }) => {
   test.setTimeout(60_000);
@@ -890,40 +892,35 @@ test('TAX-14：TabBar 按钮簇浮层与 tab 右键菜单互斥——双向接�
   await openDir(page, [{ name: 'mutex.txt', type: 'text/plain', content: 'mutex body\n' }]);
   await openFile(page, 'mutex.txt');
   const targetTab = tabNamed(page, 'mutex.txt');
-  const pop = page.locator('.vv-tbact-pop');
+  const pop = page.locator(MENU_POP);
   const ctx = page.locator('.vv-tabctx');
   const overlayCount = async (): Promise<number> =>
-    page.locator('.vv-tbact-pop, .vv-tabctx').count();
+    page.locator(`${MENU_POP}, .vv-tabctx`).count();
 
-  // ① ＋ 菜单开 → 右键 tab：pointerdown(button 2) 落 pop 外先关簇浮层，
+  // ① 菜单开 → 右键 tab：pointerdown(button 2) 落 pop 外先关菜单浮层，
   //    contextmenu 再挂右键菜单——右键接管（互斥正向）
-  await openPlusMenu(page);
+  await openMenu(page);
   await expect(pop).toBeVisible();
   await targetTab.click({ button: 'right' });
   await expect(ctx).toBeVisible();
   await expect(pop).toHaveCount(0);
   expect(await overlayCount()).toBe(1);
 
-  // ② 右键菜单开 → 点 ＋：外点 pointerdown 关右键菜单、click toggle 开 ＋ 菜单（互斥反向）
-  await openPlusMenu(page);
+  // ② 右键菜单开 → 点触发钮：外点 pointerdown 关右键菜单、click toggle 开菜单（互斥反向）
+  await openMenu(page);
   await expect(ctx).toHaveCount(0);
   await expect(pop).toBeVisible();
   expect(await overlayCount()).toBe(1);
 
-  // ③ ＋ 开 → 点 ⋯：簇内 menu 单槽切换互斥（开一个收另一个），触发钮 aria-expanded 随翻
-  await page.locator(`${TABBAR_ACTIONS} [aria-label="更多"]`).click();
-  await expect(pop).toBeVisible(); // ⋯ 浮层与 ＋ 浮层同类名，同刻至多一个
-  await expect(page.locator(`${TABBAR_ACTIONS} [aria-label="打开"]`)).toHaveAttribute(
-    'aria-expanded',
-    'false'
-  );
-  await expect(page.locator(`${TABBAR_ACTIONS} [aria-label="更多"]`)).toHaveAttribute(
+  // ③ 单浮层契约：触发钮 aria-expanded 随开合翻转（旧 ＋/⋯ 簇内切换互斥随双触发
+  //    钮退役——menuOpen 单状态下同刻至多一个浮层天然成立）
+  await expect(page.locator(`${TABBAR_MENU} [aria-label="切换工作区"]`)).toHaveAttribute(
     'aria-expanded',
     'true'
   );
   expect(await overlayCount()).toBe(1);
 
-  // ④ Esc 收 ⋯：全部瞬态浮层零残留
+  // ④ Esc 收菜单：全部瞬态浮层零残留
   await page.keyboard.press('Escape');
   await expect(pop).toHaveCount(0);
   await expect(ctx).toHaveCount(0);

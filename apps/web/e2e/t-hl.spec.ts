@@ -1,4 +1,4 @@
-import { overflowConnectServer } from './tabbar-actions';
+import { menuConnectServer } from './tabbar-menu';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
@@ -490,7 +490,7 @@ test('HL-10/3: 远程策略 rs/ts/sh 三语言 POST /api/compute/highlight 对�
     await waitHealthy(BASE);
     // 同源连接（页面即该实例伺服，无 token）：server store 树出现即连接完成
     await page.goto(`${BASE}/`);
-    await overflowConnectServer(page);
+    await menuConnectServer(page);
     await page.getByLabel('服务器地址').fill(BASE);
     await page.getByRole('button', { name: '连接', exact: true }).click();
     await expect(page.locator('.vv-tree-row', { hasText: 'thl-' }).first()).toBeVisible({ timeout: 10_000 });

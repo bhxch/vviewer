@@ -22,7 +22,7 @@ import { closeDrawerIfOpened, isDrawerViewport, openDrawerIfNarrow } from './dra
  * fake-file-server；url 语料 route 定态化（外网面禁入）。
  */
 
-import { overflowConnectServer, plusOpenUrl } from './tabbar-actions';
+import { menuConnectServer, menuOpenUrl } from './tabbar-menu';
 import { startFakeFileServer } from './fake-file-server';
 import { tabNamed } from './helpers';
 
@@ -203,7 +203,7 @@ test.describe('侧栏多根测绘差距（SRC-05..08）', () => {
     // ＋ 菜单「粘贴 URL」开同名 readme.md（场景表指定 openUrl 通道既有先例装置）：
     // url 文件 tab 不登记 workspace 来源（TabCollection.add 无 addSource 面）——
     // 徽标名册外的单文件形态无徽标，且不清掉本地对手对的冲突计数（对手对称性保持）
-    await plusOpenUrl(page, 'https://fake.src.test/readme.md');
+    await menuOpenUrl(page, 'https://fake.src.test/readme.md');
     const urlTab = tabNamed(page, 'readme.md').nth(2);
     await expect(urlTab).toBeVisible();
     await expect(urlTab.locator('.vv-tab-src')).toHaveCount(0);
@@ -222,7 +222,7 @@ test.describe('侧栏多根测绘差距（SRC-05..08）', () => {
       // storeLabel = serverLabel(base) = host，两侧目录 tab（path=''，name=displayName）
       // 同名异 storeId（场景表 §4 同 label 构造口径）
       await openLocalDir(page, [{ name: 'note.txt', content: 'local note\n' }], fake.host);
-      await overflowConnectServer(page);
+      await menuConnectServer(page);
       await page.getByLabel('服务器地址').fill(fake.base);
       await page.getByRole('button', { name: '连接', exact: true }).click();
       await expect(tabNamed(page, fake.host)).toHaveCount(2, { timeout: 15_000 }); // 双目录 tab 同屏

@@ -1,4 +1,4 @@
-import { overflowConnectServer } from './tabbar-actions';
+import { menuConnectServer, openSubmenu, TRIGGER } from './tabbar-menu';
 import { test, expect, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 import { startFakeFileServer } from './fake-file-server';
@@ -34,7 +34,7 @@ async function openLocalDir(page: Page, files: Array<{ name: string; content: st
 }
 
 async function connectForm(page: Page, base: string): Promise<void> {
-  await overflowConnectServer(page);
+  await menuConnectServer(page);
   await page.getByLabel('服务器地址').fill(base);
   await page.getByRole('button', { name: '连接', exact: true }).click();
 }
@@ -62,18 +62,10 @@ async function removeSource(page: Page, label: string, accept: boolean): Promise
   await closeDrawerIfOpened(page, drawer);
 }
 
-/** 断言活动工作区（b-wsx-recovery expectActiveWorkspace 同款：窄视口触发钮恒显
- * 「工作区 ▾」，经下拉活动行核对后 Esc 还原；宽视口直读触发钮文案） */
-const WS_TRIGGER_NARROW_MQ = '(max-width: 600px)';
-
+/** 断言活动工作区（b-wsx-recovery expectActiveWorkspace 同款：直读触发钮文案；
+ * 窄视口分支随融合菜单 narrow 退役——单钮恒显「组名 ▾」） */
 async function expectActiveWorkspace(page: Page, name: string): Promise<void> {
-  if (await page.evaluate((mq) => window.matchMedia(mq).matches, WS_TRIGGER_NARROW_MQ)) {
-    await page.locator('.vv-ws-trigger').click();
-    await expect(page.locator('.vv-ws-item.active', { hasText: name })).toBeVisible();
-    await page.keyboard.press('Escape');
-    return;
-  }
-  await expect(page.locator('.vv-ws-trigger')).toContainText(name);
+  await expect(page.locator(TRIGGER)).toContainText(name);
 }
 
 test.describe('文件树源级移除（FTSRC-01..04）', () => {
@@ -129,7 +121,7 @@ test.describe('文件树源级移除（FTSRC-01..04）', () => {
       await openLocalDir(page, [{ name: 'shared-file.txt', content: 'shared body\n' }], 'shared-src');
       await expect(page.locator('.vv-tree-src', { hasText: 'shared-src' })).toBeVisible();
       // 新建工作区 ftsrc-group-b（创建即激活；b-wsx-recovery createWorkspace 同款）
-      await page.locator('.vv-ws-trigger').click();
+      await openSubmenu(page, '工作区');
       await page.getByRole('button', { name: '＋ 新建工作区…' }).click();
       const modal = page.locator('.vv-wscreate');
       await expect(modal).toBeVisible();
@@ -142,7 +134,7 @@ test.describe('文件树源级移除（FTSRC-01..04）', () => {
       await expect(page.locator('.vv-tree-src', { hasText: 'shared-src' })).toBeVisible();
       await expect(page.locator('.vv-tab', { hasText: 'shared-src' })).toBeVisible(); // 既有目录 tab 激活
       // 组 B 仍空（无重复源）
-      await page.locator('.vv-ws-trigger').click();
+      await openSubmenu(page, '工作区');
       await page.locator('.vv-ws-name', { hasText: 'ftsrc-group-b' }).click();
       await expect(page.locator('main')).toContainText('拖入文件');
     } finally {

@@ -1,4 +1,4 @@
-import { overflowConnectServer } from './tabbar-actions';
+import { MENU_POP, menuConnectServer, openSubmenu, TRIGGER } from './tabbar-menu';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test, expect, type Page } from '@playwright/test';
@@ -70,16 +70,17 @@ async function dropFile(page: Page, name: string, content: string): Promise<void
   await expect(page.locator('.vv-tab.active', { hasText: name })).toBeVisible();
 }
 
-/** 新建工作区（切换器 → 模态命名 → 创建并激活；WS-01/03/04/05 复用） */
+/** 新建工作区（融合菜单「工作区」子菜单 → 模态命名 → 创建并激活；WS-01/03/04/05 复用。
+ * 新建先关菜单再开模态——点击后子菜单随浮层收起，模态常驻挂 TabBarMenu 组件体） */
 async function createWorkspace(page: Page, name: string): Promise<void> {
-  await page.locator('.vv-ws-trigger').click();
+  await openSubmenu(page, '工作区');
   await page.getByRole('button', { name: '＋ 新建工作区…' }).click();
   const modal = page.locator('.vv-wscreate');
   await expect(modal).toBeVisible();
   await page.getByLabel('工作区名称').fill(name);
   await modal.getByRole('button', { name: '创建并激活' }).click();
   await expect(modal).toHaveCount(0);
-  await expectActiveWorkspace(page, name); // 新建即激活（T4 裁决；窄视口经下拉活动行核对）
+  await expectActiveWorkspace(page, name); // 新建即激活（T4 裁决）
 }
 
 /**
@@ -168,28 +169,18 @@ async function startFakeServer(
 
 /** 连接表单提交（t-srv connectForm 同款；token 留空） */
 async function connectForm(page: Page, base: string): Promise<void> {
-  await overflowConnectServer(page);
+  await menuConnectServer(page);
   await page.getByLabel('服务器地址').fill(base);
   await page.getByRole('button', { name: '连接', exact: true }).click();
 }
 
 /**
- * 断言活动工作区名为 name。宽视口直读触发钮文案（`${name} ▾`）；窄视口
- * （≤600px，标签栏断点 spec E §2.3）触发钮恒显「工作区 ▾」不含组名——经下拉内
- * 活动行（.vv-ws-item.active）核对，断言后 Esc 还原关闭态。
+ * 断言活动工作区名为 name：直读触发钮文案（`${name} ▾`）。原窄视口分支（≤600px
+ * 触发钮恒显「工作区 ▾」、经下拉活动行核对）随融合菜单 narrow 分支退役——
+ * 单钮形态下工作区名不再让位（标签栏收敛 Task 1）。
  */
-const WS_TRIGGER_NARROW_MQ = '(max-width: 600px)';
-
 async function expectActiveWorkspace(page: Page, name: string): Promise<void> {
-  const narrow = await page.evaluate((q) => window.matchMedia(q).matches, WS_TRIGGER_NARROW_MQ);
-  if (!narrow) {
-    await expect(page.locator('.vv-ws-trigger')).toContainText(name);
-    return;
-  }
-  await page.locator('.vv-ws-trigger').click();
-  await expect(page.locator('.vv-ws-item.active .vv-ws-name', { hasText: name })).toBeVisible();
-  await page.keyboard.press('Escape'); // 焦点在 body：window 兜底通道关下拉
-  await expect(page.locator('.vv-ws-pop')).toHaveCount(0);
+  await expect(page.locator(TRIGGER)).toContainText(name);
 }
 
 /** 等待 workspaces 快照落盘（跨全部组包含指定 tab 名——异步 persist 的确定性等待） */
@@ -232,14 +223,13 @@ async function waitSnapshotTabs(page: Page, wanted: string[]): Promise<void> {
 
 test('WS-01：切换器新建工作区（模态跳过来源）→ 重命名 → 删除需 confirm', async ({ page }) => {
   await waitAppMounted(page);
-  const trigger = page.locator('.vv-ws-trigger');
   await expectActiveWorkspace(page, '默认');
 
   // ① 新建：模态不选来源（「可跳过」）→ 创建并激活
   await createWorkspace(page, '研究');
 
-  // ② 切换器重命名：行内 ✎ → 表单 Enter/✓ 提交
-  await trigger.click();
+  // ② 「工作区」子菜单重命名：行内 ✎ → 表单 Enter/✓ 提交
+  await openSubmenu(page, '工作区');
   await page.getByRole('button', { name: '重命名工作区 研究' }).click();
   // exact 定位输入框：各行 ✎ 按钮的 aria-label 同以「重命名工作区」开头
   //（"重命名工作区 {组名}"），getByLabel 子串匹配会连同按钮一并命中（strict violation）
@@ -247,21 +237,21 @@ test('WS-01：切换器新建工作区（模态跳过来源）→ 重命名 → 
   await expect(rename).toBeVisible();
   await rename.fill('深研');
   await page.getByRole('button', { name: '确认重命名' }).click();
-  // 下拉保持展开：重命名后活动行即新名（窄视口触发钮无组名，经活动行断言）
+  // 子菜单保持展开：重命名后活动行即新名（commitRename 不关浮层）
   await expect(page.locator('.vv-ws-item.active .vv-ws-name', { hasText: '深研' })).toBeVisible();
   await expect(page.locator('.vv-ws-name', { hasText: '深研' })).toBeVisible();
-  await page.keyboard.press('Escape'); // 关下拉（焦点已回 body，window 兜底通道）
-  await expect(page.locator('.vv-ws-pop')).toHaveCount(0);
+  await page.keyboard.press('Escape'); // 关浮层（焦点已回 body，window 兜底通道）
+  await expect(page.locator(MENU_POP)).toHaveCount(0);
 
   // ③ 删除工作区：window.confirm 需接受（Playwright 默认 dismiss——必须挂 handler）
   page.on('dialog', (d) => void d.accept());
-  await trigger.click();
+  await openSubmenu(page, '工作区');
   await page.getByRole('button', { name: '删除工作区 深研' }).click();
   // 删活动组 → remove 内部切到剩余组首（默认），且至少一个不变式保持
   await expect(page.locator('.vv-ws-item.active .vv-ws-name', { hasText: '默认' })).toBeVisible();
   await expect(page.locator('.vv-ws-item')).toHaveCount(1);
   await page.keyboard.press('Escape');
-  await expect(page.locator('.vv-ws-pop')).toHaveCount(0);
+  await expect(page.locator(MENU_POP)).toHaveCount(0);
 });
 
 // ---------------------------------------------------------------- WS-02
@@ -417,7 +407,7 @@ test('WS-04：刷新恢复——双 workspace 结构、remote 重连内容恢复
     });
     // 组结构恢复：切换器两组齐全、活动组为快照记录的本地组
     await expectActiveWorkspace(page, '本地组');
-    await page.locator('.vv-ws-trigger').click();
+    await openSubmenu(page, '工作区');
     await expect(page.locator('.vv-ws-item')).toHaveCount(2);
     // 切回默认组：remote 来源重连（BUG-08 通道）→ 文件内容恢复，非占位
     await page.locator('.vv-ws-name', { hasText: '默认' }).click();
@@ -444,7 +434,7 @@ test('WS-05：后端路径 basePath 来源重载两次不落占位（T5 I-1 stor
 
     // 切换器 → 新建模态 → 后端路径浏览 → 选 sub 目录为来源（basePath 源，
     // label = `${host}/sub`——参与 storeId hash，恢复必须原值回环）
-    await page.locator('.vv-ws-trigger').click();
+    await openSubmenu(page, '工作区');
     await page.getByRole('button', { name: '＋ 新建工作区…' }).click();
     const modal = page.locator('.vv-wscreate');
     await expect(modal).toBeVisible();
@@ -540,7 +530,7 @@ test('WS-07：单文件来源重载两次不落占位（T5 I-1 回环——openR
 
     // 新建工作区 → 后端路径浏览 → 进入 sub → 对文件行「将此文件作为来源」
     //（openRemoteSource 第 5 参 file：label=文件名 basename，参与 storeId hash）
-    await page.locator('.vv-ws-trigger').click();
+    await openSubmenu(page, '工作区');
     await page.getByRole('button', { name: '＋ 新建工作区…' }).click();
     const modal = page.locator('.vv-wscreate');
     await expect(modal).toBeVisible();

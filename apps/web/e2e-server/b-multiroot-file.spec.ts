@@ -1,4 +1,4 @@
-import { overflowConnectServer } from '../e2e/tabbar-actions';
+import { menuConnectServer, openSubmenu } from '../e2e/tabbar-menu';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import * as os from 'node:os';
@@ -113,7 +113,7 @@ function treeRow(page: Page, name: string): ReturnType<Page['locator']> {
 
 /** 连接表单提交（t-srv/b-io-streaming connectForm 同款；token 留空） */
 async function connectForm(page: Page, base: string): Promise<void> {
-  await overflowConnectServer(page);
+  await menuConnectServer(page);
   await page.getByLabel('服务器地址').fill(base);
   await page.getByRole('button', { name: '连接', exact: true }).click();
 }
@@ -141,8 +141,8 @@ async function openRoot1HelloTab(page: Page, fileReqs: string[]): Promise<void> 
   await connectForm(page, MULTI_BASE);
   await expect(page.locator('.vv-tab', { hasText: MULTI_HOST })).toBeVisible({ timeout: 10_000 });
 
-  // 来源创建流：切换器 → 新建模态 → 后端路径（t-workspace WS-05 同款）
-  await page.locator('.vv-ws-trigger').click();
+  // 来源创建流：融合菜单「工作区」子菜单 → 新建模态 → 后端路径（t-workspace WS-05 同款）
+  await openSubmenu(page, '工作区');
   await page.getByRole('button', { name: '＋ 新建工作区…' }).click();
   const modal = page.locator('.vv-wscreate');
   await expect(modal).toBeVisible();

@@ -1,4 +1,4 @@
-import { openOverflowMenu, overflowConnectServer } from './tabbar-actions';
+import { menuConnectServer, openMenu } from './tabbar-menu';
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 
@@ -149,7 +149,7 @@ async function seeTreeRow(page: Page, text: string): Promise<void> {
 /** ⋯ 菜单通道打开目录管理页（顶栏退役：📁 钮随 TopBar 整行删除，条目入 ⋯ 菜单——
  * 点击即收菜单并 toggle 面板；本装置仅在面板关态调用，开态直点会 toggle 关闭） */
 async function openMountsPanel(page: Page): Promise<void> {
-  await openOverflowMenu(page);
+  await openMenu(page);
   await page.locator('button[aria-label="目录管理"]').click();
   await expect(page.locator('.vv-mounts-manager')).toBeVisible();
 }
@@ -798,7 +798,7 @@ test.describe('b-mounts-manager 目录管理页', () => {
     //（旧 r2 目录+文件两 tab 被系统替换关闭）+ 根 0 host 目录 tab 重建 + 对账幂等
     // POST（挂载行恢复的服务端面）
     down = false;
-    await overflowConnectServer(page);
+    await menuConnectServer(page);
     await page.getByLabel('服务器地址').fill(API);
     await page.getByRole('button', { name: '连接', exact: true }).click();
     await expect(page.locator('.vv-tab.active', { hasText: '127.0.0.1:8793' })).toBeVisible();

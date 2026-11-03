@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 import { applySettings, openSettings } from './settings-center';
-import { openOverflowMenu } from './tabbar-actions';
+import { MENU_POP, openSubmenu } from './tabbar-menu';
 
 /**
  * theme-system 域缺口补齐（t- 前缀标记本轮新增；README §3.2：一域一文件、
@@ -179,60 +179,60 @@ for my $word (sort { $counts{$b} <=> $counts{$a} } keys %counts) {
 
 // ── 用例 ──
 
-test('THEME-01: 三态循环（跟随系统→亮→暗→跟随系统）、整壳配色变化、localStorage 单键持久与刷新恢复', async ({
+test('THEME-01: 三显式项（跟随系统/亮/暗）整壳配色变化、localStorage 单键持久与刷新恢复', async ({
   page
 }) => {
   await page.goto('/');
-  // ⋯ 菜单主题条目（顶栏退役 Task 4 前为 TopBar 主题钮）；点击即收菜单，每轮重开
-  const themeBtn = page.locator('.vv-tbact-pop').getByRole('button', { name: /主题：/ });
+  // 融合菜单「主题」子菜单三显式项（标签栏收敛 Task 1：轮换条目退役）；当前项
+  // ✓ 前缀回显，点击即收菜单，每轮重开子菜单
   const mode = () => page.locator('html').getAttribute('data-theme-mode');
-  const openMenu = () => openOverflowMenu(page);
+  const themeItem = (label: string) =>
+    page.locator(MENU_POP).getByRole('button', { name: label });
+  const openThemeSubmenu = () => openSubmenu(page, '主题');
 
   // 初始态：settings 默认 themeMode=system（settings.ts DEFAULTS）
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'system');
-  await openMenu();
-  await expect(themeBtn).toHaveText('主题：跟随系统');
+  await openThemeSubmenu();
+  await expect(themeItem('跟随系统')).toHaveText('✓ 跟随系统');
   const bgLight = await uiBg(page);
   expect(bgLight).toBe('#ffffff'); // headless 默认 prefers light
 
-  // 主题条目 onclick 即收菜单（TabBarActions：oncycletheme 后 menu=null，与连接
-  // 服务器「保持开」不同；TopBar 时代按钮常驻，点击后可直接读文案）——三态循环
-  // 统一节拍「重开菜单读文案 → 点击切换 → 断言状态」，段落间菜单恒收，文案
-  // 断言一条不少，且不依赖上一段遗留的开合态
+  // 主题项 onclick 即收菜单（TabBarMenu：onsettheme 后 menuOpen=false，与连接
+  // 服务器「保持开」不同）——统一节拍「重开子菜单读当前项 → 点击目标项 →
+  // 断言状态」，段落间菜单恒收，文案断言一条不少，且不依赖上一段遗留的开合态
   // ① system → 亮：data-theme-mode、整壳配色、localStorage 单键同步
-  await themeBtn.click();
+  await themeItem('亮').click();
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'light');
   await expect.poll(() => savedThemeMode(page)).toBe('light');
   expect(await uiBg(page)).toBe(bgLight); // 亮态壳层配色不变（light 亮色板）
 
   // ② 亮 → 暗：整壳 UI 配色可见变化 + 单键更新
-  await openMenu();
-  await expect(themeBtn).toHaveText('主题：亮');
-  await themeBtn.click();
+  await openThemeSubmenu();
+  await expect(themeItem('暗')).toHaveText('暗');
+  await themeItem('暗').click();
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'dark');
   await expect.poll(() => savedThemeMode(page)).toBe('dark');
   await expect.poll(uiBg.bind(null, page)).toBe('#0d1117'); // 与亮态实际不同色
 
-  // ③ 暗 → 跟随系统：循环闭环，配色还原亮色板（headless system 解析为亮）
-  await openMenu();
-  await expect(themeBtn).toHaveText('主题：暗');
-  await themeBtn.click();
+  // ③ 暗 → 跟随系统：回环，配色还原亮色板（headless system 解析为亮）
+  await openThemeSubmenu();
+  await expect(themeItem('暗')).toHaveText('✓ 暗'); // 当前项 = 上一步选入的暗
+  await themeItem('跟随系统').click();
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'system');
   await expect.poll(uiBg.bind(null, page)).toBe(bgLight);
 
   // ④ 暗态 F5 刷新：主题态与刷新前一致（持久于 localStorage 并恢复）
-  await openMenu();
-  await expect(themeBtn).toHaveText('主题：跟随系统');
-  await themeBtn.click(); // system → light
+  await openThemeSubmenu();
+  await themeItem('亮').click(); // system → light
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'light');
-  await openMenu();
-  await themeBtn.click(); // light → dark
+  await openThemeSubmenu();
+  await themeItem('暗').click(); // light → dark
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'dark');
   expect(await savedThemeMode(page)).toBe('dark');
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'dark');
-  await openMenu();
-  await expect(page.locator('.vv-tbact-pop').getByRole('button', { name: /主题：/ })).toHaveText('主题：暗');
+  await openThemeSubmenu();
+  await expect(themeItem('暗')).toHaveText('✓ 暗');
   await expect.poll(() => savedThemeMode(page)).toBe('dark');
   await expect.poll(uiBg.bind(null, page)).toBe('#0d1117');
 });
@@ -461,18 +461,14 @@ async function makeVsix(files: Record<string, string>): Promise<Buffer> {
   return zip.generateAsync({ type: 'nodebuffer' });
 }
 
-/** 主题按钮三态循环到目标亮暗（新 context 的 localStorage 为默认 system；headless
- * prefers light，故 light 一次点击、dark 两次——THEME-01 同通道；顶栏退役 Task 4
- * 后经 ⋯ 菜单主题条目，点击即收需逐次重开）。 */
+/** 主题子菜单三显式项直选到目标亮暗（新 context 的 localStorage 为默认 system；
+ * THEME-01 同通道；标签栏收敛 Task 1 后经融合菜单「主题」子菜单，点击即收需
+ * 逐次重开）。 */
 async function gotoInMode(page: Page, mode: 'light' | 'dark'): Promise<void> {
   await page.goto('/');
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'system');
-  await openOverflowMenu(page);
-  await page.locator('.vv-tbact-pop').getByRole('button', { name: /主题：/ }).click();
-  if (mode === 'dark') {
-    await openOverflowMenu(page);
-    await page.locator('.vv-tbact-pop').getByRole('button', { name: /主题：/ }).click();
-  }
+  await openSubmenu(page, '主题');
+  await page.locator(MENU_POP).getByRole('button', { name: mode === 'light' ? '亮' : '暗' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', mode);
 }
 

@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { openOverflowMenu } from './tabbar-actions';
+import { MENU_POP, openMenu } from './tabbar-menu';
 
 /**
  * 设置中心 e2e 共用装置（settings center 2026-10-19，Task 5 迁移共用）：
@@ -7,7 +7,7 @@ import { openOverflowMenu } from './tabbar-actions';
  * .vv-settings 弹层后，各 spec 的「开面板→改→即时生效」断言统一迁移为
  * 「开页→切组→改→应用」管线。本模块只收装置，不含断言策略。
  *
- * - 打开：⋯ 菜单「设置」条目（aria-label「设置」；顶栏退役 Task 4 前为
+ * - 打开：融合菜单「设置」条目（aria-label「设置」；顶栏退役 Task 4 前为
  *   TopBar ⚙ 直点，全局动作宿主迁标签栏按钮簇后走两段流）；Ctrl+, 入口的
  *   专项断言在 b-settings-center（双入口用例），迁移用例统一走菜单通道。
  * - 应用：草稿→saveSettings 订阅链的唯一落盘时机；应用成功后「应用/放弃」
@@ -19,10 +19,10 @@ import { openOverflowMenu } from './tabbar-actions';
 /** 设置中心根（全屏 overlay；OVERLAY_SELECTOR 入册类名） */
 export const SETTINGS_ROOT = '.vv-settings-center';
 
-/** 打开设置中心（⋯ 菜单 → 「设置」条目 → 全屏页；返回根 locator 便于调用方局部断言） */
+/** 打开设置中心（融合菜单 → 「设置」条目 → 全屏页；返回根 locator 便于调用方局部断言） */
 export async function openSettings(page: Page): Promise<void> {
-  await openOverflowMenu(page);
-  await page.locator('.vv-tbact-pop').getByRole('button', { name: '设置', exact: true }).click();
+  await openMenu(page);
+  await page.locator(MENU_POP).getByRole('button', { name: '设置', exact: true }).click();
   await expect(page.locator(SETTINGS_ROOT)).toBeVisible();
 }
 

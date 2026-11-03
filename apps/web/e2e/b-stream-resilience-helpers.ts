@@ -1,4 +1,4 @@
-import { overflowConnectServer, plusOpenUrl } from './tabbar-actions';
+import { menuConnectServer, menuOpenUrl } from './tabbar-menu';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { expect, type Page } from '@playwright/test';
@@ -501,7 +501,7 @@ export async function waitAppMounted(page: Page): Promise<void> {
 
 /** 连接表单提交（token 留空） */
 export async function connectForm(page: Page, base: string): Promise<void> {
-  await overflowConnectServer(page);
+  await menuConnectServer(page);
   await page.getByLabel('服务器地址').fill(base);
   await page.getByRole('button', { name: '连接', exact: true }).click();
 }
@@ -532,7 +532,7 @@ export async function openRemoteFile(
 /** ＋ 菜单「粘贴 URL」打开（url store）：表单填入回车 → 活动 tab 可见 */
 export async function openUrlFile(page: Page, url: string, tabName: string): Promise<void> {
   await waitAppMounted(page);
-  await plusOpenUrl(page, url);
+  await menuOpenUrl(page, url);
   await expect(page.locator('.vv-tab.active', { hasText: tabName })).toBeVisible();
 }
 

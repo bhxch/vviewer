@@ -310,9 +310,9 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
      模糊差，与 toast/菜单同档） */
   transform: none; opacity: .88; box-shadow: var(--vv-shadow-2);
 }
-/* 台账带入（布局 zen Task 5）：新建工作区模态由切换器链路挂载（WorkspaceSwitcher
-   自持挂点，顶栏退役 Task 1 抽取、Task 3 起宿主为 TabBar 左端动作簇内——
-   chrome-off 的 visibility:hidden 继承域覆盖）。显式 visible 压过父级继承
+/* 台账带入（布局 zen Task 5）：新建工作区模态由切换器链路挂载（原 WorkspaceSwitcher
+   自持挂点，标签栏收敛 Task 1 起宿主为融合菜单 TabBarMenu 组件体——浮层 {#if}
+   之外，chrome-off 的 visibility:hidden 继承域覆盖）。显式 visible 压过父级继承
    （CSS 标准逃生门：子级显式声明压过父级继承）——TabBar 隐藏态热区唤出的临时条
    上打开新建工作区模态仍可见。fixed 包含块面（量化）：chrome-off 的
    translateY(-100%) 劫持 fixed 后代包含块后，模态（.vv-wscreate-panel
@@ -357,17 +357,11 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
    永不生效；#d33 白上 4.57:1 勉强过、暗色上 4.14:1 不达 AA。裸写 var(--ui-danger)
    即可（本文件 7 行 8 处；组件侧 7 处由各组清理） */
 .vv-server-error { color: var(--ui-danger); font-size: var(--vv-fs-xs); max-width: 320px; }
-/* workspace 切换器（T5）：打开按钮组右侧下拉；≤600px 触发按钮收敛、下拉改
-   同位 fixed 浮层。z-index 30 对齐设置中心/GlobalSearchPanel 惯例。narrow 浮层
-   top 自顶栏退役 Task 1 起由 WorkspaceSwitcher 打开时内联计算（触发按钮底缘
-   实测 + 4px，顶栏换行/临时条形态下正确锚定），此处不再硬编码 */
-.vv-ws { position: relative; }
-.vv-ws-trigger { white-space: nowrap; max-width: 22vw; overflow: hidden; text-overflow: ellipsis; }
-.vv-ws-pop { position: absolute; top: calc(100% + 4px); left: 0; min-width: 210px; max-width: 320px;
-  max-height: 60vh; overflow: auto; display: flex; flex-direction: column; gap: 2px; padding: 4px;
-  background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 8px;
-  box-shadow: var(--vv-shadow-3); z-index: 30; }
-.vv-ws-pop.narrow { position: fixed; right: 8px; left: auto; min-width: 230px; }
+/* workspace 列表（标签栏收敛 Task 1：自切换器抽取为 WorkspaceList——融合菜单
+   「工作区」子菜单体）：浮层/触发钮段（.vv-ws/.vv-ws-trigger/.vv-ws-pop(.narrow)）
+   随退役删除，关闭通道/定位/限高滚动全部归 .vv-tbmenu-pop 宿主（原下拉 z-index
+   30 语义由菜单浮层 90 承接）；仅列表条目段保留原样（类名零变更，e2e 锚红线，
+   t-workspace/b-wsx-recovery 消费） */
 .vv-ws-item { display: flex; align-items: center; gap: 2px; border-radius: 6px; }
 .vv-ws-item:hover, .vv-ws-item:focus-within { background: var(--ui-hover-bg); }
 .vv-ws-item.active .vv-ws-name { color: var(--ui-accent); font-weight: 600; }
@@ -450,38 +444,48 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 }
 /* 顶栏退役 Task 2：.vv-tabbar 改嵌套滚动结构——overflow-x:auto 收进内层
    .vv-tabbar-tabs（左端动作簇与「管理」钮不随滚动挤压/位移），本层 overflow:
-   visible 供簇内浮层（.vv-ws-pop 下拉 / .vv-tbact-pop 菜单）逃逸裁剪 */
+   visible 供簇内浮层（.vv-tbmenu-pop 融合菜单）逃逸裁剪。标签栏收敛 Task 1：
+   左端四件簇收敛为融合菜单单钮，容器随迁改名（flex:none + border-right 分隔
+   语义不变） */
 .vv-tabbar { display: flex; overflow: visible; background: var(--ui-tab-bg); border-bottom: 1px solid var(--ui-border); }
 .vv-tabbar-tabs { display: flex; overflow-x: auto; flex: 1; min-width: 0; }
-.vv-tabbar-actions { flex: none; display: flex; align-items: center; gap: 2px; border-right: 1px solid var(--ui-border); padding: 0 4px; }
-/* 簇内图标钮基类（TabBarActions ＋/↻/⋯）：borderless 复用全局 button 基座
-   （背景/字色/字号/内边距），去边框圆角贴条观感 */
-.vv-tbact { background: none; border: 0; border-radius: 0; }
-/* 簇内工作区触发钮收窄（顶栏退役 Task 3 后为唯一消费形态；基座 .vv-ws-trigger
-   的 22vw 上限仅剩历史语义，本覆盖为生效值）：簇四件（切换器/＋/↻/⋯）同行共存，
-   375px 档实测算 16vw≈60px 时簇宽 ~174px（≈46vw），tabs 滚动区余 ~54vw 不被挤爆，
-   故取 16vw */
-.vv-tabbar-actions .vv-ws-trigger { max-width: 16vw; }
-/* 簇浮层菜单（＋ 打开 / ⋯ 更多）：chrome 菜单观感（.vv-chromemenu/.vv-tabctx 同
-   token），fixed + 视口收敛内联坐标（开合时从触发钮 rect 一次计算）；z-index 90
-   对齐菜单惯例（> 面板层 30）；关闭通道 = 外点 pointerdown + Esc（无 scroll-close
-   ——fixed 定位不随 tabbar 横滚失锚） */
-.vv-tbact-pop { position: fixed; z-index: 90; min-width: 11em; padding: 4px; display: flex;
+.vv-tabbar-menu { flex: none; display: flex; align-items: center; gap: 2px; border-right: 1px solid var(--ui-border); padding: 0 4px; }
+/* 融合菜单触发钮（标签栏收敛 Task 1，替代原 .vv-tbact 图标钮基座与
+   .vv-ws-trigger 22vw/16vw 上限）：borderless 复用全局 button 基座（背景/字色/
+   字号/内边距），去边框圆角贴条观感；文本「工作区名 ▾」恒显（narrow 分支退役），
+   上限 min(40vw, 16em) + ellipsis——原 16vw 是四件簇共存的历史值，单钮形态取
+   40vw（375px 档 ≈150px，tabs 滚动区余量充裕） */
+.vv-tbmenu-trigger { background: none; border: 0; border-radius: 0; white-space: nowrap;
+  max-width: min(40vw, 16em); overflow: hidden; text-overflow: ellipsis; }
+/* 融合菜单浮层（.vv-tbmenu-pop）：chrome 菜单观感（.vv-chromemenu/.vv-tabctx 同
+   token），fixed + 视口收敛内联坐标（开合时从触发钮 rect 一次 clamp）；z-index 90
+   对齐菜单惯例（> 面板层 30）；关闭通道 = 外点 pointerdown + 容器 Esc + window
+   兜底（无 scroll-close——fixed 定位不随 tabbar 横滚失锚）。max-height 由组件
+   $effect 实测内容高写入（spec §3.3 超高策略：子菜单/行内表单开合即重估），
+   触顶转 overflow-y 内部滚动——该滚动条属面板滚动非 tab 条，不隐藏 */
+.vv-tbmenu-pop { position: fixed; z-index: 90; min-width: 11em; padding: 4px; display: flex;
   flex-direction: column; gap: 2px; background: var(--ui-tab-active-bg); border: 1px solid var(--ui-border);
-  border-radius: 6px; box-shadow: var(--vv-shadow-2); }
-.vv-tbact-item { background: none; border: none; border-radius: 4px; text-align: left;
+  border-radius: 6px; box-shadow: var(--vv-shadow-2); overflow-y: auto; }
+.vv-tbmenu-item { background: none; border: none; border-radius: 4px; text-align: left;
   padding: 4px 10px; font: inherit; font-size: var(--vv-fs-sm); white-space: nowrap; cursor: pointer; }
-.vv-tbact-item:hover { background: var(--ui-hover-bg); }
+.vv-tbmenu-item:hover { background: var(--ui-hover-bg); }
+/* 子菜单父项 chevron（▸/▾ 随态翻转；aria-hidden 字形 span，不进 accessible name） */
+.vv-tbmenu-caret { margin-left: 6px; }
 /* 「粘贴 URL」行内展开行（form）与连接服务器表单行（div，常驻挂载+hidden）：
    行内表单留 2px 呼吸边 */
-.vv-tbact-row { display: flex; gap: 4px; align-items: center; padding: 2px 4px; }
-.vv-tbact-row input { flex: 1; min-width: 0; }
-.vv-tbact-pop > div { padding: 2px 4px; }
-/* 字形钮触控目标（§6.4/§10-G1，≤600px 档，自 TopBar scoped 迁来改类选择器）：
-   簇三钮均为图标钮，padding-block 补至 8px 使触控高 ≥32px（13px 字号 + normal
-   行高 ≈ 33.6px；随 --vv-ui-font-size 联动增大，恒过线）。桌面断点不适用，零漂移 */
+.vv-tbmenu-row { display: flex; gap: 4px; align-items: center; padding: 2px 4px; }
+.vv-tbmenu-row input { flex: 1; min-width: 0; }
+.vv-tbmenu-pop > div { padding: 2px 4px; }
+/* 子菜单容器（就地手风琴缩进区；spec §3.2 拍板：子项含表单——工作区重命名行/
+   粘贴 URL 行——飞出面板局促，就地展开享全宽，移动端友好）。置于 > div 通配
+   之后：同特异性靠序覆盖，缩进 padding 生效 */
+.vv-tbmenu-sub { display: flex; flex-direction: column; gap: 2px; padding: 2px 2px 2px 14px; }
+/* 触发钮触控目标（§6.4/§10-G1，≤600px 档；顶栏退役 Task 2 自 TopBar scoped 迁来
+   改类选择器，标签栏收敛 Task 1 随融合菜单换挂 .vv-tbmenu-trigger）：
+   padding-block 补至 8px 使触控高 ≥32px（13px 字号 + normal 行高 ≈ 33.6px；随
+   --vv-ui-font-size 联动增大，恒过线）。桌面断点不适用，零漂移 */
 @media (max-width: 600px) {
-  .vv-tabbar-actions .vv-tbact { padding-block: 8px; }
+  .vv-tabbar-menu .vv-tbmenu-trigger { padding-block: 8px; }
 }
 /* .vv-tab 为 div[role=tab]（U2：激活区与关闭钮拆为兄弟节点，button 内不再嵌交互元素）；
    cursor 与 font-size 需自带（原先由全局 button 规则提供——U2 去 button 化后 div

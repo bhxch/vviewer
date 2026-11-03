@@ -1,4 +1,4 @@
-import { overflowConnectServer } from './tabbar-actions';
+import { menuConnectServer } from './tabbar-menu';
 import type { ChildProcess } from 'node:child_process';
 import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -77,7 +77,7 @@ test.afterAll(async () => {
 
 /** 展开 ⋯ 菜单连接表单并提交（同 m5：每次测试用新 page，存储互不影响） */
 async function connect(page: Page, token: string): Promise<void> {
-  await overflowConnectServer(page);
+  await menuConnectServer(page);
   await page.getByLabel('服务器地址').fill(BASE);
   await page.getByLabel('访问令牌').fill(token);
   await page.getByRole('button', { name: '连接', exact: true }).click();

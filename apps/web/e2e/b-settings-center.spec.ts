@@ -1,4 +1,4 @@
-import { openOverflowMenu } from './tabbar-actions';
+import { MENU_POP, openMenu, openSubmenu } from './tabbar-menu';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -53,13 +53,13 @@ function exportFileBuffer(settings: Record<string, unknown>): Buffer {
 }
 
 test.describe('b-settings-center 统一设置中心', () => {
-  test('SC-01 骨架与双入口：⋯ 菜单「设置」/Ctrl+, 开合、九组定稿序、切组、Esc 关闭', async ({ page }) => {
+  test('SC-01 骨架与双入口：融合菜单「设置」/Ctrl+, 开合、九组定稿序、切组、Esc 关闭', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('.vv-tabbar')).toBeVisible();
 
-    // 入口① ⋯ 菜单「设置」条目（顶栏退役后 ⚙ 宿主迁标签栏按钮簇）：全屏页 + role=dialog 双通道
-    await openOverflowMenu(page);
-    await page.locator('.vv-tbact-pop').getByRole('button', { name: '设置', exact: true }).click();
+    // 入口① 融合菜单「设置」条目（标签栏收敛 Task 1 后 ⚙ 宿主为 TabBarMenu）：全屏页 + role=dialog 双通道
+    await openMenu(page);
+    await page.locator(MENU_POP).getByRole('button', { name: '设置', exact: true }).click();
     const root = page.locator(SETTINGS_ROOT);
     await expect(root).toBeVisible();
     await expect(page.getByRole('dialog', { name: '设置' })).toBeVisible();
@@ -402,18 +402,19 @@ test.describe('b-settings-center 统一设置中心', () => {
     await expect(page.locator('select[aria-label="代码主题"]')).toHaveCount(0);
     await expect(page.locator('select[aria-label="计算策略"]')).toHaveCount(0);
 
-    // ⋯ 菜单「设置」条目指向设置中心
-    await openOverflowMenu(page);
-    await page.locator('.vv-tbact-pop').getByRole('button', { name: '设置', exact: true }).click();
+    // 融合菜单「设置」条目指向设置中心
+    await openMenu(page);
+    await page.locator(MENU_POP).getByRole('button', { name: '设置', exact: true }).click();
     await expect(page.locator(SETTINGS_ROOT)).toBeVisible();
     await closeSettings(page);
 
-    // 亮暗快切保留（⋯ 菜单主题条目与设置中心亮暗模式控件双写同字段；点击即收，
-    // 再切需重开菜单）
-    await openOverflowMenu(page);
-    const themeBtn = page.locator('.vv-tbact-pop').getByRole('button', { name: /主题：/ });
-    await expect(themeBtn).toHaveText('主题：跟随系统');
-    await themeBtn.click();
+    // 亮暗快切保留（融合菜单主题子菜单与设置中心亮暗模式控件双写同字段；三显项
+    // 直选即收菜单，再切需重开子菜单）
+    await openSubmenu(page, '主题');
+    await expect(page.locator(MENU_POP).getByRole('button', { name: '跟随系统' })).toHaveText(
+      '✓ 跟随系统'
+    );
+    await page.locator(MENU_POP).getByRole('button', { name: '亮' }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'light');
     await expect.poll(() => savedSettings(page)).toEqual(expect.objectContaining({ themeMode: 'light' }));
   });

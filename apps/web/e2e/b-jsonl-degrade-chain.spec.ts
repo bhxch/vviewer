@@ -1,4 +1,4 @@
-import { overflowConnectServer } from './tabbar-actions';
+import { menuConnectServer } from './tabbar-menu';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test, expect, type Locator, type Page } from '@playwright/test';
@@ -351,7 +351,7 @@ async function waitAppMounted(page: Page): Promise<void> {
 
 /** 连接表单提交（b-io-streaming connectForm 同款；token 留空） */
 async function connectForm(page: Page, base: string): Promise<void> {
-  await overflowConnectServer(page);
+  await menuConnectServer(page);
   await page.getByLabel('服务器地址').fill(base);
   await page.getByRole('button', { name: '连接', exact: true }).click();
 }

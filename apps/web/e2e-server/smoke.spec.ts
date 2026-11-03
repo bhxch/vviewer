@@ -4,7 +4,7 @@ import { test, expect } from '@playwright/test';
  * 服务端模式冒烟用例：release 二进制同源伺服 web-dist（:4174），
  * 打开首页断言应用壳渲染（壳选择器与既有 e2e 同源：AppShell.svelte 的
  * .vv-shell/.vv-main/.vv-tabbar；品牌条随顶栏退役删除，标签栏按钮簇
- * .vv-ws-trigger 接替壳渲染锚）。只验证壳可用 + 免鉴权
+ * 融合菜单触发钮 .vv-tbmenu-trigger 接替壳渲染锚，标签栏收敛 Task 1 随迁）。只验证壳可用 + 免鉴权
  * /api/health 能力宣告，连接/目录树/渲染全链路属 m5/m6 域用例，不在此重复。
  */
 test('服务端模式首页渲染应用壳', async ({ page }) => {
@@ -17,7 +17,7 @@ test('服务端模式首页渲染应用壳', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('.vv-shell')).toBeVisible();
   await expect(page.locator('.vv-tabbar')).toBeVisible();
-  await expect(page.locator('.vv-ws-trigger')).toBeVisible();
+  await expect(page.locator('.vv-tabbar-menu .vv-tbmenu-trigger')).toBeVisible();
   await expect(page.locator('.vv-side')).toBeVisible();
   await expect(page.locator('.vv-main')).toBeVisible();
 });

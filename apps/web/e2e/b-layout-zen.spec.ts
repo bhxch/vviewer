@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { openOverflowMenu } from './tabbar-actions';
+import { MENU_POP, openMenu, openSubmenu } from './tabbar-menu';
 
 /**
  * 布局自由化与 zen mode 冒烟（spec 2026-10-19 §2/§3/§3.1，plan Task 5）。
@@ -12,7 +12,7 @@ import { openOverflowMenu } from './tabbar-actions';
  *   LZ-10 双条组合矩阵失去载体移除、其全量还原锚并入本用例）
  * - LZ-04 标签栏隐藏态 Ctrl+, 设置面板/新建工作区模态仍可见（台账带入断言：
  *   visibility 逃生门，b-layout-zen 钉住「隐藏条不影响挂点面板」不变式）
- * - LZ-05 zen：⋯ 菜单「专注」/Ctrl+Alt+Z 进出、正交性（显式字段不改写）、
+ * - LZ-05 zen：融合菜单「专注」/Ctrl+Alt+Z 进出、正交性（显式字段不改写）、
  *   Esc 面板优先、边缘条右键退出、桌面无浮钮
  * - LZ-06 reload 落 zen
  * - LZ-07 标签栏隐藏：临时标签条指针移入内容区 1.5s 自动收回
@@ -24,7 +24,7 @@ import { openOverflowMenu } from './tabbar-actions';
  * - mLZ-02 返回键（page.goBack）先关面板再退 zen（zenPopAction 分派）
  * - mLZ-03 reload 落 zen：浮钮在场 + 守卫项经 history.state 存活、返回键仍退 zen
  * - mLZ-04 zen 隐抽屉 toggles/本体，退出还原进入前开合态
- * - mLZ-05 返回键先关 .vv-ws-pop 工作区菜单（终审 I-2——pop 是九类 overlay 中唯一
+ * - mLZ-05 返回键先关 .vv-tbmenu-pop 融合菜单（终审 I-2——pop 是 overlay 中唯一
  *   无容器 keydown 的，合成 Esc 派发目标即本体被 window 兜底 contains 守卫挡下，
  *   closeOverlay 空转+守卫重压成返回键死循环；修复后通道闭合、二次返回退 zen）
  *
@@ -209,9 +209,10 @@ test.describe('布局与 zen（桌面）', () => {
     await page.keyboard.press('Escape');
     await expect(panel).toHaveCount(0);
 
-    // 热区唤出临时条 → 工作区菜单 → 新建工作区模态（TabBar 内挂点第二面板根）同不变式
+    // 热区唤出临时条 → 融合菜单「工作区」子菜单 → 新建工作区模态（TabBarMenu
+    // 组件体挂点第二面板根）同不变式
     await hoverTabEdge(page);
-    await page.locator('.vv-ws-trigger').click();
+    await openSubmenu(page, '工作区');
     await page.locator('.vv-ws-new').click();
     const modal = page.locator('.vv-wscreate');
     await expect(modal).toBeVisible();
@@ -228,13 +229,13 @@ test.describe('布局与 zen（桌面）', () => {
     // 补发 pointerenter 唤出临时条（真实行为）——中性区起点避免误唤出
     await page.mouse.move(400, 300);
 
-    // 可见入口（2026-10-23）：⋯ 菜单「专注」条目进 zen（顶栏退役 Task 4 前为
+    // 可见入口（2026-10-23）：融合菜单「专注」条目进 zen（顶栏退役 Task 4 前为
     // TopBar「专注」钮），tooltip 写明进出双方式；临时条形态（zen 下热区唤出）
     // 右键菜单同通道即「退出专注」
-    await openOverflowMenu(page);
-    // exact 按 accessible name 全等——按钮 aria-label 是「进入专注模式」（TabBarActions），
-    // 按钮可见文本「专注」只是非 aria 的内联文案，不能作 name 锚
-    const zenBtn = page.locator('.vv-tbact-pop').getByRole('button', {
+    await openMenu(page);
+    // exact 按 accessible name 全等——按钮 aria-label 是「进入专注模式」（TabBarMenu
+    // 红线逐字），按钮可见文本「专注」只是非 aria 的内联文案，不能作 name 锚
+    const zenBtn = page.locator(MENU_POP).getByRole('button', {
       name: '进入专注模式',
       exact: true
     });
@@ -413,7 +414,7 @@ test.describe('zen 移动端（mobile project）', () => {
     await expect(page.locator('.vv-tabbar')).toBeVisible();
   });
 
-  test('mLZ-05：返回键先关 .vv-ws-pop 菜单（合成 Esc 容器通道，终审 I-2 死循环回归锚）', async ({
+  test('mLZ-05：返回键先关 .vv-tbmenu-pop 菜单（合成 Esc 容器通道，终审 I-2 死循环回归锚）', async ({
     page
   }) => {
     await page.goto('/');
@@ -425,13 +426,14 @@ test.describe('zen 移动端（mobile project）', () => {
     await page.mouse.move(180, 300);
     await page.mouse.move(tabEdge.x + 4, tabEdge.y + tabEdge.height / 2);
     await expect(page.locator('.vv-tabbar.vv-chrome-temp')).toBeVisible();
-    await page.locator('.vv-ws-trigger').click();
-    await expect(page.locator('.vv-ws-pop')).toBeVisible();
+    await page.locator('.vv-tabbar-menu .vv-tbmenu-trigger').click();
+    await expect(page.locator('.vv-tbmenu-pop')).toBeVisible();
 
     // 第一次返回：只关菜单，zen 与守卫保持（修复前 closeOverlay 空转+守卫重压，
-    // 菜单永不关、返回键连续无效的死循环）
+    // 菜单永不关、返回键连续无效的死循环；容器通道现挂 .vv-tbmenu-pop，
+    // OVERLAY_SELECTOR 同步随迁）
     await page.goBack();
-    await expect(page.locator('.vv-ws-pop')).toHaveCount(0);
+    await expect(page.locator('.vv-tbmenu-pop')).toHaveCount(0);
     await expect(page.locator('.vv-shell.zen')).toHaveCount(1);
     expect(await page.evaluate(() => (history.state as { vvZen?: number } | null)?.vvZen)).toBe(1);
 

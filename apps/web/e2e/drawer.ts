@@ -32,20 +32,38 @@ function isDrawerOpen(page: Page): Promise<boolean> {
   });
 }
 
+/**
+ * 抽屉开合状态幂等确保（BUG-61 教训的左抽屉收口版，ensureRightDrawer 同构）：
+ * .vv-side 开合带 0.2s transform 过渡，瞬时采样会在过渡中段把「开」误读为
+ * 「关」（matrix 中间值非 none）——close 判定因此跳过关闭（抽屉挂开遮挡后续
+ * 点击，标签栏收敛 Task 1 门禁在 ICON-05/ICON-07/OWM-05 mobile 实证）、open
+ * 判定因此重复 toggle 双 flip。期望状态未落定前以 250ms（> --vv-dur-med
+ * 0.2s）间隔重读重 toggle，10 次封顶。
+ */
+async function ensureDrawer(page: Page, wantOpen: boolean): Promise<void> {
+  let open = await isDrawerOpen(page);
+  for (let i = 0; i < 10 && open !== wantOpen; i++) {
+    await page.locator('.vv-drawer-toggle').click();
+    await page.waitForTimeout(250); // > --vv-dur-med（0.2s）：过渡落定再采样
+    open = await isDrawerOpen(page);
+  }
+}
+
 /** 窄视口下确保抽屉打开（已开则不重复 toggle——BUG-61 自动收起后的状态幂等），
  * 返回调用方是否处于抽屉断点（配 closeDrawer 还原语义保留，见 closeDrawer）。 */
 export async function openDrawerIfNarrow(page: Page): Promise<boolean> {
   // isDrawerViewport 为异步（matchMedia 经 page.evaluate 求值）：必须 await，
   // 否则 Promise 恒真导致桌面视口也去点 display:none 的抽屉钮（超时雪崩）
   if (!(await isDrawerViewport(page))) return false;
-  if (!(await isDrawerOpen(page))) await page.locator('.vv-drawer-toggle').click();
+  await ensureDrawer(page, true);
   return true;
 }
 
 /** 窄视口下若抽屉仍开着则关闭（BUG-61 起行点击后应用自动收起，多为 no-op）；
- * opened=false（桌面视口）为空操作。 */
+ * opened=false（桌面视口）为空操作。关闭同样走 ensureDrawer 过渡落定重试
+ * （见其注：过渡中段误读曾致跳过关闭、抽屉挂开遮挡后续点击）。 */
 export async function closeDrawerIfOpened(page: Page, opened: boolean): Promise<void> {
-  if (opened && (await isDrawerOpen(page))) await page.locator('.vv-drawer-toggle').click();
+  if (opened) await ensureDrawer(page, false);
 }
 
 /**

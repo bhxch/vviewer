@@ -167,7 +167,7 @@
   });
 </script>
 
-<!-- oncontextmenu（TabBarActions / WorkspaceSwitcher 同款）：本浮层挂在 .vv-tabbar 根下、
+<!-- oncontextmenu（TabBarMenu 融合菜单同款）：本浮层挂在 .vv-tabbar 根下、
      不在 .vv-tab 内，壳层 .vv-shell onShellContextMenu 的放行判定不命中——右键条目会
      叠开 chrome 菜单，stopPropagation 截断冒泡；preventDefault 只对非输入元素 -->
 <div

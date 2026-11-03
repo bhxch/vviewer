@@ -311,19 +311,18 @@
   }
 
   /**
-   * 主题循环切换（顶栏退役 Task 2 自 TopBar 迁入：全局动作簇 TabBarActions 的
-   * oncycletheme 宿主实现；Task 3 随 TopBar 退役成为唯一入口）：order 三态循环 →
-   * 本组件 settings 响应式副本上变更 → saveSettings 落盘（副本经 onSettingsChanged
-   * 订阅与持久层恒同步）→ html data-theme-mode 打标（设置中心「亮暗模式」路径同款，
-   * 订阅内亦会同步打标）。'system' 模式的暗色由 app.css @media prefers-color-scheme
-   * 处理，无需 JS；注入不在此直调：saveSettings → onSettingsChanged 订阅 →
-   * effectiveMode 变化命中 diff（spec 2026-10-12 §2.4）。
+   * 主题写入路径（顶栏退役 Task 2 自 TopBar 迁入壳层；标签栏收敛 Task 1 换签名：
+   * 融合菜单 TabBarMenu 的 onsettheme 宿主实现，主题轮换退役改三显式项——spec §8
+   * 裁决）：mode 显式入参 → 本组件 settings 响应式副本上变更 → saveSettings 落盘
+   * （副本经 onSettingsChanged 订阅与持久层恒同步）→ html data-theme-mode 打标
+   * （设置中心「亮暗模式」路径同款，订阅内亦会同步打标）。'system' 模式的暗色由
+   * app.css @media prefers-color-scheme 处理，无需 JS；注入不在此直调：saveSettings
+   * → onSettingsChanged 订阅 → effectiveMode 变化命中 diff（spec 2026-10-12 §2.4）。
    */
-  function cycleTheme(): void {
-    const order: Settings['themeMode'][] = ['system', 'light', 'dark'];
-    settings.themeMode = order[(order.indexOf(settings.themeMode) + 1) % 3]!;
+  function setThemeMode(mode: Settings['themeMode']): void {
+    settings.themeMode = mode;
     saveSettings(settings);
-    document.documentElement.dataset.themeMode = settings.themeMode;
+    document.documentElement.dataset.themeMode = mode;
   }
 
   /**
@@ -625,10 +624,10 @@
     '.vv-wscreate',
     '.vv-remotesrc',
     '.vv-tabctx',
-    // 顶栏退役 Task 2：TabBar 左端动作簇浮层菜单（瞬态菜单同 .vv-tabctx 语义——
-    // 桌面 Esc 只关菜单不退 zen，移动端返回键可关不残留）
-    '.vv-tbact-pop',
-    '.vv-ws-pop',
+    // 顶栏退役 Task 2 + 标签栏收敛 Task 1：TabBar 左端融合菜单浮层（瞬态菜单同
+    // .vv-tabctx 语义——桌面 Esc 只关菜单不退 zen，移动端返回键可关不残留）；
+    // 原 .vv-ws-pop 条目删除（工作区子菜单随宿主浮层同生命周期，无独立关闭态）
+    '.vv-tbmenu-pop',
     '.vv-status-picker'
   ].join(', ');
 
@@ -728,7 +727,8 @@
     // 设置变更（设置中心/标签栏动作簇经 saveSettings 写入）→ 刷新响应式副本 + html 打标：
     // 排除规则变化经下方 {#key} 重建 FileTree（BUG-05）；themeMode 变化经设置中心
     // 「亮暗模式」控件应用时，data-theme-mode 也须同步（此前唯一运行时写入点在
-    // TopBar cycleTheme——设置中心路径漏打标，壳层配色不切换，Task 5 e2e SC-03 补出）。
+    // TopBar cycleTheme——设置中心路径漏打标，壳层配色不切换，Task 5 e2e SC-03 补出；
+    // 该写入点现名 setThemeMode，标签栏收敛 Task 1 换签名）。
     // 外观/字体注入同挂本回调（原 TopBar 订阅链并入单订阅，顶栏退役 Task 3——
     // 双订阅会重复 diff 注入，spec 2026-10-12 §2.4 注入触发通道单点化）
     const offSettings = onSettingsChanged((s) => {
@@ -1228,7 +1228,7 @@
     sources={activeWorkspace?.sources ?? []}
     onmanage={() => (wsPanelOpen = !wsPanelOpen)}
     themeMode={settings.themeMode}
-    oncycletheme={cycleTheme}
+    onsettheme={setThemeMode}
     onsettings={() => toggleSettingsCenter()}
     onmounts={() => toggleMountsManager()}
     zen={layout.zen}

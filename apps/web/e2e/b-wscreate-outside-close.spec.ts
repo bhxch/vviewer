@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { openSubmenu } from './tabbar-menu';
 
 /**
  * wscreate 外点关闭（设计系统 §10-G3 交互补齐 / §12.3-6 回归口径）：新建工作区
@@ -7,7 +8,7 @@ import { test, expect, type Page } from '@playwright/test';
  * 全部是面板内操作路径、无外点回归保护，本 spec 独立补锚——新增文件，不触碰既有断言：
  * - 面板内点击不被外点监听误伤（contains 守卫）：「创建并激活」照常完成创建并关闭；
  * - 面板外 pointerdown 关闭：复用 t-workspace createWorkspace 的打开装置
- *   （触发器 → 「＋ 新建工作区…」，两个 project 视口同径）。
+ *   （融合菜单「工作区」子菜单 → 「＋ 新建工作区…」，两个 project 视口同径）。
  */
 
 /** 等应用挂载（t-workspace waitAppMounted 同款：__vvOpenDirImpl 就绪 + TabBar 可见） */
@@ -25,7 +26,7 @@ test('WS-OC：wscreate 外点关闭——面板内点击不受误伤、面板外
   await waitAppMounted(page);
 
   // 面板内点击不受误伤：主钮（finish → close）照常工作，面板经既有完成路径关闭
-  await page.locator('.vv-ws-trigger').click();
+  await openSubmenu(page, '工作区');
   await page.getByRole('button', { name: '＋ 新建工作区…' }).click();
   const modal = page.locator('.vv-wscreate');
   await expect(modal).toBeVisible();
@@ -35,7 +36,7 @@ test('WS-OC：wscreate 外点关闭——面板内点击不受误伤、面板外
   // 面板外 pointerdown 关闭：重开后点模态底边下方 40px 的正文区坐标——顶距 44px +
   // 模态限高 min(75vh, 560px) + 40px 在两个 project 视口（375×667 / 1280×720）内
   // 恒有落点；x=12 处 pointerdown 经冒泡到 document 监听，落在面板 contains 之外
-  await page.locator('.vv-ws-trigger').click();
+  await openSubmenu(page, '工作区');
   await page.getByRole('button', { name: '＋ 新建工作区…' }).click();
   await expect(modal).toBeVisible();
   const box = await modal.boundingBox();

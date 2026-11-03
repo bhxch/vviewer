@@ -326,16 +326,16 @@ describe('storageHealth 共享模块导出面（spec §2.1/§2.2 接口契约）
   });
 });
 
-describe('TopBar 退役宿主迁移（顶栏退役 Task 3：原 TopBar 精简面接续）', () => {
+describe('TopBar 退役宿主迁移（顶栏退役 Task 3 + 标签栏收敛 Task 1：原 TopBar 精简面接续）', () => {
   const shell = readSrc('src/lib/AppShell.svelte');
-  const actions = readSrc('src/lib/TabBarActions.svelte');
+  const actions = readSrc('src/lib/TabBarMenu.svelte');
 
   it('TopBar.svelte 已删除（退役组件文件不存在，rg 零残留口径锁定）', () => {
     expect(existsSync(resolve('apps/web/src/lib/TopBar.svelte'))).toBe(false);
   });
 
-  it('亮暗快切与注入订阅链保留并归壳层（cycleTheme + applyAppearance/applyFonts + fonts reaction）；onSettingsChanged 单订阅不双挂', () => {
-    expect(shell).toContain('function cycleTheme');
+  it('亮暗显式三显项写入路径归壳层（setThemeMode + applyAppearance/applyFonts + fonts reaction）；onSettingsChanged 单订阅不双挂', () => {
+    expect(shell).toContain('function setThemeMode');
     expect(shell).toContain('applyAppearanceFromSettings');
     expect(shell).toContain('applyFontsFromSettings');
     expect(shell).toContain('reactToFontsChange');
@@ -349,7 +349,7 @@ describe('TopBar 退役宿主迁移（顶栏退役 Task 3：原 TopBar 精简面
     expect(actions).not.toContain('themeOptions');
   });
 
-  it('⚙ 按钮走 onsettings 回调（宿主 TabBarActions，props 声明；菜单项 onclick 体内经 menu=null 后回调）', () => {
+  it('⚙ 入口走 onsettings 回调（宿主 TabBarMenu 融合菜单，props 声明；设置项 onclick 体内经 menuOpen=false 后回调）', () => {
     expect(actions).toMatch(/onsettings\(\): void/);
     expect(actions).toMatch(/aria-label="设置"[\s\S]{0,200}onsettings\(\)/);
   });

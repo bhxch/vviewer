@@ -1,4 +1,4 @@
-import { overflowConnectServer } from './tabbar-actions';
+import { menuConnectServer } from './tabbar-menu';
 import { test, expect, type Page } from '@playwright/test';
 import { startFakeFileServer } from './fake-file-server';
 
@@ -32,7 +32,7 @@ async function openLocalDir(page: Page, files: Array<{ name: string; content: st
 }
 
 async function connectForm(page: Page, base: string): Promise<void> {
-  await overflowConnectServer(page);
+  await menuConnectServer(page);
   await page.getByLabel('服务器地址').fill(base);
   await page.getByRole('button', { name: '连接', exact: true }).click();
 }

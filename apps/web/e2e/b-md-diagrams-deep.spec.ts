@@ -1,7 +1,7 @@
 import { inflateSync } from 'node:zlib';
 import { expect, test, type Page } from '@playwright/test';
 import { injectDir, openTreeFile } from './b-markdown-html-docs-helpers';
-import { openOverflowMenu } from './tabbar-actions';
+import { MENU_POP, openSubmenu } from './tabbar-menu';
 
 /**
  * b-md-diagrams-deep 图表三通道矩阵补强（DM-01~DM-10，不与 b-md-diagrams /
@@ -308,15 +308,12 @@ test.describe('b-md-diagrams-deep 图表三通道矩阵补强', () => {
     const snap = () =>
       page.evaluate(() => document.querySelector('.vv-markdown .md-diagram-view[data-mermaid]')?.outerHTML ?? '');
     const before = await snap();
-    // ⋯ 菜单主题快切（与设置中心同一 themeMode 字段）→ saveSettings → 订阅派发事件；
-    // 条目点击即收菜单，每轮重开（顶栏退役 Task 4）
-    const themeItem = page.locator('.vv-tbact-pop').getByRole('button', { name: /主题：/ });
-    await openOverflowMenu(page);
-    await expect(themeItem).toHaveText('主题：亮');
-    await themeItem.click();
-    await openOverflowMenu(page);
-    await expect(themeItem).toHaveText('主题：暗');
-    await themeItem.click();
+    // 融合菜单主题子菜单快切（与设置中心同一 themeMode 字段）→ saveSettings →
+    // 订阅派发事件；三显式项直选，点击即收菜单，每轮重开（标签栏收敛 Task 1）
+    await openSubmenu(page, '主题');
+    await page.locator(MENU_POP).getByRole('button', { name: '亮' }).click();
+    await openSubmenu(page, '主题');
+    await page.locator(MENU_POP).getByRole('button', { name: '暗' }).click();
     // 事件驱动 [data-mermaid] 容器就地重画：外层 HTML 变化（新 svg 节点/新主题配色）且不重开 tab
     await expect(view).toBeVisible();
     await expect.poll(snap, { timeout: 30_000, message: 'mermaid 应随主题就地重画' }).not.toBe(before);

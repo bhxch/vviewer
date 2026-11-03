@@ -3,8 +3,8 @@
   import { connectServer, loadLastServer } from './openFlow.svelte';
 
   /** 连接服务器表单（侧栏多根 spec Task 3 自 TopBar 抽取的共享组件；顶栏退役后
-   * TopBar 消费点随整行删除）：现两消费点复用——标签栏动作簇 ⋯ 菜单瞬态挂载
-   * （TabBarActions：{#if menu} 门控浮层、菜单内 hidden 控制「连接服务器」行
+   * TopBar 消费点随整行删除）：现两消费点复用——标签栏融合菜单瞬态挂载
+   * （TabBarMenu：{#if menuOpen} 门控浮层、菜单内 hidden 控制「连接服务器」行
    * 收展——会话内切换收展不卸载、未提交输入保留，随菜单关闭整体卸载，连接成功
    * onconnected 收起浮层）与侧栏 0 目录空态引导区 {#if} 门控挂载（AppShell
    * .vv-side-empty，展开首渲染预填）。内部自持 url/token/connecting/error

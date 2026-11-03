@@ -2,14 +2,14 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type CDPSession, type Page } from '@playwright/test';
 import { closeDrawerIfOpened } from './drawer';
-import { openOverflowMenu } from './tabbar-actions';
+import { MENU_POP, openSubmenu } from './tabbar-menu';
 
 /**
  * M7 Task 4：移动视口（375×667 触摸）冒烟——
  * 1. 抽屉开合：≤900px 断点下文件树/右栏收进抽屉，drawer-toggle 按钮开合生效；
  * 2. 文件夹打开 → 树 → 打开 md → 渲染（经抽屉内树行点击的移动端真实路径）；
  * 3. 触摸滚动：CDP Input.dispatchTouchEvent 滑动 markdown 正文，scrollTop 前移；
- * 4. 主题切换：⋯ 菜单主题条目三态循环，html data-theme-mode 随之变化；
+ * 4. 主题切换：融合菜单主题子菜单三显项直选，html data-theme-mode 随之变化；
  * 5. 视频播放页不崩：ArtPlayer 容器挂载、video 无 error（headless codec 宽松断言）；
  * 6. 手机右栏入口：ℹ toggle 开合 TOC/属性抽屉（≤600px 断点，终审 M7 补入口）。
  *
@@ -119,19 +119,19 @@ test('触摸滑动 markdown 正文：scrollTop 前移', async ({ page }) => {
     .toBeGreaterThan(0);
 });
 
-test('主题切换：⋯ 菜单主题条目三态循环写入 data-theme-mode', async ({ page }) => {
+test('主题切换：融合菜单主题子菜单三显项写入 data-theme-mode', async ({ page }) => {
   await page.goto('/');
-  const themeItem = page.locator('.vv-tbact-pop').getByRole('button', { name: /主题：/ });
-  await expect(themeItem).toBeHidden(); // 浮层未开（触发通道迁移后经 ⋯ 菜单两段点击）
-  await openOverflowMenu(page);
+  const themeItem = page.locator(MENU_POP).getByRole('button', { name: '跟随系统' });
+  await expect(themeItem).toBeHidden(); // 浮层未开（触发通道经「主题」子菜单三段点击）
 
-  // system → light → dark → system 循环（AppShell onMount 写初始 system）；
-  // 条目点击即收菜单，每轮重新开 ⋯
+  // system → light → dark 显式直选（AppShell onMount 写初始 system；标签栏收敛
+  // Task 1：三显项子菜单替代旧轮换条目）——选择即收菜单，每轮重开
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'system');
-  await themeItem.click();
+  await openSubmenu(page, '主题');
+  await page.locator(MENU_POP).getByRole('button', { name: '亮' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'light');
-  await openOverflowMenu(page);
-  await themeItem.click();
+  await openSubmenu(page, '主题');
+  await page.locator(MENU_POP).getByRole('button', { name: '暗' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'dark');
   // 刷新后持久化（localStorage）
   await page.reload();

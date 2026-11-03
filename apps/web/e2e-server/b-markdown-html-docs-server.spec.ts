@@ -1,4 +1,4 @@
-import { overflowConnectServer } from '../e2e/tabbar-actions';
+import { menuConnectServer } from '../e2e/tabbar-menu';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,7 +43,7 @@ test.beforeAll(() => {
 /** ⋯ 菜单连接表单：无 token 启动的 server 全放行（server/src/auth.rs 无 token 配置全放行） */
 async function connectSameOrigin(page: Page): Promise<void> {
   await page.goto('/');
-  await overflowConnectServer(page);
+  await menuConnectServer(page);
   await page.getByLabel('服务器地址').fill(BASE_URL);
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await expect(page.locator('.vv-tree-row', { hasText: 'bmd-danger.html' })).toBeVisible({
