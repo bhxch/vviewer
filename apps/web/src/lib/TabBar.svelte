@@ -3,6 +3,7 @@
   import type { WorkspaceSource } from './workspaceStore';
   import { activateTab, closeTab, closedStackSize, reopenClosed, tabStore } from './openFlow.svelte';
   import { reorderIds } from './tabOrder';
+  import { arrowVisibility, dominantWheelDelta } from './tabScroll';
   import { badgeOf } from './tabBadge';
   import { registry } from './viewer';
   import { rendererCandidatesOfTab } from './RendererPickerMenu';
@@ -243,6 +244,182 @@
     // drop 成功 / 拖出取消 / Esc 释放统一清理（drop 内也清一次，防个别宿主缺 dragend）
     dragFromId = null;
     dragOver = null;
+    stopDragAutoScroll(); // 边缘自动滚 rAF 链随拖拽会话终止（含 Esc 取消路径）
+  }
+
+  // ---------- tab 条优雅滚动（标签栏收敛 Task 2，spec §4）----------
+
+  /**
+   * 滚动容器（.vv-tabbar-tabs）与箭头/渐隐可见性。bind:this 赋值可能晚于首轮
+   * effect（GlobalSearchPanel 同款）：effect 判空先行，挂载后 cleanup/重跑幂等重建。
+   * 箭头与遮罩的 absolute 锚在 wrapper 上（.vv-tabbar-tabs-wrap，position:relative），
+   * 绝不放滚动容器内——会随 scrollLeft 位移（spec §4.3 结构红线）。
+   */
+  let scroller = $state<HTMLElement | null>(null);
+  let vis = $state({ left: false, right: false });
+
+  function updateVis(): void {
+    const el = scroller;
+    if (el === null) return;
+    vis = arrowVisibility(el.scrollLeft, el.clientWidth, el.scrollWidth);
+  }
+
+  // 重算触发面（spec §4.3）：scroll（passive）+ ResizeObserver（容器盒变）+ window
+  // resize + tabs 依赖——tabs 为 props 深响应代理，枚举即对数组建依赖（开/关 tab、
+  // 恢复快照后箭头随 tab 数刷新）。徽标/图标态变更若改 tab 宽度，盒面由 RO 兜底。
+  $effect(() => {
+    const el = scroller;
+    if (el === null) return;
+    [...tabs];
+    updateVis();
+    const ro = new ResizeObserver(updateVis);
+    ro.observe(el);
+    const onScroll = (): void => updateVis();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', updateVis);
+    return () => {
+      ro.disconnect();
+      el.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', updateVis);
+    };
+  });
+
+  // 滚轮横移（spec §4.2）：Svelte 委托路径 onwheel 的 preventDefault 不可靠（评审
+  // 焦点 2）——手动元素级非被动监听。竖向占优：归一为 px 后横移并阻断页面竖滚；
+  // 横向占优（dominantWheelDelta 返回 0）：放行原生横滚。
+  $effect(() => {
+    const el = scroller;
+    if (el === null) return;
+    const onWheel = (e: WheelEvent): void => {
+      const d = dominantWheelDelta(e);
+      if (d === 0) return;
+      e.preventDefault();
+      el.scrollLeft += d;
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  });
+
+  /** 行为常数（spec §4.3 拍板档：单击 0.8×视宽平滑；按住 350ms 后 80ms 步进 64px）。 */
+  const HOLD_DELAY_MS = 350;
+  const REPEAT_INTERVAL_MS = 80;
+  const REPEAT_STEP_PX = 64;
+  /** 连滚已发生旗标：抑制随后 click 补滚（释放即停，不叠加一次 0.8×视宽跳跃）。 */
+  let held = false;
+  let holdTimer: ReturnType<typeof setTimeout> | null = null;
+  let repeatTimer: ReturnType<typeof setInterval> | null = null;
+
+  function arrowNudge(side: 'left' | 'right', px: number, behavior: ScrollBehavior): void {
+    scroller?.scrollBy({ left: side === 'left' ? -px : px, behavior });
+  }
+
+  function onArrowDown(side: 'left' | 'right'): void {
+    held = false;
+    const el = scroller;
+    if (el === null) return;
+    holdTimer = setTimeout(() => {
+      held = true; // 进入连滚：随后的 click 补滚在 onArrowClick 抑制
+      repeatTimer = setInterval(() => arrowNudge(side, REPEAT_STEP_PX, 'auto'), REPEAT_INTERVAL_MS);
+    }, HOLD_DELAY_MS);
+  }
+
+  /**
+   * 按住链路清理（pointerup / pointercancel / pointerleave）。held 复位分两路：
+   * pointerup 不复位——click 在其之后派发，须读到 held=true 才能抑制补滚；
+   * leave/cancel 复位——指针已离开本钮，click 不再落此，旗标滞留会吞掉下一次单击。
+   */
+  function holdCleanup(resetHeld: boolean): void {
+    if (holdTimer !== null) {
+      clearTimeout(holdTimer);
+      holdTimer = null;
+    }
+    if (repeatTimer !== null) {
+      clearInterval(repeatTimer);
+      repeatTimer = null;
+    }
+    if (resetHeld) held = false;
+  }
+
+  function onArrowClick(side: 'left' | 'right'): void {
+    if (held) {
+      held = false; // 连滚刚发生：本次 click 是按住释放的派发余波，吞掉并复位
+      return;
+    }
+    const el = scroller;
+    if (el === null) return;
+    arrowNudge(side, el.clientWidth * 0.8, 'smooth');
+  }
+
+  /**
+   * 激活 tab 滚入（spec §4.4）：instant（auto）裁决——平滑动画与连续点击/拖拽重排
+   * 竞态，e2e 稳定优先；树/quick open 等一切 activateTab 通道自动获益。拖拽进行中
+   * 跳过（评审焦点 5）：dragFromId 故意保持非响应式（不建依赖、不触发重跑）——
+   * 拖拽中的激活变化不动作，被拖 tab 本就在可视区，结束后亦无需补滚。
+   */
+  let activeTabId = $derived(tabs.find((t) => t.active)?.id ?? null);
+  $effect(() => {
+    const id = activeTabId;
+    if (id === null) return;
+    const el = scroller;
+    if (el === null) return;
+    if (dragFromId !== null) return;
+    el.querySelector<HTMLElement>('[role=tab].active')?.scrollIntoView({
+      inline: 'nearest',
+      block: 'nearest',
+      behavior: 'auto'
+    });
+  });
+
+  // ---------- 拖拽边缘自动滚（标签栏收敛 Task 2，spec §4.5）----------
+  // native-first 探针结论（SCRL-07，Chromium headless / playwright CDP drag）：
+  // 悬置右缘 36px 带 1.2s scrollLeft 恒 0——合成 drag 会话不驱动浏览器原生
+  // autoscroll timer，按计划走「探针红 → 补手工实现」终态。§4.5 参数逐字：
+  // 36px 边缘带 + rAF 步进 ±10px/帧；dragleave（离容器）/drop/dragend 清理。
+  const DRAG_EDGE_PX = 36;
+  const DRAG_STEP_PX = 10;
+  let dragRafId: number | null = null;
+  let dragDir = 0;
+
+  function stopDragAutoScroll(): void {
+    if (dragRafId !== null) {
+      cancelAnimationFrame(dragRafId);
+      dragRafId = null;
+    }
+    dragDir = 0;
+  }
+
+  /**
+   * 容器级 dragover（与 tab 级落点指示 handler 并存，冒泡后到）：clientX 落左右
+   * 36px 带则起 rAF 链步进滚动。方向未变不重挂（dragover 高频派发，反复重挂会使
+   * 步进永远凑不满一帧）；方向翻转/回中带即停旧链。dragFromId 门禁：外部文件拖入
+   * （AppShell window drop 通道）不触发自动滚。
+   */
+  function onScrollerDragover(e: DragEvent): void {
+    if (dragFromId === null) {
+      stopDragAutoScroll();
+      return;
+    }
+    const el = scroller;
+    if (el === null) return;
+    const rect = el.getBoundingClientRect();
+    const rel = e.clientX - rect.left;
+    const dir = rel < DRAG_EDGE_PX ? -1 : rel > rect.width - DRAG_EDGE_PX ? 1 : 0;
+    if (dir === dragDir) return;
+    stopDragAutoScroll();
+    if (dir === 0) return;
+    dragDir = dir;
+    const step = (): void => {
+      el.scrollLeft += dir * DRAG_STEP_PX;
+      dragRafId = requestAnimationFrame(step);
+    };
+    dragRafId = requestAnimationFrame(step);
+  }
+
+  /** 拖出容器（relatedTarget 已不在容器内）即停——tab 间穿越的 dragleave 不清。 */
+  function onScrollerDragleave(e: DragEvent): void {
+    const to = e.relatedTarget;
+    if (to instanceof Node && scroller?.contains(to)) return;
+    stopDragAutoScroll();
   }
 </script>
 
@@ -264,7 +441,31 @@
   <div class="vv-tabbar-menu">
     <TabBarMenu {themeMode} {onsettheme} {onsettings} {onmounts} {zen} {onToggleZen} />
   </div>
-  <div class="vv-tabbar-tabs">
+  <!-- tab 条优雅滚动（标签栏收敛 Task 2）：外包 .vv-tabbar-tabs-wrap
+       （position:relative）包住滚动容器与两组箭头/渐隐——absolute 锚若置于
+       .vv-tabbar-tabs（滚动容器）内会随 scrollLeft 位移（spec §4.3 红线）；
+       不可滚方向整钮+遮罩 {#if} 不渲染 -->
+  <div class="vv-tabbar-tabs-wrap">
+    {#if vis.left}
+      <button
+        type="button"
+        class="vv-tabbar-arrow"
+        data-side="left"
+        aria-label="向左滚动标签"
+        title="向左滚动标签"
+        onpointerdown={() => onArrowDown('left')}
+        onpointerup={() => holdCleanup(false)}
+        onpointercancel={() => holdCleanup(true)}
+        onpointerleave={() => holdCleanup(true)}
+        onclick={() => onArrowClick('left')}>◂</button><div class="vv-tabbar-fade" data-side="left"></div>
+    {/if}
+    <div
+      class="vv-tabbar-tabs"
+      bind:this={scroller}
+      ondragover={onScrollerDragover}
+      ondragleave={onScrollerDragleave}
+      ondrop={stopDragAutoScroll}
+    >
     {#each tabs as tab (tab.id)}
       {@const badge = badgeOfFor(tab)}
       <!-- 遗留 U2：激活区与关闭钮拆为兄弟节点——button 内不得再嵌 span[role=button]
@@ -324,6 +525,20 @@
           }}>✕</button>
       </div>
     {/each}
+    </div>
+    {#if vis.right}
+      <button
+        type="button"
+        class="vv-tabbar-arrow"
+        data-side="right"
+        aria-label="向右滚动标签"
+        title="向右滚动标签"
+        onpointerdown={() => onArrowDown('right')}
+        onpointerup={() => holdCleanup(false)}
+        onpointercancel={() => holdCleanup(true)}
+        onpointerleave={() => holdCleanup(true)}
+        onclick={() => onArrowClick('right')}>▸</button><div class="vv-tabbar-fade" data-side="right"></div>
+    {/if}
   </div>
   <!-- T6：tab 管理面板入口。data-vv-wspanel-trigger 供面板外点关闭豁免
        （pointerdown 先关 + click 切换会打架，见 WorkspaceTabsPanel 头注释） -->

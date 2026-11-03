@@ -448,7 +448,31 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
    左端四件簇收敛为融合菜单单钮，容器随迁改名（flex:none + border-right 分隔
    语义不变） */
 .vv-tabbar { display: flex; overflow: visible; background: var(--ui-tab-bg); border-bottom: 1px solid var(--ui-border); }
-.vv-tabbar-tabs { display: flex; overflow-x: auto; flex: 1; min-width: 0; }
+/* wrapper（标签栏收敛 Task 2，spec §4.3 结构红线）：箭头/渐隐 absolute 锚不得置于
+   .vv-tabbar-tabs（滚动容器）内——会随 scrollLeft 位移，由本层 position:relative
+   承担锚定；原 .vv-tabbar-tabs 的 flex/min-width 布局职责随迁至此 */
+.vv-tabbar-tabs-wrap { position: relative; display: flex; flex: 1; min-width: 0; }
+/* 滚动条隐藏（spec §4.1）：scrollbar-width:none（Firefox）+ ::-webkit-scrollbar
+   display:none（Chromium）；overflow-x:auto 保持——触屏原生滑动/动量不受影响 */
+.vv-tabbar-tabs { display: flex; overflow-x: auto; scrollbar-width: none; }
+.vv-tabbar-tabs::-webkit-scrollbar { display: none; }
+/* 悬浮箭头（spec §4.3 A 方案：不占布局空间）：24×24 圆钮 absolute 居中于滚动区
+   两端（left/right:4px），z-index:1 盖过渐隐与 tab；全部观感走设计令牌（圆角
+   pill 用 --vv-radius-full、浮起 --vv-shadow-2）。hover 沿 .vv-tab 先例 color-mix
+   派生——--ui-hover-bg 与 --ui-tab-bg 亮暗各为同值，直用零视觉响应 */
+.vv-tabbar-arrow { position: absolute; top: 50%; transform: translateY(-50%); z-index: 1;
+  width: 24px; height: 24px; padding: 0; line-height: 1; font-size: var(--vv-fs-sm);
+  background: var(--ui-tab-bg); border: 1px solid var(--ui-border); border-radius: var(--vv-radius-full);
+  box-shadow: var(--vv-shadow-2); cursor: pointer; }
+.vv-tabbar-arrow[data-side='left'] { left: 4px; }
+.vv-tabbar-arrow[data-side='right'] { right: 4px; }
+.vv-tabbar-arrow:hover { background: color-mix(in srgb, var(--ui-hover-bg) 60%, var(--ui-border)); }
+/* 同侧 48px 渐隐遮罩（spec §4.3）：linear-gradient → --ui-tab-bg，pointer-events:none
+   不挡点击；不设 z-index（auto）——DOM 序在滚动容器后自然盖住 tab，又被 z-index:1
+   的箭头盖住（箭头须全形可见，渐隐只承担「下面还有」的暗示） */
+.vv-tabbar-fade { position: absolute; top: 0; bottom: 0; width: 48px; pointer-events: none; }
+.vv-tabbar-fade[data-side='left'] { left: 0; background: linear-gradient(to right, var(--ui-tab-bg), transparent); }
+.vv-tabbar-fade[data-side='right'] { right: 0; background: linear-gradient(to left, var(--ui-tab-bg), transparent); }
 .vv-tabbar-menu { flex: none; display: flex; align-items: center; gap: 2px; border-right: 1px solid var(--ui-border); padding: 0 4px; }
 /* 融合菜单触发钮（标签栏收敛 Task 1，替代原 .vv-tbact 图标钮基座与
    .vv-ws-trigger 22vw/16vw 上限）：borderless 复用全局 button 基座（背景/字色/
