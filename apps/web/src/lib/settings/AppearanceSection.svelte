@@ -254,10 +254,12 @@
   let ovxIconInput = $state('');
   let ovxIconBusy = $state(false);
   /** 逐条通道簿记（id → 值；$state Record 需整体重赋值触发）：检查/更新忙态与
-   * 已检 latest 版本（更新成功后写回新版本 → 行内自然回到「检查更新」态）。 */
+   * 已检结果 latest + hasUpdate（checkUpdate semver-lite 判定，UI 与库同源口径：
+   * latest 不高于已装版本——平版/降级——不出更新钮、不计可更新；更新成功后写回
+   * 新版本且 hasUpdate:false → 行内自然回到「检查更新」态）。 */
   let ovxCheckBusy = $state<Record<string, boolean>>({});
   let ovxUpdateBusy = $state<Record<string, boolean>>({});
-  let ovxLatest = $state<Record<string, string>>({});
+  let ovxLatest = $state<Record<string, { latest: string; hasUpdate: boolean }>>({});
   let ovxCheckAllBusy = $state<Record<'theme' | 'icon', boolean>>({ theme: false, icon: false });
 
   /** 两列表统一刷新（安装按 manifest 预检自动分流，落任一通道都可能）。 */
@@ -297,15 +299,16 @@
   }
 
   /** 检查单条原语（不写全局 note/errors——单条钮与「全部检查」两调用方各自决定
-   * 呈现形态）：latest 记入 ovxLatest 供行内切换更新钮；失败返回 error 文案。 */
+   * 呈现形态）：latest + hasUpdate 记入 ovxLatest 供行内切换更新钮（semver-lite
+   * 同源口径，降级/平版 hasUpdate:false）；失败返回 error 文案。 */
   async function ovxCheckOnce(
     t: ImportedTheme | ImportedIconTheme,
     origin: ThemeOrigin
-  ): Promise<{ latest: string; error?: undefined } | { latest?: undefined; error: string }> {
+  ): Promise<{ latest: string; hasUpdate: boolean; error?: undefined } | { latest?: undefined; hasUpdate?: undefined; error: string }> {
     try {
-      const { latest } = await checkUpdate(origin);
-      ovxLatest = { ...ovxLatest, [t.id]: latest };
-      return { latest };
+      const { latest, hasUpdate } = await checkUpdate(origin);
+      ovxLatest = { ...ovxLatest, [t.id]: { latest, hasUpdate } };
+      return { latest, hasUpdate };
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) };
     }
@@ -321,7 +324,7 @@
     if (r.error !== undefined) {
       importErrors = [r.error];
       importNote = r.error;
-    } else if (r.latest !== t.origin.version) {
+    } else if (r.hasUpdate === true) {
       importNote = `「${t.name}」有更新：${t.origin.version} → ${r.latest}`;
     } else {
       importNote = `「${t.name}」已是最新（${r.latest}）`;
@@ -350,7 +353,7 @@
         const r = await ovxCheckOnce(t, t.origin);
         ovxCheckBusy = { ...ovxCheckBusy, [t.id]: false };
         if (r.error !== undefined) failures.push(`${t.name}: ${r.error}`);
-        else if (r.latest !== t.origin.version) updatable++;
+        else if (r.hasUpdate === true) updatable++;
       }
       importErrors = failures;
       importNote =
@@ -382,7 +385,7 @@
         invalidateAppearance();
         applyAppearanceFromSettings(loadSettings());
       }
-      ovxLatest = { ...ovxLatest, [t.id]: updated.origin?.version ?? '' };
+      ovxLatest = { ...ovxLatest, [t.id]: { latest: updated.origin?.version ?? '', hasUpdate: false } };
       importNote = `已更新「${updated.name}」到 v${updated.origin?.version ?? '?'}`;
     } catch (err) {
       importErrors = [err instanceof Error ? err.message : String(err)];
@@ -484,14 +487,14 @@
             <span class="vv-settings-theme-src" title="Open VSX：{t.origin.publisher}.{t.origin.extension}">
               v{t.origin.version}
             </span>
-            {#if ovxLatest[t.id] !== undefined && ovxLatest[t.id] !== t.origin.version}
+            {#if ovxLatest[t.id]?.hasUpdate === true}
               <button
                 type="button"
                 class="vv-settings-ovx-btn"
                 disabled={ovxUpdateBusy[t.id] === true}
                 onclick={() => void ovxUpdateOne('theme', t)}
-                aria-label="更新主题 {t.name} 到 {ovxLatest[t.id]}">
-                {ovxUpdateBusy[t.id] === true ? '更新中…' : `更新到 ${ovxLatest[t.id]}`}
+                aria-label="更新主题 {t.name} 到 {ovxLatest[t.id]?.latest}">
+                {ovxUpdateBusy[t.id] === true ? '更新中…' : `更新到 ${ovxLatest[t.id]?.latest}`}
               </button>
             {:else}
               <button
@@ -593,14 +596,14 @@
             <span class="vv-settings-theme-src" title="Open VSX：{t.origin.publisher}.{t.origin.extension}">
               v{t.origin.version}
             </span>
-            {#if ovxLatest[t.id] !== undefined && ovxLatest[t.id] !== t.origin.version}
+            {#if ovxLatest[t.id]?.hasUpdate === true}
               <button
                 type="button"
                 class="vv-settings-ovx-btn"
                 disabled={ovxUpdateBusy[t.id] === true}
                 onclick={() => void ovxUpdateOne('icon', t)}
-                aria-label="更新图标主题 {t.name} 到 {ovxLatest[t.id]}">
-                {ovxUpdateBusy[t.id] === true ? '更新中…' : `更新到 ${ovxLatest[t.id]}`}
+                aria-label="更新图标主题 {t.name} 到 {ovxLatest[t.id]?.latest}">
+                {ovxUpdateBusy[t.id] === true ? '更新中…' : `更新到 ${ovxLatest[t.id]?.latest}`}
               </button>
             {:else}
               <button

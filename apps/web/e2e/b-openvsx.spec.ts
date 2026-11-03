@@ -249,9 +249,16 @@ test.describe('b-openvsx Open VSX 安装与更新通道（SW block，CDN-02 备�
     await closeSettings(page);
     await expect(treeRowByName(page, 'app.ts').locator('.vv-file-icon')).toHaveText('\ue6e4');
 
-    currentVersion = '2.0.0';
+    // 降级锚（§6.3 semver-lite 口径）：线上翻到更低版本 0.9.0 → 检查应判
+    // 「已是最新」且不出更新钮（显式装到比 latest 新的版本是降级，非更新）
+    currentVersion = '0.9.0';
     await openSettings(page);
     await gotoGroup(page, '外观');
+    await page.getByLabel('检查更新图标主题 OVX Mini').click();
+    await expect(page.locator('.vv-settings-note')).toHaveText('「OVX Mini」已是最新（0.9.0）');
+    await expect(page.getByLabel('更新图标主题 OVX Mini 到 0.9.0')).toHaveCount(0);
+
+    currentVersion = '2.0.0';
     await page.getByLabel('检查更新图标主题 OVX Mini').click();
     await page.getByLabel(/更新图标主题 OVX Mini 到 2\.0\.0/).click();
     await expect(page.locator('.vv-settings-note')).toHaveText('已更新「OVX Mini」到 v2.0.0');
