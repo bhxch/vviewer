@@ -25,12 +25,12 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  *   类名已随迁）：融合菜单开（含子菜单展开态）→ tab 右键开菜单 → 菜单收；反向同刻至多一个
  * - MEN-05 管理 ▾ 触发：[aria-label="管理标签"] 点击 → wspanel 开
  *   （data-vv-wspanel-trigger 面板可见），Esc 收（Task 3 图标化形态回归）
- * - MOB-01 浮层触顶：8 工作区 modal 循环（简报 5 的加量——5 构造内容恰低于钳制面
- *   不触发内部滚动，加量保数学可达，用例头注记档）→ 开菜单+工作区子菜单+连接服务器
- *   表单叠加展开 → mobile project 断 pop scrollHeight > clientHeight 且内部可滚、
- *   top 未越视口（评审焦点 1，spec §3.3 超高策略；底缘现状锚 +2px 容差——content-box
- *   钳制面偏差已上报）；chromium project 断收合路径（max-height 清空、无内部滚动、
- *   整体落视口内）
+ * - MOB-01 浮层触顶：5 工作区 modal 循环 → 开菜单+工作区子菜单+连接服务器表单叠加
+ *   展开 → mobile project 断 pop scrollHeight > clientHeight 且内部可滚、top 未越
+ *   视口、bottom ≤ 视口高 − 8（评审焦点 1，spec §3.3 超高策略；首版实现底缘 +2px
+ *   越界 + 10px 内滚死窗经探针定性、属主修复 edad740，断言已收紧至精确锚——
+ *   用例头注记缺陷史）；chromium project 断收合路径（max-height 清空、无内部
+ *   滚动、整体落视口内）
  *
  * 装置：融合菜单流全经 Task 1 helper（e2e/tabbar-menu.ts 全部导出）；工作区创建走
  * WorkspaceCreateModal UI 流（b-wscreate-outside-close / t-workspace 先例）；MEN-01
@@ -481,27 +481,25 @@ test('MEN-05：管理 ▾ 触发 wspanel——data-vv-wspanel-trigger 面板可�
 // （max-height 清空 + top 拉回兜底）。两 project 同一用例分叉断言
 // （b-tabbar-scroll SCRL-07 的 project 分叉写法同款）。
 //
-// 工作区 8 枚（简报 5 的加量，SCRL-02「15→25 保数学可达」同款理由）：探针实测
-// （2026-11-03，mobile 375×667）5 枚构造内容总高 628 恰低于钳制面 630（见下
-// content-box 偏差注），内部滚动不触发——加量保「必然触顶」数学余量（8 枚内容
-// scrollHeight 728 ≫ clientHeight 628）。
+// 工作区 5 枚（简报原样）：修复 edad740 后钳制面跨 box-sizing 精确（content-box
+// 扣 chrome = padding 8 + border 2 = 10），5 枚构造内容总高 628 > avail 620 必然
+// 触顶内滚（实测 scrollHeight 626 > clientHeight 618、bottom 659 = innerH 667 − 8）。
+// 修复前该构造落在 10px 死窗（钳制值 ≥ 内容高不产生溢出、内滚不触发），曾权宜
+// 加量 8 枚绕过——死窗随修复消除，权宜回退。
 //
-// 已知产品侧偏差（现状锚定，探针数据记档，修复轮应收口后收紧断言）：app 全局
-// 无 box-sizing 重置 → .vv-tbmenu-pop 为 content-box；$effect 写 maxHeight = avail
-// （视口高 − top − 8）按 border-box 语义取值，钳制面实为内容盒——实际渲染总高
-// = avail + padding 8 + border 2，底缘可越视口 +2px（实测 669 > 667），spec §3.3
-// 的 8px 底边距意图不成立（5 枚构造则恰贴底 667 = innerH、零余量）。内部滚动
-// 通道本身稳定（overflow-y:auto + scrollTop 可滚）。本用例 bottom 断言按现状放
-// +2px 容差并注释钉死来源，修复（maxHeight 改写 avail − padding − border，或 pop
-// 改 border-box）后应收紧为 ≤ innerHeight − 8。
+// 超高策略缺陷史（Task 4 探针定性 → 属主修复 edad740 → 本用例断言收紧）：首版
+// $effect 按 border-box 语义直写 avail，content-box 下钳制面实为内容盒——底缘越
+// 视口 +2px（实测 669 > 667）且钳制值 ≥ 内容高不产生溢出。修复后 maxHeight =
+// avail − chrome（getComputedStyle 分支扣 padding+border；border-box 下 chrome=0），
+// 先清再测自然占高（rect 与「底缘 ≤ 视口」断言同源），底缘 ≤ 视口 − 8 精确成立。
 test('MOB-01：浮层触顶——子菜单+连接服务器表单叠加，mobile 断内部滚动+top 不越视口，chromium 断收合路径', async ({
   page
 }, testInfo) => {
   test.setTimeout(90_000);
   await waitAppMounted(page);
-  // 新建 8 个工作区（WorkspaceCreateModal UI 循环，b-wscreate-outside-close /
-  // t-workspace createWorkspace 同款两段流；加量理由见用例头注）
-  for (let i = 1; i <= 8; i++) {
+  // 新建 5 个工作区（WorkspaceCreateModal UI 循环，b-wscreate-outside-close /
+  // t-workspace createWorkspace 同款两段流）
+  for (let i = 1; i <= 5; i++) {
     await openSubmenu(page, '工作区');
     await page.getByRole('button', { name: '＋ 新建工作区…' }).click();
     const modal = page.locator('.vv-wscreate');
@@ -513,7 +511,7 @@ test('MOB-01：浮层触顶——子菜单+连接服务器表单叠加，mobile 
 
   // 开菜单 + 工作区子菜单 + 连接服务器表单（两展开面同刻齐开——srvOpen 与 sub 独立）
   await openSubmenu(page, '工作区');
-  await expect(page.locator(`${MENU_POP} .vv-ws-item`)).toHaveCount(9); // 默认 + 8 新建
+  await expect(page.locator(`${MENU_POP} .vv-ws-item`)).toHaveCount(6); // 默认 + 5 新建
   await page.locator(MENU_POP).getByRole('button', { name: '连接服务器', exact: true }).click();
   await expect(page.locator(`${MENU_POP} .vv-server-form`)).toBeVisible();
 
@@ -538,10 +536,9 @@ test('MOB-01：浮层触顶——子菜单+连接服务器表单叠加，mobile 
       return el.scrollTop;
     }, MENU_POP);
     expect(scrolled).toBeGreaterThan(0);
-    // 底缘现状锚（偏差来源见头注）：bottom ≤ 视口底 + 2px box-model 校正——
-    // content-box 钳制面未计 padding+border 的溢出实测恰 +2px；修复后收紧为 ≤ innerH - 8
+    // 底缘精确锚（spec §3.3 意图，edad740 修复后收紧）：bottom ≤ 视口底 − 8
     const after = await popMetrics(page);
-    expect(after.bottom).toBeLessThanOrEqual(after.viewportH + 2);
+    expect(after.bottom).toBeLessThanOrEqual(after.viewportH - 8);
   } else {
     // 收合路径（1280×720 不触顶）：max-height 清空、无溢出（scrollHeight <= clientHeight）、
     // 整体落视口内（内容远小于可用高，无 box-model 偏差面）
