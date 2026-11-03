@@ -314,7 +314,10 @@
   }
 
   function onArrowDown(side: 'left' | 'right'): void {
-    held = false;
+    // 重入守卫：双指/双指针二次按下会覆盖 holdTimer/repeatTimer 引用，旧链（尤其
+    // 80ms 步进 interval）孤儿化永续自动滚——先清既有链再开新链（resetHeld 同时
+    // 复位 held，语义与原行内 held=false 一致）
+    holdCleanup(true);
     const el = scroller;
     if (el === null) return;
     holdTimer = setTimeout(() => {
@@ -339,6 +342,14 @@
     }
     if (resetHeld) held = false;
   }
+
+  // 卸载兜底：按住中滚到尽头 → {#if} 卸载被按住的按钮，常规清理押注在「DOM 移除
+  // 时浏览器派发 pointerleave」上——Chromium 不保证该派发，本仓兼容的老 webkit2gtk
+  // 更无保证；漏清则 80ms 步进 interval 孤儿化（组件卸载后仍存活，后续新开 tab 恢复
+  // 溢出即无输入自动滚）。$effect 无依赖 → 挂载后跑一次、卸载时执行 cleanup 清两个 timer
+  $effect(() => {
+    return () => holdCleanup(true);
+  });
 
   function onArrowClick(side: 'left' | 'right'): void {
     if (held) {
