@@ -4,7 +4,7 @@
 
 ## 1. 目的与来源
 
-- **现状 e2e 文件**：`apps/web/e2e/b-sidebar-roots.spec.ts`（SRC-01 折叠 / SRC-02 键盘可达 / SRC-03 几何不重叠 / SRC-04 空态引导三入口）、`apps/web/e2e/b-filetree-src-remove.spec.ts`（FTSRC-01..04 源级移除全链 + hover 揭示显式锚 `:55-60`）、域文档 `docs/e2e/filetree-src-remove.md`。TabBar 右键菜单域另收 `docs/e2e/tab-actions-enrichment.md`（TA 系），空态引导与 ⋯ 菜单同名同屏的定位隔离已由 SRC-04 备案（`b-sidebar-roots.spec.ts:116-118`：空态「连接服务器」与 ⋯ 菜单同名同屏，定位一律限定 `.vv-side-empty` 容器）——本域不再为 TabBar 按钮簇另立编号。
+- **现状 e2e 文件**：`apps/web/e2e/b-sidebar-roots.spec.ts`（SRC-01 折叠 / SRC-02 键盘可达 / SRC-03 几何不重叠 / SRC-04 空态引导三入口）、`apps/web/e2e/b-filetree-src-remove.spec.ts`（FTSRC-01..04 源级移除全链 + hover 揭示显式锚 `:55-60`）、域文档 `docs/e2e/filetree-src-remove.md`。TabBar 右键菜单域另收 `docs/e2e/tab-actions-enrichment.md`（TA/TAX 系），空态引导与融合菜单同名条目同屏的定位隔离已由 SRC-04 备案（`b-sidebar-roots.spec.ts:116-118`：空态「连接服务器」与融合菜单「连接服务器」同名同屏，定位一律限定 `.vv-side-empty` 容器）——本域不再为 TabBar 按钮簇另立编号（原左端 `[工作区名 ▾][＋][↻][⋯]` 动作簇已随标签栏收敛退役为单触发钮融合菜单 `.vv-tabbar-menu`/`.vv-tbmenu-pop`，其域锚收册 `docs/e2e/tabbar-menu.md`）。
 - **实现锚**：消歧纯函数 `apps/web/src/lib/tabBadge.ts:18-29`（`badgeOf(sources, tabs, tab)`：同名跨源才显 + remote 单文件例外抑制 + 大小写敏感严格 `===`）；徽标渲染 `apps/web/src/lib/TabBar.svelte:313`（`.vv-tab-src` 文本=storeLabel、`title={badge}`）；源头行三段式 `apps/web/src/lib/FileTree.svelte`（`.vv-tree-src-toggle` aria-expanded + label + `.vv-tree-src-remove` hover 揭示 `:144-148`、触屏 `@media(hover:none)` 恒显 `:152`）。
 - **测绘差距**（本文档新增面）：SRC-01..04 零覆盖徽标消歧（spec §2.4 核心面，SRC-05/06）；单源形态与折叠收敛未布（SRC-01 只布双源，SRC-07）；hover 揭示只有「移除前 hover 显 1」半链（FTSRC 装置内断言，移出回 0 与触屏形态零锚，SRC-08）。
 

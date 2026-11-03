@@ -10,8 +10,8 @@
 
 任何样式重构不得违反以下红线；与本文其他条款冲突时，红线优先。
 
-1. **不改 DOM 结构与既有类名**。`.vv-*` / `.meta-*` / `.md-*` / `.vv-sc-*` 等类名是 e2e 主锚点，只允许改样式规则本身，不得改名、删除、合并元素。高频锚（rg 实测）：`.vv-code-pre`、`.vv-tab`、`.vv-error-card`、`.vv-tree-row`、`.vv-markdown`、`.vv-statusbar`、`.vv-tabbar-actions`、`.vv-search-count`、`.vv-shell.zen` 等（`.vv-topbar` 已随顶栏退役删除，Task 3 改列按钮簇新锚）。
-2. **overlay 根类名是运行时行为通道**：`AppShell.svelte:413-425` 的 `OVERLAY_SELECTOR`（`.vv-settings-center` / `.vv-mounts-manager` / `.vv-gsearch` / `.vv-quickopen` / `.vv-wspanel` / `.vv-search-panel` / `.vv-wscreate` / `.vv-remotesrc` / `.vv-tabctx` / `.vv-ws-pop` / `.vv-status-picker`）被 Esc 优先级与 zen 返回键判定实读 DOM 消费，改名破坏功能。
+1. **不改 DOM 结构与既有类名**。`.vv-*` / `.meta-*` / `.md-*` / `.vv-sc-*` 等类名是 e2e 主锚点，只允许改样式规则本身，不得改名、删除、合并元素。高频锚（rg 实测）：`.vv-code-pre`、`.vv-tab`、`.vv-error-card`、`.vv-tree-row`、`.vv-markdown`、`.vv-statusbar`、`.vv-tabbar-menu`、`.vv-search-count`、`.vv-shell.zen` 等（`.vv-topbar` 已随顶栏退役删除，Task 3 改列按钮簇新锚；`.vv-tabbar-actions` 已随标签栏收敛退役删除，改列融合菜单容器 `.vv-tabbar-menu`，2026-11-03）。
+2. **overlay 根类名是运行时行为通道**：`AppShell.svelte:617-632` 的 `OVERLAY_SELECTOR`（`.vv-settings-center` / `.vv-mounts-manager` / `.vv-gsearch` / `.vv-quickopen` / `.vv-wspanel` / `.vv-search-panel` / `.vv-wscreate` / `.vv-remotesrc` / `.vv-tabctx` / `.vv-tbmenu-pop` / `.vv-status-picker`——`.vv-ws-pop` 条目已随标签栏收敛删除，工作区子菜单随融合菜单宿主浮层同生命周期；`.vv-tbact-pop` 同步随迁 `.vv-tbmenu-pop`）被 Esc 优先级与 zen 返回键判定实读 DOM 消费，改名破坏功能。
 3. **data-\* 锚点不可动**：`data-theme-mode`（e2e 38 处亮暗断言）、`data-pinned` + `.vv-tab-pinned` 双锚点（app.css:497-499 注释约定）、`data-drop-before`（tab 拖拽插入线方向）、`data-side`/`data-edge`（折叠三件套几何，b-layout-zen boundingBox 断言）、`data-line`（代码行定位）。
 4. **抽屉实现语义被 e2e 反向依赖**：`apps/web/e2e/drawer.ts:28-33` 以 `.vv-side` 的 computed `transform === 'none'` 判开合；`drawer.ts:19` 的 `DRAWER_MEDIA_QUERY = '(max-width: 900px)'` 与 AppShell `@media` 同一条件。**≤900 / ≤600 断点冻结**；确需调整须 JS（AppShell matchMedia；原 TopBar 侧已随顶栏退役删除）+ CSS + e2e 三处同步。
 5. **字号/字体联动链路不可断**：`--vv-ui-font-size` / `--vv-code-font-size` / `--vv-code-font` / `--vv-code-line-height` 由 `theme.ts applyFonts`（theme.ts:420-432）经 `style#vv-font` 注入，优先级高于 app.css；j/k 滚动步长经 `codeLineHeight(codeSize)` 联动（AppShell.svelte:795-797）。新字阶**必须 calc 派生自这两个变量**，禁止新增第三套硬编码 px 字号。
@@ -183,10 +183,10 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 | 抽屉 | 10 | `.vv-side` / `.vv-right`（抽屉态） |
 | 抽屉/右栏浮钮 | 20 | `.vv-drawer-toggle` / `.vv-right-toggle` |
 | zen 退出钮 | 25 | `.vv-zen-exit`（AppShell.svelte:1309） |
-| 面板层 | 30/31/32 | overlay 族 30（`.vv-settings-center`/`.vv-mounts-manager`/`.vv-gsearch`/`.vv-quickopen`/`.vv-wspanel`/`.vv-wscreate-panel`/`.vv-ws-pop`/`.vv-status-picker`）；`.vv-sc-confirm` 31；`.vv-sc-modal` 32 |
+| 面板层 | 30/31/32 | overlay 族 30（`.vv-settings-center`/`.vv-mounts-manager`/`.vv-gsearch`/`.vv-quickopen`/`.vv-wspanel`/`.vv-wscreate-panel`/`.vv-status-picker`——`.vv-ws-pop` 已随标签栏收敛退役删除）；`.vv-sc-confirm` 31；`.vv-sc-modal` 32 |
 | chrome 条 | 50 | `.vv-chrome-off` / `.vv-chrome-temp`（app.css:352-359） |
 | toast/搜索浮层 | 60 | `.vv-toast`（AppShell.svelte:1263）/ `.vv-search-panel`（app.css:306） |
-| 菜单 | 90 | `.vv-tabctx` / `.vv-chromemenu`（app.css:507/375） |
+| 菜单 | 90 | `.vv-tabctx` / `.vv-chromemenu` / `.vv-tbmenu-pop`（app.css:560/331/490，融合菜单浮层 chrome 菜单观感对齐前两者） |
 | 灯箱 | 100 | `.md-lightbox-overlay`（app.css:153） |
 
 新浮层按表取值，禁止新开档位；fixed 同位浮层 `top: 44px` 假设是 b-\* spec 隐式依赖（app.css:406/426/433），不得改。
@@ -200,8 +200,8 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 | Token | 值 | 用途 | 现状归并 |
 | --- | --- | --- | --- |
 | `--vv-radius-sm` | 4px | 内嵌小件：菜单项、tree-row、chip 内钮、mark | 4px×15 直用；2px/3px/5px 全部并入（pdf 页码 chip 3px app.css:211、MountsManager 钮 5px :773/842、gsearch mark 2px :396） |
-| `--vv-radius-md` | 6px | 按钮输入框、卡片、代码块、对话框小浮层（tabctx/chromemenu/status-picker） | 6px×26 直用；10px 并入（`.vv-sc-modalbox` SettingsCenter.svelte:732） |
-| `--vv-radius-lg` | 8px | 同位大面板（ws-pop/wscreate/wspanel/gsearch/quickopen/sc-modalbox/sc-confirm/zen-exit 钮/toast） | 8px×14 直用 |
+| `--vv-radius-md` | 6px | 按钮输入框、卡片、代码块、对话框小浮层（tabctx/chromemenu/tbmenu-pop/status-picker） | 6px×26 直用；10px 并入（`.vv-sc-modalbox` SettingsCenter.svelte:732） |
+| `--vv-radius-lg` | 8px | 同位大面板（wscreate/wspanel/gsearch/quickopen/sc-modalbox/sc-confirm/zen-exit 钮/toast——原家族成员 ws-pop 已随标签栏收敛退役） | 8px×14 直用 |
 | `--vv-radius-full` | 999px | 徽标/chip pill | `.vv-mm-badge`（MountsManager.svelte:719 现唯一 999px）；`.vv-tab-src`/`.vv-wspanel-badge`/`.vv-settings-theme-src`/`.vv-jsonl-badge` 四种 8px/4px 徽标**统一并入 pill**（变更：同语义四档圆角是痛点审计点名项） |
 | 0 / 50% | — | 贴边融合（tab、tabbar-manage、ws-new）与圆形钮（zen-exit）保留 | 非档位，按元素语义 |
 
@@ -218,7 +218,7 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 | --- | --- | --- |
 | `--vv-shadow-1` | `0 2px 8px rgb(0 0 0 / 15%)` | 小浮出件：`.vv-search-panel`（app.css:308） |
 | `--vv-shadow-2` | `0 4px 16px rgb(0 0 0 / 18%)` | 菜单/status-picker（:377/509/531）、toast（AppShell.svelte:1271）、temp 条（app.css:359 现 `0 2px 12px`，并入，变更 4px 级模糊差） |
-| `--vv-shadow-3` | `0 8px 28px rgb(0 0 0 / 22%)` | 同位面板族：ws-pop/wscreate/wspanel/gsearch/quickopen/sc-confirm |
+| `--vv-shadow-3` | `0 8px 28px rgb(0 0 0 / 22%)` | 同位面板族：wscreate/wspanel/gsearch/quickopen/sc-confirm（原家族成员 ws-pop 已随标签栏收敛退役；融合菜单浮层归 `--vv-shadow-2` 菜单档） |
 | 特例·抽屉泛光 | `0 0 12px rgb(0 0 0 / 25%)`（AppShell.svelte:1209/1235） | 无偏移四周泛光，语义独立，就地保留 |
 | 特例·纸张 | `0 1px 4px rgb(0 0 0 / 30%)`（app.css:208） | PDF 页物理投影，保留 |
 | 退役 | `0 12px 36px rgb(0 0 0 / 30%)`（SettingsCenter.svelte:733） | 并入 `--vv-shadow-3`（变更） |
@@ -229,14 +229,14 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 
 ## 6. 图标
 
-**现状勘误（据实修正任务简报）**：`tools/gen-icons.mjs` 生成的是 **PWA 启动图标 PNG**（192/512 + maskable，底 #0d1117 前景 #e6edf3，gen-icons.mjs:1-18），**不产出 UI SVG**。当前 UI 内「图标」全部是文本字形与 emoji：⚙/↻/＋/⋯（TabBarActions.svelte:137-153/244，原 TopBar ⚙/📁/↻——组件随顶栏退役 Task 3 删除，钮簇为现宿主）、☰/ℹ（AppShell.svelte:1089-1090）、🌳/ℹ（折叠竖条 AppShell.svelte:1010/1085）、🔒（WorkspaceTabsPanel.svelte:243 span + app.css:500 `::before content '🔒 '`）、✕/×/✎/✓/＋/▸/▾。
+**现状勘误（据实修正任务简报）**：`tools/gen-icons.mjs` 生成的是 **PWA 启动图标 PNG**（192/512 + maskable，底 #0d1117 前景 #e6edf3，gen-icons.mjs:1-18），**不产出 UI SVG**。当前 UI 内「图标」全部是文本字形与 emoji：↻（TabBarMenu.svelte 刷新条目 aria-hidden 字形 span）/＋（WorkspaceList.svelte 新建行——原 ⚙/↻/＋/⋯ 宿主 TabBarActions.svelte 已随标签栏收敛退役删除（2026-11-03），⚙/⋯ 随簇退役不再出现）、☰/ℹ（AppShell.svelte:1089-1090）、🌳/ℹ（折叠竖条 AppShell.svelte:1010/1085）、🔒（WorkspaceTabsPanel.svelte:243 span + app.css:500 `::before content '🔒 '`）、✕/×/✎/✓/＋/▸/▾。
 
 规范（在不改 DOM 结构的红线内执行）：
 
 1. **单色字形白名单**（唯一允许集）：`✕`(U+2715 关闭) `✎`(U+270E 重命名) `✓`(U+2713 确认) `＋`(U+FF0B 新建) `↻`(U+21BB 刷新) `☰`(U+2630 抽屉) `ℹ`(U+2139 信息) `▸▾`(U+25B8/25BE 折叠) `⚙`(U+2699 设置)。**禁用彩色 emoji**：`🌳`（多数平台彩色渲染，与单色字形混排漂移）→ 折叠竖条文件树项改用白名单内 `▾`/`▸` 不合适，改用文本「树」（`.vv-strip-icon` 14px、竖条 28px 宽内可容纳 2 字）；`📁`（原 TopBar.svelte:382——组件随顶栏退役 Task 3 删除，「目录」文字钮现宿主 TabBarActions.svelte）同理改「目录」。`🔒` 退役：pinned 语义由斜体（TabBar `.vv-tab-pinned .vv-tab-name`）+ title 承担，app.css `::before` 的 `'🔒 '` content 置空（现 app.css:563，公共层归属）、WorkspaceTabsPanel.svelte span 内字符删除（改模板文本，非结构变更）。**修订（G3 复核裁决，2026-10-30）**：原文「e2e 锚定的是 `data-pinned`/`.vv-tab-pinned`，不锚字符」只对 TabBar 侧成立；wspanel 侧 e2e `t-tab-actions.spec.ts:517-518` 对 `.vv-wspanel-pin` 元素本身断言 `toBeVisible()`（Playwright 可见 = 非 empty bounding box，playwright-core@1.64 types.d.ts:17391），故 wspanel 的 span 保留为 **1×1 可见性钩子**（锚元素存在、不锚字符；e2e 不可改），pinned 行名斜体由 scoped 兄弟选择器 `.vv-wspanel-pin ~ .vv-wspanel-name` 提供（与 TabBar 同态；不用 `:has()`，兼容 Tauri/webkit2gtk 老内核）。
 2. **字形统一**：TabBar.svelte:287 的关闭钮 `×`(U+00D7) → `✕`(U+2715)，与全库其余 12 处关闭钮同码位（变更：宽度与视觉重量归一；`.vv-tab-name` 文本语义不变，红线 9 满足）。
 3. **尺寸与对齐**：图标字形所在元素 `line-height: 1`、`display: inline-flex; align-items: center`；字号三档——内联随文 12px、独立小钮 14px、浮钮 16px（zen 退出钮现 18px AppShell.svelte:1316 → 16px，44px 触控面不变）。纯图标钮必须带 `aria-label`（现状已合规，保持）。
-4. **触控目标**（口径：以 WCAG 2.2 AA 2.5.8 的 24px 为底线，32/44px 为内部增强档）：指针环境 ≥24px（`.vv-collapse-btn` 现 22px app.css:341-342 → 补足 24px，变更）；触屏断点（≤900px）≥32px（灯箱钮现 32px app.css:169-171 ✓）。**44px 现值仅 `.vv-zen-exit` 成立**（AppShell.svelte:1310-1311，冻结）——`.vv-drawer-toggle`/`.vv-right-toggle` 无任何宽高/padding 声明（AppShell.svelte:1214-1220 实测读码），触控面=全局 button 默认约 24px 高，未达移动端入口标准：≤900px 断点内补 `min-width/min-height: 32px`（变更：~24→32px，§12.2-G1）。全局动作簇字形钮（原 TopBar ⚙/↻，现 `.vv-tabbar-actions`，顶栏退役 Task 3 迁入）以 padding 补足 ≥32px 高（≤600px 档，变更）。
+4. **触控目标**（口径：以 WCAG 2.2 AA 2.5.8 的 24px 为底线，32/44px 为内部增强档）：指针环境 ≥24px（`.vv-collapse-btn` 现 22px app.css:341-342 → 补足 24px，变更）；触屏断点（≤900px）≥32px（灯箱钮现 32px app.css:169-171 ✓）。**44px 现值仅 `.vv-zen-exit` 成立**（AppShell.svelte:1310-1311，冻结）——`.vv-drawer-toggle`/`.vv-right-toggle` 无任何宽高/padding 声明（AppShell.svelte:1214-1220 实测读码），触控面=全局 button 默认约 24px 高，未达移动端入口标准：≤900px 断点内补 `min-width/min-height: 32px`（变更：~24→32px，§12.2-G1）。全局动作簇字形钮（原 TopBar ⚙/↻ → 标签栏按钮簇 `.vv-tabbar-actions`（顶栏退役 Task 3 迁入）→ 融合菜单 `.vv-tabbar-menu .vv-tbmenu-trigger` / `.vv-tbmenu-item`（标签栏收敛 Task 1 换挂））以 padding-block 8px 补足 ≥32px 高（≤600px 档，app.css:515-518，变更）。
 5. **未来项（本轮不做）**：若立项真 SVG 图标，须满足——单色 `currentColor`、16×16 viewBox 网格、线宽 1.5px、圆帽、经 `<symbol>` sprite 内联（零依赖）；届时 gen-icons.mjs 之外新建 `apps/web/src/lib/icons.ts` 单点管理，逐步替换字形白名单。
 
 **边界（packages 渲染产物）**：以上白名单与禁用 emoji 仅适用 `apps/web` 模板与 app.css；packages 渲染产物中的既有彩色 emoji 为登记在案的既有项，本轮不处置——render-archive 以 `🔒 ${label}` 渲染加密条目（packages/render-archive/src/archive.ts:102，落在红线 1 锚点 `.vv-tree-row` 内），被 zip 单测（packages/render-archive/test/zip.test.ts:302 断言 `toContain('🔒')`）与 e2e BIN-08（apps/web/e2e/b-binary-hex-archive.spec.ts:116/130 断言 `toContainText('🔒')`）双重锁定，清理须随上游独立立项。
@@ -448,7 +448,7 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 
 ### 12.2 分组实施要点（可执行项速览）
 
-- **G1**：tab hover；✕ 统一；🔒/🌳/📁 字形处置；focus-visible 环 + opacity 揭示键盘等价；抽屉/toast 时长 token 化。变更声明：×→✕、字形替换（⚙ 保留，📁→「目录」、🌳→「树」、🔒 退役）、temp 条阴影归档 `--vv-shadow-2`、**tab hover 零响应→color-mix 可感知底色**、**disabled 归一（pdf 工具条 .4→.5 app.css:203、tabctx .55→.5 app.css:513）**、**抽屉/右栏 toggle 钮 ≤900px 补 32px（~24→32）**、动作簇字形钮 ≤600px 补 ≥32px 高（原 TopBar 侧，顶栏退役 Task 3 起 `.vv-tabbar-actions`）、zen 退出钮字形 18→16px（AppShell.svelte:1316，§6.3）、toast 0.18s→200ms。
+- **G1**：tab hover；✕ 统一；🔒/🌳/📁 字形处置；focus-visible 环 + opacity 揭示键盘等价；抽屉/toast 时长 token 化。变更声明：×→✕、字形替换（⚙ 保留，📁→「目录」、🌳→「树」、🔒 退役）、temp 条阴影归档 `--vv-shadow-2`、**tab hover 零响应→color-mix 可感知底色**、**disabled 归一（pdf 工具条 .4→.5 app.css:203、tabctx .55→.5 app.css:513）**、**抽屉/右栏 toggle 钮 ≤900px 补 32px（~24→32）**、动作簇字形钮 ≤600px 补 ≥32px 高（原 TopBar 侧，顶栏退役 Task 3 起 `.vv-tabbar-actions`，标签栏收敛 Task 1 换挂 `.vv-tabbar-menu .vv-tbmenu-trigger`/`.vv-tbmenu-item`）、zen 退出钮字形 18→16px（AppShell.svelte:1316，§6.3）、toast 0.18s→200ms。
 - **G2**：dt 4em；状态栏/搜索/TOC/meta 字号 token 化；hover 语义归一（零漂移）；阴影 token 化（值不变）。
 - **G3**：三面板行 `3px 10px` + hover/active 统一（视觉变更：gsearch 行 2px→3px、缩进改纯 CSS 承接）；gsearch-hint 换 `--ui-warning`；badge pill 化；**gsearch mark 55%→`--vv-hit-bg` 45%（修复暗色 3.44→4.61:1）**；wscreate 补外点关闭（JS 层）。
 - **G4**：十类全局类恢复（§9 表即实施文案）；fs-md 收敛（15→14px 变更）；`var(--vv-code-font)` 四处替换；`.vv-sc-apply` primary 化（灰→accent 描边变更）；modalbox 阴影/圆角归档。
