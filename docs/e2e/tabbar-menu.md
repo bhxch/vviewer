@@ -10,7 +10,7 @@
 
 ## 2. 场景清单
 
-公共环境：default 套件（apps/web/playwright.config.ts：vite preview :4173，chromium 1280×720 + mobile 375×667 双 project，retries=1）。除 MOB-01 的 mobile 分叉与 SCRL-07（chromium 限定）外全场景双 project 同径；窄视口树行点击经 `e2e/drawer.ts` 适配。
+公共环境：default 套件（apps/web/playwright.config.ts：vite preview :4173，chromium 1280×720 + mobile 375×667 双 project，retries=1）。除 MOB-01 的 mobile 分叉、SCRL-07（chromium 限定）与 SCRL-08（mobile 限定）外全场景双 project 同径；窄视口树行点击经 `e2e/drawer.ts` 适配。
 
 ### 2.1 融合菜单（b-tabbar-menu.spec.ts，MEN/MOB）
 
@@ -34,20 +34,21 @@
 | SCRL-05 | 同上；scrollLeft=0 | Ctrl+P 快开激活最右 tab scrl-25 | 激活 tab 包围盒完整进入滚动区可视范围（nearest instant 滚入） | — |
 | SCRL-06 | 同上 | 读 `.vv-tabbar-tabs` computed scrollbar-width | `none`（滚动条隐藏；触屏原生滑动/动量不受影响） | — |
 | SCRL-07 | 同上（**仅 chromium project**——375px 拖拽坐标不可靠，TA-02/THEME-03 桌面基准惯例） | 合成 dnd 事件序列：dragstart 置源→dragover 右缘 36px 带内 ×12 次/100ms→dragend | 悬置期 scrollLeft 持续自增（手工 rAF 步进）；dragend 后滚停（两时间点相等）。native-first 探针结论：CDP 真实输入不进 drag session、无原生 autoscroll（TabBar.svelte 注释记档） | — |
+| SCRL-08 | 同 SCRL-01（**仅 mobile project**——触屏滑动需 hasTouch 视口，SCRL-07 桌面基准的镜像；spec §6.2「触屏滑动（mobile project 抽查）」计划 Task 2 静默收窄，终审裁决补口） | CDP 触摸事件序列（touchSwipe，mobile.spec.ts 同款）：滚动区包围盒内手指右→左滑 5 步 | `scrollLeft` 前移（>0，poll 观察合成器 panning 到位）。先行探针实证 headless 一次性触摸滑动真产生位移（单滑满程），不落 PWA-06/2「触摸动量恒 0」受限域——本行断跟手 panning，不断 touchend 惯性（真机惯性仍待复核） | — |
 
 ## 3. 验收行为
 
 - **触达矩阵即能力面零回退基准**（spec §2 目标第 4 条）：MEN-01 九段把 8 首层行全部走通到可观测效果层（内容渲染/属性翻转/页面开合），任何条目回流（如 aria 漂移、通道改名、菜单不收）即红。
 - **互斥不变式**：MEN-04 + TAX-14（随迁行）双锚锁定「融合菜单浮层 × tab 右键菜单同刻至多一个」，由双方外点 pointerdown 关闭器自然合成，无新增 JS 互斥状态；子菜单不构成独立浮层（随宿主同生命周期）。
 - **关闭通道三分**：容器 onkeydown Esc（物理浮层内焦点 + 合成派发双入口）/ window 兜底（target 在浮层外）/ 外点 pointerdown；MEN-03 三通道各自零残留防「通道互替掩盖单通道断裂」。
-- **几何护栏**：MOB-01 锁 spec §3.3 超高策略两端——触顶转内部滚动（面板滚动条不隐藏）与不触顶收合（max-height 清空）；SCRL-01..07 锁 tab 条滚动六行为。
+- **几何护栏**：MOB-01 锁 spec §3.3 超高策略两端——触顶转内部滚动（面板滚动条不隐藏）与不触顶收合（max-height 清空）；SCRL-01..08 锁 tab 条滚动行为（含触屏滑动横移）。
 - **回归护栏**：融合菜单触达流是全库高频前置（t-workspace/t-theme/b-mounts-manager/settings-center.ts 等消费 `openMenu/openSubmenu` 装置），本域红先查组件锚红线（aria-label/title/类名）。
 
 ## 4. 环境与数据
 
 ### 4.1 套件与装置
 
-- 双 project 同跑；`SCRL-07` 仅 chromium（testInfo.project skip 判定）；MOB-01 双 project 分叉断言（mobile 滚动路径 / chromium 收合路径）。
+- 双 project 同跑；`SCRL-07` 仅 chromium、`SCRL-08` 仅 mobile（testInfo.project skip 判定）；MOB-01 双 project 分叉断言（mobile 滚动路径 / chromium 收合路径）。
 - 融合菜单流全经 `e2e/tabbar-menu.ts` helper（Task 1 全导出）；工作区创建走 WorkspaceCreateModal UI 流（`openSubmenu('工作区')` → 「＋ 新建工作区…」→ 模态命名 → 创建并激活）。
 - 假服务器（MEN-01）：node:http 随机端口，health `{capabilities:['file-server']}` / ticket / events SSE 持挂 / tree·file 内存表，全响应 `ACAO:*`；token 恒空免 OPTIONS 预检。刷新观测走远端 store（read 每次真实 fetch、无内容缓存）；url store 的 `bytes` 内存缓存使 rev++ 重读不可观测（createUrlStore 实现），不选作载体。
 - 合成 Esc：`document.querySelector('.vv-tbmenu-pop').dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}))`——形态与 AppShell `closeTopOverlayForZen` 对 OVERLAY_SELECTOR 命中项的派发逐字对应。

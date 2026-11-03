@@ -542,7 +542,7 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .vv-tab-src { flex: none; max-width: 9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: var(--vv-fs-2xs); line-height: 1.5; color: var(--ui-fg-muted); border: 1px solid var(--ui-border);
   border-radius: var(--vv-radius-full); padding: 0 5px; }
-/* 「管理」按钮（T6）：推到右端、不随横向滚动挤压；融入标签栏观感 */
+/* 管理钮（▾ 图标化，aria 锚不变）：推到右端、不随横向滚动挤压；融入标签栏观感 */
 .vv-tabbar-manage { flex: none; margin-left: auto; border: 0; border-left: 1px solid var(--ui-border);
   border-radius: 0; background: var(--ui-tab-bg); }
 .vv-tabbar-manage:hover { background: var(--ui-hover-bg); }

@@ -308,7 +308,7 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 
 ## 10. 组件规范（按实施分组）
 
-### G1 壳层与导航条（AppShell / TabBar / TabBarActions / TabContextMenu / +page.svelte）
+### G1 壳层与导航条（AppShell / TabBar / TabBarMenu / TabContextMenu / +page.svelte）
 
 - **Tab hover 补齐**：`.vv-tab:hover { background: color-mix(in srgb, var(--ui-hover-bg) 60%, var(--ui-border)); }`（app.css:479 后插入；`--ui-tab-bg` 与 `--ui-hover-bg` 亮暗同值，直用 hover-bg 零视觉响应——必须 color-mix 派生，见 §7；`.active` 规则已在后靠序覆盖，激活 tab 不受影响；变更声明 §12.2-G1）。
 - **关闭字形** ×→✕（TabBar.svelte:287）；**pinned 🔒 退役**（§6.1）。

@@ -42,8 +42,7 @@ export async function openSubmenu(page: Page, which: '工作区' | '打开' | '�
 
 /** 「打开」子菜单「打开文件」：filechooser 通道喂 files（hidden input 常驻挂载，
  * 菜单条目点击后 menu 收起再弹原生选择器，事件先注册后点击）。
- * 暂无调用者（备用装置，filechooser 通道）——打开文件用例改直点流后保留，
- * 供后续 filechooser 负路径/多文件用例取用 */
+ * 调用者：b-tabbar-menu.spec.ts MEN-01 ①（filechooser 通道开文件档） */
 export async function menuOpenFile(page: Page, files: string | string[]): Promise<void> {
   const chooser = page.waitForEvent('filechooser');
   await openSubmenu(page, '打开');

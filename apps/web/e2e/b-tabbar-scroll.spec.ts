@@ -1,8 +1,8 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type CDPSession, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 
 /**
- * tab 条优雅滚动域（SCRL-01..07；标签栏收敛 spec §4 / Task 2）。域文档于 Task 4
+ * tab 条优雅滚动域（SCRL-01..08；标签栏收敛 spec §4 / Task 2）。域文档于 Task 4
  * 与 b-tabbar-menu（融合菜单域）统一收册 docs/e2e/tabbar-menu.md——本文件为 spec
  * §6.2「新域」结构性拆分的一半（箭头/滚动用例独立成文件），编号体系不变。
  *
@@ -15,10 +15,15 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * - SCRL-07 拖拽边缘自动滚：native-first 探针红（CDP 真实输入不进 drag session、
  *   无原生 autoscroll）→ TabBar 补手工 rAF 实现，用例以合成 dnd 事件序列驱动
  *   （仅 chromium project——375px 拖拽坐标不可靠，TA-02/THEME-03 桌面基准惯例）
+ * - SCRL-08 触屏滑动横移：tab 条 touch swipe → scrollLeft 前移（spec §6.2「触屏
+ *   滑动（mobile project 抽查）」计划 Task 2 静默收窄，终审裁决补口；仅 mobile
+ *   project——hasTouch 触摸视口，SCRL-07 桌面基准的镜像。先行探针实证 headless
+ *   一次性触摸滑动真产生位移（单滑满程），不落 PWA-06/2「触摸动量恒 0」受限域——
+ *   本用例断跟手 panning，不断 touchend 惯性）
  *
  * 装置：目录注入同 t-shell/t-tab-actions（__vvOpenDirImpl，webkitRelativePath 首
- * 段 = label）连开 15 文件 tab（+1 目录 tab）保溢出；树行点击开 tab（抽屉断点经
- * drawer.ts 适配，mobile project 同套装置可跑——15 tab 在 375px 溢出更甚）。
+ * 段 = label）连开 25 文件 tab（+1 目录 tab）保溢出；树行点击开 tab（抽屉断点经
+ * drawer.ts 适配，mobile project 同套装置可跑——25 tab 在 375px 溢出更甚）。
  */
 
 const SCROLLER = '.vv-tabbar-tabs';
@@ -45,7 +50,7 @@ async function waitAppMounted(page: Page): Promise<void> {
   await expect(page.locator('.vv-tabbar')).toBeVisible();
 }
 
-/** 目录注入（15 文件同源；产生 1 个「scrl」目录 tab + 树行） */
+/** 目录注入（25 文件同源；产生 1 个「scrl」目录 tab + 树行） */
 async function injectDir(page: Page): Promise<void> {
   await page.evaluate((names) => {
     const files = names.map((name) => {
@@ -66,7 +71,7 @@ async function openFileTab(page: Page, name: string): Promise<void> {
   await expect(tabNamed(page, name)).toBeVisible();
 }
 
-/** 溢出装置：注入 + 连开 15 文件 tab（+目录 tab = 16），回卷最左后钉可见性断言。
+/** 溢出装置：注入 + 连开 25 文件 tab（+目录 tab = 26），回卷最左后钉可见性断言。
  * 注意：连开 tab 时激活滚入（SCRL-05 行为）会把 scrollLeft 带到最右端——装置统一
  * setScrollLeft(0) 回到「初态」再断言右显左隐 */
 async function openOverflowTabs(page: Page): Promise<void> {
@@ -94,11 +99,40 @@ const setScrollLeft = (page: Page, v: number): Promise<void> =>
     { sel: SCROLLER, v }
   );
 
+/** CDP 触摸滑动（hasTouch 下 Playwright touchscreen 只有 tap，滑动走 CDP 触摸事件；
+ * mobile.spec.ts touchSwipe 同款） */
+async function touchSwipe(
+  page: Page,
+  cdp: CDPSession,
+  from: { x: number; y: number },
+  to: { x: number; y: number }
+): Promise<void> {
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ x: from.x, y: from.y, id: 1 }]
+  });
+  // 分步 move 模拟真实滑动轨迹（一步跳变可能被识别为 tap）
+  const steps = 5;
+  for (let i = 1; i <= steps; i++) {
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [
+        {
+          x: from.x + ((to.x - from.x) * i) / steps,
+          y: from.y + ((to.y - from.y) * i) / steps,
+          id: 1
+        }
+      ]
+    });
+  }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+}
+
 async function closeTab(page: Page, name: string): Promise<void> {
   await tabNamed(page, name).locator('.vv-tab-close').click();
 }
 
-test.describe('tab 条优雅滚动（SCRL-01..07）', () => {
+test.describe('tab 条优雅滚动（SCRL-01..08）', () => {
   test('SCRL-01：箭头可见性随滚动翻转并随 tab 数刷新', async ({ page }) => {
     await openOverflowTabs(page);
     // 初态（scrollLeft=0）：右钮可见左钮不渲染
@@ -263,5 +297,30 @@ test.describe('tab 条优雅滚动（SCRL-01..07）', () => {
     const stopped = await scrollLeftOf(page);
     await page.waitForTimeout(300);
     expect(await scrollLeftOf(page)).toBe(stopped);
+  });
+
+  test('SCRL-08：触屏滑动横移——tab 条 touch swipe → scrollLeft 前移（仅 mobile）', async ({
+    page
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== 'mobile',
+      '触屏滑动需 hasTouch 触摸视口——mobile project 限定（SCRL-07 桌面基准的镜像）'
+    );
+    await openOverflowTabs(page);
+    await setScrollLeft(page, 0);
+    const sb = await page.locator(SCROLLER).boundingBox();
+    if (sb === null) throw new Error('滚动容器无包围盒');
+    // 手指右→左滑（内容左移 → scrollLeft 增），落滚动区包围盒中带
+    const cy = sb.y + sb.height / 2;
+    const cdp = await page.context().newCDPSession(page);
+    await touchSwipe(
+      page,
+      cdp,
+      { x: sb.x + sb.width * 0.8, y: cy },
+      { x: sb.x + sb.width * 0.2, y: cy }
+    );
+    // 触摸 panning 走浏览器合成器，滑动到位有异步尾——poll 至位移出现（先行探针
+    // 实测单滑即满程；无惯性断言面，PWA-06/2 touchend 动量恒 0 受限域不属本用例）
+    await expect.poll(async () => await scrollLeftOf(page), { timeout: 5000 }).toBeGreaterThan(0);
   });
 });
