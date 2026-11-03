@@ -477,15 +477,20 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .vv-tbmenu-row input { flex: 1; min-width: 0; }
 .vv-tbmenu-pop > div { padding: 2px 4px; }
 /* 子菜单容器（就地手风琴缩进区；spec §3.2 拍板：子项含表单——工作区重命名行/
-   粘贴 URL 行——飞出面板局促，就地展开享全宽，移动端友好）。置于 > div 通配
-   之后：同特异性靠序覆盖，缩进 padding 生效 */
-.vv-tbmenu-sub { display: flex; flex-direction: column; gap: 2px; padding: 2px 2px 2px 14px; }
-/* 触发钮触控目标（§6.4/§10-G1，≤600px 档；顶栏退役 Task 2 自 TopBar scoped 迁来
-   改类选择器，标签栏收敛 Task 1 随融合菜单换挂 .vv-tbmenu-trigger）：
-   padding-block 补至 8px 使触控高 ≥32px（13px 字号 + normal 行高 ≈ 33.6px；随
-   --vv-ui-font-size 联动增大，恒过线）。桌面断点不适用，零漂移 */
+   粘贴 URL 行——飞出面板局促，就地展开享全宽，移动端友好）。选择器升档为
+   直接子 class（0,2,0），特异性战胜连接服务器表单行通配 `.vv-tbmenu-pop > div`
+   （0,1,1）——两者特异性不同，源序无关（首版注释「同特异性靠序覆盖」系错误
+   机制断言，评审 F1 勘误） */
+.vv-tbmenu-pop > .vv-tbmenu-sub { display: flex; flex-direction: column; gap: 2px; padding: 2px 2px 2px 14px; }
+/* 触控目标（§6.4/§10-G1，≤600px 档；顶栏退役 Task 2 自 TopBar scoped 迁来改类
+   选择器，标签栏收敛 Task 1 随融合菜单换挂 .vv-tbmenu-trigger）：padding-block
+   补至 8px 使触控高 ≥32px（13px 字号 + normal 行高 ≈ 17px + 16px ≈ 33px；随
+   --vv-ui-font-size 联动增大，恒过线）。菜单条目同档（评审 F2：旧 .vv-tbact-item
+   4px padding 原样随迁实测 ~26px 不达标，与触发钮同款 8px 档先例）。桌面断点
+   不适用，零漂移 */
 @media (max-width: 600px) {
-  .vv-tabbar-menu .vv-tbmenu-trigger { padding-block: 8px; }
+  .vv-tabbar-menu .vv-tbmenu-trigger,
+  .vv-tbmenu-item { padding-block: 8px; }
 }
 /* .vv-tab 为 div[role=tab]（U2：激活区与关闭钮拆为兄弟节点，button 内不再嵌交互元素）；
    cursor 与 font-size 需自带（原先由全局 button 规则提供——U2 去 button 化后 div
