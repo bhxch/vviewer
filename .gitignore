@@ -62,3 +62,4 @@ server/worker/build/
 
 # wrangler 本地 dev 状态（miniflare sqlite/tmp bundle，不入库）
 server/worker/.wrangler/
+.superpowers/
