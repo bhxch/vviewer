@@ -544,7 +544,7 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
   border-radius: var(--vv-radius-full); padding: 0 5px; }
 /* 「管理」按钮（T6）：推到右端、不随横向滚动挤压；融入标签栏观感 */
 .vv-tabbar-manage { flex: none; margin-left: auto; border: 0; border-left: 1px solid var(--ui-border);
-  border-radius: 0; background: var(--ui-tab-bg); font-size: var(--vv-fs-xs); }
+  border-radius: 0; background: var(--ui-tab-bg); }
 .vv-tabbar-manage:hover { background: var(--ui-hover-bg); }
 /* pinned tab（F 项 T2）：斜体标签；data-pinned 与 .vv-tab-pinned 双锚点（plan DOM
    锚点约定）供 e2e 与样式选择。§6.1 🔒 退役（彩色 emoji 与单色字形白名单冲突，

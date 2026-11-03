@@ -548,7 +548,7 @@
     data-vv-wspanel-trigger
     aria-label="管理标签"
     title="管理所有工作区的标签（Alt+W）"
-    onclick={onmanage}>管理</button>
+    onclick={onmanage}>▾</button>
   {#if ctx !== null}
     <!-- 右键菜单浮层（fixed 定位不随 tabbar 横向滚动；关闭路径收敛在组件内） -->
     <TabContextMenu
