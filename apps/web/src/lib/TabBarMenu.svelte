@@ -112,25 +112,42 @@
 
   $effect(() => {
     // 浮层超高策略（spec §3.3）：menuOpen/sub/urlOpen/srvOpen 任一开合变化即实测
-    // pop.offsetHeight——内容超可用高（视口 − top − 8）则压 max-height 转内部
-    // 滚动（.vv-tbmenu-pop overflow-y:auto，该滚动条属面板滚动非 tab 条，不隐藏）；
-    // 否则清 max-height，并把 top 拉回视口内（POP_EST 估算偏小的兜底，右下溢出
-    // 时上移、不低于 8）。Svelte effect 在 DOM 落定后运行，offsetHeight 即当前
-    // 开合态的实测渲染高；打开期间不追滚动/缩放（fixed 一次估算同档语义）
+    // pop 占高（getBoundingClientRect，border-box 渲染值，与「底缘 ≤ 视口」断言
+    // 同源）与可用高（视口 − top − 8）同面比较——超高则压 max-height 转内部滚动
+    // （.vv-tbmenu-pop overflow-y:auto，该滚动条属面板滚动非 tab 条，不隐藏）；
+    // 否则保持清空，并把 top 拉回视口内（POP_EST 估算偏小的兜底，右下溢出时上
+    // 移、不低于 8）。Svelte effect 在 DOM 落定后运行；打开期间不追滚动/缩放
+    //（fixed 一次估算同档语义）
     void sub;
     void urlOpen;
     void srvOpen;
     const el = popEl;
     if (menuOpen === false || el === null) return;
-    const h = el.offsetHeight;
+    // max-height 的约束面随 box-sizing 而异（Task 4 探针定性，评审修复轮 2）：
+    // app 全局无 box-sizing 重置，本浮层为 content-box——maxHeight 限的是
+    // content，须扣除 padding+border（chrome）才等于占高上限；border-box 下
+    // maxHeight 即占高上限，chrome=0。判定面（自然占高 > avail）与设置面
+    //（content 上限 = avail − chrome）同构：首版按 border-box 语义直写 avail，
+    // content-box 下底缘越视口 +2px，且「内容略超可用高 ≤chrome 带」内
+    // maxHeight ≥ content 不产生溢出——10px 死窗（不触发内滚）
+    const cs = getComputedStyle(el);
+    const chrome =
+      cs.boxSizing === 'border-box'
+        ? 0
+        : el.offsetHeight -
+            el.clientHeight + // border 两侧（clientHeight 含 padding 不含 border）
+          parseFloat(cs.paddingTop) +
+          parseFloat(cs.paddingBottom);
     const avail = window.innerHeight - popPos.top - 8;
+    // 先清再测自然占高：钳制在位时 rect 反映钳后值，直接判定会被自身钳制钉死
+    //（占高恒 = avail，重跑如「钳制在位再展开连接服务器表单」误走解除分支，
+    // 钳制丢失且无恢复）——解除→实测→按需写回，单轮内自洽
+    el.style.maxHeight = '';
+    const h = el.getBoundingClientRect().height;
     if (h > avail) {
-      el.style.maxHeight = `${avail}px`;
-    } else {
-      el.style.maxHeight = '';
-      if (popPos.top + h > window.innerHeight - 8) {
-        popPos = { ...popPos, top: Math.max(8, window.innerHeight - h - 8) };
-      }
+      el.style.maxHeight = `${Math.max(avail - chrome, 0)}px`;
+    } else if (popPos.top + h > window.innerHeight - 8) {
+      popPos = { ...popPos, top: Math.max(8, window.innerHeight - h - 8) };
     }
   });
 
