@@ -416,13 +416,24 @@ test('OUT-07 · ≈2MB python 全量+大纲同窗性能锚（场景档钉值）�
   // ③ 打开窗口内代码可滚动（主线程无长任务佐证，场景档③）：scrollTop 写入生效
   // + 可视行内容自洽更新到底段 fn799xx——虚拟行 DOM 随滚动换窗（未虚拟化则此
   // 断言在打开完成时即已满足，同为自洽）。滚到底 DOM 自洽锚（scrollHeight-
-  // clientHeight，不做行高换算）；'fn799' 前缀覆盖 fn79900-fn79999，首可视 def
-  // = 80000 - 视口行数/2（≈79981-79988），落带内且与其余四位段不撞
+  // clientHeight，不做行高换算）；'fn799' 前缀覆盖 fn79900-fn79999，滚到底首可视
+  // 行 = 160000 - 视口行数，必落 fn799xx 带（需可视行数 <400，双 project 远在内）
+  // 且与其余四位段不撞。锚整个可视窗 join 文本而非 .first()：首可视行落 def 还是
+  // pass 随视口行数奇偶翻转（fn_i def 在 0 基 2i、pass 在 2i+1；mobile 375×667
+  // 实测 39 行可视 → 首行 1 基 159962 恰为 fn79980 的 pass，.first() 不含 fn799
+  // 假红）——可视窗内必有 fn799xx def 行，带内判定不变，行数差一假红归零
   await page.locator('.vv-code-pre').evaluate((el) => {
     el.scrollTop = el.scrollHeight - el.clientHeight;
   });
   await expect
-    .poll(() => page.locator('.vv-code-pre .vv-code-line').first().textContent(), { timeout: 30_000 })
+    .poll(
+      () =>
+        page
+          .locator('.vv-code-pre .vv-code-line')
+          .allTextContents()
+          .then((ls) => ls.join('\n')),
+      { timeout: 30_000 }
+    )
     .toContain('fn799');
 });
 

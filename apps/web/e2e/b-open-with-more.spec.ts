@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { test, expect } from '@playwright/test';
 import { hash8 } from '@bhxch/vviewer-core';
 import { openDirText, openFile, openRightIfNarrow, tabNamed, waitAppMounted } from './helpers';
+import { ensureRightDrawer } from './drawer';
 
 /**
  * 打开方式「更多渲染器」展开三入口 e2e（议题一，域文档条目 OWM-01~03）：
@@ -213,8 +214,11 @@ test.describe('打开方式「更多渲染器」展开（OWM）', () => {
     await openFile(page, 'aa.txt');
     await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 20_000 });
 
-    // ① MetaPanel：__more__ 展开后 __less__ 收起 → option 面精确还原受限 5 项
-    await openRightIfNarrow(page);
+    // ① MetaPanel：__more__ 展开后 __less__ 收起 → option 面精确还原受限 5 项。
+    // mobile 用 ensureRightDrawer(true)（openRightIfNarrow 点完不等 0.2s transform
+    // 过渡落定，后续瞬时采样会在过渡中段把「开」读成「关」——drawer.ts:53-56 同款
+    // 陷阱）；桌面视口两函数同为 no-op
+    await ensureRightDrawer(page, true);
     const sel = page.locator('.meta-openwith');
     await expect(sel).toBeVisible();
     await sel.selectOption('__more__');
@@ -232,6 +236,15 @@ test.describe('打开方式「更多渲染器」展开（OWM）', () => {
     await expect(sel.locator('option[value="__more__"]')).toHaveText('更多渲染器…');
     // 收起动作不触碰 override：current 回显自动
     await expect(sel).toHaveValue('');
+    // ② 前收右抽屉（mobile）：.vv-status-openwith 在主区状态栏（左下），375px 视口
+    // 下 .vv-right 开态 inset:0 全高盖过其命中点（aside z 20 > main 内 z auto）——
+    // 不收则该钮 hit-target 校验被 aside 截胡无限重试直至测试超时（两轮 trace 实证
+    // 同象：aside.vv-right intercepts pointer events）。close 探针实证 toggle 钮在
+    // 开态仍处 elementsFromPoint 首位（同 z 20 DOM 序在后），关通道本身可达（OUT-03
+    // 先例）；此前的挂死根因是 openRightIfNarrow 不等过渡落定 + 瞬时采样误判「已
+    // 关」跳过收起。OWM-03「先断言菜单面后开抽屉」的反向运用；桌面视口 ≤600px 门
+    // no-op，chromium 既有路径零变化
+    await ensureRightDrawer(page, false);
 
     // ② 浮层：「更多渲染器…」→「收起附加候选」→ 浮层不关、menuitem 面回受限 5 项
     const btn = page.locator('.vv-status-openwith');
