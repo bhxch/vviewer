@@ -23,6 +23,15 @@ export interface Dispatcher {
  * 由调用方以 store.read 绑定（Task 4 ViewerPane 接线）。 */
 export type DispatchRead = (range?: ByteRange, signal?: AbortSignal) => Promise<Uint8Array<ArrayBuffer>>;
 
+/** 全量物化分块泵进度事件载荷（spec §6.4 远端全量物化）：loaded = 已累计字节（按
+ * 实际块长累计）；total = 文件总字节数（size 未知为 null——不定态下载，Task 4 进度卡
+ * 据此走「已下载 N MB（总大小未知）」显示）。Task 3 tracker / Task 4 进度卡 / Task 7
+ * saveAs 的消费面统一引用本具名类型（pumpFull 与 DispatchOptions.onReadProgress 同源）。 */
+export interface ReadProgressEvent {
+  loaded: number;
+  total: number | null;
+}
+
 /** dispatch 可选项（C 项：手选打开方式；io-streaming §3：流式读） */
 export interface DispatchOptions {
   /** 渲染器 override：命中 registry.byId 即用——用户显式选择 ≠ 内容识别，
@@ -44,11 +53,11 @@ export interface DispatchOptions {
   lineMetrics?: LineMetrics;
   /** 全量物化分块泵进度钩子（spec §6.4 远端全量物化）：buffer === null 的 store-backed
    * 全量拉取（≤1MB 策略直读与延迟补拉）在场时改 4MiB 分块循环（pumpFull），逐块上报
-   * {loaded, total}（size 未知 total=null 至 EOF）；节流在 UI 层做（Task 4 进度卡），
+   * ReadProgressEvent（size 未知 total=null 至 EOF）；节流在 UI 层做（Task 4 进度卡），
    * dispatcher 每块都上报。缺省零行为变化：不传即维持既有单次 read() 全量路径（调用
    * 形态与字节结果不变）；buffer 直传（兼容路径）不经泵。取消经 opts.signal 贯穿每次
    * range 读，落既有 abort 错误身份层（不新建错误形态）。 */
-  onReadProgress?: (p: { loaded: number; total: number | null }) => void;
+  onReadProgress?: (p: ReadProgressEvent) => void;
 }
 
 const HEAD_SIZE = 8192;
@@ -74,7 +83,7 @@ export async function pumpFull(
   read: DispatchRead,
   size: number | null,
   signal: AbortSignal | undefined,
-  onProgress: NonNullable<DispatchOptions['onReadProgress']>
+  onProgress: (p: ReadProgressEvent) => void
 ): Promise<Uint8Array<ArrayBuffer>> {
   if (size !== null) {
     const full = new Uint8Array(size);
@@ -86,17 +95,23 @@ export async function pumpFull(
       loaded += chunk.length;
       onProgress({ loaded, total: size });
     }
-    return loaded === size ? full : full.subarray(0, loaded);
+    // 提前 EOF 防御分支交付拷贝（slice）而非 subarray 视图：视图会钉住 size 级整块
+    // 分配不放（提前 EOF 时 size 与 loaded 的差额即纯浪费），拷贝按实得字节释放底座
+    return loaded === size ? full : full.slice(0, loaded);
   }
   const chunks: Uint8Array<ArrayBuffer>[] = [];
   let loaded = 0;
   for (;;) {
     const chunk = await read({ start: loaded, end: loaded + FULL_CHUNK - 1 }, signal);
     if (chunk.length === 0) break; // 空读 = EOF
-    chunks.push(chunk);
-    loaded += chunk.length;
+    // 违约超长返回按请求窗钳取（BlockStream ③「200 全量响应」教义镜像）：loaded 只按
+    // 窗宽累计、EOF 判定以钳块为准——不钳则超长块跨窗错位推进且短读 EOF 永不触发。
+    // 钳块取 subarray 视图（短命引用，末尾拼接即拷出，不长期钉底座）
+    const taken = chunk.length > FULL_CHUNK ? chunk.subarray(0, FULL_CHUNK) : chunk;
+    chunks.push(taken);
+    loaded += taken.length;
     onProgress({ loaded, total: null });
-    if (chunk.length < FULL_CHUNK) break; // 短读确认 EOF（BlockStream ②同口径）
+    if (taken.length < FULL_CHUNK) break; // 短读确认 EOF（BlockStream ②同口径）
   }
   const full = new Uint8Array(loaded);
   let off = 0;

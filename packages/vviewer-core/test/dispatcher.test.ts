@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createRegistry } from '../src/registry/registry';
-import { createDispatcher, signatureRouteOf } from '../src/dispatch/dispatcher';
+import { createDispatcher, signatureRouteOf, type ReadProgressEvent } from '../src/dispatch/dispatcher';
 import { abortReadError, isAbortError } from '../src/dispatch/errors';
 import type { Detection, Renderer, StreamCtx, TreeStore } from '../src/types';
 
@@ -1201,7 +1201,7 @@ describe('dispatch 全量物化分块泵（计划 2 Task 2，spec §6.4）', () 
     const reg = createRegistry();
     const SIZE = CHUNK + 1; // 4MiB+1：恰两块（4MiB 整块 + 1B 末块）
     const calls: PumpCall[] = [];
-    const reports: Array<{ loaded: number; total: number | null }> = [];
+    const reports: Array<ReadProgressEvent> = [];
     let seenBuf: Uint8Array | undefined;
     reg.install(mk('plain', ['pln'], {
       render: async (buffer) => { seenBuf = buffer; return { destroy() {} }; }
@@ -1228,7 +1228,7 @@ describe('dispatch 全量物化分块泵（计划 2 Task 2，spec §6.4）', () 
     const reg = createRegistry();
     const TOTAL = CHUNK + 100; // 整块 4MiB + 短读尾块：钉住「满块不误判 EOF、短读才收口」
     const calls: PumpCall[] = [];
-    const reports: Array<{ loaded: number; total: number | null }> = [];
+    const reports: Array<ReadProgressEvent> = [];
     let seenBuf: Uint8Array | undefined;
     reg.install(mk('plain', ['pln'], {
       render: async (buffer) => { seenBuf = buffer; return { destroy() {} }; }
@@ -1254,7 +1254,7 @@ describe('dispatch 全量物化分块泵（计划 2 Task 2，spec §6.4）', () 
     const reg = createRegistry();
     const content = new TextEncoder().encode('hello pump!'); // 11B ≤ FULL_LIMIT
     const calls: PumpCall[] = [];
-    const reports: Array<{ loaded: number; total: number | null }> = [];
+    const reports: Array<ReadProgressEvent> = [];
     let seenBuf: Uint8Array | undefined;
     reg.install(mk('plain', ['pln'], {
       render: async (buffer) => { seenBuf = buffer; return { destroy() {} }; }
@@ -1282,7 +1282,7 @@ describe('dispatch 全量物化分块泵（计划 2 Task 2，spec §6.4）', () 
     const reg = createRegistry();
     const SIZE = CHUNK + 1;
     const calls: PumpCall[] = [];
-    const reports: Array<{ loaded: number; total: number | null }> = [];
+    const reports: Array<ReadProgressEvent> = [];
     let seenBuf: Uint8Array | undefined;
     reg.install(mk('plain', ['pln'], {
       render: async (buffer) => { seenBuf = buffer; return { destroy() {} }; }
@@ -1300,7 +1300,7 @@ describe('dispatch 全量物化分块泵（计划 2 Task 2，spec §6.4）', () 
     const controller = new AbortController();
     const abortErr = abortReadError(); // store 取消的统一抛出形态（errors 单源）
     const calls: PumpCall[] = [];
-    const reports: Array<{ loaded: number; total: number | null }> = [];
+    const reports: Array<ReadProgressEvent> = [];
     let seenBuf: Uint8Array | undefined;
     reg.install(mk('plain', ['pln'], {
       render: async (buffer) => { seenBuf = buffer; return { destroy() {} }; }
@@ -1363,7 +1363,7 @@ describe('dispatch 全量物化分块泵（计划 2 Task 2，spec §6.4）', () 
     const reg = createRegistry();
     const TOTAL = CHUNK + 100;
     const calls: PumpCall[] = [];
-    const reports: Array<{ loaded: number; total: number | null }> = [];
+    const reports: Array<ReadProgressEvent> = [];
     let seenBuf: Uint8Array | undefined;
     let seenCtx: StreamCtx | undefined;
     reg.install(mk('st', ['stx'], {
@@ -1384,4 +1384,44 @@ describe('dispatch 全量物化分块泵（计划 2 Task 2，spec §6.4）', () 
     expect(seenBuf?.length).toBe(TOTAL); // 降级交付全量（非 8KB head）
     expect(seenCtx?.size).toBe(TOTAL); // 降级 ctx 形态不变：size = 全量长
   });
+
+  it('⑧ size 未知违约超长返回（8MiB > 4MiB 请求窗）：按窗钳块推进，EOF 正常收口（不错位不巧循环）', async () => {
+    const reg = createRegistry();
+    // 违约 store（镜像 BlockStream ③「200 全量响应」教义的反向面）：任何非 EOF 请求
+    // 一律返回 8MiB 满块（超请求窗一倍）；start ≥ TOTAL 时空读模拟真实 EOF
+    const TOTAL = CHUNK + 1;
+    const calls: PumpCall[] = [];
+    const reports: Array<ReadProgressEvent> = [];
+    let seenBuf: Uint8Array | undefined;
+    reg.install(mk('plain', ['pln'], {
+      render: async (buffer) => { seenBuf = buffer; return { destroy() {} }; }
+    }));
+    const read = async (
+      range?: { start: number; end: number },
+      signal?: AbortSignal
+    ): Promise<Uint8Array<ArrayBuffer>> => {
+      calls.push({ range, signal });
+      if (!range) throw new Error('泵路径不应有无 range 读');
+      if (range.start >= TOTAL) return new Uint8Array(0);
+      return new Uint8Array(CHUNK * 2).fill(0x41); // 违约：8MiB（请求窗仅 4MiB）
+    };
+    await createDispatcher(reg).dispatch(
+      pumpSrc('a.pln', null), null, document.createElement('div'),
+      { read, onReadProgress: (p) => reports.push(p) });
+    // head 探测 + 两窗钳块（8MiB 违约各取前 4MiB，loaded 按窗宽累计）+ 第三窗空读 EOF：
+    // 未钳块时 loaded 会以 8MiB 步长跨窗错位（reports 仅 1 条且窗 2 直接落在 EOF 窗）
+    expect(calls.map((c) => c.range)).toStrictEqual([
+      { start: 0, end: 8191 },
+      { start: 0, end: CHUNK - 1 },
+      { start: CHUNK, end: CHUNK * 2 - 1 },
+      { start: CHUNK * 2, end: CHUNK * 3 - 1 }
+    ]);
+    expect(reports).toStrictEqual([
+      { loaded: CHUNK, total: null }, { loaded: CHUNK * 2, total: null }
+    ]);
+    expect(seenBuf?.length).toBe(CHUNK * 2);
+    expect(seenBuf![0]).toBe(0x41);
+    expect(seenBuf![CHUNK]).toBe(0x41); // 钳块拼接连续
+  });
+
 });
