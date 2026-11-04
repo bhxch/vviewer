@@ -224,7 +224,7 @@ describe('normalizeLibarchiveError', () => {
 describe('archiveRenderer tar 分支（magic 分派 + 事件解耦）', () => {
   it('extensions 含原有 8 个 + 补绑 18 个（libarchive.js 实测支持，spec §6.3 排除清单自有补绑）', () => {
     for (const ext of [
-      'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar',
+      'zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', // zip 同在绑定清单（tar 侧嵌套 zip 条目同语义拒展）
       'jar', 'war', 'ear', 'apk', 'cbz', 'cbr',
       'gzip', 'bzip2', 'tbz', 'tbz2', 'txz', 'lzma',
       'cab', 'ar', 'cpio', 'xar', 'lha', 'lzh'

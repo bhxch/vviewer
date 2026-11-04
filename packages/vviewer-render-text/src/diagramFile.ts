@@ -246,8 +246,10 @@ async function renderDiagramFileBuffer(
   let codeInst: RenderCodeHandle | null = null;
   /** 成功渲染的复挂载闭包缓存（切换不重调引擎/不重发请求——不重读文件的实现面） */
   let renderedMount: (() => void) | null = null;
-  /** 失败回退原因（非空时源码视图顶部出提示卡；重试成功即清） */
+  /** 失败回退原因（非空时源码视图顶部出提示卡；新链启动或渲染成功即清） */
   let failureNotice: string | null = null;
+  /** 在飞渲染链代币（M4）：attemptRendered 启动新链时自增，旧链迟到落定比对过期即整体作废 */
+  let chainToken = 0;
   /** BUG-44 同款：视图切换订阅（SearchPanel 重扫）；destroy 清空防迟滞回调 */
   const viewListeners = new Set<() => void>();
 
@@ -383,7 +385,14 @@ async function renderDiagramFileBuffer(
     const host = (dOpts?.krokiHost || DEFAULT_KROKI_HOST).replace(/\/+$/, '');
     let officialTried = false;
     return mountImg(url, (img) => {
-      const fallToSource = (): void => showSourceFallback(`kroki 渲染失败（图片加载错误）：${diagram.id}`);
+      // 终态文案与 md 管线 krokiErrorText 对齐（pipeline.ts resolveUiTexts）：官方重试
+      // 一跳也败用「kroki 与官方服务器渲染失败」两跳形态，单跳失败用基础文案
+      const fallToSource = (): void =>
+        showSourceFallback(
+          officialTried
+            ? `kroki 与官方服务器渲染失败（图片加载错误）：${diagram.id}`
+            : `kroki 渲染失败（图片加载错误）：${diagram.id}`
+        );
       if (diagram.officialServer && !officialTried && host === DEFAULT_KROKI_HOST) {
         officialTried = true;
         // 编码外溢失败（pako/btoa 桩炸）直落源码回退；URL 构造成功才换 src
@@ -440,21 +449,28 @@ async function renderDiagramFileBuffer(
     return mountKroki();
   }
 
-  /** 渲染视图挂载（缓存命中直接复挂载；未命中走分发链，失败落源码回退） */
+  /**
+   * 渲染视图挂载（缓存命中直接复挂载；未命中走分发链，失败落源码回退）。
+   * M4 在飞守卫：链启动即取代币并清上一链失败态（源码视图残卡 DOM 已随 setView
+   * unmount 清空）——快速 render→source→render 连切时新链使旧链迟到落定整体作废
+   * （不覆盖 DOM/不复活失败卡），只有当前链可落定或置失败态。
+   */
   async function attemptRendered(): Promise<void> {
     if (renderedMount) {
       renderedMount();
       return;
     }
+    const token = ++chainToken;
+    failureNotice = null;
+    target.classList.remove('vv-degraded');
     try {
       const mount = await renderChain();
+      if (token !== chainToken) return; // 已被新链取代：迟到落定作废（DOM/失败卡都不动）
       renderedMount = mount;
-      failureNotice = null;
-      target.classList.remove('vv-degraded');
       if (destroyed || view !== 'rendered') return; // 迟到落定：不覆盖用户已切视图
       mount();
     } catch (e) {
-      if (destroyed) return;
+      if (destroyed || token !== chainToken) return;
       showSourceFallback(reasonText(e));
     }
   }

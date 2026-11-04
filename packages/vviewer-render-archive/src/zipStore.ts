@@ -17,16 +17,16 @@ import { naturalCompare } from '@bhxch/vviewer-core';
 export const MAX_ARCHIVE_DEPTH = 3;
 /** 归档输入大小上限（全内存解析） */
 export const MAX_ZIP_INPUT_BYTES = 200 * 1024 * 1024;
-/** archive 渲染器绑定清单（单一事实源）：archive.ts 的 extensions 引用同一数组，
- * 嵌套展开门 ARCHIVE_EXTS 由其派生，绑定与拒展两处永不漂移。剔除项不入列：
+/** archive 渲染器绑定清单（单一事实源，冻结防运行时篡改）：archive.ts 的 extensions
+ * 由其展开派生，嵌套展开门 ARCHIVE_EXTS 由其派生，绑定与拒展两处永不漂移。剔除项不入列：
  * zst/tzst（libarchive.js wasm 未编译 libzstd，仅外部程序回退，浏览器不可解）、
  * zipx（PK magic 走 jszip 仅 store/deflate，zipx 主打 LZMA/PPMd 等方法读不出）。 */
-export const ARCHIVE_BINDINGS = [
+export const ARCHIVE_BINDINGS = Object.freeze([
   'zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar',
   'jar', 'war', 'ear', 'apk', 'cbz', 'cbr', // zip/rar 容器（magic 分派：PK→jszip、RAR→libarchive）
   'gzip', 'bzip2', 'tbz', 'tbz2', 'txz', 'lzma', // 过滤器别名（zlib/bzlib/liblzma 内部编译进）
   'cab', 'ar', 'cpio', 'xar', 'lha', 'lzh' // 其余归档格式（archive_read_support_format_* 全注册）
-];
+]) as readonly string[];
 /** 视为"内嵌压缩包"需拒展的扩展名（T4 起 tar 系/7z/rar 与 zip 同语义；与绑定清单同源派生） */
 export const ARCHIVE_EXTS = new Set(ARCHIVE_BINDINGS);
 

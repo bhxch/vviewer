@@ -9,7 +9,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { createRegistry, GENERATED_EXTENSIONS, type Renderer, type Detection, type FileSource, type RenderedInstance } from '@bhxch/vviewer-core';
+import { createRegistry, GENERATED_EXTENSIONS, type Detection, type FileSource, type RenderedInstance } from '@bhxch/vviewer-core';
 import {
   resolveDiagramType,
   DEFAULT_KROKI_HOST,
@@ -129,7 +129,8 @@ describe('diagramFile 注册面（spec 2026-11-04 §5.1）', () => {
       for (const r of renderers) registry.install(r);
     }).not.toThrow();
     // 注册面形态：id diagram-<type>、label 非空、streaming false、扩展名同映射表
-    for (const r of renderers as Renderer[]) {
+    // （工厂返回类型即 Renderer[]，不再重复断言/强转——评审 T3 冗余清理）
+    for (const r of renderers) {
       const type = r.id.slice('diagram-'.length);
       expect(TYPES, r.id).toContain(type);
       expect(r.label, r.id).toBeTruthy();
@@ -153,7 +154,9 @@ describe('diagramFile 注册面（spec 2026-11-04 §5.1）', () => {
     expect(() => {
       for (const r of renderers) registry.install(r);
     }).not.toThrow();
-    for (const ext of ['md', 'markdown', 'html', 'htm', 'svg', 'jsonl', 'ndjson']) {
+    // svg 不入列：本 registry 未装 imageRenderer，byExtension('svg') 落 '(未注册)' 分支
+    // 空转——svg 排除已由上方「既有 owner 扩展名不入映射表」组经 DIAGRAM_FILE_EXTS 锚定
+    for (const ext of ['md', 'markdown', 'html', 'htm', 'jsonl', 'ndjson']) {
       const owner = registry.byExtension(ext);
       expect(owner?.id ?? '(未注册)', `".${ext}" 的 owner`).not.toMatch(/^diagram-/);
     }
@@ -335,6 +338,28 @@ describe('diagramFile 渲染——server 分发（remoteCall 通道）', () => {
     });
     expect(vi.mocked(createKrokiUrl)).not.toHaveBeenCalled();
     expect(target.querySelector('svg#ks')).not.toBeNull();
+  });
+
+  // M2（Task 4 评审）：server 模式 × remoteCall 注入但 reject × 无本地引擎（plantuml）
+  // 的组合链——降级链照走（server→kroki），引擎零调用；kroki 也败则终态源码 + 提示卡
+  it('server 模式 + remoteCall reject（plantuml 无本地引擎）：降级直落 kroki，kroki 也败终态源码 + 提示卡', async () => {
+    const remoteCall = vi.fn(() => Promise.reject(new Error('服务器断连')));
+    vi.mocked(createKrokiUrl).mockRejectedValue(new Error('kroki 不可达'));
+    setOpts({ serverDiagramOf: (lang) => lang === 'plantuml' }, (lang) => (lang === 'plantuml' ? 'server' : 'source'));
+    const { target } = await renderDiagramFile('plantuml', 'plantuml', '@startuml\nA->B\n@enduml', { remoteCall });
+    expect(remoteCall).toHaveBeenCalledTimes(1);
+    expect(remoteCall).toHaveBeenCalledWith('/api/compute/diagram', {
+      method: 'POST',
+      body: { lang: 'plantuml', source: '@startuml\nA->B\n@enduml' }
+    });
+    expect(vi.mocked(renderDiagramEngine)).not.toHaveBeenCalled(); // plantuml 无本地引擎：跳过 local 档
+    expect(vi.mocked(createKrokiUrl)).toHaveBeenCalledTimes(1); // 降级链只走一跳 kroki
+    const body = target.querySelector('.vv-code-body');
+    expect(body).not.toBeNull(); // 终态源码视图承接
+    expect(body!.textContent).toContain('@startuml');
+    const card = target.querySelector('.vv-error-card');
+    expect(card).not.toBeNull();
+    expect(card!.textContent).toContain('已回退');
   });
 });
 
@@ -520,6 +545,78 @@ describe('diagramFile 回退面——重挂源码前卸旧实例（评审 M3）'
   });
 });
 
+// ---------- Task 4 评审修正锚（M4：attemptRendered 在飞守卫 + 陈旧失败卡） ----------
+
+describe('diagramFile 渲染——在飞守卫（M4：连切后旧链迟到落定作废）', () => {
+  afterEach(() => {
+    setDiagramOptions(null);
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  /** renderDiagramFile 的不等待变体：链 1 须在飞期间操作切换钮（手控 promise 门），故不走 renderDiagramFile 助手 */
+  function startRender(type: string, ext: string, text: string): { target: HTMLElement; promise: Promise<RenderedInstance> } {
+    stubResizeObserver();
+    const target = document.createElement('div');
+    document.body.append(target);
+    const renderer = createDiagramFileRenderers({}).find((r) => r.id === `diagram-${type}`);
+    expect(renderer, `diagram-${type} 渲染器存在`).toBeTruthy();
+    const promise = renderer!.render(
+      new TextEncoder().encode(text),
+      target,
+      sourceOf(`f.${ext}`),
+      { ext, encoding: 'utf-8' } satisfies Detection
+    );
+    return { target, promise };
+  }
+
+  it('连切 render→source→render：旧链成功迟到落定不覆盖新链 DOM（代币守卫）', async () => {
+    // 手控链 1 引擎 promise：挂起期间完成 render→source→render 连切；链 2 用 beforeEach 缺省桩（svg#t）
+    let release1!: () => void;
+    const gate1 = new Promise<void>((resolve) => {
+      release1 = resolve;
+    });
+    vi.mocked(renderDiagramEngine).mockImplementationOnce(async () => {
+      await gate1;
+      return '<svg id="t1"/>';
+    });
+    const { target, promise } = startRender('graphviz', 'dot', 'digraph{a->b}');
+    target.querySelector<HTMLButtonElement>('.vv-html-btn-source')!.click(); // 链 1 仍在飞
+    target.querySelector<HTMLButtonElement>('.vv-html-btn-rendered')!.click(); // 链 2 启动（取代链 1）
+    await vi.waitFor(() => expect(target.querySelector('svg#t')).not.toBeNull()); // 链 2 已落定
+    expect(vi.mocked(renderDiagramEngine)).toHaveBeenCalledTimes(2); // 新链照常重走（守卫不拦用户请求）
+
+    release1(); // 旧链迟到成功落定
+    const instance = await promise;
+    expect(target.querySelector('svg#t1'), '被取代链的迟到落定不得覆盖新链 DOM').toBeNull();
+    expect(target.querySelector('svg#t')).not.toBeNull(); // 新链视图原样
+    expect(target.querySelector('.vv-error-card')).toBeNull();
+    instance.destroy();
+  });
+
+  it('连切后旧链失败迟到落定：不出失败卡、不切源码视图（陈旧失败卡防复活）', async () => {
+    // 手控链 1 引擎 promise 为 reject 门；链 1 引擎败后降 kroki、kroki 桩也 reject → 链 1 迟到失败
+    let reject1!: (e: unknown) => void;
+    const gate1 = new Promise<string>((_, reject) => {
+      reject1 = reject;
+    });
+    vi.mocked(renderDiagramEngine).mockImplementationOnce(() => gate1);
+    vi.mocked(createKrokiUrl).mockRejectedValue(new Error('kroki 不可达'));
+    const { target, promise } = startRender('graphviz', 'dot', 'digraph{a->b}');
+    target.querySelector<HTMLButtonElement>('.vv-html-btn-source')!.click();
+    target.querySelector<HTMLButtonElement>('.vv-html-btn-rendered')!.click(); // 链 2：引擎缺省桩成功
+    await vi.waitFor(() => expect(target.querySelector('svg#t')).not.toBeNull());
+
+    reject1(new Error('viz 加载失败')); // 旧链迟到失败（未守卫时会切源码 + 出提示卡）
+    const instance = await promise;
+    expect(target.querySelector('.vv-error-card'), '被取代链的失败不得复活提示卡').toBeNull();
+    expect(target.querySelector('.vv-code-body')).toBeNull(); // 不得把用户拽回源码视图
+    expect(target.querySelector('svg#t')).not.toBeNull(); // 新链视图原样
+    instance.destroy();
+  });
+});
+
 // ---------- Task 4 评审修正锚（M1：kroki→official 重试一跳，md 管线同款） ----------
 
 describe('diagramFile 回退面——kroki img error 官方重试一跳（评审 M1）', () => {
@@ -549,6 +646,8 @@ describe('diagramFile 回退面——kroki img error 官方重试一跳（评审
     img!.dispatchEvent(new Event('error')); // 官方也失败：两跳后终态源码回退
     await vi.waitFor(() => expect(target.querySelector('.vv-code-body')).not.toBeNull());
     expect(target.querySelector('.vv-error-card')).not.toBeNull();
+    // 终态文案（T5 评审：与 md 管线 krokiErrorText 官方已试变体对齐）
+    expect(target.querySelector('.vv-error-card')!.textContent).toContain('kroki 与官方服务器渲染失败');
   });
 
   it('自建 krokiHost（隐私防线）：img error 不回落官方，直落源码回退', async () => {
@@ -558,6 +657,10 @@ describe('diagramFile 回退面——kroki img error 官方重试一跳（评审
     await vi.waitFor(() => expect(target.querySelector('.vv-code-body')).not.toBeNull());
     expect(vi.mocked(createPlantumlUrl)).not.toHaveBeenCalled();
     expect(target.querySelector('.vv-error-card')).not.toBeNull();
+    // 终态文案（T5 评审：未试官方用基础文案，不带「与官方服务器」段）
+    const card = target.querySelector('.vv-error-card')!;
+    expect(card.textContent).toContain('kroki 渲染失败');
+    expect(card.textContent).not.toContain('与官方服务器');
   });
 
   it('非 officialServer 型（graphviz）：img error 不试官方，直落源码回退', async () => {
@@ -596,6 +699,15 @@ describe('装配序锚（Task 5：viewer.ts 语句序）', () => {
     expect(diagramAt, 'viewer.ts 未装配图表文件渲染器（createDiagramFileRenderers({ remoteCall }) 逐个 install）').toBeGreaterThan(-1);
     expect(codeAt, 'viewer.ts 未装配 codeRenderer').toBeGreaterThan(-1);
     expect(diagramAt, 'diagram install 必须先于 code install：顺序颠倒则 generated 占位反转（dot/mermaid/mmd/bpmn/dbml 在 GENERATED_EXTENSIONS 内被 code 抢注，diagram install 抛 RegistryError）').toBeLessThan(codeAt);
+  });
+
+  it('viewer.ts 源序：diagram install 块先于 generated fallback（installFallbackExtensions）调用（T5 评审序锚）', () => {
+    const src = readViewerSource();
+    const diagramAt = src.indexOf('createDiagramFileRenderers({ remoteCall');
+    const fallbackAt = src.indexOf("registry.installFallbackExtensions('code', GENERATED_EXTENSIONS)");
+    expect(diagramAt, 'viewer.ts 未装配图表文件渲染器').toBeGreaterThan(-1);
+    expect(fallbackAt, 'viewer.ts 未装配 generated fallback').toBeGreaterThan(-1);
+    expect(diagramAt, 'diagram install 块必须整体先于 generated fallback：同一铁律在收尾调用面上的序锚').toBeLessThan(fallbackAt);
   });
 
   it('镜像 viewer.ts 语句序（diagram 29 → code → markdown → html → jsonl → generated fallback）：dot 归 diagram-graphviz、tsv 归 code', () => {

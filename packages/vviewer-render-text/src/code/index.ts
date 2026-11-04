@@ -52,13 +52,12 @@ export const codeRenderer: Renderer = {
   // 注 1：不含 'svg'——svg 归 @bhxch/vviewer-render-media 的 imageRenderer（消毒预览），registry 拒绝重复注册
   // 注 2：不含 'md'/'markdown'/'html'/'htm'——M3 起归 markdownRenderer/htmlRenderer（M1-M2 期间暂由 code 承接）
   extensions: [
-    'txt', 'log', 'json', 'jsonc', 'yaml', 'yml', 'toml', 'ini', 'conf', 'cfg', 'env', 'csv', 'tsv',
+    'txt', 'log', 'json', 'jsonc', 'yaml', 'yml', 'toml', 'ini', 'conf', 'cfg', 'env', 'csv', 'tsv', // tsv：批次三引入 @file-viewer/renderer-spreadsheet 桥接时转移（spec 2026-11-04 §4.1）
     'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'css', 'scss', 'xml',
     'py', 'rb', 'go', 'rs', 'java', 'kt', 'c', 'h', 'cpp', 'hpp', 'cc', 'sh', 'bash', 'zsh', 'fish', 'sql',
     'lua', 'php', 'pl', 'swift', 'dart', 'vue', 'svelte', 'gradle', 'cmake', 'properties', 'gitignore',
     'license', 'makefile', 'diff', 'patch'
   ],
-  // tsv：批次三引入 @file-viewer/renderer-spreadsheet 桥接时转移（spec 2026-11-04 §4.1）
   // streaming（io-streaming 计划 3 Task 4，spec §4.3）：dispatcher 只交付 head +
   // StreamCtx，code 打开即走窗口流式（>2MB/size 未知）或入口守卫补拉全量（≤2MB/非
   // UTF-8）。回退面均在 render 内自处（下方守卫）；!rangeCapable 的全量视图 ctx 属

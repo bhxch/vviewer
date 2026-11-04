@@ -70,9 +70,9 @@ function diagramFileRemoteCall(path: string, init?: { method?: string; body?: un
 
 // 图表文件渲染器（29 型按映射序逐个 install）置顶安装：installFallbackExtensions 按
 // 「专有先注册、generated 补空位」跳过已认领扩展名，顺序颠倒则 code 的 generated 补
-// 空位先行认领 dot/gv/mermaid/mmd/bpmn/dbml/d2 等（均在 GENERATED_EXTENSIONS 内），
-// diagram install 抛 RegistryError（装配序锚：render-text test/diagramFile.test.ts
-// 「装配序锚」组）。
+// 空位先行认领 dot/mermaid/mmd/bpmn/dbml 等（均在 GENERATED_EXTENSIONS 内；gv/d2
+// 不在其列，不依赖此序），diagram install 抛 RegistryError（装配序锚：render-text
+// test/diagramFile.test.ts「装配序锚」组）。
 for (const r of createDiagramFileRenderers({ remoteCall: diagramFileRemoteCall })) registry.install(r);
 registry.install(codeRenderer);
 registry.install(markdownRenderer);

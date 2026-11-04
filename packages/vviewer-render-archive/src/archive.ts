@@ -118,9 +118,10 @@ export function mountArchiveTree(
 export const archiveRenderer: Renderer = {
   id: 'archive',
   label: '压缩包',
-  // 绑定清单单一事实源 ARCHIVE_BINDINGS（zipStore 导出，ARCHIVE_EXTS 嵌套展开门同源派生；
-  // 剔除 zst/tzst/zipx 理由见其注释）
-  extensions: ARCHIVE_BINDINGS,
+  // 绑定清单单一事实源 ARCHIVE_BINDINGS（zipStore 导出且冻结，ARCHIVE_EXTS 嵌套展开门
+  // 同源派生；剔除 zst/tzst/zipx 理由见其注释）。展开拷贝：Renderer.extensions 为可变
+  // 数组类型，冻结清单以内容单源（registry 只读，运行时无二份修改面）
+  extensions: [...ARCHIVE_BINDINGS],
   async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, _det: Detection): Promise<RenderedInstance> {
     // 递归深度接线：由来源 store id 的前导归档段（zip/libarchive）推导父链（顶层归档的
     // store 是 localfiles/single 等非归档来源 → 链空 → depth 0；包内第 n 层归档 → depth n-1）

@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Detection, FileSource, TreeNode } from '@bhxch/vviewer-core';
 import { archiveRenderer } from '../src/archive';
 import { ARCHIVE_OPEN_EVENT, type ArchiveOpenDetail } from '../src/archive';
-import { createZipStore, normalizeZipError, archiveChainOf, parseZipCentralDirectory, ARCHIVE_EXTS } from '../src/zipStore';
+import { createZipStore, normalizeZipError, archiveChainOf, parseZipCentralDirectory, ARCHIVE_BINDINGS, ARCHIVE_EXTS } from '../src/zipStore';
 
 async function makeZip(): Promise<Uint8Array> {
   const JSZip = (await import('jszip')).default;
@@ -425,5 +425,9 @@ describe('ARCHIVE_EXTS 嵌套展开门（与 archive 绑定清单一致）', () 
   it('与 archiveRenderer.extensions 双向一致（单一事实源，无重复）', () => {
     expect(new Set(archiveRenderer.extensions)).toEqual(ARCHIVE_EXTS);
     expect(archiveRenderer.extensions.length).toBe(ARCHIVE_EXTS.size);
+  });
+
+  it('ARCHIVE_BINDINGS 冻结（单一事实源运行时不可变，防消费方篡改漂移）', () => {
+    expect(Object.isFrozen(ARCHIVE_BINDINGS)).toBe(true);
   });
 });
