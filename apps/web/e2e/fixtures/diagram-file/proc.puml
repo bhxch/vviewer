@@ -1,0 +1,4 @@
+@startuml
+Alice -> Bob: 认证请求
+Bob --> Alice: 认证通过
+@enduml
