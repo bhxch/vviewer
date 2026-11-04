@@ -27,17 +27,21 @@ import type { Detection, Encoding, FileSource, RenderedInstance, Renderer } from
 
 /** 扩展名 → blob MIME（流媒体清单/原始流同样标注，供 blob 元数据可读） */
 // mov（QuickTime 容器，H.264 轨道主流浏览器可播）与 aac（ADTS 裸流）为浏览器
-// 可播子集的补充（终审 M3）；不保证所有编码可解码——不可解时 video/audio 元素
-// 报 error，与 mp4 同语义。
+// 可播子集的补充（终审 M3）；mpeg（MPEG-1/2 程序流容器）与 weba（WebM 纯音频轨）
+// 为终审分派表同步补全——extensions 已认领而 MIME 表缺项会让 blob 无类型，与 mp3
+// 的 audio/mpeg 区分（mpeg 键是视频容器）。不保证所有编码可解码——不可解时
+// video/audio 元素报 error，与 mp4 同语义。
 const MIME: Record<string, string> = {
   mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', ogg: 'video/ogg',
+  mpeg: 'video/mpeg',
   m3u8: 'application/vnd.apple.mpegurl', flv: 'video/x-flv', ts: 'video/mp2t',
   mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', m4a: 'audio/mp4', aac: 'audio/aac',
-  oga: 'audio/ogg', opus: 'audio/ogg'
+  oga: 'audio/ogg', opus: 'audio/ogg', weba: 'audio/webm'
 };
 
-/** 视频形态扩展名（含流媒体；'ts' 由 dispatcher 签名改派进入，BUG-01） */
-const VIDEO_EXTS = new Set(['mp4', 'm4v', 'mov', 'webm', 'ogg', 'm3u8', 'flv', 'ts']);
+/** 视频形态扩展名（含流媒体；'ts' 由 dispatcher 签名改派进入 BUG-01；'mpeg' 为
+ * 终审分派表同步——视频容器缺项会被 playerKindOf 拼成音频播放器） */
+const VIDEO_EXTS = new Set(['mp4', 'm4v', 'mov', 'webm', 'ogg', 'm3u8', 'flv', 'ts', 'mpeg']);
 
 /** 类型分派纯函数：ext → 'video'（ArtPlayer）| 'audio'（原生 <audio>） */
 export function playerKindOf(ext: string): 'video' | 'audio' {

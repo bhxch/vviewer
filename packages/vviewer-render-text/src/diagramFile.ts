@@ -24,16 +24,23 @@ import {
   createKrokiUrl,
   createPlantumlUrl,
   renderDiagramEngine,
+  renderMermaidInto,
   resolveDiagramType,
   type DiagramMode,
-  type DiagramType
+  type DiagramType,
+  type MermaidTheme
 } from '@bhxch/vviewer-render-diagram';
 import { getDiagramOptions, type DiagramRenderOptions } from '@bhxch/vviewer-markdown';
 import { sanitizeDiagramFragment } from '@bhxch/vviewer-sanitize';
 import { renderCode, type RenderCodeHandle } from './code';
 import { decodeText } from './decodeText';
 
-/** Task 4/5 注入缝：server 模式单图渲染的远端调用通道（同 md 管线 PipelineCtx.diagram.remoteCall 形态）。 */
+/**
+ * Task 4/5 注入缝：server 模式单图渲染的远端调用通道。同源 computeRouter 缝、执行器
+ * 形态（md 管线侧为描述缝：DiagramRenderOptions.remoteCall 只给 {url, headers}，fetch
+ * 在管线内做；本缝是执行器——fetch 由装配点 viewer.ts 的 diagramFileRemoteCall 代做，
+ * 鉴权头/JSON body/非 2xx 抛错传输面在装配侧收口）。
+ */
 export interface DiagramFileRenderOpts {
   remoteCall?: (path: string, init?: { method?: string; body?: unknown }) => Promise<unknown>;
 }
@@ -240,6 +247,8 @@ async function renderDiagramFileBuffer(
   const doc = target.ownerDocument;
   const text = decodeText(buffer, det.encoding);
   const localCapable = diagram.local && !!diagram.engine;
+  /** 渲染时快照的 mermaid 主题（applyTheme 缺参回退值，markdown 实例同构） */
+  const currentTheme: MermaidTheme = dOpts?.mermaidTheme ?? 'default';
 
   let destroyed = false;
   let view: DiagramView = 'rendered';
@@ -403,17 +412,26 @@ async function renderDiagramFileBuffer(
     });
   }
 
-  // official img error → 降 kroki 链（md 管线 official 档同语义）；迟到落定不覆盖已切视图
+  // official img error → 降 kroki 链（md 管线 official 档同语义）。M4 同款代币守卫：
+  // official 挂载即已失败（img error），先清 renderedMount（失败 URL 不得再作缓存
+  // 复挂载——清空后用户再点「渲染」会起全新链、链代币自增）并快照当时链代币；降级链
+  // .then/.catch 迟到落定时若代币已被新链取代（守卫形态镜像 attemptRendered）即整体
+  // 作废：不覆盖新链 DOM、不复活失败卡、不把用户拽回源码视图。
   const officialImgError = (): void => {
+    const token = chainToken;
+    renderedMount = null;
     mountKroki()
       .then((mount) => {
-        if (destroyed || view !== 'rendered') return;
+        if (destroyed || token !== chainToken || view !== 'rendered') return;
         renderedMount = mount;
         failureNotice = null;
         target.classList.remove('vv-degraded');
         mount();
       })
-      .catch((e: unknown) => showSourceFallback(reasonText(e)));
+      .catch((e: unknown) => {
+        if (destroyed || token !== chainToken) return;
+        showSourceFallback(reasonText(e));
+      });
   };
 
   async function renderChain(): Promise<() => void> {
@@ -500,11 +518,13 @@ async function renderDiagramFileBuffer(
   }
 
   const toggleable = mode !== 'source';
-  // 实例面（html 渲染器同构）：RenderedInstance + toggleView/onViewChanged 扩展
-  // （core 类型不含，消费方鸭子探测；SearchPanel 经 onViewChanged 重扫，BUG-44 同款）
+  // 实例面（html 渲染器同构）：RenderedInstance + toggleView/onViewChanged/applyTheme
+  // 扩展（core 类型不含，消费方鸭子探测；SearchPanel 经 onViewChanged 重扫，BUG-44 同款；
+  // applyTheme 供 ViewerPane 外观/设置事件桥接，markdown 实例同款鸭子探测面）
   const instance: RenderedInstance & {
     toggleView(): void;
     onViewChanged(cb: () => void): () => void;
+    applyTheme(opts?: { mermaidTheme?: MermaidTheme }): void;
   } = {
     destroy() {
       destroyed = true;
@@ -523,6 +543,20 @@ async function renderDiagramFileBuffer(
     onViewChanged(cb: () => void): () => void {
       viewListeners.add(cb);
       return () => viewListeners.delete(cb);
+    },
+    // 图表主题即时生效（markdown 实例 applyTheme 同构，ViewerPane 桥接
+    // vv:appearance-applied / vv:diagram-settings-applied 两事件）：仅 mermaid 输出
+    // 主题相关（其余型引擎产物与主题无关；graphviz svg 样式内联自引擎；kroki img
+    // 不随主题变）。守卫面：非渲染视图 / kroki img 形态（无 svg 落地）/ 链在飞一律
+    // 静默 no-op（markdown 降级实例无 applyTheme 同款鸭子探测语义）。就地重画复用
+    // md 管线 rerenderMermaid 的 renderMermaidInto（mermaid 引擎第一方产物直写，
+    // 与 md 重渲路径同语义；失败保留旧图 false，warn 仅留诊断线索）。
+    applyTheme(opts?: { mermaidTheme?: MermaidTheme }): void {
+      if (destroyed || view !== 'rendered' || diagram.id !== 'mermaid') return;
+      if (!content.querySelector('svg')) return; // kroki img / 渲染链在飞：无可重画对象
+      void renderMermaidInto(content, text, opts?.mermaidTheme ?? currentTheme).then((ok) => {
+        if (!ok) console.warn('[diagram-file] mermaid 主题重渲失败，保留旧图');
+      });
     },
     // 文件内搜索（html 渲染器同款）：源码视图复用 code 实现；渲染视图返回空结果
     search(query: string, searchOpts?: { caseSensitive?: boolean }) {

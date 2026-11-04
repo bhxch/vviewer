@@ -56,11 +56,11 @@ vi.mock('artplayer', () => ({
 }));
 
 describe('playerKindOf：扩展名 → 播放器形态', () => {
-  it('视频类（含流媒体 m3u8/flv 与签名改派的 ts）→ video，音频类 → audio', () => {
-    for (const ext of ['mp4', 'm4v', 'mov', 'webm', 'ogg', 'm3u8', 'flv', 'ts']) {
+  it('视频类（含流媒体 m3u8/flv、签名改派的 ts 与 mpeg 视频容器）→ video，音频类（含 weba）→ audio', () => {
+    for (const ext of ['mp4', 'm4v', 'mov', 'webm', 'ogg', 'm3u8', 'flv', 'ts', 'mpeg']) {
       expect(playerKindOf(ext)).toBe('video');
     }
-    for (const ext of ['mp3', 'wav', 'flac', 'm4a', 'aac', 'oga', 'opus']) {
+    for (const ext of ['mp3', 'wav', 'flac', 'm4a', 'aac', 'oga', 'opus', 'weba']) {
       expect(playerKindOf(ext)).toBe('audio');
     }
   });
@@ -275,12 +275,14 @@ describe('avRenderer', () => {
     };
   }
 
-  it('extensions：新增 m3u8/flv 与 mov/aac，仍含既有音视频；不注册 ts（签名改派由 dispatcher 完成）', () => {
+  it('extensions：新增 m3u8/flv 与 mov/aac/mpeg/weba，仍含既有音视频；不注册 ts（签名改派由 dispatcher 完成）', () => {
     for (const ext of ['mp4', 'm4v', 'mov', 'webm', 'ogg', 'mp3', 'wav', 'flac', 'm4a', 'aac', 'oga', 'opus']) {
       expect(avRenderer.extensions).toContain(ext);
     }
     expect(avRenderer.extensions).toContain('m3u8');
     expect(avRenderer.extensions).toContain('flv');
+    expect(avRenderer.extensions).toContain('mpeg');
+    expect(avRenderer.extensions).toContain('weba');
     expect(avRenderer.extensions).not.toContain('ts');
   });
 
@@ -354,7 +356,7 @@ describe('avRenderer', () => {
     target.remove();
   });
 
-  it('blob MIME 按扩展名标注（视频/音频/流媒体清单）', () => {
+  it('blob MIME 按扩展名标注（视频/音频/流媒体清单；mpeg 视频容器与 mp3 的 audio/mpeg 区分）', () => {
     expect(mediaMimeOf('mp4')).toBe('video/mp4');
     expect(mediaMimeOf('mov')).toBe('video/quicktime');
     expect(mediaMimeOf('webm')).toBe('video/webm');
@@ -363,6 +365,9 @@ describe('avRenderer', () => {
     expect(mediaMimeOf('m3u8')).toBe('application/vnd.apple.mpegurl');
     expect(mediaMimeOf('flv')).toBe('video/x-flv');
     expect(mediaMimeOf('ts')).toBe('video/mp2t');
+    // 终审分派表同步：extensions 已认领的 mpeg/weba 必须有 MIME 标注（缺项 blob 无类型）
+    expect(mediaMimeOf('mpeg')).toBe('video/mpeg');
+    expect(mediaMimeOf('weba')).toBe('audio/webm');
     expect(mediaMimeOf('nope')).toBe('');
   });
 

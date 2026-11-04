@@ -16,7 +16,9 @@ import {
   renderDiagramEngine,
   createKrokiUrl,
   createPlantumlUrl,
-  type DiagramMode
+  renderMermaidInto,
+  type DiagramMode,
+  type MermaidTheme
 } from '@bhxch/vviewer-render-diagram';
 import { setDiagramOptions, type DiagramRenderOptions } from '@bhxch/vviewer-markdown';
 import { markdownRenderer } from '../src/markdown/markdownRenderer';
@@ -34,7 +36,8 @@ vi.mock('@bhxch/vviewer-render-diagram', async (importOriginal) => {
     ...real,
     renderDiagramEngine: vi.fn(),
     createKrokiUrl: vi.fn(),
-    createPlantumlUrl: vi.fn()
+    createPlantumlUrl: vi.fn(),
+    renderMermaidInto: vi.fn()
   };
 });
 
@@ -171,6 +174,7 @@ beforeEach(() => {
   vi.mocked(renderDiagramEngine).mockResolvedValue('<svg id="t"/>');
   vi.mocked(createKrokiUrl).mockResolvedValue('https://kroki.test/svg/DEFAULT');
   vi.mocked(createPlantumlUrl).mockResolvedValue('https://plantuml.test/plantuml/svg/DEFAULT');
+  vi.mocked(renderMermaidInto).mockResolvedValue(true);
 });
 
 /** jsdom 无 ResizeObserver，源码视图的 virtualScroller 需要（照 htmlRenderer.test.ts 的 stub） */
@@ -617,6 +621,79 @@ describe('diagramFile 渲染——在飞守卫（M4：连切后旧链迟到落�
   });
 });
 
+// ---------- 终审修正锚（official 降级链代币守卫：officialImgError 迟到落定作废） ----------
+
+describe('diagramFile 渲染——official 降 kroki 链代币守卫（终审：officialImgError 迟到落定作废）', () => {
+  afterEach(() => {
+    setDiagramOptions(null);
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  it('official img error → kroki 降级在飞时切源码再点渲染（清缓存起新链）：旧链 kroki 迟到成功落定不覆盖新链 DOM/缓存', async () => {
+    // 手控旧链 kroki 降级 promise：official img error 触发 mountKroki 挂起期间完成连切
+    let releaseKroki!: (url: string) => void;
+    const krokiGate = new Promise<string>((resolve) => {
+      releaseKroki = resolve;
+    });
+    vi.mocked(createPlantumlUrl)
+      .mockResolvedValueOnce('https://plantuml.test/plantuml/svg/OLD') // 链 1 official src
+      .mockResolvedValue('https://plantuml.test/plantuml/svg/NEW'); // 新链 official src
+    vi.mocked(createKrokiUrl).mockImplementationOnce(() => krokiGate); // 链 1 降级 kroki 挂起
+    setOpts({}, (lang) => (lang === 'plantuml' ? 'official' : 'source'));
+    const { target, instance } = await renderDiagramFile('plantuml', 'plantuml', '@startuml\nA->B\n@enduml');
+    const img = target.querySelector('img');
+    expect(img!.getAttribute('src')).toBe('https://plantuml.test/plantuml/svg/OLD');
+
+    img!.dispatchEvent(new Event('error')); // official 失败 → officialImgError：清 renderedMount + kroki 链挂起
+    target.querySelector<HTMLButtonElement>('.vv-html-btn-source')!.click(); // 切源码（降级链仍在飞）
+    target.querySelector<HTMLButtonElement>('.vv-html-btn-rendered')!.click(); // 新链启动（renderedMount 已清，链代币自增）
+    await vi.waitFor(() =>
+      expect(target.querySelector('img[src="https://plantuml.test/plantuml/svg/NEW"]')).not.toBeNull()
+    );
+
+    releaseKroki('https://kroki.io/plantuml/svg/LATE'); // 旧链 kroki 迟到成功落定
+    await new Promise((resolve) => setTimeout(resolve, 0)); // 放行旧链 .then 微任务（守卫应丢弃）
+    expect(target.querySelector('img[src="https://kroki.io/plantuml/svg/LATE"]'), '被取代链的 kroki 落定不得挂载').toBeNull();
+    expect(target.querySelector('img[src="https://plantuml.test/plantuml/svg/NEW"]')).not.toBeNull(); // 新链视图原样
+    expect(target.querySelector('.vv-error-card')).toBeNull();
+
+    // 行为面锚 renderedMount 未被 clobber：切源码再回渲染，缓存复挂载仍是新链 official img
+    target.querySelector<HTMLButtonElement>('.vv-html-btn-source')!.click();
+    target.querySelector<HTMLButtonElement>('.vv-html-btn-rendered')!.click();
+    expect(target.querySelector('img[src="https://plantuml.test/plantuml/svg/NEW"]')).not.toBeNull();
+    expect(target.querySelector('img[src^="https://kroki"]')).toBeNull();
+    instance.destroy();
+  });
+
+  it('旧链 kroki 降级失败迟到落定：不出失败卡、不拽切源码（新链视图原样）', async () => {
+    let rejectKroki!: (e: unknown) => void;
+    const krokiGate = new Promise<string>((_, reject) => {
+      rejectKroki = reject;
+    });
+    vi.mocked(createPlantumlUrl)
+      .mockResolvedValueOnce('https://plantuml.test/plantuml/svg/OLD')
+      .mockResolvedValue('https://plantuml.test/plantuml/svg/NEW');
+    vi.mocked(createKrokiUrl).mockImplementationOnce(() => krokiGate);
+    setOpts({}, (lang) => (lang === 'plantuml' ? 'official' : 'source'));
+    const { target, instance } = await renderDiagramFile('plantuml', 'plantuml', '@startuml\nA->B\n@enduml');
+    target.querySelector('img')!.dispatchEvent(new Event('error'));
+    target.querySelector<HTMLButtonElement>('.vv-html-btn-source')!.click();
+    target.querySelector<HTMLButtonElement>('.vv-html-btn-rendered')!.click();
+    await vi.waitFor(() =>
+      expect(target.querySelector('img[src="https://plantuml.test/plantuml/svg/NEW"]')).not.toBeNull()
+    );
+
+    rejectKroki(new Error('kroki 不可达')); // 旧链降级失败迟到落定（未守卫会切源码 + 出提示卡）
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(target.querySelector('.vv-error-card'), '被取代链的失败不得复活提示卡').toBeNull();
+    expect(target.querySelector('.vv-code-body')).toBeNull(); // 不得把用户拽回源码视图
+    expect(target.querySelector('img[src="https://plantuml.test/plantuml/svg/NEW"]')).not.toBeNull();
+    instance.destroy();
+  });
+});
+
 // ---------- Task 4 评审修正锚（M1：kroki→official 重试一跳，md 管线同款） ----------
 
 describe('diagramFile 回退面——kroki img error 官方重试一跳（评审 M1）', () => {
@@ -669,6 +746,72 @@ describe('diagramFile 回退面——kroki img error 官方重试一跳（评审
     target.querySelector('img')!.dispatchEvent(new Event('error'));
     await vi.waitFor(() => expect(target.querySelector('.vv-code-body')).not.toBeNull());
     expect(vi.mocked(createPlantumlUrl)).not.toHaveBeenCalled();
+  });
+});
+
+// ---------- 终审修正锚（applyTheme：mermaid 文件主题联动，markdown 实例同构桥接面） ----------
+
+/** applyTheme 鸭子探测形态（ViewerPane 桥接处同款：typeof applyTheme === 'function' 即挂监听） */
+type ThemeBridgeInstance = RenderedInstance & { applyTheme(opts?: { mermaidTheme?: MermaidTheme }): void };
+
+describe('diagramFile 渲染——applyTheme mermaid 主题联动（终审）', () => {
+  afterEach(() => {
+    setDiagramOptions(null);
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  it('.mermaid 渲染视图：applyTheme 就地重画（renderMermaidInto 以新主题作用于 content 容器），DOM 换新 svg；destroy 后 no-op', async () => {
+    vi.mocked(renderDiagramEngine).mockResolvedValue('<svg id="t"/>');
+    vi.mocked(renderMermaidInto).mockImplementation(async (container, _source, theme) => {
+      container.innerHTML = `<svg data-theme="${theme}"/>`; // 模拟重画落 DOM（真身由 renderMermaid 承担）
+      return true;
+    });
+    const { target, instance } = await renderDiagramFile('mermaid', 'mermaid', 'flowchart A-->B');
+    expect(target.querySelector('svg#t')).not.toBeNull(); // 初始本地渲染（mermaid defaultMode=local）
+
+    const themed = instance as ThemeBridgeInstance;
+    expect(typeof themed.applyTheme, 'ViewerPane 鸭子探测面：applyTheme 为函数').toBe('function');
+    themed.applyTheme({ mermaidTheme: 'dark' });
+    expect(vi.mocked(renderMermaidInto)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(renderMermaidInto)).toHaveBeenCalledWith(
+      target.querySelector('.vv-html-content'),
+      'flowchart A-->B',
+      'dark'
+    );
+    expect(target.querySelector('svg[data-theme="dark"]')).not.toBeNull(); // 就地换新
+    expect(target.querySelector('svg#t')).toBeNull();
+
+    instance.destroy();
+    themed.applyTheme({ mermaidTheme: 'dark' }); // destroyed 守卫：不再重画
+    expect(vi.mocked(renderMermaidInto)).toHaveBeenCalledTimes(1);
+  });
+
+  it('非 mermaid 型（graphviz 输出主题无关）：applyTheme 静默 no-op，原图原样', async () => {
+    vi.mocked(renderDiagramEngine).mockResolvedValue('<svg id="t"/>');
+    const { target, instance } = await renderDiagramFile('graphviz', 'dot', 'digraph{a->b}');
+    (instance as ThemeBridgeInstance).applyTheme({ mermaidTheme: 'dark' });
+    expect(vi.mocked(renderMermaidInto)).not.toHaveBeenCalled();
+    expect(target.querySelector('svg#t')).not.toBeNull();
+    instance.destroy();
+  });
+
+  it('源码视图与 kroki img 形态：applyTheme 静默 no-op（无可重画的 mermaid svg）', async () => {
+    vi.mocked(renderDiagramEngine).mockResolvedValue('<svg id="t"/>');
+    const { instance } = await renderDiagramFile('mermaid', 'mermaid', 'flowchart A-->B');
+    instance.toggleView(); // → 源码视图
+    (instance as ThemeBridgeInstance).applyTheme({ mermaidTheme: 'dark' });
+    expect(vi.mocked(renderMermaidInto)).not.toHaveBeenCalled(); // 源码视图 no-op
+
+    // kroki img 形态：mounted 输出非 mermaid svg，重画无对象（缺省 krokiHost 桩出 img）
+    setOpts({ krokiHost: 'https://kroki.test' }, (lang) => (lang === 'mermaid' ? 'kroki' : 'source'));
+    const kroki = await renderDiagramFile('mermaid', 'mmd', 'flowchart C-->D');
+    expect(kroki.target.querySelector('img')).not.toBeNull();
+    (kroki.instance as ThemeBridgeInstance).applyTheme({ mermaidTheme: 'dark' });
+    expect(vi.mocked(renderMermaidInto)).not.toHaveBeenCalled(); // kroki img 形态 no-op
+    kroki.instance.destroy();
+    instance.destroy();
   });
 });
 
