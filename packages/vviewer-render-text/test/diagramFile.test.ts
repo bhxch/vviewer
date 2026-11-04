@@ -518,13 +518,15 @@ describe('diagramFile 回退面——重挂源码前卸旧实例（评审 M3）'
     document.body.innerHTML = '';
   });
 
-  /** RenderCodeHandle 生命周期桩（不产真实 DOM——本组只看实例流转） */
+  /** RenderCodeHandle 生命周期桩（不产真实 DOM——本组只看实例流转）：仅实现本组
+   * 消费的生命周期面（destroy），滚动/引擎/元数据等方法面与本组无关，经 unknown
+   * 中转窄化（TS2352 直接转型缺面报错——根 typecheck 0E 修复，行为零改动） */
   function stubHandle(destroy: () => void): RenderCodeHandle {
     return {
       destroy,
       search: async () => [],
       gotoMatch: () => {}
-    } as RenderCodeHandle;
+    } as unknown as RenderCodeHandle;
   }
 
   it('源码视图已挂载时迟到的 kroki img error 再走 showSourceFallback：重挂前 destroy 旧 code 实例（不叠加高亮）', async () => {
@@ -800,7 +802,10 @@ describe('diagramFile 渲染——applyTheme mermaid 主题联动（终审）', 
   it('源码视图与 kroki img 形态：applyTheme 静默 no-op（无可重画的 mermaid svg）', async () => {
     vi.mocked(renderDiagramEngine).mockResolvedValue('<svg id="t"/>');
     const { instance } = await renderDiagramFile('mermaid', 'mermaid', 'flowchart A-->B');
-    instance.toggleView(); // → 源码视图
+    // diagramFile 实例面 = RenderedInstance + toggleView/onViewChanged/applyTheme 扩展
+    // （diagramFile.ts「实例面」注）：core 返回类型不含扩展，按既有先例（本文件 :500
+    // 交叉断言同型）就地窄化——根 typecheck 0E 修复，行为零改动
+    (instance as RenderedInstance & { toggleView(): void }).toggleView(); // → 源码视图
     (instance as ThemeBridgeInstance).applyTheme({ mermaidTheme: 'dark' });
     expect(vi.mocked(renderMermaidInto)).not.toHaveBeenCalled(); // 源码视图 no-op
 
