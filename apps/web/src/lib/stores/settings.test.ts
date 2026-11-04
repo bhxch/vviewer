@@ -14,7 +14,8 @@ const BASE: Settings = {
   diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} },
   fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
   iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } },
-  layout: { ...DEFAULT_LAYOUT }
+  layout: { ...DEFAULT_LAYOUT },
+  storage: { remoteDownloadConfirmMb: 512 }
 };
 
 function aSettings(overrides: Partial<Settings>): Settings {
@@ -344,5 +345,49 @@ describe('layout 设置节白名单/clamp（spec 2026-10-19 布局自由化 §2�
     saveSettings(aSettings({ layout: { ...DEFAULT_LAYOUT } }));
     off();
     expect(loadSettings().layout.leftWidth).toBe(DEFAULT_LAYOUT.leftWidth);
+  });
+});
+
+describe('storage 设置节白名单/clamp（远端下载确认门 spec §6.4，计划 2 Task 5）', () => {
+  it('默认：remoteDownloadConfirmMb 512', () => {
+    localStorage.removeItem('vviewer:settings');
+    expect(loadSettings().storage).toEqual({ remoteDownloadConfirmMb: 512 });
+  });
+
+  it('clamp 双界：0→1 / 4097→4096 / 13.7→14（取整，字号同口径）；脏值（字符串）归默认', () => {
+    localStorage.setItem('vviewer:settings', JSON.stringify({ storage: { remoteDownloadConfirmMb: 0 } }));
+    expect(loadSettings().storage.remoteDownloadConfirmMb).toBe(1);
+    localStorage.setItem('vviewer:settings', JSON.stringify({ storage: { remoteDownloadConfirmMb: 4097 } }));
+    expect(loadSettings().storage.remoteDownloadConfirmMb).toBe(4096);
+    localStorage.setItem('vviewer:settings', JSON.stringify({ storage: { remoteDownloadConfirmMb: 13.7 } }));
+    expect(loadSettings().storage.remoteDownloadConfirmMb).toBe(14);
+    localStorage.setItem('vviewer:settings', JSON.stringify({ storage: { remoteDownloadConfirmMb: 'x' } }));
+    expect(loadSettings().storage.remoteDownloadConfirmMb).toBe(512);
+  });
+
+  it('持久化往返：saveSettings 写入阈值后 loadSettings 读回一致', () => {
+    saveSettings(aSettings({ storage: { remoteDownloadConfirmMb: 64 } }));
+    expect(loadSettings().storage).toEqual({ remoteDownloadConfirmMb: 64 });
+  });
+
+  it('storage 节整体缺失/脏值回落默认，不影响其余字段', () => {
+    // excludedPatterns/autoRefresh 刻意非默认：若整体回落 defaults() 则断言必炸
+    localStorage.setItem(
+      'vviewer:settings',
+      JSON.stringify({ storage: 42, excludedPatterns: ['.git'], autoRefresh: false })
+    );
+    const s = loadSettings();
+    expect(s.storage).toEqual({ remoteDownloadConfirmMb: 512 });
+    expect(s.excludedPatterns).toEqual(['.git']);
+    expect(s.autoRefresh).toBe(false);
+  });
+
+  it('订阅回调收到 storage 副本：误改不回灌', () => {
+    const off = onSettingsChanged((s) => {
+      s.storage.remoteDownloadConfirmMb = 4096; // 订阅方误改引用
+    });
+    saveSettings(aSettings({ storage: { remoteDownloadConfirmMb: 512 } }));
+    off();
+    expect(loadSettings().storage.remoteDownloadConfirmMb).toBe(512);
   });
 });

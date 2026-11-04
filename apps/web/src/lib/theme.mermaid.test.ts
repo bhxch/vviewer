@@ -27,6 +27,7 @@ function settings(over: Partial<Settings> = {}): Settings {
     fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
     iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } },
     layout: { ...DEFAULT_LAYOUT },
+    storage: { remoteDownloadConfirmMb: 512 },
     ...over
   };
 }

@@ -62,9 +62,10 @@ describe('session store', () => {
       diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} },
       fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
       iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } },
-      layout: DEFAULT_LAYOUT
+      layout: DEFAULT_LAYOUT,
+      storage: { remoteDownloadConfirmMb: 512 }
     });
-    saveSettings({ themeMode: 'dark', appearanceLight: 'default', appearanceDark: 'default', codeThemeLight: 'onelight', codeThemeDark: 'serika-dark', excludedPatterns: ['node_modules'], autoRefresh: false, computePolicy: 'remote', diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} }, fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 }, iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } }, layout: DEFAULT_LAYOUT });
+    saveSettings({ themeMode: 'dark', appearanceLight: 'default', appearanceDark: 'default', codeThemeLight: 'onelight', codeThemeDark: 'serika-dark', excludedPatterns: ['node_modules'], autoRefresh: false, computePolicy: 'remote', diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} }, fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 }, iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } }, layout: DEFAULT_LAYOUT, storage: { remoteDownloadConfirmMb: 512 } });
     expect(loadSettings().themeMode).toBe('dark');
     expect(loadSettings().computePolicy).toBe('remote');
   });

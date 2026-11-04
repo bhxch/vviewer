@@ -37,7 +37,8 @@ function baseSettings(iconThemes?: Partial<Settings['iconThemes']>): Settings {
     diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} },
     fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
     iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false }, ...iconThemes },
-    layout: { ...DEFAULT_LAYOUT }
+    layout: { ...DEFAULT_LAYOUT },
+    storage: { remoteDownloadConfirmMb: 512 }
   };
 }
 

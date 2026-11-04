@@ -9,7 +9,7 @@
 // （同一白名单单源），此处只负责「报告」；三类问题同为阻断错误（校验失败不部分
 // 应用，spec §4 导入同纪律），修复后应用时经 normalizeSettings 规范化落值。
 import { resolveDiagramType } from '@bhxch/vviewer-render-diagram';
-import { clampSize, CODE_SIZE_RANGE, DEFAULTS, ICON_THEME_SCOPE_KEYS, MERMAID_THEME_VALUES, normalizeSettings, saveSettings, UI_SIZE_RANGE, type Settings } from './stores/settings';
+import { clampSize, CODE_SIZE_RANGE, DEFAULTS, ICON_THEME_SCOPE_KEYS, MERMAID_THEME_VALUES, normalizeSettings, saveSettings, STORAGE_MB_RANGE, UI_SIZE_RANGE, type Settings } from './stores/settings';
 import type { MermaidTheme } from '@bhxch/vviewer-render-diagram';
 import { sanitizeLayout } from './layout';
 
@@ -249,6 +249,21 @@ export function validateSettings(raw: unknown): SettingsIssue[] {
       }
     }
   }
+  // storage 白名单镜像（远端下载确认门 spec §6.4，计划 2 Task 5）：单字段节，
+  // 阈值 clamp 1–4096 与 normalizeSettings 的 clampSize 归位闸同口径
+  if (raw.storage !== undefined) {
+    if (!isObj(raw.storage)) {
+      issues.push({ field: 'storage', message: '应为对象' });
+    } else {
+      const st = raw.storage;
+      for (const k of Object.keys(st)) {
+        if (k !== 'remoteDownloadConfirmMb') {
+          issues.push({ field: `storage.${k}`, message: '未知字段（白名单外，不落盘）' });
+        }
+      }
+      checkClampedNumber(issues, 'storage.remoteDownloadConfirmMb', st.remoteDownloadConfirmMb, STORAGE_MB_RANGE);
+    }
+  }
   return issues;
 }
 
@@ -469,7 +484,8 @@ function collectUnknownPaths(raw: Record<string, unknown>): string[] {
     diagrams: ['krokiHost', 'krokiVia', 'mermaidTheme', 'modes', 'renderers'],
     fonts: ['uiFamily', 'uiSize', 'codeFamily', 'codeSize'],
     iconThemes: ['theme', 'scopes'],
-    layout: Object.keys(sanitizeLayout({}))
+    layout: Object.keys(sanitizeLayout({})),
+    storage: ['remoteDownloadConfirmMb']
   };
   for (const [sec, keys] of Object.entries(allowed)) {
     const v = raw[sec];

@@ -17,12 +17,27 @@
     type StorageInfo
   } from '../storageHealth';
   import { useSettingsNav } from './nav';
-  import type { Settings } from '../stores/settings';
+  import { clampSize, STORAGE_MB_RANGE, type Settings } from '../stores/settings';
 
-  // 契约占位（注册表统一 { draft, touch } 形态；本节为操作面，不编辑草稿）
+  // 契约（注册表统一 { draft, touch } 形态）：阈值行编辑草稿（计划 2 Task 5），
+  // 其余仍为操作面不写 draft
   let { draft, touch }: { draft: Settings; touch(): void } = $props();
 
   const navTo = useSettingsNav();
+
+  /** 远端下载确认阈值提交（onchange，blur/回车触发）：输入框与 draft 同步为规范化
+   * 值（字号渐进输入先例终审 I-1 承续：无 oninput 通道，输入途中不写 draft/DOM
+   * ——渐进键入不被回写打断），非法/空输入回落当前 draft 值。 */
+  function onConfirmMbChange(e: Event): void {
+    const inp = e.currentTarget as HTMLInputElement;
+    const clamped =
+      inp.value.trim() === ''
+        ? draft.storage.remoteDownloadConfirmMb
+        : clampSize(Number(inp.value), STORAGE_MB_RANGE, draft.storage.remoteDownloadConfirmMb);
+    inp.value = String(clamped);
+    draft.storage.remoteDownloadConfirmMb = clamped;
+    touch();
+  }
 
   let info = $state<StorageInfo | null>(null);
   let loading = $state(true);
@@ -141,6 +156,25 @@
   <div class="vv-settings-hint">
     浏览器「清除站点数据」是整站一刀切；此处按分类精细删除，配合「关于」节的用量显示定位占用。
     <button type="button" class="vv-sc-linklike" onclick={() => navTo('about')}>查看存储用量 →</button>
+  </div>
+
+  <!-- 远端下载确认阈值（spec §6.4，计划 2 Task 5）：MB 计 clamp 1–4096，确认门
+       在泵启动前拦截（ViewerPane 消费，读现值即时生效）；size 未知的不定态下载
+       不适用（无前置数字，直接不定态进度卡）。 -->
+  <label class="vv-settings-theme-row">
+    <span>远端下载确认阈值</span>
+    <input
+      type="number"
+      min={STORAGE_MB_RANGE[0]}
+      max={STORAGE_MB_RANGE[1]}
+      step="1"
+      value={draft.storage.remoteDownloadConfirmMb}
+      onchange={(e) => onConfirmMbChange(e)}
+      aria-label="远端下载确认阈值（MB）"
+    />
+  </label>
+  <div class="vv-settings-hint">
+    远端来源下载超过此阈值（MB，1–4096）时先确认再下载：确认卡明示文件名/大小/目标渲染器与内存影响，确认后泵才启动（知情自担，无独立硬上限）；文件大小未知的不定态下载不适用。改动「应用」后对下一次下载即时生效。
   </div>
 
   <ul class="vv-storage-cats">

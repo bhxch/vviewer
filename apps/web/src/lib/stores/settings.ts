@@ -45,6 +45,13 @@ export interface IconThemesSettings {
   scopes: Record<(typeof ICON_THEME_SCOPE_KEYS)[number], boolean>;
 }
 
+/** 存储与数据节（远端下载确认门 spec §6.4，计划 2 Task 5）：remoteDownloadConfirmMb
+ * 为远端全量物化（R1/R2）下载前的确认阈值，MB 计，clamp 范围见 STORAGE_MB_RANGE；
+ * size 未知的不定态下载不适用确认门（无前置数字）。 */
+export interface StorageSettings {
+  remoteDownloadConfirmMb: number;
+}
+
 export interface Settings {
   themeMode: 'light' | 'dark' | 'system';
   /** 亮/暗模式下各自记忆的外观主题（'default' | 'vscode:…' 内置名 | 'imported:<id>'）；
@@ -66,6 +73,9 @@ export interface Settings {
   /** 布局节（spec 2026-10-19 布局自由化 §2）：折叠/宽度/chrome 可见性/zen。
    * 类型与白名单在 lib/layout.ts（纯函数可单测）；AppShell 消费。 */
   layout: LayoutSettings;
+  /** 存储与数据节（远端下载确认门 spec §6.4，计划 2 Task 5）：远端下载确认阈值。
+   * UI 在 SettingsCenter「存储与数据」节；ViewerPane 泵启动前消费。 */
+  storage: StorageSettings;
 }
 
 const KEY = 'vviewer:settings';
@@ -87,13 +97,16 @@ export const DEFAULTS: Settings = {
   diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} },
   fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
   iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } },
-  layout: DEFAULT_LAYOUT
+  layout: DEFAULT_LAYOUT,
+  storage: { remoteDownloadConfirmMb: 512 }
 };
 
 const POLICIES: readonly ComputePolicy[] = ['auto', 'local', 'remote'];
 /** 字号 clamp 范围（spec §2.1：uiSize 10–28 / codeSize 9–28） */
 export const UI_SIZE_RANGE = [10, 28] as const;
 export const CODE_SIZE_RANGE = [9, 28] as const;
+/** 远端下载确认阈值 clamp 范围（spec §6.4：MB 计，1–4096；默认 512） */
+export const STORAGE_MB_RANGE = [1, 4096] as const;
 
 function defaults(): Settings {
   return {
@@ -108,7 +121,8 @@ function defaults(): Settings {
     },
     fonts: { ...DEFAULTS.fonts },
     iconThemes: { theme: DEFAULTS.iconThemes.theme, scopes: { ...DEFAULTS.iconThemes.scopes } },
-    layout: { ...DEFAULTS.layout }
+    layout: { ...DEFAULTS.layout },
+    storage: { ...DEFAULTS.storage }
   };
 }
 
@@ -198,6 +212,13 @@ export function normalizeSettings(partial: Record<string, unknown>): Settings {
   // layout 节白名单（布局自由化 spec §2）：字段级归位 + 宽度 clamp，
   // 校验数学在 lib/layout.ts sanitizeLayout（可单测），此处只接线
   s.layout = sanitizeLayout(s.layout);
+  // storage 节白名单（远端下载确认门 spec §6.4，计划 2 Task 5）：阈值 MB 计
+  // clamp 1–4096（脏 JSON 字段级归位默认 512，同 fonts 字号口径）；节脏值回落
+  // 默认形态，不拖垮其余字段
+  const st = typeof s.storage === 'object' && s.storage !== null ? s.storage : DEFAULTS.storage;
+  s.storage = {
+    remoteDownloadConfirmMb: clampSize(st.remoteDownloadConfirmMb, STORAGE_MB_RANGE, DEFAULTS.storage.remoteDownloadConfirmMb)
+  };
   return s;
 }
 
@@ -242,7 +263,8 @@ function notify(s: Settings): void {
       diagrams: { ...s.diagrams, modes: { ...s.diagrams.modes }, renderers: { ...s.diagrams.renderers } },
       fonts: { ...s.fonts },
       iconThemes: { theme: s.iconThemes.theme, scopes: { ...s.iconThemes.scopes } },
-      layout: { ...s.layout }
+      layout: { ...s.layout },
+      storage: { ...s.storage }
     });
   }
 }

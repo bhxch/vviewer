@@ -548,6 +548,76 @@ describe('iconThemes 设置节（图标主题 spec §3.1，Task 3）', () => {
   });
 });
 
+describe('storage 设置节（远端下载确认阈值，spec §6.4，计划 2 Task 5）', () => {
+  it('默认 512：DEFAULTS 与 normalizeSettings({}) 均 512（BASE 含 storage 节）', () => {
+    expect(DEFAULTS.storage).toEqual({ remoteDownloadConfirmMb: 512 });
+    expect(normalizeSettings({}).storage).toEqual({ remoteDownloadConfirmMb: 512 });
+    expect(BASE.storage).toEqual({ remoteDownloadConfirmMb: 512 });
+  });
+
+  it('clamp 双界（1–4096）：0→1 / 4097→4096 / 合法值原样 / 小数取整；脏值（字符串）归默认', () => {
+    expect(normalizeSettings({ storage: { remoteDownloadConfirmMb: 0 } }).storage.remoteDownloadConfirmMb).toBe(1);
+    expect(normalizeSettings({ storage: { remoteDownloadConfirmMb: 4097 } }).storage.remoteDownloadConfirmMb).toBe(4096);
+    expect(normalizeSettings({ storage: { remoteDownloadConfirmMb: 2048 } }).storage.remoteDownloadConfirmMb).toBe(2048);
+    expect(normalizeSettings({ storage: { remoteDownloadConfirmMb: 512.7 } }).storage.remoteDownloadConfirmMb).toBe(513);
+    expect(normalizeSettings({ storage: { remoteDownloadConfirmMb: 'x' } }).storage.remoteDownloadConfirmMb).toBe(512);
+  });
+
+  it('白名单三类问题收集（spec §3 同口径）：节内未知字段/类型不符（节整体+字段）/clamp 越界全阻断', () => {
+    const draft = openDraft(aSettings({}));
+    const r = applyJson(draft, JSON.stringify({ storage: { typo: 1, remoteDownloadConfirmMb: 99999 } }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      const fields = r.errors.map((e) => e.field);
+      expect(fields).toContain('storage.typo');
+      expect(fields).toContain('storage.remoteDownloadConfirmMb');
+      expect(r.errors.find((e) => e.field === 'storage.typo')!.message).toContain('未知');
+      expect(r.errors.find((e) => e.field === 'storage.remoteDownloadConfirmMb')!.message).toContain('4096');
+    }
+    expect(draft.storage.remoteDownloadConfirmMb).toBe(512); // 阻断：draft 未被部分应用
+    const typeErr = applyJson(openDraft(aSettings({})), JSON.stringify({ storage: { remoteDownloadConfirmMb: '大' } }));
+    expect(typeErr.ok).toBe(false);
+    if (!typeErr.ok) expect(typeErr.errors.map((e) => e.field)).toContain('storage.remoteDownloadConfirmMb');
+    const wholeErr = applyJson(openDraft(aSettings({})), JSON.stringify({ storage: 42 }));
+    expect(wholeErr.ok).toBe(false);
+    if (!wholeErr.ok) expect(wholeErr.errors.map((e) => e.field)).toContain('storage');
+  });
+
+  it('合法值应用落位；normalizeSettings 静默归位口径一致（校验报告 vs 归一化互补）', () => {
+    const draft = openDraft(aSettings({}));
+    expect(applyJson(draft, JSON.stringify({ storage: { remoteDownloadConfirmMb: 64 } }))).toEqual({ ok: true });
+    expect(draft.storage.remoteDownloadConfirmMb).toBe(64);
+    expect(normalizeSettings({ storage: { remoteDownloadConfirmMb: 0 } }).storage).toEqual({ remoteDownloadConfirmMb: 1 });
+    expect(normalizeSettings({ storage: 42 }).storage).toEqual({ remoteDownloadConfirmMb: 512 }); // 节脏值回落默认，不抛
+  });
+
+  it('导出导入 round-trip：storage 节深度保形（buildExportFile → parseImportFile → replaceImported）', () => {
+    const src = aSettings({ storage: { remoteDownloadConfirmMb: 64 } });
+    const file = buildExportFile(src, '2026-11-05T00:00:00.000Z');
+    expect(file.settings.storage).toEqual({ remoteDownloadConfirmMb: 64 }); // 导出携带新字段
+    const parsed = parseImportFile(JSON.stringify(file));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(replaceImported(parsed.settings).storage).toEqual({ remoteDownloadConfirmMb: 64 });
+    // 导入文件侧：storage 节内未知键降级警告（白名单外不落盘），clamp 越界仍阻断
+    const warnFile = JSON.stringify({
+      schemaVersion: 1,
+      exportedAt: '2026-11-05T00:00:00.000Z',
+      settings: { storage: { remoteDownloadConfirmMb: 64, bogus: 1 } }
+    });
+    const warned = parseImportFile(warnFile);
+    expect(warned.ok).toBe(true);
+    if (warned.ok) expect(warned.warnings.some((w) => w.includes('storage.bogus'))).toBe(true);
+    const clampFile = JSON.stringify({
+      schemaVersion: 1,
+      exportedAt: '2026-11-05T00:00:00.000Z',
+      settings: { storage: { remoteDownloadConfirmMb: 99999 } }
+    });
+    const clamped = parseImportFile(clampFile);
+    expect(clamped.ok).toBe(false);
+    if (!clamped.ok) expect(clamped.errors.map((e) => e.field)).toContain('storage.remoteDownloadConfirmMb');
+  });
+});
+
 describe('SETTINGS_KEYS DEFAULTS 派生（FE-3：白名单对账机械化）', () => {
   it('DEFAULTS 全键经派生白名单：openDraft(DEFAULTS) 全量序列化-校验零 unknown 报告（退回手工清单/漏登记即红）；对照探针仍报告（非恒真）', () => {
     // DEFAULTS 键集 = Object.keys(DEFAULTS) 派生的白名单：全量序列化产物经
