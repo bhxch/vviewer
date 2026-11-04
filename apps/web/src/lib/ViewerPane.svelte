@@ -680,7 +680,11 @@ import DownloadProgressCard from './DownloadProgressCard.svelte';
         // .aborted（进度卡「取消」钮先于 resolve——dispatch 对 abort 分类 resolve
         // no-op 实例，不得当作正常渲染接管）双路一致丢弃实例静默收场
         if (cancelled || effectAbort.signal.aborted) {
+          // 残卡防御（评审 M-3）：abort 收场与完成态同生命周期——卸卡 + 清地址行，
+          // 取消/重渲染竞态后加载态区不留最后一次快照的孤儿卡（dlAbort 引用交 cleanup 清偿）
           res.instance.destroy();
+          dlProgress = null;
+          dlAddress = '';
           return;
         }
         // 进度卡卸载（spec §6.4 完成态自动让位渲染）：渲染实例接管 host 前清快照

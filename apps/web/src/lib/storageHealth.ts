@@ -254,7 +254,8 @@ export async function collectStorageInfo(): Promise<StorageInfo> {
   };
 }
 
-/** 用量显示格式化（B/KB/MB/GB；KB 起一位小数） */
+/** 用量显示格式化（B/KB/MB/GB/TB；KB 起一位小数）——存储健康区与下载进度卡
+ * （downloadProgress，评审 I-1 单源化）共用的字节文案事实源。 */
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   const units = ['KB', 'MB', 'GB', 'TB'] as const;

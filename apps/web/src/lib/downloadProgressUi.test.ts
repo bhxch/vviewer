@@ -146,6 +146,18 @@ describe('DownloadProgressCard 骨架（spec §6.4 字段全锚）', () => {
   it('status 语义（读屏可达）：容器 role="status"', () => {
     expect(src).toMatch(/role="status"/);
   });
+
+  it('ETA 文案形态（评审 M-4）：未稳「计算中」不带「剩余」前缀，真实 ETA 保持「剩余 X」', () => {
+    expect(src).toMatch(/ETA_PENDING_TEXT/);
+    expect(src).toMatch(/`剩余 \$\{snapshot\.etaText\}`/);
+  });
+
+  it('进度条读屏可达（评审 M-5）：role=progressbar + valuemin/max 恒挂，valuenow 仅定态（不定态省略）', () => {
+    expect(src).toMatch(/role="progressbar"/);
+    expect(src).toMatch(/aria-valuemin="0"/);
+    expect(src).toMatch(/aria-valuemax="100"/);
+    expect(src).toMatch(/aria-valuenow=\{snapshot\.ratio === null \? undefined :/);
+  });
 });
 
 // ---------- 接线契约：ViewerPane（装配门/取消链路/生命周期锚） ----------
@@ -178,6 +190,12 @@ describe('ViewerPane 进度卡接线（计划 2 Task 4）', () => {
   it('abort 静默面：resolve 守卫扩 effectAbort.signal.aborted（取消钮路径的 no-op 实例丢弃）；catch 先卸卡再分流', () => {
     expect(src).toMatch(/if \(cancelled \|\| effectAbort\.signal\.aborted\) \{/);
     expect(src).toMatch(/catch \(err\) \{[\s\S]{0,200}dlProgress = null;[\s\S]{0,400}isAbortError\(err\)/);
+  });
+
+  it('abort 残卡防御（评审 M-3）：abort 收场分支与完成态同生命周期——卸卡 + 清地址行', () => {
+    expect(src).toMatch(
+      /if \(cancelled \|\| effectAbort\.signal\.aborted\) \{[\s\S]{0,240}dlProgress = null;[\s\S]{0,80}dlAddress = '';/
+    );
   });
 
   it('生命周期清偿：cleanup 卸卡 + 清取消柄（abort 竞态锚——tab 切换/重渲染不留孤儿卡）', () => {

@@ -4,10 +4,10 @@
 // ProgressSnapshot 与卡片行级文案；UI 接线（ViewerPane loading-progress 形态）在 Task 4。
 // 纯 .ts 模块，无 runes/无 DOM，vitest 直测。
 //
-// 字节格式化：仓库无通用字节 helper（rg formatBytes/humanBytes 零命中），本地实现
-// formatBytes——二进制进位（1024），文案镜像 fonts.ts formatFontSize 的「数值+空格+单位」
-// 风格（'512 B' / '2.0 MB'），按进度卡需要扩 GB 档、KB 起一位小数；fonts.ts 的 MB 级
-// 字体场景继续用 formatFontSize，不回改。
+// 字节格式化：复用 storageHealth.formatBytes 单源（评审 I-1：删除本地双实现）——
+// 二进制进位（1024）B/KB/MB/GB/TB，KB 起一位小数，「数值+空格+单位」文案风格同
+// fonts.ts formatFontSize（'512 B' / '2.0 MB'）；fonts.ts 的 MB 级字体场景继续用
+// formatFontSize，不回改。
 //
 // 语义约定（spec §6.4）：
 // - 速度：~5s 滑动窗口均值；窗口 <2 样本或首末跨度 <1s 视为未稳 → speedText null（进度卡
@@ -19,7 +19,12 @@
 //   done() 终态不受节流、必发且幂等（重复 done/done 后 update 均忽略）。
 
 import { displayEndpoint } from './mountsSync';
+import { formatBytes } from './storageHealth';
 import { sourceKindOf } from './workspaceStore';
+
+// 字节格式化单源转发（评审 I-1）：实现只在 storageHealth（B/KB/MB/GB/TB），本模块
+// 保留 formatBytes 既有导出面供测试/消费方直引——不再持有第二实现。
+export { formatBytes };
 
 /** 进度卡纯展示快照（Task 4 进度卡逐字段消费；null=该行隐藏/不定态） */
 export interface ProgressSnapshot {
@@ -78,12 +83,8 @@ export function isRemoteDownload(storeId: string): boolean {
   return kind === 'remote' || kind === 'direct';
 }
 
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
+/** ETA 未稳/停滞的占位文案（下载进度卡以此区分无前缀占位与「剩余 X」真实 ETA，M-4） */
+export const ETA_PENDING_TEXT = '计算中';
 
 /** ETA 文案：整秒进位；<60s 秒、<1h 分秒、其余时分（余数四舍五入，60 进位收敛） */
 function formatEta(seconds: number): string {
@@ -140,7 +141,7 @@ export function createProgressTracker(
       const remaining = total! - loaded;
       if (remaining <= 0) etaText = formatEta(0);
       else if (speed !== null && speed > 0) etaText = formatEta(remaining / speed);
-      else etaText = '计算中';
+      else etaText = ETA_PENDING_TEXT;
     }
     return {
       loadedText: formatBytes(loaded),

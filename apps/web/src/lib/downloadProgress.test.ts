@@ -1,7 +1,7 @@
 // downloadProgress.test.ts — 下载进度纯函数层（spec §6.4 远端全量物化进度卡，计划 2 Task 3）。
-// downloadProgress.ts 为纯 .ts 模块（无 runes/无 DOM），vitest 直测：字节格式化（仓库无通用
-// 字节 helper，本地实现——镜像 fonts.ts formatFontSize 的「数值+空格+单位」风格，扩 GB、
-// KB 一位小数）、滑窗速度（注入假时钟 now）、ETA 稳定前「计算中」、不定态（total=null）
+// downloadProgress.ts 为纯 .ts 模块（无 runes/无 DOM），vitest 直测：字节格式化（复用
+// storageHealth.formatBytes 单源——B/KB/MB/GB/TB 二进制进位，KB 一位小数，评审 I-1
+// 去本地双实现）、滑窗速度（注入假时钟 now）、ETA 稳定前「计算中」、不定态（total=null）
 // totalText/ratio null、节流（默认 200ms 内多 update 单 tick）、done() 终态必发且幂等。
 import { describe, expect, it } from 'vitest';
 import { createProgressTracker, formatBytes, type ProgressSnapshot } from './downloadProgress';
@@ -23,13 +23,14 @@ function collect(onTickLog: ProgressSnapshot[]) {
 }
 
 describe('formatBytes（字节格式化：二进制进位，数值+空格+单位）', () => {
-  it('四档位：B / KB（一位小数）/ MB（一位小数）/ GB（一位小数）', () => {
+  it('档位：B / KB（一位小数）/ MB（一位小数）/ GB（一位小数）/ TB（storageHealth 单源，I-1）', () => {
     expect(formatBytes(0)).toBe('0 B');
     expect(formatBytes(512)).toBe('512 B');
     expect(formatBytes(1024)).toBe('1.0 KB');
     expect(formatBytes(1536)).toBe('1.5 KB');
     expect(formatBytes(2 * 1024 * 1024)).toBe('2.0 MB');
     expect(formatBytes(3 * 1024 * 1024 * 1024)).toBe('3.0 GB');
+    expect(formatBytes(5 * 1024 * 1024 * 1024 * 1024)).toBe('5.0 TB'); // 合流后超 GB 值入 TB 档（原本地实现会跌入 >1024 GB）
   });
 });
 
