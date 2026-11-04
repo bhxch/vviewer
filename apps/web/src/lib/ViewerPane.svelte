@@ -26,7 +26,7 @@
   import { isMountRootStoreId } from './serverHealthCache';
   import { createProgressTracker, dlAddressText, formatBytes, isRemoteDownload, type ProgressSnapshot } from './downloadProgress';
   import { mbToBytes, shouldConfirm } from './downloadConfirm';
-  import { saveAsTab } from './saveAs';
+  import { pumpToWritable, saveAsTab } from './saveAs';
   import { displayEndpointForStore } from './mountsSync';
 import SearchPanel from './SearchPanel.svelte';
 import DownloadProgressCard from './DownloadProgressCard.svelte';
@@ -191,15 +191,38 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
   /** 完成态「另存为」（spec §6.4）：saveAsTab 统一管线（TabContextMenu 第七动作同
    * 管道）——本地/归档面 store.read 单次在手字节；远端面重下泵取数（字节在渲染实例
    * 内无取回缝，core dispatch 只交付实例——二次传输备案取舍；零重传形态=确认卡
-   * 「下载并另存为」tee 直写）。确认门自动放行：文件刚下载过（知情面已过一次）。 */
+   * 「下载并另存为」tee 直写；picker 瞬态激活窗备案见 saveAs.ts 头注——本路径与
+   * 菜单路径同为「先泵后 picker」形态）。确认门自动放行：文件刚下载过（知情面已过
+   * 一次）。进度反馈（评审 I-3）：远端重下复用进度卡通道——dlProgress/dlAddress
+   * 直写（同一张卡同一字段面，onTick 无 cancelled/live 守卫面——本函数只在完成态卡
+   * 在场时可达，无并发渲染泵；SSE rev++ 重跑竞态由 finally 统一卸卡兜底，v1 备案）。 */
   async function saveAsCompleted(): Promise<void> {
     const t = tab;
     if (t === null) return;
     clearDlDone();
+    const tracker = isRemoteDownload(t.source.storeId)
+      ? createProgressTracker((s) => {
+          dlProgress = s;
+        })
+      : null;
+    if (tracker !== null) {
+      dlAddress = dlAddressText(
+        getRemoteBase(t.source.storeId) ?? displayEndpointForStore(t.source.storeId),
+        t.source.path
+      );
+    }
     try {
-      await saveAsTab(t, { confirm: () => true });
+      await saveAsTab(t, {
+        confirm: () => true,
+        ...(tracker !== null
+          ? { onProgress: (p: ReadProgressEvent) => tracker.update(p.loaded, p.total) }
+          : {})
+      });
     } catch (err) {
       showStatusNotice(`另存为失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      dlProgress = null;
+      dlAddress = '';
     }
   }
 
@@ -751,15 +774,12 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
       return;
     }
     dlConfirm = null;
-    // 「下载并另存为」句柄消费（Task 7）：确认卡次动作选定的本轮在场则 tee 直写；
-    // 读取即清 + 键比对（陈旧句柄/跨 tab 误配丢弃——普通「开始下载」路径恒 null）。
+    // 「下载并另存为」句柄消费（Task 7；评审 M-1 修后 = 自持泵 tee + buffer 直传）：
+    // 确认卡次动作选定的本轮在场则自持泵 tee 直写；读取即清 + 键比对（陈旧句柄/
+    // 跨 tab 误配丢弃——普通「开始下载」路径恒 null）。
     const savePick = dlSaveHandle;
     dlSaveHandle = null;
     const saveHandle = savePick !== null && savePick.key === dlKey ? savePick.handle : null;
-    // tee 写盘面（IIFE 装配 / 收口清偿）：成功 close 落盘、取消·失败·cleanup abort
-    // 丢弃半成品（saveWriteFailed 置位时成功路亦 abort）
-    let saveWritable: FileSystemWritableFileStream | null = null;
-    let saveWriteFailed = false;
     let cancelled = false;
     // markdown 图表主题桥的解绑句柄（异步装配成功才有值；cleanup 同步清偿）
     let offThemeBridge: (() => void) | null = null;
@@ -804,16 +824,49 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
           );
           dlAbort = effectAbort; // 取消柄 = effect 级 controller（取消钮与 cleanup 同源）
         }
-        // 「下载并另存为」tee 装配（Task 7，spec §6.4 双形态二）：句柄在场 → writable
-        // 开启（失败降级普通下载路径）；dispatch 的 read 闭包把泵的每个分块在返回前
-        // 直写 writable（泵逐块 await read，顺序写天然保序）。deviation 备案：渲染仍
-        // 走内存 buffer（盘 backed File 交渲染需 core dispatch 接受流源，本批不动
-        // core）——写盘流式落地、内存峰值与普通路径同；getFile 回填在 deviation 下
-        // 无消费面不取，真·盘 backed 形态留 core 流源接缝跟进（task-7 报告备案）。
+        // 「下载并另存为」装配（Task 7，spec §6.4 双形态二；评审 M-1 修后形态）：
+        // 句柄在场 → writable 开启（失败降级普通下载路径）→ **自持泵 tee**——
+        // pumpToWritable 把全量分块读逐块直写 writable 并累计 buffer。tee 严格限定
+        // 自持泵通道：dispatch 内部读（headOnly 的 8KB 探测窗、streaming 按需窗）不进
+        // tee——旧形态（read 闭包内 tee）会把探测块+全量双写盘产生 8KB 前缀重复的
+        // 坏文件、streaming 渲染器的乱序按需窗也会污染落盘面。泵完即收口落盘，
+        // dispatch 转 buffer 直传（full = buffer 零重读，进度经同款 tracker 逐块上报
+        // 与 dispatch 泵同节奏）。deviation 备案：渲染仍走内存 buffer（盘 backed
+        // File 交渲染需 core dispatch 接受流源，本批不动 core）——内存峰值与普通
+        // 路径同；getFile 回填在 deviation 下无消费面不取，真·盘 backed 形态留 core
+        // 流源接缝跟进（task-7 报告备案）。
+        let pumpBuffer: Uint8Array<ArrayBuffer> | null = null;
         if (saveHandle !== null) {
-          saveWritable = await saveHandle.createWritable().catch(() => null);
+          const writable = await saveHandle.createWritable().catch(() => null);
+          if (writable !== null) {
+            try {
+              const pumped = await pumpToWritable(
+                (range, signal) => {
+                  const merged = mergeAbortSignals(signal, effectAbort.signal);
+                  return current.source.store.read(
+                    current.source.path,
+                    range !== undefined || merged !== undefined
+                      ? { range, signal: merged }
+                      : undefined
+                  );
+                },
+                dlSize,
+                writable,
+                (p) => tracker?.update(p.loaded, p.total)
+              );
+              pumpBuffer = pumped.buffer;
+              if (pumped.writeFailed) void writable.abort().catch(() => {});
+              else void writable.close().catch(() => {}); // 泵完即落盘收口（不等渲染）
+            } catch (err) {
+              void writable.abort().catch(() => {}); // 半成品丢弃（含取消路径）
+              throw err; // 走既有 catch 分类：abort 静默 / 读失败卡片
+            }
+          }
         }
-        const res = await dispatcher.dispatch(current.source, null, host, {
+        // buffer 直传（评审 M-1）：tee 自泵路径 pumpBuffer 在手（pumpFull 通道字节
+        // 已全部读出+落盘），dispatch 走兼容路径 full = buffer 零重读——dispatch 内部
+        // 读（探测窗/按需窗）与 tee 隔离；普通路径恒 null 维持 read 闭包流式形态
+        const res = await dispatcher.dispatch(current.source, pumpBuffer, host, {
           rendererOverride: current.overrideRenderer,
           // 手动高亮语言（spec §4.1）：Task 3 setHighlightLang 写入 Tab.overrideLang，
           // 仅 code 渲染器消费（opts.lang 注入口），其余渲染器不读即零感知
@@ -827,28 +880,14 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
           // effectAbort.signal 合并（缺省直通，双侧缺省维持无 opts 调用形态）
           read: (range, signal) => {
             const merged = mergeAbortSignals(signal, effectAbort.signal);
-            const p = current.source.store.read(
+            return current.source.store.read(
               current.source.path,
               range !== undefined || merged !== undefined ? { range, signal: merged } : undefined
             );
-            if (saveWritable === null) return p;
-            // tee（下载并另存为）：块返回前直写 writable——写失败不回灌渲染主路
-            //（盘面失败吞掉置位 saveWriteFailed，收口时 abort 丢弃半成品），字节流
-            // 照常交付 dispatch（渲染优先，盘面成败不阻断内容装载）
-            return p.then(async (chunk) => {
-              const w = saveWritable;
-              if (w !== null) {
-                try {
-                  await w.write(chunk);
-                } catch {
-                  saveWriteFailed = true;
-                }
-              }
-              return chunk;
-            });
           },
           // 进度卡（spec §6.4）：仅远端来源 tracker 在场时传入（条件展开维持本地来源
-          // 的无 onReadProgress 调用形态——Task 2「缺省零行为变化」的调用面锚）
+          // 的无 onReadProgress 调用形态——Task 2「缺省零行为变化」的调用面锚；
+          // buffer 直传路径泵已在 tee 段完成，onReadProgress 不再触发，传面维持）
           ...(tracker !== null
             ? { onReadProgress: (p: ReadProgressEvent) => tracker.update(p.loaded, p.total) }
             : {})
@@ -862,25 +901,12 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
           res.instance.destroy();
           dlProgress = null;
           dlAddress = '';
-          // tee 半成品丢弃（Task 7）：取消的「下载并另存为」不在盘上留临时文件
-          if (saveWritable !== null) {
-            const w = saveWritable;
-            saveWritable = null;
-            void w.abort().catch(() => {});
-          }
           return;
         }
         // 进度卡卸载（spec §6.4 完成态自动让位渲染）：渲染实例接管 host 前清快照
+        //（tee 路径 writable 已在自持泵段收口，见上）
         dlProgress = null;
         dlAddress = '';
-        // tee 收口（Task 7）：写失败 abort 丢弃半成品，成功 close 落盘（flush 异步，
-        // fire-and-forget——渲染接管不等盘面）
-        if (saveWritable !== null) {
-          const w = saveWritable;
-          saveWritable = null;
-          if (saveWriteFailed) void w.abort().catch(() => {});
-          else void w.close().catch(() => {});
-        }
         // 完成态卡（Task 7，spec §6.4「完成后另存为」）：远端下载路径装配（tracker
         // 非 null），TTL 自动卸载（DL-PROG-01 完成后卡自动卸载锚）；浮层不占布局，
         // 内容渲染并行接管。「另存为」走 saveAsTab 统一管线（saveAsCompleted）。
@@ -1015,12 +1041,6 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
         // 都不得残留进度卡）
         dlProgress = null;
         dlAddress = '';
-        // tee 半成品丢弃（Task 7）：失败/取消的「下载并另存为」不在盘上留临时文件
-        if (saveWritable !== null) {
-          const w = saveWritable;
-          saveWritable = null;
-          void w.abort().catch(() => {});
-        }
         // store.read 失败（如会话占位 tab、句柄失效）也走错误卡片；abort 不上屏
         //（deferred 清偿 Task 5 裁决）：effect 级/实例级取消的 AbortError 不落读取
         // 失败卡片——取消不是读失败，静默 return 交新一轮渲染接管（dispatch 侧
@@ -1030,6 +1050,12 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
         const message = err instanceof Error ? err.message : String(err);
         live = showErrorCard(host, message, current.source);
         instance = live;
+        // 失败态标记（评审 I-1）：lastRendererId 'error' = 错误卡片 tab 的既有标记
+        //（dispatch 落错误卡片同值——成功路径 res.rendererId 同源），本 catch 路径
+        // 此前不写 → saveAsDisabledOf 放行、右键「另存为」对必败重下可达。写入后
+        // 打开方式子菜单按未注册 id 守卫滤除（candidatesOf 'error' 同语义），成功
+        // 重渲染覆写回真实 id（字段语义不变）。
+        current.lastRendererId = 'error';
         // 错误卡片实例无导出句柄：导出动作区随句柄清空不显示
         setExportHandle(null);
         // 错误卡片实例无大纲/首行句柄（code-outline Task 3）：右栏大纲清空（无
@@ -1054,12 +1080,6 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
       dlAddress = '';
       dlAbort = null; // 取消柄引用清偿（effectAbort 已在上方 abort，取消钮此后无在飞下载可断）
       clearDlDone(); // 完成态卡随 effect 清偿卸载（Task 7：TTL 定时一并清偿）
-      if (saveWritable !== null) {
-        // tee 半成品丢弃（Task 7）：tab 切换/重渲染打断的「下载并另存为」不留临时文件
-        const w = saveWritable;
-        saveWritable = null;
-        void w.abort().catch(() => {});
-      }
       dlSaveHandle = null; // 未消费的句柄选择作废（陈旧键防误写消费面在本轮 body，此为兜底清偿）
       offThemeBridge?.(); // 图表主题桥随实例销毁摘除（applyTheme 通道，不跨实例泄漏）
       offThemeBridge = null;

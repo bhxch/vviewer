@@ -12,6 +12,7 @@ import {
   saveAsStreamToDisk,
   saveAsTab,
   saveAsDisabledOf,
+  pumpToWritable,
   type SaveAsTabHooks
 } from './saveAs';
 import type { FileSource, TreeStore } from '@bhxch/vviewer-core';
@@ -25,6 +26,13 @@ function readSrc(relFromWeb: string): string {
 }
 
 // ---------- 桩具 ----------
+
+/** 字节等值锚（加权校验和，页面/节点/e2e 同式；大数组免 jsdom toEqual 深比较慢面） */
+function byteHash(bytes: Uint8Array): number {
+  let h = 0;
+  for (let i = 0; i < bytes.length; i++) h = (h + bytes[i]! * ((i % 97) + 1)) >>> 0;
+  return h >>> 0;
+}
 
 interface FakeWritable {
   written: Array<Blob | Uint8Array>;
@@ -342,6 +350,135 @@ describe('saveAsTab（三取数路径：在手/远端泵/zipStore）', () => {
   });
 });
 
+// ---------- pumpToWritable（评审 M-1：tee 限自持泵通道——字节等值锚） ----------
+
+describe('pumpToWritable（「下载并另存为」tee 单源：落盘字节 === 源全量）', () => {
+  function fakeWritable(): {
+    ws: FileSystemWritableFileStream;
+    written: Uint8Array[];
+    aborts: number;
+  } {
+    const written: Uint8Array[] = [];
+    let aborts = 0;
+    const ws = {
+      write: async (c: Uint8Array) => {
+        written.push(c);
+      },
+      close: async () => {},
+      abort: async () => {
+        aborts += 1;
+      }
+    } as unknown as FileSystemWritableFileStream;
+    return { ws, written, aborts };
+  }
+
+  /** store.read 形态桩：按请求窗精确切片并记录调用（dispatch headOnly 的真实序列
+   * = 8KB 探测窗先行 + pumpFull 自 0 全量重读——探测窗先手动调一次模拟） */
+  function rangedReadOf(src: Uint8Array): {
+    read: (range?: { start: number; end: number }) => Promise<Uint8Array<ArrayBuffer>>;
+    ranges: Array<{ start: number; end: number } | undefined>;
+  } {
+    const ranges: Array<{ start: number; end: number } | undefined> = [];
+    const read = async (range?: { start: number; end: number }) => {
+      ranges.push(range);
+      if (range === undefined) return new Uint8Array(src);
+      return new Uint8Array(src.slice(range.start, range.end + 1));
+    };
+    return { read, ranges };
+  }
+
+  it('探测窗读（dispatch head probe 形态）先于泵发生：tee 产出 === 源全量，前缀无 8KB 重复', async () => {
+    const src = new Uint8Array(1024 * 1024 + 5).map((_, i) => (i * 7) & 0xff);
+    const { read, ranges } = rangedReadOf(src);
+    const { ws, written } = fakeWritable();
+    // 模拟 dispatch headOnly 首步：8KB 探测读（不经 tee——dispatch 内部读）
+    await read({ start: 0, end: 8191 });
+    expect(ranges).toHaveLength(1);
+
+    const ticks: Array<{ loaded: number; total: number | null }> = [];
+    const { buffer, writeFailed } = await pumpToWritable(
+      read,
+      src.length,
+      ws,
+      (p) => ticks.push(p)
+    );
+
+    expect(writeFailed).toBe(false);
+    // 字节等值锚（byteHash 加权校验和 + 长度，大数组免 jsdom 深比较慢面；e2e 同锚法）
+    expect(buffer.length).toBe(src.length);
+    expect(byteHash(buffer)).toBe(byteHash(src));
+    // 落盘拼接 === 源全量：探测块不在 written（首块即泵的 {0, min(4MiB,size)-1} 窗）
+    const flat = new Uint8Array(written.reduce((a, c) => a + c.length, 0));
+    let off = 0;
+    for (const c of written) {
+      flat.set(c, off);
+      off += c.length;
+    }
+    expect(flat.length).toBe(src.length);
+    expect(byteHash(flat)).toBe(byteHash(src));
+    expect(written[0]!.length).toBe(Math.min(4 * 1024 * 1024, src.length)); // 首块 = 泵窗宽，非 8KB
+    expect(ticks.at(-1)).toEqual({ loaded: src.length, total: src.length });
+  });
+
+  it('多块泵（>4MiB）逐块顺序写盘，拼接 === 源全量（known-size 泵精确窗收口）', async () => {
+    const src = new Uint8Array(4 * 1024 * 1024 * 2 + 3).map((_, i) => (i * 13) & 0xff);
+    const { read } = rangedReadOf(src);
+    const { ws, written } = fakeWritable();
+
+    const { buffer, writeFailed } = await pumpToWritable(read, src.length, ws);
+
+    expect(writeFailed).toBe(false);
+    expect(buffer.length).toBe(src.length);
+    expect(byteHash(buffer)).toBe(byteHash(src));
+    expect(written).toHaveLength(3); // {0,4MiB-1} + {4MiB,8MiB-1} + {8MiB,8MiB+2}（末窗 3B 独立迭代收口）
+    const flat = new Uint8Array(written.reduce((a, c) => a + c.length, 0));
+    let off = 0;
+    for (const c of written) {
+      flat.set(c, off);
+      off += c.length;
+    }
+    expect(flat.length).toBe(src.length);
+    expect(byteHash(flat)).toBe(byteHash(src));
+  });
+
+  it('不定态（size null）满窗循环至 EOF：tee 产出 === 源全量', async () => {
+    const src = new Uint8Array(4 * 1024 * 1024 + 9).map((_, i) => (i * 3) & 0xff);
+    const { read } = rangedReadOf(src);
+    const { ws, written } = fakeWritable();
+
+    const { buffer, writeFailed } = await pumpToWritable(read, null, ws);
+
+    expect(writeFailed).toBe(false);
+    expect(buffer.length).toBe(src.length);
+    expect(byteHash(buffer)).toBe(byteHash(src));
+    const flat = new Uint8Array(written.reduce((a, c) => a + c.length, 0));
+    let off = 0;
+    for (const c of written) {
+      flat.set(c, off);
+      off += c.length;
+    }
+    expect(flat.length).toBe(src.length);
+    expect(byteHash(flat)).toBe(byteHash(src));
+  });
+
+  it('写失败：writeFailed 置位、buffer 完整返回不 throw（渲染主路不回灌；收口由调用方 abort）', async () => {
+    const src = new Uint8Array(64).map((_, i) => i & 0xff);
+    const { read } = rangedReadOf(src);
+    const ws = {
+      write: async () => {
+        throw new Error('盘满');
+      },
+      close: async () => {},
+      abort: async () => {}
+    } as unknown as FileSystemWritableFileStream;
+
+    const { buffer, writeFailed } = await pumpToWritable(read, src.length, ws);
+
+    expect(writeFailed).toBe(true);
+    expect(buffer).toEqual(src); // 字节流照常交付（渲染主路优先，小数组深比较直锚）
+  });
+});
+
 // ---------- saveAsDisabledOf ----------
 
 describe('saveAsDisabledOf（第七动作置灰：占位/错误/目录）', () => {
@@ -376,5 +513,10 @@ describe('saveAsDisabledOf（第七动作置灰：占位/错误/目录）', () =
     // 远端超阈值确认门钩子（window.confirm 原生确认先例）+ 失败上状态栏
     expect(src).toMatch(/confirm: \(info\) =>/);
     expect(src).toMatch(/showStatusNotice\(`另存为失败：/);
+    // 进度反馈（评审 I-3）：菜单路径轻量状态条——远端重下开始提示 + 完成提示
+    //（dlProgress 为 ViewerPane 私有面，跨组件无复用缝，缝最小取状态条）
+    expect(src).toMatch(/const remote = isRemoteDownload\(tab\.source\.storeId\)/);
+    expect(src).toMatch(/showStatusNotice\('正在拉取全量以另存为…'\)/);
+    expect(src).toMatch(/showStatusNotice\(`已另存为 \$\{tab\.source\.name\}`\)/);
   });
 });

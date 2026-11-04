@@ -15,6 +15,10 @@
 // - saveAsTab 的远端路径是「重新取数」：完成后另存为/菜单另存为时字节已在渲染实例
 //   内，但 core dispatch 只交付实例不交付字节（无取回缝，本批不动 core）——远端二次
 //   传输为知情取舍；零重传形态 = 确认卡「下载并另存为」tee 直写（下载落盘一次完成）。
+// - picker 瞬态激活窗（~5s）：saveAsTab 为「先泵后 picker」形态——菜单与完成态两条
+//   路径同受影响，远端重下耗时超过激活窗时 showSaveFilePicker 抛 NotAllowedError →
+//   'cancelled' 静默（saveAsBlob 取消语义）；消解需翻转为「picker 先选、泵后写」
+//   （pumpToWritable 已具备该形态的字节面，接线留后续）。
 // - 确认门在 saveAsTab 内以 hooks.confirm 呈现（本模块无 UI 依赖，纯 .ts vitest 直测）：
 //   TabBar 菜单传 window.confirm、完成态卡传恒真（已下载过一次知情）；钩子缺省放行
 //   （无确认面的调用方，门语义由调用方裁决）。
@@ -117,6 +121,39 @@ export async function saveAsStreamToDisk(
     await writable.abort().catch(() => {}); // 半成品丢弃，不让临时文件残留
     throw err;
   }
+}
+
+/**
+ * 自持泵 tee 落盘单源（评审 M-1，「下载并另存为」的字节面保证）：tee 严格限定本泵
+ * 通道——dispatch 内部读（headOnly 的 8KB 探测窗、streaming 渲染器的按需窗）不进
+ * tee，探测前缀重复/乱序窗写盘的坏文件面消除。逐块直写 writable（泵逐块 await
+ * read，顺序写天然保序），写失败置位 writeFailed 不回灌取数主路（字节流照常交付，
+ * 收口 close/abort 由调用方按 flag 裁决）；返回全量 buffer 供 dispatch buffer 直传
+ * （full = buffer 零重读，progress 经 onProgress 与 dispatch 泵同节奏上报）。
+ */
+export async function pumpToWritable(
+  read: (range?: ByteRange, signal?: AbortSignal) => Promise<Uint8Array<ArrayBuffer>>,
+  size: number | null,
+  writable: FileSystemWritableFileStream,
+  onProgress?: (p: ReadProgressEvent) => void,
+  signal?: AbortSignal
+): Promise<{ buffer: Uint8Array<ArrayBuffer>; writeFailed: boolean }> {
+  let writeFailed = false;
+  const buffer = await pumpFull(
+    async (range, sig) => {
+      const chunk = await read(range, sig);
+      try {
+        await writable.write(chunk);
+      } catch {
+        writeFailed = true; // 盘面失败吞掉置位：渲染主路优先，半成品交调用方收口
+      }
+      return chunk;
+    },
+    size,
+    signal,
+    (p) => onProgress?.(p)
+  );
+  return { buffer, writeFailed };
 }
 
 // ---------- saveAsTab（tab 级统一入口：取数三分 + 确认门 → saveAsBlob） ----------

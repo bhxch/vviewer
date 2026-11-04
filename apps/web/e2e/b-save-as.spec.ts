@@ -279,6 +279,19 @@ async function clickTabSaveAs(page: Page, tabName: string): Promise<void> {
   await page.getByRole('menuitem', { name: '另存为' }).click();
 }
 
+/** 设置面板把远端下载确认阈值改为指定 MB（DL-CONF-02/03 共用，评审 I-4 去重）：
+ * fill 只发 input 事件，本输入框 onchange 提交（blur/Enter）——Enter 触发 change
+ * 使草稿变脏（apply 恒 disabled 死锁面，b-settings-center-deep 数值输入同款） */
+async function setConfirmThreshold(page: Page, mb: string): Promise<void> {
+  await openSettings(page);
+  await gotoGroup(page, '存储与数据');
+  const input = page.getByLabel('远端下载确认阈值（MB）');
+  await input.fill(mb);
+  await input.press('Enter');
+  await applySettings(page);
+  await closeSettings(page);
+}
+
 test.describe('b-save-as 另存为管线（SA 域 + DL 移交锚）', () => {
   test.beforeEach(({}, testInfo) => {
     testInfo.skip(testInfo.project.name !== 'chromium', '桌面视口专属（仅 chromium project）');
@@ -474,14 +487,7 @@ test.describe('b-save-as 另存为管线（SA 域 + DL 移交锚）', () => {
     await expect(page.locator('.vv-tab.active', { hasText: 'e2e-fake' })).toBeVisible({ timeout: 20_000 });
 
     // 设置面板把阈值改 1MB（门读 settings 现值，应用后下一次门评估即时生效）
-    await openSettings(page);
-    await gotoGroup(page, '存储与数据');
-    // fill 只发 input 事件：本输入框 onchange 提交（blur/Enter）——Enter 触发 change
-    // 使草稿变脏（apply 恒 disabled 的死锁面，b-settings-center-deep 数值输入同款）
-    await page.getByLabel('远端下载确认阈值（MB）').fill('1');
-    await page.getByLabel('远端下载确认阈值（MB）').press('Enter');
-    await applySettings(page);
-    await closeSettings(page);
+    await setConfirmThreshold(page, '1');
 
     // 打开 2MB 文件（>1MB 阈值）→ 确认卡出现
     await page.locator('.vv-tab', { hasText: 'mid.png' }).click();
@@ -497,14 +503,7 @@ test.describe('b-save-as 另存为管线（SA 域 + DL 移交锚）', () => {
     await seedRemoteTabs(page, { base: srv.base, tabs: [{ path: '', name: 'e2e-fake', active: true }, { path: 'mid.png', name: 'mid.png', size: png.length, active: false }] });
     await page.goto('/');
     await expect(page.locator('.vv-tab.active', { hasText: 'e2e-fake' })).toBeVisible({ timeout: 20_000 });
-    await openSettings(page);
-    await gotoGroup(page, '存储与数据');
-    // fill 只发 input 事件：本输入框 onchange 提交（blur/Enter）——Enter 触发 change
-    // 使草稿变脏（apply 恒 disabled 的死锁面，b-settings-center-deep 数值输入同款）
-    await page.getByLabel('远端下载确认阈值（MB）').fill('1');
-    await page.getByLabel('远端下载确认阈值（MB）').press('Enter');
-    await applySettings(page);
-    await closeSettings(page);
+    await setConfirmThreshold(page, '1');
 
     await page.locator('.vv-tab', { hasText: 'mid.png' }).click();
     const card = page.locator('.vv-dl-confirm');

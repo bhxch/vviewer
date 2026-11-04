@@ -248,20 +248,41 @@ describe('ViewerPane 另存为接线（Task 7）', () => {
     expect(src).toMatch(/clearDlDone\(\); \/\/ 完成态卡随 effect 清偿卸载/);
   });
 
-  it('「下载并另存为」tee：确认卡次动作句柄键比对消费（跨 tab 误配丢弃），read 闭包直写 writable（写失败不回灌渲染）', () => {
+  it('「下载并另存为」句柄消费：确认卡次动作键比对（跨 tab 误配丢弃）+ writable 开启失败降级普通下载', () => {
     expect(src).toMatch(/dlSaveHandle = \{ key, handle \}/);
     expect(src).toMatch(/savePick\.key === dlKey \? savePick\.handle : null/);
-    expect(src).toMatch(/await saveHandle\.createWritable\(\)\.catch\(\(\) => null\)/);
-    expect(src).toMatch(/await w\.write\(chunk\)/);
-    expect(src).toMatch(/saveWriteFailed = true;/);
-    // 收口三路：成功 close / abort 半成品 / cleanup abort
-    expect(src).toMatch(/if \(saveWriteFailed\) void w\.abort\(\)\.catch\(\(\) => \{\}\);/);
-    expect(src).toMatch(/else void w\.close\(\)\.catch\(\(\) => \{\}\);/);
+    expect(src).toMatch(/const writable = await saveHandle\.createWritable\(\)\.catch\(\(\) => null\);/);
+    expect(src).toMatch(/if \(writable !== null\) \{/);
+  });
+
+  it('「下载并另存为」自持泵 tee（评审 M-1）：pumpToWritable 限定泵通道 + dispatch 转 buffer 直传（探测窗/按需窗不进 tee）', () => {
+    expect(src).toMatch(/import \{[^}]*pumpToWritable[^}]*\} from '\.\/saveAs'/);
+    expect(src).toMatch(/const pumped = await pumpToWritable\(/);
+    // dispatch 第二参 = pumpBuffer（null = 原形态 read 流式；tee 泵完 buffer 直传零重读）
+    expect(src).toMatch(/dispatcher\.dispatch\(current\.source, pumpBuffer, host/);
+    // read 闭包恢复纯透传（tee 已移出自持泵之外的 dispatch 内部读）
+    expect(src).toMatch(/read: \(range, signal\) => \{\s*const merged = mergeAbortSignals\(signal, effectAbort\.signal\);\s*return current\.source\.store\.read\(/);
+    // 泵完收口：写失败 abort 丢弃半成品、成功 close 落盘（不等渲染）
+    expect(src).toMatch(/if \(pumped\.writeFailed\) void writable\.abort\(\)\.catch\(\(\) => \{\}\);/);
+    expect(src).toMatch(/else void writable\.close\(\)\.catch\(\(\) => \{\}\);/);
+    // 泵失败（含取消）：abort 半成品 + 上抛走既有 catch 分类
+    expect(src).toMatch(/void writable\.abort\(\)\.catch\(\(\) => \{\}\);[\s\S]{0,80}throw err;/);
   });
 
   it('完成态「另存为」走 saveAsTab 统一管线（确认门自动放行——已下载过一次）；失败上状态栏', () => {
-    expect(src).toMatch(/await saveAsTab\(t, \{ confirm: \(\) => true \}\)/);
+    expect(src).toMatch(/await saveAsTab\(t, \{/);
+    expect(src).toMatch(/confirm: \(\) => true/);
     expect(src).toMatch(/showStatusNotice\(`另存为失败：/);
+  });
+
+  it('进度反馈接线（评审 I-3）：完成态另存为远端重下复用进度卡通道（dlProgress/dlAddress 直写，finally 卸卡）', () => {
+    expect(src).toMatch(/createProgressTracker\(\(s\) => \{\s*dlProgress = s;\s*\}\)/);
+    expect(src).toMatch(/onProgress: \(p: ReadProgressEvent\) => tracker\.update\(p\.loaded, p\.total\)/);
+    expect(src).toMatch(/finally \{\s*dlProgress = null;\s*dlAddress = '';\s*\}/);
+  });
+
+  it('读取失败卡片失败态（评审 I-1）：catch 路径写 lastRendererId error，saveAsDisabledOf 置灰面收敛', () => {
+    expect(src).toMatch(/current\.lastRendererId = 'error';/);
   });
 
   it('模板双分支：进度卡（dlProgress）/完成态卡（dlDone）互斥；确认卡 onsaveas 仅 FS Access 可用环境装配', () => {

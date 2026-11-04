@@ -6,6 +6,7 @@
   import { arrowVisibility, dominantWheelDelta } from './tabScroll';
   import { badgeOf } from './tabBadge';
   import { formatBytes } from './storageHealth';
+  import { isRemoteDownload } from './downloadProgress';
   import { saveAsDisabledOf, saveAsTab } from './saveAs';
   import { registry } from './viewer';
   import { rendererCandidatesOfTab } from './RendererPickerMenu';
@@ -176,18 +177,27 @@
         // 另存为（Task 7，spec §6.4）：置灰判定 saveAsDisabledOf（占位/错误/目录），
         // 动作进 saveAs 管线（saveAsTab）。远端超阈值确认门钩子用 window.confirm
         // （WorkspaceList/FileTree 同款原生确认先例——右键手势内可弹）：明示文件/
-        // 体量与内存影响；拒绝 = cancelled 静默。
+        // 体量与内存影响；拒绝 = cancelled 静默。进度反馈（评审 I-3）：dlProgress
+        // 为 ViewerPane 渲染 effect 私有装配面、跨组件无复用缝——本路径取轻量状态
+        // 条（远端重下开始/完成一次性提示，本地在手读零开始提示）；数值进度面为
+        // 完成态卡路径专属（ViewerPane 内 dlProgress 复用，同卡同字段零新造）。
         label: '另存为',
         disabled: saveAsDisabledOf(tab),
         onClick: () => {
+          const remote = isRemoteDownload(tab.source.storeId);
+          if (remote) showStatusNotice('正在拉取全量以另存为…');
           void saveAsTab(tab, {
             confirm: (info) =>
               window.confirm(
                 `「${info.name}」约 ${formatBytes(info.sizeBytes)}，超过远端下载确认阈值：将全量拉取到内存后再另存。继续？`
               )
-          }).catch((err: unknown) => {
-            showStatusNotice(`另存为失败：${err instanceof Error ? err.message : String(err)}`);
-          });
+          })
+            .then((r) => {
+              if (r === 'saved') showStatusNotice(`已另存为 ${tab.source.name}`);
+            })
+            .catch((err: unknown) => {
+              showStatusNotice(`另存为失败：${err instanceof Error ? err.message : String(err)}`);
+            });
         }
       }
     ];

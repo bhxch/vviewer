@@ -135,9 +135,12 @@ describe('ViewerPane 确认门接线（计划 2 Task 6）', () => {
   });
 
   it('门不写进度卡状态：确认等待期不装配 tracker/地址行（进度卡接力在确认后的 dispatch 轮）', () => {
-    // 门分支 return 早于 tracker 装配（dlAddress 写入）——确认等待期加载态区只有确认卡
+    // 门分支 return 早于渲染 effect 内 tracker 装配（dlAddress 写入）——确认等待期
+    // 加载态区只有确认卡。检索锚取渲染 effect 区段（dlConfirm = { 装配点之后）：
+    // saveAsCompleted（评审 I-3，组件函数域）同款 dlAddressText 写点在文件更前，
+    // 全文首查会误配（I-3 评审波注）
     const gateIdx = src.indexOf('dlConfirm = {');
-    const addrIdx = src.indexOf('dlAddress = dlAddressText(');
+    const addrIdx = src.indexOf('dlAddress = dlAddressText(', gateIdx);
     expect(gateIdx).toBeGreaterThan(-1);
     expect(addrIdx).toBeGreaterThan(-1);
     expect(gateIdx).toBeLessThan(addrIdx);
