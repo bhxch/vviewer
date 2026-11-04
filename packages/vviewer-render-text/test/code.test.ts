@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import hljs from 'highlight.js';
 import { HighlightCanceledError } from '@bhxch/vviewer-highlight';
-import { RemoteComputeError, createRemoteStore, type ComputeWhere, type FileSource, type OutlineEntry, type RenderedInstance, type StreamCtx } from '@bhxch/vviewer-core';
+import { RemoteComputeError, createRegistry, createRemoteStore, type ComputeWhere, type FileSource, type OutlineEntry, type RenderedInstance, type StreamCtx } from '@bhxch/vviewer-core';
 import { isAbortError as coreIsAbortError } from '@bhxch/vviewer-core';
 import { STREAM_MAX_BYTES } from '../src/blockStream';
 import * as searchModule from '../src/search';
@@ -3373,5 +3373,16 @@ describe('isAbortError（deferred 清偿 Task 3：取消错误身份判定矩阵
 
   it('单源 identity：render-text re-export 与 core 同引用（防再镜像）', () => {
     expect(isAbortError).toBe(coreIsAbortError);
+  });
+});
+
+// registry 绑定（批次一缺口，spec 2026-11-04 §4.1）：fresh registry 安装后 byExtension
+// 命中且大小写归一（registry 查询侧小写化）
+describe('codeRenderer extensions：.tsv 绑定', () => {
+  it("fresh registry 安装后 byExtension('tsv')/'TSV' 均命中", () => {
+    const registry = createRegistry();
+    registry.install(codeRenderer);
+    expect(registry.byExtension('tsv')?.id).toBe('code');
+    expect(registry.byExtension('TSV')?.id).toBe('code');
   });
 });

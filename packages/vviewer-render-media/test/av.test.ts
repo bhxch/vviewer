@@ -4,7 +4,7 @@
 // vi.mock 双态：默认构造抛错（T7 构造失败路径 revoke 后 rethrow）；可切正常构造，
 // 验证 BUG-54 视频运行期错误的 video:error 同步点缓存（卡片文案命中映射表）。
 import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
-import { createRemoteStore, SESSION_LAST_SERVER_KEY } from '@bhxch/vviewer-core';
+import { createRegistry, createRemoteStore, SESSION_LAST_SERVER_KEY } from '@bhxch/vviewer-core';
 import type { RenderedInstance } from '@bhxch/vviewer-core';
 import {
   absolutizeHlsUri,
@@ -397,5 +397,18 @@ describe('avRenderer', () => {
     expect(detail).not.toContain('未知错误');
     expect(urlRevoke).toHaveBeenCalledTimes(1); // release 摘播放器并回收 blob
     target.remove();
+  });
+});
+
+// registry 绑定（批次一缺口，spec 2026-11-04 §4.1）：fresh registry 安装后 byExtension
+// 命中且大小写归一（registry 查询侧小写化）
+describe('avRenderer extensions：.mpeg/.weba 绑定', () => {
+  it("fresh registry 安装后 byExtension('mpeg'/'MPEG'/'weba'/'WEBA') 均命中", () => {
+    const registry = createRegistry();
+    registry.install(avRenderer);
+    expect(registry.byExtension('mpeg')?.id).toBe('av');
+    expect(registry.byExtension('MPEG')?.id).toBe('av');
+    expect(registry.byExtension('weba')?.id).toBe('av');
+    expect(registry.byExtension('WEBA')?.id).toBe('av');
   });
 });

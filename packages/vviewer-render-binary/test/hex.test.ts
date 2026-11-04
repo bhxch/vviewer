@@ -1,5 +1,6 @@
 // hex.test.ts — hex dump 行格式纯函数单测（renderHexBytes）+ 虚拟滚动 DOM 渲染（renderHex）。
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { createRegistry } from '@bhxch/vviewer-core';
 import { renderHexBytes, HEX_ROW_BYTES } from '../src/hexBytes';
 import type { HexHighlight, HexRow } from '../src/hexBytes';
 
@@ -446,5 +447,16 @@ describe('renderHex：窗口模式（StreamCtx）', () => {
     expect(joined).toBe(row6After.textContent);
     inst.destroy();
     target.remove();
+  });
+});
+
+// registry 绑定（批次一缺口，spec 2026-11-04 §4.1）：fresh registry 安装后 byExtension
+// 命中且大小写归一（registry 查询侧小写化）
+describe('hexRenderer extensions：.hex 绑定', () => {
+  it("fresh registry 安装后 byExtension('hex')/'HEX' 均命中", () => {
+    const registry = createRegistry();
+    registry.install(hexRenderer);
+    expect(registry.byExtension('hex')?.id).toBe('hex');
+    expect(registry.byExtension('HEX')?.id).toBe('hex');
   });
 });

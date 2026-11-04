@@ -353,7 +353,7 @@ const ART_THEME = 'var(--ui-accent, #0969da)';
 export const avRenderer: Renderer = {
   id: 'av',
   label: '音视频',
-  extensions: ['mp4', 'm4v', 'mov', 'webm', 'ogg', 'm3u8', 'flv', 'mp3', 'wav', 'flac', 'm4a', 'aac', 'oga', 'opus'],
+  extensions: ['mp4', 'm4v', 'mov', 'webm', 'ogg', 'm3u8', 'flv', 'mp3', 'wav', 'flac', 'm4a', 'aac', 'oga', 'opus', 'mpeg', 'weba'],
   // 注意：不注册 'ts'——codeRenderer（TypeScript）先占该扩展名，registry 重复注册会抛错；
   // .ts 的播放路径由 dispatcher 的 mpegts 签名改派进入（BUG-01），此处仅保留 customType 分派
   async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection): Promise<RenderedInstance> {
