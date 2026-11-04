@@ -3,7 +3,7 @@
 - 日期：2026-11-04
 - 状态：待用户批准（brainstorm 产物，获批后转 writing-plans）
 - 调研依据：`docs/file-viewer/format-package-survey-2026-11-04.md`（47 管线逐行对照、许可证红线、覆盖矩阵）
-- 用户决策记录（brainstorm 两轮四题+三题+builder check 收口，全部拍板）：①引入范围=全量（npm 引入、不进主包；LicenseRef-PMEL 取 MPL-2.0 面；bpmn-js 排除 npm 依赖——md 管线既有运行时 CDN 加载姿态不变）；②data-asset=引 data 包，wasm 与字体查看都开；③音频=补别名+引 capability-midi；④图片=引 renderer-image 仅新 5 扩展名；⑤图表拆分=全集（29 型，builder check 补漏 7 型后收口）；⑥默认模式=默认渲染失败回退源码，引擎形态以 vviewer 图表注册表实态为准（七类 CDN 本地引擎非 kroki）；⑦drawio=引官方运行时；⑧**部署=大资产不进本项目 dist，参考 tree-sitter 语法包前例二次封装为 vviewer 自有 npm 资产包走 CDN**（Pages/Workers/桌面均不背重资产，按形态裁剪方案作废）；⑨**桥接契约=方案 A**（嵌套附件回调走 vviewer dispatcher；.shp 边车 v1 降级报错）。
+- 用户决策记录（brainstorm 两轮四题+三题+builder check 收口，全部拍板）：①引入范围=全量（npm 引入、不进主包；LicenseRef-PMEL 取 MPL-2.0 面；bpmn-js 排除 npm 依赖——md 管线既有运行时 CDN 加载姿态不变）；②data-asset=引 data 包，wasm 与字体查看都开；③音频=补别名+引 capability-midi；④图片=引 renderer-image 仅新 5 扩展名；⑤图表拆分=全集（29 型，builder check 补漏 7 型后收口）；⑥默认模式=默认渲染失败回退源码，引擎形态以 vviewer 图表注册表实态为准（七类 CDN 本地引擎非 kroki）；⑦drawio=引官方运行时；⑧**部署=大资产不进本项目 dist，Pages/Workers/桌面均不背重资产；资产包优先直接用 file-viewer 已发布的 @file-viewer/assets-\*（CDN 直链精确版本），除非必须二次封装并发包**；⑨**桥接契约=方案 A**（嵌套附件回调走 vviewer dispatcher；.shp 边车 v1 降级报错）。
 
 ## 1. 背景与动机
 
@@ -122,27 +122,27 @@ vviewer 网页版只读查看器现有 12 个自研渲染器，格式面与 file
 - 不支持 SearchMatch：MetaPanel 搜索入口对桥接渲染器 tab 显示「当前渲染器不支持检索」禁用态（复用既有状态通道，不新增机制）。
 - opts.signal 透传：destroy/取消时调 file-viewer 的销毁路径；abort 语义对齐 vviewer `abortReadError` 分类（批次外的既有错误身份层）。
 
-### 6.2 资产部署（大资产不进本项目 dist，npm 二次封装 + CDN，用户拍板）
+### 6.2 资产部署（大资产不进本项目 dist，优先直用上游已发布资产包，用户拍板）
 
-**原则**：file-viewer 的 JS 代码包走常规 npm 依赖 + rolldown 动态 import（chunk 分离进 dist，mammoth 先例）；**Worker/WASM/字体/vendor 大资产不进 dist、不进 PWA precache、Pages/Workers/桌面三形态都不背**——参考 tree-sitter 语法包前例（@bhxch/vviewer-grammars-full：单包聚合、manifest 与资产同目录、contentHash 去重门、OIDC Trusted Publisher、jsdelivr 精确版本钉死、客户端三层资产解析链 同源 dist→服务端 origin→CDN、pages 不背资产）二次封装发布。
+**原则**：file-viewer 的 JS 代码包走常规 npm 依赖 + rolldown 动态 import（chunk 分离进 dist，mammoth 先例）；**Worker/WASM/字体/vendor 大资产不进 dist、不进 PWA precache、Pages/Workers/桌面三形态都不背**；客户端三层资产解析链（同源 dist → 服务端 origin → CDN）沿既有机制，CDN 层**默认直链 file-viewer 已发布的资产包**（`https://cdn.jsdelivr.net/npm/@file-viewer/assets-<x>@3.3.3/viewer/…`，其 package.json `files` 含 `viewer/` 目录，发布面已确认）。**仅当直接使用不可行时才二次封装发包**（用户原则：「除非必须二次封装并发包，不然优先用 file-viewer 已经发布的包」）。
 
-**需要新增的 npm 包（vviewer 侧发布，仅 1 个）**：
+**需要新增的 npm 包（vviewer 侧发布）：默认 0 个**。
 
-| 包 | 内容 | 说明 |
-| --- | --- | --- |
-| `@bhxch/vviewer-foreign-assets` | 聚合上游 7 个资产包产物：@file-viewer/assets-standard / -data / -design / -drawing / -hangul / -iwork / -typst（CAD 系排除；chm/wordperfect/eda 无资产包） | 二次封装：重组 manifest（路由键=资产组/文件名），发布链照 grammars 前例全套（pack 脚本 contentHash、去重门 SKIP 复用、provenance、Trusted Publisher 配置）。客户端解析链 env（如 VV_FOREIGN_ASSETS_CDN）默认指向 jsdelivr 该包精确版本；三层链同源/服务端位保留空位（部署方愿自托管可填）。**拆分预案**：grammars 前例已验证 npm 单包解包 228MB 可行；若本包解包实测量级显著超出且 jsdelivr 单文件 20MB 上限有触碰（typst 编译器 wasm、diagrams.net bundle 需实测），按资产组拆子包（-standard/-typst/-design/…），manifest 路由支持多 base——实施期 pack 时实测后定，默认单包 |
+预案包（仅触发以下任一条件时才创建发布）：`@bhxch/vviewer-foreign-assets`（grammars 前例全套发布链：contentHash 去重门、OIDC provenance、jsdelivr 精确版本钉死），触发条件——
+1. 上游资产包存在超 jsdelivr 单文件 20MB 上限的文件（assets-typst 编译器 wasm、assets-drawing diagrams.net bundle 需实测，实施首任务核实）；
+2. 上游 assets 包的 manifest/installer 结构无法脱离 asset-installer 直接以 URL base 方式伺服（receipt 字段等 installer 耦合项需重组）。
+触发时只聚合出问题的资产组，其余继续直链上游包；发布形态（单包 vs 按资产组拆分）按 grammars 前例（npm 单包解包 228MB 已验证可行）默认单包。
 
-**需要直接引入的 npm 包（file-viewer 侧，代码依赖，23 个）**：
+**需要直接引入的 npm 包（file-viewer 侧）**：
 
-- 核心：`@file-viewer/core`
-- 渲染器：`@file-viewer/renderer-email` `-epub` `-ofd` `-chm` `-word` `-presentation` `-spreadsheet` `-iwork` `-hangul` `-wordperfect` `-data` `-design` `-image` `-geo` `-typst` `-dicom` `-signature` `-eda` `-drawing` `-media`（最后者为 capability-midi 宿主，其媒体扩展名不注册）
-- 能力：`@file-viewer/capability-rtf` `-midi` `-drawio-official`
+- 代码依赖（23 个，构建期 chunk 分离）：核心 `@file-viewer/core`；渲染器 `@file-viewer/renderer-email` `-epub` `-ofd` `-chm` `-word` `-presentation` `-spreadsheet` `-iwork` `-hangul` `-wordperfect` `-data` `-design` `-image` `-geo` `-typst` `-dicom` `-signature` `-eda` `-drawing` `-media`（末者为 capability-midi 宿主，其媒体扩展名不注册）；能力 `@file-viewer/capability-rtf` `-midi` `-drawio-official`
+- 资产包（7 个，**不入构建**，运行时 CDN 直链精确版本）：`@file-viewer/assets-standard` `-data` `-design` `-drawing` `-hangul` `-iwork` `-typst`
 
-（版本一律精确钉死；file-viewer 上游升级策略——批量追平 vs 锁定——本 spec 不裁，默认锁定 3.3.3。）
+（版本一律精确钉死 3.3.3；file-viewer 上游升级策略——批量追平 vs 锁定——本 spec 不裁，默认锁定。）
 
 **运行时**：各桥接渲染器首次打开对应扩展名时经三层链按需 fetch 资产；SW 对 CDN/该前缀设 CacheFirst（运行时缓存，不进 precache）。
 
-**门禁**：新增 foreign 预算门禁（仿 `tools/diagram-budget.mjs`）——主 chunk 与 precache 清单断言不含 `@file-viewer/*` 代码面误入主 chunk（动态 import 面）、dist 不含 `file-viewer-assets/` 目录。
+**门禁**：新增 foreign 预算门禁（仿 `tools/diagram-budget.mjs`）——主 chunk 与 precache 清单断言不含 `@file-viewer/*` 代码面误入主 chunk（动态 import 面）、dist 无 file-viewer 资产目录。
 
 ### 6.3 引入清单与扩展名默认面总表（核心交付物）
 
@@ -194,8 +194,7 @@ vviewer 网页版只读查看器现有 12 个自研渲染器，格式面与 file
 ## 8. 风险与待核实项（实施时首任务）
 
 1. file-viewer v3.3.3 浏览器 API 的实际挂载/销毁形态与宿主嵌套回调（`renderNestedBuffer`）的完整签名——桥接层第一包（email）落地时钉死模式，后续包复用。
-2. `@bhxch/vviewer-foreign-assets` 打包实测：7 个上游资产包聚合后的解包体积（grammars 前例 228MB 量级是否被超出）、单文件是否触碰 jsdelivr 20MB 上限（assets-typst 编译器 wasm、assets-drawing diagrams.net bundle 重点）——超限即触发 §6.2 拆分预案。
-3. 上游 assets 包产物能否脱离 asset-installer 独立伺服（manifest 结构为 installer 设计的部分——receipt 字段等——在二次封装 manifest 中如何取舍）。
+2. **上游资产包 CDN 直链可行性（决定是否触发预案包）**：jsdelivr 对 `@file-viewer/assets-*@3.3.3/viewer/` 各文件的可用性（单文件 20MB 上限重点核 assets-typst 编译器 wasm、assets-drawing diagrams.net bundle）+ 资产 base URL 配置能否脱离 asset-installer 直接指 CDN 路径——任一不成立即触发 §6.2 预案包。
 4. jxl、zipx 两扩展名的上游真实支持度（见 §6.3 序 14/排除清单）。
 5. `.dot` 从 code 兜底改 graphviz 专有对既有 e2e 锚的影响面。
 6. kroki-only 类型在 CI 无 krokiHost 时的 e2e 策略（mock host 或仅锚失败回退路径）。
