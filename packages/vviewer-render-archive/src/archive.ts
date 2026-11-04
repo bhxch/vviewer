@@ -1,12 +1,13 @@
 // archive.ts — 压缩包树渲染器（M4 Task 3 zip / Task 4 tar·7z·rar）。
 // render 内按 magic 分派：PK 头走 jszip（createZipStore），其余走 libarchive.js wasm
-// （createLibarchiveStore，支持 tar/tar.gz/tgz/tbz2/xz/7z/rar）。自带简单树 UI（<details>
+// （createLibarchiveStore，绑定清单见 zipStore 的 ARCHIVE_BINDINGS：tar/gz/bz2/xz 系、
+// cab/ar/cpio/xar/lha/7z/rar 及 zip/rar 容器等 wasm 实测支持格式）。自带简单树 UI（<details>
 // 懒展开），点击文件条目派发 'vv-open-entry' CustomEvent（apps/web 的
 // openFlow.bindArchiveOpenEvents 监听并 addTab），不改 Renderer 接口、不与 web 包耦合；
 // mountArchiveTree 独立导出供 web 侧复用。构造失败（加密/无法识别）抛中文错误，
 // 由 dispatcher 的错误卡兜底。
 import type { FileSource, Detection, RenderedInstance, Renderer, TreeStore, TreeNode } from '@bhxch/vviewer-core';
-import { createZipStore, archiveChainOf } from './zipStore';
+import { createZipStore, archiveChainOf, ARCHIVE_BINDINGS } from './zipStore';
 import { createLibarchiveStore } from './libarchiveStore';
 
 /** 点击包内文件条目时派发的窗口事件名 */
@@ -117,15 +118,9 @@ export function mountArchiveTree(
 export const archiveRenderer: Renderer = {
   id: 'archive',
   label: '压缩包',
-  extensions: [
-    'zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar',
-    // spec §6.3 排除清单自有补绑（仅绑定 libarchive.js wasm 实测编译进的格式/过滤器；
-    // zst/tzst 剔除——zstd 过滤器未编译进 wasm 仅外部程序回退；zipx 剔除——非独立格式，
-    // PK magic 走 jszip 仅 store/deflate，zipx 主打 LZMA/PPMd 等方法读不出）
-    'jar', 'war', 'ear', 'apk', 'cbz', 'cbr', // zip/rar 容器（magic 分派：PK→jszip、RAR→libarchive）
-    'gzip', 'bzip2', 'tbz', 'tbz2', 'txz', 'lzma', // 过滤器别名（zlib/bzlib/liblzma 内部编译进）
-    'cab', 'ar', 'cpio', 'xar', 'lha', 'lzh' // 其余归档格式（archive_read_support_format_* 全注册）
-  ],
+  // 绑定清单单一事实源 ARCHIVE_BINDINGS（zipStore 导出，ARCHIVE_EXTS 嵌套展开门同源派生；
+  // 剔除 zst/tzst/zipx 理由见其注释）
+  extensions: ARCHIVE_BINDINGS,
   async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, _det: Detection): Promise<RenderedInstance> {
     // 递归深度接线：由来源 store id 的前导归档段（zip/libarchive）推导父链（顶层归档的
     // store 是 localfiles/single 等非归档来源 → 链空 → depth 0；包内第 n 层归档 → depth n-1）

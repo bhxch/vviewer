@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Detection, FileSource, TreeNode } from '@bhxch/vviewer-core';
 import { archiveRenderer } from '../src/archive';
 import { ARCHIVE_OPEN_EVENT, type ArchiveOpenDetail } from '../src/archive';
-import { createZipStore, normalizeZipError, archiveChainOf, parseZipCentralDirectory } from '../src/zipStore';
+import { createZipStore, normalizeZipError, archiveChainOf, parseZipCentralDirectory, ARCHIVE_EXTS } from '../src/zipStore';
 
 async function makeZip(): Promise<Uint8Array> {
   const JSZip = (await import('jszip')).default;
@@ -398,5 +398,32 @@ describe('archiveRenderer：真实递归路径（depth 由 source.storeId 接线
     const buffer = await zipOf({ 'sized.txt': content });
     const detail = await renderAndClick(buffer, 'localfiles:samples', 'sized.txt');
     expect(detail.size).toBe(content.length);
+  });
+});
+
+// ARCHIVE_EXTS 嵌套展开门与 archive 绑定清单对齐（Task 2 补齐）：包内嵌套归档条目的
+// 拒展判定需覆盖渲染器绑定的全部扩展名（zip 内嵌 jar/apk 等同语义计入深度限制）；
+// zst/tzst/zipx 已剔除（wasm 无 libzstd / jszip 不解 zipx 方法）不得出现在门内
+describe('ARCHIVE_EXTS 嵌套展开门（与 archive 绑定清单一致）', () => {
+  it('含原有 8 个 + 补绑 18 个扩展名', () => {
+    for (const ext of [
+      'zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar',
+      'jar', 'war', 'ear', 'apk', 'cbz', 'cbr',
+      'gzip', 'bzip2', 'tbz', 'tbz2', 'txz', 'lzma',
+      'cab', 'ar', 'cpio', 'xar', 'lha', 'lzh'
+    ]) {
+      expect(ARCHIVE_EXTS.has(ext)).toBe(true);
+    }
+  });
+
+  it('不含被剔除的 zst/tzst/zipx', () => {
+    for (const ext of ['zst', 'tzst', 'zipx']) {
+      expect(ARCHIVE_EXTS.has(ext)).toBe(false);
+    }
+  });
+
+  it('与 archiveRenderer.extensions 双向一致（单一事实源，无重复）', () => {
+    expect(new Set(archiveRenderer.extensions)).toEqual(ARCHIVE_EXTS);
+    expect(archiveRenderer.extensions.length).toBe(ARCHIVE_EXTS.size);
   });
 });
