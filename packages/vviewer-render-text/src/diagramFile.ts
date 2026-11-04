@@ -293,7 +293,9 @@ async function renderDiagramFileBuffer(
 
   /** 源码视图挂载（renderCode 同一高亮链，buffer 引用复用——不重读文件）；失败回退时附提示卡 */
   function mountSource(): void {
-    content.replaceChildren();
+    // M3（Task 4 评审）：重挂前先卸旧实例——showSourceFallback 在源码视图已生效时迟到
+    // 触发（如 kroki img error 晚于用户切源码）会在此重挂，不卸旧则双份高亮实例叠加。
+    unmount();
     target.classList.toggle('vv-degraded', failureNotice !== null);
     if (failureNotice) content.append(failureCard(failureNotice));
     const holder = doc.createElement('div');
@@ -340,13 +342,13 @@ async function renderDiagramFileBuffer(
     };
   }
 
-  function mountImg(url: string, onError: () => void): () => void {
+  function mountImg(url: string, onError: (img: HTMLImageElement) => void): () => void {
     return () => {
       const img = doc.createElement('img');
       img.setAttribute('alt', diagram.id);
       img.setAttribute('src', url);
       // img error 仅真浏览器可派（jsdom 不派）：kroki/官方服务器不可达兜底回退
-      img.addEventListener('error', onError);
+      img.addEventListener('error', () => onError(img));
       content.replaceChildren(img);
     };
   }
@@ -373,7 +375,23 @@ async function renderDiagramFileBuffer(
       }
     }
     const url = await createKrokiUrl(dOpts?.krokiHost ?? DEFAULT_KROKI_HOST, diagram.krokiType, text);
-    return mountImg(url, () => showSourceFallback(`kroki 渲染失败（图片加载错误）：${diagram.id}`));
+    // M1（Task 4 评审，md 管线 kroki 分支同款）：kroki img error 且类型在注册表
+    // officialServer（plantuml/c4plantuml）且 kroki 上游为公共默认 kroki.io 时，src 换
+    // PlantUML 官方服务器 URL（createPlantumlUrl）重试一跳——同一 img/监听器承接两跳，
+    // 换 src 后再 error 落源码回退；自建 krokiHost 不回落（用户明确指定的服务端不得把
+    // 源码静默扩散到第三方，隐私防线），直落源码回退与既有形态一致。
+    const host = (dOpts?.krokiHost || DEFAULT_KROKI_HOST).replace(/\/+$/, '');
+    let officialTried = false;
+    return mountImg(url, (img) => {
+      const fallToSource = (): void => showSourceFallback(`kroki 渲染失败（图片加载错误）：${diagram.id}`);
+      if (diagram.officialServer && !officialTried && host === DEFAULT_KROKI_HOST) {
+        officialTried = true;
+        // 编码外溢失败（pako/btoa 桩炸）直落源码回退；URL 构造成功才换 src
+        createPlantumlUrl(text).then((official) => img.setAttribute('src', official)).catch(fallToSource);
+        return;
+      }
+      fallToSource();
+    });
   }
 
   // official img error → 降 kroki 链（md 管线 official 档同语义）；迟到落定不覆盖已切视图

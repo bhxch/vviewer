@@ -20,6 +20,7 @@ import { setDiagramOptions, type DiagramRenderOptions } from '@bhxch/vviewer-mar
 import { markdownRenderer } from '../src/markdown/markdownRenderer';
 import { htmlRenderer } from '../src/html';
 import { jsonlRenderer } from '../src/jsonl/index';
+import { codeRenderer, renderCode, type RenderCodeHandle } from '../src/code';
 import { DIAGRAM_FILE_EXTS, createDiagramFileRenderers, type DiagramFileRenderOpts } from '../src/diagramFile';
 
 // 引擎层包边界桩（spread real 保留注册表/编码等其余导出，注册面测试不受影响）：
@@ -33,6 +34,13 @@ vi.mock('@bhxch/vviewer-render-diagram', async (importOriginal) => {
     createKrokiUrl: vi.fn(),
     createPlantumlUrl: vi.fn()
   };
+});
+
+// renderCode 包装为透传 spy（real 实现不变，其余测试行为不受影响）：M3 重挂锚需要
+// 观测 diagramFile 对旧 code 实例的 destroy 流转（mockImplementationOnce 换桩句柄）。
+vi.mock('../src/code', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../src/code')>();
+  return { ...real, renderCode: vi.fn(real.renderCode) };
 });
 
 /**
@@ -466,5 +474,95 @@ describe('diagramFile 渲染——源码/渲染切换', () => {
     instance.destroy();
     expect(target.innerHTML).toBe('');
     expect(target.classList.contains('vv-html')).toBe(false);
+  });
+});
+
+// ---------- Task 4 评审修正锚（M3：重挂前卸旧实例） ----------
+
+describe('diagramFile 回退面——重挂源码前卸旧实例（评审 M3）', () => {
+  afterEach(() => {
+    setDiagramOptions(null);
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  /** RenderCodeHandle 生命周期桩（不产真实 DOM——本组只看实例流转） */
+  function stubHandle(destroy: () => void): RenderCodeHandle {
+    return {
+      destroy,
+      search: async () => [],
+      gotoMatch: () => {}
+    } as RenderCodeHandle;
+  }
+
+  it('源码视图已挂载时迟到的 kroki img error 再走 showSourceFallback：重挂前 destroy 旧 code 实例（不叠加高亮）', async () => {
+    // 自建 krokiHost：M1 的官方重试一跳不触发（隐私防线），img error 直走源码回退
+    setOpts({ krokiHost: 'https://kroki.test' }, (lang) => (lang === 'plantuml' ? 'kroki' : 'source'));
+    const { target } = await renderDiagramFile('plantuml', 'plantuml', '@startuml\nA->B\n@enduml');
+    const img = target.querySelector('img');
+    expect(img).not.toBeNull();
+
+    const destroy1 = vi.fn();
+    const destroy2 = vi.fn();
+    vi.mocked(renderCode).mockImplementationOnce(() => stubHandle(destroy1));
+    target.querySelector<HTMLButtonElement>('.vv-html-btn-source')!.click(); // 第一次 mountSource → renderCode #1
+    expect(destroy1).not.toHaveBeenCalled();
+
+    vi.mocked(renderCode).mockImplementationOnce(() => stubHandle(destroy2));
+    // 迟到的 img error（jsdom 不自动派 img error，手动派发；img 虽已脱离 DOM，监听器仍在）
+    img!.dispatchEvent(new Event('error')); // showSourceFallback：view 已 source → 仍会重挂源码
+    expect(vi.mocked(renderCode)).toHaveBeenCalledTimes(2);
+    expect(destroy1, '重挂前必须 unmount 旧实例（否则双份高亮实例叠加）').toHaveBeenCalledTimes(1);
+    expect(destroy2).not.toHaveBeenCalled();
+  });
+});
+
+// ---------- Task 4 评审修正锚（M1：kroki→official 重试一跳，md 管线同款） ----------
+
+describe('diagramFile 回退面——kroki img error 官方重试一跳（评审 M1）', () => {
+  afterEach(() => {
+    setDiagramOptions(null);
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  it('officialServer 型 + 默认 krokiHost：img error 换 createPlantumlUrl 官方 src 重试一跳（同 img），不落源码', async () => {
+    vi.mocked(createKrokiUrl).mockResolvedValue('https://kroki.io/plantuml/svg/AAA');
+    setOpts({ krokiHost: DEFAULT_KROKI_HOST }, (lang) => (lang === 'plantuml' ? 'kroki' : 'source'));
+    const { target } = await renderDiagramFile('plantuml', 'plantuml', '@startuml\nA->B\n@enduml');
+    const img = target.querySelector('img');
+    expect(img!.getAttribute('src')).toBe('https://kroki.io/plantuml/svg/AAA');
+    expect(vi.mocked(createPlantumlUrl)).not.toHaveBeenCalled();
+
+    img!.dispatchEvent(new Event('error'));
+    expect(vi.mocked(createPlantumlUrl), '默认 kroki 上游失败先试官方服务器一跳').toHaveBeenCalledWith(
+      '@startuml\nA->B\n@enduml'
+    );
+    await vi.waitFor(() => expect(img!.getAttribute('src')).toBe('https://plantuml.test/plantuml/svg/DEFAULT'));
+    expect(target.querySelector('.vv-code-body')).toBeNull(); // 重试期不落源码
+    expect(target.querySelector('.vv-error-card')).toBeNull();
+
+    img!.dispatchEvent(new Event('error')); // 官方也失败：两跳后终态源码回退
+    await vi.waitFor(() => expect(target.querySelector('.vv-code-body')).not.toBeNull());
+    expect(target.querySelector('.vv-error-card')).not.toBeNull();
+  });
+
+  it('自建 krokiHost（隐私防线）：img error 不回落官方，直落源码回退', async () => {
+    setOpts({ krokiHost: 'https://kroki.self.test' }, (lang) => (lang === 'plantuml' ? 'kroki' : 'source'));
+    const { target } = await renderDiagramFile('plantuml', 'plantuml', '@startuml\nA->B\n@enduml');
+    target.querySelector('img')!.dispatchEvent(new Event('error'));
+    await vi.waitFor(() => expect(target.querySelector('.vv-code-body')).not.toBeNull());
+    expect(vi.mocked(createPlantumlUrl)).not.toHaveBeenCalled();
+    expect(target.querySelector('.vv-error-card')).not.toBeNull();
+  });
+
+  it('非 officialServer 型（graphviz）：img error 不试官方，直落源码回退', async () => {
+    setOpts({ krokiHost: DEFAULT_KROKI_HOST }, (lang) => (lang === 'graphviz' ? 'kroki' : 'source'));
+    const { target } = await renderDiagramFile('graphviz', 'dot', 'digraph{a->b}');
+    target.querySelector('img')!.dispatchEvent(new Event('error'));
+    await vi.waitFor(() => expect(target.querySelector('.vv-code-body')).not.toBeNull());
+    expect(vi.mocked(createPlantumlUrl)).not.toHaveBeenCalled();
   });
 });
