@@ -1,6 +1,6 @@
 # TabBar 融合菜单与优雅滚动 — e2e 场景（MEN/SCRL/MOB 域）
 
-> 来源：spec `docs/superpowers/specs/2026-11-03-tabbar-consolidation-design.md`（§3 融合菜单 / §4 tab 条滚动 / §5 管理 ▾ 化 / §6.2 新增覆盖）+ plan `docs/superpowers/plans/2026-11-03-tabbar-consolidation.md`（Task 1 融合菜单迁移 / Task 2 滚动三件 / Task 3 管理 ▾ 化 / Task 4 本域落册）。现状脚本：`apps/web/e2e/b-tabbar-menu.spec.ts`（MEN-01..05 + MOB-01，Task 4 新域）与 `apps/web/e2e/b-tabbar-scroll.spec.ts`（SCRL-01..07，Task 2）。spec §6.2 的「新域 `b-tabbar-menu`」落为**结构性拆分的两文件**——箭头/滚动用例随 Task 2 commit 独立成文件、融合菜单用例随 Task 4 commit 成文件，本域文档统一收册两者，编号体系不变（b-tabbar-scroll.spec.ts 文件头注同口径备案）。公共装置：`apps/web/e2e/tabbar-menu.ts`（Task 1 交付：`TABBAR_MENU`/`TRIGGER`/`MENU_POP`/`openMenu`/`openSubmenu('工作区'|'打开'|'主题')`/`menuOpenFile`/`menuOpenFolder`/`menuOpenUrl`/`menuConnectServer`）。
+> 来源：spec `docs/superpowers/specs/2026-11-03-tabbar-consolidation-design.md`（§3 融合菜单 / §4 tab 条滚动 / §5 管理 ▾ 化 / §6.2 新增覆盖）+ plan `docs/superpowers/plans/2026-11-03-tabbar-consolidation.md`（Task 1 融合菜单迁移 / Task 2 滚动三件 / Task 3 管理 ▾ 化 / Task 4 本域落册）。现状脚本：`apps/web/e2e/b-tabbar-menu.spec.ts`（MEN-01..05 + MOB-01，Task 4 新域）与 `apps/web/e2e/b-tabbar-scroll.spec.ts`（SCRL-01..08，Task 2 + 终审修复波 SCRL-08 触屏滑动补口）。spec §6.2 的「新域 `b-tabbar-menu`」落为**结构性拆分的两文件**——箭头/滚动用例随 Task 2 commit 独立成文件、融合菜单用例随 Task 4 commit 成文件，本域文档统一收册两者，编号体系不变（b-tabbar-scroll.spec.ts 文件头注同口径备案）。公共装置：`apps/web/e2e/tabbar-menu.ts`（Task 1 交付：`TABBAR_MENU`/`TRIGGER`/`MENU_POP`/`openMenu`/`openSubmenu('工作区'|'打开'|'主题')`/`menuOpenFile`/`menuOpenFolder`/`menuOpenUrl`/`menuConnectServer`）。
 
 ## 1. 目的与来源
 
