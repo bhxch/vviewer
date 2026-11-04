@@ -264,8 +264,9 @@ test('TA-01：右键菜单六动作逐一 + 置灰态可点击无动作', async 
   // ① 置灰态（栈空 + 最右 tab 右侧无普通 tab）：项齐全、置灰项可点击但无动作
   await openTabMenu(page, 'cc.txt');
   // Task 3：六动作 + 「打开方式」子菜单父项 = 顶层 7 项；spec 2026-10-23 §4.2 增
-  // 「语言：…（在属性面板中修改）」只读跳转项（AppShell 聚焦语言行）→ 顶层 8 项
-  await expect(page.locator('.vv-tabctx-item')).toHaveCount(8);
+  // 「语言：…（在属性面板中修改）」只读跳转项（AppShell 聚焦语言行）→ 顶层 8 项；
+  // 计划 2 Task 7（spec §6.4）增第七动作「另存为」→ 顶层 9 项
+  await expect(page.locator('.vv-tabctx-item')).toHaveCount(9);
   await expect(menuItem(page, '关闭右侧')).toHaveAttribute('aria-disabled', 'true');
   await expect(menuItem(page, '重新打开已关闭标签')).toHaveAttribute('aria-disabled', 'true');
   await expect(menuItem(page, '关闭')).not.toHaveAttribute('aria-disabled', 'true');

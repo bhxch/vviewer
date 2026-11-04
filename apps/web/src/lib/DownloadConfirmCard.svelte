@@ -14,13 +14,18 @@
     sizeBytes,
     rendererLabel,
     onconfirm,
-    oncancel
+    oncancel,
+    onsaveas
   }: {
     name: string;
     sizeBytes: number;
     rendererLabel: string;
     onconfirm: () => void;
     oncancel: () => void;
+    /** 「下载并另存为」次动作（计划 2 Task 7，spec §6.4 双形态二）：仅 FS Access
+     * 可用环境传入（ViewerPane 以 showSaveFilePicker 探测装配）；缺省不渲染按钮
+     * （降级为普通下载路径——spec「无 FS Access 环境降级为普通下载」）。 */
+    onsaveas?: () => void;
   } = $props();
 </script>
 
@@ -37,6 +42,11 @@
   <div class="vv-dl-confirm-impact">下载期间文件将全量读入内存，超大文件可能造成卡顿或内存压力。</div>
   <div class="vv-dl-confirm-actions">
     <button type="button" class="vv-dl-confirm-start" onclick={onconfirm}>开始下载</button>
+    {#if onsaveas !== undefined}
+      <!-- 双形态二（Task 7）：泵字节 tee 直写 FS writable 落盘 + 渲染并行（句柄已
+           在确认卡点击的 user gesture 内选定，ViewerPane effect 重跑消费） -->
+      <button type="button" class="vv-dl-confirm-saveas" onclick={onsaveas}>下载并另存为</button>
+    {/if}
     <button type="button" class="vv-dl-confirm-cancel" onclick={oncancel}>取消</button>
   </div>
 </div>

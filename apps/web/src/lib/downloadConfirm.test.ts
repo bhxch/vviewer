@@ -76,6 +76,13 @@ describe('DownloadConfirmCard 骨架（spec §6.4 确认卡字段全锚）', () 
     expect(src).toMatch(/role="alertdialog"/);
     expect(src).toMatch(/aria-label="确认下载"/);
   });
+
+  it('「下载并另存为」次动作（计划 2 Task 7 双形态二）：onsaveas 缺省不渲染（无 FS Access 降级普通下载路径）', () => {
+    expect(src).toMatch(/onsaveas\?: \(\) => void/);
+    expect(src).toMatch(/\{#if onsaveas !== undefined\}/);
+    expect(src).toContain('>下载并另存为</button>');
+    expect(src).toMatch(/class="vv-dl-confirm-saveas"/);
+  });
 });
 
 // ---------- 接线契约：ViewerPane（门公式/泵前置拦截位/确认取消流转/生命周期锚） ----------

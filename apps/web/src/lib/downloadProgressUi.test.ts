@@ -118,9 +118,9 @@ describe('进度卡三帧数据流（不定态→有 total→速度稳）：trac
 describe('DownloadProgressCard 骨架（spec §6.4 字段全锚）', () => {
   const src = readSrc('src/lib/DownloadProgressCard.svelte');
 
-  it('props 三件套：snapshot + address + oncancel（取消经回调上抛，组件不持 AbortController）', () => {
-    expect(src).toMatch(/snapshot: ProgressSnapshot/);
-    expect(src).toMatch(/address: string/);
+  it('props：snapshot（可空，完成态分支不消费）+ address + oncancel（取消经回调上抛，组件不持 AbortController）', () => {
+    expect(src).toMatch(/snapshot: ProgressSnapshot \| null/);
+    expect(src).toMatch(/address\?: string/);
     expect(src).toMatch(/oncancel: \(\) => void/);
   });
 
@@ -160,6 +160,29 @@ describe('DownloadProgressCard 骨架（spec §6.4 字段全锚）', () => {
   });
 });
 
+// ---------- 组件契约：DownloadProgressCard 完成态（计划 2 Task 7，spec §6.4「完成后另存为」） ----------
+
+describe('DownloadProgressCard 完成态骨架（Task 7 双动作之一）', () => {
+  const src = readSrc('src/lib/DownloadProgressCard.svelte');
+
+  it('done 形态：标题「下载完成」+ 文件名/总大小 + 另存为/关闭双动作（onsaveas/onclose 上抛）', () => {
+    expect(src).toMatch(/vv-dl-progress-done/);
+    expect(src).toContain('下载完成');
+    expect(src).toMatch(/done\.name/);
+    expect(src).toMatch(/\{#if done\.totalText !== null\}/);
+    expect(src).toContain('>另存为</button>');
+    expect(src).toContain('>关闭</button>');
+    expect(src).toMatch(/onclick=\{onsaveas\}/);
+    expect(src).toMatch(/onclick=\{onclose\}/);
+  });
+
+  it('形态互斥：done 非 null 走完成态分支，snapshot 行（进度条/取消钮）仅在下载中分支', () => {
+    expect(src).toMatch(/\{#if done !== null\}/);
+    // 下载中形态在 {:else if snapshot !== null} 分支：完成态不渲染进度条/取消
+    expect(src).toMatch(/\{:else if snapshot !== null\}/);
+  });
+});
+
 // ---------- 接线契约：ViewerPane（装配门/取消链路/生命周期锚） ----------
 
 describe('ViewerPane 进度卡接线（计划 2 Task 4）', () => {
@@ -183,13 +206,13 @@ describe('ViewerPane 进度卡接线（计划 2 Task 4）', () => {
     expect(src).toMatch(/function cancelDownload\(\): void \{[\s\S]{0,80}dlProgress = null/);
   });
 
-  it('完成让位：dispatch resolve 后先卸卡再接管 host（live = res.instance 前清 dlProgress）', () => {
-    expect(src).toMatch(/dlProgress = null;[\s\S]{0,200}live = res\.instance/);
+  it('完成让位：dispatch resolve 后先卸卡再接管 host（live = res.instance 前清 dlProgress；Task 7 tee 收口/完成态卡居间，窗口放宽）', () => {
+    expect(src).toMatch(/dlProgress = null;[\s\S]{0,900}live = res\.instance/);
   });
 
   it('abort 静默面：resolve 守卫扩 effectAbort.signal.aborted（取消钮路径的 no-op 实例丢弃）；catch 先卸卡再分流', () => {
     expect(src).toMatch(/if \(cancelled \|\| effectAbort\.signal\.aborted\) \{/);
-    expect(src).toMatch(/catch \(err\) \{[\s\S]{0,200}dlProgress = null;[\s\S]{0,400}isAbortError\(err\)/);
+    expect(src).toMatch(/catch \(err\) \{[\s\S]{0,500}dlProgress = null;[\s\S]{0,800}isAbortError\(err\)/);
   });
 
   it('abort 残卡防御（评审 M-3）：abort 收场分支与完成态同生命周期——卸卡 + 清地址行', () => {
@@ -210,6 +233,43 @@ describe('ViewerPane 进度卡接线（计划 2 Task 4）', () => {
     expect(src).toMatch(/snapshot=\{dlProgress\}/);
     expect(src).toMatch(/address=\{dlAddress\}/);
     expect(src).toMatch(/oncancel=\{cancelDownload\}/);
+  });
+});
+
+// ---------- 接线契约：ViewerPane 另存为（计划 2 Task 7，spec §6.4 双形态） ----------
+
+describe('ViewerPane 另存为接线（Task 7）', () => {
+  const src = readSrc('src/lib/ViewerPane.svelte');
+
+  it('完成态卡装配：远端 tracker 在场才装（本地零感知），TTL 定时自动卸载；cleanup/守卫分支双路清偿', () => {
+    expect(src).toMatch(/if \(tracker !== null\) \{[\s\S]{0,200}dlDone = \{/);
+    expect(src).toMatch(/DL_DONE_TTL_MS/);
+    expect(src).toMatch(/function clearDlDone\(\): void \{[\s\S]{0,160}dlDone = null;/);
+    expect(src).toMatch(/clearDlDone\(\); \/\/ 完成态卡随 effect 清偿卸载/);
+  });
+
+  it('「下载并另存为」tee：确认卡次动作句柄键比对消费（跨 tab 误配丢弃），read 闭包直写 writable（写失败不回灌渲染）', () => {
+    expect(src).toMatch(/dlSaveHandle = \{ key, handle \}/);
+    expect(src).toMatch(/savePick\.key === dlKey \? savePick\.handle : null/);
+    expect(src).toMatch(/await saveHandle\.createWritable\(\)\.catch\(\(\) => null\)/);
+    expect(src).toMatch(/await w\.write\(chunk\)/);
+    expect(src).toMatch(/saveWriteFailed = true;/);
+    // 收口三路：成功 close / abort 半成品 / cleanup abort
+    expect(src).toMatch(/if \(saveWriteFailed\) void w\.abort\(\)\.catch\(\(\) => \{\}\);/);
+    expect(src).toMatch(/else void w\.close\(\)\.catch\(\(\) => \{\}\);/);
+  });
+
+  it('完成态「另存为」走 saveAsTab 统一管线（确认门自动放行——已下载过一次）；失败上状态栏', () => {
+    expect(src).toMatch(/await saveAsTab\(t, \{ confirm: \(\) => true \}\)/);
+    expect(src).toMatch(/showStatusNotice\(`另存为失败：/);
+  });
+
+  it('模板双分支：进度卡（dlProgress）/完成态卡（dlDone）互斥；确认卡 onsaveas 仅 FS Access 可用环境装配', () => {
+    expect(src).toMatch(/\{:else if dlDone\}/);
+    expect(src).toMatch(/onsaveas=\{canFsSave \? \(\) => void confirmSaveAsDownload\(\) : undefined\}/);
+    expect(src).toMatch(
+      /typeof \(window as unknown as \{ showSaveFilePicker\?: unknown \}\)\.showSaveFilePicker === 'function'/
+    );
   });
 });
 

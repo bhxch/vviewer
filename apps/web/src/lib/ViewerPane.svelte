@@ -22,10 +22,11 @@
   import { relativeDate, repoRelPath, subjectOf } from './git/gitUi';
   import { codeLineMetrics } from './theme';
   import { loadSettings } from './stores/settings';
-  import { watchHealth, statusNotice } from './openFlow.svelte';
+  import { showStatusNotice, watchHealth, statusNotice } from './openFlow.svelte';
   import { isMountRootStoreId } from './serverHealthCache';
-  import { createProgressTracker, dlAddressText, isRemoteDownload, type ProgressSnapshot } from './downloadProgress';
+  import { createProgressTracker, dlAddressText, formatBytes, isRemoteDownload, type ProgressSnapshot } from './downloadProgress';
   import { mbToBytes, shouldConfirm } from './downloadConfirm';
+  import { saveAsTab } from './saveAs';
   import { displayEndpointForStore } from './mountsSync';
 import SearchPanel from './SearchPanel.svelte';
 import DownloadProgressCard from './DownloadProgressCard.svelte';
@@ -166,6 +167,72 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
   /** 确认卡「取消」（spec §6.4）：静默中止——不 dispatch、无在飞泵、无错误卡（与
    * 进度卡取消同域的静默面），卸卡即可；确认键不登记，同文件下次渲染重问。 */
   function cancelConfirm(): void {
+    dlConfirm = null;
+  }
+
+  // ---------- 另存为（计划 2 Task 7，spec §6.4 另存为双形态 + tab 级泛化） ----------
+  /** 完成态卡数据（进度卡 done 形态唯一数据源）：远端 dispatch 成功后装配；「另存为」
+   * /「关闭」点击卸卡，TTL 自动卸载（DL-PROG-01「完成后卡自动卸载」锚）。本地来源
+   * 无进度卡（tracker null）故无完成态。 */
+  let dlDone = $state<{ name: string; totalText: string | null } | null>(null);
+  /** 完成态自动卸载定时（非响应式）：手动卸卡与 effect cleanup 双路清偿 */
+  let dlDoneTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 完成态保留时长（ms）：完成反馈窗，超时自动让位（浮层不占布局，内容并行渲染） */
+  const DL_DONE_TTL_MS = 4000;
+
+  function clearDlDone(): void {
+    if (dlDoneTimer !== null) {
+      clearTimeout(dlDoneTimer);
+      dlDoneTimer = null;
+    }
+    dlDone = null;
+  }
+
+  /** 完成态「另存为」（spec §6.4）：saveAsTab 统一管线（TabContextMenu 第七动作同
+   * 管道）——本地/归档面 store.read 单次在手字节；远端面重下泵取数（字节在渲染实例
+   * 内无取回缝，core dispatch 只交付实例——二次传输备案取舍；零重传形态=确认卡
+   * 「下载并另存为」tee 直写）。确认门自动放行：文件刚下载过（知情面已过一次）。 */
+  async function saveAsCompleted(): Promise<void> {
+    const t = tab;
+    if (t === null) return;
+    clearDlDone();
+    try {
+      await saveAsTab(t, { confirm: () => true });
+    } catch (err) {
+      showStatusNotice(`另存为失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /** 「下载并另存为」选定的句柄（非响应式）：确认卡次动作在 user gesture 内 picker
+   * 选定后携带确认作用域键暂存，渲染 effect 重跑（dlApprovedKey 写入触发）过门时
+   * 消费（读取即清）；键比对防陈旧句柄跨 tab 误写（picker 等待期切 tab 的选择作废）。 */
+  let dlSaveHandle: { key: string; handle: FileSystemFileHandle } | null = null;
+
+  /** FS Access 可用性（「下载并另存为」按钮装配门）：showSaveFilePicker 探测，缺席
+   * 环境确认卡只渲染普通下载路径（spec「无 FS Access 环境降级为普通下载路径」）。 */
+  const canFsSave =
+    typeof window !== 'undefined' &&
+    typeof (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker === 'function';
+
+  /** 确认卡「下载并另存为」（spec §6.4 双形态二）：picker 先选句柄（右键/点击的
+   * user gesture 内弹出）→ 登记确认作用域键（与「开始下载」同通道触发 effect 重跑
+   * 过门）→ dispatch read 闭包 tee 直写（装配见渲染 effect）。取消/授权拒绝静默：
+   * 确认卡留守，可改选「开始下载」或「取消」。 */
+  async function confirmSaveAsDownload(): Promise<void> {
+    if (dlConfirm === null) return;
+    const key = dlConfirm.key;
+    const w = window as unknown as {
+      showSaveFilePicker?: (opts?: { suggestedName?: string }) => Promise<FileSystemFileHandle>;
+    };
+    if (typeof w.showSaveFilePicker !== 'function') return; // 探测装配：按钮在场即支持
+    let handle: FileSystemFileHandle;
+    try {
+      handle = await w.showSaveFilePicker({ suggestedName: dlConfirm.name });
+    } catch {
+      return; // AbortError/NotAllowedError：静默留守确认卡（取消不是错误）
+    }
+    dlSaveHandle = { key, handle };
+    dlApprovedKey = key;
     dlConfirm = null;
   }
 
@@ -638,9 +705,11 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
     lastSeenTab = tab;
     // 确认卡孤儿清偿（评审 I-1）：守卫分支（host 未挂/占位/目录 tab）return 前清
     // dlConfirm——确认等待期关 tab/切目录 tab 不留孤儿卡；门分支在守卫后装配、门
-    // 通过路径另有清偿，不受影响（写非依赖 state 无自读自写环，pickerExpanded 同款）
+    // 通过路径另有清偿，不受影响（写非依赖 state 无自读自写环，pickerExpanded 同款）。
+    // 完成态卡同域清偿（Task 7：上一轮 cleanup 已清，此处对齐防御）
     if (!host || !tab || tab.source.path === '') {
       dlConfirm = null;
+      clearDlDone();
       return;
     }
     const current = tab;
@@ -682,6 +751,15 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
       return;
     }
     dlConfirm = null;
+    // 「下载并另存为」句柄消费（Task 7）：确认卡次动作选定的本轮在场则 tee 直写；
+    // 读取即清 + 键比对（陈旧句柄/跨 tab 误配丢弃——普通「开始下载」路径恒 null）。
+    const savePick = dlSaveHandle;
+    dlSaveHandle = null;
+    const saveHandle = savePick !== null && savePick.key === dlKey ? savePick.handle : null;
+    // tee 写盘面（IIFE 装配 / 收口清偿）：成功 close 落盘、取消·失败·cleanup abort
+    // 丢弃半成品（saveWriteFailed 置位时成功路亦 abort）
+    let saveWritable: FileSystemWritableFileStream | null = null;
+    let saveWriteFailed = false;
     let cancelled = false;
     // markdown 图表主题桥的解绑句柄（异步装配成功才有值；cleanup 同步清偿）
     let offThemeBridge: (() => void) | null = null;
@@ -726,6 +804,15 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
           );
           dlAbort = effectAbort; // 取消柄 = effect 级 controller（取消钮与 cleanup 同源）
         }
+        // 「下载并另存为」tee 装配（Task 7，spec §6.4 双形态二）：句柄在场 → writable
+        // 开启（失败降级普通下载路径）；dispatch 的 read 闭包把泵的每个分块在返回前
+        // 直写 writable（泵逐块 await read，顺序写天然保序）。deviation 备案：渲染仍
+        // 走内存 buffer（盘 backed File 交渲染需 core dispatch 接受流源，本批不动
+        // core）——写盘流式落地、内存峰值与普通路径同；getFile 回填在 deviation 下
+        // 无消费面不取，真·盘 backed 形态留 core 流源接缝跟进（task-7 报告备案）。
+        if (saveHandle !== null) {
+          saveWritable = await saveHandle.createWritable().catch(() => null);
+        }
         const res = await dispatcher.dispatch(current.source, null, host, {
           rendererOverride: current.overrideRenderer,
           // 手动高亮语言（spec §4.1）：Task 3 setHighlightLang 写入 Tab.overrideLang，
@@ -740,10 +827,25 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
           // effectAbort.signal 合并（缺省直通，双侧缺省维持无 opts 调用形态）
           read: (range, signal) => {
             const merged = mergeAbortSignals(signal, effectAbort.signal);
-            return current.source.store.read(
+            const p = current.source.store.read(
               current.source.path,
               range !== undefined || merged !== undefined ? { range, signal: merged } : undefined
             );
+            if (saveWritable === null) return p;
+            // tee（下载并另存为）：块返回前直写 writable——写失败不回灌渲染主路
+            //（盘面失败吞掉置位 saveWriteFailed，收口时 abort 丢弃半成品），字节流
+            // 照常交付 dispatch（渲染优先，盘面成败不阻断内容装载）
+            return p.then(async (chunk) => {
+              const w = saveWritable;
+              if (w !== null) {
+                try {
+                  await w.write(chunk);
+                } catch {
+                  saveWriteFailed = true;
+                }
+              }
+              return chunk;
+            });
           },
           // 进度卡（spec §6.4）：仅远端来源 tracker 在场时传入（条件展开维持本地来源
           // 的无 onReadProgress 调用形态——Task 2「缺省零行为变化」的调用面锚）
@@ -760,11 +862,38 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
           res.instance.destroy();
           dlProgress = null;
           dlAddress = '';
+          // tee 半成品丢弃（Task 7）：取消的「下载并另存为」不在盘上留临时文件
+          if (saveWritable !== null) {
+            const w = saveWritable;
+            saveWritable = null;
+            void w.abort().catch(() => {});
+          }
           return;
         }
         // 进度卡卸载（spec §6.4 完成态自动让位渲染）：渲染实例接管 host 前清快照
         dlProgress = null;
         dlAddress = '';
+        // tee 收口（Task 7）：写失败 abort 丢弃半成品，成功 close 落盘（flush 异步，
+        // fire-and-forget——渲染接管不等盘面）
+        if (saveWritable !== null) {
+          const w = saveWritable;
+          saveWritable = null;
+          if (saveWriteFailed) void w.abort().catch(() => {});
+          else void w.close().catch(() => {});
+        }
+        // 完成态卡（Task 7，spec §6.4「完成后另存为」）：远端下载路径装配（tracker
+        // 非 null），TTL 自动卸载（DL-PROG-01 完成后卡自动卸载锚）；浮层不占布局，
+        // 内容渲染并行接管。「另存为」走 saveAsTab 统一管线（saveAsCompleted）。
+        if (tracker !== null) {
+          dlDone = {
+            name: current.source.name,
+            totalText: dlSize !== null ? formatBytes(dlSize) : null
+          };
+          dlDoneTimer = setTimeout(() => {
+            dlDoneTimer = null;
+            dlDone = null;
+          }, DL_DONE_TTL_MS);
+        }
         live = res.instance;
         instance = res.instance;
         // markdown 图表主题桥接（@bhxch/vviewer-markdown 切换）：包内不再监听 vv:* 事件，
@@ -886,6 +1015,12 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
         // 都不得残留进度卡）
         dlProgress = null;
         dlAddress = '';
+        // tee 半成品丢弃（Task 7）：失败/取消的「下载并另存为」不在盘上留临时文件
+        if (saveWritable !== null) {
+          const w = saveWritable;
+          saveWritable = null;
+          void w.abort().catch(() => {});
+        }
         // store.read 失败（如会话占位 tab、句柄失效）也走错误卡片；abort 不上屏
         //（deferred 清偿 Task 5 裁决）：effect 级/实例级取消的 AbortError 不落读取
         // 失败卡片——取消不是读失败，静默 return 交新一轮渲染接管（dispatch 侧
@@ -918,6 +1053,14 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
       dlProgress = null; // 进度卡随 effect 清偿卸载（计划 2 Task 4：tab 切换/重渲染不留孤儿卡）
       dlAddress = '';
       dlAbort = null; // 取消柄引用清偿（effectAbort 已在上方 abort，取消钮此后无在飞下载可断）
+      clearDlDone(); // 完成态卡随 effect 清偿卸载（Task 7：TTL 定时一并清偿）
+      if (saveWritable !== null) {
+        // tee 半成品丢弃（Task 7）：tab 切换/重渲染打断的「下载并另存为」不留临时文件
+        const w = saveWritable;
+        saveWritable = null;
+        void w.abort().catch(() => {});
+      }
+      dlSaveHandle = null; // 未消费的句柄选择作废（陈旧键防误写消费面在本轮 body，此为兜底清偿）
       offThemeBridge?.(); // 图表主题桥随实例销毁摘除（applyTheme 通道，不跨实例泄漏）
       offThemeBridge = null;
       cancelAnimationFrame(rafId);
@@ -978,12 +1121,26 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
          且 path 非空，目录/占位分支天然不出现）；完成/失败/取消/tab 切换 →
          dlProgress 清空即卸卡让位 -->
     <DownloadProgressCard snapshot={dlProgress} address={dlAddress} oncancel={cancelDownload} />
+  {:else if dlDone}
+    <!-- 完成态卡（计划 2 Task 7，spec §6.4「完成后另存为」）：下载完成反馈 + 「另存为」
+         （saveAsTab 统一管线，TabContextMenu 第七动作同管道）与「关闭」，TTL 自动卸载
+         （DL-PROG-01 完成后卡自动卸载锚）。浮层不占布局——内容渲染并行接管，卡只是
+         反馈窗 -->
+    <DownloadProgressCard
+      snapshot={null}
+      done={dlDone}
+      oncancel={cancelDownload}
+      onsaveas={() => void saveAsCompleted()}
+      onclose={clearDlDone}
+    />
   {/if}
   {#if dlConfirm}
     <!-- 下载确认卡（计划 2 Task 6，spec §6.4 确认门）：进度卡同域 pane 级浮层。
          泵前置拦截——渲染 effect 在 dispatch 前装配（远端来源 size 已知且超阈值），
          「开始下载」登记确认作用域键后 effect 重跑过门进 dispatch（进度卡接力），
-         「取消」静默中止（不 dispatch 无错误卡）。挂载条件仅 dlConfirm 非空（门
+         「下载并另存为」（Task 7 双形态二）同通道 + 句柄 tee 直写（confirmSaveAsDownload），
+         「取消」静默中止（不 dispatch 无错误卡）。onsaveas 仅 FS Access 可用环境装配
+         （canFsSave 探测，缺席环境降级普通下载路径）。挂载条件仅 dlConfirm 非空（门
          分支装配，门通过/取消/清理即卸） -->
     <DownloadConfirmCard
       name={dlConfirm.name}
@@ -991,6 +1148,7 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
       rendererLabel={dlConfirm.rendererLabel}
       onconfirm={confirmDownload}
       oncancel={cancelConfirm}
+      onsaveas={canFsSave ? () => void confirmSaveAsDownload() : undefined}
     />
   {/if}
   {#if searchOpen && instance}

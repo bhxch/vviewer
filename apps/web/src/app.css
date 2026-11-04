@@ -156,6 +156,11 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
 .vv-dl-progress-meta { display: flex; gap: .75rem; flex-wrap: wrap;
   color: var(--ui-fg-muted); font-size: var(--vv-fs-xs); }
 .vv-dl-progress-cancel { align-self: flex-start; cursor: pointer; padding: .15rem .75rem; }
+/* 完成态（Task 7 spec §6.4「完成后另存为」）：同卡 done 形态——动作行（另存为/关闭），
+   自动卸载 TTL 由 ViewerPane 承担 */
+.vv-dl-progress-actions { display: flex; gap: .5rem; }
+.vv-dl-progress-saveas { cursor: pointer; padding: .15rem .75rem; }
+.vv-dl-progress-close { cursor: pointer; padding: .15rem .75rem; }
 /* 下载确认卡（DownloadConfirmCard，计划 2 Task 6 spec §6.4 确认门）：与进度卡同域
    同锚的 pane 级浮层（泵前置拦截面），样式骨架复用 .vv-dl-progress 区形态；
    alertdialog 语义——超阈值远端下载先确认后泵（知情自担无硬上限，spec 裁决） */
@@ -171,6 +176,7 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
 .vv-dl-confirm-impact { color: var(--ui-fg-muted); font-size: var(--vv-fs-xs); overflow-wrap: anywhere; }
 .vv-dl-confirm-actions { display: flex; gap: .5rem; }
 .vv-dl-confirm-start { cursor: pointer; padding: .15rem .75rem; }
+.vv-dl-confirm-saveas { cursor: pointer; padding: .15rem .75rem; }
 .vv-dl-confirm-cancel { cursor: pointer; padding: .15rem .75rem; }
 /* html 沙箱预览（htmlRenderer）：顶部视图按钮组 + iframe/源码内容区 */
 .vv-html { display: flex; flex-direction: column; height: 100%; }

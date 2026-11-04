@@ -1,10 +1,12 @@
 <script lang="ts">
   import type { Tab } from './openFlow.svelte';
   import type { WorkspaceSource } from './workspaceStore';
-  import { activateTab, closeTab, closedStackSize, reopenClosed, tabStore } from './openFlow.svelte';
+  import { activateTab, closeTab, closedStackSize, reopenClosed, showStatusNotice, tabStore } from './openFlow.svelte';
   import { reorderIds } from './tabOrder';
   import { arrowVisibility, dominantWheelDelta } from './tabScroll';
   import { badgeOf } from './tabBadge';
+  import { formatBytes } from './storageHealth';
+  import { saveAsDisabledOf, saveAsTab } from './saveAs';
   import { registry } from './viewer';
   import { rendererCandidatesOfTab } from './RendererPickerMenu';
   import { requestMetaLangFocus } from './metaLangFocus';
@@ -96,7 +98,12 @@
    * 影响。其中「更多渲染器」二级子菜单（TabCtxEntry children 递归）= 「自动」头项
    * + registry 全量（语义不变：默认受限、更多=任意），✓ 按显式 overrideRenderer
    * 回显（头项在 overrideRenderer === undefined 时打 ✓——自动路由无显式 override，
-   * 与受限面/展开面的「自动」头项同形；终审 M-1 补齐缺落的头项）。
+   * 与受限面/展开面的「自动」头项同形；终审 M-1 补齐缺落的头项）。第七动作「另存为」
+   * （计划 2 Task 7，spec §6.4 tab 级泛化）：占位（unrestorable）/错误（lastRendererId
+   * 'error'）/目录（path ''）置灰（saveAsDisabledOf 单源判定）；动作分发进 saveAs
+   * 管线（saveAsTab：在手/zipStore 读全量或远端泵+确认门→saveAsBlob），右键点击即
+   * user gesture，picker 直接弹出；失败上状态栏一次性提示（BUG-19 通道），用户取消
+   * picker 静默（saveAsBlob 取消语义）。
    */
   // 回调显式标注返回 TabCtxEntry[]：字面量数组的联合推断会给缺省属性填
   // `undefined` 型，过不了 $derived 泛型边界（子菜单父项无 onClick 的推断面）
@@ -163,6 +170,24 @@
         onClick: () => {
           activateTab(tab.id);
           requestMetaLangFocus();
+        }
+      },
+      {
+        // 另存为（Task 7，spec §6.4）：置灰判定 saveAsDisabledOf（占位/错误/目录），
+        // 动作进 saveAs 管线（saveAsTab）。远端超阈值确认门钩子用 window.confirm
+        // （WorkspaceList/FileTree 同款原生确认先例——右键手势内可弹）：明示文件/
+        // 体量与内存影响；拒绝 = cancelled 静默。
+        label: '另存为',
+        disabled: saveAsDisabledOf(tab),
+        onClick: () => {
+          void saveAsTab(tab, {
+            confirm: (info) =>
+              window.confirm(
+                `「${info.name}」约 ${formatBytes(info.sizeBytes)}，超过远端下载确认阈值：将全量拉取到内存后再另存。继续？`
+              )
+          }).catch((err: unknown) => {
+            showStatusNotice(`另存为失败：${err instanceof Error ? err.message : String(err)}`);
+          });
         }
       }
     ];
