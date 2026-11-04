@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createRegistry } from '../src/registry/registry';
 import { createDispatcher, signatureRouteOf } from '../src/dispatch/dispatcher';
+import { abortReadError, isAbortError } from '../src/dispatch/errors';
 import type { Detection, Renderer, StreamCtx, TreeStore } from '../src/types';
 
 const mk = (id: string, exts: string[], over: Partial<Renderer> = {}): Renderer => ({
@@ -1151,5 +1152,236 @@ describe('dispatch 读下沉（io-streaming §3：streaming 选路 + StreamCtx �
       expect((caught as Error).name).toBe('DispatchReadError'); // 读失败被标记
       expect((caught as Error).message).toBe('range io gone'); // 原错误 message 透传
     });
+  });
+});
+
+// ---------- 计划 2 Task 2：全量物化分块泵 + onReadProgress 钩子（spec §6.4） ----------
+//
+// store-backed 全量拉取（≤1MB 策略直读 + 延迟补拉 readFull 的两个调用点）在
+// onReadProgress 在场时改 4MiB 分块循环：逐 Range 断言（4MiB 对齐/末块收口/loaded
+// 累计/total 正确或未知 null）；abort 中途 signal 贯穿每次 range 读且异常落既有
+// abort 错误身份（isAbortError，不新建错误形态）；小文件（≤4MiB）单块路径与现行为
+// 逐字节等价。onReadProgress 缺省零行为变化——上方「dispatch 读下沉」既有用例
+//（③⑦⑧⑨⑫⑬ 等钉住无 range 全量读形态）即零翻转锚，④ 为 size 已知 >1MB 的显式补锚。
+
+describe('dispatch 全量物化分块泵（计划 2 Task 2，spec §6.4）', () => {
+  const CHUNK = 4 * 1024 * 1024; // 4MiB（与实现常量同值：锚定分块对齐）
+
+  function pumpStore(rangeCapable?: boolean): TreeStore {
+    return {
+      id: 'pump', displayName: () => 'pump', listChildren: async () => [],
+      read: async () => new Uint8Array(0), rangeCapable
+    };
+  }
+  function pumpSrc(name: string, size?: number | null, rangeCapable?: boolean) {
+    return { storeId: 's', storeLabel: 's', path: name, name, store: pumpStore(rangeCapable), size };
+  }
+  type PumpCall = { range: { start: number; end: number } | undefined; signal: AbortSignal | undefined };
+  /** 生成式 read 闭包：字节 = (start+i)&0xff（区间连续 ⇒ 拼接结果 = 全局 i&0xff）；
+   * eofAt 非 null 时以「clamp 到 eofAt」模拟 size 未知来源的 EOF（超出即短读/空读）；
+   * 记录每次 (range, signal)。 */
+  function genRead(
+    eofAt: number | null,
+    calls: PumpCall[]
+  ): (range?: { start: number; end: number }, signal?: AbortSignal) => Promise<Uint8Array<ArrayBuffer>> {
+    return async (range, signal) => {
+      calls.push({ range, signal });
+      const len = range
+        ? (eofAt === null
+          ? range.end - range.start + 1
+          : Math.max(0, Math.min(range.end - range.start + 1, eofAt - range.start)))
+        : eofAt!; // 无 range 全量读（既有缺省形态）：交付 eofAt 全量
+      const chunk = new Uint8Array(Math.max(0, len));
+      for (let i = 0; i < chunk.length; i++) chunk[i] = ((range?.start ?? 0) + i) & 0xff;
+      return chunk;
+    };
+  }
+
+  it('① size 已知 >4MiB：4MiB 对齐分块 + 末块收口，loaded 累计/total=size，渲染收拼接全量', async () => {
+    const reg = createRegistry();
+    const SIZE = CHUNK + 1; // 4MiB+1：恰两块（4MiB 整块 + 1B 末块）
+    const calls: PumpCall[] = [];
+    const reports: Array<{ loaded: number; total: number | null }> = [];
+    let seenBuf: Uint8Array | undefined;
+    reg.install(mk('plain', ['pln'], {
+      render: async (buffer) => { seenBuf = buffer; return { destroy() {} }; }
+    }));
+    await createDispatcher(reg).dispatch(
+      pumpSrc('a.pln', SIZE), null, document.createElement('div'),
+      { read: genRead(SIZE, calls), onReadProgress: (p) => reports.push(p) });
+    // head 探测（size>1MB 不直读）+ 泵两 Range：4MiB 对齐、末块 {4MiB, 4MiB} 收口
+    expect(calls.map((c) => c.range)).toStrictEqual([
+      { start: 0, end: 8191 },
+      { start: 0, end: CHUNK - 1 },
+      { start: CHUNK, end: SIZE - 1 }
+    ]);
+    expect(reports).toStrictEqual([
+      { loaded: CHUNK, total: SIZE }, { loaded: SIZE, total: SIZE }
+    ]);
+    expect(seenBuf?.length).toBe(SIZE);
+    expect(seenBuf![0]).toBe(0);
+    expect(seenBuf![CHUNK - 1]).toBe(0xff); // 首块末字节
+    expect(seenBuf![CHUNK]).toBe(0); // 末块首字节：分块拼接无错位/无重叠
+  });
+
+  it('② size 未知：满请求不定态循环，短读确认 EOF，total=null 每块上报至 EOF', async () => {
+    const reg = createRegistry();
+    const TOTAL = CHUNK + 100; // 整块 4MiB + 短读尾块：钉住「满块不误判 EOF、短读才收口」
+    const calls: PumpCall[] = [];
+    const reports: Array<{ loaded: number; total: number | null }> = [];
+    let seenBuf: Uint8Array | undefined;
+    reg.install(mk('plain', ['pln'], {
+      render: async (buffer) => { seenBuf = buffer; return { destroy() {} }; }
+    }));
+    await createDispatcher(reg).dispatch(
+      pumpSrc('a.pln', null), null, document.createElement('div'),
+      { read: genRead(TOTAL, calls), onReadProgress: (p) => reports.push(p) });
+    // head 探测 + 满请求 {0, 4MiB-1}（整块，继续）+ {4MiB, 8MiB-1}（短读 100B = EOF）
+    expect(calls.map((c) => c.range)).toStrictEqual([
+      { start: 0, end: 8191 },
+      { start: 0, end: CHUNK - 1 },
+      { start: CHUNK, end: CHUNK * 2 - 1 }
+    ]);
+    expect(reports).toStrictEqual([
+      { loaded: CHUNK, total: null }, { loaded: TOTAL, total: null }
+    ]);
+    expect(seenBuf?.length).toBe(TOTAL);
+    expect(seenBuf![CHUNK]).toBe(0); // 拼接连续性（(idx)&0xff 全局模式）
+    expect(seenBuf![TOTAL - 1]).toBe((TOTAL - 1) & 0xff); // 99：末字节不丢
+  });
+
+  it('③ 小文件（size 已知 ≤1MB ≤4MiB）+ 钩子：策略直读单块 {0,size-1} 收口，逐字节等价现行为', async () => {
+    const reg = createRegistry();
+    const content = new TextEncoder().encode('hello pump!'); // 11B ≤ FULL_LIMIT
+    const calls: PumpCall[] = [];
+    const reports: Array<{ loaded: number; total: number | null }> = [];
+    let seenBuf: Uint8Array | undefined;
+    reg.install(mk('plain', ['pln'], {
+      render: async (buffer) => { seenBuf = buffer; return { destroy() {} }; }
+    }));
+    // 真实 content 底座（非生成式桩）：逐字节等价断言才成立
+    const read = async (
+      range?: { start: number; end: number },
+      signal?: AbortSignal
+    ): Promise<Uint8Array<ArrayBuffer>> => {
+      calls.push({ range, signal });
+      return range ? content.slice(range.start, range.end + 1) : content;
+    };
+    await createDispatcher(reg).dispatch(
+      pumpSrc('a.pln', content.length), null, document.createElement('div'),
+      { read, onReadProgress: (p) => reports.push(p) });
+    // ≤1MB 策略直读走泵单块（无 head 探测）：Range 收口一次，恰一次上报
+    expect(calls.map((c) => c.range)).toStrictEqual([{ start: 0, end: content.length - 1 }]);
+    expect(reports).toStrictEqual([{ loaded: content.length, total: content.length }]);
+    // 逐字节比较（Array 化）：TextEncoder 产物与泵内 new Uint8Array 跨 realm 原型不同，
+    // typed array 的 toEqual 必败——字节等价本身才是「与现行为逐字节等价」的断言面
+    expect(Array.from(seenBuf!)).toEqual(Array.from(content)); // 与既有单次 read() 全量逐字节等价
+  });
+
+  it('④ 缺省（无钩子）size 已知 >1MB：维持单次无 range 全量读、零上报（既有形态零翻转锚）', async () => {
+    const reg = createRegistry();
+    const SIZE = CHUNK + 1;
+    const calls: PumpCall[] = [];
+    const reports: Array<{ loaded: number; total: number | null }> = [];
+    let seenBuf: Uint8Array | undefined;
+    reg.install(mk('plain', ['pln'], {
+      render: async (buffer) => { seenBuf = buffer; return { destroy() {} }; }
+    }));
+    await createDispatcher(reg).dispatch(
+      pumpSrc('a.pln', SIZE), null, document.createElement('div'), { read: genRead(SIZE, calls) });
+    expect(calls.map((c) => c.range)).toStrictEqual([{ start: 0, end: 8191 }, undefined]);
+    expect(reports).toStrictEqual([]);
+    expect(seenBuf?.length).toBe(SIZE);
+  });
+
+  it('⑤ abort 中途（延迟补拉泵）：每次 range 读收到 dispatch signal，取消落 abort 身份——resolve no-op 不落卡不 reject', async () => {
+    const reg = createRegistry();
+    const SIZE = CHUNK + 1;
+    const controller = new AbortController();
+    const abortErr = abortReadError(); // store 取消的统一抛出形态（errors 单源）
+    const calls: PumpCall[] = [];
+    const reports: Array<{ loaded: number; total: number | null }> = [];
+    let seenBuf: Uint8Array | undefined;
+    reg.install(mk('plain', ['pln'], {
+      render: async (buffer) => { seenBuf = buffer; return { destroy() {} }; }
+    }));
+    // head 探测/首块照常交付；末块挂起直至 signal abort（store 被取消的模拟）
+    const read = async (
+      range?: { start: number; end: number },
+      signal?: AbortSignal
+    ): Promise<Uint8Array<ArrayBuffer>> => {
+      calls.push({ range, signal });
+      if (!range) throw new Error('泵路径不应有无 range 读');
+      if (range.start === 0 && range.end === 8191) return new Uint8Array(8192).fill(0x41);
+      if (range.start === 0) return new Uint8Array(CHUNK).fill(0x41);
+      return new Promise((_resolve, reject) => {
+        if (signal?.aborted) { reject(abortErr); return; }
+        signal?.addEventListener('abort', () => reject(abortErr), { once: true });
+      });
+    };
+    const target = document.createElement('div');
+    const p = createDispatcher(reg).dispatch(
+      pumpSrc('a.pln', SIZE), null, target,
+      { read, signal: controller.signal, onReadProgress: (r) => reports.push(r) });
+    await vi.waitFor(() => expect(calls.length).toBe(3)); // head + 首块 + 末块在飞
+    expect(reports).toStrictEqual([{ loaded: CHUNK, total: SIZE }]); // 首块上报已发生
+    controller.abort();
+    // 取消经既有 abort 分类消化：resolve（非 reject）no-op 实例，不落错误卡片
+    const res = await p;
+    expect(res.rendererId).toBe('error');
+    expect(target.querySelector('.vv-error-card'), '取消不得落错误卡片 DOM').toBeNull();
+    expect(() => res.instance.destroy()).not.toThrow();
+    // signal 贯穿：泵的每次 range 读收到 dispatch 传入的同一 signal 实例
+    expect(calls[1]?.signal).toBe(controller.signal);
+    expect(calls[2]?.signal).toBe(controller.signal);
+  });
+
+  it('⑥ abort（≤1MB 策略泵，try 块外）：dispatch 以 abort 身份 reject（isAbortError），signal 已贯穿', async () => {
+    const reg = createRegistry();
+    const controller = new AbortController();
+    controller.abort(); // 先取消再派发：泵首读即被 store 以 abortReadError 形态拒绝
+    const calls: PumpCall[] = [];
+    const read = async (
+      range?: { start: number; end: number },
+      signal?: AbortSignal
+    ): Promise<Uint8Array<ArrayBuffer>> => {
+      calls.push({ range, signal });
+      throw abortReadError();
+    };
+    let caught: unknown;
+    try {
+      await createDispatcher(reg).dispatch(
+        pumpSrc('a.pln', 11), null, document.createElement('div'),
+        { read, signal: controller.signal, onReadProgress: () => {} });
+    } catch (err) { caught = err; }
+    expect(isAbortError(caught), '取消落既有 abort 错误身份（不新建错误形态）').toBe(true);
+    expect(calls[0]?.range).toStrictEqual({ start: 0, end: 10 });
+    expect(calls[0]?.signal).toBe(controller.signal); // signal 贯穿策略泵的 range 读
+  });
+
+  it('⑦ size 未知 + streaming !rangeCapable：降级补拉同样走泵（不定态至 EOF），进度与 ctx 双达', async () => {
+    const reg = createRegistry();
+    const TOTAL = CHUNK + 100;
+    const calls: PumpCall[] = [];
+    const reports: Array<{ loaded: number; total: number | null }> = [];
+    let seenBuf: Uint8Array | undefined;
+    let seenCtx: StreamCtx | undefined;
+    reg.install(mk('st', ['stx'], {
+      streaming: true,
+      render: async (buffer, _t, _s, _det, ctx) => { seenBuf = buffer; seenCtx = ctx; return { destroy() {} }; }
+    }));
+    await createDispatcher(reg).dispatch(
+      pumpSrc('a.stx', null, /* rangeCapable */ undefined), null, document.createElement('div'),
+      { read: genRead(TOTAL, calls), onReadProgress: (p) => reports.push(p) });
+    expect(calls.map((c) => c.range)).toStrictEqual([
+      { start: 0, end: 8191 },
+      { start: 0, end: CHUNK - 1 },
+      { start: CHUNK, end: CHUNK * 2 - 1 }
+    ]);
+    expect(reports).toStrictEqual([
+      { loaded: CHUNK, total: null }, { loaded: TOTAL, total: null }
+    ]);
+    expect(seenBuf?.length).toBe(TOTAL); // 降级交付全量（非 8KB head）
+    expect(seenCtx?.size).toBe(TOTAL); // 降级 ctx 形态不变：size = 全量长
   });
 });

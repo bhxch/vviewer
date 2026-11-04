@@ -7,7 +7,7 @@ import {
   showErrorCard,
   type ErrorCardAction
 } from './errorRenderer';
-import { classifyDispatchError, DispatchReadError } from './errors';
+import { classifyDispatchError, DispatchReadError, isAbortError } from './errors';
 
 export interface Dispatcher {
   dispatch(
@@ -42,10 +42,70 @@ export interface DispatchOptions {
   /** 行尺度（字体系统 spec §3，Task 2）：并入 render 第 6 参透传——code/hex 以之
    * 替换行高常量（虚拟滚动装配/行占位/跳转坐标），其余渲染器不读即零感知。 */
   lineMetrics?: LineMetrics;
+  /** 全量物化分块泵进度钩子（spec §6.4 远端全量物化）：buffer === null 的 store-backed
+   * 全量拉取（≤1MB 策略直读与延迟补拉）在场时改 4MiB 分块循环（pumpFull），逐块上报
+   * {loaded, total}（size 未知 total=null 至 EOF）；节流在 UI 层做（Task 4 进度卡），
+   * dispatcher 每块都上报。缺省零行为变化：不传即维持既有单次 read() 全量路径（调用
+   * 形态与字节结果不变）；buffer 直传（兼容路径）不经泵。取消经 opts.signal 贯穿每次
+   * range 读，落既有 abort 错误身份层（不新建错误形态）。 */
+  onReadProgress?: (p: { loaded: number; total: number | null }) => void;
 }
 
 const HEAD_SIZE = 8192;
 const FULL_LIMIT = 1 << 20;
+/** 全量物化分块泵块大小（spec §6.4）：4MiB */
+const FULL_CHUNK = 4 * 1024 * 1024;
+
+/**
+ * 全量物化分块泵（spec §6.4 远端全量物化，计划 2 Task 2）：store-backed 全量拉取的
+ * 4MiB 分块循环，逐块上报 onReadProgress（节流在 UI 层做，dispatcher 每块都上报）。
+ * - size 已知：Range 请求 `read({start: loaded, end: min(loaded+4MiB, size)-1})` 循环
+ *   至 size（末块收口）。size 已知来源按 ByteRange 契约精确返回（BlockStream 同口径），
+ *   循环由 size 收口不做 EOF 判定；零长度读视为提前 EOF 防御性收口（交付已得前缀，
+ *   不静默死循环）。
+ * - size 未知：满请求 `read({start: loaded, end: loaded+4MiB-1})` 不定态循环（不预钳，
+ *   BlockStream ②同口径），返回短于 4MiB（含空读）即确认 EOF，每块上报
+ *   {loaded, total: null} 至 EOF。
+ * signal 贯穿每次 range 读（取消即 store 原生 abort reject——错误身份交既有
+ * isAbortError/DispatchReadError 分类层，本泵不新建错误形态）。导出单源：计划 2
+ * Task 7 saveAs 远端取数复用同一泵（spec §6.4 另存为管线）。
+ */
+export async function pumpFull(
+  read: DispatchRead,
+  size: number | null,
+  signal: AbortSignal | undefined,
+  onProgress: NonNullable<DispatchOptions['onReadProgress']>
+): Promise<Uint8Array<ArrayBuffer>> {
+  if (size !== null) {
+    const full = new Uint8Array(size);
+    let loaded = 0;
+    while (loaded < size) {
+      const chunk = await read({ start: loaded, end: Math.min(loaded + FULL_CHUNK, size) - 1 }, signal);
+      if (chunk.length === 0) break; // 提前 EOF 防御：不静默死循环，交付已得前缀
+      full.set(chunk, loaded);
+      loaded += chunk.length;
+      onProgress({ loaded, total: size });
+    }
+    return loaded === size ? full : full.subarray(0, loaded);
+  }
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let loaded = 0;
+  for (;;) {
+    const chunk = await read({ start: loaded, end: loaded + FULL_CHUNK - 1 }, signal);
+    if (chunk.length === 0) break; // 空读 = EOF
+    chunks.push(chunk);
+    loaded += chunk.length;
+    onProgress({ loaded, total: null });
+    if (chunk.length < FULL_CHUNK) break; // 短读确认 EOF（BlockStream ②同口径）
+  }
+  const full = new Uint8Array(loaded);
+  let off = 0;
+  for (const c of chunks) {
+    full.set(c, off);
+    off += c.length;
+  }
+  return full;
+}
 
 /**
  * 补拉全量后的编码精判（终审 F2 及其渲染器侧镜像的共享 helper，I-2 收口）：
@@ -299,9 +359,17 @@ export function createDispatcher(registry: Registry): Dispatcher {
     let full: Uint8Array<ArrayBuffer> | null = buffer;
     let probe: Uint8Array<ArrayBuffer>;
     const headOnly = buffer === null;
+    // 进度钩子（spec §6.4）：在场 = 远端物化泵装配（Task 4 仅远端来源传入）——两处
+    // store-backed 全量拉取（此处 ≤1MB 策略直读 + 下方延迟补拉）改分块泵逐块上报；
+    // 缺省零行为变化（既有单次 read() 调用形态与字节结果原样保留，本地路径不经泵）
+    const onProgress = opts?.onReadProgress;
     if (buffer === null) {
       const size = source.size ?? null;
-      if (size !== null && size <= FULL_LIMIT) full = await read!();
+      if (size !== null && size <= FULL_LIMIT) {
+        full = onProgress
+          ? await pumpFull(read!, size, opts?.signal, onProgress)
+          : await read!();
+      }
       probe = full ?? (await read!({ start: 0, end: HEAD_SIZE - 1 }));
     } else {
       probe = buffer;
@@ -325,19 +393,30 @@ export function createDispatcher(registry: Registry): Dispatcher {
       opts?.signal || opts?.lineMetrics || opts?.langOverride
         ? { signal: opts.signal, lineMetrics: opts.lineMetrics, langOverride: opts.langOverride }
         : undefined;
+    // onReadProgress 透传（spec §6.4）：重入的全量补拉与主路径同泵同进度面——open-as
+    // 触发的重物化不丢进度上报（缺省零行为变化同主路径口径）
     const redisplay: Redisplay = (o) =>
       headOnly
-        ? dispatch(source, null, target, { ...o, signal: optsSignal, lineMetrics: opts?.lineMetrics, langOverride: opts?.langOverride, read })
-        : dispatch(source, buffer, target, { ...o, signal: optsSignal, lineMetrics: opts?.lineMetrics, langOverride: opts?.langOverride });
+        ? dispatch(source, null, target, { ...o, signal: optsSignal, lineMetrics: opts?.lineMetrics, langOverride: opts?.langOverride, read, onReadProgress: opts?.onReadProgress })
+        : dispatch(source, buffer, target, { ...o, signal: optsSignal, lineMetrics: opts?.lineMetrics, langOverride: opts?.langOverride, onReadProgress: opts?.onReadProgress });
     let renderer: Renderer | undefined;
     // 渲染期 ctx（streaming 分支构造）：声明在 try 外——catch 的重试动作需要透传
     //（评审指令②），try 作用域变量 catch 不可见
     let renderCtx: StreamCtx | undefined;
     // 延迟全量读统一包装（headOnly 不变量保证此处 read 已定义）：失败标 DispatchReadError
     // （单源见 ./errors），由下方 catch 识别后向上 reject，不落渲染错误卡片；
-    // open-as 重入路径同样 reject，经 openAsAction 既有 .catch 保留原错误卡片
+    // open-as 重入路径同样 reject，经 openAsAction 既有 .catch 保留原错误卡片。
+    // spec §6.4：onReadProgress 在场 → 补拉改分块泵（pumpFull，size 已知分块至 size/
+    // 未知不定态至 EOF，逐块上报，signal 贯穿每次 range 读）；泵路径的取消身份原样
+    // 透传不标 DispatchReadError（isAbortError 判定，与渲染期 ctx.read 的 abort 例外
+    // 同向——取消不落错误卡片/不触发重试，经下方 catch 既有 abort 分类静默收场）；
+    // 缺省维持单次 read() 全量（零行为变化，含既有 DispatchReadError 包装语义）。
     const readFull = (): Promise<Uint8Array<ArrayBuffer>> =>
-      read!().catch((err: unknown) => {
+      (onProgress
+        ? pumpFull(read!, source.size ?? null, optsSignal, onProgress)
+        : read!()
+      ).catch((err: unknown) => {
+        if (onProgress && isAbortError(err)) throw err;
         throw new DispatchReadError(err);
       });
     try {
