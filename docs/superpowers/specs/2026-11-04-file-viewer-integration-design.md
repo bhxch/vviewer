@@ -138,7 +138,7 @@ vviewer 网页版只读查看器现有 12 个自研渲染器，格式面与 file
 - 代码依赖（23 个，构建期 chunk 分离）：核心 `@file-viewer/core`；渲染器 `@file-viewer/renderer-email` `-epub` `-ofd` `-chm` `-word` `-presentation` `-spreadsheet` `-iwork` `-hangul` `-wordperfect` `-data` `-design` `-image` `-geo` `-typst` `-dicom` `-signature` `-eda` `-drawing` `-media`（末者为 capability-midi 宿主，其媒体扩展名不注册）；能力 `@file-viewer/capability-rtf` `-midi` `-drawio-official`
 - 资产包（7 个，**不入构建**，运行时 CDN 直链精确版本）：`@file-viewer/assets-standard` `-data` `-design` `-drawing` `-hangul` `-iwork` `-typst`
 
-（版本一律精确钉死 3.3.3；file-viewer 上游升级策略——批量追平 vs 锁定——本 spec 不裁，默认锁定。）
+**版本锁定纪律（用户拍板：必须精确锁定，避免静默升级）**：全部 30 个直引包（代码 23 + 资产 7）在 package.json 写**无 `^`/`~` 前缀的精确版本**（pnpm add 默认加 `^`，须显式剥除）；lockfile 入库；资产 CDN URL 与代码依赖钉**同一版本号**；上游升级是显式决策——单独 commit 改版本号（代码+资产 CDN 同步）+ e2e 重锚，禁止任何 range 让 `pnpm install`/lockfile 刷新静默带新版本。CI 加一道白名单校验：`@file-viewer/*` 与涉外依赖声明必须无范围前缀（仿既有 gen-code-extensions `--check` 惯例）。
 
 **运行时**：各桥接渲染器首次打开对应扩展名时经三层链按需 fetch 资产；SW 对 CDN/该前缀设 CacheFirst（运行时缓存，不进 precache）。
 
@@ -174,7 +174,7 @@ vviewer 网页版只读查看器现有 12 个自研渲染器，格式面与 file
 | 20 | renderer-drawing + capability-drawio-official + assets-drawing | drawio, dio | 仅启用 drawio 类型（diagrams.net 官方运行时，Apache-2.0）；mermaid/plantuml/excalidraw/bpmn 部分不启用（批次二 vviewer 渲染器接管）；bpmn-js 不装 |
 | 21 | capability-midi（连带 renderer-media 宿主依赖） | midi, mid | renderer-media 的媒体扩展名**不注册**（vviewer av 占优），仅 MIDI 面生效 |
 
-**排除（不引，理由记档）**：`renderer-cad`（AGPL）、`renderer-3d`（LGPL）、`renderer-text`/`renderer-pdf`/`renderer-ppt`（对应管线 vviewer 占优）、`renderer-archive`（同库 libarchive.js 已在；其 29 格式多出的 21 个扩展名改为 **vviewer archive 渲染器补绑定**——libarchive.js 本身支持 tbz/tbz2/txz/tzst/lzma/zst/cab/ar/cpio/xar/lha/lzh/jar/war/ear/apk/cbz/cbr/gzip/bzip2 等，属 vviewer 自有增强任务随本批落一个子任务；zipx 支持与否实施时核实）、`renderer-binary`（vviewer hex 占优；`.macho` 改为 vviewer hex 补绑扩展名，Mach-O 结构解析列入 hex 增强后续候选而非引包）、`bpmn-js`（自有许可）。
+**排除（不引，理由记档）**：`renderer-cad`（AGPL）、`renderer-3d`（LGPL）、`renderer-text`/`renderer-pdf`/`renderer-ppt`（对应管线 vviewer 占优）、`renderer-archive`（与 vviewer archive 渲染器同库——jszip + libarchive.js 两引擎完全相同，差异仅在扩展名绑定面：上游 29 个 vs vviewer 8 个；多出的 21 个扩展名改为 **vviewer archive 渲染器补绑定**——libarchive.js 本身支持 tbz/tbz2/txz/tzst/lzma/zst/cab/ar/cpio/xar/lha/lzh/jar/war/ear/apk/cbz/cbr/gzip/bzip2 等，零新依赖；zipx 支持与否实施时核实）、`renderer-binary`（vviewer hex 占优且结构树已含 Mach-O 解析——`struct.ts:101/108` MACHO_CPUS/MACHO_TYPES，`.macho` 缺的只是扩展名绑定，补绑即得完整能力；上游包为实验性 opt-in 模板检视形态，file-viewer 自己也未进 preset-all）、`bpmn-js`（自有许可）。
 
 **默认面校验**：批次收口时以脚本重跑调研报告 §3.1 覆盖矩阵，「未注册 174」应归零（除 jxl/zipx 两个待核实项外），产出更新版矩阵回写报告。
 
