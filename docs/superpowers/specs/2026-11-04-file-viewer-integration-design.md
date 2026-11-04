@@ -3,7 +3,7 @@
 - 日期：2026-11-04
 - 状态：待用户批准（brainstorm 产物，获批后转 writing-plans）
 - 调研依据：`docs/file-viewer/format-package-survey-2026-11-04.md`（47 管线逐行对照、许可证红线、覆盖矩阵）
-- 用户决策记录（brainstorm 两轮四题+三题+builder check 收口，全部拍板）：①引入范围=全量（npm 引入、不进主包；LicenseRef-PMEL 取 MPL-2.0 面；bpmn-js 排除 npm 依赖——md 管线既有运行时 CDN 加载姿态不变）；②data-asset=引 data 包，wasm 与字体查看都开；③音频=补别名+引 capability-midi；④图片=引 renderer-image 仅新 5 扩展名；⑤图表拆分=全集（29 型，builder check 补漏 7 型后收口）；⑥默认模式=默认渲染失败回退源码，引擎形态以 vviewer 图表注册表实态为准（七类 CDN 本地引擎非 kroki）；⑦drawio=引官方运行时；⑧**部署=大资产不进本项目 dist，Pages/Workers/桌面均不背重资产；资产包优先直接用 file-viewer 已发布的 @file-viewer/assets-\*（CDN 直链精确版本），除非必须二次封装并发包**；⑨**桥接契约=方案 A**（嵌套附件回调走 vviewer dispatcher；.shp 边车经 resolveSibling 统一回调读兄弟文件——§6.4 细化：L1/R1/R2/L3 来源全适用，仅裸单文件降级报错）。
+- 用户决策记录（brainstorm 两轮四题+三题+builder check 收口，全部拍板）：①引入范围=全量（npm 引入、不进主包；LicenseRef-PMEL 取 MPL-2.0 面；bpmn-js 排除 npm 依赖——md 管线既有运行时 CDN 加载姿态不变）；②data-asset=引 data 包，wasm 与字体查看都开；③音频=补别名+引 capability-midi；④图片=引 renderer-image 仅新 5 扩展名；⑤图表拆分=全集（29 型，builder check 补漏 7 型后收口）；⑥默认模式=默认渲染失败回退源码，引擎形态以 vviewer 图表注册表实态为准（七类 CDN 本地引擎非 kroki）；⑦drawio=引官方运行时；⑧**部署=大资产不进本项目 dist，Pages/Workers/桌面均不背重资产；资产包优先直接用 file-viewer 已发布的 @file-viewer/assets-\*（CDN 直链精确版本），除非必须二次封装并发包**；⑨**桥接契约=方案 A**（嵌套附件回调走 vviewer dispatcher；.shp 边车经 resolveSibling 统一回调读兄弟文件——§6.4 细化：L1/R1/R2/L3 来源全适用，仅裸单文件降级报错）；⑩**远端全量物化分级+下载进度卡**（≤64MB 静默 / 64–512MB 进度卡：地址·进度·速度·ETA·已下载/完整大小·取消 / >512MB 拒绝）；⑪**URL 通道维持 v1 不启用**（桥接集零渐进式消费者；上游唯一渐进式=renderer-pdf URL-only pdfjs Range I/O，价值转移为 vviewer 自有 pdf Range transport 后续候选；直连 S3 动态签名不可直链 URL 已记档）。
 
 ## 1. 背景与动机
 
@@ -190,7 +190,31 @@ vviewer 网页版只读查看器现有 12 个自研渲染器，格式面与 file
 | R1 远端服务面 | 远端服务端文件（Range-capable + SSE watch） | StreamCtx.read 分块窗段 |
 | R2 直连存储面 | S3/WebDAV 直连（Range 206 校验三态）、proxy 挂载 | 同上，凭据在 store 层 |
 
-**总原则**：桥接渲染器一律声明 `streaming: false` → dispatcher 既有全量物化路径自动接管（≤512MB 防线、size 未知走 EOF 物化、abort signal 贯穿），桥接层只见全量 `Uint8Array` → `new File([buf], name)`。**不启用 file-viewer 的 mountViewer URL 通道**——URL 直开需要把 Bearer/ticket 拼进 URL（认证面扩散、票据生命周期管理），而 ctx.read 物化由 RemoteStore 层带凭据完成、桥接零感知；URL 通道仅作 escape hatch 记档，后续有真实需求（如线性化 PDF 的 Range 流式）再立项。
+**总原则**：桥接渲染器一律声明 `streaming: false` → dispatcher 全量物化路径接管（≤512MB 防线、size 未知走 EOF 物化、abort signal 贯穿），桥接层只见全量 `Uint8Array` → `new File([buf], name)`。**不启用 file-viewer 的 mountViewer URL 通道**（再评估结论见下小节）。远端来源（R1/R2）的全量物化有体量分级与下载进度卡，见下。
+
+#### 远端全量物化的体量分级与下载进度卡（R1/R2，用户点名设计）
+
+- **物化泵与进度事件**：桥接面的大文件物化走显式泵（ctx.read 分块循环），逐块上报进度（节流 ~200ms；载体=dispatcher 的 full-view 补拉循环加可选 onReadProgress 钩子，或桥接层自泵——实施者自由度 §9，**契约钉死**：进度事件含 loaded/total、abort signal 贯穿、取消落 `abortReadError` 既有错误身份层）。
+- **体量分级**：`total ≤ 64MB`（SOFT_MATERIALIZE_BYTES，常量）静默物化（现状体验不变）；`64MB < total ≤ 512MB` 进度卡模式——**不阻断**、实时显示；`> 512MB` 既有防线拒绝（错误卡片）。阈值常量单源，mobile 可后续独立收紧（移动端内存敏感，先例：upload 通道/512MB 引导文案双上限化）。
+- **进度卡字段（用户点名全集）**：源地址（脱敏 display endpoint + path）、进度条、**已下载/完整大小**（未知 size 显示「已下载 N MB（总大小未知）」）、**下载速度**（滑动窗口均值，~5s 窗）、**预估剩余时间**（(total-loaded)/速度，速度未稳时显示「计算中」）、**取消**按钮；完成态自动让位给渲染。UI 载体=ViewerPane 加载态区（错误卡片同通道，新增 loading-progress 形态）。
+- **存储/内存注记**：Blob 包裹 typed array 无深拷贝，但 Chromium 大 Blob 的磁盘 backing 是自动行为、峰值仍含 JS 堆一份——64MB 阈值即为此保守；无需（也不应）手工磁盘管理。
+
+#### URL 通道再评估（用户点名核查）
+
+**上游事实**：file-viewer **有**渐进式渲染器——`renderer-pdf` 的 URL-only 路径特意走 pdfjs Range I/O（`packages/renderers/pdf/src/pdf.ts:2185-2203`：「The URL-only path deliberately supplies an empty buffer for PDF.js Range I/O」，`getDocument({ url: streamUrl, rangeChunkSize, disableAutoFetch, … })`，线性化 PDF 可 Range 渐进加载）；`renderer-media` 的音视频 `<video src=url>` 天然渐进（已被排除不引）。**其余渲染器（zip 系 Office/epub/chm/ofd、email、data、设计系）都是整载解析，无渐进形态**。
+
+**桥接集消费者分析**：pdf 默认归 vviewer 自有渲染器（调研 §4.1 占优）→ **桥接集内 URL 渐进通道零消费者，维持 v1 不启用**。渐进式的真实受益者是 **vviewer 自有 pdf 渲染器**（现状 `getDocument({ data: buffer })`，`packages/vviewer-render-doc/src/pdf.ts:62` 全量载入）——**后续候选（不在本 spec）**：pdf.ts 增加 Range transport 模式，走 pdfjs `PDFDataRangeTransport`（自定义 requestRange 回调接 `ctx.read`/`store.read`，token/SigV4/Basic 签名全在我们手里，各来源通用）。
+
+**直连两形态确认与 URL 适配矩阵**（用户记忆属实：`tree/directS3.ts`/`directDav.ts` 为前端直发浏览器侧签名；proxy 挂载为后端代发、挂载根复用 `remote.ts` RemoteStore 机制）：
+
+| 来源 | 全量物化+进度卡 | URL 通道可行性（若未来启用） |
+| --- | --- | --- |
+| R1 服务端 / R2 proxy（后端代发） | ✓ ctx.read（Bearer 在 store 层） | 可行：server 文件通道 + Authorization 静态头（Range RFC 已修 BUG-47），两形态同构 |
+| R2 direct DAV（前端直发） | ✓ store.read（Basic） | 可行：Basic 静态头 `httpHeaders` |
+| R2 direct S3（前端直发） | ✓ store.read（SigV4 逐请求重签） | **不可直接**：每次 Range 都要 SigV4 重签，pdfjs `httpHeaders` 给不了动态签名——需 presigned GET（时效/泄漏面）或 `PDFDataRangeTransport` 自签 |
+| L1–L3 | —（数据在手） | 不适用 |
+
+**裁决**：v1 全量物化+进度卡为唯一远端路径；URL 通道与 PDF Range transport 列后续候选（候选票：vviewer pdf.ts Range transport 增强，`ctx.read` 窗口读能力现成）。
 
 **分来源细节**：
 - **L1/L2（本地面）**：数据在手零物化成本；`Blob` 包裹 typed array 浏览器惰性物化，无深拷贝。大文件与本地其它渲染器同闸（512MB 防线）。
