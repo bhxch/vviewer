@@ -452,11 +452,18 @@ describe('renderHex：窗口模式（StreamCtx）', () => {
 
 // registry 绑定（批次一缺口，spec 2026-11-04 §4.1）：fresh registry 安装后 byExtension
 // 命中且大小写归一（registry 查询侧小写化）
-describe('hexRenderer extensions：.hex 绑定', () => {
+describe('hexRenderer extensions：.hex/.macho 绑定', () => {
   it("fresh registry 安装后 byExtension('hex')/'HEX' 均命中", () => {
     const registry = createRegistry();
     registry.install(hexRenderer);
     expect(registry.byExtension('hex')?.id).toBe('hex');
     expect(registry.byExtension('HEX')?.id).toBe('hex');
+  });
+
+  it("fresh registry 安装后 byExtension('macho')/'MACHO' 均命中", () => {
+    const registry = createRegistry();
+    registry.install(hexRenderer);
+    expect(registry.byExtension('macho')?.id).toBe('hex');
+    expect(registry.byExtension('MACHO')?.id).toBe('hex');
   });
 });

@@ -782,7 +782,7 @@ export function renderHex(
 export const hexRenderer: Renderer = {
   id: 'hex',
   label: '二进制',
-  extensions: ['hex', 'bin', 'exe', 'dll', 'so', 'dylib', 'elf', 'o', 'a', 'class', 'wasm', 'dat', 'img', 'iso', 'dmg'],
+  extensions: ['hex', 'bin', 'exe', 'dll', 'so', 'dylib', 'macho', 'elf', 'o', 'a', 'class', 'wasm', 'dat', 'img', 'iso', 'dmg'],
   // streaming（io-streaming Task 5）：dispatch 只交付 head + StreamCtx（render 第 5
   // 参），全量字节按需经 ctx.read 拉取（窗口模式），不再整文件预取
   streaming: true,

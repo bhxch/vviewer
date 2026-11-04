@@ -4,6 +4,7 @@
 // 可选 close()（RenderedInstance.destroy 接线），单测内手动调用避免线程泄漏。
 import { gzipSync } from 'node:zlib';
 import { describe, expect, it, vi } from 'vitest';
+import { createRegistry } from '@bhxch/vviewer-core';
 import type { Detection, FileSource, TreeStore, TreeNode } from '@bhxch/vviewer-core';
 import { archiveRenderer, ARCHIVE_OPEN_EVENT, type ArchiveOpenDetail } from '../src/archive';
 import { createLibarchiveStore, normalizeLibarchiveError } from '../src/libarchiveStore';
@@ -221,10 +222,21 @@ describe('normalizeLibarchiveError', () => {
 });
 
 describe('archiveRenderer tar 分支（magic 分派 + 事件解耦）', () => {
-  it('extensions 含 tar/gz/tgz/bz2/xz/7z/rar', () => {
-    for (const ext of ['tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar']) {
+  it('extensions 含原有 8 个 + 补绑 18 个（libarchive.js 实测支持，spec §6.3 排除清单自有补绑）', () => {
+    for (const ext of [
+      'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar',
+      'jar', 'war', 'ear', 'apk', 'cbz', 'cbr',
+      'gzip', 'bzip2', 'tbz', 'tbz2', 'txz', 'lzma',
+      'cab', 'ar', 'cpio', 'xar', 'lha', 'lzh'
+    ]) {
       expect(archiveRenderer.extensions).toContain(ext);
     }
+  });
+
+  it("fresh registry 安装后 byExtension 大小写归一（'ZIP' 命中）", () => {
+    const registry = createRegistry();
+    registry.install(archiveRenderer);
+    expect(registry.byExtension('ZIP')?.id).toBe('archive');
   });
 
   it('render tar：树渲染 + 点击文件派发 vv-open-entry，store 可读', async () => {

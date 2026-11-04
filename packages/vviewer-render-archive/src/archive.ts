@@ -117,7 +117,15 @@ export function mountArchiveTree(
 export const archiveRenderer: Renderer = {
   id: 'archive',
   label: '压缩包',
-  extensions: ['zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar'],
+  extensions: [
+    'zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar',
+    // spec §6.3 排除清单自有补绑（仅绑定 libarchive.js wasm 实测编译进的格式/过滤器；
+    // zst/tzst 剔除——zstd 过滤器未编译进 wasm 仅外部程序回退；zipx 剔除——非独立格式，
+    // PK magic 走 jszip 仅 store/deflate，zipx 主打 LZMA/PPMd 等方法读不出）
+    'jar', 'war', 'ear', 'apk', 'cbz', 'cbr', // zip/rar 容器（magic 分派：PK→jszip、RAR→libarchive）
+    'gzip', 'bzip2', 'tbz', 'tbz2', 'txz', 'lzma', // 过滤器别名（zlib/bzlib/liblzma 内部编译进）
+    'cab', 'ar', 'cpio', 'xar', 'lha', 'lzh' // 其余归档格式（archive_read_support_format_* 全注册）
+  ],
   async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, _det: Detection): Promise<RenderedInstance> {
     // 递归深度接线：由来源 store id 的前导归档段（zip/libarchive）推导父链（顶层归档的
     // store 是 localfiles/single 等非归档来源 → 链空 → depth 0；包内第 n 层归档 → depth n-1）
