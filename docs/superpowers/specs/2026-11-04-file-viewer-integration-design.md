@@ -65,7 +65,7 @@ vviewer 网页版只读查看器现有 12 个自研渲染器，格式面与 file
 
 ## 5. 批次二：图表类型拆独立渲染器
 
-### 5.1 类型与扩展名映射（全集 29 型 / 31 扩展名）
+### 5.1 类型与扩展名映射（全集 29 型 / 33 扩展名）
 
 依据 vviewer 图表注册表（`vviewer-render-diagram/src/markdown/diagrams.ts`，30 型对齐 kroki v0.33.0；`math` 不拆——`.tex` 维持 latex 源码高亮；`drawio` 不在注册表中，归批次三官方运行时）。**引擎形态/默认模式以注册表实态为准（builder check 核实）**：excalidraw/bpmn/vega/vegalite/dbml/wavedrom/bytefield 七类为 CDN 直链本地引擎、defaultMode local（@excalidraw/utils、bpmn-js NavigatedViewer、vega-embed、dbml-renderer、wavedrom、bytefield-svg——bpmn-js 沿用 md 管线既有运行时 CDN 加载姿态，不作 npm 依赖），与 md 围栏行为一致，不降级为 kroki 网络渲染：
 

@@ -91,7 +91,7 @@ expect(registry.byExtension('HEX')?.id).toBe('hex');
   - 31 个扩展名去重（无跨型重复）；
   - fresh registry 按映射安装 29 渲染器零 RegistryError；`byExtension('dot')`→`diagram-graphviz`、`byExtension('MERMAID')`→`diagram-mermaid`（大小写归一锚，Review Focus 1）；
   - 与既有 owner 不撞：`byExtension('md'|'markdown'|'html'|'htm'|'svg'|'jsonl')` 不被任何 diagram-* 认领（先装 markdown/html/jsonl 渲染器再装 diagram 系，install 不抛）。
-- [ ] **Step 2: 跑测试确认失败** → Step 3: 实现映射表 + `createDiagramFileRenderers`（render 体本任务为最小抛错桩，Task 4 替换；**本任务测试只锚注册面**） → Step 4: 测试绿 → Step 5: Commit：`feat(web): 图表文件渲染器注册面——29 型/31 扩展名映射（spec §5.1）`
+- [ ] **Step 2: 跑测试确认失败** → Step 3: 实现映射表 + `createDiagramFileRenderers`（render 体本任务为最小抛错桩，Task 4 替换；**本任务测试只锚注册面**） → Step 4: 测试绿 → Step 5: Commit：`feat(web): 图表文件渲染器注册面——29 型/33 扩展名映射（spec §5.1）`
 
 ### Task 4: 图表文件渲染器渲染路径——三分发 + 失败回退 + 大小门 + 切换
 
