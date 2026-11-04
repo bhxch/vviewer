@@ -115,6 +115,12 @@ describe('ViewerPane 确认门接线（计划 2 Task 6）', () => {
     expect(src).toMatch(/function cancelConfirm\(\): void \{[^}]*\}/);
   });
 
+  it('孤儿清偿（评审 I-1）：守卫分支（!host/占位/目录 tab）return 前清 dlConfirm——确认等待期关 tab/切目录 tab 不留孤儿卡', () => {
+    expect(src).toMatch(
+      /if \(!host \|\| !tab \|\| tab\.source\.path === ''\) \{[\s\S]{0,80}dlConfirm = null;[\s\S]{0,40}return;/
+    );
+  });
+
   it('模板挂载：进度卡同域 pane 级浮层（host 外侧）渲染确认卡，决策回调双接线', () => {
     expect(src).toMatch(/\{#if dlConfirm\}[\s\S]{0,400}<DownloadConfirmCard/);
     expect(src).toMatch(/onconfirm=\{confirmDownload\}/);

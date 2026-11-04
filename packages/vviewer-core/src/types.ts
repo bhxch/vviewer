@@ -104,9 +104,10 @@ export interface FileSource {
   store: TreeStore;
   /**
    * 文件总字节数（spec 2026-10-12-io-streaming §3：从 TreeNode.size / File.size /
-   * remote Content-Length 透传）：UI/渲染器免二次探测即可显示大小或做容量决策；
-   * null/缺省 = store 无法预知（渲染器走全量回退）。纯增量可选字段，既有构造点
-   * 零改动。
+   * /api/tree 条目 size 透传——directDav PROPFIND getcontentlength / directS3
+   * ListObjectsV2 Size 列，非 HTTP Content-Length 头）：UI/渲染器免二次探测即可
+   * 显示大小或做容量决策；null/缺省 = store 无法预知（渲染器走全量回退）。纯增量
+   * 可选字段，既有构造点零改动。
    */
   size?: number | null;
 }

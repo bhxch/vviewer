@@ -29,6 +29,7 @@
     <span class="vv-dl-confirm-title">确认下载</span>
     <span class="vv-dl-confirm-name" title={name}>{name}</span>
   </div>
+  <!-- size/renderer 子行类名仅作测试锚（app.css 无对应规则，样式由 .vv-dl-confirm-meta 统辖） -->
   <div class="vv-dl-confirm-meta">
     <span class="vv-dl-confirm-size">大小 {formatBytes(sizeBytes)}</span>
     <span class="vv-dl-confirm-renderer">目标渲染器：{rendererLabel}</span>

@@ -636,13 +636,20 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
     // 残留面。错误卡路径在 catch 独立清空（不受豁免）。
     if (tab !== lastSeenTab) onoutline?.([]);
     lastSeenTab = tab;
-    if (!host || !tab || tab.source.path === '') return;
+    // 确认卡孤儿清偿（评审 I-1）：守卫分支（host 未挂/占位/目录 tab）return 前清
+    // dlConfirm——确认等待期关 tab/切目录 tab 不留孤儿卡；门分支在守卫后装配、门
+    // 通过路径另有清偿，不受影响（写非依赖 state 无自读自写环，pickerExpanded 同款）
+    if (!host || !tab || tab.source.path === '') {
+      dlConfirm = null;
+      return;
+    }
     const current = tab;
     void current.rev; // SSE 变更刷新：读入 rev 使 effect 依赖它，自增即重跑（重读+重渲染）
     // 确认门（计划 2 Task 6，spec §6.4）：远端来源（R1/R2，isRemoteDownload 单源判定）
     // + size 已知 + size > 阈值 → 泵启动前显示确认卡，本轮不进渲染/泵。阈值读 settings
     // 现值（loadSettings 每轮现算，lineMetrics 同款不持副本——设置页「应用」后下一次
-    // 门评估即时生效）；size 取 FileSource.size（tree 条目/File/Content-Length 透传，
+    // 门评估即时生效）；size 取 FileSource.size（tree 条目/File 透传——directDav
+    // getcontentlength / directS3 Size / /api/tree 列表条目，非 Content-Length 头，
     // 与 dispatcher ≤1MB 直读/泵收口同源），未知归 null → 门放行（不定态下载不适用）。
     // 确认作用域键读入本 effect（dlApprovedKey 依赖）：「开始下载」写入即重跑过门，
     // 「取消」不写键不重跑 = 静默中止。确认分支 return 早于 tracker/dispatch 装配
