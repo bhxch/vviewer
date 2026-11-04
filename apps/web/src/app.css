@@ -134,6 +134,28 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
 .vv-error-card { padding: 2rem; display: flex; flex-direction: column; gap: .5rem; }
 .vv-error-title { font-weight: 600; }
 .vv-error-detail { color: var(--ui-fg-muted); white-space: pre-wrap; }
+/* 下载进度卡（DownloadProgressCard，计划 2 Task 4 spec §6.4）：ViewerPane 加载态区
+   （错误卡片同域），单一来源在本文件。pane 级 absolute 浮层（SearchPanel 同锚先例）：
+   下载中 host 为空域，浮层不占流式布局——不出滚动条、卸卡零位移 */
+.vv-dl-progress { position: absolute; top: 8px; left: 16px; z-index: 20; max-width: min(640px, calc(100% - 32px));
+  display: flex; flex-direction: column; gap: .5rem; padding: 1rem 1.25rem;
+  background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 6px;
+  box-shadow: var(--vv-shadow-1); }
+.vv-dl-progress-head { display: flex; flex-direction: column; gap: .125rem; min-width: 0; }
+.vv-dl-progress-title { font-weight: 600; }
+.vv-dl-progress-address { color: var(--ui-fg-muted); font-size: var(--vv-fs-xs); overflow-wrap: anywhere; }
+.vv-dl-progress-bar { position: relative; height: 6px; border-radius: 3px;
+  background: var(--ui-hover-bg); overflow: hidden; }
+.vv-dl-progress-fill { height: 100%; background: var(--ui-accent); border-radius: 3px;
+  transition: width .2s ease; }
+/* 不定态（ratio null）：滑块往复动画（确定态不渲染 ::after） */
+.vv-dl-progress-bar-indeterminate::after { content: ''; position: absolute; top: 0; bottom: 0;
+  left: 0; width: 40%; background: var(--ui-accent); border-radius: 3px;
+  animation: vv-dl-slide 1.2s ease-in-out infinite; }
+@keyframes vv-dl-slide { from { transform: translateX(-100%); } to { transform: translateX(350%); } }
+.vv-dl-progress-meta { display: flex; gap: .75rem; flex-wrap: wrap;
+  color: var(--ui-fg-muted); font-size: var(--vv-fs-xs); }
+.vv-dl-progress-cancel { align-self: flex-start; cursor: pointer; padding: .15rem .75rem; }
 /* html 沙箱预览（htmlRenderer）：顶部视图按钮组 + iframe/源码内容区 */
 .vv-html { display: flex; flex-direction: column; height: 100%; }
 .vv-html-toolbar { display: flex; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--ui-border); flex: none; }

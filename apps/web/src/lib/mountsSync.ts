@@ -268,6 +268,19 @@ export function displayLabelForStore(storeId: string, opts?: { storeBase?: strin
   return candidates.length === 1 ? candidates[0]!.label : undefined;
 }
 
+/**
+ * storeId → 展示面 endpoint（下载进度卡「地址」字段，计划 2 Task 4，spec §6.4）：
+ * 仅 direct 精确命中（storeId 即记录 id，displayLabelForStore 同款匹配纪律）返回
+ * displayEndpoint 剥 userinfo 后的 endpoint；proxy/remote 来源不经此查——R1 的
+ * 服务端 base 由 core getRemoteBase（store 建实例即登记）承担，无记录依赖。未命中
+ * （记录未列出过/库不可用/非 direct id）返回 undefined，调用方回落 path-only 显示
+ * （降级安全，displayLabelForStore 同款）。查询走 recordCache 镜像。
+ */
+export function displayEndpointForStore(storeId: string): string | undefined {
+  const direct = recordCache.get(storeId);
+  return direct?.kind === 'direct' ? displayEndpoint(direct.endpoint) : undefined;
+}
+
 /** 测试专用：清空会话内记录镜像（用例间隔离；镜像为模块级状态，生产无调用方）。 */
 export function resetMountRecordCacheForTests(): void {
   recordCache.clear();

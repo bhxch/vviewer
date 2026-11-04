@@ -1,7 +1,8 @@
-// downloadProgress.ts — 下载进度纯函数层（spec §6.4 远端全量物化进度卡，计划 2 Task 3）。
-// 消费 dispatcher onReadProgress 的 (loaded, total) 平面参数（计划 2 Task 2
-// ReadProgressEvent 的载荷），产出进度卡纯展示快照 ProgressSnapshot，UI 接线（ViewerPane
-// loading-progress 形态）在 Task 4。纯 .ts 模块，无 runes/无 DOM，vitest 直测。
+// downloadProgress.ts — 下载进度纯函数层（spec §6.4 远端全量物化进度卡，计划 2 Task 3，
+// Task 4 扩卡片行文案/地址拼装/来源门）。消费 dispatcher onReadProgress 的 (loaded, total)
+// 平面参数（计划 2 Task 2 ReadProgressEvent 的载荷），产出进度卡纯展示快照
+// ProgressSnapshot 与卡片行级文案；UI 接线（ViewerPane loading-progress 形态）在 Task 4。
+// 纯 .ts 模块，无 runes/无 DOM，vitest 直测。
 //
 // 字节格式化：仓库无通用字节 helper（rg formatBytes/humanBytes 零命中），本地实现
 // formatBytes——二进制进位（1024），文案镜像 fonts.ts formatFontSize 的「数值+空格+单位」
@@ -16,6 +17,9 @@
 // - 不定态：total 从未上报 → totalText/ratio/etaText null（进度卡只显已下载）。
 // - 节流：默认 200ms（spec ~200ms），窗口内多 update 单 tick；首个 update 必发；
 //   done() 终态不受节流、必发且幂等（重复 done/done 后 update 均忽略）。
+
+import { displayEndpoint } from './mountsSync';
+import { sourceKindOf } from './workspaceStore';
 
 /** 进度卡纯展示快照（Task 4 进度卡逐字段消费；null=该行隐藏/不定态） */
 export interface ProgressSnapshot {
@@ -41,6 +45,38 @@ export interface ProgressTracker {
 const WINDOW_MS = 5000; // spec §6.4：~5s 滑动窗口均值
 const STABLE_SPAN_MS = 1000; // 窗口首末跨度 <1s 视为未稳
 const DEFAULT_THROTTLE_MS = 200; // spec §6.4：节流 ~200ms
+
+// ---------- Task 4 卡片行级文案与装配门（displayLayer 纯面，ViewerPane 消费） ----------
+
+/** 进度卡「已下载」行（spec §6.4）：total 已知 → 「已下载 N / M」（已下载/完整大小
+ * 同行）；不定态（totalText null，total 从未上报）→ 「已下载 N（总大小未知）」——
+ * T3 报告移交的拼装面（快照只给 loadedText，括注由本层依 totalText===null 补齐）。 */
+export function dlLoadedLine(snap: ProgressSnapshot): string {
+  return snap.totalText === null
+    ? `已下载 ${snap.loadedText}（总大小未知）`
+    : `已下载 ${snap.loadedText} / ${snap.totalText}`;
+}
+
+/** 进度卡「地址」行（spec §6.4：脱敏 display endpoint + path）：endpoint 缺席
+ * （R2 记录未列出过/本地源退化）时只显 path。脱敏走 mountsSync.displayEndpoint
+ * 单源（userinfo 剥除，server display_endpoint 的 TS 镜像）；endpoint 尾斜杠与
+ * path 前导斜杠归一防双拼（getRemoteBase 的 normalizeServerBase 已剥尾斜杠，
+ * direct 记录 endpoint 是原始输入，此处统一兜）。 */
+export function dlAddressText(endpoint: string | null | undefined, path: string): string {
+  if (!endpoint) return path;
+  const base = displayEndpoint(endpoint).replace(/\/+$/, '');
+  return `${base}/${path.replace(/^\/+/, '')}`;
+}
+
+/** 进度卡作用门（spec §6.4：进度卡/确认门仅 R1/R2 远端全量物化；本地 L1–L3 不显示）：
+ * sourceKindOf 单源判定（workspaceStore 既有前缀分类）——'remote'（R1 服务端）与
+ * 'direct'（R2 s3direct:/davdirect: 直连）为真。'url' 不入面：url store 无视 Range
+ * 请求（memoized 全量 fetch），泵的 4MiB 请求窗循环对其不成立（T2 ⑧ 钳块锚的违约
+ * 域外），v1 URL 通道维持现状（spec §6.4「URL 通道维持 v1 不启用」）。 */
+export function isRemoteDownload(storeId: string): boolean {
+  const kind = sourceKindOf(storeId);
+  return kind === 'remote' || kind === 'direct';
+}
 
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

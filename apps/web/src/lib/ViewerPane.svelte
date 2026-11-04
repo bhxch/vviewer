@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import type { RenderedInstance, TocEntry, ComputeWhere } from '@bhxch/vviewer-core';
-  import { showErrorCard } from '@bhxch/vviewer-core';
+  import { getRemoteBase, showErrorCard, type ReadProgressEvent } from '@bhxch/vviewer-core';
   import { isAbortError, TREE_SITTER_MAX_BYTES } from '@bhxch/vviewer-render-text';
   import type { CodeEngine, CodeFileMeta } from '@bhxch/vviewer-render-text';
   import type { OutlineEntry } from '@bhxch/vviewer-highlight';
@@ -24,7 +24,10 @@
   import { loadSettings } from './stores/settings';
   import { watchHealth, statusNotice } from './openFlow.svelte';
   import { isMountRootStoreId } from './serverHealthCache';
+  import { createProgressTracker, dlAddressText, isRemoteDownload, type ProgressSnapshot } from './downloadProgress';
+  import { displayEndpointForStore } from './mountsSync';
 import SearchPanel from './SearchPanel.svelte';
+import DownloadProgressCard from './DownloadProgressCard.svelte';
 
   let {
     tab,
@@ -111,6 +114,28 @@ import SearchPanel from './SearchPanel.svelte';
   let pickerOpen = $state(false);
   let pickerEl = $state<HTMLElement | null>(null);
   let pickerBtn = $state<HTMLElement | null>(null);
+
+  // ---------- 下载进度卡（计划 2 Task 4，spec §6.4 加载态 loading-progress 形态） ----------
+  /** 进度快照（卡片唯一数据源）：onTick 写入（节流 200ms 在 tracker 层）；null = 无
+   * 在飞下载（卡不渲染）。完成/失败/取消/tab 切换随渲染 effect 生命周期清空（卸卡
+   * 让位渲染/错误卡）；tracker 每 dispatch 独立建实例（per-tab/per-轮 独立进度）。 */
+  let dlProgress = $state<ProgressSnapshot | null>(null);
+  /** 卡片「地址」行（脱敏 display endpoint + path，dlAddressText 产出）：随 tracker
+   * 装配一次（下载中不变）。 */
+  let dlAddress = $state('');
+  /** 当前在飞下载的取消柄（非响应式）：effect 体装配 = effectAbort（与 dispatch
+   * signal 同源同柄），cancelDownload 消费，cleanup 清偿。 */
+  let dlAbort: AbortController | null = null;
+
+  /** 进度卡「取消」（spec §6.4）：abort 在飞 dispatch 的 effectAbort——泵读随 signal
+   * reject，经 dispatcher 既有 abort 分类静默收场（no-op 实例/abort reject 双路都不
+   * 落错误卡，取消不是读失败）+ 同步卸卡。 */
+  function cancelDownload(): void {
+    dlProgress = null;
+    dlAddress = '';
+    dlAbort?.abort();
+    dlAbort = null;
+  }
 
   // 浮层展开态随激活 tab 切换复位（终审 M-5，MetaPanel openWithExpanded 同款）：
   // 依赖=激活 tab id（tabStore 深代理读自动追踪），复位写非依赖的展开态——无自读
@@ -603,6 +628,29 @@ import SearchPanel from './SearchPanel.svelte';
         // 行尺度（字体系统 Task 2）：codeSize 变化经 fonts 订阅 rev++ 到达本轮渲染，
         // 每轮直读 loadSettings 现算（viewer.ts getDiagramOptions 同款模式，不持副本）
         const lineMetrics = codeLineMetrics(loadSettings().fonts.codeSize);
+        // 进度卡装配（spec §6.4，计划 2 Task 4）：仅远端来源（R1 remote:/R2
+        // s3direct:/davdirect:，isRemoteDownload 单源判定）建 tracker 并传
+        // onReadProgress——dispatcher 的泵门即 onReadProgress 在场（Task 2 裁决），
+        // 本地来源（L1–L3）不传维持既有单次 read 形态、不显示进度卡。tracker 每轮
+        // dispatch 独立实例（per-tab 独立进度）；onTick 守卫两竞态：cancelled（tab
+        // 切换/重渲染后的迟到 tick）与 live 非 null（错误卡 open-as/redisplay 重入
+        // 泵的进度不上屏——重入完成无从在本 effect 收尾，进度卡只服务主装载流）。
+        const tracker = isRemoteDownload(current.source.storeId)
+          ? createProgressTracker((s) => {
+              if (cancelled || live !== null) return;
+              dlProgress = s;
+            })
+          : null;
+        if (tracker !== null) {
+          // 地址行（spec §6.4：脱敏 display endpoint + path）：R1 走 getRemoteBase
+          //（store 建实例即登记，无记录依赖）；R2 直连回落挂载记录镜像
+          // displayEndpointForStore（记录未列出过 → undefined → path-only 降级）。
+          dlAddress = dlAddressText(
+            getRemoteBase(current.source.storeId) ?? displayEndpointForStore(current.source.storeId),
+            current.source.path
+          );
+          dlAbort = effectAbort; // 取消柄 = effect 级 controller（取消钮与 cleanup 同源）
+        }
         const res = await dispatcher.dispatch(current.source, null, host, {
           rendererOverride: current.overrideRenderer,
           // 手动高亮语言（spec §4.1）：Task 3 setHighlightLang 写入 Tab.overrideLang，
@@ -621,12 +669,23 @@ import SearchPanel from './SearchPanel.svelte';
               current.source.path,
               range !== undefined || merged !== undefined ? { range, signal: merged } : undefined
             );
-          }
+          },
+          // 进度卡（spec §6.4）：仅远端来源 tracker 在场时传入（条件展开维持本地来源
+          // 的无 onReadProgress 调用形态——Task 2「缺省零行为变化」的调用面锚）
+          ...(tracker !== null
+            ? { onReadProgress: (p: ReadProgressEvent) => tracker.update(p.loaded, p.total) }
+            : {})
         });
-        if (cancelled) {
+        // 取消/重渲染竞态面：cancelled（cleanup 先于 resolve）与 effectAbort.signal
+        // .aborted（进度卡「取消」钮先于 resolve——dispatch 对 abort 分类 resolve
+        // no-op 实例，不得当作正常渲染接管）双路一致丢弃实例静默收场
+        if (cancelled || effectAbort.signal.aborted) {
           res.instance.destroy();
           return;
         }
+        // 进度卡卸载（spec §6.4 完成态自动让位渲染）：渲染实例接管 host 前清快照
+        dlProgress = null;
+        dlAddress = '';
         live = res.instance;
         instance = res.instance;
         // markdown 图表主题桥接（@bhxch/vviewer-markdown 切换）：包内不再监听 vv:* 事件，
@@ -744,6 +803,10 @@ import SearchPanel from './SearchPanel.svelte';
           });
         }
       } catch (err) {
+        // 进度卡随失败先卸（失败落下方错误卡片；取消/清理走 abort 静默面——两条路
+        // 都不得残留进度卡）
+        dlProgress = null;
+        dlAddress = '';
         // store.read 失败（如会话占位 tab、句柄失效）也走错误卡片；abort 不上屏
         //（deferred 清偿 Task 5 裁决）：effect 级/实例级取消的 AbortError 不落读取
         // 失败卡片——取消不是读失败，静默 return 交新一轮渲染接管（dispatch 侧
@@ -773,6 +836,9 @@ import SearchPanel from './SearchPanel.svelte';
     return () => {
       cancelled = true;
       effectAbort.abort(); // effect 级取消：pre-instance 在飞读即刻 reject（见上注）
+      dlProgress = null; // 进度卡随 effect 清偿卸载（计划 2 Task 4：tab 切换/重渲染不留孤儿卡）
+      dlAddress = '';
+      dlAbort = null; // 取消柄引用清偿（effectAbort 已在上方 abort，取消钮此后无在飞下载可断）
       offThemeBridge?.(); // 图表主题桥随实例销毁摘除（applyTheme 通道，不跨实例泄漏）
       offThemeBridge = null;
       cancelAnimationFrame(rafId);
@@ -824,6 +890,16 @@ import SearchPanel from './SearchPanel.svelte';
       ></div>
     {/if}
   </div>
+  {#if dlProgress}
+    <!-- 下载进度卡（计划 2 Task 4，spec §6.4）：加载态区（错误卡片同域的
+         loading-progress 形态）。pane 级 absolute 浮层（SearchPanel 同锚先例）：
+         host 子内容由 dispatch/showErrorCard replaceChildren 接管，Svelte 管理的
+         卡不放 host 内；浮层不占流式布局——下载中不出滚动条、卸卡零位移。挂载条件
+         仅 dlProgress 非空（只有渲染 effect 的远端 dispatch 装配它会写——tab 有效
+         且 path 非空，目录/占位分支天然不出现）；完成/失败/取消/tab 切换 →
+         dlProgress 清空即卸卡让位 -->
+    <DownloadProgressCard snapshot={dlProgress} address={dlAddress} oncancel={cancelDownload} />
+  {/if}
   {#if searchOpen && instance}
     <SearchPanel
       instance={instance}
