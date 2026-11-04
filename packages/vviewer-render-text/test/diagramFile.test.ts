@@ -1,15 +1,39 @@
 // diagramFile.test.ts — Task 3（spec 2026-11-04-file-viewer-integration §5.1）：
 // 图表文件渲染器注册面锚——映射表逐字一致、扩展名跨型去重、fresh registry 零
 // RegistryError 安装、byExtension 大小写归一、与既有 owner（markdown/html/jsonl）
-// 不撞。本任务只锚注册面：render 体为最小抛错桩（Task 4 实装三分发/回退后追加
-// 行为锚），装配序锚在 Task 5（viewer.ts 先 diagram 后 generated）。
-import { describe, it, expect } from 'vitest';
-import { createRegistry, type Renderer } from '@bhxch/vviewer-core';
-import { resolveDiagramType } from '@bhxch/vviewer-render-diagram';
+// 不撞。Task 4 追加渲染路径行为锚（§5.2）：三分发 local/kroki/server、失败回退链
+// （local 无引擎→kroki→源码+提示）、2MB 大小门、源码/渲染切换；引擎层（包边界）
+// 桩 renderDiagramEngine/createKrokiUrl/createPlantumlUrl，注册表 resolveDiagramType
+// 保持真身；模式注入经 setDiagramOptions 真通道（不 mock markdown 包，与装配点
+// viewer.ts 同一注入面）。装配序锚在 Task 5（viewer.ts 先 diagram 后 generated）。
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { createRegistry, type Renderer, type Detection, type FileSource, type RenderedInstance } from '@bhxch/vviewer-core';
+import {
+  resolveDiagramType,
+  DEFAULT_KROKI_HOST,
+  renderDiagramEngine,
+  createKrokiUrl,
+  createPlantumlUrl,
+  type DiagramMode
+} from '@bhxch/vviewer-render-diagram';
+import { setDiagramOptions, type DiagramRenderOptions } from '@bhxch/vviewer-markdown';
 import { markdownRenderer } from '../src/markdown/markdownRenderer';
 import { htmlRenderer } from '../src/html';
 import { jsonlRenderer } from '../src/jsonl/index';
-import { DIAGRAM_FILE_EXTS, createDiagramFileRenderers } from '../src/diagramFile';
+import { DIAGRAM_FILE_EXTS, createDiagramFileRenderers, type DiagramFileRenderOpts } from '../src/diagramFile';
+
+// 引擎层包边界桩（spread real 保留注册表/编码等其余导出，注册面测试不受影响）：
+// renderDiagramEngine/createKrokiUrl/createPlantumlUrl 缺省实现于 beforeEach 统一给
+// 值，失败分支逐测覆盖。
+vi.mock('@bhxch/vviewer-render-diagram', async (importOriginal) => {
+  const real = await importOriginal<Record<string, unknown>>();
+  return {
+    ...real,
+    renderDiagramEngine: vi.fn(),
+    createKrokiUrl: vi.fn(),
+    createPlantumlUrl: vi.fn()
+  };
+});
 
 /**
  * spec 2026-11-04 §5.1 表逐字内联（防实现漂移）。29 型（diagram 注册表全集去
@@ -123,5 +147,324 @@ describe('diagramFile 注册面（spec 2026-11-04 §5.1）', () => {
       const owner = registry.byExtension(ext);
       expect(owner?.id ?? '(未注册)', `".${ext}" 的 owner`).not.toMatch(/^diagram-/);
     }
+  });
+});
+
+// ---------- Task 4：渲染路径（spec §5.2 三分发 + 失败回退 + 2MB 门 + 切换） ----------
+
+// 桩缺省实现（成功路径），失败分支在测内以 mockRejectedValue 覆盖；clearAllMocks
+// 只清调用记录不清实现，beforeEach 重设保证每测从干净缺省起步。
+beforeEach(() => {
+  vi.mocked(renderDiagramEngine).mockResolvedValue('<svg id="t"/>');
+  vi.mocked(createKrokiUrl).mockResolvedValue('https://kroki.test/svg/DEFAULT');
+  vi.mocked(createPlantumlUrl).mockResolvedValue('https://plantuml.test/plantuml/svg/DEFAULT');
+});
+
+/** jsdom 无 ResizeObserver，源码视图的 virtualScroller 需要（照 htmlRenderer.test.ts 的 stub） */
+function stubResizeObserver(): void {
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    }
+  );
+}
+
+function sourceOf(name: string): FileSource {
+  return {
+    storeId: 's',
+    storeLabel: '样本',
+    path: name,
+    name,
+    store: {
+      id: 's',
+      displayName: () => '样本',
+      listChildren: async () => [],
+      read: async () => new Uint8Array()
+    }
+  };
+}
+
+/** 按类型取渲染器并渲染：返回宿主与实例（det.encoding 恒 utf-8，buffer 由源文本编码） */
+async function renderDiagramFile(
+  type: string,
+  ext: string,
+  text: string,
+  opts: DiagramFileRenderOpts = {},
+  buffer?: Uint8Array
+): Promise<{ target: HTMLElement; instance: RenderedInstance }> {
+  stubResizeObserver();
+  const target = document.createElement('div');
+  document.body.append(target);
+  const renderer = createDiagramFileRenderers(opts).find((r) => r.id === `diagram-${type}`);
+  expect(renderer, `diagram-${type} 渲染器存在`).toBeTruthy();
+  const instance = await renderer!.render(
+    buffer ?? new TextEncoder().encode(text),
+    target,
+    sourceOf(`f.${ext}`),
+    { ext, encoding: 'utf-8' } satisfies Detection
+  );
+  return { target, instance };
+}
+
+/** 注入图表选项（真通道 setDiagramOptions，与 viewer.ts 装配点同一注入面） */
+function setOpts(extra: Partial<DiagramRenderOptions> = {}, modeOf?: (lang: string) => DiagramMode): void {
+  setDiagramOptions(() => ({
+    krokiHost: 'https://kroki.test',
+    mermaidTheme: 'default',
+    modeOf: modeOf ?? ((lang) => resolveDiagramType(lang)?.defaultMode ?? 'source'),
+    ...extra
+  }));
+}
+
+describe('diagramFile 渲染——local 成功（净化路径注入）', () => {
+  afterEach(() => {
+    setDiagramOptions(null);
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  it('.dot：引擎 svg 经 sanitizeDiagramFragment 注入（script 剥除、svg 与引擎 style 存活），引擎参数锚', async () => {
+    vi.mocked(renderDiagramEngine).mockResolvedValue('<svg id="t"><script>alert(1)</script><style>.a{fill:red}</style></svg>');
+    const { target } = await renderDiagramFile('graphviz', 'dot', 'digraph{a->b}');
+    // 未注入 options → 注册表 defaultMode 'local'，graphviz 本地引擎直 renderDiagramEngine
+    expect(vi.mocked(renderDiagramEngine)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(renderDiagramEngine)).toHaveBeenCalledWith('graphviz', 'digraph{a->b}', {
+      mermaidTheme: 'default',
+      renderer: undefined
+    });
+    const svg = target.querySelector('svg#t');
+    expect(svg).not.toBeNull();
+    expect(svg!.querySelector('script')).toBeNull(); // 净化路径：script 剥除
+    expect(svg!.querySelector('style')).not.toBeNull(); // 图表契约壳豁免面：引擎 style 保留
+  });
+
+  it('非 UTF-8 坏字节不抛未捕获（fatal:false 解码替换，渲染照常）', async () => {
+    vi.mocked(renderDiagramEngine).mockResolvedValue('<svg id="t"/>');
+    const bytes = new TextEncoder().encode('digraph{a->b}');
+    bytes[3] = 0xff; // 坏字节
+    const { target } = await renderDiagramFile('graphviz', 'dot', 'digraph{a->b}', {}, bytes);
+    expect(target.querySelector('svg#t')).not.toBeNull();
+  });
+});
+
+describe('diagramFile 渲染——kroki 客户端 img', () => {
+  afterEach(() => {
+    setDiagramOptions(null);
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  it('mode kroki：createKrokiUrl 以 (krokiHost, krokiType, source) 调用，target 出 img[src]，不调本地引擎', async () => {
+    vi.mocked(createKrokiUrl).mockResolvedValue('https://kroki.test/plantuml/svg/AAECAw');
+    setOpts({ krokiHost: 'https://kroki.test' }, (lang) => (lang === 'plantuml' ? 'kroki' : 'source'));
+    const { target } = await renderDiagramFile('plantuml', 'plantuml', '@startuml\nA->B\n@enduml');
+    expect(vi.mocked(createKrokiUrl)).toHaveBeenCalledWith('https://kroki.test', 'plantuml', '@startuml\nA->B\n@enduml');
+    expect(vi.mocked(renderDiagramEngine)).not.toHaveBeenCalled();
+    const img = target.querySelector('img');
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute('src')).toBe('https://kroki.test/plantuml/svg/AAECAw');
+    expect(img!.getAttribute('alt')).toBe('plantuml');
+  });
+
+  it('mode official（plantuml officialServer 型）：createPlantumlUrl img（md 管线第五档同构），不经 kroki', async () => {
+    vi.mocked(createPlantumlUrl).mockResolvedValue('https://plantuml.test/plantuml/svg/BBB');
+    setOpts({}, (lang) => (lang === 'plantuml' ? 'official' : 'source'));
+    const { target } = await renderDiagramFile('plantuml', 'plantuml', '@startuml\nA->B\n@enduml');
+    expect(vi.mocked(createPlantumlUrl)).toHaveBeenCalledWith('@startuml\nA->B\n@enduml');
+    expect(vi.mocked(createKrokiUrl)).not.toHaveBeenCalled();
+    expect(target.querySelector('img[src="https://plantuml.test/plantuml/svg/BBB"]')).not.toBeNull();
+  });
+});
+
+describe('diagramFile 渲染——server 分发（remoteCall 通道）', () => {
+  afterEach(() => {
+    setDiagramOptions(null);
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  it('server 模式 + remoteCall：POST /api/compute/diagram {lang, source} → {svg} 净化注入，不经本地引擎', async () => {
+    const remoteCall = vi.fn(async () => ({ svg: '<svg id="srv"><script>x()</script></svg>' }));
+    setOpts({ serverDiagramOf: (lang) => lang === 'graphviz' }, (lang) => (lang === 'graphviz' ? 'server' : 'source'));
+    const { target } = await renderDiagramFile('graphviz', 'dot', 'digraph{a->b}', { remoteCall });
+    expect(remoteCall).toHaveBeenCalledTimes(1);
+    expect(remoteCall).toHaveBeenCalledWith('/api/compute/diagram', {
+      method: 'POST',
+      body: { lang: 'graphviz', source: 'digraph{a->b}' }
+    });
+    expect(vi.mocked(renderDiagramEngine)).not.toHaveBeenCalled();
+    const svg = target.querySelector('svg#srv');
+    expect(svg).not.toBeNull();
+    expect(svg!.querySelector('script')).toBeNull(); // 服务端 svg 必经净化（同 md 管线 server 分支）
+  });
+
+  it('server 模式但无 remoteCall（未注入通道）：跳过 server 走 local 回落（graphviz 引擎 svg）', async () => {
+    vi.mocked(renderDiagramEngine).mockResolvedValue('<svg id="t"/>');
+    setOpts({ serverDiagramOf: (lang) => lang === 'graphviz' }, (lang) => (lang === 'graphviz' ? 'server' : 'source'));
+    const { target } = await renderDiagramFile('graphviz', 'dot', 'digraph{a->b}');
+    expect(target.querySelector('svg#t')).not.toBeNull();
+    expect(vi.mocked(renderDiagramEngine)).toHaveBeenCalledTimes(1);
+  });
+
+  it('krokiVia=server 且 krokiProxy 宣告：kroki 走 /api/kroki 代发内联 svg，不经 client img', async () => {
+    const remoteCall = vi.fn(async () => ({ svg: '<svg id="ks"/>' }));
+    setOpts(
+      { krokiVia: 'server', krokiProxy: true },
+      (lang) => (lang === 'plantuml' ? 'kroki' : 'source')
+    );
+    const { target } = await renderDiagramFile('plantuml', 'plantuml', '@startuml\nA->B\n@enduml', { remoteCall });
+    expect(remoteCall).toHaveBeenCalledWith('/api/kroki', {
+      method: 'POST',
+      body: { lang: 'plantuml', source: '@startuml\nA->B\n@enduml' }
+    });
+    expect(vi.mocked(createKrokiUrl)).not.toHaveBeenCalled();
+    expect(target.querySelector('svg#ks')).not.toBeNull();
+  });
+});
+
+describe('diagramFile 渲染——回退链（Review Focus 3）', () => {
+  afterEach(() => {
+    setDiagramOptions(null);
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  it('kroki-only 型被 modeOf 强判 local：无本地引擎不调引擎，降级 kroki img 兜住', async () => {
+    setOpts({ krokiHost: 'https://kroki.test' }, () => 'local');
+    const { target } = await renderDiagramFile('plantuml', 'plantuml', '@startuml\nA->B\n@enduml');
+    expect(vi.mocked(renderDiagramEngine)).not.toHaveBeenCalled(); // plantuml 无本地引擎
+    expect(vi.mocked(createKrokiUrl)).toHaveBeenCalledWith('https://kroki.test', 'plantuml', '@startuml\nA->B\n@enduml');
+    expect(target.querySelector('img')).not.toBeNull();
+  });
+
+  it('kroki 也失败（createKrokiUrl reject）：落 renderCode 源码视图（源文本出现）+ 失败状态提示卡（渲染器内提示通道）', async () => {
+    vi.mocked(createKrokiUrl).mockRejectedValue(new Error('kroki 不可达'));
+    setOpts({}, () => 'local');
+    const { target } = await renderDiagramFile('plantuml', 'plantuml', '@startuml\nA->B\n@enduml');
+    expect(vi.mocked(renderDiagramEngine)).not.toHaveBeenCalled();
+    expect(vi.mocked(createKrokiUrl)).toHaveBeenCalledTimes(1);
+    const body = target.querySelector('.vv-code-body');
+    expect(body).not.toBeNull(); // 源码视图承接（renderCode 同一高亮链）
+    expect(body!.textContent).toContain('@startuml');
+    const card = target.querySelector('.vv-error-card'); // 状态提示元素（showStatusNotice 属 web 层，渲染器内以提示卡同语义承接）
+    expect(card).not.toBeNull();
+    expect(card!.textContent).toContain('kroki');
+    expect(card!.textContent).toContain('已回退');
+  });
+});
+
+describe('diagramFile 渲染——引擎抛错回退', () => {
+  afterEach(() => {
+    setDiagramOptions(null);
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  it('引擎 reject（graphviz 有 krokiType）：降级 kroki img（md 管线同链）', async () => {
+    vi.mocked(renderDiagramEngine).mockRejectedValue(new Error('viz 加载失败'));
+    const { target } = await renderDiagramFile('graphviz', 'dot', 'digraph{a->b}');
+    expect(vi.mocked(renderDiagramEngine)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(createKrokiUrl)).toHaveBeenCalledWith(DEFAULT_KROKI_HOST, 'graphviz', 'digraph{a->b}');
+    expect(target.querySelector('img')).not.toBeNull();
+  });
+
+  it('引擎 reject + kroki reject：直落源码视图 + 提示卡（不空白死等）', async () => {
+    vi.mocked(renderDiagramEngine).mockRejectedValue(new Error('viz 加载失败'));
+    vi.mocked(createKrokiUrl).mockRejectedValue(new Error('kroki 不可达'));
+    const { target } = await renderDiagramFile('graphviz', 'dot', 'digraph{a->b}');
+    const body = target.querySelector('.vv-code-body');
+    expect(body).not.toBeNull();
+    expect(body!.textContent).toContain('digraph');
+    expect(target.querySelector('.vv-error-card')).not.toBeNull();
+  });
+});
+
+describe('diagramFile 渲染——大小门（Review Focus 4）', () => {
+  afterEach(() => {
+    setDiagramOptions(null);
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  it('>2MB：不调引擎不构 kroki URL，直落源码视图 + 降级提示卡（无工具栏，切换空操作）', async () => {
+    const big = new Uint8Array(2 * 1024 * 1024 + 1);
+    big.set(new TextEncoder().encode('digraph{a->b}'));
+    const { target, instance } = await renderDiagramFile('graphviz', 'dot', 'digraph{a->b}', {}, big);
+    expect(vi.mocked(renderDiagramEngine)).not.toHaveBeenCalled();
+    expect(vi.mocked(createKrokiUrl)).not.toHaveBeenCalled();
+    expect(target.querySelector('.vv-error-card')).not.toBeNull(); // 降级提示卡
+    expect(target.textContent).toContain('文件过大');
+    expect(target.querySelector('.vv-code-body')).not.toBeNull(); // 源码视图承接
+    expect(target.querySelector('.vv-html-toolbar')).toBeNull(); // 无渲染视图可切
+    const toggle = instance as RenderedInstance & { toggleView(): void };
+    toggle.toggleView(); // 降级视图切换空操作
+    expect(target.querySelector('.vv-code-body')).not.toBeNull();
+    instance.destroy();
+    expect(target.innerHTML).toBe('');
+    expect(target.classList.contains('vv-html')).toBe(false);
+    expect(target.classList.contains('vv-degraded')).toBe(false);
+  });
+
+  it('=2MB 恰好不触发门（仅 >2MB 降级）：走正常渲染路径', async () => {
+    vi.mocked(renderDiagramEngine).mockResolvedValue('<svg id="t"/>');
+    const buf = new Uint8Array(2 * 1024 * 1024);
+    buf.set(new TextEncoder().encode('digraph{a->b}'));
+    const { target } = await renderDiagramFile('graphviz', 'dot', 'digraph{a->b}', {}, buf);
+    expect(vi.mocked(renderDiagramEngine)).toHaveBeenCalledTimes(1);
+    expect(target.querySelector('.vv-error-card')).toBeNull();
+    expect(target.querySelector('svg#t')).not.toBeNull();
+  });
+});
+
+describe('diagramFile 渲染——源码/渲染切换', () => {
+  afterEach(() => {
+    setDiagramOptions(null);
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  it('渲染态点源码钮：源码视图出现且引擎调用不增（不重读文件）；点渲染钮：svg 复现且引擎调用不增', async () => {
+    vi.mocked(renderDiagramEngine).mockResolvedValue('<svg id="t"/>');
+    const { target } = await renderDiagramFile('graphviz', 'dot', 'digraph{a->b}');
+    expect(vi.mocked(renderDiagramEngine)).toHaveBeenCalledTimes(1);
+    const sourceBtn = target.querySelector<HTMLButtonElement>('.vv-html-btn-source');
+    const renderedBtn = target.querySelector<HTMLButtonElement>('.vv-html-btn-rendered');
+    expect(sourceBtn).not.toBeNull();
+    expect(renderedBtn).not.toBeNull();
+
+    sourceBtn!.click();
+    expect(target.querySelector('svg#t')).toBeNull();
+    const body = target.querySelector('.vv-code-body');
+    expect(body).not.toBeNull();
+    expect(body!.textContent).toContain('digraph');
+    expect(vi.mocked(renderDiagramEngine)).toHaveBeenCalledTimes(1); // 切源码不重渲染
+
+    renderedBtn!.click();
+    expect(target.querySelector('svg#t')).not.toBeNull(); // 缓存复挂载
+    expect(target.querySelector('.vv-code-body')).toBeNull();
+    expect(vi.mocked(renderDiagramEngine)).toHaveBeenCalledTimes(1); // 切回渲染不重调引擎
+  });
+
+  it('toggleView 实例方法同通道；destroy 清空宿主与类标记', async () => {
+    vi.mocked(renderDiagramEngine).mockResolvedValue('<svg id="t"/>');
+    const { target, instance } = await renderDiagramFile('graphviz', 'dot', 'digraph{a->b}');
+    const toggle = instance as RenderedInstance & { toggleView(): void };
+    toggle.toggleView();
+    expect(target.querySelector('.vv-code-body')).not.toBeNull();
+    toggle.toggleView();
+    expect(target.querySelector('svg#t')).not.toBeNull();
+    instance.destroy();
+    expect(target.innerHTML).toBe('');
+    expect(target.classList.contains('vv-html')).toBe(false);
   });
 });
