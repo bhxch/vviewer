@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import type { RenderedInstance, TocEntry, ComputeWhere } from '@bhxch/vviewer-core';
-  import { getRemoteBase, showErrorCard, type ReadProgressEvent } from '@bhxch/vviewer-core';
+  import { getRemoteBase, showErrorCard, extractExtension, type ReadProgressEvent } from '@bhxch/vviewer-core';
   import { isAbortError, TREE_SITTER_MAX_BYTES } from '@bhxch/vviewer-render-text';
   import type { CodeEngine, CodeFileMeta } from '@bhxch/vviewer-render-text';
   import type { OutlineEntry } from '@bhxch/vviewer-highlight';
@@ -25,9 +25,11 @@
   import { watchHealth, statusNotice } from './openFlow.svelte';
   import { isMountRootStoreId } from './serverHealthCache';
   import { createProgressTracker, dlAddressText, isRemoteDownload, type ProgressSnapshot } from './downloadProgress';
+  import { mbToBytes, shouldConfirm } from './downloadConfirm';
   import { displayEndpointForStore } from './mountsSync';
 import SearchPanel from './SearchPanel.svelte';
 import DownloadProgressCard from './DownloadProgressCard.svelte';
+import DownloadConfirmCard from './DownloadConfirmCard.svelte';
 
   let {
     tab,
@@ -135,6 +137,36 @@ import DownloadProgressCard from './DownloadProgressCard.svelte';
     dlAddress = '';
     dlAbort?.abort();
     dlAbort = null;
+  }
+
+  // ---------- 下载确认卡（计划 2 Task 6，spec §6.4 确认门：泵前置拦截） ----------
+  /** 确认卡数据（加载态区浮层，进度卡同域）：null = 无待确认下载（卡不渲染）。
+   * 泵前置拦截面——渲染 effect 在 dispatch 前发现超阈值远端来源时装配（size 已知
+   * 且 > settings 阈值），本组件其余路径不写。key 为确认作用域键（确认登记用）。 */
+  let dlConfirm = $state<{ key: string; name: string; sizeBytes: number; rendererLabel: string } | null>(null);
+  /** 已确认作用域键（effect 同步读——「开始下载」写入触发 effect 重跑过门进 dispatch；
+   * 「取消」不写键不触发重跑 = 静默中止）。'' = 无确认。 */
+  let dlApprovedKey = $state('');
+
+  /** 确认作用域键：storeId/path/size 三元组——同文件重渲染（rev++/override 切换）
+   * 不重复打扰；tab 切换换文件换源、文件变更（size 变）自然换键重问。 */
+  function dlGateKeyOf(storeId: string, path: string, size: number | null): string {
+    return `${storeId}::${path}::${size ?? ''}`;
+  }
+
+  /** 确认卡「开始下载」（spec §6.4：确认后泵才启动）：登记确认作用域键 → 渲染
+   * effect 重跑过门进 dispatch（泵启动、进度卡接力）；卸卡随门通过路径
+   * （gate 通过即 dlConfirm = null）。 */
+  function confirmDownload(): void {
+    if (dlConfirm === null) return;
+    dlApprovedKey = dlConfirm.key;
+    dlConfirm = null;
+  }
+
+  /** 确认卡「取消」（spec §6.4）：静默中止——不 dispatch、无在飞泵、无错误卡（与
+   * 进度卡取消同域的静默面），卸卡即可；确认键不登记，同文件下次渲染重问。 */
+  function cancelConfirm(): void {
+    dlConfirm = null;
   }
 
   // 浮层展开态随激活 tab 切换复位（终审 M-5，MetaPanel openWithExpanded 同款）：
@@ -607,6 +639,42 @@ import DownloadProgressCard from './DownloadProgressCard.svelte';
     if (!host || !tab || tab.source.path === '') return;
     const current = tab;
     void current.rev; // SSE 变更刷新：读入 rev 使 effect 依赖它，自增即重跑（重读+重渲染）
+    // 确认门（计划 2 Task 6，spec §6.4）：远端来源（R1/R2，isRemoteDownload 单源判定）
+    // + size 已知 + size > 阈值 → 泵启动前显示确认卡，本轮不进渲染/泵。阈值读 settings
+    // 现值（loadSettings 每轮现算，lineMetrics 同款不持副本——设置页「应用」后下一次
+    // 门评估即时生效）；size 取 FileSource.size（tree 条目/File/Content-Length 透传，
+    // 与 dispatcher ≤1MB 直读/泵收口同源），未知归 null → 门放行（不定态下载不适用）。
+    // 确认作用域键读入本 effect（dlApprovedKey 依赖）：「开始下载」写入即重跑过门，
+    // 「取消」不写键不重跑 = 静默中止。确认分支 return 早于 tracker/dispatch 装配
+    // ——等待期加载态区只有确认卡；早于 cleanup 注册（本轮无在飞资源可清偿），
+    // 上一轮 cleanup 已清偿旧实例与 UI 态。
+    const dlSize =
+      typeof current.source.size === 'number' && Number.isFinite(current.source.size)
+        ? current.source.size
+        : null;
+    const dlKey = dlGateKeyOf(current.source.storeId, current.source.path, dlSize);
+    if (
+      isRemoteDownload(current.source.storeId) &&
+      shouldConfirm(dlSize, mbToBytes(loadSettings().storage.remoteDownloadConfirmMb)) &&
+      dlApprovedKey !== dlKey
+    ) {
+      dlConfirm = {
+        key: dlKey,
+        name: current.source.name,
+        sizeBytes: dlSize!,
+        // 目标渲染器名（泵前置可得的最优估计）：override 显式指定优先，回落扩展名
+        // 路由候选（探测链主路）；无效 override/extless/未命中降级「自动识别」——
+        // 真实目标渲染器在 dispatch 内 head 探测后定案
+        rendererLabel:
+          (current.overrideRenderer !== undefined
+            ? registry.byId(current.overrideRenderer)?.label
+            : undefined) ??
+          registry.byExtension(extractExtension(current.source.name))?.label ??
+          '自动识别'
+      };
+      return;
+    }
+    dlConfirm = null;
     let cancelled = false;
     // markdown 图表主题桥的解绑句柄（异步装配成功才有值；cleanup 同步清偿）
     let offThemeBridge: (() => void) | null = null;
@@ -903,6 +971,20 @@ import DownloadProgressCard from './DownloadProgressCard.svelte';
          且 path 非空，目录/占位分支天然不出现）；完成/失败/取消/tab 切换 →
          dlProgress 清空即卸卡让位 -->
     <DownloadProgressCard snapshot={dlProgress} address={dlAddress} oncancel={cancelDownload} />
+  {/if}
+  {#if dlConfirm}
+    <!-- 下载确认卡（计划 2 Task 6，spec §6.4 确认门）：进度卡同域 pane 级浮层。
+         泵前置拦截——渲染 effect 在 dispatch 前装配（远端来源 size 已知且超阈值），
+         「开始下载」登记确认作用域键后 effect 重跑过门进 dispatch（进度卡接力），
+         「取消」静默中止（不 dispatch 无错误卡）。挂载条件仅 dlConfirm 非空（门
+         分支装配，门通过/取消/清理即卸） -->
+    <DownloadConfirmCard
+      name={dlConfirm.name}
+      sizeBytes={dlConfirm.sizeBytes}
+      rendererLabel={dlConfirm.rendererLabel}
+      onconfirm={confirmDownload}
+      oncancel={cancelConfirm}
+    />
   {/if}
   {#if searchOpen && instance}
     <SearchPanel
