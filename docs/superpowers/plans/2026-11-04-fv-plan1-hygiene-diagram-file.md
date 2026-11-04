@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 修复 vviewer 侧扩展名绑定缺口并补台账（批次一）；把 markdown 已支持的图表类型拆出独立文件渲染器，29 型 / 31 扩展名双击即图形预览、可切源码模式（批次二）；顺带完成排除清单中的自有补绑（archive 21 扩展名 + hex `.macho`）。
+**Goal:** 修复 vviewer 侧扩展名绑定缺口并补台账（批次一）；把 markdown 已支持的图表类型拆出独立文件渲染器，29 型 / 33 扩展名双击即图形预览、可切源码模式（批次二）；顺带完成排除清单中的自有补绑（archive 21 扩展名 + hex `.macho`）。
 
 **Architecture:** 图表文件渲染器落 `packages/vviewer-render-text/src/diagramFile.ts`（**对 spec §5.2 落位的有意偏差**：diagram 包被 render-text 的 markdown 依赖，反向 import code.ts 的 renderCode 会成环；render-text 已依赖 diagram/highlight 两包，renderCode/decodeText/sanitize 全本地——spec 已随本计划补注记）。渲染分发复用 diagram 包导出（`renderDiagramEngine`/`createKrokiUrl`/`resolveDiagramType`）与 markdown 管线的模式注入（`getDiagramOptions().modeOf`），server 路径经装配注入的 `remoteCall`（与 PipelineCtx.diagram.remoteCall 同形）。装配点 `apps/web/src/lib/viewer.ts` 图表渲染器先于 codeRenderer 安装（generated fallback 补空位机制的前置铁律）。
 
