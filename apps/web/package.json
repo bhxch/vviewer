@@ -18,6 +18,7 @@
     "@bhxch/vviewer-render-binary": "workspace:*",
     "@bhxch/vviewer-render-diagram": "workspace:*",
     "@bhxch/vviewer-render-doc": "workspace:*",
+    "@bhxch/vviewer-render-foreign": "workspace:*",
     "@bhxch/vviewer-render-media": "workspace:*",
     "@bhxch/vviewer-render-text": "workspace:*",
     "buffer": "^6.0.3",

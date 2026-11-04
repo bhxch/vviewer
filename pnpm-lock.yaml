@@ -70,6 +70,9 @@ importers:
       '@bhxch/vviewer-render-doc':
         specifier: workspace:*
         version: link:../../packages/vviewer-render-doc
+      '@bhxch/vviewer-render-foreign':
+        specifier: workspace:*
+        version: link:../../packages/vviewer-render-foreign
       '@bhxch/vviewer-render-media':
         specifier: workspace:*
         version: link:../../packages/vviewer-render-media
@@ -271,6 +274,12 @@ importers:
       xlsx:
         specifier: https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
         version: https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
+
+  packages/vviewer-render-foreign:
+    dependencies:
+      '@bhxch/vviewer-core':
+        specifier: workspace:*
+        version: link:../vviewer-core
 
   packages/vviewer-render-media:
     dependencies:
