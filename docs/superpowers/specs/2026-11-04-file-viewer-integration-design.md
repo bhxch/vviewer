@@ -99,7 +99,7 @@ vviewer 网页版只读查看器现有 12 个自研渲染器，格式面与 file
 
 ### 5.2 渲染器形态
 
-- 落位：`packages/vviewer-render-diagram/src/file/`（新模块，复用既有 resolveDiagramType/引擎加载/kroki 编码/服务端分发），每类型导出一个 Renderer 实例（id `diagram-<type>`），装配点统一安装。
+- 落位：`packages/vviewer-render-text/src/diagramFile.ts`（**实施修正**：原定 diagram 包落位与 markdown→diagram 既有依赖成环——文件渲染器需回退复用 render-text 的 renderCode；render-text 已依赖 diagram/highlight，零新依赖零环，id 命名与分发设计不变），每类型导出一个 Renderer 实例（id `diagram-<type>`），装配点统一安装。
 - 渲染：读全量文本 → 按类型走既有 pipeline 三分发（local 引擎本地渲染 / kroki 经 krokiHost / server-served 优先服务端）→ 产出 SVG/HTML 注入 target。产出物复用 markdown 管线的 sanitize 钩子（图表 SVG 过消毒链）。
 - 失败回退：渲染异常（引擎加载失败/网络失败/语法错误）自动落源码视图——复用 `renderCode`（同一高亮链，类型对应语言如 mermaid/dot 有 tree-sitter 语法）+ 状态条提示（复用 showStatusNotice 通道）。
 - 源码/渲染切换：渲染器内 toggle（交互与样式复用 html 渲染器 `html.ts` 的源码/渲染双视图先例：默认渲染视图，一键切源码再切回，切换不重读文件）。Tab.overrideRenderer/open-as 机制照常可用（切到 code 渲染器为持久 Tab 级 override）。
