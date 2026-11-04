@@ -509,6 +509,14 @@ test('MOB-01：浮层触顶——子菜单+连接服务器表单叠加，mobile 
     await expect(modal).toHaveCount(0);
   }
 
+  // CI 字体度量方差免疫（CI run 41757373361 MOB-01 双 attempt 红，本地绿）：667 视口下
+  // 内滚裕量仅 ~8px（scrollHeight 626 vs clientHeight 618），CI 行高度量略矮即无溢出——
+  // mobile 分支运行时把视口压短到 500px，裕量放大到 ~190px 量级，断言与内容行高的
+  // 环境差解耦；chromium 收合路径保持 720（其裕量方向安全，不动 construction/计数）
+  if (testInfo.project.name === 'mobile') {
+    await page.setViewportSize({ width: 375, height: 500 });
+  }
+
   // 开菜单 + 工作区子菜单 + 连接服务器表单（两展开面同刻齐开——srvOpen 与 sub 独立）
   await openSubmenu(page, '工作区');
   await expect(page.locator(`${MENU_POP} .vv-ws-item`)).toHaveCount(6); // 默认 + 5 新建
