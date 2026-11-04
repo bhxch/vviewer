@@ -3,7 +3,7 @@
 - 日期：2026-11-04
 - 状态：待用户批准（brainstorm 产物，获批后转 writing-plans）
 - 调研依据：`docs/file-viewer/format-package-survey-2026-11-04.md`（47 管线逐行对照、许可证红线、覆盖矩阵）
-- 用户决策记录（brainstorm 两轮四题+三题+builder check 收口，全部拍板）：①引入范围=全量（npm 引入、不进主包；LicenseRef-PMEL 取 MPL-2.0 面；bpmn-js 排除 npm 依赖——md 管线既有运行时 CDN 加载姿态不变）；②data-asset=引 data 包，wasm 与字体查看都开；③音频=补别名+引 capability-midi；④图片=引 renderer-image 仅新 5 扩展名；⑤图表拆分=全集（29 型，builder check 补漏 7 型后收口）；⑥默认模式=默认渲染失败回退源码，引擎形态以 vviewer 图表注册表实态为准（七类 CDN 本地引擎非 kroki）；⑦drawio=引官方运行时；⑧**部署=大资产不进本项目 dist，Pages/Workers/桌面均不背重资产；资产包优先直接用 file-viewer 已发布的 @file-viewer/assets-\*（CDN 直链精确版本），除非必须二次封装并发包**；⑨**桥接契约=方案 A**（嵌套附件回调走 vviewer dispatcher；.shp 边车经 resolveSibling 统一回调读兄弟文件——§6.4 细化：L1/R1/R2/L3 来源全适用，仅裸单文件降级报错）；⑩**远端全量物化分级+下载进度卡**（≤64MB 静默 / 64–512MB 进度卡：地址·进度·速度·ETA·已下载/完整大小·取消 / >512MB 拒绝）；⑪**URL 通道维持 v1 不启用**（桥接集零渐进式消费者；上游唯一渐进式=renderer-pdf URL-only pdfjs Range I/O，价值转移为 vviewer 自有 pdf Range transport 后续候选；直连 S3 动态签名不可直链 URL 已记档）。
+- 用户决策记录（brainstorm 两轮四题+三题+builder check 收口，全部拍板）：①引入范围=全量（npm 引入、不进主包；LicenseRef-PMEL 取 MPL-2.0 面；bpmn-js 排除 npm 依赖——md 管线既有运行时 CDN 加载姿态不变）；②data-asset=引 data 包，wasm 与字体查看都开；③音频=补别名+引 capability-midi；④图片=引 renderer-image 仅新 5 扩展名；⑤图表拆分=全集（29 型，builder check 补漏 7 型后收口）；⑥默认模式=默认渲染失败回退源码，引擎形态以 vviewer 图表注册表实态为准（七类 CDN 本地引擎非 kroki）；⑦drawio=引官方运行时；⑧**部署=大资产不进本项目 dist，Pages/Workers/桌面均不背重资产；资产包优先直接用 file-viewer 已发布的 @file-viewer/assets-\*（CDN 直链精确版本），除非必须二次封装并发包**；⑨**桥接契约=方案 A**（嵌套附件回调走 vviewer dispatcher；.shp 边车经 resolveSibling 统一回调读兄弟文件——§6.4 细化：L1/R1/R2/L3 来源全适用，仅裸单文件降级报错）；⑩**远端全量物化：进度卡无分级全量级显示**（地址·进度·速度·ETA·已下载/完整大小·取消，size 未知不定态）+**确认门阈值可设**（settings 远端下载确认阈值，默认 512MB，先确认后下载，知情自担无独立硬上限，size 未知不适用）+**另存为双形态**（完成后另存为 FS Access 主/blob 兜底；下载并另存为=泵写盘+getFile 回填盘 backed File 免内存峰值）；⑪**URL 通道维持 v1 不启用**（桥接集零渐进式消费者；上游唯一渐进式=renderer-pdf URL-only pdfjs Range I/O；直连 S3 动态签名不可直链 URL 已记档）；⑫**vviewer 自有 pdf 接 Range 能力转正本批**（PDFDataRangeTransport 接 ctx.read，§6.6）。
 
 ## 1. 背景与动机
 
@@ -31,7 +31,7 @@ vviewer 网页版只读查看器现有 12 个自研渲染器，格式面与 file
 ## 3. 约束
 
 - vviewer 渲染器契约：`Renderer.render(buffer, target, source, det, ctx?, opts?)`（`packages/vviewer-core/src/types.ts:166` 附近），registry 一扩展名一 owner，`installFallbackExtensions` 只补空位（专有先注册是装配铁律）。
-- 桥接渲染器声明 `streaming: false` → dispatcher 自动走全量物化路径（回退矩阵既有契约），512MB 防线照旧；Range 流式源在 dispatcher 层补拉，桥接层零感知。
+- 桥接渲染器声明 `streaming: false` → dispatcher 自动走全量物化路径（回退矩阵既有契约）；原 512MB 硬防线在该通路改为**可设阈值的确认门**（§6.4），Range 流式源在 dispatcher 层补拉，桥接层零感知。
 - 第三方引入约束（THIRD_PARTY_NOTICES.md 头注）：仅收 MIT / Apache-2.0 / BSD / ISC / MPL-2.0；双许可取其一需显式记录。
 - 部署面三形态同源 dist：Pages（子路径 base）、桌面 Tauri、Cloudflare Workers（assets_fallback）；PWA precache 预算门禁既有（`tools/diagram-budget.mjs` 先例）。
 - kroki-only 图表类型渲染依赖 krokiHost（settings.diagrams 既有配置），离线场景由失败回退兜底（§5.3）。
@@ -192,12 +192,16 @@ vviewer 网页版只读查看器现有 12 个自研渲染器，格式面与 file
 
 **总原则**：桥接渲染器一律声明 `streaming: false` → dispatcher 全量物化路径接管（≤512MB 防线、size 未知走 EOF 物化、abort signal 贯穿），桥接层只见全量 `Uint8Array` → `new File([buf], name)`。**不启用 file-viewer 的 mountViewer URL 通道**（再评估结论见下小节）。远端来源（R1/R2）的全量物化有体量分级与下载进度卡，见下。
 
-#### 远端全量物化的体量分级与下载进度卡（R1/R2，用户点名设计）
+#### 远端全量物化：下载进度卡 + 确认门 + 另存为（R1/R2，用户点名设计）
 
-- **物化泵与进度事件**：桥接面的大文件物化走显式泵（ctx.read 分块循环），逐块上报进度（节流 ~200ms；载体=dispatcher 的 full-view 补拉循环加可选 onReadProgress 钩子，或桥接层自泵——实施者自由度 §9，**契约钉死**：进度事件含 loaded/total、abort signal 贯穿、取消落 `abortReadError` 既有错误身份层）。
-- **体量分级**：`total ≤ 64MB`（SOFT_MATERIALIZE_BYTES，常量）静默物化（现状体验不变）；`64MB < total ≤ 512MB` 进度卡模式——**不阻断**、实时显示；`> 512MB` 既有防线拒绝（错误卡片）。阈值常量单源，mobile 可后续独立收紧（移动端内存敏感，先例：upload 通道/512MB 引导文案双上限化）。
-- **进度卡字段（用户点名全集）**：源地址（脱敏 display endpoint + path）、进度条、**已下载/完整大小**（未知 size 显示「已下载 N MB（总大小未知）」）、**下载速度**（滑动窗口均值，~5s 窗）、**预估剩余时间**（(total-loaded)/速度，速度未稳时显示「计算中」）、**取消**按钮；完成态自动让位给渲染。UI 载体=ViewerPane 加载态区（错误卡片同通道，新增 loading-progress 形态）。
-- **存储/内存注记**：Blob 包裹 typed array 无深拷贝，但 Chromium 大 Blob 的磁盘 backing 是自动行为、峰值仍含 JS 堆一份——64MB 阈值即为此保守；无需（也不应）手工磁盘管理。
+- **物化泵与进度事件**：远端全量物化统一走显式泵（ctx.read 分块循环），逐块上报进度（节流 ~200ms；载体=dispatcher 的 full-view 补拉循环加可选 onReadProgress 钩子，或桥接层自泵——实施者自由度 §9，**契约钉死**：进度事件含 loaded/total、abort signal 贯穿、取消落 `abortReadError` 既有错误身份层）。
+- **进度卡（无分级，全量级显示）**：远端下载**无论大小一律显示**进度卡；字段：源地址（脱敏 display endpoint + path）、进度条、**已下载/完整大小**（size 未知=不定态：「已下载 N MB（总大小未知）」）、**下载速度**（~5s 滑动窗口均值）、**预估剩余时间**（速度未稳显示「计算中」）、**取消**；完成态自动让位给渲染。UI 载体=ViewerPane 加载态区（错误卡片同通道，新增 loading-progress 形态）。
+- **确认门（阈值可设置）**：`total > 阈值` 时**先确认后下载**——确认卡明示文件名/大小/目标渲染器与内存影响，确认后泵才启动；阈值=settings「远端下载确认阈值」（存储与数据组，MB 计，默认 512，clamp 1–4096）。原 512MB 硬防线在此通路改为确认门（知情自担，**无独立硬上限**）；size 未知不适用确认门（无前置数字，直接不定态下载）。settings 接入走既有 SettingsCenter 注册表 + normalizeSettings 白名单 + 导入导出。
+- **另存为（便捷 + 大文件省内存双形态）**：
+  - **完成后另存为**：进度卡完成态提供「另存为」按钮——`showSaveFilePicker`（FS Access）为主，blob URL + `download` 属性兜底（无 FS Access 环境，SHELL-07 同域受限）；
+  - **下载并另存为（推荐给确认门以上大文件）**：确认卡/进度卡的第二个动作——泵直接写 FS Access writable stream 落盘，完成后 `handle.getFile()` 回填 File 给渲染器：**浏览器盘 backed File，渲染器无需全量驻留内存**，是超大文件的最优路径；无 FS Access 环境降级为普通下载路径。
+- **作用面**：统一落在 dispatcher 全量物化通路——自有非流式渲染器（pdf/docx/xlsx/archive…）与桥接渲染器一致受益；本地来源（L1–L3）不涉下载，不显示进度卡、不受确认门。
+- **验收锚**：进度卡字段全锚（R1 mock 慢泵）、确认门双路（阈值修改生效/确认与取消各一）、另存为双形态（picker 桩 + 锚量下载）、不定态锚（size 未知）。
 
 #### URL 通道再评估（用户点名核查）
 
@@ -214,7 +218,7 @@ vviewer 网页版只读查看器现有 12 个自研渲染器，格式面与 file
 | R2 direct S3（前端直发） | ✓ store.read（SigV4 逐请求重签） | **不可直接**：每次 Range 都要 SigV4 重签，pdfjs `httpHeaders` 给不了动态签名——需 presigned GET（时效/泄漏面）或 `PDFDataRangeTransport` 自签 |
 | L1–L3 | —（数据在手） | 不适用 |
 
-**裁决**：v1 全量物化+进度卡为唯一远端路径；URL 通道与 PDF Range transport 列后续候选（候选票：vviewer pdf.ts Range transport 增强，`ctx.read` 窗口读能力现成）。
+**裁决**：v1 全量物化+进度卡为唯一远端路径；URL 通道维持不启用（escape hatch 记档）；**vviewer pdf Range transport 转正为本批任务**（决策⑫，见 §6.6）。
 
 **分来源细节**：
 - **L1/L2（本地面）**：数据在手零物化成本；`Blob` 包裹 typed array 浏览器惰性物化，无深拷贝。大文件与本地其它渲染器同闸（512MB 防线）。
@@ -240,6 +244,13 @@ vviewer 网页版只读查看器现有 12 个自研渲染器，格式面与 file
 - e2e：每包至少一个样例文件渲染锚（真实夹具入 `apps/web/e2e/fixtures/foreign/`）+ 一个错误文件错误卡片锚；计量锚（首屏耗时，预算宽松——懒加载形态首次含 chunk+资产拉取）。
 - NOTICES 行、版本钉死（package.json 精确版本，随 file-viewer 上游升级策略另行决定）。
 - 门禁：typecheck 0E / vitest 全绿 / cargo 不涉（纯前端批）/ playwright 全量零翻转 / foreign 预算门禁绿。
+
+### 6.6 vviewer 自有增强：pdf Range transport（决策⑫，随批次三交付）
+
+- `pdf.ts` 增加 transport 模式：pdf 渲染器声明 streaming（领取 head 探测字节 + StreamCtx）——**ctx 存在且 rangeCapable 且 size 已知** → pdfjs `PDFDataRangeTransport(head, size, requestRange → ctx.read)` 渐进加载；回退矩阵：size 未知 → memoizedFullRead 全量（现路径）、!rangeCapable → 全量、本地来源（数据在手）→ 现 `data` 路径零变化。
+- 生命周期：reload/watch 变更走既有 destroy → `loadingTask.destroy()` + signal 取消在飞 requestRange；abort 对齐 `abortReadError` 身份层。
+- 直连 S3 经 store.read 同样适用（SigV4 逐请求重签由 store 层负责）——Range transport 不挑 URL 适配性，这正是选 transport 而非 URL 通道的原因。
+- e2e：远端 linearized 样例渐进锚（首屏渲染先于全量到达——以请求数/字节量下限断言）、回退三路锚、S3 直连形态锚（e2e-server 套件）；门禁归批次三收口。
 
 ## 7. 合规与台账
 
