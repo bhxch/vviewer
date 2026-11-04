@@ -7,7 +7,9 @@
 // 保持真身；模式注入经 setDiagramOptions 真通道（不 mock markdown 包，与装配点
 // viewer.ts 同一注入面）。装配序锚在 Task 5（viewer.ts 先 diagram 后 generated）。
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { createRegistry, type Renderer, type Detection, type FileSource, type RenderedInstance } from '@bhxch/vviewer-core';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { createRegistry, GENERATED_EXTENSIONS, type Renderer, type Detection, type FileSource, type RenderedInstance } from '@bhxch/vviewer-core';
 import {
   resolveDiagramType,
   DEFAULT_KROKI_HOST,
@@ -564,5 +566,63 @@ describe('diagramFile 回退面——kroki img error 官方重试一跳（评审
     target.querySelector('img')!.dispatchEvent(new Event('error'));
     await vi.waitFor(() => expect(target.querySelector('.vv-code-body')).not.toBeNull());
     expect(vi.mocked(createPlantumlUrl)).not.toHaveBeenCalled();
+  });
+});
+
+// ---------- Task 5：装配序锚（viewer.ts diagram 先于 code，generated 补空位铁律） ----------
+
+describe('装配序锚（Task 5：viewer.ts 语句序）', () => {
+  // viewer.ts 本体 vitest 不可 import（$app/env 与 svelte runes 模块无插件不可编译，
+  // highlightRouter.test.ts 同款结论），故装配序以两层面锚定：
+  // ① 源序断言——直接读 viewer.ts，锁 install 语句的真实先后（顺序颠倒即本测红）；
+  // ② 行为镜像——fresh registry 按 viewer.ts 实际语句序安装，锁语义不变量。
+  function readViewerSource(): string {
+    // vitest 下 import.meta.url 非 file scheme（loader 虚拟协议），按 cwd 双候选兜底：
+    // 仓库根运行（root script 标准）与包目录运行各一份相对路径
+    for (const rel of ['apps/web/src/lib/viewer.ts', '../../apps/web/src/lib/viewer.ts']) {
+      try {
+        return readFileSync(resolve(process.cwd(), rel), 'utf8');
+      } catch {
+        /* 下一候选 */
+      }
+    }
+    throw new Error('apps/web/src/lib/viewer.ts 不可达（装配序锚须在 monorepo 内运行）');
+  }
+
+  it('viewer.ts 源序：diagram 29 型 install 语句先于 registry.install(codeRenderer)（Review Focus 2）', () => {
+    const src = readViewerSource();
+    const diagramAt = src.indexOf('createDiagramFileRenderers({ remoteCall');
+    const codeAt = src.indexOf('registry.install(codeRenderer)');
+    expect(diagramAt, 'viewer.ts 未装配图表文件渲染器（createDiagramFileRenderers({ remoteCall }) 逐个 install）').toBeGreaterThan(-1);
+    expect(codeAt, 'viewer.ts 未装配 codeRenderer').toBeGreaterThan(-1);
+    expect(diagramAt, 'diagram install 必须先于 code install：顺序颠倒则 generated 占位反转（dot/mermaid/mmd/bpmn/dbml 在 GENERATED_EXTENSIONS 内被 code 抢注，diagram install 抛 RegistryError）').toBeLessThan(codeAt);
+  });
+
+  it('镜像 viewer.ts 语句序（diagram 29 → code → markdown → html → jsonl → generated fallback）：dot 归 diagram-graphviz、tsv 归 code', () => {
+    // 镜像范围注记：image/av/pdf/docx/xlsx/pptx/hex/archive 为 app-only 依赖
+    // （render-text 不依赖 render-media/doc/binary/archive，测试面不可达），其扩展名
+    // 域（svg/jpg/pdf/docx/zip/bin…）与 diagram 33 扩展名无交集，不参与 Review
+    // Focus 2 的顺序不变量；真实终态由 pnpm --filter web typecheck 与 web 构建背书。
+    const registry = createRegistry();
+    for (const r of createDiagramFileRenderers({})) registry.install(r); // viewer.ts 语句 1：图表文件渲染器
+    registry.install(codeRenderer); // viewer.ts 语句 2
+    registry.install(markdownRenderer); // 语句 3
+    registry.install(htmlRenderer); // 语句 4
+    registry.install(jsonlRenderer); // 语句 5（generated fallback 前）
+    registry.installFallbackExtensions('code', GENERATED_EXTENSIONS); // 收尾：generated 补空位（冲突跳过）
+    // 正面：diagram 认领的扩展名不被 generated fallback 抢走
+    expect(registry.byExtension('dot')?.id).toBe('diagram-graphviz');
+    expect(registry.byExtension('gv')?.id).toBe('diagram-graphviz');
+    expect(registry.byExtension('mermaid')?.id).toBe('diagram-mermaid');
+    expect(registry.byExtension('mmd')?.id).toBe('diagram-mermaid');
+    expect(registry.byExtension('bpmn')?.id).toBe('diagram-bpmn');
+    expect(registry.byExtension('dbml')?.id).toBe('diagram-dbml');
+    expect(registry.byExtension('d2')?.id).toBe('diagram-d2');
+    // 反面：code 专有/补空位与既有 owner 原样
+    expect(registry.byExtension('tsv')?.id).toBe('code');
+    expect(registry.byExtension('csv')?.id).toBe('code');
+    expect(registry.byExtension('md')?.id).toBe('markdown');
+    expect(registry.byExtension('html')?.id).toBe('html');
+    expect(registry.byExtension('jsonl')?.id).toBe('jsonl');
   });
 });

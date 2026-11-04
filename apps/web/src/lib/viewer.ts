@@ -1,5 +1,6 @@
 import { createRegistry, createDispatcher, GENERATED_EXTENSIONS, getRemoteBase, type Dispatcher, type Registry, type FileSource } from '@bhxch/vviewer-core';
 import { codeRenderer, attachHighlightRouter } from '@bhxch/vviewer-render-text';
+import { createDiagramFileRenderers } from '@bhxch/vviewer-render-text/diagramFile';
 // markdown 渲染组合包（@bhxch/vviewer-markdown）：渲染器与注入缝的实现单源。装配语义
 // 与 render-text 转出口时期一致（render-text/markdown/* 现为对组合包的纯转出口）。
 import {
@@ -43,8 +44,36 @@ export { hasNonDiagramFence };
 /** M1 渲染器注册表：代码/文本、markdown、html 沙箱预览、图片（含消毒后的 SVG）、音视频。
  * M4 追加：PDF（render-doc）、hex/结构树（render-binary）、压缩包 zip/tar/7z/rar
  * （render-archive，libarchive worker 走静态拷贝的 /libarchive/worker-bundle.js）、
- * Office 三件套 docx/xlsx/pptx（render-doc，pptx 为文本提纲降级路径）。 */
+ * Office 三件套 docx/xlsx/pptx（render-doc，pptx 为文本提纲降级路径）。
+ * Task 5 追加（spec 2026-11-04-file-viewer-integration §5.1）：图表文件 29 型
+ * （id diagram-<type>），必须先于 codeRenderer 安装（generated 补空位铁律，见下）。 */
 export const registry: Registry = createRegistry();
+
+/** 图表文件 server 分支的远端调用通道（DiagramFileRenderOpts.remoteCall 执行缝）：
+ * md 管线同源的 computeRouter 描述缝（{url, headers}，与 setDiagramOptions 注入点
+ * 同一封装）在此代 fetch——传输面与 remoteMarkdown 同款（鉴权头 + JSON body +
+ * 非 2xx 抛错 + JSON 解析）；未连接服务器 reject（server 模式由渲染端按
+ * server→local→kroki 链降级）。 */
+function diagramFileRemoteCall(path: string, init?: { method?: string; body?: unknown }): Promise<unknown> {
+  const call = computeRouter.remoteCall(path);
+  if (!call) return Promise.reject(new Error('未连接服务器，无法服务端渲染图表'));
+  return (async () => {
+    const res = await fetch(call.url, {
+      method: init?.method ?? 'POST',
+      headers: { ...call.headers, 'content-type': 'application/json' },
+      body: JSON.stringify(init?.body)
+    });
+    if (!res.ok) throw new Error(`服务端图表渲染失败: HTTP ${res.status}`);
+    return res.json();
+  })();
+}
+
+// 图表文件渲染器（29 型按映射序逐个 install）置顶安装：installFallbackExtensions 按
+// 「专有先注册、generated 补空位」跳过已认领扩展名，顺序颠倒则 code 的 generated 补
+// 空位先行认领 dot/gv/mermaid/mmd/bpmn/dbml/d2 等（均在 GENERATED_EXTENSIONS 内），
+// diagram install 抛 RegistryError（装配序锚：render-text test/diagramFile.test.ts
+// 「装配序锚」组）。
+for (const r of createDiagramFileRenderers({ remoteCall: diagramFileRemoteCall })) registry.install(r);
 registry.install(codeRenderer);
 registry.install(markdownRenderer);
 registry.install(htmlRenderer);
