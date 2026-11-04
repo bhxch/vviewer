@@ -3,7 +3,7 @@
 - 日期：2026-11-04
 - 状态：待用户批准（brainstorm 产物，获批后转 writing-plans）
 - 调研依据：`docs/file-viewer/format-package-survey-2026-11-04.md`（47 管线逐行对照、许可证红线、覆盖矩阵）
-- 用户决策记录（brainstorm 两轮四题+三题+builder check 收口，全部拍板）：①引入范围=全量（npm 引入、不进主包；LicenseRef-PMEL 取 MPL-2.0 面；bpmn-js 排除 npm 依赖——md 管线既有运行时 CDN 加载姿态不变）；②data-asset=引 data 包，wasm 与字体查看都开；③音频=补别名+引 capability-midi；④图片=引 renderer-image 仅新 5 扩展名；⑤图表拆分=全集（29 型，builder check 补漏 7 型后收口）；⑥默认模式=默认渲染失败回退源码，引擎形态以 vviewer 图表注册表实态为准（七类 CDN 本地引擎非 kroki）；⑦drawio=引官方运行时；⑧**部署=大资产不进本项目 dist，Pages/Workers/桌面均不背重资产；资产包优先直接用 file-viewer 已发布的 @file-viewer/assets-\*（CDN 直链精确版本），除非必须二次封装并发包**；⑨**桥接契约=方案 A**（嵌套附件回调走 vviewer dispatcher；.shp 边车 v1 降级报错）。
+- 用户决策记录（brainstorm 两轮四题+三题+builder check 收口，全部拍板）：①引入范围=全量（npm 引入、不进主包；LicenseRef-PMEL 取 MPL-2.0 面；bpmn-js 排除 npm 依赖——md 管线既有运行时 CDN 加载姿态不变）；②data-asset=引 data 包，wasm 与字体查看都开；③音频=补别名+引 capability-midi；④图片=引 renderer-image 仅新 5 扩展名；⑤图表拆分=全集（29 型，builder check 补漏 7 型后收口）；⑥默认模式=默认渲染失败回退源码，引擎形态以 vviewer 图表注册表实态为准（七类 CDN 本地引擎非 kroki）；⑦drawio=引官方运行时；⑧**部署=大资产不进本项目 dist，Pages/Workers/桌面均不背重资产；资产包优先直接用 file-viewer 已发布的 @file-viewer/assets-\*（CDN 直链精确版本），除非必须二次封装并发包**；⑨**桥接契约=方案 A**（嵌套附件回调走 vviewer dispatcher；.shp 边车经 resolveSibling 统一回调读兄弟文件——§6.4 细化：L1/R1/R2/L3 来源全适用，仅裸单文件降级报错）。
 
 ## 1. 背景与动机
 
@@ -116,8 +116,8 @@ vviewer 网页版只读查看器现有 12 个自研渲染器，格式面与 file
 
 新包 `packages/vviewer-render-foreign/`：
 - `bridge.ts`：`wrapFileViewerRenderer({ id, label, extensions, mount }) → Renderer`——render 内把 `Uint8Array` 物化为 `Blob`（dispatcher 已保证全量视图），调 file-viewer 浏览器 API 渲染进 target；destroy 对接其 unmount/lifecycle。
-- **嵌套回调（方案 A）**：桥接层向 file-viewer 宿主契约提供嵌套渲染回调（对应其 `renderNestedBuffer` 缝，`file-viewer/packages/core/src/contracts/types.ts:971`）——附件 buffer 经 **vviewer 既有 dispatcher（byExtension）** 承接（pdf/image/docx 等全是 vviewer 强项，零新依赖）；dispatcher 无对应渲染器的附件回落下载。邮件附件内嵌预览因此开箱可用，不重做桥接面。
-- **`.shp` 边车 v1 降级**：单 buffer 契约拿不到 .shx/.dbf/.prj 兄弟文件——缺边车时渲染器落错误卡片提示「Shapefile 需同目录 .shx/.dbf/.prj」；基于 `source.store.read` 的边车补读列后续候选（不进本 spec）。
+- **嵌套回调（方案 A）**：桥接层向 file-viewer 宿主契约提供嵌套渲染回调（对应其 `renderNestedBuffer` 缝，`file-viewer/packages/core/src/contracts/types.ts:971`）——附件 buffer 经 **vviewer 既有 dispatcher（byExtension）** 承接（pdf/image/docx 等全是 vviewer 强项，零新依赖）；dispatcher 无对应渲染器的附件回落下载。邮件附件内嵌预览因此开箱可用，不重做桥接面。数据源对接全貌（分来源 × 分渲染器）见 §6.4。
+- **`.shp` 边车**：`resolveSibling` 统一回调经 store 读兄弟文件（L1/R1/R2/L3 全适用），裸单文件降级错误卡——细化见 §6.4。
 - file-viewer 侧入口以其 README 为准（`@file-viewer/core/browser` 的 `mountViewer`/组件化 API；`core/headless` 的 `precheckFileViewerSource` 可选用于预检），实施时按其 v3.3.3 实际 API 适配——此处只钉死桥接方向与契约映射，具体 API 调用形态是实施者自由度。
 - 不支持 SearchMatch：MetaPanel 搜索入口对桥接渲染器 tab 显示「当前渲染器不支持检索」禁用态（复用既有状态通道，不新增机制）。
 - opts.signal 透传：destroy/取消时调 file-viewer 的销毁路径；abort 语义对齐 vviewer `abortReadError` 分类（批次外的既有错误身份层）。
@@ -178,7 +178,39 @@ vviewer 网页版只读查看器现有 12 个自研渲染器，格式面与 file
 
 **默认面校验**：批次收口时以脚本重跑调研报告 §3.1 覆盖矩阵，「未注册 174」应归零（除 jxl/zipx 两个待核实项外），产出更新版矩阵回写报告。
 
-### 6.4 逐包验收（每包同一模板）
+### 6.4 数据源对接策略（分来源 × 分渲染器，用户要求展开设计）
+
+**来源分档**（vviewer FileSource 实态）：
+
+| 档 | 来源 | 文件数据形态 |
+| --- | --- | --- |
+| L1 本地文件夹面 | FS Access 目录树（bindFs） | `handle.getFile()` → File 对象在手，无网络 |
+| L2 本地单文件面 | 文件输入/拖放/本地 Files store | File/ArrayBuffer 在手 |
+| L3 归档面 | zip 条目 tab（zipStore） | 条目解压即 Blob 在手 |
+| R1 远端服务面 | 远端服务端文件（Range-capable + SSE watch） | StreamCtx.read 分块窗段 |
+| R2 直连存储面 | S3/WebDAV 直连（Range 206 校验三态）、proxy 挂载 | 同上，凭据在 store 层 |
+
+**总原则**：桥接渲染器一律声明 `streaming: false` → dispatcher 既有全量物化路径自动接管（≤512MB 防线、size 未知走 EOF 物化、abort signal 贯穿），桥接层只见全量 `Uint8Array` → `new File([buf], name)`。**不启用 file-viewer 的 mountViewer URL 通道**——URL 直开需要把 Bearer/ticket 拼进 URL（认证面扩散、票据生命周期管理），而 ctx.read 物化由 RemoteStore 层带凭据完成、桥接零感知；URL 通道仅作 escape hatch 记档，后续有真实需求（如线性化 PDF 的 Range 流式）再立项。
+
+**分来源细节**：
+- **L1/L2（本地面）**：数据在手零物化成本；`Blob` 包裹 typed array 浏览器惰性物化，无深拷贝。大文件与本地其它渲染器同闸（512MB 防线）。
+- **L3（归档面）**：条目解压即 Blob；嵌套归档（zip 内 zip）先由 archive 渲染器开条目成 tab，再落桥接渲染器，链路一致。边车文件在同归档内可经 zipStore 读兄弟条目（见边车回调）。
+- **R1/R2（后端面）**：dispatcher 经 ctx.read 分块补拉全量，凭据在 RemoteStore 层；SSE watch 命中变更 → 既有 reload 链 = 桥接实例 destroy（unmount 上游实例）→ 重渲染，`RenderedInstance` 契约天然承载，无新机制。proxyOffsite 跨服务器防线在 store 层，不涉桥接。
+
+**分渲染器数据画像分组**：
+
+| 组 | 桥接渲染器 | 数据形态 | 特别处理 |
+| --- | --- | --- | --- |
+| A 整载组 | email / epub / fb2 / umd / ofd / chm / word 系 / presentation 系 / spreadsheet 系 / iwork / hangul / wordperfect / signature / eda / dicom / typst（源码→wasm 编译）/ midi / data（sqlite·parquet·avro·webarchive·字体·wasm）/ image 增强（tiff·heic 系） | 全量 bytes → File → 库内解析（多数 worker 化，transferable 由各库自管） | 无特殊；typst 输入为小体量文本 |
+| B 嵌套附件组 | email（.eml/.msg） | 附件内嵌 buffer | 方案 A：嵌套回调 → **vviewer dispatcher byExtension** 承接（pdf/image/docx 等本地强项）；dispatcher 无渲染器的附件回落下载 |
+| C 边车组 | geo（仅 `.shp`） | .shx/.dbf/.prj 兄弟文件 | **resolveSibling 统一回调**（见下） |
+| D URL 通道 | （无） | — | v1 不启用，escape hatch 记档 |
+
+**边车回调（对决策⑨的细化升级——本节裁决）**：桥接层提供 `resolveSibling(source, name)` 统一回调，实现为 `source.store.read(join(dirname(source.path), name))`。适用面核查：L1 目录树（dirHandle read）、R1 服务端（tree/file 通道按路径读）、R2 直连（key 读）、L3 zip（同归档兄弟条目）——**除「无 store 的裸单文件」外全部来源都能补齐边车**；裸单文件维持降级错误卡（「Shapefile 需同目录 .shx/.dbf/.prj」）。geo 其余格式（geojson/kml/gpx 单文件自足）与其余组零影响。
+
+**大文件行为**：512MB 全局防线对全部桥接渲染器一致生效；可选增强=file-viewer `precheckFileViewerSource`（core/headless，签名/包结构快速校验）作打开前快速失败，v1 可选接入（实施者自由度，标 §9）。
+
+### 6.5 逐包验收（每包同一模板）
 
 - 桥接渲染器注册锚（byExtension）、默认面 open-as 双向切换锚（file-viewer ↔ vviewer 渲染器）。
 - e2e：每包至少一个样例文件渲染锚（真实夹具入 `apps/web/e2e/fixtures/foreign/`）+ 一个错误文件错误卡片锚；计量锚（首屏耗时，预算宽松——懒加载形态首次含 chunk+资产拉取）。
