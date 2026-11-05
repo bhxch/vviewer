@@ -45,11 +45,14 @@ const FOREIGN_CHUNK_FILE = /^foreign-.*\.js$/;
 // pptx.worker.*.js，约 1.06MB）——不经 foreign-* 组 chunk 命名，vite.config.ts
 // globIgnores 漏配即被 workbox 收进 precache。denylist 按「assets/ 目录 + .worker
 // 文件名」的 foreign 匿名资产形态通用封堵（覆盖未来 renderer-* 新增 worker 资产——
-// 同发射机制必然复现同形态）。注意面：vviewer 自有 worker（ts-worker/gitWorker/
-// binary.worker/libarchive worker-bundle）落 _app/immutable/workers/ 或无 .worker
-// 文件名段，不命中；若未来自有资产确需进 precache 且文件名含 .worker，需在此显式
-// 豁免（门禁收紧偏置：红先问，不静默放行）。
-const FOREIGN_WORKER_ASSET_URL = /(^|\/)_app\/immutable\/assets\/[^/]*\.worker[^/]*\.js(?:[?#]|$)/;
+// 同发射机制必然复现同形态）。第二波实测（计划 4 Task 3）补充 `-worker-` 变体：
+// renderer-dicom 的 decode-worker-<hash>.<hash>.js（8.02MB，rolldown 双哈希命名，
+// 无 .worker 点段）——同发射机制的变体文件名，一并封堵。注意面：vviewer 自有
+// worker（ts-worker/gitWorker/binary.worker/libarchive worker-bundle）落
+// _app/immutable/workers/ 或无 .worker/-worker- 文件名段，不命中；若未来自有资产
+// 确需进 precache 且文件名含 worker 段，需在此显式豁免（门禁收紧偏置：红先问，
+// 不静默放行）。
+const FOREIGN_WORKER_ASSET_URL = /(^|\/)_app\/immutable\/assets\/[^/]*(?:\.worker|-worker-)[^/]*\.js(?:[?#]|$)/;
 
 function walk(d, base = d) {
   return readdirSync(d, { withFileTypes: true }).flatMap((e) => {

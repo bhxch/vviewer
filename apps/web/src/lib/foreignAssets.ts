@@ -22,7 +22,13 @@ export const FOREIGN_ASSETS_SAME_ORIGIN_PREFIX = '';
 
 /** foreign 资产包清单（assets-standard + 第一波实测需资产的五个独立包 + 第二波四个：
  * data/design/typst/drawing——计划 4 Task 2 探针实测，core assets 清单 defaultPath 均
- * 相对基座派生；jsdelivr 均有 3.3.3 发布，超 20MB 项的 HEAD 实测台账归计划 4 Task 3）。 */
+ * 相对基座派生；jsdelivr 均有 3.3.3 发布。计划 4 Task 3 HEAD 实测台账（jsdelivr，
+ * content-length 全量字节）：assets-data sql-wasm.wasm 685,235B、assets-design
+ * paged_introspect_wasm_bg.wasm 14,704,821B / stet_wasm_bg.wasm 14,706,940B、
+ * assets-drawing viewer-static.min.js 3,909,101B 均 ≤20MB 预案线；assets-typst
+ * typst_ts_web_compiler_bg.wasm 28,325,178B ≈27MB **超 20MB**——spec §6.2 预案
+ * 备案（记台账即可，不构建自托管 fallback 包：编译器 wasm 仅 .typ 源首渲染消费，
+ * CDN 直链 + vv-foreign-assets CacheFirst 单次拉取可控）。 */
 export const FOREIGN_ASSET_PACKAGES = [
   'assets-standard',
   'assets-chm',

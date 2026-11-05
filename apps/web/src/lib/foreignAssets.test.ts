@@ -94,6 +94,21 @@ describe('resolveForeignAssetPackageBase（per-package 基座派生，Task 3 实
     }
   });
 
+  it('第二波资产包基座：data/design/typst/drawing 直链（3.3.3）——Task 3 HEAD 实测台账', () => {
+    expect(resolveForeignAssetPackageBase('assets-data')).toBe(
+      'https://cdn.jsdelivr.net/npm/@file-viewer/assets-data@3.3.3/viewer/'
+    );
+    expect(resolveForeignAssetPackageBase('assets-design')).toBe(
+      'https://cdn.jsdelivr.net/npm/@file-viewer/assets-design@3.3.3/viewer/'
+    );
+    expect(resolveForeignAssetPackageBase('assets-typst')).toBe(
+      'https://cdn.jsdelivr.net/npm/@file-viewer/assets-typst@3.3.3/viewer/'
+    );
+    expect(resolveForeignAssetPackageBase('assets-drawing')).toBe(
+      'https://cdn.jsdelivr.net/npm/@file-viewer/assets-drawing@3.3.3/viewer/'
+    );
+  });
+
   it('每包基座互异且同版本（缺省链下无碰撞）', () => {
     const bases = new Set<string>();
     const versions = new Set<string>();
@@ -142,7 +157,14 @@ describe('foreign 代码面 chunk 分组（spec §6.2：chunk 分离进 dist，�
   it('vite.config：@file-viewer 按组带名（foreign- 前缀 chunkFileNames 特判）+ 共享依赖不入组', () => {
     const src = readSource('vite.config.ts');
     expect(src, 'chunkFileNames 的 foreign- 带名特判').toContain("chunkInfo.name.startsWith('foreign-')");
-    for (const group of ['foreign-core', 'foreign-email', 'foreign-epub', 'foreign-ofd', 'foreign-chm', 'foreign-word', 'foreign-presentation', 'foreign-spreadsheet', 'foreign-iwork', 'foreign-hangul', 'foreign-wordperfect']) {
+    // 第一波 11 组 + 第二波 10 组（计划 4 Task 3）——与装配面 FOREIGN_GROUP_ASSET_PACKAGE
+    // 的 20 组 id 一一对应（foreign-core 为共享基座组，不在装配面）
+    for (const group of [
+      'foreign-core', 'foreign-email', 'foreign-epub', 'foreign-ofd', 'foreign-chm', 'foreign-word',
+      'foreign-presentation', 'foreign-spreadsheet', 'foreign-iwork', 'foreign-hangul', 'foreign-wordperfect',
+      'foreign-data', 'foreign-design', 'foreign-image', 'foreign-geo', 'foreign-typst', 'foreign-dicom',
+      'foreign-signature', 'foreign-eda', 'foreign-drawing', 'foreign-midi'
+    ]) {
       expect(src, `缺分组 ${group}`).toContain(`name: '${group}'`);
     }
   });
@@ -164,7 +186,7 @@ describe('foreign 代码面 chunk 分组（spec §6.2：chunk 分离进 dist，�
     expect(line, '缺裸包 pptx').toMatch(/renderer-pptx\|ppt\|pptx\)/);
   });
 
-  it('共享依赖铁律锚：jszip/pako/buffer 不入 foreign 组 test 正则（git-engine 组注释同款约束）', () => {
+  it('共享依赖铁律锚：jszip/pako/buffer/roughjs/dompurify 不入 foreign 组 test 正则（git-engine 组注释同款约束）', () => {
     const src = readSource('vite.config.ts');
     // lastIndexOf：文件内有两处同名注释（chunkFileNames 特判 / groups 块），取后者
     const foreignBlock = src.slice(src.lastIndexOf('foreign 渲染器组（计划 3 Task 3'));
@@ -177,5 +199,10 @@ describe('foreign 代码面 chunk 分组（spec §6.2：chunk 分离进 dist，�
     expect(testLines).not.toMatch(/pako/);
     // buffer 为 git-engine 组员（email 依赖经其组员满足，懒加载连带合法）
     expect(testLines).not.toMatch(/buffer/);
+    // roughjs 为 mermaid（vviewer 图表面）与 renderer-drawing 共享（计划 4 Task 3
+    // build 实测：入组后 mermaid precache'd chunk 反向 import foreign chunk）；dompurify
+    // 与 vviewer-sanitize 同名共享（regex 无法区分版本，pako@2 同款）
+    expect(testLines).not.toMatch(/roughjs/);
+    expect(testLines).not.toMatch(/dompurify/);
   });
 });

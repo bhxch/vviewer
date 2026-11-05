@@ -202,6 +202,11 @@ function diagramEngineChunk(): Plugin {
           output: {
             chunkFileNames(chunkInfo) {
               if (chunkInfo.name === 'git-engine') return '_app/immutable/chunks/git-engine-[hash].js';
+              // foreign worker 侧共享 chunk（计划 4 Task 3）：renderer-signature 的
+              // rpgp/openpgp glue 在 worker 图的共享 chunk（原 hash 命名无法 globIgnores，
+              // 会被 workbox 收进 precache——foreign 代码面绝不进 precache 铁律）按
+              // foreign- 前缀带名，globIgnores '**/foreign-*.js' 通用覆盖
+              if (chunkInfo.name.startsWith('foreign-')) return `_app/immutable/workers/chunks/${chunkInfo.name}-[hash].js`;
               return '_app/immutable/workers/chunks/[hash].js';
             },
             codeSplitting: {
@@ -209,6 +214,13 @@ function diagramEngineChunk(): Plugin {
                 {
                   name: 'git-engine',
                   test: /[\\/]node_modules[\\/](isomorphic-git|async-lock|clean-git-ref|crc-32|diff3|ignore|minimisted|pify|sha\.js|simple-get|buffer)[\\/]/
+                },
+                {
+                  // renderer-signature worker 图面（signature.worker 的 rpgp wasm glue
+                  // + openpgp classify 共享 chunk）；两个 worker entry 本体由 globIgnores
+                  // 精确项排除（**/signature.worker*.js / **/container.worker*.js）
+                  name: 'foreign-signature-worker',
+                  test: /[\\/]node_modules[\\/]@file-viewer[\\/]renderer-signature[\\/]/
                 }
               ]
             }
@@ -320,6 +332,80 @@ function diagramEngineChunk(): Plugin {
                     {
                       name: 'foreign-wordperfect',
                       test: /[\\/]node_modules[\\/]@file-viewer[\\/]renderer-wordperfect[\\/]/
+                    },
+                    // ---------- 第二波 foreign 渲染器组（计划 4 Task 3，spec §6.2）----------
+                    // 10 组 wave-2 渲染器代码面 + 各自独占传递依赖归堆带名（同上铁律）：
+                    // 绝不进 precache（globIgnores foreign-*.js 前缀覆盖）。组间/组外共享
+                    // 依赖裁决（groups 按序首中即胜，重复列入后组无效——均不列）：
+                    // - ag-psd 为 renderer-data/design 共享（.pnpm 单实例 31.0.3）→ 归首组
+                    //   foreign-data，design 组跨 chunk import；
+                    // - utif 为 renderer-spreadsheet/image 共享 → 已在 foreign-spreadsheet；
+                    //   cfb 为 renderer-hangul/eda 共享 → 已在 foreign-hangul；
+                    //   @xmldom/xmldom 为 spreadsheet/iwork/hangul/design 共享 → 已在
+                    //   foreign-spreadsheet（三组共享归首组先例照旧）；
+                    // - jszip（signature 组唯一声明依赖）留默认共享 chunk（vviewer zip 路径
+                    //   共享铁律，同上）；pako@2.2.0（dicom/epub 独占 major 同名目录，regex
+                    //   无法区分版本）与 dompurify@3.4.17（drawing）同理不入组——后者与
+                    //   vviewer-sanitize 的 dompurify@3.4.16 同名，组内会连坐 sanitize 面；
+                    // - events@3.3.0（renderer-dicom 声明依赖）已被其 dist 内联（esm 产物
+                    //   自带 EventEmitter polyfill），不入组（不进 vite 图则零影响）。
+                    {
+                      // sql wasm 消费面：renderSqlite 经 assets-data 基座解析 sql-wasm.wasm
+                      name: 'foreign-data',
+                      test: /[\\/]node_modules[\\/](@file-viewer[\\/]renderer-data|ag-psd|avsc|hyparquet|sql\.js)[\\/]/
+                    },
+                    {
+                      // renderer-design 本体静态依赖 renderer-data（data-asset 缝，见
+                      // foreignRenderers.ts wireDesignOrDataSeam）——跨 chunk import foreign-data
+                      name: 'foreign-design',
+                      test: /[\\/]node_modules[\\/](@file-viewer[\\/]renderer-design|@paged-media[\\/]introspect-wasm|@webtoon[\\/]psd|fzstd|illustrator-pgf|saxes)[\\/]/
+                    },
+                    {
+                      // heic2any/utif 随 dist 自包含（无 CDN 资产）；utif 已归 foreign-spreadsheet
+                      name: 'foreign-image',
+                      test: /[\\/]node_modules[\\/](@file-viewer[\\/]renderer-image|heic2any)[\\/]/
+                    },
+                    {
+                      // maplibre-gl worker 为内联源码 blob URL（T2 探针），@maplibre/* 传递
+                      // 依赖（geojson-vt/style-spec/mlt/vt-pbf）随主包归堆
+                      name: 'foreign-geo',
+                      test: /[\\/]node_modules[\\/](@file-viewer[\\/]renderer-geo|@tmcw[\\/]togeojson|maplibre-gl|@maplibre[\\/][^\\/]+|proj4|shpjs)[\\/]/
+                    },
+                    {
+                      name: 'foreign-typst',
+                      test: /[\\/]node_modules[\\/](@file-viewer[\\/]renderer-typst|@myriaddreamin[\\/][^\\/]+)[\\/]/
+                    },
+                    {
+                      name: 'foreign-dicom',
+                      test: /[\\/]node_modules[\\/](@file-viewer[\\/]renderer-dicom|dicom-parser)[\\/]/
+                    },
+                    {
+                      // jszip 不入组（vviewer zip 路径共享铁律）：signature 组跨 chunk import
+                      name: 'foreign-signature',
+                      test: /[\\/]node_modules[\\/]@file-viewer[\\/]renderer-signature[\\/]/
+                    },
+                    {
+                      // cfb 已归 foreign-hangul（shp 边车同款先例）
+                      name: 'foreign-eda',
+                      test: /[\\/]node_modules[\\/]@file-viewer[\\/](renderer-eda|eda-layout|eda-orcad)[\\/]/
+                    },
+                    {
+                      // capability-mermaid/capability-drawio-official 为 renderer-drawing
+                      // 独占传递依赖（@file-viewer 系，与 vviewer 自有 mermaid 引擎无关）；
+                      // drawio-official 不入组即成 hash 命名 facade chunk（动态 import 面）
+                      // 静默入 precache 且模块级拉起 foreign-drawing（build 实测）。
+                      // roughjs 不入组（build 实测复核：mermaid@12.1.0 亦依赖
+                      // roughjs@^4.6.6，同实例共享——入组后 mermaid 的 precache'd 代码
+                      // chunk 反向 import foreign-drawing chunk，离线手绘风断链，jszip
+                      // 铁律同款）；dompurify 不入组（见上）
+                      name: 'foreign-drawing',
+                      test: /[\\/]node_modules[\\/]@file-viewer[\\/](renderer-drawing|capability-mermaid|capability-drawio-official)[\\/]|[\\/]node_modules[\\/](@panzoom[\\/]panzoom|plantuml-encoder)[\\/]/
+                    },
+                    {
+                      // renderer-media 媒体扩展名不注册（av 占优），capability-midi 注册
+                      // MIDI loader（@tonejs/midi 独占）——midi/mid 消费面同组
+                      name: 'foreign-midi',
+                      test: /[\\/]node_modules[\\/](@file-viewer[\\/](renderer-media|capability-midi)|@tonejs[\\/]midi)[\\/]/
                     }
                   ]
                 }
@@ -405,7 +491,7 @@ export default defineConfig({
         // 泛化组——客户端产物内另有 katex 20 件 KaTeX_*.woff（~330KB），泛化 woff 会
         // 全数误收进 precache。`*` 覆盖 vite hash 中缀（seti.<hash>.woff）。
         globPatterns: ['**/*.{js,css,woff2,json}', '**/seti.*.woff'],
-        // 末四项为按需加载 chunk 排除：git 引擎 chunk（2026-10-31 git 信息面板 spec，
+        // 末段为按需加载 chunk 排除：git 引擎 chunk（2026-10-31 git 信息面板 spec，
         // isomorphic-git 经 codeSplitting groups 落 git-engine-*.js）与 foreign 渲染器
         // 组（计划 3 Task 3，spec §6.2——@file-viewer/* 代码面按组落 foreign-*-*.js，
         // 代码包 chunk 分离进 dist 但绝不进 precache：全局约束 + iwork chunk 4.05MB
@@ -414,8 +500,16 @@ export default defineConfig({
         // worker 被 vite 发射为 _app/immutable/assets/pptjs.worker.*.js /
         // pptx.worker.*.js（约 1.06MB）——不经 foreign-* 组 chunk 命名，漏配即被
         // workbox 收进 precache（foreign-budget --check 的 precache-worker 断言
-        // 兜底）。均按需加载不进 precache（同 diagram-engines 语义，膨胀防护 +
-        // 预算门禁按前缀计账）。
+        // 兜底）；第二波同发射机制复现三件（计划 4 Task 3 实测）：renderer-dicom
+        // 的 decode-worker-*.js（8.02MB，超 workbox 2MiB 上限——不配即 PWA 插件
+        // throwMaximumFileSizeToCacheInBytes 构建失败，iwork 同款）与 renderer-design
+        // 的 idml.worker.*.js / postscript.worker.*.js（<2MiB，漏配即静默 precache）。
+        // 均按需加载不进 precache（同 diagram-engines 语义，膨胀防护 + 预算门禁按
+        // 前缀计账）。renderer-signature 的两个 bundled worker entry（vite 以
+        // _app/immutable/workers/ 带名发射，<2MiB 漏配即静默 precache——T2 遗留实测，
+        // 计划 4 Task 3 封堵；其共享 chunk 经 worker 图 foreign-signature-worker 组
+        // 带名由 '**/foreign-*.js' 覆盖）：own 面的 binary.worker/ts-worker/gitWorker/
+        // mp4v.worker 不含此文件名段，不受影响。
         globIgnores: [
           '**/node_modules/**/*',
           'sw.js',
@@ -424,7 +518,12 @@ export default defineConfig({
           '**/git-engine-*.js',
           '**/foreign-*.js',
           '**/pptjs.worker*.js',
-          '**/pptx.worker*.js'
+          '**/pptx.worker*.js',
+          '**/decode-worker-*.js',
+          '**/idml.worker*.js',
+          '**/postscript.worker*.js',
+          '**/signature.worker*.js',
+          '**/container.worker*.js'
         ],
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/^\/api\//],
@@ -525,8 +624,10 @@ export default defineConfig({
             handler: 'CacheFirst',
             options: {
               cacheName: `vv-foreign-assets-${BUILD_REVISION}`,
-              // maxEntries 64 覆盖第一波实际消费面（assets-standard/-chm/-hangul/
-              // -iwork/-wordperfect 的 worker/wasm 工作集）不半途 LRU 逐出打折扣。
+              // maxEntries 64 覆盖第一波（assets-standard/-chm/-hangul/-iwork/
+              // -wordperfect 的 worker/wasm 工作集）+ 第二波（计划 4 Task 3 HEAD 台账：
+              // data sql wasm 1、design worker×6+wasm×2、typst wasm×2+字体 17、drawing
+              // viewer-static 等；全族同会话极端工作集 ~45 项 < 64）不半途 LRU 逐出打折扣。
               // assets-ppt 如实注记（终审修复 I2）：renderer-ppt 走内置
               // import('@file-viewer/ppt')（wasmRequired:false），ppt/pot 当前零 CDN
               // 资产消费，vendor/ppt/dist 不经此规则；未来经 presentation.pptModuleUrl
