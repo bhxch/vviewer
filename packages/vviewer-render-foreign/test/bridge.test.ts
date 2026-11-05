@@ -1,8 +1,9 @@
 // bridge.test.ts — 桥接契约面单测（spec §6.1）：wrapFileViewerRenderer 产出 Renderer
 // 的逐字透传 + streaming:false；render 实装（计划 3 Task 2）：Uint8Array→File 物化、
-// signal 贯穿、destroy 对接、renderNested→装配注入回调与 depth 3 上限（递归链经
-// signal 承载、兄弟调用不累积、超限落下载）；createSiblingResolver 的 sibling
-// 读取语义（store stub 命中 / 无 read / 目录 join / 目录型来源 / store 缺失 / 读失败兜 null）。
+// signal 贯穿、destroy 对接、renderNested→装配注入回调与 depth 3 上限（显式 depth
+// 形参贯穿——T2 评审 M1 精化：并发兄弟互不复位/不累积、超限落下载）；
+// createSiblingResolver 的 sibling 读取语义（store stub 命中 / 无 read / 目录 join /
+// 目录型来源 / store 缺失 / 读失败兜 null）。
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import type { Detection, FileSource, TreeStore } from '@bhxch/vviewer-core';
 import {
@@ -10,6 +11,7 @@ import {
   createSiblingResolver,
   disposeForeignRendered,
   downloadNestedAttachment,
+  markForeignNestedDepth,
   FOREIGN_NESTED_DEPTH_LIMIT,
   type ForeignMountArgs
 } from '../src/bridge';
@@ -196,7 +198,7 @@ describe('wrapFileViewerRenderer render 实装（计划 3 Task 2）', () => {
     expect(() => inst.destroy()).not.toThrow();
   });
 
-  it('renderNested → nestedDispatch(data, name, target, signal)：同 signal 贯穿', async () => {
+  it('renderNested → nestedDispatch(data, name, target, signal, depth)：同 signal 贯穿，顶层链首个嵌套 depth 1', async () => {
     const nestedDispatch = vi.fn(async () => {});
     let captured: ForeignMountArgs | undefined;
     const r = wrapFileViewerRenderer({
@@ -213,16 +215,20 @@ describe('wrapFileViewerRenderer render 实装（计划 3 Task 2）', () => {
     const data = new Uint8Array([9, 9]);
     const child = document.createElement('div');
     await captured!.renderNested(data, 'attachment.pdf', child);
-    expect(nestedDispatch).toHaveBeenCalledExactlyOnceWith(data, 'attachment.pdf', child, captured!.signal);
+    expect(nestedDispatch).toHaveBeenCalledExactlyOnceWith(data, 'attachment.pdf', child, captured!.signal, 1);
   });
 
-  it('depth 递归上限 3（FOREIGN_NESTED_DEPTH_LIMIT）：同 signal 链式重入第 4 层落下载、nestedDispatch 不再调用', async () => {
+  it('depth 递归上限 3（FOREIGN_NESTED_DEPTH_LIMIT）：显式 depth 链式重入第 4 层落下载、nestedDispatch 不再调用', async () => {
     const stub = stubBlobDownload();
     try {
-      const nestedDispatch = vi.fn(async (data: Uint8Array, _name: string, target: HTMLElement, signal: AbortSignal) => {
-        // 模拟 dispatcher byExtension 的重入：嵌套 eml 再次命中本渲染器，同一 signal 贯穿
-        await renderer.render(data, target, sourceWithStore('nested.eml', {}), { ext: 'eml' } as Detection, undefined, { signal });
-      });
+      // 模拟 viewer.ts foreignNestedDispatch：登记 target 深度（markForeignNestedDepth，
+      // 桥接 render 读回）→ 重入渲染；depth 形参显式贯穿替代 signal 键簿记
+      const nestedDispatch = vi.fn(
+        async (data: Uint8Array, _name: string, target: HTMLElement, signal: AbortSignal, depth: number) => {
+          markForeignNestedDepth(target, depth);
+          await renderer.render(data, target, sourceWithStore('nested.eml', {}), { ext: 'eml' } as Detection, undefined, { signal });
+        }
+      );
       let levels = 0;
       const renderer = wrapFileViewerRenderer({
         id: 'f',
@@ -238,8 +244,9 @@ describe('wrapFileViewerRenderer render 实装（计划 3 Task 2）', () => {
       await renderer.render(new Uint8Array(4), document.createElement('div'), sourceWithStore('root.eml', {}), { ext: 'eml' } as Detection);
       // 根（depth 0）→ 3 层嵌套渲染（depth 1..3，各自 renderNested 请求均放行）→
       // 第 4 层渲染（depth 3）的请求 3+1 > 3 超限：落下载、不再重入
+      expect(FOREIGN_NESTED_DEPTH_LIMIT).toBe(3);
       expect(levels).toBe(4);
-      expect(nestedDispatch).toHaveBeenCalledTimes(3);
+      expect(nestedDispatch.mock.calls.map((c) => c[4])).toEqual([1, 2, 3]);
       expect(stub.downloads).toEqual(['attachment.eml']);
       expect(stub.sizes).toEqual([1]); // 第 4 层请求的字节（[levels]=[4]，单字节）
     } finally {
@@ -247,8 +254,8 @@ describe('wrapFileViewerRenderer render 实装（计划 3 Task 2）', () => {
     }
   });
 
-  it('depth 兄弟调用不累积：同一 render 作用域内 5 次嵌套请求每次都在 depth 1 通过', async () => {
-    const nestedDispatch = vi.fn(async () => {});
+  it('depth 兄弟调用不累积：同一 render 作用域内 5 次嵌套请求每次都以 depth 1 分派', async () => {
+    const nestedDispatch = vi.fn(async (_data: Uint8Array, _name: string, _target: HTMLElement, _signal: AbortSignal, _depth: number) => {});
     let captured: ForeignMountArgs | undefined;
     const r = wrapFileViewerRenderer({
       id: 'f',
@@ -265,6 +272,60 @@ describe('wrapFileViewerRenderer render 实装（计划 3 Task 2）', () => {
       await captured!.renderNested(new Uint8Array([i]), `att-${i}.pdf`, document.createElement('div'));
     }
     expect(nestedDispatch).toHaveBeenCalledTimes(5);
+    expect(nestedDispatch.mock.calls.every((c) => c[4] === 1)).toBe(true);
+  });
+
+  it('depth 并发兄弟互不复位（T2 评审 M1 边缘）：并发嵌套链各携显式深度，上限在并发下依然封顶', async () => {
+    const stub = stubBlobDownload();
+    try {
+      const depths: number[] = [];
+      let mounts = 0;
+      // 测试侧深度镜像（与 markForeignNestedDepth 同登记）——mount 按「自身渲染深度」
+      // 决定行为，兄弟链各自独立推进
+      const depthOf = new WeakMap<HTMLElement, number>();
+      const nestedDispatch = vi.fn(
+        async (data: Uint8Array, _name: string, target: HTMLElement, signal: AbortSignal, depth: number) => {
+          depths.push(depth);
+          depthOf.set(target, depth);
+          // 模拟 viewer.ts foreignNestedDispatch：登记 target 深度 → 重入渲染
+          markForeignNestedDepth(target, depth);
+          await renderer.render(data, target, sourceWithStore('nested.eml', {}), { ext: 'eml' } as Detection, undefined, { signal });
+        }
+      );
+      const renderer = wrapFileViewerRenderer({
+        id: 'f',
+        label: 'F',
+        extensions: ['eml'],
+        nestedDispatch,
+        mount: async (args) => {
+          mounts++;
+          const d = depthOf.get(args.target) ?? 0;
+          if (d === 0) {
+            // 根：并发两个兄弟附件（各持独立 target），各自继续一层链
+            await Promise.all([
+              args.renderNested(new Uint8Array([1]), 'b1.eml', document.createElement('div')),
+              args.renderNested(new Uint8Array([2]), 'b2.eml', document.createElement('div'))
+            ]);
+          } else if (d === 1) {
+            await args.renderNested(new Uint8Array([2]), `c${mounts}.eml`, document.createElement('div'));
+          } else if (d === 2) {
+            await args.renderNested(new Uint8Array([3]), `e${mounts}.eml`, document.createElement('div'));
+          } else if (d === 3) {
+            // depth 3 渲染请求第 4 层：3+1 > 3 超限落下载（上限在并发下依然封顶）
+            await args.renderNested(new Uint8Array([4]), `f${mounts}.eml`, document.createElement('div'));
+          }
+          return {};
+        },
+      });
+      await renderer.render(new Uint8Array(4), document.createElement('div'), sourceWithStore('root.eml', {}), { ext: 'eml' } as Detection);
+      // 两条并发链对称：depth 1 → 2 → 3 各自分派（互不复位/不累积）；第 4 层请求
+      // 双双落下载、不再重入
+      expect(depths).toEqual([1, 2, 3, 1, 2, 3]);
+      expect(mounts).toBe(7);
+      expect(stub.downloads).toEqual(['f4.eml', 'f7.eml']);
+    } finally {
+      stub.restore();
+    }
   });
 
   it('无 nestedDispatch：嵌套请求直接落下载（downloadNestedAttachment 兜底）', async () => {

@@ -23,7 +23,7 @@ import { pptxRenderer } from '@bhxch/vviewer-render-doc/pptx';
 import { hexRenderer } from '@bhxch/vviewer-render-binary';
 import { archiveRenderer } from '@bhxch/vviewer-render-archive';
 import { jsonlRenderer } from '@bhxch/vviewer-render-text/jsonl';
-import { createForeignFileRenderers } from './foreignRenderers';
+import { createForeignFileRenderers, nestedName } from './foreignRenderers';
 
 function readViewerSource(): string {
   // vitest 下 import.meta.url 非 file scheme（loader 虚拟协议），按 cwd 双候选兜底
@@ -151,5 +151,24 @@ describe('装配序锚（viewer.ts 语句序：diagram → foreign 桥接块 →
     expect(foreignAt, '桥接块必须先于 codeRenderer：docm/potx/eml/fods 等会被 generated 补空位抢注').toBeLessThan(codeAt);
     expect(foreignAt, '桥接块居 diagram 块之后（装配叙述序）').toBeGreaterThan(diagramAt);
     expect(foreignAt, '桥接块必须先于 generated fallback').toBeLessThan(fallbackAt);
+  });
+});
+
+// T2 评审 M2 携带修复锚：nestedName 空/空白 type 回落裸 'attachment'（不得产出
+// 'attachment.' 尾点非法文件名）；含点 type 原样透传（email 附件自带扩展名的形态）。
+describe('nestedName（renderNestedBuffer type → 合成文件名）', () => {
+  it('裸扩展名合成 attachment.<ext>，小写归一', () => {
+    expect(nestedName('pdf')).toBe('attachment.pdf');
+    expect(nestedName(' PDF ')).toBe('attachment.pdf');
+  });
+
+  it('空/空白 type 回落裸 attachment（M2：无尾点）', () => {
+    expect(nestedName('')).toBe('attachment');
+    expect(nestedName('   ')).toBe('attachment');
+  });
+
+  it('含点 type 原样透传（自带扩展名的附件名）', () => {
+    expect(nestedName('photo.jpg')).toBe('photo.jpg');
+    expect(nestedName('a.b.c')).toBe('a.b.c');
   });
 });

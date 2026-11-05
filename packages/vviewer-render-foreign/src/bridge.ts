@@ -59,24 +59,39 @@ export interface ForeignMount {
 
 /**
  * 嵌套渲染分派回调（装配层注入，viewer.ts 提供）：bridge 的 renderNested 经它把
- * 嵌套子文件转交 vviewer dispatcher byExtension 渲染。同链递归（eml 套 eml）经
- * signal 承载深度（nestedDepthBySignal），由装配层把 signal 贯穿 dispatch opts
- * 保证跨层累积。
+ * 嵌套子文件转交 vviewer dispatcher byExtension 渲染。
+ *
+ * depth 形参（计划 3 T2 评审 M1 精化，计划 2 预留缝的契约扩展）：调用方所在渲染
+ * 链的显式深度贯穿——renderNested 以「自身深度 +1」显式传参（顶层渲染深度 0，首个
+ * 嵌套层 1），替代计划 2 的 signal 键深度表快照/复位簿记（并发兄弟附件在复位窗口
+ * 互相覆盖深度、嵌套链可越限）。装配层实现收到 depth 后须经 markForeignNestedDepth
+ * 把深度登记到 target（嵌套渲染实例与 target 一一对应：兄弟并发各持独立 target、
+ * 错误重试同 target——读写无竞争），再经 dispatcher 分派；桥接 render 以 target
+ * 取回自身深度，链式传递闭环。
  */
 export interface NestedDispatch {
-  (data: Uint8Array, name: string, target: HTMLElement, signal: AbortSignal): Promise<void>;
+  (data: Uint8Array, name: string, target: HTMLElement, signal: AbortSignal, depth: number): Promise<void>;
 }
 
 /** 嵌套渲染深度上限（Review Focus 5：eml-in-eml 递归死循环防线）：外层记 depth 0，
  * 每层嵌套 +1；请求超出即落下载兜底（不再重入 dispatcher）。 */
 export const FOREIGN_NESTED_DEPTH_LIMIT = 3;
 
-/** 嵌套链深度表（key=贯穿全链的 AbortSignal）：render 作用域快照读、renderNested
- * 前置自增 + finally 复位——兄弟附件调用互不累积，递归链逐层递增。 */
-const nestedDepthBySignal = new WeakMap<AbortSignal, number>();
+/** 嵌套链深度表（key=嵌套渲染 target）：装配层经 markForeignNestedDepth 在分派前
+ * 登记、桥接 render 启动时读回自身深度。target 键竞争免疫（兄弟并发各持独立
+ * target、重试同 target 复读同值），替代 T2 的 signal 键快照/复位簿记（M1）。 */
+const nestedDepthByTarget = new WeakMap<HTMLElement, number>();
 
-function foreignNestedDepth(signal: AbortSignal): number {
-  return nestedDepthBySignal.get(signal) ?? 0;
+function foreignNestedDepth(target: HTMLElement): number {
+  return nestedDepthByTarget.get(target) ?? 0;
+}
+
+/**
+ * 装配层分派嵌套渲染前登记该 target 的渲染深度（NestedDispatch.depth 的承接缝，
+ * 见该契约注记）。顶层渲染不经此登记（读回 0）；重复登记以最后一次为准。
+ */
+export function markForeignNestedDepth(target: HTMLElement, depth: number): void {
+  nestedDepthByTarget.set(target, depth);
 }
 
 /** BlobPart 窄型收窄：vviewer 管线的字节恒为 ArrayBuffer backed（store.read/物化泵
@@ -116,9 +131,10 @@ export function disposeForeignRendered(rendered: unknown): void | Promise<void> 
  * 把 foreign mount 包装为 vviewer 渲染管线可注册的 Renderer：
  * id/label/extensions 逐字透传；streaming:false（foreign 库吃全量字节/ File 形，
  * 不接 StreamCtx）。render 实装（计划 3 Task 2）：signal 取 render 第 6 参 opts.signal
- * （缺省每次独立新 signal），File 物化后交 spec.mount；renderNested 在本渲染作用域
- * 快照链上深度并强制 FOREIGN_NESTED_DEPTH_LIMIT（超限/未注入 nestedDispatch 一律
- * downloadNestedAttachment）；mount 返回的销毁委托映射为 RenderedInstance.destroy。
+ * （缺省每次独立新 signal），File 物化后交 spec.mount；renderNested 以显式深度
+ * 贯穿强制 FOREIGN_NESTED_DEPTH_LIMIT（自身深度经 target 深度表读回——装配层
+ * markForeignNestedDepth 登记；超限/未注入 nestedDispatch 一律 downloadNestedAttachment）；
+ * mount 返回的销毁委托映射为 RenderedInstance.destroy。
  */
 export function wrapFileViewerRenderer(spec: {
   id: string;
@@ -141,22 +157,18 @@ export function wrapFileViewerRenderer(spec: {
         throw new TypeError('foreign render 参数不完整（buffer/target/source/det 必填）');
       }
       // signal 贯穿（审计 R1 I-1 同参异构面）：dispatch 第 6 参透传；缺省独立新
-      // signal（直调/测试形态）——嵌套链深度以该 signal 为 key 仍可累积（装配层
-      // 把同一 signal 传入 dispatch opts.signal，嵌套渲染经 renderOpts 收回同引用）。
+      // signal（直调/测试形态）。深度读回以 target 为键（装配层
+      // markForeignNestedDepth 登记，见 NestedDispatch 契约注记）：顶层未登记 → 0。
       const signal = opts?.signal ?? new AbortController().signal;
-      const depth = foreignNestedDepth(signal);
+      const depth = foreignNestedDepth(target);
       const renderNested: NestedRender = async (data, name, nestedTarget) => {
         if (signal.aborted) return; // 外层已取消：嵌套请求静默丢弃（DOM 随外层销毁）
         if (!spec.nestedDispatch || depth + 1 > FOREIGN_NESTED_DEPTH_LIMIT) {
           downloadNestedAttachment(data, name);
           return;
         }
-        setForeignNestedDepth(signal, depth + 1);
-        try {
-          await spec.nestedDispatch(data, name, nestedTarget, signal);
-        } finally {
-          setForeignNestedDepth(signal, depth); // 复位：兄弟附件请求互不累积
-        }
+        // 显式深度贯穿（M1）：无共享簿记、无复位——并发兄弟各携 depth+1，互不干扰
+        await spec.nestedDispatch(data, name, nestedTarget, signal, depth + 1);
       };
       const result = await spec.mount({
         data: buffer,
@@ -175,10 +187,6 @@ export function wrapFileViewerRenderer(spec: {
       };
     },
   };
-}
-
-function setForeignNestedDepth(signal: AbortSignal, depth: number): void {
-  nestedDepthBySignal.set(signal, depth);
 }
 
 // core 未导出 POSIX path 工具（rg 'dirname|joinPath' packages/vviewer-core/src 无

@@ -29,7 +29,7 @@ import { hexRenderer } from '@bhxch/vviewer-render-binary';
 import { archiveRenderer } from '@bhxch/vviewer-render-archive';
 import { configureLibarchive } from '@bhxch/vviewer-render-archive/libarchiveStore';
 import { jsonlRenderer } from '@bhxch/vviewer-render-text/jsonl';
-import { downloadNestedAttachment, type NestedDispatch } from '@bhxch/vviewer-render-foreign';
+import { downloadNestedAttachment, markForeignNestedDepth, FOREIGN_NESTED_DEPTH_LIMIT, type NestedDispatch } from '@bhxch/vviewer-render-foreign';
 import { browser } from '$app/env';
 import { ensureHighlightClient, computeRouter } from './highlightClient';
 import { routeLargeFileHighlight } from './highlightRouter';
@@ -82,12 +82,18 @@ for (const r of createDiagramFileRenderers({ remoteCall: diagramFileRemoteCall }
 // ---------- file-viewer 第一波桥接渲染器（spec §6.3，计划 3 Task 2：10 组 41 扩展名） ----------
 
 /** 嵌套附件分派（spec §6.4 数据画像 B 组：email 嵌套附件 → vviewer dispatcher
- * byExtension 承接，pdf/image/docx 等本地强项；深度限 3 由桥接层 renderNested 强制，
- * 递归链深度经 signal 贯穿累积——此处分派必带 opts.signal）。byExtension 无渲染器
+ * byExtension 承接，pdf/image/docx 等本地强项；深度限 3 由桥接层 renderNested 以
+ * 显式 depth 形参强制——T2 评审 M1 精化：本实现收到 depth 后先登记到 target
+ * （markForeignNestedDepth，桥接 render 启动时读回），再经 dispatch 分派；此处
+ * depth 超限检查为防御性双闸（正常链路桥接层已拦截）。byExtension 无渲染器
  * 的附件回落下载（不落错误卡片）；有渲染器时的渲染失败由 dispatch 既有错误卡片面
  * 承接（落在 nested target 内）。合成 source 无 store（buffer 直传路径不触 store 面，
  * rangeCapable 探测读空对象即 false；sibling 解析经桥接层 read 探测兜 null）。 */
-const foreignNestedDispatch: NestedDispatch = async (data, name, target, signal) => {
+const foreignNestedDispatch: NestedDispatch = async (data, name, target, signal, depth) => {
+  if (depth > FOREIGN_NESTED_DEPTH_LIMIT) {
+    downloadNestedAttachment(data, name);
+    return;
+  }
   const i = name.lastIndexOf('.');
   const ext = i < 0 ? '' : name.slice(i + 1).toLowerCase();
   if (!registry.byExtension(ext)) {
@@ -101,6 +107,9 @@ const foreignNestedDispatch: NestedDispatch = async (data, name, target, signal)
     name,
     store: NESTED_ATTACHMENT_STORE
   };
+  // 深度登记（M1 契约）：target 与嵌套渲染实例一一对应（兄弟并发各持独立 target、
+  // 错误重试同 target 复读同值），桥接 render 以它读回自身深度，链式传递闭环。
+  markForeignNestedDepth(target, depth);
   // 窄型收窄（运行时不变量）：foreign 嵌套回调的字节源自 foreign 渲染器侧
   // ArrayBuffer（renderNestedBuffer 的 nestedBuffer）→ 桥接层 new Uint8Array 包装，
   // 恒为 ArrayBuffer backed，无 SharedArrayBuffer 面。

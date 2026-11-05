@@ -53,10 +53,14 @@ function toArrayBuffer(data: Uint8Array): ArrayBuffer {
 }
 
 /** renderNestedBuffer 的 type 实参为裸扩展名（探针：email 传 getAttachmentExtension、
- * openDocument 传 odt/odp/rtf）——合成文件名供分派/下载兜底使用。 */
-function nestedName(type: string): string {
+ * openDocument 传 odt/odp/rtf）——合成文件名供分派/下载兜底使用。空/空白 type
+ * （T2 评审 M2：'attachment.' 尾点非法文件名）回落裸 'attachment'。导出仅测试锚用，
+ * 装配面不另消费。 */
+export function nestedName(type: string): string {
   const t = type.trim();
-  return t.includes('.') ? t : `attachment.${t.toLowerCase()}`;
+  if (t.includes('.')) return t;
+  const ext = t.toLowerCase();
+  return ext ? `attachment.${ext}` : 'attachment';
 }
 
 /**
