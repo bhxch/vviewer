@@ -67,7 +67,9 @@ export interface ForeignMount {
  * 互相覆盖深度、嵌套链可越限）。装配层实现收到 depth 后须经 markForeignNestedDepth
  * 把深度登记到 target（嵌套渲染实例与 target 一一对应：兄弟并发各持独立 target、
  * 错误重试同 target——读写无竞争），再经 dispatcher 分派；桥接 render 以 target
- * 取回自身深度，链式传递闭环。
+ * 取回自身深度，链式传递闭环。未登记 target（顶层渲染天然不经登记；实现方遗漏
+ * 登记同此）读回 0——按顶层链处理，属设计缝行为而非错误（I-1/I-2 记录备案，
+ * T3 评审裁决不修）。
  */
 export interface NestedDispatch {
   (data: Uint8Array, name: string, target: HTMLElement, signal: AbortSignal, depth: number): Promise<void>;

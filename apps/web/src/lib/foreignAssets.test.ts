@@ -148,6 +148,18 @@ describe('foreign 代码面 chunk 分组（spec §6.2：chunk 分离进 dist，�
     expect(src).toContain("'**/foreign-*.js'");
   });
 
+  it('presentation 组 test 正则含裸包 ppt/pptx（评审 M-1：renderer-ppt/pptx 的传递依赖\n'
+    + '  @file-viewer/ppt@1.0.2、@file-viewer/pptx@3.3.3 无 renderer- 前缀，漏写即落默认共享 chunk 入 precache）', () => {
+    const src = readSource('vite.config.ts');
+    const line = src
+      .split('\n')
+      .filter((l) => l.includes("name: 'foreign-presentation'"))
+      .map((l) => src.slice(src.indexOf(l)).split('\n').slice(0, 4).join('\n'))
+      .join('\n');
+    expect(line, '缺裸包 ppt').toMatch(/\|ppt\|pptx\)/);
+    expect(line, '缺裸包 pptx').toMatch(/renderer-pptx\|ppt\|pptx\)/);
+  });
+
   it('共享依赖铁律锚：jszip/pako/buffer 不入 foreign 组 test 正则（git-engine 组注释同款约束）', () => {
     const src = readSource('vite.config.ts');
     // lastIndexOf：文件内有两处同名注释（chunkFileNames 特判 / groups 块），取后者

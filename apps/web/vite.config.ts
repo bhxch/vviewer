@@ -296,9 +296,12 @@ function diagramEngineChunk(): Plugin {
                       test: /[\\/]node_modules[\\/](@file-viewer[\\/](renderer-word|capability-rtf|doc|docx)|rtf\.js)[\\/]/
                     },
                     {
-                      // renderer-ppt/pptx 为 renderer-presentation 的内部再导出依赖
+                      // renderer-ppt/pptx 为 renderer-presentation 的内部再导出依赖；
+                      // 裸包 ppt@1.0.2/pptx@3.3.3 为二者的传递依赖（无 renderer- 前缀，
+                      // 评审 M-1：漏写即落默认共享 chunk 入 precache——PptError 面
+                      // 实测 244K chunk 曾入 precache 清单）
                       name: 'foreign-presentation',
-                      test: /[\\/]node_modules[\\/]@file-viewer[\\/](renderer-presentation|renderer-ppt|renderer-pptx)[\\/]/
+                      test: /[\\/]node_modules[\\/]@file-viewer[\\/](renderer-presentation|renderer-ppt|renderer-pptx|ppt|pptx)[\\/]/
                     },
                     {
                       // @xmldom/xmldom 为 spreadsheet/iwork/hangul 三组共享——归首组

@@ -77,15 +77,19 @@ export function resolveForeignAssetBase(env?: string): string {
 }
 
 /**
- * per-package 基座派生：CDN 形态（base 含 /@file-viewer/assets-standard@ 段）按
- * 包名替换——同版本钉死；env 自托管形态（合并树根，无该段）原样返回（全部包
- * 同 base）。assets-standard 恒等于 base 本身。
+ * per-package 基座派生：base 含 `/@file-viewer/assets-standard@` 段时按包名替换
+ * （同版本钉死）；无该段时 String.replace 无匹配自然原样返回（无检测分支）——
+ * 这正是 env 自托管合并树语义的承接点（全部包同 base），但区分是「合并树根」还是
+ * 「形态漂移的坏 base」不在本函数职责内，均静默原样返回。
+ *
+ * 已知边界（评审 I-3 勘误备案）：若 env base 恰含 assets-standard@ 段（如操作者
+ * 把 env 直接指向某个 assets-standard 的镜像 URL），替换照样发生——per-package
+ * 基座派生为同域其余 assets-* 包 URL。镜像域同托管全部 assets-* 包时这是期望
+ * 行为；仅托管 assets-standard 时其余包 URL 会静默 404（渲染错误卡片承接），
+ * 本函数与消费侧均不感知。assets-standard 恒等于 base 本身。
  */
 export function resolveForeignAssetPackageBase(pkg: ForeignAssetPackage, base?: string): string {
   const resolved = base ?? resolveForeignAssetBase();
   if (pkg === 'assets-standard') return resolved;
-  const substituted = resolved.replace('/@file-viewer/assets-standard@', `/@file-viewer/${pkg}@`);
-  // CDN 形态必须替换成功（防基座形态漂移后静默 404：替换失配即维持原基座，
-  // 由调用侧感知——env 合并树语义即此分支）
-  return substituted;
+  return resolved.replace('/@file-viewer/assets-standard@', `/@file-viewer/${pkg}@`);
 }
