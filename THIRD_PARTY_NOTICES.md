@@ -40,6 +40,18 @@
 | @file-viewer/renderer-spreadsheet | Apache-2.0 | xlsx 系变体（xltx/xlsb/xlt/xla/xlam/xltm）/ods/fods/dbf/tsv 表格渲染 | file-viewer 批 T1 |
 | @file-viewer/renderer-word | Apache-2.0 | doc/docm/dotx/dotm/odt/odp 文字文档渲染（odt/odp 归属本包，按其 README；其依赖 @file-viewer/doc 为 MIT） | file-viewer 批 T1 |
 | @file-viewer/renderer-wordperfect | Apache-2.0 | wpd/wp/wp5/wp6（Corel WordPerfect）渲染 | file-viewer 批 T1 |
+| @file-viewer/capability-drawio-official | Apache-2.0 | diagrams.net 官方查看运行时 opt-in 启用包（大体积运行时经 assets-drawing 资产系分发） | file-viewer 批 W2-T1 |
+| @file-viewer/capability-midi | Apache-2.0 | MIDI 检视 opt-in 启用包（其依赖 @tonejs/midi 为 MIT） | file-viewer 批 W2-T1 |
+| @file-viewer/renderer-data | Apache-2.0 | 数据/字体资产渲染（SQLite/Parquet/Avro/WebArchive/PSD/AI/EPS 预览与 WASM 模块结构、字体文件查看面；依赖 sql.js/hyparquet/avsc/ag-psd 均 MIT） | file-viewer 批 W2-T1 |
+| @file-viewer/renderer-design | Apache-2.0 | Adobe 设计文档渲染（Photoshop/Illustrator/InDesign/XD/Animate FLA 等 25 扩展名；传递依赖 @paged-media/introspect-wasm 双许可 MPL-2.0 OR LicenseRef-PMEL，取 MPL-2.0 面） | file-viewer 批 W2-T1 |
+| @file-viewer/renderer-dicom | Apache-2.0 | DICOM Part 10 医学影像渲染（依赖 dicom-parser 为 MIT） | file-viewer 批 W2-T1 |
+| @file-viewer/renderer-drawing | Apache-2.0 | 白板/图表文件渲染（Draw.io/Excalidraw/Mermaid/PlantUML；BPMN 查看为 opt-in peer bpmn-js，本仓不启用，.bpmn 维持 diagram-bpmn 渲染器） | file-viewer 批 W2-T1 |
+| @file-viewer/renderer-eda | Apache-2.0 | EDA 电路文件渲染（OLB/DRA/GDSII/OASIS；依赖 cfb 为 Apache-2.0，eda-layout/eda-orcad 自研） | file-viewer 批 W2-T1 |
+| @file-viewer/renderer-geo | Apache-2.0 | 地理数据渲染（GeoJSON/KML/GPX/SHP 解析与 MapLibre 叠加；依赖 maplibre-gl 为 BSD-3，shpjs/proj4 为 MIT，@tmcw/togeojson 为 BSD-2） | file-viewer 批 W2-T1 |
+| @file-viewer/renderer-image | Apache-2.0 | 图片渲染（原生格式预览+多页 TIFF 与 HEIC/HEIF 转换；依赖 utif/heic2any 均 MIT） | file-viewer 批 W2-T1 |
+| @file-viewer/renderer-media | Apache-2.0 | 原生音视频渲染宿主（媒体扩展名本仓不注册——vviewer av 链占优；MIDI 检视经 capability-midi） | file-viewer 批 W2-T1 |
+| @file-viewer/renderer-signature | Apache-2.0 | 数字签名/证据容器结构检视（CMS/CAdES/时间戳/ASiC/JWS/OpenPGP；依赖 jszip 为 MIT） | file-viewer 批 W2-T1 |
+| @file-viewer/renderer-typst | Apache-2.0 | Typst 排版渲染（浏览器 WASM 编译+渲染；依赖 @myriaddreamin/typst-ts-* 均 Apache-2.0） | file-viewer 批 W2-T1 |
 | helix-editor/helix | MPL-2.0 | `packages/vviewer-highlight/assets/themes.json`（214 主题派生自 `runtime/themes`，格式转换修改）与 `languages.json`（派生自 `languages.toml`）、`packages/vviewer-highlight/assets/queries/`（vendored 拷贝）；溯源见 `tools/helix-assets/README.md` | M2 |
 | microsoft/vscode | MIT | `packages/vviewer-highlight/assets/vscode/dark_modern.json`、`light_modern.json`（theme-defaults 扩展主题，JSONC 规范化与 include 内联后 vendor，色值未改动） | B |
 | microsoft/vscode（extensions/theme-seti） | MIT | `packages/vviewer-highlight/assets/vscode-icons/seti/`（Seti 图标主题，清单 JSONC 规范化与格式改写后 vendor、`seti.woff` 原样拷贝；字形上游 jesseweed/seti-ui 同 MIT），溯源与修改明细见 `packages/vviewer-highlight/assets/vscode-icons/README.md` | 图标主题 T4 |
