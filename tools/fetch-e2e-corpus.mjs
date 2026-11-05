@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // fetch-e2e-corpus.mjs — 下载 e2e 多源渲染语料到 apps/web/e2e/fixtures/corpus/<source-id>/。
 // 源表 SOURCES 写死各上游仓固定 commit（不用分支名，重跑不受上游漂移影响），按 pathPrefix
-// 子树递归列举 → 扩展名过滤 → 按 tree 顺序取前 maxFiles（确定性截断）。真实文件不入库
+// 子树递归列举 → 扩展名/include/maxBytes 过滤 → maxPerExtension 限额（可选）→ 按 tree
+// 顺序取前 maxFiles（确定性截断）。真实文件不入库
 // （避免上游许可证问题，目录已 gitignore），本脚本即初始化测试环境的一步：本地手动跑，
 // CI e2e job 在 playwright test 前同样执行（GITHUB_TOKEN 传 github.token 提升 API 限流，
 // 匿名 60 → 1000 req/h）。
@@ -9,7 +10,8 @@
 // 改分层逐目录列举（目录级仍 truncated 记入失败清单），绝不静默截断 → raw.githubusercontent.com
 // 有限并发 6 路逐个下载（非 2xx 或内容以 "<!DOCTYPE html" 开头视为错误页，按失败重试 2 次
 // 线性退避，仍失败记入失败清单继续）→ 幂等可重跑（已存在且 size 与清单一致则跳过）→ 写
-// corpus/manifest.json（generatedAt / sources[id,repo,commit,truncatedByMaxFiles,files] /
+// corpus/manifest.json（generatedAt / sources[id,repo,commit,truncatedByMaxFiles,
+// truncatedByPerExtensionCap?,files] /
 // counts[total,bySource] / failures，每文件 path/size/sha256 + git blob sha 校验，防 CDN
 // 损坏）。任一源清单拉取失败、清单为空或全部文件失败时以非 0 退出；部分文件失败仅告警。
 // 用法：node tools/fetch-e2e-corpus.mjs   （可选 env GITHUB_TOKEN）
@@ -27,7 +29,10 @@ const CONCURRENCY = 6; // 逐文件下载有限并发（幂等语义与单路一
 /**
  * 多源语料表：commit 写死（禁分支名）；maxFiles 为按 tree 顺序取前 N 的确定性上限；
  * maxBytes 可选，单文件体积上限（先滤后截）；pathPrefix 空串表示整仓，否则为仓内子树
- * 目录。rationale 记录选源依据（许可证 + 实测口径），供后续维护追溯。
+ * 目录。include 可选，路径前缀模式白名单（'*' 恰好匹配单段，命中任一即保留——多目录
+ * 夹具仓按目录圈定候选面）；maxPerExtension 可选，每扩展名至多保留 N 个（tree 顺序
+ * 首个，确定性）——多格式混合源防单格式超量挤占 maxFiles 名额。rationale 记录选源
+ * 依据（许可证 + 实测口径），供后续维护追溯。
  */
 const SOURCES = [
   {
@@ -93,12 +98,42 @@ const SOURCES = [
     maxBytes: 5_000_000, // 单文件 ≤5MB：实测该 commit 下 scifact_corpus.jsonl 8.3MB 超限排除
     pathPrefix: 'examples/data',
     rationale: 'MIT；JSONL 真实数据行语料——examples/data 实测 6 个 jsonl（非定档时 5 个，前提已过时），剔除超限的 scifact_corpus.jsonl（8.3MB）后恰 5 个（27KB~549KB）全量纳入'
+  },
+  {
+    id: 'file-viewer-fixtures',
+    repo: 'flyfish-dev/file-viewer',
+    // v3.3.3 tag（git ls-remote 钉定 2026-11-06；与 npm 依赖 3.3.3 系同版）
+    commit: '760038d88e9252bc746c04626b82b84226ef6948',
+    // SAVE-FOREIGN 第一波 10 组桥接渲染器的格式面（spec §6.3）按扩展名圈定；
+    // ppt/pptx 上游最小 1.9MB/6.7MB 超 maxBytes 不入选（渲染锚由错误卡/文档组锚覆盖），
+    // xls/xlsx/docx 维持 vviewer 既有渲染器不属本波绑定面
+    extensions: ['.doc', '.odt', '.rtf', '.eml', '.epub', '.fb2', '.chm', '.ofd', '.hwp', '.hwpx', '.dbf', '.pages', '.numbers', '.key', '.wpd', '.wp'],
+    maxFiles: 20,
+    maxPerExtension: 1, // 每扩展名至多 1 个（tree 顺序首个）：16 扩展名 × 1 = 16 文件 ~530KB
+    maxBytes: 200_000, // 单文件 ≤200KB：book.epub 139KB 为最大入选；excel.ods 650KB/putty.chm 365KB/wordperfect-corel-wp6.wpd 1MB 超限排除
+    pathPrefix: '',
+    // 夹具分散三处：viewer-demo 静态示例（epub/odt/doc/eml/rtf 等）+ 各 renderer 包
+    // test/fixtures（chm/hwp/iwork/dbf/rtf/wpd 最小夹具）+ chm rust 测试夹具
+    include: ['apps/viewer-demo/public/example/', 'packages/renderers/*/test/fixtures/', 'packages/renderers/chm/rust/tests/fixtures/'],
+    rationale: 'Apache-2.0；file-viewer 自带上游夹具（产品同源引擎的真实解析面）——整仓 recursive tree 实测未截断（6055 blobs），include 三目录圈定候选面后 maxPerExtension=1 每格式取首个小体量夹具，实测 16 文件 ~530KB（epub 组 epub+fb2 双扩展、iwork 组 pages/numbers/key 三扩展，presentation 组无小体量夹具不入选）'
   }
 ];
 
 const log = (...m) => console.log('[fetch-e2e-corpus]', ...m);
 const err = (...m) => console.error('[fetch-e2e-corpus]', ...m);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** include 前缀模式命中判定：'*' 恰好匹配单段路径（防跨目录误配），命中任一即保留；
+ * include 缺省/空数组 = 不过滤。 */
+function pathMatchesInclude(path, include) {
+  if (!include || include.length === 0) return true;
+  return include.some((pattern) => {
+    const re = new RegExp(`^${pattern.split('*').map(escapeRegExp).join('[^/]+')}`);
+    return re.test(path);
+  });
+}
 
 function ghHeaders() {
   const h = { Accept: 'application/vnd.github+json', 'User-Agent': 'vviewer-e2e-corpus' };
@@ -256,7 +291,10 @@ async function main() {
       continue;
     }
     const matched = listed.entries.filter(
-      (e) => source.extensions.some((ext) => e.path.endsWith(ext)) && (!source.maxBytes || e.size <= source.maxBytes)
+      (e) =>
+        source.extensions.some((ext) => e.path.endsWith(ext)) &&
+        pathMatchesInclude(e.path, source.include) &&
+        (!source.maxBytes || e.size <= source.maxBytes)
     );
     if (matched.length === 0) {
       err(`源 ${source.id} 清单中无匹配扩展名（${source.extensions.join(' ')}）的文件，中止该源`);
@@ -264,12 +302,34 @@ async function main() {
       hardFail = true;
       continue;
     }
-    // 2. maxFiles 确定性截断：按 tree 顺序取前 N，截断标志入 manifest
-    const truncatedByMaxFiles = matched.length > source.maxFiles;
-    const capped = matched.slice(0, source.maxFiles);
-    log(`清单：匹配 ${matched.length} 个，取前 ${capped.length}（maxFiles=${source.maxFiles}${truncatedByMaxFiles ? '，截断' : ''}）`);
+    // 2. maxPerExtension 确定性限额（可选）：每扩展名按 tree 顺序至多保留 N 个——
+    //    多格式混合源防单格式超量挤占 maxFiles 名额；限额生效记入 manifest
+    let truncatedByPerExtensionCap = false;
+    let capped = matched;
+    if (source.maxPerExtension !== undefined) {
+      const perExt = new Map();
+      const picked = [];
+      for (const e of matched) {
+        const ext = source.extensions.find((x) => e.path.endsWith(x));
+        const n = perExt.get(ext) ?? 0;
+        if (n >= source.maxPerExtension) {
+          truncatedByPerExtensionCap = true;
+          continue;
+        }
+        perExt.set(ext, n + 1);
+        picked.push(e);
+      }
+      capped = picked;
+    }
+    // 3. maxFiles 确定性截断：按 tree 顺序取前 N，截断标志入 manifest
+    const truncatedByMaxFiles = capped.length > source.maxFiles;
+    capped = capped.slice(0, source.maxFiles);
+    log(
+      `清单：匹配 ${matched.length} 个，取前 ${capped.length}（maxFiles=${source.maxFiles}${truncatedByMaxFiles ? '，截断' : ''}` +
+        `${source.maxPerExtension !== undefined ? `；maxPerExtension=${source.maxPerExtension}${truncatedByPerExtensionCap ? '，限额生效' : ''}` : ''}）`
+    );
 
-    // 3. 有限并发逐个落位（幂等：已存在且 size 与清单一致则跳过）
+    // 4. 有限并发逐个落位（幂等：已存在且 size 与清单一致则跳过）
     const results = new Array(capped.length);
     let downloaded = 0;
     let skipped = 0;
@@ -309,11 +369,12 @@ async function main() {
       repo: source.repo,
       commit: source.commit,
       truncatedByMaxFiles,
+      ...(source.maxPerExtension !== undefined ? { truncatedByPerExtensionCap } : {}),
       files: results.filter(Boolean)
     });
   }
 
-  // 4. manifest（语料根目录，随目录一并 gitignore）
+  // 5. manifest（语料根目录，随目录一并 gitignore）
   const bySource = Object.fromEntries(sources.map((s) => [s.id, s.files.length]));
   const total = sources.reduce((n, s) => n + s.files.length, 0);
   const manifest = {
@@ -326,7 +387,7 @@ async function main() {
   const manifestPath = join(corpusRoot, 'manifest.json');
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
 
-  // 5. 汇总与退出码：任一源清单失败/清单为空（上方已置 hardFail）或全部文件失败 → 非 0；
+  // 6. 汇总与退出码：任一源清单失败/清单为空（上方已置 hardFail）或全部文件失败 → 非 0；
   //    部分文件失败 → 失败清单写入 manifest.failures 并告警，不阻断（缺个别语料由 e2e 用例自身暴露）
   const landed = totalDownloaded + totalSkipped;
   log(`完成：共 ${total} 个文件（下载 ${totalDownloaded}，幂等跳过 ${totalSkipped}，失败 ${failures.length}）；manifest → ${manifestPath}`);
