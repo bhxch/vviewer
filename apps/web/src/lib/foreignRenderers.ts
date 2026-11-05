@@ -237,13 +237,48 @@ interface ForeignGroupSpec {
   load: () => Promise<ForeignPlugin>;
 }
 
+/**
+ * T2 评审 I-2 携带修复（spec §6.3 序 13 注记诉求：psd/ai/eps 高保真渲染）：
+ * design 组 data-asset handler 接上游增强缝。根因（两包 dist 实核）：pluginMount
+ * 的组内 registry 是裸 createRendererRegistry(definitions)——不走 core 的
+ * enhancement-aware install plan（registry.js createRendererDefinitionInstallPlan
+ * 仅 installFileViewerRenderers 装配路径生效），data-asset definition 自带的
+ * psd/ai/eps 扩展名注册原样生效，dispatcher 按 byExtension 路由把 psd/ai/eps
+ * 命中 data-asset 的 handler（renderer-data 的 renderFileViewerData 基础数据
+ * 视图）；design definitions 的 enhancesRendererId/enhancesExtensions
+ * （photoshop-design enhances psd、illustrator-pdf-design enhances ai、
+ * postscript-design enhances eps）在裸 registry 下不迁移扩展名归属。上游为此
+ * 预备的权威缝即 renderFileViewerDesignOrData（enhancedDataFormats = design
+ * definitions enhancesExtensions 并集 {psd,ai,eps}，命中增强格式走
+ * renderFileViewerDesign 高保真，否则原样 renderFileViewerData）——把 data-asset
+ * handler 替换为它即完成缝。psb/pdd/psdt/ait/ps 是 design definitions 的直接
+ * 扩展名，handler 本就指 renderFileViewerDesign，替换不触及。handler 形态同签名
+ * （双侧均为 FileRenderHandler<FileViewerRenderedInstance, HTMLDivElement>，
+ * dist d.ts 实核），零适配。dataId 取 renderer-data 的 dataRendererDefinition.id
+ * ——与 renderer-design dist 内 enhancedDataFormats 的归属判定同源（该包本就静态
+ * 依赖 renderer-data，零新增 chunk 级联）。导出仅测试锚用（装配经 FOREIGN_GROUPS
+ * 消费），测试锚断言替换后 handler 身份与未动面。
+ */
+export function wireDesignOrDataSeam(
+  design: typeof import('@file-viewer/renderer-design'),
+  data: typeof import('@file-viewer/renderer-data')
+): ForeignPlugin {
+  const plugin = design.designRenderer;
+  const dataId = data.dataRendererDefinition.id;
+  return {
+    ...plugin,
+    handlers: (plugin.handlers ?? []).map((h) =>
+      h.rendererId === dataId ? { ...h, handler: design.renderFileViewerDesignOrData } : h
+    )
+  };
+}
+
 /** 20 组绑定（spec §6.3 表逐字 + pot 增补 presentation；xlsx/xlsm/xls/csv/docx/pptx/
  * dot 维持 vviewer 既有渲染器，不在绑定面；第二波序 12-21——jxl 不绑定（探针裁决，
- * renderer-image dist 无 JS 解码器），renderer-media 的媒体扩展名不注册（av 占优），
+ * renderer-image dist 无解码器），renderer-media 的媒体扩展名不注册（av 占优），
  * drawing 仅 drawio/dio（mermaid/plantuml/excalidraw/bpmn 维持 vviewer 图表面，
- * bpmn-js 不装），design 组的 psd/ai/eps 上游插件经 data-asset definition 认领
- * （handlers 里 data-asset ← renderer-data 的 renderFileViewerData——增强缝
- * renderFileViewerDesignOrData 上游未接线，按插件原样桥接）。 */
+ * bpmn-js 不装），design 组经 wireDesignOrDataSeam 接上游增强缝（T2 评审 I-2），
+ * psd/ai/eps 随 data-asset handler 走 design 高保真。 */
 const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
   {
     id: 'foreign-email',
@@ -324,7 +359,12 @@ const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
       'psb', 'pdd', 'psdt', 'psd', 'ait', 'ai', 'idml', 'icml', 'idms', 'inx', 'fla', 'xfl',
       'xd', 'indd', 'indt', 'ps', 'eps', 'ase', 'aco', 'abr', 'csh', 'pat', 'grd', 'asl'
     ],
-    load: () => import('@file-viewer/renderer-design').then((m) => m.designRenderer)
+    // data-asset handler 接 renderFileViewerDesignOrData（wireDesignOrDataSeam，
+    // T2 评审 I-2/spec §6.3 序 13：psd/ai/eps 走 design 高保真而非 data 基础视图）
+    load: () =>
+      Promise.all([import('@file-viewer/renderer-design'), import('@file-viewer/renderer-data')]).then(
+        ([design, data]) => wireDesignOrDataSeam(design, data)
+      )
   },
   {
     // 仅新 4 扩展名（spec §6.3 序 14「仅新 5」减 jxl——探针裁决不绑定）；原 9 格式

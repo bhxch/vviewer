@@ -28,7 +28,8 @@ import { jsonlRenderer } from '@bhxch/vviewer-render-text/jsonl';
 import {
   createForeignFileRenderers,
   FOREIGN_GROUP_ASSET_PACKAGE,
-  nestedName
+  nestedName,
+  wireDesignOrDataSeam
 } from './foreignRenderers';
 import type { ForeignAssetPackage } from './foreignAssets';
 
@@ -260,6 +261,43 @@ describe('nestedName（renderNestedBuffer type → 合成文件名）', () => {
   it('含点 type 原样透传（自带扩展名的附件名）', () => {
     expect(nestedName('photo.jpg')).toBe('photo.jpg');
     expect(nestedName('a.b.c')).toBe('a.b.c');
+  });
+});
+
+// T2 评审 I-2 携带修复锚（spec §6.3 序 13 注记诉求）：foreign-design 组的 data-asset
+// handler 接上游增强缝 renderFileViewerDesignOrData——psd/ai/eps 走 design 高保真，
+// 不再落 renderer-data 基础数据视图。行为锚直载两真包（dist 纯数据模块，node/jsdom
+// 可安全 import），静态锚防装配面回退。
+describe('wireDesignOrDataSeam（design 组 data-asset 缝，T2 评审 I-2）', () => {
+  it('data-asset handler === renderFileViewerDesignOrData；design 直接扩展名 handler 不受影响', async () => {
+    const [design, data] = await Promise.all([
+      import('@file-viewer/renderer-design'),
+      import('@file-viewer/renderer-data')
+    ]);
+    const plugin = wireDesignOrDataSeam(design, data);
+    const byId = new Map((plugin.handlers ?? []).map((h) => [h.rendererId, h.handler]));
+    expect(byId.get(data.dataRendererDefinition.id), 'data-asset 缝：增强 handler').toBe(
+      design.renderFileViewerDesignOrData
+    );
+    expect(byId.get('photoshop-design'), 'design 直接 definition：原 handler').toBe(design.renderFileViewerDesign);
+    // 上游增强格式集语义锚：enhancesExtensions 并集 {psd,ai,eps}（renderFileViewerDesignOrData
+    // 内 enhancedDataFormats 的数据源），data-asset definition 自带同三扩展名（裸 registry
+    // 下 byExtension('psd') 命中 data-asset——缝的根因面）
+    const enhanced = design.designRendererDefinitions.flatMap((d) =>
+      d.enhancesRendererId === data.dataRendererDefinition.id ? [...(d.enhancesExtensions ?? [])] : []
+    );
+    expect([...enhanced].sort()).toEqual(['ai', 'eps', 'psd']);
+    for (const ext of ['psd', 'ai', 'eps']) {
+      expect(data.dataRendererDefinition.extensions, `data-asset 自带 ${ext}`).toContain(ext);
+    }
+  });
+
+  it('静态锚：foreign-design 组 load 经 wireDesignOrDataSeam 接线（防装配面回退）', () => {
+    const src = readForeignSource();
+    const designAt = src.indexOf("id: 'foreign-design'");
+    const seamAt = src.indexOf('wireDesignOrDataSeam(design, data)');
+    expect(seamAt, 'design 组未接 design-or-data 缝').toBeGreaterThan(-1);
+    expect(seamAt, '缝接线必须位于 foreign-design 组 load 内').toBeGreaterThan(designAt);
   });
 });
 
