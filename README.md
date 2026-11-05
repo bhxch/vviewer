@@ -33,8 +33,9 @@
 | 二进制 | hex 三列 dump（偏移/hex/ASCII）+ 结构树（PNG/IHDR 等字段展开）；offset 跳转、hex/UTF-8 双模式搜索（进度可取消、1000 命中截断）、字节检查器（属性面板展示，类型/字节序可切） |
 | 压缩包 | zip（jszip）/ tar·tgz·tbz2·7z·rar（libarchive wasm）：包内树 + 条目递归预览（嵌套深度限 3 层，超限拒绝） |
 | Office | docx（mammoth 转 HTML）、xlsx（SheetJS，多 sheet 页签、>200 行截断）、pptx（文本提纲卡片） |
+| file-viewer 桥接格式 | 第一波 10 组：邮件 eml/msg/mbox、电子书 epub/fb2/umd、OFD 版式、CHM 帮助、Word 系 doc/docm/dotx/dotm/odt/odp/rtf、演示 ppt/pot/pptm/potx/potm/ppsx/ppsm、表格变体 xltx/xlsb/xlt/xla/xlam/xltm/ods/fods/dbf/tsv、iWork pages/numbers/key、Hangul hwp/hwpx、WordPerfect wpd/wp/wp5/wp6——@file-viewer 渲染器包桥接（Worker/WASM 资产三层解析链自托管 + SW CacheFirst，嵌套附件转交 vviewer 分派） |
 | 大文件 | hex / JSON Lines / 代码文本窗口流式：首屏仅拉头部 + 首窗口，滚动续读/回看，块缓存 LRU 内存有界；本地文件 slice、后端 Range 分块拉取（压缩包条目等全量来源不流式）；code/jsonl 流式仅 UTF-8，非 UTF-8 自动回退全量；512MB 流式上限，到限提示转 hex |
-| 打开方式 | 内容探测链：magic 签名（mp4 族品牌表/webm/webp/wav/flac/ogg/bmp/ico/gz/7z/rar 等——无扩展名或改名文件直达真渲染器；「二进制扩展名 + 签名不符」不参与改派防误伤）→ 文本嗅探 → hex 兜底；「打开方式」三入口——属性面板下拉 / 状态栏浮层 / Tab 右键子菜单——受限候选 + 「更多渲染器…」就地展开全量 12 渲染器（per-tab 手动改派进会话快照，（手动）徽标），markdown 恒在候选兜底（.txt 可强制 markdown 渲染）；错误卡片快捷动作同链 |
+| 打开方式 | 内容探测链：magic 签名（mp4 族品牌表/webm/webp/wav/flac/ogg/bmp/ico/gz/7z/rar 等——无扩展名或改名文件直达真渲染器；「二进制扩展名 + 签名不符」不参与改派防误伤）→ 文本嗅探 → hex 兜底；「打开方式」三入口——属性面板下拉 / 状态栏浮层 / Tab 右键子菜单——受限候选 + 「更多渲染器…」就地展开 registry 全量渲染器清单（per-tab 手动改派进会话快照，（手动）徽标），markdown 恒在候选兜底（.txt 可强制 markdown 渲染）；错误卡片快捷动作同链 |
 | 搜索 | 文件内（`/`）+ 全局（`Ctrl+Shift+F`）双实现：浏览器内 grep / 远程搜索（rg 可选：缺 rg 自动降级系统 grep，皆缺时 501 → 前端退回浏览器内 grep）；大文件文件内搜索为后台全文扫描（进度提示、可取消、结果随扫描累积） |
 | Git 信息面板 | 右面板第三段（目录/属性/Git，探测可用才出现）：信息卡（分支/末次提交/工作区状态三态徽标——原始字节 hash 对比，CRLF/BOM 不误报）+ 行级 blame hover（≤2MB 全量 parse 路径，200 提交截断标注）+ diff 折叠区（未提交=工作区 vs HEAD / clean=HEAD vs HEAD^）+ 文件历史 log（≤50 条，条目展开提交详情与逐提交 diff）；纯前端 isomorphic-git worker 计算，**只读承诺**（fs 适配层与 worker 双侧零写通道，不读 config 凭据、零网络请求）；来源适用域 = 凡 store 能读出 `.git` 字节的**目录来源**（FS Access 本地根/服务端本地根/S3/WebDAV 直连/代理 remote），zip 内 .git 不承诺；worker chunk 懒加载，**离线首用**拉取失败段内报错可重试（重建 worker），探测失败目录负缓存同会话不重试 |
 | 会话 | IndexedDB tab 快照恢复 + 目录句柄权限记忆（本地文件内容不保留，刷新后以占位提示重开） |
