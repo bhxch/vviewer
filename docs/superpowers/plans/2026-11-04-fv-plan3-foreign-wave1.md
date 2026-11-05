@@ -20,6 +20,7 @@
 - 扩展名转移原子：新桥接渲染器 install 先于 codeRenderer（generated 补空位铁律）；`tsv` 自 code 内置清单移除与 spreadsheet 桥接注册同一 commit；`dot` 维持 graphviz（计划 1 裁决）、`pot` 归 presentation。
 - e2e 语料：真实二进制不入库——tools/fetch-e2e-corpus.mjs 增源（file-viewer GitHub 仓库测试夹具，钉 commit），CI 前拉取；仓库内只有 manifest。
 - 每任务原子 commit；中文 Conventional Commits。
+- **e2e 延后统一验证（用户指令 2026-11-05）**：开发期各任务**编写** e2e spec 但**不运行**（不跑 build:e2e/playwright）；e2e 统一在计划 5 收口后的最终验证阶段一次跑齐（含全部回归）。单测/typecheck 门禁照旧每任务全跑。
 
 ## Review Focus
 
@@ -41,7 +42,7 @@
 - Test: `tools/test/check-foreign-deps.test.mjs`（node --test 或 vitest，按 tools 既有惯例——rg tools/*/test）
 
 - [ ] **Step 1: 失败测试**（校验脚本三锚：范围前缀检出、lockfile 不一致检出、合规通过）。
-- [ ] **Step 2: 红** → **Step 3: package.json 11 项精确版本 + pnpm install --prefer-offline（registry 下载，如实发生）+ 校验脚本 + CI 接线 + NOTICES** → **Step 4: 绿**（脚本对现状 pass；手工临时加 ^ 验证 fail 后还原）+ `pnpm --filter web typecheck` 0E → **Step 5: Commit** `feat(web): file-viewer 第一波依赖精确锁版引入（11 包 3.3.3 系）+版本白名单 CI 校验+NOTICES`
+- [ ] **Step 2: 红** → **Step 3: package.json 11 项精确版本 + pnpm install --prefer-offline（registry 下载，如实发生）+ 校验脚本 + CI 接线 + NOTICES** → **Step 4: 绿**（脚本对现状 pass；手工临时加 ^ 验证 fail 后还原）+ `pnpm --filter web typecheck` 0E（e2e 本任务不涉） → **Step 5: Commit** `feat(web): file-viewer 第一波依赖精确锁版引入（11 包 3.3.3 系）+版本白名单 CI 校验+NOTICES`
 
 ### Task 2: file-viewer 渲染器 API 探针 + 桥接装配（10 组 28 扩展名）
 
@@ -85,7 +86,7 @@
 - Create: `apps/web/e2e/b-foreign-office.spec.ts`（desktop only：每格式组至少一渲染锚〔doc/odt/rtf/eml/epub/chm/hwp/dbf/pages…按夹具可得性〕+ open-as 双向切换锚〔file-viewer↔vviewer 渲染器〕+ 错误文件错误卡锚 + tsv 转移锚）
 - Test: e2e
 
-- [ ] **Step 1: 语料源接入**（本地跑 fetch 脚本验证夹具落地 + manifest）→ **Step 2: e2e 编写**（复用 b-save-as/b-diagram-file 的 openFlow helper 与 picker 桩先例；file-viewer 渲染可能慢——首屏锚时限按 foreign 懒加载形态放宽并注记）→ **Step 3: `pnpm --filter web build:e2e` + `pnpm --filter web exec playwright test b-foreign-office`** 绿 → **Step 4: 门禁**（根 vitest/双 typecheck/porcelain）→ **Step 5: Commit** `test(e2e): SAVE-FOREIGN 域锚——第一波 10 组渲染/open-as 切换/错误卡/tsv 转移`
+- [ ] **Step 1: 语料源接入**（本地跑 fetch 脚本验证夹具落地 + manifest）→ **Step 2: e2e 编写**（复用 b-save-as/b-diagram-file 的 openFlow helper 与 picker 桩先例；file-viewer 渲染可能慢——首屏锚时限按 foreign 懒加载形态放宽并注记）→ **Step 3: 编写完成即止（不 build:e2e 不跑 playwright——最终统一验证阶段执行）** → **Step 4: 门禁**（根 vitest/双 typecheck/porcelain）→ **Step 5: Commit** `test(e2e): SAVE-FOREIGN 域锚——第一波 10 组渲染/open-as 切换/错误卡/tsv 转移`
 
 ### Task 6: 覆盖矩阵增量回写 + 收口
 
@@ -97,4 +98,4 @@
 
 ### 收口
 
-- [ ] 全量门禁：根 `pnpm vitest run` exit0；`pnpm --filter web typecheck` 0E；根 `pnpm typecheck` 0E；e2e b-foreign-office + b-save-as + b-diagram-file 零翻转；`node tools/check-foreign-deps.mjs --check` 绿；`node tools/foreign-budget.mjs --check` 绿；porcelain 净空。
+- [ ] 全量门禁：根 `pnpm vitest run` exit0；`pnpm --filter web typecheck` 0E；根 `pnpm typecheck` 0E；`node tools/check-foreign-deps.mjs --check` 绿；`node tools/foreign-budget.mjs --check` 绿；porcelain 净空。（e2e 全量回归移交最终统一验证阶段）
