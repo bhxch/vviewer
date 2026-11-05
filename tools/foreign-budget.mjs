@@ -1,7 +1,8 @@
 // tools/foreign-budget.mjs — plan-3 foreign 预算门禁（spec §6.2 Task 4）：扫 apps/web/build
 // 产物，四断言面：① 主 chunk（entry + 非 foreign-* chunk，排除 sw.js / workbox-*.js）
 // 不得含 @file-viewer import 残留；② 工作箱 precache 清单（同 check-pwa-build 口径：
-// sw.js 的 url:"…" 条目）不得含 foreign-*.js 或 @file-viewer 资产 URL；③ dist 不得
+// sw.js 的 url:"…" 条目）不得含 foreign-*.js、@file-viewer 资产 URL 或 foreign
+// worker 匿名资产（_app/immutable/assets/*.worker*.js，终审修复 C1）；③ dist 不得
 // 出现 file-viewer 资产目录；④ apps/web 声明了 @file-viewer/* 依赖时，产物必须存在
 // ≥1 个 foreign-*.js 组 chunk（分组机制整体失效——如 manualChunks 配置丢失——时
 // marker 三断言全无锚点，此存在性断言兜底）。违规即失败（exit 1），不得放宽门禁。
@@ -39,6 +40,16 @@ const CHUNK_MARKERS = [
 const PRECACHE_URL = /url:"([^"]+)"/g;
 const FOREIGN_CHUNK_URL = /(^|\/)foreign-[^/]*\.js(?:[?#]|$)/;
 const FOREIGN_CHUNK_FILE = /^foreign-.*\.js$/;
+// C1（终审修复波）：foreign renderer 以 `new URL('./xxx.worker.js', import.meta.url)`
+// 引用的 worker 被 vite 发射为匿名资产（_app/immutable/assets/pptjs.worker.*.js /
+// pptx.worker.*.js，约 1.06MB）——不经 foreign-* 组 chunk 命名，vite.config.ts
+// globIgnores 漏配即被 workbox 收进 precache。denylist 按「assets/ 目录 + .worker
+// 文件名」的 foreign 匿名资产形态通用封堵（覆盖未来 renderer-* 新增 worker 资产——
+// 同发射机制必然复现同形态）。注意面：vviewer 自有 worker（ts-worker/gitWorker/
+// binary.worker/libarchive worker-bundle）落 _app/immutable/workers/ 或无 .worker
+// 文件名段，不命中；若未来自有资产确需进 precache 且文件名含 .worker，需在此显式
+// 豁免（门禁收紧偏置：红先问，不静默放行）。
+const FOREIGN_WORKER_ASSET_URL = /(^|\/)_app\/immutable\/assets\/[^/]*\.worker[^/]*\.js(?:[?#]|$)/;
 
 function walk(d, base = d) {
   return readdirSync(d, { withFileTypes: true }).flatMap((e) => {
@@ -82,6 +93,7 @@ export function scanForeignBudget(buildDir, foreignDeps) {
     for (const [, url] of readFileSync(swPath, 'utf8').matchAll(PRECACHE_URL)) {
       if (FOREIGN_CHUNK_URL.test(url)) violations.push({ kind: 'precache-foreign', file: 'sw.js', url });
       if (url.includes('@file-viewer')) violations.push({ kind: 'precache-cdn', file: 'sw.js', url });
+      if (FOREIGN_WORKER_ASSET_URL.test(url)) violations.push({ kind: 'precache-worker', file: 'sw.js', url });
     }
   } else {
     violations.push({ kind: 'missing-sw', file: 'sw.js' });
@@ -122,7 +134,7 @@ export function main() {
     console.error('处置：vite.config manualChunks 分组（foreign-*）与 precache globIgnores（foreign-*.js）回归即修，不得放宽门禁。');
     process.exitCode = 1;
   } else {
-    console.log('[foreign-budget] OK：主 chunk 无 @file-viewer import 残留，precache 清单无 foreign-*.js / @file-viewer URL，dist 无 file-viewer 资产目录，foreign 组 chunk 存在。');
+    console.log('[foreign-budget] OK：主 chunk 无 @file-viewer import 残留，precache 清单无 foreign-*.js / @file-viewer URL / worker 匿名资产，dist 无 file-viewer 资产目录，foreign 组 chunk 存在。');
   }
   return { violations };
 }

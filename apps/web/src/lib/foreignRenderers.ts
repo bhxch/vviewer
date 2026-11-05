@@ -74,8 +74,9 @@ export function nestedName(type: string): string {
  * 资产基座（计划 3 Task 3，T2 探针裁决）：权威机制 = core 全局
  * setDefaultFileViewerAssetBaseUrl，per-mount options 形态作废。装配级一次（幂等
  * 护栏）：首个组 dispatcher 建成时把解析链首层基座设为全局缺省；此后 mount 期按
- * 组的资产包归属切换（setter + handler 直调同一同步块——handler 前奏内解析
- * worker/wasm URL，JS 运行至完语义保证切换不被并发 mount 交叉）。
+ * 组的资产包归属切换（终审修复 I1：基座切换+handler 调用整体入全局队列按序执行，
+ * 见下「mount 串行队列」注——「setter+handler 同步块 run-to-completion 原子」仅
+ * 对 9/10 组的同步前奏成立，spreadsheet 组强制串行）。
  * ForeignMountArgs.assetBaseUrl 透传契约保留（bridge 测试锚）但装配不填——
  * setter 已权威，透传留作外部注入缝。
  */
@@ -87,6 +88,25 @@ function applyForeignAssetBase(base: string): void {
   coreModule.setDefaultFileViewerAssetBaseUrl(base);
   appliedAssetBase = base;
 }
+
+// ---- mount 串行队列（终审修复 I1：spreadsheet 组基座切换交叉窗口）----
+//
+// renderer-spreadsheet dist 的 handler 首语句 `await loadEVirtTable(documentRef)`
+// 先于 xlsx worker URL 解析——窗口内另一组 mount 切走全局基座 → xlsx worker URL
+// 挂错包 → 404 降级主线程。其余 9 组 handler 在同步前奏内即完成 worker/wasm URL
+// 解析（JS run-to-completion 使「基座切换+前奏」天然原子，本就安全）；spreadsheet
+// 组窗口跨 await，必须串行。修法：顶层 mount 的「基座切换+handler 调用（含等待）」
+// 整体入全局队列按序执行——任何组的切换-解析窗互不交叉。
+//
+// 嵌套豁免（死锁防线）：foreign handler 会 await context.renderNestedBuffer（email
+// 附件预览 dist 实测 await）→ nestedDispatch → 可再入 foreign mount（eml 内嵌
+// eml/odt 等，spec §6.4 深度限 3 的设计面）。嵌套调用发生时队列必被祖先 mount
+// 任务占据，再入队即死锁——renderNestedBuffer（嵌套分派唯一入口）登记 target，
+// mount 入口识别嵌套 target 即内联执行（祖先任务占队期间无其他顶层任务可交叉，
+// 内联任务结束在 finally 恢复祖先基座）。并发兄弟嵌套同时跨组的基座交叉为已知
+// 残余边界（email 附件预览 UI 单激活槽实测互斥，不叠加）。
+const nestedForeignTargets = new WeakSet<HTMLElement>();
+let mountQueueTail: Promise<unknown> = Promise.resolve();
 
 function pluginMount(load: () => Promise<ForeignPlugin>, groupId: string): ForeignMount {
   let dispatcher: Promise<ForeignDispatcher> | null = null;
@@ -102,26 +122,48 @@ function pluginMount(load: () => Promise<ForeignPlugin>, groupId: string): Forei
       const registry = core.createRendererRegistry((plugin.definitions ?? []) as readonly RendererDefinition[]);
       return core.createFileViewerRendererDispatcher<ForeignHandler>({ registry, handlers: plugin.handlers ?? [] });
     })());
-  return async (args: ForeignMountArgs): Promise<ForeignMountResult> => {
+  const mountBody = async (args: ForeignMountArgs): Promise<ForeignMountResult> => {
     const d = await loadDispatcher();
     const ext = extOf(args.name);
     const handler = d.get(ext);
     if (!handler) throw new Error(`file-viewer 渲染器无 ".${ext}" 处理器（${args.name}）`);
     // 组资产包基座切换（无资产组为 null——保持当前基座不动）；与 handler 直调
-    // 同步块执行（见上注）
+    // 同步块执行（顶层任务由队列保证无交叉，见「mount 串行队列」注）
     const pkg = foreignGroupAssetPackage(groupId, ext);
+    const savedBase = appliedAssetBase;
     if (pkg) applyForeignAssetBase(resolveForeignAssetPackageBase(pkg));
     const context: FileRenderContext = {
       filename: args.name,
       sourceFile: args.file,
       signal: args.signal,
       renderNestedBuffer: async (nestedBuffer, nestedType, nestedTarget) => {
+        // 嵌套 target 登记（见「mount 串行队列」注）：嵌套 foreign mount 据此豁免
+        // 队列内联执行，防祖先任务占队死锁
+        nestedForeignTargets.add(nestedTarget);
         await args.renderNested(new Uint8Array(nestedBuffer), nestedName(nestedType), nestedTarget);
         return undefined;
       }
     };
-    const rendered = await handler(toArrayBuffer(args.data), args.target as HTMLDivElement, ext, context);
-    return { destroy: () => disposeForeignRendered(rendered) };
+    try {
+      const rendered = await handler(toArrayBuffer(args.data), args.target as HTMLDivElement, ext, context);
+      return { destroy: () => disposeForeignRendered(rendered) };
+    } finally {
+      // 基座恢复：嵌套内联任务交还祖先基座；顶层任务恢复进入前值（下一 mount
+      // 自带切换，resting 值无消费面）
+      if (pkg) applyForeignAssetBase(savedBase ?? resolveForeignAssetBase());
+    }
+  };
+  return (args: ForeignMountArgs): Promise<ForeignMountResult> => {
+    // 嵌套重入：内联执行（见「mount 串行队列」注死锁防线）
+    if (nestedForeignTargets.has(args.target)) return mountBody(args);
+    // 顶层 mount：基座切换+handler 调用整体入队（见「mount 串行队列」注）；前序
+    // 任务失败不阻断后续（防毒队列），本任务结果原样透传调用方
+    const task = mountQueueTail.then(() => mountBody(args));
+    mountQueueTail = task.then(
+      () => undefined,
+      () => undefined
+    );
+    return task;
   };
 }
 
@@ -132,8 +174,14 @@ function pluginMount(load: () => Promise<ForeignPlugin>, groupId: string): Forei
  *   pptx（presentation pptx 系 worker）、xlsx（spreadsheet worker）、libarchive/pdf（本
  *   波未绑定，vviewer 自有管线不消费）；
  * - 独立包：assets-chm（chm worker+wasm 三件）、assets-hangul、assets-iwork（worker）、
- *   assets-wordperfect（worker+libwpd wasm/mjs）、assets-ppt（legacy ppt/pot 的
- *   pptjs 运行时——presentation 组按扩展名分流）；
+ *   assets-wordperfect（worker+libwpd wasm/mjs）；
+ * - assets-ppt（终审修复 I2 注记如实化）：presentation 组 ppt/pot 分流行保留此映射
+ *   （无害——基座切换幂等，切了也没人消费），但 renderer-ppt 实际走内置
+ *   import('@file-viewer/ppt') 运行时（ppt@1.0.2 dist wasmRequired:false）——ppt/pot
+ *   当前零 CDN 资产消费，assets-ppt 的 vendor/ppt/dist 永不被交付面拉取；如需切
+ *   CDN 须显式传 presentation.pptModuleUrl（renderer-ppt dist loadPptModule 的
+ *   options 缝，实测 moduleUrl 存在时走 CDN 动态 import），届时本映射与 SW
+ *   vv-foreign-assets 规则零改动生效；
  * - 无资产组：email/epub/ofd（epubjs、dltech ofd 随各 renderer dist 打包，相对
  *   import 非 CDN 资产）。
  */

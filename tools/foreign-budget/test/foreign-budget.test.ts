@@ -85,6 +85,29 @@ describe('scanForeignBudget', () => {
     ]);
   });
 
+  it('终审 C1：precache 清单混入 foreign worker 匿名资产检出（assets/ 下 .worker 形态）', () => {
+    const dir = fixture('precache-worker');
+    writeFileSync(
+      join(dir, 'sw.js'),
+      'define:[{url:"_app/immutable/assets/pptjs.worker.BxR0ofQt.js",revision:"1"},{url:"_app/immutable/assets/pptx.worker.CpTu_kXy.js",revision:"2"}]'
+    );
+    const { violations } = scanForeignBudget(dir, []);
+    expect(violations).toEqual([
+      expect.objectContaining({ kind: 'precache-worker', url: '_app/immutable/assets/pptjs.worker.BxR0ofQt.js' }),
+      expect.objectContaining({ kind: 'precache-worker', url: '_app/immutable/assets/pptx.worker.CpTu_kXy.js' })
+    ]);
+  });
+
+  it('终审 C1 负例：vviewer 自有 worker（workers/ 目录、无 .worker 名段）不误报', () => {
+    const dir = fixture('own-workers');
+    writeFileSync(
+      join(dir, 'sw.js'),
+      'define:[{url:"_app/immutable/workers/ts-worker-ZCbjXEqt.js",revision:"1"},{url:"_app/immutable/workers/binary.worker-Crh1y-60.js",revision:"2"},{url:"_app/immutable/assets/worker-bundle.Dx5mKZOL.js",revision:"3"}]'
+    );
+    const { violations } = scanForeignBudget(dir, []);
+    expect(violations).toEqual([]);
+  });
+
   it('锚三：合规产物通过（声明依赖 + foreign 组 chunk 存在 + 干净主 chunk + 干净 precache）', () => {
     const dir = fixture('clean');
     mkdirSync(join(dir, 'chunks'), { recursive: true });

@@ -22,7 +22,9 @@ import { injectDir, openTreeFile, type TextFileSpec } from './b-markdown-html-do
  * 逐用例 existsSync 守卫：语料未拉取时 skip（b-md-corpus-multisource 缺源容错同款），
  * 语料落地后自动生效。
  *
- * 用例组织（FO 系六锚）：
+ * 用例组织（FO 系八锚：FO-00 一致性 + FO-01…FO-07 渲染/切换/错误面）：
+ * - FO-00 语料一致性：FIXTURES 表 ⊆ manifest.files（终审 M2——上游 bump 后确定性
+ *   选取漂移时各渲染用例会静默 skip，此锚显式红）；
  * - FO-01 Word 组三格式渲染：doc（msdoc 引擎）/ odt（odf 引擎）——presence 锚引擎
  *   容器类（file-viewer 渲染器 dist 的挂载根类名，逐包 dist 实查，见各断言处注）；
  * - FO-02 邮件/电子书组：eml / epub / fb2（epub 组双扩展）；
@@ -112,6 +114,27 @@ async function injectFixtures(page: Page, keys: Array<keyof typeof FIXTURES>): P
   await injectDir(page, specs);
   return specs.map((s) => s.name);
 }
+
+test('FO-00 语料一致性：FIXTURES 表 ⊆ manifest.files（终审 M2，防上游 bump 静默 skip）', () => {
+  // fetch-e2e-corpus.mjs 的确定性选取随上游 bump 漂移：文件从 manifest 消失后各渲染
+  // 用例的 existsSync 守卫静默 skip（覆盖面空心化无告警）。此锚在 manifest 加载面
+  // 显式断言 FIXTURES 每条路径仍被选中——上游漂移即红，倒逼同步 FIXTURES/SOURCES。
+  // 不依赖 page（纯文件面断言）；语料未拉取时对容错 skip。
+  const manifestPath = join(CORPUS_ROOT, 'manifest.json');
+  test.skip(!existsSync(manifestPath), '语料未拉取（fetch-e2e-corpus.mjs 未运行），对语料容错');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+    sources: Array<{ id: string; files: Array<{ path: string }> }>;
+  };
+  const source = manifest.sources.find((s) => s.id === SOURCE_ID);
+  expect(source, `manifest 缺 ${SOURCE_ID} 源（fetch-e2e-corpus.mjs SOURCES 表漂移）`).toBeDefined();
+  const paths = new Set(source!.files.map((f) => f.path));
+  for (const [key, rel] of Object.entries(FIXTURES)) {
+    expect(
+      paths.has(rel),
+      `FIXTURES.${key} = ${rel} 不在 manifest.files（上游 bump 后确定性选取漂移——更新 FIXTURES 或调 SOURCES 约束）`
+    ).toBe(true);
+  }
+});
 
 test.describe('b-foreign-office file-viewer 桥接渲染（SAVE-FOREIGN 域）', () => {
   test.beforeEach(({}, testInfo) => {

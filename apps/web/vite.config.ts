@@ -405,13 +405,27 @@ export default defineConfig({
         // 泛化组——客户端产物内另有 katex 20 件 KaTeX_*.woff（~330KB），泛化 woff 会
         // 全数误收进 precache。`*` 覆盖 vite hash 中缀（seti.<hash>.woff）。
         globPatterns: ['**/*.{js,css,woff2,json}', '**/seti.*.woff'],
-        // 末两项为按需加载 chunk 排除：git 引擎 chunk（2026-10-31 git 信息面板 spec，
+        // 末四项为按需加载 chunk 排除：git 引擎 chunk（2026-10-31 git 信息面板 spec，
         // isomorphic-git 经 codeSplitting groups 落 git-engine-*.js）与 foreign 渲染器
         // 组（计划 3 Task 3，spec §6.2——@file-viewer/* 代码面按组落 foreign-*-*.js，
         // 代码包 chunk 分离进 dist 但绝不进 precache：全局约束 + iwork chunk 4.05MB
-        // 超 workbox 2MiB 单文件上限）。均按需加载不进 precache（同 diagram-engines
-        // 语义，膨胀防护 + 预算门禁按前缀计账）。
-        globIgnores: ['**/node_modules/**/*', 'sw.js', 'workbox-*.js', '**/diagram-engines-*.js', '**/git-engine-*.js', '**/foreign-*.js'],
+        // 超 workbox 2MiB 单文件上限）+ foreign worker 匿名资产（终审修复 C1：
+        // renderer-ppt/pptx 以 new URL('./xxx.worker.js', import.meta.url) 引用的
+        // worker 被 vite 发射为 _app/immutable/assets/pptjs.worker.*.js /
+        // pptx.worker.*.js（约 1.06MB）——不经 foreign-* 组 chunk 命名，漏配即被
+        // workbox 收进 precache（foreign-budget --check 的 precache-worker 断言
+        // 兜底）。均按需加载不进 precache（同 diagram-engines 语义，膨胀防护 +
+        // 预算门禁按前缀计账）。
+        globIgnores: [
+          '**/node_modules/**/*',
+          'sw.js',
+          'workbox-*.js',
+          '**/diagram-engines-*.js',
+          '**/git-engine-*.js',
+          '**/foreign-*.js',
+          '**/pptjs.worker*.js',
+          '**/pptx.worker*.js'
+        ],
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/^\/api\//],
         // BUG-15：vite-plugin-pwa 生成 precache manifest 的时点早于 SvelteKit
@@ -511,8 +525,13 @@ export default defineConfig({
             handler: 'CacheFirst',
             options: {
               cacheName: `vv-foreign-assets-${BUILD_REVISION}`,
-              // ppt legacy 运行时按需级联拉取 vendor/ppt/dist 分片，maxEntries 64
-              // 覆盖第一波工作集（worker/wasm + 常用分片）不半途 LRU 逐出打折扣
+              // maxEntries 64 覆盖第一波实际消费面（assets-standard/-chm/-hangul/
+              // -iwork/-wordperfect 的 worker/wasm 工作集）不半途 LRU 逐出打折扣。
+              // assets-ppt 如实注记（终审修复 I2）：renderer-ppt 走内置
+              // import('@file-viewer/ppt')（wasmRequired:false），ppt/pot 当前零 CDN
+              // 资产消费，vendor/ppt/dist 不经此规则；未来经 presentation.pptModuleUrl
+              // 显式切 CDN 时其级联分片自动落此规则（urlPattern 前缀已覆盖），届时
+              // 按分片量复核 maxEntries。
               expiration: { maxEntries: 64, purgeOnQuotaError: true },
               cacheableResponse: { statuses: [200] }
             }

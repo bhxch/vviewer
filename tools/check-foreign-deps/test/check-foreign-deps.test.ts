@@ -3,7 +3,7 @@
 // 测试目录落 tools/check-foreign-deps/test/（vitest include 为 tools/*/test/**），
 // 校验器本体按简报平铺在 tools/check-foreign-deps.mjs。
 import { describe, expect, it } from 'vitest';
-import { checkForeignDeps, isExactVersion, parseImporterDeps } from '../../check-foreign-deps.mjs';
+import { checkCdnAssetVersion, checkForeignDeps, coreVersionOf, extractForeignAssetsCdnVersion, isExactVersion, parseImporterDeps } from '../../check-foreign-deps.mjs';
 
 const WEB_DEPS_OK = {
   dependencies: {
@@ -124,5 +124,49 @@ describe('checkForeignDeps', () => {
   it('devDependencies 段的 @file-viewer/* 同在白名单约束内', () => {
     const { violations } = checkForeignDeps({ devDependencies: { '@file-viewer/core': '~3.3.3' } }, parseImporterDeps(LOCK_FIXTURE, 'apps/web'));
     expect(violations.some((x) => x.name === '@file-viewer/core' && x.kind === 'range')).toBe(true);
+  });
+});
+
+// M1（终审修复波）：CDN 版本交叉门禁夹具锚——foreignAssets.ts 直链版本 vs core 版本
+// 锚（资产系与 core 同版号发布，任一侧单独 bump 即 violation）。
+describe('checkCdnAssetVersion / extractForeignAssetsCdnVersion（M1 交叉门禁）', () => {
+  const TS_HEAD = `
+// 注记行 assets-standard@3.3.3（文件头口径）——首个命中即提取目标
+export const FOREIGN_ASSETS_CDN_DEFAULT =
+  'https://cdn.jsdelivr.net/npm/@file-viewer/assets-standard@3.3.3/viewer/';`;
+
+  it('提取：全文首个 assets-standard@x.y.z 命中（头注记与常量须同版号，单侧漏改即红）', () => {
+    expect(extractForeignAssetsCdnVersion(TS_HEAD)).toBe('3.3.3');
+    expect(extractForeignAssetsCdnVersion(TS_HEAD.replace('assets-standard@3.3.3/viewer/', 'assets-standard@3.4.0/viewer/'))).toBe('3.3.3'); // 首个命中优先
+  });
+
+  it('提取失败返回 null（正则漂移/常量移位面）', () => {
+    expect(extractForeignAssetsCdnVersion('export const X = 1;')).toBeNull();
+    expect(extractForeignAssetsCdnVersion('assets-standard@^3.3.3')).toBeNull(); // 范围前缀非精确版本
+  });
+
+  it('一致通过（core 锚 = CDN 版本）', () => {
+    expect(checkCdnAssetVersion('3.3.3', '3.3.3')).toBeNull();
+  });
+
+  it('不一致 violation（CDN 侧单侧 bump）', () => {
+    expect(checkCdnAssetVersion('3.4.0', '3.3.3')).toEqual({ kind: 'cdn-version-mismatch', cdnVersion: '3.4.0', coreVersion: '3.3.3' });
+    expect(checkCdnAssetVersion('3.3.3', '3.4.0')).toEqual({ kind: 'cdn-version-mismatch', cdnVersion: '3.3.3', coreVersion: '3.4.0' });
+  });
+
+  it('无法解析 violation（不静默放行）', () => {
+    expect(checkCdnAssetVersion(null, '3.3.3')).toEqual({ kind: 'cdn-version-unparsed', coreVersion: '3.3.3' });
+  });
+
+  it('零依赖（core 锚缺失）放行——plan-3-not-applied 无资产消费面', () => {
+    expect(checkCdnAssetVersion(null, null)).toBeNull();
+    expect(checkCdnAssetVersion('3.3.3', null)).toBeNull();
+  });
+
+  it('coreVersionOf 依赖三段回退 + 缺失 null', () => {
+    expect(coreVersionOf({ dependencies: { '@file-viewer/core': '3.3.3' } })).toBe('3.3.3');
+    expect(coreVersionOf({ devDependencies: { '@file-viewer/core': '3.3.3' } })).toBe('3.3.3');
+    expect(coreVersionOf({ optionalDependencies: { '@file-viewer/core': '3.3.3' } })).toBe('3.3.3');
+    expect(coreVersionOf({ dependencies: { buffer: '^6.0.3' } })).toBeNull();
   });
 });
