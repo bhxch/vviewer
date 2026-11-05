@@ -8,7 +8,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { scanForeignBudget } from '../../foreign-budget.mjs';
+import { foreignDepsOf, scanForeignBudget } from '../../foreign-budget.mjs';
 
 const tmp = mkdtempSync(join(tmpdir(), 'foreign-budget-'));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
@@ -24,7 +24,7 @@ const CLEAN_SW = 'define:[{url:"index.html",revision:"1"},{url:"_app/immutable/c
 
 describe('scanForeignBudget', () => {
   it('build 目录缺失返回 fatal（提示先构建，不是 pass）', () => {
-    const { fatal, violations } = scanForeignBudget(join(tmp, 'no-such-build'));
+    const { fatal, violations } = scanForeignBudget(join(tmp, 'no-such-build'), []);
     expect(fatal).toContain('先 pnpm --filter web build');
     expect(violations).toBeUndefined();
   });
@@ -33,11 +33,26 @@ describe('scanForeignBudget', () => {
     const dir = fixture('main-chunk');
     writeFileSync(join(dir, 'entry-abc.js'), 'import{v}from"@file-viewer/core";export default v');
     writeFileSync(join(dir, 'chunk-def.js'), 'import("@file-viewer/renderer-email").then(m=>m.render())');
+    mkdirSync(join(dir, 'chunks'), { recursive: true });
+    writeFileSync(join(dir, 'chunks', 'foreign-core-abc.js'), 'import{v}from"@file-viewer/core"');
     writeFileSync(join(dir, 'sw.js'), CLEAN_SW);
-    const { violations } = scanForeignBudget(dir);
+    const { violations } = scanForeignBudget(dir, ['@file-viewer/core', '@file-viewer/renderer-email']);
     expect(violations).toHaveLength(2);
     expect(violations).toContainEqual(expect.objectContaining({ kind: 'chunk-import', file: 'entry-abc.js' }));
     expect(violations).toContainEqual(expect.objectContaining({ kind: 'chunk-import', file: 'chunk-def.js' }));
+  });
+
+  it('M1：非压缩形态 marker 检出（带空格 from 与 side-effect import）', () => {
+    const dir = fixture('unminified-markers');
+    mkdirSync(join(dir, 'chunks'), { recursive: true });
+    writeFileSync(join(dir, 'chunks', 'a.js'), 'import {v} from "@file-viewer/core";export default v');
+    writeFileSync(join(dir, 'chunks', 'b.js'), 'import"@file-viewer/renderer-email";');
+    writeFileSync(join(dir, 'chunks', 'foreign-core-abc.js'), 'import{v}from"@file-viewer/core"');
+    writeFileSync(join(dir, 'sw.js'), CLEAN_SW);
+    const { violations } = scanForeignBudget(dir, ['@file-viewer/core']);
+    expect(violations).toHaveLength(2);
+    expect(violations).toContainEqual(expect.objectContaining({ kind: 'chunk-import', file: 'chunks/a.js' }));
+    expect(violations).toContainEqual(expect.objectContaining({ kind: 'chunk-import', file: 'chunks/b.js' }));
   });
 
   it('锚一负例：foreign-*.js 组 chunk 与 workbox/sw 的 urlPattern 字符串不违规', () => {
@@ -51,7 +66,7 @@ describe('scanForeignBudget', () => {
       'registerRoute(/^https:\\/\\/cdn\\.jsdelivr\\.net\\/npm\\/@file-viewer\\/assets-/,new e.CacheFirst({cacheName:"vv-foreign-assets-0.1.0-x"}));' + CLEAN_SW
     );
     writeFileSync(join(dir, 'workbox-835c8c05.js'), 'console.log("workbox runtime")');
-    const { violations } = scanForeignBudget(dir);
+    const { violations } = scanForeignBudget(dir, []);
     expect(violations).toEqual([]);
   });
 
@@ -61,20 +76,38 @@ describe('scanForeignBudget', () => {
       join(dir, 'sw.js'),
       'define:[{url:"index.html",revision:"1"},{url:"_app/immutable/chunks/foreign-core-abc.js",revision:"2"},{url:"https://cdn.jsdelivr.net/npm/@file-viewer/assets-standard@3.3.3/viewer/app.js",revision:"3"}]'
     );
-    const { violations } = scanForeignBudget(dir);
+    mkdirSync(join(dir, 'chunks'), { recursive: true });
+    writeFileSync(join(dir, 'chunks', 'foreign-core-abc.js'), 'import{v}from"@file-viewer/core"');
+    const { violations } = scanForeignBudget(dir, ['@file-viewer/core']);
     expect(violations).toEqual([
       expect.objectContaining({ kind: 'precache-foreign', url: '_app/immutable/chunks/foreign-core-abc.js' }),
       expect.objectContaining({ kind: 'precache-cdn', url: 'https://cdn.jsdelivr.net/npm/@file-viewer/assets-standard@3.3.3/viewer/app.js' })
     ]);
   });
 
-  it('锚三：合规产物通过（foreign 组 chunk 存在 + 干净主 chunk + 干净 precache）', () => {
+  it('锚三：合规产物通过（声明依赖 + foreign 组 chunk 存在 + 干净主 chunk + 干净 precache）', () => {
     const dir = fixture('clean');
     mkdirSync(join(dir, 'chunks'), { recursive: true });
     writeFileSync(join(dir, 'chunks', 'entry-abc.js'), 'import{b}from"./other";export default b');
     writeFileSync(join(dir, 'chunks', 'foreign-email-def.js'), 'import{r}from"@file-viewer/renderer-email"');
     writeFileSync(join(dir, 'sw.js'), CLEAN_SW);
-    const { violations } = scanForeignBudget(dir);
+    const { violations } = scanForeignBudget(dir, ['@file-viewer/core', '@file-viewer/renderer-email']);
+    expect(violations).toEqual([]);
+  });
+
+  it('I1 存在性：声明了 @file-viewer 依赖但产物无 foreign-*.js chunk 检出', () => {
+    const dir = fixture('no-foreign-chunk');
+    writeFileSync(join(dir, 'entry-abc.js'), 'import{b}from"./other";export default b');
+    writeFileSync(join(dir, 'sw.js'), CLEAN_SW);
+    const { violations } = scanForeignBudget(dir, ['@file-viewer/core']);
+    expect(violations).toEqual([expect.objectContaining({ kind: 'no-foreign-chunk', deps: ['@file-viewer/core'] })]);
+  });
+
+  it('I1 存在性：零依赖（plan-3-not-applied）不触发存在性断言', () => {
+    const dir = fixture('no-deps');
+    writeFileSync(join(dir, 'entry-abc.js'), 'import{b}from"./other";export default b');
+    writeFileSync(join(dir, 'sw.js'), CLEAN_SW);
+    const { violations } = scanForeignBudget(dir, []);
     expect(violations).toEqual([]);
   });
 
@@ -83,7 +116,18 @@ describe('scanForeignBudget', () => {
     mkdirSync(join(dir, 'file-viewer'), { recursive: true });
     writeFileSync(join(dir, 'file-viewer', 'font.woff2'), 'x');
     writeFileSync(join(dir, 'sw.js'), CLEAN_SW);
-    const { violations } = scanForeignBudget(dir);
+    const { violations } = scanForeignBudget(dir, []);
     expect(violations).toEqual([expect.objectContaining({ kind: 'assets-dir' })]);
+  });
+});
+
+describe('foreignDepsOf', () => {
+  it('取 dependencies + devDependencies 中 @file-viewer/* 前缀，其余忽略', () => {
+    expect(
+      foreignDepsOf({
+        dependencies: { '@file-viewer/core': '3.3.3', buffer: '^6.0.3' },
+        devDependencies: { '@file-viewer/renderer-email': '3.3.3', '@bhxch/vviewer-core': 'workspace:*' }
+      })
+    ).toEqual(['@file-viewer/core', '@file-viewer/renderer-email']);
   });
 });
