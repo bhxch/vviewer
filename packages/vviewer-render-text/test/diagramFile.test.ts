@@ -858,7 +858,7 @@ describe('装配序锚（Task 5：viewer.ts 语句序）', () => {
     expect(diagramAt, 'diagram install 块必须整体先于 generated fallback：同一铁律在收尾调用面上的序锚').toBeLessThan(fallbackAt);
   });
 
-  it('镜像 viewer.ts 语句序（diagram 29 → code → markdown → html → jsonl → generated fallback）：dot 归 diagram-graphviz、tsv 归 code', () => {
+  it('镜像 viewer.ts 语句序（diagram 29 → code → markdown → html → jsonl → generated fallback）：dot 归 diagram-graphviz、csv 归 code（tsv 已转移，见下）', () => {
     // 镜像范围注记：image/av/pdf/docx/xlsx/pptx/hex/archive 为 app-only 依赖
     // （render-text 不依赖 render-media/doc/binary/archive，测试面不可达），其扩展名
     // 域（svg/jpg/pdf/docx/zip/bin…）与 diagram 33 扩展名无交集，不参与 Review
@@ -878,8 +878,10 @@ describe('装配序锚（Task 5：viewer.ts 语句序）', () => {
     expect(registry.byExtension('bpmn')?.id).toBe('diagram-bpmn');
     expect(registry.byExtension('dbml')?.id).toBe('diagram-dbml');
     expect(registry.byExtension('d2')?.id).toBe('diagram-d2');
-    // 反面：code 专有/补空位与既有 owner 原样
-    expect(registry.byExtension('tsv')?.id).toBe('code');
+    // 反面：code 专有/补空位与既有 owner 原样（tsv 已于计划 3 Task 2 自 code 内置清单
+    // 转移至 file-viewer spreadsheet 桥接——本镜像无桥接块，故未认领；归属锚在
+    // apps/web/src/lib/foreignRenderers.test.ts「byExtension 41 项逐字」）
+    expect(registry.byExtension('tsv')).toBeUndefined();
     expect(registry.byExtension('csv')?.id).toBe('code');
     expect(registry.byExtension('md')?.id).toBe('markdown');
     expect(registry.byExtension('html')?.id).toBe('html');

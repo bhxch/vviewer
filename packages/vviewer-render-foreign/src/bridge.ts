@@ -1,7 +1,9 @@
 // bridge.ts — @bhxch/vviewer-render-foreign 桥接契约层（spec §6.1）。
 // 外部（foreign）渲染器宿主接线的单源类型面 + 装配函数：计划 3（foreign mount
-// 接线）与计划 4（数据源泵）消费。本任务只锚定契约与 sibling 解析行为；render
-// 主体为占位桩，计划 3 以 spec.mount 装配实装。
+// 接线）与计划 4（数据源泵）消费。render 实装（计划 3 Task 2）：Uint8Array→File
+// 物化、signal 贯穿、mount 调用、RenderedInstance destroy 对接、renderNested→
+// 装配注入回调（depth 限 3，超限落下载）。foreign 库本体依赖留在装配层
+// （apps/web），本包零 file-viewer 依赖。
 import type { FileSource, RenderedInstance, Renderer, TreeStore } from '@bhxch/vviewer-core';
 
 /**
@@ -23,11 +25,13 @@ export interface SiblingResolver {
 }
 
 /**
- * foreign mount 的返回面。本任务仅契约占位，字段随计划 3 接线实装扩展
- * （如外部渲染实例句柄/销毁委托）。
+ * foreign mount 的返回面：销毁委托单字段（计划 3 Task 2 实装）。装配层把 foreign
+ * 渲染实例的 unmount/$destroy/destroy（@file-viewer/core FileViewerRenderedInstance
+ * 三形态，见 disposeForeignRendered）归一为 destroy；bridge render 再映射为
+ * RenderedInstance.destroy——vviewer 宿主随 tab 生命周期统一释放。
  */
 export interface ForeignMountResult {
-  // 计划 3 接线时扩展。
+  destroy?: () => void | Promise<void>;
 }
 
 /**
@@ -54,29 +58,127 @@ export interface ForeignMount {
 }
 
 /**
+ * 嵌套渲染分派回调（装配层注入，viewer.ts 提供）：bridge 的 renderNested 经它把
+ * 嵌套子文件转交 vviewer dispatcher byExtension 渲染。同链递归（eml 套 eml）经
+ * signal 承载深度（nestedDepthBySignal），由装配层把 signal 贯穿 dispatch opts
+ * 保证跨层累积。
+ */
+export interface NestedDispatch {
+  (data: Uint8Array, name: string, target: HTMLElement, signal: AbortSignal): Promise<void>;
+}
+
+/** 嵌套渲染深度上限（Review Focus 5：eml-in-eml 递归死循环防线）：外层记 depth 0，
+ * 每层嵌套 +1；请求超出即落下载兜底（不再重入 dispatcher）。 */
+export const FOREIGN_NESTED_DEPTH_LIMIT = 3;
+
+/** 嵌套链深度表（key=贯穿全链的 AbortSignal）：render 作用域快照读、renderNested
+ * 前置自增 + finally 复位——兄弟附件调用互不累积，递归链逐层递增。 */
+const nestedDepthBySignal = new WeakMap<AbortSignal, number>();
+
+function foreignNestedDepth(signal: AbortSignal): number {
+  return nestedDepthBySignal.get(signal) ?? 0;
+}
+
+/** BlobPart 窄型收窄：vviewer 管线的字节恒为 ArrayBuffer backed（store.read/物化泵
+ * 产出，无 SharedArrayBuffer 面），运行时不变量在此显式化。 */
+function asBlobPart(data: Uint8Array): Uint8Array<ArrayBuffer> {
+  return data as Uint8Array<ArrayBuffer>;
+}
+
+/**
+ * 嵌套附件下载兜底（超深度限 / 装配未注入 nestedDispatch）：blob URL +
+ * `<a download>` 点击（saveAsBlob 兜底同款原语，revoke 延迟覆盖下载启动窗）。
+ * 渲染器嵌套预览的"不可用"降级由此统一承接，不向 foreign 渲染器抛错。
+ */
+export function downloadNestedAttachment(data: Uint8Array, name: string): void {
+  const url = URL.createObjectURL(new Blob([asBlobPart(data)]));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name || 'attachment';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
+
+/**
+ * foreign 渲染实例销毁归一：@file-viewer/core 的 FileViewerRenderedInstance 三形态
+ * `{unmount}|{$destroy}|{destroy}`（core disposeFileViewerRendered 同序探测）。
+ * 装配层 mount 返回前经此把 foreign 实例映射为 ForeignMountResult.destroy。
+ */
+export function disposeForeignRendered(rendered: unknown): void | Promise<void> {
+  if (!rendered || typeof rendered !== 'object') return;
+  const d = rendered as { unmount?: unknown; $destroy?: unknown; destroy?: unknown };
+  if (typeof d.unmount === 'function') return (d.unmount as () => void | Promise<void>).call(rendered);
+  if (typeof d.$destroy === 'function') return (d.$destroy as () => void | Promise<void>).call(rendered);
+  if (typeof d.destroy === 'function') return (d.destroy as () => void | Promise<void>).call(rendered);
+}
+
+/**
  * 把 foreign mount 包装为 vviewer 渲染管线可注册的 Renderer：
  * id/label/extensions 逐字透传；streaming:false（foreign 库吃全量字节/ File 形，
- * 不接 StreamCtx）。render 主体为占位桩——参数校验后抛错占位，计划 3 替换为
- * spec.mount(...) 装配实装。
+ * 不接 StreamCtx）。render 实装（计划 3 Task 2）：signal 取 render 第 6 参 opts.signal
+ * （缺省每次独立新 signal），File 物化后交 spec.mount；renderNested 在本渲染作用域
+ * 快照链上深度并强制 FOREIGN_NESTED_DEPTH_LIMIT（超限/未注入 nestedDispatch 一律
+ * downloadNestedAttachment）；mount 返回的销毁委托映射为 RenderedInstance.destroy。
  */
 export function wrapFileViewerRenderer(spec: {
   id: string;
   label: string;
   extensions: readonly string[];
   mount: ForeignMount;
+  /** 装配注入的嵌套分派（viewer.ts：registry.byExtension → dispatcher.dispatch）；
+   * 缺省时嵌套请求一律落下载兜底。 */
+  nestedDispatch?: NestedDispatch;
+  /** foreign 静态资产基座（计划 3 Task 3 接 VV_FOREIGN_ASSETS 三层链），透传 mount args。 */
+  assetBaseUrl?: string;
 }): Renderer {
   return {
     id: spec.id,
     label: spec.label,
     extensions: [...spec.extensions],
     streaming: false,
-    async render(buffer, target, source, det): Promise<RenderedInstance> {
+    async render(buffer, target, source, det, _ctx, opts): Promise<RenderedInstance> {
       if (!(buffer instanceof Uint8Array) || !target || !source || !det) {
         throw new TypeError('foreign render 参数不完整（buffer/target/source/det 必填）');
       }
-      throw new Error('foreign mount 由计划 3 接线');
+      // signal 贯穿（审计 R1 I-1 同参异构面）：dispatch 第 6 参透传；缺省独立新
+      // signal（直调/测试形态）——嵌套链深度以该 signal 为 key 仍可累积（装配层
+      // 把同一 signal 传入 dispatch opts.signal，嵌套渲染经 renderOpts 收回同引用）。
+      const signal = opts?.signal ?? new AbortController().signal;
+      const depth = foreignNestedDepth(signal);
+      const renderNested: NestedRender = async (data, name, nestedTarget) => {
+        if (signal.aborted) return; // 外层已取消：嵌套请求静默丢弃（DOM 随外层销毁）
+        if (!spec.nestedDispatch || depth + 1 > FOREIGN_NESTED_DEPTH_LIMIT) {
+          downloadNestedAttachment(data, name);
+          return;
+        }
+        setForeignNestedDepth(signal, depth + 1);
+        try {
+          await spec.nestedDispatch(data, name, nestedTarget, signal);
+        } finally {
+          setForeignNestedDepth(signal, depth); // 复位：兄弟附件请求互不累积
+        }
+      };
+      const result = await spec.mount({
+        data: buffer,
+        file: new File([asBlobPart(buffer)], source.name),
+        name: source.name,
+        target,
+        signal,
+        renderNested,
+        resolveSibling: createSiblingResolver(source),
+        assetBaseUrl: spec.assetBaseUrl,
+      });
+      return {
+        destroy: () => {
+          void result.destroy?.();
+        },
+      };
     },
   };
+}
+
+function setForeignNestedDepth(signal: AbortSignal, depth: number): void {
+  nestedDepthBySignal.set(signal, depth);
 }
 
 // core 未导出 POSIX path 工具（rg 'dirname|joinPath' packages/vviewer-core/src 无

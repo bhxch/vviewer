@@ -3376,13 +3376,18 @@ describe('isAbortError（deferred 清偿 Task 3：取消错误身份判定矩阵
   });
 });
 
-// registry 绑定（批次一缺口，spec 2026-11-04 §4.1）：fresh registry 安装后 byExtension
-// 命中且大小写归一（registry 查询侧小写化）
-describe('codeRenderer extensions：.tsv 绑定', () => {
-  it("fresh registry 安装后 byExtension('tsv')/'TSV' 均命中", () => {
+// registry 绑定（计划 3 Task 2，spec 2026-11-04 §6.3）：tsv 已自 code 内置清单原子
+// 转移至 file-viewer spreadsheet 桥接渲染器（apps/web foreignRenderers 装配，bridge
+// 块先于 codeRenderer——web 侧 foreignRenderers.test.ts 锚定归属；本包内无该依赖，
+// 镜像面只证 code 不再认领）。csv 维持 code（spec §6.3 注记）。
+describe('codeRenderer extensions：tsv 已转移（不再绑定）', () => {
+  it('codeRenderer.extensions 不含 tsv；fresh registry 单装后 byExtension 未认领', () => {
     const registry = createRegistry();
     registry.install(codeRenderer);
-    expect(registry.byExtension('tsv')?.id).toBe('code');
-    expect(registry.byExtension('TSV')?.id).toBe('code');
+    expect(codeRenderer.extensions).not.toContain('tsv');
+    expect(registry.byExtension('tsv')).toBeUndefined();
+    expect(registry.byExtension('TSV')).toBeUndefined();
+    // csv 维持 code
+    expect(registry.byExtension('csv')?.id).toBe('code');
   });
 });

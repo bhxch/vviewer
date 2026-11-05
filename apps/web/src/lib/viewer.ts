@@ -1,6 +1,7 @@
 import { createRegistry, createDispatcher, GENERATED_EXTENSIONS, getRemoteBase, type Dispatcher, type Registry, type FileSource } from '@bhxch/vviewer-core';
 import { codeRenderer, attachHighlightRouter } from '@bhxch/vviewer-render-text';
 import { createDiagramFileRenderers } from '@bhxch/vviewer-render-text/diagramFile';
+import { createForeignFileRenderers, NESTED_ATTACHMENT_STORE } from './foreignRenderers';
 // markdown 渲染组合包（@bhxch/vviewer-markdown）：渲染器与注入缝的实现单源。装配语义
 // 与 render-text 转出口时期一致（render-text/markdown/* 现为对组合包的纯转出口）。
 import {
@@ -28,6 +29,7 @@ import { hexRenderer } from '@bhxch/vviewer-render-binary';
 import { archiveRenderer } from '@bhxch/vviewer-render-archive';
 import { configureLibarchive } from '@bhxch/vviewer-render-archive/libarchiveStore';
 import { jsonlRenderer } from '@bhxch/vviewer-render-text/jsonl';
+import { downloadNestedAttachment, type NestedDispatch } from '@bhxch/vviewer-render-foreign';
 import { browser } from '$app/env';
 import { ensureHighlightClient, computeRouter } from './highlightClient';
 import { routeLargeFileHighlight } from './highlightRouter';
@@ -46,7 +48,9 @@ export { hasNonDiagramFence };
  * （render-archive，libarchive worker 走静态拷贝的 /libarchive/worker-bundle.js）、
  * Office 三件套 docx/xlsx/pptx（render-doc，pptx 为文本提纲降级路径）。
  * Task 5 追加（spec 2026-11-04-file-viewer-integration §5.1）：图表文件 29 型
- * （id diagram-<type>），必须先于 codeRenderer 安装（generated 补空位铁律，见下）。 */
+ * （id diagram-<type>），必须先于 codeRenderer 安装（generated 补空位铁律，见下）。
+ * 计划 3 Task 2 追加（spec §6.3）：file-viewer 第一波桥接 10 组 41 扩展名
+ * （id foreign-<group>），同铁律下居 codeRenderer 之前（diagram 块之后）。 */
 export const registry: Registry = createRegistry();
 
 /** 图表文件 server 分支的远端调用通道（DiagramFileRenderOpts.remoteCall 执行缝）：
@@ -74,6 +78,40 @@ function diagramFileRemoteCall(path: string, init?: { method?: string; body?: un
 // 不在其列，不依赖此序），diagram install 抛 RegistryError（装配序锚：render-text
 // test/diagramFile.test.ts「装配序锚」组）。
 for (const r of createDiagramFileRenderers({ remoteCall: diagramFileRemoteCall })) registry.install(r);
+
+// ---------- file-viewer 第一波桥接渲染器（spec §6.3，计划 3 Task 2：10 组 41 扩展名） ----------
+
+/** 嵌套附件分派（spec §6.4 数据画像 B 组：email 嵌套附件 → vviewer dispatcher
+ * byExtension 承接，pdf/image/docx 等本地强项；深度限 3 由桥接层 renderNested 强制，
+ * 递归链深度经 signal 贯穿累积——此处分派必带 opts.signal）。byExtension 无渲染器
+ * 的附件回落下载（不落错误卡片）；有渲染器时的渲染失败由 dispatch 既有错误卡片面
+ * 承接（落在 nested target 内）。合成 source 无 store（buffer 直传路径不触 store 面，
+ * rangeCapable 探测读空对象即 false；sibling 解析经桥接层 read 探测兜 null）。 */
+const foreignNestedDispatch: NestedDispatch = async (data, name, target, signal) => {
+  const i = name.lastIndexOf('.');
+  const ext = i < 0 ? '' : name.slice(i + 1).toLowerCase();
+  if (!registry.byExtension(ext)) {
+    downloadNestedAttachment(data, name);
+    return;
+  }
+  const source: FileSource = {
+    storeId: 'foreign-nested',
+    storeLabel: '嵌套附件',
+    path: name,
+    name,
+    store: NESTED_ATTACHMENT_STORE
+  };
+  // 窄型收窄（运行时不变量）：foreign 嵌套回调的字节源自 foreign 渲染器侧
+  // ArrayBuffer（renderNestedBuffer 的 nestedBuffer）→ 桥接层 new Uint8Array 包装，
+  // 恒为 ArrayBuffer backed，无 SharedArrayBuffer 面。
+  await dispatcher.dispatch(source, data as Uint8Array<ArrayBuffer>, target, { signal });
+};
+
+// 桥接块必须先于 codeRenderer 安装（generated 补空位铁律）：eml/fods 在
+// GENERATED_EXTENSIONS 内、tsv 已自 code 内置清单原子移除（与本次装配同一 commit），
+// 顺序颠倒即被 code 抢注。@file-viewer/* 全动态 import（foreignRenderers.ts 内），
+// 主 chunk 零混入（Review Focus 4，T4 门禁锚）。
+for (const r of createForeignFileRenderers({ nestedDispatch: foreignNestedDispatch })) registry.install(r);
 registry.install(codeRenderer);
 registry.install(markdownRenderer);
 registry.install(htmlRenderer);

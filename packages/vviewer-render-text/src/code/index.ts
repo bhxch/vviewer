@@ -51,8 +51,11 @@ export const codeRenderer: Renderer = {
   label: '代码/文本',
   // 注 1：不含 'svg'——svg 归 @bhxch/vviewer-render-media 的 imageRenderer（消毒预览），registry 拒绝重复注册
   // 注 2：不含 'md'/'markdown'/'html'/'htm'——M3 起归 markdownRenderer/htmlRenderer（M1-M2 期间暂由 code 承接）
+  // 注 3：不含 'tsv'——计划 3 Task 2（spec 2026-11-04 §6.3）原子转移至 file-viewer
+  // spreadsheet 桥接渲染器（apps/web foreignRenderers 装配，桥接块先于本渲染器注册）；
+  // csv 维持 code（spec §6.3 注记）
   extensions: [
-    'txt', 'log', 'json', 'jsonc', 'yaml', 'yml', 'toml', 'ini', 'conf', 'cfg', 'env', 'csv', 'tsv', // tsv：批次三引入 @file-viewer/renderer-spreadsheet 桥接时转移（spec 2026-11-04 §4.1）
+    'txt', 'log', 'json', 'jsonc', 'yaml', 'yml', 'toml', 'ini', 'conf', 'cfg', 'env', 'csv',
     'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'css', 'scss', 'xml',
     'py', 'rb', 'go', 'rs', 'java', 'kt', 'c', 'h', 'cpp', 'hpp', 'cc', 'sh', 'bash', 'zsh', 'fish', 'sql',
     'lua', 'php', 'pl', 'swift', 'dart', 'vue', 'svelte', 'gradle', 'cmake', 'properties', 'gitignore',
