@@ -90,7 +90,8 @@ function genSwCleanup(): Plugin {
       `vv-runtime-${BUILD_REVISION}`,
       `vv-queries-${BUILD_REVISION}`,
       `vv-diagram-svgbob-${BUILD_REVISION}`,
-      `vv-cdn-engines-${BUILD_REVISION}`
+      `vv-cdn-engines-${BUILD_REVISION}`,
+      `vv-foreign-assets-${BUILD_REVISION}`
     ];
     writeFileSync(
       SW_CLEANUP_DEST,
@@ -106,7 +107,7 @@ self.addEventListener('activate', (event) => {
         const names = await self.caches.keys();
         await Promise.all(
           names
-            .filter((n) => /^(vv-grammars|vv-runtime|vv-queries|vv-diagram-svgbob|vv-cdn-engines)-/.test(n) && !current.includes(n))
+            .filter((n) => /^(vv-grammars|vv-runtime|vv-queries|vv-diagram-svgbob|vv-cdn-engines|vv-foreign-assets)-/.test(n) && !current.includes(n))
             .map((n) => self.caches.delete(n))
         );
       } catch {
@@ -222,10 +223,16 @@ function diagramEngineChunk(): Plugin {
                 chunkFileNames(chunkInfo) {
                   if (chunkInfo.name === 'sveltekit-manifest') return '_app/manifest.js';
                   if (chunkInfo.name === 'diagram-engines') return '_app/immutable/chunks/diagram-engines-[hash].js';
-                  // git 信息面板（2026-10-31 spec）：isomorphic-git 引擎 chunk（worker 内
+                  // git 信息面板（2026-10-31 git 信息面板 spec）：isomorphic-git 引擎 chunk（worker 内
                   // 动态 import 拉取），带名特判同 diagram-engines——precache 排除与预算
                   // 门禁（tools/diagram-budget.mjs）按该前缀识别
                   if (chunkInfo.name === 'git-engine') return '_app/immutable/chunks/git-engine-[hash].js';
+                  // foreign 渲染器组（计划 3 Task 3，spec §6.2）：@file-viewer/* 代码面
+                  // 按渲染器组带名（下方 groups）——JS 代码包 chunk 分离进 dist 但绝不
+                  // 进 precache（iwork 解析器 chunk 实测 4.05MB 超 workbox 2MiB 单文件
+                  // 上限，且「不进 precache」本即全局约束）；带名供 globIgnores 排除
+                  // 与 T4 foreign 预算门禁按前缀识别
+                  if (chunkInfo.name.startsWith('foreign-')) return `_app/immutable/chunks/${chunkInfo.name}-[hash].js`;
                   return '_app/immutable/chunks/[hash].js';
                 },
                 codeSplitting: {
@@ -248,6 +255,68 @@ function diagramEngineChunk(): Plugin {
                       // buffer 为 gitIso.ts 的 Buffer shim 独占依赖（isogit 浏览器构建引用
                       // 裸 Buffer），随组懒加载不进 precache。
                       test: /[\\/]node_modules[\\/](isomorphic-git|async-lock|clean-git-ref|crc-32|diff3|ignore|minimisted|pify|sha\.js|simple-get|buffer)[\\/]/
+                    },
+                    // ---------- foreign 渲染器组（计划 3 Task 3，spec §6.2）----------
+                    // @file-viewer/* 代码面 + foreign 独占传递依赖按渲染器组归堆带名：
+                    // globIgnores 排除 precache（代码包 chunk 分离进 dist 但不进
+                    // precache——全局约束 + iwork chunk 4.05MB 超 workbox 2MiB 上限）。
+                    // 共享依赖铁律（git-engine 同款）：jszip@3.10.2 与 pako@1.0.11 为
+                    // vviewer zip 渲染路径共享、buffer 为 git 引擎组员——三者不入组
+                    //（留默认共享 chunk 维持 precache 地位；foreign 组与共享 chunk 间
+                    // 跨 chunk import 合法，仅懒加载连带，无断链）。email 的 buffer
+                    // 依赖经 git-engine 组员满足（懒加载连带，实测 build 后 rg 复核）。
+                    {
+                      name: 'foreign-core',
+                      test: /[\\/]node_modules[\\/]@file-viewer[\\/]core[\\/]/
+                    },
+                    {
+                      name: 'foreign-email',
+                      test: /[\\/]node_modules[\\/](@file-viewer[\\/]renderer-email|postal-mime|msgreader)[\\/]/
+                    },
+                    {
+                      // pako@2.2.0（epub 独占 major）不入组：与 jszip 链 pako@1.0.11 同名
+                      // 包目录，regex 无法区分版本——~45KB 留默认 chunk 无碍
+                      name: 'foreign-epub',
+                      test: /[\\/]node_modules[\\/]@file-viewer[\\/]renderer-epub[\\/]/
+                    },
+                    {
+                      // jszip@3.10.2 共享（同上铁律）不入组
+                      name: 'foreign-ofd',
+                      test: /[\\/]node_modules[\\/]@file-viewer[\\/]renderer-ofd[\\/]/
+                    },
+                    {
+                      name: 'foreign-chm',
+                      test: /[\\/]node_modules[\\/]@file-viewer[\\/]renderer-chm[\\/]/
+                    },
+                    {
+                      // capability-rtf 副作用包与 word 同组（装配层 word loader 内同载）；
+                      // @file-viewer/doc、docx 为 renderer-word 依赖；rtf.js 为
+                      // capability-rtf 独占懒加载器目标
+                      name: 'foreign-word',
+                      test: /[\\/]node_modules[\\/](@file-viewer[\\/](renderer-word|capability-rtf|doc|docx)|rtf\.js)[\\/]/
+                    },
+                    {
+                      // renderer-ppt/pptx 为 renderer-presentation 的内部再导出依赖
+                      name: 'foreign-presentation',
+                      test: /[\\/]node_modules[\\/]@file-viewer[\\/](renderer-presentation|renderer-ppt|renderer-pptx)[\\/]/
+                    },
+                    {
+                      // @xmldom/xmldom 为 spreadsheet/iwork/hangul 三组共享——归首组
+                      //（groups 按序首中即胜），其余组跨 chunk import
+                      name: 'foreign-spreadsheet',
+                      test: /[\\/]node_modules[\\/](@file-viewer[\\/]renderer-spreadsheet|e-virt-table|styled-exceljs|utif|tinycolor2|@xmldom[\\/]xmldom)[\\/]/
+                    },
+                    {
+                      name: 'foreign-iwork',
+                      test: /[\\/]node_modules[\\/](@file-viewer[\\/]renderer-iwork|keynote-archives)[\\/]/
+                    },
+                    {
+                      name: 'foreign-hangul',
+                      test: /[\\/]node_modules[\\/](@file-viewer[\\/]renderer-hangul|@ssabrojs[\\/]hwpxjs|cfb)[\\/]/
+                    },
+                    {
+                      name: 'foreign-wordperfect',
+                      test: /[\\/]node_modules[\\/]@file-viewer[\\/]renderer-wordperfect[\\/]/
                     }
                   ]
                 }
@@ -333,10 +402,13 @@ export default defineConfig({
         // 泛化组——客户端产物内另有 katex 20 件 KaTeX_*.woff（~330KB），泛化 woff 会
         // 全数误收进 precache。`*` 覆盖 vite hash 中缀（seti.<hash>.woff）。
         globPatterns: ['**/*.{js,css,woff2,json}', '**/seti.*.woff'],
-        // 末项为 git 引擎 chunk 排除（2026-10-31 git 信息面板 spec）：isomorphic-git 经
-        // codeSplitting groups 落 git-engine-*.js，按需加载不进 precache（同
-        // diagram-engines 语义，膨胀防护 + 预算门禁 tools/diagram-budget.mjs 计账）。
-        globIgnores: ['**/node_modules/**/*', 'sw.js', 'workbox-*.js', '**/diagram-engines-*.js', '**/git-engine-*.js'],
+        // 末两项为按需加载 chunk 排除：git 引擎 chunk（2026-10-31 git 信息面板 spec，
+        // isomorphic-git 经 codeSplitting groups 落 git-engine-*.js）与 foreign 渲染器
+        // 组（计划 3 Task 3，spec §6.2——@file-viewer/* 代码面按组落 foreign-*-*.js，
+        // 代码包 chunk 分离进 dist 但绝不进 precache：全局约束 + iwork chunk 4.05MB
+        // 超 workbox 2MiB 单文件上限）。均按需加载不进 precache（同 diagram-engines
+        // 语义，膨胀防护 + 预算门禁按前缀计账）。
+        globIgnores: ['**/node_modules/**/*', 'sw.js', 'workbox-*.js', '**/diagram-engines-*.js', '**/git-engine-*.js', '**/foreign-*.js'],
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/^\/api\//],
         // BUG-15：vite-plugin-pwa 生成 precache manifest 的时点早于 SvelteKit
@@ -424,6 +496,37 @@ export default defineConfig({
             }
           },
           {
+            // foreign 渲染资产（spec §6.2，计划 3 Task 3）：@file-viewer/assets-* npm
+            // 包 jsdelivr 直链（assets-standard/-chm/-hangul/-iwork/-ppt/-wordperfect，
+            // 精确版本进 URL——跨版本陈旧天然免疫，同 vv-cdn-engines 原则）。规则置于
+            // vv-cdn-engines 的 jsdelivr 通配之前（workbox 路由先匹配先赢）：foreign
+            // 资产工作集（worker/wasm/ppt 运行时分片）独立计账，不挤占引擎分片的
+            // maxEntries 配额。env VV_FOREIGN_ASSETS 自托管形态由下方同源预留槽承接
+            //（SW 规则构建期定型，运行时 env 值不可预知——缺省 CDN 前缀 + 预留前缀
+            // 双覆盖）。
+            urlPattern: /^https:\/\/cdn\.jsdelivr\.net\/npm\/@file-viewer\/assets-/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: `vv-foreign-assets-${BUILD_REVISION}`,
+              // ppt legacy 运行时按需级联拉取 vendor/ppt/dist 分片，maxEntries 64
+              // 覆盖第一波工作集（worker/wasm + 常用分片）不半途 LRU 逐出打折扣
+              expiration: { maxEntries: 64, purgeOnQuotaError: true },
+              cacheableResponse: { statuses: [200] }
+            }
+          },
+          {
+            // foreign 资产同源预留槽（FOREIGN_ASSETS_SAME_ORIGIN_PREFIX，plan 4 接线；
+            // asset-installer 合并树布局）：CacheFirst 同上；cacheableResponse 仅 200
+            //——404/SPA fallback 应答不入缓存（前缀未部署时零副作用）
+            urlPattern: /\/file-viewer-assets\//,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: `vv-foreign-assets-${BUILD_REVISION}`,
+              expiration: { maxEntries: 64, purgeOnQuotaError: true },
+              cacheableResponse: { statuses: [200] }
+            }
+          },
+          {
             // CDN 图表引擎（spec §6：excalidraw/bpmn/vega/vegalite 经 jsdelivr +esm
             // 精确版本动态 import，新 CDN 类型同吃此规则）：CacheFirst 后二次访问
             // 近似离线；版本进 URL，跨版本陈旧天然免疫（修订号仅缓存名换代用）。
@@ -455,6 +558,10 @@ export default defineConfig({
     // P2 资产三层解析链：CDN 层 base（grammar 资产目录前缀，以 / 结尾；空 = 不启用）。
     // highlightClient.ts 读 import.meta.env.VV_GRAMMAR_CDN——vite 默认不注入任意
     // 自定义 env，需在此显式静态替换（构建期定型，e2e/CI 以同名 env 控制）。
-    'import.meta.env.VV_GRAMMAR_CDN': JSON.stringify(process.env.VV_GRAMMAR_CDN ?? '')
+    'import.meta.env.VV_GRAMMAR_CDN': JSON.stringify(process.env.VV_GRAMMAR_CDN ?? ''),
+    // 计划 3 Task 3（spec §6.2）：foreign 渲染资产三层链的 env 显式层（自托管
+    // asset-installer 合并树根，尾斜杠归一在 resolveForeignAssetBase；空 = 缺省
+    // CDN 层）。foreignAssets.ts 消费，VV_GRAMMAR_CDN 同款注入先例。
+    'import.meta.env.VV_FOREIGN_ASSETS': JSON.stringify(process.env.VV_FOREIGN_ASSETS ?? '')
   }
 });

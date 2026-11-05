@@ -22,6 +22,7 @@ import {
   type ForeignMountResult,
   type NestedDispatch
 } from '@bhxch/vviewer-render-foreign';
+import { resolveForeignAssetBase, resolveForeignAssetPackageBase, type ForeignAssetPackage } from './foreignAssets';
 // type-only：编译期擦除，零运行时 chunk 影响
 import type {
   FileRenderContext,
@@ -69,12 +70,35 @@ export function nestedName(type: string): string {
  * types.d.ts FileRenderContext）：filename/sourceFile/signal + renderNestedBuffer——
  * 嵌套回调适配为 ForeignMountArgs.renderNested（计划 2 契约面），返回 undefined
  * 安全（core disposeFileViewerRendered(undefined) no-op，宿主随外层实例统一销毁）。
+ *
+ * 资产基座（计划 3 Task 3，T2 探针裁决）：权威机制 = core 全局
+ * setDefaultFileViewerAssetBaseUrl，per-mount options 形态作废。装配级一次（幂等
+ * 护栏）：首个组 dispatcher 建成时把解析链首层基座设为全局缺省；此后 mount 期按
+ * 组的资产包归属切换（setter + handler 直调同一同步块——handler 前奏内解析
+ * worker/wasm URL，JS 运行至完语义保证切换不被并发 mount 交叉）。
+ * ForeignMountArgs.assetBaseUrl 透传契约保留（bridge 测试锚）但装配不填——
+ * setter 已权威，透传留作外部注入缝。
  */
-function pluginMount(load: () => Promise<ForeignPlugin>): ForeignMount {
+let coreModule: typeof import('@file-viewer/core') | null = null;
+let appliedAssetBase: string | null = null;
+
+function applyForeignAssetBase(base: string): void {
+  if (!coreModule || appliedAssetBase === base) return;
+  coreModule.setDefaultFileViewerAssetBaseUrl(base);
+  appliedAssetBase = base;
+}
+
+function pluginMount(load: () => Promise<ForeignPlugin>, groupId: string): ForeignMount {
   let dispatcher: Promise<ForeignDispatcher> | null = null;
   const loadDispatcher = (): Promise<ForeignDispatcher> =>
     (dispatcher ??= (async () => {
       const [core, plugin] = await Promise.all([import('@file-viewer/core'), load()]);
+      coreModule = core;
+      if (appliedAssetBase === null) {
+        // 装配级一次（幂等护栏）：链首层基座（env 显式 → 同源预留槽 → 缺省 CDN）
+        appliedAssetBase = resolveForeignAssetBase();
+        core.setDefaultFileViewerAssetBaseUrl(appliedAssetBase);
+      }
       const registry = core.createRendererRegistry((plugin.definitions ?? []) as readonly RendererDefinition[]);
       return core.createFileViewerRendererDispatcher<ForeignHandler>({ registry, handlers: plugin.handlers ?? [] });
     })());
@@ -83,6 +107,10 @@ function pluginMount(load: () => Promise<ForeignPlugin>): ForeignMount {
     const ext = extOf(args.name);
     const handler = d.get(ext);
     if (!handler) throw new Error(`file-viewer 渲染器无 ".${ext}" 处理器（${args.name}）`);
+    // 组资产包基座切换（无资产组为 null——保持当前基座不动）；与 handler 直调
+    // 同步块执行（见上注）
+    const pkg = foreignGroupAssetPackage(groupId, ext);
+    if (pkg) applyForeignAssetBase(resolveForeignAssetPackageBase(pkg));
     const context: FileRenderContext = {
       filename: args.name,
       sourceFile: args.file,
@@ -95,6 +123,35 @@ function pluginMount(load: () => Promise<ForeignPlugin>): ForeignMount {
     const rendered = await handler(toArrayBuffer(args.data), args.target as HTMLDivElement, ext, context);
     return { destroy: () => disposeForeignRendered(rendered) };
   };
+}
+
+/**
+ * 每组资产包归属（Task 3 实测映射，jsdelivr data API 逐包核对；导出仅测试锚与
+ * 文档面，装配经 pluginMount 消费）：
+ * - assets-standard@3.3.3/viewer/vendor/：docx（word 组 docx 系 worker+jszip）、
+ *   pptx（presentation pptx 系 worker）、xlsx（spreadsheet worker）、libarchive/pdf（本
+ *   波未绑定，vviewer 自有管线不消费）；
+ * - 独立包：assets-chm（chm worker+wasm 三件）、assets-hangul、assets-iwork（worker）、
+ *   assets-wordperfect（worker+libwpd wasm/mjs）、assets-ppt（legacy ppt/pot 的
+ *   pptjs 运行时——presentation 组按扩展名分流）；
+ * - 无资产组：email/epub/ofd（epubjs、dltech ofd 随各 renderer dist 打包，相对
+ *   import 非 CDN 资产）。
+ */
+export const FOREIGN_GROUP_ASSET_PACKAGE: Record<string, (ext: string) => ForeignAssetPackage | null> = {
+  'foreign-email': () => null,
+  'foreign-epub': () => null,
+  'foreign-ofd': () => null,
+  'foreign-chm': () => 'assets-chm',
+  'foreign-word': () => 'assets-standard',
+  'foreign-presentation': (ext) => (ext === 'ppt' || ext === 'pot' ? 'assets-ppt' : 'assets-standard'),
+  'foreign-spreadsheet': () => 'assets-standard',
+  'foreign-iwork': () => 'assets-iwork',
+  'foreign-hangul': () => 'assets-hangul',
+  'foreign-wordperfect': () => 'assets-wordperfect'
+};
+
+function foreignGroupAssetPackage(groupId: string, ext: string): ForeignAssetPackage | null {
+  return (FOREIGN_GROUP_ASSET_PACKAGE[groupId] ?? (() => null))(ext);
 }
 
 interface ForeignGroupSpec {
@@ -174,7 +231,9 @@ const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
 /**
  * 构造第一波 10 组桥接渲染器（viewer.ts 装配点：diagram 块后、codeRenderer 前）。
  * nestedDispatch 必传（装配层单源：registry.byExtension → dispatcher.dispatch），
- * 深度限 3 由桥接层强制；assetBaseUrl 计划 3 Task 3 接 resolveForeignAssetBase。
+ * 深度限 3 由桥接层以显式 depth 形参强制。资产基座不经此处透传——权威机制为
+ * core 全局 setDefaultFileViewerAssetBaseUrl（pluginMount 内装配级一次 + 组包
+ * 切换，见 pluginMount 注）；ForeignMountArgs.assetBaseUrl 透传缝保留不填。
  */
 export function createForeignFileRenderers(opts: { nestedDispatch: NestedDispatch }): Renderer[] {
   return FOREIGN_GROUPS.map((g) =>
@@ -182,7 +241,7 @@ export function createForeignFileRenderers(opts: { nestedDispatch: NestedDispatc
       id: g.id,
       label: g.label,
       extensions: g.extensions,
-      mount: pluginMount(g.load),
+      mount: pluginMount(g.load, g.id),
       nestedDispatch: opts.nestedDispatch
     })
   );

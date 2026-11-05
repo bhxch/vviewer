@@ -23,7 +23,12 @@ import { pptxRenderer } from '@bhxch/vviewer-render-doc/pptx';
 import { hexRenderer } from '@bhxch/vviewer-render-binary';
 import { archiveRenderer } from '@bhxch/vviewer-render-archive';
 import { jsonlRenderer } from '@bhxch/vviewer-render-text/jsonl';
-import { createForeignFileRenderers, nestedName } from './foreignRenderers';
+import {
+  createForeignFileRenderers,
+  FOREIGN_GROUP_ASSET_PACKAGE,
+  nestedName
+} from './foreignRenderers';
+import type { ForeignAssetPackage } from './foreignAssets';
 
 function readViewerSource(): string {
   // vitest 下 import.meta.url 非 file scheme（loader 虚拟协议），按 cwd 双候选兜底
@@ -170,5 +175,50 @@ describe('nestedName（renderNestedBuffer type → 合成文件名）', () => {
   it('含点 type 原样透传（自带扩展名的附件名）', () => {
     expect(nestedName('photo.jpg')).toBe('photo.jpg');
     expect(nestedName('a.b.c')).toBe('a.b.c');
+  });
+});
+
+// 计划 3 Task 3：每组资产包归属锚（Task 3 实测映射——jsdelivr data API 逐包核对）。
+describe('FOREIGN_GROUP_ASSET_PACKAGE（资产三层链的组包映射，spec §6.2）', () => {
+  /** Record 索引访问收窄：缺失即断言失败（noUncheckedIndexedAccess 面友好） */
+  const pkgOf = (id: string, ext: string): ForeignAssetPackage | null => {
+    const f = FOREIGN_GROUP_ASSET_PACKAGE[id];
+    expect(f, `映射表缺组 ${id}`).toBeDefined();
+    return f!(ext);
+  };
+
+  it('无资产组：email/epub/ofd（epubjs、dltech ofd 随 renderer dist 打包）', () => {
+    for (const id of ['foreign-email', 'foreign-epub', 'foreign-ofd']) {
+      for (const ext of EXPECTED.find((e) => e.id === id)!.extensions) {
+        expect(pkgOf(id, ext), `${id}/${ext}`).toBeNull();
+      }
+    }
+  });
+
+  it('assets-standard 组：word（docx 系 worker）/spreadsheet（xlsx worker）/presentation 的 pptx 系', () => {
+    for (const ext of ['doc', 'docm', 'dotx', 'dotm', 'odt', 'odp', 'rtf']) {
+      expect(pkgOf('foreign-word', ext), ext).toBe('assets-standard');
+    }
+    for (const ext of ['xltx', 'xlsb', 'xlt', 'xla', 'xlam', 'xltm', 'ods', 'fods', 'dbf', 'tsv']) {
+      expect(pkgOf('foreign-spreadsheet', ext), ext).toBe('assets-standard');
+    }
+    for (const ext of ['pptm', 'potx', 'potm', 'ppsx', 'ppsm']) {
+      expect(pkgOf('foreign-presentation', ext), ext).toBe('assets-standard');
+    }
+  });
+
+  it('独立资产包组：chm/hangul/iwork/wordperfect；presentation 的 legacy ppt/pot 归 assets-ppt', () => {
+    expect(pkgOf('foreign-chm', 'chm')).toBe('assets-chm');
+    expect(pkgOf('foreign-hangul', 'hwp')).toBe('assets-hangul');
+    expect(pkgOf('foreign-hangul', 'hwpx')).toBe('assets-hangul');
+    expect(pkgOf('foreign-iwork', 'pages')).toBe('assets-iwork');
+    expect(pkgOf('foreign-wordperfect', 'wpd')).toBe('assets-wordperfect');
+    expect(pkgOf('foreign-presentation', 'ppt')).toBe('assets-ppt');
+    expect(pkgOf('foreign-presentation', 'pot')).toBe('assets-ppt');
+  });
+
+  it('映射表覆盖 10 组（与装配面 id 集合一致）', () => {
+    const renderers = createForeignFileRenderers({ nestedDispatch: async () => {} });
+    expect(Object.keys(FOREIGN_GROUP_ASSET_PACKAGE).sort()).toEqual(renderers.map((r) => r.id).sort());
   });
 });
