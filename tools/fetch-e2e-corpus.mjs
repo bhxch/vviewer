@@ -105,7 +105,7 @@ const SOURCES = [
     // v3.3.3 tag（git ls-remote 钉定 2026-11-06；与 npm 依赖 3.3.3 系同版）
     commit: '760038d88e9252bc746c04626b82b84226ef6948',
     // SAVE-FOREIGN 第一波 10 组桥接渲染器的格式面（spec §6.3）按扩展名圈定；
-    // ppt/pptx 上游最小 1.9MB/6.7MB 超 maxBytes 不入选（渲染锚由错误卡/文档组锚覆盖），
+    // ppt/pptx 上游最小 6.7MB/1.9MB 超 maxBytes 不入选（渲染锚由错误卡/文档组锚覆盖），
     // xls/xlsx/docx 维持 vviewer 既有渲染器不属本波绑定面
     extensions: ['.doc', '.odt', '.rtf', '.eml', '.epub', '.fb2', '.chm', '.ofd', '.hwp', '.hwpx', '.dbf', '.pages', '.numbers', '.key', '.wpd', '.wp'],
     maxFiles: 20,
