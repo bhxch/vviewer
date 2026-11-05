@@ -49,8 +49,9 @@ export { hasNonDiagramFence };
  * Office 三件套 docx/xlsx/pptx（render-doc，pptx 为文本提纲降级路径）。
  * Task 5 追加（spec 2026-11-04-file-viewer-integration §5.1）：图表文件 29 型
  * （id diagram-<type>），必须先于 codeRenderer 安装（generated 补空位铁律，见下）。
- * 计划 3 Task 2 追加（spec §6.3）：file-viewer 第一波桥接 10 组 41 扩展名
- * （id foreign-<group>），同铁律下居 codeRenderer 之前（diagram 块之后）。 */
+ * 计划 3 Task 2 追加（spec §6.3）：file-viewer 桥接第一波 10 组 41 扩展名 + 计划 4
+ * Task 2 第二波 10 组 75 扩展名（jxl 不绑定，wasm 自 hex 转移；id foreign-<group>），
+ * 同铁律下居 codeRenderer 之前（diagram 块之后）。 */
 export const registry: Registry = createRegistry();
 
 /** 图表文件 server 分支的远端调用通道（DiagramFileRenderOpts.remoteCall 执行缝）：
@@ -79,7 +80,7 @@ function diagramFileRemoteCall(path: string, init?: { method?: string; body?: un
 // test/diagramFile.test.ts「装配序锚」组）。
 for (const r of createDiagramFileRenderers({ remoteCall: diagramFileRemoteCall })) registry.install(r);
 
-// ---------- file-viewer 第一波桥接渲染器（spec §6.3，计划 3 Task 2：10 组 41 扩展名） ----------
+// ---------- file-viewer 桥接渲染器（spec §6.3：计划 3 Task 2 第一波 10 组 41 扩展名 + 计划 4 Task 2 第二波 10 组 75 扩展名） ----------
 
 /** 嵌套附件分派（spec §6.4 数据画像 B 组：email 嵌套附件 → vviewer dispatcher
  * byExtension 承接，pdf/image/docx 等本地强项；深度限 3 由桥接层 renderNested 以
@@ -118,8 +119,10 @@ const foreignNestedDispatch: NestedDispatch = async (data, name, target, signal,
 
 // 桥接块必须先于 codeRenderer 安装（generated 补空位铁律）：eml/fods 在
 // GENERATED_EXTENSIONS 内、tsv 已自 code 内置清单原子移除（与本次装配同一 commit），
-// 顺序颠倒即被 code 抢注。@file-viewer/* 全动态 import（foreignRenderers.ts 内），
-// 主 chunk 零混入（Review Focus 4，T4 门禁锚）。
+// 第二波 geojson/kml/gpx/typ/typst/sig 同居 GENERATED_EXTENSIONS（自兜底转移）、
+// wasm 已自 hex 清单原子移除（同 commit）——顺序颠倒即被 code/hex 抢注。
+// @file-viewer/* 全动态 import（foreignRenderers.ts 内），主 chunk 零混入
+// （Review Focus 4，T4 门禁锚）。
 for (const r of createForeignFileRenderers({ nestedDispatch: foreignNestedDispatch })) registry.install(r);
 registry.install(codeRenderer);
 registry.install(markdownRenderer);

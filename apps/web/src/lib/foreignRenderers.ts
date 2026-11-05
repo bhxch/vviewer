@@ -1,12 +1,20 @@
-// foreignRenderers.ts — file-viewer 第一波桥接装配（spec §6.3，计划 3 Task 2）。
-// 10 组渲染器经 @bhxch/vviewer-render-foreign 的 wrapFileViewerRenderer 桥接为
+// foreignRenderers.ts — file-viewer 桥接装配（spec §6.3：计划 3 Task 2 第一波 +
+// 计划 4 Task 2 第二波）。
+// 20 组渲染器经 @bhxch/vviewer-render-foreign 的 wrapFileViewerRenderer 桥接为
 // vviewer Renderer：扩展名绑定逐字取 spec §6.3 表（全局约束增补 pot 归 presentation，
-// §6.3 序 7 注记），挂载面按探针结论接线——各 @file-viewer/renderer-* 包导出
+// §6.3 序 7 注记；第二波序 12-21 逐字——jxl 不绑定：renderer-image dist 无 JS 解码器，
+// 仅 mime 表列名 + 浏览器原生 img 解码面，目标浏览器不支持即恒错误卡，回退未注册），
+// 挂载面按探针结论接线——各 @file-viewer/renderer-* 包导出
 // `xxxRenderer: FileViewerRendererPlugin`（definitions 来自 core 的
 // DEFAULT_RENDERER_DEFINITIONS 按 id 拾取 + handlers 按 rendererId 注册），handler
 // 签名 `(buffer: ArrayBuffer, target, type?, context?) => Promise<FileViewerRenderedInstance>`，
 // type 为小写扩展名。扩展名→handler 的组内路由用 core 的
 // createFileViewerRendererDispatcher（definitions 注册面同源）。
+// capability-* 为副作用启用包（import 即生效）：capability-rtf 向 renderer-word 注册
+// rtf.js 懒加载器（word 组 loader 内随首渲染同载）、capability-drawio-official 启用
+// renderer-drawing 的 diagrams.net 官方运行时（drawing 组，assets-drawing 基座承载）、
+// capability-midi 向 renderer-media 注册 MIDI loader（midi 组；renderer-media 的媒体
+// 扩展名不注册——vviewer av 占优，绑定面仅 midi/mid）。
 //
 // chunk 分离（Review Focus 4）：@file-viewer/* 全部动态 import——core 亦在 mount
 // 首调时懒加载，本模块静态面零 file-viewer 代码（类型导入编译期擦除），主 chunk
@@ -182,8 +190,18 @@ function pluginMount(load: () => Promise<ForeignPlugin>, groupId: string): Forei
  *   CDN 须显式传 presentation.pptModuleUrl（renderer-ppt dist loadPptModule 的
  *   options 缝，实测 moduleUrl 存在时走 CDN 动态 import），届时本映射与 SW
  *   vv-foreign-assets 规则零改动生效；
+ * - 第二波独立包（计划 4 Task 2 探针实测，core assets 清单 defaultPath 相对基座派生，
+ *   jsdelivr 均有 3.3.3）：assets-data（sql wasm viewer/wasm/data/sql-wasm.wasm——
+ *   sqlite 组内 renderSqlite 经 resolveFileViewerDataSqlWasmUrl 基座解析；字体面走
+ *   FontFace API 零资产）、assets-design（vendor/design/ 系 worker+wasm——photoshop/
+ *   illustrator/postscript/idml 等全部 design-* definition 消费）、assets-typst
+ *   （wasm/typst/ 编译器+渲染器 wasm 与字体资产）、assets-drawing（vendor/drawio/
+ *   viewer-static.min.js + 离线资产目录——官方 diagrams.net 运行时）；
  * - 无资产组：email/epub/ofd（epubjs、dltech ofd 随各 renderer dist 打包，相对
- *   import 非 CDN 资产）。
+ *   import 非 CDN 资产）+ 第二波 image/geo/dicom/signature/eda/midi（heic2any/utif/
+ *   dicom-parser/cfb 随 dist 打包；maplibre worker 内联源码 blob URL；signature 的
+ *   openpgp worker 与 rpgp wasm 均在包 dist 内经 import.meta.url 解析、vite 静态
+ *   发射自包含；midi loader 为纯 JS 能力注册）。
  */
 export const FOREIGN_GROUP_ASSET_PACKAGE: Record<string, (ext: string) => ForeignAssetPackage | null> = {
   'foreign-email': () => null,
@@ -195,7 +213,17 @@ export const FOREIGN_GROUP_ASSET_PACKAGE: Record<string, (ext: string) => Foreig
   'foreign-spreadsheet': () => 'assets-standard',
   'foreign-iwork': () => 'assets-iwork',
   'foreign-hangul': () => 'assets-hangul',
-  'foreign-wordperfect': () => 'assets-wordperfect'
+  'foreign-wordperfect': () => 'assets-wordperfect',
+  'foreign-data': () => 'assets-data',
+  'foreign-design': () => 'assets-design',
+  'foreign-image': () => null,
+  'foreign-geo': () => null,
+  'foreign-typst': () => 'assets-typst',
+  'foreign-dicom': () => null,
+  'foreign-signature': () => null,
+  'foreign-eda': () => null,
+  'foreign-drawing': () => 'assets-drawing',
+  'foreign-midi': () => null
 };
 
 function foreignGroupAssetPackage(groupId: string, ext: string): ForeignAssetPackage | null {
@@ -209,8 +237,13 @@ interface ForeignGroupSpec {
   load: () => Promise<ForeignPlugin>;
 }
 
-/** 10 组绑定（spec §6.3 表逐字 + pot 增补 presentation；xlsx/xlsm/xls/csv/docx/pptx/
- * dot 维持 vviewer 既有渲染器，不在绑定面）。 */
+/** 20 组绑定（spec §6.3 表逐字 + pot 增补 presentation；xlsx/xlsm/xls/csv/docx/pptx/
+ * dot 维持 vviewer 既有渲染器，不在绑定面；第二波序 12-21——jxl 不绑定（探针裁决，
+ * renderer-image dist 无 JS 解码器），renderer-media 的媒体扩展名不注册（av 占优），
+ * drawing 仅 drawio/dio（mermaid/plantuml/excalidraw/bpmn 维持 vviewer 图表面，
+ * bpmn-js 不装），design 组的 psd/ai/eps 上游插件经 data-asset definition 认领
+ * （handlers 里 data-asset ← renderer-data 的 renderFileViewerData——增强缝
+ * renderFileViewerDesignOrData 上游未接线，按插件原样桥接）。 */
 const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
   {
     id: 'foreign-email',
@@ -273,11 +306,97 @@ const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
     label: 'WordPerfect 文档',
     extensions: ['wpd', 'wp', 'wp5', 'wp6'],
     load: () => import('@file-viewer/renderer-wordperfect').then((m) => m.wordPerfectRenderer)
+  },
+  // ---- 第二波（spec §6.3 序 12-21，计划 4 Task 2）----
+
+  {
+    // 字体查看面（ttf/otf/woff/woff2）走 FontFace API，fonts store 加载职责不动
+    // （spec §6.3 序 12 注记）；wasm 自 hex 清单同 commit 转移（模块结构/导出解析）。
+    id: 'foreign-data',
+    label: '数据与字体',
+    extensions: ['sqlite', 'parquet', 'avro', 'webarchive', 'ttf', 'otf', 'woff', 'woff2', 'wasm'],
+    load: () => import('@file-viewer/renderer-data').then((m) => m.dataRenderer)
+  },
+  {
+    id: 'foreign-design',
+    label: 'Adobe 设计',
+    extensions: [
+      'psb', 'pdd', 'psdt', 'psd', 'ait', 'ai', 'idml', 'icml', 'idms', 'inx', 'fla', 'xfl',
+      'xd', 'indd', 'indt', 'ps', 'eps', 'ase', 'aco', 'abr', 'csh', 'pat', 'grd', 'asl'
+    ],
+    load: () => import('@file-viewer/renderer-design').then((m) => m.designRenderer)
+  },
+  {
+    // 仅新 4 扩展名（spec §6.3 序 14「仅新 5」减 jxl——探针裁决不绑定）；原 9 格式
+    // 维持 vviewer imageRenderer。
+    id: 'foreign-image',
+    label: '扩展图片',
+    extensions: ['tiff', 'tif', 'heic', 'heif'],
+    load: () => import('@file-viewer/renderer-image').then((m) => m.imageRenderer)
+  },
+  {
+    // geojson/kml/gpx 自 code 的 generated 兜底转移（装配块居前不被抢注）；shp 的
+    // .dbf/.prj/.shx 边车经桥接 resolveSibling 统一回调读兄弟文件（spec §6.4）。
+    id: 'foreign-geo',
+    label: '地理数据',
+    extensions: ['geojson', 'kml', 'gpx', 'shp'],
+    load: () => import('@file-viewer/renderer-geo').then((m) => m.geoRenderer)
+  },
+  {
+    id: 'foreign-typst',
+    label: 'Typst 排版',
+    extensions: ['typ', 'typst'],
+    load: () => import('@file-viewer/renderer-typst').then((m) => m.typstRenderer)
+  },
+  {
+    id: 'foreign-dicom',
+    label: 'DICOM 影像',
+    extensions: ['dcm', 'dicom'],
+    load: () => import('@file-viewer/renderer-dicom').then((m) => m.dicomRenderer)
+  },
+  {
+    id: 'foreign-signature',
+    label: '电子签名',
+    extensions: [
+      'p7m', 'p7s', 'p7c', 'p7b', 'pkcs7', 'cms', 'cmsc', 'tsd', 'tst', 'tsq', 'tsr',
+      'asics', 'scs', 'asice', 'sce', 'ers', 'asc', 'sig', 'pgp', 'gpg', 'jws'
+    ],
+    load: () => import('@file-viewer/renderer-signature').then((m) => m.signatureRenderer)
+  },
+  {
+    id: 'foreign-eda',
+    label: 'EDA 电路',
+    extensions: ['olb', 'dra', 'gds', 'oas', 'oasis'],
+    load: () => import('@file-viewer/renderer-eda').then((m) => m.edaRenderer)
+  },
+  {
+    // capability-drawio-official 副作用同载：drawing definition 的 drawio 面经官方
+    // diagrams.net 运行时启用（assets-drawing 基座承载 viewer-static.min.js）；
+    // bpmn 不启用（bpmn-js 不装，.bpmn 维持计划 1 diagram-bpmn 渲染器）。
+    id: 'foreign-drawing',
+    label: 'Draw.io 图表',
+    extensions: ['drawio', 'dio'],
+    load: () =>
+      Promise.all([import('@file-viewer/renderer-drawing'), import('@file-viewer/capability-drawio-official')]).then(
+        ([m]) => m.drawingRenderer
+      )
+  },
+  {
+    // capability-midi 副作用同载：向 renderer-media 注册 MIDI loader；renderer-media
+    // 的媒体扩展名不注册（vviewer av 占优），绑定面仅 midi/mid。
+    id: 'foreign-midi',
+    label: 'MIDI 音乐',
+    extensions: ['midi', 'mid'],
+    load: () =>
+      Promise.all([import('@file-viewer/renderer-media'), import('@file-viewer/capability-midi')]).then(
+        ([m]) => m.mediaRenderer
+      )
   }
 ];
 
 /**
- * 构造第一波 10 组桥接渲染器（viewer.ts 装配点：diagram 块后、codeRenderer 前）。
+ * 构造 20 组桥接渲染器（第一波 10 组 + 第二波 10 组；viewer.ts 装配点：diagram 块后、
+ * codeRenderer 前）。
  * nestedDispatch 必传（装配层单源：registry.byExtension → dispatcher.dispatch），
  * 深度限 3 由桥接层以显式 depth 形参强制。资产基座不经此处透传——权威机制为
  * core 全局 setDefaultFileViewerAssetBaseUrl（pluginMount 内装配级一次 + 组包

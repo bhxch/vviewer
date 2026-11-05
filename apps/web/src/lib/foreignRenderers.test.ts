@@ -1,8 +1,10 @@
-// foreignRenderers.test.ts — file-viewer 第一波桥接装配锚（计划 3 Task 2，spec §6.3）。
-// 沿计划 1 源序锚形态（render-text test/diagramFile.test.ts「装配序锚」组）：
-// ① 10 组渲染器 id/label/extensions 逐字（spec §6.3 表 + 全局约束「pot 归 presentation」）；
+// foreignRenderers.test.ts — file-viewer 桥接装配锚（计划 3 Task 2 第一波 + 计划 4 Task 2
+// 第二波，spec §6.3）。沿计划 1 源序锚形态（render-text test/diagramFile.test.ts「装配序锚」组）：
+// ① 20 组渲染器 id/label/extensions 逐字（spec §6.3 表 + 全局约束「pot 归 presentation」
+//   + 第二波 jxl 不绑定裁决——dist 无解码器，见 task-2 报告「API 探针」）；
 // ② fresh registry 全量镜像 viewer.ts 语句序 install——零冲突 + byExtension 逐字归属
-//   （tsv→foreign-spreadsheet、eml/fods 不被 generated fallback 抢注）；
+//   （tsv→foreign-spreadsheet、eml/fods 不被 generated fallback 抢注；第二波 geojson/
+//   kml/gpx/typ/typst/sig 同理 + wasm 自 hex 转移 + midi/mid 不与 av 冲突）；
 // ③ viewer.ts 源序：桥接块居 diagram 之后、codeRenderer 之前（generated 补空位铁律）。
 // viewer.ts 本体 vitest 不可 import（$app/env，diagramFile.test.ts 同款结论）——源序以
 // 读源断言锚定，行为以镜像面锚定。
@@ -42,6 +44,17 @@ function readViewerSource(): string {
   throw new Error('apps/web/src/lib/viewer.ts 不可达（装配序锚须在 monorepo 内运行）');
 }
 
+function readForeignSource(): string {
+  for (const rel of ['apps/web/src/lib/foreignRenderers.ts', '../../apps/web/src/lib/foreignRenderers.ts', 'src/lib/foreignRenderers.ts']) {
+    try {
+      return readFileSync(resolve(process.cwd(), rel), 'utf8');
+    } catch {
+      /* 下一候选 */
+    }
+  }
+  throw new Error('apps/web/src/lib/foreignRenderers.ts 不可达（装配序锚须在 monorepo 内运行）');
+}
+
 /** spec §6.3 第一波绑定（逐字）：全局约束增补 pot 归 presentation（§6.3 序 7 注记）。 */
 const EXPECTED: readonly { id: string; extensions: readonly string[] }[] = [
   { id: 'foreign-email', extensions: ['eml', 'msg', 'mbox'] },
@@ -56,12 +69,41 @@ const EXPECTED: readonly { id: string; extensions: readonly string[] }[] = [
   { id: 'foreign-wordperfect', extensions: ['wpd', 'wp', 'wp5', 'wp6'] }
 ];
 
-describe('createForeignFileRenderers（10 组桥接渲染器）', () => {
-  it('id/label/extensions 逐字（spec §6.3 表）：41 扩展名零重复', () => {
+/** spec §6.3 第二波绑定（逐字，序 12-21）：jxl 不绑定（探针裁决：renderer-image dist
+ * 无 JS 解码器，仅浏览器原生 img 解码面——目标浏览器不支持即恒错误卡，回退未注册）。 */
+const EXPECTED_WAVE2: readonly { id: string; extensions: readonly string[] }[] = [
+  { id: 'foreign-data', extensions: ['sqlite', 'parquet', 'avro', 'webarchive', 'ttf', 'otf', 'woff', 'woff2', 'wasm'] },
+  {
+    id: 'foreign-design',
+    extensions: [
+      'psb', 'pdd', 'psdt', 'psd', 'ait', 'ai', 'idml', 'icml', 'idms', 'inx', 'fla', 'xfl',
+      'xd', 'indd', 'indt', 'ps', 'eps', 'ase', 'aco', 'abr', 'csh', 'pat', 'grd', 'asl'
+    ]
+  },
+  { id: 'foreign-image', extensions: ['tiff', 'tif', 'heic', 'heif'] },
+  { id: 'foreign-geo', extensions: ['geojson', 'kml', 'gpx', 'shp'] },
+  { id: 'foreign-typst', extensions: ['typ', 'typst'] },
+  { id: 'foreign-dicom', extensions: ['dcm', 'dicom'] },
+  {
+    id: 'foreign-signature',
+    extensions: [
+      'p7m', 'p7s', 'p7c', 'p7b', 'pkcs7', 'cms', 'cmsc', 'tsd', 'tst', 'tsq', 'tsr',
+      'asics', 'scs', 'asice', 'sce', 'ers', 'asc', 'sig', 'pgp', 'gpg', 'jws'
+    ]
+  },
+  { id: 'foreign-eda', extensions: ['olb', 'dra', 'gds', 'oas', 'oasis'] },
+  { id: 'foreign-drawing', extensions: ['drawio', 'dio'] },
+  { id: 'foreign-midi', extensions: ['midi', 'mid'] }
+];
+
+const EXPECTED_ALL: readonly { id: string; extensions: readonly string[] }[] = [...EXPECTED, ...EXPECTED_WAVE2];
+
+describe('createForeignFileRenderers（20 组桥接渲染器）', () => {
+  it('id/label/extensions 逐字（spec §6.3 表）：116 扩展名零重复', () => {
     const renderers = createForeignFileRenderers({ nestedDispatch: async () => {} });
-    expect(renderers).toHaveLength(10);
+    expect(renderers).toHaveLength(20);
     const seen = new Set<string>();
-    for (const expected of EXPECTED) {
+    for (const expected of EXPECTED_ALL) {
       const r = renderers.find((x) => x.id === expected.id);
       expect(r, expected.id).toBeDefined();
       expect(r!.label, `${expected.id}.label`).toBeTruthy();
@@ -72,7 +114,7 @@ describe('createForeignFileRenderers（10 组桥接渲染器）', () => {
         seen.add(ext);
       }
     }
-    expect(seen.size).toBe(41);
+    expect(seen.size).toBe(116); // 41（第一波）+ 75（第二波，jxl 不绑定）
   });
 
   it('渲染器对象不携带 mount 装配外的可预期面（label 中文、extensions 小写无点）', () => {
@@ -93,7 +135,7 @@ describe('装配序锚（viewer.ts 语句序：diagram → foreign 桥接块 →
   function mirrorViewerInstallOrder(): ReturnType<typeof createRegistry> {
     const registry = createRegistry();
     for (const r of createDiagramFileRenderers({})) registry.install(r); // viewer.ts：图表文件渲染器
-    for (const r of createForeignFileRenderers({ nestedDispatch: async () => {} })) registry.install(r); // viewer.ts：file-viewer 第一波桥接块
+    for (const r of createForeignFileRenderers({ nestedDispatch: async () => {} })) registry.install(r); // viewer.ts：file-viewer 桥接块（第一波+第二波）
     registry.install(codeRenderer);
     registry.install(markdownRenderer);
     registry.install(htmlRenderer);
@@ -114,9 +156,9 @@ describe('装配序锚（viewer.ts 语句序：diagram → foreign 桥接块 →
     expect(() => mirrorViewerInstallOrder()).not.toThrow();
   });
 
-  it('byExtension 41 项逐字归属 + tsv→foreign-spreadsheet 桥（Review Focus 3）', () => {
+  it('byExtension 116 项逐字归属 + tsv→foreign-spreadsheet 桥（Review Focus 3）', () => {
     const registry = mirrorViewerInstallOrder();
-    for (const expected of EXPECTED) {
+    for (const expected of EXPECTED_ALL) {
       for (const ext of expected.extensions) {
         expect(registry.byExtension(ext)?.id, ext).toBe(expected.id);
         expect(registry.byExtension(ext.toUpperCase())?.id, ext.toUpperCase()).toBe(expected.id);
@@ -141,6 +183,49 @@ describe('装配序锚（viewer.ts 语句序：diagram → foreign 桥接块 →
     registry.install(codeRenderer);
     expect(codeRenderer.extensions).not.toContain('tsv');
     expect(registry.byExtension('tsv')).toBeUndefined();
+  });
+
+  // 计划 4 Task 2（spec §6.3 序 12/15/16/18/21 转移面）：
+  it('wasm 双向转移（Review Focus 2）：hex 清单已无 wasm；仅装 hex 的 registry 不认 wasm；全序归属 foreign-data', () => {
+    expect(hexRenderer.extensions, 'hex 保留 wasm 即双 owner').not.toContain('wasm');
+    const hexOnly = createRegistry();
+    hexOnly.install(hexRenderer);
+    expect(hexOnly.byExtension('wasm')).toBeUndefined();
+    expect(mirrorViewerInstallOrder().byExtension('wasm')?.id).toBe('foreign-data');
+  });
+
+  it('generated 兜底不回抢第二波：geojson/kml/gpx/typ/typst/sig 归桥接（装配块居前铁律的第二波证据）', () => {
+    const registry = mirrorViewerInstallOrder();
+    expect(registry.byExtension('geojson')?.id).toBe('foreign-geo');
+    expect(registry.byExtension('kml')?.id).toBe('foreign-geo');
+    expect(registry.byExtension('gpx')?.id).toBe('foreign-geo');
+    expect(registry.byExtension('typ')?.id).toBe('foreign-typst');
+    expect(registry.byExtension('typst')?.id).toBe('foreign-typst');
+    expect(registry.byExtension('sig')?.id).toBe('foreign-signature');
+  });
+
+  it('midi/mid 归 foreign-midi；av 扩展名清单不含二者（宿主媒体扩展名不注册——av 占优约束）', () => {
+    const registry = mirrorViewerInstallOrder();
+    expect(registry.byExtension('midi')?.id).toBe('foreign-midi');
+    expect(registry.byExtension('mid')?.id).toBe('foreign-midi');
+    expect(avRenderer.extensions).not.toContain('midi');
+    expect(avRenderer.extensions).not.toContain('mid');
+  });
+
+  it('jxl 不绑定（探针裁决）：任一桥接组/镜像 registry/generated 清单/vviewer image 均不认 jxl', () => {
+    const renderers = createForeignFileRenderers({ nestedDispatch: async () => {} });
+    for (const r of renderers) expect(r.extensions, r.id).not.toContain('jxl');
+    expect(mirrorViewerInstallOrder().byExtension('jxl')).toBeUndefined();
+    expect(GENERATED_EXTENSIONS).not.toContain('jxl');
+    expect(imageRenderer.extensions).not.toContain('jxl');
+  });
+
+  it('字体查看面归 foreign-data 且与 fonts store 互不写（spec §6.3 序 12：fonts store 加载职责不动）', () => {
+    const data = EXPECTED_WAVE2.find((e) => e.id === 'foreign-data')!;
+    for (const ext of ['ttf', 'otf', 'woff', 'woff2']) expect(data.extensions).toContain(ext);
+    // 静态锚：桥接装配面零 fonts store 引用（互不写的源码面证据；store 读写仅
+    // fontsStore.ts 消费链）
+    expect(readForeignSource()).not.toMatch(/fontsStore|stores\/fonts/);
   });
 
   it('viewer.ts 源序：diagram 块 → 桥接块 → codeRenderer（generated 补空位铁律，Review Focus 2）', () => {
@@ -217,8 +302,36 @@ describe('FOREIGN_GROUP_ASSET_PACKAGE（资产三层链的组包映射，spec §
     expect(pkgOf('foreign-presentation', 'pot')).toBe('assets-ppt');
   });
 
-  it('映射表覆盖 10 组（与装配面 id 集合一致）', () => {
+  it('映射表覆盖 20 组（与装配面 id 集合一致）', () => {
     const renderers = createForeignFileRenderers({ nestedDispatch: async () => {} });
     expect(Object.keys(FOREIGN_GROUP_ASSET_PACKAGE).sort()).toEqual(renderers.map((r) => r.id).sort());
+  });
+
+  // 计划 4 Task 2（T2 探针实测：core assets 清单 defaultPath 相对基座派生 + 各 dist
+  // 资产解析面）：data→assets-data（sql wasm wasm/data/）、design→assets-design
+  // （vendor/design worker/wasm）、typst→assets-typst（wasm/typst 编译器/渲染器/字体）、
+  // drawing→assets-drawing（vendor/drawio 官方运行时）。
+  it('第二波资产包组：data/design/typst/drawing 各自独立 assets-* 基座', () => {
+    expect(pkgOf('foreign-data', 'sqlite')).toBe('assets-data');
+    expect(pkgOf('foreign-data', 'ttf')).toBe('assets-data');
+    expect(pkgOf('foreign-data', 'wasm')).toBe('assets-data');
+    expect(pkgOf('foreign-design', 'psd')).toBe('assets-design');
+    expect(pkgOf('foreign-design', 'idml')).toBe('assets-design');
+    expect(pkgOf('foreign-design', 'asl')).toBe('assets-design');
+    expect(pkgOf('foreign-typst', 'typ')).toBe('assets-typst');
+    expect(pkgOf('foreign-typst', 'typst')).toBe('assets-typst');
+    expect(pkgOf('foreign-drawing', 'drawio')).toBe('assets-drawing');
+    expect(pkgOf('foreign-drawing', 'dio')).toBe('assets-drawing');
+  });
+
+  it('第二波无资产组：image/geo/dicom/signature/eda/midi（依赖随 renderer dist/vite 静态发射自包含）', () => {
+    const noAsset = [
+      'foreign-image', 'foreign-geo', 'foreign-dicom', 'foreign-signature', 'foreign-eda', 'foreign-midi'
+    ] as const;
+    for (const id of noAsset) {
+      for (const ext of EXPECTED_WAVE2.find((e) => e.id === id)!.extensions) {
+        expect(pkgOf(id, ext), `${id}/${ext}`).toBeNull();
+      }
+    }
   });
 });

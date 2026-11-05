@@ -782,7 +782,10 @@ export function renderHex(
 export const hexRenderer: Renderer = {
   id: 'hex',
   label: '二进制',
-  extensions: ['hex', 'bin', 'exe', 'dll', 'so', 'dylib', 'macho', 'elf', 'o', 'a', 'class', 'wasm', 'dat', 'img', 'iso', 'dmg'],
+  // 'wasm' 已自本清单移除（计划 4 Task 2，spec §6.3 序 12：wasm 模块结构/导出解析归
+  // renderer-data 桥接——foreign-data 组；同 commit 转移。hex 保留 open-as 兜底——
+  // 用户仍可经渲染器选择器以 hex 视图打开 wasm 文件，只是不再默认认领）。
+  extensions: ['hex', 'bin', 'exe', 'dll', 'so', 'dylib', 'macho', 'elf', 'o', 'a', 'class', 'dat', 'img', 'iso', 'dmg'],
   // streaming（io-streaming Task 5）：dispatch 只交付 head + StreamCtx（render 第 5
   // 参），全量字节按需经 ctx.read 拉取（窗口模式），不再整文件预取
   streaming: true,

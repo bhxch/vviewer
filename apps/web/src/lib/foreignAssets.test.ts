@@ -53,14 +53,18 @@ describe('resolveForeignAssetBase（三层链：env → 同源预留槽 → 缺�
 });
 
 describe('resolveForeignAssetPackageBase（per-package 基座派生，Task 3 实测映射）', () => {
-  it('包清单：standard + 五个独立资产包（chm/hangul/iwork/ppt/wordperfect）', () => {
+  it('包清单：standard + 九个独立资产包（chm/hangul/iwork/ppt/wordperfect + 二波 data/design/typst/drawing）', () => {
     expect([...FOREIGN_ASSET_PACKAGES]).toEqual([
       'assets-standard',
       'assets-chm',
       'assets-hangul',
       'assets-iwork',
       'assets-ppt',
-      'assets-wordperfect'
+      'assets-wordperfect',
+      'assets-data',
+      'assets-design',
+      'assets-typst',
+      'assets-drawing'
     ]);
   });
 

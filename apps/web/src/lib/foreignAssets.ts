@@ -20,14 +20,20 @@ export const FOREIGN_ASSETS_CDN_DEFAULT = 'https://cdn.jsdelivr.net/npm/@file-vi
  * 启用——链解析跳过该层，接线时改为指向合并树根的 base 即三层齐备。 */
 export const FOREIGN_ASSETS_SAME_ORIGIN_PREFIX = '';
 
-/** foreign 资产包清单（assets-standard + 第一波实测需资产的五个独立包）。 */
+/** foreign 资产包清单（assets-standard + 第一波实测需资产的五个独立包 + 第二波四个：
+ * data/design/typst/drawing——计划 4 Task 2 探针实测，core assets 清单 defaultPath 均
+ * 相对基座派生；jsdelivr 均有 3.3.3 发布，超 20MB 项的 HEAD 实测台账归计划 4 Task 3）。 */
 export const FOREIGN_ASSET_PACKAGES = [
   'assets-standard',
   'assets-chm',
   'assets-hangul',
   'assets-iwork',
   'assets-ppt',
-  'assets-wordperfect'
+  'assets-wordperfect',
+  'assets-data',
+  'assets-design',
+  'assets-typst',
+  'assets-drawing'
 ] as const;
 
 export type ForeignAssetPackage = (typeof FOREIGN_ASSET_PACKAGES)[number];
