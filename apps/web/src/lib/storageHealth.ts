@@ -254,10 +254,11 @@ export async function collectStorageInfo(): Promise<StorageInfo> {
   };
 }
 
-/** 用量显示格式化（B/KB/MB/GB/TB；KB 起一位小数）——存储健康区与下载进度卡
- * （downloadProgress，评审 I-1 单源化）共用的字节文案事实源。 */
+/** 用量显示格式化（B/KB/MB/GB/TB；KB 起一位小数；B 档取整——终审修复波 M-2：
+ * 分数速率（亚 KB B/s 滑窗均值）原样渲染出小数尾巴，B 档一律 Math.round）——
+ * 存储健康区与下载进度卡（downloadProgress，评审 I-1 单源化）共用的字节文案事实源。 */
 export function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
+  if (n < 1024) return `${Math.round(n)} B`;
   const units = ['KB', 'MB', 'GB', 'TB'] as const;
   let v = n / 1024;
   let u = 0;

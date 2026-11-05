@@ -100,8 +100,9 @@ afterEach(() => {
   localStorage.removeItem('vviewer:settings');
 });
 
-/** store 桩：read 记录调用形态（path 与 opts 有无——本地单次 vs 远端 range 的分形锚） */
-function fakeStore(id: string, bytes: () => Uint8Array): { store: TreeStore; calls: Array<{ path: string; opts: unknown }> } {
+/** store 桩：read 记录调用形态（path 与 opts 有无——本地单次 vs 远端 range 的分形锚）；
+ * rangeCapable 缺省 false（终审修复波 I-2 泵门控后，远端泵行为组须显式传 true） */
+function fakeStore(id: string, bytes: () => Uint8Array, rangeCapable?: boolean): { store: TreeStore; calls: Array<{ path: string; opts: unknown }> } {
   const calls: Array<{ path: string; opts: unknown }> = [];
   const store = {
     id,
@@ -110,7 +111,8 @@ function fakeStore(id: string, bytes: () => Uint8Array): { store: TreeStore; cal
     read: async (path: string, opts?: unknown) => {
       calls.push({ path, opts });
       return bytes();
-    }
+    },
+    rangeCapable
   } as unknown as TreeStore;
   return { store, calls };
 }
@@ -173,6 +175,48 @@ describe('saveAsBlob（picker 主路 / blob URL 兜底 / 取消静默）', () =>
 
     expect(fb.downloads).toEqual(['copy.bin']);
     expect(fb.urls[0]).toMatch(/^blob:mock:0:2$/); // href=objectURL 且 blob 尺寸 2
+    fb.restore();
+  });
+
+  it('picker 后写盘失败（磁盘满）→ abort 半成品再兜底（终审修复波 M-5：.crswap 不残留）', async () => {
+    const { ws } = fakeHandle();
+    // picker 成功、createWritable 成功、write 失败的盘满形态
+    mountPicker(async () => ({
+      createWritable: async () => ({
+        write: async () => {
+          throw new Error('盘满');
+        },
+        close: async () => {
+          ws.closes += 1;
+        },
+        abort: async () => {
+          ws.aborts += 1;
+        }
+      })
+    }) as unknown as FileSystemFileHandle);
+    const fb = stubBlobUrl();
+
+    await expect(saveAsBlob(new Blob([new Uint8Array([1])]), 'a.bin')).resolves.toBe('saved');
+
+    expect(ws.aborts).toBe(1); // 兜底前中止半成品（abort 先于 blob URL 兜底）
+    expect(ws.closes).toBe(0); // 未 close（未落盘成功）
+    expect(fb.downloads).toEqual(['a.bin']); // 降级兜底：数据不丢
+    fb.restore();
+  });
+
+  it('createWritable 自身失败（句柄失效）→ 无可 abort 面，直接 blob URL 兜底', async () => {
+    const { ws } = fakeHandle();
+    mountPicker(async () => ({
+      createWritable: async () => {
+        throw new Error('句柄失效');
+      }
+    }) as unknown as FileSystemFileHandle);
+    const fb = stubBlobUrl();
+
+    await expect(saveAsBlob(new Blob([new Uint8Array([1])]), 'a.bin')).resolves.toBe('saved');
+
+    expect(ws.aborts).toBe(0); // 无 writable 实例：不误计 abort
+    expect(fb.downloads).toEqual(['a.bin']);
     fb.restore();
   });
 });
@@ -260,7 +304,7 @@ describe('saveAsTab（三取数路径：在手/远端泵/zipStore）', () => {
   it('远端（R1）：range 分块泵取数（read 收 range opts）→ saveAsBlob', async () => {
     // size 2MB（>1MB 直读限，<512MB 默认阈值）：泵发 {start,end} 窗口读
     const size = 2 * 1024 * 1024;
-    const { store, calls } = fakeStore('remote:abc', () => new Uint8Array(size));
+    const { store, calls } = fakeStore('remote:abc', () => new Uint8Array(size), true);
     const { handle, ws } = fakeHandle();
     mountPicker(async () => handle);
     const ticks: Array<{ loaded: number; total: number | null }> = [];
@@ -284,7 +328,7 @@ describe('saveAsTab（三取数路径：在手/远端泵/zipStore）', () => {
       JSON.stringify({ storage: { remoteDownloadConfirmMb: 1 } })
     );
     const size = 2 * 1024 * 1024;
-    const { store, calls } = fakeStore('remote:abc', () => new Uint8Array(size));
+    const { store, calls } = fakeStore('remote:abc', () => new Uint8Array(size), true);
     const asks: Array<{ name: string; sizeBytes: number }> = [];
     const hooks: SaveAsTabHooks = {
       confirm: (info) => {
@@ -307,7 +351,7 @@ describe('saveAsTab（三取数路径：在手/远端泵/zipStore）', () => {
       JSON.stringify({ storage: { remoteDownloadConfirmMb: 1 } })
     );
     const size = 2 * 1024 * 1024;
-    const { store, calls } = fakeStore('remote:abc', () => new Uint8Array(size));
+    const { store, calls } = fakeStore('remote:abc', () => new Uint8Array(size), true);
     const { handle } = fakeHandle();
     mountPicker(async () => handle);
 
@@ -318,6 +362,28 @@ describe('saveAsTab（三取数路径：在手/远端泵/zipStore）', () => {
       )
     ).resolves.toBe('saved');
     expect(calls).toHaveLength(1);
+  });
+
+  it('远端 !rangeCapable（终审修复波 I-2 门控）：不走泵——单次无 range 全量读 + 单条 100% 上报', async () => {
+    // directS3/directDav Range 防线降级形态：带窗 read 退化为整对象下载再切片，
+    // 泵的 N 窗循环 N× 放大传输——回落单次全量 read（无 range opts）+ 100% 单报
+    const size = 2 * 1024 * 1024;
+    const { store, calls } = fakeStore('s3direct:x', () => new Uint8Array(size), false);
+    const { handle, ws } = fakeHandle();
+    mountPicker(async () => handle);
+    const ticks: Array<{ loaded: number; total: number | null }> = [];
+
+    await expect(
+      saveAsTab(
+        { source: sourceOf(store, { path: 'big.bin', name: 'big.bin', size }) },
+        { onProgress: (p) => ticks.push(p) }
+      )
+    ).resolves.toBe('saved');
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({ path: 'big.bin', opts: undefined }); // 无 range 窗：整对象单次读
+    expect(ticks).toEqual([{ loaded: size, total: size }]); // 单条 100% 上报（非泵逐块）
+    expect((ws.written[0] as Blob).size).toBe(size);
   });
 
   it('size 未知（null）：不定态直下泵（不适用确认门，Task 6 裁决）', async () => {
@@ -332,6 +398,7 @@ describe('saveAsTab（三取数路径：在手/远端泵/zipStore）', () => {
       id: 'remote:abc',
       displayName: () => 'remote',
       listChildren: async () => [],
+      rangeCapable: true, // I-2 门控后泵行为组显式给能力旗标
       read: async (path: string, opts?: { range?: { start: number; end: number } }) => {
         calls.push({ path, opts });
         round += 1;

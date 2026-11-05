@@ -194,14 +194,19 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
    * 「下载并另存为」tee 直写；picker 瞬态激活窗备案见 saveAs.ts 头注——本路径与
    * 菜单路径同为「先泵后 picker」形态）。确认门自动放行：文件刚下载过（知情面已过
    * 一次）。进度反馈（评审 I-3）：远端重下复用进度卡通道——dlProgress/dlAddress
-   * 直写（同一张卡同一字段面，onTick 无 cancelled/live 守卫面——本函数只在完成态卡
-   * 在场时可达，无并发渲染泵；SSE rev++ 重跑竞态由 finally 统一卸卡兜底，v1 备案）。 */
+   * 直写。终审修复波 I-1 竞态守卫：自持 AbortController（pumpAbort）作 hooks.signal
+   * ——卡上「取消」只断本重下泵不动 effectAbort（同 tab abort 不再打断渲染 streaming
+   * 实例的按需读）；onTick 捕获时 tab 引用守卫——切 tab/重渲染后迟到 tick 丢弃（cleanup
+   * 只清一次，旧文件进度卡不复活在新 tab）；finally 卸卡同 tab 引用守卫（tab 已切换时
+   * 不动新 tab 的进度面）。泵取消落 abort 身份：静默收场不落状态条（与渲染泵取消同裁决）。 */
   async function saveAsCompleted(): Promise<void> {
     const t = tab;
     if (t === null) return;
     clearDlDone();
+    const pumpAbort = new AbortController(); // 自持取消柄：重下泵专用（不与 effectAbort 同源）
     const tracker = isRemoteDownload(t.source.storeId)
       ? createProgressTracker((s) => {
+          if (tab !== t) return; // I-1：捕获时 tab 引用守卫——tab 已切换的迟到 tick 丢弃
           dlProgress = s;
         })
       : null;
@@ -210,19 +215,23 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
         getRemoteBase(t.source.storeId) ?? displayEndpointForStore(t.source.storeId),
         t.source.path
       );
+      dlAbort = pumpAbort; // 卡上「取消」断本重下泵（cancelDownload，不动 effectAbort）
     }
     try {
       await saveAsTab(t, {
         confirm: () => true,
+        signal: pumpAbort.signal,
         ...(tracker !== null
           ? { onProgress: (p: ReadProgressEvent) => tracker.update(p.loaded, p.total) }
           : {})
       });
     } catch (err) {
-      showStatusNotice(`另存为失败：${err instanceof Error ? err.message : String(err)}`);
+      if (!isAbortError(err)) showStatusNotice(`另存为失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
-      dlProgress = null;
-      dlAddress = '';
+      if (tab === t) {
+        dlProgress = null;
+        dlAddress = '';
+      }
     }
   }
 
@@ -861,6 +870,10 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
               void writable.abort().catch(() => {}); // 半成品丢弃（含取消路径）
               throw err; // 走既有 catch 分类：abort 静默 / 读失败卡片
             }
+          } else {
+            // 终审修复波 M-3：picker 已选定目标但 writable 开启失败（磁盘满/权限回收
+            // 等）——静默降级会让「另存为」无产出无提示；状态条降级告知（既有通道）
+            showStatusNotice('直写落盘通道开启失败，已降级为普通下载');
           }
         }
         // buffer 直传（评审 M-1）：tee 自泵路径 pumpBuffer 在手（pumpFull 通道字节
@@ -910,7 +923,11 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
         // 完成态卡（Task 7，spec §6.4「完成后另存为」）：远端下载路径装配（tracker
         // 非 null），TTL 自动卸载（DL-PROG-01 完成后卡自动卸载锚）；浮层不占布局，
         // 内容渲染并行接管。「另存为」走 saveAsTab 统一管线（saveAsCompleted）。
-        if (tracker !== null) {
+        // 泵参与门（终审修复波 I-3）：tracker.pumped = 泵收到过 update——code/jsonl/
+        // hex streaming 渲染在 range-capable 远端源只做 head 探测 + 按需窗，零全量
+        // 下载零 update，此前仅以 tracker 在场门控会误闪「下载完成」卡 4 秒；tee 直写
+        // 路径 pumpToWritable 经 tracker.update 置位（真实落盘下载），门照常装配。
+        if (tracker !== null && tracker.pumped) {
           dlDone = {
             name: current.source.name,
             totalText: dlSize !== null ? formatBytes(dlSize) : null

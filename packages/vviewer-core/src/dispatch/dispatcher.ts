@@ -71,7 +71,8 @@ const FULL_CHUNK = 4 * 1024 * 1024;
  * - size 已知：Range 请求 `read({start: loaded, end: min(loaded+4MiB, size)-1})` 循环
  *   至 size（末块收口）。size 已知来源按 ByteRange 契约精确返回（BlockStream 同口径），
  *   循环由 size 收口不做 EOF 判定；零长度读视为提前 EOF 防御性收口（交付已得前缀，
- *   不静默死循环）。
+ *   不静默死循环）；违约超长返回按请求窗钳取（不定态分支 ②同款教义，防 set 越底座
+ *   RangeError 与 loaded 越界收口失效）。
  * - size 未知：满请求 `read({start: loaded, end: loaded+4MiB-1})` 不定态循环（不预钳，
  *   BlockStream ②同口径），返回短于 4MiB（含空读）即确认 EOF，每块上报
  *   {loaded, total: null} 至 EOF。
@@ -89,10 +90,15 @@ export async function pumpFull(
     const full = new Uint8Array(size);
     let loaded = 0;
     while (loaded < size) {
+      const win = Math.min(loaded + FULL_CHUNK, size) - loaded; // 请求窗宽（收口钳）
       const chunk = await read({ start: loaded, end: Math.min(loaded + FULL_CHUNK, size) - 1 }, signal);
       if (chunk.length === 0) break; // 提前 EOF 防御：不静默死循环，交付已得前缀
-      full.set(chunk, loaded);
-      loaded += chunk.length;
+      // 违约超长返回按请求窗钳取（下方不定态分支同款教义）：超窗块直接 set 会
+      // RangeError（loaded + chunk.length 越过 size 级底座）且 loaded 越界使 size
+      // 收口失效——loaded 只按窗宽累计。钳块取 subarray 视图（短命引用，set 即拷出）
+      const taken = chunk.length > win ? chunk.subarray(0, win) : chunk;
+      full.set(taken, loaded);
+      loaded += taken.length;
       onProgress({ loaded, total: size });
     }
     // 提前 EOF 防御分支交付拷贝（slice）而非 subarray 视图：视图会钉住 size 级整块
@@ -378,12 +384,24 @@ export function createDispatcher(registry: Registry): Dispatcher {
     // store-backed 全量拉取（此处 ≤1MB 策略直读 + 下方延迟补拉）改分块泵逐块上报；
     // 缺省零行为变化（既有单次 read() 调用形态与字节结果原样保留，本地路径不经泵）
     const onProgress = opts?.onReadProgress;
+    // 泵门控（终审修复波 I-2）：分块泵只服务具备 Range 能力的来源。directS3/directDav
+    // 的 Range 防线降级（store.rangeCapable !== true，rangeOk=false）后，带窗 read 退化
+    // 为「整对象下载再切片」——泵的 N 窗循环会把全量传输放大 N 倍。非 range 来源回落
+    // 单次全量 read（字节面不变），以单条 100% 进度上报收口（进度卡直上完成态）。
+    const pumpCapable = source.store.rangeCapable === true;
+    const readFullOnce = (): Promise<Uint8Array<ArrayBuffer>> =>
+      onProgress
+        ? read!().then((b) => {
+            onProgress({ loaded: b.length, total: b.length });
+            return b;
+          })
+        : read!();
     if (buffer === null) {
       const size = source.size ?? null;
       if (size !== null && size <= FULL_LIMIT) {
-        full = onProgress
+        full = pumpCapable && onProgress
           ? await pumpFull(read!, size, opts?.signal, onProgress)
-          : await read!();
+          : await readFullOnce();
       }
       probe = full ?? (await read!({ start: 0, end: HEAD_SIZE - 1 }));
     } else {
@@ -426,10 +444,13 @@ export function createDispatcher(registry: Registry): Dispatcher {
     // 透传不标 DispatchReadError（isAbortError 判定，与渲染期 ctx.read 的 abort 例外
     // 同向——取消不落错误卡片/不触发重试，经下方 catch 既有 abort 分类静默收场）；
     // 缺省维持单次 read() 全量（零行为变化，含既有 DispatchReadError 包装语义）。
+    // 泵门控（I-2）：onReadProgress 在场且 store 具备 Range 能力才走分块泵；非 range
+    // 来源回落单次全量 read + 单条 100% 上报（readFullOnce，abort 身份经下方 catch
+    // 既有分类不变）。
     const readFull = (): Promise<Uint8Array<ArrayBuffer>> =>
-      (onProgress
+      (onProgress && pumpCapable
         ? pumpFull(read!, source.size ?? null, optsSignal, onProgress)
-        : read!()
+        : readFullOnce()
       ).catch((err: unknown) => {
         if (onProgress && isAbortError(err)) throw err;
         throw new DispatchReadError(err);

@@ -241,8 +241,8 @@ describe('ViewerPane 进度卡接线（计划 2 Task 4）', () => {
 describe('ViewerPane 另存为接线（Task 7）', () => {
   const src = readSrc('src/lib/ViewerPane.svelte');
 
-  it('完成态卡装配：远端 tracker 在场才装（本地零感知），TTL 定时自动卸载；cleanup/守卫分支双路清偿', () => {
-    expect(src).toMatch(/if \(tracker !== null\) \{[\s\S]{0,200}dlDone = \{/);
+  it('完成态卡装配：远端 tracker 泵参与门（终审修复波 I-3——tracker.pumped，零 update 流式路径不误报），TTL 定时自动卸载；cleanup/守卫分支双路清偿', () => {
+    expect(src).toMatch(/if \(tracker !== null && tracker\.pumped\) \{[\s\S]{0,240}dlDone = \{/);
     expect(src).toMatch(/DL_DONE_TTL_MS/);
     expect(src).toMatch(/function clearDlDone\(\): void \{[\s\S]{0,160}dlDone = null;/);
     expect(src).toMatch(/clearDlDone\(\); \/\/ 完成态卡随 effect 清偿卸载/);
@@ -253,6 +253,8 @@ describe('ViewerPane 另存为接线（Task 7）', () => {
     expect(src).toMatch(/savePick\.key === dlKey \? savePick\.handle : null/);
     expect(src).toMatch(/const writable = await saveHandle\.createWritable\(\)\.catch\(\(\) => null\);/);
     expect(src).toMatch(/if \(writable !== null\) \{/);
+    // 终审修复波 M-3：降级不静默——状态条告知（picker 已选目标但盘上无产出无提示的面收口）
+    expect(src).toMatch(/showStatusNotice\('直写落盘通道开启失败，已降级为普通下载'\)/);
   });
 
   it('「下载并另存为」自持泵 tee（评审 M-1）：pumpToWritable 限定泵通道 + dispatch 转 buffer 直传（探测窗/按需窗不进 tee）', () => {
@@ -273,12 +275,19 @@ describe('ViewerPane 另存为接线（Task 7）', () => {
     expect(src).toMatch(/await saveAsTab\(t, \{/);
     expect(src).toMatch(/confirm: \(\) => true/);
     expect(src).toMatch(/showStatusNotice\(`另存为失败：/);
+    // 终审修复波 I-1：自持取消柄作 hooks.signal（泵取消不动 effectAbort），取消落 abort 身份静默
+    expect(src).toMatch(/const pumpAbort = new AbortController\(\);/);
+    expect(src).toMatch(/signal: pumpAbort\.signal/);
+    expect(src).toMatch(/dlAbort = pumpAbort;/);
+    expect(src).toMatch(/if \(!isAbortError\(err\)\) showStatusNotice\(`另存为失败：/);
   });
 
   it('进度反馈接线（评审 I-3）：完成态另存为远端重下复用进度卡通道（dlProgress/dlAddress 直写，finally 卸卡）', () => {
-    expect(src).toMatch(/createProgressTracker\(\(s\) => \{\s*dlProgress = s;\s*\}\)/);
+    // 终审修复波 I-1：onTick 捕获时 tab 引用守卫（切 tab 后迟到 tick 丢弃，旧文件
+    // 进度卡不复活在新 tab）；finally 卸卡同 tab 引用守卫（tab 已切换不动新 tab 进度面）
+    expect(src).toMatch(/createProgressTracker\(\(s\) => \{\s*if \(tab !== t\) return;[\s\S]{0,120}dlProgress = s;\s*\}\)/);
     expect(src).toMatch(/onProgress: \(p: ReadProgressEvent\) => tracker\.update\(p\.loaded, p\.total\)/);
-    expect(src).toMatch(/finally \{\s*dlProgress = null;\s*dlAddress = '';\s*\}/);
+    expect(src).toMatch(/finally \{\s*if \(tab === t\) \{\s*dlProgress = null;\s*dlAddress = '';\s*\}\s*\}/);
   });
 
   it('读取失败卡片失败态（评审 I-1）：catch 路径写 lastRendererId error，saveAsDisabledOf 置灰面收敛', () => {

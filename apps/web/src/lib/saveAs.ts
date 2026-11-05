@@ -64,12 +64,16 @@ export async function saveAsBlob(blob: Blob, suggestedName: string): Promise<Sav
   if (typeof w.showSaveFilePicker === 'function') {
     try {
       const handle = await w.showSaveFilePicker({ suggestedName });
+      let writable: FileSystemWritableFileStream | null = null;
       try {
-        const writable = await handle.createWritable();
+        writable = await handle.createWritable();
         await writable.write(blob);
         await writable.close();
         return 'saved';
       } catch {
+        // 终审修复波 M-5：兜底前中止半成品（abort 丢弃临时文件，.crswap 不残留）；
+        // createWritable 自身失败（句柄失效）时无可 abort 面，直接落下方兜底
+        if (writable !== null) await writable.abort().catch(() => {});
         // picker 成功后的写盘失败（磁盘满/权限回收）：降级 blob URL 兜底，数据不丢
       }
     } catch (err) {
@@ -203,7 +207,19 @@ export async function saveAsTab(
         source.path,
         range !== undefined || signal !== undefined ? { range, signal } : undefined
       );
-    bytes = await pumpFull(read, size, hooks.signal, (p) => hooks.onProgress?.(p));
+    if (source.store.rangeCapable === true) {
+      bytes = await pumpFull(read, size, hooks.signal, (p) => hooks.onProgress?.(p));
+    } else {
+      // 泵门控（终审修复波 I-2，dispatcher readFull 同款）：非 range 来源
+      //（directS3/directDav Range 防线降级 rangeOk=false）带窗 read 退化为整对象
+      // 下载再切片，泵的 N 窗循环会把传输放大 N 倍——回落单次全量 read（signal
+      // 贯穿保留取消面）+ 单条 100% 进度上报（进度卡直上完成态）
+      bytes = await source.store.read(
+        source.path,
+        hooks.signal !== undefined ? { signal: hooks.signal } : undefined
+      );
+      hooks.onProgress?.({ loaded: bytes.length, total: bytes.length });
+    }
   } else {
     // 在手/归档面（L1–L3）：store.read 单次全量——L1/L2 File 字节在手、L3 zipStore
     // 条目读全量（jszip entry.async），统一读通道

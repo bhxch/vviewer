@@ -1163,6 +1163,11 @@ describe('dispatch 读下沉（io-streaming §3：streaming 选路 + StreamCtx �
 // abort 错误身份（isAbortError，不新建错误形态）；小文件（≤4MiB）单块路径与现行为
 // 逐字节等价。onReadProgress 缺省零行为变化——上方「dispatch 读下沉」既有用例
 //（③⑦⑧⑨⑫⑬ 等钉住无 range 全量读形态）即零翻转锚，④ 为 size 已知 >1MB 的显式补锚。
+// 终审修复波 I-2：泵按 store.rangeCapable === true 门控（directS3/directDav Range
+// 防线降级后带窗 read = 整对象下载再切片，N 窗循环 N× 放大传输）——非 range 来源
+// 回落单次全量 read + 单条 100% 上报（⑦ 显式补锚）。本组 pumpSrc 缺省
+// rangeCapable = true（泵行为组的共同前提），⑦ 以 false 显式降级。
+// M-1：size 已知违约超长返回按窗钳块（⑨，镜像不定态分支 ⑧ 的 200 全量响应教义）。
 
 describe('dispatch 全量物化分块泵（计划 2 Task 2，spec §6.4）', () => {
   const CHUNK = 4 * 1024 * 1024; // 4MiB（与实现常量同值：锚定分块对齐）
@@ -1173,7 +1178,7 @@ describe('dispatch 全量物化分块泵（计划 2 Task 2，spec §6.4）', () 
       read: async () => new Uint8Array(0), rangeCapable
     };
   }
-  function pumpSrc(name: string, size?: number | null, rangeCapable?: boolean) {
+  function pumpSrc(name: string, size?: number | null, rangeCapable: boolean | undefined = true) {
     return { storeId: 's', storeLabel: 's', path: name, name, store: pumpStore(rangeCapable), size };
   }
   type PumpCall = { range: { start: number; end: number } | undefined; signal: AbortSignal | undefined };
@@ -1359,7 +1364,7 @@ describe('dispatch 全量物化分块泵（计划 2 Task 2，spec §6.4）', () 
     expect(calls[0]?.signal).toBe(controller.signal); // signal 贯穿策略泵的 range 读
   });
 
-  it('⑦ size 未知 + streaming !rangeCapable：降级补拉同样走泵（不定态至 EOF），进度与 ctx 双达', async () => {
+  it('⑦ size 未知 + streaming !rangeCapable：降级补拉不走泵（I-2 门控）——单次全量 read + 单条 100% 上报，ctx 全量切片形态不变', async () => {
     const reg = createRegistry();
     const TOTAL = CHUNK + 100;
     const calls: PumpCall[] = [];
@@ -1371,16 +1376,12 @@ describe('dispatch 全量物化分块泵（计划 2 Task 2，spec §6.4）', () 
       render: async (buffer, _t, _s, _det, ctx) => { seenBuf = buffer; seenCtx = ctx; return { destroy() {} }; }
     }));
     await createDispatcher(reg).dispatch(
-      pumpSrc('a.stx', null, /* rangeCapable */ undefined), null, document.createElement('div'),
+      pumpSrc('a.stx', null, /* rangeCapable */ false), null, document.createElement('div'),
       { read: genRead(TOTAL, calls), onReadProgress: (p) => reports.push(p) });
-    expect(calls.map((c) => c.range)).toStrictEqual([
-      { start: 0, end: 8191 },
-      { start: 0, end: CHUNK - 1 },
-      { start: CHUNK, end: CHUNK * 2 - 1 }
-    ]);
-    expect(reports).toStrictEqual([
-      { loaded: CHUNK, total: null }, { loaded: TOTAL, total: null }
-    ]);
+    // 非 range 来源带窗 read = 整对象下载再切片，泵的 N 窗循环会 N× 放大传输——
+    // 回落单次无 range 全量读（head 探测 + 一次全量，既有缺省形态）
+    expect(calls.map((c) => c.range)).toStrictEqual([{ start: 0, end: 8191 }, undefined]);
+    expect(reports).toStrictEqual([{ loaded: TOTAL, total: TOTAL }]); // 单条 100% 上报
     expect(seenBuf?.length).toBe(TOTAL); // 降级交付全量（非 8KB head）
     expect(seenCtx?.size).toBe(TOTAL); // 降级 ctx 形态不变：size = 全量长
   });
@@ -1422,6 +1423,45 @@ describe('dispatch 全量物化分块泵（计划 2 Task 2，spec §6.4）', () 
     expect(seenBuf?.length).toBe(CHUNK * 2);
     expect(seenBuf![0]).toBe(0x41);
     expect(seenBuf![CHUNK]).toBe(0x41); // 钳块拼接连续
+  });
+
+  it('⑨ size 已知违约超长返回（窗 + 越界尾量）：按窗钳块 set 不越底座（M-1：⑧ 教义的 size 已知镜像）', async () => {
+    const reg = createRegistry();
+    // 违约 store（陈旧元数据形态：声明 size 比真实对象小 10B）：read 无视请求 end，
+    // 一律交付「从 start 到真实对象尾」的整段——未钳块时首块 set 即 RangeError
+    //（loaded + chunk.length 越过 size 级底座），且 loaded 越界使 size 收口失效
+    const SIZE = CHUNK + 1; // 声明 size（泵收口真值）
+    const src = new Uint8Array(CHUNK + 11).map((_, i) => (i * 5) & 0xff);
+    const calls: PumpCall[] = [];
+    const reports: Array<ReadProgressEvent> = [];
+    let seenBuf: Uint8Array | undefined;
+    reg.install(mk('plain', ['pln'], {
+      render: async (buffer) => { seenBuf = buffer; return { destroy() {} }; }
+    }));
+    const read = async (
+      range?: { start: number; end: number },
+      signal?: AbortSignal
+    ): Promise<Uint8Array<ArrayBuffer>> => {
+      calls.push({ range, signal });
+      if (!range) throw new Error('泵路径不应有无 range 读');
+      return new Uint8Array(src.slice(range.start)); // 违约：无视 end，交付 start 起全尾段
+    };
+    await createDispatcher(reg).dispatch(
+      pumpSrc('a.pln', SIZE), null, document.createElement('div'),
+      { read, onReadProgress: (p) => reports.push(p) });
+    // head 探测 + 两窗（违约块各钳回窗宽）：{0,4MiB-1} 收 4MiB + {4MiB,4MiB} 收 1B
+    expect(calls.map((c) => c.range)).toStrictEqual([
+      { start: 0, end: 8191 },
+      { start: 0, end: CHUNK - 1 },
+      { start: CHUNK, end: SIZE - 1 }
+    ]);
+    expect(reports).toStrictEqual([
+      { loaded: CHUNK, total: SIZE }, { loaded: SIZE, total: SIZE }
+    ]);
+    expect(seenBuf?.length).toBe(SIZE); // 不越底座（未钳块首块 set 即 throw）
+    expect(seenBuf![0]).toBe(0); // 首窗字节 = src 前缀（chunk 自 start 起，钳窗不偏移）
+    expect(seenBuf![CHUNK - 1]).toBe(((CHUNK - 1) * 5) & 0xff);
+    expect(Array.from(seenBuf!.slice(CHUNK))).toEqual(Array.from(src.slice(CHUNK, SIZE))); // 尾窗 1B 收口正确
   });
 
 });

@@ -227,7 +227,7 @@ async function seedRemoteTabs(
 async function installSavePickerStub(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const w = window as unknown as Record<string, unknown> & {
-      __vvSave: { calls: (string | null)[]; chunks: Blob[]; closed: number; aborted: number };
+      __vvSave: { calls: (string | null)[]; chunks: Array<Blob | Uint8Array>; closed: number; aborted: number };
     };
     w.__vvSave = { calls: [], chunks: [], closed: 0, aborted: 0 };
     w.showSaveFilePicker = async (o?: { suggestedName?: string }) => {
@@ -249,7 +249,8 @@ async function installSavePickerStub(page: Page): Promise<void> {
   });
 }
 
-/** 落盘汇总：suggestedName / 总字节 / 校验和 / close·abort 计数 */
+/** 落盘汇总：suggestedName / 总字节 / 校验和 / close·abort 计数。chunks 兼容双形态：
+ * Blob（saveAsBlob 一次性写）与 Uint8Array（tee 自持泵逐块直写，终审 I-4 锚） */
 async function savedSummary(page: Page): Promise<{
   calls: (string | null)[];
   total: number;
@@ -259,12 +260,12 @@ async function savedSummary(page: Page): Promise<{
 }> {
   return page.evaluate(async () => {
     const s = (window as unknown as {
-      __vvSave: { calls: (string | null)[]; chunks: Blob[]; closed: number; aborted: number };
+      __vvSave: { calls: (string | null)[]; chunks: Array<Blob | Uint8Array>; closed: number; aborted: number };
     }).__vvSave;
     let total = 0;
     let hash = 0;
     for (const c of s.chunks) {
-      const buf = new Uint8Array(await c.arrayBuffer());
+      const buf = c instanceof Blob ? new Uint8Array(await c.arrayBuffer()) : new Uint8Array(c);
       total += buf.length;
       for (let i = 0; i < buf.length; i++) hash = (hash + buf[i]! * ((i % 97) + 1)) >>> 0;
     }
@@ -514,6 +515,43 @@ test.describe('b-save-as 另存为管线（SA 域 + DL 移交锚）', () => {
     await expect(page.locator('.vv-tab.active', { hasText: 'e2e-fake' })).toBeVisible();
     await expect(card).toHaveCount(0);
     expect(srv.fileRequests).toHaveLength(0); // 全程零泵请求
+    await srv.close();
+  });
+
+  test('DL-SAVE-01 tee 直写运行时锚（终审 I-4）：确认卡「下载并另存为」→ picker 桩 close → 落盘字节 hash 与源等值', async ({ page }) => {
+    test.setTimeout(120_000);
+    // 2MiB（<4MiB 泵单块窗；>1MB 阈值触发确认门）——落盘字节面走自持泵 tee
+    //（pumpToWritable）单通道：SA-01 菜单路锚 saveAsBlob 管线，本锚钉确认卡双形态二
+    const png = makePaddedPng(2 * 1024 * 1024);
+    const srv = await startFakeVVServer('mid.png', png);
+    await installSavePickerStub(page);
+    await seedRemoteTabs(page, { base: srv.base, tabs: [{ path: '', name: 'e2e-fake', active: true }, { path: 'mid.png', name: 'mid.png', size: png.length, active: false }] });
+    await page.goto('/');
+    await expect(page.locator('.vv-tab.active', { hasText: 'e2e-fake' })).toBeVisible({ timeout: 20_000 });
+    await setConfirmThreshold(page, '1');
+
+    await page.locator('.vv-tab', { hasText: 'mid.png' }).click();
+    const card = page.locator('.vv-dl-confirm');
+    await expect(card).toBeVisible({ timeout: 20_000 });
+    expect(srv.fileRequests).toHaveLength(0); // 门拦截：泵未启动
+
+    // 双形态二：picker 桩同步 resolve → dlSaveHandle 登记 → effect 重跑过门 →
+    // 自持泵 tee 逐块直写 → 泵完 close 落盘（不等渲染）
+    await card.locator('.vv-dl-confirm-saveas').click();
+    await expect(card).toHaveCount(0); // 门通过卸卡
+    await page.waitForFunction(() => {
+      const s = (window as unknown as { __vvSave?: { closed: number } }).__vvSave;
+      return (s?.closed ?? 0) >= 1;
+    }, undefined, { timeout: 30_000 });
+
+    const sum = await savedSummary(page);
+    expect(sum.calls[0]).toBe('mid.png'); // suggestedName = 源文件名
+    expect(sum.total).toBe(png.length); // 全量字节落盘
+    expect(sum.hash).toBe(byteHash(png)); // 校验和等值（tee 直写运行时锚）
+    expect(sum.closed).toBe(1);
+    expect(sum.aborted).toBe(0);
+    // tee 泵完 buffer 直传 dispatch（full = buffer 零重读）：内容渲染接管
+    await expect(page.locator('.vv-viewer-host img')).toBeVisible({ timeout: 30_000 });
     await srv.close();
   });
 });

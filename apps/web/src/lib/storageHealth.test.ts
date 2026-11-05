@@ -131,6 +131,12 @@ describe('formatBytes（用量显示口径）', () => {
     expect(formatBytes(5 * 1024 * 1024)).toBe('5.0 MB');
     expect(formatBytes(3 * 1024 * 1024 * 1024)).toBe('3.0 GB');
   });
+
+  it('B 档分数取整（终审修复波 M-2：亚 KB 分数速率不原样渲染小数尾巴）', () => {
+    expect(formatBytes(333.33)).toBe('333 B');
+    expect(formatBytes(999.6)).toBe('1000 B'); // 四舍五入进整千仍 B 档文案
+    expect(formatBytes(0.4)).toBe('0 B');
+  });
 });
 
 describe('collectStorageInfo（spec §2.1 口径）', () => {

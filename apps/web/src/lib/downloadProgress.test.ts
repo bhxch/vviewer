@@ -142,3 +142,27 @@ describe('createProgressTracker——done() 终态', () => {
     expect(ticks[1]!.loadedText).toBe('0 B');
   });
 });
+
+describe('createProgressTracker——pumped 泵参与标志（终审修复波 I-3 完成态卡装配门）', () => {
+  it('零 update（流式渲染零下载路径）pumped=false——完成态卡不装配的门', () => {
+    const tracker = createProgressTracker(() => {});
+    expect(tracker.pumped).toBe(false);
+    tracker.done(); // done 不算泵参与（无真实下载发生）
+    expect(tracker.pumped).toBe(false);
+  });
+
+  it('任一 update 置位（节流丢弃 tick 亦算参与——tracker 收到过 update 即真）', () => {
+    const ticks: ProgressSnapshot[] = [];
+    const tracker = createProgressTracker(collect(ticks), { now: makeClock(0) });
+    tracker.update(0, null); // 首个 update 必发 tick
+    expect(tracker.pumped).toBe(true);
+  });
+
+  it('done 后的迟到 update（被忽略不发 tick）仍算泵参与', () => {
+    const tracker = createProgressTracker(() => {}, { now: makeClock(0) });
+    tracker.update(0, null);
+    tracker.done();
+    tracker.update(999, null); // finished 短路：无 tick
+    expect(tracker.pumped).toBe(true);
+  });
+});

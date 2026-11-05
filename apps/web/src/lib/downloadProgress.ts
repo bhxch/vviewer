@@ -45,6 +45,10 @@ export interface ProgressTrackerOptions {
 export interface ProgressTracker {
   update(loaded: number, total: number | null): void;
   done(): void;
+  /** update 是否发生过（终审修复波 I-3 泵参与门）：streaming 渲染在 range-capable
+   * 远端源只做 head 探测 + 按需窗，零全量下载零 update——完成态卡（ViewerPane
+   * dlDone 装配门）以本标志区分「真实泵参与」与「零下载流式路径」，防误报。 */
+  readonly pumped: boolean;
 }
 
 const WINDOW_MS = 5000; // spec §6.4：~5s 滑动窗口均值
@@ -118,6 +122,7 @@ export function createProgressTracker(
   let total: number | null = null;
   let lastTickAt = -Infinity; // 首个 update 必发 tick
   let finished = false;
+  let pumpedFlag = false; // 泵参与标志：任一 update 置位（I-3 完成态卡装配门）
 
   /** 滑窗速度：剪去窗口外旧样本（至少保留末两点）后首末差分；未稳/负增量 → null */
   function computeSpeed(): number | null {
@@ -154,6 +159,7 @@ export function createProgressTracker(
 
   return {
     update(nextLoaded: number, nextTotal: number | null): void {
+      pumpedFlag = true; // 泵参与标志先于 finished 短路：任一 update 即算参与（I-3）
       if (finished) return;
       loaded = nextLoaded;
       if (nextTotal !== null) total = nextTotal; // total 一旦上报不回退 null（事件流定态）
@@ -168,6 +174,9 @@ export function createProgressTracker(
       if (finished) return;
       finished = true;
       onTick(snapshot()); // 终态不受节流，必发
+    },
+    get pumped(): boolean {
+      return pumpedFlag;
     }
   };
 }
