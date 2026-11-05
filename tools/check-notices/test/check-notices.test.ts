@@ -14,6 +14,9 @@ importers:
       '@bhxch/vviewer-core':
         specifier: workspace:*
         version: link:../../packages/vviewer-core
+      '@file-viewer/core':
+        specifier: ^3.3.3
+        version: 3.3.3
       libarchive.js:
         specifier: ^2.0.2
         version: 2.0.2
@@ -38,7 +41,8 @@ packages: {}
 
 describe('collectRuntimeDeps', () => {
   it('汇总各 importer 的 dependencies 段，跳过 workspace 链接与 devDependencies', () => {
-    expect(collectRuntimeDeps(LOCK_FIXTURE)).toEqual(['libarchive.js', 'artplayer', 'hls.js']);
+    // '@file-viewer/core' 锚定 scoped 名：闭引号不入捕获组（T1 评审移交）
+    expect(collectRuntimeDeps(LOCK_FIXTURE)).toEqual(['@file-viewer/core', 'libarchive.js', 'artplayer', 'hls.js']);
   });
 
   it('无 importers 段返回空数组', () => {

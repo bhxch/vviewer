@@ -41,7 +41,9 @@ export function collectRuntimeDeps(lockText) {
       section = null;
       continue;
     }
-    const d = line.match(/^ {6}'?([^\s:]+)'?:/);
+    // 字符类排除引号：scoped 名的闭引号不得吞进捕获组（否则 '@file-viewer/core'
+    // 捕获成 "@file-viewer/core'"，与 NOTICES 登记名比对恒失配——T1 评审移交）。
+    const d = line.match(/^ {6}'?([^\s:']+)'?:/);
     if (d && section === 'runtime') {
       const name = d[1];
       if (name.startsWith('@bhxch/vviewer-')) continue;
