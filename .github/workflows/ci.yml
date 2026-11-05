@@ -34,6 +34,9 @@ jobs:
       - run: pnpm typecheck
       # C 项：生成扩展名物入库（运行时装配依赖）——与 languages.json 失同步即失败，防入库漂移
       - run: node tools/grammar-builder/gen-code-extensions.mjs --check
+      # plan-3 foreign 批锁版纪律：@file-viewer/* 依赖须精确版本（无 ^/~ 范围）且与
+      # pnpm-lock 解析一致，范围前缀或 lock 漂移即失败——外部渲染链升级只能显式独立 commit
+      - run: node tools/check-foreign-deps.mjs --check
       # wasm-bindgen CLI 供给缓存（runner 不预装 CLI）：构建脚本自供给下载官方预编译
       # 二进制到 ~/.cache/svgbob/wasm-bindgen-cli（镜像 grammar 工具链 binaryen 的
       # 「预编译 + ~/.cache 缓存」形态），此处仅承载缓存；键按 crate Cargo.toml 失效，

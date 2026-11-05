@@ -28,6 +28,18 @@
 | @viz-js/viz | MIT | graphviz 本地渲染（render-diagram 包） | md-diagrams 批 |
 | nomnoml | MIT | nomnoml 本地渲染（render-diagram 包） | md-diagrams 批 |
 | pako | MIT AND Zlib | kroki URL deflate 编码（render-diagram 包） | md-diagrams 批 |
+| @file-viewer/core | Apache-2.0 | file-viewer 渲染核心（桥接渲染器公共底座：mount 契约、资产 base 解析、sanitize 边界） | file-viewer 批 T1 |
+| @file-viewer/capability-rtf | Apache-2.0 | rtf 渲染启用包（向 renderer-word 注册 rtf.js；其依赖 rtf.js 为 MIT） | file-viewer 批 T1 |
+| @file-viewer/renderer-chm | Apache-2.0 | chm 编译 HTML 帮助文档渲染 | file-viewer 批 T1 |
+| @file-viewer/renderer-email | Apache-2.0 | eml/msg/mbox 邮件渲染 | file-viewer 批 T1 |
+| @file-viewer/renderer-epub | Apache-2.0 | epub/fb2/umd 电子书渲染 | file-viewer 批 T1 |
+| @file-viewer/renderer-hangul | Apache-2.0 | hwp/hwpx 韩文文档渲染 | file-viewer 批 T1 |
+| @file-viewer/renderer-iwork | Apache-2.0 | pages/numbers/key（Apple iWork）渲染 | file-viewer 批 T1 |
+| @file-viewer/renderer-ofd | Apache-2.0 | ofd 版式文档渲染 | file-viewer 批 T1 |
+| @file-viewer/renderer-presentation | Apache-2.0 | ppt/pptm/potx/potm/ppsx/ppsm 演示文稿渲染 | file-viewer 批 T1 |
+| @file-viewer/renderer-spreadsheet | Apache-2.0 | xlsx 系变体（xltx/xlsb/xlt/xla/xlam/xltm）/ods/fods/dbf/tsv 表格渲染 | file-viewer 批 T1 |
+| @file-viewer/renderer-word | Apache-2.0 | doc/docm/dotx/dotm/odt/odp 文字文档渲染（odt/odp 归属本包，按其 README；其依赖 @file-viewer/doc 为 MIT） | file-viewer 批 T1 |
+| @file-viewer/renderer-wordperfect | Apache-2.0 | wpd/wp/wp5/wp6（Corel WordPerfect）渲染 | file-viewer 批 T1 |
 | helix-editor/helix | MPL-2.0 | `packages/vviewer-highlight/assets/themes.json`（214 主题派生自 `runtime/themes`，格式转换修改）与 `languages.json`（派生自 `languages.toml`）、`packages/vviewer-highlight/assets/queries/`（vendored 拷贝）；溯源见 `tools/helix-assets/README.md` | M2 |
 | microsoft/vscode | MIT | `packages/vviewer-highlight/assets/vscode/dark_modern.json`、`light_modern.json`（theme-defaults 扩展主题，JSONC 规范化与 include 内联后 vendor，色值未改动） | B |
 | microsoft/vscode（extensions/theme-seti） | MIT | `packages/vviewer-highlight/assets/vscode-icons/seti/`（Seti 图标主题，清单 JSONC 规范化与格式改写后 vendor、`seti.woff` 原样拷贝；字形上游 jesseweed/seti-ui 同 MIT），溯源与修改明细见 `packages/vviewer-highlight/assets/vscode-icons/README.md` | 图标主题 T4 |
