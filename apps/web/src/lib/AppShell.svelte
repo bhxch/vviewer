@@ -1,4 +1,7 @@
 <script lang="ts">
+  // 跨域 Worker blob 引导桥（模块级副作用，先于任何 foreign 渲染装配——CDN 直链
+  // worker 的同源硬约束补面，见 foreignWorkerBridge.ts 头注）
+  import './foreignWorkerBridge';
   import { onMount } from 'svelte';
   import TabBar from './TabBar.svelte';
   import ViewerPane from './ViewerPane.svelte';
