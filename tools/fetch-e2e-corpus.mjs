@@ -116,6 +116,26 @@ const SOURCES = [
     // test/fixtures（chm/hwp/iwork/dbf/rtf/wpd 最小夹具）+ chm rust 测试夹具
     include: ['apps/viewer-demo/public/example/', 'packages/renderers/*/test/fixtures/', 'packages/renderers/chm/rust/tests/fixtures/'],
     rationale: 'Apache-2.0；file-viewer 自带上游夹具（产品同源引擎的真实解析面）——整仓 recursive tree 实测未截断（6055 blobs），include 三目录圈定候选面后 maxPerExtension=1 每格式取首个小体量夹具，实测 16 文件 ~530KB（epub 组 epub+fb2 双扩展、iwork 组 pages/numbers/key 三扩展，presentation 组无小体量夹具不入选）'
+  },
+  {
+    id: 'file-viewer-fixtures-2',
+    repo: 'flyfish-dev/file-viewer',
+    // 与 file-viewer-fixtures 同 commit：v3.3.3 tag（git ls-remote 钉定 2026-11-06；npm 依赖 3.3.3 同版）
+    commit: '760038d88e9252bc746c04626b82b84226ef6948',
+    // SAVE-FOREIGN-2 第二波 10 组桥接渲染器（spec §6.3 序 12-21）中上游有小体量夹具的
+    // 19 扩展名（'.midi' 置于 '.mid' 前、'.tiff' 置于 '.tif' 前——endsWith 桶序防误配）。
+    // 无小体量上游夹具的绑定格式不入选（parquet/avro/webarchive/heic/heif/shp/tif、
+    // signature 其余扩展名等）——e2e 渲染锚降级记录见 plan4 task-4 报告
+    extensions: ['.psd', '.sqlite', '.wasm', '.ttf', '.geojson', '.kml', '.gpx', '.typ', '.dcm', '.drawio', '.midi', '.mid', '.olb', '.dra', '.gds', '.oas', '.oasis', '.p7m', '.tif'],
+    maxFiles: 30,
+    maxPerExtension: 1, // 每扩展名至多 1 个（tree 顺序首个）：19 扩展名 × 1 = 18 文件（.midi 无上游夹具）~243KB
+    maxBytes: 200_000, // 单文件 ≤200KB：design.psd 116KB 为最大入选；illustrator-grid.ai 402KB 超限（且 ai 不在圈定面）
+    pathPrefix: '',
+    // 夹具三处：viewer-demo 静态示例（sqlite/psd/geo/typ/dcm/drawio/eda/midi/wasm/p7m/tiff）
+    // + drawio 样式字体目录（小体量 ttf 供字体查看锚）+ 各 renderer 包/顶层 test fixtures
+    // （dicom 备选：ct-small.dcm 消失后 tree 序下一个 dcm 顶上）
+    include: ['apps/viewer-demo/public/example/', 'apps/viewer-demo/public/vendor/drawio/styles/fonts/', 'test/fixtures/', 'packages/renderers/*/test/fixtures/'],
+    rationale: 'Apache-2.0；同 file-viewer-fixtures 源机制的第二波夹具圈定——整仓 recursive tree 实测未截断（6055 blobs），include 四目录圈定候选面后 maxPerExtension=1 每扩展名取 tree 序首个小体量夹具，实测 18 文件 ~243KB（tif 取 multipage-ccitt-g4.tif——G4 压缩经 utif decodeG4 本地实核解码通过；上游 pic.tif/pic.tiff 实为 PNG 误名字节〔渲染面走 <img> 原生解码、Chromium 无 TIFF 支持恒错误卡〕不入选；ttf 取 drawio 样式字体 ArchitectsDaughter 37KB——example 目录无 ttf，vendor/pdf 与 typst 字体目录不在圈定面）'
   }
 ];
 
