@@ -436,6 +436,16 @@ class TabCollection {
       if (t.source.storeId !== storeId) continue;
       if (t.source.path !== '' && paths.length > 0 && !paths.includes(t.source.path)) continue;
       t.rev = (t.rev ?? 0) + 1;
+      // size 快照失效（计划 2 泵化的回归修复，m5 e2e 实证）：FileSource.size 是打开时
+      // 快照（spec §6.4 已知接缝「SSE 变更只 rev++ 不重 stat」）——泵化前 ≤1MB 全量
+      // 直读（无 Range）天然带出增长字节；泵化后读窗按 size 收口（bytes=0-(size-1)），
+      // 陈旧 size 会把追加内容截在窗外（重读发生、渲染的是旧前缀——SSE 自动刷新
+      // 名存实亡）。变更推送即「源数据可能变化」，size 快照随之失效：size null 使
+      // 重渲染轮走不定态 EOF 收口泵（增长字节可见），与 spec 已知接缝「服务端增长
+      // 越过阈值不补确认（泵+进度卡+取消仍在）」同口径；树中重开文件即取新鲜值。
+      if (t.source.path !== '') {
+        t.source = { ...t.source, size: undefined };
+      }
     }
   }
 
