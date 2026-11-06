@@ -296,12 +296,16 @@ describe('mid-load 读失败收口（M1 评审：requestRange 非 abort 读失�
     return { promise, resolveDoc, rejectDoc };
   }
 
-  it('非 abort 读失败（文档未开）→ loadingTask.destroy 被调 → render promise reject 落错误卡片路径', async () => {
+  it('非 abort 读失败（文档未开）→ 读失败门竞速使 render 立即 reject（携原始读错误）→ 错误卡片路径；destroy 尽力清理', async () => {
     const host = document.createElement('div');
-    const { rejectDoc } = stubPendingGetDocument();
-    // 镜像真实 pdfjs 行为：destroy() 使 loadingTask.promise reject
+    stubPendingGetDocument();
+    // 统一验证阶段实证重定基：pdfjs 6.4.299 的 loadingTask.destroy() 在文档打开中段
+    // 挂起（await this._setupCapability.promise 永不落定）——「destroy 使 promise
+    // reject」不可达。现语义：onReadFailure 触发读失败门（Promise.race）立即按原始
+    // 读错误 reject（错误卡片显示真实读失败原因而非 destroy 的 Worker was destroyed），
+    // destroy 降级为尽力清理（fire-and-forget，不 await）
     lastDestroy.mockImplementation(async () => {
-      rejectDoc(new Error('Worker was destroyed'));
+      await new Promise(() => {}); // 镜像真实 pdfjs：中段 destroy 永不落定
     });
     const read = vi.fn(async () => {
       throw new Error('模拟网络错');
@@ -310,7 +314,7 @@ describe('mid-load 读失败收口（M1 评审：requestRange 非 abort 读失�
     const renderPromise = pdfRenderer.render(HEAD, host, makeSource({ rangeCapable: true }), DET, ctx);
     await vi.waitFor(() => expect(getDocumentMock).toHaveBeenCalled());
     lastGetDocumentArg().range!.requestDataRange(0, 100); // mid-load 读失败
-    await expect(renderPromise).rejects.toThrow('Worker was destroyed');
+    await expect(renderPromise).rejects.toThrow('模拟网络错');
     expect(lastDestroy).toHaveBeenCalled();
   });
 

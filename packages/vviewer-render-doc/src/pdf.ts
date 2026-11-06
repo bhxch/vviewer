@@ -92,8 +92,9 @@ export function createPdfRangeTransport(
     head: Uint8Array;
     read: StreamCtx['read'];
     signal?: AbortSignal;
-    /** 非 abort 读失败回调（M1）：mid-load 收口钩子，render 侧据 docOpened 门控 destroy */
-    onReadFailure?: () => void;
+    /** 非 abort 读失败回调（M1）：mid-load 收口钩子，携带原始读错误（render 侧据
+     * docOpened 门控收口，错误经竞速门让 doc-open promise 立即 reject——见 render 侧注） */
+    onReadFailure?: (err: unknown) => void;
   }
 ): PDFDataRangeTransport & { requestRange(begin: number, end: number): Promise<void> } {
   const { size, head, read, signal, onReadFailure } = opts;
@@ -110,19 +111,20 @@ export function createPdfRangeTransport(
       this.onDataRange(begin, chunk);
     }
     requestDataRange(begin: number, end: number): void {
-      // pdfjs transport API 无 per-chunk 错误回传通道：读失败/取消无法直接让
-      // loadingTask.promise reject。收口分两路（M1 评审）：
+      // pdfjs transport API 无 per-chunk 错误回传通道（worker 侧 RangeReader.read 只
+      // 有 onDataRange/_enqueue 的 resolve 面，cancel 亦 resolve 为 EOF——6.4.299 实核），
+      // 读失败/取消无法直接让 loadingTask.promise reject。收口分两路（M1 评审）：
       // - abort 身份（signal 取消，store 层统一抛 abortReadError）：静默——render 失败
       //   清理与实例 destroy 均前置 signal abort，在飞 ctx.read 先行 reject，无字节再
       //   交付，挂起的 range reader 由 loadingTask.destroy() 收口；
-      // - 非 abort 读失败（DispatchReadError/网络错）：交 onReadFailure（render 侧
-      //   docOpened 门控）——文档未开时 destroy 使 promise reject 进 render 既有 catch
-      //   → 错误卡片路径（否则 range reader 永久 pending → render 挂死且无 destroy
-      //   路径）；doc 已开后懒页 chunk 读失败维持静默（单页空白不渲染，可接受）。
+      // - 非 abort 读失败（DispatchReadError/网络错）：交 onReadFailure（携带原始错误，
+      //   render 侧 docOpened 门控）——文档未开时经读失败门竞速使 doc-open 立即 reject
+      //   进 render 既有 catch → 错误卡片路径（否则 range reader 永久 pending → render
+      //   挂死）；doc 已开后懒页 chunk 读失败维持静默（单页空白不渲染，可接受）。
       // 错误身份在此不改写（isAbortError 纯身份判定，见 core/dispatch/errors）。
       void this.requestRange(begin, end).catch((err: unknown) => {
         if (isAbortError(err)) return;
-        onReadFailure?.();
+        onReadFailure?.(err);
       });
     }
   }
@@ -207,23 +209,40 @@ export const pdfRenderer: Renderer = {
     // chunk 读失败）维持静默——单页空白不渲染可接受，不因尾块抖动整页报错
     let loadingTask: PDFDocumentLoadingTask;
     let docOpened = false;
-    // M1 收口标志：onReadFailure 触发的 destroy 与真实取消（external/readAbort）在
-    // reject 身份上同形（pdfjs destroy 的 promise reject 是 AbortException）——dispatch
-    // 错误身份层按 abort 归类「不上屏」，错误卡片永不出现（统一验证阶段 e2e 实证）。
-    // 标志区分两条收口：M1 读失败退化剥 abort 身份上屏（下方 catch），真实取消维持静默。
+    // M1 收口双件套（统一验证阶段两段实证）：
+    // ①读失败门（firstReadFailure）：pdfjs 6.4.299 的 loadingTask.destroy() 在文档
+    //   打开中段挂起（`await this._setupCapability.promise` 永不落定——setup 卡在
+    //   range reader 的只 resolve 无 reject 面），destroy 收口路径不可达。onReadFailure
+    //   触发门 reject，下方以 Promise.race 让 doc-open 立即按读失败收口；
+    // ②身份剥壳：destroy/竞速 reject 的错误若按 AbortException 身份会被 dispatch 错误
+    //   身份层归类「abort 不上屏」，错误卡片永不出现——M1 读失败退化剥 abort 身份重抛
+    //   （generic → 错误卡片 + 重试），真实取消维持 abort 静默。
     let m1ReadFailed = false;
+    let rejectFirstReadFailure: (err: Error) => void = () => {};
+    const firstReadFailure = new Promise<never>((_, reject) => {
+      rejectFirstReadFailure = reject;
+    });
     loadingTask =
       transport !== null
         ? pdfjs.getDocument({
             range: createPdfRangeTransport(pdfjs.PDFDataRangeTransport, {
               size: transport.size,
-              head: transport.head,
+              // initialData 传副本：pdfjs 对 range 参数的 initialData 同样 transfer 到
+              // worker（与 data 参数同语义，统一验证阶段 R-06 实证）——直传 head 探测块
+              // 会在 render 失败后把 dispatcher 手里的 probe 底座 detach，错误卡片的
+              // open-as/retry 动作构建（probe.slice）即抛 detached ArrayBuffer，卡片
+              // 丢失全部动作钮。8KB 一次性拷贝换错误路径的字节面完整
+              head: transport.head.slice(),
               read: transport.read,
               signal: readAbort.signal,
-              onReadFailure: () => {
+              onReadFailure: (err) => {
                 if (!docOpened) {
                   m1ReadFailed = true;
-                  void loadingTask.destroy();
+                  rejectFirstReadFailure(err instanceof Error ? err : new Error(String(err ?? '读取窗段失败')));
+                  // destroy 为尽力清理（中段调用会挂起在 setup await 上，promise 永不
+                  // 落定——竞速门已先行收口，此处只护资源回收路径）；worker 由下方
+                  // catch 显式终止（destroy 挂起期间其内部 terminate 不可达）
+                  void loadingTask.destroy().catch(() => {});
                 }
               }
             })
@@ -231,21 +250,25 @@ export const pdfRenderer: Renderer = {
         : pdfjs.getDocument({ data: buffer });
     let doc: PDFDocumentProxy;
     try {
-      doc = await loadingTask.promise;
+      doc = await Promise.race([loadingTask.promise, firstReadFailure]);
       docOpened = true; // 文档已开：后续懒页 chunk 读失败走静默分支（onReadFailure 门控）
     } catch (e) {
       const cancelled = readAbort.signal.aborted || externalSignal?.aborted === true;
-      // 打开失败（损坏 PDF/读失败）：释放 worker 端资源并取消在飞窗段读——不留孤儿
-      // promise（transport 模式挂起的 range reader 随 destroy 收口）。真实取消维持
+      // 打开失败（损坏 PDF/读失败）：释放 worker 端资源并取消在飞窗段读。真实取消维持
       // abort 身份（dispatch 既有分类：取消 no-op 不上屏）；M1 读失败退化（非 abort
-      // 读失败且文档未开 → onReadFailure destroy）剥 abort 身份重抛——destroy 的
-      // reject 是 AbortException，不改写会被归为取消而静默，错误卡片永不出现
-      //（DispatchReadError/generic 经 dispatcher catch 既有分类，generic 落错误卡片 +
-      // 重试，R-06 锚语义）。沿用 errors.ts 既有分类，不新造错误类别。
+      // 读失败且文档未开 → onReadFailure 门竞速）剥 abort 身份重抛——不改写会被归为
+      // 取消而静默，错误卡片永不出现（DispatchReadError/generic 经 dispatcher catch
+      // 既有分类，generic 落错误卡片 + 重试，R-06 锚语义）。沿用 errors.ts 既有分类，
+      // 不新造错误类别。
       readAbort.abort();
       externalSignal?.removeEventListener('abort', onExternalAbort);
-      void loadingTask.destroy();
+      void loadingTask.destroy().catch(() => {});
       if (m1ReadFailed && !cancelled) {
+        // destroy 中段挂起（setup await）→ 其内部 worker terminate 不可达：显式终止
+        // 卡在 pending range reader 的 worker（loadingTask._worker 为 pdfjs 内部字段，
+        // 6.4.299 实核 destroy(): void 同步 terminate _webWorker——仅 M1 错误路径触达，
+        // 防每次读失败重试泄漏一个假死 worker）
+        (loadingTask as unknown as { _worker?: { destroy(): void } })._worker?.destroy();
         throw new Error(e instanceof Error ? e.message : String(e));
       }
       throw e;

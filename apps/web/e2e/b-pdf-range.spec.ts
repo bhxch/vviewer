@@ -46,11 +46,12 @@ import { openMenu } from './tabbar-menu';
  *   tools/gen-e2e-pdf-linearized.py 生成（uv run tools/gen-e2e-pdf-linearized.py，
  *   12 页 600×900pt / 1,576,058B / 确定性重跑等值，生成时 sha256
  *   83bd9a3714002e443e8dda6b0fde4509bc18cad6fc3a36302cd9047dc5f0ded4）。
- * - 线性化两前提（pdfjs worker 实读锚定）：① startxref 取自文件头线性化字典首个 endobj
- *   之后（不走文件尾扫描）——文档打开只需文件头首屏段（本夹具 /E=132016，即前 3 个
- *   64KB 窗段）+ 尾部主 xref（/Prev 追随，pdf.worker.mjs readXRef 的 startXRefQueue）；
- *   ② /N=12 使 numPages 免尾区读取。R-01 悬挂带 [196608,1.45MB)（窗段 3-22）落在首屏
- *   段之后、尾部主 xref 窗段（chunk 24）之前——文档打开与首屏不受悬挂影响、全量永不可达。
+ * - 线性化前提：startxref 自文件头线性化字典后取（不走文件尾扫描）、/N=12 使
+ *   numPages 免尾区读取。统一验证阶段实测勘误（无悬挂全伺服抓取请求序）：pdfjs
+ *   6.4.299 对本夹具的 transport 装配在文档打开/首屏期间按 64KB 窗段逆序扫描主窗体
+ *   （chunk 22→2）再补拉（1,3,5）——「文档打开只需首屏段+尾部主 xref」原前提不成立。
+ *   R-01/R-05 悬挂带重定基为 [196608,458752)（窗段 3-6）：首屏所需窗段全在带外，
+ *   IMMEDIATE_PAGES 的 pages 2-3 内容流居带内（canvas 恒 1），全量永不可达。
  * - 缺失容错：existsSync 守卫 skip（fetch-e2e-corpus 同款，统一验证阶段先跑生成脚本）。
  *
  * mock 形态沿先例：R1 远端通道 = mini 假 vviewer 服务器（b-save-as 同款端点集：health/
@@ -73,6 +74,8 @@ const hasFixture = existsSync(FIXTURE_PATH);
 // ---------- R1 远端通道：mini 假 vviewer 服务器（b-save-as 同款端点集，Range 形态扩展） ----------
 
 interface FileRequestLog {
+  /** 请求的 path（统一验证阶段新增：git 可用性探测后台读 .git/HEAD 的隔离计量面） */
+  path: string;
   range: string | null;
   start: number | null;
   end: number | null;
@@ -124,8 +127,17 @@ async function startFakeVVServer(
       return;
     }
     if (url.pathname === '/api/file') {
+      const reqPath = url.searchParams.get('path') ?? '';
       const range = req.headers.range ?? null;
       const m = range !== null ? /bytes=(\d+)-(\d*)/.exec(range) : null;
+      // 非目标 path 一律 404（git 可用性探测会读 <dir>/.git/HEAD——真服务端语义；
+      // 404 使探测负缓存静默收敛，其字节不进 servedBytes 计量、请求带 path 供过滤）
+      if (reqPath !== fileName) {
+        fileRequests.push({ path: reqPath, range, start: null, end: null, served: false, servedLen: 0 });
+        res.writeHead(404, { ...cors, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'not found' }));
+        return;
+      }
       const start = m !== null ? Math.min(Number(m[1]), Math.max(bytes.length - 1, 0)) : null;
       const endSrv =
         m !== null && m[2] !== undefined && m[2] !== ''
@@ -134,7 +146,7 @@ async function startFakeVVServer(
       if (opts.hangRange !== undefined && start !== null && start >= opts.hangRange[0] && start < opts.hangRange[1]) {
         // 悬挂带：记日志（served=false）后不 response.end——请求保持打开（浏览器侧
         // fetch pending；测试收尾 closeAllConnections 统一清偿）
-        fileRequests.push({ range, start, end: endSrv, served: false, servedLen: 0 });
+        fileRequests.push({ path: reqPath, range, start, end: endSrv, served: false, servedLen: 0 });
         return;
       }
       const chunk =
@@ -149,7 +161,7 @@ async function startFakeVVServer(
         });
         res.end(chunk);
       };
-      fileRequests.push({ range, start, end: endSrv, served: true, servedLen: chunk.length });
+      fileRequests.push({ path: reqPath, range, start, end: endSrv, served: true, servedLen: chunk.length });
       servedBytes += chunk.length;
       if (opts.windowDelayMs !== undefined && opts.windowDelayMs > 0) {
         setTimeout(write, opts.windowDelayMs);
@@ -315,14 +327,14 @@ async function openMountsPanel(page: Page): Promise<void> {
 }
 
 interface DavMock {
-  /** 对象 GET 请求日志（Range 头原样；PROPFIND 不入） */
-  gets: Array<{ range: string | null }>;
+  /** 对象 GET 请求日志（Range 头原样；PROPFIND 不入；path 供 git 探测计量注释） */
+  gets: Array<{ range: string | null; path: string }>;
 }
 
 /** WebDAV mock：PROPFIND 207（单 PDF 条目）+ 对象 GET 恒 200 全量（无视 Range——
  * directDav.read 的 Range 防线：200 → rangeOk=false 降级 + 全量切片交付）。 */
 async function mockDavIgnoringRange(page: Page, origin: string, fileName: string, bytes: Uint8Array): Promise<DavMock> {
-  const gets: Array<{ range: string | null }> = [];
+  const gets: Array<{ range: string | null; path: string }> = [];
   const MULTISTATUS = `<?xml version="1.0"?><D:multistatus xmlns:D="DAV:">
     <D:response><D:href>/dav/</D:href><D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>
     <D:response><D:href>/dav/${fileName}</D:href><D:propstat><D:prop><D:resourcetype/><D:getcontentlength>${bytes.length}</D:getcontentlength></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>
@@ -336,7 +348,7 @@ async function mockDavIgnoringRange(page: Page, origin: string, fileName: string
       return void route.fulfill({ status: 207, headers: DIRECT_CORS, body: MULTISTATUS });
     }
     if (req.method() === 'GET') {
-      gets.push({ range: req.headers()['range'] ?? null });
+      gets.push({ range: req.headers()['range'] ?? null, path: new URL(req.url()).pathname });
       // 恒 200 全量（Range 头若在场即被无视）——降级形态的 mock 前提
       return void route.fulfill({
         status: 200,
@@ -350,15 +362,15 @@ async function mockDavIgnoringRange(page: Page, origin: string, fileName: string
 }
 
 interface S3Mock {
-  /** 对象 GET 请求日志（Range 头原样；ListObjectsV2 不入） */
-  gets: Array<{ range: string | null }>;
+  /** 对象 GET 请求日志（Range 头原样；ListObjectsV2 不入；path 供 git 探测隔离计量） */
+  gets: Array<{ range: string | null; path: string }>;
 }
 
 /** S3 mock：ListObjectsV2（单 PDF 条目）+ 对象 GET 遵从 Range（206 + Content-Range
  * 精确窗段；无 Range 头 200 全量）——directS3 rangeCapable 维持 true 的 transport 形态。
  * mock 不验签（SigV4 头存在性归 MM-06，本域不重复）。 */
 async function mockS3WithRanges(page: Page, origin: string, key: string, bytes: Uint8Array): Promise<S3Mock> {
-  const gets: Array<{ range: string | null }> = [];
+  const gets: Array<{ range: string | null; path: string }> = [];
   const LIST_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
   <Name>bkt</Name><Prefix></Prefix><KeyCount>1</KeyCount><MaxKeys>1000</MaxKeys>
@@ -379,7 +391,7 @@ async function mockS3WithRanges(page: Page, origin: string, key: string, bytes: 
     }
     if (req.method() === 'GET') {
       const range = req.headers()['range'] ?? null;
-      gets.push({ range });
+      gets.push({ range, path: new URL(req.url()).pathname });
       const m = range !== null ? /bytes=(\d+)-(\d*)/.exec(range) : null;
       if (m === null) {
         return void route.fulfill({
@@ -426,12 +438,16 @@ test.describe('b-pdf-range PDF-RANGE 域锚（spec §6.6）', () => {
     test.setTimeout(120_000);
     test.skip(!hasFixture, FIXTURE_HINT);
     const bytes = fixtureBytes();
-    // 悬挂带（64KB 窗段对齐语义：pdfjs 窗口请求 start 恒为 64KB 倍数）：夹具首屏段
-    // /E=132016（文档打开 + 首页渲染的全部所需，落入窗段 0-2 < 196608）之后、尾部主
-    // xref 窗段（chunk 24 起点 1_572_864，/Prev 追随的文档打开必读面）之前——带内窗口
-    // 永不应答 ⇒ 全量到达在构造上不可达。悬挂卡住 pages 2-12 对象/内容流（其窗段自
-    // chunk 3 起），IMMEDIATE_PAGES 的 pages 2-3 渲染永久 pending
-    const HANG: [number, number] = [196_608, 1_450_000];
+    // 悬挂带（64KB 窗段对齐语义：pdfjs 窗口请求 start 恒为 64KB 倍数）。统一验证阶段
+    // 依实测（无悬挂全伺服的请求序抓取）重定基：pdfjs 6.4.299 对本夹具的 transport
+    // 装配在文档打开/首屏渲染期间按 64KB 窗段逆序扫描主窗体（chunk 22→2），随后以
+    // 64KB 步进补拉尾随窗段（1,3,5）——「文档打开只需文件头首屏段 + 尾部主 xref」
+    // 的原构造前提不成立，全中段悬挂带会饿死首屏（首屏窗段在补拉序后段，被悬挂带
+    // 的在飞窗阻塞永不到达）。重定基悬挂带 = [196_608, 458_752)（chunk 3-6）：首屏
+    // 所需（chunk 0-2 + 尾段 24 + 补拉序窗段 1）全部在带外应答，IMMEDIATE_PAGES 的
+    // pages 2-3 内容流（chunk 3-6）永不应答 ⇒ canvas 恒 1；带内窗段被 auto-fetch 与
+    // 首屏后渲染双重触达 ⇒ 全量到达在构造上不可达
+    const HANG: [number, number] = [196_608, 458_752];
     const srv = await startFakeVVServer('prog.pdf', bytes, { hangRange: HANG });
     await seedRemoteTabs(page, {
       base: srv.base,
@@ -445,32 +461,31 @@ test.describe('b-pdf-range PDF-RANGE 域锚（spec §6.6）', () => {
     // transport 装配（probe 8KB 探测块 → pdfjs 窗段请求）→ 首屏 canvas
     await expect(page.locator('.vv-pdf canvas').first()).toBeVisible({ timeout: 60_000 });
     // 文档打开（numPages 自线性化 /N）+ 首页渲染；悬挂带卡住 pages 2-3（IMMEDIATE_PAGES）
-    // 的对象窗段 ⇒ canvas 恒 1（首屏先于全量的 UI 面证据）
+    // 的内容流窗段 ⇒ canvas 恒 1（首屏先于全量的 UI 面证据）
     await expect(page.locator('.vv-pdf-page-indicator')).toHaveText('第 1 / 12 页');
     expect(await page.locator('.vv-pdf canvas').count()).toBe(1);
 
-    // auto-fetch（disableAutoFetch 缺省 false：transport 下逐空块顺序补拉）终将触达
-    // 悬挂带（前缀窗段逐个应答后停在带首）——「全量字节已传」不可达的请求面证据
+    // 悬挂带窗段被请求而未应答（auto-fetch/首屏后渲染触达带内窗段）——「全量字节
+    // 已传」不可达的请求面证据
     await expect
       .poll(() => srv.fileRequests.some((r) => !r.served && r.start !== null && r.start >= HANG[0] && r.start < HANG[1]), {
         timeout: 30_000,
-        message: '悬挂带窗口未被请求——auto-fetch 未推进到中段（transport 窗段流未成立）'
+        message: '悬挂带窗口未被请求——transport 窗段流未成立'
       })
       .toBe(true);
 
-    // 请求形态断言：
-    // - 全部 /api/file 均带 Range 头（探测块 + 窗段——零「无 Range 全量拉取」混入）
+    // 请求形态断言（目标 path 计量；.git/HEAD git 探测 404 已由 fake 隔离出计量面）：
+    // - 全部 prog.pdf 请求均带 Range 头（探测块 + 窗段——零「无 Range 全量拉取」混入）
     // - 首请求恰为 dispatcher 探测块 bytes=0-8191
     // - 存在探测块之后的窗段（start ≥ 8192，transport 窗段流证据）
-    const reqs = srv.fileRequests;
+    const reqs = srv.fileRequests.filter((r) => r.path === 'prog.pdf');
     expect(reqs.length).toBeGreaterThanOrEqual(3); // 探测块 + ≥2 窗段（Range 请求数下限）
     for (const r of reqs) expect(r.range).toMatch(/^bytes=\d+-\d*$/);
     expect(reqs[0]!.range).toBe('bytes=0-8191');
     expect(reqs[0]!.servedLen).toBe(8192);
     expect(reqs.some((r) => r.start !== null && r.start >= 8192)).toBe(true);
-    // 首窗字节断言：已传字节有界（< 总量，且 < 悬挂带上界）——首屏出现时全量不可达
+    // 首窗字节断言：已传字节有界（< 总量——悬挂带窗段永不应答，全量不可达）
     expect(srv.servedBytes).toBeGreaterThan(100_000); // 窗段真实交付（非单发小读）
-    expect(srv.servedBytes).toBeLessThan(HANG[1]);
     expect(srv.servedBytes).toBeLessThan(bytes.length);
     await srv.close();
   });
@@ -494,15 +509,18 @@ test.describe('b-pdf-range PDF-RANGE 域锚（spec §6.6）', () => {
 
     // 请求形态：恰两条——探测块 bytes=0-8191 + pdf.ts memoizedFullRead 的
     // {0, MAX_SAFE_INTEGER} 全量补拉（Range bytes=0-9007199254740991，服务端钳制回全量）；
-    // 渲染完成后零新增（data 路径零按需窗——transport 未装配的请求面证据）
-    await expect.poll(() => srv.fileRequests.length, { timeout: 20_000 }).toBe(2);
-    const [probe, full] = [srv.fileRequests[0]!, srv.fileRequests[1]!];
+    // 渲染完成后零新增（data 路径零按需窗——transport 未装配的请求面证据）。
+    // 统一验证阶段重定基：git 可用性探测（渲染完成后 fire-and-forget 读 .git/HEAD，
+    // 无 Range、404 负缓存）是既有后台面——按 path 过滤后计量目标文件请求
+    const progReqs = (): FileRequestLog[] => srv.fileRequests.filter((r) => r.path === 'mystery.pdf');
+    await expect.poll(() => progReqs().length, { timeout: 20_000 }).toBe(2);
+    const [probe, full] = [progReqs()[0]!, progReqs()[1]!];
     expect(probe.range).toBe('bytes=0-8191');
     expect(probe.servedLen).toBe(8192);
     expect(full.range).toMatch(/^bytes=0-\d+$/);
     expect(full.servedLen).toBe(bytes.length); // 服务端钳制：单条全量应答
     await page.waitForTimeout(800);
-    expect(srv.fileRequests.length).toBe(2);
+    expect(progReqs().length).toBe(2);
     await srv.close();
   });
 
@@ -537,14 +555,19 @@ test.describe('b-pdf-range PDF-RANGE 域锚（spec §6.6）', () => {
     await expect(page.locator('.vv-pdf canvas').first()).toBeVisible({ timeout: 60_000 });
     await expect(page.locator('.vv-pdf-page-indicator')).toHaveText('第 1 / 12 页');
 
-    // 请求形态：恰两条对象 GET——①探测块带 Range 头、被答 200 全量（directDav Range 防线：
-    // status!==206 → rangeOk=false + 全量切片交付）；②dispatcher 降级全量补拉、无 Range 头。
-    // 渲染完成后零新增（!capable 全量切片 ctx 的 data 路径零按需窗）
-    await expect.poll(() => dav.gets.length, { timeout: 20_000 }).toBe(2);
+    // 请求形态：恰三条对象 GET（统一验证阶段重定基：git 可用性探测的 .git/HEAD 读是
+    // 既有后台面，dav mock 按 origin 全量入账）——①探测块带 Range 头、被答 200 全量
+    //（directDav Range 防线：status!==206 → rangeOk=false + 全量切片交付）；②dispatcher
+    // 降级全量补拉、无 Range 头；③git 探测 .git/HEAD（渲染完成后 fire-and-forget，
+    // 无 Range、mock 404 兜底负缓存）。序稳定：探测块（dispatch 首读）→ 降级全量
+    //（dispatch 内）→ git 探测（渲染完成后）；渲染完成后零新增（!capable 全量切片
+    // ctx 的 data 路径零按需窗）
+    await expect.poll(() => dav.gets.length, { timeout: 20_000 }).toBe(3);
     expect(dav.gets[0]!.range).toBe('bytes=0-8191');
     expect(dav.gets[1]!.range).toBeNull();
+    expect(dav.gets[2]!.range).toBeNull();
     await page.waitForTimeout(800);
-    expect(dav.gets.length).toBe(2);
+    expect(dav.gets.length).toBe(3);
   });
 
   test('PDF-RANGE-04 本地文件 data 路径：localFiles 全量交付（byteLength===size）→ 渲染成功且远端零 /api/file', async ({ page }) => {
@@ -570,9 +593,13 @@ test.describe('b-pdf-range PDF-RANGE 域锚（spec §6.6）', () => {
     test.setTimeout(150_000);
     test.skip(!hasFixture, FIXTURE_HINT);
     const bytes = fixtureBytes();
-    // 逐窗 250ms 延时：~24 窗 × 250ms ≈ 6s 的 auto-fetch 请求流——关闭时刻仍有大量
-    // 未拉窗段，「停止」断言非空转（延迟全拉完则计数天然走平，对照失效）
-    const srv = await startFakeVVServer('prog.pdf', bytes, { windowDelayMs: 250 });
+    // 悬挂带（chunk 3-6，R-01 同款重定基构造）+ 逐窗 250ms 延时：首屏窗段（带外）真实
+    // 交付而带内窗段永不应答——关闭时刻在飞悬挂窗在场且全量不可达，「停止/静默」断言
+    // 非空转。统一验证阶段重定基注：pdfjs 6.4.299 对本夹具的 transport 主窗体扫描在
+    // 首屏前完成（R-01 头注实测序），「关闭前请求流持续增长」的原前提不可达（首屏后
+    // 仅剩带内悬挂窗与零星补拉）——前提改锚「带内窗段已请求未应答」（渐进装载未完成
+    // 的构造保证），「停止」语义（关闭后零新增请求）与「取消静默」语义不变
+    const srv = await startFakeVVServer('prog.pdf', bytes, { windowDelayMs: 250, hangRange: [196_608, 458_752] });
     await seedRemoteTabs(page, {
       base: srv.base,
       tabs: [
@@ -582,13 +609,18 @@ test.describe('b-pdf-range PDF-RANGE 域锚（spec §6.6）', () => {
     });
     await page.goto('/');
 
-    // 首屏出现（首窗段 ~6 个 × 250ms ≈ 1.5s + 渲染）
+    // 首屏出现（带外窗段 × 250ms ≈ 2.5s + 渲染）
     await expect(page.locator('.vv-pdf canvas').first()).toBeVisible({ timeout: 60_000 });
-    // 关闭前先证请求流在增长（auto-fetch 逐窗推进）——「停止」的前后对照非空转前提
-    const countAtCanvas = srv.fileRequests.length;
+    // 「停止」的非空转前提：带内窗段已请求未应答（在飞窗在场——销毁后其应答面即断）
     await expect
-      .poll(() => srv.fileRequests.length, { timeout: 15_000, message: '关闭前窗口请求未增长（auto-fetch 流未成立）' })
-      .toBeGreaterThan(countAtCanvas);
+      .poll(
+        () =>
+          srv.fileRequests.some(
+            (r) => r.path === 'prog.pdf' && !r.served && r.start !== null && r.start >= 196_608 && r.start < 458_752
+          ),
+        { timeout: 30_000, message: '悬挂带窗口未被请求——渐进装载未完成的构造前提不成立' }
+      )
+      .toBe(true);
 
     // 关闭 tab：effect cleanup abort（effectAbort）+ 实例 destroy（readAbort.abort +
     // loadingTask.destroy）→ 在飞读 abort 身份静默、worker 终止、窗段请求停止
@@ -599,7 +631,7 @@ test.describe('b-pdf-range PDF-RANGE 域锚（spec §6.6）', () => {
     // 之后才采样基线，防「销毁竞态尾请求」误计为未停止
     await page.waitForTimeout(300);
 
-    // 请求停止：1.5s 观察窗内计数走平（对照：关闭前 250ms/窗 ≈ 每秒 4 窗增长）
+    // 请求停止：1.5s 观察窗内计数走平（在飞悬挂窗已随销毁中止，无新窗段请求）
     const countAtClose = srv.fileRequests.length;
     await page.waitForTimeout(1_500);
     expect(srv.fileRequests.length).toBe(countAtClose);
@@ -613,15 +645,18 @@ test.describe('b-pdf-range PDF-RANGE 域锚（spec §6.6）', () => {
     test.skip(!hasFixture, FIXTURE_HINT);
     const bytes = fixtureBytes();
     const srv = await startFakeVVServer('prog.pdf', bytes);
-    // 探测块（dispatcher 层）放行到真服务器，其后全部 /api/file（pdfjs 窗段）abort：
-    // fetch 以 TypeError('Failed to fetch') reject（非 AbortError 身份）→ ctx.read 包装标
-    // DispatchReadError → pdf.ts requestRange catch 判非 abort → onReadFailure → docOpened
-    //=false 门控 → loadingTask.destroy → render reject（M1 收口）→ dispatch catch 错误卡片
+    // 探测块（dispatcher 层）与无 Range 的 git 可用性探测放行到真服务器，其后全部
+    // 带 Range 的 /api/file（pdfjs 窗段）abort：fetch 以 TypeError('Failed to fetch')
+    // reject（非 AbortError 身份）→ ctx.read 包装标 DispatchReadError → pdf.ts
+    // requestRange catch 判非 abort → onReadFailure → docOpened=false 门控 →
+    // loadingTask.destroy → render reject（M1 收口，abort 身份剥离见 pdf.ts）→
+    // dispatch catch 错误卡片。统一验证阶段注：git 探测（.git/HEAD，无 Range）是渲染
+    // 完成后的既有后台面——只 abort 带窗请求使 abort 计量面纯净且探测链不受扰
     const aborted: string[] = [];
     await page.route('**/api/file', (route: Route) => {
       const range = route.request().headers()['range'] ?? null;
-      if (range === 'bytes=0-8191') return void route.continue(); // 探测块放行（物化头部面）
-      aborted.push(range ?? '(no-range)');
+      if (range === null || range === 'bytes=0-8191') return void route.continue(); // 探测块/git 探测放行
+      aborted.push(range);
       return void route.abort();
     });
     await seedRemoteTabs(page, {
@@ -673,15 +708,17 @@ test.describe('b-pdf-range PDF-RANGE 域锚（spec §6.6）', () => {
     await openTreeFile(page, 'prog.pdf');
 
     // transport 分支可达：探测块（Range 206 精确窗段）→ pdfjs 窗段请求（恒 206 应答，
-    // rangeOk 不降级）→ 首屏渲染；auto-fetch 持续补拉 → 窗口计数增长
+    // rangeOk 不降级）→ 首屏渲染。统一验证阶段重定基：git 可用性探测（.git/HEAD，无
+    // Range）是渲染完成后的既有后台面，按 path 过滤后计量目标对象请求
+    const objGets = (): { range: string | null }[] => s3.gets.filter((g) => g.path.endsWith('/prog.pdf'));
     await expect(page.locator('.vv-pdf canvas').first()).toBeVisible({ timeout: 60_000 });
     await expect(page.locator('.vv-pdf-page-indicator')).toHaveText('第 1 / 12 页');
     await expect
-      .poll(() => s3.gets.length, { timeout: 30_000, message: 'S3 对象 GET 窗口数未增长（transport 窗段流未成立）' })
+      .poll(() => objGets().length, { timeout: 30_000, message: 'S3 对象 GET 窗口数未增长（transport 窗段流未成立）' })
       .toBeGreaterThanOrEqual(4);
     // 形态断言：全部对象 GET 带 Range 头（探测块 + 窗段，零无 Range 全量拉取混入）；
     // 首请求恰为探测块（bytes=0-8191 → 206 + Content-Range 精确匹配，rangeCapable 维持 true 的前提）
-    for (const g of s3.gets) expect(g.range).toMatch(/^bytes=\d+-\d*$/);
-    expect(s3.gets[0]!.range).toBe('bytes=0-8191');
+    for (const g of objGets()) expect(g.range).toMatch(/^bytes=\d+-\d*$/);
+    expect(objGets()[0]!.range).toBe('bytes=0-8191');
   });
 });
