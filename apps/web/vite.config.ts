@@ -271,7 +271,7 @@ function diagramEngineChunk(): Plugin {
                     {
                       // 终审修复 C1：vite preload helper 虚拟模块（\0vite/preload-helper）
                       // 不匹配任何组 test，rolldown 把它并入先创建的组 chunk（foreign-core，
-                      // ~419KB、globIgnores 排除 precache）——11 个 precache'd 文件静态
+                      // ~419KB、globIgnores 排除 precache）——10 个 precache'd 文件静态
                       // import 它 → 离线冷启动整站断链。显式独立组收拢：非 foreign- 前缀
                       //（chunkFileNames 对 foreign- 前缀带名永不 precache，默认 hash
                       // 分支才进 precache），增量 ~3KB 随应用壳预缓存。

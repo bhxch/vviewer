@@ -4,8 +4,11 @@
 // 渲染结构：工具条（页码/缩放）+ 滚动容器内逐页 canvas；前 3 页立即渲染，
 // 其余 IntersectionObserver 懒渲染；缩放在 0.5x-3x 预设档位间步进并全量重渲染。
 // 搜索：search 时懒提取各页 textContent 并缓存，跨页扫描用 pdfText 纯函数；gotoMatch 跳页。
-import type { Detection, FileSource, RenderedInstance, Renderer } from '@bhxch/vviewer-core';
-import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
+// 流式（io-streaming 计划 5 Task 1，spec §6.6）：声明 streaming 后 dispatcher 交付
+// head 探测块 + StreamCtx；capable 且 size 已知且 buffer 短于 size 时走
+// PDFDataRangeTransport（requestRange → ctx.read 窗段）渐进加载，回退矩阵见 render 入口注释。
+import type { Detection, FileSource, RenderedInstance, Renderer, StreamCtx } from '@bhxch/vviewer-core';
+import type { PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import { extractPageText, searchPdfPages, type PdfSearchMatch, type PdfTextItem } from './pdfText';
 
 type Pdfjs = typeof import('pdfjs-dist');
@@ -38,6 +41,78 @@ function isCancelledError(e: unknown): boolean {
   return e instanceof Error && e.name === 'RenderingCancelledException';
 }
 
+// ---------- Range transport（spec §6.6，io-streaming 计划 5 Task 1） ----------
+
+/**
+ * 守卫补拉记忆（render-text/blockStream.ts memoizedFullRead 同款形态）：size 未知回退的
+ * {0, MAX_SAFE_INTEGER} 全量补拉按 ctx 记忆——错误卡片 retry 重入 render（同一 renderCtx
+ * 透传，评审指令②）不再重复全量下载；成功即记忆（字节终态），失败即刻出表（防毒化：
+ * retry 需可重新发起）。
+ */
+const fullReadMemo = new WeakMap<StreamCtx, Promise<Uint8Array<ArrayBuffer>>>();
+
+function memoizedFullRead(ctx: StreamCtx): Promise<Uint8Array<ArrayBuffer>> {
+  const memo = fullReadMemo.get(ctx);
+  if (memo !== undefined) return memo;
+  // 全量读端点 {0, MAX_SAFE_INTEGER}：远端 Range 超界由服务端钳制返回整文件、本地
+  // slice 越界自然钳制（hex.ts size-null 回退同款单发读，signal 不传——与 code 全量
+  // 补拉同口径，读失败经 dispatcher ctx.read 包装标 DispatchReadError 向上 reject）
+  const p = ctx.read({ start: 0, end: Number.MAX_SAFE_INTEGER });
+  fullReadMemo.set(ctx, p);
+  p.catch(() => {
+    fullReadMemo.delete(ctx);
+  });
+  return p;
+}
+
+/**
+ * ctx.read 窗段 → pdfjs 渐进交付的 transport 装配（可测纯装配形态，spec §6.6）。
+ *
+ * pdfjs API 实态（pdfjs-dist 6.4.299，types/src/display/api.d.ts:758）：基类形参序为
+ * `constructor(length, initialData, progressiveDone?, contentDispositionFilename?)`——
+ * length 在前、initialData 在后（spec 行文「PDFDataRangeTransport(head, size)」系笔误，
+ * 实装按真实 API 逆序传入）；基类 requestDataRange 为抽象抛错，须子类覆写。
+ *
+ * 窗段语义换算（本实现的唯一跨域换算点）：pdfjs 的 requestDataRange(begin, end) 端点
+ * 为 [begin, end) 不含端（worker ChunkedStreamManager._requestChunks：`end =
+ * Math.min(endChunk * chunkSize, length)`，即 end 指向末字节后一位置）；core ByteRange
+ * 端点为 end 含（types.ts:16）→ 请求时换算 `end - 1`。交付以 pdfjs 原始 begin 回调
+ * onDataRange（PDFDataTransportStream 按 `r._begin === begin` 匹配 range reader，
+ * 不得改写）；窗段为单块交付语义（PDFDataTransportStreamRangeReader._enqueue 后即
+ * _done）：一次 requestDataRange 恰对应一次 onDataRange 完整窗段。
+ *
+ * BaseCtor 经参注入而非静态 import：pdf.ts 对 pdfjs-dist 保持纯动态加载（重依赖不进
+ * 主包、SSR 不加载），子类在装配期才触达基类。
+ */
+export function createPdfRangeTransport(
+  BaseCtor: typeof PDFDataRangeTransport,
+  opts: { size: number; head: Uint8Array; read: StreamCtx['read']; signal?: AbortSignal }
+): PDFDataRangeTransport & { requestRange(begin: number, end: number): Promise<void> } {
+  const { size, head, read, signal } = opts;
+  class CtxReadTransport extends BaseCtor {
+    constructor() {
+      // progressiveDone=false：initialData 是探测头前缀而非完整文件（head 即全量的
+      // 文件走 data 路径，不入本分支）
+      super(size, head, false);
+    }
+    /** 可测面：读窗段并交付；reject 原样透传（abort 身份/读失败身份层不变） */
+    async requestRange(begin: number, end: number): Promise<void> {
+      // [begin, end) 不含端 → ByteRange {start: begin, end: end - 1} 含端
+      const chunk = await read({ start: begin, end: end - 1 }, signal);
+      this.onDataRange(begin, chunk);
+    }
+    requestDataRange(begin: number, end: number): void {
+      // pdfjs transport API 无错误回传通道：读失败/取消无法让 loadingTask.promise
+      // reject——在飞 range reader 挂起由 loadingTask.destroy() 收口（render 失败清理
+      // 与实例 destroy 均前置 signal abort，在飞 ctx.read 先行 reject，无字节再交付）。
+      // reject 在此静默收口仅因无通道：abort 身份（signal 取消，store 层统一抛
+      // abortReadError）与读失败身份在 ctx.read 契约内原样透传，此处不改写
+      void this.requestRange(begin, end).catch(() => {});
+    }
+  }
+  return new CtxReadTransport();
+}
+
 interface PageState {
   num: number; // 1 起
   wrap: HTMLDivElement;
@@ -51,16 +126,77 @@ export const pdfRenderer: Renderer = {
   id: 'pdf',
   label: 'PDF',
   extensions: ['pdf'],
-  async render(buffer: Uint8Array, target: HTMLElement, _source: FileSource, _det: Detection) {
+  // streaming（io-streaming 计划 5 Task 1，spec §6.6）：dispatcher 只交付 head 探测块 +
+  // StreamCtx；transport/回退分流在 render 入口自处（下方判定）。本地/退化全量来源
+  // 交付的 buffer 即全量，data 路径零变化。lineMetrics/langOverride（第 6 参其余字段）
+  // 对 pdf 无消费面，不读即零感知。
+  streaming: true,
+  async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, _det: Detection, ctx?: StreamCtx, opts?: { signal?: AbortSignal }) {
     const pdfjs = await loadPdfjs();
+    // 读取消信号（实例级）：destroy abort 在飞窗段读；外部 signal（dispatch 第 6 参，
+    // effect 级取消）合并进同一 controller——两源任一触发皆取消，取消错误身份由
+    // ctx.read 契约透传（store 层统一 abortReadError）
+    const readAbort = new AbortController();
+    const externalSignal = opts?.signal;
+    const onExternalAbort = (): void => readAbort.abort();
+    if (externalSignal !== undefined) {
+      if (externalSignal.aborted) readAbort.abort();
+      else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+    // 分流判定（spec §6.6 回退矩阵 + dispatcher 读策略镜像，code.ts 守卫同款形态）：
+    // transport 分支 = ctx 在场 && store 具备 Range 能力 && size 已知 && buffer 短于
+    // size。末项即「dispatcher 只交付了 head 探测块」的充要形态（dispatcher streaming
+    // 分支：capable 且 size>1MB 时 buffer=8KB probe；≤1MB 直读全量与 !capable 退化
+    // 全量视图均交付全量 buffer，byteLength === size 不入本支）。StreamCtx 无
+    // rangeCapable 承载字段（纯 {size, head, read}），rangeCapable 自 source.store 判
+    // （与 dispatcher capable 判定同源）。回退矩阵（均落 getDocument({data}) 全量现路径）：
+    // - ctx 缺失（直调兼容面）：buffer 即全量，data 路径零变化
+    // - size null：head 无法确认截断与否 → memoizedFullRead 全量补拉后 data 路径
+    // - !rangeCapable / 本地来源：dispatcher 已交付全量（退化视图 byteLength === size）
+    //   → data 路径零变化
+    const transport =
+      ctx !== undefined &&
+      ctx.size !== null &&
+      source.store.rangeCapable === true &&
+      buffer.byteLength < ctx.size
+        ? { size: ctx.size, head: buffer, read: ctx.read }
+        : null;
+    if (transport === null && ctx !== undefined && (ctx.size === null || buffer.byteLength < ctx.size)) {
+      // 全量守卫补拉：size 未知时 head 不可当全量用。读失败在此 await 处 reject
+      // （dispatcher 已标 DispatchReadError → 调用方读取失败面）；补拉按 ctx 记忆
+      // （memoizedFullRead），错误卡片 retry 重入不重复下载
+      buffer = await memoizedFullRead(ctx);
+    }
     // BUG-04 握手点 2 代工：size 须在 getDocument 前捕获——pdfjs 会 transfer 该 buffer
-    // 到 worker（detach），detach 后 byteLength 归零，getMeta 再读就是 0
-    const size = buffer.length;
+    // 到 worker（detach），detach 后 byteLength 归零，getMeta 再读就是 0。transport
+    // 分支 buffer 是 head 探测块，size 取 ctx.size（全量文件字节数）
+    const size = transport !== null ? transport.size : buffer.length;
     // pdfjs 会 transfer 该 buffer 到 worker（detach）：调用方每次 dispatch 前重新 read，无复用问题。
     // pdfjs 6 起移除 PDFDocumentProxy.prototype.destroy（api-major，upstream PR 21245）：
     // 资源释放改走 loadingTask.destroy()，故保留 loadingTask 引用
-    const loadingTask = pdfjs.getDocument({ data: buffer });
-    const doc: PDFDocumentProxy = await loadingTask.promise;
+    const loadingTask =
+      transport !== null
+        ? pdfjs.getDocument({
+            range: createPdfRangeTransport(pdfjs.PDFDataRangeTransport, {
+              size: transport.size,
+              head: transport.head,
+              read: transport.read,
+              signal: readAbort.signal
+            })
+          })
+        : pdfjs.getDocument({ data: buffer });
+    let doc: PDFDocumentProxy;
+    try {
+      doc = await loadingTask.promise;
+    } catch (e) {
+      // 打开失败（损坏 PDF/读失败）：释放 worker 端资源并取消在飞窗段读——不留孤儿
+      // promise（transport 模式挂起的 range reader 随 destroy 收口）；错误身份不改写，
+      // DispatchReadError/abort 经 dispatcher catch 既有分类（读失败直抛/取消 no-op）
+      readAbort.abort();
+      externalSignal?.removeEventListener('abort', onExternalAbort);
+      void loadingTask.destroy();
+      throw e;
+    }
 
     let destroyed = false;
     let scaleIdx = SCALE_PRESETS.indexOf(1);
@@ -289,6 +425,8 @@ export const pdfRenderer: Renderer = {
       },
       destroy() {
         destroyed = true;
+        readAbort.abort(); // 在飞窗段读（transport requestRange）取消，abort 身份经 ctx.read 契约透传
+        externalSignal?.removeEventListener('abort', onExternalAbort);
         io.disconnect();
         for (const st of pageStates) st.renderTask?.cancel();
         pageStates.length = 0;
