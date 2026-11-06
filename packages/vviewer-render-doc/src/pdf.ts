@@ -207,6 +207,11 @@ export const pdfRenderer: Renderer = {
     // chunk 读失败）维持静默——单页空白不渲染可接受，不因尾块抖动整页报错
     let loadingTask: PDFDocumentLoadingTask;
     let docOpened = false;
+    // M1 收口标志：onReadFailure 触发的 destroy 与真实取消（external/readAbort）在
+    // reject 身份上同形（pdfjs destroy 的 promise reject 是 AbortException）——dispatch
+    // 错误身份层按 abort 归类「不上屏」，错误卡片永不出现（统一验证阶段 e2e 实证）。
+    // 标志区分两条收口：M1 读失败退化剥 abort 身份上屏（下方 catch），真实取消维持静默。
+    let m1ReadFailed = false;
     loadingTask =
       transport !== null
         ? pdfjs.getDocument({
@@ -216,7 +221,10 @@ export const pdfRenderer: Renderer = {
               read: transport.read,
               signal: readAbort.signal,
               onReadFailure: () => {
-                if (!docOpened) void loadingTask.destroy();
+                if (!docOpened) {
+                  m1ReadFailed = true;
+                  void loadingTask.destroy();
+                }
               }
             })
           })
@@ -226,12 +234,20 @@ export const pdfRenderer: Renderer = {
       doc = await loadingTask.promise;
       docOpened = true; // 文档已开：后续懒页 chunk 读失败走静默分支（onReadFailure 门控）
     } catch (e) {
+      const cancelled = readAbort.signal.aborted || externalSignal?.aborted === true;
       // 打开失败（损坏 PDF/读失败）：释放 worker 端资源并取消在飞窗段读——不留孤儿
-      // promise（transport 模式挂起的 range reader 随 destroy 收口）；错误身份不改写，
-      // DispatchReadError/abort 经 dispatcher catch 既有分类（读失败直抛/取消 no-op）
+      // promise（transport 模式挂起的 range reader 随 destroy 收口）。真实取消维持
+      // abort 身份（dispatch 既有分类：取消 no-op 不上屏）；M1 读失败退化（非 abort
+      // 读失败且文档未开 → onReadFailure destroy）剥 abort 身份重抛——destroy 的
+      // reject 是 AbortException，不改写会被归为取消而静默，错误卡片永不出现
+      //（DispatchReadError/generic 经 dispatcher catch 既有分类，generic 落错误卡片 +
+      // 重试，R-06 锚语义）。沿用 errors.ts 既有分类，不新造错误类别。
       readAbort.abort();
       externalSignal?.removeEventListener('abort', onExternalAbort);
       void loadingTask.destroy();
+      if (m1ReadFailed && !cancelled) {
+        throw new Error(e instanceof Error ? e.message : String(e));
+      }
       throw e;
     }
 
