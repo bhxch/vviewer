@@ -98,8 +98,13 @@ async function startFakeVVServer(
     omitTreeSize?: boolean;
     /** 逐窗延时 ms（慢泵形态：R-05 取消锚的持续请求流来源） */
     windowDelayMs?: number;
-    /** 悬挂带 [start, end)：带内窗口请求记日志后永不应答（R-01 渐进锚——全量不可达的构造保证） */
-    hangRange?: [number, number];
+    /** 悬挂带集合 [start, end)：带内窗口请求记日志后永不应答（R-01/R-05 渐进锚——
+     * 全量不可达的构造保证）。多段形态：悬挂带只落奇数窗段（3、5）——统一验证阶段
+     * 实测（无悬挂全伺服抓序）：pdfjs 6.4.299 对本夹具的文档打开依赖完整偶数窗段
+     * 逆序扫描（chunk 22→2，任一偶数段悬挂即冻结 doc-open，首屏永不可达），奇数段
+     * 3/5 仅由 IMMEDIATE_PAGES pages 2-3 的异步渲染按需请求——悬挂 3/5 首屏 canvas=1
+     * 可达且全量不可达 */
+    hangRanges?: Array<[number, number]>;
   } = {}
 ): Promise<FakeVVServer> {
   const fileRequests: FileRequestLog[] = [];
@@ -143,7 +148,11 @@ async function startFakeVVServer(
         m !== null && m[2] !== undefined && m[2] !== ''
           ? Math.min(Number(m[2]), bytes.length - 1)
           : bytes.length - 1;
-      if (opts.hangRange !== undefined && start !== null && start >= opts.hangRange[0] && start < opts.hangRange[1]) {
+      if (
+        opts.hangRanges !== undefined &&
+        start !== null &&
+        opts.hangRanges.some(([hs, he]) => start >= hs && start < he)
+      ) {
         // 悬挂带：记日志（served=false）后不 response.end——请求保持打开（浏览器侧
         // fetch pending；测试收尾 closeAllConnections 统一清偿）
         fileRequests.push({ path: reqPath, range, start, end: endSrv, served: false, servedLen: 0 });
@@ -439,16 +448,18 @@ test.describe('b-pdf-range PDF-RANGE 域锚（spec §6.6）', () => {
     test.skip(!hasFixture, FIXTURE_HINT);
     const bytes = fixtureBytes();
     // 悬挂带（64KB 窗段对齐语义：pdfjs 窗口请求 start 恒为 64KB 倍数）。统一验证阶段
-    // 依实测（无悬挂全伺服的请求序抓取）重定基：pdfjs 6.4.299 对本夹具的 transport
-    // 装配在文档打开/首屏渲染期间按 64KB 窗段逆序扫描主窗体（chunk 22→2），随后以
-    // 64KB 步进补拉尾随窗段（1,3,5）——「文档打开只需文件头首屏段 + 尾部主 xref」
-    // 的原构造前提不成立，全中段悬挂带会饿死首屏（首屏窗段在补拉序后段，被悬挂带
-    // 的在飞窗阻塞永不到达）。重定基悬挂带 = [196_608, 458_752)（chunk 3-6）：首屏
-    // 所需（chunk 0-2 + 尾段 24 + 补拉序窗段 1）全部在带外应答，IMMEDIATE_PAGES 的
-    // pages 2-3 内容流（chunk 3-6）永不应答 ⇒ canvas 恒 1；带内窗段被 auto-fetch 与
-    // 首屏后渲染双重触达 ⇒ 全量到达在构造上不可达
-    const HANG: [number, number] = [196_608, 458_752];
-    const srv = await startFakeVVServer('prog.pdf', bytes, { hangRange: HANG });
+    // 依实测（无悬挂全伺服的请求序抓取 + 三轮分段悬挂实证）重定基：pdfjs 6.4.299 对
+    // 本夹具的文档打开依赖完整偶数窗段逆序扫描（chunk 22→2，任一偶数段悬挂即冻结
+    // doc-open，首屏永不可达）——「文档打开只需文件头首屏段 + 尾部主 xref」的原构造
+    // 前提不成立。悬挂带改双段奇数窗段（chunk 3、5，IMMEDIATE_PAGES pages 2-3 内容流
+    // 的非扫描段）：文档打开（偶数扫描 + 首屏段 + 尾段）不受悬挂影响，page 1 渲染
+    // （chunk 1 自首屏后补拉序应答）→ canvas 1，pages 2-3 永久 pending ⇒ canvas 恒 1；
+    // 带内窗段被按需渲染触达而永不应答 ⇒ 全量到达在构造上不可达
+    const HANG: Array<[number, number]> = [
+      [196_608, 262_144], // chunk 3（page 2 内容流第二段）
+      [327_680, 393_216] // chunk 5（page 3 内容流中段）
+    ];
+    const srv = await startFakeVVServer('prog.pdf', bytes, { hangRanges: HANG });
     await seedRemoteTabs(page, {
       base: srv.base,
       tabs: [
@@ -465,13 +476,16 @@ test.describe('b-pdf-range PDF-RANGE 域锚（spec §6.6）', () => {
     await expect(page.locator('.vv-pdf-page-indicator')).toHaveText('第 1 / 12 页');
     expect(await page.locator('.vv-pdf canvas').count()).toBe(1);
 
-    // 悬挂带窗段被请求而未应答（auto-fetch/首屏后渲染触达带内窗段）——「全量字节
+    // 悬挂带窗段被请求而未应答（pages 2-3 按需渲染触达带内窗段）——「全量字节
     // 已传」不可达的请求面证据
     await expect
-      .poll(() => srv.fileRequests.some((r) => !r.served && r.start !== null && r.start >= HANG[0] && r.start < HANG[1]), {
-        timeout: 30_000,
-        message: '悬挂带窗口未被请求——transport 窗段流未成立'
-      })
+      .poll(
+        () =>
+          srv.fileRequests.some(
+            (r) => r.path === 'prog.pdf' && !r.served && r.start !== null && HANG.some(([hs, he]) => r.start! >= hs && r.start! < he)
+          ),
+        { timeout: 30_000, message: '悬挂带窗口未被请求——transport 窗段流未成立' }
+      )
       .toBe(true);
 
     // 请求形态断言（目标 path 计量；.git/HEAD git 探测 404 已由 fake 隔离出计量面）：
@@ -555,16 +569,16 @@ test.describe('b-pdf-range PDF-RANGE 域锚（spec §6.6）', () => {
     await expect(page.locator('.vv-pdf canvas').first()).toBeVisible({ timeout: 60_000 });
     await expect(page.locator('.vv-pdf-page-indicator')).toHaveText('第 1 / 12 页');
 
-    // 请求形态：恰三条对象 GET（统一验证阶段重定基：git 可用性探测的 .git/HEAD 读是
-    // 既有后台面，dav mock 按 origin 全量入账）——①探测块带 Range 头、被答 200 全量
-    //（directDav Range 防线：status!==206 → rangeOk=false + 全量切片交付）；②dispatcher
-    // 降级全量补拉、无 Range 头；③git 探测 .git/HEAD（渲染完成后 fire-and-forget，
-    // 无 Range、mock 404 兜底负缓存）。序稳定：探测块（dispatch 首读）→ 降级全量
-    //（dispatch 内）→ git 探测（渲染完成后）；渲染完成后零新增（!capable 全量切片
-    // ctx 的 data 路径零按需窗）
+    // 请求形态：恰三条对象 GET（统一验证阶段重定基）——①探测块带 Range 头、被答
+    // 200 全量（directDav Range 防线：status!==206 → rangeOk=false + 全量切片交付）；
+    // ②dispatcher 降级补拉=泵单窗 bytes=0-(size-1)（pumpCapable 在 dispatch 入口先于
+    // 探测降级捕获——仍走 pumpFull 单窗，被答 200 后店内切片交付整窗，数据面=全量）；
+    // ③git 可用性探测 .git/HEAD（渲染完成后 fire-and-forget，无 Range，mock 200 兜底）。
+    // 序稳定：探测块（dispatch 首读）→ 泵窗（dispatch 内）→ git 探测（渲染完成后）；
+    // 渲染完成后零新增（!capable 全量切片 ctx 的 data 路径零按需窗）
     await expect.poll(() => dav.gets.length, { timeout: 20_000 }).toBe(3);
     expect(dav.gets[0]!.range).toBe('bytes=0-8191');
-    expect(dav.gets[1]!.range).toBeNull();
+    expect(dav.gets[1]!.range).toBe(`bytes=0-${bytes.length - 1}`);
     expect(dav.gets[2]!.range).toBeNull();
     await page.waitForTimeout(800);
     expect(dav.gets.length).toBe(3);
@@ -593,13 +607,20 @@ test.describe('b-pdf-range PDF-RANGE 域锚（spec §6.6）', () => {
     test.setTimeout(150_000);
     test.skip(!hasFixture, FIXTURE_HINT);
     const bytes = fixtureBytes();
-    // 悬挂带（chunk 3-6，R-01 同款重定基构造）+ 逐窗 250ms 延时：首屏窗段（带外）真实
-    // 交付而带内窗段永不应答——关闭时刻在飞悬挂窗在场且全量不可达，「停止/静默」断言
-    // 非空转。统一验证阶段重定基注：pdfjs 6.4.299 对本夹具的 transport 主窗体扫描在
-    // 首屏前完成（R-01 头注实测序），「关闭前请求流持续增长」的原前提不可达（首屏后
-    // 仅剩带内悬挂窗与零星补拉）——前提改锚「带内窗段已请求未应答」（渐进装载未完成
-    // 的构造保证），「停止」语义（关闭后零新增请求）与「取消静默」语义不变
-    const srv = await startFakeVVServer('prog.pdf', bytes, { windowDelayMs: 250, hangRange: [196_608, 458_752] });
+    // 悬挂带（奇数窗段 3、5，R-01 同款重定基构造）+ 逐窗 250ms 延时：首屏窗段（带外）
+    // 真实交付而带内窗段永不应答——关闭时刻在飞悬挂窗在场且全量不可达，「停止/静默」
+    // 断言非空转。统一验证阶段重定基注：pdfjs 6.4.299 对本夹具的文档打开依赖完整偶数
+    // 扫描（R-01 头注实测序），「关闭前请求流持续增长」的原前提不可达（首屏后仅剩
+    // 带内悬挂窗）——前提改锚「带内窗段已请求未应答」（渐进装载未完成的构造保证），
+    // 「停止」语义（关闭后零新增请求）与「取消静默」语义不变
+    const HANG_BANDS: Array<[number, number]> = [
+      [196_608, 262_144], // chunk 3
+      [327_680, 393_216] // chunk 5
+    ];
+    const srv = await startFakeVVServer('prog.pdf', bytes, {
+      windowDelayMs: 250,
+      hangRanges: HANG_BANDS
+    });
     await seedRemoteTabs(page, {
       base: srv.base,
       tabs: [
@@ -616,7 +637,11 @@ test.describe('b-pdf-range PDF-RANGE 域锚（spec §6.6）', () => {
       .poll(
         () =>
           srv.fileRequests.some(
-            (r) => r.path === 'prog.pdf' && !r.served && r.start !== null && r.start >= 196_608 && r.start < 458_752
+            (r) =>
+              r.path === 'prog.pdf' &&
+              !r.served &&
+              r.start !== null &&
+              HANG_BANDS.some(([hs, he]) => r.start! >= hs && r.start! < he)
           ),
         { timeout: 30_000, message: '悬挂带窗口未被请求——渐进装载未完成的构造前提不成立' }
       )
@@ -653,7 +678,9 @@ test.describe('b-pdf-range PDF-RANGE 域锚（spec §6.6）', () => {
     // dispatch catch 错误卡片。统一验证阶段注：git 探测（.git/HEAD，无 Range）是渲染
     // 完成后的既有后台面——只 abort 带窗请求使 abort 计量面纯净且探测链不受扰
     const aborted: string[] = [];
-    await page.route('**/api/file', (route: Route) => {
+    // 统一验证阶段实证：Playwright URL glob 对带 query 的请求不匹配（'**/api/file'
+    // 不命中 /api/file?path=…）——route 全程未触发（aborted=0，服务端全中）。改正则匹配
+    await page.route(/\/api\/file/, (route: Route) => {
       const range = route.request().headers()['range'] ?? null;
       if (range === null || range === 'bytes=0-8191') return void route.continue(); // 探测块/git 探测放行
       aborted.push(range);
