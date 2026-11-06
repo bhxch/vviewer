@@ -268,15 +268,35 @@ function diagramEngineChunk(): Plugin {
                       // 裸 Buffer），随组懒加载不进 precache。
                       test: /[\\/]node_modules[\\/](isomorphic-git|async-lock|clean-git-ref|crc-32|diff3|ignore|minimisted|pify|sha\.js|simple-get|buffer)[\\/]/
                     },
+                    {
+                      // 终审修复 C1：vite preload helper 虚拟模块（\0vite/preload-helper）
+                      // 不匹配任何组 test，rolldown 把它并入先创建的组 chunk（foreign-core，
+                      // ~419KB、globIgnores 排除 precache）——11 个 precache'd 文件静态
+                      // import 它 → 离线冷启动整站断链。显式独立组收拢：非 foreign- 前缀
+                      //（chunkFileNames 对 foreign- 前缀带名永不 precache，默认 hash
+                      // 分支才进 precache），增量 ~3KB 随应用壳预缓存。
+                      name: 'app-preload-helper',
+                      test: /preload-helper/
+                    },
+                    {
+                      // 终审修复 C2：jszip 全量收拢单一共享 chunk。无显式组时 jszip 子
+                      // 模块按 importer 集摊进 foreign-ofd（组 chunk 不进 precache），
+                      // vviewer zip 渲染路径（precache'd 面）静态依赖它 → 离线 zip/docx
+                      // 断链。非 foreign- 前缀 → 默认 hash 分支进 precache（~100KB），
+                      // 放在 foreign 组之前（groups 按序首中即胜）。
+                      name: 'zip-shared',
+                      test: /[\\/]node_modules[\\/]jszip[\\/]/
+                    },
                     // ---------- foreign 渲染器组（计划 3 Task 3，spec §6.2）----------
                     // @file-viewer/* 代码面 + foreign 独占传递依赖按渲染器组归堆带名：
                     // globIgnores 排除 precache（代码包 chunk 分离进 dist 但不进
                     // precache——全局约束 + iwork chunk 4.05MB 超 workbox 2MiB 上限）。
-                    // 共享依赖铁律（git-engine 同款）：jszip@3.10.2 与 pako@1.0.11 为
-                    // vviewer zip 渲染路径共享、buffer 为 git 引擎组员——三者不入组
-                    //（留默认共享 chunk 维持 precache 地位；foreign 组与共享 chunk 间
-                    // 跨 chunk import 合法，仅懒加载连带，无断链）。email 的 buffer
-                    // 依赖经 git-engine 组员满足（懒加载连带，实测 build 后 rg 复核）。
+                    // 共享依赖铁律（git-engine 同款）：pako@1.0.11 为 vviewer zip 渲染
+                    // 路径共享、buffer 为 git 引擎组员——二者留默认共享 chunk 维持
+                    // precache 地位；jszip 收拢进上方 zip-shared 组（非 foreign- 前缀，
+                    // 仍进 precache）。foreign 组与共享 chunk 间跨 chunk import 合法，
+                    // 仅懒加载连带，无断链。email 的 buffer 依赖经 git-engine 组员满足
+                    //（懒加载连带，实测 build 后 rg 复核）。
                     {
                       name: 'foreign-core',
                       test: /[\\/]node_modules[\\/]@file-viewer[\\/]core[\\/]/
@@ -292,7 +312,7 @@ function diagramEngineChunk(): Plugin {
                       test: /[\\/]node_modules[\\/]@file-viewer[\\/]renderer-epub[\\/]/
                     },
                     {
-                      // jszip@3.10.2 共享（同上铁律）不入组
+                      // jszip@3.10.2 归 zip-shared 共享组（同上铁律），本组跨 chunk import
                       name: 'foreign-ofd',
                       test: /[\\/]node_modules[\\/]@file-viewer[\\/]renderer-ofd[\\/]/
                     },
@@ -316,10 +336,12 @@ function diagramEngineChunk(): Plugin {
                       test: /[\\/]node_modules[\\/]@file-viewer[\\/](renderer-presentation|renderer-ppt|renderer-pptx|ppt|pptx)[\\/]/
                     },
                     {
-                      // @xmldom/xmldom 为 spreadsheet/iwork/hangul 三组共享——归首组
-                      //（groups 按序首中即胜），其余组跨 chunk import
+                      // 终审修复 C2：@xmldom/xmldom 曾归本组（三组共享归首组先例），
+                      // 但 mammoth（vviewer docx 路径，precache'd 面）静态依赖它——组
+                      // chunk 不进 precache 即离线 docx 断链。回归默认共享 chunk 恢复
+                      // precache 地位，spreadsheet/iwork/hangul/design 跨 chunk import
                       name: 'foreign-spreadsheet',
-                      test: /[\\/]node_modules[\\/](@file-viewer[\\/]renderer-spreadsheet|e-virt-table|styled-exceljs|utif|tinycolor2|@xmldom[\\/]xmldom)[\\/]/
+                      test: /[\\/]node_modules[\\/](@file-viewer[\\/]renderer-spreadsheet|e-virt-table|styled-exceljs|utif|tinycolor2)[\\/]/
                     },
                     {
                       name: 'foreign-iwork',
@@ -341,10 +363,10 @@ function diagramEngineChunk(): Plugin {
                     //   foreign-data，design 组跨 chunk import；
                     // - utif 为 renderer-spreadsheet/image 共享 → 已在 foreign-spreadsheet；
                     //   cfb 为 renderer-hangul/eda 共享 → 已在 foreign-hangul；
-                    //   @xmldom/xmldom 为 spreadsheet/iwork/hangul/design 共享 → 已在
-                    //   foreign-spreadsheet（三组共享归首组先例照旧）；
-                    // - jszip（signature 组唯一声明依赖）留默认共享 chunk（vviewer zip 路径
-                    //   共享铁律，同上）；pako@2.2.0（dicom/epub 独占 major 同名目录，regex
+                    //   @xmldom/xmldom 为 spreadsheet/iwork/hangul/design 与 vviewer
+                    //   docx（mammoth）共享 → 回默认共享 chunk（终审修复 C2，见上）；
+                    // - jszip 归 zip-shared 共享组（vviewer zip 路径共享铁律，见上，
+                    //   非 foreign- 前缀仍进 precache）；pako@2.2.0（dicom/epub 独占 major 同名目录，regex
                     //   无法区分版本）与 dompurify@3.4.17（drawing）同理不入组——后者与
                     //   vviewer-sanitize 的 dompurify@3.4.16 同名，组内会连坐 sanitize 面；
                     // - events@3.3.0（renderer-dicom 声明依赖）已被其 dist 内联（esm 产物
@@ -380,7 +402,7 @@ function diagramEngineChunk(): Plugin {
                       test: /[\\/]node_modules[\\/](@file-viewer[\\/]renderer-dicom|dicom-parser)[\\/]/
                     },
                     {
-                      // jszip 不入组（vviewer zip 路径共享铁律）：signature 组跨 chunk import
+                      // jszip 归 zip-shared 共享组（vviewer zip 路径共享铁律）：signature 组跨 chunk import
                       name: 'foreign-signature',
                       test: /[\\/]node_modules[\\/]@file-viewer[\\/]renderer-signature[\\/]/
                     },
@@ -510,6 +532,11 @@ export default defineConfig({
         // 计划 4 Task 3 封堵；其共享 chunk 经 worker 图 foreign-signature-worker 组
         // 带名由 '**/foreign-*.js' 覆盖）：own 面的 binary.worker/ts-worker/gitWorker/
         // mp4v.worker 不含此文件名段，不受影响。
+        // rpgp wasm 备案（计划 4 终审复核，记档成立不修）：renderer-signature 的
+        // rpgp-wasm/rpgp_wrapper_bg.wasm（worker 内经 import.meta.url 相对 fetch）无
+        // runtimeCaching 路由——消费面是 signature.worker，worker 仅在 foreign 代码面
+        //（不进 precache）可用时才初始化，离线本就不可达，非本计划回归；.wasm 亦不在
+        // precache globPatterns 内，无需 globIgnores 条目。
         globIgnores: [
           '**/node_modules/**/*',
           'sw.js',

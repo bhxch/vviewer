@@ -43,7 +43,7 @@
 | @file-viewer/capability-drawio-official | Apache-2.0 | diagrams.net 官方查看运行时 opt-in 启用包（大体积运行时经 assets-drawing 资产系分发） | file-viewer 批 W2-T1 |
 | @file-viewer/capability-midi | Apache-2.0 | MIDI 检视 opt-in 启用包（其依赖 @tonejs/midi 为 MIT） | file-viewer 批 W2-T1 |
 | @file-viewer/renderer-data | Apache-2.0 | 数据/字体资产渲染（SQLite/Parquet/Avro/WebArchive/PSD/AI/EPS 预览与 WASM 模块结构、字体文件查看面；依赖 sql.js/hyparquet/avsc/ag-psd 均 MIT） | file-viewer 批 W2-T1 |
-| @file-viewer/renderer-design | Apache-2.0 | Adobe 设计文档渲染（Photoshop/Illustrator/InDesign/XD/Animate FLA 等 25 扩展名；传递依赖 @paged-media/introspect-wasm 双许可 MPL-2.0 OR LicenseRef-PMEL，取 MPL-2.0 面） | file-viewer 批 W2-T1 |
+| @file-viewer/renderer-design | Apache-2.0 | Adobe 设计文档渲染（Photoshop/Illustrator/InDesign/XD/Animate FLA 等 24 扩展名；传递依赖 @paged-media/introspect-wasm 双许可 MPL-2.0 OR LicenseRef-PMEL，取 MPL-2.0 面） | file-viewer 批 W2-T1 |
 | @file-viewer/renderer-dicom | Apache-2.0 | DICOM Part 10 医学影像渲染（依赖 dicom-parser 为 MIT） | file-viewer 批 W2-T1 |
 | @file-viewer/renderer-drawing | Apache-2.0 | 白板/图表文件渲染（Draw.io/Excalidraw/Mermaid/PlantUML；BPMN 查看为 opt-in peer bpmn-js，本仓不启用，.bpmn 维持 diagram-bpmn 渲染器） | file-viewer 批 W2-T1 |
 | @file-viewer/renderer-eda | Apache-2.0 | EDA 电路文件渲染（OLB/DRA/GDSII/OASIS；依赖 cfb 为 Apache-2.0，eda-layout/eda-orcad 自研） | file-viewer 批 W2-T1 |

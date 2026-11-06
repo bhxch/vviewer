@@ -186,7 +186,7 @@ describe('foreign 代码面 chunk 分组（spec §6.2：chunk 分离进 dist，�
     expect(line, '缺裸包 pptx').toMatch(/renderer-pptx\|ppt\|pptx\)/);
   });
 
-  it('共享依赖铁律锚：jszip/pako/buffer/roughjs/dompurify 不入 foreign 组 test 正则（git-engine 组注释同款约束）', () => {
+  it('共享依赖铁律锚：jszip/pako/buffer/roughjs/dompurify/xmldom 不入 foreign 组 test 正则（git-engine 组注释同款约束）', () => {
     const src = readSource('vite.config.ts');
     // lastIndexOf：文件内有两处同名注释（chunkFileNames 特判 / groups 块），取后者
     const foreignBlock = src.slice(src.lastIndexOf('foreign 渲染器组（计划 3 Task 3'));
@@ -195,6 +195,8 @@ describe('foreign 代码面 chunk 分组（spec §6.2：chunk 分离进 dist，�
       .split('\n')
       .filter((l) => l.trim().startsWith('test:'))
       .join('\n');
+    // 终审修复 C2：jszip 收拢进 zip-shared 共享组（foreignBlock 之外的独立组，
+    // 非 foreign- 前缀仍进 precache）——组内正则行出现 jszip 即回归
     expect(testLines).not.toMatch(/jszip/);
     expect(testLines).not.toMatch(/pako/);
     // buffer 为 git-engine 组员（email 依赖经其组员满足，懒加载连带合法）
@@ -204,5 +206,29 @@ describe('foreign 代码面 chunk 分组（spec §6.2：chunk 分离进 dist，�
     // 与 vviewer-sanitize 同名共享（regex 无法区分版本，pako@2 同款）
     expect(testLines).not.toMatch(/roughjs/);
     expect(testLines).not.toMatch(/dompurify/);
+    // 终审修复 C2：@xmldom/xmldom 曾归 foreign-spreadsheet（三组共享归首组先例），
+    // 但 mammoth（vviewer docx 路径，precache'd 面）静态依赖它——出组回默认共享
+    // chunk 恢复 precache 地位，foreign 组 test 正则行不得再含 xmldom
+    expect(testLines).not.toMatch(/xmldom/);
+  });
+
+  it('终审修复 C1+C2：app-preload-helper 与 zip-shared 独立组先于 foreign 组（非 foreign- 前缀 → 进 precache）', () => {
+    const src = readSource('vite.config.ts');
+    expect(src, '缺 app-preload-helper 组（preload helper 并入 foreign-core 即离线整站断链）').toContain(
+      "name: 'app-preload-helper'"
+    );
+    expect(src, '缺 zip-shared 组（jszip 摊进 foreign-ofd 即离线 zip/docx 断链）').toContain("name: 'zip-shared'");
+    // 两组必须位于 foreign-core 之前：preload-helper 虚拟模块不匹配任何组 test 时
+    // 被 rolldown 并入先创建的组 chunk；zip-shared 按序首中收拢 jszip 全量
+    const preloadAt = src.indexOf("name: 'app-preload-helper'");
+    const zipAt = src.indexOf("name: 'zip-shared'");
+    const foreignCoreAt = src.indexOf("name: 'foreign-core'");
+    expect(preloadAt, 'app-preload-helper 须先于 foreign-core').toBeGreaterThan(-1);
+    expect(preloadAt).toBeLessThan(foreignCoreAt);
+    expect(zipAt, 'zip-shared 须先于 foreign-core').toBeGreaterThan(-1);
+    expect(zipAt).toBeLessThan(foreignCoreAt);
+    // zip-shared 组 test 收拢 jszip 包路径全量
+    const zipBlock = src.slice(zipAt, foreignCoreAt);
+    expect(zipBlock, 'zip-shared 组 test 必须匹配 jszip 包路径').toMatch(/test: \/.*jszip/);
   });
 });

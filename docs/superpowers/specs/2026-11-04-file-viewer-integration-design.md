@@ -169,7 +169,7 @@ vviewer 网页版只读查看器现有 12 个自研渲染器，格式面与 file
 | 15 | renderer-geo | geojson, kml, gpx, shp（前三自 code 兜底转移） | maplibre BSD-3 |
 | 16 | renderer-typst + assets-typst | typ, typst（自 code 兜底转移） | 渲染式预览；资产大（wasm 编译器+字体），懒加载不进 precache |
 | 17 | renderer-dicom | dcm, dicom | experimental（用户拍板全量） |
-| 18 | renderer-signature | p7m/p7s/p7c/p7b/pkcs7/cms/cmsc/tsd/tst/tsq/tsr/asics/scs/asice/sce/ers/asc/sig/pgp/gpg/jws（22，sig 自 code 兜底转移） | experimental opt-in；用户拍板 |
+| 18 | renderer-signature | p7m/p7s/p7c/p7b/pkcs7/cms/cmsc/tsd/tst/tsq/tsr/asics/scs/asice/sce/ers/asc/sig/pgp/gpg/jws（21，sig 自 code 兜底转移） | experimental opt-in；用户拍板 |
 | 19 | renderer-eda | olb, dra, gds, oas, oasis | |
 | 20 | renderer-drawing + capability-drawio-official + assets-drawing | drawio, dio | 仅启用 drawio 类型（diagrams.net 官方运行时，Apache-2.0）；mermaid/plantuml/excalidraw/bpmn 部分不启用（批次二 vviewer 渲染器接管）；bpmn-js 不装 |
 | 21 | capability-midi（连带 renderer-media 宿主依赖） | midi, mid | renderer-media 的媒体扩展名**不注册**（vviewer av 占优），仅 MIDI 面生效 |
