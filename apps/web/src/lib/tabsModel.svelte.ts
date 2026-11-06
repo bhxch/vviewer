@@ -436,14 +436,19 @@ class TabCollection {
       if (t.source.storeId !== storeId) continue;
       if (t.source.path !== '' && paths.length > 0 && !paths.includes(t.source.path)) continue;
       t.rev = (t.rev ?? 0) + 1;
-      // size 快照失效（计划 2 泵化的回归修复，m5 e2e 实证）：FileSource.size 是打开时
-      // 快照（spec §6.4 已知接缝「SSE 变更只 rev++ 不重 stat」）——泵化前 ≤1MB 全量
-      // 直读（无 Range）天然带出增长字节；泵化后读窗按 size 收口（bytes=0-(size-1)），
-      // 陈旧 size 会把追加内容截在窗外（重读发生、渲染的是旧前缀——SSE 自动刷新
-      // 名存实亡）。变更推送即「源数据可能变化」，size 快照随之失效：size null 使
-      // 重渲染轮走不定态 EOF 收口泵（增长字节可见），与 spec 已知接缝「服务端增长
-      // 越过阈值不补确认（泵+进度卡+取消仍在）」同口径；树中重开文件即取新鲜值。
-      if (t.source.path !== '') {
+      // size 快照失效（计划 2 泵化的回归修复，m5 e2e 实证；全域收敛见下）：
+      // FileSource.size 是打开时快照（spec §6.4 已知接缝「SSE 变更只 rev++ 不重
+      // stat」）——泵化前 ≤1MB 全量直读（无 Range）天然带出增长字节；泵化后读窗按
+      // size 收口（bytes=0-(size-1)），陈旧 size 会把追加内容截在窗外（重读发生、
+      // 渲染的是旧前缀——SSE 自动刷新名存实亡）。
+      // 失效域收敛到 ≤1MB（dispatcher FULL_LIMIT 镜像，泵化全量物化面）：size null
+      // 使重渲染轮走不定态 EOF 收口泵（增长字节可见），与 spec 已知接缝「服务端
+      // 增长越过阈值不补确认」同口径。>1MB 流式面不失效：hex 渲染器对 size-null
+      // ctx 走全量回退读（hex.ts「size 未知来源应由 hexRenderer 先做全量回退读」），
+      // 大文件 SSE 刷新会整件重读（IO-03 窗口级增量语义即回归）；且 >1MB 的
+      // BlockStream 尾窗按陈旧 size 收口为泵化前同款行为（非本次回归面）。树中
+      // 重开文件即取新鲜值（spec 已知接缝原文）。
+      if (t.source.path !== '' && t.source.size !== undefined && t.source.size <= 1_048_576) {
         t.source = { ...t.source, size: undefined };
       }
     }
