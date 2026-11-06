@@ -45,25 +45,25 @@ function isCancelledError(e: unknown): boolean {
 // ---------- Range transport（spec §6.6，io-streaming 计划 5 Task 1） ----------
 
 /**
- * 守卫补拉记忆（render-text/blockStream.ts memoizedFullRead 同款形态）：size 未知回退的
- * {0, MAX_SAFE_INTEGER} 全量补拉按 ctx 记忆——错误卡片 retry 重入 render（同一 renderCtx
- * 透传，评审指令②）不再重复全量下载；成功即记忆（字节终态），失败即刻出表（防毒化：
- * retry 需可重新发起）。
+ * 守卫补拉记忆（render-text/blockStream.ts memoizedFullRead 同源形态；终审 I-2 分歧备案）：
+ * size 未知回退的 {0, MAX_SAFE_INTEGER} 全量补拉按 ctx 记忆——错误卡片 retry 重入 render
+ * （同一 renderCtx 透传，评审指令②）不再重复全量下载；失败不记忆（retry 可重新发起）。
+ * 与 text 侧的关键分歧：pdfjs getDocument 会 transfer data.buffer 到 worker（主线程副本
+ * detach 归零）——memo 直存/直还 Promise 值实例时，重试即命中零长 buffer → getDocument
+ * 必抛（transfer 毒化，重试恒败且错误文案被换）。故 memo 存字节本体、每次消费返回
+ * .slice() 新副本（首消费同样拷贝：getDocument transfer 的是副本，memo 保有体不 detach）。
  */
-const fullReadMemo = new WeakMap<StreamCtx, Promise<Uint8Array<ArrayBuffer>>>();
+const fullReadMemo = new WeakMap<StreamCtx, Uint8Array<ArrayBuffer>>();
 
-function memoizedFullRead(ctx: StreamCtx): Promise<Uint8Array<ArrayBuffer>> {
+async function memoizedFullRead(ctx: StreamCtx): Promise<Uint8Array<ArrayBuffer>> {
   const memo = fullReadMemo.get(ctx);
-  if (memo !== undefined) return memo;
+  if (memo !== undefined) return memo.slice(); // 消费即拷贝（重入拿到的恒是非零新副本）
   // 全量读端点 {0, MAX_SAFE_INTEGER}：远端 Range 超界由服务端钳制返回整文件、本地
   // slice 越界自然钳制（hex.ts size-null 回退同款单发读，signal 不传——与 code 全量
   // 补拉同口径，读失败经 dispatcher ctx.read 包装标 DispatchReadError 向上 reject）
-  const p = ctx.read({ start: 0, end: Number.MAX_SAFE_INTEGER });
-  fullReadMemo.set(ctx, p);
-  p.catch(() => {
-    fullReadMemo.delete(ctx);
-  });
-  return p;
+  const bytes = await ctx.read({ start: 0, end: Number.MAX_SAFE_INTEGER });
+  fullReadMemo.set(ctx, bytes);
+  return bytes.slice(); // 首消费同样交副本：memo 保有体与 getDocument transfer 面分离
 }
 
 /**
@@ -165,11 +165,16 @@ export const pdfRenderer: Renderer = {
     // 分支：capable 且 size>1MB 时 buffer=8KB probe；≤1MB 直读全量与 !capable 退化
     // 全量视图均交付全量 buffer，byteLength === size 不入本支）。StreamCtx 无
     // rangeCapable 承载字段（纯 {size, head, read}），rangeCapable 自 source.store 判
-    // （与 dispatcher capable 判定同源）。回退矩阵（均落 getDocument({data}) 全量现路径）：
+    // （与 dispatcher capable 判定同源）。回退矩阵（非 transport 态均落
+    // getDocument({data}) 全量现路径）：
     // - ctx 缺失（直调兼容面）：buffer 即全量，data 路径零变化
     // - size null：head 无法确认截断与否 → memoizedFullRead 全量补拉后 data 路径
-    // - !rangeCapable / 本地来源：dispatcher 已交付全量（退化视图 byteLength === size）
-    //   → data 路径零变化
+    // - !rangeCapable：dispatcher 已交付全量（退化视图 byteLength === size）→ data 路径
+    //   零变化
+    // - 本地 ≤1MB（localFiles/localFs 全量直读）：同上退化视图 → data 路径零变化
+    // - 本地 >1MB：localFiles/localFs 同为 rangeCapable:true（File.slice 零网络）→
+    //   dispatcher 8KB 探测块 + ctx → transport（终审 I-1 语义对齐：非「data 路径」，
+    //   行为良性偏优——按需窗段读替代一次性全量物化）
     // typeof ctx.read === 'function'（I1 纵深防御）：对齐 dispatcher capable 判定的
     // read 在场项（`capable = store.rangeCapable === true && read !== undefined`）——
     // 渲染器无 dispatch read 直通面，以 ctx.read 在场为代理；正常 dispatcher 交付恒真，

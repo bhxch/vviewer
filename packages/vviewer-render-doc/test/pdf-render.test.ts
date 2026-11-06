@@ -9,6 +9,8 @@
 // - 回退三态：ctx 缺失 / size null（memoizedFullRead 补拉）/ !rangeCapable（全量在手零读）
 // - abort 身份：在飞 requestRange 随 signal 取消，reject 即 abortReadError 身份
 // - destroy 链：loadingTask.destroy + 实例 signal 取消在飞窗段
+// - 终审修复波锚：memo 命中重入仍可成功打开（I-2 transfer 毒化）/ 本地 >1MB →
+//   transport 且零网络读（I-1 实态对齐）
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { abortReadError, isAbortError } from '@bhxch/vviewer-core';
 import type { ByteRange, Detection, FileSource, StreamCtx, TreeStore } from '@bhxch/vviewer-core';
@@ -175,6 +177,30 @@ describe('pdfRenderer 分流入口（spec §6.6）', () => {
     expect(lastDestroy).toHaveBeenCalledTimes(1);
   });
 
+  it('本地 >1MB（终审 I-1 实态锚）：localFiles/localFs rangeCapable:true + File.slice——8KB 探测块 < ctx.size → transport 装配、render 期零读（零网络）', async () => {
+    const host = document.createElement('div');
+    const read = vi.fn();
+    const ctx = makeCtx({ size: BIG_SIZE, head: HEAD, read: asCtxRead(read) });
+    // 本地 store 实态（localFiles.ts:70 / localFs.ts:75）：rangeCapable:true，read range
+    // 分支 File.slice；dispatcher 对 size>1MB capable 来源交付 8KB 探测块 + ctx——
+    // 分流只认 buffer<ctx.size && rangeCapable，本地来源不豁免（非「本地 → data 路径」，
+    // 行为良性偏优：按需窗段读替代一次性全量物化，承诺面以此锚钉死）
+    const localSource: FileSource = {
+      storeId: 's-local',
+      storeLabel: '本地文件',
+      path: '/local-big.pdf',
+      name: 'local-big.pdf',
+      store: { rangeCapable: true } as TreeStore
+    };
+    const inst = await pdfRenderer.render(HEAD, host, localSource, DET, ctx);
+    const arg = lastGetDocumentArg();
+    expect(arg.data).toBeUndefined();
+    expect(arg.range).toBeInstanceOf(PDFDataRangeTransport);
+    expect(arg.range!.length).toBe(BIG_SIZE);
+    expect(read).not.toHaveBeenCalled(); // render 期零主动读：File.slice 按需窗段，零网络
+    inst.destroy();
+  });
+
   it('transport 分支（capable + size 已知 + buffer=head 探测块）→ getDocument 收到 PDFDataRangeTransport：initialData=head 字节、length=size、非 progressiveDone', async () => {
     const host = document.createElement('div');
     const read = vi.fn();
@@ -216,6 +242,29 @@ describe('pdfRenderer 分流入口（spec §6.6）', () => {
     expect([...arg.data!]).toEqual([...FULL]);
     expect(read).toHaveBeenCalledTimes(1);
     expect(read.mock.calls[0]![0]).toEqual({ start: 0, end: Number.MAX_SAFE_INTEGER });
+    inst.destroy();
+  });
+
+  it('memo 命中重入仍可成功打开（终审 I-2 transfer 毒化锚）：首次渲染失败后重试 → getDocument 收到非零、与源字节等值的 buffer（零重复下载）', async () => {
+    const host = document.createElement('div');
+    const read = windowRead();
+    const ctx = makeCtx({ size: null, head: HEAD, read: asCtxRead(read) });
+    // 镜像真实 pdfjs：getDocument transfer data.buffer 到 worker（主线程副本 detach 归零）
+    // ——旧实现 memo 直存 Promise 值实例时，重试命中零长 buffer → getDocument 必抛
+    //（transfer 毒化）；首开失败 = 错误卡片重试的实态前提
+    getDocumentMock.mockImplementationOnce(({ data }: { data?: Uint8Array<ArrayBuffer> }) => {
+      structuredClone(data, { transfer: [data!.buffer] });
+      return { promise: Promise.reject(new Error('首次打开失败')), destroy: lastDestroy };
+    });
+    const first = pdfRenderer.render(HEAD, host, makeSource({ rangeCapable: true }), DET, ctx);
+    await expect(first).rejects.toThrow('首次打开失败');
+    // 重试：memo 命中（零重复下载）→ 非零、与源字节等值的新副本 → 打开成功
+    const inst = await pdfRenderer.render(HEAD, host, makeSource({ rangeCapable: true }), DET, ctx);
+    const arg = lastGetDocumentArg();
+    expect(arg.range).toBeUndefined();
+    expect(arg.data!.byteLength).toBe(FULL.length); // 非零（毒化形态为 0）
+    expect([...arg.data!]).toEqual([...FULL]); // 与源字节等值
+    expect(read).toHaveBeenCalledTimes(1); // memo 命中：重试零重复全量下载
     inst.destroy();
   });
 

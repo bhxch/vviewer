@@ -26,8 +26,9 @@ import { openMenu } from './tabbar-menu';
  *   memoizedFullRead 单次全量补拉（请求形态：探测块 + 单条 0- 起全量 Range，零窗口流）；
  * - 03 非 Range store 回退：directDav 200 无视 Range → rangeOk=false 降级（探测块带
  *   Range 被答 200 全量 + 全量补拉无 Range 头）→ data 路径渲染；
- * - 04 本地文件：localFiles buffer/全量交付（byteLength===size）→ data 路径，远端服务器
- *   零 /api/file 请求；
+ * - 04 本地文件（≤1MB 小体量）：localFiles 全量交付（byteLength===size）→ data 路径，
+ *   远端服务器零 /api/file 请求（本地 >1MB 实态走 transport——File.slice 零网络，
+ *   终审 I-1 对齐，单测锚钉死）；
  * - 05 取消锚：渐进装载期关闭 tab（effectAbort → 实例 destroy → readAbort.abort +
  *   loadingTask.destroy）→ 后续 Range 窗口请求停止（增长→停止的前后对照）+ 取消静默
  *   （不落错误卡）。注：transport 渐进装载零全量物化、无泵无进度卡，取消面即 tab 关闭
@@ -42,7 +43,7 @@ import { openMenu } from './tabbar-menu';
  *
  * 夹具（linearized PDF，binary 不入库，corpus 惯例 gitignore + 生成脚本圈定）：
  * - apps/web/e2e/fixtures/corpus/pdf-linearized/progressive.pdf——由
- *   tools/gen-e2e-pdf-linearized.py 生成（uv run --with pikepdf tools/gen-e2e-pdf-linearized.py，
+ *   tools/gen-e2e-pdf-linearized.py 生成（uv run tools/gen-e2e-pdf-linearized.py，
  *   12 页 600×900pt / 1,576,058B / 确定性重跑等值，生成时 sha256
  *   83bd9a3714002e443e8dda6b0fde4509bc18cad6fc3a36302cd9047dc5f0ded4）。
  * - 线性化两前提（pdfjs worker 实读锚定）：① startxref 取自文件头线性化字典首个 endobj
@@ -64,7 +65,7 @@ const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
 const FIXTURE_PATH = `${repoRoot}/apps/web/e2e/fixtures/corpus/pdf-linearized/progressive.pdf`;
 const GENERATOR_PATH = `${repoRoot}/tools/gen-e2e-pdf-linearized.py`;
 /** 夹具缺失说明（统一验证阶段的再生命令，skip 原因透出） */
-const FIXTURE_HINT = '线性化夹具未生成——uv run --with pikepdf tools/gen-e2e-pdf-linearized.py';
+const FIXTURE_HINT = '线性化夹具未生成——uv run tools/gen-e2e-pdf-linearized.py（PEP-723 inline 依赖 pikepdf）';
 
 const fixtureBytes = (): Buffer => readFileSync(FIXTURE_PATH);
 const hasFixture = existsSync(FIXTURE_PATH);

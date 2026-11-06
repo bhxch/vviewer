@@ -249,7 +249,7 @@ vviewer 网页版只读查看器现有 12 个自研渲染器，格式面与 file
 
 ### 6.6 vviewer 自有增强：pdf Range transport（决策⑫，随批次三交付）
 
-- `pdf.ts` 增加 transport 模式：pdf 渲染器声明 streaming（领取 head 探测字节 + StreamCtx）——**ctx 存在且 rangeCapable 且 size 已知** → pdfjs `PDFDataRangeTransport(head, size, requestRange → ctx.read)` 渐进加载；回退矩阵：size 未知 → memoizedFullRead 全量（现路径）、!rangeCapable → 全量、本地来源（数据在手）→ 现 `data` 路径零变化。
+- `pdf.ts` 增加 transport 模式：pdf 渲染器声明 streaming（领取 head 探测字节 + StreamCtx）——**ctx 存在且 rangeCapable 且 size 已知** → pdfjs `PDFDataRangeTransport(head, size, requestRange → ctx.read)` 渐进加载；回退矩阵：size 未知 → memoizedFullRead 全量（现路径）、!rangeCapable → 全量、本地 ≤1MB → data 路径（dispatcher 全量直读）、本地 >1MB → transport（localFiles/localFs rangeCapable:true + File.slice 零网络，按需窗段读——终审 I-1 语义对齐备案）。
 - 生命周期：reload/watch 变更走既有 destroy → `loadingTask.destroy()` + signal 取消在飞 requestRange；abort 对齐 `abortReadError` 身份层。
 - 直连 S3 经 store.read 同样适用（SigV4 逐请求重签由 store 层负责）——Range transport 不挑 URL 适配性，这正是选 transport 而非 URL 通道的原因。
 - e2e：远端 linearized 样例渐进锚（首屏渲染先于全量到达——以请求数/字节量下限断言）、回退三路锚、S3 直连形态锚（e2e-server 套件）；门禁归批次三收口。

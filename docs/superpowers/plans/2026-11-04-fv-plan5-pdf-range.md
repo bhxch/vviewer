@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - e2e 只写不跑（既定裁决）；单测/typecheck 门禁照旧。
-- 回退三路语义钉死：ctx 缺失 / size===null / !ctx.rangeCapable → 全量现路径（memoizedFullRead 形态）；本地来源（buffer 全量在手）→ 现 `getDocument({ data: buffer })` 逐字节不变。
+- 回退三路语义钉死：ctx 缺失 / size===null / !ctx.rangeCapable → 全量现路径（memoizedFullRead 形态）；本地来源 ≤1MB（buffer 全量在手）→ 现 `getDocument({ data: buffer })` 逐字节不变；本地 >1MB → transport（localFiles/localFs rangeCapable:true + File.slice 零网络——终审 I-1 对齐原行文「本地 → data 路径」的承诺面失真，实态良性偏优并经单测锚钉死）。
 - abort：requestRange 在飞窗段随 ctx signal 取消；取消错误统一 `abortReadError` 身份（errors.ts 既有层）。
 - 直连 S3/DAV：经 store.read（SigV4/Basic 在 store 层）——transport 不挑 URL 适配性。
 - 携带修复（计划 4 终审遗留）：apps/web/vite.config.ts:274 注释「11 个」→「10 个」。

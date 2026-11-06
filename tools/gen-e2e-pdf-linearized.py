@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# /// script
+# dependencies = ["pikepdf"]
+# ///
 """生成 e2e PDF-RANGE 域夹具：确定性线性化多页 PDF（qpdf/pikepdf，io-streaming plan5 Task 2）。
 
 产物：apps/web/e2e/fixtures/corpus/pdf-linearized/progressive.pdf
@@ -12,8 +15,8 @@
   - 确定性：固定内容 + deterministic_id=True（/ID 派生自内容）+ 无时间戳元数据，
     同参数重跑字节等值（本脚本自身以 sha256 断言自证）。
 
-用法（需 python3 + pikepdf；本机经 uv 免装直跑）：
-    uv run --with pikepdf tools/gen-e2e-pdf-linearized.py
+用法（python3 + pikepdf；PEP-723 inline 依赖声明于文件头，uv 免装直跑）：
+    uv run tools/gen-e2e-pdf-linearized.py
 
 夹具不入库（apps/web/e2e/fixtures/corpus/ 整目录 gitignore，多源语料同款惯例）：
 本地与统一验证阶段先跑本脚本再跑 playwright；b-pdf-range.spec.ts 以 existsSync 守卫

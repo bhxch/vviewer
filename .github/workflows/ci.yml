@@ -173,6 +173,11 @@ jobs:
       - run: node tools/fetch-e2e-corpus.mjs
         env:
           GITHUB_TOKEN: ${{ github.token }}
+      # plan5 pdf-range 域夹具（linearized PDF，corpus 惯例 binary 不入库）：e2e 前由库内
+      # 生成器确定性再生（PEP-723 inline 依赖 pikepdf，uv run 免 --with）；缺失时
+      # PDF-RANGE-01/02/03/05/06/07 会 skip（spec existsSync 守卫），此处保证 CI 真跑非 skip
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run tools/gen-e2e-pdf-linearized.py
       # playwright.config 的 webServer 在 CI 下自行启动 vite preview（CI 环境变量内置）
       - run: pnpm --filter web exec playwright test
       # 失败用例 trace 取证（config 的 trace: retain-on-failure）：真实 fetch 时序
