@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** vviewer 自有 pdf 渲染器接 Range 能力（决策⑫/spec §6.6）：声明 streaming，`ctx.rangeCapable && size 已知` 时走 pdfjs `PDFDataRangeTransport(head, size, requestRange→ctx.read)` 渐进加载；回退三路（size 未知→全量 / !rangeCapable→全量 / 本地来源→现 data 路径零变化）；直连 S3 经 store.read 同样适用；e2e 锚编写（实跑移交统一验证）。
+**Goal:** vviewer 自有 pdf 渲染器接 Range 能力（决策⑫/spec §6.6）：声明 streaming，`ctx.rangeCapable && size 已知` 时走 pdfjs `PDFDataRangeTransport(head, size, requestRange→ctx.read)` 渐进加载；回退三路（size 未知→全量 / !rangeCapable→全量 / 本地 ≤1MB → data 路径；本地 >1MB → transport（File.slice 零网络））；直连 S3 经 store.read 同样适用；e2e 锚编写（实跑移交统一验证）。
 
 **Architecture:** pdf.ts 增加 transport 模式分支——渲染器声明 `streaming: true` 后 dispatcher 交付 head 探测字节 + StreamCtx；transport 的 requestDataRange 回调把 `ctx.read(range)` 的窗段字节交给 pdfjs；生命周期=既有 reload/destroy 链 + `loadingTask.destroy()` + signal 取消在飞窗段（abort 对齐 abortReadError 身份层）。pdfjs-dist 既有依赖（vviewer pdf 已用），零新依赖。
 

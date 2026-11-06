@@ -14,7 +14,7 @@ import { openMenu } from './tabbar-menu';
  * T1 已落地面（pdf.ts streaming:true + createPdfRangeTransport）：capable + size 已知 +
  * buffer 短于 size（>1MB 探测块形态）→ PDFDataRangeTransport（requestRange → ctx.read
  * 窗段，[begin,end) → ByteRange end 含换算）；回退矩阵（size null → memoizedFullRead 全量
- * 补拉；!rangeCapable / 本地 / ≤1MB → data 路径）；M1 收口（非 abort mid-load 读失败且
+ * 补拉；!rangeCapable / 本地 ≤1MB / ≤1MB → data 路径）；M1 收口（非 abort mid-load 读失败且
  * 文档未开 → loadingTask.destroy → render reject → 错误卡片；abort 静默）。
  *
  * 锚清单（PDF-RANGE-00~07）：
