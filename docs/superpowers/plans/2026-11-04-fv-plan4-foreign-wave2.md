@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 引入第二波 13 个 npm 包（data/design/image/geo/typst/dicom/signature/eda/drawing/drawio-official/midi + renderer-media 宿主 + assets 系），桥接装配约 66 个新扩展名（含 wasm 自 hex 转移、字体查看面、geo/typst/signature 自兜底转移），扩展资产映射与 SW 面、e2e 域编写、矩阵回写。
+**Goal:** 引入第二波 12 个 npm 包（data/design/image/geo/typst/dicom/signature/eda/drawing + renderer-media 宿主 + capability-drawio-official/-midi），桥接装配约 66 个新扩展名（含 wasm 自 hex 转移、字体查看面、geo/typst/signature 自兜底转移），扩展资产映射与 SW 面、e2e 域编写、矩阵回写。
 
 **Architecture:** 完全复用计划 3 钉死的形态：精确锁版 + wrapFileViewerRenderer 桥接 + 装配序铁律 + 全局 mount 队列串行化（计划 3 终审 I1 修复已全局生效，第二波自动受益）+ per-package 资产映射 + foreign-* chunk 分组 + 双门禁（check-foreign-deps 含 CDN 交叉断言 / foreign-budget 含 worker denylist 与存在性断言）。
 
@@ -29,14 +29,14 @@
 
 ---
 
-### Task 1: 第二波依赖精确锁版 + NOTICES（13 包）
+### Task 1: 第二波依赖精确锁版 + NOTICES（12 包）
 
 **Files:**
-- Modify: `apps/web/package.json`（13 项精确版本：core 已在；renderer-data/-design/-image/-geo/-typst/-dicom/-signature/-eda/-drawing/-media + capability-drawio-official/-midi，npm 实查 3.3.3 系）
+- Modify: `apps/web/package.json`（12 项精确版本：renderer-data/-design/-image/-geo/-typst/-dicom/-signature/-eda/-drawing/-media + capability-drawio-official/-midi，npm 实查 3.3.3 系）
 - Modify: `THIRD_PARTY_NOTICES.md`（10 行新直接依赖 + introspect-wasm 双许可注记入 renderer-design 行）
-- Test: 无新脚本（check-foreign-deps 既有门禁自动覆盖；跑一次验证 13 项全过）
+- Test: 无新脚本（check-foreign-deps 既有门禁自动覆盖；跑一次验证 12 项全过）
 
-- [ ] **Step 1: npm 实查 13 包精确版本 + peerDeps** → Step 2: package.json + install + NOTICES → Step 3: `node tools/check-foreign-deps.mjs --check` 绿 + 双 typecheck 0E + 根 vitest 全绿 → Step 4: Commit `feat(web): file-viewer 第二波依赖精确锁版引入（13 包）+NOTICES（introspect-wasm 取 MPL-2.0 面注记）`
+- [ ] **Step 1: npm 实查 12 包精确版本 + peerDeps** → Step 2: package.json + install + NOTICES → Step 3: `node tools/check-foreign-deps.mjs --check` 绿 + 双 typecheck 0E + 根 vitest 全绿 → Step 4: Commit `feat(web): file-viewer 第二波依赖精确锁版引入（12 包）+NOTICES（introspect-wasm 取 MPL-2.0 面注记）`
 
 ### Task 2: 桥接装配第二波（约 66 扩展名 + wasm 转移 + 字体面）
 
