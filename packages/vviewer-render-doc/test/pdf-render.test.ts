@@ -218,6 +218,86 @@ describe('pdfRenderer 分流入口（spec §6.6）', () => {
     expect(read.mock.calls[0]![0]).toEqual({ start: 0, end: Number.MAX_SAFE_INTEGER });
     inst.destroy();
   });
+
+  it('I1 纵深防御：ctx.read 缺失（违约形态）→ 不进 transport 分支（getDocument 不被调），全量守卫处快速失败', async () => {
+    const host = document.createElement('div');
+    // 对齐 dispatcher capable 判定的 read 在场项：read 缺失 → 即使 capable+size 已知
+    // 也不装配 transport（无读通道的 transport 是死面），落全量守卫 reject
+    const ctx = { size: BIG_SIZE, head: HEAD, read: undefined as unknown as StreamCtx['read'] };
+    const renderPromise = pdfRenderer.render(HEAD, host, makeSource({ rangeCapable: true }), DET, ctx);
+    await expect(renderPromise).rejects.toThrow();
+    expect(getDocumentMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('mid-load 读失败收口（M1 评审：requestRange 非 abort 读失败 → destroy 兜底）', () => {
+  function stubPendingGetDocument(): {
+    promise: Promise<unknown>;
+    resolveDoc: (d: unknown) => void;
+    rejectDoc: (e: unknown) => void;
+  } {
+    // 手写 deferred（执行器同步赋值，解构时即可用；target ES2022 无 Promise.withResolvers）
+    let resolveDoc!: (d: unknown) => void;
+    let rejectDoc!: (e: unknown) => void;
+    const promise = new Promise((res, rej) => {
+      resolveDoc = res;
+      rejectDoc = rej;
+    });
+    getDocumentMock.mockImplementationOnce(() => ({ promise, destroy: lastDestroy }));
+    return { promise, resolveDoc, rejectDoc };
+  }
+
+  it('非 abort 读失败（文档未开）→ loadingTask.destroy 被调 → render promise reject 落错误卡片路径', async () => {
+    const host = document.createElement('div');
+    const { rejectDoc } = stubPendingGetDocument();
+    // 镜像真实 pdfjs 行为：destroy() 使 loadingTask.promise reject
+    lastDestroy.mockImplementation(async () => {
+      rejectDoc(new Error('Worker was destroyed'));
+    });
+    const read = vi.fn(async () => {
+      throw new Error('模拟网络错');
+    });
+    const ctx = makeCtx({ size: BIG_SIZE, head: HEAD, read: asCtxRead(read) });
+    const renderPromise = pdfRenderer.render(HEAD, host, makeSource({ rangeCapable: true }), DET, ctx);
+    await vi.waitFor(() => expect(getDocumentMock).toHaveBeenCalled());
+    lastGetDocumentArg().range!.requestDataRange(0, 100); // mid-load 读失败
+    await expect(renderPromise).rejects.toThrow('Worker was destroyed');
+    expect(lastDestroy).toHaveBeenCalled();
+  });
+
+  it('abort 读失败（文档未开）→ 静默：destroy 不被调，render 正常落定', async () => {
+    const host = document.createElement('div');
+    const { resolveDoc } = stubPendingGetDocument();
+    const read = vi.fn(async () => {
+      throw abortReadError();
+    });
+    const ctx = makeCtx({ size: BIG_SIZE, head: HEAD, read: asCtxRead(read) });
+    const renderPromise = pdfRenderer.render(HEAD, host, makeSource({ rangeCapable: true }), DET, ctx);
+    await vi.waitFor(() => expect(getDocumentMock).toHaveBeenCalled());
+    lastGetDocumentArg().range!.requestDataRange(0, 100);
+    await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 0)); // reject 传播（catch 判 abort 静默）完
+    expect(lastDestroy).not.toHaveBeenCalled();
+    resolveDoc(makeDoc());
+    const inst = await renderPromise;
+    inst.destroy();
+    expect(lastDestroy).toHaveBeenCalledTimes(1); // destroy 链本身不受影响
+  });
+
+  it('doc 已开后非 abort 懒页 chunk 读失败 → 维持静默（单页空白可接受），destroy 不被调', async () => {
+    const host = document.createElement('div');
+    const read = vi.fn(async () => {
+      throw new Error('懒页网络错');
+    });
+    const ctx = makeCtx({ size: BIG_SIZE, head: HEAD, read: asCtxRead(read) });
+    // 默认 mock：loadingTask.promise 立即 resolve → render 完成即 docOpened=true
+    const inst = await pdfRenderer.render(HEAD, host, makeSource({ rangeCapable: true }), DET, ctx);
+    lastGetDocumentArg().range!.requestDataRange(0, 100);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(lastDestroy).not.toHaveBeenCalled();
+    inst.destroy();
+  });
 });
 
 describe('requestRange 窗段（PDFDataRangeTransport → ctx.read 换算与交付）', () => {

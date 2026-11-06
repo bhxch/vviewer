@@ -7,6 +7,7 @@
 // 流式（io-streaming 计划 5 Task 1，spec §6.6）：声明 streaming 后 dispatcher 交付
 // head 探测块 + StreamCtx；capable 且 size 已知且 buffer 短于 size 时走
 // PDFDataRangeTransport（requestRange → ctx.read 窗段）渐进加载，回退矩阵见 render 入口注释。
+import { isAbortError } from '@bhxch/vviewer-core';
 import type { Detection, FileSource, RenderedInstance, Renderer, StreamCtx } from '@bhxch/vviewer-core';
 import type { PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import { extractPageText, searchPdfPages, type PdfSearchMatch, type PdfTextItem } from './pdfText';
@@ -86,9 +87,16 @@ function memoizedFullRead(ctx: StreamCtx): Promise<Uint8Array<ArrayBuffer>> {
  */
 export function createPdfRangeTransport(
   BaseCtor: typeof PDFDataRangeTransport,
-  opts: { size: number; head: Uint8Array; read: StreamCtx['read']; signal?: AbortSignal }
+  opts: {
+    size: number;
+    head: Uint8Array;
+    read: StreamCtx['read'];
+    signal?: AbortSignal;
+    /** 非 abort 读失败回调（M1）：mid-load 收口钩子，render 侧据 docOpened 门控 destroy */
+    onReadFailure?: () => void;
+  }
 ): PDFDataRangeTransport & { requestRange(begin: number, end: number): Promise<void> } {
-  const { size, head, read, signal } = opts;
+  const { size, head, read, signal, onReadFailure } = opts;
   class CtxReadTransport extends BaseCtor {
     constructor() {
       // progressiveDone=false：initialData 是探测头前缀而非完整文件（head 即全量的
@@ -102,12 +110,20 @@ export function createPdfRangeTransport(
       this.onDataRange(begin, chunk);
     }
     requestDataRange(begin: number, end: number): void {
-      // pdfjs transport API 无错误回传通道：读失败/取消无法让 loadingTask.promise
-      // reject——在飞 range reader 挂起由 loadingTask.destroy() 收口（render 失败清理
-      // 与实例 destroy 均前置 signal abort，在飞 ctx.read 先行 reject，无字节再交付）。
-      // reject 在此静默收口仅因无通道：abort 身份（signal 取消，store 层统一抛
-      // abortReadError）与读失败身份在 ctx.read 契约内原样透传，此处不改写
-      void this.requestRange(begin, end).catch(() => {});
+      // pdfjs transport API 无 per-chunk 错误回传通道：读失败/取消无法直接让
+      // loadingTask.promise reject。收口分两路（M1 评审）：
+      // - abort 身份（signal 取消，store 层统一抛 abortReadError）：静默——render 失败
+      //   清理与实例 destroy 均前置 signal abort，在飞 ctx.read 先行 reject，无字节再
+      //   交付，挂起的 range reader 由 loadingTask.destroy() 收口；
+      // - 非 abort 读失败（DispatchReadError/网络错）：交 onReadFailure（render 侧
+      //   docOpened 门控）——文档未开时 destroy 使 promise reject 进 render 既有 catch
+      //   → 错误卡片路径（否则 range reader 永久 pending → render 挂死且无 destroy
+      //   路径）；doc 已开后懒页 chunk 读失败维持静默（单页空白不渲染，可接受）。
+      // 错误身份在此不改写（isAbortError 纯身份判定，见 core/dispatch/errors）。
+      void this.requestRange(begin, end).catch((err: unknown) => {
+        if (isAbortError(err)) return;
+        onReadFailure?.();
+      });
     }
   }
   return new CtxReadTransport();
@@ -154,10 +170,15 @@ export const pdfRenderer: Renderer = {
     // - size null：head 无法确认截断与否 → memoizedFullRead 全量补拉后 data 路径
     // - !rangeCapable / 本地来源：dispatcher 已交付全量（退化视图 byteLength === size）
     //   → data 路径零变化
+    // typeof ctx.read === 'function'（I1 纵深防御）：对齐 dispatcher capable 判定的
+    // read 在场项（`capable = store.rangeCapable === true && read !== undefined`）——
+    // 渲染器无 dispatch read 直通面，以 ctx.read 在场为代理；正常 dispatcher 交付恒真，
+    // 仅拦截违约 ctx（read 缺失 → 落全量守卫，memoizedFullRead 处快速失败）
     const transport =
       ctx !== undefined &&
       ctx.size !== null &&
       source.store.rangeCapable === true &&
+      typeof ctx.read === 'function' &&
       buffer.byteLength < ctx.size
         ? { size: ctx.size, head: buffer, read: ctx.read }
         : null;
@@ -174,20 +195,31 @@ export const pdfRenderer: Renderer = {
     // pdfjs 会 transfer 该 buffer 到 worker（detach）：调用方每次 dispatch 前重新 read，无复用问题。
     // pdfjs 6 起移除 PDFDocumentProxy.prototype.destroy（api-major，upstream PR 21245）：
     // 资源释放改走 loadingTask.destroy()，故保留 loadingTask 引用
-    const loadingTask =
+    // M1（评审跟进）：mid-load 读失败收口——transport 的 requestRange 非 abort 读失败
+    // 时经 onReadFailure 回调（pdfjs 无 per-chunk 错误通道）；文档未开（promise 未决）
+    // → loadingTask.destroy() 使 promise reject 进下方 catch（错误卡片路径），否则
+    // range reader 永久 pending → render 挂死且无 destroy 路径；doc 已开后（懒页
+    // chunk 读失败）维持静默——单页空白不渲染可接受，不因尾块抖动整页报错
+    let loadingTask: PDFDocumentLoadingTask;
+    let docOpened = false;
+    loadingTask =
       transport !== null
         ? pdfjs.getDocument({
             range: createPdfRangeTransport(pdfjs.PDFDataRangeTransport, {
               size: transport.size,
               head: transport.head,
               read: transport.read,
-              signal: readAbort.signal
+              signal: readAbort.signal,
+              onReadFailure: () => {
+                if (!docOpened) void loadingTask.destroy();
+              }
             })
           })
         : pdfjs.getDocument({ data: buffer });
     let doc: PDFDocumentProxy;
     try {
       doc = await loadingTask.promise;
+      docOpened = true; // 文档已开：后续懒页 chunk 读失败走静默分支（onReadFailure 门控）
     } catch (e) {
       // 打开失败（损坏 PDF/读失败）：释放 worker 端资源并取消在飞窗段读——不留孤儿
       // promise（transport 模式挂起的 range reader 随 destroy 收口）；错误身份不改写，
