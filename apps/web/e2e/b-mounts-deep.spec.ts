@@ -484,9 +484,11 @@ test.describe('b-mounts-deep 目录挂载补强', () => {
       secret: 'p',
       createdAt: 1700000000000
     };
+    // size 声明与实体一致（'namespace-free body\n' = 20B）：泵化后 size 驱动读窗
+    // 收口，谎报 size 会把重读截在窗外（统一验证阶段 MM-14 截断实证的夹具修复）
     const entries = [
       { href: '/dav/', dir: true },
-      { href: '/dav/one.txt', size: 18 },
+      { href: '/dav/one.txt', size: 20 },
       { href: '/dav/zdir/', dir: true }
     ];
     let flavor: 'default-ns' | 'custom-prefix' = 'default-ns';

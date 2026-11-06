@@ -964,7 +964,21 @@ test('IO-11：>512MB 构造即知超限——零读停机（仅探针）+ 流式
     await closeDrawerIfOpened(page, drawer);
     await expect(page.locator('.vv-tab.active', { hasText: 'huge.js' })).toBeVisible();
 
-    // 零读停机 + 非失败态提示条（spec §4.3 防线换代：解释停机而非报错，建议 hex）
+    // 确认门先行（spec §6.4 防线换代 2026-11-04：原 512MB 硬防线在远端通路改为可设
+    // 阈值确认门，默认 512MB——统一验证阶段重定基）：600MB > 512MB → 确认卡先于渲染/
+    // 泵出现，「零读停机」语义保留在确认前（未确认时零字节读）
+    const gate = page.locator('.vv-dl-confirm');
+    await expect(gate).toBeVisible({ timeout: 20_000 });
+    await expect(gate.locator('.vv-dl-confirm-name')).toHaveText('huge.js');
+    await expect(gate).toContainText('600');
+    await stats.settled();
+    await page.waitForTimeout(300);
+    await stats.settled();
+    expect(stats.count(), '确认门前零字节读（先确认后下载）').toBe(0);
+
+    // 确认后泵才启动 → code 渲染器构造即知超限：零读停机 + 非失败态提示条
+    //（spec §4.3：解释停机而非报错，建议 hex）
+    await gate.locator('.vv-dl-confirm-start').click();
     const notice = page.locator('.vv-code-oversize-card');
     await expect(notice).toBeVisible({ timeout: 20_000 });
     await expect(notice).toHaveText(

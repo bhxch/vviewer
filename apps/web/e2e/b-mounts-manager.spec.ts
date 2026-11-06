@@ -38,10 +38,13 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  */
 const S3_LIST_XML = `<?xml version="1.0"?><ListBucketResult>
   <IsTruncated>false</IsTruncated>
-  <Contents><Key>a.txt</Key><Size>3</Size></Contents>
+  <Contents><Key>a.txt</Key><Size>19</Size></Contents>
   <Contents><Key>b.txt</Key><Size>1</Size></Contents>
   <CommonPrefixes><Prefix>sub/</Prefix></CommonPrefixes>
 </ListBucketResult>`;
+// a.txt Size 与实体字节一致（'const aDirect = 1;\n' = 19B）：泵化后 size 驱动读窗收口，
+// 谎报 size 把重读截在窗外（统一验证阶段 MM-06 截断实证的夹具修复；Size 值此前无
+// 断言消费面，条目数口径不受影响）
 
 /**
  * FNV-1a hash8（core singleFile.ts 同算法镜像）：e2e 侧预置快照 storeId 需与
@@ -739,10 +742,12 @@ test.describe('b-mounts-manager 目录管理页', () => {
           entries:
             root === '2'
               ? [
-                  { name: 'notes.txt', kind: 'file', size: 19 },
+                  // size 与 /api/file 实体一致（21B/20B）：泵化后 size 驱动读窗收口，
+                  // 谎报 size 截断重读（统一验证阶段 MM-10 截断实证的夹具修复）
+                  { name: 'notes.txt', kind: 'file', size: 21 },
                   { name: 'sub', kind: 'dir' }
                 ]
-              : [{ name: 'host.txt', kind: 'file', size: 13 }]
+              : [{ name: 'host.txt', kind: 'file', size: 20 }]
         });
       }
       if (path === '/api/file') {

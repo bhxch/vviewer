@@ -467,7 +467,18 @@ test('JVL-02：STREAM_MAX_BYTES 512MB jsonl 零读停机——仅探针 + 状态
     const stats = new IoStats();
     await openRemoteJsonl(page, fake, stats, 'huge-declared.jsonl');
     const status = page.locator('.vv-jsonl-status');
-    // 零读停机 + 非失败态提示条（jsonl/index.ts STREAM_LIMIT_NOTICE；不复用错误卡片）
+    // 确认门先行（spec §6.4 防线换代，IO-11 同口径重定基）：600MB > 512MB 默认阈值 →
+    // 确认卡先于渲染/泵出现，未确认零字节读（先确认后下载）
+    const gate = page.locator('.vv-dl-confirm');
+    await expect(gate).toBeVisible({ timeout: 20_000 });
+    await expect(gate.locator('.vv-dl-confirm-name')).toHaveText('huge-declared.jsonl');
+    await stats.settled();
+    await page.waitForTimeout(300);
+    await stats.settled();
+    expect(stats.count(), '确认门前零字节读（先确认后下载）').toBe(0);
+    // 确认后泵才启动 → jsonl 构造即知超限：零读停机 + 非失败态提示条
+    //（jsonl/index.ts STREAM_LIMIT_NOTICE；不复用错误卡片）
+    await gate.locator('.vv-dl-confirm-start').click();
     await expect(status).toContainText('已加载 0 行', { timeout: 20_000 });
     await expect(status).toContainText('已达流式上限，建议以 hex 打开');
     await expect(status).not.toContainText('解析失败');

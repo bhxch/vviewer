@@ -132,7 +132,7 @@ async function startFakeServer(
         entries: [...entries].map(([name, kind]) => ({
           name,
           kind,
-          ...(kind === 'file' ? { size: (files[`${prefix}${name}`] ?? '').length } : {})
+          ...(kind === 'file' ? { size: Buffer.byteLength(files[`${prefix}${name}`] ?? '', 'utf8') } : {})
         }))
       }));
       return;
@@ -550,11 +550,12 @@ test('WS-07：单文件来源重载两次不落占位（T5 I-1 回环——openR
     });
 
     // 终审 M-1：树条目 size 到达 Tab.source.size（端到端可观测形态——读策略分流：
-    // size 已知 ≤1MB → dispatch 直读全量一次且无 Range 头；断链时 size=null → 流式
-    // 窗口模式按块探测，必带 Range 头且请求 ≥2 笔）
+    // size 已知 ≤1MB → 泵单窗全量物化一次（统一验证阶段重定基：计划 2 泵化后
+    // ≤1MB 全量物化 = 单条 bytes=0-(size-1) Range 收口，数据面字节不变）；断链时
+    // size=null → 流式窗口模式按块探测，必带 Range 头且请求 ≥2 笔）
     const notesReqs = fake.fileRequests.filter((r) => r.path === 'sub/notes.txt');
     expect(notesReqs.length).toBeGreaterThanOrEqual(1);
-    expect(notesReqs[0]!.range).toBeNull(); // 全量直读：无 Range（size 驱动的读策略）
+    expect(notesReqs[0]!.range).toBe('bytes=0-23'); // 泵单窗收口（'single file source body\n' = 24B）
     expect(notesReqs.length).toBe(1); // 恰一次（size 未达 Tab 时为探测 + 整块两笔带 Range 请求）
 
     // 快照落盘后重载两次：来源按快照 storeLabel 原值（文件名）回环重建——任何

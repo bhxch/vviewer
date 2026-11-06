@@ -8,7 +8,7 @@ import { ensureRightDrawer } from './drawer';
 /**
  * 打开方式「更多渲染器」展开三入口 e2e（议题一，域文档条目 OWM-01~03）：
  * - OWM-01 MetaPanel 下拉（入口 B）：受限候选尾「更多渲染器…」哨兵（value=__more__）
- *   就地展开为「自动 + registry 全量 12 + 收起附加候选」（value=__less__），全量选择
+ *   就地展开为「自动 + registry 全量 + 收起附加候选」（value=__less__；全量 61=29 diagram+20 foreign+12 core，统一验证阶段重定基），全量选择
  *   archive 落 override + （手动）徽标；
  * - OWM-02 状态栏浮层（壳 A）：指示器钮弹候选浮层，「更多渲染器…」就地展开，选
  *   JSON Lines 即时重渲染（jsonl 专有视图上位）+ 指示器跟随 + （手动）徽标；
@@ -20,7 +20,7 @@ import { ensureRightDrawer } from './drawer';
  *   「渲染器」）；浮层项为 `.vv-status-picker[role=menu]` 内 role=menuitem 按钮
  *   （ViewerPane.svelte :527-536），简报 getByRole('button') 按 menuitem 校准。
  * ② registry 真实 label：jsonl = 「JSON Lines」（render-text/src/jsonl/index.ts:950）、
- *   pdf = 「PDF」（render-doc/src/pdf.ts:52）；全量 12 项 = 代码/文本、Markdown、
+ *   pdf = 「PDF」（render-doc/src/pdf.ts:142）；全量 61 项 = 29 diagram + 20 foreign 桥接组 + 自有 core（代码/文本、Markdown、）
  *   HTML 预览、图片、音视频、PDF、Word 文档、Excel 表格、PowerPoint（文本提纲）、
  *   二进制、压缩包、JSON Lines（viewer.ts install 序，展开面 OWM-01 断言钉住）。
  * ③ TabContextMenu 项确为 role=menuitem；但父项（子菜单）经 onclick 展开无 hover
@@ -44,7 +44,7 @@ import { ensureRightDrawer } from './drawer';
  *   :13-14），收起必须精确还原受限面——MetaPanel option 逐项 toHaveText 对照 OWM-01
  *   受限序；浮层 LESS 分支只复位展开态不关浮层（ViewerPane.svelte:176 pickRenderer
  *   的 __less__ 拦截 return，不写 pickerOpen）；TabCtx 二级 = 「✓ 自动（按扩展名）」
- *   头项 + registry 全量 12 = 13 项、无「收起附加候选」（形态差异，TabBar.svelte
+ *   头项 + registry 全量 61 = 62 项、无「收起附加候选」（形态差异，TabBar.svelte
  *   :136-148 无 LESS 哨兵——回受限由菜单重开承担，OWM-05①）。受限面 label 序统一
  *   以词落 toHaveText（hex label=「二进制」，openWithOf 兜底序 自动/code/markdown/hex，
  *   openWith.ts:32-34）；浮层计数用 .vv-status-picker-item（避开尾部语言项
@@ -53,7 +53,7 @@ import { ensureRightDrawer } from './drawer';
  *   整棵卸载（TabBar.svelte:335）、关闭路径收敛 onclose（TabContextMenu.svelte:24），
  *   openPath 组件局部新实例空起步 → 重开即受限头面（一级 5 项 = 受限 4 + 「更多
  *   渲染器 ›」父项）；切 tab 的 pointerdown 走外点关菜单（TabContextMenu.svelte:148）
- *   → 重开二级 = 13 项不残留；状态栏浮层展开态随激活 tab id 复位（ViewerPane
+ *   → 重开二级 = 62 项不残留；状态栏浮层展开态随激活 tab id 复位（ViewerPane
  *   .svelte:118-121 复位 effect，MetaPanel :66-69 同款）→ 切 tab 重开浮层回受限面。
  *   备案（非断言）：同 tab 内关浮层再开不复位——pickerExpanded 写点仅 MORE/LESS
  *   拦截与 tab 复位 effect 两类，spec §2.2「不持久化」指不进快照/设置，非浮层开关复位。
@@ -90,27 +90,19 @@ test.describe('打开方式「更多渲染器」展开（OWM）', () => {
     await expect(sel.locator('option[value="__more__"]')).toHaveCount(1);
     await expect(sel.locator('option[value="__more__"]')).toHaveText('更多渲染器…');
     await sel.selectOption('__more__');
-    // 展开面 = 自动 头项 + registry 全量 12 + 「收起附加候选」（__less__）= 14 项
-    await expect(sel.locator('option')).toHaveCount(14);
+    // 展开面 = 自动 头项 + registry 全量 + 「收起附加候选」（__less__）。统一验证阶段
+    // 重定基（时代差锚）：registry 实态 61 = 29 diagram（计划 1）+ 20 foreign 桥接组
+    // （计划 3/4）+ 12 自有 core，展开面 63 项（自动 + 61 + 收起）——计数随注册面增长
+    // 重定，install 序语义（diagram → foreign → core，viewer.ts 装配序）以首尾 + 代表
+    // 项钉住不再逐项全列
+    await expect(sel.locator('option')).toHaveCount(63);
     await expect(sel.locator('option').first()).toHaveText('自动（按扩展名）');
     await expect(sel.locator('option[value="__less__"]')).toHaveText('收起附加候选');
-    // 全量 12 项按 registry install 序钉住（viewer.ts 装配序，议题一「更多=任意」面）
-    await expect(sel.locator('option')).toHaveText([
-      '自动（按扩展名）',
-      '代码/文本',
-      'Markdown',
-      'HTML 预览',
-      '图片',
-      '音视频',
-      'PDF',
-      'Word 文档',
-      'Excel 表格',
-      'PowerPoint（文本提纲）',
-      '二进制',
-      '压缩包',
-      'JSON Lines',
-      '收起附加候选'
-    ]);
+    await expect(sel.locator('option').nth(1)).toHaveText('Mermaid'); // diagram 块居首（装配序锚）
+    // 语义锚保持：archive 可选（受限外选择 → 错误卡片面）、PDF/JSON Lines 在全量面
+    await expect(sel.locator('option[value="archive"]')).toHaveCount(1);
+    await expect(sel.locator('option[value="pdf"]')).toHaveCount(1);
+    await expect(sel.locator('option[value="jsonl"]')).toHaveCount(1);
     // 全量面选择 archive：override 落盘即时重渲染（rev++ 复用渲染 effect 通道）——
     // txt 字节非压缩包 → archive 构造失败抛中文错误，dispatcher 错误卡兜底上位。
     // select 显示回「自动」为既有语义：override 指向受限候选外的渲染器时 openWithUi
@@ -222,7 +214,9 @@ test.describe('打开方式「更多渲染器」展开（OWM）', () => {
     const sel = page.locator('.meta-openwith');
     await expect(sel).toBeVisible();
     await sel.selectOption('__more__');
-    await expect(sel.locator('option')).toHaveCount(14);
+    // 展开面 63 = 自动 + registry 全量 61（29 diagram + 20 foreign + 12 core）+ 收起
+    //（统一验证阶段注册面增长重定基，OWM-01 注）
+    await expect(sel.locator('option')).toHaveCount(63);
     await sel.selectOption('__less__');
     await expect(sel.locator('option')).toHaveCount(5);
     await expect(sel.locator('option')).toHaveText([
@@ -252,7 +246,7 @@ test.describe('打开方式「更多渲染器」展开（OWM）', () => {
     const picker = page.locator('.vv-status-picker');
     await expect(picker).toBeVisible();
     await picker.getByRole('menuitem', { name: '更多渲染器…' }).click();
-    await expect(picker.locator('.vv-status-picker-item')).toHaveCount(14);
+    await expect(picker.locator('.vv-status-picker-item')).toHaveCount(63);
     await picker.getByRole('menuitem', { name: '收起附加候选' }).click();
     // LESS 分支只复位展开态（pickRenderer 拦截 return）：浮层仍开
     await expect(picker).toBeVisible();
@@ -266,33 +260,22 @@ test.describe('打开方式「更多渲染器」展开（OWM）', () => {
     ]);
     // 收起不封死重开路径：再次「更多渲染器…」就地展开全量仍可用
     await picker.getByRole('menuitem', { name: '更多渲染器…' }).click();
-    await expect(picker.locator('.vv-status-picker-item')).toHaveCount(14);
+    await expect(picker.locator('.vv-status-picker-item')).toHaveCount(63);
     await page.keyboard.press('Escape'); // 收尾关浮层（Esc 关闭路径，无 override 落盘）
     await expect(picker).toHaveCount(0);
 
-    // ③ TabCtx 二级子菜单静态形态：「✓ 自动」头项 + 全量 12 = 13 项，无「收起附加候选」
+    // ③ TabCtx 二级子菜单静态形态：「✓ 自动」头项 + registry 全量 61 = 62 项，
+    // 无「收起附加候选」（计数重定基同 OWM-01 注；首尾 + 语义在位锚代逐项全列）
     await tabNamed(page, 'aa.txt').click({ button: 'right' });
     await expect(page.locator('.vv-tabctx')).toBeVisible();
     await page.getByRole('menuitem', { name: '打开方式' }).click();
     await page.getByRole('menuitem', { name: '更多渲染器' }).click();
     const sub = page.locator('.vv-tabctx-sub[aria-label="更多渲染器"]');
     await expect(sub).toBeVisible();
-    await expect(sub.locator('.vv-tabctx-item')).toHaveCount(13);
-    await expect(sub.locator('.vv-tabctx-item')).toHaveText([
-      '✓ 自动（按扩展名）',
-      '代码/文本',
-      'Markdown',
-      'HTML 预览',
-      '图片',
-      '音视频',
-      'PDF',
-      'Word 文档',
-      'Excel 表格',
-      'PowerPoint（文本提纲）',
-      '二进制',
-      '压缩包',
-      'JSON Lines'
-    ]);
+    await expect(sub.locator('.vv-tabctx-item')).toHaveCount(62);
+    await expect(sub.locator('.vv-tabctx-item').first()).toHaveText('✓ 自动（按扩展名）');
+    await expect(sub.locator('.vv-tabctx-item').nth(1)).toHaveText('Mermaid');
+    await expect(sub.getByRole('menuitem', { name: 'PDF', exact: true })).toHaveCount(1);
     await expect(sub.locator('.vv-tabctx-item', { hasText: '收起附加候选' })).toHaveCount(0);
     // Esc 逐层收（二级 → 一级 → 主菜单，OWM-03 同款三层语义）
     await page.keyboard.press('Escape');
@@ -357,7 +340,7 @@ test.describe('打开方式「更多渲染器」展开（OWM）', () => {
     await expect(page.locator('.vv-tabctx')).toHaveCount(0);
 
     // ② 切 tab 二级不残留（434e6a4 修复面）：二级展开态下点另一 tab（pointerdown
-    // 外点先关旧菜单 + activateTab）→ 重开二级 = ✓ 自动头项 + 全量 12 = 13 项
+    // 外点先关旧菜单 + activateTab）→ 重开二级 = ✓ 自动头项 + 全量 61 = 62 项
     await tabNamed(page, 'bb.txt').click({ button: 'right' });
     await expect(page.locator('.vv-tabctx')).toBeVisible();
     await page.getByRole('menuitem', { name: '打开方式' }).click();
@@ -375,7 +358,7 @@ test.describe('打开方式「更多渲染器」展开（OWM）', () => {
     await page.getByRole('menuitem', { name: '更多渲染器' }).click();
     const subAgain = page.locator('.vv-tabctx-sub[aria-label="更多渲染器"]');
     await expect(subAgain).toBeVisible();
-    await expect(subAgain.locator('.vv-tabctx-item')).toHaveCount(13);
+    await expect(subAgain.locator('.vv-tabctx-item')).toHaveCount(62);
     await expect(subAgain.locator('.vv-tabctx-item').first()).toHaveText('✓ 自动（按扩展名）');
     await page.keyboard.press('Escape');
     await page.keyboard.press('Escape');
@@ -383,7 +366,7 @@ test.describe('打开方式「更多渲染器」展开（OWM）', () => {
     await expect(page.locator('.vv-tabctx')).toHaveCount(0);
 
     // ③ 状态栏浮层随激活 tab 复位：展开态下切 tab（渲染 effect cleanup 关浮层 +
-    // 复位 effect 翻 pickerExpanded）→ 重开浮层回受限 5 项（非展开 14 项）
+    // 复位 effect 翻 pickerExpanded）→ 重开浮层回受限 5 项（非展开 63 项）
     await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 20_000 }); // aa.txt 渲染完成
     const btn = page.locator('.vv-status-openwith');
     await btn.click();

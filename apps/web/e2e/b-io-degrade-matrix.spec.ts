@@ -354,13 +354,17 @@ test('DEG-05：读策略边界 ≤1MB 全量直读 vs >1MB 窗口流式（dispat
   try {
     const stats = new IoStats();
 
-    // ① ≤1MB：恰 1 请求、无 Range 头、全量形态「共 N 行」（head=full 预置全部块）
+    // ① ≤1MB：恰 1 请求、单条 0- 起 Range 窗（计划 2 泵化后的全量物化形态——统一
+    // 验证阶段重定基：远端 store rangeCapable → pumpFull 单窗 bytes=0-(size-1)，数据
+    // 面字节不变）、全量形态「共 N 行」（head=full 预置全部块）
     await openRemoteFile(page, fake, stats, 'boundary-1mb.jsonl');
     await expect(page.locator('.vv-jsonl')).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('.vv-jsonl-status')).toContainText('共 2048 行', { timeout: 20_000 });
     await settleStats(page, stats);
-    expect(stats.count(), '≤1MB 应恰 1 次全量 read').toBe(1);
-    expect(stats.records[0]?.range, '全量直读 read() 不带 range → 无 Range 头').toBeNull();
+    expect(stats.count(), '≤1MB 应恰 1 次泵窗全量 read').toBe(1);
+    expect(stats.records[0]?.range, '泵单窗收口 = bytes=0-(size-1)').toBe(
+      `bytes=0-${MB - 1}`
+    );
     expect(stats.records[0]?.bytes).toBe(MB);
 
     // ② >1MB：探针 206 8KB + 窗口块 Range，「已加载 N 行」

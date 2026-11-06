@@ -290,7 +290,7 @@ async function startWsxFakeServer(opts: FakeOptions): Promise<FakeHandle> {
             entries: [...entries].map(([name, kind]) => ({
               name,
               kind,
-              ...(kind === 'file' ? { size: (table[`${prefix}${name}`] ?? '').length } : {})
+              ...(kind === 'file' ? { size: Buffer.byteLength(table[`${prefix}${name}`] ?? '', 'utf8') } : {})
             }))
           })
         );

@@ -494,10 +494,11 @@ test('SUSP-04：Range-less(200-only) + size 已知 10MB——首屏恰 3 请求�
 
 // ---------------------------------------------------------------- SUSP-05
 
-test('SUSP-05：≤1MB 全量直读路径在 size 非块对齐时恰 2 请求（全量 read + tail 部分块整块重拉）', async ({ page }) => {
+test('SUSP-05：≤1MB 全量物化在 size 非块对齐时恰 2 请求（泵单窗收口 + tail 部分块整块重拉）', async ({ page }) => {
   test.setTimeout(120_000);
   // 921600 B = 3600 行×256B，非 256KB 块对齐（恰 4 块，末块 135168 B）；
-  // size 已知 ≤FULL_LIMIT(1MB) → dispatcher 全量直读（dispatcher.ts:277-281）
+  // size 已知 ≤FULL_LIMIT(1MB) → dispatcher 泵单窗收口（计划 2 泵化形态，统一验证
+  // 阶段重定基：远端 store rangeCapable → pumpFull bytes=0-(size-1)，数据面字节不变）
   const jsonl = makeUniformJsonl(900 * 1024);
   expect(jsonl.length).toBe(921_600);
   const fake = await startStreamFakeServer({ 'susp-900kb.jsonl': jsonl });
@@ -507,14 +508,15 @@ test('SUSP-05：≤1MB 全量直读路径在 size 非块对齐时恰 2 请求（
     await expect(page.locator('.vv-jsonl-status')).toHaveText('共 3600 行', { timeout: 30_000 });
     await settleStats(page, stats);
 
-    // 记录的现状：恰 2 请求——1 条无 Range 全量 read + 1 条 tail 部分块整块重拉
-    //（head 预置末块 135168 B 非整块，首屏喂入按「未 ensure 不得进索引」纪律重拉；
-    // 「恰 1 请求」口径在非块对齐 size 下不成立）
+    // 记录的现状：恰 2 请求——1 条泵单窗 Range 收口（0-921599）+ 1 条 tail 部分块
+    // 整块重拉（head 预置末块 135168 B 非整块，首屏喂入按「未 ensure 不得进索引」
+    // 纪律重拉）；「恰 1 请求」口径在非块对齐 size 下不成立
     expect(
       stats.records.map((r) => [r.range, r.status, r.bytes]),
-      `应恰为 [无 Range 全量 200, tail 块 206]，实得 ${digest(stats.records)}`
+      `应恰为 [泵单窗收口 206, tail 块 206]，实得 ${digest(stats.records)}`
     ).toEqual([
-      [null, 200, 921_600],
+      // 泵窗端点按 size 收口：bytes=0-921599（206 精确应答=单窗全量物化）
+      ['bytes=0-921599', 206, 921_600],
       // tail 块 Range 端点按 size 钳制：786432 + cap(135168) - 1 = 921599（非块步进端点）
       ['bytes=786432-921599', 206, 135_168]
     ]);
