@@ -123,7 +123,7 @@ const SOURCES = [
     // 与 file-viewer-fixtures 同 commit：v3.3.3 tag（git ls-remote 钉定 2026-11-06；npm 依赖 3.3.3 同版）
     commit: '760038d88e9252bc746c04626b82b84226ef6948',
     // SAVE-FOREIGN-2 第二波 10 组桥接渲染器（spec §6.3 序 12-21）中上游有小体量夹具的
-    // 19 扩展名（'.midi' 置于 '.mid' 前、'.tiff' 置于 '.tif' 前——endsWith 桶序防误配）。
+    // 19 扩展名（桶序按上游扩展名圈定清单序排列，纯确定性约定，无防误配语义）。
     // 无小体量上游夹具的绑定格式不入选（parquet/avro/webarchive/heic/heif/shp/tif、
     // signature 其余扩展名等）——e2e 渲染锚降级记录见 plan4 task-4 报告
     extensions: ['.psd', '.sqlite', '.wasm', '.ttf', '.geojson', '.kml', '.gpx', '.typ', '.dcm', '.drawio', '.midi', '.mid', '.olb', '.dra', '.gds', '.oas', '.oasis', '.p7m', '.tif'],
