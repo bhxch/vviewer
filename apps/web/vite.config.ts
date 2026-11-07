@@ -213,7 +213,16 @@ function diagramEngineChunk(): Plugin {
               groups: [
                 {
                   name: 'git-engine',
-                  test: /[\\/]node_modules[\\/](isomorphic-git|async-lock|clean-git-ref|crc-32|diff3|ignore|minimisted|pify|sha\.js|simple-get|buffer)[\\/]/
+                  // 终审修复波（precache 闭包门禁配套）：gitIso.ts（isogit 懒加载边界，
+                  // worker 专用 src 模块）显式锚定回本组——基线其随组归并落 git-engine
+                  // chunk；本批 foreign 组插入改变 rolldown 归并落位后，gitIso 落独立
+                  // hash 命名 worker 共享 chunk（进 precache）却静态 re-export
+                  // isomorphic-git（本组 chunk 不进 precache）→ precache'd → 非缓存
+                  // chunk 静态边，离线 git 面 eval 期 404。锚定回组即恢复「gitIso +
+                  // isogit 同图落 git-engine chunk」的设计位（gitIso.ts 头注）；gitWorker
+                  // 的 import('./gitIso') 保持动态——动态 import 到排除 chunk 属设计内
+                  // 懒加载（拉取失败不粘滞、可重试），不在 precache 闭包断言面。
+                  test: /[\\/]node_modules[\\/](isomorphic-git|async-lock|clean-git-ref|crc-32|diff3|ignore|minimisted|pify|sha\.js|simple-get|buffer)[\\/]|[\\/]gitIso\.ts$/
                 },
                 {
                   // renderer-signature worker 图面（signature.worker 的 rpgp wasm glue
@@ -257,6 +266,20 @@ function diagramEngineChunk(): Plugin {
                       test: /[\\/]node_modules[\\/](@viz-js[\\/]viz|nomnoml|graphre)[\\/]/
                     },
                     {
+                      // 终审修复 C1（目标级终审修复波）：base64-js/ieee754/buffer 独立共享
+                      // 组（zip-shared 先例，置于 git-engine 组之前——groups 按序首中即胜）。
+                      // 三包曾归 git-engine 组（彼时组注「buffer 为 gitIso.ts 的 Buffer shim
+                      // 独占依赖」前提失真：client 图内 isomorphic-git 全族不在图——worker
+                      // 专用，组实际只装 buffer/base64-js/ieee754），组产物被 globIgnores
+                      // git-engine-* 排除 precache，而 mammoth（vviewer docx 路径，precache'd
+                      // 懒加载 chunk）与 msgreader/email 链（precache'd 共享 chunk）静态依赖
+                      // buffer → 离线 docx/eml 模块求值期 404。独立组非 foreign- 前缀 → 默认
+                      // hash 分支进 precache（~26KB），双消费面闭包恢复完整；worker 图的
+                      // git-engine 组员保持含 buffer（gitIso 锚定同图，见 worker 分组）。
+                      name: 'buffer-shared',
+                      test: /[\\/]node_modules[\\/](base64-js|ieee754|buffer)[\\/]/
+                    },
+                    {
                       name: 'git-engine',
                       // isomorphic-git 及其独占传递依赖归堆（pnpm-lock 2026-11 实测：表中
                       // 各包仅 isogit 一家消费）。pako@1.0.11 与 readable-stream@2 为
@@ -264,9 +287,10 @@ function diagramEngineChunk(): Plugin {
                       // 组产物 git-engine-*.js 不进 precache，jszip 静态依赖连坐会把 zip
                       // 路径绑到非 precache chunk 上（离线 zip 打开断链）；二者留默认共享
                       // chunk 维持 precache 地位（增量 ~40KB，build 后 rg 复核落组）。
-                      // buffer 为 gitIso.ts 的 Buffer shim 独占依赖（isogit 浏览器构建引用
-                      // 裸 Buffer），随组懒加载不进 precache。
-                      test: /[\\/]node_modules[\\/](isomorphic-git|async-lock|clean-git-ref|crc-32|diff3|ignore|minimisted|pify|sha\.js|simple-get|buffer)[\\/]/
+                      // buffer/base64-js/ieee754 已上移 buffer-shared 组（终审修复 C1，见
+                      // 上）；client 图现无 isomorphic-git 面（worker 专用），组保留为
+                      // worker 图同款防御位——未来 client 侧引 isogit 时仍按名排除 precache。
+                      test: /[\\/]node_modules[\\/](isomorphic-git|async-lock|clean-git-ref|crc-32|diff3|ignore|minimisted|pify|sha\.js|simple-get)[\\/]/
                     },
                     {
                       // 终审修复 C1：vite preload helper 虚拟模块（\0vite/preload-helper）
@@ -292,18 +316,29 @@ function diagramEngineChunk(): Plugin {
                     // globIgnores 排除 precache（代码包 chunk 分离进 dist 但不进
                     // precache——全局约束 + iwork chunk 4.05MB 超 workbox 2MiB 上限）。
                     // 共享依赖铁律（git-engine 同款）：pako@1.0.11 为 vviewer zip 渲染
-                    // 路径共享、buffer 为 git 引擎组员——二者留默认共享 chunk 维持
-                    // precache 地位；jszip 收拢进上方 zip-shared 组（非 foreign- 前缀，
-                    // 仍进 precache）。foreign 组与共享 chunk 间跨 chunk import 合法，
-                    // 仅懒加载连带，无断链。email 的 buffer 依赖经 git-engine 组员满足
-                    //（懒加载连带，实测 build 后 rg 复核）。
+                    // 路径共享、buffer 已上移 buffer-shared 组（终审修复 C1，非 foreign-
+                    // 前缀仍进 precache）——留默认共享 chunk/独立组维持 precache 地位；
+                    // jszip 收拢进上方 zip-shared 组（非 foreign- 前缀，仍进 precache）。
+                    // foreign 组与共享 chunk 间跨 chunk import 合法，仅懒加载连带，无
+                    // 断链。email 的 buffer 依赖经 buffer-shared 组员满足（precache'd，
+                    // 闭包完整；实测 build 后 rg 复核）。
                     {
                       name: 'foreign-core',
                       test: /[\\/]node_modules[\\/]@file-viewer[\\/]core[\\/]/
                     },
                     {
+                      // 终审修复波 M-2：msgreader 实包为 scoped @kenjiuno/msgreader——原
+                      // test 字面 `msgreader` 要求 node_modules/msgreader/ 前缀，永不命中，
+                      // msgreader 及其独占依赖 decompressrtf/iconv-lite 落默认共享 chunk
+                      //（precache'd）却静态 import diagram-engines 组 chunk 内的 CJS
+                      // require-shim（不匹配任何组 test 的匿名共享模块被 rolldown 吸进先建
+                      // 组 chunk——app-preload-helper 先例）→ precache'd → 非缓存 chunk 静态
+                      // 边，离线 eml/msg 断链。归位本组（uncached）：组 chunk → diagram-engines
+                      // 跨组懒加载连带合法。iconv-lite 与 d3-dsv（foreign-geo 面 shpjs→d3
+                      // 链）共享——入组后 foreign-geo → foreign-email 跨组 import，双
+                      // uncached 合法；precache 同步减重 ~330KB。
                       name: 'foreign-email',
-                      test: /[\\/]node_modules[\\/](@file-viewer[\\/]renderer-email|postal-mime|msgreader)[\\/]/
+                      test: /[\\/]node_modules[\\/](@file-viewer[\\/]renderer-email|postal-mime|@kenjiuno[\\/](msgreader|decompressrtf)|iconv-lite)[\\/]/
                     },
                     {
                       // pako@2.2.0（epub 独占 major）不入组：与 jszip 链 pako@1.0.11 同名

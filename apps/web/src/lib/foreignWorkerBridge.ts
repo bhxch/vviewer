@@ -36,8 +36,14 @@ const BRIDGED = '__vvForeignWorkerBridged';
 /** 引导体→主线程的就绪标记（postMessage 数据形状；CDP 端标记仅作 flush 信号） */
 const READY_MARKER = '__vvForeignWorkerBridgeReady';
 
+/** 引导失败标记的载荷键：CDN 动态 import reject 时 bootstrap 经 .catch 回发
+ * { [READY_MARKER]: false, [BOOTSTRAP_ERROR]: message }，主线程转 error 事件收口。 */
+const BOOTSTRAP_ERROR = '__vvForeignWorkerBridgeError';
+
 /** module worker 引导体：URL 垫片（opaque location 基失基 → 回落原 worker URL 基）
- * + 动态 import 原 CDN 脚本 + 就绪标记（import 落定、CDN 监听挂上后发）。 */
+ * + 动态 import 原 CDN 脚本 + 就绪标记（import 落定、CDN 监听挂上后发）。
+ * 终审修复波 M-1：import reject（CDN 不可达/离线/CORS 变更）必须回发失败标记
+ * 收口——不 catch 则主线程就绪缓冲永不放行，foreign 渲染面静默挂死。 */
 function moduleBootstrap(raw: string): string {
   return [
     `const BASE = ${JSON.stringify(raw)};`,
@@ -56,6 +62,8 @@ function moduleBootstrap(raw: string): string {
     '}',
     `import(${JSON.stringify(raw)}).then(() => {`,
     `  self.postMessage({ ${JSON.stringify(READY_MARKER)}: true });`,
+    `}).catch((e) => {`,
+    `  self.postMessage({ ${JSON.stringify(READY_MARKER)}: false, ${JSON.stringify(BOOTSTRAP_ERROR)}: String((e && e.message) || e) });`,
     '});'
   ].join('\n');
 }
@@ -116,6 +124,27 @@ export function installForeignWorkerBridge(): void {
             for (const p of pending) {
               (this.postMessage as (data: unknown, transfer?: Transferable[]) => void)(p.args[0], p.args[1] as Transferable[] | undefined);
             }
+          } else if (
+            ev.data !== null &&
+            typeof ev.data === 'object' &&
+            (ev.data as Record<string, unknown>)[READY_MARKER] === false
+          ) {
+            // 终审修复波 M-1：bootstrap import reject（CDN 不可达/离线/资源失效）——
+            // 失败标记对页面隐藏（同就绪标记拦截），缓冲弃置（CDN 模块监听未挂，
+            // flush 只会静默丢帧），以标准 error 事件收口：worker onerror 消费面 →
+            // foreign 渲染既有错误卡片，不静默挂死。__ready 置位使后续 postMessage
+            // 直通（死路 worker，语义同 terminated 后 postMessage）。
+            ev.stopImmediatePropagation();
+            this.__ready = true;
+            this.__pending = [];
+            const detail = (ev.data as Record<string, unknown>)[BOOTSTRAP_ERROR];
+            this.dispatchEvent(
+              new ErrorEvent('error', {
+                message: `foreign worker bootstrap failed: ${
+                  typeof detail === 'string' && detail !== '' ? detail : 'unknown error'
+                }`
+              })
+            );
           }
         },
         { capture: false }

@@ -19,8 +19,10 @@ function fixture(name: string): string {
   return dir;
 }
 
-// 干净 sw.js（workbox generateSW 压缩输出形态：url:"…" 键不带引号）
-const CLEAN_SW = 'define:[{url:"index.html",revision:"1"},{url:"_app/immutable/chunks/entry-abc.js",revision:"2"}]';
+// 干净 sw.js（workbox generateSW 压缩输出形态：url:"…" 键不带引号）。清单只含
+// index.html（断言⑤对非 .js 条目不追产物）：各夹具按需自写 .js 清单，避免
+// CLEAN_SW 泛用条目与「在册产物必须在盘」的 fail-closed 面互相绊线
+const CLEAN_SW = 'define:[{url:"index.html",revision:"1"}]';
 
 describe('scanForeignBudget', () => {
   it('build 目录缺失返回 fatal（提示先构建，不是 pass）', () => {
@@ -76,8 +78,9 @@ describe('scanForeignBudget', () => {
       join(dir, 'sw.js'),
       'define:[{url:"index.html",revision:"1"},{url:"_app/immutable/chunks/foreign-core-abc.js",revision:"2"},{url:"https://cdn.jsdelivr.net/npm/@file-viewer/assets-standard@3.3.3/viewer/app.js",revision:"3"}]'
     );
-    mkdirSync(join(dir, 'chunks'), { recursive: true });
-    writeFileSync(join(dir, 'chunks', 'foreign-core-abc.js'), 'import{v}from"@file-viewer/core"');
+    mkdirSync(join(dir, '_app/immutable/chunks'), { recursive: true });
+    // 在册产物须在盘（断言⑤ fail-closed 面），内容 bare specifier 不入闭包解析
+    writeFileSync(join(dir, '_app/immutable/chunks', 'foreign-core-abc.js'), 'import{v}from"@file-viewer/core"');
     const { violations } = scanForeignBudget(dir, ['@file-viewer/core']);
     expect(violations).toEqual([
       expect.objectContaining({ kind: 'precache-foreign', url: '_app/immutable/chunks/foreign-core-abc.js' }),
@@ -91,6 +94,10 @@ describe('scanForeignBudget', () => {
       join(dir, 'sw.js'),
       'define:[{url:"_app/immutable/assets/pptjs.worker.BxR0ofQt.js",revision:"1"},{url:"_app/immutable/assets/pptx.worker.CpTu_kXy.js",revision:"2"}]'
     );
+    // 在册产物须在盘（断言⑤ fail-closed 面）：空体 chunk 即可，本锚只断言 ②
+    mkdirSync(join(dir, '_app/immutable/assets'), { recursive: true });
+    writeFileSync(join(dir, '_app/immutable/assets', 'pptjs.worker.BxR0ofQt.js'), '');
+    writeFileSync(join(dir, '_app/immutable/assets', 'pptx.worker.CpTu_kXy.js'), '');
     const { violations } = scanForeignBudget(dir, []);
     expect(violations).toEqual([
       expect.objectContaining({ kind: 'precache-worker', url: '_app/immutable/assets/pptjs.worker.BxR0ofQt.js' }),
@@ -104,8 +111,75 @@ describe('scanForeignBudget', () => {
       join(dir, 'sw.js'),
       'define:[{url:"_app/immutable/workers/ts-worker-ZCbjXEqt.js",revision:"1"},{url:"_app/immutable/workers/binary.worker-Crh1y-60.js",revision:"2"},{url:"_app/immutable/assets/worker-bundle.Dx5mKZOL.js",revision:"3"}]'
     );
+    mkdirSync(join(dir, '_app/immutable/workers'), { recursive: true });
+    mkdirSync(join(dir, '_app/immutable/assets'), { recursive: true });
+    for (const f of ['ts-worker-ZCbjXEqt.js', 'binary.worker-Crh1y-60.js']) {
+      writeFileSync(join(dir, '_app/immutable/workers', f), '');
+    }
+    writeFileSync(join(dir, '_app/immutable/assets', 'worker-bundle.Dx5mKZOL.js'), '');
     const { violations } = scanForeignBudget(dir, []);
     expect(violations).toEqual([]);
+  });
+
+  it('终审 I1 断言⑤：precache\u2019d chunk 静态 import 非缓存 chunk 检出（离线 docx 断链形态，三引号形态）', () => {
+    const dir = fixture('precache-closure');
+    writeFileSync(
+      join(dir, 'sw.js'),
+      'define:[{url:"_app/immutable/chunks/a.js",revision:"1"},{url:"_app/immutable/chunks/b.js",revision:"2"}]'
+    );
+    mkdirSync(join(dir, '_app/immutable/chunks'), { recursive: true });
+    // a.js：静态边指向在册 b.js（合规）+ 三引号形态指向不在册目标（检出）；
+    // missing 目标不落盘（与「组 chunk 被 globIgnores 排除 precache」同态）
+    writeFileSync(
+      join(dir, '_app/immutable/chunks/a.js'),
+      'import{q}from"./b.js";import{r}from"./missing1.js";import { s } from \'./missing2.js\';export*from`./missing3.js`;'
+    );
+    writeFileSync(join(dir, '_app/immutable/chunks/b.js'), 'export const q=1');
+    const { violations } = scanForeignBudget(dir, []);
+    expect(violations).toEqual([
+      expect.objectContaining({ kind: 'precache-closure', file: '_app/immutable/chunks/a.js', target: '_app/immutable/chunks/missing1.js' }),
+      expect.objectContaining({ kind: 'precache-closure', file: '_app/immutable/chunks/a.js', target: '_app/immutable/chunks/missing2.js' }),
+      expect.objectContaining({ kind: 'precache-closure', file: '_app/immutable/chunks/a.js', target: '_app/immutable/chunks/missing3.js' })
+    ]);
+  });
+
+  it('终审 I1 断言⑤合规：动态 import 排除 chunk 属设计内、bare/外部引用不追，闭包完整即通过', () => {
+    const dir = fixture('precache-closure-clean');
+    writeFileSync(
+      join(dir, 'sw.js'),
+      'define:[{url:"_app/immutable/entry.js",revision:"1"},{url:"_app/immutable/chunks/a.js",revision:"2"},{url:"_app/immutable/chunks/b.js",revision:"3"}]'
+    );
+    mkdirSync(join(dir, '_app/immutable/chunks'), { recursive: true });
+    writeFileSync(
+      join(dir, '_app/immutable/entry.js'),
+      'import{q}from"./chunks/b.js";import("./lazy-engine.js").then(m=>m.run())'
+    );
+    writeFileSync(
+      join(dir, '_app/immutable/chunks/a.js'),
+      'import{q}from"./b.js";import x from "isomorphic-git";const u="https://cdn.example.com/x.js";new URL(u,import.meta.url)'
+    );
+    writeFileSync(join(dir, '_app/immutable/chunks/b.js'), 'export const q=1');
+    const { violations } = scanForeignBudget(dir, []);
+    expect(violations).toEqual([]);
+  });
+
+  it('终审 I1 断言⑤：precache 在册产物缺失 fail-closed（不因读不到而静默放行）', () => {
+    const dir = fixture('precache-missing-file');
+    writeFileSync(
+      join(dir, 'sw.js'),
+      'define:[{url:"_app/immutable/chunks/ghost.js",revision:"1"}]'
+    );
+    const { violations } = scanForeignBudget(dir, []);
+    expect(violations).toEqual([
+      expect.objectContaining({ kind: 'precache-missing-file', url: '_app/immutable/chunks/ghost.js' })
+    ]);
+  });
+
+  it('终审 I1 断言⑤：sw.js 存在但清单零条目 fail-closed（清单解析失败不按空闭包放行）', () => {
+    const dir = fixture('precache-empty');
+    writeFileSync(join(dir, 'sw.js'), 'define:[]');
+    const { violations } = scanForeignBudget(dir, []);
+    expect(violations).toEqual([expect.objectContaining({ kind: 'precache-empty', file: 'sw.js' })]);
   });
 
   it('锚三：合规产物通过（声明依赖 + foreign 组 chunk 存在 + 干净主 chunk + 干净 precache）', () => {

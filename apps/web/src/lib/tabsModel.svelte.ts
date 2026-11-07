@@ -448,7 +448,10 @@ class TabCollection {
       // 大文件 SSE 刷新会整件重读（IO-03 窗口级增量语义即回归）；且 >1MB 的
       // BlockStream 尾窗按陈旧 size 收口为泵化前同款行为（非本次回归面）。树中
       // 重开文件即取新鲜值（spec 已知接缝原文）。
-      if (t.source.path !== '' && t.source.size !== undefined && t.source.size <= 1_048_576) {
+      // 终审修复波补：size null 不在失效域（注释同段「size null 走不定态 EOF 收口泵」
+      // ——null 本即未知态，转 undefined 属无意义改写；`!= null` 与上 copy 面同口径，
+      // 修 e8bbdd6 漏收窄的 svelte-check 0E 门禁面）
+      if (t.source.path !== '' && t.source.size != null && t.source.size <= 1_048_576) {
         t.source = { ...t.source, size: undefined };
       }
     }

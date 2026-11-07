@@ -31,7 +31,7 @@
 | @file-viewer/core | Apache-2.0 | file-viewer 渲染核心（桥接渲染器公共底座：mount 契约、资产 base 解析、sanitize 边界） | file-viewer 批 T1 |
 | @file-viewer/capability-rtf | Apache-2.0 | rtf 渲染启用包（向 renderer-word 注册 rtf.js；其依赖 rtf.js 为 MIT） | file-viewer 批 T1 |
 | @file-viewer/renderer-chm | Apache-2.0 | chm 编译 HTML 帮助文档渲染 | file-viewer 批 T1 |
-| @file-viewer/renderer-email | Apache-2.0 | eml/msg/mbox 邮件渲染 | file-viewer 批 T1 |
+| @file-viewer/renderer-email | Apache-2.0 | eml/msg/mbox 邮件渲染（依赖 postal-mime 为 MIT-0、@kenjiuno/msgreader 为 Apache-2.0；msgreader 传递依赖 iconv-lite 为 MIT、@kenjiuno/decompressrtf 为 BSD-2-Clause，随 renderer-email 同 chunk 分发） | file-viewer 批 T1 |
 | @file-viewer/renderer-epub | Apache-2.0 | epub/fb2/umd 电子书渲染 | file-viewer 批 T1 |
 | @file-viewer/renderer-hangul | Apache-2.0 | hwp/hwpx 韩文文档渲染 | file-viewer 批 T1 |
 | @file-viewer/renderer-iwork | Apache-2.0 | pages/numbers/key（Apple iWork）渲染 | file-viewer 批 T1 |
