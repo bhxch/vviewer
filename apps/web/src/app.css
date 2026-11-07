@@ -134,6 +134,9 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
 .vv-error-card { padding: 2rem; display: flex; flex-direction: column; gap: .5rem; }
 .vv-error-title { font-weight: 600; }
 .vv-error-detail { color: var(--ui-fg-muted); white-space: pre-wrap; }
+/* 残余 A6：.vv-error-meta 四处生产消费（errorRenderer/diagramFile/code/markdown）补
+   次要信息样式——对齐 .vv-error-detail 弱化层级，字号再降一档 */
+.vv-error-meta { color: var(--ui-fg-muted); font-size: var(--vv-fs-xs); }
 /* 下载进度卡（DownloadProgressCard，计划 2 Task 4 spec §6.4）：ViewerPane 加载态区
    （错误卡片同域），单一来源在本文件。pane 级 absolute 浮层（SearchPanel 同锚先例）：
    下载中 host 为空域，浮层不占流式布局——不出滚动条、卸卡零位移 */

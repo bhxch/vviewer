@@ -770,15 +770,19 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
         key: dlKey,
         name: current.source.name,
         sizeBytes: dlSize!,
-        // 目标渲染器名（泵前置可得的最优估计）：override 显式指定优先，回落扩展名
-        // 路由候选（探测链主路）；无效 override/extless/未命中降级「自动识别」——
-        // 真实目标渲染器在 dispatch 内 head 探测后定案
+        // 目标渲染器名（残余 A3 中性文案）：override 有效 = 显式选择定案（dispatch
+        // 「命中即用」同语义，显示其 label，无偏差面）；override 缺省/无效（dispatch
+        // 对未命中 id 静默走正常探测链，同无 override）时泵前置零字节读、探测链
+        // （签名改派/sniff 改派/BUG-13 magic 预检）可改派——不显示可能偏差的估计
+        // 渲染器名：扩展名路由命中（探测链主路）给中性限定「自动识别（按扩展名）」，
+        // extless/未命中给「自动识别」。真实目标渲染器在 dispatch 内 head 探测后定案
         rendererLabel:
           (current.overrideRenderer !== undefined
             ? registry.byId(current.overrideRenderer)?.label
             : undefined) ??
-          registry.byExtension(extractExtension(current.source.name))?.label ??
-          '自动识别'
+          (registry.byExtension(extractExtension(current.source.name)) !== undefined
+            ? '自动识别（按扩展名）'
+            : '自动识别')
       };
       return;
     }

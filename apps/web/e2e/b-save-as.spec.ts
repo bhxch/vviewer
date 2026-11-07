@@ -448,7 +448,8 @@ test.describe('b-save-as 另存为管线（SA 域 + DL 移交锚）', () => {
     expect(srv.fileRequests).toHaveLength(0);
     await expect(card.locator('.vv-dl-confirm-name')).toHaveText('huge.png');
     await expect(card.locator('.vv-dl-confirm-size')).toContainText('513.0 MB');
-    await expect(card.locator('.vv-dl-confirm-renderer')).toHaveText('目标渲染器：图片');
+    // 残余 A3 中性文案：png 扩展名路由命中 → 「自动识别（按扩展名）」（探测链偏差面不显示估计渲染器名）
+    await expect(card.locator('.vv-dl-confirm-renderer')).toHaveText('目标渲染器：自动识别（按扩展名）');
     await expect(card.locator('.vv-dl-confirm-start')).toBeVisible();
     await expect(card.locator('.vv-dl-confirm-saveas')).toBeVisible(); // 双形态二按钮（FS Access 探测装配）
     await expect(card.locator('.vv-dl-confirm-cancel')).toBeVisible();

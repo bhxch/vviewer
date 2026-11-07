@@ -105,14 +105,19 @@ describe('ViewerPane 确认门接线（计划 2 Task 6）', () => {
     expect(src).toMatch(/dlGateKeyOf\(current\.source\.storeId, current\.source\.path, dlSize\)/);
   });
 
-  it('泵前置拦截：确认卡装配早于 dispatcher.dispatch（门不过不进渲染/泵），目标渲染器 = override 优先回落扩展名路由', () => {
+  it('泵前置拦截：确认卡装配早于 dispatcher.dispatch（门不过不进渲染/泵），目标渲染器 = override 有效显 label/其余中性文案（残余 A3）', () => {
     const gateIdx = src.indexOf('dlConfirm = {');
     const dispatchIdx = src.indexOf('dispatcher.dispatch(');
     expect(gateIdx).toBeGreaterThan(-1);
     expect(dispatchIdx).toBeGreaterThan(-1);
     expect(gateIdx).toBeLessThan(dispatchIdx);
     expect(src).toMatch(/registry\.byId\(current\.overrideRenderer\)\?\.label/);
-    expect(src).toMatch(/registry\.byExtension\(extractExtension\(current\.source\.name\)\)\?\.label/);
+    // 残余 A3：探测链偏差面不显示估计渲染器名——扩展名路由命中给中性限定文案，
+    // extless/未命中给「自动识别」；不再回落 byExtension(...)?.label 估计名
+    expect(src).toMatch(
+      /registry\.byExtension\(extractExtension\(current\.source\.name\)\) !== undefined\s*\?\s*'自动识别（按扩展名）'\s*:\s*'自动识别'/
+    );
+    expect(src).not.toMatch(/registry\.byExtension\(extractExtension\(current\.source\.name\)\)\?\.label/);
   });
 
   it('确认/取消流转锚：确认登记作用域键后重跑进 dispatch（泵才启动）；取消静默卸卡不写键不 dispatch', () => {

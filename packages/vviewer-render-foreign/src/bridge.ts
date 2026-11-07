@@ -206,18 +206,43 @@ function posixJoin(...segs: readonly string[]): string {
 }
 
 /**
- * 由 FileSource 构造 sibling 解析器：`store.read(join(dirname(source.path), name))`。
+ * POSIX path 规范化（残余 A4）：折叠空段（'//'）与 '.' 段。仅字符串层规范化，
+ * 不解引用 '..'——穿越段在上游拒绝（createSiblingResolver 守卫），规范化只兜
+ * dirname 退化形（如 'a//b.csv' 的 dirname 'a/' 拼接出 'a//name'）。
+ */
+function posixNormalize(p: string): string {
+  return p
+    .split('/')
+    .filter((s) => s !== '' && s !== '.')
+    .join('/');
+}
+
+/**
+ * sibling 名契约守卫（残余 A4）：foreign 渲染器传入的 name 不在契约内——前导 '/'
+ * （绝对路径逃逸 store 根）与任一 '..' 段（目录穿越，经 posixJoin 退化为父目录读）
+ * 返回 true 由调用方拒读（resolver 兜 null，与既有防御语义同向）。
+ */
+function isUnsafeSiblingName(name: string): boolean {
+  return name.startsWith('/') || name.split('/').includes('..');
+}
+
+/**
+ * 由 FileSource 构造 sibling 解析器：`store.read(normalize(join(dirname(source.path), name)))`。
  * 防御语义（不抛）：foreign 泵装配期传入的 FileSource 形不保证完整——store 缺失
  * （纯 File 形）、store 无 read、目录型来源（path 以 '/' 结尾）一律返回 null；
- * read 抛错（含取消）亦兜 null，回退策略由 foreign 渲染器侧决定。
+ * name 契约外（空名/前导 '/'/'..' 穿越 段，残余 A4）拒读返回 null；read 抛错
+ * （含取消）亦兜 null，回退策略由 foreign 渲染器侧决定。
  */
 export function createSiblingResolver(source: FileSource): SiblingResolver {
   return async (name: string): Promise<Uint8Array | null> => {
     const store = source.store as TreeStore | undefined;
     if (!store || typeof store.read !== 'function') return null;
     if (source.path === '' || source.path.endsWith('/')) return null;
+    // 残余 A4：契约外 name（前导 '/' / '..' 段）拒读兜 null——join 前守卫穿越与
+    // 根逃逸；join 后 posixNormalize 折叠 dirname 退化形（'//' / '.'）
+    if (name === '' || isUnsafeSiblingName(name)) return null;
     try {
-      return await store.read(posixJoin(posixDirname(source.path), name));
+      return await store.read(posixNormalize(posixJoin(posixDirname(source.path), name)));
     } catch {
       return null;
     }

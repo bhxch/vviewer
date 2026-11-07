@@ -3,7 +3,7 @@
 // signal 贯穿、destroy 对接、renderNested→装配注入回调与 depth 3 上限（显式 depth
 // 形参贯穿——T2 评审 M1 精化：并发兄弟互不复位/不累积、超限落下载）；
 // createSiblingResolver 的 sibling 读取语义（store stub 命中 / 无 read / 目录 join /
-// 目录型来源 / store 缺失 / 读失败兜 null）。
+// 目录型来源 / store 缺失 / 读失败兜 null / 契约外 name 拒读与 join 后规范化——残余 A4）。
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import type { Detection, FileSource, TreeStore } from '@bhxch/vviewer-core';
 import {
@@ -453,5 +453,29 @@ describe('createSiblingResolver', () => {
     });
     const resolve = createSiblingResolver(sourceWithStore('a/b/data.csv', { read }));
     await expect(resolve('sib.json')).resolves.toBeNull();
+  });
+
+  // 残余 A4（posixJoin 规范化收紧）：契约外 name 拒读 + join 后规范化
+  it('契约外 name 拒读（残余 A4）：前导 / 与 .. 穿越段 → null 不读（防父目录/根逃逸）', async () => {
+    const read = vi.fn(async () => new Uint8Array(0));
+    const resolve = createSiblingResolver(sourceWithStore('a/b/data.csv', { read }));
+    await expect(resolve('../escape.json')).resolves.toBeNull();
+    await expect(resolve('sub/../../escape.json')).resolves.toBeNull();
+    await expect(resolve('..')).resolves.toBeNull();
+    await expect(resolve('/etc/passwd')).resolves.toBeNull();
+    await expect(resolve('')).resolves.toBeNull();
+    expect(read).not.toHaveBeenCalled();
+    // '..' 仅作独立段才算穿越：'..foo'/'...' 是合法文件名放行
+    await expect(resolve('..foo')).resolves.not.toBeNull();
+    expect(read).toHaveBeenCalledExactlyOnceWith('a/b/..foo');
+  });
+
+  it('join 后规范化（残余 A4）：dirname 退化形 // 与 . 段折叠，不解引用 ..（上游已拒）', async () => {
+    const read = vi.fn(async () => new Uint8Array(0));
+    await createSiblingResolver(sourceWithStore('a//b.csv', { read }))('sib.json');
+    expect(read).toHaveBeenCalledExactlyOnceWith('a/sib.json');
+    const read2 = vi.fn(async () => new Uint8Array(0));
+    await createSiblingResolver(sourceWithStore('./a/b.csv', { read: read2 }))('./sib.json');
+    expect(read2).toHaveBeenCalledExactlyOnceWith('a/sib.json');
   });
 });
