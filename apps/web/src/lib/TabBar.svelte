@@ -102,9 +102,10 @@
    * 与受限面/展开面的「自动」头项同形；终审 M-1 补齐缺落的头项）。第七动作「另存为」
    * （计划 2 Task 7，spec §6.4 tab 级泛化）：占位（unrestorable）/错误（lastRendererId
    * 'error'）/目录（path ''）置灰（saveAsDisabledOf 单源判定）；动作分发进 saveAs
-   * 管线（saveAsTab：在手/zipStore 读全量或远端泵+确认门→saveAsBlob），右键点击即
-   * user gesture，picker 直接弹出；失败上状态栏一次性提示（BUG-19 通道），用户取消
-   * picker 静默（saveAsBlob 取消语义）。
+   * 管线（saveAsTab：远端面残余 A2 picker-first——右键点击即 user gesture，picker
+   * 首个 await 直接弹出后确认门+泵直写盘；在手/zipStore 读全量→saveAsBlob；无 FS
+   * Access 环境降级 blob 兜底），失败上状态栏一次性提示（BUG-19 通道），用户取消
+   * picker 静默（saveAsTab/saveAsBlob 取消语义同形）。
    */
   // 回调显式标注返回 TabCtxEntry[]：字面量数组的联合推断会给缺省属性填
   // `undefined` 型，过不了 $derived 泛型边界（子菜单父项无 onClick 的推断面）
@@ -175,12 +176,14 @@
       },
       {
         // 另存为（Task 7，spec §6.4）：置灰判定 saveAsDisabledOf（占位/错误/目录），
-        // 动作进 saveAs 管线（saveAsTab）。远端超阈值确认门钩子用 window.confirm
-        // （WorkspaceList/FileTree 同款原生确认先例——右键手势内可弹）：明示文件/
-        // 体量与内存影响；拒绝 = cancelled 静默。进度反馈（评审 I-3）：dlProgress
-        // 为 ViewerPane 渲染 effect 私有装配面、跨组件无复用缝——本路径取轻量状态
-        // 条（远端重下开始/完成一次性提示，本地在手读零开始提示）；数值进度面为
-        // 完成态卡路径专属（ViewerPane 内 dlProgress 复用，同卡同字段零新造）。
+        // 动作进 saveAs 管线（saveAsTab）。残余 A2 picker-first：远端面 picker 先弹
+        // （本点击处理器同步进入 saveAsTab，首个 await 即 showSaveFilePicker——右键
+        // 手势的瞬态激活窗内），确认门在其后（远端超阈值钩子用 window.confirm，
+        // WorkspaceList/FileTree 同款原生确认先例）：拒绝 = cancelled 静默。
+        // 进度反馈（评审 I-3）：dlProgress 为 ViewerPane 渲染 effect 私有装配面、
+        // 跨组件无复用缝——本路径取轻量状态条（远端重下开始/完成一次性提示，本地
+        // 在手读零开始提示）；数值进度面为完成态卡路径专属（ViewerPane 内
+        // dlProgress 复用，同卡同字段零新造）。
         label: '另存为',
         disabled: saveAsDisabledOf(tab),
         onClick: () => {
@@ -189,7 +192,7 @@
           void saveAsTab(tab, {
             confirm: (info) =>
               window.confirm(
-                `「${info.name}」约 ${formatBytes(info.sizeBytes)}，超过远端下载确认阈值：将全量拉取到内存后再另存。继续？`
+                `「${info.name}」约 ${formatBytes(info.sizeBytes)}，超过远端下载确认阈值：确认后开始拉取并另存。继续？`
               )
           })
             .then((r) => {

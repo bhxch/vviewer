@@ -11,8 +11,9 @@ import { openSettings, gotoGroup, applySettings, closeSettings } from './setting
  * b-save-as —— 另存为统一管线 e2e 锚（spec §6.4 另存为双形态 + tab 级第七动作；
  * plan2 Task 7，brief Step-5 三锚 + 控制器移交 DL-PROG-01/02、DL-CONF-01/02/03）。
  *
- * - SA-01 远端菜单另存为：saveAsTab 重下泵（/api/file 下载事件锚：另存为触发新增
- *   Range 读）→ picker 桩直写落盘，字节校验和等值；
+ * - SA-01 远端菜单另存为：saveAsTab picker-first（残余 A2：点击手势内 picker 桩
+ *   先弹 → 确认门免（<阈值）→ 重下泵直写 writable 桩；/api/file 下载事件锚：
+ *   另存为触发新增 Range 读），字节校验和等值；
  * - SA-02 zip 条目另存为：非远端 store.read 单次全量（zipStore 条目读通道）→
  *   picker 桩字节等值（纯本地注入，零网络面）；
  * - SA-03 菜单项置灰：占位 tab（unrestorable）「另存为」aria-disabled + 点击零动作
@@ -310,7 +311,8 @@ test.describe('b-save-as 另存为管线（SA 域 + DL 移交锚）', () => {
     const readsBefore = srv.fileRequests.length;
     expect(readsBefore).toBeGreaterThanOrEqual(1); // 首开物化读锚
 
-    // 右键 → 另存为：saveAsTab 远端路（重新取数）→ saveAsBlob picker 桩
+    // 右键 → 另存为：saveAsTab 远端路 picker-first（残余 A2：picker 桩先弹、重下泵
+    // 分块直写 writable 桩——落盘字节与源等值不变）
     await clickTabSaveAs(page, 'big.png');
     await page.waitForFunction(() => {
       const s = (window as unknown as { __vvSave?: { closed: number } }).__vvSave;

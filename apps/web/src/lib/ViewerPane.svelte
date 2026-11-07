@@ -189,16 +189,18 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
   }
 
   /** 完成态「另存为」（spec §6.4）：saveAsTab 统一管线（TabContextMenu 第七动作同
-   * 管道）——本地/归档面 store.read 单次在手字节；远端面重下泵取数（字节在渲染实例
-   * 内无取回缝，core dispatch 只交付实例——二次传输备案取舍；零重传形态=确认卡
-   * 「下载并另存为」tee 直写；picker 瞬态激活窗备案见 saveAs.ts 头注——本路径与
-   * 菜单路径同为「先泵后 picker」形态）。确认门自动放行：文件刚下载过（知情面已过
-   * 一次）。进度反馈（评审 I-3）：远端重下复用进度卡通道——dlProgress/dlAddress
-   * 直写。终审修复波 I-1 竞态守卫：自持 AbortController（pumpAbort）作 hooks.signal
-   * ——卡上「取消」只断本重下泵不动 effectAbort（同 tab abort 不再打断渲染 streaming
-   * 实例的按需读）；onTick 捕获时 tab 引用守卫——切 tab/重渲染后迟到 tick 丢弃（cleanup
-   * 只清一次，旧文件进度卡不复活在新 tab）；finally 卸卡同 tab 引用守卫（tab 已切换时
-   * 不动新 tab 的进度面）。泵取消落 abort 身份：静默收场不落状态条（与渲染泵取消同裁决）。 */
+   * 管道）——本地/归档面 store.read 单次在手字节；远端面 picker-first（残余 A2，
+   * 见 saveAs.ts 头注：本动作由点击处理器同步进入，saveAsTab 首个 await 即
+   * showSaveFilePicker，重下耗时不再受瞬态激活窗约束——泵分块直写盘）。
+   * 字节在渲染实例内无取回缝，core dispatch 只交付实例——二次传输备案取舍不变；
+   * 零重传形态=确认卡「下载并另存为」tee 直写。确认门自动放行：文件刚下载过（知情
+   * 面已过一次）。进度反馈（评审 I-3）：远端重下复用进度卡通道——dlProgress/
+   * dlAddress 直写。终审修复波 I-1 竞态守卫：自持 AbortController（pumpAbort）作
+   * hooks.signal——卡上「取消」只断本重下泵不动 effectAbort（同 tab abort 不再打断
+   * 渲染 streaming 实例的按需读）；onTick 捕获时 tab 引用守卫——切 tab/重渲染后迟到
+   * tick 丢弃（cleanup 只清一次，旧文件进度卡不复活在新 tab）；finally 卸卡同 tab
+   * 引用守卫（tab 已切换时不动新 tab 的进度面）。泵取消落 abort 身份：静默收场不落
+   * 状态条（与渲染泵取消同裁决）。 */
   async function saveAsCompleted(): Promise<void> {
     const t = tab;
     if (t === null) return;

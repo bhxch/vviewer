@@ -1,9 +1,10 @@
 // saveAs.test.ts — 另存为统一管线（计划 2 Task 7，spec §6.4 另存为双形态 + tab 级
 // 第七动作）。saveAsBlob 双路（picker 主/blob URL 兜底）+ 取消静默；saveAsStreamToDisk
 // writable 生命周期（close/abort）；saveAsTab 三取数路径（在手/远端泵/zipStore——前两
-// 者经 store 调用形态区分：本地单次 read 无 opts、远端 range 分块）+ 确认门钩子；
-// saveAsDisabledOf 置灰判定（占位/错误/目录）。jsdom：picker 桩挂 window，blob URL
-// 兜底以 URL.createObjectURL 桩 + a.download 属性锚断言。
+// 者经 store 调用形态区分：本地单次 read 无 opts、远端 range 分块）+ 确认门钩子 +
+// 远端面 picker-first 时序锚（残余 A2：picker 先弹再取数；无 FS Access 环境降级面
+// 单独标注）；saveAsDisabledOf 置灰判定（占位/错误/目录）。jsdom：picker 桩挂
+// window，blob URL 兜底以 URL.createObjectURL 桩 + a.download 属性锚断言。
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -301,12 +302,21 @@ describe('saveAsTab（三取数路径：在手/远端泵/zipStore）', () => {
     expect(calls).toEqual([{ path: 'inner/hello.txt', opts: undefined }]);
   });
 
-  it('远端（R1）：range 分块泵取数（read 收 range opts）→ saveAsBlob', async () => {
+  it('远端（R1）picker-first（残余 A2）：picker 先弹（激活窗内）→ 泵分块直写 writable', async () => {
     // size 2MB（>1MB 直读限，<512MB 默认阈值）：泵发 {start,end} 窗口读
     const size = 2 * 1024 * 1024;
     const { store, calls } = fakeStore('remote:abc', () => new Uint8Array(size), true);
     const { handle, ws } = fakeHandle();
-    mountPicker(async () => handle);
+    const timeline: string[] = [];
+    mountPicker(async () => {
+      timeline.push('picker');
+      return handle;
+    });
+    const rawRead = (store.read as (...a: unknown[]) => Promise<Uint8Array>).bind(store);
+    (store as { read: unknown }).read = async (...a: unknown[]) => {
+      timeline.push('read');
+      return rawRead(...a);
+    };
     const ticks: Array<{ loaded: number; total: number | null }> = [];
 
     await expect(
@@ -316,13 +326,49 @@ describe('saveAsTab（三取数路径：在手/远端泵/zipStore）', () => {
       )
     ).resolves.toBe('saved');
 
+    expect(timeline).toEqual(['picker', 'read']); // A2 翻转锚：picker 先弹再取数
     expect(calls).toHaveLength(1);
     expect(calls[0]!.opts).toMatchObject({ range: { start: 0, end: size - 1 } }); // 远端：range 窗口形
     expect(ticks).toEqual([{ loaded: size, total: size }]);
-    expect((ws.written[0] as Blob).size).toBe(size);
+    // 泵直写（不经 saveAsBlob blob 面）：块为 Uint8Array（byteLength 锚，Blob 才有 size）
+    const first = ws.written[0]!;
+    expect(first instanceof Blob ? first.size : (first as Uint8Array).byteLength).toBe(size);
+    expect(ws.closes).toBe(1);
   });
 
-  it('远端超阈值：确认门钩子先于泵；拒绝 → cancelled 零读', async () => {
+  it('远端超阈值 picker-first：确认门在 picker 后、泵前；拒绝 → cancelled 零读零写', async () => {
+    localStorage.setItem(
+      'vviewer:settings',
+      JSON.stringify({ storage: { remoteDownloadConfirmMb: 1 } })
+    );
+    const size = 2 * 1024 * 1024;
+    const { store, calls } = fakeStore('remote:abc', () => new Uint8Array(size), true);
+    const { handle, ws } = fakeHandle();
+    const timeline: string[] = [];
+    mountPicker(async () => {
+      timeline.push('picker');
+      return handle;
+    });
+    const asks: Array<{ name: string; sizeBytes: number }> = [];
+    const hooks: SaveAsTabHooks = {
+      confirm: (info) => {
+        timeline.push('confirm');
+        asks.push(info);
+        return false;
+      }
+    };
+
+    await expect(
+      saveAsTab({ source: sourceOf(store, { path: 'big.bin', name: 'big.bin', size }) }, hooks)
+    ).resolves.toBe('cancelled');
+
+    expect(timeline).toEqual(['picker', 'confirm']); // picker 先弹（激活窗内）→ 门拒绝
+    expect(asks).toEqual([{ name: 'big.bin', sizeBytes: size }]);
+    expect(calls).toHaveLength(0); // 门拒绝：泵未启动
+    expect(ws.written).toHaveLength(0); // 目标文件零触碰（半成品零残留）
+  });
+
+  it('远端超阈值（无 FS Access 降级面，残余 A2）：确认门先于泵；拒绝 → cancelled 零读', async () => {
     localStorage.setItem(
       'vviewer:settings',
       JSON.stringify({ storage: { remoteDownloadConfirmMb: 1 } })
@@ -345,7 +391,7 @@ describe('saveAsTab（三取数路径：在手/远端泵/zipStore）', () => {
     expect(calls).toHaveLength(0); // 门拒绝：泵未启动
   });
 
-  it('远端超阈值 + 钩子放行：泵照走（Task 6 门同规则，登记后直取）', async () => {
+  it('远端超阈值 + 钩子放行（无 FS Access 降级面）：泵照走 → saveAsBlob 兜底（Task 6 门同规则）', async () => {
     localStorage.setItem(
       'vviewer:settings',
       JSON.stringify({ storage: { remoteDownloadConfirmMb: 1 } })
@@ -364,7 +410,7 @@ describe('saveAsTab（三取数路径：在手/远端泵/zipStore）', () => {
     expect(calls).toHaveLength(1);
   });
 
-  it('远端 !rangeCapable（终审修复波 I-2 门控）：不走泵——单次无 range 全量读 + 单条 100% 上报', async () => {
+  it('远端 !rangeCapable（I-2 门控，picker-first 直写形）：不走泵——单次无 range 全量读 + 单条 100% 上报 + 整块一次写盘', async () => {
     // directS3/directDav Range 防线降级形态：带窗 read 退化为整对象下载再切片，
     // 泵的 N 窗循环 N× 放大传输——回落单次全量 read（无 range opts）+ 100% 单报
     const size = 2 * 1024 * 1024;
@@ -383,7 +429,10 @@ describe('saveAsTab（三取数路径：在手/远端泵/zipStore）', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual({ path: 'big.bin', opts: undefined }); // 无 range 窗：整对象单次读
     expect(ticks).toEqual([{ loaded: size, total: size }]); // 单条 100% 上报（非泵逐块）
-    expect((ws.written[0] as Blob).size).toBe(size);
+    // picker-first 直写：整块一次写 writable（Uint8Array byteLength 锚）
+    const first = ws.written[0]!;
+    expect(first instanceof Blob ? first.size : (first as Uint8Array).byteLength).toBe(size);
+    expect(ws.closes).toBe(1);
   });
 
   it('size 未知（null）：不定态直下泵（不适用确认门，Task 6 裁决）', async () => {
