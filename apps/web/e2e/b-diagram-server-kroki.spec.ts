@@ -163,15 +163,18 @@ test.describe('b-diagram-server-kroki 消费面（默认通道）', () => {
     // 预热超时 = 引擎当前不可用，跳过本轮（引擎不可用即无 SVG 可言，语义同离线门，
     // 不属锚弱化；负结果不缓存——后续会话可重试）。
     const PREWARM_BUDGET_MS = process.env.CI ? 120_000 : 60_000;
+    // URL 经参数传入 evaluate（与 cdnEngines.ts loader 变量形态同理）：tsc 对
+    // evaluate 内字面量 URL 的动态 import 做静态解析报 TS2307（CI web job 首跑实证）
+    const d2EsmUrl = 'https://cdn.jsdelivr.net/npm/@d2lang/d2@0.1.34/+esm';
     const prewarmed = await Promise.race([
       page
-        .evaluate(async () => {
-          const mod = await import('https://cdn.jsdelivr.net/npm/@d2lang/d2@0.1.34/+esm');
+        .evaluate(async (url) => {
+          const mod = await import(/* @vite-ignore */ url);
           const d2 = new mod.D2();
           await d2.ready;
           await d2.dispose();
           return true;
-        })
+        }, d2EsmUrl)
         .catch(() => false),
       new Promise<false>((resolve) => setTimeout(() => resolve(false), PREWARM_BUDGET_MS))
     ]);
