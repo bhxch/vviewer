@@ -307,7 +307,12 @@ const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
   {
     // capability-rtf 副作用同载：open-document definition 的 rtf 面经 rtf.js 懒加载器启用
     id: 'foreign-word',
-    label: 'Word 文档',
+    // label 不得与 core docx 渲染器（render-doc/src/docx.ts 'Word 文档'，.docx 专有）
+    // 同名：registry 全量面双同名项曾炸 TabContextMenu 的 label-keyed each（Svelte 5
+    // each_key_duplicate prod 恒抛 → kit 错误边界整页换 500 错误页，CI OWM-03/04/05
+    // 全灭实迹），且选择面出现两个不可分辨的「Word 文档」。本组覆盖 doc/docm/dotx/
+    // dotm/odt/odp/rtf 兼容格式（.docx 由 core 专有），label 带限定后缀去重。
+    label: 'Word 文档（兼容格式）',
     extensions: ['doc', 'docm', 'dotx', 'dotm', 'odt', 'odp', 'rtf'],
     load: () =>
       Promise.all([import('@file-viewer/renderer-word'), import('@file-viewer/capability-rtf')]).then(([m]) => m.wordRenderer)

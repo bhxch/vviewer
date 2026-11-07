@@ -148,7 +148,10 @@
       if (t instanceof Node && menuEl !== null && menuEl.contains(t)) return; // 菜单内交互不关（含子浮层）
       onclose();
     };
-    const onGone = (): void => {
+    const onGone = (e: Event): void => {
+      // 菜单内滚动（子菜单限高 overflow 面，62 项「更多渲染器」滚入触达）不关：锚定
+      // 位置不受菜单自身滚动影响，设计语义只关「锚定失真」的外部滚动
+      if (e.target instanceof Node && menuEl !== null && menuEl.contains(e.target)) return;
       if (performance.now() - openedAt < SELF_SCROLL_GRACE_MS) return; // 打开动作自身滚动宽限
       onclose(); // 滚动 / resize：锚定位置失真，直接关
     };
@@ -187,7 +190,11 @@
        展开子浮层，子浮层内递归渲染同形项；叶子项点击 run（执行动作 + 必关）。
        expanded/sp 以 @const 收敛一次下标读取（noUncheckedIndexedAccess 面）。 -->
   {#snippet entryList(entries: TabCtxEntry[], depth: number)}
-    {#each entries as entry, i (entry.label)}
+    <!-- key 复合下标：children 由 registry 全量装配，纯 label key 在 registry 出现
+         同名 label 时即抛 each_key_duplicate（Svelte 5 prod 恒抛，kit 错误边界把整页
+         换成 500 错误页——CI OWM-03/04/05 全灭实迹）。菜单浮层整开整关，key 只承担
+         同数组重渲的节点复用，位置+label 复合不引入行为差。 -->
+    {#each entries as entry, i (`${i}:${entry.label}`)}
       {@const expanded = openPath[depth] === i}
       {@const sp = subPositions[depth]}
       {#if 'children' in entry}

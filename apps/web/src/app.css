@@ -617,7 +617,11 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
    当前项 ✓ 前缀（TabBar 组装）。aria-expanded 父项保持 hover 底色。 */
 .vv-tabctx-sub { position: absolute; min-width: 12em; padding: 4px; display: flex;
   flex-direction: column; background: var(--ui-tab-active-bg); border: 1px solid var(--ui-border);
-  border-radius: 6px; box-shadow: var(--vv-shadow-2); }
+  border-radius: 6px; box-shadow: var(--vv-shadow-2);
+  /* 「更多渲染器」二级 = registry 全量 62 项（~1900px），fixed 浮层内越界部分文档滚动
+     不可达（鼠标永不可点）——限高滚动成常规菜单形态；组件 onGone 对菜单内滚动豁免
+     关闭（锚未失真），自动化点击的滚入触达同走此面 */
+  max-height: calc(100vh - 16px); overflow-y: auto; }
 .vv-tabctx-item[aria-expanded='true'] { background: var(--ui-hover-bg); }
 /* 状态栏渲染器指示器（Task 3 壳 A）：状态栏内联按钮，观感融入文本段（继承状态栏
    字号 --vv-fs-xs/淡色），hover 提示可点；候选浮层 absolute 于 .vv-viewer-pane（position:
