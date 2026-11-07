@@ -69,6 +69,7 @@ for (const [name] of [
   ['vv-queries'],
   ['vv-runtime'], // BUG-06 配套：/tree-sitter.wasm 的 CacheFirst（主线程预热通道）
   ['vv-diagram-svgbob'], // spec §7：svgbob 前端 wasm 引擎 CacheFirst（重构丢规则时构建期拦截）
+  ['vv-worker-wasm'], // 残余 A7：worker 图同源 wasm（rpgp/mp4v-decoder/ts tree-sitter）CacheFirst（同上拦截）
   ['vv-cdn-engines'], // spec §6：CDN 图表引擎（jsdelivr +esm）CacheFirst（同上拦截）
   ['vv-foreign-assets'] // spec §6.2 计划 3 Task 3：foreign 渲染资产（assets-* CDN 直链 + 同源预留槽）CacheFirst（同上拦截）
 ]) {

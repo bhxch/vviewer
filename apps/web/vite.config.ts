@@ -1,7 +1,7 @@
 import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig, type Plugin } from 'vite';
-import { VitePWA } from 'vite-plugin-pwa';
+import { VitePWA, type VitePWAOptions } from 'vite-plugin-pwa';
 import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,6 +27,43 @@ const QUERIES_DEST = fileURLToPath(new URL('./static/queries', import.meta.url))
 // __BUILD_REVISION__ 供运行时（调试/诊断）读取。
 const pkg = JSON.parse(readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf8')) as { version: string };
 const BUILD_REVISION = `${pkg.version}-${Math.floor(Date.now() / 60_000).toString(36)}`;
+
+// 残余 A8：foreign 资产 env 镜像域（VV_FOREIGN_ASSETS，构建期定型——SW 规则在
+// generateSW 阶段由本配置生成，读 process.env 即构建期值，无需运行时常量）。语义
+// 与 foreignAssets.ts normalizeBaseDir 对齐（trim + 尾斜杠收口，空 = 未启用）：
+// 跨域 http(s) 前缀生成与缺省 CDN 同款 CacheFirst 镜像路由（双路由：env 为空仅
+// 默认）；同源路径形态不经此——同源由 /file-viewer-assets/ 预留槽路由承接。
+const FOREIGN_ASSETS_ENV_BASE = (() => {
+  const v = (process.env.VV_FOREIGN_ASSETS ?? '').trim();
+  return v === '' ? '' : v.endsWith('/') ? v : `${v}/`;
+})();
+const FOREIGN_ASSETS_ENV_MIRROR =
+  FOREIGN_ASSETS_ENV_BASE !== '' && /^https?:\/\//.test(FOREIGN_ASSETS_ENV_BASE)
+    ? FOREIGN_ASSETS_ENV_BASE
+    : '';
+// RegExp 字面量转义（镜像 base 拼进 urlPattern——'.' 等元字符须字面匹配）
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// A8 镜像路由预构造（类型取自 VitePWAOptions 推导，不直引 workbox-build）：env 为空
+// 空数组。独立常量而非内联条件展开——TS 6 对「上下文类型数组字面量内的条件展开」
+// 不下发元素上下文类型，内联写法 handler 字面量拓宽为 string 触发 RuntimeCaching
+// 不兼容（且污染其后元素的推断），预构造标注后按普通数组展开。
+const FOREIGN_MIRROR_RUNTIME_CACHING: NonNullable<
+  NonNullable<VitePWAOptions['workbox']>['runtimeCaching']
+> =
+  FOREIGN_ASSETS_ENV_MIRROR === ''
+    ? []
+    : [
+        {
+          urlPattern: new RegExp(`^${escapeRegExp(FOREIGN_ASSETS_ENV_MIRROR)}`),
+          handler: 'CacheFirst',
+          options: {
+            cacheName: `vv-foreign-assets-${BUILD_REVISION}`,
+            expiration: { maxEntries: 64, purgeOnQuotaError: true },
+            cacheableResponse: { statuses: [200] }
+          }
+        }
+      ];
 
 /**
  * tree-sitter 查询静态资产：Worker 端按需 fetch /queries/{lang}/*.scm，
@@ -90,6 +127,7 @@ function genSwCleanup(): Plugin {
       `vv-runtime-${BUILD_REVISION}`,
       `vv-queries-${BUILD_REVISION}`,
       `vv-diagram-svgbob-${BUILD_REVISION}`,
+      `vv-worker-wasm-${BUILD_REVISION}`,
       `vv-cdn-engines-${BUILD_REVISION}`,
       `vv-foreign-assets-${BUILD_REVISION}`
     ];
@@ -567,11 +605,11 @@ export default defineConfig({
         // 计划 4 Task 3 封堵；其共享 chunk 经 worker 图 foreign-signature-worker 组
         // 带名由 '**/foreign-*.js' 覆盖）：own 面的 binary.worker/ts-worker/gitWorker/
         // mp4v.worker 不含此文件名段，不受影响。
-        // rpgp wasm 备案（计划 4 终审复核，记档成立不修）：renderer-signature 的
-        // rpgp-wasm/rpgp_wrapper_bg.wasm（worker 内经 import.meta.url 相对 fetch）无
-        // runtimeCaching 路由——消费面是 signature.worker，worker 仅在 foreign 代码面
-        //（不进 precache）可用时才初始化，离线本就不可达，非本计划回归；.wasm 亦不在
-        // precache globPatterns 内，无需 globIgnores 条目。
+        // rpgp wasm 备案（计划 4 终审复核→残余 A7 已修）：renderer-signature 的
+        // rpgp-wasm/rpgp_wrapper_bg.wasm（worker 内经 import.meta.url 相对 fetch）经
+        // 下方 vv-worker-wasm 路由 CacheFirst（在线二次打开免重复下载；离线签名不可
+        // 用属 foreign 姿态——signature.worker 不进 precache，本路由不改变该面）；
+        // .wasm 仍不在 precache globPatterns 内，无需 globIgnores 条目。
         globIgnores: [
           '**/node_modules/**/*',
           'sw.js',
@@ -674,14 +712,33 @@ export default defineConfig({
             }
           },
           {
+            // 残余 A7：worker 图发射的同源 wasm 资产（_app/immutable/workers/assets/
+            // *.wasm——renderer-signature 的 rpgp_wrapper_bg、mp4v.worker 的
+            // mp4v-decoder、ts-worker 的 worker 版 tree-sitter，均在 worker 内经
+            // import.meta.url 相对 fetch）此前不在 precache（glob 不含 .wasm）也无
+            // 路由——在线二次打开重复下载。CacheFirst + 修订号缓存名；文件名带内容
+            // hash，跨版本陈旧天然免疫。如实备案：signature.worker 属 foreign 代码面
+            //（不进 precache），离线签名本就不可达（foreign 姿态）——本路由只省在线
+            // 会话的重复下载，不承诺离线签名；own 面 worker（mp4v/ts-worker）的 wasm
+            // 则随本路由获得离线二次可用性（worker 本体已 precache）。
+            urlPattern: /\/_app\/immutable\/workers\/assets\/.+\.wasm$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: `vv-worker-wasm-${BUILD_REVISION}`,
+              expiration: { maxEntries: 8, purgeOnQuotaError: true },
+              cacheableResponse: { statuses: [200] }
+            }
+          },
+          {
             // foreign 渲染资产（spec §6.2，计划 3 Task 3）：@file-viewer/assets-* npm
             // 包 jsdelivr 直链（assets-standard/-chm/-hangul/-iwork/-ppt/-wordperfect，
             // 精确版本进 URL——跨版本陈旧天然免疫，同 vv-cdn-engines 原则）。规则置于
             // vv-cdn-engines 的 jsdelivr 通配之前（workbox 路由先匹配先赢）：foreign
             // 资产工作集（worker/wasm/ppt 运行时分片）独立计账，不挤占引擎分片的
-            // maxEntries 配额。env VV_FOREIGN_ASSETS 自托管形态由下方同源预留槽承接
-            //（SW 规则构建期定型，运行时 env 值不可预知——缺省 CDN 前缀 + 预留前缀
-            // 双覆盖）。
+            // maxEntries 配额。env VV_FOREIGN_ASSETS 跨域镜像域形态由下方条件路由
+            // 承接（残余 A8 双路由），同源路径形态由 /file-viewer-assets/ 预留槽承接
+            //（SW 规则构建期定型，运行时 env 值不可预知——缺省 CDN 前缀 + env 镜像
+            // 前缀 + 预留前缀覆盖）。
             urlPattern: /^https:\/\/cdn\.jsdelivr\.net\/npm\/@file-viewer\/assets-/,
             handler: 'CacheFirst',
             options: {
@@ -699,6 +756,13 @@ export default defineConfig({
               cacheableResponse: { statuses: [200] }
             }
           },
+          // 残余 A8：env VV_FOREIGN_ASSETS 跨域镜像域双路由（构建期定型，env 为空
+          // 仅默认 CDN 路由）。镜像 base 与 foreignAssets.ts 同一消费语义（尾斜杠
+          // 归一），urlPattern 由 base 字面转义锚定前缀——镜像资产同族，共用
+          // vv-foreign-assets 计账（不另开支缓存名，LRU 工作集口径一致）。同源路径
+          // 形态（/file-viewer-assets/ 合并树）不在此生成：预留槽路由已覆盖。
+          // 预构造常量展开（类型注记见常量侧注释）。
+          ...FOREIGN_MIRROR_RUNTIME_CACHING,
           {
             // foreign 资产同源预留槽（FOREIGN_ASSETS_SAME_ORIGIN_PREFIX，plan 4 接线；
             // asset-installer 合并树布局）：CacheFirst 同上；cacheableResponse 仅 200

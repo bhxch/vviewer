@@ -140,7 +140,7 @@ vviewer 网页版只读查看器现有 12 个自研渲染器，格式面与 file
 
 **版本锁定纪律（用户拍板：必须精确锁定，避免静默升级）**：全部 30 个直引包（代码 23 + 资产 7）在 package.json 写**无 `^`/`~` 前缀的精确版本**（pnpm add 默认加 `^`，须显式剥除）；lockfile 入库；资产 CDN URL 与代码依赖钉**同一版本号**；上游升级是显式决策——单独 commit 改版本号（代码+资产 CDN 同步）+ e2e 重锚，禁止任何 range 让 `pnpm install`/lockfile 刷新静默带新版本。CI 加一道白名单校验：`@file-viewer/*` 与涉外依赖声明必须无范围前缀（仿既有 gen-code-extensions `--check` 惯例）。
 
-**运行时**：各桥接渲染器首次打开对应扩展名时经三层链按需 fetch 资产；SW 对 CDN/该前缀设 CacheFirst（运行时缓存，不进 precache）。
+**运行时**：各桥接渲染器首次打开对应扩展名时经三层链按需 fetch 资产；SW 对 CDN/该前缀设 CacheFirst（运行时缓存，不进 precache）。CacheFirst 路由面按构建期定型三覆盖：缺省 jsdelivr CDN 前缀、env `VV_FOREIGN_ASSETS` 跨域镜像前缀（构建期生成条件路由，env 空仅默认；同源路径形态由 `/file-viewer-assets/` 预留槽承接）、同源 worker 图 wasm（`_app/immutable/workers/assets/*.wasm`，`vv-worker-wasm` 缓存——rpgp 签名 wasm 在线二次打开免重复下载；离线签名不可用属 foreign 姿态，worker 本体不进 precache，该路由不改变此面）（残余 A7/A8，2026-11-07）。
 
 **门禁**：新增 foreign 预算门禁（仿 `tools/diagram-budget.mjs`）——主 chunk 与 precache 清单断言不含 `@file-viewer/*` 代码面误入主 chunk（动态 import 面）、dist 无 file-viewer 资产目录。
 
