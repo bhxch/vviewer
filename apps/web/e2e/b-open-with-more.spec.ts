@@ -277,6 +277,12 @@ test.describe('打开方式「更多渲染器」展开（OWM）', () => {
     await expect(sub.locator('.vv-tabctx-item').nth(1)).toHaveText('Mermaid');
     await expect(sub.getByRole('menuitem', { name: 'PDF', exact: true })).toHaveCount(1);
     await expect(sub.locator('.vv-tabctx-item', { hasText: '收起附加候选' })).toHaveCount(0);
+    // 限高滚动面（可达性修复锚，随 CI 稳定化补）：62 项 ~1900px 超出 max-height
+    // 100vh-16px → 子菜单内部可滚，尾部自有 core 段（PDF 等）经滚动触达——
+    // fixed 浮层内越界部分曾鼠标永不可达（OWM-03 pdf.click「outside of the viewport」
+    // 实录）；动态点击可达性由 OWM-03 的 pdf.click() 承担
+    const [scrollHeight, clientHeight] = await sub.evaluate((el) => [el.scrollHeight, el.clientHeight]);
+    expect(scrollHeight, '62 项超出子菜单限高（内部滚动面成立）').toBeGreaterThan(clientHeight);
     // Esc 逐层收（二级 → 一级 → 主菜单，OWM-03 同款三层语义）
     await page.keyboard.press('Escape');
     await page.keyboard.press('Escape');
@@ -373,7 +379,10 @@ test.describe('打开方式「更多渲染器」展开（OWM）', () => {
     const picker = page.locator('.vv-status-picker');
     await expect(picker).toBeVisible();
     await picker.getByRole('menuitem', { name: '更多渲染器…' }).click();
-    await expect(picker.locator('.vv-status-picker-item')).toHaveCount(14);
+    // 展开面 63 = 自动 + registry 全量 61 + 收起（OWM-02/④ 同面口径；本行注册面
+    // 增长期未随 f0bee90 重定基——彼时本用例恒在 ③ 前的 TabCtx 段（label 重复崩页）
+    // 失败，此行从未被跑到，陈旧计数 14（M4 时代 registry 12+自动+哨兵）漏网至本批）
+    await expect(picker.locator('.vv-status-picker-item')).toHaveCount(63);
     await tabNamed(page, 'bb.txt').click(); // 切 tab：浮层随实例切换关闭
     await expect(picker).toHaveCount(0);
     await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 20_000 }); // bb.txt 渲染完成

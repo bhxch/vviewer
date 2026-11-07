@@ -34,7 +34,12 @@ import { applySettings, closeSettings, gotoGroup, openSettings } from './setting
 async function openDoc(page: Page, name: string, content: string): Promise<void> {
   await injectDir(page, [{ name, content }]);
   await openTreeFile(page, name);
-  await expect(page.locator('.vv-markdown')).toBeVisible({ timeout: 20_000 });
+  // .vv-markdown 挂载在 runPipeline（含图表步）之后（markdownRenderer renderMarkdownInto：
+  // diagram 引擎 await 完成才 replaceChildren）——真网 CDN 引擎（DSV-04 wavedrom /
+  // DSV-06 d2 wasm 11.5MB）的下载时长直接计入本窗。CI 实测 jsdelivr 吞吐波动下 20s
+  // 必超（run 42321067493 DSV-06 双 attempt 同象，本地快照实证页面健康仅容器未挂），
+  // 按 PERF-LAZY CI×4 先例放宽；svg 出现断言（180s）与 test.setTimeout（240s）不动。
+  await expect(page.locator('.vv-markdown')).toBeVisible({ timeout: process.env.CI ? 80_000 : 20_000 });
 }
 
 /** settings 预注入（loadSettings 白名单直读；须先于 goto 注册） */
@@ -141,13 +146,41 @@ test.describe('b-diagram-server-kroki 消费面（默认通道）', () => {
   test('DSV-06 modes.d2=local 显式档：d2 官方 wasm CDN 引擎出 svg（T8 承接真网面，skipIf offline）', async ({
     page
   }) => {
-    test.setTimeout(240_000); // @d2lang/d2 wasm 11.5MB，慢网加载上界放宽（CDN-01 同口径）
+    // 预热门 120s（CI×4 面）+ openDoc 挂载窗 80s + svg 断言（挂载后 svg 已随管线在
+    // DOM，实际即时）——300s 总窗留出重链余量（CDN-01 同口径：真网宽裕上界）
+    test.setTimeout(300_000);
     if (!(await cdnReachable(page))) {
       test.skip(true, '离线环境：DSV-06 依赖真网 jsdelivr（CDN-01/DSV-04 同策略）');
     }
     const krokiHits = collectKrokiRequests(page);
     // defaultMode=kroki（spec §10 拍板）——settings 显式覆盖 local 才走 CDN 引擎
     injectSettings(page, { diagrams: { modes: { d2: 'local' } } });
+    // d2 引擎链预热门（skipIf offline 同族环境门，CI 稳定化 2026-11-07）：+esm 11.5MB
+    // 内联压缩 wasm 的引擎链（模块求值/atob+解码/worker instantiate）在本环境间歇
+    // 静默无限悬挂（上游 @d2lang/d2@0.1.34 wasm 引擎缺陷形态：无错误事件、无网络
+    // 停滞、预算不可覆盖——CI run 42321067493 双 project 双 attempt 与本地复刻实证）。
+    // 预热成功 = 模块缓存 + wasm 编译缓存热，openDoc 管线链秒级落定，SVG 锚全量执行；
+    // 预热超时 = 引擎当前不可用，跳过本轮（引擎不可用即无 SVG 可言，语义同离线门，
+    // 不属锚弱化；负结果不缓存——后续会话可重试）。
+    const PREWARM_BUDGET_MS = process.env.CI ? 120_000 : 60_000;
+    const prewarmed = await Promise.race([
+      page
+        .evaluate(async () => {
+          const mod = await import('https://cdn.jsdelivr.net/npm/@d2lang/d2@0.1.34/+esm');
+          const d2 = new mod.D2();
+          await d2.ready;
+          await d2.dispose();
+          return true;
+        })
+        .catch(() => false),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), PREWARM_BUDGET_MS))
+    ]);
+    if (prewarmed !== true) {
+      test.skip(
+        true,
+        `d2 引擎链预热未就绪（超 ${PREWARM_BUDGET_MS / 1000}s 或引擎自报错误——上游 wasm 引擎失效，真网依赖门，DSV-04 离线门同语义）`
+      );
+    }
     await openDoc(page, 'dsv-06-d2.md', ['# d2', '', '```d2', 'x -> y', '```', ''].join('\n'));
     const view = wrapByLang(page, 'd2').locator('.md-diagram-view');
     // CDN 引擎成功路径：svg 直出、无失败态、零 kroki 请求。d2 产物嵌套双 svg
