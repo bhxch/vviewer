@@ -16,6 +16,8 @@ import { isGitProbeFileRequest } from './b-stream-resilience-helpers';
  *   新 Range 请求按块拉取；拉满到底渲染末偏移行 0x9ffff0
  * - IO-03：SSE changed 重渲染免全量重读——增量 < 2MB（窗口级：新探针 + 新尾窗）
  *   而非 10MB 全量
+ * - IO-03a：SSE changed >1MB 流式面 size 回填（残余 A1）——树面新鲜 size 回填后
+ *   恰一轮重渲染按 11MB 收口 + 状态条「文件已变更」提示 + 增长首字节可达
  * - IO-04：窗口模式搜索 need/chunk 端到端——worker 以 1MB 步进发 search-need、
  *   client 经 ctx.read 逐块回灌（命中 0x600000 需 chunk 0..6），命中跳转正确
  *   （t-hex-enhance HEX-SEARCH 模式）
@@ -148,6 +150,9 @@ function treeSizeOf(entry: IoFakeFile): number {
 interface IoFakeServer {
   base: string;
   host: string;
+  /** 替换条目（残余 A1 锚 IO-03a：SSE changed 前布置增长面——tree 汇报与实体同步
+   * 换新；闭包内 files 记录原地改写，/api/tree 与 /api/file 即见新值） */
+  setEntry(path: string, entry: IoFakeFile): void;
   /** 向全部挂连的 SSE 客户端推送 changed 帧（模拟服务端 watcher 检出文件变更） */
   notifyChanged(paths: string[]): void;
   /** 释放 stall 门（startIoFakeServer opts.stall 布置；未布置时 no-op）：
@@ -261,6 +266,9 @@ async function startIoFakeServer(
   return {
     base: `http://127.0.0.1:${port}`,
     host: `127.0.0.1:${port}`,
+    setEntry(path, entry) {
+      files[path] = entry;
+    },
     notifyChanged(paths) {
       const frame = `data: ${JSON.stringify({ type: 'changed', paths })}\n\n`;
       for (const client of [...sseClients]) {
@@ -431,6 +439,58 @@ test('IO-03：SSE changed 重渲染免全量重读——增量 < 2MB（窗口级
     // 重渲染后内容完好（非占位/错误卡）
     await expect(page.locator('.vv-hex-status')).toContainText('10.0 MB · 未知二进制');
     await expect(page.locator('.vv-error-card')).toHaveCount(0);
+  } finally {
+    await fake.close();
+  }
+});
+
+// ---------------------------------------------------------------- IO-03a
+
+test('IO-03a：SSE changed >1MB 流式面 size 回填——重渲染按新鲜 size 收口 +「文件已变更」提示（残余 A1）', async ({ page }) => {
+  test.setTimeout(120_000);
+  // 实体 11MB（增长面在位），初始 tree 汇报 10MB（打开时快照 = e8bbdd6 备案面）；
+  // changed 前把树面增长为 11MB——回填链把新鲜 size 送进重渲染轮（快照行为恒按
+  // 10MB 收口：11MB 面截在窗外、「文件已变更」无提示）。treeSize 与实体解耦形同
+  // IO-11（size 是客户端唯一事实来源）
+  const grown = new Uint8Array(11 * MB);
+  grown.fill(0x41);
+  grown.fill(0x42, 10 * MB); // 增长区布点 0x42（末行 0xaffff0 可断言；旧快照尾窗 10MB 边界外）
+  const fake = await startIoFakeServer({ 'big.bin': { bytes: grown, treeSize: BIG_BYTES } });
+  try {
+    const stats = new IoStats();
+    await openRemoteBigHex(page, fake, stats);
+    const countBefore = stats.count();
+
+    // 外部增长布置 + SSE changed：refreshPaths 对 >1MB tab 先经 /api/tree 拉新鲜
+    // size（11MB）回填 source.size 再 rev++——恰一轮重渲染按 11MB 收口
+    fake.setEntry('big.bin', { bytes: grown, treeSize: 11 * MB });
+    fake.notifyChanged(['big.bin']);
+
+    // 回填检出增长 → 状态条「文件已变更：big.bin」（showStatusNotice 4s 窗内轮询）
+    await expect(page.locator('.vv-statusbar')).toContainText('文件已变更：big.bin', {
+      timeout: 15_000
+    });
+    // 重渲染按新鲜 size 收口：hex 状态行 11.0 MB（快照行为恒 10.0 MB）
+    await expect(page.locator('.vv-hex-status')).toContainText('11.0 MB · 未知二进制', {
+      timeout: 20_000
+    });
+    // 字节面证据：重渲染请求含 ≥10MB 起点的 Range（结构尾窗在 11MB 面上）
+    await stats.settled();
+    await page.waitForTimeout(300);
+    await stats.settled();
+    const newRanges = stats.records.slice(countBefore).map((r) => r.range);
+    expect(
+      newRanges.some((r) => r !== null && Number(/^bytes=(\d+)/.exec(r)?.[1]) >= 10 * MB),
+      `重渲染应按新鲜 11MB 收口（含 ≥10MB 起点 Range），实得 ${JSON.stringify(newRanges)}`
+    ).toBe(true);
+    // 增长首字节可达：滚到底渲染 0xaffff0 行（0x42 布点）——尾窗后内容按需续读
+    const dump = page.locator('.vv-hex-dump');
+    await dump.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    const lastRow = dump.locator('.vv-hex-row', { hasText: /^00affff0/ });
+    await expect(lastRow).toBeVisible({ timeout: 10_000 });
+    await expect(lastRow).toHaveText(/^00affff0 {2}42/);
   } finally {
     await fake.close();
   }

@@ -432,11 +432,15 @@ class TabCollection {
     // 树）时左栏树不随 SSE 重建；storeRevisions 分桶自增与目录 tab 的「任何 changed
     // 无条件自增」语义对齐，且天然覆盖只有文件 tab 的源（T7 分桶：无关源不重建）
     storeRevisions[storeId] = (storeRevisions[storeId] ?? 0) + 1;
+    // 残余 A1（>1MB 流式面 size 回填）：size 已知 >1MB 的命中 tab 延迟 rev++——先经
+    // 树面（listChildren 父目录）拉新鲜 size 回填 source.size 再自增，重渲染恰一轮
+    // 且按新鲜 size 收口（增长字节进尾窗；「只回填不触发内容重读」= 回填先于 rev++，
+    // 不产生额外于既有刷新通道的重渲染轮）。≤1MB 面维持 e8bbdd6 即时失效语义。
+    const streaming: Tab[] = [];
     for (const t of this.list) {
       if (t.source.storeId !== storeId) continue;
       if (t.source.path !== '' && paths.length > 0 && !paths.includes(t.source.path)) continue;
-      t.rev = (t.rev ?? 0) + 1;
-      // size 快照失效（计划 2 泵化的回归修复，m5 e2e 实证；全域收敛见下）：
+      // size 快照失效（计划 2 泵化的回归修复，m5 e2e 实证；失效域收敛见下）：
       // FileSource.size 是打开时快照（spec §6.4 已知接缝「SSE 变更只 rev++ 不重
       // stat」）——泵化前 ≤1MB 全量直读（无 Range）天然带出增长字节；泵化后读窗按
       // size 收口（bytes=0-(size-1)），陈旧 size 会把追加内容截在窗外（重读发生、
@@ -445,16 +449,21 @@ class TabCollection {
       // 使重渲染轮走不定态 EOF 收口泵（增长字节可见），与 spec 已知接缝「服务端
       // 增长越过阈值不补确认」同口径。>1MB 流式面不失效：hex 渲染器对 size-null
       // ctx 走全量回退读（hex.ts「size 未知来源应由 hexRenderer 先做全量回退读」），
-      // 大文件 SSE 刷新会整件重读（IO-03 窗口级增量语义即回归）；且 >1MB 的
-      // BlockStream 尾窗按陈旧 size 收口为泵化前同款行为（非本次回归面）。树中
-      // 重开文件即取新鲜值（spec 已知接缝原文）。
+      // 大文件 SSE 刷新会整件重读（IO-03 窗口级增量语义即回归）——改走下方树面
+      // size 回填（残余 A1，spec §6.4 已知接缝升级为已修复）。
+      if (t.source.path !== '' && t.source.size != null && t.source.size > FULL_LIMIT_BYTES) {
+        streaming.push(t);
+        continue;
+      }
+      t.rev = (t.rev ?? 0) + 1;
       // 终审修复波补：size null 不在失效域（注释同段「size null 走不定态 EOF 收口泵」
       // ——null 本即未知态，转 undefined 属无意义改写；`!= null` 与上 copy 面同口径，
       // 修 e8bbdd6 漏收窄的 svelte-check 0E 门禁面）
-      if (t.source.path !== '' && t.source.size != null && t.source.size <= 1_048_576) {
+      if (t.source.path !== '' && t.source.size != null && t.source.size <= FULL_LIMIT_BYTES) {
         t.source = { ...t.source, size: undefined };
       }
     }
+    if (streaming.length > 0) void backfillStreamingSizes(storeId, streaming);
   }
 
   /** 滚动位置即时写入内存，persist（saveWorkspaces 快照）走 300ms 尾随防抖 */
@@ -526,6 +535,72 @@ class TabCollection {
 }
 
 export const tabStore = new TabCollection();
+
+/** dispatcher FULL_LIMIT（1<<20）镜像（e8bbdd6 同口径）：≤1MB 泵化全量物化面与
+ * >1MB 流式面（残余 A1 size 回填域）的收敛分界 */
+const FULL_LIMIT_BYTES = 1_048_576;
+
+/**
+ * SSE 变更通知注入钩子（残余 A1）：>1MB 流式面回填检出 size 增长时的「文件已变更」
+ * 状态条提示。经注入而非直接 import——依赖单向 tabsModel ← serverConnect（本模块
+ * 头注释），openFlow façade 注入 showStatusNotice；未注入（纯模型测试形态）静默。
+ */
+let sseChangedNotice: ((text: string) => void) | null = null;
+
+export function setSseChangedNotice(fn: (text: string) => void): void {
+  sseChangedNotice = fn;
+}
+
+/**
+ * >1MB 流式面的树面 size 回填（残余 A1，spec §6.4「SSE 变更只 rev++ 不重 stat」
+ * 已知接缝的修复面）：按父目录分组 listChildren（同目录多 tab 单次请求），命中
+ * 条目 size 为有限数且与快照不同 → copy-on-write 回填 source.size（检出增长再经
+ * 注入钩子提示「文件已变更」），随后 rev++ 触发恰一轮重渲染——读窗按新鲜 size
+ * 收口（BlockStream 尾窗可达追加字节），不产生额外于既有刷新通道的重渲染轮。
+ * 失败回落（store 缺失/无 listChildren/listChildren 抛错）：放弃回填、即时 rev++
+ * ——重渲染语义回落到 e8bbdd6 行为（快照 size 收口），不阻塞刷新通道。size 未知
+ * （树面条目缺 size）不回填仅 rev++（渲染轮自身按 EOF 收口，增长天然可见）。
+ * 回填期间的短暂延迟（一次父目录列表 RTT）为该面刷新的知情代价：换取重渲染
+ * 一轮到位（反例：先 rev++ 后回填会对同一 SSE 事件渲染两轮、第二轮整窗重读）。
+ */
+async function backfillStreamingSizes(storeId: string, tabs: Tab[]): Promise<void> {
+  const store = storeById(storeId);
+  if (!store || typeof store.listChildren !== 'function') {
+    for (const t of tabs) t.rev = (t.rev ?? 0) + 1;
+    return;
+  }
+  const byDir = new Map<string, Tab[]>();
+  for (const t of tabs) {
+    const i = t.source.path.lastIndexOf('/');
+    const dir = i < 0 ? '' : t.source.path.slice(0, i);
+    const group = byDir.get(dir);
+    if (group !== undefined) group.push(t);
+    else byDir.set(dir, [t]);
+  }
+  for (const [dir, group] of byDir) {
+    let entries: Awaited<ReturnType<TreeStore['listChildren']>>;
+    try {
+      entries = await store.listChildren(dir);
+    } catch {
+      for (const t of group) t.rev = (t.rev ?? 0) + 1;
+      continue;
+    }
+    for (const t of group) {
+      const fresh = entries.find((e) => e.path === t.source.path);
+      if (
+        fresh !== undefined &&
+        typeof fresh.size === 'number' &&
+        Number.isFinite(fresh.size) &&
+        fresh.size !== t.source.size
+      ) {
+        const grew = fresh.size > (t.source.size ?? 0);
+        t.source = { ...t.source, size: fresh.size };
+        if (grew) sseChangedNotice?.(`文件已变更：${t.source.name}`);
+      }
+      t.rev = (t.rev ?? 0) + 1;
+    }
+  }
+}
 
 /**
  * 撤销关闭栈（F 项 T1，模块级）：容量 CLOSED_STACK_MAX 的 LIFO，元素为关闭瞬间的

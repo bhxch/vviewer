@@ -35,6 +35,7 @@ import {
   addTab,
   addDirStoreTab,
   addDirTabForRestore,
+  setSseChangedNotice,
   storeById,
   tabStore,
   workspacesView
@@ -44,6 +45,11 @@ import { showStatusNotice, serverLabel, wireStoreWatch } from './serverConnect.s
 export * from './tabsModel.svelte';
 export * from './serverConnect.svelte';
 export * from './serverCapsCache';
+
+// 残余 A1 通知面接线：>1MB 流式面 SSE size 回填检出增长时的「文件已变更」提示走
+// 既有状态条通道。经 façade 注入而非 tabsModel 反向 import——依赖单向
+// tabsModel ← serverConnect（两模块头注释同锚），注入点在依赖汇聚处。
+setSseChangedNotice(showStatusNotice);
 
 export function openFiles(files: File[]): void {
   // File.size 随链路透传（拖拽打开即可知大小，io-streaming Task 4）
