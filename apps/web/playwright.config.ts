@@ -16,6 +16,14 @@ export default defineConfig({
     trace: process.env.CI ? 'retain-on-failure' : undefined
   },
   webServer: {
+    // 残余 A10 处置备案（2026-11-07）：「vite preview 本地 3-worker 间歇 SSR 500」
+    // 前提已被 ci-stabilize-report.md §一 证伪——heading "500" 快照实为 SvelteKit
+    // 客户端错误边界就地换页（each_key_duplicate prod 恒抛，c065b35 修复），失败瞬间
+    // 网络面板全 200（trace 实证），preview 服务侧零 500 响应；且 run 42340634377
+    // （663fc3a）CI workers=1 全绿、本地 CI=true 等效验证绿。换静态伺服面（sirv/
+    // node 脚本）的收益前提不成立，而伺服语义（SPA fallback/MIME/缓存头/Range）与
+    // 1228 e2e 锚的等价性需全量重验——维持 vite preview 不换面；若未来再现「网络层
+    // 5xx」实据（非客户端错误边界同形标记），再评估换面并双验。
     command: 'pnpm vite preview --host 127.0.0.1 --port 4173 --strictPort',
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: !process.env.CI
