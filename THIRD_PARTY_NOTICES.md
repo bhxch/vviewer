@@ -20,6 +20,8 @@
 | jszip | MIT OR GPL-3.0（取 MIT） | zip 解析（render-archive 包） | M4 |
 | libarchive.js | MIT | tar/tgz/tbz2/xz/7z/rar 解析（render-archive 包，wasm+worker 静态资产） | M4 |
 | artplayer | MIT | 视频播放器（render-media 包，动态 import 不进主包） | M4 |
+| buffer | MIT | Node Buffer 浏览器填充（apps/web 直依赖，isomorphic-git 浏览器面依赖闭包；023982b 起 base64-js/buffer 独立 chunk 组） | git 信息面板 35a94ef（台账补记：残余 A5） |
+| isomorphic-git | MIT | 纯 JS git 实现（gitWorker 引擎 chunk，动态 import 不进 precache） | git 信息面板 35a94ef（台账补记：残余 A5） |
 | chardet | MIT | 文件编码重探测（core 精判分层，动态 import 不进主包） | 议题三 T8 |
 | hls.js | Apache-2.0 | HLS 流播放（render-media 包，仅 .m3u8 时动态 import） | M4 |
 | mpegts.js | Apache-2.0 | FLV/TS 流播放（render-media 包，仅 .flv/.ts 时动态 import） | M4 |

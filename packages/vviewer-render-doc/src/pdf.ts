@@ -265,9 +265,17 @@ export const pdfRenderer: Renderer = {
       void loadingTask.destroy().catch(() => {});
       if (m1ReadFailed && !cancelled) {
         // destroy 中段挂起（setup await）→ 其内部 worker terminate 不可达：显式终止
-        // 卡在 pending range reader 的 worker（loadingTask._worker 为 pdfjs 内部字段，
-        // 6.4.299 实核 destroy(): void 同步 terminate _webWorker——仅 M1 错误路径触达，
-        // 防每次读失败重试泄漏一个假死 worker）
+        // 卡在 pending range reader 的 worker（仅 M1 错误路径触达，防每次读失败重试
+        // 泄漏一个假死 worker）。
+        //
+        // 【升级复核点 · pnpm-upgrade 面】（残余 A9 在码锚，pdfjs-dist@6.4.299 实核）：
+        // 本行直访 pdfjs PDFDocumentLoadingTask 的私有字段 `_worker`（无公开销毁缝）。
+        // 升级 pdfjs-dist 时必须复核两点：①`_worker` 字段是否仍存在且具 `destroy()`；
+        // ②上游 `destroy()` 是否已改为同步 terminate 内部 worker（若已修复中段挂起，
+        // 本行直访与上方「destroy 挂起」备案一并移除）。复核手段：dist/build/pdf.mjs
+        // 搜 `_worker`/`_webWorker` 定义与 destroy 体，或以挂起形态复现 M1 错误路径
+        // 验证 terminate 到达性。字段消失时本行 `?.` 静默 no-op 不炸——但泄漏面回归，
+        // 须以 b-pdf-range 错误路径重试锚复核。
         (loadingTask as unknown as { _worker?: { destroy(): void } })._worker?.destroy();
         throw new Error(e instanceof Error ? e.message : String(e));
       }
