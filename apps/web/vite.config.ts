@@ -519,7 +519,12 @@ export default defineConfig({
     diagramEngineChunk(),
     sveltekit({
       adapter: adapter({ fallback: 'index.html' }),
-      paths: { base: kitBase }
+      paths: { base: kitBase },
+      // 强制 runes 模式（kit 3 配置经本插件参数传入，compilerOptions 转发
+      // vite-plugin-svelte；见 AGENTS.md 项目规则）：全局显式开启，禁止 legacy
+      // 语法回退与逐文件 <!-- svelte-ignore runes --> 摇摆——项目 .svelte 组件已
+      // 全量 runes 写法（$state/$derived/$props），开启后编译器按硬规则执法。
+      compilerOptions: { runes: true }
     }),
     copyTsQueries(),
     copyLibarchiveAssets(),
