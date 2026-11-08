@@ -1,7 +1,7 @@
 # file-viewer 桥接渲染器跨边界 e2e — FOM 域场景
 
-> 来源：spec `2026-11-04-file-viewer-integration` §6.1（桥接契约）/ §6.3（20 组桥接渲染器装配）/ §6.4（嵌套附件、远端确认门、归档条目、CDN 资产降级）与 `docs/superpowers/plans/` 计划 3 Task 2/Task 5、计划 4 Task 2 的装配实现。
-> 脚本：`apps/web/e2e/b-foreign-office-3.spec.ts`（FOM-NEST-01~05、FOM-REMOTE-01、FOM-CONFIRM-01、FOM-ZIP-01、FOM-CDN-01；chromium project）。
+> 来源：spec `2026-11-04-file-viewer-integration` §6.1（桥接契约）/ §6.3（20 组桥接渲染器装配）/ §6.4（嵌套附件、远端确认门、归档条目、CDN 资产降级、边车组）与 `docs/superpowers/plans/` 计划 3 Task 2/Task 5、计划 4 Task 2 的装配实现。
+> 脚本：`apps/web/e2e/b-foreign-office-3.spec.ts`（FOM-NEST-01~05、FOM-REMOTE-01、FOM-CONFIRM-01、FOM-ZIP-01、FOM-CDN-01、FOM-SHP-01；chromium project）。
 > 域定位：**钉 foreign 桥与 vviewer 自有面之间的边界**（嵌套附件回流、foreign × 远端 R1、foreign × 确认门、归档条目 × foreign 路由、CDN 资产失败收口），**不是**钉 foreign 引擎自身出图——后者由 `b-foreign-office.spec.ts`（FO-01~07）与 `b-foreign-office-2.spec.ts`（FO2 系）覆盖。
 > 本轮（复核返工轮）新增 FOM-NEST-04/05 两场景、并把七个既有场景的断言从「容器可见」升级为「内容级 + 可打红」，详见 §6。
 
@@ -39,8 +39,8 @@
 
 ## 2. 场景清单
 
-公共环境：chromium project（桌面 1280×720；本域九锚均为桌面交互面，mobile 375px 复跑无增量覆盖，`test.beforeEach` + `testInfo.skip` 跳过）。
-注入通道：`injectDir + openTreeFile`（`./b-markdown-html-docs-helpers`，只读引用）。远端面：`seedRemoteTabs` + 本文件自建 mini 假 vviewer 服务器（127.0.0.1）。
+公共环境：chromium project（桌面 1280×720；本域十锚均为桌面交互面，mobile 375px 复跑无增量覆盖，`test.beforeEach` + `testInfo.skip` 跳过）。
+注入通道：`injectDir + openTreeFile`（`./b-markdown-html-docs-helpers`，只读引用）+ 单文件注入 `injectSingleFile/dropSingleFiles`（本文件自建，合成 DataTransfer drop → `openFiles` 单文件通道，FOM-SHP-01 专用）。远端面：`seedRemoteTabs` + 本文件自建 mini 假 vviewer 服务器（127.0.0.1）。
 
 | 编号 | 前置条件 | 步骤 | 期望 | 关联缺陷 |
 | --- | --- | --- | --- | --- |
@@ -53,6 +53,7 @@
 | FOM-CONFIRM-01 | 同 FOM-REMOTE-01 的假服务器与快照预置；文件为 >1MB 的合成 eml，**声明体积 = 真实字节数**（不脱钩）；阈值经设置面板「存储与数据 → 远端下载确认阈值」改 1MB（改写后轮询 localStorage 确认已落盘） | 打开远端 `gate.eml` → 观察确认卡 → 点「开始下载」 | **门字段**：`.vv-dl-confirm` 可见，`.vv-dl-confirm-name` = `gate.eml`，`.vv-dl-confirm-size` = 按真实字节数算出的体积文案（本夹具为「大小 1.4 MB」）；**门拦截**：1s 静默窗内对 `gate.eml` 的 `/api/file` 请求计数 = 0（泵未启动，无静默窗的直接计数会假绿）；**门后泵**：请求序列恰 2 条 `bytes=0-8191` + `bytes=0-(size-1)`（观测到后再等静默窗复断言，防第 3 条迟达假绿）；**内容级接管**：`.email-header h2` = `FOM CONFIRM-01`、附件项 `pad.bin` 存在且体积标签 = `1.0 MB`；**完成态卡**：标题「下载完成」/ 无取消钮 / 有另存为钮 / 文件名 `gate.eml` | — |
 | FOM-ZIP-01 | 本地注入 `bundle.zip`（jszip 内存生成，条目 `inner.eml` = 合成 eml） | 打开 zip → 点击归档条目行 `inner.eml` | **归档面**：`.vv-archive` 可见，其内 `.vv-tree-row` 含 `inner.eml（<eml 字节数> B）`（标签的大小后缀即条目字节数）；**新 tab**：`.vv-tab.active` 文本含 `inner.eml`；**foreign 增量**：激活 tab 宿主内 `.email-header h2` = `FOM ZIP-01`、`.email-meta` 含 From、附件项 `leaf.pdf` 存在且体积标签 = `620 B`（条目字节按扩展名派发到 foreign-email 桥接管）；**不在归档面内渲染**：`.vv-viewer-host .vv-archive` 计数 0 | — |
 | FOM-CDN-01 | `test.use({ serviceWorkers: 'block' })`（`page.route` 拦不到经 SW 的请求——SW runtimeCaching 的 jsdelivr CacheFirst 会吞掉拦截面，仓内先例 `b-cdn-diagram-engines.spec.ts:125`（SW block）与 `:29-32`（备案注记））+ `page.route('**/*wordperfect.worker.js*')` 与 `page.route('**/cdn.jsdelivr.net/**')` → `abort('failed')`（路由按**资产文件名**匹配，跟随应用实际资产基座，不写死 CDN 域名/版本字面量）；本地注入 `broken.wpd`（纯文本负载） | 打开 `broken.wpd` | `.vv-viewer-host .vv-error-card` 在 90s 内可见；`.vv-error-title` = 「无法预览此文件」；`.vv-error-detail` 含 `foreign worker bootstrap failed`（跨域 worker 引导失败经桥接层转 error 事件 → 渲染器 reject → 错误卡收口，不悬挂）；`.vv-error-meta` = `broken.wpd`；**归因锚**：被拦截的请求 URL 含 `wordperfect.worker.js`（决定性证据，不依赖浏览器错误文案措辞，也不依赖 CDN 域名/版本字面量）；错误卡三动作按集合断言 = {「重试」,「以纯文本打开」,「以 hex 打开」}；宿主内 `.wpd-viewer` 计数 0（引擎壳未挂载）、`.vv-code-pre` 计数 0 | — |
+| FOM-SHP-01 | 单文件注入通道（合成 DataTransfer drop → `openFiles` → `createSingleFileStore`，storeId `single:` 前缀——`injectDir` 目录通道造不出裸单文件形态，见 §2.1）：`points.shp`（真 .shp 头 100 字节，file code 999 / version 1000 / shape type 1；负载内容与断言无关——拦截发生在任何解析之前） | 注入 `points.shp`（tab 自动激活）→ 再注入 `map.geojson`（单点 FeatureCollection，对照面） | **主面（错误卡）**：`.vv-viewer-host .vv-error-card` 在 90s 内可见；`.vv-error-title` = 「无法预览此文件」；`.vv-error-meta` = `points.shp`；`.vv-error-detail` 含「Shapefile 需同目录」（装配层前置拦截文案，spec §6.4「裸单文件维持降级错误卡」）；错误卡三动作 = {「重试」,「以纯文本打开」,「以 hex 打开」}（≥1 且重试在）；**否定面**（先等错误卡在场信号再断言，缺席断言不单飞）：`.geo-viewer` 计数 0（拦截在桥接 mount 之前，引擎 DOM 从未产出）；**对照面（扩展名特异非通道特异）**：同通道注入 `.geojson`（同样 single: 来源、单文件自足格式）→ `.geo-viewer` 可见且 `.vv-error-card` 计数 0（旧卡随 tab 切换销毁——共享单 host，内容随活动 tab 替换） | ②（**已闭**，见 §3.4） |
 
 ### 2.1 装置说明（全部自建于本 spec 文件，不抽公共 helper）
 
@@ -64,6 +65,7 @@
 | 远端 tab 快照预置 | IndexedDB `vviewer`/`kv` 的旧键 `'tabs'`；条目形如 `{id, storeId:'remote:<hash8(base:e2e-fake)>', storeLabel:'e2e-fake', storeBase, kind:'rename-only', path, name, size, active}`；另写 `sessionStorage['vviewer-last-server']`（形态沿 `b-save-as.spec.ts:187-223`）。**目录项（`path===''`）必需**——快照的 remote 来源只从目录项派生（`workspaceStore.ts:81` `migrateLegacyTabs`）；写库完成置 `window.__vvSeedReady`（诊断用） | FOM-REMOTE-01、FOM-CONFIRM-01 |
 | 下载捕获器 | `page.on('download')`（blob 兜底通道 `<a download>` 点击）；`download.path()` 回读落盘字节 | FOM-NEST-02/03/04 |
 | `formatBytesLike` | 与 `apps/web/src/lib/storageHealth.ts:260` `formatBytes` 同口径的字节格式化（确认卡体积与附件项体积标签的期望值由此算出，不写死字面量） | FOM-NEST-01/05、FOM-REMOTE-01、FOM-CONFIRM-01、FOM-ZIP-01 |
+| 单文件注入通道 `injectSingleFile`/`dropSingleFiles` | 页面内构造 `File` → 合成 `DataTransfer`（`dt.items.add(file)`）→ `window.dispatchEvent(new DragEvent('drop', { dataTransfer }))`（`+page.svelte` 的 `svelte:window ondrop`）→ `openFiles` 单文件通道 → `createSingleFileStore`（storeId `single:<name>:<size>:<lastModified>`）。程序化 DataTransfer 条目 `webkitGetAsEntry()` 为 null → `collectDirectoryFiles` 兜 null → 落 `e.dataTransfer.files` 单文件分支（即便造出 file entry，非目录条目同样兜 null，两分支殊途同归）。与既有 `injectDir` 目录通道（`__vvOpenDirImpl` → `openDirectoryViaInput`，localfiles 来源）互斥：目录通道 storeId 不带 `single:` 前缀，原理上造不出裸单文件。可追加注入（不重载页面），多文件各自成独立 single: tab，后注入者激活 | FOM-SHP-01 |
 
 ## 3. 验收行为
 
@@ -103,8 +105,8 @@
 
 | 缺口 | 核验结论与依据 |
 | --- | --- |
-| ① 兄弟边车（sibling）是死缝 | **仍开**：`apps/web/src/lib/foreignRenderers.ts:133-152` 构造 `FileRenderContext` 只给 `filename`/`sourceFile`/`signal`/`renderNestedBuffer`，`args.resolveSibling`（桥接层 `bridge.ts:182` 白造的入参）从未进入上游上下文；上游 `@file-viewer/core` 的 `FileRenderContext` 契约亦无 sibling 字段。`.shp` 的 `.shx`/`.dbf`/`.prj` 边车链路端到端不通 |
-| ② 裸单文件 `.shp` 的错误卡未实现 | **仍开**（spec §6.4:239 要求「无属性几何落错误卡」，当前静默出无属性几何）；本轮无 `.shp` 夹具，**未实跑核验**，以源码与 spec 记载为据 |
+| ① 兄弟边车（sibling）是死缝 | **仍开（知情记档，不做拦截）**：`apps/web/src/lib/foreignRenderers.ts:133-152` 构造 `FileRenderContext` 只给 `filename`/`sourceFile`/`signal`/`renderNestedBuffer`，`args.resolveSibling`（桥接层 `bridge.ts:182` 白造的入参）从未进入上游上下文；上游 `@file-viewer/core` 的 `FileRenderContext` 契约亦无 sibling 字段。`.shp` 的 `.shx`/`.dbf`/`.prj` 边车链路端到端不通——**resolveSibling 边车链路死缝（上游 FileRenderContext 无 sibling 字段）→ .shp 边车不被上游消费，目录/远端/zip 来源静默出无属性几何 = 现状语义**（这些来源的 sibling 读取面存在，边车能否取到取决于用户数据里是否真有边车文件，属数据问题不该由装配层一刀切拒绝）；**裸单文件（single: 来源）例外——边车原理上不可能存在（单文件来源没有「同目录」），落降级错误卡（FOM-SHP-01 钉死，见 §3.4）** |
+| ② 裸单文件 `.shp` 的错误卡未实现 | **已闭（2026-11-08，见 §3.4）**：装配层前置拦截落地，FOM-SHP-01 钉死；此前为静默出无属性几何（spec §6.4:239 要求落错误卡） |
 | ③ 组宽度零锚 | **仍开**：presentation 组（`foreignRenderers.ts:321-325`）无任何 e2e 锚；signature 的 OpenPGP 族 `pgp`/`gpg`/`jws`（`:407`）零锚；image 的 `heic`/`heif`（`:379`）零锚 |
 | ④ 语料一致性锚脆弱 | **仍开**：FO-00（`b-foreign-office.spec.ts:118-137`）的 `FIXTURES ⊆ manifest.files` 在两侧同空时恒真；缺「manifest 必须覆盖本组绑定扩展名全集」断言（注册面会变，不得写成硬编码数量） |
 
@@ -120,6 +122,14 @@
 | ⑩ 检索入口禁用态 | spec §6.1:122 要求桥接渲染器 tab 显示「当前渲染器不支持检索」禁用态；仓内**无该文案**（`grep -rn "不支持检索" apps/web/src packages` 无命中），实际 `'/'` 键无条件开面板（`ViewerPane.svelte:372`），SearchPanel 对无 search 的实例降级为「无结果」（`SearchPanel.svelte:79`）→ 既无锚也未登记——本轮补登 |
 
 **附：可借本域装置覆盖但因 ① 未通的缺口**——L3 归档面的 sibling 读（`.shp` 与 `.shx`/`.dbf`/`.prj` 同处一 zip 的边车读取，spec §6.4:239）：FOM-ZIP-01 已搭好归档装置（jszip 内存 zip → 注入 → 条目点击开 tab），但 ① 的死缝使该链路端到端不通，故本域未落锚。
+
+### 3.4 FOM-SHP-01：裸单文件 `.shp` 落降级错误卡（spec §6.4:239 补齐，**已实现**，2026-11-08）
+
+- **修前现状**：单文件来源（`single:` storeId，拖拽/文件 picker 单选）的 `.shp` 照常进入 foreign-geo 桥，上游 renderer-geo 只解 `.shp` 本体——静默渲染出无属性几何，与 spec §6.4「裸单文件维持降级错误卡（『Shapefile 需同目录 .shx/.dbf/.prj』）」相悖。
+- **实现落点**：`apps/web/src/lib/foreignRenderers.ts` 的 `withSingleFileShpGuard`——foreign-geo 组装配时套在 `Renderer.render` 包装层（桥接契约 `ForeignMountArgs` 不携带 storeId，只有 render 的 `FileSource` 实参有，此处为能拿到判定所需来源形态的最小侵入点，桥接包零改动）。打开 `.shp` 且 `source.storeId` 以 `single:` 前缀（`createSingleFileStore` 的 id 形态 `single:<name>:<size>:<lastModified>`）→ render 以 rejection 抛「Shapefile 需同目录的 .shx/.dbf/.prj 边车文件，单文件来源无法读取；请改用包含这些文件的文件夹方式打开」→ dispatcher 的 render catch 承接为错误卡（重试/纯文本/hex 三动作）。async 包装是有意的：错误卡「重试」动作走 `render(...).then().catch()` 链，同步 throw 会绕过该链直接逃逸。
+- **只拦 `single:` 的理由**：单文件来源在模型上只有孤零零一个 File，**不存在「同目录」**，边车原理上无法取得——不拦则静默出无属性几何，比报错更误导。目录/远端/zip 来源不拦：这些来源的 sibling 读取面存在，边车「能否取到」取决于用户数据（数据问题不该由装配层一刀切拒绝），且目录来源静默出无属性几何是既有语义（① 的死缝所致，知情记档）——本拦截只兜「边车原理上不可能存在」的形态。
+- **单测回归锚**：`apps/web/src/lib/foreignRenderers.test.ts` 的「foreign-geo 裸单文件 .shp 前置拦截」组（single .shp 抛错且上游 handler 零调用 / 非 single .shp 回落渲染路径 / single .geojson 不受影响；`@file-viewer/renderer-geo` 以带 definition/handler 的最小插件 mock，真 core registry/dispatcher 路由）。
+- **e2e 锚**：FOM-SHP-01（§2 场景表；装置=单文件注入通道）。
 
 ## 4. 环境与数据
 
@@ -148,6 +158,8 @@
 | 合成 eml（远端大文件） | 正文 + `application/octet-stream` 附件 `pad.bin`（1,100,000B 填充 `0x5a`）→ 合成后 ~1.5MB（>1MB FULL_LIMIT，故走 head 探测 + 全量窗两请求；亦 >1MB 确认门阈值）；快照声明体积 = 真实字节数 | FOM-REMOTE-01、FOM-CONFIRM-01 |
 | `broken.wpd` | 纯文本 `this is definitely not a WordPerfect document`（`application/octet-stream`）；worker 引导失败先于内容校验 | FOM-CDN-01 |
 | `bundle.zip` | jszip 内存生成（`generateAsync({type:'nodebuffer'})`），单条目 `inner.eml` = 合成 eml | FOM-ZIP-01 |
+| `points.shp` | 真 .shp 头 100 字节（file code 999 大端 / version 1000 小端 / shape type 1 点 + 64B 空 bbox）。负载内容与断言无关——拦截发生在任何解析之前，取真头部只为失败归因不失真 | FOM-SHP-01 |
+| `map.geojson` | 单点 FeatureCollection（内联合成，零语料依赖；geo 组单文件自足格式的对照面） | FOM-SHP-01 |
 | 假服务器文件表 | `{ 'remote.eml': 合成 eml }` / `{ 'gate.eml': 合成 eml }`，树条目带 `size`（size 缺失会改走 head 探测路径，请求形态随之改变） | FOM-REMOTE-01、FOM-CONFIRM-01 |
 
 ### 4.3 断言纪律与已知易踩面（写/改本 spec 前必读）
@@ -186,6 +198,7 @@
 | FOM-CONFIRM-01 | 远端大文件过确认门后泵全量物化，桥接引擎接管宿主 |
 | FOM-ZIP-01 | 压缩包条目开新 tab，条目字节按扩展名派发到 foreign 桥接管 |
 | FOM-CDN-01 | CDN 资产不可达时跨域 worker 引导失败收口成错误卡且归因可核验 |
+| FOM-SHP-01 | 裸单文件 .shp（single: 来源）落降级错误卡提示补齐边车；同通道 .geojson 照常渲染（拦截扩展名特异） |
 
 ## 6. 本轮复核返工要点（2026-11-08）
 

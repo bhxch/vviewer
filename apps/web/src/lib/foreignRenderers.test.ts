@@ -8,10 +8,11 @@
 // ③ viewer.ts 源序：桥接块居 diagram 之后、codeRenderer 之前（generated 补空位铁律）。
 // viewer.ts 本体 vitest 不可 import（$app/env，diagramFile.test.ts 同款结论）——源序以
 // 读源断言锚定，行为以镜像面锚定。
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createRegistry, GENERATED_EXTENSIONS } from '@bhxch/vviewer-core';
+import type { Detection, FileSource, RenderedInstance, TreeStore } from '@bhxch/vviewer-core';
 import { codeRenderer } from '@bhxch/vviewer-render-text';
 import { createDiagramFileRenderers } from '@bhxch/vviewer-render-text/diagramFile';
 import { markdownRenderer } from '@bhxch/vviewer-markdown';
@@ -404,5 +405,62 @@ describe('FOREIGN_GROUP_ASSET_PACKAGE（资产三层链的组包映射，spec §
         expect(pkgOf(id, ext), `${id}/${ext}`).toBeNull();
       }
     }
+  });
+});
+
+// FOM-SHP-01（spec §6.4「裸单文件维持降级错误卡」）：foreign-geo 组装配层对
+// `single:` 来源（createSingleFileStore，拖拽/文件 picker 单选形态）的 .shp 前置
+// 拦截。拦截点在 Renderer.render 包装层（withSingleFileShpGuard）——桥接契约
+// ForeignMountArgs 不携带 storeId，只有 render 的 FileSource 实参有。
+// mock 面：@file-viewer/renderer-geo 换带 definition/handler 的最小插件（真
+// @file-viewer/core registry/dispatcher 按扩展名路由，与 wireDesignOrDataSeam 组
+// 「真包可 node 直载」同证）；拦截面场景断言 handler 零调用 = 拦截在 mount 之前，
+// 非拦截面场景断言 handler 被调 = 回落既有渲染路径（不必真渲染）。
+const geoMock = vi.hoisted(() => {
+  // 参数按 ForeignHandler 形标注（buffer/target/type/context）——mock.calls 元组随之
+  // 带 type 槽（第 2 索引 = 桥接 mount 传入的裸扩展名实参）
+  const handler = vi.fn(
+    async (_buffer: ArrayBuffer, _target: HTMLElement, type?: string, _context?: unknown) => ({ unmount: () => {} })
+  );
+  return { handler };
+});
+
+vi.mock('@file-viewer/renderer-geo', () => ({
+  geoRenderer: {
+    definitions: [{ id: 'geo-bridge-mock', label: 'Geo 桥 mock', extensions: ['geojson', 'kml', 'gpx', 'shp'] }],
+    handlers: [{ rendererId: 'geo-bridge-mock', handler: geoMock.handler }]
+  }
+}));
+
+describe('foreign-geo 裸单文件 .shp 前置拦截（FOM-SHP-01，spec §6.4 降级错误卡）', () => {
+  /** bridge render 直调形态（viewer dispatch 同参子集：buffer/target/source/det 必填） */
+  function renderGeo(name: string, storeId: string, ext: string): Promise<RenderedInstance> {
+    const r = createForeignFileRenderers({ nestedDispatch: async () => {} }).find((x) => x.id === 'foreign-geo');
+    expect(r, 'foreign-geo 组渲染器').toBeDefined();
+    const source: FileSource = { storeId, storeLabel: '测试来源', path: name, name, store: {} as TreeStore };
+    return r!.render(new Uint8Array([1, 2, 3]), document.createElement('div'), source, { ext } as unknown as Detection);
+  }
+
+  beforeEach(() => {
+    geoMock.handler.mockClear();
+  });
+
+  it('single: 来源 .shp → render 拒绝含「Shapefile 需同目录」的错误；拦截在 mount 之前（上游 handler 零调用）', async () => {
+    await expect(renderGeo('points.shp', 'single:points.shp:840:0', 'shp')).rejects.toThrow(/Shapefile 需同目录/);
+    expect(geoMock.handler).not.toHaveBeenCalled();
+  });
+
+  it('非 single 来源 .shp 不拦截——回落既有渲染路径（handler 被调，type 实参 = 裸扩展名）', async () => {
+    const inst = await renderGeo('points.shp', 'localfiles:e2e-dir', 'shp');
+    expect(geoMock.handler).toHaveBeenCalledTimes(1);
+    expect(geoMock.handler.mock.calls[0]![2]).toBe('shp');
+    expect(typeof inst.destroy).toBe('function');
+  });
+
+  it('single: 来源 .geojson 不受影响（geojson 单文件自足）——照常走渲染路径', async () => {
+    const inst = await renderGeo('map.geojson', 'single:map.geojson:649:0', 'geojson');
+    expect(geoMock.handler).toHaveBeenCalledTimes(1);
+    expect(geoMock.handler.mock.calls[0]![2]).toBe('geojson');
+    expect(typeof inst.destroy).toBe('function');
   });
 });

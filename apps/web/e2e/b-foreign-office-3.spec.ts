@@ -35,6 +35,10 @@ import { openSettings, gotoGroup, applySettings, closeSettings } from './setting
  * - FOM-ZIP-01   压缩包条目点击开新 tab，条目字节按扩展名派发到 foreign 桥接管；
  * - FOM-CDN-01   CDN 资产不可达时跨域 worker 引导失败被收口成错误卡（不悬挂），
  *                 且失败归因可由被拦截的资产 URL 指纹判定。
+ * - FOM-SHP-01   裸单文件 .shp（single: 来源）落降级错误卡：提示补齐 .shx/.dbf/
+ *                 .prj 边车（spec §6.4「裸单文件维持降级错误卡」），geo 引擎壳缺席、
+ *                 错误卡三动作在；对照面：同通道注入 .geojson（单文件自足格式）
+ *                 照常渲染 .geo-viewer——拦截是扩展名特异而非通道特异。
  *
  * 内容级断言纪律（本域首轮返工要点，务必守住）：
  * `.email-viewer` 容器可见**不证明邮件渲染成功**——上游先建 root 再解析
@@ -48,7 +52,10 @@ import { openSettings, gotoGroup, applySettings, closeSettings } from './setting
  *   零语料依赖，attachments 的 filename/content 经 postal-mime 实跑核过；
  * - mini 假 vviewer 服务器（127.0.0.1，/api/health|tree|file|ticket/events，
  *   file 端点按 Range 回 206 + Content-Range 切片）+ IndexedDB 'tabs' 快照预置；
- * - 下载捕获器：page 'download' 事件（blob 兜底通道 <a download> 点击）。
+ * - 下载捕获器：page 'download' 事件（blob 兜底通道 <a download> 点击）；
+ * - 单文件注入通道（FOM-SHP-01）：合成 DataTransfer drop → openFiles 单文件
+ *   通道（single: 来源）——与 injectDir 的目录注入通道（localfiles 来源）互斥，
+ *   「裸单文件」形态只有这条通道造得出来。
  *
  * 桌面专属（仅 chromium project，b-save-as/b-diagram-file beforeEach 跳过同款）。
  */
@@ -68,6 +75,30 @@ const MYSTERY_PAYLOAD = Buffer.from('attachment-payload-bytes-0123456789', 'utf8
 
 /** 坏 PDF 负载（有 pdf 渲染器但内容不可解析——「有渲染器但渲染失败」分支用） */
 const BROKEN_PDF_PAYLOAD = Buffer.from('this is definitely not a PDF document, no header here', 'utf8');
+
+/** 真 .shp 文件头 100 字节（file code 999 大端 / version 1000 小端 / shape type 1 点
+ * + 64B 空 bbox）。负载内容与断言无关——FOM-SHP-01 拦截发生在任何解析之前，取真
+ * 头部只为失败时归因不失真。 */
+const SHP_HEADER_B64 = Buffer.from(
+  '0000270a' + '00'.repeat(20) + '00000050' + 'e8030000' + '01000000' + '00'.repeat(64),
+  'hex'
+).toString('base64');
+
+/** 对照面 geojson（单点 FeatureCollection——geo 组单文件自足格式，同 single: 通道
+ * 注入应照常渲染，钉死拦截是扩展名特异而非通道特异） */
+const GEOJSON_B64 = Buffer.from(
+  JSON.stringify({
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: { name: 'e2e point' },
+        geometry: { type: 'Point', coordinates: [139.6917, 35.6895] }
+      }
+    ]
+  }),
+  'utf8'
+).toString('base64');
 
 const CRLF = '\r\n';
 
@@ -125,6 +156,49 @@ function buildEml(opts: { subject: string; boundary: string; parts: EmlPart[] })
 async function injectAndOpenEml(page: Page, name: string, bytes: Buffer): Promise<void> {
   await injectDir(page, [{ name, content: '', type: 'message/rfc822', b64: bytes.toString('base64') }]);
   await openTreeFile(page, name);
+}
+
+// ---------- 单文件注入通道（FOM-SHP-01 装置） ----------
+
+/**
+ * 等 openFlow 装配完成（__vvOpenDirImpl 钩子与 openFiles 同模块顶层装配，钩子在即
+ * 通道在——injectDir 的等待同款，仅作就绪信号，本装置不走目录通道）。
+ */
+async function waitDropChannelReady(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => (window as unknown as { __vvOpenDirImpl?: unknown }).__vvOpenDirImpl !== undefined
+  );
+}
+
+/**
+ * 单文件注入（不重载页面，可追加）：页面内构造 File 经合成 DataTransfer 的 drop
+ * 事件派发到 window（+page.svelte 的 svelte:window ondrop）→ openFiles 单文件通道
+ * → createSingleFileStore（storeId `single:<name>:<size>:<lastModified>`）。
+ *
+ * 为什么不用既有 injectDir：那是 __vvOpenDirImpl → openDirectoryViaInput 通道，
+ * storeId 为 localfiles 形态——「裸单文件」（single: 来源）只有拖拽/文件 picker
+ * 单选才造得出来，目录通道原理上到不了。程序化构造的 DataTransfer 条目
+ * webkitGetAsEntry() 为 null（entry 仅真实 OS 拖拽存在）→ collectDirectoryFiles
+ * 兜 null → 落 e.dataTransfer.files 单文件分支；即便个别内核为合成条目造出 file
+ * entry，非目录条目同样兜 null，两分支殊途同归（openFiles）。多个文件一次 drop
+ * 时各自成独立 single: tab（后注入者激活）。
+ */
+async function dropSingleFiles(page: Page, specs: Array<{ name: string; type?: string; b64: string }>): Promise<void> {
+  await page.evaluate((list) => {
+    const dt = new DataTransfer();
+    for (const s of list) {
+      const bytes = Uint8Array.from(atob(s.b64), (c) => c.charCodeAt(0));
+      dt.items.add(new File([bytes], s.name, { type: s.type ?? 'application/octet-stream' }));
+    }
+    window.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+  }, specs);
+}
+
+/** 首页加载后注入单文件（首个 single: tab，goto 与就绪等待一次到位） */
+async function injectSingleFile(page: Page, spec: { name: string; type?: string; b64: string }): Promise<void> {
+  await page.goto('/');
+  await waitDropChannelReady(page);
+  await dropSingleFiles(page, [spec]);
 }
 
 // ---------- 邮件面内容级断言 ----------
@@ -842,5 +916,38 @@ test.describe('b-foreign-office-3 foreign 桥接渲染器的跨边界行为（FO
       await expect(host.locator('.wpd-viewer')).toHaveCount(0);
       await expect(host.locator('.vv-code-pre')).toHaveCount(0);
     });
+  });
+
+  test('FOM-SHP-01: 裸单文件 .shp（single: 来源）落降级错误卡提示补齐边车；对照面同通道 .geojson 照常渲染', async ({
+    page
+  }) => {
+    test.setTimeout(180_000);
+    const host = page.locator('.vv-viewer-host');
+
+    // ---- 主面：single: 来源 .shp → 装配层前置拦截 → dispatcher 错误卡 ----
+    await injectSingleFile(page, { name: 'points.shp', b64: SHP_HEADER_B64 });
+    await expect(page.locator('.vv-tab.active', { hasText: 'points.shp' })).toBeVisible({ timeout: 30_000 });
+
+    const card = host.locator('.vv-error-card');
+    // 先等在场信号（错误卡），再做缺席断言（缺席断言不得单飞）
+    await expect(card).toBeVisible({ timeout: 90_000 });
+    await expect(card.locator('.vv-error-title')).toHaveText('无法预览此文件');
+    await expect(card.locator('.vv-error-meta')).toHaveText('points.shp');
+    await expect(card.locator('.vv-error-detail')).toContainText('Shapefile 需同目录');
+    // 错误卡三动作（与 FOM-CDN-01 同款集合断言——registry 里 code/hex 均装配，集合确定）
+    const labels = await card.locator('.vv-error-action').allInnerTexts();
+    expect(labels.length).toBeGreaterThanOrEqual(1);
+    expect(labels).toContain('重试');
+    expect([...labels].sort()).toEqual(['以 hex 打开', '以纯文本打开', '重试'].sort());
+    // geo 引擎壳缺席（拦截发生在桥接 mount 之前，引擎 DOM 从未产出）
+    await expect(host.locator('.geo-viewer')).toHaveCount(0);
+
+    // ---- 对照面：同一单文件通道注入 .geojson（同样 single: 来源）→ 正常渲染 ----
+    // 钉死拦截是扩展名特异而非通道特异：geojson 单文件自足，不受边车限制。
+    await dropSingleFiles(page, [{ name: 'map.geojson', type: 'application/geo+json', b64: GEOJSON_B64 }]);
+    await expect(page.locator('.vv-tab.active', { hasText: 'map.geojson' })).toBeVisible({ timeout: 30_000 });
+    await expect(host.locator('.geo-viewer')).toBeVisible({ timeout: 90_000 });
+    // 旧错误卡随 tab 切换销毁（共享单 host：内容随活动 tab 替换）
+    await expect(host.locator('.vv-error-card')).toHaveCount(0);
   });
 });

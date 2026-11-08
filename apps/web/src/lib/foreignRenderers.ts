@@ -21,7 +21,7 @@
 // 不混入（T4 预算门禁锚）。capability-rtf 为副作用启用包（import 即
 // enableFileViewerRtf()，向 renderer-word 注册 rtf.js 懒加载器），置于 word 组
 // loader 内随首渲染同载。
-import type { Renderer, TreeStore } from '@bhxch/vviewer-core';
+import type { FileSource, Renderer, TreeStore } from '@bhxch/vviewer-core';
 import {
   wrapFileViewerRenderer,
   disposeForeignRendered,
@@ -424,7 +424,9 @@ const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
   },
   {
     // geojson/kml/gpx 自 code 的 generated 兜底转移（装配块居前不被抢注）；shp 的
-    // .dbf/.prj/.shx 边车经桥接 resolveSibling 统一回调读兄弟文件（spec §6.4）。
+    // .dbf/.prj/.shx 边车经桥接 resolveSibling 统一回调读兄弟文件（spec §6.4）——
+    // 裸单文件来源的 .shp 在 createForeignFileRenderers 装配点前置拦截为降级错误卡
+    // （withSingleFileShpGuard，spec §6.4「裸单文件维持降级错误卡」）。
     id: 'foreign-geo',
     label: '地理数据',
     extensions: ['geojson', 'kml', 'gpx', 'shp'],
@@ -483,23 +485,72 @@ const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
 ];
 
 /**
+ * 裸单文件 .shp 前置拦截（spec §6.4：裸单文件维持降级错误卡「Shapefile 需同目录
+ * .shx/.dbf/.prj」，FOM-SHP-01 钉死）。
+ *
+ * 为什么只拦 `single:` 前缀来源（createSingleFileStore 的 storeId 形态
+ * `single:<name>:<size>:<lastModified>`）：Shapefile 是多文件格式，.shp 本体只有
+ * 几何，属性/投影/索引在 .dbf/.prj/.shx 边车里，边车必须经同目录 sibling 读取得来
+ * ——而单文件来源（拖拽/文件 picker 单选）在模型上只有孤零零一个 File，**不存在
+ * 「同目录」这回事**，边车原理上无法取得。上游 renderer-geo 只解 .shp 本体、不消费
+ * 边车，且上游 FileRenderContext 契约无 sibling 字段，边车链路端到端不通（已知
+ * 限制，记档于 docs/e2e/file-viewer-foreign-bridge.md）；对单文件来源若不拦截，
+ * 结果是静默渲染出无属性几何——比报错更误导，故按 spec 落降级错误卡。throw 由
+ * core dispatcher 的 render catch 承接为错误卡（重试/纯文本/hex 三动作）。
+ *
+ * 为什么目录/远端/zip 来源不拦：这些来源的 sibling 读取面存在（目录=store 路径
+ * 读、远端=tree/file 通道、zip=归档兄弟条目），边车「能否取到」取决于用户数据里
+ * 是否真有边车文件——数据问题应由渲染路径自然处理而非装配层一刀切拒绝。且目录来
+ * 源在当前实现下静默出无属性几何是既有语义（上游限制所致，知情记档），本拦截不改
+ * 变它，只兜住「边车原理上不可能存在」的单文件形态。
+ *
+ * 挂装点取 Renderer.render 包装层而非 pluginMount：ForeignMountArgs（桥接契约）
+ * 不携带 storeId，只有 render 的 FileSource 实参有——在此拦是能拿到判定所需来源
+ * 形态的最小侵入点（桥接包零改动）。仅 foreign-geo 组装配时套用；throw 在委托
+ * bridge render 之前，不触发插件懒加载。
+ */
+const SINGLE_FILE_SHP_ERROR =
+  'Shapefile 需同目录的 .shx/.dbf/.prj 边车文件，单文件来源无法读取；请改用包含这些文件的文件夹方式打开';
+
+/** 裸单文件 .shp 判定（FOM-SHP-01）：.shp 扩展名 + storeId 为单文件来源形态。 */
+export function isSingleFileShpSource(source: Pick<FileSource, 'name' | 'storeId'>): boolean {
+  return extOf(source.name) === 'shp' && source.storeId.startsWith('single:');
+}
+
+/** 为 foreign-geo 组渲染器套上裸单文件 .shp 拦截（装配点见上注；导出仅测试锚用）。
+ * async 包装：拦截以 rejection 而非同步 throw 冒泡——错误卡「重试」动作走
+ * `render(...).then().catch()` 链，同步 throw 会绕过该链直接逃逸（卡片不重建）。 */
+export function withSingleFileShpGuard(renderer: Renderer): Renderer {
+  const inner = renderer.render.bind(renderer);
+  return {
+    ...renderer,
+    async render(buffer, target, source, det, ctx, opts) {
+      if (isSingleFileShpSource(source)) throw new Error(SINGLE_FILE_SHP_ERROR);
+      return inner(buffer, target, source, det, ctx, opts);
+    }
+  };
+}
+
+/**
  * 构造 20 组桥接渲染器（第一波 10 组 + 第二波 10 组；viewer.ts 装配点：diagram 块后、
  * codeRenderer 前）。
  * nestedDispatch 必传（装配层单源：registry.byExtension → dispatcher.dispatch），
  * 深度限 3 由桥接层以显式 depth 形参强制。资产基座不经此处透传——权威机制为
  * core 全局 setDefaultFileViewerAssetBaseUrl（pluginMount 内装配级一次 + 组包
  * 切换，见 pluginMount 注）；ForeignMountArgs.assetBaseUrl 透传缝保留不填。
+ * foreign-geo 组附加裸单文件 .shp 前置拦截（withSingleFileShpGuard，spec §6.4）。
  */
 export function createForeignFileRenderers(opts: { nestedDispatch: NestedDispatch }): Renderer[] {
-  return FOREIGN_GROUPS.map((g) =>
-    wrapFileViewerRenderer({
+  return FOREIGN_GROUPS.map((g) => {
+    const renderer = wrapFileViewerRenderer({
       id: g.id,
       label: g.label,
       extensions: g.extensions,
       mount: pluginMount(g.load, g.id),
       nestedDispatch: opts.nestedDispatch
-    })
-  );
+    });
+    return g.id === 'foreign-geo' ? withSingleFileShpGuard(renderer) : renderer;
+  });
 }
 
 /** 嵌套分派的合成 FileSource store 形：buffer 直传路径不触 store 面（dispatcher 仅读
