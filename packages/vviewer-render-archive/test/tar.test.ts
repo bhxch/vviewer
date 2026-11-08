@@ -115,6 +115,29 @@ describe('createLibarchiveStore（tar，libarchive.js 真实解析）', () => {
     }
   });
 
+  it('条目名含 ".." 段：按归档内规范化扁平化到根（树内无穿越段名，条目仍可读且字节为自身）', async () => {
+    // 条目名来自归档内容（构造者可任意指定）：libarchive 列举 API 原样返回 pathname
+    // （archive_read_next_header 不消毒），上游 getFilesObject 按 '/' 拆嵌套对象
+    // （'..' 原样成为对象键）——产品侧聚合期统一按归档内规范化（'..' 扁平化到上级、
+    // 不越出归档根），与 jszip 读侧消解后的形态一致。
+    const store = await createLibarchiveStore(
+      buildTar([
+        { path: 'ok.txt', content: 'ok bytes' },
+        { path: '../escape.txt', content: 'escape bytes' }
+      ])
+    );
+    try {
+      const kids = await store.listChildren('');
+      expect(kids.map((n: TreeNode) => `${n.kind}:${n.name}`)).toEqual(['file:escape.txt', 'file:ok.txt']);
+      expect(kids.some((n) => n.name === '..' || n.name === '.')).toBe(false);
+      // 规范化只改「树内路径」：句柄仍按原始 pathname 定位条目 → 解出的是该条目自身字节
+      const bytes = await store.read('escape.txt');
+      expect(new TextDecoder().decode(bytes)).toBe('escape bytes');
+    } finally {
+      closeQuietly(store);
+    }
+  });
+
   it('read 返回条目原始字节', async () => {
     const store = await createLibarchiveStore(makeTar());
     try {

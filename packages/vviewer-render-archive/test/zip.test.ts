@@ -165,6 +165,20 @@ describe('parseZipCentralDirectory（BUG-12 中心目录自解析）', () => {
     expect(dir.encryptedPaths).toEqual(new Set(['secret/locked.txt']));
   });
 
+  it('条目名含 ".." 段：按归档内规范化扁平化到根（与 jszip 读侧消解同口径）', () => {
+    // 中心目录自解析不经 jszip 读侧消解（lib/load.js:66 utils.resolve），条目名来自
+    // 归档内容（构造者可任意指定）——故自解析侧同样按归档内规范化：'..' 扁平化到
+    // 上级、不越出归档根（前导 '/' 一并剥掉）。
+    const traversal = parseZipCentralDirectory(tinyZip('../escape.txt', 0x0000));
+    expect([...traversal.sizes.keys()]).toEqual(['escape.txt']);
+    expect(traversal.sizes.get('escape.txt')).toBe(5);
+    const absolute = parseZipCentralDirectory(tinyZip('/abs.txt', 0x0000));
+    expect([...absolute.sizes.keys()]).toEqual(['abs.txt']);
+    // 加密标记集同步用规范化后的路径（否则与 libarchive 侧键不一致 → read 落「未知路径」）
+    const encrypted = parseZipCentralDirectory(tinyZip('../locked.txt', 0x0001));
+    expect([...encrypted.encryptedPaths]).toEqual(['locked.txt']);
+  });
+
   it('带注释的 zip：EOCD 从尾部向前扫描命中（注释可含任意字节）', async () => {
     const JSZip = (await import('jszip')).default;
     const zip = new JSZip();

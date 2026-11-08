@@ -8,7 +8,13 @@
 // worker 存活，故 store 暴露可选 close()；T7 已接线——从未点开条目的 store 随 archive
 // 实例 destroy 关闭，点开过条目的 store 由 openFlow 在最后一个持有 tab 关闭时关闭。
 import type { TreeStore } from '@bhxch/vviewer-core';
-import { MAX_ARCHIVE_DEPTH, MAX_ZIP_INPUT_BYTES, isArchiveEntry, listTreeChildren } from './zipStore';
+import {
+  MAX_ARCHIVE_DEPTH,
+  MAX_ZIP_INPUT_BYTES,
+  isArchiveEntry,
+  listTreeChildren,
+  normalizeArchiveEntryPath
+} from './zipStore';
 
 /** libarchive.js 的最窄使用面（主入口自带类型；node 子入口无类型，运行时同构） */
 type ArchiveModule = typeof import('libarchive.js');
@@ -184,18 +190,29 @@ export async function createLibarchiveStore(
     // 全量条目快照：路径 → 大小（文件记原始大小；目录为 -1 哨兵）+ 懒提取句柄。
     // getFilesObject 返回嵌套对象（键为名称，文件叶为 CompressedFile，目录为普通对象，
     // 空目录为 {}），递归 walk 摊平。
+    //
+    // 条目名来自归档内容（构造者可任意指定）：libarchive 的列举 API 原样返回
+    // pathname（archive_read_next_header 不消毒），上游 getFilesObject 按 '/' 拆成
+    // 嵌套对象（utils.ts getObjectPropReference 无消毒）——'..' 段会原样成为对象键。
+    // 故聚合期统一按归档内规范化（normalizeArchiveEntryPath：'..' 扁平化到上级、
+    // 不越出归档根），使条目树不出现穿越段名（与 jszip 读侧消解后的形态一致）。
+    // CompressedFile 句柄原样保留——其 extract() 按原始 pathname 定位条目，解出的
+    // 仍是该条目自身的字节（规范化只改「树内路径」，不改条目内容）。
     const content = (await withTimeout(reader.getFilesObject(), LIST_TIMEOUT_MS, '条目列举超时')) as object;
     const sizes = new Map<string, number>();
     const handles = new Map<string, CompressedFileLike>();
-    const walk = (node: object, prefix: string): void => {
+    const walk = (node: object, rawPrefix: string): void => {
       for (const [key, val] of Object.entries(node)) {
-        const p = prefix + key;
+        const rawPath = rawPrefix + key;
+        const p = normalizeArchiveEntryPath(rawPath);
         if (isCompressedFile(val)) {
+          if (p === '') continue; // 规范化后无路径（条目名全为穿越段）→ 不可寻址，不产节点
           sizes.set(p, val.size);
           handles.set(p, val);
         } else if (typeof val === 'object' && val !== null) {
-          sizes.set(p, -1);
-          walk(val, `${p}/`);
+          // 目录节点：'..' 目录扁平化后无路径 → 不建目录节点，其子项按上级路径继续
+          if (p !== '') sizes.set(p, -1);
+          walk(val, `${rawPath}/`);
         }
       }
     };

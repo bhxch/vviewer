@@ -65,9 +65,40 @@ function truncateName(name: string): string {
   return name.length > 24 ? `${name.slice(0, 24)}…` : name;
 }
 
+/**
+ * 归档内条目路径规范化（与 jszip 读侧 utils.resolve 同口径）：丢弃空段与 '.' 段，
+ * '..' 段扁平化到上级且**不越出归档根**（根上的 '..' 被丢弃），前导 '/' 一并剥掉。
+ *
+ * 背景：条目名来自归档内容（构造者可任意指定），两条解析路径的消毒能力不对等——
+ * jszip 在读侧消解（lib/load.js:66 utils.resolve），而 libarchive 的列举 API 原样
+ * 返回 pathname（archive_read_next_header 不消毒）、加密 zip 的自解析中心目录同样
+ * 原样取名。未经规范化的 '..' 段会原样进入产品条目树（表现为名为 '..' 的目录）——
+ * 归档树表达的是「归档内路径」，越出归档根的段无意义，统一扁平化到归档根。
+ */
+export function normalizeArchiveEntryPath(path: string): string {
+  const out: string[] = [];
+  for (const seg of path.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') {
+      out.pop(); // 越出归档根时为空数组上的 pop（no-op）→ 停在根
+      continue;
+    }
+    out.push(seg);
+  }
+  return out.join('/');
+}
+
+/** 条目名是否为穿越段（'..' / '.' 独立段）——纵深防御：条目名来自归档内容 */
+function isTraversalName(name: string): boolean {
+  return name === '..' || name === '.';
+}
+
 /** 全量条目快照（路径 → 大小，目录为 -1 哨兵）下的直接子项列举：虚拟目录聚合，
  * 目录优先 + naturalCompare 自然排序。zip/libarchive 两个 store 共用；
- * encryptedPaths 提供时对应文件节点带 encrypted 标记（BUG-12 逐条锁形标记）。 */
+ * encryptedPaths 提供时对应文件节点带 encrypted 标记（BUG-12 逐条锁形标记）。
+ *
+ * 纵深防御：子项名若为穿越段（'..' / '.' 独立段）一律不产（条目名来自归档内容，
+ * 规范化由各 store 的聚合期负责——此处兜住任何未经规范化的输入面）。 */
 export function listTreeChildren(
   sizes: Map<string, number>,
   path: string,
@@ -82,10 +113,13 @@ export function listTreeChildren(
     if (rest === '') continue;
     const slash = rest.indexOf('/');
     if (slash === -1) {
+      if (isTraversalName(rest)) continue;
       if (size < 0) dirs.add(rest);
       else files.push({ name: rest, path: p, kind: 'file', size, ...(encryptedPaths?.has(p) ? { encrypted: true } : {}) });
     } else {
-      dirs.add(rest.slice(0, slash));
+      const head = rest.slice(0, slash);
+      if (isTraversalName(head)) continue;
+      dirs.add(head);
     }
   }
   const out: TreeNode[] = [];
@@ -160,7 +194,11 @@ export function parseZipCentralDirectory(buffer: Uint8Array): ZipDirectory {
     if (uncompSize === 0xffffffff) throw new Error('ZIP64 格式的加密 zip 暂不支持');
     const name = decodeEntryName(buffer.subarray(off + 46, off + 46 + nameLen), flags);
     const isDir = name.endsWith('/');
-    const path = isDir ? name.replace(/\/+$/, '') : name;
+    const rawPath = isDir ? name.replace(/\/+$/, '') : name;
+    // 条目名来自归档内容（可被构造者任意指定）：中心目录自解析不经 jszip 的读侧
+    // 消解，故此处按归档内规范化（与 jszip/libarchive 两条路径同口径）——'..' 段
+    // 扁平化到归档根，不越出根；规范化后无路径的条目（名全为穿越段）不产节点。
+    const path = normalizeArchiveEntryPath(rawPath);
     if (path !== '') {
       sizes.set(path, isDir ? -1 : uncompSize);
       if (!isDir && (flags & 1) !== 0) encryptedPaths.add(path);
