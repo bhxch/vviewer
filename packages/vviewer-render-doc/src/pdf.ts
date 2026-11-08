@@ -200,6 +200,14 @@ export const pdfRenderer: Renderer = {
     // 分支 buffer 是 head 探测块，size 取 ctx.size（全量文件字节数）
     const size = transport !== null ? transport.size : buffer.length;
     // pdfjs 会 transfer 该 buffer 到 worker（detach）：调用方每次 dispatch 前重新 read，无复用问题。
+    // ↑ 该假设仅对「调用方重新 read」的路径成立；**buffer 直传**路径（嵌套附件派发：
+    // 派发器把同一份字节交给渲染器，调用方不重新 read）下 detach 会打穿调用方手
+    // 里的字节面——pdfjs 打开失败后，dispatcher 的错误卡动作构建（buffer.slice）
+    // 对 detached buffer 抛 TypeError，异常逃出 dispatch → 错误卡整个不落地。
+    // 故 data 分支与 transport 分支同款：给 pdfjs 一份**副本**
+    // （transport 分支见下方 `head: transport.head.slice()`），调用方/dispatcher
+    // 手里的 buffer 不再被 transfer 走；与 memoizedFullRead 的「消费即拷贝」契约
+    // （:48-55）一致——getDocument transfer 的是副本，保有体不 detach。
     // pdfjs 6 起移除 PDFDocumentProxy.prototype.destroy（api-major，upstream PR 21245）：
     // 资源释放改走 loadingTask.destroy()，故保留 loadingTask 引用
     // M1（评审跟进）：mid-load 读失败收口——transport 的 requestRange 非 abort 读失败
@@ -247,7 +255,7 @@ export const pdfRenderer: Renderer = {
               }
             })
           })
-        : pdfjs.getDocument({ data: buffer });
+        : pdfjs.getDocument({ data: buffer.slice() });
     let doc: PDFDocumentProxy;
     try {
       doc = await Promise.race([loadingTask.promise, firstReadFailure]);

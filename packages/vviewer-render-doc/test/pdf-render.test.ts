@@ -154,23 +154,29 @@ describe('pdfRenderer 分流入口（spec §6.6）', () => {
     expect(pdfRenderer.streaming).toBe(true);
   });
 
-  it('ctx 缺失（直调兼容面）→ data 路径：getDocument({data}) 引用不变、零 range、destroy 调 loadingTask.destroy', async () => {
+  it('ctx 缺失（直调兼容面）→ data 路径：getDocument({data}) 收副本（pdfjs transfer 不打穿调用方 buffer）、零 range、destroy 调 loadingTask.destroy', async () => {
     const host = document.createElement('div');
     const inst = await pdfRenderer.render(FULL, host, makeSource(), DET);
     const arg = lastGetDocumentArg();
-    expect(arg.data).toBe(FULL); // 引用同一：逐字节不变的最强形态
+    // 副本语义（终审 FOM-EX 修复：pdfjs transfer data.buffer → 主线程副本 detach；
+    // 直传路径调用方不重新 read，detach 会打穿调用方字节面 → dispatcher 错误卡的
+    // 动作构建（buffer.slice）抛 detached 异常 → 错误卡不落地）。故 data 必须是
+    // **字节等值但非同一引用**的副本，与 transport 分支的 head.slice() 同款。
+    expect(arg.data).not.toBe(FULL);
+    expect([...arg.data!]).toEqual([...FULL]);
     expect(arg.range).toBeUndefined();
     inst.destroy();
     expect(lastDestroy).toHaveBeenCalledTimes(1);
   });
 
-  it('本地/!rangeCapable 来源（dispatcher 退化全量视图 ctx：byteLength === size）→ data 路径零变化、零补拉读', async () => {
+  it('本地/!rangeCapable 来源（dispatcher 退化全量视图 ctx：byteLength === size）→ data 路径字节等值、零补拉读', async () => {
     const host = document.createElement('div');
     const read = vi.fn();
     const ctx = makeCtx({ size: FULL.length, head: FULL, read: asCtxRead(read) });
     const inst = await pdfRenderer.render(FULL, host, makeSource(), DET, ctx);
     const arg = lastGetDocumentArg();
-    expect(arg.data).toBe(FULL);
+    expect(arg.data).not.toBe(FULL); // 收副本（pdfjs transfer 不打穿调用方 buffer）
+    expect([...arg.data!]).toEqual([...FULL]);
     expect(arg.range).toBeUndefined();
     expect(read).not.toHaveBeenCalled(); // 全量在手：零额外读
     inst.destroy();
