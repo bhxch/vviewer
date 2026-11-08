@@ -28,6 +28,7 @@ import { jsonlRenderer } from '@bhxch/vviewer-render-text/jsonl';
 import {
   createForeignFileRenderers,
   FOREIGN_GROUP_ASSET_PACKAGE,
+  nestedDispatchName,
   nestedName,
   wireDesignOrDataSeam
 } from './foreignRenderers';
@@ -261,6 +262,38 @@ describe('nestedName（renderNestedBuffer type → 合成文件名）', () => {
   it('含点 type 原样透传（自带扩展名的附件名）', () => {
     expect(nestedName('photo.jpg')).toBe('photo.jpg');
     expect(nestedName('a.b.c')).toBe('a.b.c');
+  });
+});
+
+// FOM-EX-08 修复锚：嵌套派发名取上游第 4 参 context.filename 的附件原名（此前
+// 只取三参 → 原名被丢弃、落盘名退化为 attachment.<ext>）；原名须文件名化，
+// 防合成名携带路径成分（PAT-EX-01：恶意附件名 'x.z/evil' 不得派成扩展名
+// 'z/evil'、不得落成 'attachment.z/evil'）。
+describe('nestedDispatchName（嵌套派发名 = 附件原名，经文件名化）', () => {
+  it('原名可用 → 直接采用（扩展名口径随之正确：mystery.zzz → zzz、leaf.pdf → pdf）', () => {
+    expect(nestedDispatchName('zzz', 'mystery.zzz')).toBe('mystery.zzz');
+    expect(nestedDispatchName('pdf', 'leaf.pdf')).toBe('leaf.pdf');
+    expect(nestedDispatchName('eml', 'level2.eml')).toBe('level2.eml');
+  });
+
+  it('原名缺失/纯空白 → 回落扩展名派生名（nestedName 语义不变）', () => {
+    expect(nestedDispatchName('zzz')).toBe('attachment.zzz');
+    expect(nestedDispatchName('pdf', '')).toBe('attachment.pdf');
+    expect(nestedDispatchName('pdf', '   ')).toBe('attachment.pdf');
+    expect(nestedDispatchName('')).toBe('attachment');
+  });
+
+  it('原名含路径成分 → 取 basename（裸文件名，不含 / \\ 与 .. 段）', () => {
+    expect(nestedDispatchName('z/evil', 'x.z/evil')).toBe('evil');
+    expect(nestedDispatchName('z/evil', 'dir/sub/file.bin')).toBe('file.bin');
+    expect(nestedDispatchName('z/evil', 'dir\\sub\\file.bin')).toBe('file.bin');
+  });
+
+  it('原名仅路径成分（点/双点/空段）→ 回落扩展名派生名且该派生名亦无路径成分', () => {
+    expect(nestedDispatchName('zzz', '..')).toBe('attachment.zzz');
+    expect(nestedDispatchName('zzz', '.')).toBe('attachment.zzz');
+    expect(nestedDispatchName('z/evil', '..')).not.toContain('/');
+    expect(nestedDispatchName('z/evil', '..')).not.toContain('\\');
   });
 });
 

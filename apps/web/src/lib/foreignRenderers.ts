@@ -73,6 +73,42 @@ export function nestedName(type: string): string {
 }
 
 /**
+ * 文件名化：取 basename（'/'、'\' 分隔符之后的部分），拒空/纯空白/'.'/'..'。
+ * 派发名与下载落盘名共用此口径——落盘名含路径成分会让浏览器按目录语义落盘，
+ * 派发名含路径成分会把 'z/evil' 这类后缀派成扩展名（registry 无此扩展名 →
+ * 白白绕一圈路由）。导出仅测试锚用，装配面经 nestedDispatchName 消费。
+ */
+export function fileNameOnly(raw: string | undefined): string {
+  if (raw === undefined) return '';
+  const t = raw.trim();
+  if (t === '') return '';
+  const base = t.split(/[\\/]/).pop() ?? '';
+  if (base === '' || base === '.' || base === '..') return '';
+  return base;
+}
+
+/**
+ * 嵌套派发名（= 路由依据 + 下载兜底落盘名）：
+ * - 优先取上游 renderNestedBuffer 第 4 参 context.filename 里的附件**原名**
+ *   （上游 email 渲染器把原名放在该参：`{ ...context, filename: attachment.name }`
+ *   —— dist email.js:526-533；此前适配器只取三参、原名被丢弃，落盘名退化为
+ *   扩展名派生的 'attachment.<ext>'，FOM-EX-08）；
+ * - 原名须文件名化（fileNameOnly）： basename + 拒 '.'/'..'/空——防合成名携带
+ *   路径成分（PAT-EX-01：恶意附件名 'x.z/evil' 不得派成扩展名 'z/evil'、
+ *   不得落成 'attachment.z/evil'）；
+ * - 原名不可用（缺失/纯空白/仅路径成分）时回落扩展名派生名 nestedName(type)，
+ *   该派生名同样经文件名化（type 形如 'z/evil' 的恶意后缀不带出路径成分）。
+ *
+ * 派发名同时是嵌套派发的 source.name（viewer.ts:104-107）——错误卡的
+ * '.vv-error-meta' 亦随之显示原名。
+ */
+export function nestedDispatchName(type: string, rawName?: string): string {
+  const fromRaw = fileNameOnly(rawName);
+  if (fromRaw !== '') return fromRaw;
+  return fileNameOnly(nestedName(type)) || 'attachment';
+}
+
+/**
  * 组内 mount 装配：懒加载 core + 渲染器插件（各一次），按 definitions×handlers 建
  * 组内 dispatcher；mount 时扩展名取 handler 直调。context 形态依探针（contracts/
  * types.d.ts FileRenderContext）：filename/sourceFile/signal + renderNestedBuffer——
@@ -144,11 +180,18 @@ function pluginMount(load: () => Promise<ForeignPlugin>, groupId: string): Forei
       filename: args.name,
       sourceFile: args.file,
       signal: args.signal,
-      renderNestedBuffer: async (nestedBuffer, nestedType, nestedTarget) => {
+      renderNestedBuffer: async (nestedBuffer, nestedType, nestedTarget, nestedCtx) => {
         // 嵌套 target 登记（见「mount 串行队列」注）：嵌套 foreign mount 据此豁免
         // 队列内联执行，防祖先任务占队死锁
         nestedForeignTargets.add(nestedTarget);
-        await args.renderNested(new Uint8Array(nestedBuffer), nestedName(nestedType), nestedTarget);
+        // 嵌套字节恒拷贝（toArrayBuffer 同款不变量，:54-62）：上游 email 的附件
+        // buffer 与 vviewer 渲染器的字节面不得共享底层 ArrayBuffer——渲染器可能
+        // transfer/detach 它（pdfjs getDocument({data}) 零拷贝 transfer），打穿
+        // 上游附件字节面（其 sizeLabel/后续读取拿到零长 buffer）。
+        const nestedBytes = new Uint8Array(nestedBuffer).slice();
+        // 派发名取附件原名（第 4 参 context.filename，经文件名化消毒）——原名此前
+        // 被丢弃、落盘名为扩展名派生的 attachment.<ext>（FOM-EX-08）。
+        await args.renderNested(nestedBytes, nestedDispatchName(nestedType, nestedCtx?.filename), nestedTarget);
         return undefined;
       }
     };
