@@ -270,7 +270,18 @@ function buildRenderErrorActions(
   const hex = registry.byId('hex') && renderer.id !== 'hex'
     ? openAsAction('hex', '以 hex 打开', redisplay, onRendered)
     : null;
-  for (const action of looksTextual(buffer.slice(0, HEAD_SIZE)) ? [text, hex] : [hex, text]) {
+  // looksTextual 判定用的字节面：buffer 可能已 detached（渲染器把底层 ArrayBuffer
+  // transfer 走——pdfjs getDocument({data}) 零拷贝 transfer）——对 detached buffer
+  // 切片抛 TypeError，异常逃出会把错误卡整个吃掉（重试路径的重建卡亦同：retry 的
+  // catch 里以同一 buffer 重建卡片）。故此处切片失败即按「非文本」处理（动作排序
+  // 退化为 [hex, text]），错误卡照常落地。
+  let textual = false;
+  try {
+    textual = looksTextual(buffer.slice(0, HEAD_SIZE));
+  } catch {
+    textual = false;
+  }
+  for (const action of textual ? [text, hex] : [hex, text]) {
     if (action) actions.push(action);
   }
   return actions;
@@ -426,12 +437,28 @@ export function createDispatcher(registry: Registry): Dispatcher {
       opts?.signal || opts?.lineMetrics || opts?.langOverride
         ? { signal: opts.signal, lineMetrics: opts.lineMetrics, langOverride: opts.langOverride }
         : undefined;
+    // 错误卡与 open-as 重入共用的字节面（detached 防御）：渲染器可能已把 full/probe
+    // 的底层 ArrayBuffer transfer 走（pdfjs getDocument({data}) 零拷贝 transfer）
+    // ——对 detached buffer 切片抛 TypeError，异常逃出 dispatch 会把错误卡整个
+    // 吃掉（嵌套附件面：异常被上游渲染器的 catch 吞成自己的提示，nested target
+    // 内既无错误卡也无内容）。故统一经此取字节：可切片则用原字节面（契约不变，
+    // 直传路径下 full === buffer 入参，引用同一），已 detach 则回落渲染前的 8KB
+    // head 副本（head 恒为独立副本 probe.slice(0, HEAD_SIZE)，不与 full 共享底层）。
+    const safeBytes = (): Uint8Array<ArrayBuffer> => {
+      const candidate = full ?? probe;
+      try {
+        candidate.slice(0, 0); // 探活：detached 的 TypedArray 切片抛 TypeError
+        return candidate;
+      } catch {
+        return head;
+      }
+    };
     // onReadProgress 透传（spec §6.4）：重入的全量补拉与主路径同泵同进度面——open-as
     // 触发的重物化不丢进度上报（缺省零行为变化同主路径口径）
     const redisplay: Redisplay = (o) =>
       headOnly
         ? dispatch(source, null, target, { ...o, signal: optsSignal, lineMetrics: opts?.lineMetrics, langOverride: opts?.langOverride, read, onReadProgress: opts?.onReadProgress })
-        : dispatch(source, buffer, target, { ...o, signal: optsSignal, lineMetrics: opts?.lineMetrics, langOverride: opts?.langOverride, onReadProgress: opts?.onReadProgress });
+        : dispatch(source, safeBytes(), target, { ...o, signal: optsSignal, lineMetrics: opts?.lineMetrics, langOverride: opts?.langOverride, onReadProgress: opts?.onReadProgress });
     let renderer: Renderer | undefined;
     // 渲染期 ctx（streaming 分支构造）：声明在 try 外——catch 的重试动作需要透传
     //（评审指令②），try 作用域变量 catch 不可见
@@ -557,8 +584,11 @@ export function createDispatcher(registry: Registry): Dispatcher {
       // open-as 排序与重试复用的字节：full ?? probe（旧 buffer 语义）。兼容路径即入参
       // buffer；headOnly 时退化为 head 探测块——渲染在全量拉取前已失败，以 head 判
       // looksTextual 足够近似且零额外读（可接受的退化，非旧行为回归面）
+      //
+      // detached 防御（见 safeBytes 注）：错误卡动作构建的字节面不得假设 buffer
+      // 未被 detach——否则异常逃出 dispatch，错误卡整个不落地。
       const actions = renderer
-        ? { actions: buildRenderErrorActions(registry, renderer, full ?? probe, source, det, target, takeOver, redisplay, renderCtx, renderOpts) }
+        ? { actions: buildRenderErrorActions(registry, renderer, safeBytes(), source, det, target, takeOver, redisplay, renderCtx, renderOpts) }
         : { actions: buildRoutingErrorActions(registry, takeOver, redisplay) };
       const card = showErrorCard(target, message, source, actions);
       return {

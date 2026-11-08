@@ -337,6 +337,33 @@ describe('dispatcher 无扩展名回退链（BUG-07）', () => {
 });
 
 describe('dispatcher 错误卡片 actions（BUG-14）', () => {
+  // FOM-EX-09 修复锚：渲染器把 buffer 的底层 ArrayBuffer transfer 走（pdfjs
+  // getDocument({data}) 零拷贝 transfer）后抛错 → 错误卡动作构建
+  // （buffer.slice(0, HEAD_SIZE)）对 detached buffer 抛 TypeError，异常逃出
+  // dispatch → 错误卡整个不落地（嵌套附件面：异常被上游渲染器的 catch 吞成
+  // 自己的提示，nested target 内既无错误卡也无内容）。
+  it('渲染器 transfer 走 buffer 底层后抛错：错误卡仍落地且带动作钮（detached 防御）', async () => {
+    const reg = createRegistry();
+    reg.install(mk('steal', ['txt'], {
+      render: async (b) => {
+        // 镜像真实 pdfjs：transfer data.buffer 到 worker → 主线程副本 detach 归零
+        structuredClone(b, { transfer: [b.buffer] });
+        throw new Error('boom after transfer');
+      }
+    }));
+    reg.install(mk('hex', ['bin']));
+    const target = document.createElement('div');
+    document.body.append(target);
+    const bytes = new TextEncoder().encode('hi');
+    const { rendererId } = await createDispatcher(reg).dispatch(source('a.txt'), bytes, target);
+    expect(rendererId).toBe('error');
+    expect(target.querySelector('.vv-error-card'), 'detached buffer 不得吃掉错误卡').not.toBeNull();
+    const buttons = [...target.querySelectorAll<HTMLButtonElement>('button.vv-error-action')];
+    expect(buttons.length, '错误卡动作钮（重试至少在）').toBeGreaterThanOrEqual(1);
+    expect(buttons.map((b) => b.textContent)).toContain('重试');
+    target.remove();
+  });
+
   it('render 失败的卡片带「重试」「以纯文本打开」「以 hex 打开」按钮；重试成功即恢复渲染且新实例被级联托管', async () => {
     const reg = createRegistry();
     let attempts = 0;
