@@ -22,24 +22,41 @@ import { injectDir, openTreeFile } from './b-markdown-html-docs-helpers';
  *   (b) kroki.io 与 www.plantuml.com 双 route.abort → kroki img error → M1 官方重试
  *       一跳也败 → 终态源码视图 + 失败提示卡（两跳文案「kroki 与官方服务器渲染失败」，
  *       Task 5 officialTried 文案锚的 e2e 面）；
- * - DIA-FILE-05 big.dot（>2MB 夹具，48000 边链）打开：大小门先行直落源码视图 +
+ * - DIA-FILE-05 big.dot（>10MiB 运行时合成 digraph 边链）打开：大小门先行直落源码视图 +
  *   降级卡（标题/阈值明细/文件名 meta），无引擎外呼（kroki/官方零请求）、无工具条
- *   （大小门早于 DOM 骨架创建返回）。
+ *   （大小门早于 DOM 骨架创建返回）。2026-11-08 大小门 2MB→10MB 后原 2.2MB 静态
+ *   夹具不再越门，改代码内合成（synthBigDot）经 injectDir 注入。
  *
  * 桌面专属（仅 chromium project，b-layout-zen beforeEach 跳过同款）：图表引擎渲染面
  * 视口无关，mobile 375px 复跑同断言只翻倍套件时长无增量覆盖（重引擎 viz-js/mermaid
  * 首渲秒级），不做 mobile 变体。
  *
  * 装置：injectDir + openTreeFile 注入通道（b-md-diagrams/b-diagram-server-kroki 同款，
- * type 显式 text/plain 防默认 text/html 语义混淆）；夹具落 e2e/fixtures/diagram-file/
- * （b-corpus 的 fileURLToPath 解析同款），big.dot 为生成型文本夹具（重复行拼量，
- * 语法可恢复的有效 digraph）。
+ * type 显式 text/plain 防默认 text/html 语义混淆）；小夹具落 e2e/fixtures/diagram-file/
+ * （b-corpus 的 fileURLToPath 解析同款）；DIA-FILE-05 的 big.dot 为运行时生成型
+ * 合成（语法可恢复的有效 digraph，原 2.2MB 静态夹具已随 10MB 门扩容删除）。
  */
 const FIXTURE_DIR = fileURLToPath(new URL('./fixtures/diagram-file', import.meta.url));
 const SAMPLE_DOT = readFileSync(join(FIXTURE_DIR, 'sample.dot'), 'utf-8');
 const FLOW_MERMAID = readFileSync(join(FIXTURE_DIR, 'flow.mermaid'), 'utf-8');
 const PROC_PUML = readFileSync(join(FIXTURE_DIR, 'proc.puml'), 'utf-8');
-const BIG_DOT = readFileSync(join(FIXTURE_DIR, 'big.dot'), 'utf-8');
+
+/**
+ * 运行时合成 >minBytes 的生成型 dot 文本（digraph 边链，每行一条边 + 换行）：多行
+ * 短行而非单行巨串——虚拟滚动只渲染可视区行，单行 10MB 巨串会把布局面压垮
+ * （b-diagram-file-2 的 synthDiagramText 同思路）。
+ */
+function synthBigDot(minBytes: number): string {
+  const lines = ['digraph G {'];
+  let bytes = 12; // 'digraph G {' + 换行
+  for (let i = 0; bytes < minBytes; i += 1) {
+    const line = `n${i} -> n${i + 1};`;
+    lines.push(line);
+    bytes += line.length + 1; // 行 + 换行
+  }
+  lines.push('}');
+  return `${lines.join('\n')}\n`;
+}
 
 /** kroki/官方双 host abort（环境无关面：真网可达与否不影响回退断言，b-md-diagrams 同款） */
 async function abortDiagramRemotes(page: Page): Promise<void> {
@@ -153,16 +170,23 @@ test.describe('b-diagram-file 图表文件渲染（DIA-FILE 域五锚）', () =>
     await expect(pane.locator('img')).toHaveCount(0);
   });
 
-  test('DIA-FILE-05 big.dot（>2MB）打开：直落源码视图 + 降级卡，无引擎外呼', async ({ page }) => {
+  test('DIA-FILE-05 big.dot（>10MB 运行时合成）打开：直落源码视图 + 降级卡，无引擎外呼', async ({ page }) => {
     test.setTimeout(120_000);
     const remoteHits = collectDiagramRemoteRequests(page);
-    const pane = await openDiagramFile(page, 'big.dot', BIG_DOT);
+    // 运行时合成 >10MiB 的生成型 dot 文本（10MiB+1 起步），注入前以 TextEncoder
+    // 自证字节数（b-diagram-file-2 DIA-SIZE-01 同款自证手法）
+    const bigDot = synthBigDot(10 * 1024 * 1024 + 1);
+    expect(
+      new TextEncoder().encode(bigDot).byteLength,
+      '夹具字节数自证（>10MiB）'
+    ).toBeGreaterThan(10 * 1024 * 1024);
+    const pane = await openDiagramFile(page, 'big.dot', bigDot);
 
-    // 降级卡三件套：标题 / 阈值明细（2MB）/ 文件名 meta
+    // 降级卡三件套：标题 / 阈值明细（10MB）/ 文件名 meta
     const card = pane.locator('.vv-error-card');
     await expect(card).toBeVisible({ timeout: 30_000 });
     await expect(card.locator('.vv-error-title')).toHaveText('图表文件过大，已降级显示');
-    await expect(card.locator('.vv-error-detail')).toContainText('2MB');
+    await expect(card.locator('.vv-error-detail')).toContainText('10MB');
     await expect(card.locator('.vv-error-meta')).toHaveText('big.dot');
     // 大小门先行：源码视图直挂、渲染面（svg/img）与工具条均不存在（早于 DOM 骨架返回）。
     // 降级路径无 .vv-html-content 骨架（card + holder 直挂 target），holder 即 .vv-code 根

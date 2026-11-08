@@ -26,7 +26,7 @@ import { injectDir, openTreeFile } from './b-markdown-html-docs-helpers';
  *
  * 与既有锚的分工（不重复）：
  *   - b-diagram-file.spec.ts DIA-FILE-01~05：graphviz（抢注/双视图切换）、mermaid
- *     （本地引擎）、plantuml（kroki 成功 / kroki+官方双跳两跳文案）、>2MB 降级。
+ *     （本地引擎）、plantuml（kroki 成功 / kroki+官方双跳两跳文案）、>10MB 降级。
  *   - b-cdn-diagram-engines.spec.ts CDN-01~04 与 b-diagram-server-kroki.spec.ts
  *     DSV-04/06 走 **markdown 围栏管线**（.md-diagram-view 面，pipeline.ts）；
  *     本文件走 **图表文件渲染器**（.vv-html 面，diagramFile.ts 自有降级链）——
@@ -146,8 +146,8 @@ async function openDiagramFile(page: Page, name: string, content: string): Promi
 
 /**
  * 合成指定字节数的文本夹具：每行 80 字符 + 换行 = 81 字节，末行补齐到精确字节数。
- * 多行短行而非单行巨串——虚拟滚动只渲染可视区行，单行 2MB 会把布局面压垮
- * （同 big.dot 夹具的生成型思路）。
+ * 多行短行而非单行巨串——虚拟滚动只渲染可视区行，单行 10MB 巨串会把布局面压垮
+ * （生成型合成思路；原 2.2MB 静态 big.dot 夹具已随 10MB 门扩容删除）。
  */
 function synthDiagramText(totalBytes: number): string {
   const line = 'a'.repeat(80) + '\n'; // 81 字节
@@ -485,19 +485,19 @@ test.describe('b-diagram-file-2 图表文件渲染器 29 型扩面（DIA 域）'
     await expect(pane.locator('.vv-html-btn-rendered')).toHaveClass(/active/);
   });
 
-  // ---------- DIA-SIZE-01：大小门等界（=2MiB 与 +1 字节） ----------
+  // ---------- DIA-SIZE-01：大小门等界（=10MiB 与 +1 字节） ----------
 
-  test('DIA-SIZE-01/exact: 恰好 2MiB 的图表文件不触发大小门，走正常路径无降级卡', async ({ page }) => {
+  test('DIA-SIZE-01/exact: 恰好 10MiB 的图表文件不触发大小门，走正常路径无降级卡', async ({ page }) => {
     test.setTimeout(120_000);
     // 大小门先于模式裁决（diagramFile.ts:203 vs :245）——判据与模式无关，
     // 固定 source 档只为让「正常路径」的落点唯一（源码视图，无网络面）
     injectSettings(page, { diagrams: { modes: { pikchr: 'source' } } });
     const third = await mockThirdParty(page.context(), () => 'abort');
-    const content = synthDiagramText(2 * 1024 * 1024);
+    const content = synthDiagramText(10 * 1024 * 1024);
     expect(
       new TextEncoder().encode(content).byteLength,
-      '夹具字节数自证（恰 2MiB）'
-    ).toBe(2 * 1024 * 1024);
+      '夹具字节数自证（恰 10MiB）'
+    ).toBe(10 * 1024 * 1024);
     const pane = await openDiagramFile(page, 'exact.pikchr', content);
 
     // 正常路径（source 档）承接源码视图——降级路径无 .vv-html-content 骨架，
@@ -509,7 +509,7 @@ test.describe('b-diagram-file-2 图表文件渲染器 29 型扩面（DIA 域）'
     expect(third, '正常路径零三方外呼').toHaveLength(0);
   });
 
-  test('DIA-SIZE-01/over: 2MiB+1 字节即触发大小门（直落源码视图 + 超限降级卡，零引擎外呼）', async ({
+  test('DIA-SIZE-01/over: 10MiB+1 字节即触发大小门（直落源码视图 + 超限降级卡，零引擎外呼）', async ({
     page
   }) => {
     test.setTimeout(120_000);
@@ -518,18 +518,18 @@ test.describe('b-diagram-file-2 图表文件渲染器 29 型扩面（DIA 域）'
     // 裁决之后，pikchr 会走 kroki 档发出 kroki.io 请求，计数即非零。
     // （旧写法注入 source 档时零外呼由模式决定、与大小门次序无关——恒真。）
     const third = await mockThirdParty(page.context(), () => 'abort');
-    const content = synthDiagramText(2 * 1024 * 1024 + 1);
+    const content = synthDiagramText(10 * 1024 * 1024 + 1);
     expect(
       new TextEncoder().encode(content).byteLength,
-      '夹具字节数自证（2MiB+1）'
-    ).toBe(2 * 1024 * 1024 + 1);
+      '夹具字节数自证（10MiB+1）'
+    ).toBe(10 * 1024 * 1024 + 1);
     const pane = await openDiagramFile(page, 'over.pikchr', content);
 
-    // 降级卡三件套：标题 / 阈值明细（2MB）/ 文件名 meta
+    // 降级卡三件套：标题 / 阈值明细（10MB）/ 文件名 meta
     const card = pane.locator('.vv-error-card');
     await expect(card).toBeVisible({ timeout: 30_000 });
     await expect(card.locator('.vv-error-title')).toHaveText('图表文件过大，已降级显示');
-    await expect(card.locator('.vv-error-detail')).toContainText('2MB');
+    await expect(card.locator('.vv-error-detail')).toContainText('10MB');
     await expect(card.locator('.vv-error-meta')).toHaveText('over.pikchr');
     // 降级标记（diagramFile.ts:204 target.classList.add('vv-html','vv-degraded')）
     await expect(pane).toHaveClass(/vv-degraded/);

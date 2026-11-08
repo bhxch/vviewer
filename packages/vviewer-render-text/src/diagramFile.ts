@@ -9,7 +9,7 @@
 // 按 2 计的笔误。表行是逐字规范面（测试 test/diagramFile.test.ts 内联锚定），实现
 // 以表行为准；漏绑任一扩展名都会让对应图表文件落不进图形预览。
 //
-// 渲染路径（Task 4，spec §5.2）：全量 buffer 在手（streaming false）→ 2MB 大小门
+// 渲染路径（Task 4，spec §5.2）：全量 buffer 在手（streaming false）→ 10MB 大小门
 // 先行（超大直落源码 + 降级卡，不进任何引擎路径）→ 模式裁决（md 管线
 // effectiveModeOf 同构：getDiagramOptions().modeOf 缺省按注册表 defaultMode）→
 // 三分发 local/kroki/server 失败降级链（server→local→kroki、official→kroki、
@@ -45,8 +45,8 @@ export interface DiagramFileRenderOpts {
   remoteCall?: (path: string, init?: { method?: string; body?: unknown }) => Promise<unknown>;
 }
 
-/** 大小门（spec §5.2）：图表源超过 2MB 渲染无意义，直落源码视图。 */
-const DIAGRAM_MAX_BYTES = 2 * 1024 * 1024;
+/** 大小门（spec §5.2，2026-11-08 起 2MB→10MB）：图表源超过 10MB 渲染无意义，直落源码视图。 */
+const DIAGRAM_MAX_BYTES = 10 * 1024 * 1024;
 
 /**
  * 29 型 → 扩展名映射，逐字取 spec 2026-11-04 §5.1 表（键序 = 表行序）。标「造」
@@ -197,9 +197,9 @@ async function renderDiagramFileBuffer(
   source: FileSource,
   det: Detection
 ): Promise<RenderedInstance> {
-  // 大小门（spec §5.2）：>2MB 不进任何引擎/kroki/服务端路径，直落源码视图 +
+  // 大小门（spec §5.2）：>10MB 不进任何引擎/kroki/服务端路径，直落源码视图 +
   // 降级提示卡（renderDegradedCode 结构同构——其卡文案硬编码 MARKUP_MAX_BYTES=20MB
-  // 阈值，图表门是 2MB，按同结构自建卡取正确阈值；类面零新增）。
+  // 阈值，图表门是 10MB，按同结构自建卡取正确阈值；类面零新增）。
   if (buffer.byteLength > DIAGRAM_MAX_BYTES) {
     target.classList.add('vv-html', 'vv-degraded'); // 撑满宿主高度（同正常路径）+ 降级排布
     const card = document.createElement('div');

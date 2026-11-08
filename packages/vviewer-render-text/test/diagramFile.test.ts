@@ -2,7 +2,7 @@
 // 图表文件渲染器注册面锚——映射表逐字一致、扩展名跨型去重、fresh registry 零
 // RegistryError 安装、byExtension 大小写归一、与既有 owner（markdown/html/jsonl）
 // 不撞。Task 4 追加渲染路径行为锚（§5.2）：三分发 local/kroki/server、失败回退链
-// （local 无引擎→kroki→源码+提示）、2MB 大小门、源码/渲染切换；引擎层（包边界）
+// （local 无引擎→kroki→源码+提示）、10MB 大小门、源码/渲染切换；引擎层（包边界）
 // 桩 renderDiagramEngine/createKrokiUrl/createPlantumlUrl，注册表 resolveDiagramType
 // 保持真身；模式注入经 setDiagramOptions 真通道（不 mock markdown 包，与装配点
 // viewer.ts 同一注入面）。装配序锚在 Task 5（viewer.ts 先 diagram 后 generated）。
@@ -166,7 +166,7 @@ describe('diagramFile 注册面（spec 2026-11-04 §5.1）', () => {
   });
 });
 
-// ---------- Task 4：渲染路径（spec §5.2 三分发 + 失败回退 + 2MB 门 + 切换） ----------
+// ---------- Task 4：渲染路径（spec §5.2 三分发 + 失败回退 + 10MB 门 + 切换） ----------
 
 // 桩缺省实现（成功路径），失败分支在测内以 mockRejectedValue 覆盖；clearAllMocks
 // 只清调用记录不清实现，beforeEach 重设保证每测从干净缺省起步。
@@ -434,8 +434,8 @@ describe('diagramFile 渲染——大小门（Review Focus 4）', () => {
     document.body.innerHTML = '';
   });
 
-  it('>2MB：不调引擎不构 kroki URL，直落源码视图 + 降级提示卡（无工具栏，切换空操作）', async () => {
-    const big = new Uint8Array(2 * 1024 * 1024 + 1);
+  it('>10MB：不调引擎不构 kroki URL，直落源码视图 + 降级提示卡（无工具栏，切换空操作）', async () => {
+    const big = new Uint8Array(10 * 1024 * 1024 + 1);
     big.set(new TextEncoder().encode('digraph{a->b}'));
     const { target, instance } = await renderDiagramFile('graphviz', 'dot', 'digraph{a->b}', {}, big);
     expect(vi.mocked(renderDiagramEngine)).not.toHaveBeenCalled();
@@ -453,9 +453,9 @@ describe('diagramFile 渲染——大小门（Review Focus 4）', () => {
     expect(target.classList.contains('vv-degraded')).toBe(false);
   });
 
-  it('=2MB 恰好不触发门（仅 >2MB 降级）：走正常渲染路径', async () => {
+  it('=10MB 恰好不触发门（仅 >10MB 降级）：走正常渲染路径', async () => {
     vi.mocked(renderDiagramEngine).mockResolvedValue('<svg id="t"/>');
-    const buf = new Uint8Array(2 * 1024 * 1024);
+    const buf = new Uint8Array(10 * 1024 * 1024);
     buf.set(new TextEncoder().encode('digraph{a->b}'));
     const { target } = await renderDiagramFile('graphviz', 'dot', 'digraph{a->b}', {}, buf);
     expect(vi.mocked(renderDiagramEngine)).toHaveBeenCalledTimes(1);
