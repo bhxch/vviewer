@@ -29,7 +29,7 @@
 
 ### 2.1 特性域文档（spec 驱动续编）
 
-本轮测绘差距落库（2026-11-03）新增/补节的六域：
+本轮测绘差距落库（2026-11-03）新增/补节的六域，以及 2026-11-04/07 五计划流水线与 2026-11-07 残余批的新特性补强新增的八域：
 
 | 域 | 文档 | 场景编号 | 来源 spec |
 | --- | --- | --- | --- |
@@ -39,6 +39,16 @@
 | 代码大纲与右面板切换 | [code-outline-panel-switch.md](code-outline-panel-switch.md) | OUT-01~10 | 2026-10-31-code-outline-panel-switch-design.md |
 | Git 信息面板 | [git-panel.md](git-panel.md) | GIT-01~12 | 2026-10-31-git-panel-design.md |
 | 图表官方服务器档与 kroki 回落（diagram 域续编） | [diagram-server-kroki.md](diagram-server-kroki.md)（既有文档补节，不新建） | DSV-07a/07b、08~10（07 = DM-11/12 落库承接拆行） | 2026-10-23-renderer-lang-override-markpad-alignment-design.md §8 |
+| file-viewer 桥接渲染器跨边界（嵌套附件回流/远端 R1/确认门/归档条目/CDN 资产失败收口） | [file-viewer-foreign-bridge.md](file-viewer-foreign-bridge.md) | FOM-NEST-01~05、FOM-REMOTE-01、FOM-CONFIRM-01、FOM-ZIP-01、FOM-CDN-01（9） | 2026-11-04-file-viewer-integration-design.md §6.1/§6.3/§6.4 + 计划 3/4（fv-plan3-foreign-wave1、fv-plan4-foreign-wave2） |
+| 另存为管线与下载确认门（picker-first 顺序/无 FS Access 降级/取消语义/tee 降级面） | [save-as-pipeline.md](save-as-pipeline.md) | SAV-PROBE-02、SAV-DONE-CLOSE-01、SAV-CANCEL-PUMP-01、SAV-CANCEL-RENDER-01、SAV-PICKER-CANCEL-01、SAV-PICKER-FIRST-01、SAV-NOFSA-01、SAV-NOFSA-CONF-01、SAV-LOCAL-NOFSA-01、SAV-NORANGE-01、SAV-CONF-EQ-01、SAV-CONF-EQ-CTRL-01、SAV-CONF-UNKNOWN-01、SAV-CONF-LOCAL-01、SAV-CONF-KEY-01、SAV-CONF-KEY-02、SAV-MENU-CONF-01、SAV-MENU-CONF-02、SAV-MENU-STATUS-01、SAV-DISABLED-DIR-01、SAV-DISABLED-ERR-01、SAV-DEGRADE-WRITABLE-01、SAV-DEGRADE-WRITE-01（23） | 2026-11-04-file-viewer-integration-design.md §6.4 + 计划 2（fv-plan2-bridge-datasource） |
+| pdf Range transport 补强（本地 1MB 阈值两侧读形态/memo 记忆/进度卡缺席断言/M1 失败收口） | [pdf-range-transport.md](pdf-range-transport.md) | PDFX-LOCAL-01~02、PDFX-MEMO-01~05、PDFX-CARD-01~02、PDFX-M1-01~02、PDFX-FIX-01（12） | 2026-11-04-file-viewer-integration-design.md §6.6（决策⑫）+ 计划 5（fv-plan5-pdf-range） |
+| SW 运行时缓存路由与换版清理（URL→缓存族归属/产物层路由表/配额逐出/旧 REV 清理） | [sw-runtime-cache.md](sw-runtime-cache.md) | SWR-ROUTE-01~07、SWR-TABLE-01~02、SWR-MIRROR-01、SWR-EXP-01、SWR-CLEAN-01~03（14） | 残余 A7/A8（2026-11-07，commit 5694d93）+ `apps/web/vite.config.ts` runtimeCaching/genSwCleanup |
+| SSE 变更后 size 回填（≤1MB 失效域/回填失败回落/多 tab 分组/缩小面/手动刷新通道） | [sse-size-backfill.md](sse-size-backfill.md) | STR-NEST-01、STR-BACKFILL-01~03、STR-SHRINK-01、STR-CHANNEL-01（6） | 残余 A1（2026-11-07，commit e8bbdd6）+ plan-e2e-strengthen 工作流 STR 域 focus 段 |
+| 图表文件渲染器 29 型铺开（本地/npm/wasm/CDN/kroki/官方各档 + 大小门/单跳失败文案/sanitize） | [diagram-file-renderers.md](diagram-file-renderers.md) | DIA-LOCAL-01、DIA-KROKI-01~02、DIA-C4-01、DIA-CDN-01、DIA-SIZE-01、DIA-SRC-01、DIA-SAN-01、DIA-SERVER-01、DIA-OFFICIAL-01（10 场景编号 → 35 个 test） | 2026-11-04-file-viewer-integration-design.md §5.1/§5.2 + 计划 1（fv-plan1-hygiene-diagram-file） |
+| 扩展名绑定与抢占秩序（绑定清单一致性/签名改派绕行/探测链尾兜底/补空位扩展名/嵌套归档深度门） | [extension-bindings.md](extension-bindings.md) | BND-01~10（10） | 2026-11-04-file-viewer-integration-design.md §4（批次一卫生批）+ 计划 1（fv-plan1-hygiene-diagram-file） |
+| 路径规范化与穿越防御（bridge sibling 解析/markdown 相对图越界拒绝/嵌套附件名合成/归档条目穿越面） | [path-normalization.md](path-normalization.md) | PAT-01~09（9） | 残余 A4（2026-11-07 残余清理批一，commit 9471efd）+ 本轮测绘 PAT 域缺口清单 |
+
+上表末八行来自两个来源批次：2026-11-04/07 的 file-viewer 五计划流水线（计划 1~5，spec `2026-11-04-file-viewer-integration-design.md`），以及 2026-11-07 残余批的新特性补强（残余 A1/A2/A4/A7/A8 等已落库修复的回归锚）；两批文档编号自成体系、与首轮测试点编号不连续，各文档第 1 节载明 spec/plan 出处与现状脚本。
 
 首轮之后落库的其余特性域文档（cdn-diagram-engines、code-scan-resilience、error-card-open-as、filetree-src-remove、grammar-spa-fallback、io-degrade-matrix、jsonl-degrade-chain、multiroot-file-channel、override-lang、quickopen-multisource、susp-verification、tab-actions-enrichment、workspace-enrichment）：出处与编号段见各文档头注与 §2 场景清单，不在此重复转录。
 
