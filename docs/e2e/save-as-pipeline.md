@@ -1,15 +1,15 @@
 # 另存为管线与下载确认门 — e2e 场景（SAV 域）
 
 > 来源：spec `docs/superpowers/specs/2026-11-04-file-viewer-integration-design.md` §6.4「远端全量物化：下载进度卡 + 确认门 + 另存为（R1/R2，用户点名设计）」+ plan `docs/superpowers/plans/2026-11-04-fv-plan2-bridge-datasource.md`（Task 2 泵 / Task 3 进度卡 / Task 6 确认门 / Task 7 另存为双形态与 tab 级第七动作）+ 终审修复波 I-1~I-4 / M-1~M-5 / A2 残余（picker-first 翻转、Range 防线降级、tee 自持泵）。
-> 现状脚本：`apps/web/e2e/b-save-as-2.spec.ts`（SAV 域 23 场景）；前序脚本 `apps/web/e2e/b-save-as.spec.ts`（SA-01/02/03、DL-PROG-01/02、DL-CONF-01a/01b/02/03、DL-SAVE-01 共 10 锚）。
+> 现状脚本：`apps/web/e2e/b-save-as-2.spec.ts`（SAV 域 24 场景）；前序脚本 `apps/web/e2e/b-save-as.spec.ts`（SA-01/02/03、DL-PROG-01/02、DL-CONF-01a/01b/02/03、DL-SAVE-01 共 10 锚）。
 > 本域定位：只补**前序锚未覆盖的行为面**（另存为管线与下载确认门的零锚缺口清单），不重复既有锚；既有 spec 文件不改动（域内一文件互斥约束）。
-> 实跑记录（2026-11-08 本域自查）：`npx playwright test e2e/b-save-as-2.spec.ts --project=chromium --reporter=line` → **23 passed (1.3m)**；`npx tsc -b apps/web/tsconfig.e2e.json --noEmit` → exit 0。
+> 实跑记录（2026-11-08 本域自查）：`npx playwright test e2e/b-save-as-2.spec.ts --project=chromium --reporter=line` → **23 passed (1.3m)**；`npx tsc -b apps/web/tsconfig.e2e.json --noEmit` → exit 0。（2026-11-08 取消双语义拆分增补 SAV-PICKER-DENIED-01、SAV-PICKER-CANCEL-01 改钉 AbortError 后未复跑 playwright，验证止于定向 vitest + tsc。）
 
 ## 1. 目的与来源
 
 - **域定位**：远端全量物化（R1 `remote:` / R2 `s3direct:`/`davdirect:`）通路上的三条消费面——进度卡（下载中/完成态双形态）、下载确认门（阈值可设的知情确认）、另存为管线（`saveAsTab`：picker-first / blob 兜底 / tee 直写三形态）——的行为验收锚。产品实现面：`apps/web/src/lib/saveAs.ts`（另存为管线 + 置灰判定）、`apps/web/src/lib/downloadProgress.ts`（进度快照纯函数层）、`apps/web/src/lib/downloadConfirm.ts`（确认门决策纯函数）、`apps/web/src/lib/DownloadProgressCard.svelte`、`apps/web/src/lib/DownloadConfirmCard.svelte`、`apps/web/src/lib/ViewerPane.svelte`（三卡装配与渲染 effect 门）、`apps/web/src/lib/TabBar.svelte`（右键菜单第七动作）。
-- **三个入口（不是四个）**：① Tab 右键菜单第七动作「另存为」（`TabBar.svelte:187-205`，置灰判定 `saveAsDisabledOf`）；② 进度卡完成态「另存为」（`DownloadProgressCard.svelte:47` → `ViewerPane.svelte:204-238` `saveAsCompleted`）；③ 确认卡「下载并另存为」（`DownloadConfirmCard.svelte:48` → `ViewerPane.svelte:255-271` `confirmSaveAsDownload`）。MetaPanel 无另存为**动作入口**（rg 核实：其「另存为」字样仅出现在打印提示文案 `MetaPanel.svelte:217/219`「请改用浏览器菜单打印并另存为 PDF」中，非管线入口）——本域不设该面断言（无面可断）。
-- **编号分段**：SAV-PROBE-02（完成态卡点击链路主锚）/ SAV-DONE-CLOSE（完成态关闭）/ SAV-CANCEL（两种取消语义）/ SAV-PICKER-CANCEL（picker 取消静默分类）/ SAV-NOFSA + SAV-PICKER-FIRST（取数形态与顺序）/ SAV-NOFSA-CONF + SAV-CONF-LOCAL（确认门的降级面与本地来源边界）/ SAV-CONF（确认门非触发侧与作用域键）/ SAV-MENU-CONF + SAV-MENU-STATUS（菜单路原生确认与状态条反馈）/ SAV-DISABLED（置灰判定三条中的两条）/ SAV-DEGRADE（tee 降级面）/ SAV-LOCAL-NOFSA（在手/归档面兜底）/ SAV-NORANGE（非 rangeCapable 降级分支）。
+- **三个入口（不是四个）**：① Tab 右键菜单第七动作「另存为」（`TabBar.svelte:187-209`，置灰判定 `saveAsDisabledOf`）；② 进度卡完成态「另存为」（`DownloadProgressCard.svelte:47` → `ViewerPane.svelte:205-240` `saveAsCompleted`）；③ 确认卡「下载并另存为」（`DownloadConfirmCard.svelte:48` → `ViewerPane.svelte:259-276` `confirmSaveAsDownload`）。MetaPanel 无另存为**动作入口**（rg 核实：其「另存为」字样仅出现在打印提示文案 `MetaPanel.svelte:217/219`「请改用浏览器菜单打印并另存为 PDF」中，非管线入口）——本域不设该面断言（无面可断）。
+- **编号分段**：SAV-PROBE-02（完成态卡点击链路主锚）/ SAV-DONE-CLOSE（完成态关闭）/ SAV-CANCEL（两种取消语义）/ SAV-PICKER-CANCEL + SAV-PICKER-DENIED（picker 关闭双语义：AbortError 静默 / NotAllowedError 提示）/ SAV-NOFSA + SAV-PICKER-FIRST（取数形态与顺序）/ SAV-NOFSA-CONF + SAV-CONF-LOCAL（确认门的降级面与本地来源边界）/ SAV-CONF（确认门非触发侧与作用域键）/ SAV-MENU-CONF + SAV-MENU-STATUS（菜单路原生确认与状态条反馈）/ SAV-DISABLED（置灰判定三条中的两条）/ SAV-DEGRADE（tee 降级面）/ SAV-LOCAL-NOFSA（在手/归档面兜底）/ SAV-NORANGE（非 rangeCapable 降级分支）。
 - **既有锚的分工**：`b-save-as.spec.ts` 覆盖「菜单路 picker-first + 落盘字节等值（SA-01）」「zip 条目另存为（SA-02）」「占位 tab 置灰（SA-03）」「进度卡字段全锚与自动卸载（DL-PROG-01）」「不定态锚（DL-PROG-02）」「确认门双路与阈值生效与孤儿清偿（DL-CONF-01a/01b/02/03）」「tee 直写运行时锚（DL-SAVE-01）」；本域只做**其余行为面**，并在断言层去重（SAV-PICKER-FIRST-01 不重复 SA-01 的字节校验和，只留净增量的顺序判据）。
 - **红线消费面**（只消费既有 UI，不布产品改动）：`.vv-dl-progress` / `.vv-dl-progress-done` / `.vv-dl-confirm` / `.vv-tabctx` / `.vv-error-card` / `.vv-statusbar` 类名与 `aria-disabled` 语义、`showSaveFilePicker` 契约面（suggestedName / createWritable / write / close / abort）。
 
@@ -17,7 +17,7 @@
 
 公共环境：default 套件（`apps/web/playwright.config.ts`：vite preview :4173，chromium 1280×720 + mobile 375×667 双 project，retries=1）。**全场景桌面专属**（`test.beforeEach` + `testInfo.skip(testInfo.project.name !== 'chromium')`）——右键菜单/进度卡/确认卡均为桌面交互面，mobile 375px 复跑无增量覆盖。
 
-### 2.1 完成态卡与取消语义（SAV-PROBE-02 / SAV-DONE-CLOSE-01 / SAV-CANCEL-* / SAV-PICKER-CANCEL-01）
+### 2.1 完成态卡与取消语义（SAV-PROBE-02 / SAV-DONE-CLOSE-01 / SAV-CANCEL-* / SAV-PICKER-CANCEL-01 / SAV-PICKER-DENIED-01）
 
 | 编号 | 前置条件 | 步骤 | 期望 | 关联缺陷 |
 | --- | --- | --- | --- | --- |
@@ -25,7 +25,8 @@
 | SAV-DONE-CLOSE-01 | 同上（阈值默认 512MB，24MiB 不触发确认门；单块延时 500ms） | ① 等完成态卡出现；② 记录 `/api/file` 请求数与已渲染 img 的 src；③ 点完成态卡「关闭」 | ① 完成态卡卸载（`.vv-dl-progress-done` 计数 0）；② **显式沉降窗 500ms 后** `/api/file` 请求数**零增长**（关闭不触发重下；沉降窗口径对齐既有 DL-CONF-01b 的 500ms，避免以「点击往返时延 > 请求下发时延」的隐式时序依赖立论）；③ picker 桩调用数 0（关闭不触发另存为）；④ **已渲染内容未被销毁重建**：关闭后 `.vv-viewer-host img` 的 src 与关闭前**同一**（非「仍可见」式恒真护栏——关闭若销毁实例则 src 消失/变更即红） | —（完成态卡「关闭」零锚；`clearDlDone` 只卸卡不牵动下载面） |
 | SAV-CANCEL-PUMP-01 | 24MiB PNG（单块延时 700ms）+ picker 桩 + 默认阈值 | ① 等完成态卡出现；② 点「另存为」→ 重下（进度卡出现）；③ 记录取数计数 → 点进度卡「取消」 | ① 进度卡卸载；② picker 桩 `abort`=1、`close`=0（半成品丢弃、不落盘）；③ **判别证据：取数停增**——取消后沉降窗内 `/api/file` 计数零增长（若取消句柄错挂 `effectAbort`，重下泵会跑到结束并 close 落盘，此断言即红）；④ 已渲染内容存活（**护栏项**：取消前渲染早已收束，本条不单独判别两种句柄，判别证据是 ②③）；⑤ 状态条无「另存为失败」、原生对话框计数 0（泵取消落 abort 身份 → 静默收场） | —（两种 `dlAbort` 语义未区分：完成态重下路 `dlAbort=pumpAbort` vs 渲染 effect 路 `dlAbort=effectAbort`；本行钉前者） |
 | SAV-CANCEL-RENDER-01 | 24MiB PNG（单块延时 700ms）+ 默认阈值（不装 picker 桩） | ① 等进度卡出现（下载中形态）；② 点「取消」；③ 观察沉降窗 | ① 进度卡立即卸载；② `/api/file` 请求数在沉降窗（2.5s > 单块延时 700ms）内**零增长** → 泵被 abort；③ **无错误卡**（`.vv-error-card` 计数 0——取消不是读失败，静默面）；④ 无渲染产出（`.vv-viewer-host img` 计数 0，abort 后实例被丢弃）；⑤ 不出现完成态卡 | —（渲染 effect 路 `dlAbort=effectAbort`：取消整个 dispatch，与 SAV-CANCEL-PUMP-01 的「只断本次重下泵」成对区分） |
-| SAV-PICKER-CANCEL-01 | 2MiB 远端 PNG；picker 桩档位「抛 `NotAllowedError`」（用户取消/授权拒绝）；默认阈值 | ① 首开渲染；② 右键「另存为」（picker 在选目标处抛错） | ① picker 被调 1 次（取消点在选目标处）；② **零写入**：`createWritableCalls`=0、写入块 0、写入字节 0、`close`=0、`abort`=0（取消在开启 writable 之前）；③ **零取数**：沉降窗 500ms 后 `/api/file` 计数零增长；④ **静默**：状态条无「另存为失败」（`saveAs.ts:46-55` 的 `isPickerCancel` 分类命中 → 返回 `'cancelled'`；分类被破坏即由 `TabBar.svelte:196-203` 的 `.catch` 落失败提示而红） | —（picker 取消的静默分类在应用层零锚——此前仅有单元锚 `saveAs.test.ts:148/160`） |
+| SAV-PICKER-CANCEL-01 | 2MiB 远端 PNG；picker 桩档位「抛 `AbortError`」（用户主动取消，关闭对话框）；默认阈值 | ① 首开渲染；② 右键「另存为」（picker 在选目标处抛错） | ① picker 被调 1 次（取消点在选目标处，先等此稳定在场信号再判状态条缺席）；② **零写入**：`createWritableCalls`=0、写入块 0、写入字节 0、`close`=0、`abort`=0（取消在开启 writable 之前）；③ **零取数**：沉降窗 500ms 后 `/api/file` 计数零增长；④ **静默**：状态条无「另存为失败」也无「浏览器拒绝了文件保存请求」（`isPickerCancel` 只认 AbortError → 返回 `'cancelled'`；双语义拆分被破坏即红；SAV-PICKER-DENIED-01 为其差分对照） | —（用户主动取消的静默分类在应用层零锚——此前仅有单元锚；原钉 `NotAllowedError` 静默，取消双语义拆分后翻转） |
+| SAV-PICKER-DENIED-01 | 2MiB 远端 PNG；picker 桩档位「抛 `NotAllowedError`」（Error 携 name 形态，浏览器拒绝——授权被拒/激活过期，用户没关任何对话框）；默认阈值 | ① 首开渲染；② 右键「另存为」（picker 在选目标处抛错） | ① **状态条提示**：`.vv-statusbar` 含「浏览器拒绝了文件保存请求」（`isPickerDenied` → `'denied'` → `TabBar` `showStatusNotice(SAVE_DENIED_NOTICE)`，文案单源钉死）；② picker 恰被调 1 次（无重试面）；③ **零落盘**：`createWritableCalls`=0、写入块 0、字节 0、`close`=0、`abort`=0（writable 未创建）；④ **零取数**：沉降窗 500ms 后 `/api/file` 计数零增长（确认门/泵未启动） | —（行为变更锚：原 `NotAllowedError` → `'cancelled'` 静默即「点了没反应」困惑面，拆分后拒绝上状态条；无 FS Access 降级路先取数后选目标、激活过期正是此形态） |
 
 ### 2.2 取数形态与先后顺序（SAV-NOFSA-01 / SAV-PICKER-FIRST-01 / SAV-NORANGE-01 / SAV-LOCAL-NOFSA-01）
 
@@ -44,12 +45,12 @@
 | SAV-CONF-EQ-CTRL-01 | 阈值预置 2MB；远端文件恰 2MiB（2097152 字节 = 阈值）；目录 tab + 文件 tab | ① 打开文件 → 无确认卡、渲染完成、完成态卡回显「共 2.0 MB」；② 页内把阈值下调为 1MB → 切到目录 tab → 切回文件 tab | ① 阈值 2MB == size 2MiB → `.vv-dl-confirm` 计数 0（等界不拦）；② 完成态卡回显「共 2.0 MB」（size 已知有据）；③ **差分对照**：同一已知 size 载体，阈值降为 1MB 后重跑渲染 effect → **确认卡如期出现**（证明 ① 的缺席源于「恰等阈值」而非「size 未知/门失效」） | —（等界不触发的差分对照——单靠缺席断言无法排除「size 未随快照传播」的同真同假） |
 | SAV-CONF-UNKNOWN-01 | 阈值预置 1MB；远端文件 **size 未知**（树条目省略 size + 快照不带 size → `FileSource.size=null`） | ① 打开文件 → 等待渲染完成 | ① `.vv-dl-confirm` 计数 0（size 未知不适用确认门：无前置数字）；② `/api/file` 请求数 > 0（不定态下载照常发生） | —（确认门 size 未知不触发无显式缺席断言） |
 | SAV-CONF-LOCAL-01 | 阈值预置 1MB；本地 2MiB PNG（`helpers.ts` `openDirBytes` 注入，本地 File 体量已知且 > 阈值） | ① 打开本地文件 → 等待渲染完成 | ① `.vv-viewer-host img` 可见（本地来源直接渲染）；② `.vv-dl-confirm` 计数 0（**本地来源 L1–L3 永不拦**：体量已知且超阈值仍无确认卡——若 `isRemoteDownload` 门条件被放宽即红） | —（确认门「本地来源永不拦」边界在 e2e 无对照锚——既有与本域锚均只覆盖远端来源） |
-| SAV-NOFSA-CONF-01 | 阈值预置 1MB；远端 2MiB 文件；**无 FS Access 遮蔽**（`removeFsAccess`） | ① 打开文件 → 确认卡出现 | ① 确认卡在场，「开始下载」「取消」可见；② **`.vv-dl-confirm-saveas` 计数 0**（双形态二按钮不渲染——`canFsSave` 探测装配门，`ViewerPane.svelte:247-249` + `DownloadConfirmCard.svelte:45-49`）；③ 降级后的普通下载路径照常可用（开始下载 → 内容渲染） | —（无 FS Access 环境确认卡的降级契约零锚——plan 明列「无 FS Access 环境降级为普通下载路径」） |
+| SAV-NOFSA-CONF-01 | 阈值预置 1MB；远端 2MiB 文件；**无 FS Access 遮蔽**（`removeFsAccess`） | ① 打开文件 → 确认卡出现 | ① 确认卡在场，「开始下载」「取消」可见；② **`.vv-dl-confirm-saveas` 计数 0**（双形态二按钮不渲染——`canFsSave` 探测装配门，`ViewerPane.svelte:249-251` + `DownloadConfirmCard.svelte:45-49`）；③ 降级后的普通下载路径照常可用（开始下载 → 内容渲染） | —（无 FS Access 环境确认卡的降级契约零锚——plan 明列「无 FS Access 环境降级为普通下载路径」） |
 | SAV-CONF-KEY-01 | 阈值 1MB；远端 2MiB 文件 tab + 目录 tab；不装 picker 桩 | ① 打开文件 → 确认卡出现 →「开始下载」→ 渲染完成；② 记请求数 → 切到目录 tab → 切回文件 tab | ① 切回后 `/api/file` 请求数**增长**（渲染 effect 重跑、门已放行）；② `.vv-dl-confirm` 计数 0（**同键不再问**：键 = `storeId::path::size`，确认后登记 `dlApprovedKey`） | —（确认作用域键「同键不再问」零锚） |
 | SAV-CONF-KEY-02 | 阈值 1MB；远端 2MiB 文件 tab + 目录 tab | ① 打开文件 → 确认卡出现 →「取消」；② 切到目录 tab → 切回文件 tab | ① 取消后 `.vv-dl-confirm` 计数 0，且**沉降窗 500ms 后** `/api/file` 请求数恒 0（取消静默中止，泵未启动；显式窗口避免隐式时序依赖）；② 切回后**确认卡重现**（**取消后重问**：取消不登记确认键），且沉降窗后请求数仍为 0（重问期间泵仍未启动） | —（确认作用域键「取消后重问」零锚） |
 | SAV-MENU-CONF-01 | 阈值 1MB；远端 2MiB 文件（先经确认卡「开始下载」完成首下载）+ picker 桩；`page.on('dialog')` 桩**拒绝** | ① 右键「另存为」→ 原生确认弹出 → 拒绝 | ① 原生确认文案含文件名与「超过远端下载确认阈值」；② picker 桩被调 1 次（picker-first：目标先选）但 `createWritable` 调用数 0、写入块 0、`close`=0、`abort`=0（**目标文件零触碰**）；③ **沉降窗 500ms 后** `/api/file` 请求数零增长（**零读**：确认门拒绝 = cancelled，read 未启动） | —（菜单路远端超阈值 `window.confirm` 拒绝面零锚） |
 | SAV-MENU-CONF-02 | 阈值 1MB；远端 2MiB 文件（先经确认卡「开始下载」完成首下载）+ picker 桩；`page.on('dialog')` 桩**接受** | ① 右键「另存为」→ 原生确认弹出 → 接受 | ① picker 桩 suggestedName=文件名；② 落盘字节数与校验和等值；③ `close`=1、`abort`=0 | —（菜单路远端超阈值 `window.confirm` 接受面零锚） |
-| SAV-MENU-STATUS-01 | 12MiB PNG（单块延时 500ms → 另存为耗时约 1.5s，保证「开始拉取」提示可被观测）+ picker 桩 | ① 首开渲染；② 右键「另存为」 | ① 状态条先落「正在拉取全量以另存为…」（`TabBar.svelte:191`——菜单路的轻量进度面，与进度卡是两条不同反馈面）；② 另存为完成后状态条落「已另存为 big.png」（`TabBar.svelte:199`） | —（菜单路状态条反馈面此前仅有源码级单元断言 `saveAs.test.ts:635-636`，运行时零锚） |
+| SAV-MENU-STATUS-01 | 12MiB PNG（单块延时 500ms → 另存为耗时约 1.5s，保证「开始拉取」提示可被观测）+ picker 桩 | ① 首开渲染；② 右键「另存为」 | ① 状态条先落「正在拉取全量以另存为…」（`TabBar.svelte:195`——菜单路的轻量进度面，与进度卡是两条不同反馈面）；② 另存为完成后状态条落「已另存为 big.png」（`TabBar.svelte:203`） | —（菜单路状态条反馈面此前仅有源码级单元断言，运行时零锚） |
 
 ### 2.4 置灰判定与 tee 降级面（SAV-DISABLED-* / SAV-DEGRADE-*）
 
@@ -64,7 +65,7 @@
 
 - **完成态卡两动作是独立入口**（SAV-PROBE-02 / SAV-DONE-CLOSE-01）：同一张卡上「另存为」触发远端重下 + 落盘，「关闭」只卸卡（零取数、零 picker、已渲染内容不被销毁重建）。两者分岔即为「完成态卡是消费面而非仅提示面」的判据。
 - **两种取消语义必须分开**（SAV-CANCEL-PUMP-01 / SAV-CANCEL-RENDER-01）：完成态重下路的取消句柄是自持 `pumpAbort`（只断本次重下泵 → 半成品 abort、不落盘、取数停增）；渲染 effect 路的取消句柄是 `effectAbort`（取消整个 dispatch → 产出丢弃、无错误卡）。**判别证据是 abort/close 计数与取数停增**，「已渲染内容存活」在两种句柄下均成立（取消前渲染早已收束），只作护栏不作判据。
-- **取消与拒绝的静默语义**（SAV-PICKER-CANCEL-01 / SAV-MENU-CONF-01 / SAV-CANCEL-*）：picker 取消（NotAllowedError）与确认门拒绝都是 `cancelled` 而非失败——零写入、零取数、状态条不落「另存为失败」。分类被破坏（`isPickerCancel` 失效、`.catch` 兜到）即由状态条断言红。
+- **picker 关闭双语义：AbortError 静默 / NotAllowedError 提示**（SAV-PICKER-CANCEL-01 / SAV-PICKER-DENIED-01 / SAV-MENU-CONF-01 / SAV-CANCEL-*）：用户主动取消（AbortError，关闭对话框）与确认门拒绝都是 `cancelled` 而非失败——零写入、零取数、状态条不落任何提示；浏览器拒绝（NotAllowedError，用户没关任何对话框却回到原状）返回 `'denied'` → 状态条固定文案「另存为未完成：浏览器拒绝了文件保存请求」（`SAVE_DENIED_NOTICE` 单源；无 FS Access 降级路先取数后选目标、取数耗时超激活窗正是此形态）。分类被破坏（`isPickerCancel`/`isPickerDenied` 失效、`.catch` 兜到）即由状态条断言红。
 - **取数与选目标的顺序是产品契约**（SAV-PICKER-FIRST-01 / SAV-NOFSA-01）：有 FS Access 时目标必须先于传输选定（否则重下超过瞬态激活窗时 picker 被拒、整次另存为静默丢失）；无 FS Access 时降级面是「先取数后 blob 落地」。两条顺序结论一律以**服务器侧取数计数**（picker 桩在返回句柄前读一次 `/api/count`）与**blob 体字节等值**表达——不使用浏览器 `Date.now()` 与 node 请求到达时刻的跨进程比对（无毫秒容差，系统时钟被 NTP 调整即破）。
 - **确认门的非触发侧与触发侧同等重要**（SAV-CONF-EQ-01 / SAV-CONF-EQ-CTRL-01 / SAV-CONF-UNKNOWN-01 / SAV-CONF-LOCAL-01）：门是严格 `>` 比较，等界不确认；size 未知不适用确认门；本地来源永不拦。等界场景另配**差分对照**（同一已知 size 载体、阈值下调即出卡）与**size 已知有据**（完成态卡回显总大小）——单靠缺席断言无法排除「size 未随快照传播」的同真同假。
 - **确认作用域键的生命周期**（SAV-CONF-KEY-01 / SAV-CONF-KEY-02）：键 = `storeId::path::size`；确认后登记 → 同键不再问；取消不登记 → 同文件下次渲染重问。键是组件级 state，刷新页面即复位（本域不设刷新复位断言）。
@@ -80,7 +81,7 @@
 - **假 vviewer 服务器**（node:http 随机端口，本文件内）：`/api/health`（`{capabilities:['file-server']}`）、`/api/tree`（可声明/省略 size）、`/api/file`（Range 206 切片 + 单块延时 + 强制 500 形态 + 请求计数）、`/api/count`（**取数计数面**：顺序判据用）、`/api/ticket`、`/api/events`（SSE 持挂）；全响应 `Access-Control-Allow-Origin: *`。
 - **会话预置**：旧键 `tabs` 快照（remote 来源 `remote:hash8(base:label)` + 目录 tab + 文件 tab + 可选 size）；恢复链以快照 `storeLabel` 原值重建 store（label 参与 storeId hash，见 `serverConnect.svelte.ts` label 回环注记）。
 - **阈值装置**：`addInitScript` 预置 localStorage `vviewer:settings` 的 `storage.remoteDownloadConfirmMb`（设置面持久化单源；`loadSettings` 每轮现算 → 门评估即时生效；局部覆盖由 `normalizeSettings` 补默认节）；运行期下调用页内直写 localStorage + 切 tab 触发 effect 重跑。
-- **picker 桩**（`addInitScript`）：`showSaveFilePicker` 记录 suggestedName；writable 记录写入块数/字节数/逐块校验和（块内下标参与，与 node 端 `byteHashChunked` 同算法）、`close`/`abort` 计数；桩在返回句柄前可选读一次服务器侧取数计数（顺序判据）；四档形态（正常 / `createWritable` 抛错 / `write` 抛错 / picker 抛 `NotAllowedError`）。
+- **picker 桩**（`addInitScript`）：`showSaveFilePicker` 记录 suggestedName；writable 记录写入块数/字节数/逐块校验和（块内下标参与，与 node 端 `byteHashChunked` 同算法）、`close`/`abort` 计数；桩在返回句柄前可选读一次服务器侧取数计数（顺序判据）；五档形态（正常 / `createWritable` 抛错 / `write` 抛错 / picker 抛 `NotAllowedError`=浏览器拒绝→'denied' 提示 / picker 抛 `AbortError`=用户取消→静默）。
 - **无 FS Access 形态**：`addInitScript` 以 `Object.defineProperty(window,'showSaveFilePicker',{value:undefined})` 遮蔽原生面（headless Chromium 在安全上下文下原生面存在，不遮蔽到不了降级路径）；同时改写 `HTMLAnchorElement.prototype.click` 记录 `<a download>` 兜底点击（href/download）。
 - **直连 S3 装置**：`mounts` store 记录 + `workspaces` 快照直写（IndexedDB，免版本 open + 五 store 幂等补建，抄 `b-mounts-deep.spec.ts` MM-13 同款）；端点以 `page.route` mock（OPTIONS 预检放行、ListObjectsV2 回 XML、对象读回 200 + 全量 body 以触发 Range 防线降级）。
 - **本地文件注入**：复用既有共享 helper `e2e/helpers.ts` 的 `waitAppMounted` / `openDirBytes` / `openFile`（**只读引用，未改动共享文件**）。

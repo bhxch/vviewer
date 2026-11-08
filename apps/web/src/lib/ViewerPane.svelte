@@ -26,7 +26,7 @@
   import { isMountRootStoreId } from './serverHealthCache';
   import { createProgressTracker, dlAddressText, formatBytes, isRemoteDownload, type ProgressSnapshot } from './downloadProgress';
   import { mbToBytes, shouldConfirm } from './downloadConfirm';
-  import { pumpToWritable, saveAsTab } from './saveAs';
+  import { SAVE_DENIED_NOTICE, isPickerDenied, pumpToWritable, saveAsTab } from './saveAs';
   import { displayEndpointForStore } from './mountsSync';
 import SearchPanel from './SearchPanel.svelte';
 import DownloadProgressCard from './DownloadProgressCard.svelte';
@@ -199,8 +199,9 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
    * hooks.signal——卡上「取消」只断本重下泵不动 effectAbort（同 tab abort 不再打断
    * 渲染 streaming 实例的按需读）；onTick 捕获时 tab 引用守卫——切 tab/重渲染后迟到
    * tick 丢弃（cleanup 只清一次，旧文件进度卡不复活在新 tab）；finally 卸卡同 tab
-   * 引用守卫（tab 已切换时不动新 tab 的进度面）。泵取消落 abort 身份：静默收场不落
-   * 状态条（与渲染泵取消同裁决）。 */
+ * 引用守卫（tab 已切换时不动新 tab 的进度面）。泵取消落 abort 身份：静默收场不落
+ * 状态条（与渲染泵取消同裁决）。picker 关闭双语义（saveAs.ts isPickerDenied 注）：
+ * 'denied'（浏览器拒绝）→ 状态条固定文案；'cancelled'（用户主动取消）静默维持。 */
   async function saveAsCompleted(): Promise<void> {
     const t = tab;
     if (t === null) return;
@@ -220,13 +221,14 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
       dlAbort = pumpAbort; // 卡上「取消」断本重下泵（cancelDownload，不动 effectAbort）
     }
     try {
-      await saveAsTab(t, {
+      const r = await saveAsTab(t, {
         confirm: () => true,
         signal: pumpAbort.signal,
         ...(tracker !== null
           ? { onProgress: (p: ReadProgressEvent) => tracker.update(p.loaded, p.total) }
           : {})
       });
+      if (r === 'denied') showStatusNotice(SAVE_DENIED_NOTICE); // 浏览器拒绝：非用户取消，提示
     } catch (err) {
       if (!isAbortError(err)) showStatusNotice(`另存为失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -250,8 +252,10 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
 
   /** 确认卡「下载并另存为」（spec §6.4 双形态二）：picker 先选句柄（右键/点击的
    * user gesture 内弹出）→ 登记确认作用域键（与「开始下载」同通道触发 effect 重跑
-   * 过门）→ dispatch read 闭包 tee 直写（装配见渲染 effect）。取消/授权拒绝静默：
-   * 确认卡留守，可改选「开始下载」或「取消」。 */
+   * 过门）→ dispatch read 闭包 tee 直写（装配见渲染 effect）。picker 关闭双语义
+   * （saveAs.ts isPickerDenied 注）：AbortError（用户主动关对话框）静默留守确认卡
+   * （可改选「开始下载」或「取消」）；NotAllowedError（浏览器拒绝）→ 状态条固定
+   * 文案提示——用户没关任何对话框却回到原状，静默即困惑面。 */
   async function confirmSaveAsDownload(): Promise<void> {
     if (dlConfirm === null) return;
     const key = dlConfirm.key;
@@ -262,8 +266,9 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
     let handle: FileSystemFileHandle;
     try {
       handle = await w.showSaveFilePicker({ suggestedName: dlConfirm.name });
-    } catch {
-      return; // AbortError/NotAllowedError：静默留守确认卡（取消不是错误）
+    } catch (err) {
+      if (isPickerDenied(err)) showStatusNotice(SAVE_DENIED_NOTICE); // 浏览器拒绝：提示
+      return; // AbortError（用户主动取消）：静默留守确认卡（取消不是错误）
     }
     dlSaveHandle = { key, handle };
     dlApprovedKey = key;

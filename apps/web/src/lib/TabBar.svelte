@@ -7,7 +7,7 @@
   import { badgeOf } from './tabBadge';
   import { formatBytes } from './storageHealth';
   import { isRemoteDownload } from './downloadProgress';
-  import { saveAsDisabledOf, saveAsTab } from './saveAs';
+  import { SAVE_DENIED_NOTICE, saveAsDisabledOf, saveAsTab } from './saveAs';
   import { registry } from './viewer';
   import { rendererCandidatesOfTab } from './RendererPickerMenu';
   import { requestMetaLangFocus } from './metaLangFocus';
@@ -104,8 +104,9 @@
    * 'error'）/目录（path ''）置灰（saveAsDisabledOf 单源判定）；动作分发进 saveAs
    * 管线（saveAsTab：远端面残余 A2 picker-first——右键点击即 user gesture，picker
    * 首个 await 直接弹出后确认门+泵直写盘；在手/zipStore 读全量→saveAsBlob；无 FS
-   * Access 环境降级 blob 兜底），失败上状态栏一次性提示（BUG-19 通道），用户取消
-   * picker 静默（saveAsTab/saveAsBlob 取消语义同形）。
+   * Access 环境降级 blob 兜底），失败上状态栏一次性提示（BUG-19 通道）。picker 关闭
+   * 双语义（saveAsTab/saveAsBlob 同形）：AbortError（用户主动关对话框）静默、
+   * NotAllowedError（浏览器拒绝）'denied' → 状态条固定文案提示。
    */
   // 回调显式标注返回 TabCtxEntry[]：字面量数组的联合推断会给缺省属性填
   // `undefined` 型，过不了 $derived 泛型边界（子菜单父项无 onClick 的推断面）
@@ -179,7 +180,10 @@
         // 动作进 saveAs 管线（saveAsTab）。残余 A2 picker-first：远端面 picker 先弹
         // （本点击处理器同步进入 saveAsTab，首个 await 即 showSaveFilePicker——右键
         // 手势的瞬态激活窗内），确认门在其后（远端超阈值钩子用 window.confirm，
-        // WorkspaceList/FileTree 同款原生确认先例）：拒绝 = cancelled 静默。
+        // WorkspaceList/FileTree 同款原生确认先例）：门拒绝 = cancelled 静默。
+        // picker 关闭双语义：AbortError（用户主动关对话框）静默；NotAllowedError
+        // （浏览器拒绝授权/激活过期——用户没关任何对话框却回到原状）'denied' →
+        // 状态条固定文案提示（SAVE_DENIED_NOTICE 单源）。
         // 进度反馈（评审 I-3）：dlProgress 为 ViewerPane 渲染 effect 私有装配面、
         // 跨组件无复用缝——本路径取轻量状态条（远端重下开始/完成一次性提示，本地
         // 在手读零开始提示）；数值进度面为完成态卡路径专属（ViewerPane 内
@@ -197,6 +201,8 @@
           })
             .then((r) => {
               if (r === 'saved') showStatusNotice(`已另存为 ${tab.source.name}`);
+              else if (r === 'denied') showStatusNotice(SAVE_DENIED_NOTICE);
+              // 'cancelled'（用户主动取消）：静默维持现状
             })
             .catch((err: unknown) => {
               showStatusNotice(`另存为失败：${err instanceof Error ? err.message : String(err)}`);

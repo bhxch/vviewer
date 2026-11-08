@@ -41,14 +41,33 @@ import { mbToBytes, shouldConfirm } from './downloadConfirm';
 import { isRemoteDownload } from './downloadProgress';
 import { loadSettings } from './stores/settings';
 
-export type SaveAsResult = 'saved' | 'cancelled';
+export type SaveAsResult = 'saved' | 'cancelled' | 'denied';
 
-/** picker 取消/授权拒绝的静默分类（brief：NotAllowedError/AbortError → 'cancelled'
- *  静默；其余错误交由调用方面） */
+/** NotAllowedError（picker 授权拒绝）的用户可见文案：TabBar 菜单路与 ViewerPane
+ *  （完成态另存为 / 确认卡下载并另存为）三消费面单源，防双写漂移 */
+export const SAVE_DENIED_NOTICE = '另存为未完成：浏览器拒绝了文件保存请求';
+
+/**
+ * picker 关闭双语义拆分（此前 isPickerCancel 把两类都判取消 → 同为静默；但对用户
+ * 不是一回事，静默面错置即「点了没反应」的真困惑）：
+ * - AbortError = 用户主动关闭对话框 → isPickerCancel → 'cancelled' 静默（用户知道
+ *   自己取消了，无需提示）；
+ * - NotAllowedError = 浏览器拒绝（授权被策略拒/瞬态激活过期）→ isPickerDenied →
+ *   'denied'，调用方上状态条提示（SAVE_DENIED_NOTICE）——用户没关任何对话框却回到
+ *   原状。picker-first 翻转（残余 A2）后 FS Access 路的 picker 在手势内先弹、激活窗
+ *   不是问题；但无 FS Access 降级路（saveAsTab 先取数后 saveAsBlob 选目标）取数耗时
+ *   超激活窗时正是此形态——提示面要覆盖的就是它。
+ * 双形态并列判定同 isAbortError 口径（jsdom 的 DOMException 不继承 Error，spec 形态）。
+ */
+
+/** 用户主动取消（AbortError 身份）：静默 cancelled */
 function isPickerCancel(err: unknown): boolean {
+  return isAbortError(err);
+}
+
+/** 浏览器拒绝（NotAllowedError 身份）：'denied' → 调用方状态条提示（不静默、不走兜底） */
+export function isPickerDenied(err: unknown): boolean {
   return (
-    isAbortError(err) ||
-    // jsdom 的 DOMException 不继承 Error（spec 形态）：NotAllowedError 双形态并列判定
     (err instanceof DOMException && err.name === 'NotAllowedError') ||
     (err instanceof Error && err.name === 'NotAllowedError')
   );
@@ -75,8 +94,9 @@ async function showSaveTarget(name: string): Promise<FileSystemFileHandle> {
 
 /**
  * blob 另存（spec §6.4「完成后另存为」字节落地面）：showSaveFilePicker（FS Access）
- * 为主——suggestedName 透传、blob 一次性写入 writable 后 close；NotAllowedError/
- * AbortError → 'cancelled' 静默（用户取消与授权拒绝不是错误）。picker 缺席（无
+ * 为主——suggestedName 透传、blob 一次性写入 writable 后 close；AbortError →
+ * 'cancelled' 静默（用户主动取消），NotAllowedError → 'denied'（浏览器拒绝：不静默
+ * 也不降级兜底，交调用方状态条提示，见 isPickerDenied 注）。picker 缺席（无
  * FS Access 环境，SHELL-07 同域）或 picker 后写入失败 → blob URL + `<a download>`
  * 点击兜底（revoke 延迟 30s 覆盖下载启动窗）。
  */
@@ -100,8 +120,9 @@ export async function saveAsBlob(blob: Blob, suggestedName: string): Promise<Sav
         // picker 成功后的写盘失败（磁盘满/权限回收）：降级 blob URL 兜底，数据不丢
       }
     } catch (err) {
-      if (isPickerCancel(err)) return 'cancelled';
-      // 非取消的 picker 异常（瞬时激活失效等）：降级兜底
+      if (isPickerCancel(err)) return 'cancelled'; // 用户主动关对话框：静默
+      if (isPickerDenied(err)) return 'denied'; // 浏览器拒绝：调用方提示面（不走兜底）
+      // 非取消非拒绝的 picker 异常：降级兜底
     }
   }
   const url = URL.createObjectURL(blob);
@@ -117,8 +138,9 @@ export async function saveAsBlob(blob: Blob, suggestedName: string): Promise<Sav
  * 流式直写盘（spec §6.4「下载并另存为」的管线形态）：picker 选定句柄 → createWritable
  * → pump 闭包分块直写（进度/取消由 pump 自持）→ 管线 close 收口落盘 → pump 返回
  * handle.getFile() 回填的盘 backed File（供调用方交渲染器复用，渲染器无需全量驻留
- * 内存）。pump 抛错 → abort 丢弃半成品（临时文件不残留）且原错误上抛；picker 取消
- * → 'cancelled'（pump 不启动）。
+ * 内存）。pump 抛错 → abort 丢弃半成品（临时文件不残留）且原错误上抛（写盘失败与
+ * picker 判定互不混淆——writable.abort() 收口的 err 不进取消/拒绝分类）；picker
+ * AbortError → 'cancelled'（pump 不启动）、NotAllowedError → 'denied'。
  */
 export async function saveAsStreamToDisk(
   source: FileSource,
@@ -136,7 +158,10 @@ export async function saveAsStreamToDisk(
   try {
     handle = await w.showSaveFilePicker({ suggestedName: name });
   } catch (err) {
+    // picker 关闭双语义（见 isPickerCancel/isPickerDenied 注）：此处只分类 picker
+    // 调用本身的 err；下方 pump/writable 的写盘失败走独立 catch 原样上抛，不进来
     if (isPickerCancel(err)) return 'cancelled';
+    if (isPickerDenied(err)) return 'denied';
     throw err;
   }
   const writable = await handle.createWritable();
@@ -236,7 +261,11 @@ export async function saveAsTab(
       try {
         handle = await showSaveTarget(source.name);
       } catch (err) {
+        // picker 关闭双语义（见 isPickerCancel/isPickerDenied 注）：AbortError 静默、
+        // NotAllowedError 'denied' 上调用方状态条；泵/写盘失败走下方独立 catch
+        // （abort 半成品 + 原错误上抛），不进本分类
         if (isPickerCancel(err)) return 'cancelled';
+        if (isPickerDenied(err)) return 'denied';
         throw err;
       }
       // 确认门（Task 6 同规则，阈值 settings 现值）：超阈值先 hooks.confirm；size

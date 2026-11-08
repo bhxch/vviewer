@@ -1,14 +1,17 @@
 // saveAs.test.ts — 另存为统一管线（计划 2 Task 7，spec §6.4 另存为双形态 + tab 级
-// 第七动作）。saveAsBlob 双路（picker 主/blob URL 兜底）+ 取消静默；saveAsStreamToDisk
-// writable 生命周期（close/abort）；saveAsTab 三取数路径（在手/远端泵/zipStore——前两
-// 者经 store 调用形态区分：本地单次 read 无 opts、远端 range 分块）+ 确认门钩子 +
-// 远端面 picker-first 时序锚（残余 A2：picker 先弹再取数；无 FS Access 环境降级面
-// 单独标注）；saveAsDisabledOf 置灰判定（占位/错误/目录）。jsdom：picker 桩挂
-// window，blob URL 兜底以 URL.createObjectURL 桩 + a.download 属性锚断言。
+// 第七动作）。saveAsBlob 双路（picker 主/blob URL 兜底）+ picker 关闭双语义
+// （AbortError 用户取消 → 'cancelled' 静默、NotAllowedError 浏览器拒绝 → 'denied'
+// 交调用方状态条提示）；saveAsStreamToDisk writable 生命周期（close/abort）；
+// saveAsTab 三取数路径（在手/远端泵/zipStore——前两者经 store 调用形态区分：本地
+// 单次 read 无 opts、远端 range 分块）+ 确认门钩子 + 远端面 picker-first 时序锚
+// （残余 A2：picker 先弹再取数；无 FS Access 环境降级面单独标注）；
+// saveAsDisabledOf 置灰判定（占位/错误/目录）。jsdom：picker 桩挂 window，blob URL
+// 兜底以 URL.createObjectURL 桩 + a.download 属性锚断言。
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
+  SAVE_DENIED_NOTICE,
   saveAsBlob,
   saveAsStreamToDisk,
   saveAsTab,
@@ -157,15 +160,17 @@ describe('saveAsBlob（picker 主路 / blob URL 兜底 / 取消静默）', () =>
     fb.restore();
   });
 
-  it('picker NotAllowedError（授权拒绝）→ cancelled 静默（brief 指定双错误名）', async () => {
+  it('picker NotAllowedError（浏览器拒绝授权/激活过期）→ denied：不静默、不落兜底（调用方状态条提示）', async () => {
+    // 行为变更锚（原断言 NotAllowedError → 'cancelled' 静默已翻转）：用户没关任何
+    // 对话框却回到原状即「点了没反应」困惑面，拒绝语义交调用方提示（SAVE_DENIED_NOTICE）
     mountPicker(async () => {
       throw pickerErr('NotAllowedError');
     });
     const fb = stubBlobUrl();
 
-    await expect(saveAsBlob(new Blob([new Uint8Array([1])]), 'a.bin')).resolves.toBe('cancelled');
+    await expect(saveAsBlob(new Blob([new Uint8Array([1])]), 'a.bin')).resolves.toBe('denied');
 
-    expect(fb.downloads).toHaveLength(0);
+    expect(fb.downloads).toHaveLength(0); // 拒绝不降级兜底：语义交调用方提示面
     fb.restore();
   });
 
@@ -256,7 +261,7 @@ describe('saveAsStreamToDisk（FS Access writable 直写 + 生命周期）', () 
     expect(ws.closes).toBe(0);
   });
 
-  it('picker 取消 → cancelled（pump 不启动）', async () => {
+  it('picker 取消（AbortError）→ cancelled（pump 不启动）', async () => {
     mountPicker(async () => {
       throw pickerErr('AbortError');
     });
@@ -267,6 +272,20 @@ describe('saveAsStreamToDisk（FS Access writable 直写 + 生命周期）', () 
         return new File([], 'big.bin');
       })
     ).resolves.toBe('cancelled');
+    expect(pumped).toBe(false);
+  });
+
+  it('picker 浏览器拒绝（NotAllowedError）→ denied（pump 不启动）——与用户取消分语义', async () => {
+    mountPicker(async () => {
+      throw pickerErr('NotAllowedError');
+    });
+    let pumped = false;
+    await expect(
+      saveAsStreamToDisk(sourceOf(fakeStore('x:1', () => new Uint8Array(0)).store), 'big.bin', async () => {
+        pumped = true;
+        return new File([], 'big.bin');
+      })
+    ).resolves.toBe('denied');
     expect(pumped).toBe(false);
   });
 });
@@ -334,6 +353,40 @@ describe('saveAsTab（三取数路径：在手/远端泵/zipStore）', () => {
     const first = ws.written[0]!;
     expect(first instanceof Blob ? first.size : (first as Uint8Array).byteLength).toBe(size);
     expect(ws.closes).toBe(1);
+  });
+
+  it('远端（R1）picker AbortError（用户主动取消）→ cancelled 静默：零读零写（确认门/泵未启动）', async () => {
+    const size = 2 * 1024 * 1024;
+    const { store, calls } = fakeStore('remote:abc', () => new Uint8Array(size), true);
+    const { ws } = fakeHandle();
+    mountPicker(async () => {
+      throw pickerErr('AbortError');
+    });
+
+    await expect(
+      saveAsTab({ source: sourceOf(store, { path: 'big.bin', name: 'big.bin', size }) })
+    ).resolves.toBe('cancelled');
+
+    expect(calls).toHaveLength(0); // 用户取消：泵未启动
+    expect(ws.written).toHaveLength(0);
+  });
+
+  it('远端（R1）picker NotAllowedError（浏览器拒绝）→ denied：零读零写（调用方据此上状态条）', async () => {
+    // 双语义拆分锚（原 NotAllowedError → 'cancelled' 静默已翻转）：拒绝不静默，
+    // 返回 'denied' 交 TabBar/ViewerPane 提示面（SAVE_DENIED_NOTICE）
+    const size = 2 * 1024 * 1024;
+    const { store, calls } = fakeStore('remote:abc', () => new Uint8Array(size), true);
+    const { ws } = fakeHandle();
+    mountPicker(async () => {
+      throw pickerErr('NotAllowedError');
+    });
+
+    await expect(
+      saveAsTab({ source: sourceOf(store, { path: 'big.bin', name: 'big.bin', size }) })
+    ).resolves.toBe('denied');
+
+    expect(calls).toHaveLength(0); // 拒绝发生在选目标处：泵未启动
+    expect(ws.written).toHaveLength(0); // writable 未创建（落盘零触碰）
   });
 
   it('远端超阈值 picker-first：确认门在 picker 后、泵前；拒绝 → cancelled 零读零写', async () => {
@@ -629,6 +682,10 @@ describe('saveAsDisabledOf（第七动作置灰：占位/错误/目录）', () =
     // 远端超阈值确认门钩子（window.confirm 原生确认先例）+ 失败上状态栏
     expect(src).toMatch(/confirm: \(info\) =>/);
     expect(src).toMatch(/showStatusNotice\(`另存为失败：/);
+    // picker 关闭双语义（行为变更：NotAllowedError 不再静默）：'denied' → 状态条
+    // 固定文案（SAVE_DENIED_NOTICE 单源，值钉死）；'cancelled' 静默维持现状
+    expect(SAVE_DENIED_NOTICE).toBe('另存为未完成：浏览器拒绝了文件保存请求');
+    expect(src).toMatch(/else if \(r === 'denied'\) showStatusNotice\(SAVE_DENIED_NOTICE\)/);
     // 进度反馈（评审 I-3）：菜单路径轻量状态条——远端重下开始提示 + 完成提示
     //（dlProgress 为 ViewerPane 私有面，跨组件无复用缝，缝最小取状态条）
     expect(src).toMatch(/const remote = isRemoteDownload\(tab\.source\.storeId\)/);

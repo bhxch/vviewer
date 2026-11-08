@@ -36,8 +36,9 @@ import { openDirBytes, openFile, waitAppMounted } from './helpers';
  *   实现（原手写段与 b-save-as.spec.ts:44-67 重复，已删除）。
  * - 旧键 'tabs' 会话快照预置（remote:<hash8(base:label)> 来源 + 目录/文件 tab）。
  * - showSaveFilePicker 桩（addInitScript）：记录 suggestedName/调用时刻/写入块/
- *   close/abort 计数/「选定目标时服务器侧取数计数」；三档故障桩（createWritable
- *   抛错 / write 抛错 / picker 抛 NotAllowedError=用户取消）。
+ *   close/abort 计数/「选定目标时服务器侧取数计数」；四档故障桩（createWritable
+ *   抛错 / write 抛错 / picker 抛 NotAllowedError=浏览器拒绝→'denied' 状态条提示 /
+ *   picker 抛 AbortError=用户主动取消→'cancelled' 静默）。
  * - 无 FS Access 形态：init script 以 defineProperty 把 window.showSaveFilePicker
  *   遮蔽为 undefined（Chromium 原生面在 localhost 安全上下文下存在，必须显式遮蔽
  *   才能到达降级路径）。
@@ -285,7 +286,7 @@ async function setConfirmThresholdMb(page: Page, mb: number): Promise<void> {
 
 // ---------- picker 桩 / 无 FS Access 形态 / `<a download>` 兜底记录 ----------
 
-type PickerMode = 'ok' | 'createWritableFails' | 'writeFails' | 'notAllowed';
+type PickerMode = 'ok' | 'createWritableFails' | 'writeFails' | 'notAllowed' | 'abort';
 
 interface SaveStub {
   calls: { name: string | null }[];
@@ -337,9 +338,15 @@ async function installPickerStub(
           }
         }
         if (m.mode === 'notAllowed') {
-          // picker 取消/授权拒绝：DOMException 名 NotAllowedError（saveAs.ts:46-55
-          // 的 isPickerCancel 分类面）——正确分类即静默 'cancelled'
-          throw new DOMException('e2e: 用户取消保存', 'NotAllowedError');
+          // picker 授权拒绝（浏览器拒绝，用户没关任何对话框）：Error 携 name=
+          // 'NotAllowedError' 形态（saveAs.ts isPickerDenied 双形态之一；DOMException
+          // 形态由单元锚 saveAs.test.ts pickerErr 覆盖）→ saveAsTab 返回 'denied'，
+          // 调用方状态条提示「另存为未完成：浏览器拒绝了文件保存请求」
+          throw Object.assign(new Error('e2e: 浏览器拒绝保存'), { name: 'NotAllowedError' });
+        }
+        if (m.mode === 'abort') {
+          // 用户主动取消（关闭对话框）：AbortError → saveAsTab 返回 'cancelled' 静默
+          throw new DOMException('e2e: 用户取消保存', 'AbortError');
         }
         return {
           createWritable: async () => {
@@ -653,7 +660,7 @@ test.describe('b-save-as-2 另存为管线补强（SAV 域）', () => {
     await srv.close();
   });
 
-  test('SAV-PICKER-CANCEL-01: picker 抛 NotAllowedError（用户取消）→ 静默 cancelled：零写入、零取数、状态条无失败提示', async ({ page }) => {
+  test('SAV-PICKER-CANCEL-01: picker 抛 AbortError（用户主动取消）→ 静默 cancelled：零写入、零取数、状态条无失败/拒绝提示', async ({ page }) => {
     test.setTimeout(150_000);
     const size = 2 * 1024 * 1024;
     const png = makePngOfExactSize(size);
@@ -665,13 +672,16 @@ test.describe('b-save-as-2 另存为管线补强（SAV 域）', () => {
         { path: 'mid.png', name: 'mid.png', size, active: true }
       ]
     });
-    await installPickerStub(page, 'notAllowed');
+    // 行为变更后本锚改钉「用户主动取消」面（原钉 NotAllowedError 静默，已翻转）：
+    // AbortError → saveAsTab 返回 'cancelled' 静默；SAV-PICKER-DENIED-01 为其
+    // NotAllowedError（浏览器拒绝 → 状态条提示）的差分对照
+    await installPickerStub(page, 'abort');
     await page.goto('/');
     await expect(page.locator('.vv-viewer-host img')).toBeVisible({ timeout: 30_000 });
 
     const readsBefore = srv.fileRequests.length;
     await clickTabSaveAs(page, 'mid.png');
-    // picker 被调 1 次（用户取消点在选目标处）
+    // 稳定在场信号：picker 被调 1 次（用户取消点在选目标处），此后再判状态条缺席
     await expect.poll(async () => (await saveStubState(page)).calls.length, { timeout: 20_000 }).toBe(1);
     const stub = await saveStubState(page);
     // 零写入：取消发生在选目标处 → 未开启 writable、未写、未 close/abort
@@ -683,9 +693,49 @@ test.describe('b-save-as-2 另存为管线补强（SAV 域）', () => {
     // 零取数：确认门/泵均未启动（沉降窗口径同 DL-CONF-01b）
     await page.waitForTimeout(SETTLE_MS);
     expect(srv.fileRequests.length).toBe(readsBefore);
-    // 静默：isPickerCancel 分类命中 → saveAsTab 返回 'cancelled'，TabBar 的 .catch
-    // 不落「另存为失败」状态条（分类被破坏即红）
+    // 静默：isPickerCancel（仅 AbortError）分类命中 → saveAsTab 返回 'cancelled'，
+    // TabBar 不落「另存为失败」也不落拒绝提示（双语义拆分被破坏即红）
     await expect(page.getByText('另存为失败')).toHaveCount(0);
+    await expect(page.locator('.vv-statusbar')).not.toContainText('浏览器拒绝了文件保存请求');
+    await srv.close();
+  });
+
+  test('SAV-PICKER-DENIED-01: picker 抛 NotAllowedError（浏览器拒绝）→ 状态条提示「浏览器拒绝了文件保存请求」：picker 恰 1 次、零落盘', async ({ page }) => {
+    test.setTimeout(150_000);
+    const size = 2 * 1024 * 1024;
+    const png = makePngOfExactSize(size);
+    const srv = await startFakeVV('mid.png', png);
+    await seedRemoteTabs(page, {
+      base: srv.base,
+      tabs: [
+        { path: '', name: 'e2e-fake', active: false },
+        { path: 'mid.png', name: 'mid.png', size, active: true }
+      ]
+    });
+    // 行为变更锚（SAV-PICKER-CANCEL-01 的差分对照）：NotAllowedError = 浏览器拒绝
+    // （授权被拒/激活过期），用户没关任何对话框却回到原状——不再静默吞掉，状态条
+    // 固定文案提示（saveAs.ts isPickerDenied → 'denied' → TabBar showStatusNotice）
+    await installPickerStub(page, 'notAllowed');
+    await page.goto('/');
+    await expect(page.locator('.vv-viewer-host img')).toBeVisible({ timeout: 30_000 });
+
+    const readsBefore = srv.fileRequests.length;
+    await clickTabSaveAs(page, 'mid.png');
+    // picker 恰被调 1 次（拒绝点在选目标处；重试/兜底不得二次弹 picker）
+    await expect.poll(async () => (await saveStubState(page)).calls.length, { timeout: 20_000 }).toBe(1);
+    // 状态条提示面（.vv-statusbar，SAV-MENU-STATUS-01 同锚面）
+    await expect(page.locator('.vv-statusbar')).toContainText('浏览器拒绝了文件保存请求', { timeout: 20_000 });
+    const stub = await saveStubState(page);
+    expect(stub.calls).toHaveLength(1); // 轮询窗后恰 1 次（无重试面）
+    // 落盘计数 0：拒绝发生在选目标处 → writable 未创建、未写、未 close/abort
+    expect(stub.createWritableCalls).toBe(0);
+    expect(stub.chunks).toBe(0);
+    expect(stub.bytes).toBe(0);
+    expect(stub.closed).toBe(0);
+    expect(stub.aborted).toBe(0);
+    // 零取数：确认门/泵均未启动（沉降窗口径同 DL-CONF-01b）
+    await page.waitForTimeout(SETTLE_MS);
+    expect(srv.fileRequests.length).toBe(readsBefore);
     await srv.close();
   });
 
