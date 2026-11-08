@@ -773,7 +773,10 @@ export default defineConfig({
           {
             // foreign 资产同源预留槽（FOREIGN_ASSETS_SAME_ORIGIN_PREFIX，plan 4 接线；
             // asset-installer 合并树布局）：CacheFirst 同上；cacheableResponse 仅 200
-            //——404/SPA fallback 应答不入缓存（前缀未部署时零副作用）
+            //——404 不入缓存（前缀未部署时零副作用）；SPA fallback 的 200 HTML 由
+            // 服务端 Accept 收窄治理（server/src/lib.rs `serve_index` 只对导航请求回
+            // index.html，SWR-DEF-01）——SW 层无法按 content-type 过滤（generateSW
+            // 不支持自定义 cacheWillUpdate plugin），运行期锚见 SWR-ROUTE-07
             urlPattern: /\/file-viewer-assets\//,
             handler: 'CacheFirst',
             options: {

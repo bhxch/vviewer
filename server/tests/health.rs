@@ -1,7 +1,7 @@
 //! Task 1 集成测试：/api/health 能力发现 + 静态资产挂载。
 
 use axum::body::Body;
-use axum::http::{Request, StatusCode};
+use axum::http::{header, HeaderValue, Request, StatusCode};
 use tower::ServiceExt;
 use vviewer::state::AppState;
 
@@ -13,13 +13,22 @@ async fn get_body(
     app: axum::Router,
     uri: &str,
 ) -> (StatusCode, axum::body::Bytes) {
+    get_body_with(app, uri, &[]).await
+}
+
+/// 带请求头的 oneshot：SPA fallback 的 Accept 收窄契约（SWR-DEF-01）需要区分
+/// 导航形态（Accept 含 text/html）与 fetch/资源加载形态（`*/*` 或缺头）。
+async fn get_body_with(
+    app: axum::Router,
+    uri: &str,
+    headers: &[(header::HeaderName, &'static str)],
+) -> (StatusCode, axum::body::Bytes) {
+    let mut builder = Request::builder().uri(uri);
+    for (name, value) in headers {
+        builder = builder.header(name, HeaderValue::from_static(value));
+    }
     let res = app
-        .oneshot(
-            Request::builder()
-                .uri(uri)
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(builder.body(Body::empty()).unwrap())
         .await
         .unwrap();
     let status = res.status();
@@ -83,8 +92,17 @@ async fn web_dist_serves_assets_and_spa_fallback() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_ref(), b"console.log(1)");
 
-    // SPA fallback：未知路径返回 index.html
-    let (status, body) = get_body(app, "/some/spa/route").await;
+    // SPA fallback：导航请求（Accept 含 text/html）的未知路径返回 index.html
+    // （SWR-DEF-01 收窄后：非导航形态一律 404，见 spa_fallback_gated_on_navigation_accept）
+    let (status, body) = get_body_with(
+        app,
+        "/some/spa/route",
+        &[(
+            header::ACCEPT,
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        )],
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_ref(), b"<html>spa-shell</html>");
 }
@@ -120,10 +138,82 @@ async fn grammar_asset_paths_not_swallowed_by_spa_fallback() {
         assert_ne!(body.as_ref(), b"<html>spa-shell</html>", "{uri} 不得回 index.html");
     }
 
-    // 非 .scm/.wasm 未知路径仍走 SPA fallback（回归确认修法不外溢）
-    let (status, body) = get_body(app, "/some/spa/route").await;
+    // 非 .scm/.wasm 未知路径在导航形态下仍走 SPA fallback（回归确认修法不外溢）
+    let (status, body) = get_body_with(
+        app,
+        "/some/spa/route",
+        &[(
+            header::ACCEPT,
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        )],
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_ref(), b"<html>spa-shell</html>");
+}
+
+/// SWR-DEF-01 修复锚（e2e 锚 SWR-ROUTE-07 的服务端契约面）：SPA fallback 只对导航
+/// 请求生效。此前任何未知路径回 200 index.html——未知资产 URL（foreign 资产 .js）也
+/// 拿到 200 HTML，被 SW 的 CacheFirst（cacheableResponse 只收 200）收进
+/// vv-foreign-assets 缓存污染资产解析；收窄后非导航形态（fetch 的 `*/*`、缺头）一律
+/// 404，404 被 cacheableResponse 拒收，污染面归零。
+#[tokio::test]
+async fn spa_fallback_gated_on_navigation_accept() {
+    let root = tempfile::tempdir().unwrap();
+    let dist = tempfile::tempdir().unwrap();
+    std::fs::write(dist.path().join("index.html"), "<html>spa-shell</html>").unwrap();
+    let app = vviewer::build_router(test_state(
+        root.path().to_path_buf(),
+        Some(dist.path().to_path_buf()),
+    ));
+
+    // fetch/XHR 形态（Accept: */*）：未知路径 → 404，不回 index.html
+    let (status, body) = get_body_with(app.clone(), "/spa/route", &[(header::ACCEPT, "*/*")]).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "fetch 形态应 404");
+    assert_ne!(body.as_ref(), b"<html>spa-shell</html>", "fetch 形态不得回 index.html");
+
+    // 缺 Accept 头（非浏览器形态）：缺省拒绝 → 404
+    let (status, body) = get_body(app.clone(), "/spa/route").await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "缺 Accept 头应缺省 404");
+    assert_ne!(body.as_ref(), b"<html>spa-shell</html>");
+
+    // 决定性用例：未知 .js 路径（模拟 foreign 资产 /file-viewer-assets/xxx.js）+ fetch
+    // 形态 → 404（不再拿到 200 HTML 进 SW 运行时缓存）
+    let (status, body) = get_body_with(
+        app.clone(),
+        "/file-viewer-assets/vendor/docx/docx.js",
+        &[(header::ACCEPT, "*/*")],
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "foreign 资产形态未知 .js 应 404");
+    assert_ne!(
+        body.as_ref(),
+        b"<html>spa-shell</html>",
+        "未知 .js 不得回 index.html（SWR-DEF-01 污染面）"
+    );
+
+    // 导航形态（Accept 含 text/html）：未知路径 → 200 text/html（SPA 兜底保留）
+    let (status, body) = get_body_with(
+        app.clone(),
+        "/spa/route",
+        &[(header::ACCEPT, "text/html,application/xhtml+xml")],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "导航形态应 200 兜底");
+    assert_eq!(body.as_ref(), b"<html>spa-shell</html>");
+
+    // `.scm`/`.wasm` 特判保持在前：导航形态下缺失的语法/查询资产仍 404（终审 C1，
+    // 不得以 200 index.html 兜底），不被 Accept 收窄破坏
+    for uri in ["/queries/elisp/injections.scm", "/grammars/tree-sitter-elisp.wasm"] {
+        let (status, body) = get_body_with(
+            app.clone(),
+            uri,
+            &[(header::ACCEPT, "text/html,application/xhtml+xml")],
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{uri} 特判应维持 404");
+        assert_ne!(body.as_ref(), b"<html>spa-shell</html>", "{uri} 不得回 index.html");
+    }
 }
 
 // 裁剪形态（worker）断言面为死路径：--compute 不宣告（native feature 门控，

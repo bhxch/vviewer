@@ -29,7 +29,17 @@ fn fixture() -> Fixture {
 
 async fn get(state: &AppState, path: &str) -> (StatusCode, HeaderMap) {
     let app = vviewer::build_router(state.clone());
-    let req = Request::builder().uri(path).body(Body::empty()).unwrap();
+    // 导航形态（浏览器导航 Accept 恒含 text/html）：`/` 与 `/index.html` 是 ServeDir
+    // 直接命中（Accept 无关），`/spa/route` 经 SPA fallback——SWR-DEF-01 收窄后仅
+    // 导航请求回 index.html，fetch/缺头形态 404（契约锚在 tests/health.rs）
+    let req = Request::builder()
+        .uri(path)
+        .header(
+            axum::http::header::ACCEPT,
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        )
+        .body(Body::empty())
+        .unwrap();
     let res = app.oneshot(req).await.unwrap();
     (res.status(), res.headers().clone())
 }

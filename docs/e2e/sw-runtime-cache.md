@@ -10,8 +10,8 @@
 > `m7.spec.ts:30`、`fix-pwa.spec.ts:59,87,107`、`t-pwa.spec.ts:206,230,251,263,303,352,550,649,736`。
 >
 > **落库形态**：SWR-CLEAN-01/02 两条缺陷锚**已修产品侧并转正式断言**（清理正则补入
-> `vv-worker-wasm` 族，见 §3.1）；SWR-ROUTE-07 因需真实后端（default 套件无服务端）仍以
-> `test.fixme` 占位并在标题标注缺陷号，断言原文保留不弱化；其余 10 条为常规断言。
+> `vv-worker-wasm` 族，见 §3.1）；SWR-ROUTE-07 亦**已转正式断言**（服务端 fallback 收窄后
+> 未知资产 404 不入缓存；cargo 集成锚守服务端契约，见 §3.2）；其余 10 条为常规断言。
 
 ## 1. 目的与来源
 
@@ -31,8 +31,8 @@
 | 6 | `/\/_app\/immutable\/workers\/assets\/.+\.wasm$/` | `vv-worker-wasm-` | 8 | :729-735（**残余 A7**：worker 图同源 wasm） |
 | 7 | `/^https:\/\/cdn\.jsdelivr\.net\/npm\/@file-viewer\/assets-/` | `vv-foreign-assets-` | 64 | :747-762（foreign 资产 CDN 直链） |
 | 8 | `^<env 镜像 base>`（env 非空且为 http(s) 才生成） | `vv-foreign-assets-` | 64 | :64-72 + :770 展开 `FOREIGN_MIRROR_RUNTIME_CACHING`（**残余 A8**） |
-| 9 | `/\/file-viewer-assets\//` | `vv-foreign-assets-` | 64 | :775-781（foreign 资产同源预留槽） |
-| 10 | `/^https:\/\/cdn\.jsdelivr\.net\/npm\/.*/` | `vv-cdn-engines-` | 48 | :789-795（CDN 图表引擎通配，**必须排在 7/8 之后**） |
+| 9 | `/\/file-viewer-assets\//` | `vv-foreign-assets-` | 64 | :774-785（foreign 资产同源预留槽） |
+| 10 | `/^https:\/\/cdn\.jsdelivr\.net\/npm\/.*/` | `vv-cdn-engines-` | 48 | :789-799（CDN 图表引擎通配，**必须排在 7/8 之后**） |
 
 外加 workbox `NavigationRoute`（导航兜底，`navigateFallback: index.html`）与
 `precacheAndRoute`（workbox precache 族 `workbox-precache-*`，非 vv-* 运行时族）。
@@ -56,11 +56,12 @@
    `apps/web/scripts/check-pwa-build.mjs:67-77` 只断言 cacheName **存在**、拦不住；
    `apps/web/src/lib/foreignAssets.test.ts:142-146` 只断言 current 清单含
    `vv-foreign-assets`、同样拦不住。
-5. **新登记缺陷 SWR-DEF-01**：真实后端对未知且非 `.scm`/`.wasm` 的路径返回 200 + index.html
-   （`server/src/lib.rs:69-89` SPA fallback），而 `/file-viewer-assets/` 路由的
-   `cacheableResponse` 只收 200（`vite.config.ts:775-781`）→ fallback HTML 被收进
-   `vv-foreign-assets` 缓存，与 `vite.config.ts:774` 的注释承诺（「404/SPA fallback 应答不入
-   缓存」）相悖。实测口径见 §3.2。
+5. **缺陷 SWR-DEF-01（已修）**：真实后端曾对未知且非 `.scm`/`.wasm` 的路径返回 200 + index.html
+   （`server/src/lib.rs` SPA fallback），而 `/file-viewer-assets/` 路由的
+   `cacheableResponse` 只收 200（`vite.config.ts:777-784`）→ fallback HTML 被收进
+   `vv-foreign-assets` 缓存，与 `vite.config.ts:776` 的注释承诺相悖。**已修**：服务端 SPA
+   fallback 收窄为只对导航请求生效（Accept 含 `text/html`，`server/src/lib.rs`
+   `serve_index`），非导航 fetch 的未知资产 URL 一律 404。实测口径与修复锚见 §3.2。
 
 ## 2. 场景清单
 
@@ -76,7 +77,7 @@
 | SWR-ROUTE-04 | 同上 | 依次 fetch `/grammars/swr-probe.wasm`、`/tree-sitter.wasm`、`/libarchive/libarchive.wasm`、`/queries/swr-probe/highlight.scm`、`/_app/immutable/assets/svgbob_wasm_bg.swrprobe.wasm` | 每个 URL 恰好被 1 个 `vv-*` 缓存持有，族依次为 `vv-grammars-` / `vv-runtime-` / `vv-runtime-` / `vv-queries-` / `vv-diagram-svgbob-`（URL→族的唯一归属映射口径） | 既有路由映射回归 |
 | SWR-ROUTE-05 | 真网可达（**用页面 fetch 探可达性**，非 200/失败即 `test.skip`——CDN-01/CDN-04 同策略） | ① no-cors fetch（opaque 应答）；② cors fetch（200 应答） | ① opaque（status 0）**不入**任何 `vv-*` 缓存（`statuses:[200]` 拒收 status 0）；② 恰好被 1 个 `vv-*` 缓存持有且族为 `vv-foreign-assets-*`（**不被 jsdelivr 通配路由截胡**） | 缺口 2（跨域侧）+ 跨域应答形态 |
 | SWR-ROUTE-06 | 真网可达（同上，页面 fetch 口径） | fetch `https://cdn.jsdelivr.net/npm/lodash@4.17.21/package.json` | 恰好被 1 个 `vv-*` 缓存持有且族为 `vv-cdn-engines-*`（不被 foreign 路由截胡） | 缺口 2（跨域侧） |
-| SWR-ROUTE-07 | 同上（**现状红，test.fixme 占位**） | fetch `/file-viewer-assets/swr-spa.js`（服务端 200 + text/html，模拟 SPA fallback）；再 fetch 同族 200 wasm 探针并等其入缓存 | SPA fallback 应答 200 / type=basic；同族 wasm 探针入缓存（put 通道已跑通）；**SPA fallback 的 200 HTML 不入 `vv-foreign-assets` 缓存**（`vite.config.ts:774` 的承诺）——当前实现下失败 | **SWR-DEF-01（新登记）** |
+| SWR-ROUTE-07 | 同上（**已转正式断言**） | fetch `/file-viewer-assets/swr-spa.js`（服务端 404——修复后契约：非导航 fetch 的未知资产由 Accept 收窄回 404）；再 fetch 同族 200 wasm 探针并等其入缓存 | 未知资产 fetch 应答 404；同族 wasm 探针入缓存（put 通道已跑通）；**404 不入 `vv-foreign-assets` 缓存**（`cacheableResponse` 只收 200，拒收 404） | **SWR-DEF-01（已修）** |
 | SWR-TABLE-01 | `apps/web/build/sw.js` 存在（CI 在 e2e 前 `pnpm --filter web build`，`.github/workflows/ci.yml:163`） | 解析产物 `registerRoute` 调用表（含 plugins 段与 method 参数），按 workbox 匹配语义（正则对完整 URL 匹配；跨域须从头匹配）解析 9 条代表 URL | 每条 URL 首个命中路由：族归属符合预期（先匹配先赢）、处理器为 `CacheFirst`、方法为 `GET`、`statuses` 恰为 `[200]`、配 `maxEntries>0` 与 `purgeOnQuotaError`；`vv-runtime` 族两条路由共用同一 cacheName 且同一 maxEntries | 缺口 2/3（离线可验面）+ 路由表全参契约 |
 | SWR-TABLE-02 | 同上 | 解析产物 `importScripts` 路径与 `manifest.webmanifest` 的 scope；解析客户端产物的 SW 注册 URL/scope | 清理脚本 importScripts 目录与 manifest scope 目录一致（base 接线正确）；importScripts 目标为 `vv-sw-cleanup.js`；SW 注册 URL 为相对路径或带 base 前缀、scope 为 `./` 或与 manifest scope 一致 | VV_BASE_PATH 子路径部署面 |
 | SWR-MIRROR-01 | 同上；从构建产物注入字面量读出构建期 `VV_FOREIGN_ASSETS` 值 | 解析产物路由表，按 env 值推导期望的绝对 URL 路由条数（env 空⇒2、env 非空且 http(s)⇒3） | 绝对 URL 路由条数 == env 推导值；每条绝对 URL 路由：字面前缀可命中 + 元字符已转义（按字面匹配）+ 归属 foreign 族或 cdn-engines 族；env 非空时镜像路由字面前缀恰为 env base 且归 foreign 族；env 空时跨域主机集合恰为 `{cdn.jsdelivr.net}` | 残余 A8 零锚（双态） |
@@ -104,7 +105,7 @@
 | SWR-ROUTE-04 URL→族映射 | 任一既有路由删除/改族/被前序规则截胡；svgbob 路由族改名 |
 | SWR-ROUTE-05 opaque 不入缓存 + foreign 族归属 | `statuses` 放宽到含 0（opaque 被缓存）；foreign 规则被通配规则吞掉；族名写错 |
 | SWR-ROUTE-06 cdn-engines 族归属 | 两条 jsdelivr 规则顺序对调（foreign 被吞）；族名写错 |
-| SWR-ROUTE-07 fallback HTML 不入缓存 | `cacheableResponse` 改为按 content-type 收窄/放宽使 200 HTML 入缓存 |
+| SWR-ROUTE-07 未知资产 404 不入缓存 | 服务端 fallback 收窄回退（非导航请求重新拿到 200 index.html——则 fetch 得 200，第一条断言红）；`cacheableResponse` 放宽到含 404（则 404 入缓存，零持有者断言红） |
 | SWR-TABLE-01 族归属/handler/method/statuses/过期配额 | 任一 urlPattern 改动；handler 由 CacheFirst 改为其它策略；method 改为 POST；statuses 放宽到 [0,200] 或 [200,404]；删 ExpirationPlugin 或去掉 purgeOnQuotaError；两条 vv-runtime 路由族分裂 |
 | SWR-TABLE-02 base 接线 | importScripts 路径与 scope 脱钩（base 接错 → 清理脚本 404）；SW 注册 URL 改为不带 base 的绝对路径；注册 scope 与 manifest scope 不一致 |
 | SWR-MIRROR-01 条数 + 字面匹配 + 族归属 | env 为空时仍生成镜像路由（条数多一条）；env 非空时不生成镜像路由（条数少一条）；镜像路由 base 未转义（`re.test(mutated)` 转真）；镜像路由归错族；jsdelivr 规则族归属错位 |
@@ -122,16 +123,17 @@
 | `apps/web/src/lib/foreignAssets.test.ts`（A8 源码锚） | env → base 解析链的源码级断言 | SW 产物侧：env 推导的镜像路由条数/前缀/族归属 |
 
 **装置自建的理由**（与 `docs/e2e/README.md` §3.2 第 1 条「公共装置复用既有 helper」的边界说明）：
-本域需要的装置是「伺服 `apps/web/build` **构建产物** + 对指定路径给精确 200/404/200-HTML 应答 +
+本域需要的装置是「伺服 `apps/web/build` **构建产物** + 对指定路径给精确 200/404 合成应答 +
 在产物内改写 BUILD_REVISION」。既有 `apps/web/e2e/serverHarness.ts` 是 **m5/m6 的 Rust 进程
 harness**（cargo build + spawn vviewer 二进制 + `/api/health` 轮询），它伺服的是**文件服务根目录**
-而非构建产物目录，且其未知路径走 `server/src/lib.rs:69-89` 的 SPA fallback（无法对指定路径给
-精确 404），不满足本域的合成探针需求；本域 e2e 铁律亦要求装置自建在本文件内（避免域间文件冲突），
-故不复用。§2.1 的 `page.route` 拦截面与本域无关（SW 缓存面一律走 caches API）。
+而非构建产物目录，且其未知路径走 `server/src/lib.rs` `serve_index` 的 SPA fallback（SWR-DEF-01
+收窄后 fetch 形态恒 404，无法对指定路径给精确 200 合成应答），不满足本域的合成探针需求；
+本域 e2e 铁律亦要求装置自建在本文件内（避免域间文件冲突），故不复用。§2.1 的 `page.route`
+拦截面与本域无关（SW 缓存面一律走 caches API）。
 
 ## 3. 验收行为
 
-### 3.1 关联缺陷的验收行为（SWR-CLEAN-01/02 已修转绿；SWR-ROUTE-07 仍占位）
+### 3.1 关联缺陷的验收行为（SWR-CLEAN-01/02 已修转绿；SWR-ROUTE-07 见 §3.2 亦已修转绿）
 
 **缺陷（缓存卫生不变量在 A7 上失效）**：`genSwCleanup`（`vite.config.ts:123-169`）在构建期生成
 `static/vv-sw-cleanup.js`，其中：
@@ -158,18 +160,26 @@ harness**（cargo build + spawn vviewer 二进制 + `/api/health` 轮询），�
 > fixme 锚转正式断言即转绿。`check-pwa-build.mjs` 可另加「current 清单 ⊆ 删除正则覆盖」
 > 构建期门禁。
 
-### 3.2 新登记缺陷 SWR-DEF-01：SPA fallback 的 200 HTML 被收进 foreign 资产缓存
+### 3.2 缺陷 SWR-DEF-01（已修）：SPA fallback 的 200 HTML 曾被收进 foreign 资产缓存
 
-**缺陷态**（实测口径，见 §4.3 的装置说明）：真实后端 `server/src/lib.rs:69-89` 的 SPA fallback
-对未知且非 `.scm`/`.wasm` 的路径返回 **200 + index.html**（`text/html`）。foreign 资产的真实形态
+**缺陷态**（实测口径，见 §4.3 的装置说明）：真实后端 `server/src/lib.rs` 的 SPA fallback
+曾对未知且非 `.scm`/`.wasm` 的路径返回 **200 + index.html**（`text/html`）。foreign 资产的真实形态
 是 `.js`（`/file-viewer-assets/vendor/docx/docx.js`），前缀未部署时即命中该分支。该 200 HTML 被
-`/file-viewer-assets/` 路由的 CacheFirst + `cacheableResponse{statuses:[200]}`（:775-781）收进
-`vv-foreign-assets` 缓存并长期复用。
+`/file-viewer-assets/` 路由的 CacheFirst + `cacheableResponse{statuses:[200]}`（:777-784）收进
+`vv-foreign-assets` 缓存并长期复用——与 `vite.config.ts:776` 的注释承诺（「404/SPA fallback
+应答不入缓存」）相悖（实测只对 404 成立）。
 
-**与产品注释的偏差**：`vite.config.ts:774` 的注释写「404/SPA fallback 应答不入缓存（前缀未部署时
-零副作用）」——实测**只对 404 成立**：SPA fallback 是 200 HTML，落在 `statuses:[200]` 白名单内，
-**会**被缓存。故注释承诺与实现不一致，按实测口径记为缺陷（SWR-DEF-01），修复 PR 或收窄
-`cacheableResponse`（按 content-type 排除 text/html）或修正注释承诺后，SWR-ROUTE-07 转正。
+**修复锚**：`server/src/lib.rs` `serve_index` 加 Accept 导航判定——fallback 只对导航请求
+（Accept 含 `text/html`，大小写不敏感）回 index.html，其余（fetch/XHR 的 `*/*`、资源加载、
+缺 Accept 头）一律 404。浏览器导航 Accept 恒含 text/html 不受影响；脚本/wasm/fetch 形态
+拿到 404，`cacheableResponse` 只收 200 自然拒收，污染面归零。SW 层无法按 content-type
+过滤（generateSW 不支持自定义 cacheWillUpdate plugin），故治理面在服务端。
+
+**双端锚**：服务端契约由 cargo 集成锚 `server/tests/health.rs`
+`spa_fallback_gated_on_navigation_accept` 守住（fetch 形态 404 / 缺头 404 / 未知 .js 404 /
+导航形态 200 / `.scm`/`.wasm` 特判维持 404）；e2e 侧 SWR-ROUTE-07 已随修复转正式断言
+（断言面改为修复后契约：未知资产 fetch 得 404、零 `vv-foreign-assets` 缓存条目），
+转正后实跑待 CI/实机复核（§4.3）。
 
 ### 3.3 回归护栏（现状正确行为的保护）
 
@@ -185,10 +195,9 @@ harness**（cargo build + spawn vviewer 二进制 + `/api/health` 轮询），�
 
 | 装置 | 规格 | 用于场景 |
 | --- | --- | --- |
-| 假静态服务器 | `node:http`，`listen(0)` 取临时端口（不与 playwright webServer 的 4173 冲突）；伺服 `apps/web/build` 产物 + 合成探针 + SPA fallback 模拟；每路径命中计数；可把 `sw.js`/`vv-sw-cleanup.js` 内的 BUILD_REVISION 全量替换（部署换版模拟） | 全部运行时场景 |
+| 假静态服务器 | `node:http`，`listen(0)` 取临时端口（不与 playwright webServer 的 4173 冲突）；伺服 `apps/web/build` 产物 + 合成探针（含修复后服务端契约的 404 形态）；每路径命中计数；可把 `sw.js`/`vv-sw-cleanup.js` 内的 BUILD_REVISION 全量替换（部署换版模拟） | 全部运行时场景 |
 | 合成探针（同源，200） | `/grammars/swr-probe.wasm`、`/queries/swr-probe/highlight.scm`、`/_app/immutable/assets/svgbob_wasm_bg.swrprobe.wasm`、`/_app/immutable/workers/assets/swr-probe.wasm`、`/file-viewer-assets/swr-probe.wasm`（均为最小 wasm 头 8 字节 / 文本） | SWR-ROUTE-01~04 / SWR-CLEAN-01 |
-| 合成探针（同源，404） | `/file-viewer-assets/swr-missing.wasm` | SWR-ROUTE-03 |
-| 合成探针（同源，200 text/html） | `/file-viewer-assets/swr-spa.js`（模拟真实后端 SPA fallback 的 200 + index.html） | SWR-ROUTE-07 |
+| 合成探针（同源，404） | `/file-viewer-assets/swr-missing.wasm`；`/file-viewer-assets/swr-spa.js`（模拟**修复后**服务端契约：非导航 fetch 的未知资产路径 404——server/src/lib.rs `serve_index` Accept 收窄） | SWR-ROUTE-03 / SWR-ROUTE-07 |
 | vv-runtime 族探针 | `/y1..y3/libarchive/libarchive.wasm`（走 libarchive 路由）、`/z1..z3/tree-sitter.wasm`（走 tree-sitter 路由）——两条**不同路由**写入同一族，用于验证共用配额互相挤占 | SWR-EXP-01 |
 | 产物层解析器 | 解析 `build/sw.js` 的 `registerRoute` 调用表（含 `CacheableResponsePlugin.statuses`、`ExpirationPlugin.maxEntries/purgeOnQuotaError` 与 method 参数；压缩产物的命名空间字母随打包变化，按 `new <ns>.<Ctor>(` 形态匹配不写死字母）；按 workbox `RegExpRoute` 语义解析首个命中路由（正则对完整 URL 匹配；跨域且 match.index≠0 不接管）；另解析 `importScripts` 路径与客户端产物的 SW 注册 URL/scope | SWR-TABLE-01~02 / SWR-MIRROR-01 / SWR-CLEAN-02~03 |
 
@@ -212,7 +221,7 @@ harness**（cargo build + spawn vviewer 二进制 + `/api/health` 轮询），�
 | 场景 | 实测 | 说明 |
 | --- | --- | --- |
 | SWR-ROUTE-01~06、SWR-TABLE-01~02、SWR-MIRROR-01、SWR-EXP-01、SWR-CLEAN-03 | **passed**（11 条，两 project 各一遍） | SWR-ROUTE-05/06 在有外网时走真网断言（jsdelivr 直链），无外网时按 §2.1 skip |
-| SWR-ROUTE-07 | **fixme 占位（skipped）**，以普通 test 执行时**确实为红**：SWR-ROUTE-07 收到 `vv-foreign-assets-0.1.0-hsw4k` 持有者 | 缺陷锚非恒真——把 fixme 改为普通 test 即复现缺陷，故分诊修产品侧后可直接转正式断言 |
+| SWR-ROUTE-07 | **已转正式断言**（服务端 fallback 收窄后伺服面改为修复后契约：swr-spa.js → 404）。缺陷态实测（2026-11-08，以普通 test 跑旧 200-HTML 伺服面）确实为红：收到 `vv-foreign-assets-0.1.0-hsw4k` 持有者——证明锚非恒真；修复后契约形态的实跑待 CI/实机复核 | 缺陷锚历史证据保留；断言面已改为修复后契约（404 透传 + 零缓存条目，§3.2） |
 | SWR-CLEAN-01、SWR-CLEAN-02 | **已转正式断言（产品侧已修）**：修复前以普通 test 执行时确实为红（SWR-CLEAN-01 收到 `vv-worker-wasm-0.1.0-hsw4k` 残留、SWR-CLEAN-02 报 `清理正则未覆盖的 current 缓存族：vv-worker-wasm-0.1.0-hsw4k`）——变异核验与修复后复跑证明二者非恒真 | 删除正则补族后转绿（§3.1） |
 
 ### 4.4 已知状态与未覆盖项
@@ -220,7 +229,10 @@ harness**（cargo build + spawn vviewer 二进制 + `/api/health` 轮询），�
 - **SWR-CLEAN-01/02 已修**（真实产品缺陷已定位并修复，见 §3.1）：`genSwCleanup` 的 activate
   删除正则补入 `vv-worker-wasm` 族（`apps/web/vite.config.ts:148`），与 `current` 清单
   （`:125-133`）逐族对齐；两条锚已由 `test.fixme` 转正式断言（断言原文未弱化）。
-- **SWR-ROUTE-07 当前必红**（新登记缺陷 SWR-DEF-01，见 §3.2）——同样以 `test.fixme` 占位。
+- **SWR-ROUTE-07 已转正式断言**（SWR-DEF-01 已修，修复锚见 §3.2）：断言面为修复后契约
+  （未知资产 fetch 得 404、零 `vv-foreign-assets` 缓存条目）；服务端契约另有 cargo 集成锚
+  （`server/tests/health.rs` `spa_fallback_gated_on_navigation_accept`）双端把守；
+  本机未复跑 playwright，转正后实跑待 CI/实机复核。
 - **SWR-CLEAN-03 当前绿**（反向不变量成立）：产物路由的每条 cacheName 都在 current 清单内、
   清单无多余条目。该条为常规断言——它守住「新增族忘进 current 清单」这另一半同族漏配形态，
   使 SWR-CLEAN-02 的正向红锚有对应的绿侧对照。

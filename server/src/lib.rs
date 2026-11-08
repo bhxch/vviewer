@@ -26,7 +26,7 @@ pub mod watch;
 use std::time::Duration;
 
 use axum::extract::{Request, State};
-use axum::http::{header, HeaderValue, Method, StatusCode, Uri};
+use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
@@ -63,13 +63,35 @@ async fn placeholder_page() -> Html<&'static str> {
     )
 }
 
-/// SPA fallback：任何未知路径返回 dist/index.html。`.scm`/`.wasm` 资产路径除外——
-/// 查询目录（如 113/307 缺 injections.scm）未命中时不得以 200 index.html 兜底，
-/// 否则前端把 HTML 误载为查询文本，整语言查询编译失败降级 hljs（终审 C1，双层修之 server 层）。
-async fn serve_index(uri: Uri, State(state): State<AppState>) -> Response {
+/// SPA fallback：未知路径在**导航请求**（Accept 含 `text/html`）下返回 dist/index.html，
+/// 其余一律 404。两层特判：
+/// - `.scm`/`.wasm` 资产路径（在前，不受 Accept 影响）——查询目录（如 113/307 缺
+///   injections.scm）未命中时不得以 200 index.html 兜底，否则前端把 HTML 误载为查询
+///   文本，整语言查询编译失败降级 hljs（终审 C1，双层修之 server 层）。
+/// - SWR-DEF-01（e2e 锚 SWR-ROUTE-07）：fallback 原先对任何未知路径回 200 HTML——未知
+///   **资产** URL（如 foreign 资产 `/file-viewer-assets/xxx.js`）也拿到 200 HTML，被 SW
+///   的 CacheFirst（`cacheableResponse` 只收 200；SW 层无法按 content-type 过滤——
+///   generateSW 不支持自定义 cacheWillUpdate plugin）收进 vv-foreign-assets 缓存，污染
+///   资产解析一个部署周期。根治：fallback 只对导航请求生效——浏览器导航 Accept 恒含
+///   text/html；脚本/wasm/fetch 的 Accept 是具体类型或 `*/*`，一律 404，资产 200 HTML
+///   污染面归零（服务端契约由 server/tests/health.rs 集成锚守住）。
+async fn serve_index(uri: Uri, headers: HeaderMap, State(state): State<AppState>) -> Response {
     let path = uri.path();
     if path.ends_with(".scm") || path.ends_with(".wasm") {
         return (StatusCode::NOT_FOUND, "grammar asset not found").into_response();
+    }
+    // 大小写不敏感子串判定：浏览器导航 Accept 恒含 "text/html"；缺 Accept 头（非浏览器
+    // 形态）按非导航处理，缺省拒绝
+    let is_navigation = headers
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|accept| accept.to_ascii_lowercase().contains("text/html"));
+    if !is_navigation {
+        return (
+            StatusCode::NOT_FOUND,
+            "spa fallback only serves navigation requests (accept: text/html)",
+        )
+            .into_response();
     }
     let Some(dist) = &state.web_dist else {
         return placeholder_page().await.into_response();
@@ -114,7 +136,7 @@ pub fn build_router(state: AppState) -> Router {
 
     let app = match &state.web_dist {
         Some(dist) => {
-            // 静态资产 + SPA fallback（未知路径 → index.html）
+            // 静态资产 + SPA fallback（导航请求的未知路径 → index.html，其余 404）
             let spa_fallback = Router::new()
                 .fallback(serve_index)
                 .with_state(state.clone());

@@ -19,11 +19,13 @@ import type { AddressInfo } from 'node:net';
  * ./settings-center、./helpers，均不含本域所需的「伺服构建产物 + 合成探针 + 产物内
  * REV 改写」装置。serverHarness.ts 是 m5/m6 的 Rust 进程 harness（cargo build + spawn
  * vviewer 二进制 + /api/health 轮询），它伺服的是文件服务根目录而非构建产物目录，
- * 且未知路径走 server/src/lib.rs:69-89 的 SPA fallback，无法提供本域需要的
- * 「指定路径精确 200/404 应答」合成面，故本域自建静态伺服面）：
- * - 假静态服务器：node:http 伺服 apps/web/build 产物 + 合成探针路径（200/404/200-HTML
- *   SPA fallback），记录每路径命中次数（用于「二次访问不再回源」的 CacheFirst 判定）。
- *   端口取临时端口（listen(0)），不与 playwright webServer 的 4173 冲突。
+ * 且未知路径走 server/src/lib.rs `serve_index` 的 SPA fallback（SWR-DEF-01 收窄后仅
+ * 导航请求回 index.html，fetch 形态一律 404），无法提供本域需要的「指定路径精确
+ * 200/404 应答」合成面，故本域自建静态伺服面）：
+ * - 假静态服务器：node:http 伺服 apps/web/build 产物 + 合成探针路径（200/404 合成
+ *   应答，含修复后服务端契约——非导航 fetch 的未知资产 404），记录每路径命中次数
+ *   （用于「二次访问不再回源」的 CacheFirst 判定）。端口取临时端口（listen(0)），
+ *   不与 playwright webServer 的 4173 冲突。
  * - SW 控制权：走产品自身的注册通道（src/routes/+layout.svelte:13 registerSW），等
  *   activated + controller 在位 + precache 填充后开始断言。
  * - 换版模拟：伺服面把 sw.js / vv-sw-cleanup.js 内的 BUILD_REVISION 全量替换后再交付
@@ -43,14 +45,16 @@ import type { AddressInfo } from 'node:net';
  *   vv-foreign-assets)-/）→ 旧 REV 的 vv-worker-wasm-* 缓存永久残留（BUG-60 的缓存
  *   卫生不变量在残余 A7 路由上失效）。**已修**：删除正则补入 vv-worker-wasm 族，
  *   两条锚由 test.fixme 转正式断言（断言原文未弱化）。
- *
- * 仍以 test.fixme 占位（环境受限，标题标注原因，断言原文保留不弱化）：
- * - SWR-ROUTE-07（SWR-DEF-01，新登记）：真实后端对未知且非 .scm/.wasm 的路径返回
- *   200 + index.html（server/src/lib.rs:69-89 SPA fallback），而 /file-viewer-assets/
- *   路由的 cacheableResponse 只收 200（vite.config.ts:775-781）→ fallback HTML 被收进
- *   vv-foreign-assets 缓存，与 vite.config.ts:774 的注释承诺（「404/SPA fallback 应答不入
- *   缓存」）相悖——需真实后端才能复现，default 套件无真实服务端，由 e2e-server 通道
- *   承接或待产品修。
+ * - SWR-ROUTE-07（SWR-DEF-01）：真实后端曾对未知且非 .scm/.wasm 的路径返回 200 +
+ *   index.html（server/src/lib.rs SPA fallback），被 /file-viewer-assets/ 路由的
+ *   cacheableResponse{statuses:[200]}（vite.config.ts:777-784）收进 vv-foreign-assets
+ *   缓存。**已修（服务端 Accept 收窄）**：serve_index 只对导航请求（Accept 含
+ *   text/html）回 index.html，其余（fetch/XHR 的通配 Accept、资源加载、缺头）一律 404——
+ *   cacheableResponse 只拦非 200，SPA fallback 的 200 HTML 由服务端 Accept 收窄治理
+ *   （SW 层无法按 content-type 过滤：generateSW 不支持自定义 cacheWillUpdate plugin）。
+ *   本锚转正式断言（断言面改为修复后契约：未知资产 fetch 得 404、零缓存条目），
+ *   服务端契约由 cargo 集成锚（server/tests/health.rs spa_fallback_gated_on_navigation_accept）
+ *   守住；本域自建伺服面同步改为修复后契约（swr-spa.js → 404）。
  *
  * 旁证（SWR-EXP-01 反面）：workbox 的 runtimeCaching 配了 expiration 选项即由
  * workbox-build 自动注入 ExpirationPlugin，族内条目数受 maxEntries 压制、LRU 逐出
@@ -81,10 +85,15 @@ interface Synthetic {
 
 /**
  * 合成探针路径（仅本域装置）：命中 SW 运行时路由的 URL 形态，服务端自造应答，
- * 避免依赖外网与真实资产内容。404 探针专测 cacheableResponse 只收 200。
- * vv-runtime 族探针（/yN/libarchive/libarchive.wasm 与 /zN/tree-sitter.wasm）用于
- * LRU 逐出场景——tree-sitter 与 libarchive 两条路由共用 vv-runtime-<REV>，同族条目
- * 互相挤占同一份 maxEntries 配额。
+ * 避免依赖外网与真实资产内容。404 探针专测 cacheableResponse 只收 200——
+ * swr-missing.wasm 是通用 404 形态；swr-spa.js 模拟**修复后**的服务端契约
+ * （SWR-DEF-01：server/src/lib.rs `serve_index` 的 SPA fallback 收窄为只对导航
+ * 请求生效——Accept 含 text/html 才回 index.html，非导航 fetch 的未知资产路径
+ * 一律 404。缺陷态曾回 200 HTML 被 vv-foreign-assets 缓存，历史见
+ * docs/e2e/sw-runtime-cache.md §3.2）。vv-runtime 族探针
+ * （/yN/libarchive/libarchive.wasm 与 /zN/tree-sitter.wasm）用于 LRU 逐出场景——
+ * tree-sitter 与 libarchive 两条路由共用 vv-runtime-<REV>，同族条目互相挤占
+ * 同一份 maxEntries 配额。
  */
 const SYNTHETIC: Record<string, Synthetic> = {
   '/grammars/swr-probe.wasm': { status: 200, type: 'application/wasm', body: WASM_BYTES },
@@ -105,6 +114,14 @@ const SYNTHETIC: Record<string, Synthetic> = {
     type: 'text/plain',
     body: Buffer.from('not deployed\n')
   },
+  // 修复后服务端契约（SWR-DEF-01，server/src/lib.rs serve_index Accept 收窄）：
+  // 非导航 fetch 的未知资产路径 404——原缺陷态为 200 + text/html（SPA fallback），
+  // 曾被 vv-foreign-assets 缓存收留
+  '/file-viewer-assets/swr-spa.js': {
+    status: 404,
+    type: 'text/plain',
+    body: Buffer.from('not deployed\n')
+  },
   '/y1/libarchive/libarchive.wasm': { status: 200, type: 'application/wasm', body: WASM_BYTES },
   '/y2/libarchive/libarchive.wasm': { status: 200, type: 'application/wasm', body: WASM_BYTES },
   '/y3/libarchive/libarchive.wasm': { status: 200, type: 'application/wasm', body: WASM_BYTES },
@@ -112,12 +129,6 @@ const SYNTHETIC: Record<string, Synthetic> = {
   '/z2/tree-sitter.wasm': { status: 200, type: 'application/wasm', body: WASM_BYTES },
   '/z3/tree-sitter.wasm': { status: 200, type: 'application/wasm', body: WASM_BYTES }
 };
-
-/**
- * SPA fallback 模拟路径：真实后端（server/src/lib.rs:69-89）对未知且非 .scm/.wasm 的
- * 路径返回 200 + index.html（text/html）。foreign 资产的真实形态是 .js → 命中该分支。
- */
-const SPA_FALLBACK_PATHS = new Set(['/file-viewer-assets/swr-spa.js']);
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -151,7 +162,7 @@ interface Fixture {
   close(): Promise<void>;
 }
 
-/** 起一台自建静态服务器：伺服 build 产物 + 合成探针 + SPA fallback 模拟 */
+/** 起一台自建静态服务器：伺服 build 产物 + 合成探针（含修复后服务端契约的 404 形态） */
 async function startFixture(dir: string): Promise<Fixture> {
   const hits = new Map<string, number>();
   let revRewrite: { from: string; to: string } | null = null;
@@ -180,13 +191,6 @@ async function startFixture(dir: string): Promise<Fixture> {
         const text = (await readFile(file)).toString('utf8');
         res.writeHead(200, { 'content-type': 'application/javascript', 'cache-control': 'no-cache' });
         res.end(text.split(revRewrite.from).join(revRewrite.to));
-        return;
-      }
-      if (SPA_FALLBACK_PATHS.has(pathname)) {
-        // 真实后端的 SPA fallback：200 + index.html（text/html）
-        const html = await readFile(join(dir, 'index.html'));
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
-        res.end(html);
         return;
       }
       const data = await readFile(file);
@@ -540,7 +544,7 @@ test.describe('b-sw-runtime-cache SW 运行时缓存路由（自建静态伺服�
     const holders = await vvHolders(page, url);
     expect(
       holders[0],
-      '同源预留槽 /file-viewer-assets/ 应归 vv-foreign-assets-* 族（vite.config.ts:775-781）'
+      '同源预留槽 /file-viewer-assets/ 应归 vv-foreign-assets-* 族（vite.config.ts:774-785）'
     ).toMatch(/^vv-foreign-assets-/);
   });
 
@@ -681,16 +685,18 @@ test.describe('b-sw-runtime-cache SW 运行时缓存路由（自建静态伺服�
     ).toMatch(/^vv-cdn-engines-/);
   });
 
-  test.fixme(
-    'SWR-ROUTE-07 [SWR-DEF-01 新登记: SPA fallback 200 HTML 被收进 foreign 资产缓存]: /file-viewer-assets/ 下 SPA fallback 应答不得入运行时缓存',
+  test(
+    'SWR-ROUTE-07 [SWR-DEF-01 已修: 服务端 fallback 收窄后未知资产 404 不入 foreign 资产缓存]: /file-viewer-assets/ 下未知资产应答不得入运行时缓存',
     async ({ page }) => {
-      // 缺陷态：真实后端（server/src/lib.rs:69-89）对未知且非 .scm/.wasm 的路径返回
-      // 200 + index.html；foreign 资产的真实形态是 .js → 命中该分支。该 200 HTML 被
-      // /file-viewer-assets/ 路由的 CacheFirst + cacheableResponse{statuses:[200]}
-      // （vite.config.ts:775-781）收进 vv-foreign-assets 缓存并长期复用——与
-      // vite.config.ts:774 的注释承诺「404/SPA fallback 应答不入缓存」相悖。
-      // 断言按产品承诺写（不入缓存），当前实现下必然失败 → 以 test.fixme 占位，
-      // 修复 PR（按 content-type 收窄 cacheableResponse 或修正注释承诺）后转正。
+      // 修复后契约（server/src/lib.rs `serve_index` Accept 收窄，SWR-DEF-01）：SPA
+      // fallback 只对导航请求生效——非导航 fetch 的未知资产 URL（foreign 资产的真实
+      // 形态是 .js）由服务端回 404，404 被 /file-viewer-assets/ 路由的
+      // cacheableResponse{statuses:[200]} 拒收。cacheableResponse 只拦非 200；SPA
+      // fallback 的 200 HTML 由服务端 Accept 收窄治理（SW 层无法按 content-type 过滤：
+      // generateSW 不支持自定义 cacheWillUpdate plugin）。本域伺服面已同步为修复后
+      // 契约（swr-spa.js → 404）；服务端契约由 cargo 集成锚
+      // （server/tests/health.rs spa_fallback_gated_on_navigation_accept）守住。
+      // 缺陷态历史（200 HTML 入缓存）见 docs/e2e/sw-runtime-cache.md §3.2。
       test.setTimeout(120_000);
       await page.goto(fixture.base);
       await waitSwActivated(page);
@@ -698,8 +704,7 @@ test.describe('b-sw-runtime-cache SW 运行时缓存路由（自建静态伺服�
       const path = '/file-viewer-assets/swr-spa.js';
       const url = `${fixture.base}${path}`;
       const r = await probe(page, url);
-      expect(r.status, 'SPA fallback 应答为 200（text/html）').toBe(200);
-      expect(r.type, 'SPA fallback 应答类型为 basic（text/html，非 opaque）').toBe('basic');
+      expect(r.status, '修复后服务端对非导航 fetch 的未知资产回 404（Accept 收窄）').toBe(404);
 
       // 同族 200 探针入缓存即证明 put 通道已跑通（排除时序误判）
       const okUrl = `${fixture.base}/file-viewer-assets/swr-probe.wasm`;
@@ -713,7 +718,7 @@ test.describe('b-sw-runtime-cache SW 运行时缓存路由（自建静态伺服�
 
       expect(
         await vvHolders(page, url),
-        'SPA fallback 的 200 HTML 不得进入 vv-foreign-assets 缓存（vite.config.ts:774 的承诺）'
+        '未知资产的 404 不得进入 vv-foreign-assets 缓存（cacheableResponse 拒收非 200）'
       ).toEqual([]);
     }
   );
