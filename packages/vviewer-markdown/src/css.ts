@@ -128,14 +128,15 @@ export const RUNTIME_DIAGRAM_TOGGLE_HOVER_CSS = `.vv-markdown .md-diagram-toggle
 
 /** 灯箱 overlay（body 级单例）与画廊/控制条：纯交互壳，整段不进导出。 */
 export const RUNTIME_LIGHTBOX_CSS = `.md-lightbox-overlay { position: fixed; inset: 0; z-index: 100; background: rgb(0 0 0 / 70%);
-  display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
+  display: flex; align-items: center; justify-content: center; cursor: zoom-out; touch-action: none; }
 .md-lightbox { max-width: 92vw; max-height: 92vh; }
 /* 灯箱画廊：stage 铺满 overlay 作为缩放平移变换面（origin 0 0 与 zoomAt 的
    「屏幕点 = 内容点×zoom + t」锚定数学同构），内容居中；bar 悬浮底部集中导航/
    计数/缩放/关闭，触控目标 ≥32px。关闭语义：点背景（overlay/stage 空白）或关闭钮，
-   点内容与控制件不关 */
+   点内容与控制件不关。overlay/stage touch-action:none：触屏拖拽/捏合全交指针手势，
+   防浏览器原生平移/缩放竞争（会以 pointercancel 打断手势） */
 .md-lightbox-stage { position: absolute; inset: 0; display: flex; align-items: center;
-  justify-content: center; transform-origin: 0 0; cursor: grab; }
+  justify-content: center; transform-origin: 0 0; cursor: grab; touch-action: none; }
 .md-lightbox-stage.md-lightbox-dragging { cursor: grabbing; }
 .md-lightbox-svg { display: flex; max-width: 92vw; max-height: 92vh; }
 .md-lightbox-svg svg { max-width: 100%; max-height: 92vh; }

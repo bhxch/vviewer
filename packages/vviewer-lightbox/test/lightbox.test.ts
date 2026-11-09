@@ -1,5 +1,5 @@
 // lightbox.test.ts — 灯箱模块单测：缩放/平移/导航状态机纯函数直测 + jsdom DOM
-// 交互（打开/关闭语义、画廊导航、键盘集、归属代币、主题前缀）。
+// 交互（打开/关闭语义、画廊导航、键盘集、指针拖拽/捏合、归属代币、主题前缀）。
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LightboxCtx } from '../src/lightbox';
 import {
@@ -30,6 +30,16 @@ function viewOf(stage: HTMLElement): { tx: number; ty: number; zoom: number } {
   const m = /translate\(([-\d.e]+)px, ([-\d.e]+)px\) scale\(([-\d.e]+)\)/.exec(stage.style.transform);
   expect(m).not.toBeNull();
   return { tx: Number(m![1]), ty: Number(m![2]), zoom: Number(m![3]) };
+}
+
+/** 派发指针事件（缺省鼠标主键 pointerId 1）。jsdom 30 有 PointerEvent 构造（pointerId/
+ * pointerType 可用），无 setPointerCapture——实现须容错。 */
+function pointer(target: EventTarget, type: string, x: number, y: number, init: PointerEventInit = {}): PointerEvent {
+  const ev = new PointerEvent(type, {
+    pointerId: 1, pointerType: 'mouse', button: 0, clientX: x, clientY: y, bubbles: true, cancelable: true, ...init,
+  });
+  target.dispatchEvent(ev);
+  return ev;
 }
 
 describe('collectGallery', () => {
@@ -275,7 +285,7 @@ describe('画廊导航与键盘集', () => {
   });
 });
 
-describe('缩放平移交互（wheel/拖拽 pan/拖拽吞 click）', () => {
+describe('缩放平移交互（wheel/指针拖拽 pan/捏合/拖拽吞 click）', () => {
   it('wheel 缩放以光标为中心且限幅（deltaY<0 放大）', () => {
     const doc = docOf('<img src="a.png" alt="A">');
     openLightbox(doc.querySelector('img')!, noCtx, collectGallery(doc.body));
@@ -299,20 +309,19 @@ describe('缩放平移交互（wheel/拖拽 pan/拖拽吞 click）', () => {
     openLightbox(doc.querySelector('img')!, noCtx, collectGallery(doc.body));
     const overlay = overlayOf(doc);
     const stage = overlay.querySelector<HTMLElement>('.md-lightbox-stage')!;
-    const mouse = (type: string, x: number, y: number): void => {
-      const Target = type === 'mousedown' ? stage : doc;
-      Target.dispatchEvent(new MouseEvent(type, { button: 0, clientX: x, clientY: y, bubbles: true }));
+    const drag = (type: string, x: number, y: number): void => {
+      pointer(type === 'pointerdown' ? stage : doc, type, x, y);
     };
     expect(stage.classList.contains('md-lightbox-dragging')).toBe(false);
-    mouse('mousedown', 100, 100);
+    drag('pointerdown', 100, 100);
     expect(stage.classList.contains('md-lightbox-dragging')).toBe(true);
-    mouse('mousemove', 160, 140);
+    drag('pointermove', 160, 140);
     expect(viewOf(stage)).toEqual({ tx: 60, ty: 40, zoom: 1 });
-    mouse('mousemove', 130, 120); // 第二段增量相对按下点，不叠加
+    drag('pointermove', 130, 120); // 第二段增量相对按下点，不叠加
     expect(viewOf(stage)).toEqual({ tx: 30, ty: 20, zoom: 1 });
-    mouse('mouseup', 130, 120);
+    drag('pointerup', 130, 120);
     expect(stage.classList.contains('md-lightbox-dragging')).toBe(false);
-    mouse('mousemove', 200, 200); // 松手后不再跟随
+    drag('pointermove', 200, 200); // 松手后不再跟随
     expect(viewOf(stage)).toEqual({ tx: 30, ty: 20, zoom: 1 });
   });
 
@@ -321,10 +330,10 @@ describe('缩放平移交互（wheel/拖拽 pan/拖拽吞 click）', () => {
     openLightbox(doc.querySelector('img')!, noCtx, collectGallery(doc.body));
     const overlay = overlayOf(doc);
     const stage = overlay.querySelector<HTMLElement>('.md-lightbox-stage')!;
-    // 拖拽序列：mousedown（stage）→ 大位移 mousemove → mouseup（落点经冒泡到 overlay）
-    stage.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: 100, clientY: 100, bubbles: true }));
-    doc.dispatchEvent(new MouseEvent('mousemove', { clientX: 160, clientY: 140, bubbles: true }));
-    doc.dispatchEvent(new MouseEvent('mouseup', { clientX: 160, clientY: 140, bubbles: true }));
+    // 拖拽序列：pointerdown（stage）→ 大位移 pointermove → pointerup（落点经冒泡到 overlay）
+    pointer(stage, 'pointerdown', 100, 100);
+    pointer(doc, 'pointermove', 160, 140);
+    pointer(doc, 'pointerup', 160, 140);
     overlay.dispatchEvent(new MouseEvent('click', { bubbles: true })); // 拖拽收尾 click
     expect(overlayOf(doc)).not.toBeNull(); // 不得意外关闭
     overlay.dispatchEvent(new MouseEvent('click', { bubbles: true })); // 真正点背景
@@ -336,11 +345,104 @@ describe('缩放平移交互（wheel/拖拽 pan/拖拽吞 click）', () => {
     openLightbox(doc.querySelector('img')!, noCtx, collectGallery(doc.body));
     const overlay = overlayOf(doc);
     const stage = overlay.querySelector<HTMLElement>('.md-lightbox-stage')!;
-    stage.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: 100, clientY: 100, bubbles: true }));
-    doc.dispatchEvent(new MouseEvent('mousemove', { clientX: 101, clientY: 101, bubbles: true })); // Manhattan 2 ≤ 3
-    doc.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    pointer(stage, 'pointerdown', 100, 100);
+    pointer(doc, 'pointermove', 101, 101); // Manhattan 2 ≤ 3
+    pointer(doc, 'pointerup', 101, 101);
     overlay.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(overlayOf(doc)).toBeNull();
+  });
+
+  it('button 0 过滤只对鼠标：右键不拖；鼠标按下 preventDefault（防原生拖拽/选中），触屏不阻止（保 tap→click）', () => {
+    const doc = docOf('<img src="a.png" alt="A">');
+    openLightbox(doc.querySelector('img')!, noCtx, collectGallery(doc.body));
+    const overlay = overlayOf(doc);
+    const stage = overlay.querySelector<HTMLElement>('.md-lightbox-stage')!;
+    const right = pointer(stage, 'pointerdown', 100, 100, { button: 2 });
+    expect(right.defaultPrevented).toBe(false);
+    expect(stage.classList.contains('md-lightbox-dragging')).toBe(false);
+    pointer(doc, 'pointermove', 160, 140, { button: 2 });
+    expect(viewOf(stage)).toEqual({ tx: 0, ty: 0, zoom: 1 });
+    const left = pointer(stage, 'pointerdown', 100, 100);
+    expect(left.defaultPrevented).toBe(true);
+    pointer(doc, 'pointerup', 100, 100);
+    const touch = pointer(stage, 'pointerdown', 100, 100, { pointerId: 5, pointerType: 'touch' });
+    expect(touch.defaultPrevented).toBe(false);
+    expect(stage.classList.contains('md-lightbox-dragging')).toBe(true);
+    pointer(doc, 'pointerup', 100, 100, { pointerId: 5, pointerType: 'touch' });
+    expect(stage.classList.contains('md-lightbox-dragging')).toBe(false);
+  });
+
+  it('触屏拖动平移：按下元素（内容图）setPointerCapture——click 目标保持内容图不被改写为 stage；pointercancel 收尾', () => {
+    const doc = docOf('<img src="a.png" alt="A">');
+    openLightbox(doc.querySelector('img')!, noCtx, collectGallery(doc.body));
+    const overlay = overlayOf(doc);
+    const stage = overlay.querySelector<HTMLElement>('.md-lightbox-stage')!;
+    const clone = overlay.querySelector<HTMLImageElement>('img.md-lightbox')!;
+    const capture = vi.fn();
+    (clone as unknown as { setPointerCapture: (id: number) => void }).setPointerCapture = capture;
+    const touch = { pointerId: 7, pointerType: 'touch' };
+    pointer(clone, 'pointerdown', 100, 100, touch);
+    expect(capture).toHaveBeenCalledWith(7);
+    expect(stage.classList.contains('md-lightbox-dragging')).toBe(true);
+    // 捕获后 move 派发到按下元素、冒泡至 document
+    pointer(clone, 'pointermove', 140, 90, touch);
+    expect(viewOf(stage)).toEqual({ tx: 40, ty: -10, zoom: 1 });
+    pointer(clone, 'pointercancel', 140, 90, touch);
+    expect(stage.classList.contains('md-lightbox-dragging')).toBe(false);
+    pointer(clone, 'pointermove', 200, 200, touch);
+    expect(viewOf(stage)).toEqual({ tx: 40, ty: -10, zoom: 1 });
+  });
+
+  it('双指捏合：zoomAt 以两指中点为锚按指距比缩放并随中点平移；抬一指单指接续不跳变；捏合不误关', () => {
+    const doc = docOf('<img src="a.png" alt="A">');
+    openLightbox(doc.querySelector('img')!, noCtx, collectGallery(doc.body));
+    const overlay = overlayOf(doc);
+    const stage = overlay.querySelector<HTMLElement>('.md-lightbox-stage')!;
+    const t = (id: number): PointerEventInit => ({ pointerId: id, pointerType: 'touch' });
+    pointer(stage, 'pointerdown', 100, 100, t(1));
+    pointer(stage, 'pointerdown', 200, 100, t(2));
+    // 指距 100 → 200（×2）、中点 (150,100) → (200,100)：zoomAt 锚 (150,100) 得
+    // t = (150,100) − 2×(150,100) = (−150,−100)，再随中点平移 (+50,0)
+    pointer(doc, 'pointermove', 300, 100, t(2));
+    expect(viewOf(stage)).toEqual({ tx: -100, ty: -100, zoom: 2 });
+    // 原中点下内容点 (150,100) 落到新中点：150×2 − 100 = 200 ✓、100×2 − 100 = 100 ✓
+    pointer(doc, 'pointerup', 300, 100, t(2));
+    expect(stage.classList.contains('md-lightbox-dragging')).toBe(true); // 尚余一指
+    pointer(doc, 'pointermove', 110, 120, t(1)); // 基准重置于抬指时：增量 (+10,+20)
+    expect(viewOf(stage)).toEqual({ tx: -90, ty: -80, zoom: 2 });
+    pointer(doc, 'pointerup', 110, 120, t(1));
+    expect(stage.classList.contains('md-lightbox-dragging')).toBe(false);
+    overlay.dispatchEvent(new MouseEvent('click', { bubbles: true })); // 手势收尾 click 吞掉
+    expect(overlayOf(doc)).not.toBeNull();
+  });
+
+  it('dragstart 拦截：HTML5 原生拖拽与指针平移冲突', () => {
+    const doc = docOf('<img src="a.png" alt="A">');
+    openLightbox(doc.querySelector('img')!, noCtx, collectGallery(doc.body));
+    const ev = new Event('dragstart', { bubbles: true, cancelable: true });
+    overlayOf(doc).querySelector('img.md-lightbox')!.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+  });
+
+  it('document 级 pointermove/up/cancel 监听按下才挂、全抬起即收（引用一致，spyOn 判别）', () => {
+    const doc = docOf('<img src="a.png" alt="A">');
+    openLightbox(doc.querySelector('img')!, noCtx, collectGallery(doc.body));
+    const stage = overlayOf(doc).querySelector<HTMLElement>('.md-lightbox-stage')!;
+    const addSpy = vi.spyOn(doc, 'addEventListener');
+    const removeSpy = vi.spyOn(doc, 'removeEventListener');
+    try {
+      pointer(stage, 'pointerdown', 100, 100, { pointerId: 1, pointerType: 'touch' });
+      pointer(stage, 'pointerdown', 200, 100, { pointerId: 2, pointerType: 'touch' });
+      const added = addSpy.mock.calls.filter(([type]) => String(type).startsWith('pointer'));
+      expect(added.map(([type]) => type).sort()).toEqual(['pointercancel', 'pointermove', 'pointerup']); // 第二指不重复挂
+      pointer(doc, 'pointerup', 200, 100, { pointerId: 2, pointerType: 'touch' });
+      expect(removeSpy).not.toHaveBeenCalled(); // 尚余一指
+      pointer(doc, 'pointerup', 100, 100, { pointerId: 1, pointerType: 'touch' });
+      for (const [type, fn] of added) expect(removeSpy).toHaveBeenCalledWith(type, fn);
+    } finally {
+      addSpy.mockRestore();
+      removeSpy.mockRestore();
+    }
   });
 });
 

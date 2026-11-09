@@ -1,10 +1,13 @@
 # @bhxch/vviewer-lightbox
 
 零依赖灯箱组件包：body 级单例 overlay——画廊导航（←/→ 环绕）、键盘集、光标锚定
-缩放平移（滚轮/按钮/+− 键）、owner 代币防多实例互删。自 render-text 管线迁出的
+缩放平移（滚轮/按钮/+− 键；Pointer Events 统一鼠标/触屏/笔：单指针拖拽平移、双指
+以中点为锚捏合缩放）、owner 代币防多实例互删。自 render-text 管线迁出的
 全自研组件，供任何需要图片/SVG 灯箱的查看器复用。组件只负责 DOM 装配与交互；
-样式由宿主按类名约定自备（web 端示例见 `apps/web/src/app.css` 的 `.md-lightbox-*`
-规则组，app.css:217-237）。
+样式由宿主按类名约定自备（web 端示例见 `@bhxch/vviewer-markdown` 的
+`RUNTIME_LIGHTBOX_CSS` / `markdown.css` 中 `.md-lightbox-*` 规则组）。触屏手势要求
+宿主给 overlay 与 stage 设 `touch-action: none`——否则浏览器原生平移/缩放会与指针
+手势竞争，并以 pointercancel 打断拖拽/捏合。
 
 ## 安装
 

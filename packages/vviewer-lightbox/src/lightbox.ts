@@ -5,11 +5,12 @@
 // 对宿主管线上下文只依赖最小局部接口 LightboxCtx（类型擦除，无运行时环）。
 // - 状态机纯函数（clampZoom/zoomAt/navigate）单测直测：zoomAt 光标中心锚定——
 //   屏幕点 p = 内容点 c × zoom + t（stage transform-origin 0 0 同构），令光标处
-//   缩放前后 p 不变解出 t' = (cx,cy) − applied × ((cx,cy) − t)。
+//   缩放前后 p 不变解出 t' = (cx,cy) − applied × ((cx,cy) − t)。双指捏合同以 zoomAt
+//   锚两指中点，再叠加中点位移。
 // - 关闭语义（T1 裁决）：点背景（overlay 本体/stage 空白）或关闭钮关；点内容与
 //   控制件不关——比原「点 overlay 任意处关」多一层 target 判定，原有语义测试
 //   （overlay.click()）不受影响。
-// - 拖拽 pan 与关闭的冲突（T2 裁决）：拖拽位移超阈值置 dragMoved，吞掉 mouseup
+// - 拖拽 pan 与关闭的冲突（T2 裁决）：拖拽位移超阈值置 dragMoved，吞掉 pointerup
 //   后收尾的 click（该 click 经冒泡会落在 overlay 上，否则拖完即误关）。
 // - 递延清偿（5-2/5-3/5-5）：输入控件内按键直通不劫持；overlay 具对话框语义
 //   （role/aria-modal/开启焦点入/关闭焦点还原/计数 aria-live）；画廊按元素身份定位
@@ -322,31 +323,87 @@ function buildOverlay(doc: Document, ctx: LightboxCtx): { overlay: HTMLElement; 
     applyState();
   }, { passive: false });
 
-  // 拖拽平移：mousedown 记起点与基准位移，document 级 mousemove 增量写 tx/ty（按下
-  // 态才挂监听），mouseup 收监听；位移超阈值置 dragMoved（恒允许 pan，zoom=1 时
-  // 拖动即平移、无边界回弹——实现取简）
-  stage.addEventListener('mousedown', (ev) => {
-    if (ev.button !== 0) return;
-    ev.preventDefault(); // 防原生 img 拖拽与选中
-    dragMoved = false;
-    const startX = ev.clientX;
-    const startY = ev.clientY;
-    const base = { tx: state.tx, ty: state.ty };
-    const onMove = (me: MouseEvent): void => {
-      const dx = me.clientX - startX;
-      const dy = me.clientY - startY;
+  // 指针手势（Pointer Events 统一鼠标/触屏/笔；活动指针记于 pointers，Map 插入序即
+  // 按下序）：
+  // - 单指针拖拽平移：增量相对按下点（panFrom 基准 + 位移），位移超阈值置 dragMoved
+  //   （恒允许 pan，zoom=1 时拖动即平移、无边界回弹——实现取简）；
+  // - 双指针捏合：zoomAt 以上一帧两指中点为锚按指距比缩放，再随中点位移平移；
+  // - 指针数回落到 1（捏合抬一指）即以剩余指针现位置重置基准，接续平移不跳变。
+  // move/up/cancel 挂 document（首指按下才挂、全抬起即收）；按下元素 setPointerCapture：
+  // 指针出窗口仍持续送达，且 click 目标保持为按下元素——若改捕获到 stage，点内容的
+  // click 目标会被改写成 stage 而误关（T1 裁决）。
+  const pointers = new Map<number, { x: number; y: number }>();
+  let panFrom = { x: 0, y: 0, tx: 0, ty: 0 };
+
+  const rebase = (): void => {
+    const p = pointers.values().next().value;
+    if (p) panFrom = { x: p.x, y: p.y, tx: state.tx, ty: state.ty };
+  };
+
+  const onPointerMove = (ev: PointerEvent): void => {
+    if (!pointers.has(ev.pointerId)) return;
+    const cur = { x: ev.clientX, y: ev.clientY };
+    if (pointers.size === 1) {
+      pointers.set(ev.pointerId, cur);
+      const dx = cur.x - panFrom.x;
+      const dy = cur.y - panFrom.y;
       if (Math.abs(dx) + Math.abs(dy) > DRAG_THRESHOLD) dragMoved = true;
-      state = { ...state, tx: base.tx + dx, ty: base.ty + dy };
+      state = { ...state, tx: panFrom.tx + dx, ty: panFrom.ty + dy };
       applyState();
-    };
-    const onUp = (): void => {
-      stage.classList.remove(cls(ctx, 'dragging'));
-      doc.removeEventListener('mousemove', onMove);
-      doc.removeEventListener('mouseup', onUp);
-    };
-    stage.classList.add(cls(ctx, 'dragging'));
-    doc.addEventListener('mousemove', onMove);
-    doc.addEventListener('mouseup', onUp);
+      return;
+    }
+    // 捏合：仅按下序前两个指针参与（第三指起只记位置）
+    const [a0, b0] = [...pointers.values()];
+    pointers.set(ev.pointerId, cur);
+    const [a1, b1] = [...pointers.values()];
+    if (!a0 || !b0 || !a1 || !b1 || (a0 === a1 && b0 === b1)) return;
+    dragMoved = true;
+    const rect = overlay.getBoundingClientRect();
+    const m0x = (a0.x + b0.x) / 2 - rect.left;
+    const m0y = (a0.y + b0.y) / 2 - rect.top;
+    const m1x = (a1.x + b1.x) / 2 - rect.left;
+    const m1y = (a1.y + b1.y) / 2 - rect.top;
+    const d0 = Math.hypot(b0.x - a0.x, b0.y - a0.y);
+    const d1 = Math.hypot(b1.x - a1.x, b1.y - a1.y);
+    const zoomed = zoomAt(state, d0 > 0 ? d1 / d0 : 1, m0x, m0y);
+    state = { ...zoomed, tx: zoomed.tx + m1x - m0x, ty: zoomed.ty + m1y - m0y };
+    applyState();
+  };
+
+  const onPointerUp = (ev: PointerEvent): void => {
+    if (!pointers.delete(ev.pointerId)) return;
+    if (pointers.size === 1) rebase(); // 捏合抬一指：剩余指针接续平移
+    if (pointers.size > 0) return;
+    stage.classList.remove(cls(ctx, 'dragging'));
+    doc.removeEventListener('pointermove', onPointerMove);
+    doc.removeEventListener('pointerup', onPointerUp);
+    doc.removeEventListener('pointercancel', onPointerUp);
+  };
+
+  stage.addEventListener('pointerdown', (ev) => {
+    if (ev.pointerType === 'mouse') {
+      if (ev.button !== 0) return; // 主键过滤只对鼠标（触屏/笔的接触即主键）
+      // 防原生 img 拖拽与选中（同原 mousedown 语义）；触屏不取消——原生手势交 CSS
+      // touch-action，免得波及 tap 合成的兼容鼠标事件与 click（点背景关闭）
+      ev.preventDefault();
+    }
+    const target = ev.target;
+    if (target instanceof Element) {
+      try {
+        target.setPointerCapture(ev.pointerId);
+      } catch {
+        // jsdom 未实现 / 合成事件无活动指针时抛错：不捕获，document 级监听照常收 move/up
+      }
+    }
+    if (pointers.size === 0) {
+      dragMoved = false;
+      stage.classList.add(cls(ctx, 'dragging'));
+      doc.addEventListener('pointermove', onPointerMove);
+      doc.addEventListener('pointerup', onPointerUp);
+      doc.addEventListener('pointercancel', onPointerUp);
+    }
+    pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (pointers.size === 1) rebase();
   });
 
   // HTML5 原生拖拽与指针平移冲突，禁掉
