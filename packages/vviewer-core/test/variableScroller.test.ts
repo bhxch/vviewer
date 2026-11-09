@@ -230,6 +230,54 @@ describe('variableScroller', () => {
   });
 });
 
+describe('variableScroller 宽度变化（折行全变）', () => {
+  let roCallbacks: Array<() => void> = [];
+  beforeEach(() => {
+    roCallbacks = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: () => void) {
+          roCallbacks.push(cb);
+        }
+        observe(): void {}
+        disconnect(): void {}
+      }
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('容器变宽：onWidthChange 先行（消费方更新估算参数）→ 测高作废按新估算重估，首可视行保持', () => {
+    const c = document.createElement('div');
+    document.body.append(c);
+    let width = 400;
+    Object.defineProperty(c, 'clientWidth', { configurable: true, get: () => width });
+    let rowsPerLine = 3; // 估算：窄容器每行折 3 视觉行
+    const m = new RowHeights(() => 20 * rowsPerLine);
+    m.setRowCount(100);
+    const widthChanges: number[] = [];
+    const h = variableScroller(c, m, () => {}, 0, () => {
+      widthChanges.push(width);
+      rowsPerLine = 1; // 变宽后不再折行
+    });
+    h.measure(5, 200);
+    h.scrollTo(h.offsetOf(10)); // 首可视行 10
+    c.dispatchEvent(new Event('scroll'));
+    expect(h.firstVisibleRow()).toBe(10);
+    // 仅高度变化：不触发重估
+    for (const cb of roCallbacks) cb();
+    expect(widthChanges).toEqual([]);
+    width = 800;
+    for (const cb of roCallbacks) cb();
+    expect(widthChanges).toEqual([800]);
+    expect(m.heightOf(5)).toBe(20); // 旧测高作废、新估算生效
+    expect(h.firstVisibleRow()).toBe(10);
+    expect(c.scrollTop).toBe(200); // 行 10 新前缀 10×20
+    h.destroy();
+    c.remove();
+  });
+});
+
 describe('virtualScroller 行几何方法（与 variableScroller 同接口）', () => {
   beforeEach(() => {
     vi.stubGlobal('ResizeObserver', class {

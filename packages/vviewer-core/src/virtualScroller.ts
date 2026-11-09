@@ -183,14 +183,17 @@ export interface VariableScrollerHandle extends VirtualScrollerHandle {
  * - 自动测高：每次 onRange 渲染后同步量 data-line 行的 offsetHeight（jsdom/隐藏为 0
  *   跳过）——逐屏滚动自然收敛，估算偏差被渲染实测持续修正；
  * - 锚定补偿：测高致视口顶锚行之上的前缀变化时同步平移 scrollTop（视口内容不跳），
- *   再按新前缀重算范围（至多 4 轮收敛）。
+ *   再按新前缀重算范围（至多 4 轮收敛）；
+ * - 宽度变化（折行全变）：onWidthChange 回调后测高作废、锚行按新估算复位重绘重测。
  * onRange 内不得直写 container.scrollTop（会与锚定补偿打架）；跳转一律 scrollTo。
  */
 export function variableScroller(
   container: HTMLElement,
   model: RowHeights,
   onRange: (first: number, last: number, viewport: HTMLElement) => void,
-  overscan = 10
+  overscan = 10,
+  /** 容器宽度变化回调（折行全变，测高作废前调用——消费方更新估算参数） */
+  onWidthChange?: () => void
 ): VariableScrollerHandle {
   container.classList.add('vv-virtual');
   const spacer = document.createElement('div');
@@ -278,7 +281,24 @@ export function variableScroller(
 
   const onUpdate = (): void => update();
   container.addEventListener('scroll', onUpdate, { passive: true });
-  const ro = new ResizeObserver(onUpdate);
+  // 宽度变化 = 折行全变：测高作废（消费方 onWidthChange 先更新估算参数，如每行列数），
+  // 视口顶锚行按新估算前缀复位后强制重绘重测；仅高度变化走普通 update
+  let lastWidth = container.clientWidth;
+  const ro = new ResizeObserver(() => {
+    if (destroyed) return;
+    const width = container.clientWidth;
+    if (width === lastWidth) {
+      update();
+      return;
+    }
+    lastWidth = width;
+    const anchor = topRow();
+    onWidthChange?.();
+    model.invalidate();
+    syncSpacer();
+    container.scrollTop = Math.max(0, toScroll(model.offsetOf(anchor)));
+    update(true);
+  });
   ro.observe(container);
   update();
   return {
