@@ -11,7 +11,7 @@
 
 | # | 现象 | 根因 | 修复提交 |
 | --- | --- | --- | --- |
-| 1 | 代码没有自动换行开关 | 代码视图为固定行高虚拟滚动，`.vv-code-line { white-space: pre }`，无换行设置 | core `variableScroller`/`RowHeights`（ee308fa、d30d2e0）、render-text `wordWrap`/`setWordWrap`（baa0db4）、设置「代码视图」/状态栏「换行」/Alt+Z（9ad8bd2） |
+| 1 | 代码没有自动换行开关 | 代码视图为固定行高虚拟滚动，`.vv-code-line { white-space: pre }`，无换行设置 | core `variableScroller`/`RowHeights`（ee308fa、d30d2e0）、render-text `wordWrap`/`setWordWrap`（baa0db4）、设置「代码视图」/状态栏「换行」/Alt+Z（9ad8bd2）、HTML/图表源码视图与降级源码面同样遵循（16c26d6） |
 | 2 | 手机上 PDF 100% 超宽，横向发票看不到左半边、拖不动 | 100% = 1pt:1px（842pt 横向页 > 375px）；`.vv-pdf-pages` 以 `align-items:center` 居中，页宽超容器时左侧溢出落在负滚动区永远不可达 | a769db5（auto 默认适宽且封顶 100%、「适应宽度」按钮、左右 auto margin 居中、缩放保持阅读位置） |
 | 3 | PPT 默认是大纲模式 | `.pptx` 绑定自研文本提纲渲染器；可逐页还原的 foreign 演示文稿渲染器刻意不绑 pptx | ccdea50（演示文稿拥有 pptx，提纲降为候选）；3b37296（引擎解析失败时错误卡给「以 PowerPoint（文本提纲） 打开」兜底与可读文案） |
 | 4 | 电脑上 PDF 报「无法预览此文件 Iterator is not defined」 | 浏览器版本低（Chrome/Edge<122、Firefox<131、Safari<18.4 无全局 Iterator）：pdfjs-dist 6.4.299 现代构建模块顶层 `typeof Iterator.prototype.join` 求值即抛 ReferenceError | 03fe011（主模块/worker 改 legacy 构建，core-js 先注册全局 Iterator；加载失败不入单例） |
@@ -28,6 +28,7 @@
 | UFB-01b | 设置中心「代码视图」勾选应用后已打开视图即时换行；刷新后新打开视图仍换行 | 双 |
 | UFB-01c | Alt+Z 切换换行；Ctrl+Alt+Z 进专注模式不误触换行 | chromium |
 | UFB-01d | 换行模式滚到底末行可达；搜索跳转命中行落在视口内 | 双 |
+| UFB-01e | HTML 源码视图同样遵循换行：状态栏开关即时生效，渲染↔源码往返保持 | 双 |
 | UFB-02a | 842×595 横向页默认适宽（<100%）、整页在视口内；放大溢出后 scrollLeft=0 左缘可达；「适应宽度」页宽≈容器内容宽 | mobile |
 | UFB-02b | 放大溢出、停在最右后手指往右拖：scrollLeft 随手势减小，拖到 0 时页面左缘进入视口 | mobile |
 | UFB-02c | 桌面竖页（600pt）仍 100% | chromium |
