@@ -5,12 +5,13 @@
  * attachedClient/attachedRouter 的读取经 client.getHighlightClient/getHighlightRouter
  * （行为等价的读取面，拆分前为同模块直读）。
  */
-import { isAbortError, showErrorCard, type ComputeWhere, type SearchMatch, type StreamCtx } from '@bhxch/vviewer-core';
+import { isAbortError, RowHeights, showErrorCard, variableScroller, type ComputeWhere, type SearchMatch, type StreamCtx } from '@bhxch/vviewer-core';
 import { detectLanguage, HighlightCanceledError } from '@bhxch/vviewer-highlight';
 import { STREAM_MAX_BYTES, createBlockStream, isSuspiciousUtf8Block } from '../blockStream';
 import { createTextWindow } from '../textWindow';
 import { advanceCodeIndex, createCodeIndex, finishCodeIndex } from '../codeIndexStream';
 import { virtualScroller, type VirtualScrollerHandle } from '../virtualScroller';
+import { measureWrapColumns, WRAP_FALLBACK_COLS, wrappedRowHeight } from './wrap';
 import { searchCode, type SearchMatchWithPreview } from '../search';
 import {
   LINE_HEIGHT,
@@ -115,6 +116,9 @@ export function renderCodeWindowed(
   target.classList.add('vv-code');
   const pre = document.createElement('div');
   pre.className = 'vv-code-pre'; // virtualScroller 的滚动容器
+  // 自动换行（全量路径同款）：类名先行（首帧即按模式布局），滚动器行高模型见 index 声明后
+  let wrap = opts.wordWrap === true;
+  pre.classList.toggle('vv-code-wrap', wrap);
 
   // 提示条（BUG-20 同构）：pre 的兄弟节点而非子节点——virtualScroller 会
   // replaceChildren 滚动容器，提示条放里面会被清掉且 spacer 定位被顶偏。
@@ -158,6 +162,11 @@ export function renderCodeWindowed(
     signal: readAbort.signal
   });
   const index = createCodeIndex(Number.POSITIVE_INFINITY);
+  // 换行滚动器的行高模型：窗口模式行数动态增长，复用实例级 RowHeights——增长重建
+  // 滚动器（mount）时 setRowCount 保留既有测高，只新行按估算外推；估算取索引行字节长
+  // （CJK 3 字节/2 列偏高估，渲染实测收口）
+  let wrapCols = WRAP_FALLBACK_COLS;
+  const wrapHeights = new RowHeights((i) => wrappedRowHeight(index.lengths[i] ?? 0, wrapCols, lineHeight));
   const win = createTextWindow({
     blockSize: CODE_WINDOW_BLOCK_BYTES,
     maxBlocks: CODE_TEXT_CACHE_MAX_BLOCKS,
@@ -302,7 +311,10 @@ export function renderCodeWindowed(
     for (let i = Math.max(0, first); i <= last; i++) {
       const row = document.createElement('div');
       row.className = 'vv-code-line';
-      row.style.height = `${lineHeight}px`; // 占位行同款保行高
+      // 占位行同款保行高；换行模式行高由折行决定（variableScroller 渲染后实测），占位
+      // 行（块未驻留）以估算高占位，免得块到货重绘时整屏跳动
+      if (!wrap) row.style.height = `${lineHeight}px`;
+      else if (i >= rows() || !lineAvailable(i)) row.style.minHeight = `${wrapHeights.heightOf(i)}px`;
       row.dataset.line = String(i);
       const gutter = document.createElement('span');
       gutter.className = 'vv-code-gutter';
@@ -549,7 +561,19 @@ export function renderCodeWindowed(
     if (scroller !== null && mountedRows === n) return;
     scroller?.destroy();
     mountedRows = n;
-    scroller = virtualScroller(pre, n, lineHeight, onRange);
+    if (!wrap) {
+      scroller = virtualScroller(pre, n, lineHeight, onRange);
+      return;
+    }
+    const cols = measureWrapColumns(pre, n);
+    if (cols !== wrapCols) {
+      wrapCols = cols;
+      wrapHeights.invalidate();
+    }
+    wrapHeights.setRowCount(n);
+    scroller = variableScroller(pre, wrapHeights, onRange, 10, () => {
+      wrapCols = measureWrapColumns(pre, rows());
+    });
   }
 
   /** 续读/重拉完成后的重渲：行数增长 → 重建 scroller（spacer/总数更新，构造即重渲）；
@@ -793,10 +817,23 @@ export function renderCodeWindowed(
   function jumpToLine(line: number): void {
     if (hitTimer !== null) clearTimeout(hitTimer);
     hitLine = line;
-    const center = line * lineHeight - pre.clientHeight / 2 + lineHeight / 2;
+    // 行几何经滚动器换算（换行模式为可变行高前缀；全量引擎同款）
+    const centerOf = (): number =>
+      scroller
+        ? scroller.offsetOf(line) - pre.clientHeight / 2 + scroller.heightOf(line) / 2
+        : line * lineHeight - pre.clientHeight / 2 + lineHeight / 2;
+    const center = centerOf();
     if (scroller) scroller.scrollTo(Math.max(0, center)); // 虚拟坐标定位（BUG-55，同全量引擎）
     else pre.scrollTop = Math.max(0, center);
     scroller?.refresh();
+    if (wrap && scroller) {
+      // 换行模式：落地渲染的测高修正了目标附近行高，按实测重算一次居中
+      const settled = centerOf();
+      if (Math.abs(settled - center) >= 1) {
+        scroller.scrollTo(Math.max(0, settled));
+        scroller.refresh();
+      }
+    }
     applyHitClass();
     hitTimer = setTimeout(() => {
       hitTimer = null;
@@ -1332,7 +1369,24 @@ export function renderCodeWindowed(
     // firstVisibleLine 缺席（窗口模式行高不定，见 RenderCodeHandle 契约注）。
     // 降级重渲（fullInst）后亦不转投：降级态本属窗口实例生命周期，大纲面板
     // 以恒空对待（与 OUT-04「窗口不出大纲」口径一致）。
-    getOutline: () => []
+    getOutline: () => [],
+    setWordWrap(on: boolean) {
+      // 项 1：降级后转投全量实例（全量面已接管上屏）
+      if (fullInst !== null) return fullInst.setWordWrap?.(on);
+      if (destroyed || on === wrap) return;
+      wrap = on;
+      pre.classList.toggle('vv-code-wrap', on);
+      if (scroller === null) return; // 首拉未完成：mount 时按新模式装配
+      const line = scroller.firstVisibleRow();
+      scroller.destroy();
+      scroller = null;
+      mountedRows = -1;
+      pre.scrollLeft = 0; // 换行无横向溢出；切回不换行从行首起
+      mount();
+      const next = scroller as VirtualScrollerHandle | null;
+      next?.scrollTo(next.offsetOf(line));
+      next?.refresh(true);
+    }
   };
   // 首拉完成面：codeRenderer.render await 它——首块/本地化排空失败 → 销毁半装配实例
   // 后 rethrow（渲染期读失败面）；resolve 后实例已 mount，滚动期失败走自兜底（上方闩）。

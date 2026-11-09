@@ -1,4 +1,4 @@
-import type { ByteRange, Detection, FileSource, LineMetrics, RenderedInstance, Renderer, RendererId, StreamCtx } from '../types';
+import type { ByteRange, Detection, FileSource, LineMetrics, RenderedInstance, RenderOptions, Renderer, RendererId, StreamCtx } from '../types';
 import type { Registry } from '../registry/registry';
 import { detect, refineEncoding, looksTextual, shebangLangOf } from '@bhxch/vviewer-detect';
 import {
@@ -41,6 +41,9 @@ export interface DispatchOptions {
   /** 手动高亮语言（spec §4.1）：仅 code 渲染器消费（opts.lang 注入口，有值跳过
    * detectLanguage）；其余渲染器不读即零感知。 */
   langOverride?: string;
+  /** 代码视图自动换行（settings.code.wordWrap）：并入 render 第 6 参透传，仅 code
+   * 渲染器消费；open-as/重试重入同值透传。 */
+  wordWrap?: boolean;
   /** 流式读闭包：buffer === null 时必填（全量字节不预取，head 探测与按需读都经它）；
    * buffer 直传（兼容路径）时省略，dispatch 不触发任何 store 读。 */
   read?: DispatchRead;
@@ -247,7 +250,7 @@ function buildRenderErrorActions(
   onRendered: (instance: RenderedInstance) => void,
   redisplay: Redisplay,
   ctx?: StreamCtx,
-  renderOpts?: { signal?: AbortSignal; lineMetrics?: LineMetrics; langOverride?: string }
+  renderOpts?: RenderOptions
 ): ErrorCardAction[] {
   const retry = (): void => {
     renderer.render(buffer, target, source, det, ctx, renderOpts)
@@ -433,9 +436,9 @@ export function createDispatcher(registry: Registry): Dispatcher {
     // render 第 6 参（审计 R1 + 字体系统 Task 2 + spec §4.1）：signal 与 lineMetrics、
     // langOverride 同参异构字段；双侧缺省维持「不传第 6 参」调用形态（渲染器侧零感知，
     // 向后兼容）
-    const renderOpts: { signal?: AbortSignal; lineMetrics?: LineMetrics; langOverride?: string } | undefined =
-      opts?.signal || opts?.lineMetrics || opts?.langOverride
-        ? { signal: opts.signal, lineMetrics: opts.lineMetrics, langOverride: opts.langOverride }
+    const renderOpts: RenderOptions | undefined =
+      opts?.signal || opts?.lineMetrics || opts?.langOverride || opts?.wordWrap !== undefined
+        ? { signal: opts.signal, lineMetrics: opts.lineMetrics, langOverride: opts.langOverride, wordWrap: opts.wordWrap }
         : undefined;
     // 错误卡与 open-as 重入共用的字节面（detached 防御）：渲染器可能已把 full/probe
     // 的底层 ArrayBuffer transfer 走（pdfjs getDocument({data}) 零拷贝 transfer）
@@ -457,8 +460,8 @@ export function createDispatcher(registry: Registry): Dispatcher {
     // 触发的重物化不丢进度上报（缺省零行为变化同主路径口径）
     const redisplay: Redisplay = (o) =>
       headOnly
-        ? dispatch(source, null, target, { ...o, signal: optsSignal, lineMetrics: opts?.lineMetrics, langOverride: opts?.langOverride, read, onReadProgress: opts?.onReadProgress })
-        : dispatch(source, safeBytes(), target, { ...o, signal: optsSignal, lineMetrics: opts?.lineMetrics, langOverride: opts?.langOverride, onReadProgress: opts?.onReadProgress });
+        ? dispatch(source, null, target, { ...o, signal: optsSignal, lineMetrics: opts?.lineMetrics, langOverride: opts?.langOverride, wordWrap: opts?.wordWrap, read, onReadProgress: opts?.onReadProgress })
+        : dispatch(source, safeBytes(), target, { ...o, signal: optsSignal, lineMetrics: opts?.lineMetrics, langOverride: opts?.langOverride, wordWrap: opts?.wordWrap, onReadProgress: opts?.onReadProgress });
     let renderer: Renderer | undefined;
     // 渲染期 ctx（streaming 分支构造）：声明在 try 外——catch 的重试动作需要透传
     //（评审指令②），try 作用域变量 catch 不可见

@@ -198,9 +198,13 @@ export interface RenderCodeHandle {
   getOutline?(): OutlineEntry[];
   /** 当前视口首可视行（0 起，可选扩展；Task 3 大纲滚动跟随用）：全量模式从虚拟
    * 滚动容器 scrollTop 换算（与 virtualScroller 同款 scrollTop/行高算式，含
-   * BUG-55 超限压缩域的虚拟坐标还原），越界钳 [0, 行数-1]。仅全量模式提供——
-   * 窗口模式行高不定（块流式），鸭子探测缺席即回退（消费方不读 DOM）。 */
+   * BUG-55 超限压缩域的虚拟坐标还原；换行模式经可变行高前缀换算），越界钳
+   * [0, 行数-1]。仅全量模式提供——窗口模式行高不定（块流式），鸭子探测缺席即回退
+   * （消费方不读 DOM）。 */
   firstVisibleLine?(): number;
+  /** 自动换行原地切换（可选扩展；状态栏开关/设置变更即时生效）：重装配滚动器（换行=
+   * 可变行高、否=固定行高）并保持首可视行；两路径均提供（窗口降级后转投全量实例）。 */
+  setWordWrap?(on: boolean): void;
 }
 
 /** renderCode 选项（双模式共用）：全量模式（现状）与窗口流式模式的差异全部经
@@ -230,4 +234,7 @@ export interface CodeRenderOptions {
    * LINE_HEIGHT=20（直调兼容面）。fontSize 为 cssText 侧字号语义的协议对偶
    * （.vv-code-pre 的实际字号由 --vv-code-font-size 注入驱动）。 */
   lineMetrics?: LineMetrics;
+  /** 自动换行（settings.code.wordWrap）：行在正文列内折行，虚拟滚动改可变行高
+   * （variableScroller）；运行期经 RenderCodeHandle.setWordWrap 原地切换。缺省不换行。 */
+  wordWrap?: boolean;
 }

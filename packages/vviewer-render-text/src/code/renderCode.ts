@@ -7,8 +7,9 @@
  */
 import {
   RemoteComputeError,
-  SCROLL_PX_CAP,
+  RowHeights,
   showErrorCard,
+  variableScroller,
   type ComputeWhere,
   type SearchMatch
 } from '@bhxch/vviewer-core';
@@ -55,6 +56,7 @@ import {
   waitForAttachedClient
 } from './client';
 import { renderCodeWindowed } from './renderCodeWindowed';
+import { measureWrapColumns, WRAP_FALLBACK_COLS, wrappedRowHeight } from './wrap';
 
 export function renderCode(
   buffer: Uint8Array,
@@ -86,6 +88,13 @@ export function renderCode(
   target.classList.add('vv-code');
   const pre = document.createElement('div');
   pre.className = 'vv-code-pre'; // 即 virtualScroller 的滚动容器
+  // 自动换行（settings.code.wordWrap；setWordWrap 原地切换）：换行时行在正文列内折行，
+  // 滚动器改可变行高（variableScroller + 实例级 RowHeights：按字符数/列数粗估折行、
+  // 渲染后实测修正；模式往返且列数未变时测高保留）
+  let wrap = opts.wordWrap === true;
+  let wrapCols = WRAP_FALLBACK_COLS;
+  const wrapHeights = new RowHeights((i) => wrappedRowHeight(lines[i]?.length ?? 0, wrapCols, lineHeight));
+  pre.classList.toggle('vv-code-wrap', wrap);
   // 超限提示条（BUG-20 模式）：plain（>PLAIN_MAX_BYTES）与 lazy（>HLJS_MAX_BYTES）
   // 各一条一次性提示，顶部插入、不阻断滚动/搜索。提示条是 pre 的兄弟节点而非子
   // 节点——virtualScroller 会 replaceChildren 滚动容器，提示条放里面会被清掉且
@@ -189,7 +198,8 @@ export function renderCode(
     for (let i = first; i <= last; i++) {
       const row = document.createElement('div');
       row.className = 'vv-code-line';
-      row.style.height = `${lineHeight}px`;
+      // 换行模式行高由内容折行决定（variableScroller 渲染后实测），不写固定高度
+      if (!wrap) row.style.height = `${lineHeight}px`;
       row.dataset.line = String(i); // 搜索跳转按行号定位行 DOM
       const hits = searchHitsByLine.get(i);
       // BUG-18：全部命中行都有行级背景（可见范围内，由 searchState 驱动）；
@@ -216,9 +226,22 @@ export function renderCode(
 
   function mount(): void {
     if (scroller || destroyed) return;
-    scroller = virtualScroller(pre, lines.length, lineHeight, (first, last, viewport) => {
+    const onRange = (first: number, last: number, viewport: HTMLElement): void => {
       if (strategy === 'lazy') scheduleChunks(first, last); // 可视区驱动 chunk 请求
       fillRows(first, last, viewport);
+    };
+    if (!wrap) {
+      scroller = virtualScroller(pre, lines.length, lineHeight, onRange);
+      return;
+    }
+    const cols = measureWrapColumns(pre, lines.length);
+    if (cols !== wrapCols) {
+      wrapCols = cols;
+      wrapHeights.invalidate();
+    }
+    wrapHeights.setRowCount(lines.length);
+    scroller = variableScroller(pre, wrapHeights, onRange, 10, () => {
+      wrapCols = measureWrapColumns(pre, lines.length);
     });
   }
 
@@ -604,16 +627,26 @@ export function renderCode(
     // 大纲缓存直读（2026-10-31 code-outline Task 2）：请求在飞/失败/hljs 兜底/plain
     // 分支均为 []（缓存初始值，语义见 RenderCodeHandle.getOutline 注）
     getOutline: () => outlineEntries,
-    // 视口首可视行（Task 3 滚动跟随消费）：scrollTop → 虚拟坐标与 virtualScroller
-    // 同款算式（未超限恒等；BUG-55 超限压缩域线性还原），floor 后钳 [0, 行数-1]
+    // 视口首可视行（Task 3 滚动跟随消费）：经滚动器行几何换算（固定行高 scrollTop/
+    // 行高、换行模式可变行高前缀；均含 BUG-55 超限压缩域还原），钳 [0, 行数-1]；
+    // 未挂载窗口期按固定行高回落
     firstVisibleLine() {
-      const total = lines.length * lineHeight;
-      let virtualY = pre.scrollTop;
-      if (total > SCROLL_PX_CAP) {
-        const scrollable = Math.max(1, SCROLL_PX_CAP - pre.clientHeight);
-        virtualY = (virtualY / scrollable) * Math.max(1, total - pre.clientHeight);
-      }
-      return Math.min(Math.max(0, lines.length - 1), Math.max(0, Math.floor(virtualY / lineHeight)));
+      if (scroller) return scroller.firstVisibleRow();
+      return Math.min(Math.max(0, lines.length - 1), Math.max(0, Math.floor(pre.scrollTop / lineHeight)));
+    },
+    setWordWrap(on: boolean) {
+      if (destroyed || on === wrap) return;
+      wrap = on;
+      pre.classList.toggle('vv-code-wrap', on);
+      if (!scroller) return; // 尚未挂载：mount 时按新模式装配
+      const line = scroller.firstVisibleRow();
+      scroller.destroy();
+      scroller = null;
+      pre.scrollLeft = 0; // 换行无横向溢出；切回不换行从行首起
+      mount();
+      const next = scroller as VirtualScrollerHandle | null;
+      next?.scrollTo(next.offsetOf(line));
+      next?.refresh(true);
     }
   };
 
@@ -623,11 +656,24 @@ export function renderCode(
     hitLine = line;
     // 目标行滚到视口中部（clientHeight 为 0（jsdom/未布局）时回落贴顶）。
     // 经 scroller.scrollTo 以虚拟坐标定位（BUG-55：总行高超浏览器滚动域上限后
-    // scrollTop 与虚拟坐标不再恒等；scroller 未挂载窗口期回落直写）
-    const center = line * lineHeight - pre.clientHeight / 2 + lineHeight / 2;
+    // scrollTop 与虚拟坐标不再恒等；scroller 未挂载窗口期回落直写）。行几何经滚动器
+    // 换算（换行模式为可变行高前缀）
+    const centerOf = (): number =>
+      scroller
+        ? scroller.offsetOf(line) - pre.clientHeight / 2 + scroller.heightOf(line) / 2
+        : line * lineHeight - pre.clientHeight / 2 + lineHeight / 2;
+    const center = centerOf();
     if (scroller) scroller.scrollTo(Math.max(0, center));
     else pre.scrollTop = Math.max(0, center);
     scroller?.refresh(); // 按新 scrollTop 重算可视范围（范围未变则行 DOM 已在，applyHitClass 兜底）
+    if (wrap && scroller) {
+      // 换行模式：跳转落地后的渲染测高修正了目标附近行高，按实测重算一次居中
+      const settled = centerOf();
+      if (Math.abs(settled - center) >= 1) {
+        scroller.scrollTo(Math.max(0, settled));
+        scroller.refresh();
+      }
+    }
     applyHitClass();
     hitTimer = setTimeout(() => {
       hitTimer = null;

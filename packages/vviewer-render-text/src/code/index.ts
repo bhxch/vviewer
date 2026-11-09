@@ -15,7 +15,7 @@ import {
   type FileSource,
   type RenderedInstance,
   type StreamCtx,
-  type LineMetrics,
+  type RenderOptions,
   type Encoding,
   type ComputeSource,
   type ComputeWhere,
@@ -66,7 +66,7 @@ export const codeRenderer: Renderer = {
   // UTF-8）。回退面均在 render 内自处（下方守卫）；!rangeCapable 的全量视图 ctx 属
   // 窗口模式退化形态，BlockStream 零 IO 排空。
   streaming: true,
-  async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection, ctx?: StreamCtx, opts?: { signal?: AbortSignal; lineMetrics?: LineMetrics; langOverride?: string }) {
+  async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection, ctx?: StreamCtx, opts?: RenderOptions) {
     // 远端文件（M5 RemoteStore）的服务端检测头纠偏：X-VV-Lang/X-VV-Encoding
     // 与 languages.json 同源，比本地扩展名表/编码启发式更准（无扩展名脚本等）。
     // opts.lang 有值时 renderCode 直接采用、跳过 detectLanguage；服务端无检测头时
@@ -86,7 +86,10 @@ export const codeRenderer: Renderer = {
       computeSrc,
       // 行尺度（字体系统 Task 2）：ViewerPane 按 settings.fonts.codeSize 经 dispatch
       // 透传；缺省 undefined → renderCode 回落 LINE_HEIGHT（降级重渲路径随展开保留）
-      lineMetrics: opts?.lineMetrics
+      lineMetrics: opts?.lineMetrics,
+      // 自动换行（settings.code.wordWrap）：ViewerPane 经 dispatch 透传初值，运行期
+      // 切换走实例 setWordWrap（降级重渲路径随展开保留）
+      wordWrap: opts?.wordWrap
     };
     // 窗口流式候选：ctx 存在且 UTF-8 且 size>2MB 或 size 未知（spec §4.3 高亮分界）。
     // detect 收口：窗口模式仅 UTF-8/ASCII（Encoding 无 ascii——ASCII 为 UTF-8 子集，
@@ -163,6 +166,7 @@ export const codeRenderer: Renderer = {
       revealLine(line: number, col?: number): void;
       getOutline(): OutlineEntry[];
       firstVisibleLine?(): number;
+      setWordWrap(on: boolean): void;
     } = {
       destroy() {
         inst.destroy();
@@ -190,6 +194,10 @@ export const codeRenderer: Renderer = {
       },
       getOutline() {
         return inst.getOutline?.() ?? [];
+      },
+      // 自动换行原地切换（状态栏开关/设置变更即时生效；ViewerPane 鸭子探测 'setWordWrap' in inst）
+      setWordWrap(on) {
+        inst.setWordWrap?.(on);
       },
       // 存在性透传：仅全量 inst 有 firstVisibleLine（窗口 inst 缺席——消费方鸭子
       // 探测 `'firstVisibleLine' in inst` 保持 false）

@@ -125,6 +125,11 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
 .vv-code-gutter { user-select: none; text-align: right; min-width: 3.5em; padding-right: 1em;
   color: var(--code-gutter); flex: none; }
 .vv-code-body { flex: 1; color: var(--code-fg); }
+/* 自动换行（settings.code.wordWrap / 状态栏开关）：正文在列内折行（长 token 在任意处断开，
+   不撑出横向滚动），行高由内容决定（可变行高虚拟滚动渲染后实测）；行号列顶对齐首个
+   视觉行。min-width:0 让 flex 子项收缩到列宽以内才会折行 */
+.vv-code-wrap .vv-code-line { white-space: pre-wrap; overflow-wrap: anywhere; align-items: flex-start; }
+.vv-code-wrap .vv-code-body { min-width: 0; }
 /* 图片 / 音视频 / 错误卡 */
 .vv-image { height: 100%; overflow: auto; display: flex; touch-action: none; user-select: none; }
 .vv-image img { flex: none; margin: auto; max-width: none; }

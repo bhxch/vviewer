@@ -197,6 +197,9 @@ export interface Renderer {
    * 第 6 参 opts.langOverride（spec §4.1）：手动高亮语言，仅 code 渲染器消费
    * （opts.lang 注入口，有值跳过 detectLanguage）；与 signal/lineMetrics 同参异构
    * 先例一致，其余渲染器不读即零感知。
+   *
+   * 第 6 参 opts.wordWrap：代码视图自动换行（settings.code.wordWrap），仅 code
+   * 渲染器消费（长行折行 + 可变行高虚拟滚动）；其余渲染器不读即零感知。
    */
   render(
     buffer: Uint8Array,
@@ -204,6 +207,14 @@ export interface Renderer {
     source: FileSource,
     det: Detection,
     ctx?: StreamCtx,
-    opts?: { signal?: AbortSignal; lineMetrics?: LineMetrics; langOverride?: string }
+    opts?: RenderOptions
   ): Promise<RenderedInstance>;
+}
+
+/** Renderer.render 第 6 参（同参异构：各字段语义见 Renderer.render 注，渲染器只读所需字段） */
+export interface RenderOptions {
+  signal?: AbortSignal;
+  lineMetrics?: LineMetrics;
+  langOverride?: string;
+  wordWrap?: boolean;
 }
