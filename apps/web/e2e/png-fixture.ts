@@ -1,16 +1,14 @@
 import { deflateSync, crc32 } from 'node:zlib';
 
 /**
- * 真 PNG 夹具（32×8 RGBA：签名+IHDR+IDAT+IEND，CRC 经 node:zlib crc32），供各
- * e2e 套件作「正常图片」载体。来源：samples/m4/sample.bin 系「PNG 签名+IHDR+4KB
+ * 真 PNG 夹具（缺省 32×8 RGBA，可传宽高——平移/捏合用例需溢出视口的大图；签名+
+ * IHDR+IDAT+IEND，CRC 经 node:zlib crc32），供各 e2e 套件作「正常图片」载体。来源：samples/m4/sample.bin 系「PNG 签名+IHDR+4KB
  * 伪随机体」（无 IDAT/IEND，本就不可完整解码），BUG-53 解码校验（image.ts render
  * 后 observeImageDecode，2026-10-16 合入）按设计以「图片解码失败」卡拒绝之——
  * t-media MEDIA-01 连带红为载体修复波实证；b-media zoom.png 连带红为同批全量门禁发现
  * （2026-10-16 T4a 实证，fix(test) 07f9bf9 后抽出本夹具统一修面）。
  */
-export const goodPng = (): Uint8Array => {
-  const w = 32;
-  const h = 8;
+export const goodPng = (w = 32, h = 8): Uint8Array => {
   const chunk = (type: string, data: Uint8Array): Uint8Array => {
     const out = new Uint8Array(12 + data.length);
     const dv = new DataView(out.buffer);

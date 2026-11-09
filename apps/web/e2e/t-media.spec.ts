@@ -11,8 +11,9 @@ import { goodPng } from './png-fixture';
  * 编号约定。既有覆盖不重写：b-media-office-viewer.spec.ts 已覆盖 MEDIA-01/02/03/05/
  * 06/07/11，m4.spec.ts 已覆盖 office 三件套行为；本文件只补缺口分析指出的弱断言与
  * 无编号用例（每条对应一个场景编号，标题以编号开头）：
- * - MEDIA-01 逐次断言 1.1×/0.9× 步进倍率（b- 仅断收敛终态 scale(10/0.1/1)，任何
- *   ≥1.1 的乘法步进都能通过；步进实现见 packages/vviewer-render-media/src/image.ts:39），
+ * - MEDIA-01 逐次断言 1.1×/0.9× 步进倍率（b- 仅断收敛终态 10/0.1/1，任何 ≥1.1 的
+ *   乘法步进都能通过；步进实现见 packages/vviewer-render-media/src/image.ts onWheel，
+ *   倍率读数面为 img data-vv-zoom），
  *   并补「初始倍率 1×」记录与限位/复位复核；
  * - MEDIA-03 断言 readyState=4 与「video 元素出现耗时」（b- 仅断 err=0 + 推进或
  *   ended；m4 放宽为 loadedmetadata 或无 error；135ms 为报告域内实测参考值，
@@ -85,12 +86,10 @@ test('MEDIA-01：图片滚轮缩放逐次 1.1×/0.9× 步进倍率、上限 10×
 
   const img = page.locator('.vv-image img');
   await expect(img).toBeVisible();
-  // attachZoom 把倍率写进 img.style.transform（image.ts:40）；未写时即初始 1×
+  // attachZoom 把倍率写进 img.dataset.vvZoom（布局缩放：宽高经 CSS 序列化有舍入，
+  // 不宜反推倍率；倍率串即 String(zoom) 十进制往返精确）；未写时即初始 1×
   const readScale = (): Promise<number> =>
-    img.evaluate((el) => {
-      const m = /scale\(([\d.eE+-]+)\)/.exec(el.style.transform);
-      return m ? Number(m[1]) : 1;
-    });
+    img.evaluate((el) => Number((el as HTMLElement).dataset.vvZoom ?? '1'));
   await expect.poll(readScale, { timeout: 5_000 }).toBe(1); // ① 初始倍率 1×
 
   // ② 逐次向上：每步严格 ×1.1（模板串十进制往返精确，容差仅防格式化边缘）
@@ -121,9 +120,11 @@ test('MEDIA-01：图片滚轮缩放逐次 1.1×/0.9× 步进倍率、上限 10×
   }
   await expect.poll(readScale, { timeout: 5_000 }).toBe(0.1);
 
-  // ④ 双击复位 1×（偏差 #4：移动端捏合缩放未实现属裁决维持，不做捏合断言）
+  // ④ 双击复位 1×（捏合缩放与拖动平移另见 b-user-feedback UFB-08 系列）；布局缩放：
+  // 复位后 img 宽回到固有宽度（goodPng 32px）
   await page.locator('.vv-image').dispatchEvent('dblclick');
   await expect.poll(readScale, { timeout: 5_000 }).toBe(1);
+  expect(await img.evaluate((el) => Math.round(el.getBoundingClientRect().width))).toBe(32);
 });
 
 test('MEDIA-03：mp4 ArtPlayer 挂载、video readyState=4、播放推进', async ({ page }) => {

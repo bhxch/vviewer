@@ -9,7 +9,7 @@ import { goodPng } from './png-fixture';
  * 场景来源：docs/e2e/media-office-viewer.md（MEDIA-01~11）。既有覆盖不重写：
  * m4.spec.ts 已覆盖 MEDIA-03 就绪（ArtPlayer 挂载）、MEDIA-07 canvas 初渲染、
  * MEDIA-08/09/10（office 三件套）；本文件补：
- * - MEDIA-01 图片滚轮缩放 1.1× 步进 + 10/0.1 限位 + 双击复位（偏差 #4：不做捏合断言）
+ * - MEDIA-01 图片滚轮缩放 1.1× 步进 + 10/0.1 限位 + 双击复位（捏合/拖动平移见 b-user-feedback）
  * - MEDIA-02 SVG 消毒（script 移除 / onload 剥除 / 探针变量不出现）
  * - MEDIA-03 播放推进（补 m4 就绪断言之外的 currentTime 推进）
  * - MEDIA-05 mp3/wav 原生音频控件 + 播放推进 + 暂停生效
@@ -211,23 +211,28 @@ test('MEDIA-01：图片滚轮缩放 1.1× 步进、上限 10×、下限 0.1×、
 
   const img = page.locator('.vv-image img');
   await expect(img).toBeVisible();
-  const transform = () => img.evaluate((el) => el.style.transform);
+  // 倍率读数面：img data-vv-zoom（布局缩放改 img 宽高，attachZoom 同步写倍率串）
+  const zoom = () => img.evaluate((el) => (el as HTMLElement).dataset.vvZoom);
+  const width = () => img.evaluate((el) => Math.round(el.getBoundingClientRect().width));
 
-  // 滚轮向上 30 步：1.1^30 ≈ 17.4 → 收敛到上限 10×（render-media/src/image.ts attachZoom）
+  // 滚轮向上 30 步：1.1^30 ≈ 17.4 → 收敛到上限 10×（render-media/src/image.ts attachZoom）；
+  // 布局缩放 = 实际尺寸随倍率增长（goodPng 32px → 320px）
   for (let i = 0; i < 30; i++) {
     await page.locator('.vv-image').dispatchEvent('wheel', { deltaY: -100 });
   }
-  await expect.poll(transform, { timeout: 5_000 }).toBe('scale(10)');
+  await expect.poll(zoom, { timeout: 5_000 }).toBe('10');
+  expect(await width()).toBe(320);
 
   // 滚轮向下 50 步：10 × 0.9^50 ≈ 0.005 → 收敛到下限 0.1×
   for (let i = 0; i < 50; i++) {
     await page.locator('.vv-image').dispatchEvent('wheel', { deltaY: 100 });
   }
-  await expect.poll(transform, { timeout: 5_000 }).toBe('scale(0.1)');
+  await expect.poll(zoom, { timeout: 5_000 }).toBe('0.1');
 
-  // 双击复位 1×（偏差 #4：移动端捏合缩放未实现属裁决维持，本场景不含捏合断言）
+  // 双击复位 1×（捏合/拖动平移见 b-user-feedback UFB-08 系列）
   await page.locator('.vv-image').dispatchEvent('dblclick');
-  await expect.poll(transform, { timeout: 5_000 }).toBe('scale(1)');
+  await expect.poll(zoom, { timeout: 5_000 }).toBe('1');
+  expect(await width()).toBe(32);
 });
 
 test('MEDIA-02：SVG 消毒——script 移除、onload 剥除、探针变量不出现', async ({ page }) => {

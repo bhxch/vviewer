@@ -75,20 +75,185 @@ export function sanitizeSvg(svgText: string): string {
   return new XMLSerializer().serializeToString(svg);
 }
 
-function attachZoom(container: HTMLElement, img: HTMLElement): () => void {
+/** 缩放范围（滚轮/捏合同规）：下限 0.1、上限 10 */
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 10;
+
+/** 指针位移超过该值（Manhattan 距离，px）视为拖动：拖动收尾凑成的 dblclick 不复位 */
+const DRAG_THRESHOLD = 3;
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+const midpoint = (a: Point, b: Point): Point => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+
+/**
+ * 缩放平移交互（布局缩放 + 容器滚动）：
+ * - 缩放改 img 的 width/height（基准为 naturalWidth/Height；SVG 无固有尺寸时取 zoom=1
+ *   的布局尺寸），容器滚动区随之增长——放大后整幅图任意区域都能滚到/拖到，且溢出
+ *   恒从左上起，不出现左/上侧溢出不可达（原 transform: scale 不改布局尺寸，放大部分
+ *   无从平移）。宿主 CSS 契约（app.css .vv-image）：容器 flex + overflow:auto，img
+ *   flex:none + margin:auto——小图居中，溢出时 auto margin 归零从左上起可滚。
+ * - 平移即改容器 scrollLeft/scrollTop；锚点缩放前后各取一次 img 实际布局矩形（居中
+ *   margin、滚动条增减均已计入），差值补偿到滚动，令锚点下像素不动。
+ * - Pointer Events 统一鼠标/触屏/笔：单指针拖动平移；双指针以两指中点为锚捏合缩放
+ *   并随中点平移；滚轮以光标为锚缩放；双击复位。
+ * - 防原生行为抢手势：容器 touch-action:none / user-select:none 在宿主 CSS（否则浏览器
+ *   原生滚动/缩放与自定义手势竞争并以 pointercancel 打断）；此处 img draggable=false
+ *   并拦 dragstart（原生图片拖拽会吃掉鼠标拖动）。
+ * 当前倍率写入 img 的 data-vv-zoom（e2e 读数面：布局尺寸经 CSS 序列化有舍入，不宜
+ * 反推倍率）。返回 detach：摘除全部监听。
+ */
+function attachZoom(container: HTMLElement, img: HTMLImageElement): () => void {
   let zoom = 1; // 每实例独立，避免多图共享状态互相污染
-  const onWheel = (e: WheelEvent) => {
-    e.preventDefault();
-    zoom = Math.min(10, Math.max(0.1, zoom * (e.deltaY < 0 ? 1.1 : 0.9)));
-    img.style.transform = `scale(${zoom})`;
+  let base: { w: number; h: number } | null = null;
+  /** 活动指针 → 最近位置（Map 插入序即按下序，捏合取前两个） */
+  const pointers = new Map<number, Point>();
+  /** 本次手势首指按下点与是否越过拖动阈值（dblclick 守卫） */
+  let downAt: Point = { x: 0, y: 0 };
+  let moved = false;
+
+  img.draggable = false;
+  img.dataset.vvZoom = '1';
+
+  /** zoom=1 基准尺寸：首次缩放时测定并缓存；图片未就绪（尺寸全 0）返回 null 不缩放 */
+  const measureBase = (): { w: number; h: number } | null => {
+    if (base) return base;
+    let w = img.naturalWidth;
+    let h = img.naturalHeight;
+    if (!(w > 0 && h > 0)) {
+      // SVG 无固有尺寸：首次缩放前 img 未写尺寸，当前布局尺寸即 zoom=1 尺寸
+      const r = img.getBoundingClientRect();
+      w = r.width;
+      h = r.height;
+    }
+    if (w > 0 && h > 0) base = { w, h };
+    return base;
   };
-  const onDbl = () => { zoom = 1; img.style.transform = 'scale(1)'; };
-  // 双指捏合缩放留待 M7 触屏专项
+
+  /** cursor：可平移时 grab、拖动中 grabbing、不可平移不设（随缩放/指针/容器尺寸变化同步） */
+  const syncCursor = (): void => {
+    const pannable = container.scrollWidth > container.clientWidth || container.scrollHeight > container.clientHeight;
+    const next = !pannable ? '' : pointers.size > 0 ? 'grabbing' : 'grab';
+    if (container.style.cursor !== next) container.style.cursor = next;
+  };
+
+  /**
+   * 缩放到 next，并令缩放前视口点 from 下的图像像素落到视口点 to：滚轮 from=to=光标；
+   * 捏合 from/to 为前后两帧两指中点（缩放与平移一步完成）。
+   */
+  const zoomAround = (next: number, from: Point, to: Point): void => {
+    const b = measureBase();
+    if (!b) return;
+    const before = img.getBoundingClientRect();
+    if (!(before.width > 0 && before.height > 0)) return; // 容器隐藏等无布局态
+    const u = (from.x - before.left) / before.width;
+    const v = (from.y - before.top) / before.height;
+    zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
+    img.style.width = `${b.w * zoom}px`;
+    img.style.height = `${b.h * zoom}px`;
+    img.dataset.vvZoom = String(zoom);
+    const after = img.getBoundingClientRect();
+    container.scrollLeft += after.left + u * after.width - to.x;
+    container.scrollTop += after.top + v * after.height - to.y;
+    syncCursor();
+  };
+
+  const onWheel = (e: WheelEvent): void => {
+    e.preventDefault();
+    const at = { x: e.clientX, y: e.clientY };
+    zoomAround(zoom * (e.deltaY < 0 ? 1.1 : 0.9), at, at);
+  };
+
+  /** 按在容器自身的经典滚动条上（目标为容器且落在客户区外；覆盖式滚动条不占客户区外，恒 false） */
+  const onScrollbar = (e: PointerEvent): boolean => {
+    if (e.target !== container) return false;
+    const r = container.getBoundingClientRect();
+    return e.clientX - r.left - container.clientLeft >= container.clientWidth
+      || e.clientY - r.top - container.clientTop >= container.clientHeight;
+  };
+
+  const onDown = (e: PointerEvent): void => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return; // 鼠标仅主键拖动（中键/右键原生行为照常）
+    if (onScrollbar(e)) return; // 滚动条保留原生拖动：起平移会与之反向互搏
+    try {
+      // 捕获：拖出容器乃至窗口仍持续收到 move/up
+      container.setPointerCapture(e.pointerId);
+    } catch {
+      // jsdom 未实现 / 合成事件无活动指针时抛错：不捕获，容器内拖动照常
+    }
+    if (pointers.size === 0) {
+      downAt = { x: e.clientX, y: e.clientY };
+      moved = false;
+    }
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    syncCursor();
+  };
+
+  const onMove = (e: PointerEvent): void => {
+    const prev = pointers.get(e.pointerId);
+    if (!prev) return;
+    const cur = { x: e.clientX, y: e.clientY };
+    if (pointers.size === 1) {
+      // 单指针平移：增量跟手（图随指针移动 = 滚动反向）
+      pointers.set(e.pointerId, cur);
+      if (Math.abs(cur.x - downAt.x) + Math.abs(cur.y - downAt.y) > DRAG_THRESHOLD) moved = true;
+      container.scrollLeft -= cur.x - prev.x;
+      container.scrollTop -= cur.y - prev.y;
+      return;
+    }
+    // 双指针捏合：仅按下序前两个指针参与（第三指起只记位置）
+    const [a0, b0] = [...pointers.values()];
+    pointers.set(e.pointerId, cur);
+    const [a1, b1] = [...pointers.values()];
+    if (!a0 || !b0 || !a1 || !b1 || (a0 === a1 && b0 === b1)) return;
+    moved = true;
+    const d0 = Math.hypot(b0.x - a0.x, b0.y - a0.y);
+    const d1 = Math.hypot(b1.x - a1.x, b1.y - a1.y);
+    zoomAround(d0 > 0 ? zoom * (d1 / d0) : zoom, midpoint(a0, b0), midpoint(a1, b1));
+  };
+
+  // 抬起/取消：剩余指针按其最近位置接续（捏合抬一指转单指平移，增量跟手无跳变）
+  const onUp = (e: PointerEvent): void => {
+    if (pointers.delete(e.pointerId)) syncCursor();
+  };
+
+  const onDbl = (): void => {
+    if (moved) return; // 拖动收尾凑成的双击不复位
+    zoom = 1;
+    img.style.width = '';
+    img.style.height = '';
+    img.dataset.vvZoom = '1';
+    container.scrollLeft = 0;
+    container.scrollTop = 0;
+    syncCursor();
+  };
+
+  const onDragStart = (e: Event): void => e.preventDefault();
+
   container.addEventListener('wheel', onWheel, { passive: false });
+  container.addEventListener('pointerdown', onDown);
+  container.addEventListener('pointermove', onMove);
+  container.addEventListener('pointerup', onUp);
+  container.addEventListener('pointercancel', onUp);
+  container.addEventListener('pointerenter', syncCursor); // 容器尺寸可能已变（窗口/分栏调整）
   container.addEventListener('dblclick', onDbl);
+  container.addEventListener('dragstart', onDragStart);
+  img.addEventListener('load', syncCursor); // SVG 不等解码、超时放行的 raster 迟到加载
+  syncCursor();
   return () => {
     container.removeEventListener('wheel', onWheel);
+    container.removeEventListener('pointerdown', onDown);
+    container.removeEventListener('pointermove', onMove);
+    container.removeEventListener('pointerup', onUp);
+    container.removeEventListener('pointercancel', onUp);
+    container.removeEventListener('pointerenter', syncCursor);
     container.removeEventListener('dblclick', onDbl);
+    container.removeEventListener('dragstart', onDragStart);
+    img.removeEventListener('load', syncCursor);
+    pointers.clear();
     zoom = 1;
   };
 }

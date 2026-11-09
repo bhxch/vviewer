@@ -126,8 +126,8 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
   color: var(--code-gutter); flex: none; }
 .vv-code-body { flex: 1; color: var(--code-fg); }
 /* 图片 / 音视频 / 错误卡 */
-.vv-image { height: 100%; overflow: auto; display: flex; align-items: flex-start; }
-.vv-image img { transform-origin: 0 0; max-width: none; }
+.vv-image { height: 100%; overflow: auto; display: flex; touch-action: none; user-select: none; }
+.vv-image img { flex: none; margin: auto; max-width: none; }
 .vv-av { max-width: 100%; }
 /* ArtPlayer 容器（av.ts 视频分支）：ArtPlayer 需有尺寸的挂载块，16:9 黑底与播放器一致 */
 .vv-artplayer { width: 100%; aspect-ratio: 16 / 9; background: #000; }
