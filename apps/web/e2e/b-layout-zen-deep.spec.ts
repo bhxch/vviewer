@@ -273,9 +273,14 @@ test.describe('布局与 zen 补强（桌面）', () => {
   }) => {
     test.setTimeout(60_000);
     await waitApp(page);
-    await page.keyboard.press('Control+p');
     const input = page.locator('.vv-quickopen-input');
-    await expect(input).toBeVisible();
+    // 计时型抖动加固：高负载下首个 Ctrl+P 可能早于 AppShell keydown 监听挂载（effect
+    // 挂载晚于 waitApp 的 tabbar 可见锚）而丢失——面板未出现才补按（toggle 语义，已开
+    // 再按会关），断言可重试
+    await expect(async () => {
+      if (!(await input.isVisible())) await page.keyboard.press('Control+p');
+      await expect(input).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 10_000 });
     await expect(input).toBeFocused();
     await input.fill('zen');
 
