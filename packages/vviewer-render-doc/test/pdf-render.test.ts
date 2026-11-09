@@ -14,12 +14,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { abortReadError, isAbortError } from '@bhxch/vviewer-core';
 import type { ByteRange, Detection, FileSource, StreamCtx, TreeStore } from '@bhxch/vviewer-core';
-import { PDFDataRangeTransport } from 'pdfjs-dist';
+import { PDFDataRangeTransport } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { createPdfRangeTransport, pdfRenderer } from '../src/pdf';
 
 const getDocumentMock = vi.hoisted(() => vi.fn());
 
-vi.mock('pdfjs-dist', () => {
+// 桩的说明符须与 pdf.ts 运行期加载的入口一致（legacy 构建，见 pdf.ts loadPdfjs 注释），
+// 否则 mock 落空、真实 pdfjs 被加载
+vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => {
   // fake PDFDataRangeTransport：仅覆盖本测试消费的真实类面（pdf.mjs 导出同名基类，
   // 字段/方法签名逐一对齐 types/src/display/api.d.ts:758）
   class PDFDataRangeTransport {

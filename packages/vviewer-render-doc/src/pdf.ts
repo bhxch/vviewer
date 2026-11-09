@@ -1,6 +1,7 @@
 // pdf.ts — PDF 渲染器（M4 Task 1）。pdfjs-dist 动态 import（重依赖不进主包、SSR 不加载），
 // worker 以 vite 原生资产 URL 提供（new URL + import.meta.url，vite ≥5.1 支持裸说明符，
-// build 时输出为哈希资产——实测见任务报告）。
+// build 时输出为哈希资产——实测见任务报告）。主模块与 worker 均取 legacy 构建（旧浏览器
+// 缺全局 Iterator，现代构建加载即抛，见 loadPdfjs 注释）。
 // 渲染结构：工具条（页码/缩放）+ 滚动容器内逐页 canvas；前 3 页立即渲染，
 // 其余 IntersectionObserver 懒渲染；缩放在 0.5x-3x 预设档位间步进并全量重渲染。
 // 搜索：search 时懒提取各页 textContent 并缓存，跨页扫描用 pdfText 纯函数；gotoMatch 跳页。
@@ -9,10 +10,17 @@
 // PDFDataRangeTransport（requestRange → ctx.read 窗段）渐进加载，回退矩阵见 render 入口注释。
 import { isAbortError } from '@bhxch/vviewer-core';
 import type { Detection, FileSource, RenderedInstance, Renderer, StreamCtx } from '@bhxch/vviewer-core';
-import type { PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
+import type {
+  PDFDataRangeTransport,
+  PDFDocumentLoadingTask,
+  PDFDocumentProxy,
+  PDFPageProxy
+} from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { extractPageText, searchPdfPages, type PdfSearchMatch, type PdfTextItem } from './pdfText';
 
-type Pdfjs = typeof import('pdfjs-dist');
+// 类型与运行期同取 legacy 入口（legacy/build/pdf.d.mts 即 `export * from "pdfjs-dist"`，
+// 类型面与现代入口等价；同源书写免得两处入口分叉）
+type Pdfjs = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
 
 /** 缩放预设档位（0.5x-3x），工具条 −/＋ 在档位间步进 */
 const SCALE_PRESETS = [0.5, 0.75, 1, 1.5, 2, 3];
@@ -25,16 +33,35 @@ const HIT_FLASH_MS = 1200;
 
 let pdfjsPromise: Promise<Pdfjs> | null = null;
 
-/** pdfjs 懒加载（单例）：getDocument 前必须设好 workerSrc，避免走主线程假 worker */
+/**
+ * pdfjs 懒加载（单例）：getDocument 前必须设好 workerSrc，避免走主线程假 worker。
+ *
+ * 主模块与 worker 都取 legacy 构建：现代构建（build/pdf.mjs 与 build/pdf.worker.min.mjs）
+ * 在模块顶层执行 `typeof Iterator.prototype.join`——typeof 只保护裸标识符，无全局
+ * Iterator 的浏览器（Chrome/Edge<122、Firefox<131、Safari<18.4）求值 Iterator.prototype
+ * 即抛 ReferenceError「Iterator is not defined」，PDF 整体无法预览。legacy 构建内置的
+ * core-js 先注册全局 Iterator 再做同款检查。worker 跑在独立全局（WorkerGlobalScope），
+ * 主线程的 polyfill 带不过去，故两份产物须同取 legacy。worker 产物名仍是
+ * pdf.worker.min.<hash>.mjs（构建脚本/e2e 按文件名匹配的口径不变）。
+ * 回退防线：test/pdf-legacy-build.test.ts（删除全局 Iterator 后真实求值 + 源码契约锚）。
+ */
 function loadPdfjs(): Promise<Pdfjs> {
-  pdfjsPromise ??= (async () => {
-    const pdfjs = await import('pdfjs-dist');
-    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-      'pdfjs-dist/build/pdf.worker.min.mjs',
-      import.meta.url
-    ).toString();
-    return pdfjs;
-  })();
+  if (pdfjsPromise === null) {
+    const loading = (async () => {
+      const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+      pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+        'pdfjs-dist/legacy/build/pdf.worker.min.mjs',
+        import.meta.url
+      ).toString();
+      return pdfjs;
+    })();
+    pdfjsPromise = loading;
+    // 加载失败不入单例（chunk 网络抖动/离线未缓存）：清空后下次打开或错误卡「重试」重新
+    // 加载——否则一次失败即永久报错，只能刷新页面
+    loading.catch(() => {
+      if (pdfjsPromise === loading) pdfjsPromise = null;
+    });
+  }
   return pdfjsPromise;
 }
 
@@ -280,10 +307,10 @@ export const pdfRenderer: Renderer = {
         // 本行直访 pdfjs PDFDocumentLoadingTask 的私有字段 `_worker`（无公开销毁缝）。
         // 升级 pdfjs-dist 时必须复核两点：①`_worker` 字段是否仍存在且具 `destroy()`；
         // ②上游 `destroy()` 是否已改为同步 terminate 内部 worker（若已修复中段挂起，
-        // 本行直访与上方「destroy 挂起」备案一并移除）。复核手段：dist/build/pdf.mjs
-        // 搜 `_worker`/`_webWorker` 定义与 destroy 体，或以挂起形态复现 M1 错误路径
-        // 验证 terminate 到达性。字段消失时本行 `?.` 静默 no-op 不炸——但泄漏面回归，
-        // 须以 b-pdf-range 错误路径重试锚复核。
+        // 本行直访与上方「destroy 挂起」备案一并移除）。复核手段：legacy/build/pdf.mjs
+        // （运行期实际加载的构建）搜 `_worker`/`_webWorker` 定义与 destroy 体，或以挂起
+        // 形态复现 M1 错误路径验证 terminate 到达性。字段消失时本行 `?.` 静默 no-op
+        // 不炸——但泄漏面回归，须以 b-pdf-range 错误路径重试锚复核。
         (loadingTask as unknown as { _worker?: { destroy(): void } })._worker?.destroy();
         throw new Error(e instanceof Error ? e.message : String(e));
       }
