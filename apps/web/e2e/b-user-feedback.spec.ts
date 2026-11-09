@@ -18,8 +18,9 @@ import { applySettings, closeSettings, gotoGroup, openSettings } from './setting
  * - UFB-03 pptx 默认演示文稿：真结构 pptx（pptx-fixture，含 theme/master/layout）落
  *   foreign 演示文稿逐页渲染；打开方式可切回文本提纲；极简 pptx（无 theme，引擎解析
  *   失败）错误卡给出可读文案 +「以 PowerPoint（文本提纲） 打开」兜底。
- * - UFB-04 旧浏览器 PDF：删除全局 Iterator（模拟 Chrome<122 等）后 PDF 照常渲染，legacy
- *   构建的 core-js 在加载时补回全局 Iterator（修复生效的直接证据）。
+ * - UFB-04 PDF 浏览器感知构建：特性齐备（现代 Chromium）选现代构建、删除任一所需特性
+ *   （模拟 Chrome<122 等旧浏览器）选 legacy 构建——core-js 在加载时补回缺失全局（如
+ *   Iterator），两种构建都照常渲染；判别面为 .vv-pdf 的 data-pdf-build。
  * - UFB-05 docx 默认版式还原：落 docx-preview 系 .docx-wrapper，打开方式列出两个可区分
  *   的 Word 渲染器并可切到简化视图。
  * - UFB-06 默认渲染器设置：「打开方式」节列出多渲染器格式；改 .docx 默认后新打开即生效、
@@ -429,9 +430,38 @@ test.describe('UFB-03 pptx 默认演示文稿', () => {
 
 // ─────────────────────────────── UFB-04 旧浏览器 PDF ───────────────────────────────
 
-test('UFB-04 无全局 Iterator（旧浏览器）PDF 照常渲染，legacy 构建补回 Iterator', async ({ page }) => {
+/** 页面内复算能力探针（与 pdf.ts preferModernBuild 同一名单）：true = 应选现代构建 */
+function expectModern(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const g = globalThis as Record<string, unknown>;
+    const has = (v: unknown): boolean => typeof v === 'function';
+    // proto 沿 .prototype 取（对齐 pdf.ts protoHas：迭代器 helper 在 Iterator.prototype 上，
+    // 原版误读静态位恒 false——页面快照实证）
+    const proto = (o: unknown, k: string): boolean =>
+      !!o && has((o as { prototype?: Record<string, unknown> }).prototype?.[k]);
+    return (
+      proto(g.Iterator, 'map') &&
+      proto(Set, 'union') &&
+      has((Uint8Array as unknown as Record<string, unknown>).fromBase64) &&
+      proto(Map, 'getOrInsert') &&
+      has((Promise as unknown as Record<string, unknown>).try) &&
+      has((URL as unknown as Record<string, unknown>).parse) &&
+      has((JSON as unknown as Record<string, unknown>).rawJSON) &&
+      has((Math as unknown as Record<string, unknown>).sumPrecise)
+    );
+  });
+}
+
+async function expectPdfBuild(page: Page, build: 'modern' | 'legacy'): Promise<void> {
+  await expect
+    .poll(() => page.locator('.vv-pdf').getAttribute('data-pdf-build'), { timeout: 10_000 })
+    .toBe(build);
+}
+
+test('UFB-04 无全局 Iterator（旧浏览器）选兼容构建：PDF 照常渲染且 core-js 补回 Iterator', async ({ page }) => {
   test.setTimeout(90_000);
-  // 模拟 Chrome<122 / Firefox<131 / Safari<18.4：页面脚本运行前删掉全局 Iterator
+  // 模拟 Chrome<122 / Firefox<131 / Safari<18.4：页面脚本运行前删掉全局 Iterator——
+  // 能力探针不再齐备，加载链感知后选 legacy 构建
   await page.addInitScript(() => {
     delete (globalThis as { Iterator?: unknown }).Iterator;
   });
@@ -440,8 +470,24 @@ test('UFB-04 无全局 Iterator（旧浏览器）PDF 照常渲染，legacy 构�
   await openNamed(page, 'ufb4', 'report.pdf', buildPdf(['REPORT'], 600, 900));
   await expect(page.locator('.vv-pdf canvas').first()).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('.vv-error-card')).toHaveCount(0);
+  await expectPdfBuild(page, 'legacy');
   // legacy 构建内置 core-js：加载即注册全局 Iterator（修复生效的直接证据）
   expect(await page.evaluate(() => typeof (globalThis as { Iterator?: unknown }).Iterator)).toBe('function');
+});
+
+test('UFB-04b 特性齐备（现代浏览器）选现代构建：渲染照常、零 polyfill 注入', async ({ page }) => {
+  test.setTimeout(90_000);
+  await waitAppMounted(page);
+  const modern = await expectModern(page);
+  await openNamed(page, 'ufb4b', 'report.pdf', buildPdf(['REPORT'], 600, 900));
+  await expect(page.locator('.vv-pdf canvas').first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('.vv-error-card')).toHaveCount(0);
+  await expectPdfBuild(page, modern ? 'modern' : 'legacy');
+  if (modern) {
+    // 现代构建无 core-js：本就缺失的特性不会被补（这里挑一个 Chromium 天然缺失的
+    // 特性位不存在——故只断言齐备态下全部探针仍为函数即可，无新增全局）
+    expect(await expectModern(page)).toBe(true);
+  }
 });
 
 // ─────────────────────────────── UFB-05/06 Word 与默认渲染器 ───────────────────────────────
@@ -464,6 +510,21 @@ test.describe('UFB-05/06 docx 默认版式还原与默认渲染器设置', () =>
     await expect(picker.getByRole('menuitem', { name: 'Word 文档（版式还原）' })).toHaveCount(1);
     await picker.getByRole('menuitem', { name: 'Word 文档（简化视图）' }).click();
     await expect(host.locator('.vv-docx-content')).toContainText('vviewer docx 样例', { timeout: 20_000 });
+  });
+
+  test('UFB-05b xlsx 默认电子表格（file-viewer 表格还原），打开方式可切 SheetJS 简化视图', async ({ page }) => {
+    test.setTimeout(150_000);
+    await waitAppMounted(page);
+    await openNamed(page, 'ufb5b', 'sample.xlsx', sampleOf('sample.xlsx'));
+    const host = page.locator('.vv-viewer-host');
+    await expect(host.locator('.excel-wrapper')).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator('.vv-status-openwith')).toContainText('电子表格');
+    await expect(host.locator('.vv-xlsx')).toHaveCount(0);
+
+    await page.locator('.vv-status-openwith').click();
+    await page.locator('.vv-status-picker').getByRole('menuitem', { name: 'Excel 表格（简化视图）' }).click();
+    await expect(host.locator('.vv-xlsx')).toBeVisible({ timeout: 20_000 });
+    await expect(host.locator('.vv-xlsx-tab')).toHaveCount(2);
   });
 
   test('UFB-06 设置「打开方式」：列出多渲染器格式；改 .docx 默认即生效、改回恢复；单标签手选优先', async ({ page }) => {

@@ -29,10 +29,10 @@
 | HTML | 沙箱 iframe 预览（sandbox 无 `allow-scripts`）+ DOMPurify 净化，源码/渲染双视图 |
 | 图片 | 常见位图/矢量格式：滚轮以光标为锚缩放、鼠标/触屏拖动平移、双指捏合、双击复位；markdown 图片灯箱（触屏拖动/捏合同效） |
 | 音视频 | ArtPlayer 集成：mp4/webm 直接播，`.m3u8` 按需加载 hls.js、`.flv/.ts` 按需加载 mpegts.js |
-| PDF | pdfjs（legacy 构建，兼容无全局 Iterator 的旧浏览器）canvas 渲染：默认适应宽度（封顶 100%，手机看横向页不超宽）、「↔ 适应宽度」与 −/＋ 档位、缩放保持阅读位置；文件内文本搜索定位 |
+| PDF | pdfjs 构建按浏览器能力感知选择（新特性齐备取现代构建，旧浏览器自动落兼容构建——core-js 先补全局再运行）canvas 渲染：默认适应宽度（封顶 100%，手机看横向页不超宽）、「↔ 适应宽度」与 −/＋ 档位、缩放保持阅读位置；文件内文本搜索定位 |
 | 二进制 | hex 三列 dump（偏移/hex/ASCII）+ 结构树（PNG/IHDR 等字段展开）；offset 跳转、hex/UTF-8 双模式搜索（进度可取消、1000 命中截断）、字节检查器（属性面板展示，类型/字节序可切） |
 | 压缩包 | zip（jszip）/ tar·tgz·tbz2·7z·rar（libarchive wasm）：包内树 + 条目递归预览（嵌套深度限 3 层，超限拒绝） |
-| Office | docx 默认版式还原（file-viewer docx-preview 系，可切「简化视图」mammoth 语义 HTML）、xlsx（SheetJS，多 sheet 页签、>200 行截断）、pptx 默认演示文稿逐页还原（可切文本提纲卡片；引擎解析失败时错误卡一键改用提纲） |
+| Office | docx 默认版式还原（file-viewer docx-preview 系，可切「简化视图」mammoth 语义 HTML）、xlsx/xlsm/xls 默认电子表格（file-viewer 版式还原，可切「简化视图」SheetJS 表格，>200 行截断）、pptx 默认演示文稿逐页还原（可切文本提纲卡片；引擎解析失败时错误卡一键改用提纲） |
 | file-viewer 桥接格式 | 第一波 10 组：邮件 eml/msg/mbox、电子书 epub/fb2/umd、OFD 版式、CHM 帮助、Word 系 docx/doc/docm/dotx/dotm/odt/odp/rtf、演示 pptx/ppt/pot/pptm/potx/potm/ppsx/ppsm、表格变体 xltx/xlsb/xlt/xla/xlam/xltm/ods/fods/dbf/tsv、iWork pages/numbers/key、Hangul hwp/hwpx、WordPerfect wpd/wp/wp5/wp6；第二波 10 组：数据与字体 sqlite/parquet/avro/webarchive/ttf/otf/woff/woff2/wasm、Adobe 设计系 24 扩展名（psd/ai/eps/psb/idml/inx/…）、扩展图片 tiff/tif/heic/heif、地理 geojson/kml/gpx/shp（maplibre 地图）、Typst、DICOM、签名 21 扩展名、EDA、Draw.io drawio/dio、MIDI——@file-viewer 渲染器包桥接（Worker/WASM 资产三层解析链自托管 + SW CacheFirst，嵌套附件转交 vviewer 分派） |
 | 大文件 | hex / JSON Lines / 代码文本窗口流式：首屏仅拉头部 + 首窗口，滚动续读/回看，块缓存 LRU 内存有界；本地文件 slice、后端 Range 分块拉取（压缩包条目等全量来源不流式）；code/jsonl 流式仅 UTF-8，非 UTF-8 自动回退全量；512MB 流式上限，到限提示转 hex |
 | 打开方式 | 内容探测链：magic 签名（mp4 族品牌表/webm/webp/wav/flac/ogg/bmp/ico/gz/7z/rar 等——无扩展名或改名文件直达真渲染器；「二进制扩展名 + 签名不符」不参与改派防误伤）→ 文本嗅探 → hex 兜底；「打开方式」三入口——属性面板下拉 / 状态栏浮层 / Tab 右键子菜单——受限候选 + 「更多渲染器…」就地展开 registry 全量渲染器清单（per-tab 手动改派进会话快照，（手动）徽标），markdown 恒在候选兜底（.txt 可强制 markdown 渲染）；错误卡片快捷动作同链（含同格式候选渲染器）；同一格式有多个渲染器时（docx/pptx/xlsx/xls/xlsm/csv）可在设置中心「打开方式」节改默认渲染器 |

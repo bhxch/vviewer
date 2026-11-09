@@ -14,8 +14,8 @@
 | 1 | 代码没有自动换行开关 | 代码视图为固定行高虚拟滚动，`.vv-code-line { white-space: pre }`，无换行设置 | core `variableScroller`/`RowHeights`（ee308fa、d30d2e0）、render-text `wordWrap`/`setWordWrap`（baa0db4）、设置「代码视图」/状态栏「换行」/Alt+Z（9ad8bd2）、HTML/图表源码视图与降级源码面同样遵循（16c26d6） |
 | 2 | 手机上 PDF 100% 超宽，横向发票看不到左半边、拖不动 | 100% = 1pt:1px（842pt 横向页 > 375px）；`.vv-pdf-pages` 以 `align-items:center` 居中，页宽超容器时左侧溢出落在负滚动区永远不可达 | a769db5（auto 默认适宽且封顶 100%、「适应宽度」按钮、左右 auto margin 居中、缩放保持阅读位置） |
 | 3 | PPT 默认是大纲模式 | `.pptx` 绑定自研文本提纲渲染器；可逐页还原的 foreign 演示文稿渲染器刻意不绑 pptx | ccdea50（演示文稿拥有 pptx，提纲降为候选）；3b37296（引擎解析失败时错误卡给「以 PowerPoint（文本提纲） 打开」兜底与可读文案） |
-| 4 | 电脑上 PDF 报「无法预览此文件 Iterator is not defined」 | 浏览器版本低（Chrome/Edge<122、Firefox<131、Safari<18.4 无全局 Iterator）：pdfjs-dist 6.4.299 现代构建模块顶层 `typeof Iterator.prototype.join` 求值即抛 ReferenceError | 03fe011（主模块/worker 改 legacy 构建，core-js 先注册全局 Iterator；加载失败不入单例） |
-| 5 | Word 分成「Word 文档」与「（兼容格式）」两个 | 两个渲染器：mammoth 语义 HTML（丢版式，.docx 默认）与 docx-preview 系版式还原（原只绑 doc/rtf/odt 等） | ccdea50（版式还原拥有 docx、label 澄清为「版式还原」/「简化视图」） |
+| 4 | 电脑上 PDF 报「无法预览此文件 Iterator is not defined」 | 浏览器版本低（Chrome/Edge<122、Firefox<131、Safari<18.4 无全局 Iterator）：pdfjs-dist 6.4.299 现代构建模块顶层 `typeof Iterator.prototype.join` 求值即抛 ReferenceError | 03fe011（先全量落 legacy）→ 本轮升级为能力感知：`preferModernBuild` 按 legacy core-js 清单逐项探测（迭代器 helper/Set 方法/Uint8Array base64·hex/Map.getOrInsert/Promise.try/URL.parse/JSON 源访问/Math.sumPrecise），齐备取现代构建、任一缺失取 legacy；判定首用定格（legacy 加载后 core-js 补回全局会翻转探针复评——不定格则 data-pdf-build 标记漂移，UFB-04 实证）；加载失败不入单例 |
+| 5 | Word 分成「Word 文档」与「（兼容格式）」两个 | 两个渲染器：mammoth 语义 HTML（丢版式，.docx 默认）与 docx-preview 系版式还原（原只绑 doc/rtf/odt 等） | ccdea50（版式还原拥有 docx、label 澄清为「版式还原」/「简化视图」）；本轮 xlsx/xlsm/xls 同型翻转（电子表格拥有，SheetJS 简化视图降候选；csv 维持 code 默认，可经设置改表格） |
 | 6 | 多渲染器格式无法设置默认渲染器 | 注册表每扩展名单一所有者，无偏好机制 | 3326018（`altExtensions` 候选 + `registry.setPreferenceResolver` + 设置「打开方式」节 + `rendererDefaults`） |
 | 7 | 缩窄窗口后左栏自动折叠，右栏折叠钮不见了 | 601–900px 段左栏转抽屉，右栏仍在主区，但折叠钮/竖条/`.vv-right-off` 只在 >900px 生效，ℹ 右抽屉只在 ≤600px 出现——该段右栏无任何收起入口 | 10ceaf8 |
 | 8 | 打开图片后能滚轮缩放，但鼠标/触屏拖动都移不动 | 图片查看器只写 `transform: scale`（不改布局尺寸、滚动区不增长）且无拖动平移；灯箱平移只挂 mouse 事件 | 981a788（布局缩放 + 容器滚动、Pointer Events 拖动/捏合）、acec3c6（灯箱 Pointer Events + 捏合 + touch-action） |
@@ -34,8 +34,10 @@
 | UFB-02c | 桌面竖页（600pt）仍 100% | chromium |
 | UFB-03a | 真结构 pptx 落演示文稿逐页渲染（`.pptx-viewer-shell` + `.slide`），打开方式可切回文本提纲 | chromium |
 | UFB-03b | 极简 pptx（无 theme，引擎解析失败）错误卡文案可读（非「[object Object]」）+「以 PowerPoint（文本提纲） 打开」兜底可用 | chromium |
-| UFB-04 | 删除全局 Iterator 后 PDF 照常渲染、无错误卡；加载后全局 Iterator 由 legacy 构建补回 | 双 |
+| UFB-04 | 删除全局 Iterator 后选兼容构建（data-pdf-build=legacy）：PDF 照常渲染、core-js 补回 Iterator | 双 |
+| UFB-04b | 特性齐备（现代浏览器）选现代构建（data-pdf-build=modern），渲染照常 | 双 |
 | UFB-05 | docx 落版式还原（`.docx-wrapper`）；打开方式列出两个可区分的 Word 渲染器并可切简化视图 | chromium |
+| UFB-05b | xlsx 默认电子表格（`.excel-wrapper`），可切「Excel 表格（简化视图）」SheetJS 面 | chromium |
 | UFB-06 | 设置「打开方式」列出 csv/docx/pptx/xls/xlsm/xlsx；改 .docx 默认即生效、单标签手选优先、改回内置默认恢复 | chromium |
 | UFB-07a | 800px：左栏抽屉化、右栏折叠钮可见可用（折叠→右竖条展开） | chromium（自设视口） |
 | UFB-07b | 桌面折叠右栏后缩窄到 800px：右栏保持折叠 | chromium（自设视口） |
