@@ -219,7 +219,7 @@ export const codeRenderer: Renderer = {
 export function renderDegradedCode(
   buffer: Uint8Array,
   target: HTMLElement,
-  opts: { name: string; mode: string; encoding?: Encoding; ext?: string; highlight?: boolean }
+  opts: { name: string; mode: string; encoding?: Encoding; ext?: string; highlight?: boolean; wordWrap?: boolean }
 ): RenderCodeHandle {
   target.classList.add('vv-degraded');
   const card = document.createElement('div');
@@ -241,6 +241,7 @@ export function renderDegradedCode(
     encoding: opts.encoding,
     highlight: opts.highlight,
     ext: opts.ext,
-    oversizeNotice: false // 降级卡已存在：不再叠加 >20MB 纯文本提示条（BUG-20 防重复）
+    oversizeNotice: false, // 降级卡已存在：不再叠加 >20MB 纯文本提示条（BUG-20 防重复）
+    wordWrap: opts.wordWrap // 代码视图自动换行（settings.codeWordWrap）同样作用于降级源码面
   });
 }

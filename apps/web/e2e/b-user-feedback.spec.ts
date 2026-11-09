@@ -10,7 +10,8 @@ import { applySettings, closeSettings, gotoGroup, openSettings } from './setting
  * b-user-feedback —— 2026-11-09 用户反馈八项的验收 e2e（UFB-01..08，一项一组）：
  * - UFB-01 代码自动换行：状态栏「换行」开关 / 设置中心「代码视图」节 / Alt+Z；换行后无
  *   横向溢出、长行折成多视觉行且相邻行不重叠（可变行高虚拟滚动的核心正确性）、滚到底
- *   末行可达、搜索跳转落在视口内；设置持久化；Ctrl+Alt+Z（zen）不误触换行。
+ *   末行可达、搜索跳转落在视口内；设置持久化；Ctrl+Alt+Z（zen）不误触换行；HTML 源码
+ *   视图同样遵循换行设置。
  * - UFB-02 手机 PDF：横向页（842×595pt）在 375 视口默认适宽（<100%）不超宽、左缘可见；
  *   放大溢出后 scrollLeft=0 时页左缘可达（旧 align-items:center 左半边落负滚动区）、
  *   触屏横扫可平移；「适应宽度」按钮；桌面竖页仍 100%。
@@ -233,6 +234,28 @@ test.describe('UFB-01 代码自动换行', () => {
       )
       .toBe(true);
   });
+});
+
+test('UFB-01e HTML 源码视图同样遵循换行（状态栏开关即时生效，渲染视图切回源码保持）', async ({ page }) => {
+  test.setTimeout(60_000);
+  await waitAppMounted(page);
+  const html = Array.from({ length: 40 }, (_, i) => `<p>${i} ${'htmlword '.repeat(60)}</p>`).join('\n');
+  await openDirText(page, 'ufb1e', 'page.html', html);
+  await openFile(page, 'page.html');
+  await page.locator('.vv-html-btn-source').click();
+  const pre = page.locator('.vv-code-pre');
+  await expect(page.locator('.vv-code-line').first()).toBeVisible({ timeout: 20_000 });
+  await expect(pre).not.toHaveClass(/vv-code-wrap/);
+  await expect.poll(() => pre.evaluate((el) => el.scrollWidth > el.clientWidth + 10)).toBe(true);
+
+  await page.locator('.vv-status-wrap').click();
+  await expect(pre).toHaveClass(/vv-code-wrap/);
+  await expect.poll(() => pre.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+
+  // 渲染 ↔ 源码往返：源码视图按当前设置重挂，换行保持
+  await page.locator('.vv-html-btn-rendered').click();
+  await page.locator('.vv-html-btn-source').click();
+  await expect(page.locator('.vv-code-pre')).toHaveClass(/vv-code-wrap/);
 });
 
 // ─────────────────────────────── UFB-02 手机 PDF ───────────────────────────────

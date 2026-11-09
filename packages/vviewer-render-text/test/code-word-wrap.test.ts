@@ -3,7 +3,10 @@
 // 粗估折行数、渲染后实测修正）；setWordWrap 原地切换且保持首可视行。全量与窗口两路径。
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Detection, FileSource, StreamCtx, TreeStore } from '@bhxch/vviewer-core';
-import { codeRenderer, renderCode } from '../src/code';
+import { codeRenderer, renderCode, renderDegradedCode } from '../src/code';
+import { htmlRenderer } from '../src/html';
+import { createDiagramFileRenderers } from '../src/diagramFile';
+import { setDiagramOptions } from '@bhxch/vviewer-markdown';
 
 function stubResizeObserver(): void {
   vi.stubGlobal('ResizeObserver', class {
@@ -121,3 +124,56 @@ describe('codeRenderer 透传 opts.wordWrap 与 setWordWrap', () => {
     inst.destroy();
   });
 });
+
+describe('复用代码视图的源码面同样遵循换行设置', () => {
+  const src = (name: string): FileSource => ({ storeId: 's', storeLabel: 's', path: name, name, store: {} as TreeStore });
+  type Toggleable = { toggleView(): void; setWordWrap(on: boolean): void; destroy(): void };
+  const wrapped = (host: HTMLElement): boolean => host.querySelector('.vv-code-pre')!.classList.contains('vv-code-wrap');
+
+  it('HTML 源码视图：按 opts.wordWrap 换行；setWordWrap 即时切换，渲染视图下切换后再切源码亦生效', async () => {
+    stubResizeObserver();
+    const host = mountHost();
+    const html = new TextEncoder().encode(`<p>${'x'.repeat(300)}</p>`);
+    const det = { ext: 'html', encoding: 'utf-8' } as Detection;
+    const inst = (await htmlRenderer.render(html, host, src('a.html'), det, undefined, { wordWrap: true })) as unknown as Toggleable;
+    inst.toggleView(); // → 源码
+    expect(wrapped(host)).toBe(true);
+    inst.setWordWrap(false);
+    expect(wrapped(host)).toBe(false);
+    inst.toggleView(); // → 渲染
+    inst.setWordWrap(true);
+    inst.toggleView(); // → 源码：按最新设置重挂
+    expect(wrapped(host)).toBe(true);
+    inst.destroy();
+  });
+
+  it('超大降级源码视图（renderDegradedCode）：opts.wordWrap 透传', () => {
+    stubResizeObserver();
+    const host = mountHost();
+    const code = renderDegradedCode(new TextEncoder().encode(TEXT), host, { name: 'big.html', mode: '源码', wordWrap: true });
+    expect(wrapped(host)).toBe(true);
+    code.setWordWrap?.(false);
+    expect(wrapped(host)).toBe(false);
+    code.destroy();
+  });
+
+  it('图表文件源码模式：按 opts.wordWrap 换行并可 setWordWrap 切换', async () => {
+    stubResizeObserver();
+    setDiagramOptions(() => ({ krokiHost: 'https://kroki.example', modeOf: () => 'source' }) as never);
+    try {
+      const host = mountHost();
+      const r = createDiagramFileRenderers({}).find((x) => x.id === 'diagram-mermaid')!;
+      const det = { ext: 'mmd', encoding: 'utf-8' } as Detection;
+      const inst = (await r.render(new TextEncoder().encode(`graph TD\n  A-->${'B'.repeat(300)}`), host, src('a.mmd'), det, undefined, {
+        wordWrap: true
+      })) as unknown as Toggleable;
+      expect(wrapped(host)).toBe(true);
+      inst.setWordWrap(false);
+      expect(wrapped(host)).toBe(false);
+      inst.destroy();
+    } finally {
+      setDiagramOptions(() => null as never);
+    }
+  });
+});
+

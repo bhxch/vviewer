@@ -11,7 +11,7 @@
 // 高亮降级链）。样式统一由 apps/web/src/app.css 提供（单一来源，同 code.ts）。
 // 超大输入（>20MB）：净化/DOM 遍历无分块能力，跳过沙箱管线降级为源码视图
 // + 提示卡（renderDegradedCode；降级而非拒绝）。
-import type { Renderer, RenderedInstance, Detection, FileSource, SearchMatch } from '@bhxch/vviewer-core';
+import type { Renderer, RenderedInstance, RenderOptions, Detection, FileSource, SearchMatch, StreamCtx } from '@bhxch/vviewer-core';
 import { ALLOWED_URI_REGEXP, sanitizeHtml } from '@bhxch/vviewer-sanitize';
 import { decodeText } from './decodeText';
 import {
@@ -78,7 +78,10 @@ export const htmlRenderer: Renderer = {
   id: 'html',
   label: 'HTML 预览',
   extensions: ['html', 'htm'],
-  async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection) {
+  async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection, _ctx?: StreamCtx, opts?: RenderOptions) {
+    // 代码视图自动换行（settings.codeWordWrap）：源码视图/降级源码面与 code 渲染器同一
+    // 设置——初值取第 6 参，运行期经实例 setWordWrap 切换（渲染视图下切换在下次挂源码时生效）
+    let wrap = opts?.wordWrap === true;
     // 超大输入守卫：沙箱管线（净化/DOM 遍历/序列化）无分块能力，>20MB 会长时间
     // 阻塞主线程。降级为源码视图 + 提示卡（不建 toolbar，渲染视图本档不提供）。
     if (buffer.byteLength > MARKUP_MAX_BYTES) {
@@ -88,9 +91,10 @@ export const htmlRenderer: Renderer = {
         mode: '源码',
         encoding: det.encoding,
         ext: det.ext,
-        highlight: true
+        highlight: true,
+        wordWrap: wrap
       });
-      const instance: RenderedInstance & { toggleView(): void } = {
+      const instance: RenderedInstance & { toggleView(): void; setWordWrap(on: boolean): void } = {
         destroy() {
           code.destroy();
           target.replaceChildren();
@@ -100,7 +104,8 @@ export const htmlRenderer: Renderer = {
           // 降级视图无渲染视图可切：保持接口形状，操作为空
         },
         search: (query: string, opts?: { caseSensitive?: boolean }) => code.search(query, opts),
-        gotoMatch: (index) => code.gotoMatch(index)
+        gotoMatch: (index) => code.gotoMatch(index),
+        setWordWrap: (on) => code.setWordWrap?.(on)
       };
       return instance;
     }
@@ -150,7 +155,7 @@ export const htmlRenderer: Renderer = {
 
     function mountSource(): void {
       // 源码视图复用 code 渲染器：同一虚拟滚动与高亮降级链
-      codeInst = renderCode(buffer, content, { encoding: det.encoding, highlight: true, ext: det.ext });
+      codeInst = renderCode(buffer, content, { encoding: det.encoding, highlight: true, ext: det.ext, wordWrap: wrap });
     }
 
     /** 渲染/源码切换（按钮与实例方法同通道） */
@@ -178,6 +183,7 @@ export const htmlRenderer: Renderer = {
       search(query: string, opts?: { caseSensitive?: boolean }): Promise<SearchMatch[]>;
       /** BUG-44：视图切换订阅（SearchPanel 重扫）；返回退订函数 */
       onViewChanged(cb: () => void): () => void;
+      setWordWrap(on: boolean): void;
     } = {
       destroy() {
         destroyed = true;
@@ -203,7 +209,11 @@ export const htmlRenderer: Renderer = {
       },
       // BUG-22：html 渲染恒本地（沙箱 srcdoc 不参与 compute 路由），渲染/源码两
       // 视图状态栏均显示「渲染: 本地」（ViewerPane 复用 markdown 引擎文案分支）
-      getEngine: () => 'local'
+      getEngine: () => 'local',
+      setWordWrap(on) {
+        wrap = on;
+        codeInst?.setWordWrap?.(on);
+      }
     };
     return instance;
   }

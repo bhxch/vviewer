@@ -195,8 +195,12 @@ async function renderDiagramFileBuffer(
   buffer: Uint8Array,
   target: HTMLElement,
   source: FileSource,
-  det: Detection
+  det: Detection,
+  wordWrap = false
 ): Promise<RenderedInstance> {
+  // 代码视图自动换行（settings.codeWordWrap）：源码视图与 code 渲染器同一设置——初值
+  // 取 render 第 6 参，运行期经实例 setWordWrap 切换（渲染视图下切换在下次挂源码时生效）
+  let wrap = wordWrap;
   // 大小门（spec §5.2）：>10MB 不进任何引擎/kroki/服务端路径，直落源码视图 +
   // 降级提示卡（renderDegradedCode 结构同构——其卡文案硬编码 MARKUP_MAX_BYTES=20MB
   // 阈值，图表门是 10MB，按同结构自建卡取正确阈值；类面零新增）。
@@ -221,9 +225,10 @@ async function renderDiagramFileBuffer(
       encoding: det.encoding,
       highlight: true,
       ext: det.ext,
-      oversizeNotice: false // 降级卡已存在：不叠加超限提示条（BUG-20 防重复）
+      oversizeNotice: false, // 降级卡已存在：不叠加超限提示条（BUG-20 防重复）
+      wordWrap: wrap
     });
-    const instance: RenderedInstance & { toggleView(): void } = {
+    const instance: RenderedInstance & { toggleView(): void; setWordWrap(on: boolean): void } = {
       destroy() {
         codeInst.destroy();
         target.replaceChildren();
@@ -237,6 +242,9 @@ async function renderDiagramFileBuffer(
       },
       gotoMatch(index: number) {
         codeInst.gotoMatch(index);
+      },
+      setWordWrap(on: boolean) {
+        codeInst.setWordWrap?.(on);
       }
     };
     return instance;
@@ -312,7 +320,7 @@ async function renderDiagramFileBuffer(
     const holder = doc.createElement('div');
     holder.className = 'vv-degraded-content';
     content.append(holder);
-    codeInst = renderCode(buffer, holder, { encoding: det.encoding, highlight: true, ext: det.ext });
+    codeInst = renderCode(buffer, holder, { encoding: det.encoding, highlight: true, ext: det.ext, wordWrap: wrap });
   }
 
   // ---------- 三分发失败降级链（md 管线 renderDiagramBlock 同构） ----------
@@ -525,6 +533,7 @@ async function renderDiagramFileBuffer(
     toggleView(): void;
     onViewChanged(cb: () => void): () => void;
     applyTheme(opts?: { mermaidTheme?: MermaidTheme }): void;
+    setWordWrap(on: boolean): void;
   } = {
     destroy() {
       destroyed = true;
@@ -564,6 +573,10 @@ async function renderDiagramFileBuffer(
     },
     gotoMatch(index: number) {
       if (view === 'source') codeInst?.gotoMatch(index);
+    },
+    setWordWrap(on: boolean) {
+      wrap = on;
+      codeInst?.setWordWrap?.(on);
     }
   };
   return instance;
@@ -585,8 +598,8 @@ export function createDiagramFileRenderers(opts: DiagramFileRenderOpts): Rendere
       label: DIAGRAM_LABELS[diagram.id] ?? diagram.id,
       extensions: [...extensions],
       streaming: false,
-      async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection) {
-        return renderDiagramFileBuffer(diagram, opts, buffer, target, source, det);
+      async render(buffer: Uint8Array, target: HTMLElement, source: FileSource, det: Detection, _ctx, renderOpts) {
+        return renderDiagramFileBuffer(diagram, opts, buffer, target, source, det, renderOpts?.wordWrap === true);
       }
     };
   });
