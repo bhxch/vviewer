@@ -364,6 +364,58 @@ describe('dispatcher 错误卡片 actions（BUG-14）', () => {
     target.remove();
   });
 
+  it('默认渲染器失败：错误卡追加同扩展名候选渲染器的「以 <label> 打开」，点击即以候选重渲（非对象错误取 message）', async () => {
+    const reg = createRegistry();
+    // 上游 PptxDiagnosticError 形态：普通对象（非 Error 实例）带 message
+    reg.install(mk('slides', ['pptx'], {
+      label: '演示文稿',
+      render: async () => {
+        throw { name: 'PptxDiagnosticError', code: 'PPTX_NO_RENDERABLE_SLIDES', message: 'PPTX 中没有可成功渲染的幻灯片。' };
+      }
+    }));
+    let outlineRendered = 0;
+    reg.install(mk('outline', [], {
+      label: 'PowerPoint（文本提纲）',
+      altExtensions: ['pptx'],
+      render: async (_b, t) => {
+        outlineRendered++;
+        t.replaceChildren('outline');
+        return { destroy() {} };
+      }
+    }));
+    reg.install(mk('hex', ['bin']));
+    const target = document.createElement('div');
+    document.body.append(target);
+    const { rendererId } = await createDispatcher(reg).dispatch(source('deck.pptx'), new Uint8Array([1, 2, 3]), target);
+    expect(rendererId).toBe('error');
+    expect(target.querySelector('.vv-error-detail')?.textContent).toBe('PPTX 中没有可成功渲染的幻灯片。');
+    const buttons = [...target.querySelectorAll<HTMLButtonElement>('button.vv-error-action')];
+    // 候选紧随「重试」（同格式的其它渲染器是最贴切的兜底），通用 open-as 在后
+    expect(buttons.map((b) => b.textContent)).toEqual(['重试', '以 PowerPoint（文本提纲） 打开', '以 hex 打开']);
+    buttons[1]!.click();
+    await vi.waitFor(() => expect(outlineRendered).toBe(1));
+    expect(target.textContent).toContain('outline');
+    target.remove();
+  });
+
+  it('候选渲染器自身失败：错误卡不再列出它自己，所有者作为候选出现', async () => {
+    const reg = createRegistry();
+    reg.install(mk('slides', ['pptx'], { label: '演示文稿' }));
+    reg.install(mk('outline', [], {
+      label: 'PowerPoint（文本提纲）',
+      altExtensions: ['pptx'],
+      render: async () => {
+        throw new Error('outline boom');
+      }
+    }));
+    const target = document.createElement('div');
+    document.body.append(target);
+    await createDispatcher(reg).dispatch(source('deck.pptx'), new Uint8Array([1]), target, { rendererOverride: 'outline' });
+    const labels = [...target.querySelectorAll<HTMLButtonElement>('button.vv-error-action')].map((b) => b.textContent);
+    expect(labels).toEqual(['重试', '以 演示文稿 打开']);
+    target.remove();
+  });
+
   it('render 失败的卡片带「重试」「以纯文本打开」「以 hex 打开」按钮；重试成功即恢复渲染且新实例被级联托管', async () => {
     const reg = createRegistry();
     let attempts = 0;

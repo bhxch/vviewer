@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  errorMessageOf,
   abortReadError,
   classifyDispatchError,
   DispatchReadError,
@@ -34,3 +35,23 @@ describe('classifyDispatchError（错误身份与字节映射：纯身份三分�
     expect(isAbortError(e)).toBe(true);
   });
 });
+
+describe('errorMessageOf（错误卡文案提取）', () => {
+  it('Error 取 message；带 string message 的普通对象取 message（上游诊断错误形态）', () => {
+    expect(errorMessageOf(new Error('boom'))).toBe('boom');
+    expect(errorMessageOf({ name: 'PptxDiagnosticError', message: '解析失败' })).toBe('解析失败');
+  });
+  it('无 message 的对象序列化；基础类型 String()；空串回落通用文案', () => {
+    expect(errorMessageOf({ code: 42 })).toBe('{"code":42}');
+    expect(errorMessageOf('raw')).toBe('raw');
+    expect(errorMessageOf(undefined)).toBe('undefined');
+    expect(errorMessageOf(new Error(''))).toBe('渲染失败');
+    expect(errorMessageOf({ message: '' })).toBe('渲染失败');
+  });
+  it('不可序列化对象（循环引用）回落 String()', () => {
+    const o: { self?: unknown } = {};
+    o.self = o;
+    expect(errorMessageOf(o)).toBe('[object Object]');
+  });
+});
+

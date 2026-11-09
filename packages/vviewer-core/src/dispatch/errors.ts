@@ -27,9 +27,30 @@ export function isAbortError(err: unknown): boolean {
  */
 export class DispatchReadError extends Error {
   constructor(err: unknown) {
-    super(err instanceof Error ? err.message : String(err));
+    super(errorMessageOf(err));
     this.name = 'DispatchReadError';
   }
+}
+
+/**
+ * 错误卡文案提取：Error 取 message；带 string message 的普通对象同取 message（桥接的
+ * 上游渲染器会抛非 Error 的诊断对象，如 file-viewer pptx 的 PptxDiagnosticError
+ * `{name, code, message}`——String() 只得到「[object Object]」）；无 message 的对象
+ * JSON 序列化（循环引用等不可序列化回落 String()）；空文案回落「渲染失败」。
+ */
+export function errorMessageOf(err: unknown): string {
+  let msg: string;
+  if (err instanceof Error) msg = err.message;
+  else if (typeof err === 'object' && err !== null && typeof (err as { message?: unknown }).message === 'string') {
+    msg = (err as { message: string }).message;
+  } else if (typeof err === 'object' && err !== null) {
+    try {
+      msg = JSON.stringify(err);
+    } catch {
+      msg = String(err);
+    }
+  } else msg = String(err);
+  return msg === '' ? '渲染失败' : msg;
 }
 
 /** 统一抛出形态（Task 1 既有约定的单源化）：tree 层 localFiles/singleFile/localFs

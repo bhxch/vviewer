@@ -7,7 +7,7 @@ import {
   showErrorCard,
   type ErrorCardAction
 } from './errorRenderer';
-import { classifyDispatchError, DispatchReadError, isAbortError } from './errors';
+import { classifyDispatchError, DispatchReadError, errorMessageOf, isAbortError } from './errors';
 
 export interface Dispatcher {
   dispatch(
@@ -260,13 +260,20 @@ function buildRenderErrorActions(
         // 同裁决）：重试被取消时原卡保留在屏，不以「读取已取消」重画
         if (classifyDispatchError(err) === 'abort') return;
         // 重试仍失败：保留错误详情，按钮随之重建（可继续重试/以其他方式打开）
-        const message = err instanceof Error ? err.message : String(err);
+        const message = errorMessageOf(err);
         showErrorCard(target, message, source, {
           actions: buildRenderErrorActions(registry, renderer, buffer, source, det, target, onRendered, redisplay, ctx, renderOpts)
         });
       });
   };
   const actions: ErrorCardAction[] = [{ label: '重试', onClick: retry }];
+  // 同扩展名的其它候选渲染器（所有者 + altExtensions 声明者，去掉失败者自身）紧随「重试」：
+  // 同格式的另一渲染器是最贴切的兜底（如演示文稿引擎解析不了的 pptx 改用文本提纲），
+  // 通用 code/hex 在后；code/hex 本身是候选时不重复列出
+  for (const alt of det.ext !== '' ? registry.candidatesOf(det.ext) : []) {
+    if (alt.id === renderer.id || alt.id === 'code' || alt.id === 'hex') continue;
+    actions.push(openAsAction(alt.id, `以 ${alt.label} 打开`, redisplay, onRendered));
+  }
   const text = registry.byId('code')
     ? openAsAction('code', '以纯文本打开', redisplay, onRendered)
     : null;
@@ -575,7 +582,7 @@ export function createDispatcher(registry: Registry): Dispatcher {
       if (kind === 'abort') {
         return { instance: { destroy() {} }, rendererId: errorRenderer.id, det };
       }
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessageOf(err);
       // render 失败提供重试 + open-as（选路失败无重试，只给 open-as 换打开方式）。
       // 重试/open-as 成功产出的真实实例由 liveChild 级联托管：调用方（ViewerPane）持有的
       // live 仍是本卡片实例，其 destroy（tab 关闭/重渲染）时级联释放，杜绝资源泄漏
