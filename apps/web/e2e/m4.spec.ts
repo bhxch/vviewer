@@ -179,10 +179,14 @@ test('tar：libarchive 路径树渲染 + 条目可读 + 切回树 tab 复渲染'
 
 test('office：docx 段落 / xlsx 表格与页签 / 大表 200 行截断 / pptx 提纲卡片', async ({ page }) => {
   test.setTimeout(90_000);
-  // docx/pptx 内置默认已改为 file-viewer 版式/幻灯片还原（foreign-word/presentation）；
-  // 本用例锚 vviewer 自有 mammoth/提纲渲染器 → 经「默认渲染器」设置偏好选用
+  // docx/pptx/xlsx 内置默认已改为 file-viewer 版式/幻灯片/表格还原（foreign-word/
+  // presentation/spreadsheet）；本用例锚 vviewer 自有 mammoth/提纲/SheetJS 渲染器 →
+  // 经「默认渲染器」设置偏好选用
   await page.addInitScript(() => {
-    localStorage.setItem('vviewer:settings', JSON.stringify({ rendererDefaults: { docx: 'docx', pptx: 'pptx' } }));
+    localStorage.setItem(
+      'vviewer:settings',
+      JSON.stringify({ rendererDefaults: { docx: 'docx', pptx: 'pptx', xlsx: 'xlsx' } })
+    );
   });
   await page.goto('/');
   await openDir(page);

@@ -66,11 +66,15 @@ async function readGrid(page: Page): Promise<string[][]> {
     .evaluateAll((trs) => trs.map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent ?? '')));
 }
 
-/** docx/pptx 内置默认为 file-viewer 版式/幻灯片还原（foreign-word/presentation）；锚 vviewer
- * 自有 mammoth/提纲渲染器的用例经「默认渲染器」设置偏好（rendererDefaults）选用——须先于 goto */
+/** docx/pptx/xlsx 内置默认为 file-viewer 版式/幻灯片/表格还原（foreign-word/presentation/
+ * spreadsheet）；锚 vviewer 自有 mammoth/提纲/SheetJS 渲染器的用例经「默认渲染器」设置
+ * 偏好（rendererDefaults）选用——须先于 goto */
 async function seedCoreOfficeRenderers(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    localStorage.setItem('vviewer:settings', JSON.stringify({ rendererDefaults: { docx: 'docx', pptx: 'pptx' } }));
+    localStorage.setItem(
+      'vviewer:settings',
+      JSON.stringify({ rendererDefaults: { docx: 'docx', pptx: 'pptx', xlsx: 'xlsx' } })
+    );
   });
 }
 
@@ -201,6 +205,7 @@ test('MEDIA-08：docx 正文 p 与源 document.xml 的 w:t 一一对应（数量
 
 test('MEDIA-09：xlsx 多 sheet 页签切换逐格核对 + 250 行仅渲染前 200 行与截断提示', async ({ page }) => {
   test.setTimeout(90_000);
+  await seedCoreOfficeRenderers(page); // xlsx 内置默认已改 file-viewer 表格还原；本用例锚 SheetJS 面
   // 源基准（2026-10-10 实提，SheetJS 读 samples/m4/sample*.xlsx）：
   // sample.xlsx 两 sheet——清单 A1:C3、汇总 A1:B3；sample-large.xlsx 单 sheet 大表 A1:C250
   // （表头 序号/名称/数量，数据行 n → [n, 项目 n, 2n]）。

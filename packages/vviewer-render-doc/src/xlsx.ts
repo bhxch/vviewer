@@ -85,10 +85,14 @@ function buildSheetDom(sheet: WorkSheet, XLSX: XlsxModule): DocumentFragment {
 
 export const xlsxRenderer: Renderer = {
   id: 'xlsx',
-  label: 'Excel 表格',
-  // 'xls'（旧版 OLE/BIFF 二进制格式）是 spec 外的有意 scope 扩展（遗留 T10）：
-  // SheetJS community 可直接解析 OLE/BIFF，与 OOXML 同一 read 通道零额外成本
-  extensions: ['xlsx', 'xlsm', 'xls'],
+  label: 'Excel 表格（简化视图）',
+  // .xlsx/.xlsm 的内置默认是 file-viewer 桥接的电子表格渲染器（foreign-spreadsheet，
+  // 版式还原）；本渲染器走 SheetJS 转 HTML 表格（无版式、纯本地离线），以 altExtensions
+  // 作为候选——设置「打开方式」或单标签「打开方式」可改用。'xls'（旧版 OLE/BIFF 二进制
+  // 格式，遗留 T10 scope 扩展）同样随组转移：SheetJS community 可直接解析 OLE/BIFF，
+  // 与 OOXML 同一 read 通道零额外成本
+  extensions: [],
+  altExtensions: ['xlsx', 'xlsm', 'xls'],
   sniff: sniffOoxml,
   async render(buffer: Uint8Array, target: HTMLElement, _source: FileSource, _det: Detection) {
     const mod = await import('xlsx');
