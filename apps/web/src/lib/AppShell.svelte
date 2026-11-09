@@ -1514,10 +1514,16 @@
     border-left: 1px solid var(--ui-border);
     background: var(--ui-side-bg);
   }
-  /* 折叠态桌面隐藏本体（残留竖条由 .vv-strip 承担）；≤900px 抽屉不受折叠影响，
-     故 off 规则限定桌面断点（移动端无折叠语义，spec 非目标） */
+  /* 折叠态隐藏本体（残留竖条由 .vv-strip 承担）。左栏 off 规则限定桌面断点——
+     ≤900px 左栏是抽屉，不受折叠影响；右栏 off 覆盖桌面 + 平板段（601–900px 右栏
+     仍在主区流式布局内，折叠钮/竖条同段放开，见 app.css），≤600px 右栏为抽屉
+     不受折叠影响（移动端无折叠语义，spec 非目标） */
   @media (min-width: 901px) {
-    .vv-side.vv-side-off,
+    .vv-side.vv-side-off {
+      display: none;
+    }
+  }
+  @media (min-width: 601px) {
     .vv-right.vv-right-off {
       display: none;
     }
@@ -1597,9 +1603,10 @@
       min-width: 32px;
       min-height: 32px;
     }
-    /* 平板段（601-900px）只把文件树收进抽屉：右栏（230px 固定宽）保留在主区
-       流式布局内——原先两栏同时滑入抽屉、单按钮同开同关，600px 档两栏合计
-       600px 几乎盖满视口（终审 M7「双栏并存遮挡」）。 */
+    /* 平板段（601-900px）只把文件树收进抽屉：右栏保留在主区流式布局内（持久宽度，
+       可经右上角折叠钮收起、右竖条展开——app.css 同段放开）——原先两栏同时滑入
+       抽屉、单按钮同开同关，600px 档两栏合计 600px 几乎盖满视口（终审 M7「双栏
+       并存遮挡」）。 */
     /* 手机宽度（≤600px）：主区放不下 230px 右栏，MetaPanel/TOC 收进右侧抽屉，
        独立 toggle 入口（终审 M7「手机无右栏入口、TOC 不可达」） */
     @media (max-width: 600px) {

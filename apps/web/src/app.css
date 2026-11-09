@@ -311,17 +311,34 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 /* BUG-23：文件内搜索面板的 Aa 开关激活态（对齐全局面板按钮） */
 .vv-search-btn.active { color: var(--ui-accent); border-color: var(--ui-accent); }
 /* 布局自由化（spec 2026-10-19 §2）：折叠竖条 / 中缝调宽把手 / 面板折叠钮。
-   桌面断点（>900px）专属——≤900px 抽屉机制不动（spec 非目标），三件套在移动段
-   display:none（基类隐藏、min-width 查询内放开，避免依赖选择器顺序） */
+   基类隐藏、媒体查询内放开（避免依赖选择器顺序）。显隐分两段：桌面（>900px）
+   双栏三件套全开；平板段（601–900px）左栏已收进抽屉（☰），右栏仍在主区流式
+   布局内——只放开右栏折叠钮与右竖条，否则该段右栏无任何收起入口（缩窄窗口后
+   「右栏折叠钮消失」）；≤600px 右栏收进抽屉（ℹ），三件套全隐。调宽把手仍仅桌面
+   （≤900px 拖拽调宽禁用，AppShell startDrag 同条件） */
 .vv-strip, .vv-colhandle, .vv-collapse-btn { display: none; }
-@media (min-width: 901px) {
-  /* 折叠竖条：栏宽归零的残留 ~28px 条（展开钮 + 所属面板图标，spec §2） */
-  .vv-strip { display: flex; flex-direction: column; align-items: center; gap: 8px;
+@media (min-width: 601px) {
+  /* 折叠竖条：栏宽归零的残留 ~28px 条（展开钮 + 所属面板图标，spec §2）——形态，
+     显隐见下方两段 */
+  .vv-strip { flex-direction: column; align-items: center; gap: 8px;
     width: 28px; flex: none; padding: 8px 0; background: var(--ui-side-bg);
     border-right: 1px solid var(--ui-border); }
   .vv-strip[data-side='right'] { border-right: 0; border-left: 1px solid var(--ui-border); }
   .vv-strip-expand { width: 22px; padding: 2px 0; font-size: var(--vv-fs-xs); line-height: 1.4; }
   .vv-strip-icon { font-size: 14px; color: var(--ui-fg-muted); line-height: 1; }
+  /* 面板折叠钮：面板右上角浮置（不占布局流），默认低透明度 hover 实起。
+     双栏统一右上角（VS Code 侧栏动作位惯例）：右栏若放左上角会压住 MetaPanel
+     首行「属性」标题（均为 ~6px 锚点的浮层/文本叠放），右上角是标题行右侧空白 */
+  .vv-collapse-btn { position: absolute; top: 6px; z-index: 5;
+    width: 24px; height: 24px; padding: 0; font-size: var(--vv-fs-xs); line-height: 1; opacity: .35; }
+  .vv-collapse-btn:hover { opacity: 1; }
+  /* hover 揭示的键盘等价（§7/§10-G1）：否则键盘聚焦恒 0.35 近乎不可见 */
+  .vv-collapse-btn:focus-visible { opacity: 1; }
+  .vv-collapse-left, .vv-collapse-right { right: 6px; }
+}
+@media (min-width: 901px) {
+  .vv-strip { display: flex; }
+  .vv-collapse-btn { display: block; }
   /* 中缝调宽把手：6px 热区（视觉 2px accent 线 hover/拖拽中显现）；
      touch-action none 防触屏拖拽被滚动接管 */
   .vv-colhandle { display: block; flex: none; width: 6px; cursor: col-resize;
@@ -329,15 +346,10 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
   .vv-colhandle::after { content: ''; position: absolute; top: 0; bottom: 0; left: 2px;
     width: 2px; background: transparent; }
   .vv-colhandle:hover::after, .vv-colhandle.vv-dragging::after { background: var(--ui-accent); }
-  /* 面板折叠钮：面板右上角浮置（不占布局流），默认低透明度 hover 实起。
-     双栏统一右上角（VS Code 侧栏动作位惯例）：右栏若放左上角会压住 MetaPanel
-     首行「属性」标题（均为 ~6px 锚点的浮层/文本叠放），右上角是标题行右侧空白 */
-  .vv-collapse-btn { display: block; position: absolute; top: 6px; z-index: 5;
-    width: 24px; height: 24px; padding: 0; font-size: var(--vv-fs-xs); line-height: 1; opacity: .35; }
-  .vv-collapse-btn:hover { opacity: 1; }
-  /* hover 揭示的键盘等价（§7/§10-G1）：否则键盘聚焦恒 0.35 近乎不可见 */
-  .vv-collapse-btn:focus-visible { opacity: 1; }
-  .vv-collapse-left, .vv-collapse-right { right: 6px; }
+}
+@media (min-width: 601px) and (max-width: 900px) {
+  .vv-strip[data-side='right'] { display: flex; }
+  .vv-collapse-right { display: block; }
 }
 /* chrome 隐藏与 zen（spec 2026-10-19 §2/§3，Task 2）：隐藏条 fixed 平移出视口顶
    （不回流内容、组件保持挂载；visibility:hidden 移出 Tab 序/AT 树并停用内部
