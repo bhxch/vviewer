@@ -618,6 +618,20 @@ describe('storage 设置节（远端下载确认阈值，spec §6.4，计划 2 T
   });
 });
 
+describe('codeWordWrap 设置（代码视图自动换行）', () => {
+  it('默认关闭；normalizeSettings 非布尔脏值归位 false、布尔原样', () => {
+    expect(DEFAULTS.codeWordWrap).toBe(false);
+    expect(normalizeSettings({}).codeWordWrap).toBe(false);
+    expect(normalizeSettings({ codeWordWrap: true }).codeWordWrap).toBe(true);
+    expect(normalizeSettings({ codeWordWrap: 'yes' }).codeWordWrap).toBe(false);
+  });
+
+  it('validateSettings：非布尔报告，布尔零报告', () => {
+    expect(validateSettings({ codeWordWrap: true })).toEqual([]);
+    expect(validateSettings({ codeWordWrap: 1 }).map((i) => i.field)).toEqual(['codeWordWrap']);
+  });
+});
+
 describe('rendererDefaults 设置节（多渲染器格式的默认渲染器偏好）', () => {
   it('默认空表：DEFAULTS 与 normalizeSettings({}) 均为 {}', () => {
     expect(DEFAULTS.rendererDefaults).toEqual({});

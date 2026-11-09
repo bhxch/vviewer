@@ -17,6 +17,7 @@ function baseSettings(fonts?: Partial<Settings['fonts']>): Settings {
     codeThemeDark: 'serika-dark',
     excludedPatterns: [],
     autoRefresh: true,
+    codeWordWrap: false,
     computePolicy: 'auto',
     diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} },
     fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13, ...fonts },

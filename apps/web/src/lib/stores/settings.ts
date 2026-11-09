@@ -63,6 +63,9 @@ export interface Settings {
   codeThemeDark: string;
   excludedPatterns: string[];
   autoRefresh: boolean;
+  /** 代码/纯文本视图自动换行（设置中心「代码视图」节、状态栏「换行」开关、Alt+Z）：
+   * ViewerPane 经 dispatch 透传初值，运行期变更订阅后在存活实例上 setWordWrap 原地切换 */
+  codeWordWrap: boolean;
   /** 计算策略（M6）：auto=远程文件优先远程计算（失败回退本地）；local/remote=显式指定 */
   computePolicy: ComputePolicy;
   diagrams: DiagramsSettings;
@@ -98,6 +101,7 @@ export const DEFAULTS: Settings = {
   codeThemeDark: 'serika-dark',
   excludedPatterns: [],
   autoRefresh: true,
+  codeWordWrap: false,
   computePolicy: 'auto',
   diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} },
   fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
@@ -154,6 +158,7 @@ export function normalizeSettings(partial: Record<string, unknown>): Settings {
   const s = { ...defaults(), ...(partial as Partial<Settings>) };
   // computePolicy 白名单校验：旧版本/手改 localStorage 的非法值回落默认
   if (!POLICIES.includes(s.computePolicy)) s.computePolicy = DEFAULTS.computePolicy;
+  if (typeof s.codeWordWrap !== 'boolean') s.codeWordWrap = DEFAULTS.codeWordWrap;
   // 外观槽格式白名单（spec 2026-10-12 §2.3）：'default' 或 'vscode:'/'imported:'
   // 前缀；存在性校验（内置名单/imported id）由注入期 warn+回退兜底，此处只挡格式
   for (const key of ['appearanceLight', 'appearanceDark'] as const) {

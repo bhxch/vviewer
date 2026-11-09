@@ -133,6 +133,9 @@ export function validateSettings(raw: unknown): SettingsIssue[] {
   if (raw.autoRefresh !== undefined && typeof raw.autoRefresh !== 'boolean') {
     issues.push({ field: 'autoRefresh', message: '应为布尔值' });
   }
+  if (raw.codeWordWrap !== undefined && typeof raw.codeWordWrap !== 'boolean') {
+    issues.push({ field: 'codeWordWrap', message: '应为布尔值' });
+  }
   if (raw.computePolicy !== undefined && !POLICIES.includes(raw.computePolicy as string)) {
     issues.push({ field: 'computePolicy', message: `须为 ${POLICIES.join(' / ')} 之一` });
   }

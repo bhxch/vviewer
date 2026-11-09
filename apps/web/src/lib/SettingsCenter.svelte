@@ -33,6 +33,7 @@
   } from './settingsDraft';
   import AppearanceSection from './settings/AppearanceSection.svelte';
   import FontsSection from './settings/FontsSection.svelte';
+  import CodeSection from './settings/CodeSection.svelte';
   import DiagramsSection from './settings/DiagramsSection.svelte';
   import RenderersSection from './settings/RenderersSection.svelte';
   import LayoutSection from './settings/LayoutSection.svelte';
@@ -53,10 +54,11 @@
   }
 
   // 组序（spec §2 定稿序：外观/字体/图表/布局/搜索与排除/自动刷新/计算/存储与数据/关于；
-  // 「打开方式」（默认渲染器偏好）插在图表之后）
+  // 「代码视图」（自动换行）插在字体之后，「打开方式」（默认渲染器偏好）插在图表之后）
   const groups: SettingsGroup[] = [
     { id: 'appearance', label: '外观', content: AppearanceSection },
     { id: 'fonts', label: '字体', content: FontsSection },
+    { id: 'code', label: '代码视图', content: CodeSection },
     { id: 'diagrams', label: '图表', content: DiagramsSection },
     { id: 'renderers', label: '打开方式', content: RenderersSection },
     { id: 'layout', label: '布局', content: LayoutSection },

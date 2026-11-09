@@ -651,9 +651,11 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 /* 状态栏渲染器指示器（Task 3 壳 A）：状态栏内联按钮，观感融入文本段（继承状态栏
    字号 --vv-fs-xs/淡色），hover 提示可点；候选浮层 absolute 于 .vv-viewer-pane（position:
    relative 已有，SearchPanel 同锚）状态栏上方左对齐，z-index 对齐面板层。 */
-.vv-status-openwith { background: none; border: none; padding: 0; font: inherit;
+.vv-status-openwith, .vv-status-wrap { background: none; border: none; padding: 0; font: inherit;
   font-size: var(--vv-fs-xs); color: inherit; cursor: pointer; text-align: left; }
-.vv-status-openwith:hover { color: var(--ui-accent); }
+.vv-status-openwith:hover, .vv-status-wrap:hover { color: var(--ui-accent); }
+/* 状态栏「换行」开关（代码视图自动换行，Alt+Z 同效）：开态 accent 标示 */
+.vv-status-wrap[aria-pressed='true'] { color: var(--ui-accent); }
 .vv-status-picker { position: absolute; left: 8px; bottom: 26px; z-index: 30; min-width: 12em;
   padding: 4px; display: flex; flex-direction: column; background: var(--ui-tab-active-bg);
   border: 1px solid var(--ui-border); border-radius: 6px; box-shadow: var(--vv-shadow-2); }

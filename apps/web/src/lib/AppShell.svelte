@@ -367,6 +367,14 @@
     saveSettings(fresh);
   }
 
+  /** Alt+Z：翻转代码视图自动换行（读最新持久值只改该字段，updateLayout 同惯例）；
+   * 存活代码实例由 ViewerPane 设置订阅原地切换 */
+  function toggleCodeWordWrap(): void {
+    const fresh = loadSettings();
+    fresh.codeWordWrap = !fresh.codeWordWrap;
+    saveSettings(fresh);
+  }
+
   /** 拖拽调宽会话（null = 未拖拽）：startX/startW 锚定增量数学，dragW 为实时
    * 预览宽（clamp 后）；松手才 updateLayout 落盘（拖拽途中学不写 localStorage）。 */
   let drag = $state<{ side: LayoutSide; startX: number; startW: number } | null>(null);
@@ -1164,6 +1172,14 @@
       if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.code === 'KeyW') {
         e.preventDefault();
         wsPanelOpen = !wsPanelOpen;
+        return;
+      }
+      // Alt+Z 切换代码视图自动换行（VS Code 同键位）：写 settings.codeWordWrap，存活
+      // 代码实例经 ViewerPane 设置订阅原地 setWordWrap。e.code 判定同 Alt+W（macOS
+      // Option+Z 产出 'Ω'）；与 zen 的 Ctrl+Alt+Z 以 Ctrl/Meta 修饰互斥
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.code === 'KeyZ') {
+        e.preventDefault();
+        toggleCodeWordWrap();
         return;
       }
       // Alt+Shift+T 撤销关闭 tab（F 项 T3）：出栈重建最近关闭的一个（LIFO 单个——

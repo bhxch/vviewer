@@ -22,6 +22,7 @@ function settings(over: Partial<Settings> = {}): Settings {
     codeThemeDark: 'serika-dark',
     excludedPatterns: [],
     autoRefresh: true,
+    codeWordWrap: false,
     computePolicy: 'auto',
     diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} },
     fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },

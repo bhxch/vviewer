@@ -21,7 +21,7 @@
   import { BLAME_MAX_COMMITS, UNCOMMITTED_SHA } from './git/gitDiff';
   import { relativeDate, repoRelPath, subjectOf } from './git/gitUi';
   import { codeLineMetrics } from './theme';
-  import { loadSettings } from './stores/settings';
+  import { loadSettings, onSettingsChanged, saveSettings } from './stores/settings';
   import { showStatusNotice, watchHealth, statusNotice } from './openFlow.svelte';
   import { isMountRootStoreId } from './serverHealthCache';
   import { createProgressTracker, dlAddressText, formatBytes, isRemoteDownload, type ProgressSnapshot } from './downloadProgress';
@@ -85,6 +85,10 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
   let instance = $state<RenderedInstance | null>(null);
   /** 当前实例的生命周期持有者（非响应式）：destroy/方法调用都经它 */
   let live: RenderedInstance | null = null;
+  /** 代码视图自动换行（settings.codeWordWrap 镜像；状态栏「换行」开关文案/aria-pressed） */
+  let codeWordWrap = $state(loadSettings().codeWordWrap);
+  /** 当前实例支持换行切换（code 渲染器实例具 setWordWrap——状态栏开关显隐门） */
+  let wrapCapable = $state(false);
   let rafId = 0;
   /** 当前 tab 的高亮引擎文案（仅 code 渲染器非空；其余渲染器不显示状态条） */
   let engineLabel = $state('');
@@ -900,6 +904,9 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
           signal: effectAbort.signal,
           // 行高联动（字体系统 spec §3）：code/hex 以此重建虚拟滚动器
           lineMetrics,
+          // 自动换行初值（settings.codeWordWrap 现读，lineMetrics 同款不持副本）；运行期
+          // 变更经下方设置订阅在存活实例上 setWordWrap，仅 code 渲染器消费
+          wordWrap: loadSettings().codeWordWrap,
           // signal 透传（流式硬化 + Task 5 effect 级取消）：实例级 signal 与
           // effectAbort.signal 合并（缺省直通，双侧缺省维持无 opts 调用形态）
           read: (range, signal) => {
@@ -950,6 +957,7 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
         }
         live = res.instance;
         instance = res.instance;
+        wrapCapable = 'setWordWrap' in res.instance;
         // markdown 图表主题桥接（@bhxch/vviewer-markdown 切换）：包内不再监听 vv:* 事件，
         // 联动改为实例 API applyTheme——此处把 theme.ts（vv:appearance-applied，外观
         // 亮暗联动）与 AppShell（vv:diagram-settings-applied，mermaid 主题设置保存）
@@ -1134,8 +1142,25 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
       live?.destroy();
       live = null;
       instance = null;
+      wrapCapable = false;
     };
   });
+
+  // 自动换行即时生效：设置中心「应用」/状态栏开关/Alt+Z 均落 settings.codeWordWrap，
+  // 订阅回调在存活实例上原地切换（不重渲染：保持滚动位置/搜索状态/高亮缓存）
+  $effect(() =>
+    onSettingsChanged((s) => {
+      codeWordWrap = s.codeWordWrap;
+      (live as { setWordWrap?(on: boolean): void } | null)?.setWordWrap?.(s.codeWordWrap);
+    })
+  );
+
+  /** 状态栏「换行」开关：读最新持久值只翻该字段（其余字段不被旧副本覆盖） */
+  function toggleWordWrap(): void {
+    const fresh = loadSettings();
+    fresh.codeWordWrap = !fresh.codeWordWrap;
+    saveSettings(fresh);
+  }
 
   function onScroll(e: Event): void {
     const t = tab;
@@ -1229,7 +1254,7 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
   {/if}
   {#if engineLabel || metaLabel || rendererLabel || watchLabel || statusNotice.text}
     <div class="vv-statusbar" role="status">
-      {#if rendererLabel}<button type="button" class="vv-status-openwith" bind:this={pickerBtn} aria-haspopup="menu" aria-expanded={pickerOpen} aria-label="打开方式" title="打开方式（点击切换渲染器）" onclick={togglePicker}>打开方式: {rendererLabel}{#if detLabel}&nbsp;（{detLabel}）{/if}</button>{/if}{#if engineLabel}{#if rendererLabel}&nbsp;·&nbsp;{/if}{engineLabel}{#if computeWhereLabel}&nbsp;· 执行: {computeWhereLabel}{/if}{/if}{#if metaLabel}{#if engineLabel || rendererLabel}&nbsp;·&nbsp;{/if}{metaLabel}{/if}{#if watchLabel}{#if engineLabel || metaLabel || rendererLabel}&nbsp;·{/if} {watchLabel}{/if}{#if statusNotice.text}{#if engineLabel || metaLabel || rendererLabel || watchLabel}&nbsp;·{/if} {statusNotice.text}{/if}
+      {#if rendererLabel}<button type="button" class="vv-status-openwith" bind:this={pickerBtn} aria-haspopup="menu" aria-expanded={pickerOpen} aria-label="打开方式" title="打开方式（点击切换渲染器）" onclick={togglePicker}>打开方式: {rendererLabel}{#if detLabel}&nbsp;（{detLabel}）{/if}</button>{/if}{#if engineLabel}{#if rendererLabel}&nbsp;·&nbsp;{/if}{engineLabel}{#if computeWhereLabel}&nbsp;· 执行: {computeWhereLabel}{/if}{/if}{#if metaLabel}{#if engineLabel || rendererLabel}&nbsp;·&nbsp;{/if}{metaLabel}{/if}{#if wrapCapable}&nbsp;·&nbsp;<button type="button" class="vv-status-wrap" aria-pressed={codeWordWrap} title="自动换行（Alt+Z）" onclick={toggleWordWrap}>换行: {codeWordWrap ? '开' : '关'}</button>{/if}{#if watchLabel}{#if engineLabel || metaLabel || rendererLabel}&nbsp;·{/if} {watchLabel}{/if}{#if statusNotice.text}{#if engineLabel || metaLabel || rendererLabel || watchLabel}&nbsp;·{/if} {statusNotice.text}{/if}
     </div>
   {/if}
   {#if pickerOpen}
