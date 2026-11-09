@@ -181,6 +181,19 @@ describe('装配序锚（viewer.ts 语句序：diagram → foreign 桥接块 →
     expect(registry.byExtension('dot')?.id).toBe('diagram-graphviz'); // 计划 1 裁决：dot 维持 graphviz
   });
 
+  it('多渲染器候选（altExtensions）：xlsx/xlsm/xls/csv 以 foreign-spreadsheet 为候选，偏好命中即改派、其余不动', () => {
+    const registry = mirrorViewerInstallOrder();
+    for (const ext of ['xlsx', 'xlsm', 'xls']) {
+      expect(registry.candidatesOf(ext).map((r) => r.id), ext).toEqual(['xlsx', 'foreign-spreadsheet']);
+    }
+    expect(registry.candidatesOf('csv').map((r) => r.id)).toEqual(['code', 'foreign-spreadsheet']);
+    registry.setPreferenceResolver((ext) => (ext === 'xlsx' || ext === 'csv' ? 'foreign-spreadsheet' : undefined));
+    expect(registry.byExtension('xlsx')?.id).toBe('foreign-spreadsheet');
+    expect(registry.byExtension('csv')?.id).toBe('foreign-spreadsheet');
+    expect(registry.byExtension('xls')?.id).toBe('xlsx'); // 未设偏好的同族扩展名不受牵连
+    expect(registry.ownerOf('xlsx')?.id).toBe('xlsx');
+  });
+
   it('code 内置清单已无 tsv（转移原子性的 code 侧证据）', () => {
     const registry = createRegistry();
     registry.install(codeRenderer);

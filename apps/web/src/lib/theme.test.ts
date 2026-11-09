@@ -268,7 +268,8 @@ describe('applyAppearanceFromSettings（订阅触发入口，spec 2026-10-12 §2
     fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
     iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } },
     layout: { ...DEFAULT_LAYOUT },
-    storage: { remoteDownloadConfirmMb: 512 }
+    storage: { remoteDownloadConfirmMb: 512 },
+    rendererDefaults: {}
   });
 
   it('diff 命中必注入（哨兵先行把签名推离目标）', async () => {

@@ -153,6 +153,15 @@ if (browser) {
 
 export const dispatcher: Dispatcher = createDispatcher(registry);
 
+// 默认渲染器偏好（设置「打开方式」节，settings.rendererDefaults）：闭包现读设置
+// （setDiagramOptions 同款——「应用」后下一次选路即时生效，不持快照）。
+// registry.byExtension 只在偏好 id 属于该扩展名候选时采用，否则回落扩展名所有者；
+// dispatcher 选路、确认门文案、嵌套附件分派同经 byExtension，偏好一致生效。
+// '' = 内置默认。SSR 无 localStorage，不注入即恒为所有者。
+if (browser) {
+  registry.setPreferenceResolver((ext) => loadSettings().rendererDefaults[ext] || undefined);
+}
+
 // M2：应用启动即预热 tree-sitter 高亮 Worker（握手 + 资产就绪早于首个 code tab；
 // 失败只告警一次，渲染端对 code.ts 的 attachHighlightClient 保持未注入 → 降级 hljs）
 if (browser) {

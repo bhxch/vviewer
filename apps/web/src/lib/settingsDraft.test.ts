@@ -618,6 +618,45 @@ describe('storage 设置节（远端下载确认阈值，spec §6.4，计划 2 T
   });
 });
 
+describe('rendererDefaults 设置节（多渲染器格式的默认渲染器偏好）', () => {
+  it('默认空表：DEFAULTS 与 normalizeSettings({}) 均为 {}', () => {
+    expect(DEFAULTS.rendererDefaults).toEqual({});
+    expect(normalizeSettings({}).rendererDefaults).toEqual({});
+  });
+
+  it('normalizeSettings 白名单：小写扩展名键 + 渲染器 id 形态值（含 \'\' = 内置默认）保留，其余剔除', () => {
+    const s = normalizeSettings({
+      rendererDefaults: { docx: 'docx', pptx: '', csv: 'foreign-spreadsheet', 'DOCX': 'x', '.md': 'code', xlsx: 42, odt: 'Bad Id' }
+    });
+    expect(s.rendererDefaults).toEqual({ docx: 'docx', pptx: '', csv: 'foreign-spreadsheet' });
+    expect(normalizeSettings({ rendererDefaults: 42 }).rendererDefaults).toEqual({}); // 节脏值回落空表，不抛
+    expect(normalizeSettings({ rendererDefaults: ['docx'] }).rendererDefaults).toEqual({});
+  });
+
+  it('validateSettings：节非对象/键非小写扩展名/值非渲染器 id 全报告；合法表零报告', () => {
+    expect(validateSettings({ rendererDefaults: { docx: 'docx', pptx: '' } })).toEqual([]);
+    const fields = validateSettings({ rendererDefaults: { 'DOCX': 'docx', pptx: 3, odt: 'Bad Id' } }).map((i) => i.field);
+    expect(fields).toEqual(['rendererDefaults.DOCX', 'rendererDefaults.pptx', 'rendererDefaults.odt']);
+    expect(validateSettings({ rendererDefaults: 'docx' }).map((i) => i.field)).toEqual(['rendererDefaults']);
+  });
+
+  it("mergeDraftOnto：改回内置默认写 ''（删键不传播），'' 覆盖 latest 中的旧偏好", () => {
+    const base = aSettings({ rendererDefaults: { docx: 'docx' } });
+    const draft = openDraft(base);
+    draft.rendererDefaults.docx = '';
+    draft.rendererDefaults.pptx = 'pptx';
+    const merged = mergeDraftOnto(base, base, draft);
+    expect(merged.rendererDefaults).toEqual({ docx: '', pptx: 'pptx' });
+  });
+
+  it('导出导入 round-trip 保形', () => {
+    const src = aSettings({ rendererDefaults: { docx: 'docx', xlsx: 'foreign-spreadsheet' } });
+    const parsed = parseImportFile(JSON.stringify(buildExportFile(src, '2026-11-09T00:00:00.000Z')));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(replaceImported(parsed.settings).rendererDefaults).toEqual({ docx: 'docx', xlsx: 'foreign-spreadsheet' });
+  });
+});
+
 describe('SETTINGS_KEYS DEFAULTS 派生（FE-3：白名单对账机械化）', () => {
   it('DEFAULTS 全键经派生白名单：openDraft(DEFAULTS) 全量序列化-校验零 unknown 报告（退回手工清单/漏登记即红）；对照探针仍报告（非恒真）', () => {
     // DEFAULTS 键集 = Object.keys(DEFAULTS) 派生的白名单：全量序列化产物经

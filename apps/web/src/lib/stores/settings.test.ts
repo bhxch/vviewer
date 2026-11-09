@@ -15,7 +15,8 @@ const BASE: Settings = {
   fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
   iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } },
   layout: { ...DEFAULT_LAYOUT },
-  storage: { remoteDownloadConfirmMb: 512 }
+  storage: { remoteDownloadConfirmMb: 512 },
+  rendererDefaults: {}
 };
 
 function aSettings(overrides: Partial<Settings>): Settings {

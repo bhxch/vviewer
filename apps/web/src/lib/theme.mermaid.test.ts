@@ -28,6 +28,7 @@ function settings(over: Partial<Settings> = {}): Settings {
     iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } },
     layout: { ...DEFAULT_LAYOUT },
     storage: { remoteDownloadConfirmMb: 512 },
+    rendererDefaults: {},
     ...over
   };
 }

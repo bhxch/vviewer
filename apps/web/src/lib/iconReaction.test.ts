@@ -38,7 +38,8 @@ function baseSettings(iconThemes?: Partial<Settings['iconThemes']>): Settings {
     fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
     iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false }, ...iconThemes },
     layout: { ...DEFAULT_LAYOUT },
-    storage: { remoteDownloadConfirmMb: 512 }
+    storage: { remoteDownloadConfirmMb: 512 },
+    rendererDefaults: {}
   };
 }
 

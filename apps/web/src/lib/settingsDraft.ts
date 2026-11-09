@@ -9,7 +9,7 @@
 // （同一白名单单源），此处只负责「报告」；三类问题同为阻断错误（校验失败不部分
 // 应用，spec §4 导入同纪律），修复后应用时经 normalizeSettings 规范化落值。
 import { resolveDiagramType } from '@bhxch/vviewer-render-diagram';
-import { clampSize, CODE_SIZE_RANGE, DEFAULTS, ICON_THEME_SCOPE_KEYS, MERMAID_THEME_VALUES, normalizeSettings, saveSettings, STORAGE_MB_RANGE, UI_SIZE_RANGE, type Settings } from './stores/settings';
+import { clampSize, CODE_SIZE_RANGE, DEFAULTS, ICON_THEME_SCOPE_KEYS, MERMAID_THEME_VALUES, normalizeSettings, RENDERER_DEFAULT_EXT_RE, RENDERER_DEFAULT_ID_RE, saveSettings, STORAGE_MB_RANGE, UI_SIZE_RANGE, type Settings } from './stores/settings';
 import type { MermaidTheme } from '@bhxch/vviewer-render-diagram';
 import { sanitizeLayout } from './layout';
 
@@ -262,6 +262,21 @@ export function validateSettings(raw: unknown): SettingsIssue[] {
         }
       }
       checkClampedNumber(issues, 'storage.remoteDownloadConfirmMb', st.remoteDownloadConfirmMb, STORAGE_MB_RANGE);
+    }
+  }
+  // rendererDefaults 白名单镜像（与 normalizeSettings 同源形态正则）：键小写扩展名、
+  // 值渲染器 id 或 ''（内置默认）；候选合法性由注册表消费时裁决，此处不查注册表
+  if (raw.rendererDefaults !== undefined) {
+    if (!isObj(raw.rendererDefaults)) {
+      issues.push({ field: 'rendererDefaults', message: '应为对象（扩展名 → 渲染器 id）' });
+    } else {
+      for (const [k, v] of Object.entries(raw.rendererDefaults)) {
+        if (!RENDERER_DEFAULT_EXT_RE.test(k)) {
+          issues.push({ field: `rendererDefaults.${k}`, message: '键须为小写扩展名（不含点）' });
+        } else if (typeof v !== 'string' || !RENDERER_DEFAULT_ID_RE.test(v)) {
+          issues.push({ field: `rendererDefaults.${k}`, message: "值须为渲染器 id（'' = 内置默认）" });
+        }
+      }
     }
   }
   return issues;

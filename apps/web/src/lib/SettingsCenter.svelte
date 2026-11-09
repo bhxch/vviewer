@@ -34,6 +34,7 @@
   import AppearanceSection from './settings/AppearanceSection.svelte';
   import FontsSection from './settings/FontsSection.svelte';
   import DiagramsSection from './settings/DiagramsSection.svelte';
+  import RenderersSection from './settings/RenderersSection.svelte';
   import LayoutSection from './settings/LayoutSection.svelte';
   import SearchSection from './settings/SearchSection.svelte';
   import AutoRefreshSection from './settings/AutoRefreshSection.svelte';
@@ -51,11 +52,13 @@
     content: Component<{ draft: Settings; touch(): void }>;
   }
 
-  // 组序（spec §2 定稿序：外观/字体/图表/布局/搜索与排除/自动刷新/计算/存储与数据/关于）
+  // 组序（spec §2 定稿序：外观/字体/图表/布局/搜索与排除/自动刷新/计算/存储与数据/关于；
+  // 「打开方式」（默认渲染器偏好）插在图表之后）
   const groups: SettingsGroup[] = [
     { id: 'appearance', label: '外观', content: AppearanceSection },
     { id: 'fonts', label: '字体', content: FontsSection },
     { id: 'diagrams', label: '图表', content: DiagramsSection },
+    { id: 'renderers', label: '打开方式', content: RenderersSection },
     { id: 'layout', label: '布局', content: LayoutSection },
     { id: 'search', label: '搜索与排除', content: SearchSection },
     { id: 'autorefresh', label: '自动刷新', content: AutoRefreshSection },

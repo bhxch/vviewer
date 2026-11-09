@@ -165,6 +165,13 @@ export interface Renderer {
   id: RendererId;
   label: string;
   extensions: string[];   // 该 renderer 拥有的扩展名（小写无点）
+  /**
+   * 可选：能渲染但不默认拥有的扩展名（小写无点）。同一格式有多个渲染器时，扩展名
+   * 所有者（extensions）是内置默认，其余渲染器以此声明为候选——打开方式候选集与
+   * 「默认渲染器」设置据此列出，用户偏好经 registry.setPreferenceResolver 生效。
+   * 不参与扩展名冲突检测（多个渲染器可声明同一候选扩展名）。
+   */
+  altExtensions?: string[];
   /** 可选：基于文件头部做签名纠偏，返回应改派的 rendererId */
   sniff?(head: Uint8Array, det: Detection): Promise<RendererId | null> | RendererId | null;
   /**

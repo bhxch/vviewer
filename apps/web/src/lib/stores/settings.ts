@@ -76,6 +76,11 @@ export interface Settings {
   /** 存储与数据节（远端下载确认门 spec §6.4，计划 2 Task 5）：远端下载确认阈值。
    * UI 在 SettingsCenter「存储与数据」节；ViewerPane 泵启动前消费。 */
   storage: StorageSettings;
+  /** 默认渲染器偏好（同一扩展名有多个可用渲染器时）：小写扩展名 → 渲染器 id，
+   * '' 或缺省 = 内置默认（注册表扩展名所有者）。改回默认写 ''（mergeDraftOnto 删键
+   * 不传播）。UI 在 SettingsCenter「打开方式」节；viewer.ts 注入
+   * registry.setPreferenceResolver 消费——id 不是该扩展名候选时自动回落内置默认。 */
+  rendererDefaults: Record<string, string>;
 }
 
 const KEY = 'vviewer:settings';
@@ -98,10 +103,15 @@ export const DEFAULTS: Settings = {
   fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 },
   iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } },
   layout: DEFAULT_LAYOUT,
-  storage: { remoteDownloadConfirmMb: 512 }
+  storage: { remoteDownloadConfirmMb: 512 },
+  rendererDefaults: {}
 };
 
 const POLICIES: readonly ComputePolicy[] = ['auto', 'local', 'remote'];
+/** rendererDefaults 键/值形态（normalizeSettings 与 settingsDraft 校验同源）：键为小写
+ * 无点扩展名；值为渲染器 id（注册表 id 均为小写连字符形态），'' = 内置默认。 */
+export const RENDERER_DEFAULT_EXT_RE = /^[a-z0-9][a-z0-9_+-]*$/;
+export const RENDERER_DEFAULT_ID_RE = /^(?:[a-z0-9][a-z0-9-]*)?$/;
 /** 字号 clamp 范围（spec §2.1：uiSize 10–28 / codeSize 9–28） */
 export const UI_SIZE_RANGE = [10, 28] as const;
 export const CODE_SIZE_RANGE = [9, 28] as const;
@@ -122,7 +132,8 @@ function defaults(): Settings {
     fonts: { ...DEFAULTS.fonts },
     iconThemes: { theme: DEFAULTS.iconThemes.theme, scopes: { ...DEFAULTS.iconThemes.scopes } },
     layout: { ...DEFAULTS.layout },
-    storage: { ...DEFAULTS.storage }
+    storage: { ...DEFAULTS.storage },
+    rendererDefaults: { ...DEFAULTS.rendererDefaults }
   };
 }
 
@@ -219,6 +230,15 @@ export function normalizeSettings(partial: Record<string, unknown>): Settings {
   s.storage = {
     remoteDownloadConfirmMb: clampSize(st.remoteDownloadConfirmMb, STORAGE_MB_RANGE, DEFAULTS.storage.remoteDownloadConfirmMb)
   };
+  // rendererDefaults 白名单：只挡形态（键小写扩展名、值渲染器 id 或 ''），不查注册表——
+  // 该 id 能否渲染该扩展名由 registry.byExtension 消费时裁决（非候选回落所有者），
+  // settings 不依赖渲染器装配；节脏值回落空表，不拖垮其余字段
+  const rd = s.rendererDefaults;
+  s.rendererDefaults = Object.fromEntries(
+    Object.entries(typeof rd === 'object' && rd !== null && !Array.isArray(rd) ? rd : {}).flatMap(([k, v]): [string, string][] =>
+      RENDERER_DEFAULT_EXT_RE.test(k) && typeof v === 'string' && RENDERER_DEFAULT_ID_RE.test(v) ? [[k, v]] : []
+    )
+  );
   return s;
 }
 
@@ -264,7 +284,8 @@ function notify(s: Settings): void {
       fonts: { ...s.fonts },
       iconThemes: { theme: s.iconThemes.theme, scopes: { ...s.iconThemes.scopes } },
       layout: { ...s.layout },
-      storage: { ...s.storage }
+      storage: { ...s.storage },
+      rendererDefaults: { ...s.rendererDefaults }
     });
   }
 }

@@ -35,7 +35,8 @@ function baseSettings(fonts?: Partial<Settings['fonts']>): Settings {
     fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13, ...fonts },
     iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } },
     layout: { ...DEFAULT_LAYOUT },
-    storage: { remoteDownloadConfirmMb: 512 }
+    storage: { remoteDownloadConfirmMb: 512 },
+    rendererDefaults: {}
   };
 }
 

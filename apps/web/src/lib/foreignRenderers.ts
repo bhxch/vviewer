@@ -277,6 +277,9 @@ interface ForeignGroupSpec {
   id: string;
   label: string;
   extensions: readonly string[];
+  /** 能渲染但不默认拥有的扩展名（Renderer.altExtensions）：上游定义覆盖、vviewer 已有
+   * 所有者的格式——用户可在设置「打开方式」改为默认，或经「打开方式」临时改选 */
+  altExtensions?: readonly string[];
   load: () => Promise<ForeignPlugin>;
 }
 
@@ -370,6 +373,9 @@ const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
     id: 'foreign-spreadsheet',
     label: '电子表格',
     extensions: ['xltx', 'xlsb', 'xlt', 'xla', 'xlam', 'xltm', 'ods', 'fods', 'dbf', 'tsv'],
+    // 上游 spreadsheet-openxml 定义同样覆盖 xlsx/xlsm/xls/csv（vviewer 自有 xlsx 表格与
+    // code 纯文本仍为内置默认）——作为候选可经设置/打开方式改选
+    altExtensions: ['xlsx', 'xlsm', 'xls', 'csv'],
     load: () => import('@file-viewer/renderer-spreadsheet').then((m) => m.spreadsheetRenderer)
   },
   {
@@ -542,13 +548,16 @@ export function withSingleFileShpGuard(renderer: Renderer): Renderer {
  */
 export function createForeignFileRenderers(opts: { nestedDispatch: NestedDispatch }): Renderer[] {
   return FOREIGN_GROUPS.map((g) => {
-    const renderer = wrapFileViewerRenderer({
+    const bridged = wrapFileViewerRenderer({
       id: g.id,
       label: g.label,
       extensions: g.extensions,
       mount: pluginMount(g.load, g.id),
       nestedDispatch: opts.nestedDispatch
     });
+    // 候选声明在装配层附加（桥接契约零改动）：组内路由按扩展名取 handler，候选扩展名
+    // 与自有扩展名同一路径（pluginMount d.get(ext)），无需桥接层感知
+    const renderer: Renderer = g.altExtensions ? { ...bridged, altExtensions: [...g.altExtensions] } : bridged;
     return g.id === 'foreign-geo' ? withSingleFileShpGuard(renderer) : renderer;
   });
 }

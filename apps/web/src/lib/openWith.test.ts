@@ -74,3 +74,28 @@ describe('openWithOf markdown 恒兜底（spec 2026-10-23 §3.1）', () => {
     expect(res.options.map((o) => o.id)).toEqual(['', 'code', 'markdown', 'hex']);
   });
 });
+
+describe('openWithOf 候选渲染器（altExtensions）', () => {
+  /** pptx 双渲染器：slides 拥有、outline 候选（vviewer 实装：foreign-presentation / pptx 提纲） */
+  function makeMulti(): ReturnType<typeof createRegistry> {
+    const reg = makeRegistry();
+    reg.install(mk('slides', ['pptx']));
+    reg.install({ ...mk('outline', []), altExtensions: ['pptx'] });
+    return reg;
+  }
+
+  it('扩展名候选含 altExtensions 声明者：所有者渲染时候选渲染器紧随其后', () => {
+    const res = openWithOf(makeMulti(), undefined, 'slides', 'pptx');
+    expect(res.options.map((o) => o.id)).toEqual(['', 'slides', 'outline', 'code', 'markdown', 'hex']);
+  });
+
+  it('偏好改用候选渲染时，所有者仍留在受限候选里可切回', () => {
+    const res = openWithOf(makeMulti(), undefined, 'outline', 'pptx');
+    expect(res.options.map((o) => o.id)).toEqual(['', 'outline', 'slides', 'code', 'markdown', 'hex']);
+  });
+
+  it('其它扩展名不受候选声明影响', () => {
+    const res = openWithOf(makeMulti(), undefined, 'image', 'png');
+    expect(res.options.map((o) => o.id)).toEqual(['', 'image', 'code', 'markdown', 'hex']);
+  });
+});

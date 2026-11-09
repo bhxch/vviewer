@@ -64,12 +64,13 @@ test.describe('b-settings-center 统一设置中心', () => {
     await expect(root).toBeVisible();
     await expect(page.getByRole('dialog', { name: '设置' })).toBeVisible();
 
-    // 九组定稿序（spec §2）+ 默认外观组激活
+    // 定稿序（spec §2）+「打开方式」（默认渲染器偏好）插在图表之后 + 默认外观组激活
     const labels = await page.locator('.vv-sc-navitem').allTextContents();
     expect(labels).toEqual([
       '外观',
       '字体',
       '图表',
+      '打开方式',
       '布局',
       '搜索与排除',
       '自动刷新',
