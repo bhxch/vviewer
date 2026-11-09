@@ -192,6 +192,23 @@ async function pageTopOffset(page: Page, nth: number): Promise<number> {
   }, nth);
 }
 
+/**
+ * 命中页「顶对齐到位」：页顶贴视口顶（偏移 <5px，与 pageTopOffset 原口径一致），或内容已
+ * 滚到底且页顶落在视口内——PDF 默认 auto 缩放（适宽、封顶 100%）在 mobile 窄视口下页变矮，
+ * 末页之后没有足够内容让它贴顶（scrollIntoView 被滚动底界截住），此时到底即是到位。
+ */
+async function pageTopReached(page: Page, nth: number): Promise<boolean> {
+  return page.evaluate((n) => {
+    const host = document.querySelector('.vv-pdf-pages');
+    const wrap = document.querySelectorAll('.vv-pdf-page')[n];
+    if (!(host instanceof HTMLElement) || !(wrap instanceof HTMLElement)) return false;
+    const off = Math.round(wrap.getBoundingClientRect().top - host.getBoundingClientRect().top);
+    if (off < 5) return true;
+    const atBottom = host.scrollTop + host.clientHeight >= host.scrollHeight - 1;
+    return atBottom && off < host.clientHeight;
+  }, nth);
+}
+
 test('FSEARCH-01: sample.ts 搜索——/ 唤起、计数 1/4 与 grep 基准吻合、4 处命中全部词级高亮、Enter/Shift+Enter 首尾循环、Esc 还原（BUG-18 验收 1/2/3）', async ({
   page
 }) => {
@@ -370,18 +387,18 @@ test('FSEARCH-06: 3 页 PDF 搜索——计数与 pdftotext 基准吻合（1/4�
   await page.keyboard.press('Enter');
   await expect(count).toHaveText('2/4');
   await expect(page.locator('.vv-pdf-page').nth(1)).toHaveClass(/vv-pdf-page-hit/, { timeout: 2_000 });
-  await expect.poll(() => pageTopOffset(page, 1), { timeout: 5_000 }).toBeLessThan(5);
+  await expect.poll(() => pageTopReached(page, 1), { timeout: 5_000 }).toBe(true);
 
   // Enter 步进 3/4：同页第 2 处命中（页 2 两个 BT 文本块各成一命中），视口驻留第 2 页
   await page.keyboard.press('Enter');
   await expect(count).toHaveText('3/4');
-  await expect.poll(() => pageTopOffset(page, 1), { timeout: 5_000 }).toBeLessThan(5);
+  await expect.poll(() => pageTopReached(page, 1), { timeout: 5_000 }).toBe(true);
 
   // Enter 步进 4/4：跨页跳到第 3 页（大写 GAMMA 在不敏感口径命中），顶对齐第 3 页
   await page.keyboard.press('Enter');
   await expect(count).toHaveText('4/4');
   await expect(page.locator('.vv-pdf-page').nth(2)).toHaveClass(/vv-pdf-page-hit/, { timeout: 2_000 });
-  await expect.poll(() => pageTopOffset(page, 2), { timeout: 5_000 }).toBeLessThan(5);
+  await expect.poll(() => pageTopReached(page, 2), { timeout: 5_000 }).toBe(true);
 
   await page.keyboard.press('Escape');
   await expect(page.locator('.vv-search-panel')).toHaveCount(0);

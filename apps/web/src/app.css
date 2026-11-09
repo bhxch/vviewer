@@ -195,9 +195,14 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
 .vv-pdf-toolbar button:disabled { opacity: .5; cursor: default; }
 .vv-pdf-zoom-label { min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; }
 .vv-pdf-page-indicator { margin-left: auto; color: var(--ui-fg-muted); font-size: var(--vv-fs-xs); }
-.vv-pdf-pages { flex: 1; overflow: auto; display: flex; flex-direction: column; align-items: center;
+/* 页居中交给页自身的左右 auto margin，容器不设 align-items:center：页宽超过容器时
+   （手机竖屏看横向页、放大后）center 让页向左右对称溢出，左侧溢出落在负滚动区永远滚不到
+   （看不到左半边；往右拖时 scrollLeft 已是 0，表现为拖不动）。flex 交叉轴的 auto margin
+   在负余量时归零，溢出只向右，可滚到。不用 safe center / margin-inline：用户浏览器偏旧。
+   左右 padding 由 pdf.ts 适宽计算经计算样式读取，改这里无需同步常量 */
+.vv-pdf-pages { flex: 1; overflow: auto; display: flex; flex-direction: column;
   gap: 12px; padding: 12px; }
-.vv-pdf-page { position: relative; flex: none; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 30%); }
+.vv-pdf-page { position: relative; flex: none; margin-left: auto; margin-right: auto; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 30%); }
 .vv-pdf-page canvas { display: block; }
 /* §2.2 修复（§12.2 基础层）：亮色字面量换令牌——暗色下不再「刺眼白块」（变更）；
    3px 圆角并入 --vv-radius-sm（§5.1 并档，变更） */

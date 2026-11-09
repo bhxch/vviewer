@@ -3,7 +3,8 @@
 // build 时输出为哈希资产——实测见任务报告）。主模块与 worker 均取 legacy 构建（旧浏览器
 // 缺全局 Iterator，现代构建加载即抛，见 loadPdfjs 注释）。
 // 渲染结构：工具条（页码/缩放）+ 滚动容器内逐页 canvas；前 3 页立即渲染，
-// 其余 IntersectionObserver 懒渲染；缩放在 0.5x-3x 预设档位间步进并全量重渲染。
+// 其余 IntersectionObserver 懒渲染；缩放为连续值（auto 默认适宽且封顶 100% / fit 精确
+// 适宽 / manual −/＋ 档位步进，见 ZoomMode），变更时全量重渲染。
 // 搜索：search 时懒提取各页 textContent 并缓存，跨页扫描用 pdfText 纯函数；gotoMatch 跳页。
 // 流式（io-streaming 计划 5 Task 1，spec §6.6）：声明 streaming 后 dispatcher 交付
 // head 探测块 + StreamCtx；capable 且 size 已知且 buffer 短于 size 时走
@@ -22,14 +23,44 @@ import { extractPageText, searchPdfPages, type PdfSearchMatch, type PdfTextItem 
 // 类型面与现代入口等价；同源书写免得两处入口分叉）
 type Pdfjs = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
 
-/** 缩放预设档位（0.5x-3x），工具条 −/＋ 在档位间步进 */
-const SCALE_PRESETS = [0.5, 0.75, 1, 1.5, 2, 3];
+/**
+ * 缩放预设档位（0.25x-3x）：manual 模式下工具条 −/＋ 从当前连续缩放值出发，步进到严格
+ * 小于/大于它的相邻档位（auto/fit 求出的适宽值通常不在档位上）
+ */
+const SCALE_PRESETS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3];
+/**
+ * 步进判同档容差：与缩放标签的取整粒度（1%）对齐——与档位相差不足半个百分点视为同档，
+ * 否则标签同显 100% 的 0.998 按 ＋ 会先落到 1，出现标签不变的空步
+ */
+const SCALE_STEP_EPS = 0.005;
+/** 适宽值下限：容器极窄时避免 0/负值缩放与退化画布 */
+const FIT_SCALE_MIN = 0.1;
+/** 容器宽变化后重算适宽的防抖时长（ms）：合并拖拽调宽/转屏期间的连串通知 */
+const REFIT_DEBOUNCE_MS = 150;
+/** 重算所得缩放与现值的相对差超过该比例才重排（全量重渲染代价高，亚像素抖动不值得） */
+const REFIT_MIN_RATIO = 0.005;
 /** 打开文件后立即渲染的页数，其余懒渲染 */
 const IMMEDIATE_PAGES = 3;
 /** 懒渲染预热边距：提前渲染视口外 200px 内的页，翻页不露白 */
 const LAZY_ROOT_MARGIN = '200px';
 /** gotoMatch 跳页后命中页的高亮时长（ms） */
 const HIT_FLASH_MS = 1200;
+
+/**
+ * 缩放模式（缩放值本身是连续值，模式决定它怎么来）：
+ * - auto：默认。适应宽度但不超过 100%，即 min(1, 适宽值)——窄屏（手机竖屏看横向发票）
+ *   首屏不超宽，宽屏维持 1pt:1px；
+ * - fit：点工具条「适应宽度」进入，精确适宽，可超过 100%；
+ * - manual：−/＋ 步进后进入，停在档位上，不再跟随容器宽。
+ * auto/fit 随容器宽变化重算（ResizeObserver，见 render 内「容器宽跟随」段）。
+ */
+type ZoomMode = 'auto' | 'fit' | 'manual';
+
+/** 从连续缩放值 cur 出发取严格小于（dir=-1）/大于（dir=1）它的相邻档位；没有则 null（按钮禁用） */
+function adjacentPreset(cur: number, dir: -1 | 1): number | null {
+  if (dir > 0) return SCALE_PRESETS.find((p) => p > cur + SCALE_STEP_EPS) ?? null;
+  return [...SCALE_PRESETS].reverse().find((p) => p < cur - SCALE_STEP_EPS) ?? null;
+}
 
 let pdfjsPromise: Promise<Pdfjs> | null = null;
 
@@ -318,8 +349,10 @@ export const pdfRenderer: Renderer = {
     }
 
     let destroyed = false;
-    let scaleIdx = SCALE_PRESETS.indexOf(1);
-    const scale = (): number => SCALE_PRESETS[scaleIdx] ?? 1;
+    // 连续缩放值（取代原预设档位下标）：首屏值按 auto 模式在占位入流后求出，见「首屏缩放」段
+    let zoomMode: ZoomMode = 'auto';
+    let curScale = 1;
+    const scale = (): number => curScale;
 
     const root = document.createElement('div');
     root.className = 'vv-pdf';
@@ -375,6 +408,34 @@ export const pdfRenderer: Renderer = {
       wrap.style.width = `${pageW * scale()}px`;
       wrap.style.height = `${pageH * scale()}px`;
     }
+
+    // ---- 适宽 ----
+    /**
+     * 适宽值 = pagesHost 内容可用宽 / 首页 scale 1 的 viewport 宽。可用宽取 clientWidth
+     * （含 padding、已扣竖向滚动条）减左右 padding（读计算样式，与 app.css 同源，不写死
+     * 12px）。clientWidth<=0（jsdom 或尚未布局）回落 1，与改造前固定 100% 同义。
+     */
+    function fitScale(): number {
+      const cw = pagesHost.clientWidth;
+      if (!(cw > 0) || !(pageW > 0)) return 1;
+      const cs = getComputedStyle(pagesHost);
+      const pad = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+      return Math.max(FIT_SCALE_MIN, (cw - pad) / pageW);
+    }
+
+    /** 按当前模式求目标缩放（manual 停在现值） */
+    function modeScale(): number {
+      if (zoomMode === 'manual') return curScale;
+      const fit = fitScale();
+      return zoomMode === 'auto' ? Math.min(1, fit) : fit;
+    }
+
+    // 首屏缩放：等占位入流后再量宽——多页文档的竖向滚动条此刻已出现、clientWidth 已扣除，
+    // 适宽后不会被滚动条再挤出横向溢出；量完按结果重设占位（scale 仍为 1 时重设无变化）。
+    // lastHostW 记下此刻的边框盒宽，供「容器宽跟随」段判断宽度是否真的变了
+    curScale = modeScale();
+    let lastHostW = pagesHost.offsetWidth;
+    for (const st of pageStates) setPlaceholderSize(st.wrap);
 
     // ---- 懒渲染 ----
     async function ensureRender(st: PageState): Promise<void> {
@@ -462,17 +523,47 @@ export const pdfRenderer: Renderer = {
     zoomIn.type = 'button';
     zoomIn.textContent = '＋';
     zoomIn.setAttribute('aria-label', '放大');
-    toolbar.append(zoomOut, zoomBtn, zoomIn, pageIndicator);
+    const fitBtn = document.createElement('button');
+    fitBtn.type = 'button';
+    fitBtn.textContent = '↔';
+    fitBtn.setAttribute('aria-label', '适应宽度');
+    fitBtn.title = '适应宽度';
+    toolbar.append(zoomOut, zoomBtn, zoomIn, fitBtn, pageIndicator);
 
     function syncZoomUi(): void {
       zoomBtn.textContent = `${Math.round(scale() * 100)}%`;
-      zoomOut.disabled = scaleIdx <= 0;
-      zoomIn.disabled = scaleIdx >= SCALE_PRESETS.length - 1;
+      // 禁用态与步进同一判定：从连续值出发找不到严格相邻档位即禁用
+      zoomOut.disabled = adjacentPreset(scale(), -1) === null;
+      zoomIn.disabled = adjacentPreset(scale(), 1) === null;
     }
 
+    /**
+     * 阅读锚：视口顶部所在页（首个底边越过视口顶的页）+ 视口顶在该页内的纵向比例，横向取
+     * 视口中心占内容宽的比例。缩放（含 auto/fit 随容器宽重算、转屏）前取锚、重设占位后
+     * 复位——否则 scrollTop 不变而页高按比例变，阅读位置跳到别处。无布局（jsdom/隐藏）
+     * 时矩形全 0，取不到锚即不动滚动。
+     */
+    function readingAnchor(): { st: PageState; frac: number; cx: number } | null {
+      const hostTop = pagesHost.getBoundingClientRect().top;
+      for (const st of pageStates) {
+        const r = st.wrap.getBoundingClientRect();
+        if (r.bottom > hostTop) {
+          const sw = pagesHost.scrollWidth;
+          return {
+            st,
+            frac: r.height > 0 ? (hostTop - r.top) / r.height : 0,
+            cx: sw > 0 ? (pagesHost.scrollLeft + pagesHost.clientWidth / 2) / sw : 0.5
+          };
+        }
+      }
+      return null;
+    }
+
+    /** 切换到连续缩放值 next 并全量重渲染（三种模式共用；与现值相同即 no-op） */
     function applyScale(next: number): void {
-      if (destroyed || next === scaleIdx) return;
-      scaleIdx = Math.max(0, Math.min(SCALE_PRESETS.length - 1, next));
+      if (destroyed || next === curScale) return;
+      const anchor = readingAnchor();
+      curScale = next;
       syncZoomUi();
       // 全量重渲染：取消在途任务、清空已渲染画布、重设占位尺寸；
       // 可视页立即重渲染，其余交还 IO（scroll 位置不变时 IO 不会再触发）
@@ -483,6 +574,12 @@ export const pdfRenderer: Renderer = {
         st.renderedScale = null;
         setPlaceholderSize(st.wrap);
       }
+      if (anchor) {
+        // 占位已同步重设尺寸：锚页新位置即刻可量，把「锚页顶 + 页内比例」拉回视口顶
+        const r = anchor.st.wrap.getBoundingClientRect();
+        pagesHost.scrollTop += r.top - pagesHost.getBoundingClientRect().top + anchor.frac * r.height;
+        pagesHost.scrollLeft = Math.max(0, anchor.cx * pagesHost.scrollWidth - pagesHost.clientWidth / 2);
+      }
       const nums = visible.size > 0
         ? [...visible]
         : pageStates.slice(0, IMMEDIATE_PAGES).map((s) => s.num);
@@ -492,9 +589,52 @@ export const pdfRenderer: Renderer = {
       }
     }
 
-    zoomOut.onclick = () => applyScale(scaleIdx - 1);
-    zoomIn.onclick = () => applyScale(scaleIdx + 1);
+    /** manual 步进：从当前连续值到严格相邻档位（无相邻档时按钮已禁用，此处兜底 no-op） */
+    function stepZoom(dir: -1 | 1): void {
+      const next = adjacentPreset(curScale, dir);
+      if (next === null) return;
+      zoomMode = 'manual';
+      applyScale(next);
+    }
+
+    zoomOut.onclick = () => stepZoom(-1);
+    zoomIn.onclick = () => stepZoom(1);
+    fitBtn.onclick = () => {
+      zoomMode = 'fit';
+      lastHostW = pagesHost.offsetWidth;
+      applyScale(modeScale());
+    };
     syncZoomUi();
+
+    // ---- 容器宽跟随（auto/fit） ----
+    // 观察 pagesHost 的边框盒而非内容盒：滚动条出没只改内容盒宽，若跟着重算，临界尺寸下会
+    // 「适宽 → 页变高出竖向滚动条 → 内容变窄 → 再适宽 → 页变矮滚动条消失 → …」来回重排。
+    // 回调里再以边框盒宽（offsetWidth）与上次量宽比对：observe 时的首次通知、只变高度的
+    // 通知都不重算；150ms 防抖合并拖拽调宽/转屏的连串通知；重算结果与现值差不足 0.5% 不重排。
+    // 容器暂不可见（clientWidth 归 0，如所在面板被隐藏）时不重算，保持现缩放——否则会先
+    // 回落 100% 再恢复，白白两轮全量重渲染。jsdom/旧浏览器无 ResizeObserver：守卫跳过，
+    // 只是失去跟随，首屏适宽照常。
+    let refitTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function refit(): void {
+      refitTimer = null;
+      if (destroyed || zoomMode === 'manual') return;
+      const hostW = pagesHost.offsetWidth;
+      if (hostW === lastHostW || pagesHost.clientWidth <= 0) return;
+      lastHostW = hostW;
+      const next = modeScale();
+      if (Math.abs(next - curScale) > curScale * REFIT_MIN_RATIO) applyScale(next);
+    }
+
+    const ro =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => {
+            if (destroyed || zoomMode === 'manual') return;
+            if (refitTimer !== null) clearTimeout(refitTimer);
+            refitTimer = setTimeout(refit, REFIT_DEBOUNCE_MS);
+          })
+        : null;
+    ro?.observe(pagesHost, { box: 'border-box' });
 
     // ---- 搜索 ----
     let pageTexts: string[] | null = null; // 首次搜索时懒提取并缓存
@@ -547,6 +687,8 @@ export const pdfRenderer: Renderer = {
         readAbort.abort(); // 在飞窗段读（transport requestRange）取消，abort 身份经 ctx.read 契约透传
         externalSignal?.removeEventListener('abort', onExternalAbort);
         io.disconnect();
+        ro?.disconnect();
+        if (refitTimer !== null) clearTimeout(refitTimer); // 在途防抖不再落地
         for (const st of pageStates) st.renderTask?.cancel();
         pageStates.length = 0;
         stateByWrap.clear();

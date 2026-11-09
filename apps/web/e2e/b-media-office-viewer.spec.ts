@@ -351,7 +351,7 @@ test('MEDIA-06：EXIF Orientation=6 按 90° 顺时针应用（natural 200×400�
     .toBe('200x400');
 });
 
-test('MEDIA-07：6 页 PDF 翻页页码随动、200% 缩放、canvas 懒渲染', async ({ page }) => {
+test('MEDIA-07：6 页 PDF 翻页页码随动、200% 缩放、canvas 懒渲染', async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   const pdf = buildMultiPagePdf([
     'Deck Page 1',
@@ -368,7 +368,22 @@ test('MEDIA-07：6 页 PDF 翻页页码随动、200% 缩放、canvas 懒渲染',
   await expect(page.locator('.vv-pdf')).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.vv-pdf-page')).toHaveCount(6);
   await expect(page.locator('.vv-pdf-page-indicator')).toHaveText('第 1 / 6 页');
-  await expect(page.locator('.vv-pdf-zoom-label')).toHaveText('100%');
+  // 首屏缩放 = auto 模式（适应宽度且封顶 100%）：桌面窗格宽于 600pt 页 → 100%；mobile
+  // 375 视口 → 适宽值（<100%，横向页不再超宽）。其后以 ＋ 回到 100% 再走原锚链（页码随动/
+  // 懒渲染/200% 缩放），与改造前固定 100% 起点同口径
+  const zoomLabel = page.locator('.vv-pdf-zoom-label');
+  const autoPct = await page.locator('.vv-pdf-pages').evaluate((el) => {
+    const cs = getComputedStyle(el);
+    const avail = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    return Math.round(Math.min(1, avail / 600) * 100); // buildMultiPagePdf 页宽 600pt
+  });
+  await expect(zoomLabel).toHaveText(`${autoPct}%`);
+  if (testInfo.project.name === 'chromium') expect(autoPct).toBe(100);
+  else expect(autoPct).toBeLessThan(100);
+  for (let i = 0; i < 3 && (await zoomLabel.textContent()) !== '100%'; i++) {
+    await page.getByRole('button', { name: '放大' }).click();
+  }
+  await expect(zoomLabel).toHaveText('100%');
 
   // 懒渲染：初始只渲染前 3 页（IMMEDIATE_PAGES）+ 200px 预热边距内的页，第 6 页 canvas 不存在
   await expect(page.locator('.vv-pdf canvas').first()).toBeVisible({ timeout: 20_000 });
@@ -382,7 +397,7 @@ test('MEDIA-07：6 页 PDF 翻页页码随动、200% 缩放、canvas 懒渲染',
   await expect(page.locator('.vv-pdf-page-indicator')).toHaveText('第 6 / 6 页', { timeout: 10_000 });
   await expect(page.locator('.vv-pdf-page').nth(5).locator('canvas')).toHaveCount(1, { timeout: 10_000 });
 
-  // 缩放至 200%（预设档 0.5/0.75/1/1.5/2/3）：档位两步串行——每档全量重绘（清空全部
+  // 缩放至 200%（预设档 0.25/0.5/0.75/1/1.5/2/3）：档位两步串行——每档全量重绘（清空全部
   // canvas、占位尺寸变化）后滚动锚点仍为绝对像素值，需重滚到底让第 6 页回到可视集；
   // canvas 只为可视页重绘（总数受限）即缩放重绘 + 回收证据
   await page.getByRole('button', { name: '放大' }).click();
