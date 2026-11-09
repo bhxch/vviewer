@@ -697,6 +697,12 @@ test.describe('b-foreign-office-3 foreign 桥接渲染器的跨边界行为（FO
     page
   }) => {
     test.setTimeout(180_000);
+    // docx 内置默认已改为 file-viewer 版式还原（foreign-word）；本用例锚「嵌套附件经
+    // vviewer 派发器落自有 docx 面」→ 经默认渲染器偏好选用 mammoth（偏好与顶层打开
+    // 同经 registry.byExtension，嵌套分派一致生效；injectDir 内 goto 前注册）
+    await page.addInitScript(() => {
+      localStorage.setItem('vviewer:settings', JSON.stringify({ rendererDefaults: { docx: 'docx' } }));
+    });
     const host = page.locator('.vv-viewer-host');
     const png = Buffer.from(PIXEL_PNG_B64, 'base64');
     const eml = buildEml({

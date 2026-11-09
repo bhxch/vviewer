@@ -46,7 +46,8 @@ export { hasNonDiagramFence };
 /** M1 渲染器注册表：代码/文本、markdown、html 沙箱预览、图片（含消毒后的 SVG）、音视频。
  * M4 追加：PDF（render-doc）、hex/结构树（render-binary）、压缩包 zip/tar/7z/rar
  * （render-archive，libarchive worker 走静态拷贝的 /libarchive/worker-bundle.js）、
- * Office 三件套 docx/xlsx/pptx（render-doc，pptx 为文本提纲降级路径）。
+ * Office 三件套 docx/xlsx/pptx（render-doc；docx/pptx 的内置默认是 file-viewer 桥接
+ * 的版式/幻灯片还原，render-doc 的 mammoth 简化视图/文本提纲以候选注册）。
  * Task 5 追加（spec 2026-11-04-file-viewer-integration §5.1）：图表文件 29 型
  * （id diagram-<type>），必须先于 codeRenderer 安装（generated 补空位铁律，见下）。
  * 计划 3 Task 2 追加（spec §6.3）：file-viewer 桥接第一波 10 组 41 扩展名 + 计划 4

@@ -5,6 +5,8 @@
 // jszip 读 ppt/slides/slideN.xml 提取 <a:t> 文本，每页一张提纲卡片（不还原版式）。
 // 页序以 slideN 文件名数字序近似（真实页序在 presentation.xml 的 rels 链中，
 // 常见生成器按此命名，偏差已在任务报告记录）。
+// .pptx 的内置默认是 file-viewer 桥接的演示文稿渲染器（foreign-presentation，逐页
+// 还原幻灯片）；本提纲渲染器以 altExtensions 作为候选，可经「打开方式」改用。
 import type { Detection, FileSource, RenderedInstance, Renderer } from '@bhxch/vviewer-core';
 import { sniffOoxml } from './ooxml';
 import { extractSlideLines } from './pptxText';
@@ -16,7 +18,8 @@ const SLIDE_RE = /^ppt\/slides\/slide(\d+)\.xml$/;
 export const pptxRenderer: Renderer = {
   id: 'pptx',
   label: 'PowerPoint（文本提纲）',
-  extensions: ['pptx'],
+  extensions: [],
+  altExtensions: ['pptx'],
   sniff: sniffOoxml,
   async render(buffer: Uint8Array, target: HTMLElement, _source: FileSource, _det: Detection) {
     const mod = await import('jszip');

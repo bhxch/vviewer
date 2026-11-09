@@ -319,8 +319,10 @@ export function wireDesignOrDataSeam(
   };
 }
 
-/** 20 组绑定（spec §6.3 表逐字 + pot 增补 presentation；xlsx/xlsm/xls/csv/docx/pptx/
- * dot 维持 vviewer 既有渲染器，不在绑定面；第二波序 12-21——jxl 不绑定（探针裁决，
+/** 20 组绑定（spec §6.3 表逐字 + pot 增补 presentation；docx/pptx 改由 word/presentation
+ * 组拥有（内置默认改为版式/幻灯片还原，core mammoth/提纲渲染器降为 altExtensions 候选）；
+ * xlsx/xlsm/xls/csv/dot 维持 vviewer 既有渲染器，不在绑定面（xlsx 系为 spreadsheet 组
+ * 候选）；第二波序 12-21——jxl 不绑定（探针裁决，
  * renderer-image dist 无解码器），renderer-media 的媒体扩展名不注册（av 占优），
  * drawing 仅 drawio/dio（mermaid/plantuml/excalidraw/bpmn 维持 vviewer 图表面，
  * bpmn-js 不装），design 组经 wireDesignOrDataSeam 接上游增强缝（T2 评审 I-2），
@@ -353,20 +355,22 @@ const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
   {
     // capability-rtf 副作用同载：open-document definition 的 rtf 面经 rtf.js 懒加载器启用
     id: 'foreign-word',
-    // label 不得与 core docx 渲染器（render-doc/src/docx.ts 'Word 文档'，.docx 专有）
+    // label 不得与 core docx 渲染器（render-doc/src/docx.ts「Word 文档（简化视图）」）
     // 同名：registry 全量面双同名项曾炸 TabContextMenu 的 label-keyed each（Svelte 5
     // each_key_duplicate prod 恒抛 → kit 错误边界整页换 500 错误页，CI OWM-03/04/05
-    // 全灭实迹），且选择面出现两个不可分辨的「Word 文档」。本组覆盖 doc/docm/dotx/
-    // dotm/odt/odp/rtf 兼容格式（.docx 由 core 专有），label 带限定后缀去重。
-    label: 'Word 文档（兼容格式）',
-    extensions: ['doc', 'docm', 'dotx', 'dotm', 'odt', 'odp', 'rtf'],
+    // 全灭实迹），且选择面出现两个不可分辨的「Word 文档」。本组为 .docx 的内置默认
+    // （docx-preview 系版式还原：分页/字体/表格；core mammoth 简化视图降为候选），
+    // 兼覆盖 doc/docm/dotx/dotm/odt/odp/rtf。
+    label: 'Word 文档（版式还原）',
+    extensions: ['docx', 'doc', 'docm', 'dotx', 'dotm', 'odt', 'odp', 'rtf'],
     load: () =>
       Promise.all([import('@file-viewer/renderer-word'), import('@file-viewer/capability-rtf')]).then(([m]) => m.wordRenderer)
   },
   {
+    // .pptx 内置默认（逐页还原幻灯片；core 文本提纲渲染器降为候选）
     id: 'foreign-presentation',
     label: '演示文稿',
-    extensions: ['ppt', 'pot', 'pptm', 'potx', 'potm', 'ppsx', 'ppsm'],
+    extensions: ['pptx', 'ppt', 'pot', 'pptm', 'potx', 'potm', 'ppsx', 'ppsm'],
     load: () => import('@file-viewer/renderer-presentation').then((m) => m.presentationRenderer)
   },
   {

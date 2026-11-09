@@ -65,6 +65,14 @@ async function readGrid(page: Page): Promise<string[][]> {
     .evaluateAll((trs) => trs.map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent ?? '')));
 }
 
+/** docx/pptx 内置默认为 file-viewer 版式/幻灯片还原（foreign-word/presentation）；锚 vviewer
+ * 自有 mammoth/提纲渲染器的用例经「默认渲染器」设置偏好（rendererDefaults）选用——须先于 goto */
+async function seedCoreOfficeRenderers(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    localStorage.setItem('vviewer:settings', JSON.stringify({ rendererDefaults: { docx: 'docx', pptx: 'pptx' } }));
+  });
+}
+
 test('MEDIA-01：图片滚轮缩放逐次 1.1×/0.9× 步进倍率、上限 10×/下限 0.1×、双击复位 1×', async ({
   page
 }) => {
@@ -162,6 +170,8 @@ test('MEDIA-03：mp4 ArtPlayer 挂载、video readyState=4、播放推进', asyn
 
 test('MEDIA-08：docx 正文 p 与源 document.xml 的 w:t 一一对应（数量/顺序/文本）', async ({ page }) => {
   test.setTimeout(60_000);
+  // docx/pptx 内置默认已改为 file-viewer 版式/幻灯片还原；本用例锚 vviewer 自有渲染器 → 设置偏好选用
+  await seedCoreOfficeRenderers(page);
   // 源基准（2026-10-10 实提）：unzip -p samples/m4/sample.docx word/document.xml | grep -o '<w:t[^>]*>[^<]*</w:t>'
   // 恰 4 个 w:t，每个独立成段；mammoth 一段一 <p>（packages/vviewer-render-doc/src/docx.ts:37-43）
   const W_T_TEXTS = [
@@ -243,6 +253,8 @@ test('MEDIA-09：xlsx 多 sheet 页签切换逐格核对 + 250 行仅渲染前 2
 
 test('MEDIA-10：pptx 提纲卡片页码齐全且文本与源 slide XML 一致', async ({ page }) => {
   test.setTimeout(60_000);
+  // docx/pptx 内置默认已改为 file-viewer 版式/幻灯片还原；本用例锚 vviewer 自有渲染器 → 设置偏好选用
+  await seedCoreOfficeRenderers(page);
   // 源基准（2026-10-10 实提）：unzip -p samples/m4/sample.pptx ppt/slides/slide{1,2}.xml
   // 的 <a:p> 段落；extractSlideLines 一段一行（packages/vviewer-render-doc/src/pptxText.ts:35-45），
   // 卡片页码 head.textContent = `第 ${idx + 1} 页`（pptx.ts:46-47）。

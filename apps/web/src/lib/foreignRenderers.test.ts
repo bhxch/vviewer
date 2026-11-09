@@ -64,8 +64,8 @@ const EXPECTED: readonly { id: string; extensions: readonly string[] }[] = [
   { id: 'foreign-epub', extensions: ['epub', 'fb2', 'umd'] },
   { id: 'foreign-ofd', extensions: ['ofd'] },
   { id: 'foreign-chm', extensions: ['chm'] },
-  { id: 'foreign-word', extensions: ['doc', 'docm', 'dotx', 'dotm', 'odt', 'odp', 'rtf'] },
-  { id: 'foreign-presentation', extensions: ['ppt', 'pot', 'pptm', 'potx', 'potm', 'ppsx', 'ppsm'] },
+  { id: 'foreign-word', extensions: ['docx', 'doc', 'docm', 'dotx', 'dotm', 'odt', 'odp', 'rtf'] },
+  { id: 'foreign-presentation', extensions: ['pptx', 'ppt', 'pot', 'pptm', 'potx', 'potm', 'ppsx', 'ppsm'] },
   { id: 'foreign-spreadsheet', extensions: ['xltx', 'xlsb', 'xlt', 'xla', 'xlam', 'xltm', 'ods', 'fods', 'dbf', 'tsv'] },
   { id: 'foreign-iwork', extensions: ['pages', 'numbers', 'key'] },
   { id: 'foreign-hangul', extensions: ['hwp', 'hwpx'] },
@@ -102,7 +102,7 @@ const EXPECTED_WAVE2: readonly { id: string; extensions: readonly string[] }[] =
 const EXPECTED_ALL: readonly { id: string; extensions: readonly string[] }[] = [...EXPECTED, ...EXPECTED_WAVE2];
 
 describe('createForeignFileRenderers（20 组桥接渲染器）', () => {
-  it('id/label/extensions 逐字（spec §6.3 表）：116 扩展名零重复', () => {
+  it('id/label/extensions 逐字（spec §6.3 表 + docx/pptx 所有权）：118 扩展名零重复', () => {
     const renderers = createForeignFileRenderers({ nestedDispatch: async () => {} });
     expect(renderers).toHaveLength(20);
     const seen = new Set<string>();
@@ -117,7 +117,7 @@ describe('createForeignFileRenderers（20 组桥接渲染器）', () => {
         seen.add(ext);
       }
     }
-    expect(seen.size).toBe(116); // 41（第一波）+ 75（第二波，jxl 不绑定）
+    expect(seen.size).toBe(118); // 41（第一波）+ docx/pptx（内置默认改版式/幻灯片还原）+ 75（第二波，jxl 不绑定）
   });
 
   it('渲染器对象不携带 mount 装配外的可预期面（label 中文、extensions 小写无点）', () => {
@@ -159,7 +159,7 @@ describe('装配序锚（viewer.ts 语句序：diagram → foreign 桥接块 →
     expect(() => mirrorViewerInstallOrder()).not.toThrow();
   });
 
-  it('byExtension 116 项逐字归属 + tsv→foreign-spreadsheet 桥（Review Focus 3）', () => {
+  it('byExtension 118 项逐字归属 + tsv→foreign-spreadsheet 桥（Review Focus 3）', () => {
     const registry = mirrorViewerInstallOrder();
     for (const expected of EXPECTED_ALL) {
       for (const ext of expected.extensions) {
@@ -169,16 +169,29 @@ describe('装配序锚（viewer.ts 语句序：diagram → foreign 桥接块 →
     }
   });
 
-  it('generated 补空位不回抢：eml/fods 归桥接；csv/docx/pptx 维持 vviewer 既有渲染器', () => {
+  it('generated 补空位不回抢：eml/fods 归桥接；csv/xlsx 维持 vviewer 既有渲染器，docx/pptx 归版式/幻灯片还原', () => {
     const registry = mirrorViewerInstallOrder();
     expect(registry.byExtension('eml')?.id).toBe('foreign-email'); // GENERATED_EXTENSIONS 内，桥接块居前才不被 code 抢注
     expect(registry.byExtension('fods')?.id).toBe('foreign-spreadsheet');
     expect(registry.byExtension('tsv')?.id).toBe('foreign-spreadsheet'); // 自 code 内置清单原子转移
     expect(registry.byExtension('csv')?.id).toBe('code'); // spec §6.3：csv 维持 code
-    expect(registry.byExtension('docx')?.id).toBe('docx'); // docx 维持 vviewer mammoth
+    expect(registry.byExtension('docx')?.id).toBe('foreign-word'); // 内置默认：docx-preview 系版式还原
     expect(registry.byExtension('xlsx')?.id).toBe('xlsx');
-    expect(registry.byExtension('pptx')?.id).toBe('pptx');
+    expect(registry.byExtension('pptx')?.id).toBe('foreign-presentation'); // 内置默认：逐页幻灯片
     expect(registry.byExtension('dot')?.id).toBe('diagram-graphviz'); // 计划 1 裁决：dot 维持 graphviz
+  });
+
+  it('docx/pptx 的 core 渲染器降为候选：仍可经偏好/打开方式选用，且不再占有扩展名', () => {
+    const registry = mirrorViewerInstallOrder();
+    expect(registry.candidatesOf('docx').map((r) => r.id)).toEqual(['foreign-word', 'docx']);
+    expect(registry.candidatesOf('pptx').map((r) => r.id)).toEqual(['foreign-presentation', 'pptx']);
+    expect(docxRenderer.extensions).toEqual([]);
+    expect(pptxRenderer.extensions).toEqual([]);
+    registry.setPreferenceResolver((ext) => ({ docx: 'docx', pptx: 'pptx' })[ext]);
+    expect(registry.byExtension('docx')?.id).toBe('docx');
+    expect(registry.byExtension('pptx')?.id).toBe('pptx');
+    // 两者 label 可区分（registry 全量面同名项会炸 label-keyed each，见 foreignRenderers.ts 注）
+    expect(registry.byId('foreign-word')?.label).not.toBe(registry.byId('docx')?.label);
   });
 
   it('多渲染器候选（altExtensions）：xlsx/xlsm/xls/csv 以 foreign-spreadsheet 为候选，偏好命中即改派、其余不动', () => {

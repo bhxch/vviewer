@@ -5,6 +5,9 @@
 // render-doc → sanitize，SDD 裁决）。mammoth 图片默认内联为
 // data:image/* base64，净化白名单已放行 img src 的 data:image。
 // OOXML 预检语义见 ooxml.ts：render 侧 ZIP 签名早失败，sniff 永不改派。
+// .docx 的内置默认是 file-viewer 桥接的版式还原渲染器（foreign-word，docx-preview
+// 系，保留分页/字体/表格版式）；本渲染器转语义 HTML（丢版式、纯本地离线），以
+// altExtensions 作为候选——设置「打开方式」或单标签「打开方式」可改用。
 import type { Detection, FileSource, RenderedInstance, Renderer } from '@bhxch/vviewer-core';
 import { sanitizeHtml } from '@bhxch/vviewer-sanitize';
 import { assertZipSignature, sniffOoxml } from './ooxml';
@@ -27,8 +30,9 @@ function toMammothInput(u8: Uint8Array): MammothInput {
 
 export const docxRenderer: Renderer = {
   id: 'docx',
-  label: 'Word 文档',
-  extensions: ['docx'],
+  label: 'Word 文档（简化视图）',
+  extensions: [],
+  altExtensions: ['docx'],
   sniff: sniffOoxml,
   async render(buffer: Uint8Array, target: HTMLElement, _source: FileSource, _det: Detection) {
     assertZipSignature(buffer, 'docx（Word）');
