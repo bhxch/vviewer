@@ -47,6 +47,7 @@
 | 图表文件渲染器 29 型铺开（本地/npm/wasm/CDN/kroki/官方各档 + 大小门/单跳失败文案/sanitize） | [diagram-file-renderers.md](diagram-file-renderers.md) | DIA-LOCAL-01、DIA-KROKI-01~02、DIA-C4-01、DIA-CDN-01、DIA-SIZE-01、DIA-SRC-01、DIA-SAN-01、DIA-SERVER-01、DIA-OFFICIAL-01（10 场景编号 → 35 个 test） | 2026-11-04-file-viewer-integration-design.md §5.1/§5.2 + 计划 1（fv-plan1-hygiene-diagram-file） |
 | 扩展名绑定与抢占秩序（绑定清单一致性/签名改派绕行/探测链尾兜底/补空位扩展名/嵌套归档深度门） | [extension-bindings.md](extension-bindings.md) | BND-01~10（10） | 2026-11-04-file-viewer-integration-design.md §4（批次一卫生批）+ 计划 1（fv-plan1-hygiene-diagram-file） |
 | 路径规范化与穿越防御（bridge sibling 解析/markdown 相对图越界拒绝/嵌套附件名合成/归档条目穿越面） | [path-normalization.md](path-normalization.md) | PAT-01~09（9） | 残余 A4（2026-11-07 残余清理批一，commit 9471efd）+ 本轮测绘 PAT 域缺口清单 |
+| 用户反馈八项验收（代码自动换行/手机 PDF 适宽/pptx·docx 默认渲染器/旧浏览器 PDF/默认渲染器设置/平板段右栏折叠/图片拖动平移） | [user-feedback-2026-11-09.md](user-feedback-2026-11-09.md) | UFB-01a~d、UFB-02a~c、UFB-03a~b、UFB-04、UFB-05、UFB-06、UFB-07a~c、UFB-08a~d（19） | 2026-11-09 用户反馈（无 spec，根因与修复对照见文档 §2） |
 
 上表末八行来自两个来源批次：2026-11-04/07 的 file-viewer 五计划流水线（计划 1~5，spec `2026-11-04-file-viewer-integration-design.md`），以及 2026-11-07 残余批的新特性补强（残余 A1/A2/A4/A7/A8 等已落库修复的回归锚）；两批文档编号自成体系、与首轮测试点编号不连续，各文档第 1 节载明 spec/plan 出处与现状脚本。
 
