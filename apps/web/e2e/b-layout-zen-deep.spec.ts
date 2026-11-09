@@ -54,10 +54,30 @@ function barState(page: Page, selector: string): Promise<{ cls: string; visibili
   }, selector);
 }
 
-/** 等应用挂载（AppShell 渲染出标签栏；顶栏退役 Task 3 后壳锚唯一） */
+/** 等应用挂载（AppShell 渲染出标签栏；顶栏退役 Task 3 后壳锚唯一）+ window 监听就绪锚：
+ * 负载下标签栏入 DOM 可先于 AppShell 的 svelte:window drop/keydown 监听挂载——空窗内的
+ * 合成 drop（LZ-15 dropFile）与首个快捷键（LZ-13 Ctrl+P）即永久丢失、断言时限救不回。
+ * 移植 t-open-with waitAppMounted 已验证装置（OPEN-01/02/06 根治点）：EventTarget 包装
+ * 在 window 出现 drop 监听时置位，expect.poll 等到置位再放行（单评估即放行的
+ * waitForFunction 不用）。 */
 async function waitApp(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as unknown as Record<string, unknown>;
+    w.__vvDropListenerReady = false;
+    const orig = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function (type: string, ...rest: unknown[]) {
+      if (this === window && type === 'drop') w.__vvDropListenerReady = true;
+      return (orig as (...a: unknown[]) => void).apply(this, [type, ...rest]);
+    };
+  });
   await page.goto('/');
   await expect(page.locator('.vv-tabbar')).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as Record<string, unknown>).__vvDropListenerReady === true), {
+      timeout: 20_000,
+      message: 'svelte:window drop 监听未挂载（应用 boot 未完成）'
+    })
+    .toBe(true);
 }
 
 /** 右键标签栏非条目区（.vv-tabbar-manage）打开 chrome 菜单并点指定条目（顶栏退役
