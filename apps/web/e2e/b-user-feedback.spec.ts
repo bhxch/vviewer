@@ -329,7 +329,7 @@ test.describe('UFB-02 手机 PDF 适宽与横向可达', () => {
       .toBeLessThanOrEqual(2);
   });
 
-  test('UFB-02b 放大溢出后触屏横扫可平移（原生滚动接管拖动）', async ({ page }) => {
+  test('UFB-02b 放大溢出后触屏往右拖看左半边：能拖动且最终看到页面左缘', async ({ page }) => {
     test.skip(!isMobile(), '触屏（mobile project hasTouch）专属');
     test.setTimeout(90_000);
     await waitAppMounted(page);
@@ -338,12 +338,24 @@ test.describe('UFB-02 手机 PDF 适宽与横向可达', () => {
     const zoomIn = page.getByRole('button', { name: '放大' });
     for (let i = 0; i < 6 && (await zoomPct(page)) < 100; i++) await zoomIn.click();
     await expect.poll(() => page.locator('.vv-pdf-pages').evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-    await page.locator('.vv-pdf-pages').evaluate((el) => {
-      el.scrollLeft = 0;
+    // 先停在最右（看右半边），再用手指往右拖——用户「看左半边」的真实手势
+    const startLeft = await page.locator('.vv-pdf-pages').evaluate((el) => {
+      el.scrollLeft = el.scrollWidth;
+      return el.scrollLeft;
     });
+    expect(startLeft).toBeGreaterThan(0);
     const c = await centerOf(page, '.vv-pdf-pages');
-    await touchGesture(page, [{ from: { x: c.x + 100, y: c.y }, to: { x: c.x - 100, y: c.y } }]);
-    await expect.poll(() => page.locator('.vv-pdf-pages').evaluate((el) => el.scrollLeft)).toBeGreaterThan(50);
+    await touchGesture(page, [{ from: { x: c.x - 120, y: c.y }, to: { x: c.x + 120, y: c.y } }]);
+    // 能拖动：scrollLeft 随手指减小
+    await expect
+      .poll(() => page.locator('.vv-pdf-pages').evaluate((el) => el.scrollLeft))
+      .toBeLessThan(startLeft - 50);
+    // 继续往右拖到底：页面左缘进入视口（旧居中溢出时左半边落负滚动区，拖到底也看不到）
+    for (let i = 0; i < 6; i++) {
+      await touchGesture(page, [{ from: { x: c.x - 120, y: c.y }, to: { x: c.x + 120, y: c.y } }]);
+    }
+    await expect.poll(() => page.locator('.vv-pdf-pages').evaluate((el) => el.scrollLeft)).toBe(0);
+    expect((await pdfGeometry(page)).left).toBeGreaterThanOrEqual(-1);
   });
 
   test('UFB-02c 桌面竖页回归：600pt 页仍 100%', async ({ page }) => {
