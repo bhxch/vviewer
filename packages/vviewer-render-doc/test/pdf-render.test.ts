@@ -19,11 +19,11 @@ import { createPdfRangeTransport, pdfRenderer } from '../src/pdf';
 
 const getDocumentMock = vi.hoisted(() => vi.fn());
 
-// 桩的说明符须与 pdf.ts 运行期加载的入口一致（legacy 构建，见 pdf.ts loadPdfjs 注释），
-// 否则 mock 落空、真实 pdfjs 被加载
-vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => {
-  // fake PDFDataRangeTransport：仅覆盖本测试消费的真实类面（pdf.mjs 导出同名基类，
-  // 字段/方法签名逐一对齐 types/src/display/api.d.ts:758）
+/** 双说明符共享工厂（能力感知后 pdf.ts 双入口都可能加载；jsdom 特性探针恒选 legacy，
+ * modern mock 为保险面——mock 落空即加载真实 pdfjs）。fake PDFDataRangeTransport 仅
+ * 覆盖本测试消费的真实类面（pdf.mjs 导出同名基类，字段/方法签名逐一对齐
+ * types/src/display/api.d.ts:758） */
+const pdfjsMockFactory = vi.hoisted(() => (): Record<string, unknown> => {
   class PDFDataRangeTransport {
     length: number;
     initialData: Uint8Array | null;
@@ -63,6 +63,8 @@ vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => {
     PDFDataRangeTransport
   };
 });
+vi.mock('pdfjs-dist/legacy/build/pdf.mjs', pdfjsMockFactory);
+vi.mock('pdfjs-dist', pdfjsMockFactory);
 
 // ---- 夹具 ----
 

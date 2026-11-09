@@ -10,7 +10,10 @@
 // - 对照：现代构建主模块 / worker 求值即抛（证明删除手法有判别力）；
 // - pdf.ts 实际加载链（render → loadPdfjs）越过 pdfjs 加载阶段；
 // - legacy worker 求值成功；
-// - 源码契约锚：pdf.ts 的主模块与 worker 说明符均指向 legacy 构建，防回退。
+// - 浏览器感知构建选择（preferModernBuild 真值表）：特性齐备选现代构建、任一缺失选
+//   legacy（core-js polyfill 清单即现代构建的真实特性面）；
+// - 源码契约锚：双构建动态 import 与 worker 资产同受 preferModernBuild 门控，渲染根
+//   暴露 data-pdf-build 判别面。
 // 模块缓存：pdfjs-dist 属 node_modules 依赖，vitest 将其 externalize 交 Node 原生 ESM
 // 加载——原生模块缓存不受 vi.resetModules 影响，同一模块 URL 在本文件内只求值一次（求值
 // 失败的记录同样缓存）。故各用例导入的模块 URL 互不重叠、首次导入即该例的断言对象
@@ -21,7 +24,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Detection, FileSource, StreamCtx, TreeStore } from '@bhxch/vviewer-core';
-import { pdfRenderer } from '../src/pdf';
+import { pdfRenderer, preferModernBuild, resetPdfBuildDecisionForTest } from '../src/pdf';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -94,20 +97,109 @@ describe('pdfjs 构建选型：无全局 Iterator 的旧浏览器条件', () => 
   });
 });
 
-describe('pdf.ts 源码契约锚：主模块与 worker 走 legacy 构建', () => {
-  const src = readFileSync(path.join(here, '../src/pdf.ts'), 'utf8');
+// ---------- 浏览器感知构建选择：preferModernBuild 真值表 ----------
 
-  it('动态 import 的 pdfjs 说明符只有 legacy 主模块', () => {
-    // 同时覆盖运行期 import(...) 与类型位 typeof import(...)：两者同指一个入口
-    const specs = [...src.matchAll(/\bimport\(\s*'(pdfjs-dist[^']*)'\s*\)/g)].map((m) => m[1]);
-    expect(specs.length).toBeGreaterThan(0);
-    expect(new Set(specs)).toEqual(new Set(['pdfjs-dist/legacy/build/pdf.mjs']));
+/** 特性探针位：legacy 构建 core-js polyfill 清单里的现代特性（即现代构建的真实依赖面） */
+interface FeatureSlot {
+  host: object;
+  key: string;
+}
+const NOOP = (): void => {};
+const SLOTS: Record<string, FeatureSlot> = {
+  iterator: { host: globalThis, key: 'Iterator' },
+  iteratorMap: { host: (globalThis as unknown as { Iterator: { prototype: object } }).Iterator.prototype, key: 'map' },
+  setUnion: { host: Set.prototype, key: 'union' },
+  fromBase64: { host: Uint8Array as unknown as object, key: 'fromBase64' },
+  getOrInsert: { host: Map.prototype, key: 'getOrInsert' },
+  promiseTry: { host: Promise as unknown as object, key: 'try' },
+  urlParse: { host: URL as unknown as object, key: 'parse' },
+  rawJSON: { host: JSON as unknown as object, key: 'rawJSON' },
+  sumPrecise: { host: Math, key: 'sumPrecise' }
+};
+const stash = new Map<FeatureSlot, PropertyDescriptor | undefined>();
+
+/** 置为函数桩（已是函数则不动；原始描述符记入 stash 供复位） */
+function ensure(slot: FeatureSlot): void {
+  if (typeof (slot.host as Record<string, unknown>)[slot.key] === 'function') return;
+  if (!stash.has(slot)) stash.set(slot, Object.getOwnPropertyDescriptor(slot.host, slot.key));
+  Object.defineProperty(slot.host, slot.key, { value: NOOP, writable: true, configurable: true, enumerable: false });
+}
+
+/** 删除特性（缺失形态） */
+function remove(slot: FeatureSlot): void {
+  if (!stash.has(slot)) stash.set(slot, Object.getOwnPropertyDescriptor(slot.host, slot.key));
+  delete (slot.host as Record<string, unknown>)[slot.key];
+}
+
+function restoreFeatures(): void {
+  for (const [slot, desc] of stash) {
+    if (desc !== undefined) Object.defineProperty(slot.host, slot.key, desc);
+    else delete (slot.host as Record<string, unknown>)[slot.key];
+  }
+  stash.clear();
+}
+
+describe('preferModernBuild 真值表（浏览器感知构建选择）', () => {
+  const ALL = Object.values(SLOTS);
+
+  beforeEach(() => {
+    // 判定定格复位（首用定格语义——逐例需要干净判定；前序 describe 的 render 已定格 false）
+    resetPdfBuildDecisionForTest();
   });
 
-  it('worker 资产 URL 只有 legacy worker', () => {
-    const urls = [...src.matchAll(/new URL\(\s*'(pdfjs-dist[^']*)'\s*,\s*import\.meta\.url\s*\)/g)].map(
-      (m) => m[1]
-    );
-    expect(urls).toEqual(['pdfjs-dist/legacy/build/pdf.worker.min.mjs']);
+  afterEach(() => {
+    restoreFeatures();
+    resetPdfBuildDecisionForTest();
+    // 前置自检的对称面：复位后探针必须回到真值（桩未漏复原即在此红）
+    expect(preferModernBuild()).toBe(true);
+  });
+
+  it('全部特性在场 → 现代构建', () => {
+    ALL.forEach(ensure);
+    expect(preferModernBuild()).toBe(true);
+  });
+
+  it('任一特性缺失 → legacy 构建（逐个验证；core-js 清单即现代构建真实依赖面）', () => {
+    for (const slot of ALL) {
+      restoreFeatures();
+      ALL.forEach(ensure);
+      remove(slot);
+      resetPdfBuildDecisionForTest();
+      expect(preferModernBuild(), `缺失 ${slot.key} 时应选 legacy`).toBe(false);
+    }
+    restoreFeatures();
+  });
+
+  it('首用定格：探针读数后续变化不翻转判定（core-js 补回缺失特性后标记不漂移）', () => {
+    remove(SLOTS.iterator!);
+    resetPdfBuildDecisionForTest();
+    expect(preferModernBuild()).toBe(false);
+    // 模拟 legacy core-js 加载后补回全局 Iterator：定格的判定不变
+    ensure(SLOTS.iterator!);
+    ensure(SLOTS.iteratorMap!);
+    expect(preferModernBuild()).toBe(false);
+  });
+});
+
+describe('pdf.ts 源码契约锚：能力感知双构建', () => {
+  const src = readFileSync(path.join(here, '../src/pdf.ts'), 'utf8');
+
+  it('动态 import 双构建都在场且同受 preferModernBuild 门控', () => {
+    const specs = [...src.matchAll(/\bimport\(\s*'(pdfjs-dist[^']*)'\s*\)/g)].map((m) => m[1]);
+    expect(new Set(specs)).toEqual(new Set(['pdfjs-dist', 'pdfjs-dist/legacy/build/pdf.mjs']));
+    expect(src).toMatch(/preferModernBuild\(\)\s*\?\s*import\('pdfjs-dist'\)/);
+    expect(src).toMatch(/:\s*import\('pdfjs-dist\/legacy\/build\/pdf\.mjs'\)/);
+  });
+
+  it('worker 资产 URL 双构建都在场且同一判定选择', () => {
+    expect(src).toContain("'pdfjs-dist/build/pdf.worker.min.mjs'");
+    expect(src).toContain("'pdfjs-dist/legacy/build/pdf.worker.min.mjs'");
+    // worker 与主模块同一判定（worker 独立全局，主线程 polyfill 带不过去）
+    expect(src).toMatch(/preferModernBuild\(\)[^;]*pdf\.worker/);
+  });
+
+  it('渲染根暴露构建标记（e2e 判别面 data-pdf-build）', () => {
+    expect(src).toMatch(/root\.dataset\.pdfBuild\s*=/);
+    expect(src).toMatch(/preferModernBuild\(\)\s*\?\s*'modern'\s*:\s*'legacy'/);
   });
 });

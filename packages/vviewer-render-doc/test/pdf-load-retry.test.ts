@@ -8,7 +8,20 @@ const load = vi.hoisted(() => ({ attempts: 0 }));
 
 // 首次求值抛错（模拟动态 chunk 加载失败），之后返回可用桩：getDocument 立即以可辨识的
 // 打开失败 reject——第二次 render 落到它即证明 pdfjs 被重新加载
+// 双说明符同工厂（jsdom 探针恒选 legacy，modern mock 为保险面）
 vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => {
+  load.attempts++;
+  if (load.attempts === 1) throw new Error('探针：pdfjs chunk 加载失败');
+  return {
+    GlobalWorkerOptions: { workerSrc: '' },
+    PDFDataRangeTransport: class {},
+    getDocument: () => ({
+      promise: Promise.reject(new Error('探针：文档打开失败')),
+      destroy: () => Promise.resolve()
+    })
+  };
+});
+vi.mock('pdfjs-dist', () => {
   load.attempts++;
   if (load.attempts === 1) throw new Error('探针：pdfjs chunk 加载失败');
   return {

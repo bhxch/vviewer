@@ -1,7 +1,8 @@
 // pdf.ts — PDF 渲染器（M4 Task 1）。pdfjs-dist 动态 import（重依赖不进主包、SSR 不加载），
 // worker 以 vite 原生资产 URL 提供（new URL + import.meta.url，vite ≥5.1 支持裸说明符，
-// build 时输出为哈希资产——实测见任务报告）。主模块与 worker 均取 legacy 构建（旧浏览器
-// 缺全局 Iterator，现代构建加载即抛，见 loadPdfjs 注释）。
+// build 时输出为哈希资产——实测见任务报告）。主模块与 worker 按 preferModernBuild
+// 能力感知选构建：特性齐备取现代构建（零 polyfill），任一缺失（旧浏览器）取 legacy
+//（core-js 先注册全局再运行 pdfjs 本体），见 loadPdfjs/preferModernBuild 注释。
 // 渲染结构：工具条（页码/缩放）+ 滚动容器内逐页 canvas；前 3 页立即渲染，
 // 其余 IntersectionObserver 懒渲染；缩放为连续值（auto 默认适宽且封顶 100% / fit 精确
 // 适宽 / manual −/＋ 档位步进，见 ZoomMode），变更时全量重渲染。
@@ -62,28 +63,93 @@ function adjacentPreset(cur: number, dir: -1 | 1): number | null {
   return [...SCALE_PRESETS].reverse().find((p) => p < cur - SCALE_STEP_EPS) ?? null;
 }
 
+/** 特性探针的取值助手：静态成员 / 原型成员是否为函数（宿主可为构造器或 JSON/Math 等普通对象） */
+type AnyFn = { [key: string]: unknown };
+const staticHas = (host: unknown, method: string): boolean =>
+  typeof (host as unknown as AnyFn | undefined)?.[method] === 'function';
+const protoHas = (ctor: unknown, method: string): boolean =>
+  typeof (ctor as { prototype?: AnyFn } | undefined)?.prototype?.[method] === 'function';
+
+/**
+ * 浏览器感知的构建选择（UFB-04 感知版）：现代构建不带 polyfill，其源码直接使用以下
+ * 现代特性——legacy 构建的 core-js polyfill 清单即这份清单（构建产物逐模块核对）：
+ * 迭代器 helper、Set 方法、Uint8Array base64/hex、Map.getOrInsert、Promise.try、
+ * URL.parse、JSON 源访问、Math.sumPrecise。任一缺失即选 legacy——core-js 先注册全局
+ * 再运行 pdfjs 本体（旧浏览器不再「Iterator is not defined」），特性齐备的现代浏览器
+ * 不再白背 polyfill 与双倍体积。判定首次调用定格：legacy 加载后 core-js 会把缺失特性
+ * 补回全局，探针复评即翻面——不定格则 dataset 标记会与实际加载的构建漂移（e2e
+ * UFB-04 实证）。
+ */
+let pdfBuildDecision: boolean | null = null;
+const MODERN_FEATURE_PROBES: Array<[string, () => boolean]> = [
+  ['迭代器 helper', () => protoHas((globalThis as AnyFn).Iterator, 'map')],
+  ['Set 方法', () => protoHas(Set, 'union')],
+  ['Uint8Array base64/hex', () => staticHas(Uint8Array, 'fromBase64')],
+  ['Map.getOrInsert', () => protoHas(Map, 'getOrInsert')],
+  ['Promise.try', () => staticHas(Promise, 'try')],
+  ['URL.parse', () => staticHas(URL, 'parse')],
+  ['JSON 源访问', () => staticHas(JSON, 'rawJSON')],
+  ['Math.sumPrecise', () => staticHas(Math, 'sumPrecise')]
+];
+
+/** true = 特性齐备，选现代构建；false = 任一缺失（或探针异常），选 legacy 构建 */
+export function preferModernBuild(): boolean {
+  pdfBuildDecision ??= evaluateModernSupport();
+  return pdfBuildDecision;
+}
+
+function evaluateModernSupport(): boolean {
+  for (const [name, probe] of MODERN_FEATURE_PROBES) {
+    try {
+      if (!probe()) return false;
+    } catch {
+      console.debug(`[pdf] 特性探针异常（按缺失处理）：${name}`);
+      return false;
+    }
+  }
+  return true;
+}
+
+/** 测试缝：复位定格（构建选型真值表逐例需要干净判定；生产路径不调用） */
+export function resetPdfBuildDecisionForTest(): void {
+  pdfBuildDecision = null;
+}
+
+/** 按 preferModernBuild 选主模块入口（legacy/build/pdf.d.mts 即 `export * from
+ * "pdfjs-dist"`，两入口类型面等价，类型统一取 legacy 位） */
+async function importPdfjs(): Promise<Pdfjs> {
+  return preferModernBuild() ? import('pdfjs-dist') : import('pdfjs-dist/legacy/build/pdf.mjs');
+}
+
+/** worker 资产 URL 与主模块同一判定：worker 跑在独立全局（WorkerGlobalScope），
+ * 主线程的 polyfill 带不过去，两份产物须同构建。vite 对 new URL(裸说明符,
+ * import.meta.url) 的资产化只识别字面量实参——三元合成的条件串不会被处理（运行期
+ * fetch 到未打包的原始路径，e2e 实证），两个分支各自保持完整调用形态。 */
+function pdfWorkerUrl(): string {
+  return preferModernBuild()
+    ? new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
+    : new URL('pdfjs-dist/legacy/build/pdf.worker.min.mjs', import.meta.url).toString();
+}
+
 let pdfjsPromise: Promise<Pdfjs> | null = null;
 
 /**
  * pdfjs 懒加载（单例）：getDocument 前必须设好 workerSrc，避免走主线程假 worker。
  *
- * 主模块与 worker 都取 legacy 构建：现代构建（build/pdf.mjs 与 build/pdf.worker.min.mjs）
- * 在模块顶层执行 `typeof Iterator.prototype.join`——typeof 只保护裸标识符，无全局
- * Iterator 的浏览器（Chrome/Edge<122、Firefox<131、Safari<18.4）求值 Iterator.prototype
- * 即抛 ReferenceError「Iterator is not defined」，PDF 整体无法预览。legacy 构建内置的
- * core-js 先注册全局 Iterator 再做同款检查。worker 跑在独立全局（WorkerGlobalScope），
- * 主线程的 polyfill 带不过去，故两份产物须同取 legacy。worker 产物名仍是
- * pdf.worker.min.<hash>.mjs（构建脚本/e2e 按文件名匹配的口径不变）。
+ * 主模块与 worker 经 preferModernBuild 能力感知选构建（注释见其上）：现代构建在
+ * 无全局 Iterator 等特性的旧浏览器（Chrome/Edge<122、Firefox<131、Safari<18.4）模块
+ * 顶层即抛「Iterator is not defined」，legacy 构建内置 core-js 先注册全局再运行本体。
+ * 两份产物文件名同为 pdf.worker.min.<hash>.mjs（内容不同、哈希不同，vite 资产不冲突；
+ * 构建脚本/e2e 按文件名匹配的口径不变）。加载失败不入单例（chunk 网络抖动/离线未
+ * 缓存）：清空后下次打开或错误卡「重试」重新加载——否则一次失败即永久报错，只能
+ * 刷新页面。
  * 回退防线：test/pdf-legacy-build.test.ts（删除全局 Iterator 后真实求值 + 源码契约锚）。
  */
 function loadPdfjs(): Promise<Pdfjs> {
   if (pdfjsPromise === null) {
     const loading = (async () => {
-      const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-      pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-        'pdfjs-dist/legacy/build/pdf.worker.min.mjs',
-        import.meta.url
-      ).toString();
+      const pdfjs = await importPdfjs();
+      pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl();
       return pdfjs;
     })();
     pdfjsPromise = loading;
@@ -356,6 +422,8 @@ export const pdfRenderer: Renderer = {
 
     const root = document.createElement('div');
     root.className = 'vv-pdf';
+    // 构建标记（e2e 判别面）：本次实际加载的 pdfjs 构建（能力感知选择的结果）
+    root.dataset.pdfBuild = preferModernBuild() ? 'modern' : 'legacy';
     const toolbar = document.createElement('div');
     toolbar.className = 'vv-pdf-toolbar';
     const pagesHost = document.createElement('div');
