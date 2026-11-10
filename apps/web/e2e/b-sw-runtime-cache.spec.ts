@@ -168,7 +168,7 @@ async function startFixture(dir: string): Promise<Fixture> {
   let revRewrite: { from: string; to: string } | null = null;
   const server = createServer((req, res) => {
     void (async () => {
-      let pathname = '/';
+      let pathname: string;
       try {
         pathname = decodeURIComponent(new URL(req.url ?? '/', 'http://127.0.0.1').pathname);
       } catch {

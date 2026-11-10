@@ -233,7 +233,7 @@ export async function collectStorageInfo(): Promise<StorageInfo> {
     kvKeyBytes('tabs').then(async (tabs) => tabs + (await kvKeyBytes('workspaces'))),
     kvKeyBytes(DIR_HANDLE_KEY)
   ]);
-  let cacheNames: string[] = [];
+  let cacheNames: string[];
   try {
     cacheNames = typeof caches !== 'undefined' ? await caches.keys() : [];
   } catch {

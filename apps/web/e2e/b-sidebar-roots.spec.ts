@@ -306,7 +306,7 @@ test.describe('侧栏多根测绘差距（SRC-05..08）', () => {
     //    媒介特征；不支持的环境 skip 备案（真 skip 先例 SRC-03，本文件 :100；
     //    FTSRC :55-56 为注释口径无 skip 实装）。skip 判定置于 ①② 之后：环境缺失
     //    只豁免 ③，揭示/回零主链照常受锚
-    let touchForm = false;
+    let touchForm: boolean;
     try {
       const cdp = await page.context().newCDPSession(page);
       await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });

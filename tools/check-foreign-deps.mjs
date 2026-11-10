@@ -151,7 +151,7 @@ export function main() {
     return { violations, count };
   }
   // M1：CDN 版本交叉（有依赖面才校验；foreignAssets.ts 不可读视同无法解析，不静默放行）
-  let cdnVersion = null;
+  let cdnVersion;
   try {
     cdnVersion = extractForeignAssetsCdnVersion(fs.readFileSync(PATHS.foreignAssets, 'utf8'));
   } catch {

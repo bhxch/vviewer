@@ -205,7 +205,7 @@
    * 引用时槽位回落默认（''）并写 draft + touch（已导入主题删除同款）。 */
   async function removeFont(rec: FontRecord): Promise<void> {
     if (!window.confirm(`删除网络字体「${rec.name}」？`)) return;
-    let gone: FontRecord | null = null;
+    let gone: FontRecord | null;
     try {
       gone = await deleteFont(rec.id);
     } catch (err) {

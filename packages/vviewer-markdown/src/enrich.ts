@@ -146,9 +146,7 @@ function convertCallouts(root: Document): void {
         }
       }
       if (current.nodeType === 1 && (current as Element).tagName === 'BR') {
-        const br = current;
-        current = br.nextSibling;
-        br.parentElement?.removeChild(br);
+        current.parentElement?.removeChild(current);
         break;
       }
       const next: Node | null = current.nextSibling;

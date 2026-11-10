@@ -174,7 +174,7 @@ async function inlineImages(root: Document, resolveImage: ExportHtmlOptions['res
   await Promise.all(
     imgs.map(async (img) => {
       const src = img.getAttribute('src') ?? '';
-      let replacement: string | null = null;
+      let replacement: string | null;
       try {
         replacement = await resolveImage(src);
       } catch {

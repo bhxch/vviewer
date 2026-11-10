@@ -74,7 +74,7 @@
 
   async function runSearch(q: string): Promise<void> {
     const seq = ++searchSeq;
-    let matches: SearchMatch[] = [];
+    let matches: SearchMatch[];
     try {
       matches = instance?.search ? await instance.search(q, { caseSensitive }) : [];
     } catch {

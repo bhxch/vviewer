@@ -285,7 +285,7 @@ function buildRenderErrorActions(
   // 切片抛 TypeError，异常逃出会把错误卡整个吃掉（重试路径的重建卡亦同：retry 的
   // catch 里以同一 buffer 重建卡片）。故此处切片失败即按「非文本」处理（动作排序
   // 退化为 [hex, text]），错误卡照常落地。
-  let textual = false;
+  let textual: boolean;
   try {
     textual = looksTextual(buffer.slice(0, HEAD_SIZE));
   } catch {

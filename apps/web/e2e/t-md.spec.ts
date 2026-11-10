@@ -355,7 +355,7 @@ test('BUG-39 [探索]: 远程档 heading id 双引擎方案统一 user-content- 
     ],
     { stdio: 'ignore' }
   );
-  let remoteIds: string[] = [];
+  let remoteIds: string[];
   try {
     await waitHealthy(REMOTE);
     const rpage = await browser.newPage();

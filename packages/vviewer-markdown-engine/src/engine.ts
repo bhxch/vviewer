@@ -120,7 +120,7 @@ function installHeadingAnchors(md: MarkdownEngine): void {
     // 前缀（BUG-39 双引擎统一命名空间；本地 heading 的实际 id 归 enrich assignHeadingIds，
     // 同一 GfmAnchorizer 算法，最终一致）
     const text = headingText(tokens[idx - 1]);
-    const scope = (env ??= {}) as { __anchorizer?: GfmAnchorizer };
+    const scope = (env ?? {}) as { __anchorizer?: GfmAnchorizer };
     const state = scope.__anchorizer ?? (scope.__anchorizer = new GfmAnchorizer());
     const id = state.anchorize(text);
     const escaped = escapeAttr(text);
