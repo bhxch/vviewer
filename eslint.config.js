@@ -66,6 +66,8 @@ export default defineConfig(
     }
   },
   {
+    // 本块只列在本 config（非 type-aware + 强制 runes）下真会运行的规则：空转的规则不列，
+    // 免得清单看着齐全、实则无人执法
     files: ['**/*.svelte', '**/*.ts'],
     rules: {
       // a11y 硬门槛载体（D12）：eslint-plugin-svelte 没有 a11y-* 前缀规则，Svelte 编译器的
@@ -73,27 +75,24 @@ export default defineConfig(
       // lint 期执法载体：编译按上方 svelteConfig 的 runes: true 进行，legacy 语法即编译错误
       'svelte/valid-compile': 'error',
       'svelte/no-unused-svelte-ignore': 'error',
-      // legacy 语法检测。`$:` 系三条（reactive-functions / reactive-literals /
-      // immutable-reactive-statements）与下方的 no-extra-reactive-curlies 自带运行条件
-      // 「仅 legacy/未定模式」，上面强制 runes 后对 .svelte 不再运行——`$:` 本身已是编译
-      // 错误，统一由 valid-compile 拦（实测各 `$:` 形态均仍报 error）。四条按规范清单
-      // 保留：runes 强制一旦放开即自动恢复兜底
-      'svelte/no-reactive-functions': 'error',
-      'svelte/no-reactive-literals': 'error',
-      'svelte/no-immutable-reactive-statements': 'error',
+      // legacy 写法检测：只列强制 runes 下仍运行的三条（逐条实测能报）。`$:` 系四条
+      // （no-reactive-functions / no-reactive-literals / no-immutable-reactive-statements /
+      // no-extra-reactive-curlies）不列——它们自带条件只在 legacy/未定模式运行，强制 runes
+      // 后是空转；legacy `$:` 六形态已由 valid-compile + runes 以 error 全拦（实测）
       'svelte/no-dupe-on-directives': 'error',
       'svelte/no-not-function-handler': 'error',
       'svelte/no-at-debug-tags': 'error',
       // runes 健壮性
       'svelte/no-unnecessary-state-wrap': 'error',
-      'svelte/no-extra-reactive-curlies': 'error',
-      'svelte/require-event-prefix': 'error',
       // 逐点裁决不 blanket 关（D18）：驱动渲染的改 SvelteMap/SvelteSet；纯数据结构逐行
       // 写 disable-next-line 指令并附理由
       'svelte/prefer-svelte-reactivity': 'error',
       'svelte/require-each-key': 'error',
       'svelte/prefer-derived-over-derived-by': 'warn',
-      'svelte/no-unused-props': 'warn',
+      // 不列 svelte/require-event-prefix 与 svelte/no-unused-props：两条都依赖类型信息
+      // （拿不到 TS program 即整条不运行），本 config 不启用 type-aware（D1），列了也是空转。
+      // 回调 props 的 onXxx 命名约定因此不由 lint 执法，降级为评审必查项（由规范文档的
+      // PR 必查清单承接）
       // 丢弃项与占位参数用 _ 前缀豁免
       '@typescript-eslint/no-unused-vars': [
         'error',
