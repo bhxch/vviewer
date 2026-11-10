@@ -58,7 +58,9 @@ export default defineConfig(
   ]),
   {
     // 失效的豁免指令必须红（与 svelte/no-unused-svelte-ignore 禁僵尸 svelte-ignore 对称）：
-    // 写了 disable 而规则并未在此报，说明规则丢了、被改名或被配置顶掉——静默即防线上的洞
+    // 写了 disable 而规则并未在此报，说明规则丢了、被改名或被配置顶掉——静默即防线上的洞。
+    // 注意本项只管 JS 注释指令；.svelte 模板里的 HTML 注释指令（<!-- eslint-disable… -->）
+    // 不归 ESLint 核心管，由下方规则块的 svelte/comment-directive 选项承接，两处成对
     linterOptions: { reportUnusedDisableDirectives: 'error' }
   },
   eslint.configs.recommended,
@@ -103,6 +105,10 @@ export default defineConfig(
       // lint 期执法载体：编译按上方 svelteConfig 的 runes: true 进行，legacy 语法即编译错误
       'svelte/valid-compile': 'error',
       'svelte/no-unused-svelte-ignore': 'error',
+      // 模板内失效的豁免指令同样必须红：与上方 linterOptions.reportUnusedDisableDirectives
+      // 成对——核心那项只管 JS 注释指令，.svelte 模板里的 HTML 注释指令归 svelte 插件自己
+      // 处理，其同名选项默认关，不开则模板里写错/过期的豁免无人报
+      'svelte/comment-directive': ['error', { reportUnusedDisableDirectives: true }],
       // legacy 写法检测：只列强制 runes 下仍运行的三条（逐条实测能报）。`$:` 系四条
       // （no-reactive-functions / no-reactive-literals / no-immutable-reactive-statements /
       // no-extra-reactive-curlies）不列——它们自带条件只在 legacy/未定模式运行，强制 runes

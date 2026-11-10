@@ -124,6 +124,23 @@ describe('eslint 机检样例（规则自身被机检）', () => {
     expect(exitCode, 'eslint 应以 lint error 收场').toBe(1);
   }, LINT_TIMEOUT);
 
+  it('模板内失效指令必命中：未生效的 <!-- eslint-disable-next-line --> 被 svelte/comment-directive 以 error 报出', () => {
+    const { exitCode, messages } = lintFixture('sample.stale-directive.svelte');
+    // ESLint 核心的 reportUnusedDisableDirectives 只管 JS 注释指令；.svelte 模板里的 HTML
+    // 注释指令归 svelte 插件的 comment-directive 上报，其同名选项默认关——config 里那一行
+    // 丢了，模板内写错/过期的豁免就没人报，本样例即零报错
+    expect(
+      messages.some(
+        (m) =>
+          m.ruleId === 'svelte/comment-directive' &&
+          m.severity === 2 &&
+          m.message.includes('Unused eslint-disable-next-line directive')
+      ),
+      '模板内的失效豁免指令未被 svelte/comment-directive 以 error 报出'
+    ).toBe(true);
+    expect(exitCode, 'eslint 应以 lint error 收场').toBe(1);
+  }, LINT_TIMEOUT);
+
   it('合法样例零报错：console.warn/error/debug 与 _ 前缀未用变量不被误伤', () => {
     const { exitCode, messages } = lintFixture('sample.clean.ts');
     expect(messages, '合法样例被误报').toEqual([]);
