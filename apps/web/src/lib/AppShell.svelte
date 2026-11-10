@@ -692,7 +692,7 @@
     const ws = activeWorkspace;
     if (ws === null) return [] as TreeSource[];
     const tabs = tabStore.list;
-    registryVersion.n; // 注册表版本依赖：activeStores 为普通 Map 不可追踪（openFlow doc）
+    void registryVersion.n; // 注册表版本依赖：activeStores 为普通 Map 不可追踪（openFlow doc）
     const out: TreeSource[] = [];
     for (const s of ws.sources) {
       const store = storeById(s.storeId);

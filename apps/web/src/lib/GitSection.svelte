@@ -350,7 +350,7 @@
     const rd = repoDir;
     const st = store;
     const fp = filePath;
-    const rv = rev ?? 0; // 仅依赖接入：rev 变化重启本 effect 即重拉
+    void rev; // 仅依赖接入：rev 变化重启本 effect 即重拉
     void load(rd, st, fp);
     return () => {
       runSeq++;

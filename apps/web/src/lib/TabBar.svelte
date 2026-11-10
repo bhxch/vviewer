@@ -314,7 +314,7 @@
   $effect(() => {
     const el = scroller;
     if (el === null) return;
-    [...tabs];
+    void [...tabs];
     updateVis();
     const ro = new ResizeObserver(updateVis);
     ro.observe(el);
