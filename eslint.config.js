@@ -57,17 +57,24 @@ export default defineConfig(
         // <script lang="ts"> 经 typescript-eslint 解析（svelte-eslint-parser 承担模板层）
         parser: tseslint.parser,
         extraFileExtensions: ['.svelte'],
-        // 非 type-aware 下作用域分析器读不到 tsconfig：显式声明 TS lib（与 apps/web
-        // tsconfig 的 lib 对齐），否则 ScrollBehavior 等 DOM 纯类型名被 no-undef 误报
-        lib: ['esnext', 'dom', 'dom.iterable', 'dom.asynciterable'],
         // 全局强制 runes 的 lint 期执法：与 apps/web/vite.config.ts 里 sveltekit() 的
         // compilerOptions: { runes: true } 同源语义，两处必须同步改。kit 3 不读
         // svelte.config.js，插件的自动加载拿不到该选项，须在此显式传入——否则 lint 期编译
         // 按逐文件自动探测走，export let / $: 的 legacy 组件零报错，要等到构建才拦
         svelteConfig: { compilerOptions: { runes: true } }
       },
-      // 运行时全局（window/document/setTimeout…）——lib 只带类型，两者缺一不可
+      // 浏览器运行时全局必须留着，消费者不是 no-undef（下面已关）而是
+      // svelte/prefer-svelte-reactivity：它按「已声明的全局」追踪 new URL /
+      // new URLSearchParams（非 ES 内建，要靠环境声明），去掉即对这两类静默失明——
+      // 实测去掉后被变更的 URL / URLSearchParams 实例不再报（Map 照报），serverConnect
+      // 的豁免指令当场变成「未使用」
       globals: { ...globals.browser }
+    },
+    rules: {
+      // 未定义标识符/类型由 svelte-check（TS）承载，与 typescript-eslint 对 *.ts 关掉 no-undef
+      // 的处置对称：本 config 非 type-aware，no-undef 分不清 DOM 纯类型名（如
+      // ScrollBehavior），留着只会误报，还得另补一份 TS lib 声明去喂它
+      'no-undef': 'off'
     }
   },
   {
