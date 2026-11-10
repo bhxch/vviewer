@@ -1,3 +1,4 @@
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference -- ambient 垫片不随 import 图传播，path 引用指令是唯一收进通道（见下行说明），无法改写为 import
 /// <reference path="./types/katex-min-css.d.ts" />
 // （ambient 模块声明随本指令进入每个拉入 pipeline 源的编译单元——ambient declare
 // module 不随 import 图传播，reference 指令是唯一收进通道，markdown-engine 五垫片

@@ -25,6 +25,7 @@ const FONT_SIZE_RE = /^[0-9.]+(px|em|rem|%)$/;
  * CSS 字符串外逃）。真实字形（私用区/字母/符号）不受影响；注入层（Task 2）仍
  * 应十六进制转义（content:"\e001" 形态）双保险。
  */
+// eslint-disable-next-line no-control-regex -- 有意匹配控制符：本正则就是「拒绝控制符」的注入兜底闸
 const FONT_CHARACTER_FORBIDDEN_RE = /[\u0000-\u001F\u007F-\u009F"'\\]/;
 
 /**
@@ -190,6 +191,7 @@ function* fileSuffixes(lowerName: string): Generator<string> {
 }
 
 /** src 注入面负向闸：url() 文本内可截断/逃逸的字符（空白、引号、反斜杠、括号、分号、花括号、尖括号、控制符）一律拒——真实字体路径不含这些字符。 */
+// eslint-disable-next-line no-control-regex -- 有意匹配控制符：负向闸的拒绝集本就含控制符
 const FONT_SRC_FORBIDDEN_RE = /[\s'"\\;(){}<>\u0000-\u001F\u007F-\u009F]/;
 
 /**

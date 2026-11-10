@@ -17,11 +17,13 @@
 // 双端等价面口径：comrak 行内脚注深层形态（#fn-__inline_N、尾注 ol 无类、
 // data-footnote-backref）与本插件（#fnN、ol.footnotes-list、footnote-backref 类）
 // 不等深同构，等价面=class + DOM 结构层，勿跨端互锚 id 形态。
+/* eslint-disable @typescript-eslint/triple-slash-reference -- ambient 垫片（declare module）不随 import 图传播，path 引用指令是把它收进消费方 program 的唯一通道，无法改写为 import（详见下方 import 段注释） */
 /// <reference path="./types/markdown-it-task-lists.d.ts" />
 /// <reference path="./types/markdown-it-footnote.d.ts" />
 /// <reference path="./types/markdown-it-mark.d.ts" />
 /// <reference path="./types/markdown-it-ins.d.ts" />
 /// <reference path="./types/markdown-it-deflist.d.ts" />
+/* eslint-enable @typescript-eslint/triple-slash-reference */
 import MarkdownIt from 'markdown-it';
 import type { MarkdownIt as MarkdownItInstance } from 'markdown-it';
 // markdown-it-task-lists / markdown-it-footnote / markdown-it-mark / markdown-it-ins /
