@@ -126,10 +126,15 @@ export default defineConfig(
       // 本来就不运行），是让生效配置如实 ——
       // · 依赖类型信息，非 type-aware 下整条不运行（D1）；日后启用 type-aware 时重新评估
       'svelte/no-unused-props': 'off',
-      // · 自带条件只在 legacy/未定模式运行，强制 runes 后不运行
+      // · 自带条件只在 legacy/未定模式运行，强制 runes 后不运行（legacy `$:` 已由
+      //   valid-compile 以 error 全拦，见自检样例）
       'svelte/no-reactive-functions': 'off',
       'svelte/no-reactive-literals': 'off',
       'svelte/no-immutable-reactive-statements': 'off',
+      'svelte/infinite-reactive-loop': 'off',
+      'svelte/no-reactive-reassign': 'off',
+      // · 只适用于 Svelte 3/4（本仓 Svelte 5）
+      'svelte/require-event-dispatcher-types': 'off',
       // 回调 props 的 onXxx 命名约定因此不由 lint 执法，降级为评审必查项（由规范文档的
       // PR 必查清单承接）
       // 丢弃项与占位参数用 _ 前缀豁免
