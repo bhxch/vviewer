@@ -96,8 +96,9 @@ export default defineConfig(
     }
   },
   {
-    // 本块只列在本 config（非 type-aware + 强制 runes）下真会运行的规则：空转的规则不列，
-    // 免得清单看着齐全、实则无人执法
+    // 本块显式开启的都是在本 config（非 type-aware + 强制 runes）下真会运行的规则；预设
+    // 带入却不运行的，在块尾显式关闭——生效配置（--print-config）里非 off 的 svelte
+    // 规则即真在执法的
     files: ['**/*.svelte', '**/*.ts'],
     rules: {
       // a11y 硬门槛载体（D12）：eslint-plugin-svelte 没有 a11y-* 前缀规则，Svelte 编译器的
