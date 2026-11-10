@@ -118,7 +118,7 @@ async function fetchResponse(url: string, networkPrefix: string, httpPrefix: str
   try {
     res = await fetchImpl(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   } catch (err) {
-    throw new Error(`${networkPrefix}：${errText(err)}`);
+    throw new Error(`${networkPrefix}：${errText(err)}`, { cause: err });
   }
   if (!res.ok) throw new Error(`${httpPrefix}：HTTP ${res.status}（GET ${url}）`);
   return res;
@@ -130,7 +130,7 @@ async function fetchJson(url: string, networkPrefix: string, httpPrefix: string)
   try {
     return await res.json();
   } catch (err) {
-    throw new Error(`${httpPrefix}：响应不是有效 JSON（${errText(err)}）`);
+    throw new Error(`${httpPrefix}：响应不是有效 JSON（${errText(err)}）`, { cause: err });
   }
 }
 

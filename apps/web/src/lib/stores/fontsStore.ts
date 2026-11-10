@@ -111,7 +111,7 @@ async function ensureFontFace(rec: FontRecord): Promise<FontFace> {
   try {
     await face.load();
   } catch (err) {
-    throw new Error(`字体解析失败（内容不是有效字体？）：${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`字体解析失败（内容不是有效字体？）：${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
   faceCache.set(rec.id, face);
   return face;
@@ -189,7 +189,7 @@ export async function addFontFromUrl(url: string, name?: string): Promise<FontRe
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     buf = await res.arrayBuffer();
   } catch (err) {
-    throw new Error(`字体下载失败（字体源需开启 CORS）：${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`字体下载失败（字体源需开启 CORS）：${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
   return addFromBuffer(buf, { kind: 'url', url, name: name?.trim() || stemOf(parsed.pathname) });
 }

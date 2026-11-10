@@ -215,7 +215,7 @@ export function createRemoteStore(
       res = await fetch(`${base}${apiPath}?${query}`, { headers, signal: merged });
     } catch (err) {
       if (err instanceof Error && err.name === 'TimeoutError') {
-        throw new Error(`服务器请求超时（30s）: ${base}${apiPath}`);
+        throw new Error(`服务器请求超时（30s）: ${base}${apiPath}`, { cause: err });
       }
       throw err;
     }

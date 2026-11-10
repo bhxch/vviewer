@@ -461,10 +461,10 @@ export async function rawFetch(
     return await fetch(url, { ...init, signal: merged });
   } catch (err) {
     if (err instanceof Error && err.name === 'TimeoutError') {
-      throw new Error(`直连请求超时（30s）: ${url}`);
+      throw new Error(`直连请求超时（30s）: ${url}`, { cause: err });
     }
     if (err instanceof TypeError) {
-      throw new Error(corsMessage);
+      throw new Error(corsMessage, { cause: err });
     }
     throw err;
   }

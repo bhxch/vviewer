@@ -410,7 +410,9 @@ export const pdfRenderer: Renderer = {
         // 形态复现 M1 错误路径验证 terminate 到达性。字段消失时本行 `?.` 静默 no-op
         // 不炸——但泄漏面回归，须以 b-pdf-range 错误路径重试锚复核。
         (loadingTask as unknown as { _worker?: { destroy(): void } })._worker?.destroy();
-        throw new Error(e instanceof Error ? e.message : String(e));
+        // cause 只留诊断链，不回流 abort 身份：isAbortError / classifyDispatchError 只看
+        // 顶层 name，不沿 cause 回溯
+        throw new Error(e instanceof Error ? e.message : String(e), { cause: e });
       }
       throw e;
     }
