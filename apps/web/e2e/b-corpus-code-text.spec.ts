@@ -14,8 +14,8 @@ import { injectDir, openTreeFile, type TextFileSpec } from './b-markdown-html-do
  *
  * 分派链事实（源码锚，写作时已读）：
  * - 扩展名主路由：core detect/extension.ts 提取小写扩展名 → registry.byExtension
- *   （dispatcher.ts:326）。code 渲染器扩展表含 txt/js/json/yaml/yml/toml/csv/xml/rs/py/
- *   java/c/cpp/ts/tsx/go/php/rb/sh 等（render-text code.ts:2513-2519），md 归 markdown
+ *   （dispatcher.ts:326）。code 渲染器扩展表含 txt/js/json/yaml/yml/toml/xml/rs/py/
+ *   java/c/cpp/ts/tsx/go/php/rb/sh 等（render-text code/index.ts 扩展表），md 归 markdown
  *   （markdownRenderer.ts:461），jsonl/ndjson 归 JSON Lines 专有渲染器（jsonl/index.ts:950-951）。
  * - 内容探测链仅对「无扩展名/未知扩展名」生效：签名改派 → looksTextual → hex 兜底
  *   （dispatcher.ts:200-258）。hljs-detect 语料实为 test/detect/<语言>/default.txt
@@ -106,8 +106,10 @@ function corpusSpec(sourceId: string, rel: string): TextFileSpec {
  * 扩展名 → 预期状态栏语言（detectLanguage 扩展名精确表，内容无关）。
  * 实证方式：node 直查 packages/vviewer-highlight/assets/languages.json（fileTypes 排序
  * first-wins，langdetect.ts:27-44 同算法），写作时逐项跑过——yaml/yml→yaml、toml→toml、
- * csv→csv、json→json、xml→xml、rs→rust、py→python、java→java、c→c、cpp→cpp、
+ * json→json、xml→xml、rs→rust、py→python、java→java、c→c、cpp→cpp、
  * ts→typescript、tsx→tsx、go→go、php→php、rb→ruby、sh→bash。
+ * csv 不入此表：2026-11-10 起 csv 归 foreign-spreadsheet 电子表格桥（code 纯文本降
+ * 候选），状态栏无 code 语言段（批量组内 isCsv 分支断 .excel-wrapper 容器）。
  * md 不在表内：markdown 实例 getMeta 无 lang 字段（markdownRenderer.ts:430-433,586），
  * 状态栏无「语言」段，其分派锚改用 .vv-markdown 容器（批量组内 isMd 分支）。
  * 清单出现表外扩展名时该组跳过语言锚（只断容器），不放宽为猜测值。
@@ -116,7 +118,6 @@ const EXT_EXPECTED_LANG: Readonly<Record<string, string>> = {
   yaml: 'yaml',
   yml: 'yaml',
   toml: 'toml',
-  csv: 'csv',
   json: 'json',
   xml: 'xml',
   rs: 'rust',
@@ -338,14 +339,17 @@ if (manifest === null) {
   for (const [ext, files] of lcdGroups) {
     for (const [bi, batch] of chunk10(files).entries()) {
       const isMd = ext === 'md';
+      // 2026-11-10 起 csv 归 foreign-spreadsheet 电子表格桥（code 纯文本降候选）：
+      // 容器锚改 .excel-wrapper，无 code 语言段（首开需 assets-standard xlsx worker 资产）
+      const isCsv = ext === 'csv';
       const expectedLang = EXT_EXPECTED_LANG[ext];
-      test(`LCD-${ext}${bi > 0 ? `-${bi + 1}` : ''} · linguist ${ext} 批量（${batch.length} 文件）：${isMd ? 'markdown 渲染器接管' : '代码渲染器接管'}、语言指示在位、不落 hex/错误卡`, async ({
+      test(`LCD-${ext}${bi > 0 ? `-${bi + 1}` : ''} · linguist ${ext} 批量（${batch.length} 文件）：${isMd ? 'markdown 渲染器接管' : isCsv ? '电子表格桥接管' : '代码渲染器接管'}、分派合理、不落 hex/错误卡`, async ({
         page
       }) => {
-        // 分派锚（实现实况）：代码/配置扩展名在 code 渲染器扩展表（code.ts:2513-2519
-        // 含 yaml/yml/toml/csv/json/xml/rs/py/java/c/cpp/ts/tsx/go/php/rb/sh），md 归
-        // markdownRenderer（markdownRenderer.ts:461）。csv 的「代码渲染器」承引同一行
-        // 扩展表——非猜测，registry 注册实况如此。组首文件再锚语言指示（表外扩展名
+        // 分派锚（实现实况）：代码/配置扩展名在 code 渲染器扩展表（render-text
+        // code/index.ts，含 yaml/yml/toml/json/xml/rs/py/java/c/cpp/ts/tsx/go/php/rb/sh），
+        // md 归 markdownRenderer（markdownRenderer.ts:461），csv 归 foreign-spreadsheet
+        // 桥（foreignRenderers.ts spreadsheet 组）。组首文件再锚语言指示（表外扩展名
         // 跳过语言锚只断容器，不猜值）。
         test.setTimeout(240_000);
         const sourceId = 'linguist-samples';
@@ -364,10 +368,12 @@ if (manifest === null) {
           await openTreeFile(page, flatName(f.path));
           if (isMd) {
             await expect(page.locator('.vv-markdown')).toBeVisible({ timeout: 30_000 });
+          } else if (isCsv) {
+            await expect(page.locator('.excel-wrapper')).toBeVisible({ timeout: 45_000 });
           } else {
             await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 30_000 });
           }
-          if (i === 0 && expectedLang !== undefined && !isMd) {
+          if (i === 0 && expectedLang !== undefined && !isMd && !isCsv) {
             await expect(page.locator('.vv-statusbar')).toContainText(`语言: ${expectedLang}`, {
               timeout: 20_000
             });
@@ -441,12 +447,12 @@ if (manifest === null) {
     });
   }
 
-  // 深断言 ×3 csv：csv 在 code 渲染器扩展表（code.ts:2514）⇒ 代码渲染器接管 + 语言
-  // 指示 csv（languages.json 有 csv 条目，写作时实证）；不锚 span（csv 纯数据行经
-  // highlightAuto 常无着色产出——无语言可探，注释即依据，不放宽不硬锚）。
+  // 深断言 ×3 csv：2026-11-10 起 csv 归 foreign-spreadsheet 电子表格桥（code 纯文本
+  // 降候选）⇒ 网格容器接管 + 桥 label 上位；锚 code 源码面否定断言（装配序回退/
+  // code 清单恢复任一发生即红）。首开需 assets-standard xlsx worker（CDN 资产组）。
   const csvDeep = largestOf((linguist?.files ?? []).filter((f) => f.path.toLowerCase().endsWith('.csv')));
   if (csvDeep !== undefined) {
-    test(`LCD-D3 · linguist 深断言 csv（最大样本 ${csvDeep.path}）：代码渲染器接管（扩展表实况）+ 语言指示`, async ({
+    test(`LCD-D3 · linguist 深断言 csv（最大样本 ${csvDeep.path}）：电子表格桥接管（转移实况）+ code 源码面零出现`, async ({
       page
     }) => {
       test.setTimeout(120_000);
@@ -455,11 +461,12 @@ if (manifest === null) {
       const pageErrors = collectPageErrors(page);
       await openCodeCorpus(page, 'linguist-samples', csvDeep.path);
 
-      await expect(page.locator('.vv-statusbar')).toContainText('打开方式: 代码/文本', {
+      const host = page.locator('.vv-viewer-host');
+      await expect(host.locator('.excel-wrapper')).toBeVisible({ timeout: 45_000 });
+      await expect(host.locator('.vv-code-pre')).toHaveCount(0);
+      await expect(page.locator('.vv-statusbar')).toContainText('打开方式: 电子表格', {
         timeout: 20_000
       });
-      await expect(page.locator('.vv-statusbar')).toContainText('（csv）');
-      await expect(page.locator('.vv-statusbar')).toContainText('语言: csv', { timeout: 20_000 });
 
       expect(pageErrors).toEqual([]);
       await expect(page.locator('.vv-error-card')).toHaveCount(0);

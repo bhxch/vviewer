@@ -321,12 +321,12 @@ export function wireDesignOrDataSeam(
 
 /** 20 组绑定（spec §6.3 表逐字 + pot 增补 presentation；docx/pptx/xlsx 系改由
  * word/presentation/spreadsheet 组拥有（内置默认改为版式/幻灯片/表格还原，core
- * mammoth/提纲/SheetJS 渲染器降为 altExtensions 候选）；csv/dot 维持 vviewer 既有
- * 渲染器（csv 归 code，不在绑定面）；第二波序 12-21——jxl 不绑定（探针裁决，
- * renderer-image dist 无解码器），renderer-media 的媒体扩展名不注册（av 占优），
- * drawing 仅 drawio/dio（mermaid/plantuml/excalidraw/bpmn 维持 vviewer 图表面，
- * bpmn-js 不装），design 组经 wireDesignOrDataSeam 接上游增强缝（T2 评审 I-2），
- * psd/ai/eps 随 data-asset handler 走 design 高保真。 */
+ * mammoth/提纲/SheetJS 渲染器降为 altExtensions 候选）；csv 2026-11-10 用户裁决随
+ * xlsx 同面转移（code 纯文本降候选）、dot 维持 vviewer 既有渲染器（不在绑定面）；
+ * 第二波序 12-21——jxl 不绑定（探针裁决，renderer-image dist 无解码器），renderer-media
+ * 的媒体扩展名不注册（av 占优），drawing 仅 drawio/dio（mermaid/plantuml/excalidraw/
+ * bpmn 维持 vviewer 图表面，bpmn-js 不装），design 组经 wireDesignOrDataSeam 接上游
+ * 增强缝（T2 评审 I-2），psd/ai/eps 随 data-asset handler 走 design 高保真。 */
 const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
   {
     id: 'foreign-email',
@@ -376,10 +376,14 @@ const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
   {
     id: 'foreign-spreadsheet',
     label: '电子表格',
-    // xlsx/xlsm/xls 的内置默认（版式还原，core SheetJS 简化视图降为 altExtensions 候选；
-    // 上游 spreadsheet-openxml 定义覆盖同面）；csv 维持 code 纯文本默认（本组仅候选）
-    extensions: ['xlsx', 'xlsm', 'xls', 'xltx', 'xlsb', 'xlt', 'xla', 'xlam', 'xltm', 'ods', 'fods', 'dbf', 'tsv'],
-    altExtensions: ['csv'],
+    // xlsx/xlsm/xls/csv 的内置默认（版式还原，core SheetJS 简化视图降为 altExtensions
+    // 候选；上游 spreadsheet-openxml 定义覆盖同面）。csv 2026-11-10 自 code 内置清单
+    // 原子转移（上游 definitions/worker 文本表格路径/GRID_FORMATS 三面均含 csv 实证；
+    // code 纯文本降为候选，可经「打开方式」改回）
+    extensions: [
+      'xlsx', 'xlsm', 'xls', 'xltx', 'xlsb', 'xlt', 'xla', 'xlam', 'xltm', 'ods', 'fods',
+      'dbf', 'tsv', 'csv'
+    ],
     load: () => import('@file-viewer/renderer-spreadsheet').then((m) => m.spreadsheetRenderer)
   },
   {

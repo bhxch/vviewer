@@ -22,7 +22,7 @@ import { injectDir, openTreeFile, type TextFileSpec } from './b-markdown-html-do
  * 逐用例 existsSync 守卫：语料未拉取时 skip（b-md-corpus-multisource 缺源容错同款），
  * 语料落地后自动生效。
  *
- * 用例组织（FO 系八锚：FO-00 一致性 + FO-01…FO-07 渲染/切换/错误面）：
+ * 用例组织（FO 系九锚：FO-00 一致性 + FO-01…FO-08 渲染/切换/错误面/转移锚）：
  * - FO-00 语料一致性：FIXTURES 表 ⊆ manifest.files（终审 M2——上游 bump 后确定性
  *   选取漂移时各渲染用例会静默 skip，此锚显式红）；
  * - FO-01 Word 组三格式渲染：doc（msdoc 引擎）/ odt（odf 引擎）——presence 锚引擎
@@ -36,7 +36,9 @@ import { injectDir, openTreeFile, type TextFileSpec } from './b-markdown-html-do
  *   （msgCfb 'missing CFB signature'）→ dispatcher 错误卡片上位（无渲染器内错误面）；
  * - FO-07 tsv 转移锚：tsv 自 code 内置清单转移至 spreadsheet 桥（T2 同 commit 原子
  *   转移）——打开 tsv 落电子表格桥渲染，code 源码面零出现（装配序回退/code 清单
- *   漏删任一即红）。
+ *   漏删任一即红）；
+ * - FO-08 csv 转移锚：csv 2026-11-10 自 code 内置清单转移至 spreadsheet 桥（默认
+ *   电子表格网格面，code 纯文本降 altExtensions 候选）——判据同 FO-07。
  *
  * 断言口径：presence-based（引擎容器类可见 + code 源码面否定断言），不做引擎内部
  * 深断言——file-viewer 渲染内部结构非本仓契约面。全部经 .vv-viewer-host 作用域
@@ -308,6 +310,27 @@ test.describe('b-foreign-office file-viewer 桥接渲染（SAVE-FOREIGN 域）',
     const host = page.locator('.vv-viewer-host');
     await expect(host.locator('.excel-wrapper')).toBeVisible({ timeout: FIRST_RENDER_TIMEOUT });
     await expect(host.locator('.vv-code-pre')).toHaveCount(0); // code 未抢注（转移锚否定面）
+    await expect(page.locator('.vv-status-openwith')).toContainText('电子表格'); // 桥 label 上位
+  });
+
+  test('FO-08 csv 转移锚：csv 落 spreadsheet 桥而非 code（2026-11-10 扩展名转移原子性）', async ({ page }) => {
+    test.setTimeout(120_000);
+    // csv 自 code 内置清单移除与 spreadsheet 桥接注册同一 commit（原子转移，tsv FO-07
+    // 同款判据）：任一侧回退（装配序颠倒被 generated 抢注 / code 清单漏删双注册冲突）
+    // → 此锚红。上游 renderer 三面实证支持 csv（definitions extensions / worker
+    // TEXT_SPREADSHEET_EXTENSIONS / GRID_FORMATS 网格面）。首开需 xlsx worker 资产
+    await injectDir(page, [
+      {
+        name: 'sample.csv',
+        content: 'name,age,city\nAlice,30,Beijing\nBob,25,Shanghai\n',
+        type: 'text/csv'
+      }
+    ]);
+    await openTreeFile(page, 'sample.csv');
+
+    const host = page.locator('.vv-viewer-host');
+    await expect(host.locator('.excel-wrapper')).toBeVisible({ timeout: FIRST_RENDER_TIMEOUT });
+    await expect(host.locator('.vv-code-pre')).toHaveCount(0); // code 降候选未抢注（转移锚否定面）
     await expect(page.locator('.vv-status-openwith')).toContainText('电子表格'); // 桥 label 上位
   });
 });

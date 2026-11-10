@@ -51,16 +51,20 @@ export const codeRenderer: Renderer = {
   label: '代码/文本',
   // 注 1：不含 'svg'——svg 归 @bhxch/vviewer-render-media 的 imageRenderer（消毒预览），registry 拒绝重复注册
   // 注 2：不含 'md'/'markdown'/'html'/'htm'——M3 起归 markdownRenderer/htmlRenderer（M1-M2 期间暂由 code 承接）
-  // 注 3：不含 'tsv'——计划 3 Task 2（spec 2026-11-04 §6.3）原子转移至 file-viewer
-  // spreadsheet 桥接渲染器（apps/web foreignRenderers 装配，桥接块先于本渲染器注册）；
-  // csv 维持 code（spec §6.3 注记）
+  // 注 3：不含 'tsv'/'csv'——原子转移至 file-viewer spreadsheet 桥接渲染器（apps/web
+  // foreignRenderers 装配，桥接块先于本渲染器注册）：tsv 计划 3 Task 2（spec
+  // 2026-11-04 §6.3）、csv 2026-11-10 用户裁决（默认电子表格网格面，code 纯文本降为
+  // 候选——下方 altExtensions，可经「打开方式」改回）
   extensions: [
-    'txt', 'log', 'json', 'jsonc', 'yaml', 'yml', 'toml', 'ini', 'conf', 'cfg', 'env', 'csv',
+    'txt', 'log', 'json', 'jsonc', 'yaml', 'yml', 'toml', 'ini', 'conf', 'cfg', 'env',
     'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'css', 'scss', 'xml',
     'py', 'rb', 'go', 'rs', 'java', 'kt', 'c', 'h', 'cpp', 'hpp', 'cc', 'sh', 'bash', 'zsh', 'fish', 'sql',
     'lua', 'php', 'pl', 'swift', 'dart', 'vue', 'svelte', 'gradle', 'cmake', 'properties', 'gitignore',
     'license', 'makefile', 'diff', 'patch'
   ],
+  // 候选声明（不抢所有权，仅「打开方式」候选面）：csv 归 foreign-spreadsheet 网格面
+  // 后保留纯文本代码视图入口（xlsx 的 SheetJS 简化视图降候选同款语义）
+  altExtensions: ['csv'],
   // streaming（io-streaming 计划 3 Task 4，spec §4.3）：dispatcher 只交付 head +
   // StreamCtx，code 打开即走窗口流式（>2MB/size 未知）或入口守卫补拉全量（≤2MB/非
   // UTF-8）。回退面均在 render 内自处（下方守卫）；!rangeCapable 的全量视图 ctx 属

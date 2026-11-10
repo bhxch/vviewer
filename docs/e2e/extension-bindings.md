@@ -5,7 +5,7 @@
 > 实现锚（源码实况，2026-11-08 核对）：
 > - 注册面装配序：`apps/web/src/lib/viewer.ts:81`（diagram 29 型）→ `:126`（foreign 20 组）→ `:127-140`（自有 12 类）→ `:143`（`installFallbackExtensions('code', GENERATED_EXTENSIONS)` 补空位）。
 > - 注册表语义（冲突抛错 / 补空位只填空位 / 单 owner）：`packages/vviewer-core/src/registry/registry.ts:21`（`install`，扩展名归一化 + `RegistryError`）、`:33`（`installFallbackExtensions`，已占即 skipped）。
-> - 绑定清单：hex `packages/vviewer-render-binary/src/hex.ts:788`（含 `hex`）；av `packages/vviewer-render-media/src/av.ts:360`（含 `mpeg`/`weba`）、`:34`（MIME 表 `weba:'audio/webm'`）、`:44`（`VIDEO_EXTS` 含 `mpeg`）；archive `packages/vviewer-render-archive/src/zipStore.ts:24`（`ARCHIVE_BINDINGS` 单一事实源，冻结）、`:31`（`ARCHIVE_EXTS` 同源派生）、`:17`（`MAX_ARCHIVE_DEPTH=3`）、`:51`（`isArchiveEntry`）；foreign 20 组 `apps/web/src/lib/foreignRenderers.ts`（spreadsheet 组含 `tsv`、data 组含 `sqlite`/`wasm`）。
+> - 绑定清单：hex `packages/vviewer-render-binary/src/hex.ts:788`（含 `hex`）；av `packages/vviewer-render-media/src/av.ts:360`（含 `mpeg`/`weba`）、`:34`（MIME 表 `weba:'audio/webm'`）、`:44`（`VIDEO_EXTS` 含 `mpeg`）；archive `packages/vviewer-render-archive/src/zipStore.ts:24`（`ARCHIVE_BINDINGS` 单一事实源，冻结）、`:31`（`ARCHIVE_EXTS` 同源派生）、`:17`（`MAX_ARCHIVE_DEPTH=3`）、`:51`（`isArchiveEntry`）；foreign 20 组 `apps/web/src/lib/foreignRenderers.ts`（spreadsheet 组含 `tsv`/`csv`——csv 2026-11-10 自 code 内置清单原子转移，code 降 altExtensions 候选、data 组含 `sqlite`/`wasm`）。
 > - 派发链：`packages/vviewer-core/src/dispatch/dispatcher.ts:301`（`resolveInitialRenderer`：扩展名主路由 → 签名改派 → 文本性探测 → hex 兜底）、`:162`（`SIGNATURE_ROUTES` 签名改派表）、`packages/vviewer-detect/src/detect/magic.ts`（签名嗅探表无 zstd 项；`looksTextual` 以「无 NUL 且控制字符占比 ≤5%」判文本——见 §3.3 的实测边界）。
 > - 资产三层链：`apps/web/src/lib/foreignAssets.ts:17`（缺省 CDN 层）、`:21`（同源预留槽，当前为空串 = 未启用）、`:72-79`（链对象）、`:86`（链首非空层解析）、`:103`（per-package 基座派生）；构建期 env 层注入 `apps/web/vite.config.ts:819`。
 > - 候选面构造：`apps/web/src/lib/openWith.ts:13-33`（`['', dispatch 渲染器, 扩展名注册渲染器…, code, markdown, hex]`，`Set` 去重 + `registry.byId` 存在性守卫）；`apps/web/src/lib/MetaPanel.svelte:238-246`（下拉渲染）、`:76-79`（折叠面追加 UI 哨兵项「更多渲染器…」）；哨兵 id 定义 `apps/web/src/lib/RendererPickerMenu.ts:15-17`。
@@ -112,7 +112,7 @@
 - 状态栏「打开方式」按钮：`.vv-status-openwith`，文案 `打开方式: {rendererLabel}（{detLabel}）`（`ViewerPane.svelte:1227`；`rendererLabel = registry.byId(res.rendererId)?.label`（`:985`，错误卡时为空 → 按钮不渲染）、`detLabel = res.det.ext`（`:986`，派发后纠偏值））。
 - 属性面板「打开方式」下拉：`.meta-openwith`（`MetaPanel.svelte:238-246`），候选由 `rendererCandidatesOfTab` → `openWithOf`（`apps/web/src/lib/openWith.ts:13-33`）构造：`['', dispatch 渲染器, 扩展名注册渲染器…, code, markdown, hex]`，`Set` 去重；`MetaPanel.svelte:47-57` 用激活 tab 的 `lastRendererId`/`lastDetExt` 计算（未渲染成功时 `lastDetExt` 缺省 → 由文件名派生扩展名，`RendererPickerMenu.ts:42-46`（扩展名派生）、`:53-70`（候选组装））；折叠面另追加 UI 哨兵 `__more__`（`MetaPanel.svelte:76-79`，id 定义 `RendererPickerMenu.ts:15-17`）。
 - 派发链与改派：`dispatcher.ts:301-360`（`resolveInitialRenderer`）、`:162-185`（`SIGNATURE_ROUTES`：`zip→archive/zip` 等）；`magic.ts`（嗅探表 + `looksTextual`）。
-- 绑定清单：hex `hex.ts:788`；av `av.ts:34/44/360`；archive `zipStore.ts:24/31/17/51`；foreign 组 `foreignRenderers.ts`（spreadsheet 组 `tsv`、data 组 `sqlite`/`wasm`）。
+- 绑定清单：hex `hex.ts:788`；av `av.ts:34/44/360`；archive `zipStore.ts:24/31/17/51`；foreign 组 `foreignRenderers.ts`（spreadsheet 组 `tsv`/`csv`、data 组 `sqlite`/`wasm`）。
 - 补空位语义：`registry.ts:33-52`（`installFallbackExtensions`：已占即 skipped，只填空位）；冲突面 `registry.ts:26-27`（重复扩展名抛 `RegistryError`）；生成物清单 `packages/vviewer-core/src/registry/generated-extensions.ts`（670 项，由 `tools/grammar-builder/gen-code-extensions.mjs` 生成，CI `--check` 校验）。
 - 资产三层链：`foreignAssets.ts:17/21/72-79/86/103`（缺省 CDN / 同源槽 / 链对象 / 链首非空层解析 / per-package 派生）；构建期 env 注入 `vite.config.ts:819`；组→包映射 `foreignRenderers.ts:206-227`（`foreign-data → assets-data`）；SQL wasm 资产路径 `viewer/wasm/data/sql-wasm.wasm`（包内基座相对派生）。
 
@@ -121,7 +121,8 @@
 | 既有锚 | 位置 | 与本域的关系 |
 | --- | --- | --- |
 | DIA-FILE-01（`.dot` 抢注） | `b-diagram-file.spec.ts:73` | 同语义（补空位不抢注）单点载体；BND-08 是跨组表驱动版本，不含 `.dot` |
-| FO-07（`.tsv` 转移） | `b-foreign-office.spec.ts:294` | foreign 组转移语义单点载体；BND-08 不含 `.tsv` |
+| FO-07（`.tsv` 转移） | `b-foreign-office.spec.ts:296` | foreign 组转移语义单点载体；BND-08 不含 `.tsv` |
+| FO-08（`.csv` 转移，2026-11-10） | `b-foreign-office.spec.ts:316` | 同上（csv 自 code 转移至 spreadsheet 桥）；BND-08 不含 `.csv` |
 | FO2-06（`geojson/kml/gpx` 转移） | `b-foreign-office-2.spec.ts:299` | 同上；BND-08 不含三者 |
 | FO2-02（`wasm` 转移） | `b-foreign-office-2.spec.ts:202` | 同上；BND-08 不含 `wasm` |
 | FO2-01（`sqlite`/`wasm` 渲染面） | `b-foreign-office-2.spec.ts:180` | 渲染面锚；BND-07 的增量在**资产基座层选**，不在渲染面 |

@@ -66,7 +66,7 @@ const EXPECTED: readonly { id: string; extensions: readonly string[] }[] = [
   { id: 'foreign-chm', extensions: ['chm'] },
   { id: 'foreign-word', extensions: ['docx', 'doc', 'docm', 'dotx', 'dotm', 'odt', 'odp', 'rtf'] },
   { id: 'foreign-presentation', extensions: ['pptx', 'ppt', 'pot', 'pptm', 'potx', 'potm', 'ppsx', 'ppsm'] },
-  { id: 'foreign-spreadsheet', extensions: ['xlsx', 'xlsm', 'xls', 'xltx', 'xlsb', 'xlt', 'xla', 'xlam', 'xltm', 'ods', 'fods', 'dbf', 'tsv'] },
+  { id: 'foreign-spreadsheet', extensions: ['xlsx', 'xlsm', 'xls', 'xltx', 'xlsb', 'xlt', 'xla', 'xlam', 'xltm', 'ods', 'fods', 'dbf', 'tsv', 'csv'] },
   { id: 'foreign-iwork', extensions: ['pages', 'numbers', 'key'] },
   { id: 'foreign-hangul', extensions: ['hwp', 'hwpx'] },
   { id: 'foreign-wordperfect', extensions: ['wpd', 'wp', 'wp5', 'wp6'] }
@@ -102,7 +102,7 @@ const EXPECTED_WAVE2: readonly { id: string; extensions: readonly string[] }[] =
 const EXPECTED_ALL: readonly { id: string; extensions: readonly string[] }[] = [...EXPECTED, ...EXPECTED_WAVE2];
 
 describe('createForeignFileRenderers（20 组桥接渲染器）', () => {
-  it('id/label/extensions 逐字（spec §6.3 表 + docx/pptx/xlsx 系所有权）：121 扩展名零重复', () => {
+  it('id/label/extensions 逐字（spec §6.3 表 + docx/pptx/xlsx/csv 系所有权）：122 扩展名零重复', () => {
     const renderers = createForeignFileRenderers({ nestedDispatch: async () => {} });
     expect(renderers).toHaveLength(20);
     const seen = new Set<string>();
@@ -117,7 +117,7 @@ describe('createForeignFileRenderers（20 组桥接渲染器）', () => {
         seen.add(ext);
       }
     }
-    expect(seen.size).toBe(121); // 41（第一波）+ docx/pptx/xlsx/xlsm/xls（内置默认改版式/幻灯片/表格还原）+ 75（第二波，jxl 不绑定）
+    expect(seen.size).toBe(122); // 41（第一波）+ docx/pptx/xlsx/xlsm/xls（内置默认改版式/幻灯片/表格还原）+ csv（2026-11-10 自 code 转移）+ 75（第二波，jxl 不绑定）
   });
 
   it('渲染器对象不携带 mount 装配外的可预期面（label 中文、extensions 小写无点）', () => {
@@ -159,7 +159,7 @@ describe('装配序锚（viewer.ts 语句序：diagram → foreign 桥接块 →
     expect(() => mirrorViewerInstallOrder()).not.toThrow();
   });
 
-  it('byExtension 121 项逐字归属 + tsv→foreign-spreadsheet 桥（Review Focus 3）', () => {
+  it('byExtension 122 项逐字归属 + tsv→foreign-spreadsheet 桥（Review Focus 3）', () => {
     const registry = mirrorViewerInstallOrder();
     for (const expected of EXPECTED_ALL) {
       for (const ext of expected.extensions) {
@@ -169,12 +169,12 @@ describe('装配序锚（viewer.ts 语句序：diagram → foreign 桥接块 →
     }
   });
 
-  it('generated 补空位不回抢：eml/fods 归桥接；csv/xlsx 维持 vviewer 既有渲染器，docx/pptx 归版式/幻灯片还原', () => {
+  it('generated 补空位不回抢：eml/fods/tsv/csv 归桥接，xlsx/docx/pptx 归版式/表格/幻灯片还原', () => {
     const registry = mirrorViewerInstallOrder();
     expect(registry.byExtension('eml')?.id).toBe('foreign-email'); // GENERATED_EXTENSIONS 内，桥接块居前才不被 code 抢注
     expect(registry.byExtension('fods')?.id).toBe('foreign-spreadsheet');
     expect(registry.byExtension('tsv')?.id).toBe('foreign-spreadsheet'); // 自 code 内置清单原子转移
-    expect(registry.byExtension('csv')?.id).toBe('code'); // spec §6.3：csv 维持 code
+    expect(registry.byExtension('csv')?.id).toBe('foreign-spreadsheet'); // 2026-11-10 自 code 内置清单原子转移（默认电子表格网格面）
     expect(registry.byExtension('docx')?.id).toBe('foreign-word'); // 内置默认：docx-preview 系版式还原
     expect(registry.byExtension('xlsx')?.id).toBe('foreign-spreadsheet'); // 内置默认：版式还原表格
     expect(registry.byExtension('xlsm')?.id).toBe('foreign-spreadsheet');
@@ -201,9 +201,9 @@ describe('装配序锚（viewer.ts 语句序：diagram → foreign 桥接块 →
     for (const ext of ['xlsx', 'xlsm', 'xls']) {
       expect(registry.candidatesOf(ext).map((r) => r.id), ext).toEqual(['foreign-spreadsheet', 'xlsx']);
     }
-    expect(registry.candidatesOf('csv').map((r) => r.id)).toEqual(['code', 'foreign-spreadsheet']);
-    registry.setPreferenceResolver((ext) => (ext === 'xlsx' || ext === 'csv' ? 'foreign-spreadsheet' : undefined));
-    expect(registry.byExtension('csv')?.id).toBe('foreign-spreadsheet');
+    expect(registry.candidatesOf('csv').map((r) => r.id)).toEqual(['foreign-spreadsheet', 'code']); // csv 反向：桥默认持有，code 纯文本降候选
+    registry.setPreferenceResolver((ext) => (ext === 'xlsx' || ext === 'csv' ? 'code' : undefined));
+    expect(registry.byExtension('csv')?.id).toBe('code'); // 偏好命中 code：纯文本代码视图改派回
     expect(registry.byExtension('xls')?.id).toBe('foreign-spreadsheet'); // 未设偏好的同族扩展名不受牵连
     expect(registry.ownerOf('xlsx')?.id).toBe('foreign-spreadsheet');
     registry.setPreferenceResolver((ext) => (ext === 'xlsx' ? 'xlsx' : undefined));
@@ -211,11 +211,14 @@ describe('装配序锚（viewer.ts 语句序：diagram → foreign 桥接块 →
     expect(registry.byExtension('xlsm')?.id).toBe('foreign-spreadsheet');
   });
 
-  it('code 内置清单已无 tsv（转移原子性的 code 侧证据）', () => {
+  it('code 内置清单已无 tsv/csv（转移原子性的 code 侧证据），csv 降为候选声明', () => {
     const registry = createRegistry();
     registry.install(codeRenderer);
     expect(codeRenderer.extensions).not.toContain('tsv');
+    expect(codeRenderer.extensions).not.toContain('csv');
     expect(registry.byExtension('tsv')).toBeUndefined();
+    expect(registry.byExtension('csv')).toBeUndefined(); // 候选声明不占所有权
+    expect(codeRenderer.altExtensions).toEqual(['csv']);
   });
 
   // 计划 4 Task 2（spec §6.3 序 12/15/16/18/21 转移面）：

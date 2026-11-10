@@ -3379,15 +3379,20 @@ describe('isAbortError（deferred 清偿 Task 3：取消错误身份判定矩阵
 // registry 绑定（计划 3 Task 2，spec 2026-11-04 §6.3）：tsv 已自 code 内置清单原子
 // 转移至 file-viewer spreadsheet 桥接渲染器（apps/web foreignRenderers 装配，bridge
 // 块先于 codeRenderer——web 侧 foreignRenderers.test.ts 锚定归属；本包内无该依赖，
-// 镜像面只证 code 不再认领）。csv 维持 code（spec §6.3 注记）。
-describe('codeRenderer extensions：tsv 已转移（不再绑定）', () => {
-  it('codeRenderer.extensions 不含 tsv；fresh registry 单装后 byExtension 未认领', () => {
+// 镜像面只证 code 不再认领）。csv 同面转移（2026-11-10 用户裁决：默认电子表格网格
+// 面），code 侧以 altExtensions 保留纯文本候选（不占所有权）。
+describe('codeRenderer extensions：tsv/csv 已转移（不再绑定）', () => {
+  it('codeRenderer.extensions 不含 tsv/csv；fresh registry 单装后 byExtension 未认领；csv 降候选', () => {
     const registry = createRegistry();
     registry.install(codeRenderer);
     expect(codeRenderer.extensions).not.toContain('tsv');
     expect(registry.byExtension('tsv')).toBeUndefined();
     expect(registry.byExtension('TSV')).toBeUndefined();
-    // csv 维持 code
-    expect(registry.byExtension('csv')?.id).toBe('code');
+    // csv 转移至 spreadsheet 桥（默认电子表格），code 仅候选声明
+    expect(codeRenderer.extensions).not.toContain('csv');
+    expect(registry.byExtension('csv')).toBeUndefined();
+    expect(registry.byExtension('CSV')).toBeUndefined();
+    expect(codeRenderer.altExtensions).toEqual(['csv']);
+    // 候选声明不抢所有权：单装面 byExtension 无 csv 归属
   });
 });
