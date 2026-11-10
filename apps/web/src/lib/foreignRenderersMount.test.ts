@@ -19,7 +19,9 @@ const h = vi.hoisted(() => ({
   gates: new Map<string, Promise<void>>(),
   releases: new Map<string, () => void>(),
   // dbf handler 是否发起嵌套渲染（锚 2 置 true；锚 1 保持 false 保持全序列确定）
-  nestedOnDbf: false
+  nestedOnDbf: false,
+  // mount 期 zoom provider 交付桩（锚 3 置桩；缺省 null = 无 provider 组形态）
+  zoomProvider: null as unknown
 }));
 
 vi.mock('@file-viewer/core', () => {
@@ -45,7 +47,8 @@ vi.mock('@file-viewer/core', () => {
       h.events.push(`base:${tag(base)}`);
     },
     createRendererRegistry: (definitions: readonly unknown[]) => ({ definitions }),
-    createFileViewerRendererDispatcher: () => ({ get: () => handler })
+    createFileViewerRendererDispatcher: () => ({ get: () => handler }),
+    findFileViewerZoomProvider: () => h.zoomProvider // 锚 3 交付桩；缺省 null = 无 provider 组零干预
   };
 });
 
@@ -132,5 +135,39 @@ describe('pluginMount 串行队列（终审 I1）', () => {
     expect(h.events.lastIndexOf('base:std')).toBeGreaterThan(idx('end:chm'));
     expect(h.events.lastIndexOf('base:std')).toBeLessThan(idx('end:dbf'));
     h.nestedOnDbf = false;
+  });
+
+  it('锚三：mount 成功接 ctrl+wheel 缩放（provider 发现→接线→destroy 摘除），无 provider 组零干预', async () => {
+    // provider 桩：经 mock 的 core findFileViewerZoomProvider 交付（装配层发现缝实况）
+    const zoomCalls: number[] = [];
+    h.zoomProvider = {
+      zoomIn: () => ({}),
+      zoomOut: () => ({}),
+      setZoom: (scale: number) => {
+        zoomCalls.push(scale);
+      },
+      getState: () => ({ scale: 1 })
+    };
+    const renderers = createForeignFileRenderers({ nestedDispatch: async () => {} });
+    const ss = renderers.find((r) => r.id === 'foreign-spreadsheet')!;
+    const target = document.createElement('div');
+    const wheel = (deltaY: number): boolean => {
+      const e = new WheelEvent('wheel', { cancelable: true, bubbles: true, ctrlKey: true, deltaY });
+      target.dispatchEvent(e);
+      return e.defaultPrevented;
+    };
+    const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 30));
+
+    const inst = await renderOnce(ss, 'a.xlsx', target);
+    expect(wheel(-120)).toBe(true); // 有 provider：拦截浏览器整页缩放
+    await tick();
+    expect(zoomCalls).toHaveLength(1);
+    expect(zoomCalls[0]).toBeCloseTo(Math.exp(120 / 1000), 5); // 乘性步进实况
+
+    (inst as { destroy: () => void }).destroy();
+    zoomCalls.length = 0;
+    expect(wheel(-120)).toBe(false); // destroy 摘除：不再拦截不缩放
+    await tick();
+    expect(zoomCalls).toEqual([]);
   });
 });

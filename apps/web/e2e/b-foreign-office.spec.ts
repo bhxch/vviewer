@@ -22,7 +22,7 @@ import { injectDir, openTreeFile, type TextFileSpec } from './b-markdown-html-do
  * 逐用例 existsSync 守卫：语料未拉取时 skip（b-md-corpus-multisource 缺源容错同款），
  * 语料落地后自动生效。
  *
- * 用例组织（FO 系九锚：FO-00 一致性 + FO-01…FO-08 渲染/切换/错误面/转移锚）：
+ * 用例组织（FO 系十锚：FO-00 一致性 + FO-01…FO-09 渲染/切换/错误面/转移/缩放锚）：
  * - FO-00 语料一致性：FIXTURES 表 ⊆ manifest.files（终审 M2——上游 bump 后确定性
  *   选取漂移时各渲染用例会静默 skip，此锚显式红）；
  * - FO-01 Word 组三格式渲染：doc（msdoc 引擎）/ odt（odf 引擎）——presence 锚引擎
@@ -38,7 +38,9 @@ import { injectDir, openTreeFile, type TextFileSpec } from './b-markdown-html-do
  *   转移）——打开 tsv 落电子表格桥渲染，code 源码面零出现（装配序回退/code 清单
  *   漏删任一即红）；
  * - FO-08 csv 转移锚：csv 2026-11-10 自 code 内置清单转移至 spreadsheet 桥（默认
- *   电子表格网格面，code 纯文本降 altExtensions 候选）——判据同 FO-07。
+ *   电子表格网格面，code 纯文本降 altExtensions 候选）——判据同 FO-07；
+ * - FO-09 ctrl+滚轮缩放锚：宿主桥接层（foreignZoom.ts）消费渲染器 zoom provider
+ *   ——真实输入链驱动 provider scale 步进/钳界 + preventDefault 拦浏览器整页缩放。
  *
  * 断言口径：presence-based（引擎容器类可见 + code 源码面否定断言），不做引擎内部
  * 深断言——file-viewer 渲染内部结构非本仓契约面。全部经 .vv-viewer-host 作用域
@@ -332,5 +334,61 @@ test.describe('b-foreign-office file-viewer 桥接渲染（SAVE-FOREIGN 域）',
     await expect(host.locator('.excel-wrapper')).toBeVisible({ timeout: FIRST_RENDER_TIMEOUT });
     await expect(host.locator('.vv-code-pre')).toHaveCount(0); // code 降候选未抢注（转移锚否定面）
     await expect(page.locator('.vv-status-openwith')).toContainText('电子表格'); // 桥 label 上位
+  });
+
+  test('FO-09 ctrl+滚轮缩放：zoom provider 被宿主接线驱动（放大步进/缩小+钳界/整页缩放拦截）', async ({ page }) => {
+    test.setTimeout(120_000);
+    // 渲染器把缩放能力注册为 zoom provider（[data-viewer-zoom-provider] 的
+    // __flyfishViewerZoomProvider）但不接任何事件——宿主桥接层（foreignZoom.ts）
+    // 挂 ctrl+wheel → setZoom 驱动。此前零消费 ⇒ ctrl+滚轮落浏览器默认整页缩放
+    // （支持不佳的根因）。锚：真实输入链（键盘 Control + mouse.wheel，CDP 合成
+    // 事件带修饰键实况）驱动 provider scale 变化 + 边界钳制 + preventDefault。
+    await injectDir(page, [
+      { name: 'zoom.csv', content: 'name,age\nAlice,30\nBob,25\nCarol,41\n', type: 'text/csv' }
+    ]);
+    await openTreeFile(page, 'zoom.csv');
+
+    const host = page.locator('.vv-viewer-host');
+    await expect(host.locator('.excel-wrapper')).toBeVisible({ timeout: FIRST_RENDER_TIMEOUT });
+
+    // provider 读取锚（zoom 状态只有 provider 面，无 DOM 可见标签——chrome 不渲染
+    // 缩放百分比，renderChrome 实读）
+    const readScale = (): Promise<number | null> =>
+      page.evaluate(() => {
+        const el = document.querySelector<HTMLElement & { __flyfishViewerZoomProvider?: { getState(): { scale: number } } }>(
+          '.vv-viewer-host [data-viewer-zoom-provider]'
+        );
+        return el?.__flyfishViewerZoomProvider?.getState().scale ?? null;
+      });
+    await expect.poll(readScale, { timeout: 20_000 }).not.toBeNull();
+    const initial = (await readScale()) as number;
+    expect(initial).toBeGreaterThan(0);
+
+    // 放大：ctrl+滚轮（真实输入链，事件落点在表格上冒泡至宿主 target 监听）
+    await host.locator('.excel-wrapper').hover();
+    await page.keyboard.down('Control');
+    await page.mouse.wheel(0, -120);
+    await page.mouse.wheel(0, -120);
+    await page.keyboard.up('Control');
+    await expect.poll(readScale, { timeout: 20_000 }).toBeGreaterThan(initial); // 乘性步进生效
+
+    // 缩小越界：连续下滚钳到 minScale（spreadsheet 0.25），不放行浏览器整页缩放
+    await page.keyboard.down('Control');
+    for (let i = 0; i < 8; i += 1) await page.mouse.wheel(0, 240);
+    await page.keyboard.up('Control');
+    await expect
+      .poll(readScale, { timeout: 20_000 })
+      .toBeLessThan(initial); // 已离开放大态
+    expect((await readScale()) as number).toBeGreaterThanOrEqual(0.25); // 钳界（renderer clampZoom）
+
+    // preventDefault 锚：合成 ctrl+wheel 经接线监听被拦截（默认动作=浏览器整页缩放）
+    const prevented = await page.evaluate(() => {
+      const el = document.querySelector('.vv-viewer-host [data-viewer-zoom-provider]');
+      if (!el) return false;
+      const e = new WheelEvent('wheel', { cancelable: true, bubbles: true, ctrlKey: true, deltaY: -120 });
+      el.dispatchEvent(e);
+      return e.defaultPrevented;
+    });
+    expect(prevented).toBe(true);
   });
 });

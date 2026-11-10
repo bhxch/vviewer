@@ -2,7 +2,7 @@
 
 > 来源：spec `2026-11-04-file-viewer-integration` §6.1（桥接契约）/ §6.3（20 组桥接渲染器装配）/ §6.4（嵌套附件、远端确认门、归档条目、CDN 资产降级、边车组）与 `docs/superpowers/plans/` 计划 3 Task 2/Task 5、计划 4 Task 2 的装配实现。
 > 脚本：`apps/web/e2e/b-foreign-office-3.spec.ts`（FOM-NEST-01~05、FOM-REMOTE-01、FOM-CONFIRM-01、FOM-ZIP-01、FOM-CDN-01、FOM-SHP-01；chromium project）。
-> 域定位：**钉 foreign 桥与 vviewer 自有面之间的边界**（嵌套附件回流、foreign × 远端 R1、foreign × 确认门、归档条目 × foreign 路由、CDN 资产失败收口），**不是**钉 foreign 引擎自身出图——后者由 `b-foreign-office.spec.ts`（FO-01~07）与 `b-foreign-office-2.spec.ts`（FO2 系）覆盖。
+> 域定位：**钉 foreign 桥与 vviewer 自有面之间的边界**（嵌套附件回流、foreign × 远端 R1、foreign × 确认门、归档条目 × foreign 路由、CDN 资产失败收口），**不是**钉 foreign 引擎自身出图——后者由 `b-foreign-office.spec.ts`（FO-01~09，含 FO-08 csv 转移锚与 FO-09 ctrl+滚轮缩放锚）与 `b-foreign-office-2.spec.ts`（FO2 系）覆盖。
 > 本轮（复核返工轮）新增 FOM-NEST-04/05 两场景、并把七个既有场景的断言从「容器可见」升级为「内容级 + 可打红」，详见 §6。
 
 ## 1. 目的与来源

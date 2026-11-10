@@ -31,6 +31,7 @@ import {
   type NestedDispatch
 } from '@bhxch/vviewer-render-foreign';
 import { resolveForeignAssetBase, resolveForeignAssetPackageBase, type ForeignAssetPackage } from './foreignAssets';
+import { wireForeignZoom } from './foreignZoom';
 // type-only：编译期擦除，零运行时 chunk 影响
 import type {
   FileRenderContext,
@@ -197,7 +198,20 @@ function pluginMount(load: () => Promise<ForeignPlugin>, groupId: string): Forei
     };
     try {
       const rendered = await handler(toArrayBuffer(args.data), args.target as HTMLDivElement, ext, context);
-      return { destroy: () => disposeForeignRendered(rendered) };
+      // ctrl+wheel 缩放接线（zoom provider 宿主消费缝，2026-11-10）：上游渲染器把
+      // 缩放能力注册为 zoom provider（core registerFileViewerZoomProvider）但不接
+      // 任何事件——事件面由宿主驱动。此前零消费 ⇒ ctrl+滚轮落浏览器默认整页缩放
+      // （缩放整个 vviewer UI 而非文档内容）。mount resolve 时渲染器 root 已 append
+      // （同步段 replaceChildren 后才 resolve），provider 可发现；无 provider 的组
+      // （email/epub 等）短路零干预。接线/摘除的幂等与生命周期语义见 foreignZoom.ts。
+      const zoomProvider = coreModule?.findFileViewerZoomProvider(args.target);
+      const detachZoom = zoomProvider ? wireForeignZoom(args.target, zoomProvider) : null;
+      return {
+        destroy: () => {
+          detachZoom?.();
+          disposeForeignRendered(rendered);
+        }
+      };
     } finally {
       // 基座恢复：嵌套内联任务交还祖先基座；顶层任务恢复进入前值（下一 mount
       // 自带切换，resting 值无消费面）
