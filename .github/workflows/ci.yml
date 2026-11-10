@@ -1,4 +1,4 @@
-# 最小 CI（final review A2）：typecheck + vitest + web 构建 + cargo test + E2E。
+# 最小 CI（final review A2）：lint + typecheck + vitest + web 构建 + cargo test + E2E。
 # grammar wasm 不入库：单测/e2e 前经 composite action 生成最小语言集（tree-sitter-cli
 # 自建，免 emcc；工具链/源树/产物三层缓存）。全量门禁触发链：tag → release.yml →
 # workflow_call 复用 grammar.yml（I2 后其自身无 push 触发器）。
@@ -27,6 +27,9 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # lint 门禁置于最前（秒级成本，失败即 fast-fail）：不依赖 grammar/wasm 等生成物，
+      # install 完即可跑
+      - run: pnpm run lint
       # highlight 单测用真实 wasm（bash/html/css/javascript/typescript）
       - uses: ./.github/actions/setup-grammars
         with:
