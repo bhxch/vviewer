@@ -54,7 +54,12 @@ export default defineConfig(
         extraFileExtensions: ['.svelte'],
         // 非 type-aware 下作用域分析器读不到 tsconfig：显式声明 TS lib（与 apps/web
         // tsconfig 的 lib 对齐），否则 ScrollBehavior 等 DOM 纯类型名被 no-undef 误报
-        lib: ['esnext', 'dom', 'dom.iterable', 'dom.asynciterable']
+        lib: ['esnext', 'dom', 'dom.iterable', 'dom.asynciterable'],
+        // 全局强制 runes 的 lint 期执法：与 apps/web/vite.config.ts 里 sveltekit() 的
+        // compilerOptions: { runes: true } 同源语义，两处必须同步改。kit 3 不读
+        // svelte.config.js，插件的自动加载拿不到该选项，须在此显式传入——否则 lint 期编译
+        // 按逐文件自动探测走，export let / $: 的 legacy 组件零报错，要等到构建才拦
+        svelteConfig: { compilerOptions: { runes: true } }
       },
       // 运行时全局（window/document/setTimeout…）——lib 只带类型，两者缺一不可
       globals: { ...globals.browser }
@@ -64,10 +69,15 @@ export default defineConfig(
     files: ['**/*.svelte', '**/*.ts'],
     rules: {
       // a11y 硬门槛载体（D12）：eslint-plugin-svelte 没有 a11y-* 前缀规则，Svelte 编译器的
-      // a11y 警告经本规则报为 lint error；配套禁僵尸 svelte-ignore
+      // a11y 警告经本规则报为 lint error；配套禁僵尸 svelte-ignore。同时是全局 runes 的
+      // lint 期执法载体：编译按上方 svelteConfig 的 runes: true 进行，legacy 语法即编译错误
       'svelte/valid-compile': 'error',
       'svelte/no-unused-svelte-ignore': 'error',
-      // legacy 语法检测（runes:true 下多为编译报错，此处是 lint 期兜底）
+      // legacy 语法检测。`$:` 系三条（reactive-functions / reactive-literals /
+      // immutable-reactive-statements）与下方的 no-extra-reactive-curlies 自带运行条件
+      // 「仅 legacy/未定模式」，上面强制 runes 后对 .svelte 不再运行——`$:` 本身已是编译
+      // 错误，统一由 valid-compile 拦（实测各 `$:` 形态均仍报 error）。四条按规范清单
+      // 保留：runes 强制一旦放开即自动恢复兜底
       'svelte/no-reactive-functions': 'error',
       'svelte/no-reactive-literals': 'error',
       'svelte/no-immutable-reactive-statements': 'error',

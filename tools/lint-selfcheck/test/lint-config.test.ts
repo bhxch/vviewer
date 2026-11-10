@@ -76,6 +76,21 @@ describe('eslint 机检样例（规则自身被机检）', () => {
     expect(exitCode, 'eslint 应以 lint error 收场').toBe(1);
   }, LINT_TIMEOUT);
 
+  it('legacy 必命中：export let + $: 的组件在全局 runes 模式下被 svelte/valid-compile 以 error 拦下', () => {
+    const { exitCode, messages } = lintFixture('sample.legacy.svelte');
+    const compileErrors = messages.filter(
+      (m) => m.ruleId === 'svelte/valid-compile' && m.severity === 2
+    );
+    // 编译错误是抛出式的，一次编译只报首个：两种 legacy 写法命中其一，即证明 lint 期编译
+    // 确实拿到了 runes: true（config 的 svelteConfig 一旦丢失，本样例零报错）
+    const legacyCodes = ['legacy_export_invalid', 'legacy_reactive_statement_invalid'];
+    expect(
+      compileErrors.some((m) => legacyCodes.some((code) => m.message.includes(code))),
+      'legacy 语法未被 valid-compile 以 error 命中——lint 期的 runes 强制失效？'
+    ).toBe(true);
+    expect(exitCode, 'eslint 应以 lint error 收场').toBe(1);
+  }, LINT_TIMEOUT);
+
   it('合法样例零报错：console.warn/error/debug 与 _ 前缀未用变量不被误伤', () => {
     const { exitCode, messages } = lintFixture('sample.clean.ts');
     expect(messages, '合法样例被误报').toEqual([]);
