@@ -70,7 +70,7 @@ describe('openFlow 直连 store 创建分派（带入①创建链路）', () => 
 
   it('台账 3-21：connectServer 同 base 重连清扫旧 tab 补状态栏提示（系统替换动作的可见性）', () => {
     const sweep = scSrc.match(
-      /const staleTabIds = tabStore\.list[\s\S]*?for \(const id of staleTabIds\) \{[\s\S]*?\n  \}[\s\S]*?\n  \}/
+      /const staleTabIds = tabStore\.list[\s\S]*?for \(const id of staleTabIds\) \{[\s\S]*?\n {2}\}[\s\S]*?\n {2}\}/
     )![0];
     expect(sweep).toMatch(/已关闭 \$\{staleTabIds\.length\} 个旧标签页（服务器已重新连接）/);
     expect(sweep).toMatch(/if \(staleTabIds\.length > 0\)/);

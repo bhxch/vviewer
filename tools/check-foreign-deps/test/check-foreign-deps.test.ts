@@ -98,7 +98,7 @@ describe('checkForeignDeps', () => {
   });
 
   it('锚二变体：lockfile 缺该包条目同样检出', () => {
-    const lock = LOCK_FIXTURE.replace(/      '@file-viewer\/core':\n        specifier: 3\.3\.3\n        version: 3\.3\.3\n/, '');
+    const lock = LOCK_FIXTURE.replace(/ {6}'@file-viewer\/core':\n {8}specifier: 3\.3\.3\n {8}version: 3\.3\.3\n/, '');
     const { violations } = checkForeignDeps(WEB_DEPS_OK, parseImporterDeps(lock, 'apps/web'));
     expect(violations.some((x) => x.name === '@file-viewer/core' && x.kind === 'lock-missing')).toBe(true);
   });

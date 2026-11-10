@@ -48,7 +48,7 @@ describe('MetaPanel 语言行（Task 5 源码契约锚）', () => {
   });
 
   it('onLangCommit 提交语义：trim 判空 → null 清除，否则原值宽松透传（单点走 setHighlightLang）', () => {
-    const fn = fnWindow(src, /function onLangCommit\(raw: string\): void \{[\s\S]*?\n  \}/);
+    const fn = fnWindow(src, /function onLangCommit\(raw: string\): void \{[\s\S]*?\n {2}\}/);
     const call = fn.indexOf('tabStore.setHighlightLang(');
     expect(call).toBeGreaterThan(-1); // 唯一下行通道（setHighlightLang，Task 3 接口）
     expect(fn.indexOf('tabStore.setHighlightLang(', call + 1)).toBe(-1);
@@ -60,7 +60,7 @@ describe('MetaPanel 语言行（Task 5 源码契约锚）', () => {
   it('显示值/徽标自激活 tab 的 overrideLang 派生（openWithUi 同款 tab 侧直读）', () => {
     const derived = fnWindow(
       src,
-      /const langOverrideUi = \$derived\.by\(\(\) => \{[\s\S]*?\n  \}\);/
+      /const langOverrideUi = \$derived\.by\(\(\) => \{[\s\S]*?\n {2}\}\);/
     );
     expect(derived).toContain("tabStore.list.find((t) => t.active)");
     expect(derived).toContain('tab?.overrideLang ?? \'\'');

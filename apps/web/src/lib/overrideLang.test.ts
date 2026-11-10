@@ -75,17 +75,17 @@ describe('tabsModel.svelte.ts 触点契约（runes 模块源码锚；FE-1 自 op
   });
 
   it('duplicate 读回（复制继承，overrideRenderer 同形态）', () => {
-    const fn = fnWindow(src, /duplicate\(tabId: string\): Tab \| null \{[\s\S]*?\n  \}/);
+    const fn = fnWindow(src, /duplicate\(tabId: string\): Tab \| null \{[\s\S]*?\n {2}\}/);
     expect(fn).toContain('if (src.overrideLang !== undefined) tab.overrideLang = src.overrideLang;');
   });
 
   it('reopenClosed（撤销重建）读回（快照 → 新 tab，overrideRenderer 同形态）', () => {
-    const fn = fnWindow(src, /reopenClosed\(\): Tab \| null \{[\s\S]*?\n  \}/);
+    const fn = fnWindow(src, /reopenClosed\(\): Tab \| null \{[\s\S]*?\n {2}\}/);
     expect(fn).toContain('if (snap.overrideLang !== undefined) tab.overrideLang = snap.overrideLang;');
   });
 
   it('setHighlightLang 语义：未变化早退 → null 清除（delete）/置位 → rev++ → persist（setRendererOverride 同款顺序）', () => {
-    const fn = fnWindow(src, /setHighlightLang\(tabId: string, lang: string \| null\): void \{[\s\S]*?\n  \}/);
+    const fn = fnWindow(src, /setHighlightLang\(tabId: string, lang: string \| null\): void \{[\s\S]*?\n {2}\}/);
     const earlyReturn = fn.indexOf('if (unchanged) return;');
     const clear = fn.indexOf('delete tab.overrideLang;');
     const assign = fn.indexOf('tab.overrideLang = lang;');

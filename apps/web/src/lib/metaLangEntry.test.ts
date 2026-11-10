@@ -65,14 +65,14 @@ describe('ViewerPane 状态栏浮层语言项（Task 6 源码契约锚）', () =
   it('langOverrideText 派生：overrideLang → 「（手动）」，否则 fileMeta.lang 回显、缺省「自动」', () => {
     const derived = fnWindow(
       src,
-      /const langOverrideText = \$derived\.by\(\(\) => \{[\s\S]*?\n  \}\);/
+      /const langOverrideText = \$derived\.by\(\(\) => \{[\s\S]*?\n {2}\}\);/
     );
     expect(derived).toContain('if (t?.overrideLang) return `${t.overrideLang}（手动）`;');
     expect(derived).toContain("return fileMeta.lang ? `自动（检测 ${fileMeta.lang}）` : '自动';");
   });
 
   it('focusMetaLang 只派发单通道（关浮层 + requestMetaLangFocus），无通道字面量/候选计算复制', () => {
-    const fn = fnWindow(src, /function focusMetaLang\(\): void \{[\s\S]*?\n  \}/);
+    const fn = fnWindow(src, /function focusMetaLang\(\): void \{[\s\S]*?\n {2}\}/);
     expect(fn).toContain('pickerOpen = false;');
     expect(fn).toContain('requestMetaLangFocus();');
     expect(fn).not.toMatch(/setHighlightLang|setRendererOverride|Candidates|CustomEvent/);
@@ -87,7 +87,7 @@ describe('TabBar 右键语言项（Task 6 源码契约锚）', () => {
   it('ctxActions 末项：label「语言：…（在属性面板中修改）」+ onClick 先激活被右键 tab 再走单通道（终审 I-1）', () => {
     const entry = fnWindow(
       src,
-      /\{\n        \/\/ 语言轻入口（Task 6）[\s\S]*?\n      \}/
+      /\{\n {8}\/\/ 语言轻入口（Task 6）[\s\S]*?\n {6}\}/
     );
     expect(entry).toContain('语言：${langLabelOf(tab)}（在属性面板中修改）');
     // 文案读被右键 tab（langLabelOf(tab)），落点须同 tab：先 activateTab 再聚焦——
@@ -99,7 +99,7 @@ describe('TabBar 右键语言项（Task 6 源码契约锚）', () => {
   });
 
   it('langLabelOf：被右键 tab 的 overrideLang → 「（手动）」，否则「自动」（无检测值回显面）', () => {
-    const fn = fnWindow(src, /function langLabelOf\(tab: Tab\): string \{[\s\S]*?\n  \}/);
+    const fn = fnWindow(src, /function langLabelOf\(tab: Tab\): string \{[\s\S]*?\n {2}\}/);
     expect(fn).toContain("return tab.overrideLang !== undefined ? `${tab.overrideLang}（手动）` : '自动';");
     expect(fn).not.toContain('fileMeta'); // 非激活 tab 无 meta 对应面，不读激活态检测值
   });
@@ -121,7 +121,7 @@ describe('AppShell 跳转消费（Task 6 源码契约锚）', () => {
   });
 
   it('移动端先开抽屉（≤600px 同一媒体查询）→ 桌面折叠先展开 → rAF 后聚焦语言行', () => {
-    const handler = fnWindow(src, /const onFocusMetaLang = \(\): void => \{[\s\S]*?\n    \};/);
+    const handler = fnWindow(src, /const onFocusMetaLang = \(\): void => \{[\s\S]*?\n {4}\};/);
     // FE-2：抽屉开合转移抽在 shellDrawers.ts（openRightDrawerForMetaLang 置位开右抽屉）
     const drawer = handler.indexOf('openRightDrawerForMetaLang(drawers)');
     const expand = handler.indexOf("updateLayout({ rightCollapsed: false })");
