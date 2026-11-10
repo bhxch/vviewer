@@ -225,8 +225,19 @@ function normalizeServerDiagramContract(contract?: ServerDiagramContract): {
 // 全量 clone 保留自有键、_executeHooks 把当次 CONFIG 原样传给钩子）——逐调用
 // 透传，钩子侧不持模块级可变状态。键名加 __ 前缀避免与上游未来新增键冲突。
 const SERVER_DIAGRAM_CONFIG_KEY = '__vvServerDiagramContract';
+
+// 钩子作用域哨兵：addHook 挂在 DOMPurify 模块单例的全局态上，而第三方库会在同一
+// 单例上清洗自己的产物——mermaid 12 strict 渲染出口即如此（pnpm 解析使 mermaid 与
+// 本包共享同一 dompurify 实例；2026-11-10 markpad 语料取证实锤：本包 style 二分误剥
+// mermaid 产物 <style> → flowchart/gantt 黑块、sequence 线消失，属性钩子同理外溢）。
+// 本包两个钩子是 sanitizeHtml 的策略语义，不作用于他方：仅带哨兵键的调用（即本包
+// sanitizeHtml 发起，config 组装点恒注入）执行钩子体，外来调用方（无哨兵）直接
+// 返回——mermaid 保持 strict 安全级不降级，BUG-40 防线不松动（vviewer 出口行为零变化）。
+const SANITIZE_SCOPE_CONFIG_KEY = '__vvSanitizeScope';
+
 type SanitizeConfig = Config &
-  Record<typeof SERVER_DIAGRAM_CONFIG_KEY, { attr: string; value: string }>;
+  Record<typeof SERVER_DIAGRAM_CONFIG_KEY, { attr: string; value: string }> &
+  Record<typeof SANITIZE_SCOPE_CONFIG_KEY, true>;
 
 /** 钩子侧读回当次契约：config 未携带（防御性兜底）时回落默认字面量 */
 function hookServerDiagramContract(config: Config | undefined): {
@@ -279,6 +290,8 @@ function registerSanitizeHooks(): void {
     // 文本一并移除；DOMPurify 对钩内摘除有 _handleHookDetachedNode 正式支撑，
     // 可观察输出与原 FORBID_TAGS+FORBID_CONTENTS 一致）；容器内按判定放行或丢弃。
     if (data.tagName !== 'style' || node.nodeType !== 1) return;
+    // 外来调用方（无哨兵，如 mermaid 内部出口 sanitize）：本包策略不作用于他方
+    if ((config as SanitizeConfig | undefined)?.[SANITIZE_SCOPE_CONFIG_KEY] !== true) return;
     const { attr, value } = hookServerDiagramContract(config);
     const el = node as Element;
     let inServer = false;
@@ -300,7 +313,10 @@ function registerSanitizeHooks(): void {
       el.remove();
     }
   });
-  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  DOMPurify.addHook('afterSanitizeAttributes', (node, _data, config) => {
+    // 作用域哨兵：同 uponSanitizeElement——本包属性级策略（data: 收窄/外域拦截）
+    // 不作用于第三方调用方（mermaid 出口 sanitize 的产物不经本包策略）
+    if ((config as SanitizeConfig | undefined)?.[SANITIZE_SCOPE_CONFIG_KEY] !== true) return;
     for (const attr of Array.from(node.attributes)) {
       if (DATA_URI_ATTRS.has(attr.name.toLowerCase())) continue;
       if (/^\s*data:/i.test(attr.value)) node.removeAttribute(attr.name);
@@ -466,6 +482,7 @@ export function sanitizeHtml(dirty: string | Document, opts: SanitizeOptions = {
     ...MARKDOWN_SANITIZE_CONFIG,
     ...(opts.wholeDocument ? { WHOLE_DOCUMENT: true } : {}),
     [SERVER_DIAGRAM_CONFIG_KEY]: normalizeServerDiagramContract(opts.serverDiagram),
+    [SANITIZE_SCOPE_CONFIG_KEY]: true,
   };
   // 无 RETURN_DOM/RETURN_DOM_FRAGMENT 的重载返回 string
   return DOMPurify.sanitize(html, config) as string;

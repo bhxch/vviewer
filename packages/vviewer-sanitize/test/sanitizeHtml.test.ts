@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import DOMPurify from 'dompurify';
 import { ALLOWED_URI_REGEXP, hostOf, isExternalMediaSrc, sanitizeHtml } from '../src/sanitize';
 
 function docOf(html: string): Document {
@@ -451,5 +452,39 @@ describe('sanitizeHtml——serverDiagram 契约选项（拆包提取：默认�
     const back = sanitizeHtml(srv); // 随后的默认调用必须恢复默认契约
     expect(back).toContain('<style>');
     expect(back).toContain('fill:none');
+  });
+});
+
+describe('sanitizeHtml——钩子作用域隔离（第三方 DOMPurify 调用方不受误伤）', () => {
+  // 根因（2026-11-10 markpad 语料取证实锤）：mermaid 12 strict 渲染出口会在 DOMPurify
+  // 模块单例上清洗自己的 SVG 产物（pnpm 解析使 mermaid 与本包共享同一 dompurify
+  // 实例）。本包钩子是 sanitizeHtml 的策略语义——style 上下文二分误剥 mermaid 样式
+  // 块（flowchart/gantt 黑块、sequence 线消失）；属性级 data:/外域收窄同理不应对
+  // 他方产物生效。修复=钩子按 config 哨兵作用域化：仅本包 sanitize 发起的调用执行，
+  // 外来调用方（无哨兵）钩子直接返回。mermaid 保持 strict 安全级不降级。
+  it('先走一次本包 sanitizeHtml 触发钩子注册：普通位置 style 仍被剥（防线自证）', () => {
+    const out = sanitizeHtml('<p>x</p><style>.a{color:red}</style>');
+    expect(out).not.toContain('<style');
+  });
+
+  it('第三方调用方（无哨兵）的 svg <style> 不被本包钩子剥除（mermaid 出口 sanitize 形态）', () => {
+    const dirty = '<svg id="md-mermaid-1"><style>#md-mermaid-1{fill:#333}</style><rect/></svg>';
+    const doc = docOf(dirty);
+    const out = DOMPurify.sanitize(doc.querySelector('svg')!.outerHTML);
+    expect(out).toContain('<style');
+    expect(out).toContain('fill:#333');
+  });
+
+  it('第三方调用方的 img 外域 src 不被本包钩子打拦截标记（属性钩子同样作用域化）', () => {
+    const doc = docOf('<svg><image href="https://external.example/a.png"/></svg>');
+    const out = DOMPurify.sanitize(doc.body.innerHTML);
+    expect(out).not.toContain('data-vv-blocked-external');
+    expect(out).toContain('external.example');
+  });
+
+  it('本包 sanitizeHtml 的行为在作用域化后零变化（哨兵恒在：容器内 style 豁免仍生效）', () => {
+    const srv = '<div data-vv-diagram="server"><svg><style>.e{fill:none}</style></svg></div>';
+    expect(sanitizeHtml(srv)).toContain('<style>');
+    expect(sanitizeHtml('<p>x</p><style>.a{color:red}</style>')).not.toContain('<style');
   });
 });
