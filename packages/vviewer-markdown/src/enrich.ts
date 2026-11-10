@@ -102,7 +102,7 @@ function convertCallouts(root: Document): void {
     // 次行内容并进标题（markdown-it 软换行输出 '\n' 而非 <br>）
     const matchResult =
       lead?.nodeType === 3
-        ? lead.nodeValue?.match(/^\s*\[!([a-zA-Z0-9_\-]+)\][^\S\n]*/i)
+        ? lead.nodeValue?.match(/^\s*\[!([a-zA-Z0-9_-]+)\][^\S\n]*/i)
         : null;
     if (!matchResult || !lead) continue;
     const textNode = lead as Text;
@@ -221,7 +221,7 @@ function convertCallouts(root: Document): void {
  * - `[[file…]]` → span.md-wikilink-dead（跨文件 wikilink 不支持，原文保留不可点）。
  * 尺寸段非法（含多段）时只取首段路径、尺寸丢弃——未知写法从保守。
  */
-const WIKILINK_RE = /(!?)\[\[([^\[\]]+)\]\]/g;
+const WIKILINK_RE = /(!?)\[\[([^[\]]+)\]\]/g;
 const WIKILINK_SKIP_TAGS = new Set(['PRE', 'CODE', 'SCRIPT', 'STYLE', 'A']);
 
 function buildWikilink(root: Document, embed: boolean, content: string, raw: string): Node {

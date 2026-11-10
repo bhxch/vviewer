@@ -339,7 +339,6 @@ export const pdfRenderer: Renderer = {
     // → loadingTask.destroy() 使 promise reject 进下方 catch（错误卡片路径），否则
     // range reader 永久 pending → render 挂死且无 destroy 路径；doc 已开后（懒页
     // chunk 读失败）维持静默——单页空白不渲染可接受，不因尾块抖动整页报错
-    let loadingTask: PDFDocumentLoadingTask;
     let docOpened = false;
     // M1 收口双件套（统一验证阶段两段实证）：
     // ①读失败门（firstReadFailure）：pdfjs 6.4.299 的 loadingTask.destroy() 在文档
@@ -354,7 +353,9 @@ export const pdfRenderer: Renderer = {
     const firstReadFailure = new Promise<never>((_, reject) => {
       rejectFirstReadFailure = reject;
     });
-    loadingTask =
+    // onReadFailure 闭包在本初始化式内自引用 loadingTask：回调只在读失败时异步触发，
+    // 届时绑定早已完成初始化
+    const loadingTask: PDFDocumentLoadingTask =
       transport !== null
         ? pdfjs.getDocument({
             range: createPdfRangeTransport(pdfjs.PDFDataRangeTransport, {

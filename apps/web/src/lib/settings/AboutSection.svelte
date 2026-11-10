@@ -23,9 +23,11 @@
 
   const navTo = useSettingsNav();
 
+  // 三条外链均写完整字面量：svelte/no-navigation-without-resolve 靠字面量识别绝对 URL，
+  // 不解析模板串里的标识符——`${REPO_URL}/...` 会被当成内部链接要求 resolve()
   const REPO_URL = 'https://github.com/bhxch/vviewer';
-  const LICENSE_URL = `${REPO_URL}/blob/main/LICENSE`;
-  const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`;
+  const LICENSE_URL = 'https://github.com/bhxch/vviewer/blob/main/LICENSE';
+  const NOTICES_URL = 'https://github.com/bhxch/vviewer/blob/main/THIRD_PARTY_NOTICES.md';
 
   const frontendVersion = appVersion(); // 构建期定型；vitest 降级 null →「开发构建」
   const health = loadServerHealth(); // 会话缓存；无记录 = 未连接（降级显示）

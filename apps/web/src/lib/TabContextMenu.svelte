@@ -76,24 +76,23 @@
    * 弹出（宿层右缘略叠 6px），右侧放不下翻折左侧。宽高未测得（首帧）按 170×项数
    * 估算兜底。宿层取锚按钮 offsetParent——首层为 fixed 主浮层、深层为上一层
    * 子浮层（absolute 即包含块），坐标系与内联 top/left 的解析基准一致。 */
-  const subPositions = $derived.by(
-    (): ({ top: number; left: number } | null)[] =>
-      openPath.map((_, depth) => {
-        const anchor = subAnchors[depth];
-        if (anchor === null || anchor === undefined) return null;
-        const margin = 8;
-        const childCount = childrenAt(depth).length;
-        const w = subEls[depth]?.offsetWidth ?? 170;
-        const h = subEls[depth]?.offsetHeight ?? childCount * 30 + margin * 2;
-        const top = Math.max(margin, Math.min(anchor.offsetTop, window.innerHeight - h - margin));
-        const host = anchor.offsetParent as HTMLElement | null;
-        const rightOf = anchor.offsetLeft + (host?.offsetWidth ?? 160) - 6;
-        const left =
-          rightOf + w <= window.innerWidth - margin
-            ? rightOf
-            : Math.max(margin, anchor.offsetLeft - w + 6);
-        return { top, left };
-      })
+  const subPositions: ({ top: number; left: number } | null)[] = $derived(
+    openPath.map((_, depth) => {
+      const anchor = subAnchors[depth];
+      if (anchor === null || anchor === undefined) return null;
+      const margin = 8;
+      const childCount = childrenAt(depth).length;
+      const w = subEls[depth]?.offsetWidth ?? 170;
+      const h = subEls[depth]?.offsetHeight ?? childCount * 30 + margin * 2;
+      const top = Math.max(margin, Math.min(anchor.offsetTop, window.innerHeight - h - margin));
+      const host = anchor.offsetParent as HTMLElement | null;
+      const rightOf = anchor.offsetLeft + (host?.offsetWidth ?? 160) - 6;
+      const left =
+        rightOf + w <= window.innerWidth - margin
+          ? rightOf
+          : Math.max(margin, anchor.offsetLeft - w + 6);
+      return { top, left };
+    })
   );
 
   /** 打开动作自身滚动的宽限窗（毫秒）：溢出 TabBar 上右键裁剪目标时，动作性滚动

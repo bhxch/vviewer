@@ -565,7 +565,7 @@
             <div class="vv-mm-field">
               <label for="vv-mm-pathstyle">path-style 寻址</label>
               <input id="vv-mm-pathstyle" type="checkbox" bind:checked={draft.pathStyle} />
-              <span class="vv-mm-hint">关闭则使用 virtual-host 形态（bucket.{''}host）</span>
+              <span class="vv-mm-hint">关闭则使用 virtual-host 形态（bucket.host）</span>
             </div>
           {/if}
           <div class="vv-mm-field">

@@ -19,7 +19,7 @@ import type { Config } from 'dompurify';
 // 注意该正则只做值前缀匹配、不区分属性：data:image/ 也会命中 <a href>，
 // data: 的属性级放行由下方 afterSanitizeAttributes 钩子收窄为 src/srcset。
 export const ALLOWED_URI_REGEXP =
-  /^(?:(?:(?:f|ht)tps?|mailto):|data:image\/|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
+  /^(?:(?:(?:f|ht)tps?|mailto):|data:image\/|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i;
 
 // data: 协议仅放行 src/srcset（内嵌图片/媒体）。ALLOWED_URI_REGEXP 按属性无关的
 // 值前缀匹配，单正则难以按属性区分；DOMPurify 默认的 DATA_URI_TAGS 分支又只覆盖

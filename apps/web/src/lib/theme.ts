@@ -181,7 +181,7 @@ async function injectCodeTheme(
 ): Promise<void> {
   const tables = await loadTables();
   if (isCurrent && !isCurrent()) return; // 弃单守卫：已被更新调用超越，不写 style
-  let theme = tables[name];
+  const theme = tables[name];
   if (!theme) {
     const fallback = DEFAULT_CODE_THEME[mode];
     console.warn(`未知代码主题：${name}，回退默认代码主题 ${fallback}`);
