@@ -15,6 +15,20 @@ import svelte from 'eslint-plugin-svelte';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
+// `<svelte:options runes={false} />` 是逐组件退出 runes 的后门：编译器里它优先于全局
+// compilerOptions，构建期同样拦不住（实测编译通过、metadata.runes=false）。全局强制 runes
+// 「任何位置不得关闭」（AGENTS.md）由本条机检承接。
+// 注意：no-restricted-syntax 在多个 config 块之间是「后块整体覆盖前块」而非合并——日后给
+// .svelte 追加条目（如 i18n 三条纪律）的块，必须把 runesOptOut 一并展开进去，否则本条在
+// 那些文件上被静默顶掉。自检的 sample.optout.svelte 只守样例所在路径：后加块若只作用于
+// apps/web/src/lib/** 之类的子集，样例测不出这种覆盖。
+const runesOptOut = {
+  selector:
+    'SvelteElement[name.name="svelte:options"] SvelteAttribute[key.name="runes"] Literal[value=false]',
+  message:
+    '禁止用 <svelte:options runes={false}> 逐组件退出 runes 模式：全局强制 runes，任何位置不得关闭（AGENTS.md）'
+};
+
 export default defineConfig(
   // 全局 ignores：依赖/构建产物/临时目录/生成物与下载物（ESLint 不读 .gitignore，须显式列）。
   // grammar-builder/out、.wrangler、.zcode 三处缺任一即十万级误报（spec §4.1 记录的实测结论）；
@@ -116,6 +130,13 @@ export default defineConfig(
       ],
       // D2：warn/error/debug 是结构化观测留痕（降级警告/错误留痕/调试探针），禁的是 log/info
       'no-console': ['error', { allow: ['warn', 'error', 'debug'] }]
+    }
+  },
+  // 禁逐组件退出 runes（选择器与覆盖语义的注意事项见文件顶部 runesOptOut）
+  {
+    files: ['**/*.svelte'],
+    rules: {
+      'no-restricted-syntax': ['error', runesOptOut]
     }
   },
   // 测试与 e2e 放开 console

@@ -91,6 +91,23 @@ describe('eslint 机检样例（规则自身被机检）', () => {
     expect(exitCode, 'eslint 应以 lint error 收场').toBe(1);
   }, LINT_TIMEOUT);
 
+  it('runes 退出口必命中：<svelte:options runes={false}> 被 no-restricted-syntax 以 error 拦下', () => {
+    const { exitCode, messages } = lintFixture('sample.optout.svelte');
+    // 该标记在编译器里优先于全局 runes 选项：样例以 legacy 模式编译通过，valid-compile 不报，
+    // 能拦它的只有 config 里的 runesOptOut 选择器——选择器丢了，或被后加的
+    // no-restricted-syntax 块整体覆盖掉，本样例即零报错
+    expect(
+      messages.some(
+        (m) =>
+          m.ruleId === 'no-restricted-syntax' &&
+          m.severity === 2 &&
+          m.message.includes('逐组件退出 runes')
+      ),
+      'svelte:options runes={false} 未被 no-restricted-syntax 以 error 命中'
+    ).toBe(true);
+    expect(exitCode, 'eslint 应以 lint error 收场').toBe(1);
+  }, LINT_TIMEOUT);
+
   it('合法样例零报错：console.warn/error/debug 与 _ 前缀未用变量不被误伤', () => {
     const { exitCode, messages } = lintFixture('sample.clean.ts');
     expect(messages, '合法样例被误报').toEqual([]);
