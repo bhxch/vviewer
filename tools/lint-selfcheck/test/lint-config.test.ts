@@ -29,6 +29,12 @@ interface LintRun {
   messages: LintMessage[];
 }
 
+// eslint CLI 冷启动（加载 config 与三套插件）在全量并发下明显慢于单测均值——用例级放宽超时
+const LINT_TIMEOUT = 30_000;
+// 子进程自身的超时，必须小于用例超时：execFileSync 同步阻塞，eslint 一旦挂住，vitest 的
+// 用例超时根本没机会触发（事件循环被占着），整个 worker 会被拖死——只能靠它先把子进程杀掉
+const ESLINT_TIMEOUT = 25_000;
+
 function lintFixture(file: string): LintRun {
   const target = path.join(FIXTURES, file);
   let exitCode = 0;
@@ -39,11 +45,24 @@ function lintFixture(file: string): LintRun {
     stdout = execFileSync(ESLINT, ['--no-ignore', '--format', 'json', target], {
       cwd: REPO,
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: ESLINT_TIMEOUT
     });
   } catch (error) {
+    const failure = error as {
+      status?: number | null;
+      signal?: string | null;
+      stdout?: string;
+      stderr?: string;
+    };
+    if (failure.signal) {
+      // 超时被杀（status 为 null、带 signal）：单独报出，别混进下面的「未产出 JSON」
+      throw new Error(
+        `eslint 子进程 ${ESLINT_TIMEOUT}ms 内未结束，已被 ${failure.signal} 终止（样例：${file}）`,
+        { cause: error }
+      );
+    }
     // 必命中样例以 exit 1 收场——非零退出在此捕获，stdout 仍携带 JSON 报告
-    const failure = error as { status?: number | null; stdout?: string; stderr?: string };
     exitCode = failure.status ?? -1;
     stdout = failure.stdout ?? '';
     stderr = failure.stderr ?? '';
@@ -59,9 +78,6 @@ function lintFixture(file: string): LintRun {
   }
   return { exitCode, messages: reports.flatMap((report) => report.messages) };
 }
-
-// eslint CLI 冷启动（加载 config 与三套插件）在全量并发下明显慢于单测均值——用例级放宽超时
-const LINT_TIMEOUT = 30_000;
 
 describe('eslint 机检样例（规则自身被机检）', () => {
   it('a11y 必命中：带 onclick 的静态 div 被 svelte/valid-compile 以 error 拦下（无键盘可达 + 缺 role）', () => {
