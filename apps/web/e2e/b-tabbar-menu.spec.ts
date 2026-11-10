@@ -444,7 +444,7 @@ test('MEN-04：融合菜单与 tab 右键菜单互斥——双向接管同刻至
   await expect(ctx).toHaveCount(0);
   await expect(pop).toBeVisible();
   expect(await overlayCount()).toBe(1);
-  await expect(page.locator(`${TABBAR_MENU} [aria-label="切换工作区"]`)).toHaveAttribute(
+  await expect(page.locator(TRIGGER)).toHaveAttribute(
     'aria-expanded',
     'true'
   );

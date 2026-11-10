@@ -1,4 +1,4 @@
-import { MENU_POP, TABBAR_MENU, menuConnectServer, openMenu } from './tabbar-menu';
+import { MENU_POP, TABBAR_MENU, TRIGGER, menuConnectServer, openMenu } from './tabbar-menu';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test, expect, type Locator, type Page } from '@playwright/test';
@@ -914,7 +914,7 @@ test('TAX-14：TabBar 融合菜单浮层与 tab 右键菜单互斥——双向�
 
   // ③ 单浮层契约：触发钮 aria-expanded 随开合翻转（旧 ＋/⋯ 簇内切换互斥随双触发
   //    钮退役——menuOpen 单状态下同刻至多一个浮层天然成立）
-  await expect(page.locator(`${TABBAR_MENU} [aria-label="切换工作区"]`)).toHaveAttribute(
+  await expect(page.locator(TRIGGER)).toHaveAttribute(
     'aria-expanded',
     'true'
   );

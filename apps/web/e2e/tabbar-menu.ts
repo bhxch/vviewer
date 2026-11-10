@@ -18,15 +18,17 @@ import { expect, type Locator, type Page } from '@playwright/test';
 /** TabBar 左端融合菜单容器（TabBar.svelte 内固定插槽，不随 tabs 滚动） */
 export const TABBAR_MENU = '.vv-tabbar-menu';
 
-/** 融合菜单触发钮（aria-label="切换工作区"；文本恒「工作区名 ▾」，narrow 分支退役） */
+/** 融合菜单触发钮（类锚；aria-label 动态「工作区：工作区名」——a11y Task 2 真修
+ * label-content-name-mismatch，原静态「切换工作区」红线解除；文本恒「工作区名 ▾」，
+ * narrow 分支退役） */
 export const TRIGGER = `${TABBAR_MENU} .vv-tbmenu-trigger`;
 
 /** 融合菜单浮层（首层 8 行 + 子菜单/行内表单同浮层，同刻至多一个开） */
 export const MENU_POP = '.vv-tbmenu-pop';
 
-/** 点触发钮打开融合菜单浮层（aria-label="切换工作区" 红线逐字） */
+/** 点触发钮打开融合菜单浮层（TRIGGER 类锚） */
 export async function openMenu(page: Page): Promise<void> {
-  await page.locator(`${TABBAR_MENU} [aria-label="切换工作区"]`).click();
+  await page.locator(TRIGGER).click();
   await expect(page.locator(MENU_POP)).toBeVisible();
 }
 

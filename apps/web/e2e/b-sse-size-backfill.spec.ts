@@ -335,7 +335,7 @@ function treeRow(page: Page, name: string) {
 
 /** 连接假服务器（TabBarMenu 融合菜单 → 连接服务器 → 表单） */
 async function connectFakeServer(page: Page, fake: StrFakeServer): Promise<void> {
-  await page.locator('.vv-tabbar-menu [aria-label="切换工作区"]').click();
+  await page.locator('.vv-tabbar-menu .vv-tbmenu-trigger').click();
   await expect(page.locator('.vv-tbmenu-pop')).toBeVisible();
   await page.locator('.vv-tbmenu-pop').getByRole('button', { name: '连接服务器', exact: true }).click();
   const form = page.locator('.vv-tbmenu-pop .vv-server-form');
@@ -677,7 +677,8 @@ test('STR-BACKFILL-03: >1MB 面回填按父目录分组，同目录多 tab 合�
     ] as const) {
       const probeBefore = probeReads(fake.logsSince(mark), path).length;
       await tabNamed(page, name).click();
-      await expect(tabNamed(page, name)).toHaveAttribute('aria-selected', 'true');
+      // a11y Task 2：aria-selected 随 role=tab 落内层 .vv-tab-hit（壳 presentation 化）
+      await expect(tabNamed(page, name).locator('[role="tab"]')).toHaveAttribute('aria-selected', 'true');
       await expect(hexStatus(page)).toContainText('3.0 MB', { timeout: 30_000 });
       await expect(hexStatus(page)).not.toContainText('2.0 MB');
       await expect(page.locator('.vv-error-card')).toHaveCount(0);
@@ -777,7 +778,7 @@ test('STR-CHANNEL-01: 手动刷新通道（TabBarMenu「刷新当前文件」）
     const mark = fake.mark();
     fake.setFile('sub/big.bin', { bytes: makeFile(3 * MB, 2 * MB), treeSize: 3 * MB });
     // 全程不调 notifyChanged（假服务器不推任何帧）——变更只由手动刷新动作触发
-    await page.locator('.vv-tabbar-menu [aria-label="切换工作区"]').click();
+    await page.locator('.vv-tabbar-menu .vv-tbmenu-trigger').click();
     await expect(page.locator('.vv-tbmenu-pop')).toBeVisible();
     await page.locator('.vv-tbmenu-pop').getByRole('button', { name: '刷新当前文件' }).click();
 

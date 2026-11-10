@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
-import { openDirText, waitAppMounted } from './helpers';
+import { openDirText, openFile, tabNamed, waitAppMounted } from './helpers';
 import { openSettings } from './settings-center';
 import { openMenu } from './tabbar-menu';
 
@@ -73,8 +73,9 @@ test.describe('b-a11y-axe 全页可达性扫描（wcag2a+wcag21a 零违规）', 
     await page.goto('/');
     await waitAppMounted(page);
     await openDirText(page, 'a11y-md', 'sample.md', MARKDOWN_SAMPLE);
-    await page.locator('.vv-tree-row', { hasText: 'sample.md' }).click();
-    await expect(page.locator('.vv-tab-name', { hasText: 'sample.md' })).toBeVisible();
+    // openFile 装置含 ≤900px 抽屉断点适配（mobile project 同流）；打开后抽屉已收，
+    // axe 扫的是抽屉关态主区
+    await openFile(page, 'sample.md');
     await expect(page.locator('.vv-markdown')).toBeVisible({ timeout: 20_000 });
     await expectNoAxeViolations(page);
   });
@@ -83,8 +84,8 @@ test.describe('b-a11y-axe 全页可达性扫描（wcag2a+wcag21a 零违规）', 
     await page.goto('/');
     await waitAppMounted(page);
     await openDirText(page, 'a11y-code', 'sample.ts', CODE_SAMPLE);
-    await page.locator('.vv-tree-row', { hasText: 'sample.ts' }).click();
-    await expect(page.locator('.vv-tab-name', { hasText: 'sample.ts' })).toBeVisible();
+    await openFile(page, 'sample.ts');
+    await expect(tabNamed(page, 'sample.ts')).toBeVisible();
     await expectNoAxeViolations(page);
   });
 

@@ -16,7 +16,8 @@ import { ensureRightDrawer } from './drawer';
  *   全量）可选 PDF，run 必关 + 即时重渲染 + ✓ 回显 + （手动）徽标。
  *
  * 简报 Step 2 四处校准的实测事实（2026-10-28 核对源码）：
- * ① 状态栏指示器钮 = `.vv-status-openwith`（aria-label「打开方式」，非简报草稿的
+ * ① 状态栏指示器钮 = `.vv-status-openwith`（aria-label 动态「打开方式: {渲染器}
+ *   （{检出}）」——a11y Task 2 纳入可见值，原静态「打开方式」，非简报草稿的
  *   「渲染器」）；浮层项为 `.vv-status-picker[role=menu]` 内 role=menuitem 按钮
  *   （ViewerPane.svelte :527-536），简报 getByRole('button') 按 menuitem 校准。
  * ② registry 真实 label：jsonl = 「JSON Lines」（render-text/src/jsonl/index.ts:950）、
@@ -122,7 +123,7 @@ test.describe('打开方式「更多渲染器」展开（OWM）', () => {
     await openFile(page, 'aa.txt');
     await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 20_000 });
 
-    // 指示器钮（aria-label「打开方式」——校准①）弹候选浮层（壳 A 既有交互）
+    // 指示器钮（aria-label 动态含可见值，a11y Task 2——校准①）弹候选浮层（壳 A 既有交互）
     const btn = page.locator('.vv-status-openwith');
     await btn.click();
     const picker = page.locator('.vv-status-picker');
