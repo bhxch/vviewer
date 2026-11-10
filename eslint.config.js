@@ -7,8 +7,8 @@
 //
 // 分期激活预留（D6）：i18n 三条纪律——CJK 字面量禁令（Literal/TemplateElement/SvelteText）、
 // 禁裸 Intl.* / toLocale*、禁直读 catalogs——本文件暂不落，随文案抽取收尾任务同 commit
-// 激活（抽取完成前的中间 commit 必须保持 lint 绿）；届时规则块加在「测试放开块」之前，
-// 必命中样例与断言同步补进 lint-selfcheck。
+// 激活（抽取完成前的中间 commit 必须保持 lint 绿）；届时必命中样例与断言同步补进
+// lint-selfcheck。
 import eslint from '@eslint/js';
 import { defineConfig, globalIgnores } from 'eslint/config';
 import svelte from 'eslint-plugin-svelte';
@@ -17,7 +17,7 @@ import tseslint from 'typescript-eslint';
 
 export default defineConfig(
   // 全局 ignores：依赖/构建产物/临时目录/生成物与下载物（ESLint 不读 .gitignore，须显式列）。
-  // grammar-builder/out、.wrangler、.zcode、svgbob-wasm-gen 缺任一即十万级误报（实测）；
+  // grammar-builder/out、.wrangler、.zcode 三处缺任一即十万级误报（spec §4.1 记录的实测结论）；
   // lint-fixtures 为必命中样例，常规 lint 不扫，仅自检测试以 --no-ignore 显式驱动。
   globalIgnores([
     '**/node_modules/**',
