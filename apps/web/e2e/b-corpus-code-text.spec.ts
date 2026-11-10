@@ -459,7 +459,10 @@ if (manifest === null) {
       test.skip(!existsSync(join(CORPUS_DIR, 'linguist-samples', csvDeep.path)), `语料文件缺失：${csvDeep.path}`);
       await mockExternalNoise(page);
       const pageErrors = collectPageErrors(page);
-      await openCodeCorpus(page, 'linguist-samples', csvDeep.path);
+      // 不走 openCodeCorpus（其 helper 锚 .vv-code-pre——csv 已不落 code 面）：直接
+      // 注入+打开通道（FO-08 同款），锚电子表格桥容器
+      await injectDir(page, [corpusSpec('linguist-samples', csvDeep.path)]);
+      await openTreeFile(page, flatName(csvDeep.path));
 
       const host = page.locator('.vv-viewer-host');
       await expect(host.locator('.excel-wrapper')).toBeVisible({ timeout: 45_000 });
