@@ -40,6 +40,11 @@ export default defineConfig(
     'server/target/**',
     'apps/desktop/src-tauri/target/**'
   ]),
+  {
+    // 失效的豁免指令必须红（与 svelte/no-unused-svelte-ignore 禁僵尸 svelte-ignore 对称）：
+    // 写了 disable 而规则并未在此报，说明规则丢了、被改名或被配置顶掉——静默即防线上的洞
+    linterOptions: { reportUnusedDisableDirectives: 'error' }
+  },
   eslint.configs.recommended,
   tseslint.configs.recommended,
   svelte.configs['flat/recommended'],
