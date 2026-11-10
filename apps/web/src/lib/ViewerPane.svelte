@@ -520,6 +520,7 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
           // 读失败（文件已删）→ undefined，blame 落 HEAD 域
           const bytes = await srcStore.read(srcPath).catch(() => undefined);
           const res = await client.blame(repoDir, repoRelPath(repoDir, srcPath), bytes, srcStore, ac.signal);
+          // eslint-disable-next-line svelte/prefer-svelte-reactivity -- blame 行号→归属的一次性构建缓存：存入 cache 供命令式 hover 浮层查表，不进模板/$derived
           const map = new Map<number, GitBlameLine>();
           for (const g of res.lines) {
             for (let k = 0; k < g.numLines; k++) map.set(g.line + k, g);

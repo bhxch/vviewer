@@ -92,6 +92,7 @@
   });
 
   const counts = $derived.by(() => {
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- $derived.by 内的构建期累加器：随 matches 整表重算，返回后只读；响应性由 $derived 整体重算承载
     const c = new Map<string, number>();
     for (const m of matches) {
       const key = `${m.storeId}:${m.path}`;

@@ -852,6 +852,7 @@
       // 同 base+root+basePath 只探测一次（多 workspace 共享同一来源时复用实例，
       // 避免同 id 双 SSE 流）；health 探测 3s 超时，失败不重试、不阻塞启动
       const last = loadLastServer();
+      // eslint-disable-next-line svelte/prefer-svelte-reactivity -- restore 单次流程内的重连单飞去重表：函数局部，仅 reconnectOf 闭包读写，不进模板/$derived
       const reconnected = new Map<string, Promise<TreeStore | null>>();
       const reconnectOf = (src: WorkspaceSource): Promise<TreeStore | null> => {
         const key = `${src.storeBase}|${src.rootIndex ?? 0}|${src.basePath ?? ''}`;
@@ -875,6 +876,7 @@
         // 语义，不会在循环中途改写 activeId 造成串组
         workspaceStore.setActive(wsItem.id);
         // —— 先重建各来源的 store ——
+        // eslint-disable-next-line svelte/prefer-svelte-reactivity -- 本组重建期的局部索引（storeId → 已重建 store）：循环体内读写即弃，不进模板/$derived
         const rebuilt = new Map<string, TreeStore>();
         for (const src of wsItem.sources) {
           if (src.kind === 'localfs') {

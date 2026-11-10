@@ -64,6 +64,7 @@ export function showStatusNotice(text: string, duration = 4000): void {
 /** 目录 tab 显示名：取地址 host（解析失败退回原串）。 */
 export function serverLabel(base: string): string {
   try {
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- 一次性解析取 host，零写入；规则对 .svelte.ts 导出函数内的 new URL 不论可变性整报（瞬时局部对象无响应面）
     return new URL(base).host;
   } catch {
     return base;
@@ -248,6 +249,7 @@ export function applyMountRootIndexMigrations(moves: RootIndexMove[], token: str
   if (moves.length === 0) return;
   // 旧 storeId → 重建实例所需的冻结元数据（须在 sources[] 改写前捕获——改写后
   // sources 的 storeId 已是新值，rootIndex 字段同理不再指向旧索引）
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- 迁移改写期的函数局部暂存：本函数内同步读写即弃，不进任何响应面
   const metaByOldId = new Map<string, { storeBase: string; storeLabel: string; basePath?: string }>();
   for (const s of workspaceStore.list.flatMap((w) => w.sources)) {
     if (s.storeBase === undefined) continue;

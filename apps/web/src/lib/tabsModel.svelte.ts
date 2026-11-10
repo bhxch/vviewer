@@ -569,6 +569,7 @@ async function backfillStreamingSizes(storeId: string, tabs: Tab[]): Promise<voi
     for (const t of tabs) t.rev = (t.rev ?? 0) + 1;
     return;
   }
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- 按父目录分组的函数局部累加器：本次回填内读写即弃，不进任何响应面
   const byDir = new Map<string, Tab[]>();
   for (const t of tabs) {
     const i = t.source.path.lastIndexOf('/');
@@ -621,6 +622,7 @@ const closedStack = new ClosedStack<ClosedTabEntry>(CLOSED_STACK_MAX);
  * 读侧漏更新曾致恢复后左栏树恒空（CMP-04 实测）：读 registryVersion.n 建立
  * 依赖，注册表任何增删必然触发消费者重算。
  */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity -- 见上方 doc：注册表刻意保持普通 Map，响应面由 registryVersion 版本计数显式承载（CMP-04）；换 SvelteMap 须连带重构全部消费点且仅 e2e 可验
 const activeStores = new Map<string, TreeStore>();
 
 /** 注册表版本计数（随 activeStores 增删自增）：消费侧读它建立响应式依赖。 */

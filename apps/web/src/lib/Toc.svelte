@@ -11,6 +11,7 @@
   let activeId = $state<string | null>(null);
   let observer: IntersectionObserver | null = null;
   /** id → 最新回调时该标题 boundingClientRect.top（IO 回调维护；取最小 top 者为当前节） */
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- IO 回调内部簿记：只在回调里读写，不进模板；对外响应面是 activeId（$state）
   let visible = new Map<string, number>();
 
   $effect(() => {

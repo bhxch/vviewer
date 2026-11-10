@@ -76,6 +76,7 @@
                 t.source.name.toLowerCase().includes(q) || t.source.path.toLowerCase().includes(q)
             );
       if (q !== '' && rows.length === 0) continue;
+      // eslint-disable-next-line svelte/prefer-svelte-reactivity -- $derived.by 内的构建期累加器：装入 GroupView 后只读，随分组整表重算；响应性由 $derived 承载
       const badges = new Map<string, string>();
       if (ws.sources.length > 1) {
         for (const s of ws.sources) badges.set(s.storeId, s.storeLabel);
