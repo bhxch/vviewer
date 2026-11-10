@@ -453,7 +453,7 @@ const geoMock = vi.hoisted(() => {
   // 参数按 ForeignHandler 形标注（buffer/target/type/context）——mock.calls 元组随之
   // 带 type 槽（第 2 索引 = 桥接 mount 传入的裸扩展名实参）
   const handler = vi.fn(
-    async (_buffer: ArrayBuffer, _target: HTMLElement, type?: string, _context?: unknown) => ({ unmount: () => {} })
+    async (_buffer: ArrayBuffer, _target: HTMLElement, _type?: string, _context?: unknown) => ({ unmount: () => {} })
   );
   return { handler };
 });

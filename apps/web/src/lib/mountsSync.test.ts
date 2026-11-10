@@ -770,7 +770,6 @@ describe('syncMountsOnConnect 迁移回调（台账 3-1：换索引收集 RootIn
   it('迁移对与 core 工厂联动：重建实例（冻结 label + 新 rootIndex）的 storeId = 正则改写结果', async () => {
     // 3-1 存活 tab 面的换挂互锁锚：openFlow 以快照 storeLabel 原值 + 新索引重建，
     // createRemoteStore 产出的 id 必须恰为 rewriteStoreIdRootIndex 的改写值
-    const rec = recordOf({ registeredRootIndex: 2 });
     const oldLabel = 'srv:8321 · 根2/';
     const oldStore = createRemoteStore(BASE, null, oldLabel, { rootIndex: 2 });
     expect(oldStore.id).toMatch(/^remote:[0-9a-f]{8}:r2$/);

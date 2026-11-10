@@ -199,7 +199,6 @@ test('office：docx 段落 / xlsx 表格与页签 / 大表 200 行截断 / pptx 
 
   // xlsx：<table> + 双 sheet 页签切换（两 sheet 的 table 常驻 DOM，只断言可见 sheet）
   await openFile(page, 'sample.xlsx');
-  const xlsx = page.locator('.vv-xlsx');
   const activeSheet = page.locator('.vv-xlsx-sheet:not([hidden])');
   await expect(activeSheet.locator('table')).toBeVisible({ timeout: 20_000 });
   await expect(activeSheet.locator('table tr').nth(1)).toContainText('苹果'); // 首行为表头

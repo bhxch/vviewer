@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs';
 import JSZip from 'jszip';
 import { test, expect, type Page } from '@playwright/test';
-import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 import { applySettings, closeSettings, gotoGroup, openSettings } from './settings-center';
 
 /**

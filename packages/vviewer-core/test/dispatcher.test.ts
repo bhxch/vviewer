@@ -1385,9 +1385,8 @@ describe('dispatch 全量物化分块泵（计划 2 Task 2，spec §6.4）', () 
     const abortErr = abortReadError(); // store 取消的统一抛出形态（errors 单源）
     const calls: PumpCall[] = [];
     const reports: Array<ReadProgressEvent> = [];
-    let seenBuf: Uint8Array | undefined;
     reg.install(mk('plain', ['pln'], {
-      render: async (buffer) => { seenBuf = buffer; return { destroy() {} }; }
+      render: async () => ({ destroy() {} })
     }));
     // head 探测/首块照常交付；末块挂起直至 signal abort（store 被取消的模拟）
     const read = async (

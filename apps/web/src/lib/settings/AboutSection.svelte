@@ -17,8 +17,9 @@
   import { useSettingsNav } from './nav';
   import type { Settings } from '../stores/settings';
 
-  // 契约占位（注册表统一 { draft, touch } 形态；本节为只读视图，不编辑草稿）
-  let { draft, touch }: { draft: Settings; touch(): void } = $props();
+  // 契约占位（注册表统一 { draft, touch } 形态；本节为只读视图，不编辑草稿，
+  // 形参以 _ 前缀落位占位，props 面 { draft, touch } 契约不变）
+  let { draft: _draft, touch: _touch }: { draft: Settings; touch(): void } = $props();
 
   const navTo = useSettingsNav();
 

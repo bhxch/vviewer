@@ -5,7 +5,7 @@ import { browser } from '$app/env';
 // 「<base>/」前缀（base='' 时为 '/'，子路径托管时为 '/<base>/'），静态资产
 // URL（grammars/queries/runtime wasm）由它拼接，语义与 kit2 的 `${base}/...` 一致。
 const baseUrl = resolve('/');
-import { HighlightClient, HighlightCanceledError } from '@bhxch/vviewer-highlight';
+import { HighlightClient } from '@bhxch/vviewer-highlight';
 import { attachHighlightClient, type CodeHighlightClient, type HighlightCallContext } from '@bhxch/vviewer-render-text';
 import {
   createComputeRouter,

@@ -3218,14 +3218,10 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
       lines.push(head + 'p'.repeat(Math.max(0, 1499 - head.length)) + '\n'); // 每行恰 1500B
     }
     const content = enc(lines.join('')); // ≈5.1MB ≈ 20 块
-    let readCalls = 0;
     const ctx: StreamCtx = {
       size: content.length,
       head: content.slice(0, 8192),
-      read: async (r) => {
-        readCalls += 1;
-        return content.slice(r.start, r.end + 1);
-      }
+      read: async (r) => content.slice(r.start, r.end + 1)
     };
     const host = newHost();
     const handle = renderCode(content.slice(0, 8192), host, { ext: 'js', lang: 'javascript', ctx });

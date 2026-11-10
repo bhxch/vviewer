@@ -5,7 +5,7 @@
 // （decode→replace(/\r\n?/g,'\n')→splitJsonlLines）的逐字节等价性（字符空间映射
 // 回原始字节空间的独立参照实现，与被测字节扫描器不同构）。
 import { describe, expect, it } from 'vitest';
-import { JSONL_OVERSIZE_LINE_BYTES, splitJsonlLines } from '../src/jsonl/parse';
+import { JSONL_OVERSIZE_LINE_BYTES } from '../src/jsonl/parse';
 import { advanceJsonlIndex, createJsonlIndex, finishJsonlIndex } from '../src/jsonl/indexStream';
 
 const enc = new TextEncoder();

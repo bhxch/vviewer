@@ -31,12 +31,6 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * 切换器断言经 expectActiveWorkspace（触发钮恒显「组名 ▾」，narrow 分支随融合菜单退役）。
  */
 
-interface Payload {
-  name: string;
-  type: string;
-  content?: string;
-}
-
 /** 等应用挂载（svelte:window drop 监听与 TabBar 就绪；t-shell waitAppMounted 同款） */
 async function waitAppMounted(page: Page): Promise<void> {
   await page.goto('/');

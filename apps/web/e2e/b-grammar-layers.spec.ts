@@ -27,10 +27,6 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  */
 test.use({ serviceWorkers: 'block' });
 
-/** CDN origin / base（base 含 /grammars/ 目录段，与 VV_GRAMMAR_CDN 构建值一致） */
-const CDN_ORIGIN = 'https://cdn.grammars.test';
-const CDN_BASE = `${CDN_ORIGIN}/grammars/`;
-
 /** 用例载入的 .java 文件内容（短小、语法特征明确：tree-sitter 与 hljs 均可识别） */
 const JAVA_SRC = [
   'package com.vviewer.demo;',

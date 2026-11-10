@@ -12,7 +12,7 @@ describe('anySignal', () => {
     expect(m.reason?.name).toBe('AbortError');
   });
   it('缺失时手写桥接：任一 abort 同步传播', () => {
-    const desc = ANY_DESC; Object.defineProperty(AbortSignal, 'any', { value: undefined, configurable: true });
+    Object.defineProperty(AbortSignal, 'any', { value: undefined, configurable: true });
     const a = new AbortController(), b = new AbortController();
     const m = anySignal(a.signal, b.signal);
     b.abort(new DOMException('y', 'AbortError'));

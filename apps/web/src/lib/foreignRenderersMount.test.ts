@@ -108,7 +108,6 @@ describe('pluginMount 串行队列（终审 I1）', () => {
 
   it('锚二：嵌套 foreign mount 豁免队列内联执行——外层挂起期间嵌套完成（无死锁）且恢复祖先基座', async () => {
     const renderers = createForeignFileRenderers({ nestedDispatch: async () => {} });
-    const ss = renderers.find((r) => r.id === 'foreign-spreadsheet')!;
     const chm = renderers.find((r) => r.id === 'foreign-chm')!;
     // viewer.ts foreignNestedDispatch 镜像：登记深度 → byExtension 分派（此处直连
     // chm 桥）——嵌套链终点的 mount 携嵌套 target，走内联豁免路径

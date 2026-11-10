@@ -43,7 +43,6 @@ const BIN = join(repoRoot, 'server/target/release/vviewer');
 const FIXTURE = process.env.VV_E2E_SERVER_FIXTURE ?? join(repoRoot, '.temp/e2e-server-fixture');
 const BASE = 'http://127.0.0.1:4174';
 const TOKEN = 'srv-e2e-token-42';
-const PAGE_ORIGIN = 'http://127.0.0.1:4174'; // 浏览器页面源（webServer 同源伺服）
 
 const PORT_COMPUTE = 4176;
 const PORT_TOKEN = 4175;

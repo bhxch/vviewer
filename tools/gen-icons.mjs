@@ -6,7 +6,7 @@
 // .gitignore 排除；apps/web build 脚本在 vite build 前调用本脚本）。
 import { deflateSync } from 'node:zlib';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const OUT_DIR = fileURLToPath(new URL('../apps/web/static/icons', import.meta.url));

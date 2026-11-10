@@ -222,7 +222,7 @@ export class TreeSitterEngine {
    * 整文本口径）；返回区间相对子文本，行号平移由调用侧（渲染层）负责。保留形参仅使
    * client → worker → engine 链路显式携带窗口语义（自文档化），实现零分支。
    */
-  async highlight(text: string, lang: string, depth = 0, chunk?: HighlightChunk): Promise<HighlightResult> {
+  async highlight(text: string, lang: string, depth = 0, _chunk?: HighlightChunk): Promise<HighlightResult> {
     try {
       const prepared = await this.prepare(lang);
       if (!prepared) return { ok: false, error: `语言 ${lang} 无可用 grammar 或查询` };

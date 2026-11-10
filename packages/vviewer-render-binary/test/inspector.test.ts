@@ -5,7 +5,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { decodeAt, type InspectorRow } from '../src/inspector';
 import { renderHexBytes, byteIndexAtColumn } from '../src/hexBytes';
-import type { HexHighlight, HexRow } from '../src/hexBytes';
+import type { HexRow } from '../src/hexBytes';
 import { renderHex } from '../src/hex';
 
 // ---- decodeAt：解码表纯函数 ----

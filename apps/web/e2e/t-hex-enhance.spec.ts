@@ -290,7 +290,6 @@ test('HEX-SEARCH-02：文本模式 + 大小写开关（默认敏感）+ 无命�
   await page.goto('/');
   await openDir(page, 'text.bin', makeTextSample());
   await openHexFile(page, 'text.bin');
-  const dump = page.locator('.vv-hex-dump');
   const search = page.locator('.vv-hex-search');
   const status = page.locator('.vv-hex-search-status');
   const caseToggle = page.locator('.vv-hex-search-case');

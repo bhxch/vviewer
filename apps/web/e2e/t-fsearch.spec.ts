@@ -179,23 +179,13 @@ async function activeMarkIndex(page: Page): Promise<number> {
   });
 }
 
-/** 第 n 页（0 起）wrap 顶相对 PDF 滚动容器可视顶的偏移（px）——
- * gotoMatch 为 scrollIntoView({block:'start'})，跨页跳转到位时偏移 ≈0；
- * 工具条页码指示器是 IO 可视集合（含 200px 预热边距）的最小页号，跳转后
- * 前一页仍落在预热区内、文案停留前一页属既有口径，不作为跳转断言 */
-async function pageTopOffset(page: Page, nth: number): Promise<number> {
-  return page.evaluate((n) => {
-    const host = document.querySelector('.vv-pdf-pages');
-    const wrap = document.querySelectorAll('.vv-pdf-page')[n];
-    if (!(host instanceof HTMLElement) || !(wrap instanceof HTMLElement)) return Number.NaN;
-    return Math.round(wrap.getBoundingClientRect().top - host.getBoundingClientRect().top);
-  }, nth);
-}
-
 /**
- * 命中页「顶对齐到位」：页顶贴视口顶（偏移 <5px，与 pageTopOffset 原口径一致），或内容已
+ * 命中页「顶对齐到位」：页顶贴视口顶（wrap 顶相对 PDF 滚动容器可视顶的偏移 <5px——gotoMatch
+ * 为 scrollIntoView({block:'start'})，跨页跳转到位时偏移 ≈0），或内容已
  * 滚到底且页顶落在视口内——PDF 默认 auto 缩放（适宽、封顶 100%）在 mobile 窄视口下页变矮，
  * 末页之后没有足够内容让它贴顶（scrollIntoView 被滚动底界截住），此时到底即是到位。
+ * 工具条页码指示器是 IO 可视集合（含 200px 预热边距）的最小页号，跳转后前一页仍落在
+ * 预热区内、文案停留前一页属既有口径，不作为跳转断言。
  */
 async function pageTopReached(page: Page, nth: number): Promise<boolean> {
   return page.evaluate((n) => {

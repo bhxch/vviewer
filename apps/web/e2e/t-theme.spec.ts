@@ -185,7 +185,6 @@ test('THEME-01: 三显式项（跟随系统/亮/暗）整壳配色变化、local
   await page.goto('/');
   // 融合菜单「主题」子菜单三显式项（标签栏收敛 Task 1：轮换条目退役）；当前项
   // ✓ 前缀回显，点击即收菜单，每轮重开子菜单
-  const mode = () => page.locator('html').getAttribute('data-theme-mode');
   const themeItem = (label: string) =>
     page.locator(MENU_POP).getByRole('button', { name: label });
   const openThemeSubmenu = () => openSubmenu(page, '主题');

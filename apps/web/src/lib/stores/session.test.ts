@@ -1,5 +1,5 @@
 // apps/web/src/lib/stores/session.test.ts
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 // fake-indexeddb 提供 IDB 实现
 import 'fake-indexeddb/auto';

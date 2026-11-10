@@ -17,7 +17,6 @@ import {
   planFetch,
   fetchGrammarSources,
   PATHS,
-  WARN_FILE_BYTES,
 } from '../build.mjs';
 
 const exec = promisify(execFileCb);

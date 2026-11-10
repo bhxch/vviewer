@@ -415,7 +415,7 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
     return;
   }
 
-  const { view, sourcePane, sourceCode } = w;
+  const { view, sourcePane } = w;
   const toggle = w.toggle!; // 非 source 模式恒为 withToggle=true 构造，toggle 必在
 
   // kroki img 构造（spec §6 回退链 local→kroki→错误卡+源码：kroki 模式直走；local
@@ -774,7 +774,7 @@ async function runLightbox(root: Document, ctx: PipelineCtx): Promise<void> {
 // ---------- 装配与执行 ----------
 
 /** 当前配置下的五步有序列表（单一代码来源；runPipeline 即按此顺序执行）。 */
-export function getPipelineSteps(ctx: PipelineCtx): PipelineStep[] {
+export function getPipelineSteps(_ctx: PipelineCtx): PipelineStep[] {
   return [
     { name: 'highlight', run: (r, c) => runHighlight(r, c) },
     { name: 'diagrams', run: (r, c) => runDiagrams(r, c) },

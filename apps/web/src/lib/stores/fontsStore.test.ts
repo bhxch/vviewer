@@ -290,7 +290,7 @@ describe('loadEnabledFontFaces（启动恢复）', () => {
   it('仅 enabled 项注册；损坏项 warn 不阻断其余；停用项不注册', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const a = await addFontFromFile(fileOf([1], 'A.ttf'));
-    const b = await addFontFromFile(fileOf([2], 'B.ttf'));
+    await addFontFromFile(fileOf([2], 'B.ttf'));
     await setEnabledFont(a.id, false);
     const corrupt: FontRecord = {
       id: 'font:corrupt1',

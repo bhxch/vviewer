@@ -13,8 +13,7 @@ import {
   UI_FONT_PRESETS,
   fontFamilyOptions,
   formatFontSize,
-  mergedFamilyOptions,
-  type FontPreset
+  mergedFamilyOptions
 } from './fonts';
 
 // vitest 会转译 import.meta.url（metaStore.test 同款处理）：双 cwd 兼容根/apps/web

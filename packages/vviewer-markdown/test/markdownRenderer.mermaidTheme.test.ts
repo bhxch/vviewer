@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { markdownRenderer, setDiagramOptions, setHighlightFence } from '../src/markdownRenderer';
 import type { MarkdownRenderedInstance } from '../src/markdownRenderer';
-import { renderMermaidInto, type MermaidTheme } from '@bhxch/vviewer-render-diagram';
+import type { MermaidTheme } from '@bhxch/vviewer-render-diagram';
 
 vi.mock('@bhxch/vviewer-render-diagram', async (importOriginal) => {
   const real = await importOriginal<Record<string, unknown>>();
