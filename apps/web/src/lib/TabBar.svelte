@@ -493,8 +493,8 @@
   onpointerleave={() => onleave?.()}
 >
   <!-- 顶栏退役 Task 2：嵌套滚动结构——左端全局动作簇（flex:none 定宽不随滚动）+
-       tabs 横向滚动容器（overflow-x 收进内层）+ 既有管理钮。role=tablist 留守
-       .vv-tabbar（tab 行仍为其后代，DOM 契约 .vv-tab 不变）。标签栏收敛 Task 1：
+       tabs 横向滚动容器（overflow-x 收进内层）+ 既有管理钮。role=tablist 原留守
+       .vv-tabbar，a11y Task 2 落位 .vv-tabbar-tabs（上方容器注）。标签栏收敛 Task 1：
        簇内四件收敛为融合菜单单钮（.vv-tabbar-actions → .vv-tabbar-menu） -->
   <div class="vv-tabbar-menu">
     <TabBarMenu {themeMode} {onsettheme} {onsettings} {onmounts} {zen} {onToggleZen} />
