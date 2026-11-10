@@ -1,4 +1,4 @@
-import { MENU_POP, TABBAR_MENU, TRIGGER, menuConnectServer, menuOpenFile, menuOpenFolder, menuOpenUrl, openMenu, openSubmenu } from './tabbar-menu';
+import { MENU_POP, TRIGGER, menuConnectServer, menuOpenFile, menuOpenFolder, menuOpenUrl, openMenu, openSubmenu } from './tabbar-menu';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
