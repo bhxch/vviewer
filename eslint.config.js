@@ -78,7 +78,8 @@ export default defineConfig(
       // legacy 写法检测：只列强制 runes 下仍运行的三条（逐条实测能报）。`$:` 系四条
       // （no-reactive-functions / no-reactive-literals / no-immutable-reactive-statements /
       // no-extra-reactive-curlies）不列——它们自带条件只在 legacy/未定模式运行，强制 runes
-      // 后是空转；legacy `$:` 六形态已由 valid-compile + runes 以 error 全拦（实测）
+      // 后是空转；legacy `$:` 六形态已由 valid-compile + runes 以 error 全拦（实测）。
+      // 注：前三条 recommended 预设仍会带入（生效配置里看得到），同样不运行
       'svelte/no-dupe-on-directives': 'error',
       'svelte/no-not-function-handler': 'error',
       'svelte/no-at-debug-tags': 'error',
@@ -92,7 +93,8 @@ export default defineConfig(
       // 不列 svelte/require-event-prefix 与 svelte/no-unused-props：两条都依赖类型信息
       // （拿不到 TS program 即整条不运行），本 config 不启用 type-aware（D1），列了也是空转。
       // 回调 props 的 onXxx 命名约定因此不由 lint 执法，降级为评审必查项（由规范文档的
-      // PR 必查清单承接）
+      // PR 必查清单承接）。注：no-unused-props 仍由 recommended 预设以 error 带入、同样
+      // 不运行；日后若启用 type-aware，它会按预设的 error 级生效
       // 丢弃项与占位参数用 _ 前缀豁免
       '@typescript-eslint/no-unused-vars': [
         'error',
