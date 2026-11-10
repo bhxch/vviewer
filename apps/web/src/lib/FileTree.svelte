@@ -70,7 +70,11 @@
 
 <div class="vv-tree" role="tree">
   {#each roots as src (src.storeId)}
-    <div class="vv-tree-src">
+    <!-- 源行 role=treeitem（a11y Task 2 真修）：tree 的 required owned =
+         group/treeitem——原裸 div 子元素被 axe aria-required-children 判 unallowed；
+         行内两钮在 treeitem 内合法（treeitem 无 required owned），展开态以
+         aria-expanded 上行（aria-selected 由树行自身承担，源行不重复） -->
+    <div class="vv-tree-src" role="treeitem" aria-selected={false} aria-expanded={!collapsed[src.storeId]}>
       <button type="button" class="vv-tree-src-toggle" aria-label="折叠/展开 {src.label}"
         aria-expanded={!collapsed[src.storeId]}
         onclick={() => toggleCollapse(src.storeId)}>{collapsed[src.storeId] ? '▸' : '▾'}</button>

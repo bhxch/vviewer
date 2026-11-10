@@ -585,11 +585,13 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
   .vv-tabbar-menu .vv-tbmenu-trigger,
   .vv-tbmenu-item { padding-block: 8px; }
 }
-/* .vv-tab 为 div[role=tab]（U2：激活区与关闭钮拆为兄弟节点，button 内不再嵌交互元素）；
-   cursor 与 font-size 需自带（原先由全局 button 规则提供——U2 去 button 化后 div
-   回落 body 的 16px，字号脱档；§3.2 「tab 名」归 --vv-fs-sm 档，走查 medium）。 */
+/* .vv-tab 为 presentation 壳（a11y Task 2：role=tab 落内层 .vv-tab-hit，close 字形
+   为 aria-hidden span——axe nested-interactive 真修）；cursor 与 font-size 需自带
+   （span 化后无全局 button 规则兜底；§3.2 「tab 名」归 --vv-fs-sm 档，走查 medium）。
+   .vv-tab-hit 内层 flex 复刻壳布局（icon/name/badge 与 close 的间距随壳 gap 6px）。 */
 .vv-tab { display: inline-flex; align-items: center; gap: 6px; border: none; border-right: 1px solid var(--ui-border);
   background: var(--ui-tab-bg); padding: 6px 10px; border-radius: 0; cursor: pointer; font-size: var(--vv-fs-sm); }
+.vv-tab-hit { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 /* 非激活 tab hover（§7/§10-G1，变更：原零响应）。置于 .active 规则之前——同特异性
    (0,2,0) 靠序覆盖，激活 tab 保持 active 底色不受 hover 影响。--ui-tab-bg 与
    --ui-hover-bg 亮暗各为同值（:root:20/22、暗:54/55），直用 hover-bg 零视觉响应，
@@ -599,12 +601,11 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 /* tab 名超长截断（成熟编辑器惯例：单 tab 定宽上限 + ellipsis，全名走 title）：
    上限 200px（VS Code ~240px 档位取紧），否则长文件名单 tab 即撑满整个标签栏 */
 .vv-tab-name { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* 关闭钮改真实 button（U2）：重置全局 button 规则的背景/边框/圆角，还原原 span 观感 */
-.vv-tab-close { background: none; border: none; border-radius: 0; color: inherit; font: inherit;
+/* 关闭字形（a11y Task 2：aria-hidden span 纯指针，键盘关闭走 hit 的 Delete/右键
+   菜单——:focus-visible 等价规则随可聚焦性移除） */
+.vv-tab-close { color: inherit; font: inherit;
   opacity: .6; padding: 0 2px; }
 .vv-tab-close:hover { opacity: 1; }
-/* hover 揭示的键盘等价（§7/§10-G1）；焦点环由 :where(...) focus-visible 全局规则承担 */
-.vv-tab-close:focus-visible { opacity: 1; }
 /* 来源徽标（T6）：仅多源 workspace 显示（TabBar badgeOf），截短走 ellipsis（title 全名）；
    圆角 pill 化（§5.1/§10-G3，变更）：8px→--vv-radius-full，与 wspanel/settings-src
    等同语义徽标归一 */

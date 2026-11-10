@@ -7,8 +7,10 @@
   // themeMode/onsettheme/onsettings/onmounts/zen/onToggleZen 由 AppShell 持有
   // ——订阅链所有权在壳层，本组件只消费；onsettheme 为显式三显项入参（主题
   // 轮换 oncycletheme 退役，spec §8 裁决）。
-  // aria-label/title 逐字沿用（e2e 锚红线：切换工作区/刷新当前文件/目录管理/
-  // 设置/zen 文案随态/文件 URL）；触发钮 title 换「工作区与全局功能菜单」——
+  // aria-label/title 逐字沿用（e2e 锚锚面：刷新当前文件/目录管理/
+  // 设置/zen 文案随态/文件 URL）；触发钮 aria-label 例外（a11y Task 2 真修）：
+  // 静态「切换工作区」改动态「工作区：工作区名」——axe label-content-name-mismatch
+  // 要求可见文本含于 accessible name（模板处注）。触发钮 title 换「工作区与全局功能菜单」——
   // 单钮承载全域，原「新建/重命名/删除」注解归「工作区」子菜单本体。首层条目
   // accessible name=可见文本（chevron ▸/▾ 为 aria-hidden span，不进 name）；
   // 「工作区/打开/主题/粘贴 URL/打开文件/打开文件夹/连接服务器」等条目文案
@@ -213,13 +215,16 @@
   }
 </script>
 
-<!-- 触发钮（spec §3.4 DOM 契约）：class/.aria-label/.aria-expanded 红线逐字；
-     文本恒「工作区名 ▾」（▾ 直排可见文案——name 由 aria-label 决定，不受影响） -->
+<!-- 触发钮（spec §3.4 DOM 契约）：class/.aria-expanded 红线逐字；aria-label 原为
+     静态「切换工作区」（旧红线），axe label-content-name-mismatch（wcag2a，a11y
+     Task 2）真修：可见文本「工作区名 ▾」须含于 accessible name——label 动态
+     「工作区：工作区名」纳入可见值（word 分词后「名」为 label 子序列，▾ 为非
+     字形 token 剥离，双态均匹配）；文本恒「工作区名 ▾」（▾ 直排可见文案） -->
 <button
   type="button"
   class="vv-tbmenu-trigger"
   bind:this={triggerBtn}
-  aria-label="切换工作区"
+  aria-label={`工作区：${activeWorkspace?.name ?? '工作区'}`}
   aria-expanded={menuOpen}
   title="工作区与全局功能菜单"
   onclick={toggleMenu}>{activeWorkspace?.name ?? '工作区'} ▾</button

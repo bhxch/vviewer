@@ -1255,7 +1255,12 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
   {/if}
   {#if engineLabel || metaLabel || rendererLabel || watchLabel || statusNotice.text}
     <div class="vv-statusbar" role="status">
-      {#if rendererLabel}<button type="button" class="vv-status-openwith" bind:this={pickerBtn} aria-haspopup="menu" aria-expanded={pickerOpen} aria-label="打开方式" title="打开方式（点击切换渲染器）" onclick={togglePicker}>打开方式: {rendererLabel}{#if detLabel}&nbsp;（{detLabel}）{/if}</button>{/if}{#if engineLabel}{#if rendererLabel}&nbsp;·&nbsp;{/if}{engineLabel}{#if computeWhereLabel}&nbsp;· 执行: {computeWhereLabel}{/if}{/if}{#if metaLabel}{#if engineLabel || rendererLabel}&nbsp;·&nbsp;{/if}{metaLabel}{/if}{#if wrapCapable}&nbsp;·&nbsp;<button type="button" class="vv-status-wrap" aria-pressed={codeWordWrap} title="自动换行（Alt+Z）" onclick={toggleWordWrap}>换行: {codeWordWrap ? '开' : '关'}</button>{/if}{#if watchLabel}{#if engineLabel || metaLabel || rendererLabel}&nbsp;·{/if} {watchLabel}{/if}{#if statusNotice.text}{#if engineLabel || metaLabel || rendererLabel || watchLabel}&nbsp;·{/if} {statusNotice.text}{/if}
+      <!-- openwith 指示器 aria-label 随可见文本动态拼接（原静态「打开方式」，a11y
+           Task 2 真修）：axe label-content-name-mismatch（wcag2a）要求可见文本
+           「打开方式: {渲染器}（{检出扩展名}）」含于 accessible name——label 与
+           可见值逐 token 等值（&nbsp; 归一空白）；候选浮层 role=menu 的
+           aria-label=「打开方式」不受影响（menu 无可见文本） -->
+      {#if rendererLabel}<button type="button" class="vv-status-openwith" bind:this={pickerBtn} aria-haspopup="menu" aria-expanded={pickerOpen} aria-label={`打开方式: ${rendererLabel}${detLabel === '' ? '' : `（${detLabel}）`}`} title="打开方式（点击切换渲染器）" onclick={togglePicker}>打开方式: {rendererLabel}{#if detLabel}&nbsp;（{detLabel}）{/if}</button>{/if}{#if engineLabel}{#if rendererLabel}&nbsp;·&nbsp;{/if}{engineLabel}{#if computeWhereLabel}&nbsp;· 执行: {computeWhereLabel}{/if}{/if}{#if metaLabel}{#if engineLabel || rendererLabel}&nbsp;·&nbsp;{/if}{metaLabel}{/if}{#if wrapCapable}&nbsp;·&nbsp;<button type="button" class="vv-status-wrap" aria-pressed={codeWordWrap} title="自动换行（Alt+Z）" onclick={toggleWordWrap}>换行: {codeWordWrap ? '开' : '关'}</button>{/if}{#if watchLabel}{#if engineLabel || metaLabel || rendererLabel}&nbsp;·{/if} {watchLabel}{/if}{#if statusNotice.text}{#if engineLabel || metaLabel || rendererLabel || watchLabel}&nbsp;·{/if} {statusNotice.text}{/if}
     </div>
   {/if}
   {#if pickerOpen}

@@ -116,6 +116,10 @@ export function renderCodeWindowed(
   target.classList.add('vv-code');
   const pre = document.createElement('div');
   pre.className = 'vv-code-pre'; // virtualScroller 的滚动容器
+  // 滚动容器键盘可达（a11y Task 2 真修，renderCode 全量路径同款）：overflow:auto
+  // 区域无 tabindex 时，axe scrollable-region-focusable（wcag2a）在横向溢出判违规，
+  // 键盘用户也无法滚动——tabIndex=0 使聚焦后方向键原生滚动
+  pre.tabIndex = 0;
   // 自动换行（全量路径同款）：类名先行（首帧即按模式布局），滚动器行高模型见 index 声明后
   let wrap = opts.wordWrap === true;
   pre.classList.toggle('vv-code-wrap', wrap);

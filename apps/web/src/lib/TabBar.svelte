@@ -418,7 +418,8 @@
     const el = scroller;
     if (el === null) return;
     if (dragFromId !== null) return;
-    el.querySelector<HTMLElement>('[role=tab].active')?.scrollIntoView({
+    // a11y Task 2：role=tab 落内层 .vv-tab-hit 后，.active 仍在壳上——按类锚滚入
+    el.querySelector<HTMLElement>('.vv-tab.active')?.scrollIntoView({
       inline: 'nearest',
       block: 'nearest',
       behavior: 'auto'
@@ -478,14 +479,16 @@
   }
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions, a11y_interactive_supports_focus --><!--
-     pointerenter/leave 为临时条唤出通道（无 AT 语义）；tablist 容器不应持有焦点
-     （键盘焦点在行内各 role=tab 的 div[tabindex=0] 上，ARIA APG tab 惯例） -->
+<!-- svelte-ignore a11y_no_static_element_interactions --><!--
+     pointerenter/leave 为临时条唤出通道（无 AT 语义）。a11y Task 2：role=tablist
+     从本容器落位 .vv-tabbar-tabs（axe aria-required-children：tablist 的
+     required owned=tab，容器直下还挂着融合菜单/箭头/管理钮等非 tab 可聚焦件，
+     一律判 unallowed——落位后 owned 仅剩各 role=tab；键盘焦点在滚动容器内
+     各 role=tab 的 .vv-tab-hit[tabindex=0] 上，ARIA APG tab 惯例） -->
 <div
   class="vv-tabbar"
   class:vv-chrome-temp={temp}
   class:vv-chrome-off={hidden}
-  role="tablist"
   onpointerenter={() => onenter?.()}
   onpointerleave={() => onleave?.()}
 >
@@ -516,6 +519,8 @@
     {/if}
     <div
       class="vv-tabbar-tabs"
+      role="tablist"
+      tabindex="-1"
       bind:this={scroller}
       ondragover={onScrollerDragover}
       ondragleave={onScrollerDragleave}
@@ -523,20 +528,27 @@
     >
     {#each tabs as tab (tab.id)}
       {@const badge = badgeOfFor(tab)}
-      <!-- 遗留 U2：激活区与关闭钮拆为兄弟节点——button 内不得再嵌 span[role=button]
-           （嵌套交互元素违反 a11y 嵌套交互规则）。外层 div[role=tab][tabindex] 键盘可达，
-           Enter/Space 激活需手动接线（ARIA APG 的 tab 键盘约定）；关闭钮为真实 button，
-           Tab 可达、Enter 原生触发。 -->
+      <!-- a11y Task 2 结构落位（axe nested-interactive + aria-required-children 真修，
+           替代遗留 U2 注）：
+           · role=tablist 移至 .vv-tabbar-tabs（required owned=tab 即其直子级；
+             reviewEmpty 使空条态为 needs-review 非 violation）；
+           · tab 为 childrenPresentational 角色（AT 把整钮呈现为单一原子件），
+             内嵌可聚焦件必违 nested-interactive——故 .vv-tab 壳降为
+             presentation（指针/拖拽/右键 handler 全留壳上，类名锚不变），
+             role=tab 落内层 .vv-tab-hit（tabindex/aria-selected/键盘接线随迁）；
+           · 关闭钮改 aria-hidden 纯指针字形（span.vv-tab-close，类名锚不变）：
+             键盘关闭 = hit 聚焦后 Delete/Backspace（编辑器惯例）或右键菜单
+             「关闭」（Shift+F10），键盘路径不丢；aria-hidden + 不可聚焦不触发
+             axe aria-hidden-focus。 -->
+      <!-- presentation 壳不进 AT 树（键盘交互由内层 hit 承担，见上注） -->
       <div
         class="vv-tab"
+        role="presentation"
         class:active={tab.active}
         class:vv-tab-pinned={tab.pinned === true}
         data-pinned={tab.pinned === true ? 'true' : undefined}
         class:vv-tab-dragover={dragOver?.id === tab.id}
         data-drop-before={dragOver?.id === tab.id ? String(dragOver.before) : undefined}
-        role="tab"
-        tabindex="0"
-        aria-selected={tab.active}
         draggable="true"
         onclick={() => activateTab(tab.id)}
         oncontextmenu={(e) => openMenu(e, tab)}
@@ -550,34 +562,44 @@
         ondragover={(e) => ondragover(e, tab)}
         ondragleave={(e) => ondragleave(e, tab)}
         ondrop={(e) => ondrop(e, tab)}
-        ondragend={ondragend}
-        onkeydown={(e) => {
-          // 快捷键只认行本身：Enter/Space 聚焦在行内关闭钮上时不得被行吞掉
-          //（按钮原生触发 closeTab，行级 preventDefault 会截胡——T6 评审移交）
-          if (e.target !== e.currentTarget) return;
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            activateTab(tab.id);
-          }
-        }}>
-        {#if iconTabs}
-          <!-- tab 图标位（图标主题 spec §3.3 tabs 作用域）：文件 tab kind=file、
-               目录 tab（path===''，目录挂载/恢复通道）kind=folder -->
-          <FileIcon kind={tab.source.path === '' ? 'folder' : 'file'} name={tab.source.name} />
-        {/if}
-        <span class="vv-tab-name" title={tab.source.name}>{tab.source.name}</span>
-        {#if badge !== null}
-          <!-- 来源徽标（多源 workspace 才显示）：截短由 CSS ellipsis 承担，title 全名 -->
-          <span class="vv-tab-src" title={badge}>{badge}</span>
-        {/if}
-        <button
-          type="button"
+        ondragend={ondragend}>
+        <div
+          class="vv-tab-hit"
+          role="tab"
+          tabindex="0"
+          aria-selected={tab.active}
+          onkeydown={(e) => {
+            // 键盘接线（ARIA APG tab 键盘约定的本仓形态）：Enter/Space 激活；
+            // Delete/Backspace 关闭（aria-hidden 关闭字形的键盘等价通道）。
+            // 快捷键只认 hit 本身：命中子元素时不吞（现子元素均不可聚焦，防御保留）
+            if (e.target !== e.currentTarget) return;
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              activateTab(tab.id);
+            } else if (e.key === 'Delete' || e.key === 'Backspace') {
+              e.preventDefault();
+              closeTab(tab.id);
+            }
+          }}>
+          {#if iconTabs}
+            <!-- tab 图标位（图标主题 spec §3.3 tabs 作用域）：文件 tab kind=file、
+                 目录 tab（path===''，目录挂载/恢复通道）kind=folder -->
+            <FileIcon kind={tab.source.path === '' ? 'folder' : 'file'} name={tab.source.name} />
+          {/if}
+          <span class="vv-tab-name" title={tab.source.name}>{tab.source.name}</span>
+          {#if badge !== null}
+            <!-- 来源徽标（多源 workspace 才显示）：截短由 CSS ellipsis 承担，title 全名 -->
+            <span class="vv-tab-src" title={badge}>{badge}</span>
+          {/if}
+        </div>
+        <!-- aria-hidden 纯指针字形（键盘关闭走 hit 的 Delete/右键菜单，见上注） -->
+        <span
           class="vv-tab-close"
-          aria-label="关闭 {tab.source.name}"
+          aria-hidden="true"
           onclick={(e) => {
             e.stopPropagation();
             closeTab(tab.id);
-          }}>✕</button>
+          }}>✕</span>
       </div>
     {/each}
     </div>

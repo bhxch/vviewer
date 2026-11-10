@@ -88,6 +88,11 @@ export function renderCode(
   target.classList.add('vv-code');
   const pre = document.createElement('div');
   pre.className = 'vv-code-pre'; // 即 virtualScroller 的滚动容器
+  // 滚动容器键盘可达（a11y Task 2 真修）：overflow:auto 区域无 tabindex 时，
+  // axe scrollable-region-focusable（wcag2a）在横向溢出（窄视口/长行）判违规，
+  // 键盘用户也无法滚动——tabIndex=0 使聚焦后方向键原生滚动（VS Code 同款惯例）；
+  // 不溢出时无副作用（空态聚焦环与滚动持久化均不感知）
+  pre.tabIndex = 0;
   // 自动换行（settings.code.wordWrap；setWordWrap 原地切换）：换行时行在正文列内折行，
   // 滚动器改可变行高（variableScroller + 实例级 RowHeights：按字符数/列数粗估折行、
   // 渲染后实测修正；模式往返且列数未变时测高保留）

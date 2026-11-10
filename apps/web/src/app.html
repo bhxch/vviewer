@@ -1,6 +1,9 @@
 <!doctype html>
 <html lang="zh-CN">
   <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- axe document-title（wcag2a）真修：单页查看器无路由级 svelte:head，静态兜底
+       标题；%sveltekit.head% 内若未来注入 title 则以注入序后者胜出，不冲突 -->
+  <title>vviewer</title>
   <link rel="manifest" href="%sveltekit.assets%/manifest.webmanifest" />
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0d1117" />
