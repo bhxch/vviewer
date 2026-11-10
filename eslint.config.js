@@ -36,6 +36,8 @@ export default defineConfig(
     'tools/lint-selfcheck/lint-fixtures/**',
     // e2e 多源语料：上游仓真实文件（tools/fetch-e2e-corpus.mjs 下载，不入库），非本仓代码
     'apps/web/e2e/fixtures/corpus/**',
+    // 查看器演示语料（各格式样例文件，e2e 打开后按内容断言）：是被查看的内容，不是产品代码
+    'samples/**',
     // Rust 构建目录：无可 lint 文件，但数万文件的遍历使本地全量 lint 耗时翻倍（实测 47s→21s）
     'server/target/**',
     'apps/desktop/src-tauri/target/**'
@@ -143,14 +145,6 @@ export default defineConfig(
     files: ['*.config.js', '*.config.ts', '**/*.mjs'],
     languageOptions: {
       globals: { ...globals.node }
-    }
-  },
-  // samples 下的脚本是查看器演示语料（不执行；e2e 打开后按内容断言，不为过 lint 改写
-  // 内容）：声明其书写环境——node/浏览器通用全局
-  {
-    files: ['samples/**/*.js'],
-    languageOptions: {
-      globals: { ...globals['shared-node-browser'] }
     }
   }
 );
