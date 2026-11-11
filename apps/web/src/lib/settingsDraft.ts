@@ -9,8 +9,9 @@
 // （同一白名单单源），此处只负责「报告」；三类问题同为阻断错误（校验失败不部分
 // 应用，spec §4 导入同纪律），修复后应用时经 normalizeSettings 规范化落值。
 import { resolveDiagramType } from '@bhxch/vviewer-render-diagram';
-import { CODE_SIZE_RANGE, DEFAULTS, ICON_THEME_SCOPE_KEYS, MERMAID_THEME_VALUES, normalizeSettings, RENDERER_DEFAULT_EXT_RE, RENDERER_DEFAULT_ID_RE, saveSettings, STORAGE_MB_RANGE, UI_SIZE_RANGE, type Settings } from './stores/settings';
+import { CODE_SIZE_RANGE, DEFAULTS, ICON_THEME_SCOPE_KEYS, MERMAID_THEME_VALUES, normalizeSettings, REDUCE_MOTION_VALUES, RENDERER_DEFAULT_EXT_RE, RENDERER_DEFAULT_ID_RE, saveSettings, STORAGE_MB_RANGE, UI_SIZE_RANGE, type Settings } from './stores/settings';
 import type { MermaidTheme } from '@bhxch/vviewer-render-diagram';
+import { LOCALES, type Locale } from './i18n/core';
 import { sanitizeLayout } from './layout';
 
 /** 校验问题（field 为顶层字段名或 `节.字段` 点径；'' = JSON 整体语法/形态错误） */
@@ -138,6 +139,15 @@ export function validateSettings(raw: unknown): SettingsIssue[] {
   }
   if (raw.computePolicy !== undefined && !POLICIES.includes(raw.computePolicy as string)) {
     issues.push({ field: 'computePolicy', message: `须为 ${POLICIES.join(' / ')} 之一` });
+  }
+  // locale/reduceMotion 枚举镜像（i18n 基建 D3/D11，validateSettings 逐字段手写
+  // ——SETTINGS_KEYS 白名单自 DEFAULTS 派生只管键集，枚举校验不自动覆盖）：
+  // 与 normalizeSettings 归位闸同口径，脏值标红阻断
+  if (raw.locale !== undefined && !LOCALES.includes(raw.locale as Locale)) {
+    issues.push({ field: 'locale', message: `须为 ${LOCALES.join(' / ')} 之一` });
+  }
+  if (raw.reduceMotion !== undefined && !(REDUCE_MOTION_VALUES as readonly string[]).includes(raw.reduceMotion as string)) {
+    issues.push({ field: 'reduceMotion', message: `须为 ${REDUCE_MOTION_VALUES.join(' / ')} 之一` });
   }
   if (raw.diagrams !== undefined) {
     if (!isObj(raw.diagrams)) {

@@ -2,9 +2,9 @@
   // SettingsCenter.svelte — 统一设置中心（全屏 overlay，settings center spec
   // 2026-10-19 §2/§3/§4）：左侧分组导航 + 右侧 UI/JSON 双视图 + 导入导出。取代
   // SettingsPanel 弹层（TopBar ⚙ 与 Ctrl+, 双入口均指向本页，AppShell 挂载）。
-  // 分组由注册表数组驱动（{ id, label, content }，content 为节组件）——九组定稿
-  // 序（外观/字体/图表/布局/搜索与排除/自动刷新/计算/存储与数据/关于）+ 左导航
-  // 底部导入/导出动作区；后续分组以注册项插入，零骨架改动。
+// 分组由注册表数组驱动（{ id, label, content }，content 为节组件）——定稿序
+// （外观/语言与辅助功能/字体/图表/布局/搜索与排除/自动刷新/计算/存储与数据/关于
+// 等十二组）+ 左导航底部导入/导出动作区；后续分组以注册项插入，零骨架改动。
   // 草稿语义（spec §3）：打开即 openDraft 深拷贝生效 settings；表单节组件只改
   // draft 并调 touch()（仅使 JSON 派生失效，不落盘）；「应用」统一经
   // commit(mergeDraftOnto(最新值, 出发快照, draft))→saveSettings 走集中订阅链
@@ -32,6 +32,7 @@
     type SettingsIssue
   } from './settingsDraft';
   import AppearanceSection from './settings/AppearanceSection.svelte';
+  import LanguageA11ySection from './settings/LanguageA11ySection.svelte';
   import FontsSection from './settings/FontsSection.svelte';
   import CodeSection from './settings/CodeSection.svelte';
   import DiagramsSection from './settings/DiagramsSection.svelte';
@@ -43,6 +44,7 @@
   import StorageSection from './settings/StorageSection.svelte';
   import AboutSection from './settings/AboutSection.svelte';
   import { SETTINGS_NAV_KEY } from './settings/nav';
+  import { t } from './i18n/index.svelte';
 
   let { onclose }: { onclose(): void } = $props();
 
@@ -54,9 +56,13 @@
   }
 
   // 组序（spec §2 定稿序：外观/字体/图表/布局/搜索与排除/自动刷新/计算/存储与数据/关于；
-  // 「代码视图」（自动换行）插在字体之后，「打开方式」（默认渲染器偏好）插在图表之后）
+  // 「代码视图」（自动换行）插在字体之后，「打开方式」（默认渲染器偏好）插在图表之后，
+  // 「语言与辅助功能」（i18n 基建 D3/D11）插在外观之后）。新节组名走 t()——目录
+  // 首批消费者（组件挂载即取当下 locale；既有组名仍为静态中文，随域 C 抽取任务
+  // 迁目录，本任务不扩面）
   const groups: SettingsGroup[] = [
     { id: 'appearance', label: '外观', content: AppearanceSection },
+    { id: 'languageA11y', label: t('settings.nav.languageA11y'), content: LanguageA11ySection },
     { id: 'fonts', label: '字体', content: FontsSection },
     { id: 'code', label: '代码视图', content: CodeSection },
     { id: 'diagrams', label: '图表', content: DiagramsSection },

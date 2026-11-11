@@ -682,3 +682,20 @@ describe('SETTINGS_KEYS DEFAULTS 派生（FE-3：白名单对账机械化）', (
     expect(validateSettings({ ...DEFAULTS, __probe: 1 }).map((i) => i.field)).toContain('__probe');
   });
 });
+
+describe('locale/reduceMotion 枚举镜像（i18n 基建 D3/D11，validateSettings 手写补口）', () => {
+  it('合法枚举零报告；DEFAULTS 序列化含两新字段也零报告（FE-3 派生白名单对账）', () => {
+    expect(validateSettings({ locale: 'zh-CN', reduceMotion: 'system' })).toEqual([]);
+    expect(validateSettings({ locale: 'en', reduceMotion: 'on' })).toEqual([]);
+    expect(validateSettings({ locale: 'zh-CN', reduceMotion: 'off' })).toEqual([]);
+  });
+
+  it('枚举外脏值标红阻断：locale/reduceMotion 各报一条（field 点径记法）', () => {
+    expect(validateSettings({ locale: 'fr' }).map((i) => i.field)).toEqual(['locale']);
+    expect(validateSettings({ reduceMotion: 'reduce' }).map((i) => i.field)).toEqual(['reduceMotion']);
+    expect(validateSettings({ locale: 42 }).map((i) => i.field)).toEqual(['locale']); // 非字符串脏值同口径
+    // 归位语义在 normalizeSettings（静默归位），校验层只回答「哪里不合法」
+    expect(normalizeSettings({ locale: 'fr', reduceMotion: 42 }).locale).toBe('zh-CN');
+    expect(normalizeSettings({ locale: 'fr', reduceMotion: 42 }).reduceMotion).toBe('system');
+  });
+});

@@ -17,7 +17,7 @@ import {
 
 /**
  * b-settings-center 统一设置中心冒烟（settings center spec 2026-10-19，plan Task 5）：
- * - SC-01 骨架与双入口：⋯ 菜单「设置」/Ctrl+, 开合、九组定稿序、切组、Esc 关闭
+ * - SC-01 骨架与双入口：⋯ 菜单「设置」/Ctrl+, 开合、十二组定稿序、切组、Esc 关闭
  * - SC-02 表单↔JSON 双视图：表单改动即时反映 JSON、非法 JSON 阻断（停留标错+
  *   文本不丢+应用拦截）、合法 JSON 应用落盘
  * - SC-03 应用订阅链三线生效：外观+字体+布局一次提交（订阅链 diff 注入语义）；
@@ -53,7 +53,7 @@ function exportFileBuffer(settings: Record<string, unknown>): Buffer {
 }
 
 test.describe('b-settings-center 统一设置中心', () => {
-  test('SC-01 骨架与双入口：融合菜单「设置」/Ctrl+, 开合、九组定稿序、切组、Esc 关闭', async ({ page }) => {
+  test('SC-01 骨架与双入口：融合菜单「设置」/Ctrl+, 开合、十二组定稿序、切组、Esc 关闭', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('.vv-tabbar')).toBeVisible();
 
@@ -65,10 +65,12 @@ test.describe('b-settings-center 统一设置中心', () => {
     await expect(page.getByRole('dialog', { name: '设置' })).toBeVisible();
 
     // 定稿序（spec §2）+「代码视图」（自动换行）插在字体之后、「打开方式」（默认渲染器
-    // 偏好）插在图表之后 + 默认外观组激活
+    // 偏好）插在图表之后、「语言与辅助功能」（i18n 基建，i18n-locale spec）插在
+    // 外观之后 + 默认外观组激活
     const labels = await page.locator('.vv-sc-navitem').allTextContents();
     expect(labels).toEqual([
       '外观',
+      '语言与辅助功能',
       '字体',
       '代码视图',
       '图表',

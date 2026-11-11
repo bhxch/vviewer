@@ -17,7 +17,9 @@ const BASE: Settings = {
   iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } },
   layout: { ...DEFAULT_LAYOUT },
   storage: { remoteDownloadConfirmMb: 512 },
-  rendererDefaults: {}
+  rendererDefaults: {},
+  locale: 'zh-CN',
+  reduceMotion: 'system'
 };
 
 function aSettings(overrides: Partial<Settings>): Settings {
@@ -391,5 +393,33 @@ describe('storage 设置节白名单/clamp（远端下载确认门 spec §6.4，
     saveSettings(aSettings({ storage: { remoteDownloadConfirmMb: 512 } }));
     off();
     expect(loadSettings().storage.remoteDownloadConfirmMb).toBe(512);
+  });
+});
+
+describe('locale/reduceMotion 枚举白名单（i18n 基建 D3/D11）', () => {
+  it('默认：locale zh-CN / reduceMotion system（既有用户零迁移）', () => {
+    localStorage.removeItem('vviewer:settings');
+    expect(loadSettings().locale).toBe('zh-CN');
+    expect(loadSettings().reduceMotion).toBe('system');
+  });
+
+  it('合法枚举原样通过：locale en、reduceMotion on/off 往返一致', () => {
+    saveSettings(aSettings({ locale: 'en', reduceMotion: 'on' }));
+    expect(loadSettings().locale).toBe('en');
+    expect(loadSettings().reduceMotion).toBe('on');
+    saveSettings(aSettings({ locale: 'zh-CN', reduceMotion: 'off' }));
+    expect(loadSettings().reduceMotion).toBe('off');
+  });
+
+  it('枚举外脏值（含非字符串 JSON 脏值）字段级归位默认，不拖垮其余字段', () => {
+    localStorage.setItem(
+      'vviewer:settings',
+      JSON.stringify({ locale: 'fr', reduceMotion: 42, excludedPatterns: ['.git'], autoRefresh: false })
+    );
+    const s = loadSettings();
+    expect(s.locale).toBe('zh-CN');
+    expect(s.reduceMotion).toBe('system');
+    expect(s.excludedPatterns).toEqual(['.git']); // 整体回落 defaults() 则必炸
+    expect(s.autoRefresh).toBe(false);
   });
 });

@@ -11,8 +11,7 @@ import {
   onChange,
   setLocaleInternal,
   translate,
-  type Locale,
-  type MessageKey
+  type Locale
 } from './core';
 import { messages as zhMessages } from './catalogs/zh-CN';
 import { messages as enMessages } from './catalogs/en';
@@ -26,10 +25,9 @@ describe('i18n core（纯 TS 层）', () => {
     expect(getLocale()).toBe('zh-CN');
   });
 
-  it('未知 key 抛错（aelrova「未知文案 key」同款，错误信息带 key）', () => {
-    expect(() => translate('settings.no.such.key' as unknown as MessageKey)).toThrow(
-      /未知文案 key（settings\.no\.such\.key）/
-    );
+  it('未知 key 抛错（aelrova「未知文案 key」同款，错误信息带 key；类型层由 @ts-expect-error 承接）', () => {
+    // @ts-expect-error 故意传入不存在的 key 验证运行时抛错
+    expect(() => translate('settings.no.such.key')).toThrow(/未知文案 key（settings\.no\.such\.key）/);
   });
 
   it('zh 查表 + 占位符插值：translate 取目录值并替换 {占位符}', () => {

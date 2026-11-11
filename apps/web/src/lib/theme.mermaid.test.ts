@@ -30,6 +30,8 @@ function settings(over: Partial<Settings> = {}): Settings {
     layout: { ...DEFAULT_LAYOUT },
     storage: { remoteDownloadConfirmMb: 512 },
     rendererDefaults: {},
+    locale: 'zh-CN',
+    reduceMotion: 'system',
     ...over
   };
 }

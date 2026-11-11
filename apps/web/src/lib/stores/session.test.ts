@@ -65,9 +65,11 @@ describe('session store', () => {
       iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } },
       layout: DEFAULT_LAYOUT,
       storage: { remoteDownloadConfirmMb: 512 },
-      rendererDefaults: {}
+      rendererDefaults: {},
+      locale: 'zh-CN',
+      reduceMotion: 'system'
     });
-    saveSettings({ themeMode: 'dark', appearanceLight: 'default', appearanceDark: 'default', codeThemeLight: 'onelight', codeThemeDark: 'serika-dark', excludedPatterns: ['node_modules'], autoRefresh: false, codeWordWrap: false, computePolicy: 'remote', diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} }, fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 }, iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } }, layout: DEFAULT_LAYOUT, storage: { remoteDownloadConfirmMb: 512 }, rendererDefaults: {} });
+    saveSettings({ themeMode: 'dark', appearanceLight: 'default', appearanceDark: 'default', codeThemeLight: 'onelight', codeThemeDark: 'serika-dark', excludedPatterns: ['node_modules'], autoRefresh: false, codeWordWrap: false, computePolicy: 'remote', diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} }, fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 }, iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } }, layout: DEFAULT_LAYOUT, storage: { remoteDownloadConfirmMb: 512 }, rendererDefaults: {}, locale: 'zh-CN', reduceMotion: 'system' });
     expect(loadSettings().themeMode).toBe('dark');
     expect(loadSettings().computePolicy).toBe('remote');
   });

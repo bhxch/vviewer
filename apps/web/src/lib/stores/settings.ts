@@ -2,11 +2,19 @@ import type { ComputePolicy } from '@bhxch/vviewer-core';
 import { resolveDiagramType, type DiagramMode } from '@bhxch/vviewer-render-diagram';
 import { MERMAID_THEMES, type MermaidTheme } from '@bhxch/vviewer-render-diagram';
 import { DEFAULT_LAYOUT, sanitizeLayout, type LayoutSettings } from '../layout';
+import { LOCALES, type Locale } from '../i18n/core';
 
 /** mermaid 主题设置白名单（spec 2026-10-23 §9.2）：'auto' 跟随外观亮暗（现状语义，
  * 消费侧 viewer.ts 注入器/AppShell 派发经 resolveMermaidTheme 解析），其余为 mermaid
  * 原生主题显式固定。 */
 export const MERMAID_THEME_VALUES: readonly (MermaidTheme | 'auto')[] = ['auto', ...MERMAID_THEMES];
+
+/** reduceMotion 三态白名单（i18n 基建 D11）：'system'=跟随系统 prefers-reduced-motion
+ * （现状语义，CSS media 块承接），'on'=减弱（:root[data-reduce-motion="on"] 块），
+ * 'off'=照常（media 块经 :root:not([data-reduce-motion="off"]) 排除）。
+ * normalizeSettings 与 settingsDraft 校验同源消费；AppShell 接线写 html dataset。 */
+export const REDUCE_MOTION_VALUES = ['system', 'on', 'off'] as const;
+export type ReduceMotion = (typeof REDUCE_MOTION_VALUES)[number];
 
 /** 图表渲染设置（spec 2026-10-19 §2.1）：krokiHost 空串 = 用注册表 DEFAULT_KROKI_HOST；
  * modes 键 = 图表类型 id/别名，值覆盖注册表 defaultMode（Task 7 面板消费）；
@@ -84,6 +92,13 @@ export interface Settings {
    * 不传播）。UI 在 SettingsCenter「打开方式」节；viewer.ts 注入
    * registry.setPreferenceResolver 消费——id 不是该扩展名候选时自动回落内置默认。 */
   rendererDefaults: Record<string, string>;
+  /** 界面语言（i18n 基建 D3）：'zh-CN' 默认（不设 'auto'——CI 浏览器默认 locale
+   * en-US 会使全量 e2e 中文锚整体翻转）。AppShell 启动/订阅接线 setLocale 写
+   * html[lang]；类型单源 i18n/core 的 LOCALES。UI 在「语言与辅助功能」节。 */
+  locale: Locale;
+  /** 减少动效（i18n 基建 D11）：三态白名单见 REDUCE_MOTION_VALUES。AppShell 接线
+   * 写 html data-reduce-motion（system=移除属性，CSS media 块承接）。 */
+  reduceMotion: ReduceMotion;
 }
 
 const KEY = 'vviewer:settings';
@@ -108,7 +123,9 @@ export const DEFAULTS: Settings = {
   iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } },
   layout: DEFAULT_LAYOUT,
   storage: { remoteDownloadConfirmMb: 512 },
-  rendererDefaults: {}
+  rendererDefaults: {},
+  locale: 'zh-CN',
+  reduceMotion: 'system'
 };
 
 const POLICIES: readonly ComputePolicy[] = ['auto', 'local', 'remote'];
@@ -159,6 +176,11 @@ export function normalizeSettings(partial: Record<string, unknown>): Settings {
   // computePolicy 白名单校验：旧版本/手改 localStorage 的非法值回落默认
   if (!POLICIES.includes(s.computePolicy)) s.computePolicy = DEFAULTS.computePolicy;
   if (typeof s.codeWordWrap !== 'boolean') s.codeWordWrap = DEFAULTS.codeWordWrap;
+  // locale/reduceMotion 枚举白名单（i18n 基建 D3/D11）：枚举外脏值（含 JSON 非字符串
+  // 脏值——includes 对任意类型安全）字段级归位默认（zh-CN/system=既有现状语义，
+  // 既有用户零迁移）
+  if (!LOCALES.includes(s.locale)) s.locale = DEFAULTS.locale;
+  if (!REDUCE_MOTION_VALUES.includes(s.reduceMotion)) s.reduceMotion = DEFAULTS.reduceMotion;
   // 外观槽格式白名单（spec 2026-10-12 §2.3）：'default' 或 'vscode:'/'imported:'
   // 前缀；存在性校验（内置名单/imported id）由注入期 warn+回退兜底，此处只挡格式
   for (const key of ['appearanceLight', 'appearanceDark'] as const) {
