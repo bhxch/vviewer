@@ -8,13 +8,17 @@ import { messages as settings } from './zh-CN/settings';
 import { messages as a11y } from './zh-CN/a11y';
 import { messages as shell } from './zh-CN/shell';
 import { messages as tabs } from './zh-CN/tabs';
+import { messages as tree } from './zh-CN/tree';
+import { messages as quickopen } from './zh-CN/quickopen';
 
 /** domain→pack 记录（聚合机检逐域面；键序即注册序，无运行时注入层——单 app 直读目录） */
 export const MESSAGE_PACKS = {
   settings,
   a11y,
   shell,
-  tabs
+  tabs,
+  tree,
+  quickopen
 } as const;
 
-export const messages = { ...settings, ...a11y, ...shell, ...tabs } as const;
+export const messages = { ...settings, ...a11y, ...shell, ...tabs, ...tree, ...quickopen } as const;
