@@ -49,8 +49,11 @@ export async function openDirBytes(page: Page, group: string, name: string, byte
   );
 }
 
-/** 精确名 tab 定位（.vv-tab-name 子元素锚定——tab 根级 textContent 含关闭钮「×」，
- * getByRole('tab') 不可用） */
+/** 精确名 tab 定位（.vv-tab-name 子元素锚定）。历史注记「getByRole('tab') 不可用——
+ * tab 根级 textContent 含关闭钮」已失真：a11y Task 2 后 role=tab 落内层 .vv-tab-hit、
+ * 关闭字形 ✕ 移出且 aria-hidden，getByRole('tab', { name }) 实测可用（2026-11-12 探针，
+ * chromium/mobile 双 project）；本装置保留类锚实现——可访问名随来源徽标（.vv-tab-src）
+ * 与图标主题字形（FileIcon）组合面变化，类锚与名组合解耦更稳 */
 export function tabNamed(page: Page, name: string): Locator {
   return page
     .locator('.vv-tab')

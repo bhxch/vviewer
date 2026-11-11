@@ -87,6 +87,9 @@ test.describe('b-a11y-axe 全页可达性扫描（wcag2a+wcag21a 零违规）', 
     await openDirText(page, 'a11y-code', 'sample.ts', CODE_SAMPLE);
     await openFile(page, 'sample.ts');
     await expect(tabNamed(page, 'sample.ts')).toBeVisible();
+    // 内容挂载守卫（对齐 A11Y-02 对 .vv-markdown 的口径）：防虚拟滚动未挂载时
+    // axe 扫到空主区而静默弱化
+    await expect(page.locator('.vv-code-pre')).toBeVisible({ timeout: 20_000 });
     await expectNoAxeViolations(page);
   });
 

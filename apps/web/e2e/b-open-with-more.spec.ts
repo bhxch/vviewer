@@ -28,7 +28,10 @@ import { ensureRightDrawer } from './drawer';
  *   路径（toggleSub，TA-09 先例），且父项可访问名带「 ›」尾缀——简报的 hover/exact
  *   按 click + 子串匹配校准。
  * ④ tab 定位复用 t-tab-actions 的 tabNamed 装置（.vv-tab-name 子元素锚定，右键菜单
- *   同款）；简报 getByRole('tab') 弃用（tab 根级 textContent 含关闭钮「×」）。
+ *   同款）；简报 getByRole('tab') 弃用系历史口径（a11y Task 2 前关闭字形在 tab 根级
+ *   textContent 内）——Task 2 后 role=tab 落内层 .vv-tab-hit 且 ✕ aria-hidden，
+ *   getByRole('tab', { name }) 已实测可用（Task 13 探针校准）；tabNamed 保留为类锚
+ *   稳态装置（可访问名随徽标/图标字形组合面变化，见 helpers.ts tabNamed 注记）。
  *
  * 已知语义（Task 2 评审裁定，断言面据此校准）：override 指向受限候选外的渲染器时
  * MetaPanel select 回退显示「自动」（受限面无匹配项，回退自动 > 空白选中——Svelte
