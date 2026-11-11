@@ -808,7 +808,9 @@
     // 网络字体启动恢复（字体系统 spec §5.2，Task 5）：enabled 项从 IndexedDB 重建
     // FontFace 并注册 document.fonts——与 dirHandle 会话恢复同层（onMount 启动期、
     // 不阻断启动）；单项失败已在 store 内 warn 不阻断，整体失败（库不可用）仅告警
-    void loadEnabledFontFaces().catch((err: unknown) => console.warn('[fonts] 启动字体恢复失败', err));
+    void loadEnabledFontFaces().catch((err: unknown) =>
+      console.warn('[vviewer] fonts: failed to restore startup fonts', err)
+    );
     // zen 返回键拦截（spec §3.1）：reload 落 zen 时守卫项跨 reload 存活在当前历史项
     // （history.state 持久）——认领之；当前项无守卫（上个会话经浮钮退出后 reload 等）
     // 且在移动断点则补压——reload 后浮钮即在场 + 返回键仍先于离页退出 zen（无困死路径）
@@ -927,7 +929,7 @@
               store = await reconnectOf(src);
             } catch (err) {
               // 重连通道意外抛错：与不可达同待遇——落占位，绝不让单来源拖垮整个恢复
-              console.error(`恢复服务器 ${src.storeBase} 的来源失败`, err);
+              console.error(`[vviewer] shell: failed to restore source from server ${src.storeBase}`, err);
             }
             if (store !== null) {
               rebuilt.set(src.storeId, store);
@@ -952,7 +954,7 @@
                 store = createDirectMountStore(rec);
               } catch (err) {
                 // 记录损坏（backend 不识别等）：落占位，不让单来源拖垮恢复
-                console.warn(`恢复直连挂载 ${src.storeId} 失败`, err);
+                console.warn(`[vviewer] shell: failed to restore direct mount ${src.storeId}`, err);
               }
               if (store !== null) {
                 registerStore(store); // 恢复链入册：不依赖目录 tab 的 addTab 时序（registerStore doc）
@@ -1000,7 +1002,7 @@
       // 合并路径保持用户当前所在（恢复循环的逐组锚定会把活动组拨到快照末组，需拨回）
       workspaceStore.setActive(merging ? userActiveId : snap.activeId);
     } catch (err) {
-      console.error('会话恢复失败，已降级为空会话', err);
+      console.error('[vviewer] shell: session restore failed, falling back to empty session', err);
     }
   }
 
@@ -1252,7 +1254,7 @@
    * 只会原样复抛）。文案即用 t()（a11y.boundary.* 目录键）。
    */
   function onBoundaryError(err: unknown): void {
-    console.error('[vv-boundary] 渲染期未捕获异常', err);
+    console.error('[vv-boundary] uncaught error during rendering', err);
   }
 </script>
 
