@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { TocEntry } from '@bhxch/vviewer-core';
+  import { t } from './i18n/index.svelte';
 
   /** 目录组件（Task 5）：entries 由 ViewerPane 从渲染实例 getToc() 流入（AppShell 中转）。
    * 点击滚动到 heading（scrollIntoView，markdown 的滚动容器是外层 .vv-viewer-scroll）；
@@ -58,9 +59,9 @@
   }
 </script>
 
-<nav class="toc" aria-label="目录">
+<nav class="toc" aria-label={t('viewer.toc.aria')}>
   {#if entries.length === 0}
-    <p class="toc-empty">无标题</p>
+    <p class="toc-empty">{t('viewer.toc.empty')}</p>
   {:else}
     <ul>
       {#each entries as e (e.id)}

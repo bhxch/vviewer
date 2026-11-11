@@ -12,11 +12,10 @@ import type { OutlineEntry } from '@bhxch/vviewer-highlight';
 /** 截断门限：显示集上限（恰等于门限不截断） */
 export const OUTLINE_TRUNCATE_LIMIT = 2000;
 
-/** 截断提示文案（静态面；组件内不再二次插值） */
-export const OUTLINE_TRUNCATE_TEXT = `大纲超过 ${OUTLINE_TRUNCATE_LIMIT} 条，仅显示前 ${OUTLINE_TRUNCATE_LIMIT} 条`;
-
-/** 「全部展开」动作钮文案 */
-export const OUTLINE_EXPAND_ALL_TEXT = '全部展开';
+// Task 10 域 G：截断提示与「全部展开」文案迁移 i18n viewer.outline.*（OutlineView
+// 内 t() 现取，目录值带 {limit} 占位）。原模块级 TEXT 常量在装配时刻锁 locale
+// （Task 7/8 提示常量裁决同款问题），故删除；文案单点语义由目录值承载，本文件
+// 保留门限数值与切片算法单点。
 
 /**
  * 门限截断显示集：未展开且超门限时取前 OUTLINE_TRUNCATE_LIMIT 条，其余（未超门限

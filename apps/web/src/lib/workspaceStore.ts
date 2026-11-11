@@ -10,6 +10,13 @@
  */
 import type { TabSnapshot } from './stores/session';
 
+/**
+ * 默认工作区名（Task 10 D8 审计数据值裁决）：持久化进会话快照的**数据名**非 UI
+ * 文案——locale 化会使已有会话的组名与新建组名分叉（Task 4 §9.5 同裁决），恒定
+ * zh 值经 \u 转义保留（'默认' 的逐字节等价形态，运行时值不变）。
+ */
+const DEFAULT_WORKSPACE_NAME = '\u9ed8\u8ba4';
+
 /** 工作区来源类别：由 storeId 前缀推导（sourceKindOf）。'direct' = S3/WebDAV
  * 浏览器直连挂载（目录挂载 spec §4 阶段三——s3direct:/davdirect: 前缀）。 */
 export type WorkspaceSourceKind = 'localfs' | 'localfiles' | 'remote' | 'direct' | 'single' | 'url';
@@ -95,7 +102,7 @@ export function migrateLegacyTabs(tabs: ReadonlyArray<TabSnapshot>): WorkspacesS
     workspaces: [
       {
         id: 'w1',
-        name: '默认',
+        name: DEFAULT_WORKSPACE_NAME,
         sources,
         createdAt: Date.now(),
         tabs: tabs.map((t) => ({ ...t })),
@@ -155,7 +162,7 @@ export function createWorkspaceState(): {
   /** 内核：空则建默认（不通知）；replaceAll/单例初始化等组合操作复用。 */
   function ensureNonEmptyInternal(): boolean {
     if (list.length > 0) return false;
-    const w: Workspace = { id: nextIdInternal(), name: '默认', sources: [], createdAt: Date.now() };
+    const w: Workspace = { id: nextIdInternal(), name: DEFAULT_WORKSPACE_NAME, sources: [], createdAt: Date.now() };
     list = [w];
     activeId = w.id;
     return true;
@@ -173,7 +180,7 @@ export function createWorkspaceState(): {
     get activeId(): string {
       return activeId;
     },
-    add(name = '默认', sources = []): Workspace {
+    add(name = DEFAULT_WORKSPACE_NAME, sources = []): Workspace {
       const w: Workspace = { id: nextIdInternal(), name, sources: sources.map((s) => ({ ...s })), createdAt: Date.now() };
       list = [...list, w];
       activeId = w.id; // 新建即激活（T4 工作区切换的预期行为）
@@ -190,7 +197,7 @@ export function createWorkspaceState(): {
       if (!list.some((x) => x.id === id)) return;
       if (list.length === 1) {
         // 删最后一个：先建默认再删，保持至少一个工作区
-        const fresh: Workspace = { id: nextIdInternal(), name: '默认', sources: [], createdAt: Date.now() };
+        const fresh: Workspace = { id: nextIdInternal(), name: DEFAULT_WORKSPACE_NAME, sources: [], createdAt: Date.now() };
         list = [fresh];
         activeId = fresh.id;
       } else {
@@ -206,7 +213,7 @@ export function createWorkspaceState(): {
     },
     addSource(wsId: string, source: WorkspaceSource): WorkspaceSource {
       const w = list.find((x) => x.id === wsId);
-      if (!w) throw new Error(`未知工作区: ${wsId}`);
+      if (!w) throw new Error(`unknown workspace: ${wsId}`); // 编程边界防御（不可达路径），非用户可见文案
       const existing = w.sources.find((s) => s.storeId === source.storeId);
       if (existing) return existing; // storeId 去重：重复入组返回既有
       const stored: WorkspaceSource = { ...source };

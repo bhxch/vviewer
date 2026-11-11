@@ -23,6 +23,7 @@ import {
   type MergedGrammarTable
 } from './grammarLayers';
 import { loadCapabilities, loadComputeLanguages, loadLastServer } from './openFlow.svelte';
+import { translate as t } from './i18n/core';
 import { loadSettings } from './stores/settings';
 
 /**
@@ -96,7 +97,7 @@ export function ensureHighlightClient(): Promise<HighlightClient> | null {
         // BUG-06 可观测：创建期失败（worker 创建等；manifest 各层失败已在 grammarLayers
         // 跳层折叠，不再走到这里）同样显式上报，不再零提示静默降级 hljs；
         // rethrow 保持既有 rejected 语义（不重试）
-        console.error(`[vviewer] tree-sitter worker 加载失败：${e instanceof Error ? e.message : String(e)}`);
+        console.error(`[vviewer] tree-sitter worker failed to load: ${e instanceof Error ? e.message : String(e)}`);
         // 同步放行渲染端 attach 等待者（render-text waitForAttachedClient）：
         // 创建失败即解绑，降级 hljs 路径不必等超时（attachHighlightClient(null) 语义）
         clientSettled = true;
@@ -154,8 +155,8 @@ async function remoteHighlight(
   lang: string
 ): Promise<HighlightInterval[]> {
   const call = computeRouter.remoteCall('/api/compute/highlight');
-  if (!call) throw new Error('未连接服务器，无法远程高亮');
-  if (!src.path) throw new Error('远程高亮需要文件的服务端 path');
+  if (!call) throw new Error(t('errors.highlight.noServer'));
+  if (!src.path) throw new Error(t('errors.highlight.needsPath'));
   // 挂 tab 级 abort：cancelHighlight（tab 切换）时中止在途请求，不留无主连接
   const ac = new AbortController();
   remoteAbort = ac;
@@ -166,7 +167,7 @@ async function remoteHighlight(
       body: JSON.stringify({ path: src.path, lang }),
       signal: ac.signal
     });
-    if (!res.ok) throw new Error(`远程高亮失败: HTTP ${res.status}`);
+    if (!res.ok) throw new Error(t('errors.highlight.http', { status: res.status }));
     return decodeHighlightResponse(await res.json());
   } finally {
     if (remoteAbort === ac) remoteAbort = null;
@@ -233,7 +234,7 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
           if (remoteAttempted && res.where === 'local') {
             // auto 回退：远程失败已由 router 折叠，本地高亮兜住可用性；
             // 状态栏 where 已回 local，这里补可观测痕迹（one-off 提示最小实现）
-            console.warn(`[vviewer] 远程高亮失败，已回退本地高亮：${res.error ?? '未知原因'}`);
+            console.warn(`[vviewer] remote highlight failed, fell back to local: ${res.error ?? 'unknown reason'}`);
           }
           return resolveHighlightResult(res);
         });
@@ -266,7 +267,7 @@ async function create(): Promise<HighlightClient> {
   if (layers.length === 0) {
     // BUG-06 可观测：三层全部失败时本地 tree-sitter 必然全链不可用，显式留痕
     // （create 单例只跑一次，此 error 天然一次性；不 reject——hljs 降级仍可用）
-    console.error('[vviewer] grammar 资产三层全部加载失败（同源/服务端/CDN），本地高亮将降级 hljs');
+    console.error('[vviewer] all three grammar asset layers failed (same-origin/server/CDN); local highlighting will fall back to hljs');
   }
   grammarManifest = grammars;
   const worker = new Worker(new URL('./ts-worker.ts', import.meta.url), { type: 'module' });
@@ -288,7 +289,7 @@ async function create(): Promise<HighlightClient> {
     // BUG-06 可观测：worker 脚本/消息错误经显式标签上报——此前该类失败零提示
     // 静默降级 hljs，是「本地 tree-sitter 全链失效却无任何痕迹」的主要观测障碍
     (reason) => {
-      console.error(`[vviewer] tree-sitter worker 加载失败：${reason}`);
+      console.error(`[vviewer] tree-sitter worker failed to load: ${reason}`);
     }
   );
   attachHighlightClient(withDebug(client));

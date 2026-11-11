@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { OutlineEntry } from '@bhxch/vviewer-highlight';
-  import { OUTLINE_EXPAND_ALL_TEXT, OUTLINE_TRUNCATE_TEXT } from './outlineTruncate';
+  import { OUTLINE_TRUNCATE_LIMIT } from './outlineTruncate';
   import { outlineLogicalDepths } from './outlineDepth';
+  import { t, type MessageKey } from './i18n/index.svelte';
 
   /**
    * 代码大纲视图（code-outline Task 3）：entries 由 AppShell 传入——ViewerPane
@@ -35,35 +36,39 @@
     onexpandall?: () => void;
   } = $props();
 
-  /** kind 短名 → 展示名（tags.scm 高频捕获实测枚举：现盘全量 @definition.* grep
-   * 取头部；未收录的残余词形——如 strictdoc 的 section.uid——显示原词不猜测） */
-  const KIND_LABELS: Record<string, string> = {
-    function: '函数',
-    method: '方法',
-    class: '类',
-    struct: '结构体',
-    interface: '接口',
-    enum: '枚举',
-    type: '类型',
-    module: '模块',
-    namespace: '命名空间',
-    constant: '常量',
-    variable: '变量',
-    property: '属性',
-    field: '字段',
-    macro: '宏',
-    union: '联合',
-    trait: '特质',
-    object: '对象',
-    constructor: '构造函数',
-    section: '小节',
-    name: '符号'
-  };
+  /**
+   * kind 短名 → 目录键（tags.scm 高频捕获实测枚举：现盘全量 @definition.* grep
+   * 取头部；未收录的残余词形——如 strictdoc 的 section.uid——显示原词不猜测）。
+   * kind 是提取端稳定标识符（D8 审计），label 经键分支取 viewer.outline.kind.*。
+   */
+  const KIND_LABEL_KEYS = {
+    function: 'viewer.outline.kind.function',
+    method: 'viewer.outline.kind.method',
+    class: 'viewer.outline.kind.class',
+    struct: 'viewer.outline.kind.struct',
+    interface: 'viewer.outline.kind.interface',
+    enum: 'viewer.outline.kind.enum',
+    type: 'viewer.outline.kind.type',
+    module: 'viewer.outline.kind.module',
+    namespace: 'viewer.outline.kind.namespace',
+    constant: 'viewer.outline.kind.constant',
+    variable: 'viewer.outline.kind.variable',
+    property: 'viewer.outline.kind.property',
+    field: 'viewer.outline.kind.field',
+    macro: 'viewer.outline.kind.macro',
+    union: 'viewer.outline.kind.union',
+    trait: 'viewer.outline.kind.trait',
+    object: 'viewer.outline.kind.object',
+    constructor: 'viewer.outline.kind.constructor',
+    section: 'viewer.outline.kind.section',
+    name: 'viewer.outline.kind.name'
+  } as const satisfies Record<string, MessageKey>;
 
   /** 引用条目已由 AppShell outlineDefinitions 单源过滤（props 契约），本组件直吃 */
   function kindLabel(kind: string): string {
     const short = kind.startsWith('definition.') ? kind.slice('definition.'.length) : kind;
-    return KIND_LABELS[short] ?? short;
+    const key = KIND_LABEL_KEYS[short as keyof typeof KIND_LABEL_KEYS];
+    return key !== undefined ? t(key) : short;
   }
 
   /**
@@ -76,15 +81,18 @@
   const depths = $derived(outlineLogicalDepths(entries));
 </script>
 
-<nav class="vv-outline" aria-label="代码大纲">
+<nav class="vv-outline" aria-label={t('viewer.outline.aria')}>
   {#if truncated}
-    <!-- 门限截断提示条（文案/门限常量单点 outlineTruncate）：置列表顶部——容器
-         overflow:auto，置尾部初始不可见须滚 2000 条才能发现；「全部展开」经
-         onexpandall 上抛 AppShell 翻展开态（显示集切片取消，entries 变全量） -->
+    <!-- 门限截断提示条（文案 viewer.outline.* 目录取值，门限数值单点 outlineTruncate）：
+         置列表顶部——容器 overflow:auto，置尾部初始不可见须滚 2000 条才能发现；
+         「全部展开」经 onexpandall 上抛 AppShell 翻展开态（显示集切片取消，
+         entries 变全量） -->
     <div class="vv-outline-truncate" role="note">
-      <span class="vv-outline-truncate-text">{OUTLINE_TRUNCATE_TEXT}</span>
+      <span class="vv-outline-truncate-text">
+        {t('viewer.outline.truncated', { limit: OUTLINE_TRUNCATE_LIMIT })}
+      </span>
       <button type="button" class="vv-outline-expand" onclick={() => onexpandall?.()}>
-        {OUTLINE_EXPAND_ALL_TEXT}
+        {t('viewer.outline.expandAll')}
       </button>
     </div>
   {/if}

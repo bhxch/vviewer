@@ -109,7 +109,7 @@ describe('fetchGrammarManifest（失败折叠为 null + warn）', () => {
     vi.stubGlobal('fetch', vi.fn(async () => res(200, '<!doctype html>', 'text/html; charset=utf-8')));
     await expect(fetchGrammarManifest('/grammars/manifest.json')).resolves.toBeNull();
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(String(warn.mock.calls[0][0])).toContain('非 JSON 资产应答（SPA fallback？）');
+    expect(String(warn.mock.calls[0][0])).toContain('non-JSON asset response (SPA fallback?)');
   });
 });
 

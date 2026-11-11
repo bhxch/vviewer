@@ -49,6 +49,7 @@ describe('mbToBytes（settings MB 字段 → 字节换算单源）', () => {
   });
 });
 
+// Task 10 域 G:确认卡文案目录键化,目录 zh 值双锁
 // ---------- 组件契约：DownloadConfirmCard.svelte（字段/决策回调） ----------
 
 describe('DownloadConfirmCard 骨架（spec §6.4 确认卡字段全锚）', () => {
@@ -62,26 +63,30 @@ describe('DownloadConfirmCard 骨架（spec §6.4 确认卡字段全锚）', () 
     expect(src).toMatch(/oncancel: \(\) => void/);
   });
 
-  it('字段全锚：标题/文件名/大小（formatBytes 单源）/目标渲染器/内存影响文案/开始下载/取消钮', () => {
+  it('字段全锚：标题/文件名/大小（formatBytes 单源）/目标渲染器/内存影响文案/开始下载/取消钮（Task 10 目录键形态双锁）', () => {
     expect(src).toMatch(/vv-dl-confirm-name/);
-    expect(src).toMatch(/\{formatBytes\(sizeBytes\)\}/);
+    expect(src).toMatch(/t\('viewer\.confirm\.size', \{ size: formatBytes\(sizeBytes\) \}\)/);
     expect(src).toMatch(/vv-dl-confirm-renderer/);
     expect(src).toMatch(/vv-dl-confirm-impact/);
-    expect(src).toContain('>开始下载</button>');
-    expect(src).toContain('>取消</button>');
+    expect(src).toContain(">{t('viewer.confirm.start')}</button>");
+    expect(src).toContain(">{t('viewer.dl.cancel')}</button>");
+    expect(zhViewer['viewer.confirm.start']).toBe('开始下载');
+    expect(zhViewer['viewer.dl.cancel']).toBe('取消');
     expect(src).toMatch(/onclick=\{onconfirm\}/);
     expect(src).toMatch(/onclick=\{oncancel\}/);
   });
 
-  it('alertdialog 语义（读屏可达，StorageSection 确认面板先例）：role="alertdialog" + aria-label', () => {
+  it('alertdialog 语义（读屏可达，StorageSection 确认面板先例）：role="alertdialog" + aria-label（Task 10 t() 形态双锁）', () => {
     expect(src).toMatch(/role="alertdialog"/);
-    expect(src).toMatch(/aria-label="确认下载"/);
+    expect(src).toContain("aria-label={t('viewer.confirm.title')}");
+    expect(zhViewer['viewer.confirm.title']).toBe('确认下载');
   });
 
   it('「下载并另存为」次动作（计划 2 Task 7 双形态二）：onsaveas 缺省不渲染（无 FS Access 降级普通下载路径）', () => {
     expect(src).toMatch(/onsaveas\?: \(\) => void/);
     expect(src).toMatch(/\{#if onsaveas !== undefined\}/);
-    expect(src).toContain('>下载并另存为</button>');
+    expect(src).toContain(">{t('viewer.confirm.saveAs')}</button>");
+    expect(zhViewer['viewer.confirm.saveAs']).toBe('下载并另存为');
     expect(src).toMatch(/class="vv-dl-confirm-saveas"/);
   });
 });

@@ -45,20 +45,20 @@ export async function fetchGrammarManifest(url: string): Promise<GrammarTable | 
   try {
     const res = await fetch(url);
     if (!res.ok) {
-      console.warn(`[vviewer] grammar manifest ${url}: HTTP ${res.status}，跳过该资产层`);
+      console.warn(`[vviewer] grammar manifest ${url}: HTTP ${res.status}, skipping this asset layer`);
       return null;
     }
     // SPA-fallback 防御（与 core-parse remoteQueryLoader 的 C1 前端层修复同款）：
     // 静态服务器把缺失 manifest 兜底成 200 index.html 时视为层缺失——不嗅探会在
     // res.json() 抛 SyntaxError 走 catch，warn 文案误导为网络错。
     if ((res.headers.get('content-type') ?? '').includes('text/html')) {
-      console.warn(`[vviewer] grammar manifest ${url}: 非 JSON 资产应答（SPA fallback？），跳过该资产层`);
+      console.warn(`[vviewer] grammar manifest ${url}: non-JSON asset response (SPA fallback?), skipping this asset layer`);
       return null;
     }
     const json = (await res.json()) as { grammars?: GrammarTable };
     return json.grammars ?? null;
   } catch (e) {
-    console.warn(`[vviewer] grammar manifest ${url} 加载失败，跳过该资产层:`, e);
+    console.warn(`[vviewer] grammar manifest ${url} failed to load, skipping this asset layer:`, e);
     return null;
   }
 }

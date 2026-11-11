@@ -40,7 +40,7 @@ describe('openFlow 直连 store 创建分派（带入①创建链路）', () => 
       /export function createDirectMountStore\(rec: DirectMountRecord\): DirectStore \{[\s\S]*?\n\}/
     )![0];
     expect(fn).not.toMatch(/watchHealth\./);
-    expect(fn).toMatch(/直连挂载不支持变更推送/);
+    expect(fn).toMatch(/direct mounts do not support change push/);
   });
 
   it('openDirectMount：存活实例复用（storeById(rec.id)——直连 storeId = 记录 id）+ addDirStoreTab 目录 tab 通道', () => {
@@ -66,7 +66,7 @@ describe('openFlow 直连 store 创建分派（带入①创建链路）', () => 
     const fn = src.match(
       /export function releaseDirectMountStore\(storeId: string\): number \{[\s\S]*?\n\}/
     )![0];
-    expect(fn).toMatch(/showStatusNotice\(`已关闭 \$\{ids\.length\} 个标签页（挂载已释放）`\)/);
+    expect(fn).toMatch(/showStatusNotice\(t\('notice\.openflow\.tabsClosed', \{ n: ids\.length \}\)\)/);
     expect(fn).toMatch(/if \(ids\.length > 0\)/);
   });
 

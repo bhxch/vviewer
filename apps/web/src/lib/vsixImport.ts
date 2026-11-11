@@ -9,6 +9,7 @@
  * 整条拒绝（不部分入库）；单字体 30MB 上限复用 fontsStore 的 MAX_FONT_BYTES。
  */
 import { validateVscodeIconTheme, validateVscodeTheme } from '@bhxch/vviewer-highlight';
+import { translate as t } from './i18n/core';
 import { createZipStore } from '@bhxch/vviewer-render-archive/zipStore';
 import { MAX_FONT_BYTES } from './stores/fontsStore';
 import {
@@ -70,8 +71,7 @@ function parseJson(text: string): { ok: true; value: unknown } | { ok: false } {
   }
 }
 
-const NOT_FOUND = '扩展包内未找到主题';
-const NOT_FOUND_ICONS = '扩展包内未找到图标主题';
+// 「未找到」文案 Task 10 迁 errors.vsix.*（原模块级常量装配时刻锁 locale，改事件时刻取值）
 
 /** contributes 类别键：'themes'（颜色主题）| 'iconThemes'（图标主题）。 */
 type ContributionKey = 'themes' | 'iconThemes';
@@ -83,7 +83,7 @@ type ContributionKey = 'themes' | 'iconThemes';
  * 路径基名。颜色主题路径行为与泛化前逐字不变（既有单测为回归闸）。
  */
 async function readVsixContributions(store: ZipReader, key: ContributionKey): Promise<VsixThemeEntry[]> {
-  const notFound = key === 'iconThemes' ? NOT_FOUND_ICONS : NOT_FOUND;
+  const notFound = key === 'iconThemes' ? t('errors.vsix.iconNotFound') : t('errors.vsix.notFound');
   let bytes: Uint8Array;
   try {
     bytes = await store.read('extension/package.json');
@@ -127,7 +127,7 @@ async function importThemeText(
 ): Promise<void> {
   const parsed = parseJson(text);
   if (!parsed.ok) {
-    errors.push(`${displayName}: 主题 JSON 解析失败`);
+    errors.push(t('errors.vsix.jsonParse', { name: displayName }));
     return;
   }
   const rawObj = (typeof parsed.value === 'object' && parsed.value !== null ? parsed.value : {}) as Record<string, unknown>;
@@ -138,7 +138,7 @@ async function importThemeText(
     errors.push(`${displayName}: ${v.reason}`);
     return;
   }
-  const t: ImportedTheme = {
+  const themeRec: ImportedTheme = {
     id: randomId(),
     name: v.theme.name,
     kind: v.theme.kind,
@@ -147,9 +147,9 @@ async function importThemeText(
     source,
     addedAt: Date.now()
   };
-  if (origin !== undefined) t.origin = origin; // fontsStore rec.url 同款：缺省不落键
-  await putTheme(t);
-  imported.push(t);
+  if (origin !== undefined) themeRec.origin = origin; // fontsStore rec.url 同款：缺省不落键
+  await putTheme(themeRec);
+  imported.push(themeRec);
 }
 
 async function importVsixFile(file: File, imported: ImportedTheme[], errors: string[], origin?: ThemeOrigin): Promise<void> {
@@ -159,7 +159,7 @@ async function importVsixFile(file: File, imported: ImportedTheme[], errors: str
     try {
       const bytes = await store.read(`extension/${path}`);
       if (bytes.byteLength > MAX_THEME_JSON_BYTES) {
-        errors.push(`${label}: 主题 JSON 超过 1MB 上限，已跳过`);
+        errors.push(t('errors.vsix.jsonTooLarge', { name: label }));
         continue;
       }
       await importThemeText(new TextDecoder().decode(bytes), label, label, 'vsix', imported, errors, origin);
@@ -171,7 +171,7 @@ async function importVsixFile(file: File, imported: ImportedTheme[], errors: str
 
 async function importJsonFile(file: File, imported: ImportedTheme[], errors: string[], origin?: ThemeOrigin): Promise<void> {
   if (file.size > MAX_THEME_JSON_BYTES) {
-    errors.push(`${file.name}: 主题 JSON 超过 1MB 上限，已跳过`);
+    errors.push(t('errors.vsix.jsonTooLarge', { name: file.name }));
     return;
   }
   await importThemeText(await file.text(), file.name, basename(file.name).replace(/\.json$/i, ''), 'json', imported, errors, origin);
@@ -190,7 +190,7 @@ export async function importThemeFiles(files: File[], opts: ImportOpts = {}): Pr
     try {
       if (/\.json$/i.test(file.name)) await importJsonFile(file, imported, errors, opts.origin);
       else if (/\.vsix$/i.test(file.name)) await importVsixFile(file, imported, errors, opts.origin);
-      else errors.push(`${file.name}: 不支持的文件类型（仅 .json / .vsix）`);
+      else errors.push(t('errors.vsix.badType', { name: file.name }));
     } catch (err) {
       errors.push(`${file.name}: ${errText(err)}`);
     }
@@ -254,7 +254,7 @@ async function importIconThemeText(
 ): Promise<void> {
   const parsed = parseJson(text);
   if (!parsed.ok) {
-    errors.push(`${displayName}: 主题 JSON 解析失败`);
+    errors.push(t('errors.vsix.jsonParse', { name: displayName }));
     return;
   }
   const rawObj = (typeof parsed.value === 'object' && parsed.value !== null ? parsed.value : {}) as Record<string, unknown>;
@@ -271,11 +271,11 @@ async function importIconThemeText(
       const base = basename(src);
       const bytes = await resolveFont(base);
       if (bytes === null) {
-        errors.push(`${displayName}: 缺少字体文件 ${base}（图标主题字体须同批提供），已跳过`);
+        errors.push(t('errors.vsix.fontMissing', { name: displayName, base }));
         return;
       }
       if (bytes.byteLength > MAX_FONT_BYTES) {
-        errors.push(`${displayName}: 字体 ${base} 超过 30MB 上限，已跳过`);
+        errors.push(t('errors.vsix.fontTooLarge', { name: displayName, base }));
         return;
       }
       const rec: ImportedIconThemeFont = { path: base, data: toArrayBuffer(bytes) };
@@ -284,7 +284,7 @@ async function importIconThemeText(
       fonts.push(rec);
     }
   }
-  const t: ImportedIconTheme = {
+  const iconRec: ImportedIconTheme = {
     id: randomId(),
     name: v.theme.name,
     manifest: v.theme,
@@ -292,9 +292,9 @@ async function importIconThemeText(
     source,
     addedAt: Date.now()
   };
-  if (origin !== undefined) t.origin = origin;
-  await putIconTheme(t);
-  imported.push(t);
+  if (origin !== undefined) iconRec.origin = origin;
+  await putIconTheme(iconRec);
+  imported.push(iconRec);
 }
 
 async function importIconJsonFile(
@@ -305,7 +305,7 @@ async function importIconJsonFile(
   origin?: ThemeOrigin
 ): Promise<void> {
   if (file.size > MAX_THEME_JSON_BYTES) {
-    errors.push(`${file.name}: 主题 JSON 超过 1MB 上限，已跳过`);
+    errors.push(t('errors.vsix.jsonTooLarge', { name: file.name }));
     return;
   }
   const resolveFont: FontResolver = async (base) => {
@@ -350,7 +350,7 @@ async function importIconVsixFile(
     try {
       const bytes = await store.read(`extension/${path}`);
       if (bytes.byteLength > MAX_THEME_JSON_BYTES) {
-        errors.push(`${label}: 主题 JSON 超过 1MB 上限，已跳过`);
+        errors.push(t('errors.vsix.jsonTooLarge', { name: label }));
         continue;
       }
       await importIconThemeText(new TextDecoder().decode(bytes), label, label, 'vsix', resolveFont, imported, errors, origin);
@@ -389,7 +389,7 @@ export async function importIconThemeFiles(
       if (/\.json$/i.test(file.name)) await importIconJsonFile(file, batchFonts, imported, errors, opts.origin);
       else if (/\.vsix$/i.test(file.name)) await importIconVsixFile(file, imported, errors, opts.origin);
       else if (!batchFonts.has(basename(file.name)))
-        errors.push(`${file.name}: 不支持的文件类型（仅 .json / .vsix / 字体文件）`);
+        errors.push(t('errors.vsix.badTypeWithFonts', { name: file.name }));
     } catch (err) {
       errors.push(`${file.name}: ${errText(err)}`);
     }

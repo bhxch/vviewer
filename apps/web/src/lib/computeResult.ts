@@ -1,4 +1,5 @@
 import { isCanceledMessage, RemoteComputeError, type ComputeResult, type HighlightInterval } from '@bhxch/vviewer-core';
+import { translate as t } from './i18n/core';
 import { HighlightCanceledError } from '@bhxch/vviewer-highlight';
 
 /**
@@ -17,6 +18,6 @@ export function resolveHighlightResult(
 ): HighlightInterval[] {
   if (res.ok && res.data) return res.data;
   if (isCanceledMessage(res.error)) throw new HighlightCanceledError();
-  if (res.where === 'remote') throw new RemoteComputeError(res.error ?? '远程高亮失败');
-  throw new Error(res.error ?? '高亮失败');
+  if (res.where === 'remote') throw new RemoteComputeError(res.error ?? t('errors.highlight.remoteFailed'));
+  throw new Error(res.error ?? t('errors.highlight.failed'));
 }

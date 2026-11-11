@@ -115,7 +115,7 @@
       truncated = false;
       degraded = false;
       mountDegraded = false;
-      status = sources.length > 0 ? '' : t('search.noFolder');
+      status = sources.length > 0 ? '' : t('shell.empty.title'); // 同词复用（Task 10 移交项 7：三壳同词并键）
       return;
     }
     const ac = new AbortController();

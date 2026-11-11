@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { OutlineEntry } from '@bhxch/vviewer-highlight';
-import {
-  OUTLINE_EXPAND_ALL_TEXT,
-  OUTLINE_TRUNCATE_LIMIT,
-  OUTLINE_TRUNCATE_TEXT,
-  outlineDisplaySlice
-} from './outlineTruncate';
+import { OUTLINE_TRUNCATE_LIMIT, outlineDisplaySlice } from './outlineTruncate';
+// Task 10 域 G:文案迁 viewer.outline.* 后目录 zh 值双锁(原常量断言的等价承接)
+import { messages as zhViewer } from './i18n/catalogs/zh-CN/viewer';
 
 function entry(line: number): OutlineEntry {
   return { name: `sym${line}`, kind: 'definition.function', line, byteStart: line, byteEnd: line + 1, depth: 0 };
@@ -16,9 +13,9 @@ describe('outlineDisplaySlice（大纲门限截断显示集）', () => {
     expect(OUTLINE_TRUNCATE_LIMIT).toBe(2000);
   });
 
-  it('截断文案含门限数值，「全部展开」文案在册', () => {
-    expect(OUTLINE_TRUNCATE_TEXT).toContain(String(OUTLINE_TRUNCATE_LIMIT));
-    expect(OUTLINE_EXPAND_ALL_TEXT).toBe('全部展开');
+  it('截断文案含门限数值、「全部展开」文案在册(Task 10 迁 viewer.outline.*:目录值双锁)', () => {
+    expect(zhViewer['viewer.outline.truncated']).toBe('大纲超过 {limit} 条，仅显示前 {limit} 条');
+    expect(zhViewer['viewer.outline.expandAll']).toBe('全部展开');
   });
 
   it('未超门限：原数组透传（引用稳定，零切片开销）', () => {

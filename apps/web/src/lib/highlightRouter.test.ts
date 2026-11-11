@@ -270,7 +270,7 @@ describe('routeLargeFileHighlight（阶段 3+4 契约矩阵）', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     await expect(routeLargeFileHighlight(SRC, 'javascript')).resolves.toBeNull();
     expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0]?.[0]).toContain('回退本地');
+    expect(warnSpy.mock.calls[0]?.[0]).toContain('falling back to local chunks');
     warnSpy.mockRestore();
   });
 
@@ -283,7 +283,7 @@ describe('routeLargeFileHighlight（阶段 3+4 契约矩阵）', () => {
     await expect(routeLargeFileHighlight(SRC, 'javascript')).resolves.toBeNull();
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0]?.[0]).toContain('回退本地');
+    expect(warnSpy.mock.calls[0]?.[0]).toContain('falling back to local chunks');
     warnSpy.mockRestore();
   });
 

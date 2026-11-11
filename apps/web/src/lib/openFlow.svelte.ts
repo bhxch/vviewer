@@ -41,6 +41,7 @@ import {
   workspacesView
 } from './tabsModel.svelte';
 import { showStatusNotice, serverLabel, wireStoreWatch } from './serverConnect.svelte';
+import { t } from './i18n/index.svelte';
 
 export * from './tabsModel.svelte';
 export * from './serverConnect.svelte';
@@ -89,7 +90,7 @@ export async function openDirectoryViaPicker(): Promise<void> {
     // （审计 R1 I-3：第四份内联 AbortError 判定迁移 core 单源 isAbortError；Error+name
     // 形态改判为取消对 picker 取消语义更正确，单支判定迁移属行为微扩，审计已定性）
     if (isAbortError(err)) {
-      showStatusNotice('已取消选择文件夹');
+      showStatusNotice(t('notice.openflow.pickCanceled'));
       return;
     }
     throw err;
@@ -107,11 +108,11 @@ export async function openDirectoryViaPicker(): Promise<void> {
 export async function openSavedDirectory(): Promise<void> {
   const handle = await loadDirHandle();
   if (handle === null) {
-    showStatusNotice('没有已保存的文件夹授权');
+    showStatusNotice(t('notice.openflow.noSavedGrant'));
     return;
   }
   if (!(await ensurePermission(handle))) {
-    showStatusNotice('文件夹授权已失效，请重新选择');
+    showStatusNotice(t('notice.openflow.grantExpired'));
     return;
   }
   addDirStoreTab(createLocalFsStore(handle));
@@ -122,7 +123,7 @@ export function openDirectoryViaInput(files: FileList | File[]): void {
   if (all.length === 0) {
     // 空目录（input webkitdirectory 选空文件夹 / 拖入空目录）：此前静默无反馈，
     // 状态栏一次性提示说明原因（遗留 U1）
-    showStatusNotice('所选文件夹为空');
+    showStatusNotice(t('notice.openflow.emptyFolder'));
     return;
   }
   const firstPath = all.find((f) => f.webkitRelativePath !== '')?.webkitRelativePath;
@@ -146,7 +147,7 @@ function openDirectoryViaInputFallback(): void {
     if (input.files) openDirectoryViaInput(input.files);
   };
   // BUG-19：webkitdirectory 回退通道的用户取消此前零反馈——cancel 事件接同一文案
-  input.oncancel = () => showStatusNotice('已取消选择文件夹');
+  input.oncancel = () => showStatusNotice(t('notice.openflow.pickCanceled'));
   input.click();
 }
 
@@ -261,7 +262,7 @@ export function createDirectMountStore(rec: DirectMountRecord): DirectStore {
       tabStore.refreshPaths(store.id, paths);
     },
     () => {
-      console.warn('[vviewer] 直连挂载不支持变更推送，自动刷新对该来源不可用');
+      console.warn('[vviewer] direct mounts do not support change push; auto-refresh unavailable for this source');
     }
   );
   return store;
@@ -291,7 +292,7 @@ export function releaseDirectMountStore(storeId: string): number {
   for (const id of ids) tabStore.close(id, { undoable: false });
   // 台账 3-21：批量关闭（undoable:false 豁免撤销）此前静默——用户视角 tab 凭空消失。
   // 状态栏一次性提示说明去向；0 = 无存活实例（幂等调用），无动作不提示。
-  if (ids.length > 0) showStatusNotice(`已关闭 ${ids.length} 个标签页（挂载已释放）`);
+  if (ids.length > 0) showStatusNotice(t('notice.openflow.tabsClosed', { n: ids.length }));
   return ids.length;
 }
 
@@ -305,7 +306,11 @@ function remoteSourceLabel(base: string, rootIndex: number, basePath: string, fi
   const host = serverLabel(base);
   if (rootIndex === 0 && basePath === '') return host;
   const tail = basePath.split('/').pop() ?? basePath;
-  return rootIndex === 0 ? `${host}/${tail}` : `${host} · 根${rootIndex}/${tail}`;
+  // 「· 根N」是 storeId hash 的输入成分（remote:${hash8(`${base}:${label}`)}），属
+  // 标识串非显示文案（D8 审计裁决）：locale 化会使同一 rootIndex/basePath 在不同
+  // locale 下派生不同 storeId（双 SSE 流/双树行/快照恢复链 storeLabel 回环断裂）。
+  // 恒定值经 \u 转义保留（' · 根' 的逐字节等价形态，运行时值不变）。
+  return rootIndex === 0 ? `${host}/${tail}` : `${host} · \u6839${rootIndex}/${tail}`;
 }
 
 /**
@@ -339,7 +344,7 @@ export function openUrl(url: string): void {
   // path==='' 替换扫描把它当目录 tab 静默误关）。目录形态 URL 明确拒绝：状态栏一次性
   // 提示说明，不建 tab（真实目录请走「连接服务器」/打开文件夹通道）。
   if (name === '') {
-    showStatusNotice('URL 以 / 结尾：指向目录而非文件，未打开');
+    showStatusNotice(t('notice.openflow.urlIsDirectory'));
     return;
   }
   // url 打开时大小未知：显式 null（读策略走 head 探测）

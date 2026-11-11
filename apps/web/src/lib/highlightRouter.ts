@@ -17,6 +17,7 @@ import {
 } from '@bhxch/vviewer-core';
 import { computeRouter } from './highlightClient';
 import { loadCapabilities, loadComputeLanguages } from './openFlow.svelte';
+import { translate as t } from './i18n/core';
 import { loadSettings } from './stores/settings';
 
 /**
@@ -106,7 +107,7 @@ export async function routeLargeFileHighlight(
   // remoteCall 判空在 try 内：auto 未连接 → warn+null 回退；remote 未连接 → 抛错错误卡片
   try {
     const call = computeRouter.remoteCall('/api/compute/highlight');
-    if (!call) throw new Error('未连接服务器，无法远程高亮');
+    if (!call) throw new Error(t('errors.highlight.noServer'));
     // 不挂 tab 级 abort：tab 切换后渲染端以 destroyed 丢弃结果，短连接可接受
     //（常规远程高亮的 remoteAbort 管线在 highlightClient，本链路不经它）
     // CMP-02/2：会话缓存有条目则随请求携带 cacheId 令牌，服务端校验命中回极小帧
@@ -124,7 +125,7 @@ export async function routeLargeFileHighlight(
         ...(cached ? { cacheId: cached.cacheId } : {})
       })
     });
-    if (!res.ok) throw new Error(`远程高亮失败: HTTP ${res.status}`);
+    if (!res.ok) throw new Error(t('errors.highlight.http', { status: res.status }));
     // json 单次消费：decode 与 baseLine 同源读取；baseLine 缺失 = 旧服务端，兜 0
     const json: unknown = await res.json();
     const rawBaseLine = (json as { baseLine?: unknown }).baseLine;
@@ -134,7 +135,7 @@ export async function routeLargeFileHighlight(
     // 条目必在（令牌即来自它；被容量逐出则本轮请求根本不会带令牌）
     if ((json as { cached?: unknown }).cached === true) {
       if (cached) return { intervals: cached.intervals, baseLine };
-      throw new Error('远程高亮缓存命中但本地会话条目缺失');
+      throw new Error(t('errors.highlight.cacheMissing'));
     }
     const intervals = decodeHighlightResponse(json);
     const cacheId = (json as { cacheId?: unknown }).cacheId;
@@ -150,7 +151,7 @@ export async function routeLargeFileHighlight(
     // 413 仍落此回退）
     if (policy === 'auto') {
       console.warn(
-        `[vviewer] 大文件远程高亮失败，回退本地分块：${err instanceof Error ? err.message : String(err)}`
+        `[vviewer] large-file remote highlight failed, falling back to local chunks: ${err instanceof Error ? err.message : String(err)}`
       );
       return null;
     }

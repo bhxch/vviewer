@@ -119,7 +119,7 @@ async function swapFaces(
       if (meta === undefined) continue;
       const entry = datas[i];
       if (entry === undefined) {
-        console.warn(`[icons] 主题「${manifest.name || themeKey}」字体 ${meta.id} 缺字节，该字体字形回退系统字体`);
+        console.warn(`[icons] font ${meta.id} of theme "${manifest.name || themeKey}" is missing bytes; its glyphs fall back to system fonts`);
         fontsOk = false;
         continue;
       }
@@ -130,7 +130,7 @@ async function swapFaces(
       try {
         await face.load();
       } catch (err) {
-        console.warn(`[icons] 字体 ${meta.id} 解析失败（内容不是有效字体？）`, err);
+        console.warn(`[icons] failed to parse font ${meta.id} (content is not a valid font?)`, err);
         fontsOk = false;
         continue;
       }
@@ -141,7 +141,7 @@ async function swapFaces(
     try {
       document.fonts.add(face);
     } catch (err) {
-      console.warn('[icons] FontFace 注册失败', err);
+      console.warn('[icons] FontFace registration failed', err);
       fontsOk = false;
     }
   }
@@ -188,7 +188,7 @@ export function applyIconsFromSettings(s: Settings): Promise<void> {
       } else {
         // 引用回落语义（颜色主题同款）：记录已被删除，运行时降级无图标；设置槽
         // 回写 'none' 由删除流程负责
-        console.warn(`[icons] 设置引用的图标主题不存在（已被删除？）：${themeKey}，回退无图标`);
+        console.warn(`[icons] icon theme referenced by settings does not exist (deleted?): ${themeKey}, falling back to no icons`);
       }
     } else if (themeKey === 'seti') {
       if (builtinLoader !== null) {
@@ -199,7 +199,7 @@ export function applyIconsFromSettings(s: Settings): Promise<void> {
         }
       } else if (!warnedNoBuiltinLoader) {
         warnedNoBuiltinLoader = true;
-        console.warn('[icons] builtin 图标主题 loader 未注册（Seti 资产未接入，Task 4），回退无图标');
+        console.warn('[icons] builtin icon theme loader not registered (Seti assets not wired, Task 4), falling back to no icons');
       }
     }
     // 'none' 与其余脏键：白名单已挡，此处 manifest 恒 null = 纯注销

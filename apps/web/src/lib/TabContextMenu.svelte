@@ -32,6 +32,7 @@
    // snippet 渲染，深层子浮层 absolute 于上一层子浮层（同法测位）。Esc 逐层收
    // 子菜单，收尽再关主菜单。
   import type { Tab } from './openFlow.svelte';
+  import { t } from './i18n/index.svelte';
 
   let {
     x,
@@ -176,7 +177,7 @@
   class="vv-tabctx"
   role="menu"
   tabindex="-1"
-  aria-label="标签菜单 {tab.source.name}"
+  aria-label={t('tabs.ctx.menuAria', { name: tab.source.name })}
   style:left="{pos.left}px"
   style:top="{pos.top}px"
   bind:this={menuEl}

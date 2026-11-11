@@ -6,43 +6,62 @@
  *   fontFamilyOptions 装配时并入默认选项位，不产生重复选项值；
  * - 按可用性分化不承诺（spec §4）：本机缺失的预设由浏览器回退，不做探测。
  * Task 5 网络字体管理列表以下拉合并源身份复用本清单（fontFamilyOptions）。
+ * Task 10 域 G：label 迁目录键（settings.fonts.preset.*，消费点 t() 现取）；
+ * value 与样张的 CJK 是数据值（family 名/字形样本），\u 转义保留恒定字节。
  */
 
-/** 预设项：value 存 settings，label 供下拉显示 */
+import { translate } from './i18n/core';
+
+// t 的松散签名(gitClient tLoose / index.svelte coreTranslateLoose 先例):label 是
+// \`settings.fonts.preset.${string}\` 模板键类型,规范 TFunction 的占位符模板推导对
+// 模板键类型推不出空参元组(编译误报必传参)——键与占位符的对齐由目录 satisfies
+// 与消费点字面键保证,此处以 loose 面承接键分支形态。
+type LooseT = (key: string, params?: Record<string, string | number>) => string;
+const t = translate as unknown as LooseT;
+
+/**
+ * 预设项：value 存 settings（family 名数据值，不翻译——含 CJK 的 family 名以
+ * \u 转义保留恒定字节，运行时值逐字节不变）；label 是下拉显示文案的目录键
+ * （settings.fonts.preset.*）——消费点（fontFamilyOptions/mergedFamilyOptions）
+ * t(label) 当下取值。
+ */
 export interface FontPreset {
   value: string;
-  label: string;
+  label: `settings.fonts.preset.${string}`;
 }
 
 /** UI 槽预设（spec §4 UI 组 8 项，无衬线） */
 export const UI_FONT_PRESETS: readonly FontPreset[] = [
-  { value: 'system-ui', label: 'system-ui（默认无衬线）' },
-  { value: '微软雅黑', label: '微软雅黑 Microsoft YaHei' },
-  { value: 'PingFang SC', label: 'PingFang SC 苹方' },
-  { value: 'Noto Sans CJK SC', label: 'Noto Sans CJK SC' },
-  { value: '思源黑体', label: '思源黑体 Source Han Sans' },
-  { value: 'Segoe UI', label: 'Segoe UI（Windows）' },
-  { value: 'Roboto', label: 'Roboto（Android）' },
-  { value: 'Helvetica Neue', label: 'Helvetica Neue（macOS）' }
+  { value: 'system-ui', label: 'settings.fonts.preset.systemUi' },
+  { value: '\u5fae\u8f6f\u96c5\u9ed1', label: 'settings.fonts.preset.microsoftYaHei' },
+  { value: 'PingFang SC', label: 'settings.fonts.preset.pingFangSc' },
+  { value: 'Noto Sans CJK SC', label: 'settings.fonts.preset.notoSansCjkSc' },
+  { value: '\u601d\u6e90\u9ed1\u4f53', label: 'settings.fonts.preset.sourceHanSans' },
+  { value: 'Segoe UI', label: 'settings.fonts.preset.segoeUi' },
+  { value: 'Roboto', label: 'settings.fonts.preset.roboto' },
+  { value: 'Helvetica Neue', label: 'settings.fonts.preset.helveticaNeue' }
 ];
 
 /** 代码槽预设（spec §4 代码组 10 项，等宽；首项为默认占位 value ''） */
 export const CODE_FONT_PRESETS: readonly FontPreset[] = [
-  { value: '', label: '默认等宽栈' },
-  { value: 'JetBrains Mono', label: 'JetBrains Mono' },
-  { value: 'Fira Code', label: 'Fira Code' },
-  { value: 'Cascadia Code', label: 'Cascadia Code（Windows 11）' },
-  { value: 'Consolas', label: 'Consolas（Windows）' },
-  { value: 'Menlo', label: 'Menlo（macOS）' },
-  { value: 'SF Mono', label: 'SF Mono（macOS）' },
-  { value: 'Source Code Pro', label: 'Source Code Pro' },
-  { value: 'Sarasa Mono SC', label: '更纱等宽 Sarasa Mono SC' },
-  { value: 'Noto Sans Mono CJK SC', label: 'Noto Sans Mono CJK SC' }
+  { value: '', label: 'settings.fonts.preset.defaultMono' },
+  { value: 'JetBrains Mono', label: 'settings.fonts.preset.jetbrainsMono' },
+  { value: 'Fira Code', label: 'settings.fonts.preset.firaCode' },
+  { value: 'Cascadia Code', label: 'settings.fonts.preset.cascadiaCode' },
+  { value: 'Consolas', label: 'settings.fonts.preset.consolas' },
+  { value: 'Menlo', label: 'settings.fonts.preset.menlo' },
+  { value: 'SF Mono', label: 'settings.fonts.preset.sfMono' },
+  { value: 'Source Code Pro', label: 'settings.fonts.preset.sourceCodePro' },
+  { value: 'Sarasa Mono SC', label: 'settings.fonts.preset.sarasaMonoSc' },
+  { value: 'Noto Sans Mono CJK SC', label: 'settings.fonts.preset.notoSansMonoCjkSc' }
 ];
 
-/** 样张文本（spec §4）：中英数与易混形字符（0O、Il、1|）齐全——面板预览与
- * Task 5 管理列表样张共用 */
-export const FONT_SPECIMEN = 'AaBbYyZz 0123 永江流千里 0OIl1|';
+/**
+ * 样张文本（spec §4）：中英数与易混形字符（0O、Il、1|）齐全——面板预览与
+ * Task 5 管理列表样张共用。中文字形段是字体渲染预览的固定样本数据（en 态同样
+ * 要展示 CJK 字形效果），非翻译文案——D8 审计数据值裁决，\u 转义保留恒定值。
+ */
+export const FONT_SPECIMEN = 'AaBbYyZz 0123 \u6c38\u6c5f\u6d41\u5343\u91cc 0OIl1|';
 
 /** 「自定义…」选项哨兵：select 选中它 = 展开手输框（预设清单值不会取此形态） */
 export const CUSTOM_FONT_SENTINEL = '__custom__';
@@ -58,11 +77,11 @@ export interface FontFamilyOption {
  * +「自定义…」哨兵收尾；输出值唯一（spec 默认项并入默认位，不重复出现）。
  */
 export function fontFamilyOptions(presets: readonly FontPreset[]): FontFamilyOption[] {
-  const defaultLabel = presets.find((p) => p.value === '')?.label ?? '默认';
+  const defaultKey = presets.find((p) => p.value === '')?.label ?? 'settings.fonts.preset.default';
   return [
-    { value: '', label: defaultLabel },
-    ...presets.filter((p) => p.value !== '').map((p) => ({ value: p.value, label: p.label })),
-    { value: CUSTOM_FONT_SENTINEL, label: '自定义…' }
+    { value: '', label: t(defaultKey) },
+    ...presets.filter((p) => p.value !== '').map((p) => ({ value: p.value, label: t(p.label) })),
+    { value: CUSTOM_FONT_SENTINEL, label: t('settings.fonts.preset.custom') }
   ];
 }
 
@@ -83,7 +102,7 @@ export function mergedFamilyOptions(
   const taken = new Set(base.map((o) => o.value));
   const net = networkNames
     .filter((n) => !taken.has(n))
-    .map((n) => ({ value: n, label: `${n}（网络）` }));
+    .map((n) => ({ value: n, label: t('settings.fonts.preset.network', { name: n }) }));
   return [...base.slice(0, -1), ...net, sentinel];
 }
 

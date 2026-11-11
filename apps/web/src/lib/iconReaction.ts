@@ -31,7 +31,7 @@ export async function reactToIconsChange(s: Settings, onIconsChanged: () => void
   try {
     await mod.applyIconsFromSettings(s);
   } catch (err) {
-    console.warn('[icons] 图标主题应用失败', err);
+    console.warn('[icons] failed to apply icon theme', err);
     return false;
   }
   onIconsChanged();

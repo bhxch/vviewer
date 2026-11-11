@@ -612,7 +612,20 @@ export function createForeignFileRenderers(opts: { nestedDispatch: NestedDispatc
     };
     // 候选声明在装配层附加（桥接契约零改动）：组内路由按扩展名取 handler，候选扩展名
     // 与自有扩展名同一路径（pluginMount d.get(ext)），无需桥接层感知
-    const renderer: Renderer = g.altExtensions ? { ...withLabel, altExtensions: [...g.altExtensions] } : withLabel;
+    const renderer: Renderer = g.altExtensions
+      ? {
+          ...withLabel,
+          // 委托 getter（Task 7 M-1 清偿）：spread 会把 withLabel 的 label getter
+          // 求值固化为装配时刻字符串（锁 zh）——此处以 getter 覆盖 spread 结果的
+          // label 数据位，回委托 withLabel 的 getter，消费点每次读仍现求值 t()。
+          // 当前上游无 altExtensions 声明（死分支，预留扩展位），形态正确性在此
+          // 预置以防未来启用时静默锁 locale。
+          get label() {
+            return withLabel.label;
+          },
+          altExtensions: [...g.altExtensions]
+        }
+      : withLabel;
     return g.id === 'foreign-geo' ? withSingleFileShpGuard(renderer) : renderer;
   });
 }

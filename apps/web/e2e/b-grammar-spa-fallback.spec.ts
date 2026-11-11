@@ -126,7 +126,7 @@ async function lastHighlight(page: Page): Promise<{ ok?: boolean; lang?: string 
 interface WarnProbe {
   /** 嗅探路径 warn（「非 JSON 资产应答（SPA fallback？）」） */
   spa: string[];
-  /** 全部跳层 warn（文案含「跳过该资产层」尾巴） */
+  /** 全部跳层 warn（文案含 "skipping this asset layer" 尾巴——Task 10 日志英文化，观测口径跟进） */
   layerSkip: string[];
   /** per-language 准备失败 warn（文案含「grammar/查询准备失败」） */
   langPrepFail: string[];
@@ -138,8 +138,8 @@ function attachWarnProbe(page: Page): WarnProbe {
   page.on('console', (msg) => {
     if (msg.type() !== 'warning') return;
     const text = msg.text();
-    if (text.includes('非 JSON 资产应答')) probe.spa.push(text);
-    if (text.includes('跳过该资产层')) probe.layerSkip.push(text);
+    if (text.includes('non-JSON asset response')) probe.spa.push(text);
+    if (text.includes('skipping this asset layer')) probe.layerSkip.push(text);
     if (text.includes('grammar/查询准备失败')) probe.langPrepFail.push(text);
   });
   page.on('pageerror', (err) => probe.pageErrors.push(String(err)));

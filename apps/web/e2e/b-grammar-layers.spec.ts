@@ -164,7 +164,7 @@ test('分层链用例 2：CDN manifest 不可达 → 跳层 console.warn 一条�
   const layerSkips: string[] = [];
   const pageErrors: string[] = [];
   page.on('console', (msg) => {
-    if (msg.type() === 'warning' && msg.text().includes('跳过该资产层')) layerSkips.push(msg.text());
+    if (msg.type() === 'warning' && msg.text().includes('skipping this asset layer')) layerSkips.push(msg.text());
   });
   page.on('pageerror', (err) => pageErrors.push(String(err)));
 

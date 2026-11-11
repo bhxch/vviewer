@@ -27,6 +27,7 @@
   } from './openFlow.svelte';
   import { workspaceStore, type Workspace } from './workspaceStore';
   import RemoteSourceModal from './RemoteSourceModal.svelte';
+  import { t } from './i18n/index.svelte';
 
   let { onclose }: { onclose(): void } = $props();
 
@@ -183,7 +184,7 @@
   }
 </script>
 
-<div class="vv-wspanel" role="dialog" aria-label="标签管理" tabindex="-1" bind:this={panelEl} onkeydown={onpanelkeydown}>
+<div class="vv-wspanel" role="dialog" aria-label={t('tabs.panel.aria')} tabindex="-1" bind:this={panelEl} onkeydown={onpanelkeydown}>
   {#if remoteBrowse}
     <!-- 后端路径浏览层：WorkspaceCreateModal 同款内嵌视图切换（RemoteSourceModal
          自带 Esc stopPropagation，不会连关本面板） -->
@@ -196,11 +197,11 @@
         bind:this={inputEl}
         bind:value={query}
         type="text"
-        placeholder="按名称 / 路径过滤所有工作区的标签"
-        aria-label="过滤标签"
+        placeholder={t('tabs.panel.filterPlaceholder')}
+        aria-label={t('tabs.panel.filterAria')}
         spellcheck="false"
       />
-      <button type="button" aria-label="关闭标签管理" title="关闭（Esc）" onclick={close}>✕</button>
+      <button type="button" aria-label={t('tabs.panel.close')} title={t('tabs.panel.closeTitle')} onclick={close}>✕</button>
     </div>
     <div class="vv-wspanel-body">
       {#each groups as group (group.ws.id)}
@@ -243,17 +244,17 @@
                      §6.1 修订版）：字符删除、span 保留为 1×1 可见性钩子（e2e
                      t-tab-actions 对本元素断言 toBeVisible，锚元素存在而非字符），
                      pinned 语义由 title + 行名斜体（scoped 兄弟选择器）承担 -->
-                <span class="vv-wspanel-pin" title="已固定"></span>
+                <span class="vv-wspanel-pin" title={t('tabs.panel.pinnedTitle')}></span>
               {/if}
               <span class="vv-wspanel-name">{tab.source.name}</span>
               {#if badge !== null}
                 <span class="vv-wspanel-badge" title={badge}>{badge}</span>
               {/if}
-              <span class="vv-wspanel-path">{tab.source.path === '' ? '（目录来源）' : tab.source.path}</span>
+              <span class="vv-wspanel-path">{tab.source.path === '' ? t('tabs.panel.dirSource') : tab.source.path}</span>
               <button
                 type="button"
                 class="vv-wspanel-close"
-                aria-label="关闭 {tab.source.name}"
+                aria-label={t('tabs.panel.closeTabAria', { name: tab.source.name })}
                 onclick={(e) => {
                   e.stopPropagation(); // 快捷关闭不触发行激活/不切组
                   closeTab(tab.id);
@@ -262,23 +263,24 @@
           {/each}
           {#if group.rows.length === 0}
             <div class="vv-wspanel-empty">
-              暂无标签 · 已登记来源 {group.ws.sources.length} 个。用下方「＋ 添加来源」，或标签栏 ＋/⋯ 菜单「打开文件 / 打开文件夹 / 连接服务器」添加。
+              {t('tabs.panel.emptyGroup', { n: group.ws.sources.length })}
             </div>
           {/if}
           <button type="button" class="vv-wspanel-addbtn" onclick={() => toggleAdd(group.ws)}>
-            {addingFor === group.ws.id ? '收起来源入口' : '＋ 添加来源'}
+            {addingFor === group.ws.id ? t('tabs.panel.collapseAdd') : t('tabs.panel.addSource')}
           </button>
           {#if addingFor === group.ws.id}
             <div class="vv-wspanel-add">
-              <button type="button" onclick={() => addFolder(group.ws)}>本地文件夹…</button>
-              <button type="button" onclick={() => addFiles(group.ws)}>本地文件…</button>
-              <button type="button" onclick={() => openRemote(group.ws)}>后端路径…</button>
+              <!-- 来源三入口与目录管理面板同词：复用 mounts.src.*（Task 10 移交项 1 裁决） -->
+              <button type="button" onclick={() => addFolder(group.ws)}>{t('mounts.src.folder')}</button>
+              <button type="button" onclick={() => addFiles(group.ws)}>{t('mounts.src.files')}</button>
+              <button type="button" onclick={() => openRemote(group.ws)}>{t('mounts.src.remote')}</button>
             </div>
           {/if}
         {/if}
       {/each}
       {#if groups.length === 0}
-        <div class="vv-wspanel-empty">无匹配标签</div>
+        <div class="vv-wspanel-empty">{t('tabs.panel.noMatch')}</div>
       {/if}
     </div>
     <input type="file" multiple hidden bind:this={fileInputEl} onchange={onFilesPick} />

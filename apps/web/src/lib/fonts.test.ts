@@ -40,7 +40,8 @@ describe('预设清单形状（spec §4：UI 组 8 项 / 代码组 10 项）', (
       'Helvetica Neue'
     ]);
     for (const p of UI_FONT_PRESETS) {
-      expect(p.label.trim()).not.toBe('');
+      // Task 10 域 G:label 是目录键(settings.fonts.preset.* 前缀),值唯一性不变
+      expect(p.label.startsWith('settings.fonts.preset.')).toBe(true);
       expect(p.value.trim()).not.toBe('');
     }
     expect(new Set(UI_FONT_PRESETS.map((p) => p.value)).size).toBe(UI_FONT_PRESETS.length);
@@ -48,7 +49,9 @@ describe('预设清单形状（spec §4：UI 组 8 项 / 代码组 10 项）', (
 
   it("代码组 10 项：首项为默认占位（value ''、label 默认等宽栈），其余为 spec 清单原文", () => {
     expect(CODE_FONT_PRESETS).toHaveLength(10);
-    expect(CODE_FONT_PRESETS[0]).toEqual({ value: '', label: '默认等宽栈' });
+    // Task 10 域 G:label 迁目录键(消费点 t() 现取),清单本体锁键、目录值双锁
+    expect(CODE_FONT_PRESETS[0]).toEqual({ value: '', label: 'settings.fonts.preset.defaultMono' });
+    expect(zhSettings['settings.fonts.preset.defaultMono']).toBe('默认等宽栈');
     expect(CODE_FONT_PRESETS.slice(1).map((p) => p.value)).toEqual([
       'JetBrains Mono',
       'Fira Code',
@@ -63,17 +66,20 @@ describe('预设清单形状（spec §4：UI 组 8 项 / 代码组 10 项）', (
     expect(new Set(CODE_FONT_PRESETS.map((p) => p.value)).size).toBe(CODE_FONT_PRESETS.length);
   });
 
-  it('样张常量（spec §4）：中英数易混形字符齐全——Task 3 预览/Task 5 管理列表共用', () => {
+  it('样张常量（spec §4）：中英数易混形字符齐全——Task 3 预览/Task 5 管理列表共用（中文字形段是预览数据值，转义形态保留恒定值）', () => {
     expect(FONT_SPECIMEN).toBe('AaBbYyZz 0123 永江流千里 0OIl1|');
   });
 });
 
 describe('fontFamilyOptions（两槽下拉装配：默认 + 预设组 + 自定义哨兵）', () => {
-  it("UI 槽：默认项（value ''）居首、预设组保持清单序、自定义哨兵收尾，值唯一", () => {
+  it("UI 槽：默认项（value ''）居首、预设组保持清单序、自定义哨兵收尾，值唯一（label 译文=目录 zh 值，Task 10）", () => {
     const opts = fontFamilyOptions(UI_FONT_PRESETS);
-    expect(opts[0]).toEqual({ value: '', label: '默认' });
-    expect(opts.slice(1, -1)).toEqual(UI_FONT_PRESETS.map((p) => ({ ...p })));
-    expect(opts.at(-1)).toEqual({ value: CUSTOM_FONT_SENTINEL, label: '自定义…' });
+    expect(opts[0]).toEqual({ value: '', label: zhSettings['settings.fonts.preset.default'] });
+    expect(opts[0]!.label).toBe('默认');
+    expect(opts.slice(1, -1)).toEqual(
+      UI_FONT_PRESETS.map((p) => ({ ...p, label: (zhSettings as Record<string, string>)[p.label] }))
+    );
+    expect(opts.at(-1)).toEqual({ value: CUSTOM_FONT_SENTINEL, label: zhSettings['settings.fonts.preset.custom'] });
     expect(new Set(opts.map((o) => o.value)).size).toBe(opts.length);
   });
 

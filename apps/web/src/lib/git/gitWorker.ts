@@ -39,6 +39,31 @@ import {
 /** isogit 命名空间（经 gitIso 懒加载边界的 re-export 形状）。 */
 type IsoGit = typeof import('./gitIso');
 
+/**
+ * 错误码运行时收窄（Task 9 M-1 清偿）：catch 面对任意 err.code 不再盲目 cast——
+ * 本白名单反查（satisfies 锁元素均为合法码）通过才随帧上行 code，否则 message-only
+ * （主线程 WORKER_ERROR_KEYS 无键可映射，与无码错误同路径）。与 gitClient 的
+ * GitWorkerErrorCode 联合的「全集覆盖」编译期不可检（联合→值级白名单无镜像推导）：
+ * 新增错误码时须同步扩列，漏列的后果是该码错误静默降级 message-only（不误翻译）。
+ */
+const CODED_ERROR_CODES: ReadonlySet<string> = new Set(
+  [
+    'canceled',
+    'fs-encoding',
+    'fs-readlink',
+    'fs-write-banned',
+    'bad-fs-reply-read',
+    'bad-fs-reply-stat',
+    'bad-fs-reply-entries',
+    'unknown-op'
+  ] satisfies readonly GitWorkerErrorCode[]
+);
+
+function isWorkerErrorCode(v: unknown): v is GitWorkerErrorCode {
+  return typeof v === 'string' && CODED_ERROR_CODES.has(v);
+}
+
+
 /** worker 上下文（仅真实 Worker/jsdom 环境存在 self）。 */
 type WorkerCtx = {
   onmessage: ((ev: MessageEvent<GitWorkerIn>) => void) | null;
@@ -440,7 +465,7 @@ async function runOp(msg: GitOpRequest, post: (m: GitWorkerOut) => void): Promis
       requestId: msg.requestId,
       op: msg.kind,
       error: e instanceof Error ? e.message : String(e),
-      ...(typeof err?.code === 'string' ? { code: err.code as GitWorkerErrorCode } : {}),
+      ...(isWorkerErrorCode(err?.code) ? { code: err.code } : {}),
       ...(err?.params !== undefined ? { params: err.params } : {})
     });
   } finally {

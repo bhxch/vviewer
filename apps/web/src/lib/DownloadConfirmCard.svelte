@@ -8,6 +8,7 @@
   // 纯展示组件：字段进、DOM 出，无本地状态（根 vitest 无 svelte 插件不可挂载，
   // 字段契约由 downloadConfirm.test.ts 源码断言锁定，运行时行为 e2e 兜底）。
   import { formatBytes } from './storageHealth';
+  import { t } from './i18n/index.svelte';
 
   let {
     name,
@@ -29,24 +30,24 @@
   } = $props();
 </script>
 
-<div class="vv-dl-confirm" role="alertdialog" aria-label="确认下载">
+<div class="vv-dl-confirm" role="alertdialog" aria-label={t('viewer.confirm.title')}>
   <div class="vv-dl-confirm-head">
-    <span class="vv-dl-confirm-title">确认下载</span>
+    <span class="vv-dl-confirm-title">{t('viewer.confirm.title')}</span>
     <span class="vv-dl-confirm-name" title={name}>{name}</span>
   </div>
   <!-- size/renderer 子行类名仅作测试锚（app.css 无对应规则，样式由 .vv-dl-confirm-meta 统辖） -->
   <div class="vv-dl-confirm-meta">
-    <span class="vv-dl-confirm-size">大小 {formatBytes(sizeBytes)}</span>
-    <span class="vv-dl-confirm-renderer">目标渲染器：{rendererLabel}</span>
+    <span class="vv-dl-confirm-size">{t('viewer.confirm.size', { size: formatBytes(sizeBytes) })}</span>
+    <span class="vv-dl-confirm-renderer">{t('viewer.confirm.renderer', { renderer: rendererLabel })}</span>
   </div>
-  <div class="vv-dl-confirm-impact">下载期间文件将全量读入内存，超大文件可能造成卡顿或内存压力。</div>
+  <div class="vv-dl-confirm-impact">{t('viewer.confirm.impact')}</div>
   <div class="vv-dl-confirm-actions">
-    <button type="button" class="vv-dl-confirm-start" onclick={onconfirm}>开始下载</button>
+    <button type="button" class="vv-dl-confirm-start" onclick={onconfirm}>{t('viewer.confirm.start')}</button>
     {#if onsaveas !== undefined}
       <!-- 双形态二（Task 7）：泵字节 tee 直写 FS writable 落盘 + 渲染并行（句柄已
            在确认卡点击的 user gesture 内选定，ViewerPane effect 重跑消费） -->
-      <button type="button" class="vv-dl-confirm-saveas" onclick={onsaveas}>下载并另存为</button>
+      <button type="button" class="vv-dl-confirm-saveas" onclick={onsaveas}>{t('viewer.confirm.saveAs')}</button>
     {/if}
-    <button type="button" class="vv-dl-confirm-cancel" onclick={oncancel}>取消</button>
+    <button type="button" class="vv-dl-confirm-cancel" onclick={oncancel}>{t('viewer.dl.cancel')}</button>
   </div>
 </div>

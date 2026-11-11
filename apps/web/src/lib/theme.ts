@@ -15,6 +15,7 @@ import {
   type VscodeThemeJson
 } from '@bhxch/vviewer-highlight';
 import type { Settings } from './stores/settings';
+import { translate as t } from './i18n/core';
 import { listThemes as listImportedThemes } from './stores/session';
 
 /** themes.json 全量表（键为 helix 主题名）。 */
@@ -100,16 +101,17 @@ export async function getTheme(name: string): Promise<ThemeTable | null> {
   return (await loadTables())[name] ?? null;
 }
 
-/** 下拉选项：精选置顶，其余按字母排序。 */
-export async function themeOptions(): Promise<{ group: '精选' | '全部'; themes: string[] }[]> {
+/** 下拉选项：精选置顶，其余按字母排序。group 是 optgroup 显示文案（Task 10 迁
+ * settings.code.themeGroup*，调用时刻取当下 locale）。 */
+export async function themeOptions(): Promise<{ group: string; themes: string[] }[]> {
   const tables = await loadTables();
   const curated = CURATED_CODE_THEMES.filter((t) => t in tables);
   const rest = Object.keys(tables)
     .filter((t) => !(CURATED_CODE_THEMES as readonly string[]).includes(t))
     .sort();
   return [
-    { group: '精选', themes: [...curated] },
-    { group: '全部', themes: rest }
+    { group: t('settings.code.themeGroupCurated'), themes: [...curated] },
+    { group: t('settings.code.themeGroupAll'), themes: rest }
   ];
 }
 
@@ -184,14 +186,14 @@ async function injectCodeTheme(
   const theme = tables[name];
   if (!theme) {
     const fallback = DEFAULT_CODE_THEME[mode];
-    console.warn(`未知代码主题：${name}，回退默认代码主题 ${fallback}`);
+    console.warn(`[vviewer] theme: unknown code theme "${name}", falling back to default code theme ${fallback}`);
     if (fallback !== name && tables[fallback]) return injectCodeTheme(fallback, mode, isCurrent);
     return; // 默认主题也不在表内（themes.json 异常）：保持现状
   }
   const el = ensureStyleEl();
   // 整体替换 textContent（非追加）：切换主题零残留；span 类名不变 → 零重解析。
   // 同一节点内追加 --hljs-* 近似映射（M7）：hljs 兜底着色跟随当前代码主题
-  el.textContent = `/* vviewer 代码主题：${name}（${mode}）——只换 CSS 变量，不重解析 */\n${THEME_ROOT_SELECTOR} {\n${themeToCssVars(theme, [...CODE_CAPTURES])}\n${hljsThemeVars(theme)}\n}`;
+  el.textContent = `/* vviewer code theme: ${name} (${mode}) -- swaps CSS variables only, no re-parsing */\n${THEME_ROOT_SELECTOR} {\n${themeToCssVars(theme, [...CODE_CAPTURES])}\n${hljsThemeVars(theme)}\n}`;
   el.dataset.mode = mode;
 }
 
@@ -212,7 +214,7 @@ function injectAppearance(appearance: string, mode: 'light' | 'dark', json: Vsco
   ].filter((s) => s !== '');
   if (sections.length === 0) return false;
   const el = ensureStyleEl();
-  el.textContent = `/* vviewer 外观主题：${appearance}（${mode}）——只换 CSS 变量，不重解析 */\n${THEME_ROOT_SELECTOR} {\n${sections.join('\n')}\n}`;
+  el.textContent = `/* vviewer appearance theme: ${appearance} (${mode}) -- swaps CSS variables only, no re-parsing */\n${THEME_ROOT_SELECTOR} {\n${sections.join('\n')}\n}`;
   el.dataset.mode = mode;
   return true;
 }
@@ -267,7 +269,7 @@ export async function applyAppearance(
     lastAppearanceSig = appearanceSig(mode, appearance, codeTheme);
     return;
   }
-  if (appearance !== 'default' && !json) console.warn(`未知外观主题：${appearance}，回退 default`);
+  if (appearance !== 'default' && !json) console.warn(`[vviewer] theme: unknown appearance theme "${appearance}", falling back to default`);
   await injectCodeTheme(codeTheme, mode, () => token === appearanceCallSeq);
   if (token !== appearanceCallSeq) return; // loadTables 等待期被超越：注入文本已被更新调用覆写，只补签名
   lastAppearanceSig = appearanceSig(mode, 'default', codeTheme);
@@ -435,7 +437,7 @@ function ensureFontStyleEl(): HTMLStyleElement {
 export function applyFonts(settings: Settings): void {
   const f = settings.fonts;
   ensureFontStyleEl().textContent = [
-    '/* vviewer 字体设置——独立节点：字体变化不触发外观重注入，反之亦然 */',
+    '/* vviewer font settings -- standalone node: font changes do not re-trigger appearance injection and vice versa */',
     ':root {',
     `  --vv-ui-font: ${fontFamilyValue(f.uiFamily, DEFAULT_UI_FONT_STACK)};`,
     `  --vv-ui-font-size: ${f.uiSize}px;`,

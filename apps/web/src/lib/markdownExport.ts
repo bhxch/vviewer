@@ -112,7 +112,7 @@ export function printDocument(html: string, onUnavailable: PrintUnavailableNotic
   iframe.style.visibility = 'hidden';
   iframe.onload = () => {
     try {
-      if (!printAvailable(iframe.contentWindow)) throw new Error('print 不可用');
+      if (!printAvailable(iframe.contentWindow)) throw new Error('print unavailable');
       iframe.contentWindow?.print(); // Chromium 阻塞至打印对话框关闭
     } catch {
       onUnavailable();

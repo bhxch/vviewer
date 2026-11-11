@@ -15,6 +15,7 @@
  * fontsStore.test.ts 同文件说明）。
  */
 import { db, FONTS } from './session';
+import { translate as t } from '../i18n/core';
 import { FETCH_TIMEOUT_MS } from '../fetchTimeout';
 import { tryRequestPersistentSilent } from '../storageHealth';
 
@@ -51,7 +52,7 @@ export function withQuotaGuidance(err: unknown): unknown {
   const name = typeof err === 'object' && err !== null ? (err as { name?: unknown }).name : undefined;
   if (typeof name !== 'string' || !/quota/i.test(name)) return err;
   const message = err instanceof Error ? err.message : String(err);
-  const wrapped = new Error(`${message}（存储空间不足：前往 设置→存储与数据 清理空间后重试）`);
+  const wrapped = new Error(t('errors.fonts.quota', { message }));
   wrapped.name = name;
   return wrapped;
 }
@@ -111,7 +112,7 @@ async function ensureFontFace(rec: FontRecord): Promise<FontFace> {
   try {
     await face.load();
   } catch (err) {
-    throw new Error(`字体解析失败（内容不是有效字体？）：${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    throw new Error(t('errors.fonts.parseFailed', { message: err instanceof Error ? err.message : String(err) }), { cause: err });
   }
   faceCache.set(rec.id, face);
   return face;
@@ -142,13 +143,13 @@ async function addFromBuffer(
 ): Promise<FontRecord> {
   const name = meta.name || 'font';
   if (name.includes(',')) {
-    throw new Error(`字体名称不能包含逗号：「${name}」（逗号是 family 多级回退分隔符）`);
+    throw new Error(t('errors.fonts.nameComma', { name }));
   }
   if ((await listFontRecords()).some((r) => r.name === name)) {
-    throw new Error(`已存在同名字体「${name}」，请改名或先删除原字体`);
+    throw new Error(t('errors.fonts.nameExists', { name }));
   }
   if (buf.byteLength > MAX_FONT_BYTES) {
-    throw new Error(`字体文件超过 30MB 上限（${(buf.byteLength / 1024 / 1024).toFixed(1)}MB）`);
+    throw new Error(t('errors.fonts.tooLarge', { size: (buf.byteLength / 1024 / 1024).toFixed(1) }));
   }
   const rec: FontRecord = {
     id: newFontId(),
@@ -179,9 +180,9 @@ export async function addFontFromUrl(url: string, name?: string): Promise<FontRe
   try {
     parsed = new URL(url);
   } catch {
-    throw new Error(`非法字体地址：${url}`);
+    throw new Error(t('errors.fonts.badUrl', { url }));
   }
-  if (parsed.protocol !== 'https:') throw new Error('仅支持 https 字体地址（混合内容防线）');
+  if (parsed.protocol !== 'https:') throw new Error(t('errors.fonts.httpsOnly'));
   let buf: ArrayBuffer;
   try {
     // 硬超时单源见 fetchTimeout.ts（AbortError 归入下方 CORS 失败面文案）
@@ -189,7 +190,7 @@ export async function addFontFromUrl(url: string, name?: string): Promise<FontRe
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     buf = await res.arrayBuffer();
   } catch (err) {
-    throw new Error(`字体下载失败（字体源需开启 CORS）：${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    throw new Error(t('errors.fonts.downloadFailed', { message: err instanceof Error ? err.message : String(err) }), { cause: err });
   }
   return addFromBuffer(buf, { kind: 'url', url, name: name?.trim() || stemOf(parsed.pathname) });
 }
@@ -206,7 +207,7 @@ export async function addFontFromFile(file: File): Promise<FontRecord> {
  */
 export async function setEnabledFont(id: string, enabled: boolean): Promise<void> {
   const rec = await getFontRecord(id);
-  if (!rec) throw new Error(`字体记录不存在：${id}`);
+  if (!rec) throw new Error(t('errors.fonts.recordMissing', { id }));
   await putFontRecord({ ...rec, enabled });
   if (!enabled) {
     const face = faceCache.get(id);
@@ -249,7 +250,7 @@ export async function loadEnabledFontFaces(): Promise<void> {
     try {
       document.fonts.add(await ensureFontFace(rec));
     } catch (err) {
-      console.warn(`字体「${rec.name}」恢复失败`, err);
+      console.warn(`[vviewer] fonts: failed to restore "${rec.name}"`, err);
     }
   }
 }

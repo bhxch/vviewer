@@ -42,7 +42,7 @@
   $effect(() => {
     const srcs = sources;
     if (srcs.length === 0) {
-      status = t('quickopen.status.noFolder');
+      status = t('shell.empty.title'); // 同词复用（Task 10 移交项 7：三壳同词并键）
       return;
     }
     let stale = false;

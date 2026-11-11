@@ -45,7 +45,7 @@ function hljsVarsOf(theme: NonNullable<Awaited<ReturnType<typeof getTheme>>>): s
  */
 async function legacyExpectedText(name: string, mode: 'light' | 'dark'): Promise<string> {
   const theme = (await getTheme(name))!;
-  return `/* vviewer 代码主题：${name}（${mode}）——只换 CSS 变量，不重解析 */\n${THEME_ROOT_SELECTOR} {\n${themeToCssVars(theme, [...CODE_CAPTURES])}\n${hljsVarsOf(theme)}\n}`;
+  return `/* vviewer code theme: ${name} (${mode}) -- swaps CSS variables only, no re-parsing */\n${THEME_ROOT_SELECTOR} {\n${themeToCssVars(theme, [...CODE_CAPTURES])}\n${hljsVarsOf(theme)}\n}`;
 }
 
 afterEach(() => {
@@ -389,7 +389,7 @@ describe('hljs 兜底近似映射（M7 Task 3：--hljs-* 跟随代码主题）',
     // 真实级联的最终裁决由 e2e/m7.spec.ts 的 computed style 抽查覆盖。
     await applyCodeTheme('gruvbox', 'dark');
     const text = styleEl()?.textContent ?? '';
-    expect(text).toContain('/* vviewer 代码主题');
+    expect(text).toContain('/* vviewer code theme');
     expect(text).toContain('*/\n:root, :root[data-theme-mode="light"], :root[data-theme-mode="dark"], :root[data-theme-mode="system"] {');
     for (const form of [
       ':root,',

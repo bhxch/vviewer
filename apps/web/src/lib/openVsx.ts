@@ -21,6 +21,7 @@
  * 留缝即此常量）；生产路径恒原生 fetch，open-vsx.org 恒 https（三形态解析对 URL
  * 形态强制 https，混合内容无冲突；全链 CORS 放行实测见 §6.1）。
  */
+import { translate as t } from './i18n/core';
 import { FETCH_TIMEOUT_MS } from './fetchTimeout';
 import { MAX_FONT_BYTES } from './stores/fontsStore';
 import {
@@ -71,16 +72,16 @@ const DOWNLOAD_RE = new RegExp(`^/api/(${SEG})/(${SEG})/(${VER})/file/.+\\.vsix$
  */
 export function parseOpenVsxInput(input: string): OpenVsxInput {
   const s = input.trim();
-  if (s === '') return { error: '请输入 Open VSX 标识（publisher.extension）或链接' };
+  if (s === '') return { error: t('errors.openvsx.inputEmpty') };
   if (/^https?:\/\//i.test(s)) {
     let u: URL;
     try {
       u = new URL(s);
     } catch {
-      return { error: `无法解析输入：${input}` };
+      return { error: t('errors.openvsx.inputUnparsable', { input }) };
     }
-    if (u.protocol !== 'https:') return { error: `仅支持 https 链接（open-vsx.org 恒 https）：${input}` };
-    if (u.hostname !== 'open-vsx.org') return { error: `仅支持 open-vsx.org 链接：${input}` };
+    if (u.protocol !== 'https:') return { error: t('errors.openvsx.httpsOnly', { input }) };
+    if (u.hostname !== 'open-vsx.org') return { error: t('errors.openvsx.hostOnly', { input }) };
     const page = PAGE_RE.exec(u.pathname);
     if (page !== null) {
       return page[3] !== undefined
@@ -90,7 +91,8 @@ export function parseOpenVsxInput(input: string): OpenVsxInput {
     const dl = DOWNLOAD_RE.exec(u.pathname);
     if (dl !== null) return { publisher: dl[1]!, extension: dl[2]!, version: dl[3]! };
     return {
-      error: `无法识别的 open-vsx.org 链接（支持 /extension/{p}/{e}[/v] 或 vsix 直链）：${input}`
+      // {p}/{e} 是 URL 形态文档不是插值:以字面 'p'/'e' 占位参与插值,输出逐字节等价原文
+      error: t('errors.openvsx.pageUnrecognized', { input, p: 'p', e: 'e' })
     };
   }
   const id = IDENT_RE.exec(s);
@@ -99,7 +101,7 @@ export function parseOpenVsxInput(input: string): OpenVsxInput {
       ? { publisher: id[1]!, extension: id[2]!, version: id[3] }
       : { publisher: id[1]!, extension: id[2]! };
   }
-  return { error: `无法识别的输入（支持 publisher.extension[@version] 或 open-vsx.org 链接）：${input}` };
+  return { error: t('errors.openvsx.inputUnrecognized', { input }) };
 }
 
 // ---------- fetch 薄封装（错误文案统一仿 fontsStore 句式） ----------
@@ -118,9 +120,9 @@ async function fetchResponse(url: string, networkPrefix: string, httpPrefix: str
   try {
     res = await fetchImpl(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   } catch (err) {
-    throw new Error(`${networkPrefix}：${errText(err)}`, { cause: err });
+    throw new Error(t('errors.openvsx.detail', { prefix: networkPrefix, message: errText(err) }), { cause: err });
   }
-  if (!res.ok) throw new Error(`${httpPrefix}：HTTP ${res.status}（GET ${url}）`);
+  if (!res.ok) throw new Error(t('errors.openvsx.httpDetail', { prefix: httpPrefix, status: res.status, url }));
   return res;
 }
 
@@ -130,7 +132,7 @@ async function fetchJson(url: string, networkPrefix: string, httpPrefix: string)
   try {
     return await res.json();
   } catch (err) {
-    throw new Error(`${httpPrefix}：响应不是有效 JSON（${errText(err)}）`, { cause: err });
+    throw new Error(t('errors.openvsx.jsonDetail', { prefix: httpPrefix, message: errText(err) }), { cause: err });
   }
 }
 
@@ -156,7 +158,11 @@ async function downloadVsix(url: string, networkPrefix: string, failPrefix: stri
   const buf = await fetchBytes(url, networkPrefix, failPrefix);
   if (buf.byteLength > MAX_VSIX_BYTES) {
     throw new Error(
-      `${failPrefix}：vsix 超过 ${MAX_VSIX_BYTES / (1024 * 1024)}MB 上限（${(buf.byteLength / 1024 / 1024).toFixed(1)}MB）`
+      t('errors.openvsx.tooLarge', {
+        prefix: failPrefix,
+        max: MAX_VSIX_BYTES / (1024 * 1024),
+        size: (buf.byteLength / 1024 / 1024).toFixed(1)
+      })
     );
   }
   return buf;
@@ -192,28 +198,28 @@ export async function installFromOpenVsx(
   const parsed = parseOpenVsxInput(input);
   if ('error' in parsed) throw new Error(parsed.error);
   const { publisher, extension } = parsed;
-  const NET = 'Open VSX 安装失败（需网络与 CORS，或改用手动导入 vsix）';
-  const FAIL = 'Open VSX 安装失败';
+  const NET = t('errors.openvsx.installNet');
+  const FAIL = t('errors.openvsx.installFail');
   const meta = await metaOf(publisher, extension, parsed.version, NET, FAIL);
   // manifest 预检（§6.2）：contributes.themes/iconThemes 至少一项存在才下整包
   if (typeof meta.files?.manifest !== 'string') {
-    throw new Error(`${FAIL}：元数据缺少 manifest 文件（扩展未正确打包？）：${publisher}.${extension}`);
+    throw new Error(t('errors.openvsx.noManifest', { id: `${publisher}.${extension}` }));
   }
   const contributes = readContributes(await fetchBytes(meta.files.manifest, NET, FAIL));
   const hasColor = (contributes.themes?.length ?? 0) > 0;
   const hasIcon = (contributes.iconThemes?.length ?? 0) > 0;
   if (!hasColor && !hasIcon) {
-    throw new Error(`该扩展不含主题（contributes.themes/iconThemes 均缺失）：${publisher}.${extension}`);
+    throw new Error(t('errors.openvsx.noThemes', { id: `${publisher}.${extension}` }));
   }
   if (typeof meta.files?.download !== 'string') {
-    throw new Error(`${FAIL}：元数据缺少 vsix 下载地址：${publisher}.${extension}`);
+    throw new Error(t('errors.openvsx.noDownload', { id: `${publisher}.${extension}` }));
   }
   // 版本号落 origin：元数据 version 优先，回落用户显式 @version；两者皆缺即抛错
   //（评审 Minor 4：'latest' 死值兜底会让 checkUpdate 对 'latest' 恒报有更新——
   // 死循环提示，诚实抛错优于假版本入库）
   const version = typeof meta.version === 'string' && meta.version !== '' ? meta.version : (parsed.version ?? '');
   if (version === '') {
-    throw new Error(`${FAIL}：元数据缺少版本号：${publisher}.${extension}`);
+    throw new Error(t('errors.openvsx.noVersion', { id: `${publisher}.${extension}` }));
   }
   const buf = await downloadVsix(meta.files.download, NET, FAIL);
   const file = new File([buf], `${publisher}.${extension}-${version}.vsix`); // .vsix 后缀 = 管线分发依据
@@ -271,11 +277,11 @@ export function compareVersions(a: string, b: string): number {
  * 高于已装版本（平版/降级）一律不提示）。
  */
 export async function checkUpdate(origin: ThemeOrigin): Promise<{ latest: string; hasUpdate: boolean }> {
-  const NET = 'Open VSX 检查更新失败（需网络与 CORS）';
-  const FAIL = 'Open VSX 检查更新失败';
+  const NET = t('errors.openvsx.checkNet');
+  const FAIL = t('errors.openvsx.checkFail');
   const meta = await metaOf(origin.publisher, origin.extension, undefined, NET, FAIL);
   if (typeof meta.version !== 'string' || meta.version === '') {
-    throw new Error(`${FAIL}：元数据缺少 version：${origin.publisher}.${origin.extension}`);
+    throw new Error(t('errors.openvsx.checkNoVersion', { id: `${origin.publisher}.${origin.extension}` }));
   }
   return { latest: meta.version, hasUpdate: compareVersions(meta.version, origin.version) > 0 };
 }
@@ -293,17 +299,17 @@ export async function checkUpdate(origin: ThemeOrigin): Promise<{ latest: string
  */
 export async function updateTheme(record: ImportedTheme | ImportedIconTheme): Promise<ImportedTheme | ImportedIconTheme> {
   if (!record.origin) {
-    throw new Error(`主题「${record.name}」无 Open VSX 来源信息（本地导入不支持更新）`);
+    throw new Error(t('errors.openvsx.updateNoOrigin', { name: record.name }));
   }
   const { publisher, extension } = record.origin;
-  const NET = 'Open VSX 更新失败（需网络与 CORS，或改用手动导入 vsix）';
-  const FAIL = 'Open VSX 更新失败';
+  const NET = t('errors.openvsx.updateNet');
+  const FAIL = t('errors.openvsx.updateFail');
   const meta = await metaOf(publisher, extension, undefined, NET, FAIL);
   if (typeof meta.version !== 'string' || meta.version === '') {
-    throw new Error(`${FAIL}：元数据缺少 version：${publisher}.${extension}`);
+    throw new Error(t('errors.openvsx.updateNoVersion', { id: `${publisher}.${extension}` }));
   }
   if (typeof meta.files?.download !== 'string') {
-    throw new Error(`${FAIL}：元数据缺少 vsix 下载地址：${publisher}.${extension}`);
+    throw new Error(t('errors.openvsx.updateNoDownload', { id: `${publisher}.${extension}` }));
   }
   const buf = await downloadVsix(meta.files.download, NET, FAIL);
   const origin: ThemeOrigin = { publisher, extension, version: meta.version, checkedAt: Date.now() };
@@ -319,11 +325,10 @@ export async function updateTheme(record: ImportedTheme | ImportedIconTheme): Pr
     const tempIds = r.imported.map((t) => t.id);
     if (isIcon) await replaceIconThemeAtomic(null, tempIds);
     else await replaceThemeAtomic(null, tempIds);
-    const detail =
-      r.errors.length > 0
-        ? `：${r.errors.join('；')}`
-        : `：包内未找到同名主题「${record.name}」（上游可能已改名，可删除后重装）`;
-    throw new Error(`Open VSX 更新失败${detail}`);
+    if (r.errors.length > 0) {
+      throw new Error(t('errors.openvsx.updateFailedErrors', { errors: r.errors.join('；') }));
+    }
+    throw new Error(t('errors.openvsx.updateNoNamedTheme', { name: record.name }));
   }
   const updated: ImportedTheme | ImportedIconTheme = isIcon
     ? { ...(fresh as ImportedIconTheme), id: record.id }
