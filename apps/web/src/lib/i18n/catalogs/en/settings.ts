@@ -227,7 +227,7 @@ export const messages = {
   'settings.fonts.added': 'Added font "{name}"',
   'settings.fonts.deleteConfirm': 'Delete web font "{name}"?',
   'settings.fonts.removedWithFallback':
-    'Deleted "{name}"; {slots}slots fell back to the default font',
+    'Deleted "{name}"; {slots} fell back to the default font',
   'settings.fonts.removed': 'Deleted "{name}"',
 
   // —— 字体预设 label（settings.fonts.preset.*：fonts.ts 清单 label 键化——Task 10
