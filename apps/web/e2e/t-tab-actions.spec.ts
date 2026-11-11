@@ -78,7 +78,9 @@ async function openFile(page: Page, name: string): Promise<void> {
   await expect(tabNamed(page, name)).toBeVisible();
 }
 
-/** 精确名 tab 定位（.vv-tab-name 子元素锚定——tab 根级 textContent 含关闭钮「×」） */
+/** 精确名 tab 定位（.vv-tab-name 子元素锚定）。关闭字形已移出 role=tab 元素且
+ * aria-hidden，getByRole('tab', { name }) 实测可用；保留类锚——可访问名随来源徽标
+ * 与图标主题字形组合面变化，类锚与名组合解耦更稳（helpers.ts tabNamed 同款口径） */
 function tabNamed(page: Page, name: string): Locator {
   return page
     .locator('.vv-tab')

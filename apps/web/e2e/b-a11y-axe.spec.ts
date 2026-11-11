@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { openDirText, openFile, tabNamed, waitAppMounted } from './helpers';
 import { gotoGroup, openSettings } from './settings-center';
-import { openMenu } from './tabbar-menu';
+import { openMenu, MENU_POP } from './tabbar-menu';
 
 /**
  * b-a11y-axe 全页可达性扫描域（A11Y- 域，a11y 重构 spec Task 2）：
@@ -125,7 +125,7 @@ test.describe('b-a11y-axe 全页可达性扫描（wcag2a+wcag21a 零违规）', 
     await page.goto('/');
     await waitAppMounted(page);
     await openMenu(page);
-    await page.locator('button[aria-label="目录管理"]').click();
+    await page.locator(MENU_POP).getByRole('button', { name: /目录管理|Mounts/ }).click();
     await expect(page.locator('.vv-mounts-manager')).toBeVisible();
     await expectNoAxeViolations(page);
   });

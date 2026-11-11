@@ -1,13 +1,18 @@
 // catalogs.aggregate.test.ts — i18n 目录聚合机检（D5/D15 硬门槛；aelrova
-// i18n-aggregate.test.ts 移植）。四道断言：
+// i18n-aggregate.test.ts 移植）。五道断言：
 // ① zh 各域文件 key 数之和 == 聚合总数（spread 静默覆盖同名 key 即红）；
 // ② 全部 key 首段 == 其域段（satisfies 编译期锁 + 本测试运行时双锁）；
 // ③ en 键集 == zh 键集（缺键/孤儿键双向断言，失败输出差集清单——回落机制是
 //    安全网不是欠账通道，D15 全量覆盖收口）；
-// ④ zh/en 逐 key 占位符集合相等（插值占位符跨语言漂移即红）。
-// ⑤（aelrova 的 registerAll 后查表含全量）不适用：单 app 直读目录（D4/D5 裁决），
-//    无 aelrova registry 运行时注入层（无 registerMessages/getRegisteredMessages），
-//    core.translate 直接消费聚合目录——① 已锁 spread 全量性，注入断言无对象。
+// ④ zh/en 逐 key 占位符集合相等（插值占位符跨语言漂移即红）；
+// ⑤ catalogs/{zh-CN,en}/ 域文件集合 == MESSAGE_PACKS 键集（双侧；新域文件
+//    落目录但漏 import/登记进聚合入口即红）。
+// aelrova 的 registerAll 后查表含全量断言不适用：单 app 直读目录（D4/D5 裁决），
+// 无 aelrova registry 运行时注入层（无 registerMessages/getRegisteredMessages），
+// core.translate 直接消费聚合目录——⑤ 改为目录 vs 注册的静态对账承接其
+// 「漏注册即红」意图，① 锁 spread 全量性。
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { MESSAGE_PACKS as EN_PACKS, messages as enMessages } from './catalogs/en';
 import { MESSAGE_PACKS, messages as zhMessages } from './catalogs/zh-CN';
@@ -55,6 +60,28 @@ describe('i18n 目录聚合机检（D5/D15）', () => {
       const zh = zhMessages[key as keyof typeof zhMessages];
       const en = enMessages[key as keyof typeof enMessages];
       expect(placeholdersOf(en), `占位符集合不一致 @ ${key}`).toBe(placeholdersOf(zh));
+    }
+  });
+
+  it('⑤ catalogs 域文件集合 == MESSAGE_PACKS 键集（zh/en 双侧；新域文件漏注册即红）', () => {
+    for (const [dir, packs] of [
+      ['zh-CN', MESSAGE_PACKS],
+      ['en', EN_PACKS]
+    ] as const) {
+      // 不用 new URL(模板串, import.meta.url)：vitest 对该形态做资产宏改写、
+      // 运行时插值丢失（实测解析成 ./undefined），dirname+join 是稳定面
+      const domainFiles = readdirSync(join(import.meta.dirname, 'catalogs', dir))
+        .filter((f) => f.endsWith('.ts'))
+        .map((f) => f.replace(/\.ts$/, ''))
+        .sort();
+      const registered = Object.keys(packs).sort();
+      const missing = domainFiles.filter((f) => !registered.includes(f));
+      const orphan = registered.filter((f) => !domainFiles.includes(f));
+      expect(
+        missing,
+        `${dir} 域文件漏注册（文件在目录、聚合入口未 import+登记）：${missing.join(', ')}`
+      ).toEqual([]);
+      expect(orphan, `${dir} 注册孤儿（MESSAGE_PACKS 有、目录无文件）：${orphan.join(', ')}`).toEqual([]);
     }
   });
 });
