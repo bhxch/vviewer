@@ -5,6 +5,7 @@
   import Self from './TreeNodeRow.svelte';
   import FileIcon from './FileIcon.svelte';
   import { iconThemeState } from './iconTheme.svelte';
+  import { t } from './i18n/index.svelte';
 
   let { store, excludedPatterns = [], node, depth, iconEnabled = false, onopen }: {
     store: TreeStore;
@@ -33,10 +34,10 @@
    */
   const caretReplaced = $derived.by(() => {
     if (!iconEnabled || node.kind !== 'dir' || iconThemeState.runtime === null) return false;
-    const t = iconThemeState.runtime;
-    if (!t.hidesExplorerArrows || (t.folderNames.size === 0 && t._folder === undefined)) return false;
-    if (t.fontsOk === false) return false;
-    return matchIconTheme(t, { kind: expanded ? 'folderExpanded' : 'folder', name: node.name }) !== null;
+    const runtime = iconThemeState.runtime;
+    if (!runtime.hidesExplorerArrows || (runtime.folderNames.size === 0 && runtime._folder === undefined)) return false;
+    if (runtime.fontsOk === false) return false;
+    return matchIconTheme(runtime, { kind: expanded ? 'folderExpanded' : 'folder', name: node.name }) !== null;
   });
 
   function excluded(name: string): boolean {
@@ -54,11 +55,11 @@
         const list = await store.listChildren(node.path);
         children = list.filter((n) => !excluded(n.name));
       } catch (err) {
-        console.error(`加载目录 ${node.path} 失败`, err);
+        console.error(`[vviewer] tree: failed to load directory ${node.path}`, err);
         // BUG-24：断网/服务器异常下展开未加载目录此前静默失败——复用既有状态栏
         // 一次性提示通道（与文件打开失败的错误卡片对照），保留 expanded 回滚
         const message = err instanceof Error ? err.message : String(err);
-        showStatusNotice(`目录 ${node.name} 加载失败：${message}`);
+        showStatusNotice(t('tree.node.loadFailed', { name: node.name, message }));
         expanded = false; // 加载失败回滚展开态，避免出现空子树
       }
     }

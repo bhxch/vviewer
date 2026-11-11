@@ -3,6 +3,7 @@
   import TreeNodeRow from './TreeNodeRow.svelte';
   import FileIcon from './FileIcon.svelte';
   import { showStatusNotice } from './openFlow.svelte';
+  import { t } from './i18n/index.svelte';
 
   let { sources, excludedPatterns = [], iconTree = false, onopen, onremove }: {
     /** 当前 workspace 的全部可渲染来源（AppShell 由 workspace.sources × 活动实例解析） */
@@ -43,7 +44,7 @@
             //（TreeNodeRow 子目录展开失败同款），失败隔离语义保留（本源空列表
             // 不拖垮其他源）；轻量异常走状态栏一次性提示而非错误卡片
             const message = err instanceof Error ? err.message : String(err);
-            showStatusNotice(`来源 ${src.label} 加载失败：${message}`);
+            showStatusNotice(t('tree.src.loadFailed', { label: src.label, message }));
             return [] as TreeNode[];
           })
       }))
@@ -63,7 +64,7 @@
   }
 
   function requestRemove(store: TreeStore): void {
-    if (!confirm(`将关闭该来源下全部 tab，并从当前工作区移除来源「${store.displayName()}」，确定？`)) return;
+    if (!confirm(t('tree.src.removeConfirm', { name: store.displayName() }))) return;
     onremove?.(store);
   }
 </script>
@@ -75,7 +76,7 @@
          行内两钮在 treeitem 内合法（treeitem 无 required owned），展开态以
          aria-expanded 上行（aria-selected 由树行自身承担，源行不重复） -->
     <div class="vv-tree-src" role="treeitem" aria-selected={false} aria-expanded={!collapsed[src.storeId]}>
-      <button type="button" class="vv-tree-src-toggle" aria-label="折叠/展开 {src.label}"
+      <button type="button" class="vv-tree-src-toggle" aria-label={t('tree.src.toggleAria', { label: src.label })}
         aria-expanded={!collapsed[src.storeId]}
         onclick={() => toggleCollapse(src.storeId)}>{collapsed[src.storeId] ? '▸' : '▾'}</button>
       {#if iconTree}
@@ -87,8 +88,8 @@
       <button
         type="button"
         class="vv-tree-src-remove"
-        aria-label="移除来源 {src.label}"
-        title="移除该来源（将关闭该来源下全部 tab）"
+        aria-label={t('tree.src.removeAria', { label: src.label })}
+        title={t('tree.src.removeTitle')}
         onclick={() => requestRemove(src.store)}
       >✕</button>
     </div>

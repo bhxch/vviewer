@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { TreeStore, TreeNode } from '@bhxch/vviewer-core';
 import { excludedName, fileNameOf, filterFiles, listFilesRecursively } from './quickOpen';
+// i18n 目录（Task 5 域 B 抽取）：onWarn 告警文案迁入目录，锚改指新形态（translate
+// + key）+ 目录 zh 模板逐字节等价断言（e2e 中文锚零回归的保证面）
+import { messages as zhQuickopen } from './i18n/catalogs/zh-CN/quickopen';
+import { translate as t } from './i18n/core';
 
 /** 测试树：路径 → 子节点。listChildren(path) 查表返回。 */
 function fakeStore(id: string, tree: Record<string, TreeNode[]>): TreeStore {
@@ -131,7 +135,10 @@ describe('listFilesRecursively 单目录容错（BUG-27）', () => {
       { storeId: 'store:bug27', path: 'a.txt', name: 'a.txt' },
       { storeId: 'store:bug27', path: 'sub/inner.md', name: 'inner.md' }
     ]);
-    expect(warns).toEqual(['目录 locked 列举失败：服务器请求失败: HTTP 403: path escapes root']);
+    expect(warns).toEqual([
+      t('quickopen.warn.listFailed', { path: 'locked', message: '服务器请求失败: HTTP 403: path escapes root' })
+    ]);
+    expect(zhQuickopen['quickopen.warn.listFailed']).toBe('目录 {path} 列举失败：{message}');
   });
 
   it('根目录失败：该源告警跳过，多源时其余源不受牵连', async () => {
@@ -143,7 +150,7 @@ describe('listFilesRecursively 单目录容错（BUG-27）', () => {
     const warns: string[] = [];
     const files = await listFilesRecursively([bad, good], [], { onWarn: (m) => warns.push(m) });
     expect(files.map((f) => f.path)).toEqual(['g.txt']);
-    expect(warns).toEqual(['目录 label-store:bad 列举失败：boom']);
+    expect(warns).toEqual([t('quickopen.warn.listFailed', { path: 'label-store:bad', message: 'boom' })]);
   });
 });
 

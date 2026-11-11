@@ -1,4 +1,5 @@
 import type { TreeStore } from '@bhxch/vviewer-core';
+import { translate as t } from './i18n/core';
 
 /**
  * QuickOpenPanel（BUG-03 Ctrl+P 快速打开）的可单测纯逻辑：
@@ -49,7 +50,7 @@ export async function listFilesRecursively(
         children = await src.store.listChildren(dirPath);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        opts?.onWarn?.(`目录 ${dirPath === '' ? src.label : dirPath} 列举失败：${message}`);
+        opts?.onWarn?.(t('quickopen.warn.listFailed', { path: dirPath === '' ? src.label : dirPath, message }));
         return; // 跳过失败子树，兄弟层与其余来源继续
       }
       for (const node of children) {

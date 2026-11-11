@@ -10,6 +10,7 @@
   import { loadSettings } from './stores/settings';
   import { fileNameOf, filterFiles, listFilesRecursively, type ScannedFile } from './quickOpen';
   import FileIcon from './FileIcon.svelte';
+  import { t } from './i18n/index.svelte';
 
   let { sources, onclose }: { sources: Array<{ label: string; store: TreeStore }>; onclose(): void } = $props();
 
@@ -41,11 +42,11 @@
   $effect(() => {
     const srcs = sources;
     if (srcs.length === 0) {
-      status = '未打开文件夹';
+      status = t('quickopen.status.noFolder');
       return;
     }
     let stale = false;
-    status = '正在列出文件…';
+    status = t('quickopen.status.listing');
     // BUG-27：单目录 listChildren 失败降级收集（列表照常给出），状态行透出被跳过
     // 的目录——树侧 showStatusNotice 同语义，不静默吞掉失败面
     const warns: string[] = [];
@@ -58,12 +59,12 @@
         active = 0; // 重扫完成列表已换血：复位选中项，防越界空选（Enter 落空）
         status =
           warns.length > 0
-            ? `部分目录无法列出（${warns.length} 个已跳过）：${warns[0]}`
+            ? t('quickopen.status.partial', { count: warns.length, message: warns[0] ?? '' })
             : '';
       })
       .catch((err) => {
         if (stale) return;
-        status = `列出文件失败：${err instanceof Error ? err.message : String(err)}`;
+        status = t('quickopen.status.listFailed', { message: err instanceof Error ? err.message : String(err) });
       });
     return () => {
       stale = true;
@@ -146,22 +147,22 @@
   }
 </script>
 
-<div class="vv-quickopen" role="dialog" aria-label="快速打开" tabindex="-1" bind:this={panelEl} onkeydown={onpanelkeydown}>
+<div class="vv-quickopen" role="dialog" aria-label={t('quickopen.panel.aria')} tabindex="-1" bind:this={panelEl} onkeydown={onpanelkeydown}>
   <div class="vv-quickopen-bar">
     <input
       bind:this={inputEl}
       bind:value={query}
       class="vv-quickopen-input"
       type="text"
-      placeholder="输入文件名过滤，↑↓ 选择，Enter 打开"
-      aria-label="快速打开文件"
+      placeholder={t('quickopen.input.placeholder')}
+      aria-label={t('quickopen.input.aria')}
       spellcheck="false"
       onkeydown={oninputkey}
     />
-    <button type="button" class="vv-quickopen-btn" aria-label="关闭快速打开" title="关闭（Esc）" onclick={close}>✕</button>
+    <button type="button" class="vv-quickopen-btn" aria-label={t('quickopen.close.aria')} title={t('quickopen.close.title')} onclick={close}>✕</button>
   </div>
   <div class="vv-quickopen-status" aria-live="polite">
-    {status}{#if !status && files.length > 0 && results.length === 0}无匹配文件{/if}
+    {status}{#if !status && files.length > 0 && results.length === 0}{t('quickopen.status.noMatch')}{/if}
   </div>
   {#if results.length > 0}
     <ul class="vv-quickopen-list" bind:this={listEl}>
