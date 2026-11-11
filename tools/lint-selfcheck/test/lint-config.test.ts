@@ -222,15 +222,17 @@ describe('eslint 机检样例（规则自身被机检）', () => {
   it('SvelteText 必命中（stdin→lib 路径）：标记文本 CJK 与 a11y 同文件双规则各自命中', () => {
     const { exitCode, messages } = lintStdin('sample.markup.svelte', 'apps/web/src/lib/sample.markup.svelte');
     const errors = messages.filter((m) => m.severity === 2);
+    // 两臂 message 专属(评审 M-2① 二轮判别化):「标记文本含 CJK」/「静态属性值含 CJK」
+    // 互不为对方 message 的子串——includes 判别即臂判别
     expect(
-      errors.some((m) => m.ruleId === 'no-restricted-syntax' && m.message.includes('标记文本')),
-      'SvelteText 标记文本 CJK 未命中'
+      errors.some((m) => m.ruleId === 'no-restricted-syntax' && m.message.includes('标记文本含 CJK')),
+      'SvelteText 臂未命中(标记文本 CJK)'
     ).toBe(true);
     // 评审 M-2①:静态属性值 CJK(SvelteLiteral)必命中——aria/title/placeholder 形态
     // 是 Task 10 抽取的最大面,漏挂即防线缺口
     expect(
-      errors.some((m) => m.ruleId === 'no-restricted-syntax' && m.message.includes('静态属性值')),
-      'SvelteLiteral 静态属性值 CJK 未命中'
+      errors.some((m) => m.ruleId === 'no-restricted-syntax' && m.message.includes('静态属性值含 CJK')),
+      'SvelteLiteral 臂未命中(静态属性值 CJK)'
     ).toBe(true);
     // 同文件旧规则并存：块覆盖语义下 valid-compile 的 a11y 面不得被顶掉
     expect(

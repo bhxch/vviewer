@@ -56,9 +56,14 @@ const cjkTemplateElement = {
 // 同口径),不是用户可见文案;组件样式中文注释不入目录(实测缺此排除即 14 文件
 // style 块整块误报)。
 const cjkSvelteText = {
-  selector: `SvelteText[value=/${CJK_RANGE}/]:not(SvelteStyleElement SvelteText), SvelteLiteral[value=/${CJK_RANGE}/]`,
+  selector: `SvelteText[value=/${CJK_RANGE}/]:not(SvelteStyleElement SvelteText)`,
   message:
-    '禁止 Svelte 标记文本/静态属性值含 CJK：用户可见文案一律 t() 目录键（{{t("domain.key")}}）；aria-label/title/placeholder 用 {t(…)} 表达式形态'
+    '禁止 Svelte 标记文本含 CJK：用户可见文案一律 t() 目录键（{{t("domain.key")}}）——两臂 message 专属（评审 M-2① 二轮）：lint-config 断言按 message 判别臂，拆分前共享 message 的子串互相污染、断言无判别力'
+};
+const cjkSvelteLiteral = {
+  selector: 'SvelteLiteral[value=/' + CJK_RANGE + '/]',
+  message:
+    '禁止 Svelte 静态属性值含 CJK：aria-label/title/placeholder 一律 {t(…)} 表达式形态——两臂 message 专属（评审 M-2① 二轮），断言按本 message 判别本臂'
 };
 // 禁裸 Intl / toLocale*（apps/web 全域）：日期/数字/列表格式化单点 i18n/format.ts
 // （组内集中切 locale、单测直测面），散用 Intl 会在 locale 切换时按浏览器 locale
@@ -236,7 +241,7 @@ export default defineConfig(
     files: ['apps/web/src/lib/**/*.{svelte,ts}'],
     ignores: ['apps/web/src/lib/i18n/**', 'apps/web/src/lib/**/*.test.ts'],
     rules: {
-      'no-restricted-syntax': ['error', runesOptOut, cjkLiteral, cjkTemplateElement, cjkSvelteText, bareIntl],
+      'no-restricted-syntax': ['error', runesOptOut, cjkLiteral, cjkTemplateElement, cjkSvelteText, cjkSvelteLiteral, bareIntl],
       'no-restricted-imports': [
         'error',
         {
