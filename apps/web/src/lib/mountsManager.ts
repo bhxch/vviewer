@@ -16,6 +16,7 @@ import {
   type DavDirectConfig,
   type S3DirectConfig
 } from '@bhxch/vviewer-core';
+import { translate as t } from './i18n/core';
 import {
   directConfigOf,
   displayEndpoint,
@@ -30,15 +31,19 @@ import type { WorkspaceSource } from './workspaceStore';
 
 /**
  * 凭据警示（spec §6 固定文案）：直连凭据 IndexedDB 明文可被同源脚本与本机用户
- * 提取——组件在新增表单与列表详情双处固定渲染本常量（单一出处，双处出现在
- * mountsManagerUi.test.ts 源码契约锁定）。
+ * 提取——组件在新增表单与列表详情双处固定渲染本函数（单一出处，双处出现在
+ * mountsManagerUi.test.ts 源码契约锁定）。i18n Task 8：文案迁目录 mounts.warn.*
+ * ——原模块常量改函数（Task 7 saveDeniedNotice 先例：常量在模块装载时刻取值会
+ * 钉死启动 locale，函数在渲染时刻现取当下 locale）。
  */
-export const CREDENTIAL_WARNING =
-  '直连凭据以明文保存在浏览器 IndexedDB，可被同源脚本与本机用户提取；请勿在共享设备保存高权限凭据。';
+export function credentialWarning(): string {
+  return t('mounts.warn.credential');
+}
 
 /** WebDAV 直连 CORS 预检提示（spec §4：大概率被拦，知情使用；表单 kind 切至 webdav 即示）。 */
-export const WEBDAV_CORS_HINT =
-  'WebDAV 服务器需配置 CORS（允许本站来源 + PROPFIND/GET 方法），否则浏览器直连会被拦截。';
+export function webdavCorsHint(): string {
+  return t('mounts.warn.webdavCors');
+}
 
 /**
  * 新增/编辑表单草稿（kind→字段集切换；mode 切直连/代理）。username/secret 为
@@ -89,7 +94,7 @@ export function endpointIssue(endpoint: string): string | null {
   const rest = idx >= 0 ? endpoint.slice(idx + 3) : endpoint;
   const authority = rest.split('/')[0] ?? rest;
   if (authority.includes('@')) {
-    return '请使用不含凭据的 endpoint，凭据在下方字段填写';
+    return t('mounts.form.endpointUserinfo');
   }
   return null;
 }
@@ -102,18 +107,18 @@ export function endpointIssue(endpoint: string): string | null {
  */
 export function mountFormIssues(d: MountFormDraft): Partial<Record<keyof MountFormDraft, string>> {
   const issues: Partial<Record<keyof MountFormDraft, string>> = {};
-  if (d.label.trim() === '') issues.label = '必填';
-  if (d.endpoint.trim() === '') issues.endpoint = '必填';
+  if (d.label.trim() === '') issues.label = t('mounts.form.required');
+  if (d.endpoint.trim() === '') issues.endpoint = t('mounts.form.required');
   else {
     const ui = endpointIssue(d.endpoint.trim());
     if (ui !== null) issues.endpoint = ui;
   }
   if (d.mode === 'proxy' && d.serverBase.trim() === '') {
-    issues.serverBase = '代理挂载需先连接服务器';
+    issues.serverBase = t('mounts.form.serverBaseRequired');
   }
-  if (d.backend === 's3' && d.bucket.trim() === '') issues.bucket = '必填';
-  if (d.username.trim() === '') issues.username = '必填';
-  if (d.secret === '') issues.secret = '必填';
+  if (d.backend === 's3' && d.bucket.trim() === '') issues.bucket = t('mounts.form.required');
+  if (d.username.trim() === '') issues.username = t('mounts.form.required');
+  if (d.secret === '') issues.secret = t('mounts.form.required');
   return issues;
 }
 
@@ -242,9 +247,9 @@ export function assembleServerMountRows(
   for (let i = 0; i < manifest.fsRoots; i++) {
     rows.push({
       rootIndex: i,
-      title: rootPaths[i] ?? `根 ${i}`,
+      title: rootPaths[i] ?? t('mounts.title.fsRoot', { n: i }),
       segment: 'fs',
-      segmentLabel: 'fs 根',
+      segmentLabel: t('mounts.segment.fs'),
       prefix: '',
       watch: true,
       search: true
@@ -253,9 +258,9 @@ export function assembleServerMountRows(
   const push = (e: MountManifestEntry, segment: 'static' | 'runtime'): void => {
     rows.push({
       rootIndex: e.rootIndex,
-      title: e.label ?? `${e.kind} 挂载`,
+      title: e.label ?? t('mounts.title.mount', { kind: e.kind }),
       segment,
-      segmentLabel: segment === 'static' ? '静态挂载' : '运行时',
+      segmentLabel: segment === 'static' ? t('mounts.segment.static') : t('mounts.segment.runtime'),
       kind: e.kind,
       endpoint: e.endpoint,
       bucket: e.bucket,
@@ -278,10 +283,12 @@ export type MountRowState =
   | { code: 'pending'; error?: string }
   | { code: 'unregistered' };
 
-/** 组②行（前端配置挂载视图模型）。 */
+/** 组②行（前端配置挂载视图模型）。modeLabel 为纯显示徽标（i18n 目录值）——
+ * 判别面一律走 record.kind / state.code 稳定标识符（i18n Task 8 D8：原模板
+ * `modeLabel === '直连'` 的显示串比较已改 record.kind，locale 切换不再影响判别）。 */
 export interface MountRow {
   record: MountRecord;
-  modeLabel: '直连' | '代理';
+  modeLabel: string;
   backendLabel: 'S3' | 'WebDAV';
   /** 凭据已存指示（spec §5 组②）。 */
   hasCredential: boolean;
@@ -321,7 +328,7 @@ export function assembleMountRows(
       displayEndpointText: displayEndpoint(record.endpoint)
     };
     if (record.kind === 'direct') {
-      return { ...base, modeLabel: '直连' as const, state: { code: 'direct' } as const };
+      return { ...base, modeLabel: t('mounts.mode.direct'), state: { code: 'direct' } as const };
     }
     const state: MountRowState =
       record.pendingRetry === true
@@ -331,7 +338,7 @@ export function assembleMountRows(
             ? { code: 'offsite', rootIndex: record.registeredRootIndex }
             : { code: 'registered', rootIndex: record.registeredRootIndex }
           : { code: 'unregistered' };
-    return { ...base, modeLabel: '代理' as const, state };
+    return { ...base, modeLabel: t('mounts.mode.proxy'), state };
   });
 }
 
@@ -363,8 +370,8 @@ export function assembleLocalRows(
       permission: permission ?? 'prompt',
       detail:
         permission === 'granted'
-          ? '已授权（会话恢复可用）'
-          : '需重新授权（刷新后恢复将弹出权限提示）'
+          ? t('mounts.local.granted')
+          : t('mounts.local.needsReauth')
     });
   }
   for (const s of sources) {
@@ -374,7 +381,7 @@ export function assembleLocalRows(
       kind: 'localfiles',
       title: s.storeLabel,
       permission: null,
-      detail: '会话来源（文件内容不持久，刷新后需重新打开）'
+      detail: t('mounts.local.sessionDetail')
     });
   }
   return rows;
@@ -416,7 +423,9 @@ export async function probeRecord(rec: DirectMountRecord): Promise<ProbeResult> 
 
 /** 测试连接结果回显文案（spec §5：条目数 + 延迟）。 */
 export function formatProbeResult(r: ProbeResult): string {
-  return r.ok ? `连接成功：根目录 ${r.entries} 个条目，延迟 ${r.ms} ms` : `连接失败：${r.error}`;
+  return r.ok
+    ? t('mounts.probe.ok', { entries: r.entries, ms: r.ms })
+    : t('mounts.probe.fail', { error: r.error });
 }
 
 // ---------- 删除联动 ----------

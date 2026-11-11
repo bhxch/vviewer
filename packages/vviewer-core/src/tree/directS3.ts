@@ -64,13 +64,98 @@ const ERROR_BODY_SNIPPET = 512;
 /** 请求超时（RemoteStore.request 30s 同款对齐）。 */
 const REQUEST_TIMEOUT_MS = 30_000;
 
+// ---------- 错误特征化文案注入缝（i18n Task 8，dispatch/errors.ts
+// setRenderFailedText 先例）：本包保持零 i18n 依赖（依赖方向 apps/web → core
+// 不反转），apps/web 装配时（mountsSync.ts）注入目录 getter——错误抛出时刻现取
+// 当下 locale。缺省英文供包内独立消费（无人注入面；apps/web 恒注入故直连错误
+// 面恒走目录 zh 值=原值逐字节）。可变态私有、经稳定访问函数导出（directDav
+// 同消费），避免可变导出面。 ----------
+
+let webCryptoMissingText: () => string = () =>
+  'WebCrypto unavailable: S3 direct signing requires HTTPS or a localhost environment';
+
+/** WebCrypto 缺失文案（apps/web 恒注入故恒走目录；包独立消费回落英文缺省）。 */
+export function s3WebCryptoMissingText(): string {
+  return webCryptoMissingText();
+}
+
+/** 注入 WebCrypto 缺失文案 getter（apps/web 装配点消费；传 null 恢复缺省）。 */
+export function setS3WebCryptoMissingText(getter: (() => string) | null): void {
+  webCryptoMissingText = getter ?? (() => 'WebCrypto unavailable: S3 direct signing requires HTTPS or a localhost environment');
+}
+
+let s3CorsFailureTextImpl: () => string = () =>
+  'S3 direct mount failed: bucket CORS not configured or network unreachable';
+
+/** S3 CORS 特征化文案（注入缝消费面同上）。 */
+export function s3CorsFailureText(): string {
+  return s3CorsFailureTextImpl();
+}
+
+/** 注入 S3 CORS 特征化文案 getter（apps/web 装配点消费；传 null 恢复缺省）。 */
+export function setS3CorsFailureText(getter: (() => string) | null): void {
+  s3CorsFailureTextImpl = getter ?? (() => 'S3 direct mount failed: bucket CORS not configured or network unreachable');
+}
+
+let directTimeoutTextImpl: (url: string) => string = (url) => `Direct request timed out (30s): ${url}`;
+
+/** 直连超时文案（注入缝消费面同上）。 */
+export function directTimeoutText(url: string): string {
+  return directTimeoutTextImpl(url);
+}
+
+/** 注入直连超时文案 getter（apps/web 装配点消费；传 null 恢复缺省）。 */
+export function setDirectTimeoutText(getter: ((url: string) => string) | null): void {
+  directTimeoutTextImpl = getter ?? ((url) => `Direct request timed out (30s): ${url}`);
+}
+
+let httpFailedTextImpl: (label: string, status: number, detail: string) => string = (label, status, detail) =>
+  `${label} request failed: HTTP ${status}${detail}`;
+
+/** HTTP 非 2xx 错误文案（S3/WebDAV 共用；detail 为调用方拼好的附加段——采样体/
+ * 认证提示；注入缝消费面同上）。 */
+export function httpFailedText(label: string, status: number, detail: string): string {
+  return httpFailedTextImpl(label, status, detail);
+}
+
+/** 注入 HTTP 非 2xx 错误文案 getter（apps/web 装配点消费；传 null 恢复缺省）。 */
+export function setHttpFailedText(getter: ((label: string, status: number, detail: string) => string) | null): void {
+  httpFailedTextImpl =
+    getter ?? ((label, status, detail) => `${label} request failed: HTTP ${status}${detail}`);
+}
+
+let davCorsFailureTextImpl: () => string = () =>
+  'WebDAV direct mount failed: server CORS not configured or network unreachable';
+
+/** WebDAV CORS 特征化文案（注入缝消费面同上）。 */
+export function davCorsFailureText(): string {
+  return davCorsFailureTextImpl();
+}
+
+/** 注入 WebDAV CORS 特征化文案 getter（apps/web 装配点消费；传 null 恢复缺省）。 */
+export function setDavCorsFailureText(getter: (() => string) | null): void {
+  davCorsFailureTextImpl = getter ?? (() => 'WebDAV direct mount failed: server CORS not configured or network unreachable');
+}
+
+let davAuthHintTextImpl: () => string = () => ' (authentication failed: check username/password)';
+
+/** WebDAV 401 认证提示文案（注入缝消费面同上）。 */
+export function davAuthHintText(): string {
+  return davAuthHintTextImpl();
+}
+
+/** 注入 WebDAV 401 认证提示文案 getter（apps/web 装配点消费；传 null 恢复缺省）。 */
+export function setDavAuthHintText(getter: (() => string) | null): void {
+  davAuthHintTextImpl = getter ?? (() => ' (authentication failed: check username/password)');
+}
+
 // ---------- WebCrypto 原语（懒取 globalThis.crypto：测试可注入，http 非
 // 安全上下文浏览器无 subtle 时报错面收敛在签名入口） ----------
 
 function subtle(): SubtleCrypto {
   const s = globalThis.crypto?.subtle;
   if (!s) {
-    throw new Error('WebCrypto 不可用：S3 直连签名需要 HTTPS 或 localhost 环境');
+    throw new Error(s3WebCryptoMissingText());
   }
   return s;
 }
@@ -434,11 +519,7 @@ async function signedFetch(
     region: opts.region,
     extraHeaders: opts.extraHeaders
   });
-  return rawFetch(
-    url,
-    { headers, signal: opts.signal },
-    'S3 直连失败：bucket CORS 未配置或网络不可达'
-  );
+  return rawFetch(url, { headers, signal: opts.signal }, s3CorsFailureText());
 }
 
 /**
@@ -461,7 +542,7 @@ export async function rawFetch(
     return await fetch(url, { ...init, signal: merged });
   } catch (err) {
     if (err instanceof Error && err.name === 'TimeoutError') {
-      throw new Error(`直连请求超时（30s）: ${url}`, { cause: err });
+      throw new Error(directTimeoutText(url), { cause: err });
     }
     if (err instanceof TypeError) {
       throw new Error(corsMessage, { cause: err });
@@ -479,7 +560,7 @@ async function ensureOk(res: Response, label: string): Promise<void> {
   } catch {
     // 错误体不可读：只用状态码
   }
-  throw new Error(`${label}请求失败: HTTP ${res.status}${snippet ? ` ${snippet}` : ''}`);
+  throw new Error(httpFailedText(label, res.status, snippet !== '' ? ` ${snippet}` : ''));
 }
 
 /**

@@ -19,8 +19,32 @@
  * 测试形态：fake-indexeddb + fetch 路由桩（mountsSync.test.ts）。
  */
 import { db, MOUNTS } from './stores/session';
-import { parseRemoteStoreId, type DavDirectConfig, type S3DirectConfig } from '@bhxch/vviewer-core';
+import {
+  parseRemoteStoreId,
+  setS3WebCryptoMissingText,
+  setS3CorsFailureText,
+  setDirectTimeoutText,
+  setHttpFailedText,
+  setDavCorsFailureText,
+  setDavAuthHintText,
+  type DavDirectConfig,
+  type S3DirectConfig
+} from '@bhxch/vviewer-core';
+import { translate as t } from './i18n/core';
 import type { WorkspaceSource } from './workspaceStore';
+
+// 直连错误特征化文案注入缝（i18n Task 8，Task 7 setRenderFailedText 先例）：
+// core 包保持零 i18n 依赖（依赖方向 apps/web → core 不反转），本模块是 direct
+// 记录/直连工厂在 apps/web 的启动加载面（openFlow/serverConnect/管理页共同依赖），
+// 在此一次性注入目录 getter——错误抛出时刻现取当下 locale（事件时刻取值，错误串
+// 为一次性产物无回写面）。apps/web 恒注入故直连面恒走目录 zh 值=原值逐字节；
+// core 独立消费回落包内英文缺省（非显示面契约，Task 7 同口径）。
+setS3WebCryptoMissingText(() => t('mounts.err.s3WebCrypto'));
+setS3CorsFailureText(() => t('mounts.err.s3Cors'));
+setDirectTimeoutText((url) => t('mounts.err.directTimeout', { url }));
+setHttpFailedText((label, status, detail) => t('mounts.err.httpFailed', { label, status, detail }));
+setDavCorsFailureText(() => t('mounts.err.davCors'));
+setDavAuthHintText(() => t('mounts.err.davAuth'));
 
 /**
  * 代理挂载记录（brief 接口 schema + 实施扩展，扩展面记录任务报告）：
@@ -315,7 +339,7 @@ export function directConfigOf(rec: DirectMountRecord): S3DirectConfig | DavDire
       label: rec.label
     };
   }
-  throw new Error(`未知直连后端: ${String((rec as { backend?: unknown }).backend)}`);
+  throw new Error(`Unknown direct backend: ${String((rec as { backend?: unknown }).backend)}`);
 }
 
 /** 兼容别名（既有调用面沿用 proxy 具名形态）。 */
@@ -414,7 +438,7 @@ export async function reregisterMount(
 ): Promise<{ oldIndex: number; newIndex: number }> {
   const del = await mountsApi(rec.serverBase, token, `/api/mounts/${rootIndex}`, { method: 'DELETE' });
   if (!del.ok && del.status !== 404) {
-    throw new Error(`重注册 DELETE 失败：HTTP ${del.status}`);
+    throw new Error(t('mounts.sync.reregisterDeleteFailed', { message: `HTTP ${del.status}` }));
   }
   const post = await mountsApi(rec.serverBase, token, '/api/mounts', {
     method: 'POST',
@@ -422,11 +446,11 @@ export async function reregisterMount(
     body: JSON.stringify(postBodyOf(rec))
   });
   if (!post.ok) {
-    throw new Error(`重注册 POST 失败：HTTP ${post.status}`);
+    throw new Error(t('mounts.sync.reregisterPostFailed', { message: `HTTP ${post.status}` }));
   }
   const body = (await post.json()) as { rootIndex?: unknown };
   if (typeof body.rootIndex !== 'number') {
-    throw new Error('重注册响应缺少 rootIndex');
+    throw new Error(t('mounts.sync.reregisterNoIndex'));
   }
   return { oldIndex: rootIndex, newIndex: body.rootIndex };
 }
@@ -446,9 +470,9 @@ export async function registerProxyMount(
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(postBodyOf(rec))
   });
-  if (!res.ok) throw new Error(`注册失败：HTTP ${res.status}`);
+  if (!res.ok) throw new Error(t('mounts.sync.registerFailed', { message: `HTTP ${res.status}` }));
   const body = (await res.json()) as { rootIndex?: unknown };
-  if (typeof body.rootIndex !== 'number') throw new Error('注册响应缺少 rootIndex');
+  if (typeof body.rootIndex !== 'number') throw new Error(t('mounts.sync.registerNoIndex'));
   return body.rootIndex;
 }
 
@@ -464,7 +488,7 @@ export async function unregisterProxyMount(
   rootIndex: number
 ): Promise<void> {
   const del = await mountsApi(rec.serverBase, token, `/api/mounts/${rootIndex}`, { method: 'DELETE' });
-  if (!del.ok && del.status !== 404) throw new Error(`注销失败：HTTP ${del.status}`);
+  if (!del.ok && del.status !== 404) throw new Error(t('mounts.sync.unregisterFailed', { message: `HTTP ${del.status}` }));
 }
 
 async function postRegister(rec: ProxyMountRecord, base: string, token: string | null): Promise<ProxyMountRecord> {
@@ -475,7 +499,7 @@ async function postRegister(rec: ProxyMountRecord, base: string, token: string |
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const body = (await res.json()) as { rootIndex?: unknown };
-  if (typeof body.rootIndex !== 'number') throw new Error('响应缺少 rootIndex');
+  if (typeof body.rootIndex !== 'number') throw new Error(t('mounts.sync.responseNoIndex'));
   return healthyRecord(rec, body.rootIndex);
 }
 
@@ -559,15 +583,15 @@ export async function syncMountsOnConnect(
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = (await res.json()) as Partial<MountsManifest>;
       if (!Array.isArray(body.mounts) || typeof body.fsRoots !== 'number') {
-        throw new Error('清单形态不识别');
+        throw new Error(t('mounts.sync.listUnrecognized'));
       }
       manifest = body as MountsManifest;
     } catch (err) {
       // 清单不可达（网络/鉴权/旧服务端无此 API）：全部记录静默标记待重试，
       // 下次连接自然重试（spec §3 Pages+无后端场景的降级同口径）
       const reason = errText(err);
-      console.warn(`[vviewer] mountsSync：/api/mounts 不可达（${reason}），代理挂载标记待重试`);
-      for (const rec of records) await saveProxyMount(failedRecord(rec, `清单获取失败：${reason}`));
+      console.warn(`[vviewer] mountsSync: /api/mounts unreachable (${reason}); proxy mounts marked pending retry`);
+      for (const rec of records) await saveProxyMount(failedRecord(rec, t('mounts.sync.listFailed', { reason })));
       return;
     }
 
@@ -583,8 +607,8 @@ export async function syncMountsOnConnect(
         try {
           updated = await postRegister(rec, serverBase, tok);
         } catch (err) {
-          updated = failedRecord(rec, `注册失败：${errText(err)}`);
-          console.warn(`[vviewer] mountsSync：「${rec.label}」${updated.lastError}`);
+          updated = failedRecord(rec, t('mounts.sync.registerFailed', { message: errText(err) }));
+          console.warn(`[vviewer] mountsSync: ${rec.label} ${updated.lastError}`);
         }
       } else if (entry.rootIndex >= runtimeSegmentStart) {
         // 运行时项：探测健康（S-3）——失败 = 服务端可能持过期凭据，走
@@ -595,8 +619,8 @@ export async function syncMountsOnConnect(
           try {
             updated = healthyRecord(rec, (await reregisterMount(rec, tok, entry.rootIndex)).newIndex);
           } catch (err) {
-            updated = failedRecord(rec, `重注册失败：${errText(err)}`);
-            console.warn(`[vviewer] mountsSync：「${rec.label}」${updated.lastError}`);
+            updated = failedRecord(rec, t('mounts.sync.reregisterFailed', { message: errText(err) }));
+            console.warn(`[vviewer] mountsSync: ${rec.label} ${updated.lastError}`);
           }
         }
       } else {
@@ -618,11 +642,11 @@ export async function syncMountsOnConnect(
       try {
         onMigrated(moves);
       } catch (err) {
-        console.warn('[vviewer] mountsSync：迁移回调失败（记录已落库，不影响对账）', err);
+        console.warn('[vviewer] mountsSync: migration callback failed (records persisted; reconciliation unaffected)', err);
       }
     }
   } catch (err) {
     // 防御性兜底（IndexedDB 自身不可用等）：对账不抛错，不影响连接主链
-    console.warn('[vviewer] mountsSync：对账未完成（不影响连接）', err);
+    console.warn('[vviewer] mountsSync: reconciliation incomplete (connection unaffected)', err);
   }
 }

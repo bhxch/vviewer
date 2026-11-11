@@ -10,7 +10,7 @@ import {
   assembleLocalRows,
   assembleMountRows,
   assembleServerMountRows,
-  CREDENTIAL_WARNING,
+  credentialWarning,
   draftFromRecord,
   draftToDirectRecord,
   draftToProxyRecord,
@@ -22,9 +22,11 @@ import {
   probeDraft,
   probeRecord,
   proxyOffsiteOf,
-  WEBDAV_CORS_HINT,
+  webdavCorsHint,
   type MountFormDraft
 } from './mountsManager';
+// i18n 目录（Task 8 域 E）：zh 值逐字节双锁（S5——运行时值断言保留 + 目录锁）
+import { messages as zhMounts } from './i18n/catalogs/zh-CN/mounts';
 import type { DirectMountRecord, MountsManifest, ProxyMountRecord } from './mountsSync';
 import type { WorkspaceSource } from './workspaceStore';
 
@@ -506,11 +508,36 @@ describe('probeDraft/probeRecord/formatProbeResult（测试连接状态回显）
 // ---------- 警示文案与删除联动 ----------
 
 describe('固定警示文案（spec §6：新增表单与列表详情双处出现——组件源码契约在 Ui 测试锁双处）', () => {
-  it('凭据警示与 WebDAV CORS 提示为模块常量（单一出处）', () => {
-    expect(CREDENTIAL_WARNING).toContain('明文');
-    expect(CREDENTIAL_WARNING).toContain('同源脚本');
-    expect(CREDENTIAL_WARNING).toContain('本机用户');
-    expect(WEBDAV_CORS_HINT).toContain('CORS');
+  it('凭据警示与 WebDAV CORS 提示为目录值函数（单一出处；Task 8 常量改函数——装载时刻取值钉死 locale）', () => {
+    expect(credentialWarning()).toContain('明文');
+    expect(credentialWarning()).toContain('同源脚本');
+    expect(credentialWarning()).toContain('本机用户');
+    expect(webdavCorsHint()).toContain('CORS');
+  });
+});
+
+// —— Task 8 S5 目录双锁（域 E）：运行时 zh 值断言全部保留在上方用例（vitest 缺省
+// locale=zh-CN，translate 取目录 zh 值=原字面量逐字节），此处补目录键字节锁——
+// 键值漂移与运行时断言脱钩即红。 ——
+describe('mounts 域目录字节锁（Task 8 S5 双锁）', () => {
+  it('表单校验/警示/探测回显/装配文案与目录 zh 值逐字节等价', () => {
+    expect(zhMounts['mounts.form.endpointUserinfo']).toBe('请使用不含凭据的 endpoint，凭据在下方字段填写');
+    expect(zhMounts['mounts.form.required']).toBe('必填');
+    expect(zhMounts['mounts.form.serverBaseRequired']).toBe('代理挂载需先连接服务器');
+    expect(zhMounts['mounts.warn.credential']).toBe(credentialWarning());
+    expect(zhMounts['mounts.warn.webdavCors']).toBe(webdavCorsHint());
+    expect(zhMounts['mounts.probe.ok']).toBe('连接成功：根目录 {entries} 个条目，延迟 {ms} ms');
+    expect(zhMounts['mounts.probe.fail']).toBe('连接失败：{error}');
+    expect(zhMounts['mounts.segment.fs']).toBe('fs 根');
+    expect(zhMounts['mounts.segment.static']).toBe('静态挂载');
+    expect(zhMounts['mounts.segment.runtime']).toBe('运行时');
+    expect(zhMounts['mounts.title.fsRoot']).toBe('根 {n}');
+    expect(zhMounts['mounts.title.mount']).toBe('{kind} 挂载');
+    expect(zhMounts['mounts.mode.direct']).toBe('直连');
+    expect(zhMounts['mounts.mode.proxy']).toBe('代理');
+    expect(zhMounts['mounts.local.granted']).toBe('已授权（会话恢复可用）');
+    expect(zhMounts['mounts.local.needsReauth']).toBe('需重新授权（刷新后恢复将弹出权限提示）');
+    expect(zhMounts['mounts.local.sessionDetail']).toBe('会话来源（文件内容不持久，刷新后需重新打开）');
   });
 });
 

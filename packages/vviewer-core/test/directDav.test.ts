@@ -184,16 +184,16 @@ describe('createDavDirectStore', () => {
     expect(contentRangeMatches(null, 1, 3)).toBeNull();
   });
 
-  it('PROPFIND 401：抛含 401 与认证提示的 Error', async () => {
+  it('PROPFIND 401：抛含 401 与认证提示的 Error（包内缺省值断言为英文——apps/web 恒注入 zh 目录值，i18n Task 8 注入缝双面契约）', async () => {
     vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => xmlResponse('<error/>', 401)));
-    await expect(testStore().listChildren('')).rejects.toThrow(/401.*认证/s);
+    await expect(testStore().listChildren('')).rejects.toThrow(/401.*authentication failed/is);
   });
 
-  it('CORS TypeError 特征化：网络层失败报 CORS 未配置或网络不可达', async () => {
+  it('CORS TypeError 特征化：网络层失败报 CORS 未配置或网络不可达（包内缺省值断言为英文——apps/web 恒注入 zh 目录值，i18n Task 8 注入缝双面契约）', async () => {
     vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       throw new TypeError('Failed to fetch');
     }));
-    await expect(testStore().read('a.txt')).rejects.toThrow(/CORS 未配置或网络不可达/);
+    await expect(testStore().read('a.txt')).rejects.toThrow(/CORS not configured or network unreachable/);
   });
 
   it('watch 恒不支持：立即通知 onError，listener 不触发，解绑函数可安全调用', () => {

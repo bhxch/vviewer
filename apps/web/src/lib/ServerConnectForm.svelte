@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { t } from './i18n/index.svelte';
   import { connectServer, loadLastServer } from './openFlow.svelte';
 
   /** 连接服务器表单（侧栏多根 spec Task 3 自 TopBar 抽取的共享组件；顶栏退役后
@@ -36,7 +37,7 @@
     if (connecting) return;
     const url = serverUrl.trim();
     if (!url) {
-      serverError = '请输入服务器地址';
+      serverError = t('mounts.connect.addressRequired');
       return;
     }
     connecting = true;
@@ -58,16 +59,16 @@
   <input
     placeholder="http://127.0.0.1:8321"
     bind:value={serverUrl}
-    aria-label="服务器地址"
+    aria-label={t('mounts.connect.addressAria')}
     spellcheck="false"
   />
   <input
     type="password"
-    placeholder="访问令牌（可空）"
+    placeholder={t('mounts.connect.tokenPlaceholder')}
     bind:value={serverToken}
-    aria-label="访问令牌"
+    aria-label={t('mounts.connect.tokenAria')}
   />
-  <button type="submit" disabled={connecting}>{connecting ? '连接中…' : '连接'}</button>
+  <button type="submit" disabled={connecting}>{connecting ? t('mounts.connect.connecting') : t('mounts.connect.connect')}</button>
   {#if serverError}
     <span class="vv-server-error" role="alert">{serverError}</span>
   {/if}

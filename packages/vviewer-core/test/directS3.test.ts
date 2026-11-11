@@ -323,12 +323,12 @@ describe('createS3DirectStore', () => {
     await expect(testStore().read('nope.txt')).rejects.toThrow(/HTTP 404.*NoSuchKey/s);
   });
 
-  it('CORS TypeError 特征化：网络层失败报「bucket CORS 未配置或网络不可达」', async () => {
+  it('CORS TypeError 特征化：网络层失败报「bucket CORS 未配置或网络不可达」（包内缺省值断言为英文——apps/web 恒注入 zh 目录值，i18n Task 8 注入缝双面契约）', async () => {
     vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       throw new TypeError('Failed to fetch');
     }));
     await expect(testStore().read('a.txt')).rejects.toThrow(
-      'S3 直连失败：bucket CORS 未配置或网络不可达'
+      'S3 direct mount failed: bucket CORS not configured or network unreachable'
     );
   });
 

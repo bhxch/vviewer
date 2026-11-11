@@ -9,6 +9,9 @@ import {
   parseTimestamp,
   percentDecode,
   rawFetch,
+  davCorsFailureText,
+  davAuthHintText,
+  httpFailedText,
   type DirectStore
 } from './directS3';
 
@@ -163,8 +166,8 @@ export function createDavDirectStore(cfg: DavDirectConfig): DirectStore {
     } catch {
       // 错误体不可读：只用状态码
     }
-    const auth = res.status === 401 ? '（认证失败：检查用户名/密码）' : '';
-    throw new Error(`WebDAV 请求失败: HTTP ${res.status}${auth}${snippet ? ` ${snippet}` : ''}`);
+    const auth = res.status === 401 ? davAuthHintText() : '';
+    throw new Error(httpFailedText('WebDAV', res.status, `${auth}${snippet !== '' ? ` ${snippet}` : ''}`));
   }
 
   async function request(
@@ -174,8 +177,7 @@ export function createDavDirectStore(cfg: DavDirectConfig): DirectStore {
     body: string | undefined,
     signal?: AbortSignal
   ): Promise<Response> {
-    return rawFetch(url, { method, headers: { ...headers, authorization }, body, signal },
-      'WebDAV 直连失败：服务器 CORS 未配置或网络不可达');
+    return rawFetch(url, { method, headers: { ...headers, authorization }, body, signal }, davCorsFailureText());
   }
 
   return {

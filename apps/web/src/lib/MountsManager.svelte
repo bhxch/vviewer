@@ -15,9 +15,10 @@
   //   ③本机授权来源——localfs 句柄（kv 'dirHandle' 单槽：名称+授权态，打开/
   //     清除——清除后快照 localfs 恢复失效需确认提示）与 localfiles 会话来源。
   // 警示（spec §6）：直连凭据 IndexedDB 明文可被同源脚本与本机用户提取——
-  // 新增表单与列表详情双处固定渲染 CREDENTIAL_WARNING（单一出处常量）。
+  // 新增表单与列表详情双处固定渲染 credentialWarning()（单一出处函数）。
   // 纯逻辑（校验/装配/探测/记录构造）在 mountsManager.ts，本组件只做交互编排。
   import { onMount } from 'svelte';
+  import { t } from './i18n/index.svelte';
   import {
     deleteMount,
     listMounts,
@@ -32,7 +33,7 @@
     assembleLocalRows,
     assembleMountRows,
     assembleServerMountRows,
-    CREDENTIAL_WARNING,
+    credentialWarning,
     draftFromRecord,
     draftToDirectRecord,
     draftToProxyRecord,
@@ -43,7 +44,7 @@
     probeDraft,
     probeRecord,
     proxyOffsiteOf,
-    WEBDAV_CORS_HINT,
+    webdavCorsHint,
     type MountFormDraft,
     type ProbeResult
   } from './mountsManager';
@@ -163,7 +164,7 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = (await res.json()) as Partial<MountsManifest>;
       if (!Array.isArray(body.mounts) || typeof body.fsRoots !== 'number') {
-        throw new Error('清单形态不识别（旧服务端？）');
+        throw new Error(t('mounts.server.unrecognized'));
       }
       serverManifest = body as MountsManifest;
     } catch (err) {
@@ -193,7 +194,7 @@
     try {
       records = await listMounts();
     } catch (err) {
-      console.warn('[vviewer] 挂载记录读取失败', err);
+      console.warn('[vviewer] mounts: failed to load mount records', err);
       records = [];
     }
   }
@@ -265,7 +266,7 @@
         // rec.serverBase 只会 401（死锁面），须先连接该服务器。
         const old = editing !== null && editing.kind === 'proxy' ? editing : null;
         if (old !== null && proxyOffsiteOf(old, last?.baseUrl ?? null)) {
-          formError = `该挂载注册于 ${hostOf(old.serverBase)}，与当前连接的服务器不一致——注销/重注册无法以当前令牌执行；请先连接该服务器再编辑注册。`;
+          formError = t('mounts.edit.offsiteBlock', { host: hostOf(old.serverBase) });
           return;
         }
         const rec = draftToProxyRecord(draft, old ?? undefined);
@@ -342,15 +343,20 @@
     // 自然失效），确认文案显式声明该后果。
     const usage = mountUsageOf(rec.id, workspacesView.list);
     const offsite = rec.kind === 'proxy' && proxyOffsiteOf(rec, last?.baseUrl ?? null);
-    const detail = usage.sources > 0 ? `当前 ${usage.sources} 个工作区正在使用此挂载；` : '';
+    const detail =
+      usage.sources > 0 ? t('mounts.delete.usage', { n: usage.sources }) : '';
     const scopeNote =
       rec.kind === 'proxy' && offsite
-        ? `该挂载注册于服务器 ${hostOf(rec.serverBase)}，与当前连接不一致：将强制本地删除（仅删本机保存的配置，服务器上的注册保留，可连接该服务器后再删除或待其重启失效）。`
+        ? t('mounts.delete.offsiteNote', { host: hostOf(rec.serverBase) })
         : '';
     const forceLocal = rec.kind === 'proxy' && offsite;
     if (
       !window.confirm(
-        `删除挂载「${rec.label}」？${detail}${scopeNote}删除后刷新页面，相关标签页将无法自动恢复。${forceLocal ? '（强制本地删除）' : ''}`
+        t('mounts.delete.confirm', {
+          label: rec.label,
+          detail,
+          scope: scopeNote
+        }) + (forceLocal ? t('mounts.delete.forceLocalSuffix') : '')
       )
     ) {
       return;
@@ -360,7 +366,7 @@
         await unregisterProxyMount(rec, last?.token ?? null, rec.registeredRootIndex);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        showStatusNotice(`服务端注销失败：${msg}（本地记录未删除）`);
+        showStatusNotice(t('mounts.delete.unregisterFailed', { message: msg }));
         return;
       }
     }
@@ -394,23 +400,19 @@
         dirPermission = null;
       }
     } catch (err) {
-      console.warn('[vviewer] 本机授权状态读取失败', err);
+      console.warn('[vviewer] mounts: failed to load local authorization state', err);
       dirHandle = null;
       dirPermission = null;
     }
   }
 
   async function clearHandle(): Promise<void> {
-    if (
-      !window.confirm(
-        '清除已保存的文件夹授权？会话快照中的 localfs 来源将无法自动恢复（下次需重新选择文件夹）。'
-      )
-    ) {
+    if (!window.confirm(t('mounts.local.clearConfirm'))) {
       return;
     }
     await saveDirHandle(null);
     await reloadLocal();
-    showStatusNotice('已清除文件夹授权');
+    showStatusNotice(t('mounts.local.cleared'));
   }
 
   onMount(() => {
@@ -423,28 +425,28 @@
 <div
   class="vv-mounts-manager"
   role="dialog"
-  aria-label="目录管理"
+  aria-label={t('mounts.title')}
   tabindex="-1"
   bind:this={rootEl}
   onkeydown={onRootKeydown}
 >
   <header class="vv-mm-head">
-    <span class="vv-mm-title">目录管理</span>
-    <span class="vv-mm-sub">服务端挂载 / 前端直连与代理 / 本机授权</span>
-    <button type="button" class="vv-mm-close" aria-label="关闭目录管理" title="关闭（Esc）" onclick={requestClose}>✕</button>
+    <span class="vv-mm-title">{t('mounts.title')}</span>
+    <span class="vv-mm-sub">{t('mounts.subtitle')}</span>
+    <button type="button" class="vv-mm-close" aria-label={t('mounts.close')} title={t('mounts.closeTitle')} onclick={requestClose}>✕</button>
   </header>
   <div class="vv-mm-body">
     <!-- 组①：服务端根与挂载 -->
-    <section class="vv-mm-group" aria-label="服务端根与挂载">
-      <h2>服务端根与挂载</h2>
+    <section class="vv-mm-group" aria-label={t('mounts.group.server')}>
+      <h2>{t('mounts.group.server')}</h2>
       {#if last === null}
-        <p class="vv-mm-empty">未连接服务器——通过「连接服务器」连接后，此处显示 fs 根与静态/运行时挂载。</p>
+        <p class="vv-mm-empty">{t('mounts.server.notConnected')}</p>
       {:else if serverError !== ''}
-        <p class="vv-mm-error" role="alert">清单获取失败：{serverError}</p>
+        <p class="vv-mm-error" role="alert">{t('mounts.sync.listFailed', { reason: serverError })}</p>
       {:else if serverLoading}
-        <p class="vv-mm-empty">清单加载中…</p>
+        <p class="vv-mm-empty">{t('mounts.server.listLoading')}</p>
       {:else if serverRows.length === 0}
-        <p class="vv-mm-empty">清单为空。</p>
+        <p class="vv-mm-empty">{t('mounts.server.listEmpty')}</p>
       {:else}
         <ul class="vv-mm-list">
           {#each serverRows as row (row.rootIndex)}
@@ -458,9 +460,9 @@
                   rootIndex={row.rootIndex}
                 {/if}
               </span>
-              <span class="vv-mm-caps">{row.watch ? '' : '无推送'}{row.search ? '' : '·无搜索'}</span>
+              <span class="vv-mm-caps">{row.watch ? '' : t('mounts.caps.noWatch')}{row.search ? '' : t('mounts.caps.noSearch')}</span>
               <span class="vv-mm-actions">
-                <button type="button" onclick={() => openServerRoot(row)}>在树中打开</button>
+                <button type="button" onclick={() => openServerRoot(row)}>{t('mounts.server.openInTree')}</button>
               </span>
             </li>
           {/each}
@@ -469,55 +471,55 @@
     </section>
 
     <!-- 组②：前端配置挂载 -->
-    <section class="vv-mm-group" aria-label="前端配置挂载">
+    <section class="vv-mm-group" aria-label={t('mounts.group.configured')}>
       <h2>
-        前端配置挂载
-        <button type="button" class="vv-mm-add" onclick={openCreate}>＋ 新增挂载</button>
+        {t('mounts.group.configured')}
+        <button type="button" class="vv-mm-add" onclick={openCreate}>{t('mounts.add')}</button>
       </h2>
       <!-- 列表详情警示（spec §6 双处之一；新增表单内为另一处） -->
-      <p class="vv-mm-warning" role="note">⚠ {CREDENTIAL_WARNING}</p>
+      <p class="vv-mm-warning" role="note">⚠ {credentialWarning()}</p>
       {#if mountRows.length === 0}
-        <p class="vv-mm-empty">暂无前端配置挂载。</p>
+        <p class="vv-mm-empty">{t('mounts.config.empty')}</p>
       {:else}
         <ul class="vv-mm-list">
           {#each mountRows as row (row.record.id)}
             <li class="vv-mm-item">
-              <span class="vv-mm-badge" data-mode={row.modeLabel === '直连' ? 'direct' : 'proxy'}>{row.modeLabel}</span>
+              <span class="vv-mm-badge" data-mode={row.record.kind}>{row.modeLabel}</span>
               <span class="vv-mm-badge" data-kind>{row.backendLabel}</span>
               <span class="vv-mm-name" title={row.record.label}>{row.record.label}</span>
               <span class="vv-mm-meta">
                 {row.displayEndpointText}{row.record.kind === 'direct' && row.record.bucket !== undefined ? ` · ${row.record.bucket}` : ''}{row.record.prefix !== '' ? ` · ${row.record.prefix}` : ''}
-                {row.hasCredential ? '· 凭据已存' : ''}
+                {row.hasCredential ? t('mounts.credStored') : ''}
               </span>
               <span class="vv-mm-state" data-state={row.state.code}>
                 {#if row.state.code === 'registered'}
-                  已注册 rootIndex={row.state.rootIndex}
+                  {t('mounts.state.registered', { n: row.state.rootIndex })}
                 {:else if row.state.code === 'offsite'}
-                  注册于他机
+                  {t('mounts.state.offsite')}
                 {:else if row.state.code === 'pending'}
-                  待注册{row.state.error !== undefined ? `（${row.state.error}）` : ''}
+                  {row.state.error !== undefined ? t('mounts.state.pendingError', { error: row.state.error }) : t('mounts.state.pending')}
                 {:else if row.state.code === 'unregistered'}
-                  未注册
+                  {t('mounts.state.unregistered')}
                 {/if}
               </span>
               <span class="vv-mm-actions">
                 {#if row.record.kind === 'direct'}
-                  <button type="button" onclick={() => openDirectRow(row.record)}>打开</button>
+                  <button type="button" onclick={() => openDirectRow(row.record)}>{t('mounts.open')}</button>
                   <button
                     type="button"
                     disabled={rowProbes[row.record.id] === 'probing'}
                     onclick={() => testRow(row.record)}
-                  >测试</button>
+                  >{t('mounts.test')}</button>
                 {:else if row.state.code === 'registered'}
-                  <button type="button" onclick={() => openProxyRow(row.record)}>打开</button>
+                  <button type="button" onclick={() => openProxyRow(row.record)}>{t('mounts.open')}</button>
                 {/if}
-                <button type="button" onclick={() => openEdit(row.record)}>编辑</button>
-                <button type="button" onclick={() => removeRecord(row.record)}>删除</button>
+                <button type="button" onclick={() => openEdit(row.record)}>{t('mounts.edit')}</button>
+                <button type="button" onclick={() => removeRecord(row.record)}>{t('mounts.delete')}</button>
               </span>
               {#if row.record.kind === 'direct' && rowProbes[row.record.id] !== undefined}
                 {@const rp = rowProbes[row.record.id] as ProbeResult | 'probing'}
                 <p class="vv-mm-probe" class:vv-mm-probe-err={rp !== 'probing' && !rp.ok} role="status">
-                  {rp === 'probing' ? '探测中…' : formatProbeResult(rp)}
+                  {rp === 'probing' ? t('mounts.probing') : formatProbeResult(rp)}
                 </p>
               {/if}
             </li>
@@ -528,26 +530,26 @@
       {#if formOpen}
         <!-- 新增/编辑表单：kind→字段集切换→测试连接→保存 -->
         <form class="vv-mm-form" onsubmit={submitForm}>
-          <h3>{editing === null ? '新增挂载' : `编辑挂载：${editing.label}`}</h3>
+          <h3>{editing === null ? t('mounts.form.titleCreate') : t('mounts.form.titleEdit', { label: editing.label })}</h3>
           <div class="vv-mm-field">
-            <label for="vv-mm-mode">访问方式</label>
+            <label for="vv-mm-mode">{t('mounts.form.mode')}</label>
             <select id="vv-mm-mode" bind:value={draft.mode} disabled={last === null}>
-              <option value="direct">直连（浏览器直接访问）</option>
-              <option value="proxy">代理（经服务器访问）</option>
+              <option value="direct">{t('mounts.form.modeDirect')}</option>
+              <option value="proxy">{t('mounts.form.modeProxy')}</option>
             </select>
             {#if draft.mode === 'proxy' && last === null}
-              <span class="vv-mm-issue">代理挂载需先连接服务器</span>
+              <span class="vv-mm-issue">{t('mounts.form.serverBaseRequired')}</span>
             {/if}
           </div>
           <div class="vv-mm-field">
-            <label for="vv-mm-backend">类型</label>
+            <label for="vv-mm-backend">{t('mounts.form.backend')}</label>
             <select id="vv-mm-backend" bind:value={draft.backend}>
               <option value="s3">S3</option>
               <option value="webdav">WebDAV</option>
             </select>
           </div>
           <div class="vv-mm-field">
-            <label for="vv-mm-label">显示名</label>
+            <label for="vv-mm-label">{t('mounts.form.label')}</label>
             <input id="vv-mm-label" bind:value={draft.label} spellcheck="false" />
             {#if formIssues?.label}<span class="vv-mm-issue">{formIssues.label}</span>{/if}
           </div>
@@ -558,32 +560,32 @@
           </div>
           {#if draft.backend === 's3'}
             <div class="vv-mm-field">
-              <label for="vv-mm-bucket">存储桶（bucket）</label>
+              <label for="vv-mm-bucket">{t('mounts.form.bucket')}</label>
               <input id="vv-mm-bucket" bind:value={draft.bucket} spellcheck="false" />
               {#if formIssues?.bucket}<span class="vv-mm-issue">{formIssues.bucket}</span>{/if}
             </div>
             <div class="vv-mm-field">
-              <label for="vv-mm-pathstyle">path-style 寻址</label>
+              <label for="vv-mm-pathstyle">{t('mounts.form.pathStyle')}</label>
               <input id="vv-mm-pathstyle" type="checkbox" bind:checked={draft.pathStyle} />
-              <span class="vv-mm-hint">关闭则使用 virtual-host 形态（bucket.host）</span>
+              <span class="vv-mm-hint">{t('mounts.form.pathStyleHint')}</span>
             </div>
           {/if}
           <div class="vv-mm-field">
-            <label for="vv-mm-prefix">子路径（prefix，可空）</label>
+            <label for="vv-mm-prefix">{t('mounts.form.prefix')}</label>
             <input id="vv-mm-prefix" bind:value={draft.prefix} spellcheck="false" />
           </div>
           <div class="vv-mm-field">
-            <label for="vv-mm-username">{draft.backend === 's3' ? 'Access Key ID' : '用户名'}</label>
+            <label for="vv-mm-username">{draft.backend === 's3' ? 'Access Key ID' : t('mounts.form.username')}</label>
             <input id="vv-mm-username" bind:value={draft.username} autocomplete="off" spellcheck="false" />
             {#if formIssues?.username}<span class="vv-mm-issue">{formIssues.username}</span>{/if}
           </div>
           <div class="vv-mm-field">
-            <label for="vv-mm-secret">{draft.backend === 's3' ? 'Secret Access Key' : '密码'}</label>
+            <label for="vv-mm-secret">{draft.backend === 's3' ? 'Secret Access Key' : t('mounts.form.secret')}</label>
             <input id="vv-mm-secret" type="password" bind:value={draft.secret} autocomplete="off" />
             {#if formIssues?.secret}<span class="vv-mm-issue">{formIssues.secret}</span>{/if}
           </div>
           {#if draft.backend === 'webdav'}
-            <p class="vv-mm-hint" role="note">⚠ {WEBDAV_CORS_HINT}</p>
+            <p class="vv-mm-hint" role="note">⚠ {webdavCorsHint()}</p>
           {/if}
           {#if draft.mode === 'proxy'}
             <!-- 终审 I-4 勘误：proxy 的「测试连接」同为浏览器侧探测（直打目标
@@ -591,14 +593,14 @@
               用；代理链路的真实可用性以服务器出口为准（保存注册后由对账健康探测
               覆盖，spec §3）。 -->
             <p class="vv-mm-hint" role="note">
-              「测试连接」为浏览器侧探测（直连目标端点）：被 CORS 拦截不代表代理链路不可用——代理访问以服务器出口为准，保存注册后由对账健康探测验证。
+              {t('mounts.form.proxyProbeHint')}
             </p>
           {/if}
           <!-- 新增表单警示（spec §6 双处之二） -->
-          <p class="vv-mm-warning" role="note">⚠ {CREDENTIAL_WARNING}</p>
+          <p class="vv-mm-warning" role="note">⚠ {credentialWarning()}</p>
           <div class="vv-mm-form-actions">
             <button type="button" disabled={probing || saving} onclick={runProbe}>
-              {probing ? '探测中…' : '测试连接'}
+              {probing ? t('mounts.probing') : t('mounts.form.test')}
             </button>
             {#if probe !== null}
               <span
@@ -612,32 +614,32 @@
             <p class="vv-mm-error" role="alert">{formError}</p>
           {/if}
           <div class="vv-mm-form-actions">
-            <button type="submit" disabled={saving}>{saving ? '保存中…' : '保存'}</button>
-            <button type="button" onclick={closeForm}>取消</button>
+            <button type="submit" disabled={saving}>{saving ? t('mounts.form.saving') : t('mounts.form.save')}</button>
+            <button type="button" onclick={closeForm}>{t('mounts.cancel')}</button>
           </div>
         </form>
       {/if}
     </section>
 
     <!-- 组③：本机授权来源 -->
-    <section class="vv-mm-group" aria-label="本机授权来源">
+    <section class="vv-mm-group" aria-label={t('mounts.group.local')}>
       <h2>
-        本机授权来源
-        <button type="button" class="vv-mm-add" onclick={() => void openDirectoryViaPicker()}>选择文件夹授权</button>
+        {t('mounts.group.local')}
+        <button type="button" class="vv-mm-add" onclick={() => void openDirectoryViaPicker()}>{t('mounts.local.authorize')}</button>
       </h2>
       {#if localRows.length === 0}
-        <p class="vv-mm-empty">暂无本机授权来源。</p>
+        <p class="vv-mm-empty">{t('mounts.local.empty')}</p>
       {:else}
         <ul class="vv-mm-list">
           {#each localRows as row (row.key)}
             <li class="vv-mm-item">
-              <span class="vv-mm-badge" data-seg={row.kind === 'localfs' ? 'fs' : 'session'}>{row.kind === 'localfs' ? 'localfs' : '会话'}</span>
+              <span class="vv-mm-badge" data-seg={row.kind === 'localfs' ? 'fs' : 'session'}>{row.kind === 'localfs' ? 'localfs' : t('mounts.badge.session')}</span>
               <span class="vv-mm-name">{row.title}</span>
               <span class="vv-mm-meta">{row.detail}</span>
               <span class="vv-mm-actions">
                 {#if row.kind === 'localfs'}
-                  <button type="button" onclick={() => void openSavedDirectory()}>打开</button>
-                  <button type="button" onclick={() => void clearHandle()}>清除授权</button>
+                  <button type="button" onclick={() => void openSavedDirectory()}>{t('mounts.open')}</button>
+                  <button type="button" onclick={() => void clearHandle()}>{t('mounts.local.clearAuth')}</button>
                 {/if}
               </span>
             </li>

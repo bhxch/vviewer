@@ -10,6 +10,7 @@
  * 见 openFlow.svelte.ts 该函数注释（双锚测锁死的有意分叉）。
  */
 import { createRemoteStore, getRemoteBase, normalizeServerBase, type TreeStore } from '@bhxch/vviewer-core';
+import { t } from './i18n/index.svelte';
 import { loadSettings } from './stores/settings';
 import { workspaceStore } from './workspaceStore';
 import {
@@ -90,7 +91,7 @@ export function wireStoreWatch(store: ReturnType<typeof createRemoteStore>): voi
     },
     () => {
       watchHealth.degraded = true;
-      console.warn('[vviewer] 服务器变更推送不可用，自动刷新已停用');
+      console.warn('[vviewer] server change feed unavailable; auto refresh disabled');
     }
   );
 }
@@ -112,9 +113,9 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
   try {
     res = await fetch(`${base}/api/health`, { headers });
   } catch {
-    throw new Error(`无法连接 ${base}：网络错误或地址不可达`);
+    throw new Error(t('mounts.connect.unreachable', { base }));
   }
-  if (!res.ok) throw new Error(`服务器响应异常: HTTP ${res.status}`);
+  if (!res.ok) throw new Error(t('mounts.connect.httpError', { status: res.status }));
   let caps: {
     version?: unknown;
     capabilities?: unknown;
@@ -135,10 +136,10 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
       fsRoots?: unknown;
     };
   } catch {
-    throw new Error('health 响应不是有效 JSON');
+    throw new Error(t('mounts.connect.healthJson'));
   }
   if (!Array.isArray(caps.capabilities) || !caps.capabilities.includes('file-server')) {
-    throw new Error('目标不是 vviewer 文件服务器（缺少 file-server 能力）');
+    throw new Error(t('mounts.connect.notFileServer'));
   }
   // health 摘要缓存（settings center spec §2.1 关于分节）：version/capabilities/
   // searchEngine/roots 并列显示；旧服务端缺 version 时按无记录处理（显示「未连接」）
@@ -160,11 +161,13 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
   try {
     authRes = await fetch(`${base}/api/ticket`, { method: 'POST', headers });
   } catch {
-    throw new Error(`无法连接 ${base}：网络错误或地址不可达`);
+    throw new Error(t('mounts.connect.unreachable', { base }));
   }
   if (!authRes.ok) {
     throw new Error(
-      authRes.status === 401 ? '鉴权失败：令牌缺失或错误（HTTP 401）' : `服务器响应异常: HTTP ${authRes.status}`
+      authRes.status === 401
+        ? t('mounts.connect.authFailed')
+        : t('mounts.connect.httpError', { status: authRes.status })
     );
   }
 
@@ -220,7 +223,7 @@ export async function connectServer(baseUrl: string, token: string | null): Prom
   // 台账 3-21：重连清扫与挂载释放同口径（状态栏一次性提示）——旧 tab 被系统替换
   // 关闭（undoable:false 不入撤销栈）此前零反馈；0 = 首次连接/无存活实例，不提示。
   if (staleTabIds.length > 0) {
-    showStatusNotice(`已关闭 ${staleTabIds.length} 个旧标签页（服务器已重新连接）`);
+    showStatusNotice(t('mounts.connect.closedStaleTabs', { n: staleTabIds.length }));
   }
 
   const store = createRemoteStore(base, tok, serverLabel(base));

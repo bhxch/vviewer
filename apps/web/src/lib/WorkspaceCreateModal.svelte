@@ -11,6 +11,7 @@
   // Esc 双 handler 仿 GlobalSearchPanel（容器 keydown + window 兜底）；焦点在浏览
   // 层时由内层 handler 先关浏览层（target 互斥不双触发）。
   import { createLocalFsStore, isAbortError } from '@bhxch/vviewer-core';
+  import { t } from './i18n/index.svelte';
   import {
     addDirStoreTab,
     openDirectoryViaInput,
@@ -23,7 +24,9 @@
 
   let { onclose }: { onclose(): void } = $props();
 
-  const defaultName = `工作区 ${workspaceSeqOf(workspaceStore.nextId())}`;
+  // 默认名（i18n Task 8）：显示面为 placeholder/初始名模板——组件挂载时刻现取
+  // locale；名字一经创建即数据值（不随 locale 回写，与既有「工作区 N」持久化一致）。
+  const defaultName = t('mounts.wscreate.defaultName', { n: workspaceSeqOf(workspaceStore.nextId()) });
   let name = $state(defaultName);
   /** 本次已创建的 workspace id（null = 尚未创建：来源选定前不建组） */
   let createdId = $state<string | null>(null);
@@ -77,7 +80,7 @@
     } catch (err) {
       // 用户取消（BUG-19 同款文案走状态栏提示）：不建组，模态保持
       if (isAbortError(err)) {
-        showStatusNotice('已取消选择文件夹');
+        showStatusNotice(t('mounts.wscreate.folderCancelled'));
         return;
       }
       note = err instanceof Error ? err.message : String(err);
@@ -86,7 +89,7 @@
     ensureCreated(); // 选定后才建组：addDirStoreTab 归当前活动组 = 新组
     await saveDirHandle(handle);
     addDirStoreTab(createLocalFsStore(handle));
-    note = `已添加文件夹来源「${handle.name}」，可继续添加或完成创建`;
+    note = t('mounts.wscreate.folderAdded', { name: handle.name });
   }
 
   /** webkitdirectory 回退通道（Firefox 等）：同 openDirectoryViaPicker 的回退语义 */
@@ -111,7 +114,7 @@
     if (input.files !== null && input.files.length > 0) {
       ensureCreated();
       openFiles([...input.files]);
-      note = `已添加 ${input.files.length} 个文件，可继续添加或完成创建`;
+      note = t('mounts.wscreate.filesAdded', { n: input.files.length });
     }
     input.value = '';
   }
@@ -125,7 +128,7 @@
   }
 
   function onRemotePicked(): void {
-    note = '已添加后端路径来源，可继续添加或完成创建';
+    note = t('mounts.wscreate.remoteAdded');
   }
 
   // ---------- Esc（双 handler，GlobalSearchPanel 模式） ----------
@@ -177,30 +180,30 @@
   }
 </script>
 
-<div class="vv-wscreate-panel vv-wscreate" role="dialog" aria-label="新建工作区" tabindex="-1" bind:this={panelEl} onkeydown={onpanelkeydown}>
+<div class="vv-wscreate-panel vv-wscreate" role="dialog" aria-label={t('mounts.wscreate.title')} tabindex="-1" bind:this={panelEl} onkeydown={onpanelkeydown}>
   {#if remoteBrowse}
     <RemoteSourceModal onclose={() => (remoteBrowse = false)} onpicked={onRemotePicked} />
   {:else}
     <div class="vv-wscreate-head">
-      <span class="vv-wscreate-title">新建工作区</span>
-      <button type="button" class="vv-wscreate-close" aria-label="关闭新建工作区" title="完成创建（Esc）" onclick={finish}>✕</button>
+      <span class="vv-wscreate-title">{t('mounts.wscreate.title')}</span>
+      <button type="button" class="vv-wscreate-close" aria-label={t('mounts.wscreate.close')} title={t('mounts.wscreate.closeTitle')} onclick={finish}>✕</button>
     </div>
     <label class="vv-wscreate-name">
-      <span>名称</span>
-      <input bind:this={nameInputEl} bind:value={name} placeholder={defaultName} aria-label="工作区名称" spellcheck="false" />
+      <span>{t('mounts.wscreate.nameLabel')}</span>
+      <input bind:this={nameInputEl} bind:value={name} placeholder={defaultName} aria-label={t('mounts.wscreate.nameAria')} spellcheck="false" />
     </label>
-    <div class="vv-wscreate-label">添加来源（可跳过）</div>
+    <div class="vv-wscreate-label">{t('mounts.wscreate.addSources')}</div>
     <div class="vv-wscreate-sources">
-      <button type="button" onclick={() => void pickFolder()}>本地文件夹…</button>
-      <button type="button" onclick={pickFiles}>本地文件…</button>
-      <button type="button" onclick={openRemote}>后端路径…</button>
+      <button type="button" onclick={() => void pickFolder()}>{t('mounts.src.folder')}</button>
+      <button type="button" onclick={pickFiles}>{t('mounts.src.files')}</button>
+      <button type="button" onclick={openRemote}>{t('mounts.src.remote')}</button>
     </div>
-    <div class="vv-wscreate-hint">来源将加入本工作区；创建后也可用标签栏 ＋/⋯ 菜单「打开文件夹 / 连接服务器」继续添加。</div>
+    <div class="vv-wscreate-hint">{t('mounts.wscreate.hint')}</div>
     {#if note}
       <div class="vv-wscreate-note" role="status">{note}</div>
     {/if}
     <div class="vv-wscreate-actions">
-      <button type="button" class="vv-wscreate-primary" onclick={finish}>创建并激活</button>
+      <button type="button" class="vv-wscreate-primary" onclick={finish}>{t('mounts.wscreate.finish')}</button>
     </div>
     <input type="file" multiple hidden bind:this={fileInputEl} onchange={onFilesPick} />
     <input type="file" hidden bind:this={dirInputEl} onchange={onDirPick} />

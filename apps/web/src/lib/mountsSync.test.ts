@@ -976,8 +976,8 @@ describe('directConfigOf', () => {
     });
   });
 
-  it('未知 backend 抛错（记录损坏防御）', () => {
-    expect(() => directConfigOf({ ...s3Rec, backend: 'ftp' as DirectMountRecord['backend'] })).toThrow(/未知直连后端/);
+  it('未知 backend 抛错（记录损坏防御；i18n Task 8——防御错误为内部身份面不上屏，英文化同日志串口径）', () => {
+    expect(() => directConfigOf({ ...s3Rec, backend: 'ftp' as DirectMountRecord['backend'] })).toThrow(/Unknown direct backend/);
   });
 
   it('与 core 工厂联动：配置直接建 store 得到的 storeId = 记录 id（id 闭环——管理页保存即以 s3DirectStoreId/davDirectStoreId 为记录 id）', async () => {

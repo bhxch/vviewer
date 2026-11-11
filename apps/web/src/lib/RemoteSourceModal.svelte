@@ -13,6 +13,7 @@
   // （容器 keydown + window 兜底，target 互斥天然不双触发；内嵌于创建模态时焦点
   // 在外层时仅关本层、焦点在 body 时两层同关，语义均为「退出浏览」）。
   import { loadLastServer, openRemoteSource } from './openFlow.svelte';
+  import { t } from './i18n/index.svelte';
 
   let {
     onclose,
@@ -45,7 +46,7 @@
 
   /** 根显示名：有路径宣告显示路径，否则回落「根 N」序号（旧服务端/token 部署） */
   function rootLabel(i: number): string {
-    return rootPaths[i] ?? `根 ${i}`;
+    return rootPaths[i] ?? t('mounts.title.fsRoot', { n: i });
   }
 
   /** Bearer 头构造（connectServer 同款：token 空串归一 null） */
@@ -73,12 +74,12 @@
         signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(30_000) : undefined
       });
     } catch {
-      error = `无法连接 ${last.baseUrl}：网络错误或地址不可达`;
+      error = t('mounts.connect.unreachable', { base: last.baseUrl });
       phase = 'browse';
       return;
     }
     if (!res.ok) {
-      error = `服务器响应异常: HTTP ${res.status}`;
+      error = t('mounts.connect.httpError', { status: res.status });
       phase = 'browse';
       return;
     }
@@ -86,7 +87,7 @@
     try {
       body = (await res.json()) as { roots?: unknown; rootPaths?: unknown };
     } catch {
-      error = 'health 响应不是有效 JSON';
+      error = t('mounts.connect.healthJson');
       phase = 'browse';
       return;
     }
@@ -125,8 +126,8 @@
     } catch (err) {
       error =
         err instanceof Error && err.name === 'TimeoutError'
-          ? `服务器请求超时（30s）: ${last.baseUrl}/api/tree`
-          : `无法连接 ${last.baseUrl}：网络错误或地址不可达`;
+          ? t('mounts.remote.treeTimeout', { base: last.baseUrl })
+          : t('mounts.connect.unreachable', { base: last.baseUrl });
       loading = false;
       return;
     }
@@ -138,7 +139,7 @@
       } catch {
         // 非 JSON 错误体：只用状态码
       }
-      error = `服务器请求失败: HTTP ${res.status}${detail}`;
+      error = t('mounts.remote.treeFailed', { status: res.status, detail });
       loading = false;
       return;
     }
@@ -146,7 +147,7 @@
     try {
       body = (await res.json()) as { entries?: Array<{ name?: unknown; kind?: unknown; size?: unknown }> };
     } catch {
-      error = 'tree 响应不是有效 JSON';
+      error = t('mounts.remote.treeJson');
       loading = false;
       return;
     }
@@ -217,18 +218,18 @@
   }
 </script>
 
-<div class="vv-remotesrc" role="dialog" aria-label="添加后端路径来源" tabindex="-1" bind:this={panelEl} onkeydown={onpanelkeydown}>
+<div class="vv-remotesrc" role="dialog" aria-label={t('mounts.remote.dialogAria')} tabindex="-1" bind:this={panelEl} onkeydown={onpanelkeydown}>
   <div class="vv-remotesrc-head">
-    <span class="vv-remotesrc-title">后端路径来源</span>
-    <button type="button" class="vv-remotesrc-close" aria-label="关闭后端路径浏览" title="关闭（Esc）" onclick={close}>✕</button>
+    <span class="vv-remotesrc-title">{t('mounts.remote.title')}</span>
+    <button type="button" class="vv-remotesrc-close" aria-label={t('mounts.remote.close')} title={t('mounts.closeTitle')} onclick={close}>✕</button>
   </div>
 
   {#if phase === 'no-server'}
     <div class="vv-remotesrc-empty">
-      尚未连接服务器。请先在标签栏 ⋯ 菜单「连接服务器」建立连接，再添加后端路径来源。
+      {t('mounts.remote.noServer')}
     </div>
   {:else if phase === 'roots'}
-    <div class="vv-remotesrc-hint">该服务器有多数据根，请先选择根：</div>
+    <div class="vv-remotesrc-hint">{t('mounts.remote.multiRoot')}</div>
     <div class="vv-remotesrc-roots">
       {#each rootIndices as i (i)}
         <button
@@ -243,16 +244,16 @@
       {/each}
     </div>
     {#if rootPaths.length === 0}
-      <div class="vv-remotesrc-hint">服务器仅宣告根数量（无根路径），以序号表示。</div>
+      <div class="vv-remotesrc-hint">{t('mounts.remote.rootsOnly')}</div>
     {/if}
   {:else}
     {#if rootsCount > 1}
       <button type="button" class="vv-remotesrc-rootback" onclick={() => (phase = 'roots')}>
-        ← 重选根（当前：{rootLabel(rootIndex)}）
+        {t('mounts.remote.rootBack', { current: rootLabel(rootIndex) })}
       </button>
     {/if}
-    <div class="vv-remotesrc-crumbs" aria-label="路径面包屑">
-      <button type="button" class="vv-remotesrc-crumb" disabled={path === ''} onclick={() => void load('')}>根</button>
+    <div class="vv-remotesrc-crumbs" aria-label={t('mounts.remote.crumbsAria')}>
+      <button type="button" class="vv-remotesrc-crumb" disabled={path === ''} onclick={() => void load('')}>{t('mounts.remote.crumbRoot')}</button>
       {#each path.split('/') as seg, i (i)}
         <span class="vv-remotesrc-sep">/</span>
         {@const prefix = path.split('/').slice(0, i + 1).join('/')}
@@ -265,17 +266,17 @@
       {/each}
     </div>
     <button type="button" class="vv-remotesrc-pickcurrent" disabled={loading} onclick={() => pick(path)}>
-      将当前目录作为来源（{path === '' ? rootLabel(rootIndex) : path}）
+      {t('mounts.remote.pickCurrent', { current: path === '' ? rootLabel(rootIndex) : path })}
     </button>
     {#if error}
       <div class="vv-remotesrc-error" role="alert">
         {error}
-        <button type="button" onclick={() => void load(path)}>重试</button>
+        <button type="button" onclick={() => void load(path)}>{t('mounts.remote.retry')}</button>
       </div>
     {:else if loading}
-      <div class="vv-remotesrc-empty">加载中…</div>
+      <div class="vv-remotesrc-empty">{t('mounts.remote.loading')}</div>
     {:else if entries.length === 0}
-      <div class="vv-remotesrc-empty">（空目录）</div>
+      <div class="vv-remotesrc-empty">{t('mounts.remote.emptyDir')}</div>
     {:else}
       <ul class="vv-remotesrc-list">
         {#each entries as e (e.name)}
@@ -290,16 +291,16 @@
               <button
                 type="button"
                 class="vv-remotesrc-pick"
-                title={`将此目录作为来源：${join(path, e.name)}`}
-                onclick={() => pick(join(path, e.name))}>作为来源</button
+                title={t('mounts.remote.pickDirTitle', { path: join(path, e.name) })}
+                onclick={() => pick(join(path, e.name))}>{t('mounts.remote.pickDir')}</button
               >
             {:else}
               <span class="vv-remotesrc-name vv-remotesrc-file" title={join(path, e.name)}>{e.name}</span>
               <button
                 type="button"
                 class="vv-remotesrc-pick"
-                title={`将此文件作为来源：${join(path, e.name)}`}
-                onclick={() => pick(path, join(path, e.name), e.size)}>将此文件作为来源</button
+                title={t('mounts.remote.pickFileTitle', { path: join(path, e.name) })}
+                onclick={() => pick(path, join(path, e.name), e.size)}>{t('mounts.remote.pickFile')}</button
               >
             {/if}
           </li>

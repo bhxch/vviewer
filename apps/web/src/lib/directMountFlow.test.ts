@@ -6,6 +6,8 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+// i18n 目录（Task 8 域 E）：serverConnect 提示文案锚的 zh 值双锁
+import { messages as zhMounts } from './i18n/catalogs/zh-CN/mounts';
 
 // vitest 会转译 import.meta.url（metaStore.test 同款处理）：双 cwd 兼容根/apps/web
 function readSrc(relFromWeb: string): string {
@@ -72,7 +74,11 @@ describe('openFlow 直连 store 创建分派（带入①创建链路）', () => 
     const sweep = scSrc.match(
       /const staleTabIds = tabStore\.list[\s\S]*?for \(const id of staleTabIds\) \{[\s\S]*?\n {2}\}[\s\S]*?\n {2}\}/
     )![0];
-    expect(sweep).toMatch(/已关闭 \$\{staleTabIds\.length\} 个旧标签页（服务器已重新连接）/);
+    // i18n Task 8：提示文案迁目录——键形态 + zh 值逐字节双锁（断言力不弱化）
+    expect(sweep).toMatch(
+      /showStatusNotice\(t\('mounts\.connect\.closedStaleTabs', \{ n: staleTabIds\.length \}\)\)/
+    );
+    expect(zhMounts['mounts.connect.closedStaleTabs']).toBe('已关闭 {n} 个旧标签页（服务器已重新连接）');
     expect(sweep).toMatch(/if \(staleTabIds\.length > 0\)/);
   });
 
