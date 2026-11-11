@@ -1,6 +1,8 @@
 // gitUi.ts — Git 段 UI 共用小工具（git 信息面板 Task 3）：GitSection（信息卡 +
 // diff 折叠区 + log 列表）与 ViewerPane（blame hover 浮层）双消费，抽此处避免
-// 双写漂移。纯函数无依赖。
+// 双写漂移。日历日期经 i18n/format（Intl 唯一通道，§4.2——裸 Intl/toLocale* 禁令
+// 的存量迁移点；locale 跟随设置语言，时区维持浏览器本地）。
+import { formatDate, formatDateTime } from '../i18n/format';
 
 /**
  * store 相对路径 → isogit 树内路径（仓库相对）：GitSection.svelte:103 的既定口径
@@ -16,14 +18,15 @@ export function repoRelPath(repoDir: string, filePath: string): string {
       : filePath;
 }
 
-/** 相对日期（spec §3.1「短 hash/作者/相对日期/subject」；超月回落日历日期）。 */
+/** 相对日期（spec §3.1「短 hash/作者/相对日期/subject」；超月回落日历日期
+ * ——formatDate，locale 随当前界面语言）。 */
 export function relativeDate(ts: number): string {
   const diff = Date.now() / 1000 - ts;
   if (diff < 60) return '刚刚';
   if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
   if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
   if (diff < 86400 * 30) return `${Math.floor(diff / 86400)} 天前`;
-  return new Date(ts * 1000).toLocaleDateString();
+  return formatDate(new Date(ts * 1000));
 }
 
 /** commit message → subject（首行；空 message 回落占位）。 */
@@ -32,7 +35,8 @@ export function subjectOf(message: string): string {
   return first === '' ? '（无说明）' : first;
 }
 
-/** 提交详情的日历时间戳（log 展开消费：author/committer 各一行）。 */
+/** 提交详情的日历时间戳（log 展开消费：author/committer 各一行）——formatDateTime，
+ * locale 随当前界面语言。 */
 export function calendarTime(ts: number): string {
-  return new Date(ts * 1000).toLocaleString();
+  return formatDateTime(new Date(ts * 1000));
 }
