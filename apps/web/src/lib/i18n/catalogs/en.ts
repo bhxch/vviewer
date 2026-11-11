@@ -9,6 +9,8 @@ import { messages as quickopen } from './en/quickopen';
 import { messages as viewer } from './en/viewer';
 import { messages as errors } from './en/errors';
 import { messages as mounts } from './en/mounts';
+import { messages as git } from './en/git';
+import { messages as search } from './en/search';
 
 /** domain→pack 记录（聚合机检逐域面；与 zh 同构） */
 export const MESSAGE_PACKS = {
@@ -20,7 +22,9 @@ export const MESSAGE_PACKS = {
   quickopen,
   viewer,
   errors,
-  mounts
+  mounts,
+  git,
+  search
 } as const;
 
 export const messages = {
@@ -32,5 +36,7 @@ export const messages = {
   ...quickopen,
   ...viewer,
   ...errors,
-  ...mounts
+  ...mounts,
+  ...git,
+  ...search
 } as const;
