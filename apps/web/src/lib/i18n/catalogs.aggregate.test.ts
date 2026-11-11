@@ -12,8 +12,15 @@ import { describe, expect, it } from 'vitest';
 import { MESSAGE_PACKS as EN_PACKS, messages as enMessages } from './catalogs/en';
 import { MESSAGE_PACKS, messages as zhMessages } from './catalogs/zh-CN';
 
-/** 抽取值中全部 {占位符} 名（排序后拼接，集合比较免序敏感） */
-function placeholdersOf(v: string): string {
+/**
+ * 抽取值中全部 {占位符} 名（排序后拼接，集合比较免序敏感）。
+ * 前置守卫（修复轮 M-5）：③（键集相等）不变式破时④独立可诊断——缺键侧返回哨兵
+ * 串（不与任何真实占位符集合相等），④失败 diff 点名「缺键」而非裸 TypeError
+ * （undefined.matchAll）。类型入参收 string：交付态目录 satisfies 全 string，
+ * undefined 仅在③所锁不变式被破坏时运行时可达。
+ */
+function placeholdersOf(v: string | undefined): string {
+  if (v === undefined) return '⟨缺键：③键集相等已破⟩';
   return [...v.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',');
 }
 
