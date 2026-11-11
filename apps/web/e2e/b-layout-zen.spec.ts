@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
-import { MENU_POP, openMenu, openSubmenu } from './tabbar-menu';
+import { openDrawerIfNarrow } from './drawer';
+import { MENU_POP, openMenu, openSubmenu, primeUiInteractive } from './tabbar-menu';
 
 /**
  * 布局自由化与 zen mode 冒烟（spec 2026-10-19 §2/§3/§3.1，plan Task 5）。
@@ -88,6 +89,7 @@ test.describe('布局与 zen（桌面）', () => {
 
   test('LZ-01：双栏折叠/展开 + reload 保持（layout 节持久化）', async ({ page }) => {
     await waitApp(page);
+    await primeUiInteractive(page); // 水合竞态门（T13b）：首交互前确保委托监听挂载
 
     // 左栏折叠：竖条上岗、aside 挂 off 类、落盘
     await page.locator('.vv-collapse-left').click();
@@ -116,6 +118,7 @@ test.describe('布局与 zen（桌面）', () => {
   test('LZ-02：中缝拖拽调宽 + clamp + 双击重置', async ({ page }) => {
     test.setTimeout(60_000);
     await waitApp(page);
+    await primeUiInteractive(page); // 水合竞态门（T13b）：拖拽 pointerdown 前确保委托监听挂载
 
     const readLeft = async (): Promise<number> =>
       (await layoutOf(page)).leftWidth as number;
@@ -164,6 +167,7 @@ test.describe('布局与 zen（桌面）', () => {
     page
   }) => {
     await waitApp(page);
+    await primeUiInteractive(page); // 水合竞态门（T13b）：contextmenu 右键前确保委托监听挂载
 
     // 右键标签栏 → 隐藏标签栏：chrome-off（translateY + visibility:hidden，不用 isVisible）
     await chromeMenuItem(page, '隐藏标签栏');
@@ -196,6 +200,7 @@ test.describe('布局与 zen（桌面）', () => {
     page
   }) => {
     await waitApp(page);
+    await primeUiInteractive(page); // 水合竞态门（T13b）：contextmenu/Ctrl+, 前确保监听挂载
     await chromeMenuItem(page, '隐藏标签栏');
     expect((await barState(page, '.vv-tabbar')).cls).toContain('vv-chrome-off');
 
@@ -292,6 +297,7 @@ test.describe('布局与 zen（桌面）', () => {
     page
   }) => {
     await waitApp(page);
+    await primeUiInteractive(page); // 水合竞态门（T13b）：contextmenu 右键前确保委托监听挂载
 
     // 右键 tabbar 非条目区（管理钮）→ 隐藏标签栏（顶栏退役后唯一可隐 chrome 条）
     await page.locator('.vv-tabbar-manage').click({ button: 'right' });
@@ -318,6 +324,7 @@ test.describe('布局与 zen（桌面）', () => {
 
   test('LZ-06：reload 落 zen（layout.zen 持久化，桌面无浮钮、Esc 退出）', async ({ page }) => {
     await waitApp(page);
+    await primeUiInteractive(page); // 水合竞态门（T13b）：Ctrl+Alt+Z keydown 前确保监听挂载
     // 同 LZ-05：光标离开顶热区再进 zen（reload 前置态干净）
     await page.mouse.move(400, 300);
     await page.keyboard.press('Control+Alt+z');
@@ -341,9 +348,11 @@ test.describe('zen 移动端（mobile project）', () => {
     testInfo.skip(testInfo.project.name !== 'mobile', '移动视口专属（仅 mobile project）');
   });
 
-  /** 经 ☰ 抽屉头部「专注模式」进入 zen（iOS Safari 不派发 contextmenu 的回落入口） */
+  /** 经 ☰ 抽屉头部「专注模式」进入 zen（iOS Safari 不派发 contextmenu 的回落入口）。
+   * 开抽屉走 drawer.ts 装置（T13b 水合竞态门：ensureDrawer 以 .vv-side transform
+   * 落定为准重试——竞态窗内 toggle 点击会被吞且不可恢复，装置自校验兜住） */
   async function enterZenViaDrawer(page: Page): Promise<void> {
-    await page.locator('.vv-drawer-toggle').click();
+    await openDrawerIfNarrow(page);
     await page.locator('.vv-drawer-zen').click();
     await expect(page.locator('.vv-shell.zen')).toHaveCount(1);
   }
@@ -450,7 +459,8 @@ test.describe('zen 移动端（mobile project）', () => {
     // 进入前左抽屉开着（还原基准）；抽屉头部入口直接进 zen
     // （勿再走 enterZenViaDrawer——其会再点一次 ☰ 把已开的抽屉关上，
     //  专注模式按钮随抽屉滑出视口，点击永等可操作性）
-    await page.locator('.vv-drawer-toggle').click();
+    // 开抽屉走 drawer.ts 装置（T13b 水合竞态门，enterZenViaDrawer 注同源）
+    await openDrawerIfNarrow(page);
     await expect.poll(
       async () => (await page.locator('.vv-side').boundingBox())?.x ?? -1,
       { timeout: 3_000 }

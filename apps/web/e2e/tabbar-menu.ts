@@ -26,10 +26,36 @@ export const TRIGGER = `${TABBAR_MENU} .vv-tbmenu-trigger`;
 /** 融合菜单浮层（首层 8 行 + 子菜单/行内表单同浮层，同刻至多一个开） */
 export const MENU_POP = '.vv-tbmenu-pop';
 
-/** 点触发钮打开融合菜单浮层（TRIGGER 类锚） */
+/** 点触发钮打开融合菜单浮层（TRIGGER 类锚）。
+ *
+ * 水合竞态根治（T13b，2026-11-12 探针实证）：SvelteKit SPA fallback + Svelte 5
+ * 启动路径下，触发钮 DOM 可见早于根级委托 click 监听挂载约 200-400ms（全量并发
+ * 负载下更长；探针 dump：trusted click t=370ms 命中触发钮、委托监听 t=591ms 才
+ * 挂载、浮层此后永不出现——Svelte 内部 event delegation 在组件 mount 完成**之后**
+ * 才安装，OPEN-01/02「监听挂载前派发的事件永久丢失」同族）。单发点击落进竞态窗
+ * 即被吞且不可恢复，故改自校验重试：click → 浮层可见才算成功，未开（被吞）即
+ * 退避重试。浮层既现即委托监听必已挂载，故本装置同时是整条菜单流（openSubmenu
+ * 与浮层内条目点击）的监听就绪锚，后续点击免再锚。 */
 export async function openMenu(page: Page): Promise<void> {
+  const trigger = page.locator(TRIGGER);
+  await trigger.waitFor({ state: 'visible', timeout: 20_000 });
+  const pop = page.locator(MENU_POP);
+  await expect(async () => {
+    await trigger.click({ timeout: 2_000 });
+    await expect(pop).toBeVisible({ timeout: 250 });
+  }).toPass({ timeout: 15_000, intervals: [100, 250, 500] });
+}
+
+/** 应用交互就绪门（T13b）：openMenu → 点触发钮收回，一个开合来回。openMenu 的
+ * 自校验重试通过即委托 click 监听已挂载（组件 mount 完成），此后整个文档上的
+ * UI 交互——含 contextmenu 右键、pointer 拖拽、svelte:window keydown（均在
+ * mount 同期挂载，不晚于委托监听）——全部生效。供 goto 后不经菜单/设置装置、
+ * 直接点壳内元素的 spec（b-layout-zen 折叠/右键/Ctrl+,、mobile 抽屉等）在首
+ * 交互前调用一次。菜单开合零持久化副作用，落点为关态，不影响后续断言。 */
+export async function primeUiInteractive(page: Page): Promise<void> {
+  await openMenu(page);
   await page.locator(TRIGGER).click();
-  await expect(page.locator(MENU_POP)).toBeVisible();
+  await expect(page.locator(MENU_POP)).toHaveCount(0);
 }
 
 /** 打开子菜单（就地手风琴：openMenu 后点子菜单父项一行，aria-expanded 翻转断言

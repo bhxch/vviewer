@@ -24,11 +24,18 @@ export function isDrawerViewport(page: Page): Promise<boolean> {
 }
 
 /** 抽屉实际开合状态：open 态 transform:none（AppShell @media 内 .vv-shell.drawer
- * .vv-side { transform: none }），closed 态为 translateX(-100%) 的 matrix。 */
+ * .vv-side { transform: none }），closed 态为 translateX(-100%) 的 matrix。
+ * T13b 补 position==='fixed' 前置门：goto 后至首个样式表应用存在约 60ms 的
+ * 无样式窗（探针实测 document.styleSheets 0→2 @ ~62ms）——窗内裸 aside 的
+ * computed transform 恒 'none'，仅凭 transform 读态会把「未样式化」误判为
+ * 「已开」而跳过 toggle（mLZ-01/06 30s 超时实证）；抽屉态在 ≤900px 断点下
+ * 恒为 fixed 定位，裸布局（position:static）一律视为未开。 */
 function isDrawerOpen(page: Page): Promise<boolean> {
   return page.evaluate(() => {
     const el = document.querySelector('.vv-side');
-    return el !== null && getComputedStyle(el).transform === 'none';
+    if (el === null) return false;
+    const cs = getComputedStyle(el);
+    return cs.position === 'fixed' && cs.transform === 'none';
   });
 }
 
@@ -80,7 +87,10 @@ export async function ensureRightDrawer(page: Page, wantOpen: boolean): Promise<
   const readOpen = (): Promise<boolean> =>
     page.evaluate(() => {
       const el = document.querySelector('.vv-right');
-      return el !== null && getComputedStyle(el).transform === 'none';
+      if (el === null) return false;
+      const cs = getComputedStyle(el);
+      // position==='fixed' 前置门同 isDrawerOpen（无样式窗误判防护，T13b）
+      return cs.position === 'fixed' && cs.transform === 'none';
     });
   let open = await readOpen();
   for (let i = 0; i < 10 && open !== wantOpen; i++) {

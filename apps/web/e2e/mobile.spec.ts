@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type CDPSession, type Page } from '@playwright/test';
-import { closeDrawerIfOpened } from './drawer';
+import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 import { MENU_POP, openSubmenu } from './tabbar-menu';
 
 /**
@@ -76,22 +76,30 @@ test('抽屉开合：toggle 点击后侧栏滑入/滑出视口', async ({ page }
   const toggle = page.locator('.vv-drawer-toggle');
   const side = page.locator('.vv-side');
 
-  // 初始关闭：抽屉在视口外（translateX(-100%)，宽 300px → x ≈ -300）
+  // 初始关闭：抽屉在视口外（translateX(-100%)，宽 300px → x ≈ -300）。
+  // 轮询断言：goto 后至首个样式表应用存在约 60ms 无样式窗（T13b 探针实测），
+  // 窗内裸 aside 的 boundingBox x===0——单发采样会跑赢 CSS，以轮询等样式就位
   await expect(toggle).toBeVisible();
-  const closedBox = await side.boundingBox();
-  expect(closedBox).not.toBeNull();
-  expect(closedBox!.x).toBeLessThan(0);
+  await expect
+    .poll(async () => (await side.boundingBox())?.x ?? 0, {
+      timeout: 5_000,
+      message: '等抽屉关态样式就位（CSS 应用后 x<0）'
+    })
+    .toBeLessThan(0);
   await expect(page.locator('.vv-shell.drawer')).toHaveCount(0);
 
-  // 开：抽屉滑入视口（x=0），shell 挂 drawer 类
-  await toggle.click();
+  // 开：抽屉滑入视口（x=0），shell 挂 drawer 类。开合经 drawer.ts 装置
+  // （T13b 水合竞态门：goto 后立即点击落在 Svelte 5 委托监听挂载前的竞态窗内
+  // 会被永久吞掉——探针实证 trusted click 早于监听挂载 200-400ms；ensureDrawer
+  // 以 .vv-side transform 落定为准重试兜住），滑入/滑出断言保持原锚
+  await openDrawerIfNarrow(page);
   await expect(page.locator('.vv-shell.drawer')).toHaveCount(1);
   await expect
     .poll(async () => (await side.boundingBox())?.x ?? -1, { timeout: 3_000 })
     .toEqual(0);
 
   // 关：滑回视口外
-  await toggle.click();
+  await closeDrawerIfOpened(page, true);
   await expect(page.locator('.vv-shell.drawer')).toHaveCount(0);
   await expect
     .poll(async () => (await side.boundingBox())?.x ?? 0, { timeout: 3_000 })

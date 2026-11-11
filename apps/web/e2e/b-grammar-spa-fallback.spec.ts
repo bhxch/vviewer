@@ -7,8 +7,8 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  * （manifest / wasm / 查询 .scm）各有「200 text/html 误载」修复的浏览器端回归锚：
  *
  * - manifest（grammarLayers.ts fetchGrammarManifest）：200 且 content-type 含 text/html
- *   → null + 「非 JSON 资产应答（SPA fallback？）」warn 跳层（050ae69；修复前
- *   res.json() 抛 SyntaxError 误报网络错）；
+ *   → null + 「non-JSON asset response (SPA fallback?)」warn 跳层（050ae69 修语义；
+ *   文案随 Task 10 日志英文化；修复前 res.json() 抛 SyntaxError 误报网络错）；
  * - 查询 .scm（core-parse.ts remoteQueryLoader）：200 text/html → undefined 视同缺失
  *   （7fab3a5 前端层；修复前 HTML 误载为查询文本，Query 编译抛错整语言降级 hljs）；
  * - wasm：HTML 误入 WebAssembly 实例化必抛——断言被捕获降级 hljs 不崩（BUG-06a
@@ -124,7 +124,7 @@ async function lastHighlight(page: Page): Promise<{ ok?: boolean; lang?: string 
  * BUG-06a per-language 准备失败通道（core-parse prepare catch）。
  */
 interface WarnProbe {
-  /** 嗅探路径 warn（「非 JSON 资产应答（SPA fallback？）」） */
+  /** 嗅探路径 warn（「non-JSON asset response (SPA fallback?)」） */
   spa: string[];
   /** 全部跳层 warn（文案含 "skipping this asset layer" 尾巴——Task 10 日志英文化，观测口径跟进） */
   layerSkip: string[];
@@ -288,8 +288,8 @@ test('GRF-01: CDN manifest 200 text/html → 嗅探跳层「非 JSON 资产应�
         '等待 CDN manifest 嗅探跳层 warn。恒 0 时排查构建是否注入 VV_GRAMMAR_CDN=https://cdn.grammars.test/grammars/（未注入则 CDN 层不发起请求）'
     })
     .toBe(1);
-  // 050ae69 修复文案（「非 JSON 资产应答」），而非修复前误报的网络错误导（catch 的「加载失败」）
-  expect(probe.spa[0]).toContain('非 JSON 资产应答（SPA fallback？）');
+  // 050ae69 修复跳层语义（Task 10 后文案为英文），而非修复前误报的网络错误导（catch 的「加载失败」）
+  expect(probe.spa[0]).toContain('non-JSON asset response (SPA fallback?)');
   expect(probe.spa[0]).not.toContain('加载失败');
   // HTML 未被当 JSON 解析的行为学判据：manifest 无 java 条目 → 不发起 java.wasm 请求
   expect(cdnWasm.hits()).toBe(0);
@@ -338,7 +338,7 @@ test('GRF-02: 同源 manifest 200 text/html → 层缺失跳过，CDN 层兜底�
   await expect
     .poll(() => probe.spa.length, { timeout: 20_000, message: '等待同源 manifest 嗅探跳层 warn' })
     .toBe(1);
-  expect(probe.spa[0]).toContain('非 JSON 资产应答（SPA fallback？）');
+  expect(probe.spa[0]).toContain('non-JSON asset response (SPA fallback?)');
   await expect(page.locator('.vv-error-card')).toHaveCount(0);
   expect(probe.pageErrors).toEqual([]);
 });
@@ -461,15 +461,15 @@ test('GRF-06: 同源 manifest 200 无 content-type + HTML body → 走 JSON.pars
   await openDir(page, [{ name: 'Hello.java', type: 'text/x-java-source', content: JAVA_SRC }]);
   await openFile(page, 'Hello.java');
 
-  // 同源 manifest 的 catch 路径 warn 恰一条（「加载失败」catch 文案，非嗅探文案）
+  // 同源 manifest 的 catch 路径 warn 恰一条（catch 文案随 Task 10 日志英文化，非嗅探文案）
   await expect
     .poll(() => originManifestSkips(probe).length, {
       timeout: 20_000,
       message: '等待同源 manifest 的 catch 路径跳层 warn'
     })
     .toBe(1);
-  expect(originManifestSkips(probe)[0]).toContain('加载失败，跳过该资产层');
-  expect(originManifestSkips(probe)[0]).not.toContain('非 JSON 资产应答');
+  expect(originManifestSkips(probe)[0]).toContain('failed to load, skipping this asset layer');
+  expect(originManifestSkips(probe)[0]).not.toContain('non-JSON asset response');
   // HTML body 未被误当 manifest 条目的行为学判据：不发起 java.wasm 请求
   expect(wasm.hits()).toBe(0);
   // 等价层缺失：java 降级 hljs 兜底，页面不崩
@@ -510,7 +510,7 @@ test('GRF-07: SPA-fallback 层缺失 warn 每层每会话恰一条——连续�
 
   // 不重复刷屏：两次文件打开后嗅探 warn 仍恰一条（每层每会话恰一次）
   expect(probe.spa).toHaveLength(1);
-  expect(probe.spa[0]).toContain('非 JSON 资产应答（SPA fallback？）');
+  expect(probe.spa[0]).toContain('non-JSON asset response (SPA fallback?)');
   expect(probe.pageErrors).toEqual([]);
 });
 

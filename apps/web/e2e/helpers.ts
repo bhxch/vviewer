@@ -11,7 +11,12 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 
 const REG_SPECIAL = /[.*+?^${}()|[\]\\]/g;
 
-/** 等应用挂载：__vvOpenDirImpl 注入钩子就绪 + TabBar 可见 */
+/** 等应用挂载：__vvOpenDirImpl 注入钩子就绪 + TabBar 可见。
+ * 锚口径注记（T13b 探针实证 2026-11-12）：__vvOpenDirImpl 为模块顶层赋值
+ * （模块求值即就绪），.vv-tabbar 可见早于 Svelte 5 根级委托 click 监听挂载约
+ * 200-400ms——本装置是「注入/求值就绪」锚，不是「点击就绪」锚。其后要做 UI
+ * 点击的调用方须经 tabbar-menu 的 openMenu/primeUiInteractive（自校验重试），
+ * 或 drawer.ts ensureDrawer（状态幂等重试）。 */
 export async function waitAppMounted(page: Page): Promise<void> {
   await page.goto('/');
   await page.waitForFunction(

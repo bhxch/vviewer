@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { openDrawerIfNarrow } from './drawer';
 
 /**
  * 布局与专注模式补强批（b-layout-zen-deep）：六批落地后的边界/负路径/组合交互。
@@ -415,7 +416,9 @@ test.describe('zen 移动端补强（mobile project）', () => {
     await expect(page.locator('.vv-tabbar')).toBeVisible();
 
     // 抽屉头部进 zen（进入前抽屉开——还原基准的默认关由 reload 段自然重置）
-    await page.locator('.vv-drawer-toggle').click();
+    // 开抽屉走 drawer.ts 装置（T13b 水合竞态门：竞态窗内 toggle 点击被吞且不可恢复，
+    // ensureDrawer 以 .vv-side transform 落定为准重试兜住）
+    await openDrawerIfNarrow(page);
     await expect.poll(
       async () => (await page.locator('.vv-side').boundingBox())?.x ?? -1,
       { timeout: 3_000 }
