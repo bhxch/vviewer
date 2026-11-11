@@ -134,3 +134,11 @@ web job 步骤序：install → setup-grammars → **`pnpm run lint`（新）** 
 - 非 .svelte/.ts 模块（renderer 包内的渲染产物 DOM）文案不受 t() 覆盖。
 - e2e 语料/夹具中的中文（fixtures、语料文档）非 UI 文案，不在禁令域。
 - D10 svelte:boundary 若与既有错误通道冲突，按 D10 降级条款处置并记档。
+
+## 7. 执行期订正（2026-11-12，Task 12 成文时据实态追加；不改写正文原文，正文以本节勘误为准）
+
+1. **devDeps 版本**（订正 §4.1）：ESLint 实装 **`eslint@^10.14.0`**（正文写 `^9`）；配套 `@eslint/js`/`typescript-eslint`/`eslint-plugin-svelte`/`globals` 均按根 package.json 实装值为准。
+2. **a11y lint 载体**（订正 §4.1 第 3 条）：eslint-plugin-svelte 3.x **无 `a11y-*` 前缀规则**，编译器 a11y 警告的真实载体是 `svelte/valid-compile: 'error'`（D12 已裁决，正文「svelte 全系 a11y 规则 error」按此理解）；`require-each-key` 在列，`no-unused-svelte-ignore` 在列。
+3. **规则清单现状**（订正 §4.1 第 3 条）：正文列举的 `require-event-prefix` 未启用（回调 props `onXxx` 命名约定降级为评审必查，由 `docs/design/frontend-conventions.md` §6 B2 承接）；`no-unused-props`、`no-reactive-functions`、`no-reactive-literals`、`no-immutable-reactive-statements`、`infinite-reactive-loop`、`no-reactive-reassign`、`require-event-dispatcher-types` 共 **7 条空转规则显式 off**（recommended 预设带入但在「非 type-aware + 强制 runes」配置下不运行，关闭是让生效配置如实而非放松）；legacy 检测实装为三条（`no-dupe-on-directives`/`no-not-function-handler`/`no-at-debug-tags`），`$:` 系规则不开（强制 runes 下不运行，legacy 已由 valid-compile 全拦）。**规则清单以 eslint.config.js 注释与生效配置为权威**。
+4. **Task 3 CSS 模板勘误**：reduced-motion 双块模板的 selector list 门控前缀问题已在计划 Errata 记载（`docs/superpowers/plans/2026-11-11-frontend-conventions.md` §Errata，2026-11-11），以实现侧修复为准，此处引用不重复。
+5. 其余执行期裁决（D18 逐点、D19 连带面实测值、i18n 双模块形态等）均已在 §3 决策记录内随任务落地更新过表述，正文可读，不再另列勘误。
