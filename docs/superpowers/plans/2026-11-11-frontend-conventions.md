@@ -301,3 +301,7 @@ git add docs AGENTS.md README.md && git commit -m "docs: 语义交互清单与�
 
 - [ ] `node tools/fetch-e2e-corpus.mjs`（语料）→ `pnpm lint && pnpm typecheck && pnpm vitest run` → `pnpm --filter web build:e2e` → playwright 全量双 project（对比基线 1394p：除 SC-01/A11Y 重构域列举翻转外零回归）→ `pnpm exec playwright test --config playwright.server.config.ts`（server 档零翻转）→ `git status --porcelain` 净空。
 - [ ] 全量 review（superpowers:requesting-code-review，范围=本计划全部 commit），修复全部 C/I/M 后复审，推送并守护 GitHub CI（rust/web/e2e 三 job）+ Pages 全绿。
+
+## Errata（执行期勘误）
+
+- 2026-11-11 Task 3 评审发现：本计划 Task 3 Step 6 的 reduced-motion CSS 双块模板中，`*, ::before, ::after` 形态的 selector list 里裸 `::before, ::after` 不继承门控选择器——块二会对默认用户无条件压制全站伪元素动效、块一在「设置=照常」时对伪元素失效。正确形态为伪元素部分同样挂门控前缀（`:root:not([data-reduce-motion="off"]) ::before, …` / `:root[data-reduce-motion="on"] ::before, …`）。以实现侧修复为准，模板原文作废。
