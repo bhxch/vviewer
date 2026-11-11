@@ -384,6 +384,27 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 
 - 不新增 loading spinner/骨架屏动画；面板开合（overlay 族）保持瞬显（现状），不引入进出动画——浮层高频开关，动效成本大于收益（Linear 取舍项）。
 
+### 11.1 reduceMotion 双块改写与 locale 影响面（2026-11-12 补记，i18n 基建 D11 落地后据实态更新）
+
+上节 `prefers-reduced-motion` 单块模板已被设置项驱动的**双块同体**取代（app.css:107-130 实态）：
+
+```css
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) *,
+  :root:not([data-reduce-motion="off"]) ::before,
+  :root:not([data-reduce-motion="off"]) ::after { /* 同体三声明 */ }
+}
+:root[data-reduce-motion="on"] *,
+:root[data-reduce-motion="on"] ::before,
+:root[data-reduce-motion="on"] ::after { /* 同体三声明 */ }
+```
+
+- **双层门**：块一 = OS 偏好命中且未被设置显式关闭（`system` 不打标 / `off` 排除）；块二 = 设置显式开启（`on` 无视 OS 偏好）。AppShell `applyLocaleAndReduceMotion` 写 `html data-reduce-motion`（`system` 移除属性）；设置项 `reduceMotion: 'system'|'on'|'off'`（默认 system = 本节原语义）。
+- **selector list 纪律**：门控前缀（`:root…`）必须对每个选择器逐项重复——逗号分隔 selector list 各项独立解析，裸 `::before, ::after` 不继承前缀限定（裸写 = 全站伪元素动效对所有用户无条件压制，门控失效成纯回归；计划 Errata 2026-11-11 勘误即此坑）。伪元素与通配符**同门控**即上表形态，冻结。
+- hex 跳转闪烁完全省略（恒终态透明）、toast 入场瞬显的降级口径沿上节括注不变。
+
+**locale 设置对设计系统的影响面**：`settings.locale`（默认 `zh-CN`）是纯文案层设置，**不触碰任何设计 token**——字阶四档（`--vv-fs-*` calc 派生自 `--vv-ui-font-size`）与字体族双槽（`--vv-ui-font`/`--vv-code-font`）**语言无关**，用户字号/字体设置对 zh/en 同样生效；切换语言不改间距/圆角/阴影/动效档。语言敏感的呈现面收敛于：文案目录（`i18n/catalogs/`）、`html[lang]` 同步（AppShell `setLocale`）、日期时间形态（`i18n/format.ts` 按 locale 取 zh-CN/en-US）。设计系统侧无需（也不得）为语言分支 token。
+
 ---
 
 ## 12. 落地清单
