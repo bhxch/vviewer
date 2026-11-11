@@ -25,6 +25,7 @@ import {
   setS3CorsFailureText,
   setDirectTimeoutText,
   setHttpFailedText,
+  setDavHttpFailedText,
   setDavCorsFailureText,
   setDavAuthHintText,
   type DavDirectConfig,
@@ -38,11 +39,13 @@ import type { WorkspaceSource } from './workspaceStore';
 // 记录/直连工厂在 apps/web 的启动加载面（openFlow/serverConnect/管理页共同依赖），
 // 在此一次性注入目录 getter——错误抛出时刻现取当下 locale（事件时刻取值，错误串
 // 为一次性产物无回写面）。apps/web 恒注入故直连面恒走目录 zh 值=原值逐字节；
-// core 独立消费回落包内英文缺省（非显示面契约，Task 7 同口径）。
+// core 独立消费回落包内英文缺省（非显示面契约，Task 7 同口径）。S3/DAV 的 HTTP
+// 非 2xx 文案拆独立缝（评审 I-1：zh 串「WebDAV 请求失败」词间空格不经 label 拼合）。
 setS3WebCryptoMissingText(() => t('mounts.err.s3WebCrypto'));
 setS3CorsFailureText(() => t('mounts.err.s3Cors'));
 setDirectTimeoutText((url) => t('mounts.err.directTimeout', { url }));
 setHttpFailedText((label, status, detail) => t('mounts.err.httpFailed', { label, status, detail }));
+setDavHttpFailedText((status, detail) => t('mounts.err.davHttpFailed', { status, detail }));
 setDavCorsFailureText(() => t('mounts.err.davCors'));
 setDavAuthHintText(() => t('mounts.err.davAuth'));
 

@@ -112,8 +112,8 @@ export function setDirectTimeoutText(getter: ((url: string) => string) | null): 
 let httpFailedTextImpl: (label: string, status: number, detail: string) => string = (label, status, detail) =>
   `${label} request failed: HTTP ${status}${detail}`;
 
-/** HTTP 非 2xx 错误文案（S3/WebDAV 共用；detail 为调用方拼好的附加段——采样体/
- * 认证提示；注入缝消费面同上）。 */
+/** HTTP 非 2xx 错误文案（S3 面，label 传 'S3'；detail 为调用方拼好的附加段——
+ * 采样体；注入缝消费面同上）。 */
 export function httpFailedText(label: string, status: number, detail: string): string {
   return httpFailedTextImpl(label, status, detail);
 }
@@ -122,6 +122,22 @@ export function httpFailedText(label: string, status: number, detail: string): s
 export function setHttpFailedText(getter: ((label: string, status: number, detail: string) => string) | null): void {
   httpFailedTextImpl =
     getter ?? ((label, status, detail) => `${label} request failed: HTTP ${status}${detail}`);
+}
+
+let davHttpFailedTextImpl: (status: number, detail: string) => string = (status, detail) =>
+  `WebDAV request failed: HTTP ${status}${detail}`;
+
+/** WebDAV HTTP 非 2xx 错误文案（独立缝——i18n 评审 I-1：原与 S3 共用 {label}
+ * 模板会把 zh 串「WebDAV 请求失败」的词间空格丢进 label 拼合，尾随空格 label 又
+ * 使 en 模板渲染双空格；S3/DAV 拆独立键两侧均逐字节。detail 为调用方拼好的
+ * 附加段——认证提示/采样体）。 */
+export function davHttpFailedText(status: number, detail: string): string {
+  return davHttpFailedTextImpl(status, detail);
+}
+
+/** 注入 WebDAV HTTP 非 2xx 错误文案 getter（apps/web 装配点消费；传 null 恢复缺省）。 */
+export function setDavHttpFailedText(getter: ((status: number, detail: string) => string) | null): void {
+  davHttpFailedTextImpl = getter ?? ((status, detail) => `WebDAV request failed: HTTP ${status}${detail}`);
 }
 
 let davCorsFailureTextImpl: () => string = () =>

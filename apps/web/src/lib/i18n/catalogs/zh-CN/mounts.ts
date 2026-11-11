@@ -183,6 +183,7 @@ export const messages = {
   'mounts.err.s3Cors': 'S3 直连失败：bucket CORS 未配置或网络不可达',
   'mounts.err.directTimeout': '直连请求超时（30s）: {url}',
   'mounts.err.httpFailed': '{label}请求失败: HTTP {status}{detail}',
+  'mounts.err.davHttpFailed': 'WebDAV 请求失败: HTTP {status}{detail}',
   'mounts.err.davCors': 'WebDAV 直连失败：服务器 CORS 未配置或网络不可达',
   'mounts.err.davAuth': '（认证失败：检查用户名/密码）'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;

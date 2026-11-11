@@ -179,6 +179,7 @@ export const messages = {
   'mounts.err.s3Cors': 'S3 direct mount failed: bucket CORS not configured or network unreachable',
   'mounts.err.directTimeout': 'Direct request timed out (30s): {url}',
   'mounts.err.httpFailed': '{label} request failed: HTTP {status}{detail}',
+  'mounts.err.davHttpFailed': 'WebDAV request failed: HTTP {status}{detail}',
   'mounts.err.davCors': 'WebDAV direct mount failed: server CORS not configured or network unreachable',
   'mounts.err.davAuth': ' (authentication failed: check username/password)'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;

@@ -27,6 +27,9 @@ import {
 } from './mountsManager';
 // i18n 目录（Task 8 域 E）：zh 值逐字节双锁（S5——运行时值断言保留 + 目录锁）
 import { messages as zhMounts } from './i18n/catalogs/zh-CN/mounts';
+// 注入缝访问函数（评审 I-1 测试锁）：本文件 import 链经 mountsSync 顶层注入目录
+// getter，core 访问函数在测试进程内恒返回 zh 目录值——锁直连错误文案的 zh 渲染形态
+import { httpFailedText, davHttpFailedText } from '@bhxch/vviewer-core';
 import type { DirectMountRecord, MountsManifest, ProxyMountRecord } from './mountsSync';
 import type { WorkspaceSource } from './workspaceStore';
 
@@ -538,6 +541,23 @@ describe('mounts 域目录字节锁（Task 8 S5 双锁）', () => {
     expect(zhMounts['mounts.local.granted']).toBe('已授权（会话恢复可用）');
     expect(zhMounts['mounts.local.needsReauth']).toBe('需重新授权（刷新后恢复将弹出权限提示）');
     expect(zhMounts['mounts.local.sessionDetail']).toBe('会话来源（文件内容不持久，刷新后需重新打开）');
+  });
+
+  it('直连 HTTP 非 2xx 文案注入链 zh 渲染逐字节锁（评审 I-1：S3 无空格/DAV 词间含空格——独立缝两侧逐字节）', () => {
+    // S3 面：ensureOk label='S3'，zh 模板无词间空格（与基线 `S3请求失败` 逐字节）
+    expect(httpFailedText('S3', 403, '')).toBe('S3请求失败: HTTP 403');
+    expect(httpFailedText('S3', 404, ' <Error><Code>NoSuchKey</Code></Error>')).toBe(
+      'S3请求失败: HTTP 404 <Error><Code>NoSuchKey</Code></Error>'
+    );
+    // DAV 面：独立键带词间空格（与基线 `WebDAV 请求失败` 逐字节——评审 I-1 修复锁，
+    // 原 {label} 共用模板渲染「WebDAV请求失败」丢空格为违约束形态）
+    expect(davHttpFailedText(401, '（认证失败：检查用户名/密码）')).toBe(
+      'WebDAV 请求失败: HTTP 401（认证失败：检查用户名/密码）'
+    );
+    expect(davHttpFailedText(404, ' <error/>')).toBe('WebDAV 请求失败: HTTP 404 <error/>');
+    // 目录键面双锁（占位符形态 + core 缺省英文注释见 directS3.ts 缝注）
+    expect(zhMounts['mounts.err.httpFailed']).toBe('{label}请求失败: HTTP {status}{detail}');
+    expect(zhMounts['mounts.err.davHttpFailed']).toBe('WebDAV 请求失败: HTTP {status}{detail}');
   });
 });
 

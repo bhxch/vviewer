@@ -11,7 +11,7 @@ import {
   rawFetch,
   davCorsFailureText,
   davAuthHintText,
-  httpFailedText,
+  davHttpFailedText,
   type DirectStore
 } from './directS3';
 
@@ -167,7 +167,7 @@ export function createDavDirectStore(cfg: DavDirectConfig): DirectStore {
       // 错误体不可读：只用状态码
     }
     const auth = res.status === 401 ? davAuthHintText() : '';
-    throw new Error(httpFailedText('WebDAV', res.status, `${auth}${snippet !== '' ? ` ${snippet}` : ''}`));
+    throw new Error(davHttpFailedText(res.status, `${auth}${snippet !== '' ? ` ${snippet}` : ''}`));
   }
 
   async function request(
