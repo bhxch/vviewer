@@ -108,15 +108,22 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
    瞬时——hex 跳转闪烁完全省略（恒为终态透明）、toast 瞬显；滚动定位等功能表达
    不受影响。双层门：块一 = OS 偏好命中且未被设置显式关闭（system 不打标 /
    off=照常 排除）；块二 = 设置显式开启（on=减弱，无视 OS 偏好）。AppShell
-   applyLocaleAndReduceMotion 写 html data-reduce-motion（system=移除属性）。 */
+   applyLocaleAndReduceMotion 写 html data-reduce-motion（system=移除属性）。
+   selector list 纪律（修复轮 I-1）：门控前缀必须对每个选择器重复——逗号分隔的
+   selector list 各项独立解析，裸 ::before/::after 不继承前缀限定（裸写 = 全站
+   伪元素动效对所有用户无条件压制，门控失效成纯回归）。 */
 @media (prefers-reduced-motion: reduce) {
-  :root:not([data-reduce-motion="off"]) *, ::before, ::after {
+  :root:not([data-reduce-motion="off"]) *,
+  :root:not([data-reduce-motion="off"]) ::before,
+  :root:not([data-reduce-motion="off"]) ::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 }
-:root[data-reduce-motion="on"] *, ::before, ::after {
+:root[data-reduce-motion="on"] *,
+:root[data-reduce-motion="on"] ::before,
+:root[data-reduce-motion="on"] ::after {
   animation-duration: 0.01ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0.01ms !important;
