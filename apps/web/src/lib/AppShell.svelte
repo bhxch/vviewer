@@ -1267,7 +1267,7 @@
       <div class="vv-error-title">{t('a11y.boundary.title')}</div>
       <div class="vv-error-detail">{t('a11y.boundary.detail', { message: error instanceof Error ? error.message : String(error) })}</div>
       <div class="vv-error-actions">
-        <button type="button" onclick={() => location.reload()}>{t('a11y.boundary.reload')}</button>
+        <button type="button" class="vv-error-action" onclick={() => location.reload()}>{t('a11y.boundary.reload')}</button>
       </div>
     </div>
   {/snippet}

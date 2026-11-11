@@ -157,6 +157,11 @@ input[type='checkbox'] { accent-color: var(--ui-accent); }
 /* 残余 A6：.vv-error-meta 四处生产消费（errorRenderer/diagramFile/code/markdown）补
    次要信息样式——对齐 .vv-error-detail 弱化层级，字号再降一档 */
 .vv-error-meta { color: var(--ui-fg-muted); font-size: var(--vv-fs-xs); }
+/* 动作区（修复轮 M-1）：errorRenderer.ts（BUG-14）此前样式内联并注明「类名保留
+   语义钩子供 e2e/样式接管」——此处即接管落点；值逐字对齐其内联惯例（包侧内联
+   同值保留，双源不冲突），AppShell D10 boundary failed 片段的动作区同用此钩子 */
+.vv-error-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .25rem; }
+.vv-error-action { cursor: pointer; padding: .15rem .75rem; }
 /* 下载进度卡（DownloadProgressCard，计划 2 Task 4 spec §6.4）：ViewerPane 加载态区
    （错误卡片同域），单一来源在本文件。pane 级 absolute 浮层（SearchPanel 同锚先例）：
    下载中 host 为空域，浮层不占流式布局——不出滚动条、卸卡零位移 */
