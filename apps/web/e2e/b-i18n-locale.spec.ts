@@ -66,6 +66,9 @@ test.describe('b-i18n-locale 语言与减少动效', () => {
     await closeSettings(page);
 
     await page.reload();
+    // 装置口径（修复轮 M-6）：与全 spec 一致走 waitAppMounted（注入钩子就绪 +
+    // tabbar 可见）显式等水合，不靠后序 toHaveAttribute 的自动重试隐式兜
+    await waitAppMounted(page);
     await expect(page.locator('html')).toHaveAttribute('lang', 'en');
     // 设置中心挂载期 t()（groups 注册表 init 取当下 locale）随持久化 en 翻英
     await openSettings(page);
