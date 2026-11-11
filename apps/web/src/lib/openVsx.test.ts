@@ -169,6 +169,12 @@ describe('parseOpenVsxInput（三形态 + 非法输入）', () => {
     expect('error' in parseOpenVsxInput('https://evil.com/extension/a/b')).toBe(true);
     expect('error' in parseOpenVsxInput(`${OVX}/api/a/b`)).toBe(true);
     expect('error' in parseOpenVsxInput(`${OVX}/extension/a`)).toBe(true);
+    // 评审 M-1 文案锁:pageUnrecognized 的 {p}/{e} 是 URL 形态文档不是插值——
+    // 占位实参取带花括号的自指值,运行时输出必须保留花括号(与被移除字面量逐字节等价)
+    const pageErr = parseOpenVsxInput(`${OVX}/extension/a`);
+    expect('error' in pageErr && pageErr.error).toBe(
+      `无法识别的 open-vsx.org 链接（支持 /extension/{p}/{e}[/v] 或 vsix 直链）：${OVX}/extension/a`
+    );
   });
 });
 

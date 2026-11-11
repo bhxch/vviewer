@@ -251,6 +251,18 @@ export default defineConfig(
       ]
     }
   },
+  // 块 A2（评审 M-3，bareIntl 豁免面收窄）：i18n/** 在块 A 整体豁免（catalog 本体
+  // 含 CJK 键值、core/index 是 catalogs 直读的合法点），但 bareIntl 的唯一豁免点
+  // 是 format.ts——门面/核心文件日后引入裸 Intl 必须照红。只挂 bareIntl（不挂 CJK，
+  // catalogs 键值是 CJK 本体）；runesOptOut 按覆盖纪律照常展开（.svelte.ts 无匹配
+  // 面，防后加块覆盖语义的惯例保持）。
+  {
+    files: ['apps/web/src/lib/i18n/**'],
+    ignores: ['apps/web/src/lib/i18n/format.ts'],
+    rules: {
+      'no-restricted-syntax': ['error', runesOptOut, bareIntl]
+    }
+  },
   // 块 B：apps/web 全域（lib 除外，其由块 A 承担）——bareIntl + runesOptOut。
   // 同样的覆盖展开纪律：本块在旧 runesOptOut 块之后，.svelte 面漏展开 runesOptOut
   // 即 routes 层的退 runes 防线被顶掉。bareIntl 对 test/e2e 不豁免（存量零命中：

@@ -226,6 +226,12 @@ describe('eslint 机检样例（规则自身被机检）', () => {
       errors.some((m) => m.ruleId === 'no-restricted-syntax' && m.message.includes('标记文本')),
       'SvelteText 标记文本 CJK 未命中'
     ).toBe(true);
+    // 评审 M-2①:静态属性值 CJK(SvelteLiteral)必命中——aria/title/placeholder 形态
+    // 是 Task 10 抽取的最大面,漏挂即防线缺口
+    expect(
+      errors.some((m) => m.ruleId === 'no-restricted-syntax' && m.message.includes('静态属性值')),
+      'SvelteLiteral 静态属性值 CJK 未命中'
+    ).toBe(true);
     // 同文件旧规则并存：块覆盖语义下 valid-compile 的 a11y 面不得被顶掉
     expect(
       errors.some((m) => m.ruleId === 'svelte/valid-compile' && m.message.includes('a11y_click_events_have_key_events')),
@@ -246,6 +252,12 @@ describe('eslint 机检样例（规则自身被机检）', () => {
       '子集块未挂上（CJK 条目缺失）'
     ).toBe(true);
     expect(exitCode).toBe(1);
+  }, LINT_TIMEOUT);
+
+  it('style 块 CSS 注释合法样例（stdin→lib 路径）：:not(SvelteStyleElement SvelteText) 排除面零误报（评审 M-2②）', () => {
+    const { exitCode, messages } = lintStdin('sample.svelte-clean.svelte', 'apps/web/src/lib/sample.svelte-clean.svelte');
+    expect(messages, 'style 块中文 CSS 注释被误报（:not 排除面失效）').toEqual([]);
+    expect(exitCode).toBe(0);
   }, LINT_TIMEOUT);
 
   it('裸 Intl 双向探针：lib 普通路径必命中、i18n/format.ts 虚拟路径零报（唯一豁免点）', () => {

@@ -91,8 +91,10 @@ export function parseOpenVsxInput(input: string): OpenVsxInput {
     const dl = DOWNLOAD_RE.exec(u.pathname);
     if (dl !== null) return { publisher: dl[1]!, extension: dl[2]!, version: dl[3]! };
     return {
-      // {p}/{e} 是 URL 形态文档不是插值:以字面 'p'/'e' 占位参与插值,输出逐字节等价原文
-      error: t('errors.openvsx.pageUnrecognized', { input, p: 'p', e: 'e' })
+      // {p}/{e} 是 URL 形态文档不是插值：占位实参取**带花括号的自指值**——
+      // interpolate 是单遍 replaceAll（替换值不二次扫描），'{p}' 原样落回输出，
+      // 运行时串与被移除字面量逐字节等价（含花括号；openVsx.test.ts 文案锚锁死）
+      error: t('errors.openvsx.pageUnrecognized', { input, p: '{p}', e: '{e}' })
     };
   }
   const id = IDENT_RE.exec(s);

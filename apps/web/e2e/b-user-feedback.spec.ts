@@ -554,7 +554,7 @@ test.describe('UFB-05/06 docx 默认版式还原与默认渲染器设置', () =>
     await page.getByRole('combobox', { name: '.docx 默认渲染器' }).selectOption('');
     await applySettings(page);
     await closeSettings(page);
-        // Task 10 移交项 2（UFB-06 锚升级，授权例外面）：关闭字形自 Task 2 a11y 真修改
+    // Task 10 移交项 2（UFB-06 锚升级，授权例外面）：关闭字形自 Task 2 a11y 真修改
     // span.vv-tab-close aria-hidden（无 aria-label），原 button[aria-label=关闭 {name}]
     // 锚指向已删除元素——按 aria 终值基线改类名锚
     await tabNamed(page, 'sample.docx').locator('.vv-tab-close').click();

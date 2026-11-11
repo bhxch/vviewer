@@ -19,6 +19,7 @@ import { t } from './i18n/index.svelte'; // i18n 门面导入（对照：直读 
 
 export const ESCAPE_RE = /[\u4e00-\u9fff]+/g; // \u 转义正则：合法
 export const FAMILY_NAME = '\u5fae\u8f6f\u96c5\u9ed1'; // \u 转义数据值串（family 名）：合法
+export const TPL_ESCAPED = `pre \u4e2d\u6587 post`; // 模板串静态段 \u 转义：合法（TemplateElement value.raw 豁免面；装饰词用 ASCII——样例行自身不得含字面 CJK）
 
 export function translated(): string {
   return t('shell.empty.title'); // 门面 t() 调用：合法
