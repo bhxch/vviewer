@@ -7,6 +7,7 @@
 // 文本锚锁死；全部单测落 core.ts（纯侧）。
 import {
   getLocale as coreGetLocale,
+  onChange as coreOnChange,
   setLocaleInternal,
   translate as coreTranslate,
   type Locale,
@@ -19,6 +20,13 @@ export type { Locale, MessageKey, MessageCatalog, Placeholders, TFunction } from
 /** locale 的 $state 镜像（初值取 core 当前值；启动接线 AppShell→setLocale 前为
  * zh-CN 缺省兜底，与 app.html 静态 lang="zh-CN" 同口径） */
 let locale = $state<Locale>(coreGetLocale());
+
+// 防分叉回灌（修复轮 M-2）：core 侧任何写入（生产代码直调 setLocaleInternal、未来
+// 非胶水接线）经 onChange 订阅回灌 $state 镜像，两侧恒一致；setLocale 正常路径的
+// 双写触发同值回写（幂等，无循环）。
+coreOnChange((l) => {
+  locale = l;
+});
 
 type LooseTranslate = (key: string, ...args: readonly unknown[]) => string;
 const coreTranslateLoose = coreTranslate as unknown as LooseTranslate;

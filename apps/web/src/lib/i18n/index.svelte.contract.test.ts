@@ -30,6 +30,11 @@ describe('index.svelte.ts 源码契约锚（D4 胶水形态）', () => {
     expect(SRC).toMatch(/documentElement\.lang = l/);
   });
 
+  it('core.onChange 回灌 $state 镜像（修复轮 M-2 防分叉：直调 setLocaleInternal 不落镜像差）', () => {
+    expect(SRC).toMatch(/coreOnChange\(\(l\) => \{/);
+    expect(SRC).toMatch(/locale = l;/);
+  });
+
   it('SSR/构建期 document 守卫（adapter-static 构建链无 DOM）', () => {
     expect(SRC).toMatch(/typeof document !== 'undefined'/);
   });
