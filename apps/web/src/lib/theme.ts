@@ -192,8 +192,11 @@ async function injectCodeTheme(
   }
   const el = ensureStyleEl();
   // 整体替换 textContent（非追加）：切换主题零残留；span 类名不变 → 零重解析。
+  // 注释头是 \u 转义恒值（Task 10 D8 数据值裁决）：它是 e2e 断言锁定的注入文本契约
+  // （t-theme THEME-03/2 等 evaluate 逐项等注释头到位），非可翻译文案——locale 化
+  // 或英文化都会破坏既有 e2e 断言；转义形态字面无 CJK 字符，过 CJK 字面量禁令。
   // 同一节点内追加 --hljs-* 近似映射（M7）：hljs 兜底着色跟随当前代码主题
-  el.textContent = `/* vviewer code theme: ${name} (${mode}) -- swaps CSS variables only, no re-parsing */\n${THEME_ROOT_SELECTOR} {\n${themeToCssVars(theme, [...CODE_CAPTURES])}\n${hljsThemeVars(theme)}\n}`;
+  el.textContent = `/* vviewer \u4ee3\u7801\u4e3b\u9898\uff1a${name}\uff08${mode}\uff09\u2014\u2014\u53ea\u6362 CSS \u53d8\u91cf\uff0c\u4e0d\u91cd\u89e3\u6790 */\n${THEME_ROOT_SELECTOR} {\n${themeToCssVars(theme, [...CODE_CAPTURES])}\n${hljsThemeVars(theme)}\n}`;
   el.dataset.mode = mode;
 }
 
@@ -214,7 +217,7 @@ function injectAppearance(appearance: string, mode: 'light' | 'dark', json: Vsco
   ].filter((s) => s !== '');
   if (sections.length === 0) return false;
   const el = ensureStyleEl();
-  el.textContent = `/* vviewer appearance theme: ${appearance} (${mode}) -- swaps CSS variables only, no re-parsing */\n${THEME_ROOT_SELECTOR} {\n${sections.join('\n')}\n}`;
+  el.textContent = `/* vviewer \u5916\u89c2\u4e3b\u9898\uff1a${appearance}\uff08${mode}\uff09\u2014\u2014\u53ea\u6362 CSS \u53d8\u91cf\uff0c\u4e0d\u91cd\u89e3\u6790 */\n${THEME_ROOT_SELECTOR} {\n${sections.join('\n')}\n}`;
   el.dataset.mode = mode;
   return true;
 }
@@ -437,7 +440,7 @@ function ensureFontStyleEl(): HTMLStyleElement {
 export function applyFonts(settings: Settings): void {
   const f = settings.fonts;
   ensureFontStyleEl().textContent = [
-    '/* vviewer font settings -- standalone node: font changes do not re-trigger appearance injection and vice versa */',
+    '/* vviewer \u5b57\u4f53\u8bbe\u7f6e\u2014\u2014\u72ec\u7acb\u8282\u70b9\uff1a\u5b57\u4f53\u53d8\u5316\u4e0d\u89e6\u53d1\u5916\u89c2\u91cd\u6ce8\u5165\uff0c\u53cd\u4e4b\u4ea6\u7136 */',
     ':root {',
     `  --vv-ui-font: ${fontFamilyValue(f.uiFamily, DEFAULT_UI_FONT_STACK)};`,
     `  --vv-ui-font-size: ${f.uiSize}px;`,
