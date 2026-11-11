@@ -5,6 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+// i18n 目录（Task 4 域 A 抽取）：抽屉头部文案迁入目录，锚改指 t() key + zh 值逐字节等价
+import { messages as zhShell } from './i18n/catalogs/zh-CN/shell';
 
 function readSrc(relFromWeb: string): string {
   return readFileSync(
@@ -73,7 +75,8 @@ describe('移动端 zen 入口（spec §3.1：布局菜单项 + ☰ 抽屉头部
   const src = readSrc('src/lib/AppShell.svelte');
 
   it('抽屉头部「专注模式」项接同一 toggleZen（与桌面 chrome 菜单同源），不动抽屉开合态', () => {
-    expect(src).toMatch(/vv-drawer-head[\s\S]{0,300}专注模式/);
+    expect(src).toMatch(/vv-drawer-head[\s\S]{0,300}t\('shell\.drawer\.zen'\)/);
+    expect(zhShell['shell.drawer.zen']).toBe('专注模式');
     expect(src).toMatch(/vv-drawer-zen"[\s\S]{0,120}onclick=\{\(\) => toggleZen\(\)\}/);
     expect(src).not.toMatch(/vv-drawer-zen"[\s\S]{0,200}drawerOpen/); // 退出还原进入前开合（spec）
   });

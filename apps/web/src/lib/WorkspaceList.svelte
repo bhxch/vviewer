@@ -17,6 +17,8 @@
   //（关闭通道全部归 TabBarMenu 浮层）。
   import { closeTab, tabStore, workspacesView } from './openFlow.svelte';
   import { workspaceStore } from './workspaceStore';
+  // i18n（Task 4 域 A 抽取）：工作区子菜单文案入 tabs.ws.* 目录
+  import { t } from './i18n/index.svelte';
 
   let { onclose, oncreate }: { onclose(): void; oncreate(): void } = $props();
 
@@ -51,7 +53,7 @@
    * 一个自动建默认；删活动组时 remove 内部切到剩余组首）。菜单保持展开（原
    * removeWorkspace 不复位 wsMenuOpen 同语义，t-tab-actions TA 用例依赖）。 */
   function removeWorkspace(id: string, name: string): void {
-    if (!window.confirm(`删除工作区「${name}」？将关闭其全部 tab。`)) return;
+    if (!window.confirm(t('tabs.ws.deleteConfirm', { name }))) return;
     for (const t of [...tabStore.tabsOf(id)]) closeTab(t.id);
     workspaceStore.remove(id);
     workspaceStore.ensureNonEmpty();
@@ -70,7 +72,7 @@
     >
       <input
         bind:value={renameDraft}
-        aria-label="重命名工作区"
+        aria-label={t('tabs.ws.renameAria')}
         spellcheck="false"
         onkeydown={(e) => {
           if (e.key === 'Escape') {
@@ -80,8 +82,8 @@
           }
         }}
       />
-      <button type="submit" aria-label="确认重命名" title="确认（Enter）">✓</button>
-      <button type="button" aria-label="取消重命名" title="取消（Esc）" onclick={cancelRename}>✕</button>
+      <button type="submit" aria-label={t('tabs.ws.renameConfirmAria')} title={t('tabs.ws.renameConfirmTitle')}>✓</button>
+      <button type="button" aria-label={t('tabs.ws.renameCancelAria')} title={t('tabs.ws.renameCancelTitle')} onclick={cancelRename}>✕</button>
     </form>
   {:else}
     <div class="vv-ws-item" class:active={w.id === workspacesView.activeId}>
@@ -92,15 +94,15 @@
         <button
           type="button"
           class="vv-ws-act"
-          aria-label="重命名工作区 {w.name}"
-          title="重命名"
+          aria-label={t('tabs.ws.renameItemAria', { name: w.name })}
+          title={t('tabs.ws.renameItemTitle')}
           onclick={() => startRename(w.id, w.name)}>✎</button
         >
         <button
           type="button"
           class="vv-ws-act"
-          aria-label="删除工作区 {w.name}"
-          title="删除（将关闭其全部 tab）"
+          aria-label={t('tabs.ws.deleteItemAria', { name: w.name })}
+          title={t('tabs.ws.deleteItemTitle')}
           onclick={() => removeWorkspace(w.id, w.name)}>✕</button
         >
       </span>
@@ -109,4 +111,4 @@
 {/each}
 <!-- ＋ 新建工作区…：先关菜单再开模态（openCreate 原语义拆两步——关在宿主浮层
      oncreate 通道内一并完成，模态挂 TabBarMenu 组件体） -->
-<button type="button" class="vv-ws-new" onclick={oncreate}>＋ 新建工作区…</button>
+<button type="button" class="vv-ws-new" onclick={oncreate}>{t('tabs.ws.create')}</button>

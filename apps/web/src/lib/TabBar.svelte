@@ -15,6 +15,9 @@
   import TabBarMenu from './TabBarMenu.svelte';
   import FileIcon from './FileIcon.svelte';
   import type { Settings } from './stores/settings';
+  // i18n（Task 4 域 A 抽取）：右键菜单/箭头/管理钮文案入 tabs.* 目录；label 仍只作
+  // 显示面（TabContextMenu each key 为 位置+label 复合，无 label-keyed each 风险）
+  import { t } from './i18n/index.svelte';
 
   /**
    * tabs：AppShell 传当前 workspace 组内过滤值（tabStore.tabsOf(activeId)，T6）——
@@ -75,7 +78,9 @@
    * 由 AppShell 裁决，本组件不复制展开/聚焦逻辑。
    */
   function langLabelOf(tab: Tab): string {
-    return tab.overrideLang !== undefined ? `${tab.overrideLang}（手动）` : '自动';
+    return tab.overrideLang !== undefined
+      ? t('tabs.ctx.langManual', { lang: tab.overrideLang })
+      : t('tabs.ctx.langAuto');
   }
 
   // ---------- F 项 T2：右键菜单 / 中键关闭 / 拖拽重排 / pinned 态 ----------
@@ -116,38 +121,40 @@
     const at = tabs.findIndex((t) => t.id === tab.id);
     const normalRight = at >= 0 ? tabs.slice(at + 1).filter((t) => !t.pinned).length : 0;
     return [
-      { label: '关闭', onClick: () => tabStore.close(tab.id) },
-      { label: '关闭其他', onClick: () => tabStore.closeOthers(tab.id) },
-      { label: '关闭右侧', disabled: normalRight === 0, onClick: () => tabStore.closeRight(tab.id) },
+      { label: t('tabs.ctx.close'), onClick: () => tabStore.close(tab.id) },
+      { label: t('tabs.ctx.closeOthers'), onClick: () => tabStore.closeOthers(tab.id) },
+      { label: t('tabs.ctx.closeRight'), disabled: normalRight === 0, onClick: () => tabStore.closeRight(tab.id) },
       tab.pinned === true
-        ? { label: '取消固定', onClick: () => tabStore.unpin(tab.id) }
-        : { label: '固定', onClick: () => tabStore.pin(tab.id) },
+        ? { label: t('tabs.ctx.unpin'), onClick: () => tabStore.unpin(tab.id) }
+        : { label: t('tabs.ctx.pin'), onClick: () => tabStore.pin(tab.id) },
       {
-        label: '复制标签页',
+        label: t('tabs.ctx.duplicate'),
         disabled: tab.unrestorable === true,
         onClick: () => tabStore.duplicate(tab.id)
       },
       {
-        label: '重新打开已关闭标签',
+        label: t('tabs.ctx.reopen'),
         disabled: closedStackSize() === 0,
         onClick: () => reopenClosed()
       },
       {
-        label: '打开方式',
+        label: t('tabs.ctx.openWith'),
         children: [
           ...rendererCandidatesOfTab(registry, tab).map((c) => ({
             label: c.current ? `✓ ${c.label}` : c.label,
             onClick: () => tabStore.setRendererOverride(tab.id, c.id === '' ? null : c.id)
           })),
           {
-            label: '更多渲染器',
+            label: t('tabs.ctx.moreRenderers'),
             children: [
               // 「自动」头项（终审 M-1，受限面/状态栏浮层展开面同形）：✓ 按
               // overrideRenderer === undefined 打标（未显式 override 即自动路由），
               // 点击清 override 回自动（onOpenWith 选「自动」= null 同语义）
               {
                 label:
-                  tab.overrideRenderer === undefined ? '✓ 自动（按扩展名）' : '自动（按扩展名）',
+                  tab.overrideRenderer === undefined
+                    ? `✓ ${t('tabs.ctx.autoRenderer')}`
+                    : t('tabs.ctx.autoRenderer'),
                 onClick: () => tabStore.setRendererOverride(tab.id, null)
               },
               ...registry.all().map((r) => ({
@@ -169,7 +176,7 @@
         //（聚焦落到原激活 tab 的语言行）。监听在 AppShell document 级 $effect（无
         // 响应式依赖，激活重渲不摘除），先激活后派发即兼容；新 tab meta 异步上行
         // 期间 rAF 聚焦落空按既有静默跳过语义（AppShell onFocusMetaLang 注）。
-        label: `语言：${langLabelOf(tab)}（在属性面板中修改）`,
+        label: t('tabs.ctx.lang', { lang: langLabelOf(tab) }),
         onClick: () => {
           activateTab(tab.id);
           requestMetaLangFocus();
@@ -188,24 +195,31 @@
         // 跨组件无复用缝——本路径取轻量状态条（远端重下开始/完成一次性提示，本地
         // 在手读零开始提示）；数值进度面为完成态卡路径专属（ViewerPane 内
         // dlProgress 复用，同卡同字段零新造）。
-        label: '另存为',
+        label: t('tabs.ctx.saveAs'),
         disabled: saveAsDisabledOf(tab),
         onClick: () => {
           const remote = isRemoteDownload(tab.source.storeId);
-          if (remote) showStatusNotice('正在拉取全量以另存为…');
+          if (remote) showStatusNotice(t('tabs.ctx.saveAsFetching'));
           void saveAsTab(tab, {
             confirm: (info) =>
               window.confirm(
-                `「${info.name}」约 ${formatBytes(info.sizeBytes)}，超过远端下载确认阈值：确认后开始拉取并另存。继续？`
+                t('tabs.ctx.saveAsConfirm', {
+                  name: info.name,
+                  size: formatBytes(info.sizeBytes)
+                })
               )
           })
             .then((r) => {
-              if (r === 'saved') showStatusNotice(`已另存为 ${tab.source.name}`);
+              if (r === 'saved') showStatusNotice(t('tabs.ctx.saveAsSaved', { name: tab.source.name }));
               else if (r === 'denied') showStatusNotice(SAVE_DENIED_NOTICE);
               // 'cancelled'（用户主动取消）：静默维持现状
             })
             .catch((err: unknown) => {
-              showStatusNotice(`另存为失败：${err instanceof Error ? err.message : String(err)}`);
+              showStatusNotice(
+                t('tabs.ctx.saveAsFailed', {
+                  message: err instanceof Error ? err.message : String(err)
+                })
+              );
             });
         }
       }
@@ -509,8 +523,8 @@
         type="button"
         class="vv-tabbar-arrow"
         data-side="left"
-        aria-label="向左滚动标签"
-        title="向左滚动标签"
+        aria-label={t('tabs.arrow.left')}
+        title={t('tabs.arrow.left')}
         onpointerdown={() => onArrowDown('left')}
         onpointerup={() => holdCleanup(false)}
         onpointercancel={() => holdCleanup(true)}
@@ -608,8 +622,8 @@
         type="button"
         class="vv-tabbar-arrow"
         data-side="right"
-        aria-label="向右滚动标签"
-        title="向右滚动标签"
+        aria-label={t('tabs.arrow.right')}
+        title={t('tabs.arrow.right')}
         onpointerdown={() => onArrowDown('right')}
         onpointerup={() => holdCleanup(false)}
         onpointercancel={() => holdCleanup(true)}
@@ -623,8 +637,8 @@
     type="button"
     class="vv-tabbar-manage"
     data-vv-wspanel-trigger
-    aria-label="管理标签"
-    title="管理所有工作区的标签（Alt+W）"
+    aria-label={t('tabs.manage.aria')}
+    title={t('tabs.manage.title')}
     onclick={onmanage}>▾</button>
   {#if ctx !== null}
     <!-- 右键菜单浮层（fixed 定位不随 tabbar 横向滚动；关闭路径收敛在组件内） -->

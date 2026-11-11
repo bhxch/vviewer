@@ -20,6 +20,9 @@ import {
   type SaveAsTabHooks
 } from './saveAs';
 import type { FileSource, TreeStore } from '@bhxch/vviewer-core';
+// i18n 目录（Task 4 域 A 抽取）：TabBar 第七动作文案迁入目录，源码锚改指 t() key +
+// zh 值逐字节等价断言（e2e 中文锚零回归的保证面）
+import { messages as zhTabs } from './i18n/catalogs/zh-CN/tabs';
 
 // 双 cwd 兼容根/apps/web（downloadProgressUi.test.ts readSrc 同款）
 function readSrc(relFromWeb: string): string {
@@ -676,12 +679,14 @@ describe('saveAsDisabledOf（第七动作置灰：占位/错误/目录）', () =
 
   it('TabBar 第七动作组装（源码契约）：另存为项 disabled 接 saveAsDisabledOf、onClick 进 saveAsTab 管线', () => {
     const src = readSrc('src/lib/TabBar.svelte');
-    expect(src).toMatch(/label: '另存为'/);
+    expect(src).toMatch(/label: t\('tabs\.ctx\.saveAs'\)/);
+    expect(zhTabs['tabs.ctx.saveAs']).toBe('另存为');
     expect(src).toMatch(/disabled: saveAsDisabledOf\(tab\)/);
     expect(src).toMatch(/void saveAsTab\(tab, \{/);
     // 远端超阈值确认门钩子（window.confirm 原生确认先例）+ 失败上状态栏
     expect(src).toMatch(/confirm: \(info\) =>/);
-    expect(src).toMatch(/showStatusNotice\(`另存为失败：/);
+    expect(src).toMatch(/showStatusNotice\(\s*t\('tabs\.ctx\.saveAsFailed'/);
+    expect(zhTabs['tabs.ctx.saveAsFailed']).toMatch(/^另存为失败：/);
     // picker 关闭双语义（行为变更：NotAllowedError 不再静默）：'denied' → 状态条
     // 固定文案（SAVE_DENIED_NOTICE 单源，值钉死）；'cancelled' 静默维持现状
     expect(SAVE_DENIED_NOTICE).toBe('另存为未完成：浏览器拒绝了文件保存请求');
@@ -689,7 +694,9 @@ describe('saveAsDisabledOf（第七动作置灰：占位/错误/目录）', () =
     // 进度反馈（评审 I-3）：菜单路径轻量状态条——远端重下开始提示 + 完成提示
     //（dlProgress 为 ViewerPane 私有面，跨组件无复用缝，缝最小取状态条）
     expect(src).toMatch(/const remote = isRemoteDownload\(tab\.source\.storeId\)/);
-    expect(src).toMatch(/showStatusNotice\('正在拉取全量以另存为…'\)/);
-    expect(src).toMatch(/showStatusNotice\(`已另存为 \$\{tab\.source\.name\}`\)/);
+    expect(src).toMatch(/showStatusNotice\(t\('tabs\.ctx\.saveAsFetching'\)\)/);
+    expect(zhTabs['tabs.ctx.saveAsFetching']).toBe('正在拉取全量以另存为…');
+    expect(src).toMatch(/showStatusNotice\(t\('tabs\.ctx\.saveAsSaved', \{ name: tab\.source\.name \}\)\)/);
+    expect(zhTabs['tabs.ctx.saveAsSaved']).toBe('已另存为 {name}');
   });
 });

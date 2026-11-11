@@ -17,6 +17,9 @@ import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { VV_FOCUS_META_LANG, requestMetaLangFocus } from './metaLangFocus';
+// i18n 目录（Task 4 域 A 抽取）：TabBar 语言轻入口文案迁入目录，锚改指 t() key +
+// zh 值逐字节等价（ViewerPane 状态栏浮层文案属域 D，Task 7 抽取，其锚不动）
+import { messages as zhTabs } from './i18n/catalogs/zh-CN/tabs';
 
 // vitest 会转译 import.meta.url（watchHealth.test.ts 同款双 cwd 兼容根/apps/web）
 function readSrc(relFromWeb: string): string {
@@ -89,7 +92,8 @@ describe('TabBar 右键语言项（Task 6 源码契约锚）', () => {
       src,
       /\{\n {8}\/\/ 语言轻入口（Task 6）[\s\S]*?\n {6}\}/
     );
-    expect(entry).toContain('语言：${langLabelOf(tab)}（在属性面板中修改）');
+    expect(entry).toContain("t('tabs.ctx.lang', { lang: langLabelOf(tab) })");
+    expect(zhTabs['tabs.ctx.lang']).toBe('语言：{lang}（在属性面板中修改）');
     // 文案读被右键 tab（langLabelOf(tab)），落点须同 tab：先 activateTab 再聚焦——
     // 只派发聚焦会落到原激活 tab 的语言行（右键非激活 tab 时跨 tab 错位）
     expect(entry).toContain('activateTab(tab.id);');
@@ -100,7 +104,10 @@ describe('TabBar 右键语言项（Task 6 源码契约锚）', () => {
 
   it('langLabelOf：被右键 tab 的 overrideLang → 「（手动）」，否则「自动」（无检测值回显面）', () => {
     const fn = fnWindow(src, /function langLabelOf\(tab: Tab\): string \{[\s\S]*?\n {2}\}/);
-    expect(fn).toContain("return tab.overrideLang !== undefined ? `${tab.overrideLang}（手动）` : '自动';");
+    expect(fn).toContain("t('tabs.ctx.langManual', { lang: tab.overrideLang })");
+    expect(fn).toContain("t('tabs.ctx.langAuto')");
+    expect(zhTabs['tabs.ctx.langManual']).toBe('{lang}（手动）');
+    expect(zhTabs['tabs.ctx.langAuto']).toBe('自动');
     expect(fn).not.toContain('fileMeta'); // 非激活 tab 无 meta 对应面，不读激活态检测值
   });
 

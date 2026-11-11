@@ -7,6 +7,10 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+// i18n 目录（Task 4 域 A 抽取）：文案字面量迁入目录，锚改指新形态（t() key）+ 目录
+// zh 值逐字节等价断言（e2e 中文锚零回归的保证面）
+import { messages as zhShell } from './i18n/catalogs/zh-CN/shell';
+import { messages as zhTabs } from './i18n/catalogs/zh-CN/tabs';
 
 function readSrc(relFromWeb: string): string {
   return readFileSync(
@@ -22,8 +26,11 @@ describe('zen 进入提示 Toast（退出通道发现性）', () => {
     expect(src).toMatch(
       /if \(zen\) \{\s*showZenToast\(\s*isDrawerBreakpoint\(\)/
     );
-    expect(src).toContain('已进入专注模式：按 Esc 或 Ctrl+Alt+Z 退出');
-    expect(src).toContain('已进入专注模式：点右下角 ✕ 或按返回键退出');
+    expect(src).toContain(
+      "isDrawerBreakpoint() ? t('shell.zen.toastMobile') : t('shell.zen.toastDesktop')"
+    );
+    expect(zhShell['shell.zen.toastDesktop']).toBe('已进入专注模式：按 Esc 或 Ctrl+Alt+Z 退出');
+    expect(zhShell['shell.zen.toastMobile']).toBe('已进入专注模式：点右下角 ✕ 或按返回键退出');
   });
 
   it('退出 zen 立即收回 toast（dismissZenToast）——提示语义只属于 zen 在场期间，不残留盖在恢复的 chrome 上', () => {
@@ -64,8 +71,13 @@ describe('标签栏动作簇专注模式可见入口（进出双提示；标签�
   });
 
   it('按钮 title 同时写明进入与退出方式（快捷键 + zen 内退出通道），文案随 zen 态切换', () => {
-    expect(src).toContain('专注模式（Ctrl+Alt+Z）：隐藏标签栏与两侧面板，进入后按 Esc 或 Ctrl+Alt+Z 退出');
-    expect(src).toContain('退出专注模式（Esc 或 Ctrl+Alt+Z）');
-    expect(src).toMatch(/\{zen \? '退出专注' : '专注'\}/);
+    expect(src).toContain("{zen ? t('tabs.menu.zenExitTitle') : t('tabs.menu.zenEnterTitle')}");
+    expect(src).toMatch(/\{zen \? t\('tabs\.menu\.zenExitText'\) : t\('tabs\.menu\.zenEnterText'\)\}/);
+    expect(zhTabs['tabs.menu.zenEnterTitle']).toBe(
+      '专注模式（Ctrl+Alt+Z）：隐藏标签栏与两侧面板，进入后按 Esc 或 Ctrl+Alt+Z 退出'
+    );
+    expect(zhTabs['tabs.menu.zenExitTitle']).toBe('退出专注模式（Esc 或 Ctrl+Alt+Z）');
+    expect(zhTabs['tabs.menu.zenExitText']).toBe('退出专注');
+    expect(zhTabs['tabs.menu.zenEnterText']).toBe('专注');
   });
 });

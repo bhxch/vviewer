@@ -7,6 +7,9 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+// i18n 目录（Task 4 域 A 抽取）：融合菜单目录管理条目文案迁入目录，锚改指 t() key +
+// zh 值逐字节等价（MountsManager.svelte 本体文案属域 E，Task 8 抽取，其锚不动）
+import { messages as zhTabs } from './i18n/catalogs/zh-CN/tabs';
 
 // vitest 会转译 import.meta.url（metaStore.test 同款处理）：双 cwd 兼容根/apps/web
 function readSrc(relFromWeb: string): string {
@@ -135,8 +138,10 @@ describe('AppShell/标签栏动作簇接线（Ctrl+Alt+M + 📁 双入口 + over
   it('融合菜单目录管理条目（aria-label=目录管理，title 提示 Ctrl+Alt+M；标签栏收敛 Task 1 后宿主为 TabBarMenu），回调经 onmounts 注入', () => {
     const menu = readSrc('src/lib/TabBarMenu.svelte');
     expect(menu).toMatch(/onmounts/);
-    expect(menu).toMatch(/aria-label="目录管理"/);
-    expect(menu).toMatch(/Ctrl\+Alt\+M/);
+    expect(menu).toMatch(/aria-label=\{t\('tabs\.menu\.mounts'\)\}/);
+    expect(menu).toMatch(/title=\{t\('tabs\.menu\.mountsTitle'\)\}/);
+    expect(zhTabs['tabs.menu.mounts']).toBe('目录管理');
+    expect(zhTabs['tabs.menu.mountsTitle']).toMatch(/Ctrl\+Alt\+M/);
     expect(shell).toMatch(/onmounts=\{\(\) => toggleMountsManager\(\)\}/);
   });
 });

@@ -27,6 +27,8 @@
   import ServerConnectForm from './ServerConnectForm.svelte';
   import WorkspaceCreateModal from './WorkspaceCreateModal.svelte';
   import WorkspaceList from './WorkspaceList.svelte';
+  // i18n（Task 4 域 A 抽取）：文案全部入 tabs.* 目录；mode 等非显示标识符不进目录（D8）
+  import { t } from './i18n/index.svelte';
   import {
     openFiles,
     openDirectoryViaPicker,
@@ -92,12 +94,20 @@
    * 兜底回正；偏小场景由 top 拉回分支兜底。 */
   const POP_EST = { w: 220, h: 400 } as const;
 
-  /** 主题三显式项（spec §3.2：跟随系统/亮/暗，当前项 ✓ 前缀——TabContextMenu 先例）。 */
-  const THEME_MODES = [
-    ['system', '跟随系统'],
-    ['light', '亮'],
-    ['dark', '暗']
-  ] as const;
+  /** 主题三显式项（spec §3.2：跟随系统/亮/暗，当前项 ✓ 前缀——TabContextMenu 先例）。
+   * mode 为稳定标识符（D8：非显示串不入目录）；文案经 themeLabelKey 键分支取
+   * tabs.menu.theme*（Task 4 域 A 抽取，locale 切换模板内 t() 自动重渲）。 */
+  const THEME_MODES = ['system', 'light', 'dark'] as const;
+  /** 键类型收窄到三枚无占位符 key（MessageKey 全集会把 t() 的 args 签名并成
+   * 「带占位符」联合，无参调用反而不合法——窄联合下 Placeholders=never，t(key) 直调） */
+  const themeLabelKey: Record<
+    (typeof THEME_MODES)[number],
+    'tabs.menu.themeSystem' | 'tabs.menu.themeLight' | 'tabs.menu.themeDark'
+  > = {
+    system: 'tabs.menu.themeSystem',
+    light: 'tabs.menu.themeLight',
+    dark: 'tabs.menu.themeDark'
+  };
 
   function toggleMenu(e: MouseEvent): void {
     if (menuOpen) {
@@ -224,10 +234,12 @@
   type="button"
   class="vv-tbmenu-trigger"
   bind:this={triggerBtn}
-  aria-label={`工作区：${activeWorkspace?.name ?? '工作区'}`}
+  aria-label={t('tabs.menu.triggerAria', {
+    name: activeWorkspace?.name ?? t('tabs.menu.workspaceFallback')
+  })}
   aria-expanded={menuOpen}
-  title="工作区与全局功能菜单"
-  onclick={toggleMenu}>{activeWorkspace?.name ?? '工作区'} ▾</button
+  title={t('tabs.menu.triggerTitle')}
+  onclick={toggleMenu}>{activeWorkspace?.name ?? t('tabs.menu.workspaceFallback')} ▾</button
 >
 <input type="file" multiple hidden bind:this={fileInput} onchange={onPick} />
 {#if menuOpen}
@@ -263,7 +275,7 @@
       class="vv-tbmenu-item"
       aria-expanded={sub === 'ws'}
       onclick={() => (sub = sub === 'ws' ? null : 'ws')}>
-      工作区
+      {t('tabs.menu.workspace')}
       <span class="vv-tbmenu-caret" aria-hidden="true">{sub === 'ws' ? '▾' : '▸'}</span>
     </button>
     {#if sub === 'ws'}
@@ -285,7 +297,7 @@
       class="vv-tbmenu-item"
       aria-expanded={sub === 'open'}
       onclick={() => (sub = sub === 'open' ? null : 'open')}>
-      打开
+      {t('tabs.menu.open')}
       <span class="vv-tbmenu-caret" aria-hidden="true">{sub === 'open' ? '▾' : '▸'}</span>
     </button>
     {#if sub === 'open'}
@@ -296,7 +308,7 @@
           onclick={() => {
             menuOpen = false;
             fileInput?.click();
-          }}>打开文件</button
+          }}>{t('tabs.menu.openFile')}</button
         >
         <button
           type="button"
@@ -304,14 +316,14 @@
           onclick={() => {
             menuOpen = false;
             void openDirectoryViaPicker();
-          }}>打开文件夹</button
+          }}>{t('tabs.menu.openFolder')}</button
         >
         <button
           type="button"
           class="vv-tbmenu-item"
           aria-expanded={urlOpen}
           onclick={() => (urlOpen = !urlOpen)}>
-          粘贴 URL
+          {t('tabs.menu.pasteUrl')}
         </button>
         {#if urlOpen}
           <!-- 选中就在菜单内就地展开的单行 URL 表单：input aria-label 沿用原文
@@ -319,8 +331,8 @@
                另配显式「打开」钮（空态引导区同款形态）；提交后展开行收起、菜单
                保持开 -->
           <form class="vv-tbmenu-row" onsubmit={submitUrl}>
-            <input placeholder="粘贴文件 URL" bind:value={urlValue} aria-label="文件 URL" />
-            <button type="submit">打开</button>
+            <input placeholder={t('tabs.menu.urlPlaceholder')} bind:value={urlValue} aria-label={t('tabs.menu.urlAria')} />
+            <button type="submit">{t('tabs.menu.urlSubmit')}</button>
           </form>
         {/if}
       </div>
@@ -330,13 +342,13 @@
     <button
       type="button"
       class="vv-tbmenu-item"
-      aria-label="刷新当前文件"
-      title="手动刷新当前文件与目录树（快捷键 Ctrl+, 打开设置可关自动刷新）"
+      aria-label={t('tabs.menu.refresh')}
+      title={t('tabs.menu.refreshTitle')}
       onclick={() => {
         menuOpen = false;
         manualRefresh();
       }}>
-      <span aria-hidden="true">↻</span> 刷新当前文件
+      <span aria-hidden="true">↻</span> {t('tabs.menu.refresh')}
     </button>
     <!-- ④ 连接服务器：直展开行内表单（菜单保持开）。常驻挂载+hidden 控制
          （TopBar 终审 Minor 同款）：本菜单会话内切换收展不卸载，未提交输入
@@ -346,7 +358,7 @@
       class="vv-tbmenu-item"
       aria-expanded={srvOpen}
       onclick={() => (srvOpen = !srvOpen)}>
-      连接服务器
+      {t('tabs.menu.connectServer')}
     </button>
     <div hidden={!srvOpen}>
       <ServerConnectForm
@@ -364,12 +376,12 @@
       class="vv-tbmenu-item"
       aria-expanded={sub === 'theme'}
       onclick={() => (sub = sub === 'theme' ? null : 'theme')}>
-      主题
+      {t('tabs.menu.theme')}
       <span class="vv-tbmenu-caret" aria-hidden="true">{sub === 'theme' ? '▾' : '▸'}</span>
     </button>
     {#if sub === 'theme'}
       <div class="vv-tbmenu-sub">
-        {#each THEME_MODES as [mode, label] (mode)}
+        {#each THEME_MODES as mode (mode)}
           <button
             type="button"
             class="vv-tbmenu-item"
@@ -377,7 +389,7 @@
               onsettheme(mode);
               menuOpen = false;
             }}>
-            {themeMode === mode ? '✓ ' : ''}{label}
+            {themeMode === mode ? '✓ ' : ''}{t(themeLabelKey[mode])}
           </button>
         {/each}
       </div>
@@ -386,25 +398,25 @@
     <button
       type="button"
       class="vv-tbmenu-item"
-      aria-label="目录管理"
-      title="目录管理（Ctrl+Alt+M）：服务端挂载 / 前端直连与代理 / 本机授权"
+      aria-label={t('tabs.menu.mounts')}
+      title={t('tabs.menu.mountsTitle')}
       onclick={() => {
         menuOpen = false;
         onmounts();
       }}>
-      目录管理
+      {t('tabs.menu.mounts')}
     </button>
     <!-- ⑦ 设置（aria/title 逐字，title 含 Ctrl+,） -->
     <button
       type="button"
       class="vv-tbmenu-item"
-      aria-label="设置"
-      title="设置（Ctrl+,）：外观 / 字体 / 图表 / 搜索与排除 / 自动刷新 / 计算"
+      aria-label={t('tabs.menu.settings')}
+      title={t('tabs.menu.settingsTitle')}
       onclick={() => {
         menuOpen = false;
         onsettings();
       }}>
-      设置
+      {t('tabs.menu.settings')}
     </button>
     <!-- ⑧ 专注模式：aria-label 沿用 TopBar 原文随 zen 态切换，title 旧簇原文
          （随顶栏退役删「隐藏顶栏」字样，appShellZenToast 契约锚），可见文案
@@ -412,15 +424,13 @@
     <button
       type="button"
       class="vv-tbmenu-item"
-      aria-label={zen ? '退出专注模式' : '进入专注模式'}
-      title={zen
-        ? '退出专注模式（Esc 或 Ctrl+Alt+Z）'
-        : '专注模式（Ctrl+Alt+Z）：隐藏标签栏与两侧面板，进入后按 Esc 或 Ctrl+Alt+Z 退出'}
+      aria-label={zen ? t('tabs.menu.zenExit') : t('tabs.menu.zenEnter')}
+      title={zen ? t('tabs.menu.zenExitTitle') : t('tabs.menu.zenEnterTitle')}
       onclick={() => {
         menuOpen = false;
         onToggleZen();
       }}>
-      {zen ? '退出专注' : '专注'}
+      {zen ? t('tabs.menu.zenExitText') : t('tabs.menu.zenEnterText')}
     </button>
   </div>
 {/if}

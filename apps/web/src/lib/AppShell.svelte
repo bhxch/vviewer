@@ -515,9 +515,7 @@
     saveSettings(fresh);
     if (zen) {
       showZenToast(
-        isDrawerBreakpoint()
-          ? '已进入专注模式：点右下角 ✕ 或按返回键退出'
-          : '已进入专注模式：按 Esc 或 Ctrl+Alt+Z 退出'
+        isDrawerBreakpoint() ? t('shell.zen.toastMobile') : t('shell.zen.toastDesktop')
       );
     } else {
       clearTempTimers();
@@ -818,9 +816,7 @@
       if (!zenGuard.claimReloaded() && isDrawerBreakpoint()) zenGuard.arm();
       // reload 落 zen：同样提示退出通道（恢复态用户与首次进入同样需要发现性）
       showZenToast(
-        isDrawerBreakpoint()
-          ? '已进入专注模式：点右下角 ✕ 或按返回键退出'
-          : '已进入专注模式：按 Esc 或 Ctrl+Alt+Z 退出'
+        isDrawerBreakpoint() ? t('shell.zen.toastMobile') : t('shell.zen.toastDesktop')
       );
     }
     window.addEventListener('popstate', onPopstate);
@@ -1032,35 +1028,36 @@
     if (match) activateTab(match.id);
   }
 
-  function addPlaceholderTab(t: TabSnapshot): void {
+  function addPlaceholderTab(snap: TabSnapshot): void {
     // 占位 store：read 即抛错，ViewerPane 以错误卡片提示"需重新打开"。
     // BUG-08：服务器来源（快照带 storeBase）的占位文案指向服务器——
-    // 不得再出现「本地文件」字样误导（SHELL-14 验收）
-    const remote = t.storeBase !== undefined;
-    let host = t.storeBase ?? '';
+    // 不得再出现「本地文件」字样误导（SHELL-14 验收）。
+    // 形参 snap（原 t）：i18n t() 导入后让位（Task 4 域 A，遮蔽即编译错）
+    const remote = snap.storeBase !== undefined;
+    let host = snap.storeBase ?? '';
     if (remote) {
       try {
-        host = new URL(t.storeBase ?? '').host;
+        host = new URL(snap.storeBase ?? '').host;
       } catch {
         // base 非法：显示名退回原串
       }
     }
     const message = remote
-      ? `服务器 ${host} 的文件，重连后可恢复（会话不保留服务器文件内容）`
-      : '会话中的本地文件需要重新打开（浏览器不保留文件内容）';
+      ? t('tabs.model.placeholderRemote', { host })
+      : t('tabs.model.placeholderLocal');
     const store: TreeStore = {
       // C1：快照 storeId 已带 placeholder: 前缀（断连刷新产物）时剥后再包——
       // 与 openFlow.addPlaceholder 的 originStoreIdOf 防线同款，幂等不叠双前缀
-      id: `placeholder:${originStoreIdOf(t)}`,
-      displayName: () => t.storeLabel,
+      id: `placeholder:${originStoreIdOf(snap)}`,
+      displayName: () => snap.storeLabel,
       listChildren: async () => [],
       read: async () => {
         throw new Error(message);
       }
     };
-    const tab = addTab(store, t.path, t.name);
+    const tab = addTab(store, snap.path, snap.name);
     tab.unrestorable = true;
-    if (t.pinned) tab.pinned = true; // F 项读回：占位 tab 的 pinned 态一并恢复（保快照序区不变式）
+    if (snap.pinned) tab.pinned = true; // F 项读回：占位 tab 的 pinned 态一并恢复（保快照序区不变式）
   }
 
   /**
@@ -1162,10 +1159,11 @@
         }
         return;
       }
-      const t = e.target as HTMLElement | null;
+      // 局部名 tgt（原 t）：i18n t() 导入后让位（Task 4 域 A，遮蔽即编译错）
+      const tgt = e.target as HTMLElement | null;
       const inField =
-        t !== null &&
-        (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+        tgt !== null &&
+        (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.tagName === 'SELECT' || tgt.isContentEditable);
       if (inField) {
         // BUG-31：快速打开面板输入框自动聚焦，本分支提前 return 会吞掉 Ctrl+P
         // toggle（面板已开时再按不关闭、不 preventDefault → 真实浏览器触发打印）。
@@ -1216,7 +1214,7 @@
       // （BUG-19「已取消选择文件夹」同通道），不静默——空按必须有可感知结果。
       if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyT') {
         e.preventDefault();
-        if (reopenClosed() === null) showStatusNotice('没有可重新打开的标签页');
+        if (reopenClosed() === null) showStatusNotice(t('shell.notice.noReopenable'));
         return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -1319,9 +1317,9 @@
       <!-- 折叠竖条（spec §2：~28px，展开钮+所属面板图标），桌面断点专属（app.css）；
            ≤900px 抽屉机制不动，竖条不渲染进视觉（display:none） -->
       <div class="vv-strip" data-side="left">
-        <button type="button" class="vv-strip-expand" aria-label="展开文件树" title="展开文件树"
+        <button type="button" class="vv-strip-expand" aria-label={t('shell.strip.expandTree')} title={t('shell.strip.expandTree')}
           onclick={() => updateLayout({ leftCollapsed: false })}>»</button>
-        <span class="vv-strip-icon" aria-hidden="true">树</span>
+        <span class="vv-strip-icon" aria-hidden="true">{t('shell.strip.treeIcon')}</span>
       </div>
     {/if}
     <aside class="vv-side" class:vv-side-off={layout.leftCollapsed} class:vv-side-blank={sources.length === 0} style="--vv-side-w: {leftW}px">
@@ -1330,10 +1328,10 @@
            zen 不动抽屉开合态——zen 隐抽屉本体，退出还原进入前开合（spec「恢复原
            开合状态」）；与桌面 chrome 菜单同源 toggleZen -->
       <div class="vv-drawer-head">
-        <button type="button" class="vv-drawer-zen" onclick={() => toggleZen()}>专注模式</button>
+        <button type="button" class="vv-drawer-zen" onclick={() => toggleZen()}>{t('shell.drawer.zen')}</button>
       </div>
-      <button type="button" class="vv-collapse-btn vv-collapse-left" aria-label="折叠文件树"
-        title="折叠文件树" onclick={() => updateLayout({ leftCollapsed: true })}>‹</button>
+      <button type="button" class="vv-collapse-btn vv-collapse-left" aria-label={t('shell.strip.collapseTree')}
+        title={t('shell.strip.collapseTree')} onclick={() => updateLayout({ leftCollapsed: true })}>‹</button>
       {#if sources.length > 0}
         <!-- 整树重建 key：源数量 | 各源数据版本 storeRevisions | 排除规则（BUG-05 通道，T4 多源化，M-2 修正，T7 分桶） -->
         {#key treeKey}
@@ -1343,15 +1341,15 @@
         <!-- 0 目录空态引导区（spec §2.3）：三入口动作与标签栏动作簇同源（openFlow façade
              现有函数），不新建打开通道；按钮不加禁用态（打开文件夹 fallback 恒可用） -->
         <div class="vv-side-empty">
-          <p class="vv-side-empty-title">未打开文件夹</p>
-          <button type="button" onclick={() => void openDirectoryViaPicker()}>打开文件夹</button>
-          <button type="button" aria-expanded={emptyServerOpen} onclick={() => (emptyServerOpen = !emptyServerOpen)}>连接服务器</button>
+          <p class="vv-side-empty-title">{t('shell.empty.title')}</p>
+          <button type="button" onclick={() => void openDirectoryViaPicker()}>{t('shell.empty.openFolder')}</button>
+          <button type="button" aria-expanded={emptyServerOpen} onclick={() => (emptyServerOpen = !emptyServerOpen)}>{t('shell.empty.connectServer')}</button>
           {#if emptyServerOpen}<ServerConnectForm onconnected={() => (emptyServerOpen = false)} />{/if}
           <form class="vv-side-empty-url" onsubmit={submitEmptyUrl}>
-            <input placeholder="粘贴文件 URL" bind:value={emptyUrl} aria-label="文件 URL" />
-            <button type="submit">打开</button>
+            <input placeholder={t('shell.empty.urlPlaceholder')} bind:value={emptyUrl} aria-label={t('shell.empty.urlAria')} />
+            <button type="submit">{t('shell.empty.open')}</button>
           </form>
-          <p class="vv-side-empty-hint">也可直接拖入文件/文件夹</p>
+          <p class="vv-side-empty-hint">{t('shell.empty.dragHint')}</p>
         </div>
       {/if}
     </aside>
@@ -1363,8 +1361,8 @@
         data-side="left"
         role="separator"
         aria-orientation="vertical"
-        aria-label="调整文件树宽度"
-        title="拖拽调宽（双击重置）"
+        aria-label={t('shell.colhandle.treeAria')}
+        title={t('shell.colhandle.title')}
         onpointerdown={(e) => startDrag('left', e)}
         onpointermove={moveDrag}
         onpointerup={endDrag}
@@ -1389,8 +1387,8 @@
         data-side="right"
         role="separator"
         aria-orientation="vertical"
-        aria-label="调整属性面板宽度"
-        title="拖拽调宽（双击重置）"
+        aria-label={t('shell.colhandle.metaAria')}
+        title={t('shell.colhandle.title')}
         onpointerdown={(e) => startDrag('right', e)}
         onpointermove={moveDrag}
         onpointerup={endDrag}
@@ -1400,8 +1398,8 @@
       ></div>
     {/if}
     <aside class="vv-right" class:vv-right-off={layout.rightCollapsed} style="--vv-right-w: {rightW}px">
-      <button type="button" class="vv-collapse-btn vv-collapse-right" aria-label="折叠属性面板"
-        title="折叠属性面板" onclick={() => updateLayout({ rightCollapsed: true })}>›</button>
+      <button type="button" class="vv-collapse-btn vv-collapse-right" aria-label={t('shell.strip.collapseMeta')}
+        title={t('shell.strip.collapseMeta')} onclick={() => updateLayout({ rightCollapsed: true })}>›</button>
       {#if tocEntries.length > 0 || outlineDefinitions.length > 0 || gitInfo !== null}
         <!-- 「目录 | 属性 | Git」分段切换器（code-outline Task 3 二元 + git-panel
              Task 2 扩三元）：目录数据非空或 git 探测可用时渲染（均无维持纯属性现状
@@ -1410,7 +1408,7 @@
              不出现空目录段）；Git 钮 = gitInfo 非 null（后台 probe 可用才出现）；
              激活任一段置 rightViewTouched（用户显式选择），默认落位 effect 永不选
              'git'（下方注释）。 -->
-        <div class="vv-right-switch" role="group" aria-label="右面板视图切换">
+        <div class="vv-right-switch" role="group" aria-label={t('shell.right.switchAria')}>
           {#if tocEntries.length > 0 || outlineDefinitions.length > 0}
             <button
               type="button"
@@ -1420,7 +1418,7 @@
               onclick={() => {
                 rightViewTouched = true;
                 rightView = 'toc';
-              }}>目录</button
+              }}>{t('shell.right.toc')}</button
             >
           {/if}
           <button
@@ -1431,7 +1429,7 @@
             onclick={() => {
               rightViewTouched = true;
               rightView = 'meta';
-            }}>属性</button
+            }}>{t('shell.right.meta')}</button
           >
           {#if gitInfo !== null}
             <button
@@ -1482,20 +1480,20 @@
     </aside>
     {#if layout.rightCollapsed}
       <div class="vv-strip" data-side="right">
-        <button type="button" class="vv-strip-expand" aria-label="展开属性面板" title="展开属性面板"
+        <button type="button" class="vv-strip-expand" aria-label={t('shell.strip.expandMeta')} title={t('shell.strip.expandMeta')}
           onclick={() => updateLayout({ rightCollapsed: false })}>«</button>
         <span class="vv-strip-icon" aria-hidden="true">ℹ</span>
       </div>
     {/if}
   </div>
-  <button class="vv-drawer-toggle" aria-label="切换侧栏" onclick={() => (drawers = toggleLeftDrawer(drawers))}>☰</button>
-  <button class="vv-right-toggle" aria-label="切换目录与属性面板" onclick={() => (drawers = toggleRightDrawer(drawers))}>ℹ</button>
+  <button class="vv-drawer-toggle" aria-label={t('shell.drawerToggle.aria')} onclick={() => (drawers = toggleLeftDrawer(drawers))}>☰</button>
+  <button class="vv-right-toggle" aria-label={t('shell.rightToggle.aria')} onclick={() => (drawers = toggleRightDrawer(drawers))}>ℹ</button>
   {#if layout.zen}
     <!-- zen 退出浮钮（spec §3.1 移动端）：hover 退出条的触屏替身，桌面无此钮
          （媒体查询隐藏）。≥44px 触控标准、半透不遮内容；右下角定于状态栏上方
          （状态栏 zen 保留，浮钮避让其高度）；z-index 低于面板层 30——面板在场时
          返回键先关面板，浮钮被压住即「面板优先」的视觉一致 -->
-    <button type="button" class="vv-zen-exit" aria-label="退出专注模式" title="退出专注模式"
+    <button type="button" class="vv-zen-exit" aria-label={t('shell.zen.exit')} title={t('shell.zen.exit')}
       onclick={() => toggleZen()}>✕</button>
   {/if}
   {#if zenToast}
@@ -1531,7 +1529,7 @@
           menuToggleVisible();
           chromeMenu = null;
         }}>
-        {layout.tabBarVisible ? '隐藏标签栏' : '显示标签栏'}
+        {layout.tabBarVisible ? t('shell.chrome.hideTabbar') : t('shell.chrome.showTabbar')}
       </button>
       <button
         type="button"
@@ -1540,7 +1538,7 @@
           toggleZen();
           chromeMenu = null;
         }}>
-        {layout.zen ? '退出专注模式' : '进入专注模式'}
+        {layout.zen ? t('shell.chrome.exitZen') : t('shell.chrome.enterZen')}
       </button>
     </div>
   {/if}

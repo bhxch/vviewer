@@ -351,6 +351,7 @@ describe('TopBar 退役宿主迁移（顶栏退役 Task 3 + 标签栏收敛 Task
 
   it('⚙ 入口走 onsettings 回调（宿主 TabBarMenu 融合菜单，props 声明；设置项 onclick 体内经 menuOpen=false 后回调）', () => {
     expect(actions).toMatch(/onsettings\(\): void/);
-    expect(actions).toMatch(/aria-label="设置"[\s\S]{0,200}onsettings\(\)/);
+    // 文案入 i18n 目录（Task 4 域 A 抽取）：源码锚改指 t() key，zh 值逐字节等价由目录承接
+    expect(actions).toMatch(/aria-label=\{t\('tabs\.menu\.settings'\)\}[\s\S]{0,200}onsettings\(\)/);
   });
 });

@@ -25,6 +25,9 @@ import {
 } from './tabOrder';
 import { displayLabelForStore } from './mountsSync';
 import { neighborAfterClose, neighborAfterBatch } from './tabNeighbors';
+// i18n（Task 4 域 A 抽取）：占位 tab 恢复文案/SSE 变更提示入 tabs.model.* 目录
+// （runes 模块消费响应式 t；错误 message 为显示面——ViewerPane 错误卡渲染 err.message）
+import { t } from './i18n/index.svelte';
 
 export interface Tab {
   id: string;
@@ -397,8 +400,8 @@ class TabCollection {
       }
     }
     const message = remote
-      ? `服务器 ${host} 的文件，重连后可恢复（会话不保留服务器文件内容）`
-      : '会话中的本地文件需要重新打开（浏览器不保留文件内容）';
+      ? t('tabs.model.placeholderRemote', { host })
+      : t('tabs.model.placeholderLocal');
     const store: TreeStore = {
       id: `placeholder:${originStoreIdOf(snap)}`,
       displayName: () => snap.storeLabel,
@@ -586,19 +589,20 @@ async function backfillStreamingSizes(storeId: string, tabs: Tab[]): Promise<voi
       for (const t of group) t.rev = (t.rev ?? 0) + 1;
       continue;
     }
-    for (const t of group) {
-      const fresh = entries.find((e) => e.path === t.source.path);
+    // 循环变量名 tab（原 t）：i18n t() 导入后需在本循环内可用（Task 4 域 A）
+    for (const tab of group) {
+      const fresh = entries.find((e) => e.path === tab.source.path);
       if (
         fresh !== undefined &&
         typeof fresh.size === 'number' &&
         Number.isFinite(fresh.size) &&
-        fresh.size !== t.source.size
+        fresh.size !== tab.source.size
       ) {
-        const grew = fresh.size > (t.source.size ?? 0);
-        t.source = { ...t.source, size: fresh.size };
-        if (grew) sseChangedNotice?.(`文件已变更：${t.source.name}`);
+        const grew = fresh.size > (tab.source.size ?? 0);
+        tab.source = { ...tab.source, size: fresh.size };
+        if (grew) sseChangedNotice?.(t('tabs.model.sseChanged', { name: tab.source.name }));
       }
-      t.rev = (t.rev ?? 0) + 1;
+      tab.rev = (tab.rev ?? 0) + 1;
     }
   }
 }
