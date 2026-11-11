@@ -79,28 +79,67 @@ const system = extractBlock(
   'media 内 [data-theme-mode="system"]'
 );
 
-/** 解析为 0..1 的 sRGB gamma 编码通道 + α */
+const HEX3_RE = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i;
+const HEX6_RE = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i;
+const RGB_SPACE_RE = /^rgb\(\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\s*(?:\/\s*([\d.]+)\s*(%?)\s*)?\)$/;
+const RGBA_COMMA_RE = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*([\d.]+)\s*\)$/;
+
+/** 解析为 0..1 的 sRGB gamma 编码通道 + α（α：`%` 形态除 100，裸值即 0..1 小数） */
 function parseColor(value: string): Srgb {
-  throw new Error(`TDD 桩：转换管线未实现（${value}）`);
+  let m = HEX3_RE.exec(value);
+  if (m) {
+    const d = (s: string) => (parseInt(s, 16) * 16 + parseInt(s, 16)) / 255;
+    return { r: d(m[1]!), g: d(m[2]!), b: d(m[3]!), alpha: 1 };
+  }
+  m = HEX6_RE.exec(value);
+  if (m) return { r: parseInt(m[1]!, 16) / 255, g: parseInt(m[2]!, 16) / 255, b: parseInt(m[3]!, 16) / 255, alpha: 1 };
+  m = RGB_SPACE_RE.exec(value);
+  if (m) {
+    const alpha = m[4] === undefined ? 1 : m[5] === '%' ? parseFloat(m[4]) / 100 : parseFloat(m[4]);
+    return { r: Number(m[1]) / 255, g: Number(m[2]) / 255, b: Number(m[3]) / 255, alpha };
+  }
+  m = RGBA_COMMA_RE.exec(value);
+  if (m) return { r: Number(m[1]) / 255, g: Number(m[2]) / 255, b: Number(m[3]) / 255, alpha: parseFloat(m[4]!) };
+  throw new Error(`无法解析的 token 颜色值：${value}（机检只覆盖 #rgb/#rrggbb/rgb()/rgba()，新增形态须扩解析器）`);
 }
 
+/** sRGB gamma 解码（WCAG 2.1 官方分段；8-bit 通道值下 0.03928/0.04045 两阈值无差异） */
 function linearChannel(c: number): number {
-  throw new Error('TDD 桩：转换管线未实现');
+  return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
 }
 
 /** 底色链合成：layers[0] 为最底不透明底色，其后自底向顶逐层 α 混合（sRGB gamma 空间） */
 function compositeLayers(layers: Srgb[]): Channels {
-  throw new Error('TDD 桩：转换管线未实现');
+  let out: Channels = { r: layers[0]!.r, g: layers[0]!.g, b: layers[0]!.b };
+  for (const layer of layers.slice(1)) {
+    out = {
+      r: layer.alpha * layer.r + (1 - layer.alpha) * out.r,
+      g: layer.alpha * layer.g + (1 - layer.alpha) * out.g,
+      b: layer.alpha * layer.b + (1 - layer.alpha) * out.b
+    };
+  }
+  return out;
 }
 
 /** WCAG 2.1 相对亮度：linear 化后 0.2126/0.7152/0.0722 加权；透明色先对底合成 */
 function relativeLuminance(color: Srgb, backdrop?: Channels): number {
-  throw new Error('TDD 桩：转换管线未实现');
+  let { r, g, b } = color;
+  if (color.alpha < 1 && backdrop) {
+    r = color.alpha * r + (1 - color.alpha) * backdrop.r;
+    g = color.alpha * g + (1 - color.alpha) * backdrop.g;
+    b = color.alpha * b + (1 - color.alpha) * backdrop.b;
+  }
+  const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
+  return 0.2126 * linearChannel(clamp01(r)) + 0.7152 * linearChannel(clamp01(g)) + 0.0722 * linearChannel(clamp01(b));
 }
 
 /** 文本色（fg，透明则对底合成）× 底色链 的 WCAG 对比度 */
 function contrastRatio(fg: Srgb, bgLayers: Srgb[]): number {
-  throw new Error('TDD 桩：转换管线未实现');
+  const backdrop = compositeLayers(bgLayers);
+  const l1 = relativeLuminance(fg, fg.alpha < 1 ? backdrop : undefined);
+  const l2 = relativeLuminance({ ...backdrop, alpha: 1 });
+  const [lighter, darker] = l1 >= l2 ? [l1, l2] : [l2, l1];
+  return (lighter + 0.05) / (darker + 0.05);
 }
 
 function tokenOf(set: TokenSet, name: string): Srgb {
