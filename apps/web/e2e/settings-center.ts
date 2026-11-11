@@ -22,7 +22,7 @@ export const SETTINGS_ROOT = '.vv-settings-center';
 /** 打开设置中心（融合菜单 → 「设置」条目 → 全屏页；返回根 locator 便于调用方局部断言） */
 export async function openSettings(page: Page): Promise<void> {
   await openMenu(page);
-  await page.locator(MENU_POP).getByRole('button', { name: '设置', exact: true }).click();
+  await page.locator(MENU_POP).getByRole('button', { name: /设置|Settings/ }).click();
   await expect(page.locator(SETTINGS_ROOT)).toBeVisible();
 }
 
