@@ -180,8 +180,7 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 
 | 层 | 值 | 成员 |
 | --- | --- | --- |
-| 抽屉 | 10 | `.vv-side` / `.vv-right`（抽屉态） |
-| 抽屉/右栏浮钮 | 20 | `.vv-drawer-toggle` / `.vv-right-toggle` |
+| 抽屉带 | 20 | `.vv-side` / `.vv-right`（抽屉态，AppShell.svelte:1656/:1690）、`.vv-drawer-toggle` / `.vv-right-toggle`（:1668/:1702）——PWA-09：压过 ArtPlayer `.art-video`（上游 absolute z-index:10），档 10 为修复前旧值 |
 | zen 退出钮 | 25 | `.vv-zen-exit`（AppShell.svelte:1309） |
 | 面板层 | 30/31/32 | overlay 族 30（`.vv-settings-center`/`.vv-mounts-manager`/`.vv-gsearch`/`.vv-quickopen`/`.vv-wspanel`/`.vv-wscreate-panel`/`.vv-status-picker`——`.vv-ws-pop` 已随标签栏收敛退役删除）；`.vv-sc-confirm` 31；`.vv-sc-modal` 32 |
 | chrome 条 | 50 | `.vv-chrome-off` / `.vv-chrome-temp`（app.css:352-359） |

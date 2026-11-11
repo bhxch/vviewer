@@ -63,8 +63,6 @@
 | 菜单 | 90 | `.vv-tabctx`（app.css:650）、`.vv-chromemenu`（app.css:420）、`.vv-tbmenu-pop`（app.css:579） | 瞬态操作面，不被任何浮层压住 |
 | 灯箱 | 100 | `.md-lightbox-overlay`（packages/vviewer-markdown/src/markdown.css:78；`css.ts` `RUNTIME_LIGHTBOX_CSS` 运行时同值） | markdown 包承载，全站最高 |
 
-**勘误注记**：`ui-design-system.md` §4.4 表载抽屉档 10——已过时；现值为 20（ArtPlayer 上游 z 10 会盖抽屉的命中测试修复，见 AppShell.svelte:1652-1656 注释）。本表为现值权威；§4.4 以「面板 30 < 条 50 < 菜单 90」的核心序仍成立。
-
 **机检载体**：无通用机检（CSS 值盘点性规则）；档位核对落 PR 必查清单第 3 条。既有档位间关系有行为面机检：zen 返回键分层（b-layout-zen-deep LZ-12）、灯箱画廊（markdown e2e）。
 
 ---
@@ -109,6 +107,8 @@
 | StorageSection.svelte:285 / :295 | 清除操作提示 / 用量统计中 |
 | AboutSection.svelte:96 / :174 / :190 | 版本不一致警示 / 用量行 / 持久化结果 |
 | LayoutSection.svelte:101 | 布局 zen 说明（note） |
+
+> 口径注：表 1 为 apps/web 属性写法穷举；packages 侧 setAttribute 动态形态（vviewer-render-text jsonl/index.ts:204、vviewer-lightbox lightbox.ts:239）另计，不入本表穷举口径。
 
 **表 2：原生轻确认成员（`window.confirm` 7 处 + 裸 `confirm(` 1 处，同义形态；rg 2026-11-12 穷举；确认文案一律走 t()，CJK lint 静态属性/字面量臂拦非 t() 面）**
 
