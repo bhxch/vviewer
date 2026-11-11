@@ -6,11 +6,15 @@
 // 豁免点之一；消费方一律经 ../core（纯）或 ../index.svelte（响应式）。
 import { messages as settings } from './zh-CN/settings';
 import { messages as a11y } from './zh-CN/a11y';
+import { messages as shell } from './zh-CN/shell';
+import { messages as tabs } from './zh-CN/tabs';
 
 /** domain→pack 记录（聚合机检逐域面；键序即注册序，无运行时注入层——单 app 直读目录） */
 export const MESSAGE_PACKS = {
   settings,
-  a11y
+  a11y,
+  shell,
+  tabs
 } as const;
 
-export const messages = { ...settings, ...a11y } as const;
+export const messages = { ...settings, ...a11y, ...shell, ...tabs } as const;
