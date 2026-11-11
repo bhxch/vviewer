@@ -155,5 +155,45 @@ export const messages = {
   // —— 查看器空态 ——
   'viewer.empty.drop': 'Drop files/folders here, or open via the ＋ button in the tab bar',
   'viewer.empty.unrestorable': 'This source cannot be restored automatically; reopen the folder',
-  'viewer.empty.directory': 'Directory source: open files from the tree on the left'
+  'viewer.empty.directory': 'Directory source: open files from the tree on the left',
+
+  // —— 下载确认卡（viewer.confirm.*：DownloadConfirmCard——Task 10 域 G 收尾；
+  //    取消钮与进度卡同词复用 viewer.dl.cancel）——
+  'viewer.confirm.title': 'Confirm download',
+  'viewer.confirm.size': 'Size {size}',
+  'viewer.confirm.renderer': 'Target renderer: {renderer}',
+  'viewer.confirm.impact':
+    'The file will be fully read into memory during download; very large files may cause lag or memory pressure.',
+  'viewer.confirm.start': 'Start download',
+  'viewer.confirm.saveAs': 'Download and save as',
+
+  // —— 代码大纲（viewer.outline.*：OutlineView + outlineTruncate 文案常量迁移；
+  //    kind 展示名键分支——kind 是 tags.scm 捕获稳定标识符，未收录词形显示原词）——
+  'viewer.outline.aria': 'Code outline',
+  'viewer.outline.truncated': 'Outline exceeds {limit} entries; showing the first {limit}',
+  'viewer.outline.expandAll': 'Expand all',
+  'viewer.outline.kind.function': 'Function',
+  'viewer.outline.kind.method': 'Method',
+  'viewer.outline.kind.class': 'Class',
+  'viewer.outline.kind.struct': 'Struct',
+  'viewer.outline.kind.interface': 'Interface',
+  'viewer.outline.kind.enum': 'Enum',
+  'viewer.outline.kind.type': 'Type',
+  'viewer.outline.kind.module': 'Module',
+  'viewer.outline.kind.namespace': 'Namespace',
+  'viewer.outline.kind.constant': 'Constant',
+  'viewer.outline.kind.variable': 'Variable',
+  'viewer.outline.kind.property': 'Property',
+  'viewer.outline.kind.field': 'Field',
+  'viewer.outline.kind.macro': 'Macro',
+  'viewer.outline.kind.union': 'Union',
+  'viewer.outline.kind.trait': 'Trait',
+  'viewer.outline.kind.object': 'Object',
+  'viewer.outline.kind.constructor': 'Constructor',
+  'viewer.outline.kind.section': 'Section',
+  'viewer.outline.kind.name': 'Symbol',
+
+  // —— 右栏目录（viewer.toc.*，Toc.svelte）——
+  'viewer.toc.aria': 'Table of contents',
+  'viewer.toc.empty': 'No headings'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;

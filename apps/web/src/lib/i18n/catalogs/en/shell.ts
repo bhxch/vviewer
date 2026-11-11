@@ -29,6 +29,7 @@ export const messages = {
   'shell.drawer.zen': 'Zen mode',
 
   // —— 0 目录空态引导区（shell.empty.*）——
+  // "No folder opened" shared by all three shells (Task 10 item 7): search/quickopen reuse this key
   'shell.empty.title': 'No folder opened',
   'shell.empty.openFolder': 'Open folder',
   'shell.empty.connectServer': 'Connect to server',

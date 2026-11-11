@@ -30,6 +30,7 @@ export const messages = {
   'shell.drawer.zen': '专注模式',
 
   // —— 0 目录空态引导区（shell.empty.*）——
+  // 「未打开文件夹」三壳同词并键（Task 10 移交项 7）：search/quickopen 状态条同词复用本键
   'shell.empty.title': '未打开文件夹',
   'shell.empty.openFolder': '打开文件夹',
   'shell.empty.connectServer': '连接服务器',

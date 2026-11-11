@@ -12,7 +12,6 @@ export const messages = {
   'quickopen.close.title': 'Close (Esc)',
 
   // —— 状态行（quickopen.status.*）——
-  'quickopen.status.noFolder': 'No folder opened',
   'quickopen.status.listing': 'Listing files…',
   'quickopen.status.partial': 'Some directories could not be listed ({count} skipped): {message}',
   'quickopen.status.listFailed': 'Failed to list files: {message}',

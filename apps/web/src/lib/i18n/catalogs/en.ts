@@ -11,6 +11,7 @@ import { messages as errors } from './en/errors';
 import { messages as mounts } from './en/mounts';
 import { messages as git } from './en/git';
 import { messages as search } from './en/search';
+import { messages as notice } from './en/notice';
 
 /** domain→pack 记录（聚合机检逐域面；与 zh 同构） */
 export const MESSAGE_PACKS = {
@@ -24,7 +25,8 @@ export const MESSAGE_PACKS = {
   errors,
   mounts,
   git,
-  search
+  search,
+  notice
 } as const;
 
 export const messages = {
@@ -38,5 +40,6 @@ export const messages = {
   ...errors,
   ...mounts,
   ...git,
-  ...search
+  ...search,
+  ...notice
 } as const;

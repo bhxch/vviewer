@@ -14,7 +14,6 @@ export const messages = {
   'quickopen.close.title': '关闭（Esc）',
 
   // —— 状态行（quickopen.status.*，aria-live=polite）——
-  'quickopen.status.noFolder': '未打开文件夹',
   'quickopen.status.listing': '正在列出文件…',
   'quickopen.status.partial': '部分目录无法列出（{count} 个已跳过）：{message}',
   'quickopen.status.listFailed': '列出文件失败：{message}',

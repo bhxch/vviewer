@@ -77,5 +77,24 @@ export const messages = {
   // —— tabsModel 占位 tab / SSE 变更提示（tabs.model.*）——
   'tabs.model.placeholderRemote': '服务器 {host} 的文件，重连后可恢复（会话不保留服务器文件内容）',
   'tabs.model.placeholderLocal': '会话中的本地文件需要重新打开（浏览器不保留文件内容）',
-  'tabs.model.sseChanged': '文件已变更：{name}'
+  'tabs.model.sseChanged': '文件已变更：{name}',
+
+  // —— 标签管理面板（tabs.panel.*，WorkspaceTabsPanel——Task 10 域 G 收尾；
+  //    来源三入口与目录管理同词复用 mounts.src.folder/files/remote）——
+  'tabs.panel.aria': '标签管理',
+  'tabs.panel.filterPlaceholder': '按名称 / 路径过滤所有工作区的标签',
+  'tabs.panel.filterAria': '过滤标签',
+  'tabs.panel.close': '关闭标签管理',
+  'tabs.panel.closeTitle': '关闭（Esc）',
+  'tabs.panel.pinnedTitle': '已固定',
+  'tabs.panel.dirSource': '（目录来源）',
+  'tabs.panel.closeTabAria': '关闭 {name}',
+  'tabs.panel.emptyGroup':
+    '暂无标签 · 已登记来源 {n} 个。用下方「＋ 添加来源」，或标签栏 ＋/⋯ 菜单「打开文件 / 打开文件夹 / 连接服务器」添加。',
+  'tabs.panel.addSource': '＋ 添加来源',
+  'tabs.panel.collapseAdd': '收起来源入口',
+  'tabs.panel.noMatch': '无匹配标签',
+
+  // —— 右键菜单触发钮（tabs.ctx.menuAria，TabContextMenu——Task 4 §9.4 移交）——
+  'tabs.ctx.menuAria': '标签菜单 {name}'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;

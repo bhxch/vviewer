@@ -158,5 +158,44 @@ export const messages = {
   // —— 查看器空态（viewer.empty.*，ViewerPane）——
   'viewer.empty.drop': '拖入文件/文件夹，或用标签栏 ＋ 打开',
   'viewer.empty.unrestorable': '此来源无法自动恢复，请重新打开文件夹',
-  'viewer.empty.directory': '目录来源：文件在左侧树中打开'
+  'viewer.empty.directory': '目录来源：文件在左侧树中打开',
+
+  // —— 下载确认卡（viewer.confirm.*，DownloadConfirmCard——Task 10 域 G 收尾；
+  //    取消钮与进度卡同词复用 viewer.dl.cancel）——
+  'viewer.confirm.title': '确认下载',
+  'viewer.confirm.size': '大小 {size}',
+  'viewer.confirm.renderer': '目标渲染器：{renderer}',
+  'viewer.confirm.impact': '下载期间文件将全量读入内存，超大文件可能造成卡顿或内存压力。',
+  'viewer.confirm.start': '开始下载',
+  'viewer.confirm.saveAs': '下载并另存为',
+
+  // —— 代码大纲（viewer.outline.*：OutlineView + outlineTruncate 文案常量迁移；
+  //    kind 展示名键分支——kind 是 tags.scm 捕获稳定标识符，未收录词形显示原词）——
+  'viewer.outline.aria': '代码大纲',
+  'viewer.outline.truncated': '大纲超过 {limit} 条，仅显示前 {limit} 条',
+  'viewer.outline.expandAll': '全部展开',
+  'viewer.outline.kind.function': '函数',
+  'viewer.outline.kind.method': '方法',
+  'viewer.outline.kind.class': '类',
+  'viewer.outline.kind.struct': '结构体',
+  'viewer.outline.kind.interface': '接口',
+  'viewer.outline.kind.enum': '枚举',
+  'viewer.outline.kind.type': '类型',
+  'viewer.outline.kind.module': '模块',
+  'viewer.outline.kind.namespace': '命名空间',
+  'viewer.outline.kind.constant': '常量',
+  'viewer.outline.kind.variable': '变量',
+  'viewer.outline.kind.property': '属性',
+  'viewer.outline.kind.field': '字段',
+  'viewer.outline.kind.macro': '宏',
+  'viewer.outline.kind.union': '联合',
+  'viewer.outline.kind.trait': '特质',
+  'viewer.outline.kind.object': '对象',
+  'viewer.outline.kind.constructor': '构造函数',
+  'viewer.outline.kind.section': '小节',
+  'viewer.outline.kind.name': '符号',
+
+  // —— 右栏目录（viewer.toc.*，Toc.svelte）——
+  'viewer.toc.aria': '目录',
+  'viewer.toc.empty': '无标题'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;

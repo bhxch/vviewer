@@ -14,7 +14,6 @@ export const messages = {
   'search.closeTitle': 'Close (Esc)',
 
   // —— 状态条 ——
-  'search.noFolder': 'No folder opened',
   'search.searching': 'Searching…',
   'search.scanned': 'Scanned {done} files…',
   'search.noResults': 'No results',

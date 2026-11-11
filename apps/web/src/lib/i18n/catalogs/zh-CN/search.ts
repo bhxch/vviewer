@@ -1,6 +1,6 @@
 // catalogs/zh-CN/search.ts — search 域目录（Task 9 域 F：搜索——全局跨文件搜索面板
 // + 文件内搜索面板 + globalSearch 路由纯层提示/错误串）。「未打开文件夹」（Task 5
-// 遗留 M 面）入 search.noFolder。zh 值与被移除字面量逐字节等价（D7）。globalSearch
+// 遗留 M 面）入 search.noFolder——Task 10 移交项 7 三壳同词并键，删除（消费点复用 shell.empty.title）。zh 值与被移除字面量逐字节等价（D7）。globalSearch
 // 的两个提示常量改函数（挂载时刻锁 locale 问题，Task 7/8 裁决同款），键落本域。
 export const domain = 'search' as const;
 
@@ -15,7 +15,6 @@ export const messages = {
   'search.closeTitle': '关闭（Esc）',
 
   // —— 状态条（aria-live：搜索中/进度/摘要/错误/未打开目录）——
-  'search.noFolder': '未打开文件夹',
   'search.searching': '搜索中…',
   'search.scanned': '已扫描 {done} 个文件…',
   'search.noResults': '无结果',

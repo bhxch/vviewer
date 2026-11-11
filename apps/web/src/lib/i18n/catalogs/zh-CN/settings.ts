@@ -218,9 +218,36 @@ export const messages = {
   'settings.fonts.removedWithFallback': '已删除「{name}」，{slots}槽已回落默认字体',
   'settings.fonts.removed': '已删除「{name}」',
 
+  // —— 字体预设 label（settings.fonts.preset.*：fonts.ts 清单 label 键化——Task 10
+  //    域 G；value（family 名）是存入 settings 的数据值不翻译，label 双侧同键；
+  //    字体产品名双语并列保留原文，括注修饰语译英）——
+  'settings.fonts.preset.systemUi': 'system-ui（默认无衬线）',
+  'settings.fonts.preset.microsoftYaHei': '微软雅黑 Microsoft YaHei',
+  'settings.fonts.preset.pingFangSc': 'PingFang SC 苹方',
+  'settings.fonts.preset.notoSansCjkSc': 'Noto Sans CJK SC',
+  'settings.fonts.preset.sourceHanSans': '思源黑体 Source Han Sans',
+  'settings.fonts.preset.segoeUi': 'Segoe UI（Windows）',
+  'settings.fonts.preset.roboto': 'Roboto（Android）',
+  'settings.fonts.preset.helveticaNeue': 'Helvetica Neue（macOS）',
+  'settings.fonts.preset.defaultMono': '默认等宽栈',
+  'settings.fonts.preset.jetbrainsMono': 'JetBrains Mono',
+  'settings.fonts.preset.firaCode': 'Fira Code',
+  'settings.fonts.preset.cascadiaCode': 'Cascadia Code（Windows 11）',
+  'settings.fonts.preset.consolas': 'Consolas（Windows）',
+  'settings.fonts.preset.menlo': 'Menlo（macOS）',
+  'settings.fonts.preset.sfMono': 'SF Mono（macOS）',
+  'settings.fonts.preset.sourceCodePro': 'Source Code Pro',
+  'settings.fonts.preset.sarasaMonoSc': '更纱等宽 Sarasa Mono SC',
+  'settings.fonts.preset.notoSansMonoCjkSc': 'Noto Sans Mono CJK SC',
+  'settings.fonts.preset.default': '默认',
+  'settings.fonts.preset.custom': '自定义…',
+  'settings.fonts.preset.network': '{name}（网络）',
+
   // —— 「代码视图」节（settings.code.*）——
   'settings.code.wordWrap': '自动换行',
   'settings.code.hint': '长行在视图宽度内折行显示，不再横向滚动。也可用代码视图状态栏的「换行」开关或 Alt+Z 随时切换。',
+  'settings.code.themeGroupCurated': '精选',
+  'settings.code.themeGroupAll': '全部',
 
   // —— 「图表」节（settings.diagrams.*）——
   'settings.diagrams.label': '图表',

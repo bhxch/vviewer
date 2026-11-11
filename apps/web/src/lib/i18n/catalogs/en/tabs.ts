@@ -83,5 +83,24 @@ export const messages = {
     'File from server {host}, recoverable after reconnect (the session does not retain server file contents)',
   'tabs.model.placeholderLocal':
     'Local files in the session need to be reopened (the browser does not retain file contents)',
-  'tabs.model.sseChanged': 'File changed: {name}'
+  'tabs.model.sseChanged': 'File changed: {name}',
+
+  // —— 标签管理面板（tabs.panel.*，WorkspaceTabsPanel——Task 10 域 G 收尾；
+  //    来源三入口与目录管理同词复用 mounts.src.folder/files/remote）——
+  'tabs.panel.aria': 'Tab manager',
+  'tabs.panel.filterPlaceholder': 'Filter tabs of all workspaces by name / path',
+  'tabs.panel.filterAria': 'Filter tabs',
+  'tabs.panel.close': 'Close tab manager',
+  'tabs.panel.closeTitle': 'Close (Esc)',
+  'tabs.panel.pinnedTitle': 'Pinned',
+  'tabs.panel.dirSource': '(directory source)',
+  'tabs.panel.closeTabAria': 'Close {name}',
+  'tabs.panel.emptyGroup':
+    'No tabs · {n} source(s) registered. Use "＋ Add source" below, or the ＋/⋯ menu in the tab bar ("Open file / Open folder / Connect to server") to add one.',
+  'tabs.panel.addSource': '＋ Add source',
+  'tabs.panel.collapseAdd': 'Collapse source entry',
+  'tabs.panel.noMatch': 'No matching tabs',
+
+  // —— 右键菜单触发钮（tabs.ctx.menuAria，TabContextMenu——Task 4 §9.4 移交）——
+  'tabs.ctx.menuAria': 'Tab menu for {name}'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;
