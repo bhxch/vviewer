@@ -95,7 +95,7 @@ zh 目录值必须与被替换的字面量**逐字节等价**（含空白与全�
 ### 4.3 aria 形态惯例（机检落点随列）
 
 - 图标按钮必须带可读名称（`aria-label` 走 `t()`——静态属性值 CJK lint 拦非 t() 面）；**aria-label 与可见文本包含**（axe `label-content-name-mismatch` 曾两处真违规真修：触发钮「工作区：{name}」、状态栏 openwith 动态全等形态）。
-- 异步反馈经 `role="status"` / `aria-live` 通道（现状九处先例，见 semantic-components.md §4）。
+- 异步反馈经 `role="status"` / `aria-live` 通道对读屏可达（现状 23 处：`role="status"` 21 + `aria-live="polite"` 2；新增点经 §6 A2 逐条核）。
 - tablist 结构：`role=tablist` 落 `.vv-tabbar-tabs`（tab 容器直下有非 tab 可聚焦后代即 axe `aria-required-children` 违规）、`tabindex="-1"` 仅为过 `a11y_interactive_supports_focus`（不影响 tab 序，焦点落 `.vv-tab-hit[tabindex=0]`，APG tab 惯例）、`.vv-tab` 壳 `role="presentation"`、关闭钮 `span.vv-tab-close aria-hidden`（键盘关闭走 Delete/Backspace 或右键菜单）。
 - 源行 `role=treeitem` + `aria-selected` + `aria-expanded`（tree required owned 结构）；边界⑦ 的悬空面见 §5。
 
@@ -121,7 +121,7 @@ zh 目录值必须与被替换的字面量**逐字节等价**（含空白与全�
 ### A 组：a11y（aelrova §2.4 八条移植，本地化）
 
 1. **动效/过渡落白名单且被门控承接**：只动 opacity/transform/背景色/边框色/文字色（ui-design-system §11）；CSS transition/animation 由 app.css 全局双块自动压制，**JS 驱动的动画/样式写入**（无 transition 属性可压的面，如逐帧 style 写入）手工核 reduceMotion 语义。
-2. **异步结果读屏可达**：进度/校验/对账/导出反馈等异步结果经 `role="status"` 或 aria-live 通道（现状先例见 semantic-components.md §4），不只视觉反馈——axe 不扫动态注入时机，新增点逐条核。
+2. **异步结果读屏可达**：进度/校验/对账/导出反馈等异步结果经 `role="status"` 或 aria-live 通道（现状 23 处：`role="status"` 21 + `aria-live="polite"` 2，成员 file:line 穷举在册于交互清单文档），不只视觉反馈——axe 不扫动态注入时机，新增点逐条核。
 3. **新浮层先登记后使用**：新建交互件/浮层/菜单前 grep `semantic-components.md`；命中即复用，不命中先登记（OVERLAY_SELECTOR 入册、z-index 按档位、关闭通道、e2e 锚命名、机检锚五要素）再写码。
 4. **壳 landmark 与窄视口**：单一 `<main>` 与 app.html `<title>` 兜底不删；新增顶层区块用 landmark 元素；新面板 ≤900/≤600 断点与 mobile 375 视口不横向断裂不丢内容（axe 双 project 扫描覆盖 aria 面，布局行为本条核对）。
 5. **表单/校验错误关联 + 判别符非显示串**：错误提示经 `aria-describedby` 或紧邻 `role="status"` 关联到输入框（设置中心 JSON 错误/挂载表单先例）；`data-*` 判别、each key、比较逻辑一律稳定标识符（data-mode 显示串判别已拆除，防回退锚在案）。

@@ -85,19 +85,51 @@
 
 信息按性质择通道，不发明第四条：
 
-| 通道 | 形态锚 | 适用 | 现状成员 |
+| 通道 | 形态锚 | 适用 | 现状成员（穷举见下方表 1/表 2） |
 |---|---|---|---|
 | **错误卡** | `.vv-error-card`（title/detail/meta/actions 四段，app.css:154-164） | 渲染失败/加载失败等阻断性错误 | core dispatcher `showErrorCard`（packages/vviewer-core/src/dispatch/errorRenderer.ts:41-52）+ `errorRenderer` 兜底渲染器（:71-82）+ svelte:boundary failed 片段（AppShell.svelte:1264-1273 复用 `.vv-error-*` 视觉 + 「重载」） |
-| **确认卡** | `.vv-dl-confirm`（role=alertdialog，DownloadConfirmCard.svelte:33）；`.vv-sc-confirm`（设置中心脏态条，z 31）；`.vv-storage-confirm`（危险确认，accent/danger 描边） | 不可逆/大代价动作前置确认 | 下载确认门（远端 >阈值 MB）；设置脏态关闭确认；存储清除/恢复出厂；`window.confirm` 轻确认五处（WorkspaceList 删除/重命名族、主题删除族——轻量删除类沿原生 confirm 形态） |
-| **状态条** | `.vv-statusbar`（role=status，ViewerPane.svelte:1263）；`.vv-toast`（zen 进入提示，z 60）；各面板内 `role="status"` 行 | 一次性非阻断反馈 | `showStatusNotice`（AppShell/serverConnect 出口）、`showZenToast`（AppShell.svelte:494-498）、gsearch `aria-live="polite"` 计数（GlobalSearchPanel.svelte:252）、下载进度卡（role=status 双态）、MountsManager 探测回显（role=status）、设置脏态提示（SettingsCenter.svelte:362） |
+| **确认卡** | `.vv-dl-confirm`（role=alertdialog，DownloadConfirmCard.svelte:33）；`.vv-sc-confirm`（设置中心脏态条，z 31）；`.vv-storage-confirm`（role=alertdialog 危险确认面板，StorageSection.svelte:271-275，accent/danger 描边） | 不可逆/大代价动作前置确认 | 组件卡三形态（下载确认门 / 设置脏态关闭确认 / 存储七分类清除与恢复出厂确认面板）+ 原生轻确认 8 处（表 2） |
+| **状态条** | `.vv-statusbar`（role=status，ViewerPane.svelte:1263）；`.vv-toast`（zen 进入提示，z 60，AppShell.svelte:1506 role=status）；各面板内 `role="status"` 行 | 一次性非阻断反馈 | `showStatusNotice`（AppShell/serverConnect 出口）+ `showZenToast`（AppShell.svelte:494-498）；读屏可达行 23 处穷举见表 1 |
+
+**表 1：读屏可达通道成员（`role="status"` 21 处 + `aria-live="polite"` 2 处；rg 2026-11-12 穷举，新增点同步登记本表）**
+
+| 成员（文件:行） | 语义 |
+|---|---|
+| ViewerPane.svelte:1263 | 状态栏（含引擎指示/通知面） |
+| AppShell.svelte:1506 | zen 进入 toast（`.vv-toast`） |
+| WorkspaceCreateModal.svelte:203 | 创建流提示（note） |
+| MetaPanel.svelte:312 | 导出结果回显 |
+| DownloadProgressCard.svelte:39 / :53 | 下载完成/进行中双态（另经 aria-label 双通道） |
+| GlobalSearchPanel.svelte:252 | 全局搜索计数（aria-live="polite"） |
+| QuickOpenPanel.svelte:164 | 快开状态行（aria-live="polite"） |
+| MountsManager.svelte:521 / :609 | 组① 挂载行探测回显 / 组② 直连探测回显 |
+| SettingsCenter.svelte:362 / :438 | 脏态提示 / JSON 视图校验警示 |
+| AppearanceSection.svelte:440 / :454 / :480 | 亮槽警示 / 暗槽警示 / 导入错误摘要 |
+| FontsSection.svelte:373 / :422 | 字体操作提示（note）/ 网络字体错误行 |
+| StorageSection.svelte:285 / :295 | 清除操作提示 / 用量统计中 |
+| AboutSection.svelte:96 / :174 / :190 | 版本不一致警示 / 用量行 / 持久化结果 |
+| LayoutSection.svelte:101 | 布局 zen 说明（note） |
+
+**表 2：原生轻确认成员（`window.confirm` 7 处 + 裸 `confirm(` 1 处，同义形态；rg 2026-11-12 穷举；确认文案一律走 t()，CJK lint 静态属性/字面量臂拦非 t() 面）**
+
+| 成员（文件:行） | 确认动作 |
+|---|---|
+| MountsManager.svelte:354 | 挂载记录删除（含异地提示拼合） |
+| MountsManager.svelte:410 | 本机授权来源清除 |
+| TabBar.svelte:206 | 远端文件另存为阈值确认（saveAsTab confirm 回调） |
+| FileTree.svelte:67 | 树源行移除（裸 `confirm(` 形态，语义同 window.confirm） |
+| WorkspaceList.svelte:56 | 工作区删除 |
+| AppearanceSection.svelte:176 | 导入代码主题删除 |
+| AppearanceSection.svelte:244 | 导入图标主题删除 |
+| FontsSection.svelte:208 | 网络字体删除 |
 
 **规则**：
 
-1. 阻断性错误走错误卡；一次性告知走状态条/toast；危险动作走确认卡——三类不得互相替代（错误不得静默降级为 toast，确认不得降级为 toast）。
+1. 阻断性错误走错误卡；一次性告知走状态条/toast；危险动作走确认卡——三类不得互相替代（错误不得静默降级为 toast，确认不得降级为 toast）。原生 `window.confirm` 仅限表 2 已登记的轻量删除/代价类动作，新组件卡类确认走组件形态不新增原生 confirm。
 2. 状态条/toast 文案为**事件时刻取值**（历史提示不随 locale 回写，见 frontend-conventions.md 已知边界 ③⑤）。
-3. 异步结果必须对读屏可达：容器 `role="status"` 或 aria-live（现状九处先例）；下载进度另经 `aria-label` 双通道（DownloadProgressCard.svelte:39/53/60 注释）。
+3. 异步结果必须对读屏可达：容器 `role="status"` 或 aria-live（成员以表 1 为穷举单源，新增点同步登记）；下载进度另经 `aria-label` 双通道（DownloadProgressCard.svelte:39/53）。
 
-**机检载体**：role/aria 结构经 axe 面板态扫描（A11Y-02~09）与 valid-compile；文案经 CJK 三形态 lint（静态属性值臂拦非 t() 的 aria）；`role="status"` 的**新增点核对**落 PR 必查清单第 2 条（axe 不扫动态注入时机）。
+**机检载体**：role/aria 结构经 axe 面板态扫描（A11Y-02~09）与 valid-compile；文案经 CJK 三形态 lint（静态属性值臂拦非 t() 的 aria）；表 1/表 2 的**新增点核对**落 PR 必查清单第 2 条（axe 不扫动态注入时机）。
 
 ## 5. 焦点环 token
 
@@ -131,4 +163,4 @@
 ## 附：证据清单
 
 - 实读：`apps/web/src/lib/AppShell.svelte:649-664`（OVERLAY_SELECTOR 现值 11 类）、`:1264-1273`（boundary failed 片段）、`:1652-1773`（抽屉/toast/zen-exit z 值）、`apps/web/src/app.css:104/154-164/168/195/329/362/392-397/420-425/474-484/549-552/579/650/680/799`、`packages/vviewer-core/src/dispatch/errorRenderer.ts`（全文，内联样式 :22-30）、`DownloadConfirmCard.svelte:33`、`TabBarMenu.svelte:246-262`、`GlobalSearchPanel.svelte:252`、`DownloadProgressCard.svelte:39-60`、`packages/vviewer-markdown/src/markdown.css:78`。
-- rg 实测（本会话运行）：`z-index` 全仓（apps/web/src + packages，值域 1/5/20/25/30/31/32/50/60/90/100 全档定位）、`aria-live|role="status"` 九处、`svelte-ignore` 依据注释五处、`OVERLAY_SELECTOR` 消费面（mountsManagerUi.test.ts:143-147 源码锚）。
+- rg 实测（本会话运行）：`z-index` 全仓（apps/web/src + packages，值域 1/5/20/25/30/31/32/50/60/90/100 全档定位）；`role="status"` 21 处 DOM 点（rg 22 行含 DownloadProgressCard.svelte:60 注释引用行）+ `aria-live="polite"` 2 处（表 1 穷举口径）；`window.confirm` 7 处 + 裸 `confirm(` 1 处（表 2 穷举口径）；`svelte-ignore a11y-*` 依据注释五处；`OVERLAY_SELECTOR` 消费面（mountsManagerUi.test.ts:143-147 源码锚）。
