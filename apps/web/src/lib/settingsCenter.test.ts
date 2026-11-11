@@ -6,6 +6,8 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+// i18n 目录（Task 4 域 A 抽取）：融合菜单设置条目锚的对目录值双锁（对齐其余锚文件口径）
+import { messages as zhTabs } from './i18n/catalogs/zh-CN/tabs';
 
 // vitest 会转译 import.meta.url（metaStore.test 同款处理）：双 cwd 兼容根/apps/web
 function readSrc(relFromWeb: string): string {
@@ -351,7 +353,8 @@ describe('TopBar 退役宿主迁移（顶栏退役 Task 3 + 标签栏收敛 Task
 
   it('⚙ 入口走 onsettings 回调（宿主 TabBarMenu 融合菜单，props 声明；设置项 onclick 体内经 menuOpen=false 后回调）', () => {
     expect(actions).toMatch(/onsettings\(\): void/);
-    // 文案入 i18n 目录（Task 4 域 A 抽取）：源码锚改指 t() key，zh 值逐字节等价由目录承接
+    // 文案入 i18n 目录（Task 4 域 A 抽取）：源码锚改指 t() key + 目录 zh 值双锁
     expect(actions).toMatch(/aria-label=\{t\('tabs\.menu\.settings'\)\}[\s\S]{0,200}onsettings\(\)/);
+    expect(zhTabs['tabs.menu.settings']).toBe('设置');
   });
 });
