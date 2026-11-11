@@ -24,6 +24,7 @@ import type {
   GitFileLogResult,
   GitOpRequest,
   GitStatus,
+  GitWorkerErrorCode,
   GitWorkerIn,
   GitWorkerOut
 } from './gitClient';
@@ -95,8 +96,22 @@ function repoCache(repoDir: string): Record<string, unknown> {
 }
 
 function canceled(): Error {
-  const e = new Error('git 请求已取消');
+  const e = codedError('canceled', 'git request cancelled');
   e.name = 'GitCanceled';
+  return e;
+}
+
+/**
+ * 错误码化构造（Worker 错误码化强制面，Task 9）：Worker 内读不到主线程 locale 且
+ * 零 i18n import——面向用户的错误以「稳定错误码 + 参数」上行（GitWorkerErrorCode，
+ * 结构化克隆安全），诊断 message 一律英文（仅日志/调试面，不上屏——主线程按码映射
+ * git.* 键翻译，见 gitClient.WORKER_ERROR_KEYS）。code 挂 e.code 与 fs 适配层的
+ * ENOENT 透传同字段互斥（ENOENT 码是 isogit 探测语义，错误码是大写枚举值，不冲突）。
+ */
+function codedError(code: GitWorkerErrorCode, message: string, params?: Record<string, string>): Error {
+  const e = new Error(message);
+  (e as { code?: string }).code = code;
+  if (params !== undefined) (e as { params?: Record<string, string> }).params = params;
   return e;
 }
 
@@ -139,13 +154,13 @@ function makeFs(requestId: number, post: (m: GitWorkerOut) => void): { promises:
     if (hit) return hit;
     const r = await ask('read', key);
     if ('error' in r) throw frameError(r);
-    if (!('data' in r)) throw new Error('fs read 回帧缺 data');
+    if (!('data' in r)) throw codedError('bad-fs-reply-read', 'fs read reply missing data');
     if (cacheableObjectPath(key)) objectBytes.set(key, r.data);
     return r.data;
   };
   const decoder = new TextDecoder();
   const writeBan = (name: string) => async (): Promise<never> => {
-    throw new Error(`git fs 只读承诺：worker 侧 ${name} 不可用`);
+    throw codedError('fs-write-banned', `git fs read-only promise: worker-side ${name} unavailable`, { name });
   };
   return {
     promises: {
@@ -158,7 +173,9 @@ function makeFs(requestId: number, post: (m: GitWorkerOut) => void): { promises:
       if (encoding === undefined || encoding === null) return raw;
       // isogit 只产 utf8/无编码两形（1.44.8 实测）；未知 encoding 硬失败，与主线程
       // 适配层同款行为（评审 Minor④ 一致性），避免静默按原始字节歧义
-      throw new Error(`git fs readFile 不支持的 encoding: ${String(encoding)}`);
+      throw codedError('fs-encoding', `git fs readFile unsupported encoding: ${String(encoding)}`, {
+        encoding: String(encoding)
+      });
     },
     writeFile: writeBan('writeFile'),
     mkdir: writeBan('mkdir'),
@@ -168,7 +185,7 @@ function makeFs(requestId: number, post: (m: GitWorkerOut) => void): { promises:
     stat: async (path: string) => {
       const r = await ask('stat', canonPath(path));
       if ('error' in r) throw frameError(r);
-      if (!('stat' in r)) throw new Error('fs stat 回帧缺 stat');
+      if (!('stat' in r)) throw codedError('bad-fs-reply-stat', 'fs stat reply missing stat');
       const { type, size } = r.stat;
       return {
         isFile: () => type === 'file',
@@ -181,7 +198,7 @@ function makeFs(requestId: number, post: (m: GitWorkerOut) => void): { promises:
     lstat: async (path: string) => {
       const r = await ask('stat', canonPath(path));
       if ('error' in r) throw frameError(r);
-      if (!('stat' in r)) throw new Error('fs stat 回帧缺 stat');
+      if (!('stat' in r)) throw codedError('bad-fs-reply-stat', 'fs stat reply missing stat');
       const { type, size } = r.stat;
       return {
         isFile: () => type === 'file',
@@ -194,13 +211,13 @@ function makeFs(requestId: number, post: (m: GitWorkerOut) => void): { promises:
     readdir: async (path: string): Promise<string[]> => {
       const r = await ask('readdir', canonPath(path));
       if ('error' in r) throw frameError(r);
-      if (!('entries' in r)) throw new Error('fs readdir 回帧缺 entries');
+      if (!('entries' in r)) throw codedError('bad-fs-reply-entries', 'fs readdir reply missing entries');
       return r.entries;
     },
     readlink: async (path: string) => {
       const r = await ask('readlink', canonPath(path));
       if ('error' in r) throw frameError(r);
-      throw new Error('git fs readlink 不可用');
+      throw codedError('fs-readlink', 'git fs readlink unavailable');
     }
     }
   };
@@ -397,7 +414,7 @@ async function handleOp(isoGit: IsoGit, msg: GitOpRequest, fs: { promises: Promi
     }
     default: {
       const k: string = (msg as { kind: string }).kind;
-      throw new Error(`未知 git 请求 kind: ${k}`);
+      throw codedError('unknown-op', `unknown git request kind: ${k}`, { kind: k });
     }
   }
 }
@@ -414,7 +431,18 @@ async function runOp(msg: GitOpRequest, post: (m: GitWorkerOut) => void): Promis
     post({ kind: 'result', requestId: msg.requestId, op: msg.kind, payload });
   } catch (e) {
     if (abortedOps.has(msg.requestId)) return;
-    post({ kind: 'error', requestId: msg.requestId, op: msg.kind, error: e instanceof Error ? e.message : String(e) });
+    // 错误码化上行（Task 9）：codedError 挂的 code/params 随帧回传（结构化克隆
+    // 安全），主线程按 WORKER_ERROR_KEYS 映射翻译；无码错误（isogit 原生等）
+    // message 原样上行
+    const err = e as { code?: unknown; params?: Record<string, string> | undefined } | null;
+    post({
+      kind: 'error',
+      requestId: msg.requestId,
+      op: msg.kind,
+      error: e instanceof Error ? e.message : String(e),
+      ...(typeof err?.code === 'string' ? { code: err.code as GitWorkerErrorCode } : {}),
+      ...(err?.params !== undefined ? { params: err.params } : {})
+    });
   } finally {
     activeOps.delete(msg.requestId);
     abortedOps.delete(msg.requestId);

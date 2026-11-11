@@ -26,6 +26,7 @@
 // 无 $app 依赖的纯模块（markdownImages.ts:2 先例——vitest 直测的解析前提）：SSR
 // 守卫以 window 存在性替代 $app/env 的 browser（ensureGitClient 内，见该处注释）。
 import type { TreeStore } from '@bhxch/vviewer-core';
+import { translate as t, type MessageKey } from '../i18n/core';
 import { GitFsAdapter } from './gitFs';
 
 // ---------- 结果形状（T2/T3 消费面） ----------
@@ -77,6 +78,22 @@ export interface GitBlobAtResult {
 
 export type GitOpKind = 'probe-head' | 'last-commit' | 'status' | 'blame' | 'file-log' | 'blob-at';
 
+/**
+ * worker 内错误的稳定错误码（Worker 错误码化强制面，Task 9）：Worker 内读不到主线程
+ * locale 且零 i18n import——worker 产生的面向用户错误以「码 + 参数」上行（诊断
+ * message 一律英文，仅日志/调试面），主线程按 WORKER_ERROR_KEYS 映射 git.* 键以
+ * 当下 locale 翻译（事件时刻取值快照）。isogit 原生错误无码，message 原样上行。
+ */
+export type GitWorkerErrorCode =
+  | 'canceled'
+  | 'fs-encoding'
+  | 'fs-readlink'
+  | 'fs-write-banned'
+  | 'bad-fs-reply-read'
+  | 'bad-fs-reply-stat'
+  | 'bad-fs-reply-entries'
+  | 'unknown-op';
+
 export type GitOpRequest =
   | { kind: 'probe-head'; requestId: number; repoDir: string }
   | { kind: 'last-commit'; requestId: number; repoDir: string; filepath: string }
@@ -91,10 +108,17 @@ export type GitWorkerIn =
   | { kind: 'cancel'; requestId: number }
   | { kind: 'fs-result'; requestId: number; fsId: number } & FsReplyPayload;
 
-/** worker → 主 帧：结果 / 错误 / fs 反向请求。 */
+/** worker → 主 帧：结果 / 错误（带码帧携 code/params 供主线程翻译）/ fs 反向请求。 */
 export type GitWorkerOut =
   | { kind: 'result'; requestId: number; op: GitOpKind; payload: unknown }
-  | { kind: 'error'; requestId: number; op: GitOpKind; error: string }
+  | {
+      kind: 'error';
+      requestId: number;
+      op: GitOpKind;
+      error: string;
+      code?: GitWorkerErrorCode;
+      params?: Record<string, string>;
+    }
   | { kind: 'fs'; requestId: number; fsId: number; op: 'read' | 'readdir' | 'stat' | 'readlink'; path: string };
 
 /** fs 反向请求的回帧载荷（与 kind:'fs-result' 同帧发送；error 与成功载荷互斥）。
@@ -113,9 +137,42 @@ interface Pending {
   cleanup: () => void;
 }
 
+/**
+ * worker error 帧错误码 → git.* 目录键（Task 9 Worker 错误码化）：码集合与
+ * GitWorkerErrorCode 全等（编译期 Record 锁），值域首段恒 'git'。同值同键复用
+ * （Task 4 先例）：fs-encoding/fs-readlink 码映射到 gitFs 主线程同串键。
+ */
+const WORKER_ERROR_KEYS: Record<GitWorkerErrorCode, MessageKey> = {
+  canceled: 'git.canceled',
+  'fs-encoding': 'git.fs.encoding',
+  'fs-readlink': 'git.fs.readlinkUnavailable',
+  'fs-write-banned': 'git.worker.fsWriteBanned',
+  'bad-fs-reply-read': 'git.worker.badFsReplyRead',
+  'bad-fs-reply-stat': 'git.worker.badFsReplyStat',
+  'bad-fs-reply-entries': 'git.worker.badFsReplyEntries',
+  'unknown-op': 'git.worker.unknownOp'
+};
+
+/** t 的松散签名（Task 7 coreTranslateLoose 先例）：键来自 WORKER_ERROR_KEYS 联合、
+ *  参数为 worker 上行的结构化克隆 Record——占位符与键的逐 key 对齐由目录聚合机检
+ *  ④（zh/en 占位符相等）与本映射表的键值对锁死。 */
+type LooseT = (key: MessageKey, params?: Record<string, string>) => string;
+const tLoose = t as unknown as LooseT;
+
+/**
+ * worker error 帧 → reject Error：带码帧按 WORKER_ERROR_KEYS 映射 git.* 键以当下
+ * locale 翻译（事件时刻取值，Task 4 statusNotice 同口径快照）；无码帧（isogit
+ * 原生错误）message 原样上行（英文，外部库内容）。
+ */
+function workerErrorOf(msg: Extract<GitWorkerOut, { kind: 'error' }>): Error {
+  const key = msg.code !== undefined ? WORKER_ERROR_KEYS[msg.code] : undefined;
+  if (key !== undefined) return new Error(tLoose(key, msg.params));
+  return new Error(msg.error);
+}
+
 export class GitCanceledError extends Error {
   constructor() {
-    super('git 请求已取消');
+    super(t('git.canceled'));
     this.name = 'GitCanceled';
   }
 }
@@ -149,15 +206,20 @@ export class GitClient {
       if (!p) return; // 已取消请求的迟到帧：安全落空（骨架同 outline 通道）
       this.settle(msg.requestId);
       if (msg.kind === 'result') p.resolve(msg.payload);
-      else p.reject(new Error(msg.error));
+      else p.reject(workerErrorOf(msg));
     };
     // worker 脚本 404/MIME 异常/运行期崩溃：onerror 后不再有回包，统一致命收敛
     this.worker.onerror = (ev: ErrorEvent) => {
-      const file = ev.filename ? `（${ev.filename}）` : '';
-      this.failWorker(`worker 错误：${ev.message || '脚本加载失败'}${file}`);
+      const file = ev.filename ? t('git.client.errorFile', { file: ev.filename }) : '';
+      this.failWorker(
+        t('git.client.workerError', {
+          message: ev.message || t('git.client.scriptLoadFailed'),
+          file
+        })
+      );
     };
     this.worker.onmessageerror = () => {
-      this.failWorker('worker 消息反序列化失败（onmessageerror）');
+      this.failWorker(t('git.client.msgDeserializeFailed'));
     };
   }
 
@@ -271,7 +333,7 @@ export class GitClient {
     signal?: AbortSignal
   ): Promise<unknown> {
     if (this.disposed) return Promise.reject(new GitCanceledError());
-    if (this.dead) return Promise.reject(new Error(`git worker 不可用：${this.deadReason}`));
+    if (this.dead) return Promise.reject(new Error(t('git.client.unavailable', { reason: this.deadReason })));
     if (signal?.aborted) return Promise.reject(new GitCanceledError());
     const id = this.nextId++;
     // 供数身份随请求捕获（冻结）：适配器持传入 store + repoDir 前缀映射（无状态，
@@ -292,7 +354,7 @@ export class GitClient {
       // 永不落空（评审 Minor③ 泄漏面）
       if (!this.safePost(build(id))) {
         this.settle(id);
-        reject(new Error('git worker 不可用：postMessage 失败（worker 已终止？）'));
+        reject(new Error(t('git.client.unavailablePost')));
       }
     });
   }
@@ -316,8 +378,8 @@ export class GitClient {
     if (this.dead || this.disposed) return;
     this.dead = true;
     this.deadReason = reason;
-    console.error(`[vviewer] git worker 失败：${reason}（下次 ensureGitClient 重建）`);
-    const err = new Error(`git worker 不可用：${reason}`);
+    console.error(`[vviewer] git worker failed: ${reason} (next ensureGitClient rebuilds it)`);
+    const err = new Error(t('git.client.unavailable', { reason }));
     for (const [, p] of [...this.pending]) p.reject(err);
     this.pending.clear();
     this.opAdapters.clear();
@@ -352,7 +414,7 @@ export class GitClient {
     if (!adapter) {
       // 每请求自建适配器，「无登记」只可能是迟到/未知 requestId 的 fs 帧
       //（请求已 settle 除名或 worker 死亡清表后到达）
-      throw new Error(`fs 供数无登记：请求已结算或未知（requestId=${msg.requestId}）`);
+      throw new Error(t('git.client.fsNoAdapter', { id: msg.requestId }));
     }
     if (msg.op === 'read') {
       // fs 'read' 恒为原始字节：encoding 由 worker 侧 stub 消化（缓存/解码单点）
@@ -366,7 +428,7 @@ export class GitClient {
       return { stat: { type: st.isFile() ? 'file' : 'dir', size: st.size } };
     }
     await adapter.readlink(msg.path); // 恒 throw → error 回帧
-    return { error: 'git fs readlink 不可用' };
+    return { error: t('git.fs.readlinkUnavailable') };
   }
 
   /** 投递帧；false = worker 已终止等 postMessage 失败（调用方各自兜底结算）。 */

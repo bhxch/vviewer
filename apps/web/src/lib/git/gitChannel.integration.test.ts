@@ -13,6 +13,7 @@ import { deflateSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { TreeNode, TreeStore } from '@bhxch/vviewer-core';
 import { GitClient, type GitWorkerIn, type GitWorkerOut } from './gitClient';
+import { UNCOMMITTED_SHA } from './gitDiff';
 import { serveGitWorker } from './gitWorker';
 
 const enc = new TextEncoder();
@@ -271,10 +272,11 @@ describe('T3 操作：file-log / blob-at / blame（真 isogit + 四提交删除�
     expect(r.truncated).toBe(false);
     expect(r.lines).toHaveLength(1);
     expect(r.lines[0]).toMatchObject({ sha: commit4.oid, line: 0, numLines: 1, author: 'T' });
-    // 工作区改写（归一后不等）：未提交哨兵
+    // 工作区改写（归一后不等）：未提交哨兵（Task 9 域 F：author 同为空串哨兵上行，
+    // 显示值由 ViewerPane 特判 git.blame.uncommitted——worker 图零 i18n）
     const dirty = await client.blame('', 'a.txt', enc.encode('reborn content more\n'), store);
-    expect(dirty.lines[0]!.sha).toBe('');
-    expect(dirty.lines[0]!.author).toBe('（未提交）');
+    expect(dirty.lines[0]!.sha).toBe(UNCOMMITTED_SHA);
+    expect(dirty.lines[0]!.author).toBe(UNCOMMITTED_SHA);
     // CRLF 工作区字节归一后与 HEAD blob 同域：归属保持 HEAD 提交（行号域与渲染
     // data-line 对齐的集成锚）
     const crlf = await client.blame('', 'a.txt', enc.encode('reborn content\r\n'), store);

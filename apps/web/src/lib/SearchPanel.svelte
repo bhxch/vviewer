@@ -6,6 +6,7 @@
   // 全局面板 toggleOption 惯例）。实例不带 search（如图片/音视频渲染器）时显示
   // "此视图不支持搜索"。
   import type { RenderedInstance, SearchMatch } from '@bhxch/vviewer-core';
+  import { t } from './i18n/index.svelte';
 
   /** search 契约的 caseSensitive 扩展（BUG-23；结构化收窄，不动 core 类型）+ 视图
    * 切换订阅（BUG-44：html 渲染器内部重挂载切换源码/渲染视图，可达性随视图变化） */
@@ -153,14 +154,14 @@
 <!-- role 用 dialog（Esc 关闭的浮层面板，同 WorkspaceCreateModal 等 5 处先例）：
      search 属 landmark 非交互角色，容器 keydown 委托会触发 a11y 告警；dialog +
      tabindex=-1（不进 Tab 序，键盘行为不变）即仓库统一的浮层面板 a11y 模式 -->
-<div class="vv-search-panel" role="dialog" aria-label="文件内搜索" tabindex="-1" bind:this={panelEl} onkeydown={onpanelkeydown}>
+<div class="vv-search-panel" role="dialog" aria-label={t('search.infileAria')} tabindex="-1" bind:this={panelEl} onkeydown={onpanelkeydown}>
   <input
     bind:this={inputEl}
     bind:value={query}
     class="vv-search-input"
     type="text"
-    placeholder="搜索（Enter 下一个）"
-    aria-label="搜索内容"
+    placeholder={t('search.infilePlaceholder')}
+    aria-label={t('search.infileInputAria')}
     oninput={oninput}
     onkeydown={oninputkeydown}
   />
@@ -169,19 +170,19 @@
     class="vv-search-btn"
     class:active={caseSensitive}
     aria-pressed={caseSensitive}
-    title="区分大小写"
+    title={t('search.caseTitle')}
     onclick={toggleCase}>Aa</button
   >
   <span class="vv-search-count">
     {#if !instance?.search}
-      此视图不支持搜索
+      {t('search.unsupportedView')}
     {:else if total === 0}
-      无结果
+      {t('search.noResults')}
     {:else}
       {current}/{total}
     {/if}
   </span>
-  <button type="button" class="vv-search-btn" aria-label="上一个" title="上一个（Shift+Enter）" onclick={() => step(-1)}>↑</button>
-  <button type="button" class="vv-search-btn" aria-label="下一个" title="下一个（Enter）" onclick={() => step(1)}>↓</button>
-  <button type="button" class="vv-search-btn" aria-label="关闭搜索" title="关闭（Esc）" onclick={close}>✕</button>
+  <button type="button" class="vv-search-btn" aria-label={t('search.prevAria')} title={t('search.prevTitle')} onclick={() => step(-1)}>↑</button>
+  <button type="button" class="vv-search-btn" aria-label={t('search.nextAria')} title={t('search.nextTitle')} onclick={() => step(1)}>↓</button>
+  <button type="button" class="vv-search-btn" aria-label={t('search.closeSearchAria')} title={t('search.closeTitle')} onclick={close}>✕</button>
 </div>

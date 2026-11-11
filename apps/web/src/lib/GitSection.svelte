@@ -22,6 +22,7 @@
   import { BLAME_MAX_COMMITS, LOG_MAX_ENTRIES, normalizeBlobText, splitLines, unifiedDiff } from './git/gitDiff';
   import { calendarTime, relativeDate, repoRelPath, subjectOf } from './git/gitUi';
   import GitDiffView, { type GitDiffUiState } from './GitDiffView.svelte';
+  import { t, type MessageKey } from './i18n/index.svelte';
 
   let {
     repoDir,
@@ -70,18 +71,21 @@
   let expandedLog = $state<number | null>(null);
   let commitDiffs = $state<Record<number, GitDiffUiState>>({});
 
-  const STATUS_LABELS: Record<GitStatus, string> = {
-    clean: '无改动',
-    modified: '已修改',
-    untracked: '未跟踪'
-  };
+  /** 状态三态 → 目录键（显示值 t() 模板派生，locale 切换即重渲）。as const
+   *  satisfies 收窄字面量联合（Task 7 FOREIGN_LABEL_KEYS 同口径）：键无占位符，
+   *  t() 空元组签名经 Placeholders 分布推得 never 保持。 */
+  const STATUS_KEYS = {
+    clean: 'git.status.clean',
+    modified: 'git.status.modified',
+    untracked: 'git.status.untracked'
+  } as const satisfies Record<GitStatus, MessageKey>;
 
   /** diff 折叠钮模式标注（spec §3.3 规则的 UI 面）：未跟踪提示 / 工作区 vs HEAD /
    *  HEAD vs HEAD^（含状态不可用但有历史的回落）。 */
   const diffLabel = $derived.by(() => {
     if (phase.s !== 'ready') return '';
-    if (phase.commit === null) return '（未跟踪文件无 diff）';
-    return phase.status === 'modified' ? '（工作区 vs HEAD）' : '（末次提交 HEAD^ vs HEAD）';
+    if (phase.commit === null) return t('git.diffLabel.untracked');
+    return phase.status === 'modified' ? t('git.diffLabel.worktreeVsHead') : t('git.diffLabel.headVsParent');
   });
 
   /** 迟到上行守卫：effect 重拉/手动重试/卸载都推进代数，旧 load 的回包不再写
@@ -129,7 +133,7 @@
     workBytes = null;
     const ensure = ensureGitClient();
     if (ensure === null) {
-      phase = { s: 'error', message: 'git 客户端不可用（非浏览器环境）' };
+      phase = { s: 'error', message: t('git.clientUnavailableSsr') };
       return;
     }
     let client: Awaited<NonNullable<ReturnType<typeof ensureGitClient>>>;
@@ -194,7 +198,7 @@
   function startDiff(): Promise<void> {
     const ensure = ensureGitClient();
     if (ensure === null) {
-      diffState = { s: 'error', message: 'git 客户端不可用' };
+      diffState = { s: 'error', message: t('git.clientUnavailable') };
       return Promise.resolve();
     }
     return ensure.then(
@@ -217,7 +221,7 @@
     diffAC = ac;
     const commit = phase.s === 'ready' ? phase.commit : null;
     if (commit === null) {
-      diffState = { s: 'empty', note: '未跟踪文件无 diff（HEAD 树无此路径）' };
+      diffState = { s: 'empty', note: t('git.diffEmpty.untracked') };
       return;
     }
     if (phase.s === 'ready' && phase.status === 'modified' && workBytes !== null) {
@@ -226,7 +230,7 @@
         const head = await client.blobAt(rd, 'HEAD', relPath, st, ac.signal);
         if (stale()) return;
         if (head === null) {
-          diffState = { s: 'empty', note: 'HEAD 树无此路径' };
+          diffState = { s: 'empty', note: t('git.diffEmpty.noPath') };
           return;
         }
         diffState = {
@@ -251,7 +255,7 @@
       ]);
       if (stale()) return;
       if (head === null) {
-        diffState = { s: 'empty', note: 'HEAD 树无此路径' };
+        diffState = { s: 'empty', note: t('git.diffEmpty.noPath') };
         return;
       }
       diffState = {
@@ -312,7 +316,7 @@
     commitDiffs = { ...commitDiffs, [i]: { s: 'loading' } };
     const ensure = ensureGitClient();
     if (ensure === null) {
-      commitDiffs = { ...commitDiffs, [i]: { s: 'error', message: 'git 客户端不可用' } };
+      commitDiffs = { ...commitDiffs, [i]: { s: 'error', message: t('git.clientUnavailable') } };
       return;
     }
     try {
@@ -323,7 +327,7 @@
       ]);
       if (stale()) return;
       if (target === null) {
-        commitDiffs = { ...commitDiffs, [i]: { s: 'empty', note: '该提交树内无此文件' } };
+        commitDiffs = { ...commitDiffs, [i]: { s: 'empty', note: t('git.diffEmpty.notInCommit') } };
         return;
       }
       commitDiffs = {
@@ -364,42 +368,42 @@
   });
 </script>
 
-<section class="vv-git" aria-label="Git 信息">
+<section class="vv-git" aria-label={t('git.title')}>
   <h2 class="vv-git-title">Git</h2>
   {#if phase.s === 'loading'}
-    <p class="vv-git-note">正在读取 git 信息…</p>
+    <p class="vv-git-note">{t('git.loading')}</p>
   {:else if phase.s === 'error'}
     <p class="vv-git-error">{phase.message}</p>
-    <button type="button" class="vv-git-retry" onclick={retry}>重试</button>
+    <button type="button" class="vv-git-retry" onclick={retry}>{t('git.retry')}</button>
   {:else}
     <dl class="vv-git-list">
       <div class="vv-git-row">
-        <dt>分支</dt>
-        <dd>{phase.headOk ? (phase.branch ?? '（游离 HEAD）') : '不可用'}</dd>
+        <dt>{t('git.field.branch')}</dt>
+        <dd>{phase.headOk ? (phase.branch ?? t('git.detachedHead')) : t('git.unavailable')}</dd>
       </div>
       <div class="vv-git-row">
-        <dt>状态</dt>
+        <dt>{t('git.field.status')}</dt>
         <dd>
-          {#if phase.status !== null}<span class="vv-git-dot vv-git-dot-{phase.status}" aria-hidden="true"></span>{STATUS_LABELS[phase.status]}{:else}不可用{/if}
+          {#if phase.status !== null}<span class="vv-git-dot vv-git-dot-{phase.status}" aria-hidden="true"></span>{t(STATUS_KEYS[phase.status])}{:else}{t('git.unavailable')}{/if}
         </dd>
       </div>
       {#if phase.commit}
-        <div class="vv-git-row"><dt>末次提交</dt><dd class="vv-git-mono">{phase.commit.oid.slice(0, 7)}</dd></div>
-        <div class="vv-git-row"><dt>作者</dt><dd>{phase.commit.author}</dd></div>
-        <div class="vv-git-row"><dt>时间</dt><dd>{relativeDate(phase.commit.timestamp)}</dd></div>
-        <div class="vv-git-row"><dt>说明</dt><dd>{subjectOf(phase.commit.message)}</dd></div>
+        <div class="vv-git-row"><dt>{t('git.field.lastCommit')}</dt><dd class="vv-git-mono">{phase.commit.oid.slice(0, 7)}</dd></div>
+        <div class="vv-git-row"><dt>{t('git.field.author')}</dt><dd>{phase.commit.author}</dd></div>
+        <div class="vv-git-row"><dt>{t('git.field.time')}</dt><dd>{relativeDate(phase.commit.timestamp)}</dd></div>
+        <div class="vv-git-row"><dt>{t('git.field.subject')}</dt><dd>{subjectOf(phase.commit.message)}</dd></div>
       {:else}
-        <div class="vv-git-row"><dt>末次提交</dt><dd>无（未跟踪文件）</dd></div>
+        <div class="vv-git-row"><dt>{t('git.field.lastCommit')}</dt><dd>{t('git.noCommit.untracked')}</dd></div>
       {/if}
     </dl>
     {#if phase.commit !== null}
       <!-- blame 说明行（spec §4）：hover 即查提示 + 200 截断标注（仅对有历史的文件） -->
-      <p class="vv-git-note vv-git-blame-hint">悬停代码行可查看提交归属；文件历史超 {BLAME_MAX_COMMITS} 提交仅最近 {BLAME_MAX_COMMITS} 参与归属。</p>
+      <p class="vv-git-note vv-git-blame-hint">{t('git.blameHint', { limit: BLAME_MAX_COMMITS })}</p>
     {/if}
     <!-- diff 折叠区（spec §3.3）：默认收起，展开即拉；模式标注随状态三态 -->
     <div class="vv-git-fold">
       <button type="button" class="vv-git-fold-btn" aria-expanded={diffOpen} onclick={toggleDiff}>
-        <span class="vv-git-fold-caret" aria-hidden="true">{diffOpen ? '▾' : '▸'}</span>差异{diffLabel}
+        <span class="vv-git-fold-caret" aria-hidden="true">{diffOpen ? '▾' : '▸'}</span>{t('git.diffLabel.base')}{diffLabel}
       </button>
       {#if diffOpen}
         <div class="vv-git-fold-body">
@@ -409,13 +413,13 @@
     </div>
     <!-- 文件历史（spec §3.4）：≤50 条列表；点击条目展开完整详情 + 逐提交 diff -->
     <div class="vv-git-log">
-      <h3 class="vv-git-log-title">文件历史</h3>
+      <h3 class="vv-git-log-title">{t('git.log.title')}</h3>
       {#if logPhase.s === 'loading'}
-        <p class="vv-git-note">正在加载历史…</p>
+        <p class="vv-git-note">{t('git.log.loading')}</p>
       {:else if logPhase.s === 'error'}
         <p class="vv-git-error">{logPhase.message}</p>
       {:else if logPhase.entries.length === 0}
-        <p class="vv-git-note">无历史（未跟踪文件）</p>
+        <p class="vv-git-note">{t('git.log.empty')}</p>
       {:else}
         <ul class="vv-git-log-list">
           {#each logPhase.entries as entry, i (entry.oid)}
@@ -429,9 +433,9 @@
               {#if expandedLog === i}
                 <dl class="vv-git-list vv-git-log-detail">
                   <div class="vv-git-row"><dt>hash</dt><dd class="vv-git-mono">{entry.oid}</dd></div>
-                  <div class="vv-git-row"><dt>作者</dt><dd>{entry.author}（{calendarTime(entry.timestamp)}）</dd></div>
-                  <div class="vv-git-row"><dt>提交者</dt><dd>{entry.committer ?? entry.author}（{calendarTime(entry.committerTimestamp ?? entry.timestamp)}）</dd></div>
-                  <div class="vv-git-row"><dt>说明</dt><dd class="vv-git-log-msg">{entry.message}</dd></div>
+                  <div class="vv-git-row"><dt>{t('git.field.author')}</dt><dd>{t('git.log.authorTime', { author: entry.author, time: calendarTime(entry.timestamp) })}</dd></div>
+                  <div class="vv-git-row"><dt>{t('git.field.committer')}</dt><dd>{t('git.log.authorTime', { author: entry.committer ?? entry.author, time: calendarTime(entry.committerTimestamp ?? entry.timestamp) })}</dd></div>
+                  <div class="vv-git-row"><dt>{t('git.field.subject')}</dt><dd class="vv-git-log-msg">{entry.message}</dd></div>
                 </dl>
                 <div class="vv-git-log-diff">
                   <GitDiffView state={commitDiffs[i] ?? { s: 'idle' }} />
@@ -441,7 +445,7 @@
           {/each}
         </ul>
         {#if logPhase.truncated}
-          <p class="vv-git-note">仅显示最近 {LOG_MAX_ENTRIES} 条</p>
+          <p class="vv-git-note">{t('git.log.truncated', { n: LOG_MAX_ENTRIES })}</p>
         {/if}
       {/if}
     </div>

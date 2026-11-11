@@ -567,7 +567,9 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
       x: pos.x,
       y: pos.y,
       below: pos.below,
-      author: g.author,
+      // 未提交哨兵行（Task 9）：blameWalk 在 worker 内产 author=''（原「（未提交）」
+      // 字面量随 Worker 错误码化同面撤出 worker 图），显示值由本侧特判现 t()
+      author: g.sha === UNCOMMITTED_SHA ? t('git.blame.uncommitted') : g.author,
       date: g.sha === UNCOMMITTED_SHA ? t('viewer.blame.uncommitted') : relativeDate(g.timestamp),
       subject: subjectOf(g.message),
       sha: g.sha === UNCOMMITTED_SHA ? '' : g.sha.slice(0, 7),

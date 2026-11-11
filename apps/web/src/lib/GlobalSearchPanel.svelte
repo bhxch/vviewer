@@ -7,10 +7,11 @@
   import type { GrepMatch } from '@bhxch/vviewer-core';
   import { matchRanges } from '@bhxch/vviewer-core';
   import { addTab } from './openFlow.svelte';
-  import { runGlobalSearch, serverSearchHint, MOUNT_SEARCH_DEGRADED_HINT, type SearchSource } from './globalSearch';
+  import { runGlobalSearch, serverSearchHint, mountSearchDegradedHint, type SearchSource } from './globalSearch';
   import { loadSearchEngine } from './searchEngineCache';
   import { loadSettings } from './stores/settings';
   import FileIcon from './FileIcon.svelte';
+  import { t } from './i18n/index.svelte';
 
   let { sources, onclose }: { sources: Array<SearchSource>; onclose(): void } = $props();
 
@@ -114,7 +115,7 @@
       truncated = false;
       degraded = false;
       mountDegraded = false;
-      status = sources.length > 0 ? '' : '未打开文件夹';
+      status = sources.length > 0 ? '' : t('search.noFolder');
       return;
     }
     const ac = new AbortController();
@@ -126,7 +127,7 @@
     truncated = false;
     degraded = false;
     mountDegraded = false;
-    status = '搜索中…';
+    status = t('search.searching');
     try {
       const res = await runGlobalSearch(
         sources,
@@ -134,7 +135,7 @@
         { caseSensitive, regex },
         (done) => {
           // 进度节流：前 20 个实时，其后每 25 个刷一次
-          if (!canceled() && (done < 20 || done % 25 === 0)) status = `已扫描 ${done} 个文件…`;
+          if (!canceled() && (done < 20 || done % 25 === 0)) status = t('search.scanned', { done });
         },
         canceled,
         ac.signal
@@ -144,7 +145,7 @@
       truncated = res.truncated;
       degraded = res.degraded;
       mountDegraded = res.mountSearchDegraded;
-      status = matches.length === 0 ? '无结果' : `${matches.length} 个命中`;
+      status = matches.length === 0 ? t('search.noResults') : t('search.hitCount', { n: matches.length });
     } catch (err) {
       if (canceled()) return;
       matches = [];
@@ -219,15 +220,15 @@
 <!-- role 用 dialog（Esc 关闭的浮层面板，同 WorkspaceCreateModal 等 5 处先例）：
      search 属 landmark 非交互角色，容器 keydown 委托会触发 a11y 告警；dialog +
      tabindex=-1（不进 Tab 序，键盘行为不变）即仓库统一的浮层面板 a11y 模式 -->
-<div class="vv-gsearch" role="dialog" aria-label="全局搜索" tabindex="-1" bind:this={panelEl} onkeydown={onpanelkeydown}>
+<div class="vv-gsearch" role="dialog" aria-label={t('search.panelAria')} tabindex="-1" bind:this={panelEl} onkeydown={onpanelkeydown}>
   <div class="vv-gsearch-bar">
     <input
       bind:this={inputEl}
       bind:value={query}
       class="vv-gsearch-input"
       type="text"
-      placeholder="在打开的文件夹中搜索"
-      aria-label="全局搜索内容"
+      placeholder={t('search.placeholder')}
+      aria-label={t('search.inputAria')}
       oninput={oninput}
     />
     <button
@@ -235,7 +236,7 @@
       class="vv-gsearch-btn"
       class:active={caseSensitive}
       aria-pressed={caseSensitive}
-      title="区分大小写"
+      title={t('search.caseTitle')}
       onclick={() => toggleOption('caseSensitive')}>Aa</button
     >
     <button
@@ -243,14 +244,14 @@
       class="vv-gsearch-btn"
       class:active={regex}
       aria-pressed={regex}
-      title="正则表达式"
+      title={t('search.regexTitle')}
       onclick={() => toggleOption('regex')}>.*</button
     >
-    <button type="button" class="vv-gsearch-btn" aria-label="关闭全局搜索" title="关闭（Esc）" onclick={close}>✕</button>
+    <button type="button" class="vv-gsearch-btn" aria-label={t('search.closeAria')} title={t('search.closeTitle')} onclick={close}>✕</button>
   </div>
   <div class="vv-gsearch-status" aria-live="polite">
     <span class:running>
-      {status}{truncated ? '（结果不完整，已达上限）' : ''}
+      {status}{truncated ? t('search.truncatedSuffix') : ''}
     </span>
     {#if truncated}
       {@const hint = serverSearchHint(sources)}
@@ -261,20 +262,20 @@
       {/if}
     {/if}
     {#if degraded}
-      <span class="vv-gsearch-hint">服务器 ripgrep 不可用，已改用浏览器内搜索（可能较慢）</span>
+      <span class="vv-gsearch-hint">{t('search.degradedHint')}</span>
     {/if}
     {#if mountDegraded}
       <!-- 目录挂载 spec §3：挂载根无服务端搜索（能力边界，与上条 501 降级并存）
            ——runGlobalSearch 对挂载根不白发远端请求，本地补扫后由此提示 -->
-      <span class="vv-gsearch-hint">{MOUNT_SEARCH_DEGRADED_HINT}</span>
+      <span class="vv-gsearch-hint">{mountSearchDegradedHint()}</span>
     {/if}
     {#if searchEngine}
       <span
         class="vv-gsearch-hint"
         title={searchEngine === 'grep'
-          ? '降级引擎：无列定位、结果顺序不保证、正则为 ERE 方言'
+          ? t('search.engineGrepTitle')
           : ''}
-      >服务端搜索：{searchEngine}</span>
+      >{t('search.engineLabel', { engine: searchEngine })}</span>
     {/if}
   </div>
   {#if rows.length > 0}
@@ -300,7 +301,7 @@
         </button>
       {/each}
       {#if matches.length > rows.length}
-        <div class="vv-gsearch-more">仅显示前 {rows.length} 条（共 {matches.length} 条）</div>
+        <div class="vv-gsearch-more">{t('search.moreRows', { rows: rows.length, total: matches.length })}</div>
       {/if}
     </div>
   {/if}

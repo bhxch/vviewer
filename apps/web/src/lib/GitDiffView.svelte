@@ -12,16 +12,31 @@
 <script lang="ts">
   // GitDiffView.svelte — diff 渲染面（git 信息面板 spec §3.3，Task 3）：+/- 行级
   // 着色 pre（自绘，不经 dispatcher 全链、不派发临时 tab；diff 语法高亮不做），
-  // 统计行 + 截断尾注（unifiedDiff 产出的 note 直显——常量进实现，UI 可见）。
+  // 统计行 + 截断尾注（Task 9 域 F 起 note 不在 unifiedDiff 产出——gitDiff.ts 被
+  // worker 打包须零 i18n import——本组件以 truncated + 常量拼装 git.diff.
+  // truncatedNote，渲染值与原字面量逐字节等价）。
   // GitSection 的 diff 折叠区与 log 条目展开的逐提交 diff 复用本组件（「复用 diff
   // 通道」裁决的渲染半边，数据半边是 unifiedDiff 纯函数）。
+  import { DIFF_MAX_BYTES, DIFF_MAX_ROWS } from './git/gitDiff';
+  import { t } from './i18n/index.svelte';
   import type { DiffResult } from './git/gitDiff';
 
   let { state }: { state: GitDiffUiState } = $props();
+
+  /** 截断尾注（truncated 时直显；unifiedDiff 的 maxRows/maxBytes 用缺省常量——
+   *  GitSection 三处调用均不传 opts，上限即 DIFF_MAX_ROWS/DIFF_MAX_BYTES）。 */
+  const truncNote = $derived(
+    state.s === 'ready' && state.diff.truncated
+      ? t('git.diff.truncatedNote', {
+          rows: DIFF_MAX_ROWS,
+          kb: Math.round(DIFF_MAX_BYTES / 1024)
+        })
+      : ''
+  );
 </script>
 
 {#if state.s === 'loading'}
-  <p class="vv-git-note">正在计算 diff…</p>
+  <p class="vv-git-note">{t('git.diff.computing')}</p>
 {:else if state.s === 'error'}
   <p class="vv-git-error">{state.message}</p>
 {:else if state.s === 'empty'}
@@ -32,9 +47,9 @@
     <span class="vv-git-diff-minus">−{state.diff.delCount}</span>
   </p>
   {#if state.diff.rows.length === 0}
-    <p class="vv-git-note">内容无差异（仅行尾/编码差异按归一口径不显示）</p>
+    <p class="vv-git-note">{t('git.diff.noChanges')}</p>
   {:else}
     <!-- whitespace 抑制：行内无裸换行文本节点，行块由 display:block 呈现 -->
-    <pre class="vv-git-diff">{#each state.diff.rows as row, i (i)}<span class="vv-git-diff-row vv-git-diff-row-{row.type}">{row.type === 'add' ? '+' : row.type === 'del' ? '-' : ' '} {row.text}</span>{/each}{#if state.diff.truncated}<span class="vv-git-diff-trunc">{state.diff.note}</span>{/if}</pre>
+    <pre class="vv-git-diff">{#each state.diff.rows as row, i (i)}<span class="vv-git-diff-row vv-git-diff-row-{row.type}">{row.type === 'add' ? '+' : row.type === 'del' ? '-' : ' '} {row.text}</span>{/each}{#if truncNote !== ''}<span class="vv-git-diff-trunc">{truncNote}</span>{/if}</pre>
   {/if}
 {/if}

@@ -15,6 +15,8 @@ import {
   type BlameHistoryEntry,
   type DiffOp
 } from './gitDiff';
+import { translate as t } from '../i18n/core';
+import { messages as zhGit } from '../i18n/catalogs/zh-CN/git';
 
 const enc = new TextEncoder();
 
@@ -143,7 +145,12 @@ describe('unifiedDiff', () => {
     const r = unifiedDiff(a, b, { context: 0, maxRows: 50 });
     expect(r.rows.length).toBe(50);
     expect(r.truncated).toBe(true);
-    expect(r.note).toContain('50');
+    // Task 9 域 F：note 不再由 unifiedDiff 产出（worker 图零 i18n），尾注移至
+    // GitDiffView 拼装——目录键 + 插值渲染双锁（本文件缺省 locale=zh-CN）
+    expect(zhGit['git.diff.truncatedNote']).toBe('diff 过大已截断（上限 {rows} 行 / {kb}KB），仅显示前段');
+    expect(t('git.diff.truncatedNote', { rows: 2000, kb: 200 })).toBe(
+      'diff 过大已截断（上限 2000 行 / 200KB），仅显示前段'
+    );
     // 统计不受截断影响
     expect(r.addCount).toBe(100);
     expect(r.delCount).toBe(100);
@@ -158,7 +165,33 @@ describe('unifiedDiff', () => {
     });
     expect(r.truncated).toBe(true);
     expect(r.rows.length).toBeLessThanOrEqual(DIFF_MAX_ROWS);
-    expect(r.note).toContain('200KB');
+  });
+});
+
+// ---------- 目录双锁（Task 9 域 F S5）：显示串撤出 gitDiff.ts 后的锚定面 ----------
+
+describe('git 域目录双锁（Task 9：gitDiff 域显示键）', () => {
+  it('blame 未提交 author 哨兵与显示值：UNCOMMITTED_SHA 空串上行 + 目录 zh 逐字节', () => {
+    expect(UNCOMMITTED_SHA).toBe('');
+    expect(zhGit['git.blame.uncommitted']).toBe('（未提交）');
+  });
+
+  it('相对时间四形态（M-3）目录 zh 逐字节 + en 占位符一致', async () => {
+    expect(zhGit['git.rel.now']).toBe('刚刚');
+    expect(zhGit['git.rel.minutes']).toBe('{n} 分钟前');
+    expect(zhGit['git.rel.hours']).toBe('{n} 小时前');
+    expect(zhGit['git.rel.days']).toBe('{n} 天前');
+    const { messages: enGit } = await import('../i18n/catalogs/en/git');
+    expect(enGit['git.rel.now']).toBe('just now');
+    expect(enGit['git.rel.minutes']).toBe('{n} minutes ago');
+    expect(enGit['git.rel.hours']).toBe('{n} hours ago');
+    expect(enGit['git.rel.days']).toBe('{n} days ago');
+  });
+
+  it('gitUi subject 兜底：目录 zh 值 + 纯层 translate 渲染锁', () => {
+    // gitUi.subjectOf 经 translate（缺省 locale=zh-CN）回落占位——同链直证
+    expect(zhGit['git.subjectNone']).toBe('（无说明）');
+    expect(t('git.subjectNone')).toBe('（无说明）');
   });
 });
 
@@ -198,7 +231,9 @@ describe('blameWalk（行归属推进）', () => {
     const r = blameWalk([c1], ['a', 'b', 'new'], false);
     expect(r.lines).toEqual([
       { sha: 'head', line: 0, numLines: 2, author: 'a', timestamp: 1700000000, message: 'head msg' },
-      { sha: UNCOMMITTED_SHA, line: 2, numLines: 1, author: '（未提交）', timestamp: r.lines[1]!.timestamp, message: '' }
+      // Task 9 域 F：author 同为空串哨兵（原「（未提交）」字面量撤出 worker 图），
+      // 显示值由 ViewerPane 特判 git.blame.uncommitted（目录锁见下方 describe）
+      { sha: UNCOMMITTED_SHA, line: 2, numLines: 1, author: UNCOMMITTED_SHA, timestamp: r.lines[1]!.timestamp, message: '' }
     ]);
   });
 

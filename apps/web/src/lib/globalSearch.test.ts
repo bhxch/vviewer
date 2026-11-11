@@ -31,14 +31,15 @@ vi.mock('@bhxch/vviewer-core', async (importOriginal) => {
 });
 
 import type { GrepMatch, TreeStore, TreeNode } from '@bhxch/vviewer-core';
+import { messages as zhSearch } from './i18n/catalogs/zh-CN/search';
 import {
   attributeRemoteMatches,
   isMountRootSource,
   isRemoteStore,
   serverSearchHint,
   runGlobalSearch,
-  MOUNT_SEARCH_DEGRADED_HINT,
-  SERVER_SEARCH_HINT
+  mountSearchDegradedHint,
+  serverSearchHintText
 } from './globalSearch';
 
 function makeStore(id: string, withWatch: boolean): TreeStore {
@@ -54,10 +55,13 @@ function makeStore(id: string, withWatch: boolean): TreeStore {
 describe('serverSearchHint（BUG-11 截断引导裁决；T4 起作用于来源列表）', () => {
   it('纯前端（本地）来源：返回服务器模式引导文案', () => {
     const sources = [{ label: 'a', store: makeStore('localfs:x', false) }];
-    expect(serverSearchHint(sources)).toBe(SERVER_SEARCH_HINT);
-    expect(SERVER_SEARCH_HINT).toContain('建议在标签栏连接服务器');
-    expect(SERVER_SEARCH_HINT).toContain('2000');
-    expect(SERVER_SEARCH_HINT).toContain('200MB');
+    // Task 9 域 F：SERVER_SEARCH_HINT 常量改 serverSearchHintText()（装载时刻锁
+    // locale 问题，Task 7/8 常量改函数裁决同款）；zh 子串断言保留（运行时值=目录值）
+    expect(serverSearchHint(sources)).toBe(serverSearchHintText());
+    expect(zhSearch['search.serverHint']).toBe(serverSearchHintText());
+    expect(serverSearchHintText()).toContain('建议在标签栏连接服务器');
+    expect(serverSearchHintText()).toContain('2000');
+    expect(serverSearchHintText()).toContain('200MB');
   });
 
   it('含远程来源（带 watch）：null——已是服务器模式，CMP-08 截断不引导（回归护栏）', () => {
@@ -444,7 +448,9 @@ describe('runGlobalSearch 挂载根来源（spec §3：不参与远端、本地�
   });
 
   it('降级文案锚定（brief：挂载根显式 root 的 404 收敛为该文案）', () => {
-    expect(MOUNT_SEARCH_DEGRADED_HINT).toBe('该根不可服务端搜索，已切换浏览器内搜索');
+    // Task 9 域 F：常量改 mountSearchDegradedHint() + 目录双锁
+    expect(mountSearchDegradedHint()).toBe('该根不可服务端搜索，已切换浏览器内搜索');
+    expect(zhSearch['search.mountDegradedHint']).toBe('该根不可服务端搜索，已切换浏览器内搜索');
   });
 
   it('isMountRootSource：fsRoots 边界裁决（≥ 为挂载根；非 remote 恒 false；direct 前缀恒 true——Task 3 收口）', () => {

@@ -31,6 +31,7 @@
 //   表达不了，判不可用），能到本适配层的 gitdir: 形态均指向 repoDir 子树内实体。
 
 import type { TreeStore } from '@bhxch/vviewer-core';
+import { translate as t } from '../i18n/core';
 
 /** isogit stat 消费面（FileSystem.exists/statusMatrix 等鸭子读取的最小形状）。 */
 export interface GitFsStat {
@@ -59,10 +60,12 @@ export function resolveRelPath(p: string): string | null {
   return segs.join('/');
 }
 
-/** 带 code:'ENOENT' 的读失败转写：isogit 的 isNotFoundError/存在性探测消费该码。 */
+/** 带 code:'ENOENT' 的读失败转写：isogit 的 isNotFoundError/存在性探测消费该码。
+ *  显示串走目录（Task 9 域 F）：ENOENT 常被 isogit 探测链消化，但 log/blame 非
+ *  NotFound 上抛路径会经 worker error 帧回屏——上屏链路存在即进目录（Task 8 口径）。 */
 function enoent(path: string, cause?: unknown): Error {
-  const detail = cause instanceof Error ? `（${cause.message}）` : '';
-  const err = new Error(`git fs ENOENT: ${path}${detail}`);
+  const detail = cause instanceof Error ? t('git.fs.causeDetail', { message: cause.message }) : '';
+  const err = new Error(t('git.fs.enoent', { path, detail }));
   (err as { code?: string }).code = 'ENOENT';
   return err;
 }
@@ -89,7 +92,7 @@ export class GitFsAdapter {
    *  时剥掉前缀尾斜杠（store 路径无尾斜杠语义，listChildren('') 即根）。 */
   private mapPath(p: string): string {
     const rel = resolveRelPath(p);
-    if (rel === null) throw new Error(`git fs 路径越界（逃出仓库根）: ${p}`);
+    if (rel === null) throw new Error(t('git.fs.pathEscape', { p }));
     if (rel === '') return this.prefix.replace(/\/$/, '');
     return `${this.prefix}${rel}`;
   }
@@ -113,13 +116,13 @@ export class GitFsAdapter {
     if (encoding === undefined || encoding === null || encoding === 'binary' || encoding === 'latin1' || encoding === 'ascii') {
       return data;
     }
-    throw new Error(`git fs readFile 不支持的 encoding: ${String(encoding)}`);
+    throw new Error(t('git.fs.encoding', { encoding: String(encoding) }));
   }
 
   /** 经 listChildren(父目录) 推导：kind → isFile/isDirectory，TreeNode.size 透传。 */
   async stat(p: string): Promise<GitFsStat> {
     const rel = resolveRelPath(p);
-    if (rel === null) throw enoent(p, new Error('路径越界'));
+    if (rel === null) throw enoent(p, new Error(t('git.fs.pathEscapeCause')));
     if (rel === '') return dirStat(); // 仓库根本身
     const slash = rel.lastIndexOf('/');
     const parent = slash === -1 ? '' : rel.slice(0, slash);
@@ -138,35 +141,35 @@ export class GitFsAdapter {
   /** 目录名单（isogit 消费 string[]——objects/pack 包文件发现等）。 */
   async readdir(p: string): Promise<string[]> {
     const rel = resolveRelPath(p);
-    if (rel === null) throw enoent(p, new Error('路径越界'));
+    if (rel === null) throw enoent(p, new Error(t('git.fs.pathEscapeCause')));
     const children = await this.listChildrenOf(p, rel);
     return children.map((c) => c.name);
   }
 
   async readlink(p: string): Promise<never> {
-    throw enoent(p, new Error('store 无符号链接语义，git fs readlink 不可用'));
+    throw enoent(p, new Error(t('git.fs.readlinkCause')));
   }
 
   // ---------- 只读承诺：写面一律 throw ----------
 
   async writeFile(): Promise<never> {
-    throw new Error('git fs 只读承诺：writeFile 不可用');
+    throw new Error(t('git.fs.writeBanned', { name: 'writeFile' }));
   }
 
   async mkdir(): Promise<never> {
-    throw new Error('git fs 只读承诺：mkdir 不可用');
+    throw new Error(t('git.fs.writeBanned', { name: 'mkdir' }));
   }
 
   async rmdir(): Promise<never> {
-    throw new Error('git fs 只读承诺：rmdir 不可用');
+    throw new Error(t('git.fs.writeBanned', { name: 'rmdir' }));
   }
 
   async unlink(): Promise<never> {
-    throw new Error('git fs 只读承诺：unlink 不可用');
+    throw new Error(t('git.fs.writeBanned', { name: 'unlink' }));
   }
 
   async symlink(): Promise<never> {
-    throw new Error('git fs 只读承诺：symlink 不可用');
+    throw new Error(t('git.fs.writeBanned', { name: 'symlink' }));
   }
 
   // ---------- 内部 ----------
@@ -177,7 +180,7 @@ export class GitFsAdapter {
     try {
       return await this.store.listChildren(storePath);
     } catch (e) {
-      throw enoent(storePath === '' ? `${p}（目录列表失败）` : storePath, e);
+      throw enoent(storePath === '' ? `${p}${t('git.fs.dirListSuffix')}` : storePath, e);
     }
   }
 }

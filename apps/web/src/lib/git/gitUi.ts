@@ -1,8 +1,11 @@
 // gitUi.ts — Git 段 UI 共用小工具（git 信息面板 Task 3）：GitSection（信息卡 +
 // diff 折叠区 + log 列表）与 ViewerPane（blame hover 浮层）双消费，抽此处避免
 // 双写漂移。日历日期经 i18n/format（Intl 唯一通道，§4.2——裸 Intl/toLocale* 禁令
-// 的存量迁移点；locale 跟随设置语言，时区维持浏览器本地）。
+// 的存量迁移点；locale 跟随设置语言，时区维持浏览器本地）。显示串走目录（Task 9
+// 域 F / Task 3 遗留 M-3：相对时间四形态入 git.rel.*；主线程纯层 translate，本
+// 模块不在 worker 打包图内）。
 import { formatDate, formatDateTime } from '../i18n/format';
+import { translate as t } from '../i18n/core';
 
 /**
  * store 相对路径 → isogit 树内路径（仓库相对）：GitSection.svelte:103 的既定口径
@@ -19,20 +22,21 @@ export function repoRelPath(repoDir: string, filePath: string): string {
 }
 
 /** 相对日期（spec §3.1「短 hash/作者/相对日期/subject」；超月回落日历日期
- * ——formatDate，locale 随当前界面语言）。 */
+ * ——formatDate，locale 随当前界面语言）。四形态入 git.rel.*（M-3：en 态
+ * just now/X minutes ago/X hours ago/X days ago，调用时取当下 locale）。 */
 export function relativeDate(ts: number): string {
   const diff = Date.now() / 1000 - ts;
-  if (diff < 60) return '刚刚';
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
-  if (diff < 86400 * 30) return `${Math.floor(diff / 86400)} 天前`;
+  if (diff < 60) return t('git.rel.now');
+  if (diff < 3600) return t('git.rel.minutes', { n: Math.floor(diff / 60) });
+  if (diff < 86400) return t('git.rel.hours', { n: Math.floor(diff / 3600) });
+  if (diff < 86400 * 30) return t('git.rel.days', { n: Math.floor(diff / 86400) });
   return formatDate(new Date(ts * 1000));
 }
 
 /** commit message → subject（首行；空 message 回落占位）。 */
 export function subjectOf(message: string): string {
   const first = message.split('\n', 1)[0]!.trim();
-  return first === '' ? '（无说明）' : first;
+  return first === '' ? t('git.subjectNone') : first;
 }
 
 /** 提交详情的日历时间戳（log 展开消费：author/committer 各一行）——formatDateTime，

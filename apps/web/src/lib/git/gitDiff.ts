@@ -211,14 +211,14 @@ export interface DiffResult {
   readonly addCount: number;
   readonly delCount: number;
   readonly truncated: boolean;
-  /** 截断尾注（truncated 时 UI 直显；未截断为 ''） */
-  readonly note: string;
 }
 
 /**
  * unified diff：变更游程按「eq 间隔 > 2×context 即分 hunk」合并，hunk 两侧扩
  * context 行；行/字节预算超限即停（截断处收口，不产半行）。统计为全量（不受截断
- * 影响），尾注由常量拼装（spec：常量进实现，UI 可见）。
+ * 影响）。截断尾注不在本函数产出（Task 9 域 F）：本模块被 worker 打包（blameWalk
+ * 复用），须保持零 i18n import——尾注文案由 UI 层（GitDiffView）以 truncated +
+ * DIFF_MAX_ROWS/DIFF_MAX_BYTES 常量拼装，渲染值与原字面量逐字节等价。
  */
 export function unifiedDiff(
   aLines: readonly string[],
@@ -288,10 +288,7 @@ export function unifiedDiff(
       bytes += cost;
     }
   }
-  const note = truncated
-    ? `diff 过大已截断（上限 ${maxRows} 行 / ${Math.round(maxBytes / 1024)}KB），仅显示前段`
-    : '';
-  return { rows, addCount, delCount, truncated, note };
+  return { rows, addCount, delCount, truncated };
 }
 
 // ---------- blame 行归属推进（spec §3.2，worker 消费） ----------
@@ -317,7 +314,12 @@ export interface BlameGroup {
   message: string;
 }
 
-/** 工作区新增行的归属哨兵（sha=''，UI 特判渲染「未提交」态）。 */
+/**
+ * 工作区新增行的归属哨兵（sha=author=''，UI 特判渲染「未提交」态）。author 同为
+ * 空串（Task 9 Worker 错误码化同型面）：blameWalk 在 worker 内执行，原字面量
+ * 「（未提交）」以哨兵值上行、显示值由 UI 特判（sha===UNCOMMITTED_SHA → git.blame.
+ * uncommitted）——worker 图零 i18n（gitUi.relativeDate 同理不进 worker）。
+ */
 export const UNCOMMITTED_SHA = '';
 
 export interface BlameWalkResult {
@@ -372,7 +374,7 @@ export function blameWalk(
         sha: UNCOMMITTED_SHA,
         line: i,
         numLines: j - i,
-        author: '（未提交）',
+        author: UNCOMMITTED_SHA,
         timestamp: nowSec,
         message: ''
       });

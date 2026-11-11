@@ -4,6 +4,7 @@
 // fake store 记录调用路径（断言「调用路径含 repoPrefix」）与调用计数。
 import { describe, expect, it } from 'vitest';
 import type { TreeNode, TreeStore } from '@bhxch/vviewer-core';
+import { messages as zhGit } from '../i18n/catalogs/zh-CN/git';
 import { GitFsAdapter, resolveRelPath } from './gitFs';
 
 const enc = new TextEncoder();
@@ -184,5 +185,25 @@ describe('GitFsAdapter readdir/stat', () => {
     const l = await adapter.lstat('f.txt');
     expect(l.isFile()).toBe(true);
     expect(l.isSymbolicLink()).toBe(false);
+  });
+});
+
+// ---------- 目录双锁（Task 9 域 F S5）：适配层错误串入目录后的锚定面 ----------
+// 运行时 zh 断言（上文 /越界/、/只读/ 等子串正则）全部保留——vitest 缺省
+// locale=zh-CN，translate 取目录 zh 值 = 原字面量逐字节；本节锁目录键字节。
+
+describe('git 域目录双锁（Task 9：gitFs 错误面键）', () => {
+  it('越界/只读/ENOENT 骨架键 zh 逐字节', () => {
+    expect(zhGit['git.fs.pathEscape']).toBe('git fs 路径越界（逃出仓库根）: {p}');
+    expect(zhGit['git.fs.pathEscapeCause']).toBe('路径越界');
+    expect(zhGit['git.fs.writeBanned']).toBe('git fs 只读承诺：{name} 不可用');
+    expect(zhGit['git.fs.enoent']).toBe('git fs ENOENT: {path}{detail}');
+    expect(zhGit['git.fs.causeDetail']).toBe('（{message}）');
+    expect(zhGit['git.fs.dirListSuffix']).toBe('（目录列表失败）');
+  });
+
+  it('写五件 name 参数与目录模板拼合渲染逐字节（writeFile 代表向量）', async () => {
+    const { translate } = await import('../i18n/core');
+    expect(translate('git.fs.writeBanned', { name: 'writeFile' })).toBe('git fs 只读承诺：writeFile 不可用');
   });
 });
