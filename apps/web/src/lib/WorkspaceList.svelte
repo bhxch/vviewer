@@ -54,7 +54,8 @@
    * removeWorkspace 不复位 wsMenuOpen 同语义，t-tab-actions TA 用例依赖）。 */
   function removeWorkspace(id: string, name: string): void {
     if (!window.confirm(t('tabs.ws.deleteConfirm', { name }))) return;
-    for (const t of [...tabStore.tabsOf(id)]) closeTab(t.id);
+    // 循环变量名 tab（原 t）：i18n t() 导入后让位，遮蔽纪律与 AppShell/tabsModel 对齐（评审 M-2）
+    for (const tab of [...tabStore.tabsOf(id)]) closeTab(tab.id);
     workspaceStore.remove(id);
     workspaceStore.ensureNonEmpty();
     if (renamingId === id) renamingId = null;

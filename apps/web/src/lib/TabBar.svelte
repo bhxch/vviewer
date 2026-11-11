@@ -118,8 +118,9 @@
   const ctxActions: TabCtxEntry[] = $derived.by((): TabCtxEntry[] => {
     if (ctx === null) return [];
     const tab = ctx.tab;
-    const at = tabs.findIndex((t) => t.id === tab.id);
-    const normalRight = at >= 0 ? tabs.slice(at + 1).filter((t) => !t.pinned).length : 0;
+    // 箭头参数名 item（原 t）：i18n t() 导入后让位，遮蔽纪律与 AppShell/tabsModel 对齐（评审 M-2）
+    const at = tabs.findIndex((item) => item.id === tab.id);
+    const normalRight = at >= 0 ? tabs.slice(at + 1).filter((item) => !item.pinned).length : 0;
     return [
       { label: t('tabs.ctx.close'), onClick: () => tabStore.close(tab.id) },
       { label: t('tabs.ctx.closeOthers'), onClick: () => tabStore.closeOthers(tab.id) },
