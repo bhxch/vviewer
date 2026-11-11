@@ -11,7 +11,7 @@
 任何样式重构不得违反以下红线；与本文其他条款冲突时，红线优先。
 
 1. **不改 DOM 结构与既有类名**。`.vv-*` / `.meta-*` / `.md-*` / `.vv-sc-*` 等类名是 e2e 主锚点，只允许改样式规则本身，不得改名、删除、合并元素。高频锚（rg 实测）：`.vv-code-pre`、`.vv-tab`、`.vv-error-card`、`.vv-tree-row`、`.vv-markdown`、`.vv-statusbar`、`.vv-tabbar-menu`、`.vv-search-count`、`.vv-shell.zen` 等（`.vv-topbar` 已随顶栏退役删除，Task 3 改列按钮簇新锚；`.vv-tabbar-actions` 已随标签栏收敛退役删除，改列融合菜单容器 `.vv-tabbar-menu`，2026-11-03）。
-2. **overlay 根类名是运行时行为通道**：`AppShell.svelte:617-632` 的 `OVERLAY_SELECTOR`（`.vv-settings-center` / `.vv-mounts-manager` / `.vv-gsearch` / `.vv-quickopen` / `.vv-wspanel` / `.vv-search-panel` / `.vv-wscreate` / `.vv-remotesrc` / `.vv-tabctx` / `.vv-tbmenu-pop` / `.vv-status-picker`——`.vv-ws-pop` 条目已随标签栏收敛删除，工作区子菜单随融合菜单宿主浮层同生命周期；`.vv-tbact-pop` 同步随迁 `.vv-tbmenu-pop`）被 Esc 优先级与 zen 返回键判定实读 DOM 消费，改名破坏功能。
+2. **overlay 根类名是运行时行为通道**：`AppShell.svelte` 内 `OVERLAY_SELECTOR` 常量（`.vv-settings-center` / `.vv-mounts-manager` / `.vv-gsearch` / `.vv-quickopen` / `.vv-wspanel` / `.vv-search-panel` / `.vv-wscreate` / `.vv-remotesrc` / `.vv-tabctx` / `.vv-tbmenu-pop` / `.vv-status-picker`——`.vv-ws-pop` 条目已随标签栏收敛删除，工作区子菜单随融合菜单宿主浮层同生命周期；`.vv-tbact-pop` 同步随迁 `.vv-tbmenu-pop`）被 Esc 优先级与 zen 返回键判定实读 DOM 消费，改名破坏功能。
 3. **data-\* 锚点不可动**：`data-theme-mode`（e2e 38 处亮暗断言）、`data-pinned` + `.vv-tab-pinned` 双锚点（app.css:497-499 注释约定）、`data-drop-before`（tab 拖拽插入线方向）、`data-side`/`data-edge`（折叠三件套几何，b-layout-zen boundingBox 断言）、`data-line`（代码行定位）。
 4. **抽屉实现语义被 e2e 反向依赖**：`apps/web/e2e/drawer.ts:28-33` 以 `.vv-side` 的 computed `transform === 'none'` 判开合；`drawer.ts:19` 的 `DRAWER_MEDIA_QUERY = '(max-width: 900px)'` 与 AppShell `@media` 同一条件。**≤900 / ≤600 断点冻结**；确需调整须 JS（AppShell matchMedia；原 TopBar 侧已随顶栏退役删除）+ CSS + e2e 三处同步。
 5. **字号/字体联动链路不可断**：`--vv-ui-font-size` / `--vv-code-font-size` / `--vv-code-font` / `--vv-code-line-height` 由 `theme.ts applyFonts`（theme.ts:420-432）经 `style#vv-font` 注入，优先级高于 app.css；j/k 滚动步长经 `codeLineHeight(codeSize)` 联动（AppShell.svelte:795-797）。新字阶**必须 calc 派生自这两个变量**，禁止新增第三套硬编码 px 字号。
@@ -135,7 +135,7 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 规则：
 
 1. 全库硬编码 px 字号（rg 实测 114 处声明：12px×73、13px×23、11px×9、16px×3、15px×2、14px×2、18px×1、10px×1）**只允许收敛到上表 token**，逐一映射：12px→`--vv-fs-xs`、13px→`--vv-fs-sm`、11px→`--vv-fs-2xs`、15/14px 标题→`--vv-fs-md`。
-2. 孤值处置（rg 复核：15px×2、14px×2，各含一处非 chrome 语义）：SettingsCenter.svelte:526 `15px`（`.vv-sc-title`）与 :742 `14px`（`.vv-sc-modaltitle`）并入 `--vv-fs-md`；app.css:258 `15px` 是 `.vv-docx-content` 渲染器文档正文字号，**不入 chrome 字阶**——改 `0.9375em` 相对继承字号，U=16px 时 15px 等值零漂移，且与 `.vv-markdown` 正文口径归一（同随用户字号联动）；app.css:330 `14px` 是 `.vv-strip-icon` 图形字形，归 §6 图标字号档。18px（zen 退出钮字形 AppShell.svelte:1316）与 16px（`.vv-sc-close` :573、灯箱钮 app.css:171）同为图形字形尺寸。
+2. 孤值处置（rg 复核：15px×2、14px×2，各含一处非 chrome 语义）：SettingsCenter.svelte:526 `15px`（`.vv-sc-title`）与 :742 `14px`（`.vv-sc-modaltitle`）并入 `--vv-fs-md`；app.css:258 `15px` 是 `.vv-docx-content` 渲染器文档正文字号，**不入 chrome 字阶**——改 `0.9375em` 相对继承字号，U=16px 时 15px 等值零漂移，且与 `.vv-markdown` 正文口径归一（同随用户字号联动）；app.css:330 `14px` 是 `.vv-strip-icon` 图形字形，归 §6 图标字号档。18px（zen 退出钮字形，AppShell.svelte 内 `.vv-zen-exit` 样式块 font-size 档）与 16px（`.vv-sc-close` :573、灯箱钮 app.css:171）同为图形字形尺寸。
 3. 代码语义的 13px 硬编码改 `var(--vv-code-font-size, 13px)`：`.md-diagram-error`（app.css:147）、`.md-diagram-source code`（:152）、`.vv-hex-struct`（:227）、`.vv-xlsx-tab`（:271）、`.vv-xlsx-sheet`（:274）——代码面跟随用户代码字号，与 `.vv-hex-dump`（:218 已是变量）同法。**其中 `.md-diagram-error` 与 `.md-diagram-source code` 两规则位于 app.css:107-110 声明的导出复制域（图表段；packages/render-text/src/markdown/export.ts:111/114 逐字含同段），属双端同步义务：改须同步 render-text 侧 exportBaseCss，并跑 markdownExport.test.ts / export.test.ts（与 §2.4 markdown-alert 标注口径一致）。**
 4. **禁止**在组件 scoped style 再写裸 px 字号；e2e 若断言字号（现无）应锚 token 消费而非 px 值。
 
@@ -181,7 +181,7 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 | 层 | 值 | 成员 |
 | --- | --- | --- |
 | 抽屉带 | 20 | `.vv-side` / `.vv-right`（抽屉态，AppShell.svelte:1656/:1690）、`.vv-drawer-toggle` / `.vv-right-toggle`（:1668/:1702）——PWA-09：压过 ArtPlayer `.art-video`（上游 absolute z-index:10），档 10 为修复前旧值 |
-| zen 退出钮 | 25 | `.vv-zen-exit`（AppShell.svelte:1309） |
+| zen 退出钮 | 25 | `.vv-zen-exit`（AppShell.svelte 内 `.vv-zen-exit` 样式块） |
 | 面板层 | 30/31/32 | overlay 族 30（`.vv-settings-center`/`.vv-mounts-manager`/`.vv-gsearch`/`.vv-quickopen`/`.vv-wspanel`/`.vv-wscreate-panel`/`.vv-status-picker`——`.vv-ws-pop` 已随标签栏收敛退役删除）；`.vv-sc-confirm` 31；`.vv-sc-modal` 32 |
 | chrome 条 | 50 | `.vv-chrome-off` / `.vv-chrome-temp`（app.css:352-359） |
 | toast/搜索浮层 | 60 | `.vv-toast`（AppShell.svelte:1263）/ `.vv-search-panel`（app.css:306） |
@@ -234,8 +234,8 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 
 1. **单色字形白名单**（唯一允许集）：`✕`(U+2715 关闭) `✎`(U+270E 重命名) `✓`(U+2713 确认) `＋`(U+FF0B 新建) `↻`(U+21BB 刷新) `☰`(U+2630 抽屉) `ℹ`(U+2139 信息) `▸▾`(U+25B8/25BE 折叠) `⚙`(U+2699 设置)。**禁用彩色 emoji**：`🌳`（多数平台彩色渲染，与单色字形混排漂移）→ 折叠竖条文件树项改用白名单内 `▾`/`▸` 不合适，改用文本「树」（`.vv-strip-icon` 14px、竖条 28px 宽内可容纳 2 字）；`📁`（原 TopBar.svelte:382——组件随顶栏退役 Task 3 删除，「目录」文字钮现宿主 TabBarActions.svelte）同理改「目录」。`🔒` 退役：pinned 语义由斜体（TabBar `.vv-tab-pinned .vv-tab-name`）+ title 承担，app.css `::before` 的 `'🔒 '` content 置空（现 app.css:563，公共层归属）、WorkspaceTabsPanel.svelte span 内字符删除（改模板文本，非结构变更）。**修订（G3 复核裁决，2026-10-30）**：原文「e2e 锚定的是 `data-pinned`/`.vv-tab-pinned`，不锚字符」只对 TabBar 侧成立；wspanel 侧 e2e `t-tab-actions.spec.ts:517-518` 对 `.vv-wspanel-pin` 元素本身断言 `toBeVisible()`（Playwright 可见 = 非 empty bounding box，playwright-core@1.64 types.d.ts:17391），故 wspanel 的 span 保留为 **1×1 可见性钩子**（锚元素存在、不锚字符；e2e 不可改），pinned 行名斜体由 scoped 兄弟选择器 `.vv-wspanel-pin ~ .vv-wspanel-name` 提供（与 TabBar 同态；不用 `:has()`，兼容 Tauri/webkit2gtk 老内核）。
 2. **字形统一**：TabBar.svelte:287 的关闭钮 `×`(U+00D7) → `✕`(U+2715)，与全库其余 12 处关闭钮同码位（变更：宽度与视觉重量归一；`.vv-tab-name` 文本语义不变，红线 9 满足）。
-3. **尺寸与对齐**：图标字形所在元素 `line-height: 1`、`display: inline-flex; align-items: center`；字号三档——内联随文 12px、独立小钮 14px、浮钮 16px（zen 退出钮现 18px AppShell.svelte:1316 → 16px，44px 触控面不变）。纯图标钮必须带 `aria-label`（现状已合规，保持）。
-4. **触控目标**（口径：以 WCAG 2.2 AA 2.5.8 的 24px 为底线，32/44px 为内部增强档）：指针环境 ≥24px（`.vv-collapse-btn` 现 22px app.css:341-342 → 补足 24px，变更）；触屏断点（≤900px）≥32px（灯箱钮现 32px app.css:169-171 ✓）。**44px 现值仅 `.vv-zen-exit` 成立**（AppShell.svelte:1310-1311，冻结）——`.vv-drawer-toggle`/`.vv-right-toggle` 无任何宽高/padding 声明（AppShell.svelte:1214-1220 实测读码），触控面=全局 button 默认约 24px 高，未达移动端入口标准：≤900px 断点内补 `min-width/min-height: 32px`（变更：~24→32px，§12.2-G1）。全局动作簇字形钮（原 TopBar ⚙/↻ → 标签栏按钮簇 `.vv-tabbar-actions`（顶栏退役 Task 3 迁入）→ 融合菜单 `.vv-tabbar-menu .vv-tbmenu-trigger` / `.vv-tbmenu-item`（标签栏收敛 Task 1 换挂））以 padding-block 8px 补足 ≥32px 高（≤600px 档，app.css:515-518，变更）。
+3. **尺寸与对齐**：图标字形所在元素 `line-height: 1`、`display: inline-flex; align-items: center`；字号三档——内联随文 12px、独立小钮 14px、浮钮 16px（zen 退出钮 18px→16px 已落，AppShell.svelte 内 `.vv-zen-exit` 样式块，44px 触控面不变）。纯图标钮必须带 `aria-label`（现状已合规，保持）。
+4. **触控目标**（口径：以 WCAG 2.2 AA 2.5.8 的 24px 为底线，32/44px 为内部增强档）：指针环境 ≥24px（`.vv-collapse-btn` 现 22px app.css:341-342 → 补足 24px，变更）；触屏断点（≤900px）≥32px（灯箱钮现 32px app.css:169-171 ✓）。**44px 现值仅 `.vv-zen-exit` 成立**（AppShell.svelte 内 `.vv-zen-exit` 样式块 width/height，冻结）——`.vv-drawer-toggle`/`.vv-right-toggle` 无任何宽高/padding 声明（AppShell.svelte 二钮基础样式块实测读码），触控面=全局 button 默认约 24px 高，未达移动端入口标准：≤900px 断点内补 `min-width/min-height: 32px`（变更：~24→32px，§12.2-G1）。全局动作簇字形钮（原 TopBar ⚙/↻ → 标签栏按钮簇 `.vv-tabbar-actions`（顶栏退役 Task 3 迁入）→ 融合菜单 `.vv-tabbar-menu .vv-tbmenu-trigger` / `.vv-tbmenu-item`（标签栏收敛 Task 1 换挂））以 padding-block 8px 补足 ≥32px 高（≤600px 档，app.css:515-518，变更）。
 5. **未来项（本轮不做）**：若立项真 SVG 图标，须满足——单色 `currentColor`、16×16 viewBox 网格、线宽 1.5px、圆帽、经 `<symbol>` sprite 内联（零依赖）；届时 gen-icons.mjs 之外新建 `apps/web/src/lib/icons.ts` 单点管理，逐步替换字形白名单。
 
 **边界（packages 渲染产物）**：以上白名单与禁用 emoji 仅适用 `apps/web` 模板与 app.css；packages 渲染产物中的既有彩色 emoji 为登记在案的既有项，本轮不处置——render-archive 以 `🔒 ${label}` 渲染加密条目（packages/render-archive/src/archive.ts:102，落在红线 1 锚点 `.vv-tree-row` 内），被 zip 单测（packages/render-archive/test/zip.test.ts:302 断言 `toContain('🔒')`）与 e2e BIN-08（apps/web/e2e/b-binary-hex-archive.spec.ts:116/130 断言 `toContainText('🔒')`）双重锁定，清理须随上游独立立项。
@@ -244,13 +244,13 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 
 ## 7. 交互状态
 
-状态全集与统一写法（现状 rg 实测：transition/animation 全前端仅 5 处、`:focus-visible` 仅 2 处 app.css:450 与 AppShell.svelte:1322、hover 专属揭示多处无键盘等价——本轮补齐）：
+状态全集与统一写法（现状 rg 实测：transition/animation 全前端仅 5 处、`:focus-visible` 仅 2 处 app.css:450 与 AppShell.svelte 内 `.vv-zen-exit` 样式块、hover 专属揭示多处无键盘等价——本轮补齐）：
 
 | 状态 | 规则 | 备注 |
 | --- | --- | --- |
 | hover | 可点行/菜单项 `background: var(--ui-hover-bg)`；文字钮 `color: var(--ui-fg)` 或 `--ui-accent`；**不得只动 opacity** | 补 `.vv-tab:hover { background: color-mix(in srgb, var(--ui-hover-bg) 60%, var(--ui-border)); }`——**直用 hover-bg 无效**：`--ui-tab-bg` 与 `--ui-hover-bg` 亮暗各为同值（#f6f8fa/#161b22，app.css:13,15 与 24,25 实测读码），须 color-mix 向 border 方向派生一档可感知差异（亮色变深、暗色变浅）。非激活 tab 现零响应（app.css:479-488 实证无 hover 规则），激活 tab 由 `.active` 底色覆盖无需 hover；变更声明 §12.2-G1 |
 | active（按下） | 不做位移/缩放（保持零漂移）；列表选中态用 `.active` 类：文字 `--ui-accent` + 可选 600 字重（`.vv-ws-item.active .vv-ws-name` app.css:409 现法） | — |
-| focus-visible | **全局统一焦点环**（新增至 app.css 基础层）：`:where(button, input, select, summary, [tabindex], a[href]):focus-visible { outline: 2px solid var(--ui-accent); outline-offset: -1px; }`（offset 负值防浮层贴边裁剪；`a[href]` 为走查补档——链接此前仅 UA auto 环，暗色上不可辨识，含 markdown 标题锚点）；已显式处理的（AppShell.svelte:1322 zen-exit）保留 | 键盘可达性的兜底保障；`:focus`（鼠标按下）不触发环 |
+| focus-visible | **全局统一焦点环**（新增至 app.css 基础层）：`:where(button, input, select, summary, [tabindex], a[href]):focus-visible { outline: 2px solid var(--ui-accent); outline-offset: -1px; }`（offset 负值防浮层贴边裁剪；`a[href]` 为走查补档——链接此前仅 UA auto 环，暗色上不可辨识，含 markdown 标题锚点）；已显式处理的（AppShell.svelte 内 `.vv-zen-exit` 样式块 :hover/:focus-visible 提亮）保留 | 键盘可达性的兜底保障；`:focus`（鼠标按下）不触发环 |
 | 专属揭示的键盘等价 | hover 才显现的控件必须同时被 `:focus-within`/`:focus-visible` 显现：`.vv-ws-actions`（app.css:413-414 已有 focus-within ✓）、`.vv-wspanel-close`（:461 ✓）、`.vv-collapse-btn` opacity .35 → 补 `.vv-collapse-btn:focus-visible { opacity: 1 }`（现 hover 提亮 app.css:343，键盘聚焦恒 0.35 近乎不可见）、`.vv-tab-close` 同法（:486-488） | — |
 | disabled | 统一 `opacity: .5; cursor: default;`，且抑制 hover 变化；五套口径归一：`.4`（pdf 工具条 app.css:203）、`.55`+弱化色（tabctx :513）→ `.5`（变更） | `aria-disabled`（tabctx 保持可聚焦语义）与 `[disabled]` 同观感；MountsManager 表单控件补齐禁用态（MountsManager.svelte:534 现无） |
 | loading | 文本即态（「连接中…」ServerConnectForm.svelte:69——原 TopBar 引用随顶栏退役改锚、「加载更多」gsearch）+ 可选 disabled；不引入 spinner 组件 | 只读器场景足够 |
@@ -315,7 +315,7 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 - **图标字形**：⚙ 保留，📁→「目录」、🌳→「树」、🔒 退役；↻/☰/ℹ 保留（§6）。
 - **抽屉过渡**：`transition: transform 0.2s`（AppShell.svelte:1206/1232）改 `var(--vv-dur-med) ease-out`（200ms 等值零漂移）；toast `0.18s`（:1272）并入 `var(--vv-dur-med)`（变更 20ms 级）；`.vv-ws-actions` opacity `.12s`（app.css:413）改 `var(--vv-dur-fast)`。
 - **chrome temp 条阴影** `0 2px 12px`→`--vv-shadow-2`（app.css:359）。
-- **zen 退出钮**：44px/浮钮规格冻结（AppShell.svelte:1304-1324）；focus-visible 已有保留。抽屉/右栏开关钮（`.vv-drawer-toggle`/`.vv-right-toggle`，无宽高声明现 ~24px 高）在 ≤900px 断点内补 `min-width/min-height: 32px`（§6.4，变更）。
+- **zen 退出钮**：44px/浮钮规格冻结（AppShell.svelte zen 退出浮钮 markup + `.vv-zen-exit` 样式块）；focus-visible 已有保留。抽屉/右栏开关钮（`.vv-drawer-toggle`/`.vv-right-toggle`，无宽高声明现 ~24px 高）在 ≤900px 断点内补 `min-width/min-height: 32px`（§6.4，变更）。
 - +page.svelte 拖拽壳无样式改动，仅随组 review。
 
 ### G2 阅读区与侧栏面板（ViewerPane / SearchPanel / MetaPanel / Toc / FileTree / TreeNodeRow）
@@ -468,7 +468,7 @@ vviewer 是「只读文件查看器」：阅读面积最大化、chrome 极薄�
 
 ### 12.2 分组实施要点（可执行项速览）
 
-- **G1**：tab hover；✕ 统一；🔒/🌳/📁 字形处置；focus-visible 环 + opacity 揭示键盘等价；抽屉/toast 时长 token 化。变更声明：×→✕、字形替换（⚙ 保留，📁→「目录」、🌳→「树」、🔒 退役）、temp 条阴影归档 `--vv-shadow-2`、**tab hover 零响应→color-mix 可感知底色**、**disabled 归一（pdf 工具条 .4→.5 app.css:203、tabctx .55→.5 app.css:513）**、**抽屉/右栏 toggle 钮 ≤900px 补 32px（~24→32）**、动作簇字形钮 ≤600px 补 ≥32px 高（原 TopBar 侧，顶栏退役 Task 3 起 `.vv-tabbar-actions`，标签栏收敛 Task 1 换挂 `.vv-tabbar-menu .vv-tbmenu-trigger`/`.vv-tbmenu-item`）、zen 退出钮字形 18→16px（AppShell.svelte:1316，§6.3）、toast 0.18s→200ms。
+- **G1**：tab hover；✕ 统一；🔒/🌳/📁 字形处置；focus-visible 环 + opacity 揭示键盘等价；抽屉/toast 时长 token 化。变更声明：×→✕、字形替换（⚙ 保留，📁→「目录」、🌳→「树」、🔒 退役）、temp 条阴影归档 `--vv-shadow-2`、**tab hover 零响应→color-mix 可感知底色**、**disabled 归一（pdf 工具条 .4→.5 app.css:203、tabctx .55→.5 app.css:513）**、**抽屉/右栏 toggle 钮 ≤900px 补 32px（~24→32）**、动作簇字形钮 ≤600px 补 ≥32px 高（原 TopBar 侧，顶栏退役 Task 3 起 `.vv-tabbar-actions`，标签栏收敛 Task 1 换挂 `.vv-tabbar-menu .vv-tbmenu-trigger`/`.vv-tbmenu-item`）、zen 退出钮字形 18→16px（AppShell.svelte 内 `.vv-zen-exit` 样式块，§6.3）、toast 0.18s→200ms。
 - **G2**：dt 4em；状态栏/搜索/TOC/meta 字号 token 化；hover 语义归一（零漂移）；阴影 token 化（值不变）。
 - **G3**：三面板行 `3px 10px` + hover/active 统一（视觉变更：gsearch 行 2px→3px、缩进改纯 CSS 承接）；gsearch-hint 换 `--ui-warning`；badge pill 化；**gsearch mark 55%→`--vv-hit-bg` 45%（修复暗色 3.44→4.61:1）**；wscreate 补外点关闭（JS 层）。
 - **G4**：十类全局类恢复（§9 表即实施文案）；fs-md 收敛（15→14px 变更）；`var(--vv-code-font)` 四处替换；`.vv-sc-apply` primary 化（灰→accent 描边变更）；modalbox 阴影/圆角归档。

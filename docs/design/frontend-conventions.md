@@ -129,13 +129,14 @@ zh 目录值必须与被替换的字面量**逐字节等价**（含空白与全�
 7. **焦点可见 + 颜色非唯一载体**：禁裸 `outline: none`/`outline-hidden` 抹焦点（无机检，本条承接）；hover 才显现的控件补 `:focus-within`/`:focus-visible` 键盘等价；状态/语义不得仅以颜色区分（附文字或字形）。
 8. **svelte-ignore 豁免随附依据**：`<!-- svelte-ignore a11y-* -->` 必须随附理由注释（WAI-ARIA APG 模式名或结构理由）；僵尸豁免由 `no-unused-svelte-ignore` 机检兜底，依据质量本条核对（现仓五处全带理由）。
 
-### B 组：结构与 i18n 补充（无机检面条款）
+### B 组：结构、i18n 与 e2e 补充（无机检面条款）
 
 - **B1 新组件落三层形态**：props 注入/回调上行，不直触网络与持久化（§1）。
 - **B2 回调 props 命名 `onXxx`**（`svelte/require-event-prefix` 未启用的承接，eslint.config.js 注释同源）。
 - **B3 i18n key 语义命名**：`button1`/`msg2` 类即驳回（存在性/首段机检拦不住语义贫瘠）；新增文案先查目录既有键——同动作同文案复用同键，防同义双键漂移。
 - **B4 each key 稳定标识符**：`svelte/require-each-key` 机检 key 在场；key 是否由文案/label 派生本条核（registry label-keyed each 曾致 Svelte 5 prod 整页 500）。
 - **B5 展示层无手工拼接格式化串**：日期/数字展示一律 `i18n/format.ts`（lint 拦裸 Intl 调用；手工拼 `/`-`:` 日期形态本条核，aelrova 3.6② 同款）。
+- **B6 e2e 装置入口带应用就绪锚**：装置打开菜单/面板前必须经 `openMenu`/`primeUiInteractive` 等含应用就绪锚的装置入口，禁止裸 click 触发钮（goto 后立即点击落在 Svelte 5 委托监听挂载前的竞态窗内，T13b 根因实证）。
 
 ## 7. 强制力总表（规则 → 落点 → 载体）
 
