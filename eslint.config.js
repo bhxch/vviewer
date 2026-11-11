@@ -55,15 +55,16 @@ const cjkTemplateElement = {
 // 全文(含中文 CSS 注释)作 SvelteText,而 CSS 注释是开发者面注释(与 // /*
 // 同口径),不是用户可见文案;组件样式中文注释不入目录(实测缺此排除即 14 文件
 // style 块整块误报)。
+// 两臂 message 互斥判别(评审 M-2① 二轮):lint-config 自检断言按 message 子串
+// (「标记文本含 CJK」/「静态属性值含 CJK」)判别臂——拆分前两臂共享 message,
+// 子串互相污染、断言无判别力;改 message 须保这两个短语各自唯一在场。
 const cjkSvelteText = {
   selector: `SvelteText[value=/${CJK_RANGE}/]:not(SvelteStyleElement SvelteText)`,
-  message:
-    '禁止 Svelte 标记文本含 CJK：用户可见文案一律 t() 目录键（{{t("domain.key")}}）——两臂 message 专属（评审 M-2① 二轮）：lint-config 断言按 message 判别臂，拆分前共享 message 的子串互相污染、断言无判别力'
+  message: '禁止 Svelte 标记文本含 CJK：文案走 t()（frontend-conventions §3）'
 };
 const cjkSvelteLiteral = {
   selector: 'SvelteLiteral[value=/' + CJK_RANGE + '/]',
-  message:
-    '禁止 Svelte 静态属性值含 CJK：aria-label/title/placeholder 一律 {t(…)} 表达式形态——两臂 message 专属（评审 M-2① 二轮），断言按本 message 判别本臂'
+  message: '禁止 Svelte 静态属性值含 CJK：aria-label/title/placeholder 一律 {t(…)} 表达式形态'
 };
 // 禁裸 Intl / toLocale*（apps/web 全域）：日期/数字/列表格式化单点 i18n/format.ts
 // （组内集中切 locale、单测直测面），散用 Intl 会在 locale 切换时按浏览器 locale
