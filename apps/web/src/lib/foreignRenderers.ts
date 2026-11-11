@@ -32,6 +32,9 @@ import {
 } from '@bhxch/vviewer-render-foreign';
 import { resolveForeignAssetBase, resolveForeignAssetPackageBase, type ForeignAssetPackage } from './foreignAssets';
 import { wireForeignZoom } from './foreignZoom';
+// 纯层 i18n（Task 7 域 D）：registry label 消费点读取时现 t()（getter 派生显示，
+// 见 FOREIGN_LABEL_KEYS 注）；调用时刻取当下 locale，非响应式。
+import { translate as t, type MessageKey } from './i18n/core';
 // type-only：编译期擦除，零运行时 chunk 影响
 import type {
   FileRenderContext,
@@ -67,9 +70,9 @@ function toArrayBuffer(data: Uint8Array): ArrayBuffer {
  * （T2 评审 M2：'attachment.' 尾点非法文件名）回落裸 'attachment'。导出仅测试锚用，
  * 装配面不另消费。 */
 export function nestedName(type: string): string {
-  const t = type.trim();
-  if (t.includes('.')) return t;
-  const ext = t.toLowerCase();
+  const raw = type.trim();
+  if (raw.includes('.')) return raw;
+  const ext = raw.toLowerCase();
   return ext ? `attachment.${ext}` : 'attachment';
 }
 
@@ -81,9 +84,9 @@ export function nestedName(type: string): string {
  */
 export function fileNameOnly(raw: string | undefined): string {
   if (raw === undefined) return '';
-  const t = raw.trim();
-  if (t === '') return '';
-  const base = t.split(/[\\/]/).pop() ?? '';
+  const trimmed = raw.trim();
+  if (trimmed === '') return '';
+  const base = trimmed.split(/[\\/]/).pop() ?? '';
   if (base === '' || base === '.' || base === '..') return '';
   return base;
 }
@@ -171,7 +174,7 @@ function pluginMount(load: () => Promise<ForeignPlugin>, groupId: string): Forei
     const d = await loadDispatcher();
     const ext = extOf(args.name);
     const handler = d.get(ext);
-    if (!handler) throw new Error(`file-viewer 渲染器无 ".${ext}" 处理器（${args.name}）`);
+    if (!handler) throw new Error(t('viewer.foreign.noHandler', { ext, name: args.name }));
     // 组资产包基座切换（无资产组为 null——保持当前基座不动）；与 handler 直调
     // 同步块执行（顶层任务由队列保证无交叉，见「mount 串行队列」注）
     const pkg = foreignGroupAssetPackage(groupId, ext);
@@ -289,13 +292,46 @@ function foreignGroupAssetPackage(groupId: string, ext: string): ForeignAssetPac
 
 interface ForeignGroupSpec {
   id: string;
-  label: string;
   extensions: readonly string[];
   /** 能渲染但不默认拥有的扩展名（Renderer.altExtensions）：上游定义覆盖、vviewer 已有
    * 所有者的格式——用户可在设置「打开方式」改为默认，或经「打开方式」临时改选 */
   altExtensions?: readonly string[];
   load: () => Promise<ForeignPlugin>;
 }
+
+/**
+ * 20 组渲染器 label 的目录键映射（Task 7 域 D，registry label D8 重点审计面的
+ * 落地形态）：FOREIGN_GROUPS 不再携带 label 字面量——渲染器对象经 getter 派生
+ * 显示（`get label()` 读本映射现 t()），registry/桥接/消费点零改动（Renderer
+ * 接口 label: string 不变，getter 满足属性读取语义）。标识用途（each key、比较、
+ * 对象键）一律渲染器 id：域内 each key 已全部 id 化（ViewerPane pickerItems/
+ * MetaPanel openWithOptions 均 (opt.id)；TabContextMenu 复合键 `${i}:${label}`
+ * 含位置分量恒唯一）；label 消费点（TabBar 子菜单/错误卡 open-as/状态栏指示器/
+ * 确认卡）全部为显示面、读取时刻求值——locale 切换后新装配/新派生即取新值。
+ * 标识符 id 稳定 ASCII（'foreign-<group>'），不再有任何 label-keyed 标识面。
+ */
+const FOREIGN_LABEL_KEYS = {
+  'foreign-email': 'viewer.renderer.foreign-email',
+  'foreign-epub': 'viewer.renderer.foreign-epub',
+  'foreign-ofd': 'viewer.renderer.foreign-ofd',
+  'foreign-chm': 'viewer.renderer.foreign-chm',
+  'foreign-word': 'viewer.renderer.foreign-word',
+  'foreign-presentation': 'viewer.renderer.foreign-presentation',
+  'foreign-spreadsheet': 'viewer.renderer.foreign-spreadsheet',
+  'foreign-iwork': 'viewer.renderer.foreign-iwork',
+  'foreign-hangul': 'viewer.renderer.foreign-hangul',
+  'foreign-wordperfect': 'viewer.renderer.foreign-wordperfect',
+  'foreign-data': 'viewer.renderer.foreign-data',
+  'foreign-design': 'viewer.renderer.foreign-design',
+  'foreign-image': 'viewer.renderer.foreign-image',
+  'foreign-geo': 'viewer.renderer.foreign-geo',
+  'foreign-typst': 'viewer.renderer.foreign-typst',
+  'foreign-dicom': 'viewer.renderer.foreign-dicom',
+  'foreign-signature': 'viewer.renderer.foreign-signature',
+  'foreign-eda': 'viewer.renderer.foreign-eda',
+  'foreign-drawing': 'viewer.renderer.foreign-drawing',
+  'foreign-midi': 'viewer.renderer.foreign-midi'
+} as const satisfies Record<(typeof FOREIGN_GROUPS)[number]['id'], MessageKey>;
 
 /**
  * T2 评审 I-2 携带修复（spec §6.3 序 13 注记诉求：psd/ai/eps 高保真渲染）：
@@ -344,25 +380,21 @@ export function wireDesignOrDataSeam(
 const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
   {
     id: 'foreign-email',
-    label: '邮件',
     extensions: ['eml', 'msg', 'mbox'],
     load: () => import('@file-viewer/renderer-email').then((m) => m.emailRenderer)
   },
   {
     id: 'foreign-epub',
-    label: '电子书',
     extensions: ['epub', 'fb2', 'umd'],
     load: () => import('@file-viewer/renderer-epub').then((m) => m.ebookRenderer)
   },
   {
     id: 'foreign-ofd',
-    label: 'OFD 版式文档',
     extensions: ['ofd'],
     load: () => import('@file-viewer/renderer-ofd').then((m) => m.ofdRenderer)
   },
   {
     id: 'foreign-chm',
-    label: 'CHM 帮助文档',
     extensions: ['chm'],
     load: () => import('@file-viewer/renderer-chm').then((m) => m.chmRenderer)
   },
@@ -375,7 +407,6 @@ const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
     // 全灭实迹），且选择面出现两个不可分辨的「Word 文档」。本组为 .docx 的内置默认
     // （docx-preview 系版式还原：分页/字体/表格；core mammoth 简化视图降为候选），
     // 兼覆盖 doc/docm/dotx/dotm/odt/odp/rtf。
-    label: 'Word 文档（版式还原）',
     extensions: ['docx', 'doc', 'docm', 'dotx', 'dotm', 'odt', 'odp', 'rtf'],
     load: () =>
       Promise.all([import('@file-viewer/renderer-word'), import('@file-viewer/capability-rtf')]).then(([m]) => m.wordRenderer)
@@ -383,13 +414,11 @@ const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
   {
     // .pptx 内置默认（逐页还原幻灯片；core 文本提纲渲染器降为候选）
     id: 'foreign-presentation',
-    label: '演示文稿',
     extensions: ['pptx', 'ppt', 'pot', 'pptm', 'potx', 'potm', 'ppsx', 'ppsm'],
     load: () => import('@file-viewer/renderer-presentation').then((m) => m.presentationRenderer)
   },
   {
     id: 'foreign-spreadsheet',
-    label: '电子表格',
     // xlsx/xlsm/xls/csv 的内置默认（版式还原，core SheetJS 简化视图降为 altExtensions
     // 候选；上游 spreadsheet-openxml 定义覆盖同面）。csv 2026-11-10 自 code 内置清单
     // 原子转移（上游 definitions/worker 文本表格路径/GRID_FORMATS 三面均含 csv 实证；
@@ -402,19 +431,16 @@ const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
   },
   {
     id: 'foreign-iwork',
-    label: 'iWork 文档',
     extensions: ['pages', 'numbers', 'key'],
     load: () => import('@file-viewer/renderer-iwork').then((m) => m.iworkRenderer)
   },
   {
     id: 'foreign-hangul',
-    label: 'Hangul 文档',
     extensions: ['hwp', 'hwpx'],
     load: () => import('@file-viewer/renderer-hangul').then((m) => m.hangulRenderer)
   },
   {
     id: 'foreign-wordperfect',
-    label: 'WordPerfect 文档',
     extensions: ['wpd', 'wp', 'wp5', 'wp6'],
     load: () => import('@file-viewer/renderer-wordperfect').then((m) => m.wordPerfectRenderer)
   },
@@ -424,13 +450,11 @@ const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
     // 字体查看面（ttf/otf/woff/woff2）走 FontFace API，fonts store 加载职责不动
     // （spec §6.3 序 12 注记）；wasm 自 hex 清单同 commit 转移（模块结构/导出解析）。
     id: 'foreign-data',
-    label: '数据与字体',
     extensions: ['sqlite', 'parquet', 'avro', 'webarchive', 'ttf', 'otf', 'woff', 'woff2', 'wasm'],
     load: () => import('@file-viewer/renderer-data').then((m) => m.dataRenderer)
   },
   {
     id: 'foreign-design',
-    label: 'Adobe 设计',
     extensions: [
       'psb', 'pdd', 'psdt', 'psd', 'ait', 'ai', 'idml', 'icml', 'idms', 'inx', 'fla', 'xfl',
       'xd', 'indd', 'indt', 'ps', 'eps', 'ase', 'aco', 'abr', 'csh', 'pat', 'grd', 'asl'
@@ -446,7 +470,6 @@ const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
     // 仅新 4 扩展名（spec §6.3 序 14「仅新 5」减 jxl——探针裁决不绑定）；原 9 格式
     // 维持 vviewer imageRenderer。
     id: 'foreign-image',
-    label: '扩展图片',
     extensions: ['tiff', 'tif', 'heic', 'heif'],
     load: () => import('@file-viewer/renderer-image').then((m) => m.imageRenderer)
   },
@@ -456,25 +479,21 @@ const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
     // 裸单文件来源的 .shp 在 createForeignFileRenderers 装配点前置拦截为降级错误卡
     // （withSingleFileShpGuard，spec §6.4「裸单文件维持降级错误卡」）。
     id: 'foreign-geo',
-    label: '地理数据',
     extensions: ['geojson', 'kml', 'gpx', 'shp'],
     load: () => import('@file-viewer/renderer-geo').then((m) => m.geoRenderer)
   },
   {
     id: 'foreign-typst',
-    label: 'Typst 排版',
     extensions: ['typ', 'typst'],
     load: () => import('@file-viewer/renderer-typst').then((m) => m.typstRenderer)
   },
   {
     id: 'foreign-dicom',
-    label: 'DICOM 影像',
     extensions: ['dcm', 'dicom'],
     load: () => import('@file-viewer/renderer-dicom').then((m) => m.dicomRenderer)
   },
   {
     id: 'foreign-signature',
-    label: '电子签名',
     extensions: [
       'p7m', 'p7s', 'p7c', 'p7b', 'pkcs7', 'cms', 'cmsc', 'tsd', 'tst', 'tsq', 'tsr',
       'asics', 'scs', 'asice', 'sce', 'ers', 'asc', 'sig', 'pgp', 'gpg', 'jws'
@@ -483,7 +502,6 @@ const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
   },
   {
     id: 'foreign-eda',
-    label: 'EDA 电路',
     extensions: ['olb', 'dra', 'gds', 'oas', 'oasis'],
     load: () => import('@file-viewer/renderer-eda').then((m) => m.edaRenderer)
   },
@@ -492,7 +510,6 @@ const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
     // diagrams.net 运行时启用（assets-drawing 基座承载 viewer-static.min.js）；
     // bpmn 不启用（bpmn-js 不装，.bpmn 维持计划 1 diagram-bpmn 渲染器）。
     id: 'foreign-drawing',
-    label: 'Draw.io 图表',
     extensions: ['drawio', 'dio'],
     load: () =>
       Promise.all([import('@file-viewer/renderer-drawing'), import('@file-viewer/capability-drawio-official')]).then(
@@ -503,7 +520,6 @@ const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
     // capability-midi 副作用同载：向 renderer-media 注册 MIDI loader；renderer-media
     // 的媒体扩展名不注册（vviewer av 占优），绑定面仅 midi/mid。
     id: 'foreign-midi',
-    label: 'MIDI 音乐',
     extensions: ['midi', 'mid'],
     load: () =>
       Promise.all([import('@file-viewer/renderer-media'), import('@file-viewer/capability-midi')]).then(
@@ -537,8 +553,7 @@ const FOREIGN_GROUPS: readonly ForeignGroupSpec[] = [
  * 形态的最小侵入点（桥接包零改动）。仅 foreign-geo 组装配时套用；throw 在委托
  * bridge render 之前，不触发插件懒加载。
  */
-const SINGLE_FILE_SHP_ERROR =
-  'Shapefile 需同目录的 .shx/.dbf/.prj 边车文件，单文件来源无法读取；请改用包含这些文件的文件夹方式打开';
+const SINGLE_FILE_SHP_ERROR = (): string => t('viewer.foreign.shpGuard');
 
 /** 裸单文件 .shp 判定（FOM-SHP-01）：.shp 扩展名 + storeId 为单文件来源形态。 */
 export function isSingleFileShpSource(source: Pick<FileSource, 'name' | 'storeId'>): boolean {
@@ -552,8 +567,13 @@ export function withSingleFileShpGuard(renderer: Renderer): Renderer {
   const inner = renderer.render.bind(renderer);
   return {
     ...renderer,
+    // label getter 委托内层（spread 会把 getter 固化为静态值——locale 派生显示面
+    // 必须保持读取时求值，见 FOREIGN_LABEL_KEYS 注）
+    get label() {
+      return renderer.label;
+    },
     async render(buffer, target, source, det, ctx, opts) {
-      if (isSingleFileShpSource(source)) throw new Error(SINGLE_FILE_SHP_ERROR);
+      if (isSingleFileShpSource(source)) throw new Error(SINGLE_FILE_SHP_ERROR());
       return inner(buffer, target, source, det, ctx, opts);
     }
   };
@@ -572,14 +592,27 @@ export function createForeignFileRenderers(opts: { nestedDispatch: NestedDispatc
   return FOREIGN_GROUPS.map((g) => {
     const bridged = wrapFileViewerRenderer({
       id: g.id,
-      label: g.label,
+      // label 数据位清空（Task 6 APPEARANCE_BUILTINS 先例）：文案走 getter 派生，
+      // bridge 对 label 纯透传、getter 覆盖 spread 的空值
+      label: '',
       extensions: g.extensions,
       mount: pluginMount(g.load, g.id),
       nestedDispatch: opts.nestedDispatch
     });
+    // registry label 派生显示（D8 重点审计面，见 FOREIGN_LABEL_KEYS 注）：getter
+    // 覆盖 spread——消费点每次读 label 现求值（装配时刻不锁定 zh），标识面（each
+    // key/比较/对象键）恒用 id（本 map 的键即 g.id）
+    const withLabel: Renderer = {
+      ...bridged,
+      get label() {
+        // 窄化断言：g.id 为 Spec 宽 string，FOREIGN_LABEL_KEYS 恒全 id 覆盖（上方
+        // satisfies Record 已把 20 组 id 锁为键集，缺键在编译期即红）
+        return t(FOREIGN_LABEL_KEYS[g.id as keyof typeof FOREIGN_LABEL_KEYS]);
+      }
+    };
     // 候选声明在装配层附加（桥接契约零改动）：组内路由按扩展名取 handler，候选扩展名
     // 与自有扩展名同一路径（pluginMount d.get(ext)），无需桥接层感知
-    const renderer: Renderer = g.altExtensions ? { ...bridged, altExtensions: [...g.altExtensions] } : bridged;
+    const renderer: Renderer = g.altExtensions ? { ...withLabel, altExtensions: [...g.altExtensions] } : withLabel;
     return g.id === 'foreign-geo' ? withSingleFileShpGuard(renderer) : renderer;
   });
 }

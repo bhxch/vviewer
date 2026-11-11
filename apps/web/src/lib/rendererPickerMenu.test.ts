@@ -18,6 +18,8 @@ import {
   rendererCandidatesOfTab
 } from './RendererPickerMenu';
 import { openWithOf } from './openWith';
+// i18n 目录（Task 7 域 D 抽取）：首项「自动」label 目录双锁
+import { messages as zhViewer } from './i18n/catalogs/zh-CN/viewer';
 
 const mk = (id: string, exts: string[]): Renderer => ({
   id, label: `${id}-label`, extensions: exts, render: async () => ({ destroy() {} })
@@ -51,9 +53,10 @@ describe('rendererCandidates 与 openWithOf 等价（Task 3 契约①）', () =>
 });
 
 describe('rendererCandidates 形状契约（Task 3 契约②③④）', () => {
-  it('「自动」恒首位且 id 为空串（清除 override 的语义锚）', () => {
+  it('「自动」恒首位且 id 为空串（清除 override 的语义锚；label 目录双锁——Task 7）', () => {
     const cands = rendererCandidates(makeRegistry(), undefined, 'code', 'txt');
     expect(cands[0]).toEqual({ id: '', label: '自动（按扩展名）', current: true });
+    expect(zhViewer['viewer.openwith.auto']).toBe('自动（按扩展名）');
   });
 
   it('自动时仅「自动」标 current；手选 hex 时仅 hex 标 current', () => {

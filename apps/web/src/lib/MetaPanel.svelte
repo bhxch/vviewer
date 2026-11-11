@@ -17,6 +17,7 @@
   import { MORE_RENDERER_ID, LESS_RENDERER_ID, rendererCandidatesOfTab } from './RendererPickerMenu';
   import { detectableLanguageNames } from '@bhxch/vviewer-highlight';
   import { registry } from './viewer';
+  import { t } from './i18n/index.svelte';
   import {
     collectExportHtml,
     collectPrintHtml,
@@ -73,12 +74,12 @@
     if (!ow) return [];
     if (openWithExpanded) {
       return [
-        { id: '', label: '自动（按扩展名）' },
+        { id: '', label: t('viewer.openwith.auto') },
         ...ow.all,
-        { id: LESS_RENDERER_ID, label: '收起附加候选' }
+        { id: LESS_RENDERER_ID, label: t('viewer.openwith.less') }
       ];
     }
-    return [...ow.options, { id: MORE_RENDERER_ID, label: '更多渲染器…' }];
+    return [...ow.options, { id: MORE_RENDERER_ID, label: t('viewer.openwith.more') }];
   });
 
   function onOpenWithChange(id: string): void {
@@ -186,14 +187,14 @@
     try {
       const doc = getExportDoc();
       if (!doc) {
-        showNotice('导出快照不可用，请重新打开文件后再试');
+        showNotice(t('viewer.export.snapshotUnavailable'));
         return;
       }
       const html = await assembleExportHtml(doc);
       downloadExport(html, exportFileName(fileMeta.name, 'html'));
-      showNotice('已导出 HTML');
+      showNotice(t('viewer.export.htmlDone'));
     } catch (err) {
-      showNotice(`导出 HTML 失败：${err instanceof Error ? err.message : String(err)}`);
+      showNotice(t('viewer.export.htmlFailed', { message: err instanceof Error ? err.message : String(err) }));
     } finally {
       exportBusy = false;
     }
@@ -207,18 +208,16 @@
       // 主题 WYSIWYG 不走此步）再 collectExportHtml → collectPrintHtml 包打印模板
       const doc = getExportDoc();
       if (!doc) {
-        showNotice('导出快照不可用，请重新打开文件后再试');
+        showNotice(t('viewer.export.snapshotUnavailable'));
         return;
       }
       await repaintMermaidForPrint(doc);
       const printSource = await assembleExportHtml(doc);
       const printHtml = collectPrintHtml(printSource, { page: 'a4' });
-      printDocument(printHtml, () =>
-        showNotice('当前环境无法唤起打印，请改用浏览器菜单打印并另存为 PDF')
-      );
-      showNotice('已唤起系统打印，请在对话框中选择「另存为 PDF」');
+      printDocument(printHtml, () => showNotice(t('viewer.export.printUnavailable')));
+      showNotice(t('viewer.export.printStarted'));
     } catch (err) {
-      showNotice(`导出 PDF 失败：${err instanceof Error ? err.message : String(err)}`);
+      showNotice(t('viewer.export.pdfFailed', { message: err instanceof Error ? err.message : String(err) }));
     } finally {
       exportBusy = false;
     }
@@ -226,17 +225,17 @@
 </script>
 
 <section class="meta-panel">
-  <h2 class="meta-title">属性</h2>
+  <h2 class="meta-title">{t('viewer.meta.title')}</h2>
   {#if fileMeta.name}
     <dl class="meta-list">
-      <div class="meta-row"><dt>名称</dt><dd class="meta-name">{fileMeta.name}</dd></div>
+      <div class="meta-row"><dt>{t('viewer.meta.nameRow')}</dt><dd class="meta-name">{fileMeta.name}</dd></div>
       <div class="meta-row">
-        <dt>打开方式</dt>
+        <dt>{t('viewer.meta.openWithRow')}</dt>
         <dd>
           {#if openWithUi}
             <select
               class="meta-openwith"
-              aria-label="打开方式"
+              aria-label={t('viewer.meta.openWithAria')}
               value={openWithUi.current}
               onchange={(e) => onOpenWithChange(e.currentTarget.value)}
             >
@@ -244,54 +243,54 @@
                 <option value={opt.id}>{opt.label}</option>
               {/each}
             </select>
-            {#if openWithUi.manual}<span class="meta-openwith-manual">（手动）</span>{/if}
+            {#if openWithUi.manual}<span class="meta-openwith-manual">{t('viewer.lang.badgeManual')}</span>{/if}
           {/if}
         </dd>
       </div>
       {#if fileMeta.size !== null}
-        <div class="meta-row"><dt>大小</dt><dd>{fileMeta.size} 字节</dd></div>
+        <div class="meta-row"><dt>{t('viewer.meta.sizeRow')}</dt><dd>{t('viewer.meta.sizeBytes', { size: fileMeta.size })}</dd></div>
       {/if}
       {#if fileMeta.encoding}
-        <div class="meta-row"><dt>编码</dt><dd>{fileMeta.encoding}</dd></div>
+        <div class="meta-row"><dt>{t('viewer.meta.encodingRow')}</dt><dd>{fileMeta.encoding}</dd></div>
       {/if}
       <div class="meta-row">
-        <dt>语言</dt>
+        <dt>{t('viewer.meta.langRow')}</dt>
         <dd>
           <input
             class="meta-lang-input"
             list="vv-lang-datalist"
             value={langOverrideUi.value}
-            placeholder={fileMeta.lang ? `自动（${fileMeta.lang}）` : '自动'}
+            placeholder={fileMeta.lang ? t('viewer.lang.autoDetected', { lang: fileMeta.lang }) : t('viewer.lang.auto')}
             onchange={(e) => onLangCommit((e.currentTarget as HTMLInputElement).value)}
-            aria-label="高亮语言（留空自动检测）"
+            aria-label={t('viewer.lang.inputAria')}
             spellcheck="false"
           />
           <datalist id="vv-lang-datalist">
             {#each langNames as n (n)}<option value={n}></option>{/each}
           </datalist>
-          {#if langOverrideUi.active}<span class="meta-openwith-manual">（手动）</span>{/if}
+          {#if langOverrideUi.active}<span class="meta-openwith-manual">{t('viewer.lang.badgeManual')}</span>{/if}
         </dd>
       </div>
       {#if fileMeta.lines !== null}
-        <div class="meta-row"><dt>行数</dt><dd>{fileMeta.lines}</dd></div>
+        <div class="meta-row"><dt>{t('viewer.meta.linesRow')}</dt><dd>{fileMeta.lines}</dd></div>
       {/if}
       {#if fileMeta.sourceLabel}
-        <div class="meta-row"><dt>来源</dt><dd>{fileMeta.sourceLabel}</dd></div>
+        <div class="meta-row"><dt>{t('viewer.meta.sourceRow')}</dt><dd>{fileMeta.sourceLabel}</dd></div>
       {/if}
     </dl>
     {#if fileMeta.inspector}
       <div class="meta-inspector">
         <div class="meta-inspector-head">
-          <span class="meta-inspector-title">数据检查器</span>
+          <span class="meta-inspector-title">{t('viewer.inspector.title')}</span>
           <span class="meta-inspector-offset">@ 0x{fileMeta.inspector.offset.toString(16)}</span>
           <select
             class="meta-inspector-little"
-            aria-label="字节序"
+            aria-label={t('viewer.inspector.endiannessAria')}
             value={fileMeta.inspector.little ? 'little' : 'big'}
             onchange={(e) => setInspectorLittle(e.currentTarget.value === 'little')}
           >
-            <option value="little">小端</option>
-            <option value="big">大端</option>
+            <option value="little">{t('viewer.inspector.little')}</option>
+            <option value="big">{t('viewer.inspector.big')}</option>
           </select>
         </div>
         <dl class="meta-list">
@@ -305,16 +304,16 @@
     {/if}
     {#if fileMeta.name && exportState.available}
       <div class="meta-export">
-        <span class="meta-export-title">导出</span>
+        <span class="meta-export-title">{t('viewer.export.title')}</span>
         <div class="meta-export-actions">
-          <button type="button" class="meta-export-btn" onclick={onExportHtml} disabled={exportBusy}>导出 HTML</button>
-          <button type="button" class="meta-export-btn" onclick={onExportPdf} disabled={exportBusy}>导出 PDF</button>
+          <button type="button" class="meta-export-btn" onclick={onExportHtml} disabled={exportBusy}>{t('viewer.export.html')}</button>
+          <button type="button" class="meta-export-btn" onclick={onExportPdf} disabled={exportBusy}>{t('viewer.export.pdf')}</button>
         </div>
         {#if exportNotice}<p class="meta-export-notice" role="status">{exportNotice}</p>{/if}
       </div>
     {/if}
   {:else}
-    <p class="meta-empty">未打开文件</p>
+    <p class="meta-empty">{t('viewer.meta.empty')}</p>
   {/if}
 </section>
 

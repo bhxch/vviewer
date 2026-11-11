@@ -413,7 +413,7 @@ describe('requestRange 窗段（PDFDataRangeTransport → ctx.read 换算与交�
     }
     expect(isAbortError(caught)).toBe(true);
     expect((caught as Error).name).toBe('AbortError');
-    expect((caught as Error).message).toBe('读取已取消');
+    expect((caught as Error).message).toBe('Read cancelled');
   });
 });
 

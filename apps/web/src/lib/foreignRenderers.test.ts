@@ -34,6 +34,8 @@ import {
   wireDesignOrDataSeam
 } from './foreignRenderers';
 import type { ForeignAssetPackage } from './foreignAssets';
+// i18n 目录（Task 7 域 D 抽取）：registry label 目录值双锁（getter 派生显示）
+import { messages as zhViewer } from './i18n/catalogs/zh-CN/viewer';
 
 function readViewerSource(): string {
   // vitest 下 import.meta.url 非 file scheme（loader 虚拟协议），按 cwd 双候选兜底
@@ -102,7 +104,7 @@ const EXPECTED_WAVE2: readonly { id: string; extensions: readonly string[] }[] =
 const EXPECTED_ALL: readonly { id: string; extensions: readonly string[] }[] = [...EXPECTED, ...EXPECTED_WAVE2];
 
 describe('createForeignFileRenderers（20 组桥接渲染器）', () => {
-  it('id/label/extensions 逐字（spec §6.3 表 + docx/pptx/xlsx/csv 系所有权）：122 扩展名零重复', () => {
+  it('id/label/extensions 逐字（spec §6.3 表 + docx/pptx/xlsx/csv 系所有权）：122 扩展名零重复；label 目录值双锁（Task 7 域 D getter 派生）', () => {
     const renderers = createForeignFileRenderers({ nestedDispatch: async () => {} });
     expect(renderers).toHaveLength(20);
     const seen = new Set<string>();
@@ -110,6 +112,11 @@ describe('createForeignFileRenderers（20 组桥接渲染器）', () => {
       const r = renderers.find((x) => x.id === expected.id);
       expect(r, expected.id).toBeDefined();
       expect(r!.label, `${expected.id}.label`).toBeTruthy();
+      // label 目录双锁（Task 7）：registry label 经 id 派生显示（getter 现 t()），
+      // zh 值逐字节等价锚定在目录；标识用途恒 id（each key/比较/对象键全 id 化）
+      expect(r!.label, `${expected.id}.label`).toBe(
+        zhViewer[`viewer.renderer.${expected.id}` as keyof typeof zhViewer]
+      );
       expect(r!.extensions, `${expected.id}.extensions`).toEqual([...expected.extensions]);
       expect(r!.streaming, `${expected.id}.streaming`).toBe(false);
       for (const ext of expected.extensions) {
@@ -118,9 +125,17 @@ describe('createForeignFileRenderers（20 组桥接渲染器）', () => {
       }
     }
     expect(seen.size).toBe(122); // 41（第一波）+ docx/pptx/xlsx/xlsm/xls（内置默认改版式/幻灯片/表格还原）+ csv（2026-11-10 自 code 转移）+ 75（第二波，jxl 不绑定）
+    // 双锁完整性：目录 label 键恰 20（id ↔ 键一一对应，FOREIGN_LABEL_KEYS 全量覆盖）
+    expect(Object.keys(zhViewer).filter((k) => k.startsWith('viewer.renderer.'))).toHaveLength(20);
   });
 
-  it('渲染器对象不携带 mount 装配外的可预期面（label 中文、extensions 小写无点）', () => {
+  it('渲染器对象不携带 mount 装配外的可预期面（label 目录 getter 派生、extensions 小写无点）', () => {
+    // Task 7 静态锚：label 不再是字面量——FOREIGN_GROUPS 无 label 字段、getter 派生
+    //（读取时现 t()，装配时刻不锁定 zh）；标识面（each key/比较/对象键）恒 id
+    const src = readForeignSource();
+    expect(src).not.toMatch(/label: '[^']*[\u4e00-\u9fff]/u);
+    expect(src).toMatch(/get label\(\) \{[\s\S]{0,200}return t\(FOREIGN_LABEL_KEYS\[g\.id as keyof typeof FOREIGN_LABEL_KEYS\]\);/);
+    expect(src).toMatch(/as const satisfies Record<\(typeof FOREIGN_GROUPS\)\[number\]\['id'\], MessageKey>/);
     const renderers = createForeignFileRenderers({ nestedDispatch: async () => {} });
     for (const r of renderers) {
       for (const ext of r.extensions) {

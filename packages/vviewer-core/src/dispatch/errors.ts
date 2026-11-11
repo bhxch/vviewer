@@ -33,10 +33,24 @@ export class DispatchReadError extends Error {
 }
 
 /**
+ * 错误卡空文案兜底的注入缝（i18n Task 7 域 D）：本包保持零 i18n 依赖（依赖方向
+ * apps/web → core 不反转），apps/web 装配时（viewer.ts）注入目录 getter——错误卡
+ * 构造时刻现取当下 locale。缺省英文 'Render failed' 供包内独立消费（无人注入面；
+ * apps/web 恒注入故渲染输出恒走目录）。形态对齐 setHexFallbackRenderer 注入先例。
+ */
+let renderFailedText: () => string = () => 'Render failed';
+
+/** 注入空文案兜底 getter（apps/web 装配点消费；传 null 恢复缺省）。 */
+export function setRenderFailedText(getter: (() => string) | null): void {
+  renderFailedText = getter ?? (() => 'Render failed');
+}
+
+/**
  * 错误卡文案提取：Error 取 message；带 string message 的普通对象同取 message（桥接的
  * 上游渲染器会抛非 Error 的诊断对象，如 file-viewer pptx 的 PptxDiagnosticError
  * `{name, code, message}`——String() 只得到「[object Object]」）；无 message 的对象
- * JSON 序列化（循环引用等不可序列化回落 String()）；空文案回落「渲染失败」。
+ * JSON 序列化（循环引用等不可序列化回落 String()）；空文案回落注入的兜底文案
+ * （setRenderFailedText，apps/web 目录值「渲染失败」）。
  */
 export function errorMessageOf(err: unknown): string {
   let msg: string;
@@ -50,13 +64,15 @@ export function errorMessageOf(err: unknown): string {
       msg = String(err);
     }
   } else msg = String(err);
-  return msg === '' ? '渲染失败' : msg;
+  return msg === '' ? renderFailedText() : msg;
 }
 
 /** 统一抛出形态（Task 1 既有约定的单源化）：tree 层 localFiles/singleFile/localFs
- * 预 abort 抛出的既定形态（isAbortError 身份判定恒静默不误吞读失败）。 */
+ * 预 abort 抛出的既定形态（isAbortError 身份判定恒静默不误吞读失败）。message 为
+ * 内部身份携带面（判定只看 name='AbortError'；abort 分类恒静默不上屏——i18n 抽取
+ * 面外，与仓库日志串英文化同口径记档）。 */
 export function abortReadError(): Error {
-  return new DOMException('读取已取消', 'AbortError');
+  return new DOMException('Read cancelled', 'AbortError');
 }
 
 export type DispatchErrorKind = 'abort' | 'read' | 'generic';

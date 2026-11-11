@@ -16,6 +16,9 @@ import {
   type ProgressSnapshot
 } from './downloadProgress';
 import { displayEndpointForStore, resetMountRecordCacheForTests, saveDirectMount, type DirectMountRecord } from './mountsSync';
+// i18n 目录（Task 7 域 D 抽取）：进度卡文案目录双锁
+import { messages as zhViewer } from './i18n/catalogs/zh-CN/viewer';
+import { messages as zhTabs } from './i18n/catalogs/zh-CN/tabs';
 
 // vitest 会转译 import.meta.url（metaStore.test 同款处理）：双 cwd 兼容根/apps/web
 function readSrc(relFromWeb: string): string {
@@ -47,6 +50,11 @@ describe('dlLoadedLine（已下载行：total 已知/不定态双形态，spec �
     expect(dlLoadedLine(snap({ totalText: null, ratio: null, etaText: null }))).toBe(
       '已下载 2.0 MB（总大小未知）'
     );
+  });
+
+  it('目录 zh 值字节锁（Task 7 域 D 双锁）：loadedLine/loadedLineUnknown 与运行时输出同源', () => {
+    expect(zhViewer['viewer.dl.loadedLine']).toBe('已下载 {loaded} / {total}');
+    expect(zhViewer['viewer.dl.loadedLineUnknown']).toBe('已下载 {loaded}（总大小未知）');
   });
 });
 
@@ -124,15 +132,15 @@ describe('DownloadProgressCard 骨架（spec §6.4 字段全锚）', () => {
     expect(src).toMatch(/oncancel: \(\) => void/);
   });
 
-  it('字段全锚：地址行/进度条（ratio 宽度）/已下载行（dlLoadedLine）/速度/ETA/取消钮', () => {
+  it('字段全锚：地址行/进度条（ratio 宽度）/已下载行（dlLoadedLine）/速度/ETA/取消钮（Task 7 取消钮文案目录键双锁）', () => {
     expect(src).toMatch(/vv-dl-progress-address/);
     expect(src).toMatch(/vv-dl-progress-fill/);
     expect(src).toMatch(/style:width/);
     expect(src).toMatch(/\{dlLoadedLine\(snapshot\)\}/);
     expect(src).toMatch(/snapshot\.speedText/);
     expect(src).toMatch(/snapshot\.etaText/);
-    expect(src).toContain('>取消</button>');
-    expect(src).toMatch(/onclick=\{oncancel\}/);
+    expect(src).toMatch(/onclick=\{oncancel\}>{t\('viewer\.dl\.cancel'\)\}/);
+    expect(zhViewer['viewer.dl.cancel']).toBe('取消');
   });
 
   it('不定态：ratio null → 进度条 indeterminate 修饰类、fill 不渲染；speed/eta 行按 null 隐藏', () => {
@@ -147,9 +155,12 @@ describe('DownloadProgressCard 骨架（spec §6.4 字段全锚）', () => {
     expect(src).toMatch(/role="status"/);
   });
 
-  it('ETA 文案形态（评审 M-4）：未稳「计算中」不带「剩余」前缀，真实 ETA 保持「剩余 X」', () => {
-    expect(src).toMatch(/ETA_PENDING_TEXT/);
-    expect(src).toMatch(/`剩余 \$\{snapshot\.etaText\}`/);
+  it('ETA 文案形态（评审 M-4）：未稳「计算中」不带「剩余」前缀，真实 ETA 保持「剩余 X」（Task 7 目录键形态双锁）', () => {
+    expect(src).toMatch(/etaPendingText\(\)/);
+    expect(src).toMatch(/snapshot\.etaText === etaPendingText\(\) \? etaPendingText\(\)/);
+    expect(src).toMatch(/t\('viewer\.dl\.etaRemaining', \{ eta: snapshot\.etaText \}\)/);
+    expect(zhViewer['viewer.dl.etaPending']).toBe('计算中');
+    expect(zhViewer['viewer.dl.etaRemaining']).toBe('剩余 {eta}');
   });
 
   it('进度条读屏可达（评审 M-5）：role=progressbar + valuemin/max 恒挂，valuenow 仅定态（不定态省略）', () => {
@@ -165,15 +176,17 @@ describe('DownloadProgressCard 骨架（spec §6.4 字段全锚）', () => {
 describe('DownloadProgressCard 完成态骨架（Task 7 双动作之一）', () => {
   const src = readSrc('src/lib/DownloadProgressCard.svelte');
 
-  it('done 形态：标题「下载完成」+ 文件名/总大小 + 另存为/关闭双动作（onsaveas/onclose 上抛）', () => {
+  it('done 形态：标题「下载完成」+ 文件名/总大小 + 另存为/关闭双动作（onsaveas/onclose 上抛；Task 7 目录键形态双锁）', () => {
     expect(src).toMatch(/vv-dl-progress-done/);
-    expect(src).toContain('下载完成');
+    expect(src).toMatch(/aria-label=\{t\('viewer\.dl\.done'\)\}/);
+    expect(src).toContain("{t('viewer.dl.done')}");
+    expect(zhViewer['viewer.dl.done']).toBe('下载完成');
     expect(src).toMatch(/done\.name/);
     expect(src).toMatch(/\{#if done\.totalText !== null\}/);
-    expect(src).toContain('>另存为</button>');
-    expect(src).toContain('>关闭</button>');
-    expect(src).toMatch(/onclick=\{onsaveas\}/);
-    expect(src).toMatch(/onclick=\{onclose\}/);
+    expect(src).toMatch(/onclick=\{onsaveas}>{t\('viewer\.dl\.saveAs'\)}/);
+    expect(src).toMatch(/onclick=\{onclose}>{t\('viewer\.dl\.close'\)}/);
+    expect(zhViewer['viewer.dl.saveAs']).toBe('另存为');
+    expect(zhViewer['viewer.dl.close']).toBe('关闭');
   });
 
   it('形态互斥：done 非 null 走完成态分支，snapshot 行（进度条/取消钮）仅在下载中分支', () => {
@@ -253,8 +266,10 @@ describe('ViewerPane 另存为接线（Task 7）', () => {
     expect(src).toMatch(/savePick\.key === dlKey \? savePick\.handle : null/);
     expect(src).toMatch(/const writable = await saveHandle\.createWritable\(\)\.catch\(\(\) => null\);/);
     expect(src).toMatch(/if \(writable !== null\) \{/);
-    // 终审修复波 M-3：降级不静默——状态条告知（picker 已选目标但盘上无产出无提示的面收口）
-    expect(src).toMatch(/showStatusNotice\('直写落盘通道开启失败，已降级为普通下载'\)/);
+    // 终审修复波 M-3：降级不静默——状态条告知（picker 已选目标但盘上无产出无提示的
+    // 面收口；Task 7 文案迁目录键双锁）
+    expect(src).toMatch(/showStatusNotice\(t\('viewer\.dl\.directWriteFailed'\)\)/);
+    expect(zhViewer['viewer.dl.directWriteFailed']).toBe('直写落盘通道开启失败，已降级为普通下载');
   });
 
   it('「下载并另存为」自持泵 tee（评审 M-1）：pumpToWritable 限定泵通道 + dispatch 转 buffer 直传（探测窗/按需窗不进 tee）', () => {
@@ -271,15 +286,16 @@ describe('ViewerPane 另存为接线（Task 7）', () => {
     expect(src).toMatch(/void writable\.abort\(\)\.catch\(\(\) => \{\}\);[\s\S]{0,80}throw err;/);
   });
 
-  it('完成态「另存为」走 saveAsTab 统一管线（确认门自动放行——已下载过一次）；失败上状态栏', () => {
+  it('完成态「另存为」走 saveAsTab 统一管线（确认门自动放行——已下载过一次）；失败上状态栏（Task 7 目录键形态双锁）', () => {
     expect(src).toMatch(/await saveAsTab\(t, \{/);
     expect(src).toMatch(/confirm: \(\) => true/);
-    expect(src).toMatch(/showStatusNotice\(`另存为失败：/);
+    expect(src).toMatch(/showStatusNotice\(saveAsFailedNotice\(/);
     // 终审修复波 I-1：自持取消柄作 hooks.signal（泵取消不动 effectAbort），取消落 abort 身份静默
     expect(src).toMatch(/const pumpAbort = new AbortController\(\);/);
     expect(src).toMatch(/signal: pumpAbort\.signal/);
     expect(src).toMatch(/dlAbort = pumpAbort;/);
-    expect(src).toMatch(/if \(!isAbortError\(err\)\) showStatusNotice\(`另存为失败：/);
+    expect(src).toMatch(/if \(!isAbortError\(err\)\)\s*\n\s*showStatusNotice\(saveAsFailedNotice\(/);
+    expect(zhTabs['tabs.ctx.saveAsFailed']).toMatch(/^另存为失败：\{message\}$/);
   });
 
   it('进度反馈接线（评审 I-3）：完成态另存为远端重下复用进度卡通道（dlProgress/dlAddress 直写，finally 卸卡）', () => {

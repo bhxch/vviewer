@@ -7,7 +7,7 @@
   import { badgeOf } from './tabBadge';
   import { formatBytes } from './storageHealth';
   import { isRemoteDownload } from './downloadProgress';
-  import { SAVE_DENIED_NOTICE, saveAsDisabledOf, saveAsTab } from './saveAs';
+  import { saveDeniedNotice, saveAsDisabledOf, saveAsTab } from './saveAs';
   import { registry } from './viewer';
   import { rendererCandidatesOfTab } from './RendererPickerMenu';
   import { requestMetaLangFocus } from './metaLangFocus';
@@ -191,7 +191,7 @@
         // WorkspaceList/FileTree 同款原生确认先例）：门拒绝 = cancelled 静默。
         // picker 关闭双语义：AbortError（用户主动关对话框）静默；NotAllowedError
         // （浏览器拒绝授权/激活过期——用户没关任何对话框却回到原状）'denied' →
-        // 状态条固定文案提示（SAVE_DENIED_NOTICE 单源）。
+        // 状态条固定文案提示（saveDeniedNotice 单源）。
         // 进度反馈（评审 I-3）：dlProgress 为 ViewerPane 渲染 effect 私有装配面、
         // 跨组件无复用缝——本路径取轻量状态条（远端重下开始/完成一次性提示，本地
         // 在手读零开始提示）；数值进度面为完成态卡路径专属（ViewerPane 内
@@ -212,7 +212,7 @@
           })
             .then((r) => {
               if (r === 'saved') showStatusNotice(t('tabs.ctx.saveAsSaved', { name: tab.source.name }));
-              else if (r === 'denied') showStatusNotice(SAVE_DENIED_NOTICE);
+              else if (r === 'denied') showStatusNotice(saveDeniedNotice());
               // 'cancelled'（用户主动取消）：静默维持现状
             })
             .catch((err: unknown) => {

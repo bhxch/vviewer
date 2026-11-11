@@ -9,7 +9,7 @@ import {
 
 describe('classifyDispatchError（错误身份与字节映射：纯身份三分类）', () => {
   it('AbortError 双形态 → abort（jsdom DOMException 非 Error 子类环境兜底形态并判）', () => {
-    expect(classifyDispatchError(new DOMException('读取已取消', 'AbortError'))).toBe('abort');
+    expect(classifyDispatchError(new DOMException('Read cancelled', 'AbortError'))).toBe('abort');
     expect(classifyDispatchError(Object.assign(new Error('x'), { name: 'AbortError' }))).toBe('abort');
   });
 
@@ -28,10 +28,10 @@ describe('classifyDispatchError（错误身份与字节映射：纯身份三分�
     expect(classifyDispatchError(undefined)).toBe('generic');
   });
 
-  it('abortReadError：统一抛出形态（DOMException AbortError「读取已取消」，isAbortError 恒真）', () => {
+  it('abortReadError：统一抛出形态（DOMException AbortError「Read cancelled」，isAbortError 恒真；message 为内部身份携带面不上屏，i18n Task 7 同日志串英文化口径）', () => {
     const e = abortReadError();
     expect(e.name).toBe('AbortError');
-    expect(e.message).toBe('读取已取消');
+    expect(e.message).toBe('Read cancelled');
     expect(isAbortError(e)).toBe(true);
   });
 });
@@ -41,12 +41,12 @@ describe('errorMessageOf（错误卡文案提取）', () => {
     expect(errorMessageOf(new Error('boom'))).toBe('boom');
     expect(errorMessageOf({ name: 'PptxDiagnosticError', message: '解析失败' })).toBe('解析失败');
   });
-  it('无 message 的对象序列化；基础类型 String()；空串回落通用文案', () => {
+  it('无 message 的对象序列化；基础类型 String()；空串回落注入兜底缺省（apps/web 装配注入目录值「渲染失败」，包内缺省英文）', () => {
     expect(errorMessageOf({ code: 42 })).toBe('{"code":42}');
     expect(errorMessageOf('raw')).toBe('raw');
     expect(errorMessageOf(undefined)).toBe('undefined');
-    expect(errorMessageOf(new Error(''))).toBe('渲染失败');
-    expect(errorMessageOf({ message: '' })).toBe('渲染失败');
+    expect(errorMessageOf(new Error(''))).toBe('Render failed');
+    expect(errorMessageOf({ message: '' })).toBe('Render failed');
   });
   it('不可序列化对象（循环引用）回落 String()', () => {
     const o: { self?: unknown } = {};

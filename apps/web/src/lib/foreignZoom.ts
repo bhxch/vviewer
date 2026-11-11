@@ -90,7 +90,7 @@ export function wireForeignZoom(target: HTMLElement, provider: ForeignZoomProvid
       provider.setZoom(next);
     } catch (error) {
       // provider 异常不毒化接线（渲染器内部错误自有错误面）——记录后照常续帧
-      console.error('[vviewer] foreign zoom provider 调用失败', error);
+      console.error('[vviewer] foreign zoom provider call failed', error);
     }
   };
 

@@ -21,6 +21,8 @@
 import { displayEndpoint } from './mountsSync';
 import { formatBytes } from './storageHealth';
 import { sourceKindOf } from './workspaceStore';
+// 纯层 i18n（Task 7 域 D）：卡片行级文案调用时刻取当下 locale（非响应式）
+import { translate as t } from './i18n/core';
 
 // 字节格式化单源转发（评审 I-1）：实现只在 storageHealth（B/KB/MB/GB/TB），本模块
 // 保留 formatBytes 既有导出面供测试/消费方直引——不再持有第二实现。
@@ -62,8 +64,8 @@ const DEFAULT_THROTTLE_MS = 200; // spec §6.4：节流 ~200ms
  * T3 报告移交的拼装面（快照只给 loadedText，括注由本层依 totalText===null 补齐）。 */
 export function dlLoadedLine(snap: ProgressSnapshot): string {
   return snap.totalText === null
-    ? `已下载 ${snap.loadedText}（总大小未知）`
-    : `已下载 ${snap.loadedText} / ${snap.totalText}`;
+    ? t('viewer.dl.loadedLineUnknown', { loaded: snap.loadedText })
+    : t('viewer.dl.loadedLine', { loaded: snap.loadedText, total: snap.totalText });
 }
 
 /** 进度卡「地址」行（spec §6.4：脱敏 display endpoint + path）：endpoint 缺席
@@ -87,23 +89,27 @@ export function isRemoteDownload(storeId: string): boolean {
   return kind === 'remote' || kind === 'direct';
 }
 
-/** ETA 未稳/停滞的占位文案（下载进度卡以此区分无前缀占位与「剩余 X」真实 ETA，M-4） */
-export const ETA_PENDING_TEXT = '计算中';
+/** ETA 未稳/停滞的占位文案（下载进度卡以此区分无前缀占位与「剩余 X」真实 ETA，M-4）。
+ * 原 ETA_PENDING_TEXT 常量（Task 7 抽取改函数——目录键调用时刻取值；快照值与
+ * 组件侧比较恒用本函数（同 locale 同值），身份比较语义保持）。 */
+export function etaPendingText(): string {
+  return t('viewer.dl.etaPending');
+}
 
 /** ETA 文案：整秒进位；<60s 秒、<1h 分秒、其余时分（余数四舍五入，60 进位收敛） */
 function formatEta(seconds: number): string {
-  if (seconds <= 0) return '0 秒';
-  if (seconds < 60) return `${Math.ceil(seconds)} 秒`;
+  if (seconds <= 0) return t('viewer.dl.etaSeconds', { n: 0 });
+  if (seconds < 60) return t('viewer.dl.etaSeconds', { n: Math.ceil(seconds) });
   if (seconds < 3600) {
     const m = Math.floor(seconds / 60);
     const r = Math.round(seconds - m * 60);
-    if (r === 60) return `${m + 1} 分`;
-    return r > 0 ? `${m} 分 ${r} 秒` : `${m} 分`;
+    if (r === 60) return t('viewer.dl.etaMinutes', { m: m + 1 });
+    return r > 0 ? t('viewer.dl.etaMinSec', { m, r }) : t('viewer.dl.etaMinutes', { m });
   }
   const h = Math.floor(seconds / 3600);
   const m = Math.round((seconds - h * 3600) / 60);
-  if (m === 60) return `${h + 1} 小时`;
-  return m > 0 ? `${h} 小时 ${m} 分` : `${h} 小时`;
+  if (m === 60) return t('viewer.dl.etaHours', { h: h + 1 });
+  return m > 0 ? t('viewer.dl.etaHourMin', { h, m }) : t('viewer.dl.etaHours', { h });
 }
 
 interface Sample {
@@ -146,7 +152,7 @@ export function createProgressTracker(
       const remaining = total! - loaded;
       if (remaining <= 0) etaText = formatEta(0);
       else if (speed !== null && speed > 0) etaText = formatEta(remaining / speed);
-      else etaText = ETA_PENDING_TEXT;
+      else etaText = etaPendingText();
     }
     return {
       loadedText: formatBytes(loaded),
@@ -163,10 +169,10 @@ export function createProgressTracker(
       if (finished) return;
       loaded = nextLoaded;
       if (nextTotal !== null) total = nextTotal; // total 一旦上报不回退 null（事件流定态）
-      const t = now(); // 每 update 只取一个时刻（假时钟语义）
-      samples.push({ t, loaded: nextLoaded });
-      if (t - lastTickAt >= throttleMs) {
-        lastTickAt = t;
+      const stamp = now(); // 每 update 只取一个时刻（假时钟语义）
+      samples.push({ t: stamp, loaded: nextLoaded });
+      if (stamp - lastTickAt >= throttleMs) {
+        lastTickAt = stamp;
         onTick(snapshot());
       }
     },

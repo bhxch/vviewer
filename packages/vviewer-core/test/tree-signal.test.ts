@@ -52,10 +52,10 @@ describe('store read 的 signal 取消语义', () => {
     // 错误身份可判别（Task 3 渲染器按 err.name === 'AbortError' 区分取消与读失败）
     await expect(
       store.read('a.txt', { signal: controller.signal })
-    ).rejects.toMatchObject({ name: 'AbortError', message: '读取已取消' });
+    ).rejects.toMatchObject({ name: 'AbortError', message: 'Read cancelled' });
   });
 
-  it('localFs：signal 预先 aborted → 立即 reject（读取已取消，localFiles 同款入口截断）', async () => {
+  it('localFs：signal 预先 aborted → 立即 reject（Read cancelled，localFiles 同款入口截断）', async () => {
     // File System Access handle 最小 mock 面：read 入口在 resolve 之前即截断，
     // 目录句柄只需 kind/name 满足构造；values() 供 resolve 可达性兜底
     const fileHandle = {
@@ -77,6 +77,6 @@ describe('store read 的 signal 取消语义', () => {
     // DOMException 形态）——message 不变，name 可判别（isAbortError 同源判定消费面）
     await expect(
       store.read('a.txt', { signal: controller.signal })
-    ).rejects.toMatchObject({ name: 'AbortError', message: '读取已取消' });
+    ).rejects.toMatchObject({ name: 'AbortError', message: 'Read cancelled' });
   });
 });

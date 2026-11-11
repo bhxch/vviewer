@@ -20,6 +20,7 @@ import { VV_FOCUS_META_LANG, requestMetaLangFocus } from './metaLangFocus';
 // i18n 目录（Task 4 域 A 抽取）：TabBar 语言轻入口文案迁入目录，锚改指 t() key +
 // zh 值逐字节等价（ViewerPane 状态栏浮层文案属域 D，Task 7 抽取，其锚不动）
 import { messages as zhTabs } from './i18n/catalogs/zh-CN/tabs';
+import { messages as zhViewer } from './i18n/catalogs/zh-CN/viewer';
 
 // vitest 会转译 import.meta.url（watchHealth.test.ts 同款双 cwd 兼容根/apps/web）
 function readSrc(relFromWeb: string): string {
@@ -56,22 +57,28 @@ describe('metaLangFocus 通道（行为直测，jsdom）', () => {
 describe('ViewerPane 状态栏浮层语言项（Task 6 源码契约锚）', () => {
   const src = readSrc('src/lib/ViewerPane.svelte');
 
-  it('浮层尾部固定项：.vv-status-picker-lang + role=menuitem + 文案「语言：{langOverrideText}」', () => {
+  it('浮层尾部固定项：.vv-status-picker-lang + role=menuitem + 文案「语言：{text}」（Task 7 域 D 目录键形态双锁）', () => {
     const picker = fnWindow(src, /<div class="vv-status-picker"[\s\S]*?<\/div>/);
     expect(picker).toContain('class="vv-status-picker-lang"');
     expect(picker).toContain('role="menuitem"');
-    expect(picker).toContain('语言：{langOverrideText}');
+    expect(picker).toContain("{t('viewer.lang.entry', { text: langOverrideText })}");
+    expect(zhViewer['viewer.lang.entry']).toBe('语言：{text}');
     // 固定项在候选 {#each} 之后（菜单尾部，非候选菜单成员）
     expect(picker.indexOf('{/each}')).toBeLessThan(picker.indexOf('vv-status-picker-lang'));
   });
 
-  it('langOverrideText 派生：overrideLang → 「（手动）」，否则 fileMeta.lang 回显、缺省「自动」', () => {
+  it('langOverrideText 派生：overrideLang → 「（手动）」，否则 fileMeta.lang 回显、缺省「自动」（Task 7 目录键形态双锁）', () => {
     const derived = fnWindow(
       src,
       /const langOverrideText = \$derived\.by\(\(\) => \{[\s\S]*?\n {2}\}\);/
     );
-    expect(derived).toContain('if (t?.overrideLang) return `${t.overrideLang}（手动）`;');
-    expect(derived).toContain("return fileMeta.lang ? `自动（检测 ${fileMeta.lang}）` : '自动';");
+    expect(derived).toContain("if (tab?.overrideLang) return t('viewer.lang.manual', { lang: tab.overrideLang });");
+    expect(derived).toContain(
+      "return fileMeta.lang ? t('viewer.lang.autoDetect', { lang: fileMeta.lang }) : t('viewer.lang.auto');"
+    );
+    expect(zhViewer['viewer.lang.manual']).toBe('{lang}（手动）');
+    expect(zhViewer['viewer.lang.autoDetect']).toBe('自动（检测 {lang}）');
+    expect(zhViewer['viewer.lang.auto']).toBe('自动');
   });
 
   it('focusMetaLang 只派发单通道（关浮层 + requestMetaLangFocus），无通道字面量/候选计算复制', () => {

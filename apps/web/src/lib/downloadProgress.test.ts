@@ -166,3 +166,19 @@ describe('createProgressTracker——pumped 泵参与标志（终审修复波 I-
     expect(tracker.pumped).toBe(true);
   });
 });
+
+// 目录 zh 值字节锁（Task 7 域 D 双锁）：ETA 族文案迁目录后，运行时断言（上方各
+// it 的「计算中」「2 分 15 秒」等 zh 输出）与此处目录值同源钉死——文案漂移即红。
+describe('ETA/已下载行文案目录双锁（Task 7 域 D）', () => {
+  it('viewer.dl.eta* / loadedLine* 键值逐字节', async () => {
+    const { messages: zhViewer } = await import('./i18n/catalogs/zh-CN/viewer');
+    expect(zhViewer['viewer.dl.etaPending']).toBe('计算中');
+    expect(zhViewer['viewer.dl.etaSeconds']).toBe('{n} 秒');
+    expect(zhViewer['viewer.dl.etaMinutes']).toBe('{m} 分');
+    expect(zhViewer['viewer.dl.etaMinSec']).toBe('{m} 分 {r} 秒');
+    expect(zhViewer['viewer.dl.etaHours']).toBe('{h} 小时');
+    expect(zhViewer['viewer.dl.etaHourMin']).toBe('{h} 小时 {m} 分');
+    expect(zhViewer['viewer.dl.loadedLine']).toBe('已下载 {loaded} / {total}');
+    expect(zhViewer['viewer.dl.loadedLineUnknown']).toBe('已下载 {loaded}（总大小未知）');
+  });
+});

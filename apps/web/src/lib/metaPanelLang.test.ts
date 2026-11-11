@@ -16,6 +16,8 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+// i18n 目录（Task 7 域 D 抽取）：语言行文案目录双锁
+import { messages as zhViewer } from './i18n/catalogs/zh-CN/viewer';
 
 // vitest 会转译 import.meta.url（watchHealth.test.ts 同款双 cwd 兼容根/apps/web）
 function readSrc(relFromWeb: string): string {
@@ -65,16 +67,24 @@ describe('MetaPanel 语言行（Task 5 源码契约锚）', () => {
     expect(derived).toContain("tabStore.list.find((t) => t.active)");
     expect(derived).toContain('tab?.overrideLang ?? \'\'');
     expect(derived).toContain('tab?.overrideLang !== undefined');
-    // 徽标复用打开方式行的既有类（（手动）文案同款）
-    expect(src).toContain('{#if langOverrideUi.active}<span class="meta-openwith-manual">（手动）</span>{/if}');
+    // 徽标复用打开方式行的既有类（（手动）文案同款；Task 7 域 D 目录键形态双锁）
+    expect(src).toContain(
+      "{#if langOverrideUi.active}<span class=\"meta-openwith-manual\">{t('viewer.lang.badgeManual')}</span>{/if}"
+    );
+    expect(zhViewer['viewer.lang.badgeManual']).toBe('（手动）');
   });
 
-  it('placeholder 回显自动检测语言（嗅探不回写既有现状）：fileMeta.lang 缺省「自动」', () => {
-    expect(src).toContain("placeholder={fileMeta.lang ? `自动（${fileMeta.lang}）` : '自动'}");
+  it('placeholder 回显自动检测语言（嗅探不回写既有现状）：fileMeta.lang 缺省「自动」（Task 7 目录键形态双锁）', () => {
+    expect(src).toContain(
+      "placeholder={fileMeta.lang ? t('viewer.lang.autoDetected', { lang: fileMeta.lang }) : t('viewer.lang.auto')}"
+    );
+    expect(zhViewer['viewer.lang.autoDetected']).toBe('自动（{lang}）');
+    expect(zhViewer['viewer.lang.auto']).toBe('自动');
   });
 
-  it('a11y 面：aria-label「高亮语言（留空自动检测）」+ spellcheck=false', () => {
-    expect(src).toContain('aria-label="高亮语言（留空自动检测）"');
+  it('a11y 面：aria-label「高亮语言（留空自动检测）」+ spellcheck=false（Task 7 目录键形态双锁）', () => {
+    expect(src).toContain("aria-label={t('viewer.lang.inputAria')}");
+    expect(zhViewer['viewer.lang.inputAria']).toBe('高亮语言（留空自动检测）');
     expect(src).toContain('spellcheck="false"');
   });
 });

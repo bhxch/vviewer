@@ -13,7 +13,8 @@
   // 卸载锚；浮层不占布局，内容渲染并行接管）。纯展示组件：快照进、DOM 出，无本地
   // 状态（根 vitest 无 svelte 插件不可挂载，字段契约由 downloadProgressUi.test.ts
   // 源码断言锁定，运行时行为 e2e 兜底）。
-  import { dlLoadedLine, ETA_PENDING_TEXT, type ProgressSnapshot } from './downloadProgress';
+  import { dlLoadedLine, etaPendingText, type ProgressSnapshot } from './downloadProgress';
+  import { t } from './i18n/index.svelte';
 
   let {
     snapshot,
@@ -35,23 +36,23 @@
 </script>
 
 {#if done !== null}
-  <div class="vv-dl-progress vv-dl-progress-done" role="status" aria-label="下载完成">
+  <div class="vv-dl-progress vv-dl-progress-done" role="status" aria-label={t('viewer.dl.done')}>
     <div class="vv-dl-progress-head">
-      <span class="vv-dl-progress-title">下载完成</span>
+      <span class="vv-dl-progress-title">{t('viewer.dl.done')}</span>
       <span class="vv-dl-progress-address" title={done.name}>{done.name}</span>
     </div>
     {#if done.totalText !== null}
-      <div class="vv-dl-progress-meta"><span class="vv-dl-progress-loaded">共 {done.totalText}</span></div>
+      <div class="vv-dl-progress-meta"><span class="vv-dl-progress-loaded">{t('viewer.dl.totalLine', { total: done.totalText })}</span></div>
     {/if}
     <div class="vv-dl-progress-actions">
-      <button type="button" class="vv-dl-progress-saveas" onclick={onsaveas}>另存为</button>
-      <button type="button" class="vv-dl-progress-close" onclick={onclose}>关闭</button>
+      <button type="button" class="vv-dl-progress-saveas" onclick={onsaveas}>{t('viewer.dl.saveAs')}</button>
+      <button type="button" class="vv-dl-progress-close" onclick={onclose}>{t('viewer.dl.close')}</button>
     </div>
   </div>
 {:else if snapshot !== null}
-  <div class="vv-dl-progress" role="status" aria-label="正在下载">
+  <div class="vv-dl-progress" role="status" aria-label={t('viewer.dl.active')}>
     <div class="vv-dl-progress-head">
-      <span class="vv-dl-progress-title">正在下载</span>
+      <span class="vv-dl-progress-title">{t('viewer.dl.active')}</span>
       <span class="vv-dl-progress-address" title={address}>{address}</span>
     </div>
     <!-- 进度条：ratio 有值 = 确定态（宽度驱动 + valuenow 定态回显）；null = 不定态
@@ -61,7 +62,7 @@
       class="vv-dl-progress-bar"
       class:vv-dl-progress-bar-indeterminate={snapshot.ratio === null}
       role="progressbar"
-      aria-label="下载进度"
+      aria-label={t('viewer.dl.progressAria')}
       aria-valuemin="0"
       aria-valuemax="100"
       aria-valuenow={snapshot.ratio === null ? undefined : Math.round(snapshot.ratio * 100)}
@@ -73,8 +74,8 @@
     <div class="vv-dl-progress-meta">
       <span class="vv-dl-progress-loaded">{dlLoadedLine(snapshot)}</span>
       {#if snapshot.speedText !== null}<span class="vv-dl-progress-speed">{snapshot.speedText}</span>{/if}
-      {#if snapshot.etaText !== null}<span class="vv-dl-progress-eta">{snapshot.etaText === ETA_PENDING_TEXT ? ETA_PENDING_TEXT : `剩余 ${snapshot.etaText}`}</span>{/if}
+      {#if snapshot.etaText !== null}<span class="vv-dl-progress-eta">{snapshot.etaText === etaPendingText() ? etaPendingText() : t('viewer.dl.etaRemaining', { eta: snapshot.etaText })}</span>{/if}
     </div>
-    <button type="button" class="vv-dl-progress-cancel" onclick={oncancel}>取消</button>
+    <button type="button" class="vv-dl-progress-cancel" onclick={oncancel}>{t('viewer.dl.cancel')}</button>
   </div>
 {/if}

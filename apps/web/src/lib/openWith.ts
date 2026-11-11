@@ -4,6 +4,8 @@
 // 运行时模块（根 vitest 无 svelte 插件，先例见 metaStore.test.ts）。
 import type { Registry } from '@bhxch/vviewer-core';
 import type { FileOpenWith } from './metaStore.svelte';
+// 纯层 i18n（Task 7 域 D）：首项「自动（按扩展名）」文案调用时刻取当下 locale
+import { translate as t } from './i18n/core';
 
 /** 候选 =「自动」+ 生效渲染器 ∪ 扩展名注册渲染器（所有者与 altExtensions 候选声明者）
  * ∪ code/markdown/hex（去重）。
@@ -18,7 +20,7 @@ export function openWithOf(
   detExt: string
 ): FileOpenWith {
   const seen = new Set<string>(['']);
-  const options: { id: string; label: string }[] = [{ id: '', label: '自动（按扩展名）' }];
+  const options: { id: string; label: string }[] = [{ id: '', label: t('viewer.openwith.auto') }];
   const push = (id: string): void => {
     if (seen.has(id)) return;
     const r = registry.byId(id);

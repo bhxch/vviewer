@@ -6,6 +6,8 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+// i18n 目录（Task 7 域 D 抽取）：导出区文案目录双锁
+import { messages as zhViewer } from './i18n/catalogs/zh-CN/viewer';
 
 // vitest 会转译 import.meta.url（metaStore.test 同款处理）：双 cwd 兼容根/apps/web
 function readSrc(relFromWeb: string): string {
@@ -16,13 +18,15 @@ function readSrc(relFromWeb: string): string {
 }
 
 describe('导出动作区可见性契约（仅 markdown 渲染 tab 显示）', () => {
-  it('MetaPanel：导出区以 exportState.available 门控（markdown 实例句柄可得才渲染），非 markdown tab 不出现', () => {
+  it('MetaPanel：导出区以 exportState.available 门控（markdown 实例句柄可得才渲染），非 markdown tab 不出现（Task 7 目录键形态双锁）', () => {
     const src = readSrc('src/lib/MetaPanel.svelte');
     // 门控：句柄可用 + 文件名在（标题所需）才渲染动作区
     expect(src).toMatch(/\{#if fileMeta\.name && exportState\.available\}/);
-    // 两钮与处理器
-    expect(src).toContain('导出 HTML');
-    expect(src).toContain('导出 PDF');
+    // 两钮与处理器（Task 7 文案迁目录键）
+    expect(src).toContain("{t('viewer.export.html')}");
+    expect(src).toContain("{t('viewer.export.pdf')}");
+    expect(zhViewer['viewer.export.html']).toBe('导出 HTML');
+    expect(zhViewer['viewer.export.pdf']).toBe('导出 PDF');
     expect(src).toContain('onclick={onExportHtml}');
     expect(src).toContain('onclick={onExportPdf}');
     // 降级提示不静默（spec §7/计划 print 可用性探测）

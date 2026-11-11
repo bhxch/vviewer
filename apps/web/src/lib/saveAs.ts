@@ -40,12 +40,26 @@ import {
 import { mbToBytes, shouldConfirm } from './downloadConfirm';
 import { isRemoteDownload } from './downloadProgress';
 import { loadSettings } from './stores/settings';
+// 纯层 i18n（Task 7 域 D）：文案调用时刻取当下 locale（非响应式），单源在目录键
+import { translate as t } from './i18n/core';
 
 export type SaveAsResult = 'saved' | 'cancelled' | 'denied';
 
 /** NotAllowedError（picker 授权拒绝）的用户可见文案：TabBar 菜单路与 ViewerPane
- *  （完成态另存为 / 确认卡下载并另存为）三消费面单源，防双写漂移 */
-export const SAVE_DENIED_NOTICE = '另存为未完成：浏览器拒绝了文件保存请求';
+ *  （完成态另存为 / 确认卡下载并另存为）三消费面单源，防双写漂移。原为常量
+ *  SAVE_DENIED_NOTICE（Task 7 抽取改函数——目录键调用时刻取值，const 装载时刻
+ *  锁定 locale 会破坏 en 态）。 */
+export function saveDeniedNotice(): string {
+  return t('viewer.save.denied');
+}
+
+/** saveAsTab 远端/取数失败的调用方提示文案（ViewerPane 完成态卡 catch 面）：与
+ *  TabBar 菜单路 t('tabs.ctx.saveAsFailed') 同一目录键单源（同动作同文案，Task 4
+ *  AppShell 侧重复串同键复用口径）——本包装供无 t() 导入的纯层消费面（遮蔽让位
+ *  纪律，ViewerPane saveAsCompleted 局部 t 标识符不改名）。 */
+export function saveAsFailedNotice(message: string): string {
+  return t('tabs.ctx.saveAsFailed', { message });
+}
 
 /**
  * picker 关闭双语义拆分（此前 isPickerCancel 把两类都判取消 → 同为静默；但对用户
@@ -152,7 +166,7 @@ export async function saveAsStreamToDisk(
     showSaveFilePicker?: (opts?: { suggestedName?: string }) => Promise<FileSystemFileHandle>;
   };
   if (typeof w.showSaveFilePicker !== 'function') {
-    throw new Error('当前环境不支持文件句柄直写（无 showSaveFilePicker）');
+    throw new Error(t('viewer.save.noFsWrite'));
   }
   let handle: FileSystemFileHandle;
   try {

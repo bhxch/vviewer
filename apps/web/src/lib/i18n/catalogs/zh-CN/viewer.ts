@@ -75,6 +75,7 @@ export const messages = {
   'viewer.meta.nameRow': '名称',
   'viewer.meta.openWithRow': '打开方式',
   'viewer.meta.openWithAria': '打开方式',
+  'viewer.meta.sizeRow': '大小',
   'viewer.meta.sizeBytes': '{size} 字节',
   'viewer.meta.encodingRow': '编码',
   'viewer.meta.langRow': '语言',
@@ -88,6 +89,7 @@ export const messages = {
   'viewer.lang.manual': '{lang}（手动）',
   'viewer.lang.badgeManual': '（手动）',
   'viewer.lang.inputAria': '高亮语言（留空自动检测）',
+  'viewer.lang.entry': '语言：{text}',
 
   // —— blame hover 浮层（viewer.blame.*，git-panel）——
   'viewer.blame.loading': '正在计算行归属…',

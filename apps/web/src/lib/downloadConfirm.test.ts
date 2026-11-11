@@ -4,6 +4,7 @@
 // 组件与 ViewerPane 接线按既有「源码契约断言」先例锁定字段、泵前置拦截位、确认/
 // 取消流转锚；运行时行为由 e2e 兜底（Task 7 验收锚面）。
 import { describe, expect, it } from 'vitest';
+import { messages as zhViewer } from './i18n/catalogs/zh-CN/viewer';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { mbToBytes, shouldConfirm } from './downloadConfirm';
@@ -114,9 +115,12 @@ describe('ViewerPane 确认门接线（计划 2 Task 6）', () => {
     expect(src).toMatch(/registry\.byId\(current\.overrideRenderer\)\?\.label/);
     // 残余 A3：探测链偏差面不显示估计渲染器名——扩展名路由命中给中性限定文案，
     // extless/未命中给「自动识别」；不再回落 byExtension(...)?.label 估计名
+    //（Task 7 域 D：中性文案迁目录键，形态 + zh 值双锁）
     expect(src).toMatch(
-      /registry\.byExtension\(extractExtension\(current\.source\.name\)\) !== undefined\s*\?\s*'自动识别（按扩展名）'\s*:\s*'自动识别'/
+      /registry\.byExtension\(extractExtension\(current\.source\.name\)\) !== undefined\s*\?\s*t\('viewer\.confirm\.autodetectExt'\)\s*:\s*t\('viewer\.confirm\.autodetect'\)/
     );
+    expect(zhViewer['viewer.confirm.autodetectExt']).toBe('自动识别（按扩展名）');
+    expect(zhViewer['viewer.confirm.autodetect']).toBe('自动识别');
     expect(src).not.toMatch(/registry\.byExtension\(extractExtension\(current\.source\.name\)\)\?\.label/);
   });
 

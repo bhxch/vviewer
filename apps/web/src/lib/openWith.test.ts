@@ -4,6 +4,8 @@ import { createRegistry, type Renderer } from '@bhxch/vviewer-core';
 // 纯函数（无 runes/DOM），真 registry 注入即可单测；钉住「dispatch 渲染失败返回的
 // 'error' id（registry 未注册）不得进入下拉 options（错误卡片 current 维持 ''/自动）」。
 import { openWithOf } from './openWith';
+// i18n 目录（Task 7 域 D 抽取）：首项「自动」label 目录双锁
+import { messages as zhViewer } from './i18n/catalogs/zh-CN/viewer';
 
 const mk = (id: string, exts: string[]): Renderer => ({
   id, label: `${id}-label`, extensions: exts, render: async () => ({ destroy() {} })
@@ -29,10 +31,12 @@ describe('openWithOf 存在性守卫（终审 Important 1）', () => {
     expect(res.options.every((o) => o.id !== 'error')).toBe(true);
   });
 
-  it('生效渲染器 id 在首位且 label 取自 registry（非英文 id 回退）', () => {
+  it('生效渲染器 id 在首位且 label 取自 registry（非英文 id 回退）；首项「自动」label 目录双锁（Task 7）', () => {
     const res = openWithOf(makeRegistry(), undefined, 'image', 'png');
     expect(res.options.map((o) => o.id)).toEqual(['', 'image', 'code', 'markdown', 'hex']); // spec 2026-10-23 §3.1 markdown 恒兜底
     expect(res.options.find((o) => o.id === 'image')?.label).toBe('image-label');
+    // 首项（id ''）label = 目录键值（Task 7 纯层 t() 派生，zh 逐字节）
+    expect(res.options[0]!.label).toBe(zhViewer['viewer.openwith.auto']);
   });
 
   it('override 手选生效：current=override、manual=true；override id 未注册时不进 options', () => {

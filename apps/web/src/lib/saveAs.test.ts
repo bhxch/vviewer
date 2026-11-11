@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
-  SAVE_DENIED_NOTICE,
+  saveDeniedNotice,
   saveAsBlob,
   saveAsStreamToDisk,
   saveAsTab,
@@ -23,6 +23,8 @@ import type { FileSource, TreeStore } from '@bhxch/vviewer-core';
 // i18n 目录（Task 4 域 A 抽取）：TabBar 第七动作文案迁入目录，源码锚改指 t() key +
 // zh 值逐字节等价断言（e2e 中文锚零回归的保证面）
 import { messages as zhTabs } from './i18n/catalogs/zh-CN/tabs';
+// i18n 目录（Task 7 域 D 抽取）：saveDeniedNotice 文案目录双锁
+import { messages as zhViewer } from './i18n/catalogs/zh-CN/viewer';
 
 // 双 cwd 兼容根/apps/web（downloadProgressUi.test.ts readSrc 同款）
 function readSrc(relFromWeb: string): string {
@@ -688,9 +690,11 @@ describe('saveAsDisabledOf（第七动作置灰：占位/错误/目录）', () =
     expect(src).toMatch(/showStatusNotice\(\s*t\('tabs\.ctx\.saveAsFailed'/);
     expect(zhTabs['tabs.ctx.saveAsFailed']).toMatch(/^另存为失败：/);
     // picker 关闭双语义（行为变更：NotAllowedError 不再静默）：'denied' → 状态条
-    // 固定文案（SAVE_DENIED_NOTICE 单源，值钉死）；'cancelled' 静默维持现状
-    expect(SAVE_DENIED_NOTICE).toBe('另存为未完成：浏览器拒绝了文件保存请求');
-    expect(src).toMatch(/else if \(r === 'denied'\) showStatusNotice\(SAVE_DENIED_NOTICE\)/);
+    // 固定文案（saveDeniedNotice 单源——Task 7 常量改函数，值迁目录键双锁钉死）；
+    // 'cancelled' 静默维持现状
+    expect(saveDeniedNotice()).toBe('另存为未完成：浏览器拒绝了文件保存请求');
+    expect(zhViewer['viewer.save.denied']).toBe('另存为未完成：浏览器拒绝了文件保存请求');
+    expect(src).toMatch(/else if \(r === 'denied'\) showStatusNotice\(saveDeniedNotice\(\)\)/);
     // 进度反馈（评审 I-3）：菜单路径轻量状态条——远端重下开始提示 + 完成提示
     //（dlProgress 为 ViewerPane 私有面，跨组件无复用缝，缝最小取状态条）
     expect(src).toMatch(/const remote = isRemoteDownload\(tab\.source\.storeId\)/);

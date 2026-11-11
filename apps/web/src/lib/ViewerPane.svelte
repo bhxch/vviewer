@@ -26,7 +26,9 @@
   import { isMountRootStoreId } from './serverHealthCache';
   import { createProgressTracker, dlAddressText, formatBytes, isRemoteDownload, type ProgressSnapshot } from './downloadProgress';
   import { mbToBytes, shouldConfirm } from './downloadConfirm';
-  import { SAVE_DENIED_NOTICE, isPickerDenied, pumpToWritable, saveAsTab } from './saveAs';
+  import { saveAsFailedNotice, saveDeniedNotice, isPickerDenied, pumpToWritable, saveAsTab } from './saveAs';
+  import { t } from './i18n/index.svelte';
+  import type { MessageKey } from './i18n/index.svelte';
   import { displayEndpointForStore } from './mountsSync';
 import SearchPanel from './SearchPanel.svelte';
 import DownloadProgressCard from './DownloadProgressCard.svelte';
@@ -57,27 +59,28 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
    */
   const watchLabel = $derived(
     tab !== null && isMountRootStoreId(tab.source.storeId)
-      ? '此源不支持变更推送'
+      ? t('viewer.statusbar.watchMountUnsupported')
       : watchHealth.degraded
-        ? '自动刷新不可用'
+        ? t('viewer.statusbar.watchDegraded')
         : ''
   );
 
-  /** 引擎指示器文案（F4 状态栏） */
-  const ENGINE_LABELS: Record<CodeEngine, string> = {
-    pending: '高亮: 解析中…',
-    'tree-sitter': '高亮: tree-sitter',
-    hljs: '高亮: hljs 兜底',
-    'hljs-block': '高亮: hljs 分块',
-    plain: '纯文本'
-  };
+  /** 引擎指示器目录键（F4 状态栏；值经 t() 在读取时现取——locale 切换后 ≤250ms
+   * 轮询拍即取新值） */
+  const ENGINE_LABEL_KEYS = {
+    pending: 'viewer.engine.pending',
+    'tree-sitter': 'viewer.engine.treeSitter',
+    hljs: 'viewer.engine.hljs',
+    'hljs-block': 'viewer.engine.hljsBlock',
+    plain: 'viewer.engine.plain'
+  } as const satisfies Record<CodeEngine, MessageKey>;
 
-  /** markdown 正文引擎文案（M7：local/remote 即执行位置，同一状态栏复用）。
+  /** markdown 正文引擎目录键（M7：local/remote 即执行位置，同一状态栏复用）。
    * 无 pending：markdown 实例仅在渲染完成后创建，getEngine 无观察窗口（遗留 T1） */
-  const MARKDOWN_ENGINE_LABELS: Record<MarkdownEngineState, string> = {
-    local: '渲染: 本地',
-    remote: '渲染: 远程'
-  };
+  const MARKDOWN_ENGINE_LABEL_KEYS = {
+    local: 'viewer.engine.mdLocal',
+    remote: 'viewer.engine.mdRemote'
+  } as const satisfies Record<MarkdownEngineState, MessageKey>;
 
   let host = $state<HTMLElement | null>(null);
   /** UI 镜像（SearchPanel 模板读取）。注意：渲染 effect 体内不得读它——
@@ -232,9 +235,10 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
           ? { onProgress: (p: ReadProgressEvent) => tracker.update(p.loaded, p.total) }
           : {})
       });
-      if (r === 'denied') showStatusNotice(SAVE_DENIED_NOTICE); // 浏览器拒绝：非用户取消，提示
+      if (r === 'denied') showStatusNotice(saveDeniedNotice()); // 浏览器拒绝：非用户取消，提示
     } catch (err) {
-      if (!isAbortError(err)) showStatusNotice(`另存为失败：${err instanceof Error ? err.message : String(err)}`);
+      if (!isAbortError(err))
+        showStatusNotice(saveAsFailedNotice(err instanceof Error ? err.message : String(err)));
     } finally {
       if (tab === t) {
         dlProgress = null;
@@ -271,7 +275,7 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
     try {
       handle = await w.showSaveFilePicker({ suggestedName: dlConfirm.name });
     } catch (err) {
-      if (isPickerDenied(err)) showStatusNotice(SAVE_DENIED_NOTICE); // 浏览器拒绝：提示
+      if (isPickerDenied(err)) showStatusNotice(saveDeniedNotice()); // 浏览器拒绝：提示
       return; // AbortError（用户主动取消）：静默留守确认卡（取消不是错误）
     }
     dlSaveHandle = { key, handle };
@@ -329,11 +333,11 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
     });
     return pickerExpanded
       ? [
-          { id: '', label: '自动（按扩展名）', current: ow.current === '' },
+          { id: '', label: t('viewer.openwith.auto'), current: ow.current === '' },
           ...ow.all.map(mark),
-          { id: LESS_RENDERER_ID, label: '收起附加候选', current: false }
+          { id: LESS_RENDERER_ID, label: t('viewer.openwith.less'), current: false }
         ]
-      : [...openWithCandidates, { id: MORE_RENDERER_ID, label: '更多渲染器…', current: false }];
+      : [...openWithCandidates, { id: MORE_RENDERER_ID, label: t('viewer.openwith.more'), current: false }];
   });
 
   /** 双入口共用选择语义（MetaPanel onOpenWith 同款）：'' = 清除 override 回自动，
@@ -357,9 +361,9 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
    * 否则「自动（检测 …）」——检测语言从 fileMeta.lang 读（readInstanceMeta 上行，
    * 嗅探不回写面），缺省「自动」。 */
   const langOverrideText = $derived.by(() => {
-    const t = tabStore.list.find((x) => x.active);
-    if (t?.overrideLang) return `${t.overrideLang}（手动）`;
-    return fileMeta.lang ? `自动（检测 ${fileMeta.lang}）` : '自动';
+    const tab = tabStore.list.find((x) => x.active);
+    if (tab?.overrideLang) return t('viewer.lang.manual', { lang: tab.overrideLang });
+    return fileMeta.lang ? t('viewer.lang.autoDetect', { lang: fileMeta.lang }) : t('viewer.lang.auto');
   });
 
   /** 浮层「语言」项点击：轻入口只派发跳转事件（AppShell 监听，metaLangFocus 单通道） */
@@ -527,7 +531,7 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
           }
           cache = map;
           truncatedNote = res.truncated
-            ? `文件历史超 ${BLAME_MAX_COMMITS} 提交，仅最近 ${BLAME_MAX_COMMITS} 个参与归属`
+            ? t('viewer.blame.truncated', { limit: BLAME_MAX_COMMITS })
             : null;
           return map;
         } catch {
@@ -564,7 +568,7 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
       y: pos.y,
       below: pos.below,
       author: g.author,
-      date: g.sha === UNCOMMITTED_SHA ? '工作区未提交改动' : relativeDate(g.timestamp),
+      date: g.sha === UNCOMMITTED_SHA ? t('viewer.blame.uncommitted') : relativeDate(g.timestamp),
       subject: subjectOf(g.message),
       sha: g.sha === UNCOMMITTED_SHA ? '' : g.sha.slice(0, 7),
       note: truncatedNote
@@ -631,9 +635,9 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
       const engine = (inst as { getEngine(): CodeEngine }).getEngine;
       const where = (inst as { getComputeWhere(): ComputeWhere | null }).getComputeWhere;
       const read = (): void => {
-        engineLabel = ENGINE_LABELS[engine()];
+        engineLabel = t(ENGINE_LABEL_KEYS[engine()]);
         const w = where();
-        computeWhereLabel = w === 'remote' ? '远程' : w === 'local' ? '本地' : '';
+        computeWhereLabel = w === 'remote' ? t('viewer.compute.remote') : w === 'local' ? t('viewer.compute.local') : '';
       };
       read();
       engineTimer = setInterval(read, 250);
@@ -641,7 +645,7 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
     }
     const engine = (inst as { getEngine(): MarkdownEngineState }).getEngine;
     const read = (): void => {
-      engineLabel = MARKDOWN_ENGINE_LABELS[engine()];
+      engineLabel = t(MARKDOWN_ENGINE_LABEL_KEYS[engine()]);
     };
     read();
     engineTimer = setInterval(read, 250);
@@ -686,11 +690,11 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
     const m = readMeta.call(inst);
     // 段序对齐 spec SHELL-12 验收文本：「语言 · 编码 · 大小 · 行」
     const parts: string[] = [];
-    if (m.lang) parts.push(`语言: ${m.lang}`);
-    if (m.encoding) parts.push(`编码: ${m.encoding}`);
-    if (m.size !== undefined) parts.push(`大小: ${m.size}`);
+    if (m.lang) parts.push(t('viewer.statusMeta.lang', { lang: m.lang }));
+    if (m.encoding) parts.push(t('viewer.statusMeta.encoding', { encoding: m.encoding }));
+    if (m.size !== undefined) parts.push(t('viewer.statusMeta.size', { size: m.size }));
     // 行段仅 code 实例提供（markdown/html 渲染视图无行概念）
-    if (m.lines !== undefined) parts.push(`行: ${m.lines}`);
+    if (m.lines !== undefined) parts.push(t('viewer.statusMeta.lines', { lines: m.lines }));
     metaLabel = parts.join(' · ');
     setFileMeta({
       name: tabName,
@@ -793,8 +797,8 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
             ? registry.byId(current.overrideRenderer)?.label
             : undefined) ??
           (registry.byExtension(extractExtension(current.source.name)) !== undefined
-            ? '自动识别（按扩展名）'
-            : '自动识别')
+            ? t('viewer.confirm.autodetectExt')
+            : t('viewer.confirm.autodetect'))
       };
       return;
     }
@@ -889,7 +893,7 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
           } else {
             // 终审修复波 M-3：picker 已选定目标但 writable 开启失败（磁盘满/权限回收
             // 等）——静默降级会让「另存为」无产出无提示；状态条降级告知（既有通道）
-            showStatusNotice('直写落盘通道开启失败，已降级为普通下载');
+            showStatusNotice(t('viewer.dl.directWriteFailed'));
           }
         }
         // buffer 直传（评审 M-1）：tee 自泵路径 pumpBuffer 在手（pumpFull 通道字节
@@ -1173,11 +1177,11 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
 <div class="vv-viewer-pane">
   <div class="vv-viewer-scroll" onscroll={onScroll}>
     {#if !tab}
-      <div class="vv-empty">拖入文件/文件夹，或用标签栏 ＋ 打开</div>
+      <div class="vv-empty">{t('viewer.empty.drop')}</div>
     {:else if tab.unrestorable && tab.source.path === ''}
-      <div class="vv-empty">此来源无法自动恢复，请重新打开文件夹</div>
+      <div class="vv-empty">{t('viewer.empty.unrestorable')}</div>
     {:else if tab.source.path === ''}
-      <div class="vv-empty">目录来源：文件在左侧树中打开</div>
+      <div class="vv-empty">{t('viewer.empty.directory')}</div>
     {:else}
       <div
         class="vv-viewer-host"
@@ -1245,7 +1249,7 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
       style:top="{blameTip.y}px"
     >
       {#if blameTip.s === 'loading'}
-        <span class="vv-git-blame-pop-meta">正在计算行归属…</span>
+        <span class="vv-git-blame-pop-meta">{t('viewer.blame.loading')}</span>
       {:else}
         <span class="vv-git-blame-pop-meta">{blameTip.author} · {blameTip.date}{blameTip.sha !== '' ? ` · ${blameTip.sha}` : ''}</span>
         <span class="vv-git-blame-pop-subject">{blameTip.subject}</span>
@@ -1260,14 +1264,14 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
            「打开方式: {渲染器}（{检出扩展名}）」含于 accessible name——label 与
            可见值逐 token 等值（&nbsp; 归一空白）；候选浮层 role=menu 的
            aria-label=「打开方式」不受影响（menu 无可见文本） -->
-      {#if rendererLabel}<button type="button" class="vv-status-openwith" bind:this={pickerBtn} aria-haspopup="menu" aria-expanded={pickerOpen} aria-label={`打开方式: ${rendererLabel}${detLabel === '' ? '' : `（${detLabel}）`}`} title="打开方式（点击切换渲染器）" onclick={togglePicker}>打开方式: {rendererLabel}{#if detLabel}&nbsp;（{detLabel}）{/if}</button>{/if}{#if engineLabel}{#if rendererLabel}&nbsp;·&nbsp;{/if}{engineLabel}{#if computeWhereLabel}&nbsp;· 执行: {computeWhereLabel}{/if}{/if}{#if metaLabel}{#if engineLabel || rendererLabel}&nbsp;·&nbsp;{/if}{metaLabel}{/if}{#if wrapCapable}&nbsp;·&nbsp;<button type="button" class="vv-status-wrap" aria-pressed={codeWordWrap} title="自动换行（Alt+Z）" onclick={toggleWordWrap}>换行: {codeWordWrap ? '开' : '关'}</button>{/if}{#if watchLabel}{#if engineLabel || metaLabel || rendererLabel}&nbsp;·{/if} {watchLabel}{/if}{#if statusNotice.text}{#if engineLabel || metaLabel || rendererLabel || watchLabel}&nbsp;·{/if} {statusNotice.text}{/if}
+      {#if rendererLabel}<button type="button" class="vv-status-openwith" bind:this={pickerBtn} aria-haspopup="menu" aria-expanded={pickerOpen} aria-label={detLabel === '' ? t('viewer.statusbar.openwithAria', { label: rendererLabel }) : t('viewer.statusbar.openwithAriaExt', { label: rendererLabel, ext: detLabel })} title={t('viewer.statusbar.openwithTitle')} onclick={togglePicker}>{t('viewer.statusbar.openwithLabel')}: {rendererLabel}{#if detLabel}&nbsp;（{detLabel}）{/if}</button>{/if}{#if engineLabel}{#if rendererLabel}&nbsp;·&nbsp;{/if}{engineLabel}{#if computeWhereLabel}&nbsp;· {t('viewer.statusbar.exec', { where: computeWhereLabel })}{/if}{/if}{#if metaLabel}{#if engineLabel || rendererLabel}&nbsp;·&nbsp;{/if}{metaLabel}{/if}{#if wrapCapable}&nbsp;·&nbsp;<button type="button" class="vv-status-wrap" aria-pressed={codeWordWrap} title={t('viewer.statusbar.wrapTitle')} onclick={toggleWordWrap}>{codeWordWrap ? t('viewer.statusbar.wrapOn') : t('viewer.statusbar.wrapOff')}</button>{/if}{#if watchLabel}{#if engineLabel || metaLabel || rendererLabel}&nbsp;·{/if} {watchLabel}{/if}{#if statusNotice.text}{#if engineLabel || metaLabel || rendererLabel || watchLabel}&nbsp;·{/if} {statusNotice.text}{/if}
     </div>
   {/if}
   {#if pickerOpen}
     <!-- 渲染器候选浮层（Task 3 壳 A）：absolute 于 .vv-viewer-pane（position:relative
          已有，SearchPanel 同锚），状态栏上方左对齐；项形态对齐 .vv-tabctx-item，
          当前项以 ✓ 前缀 + aria-current 标记（右键子菜单同款） -->
-    <div class="vv-status-picker" role="menu" aria-label="打开方式" bind:this={pickerEl}>
+    <div class="vv-status-picker" role="menu" aria-label={t('viewer.openwith.menuAria')} bind:this={pickerEl}>
       {#each pickerItems as c (c.id)}
         <button
           type="button"
@@ -1280,7 +1284,7 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
       <!-- 语言轻入口（Task 6）：浮层尾部固定项（非候选菜单项，pickerItems 之外），
            点击跳转属性面板聚焦语言行（requestMetaLangFocus 单通道，metaLangFocus.ts） -->
       <button type="button" class="vv-status-picker-lang" role="menuitem" onclick={focusMetaLang}>
-        语言：{langOverrideText}
+        {t('viewer.lang.entry', { text: langOverrideText })}
       </button>
     </div>
   {/if}

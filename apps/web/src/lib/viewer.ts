@@ -31,6 +31,8 @@ import { configureLibarchive } from '@bhxch/vviewer-render-archive/libarchiveSto
 import { jsonlRenderer } from '@bhxch/vviewer-render-text/jsonl';
 import { downloadNestedAttachment, markForeignNestedDepth, FOREIGN_NESTED_DEPTH_LIMIT, type NestedDispatch } from '@bhxch/vviewer-render-foreign';
 import { browser } from '$app/env';
+import { setRenderFailedText } from '@bhxch/vviewer-core';
+import { translate as t } from './i18n/core';
 import { ensureHighlightClient, computeRouter } from './highlightClient';
 import { routeLargeFileHighlight } from './highlightRouter';
 import { resolveImageBlobUrl } from './markdownImages';
@@ -55,6 +57,12 @@ export { hasNonDiagramFence };
  * 同铁律下居 codeRenderer 之前（diagram 块之后）。 */
 export const registry: Registry = createRegistry();
 
+// core dispatch 错误面兜底文案注入（Task 7 域 D，errors 域）：vviewer-core 保持零
+// i18n 依赖（依赖方向不反转），errorMessageOf 空文案兜底经注入缝从目录取值——
+// getter 形态使错误卡构造时刻现取当下 locale（apps/web 恒注入，渲染输出恒走目录；
+// core 独立消费回落包内英文缺省，非显示面契约）。
+setRenderFailedText(() => t('errors.renderFailed'));
+
 /** 图表文件 server 分支的远端调用通道（DiagramFileRenderOpts.remoteCall 执行缝）：
  * md 管线同源的 computeRouter 描述缝（{url, headers}，与 setDiagramOptions 注入点
  * 同一封装）在此代 fetch——传输面与 remoteMarkdown 同款（鉴权头 + JSON body +
@@ -62,14 +70,14 @@ export const registry: Registry = createRegistry();
  * server→local→kroki 链降级）。 */
 function diagramFileRemoteCall(path: string, init?: { method?: string; body?: unknown }): Promise<unknown> {
   const call = computeRouter.remoteCall(path);
-  if (!call) return Promise.reject(new Error('未连接服务器，无法服务端渲染图表'));
+  if (!call) return Promise.reject(new Error(t('viewer.remote.diagramNoServer')));
   return (async () => {
     const res = await fetch(call.url, {
       method: init?.method ?? 'POST',
       headers: { ...call.headers, 'content-type': 'application/json' },
       body: JSON.stringify(init?.body)
     });
-    if (!res.ok) throw new Error(`服务端图表渲染失败: HTTP ${res.status}`);
+    if (!res.ok) throw new Error(t('viewer.remote.diagramHttp', { status: res.status }));
     return res.json();
   })();
 }
@@ -104,7 +112,7 @@ const foreignNestedDispatch: NestedDispatch = async (data, name, target, signal,
   }
   const source: FileSource = {
     storeId: 'foreign-nested',
-    storeLabel: '嵌套附件',
+    storeLabel: t('viewer.nested.storeLabel'),
     path: name,
     name,
     store: NESTED_ATTACHMENT_STORE
@@ -167,7 +175,7 @@ if (browser) {
 // 失败只告警一次，渲染端对 code.ts 的 attachHighlightClient 保持未注入 → 降级 hljs）
 if (browser) {
   ensureHighlightClient()?.catch((e: unknown) => {
-    console.warn('[highlight] client 初始化失败，代码高亮降级 hljs', e);
+    console.warn('[highlight] client init failed, falling back to hljs', e);
   });
   // BUG-10：>2MB 文件问路由（local/无 path/auto 门在注入侧硬拦为本地——server-served
   // auto 不限大小走服务端，本地来源恒 hljs 分块零 POST；裁决注释见 highlightRouter.ts）
@@ -211,7 +219,7 @@ export function cancelMarkdownRemote(): void {
  */
 async function remoteMarkdown(text: string): Promise<string> {
   const call = computeRouter.remoteCall('/api/compute/markdown');
-  if (!call) throw new Error('未连接服务器，无法远程渲染 markdown');
+  if (!call) throw new Error(t('viewer.remote.mdNoServer'));
   // 挂 tab 级 abort：cancelMarkdownRemote（tab 切换/重渲染）时中止在途请求
   const ac = new AbortController();
   markdownRemoteAbort = ac;
@@ -222,7 +230,7 @@ async function remoteMarkdown(text: string): Promise<string> {
       body: JSON.stringify({ text, options: undefined }),
       signal: ac.signal
     });
-    if (!res.ok) throw new Error(`远程 markdown 渲染失败: HTTP ${res.status}`);
+    if (!res.ok) throw new Error(t('viewer.remote.mdHttp', { status: res.status }));
     const data = (await res.json()) as { html: string };
     return data.html;
   } finally {
@@ -254,9 +262,9 @@ if (browser) {
       text,
       undefined,
       () => Promise.resolve(renderMarkdownBody(text)),
-      src && !localOnly ? (t) => remoteMarkdown(t) : undefined
+      src && !localOnly ? (mdText) => remoteMarkdown(mdText) : undefined
     );
-    if (!res.ok) throw new Error(res.error ?? 'markdown 渲染失败');
+    if (!res.ok) throw new Error(res.error ?? t('viewer.remote.mdFailed'));
     return { html: res.data ?? '', where: res.where };
   });
 }

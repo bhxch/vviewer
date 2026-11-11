@@ -72,6 +72,7 @@ export const messages = {
   'viewer.meta.nameRow': 'Name',
   'viewer.meta.openWithRow': 'Open with',
   'viewer.meta.openWithAria': 'Open with',
+  'viewer.meta.sizeRow': 'Size',
   'viewer.meta.sizeBytes': '{size} bytes',
   'viewer.meta.encodingRow': 'Encoding',
   'viewer.meta.langRow': 'Language',
@@ -85,6 +86,7 @@ export const messages = {
   'viewer.lang.manual': '{lang} (manual)',
   'viewer.lang.badgeManual': '(manual)',
   'viewer.lang.inputAria': 'Highlight language (leave empty for auto-detect)',
+  'viewer.lang.entry': 'Language: {text}',
 
   // —— blame hover 浮层 ——
   'viewer.blame.loading': 'Computing line attribution…',
