@@ -104,14 +104,22 @@ select { background: var(--ui-side-bg); color: var(--ui-fg); border: 1px solid v
 :where(button, input, select, summary, [tabindex], a[href]):focus-visible { outline: 2px solid var(--ui-accent); outline-offset: -1px; }
 /* §8.2：全站 checkbox 统一着色（基础层一行，零 DOM 变更） */
 input[type='checkbox'] { accent-color: var(--ui-accent); }
-/* §11 prefers-reduced-motion 全局适配（rg 实测现零适配）：辅助性动效压至瞬时——
-   hex 跳转闪烁完全省略（恒为终态透明）、toast 瞬显；滚动定位等功能表达不受影响 */
+/* §11 prefers-reduced-motion 全局适配（i18n 基建 D11 双块改写）：辅助性动效压至
+   瞬时——hex 跳转闪烁完全省略（恒为终态透明）、toast 瞬显；滚动定位等功能表达
+   不受影响。双层门：块一 = OS 偏好命中且未被设置显式关闭（system 不打标 /
+   off=照常 排除）；块二 = 设置显式开启（on=减弱，无视 OS 偏好）。AppShell
+   applyLocaleAndReduceMotion 写 html data-reduce-motion（system=移除属性）。 */
 @media (prefers-reduced-motion: reduce) {
-  *, ::before, ::after {
+  :root:not([data-reduce-motion="off"]) *, ::before, ::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+:root[data-reduce-motion="on"] *, ::before, ::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
 }
 
 /* 虚拟滚动 */

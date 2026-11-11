@@ -56,6 +56,8 @@
   } from './stores/session';
   import { migrateLegacyTabs, workspaceStore, type WorkspaceSnapshotItem, type WorkspaceSource } from './workspaceStore';
   import { loadSettings, onSettingsChanged, saveSettings, type Settings } from './stores/settings';
+  // i18n/reduceMotion 接线（i18n 基建 D3/D11）：启动 + 设置订阅双通道应用
+  import { setLocale, t } from './i18n/index.svelte';
   // 大纲滚动跟随句柄（code-outline Task 3）：ViewerPane 上行 firstVisibleLine 命令式快照
   import { firstOutlineVisibleLine } from './metaStore.svelte';
   import { VV_FOCUS_META_LANG } from './metaLangFocus';
@@ -114,6 +116,24 @@
   // 响应式副本：onSettingsChanged 订阅刷新（BUG-05）。此前是非响应式快照，
   // 设置面板改排除规则后 FileTree 拿不到新值
   let settings = $state(loadSettings());
+
+  /**
+   * locale/reduceMotion 初值与变更应用（i18n 基建 D3/D11）：setLocale 写 i18n
+   * $state 镜像 + core 纯变量 + html[lang]（app.html 静态兜底 zh-CN 的运行时
+   * 覆盖点）；reduceMotion 打标 html data-reduce-motion——'system' 移除属性
+   * （CSS @media prefers-reduced-motion 块承接=现状语义），'on'/'off' 显式写值
+   * （app.css 双块第二块的设置覆盖面）。启动（$state 初值后同步调用，首帧前
+   * 生效）与 onSettingsChanged 订阅内双通道共用。
+   */
+  function applyLocaleAndReduceMotion(s: Settings): void {
+    setLocale(s.locale);
+    if (s.reduceMotion === 'system') delete document.documentElement.dataset.reduceMotion;
+    else document.documentElement.dataset.reduceMotion = s.reduceMotion;
+  }
+  // 启动应用（首帧前，一次性初值语义）：经闭包读副本——init 期脚本体直读 $state
+  // 触发 state_referenced_locally 警（编译器不知此处只取初值），闭包形态即取当下值
+  const applyLocalePrefsAtStartup = (): void => applyLocaleAndReduceMotion(settings);
+  applyLocalePrefsAtStartup();
   /** 移动端双抽屉开合（状态机在 shellDrawers.ts 纯模块，FE-2 抽出）：左=文件树
    *（≤900px 抽屉断点，shell .drawer 类）、右=MetaPanel/TOC（≤600px，.rightopen
    * 类，见样式媒体查询）——双抽屉独立开合（e937d05 钉死语义），断点门在事件侧
@@ -743,6 +763,9 @@
     // 外观/字体注入同挂本回调（原 TopBar 订阅链并入单订阅，顶栏退役 Task 3——
     // 双订阅会重复 diff 注入，spec 2026-10-12 §2.4 注入触发通道单点化）
     const offSettings = onSettingsChanged((s) => {
+      // locale/reduceMotion 接线（i18n 基建 D3/D11）：「语言与辅助功能」节应用后
+      // 经本订阅生效——html[lang] 与 data-reduce-motion 同步打标
+      applyLocaleAndReduceMotion(s);
       // mermaid 主题即时生效（spec 2026-10-23 §9.2，Task 7）：仅 diagrams.mermaidTheme
       // 实际变化才派发 vv:diagram-settings-applied（无关设置保存零重画）；detail 恒
       // 为已解析具体主题（'auto' 按当前亮暗映射，与 viewer.ts 注入器同公式），挂载的
@@ -1219,11 +1242,35 @@
       window.removeEventListener('keydown', onKey);
     };
   });
+
+  /**
+   * 渲染边界兜底（D10 svelte:boundary）：只兜渲染期未捕获异常（each_key_duplicate
+   * 曾致 prod 整页 500 的前科面），现有渲染错误主通道（dispatcher catch → 错误卡，
+   * 异步回调不经渲染期）不动、不受边界吞接。handler 仅留痕——恢复动作在 failed
+   * 片段的「重载」（location.reload()，整页重置；reset() 局部重放对确定性渲染错误
+   * 只会原样复抛）。文案即用 t()（a11y.boundary.* 目录键）。
+   */
+  function onBoundaryError(err: unknown): void {
+    console.error('[vv-boundary] 渲染期未捕获异常', err);
+  }
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions --><!-- contextmenu 为 chrome
+<!-- D10 渲染边界：failed 片段（Svelte 5 boundary 的兜底 snippet 名）复用 .vv-error-*
+     错误卡视觉类名（app.css 全局）+「重载」。内容缩进保持原级（270 行子树不做整块
+     重排，diff 面最小化） -->
+<svelte:boundary onerror={onBoundaryError}>
+  {#snippet failed(error)}
+    <div class="vv-error-card">
+      <div class="vv-error-title">{t('a11y.boundary.title')}</div>
+      <div class="vv-error-detail">{t('a11y.boundary.detail', { message: error instanceof Error ? error.message : String(error) })}</div>
+      <div class="vv-error-actions">
+        <button type="button" onclick={() => location.reload()}>{t('a11y.boundary.reload')}</button>
+      </div>
+    </div>
+  {/snippet}
+  <!-- svelte-ignore a11y_no_static_element_interactions --><!-- contextmenu 为 chrome
      布局菜单入口（shell 级代理，按 target 归属分流），shell 容器无 AT 交互角色 -->
-<div class="vv-shell" class:drawer={drawers.leftOpen} class:rightopen={drawers.rightOpen} class:zen={layout.zen} oncontextmenu={onShellContextMenu}>
+  <div class="vv-shell" class:drawer={drawers.leftOpen} class:rightopen={drawers.rightOpen} class:zen={layout.zen} oncontextmenu={onShellContextMenu}>
   <!-- 标签栏：hidden=zen 或显式隐藏（chromeVisible 覆盖语义）；temp=顶边悬停
        临时条（半透覆盖形态）。组件保持挂载——Ctrl+, 设置中心入口（AppShell 自有
        状态）与外观/字体订阅注入链（AppShell onMount）不因隐藏失效（spec §2 全件
@@ -1495,6 +1542,7 @@
     </div>
   {/if}
 </div>
+</svelte:boundary>
 
 <style>
   .vv-shell {
