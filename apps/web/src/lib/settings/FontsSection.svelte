@@ -21,6 +21,7 @@
     type FontPreset
   } from '../fonts';
   import { DEFAULT_CODE_FONT_STACK, DEFAULT_UI_FONT_STACK, fontFamilyValue } from '../theme';
+  import { t } from '../i18n/index.svelte';
   import {
     addFontFromFile,
     addFontFromUrl,
@@ -156,7 +157,7 @@
       fontUrlDraft = '';
       fontNameDraft = '';
       fontFailures = fontFailures.filter((f) => f.url !== url);
-      fontNote = `已添加字体「${rec.name}」`;
+      fontNote = t('settings.fonts.added', { name: rec.name });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       fontFailures = [...fontFailures.filter((f) => f.url !== url), { url, name: explicit || stemOf(url), message }];
@@ -177,7 +178,7 @@
     try {
       const rec = await addFontFromFile(file);
       fontRecords = [...fontRecords, rec];
-      fontNote = `已添加字体「${rec.name}」`;
+      fontNote = t('settings.fonts.added', { name: rec.name });
     } catch (err) {
       fontNote = err instanceof Error ? err.message : String(err);
     } finally {
@@ -193,7 +194,7 @@
     try {
       await setEnabledFont(rec.id, enabled);
     } catch (err) {
-      console.error(`切换网络字体「${rec.name}」失败`, err);
+      console.error(`[vviewer] settings: failed to toggle web font ${rec.name}`, err);
       fontNote = err instanceof Error ? err.message : String(err);
       fontRecords = [...fontRecords];
       return;
@@ -204,12 +205,12 @@
   /** 删除（spec §5.2）：store 移除 + document.fonts 注销；被 uiFamily/codeFamily
    * 引用时槽位回落默认（''）并写 draft + touch（已导入主题删除同款）。 */
   async function removeFont(rec: FontRecord): Promise<void> {
-    if (!window.confirm(`删除网络字体「${rec.name}」？`)) return;
+    if (!window.confirm(t('settings.fonts.deleteConfirm', { name: rec.name }))) return;
     let gone: FontRecord | null;
     try {
       gone = await deleteFont(rec.id);
     } catch (err) {
-      console.error(`删除网络字体「${rec.name}」失败`, err);
+      console.error(`[vviewer] settings: failed to delete web font ${rec.name}`, err);
       return; // 删库失败：列表/槽保持不动（removeImported 容错风格）
     }
     fontRecords = fontRecords.filter((x) => x.id !== rec.id);
@@ -220,16 +221,19 @@
       draft.fonts.uiFamily = '';
       uiCustomMode = false;
       changed = true;
-      fell.push('界面字体');
+      fell.push(t('settings.fonts.uiFamilyRow'));
     }
     if (draft.fonts.codeFamily === gone.name) {
       draft.fonts.codeFamily = '';
       codeCustomMode = false;
       changed = true;
-      fell.push('代码字体');
+      fell.push(t('settings.fonts.codeFamilyRow'));
     }
     if (changed) touch();
-    fontNote = fell.length > 0 ? `已删除「${gone.name}」，${fell.join('、')}槽已回落默认字体` : `已删除「${gone.name}」`;
+    fontNote =
+      fell.length > 0
+        ? t('settings.fonts.removedWithFallback', { name: gone.name, slots: fell.join(t('settings.common.listSep')) })
+        : t('settings.fonts.removed', { name: gone.name });
   }
 
   /** 错误态重试：复跑同 URL/名称的添加管线，成功移出暂存、失败原位更新错误信息。 */
@@ -241,7 +245,7 @@
       const rec = await addFontFromUrl(f.url, f.name || undefined);
       fontRecords = [...fontRecords, rec];
       fontFailures = fontFailures.filter((x) => x.url !== f.url);
-      fontNote = `已添加字体「${rec.name}」`;
+      fontNote = t('settings.fonts.added', { name: rec.name });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       fontFailures = fontFailures.map((x) => (x.url === f.url ? { ...x, message } : x));
@@ -256,11 +260,11 @@
 </script>
 
 <section class="vv-sc-section">
-  <div class="vv-settings-label">字体</div>
-  <div class="vv-settings-hint">family 支持逗号分隔多级回退（如 JetBrains Mono, monospace）；本机缺失的字体由浏览器回退。</div>
+  <div class="vv-settings-label">{t('settings.fonts.label')}</div>
+  <div class="vv-settings-hint">{t('settings.fonts.familyHint')}</div>
   <label class="vv-settings-theme-row">
-    <span>界面字体</span>
-    <select value={uiSelectValue} onchange={(e) => onFamilyChange('ui', e)} aria-label="界面字体族">
+    <span>{t('settings.fonts.uiFamilyRow')}</span>
+    <select value={uiSelectValue} onchange={(e) => onFamilyChange('ui', e)} aria-label={t('settings.fonts.uiSelectAria')}>
       {#each uiOptions as o (o.value)}
         <option value={o.value}>{o.label}</option>
       {/each}
@@ -268,13 +272,13 @@
   </label>
   {#if uiCustomMode}
     <label class="vv-settings-theme-row">
-      <span>界面自定义</span>
+      <span>{t('settings.fonts.uiCustomRow')}</span>
       <input
         type="text"
         value={draft.fonts.uiFamily}
         oninput={(e) => onFamilyInput('ui', e)}
-        placeholder="Family 名，逗号分隔多级回退"
-        aria-label="自定义界面字体族"
+        placeholder={t('settings.fonts.familyPlaceholder')}
+        aria-label={t('settings.fonts.uiCustomAria')}
         spellcheck="false"
       />
     </label>
@@ -287,7 +291,7 @@
     </div>
   {/if}
   <label class="vv-settings-theme-row">
-    <span>界面字号</span>
+    <span>{t('settings.fonts.uiSizeRow')}</span>
     <input
       type="number"
       min={UI_SIZE_RANGE[0]}
@@ -295,12 +299,12 @@
       step="1"
       value={draft.fonts.uiSize}
       onchange={(e) => onSizeChange('ui', e)}
-      aria-label="界面字号（px）"
+      aria-label={t('settings.fonts.uiSizeAria')}
     />
   </label>
   <label class="vv-settings-theme-row">
-    <span>代码字体</span>
-    <select value={codeSelectValue} onchange={(e) => onFamilyChange('code', e)} aria-label="代码字体族">
+    <span>{t('settings.fonts.codeFamilyRow')}</span>
+    <select value={codeSelectValue} onchange={(e) => onFamilyChange('code', e)} aria-label={t('settings.fonts.codeSelectAria')}>
       {#each codeOptions as o (o.value)}
         <option value={o.value}>{o.label}</option>
       {/each}
@@ -308,13 +312,13 @@
   </label>
   {#if codeCustomMode}
     <label class="vv-settings-theme-row">
-      <span>代码自定义</span>
+      <span>{t('settings.fonts.codeCustomRow')}</span>
       <input
         type="text"
         value={draft.fonts.codeFamily}
         oninput={(e) => onFamilyInput('code', e)}
-        placeholder="Family 名，逗号分隔多级回退"
-        aria-label="自定义代码字体族"
+        placeholder={t('settings.fonts.familyPlaceholder')}
+        aria-label={t('settings.fonts.codeCustomAria')}
         spellcheck="false"
       />
     </label>
@@ -327,7 +331,7 @@
     </div>
   {/if}
   <label class="vv-settings-theme-row">
-    <span>代码字号</span>
+    <span>{t('settings.fonts.codeSizeRow')}</span>
     <input
       type="number"
       min={CODE_SIZE_RANGE[0]}
@@ -335,34 +339,33 @@
       step="1"
       value={draft.fonts.codeSize}
       onchange={(e) => onSizeChange('code', e)}
-      aria-label="代码字号（px）"
+      aria-label={t('settings.fonts.codeSizeAria')}
     />
   </label>
-  <div class="vv-settings-hint">代码字号变更后行高联动、已打开文件自动以新行高重排。</div>
-  <div class="vv-settings-label">网络字体</div>
+  <div class="vv-settings-hint">{t('settings.fonts.sizeHint')}</div>
+  <div class="vv-settings-label">{t('settings.fonts.webLabel')}</div>
   <div class="vv-settings-hint">
-    https 直链或本地上传 .ttf/.otf/.woff/.woff2（单文件 ≤30MB）；已启用的字体进上方两槽下拉，
-    停用即从下拉移除（已引用槽位由浏览器回退显示），删除后 IndexedDB 不再保留。
+    {t('settings.fonts.webHint')}
   </div>
   <form class="vv-settings-add" onsubmit={onFontUrlSubmit}>
     <input
       bind:value={fontUrlDraft}
       placeholder="https://example.com/font.woff2"
-      aria-label="网络字体地址"
+      aria-label={t('settings.fonts.urlAria')}
       spellcheck="false"
     />
-    <button type="submit" disabled={fontBusy || fontUrlDraft.trim() === ''}>添加</button>
+    <button type="submit" disabled={fontBusy || fontUrlDraft.trim() === ''}>{t('settings.fonts.add')}</button>
   </form>
   <div class="vv-settings-font-addrow">
     <input
       type="text"
       bind:value={fontNameDraft}
-      placeholder="字体名称（可选，默认取地址末段/文件名）"
-      aria-label="网络字体名称（可选）"
+      placeholder={t('settings.fonts.namePlaceholder')}
+      aria-label={t('settings.fonts.nameAria')}
       spellcheck="false"
     />
     <button type="button" disabled={fontBusy} onclick={() => fontInputEl?.click()}>
-      {fontBusy ? '处理中…' : '上传字体…'}
+      {fontBusy ? t('settings.fonts.busy') : t('settings.fonts.upload')}
     </button>
     <input type="file" accept=".ttf,.otf,.woff,.woff2" hidden bind:this={fontInputEl} onchange={onFontFileChange} />
   </div>
@@ -378,7 +381,7 @@
               <input
                 type="checkbox"
                 checked={rec.enabled}
-                aria-label="启用网络字体 {rec.name}"
+                aria-label={t('settings.fonts.enableAria', { name: rec.name })}
                 onchange={(e) => void onFontToggle(rec, e)}
               />
               <span class="vv-settings-font-name" title={rec.name}>{rec.name}</span>
@@ -387,8 +390,8 @@
             <button
               type="button"
               class="vv-settings-remove"
-              aria-label="删除网络字体 {rec.name}"
-              title="删除"
+              aria-label={t('settings.fonts.deleteAria', { name: rec.name })}
+              title={t('settings.fonts.deleteTitle')}
               onclick={() => void removeFont(rec)}>✕</button
             >
           </div>
@@ -405,14 +408,14 @@
               type="button"
               class="vv-settings-font-retry"
               disabled={fontBusy}
-              aria-label="重试添加网络字体 {f.name}"
-              onclick={() => void retryFont(f)}>重试</button
+              aria-label={t('settings.fonts.retryAria', { name: f.name })}
+              onclick={() => void retryFont(f)}>{t('settings.fonts.retry')}</button
             >
             <button
               type="button"
               class="vv-settings-remove"
-              aria-label="忽略网络字体 {f.name}"
-              title="忽略"
+              aria-label={t('settings.fonts.dismissAria', { name: f.name })}
+              title={t('settings.fonts.dismissTitle')}
               onclick={() => dismissFontFailure(f)}>✕</button
             >
           </div>
@@ -421,6 +424,6 @@
       {/each}
     </ul>
   {:else}
-    <div class="vv-settings-empty">暂无网络字体</div>
+    <div class="vv-settings-empty">{t('settings.fonts.empty')}</div>
   {/if}
 </section>

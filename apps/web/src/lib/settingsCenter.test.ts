@@ -8,6 +8,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 // i18n 目录（Task 4 域 A 抽取）：融合菜单设置条目锚的对目录值双锁（对齐其余锚文件口径）
 import { messages as zhTabs } from './i18n/catalogs/zh-CN/tabs';
+// 域 C 抽取（Task 6）：组名/中心骨架/节组件文案源码锚改 t() 新形态 + 目录 zh 值双锁
+import { messages as zhSettings } from './i18n/catalogs/zh-CN/settings';
 
 // vitest 会转译 import.meta.url（metaStore.test 同款处理）：双 cwd 兼容根/apps/web
 function readSrc(relFromWeb: string): string {
@@ -28,15 +30,23 @@ describe('SettingsCenter 分组注册表（spec §2 定稿序的在 Task 1 在�
     expect(src).toMatch(/const groups: SettingsGroup\[\] = \[/);
   });
 
-  it('组序（spec §2 定稿序，Task 1 在场组）：外观→字体→图表→搜索与排除→自动刷新→计算', () => {
+  it('组序（spec §2 定稿序，Task 1 在场组）：外观→字体→图表→搜索与排除→自动刷新→计算（域 C 抽取：组名走 t()，键序 + 目录值双锁）', () => {
     const ids = ['appearance', 'fonts', 'diagrams', 'search', 'autorefresh', 'compute'];
     const pos = ids.map((id) => src.indexOf(`id: '${id}'`));
     for (const p of pos) expect(p).toBeGreaterThan(-1);
     expect([...pos].sort((a, b) => a - b)).toEqual(pos);
-    const labels = ['外观', '字体', '图表', '搜索与排除', '自动刷新', '计算'];
-    const lpos = labels.map((l) => src.indexOf(`label: '${l}'`));
-    for (const p of lpos) expect(p).toBeGreaterThan(-1);
-    expect([...lpos].sort((a, b) => a - b)).toEqual(lpos);
+    // 组名锚改 t() 键形态（原 label: '<组名>' 字面量不再在源码），目录键序对应原组名序
+    const navKeys = ['appearance', 'fonts', 'diagrams', 'search', 'autorefresh', 'compute'];
+    const kpos = navKeys.map((k) => src.indexOf(`t('settings.nav.${k}')`));
+    for (const p of kpos) expect(p).toBeGreaterThan(-1);
+    expect([...kpos].sort((a, b) => a - b)).toEqual(kpos);
+    // 目录 zh 值双锁：原组名字面量逐字节保留于目录
+    expect(zhSettings['settings.nav.appearance']).toBe('外观');
+    expect(zhSettings['settings.nav.fonts']).toBe('字体');
+    expect(zhSettings['settings.nav.diagrams']).toBe('图表');
+    expect(zhSettings['settings.nav.search']).toBe('搜索与排除');
+    expect(zhSettings['settings.nav.autorefresh']).toBe('自动刷新');
+    expect(zhSettings['settings.nav.compute']).toBe('计算');
   });
 
   it('左导航与右内容均由注册表 each 驱动（含键盘 ↑↓ 切组，spec §2 分组导航键盘可达）', () => {
@@ -44,10 +54,12 @@ describe('SettingsCenter 分组注册表（spec §2 定稿序的在 Task 1 在�
     expect(src).toMatch(/ArrowDown|ArrowUp/);
   });
 
-  it('全屏 overlay 骨架：dialog 角色 + 容器/窗兜底双 Esc 通道 + 关闭焦点还原', () => {
+  it('全屏 overlay 骨架：dialog 角色 + 容器/窗兜底双 Esc 通道 + 关闭焦点还原（域 C 抽取：aria 走 t() + 目录值双锁）', () => {
     expect(src).toContain('class="vv-settings-center"');
     expect(src).toMatch(/role="dialog"/);
-    expect(src).toMatch(/aria-label="设置"/);
+    // 原锚 aria-label="设置"：改 t() 键形态 + 目录 zh 值双锁
+    expect(src).toMatch(/aria-label=\{t\('settings\.center\.title'\)\}/);
+    expect(zhSettings['settings.center.title']).toBe('设置');
     // 容器 keydown（合成 Esc 派发目标即根元素）+ window 兜底（target 在面板外），
     // 与 SettingsPanel/GlobalSearchPanel 同仓库 dialog 模式
     expect(src).toMatch(/function onRootKeydown[\s\S]*?e\.key === 'Escape'/);
@@ -56,42 +68,103 @@ describe('SettingsCenter 分组注册表（spec §2 定稿序的在 Task 1 在�
   });
 });
 
-describe('五节组件契约（既有 SettingsPanel 五节片段组件化，统一 { draft, touch } props）', () => {
-  const cases: readonly [string, string[]][] = [
-    ['AppearanceSection.svelte', ['亮色界面主题', '暗色界面主题', '代码主题', '导入主题', 'themeOptions']],
-    ['FontsSection.svelte', ['界面字体族', '代码字体族', '界面字号（px）', '代码字号（px）', '网络字体地址']],
-    ['DiagramsSection.svelte', ['Kroki 服务地址', '渲染模式', 'DIAGRAM_TYPES']],
-    ['SearchSection.svelte', ['添加排除规则', '删除排除规则', '加入预设排除规则', '暂无排除规则']],
-    ['AutoRefreshSection.svelte', ['自动刷新', 'type="checkbox"']],
-    ['ComputeSection.svelte', ['计算策略', 'auto', 'local', 'remote']]
+describe('五节组件契约（既有 SettingsPanel 五节片段组件化，统一 { draft, touch } props；域 C 抽取后锚 = t() 新形态 + 目录值双锁）', () => {
+  const cases: readonly [string, string[], [string, string][]][] = [
+    [
+      'AppearanceSection.svelte',
+      [
+        "t('settings.appearance.lightAria')",
+        "t('settings.appearance.darkAria')",
+        "t('settings.appearance.codeThemeLabel')",
+        "t('settings.appearance.importTheme')",
+        'themeOptions'
+      ],
+      [
+        ['settings.appearance.lightAria', '亮色界面主题'],
+        ['settings.appearance.darkAria', '暗色界面主题'],
+        ['settings.appearance.codeThemeLabel', '代码主题'],
+        ['settings.appearance.importTheme', '导入主题…']
+      ]
+    ],
+    [
+      'FontsSection.svelte',
+      [
+        "t('settings.fonts.uiSelectAria')",
+        "t('settings.fonts.codeSelectAria')",
+        "t('settings.fonts.uiSizeAria')",
+        "t('settings.fonts.codeSizeAria')",
+        "t('settings.fonts.urlAria')"
+      ],
+      [
+        ['settings.fonts.uiSelectAria', '界面字体族'],
+        ['settings.fonts.codeSelectAria', '代码字体族'],
+        ['settings.fonts.uiSizeAria', '界面字号（px）'],
+        ['settings.fonts.codeSizeAria', '代码字号（px）'],
+        ['settings.fonts.urlAria', '网络字体地址']
+      ]
+    ],
+    [
+      'DiagramsSection.svelte',
+      ["t('settings.diagrams.krokiAria')", "t('settings.diagrams.modesRow')", 'DIAGRAM_TYPES'],
+      [
+        ['settings.diagrams.krokiAria', 'Kroki 服务地址'],
+        ['settings.diagrams.modesRow', '渲染模式']
+      ]
+    ],
+    [
+      'SearchSection.svelte',
+      [
+        "t('settings.search.addAria')",
+        "t('settings.search.removeAria'",
+        "t('settings.search.presetAria'",
+        "t('settings.search.empty')"
+      ],
+      [
+        ['settings.search.addAria', '添加排除规则'],
+        ['settings.search.removeAria', '删除排除规则 {pattern}'],
+        ['settings.search.presetAria', '加入预设排除规则 {pattern}'],
+        ['settings.search.empty', '暂无排除规则']
+      ]
+    ],
+    ['AutoRefreshSection.svelte', ["t('settings.autorefresh.label')", 'type="checkbox"'], [['settings.autorefresh.label', '自动刷新']]],
+    [
+      'ComputeSection.svelte',
+      ["t('settings.compute.selectAria')", 'auto', 'local', 'remote'],
+      [['settings.compute.selectAria', '计算策略']]
+    ]
   ];
 
-  for (const [file, tokens] of cases) {
-    it(`${file}：draft/touch props 契约 + 既有字段绑定迁移（同 schema 字段同绑定语义）`, () => {
+  for (const [file, tokens, catalogLocks] of cases) {
+    it(`${file}：draft/touch props 契约 + 既有字段绑定迁移（同 schema 字段同绑定语义；文案锚走 t() 键 + 目录 zh 值双锁）`, () => {
       const src = readSrc(`src/lib/settings/${file}`);
       expect(src).toMatch(/draft: Settings; touch\(\): void/);
       expect(src).toMatch(/touch\(\)/);
-      for (const t of tokens) expect(src).toContain(t);
+      for (const token of tokens) expect(src).toContain(token);
+      for (const [key, value] of catalogLocks) expect(zhSettings[key as keyof typeof zhSettings]).toBe(value);
     });
   }
 });
 
-describe('DiagramsSection 渲染器第二列（spec 2026-10-23 §9.1，Task 6）', () => {
+describe('DiagramsSection 渲染器第二列（spec 2026-10-23 §9.1，Task 6；域 C 抽取后循环变量 t→dt 让位 + aria 走 t() 键）', () => {
   const src = readSrc('src/lib/settings/DiagramsSection.svelte');
 
-  it('渲染器 select 按行门控：{#if t.renderers?.length} 包裹（graphviz 行有、mermaid 等单渲染器行无）', () => {
+  it('渲染器 select 按行门控：{#if dt.renderers?.length} 包裹（graphviz 行有、mermaid 等单渲染器行无）', () => {
     // 根 vitest 无 svelte 插件不可挂载，源码契约锚形态（本文件既有先例）；注册表侧
-    // 「仅 graphviz 宣告 renderers」由 packages/vviewer-render-text diagrams.test.ts 锁定
-    expect(src).toMatch(/\{#if t\.renderers\?\.length\}\s*<select/);
-    expect(src).toContain('aria-label="{t.id} 渲染器"');
+    // 「仅 graphviz 宣告 renderers」由 packages/vviewer-render-text diagrams.test.ts 锁定。
+    // 域 C 抽取（Task 6）：循环变量 t 让位改名 dt（i18n t() 导入后遮蔽让位纪律），aria 走 t() 键
+    expect(src).toMatch(/\{#if dt\.renderers\?\.length\}\s*<select/);
+    expect(src).toContain("t('settings.diagrams.rendererAria', { id: dt.id })");
     // 渲染器 select 必须先于模式 select 出现（同一 label 行内第二列），且模式 select 不被吞并
-    expect(src).toMatch(/aria-label="\{t\.id\} 渲染器"[\s\S]*?aria-label="\{t\.id\} 渲染模式"/);
+    expect(src).toMatch(/settings\.diagrams\.rendererAria[\s\S]*?settings\.diagrams\.modeAria/);
+    // 目录 zh 值双锁：原 aria 模板字面量逐字节保留于目录（运行时渲染 'graphviz 渲染器' 同形）
+    expect(zhSettings['settings.diagrams.rendererAria']).toBe('{id} 渲染器');
+    expect(zhSettings['settings.diagrams.modeAria']).toBe('{id} 渲染模式');
   });
 
-  it('绑定 draft.diagrams.renderers[t.id]（缺省回注册表首项=默认渲染器），改动走 touch', () => {
-    expect(src).toContain('draft.diagrams.renderers[t.id] ?? t.renderers[0]');
+  it('绑定 draft.diagrams.renderers[dt.id]（缺省回注册表首项=默认渲染器），改动走 touch', () => {
+    expect(src).toContain('draft.diagrams.renderers[dt.id] ?? dt.renderers[0]');
     expect(src).toMatch(/function onDiagramRendererChange[\s\S]*?touch\(\)/);
-    expect(src).toContain('aria-label="{t.id} 渲染器"');
+    expect(src).toContain("t('settings.diagrams.rendererAria', { id: dt.id })");
   });
 });
 
@@ -139,8 +212,9 @@ describe('草稿模型与 UI/JSON 双视图接线（settings center spec §3，T
     expect(src).toMatch(/function leaveJson[\s\S]{0,300}if \(!r\.ok\)\s*\{\s*jsonErrors = r\.errors;\s*return false;/);
   });
 
-  it('JSON 视图：等宽 textarea + 行号栏，手编缓冲原样保留（非法标错不丢文本）', () => {
-    expect(src).toContain('aria-label="设置 JSON"');
+  it('JSON 视图：等宽 textarea + 行号栏，手编缓冲原样保留（非法标错不丢文本；域 C 抽取：aria 走 t() + 目录值双锁）', () => {
+    expect(src).toContain("aria-label={t('settings.center.jsonAreaAria')}");
+    expect(zhSettings['settings.center.jsonAreaAria']).toBe('设置 JSON');
     expect(src).toContain('vv-sc-gutter');
     expect(src).toMatch(/jsonDirtyBuffer = \(e\.currentTarget as HTMLTextAreaElement\)\.value/);
   });
@@ -161,11 +235,13 @@ describe('草稿模型与 UI/JSON 双视图接线（settings center spec §3，T
     expect(src).toMatch(/draft = openDraft\(applied\);\s*draftBase = openDraft\(applied\);/);
   });
 
-  it('脏态关闭确认（spec §3）：requestClose 导出 + 确认条（应用并关闭/放弃并关闭）', () => {
+  it('脏态关闭确认（spec §3）：requestClose 导出 + 确认条（应用并关闭/放弃并关闭；域 C 抽取：文案走 t() + 目录值双锁）', () => {
     expect(src).toMatch(/export function requestClose\(\): void/);
     expect(src).toMatch(/role="alertdialog"/);
-    expect(src).toContain('应用并关闭');
-    expect(src).toContain('放弃并关闭');
+    expect(src).toContain("t('settings.center.applyAndClose')");
+    expect(src).toContain("t('settings.center.discardAndClose')");
+    expect(zhSettings['settings.center.applyAndClose']).toBe('应用并关闭');
+    expect(zhSettings['settings.center.discardAndClose']).toBe('放弃并关闭');
     // 全部关闭路径（✕/容器 Esc/窗兜底 Esc）均走 requestClose 而非直关
     expect(src).toMatch(/onclick=\{requestClose\}/);
     expect(src).toMatch(/function onRootKeydown[\s\S]{0,600}requestClose\(\)/);
@@ -181,8 +257,9 @@ describe('评审带入项（Task 1+2 review：M1 必做 / L2·L6 顺手）', () 
   const appearance = readSrc('src/lib/settings/AppearanceSection.svelte');
   const src = readSrc('src/lib/SettingsCenter.svelte');
 
-  it('M1：外观组亮暗模式三态控件（spec §2 外观组定义；TopBar 快切并存双写同字段）', () => {
-    expect(appearance).toContain('aria-label="亮暗模式"');
+  it('M1：外观组亮暗模式三态控件（spec §2 外观组定义；TopBar 快切并存双写同字段；域 C 抽取：aria 走 t() + 目录值双锁）', () => {
+    expect(appearance).toContain("aria-label={t('settings.appearance.modeLabel')}");
+    expect(zhSettings['settings.appearance.modeLabel']).toBe('亮暗模式');
     for (const v of ['system', 'light', 'dark']) {
       expect(appearance).toContain(`value="${v}"`);
     }
@@ -217,19 +294,24 @@ describe('导入/导出（settings center spec §4，Task 3）', () => {
     expect(src).toMatch(/function onExport[\s\S]{0,400}loadSettings\(\)/);
   });
 
-  it('导入：隐藏 file input → parseImportFile；失败报错弹层（不部分应用）、成功开摘要对话框', () => {
+  it('导入：隐藏 file input → parseImportFile；失败报错弹层（不部分应用）、成功开摘要对话框（域 C 抽取：aria 走 t() + 目录值双锁）', () => {
     expect(src).toMatch(/type="file"[^>]*hidden/);
-    expect(src).toMatch(/aria-label="导入设置错误"/);
-    expect(src).toMatch(/aria-label="导入设置"/);
+    expect(src).toMatch(/aria-label=\{t\('settings\.center\.importErrorAria'\)\}/);
+    expect(src).toMatch(/aria-label=\{t\('settings\.center\.importModal'\)\}/);
+    expect(zhSettings['settings.center.importErrorAria']).toBe('导入设置错误');
+    expect(zhSettings['settings.center.importModal']).toBe('导入设置');
     expect(src).toMatch(/function onImportFile[\s\S]{0,300}parseImportFile\(/);
   });
 
-  it('导入对话框：合并/替换 radio 二选一 + 变更摘要渲染 + 内容资产注记', () => {
+  it('导入对话框：合并/替换 radio 二选一 + 变更摘要渲染 + 内容资产注记（域 C 抽取：文案走 t() + 目录值双锁）', () => {
     expect(src).toContain('type="radio"');
-    expect(src).toContain('合并（缺项保留现状）');
-    expect(src).toContain('替换（整体覆盖为导入值）');
+    expect(src).toContain("t('settings.center.mergeMode')");
+    expect(src).toContain("t('settings.center.replaceMode')");
+    expect(zhSettings['settings.center.mergeMode']).toBe('合并（缺项保留现状）');
+    expect(zhSettings['settings.center.replaceMode']).toBe('替换（整体覆盖为导入值）');
     expect(src).toMatch(/importGroupDiffs\(/);
-    expect(src).toContain('内容资产');
+    expect(src).toContain("t('settings.center.assetsHint')");
+    expect(zhSettings['settings.center.assetsHint']).toContain('内容资产');
   });
 
   it('确认导入走统一应用链（doApply→commit→saveSettings）；Esc 先关导入弹层再关页', () => {
@@ -241,7 +323,7 @@ describe('导入/导出（settings center spec §4，Task 3）', () => {
 describe('新分组补全（settings center spec §2 定稿序，Task 4）', () => {
   const src = readSrc('src/lib/SettingsCenter.svelte');
 
-  it('九组注册序：布局在图表/搜索之间；存储与数据在计算/关于之间', () => {
+  it('九组注册序：布局在图表/搜索之间；存储与数据在计算/关于之间（域 C 抽取：组名走 t()，键序 + 目录值双锁）', () => {
     const ids = [
       'appearance',
       'fonts',
@@ -256,10 +338,23 @@ describe('新分组补全（settings center spec §2 定稿序，Task 4）', () 
     const pos = ids.map((id) => src.indexOf(`id: '${id}'`));
     for (const p of pos) expect(p).toBeGreaterThan(-1);
     expect([...pos].sort((a, b) => a - b)).toEqual(pos);
-    const labels = ['外观', '字体', '图表', '布局', '搜索与排除', '自动刷新', '计算', '存储与数据', '关于'];
-    const lpos = labels.map((l) => src.indexOf(`label: '${l}'`));
-    for (const p of lpos) expect(p).toBeGreaterThan(-1);
-    expect([...lpos].sort((a, b) => a - b)).toEqual(lpos);
+    const navKeys = [
+      'appearance',
+      'fonts',
+      'diagrams',
+      'layout',
+      'search',
+      'autorefresh',
+      'compute',
+      'storage',
+      'about'
+    ];
+    const kpos = navKeys.map((k) => src.indexOf(`t('settings.nav.${k}')`));
+    for (const p of kpos) expect(p).toBeGreaterThan(-1);
+    expect([...kpos].sort((a, b) => a - b)).toEqual(kpos);
+    expect(zhSettings['settings.nav.layout']).toBe('布局');
+    expect(zhSettings['settings.nav.storage']).toBe('存储与数据');
+    expect(zhSettings['settings.nav.about']).toBe('关于');
   });
 
   it('节间互链通道：SettingsCenter setContext 提供导航（关于↔存储与数据互链）', () => {
@@ -268,38 +363,51 @@ describe('新分组补全（settings center spec §2 定稿序，Task 4）', () 
 });
 
 describe('Task 4 新节组件契约', () => {
-  it('LayoutSection：draft/touch 契约 + 四布尔/两宽度/zen 重置（clampWidth 同口径）', () => {
+  it('LayoutSection：draft/touch 契约 + 四布尔/两宽度/zen 重置（clampWidth 同口径；域 C 抽取：文案走 t() + 目录值双锁）', () => {
     const src = readSrc('src/lib/settings/LayoutSection.svelte');
     expect(src).toMatch(/draft: Settings; touch\(\): void/);
     expect(src).toMatch(/touch\(\)/);
-    for (const t of ['显示标签栏', '折叠文件树', '折叠属性面板', 'clampWidth', 'resetZen']) {
-      expect(src).toContain(t);
+    for (const key of [
+      'settings.layout.tabBar',
+      'settings.layout.leftCollapse',
+      'settings.layout.rightCollapse'
+    ]) {
+      expect(src).toContain(`t('${key}')`);
     }
+    expect(zhSettings['settings.layout.tabBar']).toBe('显示标签栏');
+    expect(zhSettings['settings.layout.leftCollapse']).toBe('折叠文件树（左栏）');
+    expect(zhSettings['settings.layout.rightCollapse']).toBe('折叠属性面板（右栏）');
+    expect(src).toContain('clampWidth');
+    expect(src).toContain('resetZen');
   });
 
-  it('StorageSection：七分类行 + 挂载配置禁用态 + 确认面板门 + 设置/出厂后重载', () => {
+  it('StorageSection：七分类行 + 挂载配置禁用态 + 确认面板门 + 设置/出厂后重载（域 C 抽取：文案走 t() + 目录值双锁）', () => {
     const src = readSrc('src/lib/settings/StorageSection.svelte');
     for (const cat of ['settings', 'sessions', 'dirhandle', 'themes', 'fonts', 'mounts', 'runtime-cache']) {
       expect(src).toContain(`'${cat}'`);
     }
     expect(src).toMatch(/purgeCategory\(/);
     expect(src).toMatch(/factoryReset\(/);
-    // 挂载配置行禁用态（Spec 5 前向兼容）
-    expect(src).toMatch(/vv-storage-cat-disabled[\s\S]{0,400}挂载配置[\s\S]{0,600}disabled/);
-    // 确认面板（红色危险调+列明后果）与重载收尾
+    // 挂载配置行禁用态（Spec 5 前向兼容）——原锚「挂载配置」字面量改 t() 键形态
+    expect(src).toMatch(/vv-storage-cat-disabled[\s\S]{0,400}catMounts'\)[\s\S]{0,600}disabled/);
+    expect(zhSettings['settings.storage.catMounts']).toBe('挂载配置');
+    // 确认面板（红色危险调+列明后果）与重载收尾——原锚「此操作不可恢复」改目录模板双锁
     expect(src).toMatch(/role="alertdialog"/);
     expect(src).toMatch(/function confirmPurge[\s\S]{0,700}location\.reload\(\)/);
-    expect(src).toContain('此操作不可恢复');
+    expect(src).toContain("t('settings.storage.consequenceFactory')");
+    expect(zhSettings['settings.storage.consequenceFactory']).toContain('此操作不可恢复');
     // 互链跳转（关于节用量显示）
     expect(src).toMatch(/navTo\('about'\)/);
   });
 
-  it('AboutSection：版本并列与不一致注记 + 未连接降级 + estimate/persist + 致谢链接 + persist 钩子说明', () => {
+  it('AboutSection：版本并列与不一致注记 + 未连接降级 + estimate/persist + 致谢链接 + persist 钩子说明（域 C 抽取：文案走 t() + 目录值双锁）', () => {
     const src = readSrc('src/lib/settings/AboutSection.svelte');
     expect(src).toMatch(/appVersion\(\)/);
     expect(src).toMatch(/loadServerHealth\(\)/);
     expect(src).toMatch(/versionMismatch/);
-    expect(src).toContain('未连接'); // 服务端版本不可得降级
+    // 服务端版本不可得降级——原锚「未连接」字面量改 t() 键形态 + 目录 zh 值双锁
+    expect(src).toContain("t('settings.about.notConnected')");
+    expect(zhSettings['settings.about.notConnected']).toBe('未连接');
     expect(src).toMatch(/collectStorageInfo\(/);
     expect(src).toMatch(/persistedState|info\.persisted/);
     expect(src).toMatch(/requestPersistent\(\)/);

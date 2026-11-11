@@ -15,6 +15,7 @@
     type StorageInfo
   } from '../storageHealth';
   import { useSettingsNav } from './nav';
+  import { t } from '../i18n/index.svelte';
   import type { Settings } from '../stores/settings';
 
   // 契约占位（注册表统一 { draft, touch } 形态；本节为只读视图，不编辑草稿，
@@ -65,8 +66,8 @@
     try {
       const granted = await requestPersistent();
       persistNote = granted
-        ? '已授予持久化存储：字体/主题/会话快照/离线缓存不再被磁盘压力驱逐'
-        : '未获授予：浏览器按启发式判定（站点互动/通知/装为 PWA 可提高授予率）——安装为 PWA 通常自动持久化';
+        ? t('settings.about.persistGranted')
+        : t('settings.about.persistDenied');
       void refresh(); // 状态行反映最新结果
     } finally {
       requesting = false;
@@ -81,54 +82,54 @@
 </script>
 
 <section class="vv-sc-section">
-  <div class="vv-settings-label">项目信息</div>
-  <div class="vv-about-row"><span class="vv-about-key">应用</span><span>vviewer</span></div>
+  <div class="vv-settings-label">{t('settings.about.projectLabel')}</div>
+  <div class="vv-about-row"><span class="vv-about-key">{t('settings.about.appKey')}</span><span>vviewer</span></div>
   <div class="vv-about-row">
-    <span class="vv-about-key">前端版本</span>
-    <span>{frontendVersion ?? '开发构建'}</span>
+    <span class="vv-about-key">{t('settings.about.frontendKey')}</span>
+    <span>{frontendVersion ?? t('settings.about.devBuild')}</span>
   </div>
   <div class="vv-about-row">
-    <span class="vv-about-key">服务端版本</span>
-    <span>{health?.version ?? '未连接'}</span>
+    <span class="vv-about-key">{t('settings.about.serverKey')}</span>
+    <span>{health?.version ?? t('settings.about.notConnected')}</span>
   </div>
   {#if versionMismatch}
-    <div class="vv-settings-warn" role="status">前端（{frontendVersion}）与服务端（{health?.version}）版本不一致</div>
+    <div class="vv-settings-warn" role="status">{t('settings.about.mismatch', { front: frontendVersion ?? '', server: health?.version ?? '' })}</div>
   {/if}
   {#if health !== null}
     <div class="vv-about-row">
-      <span class="vv-about-key">能力</span>
-      <span>{health.capabilities.join('、') || '—'}</span>
+      <span class="vv-about-key">{t('settings.about.capsKey')}</span>
+      <span>{health.capabilities.join(t('settings.common.listSep')) || '—'}</span>
     </div>
     <div class="vv-about-row">
-      <span class="vv-about-key">搜索引擎</span>
-      <span>{health.searchEngine ?? '未宣告'}</span>
+      <span class="vv-about-key">{t('settings.about.engineKey')}</span>
+      <span>{health.searchEngine ?? t('settings.about.notDeclared')}</span>
     </div>
     <div class="vv-about-row">
-      <span class="vv-about-key">数据根</span>
-      <span>{health.roots ?? 1} 个</span>
+      <span class="vv-about-key">{t('settings.about.rootsKey')}</span>
+      <span>{t('settings.about.rootsCount', { count: health.roots ?? 1 })}</span>
     </div>
   {/if}
   <div class="vv-about-row">
-    <span class="vv-about-key">仓库</span>
+    <span class="vv-about-key">{t('settings.about.repoKey')}</span>
     <a href={REPO_URL} target="_blank" rel="noreferrer">github.com/bhxch/vviewer</a>
   </div>
   <div class="vv-about-row">
-    <span class="vv-about-key">许可</span>
+    <span class="vv-about-key">{t('settings.about.licenseKey')}</span>
     <a href={LICENSE_URL} target="_blank" rel="noreferrer">Apache-2.0</a>
   </div>
   <div class="vv-about-row">
-    <span class="vv-about-key">第三方致谢</span>
+    <span class="vv-about-key">{t('settings.about.noticesKey')}</span>
     <a href={NOTICES_URL} target="_blank" rel="noreferrer">THIRD_PARTY_NOTICES.md</a>
   </div>
 
-  <div class="vv-settings-label">存储用量与配额</div>
+  <div class="vv-settings-label">{t('settings.about.usageLabel')}</div>
   <div class="vv-settings-hint">
-    配额为浏览器估算值（Chrome 粒度较粗、Firefox 按磁盘约 10% 报告）；清理空间在
-    <button type="button" class="vv-sc-linklike" onclick={() => navTo('storage')}>存储与数据 →</button>
+    {t('settings.about.quotaHint')}
+    <button type="button" class="vv-sc-linklike" onclick={() => navTo('storage')}>{t('settings.about.storageLink')}</button>
   </div>
   {#if info !== null && info.estimate !== null}
     <div class="vv-about-row">
-      <span class="vv-about-key">已用 / 配额</span>
+      <span class="vv-about-key">{t('settings.about.usedQuotaKey')}</span>
       <span>{formatBytes(info.estimate.usage)} / {formatBytes(info.estimate.quota)}</span>
     </div>
     {#each detailEntries as [k, v] (k)}
@@ -138,51 +139,51 @@
       </div>
     {/each}
   {:else}
-    <div class="vv-settings-hint">当前浏览器不支持配额估算（仅显示本地估算行）。</div>
+    <div class="vv-settings-hint">{t('settings.about.noQuotaHint')}</div>
   {/if}
   <div class="vv-about-row">
-    <span class="vv-about-key">localStorage 估算</span>
+    <span class="vv-about-key">{t('settings.about.lsKey')}</span>
     <span>{info === null ? '…' : formatBytes(info.localStorageBytes)}</span>
   </div>
   <div class="vv-about-row">
-    <span class="vv-about-key">IndexedDB · kv（会话/句柄）</span>
-    <span>{info === null ? '…' : `${info.kv.records} 条 · ${formatBytes(info.kv.bytes)}`}</span>
+    <span class="vv-about-key">{t('settings.about.kvKey')}</span>
+    <span>{info === null ? '…' : t('settings.about.recordsBytes', { records: info.kv.records, bytes: formatBytes(info.kv.bytes) })}</span>
   </div>
   <div class="vv-about-row">
-    <span class="vv-about-key">IndexedDB · themes（导入主题）</span>
-    <span>{info === null ? '…' : `${info.themes.records} 条 · ${formatBytes(info.themes.bytes)}`}</span>
+    <span class="vv-about-key">{t('settings.about.themesKey')}</span>
+    <span>{info === null ? '…' : t('settings.about.recordsBytes', { records: info.themes.records, bytes: formatBytes(info.themes.bytes) })}</span>
   </div>
   <div class="vv-about-row">
-    <span class="vv-about-key">IndexedDB · iconThemes（导入图标主题）</span>
-    <span>{info === null ? '…' : `${info.iconThemes.records} 条 · ${formatBytes(info.iconThemes.bytes)}`}</span>
+    <span class="vv-about-key">{t('settings.about.iconThemesKey')}</span>
+    <span>{info === null ? '…' : t('settings.about.recordsBytes', { records: info.iconThemes.records, bytes: formatBytes(info.iconThemes.bytes) })}</span>
   </div>
   <div class="vv-about-row">
-    <span class="vv-about-key">IndexedDB · fonts（网络字体）</span>
-    <span>{info === null ? '…' : `${info.fonts.records} 条 · ${formatBytes(info.fonts.bytes)}`}</span>
+    <span class="vv-about-key">{t('settings.about.fontsKey')}</span>
+    <span>{info === null ? '…' : t('settings.about.recordsBytes', { records: info.fonts.records, bytes: formatBytes(info.fonts.bytes) })}</span>
   </div>
   <div class="vv-about-row vv-about-detail">
-    <span class="vv-about-key">IndexedDB · mounts（挂载配置）</span>
-    <span>未启用</span>
+    <span class="vv-about-key">{t('settings.about.mountsKey')}</span>
+    <span>{t('settings.about.mountsDisabled')}</span>
   </div>
   <div class="vv-settings-import">
-    <button type="button" disabled={loading} onclick={() => void refresh()}>刷新</button>
+    <button type="button" disabled={loading} onclick={() => void refresh()}>{t('settings.about.refresh')}</button>
   </div>
 
-  <div class="vv-settings-label">持久化存储</div>
+  <div class="vv-settings-label">{t('settings.about.persistLabel')}</div>
   {#if persisted !== null}
     <div class="vv-about-row" role="status">
-      <span class="vv-about-key">状态</span>
-      <span>{persisted ? '已持久化' : '未持久化（best-effort，磁盘紧张时可能被清除）'}</span>
+      <span class="vv-about-key">{t('settings.about.statusKey')}</span>
+      <span>{persisted ? t('settings.about.persisted') : t('settings.about.notPersisted')}</span>
     </div>
   {:else}
-    <div class="vv-settings-hint">当前浏览器不支持持久化存储查询。</div>
+    <div class="vv-settings-hint">{t('settings.about.noPersistHint')}</div>
   {/if}
   <div class="vv-settings-hint">
-    持久化为 origin 级：一次申请保护全源（字体/主题/会话快照/离线缓存）；字体新增成功时也会静默尝试一次。
+    {t('settings.about.persistHint')}
   </div>
   <div class="vv-settings-import">
     <button type="button" disabled={requesting} onclick={() => void onRequestPersist()}>
-      申请持久化存储
+      {t('settings.about.requestPersist')}
     </button>
   </div>
   {#if persistNote}

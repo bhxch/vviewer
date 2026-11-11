@@ -3,6 +3,7 @@
   // 自 SettingsPanel 排除规则节原样迁移（2026-10-19 设置中心 Task 1）：条目删除/
   // 手动添加/预设一键加入。改动写 draft.excludedPatterns 后调 touch()——落盘与
   // 生效时机由 SettingsCenter 统一决定（Task 1 即时持久化 / Task 2 起草稿统一应用）。
+  import { t } from '../i18n/index.svelte';
   import type { Settings } from '../stores/settings';
 
   let { draft, touch }: { draft: Settings; touch(): void } = $props();
@@ -34,8 +35,8 @@
 </script>
 
 <section class="vv-sc-section">
-  <div class="vv-settings-label">排除规则</div>
-  <div class="vv-settings-hint">命中名称的文件/目录不显示在文件树与快速打开中（如 .git、node_modules；*.log 排除所有 .log 文件）。</div>
+  <div class="vv-settings-label">{t('settings.search.label')}</div>
+  <div class="vv-settings-hint">{t('settings.search.hint')}</div>
   {#if patterns.length > 0}
     <ul class="vv-settings-patterns">
       {#each patterns as p (p)}
@@ -44,32 +45,32 @@
           <button
             type="button"
             class="vv-settings-remove"
-            aria-label="删除排除规则 {p}"
-            title="删除"
+            aria-label={t('settings.search.removeAria', { pattern: p })}
+            title={t('settings.search.deleteTitle')}
             onclick={() => removePattern(p)}>✕</button
           >
         </li>
       {/each}
     </ul>
   {:else}
-    <div class="vv-settings-empty">暂无排除规则</div>
+    <div class="vv-settings-empty">{t('settings.search.empty')}</div>
   {/if}
   <form class="vv-settings-add" onsubmit={submit}>
     <input
       bind:this={inputEl}
       bind:value
-      placeholder="添加名称或 *.后缀"
-      aria-label="添加排除规则"
+      placeholder={t('settings.search.placeholder')}
+      aria-label={t('settings.search.addAria')}
       spellcheck="false"
     />
-    <button type="submit" disabled={value.trim() === ''}>添加</button>
+    <button type="submit" disabled={value.trim() === ''}>{t('settings.search.add')}</button>
   </form>
   <div class="vv-settings-presets">
     {#each PRESETS as p (p)}
       <button
         type="button"
         disabled={patterns.includes(p)}
-        aria-label="加入预设排除规则 {p}"
+        aria-label={t('settings.search.presetAria', { pattern: p })}
         onclick={() => addPattern(p)}>+ {p}</button
       >
     {/each}

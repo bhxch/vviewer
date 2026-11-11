@@ -15,6 +15,8 @@ import {
   formatFontSize,
   mergedFamilyOptions
 } from './fonts';
+// 域 C 抽取（Task 6）：aria 源码锚改 t() 新形态 + 目录 zh 值双锁（对齐 settingsCenter.test 先例）
+import { messages as zhSettings } from './i18n/catalogs/zh-CN/settings';
 
 // vitest 会转译 import.meta.url（metaStore.test 同款处理）：双 cwd 兼容根/apps/web
 function readSrc(relFromWeb: string): string {
@@ -134,13 +136,20 @@ describe('formatFontSize（管理列表体积显示）', () => {
 describe('FontsSection 字体节源码契约（两槽四输入 + draft/touch 接线；节序由 settingsCenter.test 注册表锁定）', () => {
   const src = readSrc('src/lib/settings/FontsSection.svelte');
 
-  it('两槽四输入：族下拉/自定义手输/字号 number 各×2，aria-label 可寻址', () => {
-    expect(src).toContain('aria-label="界面字体族"');
-    expect(src).toContain('aria-label="代码字体族"');
-    expect(src).toContain('aria-label="自定义界面字体族"');
-    expect(src).toContain('aria-label="自定义代码字体族"');
-    expect(src).toContain('aria-label="界面字号（px）"');
-    expect(src).toContain('aria-label="代码字号（px）"');
+  it('两槽四输入：族下拉/自定义手输/字号 number 各×2，aria-label 可寻址（t() 新形态 + 目录值双锁）', () => {
+    // 域 C 抽取（Task 6）：aria 走 t()（新形态）+ 目录 zh 值双锁（原字面量逐字节保留于目录）
+    expect(src).toContain("aria-label={t('settings.fonts.uiSelectAria')}");
+    expect(src).toContain("aria-label={t('settings.fonts.codeSelectAria')}");
+    expect(src).toContain("aria-label={t('settings.fonts.uiCustomAria')}");
+    expect(src).toContain("aria-label={t('settings.fonts.codeCustomAria')}");
+    expect(src).toContain("aria-label={t('settings.fonts.uiSizeAria')}");
+    expect(src).toContain("aria-label={t('settings.fonts.codeSizeAria')}");
+    expect(zhSettings['settings.fonts.uiSelectAria']).toBe('界面字体族');
+    expect(zhSettings['settings.fonts.codeSelectAria']).toBe('代码字体族');
+    expect(zhSettings['settings.fonts.uiCustomAria']).toBe('自定义界面字体族');
+    expect(zhSettings['settings.fonts.codeCustomAria']).toBe('自定义代码字体族');
+    expect(zhSettings['settings.fonts.uiSizeAria']).toBe('界面字号（px）');
+    expect(zhSettings['settings.fonts.codeSizeAria']).toBe('代码字号（px）');
     expect(src.match(/type="number"/g)?.length).toBe(2);
     // 自定义手输×2（绑定 draft.fonts 槽位）
     expect(src.match(/type="text"\s*\n\s*value=\{draft\.fonts\.uiFamily\}/g)?.length).toBe(1);

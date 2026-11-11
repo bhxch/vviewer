@@ -5,6 +5,8 @@
   // 字段同绑定语义，写入当前生效亮暗槽（system 按 prefers-color-scheme 解析）。
   // 槽改动写 draft 后调 touch()——落盘与注入时机由 SettingsCenter 统一决定
   // （注入由壳层 AppShell 的 onSettingsChanged 订阅 diff 触发，spec 2026-10-12 §2.4）。
+  // 文案入 i18n 目录（域 C 抽取，Task 6）：组件走响应式 t()；局部主题记录形参/
+  // 循环变量避让 t 改名 theme/iconTheme/rec（Task 4 M-2 让位纪律）。
   import { onMount } from 'svelte';
   import {
     deleteIconTheme,
@@ -25,6 +27,7 @@
   import { applyIconsFromSettings, invalidateIcons } from '../iconTheme.svelte';
   import { checkUpdate, installFromOpenVsx, updateTheme } from '../openVsx';
   import { ICON_THEME_SCOPE_KEYS, loadSettings, type Settings } from '../stores/settings';
+  import { t } from '../i18n/index.svelte';
 
   let { draft, touch }: { draft: Settings; touch(): void } = $props();
 
@@ -42,12 +45,14 @@
   let iconImporting = $state(false);
   let iconInputEl = $state<HTMLInputElement | null>(null);
 
-  /** 四 scopes 中文标签（ICON_THEME_SCOPE_KEYS 键序即渲染序，draft 值经键索引读写） */
-  const ICON_SCOPE_LABELS: Record<(typeof ICON_THEME_SCOPE_KEYS)[number], string> = {
-    tree: '文件树',
-    tabs: '标签栏',
-    quickOpen: '快速打开',
-    search: '全局搜索'
+  /** 四 scopes 显示文案（ICON_THEME_SCOPE_KEYS 键序即渲染序，draft 值经键索引读写）：
+   * id → 取文案闭包（字面键调用保 TFunction 类型安全；模板内求值保 locale 响应式，
+   * 域 C 抽取 Task 6） */
+  const ICON_SCOPE_LABELS: Record<(typeof ICON_THEME_SCOPE_KEYS)[number], () => string> = {
+    tree: () => t('settings.appearance.scopeTree'),
+    tabs: () => t('settings.appearance.scopeTabs'),
+    quickOpen: () => t('settings.appearance.scopeQuickOpen'),
+    search: () => t('settings.appearance.scopeSearch')
   };
 
   // 主题表经动态 import 惰性加载（不进主 chunk，TopBar 旧实现同款），选项挂载后异步填充
@@ -65,9 +70,10 @@
   /** 外观接管（spec B §2.3）：当前 mode 槽非 default 时代码配色由外观 tokenColors 决定 */
   const appearanceTakesOver = $derived(currentAppearance !== 'default');
 
-  /** 内置外观候选（spec B §2.3）：值即 theme.ts BUILTIN_APPEARANCES 清单键 + default */
+  /** 内置外观候选（spec B §2.3）：值即 theme.ts BUILTIN_APPEARANCES 清单键 + default
+   * （default 行文案经 t() 取目录值，label 置空不消费；VSCode 两行名为 ASCII 数据值） */
   const APPEARANCE_BUILTINS: readonly { value: string; label: string }[] = [
-    { value: 'default', label: '默认' },
+    { value: 'default', label: '' },
     { value: 'vscode:Dark Modern', label: 'Dark Modern (VSCode)' },
     { value: 'vscode:Light Modern', label: 'Light Modern (VSCode)' }
   ];
@@ -80,18 +86,18 @@
   function appearanceKind(ref: string): 'dark' | 'light' | null {
     if (ref === 'vscode:Dark Modern') return 'dark';
     if (ref === 'vscode:Light Modern') return 'light';
-    if (ref.startsWith('imported:')) return imported.find((t) => t.id === ref)?.kind ?? null;
+    if (ref.startsWith('imported:')) return imported.find((theme) => theme.id === ref)?.kind ?? null;
     return null;
   }
 
   /** 槽与主题亮暗不匹配提醒文案（空串=无不匹配）：与所选主题 kind 反色的槽才提示 */
   const lightWarn = $derived.by(() => {
     const k = appearanceKind(draft.appearanceLight);
-    return k === 'dark' ? '已选主题为暗色，与当前亮色槽不匹配（仍会生效）' : '';
+    return k === 'dark' ? t('settings.appearance.mismatchLightSlot') : '';
   });
   const darkWarn = $derived.by(() => {
     const k = appearanceKind(draft.appearanceDark);
-    return k === 'light' ? '已选主题为亮色，与当前暗色槽不匹配（仍会生效）' : '';
+    return k === 'light' ? t('settings.appearance.mismatchDarkSlot') : '';
   });
 
   $effect(() => {
@@ -151,11 +157,14 @@
     try {
       const { imported: ok, errors } = await importThemeFiles(files);
       importErrors = errors;
-      importNote = errors.length === 0 ? `已导入 ${ok.length} 个主题` : `已导入 ${ok.length} 个，失败 ${errors.length} 个`;
+      importNote =
+        errors.length === 0
+          ? t('settings.appearance.importedThemes', { ok: ok.length })
+          : t('settings.appearance.importedPartial', { ok: ok.length, failed: errors.length });
       imported = [...(await listThemes())].sort((a, b) => a.name.localeCompare(b.name) || a.addedAt - b.addedAt);
     } catch (err) {
       importErrors = [err instanceof Error ? err.message : String(err)];
-      importNote = '导入失败';
+      importNote = t('settings.appearance.importFailed');
     } finally {
       importing = false;
     }
@@ -163,20 +172,20 @@
 
   /** 删除已导入主题：确认后删库；仍被槽引用的回 'default'（悬空 id 本有 warn 回退，UI 同步归位）。
    * 删库失败（存储不可用等）只记 console.error，列表/槽保持不动（onImportChange 容错风格）。 */
-  async function removeImported(t: ImportedTheme): Promise<void> {
-    if (!window.confirm(`删除已导入主题「${t.name}」？`)) return;
+  async function removeImported(theme: ImportedTheme): Promise<void> {
+    if (!window.confirm(t('settings.appearance.deleteThemeConfirm', { name: theme.name }))) return;
     try {
-      await deleteTheme(t.id);
+      await deleteTheme(theme.id);
     } catch (err) {
-      console.error(`删除已导入主题「${t.name}」失败`, err);
+      console.error(`[vviewer] settings: failed to delete imported theme ${theme.name}`, err);
       return;
     }
     let changed = false;
-    if (draft.appearanceLight === t.id) {
+    if (draft.appearanceLight === theme.id) {
       draft.appearanceLight = 'default';
       changed = true;
     }
-    if (draft.appearanceDark === t.id) {
+    if (draft.appearanceDark === theme.id) {
       draft.appearanceDark = 'default';
       changed = true;
     }
@@ -184,7 +193,7 @@
       // 槽归位只写 draft：注入由壳层 AppShell 订阅 diff 触发（spec 2026-10-12 §2.4）
       touch();
     }
-    imported = imported.filter((x) => x.id !== t.id);
+    imported = imported.filter((x) => x.id !== theme.id);
   }
 
   // ---------- 图标主题分区（图标主题 spec §3.1，Task 4） ----------
@@ -214,13 +223,16 @@
     try {
       const { imported: ok, errors } = await importIconThemeFiles(files);
       importErrors = errors;
-      importNote = errors.length === 0 ? `已导入 ${ok.length} 个图标主题` : `已导入 ${ok.length} 个，失败 ${errors.length} 个`;
+      importNote =
+        errors.length === 0
+          ? t('settings.appearance.importedIconThemes', { ok: ok.length })
+          : t('settings.appearance.importedPartial', { ok: ok.length, failed: errors.length });
       iconImported = [...(await listIconThemes())].sort(
         (a, b) => a.name.localeCompare(b.name) || a.addedAt - b.addedAt
       );
     } catch (err) {
       importErrors = [err instanceof Error ? err.message : String(err)];
-      importNote = '导入失败';
+      importNote = t('settings.appearance.importFailed');
     } finally {
       iconImporting = false;
     }
@@ -228,19 +240,19 @@
 
   /** 删除已导入图标主题：确认后删库；仍被主题槽引用的回 'none'（引用回落语义，
    * 颜色主题删除同款；spec §3.5）。删库失败只记 console.error，列表/槽保持不动。 */
-  async function removeIconImported(t: ImportedIconTheme): Promise<void> {
-    if (!window.confirm(`删除已导入图标主题「${t.name}」？`)) return;
+  async function removeIconImported(iconTheme: ImportedIconTheme): Promise<void> {
+    if (!window.confirm(t('settings.appearance.deleteIconThemeConfirm', { name: iconTheme.name }))) return;
     try {
-      await deleteIconTheme(t.id);
+      await deleteIconTheme(iconTheme.id);
     } catch (err) {
-      console.error(`删除已导入图标主题「${t.name}」失败`, err);
+      console.error(`[vviewer] settings: failed to delete imported icon theme ${iconTheme.name}`, err);
       return;
     }
-    if (draft.iconThemes.theme === t.id) {
+    if (draft.iconThemes.theme === iconTheme.id) {
       draft.iconThemes.theme = 'none';
       touch();
     }
-    iconImported = iconImported.filter((x) => x.id !== t.id);
+    iconImported = iconImported.filter((x) => x.id !== iconTheme.id);
   }
 
   // ---------- Open VSX 安装与更新通道（图标主题 spec §6.2/§6.3，Task 5） ----------
@@ -285,13 +297,15 @@
       const { imported: ok, errors } = await installFromOpenVsx(input);
       importErrors = errors;
       importNote =
-        errors.length === 0 ? `已从 Open VSX 安装 ${ok.length} 个主题` : `已安装 ${ok.length} 个，失败 ${errors.length} 个`;
+        errors.length === 0
+          ? t('settings.appearance.ovsxInstalled', { ok: ok.length })
+          : t('settings.appearance.installedPartial', { ok: ok.length, failed: errors.length });
       if (channel === 'theme') ovxThemeInput = '';
       else ovxIconInput = '';
       await refreshImportedLists();
     } catch (err) {
       importErrors = [err instanceof Error ? err.message : String(err)];
-      importNote = importErrors[0] ?? 'Open VSX 安装失败';
+      importNote = importErrors[0] ?? t('settings.appearance.ovsxInstallFailed');
     } finally {
       if (channel === 'theme') ovxThemeBusy = false;
       else ovxIconBusy = false;
@@ -302,12 +316,12 @@
    * 呈现形态）：latest + hasUpdate 记入 ovxLatest 供行内切换更新钮（semver-lite
    * 同源口径，降级/平版 hasUpdate:false）；失败返回 error 文案。 */
   async function ovxCheckOnce(
-    t: ImportedTheme | ImportedIconTheme,
+    rec: ImportedTheme | ImportedIconTheme,
     origin: ThemeOrigin
   ): Promise<{ latest: string; hasUpdate: boolean; error?: undefined } | { latest?: undefined; hasUpdate?: undefined; error: string }> {
     try {
       const { latest, hasUpdate } = await checkUpdate(origin);
-      ovxLatest = { ...ovxLatest, [t.id]: { latest, hasUpdate } };
+      ovxLatest = { ...ovxLatest, [rec.id]: { latest, hasUpdate } };
       return { latest, hasUpdate };
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) };
@@ -315,30 +329,30 @@
   }
 
   /** 逐条「检查更新」钮（spec §6.3）：单条结果直接上 note（失败文案即 note）。 */
-  async function ovxCheckOne(t: ImportedTheme | ImportedIconTheme): Promise<void> {
-    if (t.origin === undefined) return;
-    ovxCheckBusy = { ...ovxCheckBusy, [t.id]: true };
+  async function ovxCheckOne(rec: ImportedTheme | ImportedIconTheme): Promise<void> {
+    if (rec.origin === undefined) return;
+    ovxCheckBusy = { ...ovxCheckBusy, [rec.id]: true };
     importNote = '';
     importErrors = [];
-    const r = await ovxCheckOnce(t, t.origin);
+    const r = await ovxCheckOnce(rec, rec.origin);
     if (r.error !== undefined) {
       importErrors = [r.error];
       importNote = r.error;
     } else if (r.hasUpdate === true) {
-      importNote = `「${t.name}」有更新：${t.origin.version} → ${r.latest}`;
+      importNote = t('settings.appearance.hasUpdate', { name: rec.name, version: rec.origin.version, latest: r.latest });
     } else {
-      importNote = `「${t.name}」已是最新（${r.latest}）`;
+      importNote = t('settings.appearance.upToDate', { name: rec.name, latest: r.latest });
     }
-    ovxCheckBusy = { ...ovxCheckBusy, [t.id]: false };
+    ovxCheckBusy = { ...ovxCheckBusy, [rec.id]: false };
   }
 
   /** 「全部检查」（列表头）：逐条串行 GET（spec §6.3——记录数量级小，无并发风暴）。
    * 失败条目逐条收集进 importErrors（note 的 title tooltip 可见「{name}: 原因」），
    * 成功汇总照旧上 note——单条失败不再被下一条的 note 覆盖丢失（评审 Minor 2）。 */
   async function ovxCheckAll(channel: 'theme' | 'icon'): Promise<void> {
-    const targets = (channel === 'theme' ? imported : iconImported).filter((t) => t.origin !== undefined);
+    const targets = (channel === 'theme' ? imported : iconImported).filter((rec) => rec.origin !== undefined);
     if (targets.length === 0) {
-      importNote = '无 Open VSX 来源的主题（本地导入无更新通道）';
+      importNote = t('settings.appearance.noOvsx');
       return;
     }
     ovxCheckAllBusy = { ...ovxCheckAllBusy, [channel]: true };
@@ -347,19 +361,19 @@
     let updatable = 0;
     const failures: string[] = [];
     try {
-      for (const t of targets) {
-        if (t.origin === undefined) continue; // filter 已保证；仅供类型收窄
-        ovxCheckBusy = { ...ovxCheckBusy, [t.id]: true };
-        const r = await ovxCheckOnce(t, t.origin);
-        ovxCheckBusy = { ...ovxCheckBusy, [t.id]: false };
-        if (r.error !== undefined) failures.push(`${t.name}: ${r.error}`);
+      for (const rec of targets) {
+        if (rec.origin === undefined) continue; // filter 已保证；仅供类型收窄
+        ovxCheckBusy = { ...ovxCheckBusy, [rec.id]: true };
+        const r = await ovxCheckOnce(rec, rec.origin);
+        ovxCheckBusy = { ...ovxCheckBusy, [rec.id]: false };
+        if (r.error !== undefined) failures.push(`${rec.name}: ${r.error}`);
         else if (r.hasUpdate === true) updatable++;
       }
       importErrors = failures;
       importNote =
         failures.length > 0
-          ? `全部检查完成（${targets.length} 条）：${updatable} 条可更新，失败 ${failures.length} 条`
-          : `全部检查完成（${targets.length} 条）：${updatable} 条可更新`;
+          ? t('settings.appearance.checkAllDonePartial', { total: targets.length, updatable, failed: failures.length })
+          : t('settings.appearance.checkAllDone', { total: targets.length, updatable });
     } finally {
       ovxCheckAllBusy = { ...ovxCheckAllBusy, [channel]: false };
     }
@@ -370,12 +384,12 @@
    * 签名再手动触发一次应用（spec §6.3「设置引用零断链 + 内容替换」的本实现达成
    * 形态，两通道一并处置）。重应用读 loadSettings()（已落盘设置）而非 draft：
    * 未应用的草稿改动不应被提前注入；两槽 id 与覆盖前一致，语义不变。 */
-  async function ovxUpdateOne(channel: 'theme' | 'icon', t: ImportedTheme | ImportedIconTheme): Promise<void> {
-    ovxUpdateBusy = { ...ovxUpdateBusy, [t.id]: true };
+  async function ovxUpdateOne(channel: 'theme' | 'icon', rec: ImportedTheme | ImportedIconTheme): Promise<void> {
+    ovxUpdateBusy = { ...ovxUpdateBusy, [rec.id]: true };
     importNote = '';
     importErrors = [];
     try {
-      const updated = await updateTheme(t);
+      const updated = await updateTheme(rec);
       if (channel === 'icon') {
         iconImported = iconImported.map((x) => (x.id === updated.id ? (updated as ImportedIconTheme) : x));
         invalidateIcons();
@@ -385,40 +399,40 @@
         invalidateAppearance();
         applyAppearanceFromSettings(loadSettings());
       }
-      ovxLatest = { ...ovxLatest, [t.id]: { latest: updated.origin?.version ?? '', hasUpdate: false } };
-      importNote = `已更新「${updated.name}」到 v${updated.origin?.version ?? '?'}`;
+      ovxLatest = { ...ovxLatest, [rec.id]: { latest: updated.origin?.version ?? '', hasUpdate: false } };
+      importNote = t('settings.appearance.updatedTo', { name: updated.name, version: updated.origin?.version ?? '' });
     } catch (err) {
       importErrors = [err instanceof Error ? err.message : String(err)];
-      importNote = importErrors[0] ?? 'Open VSX 更新失败';
+      importNote = importErrors[0] ?? t('settings.appearance.ovsxUpdateFailed');
     } finally {
-      ovxUpdateBusy = { ...ovxUpdateBusy, [t.id]: false };
+      ovxUpdateBusy = { ...ovxUpdateBusy, [rec.id]: false };
     }
   }
 </script>
 
 <section class="vv-sc-section">
-  <div class="vv-settings-label">亮暗模式</div>
+  <div class="vv-settings-label">{t('settings.appearance.modeLabel')}</div>
   <label class="vv-settings-theme-row">
-    <span>主题模式</span>
-    <select value={draft.themeMode} onchange={onThemeModeChange} aria-label="亮暗模式">
-      <option value="system">跟随系统</option>
-      <option value="light">亮色</option>
-      <option value="dark">暗色</option>
+    <span>{t('settings.appearance.modeRow')}</span>
+    <select value={draft.themeMode} onchange={onThemeModeChange} aria-label={t('settings.appearance.modeLabel')}>
+      <option value="system">{t('settings.appearance.followSystem')}</option>
+      <option value="light">{t('settings.appearance.light')}</option>
+      <option value="dark">{t('settings.appearance.dark')}</option>
     </select>
   </label>
-  <div class="vv-settings-hint">标签栏 ⋯ 菜单「主题」快切按钮与本控件写入同一字段；跟随系统时按操作系统亮暗解析。</div>
-  <div class="vv-settings-label">界面主题</div>
+  <div class="vv-settings-hint">{t('settings.appearance.modeHint')}</div>
+  <div class="vv-settings-label">{t('settings.appearance.themeLabel')}</div>
   <div class="vv-settings-hint">
-    VSCode 外观主题同时接管代码配色（亮/暗各自记忆，跟随标签栏主题模式）；非默认时代码主题选择停用。
+    {t('settings.appearance.themeHint')}
   </div>
   <label class="vv-settings-theme-row">
-    <span>亮色</span>
-    <select value={draft.appearanceLight} onchange={(e) => onAppearanceChange('light', e)} aria-label="亮色界面主题">
+    <span>{t('settings.appearance.light')}</span>
+    <select value={draft.appearanceLight} onchange={(e) => onAppearanceChange('light', e)} aria-label={t('settings.appearance.lightAria')}>
       {#each APPEARANCE_BUILTINS as o (o.value)}
-        <option value={o.value}>{o.label}</option>
+        <option value={o.value}>{o.value === 'default' ? t('settings.appearance.builtinDefault') : o.label}</option>
       {/each}
-      {#each imported as t (t.id)}
-        <option value={t.id}>{t.name}（{t.kind === 'dark' ? '暗' : '亮'}）</option>
+      {#each imported as theme (theme.id)}
+        <option value={theme.id}>{t('settings.appearance.optionLabel', { name: theme.name, kind: theme.kind === 'dark' ? t('settings.appearance.kindDark') : t('settings.appearance.kindLight') })}</option>
       {/each}
     </select>
   </label>
@@ -426,13 +440,13 @@
     <div class="vv-settings-warn" role="status">{lightWarn}</div>
   {/if}
   <label class="vv-settings-theme-row">
-    <span>暗色</span>
-    <select value={draft.appearanceDark} onchange={(e) => onAppearanceChange('dark', e)} aria-label="暗色界面主题">
+    <span>{t('settings.appearance.dark')}</span>
+    <select value={draft.appearanceDark} onchange={(e) => onAppearanceChange('dark', e)} aria-label={t('settings.appearance.darkAria')}>
       {#each APPEARANCE_BUILTINS as o (o.value)}
-        <option value={o.value}>{o.label}</option>
+        <option value={o.value}>{o.value === 'default' ? t('settings.appearance.builtinDefault') : o.label}</option>
       {/each}
-      {#each imported as t (t.id)}
-        <option value={t.id}>{t.name}（{t.kind === 'dark' ? '暗' : '亮'}）</option>
+      {#each imported as theme (theme.id)}
+        <option value={theme.id}>{t('settings.appearance.optionLabel', { name: theme.name, kind: theme.kind === 'dark' ? t('settings.appearance.kindDark') : t('settings.appearance.kindLight') })}</option>
       {/each}
     </select>
   </label>
@@ -441,7 +455,7 @@
   {/if}
   <div class="vv-settings-import">
     <button type="button" disabled={importing} onclick={() => themeInputEl?.click()}>
-      {importing ? '导入中…' : '导入主题…'}
+      {importing ? t('settings.appearance.importBusy') : t('settings.appearance.importTheme')}
     </button>
     <input type="file" multiple accept=".json,.vsix" hidden bind:this={themeInputEl} onchange={onImportChange} />
   </div>
@@ -455,11 +469,11 @@
     <input
       type="text"
       bind:value={ovxThemeInput}
-      placeholder="从 Open VSX 安装：publisher.extension 或粘贴链接"
-      aria-label="从 Open VSX 安装颜色主题"
+      placeholder={t('settings.appearance.ovsxPlaceholder')}
+      aria-label={t('settings.appearance.ovsxInstallColorAria')}
     />
     <button type="submit" disabled={ovxThemeBusy || ovxThemeInput.trim() === ''}>
-      {ovxThemeBusy ? '安装中…' : '安装'}
+      {ovxThemeBusy ? t('settings.appearance.installBusy') : t('settings.appearance.install')}
     </button>
   </form>
   {#if importNote}
@@ -469,85 +483,85 @@
   {/if}
   {#if imported.length > 0}
     <div class="vv-settings-themes-head">
-      <span>已导入（{imported.length}）</span>
+      <span>{t('settings.appearance.importedCount', { count: imported.length })}</span>
       <button
         type="button"
         class="vv-settings-ovx-btn"
         disabled={ovxCheckAllBusy.theme}
         onclick={() => void ovxCheckAll('theme')}
-        aria-label="全部检查颜色主题更新">全部检查</button
+        aria-label={t('settings.appearance.checkAllColorAria')}>{t('settings.appearance.checkAll')}</button
       >
     </div>
     <ul class="vv-settings-themes">
-      {#each imported as t (t.id)}
+      {#each imported as theme (theme.id)}
         <li class="vv-settings-theme">
-          <span class="vv-settings-theme-name" title={t.name}>{t.name}</span>
-          <span class="vv-settings-theme-src">{t.source}</span>
-          {#if t.origin}
-            <span class="vv-settings-theme-src" title="Open VSX：{t.origin.publisher}.{t.origin.extension}">
-              v{t.origin.version}
+          <span class="vv-settings-theme-name" title={theme.name}>{theme.name}</span>
+          <span class="vv-settings-theme-src">{theme.source}</span>
+          {#if theme.origin}
+            <span class="vv-settings-theme-src" title={t('settings.appearance.ovsxSourceTitle', { publisher: theme.origin.publisher, extension: theme.origin.extension })}>
+              v{theme.origin.version}
             </span>
-            {#if ovxLatest[t.id]?.hasUpdate === true}
+            {#if ovxLatest[theme.id]?.hasUpdate === true}
               <button
                 type="button"
                 class="vv-settings-ovx-btn"
-                disabled={ovxUpdateBusy[t.id] === true}
-                onclick={() => void ovxUpdateOne('theme', t)}
-                aria-label="更新主题 {t.name} 到 {ovxLatest[t.id]?.latest}">
-                {ovxUpdateBusy[t.id] === true ? '更新中…' : `更新到 ${ovxLatest[t.id]?.latest}`}
+                disabled={ovxUpdateBusy[theme.id] === true}
+                onclick={() => void ovxUpdateOne('theme', theme)}
+                aria-label={t('settings.appearance.updateAria', { name: theme.name, version: ovxLatest[theme.id]?.latest ?? '' })}>
+                {ovxUpdateBusy[theme.id] === true ? t('settings.appearance.updateBusy') : t('settings.appearance.updateTo', { version: ovxLatest[theme.id]?.latest ?? '' })}
               </button>
             {:else}
               <button
                 type="button"
                 class="vv-settings-ovx-btn"
-                disabled={ovxCheckBusy[t.id] === true}
-                onclick={() => void ovxCheckOne(t)}
-                aria-label="检查更新主题 {t.name}">
-                {ovxCheckBusy[t.id] === true ? '检查中…' : '检查更新'}
+                disabled={ovxCheckBusy[theme.id] === true}
+                onclick={() => void ovxCheckOne(theme)}
+                aria-label={t('settings.appearance.checkAria', { name: theme.name })}>
+                {ovxCheckBusy[theme.id] === true ? t('settings.appearance.checkBusy') : t('settings.appearance.checkUpdate')}
               </button>
             {/if}
           {/if}
           <button
             type="button"
             class="vv-settings-remove"
-            aria-label="删除已导入主题 {t.name}"
-            title="删除"
-            onclick={() => void removeImported(t)}>✕</button
+            aria-label={t('settings.appearance.deleteThemeAria', { name: theme.name })}
+            title={t('settings.appearance.deleteTitle')}
+            onclick={() => void removeImported(theme)}>✕</button
           >
         </li>
       {/each}
     </ul>
   {:else}
-    <div class="vv-settings-empty">暂无已导入主题</div>
+    <div class="vv-settings-empty">{t('settings.appearance.noThemes')}</div>
   {/if}
-  <div class="vv-settings-label">图标主题</div>
+  <div class="vv-settings-label">{t('settings.appearance.iconThemeLabel')}</div>
   <label class="vv-settings-theme-row">
-    <span>主题</span>
-    <select value={draft.iconThemes.theme} onchange={onIconThemeChange} aria-label="图标主题">
-      <option value="none">无</option>
+    <span>{t('settings.appearance.iconRow')}</span>
+    <select value={draft.iconThemes.theme} onchange={onIconThemeChange} aria-label={t('settings.appearance.iconThemeLabel')}>
+      <option value="none">{t('settings.appearance.iconNone')}</option>
       <option value="seti">Seti (VSCode)</option>
-      {#each iconImported as t (t.id)}
-        <option value={t.id}>{t.name}（{t.source}）</option>
+      {#each iconImported as iconTheme (iconTheme.id)}
+        <option value={iconTheme.id}>{t('settings.appearance.iconOptionLabel', { name: iconTheme.name, source: iconTheme.source })}</option>
       {/each}
     </select>
   </label>
-  <div class="vv-settings-hint">单选且不随亮暗切换；出现范围默认仅文件树。</div>
-  <div class="vv-settings-scopes" role="group" aria-label="图标主题出现范围">
+  <div class="vv-settings-hint">{t('settings.appearance.iconHint')}</div>
+  <div class="vv-settings-scopes" role="group" aria-label={t('settings.appearance.scopesAria')}>
     {#each ICON_THEME_SCOPE_KEYS as key (key)}
       <label class="vv-settings-scope">
         <input
           type="checkbox"
           checked={draft.iconThemes.scopes[key]}
           onchange={(e) => onScopeToggle(key, e)}
-          aria-label="图标主题出现范围：{ICON_SCOPE_LABELS[key]}"
+          aria-label={t('settings.appearance.scopeAria', { scope: ICON_SCOPE_LABELS[key]() })}
         />
-        {ICON_SCOPE_LABELS[key]}
+        {ICON_SCOPE_LABELS[key]()}
       </label>
     {/each}
   </div>
   <div class="vv-settings-import">
     <button type="button" disabled={iconImporting} onclick={() => iconInputEl?.click()}>
-      {iconImporting ? '导入中…' : '导入图标主题…'}
+      {iconImporting ? t('settings.appearance.importBusy') : t('settings.appearance.importIconTheme')}
     </button>
     <input
       type="file"
@@ -568,81 +582,81 @@
     <input
       type="text"
       bind:value={ovxIconInput}
-      placeholder="从 Open VSX 安装：publisher.extension 或粘贴链接"
-      aria-label="从 Open VSX 安装图标主题"
+      placeholder={t('settings.appearance.ovsxPlaceholder')}
+      aria-label={t('settings.appearance.ovsxInstallIconAria')}
     />
     <button type="submit" disabled={ovxIconBusy || ovxIconInput.trim() === ''}>
-      {ovxIconBusy ? '安装中…' : '安装'}
+      {ovxIconBusy ? t('settings.appearance.installBusy') : t('settings.appearance.install')}
     </button>
   </form>
-  <div class="vv-settings-hint">JSON 导入须将主题清单与字体文件（woff/woff2/ttf/otf）同批选中；VSIX 自动解包。</div>
+  <div class="vv-settings-hint">{t('settings.appearance.iconJsonHint')}</div>
   {#if iconImported.length > 0}
     <div class="vv-settings-themes-head">
-      <span>已导入（{iconImported.length}）</span>
+      <span>{t('settings.appearance.importedCount', { count: iconImported.length })}</span>
       <button
         type="button"
         class="vv-settings-ovx-btn"
         disabled={ovxCheckAllBusy.icon}
         onclick={() => void ovxCheckAll('icon')}
-        aria-label="全部检查图标主题更新">全部检查</button
+        aria-label={t('settings.appearance.checkAllIconAria')}>{t('settings.appearance.checkAll')}</button
       >
     </div>
     <ul class="vv-settings-themes">
-      {#each iconImported as t (t.id)}
+      {#each iconImported as iconTheme (iconTheme.id)}
         <li class="vv-settings-theme">
-          <span class="vv-settings-theme-name" title={t.name}>{t.name}</span>
-          <span class="vv-settings-theme-src">{t.source}</span>
-          {#if t.origin}
-            <span class="vv-settings-theme-src" title="Open VSX：{t.origin.publisher}.{t.origin.extension}">
-              v{t.origin.version}
+          <span class="vv-settings-theme-name" title={iconTheme.name}>{iconTheme.name}</span>
+          <span class="vv-settings-theme-src">{iconTheme.source}</span>
+          {#if iconTheme.origin}
+            <span class="vv-settings-theme-src" title={t('settings.appearance.ovsxSourceTitle', { publisher: iconTheme.origin.publisher, extension: iconTheme.origin.extension })}>
+              v{iconTheme.origin.version}
             </span>
-            {#if ovxLatest[t.id]?.hasUpdate === true}
+            {#if ovxLatest[iconTheme.id]?.hasUpdate === true}
               <button
                 type="button"
                 class="vv-settings-ovx-btn"
-                disabled={ovxUpdateBusy[t.id] === true}
-                onclick={() => void ovxUpdateOne('icon', t)}
-                aria-label="更新图标主题 {t.name} 到 {ovxLatest[t.id]?.latest}">
-                {ovxUpdateBusy[t.id] === true ? '更新中…' : `更新到 ${ovxLatest[t.id]?.latest}`}
+                disabled={ovxUpdateBusy[iconTheme.id] === true}
+                onclick={() => void ovxUpdateOne('icon', iconTheme)}
+                aria-label={t('settings.appearance.updateIconAria', { name: iconTheme.name, version: ovxLatest[iconTheme.id]?.latest ?? '' })}>
+                {ovxUpdateBusy[iconTheme.id] === true ? t('settings.appearance.updateBusy') : t('settings.appearance.updateTo', { version: ovxLatest[iconTheme.id]?.latest ?? '' })}
               </button>
             {:else}
               <button
                 type="button"
                 class="vv-settings-ovx-btn"
-                disabled={ovxCheckBusy[t.id] === true}
-                onclick={() => void ovxCheckOne(t)}
-                aria-label="检查更新图标主题 {t.name}">
-                {ovxCheckBusy[t.id] === true ? '检查中…' : '检查更新'}
+                disabled={ovxCheckBusy[iconTheme.id] === true}
+                onclick={() => void ovxCheckOne(iconTheme)}
+                aria-label={t('settings.appearance.checkIconAria', { name: iconTheme.name })}>
+                {ovxCheckBusy[iconTheme.id] === true ? t('settings.appearance.checkBusy') : t('settings.appearance.checkUpdate')}
               </button>
             {/if}
           {/if}
           <button
             type="button"
             class="vv-settings-remove"
-            aria-label="删除已导入图标主题 {t.name}"
-            title="删除"
-            onclick={() => void removeIconImported(t)}>✕</button
+            aria-label={t('settings.appearance.deleteIconThemeAria', { name: iconTheme.name })}
+            title={t('settings.appearance.deleteTitle')}
+            onclick={() => void removeIconImported(iconTheme)}>✕</button
           >
         </li>
       {/each}
     </ul>
   {:else}
-    <div class="vv-settings-empty">暂无已导入图标主题</div>
+    <div class="vv-settings-empty">{t('settings.appearance.noIconThemes')}</div>
   {/if}
-  <div class="vv-settings-label">代码主题</div>
+  <div class="vv-settings-label">{t('settings.appearance.codeThemeLabel')}</div>
   <label class="vv-settings-theme-row">
-    <span>高亮配色</span>
+    <span>{t('settings.appearance.highlightRow')}</span>
     <select
       value={currentCodeTheme}
       onchange={onCodeThemeChange}
-      aria-label="代码主题"
-      title={appearanceTakesOver ? '由外观主题接管（界面主题区选回「默认」后可换）' : '代码主题'}
+      aria-label={t('settings.appearance.codeThemeLabel')}
+      title={appearanceTakesOver ? t('settings.appearance.takeOverTitle') : t('settings.appearance.codeThemeLabel')}
       disabled={appearanceTakesOver}
     >
       {#each codeThemeOptions as { group, themes } (group)}
         <optgroup label={group}>
-          {#each themes as t (t)}
-            <option value={t}>{t}</option>
+          {#each themes as themeName (themeName)}
+            <option value={themeName}>{themeName}</option>
           {/each}
         </optgroup>
       {/each}

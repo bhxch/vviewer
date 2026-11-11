@@ -9,6 +9,7 @@
   // 写入口——本节走草稿统一应用，AppShell updateLayout 读最新持久值局部合并，
   // 互不覆盖对方字段。
   import { clampWidth, LEFT_WIDTH_RANGE, RIGHT_WIDTH_RANGE } from '../layout';
+  import { t } from '../i18n/index.svelte';
   import type { Settings } from '../stores/settings';
 
   let { draft, touch }: { draft: Settings; touch(): void } = $props();
@@ -40,39 +41,39 @@
 </script>
 
 <section class="vv-sc-section">
-  <div class="vv-settings-label">布局</div>
+  <div class="vv-settings-label">{t('settings.layout.label')}</div>
   <div class="vv-settings-hint">
-    改动写入草稿，点右上「应用」后生效（订阅链刷新整个界面）；左右栏折叠与拖拽调宽在界面内即时生效，与本节同一存储字段。
+    {t('settings.layout.hint')}
   </div>
   <label class="vv-settings-theme-row">
-    <span>显示标签栏</span>
+    <span>{t('settings.layout.tabBar')}</span>
     <input
       type="checkbox"
       checked={draft.layout.tabBarVisible}
       onchange={(e) => onCheck('tabBarVisible', e)}
-      aria-label="显示标签栏"
+      aria-label={t('settings.layout.tabBar')}
     />
   </label>
   <label class="vv-settings-theme-row">
-    <span>折叠文件树（左栏）</span>
+    <span>{t('settings.layout.leftCollapse')}</span>
     <input
       type="checkbox"
       checked={draft.layout.leftCollapsed}
       onchange={(e) => onCheck('leftCollapsed', e)}
-      aria-label="折叠文件树（左栏）"
+      aria-label={t('settings.layout.leftCollapse')}
     />
   </label>
   <label class="vv-settings-theme-row">
-    <span>折叠属性面板（右栏）</span>
+    <span>{t('settings.layout.rightCollapse')}</span>
     <input
       type="checkbox"
       checked={draft.layout.rightCollapsed}
       onchange={(e) => onCheck('rightCollapsed', e)}
-      aria-label="折叠属性面板（右栏）"
+      aria-label={t('settings.layout.rightCollapse')}
     />
   </label>
   <label class="vv-settings-theme-row">
-    <span>左栏宽度（px，{LEFT_WIDTH_RANGE[0]}–{LEFT_WIDTH_RANGE[1]}）</span>
+    <span>{t('settings.layout.leftWidthRow', { min: LEFT_WIDTH_RANGE[0], max: LEFT_WIDTH_RANGE[1] })}</span>
     <input
       type="number"
       min={LEFT_WIDTH_RANGE[0]}
@@ -80,11 +81,11 @@
       step="1"
       value={draft.layout.leftWidth}
       onchange={(e) => onWidth('left', e)}
-      aria-label="左栏宽度（px）"
+      aria-label={t('settings.layout.leftWidthAria')}
     />
   </label>
   <label class="vv-settings-theme-row">
-    <span>右栏宽度（px，{RIGHT_WIDTH_RANGE[0]}–{RIGHT_WIDTH_RANGE[1]}）</span>
+    <span>{t('settings.layout.rightWidthRow', { min: RIGHT_WIDTH_RANGE[0], max: RIGHT_WIDTH_RANGE[1] })}</span>
     <input
       type="number"
       min={RIGHT_WIDTH_RANGE[0]}
@@ -92,16 +93,16 @@
       step="1"
       value={draft.layout.rightWidth}
       onchange={(e) => onWidth('right', e)}
-      aria-label="右栏宽度（px）"
+      aria-label={t('settings.layout.rightWidthAria')}
     />
   </label>
-  <div class="vv-settings-label">专注模式（zen）</div>
+  <div class="vv-settings-label">{t('settings.layout.zenLabel')}</div>
   {#if draft.layout.zen}
-    <div class="vv-settings-note" role="status">当前草稿为专注模式（覆盖标签栏/双栏显示），其余布局字段保持原值。</div>
+    <div class="vv-settings-note" role="status">{t('settings.layout.zenNote')}</div>
     <div class="vv-settings-import">
-      <button type="button" onclick={resetZen} aria-label="重置专注模式">重置专注模式（应用后生效）</button>
+      <button type="button" onclick={resetZen} aria-label={t('settings.layout.zenResetAria')}>{t('settings.layout.zenReset')}</button>
     </div>
   {:else}
-    <div class="vv-settings-hint">专注模式经界面右键菜单或移动端浮钮进入；本节仅提供重置。</div>
+    <div class="vv-settings-hint">{t('settings.layout.zenHint')}</div>
   {/if}
 </section>

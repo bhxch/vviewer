@@ -57,22 +57,22 @@
 
   // 组序（spec §2 定稿序：外观/字体/图表/布局/搜索与排除/自动刷新/计算/存储与数据/关于；
   // 「代码视图」（自动换行）插在字体之后，「打开方式」（默认渲染器偏好）插在图表之后，
-  // 「语言与辅助功能」（i18n 基建 D3/D11）插在外观之后）。新节组名走 t()——目录
-  // 首批消费者（组件挂载即取当下 locale；既有组名仍为静态中文，随域 C 抽取任务
-  // 迁目录，本任务不扩面）
+  // 「语言与辅助功能」（i18n 基建 D3/D11）插在外观之后）。组名走 t()（域 C 抽取，
+  // Task 6）——挂载期取当下 locale（与 Task 3 languageA11y 先例同形：持久化 locale
+  // 重载后随启动接线翻英；会话中切语言组名不就地重渲，节内容模板 t() 响应式）
   const groups: SettingsGroup[] = [
-    { id: 'appearance', label: '外观', content: AppearanceSection },
+    { id: 'appearance', label: t('settings.nav.appearance'), content: AppearanceSection },
     { id: 'languageA11y', label: t('settings.nav.languageA11y'), content: LanguageA11ySection },
-    { id: 'fonts', label: '字体', content: FontsSection },
-    { id: 'code', label: '代码视图', content: CodeSection },
-    { id: 'diagrams', label: '图表', content: DiagramsSection },
-    { id: 'renderers', label: '打开方式', content: RenderersSection },
-    { id: 'layout', label: '布局', content: LayoutSection },
-    { id: 'search', label: '搜索与排除', content: SearchSection },
-    { id: 'autorefresh', label: '自动刷新', content: AutoRefreshSection },
-    { id: 'compute', label: '计算', content: ComputeSection },
-    { id: 'storage', label: '存储与数据', content: StorageSection },
-    { id: 'about', label: '关于', content: AboutSection }
+    { id: 'fonts', label: t('settings.nav.fonts'), content: FontsSection },
+    { id: 'code', label: t('settings.nav.code'), content: CodeSection },
+    { id: 'diagrams', label: t('settings.nav.diagrams'), content: DiagramsSection },
+    { id: 'renderers', label: t('settings.nav.renderers'), content: RenderersSection },
+    { id: 'layout', label: t('settings.nav.layout'), content: LayoutSection },
+    { id: 'search', label: t('settings.nav.search'), content: SearchSection },
+    { id: 'autorefresh', label: t('settings.nav.autorefresh'), content: AutoRefreshSection },
+    { id: 'compute', label: t('settings.nav.compute'), content: ComputeSection },
+    { id: 'storage', label: t('settings.nav.storage'), content: StorageSection },
+    { id: 'about', label: t('settings.nav.about'), content: AboutSection }
   ];
 
   let activeId = $state('appearance');
@@ -342,16 +342,16 @@
 <div
   class="vv-settings-center"
   role="dialog"
-  aria-label="设置"
+  aria-label={t('settings.center.title')}
   tabindex="-1"
   bind:this={rootEl}
   onkeydown={onRootKeydown}
 >
   <header class="vv-sc-head">
-    <span class="vv-sc-title">设置</span>
+    <span class="vv-sc-title">{t('settings.center.title')}</span>
     <div class="vv-sc-views">
       <button type="button" class="vv-sc-viewbtn" class:active={view === 'form'} aria-pressed={view === 'form'} onclick={showForm}>
-        表单
+        {t('settings.center.viewForm')}
       </button>
       <button type="button" class="vv-sc-viewbtn" class:active={view === 'json'} aria-pressed={view === 'json'} onclick={showJson}>
         JSON
@@ -359,17 +359,17 @@
     </div>
     <span class="vv-sc-headspacer"></span>
     {#if canApply}
-      <span class="vv-sc-dirty" role="status">未应用</span>
+      <span class="vv-sc-dirty" role="status">{t('settings.center.dirty')}</span>
     {/if}
-    <button type="button" class="vv-sc-apply" disabled={!canApply} onclick={() => doApply()} title="应用（写回并立即生效）">应用</button>
-    <button type="button" class="vv-sc-discard" disabled={!canApply} onclick={doDiscard} title="放弃未应用修改">放弃</button>
-    <button type="button" class="vv-sc-close" aria-label="关闭设置" title="关闭（Esc）" onclick={requestClose}>✕</button>
+    <button type="button" class="vv-sc-apply" disabled={!canApply} onclick={() => doApply()} title={t('settings.center.applyTitle')}>{t('settings.center.apply')}</button>
+    <button type="button" class="vv-sc-discard" disabled={!canApply} onclick={doDiscard} title={t('settings.center.discardTitle')}>{t('settings.center.discard')}</button>
+    <button type="button" class="vv-sc-close" aria-label={t('settings.center.closeAria')} title={t('settings.center.closeTitle')} onclick={requestClose}>✕</button>
   </header>
   <div class="vv-sc-body">
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions --><!-- ↑↓ 切组
          是导航的键盘可达性通道（spec §2 分组导航键盘可达），纯增强、按钮本身
          原生可达 -->
-    <nav class="vv-sc-nav" aria-label="设置分组" onkeydown={onNavKeydown}>
+    <nav class="vv-sc-nav" aria-label={t('settings.center.navAria')} onkeydown={onNavKeydown}>
       {#each groups as g (g.id)}
         <button
           type="button"
@@ -383,11 +383,11 @@
       {/each}
       <!-- 导入/导出动作区（spec §4，Task 3）：非分组项，驻左导航底部 -->
       <div class="vv-sc-navactions">
-        <button type="button" onclick={onExport} title="导出全部设置为 JSON 文件（vviewer-settings-日期.json）">
-          导出…
+        <button type="button" onclick={onExport} title={t('settings.center.exportTitle')}>
+          {t('settings.center.export')}
         </button>
-        <button type="button" onclick={() => importInputEl?.click()} title="从 JSON 文件导入设置">
-          导入…
+        <button type="button" onclick={() => importInputEl?.click()} title={t('settings.center.importFileTitle')}>
+          {t('settings.center.import')}
         </button>
         <input type="file" accept=".json,application/json" hidden bind:this={importInputEl} onchange={onImportFile} />
       </div>
@@ -396,7 +396,7 @@
       {#if view === 'json'}
         <section class="vv-sc-section">
           <div class="vv-settings-hint">
-            完整 settings JSON（与表单共享草稿）：表单改动即时反映至此；应用前先 parse+校验，非法标红停留、文本不丢。
+            {t('settings.center.jsonHint')}
           </div>
           <div class="vv-sc-jsonwrap">
             <div class="vv-sc-gutter" aria-hidden="true" bind:this={gutterEl}>
@@ -411,7 +411,7 @@
               value={jsonDisplay}
               oninput={onJsonInput}
               onscroll={syncGutter}
-              aria-label="设置 JSON"
+              aria-label={t('settings.center.jsonAreaAria')}
               bind:this={jsonAreaEl}
             ></textarea>
           </div>
@@ -431,14 +431,14 @@
   </div>
   {#if importPreview !== null}
     <!-- 导入确认对话框（spec §4：变更摘要 + 合并/替换二选一） -->
-    <div class="vv-sc-modal" role="dialog" aria-label="导入设置">
+    <div class="vv-sc-modal" role="dialog" aria-label={t('settings.center.importModal')}>
       <div class="vv-sc-modalbox">
-        <div class="vv-sc-modaltitle">导入设置</div>
+        <div class="vv-sc-modaltitle">{t('settings.center.importModal')}</div>
         {#each importPreview.warnings as w (w)}
           <div class="vv-settings-warn" role="status">{w}</div>
         {/each}
         {#if importPreview.diffs.length === 0}
-          <div class="vv-settings-note">导入文件与当前设置无差异</div>
+          <div class="vv-settings-note">{t('settings.center.noDiffs')}</div>
         {:else}
           <ul class="vv-sc-importdiffs">
             {#each importPreview.diffs as d (d.key)}
@@ -453,32 +453,32 @@
         {/if}
         <label class="vv-sc-importmode">
           <input type="radio" name="vv-import-mode" value="merge" bind:group={importMode} />
-          合并（缺项保留现状）
+          {t('settings.center.mergeMode')}
         </label>
         <label class="vv-sc-importmode">
           <input type="radio" name="vv-import-mode" value="replace" bind:group={importMode} />
-          替换（整体覆盖为导入值）
+          {t('settings.center.replaceMode')}
         </label>
-        <div class="vv-settings-hint">导入不携带主题/字体等内容资产（各自已有导入通道）</div>
+        <div class="vv-settings-hint">{t('settings.center.assetsHint')}</div>
         <div class="vv-sc-modalactions">
-          <button type="button" class="vv-sc-apply" onclick={confirmImport}>导入并应用</button>
-          <button type="button" onclick={() => (importPreview = null)}>取消</button>
+          <button type="button" class="vv-sc-apply" onclick={confirmImport}>{t('settings.center.importApply')}</button>
+          <button type="button" onclick={() => (importPreview = null)}>{t('settings.center.cancel')}</button>
         </div>
       </div>
     </div>
   {/if}
   {#if importErrors !== null}
     <!-- 导入失败（spec §4：校验失败明确报错不部分应用） -->
-    <div class="vv-sc-modal" role="alertdialog" aria-label="导入设置错误">
+    <div class="vv-sc-modal" role="alertdialog" aria-label={t('settings.center.importErrorAria')}>
       <div class="vv-sc-modalbox">
-        <div class="vv-sc-modaltitle">导入失败（未应用任何更改）</div>
+        <div class="vv-sc-modaltitle">{t('settings.center.importErrorTitle')}</div>
         <div class="vv-sc-jsonerrors" role="alert">
           {#each importErrors as e (e.field + e.message)}
             <div class="vv-sc-jsonerror"><code>{e.field === '' ? '(JSON)' : e.field}</code> {e.message}</div>
           {/each}
         </div>
         <div class="vv-sc-modalactions">
-          <button type="button" onclick={() => (importErrors = null)}>关闭</button>
+          <button type="button" onclick={() => (importErrors = null)}>{t('settings.center.close')}</button>
         </div>
       </div>
     </div>
@@ -486,8 +486,8 @@
   {#if confirmClose}
     <!-- 脏态关闭确认（spec §3：应用/放弃二选一）——内联条而非原生 confirm
          （选择语义，非是非问） -->
-    <div class="vv-sc-confirm" role="alertdialog" aria-label="未应用的修改">
-      <span>有未应用的修改</span>
+    <div class="vv-sc-confirm" role="alertdialog" aria-label={t('settings.center.confirmAria')}>
+      <span>{t('settings.center.confirmText')}</span>
       <button
         type="button"
         onclick={() => {
@@ -495,7 +495,7 @@
             confirmClose = false;
             close();
           }
-        }}>应用并关闭</button
+        }}>{t('settings.center.applyAndClose')}</button
       >
       <button
         type="button"
@@ -503,9 +503,9 @@
           doDiscard();
           confirmClose = false;
           close();
-        }}>放弃并关闭</button
+        }}>{t('settings.center.discardAndClose')}</button
       >
-      <button type="button" onclick={() => (confirmClose = false)}>继续编辑</button>
+      <button type="button" onclick={() => (confirmClose = false)}>{t('settings.center.keepEditing')}</button>
     </div>
   {/if}
 </div>

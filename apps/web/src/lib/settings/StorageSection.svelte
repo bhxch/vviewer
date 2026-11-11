@@ -17,6 +17,7 @@
     type StorageInfo
   } from '../storageHealth';
   import { useSettingsNav } from './nav';
+  import { t } from '../i18n/index.svelte';
   import { clampSize, STORAGE_MB_RANGE, type Settings } from '../stores/settings';
 
   // 契约（注册表统一 { draft, touch } 形态）：阈值行编辑草稿（计划 2 Task 5），
@@ -80,38 +81,39 @@
       case 'mounts':
         return '—';
       case 'runtime-cache':
-        return `${info.cacheNames.length} 个缓存`;
+        return t('settings.storage.usageCaches', { count: info.cacheNames.length });
     }
   }
 
-  /** 确认面板文案（spec §2.2：列明后果；恢复出厂措辞最强） */
-  const CONSEQUENCES: Record<StorageCategoryId | 'factory', string> = {
-    settings: '删除全部设置并重载页面：亮暗模式/外观/代码主题/图标主题/字体/图表/布局/排除规则/自动刷新/计算策略全部回落默认值。',
-    sessions: '删除标签页与工作区快照：当前内存会话不受影响，下次启动为空会话；目录授权句柄保留。',
-    dirhandle: '删除目录授权句柄：localfs 来源下次启动不再自动恢复，需重新授权；快照恢复失败降级链照旧。',
-    themes: '删除全部已导入主题：引用这些主题的外观槽位回落「默认」（实时生效，无需重载）；内置主题不受影响。单项删除在「外观」节。',
-    'icon-themes': '删除全部已导入图标主题：引用的主题槽位回落「无」（实时生效，无需重载）；内置 Seti 不受影响。单项删除在「外观」节。',
-    fonts: '删除全部网络字体并注销加载：引用字体的槽位回落默认字体栈（实时生效）。单项删除在「字体」节。',
-    mounts: '挂载配置管理尚未启用（目录挂载管理页后续提供）。',
-    'runtime-cache': '清除运行时缓存（语法 wasm/媒体等）：precache 保留，离线能力不受影响。',
-    factory:
-      '恢复出厂：删除全部设置、会话快照、目录授权、导入主题、导入图标主题、网络字体，清除全部缓存（含离线 precache），注销 Service Worker 并重载页面。此操作不可恢复。'
+  /** 确认面板文案（spec §2.2：列明后果；恢复出厂措辞最强）——id → 取文案闭包
+   * （分类 id 为稳定标识符；字面键调用保 TFunction 类型安全，模板内求值保 locale
+   * 响应式，域 C 抽取 Task 6） */
+  const CONSEQUENCES: Record<StorageCategoryId | 'factory', () => string> = {
+    settings: () => t('settings.storage.consequenceSettings'),
+    sessions: () => t('settings.storage.consequenceSessions'),
+    dirhandle: () => t('settings.storage.consequenceDirhandle'),
+    themes: () => t('settings.storage.consequenceThemes'),
+    'icon-themes': () => t('settings.storage.consequenceIconThemes'),
+    fonts: () => t('settings.storage.consequenceFonts'),
+    mounts: () => t('settings.storage.consequenceMounts'),
+    'runtime-cache': () => t('settings.storage.consequenceRuntime'),
+    factory: () => t('settings.storage.consequenceFactory')
   };
 
-  const PURGE_LABELS: Record<StorageCategoryId, string> = {
-    settings: '清除设置',
-    sessions: '清除会话快照',
-    dirhandle: '清除目录授权',
-    themes: '删除导入主题',
-    'icon-themes': '删除导入图标主题',
-    fonts: '删除网络字体',
-    mounts: '清除挂载配置',
-    'runtime-cache': '清除运行时缓存'
+  const PURGE_LABELS: Record<StorageCategoryId, () => string> = {
+    settings: () => t('settings.storage.purgeSettings'),
+    sessions: () => t('settings.storage.purgeSessions'),
+    dirhandle: () => t('settings.storage.purgeDirhandle'),
+    themes: () => t('settings.storage.purgeThemes'),
+    'icon-themes': () => t('settings.storage.purgeIconThemes'),
+    fonts: () => t('settings.storage.purgeFonts'),
+    mounts: () => t('settings.storage.purgeMounts'),
+    'runtime-cache': () => t('settings.storage.purgeRuntime')
   };
 
   const isFactory = $derived(pending === 'factory');
   const pendingLabel = $derived(
-    pending === null ? '' : pending === 'factory' ? '恢复出厂' : PURGE_LABELS[pending]
+    pending === null ? '' : pending === 'factory' ? t('settings.storage.factory') : PURGE_LABELS[pending]()
   );
 
   function cancelPurge(): void {
@@ -128,7 +130,7 @@
       if (action === 'factory') {
         const r = await factoryReset();
         location.reload(); // 全新会话（最高危动作的收尾，spec §2.2）
-        note = `已恢复出厂（清 ${r.cachesCleared} 个缓存、注销 ${r.swUnregistered} 个 Service Worker），正在重载…`;
+        note = t('settings.storage.factoryDone', { caches: r.cachesCleared, sw: r.swUnregistered });
         return;
       }
       const r = await purgeCategory(action);
@@ -138,12 +140,12 @@
       }
       note =
         action === 'runtime-cache'
-          ? `已清除 ${r.deleted} 个运行时缓存（precache 保留）`
-          : `已清除 ${r.deleted} 项`;
+          ? t('settings.storage.runtimePurged', { count: r.deleted })
+          : t('settings.storage.itemsPurged', { count: r.deleted });
       pending = null;
       void refresh();
     } catch (err) {
-      note = `清除失败：${err instanceof Error ? err.message : String(err)}`;
+      note = t('settings.storage.purgeFailed', { message: err instanceof Error ? err.message : String(err) });
       pending = null;
     } finally {
       purging = false;
@@ -152,17 +154,17 @@
 </script>
 
 <section class="vv-sc-section">
-  <div class="vv-settings-label">存储与数据</div>
+  <div class="vv-settings-label">{t('settings.storage.label')}</div>
   <div class="vv-settings-hint">
-    浏览器「清除站点数据」是整站一刀切；此处按分类精细删除，配合「关于」节的用量显示定位占用。
-    <button type="button" class="vv-sc-linklike" onclick={() => navTo('about')}>查看存储用量 →</button>
+    {t('settings.storage.hint')}
+    <button type="button" class="vv-sc-linklike" onclick={() => navTo('about')}>{t('settings.storage.usageLink')}</button>
   </div>
 
   <!-- 远端下载确认阈值（spec §6.4，计划 2 Task 5）：MB 计 clamp 1–4096，确认门
        在泵启动前拦截（ViewerPane 消费，读现值即时生效）；size 未知的不定态下载
        不适用（无前置数字，直接不定态进度卡）。 -->
   <label class="vv-settings-theme-row">
-    <span>远端下载确认阈值</span>
+    <span>{t('settings.storage.thresholdRow')}</span>
     <input
       type="number"
       min={STORAGE_MB_RANGE[0]}
@@ -170,111 +172,111 @@
       step="1"
       value={draft.storage.remoteDownloadConfirmMb}
       onchange={(e) => onConfirmMbChange(e)}
-      aria-label="远端下载确认阈值（MB）"
+      aria-label={t('settings.storage.thresholdAria')}
     />
   </label>
   <div class="vv-settings-hint">
-    远端来源下载超过此阈值（MB，1–4096）时先确认再下载：确认卡明示文件名/大小/目标渲染器与内存影响，确认后泵才启动（知情自担，无独立硬上限）；文件大小未知的不定态下载不适用。改动「应用」后对下一次下载即时生效。
+    {t('settings.storage.thresholdHint')}
   </div>
 
   <ul class="vv-storage-cats">
     <li class="vv-storage-cat">
       <div class="vv-storage-catinfo">
-        <span class="vv-storage-catname">设置</span>
-        <span class="vv-storage-catdesc">localStorage（外观/字体/图表/布局/排除规则等全部设置项）</span>
+        <span class="vv-storage-catname">{t('settings.storage.catSettings')}</span>
+        <span class="vv-storage-catdesc">{t('settings.storage.catSettingsDesc')}</span>
       </div>
       <span class="vv-storage-catsize">{usageOf('settings')}</span>
       <button type="button" class="vv-storage-danger" disabled={purging} onclick={() => (pending = 'settings')}>
-        清除
+        {t('settings.storage.purge')}
       </button>
     </li>
     <li class="vv-storage-cat">
       <div class="vv-storage-catinfo">
-        <span class="vv-storage-catname">会话快照</span>
-        <span class="vv-storage-catdesc">IndexedDB kv（标签页/工作区布局）</span>
+        <span class="vv-storage-catname">{t('settings.storage.catSessions')}</span>
+        <span class="vv-storage-catdesc">{t('settings.storage.catSessionsDesc')}</span>
       </div>
       <span class="vv-storage-catsize">{usageOf('sessions')}</span>
       <button type="button" class="vv-storage-danger" disabled={purging} onclick={() => (pending = 'sessions')}>
-        清除
+        {t('settings.storage.purge')}
       </button>
     </li>
     <li class="vv-storage-cat">
       <div class="vv-storage-catinfo">
-        <span class="vv-storage-catname">目录授权句柄</span>
-        <span class="vv-storage-catdesc">IndexedDB kv（localfs 来源的自动恢复凭据）</span>
+        <span class="vv-storage-catname">{t('settings.storage.catDirhandle')}</span>
+        <span class="vv-storage-catdesc">{t('settings.storage.catDirhandleDesc')}</span>
       </div>
       <span class="vv-storage-catsize">{usageOf('dirhandle')}</span>
       <button type="button" class="vv-storage-danger" disabled={purging} onclick={() => (pending = 'dirhandle')}>
-        清除
+        {t('settings.storage.purge')}
       </button>
     </li>
     <li class="vv-storage-cat">
       <div class="vv-storage-catinfo">
-        <span class="vv-storage-catname">导入主题</span>
-        <span class="vv-storage-catdesc">IndexedDB themes（{info?.themes.records ?? 0} 条）</span>
+        <span class="vv-storage-catname">{t('settings.storage.catThemes')}</span>
+        <span class="vv-storage-catdesc">{t('settings.storage.catThemesDesc', { count: info?.themes.records ?? 0 })}</span>
       </div>
       <span class="vv-storage-catsize">{usageOf('themes')}</span>
       <button type="button" class="vv-storage-danger" disabled={purging} onclick={() => (pending = 'themes')}>
-        清除
+        {t('settings.storage.purge')}
       </button>
     </li>
     <li class="vv-storage-cat">
       <div class="vv-storage-catinfo">
-        <span class="vv-storage-catname">导入图标主题</span>
-        <span class="vv-storage-catdesc">IndexedDB iconThemes（{info?.iconThemes.records ?? 0} 条）</span>
+        <span class="vv-storage-catname">{t('settings.storage.catIconThemes')}</span>
+        <span class="vv-storage-catdesc">{t('settings.storage.catIconThemesDesc', { count: info?.iconThemes.records ?? 0 })}</span>
       </div>
       <span class="vv-storage-catsize">{usageOf('icon-themes')}</span>
       <button type="button" class="vv-storage-danger" disabled={purging} onclick={() => (pending = 'icon-themes')}>
-        清除
+        {t('settings.storage.purge')}
       </button>
     </li>
     <li class="vv-storage-cat">
       <div class="vv-storage-catinfo">
-        <span class="vv-storage-catname">网络字体</span>
-        <span class="vv-storage-catdesc">IndexedDB fonts（{info?.fonts.records ?? 0} 条）</span>
+        <span class="vv-storage-catname">{t('settings.storage.catFonts')}</span>
+        <span class="vv-storage-catdesc">{t('settings.storage.catFontsDesc', { count: info?.fonts.records ?? 0 })}</span>
       </div>
       <span class="vv-storage-catsize">{usageOf('fonts')}</span>
       <button type="button" class="vv-storage-danger" disabled={purging} onclick={() => (pending = 'fonts')}>
-        清除
+        {t('settings.storage.purge')}
       </button>
     </li>
     <li class="vv-storage-cat vv-storage-cat-disabled">
       <div class="vv-storage-catinfo">
-        <span class="vv-storage-catname">挂载配置</span>
-        <span class="vv-storage-catdesc">目录挂载管理页后续提供（即将推出）</span>
+        <span class="vv-storage-catname">{t('settings.storage.catMounts')}</span>
+        <span class="vv-storage-catdesc">{t('settings.storage.catMountsDesc')}</span>
       </div>
       <span class="vv-storage-catsize">—</span>
-      <button type="button" class="vv-storage-danger" disabled title="目录挂载管理（Spec 5）未落地，暂无挂载配置可清">
-        清除
+      <button type="button" class="vv-storage-danger" disabled title={t('settings.storage.catMountsDisabledTitle')}>
+        {t('settings.storage.purge')}
       </button>
     </li>
     <li class="vv-storage-cat">
       <div class="vv-storage-catinfo">
-        <span class="vv-storage-catname">运行时缓存</span>
+        <span class="vv-storage-catname">{t('settings.storage.catRuntime')}</span>
         <span class="vv-storage-catdesc">
-          Cache Storage（语法 wasm/媒体等运行时缓存，precache 保留）
+          {t('settings.storage.catRuntimeDesc')}
           {#if info !== null && info.cacheNames.length > 0}
-            <span class="vv-storage-cachenames">{info.cacheNames.join('、')}</span>
+            <span class="vv-storage-cachenames">{info.cacheNames.join(t('settings.common.listSep'))}</span>
           {/if}
         </span>
       </div>
       <span class="vv-storage-catsize">{usageOf('runtime-cache')}</span>
       <button type="button" class="vv-storage-danger" disabled={purging} onclick={() => (pending = 'runtime-cache')}>
-        清除
+        {t('settings.storage.purge')}
       </button>
     </li>
   </ul>
 
   {#if pending !== null}
     <!-- 确认面板（spec §2.2：红色危险调+列明后果；恢复出厂措辞最强） -->
-    <div class="vv-storage-confirm" role="alertdialog" aria-label="{pendingLabel}确认">
-      <div class="vv-storage-confirmlabel">{isFactory ? '⚠ 恢复出厂' : pendingLabel}</div>
-      <div class="vv-storage-confirmtext">{CONSEQUENCES[pending]}</div>
+    <div class="vv-storage-confirm" role="alertdialog" aria-label={t('settings.storage.confirmAria', { label: pendingLabel })}>
+      <div class="vv-storage-confirmlabel">{isFactory ? t('settings.storage.factoryConfirmLabel') : pendingLabel}</div>
+      <div class="vv-storage-confirmtext">{CONSEQUENCES[pending]()}</div>
       <div class="vv-storage-confirmrow">
         <button type="button" class="vv-storage-danger" disabled={purging} onclick={() => void confirmPurge()}>
-          {purging ? '执行中…' : isFactory ? '确认恢复出厂（不可恢复）' : '确认清除'}
+          {purging ? t('settings.storage.purging') : isFactory ? t('settings.storage.confirmFactory') : t('settings.storage.confirmPurge')}
         </button>
-        <button type="button" onclick={cancelPurge} disabled={purging}>取消</button>
+        <button type="button" onclick={cancelPurge} disabled={purging}>{t('settings.storage.cancel')}</button>
       </div>
     </div>
   {/if}
@@ -283,16 +285,16 @@
     <div class="vv-settings-note" role="status">{note}</div>
   {/if}
 
-  <div class="vv-settings-label">恢复出厂</div>
-  <div class="vv-settings-hint">独立于分类清单的兜底动作：全部分类 + 注销 Service Worker + 清全部缓存 + 重载。</div>
+  <div class="vv-settings-label">{t('settings.storage.factory')}</div>
+  <div class="vv-settings-hint">{t('settings.storage.factoryHint')}</div>
   <div class="vv-settings-import">
     <button type="button" class="vv-storage-danger" disabled={purging} onclick={() => (pending = 'factory')}>
-      恢复出厂…
+      {t('settings.storage.factoryButton')}
     </button>
     {#if loading}
-      <span class="vv-storage-loading" role="status">统计中…</span>
+      <span class="vv-storage-loading" role="status">{t('settings.storage.counting')}</span>
     {:else}
-      <button type="button" onclick={() => void refresh()}>刷新统计</button>
+      <button type="button" onclick={() => void refresh()}>{t('settings.storage.refreshStats')}</button>
     {/if}
   </div>
 </section>

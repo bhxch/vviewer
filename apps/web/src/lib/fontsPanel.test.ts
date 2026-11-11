@@ -12,6 +12,8 @@ import { resolve } from 'node:path';
 import { IDBFactory } from 'fake-indexeddb';
 import { CODE_FONT_PRESETS, CUSTOM_FONT_SENTINEL, fontFamilyOptions, mergedFamilyOptions } from './fonts';
 import { addFontFromFile, deleteFont, listFontRecords, setEnabledFont } from './stores/fontsStore';
+// 域 C 抽取（Task 6）：文案源码锚改 t() 新形态 + 目录 zh 值双锁（对齐 settingsCenter.test 先例）
+import { messages as zhSettings } from './i18n/catalogs/zh-CN/settings';
 
 // vitest 会转译 import.meta.url（metaStore.test 同款处理）：双 cwd 兼容根/apps/web
 function readSrc(relFromWeb: string): string {
@@ -31,9 +33,11 @@ describe('FontsSection 网络字体管理区源码契约（字体节下半）', 
     }
   });
 
-  it('URL 添加表单：地址输入 + 名称（可选）输入，提交走 addFontFromUrl', () => {
-    expect(src).toContain('aria-label="网络字体地址"');
-    expect(src).toContain('aria-label="网络字体名称（可选）"');
+  it('URL 添加表单：地址输入 + 名称（可选）输入，提交走 addFontFromUrl（t() 新形态 + 目录值双锁）', () => {
+    expect(src).toContain("aria-label={t('settings.fonts.urlAria')}");
+    expect(src).toContain("aria-label={t('settings.fonts.nameAria')}");
+    expect(zhSettings['settings.fonts.urlAria']).toBe('网络字体地址');
+    expect(zhSettings['settings.fonts.nameAria']).toBe('网络字体名称（可选）');
     expect(src).toMatch(/function onFontUrlSubmit/);
     expect(src).toMatch(/addFontFromUrl\(url, explicit \|\| undefined\)/);
   });
@@ -44,33 +48,42 @@ describe('FontsSection 网络字体管理区源码契约（字体节下半）', 
     expect(src).toMatch(/addFontFromFile\(file\)/);
   });
 
-  it('列表行：启停开关/体积/删除齐备且 aria-label 按名可寻址', () => {
-    expect(src).toContain('aria-label="启用网络字体 {rec.name}"');
-    expect(src).toContain('aria-label="删除网络字体 {rec.name}"');
+  it('列表行：启停开关/体积/删除齐备且 aria-label 按名可寻址（t() 新形态 + 目录值双锁）', () => {
+    expect(src).toContain("aria-label={t('settings.fonts.enableAria', { name: rec.name })}");
+    expect(src).toContain("aria-label={t('settings.fonts.deleteAria', { name: rec.name })}");
+    expect(zhSettings['settings.fonts.enableAria']).toBe('启用网络字体 {name}');
+    expect(zhSettings['settings.fonts.deleteAria']).toBe('删除网络字体 {name}');
     expect(src).toContain('formatFontSize(rec.size)');
     expect(src).toContain('class="vv-settings-fonts"');
-    expect(src).toContain('暂无网络字体');
+    expect(src).toContain("{t('settings.fonts.empty')}");
+    expect(zhSettings['settings.fonts.empty']).toBe('暂无网络字体');
   });
 
   it('样张以该字体渲染：fontFamilyValue(rec.name, 默认栈) 同源转义内联 + FONT_SPECIMEN', () => {
     expect(src).toContain('style:font-family={fontFamilyValue(rec.name, DEFAULT_UI_FONT_STACK)}');
   });
 
-  it('错误态重试（spec §6）：失败暂存（url 键去重）+ 重试/忽略钮', () => {
+  it('错误态重试（spec §6）：失败暂存（url 键去重）+ 重试/忽略钮（t() 新形态 + 目录值双锁）', () => {
     expect(src).toContain('fontFailures');
     expect(src).toMatch(/fontFailures = fontFailures\.filter\(\(f\) => f\.url !== url\)/);
     expect(src).toMatch(/function retryFont/);
     expect(src).toMatch(/function dismissFontFailure/);
-    expect(src).toContain('aria-label="重试添加网络字体 {f.name}"');
-    expect(src).toContain('aria-label="忽略网络字体 {f.name}"');
+    expect(src).toContain("aria-label={t('settings.fonts.retryAria', { name: f.name })}");
+    expect(src).toContain("aria-label={t('settings.fonts.dismissAria', { name: f.name })}");
+    expect(zhSettings['settings.fonts.retryAria']).toBe('重试添加网络字体 {name}');
+    expect(zhSettings['settings.fonts.dismissAria']).toBe('忽略网络字体 {name}');
   });
 
-  it('删除被引用字体：比对 deleteFont 返回记录的 name，槽位回落默认并提示（draft+touch 链）', () => {
+  it('删除被引用字体：比对 deleteFont 返回记录的 name，槽位回落默认并提示（draft+touch 链；提示文案走 t() + 目录值双锁）', () => {
     expect(src).toMatch(/gone = await deleteFont\(rec\.id\)/);
     expect(src).toMatch(/draft\.fonts\.uiFamily === gone\.name/);
     expect(src).toMatch(/draft\.fonts\.codeFamily === gone\.name/);
     expect(src).toMatch(/draft\.fonts\.\w+ = ''/);
-    expect(src).toContain('回落默认');
+    // 「回落默认」原锚：提示串入目录（removedWithFallback），源码锚改键形态 + 模板双锁
+    expect(src).toMatch(/removedWithFallback/);
+    expect(zhSettings['settings.fonts.removedWithFallback']).toBe('已删除「{name}」，{slots}槽已回落默认字体');
+    expect(zhSettings['settings.fonts.uiFamilyRow']).toBe('界面字体');
+    expect(zhSettings['settings.fonts.codeFamilyRow']).toBe('代码字体');
   });
 
   it('两槽下拉合并源：uiOptions/codeOptions 派生自 mergedFamilyOptions × enabledFontNames（仅启用项）', () => {

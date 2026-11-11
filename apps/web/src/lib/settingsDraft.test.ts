@@ -22,6 +22,9 @@ import {
 } from './settingsDraft';
 import { DEFAULTS, normalizeSettings, onSettingsChanged, type Settings } from './stores/settings';
 import { DEFAULT_LAYOUT } from './layout';
+// 域 C 抽取（Task 6）：校验文案入目录（settingsDraft 纯层 translate as t）——上层
+// 子串断言（'未知'/'风险' 等）之外，对被锚键补目录 zh 模板字节锁（双锁口径）
+import { messages as zhSettings } from './i18n/catalogs/zh-CN/settings';
 
 const BASE: Settings = normalizeSettings({});
 
@@ -697,5 +700,17 @@ describe('locale/reduceMotion 枚举镜像（i18n 基建 D3/D11，validateSettin
     // 归位语义在 normalizeSettings（静默归位），校验层只回答「哪里不合法」
     expect(normalizeSettings({ locale: 'fr', reduceMotion: 42 }).locale).toBe('zh-CN');
     expect(normalizeSettings({ locale: 'fr', reduceMotion: 42 }).reduceMotion).toBe('system');
+  });
+});
+
+describe('校验文案目录双锁（域 C 抽取 Task 6）：上层子串断言所锚键的 zh 模板字节锁', () => {
+  it('被「未知」子串锚定的两键 + 「风险」子串锚定的导入版本警告键，模板逐字节等价', () => {
+    expect(zhSettings['settings.issue.unknownField']).toBe('未知字段（白名单外，不落盘）');
+    expect(zhSettings['settings.import.unknownFieldWarn']).toBe('{path}：未知字段（白名单外，不落盘）');
+    expect(zhSettings['settings.import.newerSchema']).toBe(
+      '导入文件版本更新（schemaVersion {version} > {current}），将尽力合并，可能存在兼容风险'
+    );
+    // translate（zh 默认）+ interpolate 组装 = 原字面量逐字节等价的运行时直证
+    expect(zhSettings['settings.issue.outOfRange']).toBe('超出范围 {min}–{max}，将截断为 {clamped}');
   });
 });

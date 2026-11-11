@@ -11,7 +11,7 @@
 import { resolveDiagramType } from '@bhxch/vviewer-render-diagram';
 import { CODE_SIZE_RANGE, DEFAULTS, ICON_THEME_SCOPE_KEYS, MERMAID_THEME_VALUES, normalizeSettings, REDUCE_MOTION_VALUES, RENDERER_DEFAULT_EXT_RE, RENDERER_DEFAULT_ID_RE, saveSettings, STORAGE_MB_RANGE, UI_SIZE_RANGE, type Settings } from './stores/settings';
 import type { MermaidTheme } from '@bhxch/vviewer-render-diagram';
-import { LOCALES, type Locale } from './i18n/core';
+import { LOCALES, translate as t, type Locale } from './i18n/core';
 import { sanitizeLayout } from './layout';
 
 /** 校验问题（field 为顶层字段名或 `节.字段` 点径；'' = JSON 整体语法/形态错误） */
@@ -92,13 +92,13 @@ function iconThemeValueOk(v: unknown): boolean {
 function checkClampedNumber(issues: SettingsIssue[], field: string, v: unknown, range: readonly [number, number] | readonly number[]): void {
   if (v === undefined) return;
   if (typeof v !== 'number' || !Number.isFinite(v)) {
-    issues.push({ field, message: '应为数字' });
+    issues.push({ field, message: t('settings.issue.mustBeNumber') });
     return;
   }
   const rounded = Math.round(v);
   const clamped = Math.min(range[1]!, Math.max(range[0]!, rounded));
   if (clamped !== rounded) {
-    issues.push({ field, message: `超出范围 ${range[0]}–${range[1]}，将截断为 ${clamped}` });
+    issues.push({ field, message: t('settings.issue.outOfRange', { min: range[0]!, max: range[1]!, clamped }) });
   }
 }
 
@@ -108,76 +108,76 @@ function checkClampedNumber(issues: SettingsIssue[], field: string, v: unknown, 
  * 本函数回答「哪里不合法」，normalizeSettings 回答「合法值如何落」。
  */
 export function validateSettings(raw: unknown): SettingsIssue[] {
-  if (!isObj(raw)) return [{ field: '', message: '设置 JSON 必须是对象' }];
+  if (!isObj(raw)) return [{ field: '', message: t('settings.issue.rootMustBeObject') }];
   const issues: SettingsIssue[] = [];
   for (const k of Object.keys(raw)) {
-    if (!SETTINGS_KEYS.includes(k as keyof Settings)) issues.push({ field: k, message: '未知字段（白名单外，不落盘）' });
+    if (!SETTINGS_KEYS.includes(k as keyof Settings)) issues.push({ field: k, message: t('settings.issue.unknownField') });
   }
   if (raw.themeMode !== undefined && !THEME_MODES.includes(raw.themeMode as string)) {
-    issues.push({ field: 'themeMode', message: `须为 ${THEME_MODES.join(' / ')} 之一` });
+    issues.push({ field: 'themeMode', message: t('settings.issue.mustBeOneOf', { values: THEME_MODES.join(' / ') }) });
   }
   for (const slot of ['appearanceLight', 'appearanceDark'] as const) {
     if (raw[slot] !== undefined && !appearanceFormatOk(raw[slot])) {
-      issues.push({ field: slot, message: "须为 'default'、'vscode:内置名' 或 'imported:<id>' 形态" });
+      issues.push({ field: slot, message: t('settings.issue.appearanceSlot') });
     }
   }
   for (const slot of ['codeThemeLight', 'codeThemeDark'] as const) {
     if (raw[slot] !== undefined && typeof raw[slot] !== 'string') {
-      issues.push({ field: slot, message: '应为字符串（主题键名）' });
+      issues.push({ field: slot, message: t('settings.issue.mustBeStringTheme') });
     }
   }
   if (raw.excludedPatterns !== undefined) {
     if (!Array.isArray(raw.excludedPatterns) || !raw.excludedPatterns.every((p) => typeof p === 'string')) {
-      issues.push({ field: 'excludedPatterns', message: '应为字符串数组' });
+      issues.push({ field: 'excludedPatterns', message: t('settings.issue.mustBeStringArray') });
     }
   }
   if (raw.autoRefresh !== undefined && typeof raw.autoRefresh !== 'boolean') {
-    issues.push({ field: 'autoRefresh', message: '应为布尔值' });
+    issues.push({ field: 'autoRefresh', message: t('settings.issue.mustBeBoolean') });
   }
   if (raw.codeWordWrap !== undefined && typeof raw.codeWordWrap !== 'boolean') {
-    issues.push({ field: 'codeWordWrap', message: '应为布尔值' });
+    issues.push({ field: 'codeWordWrap', message: t('settings.issue.mustBeBoolean') });
   }
   if (raw.computePolicy !== undefined && !POLICIES.includes(raw.computePolicy as string)) {
-    issues.push({ field: 'computePolicy', message: `须为 ${POLICIES.join(' / ')} 之一` });
+    issues.push({ field: 'computePolicy', message: t('settings.issue.mustBeOneOf', { values: POLICIES.join(' / ') }) });
   }
   // locale/reduceMotion 枚举镜像（i18n 基建 D3/D11，validateSettings 逐字段手写
   // ——SETTINGS_KEYS 白名单自 DEFAULTS 派生只管键集，枚举校验不自动覆盖）：
   // 与 normalizeSettings 归位闸同口径，脏值标红阻断
   if (raw.locale !== undefined && !LOCALES.includes(raw.locale as Locale)) {
-    issues.push({ field: 'locale', message: `须为 ${LOCALES.join(' / ')} 之一` });
+    issues.push({ field: 'locale', message: t('settings.issue.mustBeOneOf', { values: LOCALES.join(' / ') }) });
   }
   if (raw.reduceMotion !== undefined && !(REDUCE_MOTION_VALUES as readonly string[]).includes(raw.reduceMotion as string)) {
-    issues.push({ field: 'reduceMotion', message: `须为 ${REDUCE_MOTION_VALUES.join(' / ')} 之一` });
+    issues.push({ field: 'reduceMotion', message: t('settings.issue.mustBeOneOf', { values: REDUCE_MOTION_VALUES.join(' / ') }) });
   }
   if (raw.diagrams !== undefined) {
     if (!isObj(raw.diagrams)) {
-      issues.push({ field: 'diagrams', message: '应为对象' });
+      issues.push({ field: 'diagrams', message: t('settings.issue.mustBeObject') });
     } else {
       const d = raw.diagrams;
       for (const k of Object.keys(d)) {
         if (k !== 'krokiHost' && k !== 'krokiVia' && k !== 'mermaidTheme' && k !== 'modes' && k !== 'renderers') {
-          issues.push({ field: `diagrams.${k}`, message: '未知字段（白名单外，不落盘）' });
+          issues.push({ field: `diagrams.${k}`, message: t('settings.issue.unknownField') });
         }
       }
       if (d.krokiHost !== undefined && d.krokiHost !== '' && !(typeof d.krokiHost === 'string' && /^https?:\/\//.test(d.krokiHost))) {
-        issues.push({ field: 'diagrams.krokiHost', message: '须为 http(s):// 开头地址或空串（空 = 默认服务）' });
+        issues.push({ field: 'diagrams.krokiHost', message: t('settings.issue.krokiHost') });
       }
       if (d.krokiVia !== undefined && d.krokiVia !== 'client' && d.krokiVia !== 'server') {
-        issues.push({ field: 'diagrams.krokiVia', message: "须为 'client' / 'server' 之一（client=前端直连，server=服务端代发）" });
+        issues.push({ field: 'diagrams.krokiVia', message: t('settings.issue.krokiVia') });
       }
       // mermaidTheme 白名单镜像（spec §9.2）：'auto' + 五枚举（与 normalizeSettings
       // 同源单表 MERMAID_THEME_VALUES 裁决）
       if (d.mermaidTheme !== undefined && !MERMAID_THEME_VALUES.includes(d.mermaidTheme as MermaidTheme | 'auto')) {
-        issues.push({ field: 'diagrams.mermaidTheme', message: "须为 'auto'（跟随亮暗）或 default / neutral / dark / forest / base 之一" });
+        issues.push({ field: 'diagrams.mermaidTheme', message: t('settings.issue.mermaidTheme') });
       }
       if (d.modes !== undefined) {
         if (!isObj(d.modes)) {
-          issues.push({ field: 'diagrams.modes', message: '应为对象' });
+          issues.push({ field: 'diagrams.modes', message: t('settings.issue.mustBeObject') });
         } else {
           for (const [k, v] of Object.entries(d.modes)) {
-            if (!resolveDiagramType(k)) issues.push({ field: `diagrams.modes.${k}`, message: '未知图表类型（注册表外）' });
+            if (!resolveDiagramType(k)) issues.push({ field: `diagrams.modes.${k}`, message: t('settings.issue.unknownDiagramType') });
             else if (!DIAGRAM_MODES.includes(v as string)) {
-              issues.push({ field: `diagrams.modes.${k}`, message: `渲染模式须为 ${DIAGRAM_MODES.join(' / ')} 之一` });
+              issues.push({ field: `diagrams.modes.${k}`, message: t('settings.issue.diagramMode', { values: DIAGRAM_MODES.join(' / ') }) });
             }
           }
         }
@@ -186,13 +186,13 @@ export function validateSettings(raw: unknown): SettingsIssue[] {
       // 类型注册表 renderers 选择面（per-type——与 normalizeSettings 同源单表裁决）
       if (d.renderers !== undefined) {
         if (!isObj(d.renderers)) {
-          issues.push({ field: 'diagrams.renderers', message: '应为对象' });
+          issues.push({ field: 'diagrams.renderers', message: t('settings.issue.mustBeObject') });
         } else {
           for (const [k, v] of Object.entries(d.renderers)) {
-            const t = resolveDiagramType(k);
-            if (!t) issues.push({ field: `diagrams.renderers.${k}`, message: '未知图表类型（注册表外）' });
-            else if (!t.renderers || !t.renderers.includes(v as string)) {
-              issues.push({ field: `diagrams.renderers.${k}`, message: '该类型不支持此渲染器' });
+            const dt = resolveDiagramType(k);
+            if (!dt) issues.push({ field: `diagrams.renderers.${k}`, message: t('settings.issue.unknownDiagramType') });
+            else if (!dt.renderers || !dt.renderers.includes(v as string)) {
+              issues.push({ field: `diagrams.renderers.${k}`, message: t('settings.issue.unsupportedRenderer') });
             }
           }
         }
@@ -201,16 +201,16 @@ export function validateSettings(raw: unknown): SettingsIssue[] {
   }
   if (raw.fonts !== undefined) {
     if (!isObj(raw.fonts)) {
-      issues.push({ field: 'fonts', message: '应为对象' });
+      issues.push({ field: 'fonts', message: t('settings.issue.mustBeObject') });
     } else {
       const f = raw.fonts;
       for (const k of Object.keys(f)) {
         if (k !== 'uiFamily' && k !== 'uiSize' && k !== 'codeFamily' && k !== 'codeSize') {
-          issues.push({ field: `fonts.${k}`, message: '未知字段（白名单外，不落盘）' });
+          issues.push({ field: `fonts.${k}`, message: t('settings.issue.unknownField') });
         }
       }
       for (const fam of ['uiFamily', 'codeFamily'] as const) {
-        if (f[fam] !== undefined && typeof f[fam] !== 'string') issues.push({ field: `fonts.${fam}`, message: '应为字符串（family 栈，空串 = 默认栈）' });
+        if (f[fam] !== undefined && typeof f[fam] !== 'string') issues.push({ field: `fonts.${fam}`, message: t('settings.issue.fontFamily') });
       }
       checkClampedNumber(issues, 'fonts.uiSize', f.uiSize, UI_SIZE_RANGE);
       checkClampedNumber(issues, 'fonts.codeSize', f.codeSize, CODE_SIZE_RANGE);
@@ -220,26 +220,26 @@ export function validateSettings(raw: unknown): SettingsIssue[] {
   // 布尔，与 normalizeSettings 归位闸同口径（未知键 = 白名单外不落盘）
   if (raw.iconThemes !== undefined) {
     if (!isObj(raw.iconThemes)) {
-      issues.push({ field: 'iconThemes', message: '应为对象' });
+      issues.push({ field: 'iconThemes', message: t('settings.issue.mustBeObject') });
     } else {
       const it = raw.iconThemes;
       for (const k of Object.keys(it)) {
         if (k !== 'theme' && k !== 'scopes') {
-          issues.push({ field: `iconThemes.${k}`, message: '未知字段（白名单外，不落盘）' });
+          issues.push({ field: `iconThemes.${k}`, message: t('settings.issue.unknownField') });
         }
       }
       if (it.theme !== undefined && !iconThemeValueOk(it.theme)) {
-        issues.push({ field: 'iconThemes.theme', message: "须为 'none' / 'seti' / 'imported:<id>' 之一" });
+        issues.push({ field: 'iconThemes.theme', message: t('settings.issue.iconTheme') });
       }
       if (it.scopes !== undefined) {
         if (!isObj(it.scopes)) {
-          issues.push({ field: 'iconThemes.scopes', message: '应为对象' });
+          issues.push({ field: 'iconThemes.scopes', message: t('settings.issue.mustBeObject') });
         } else {
           for (const [k, v] of Object.entries(it.scopes)) {
             if (!(ICON_THEME_SCOPE_KEYS as readonly string[]).includes(k)) {
-              issues.push({ field: `iconThemes.scopes.${k}`, message: '未知字段（白名单外，不落盘）' });
+              issues.push({ field: `iconThemes.scopes.${k}`, message: t('settings.issue.unknownField') });
             } else if (typeof v !== 'boolean') {
-              issues.push({ field: `iconThemes.scopes.${k}`, message: '应为布尔值' });
+              issues.push({ field: `iconThemes.scopes.${k}`, message: t('settings.issue.mustBeBoolean') });
             }
           }
         }
@@ -248,16 +248,16 @@ export function validateSettings(raw: unknown): SettingsIssue[] {
   }
   if (raw.layout !== undefined) {
     if (!isObj(raw.layout)) {
-      issues.push({ field: 'layout', message: '应为对象' });
+      issues.push({ field: 'layout', message: t('settings.issue.mustBeObject') });
     } else {
       const l = raw.layout;
       const sanitized = sanitizeLayout(l);
       for (const k of Object.keys(l)) {
         if (!(k in sanitized)) {
-          issues.push({ field: `layout.${k}`, message: '未知字段（白名单外，不落盘）' });
+          issues.push({ field: `layout.${k}`, message: t('settings.issue.unknownField') });
         } else if (sanitized[k as keyof typeof sanitized] !== l[k]) {
           // 归位/夹紧差异 = 布尔脏值或宽度越界（clamp 类），报目标值
-          issues.push({ field: `layout.${k}`, message: `非法或越界，将修正为 ${JSON.stringify(sanitized[k as keyof typeof sanitized])}` });
+          issues.push({ field: `layout.${k}`, message: t('settings.issue.layoutSanitized', { value: JSON.stringify(sanitized[k as keyof typeof sanitized]) }) });
         }
       }
     }
@@ -266,12 +266,12 @@ export function validateSettings(raw: unknown): SettingsIssue[] {
   // 阈值 clamp 1–4096 与 normalizeSettings 的 clampSize 归位闸同口径
   if (raw.storage !== undefined) {
     if (!isObj(raw.storage)) {
-      issues.push({ field: 'storage', message: '应为对象' });
+      issues.push({ field: 'storage', message: t('settings.issue.mustBeObject') });
     } else {
       const st = raw.storage;
       for (const k of Object.keys(st)) {
         if (k !== 'remoteDownloadConfirmMb') {
-          issues.push({ field: `storage.${k}`, message: '未知字段（白名单外，不落盘）' });
+          issues.push({ field: `storage.${k}`, message: t('settings.issue.unknownField') });
         }
       }
       checkClampedNumber(issues, 'storage.remoteDownloadConfirmMb', st.remoteDownloadConfirmMb, STORAGE_MB_RANGE);
@@ -281,13 +281,13 @@ export function validateSettings(raw: unknown): SettingsIssue[] {
   // 值渲染器 id 或 ''（内置默认）；候选合法性由注册表消费时裁决，此处不查注册表
   if (raw.rendererDefaults !== undefined) {
     if (!isObj(raw.rendererDefaults)) {
-      issues.push({ field: 'rendererDefaults', message: '应为对象（扩展名 → 渲染器 id）' });
+      issues.push({ field: 'rendererDefaults', message: t('settings.issue.rendererDefaultsShape') });
     } else {
       for (const [k, v] of Object.entries(raw.rendererDefaults)) {
         if (!RENDERER_DEFAULT_EXT_RE.test(k)) {
-          issues.push({ field: `rendererDefaults.${k}`, message: '键须为小写扩展名（不含点）' });
+          issues.push({ field: `rendererDefaults.${k}`, message: t('settings.issue.rendererExt') });
         } else if (typeof v !== 'string' || !RENDERER_DEFAULT_ID_RE.test(v)) {
-          issues.push({ field: `rendererDefaults.${k}`, message: "值须为渲染器 id（'' = 内置默认）" });
+          issues.push({ field: `rendererDefaults.${k}`, message: t('settings.issue.rendererId') });
         }
       }
     }
@@ -306,8 +306,8 @@ export function applyJson(draft: Draft, text: string): JsonApplyResult {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const m = /position\s+(\d+)/i.exec(msg);
-    const at = m ? `（第 ${jsonLineOf(text, Number(m[1]))} 行附近）` : '';
-    return { ok: false, errors: [{ field: '', message: `JSON 语法错误${at}：${msg}` }] };
+    const at = m ? t('settings.json.atLine', { line: jsonLineOf(text, Number(m[1])) }) : '';
+    return { ok: false, errors: [{ field: '', message: t('settings.json.syntaxError', { at, msg }) }] };
   }
   const issues = validateSettings(parsed);
   if (issues.length > 0) return { ok: false, errors: issues };
@@ -475,28 +475,28 @@ export function parseImportFile(text: string): ImportParseResult {
     parsed = JSON.parse(text);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, errors: [{ field: '', message: `JSON 语法错误：${msg}` }] };
+    return { ok: false, errors: [{ field: '', message: t('settings.json.syntaxError', { at: '', msg }) }] };
   }
-  if (!isObj(parsed)) return { ok: false, errors: [{ field: '', message: '导入文件必须是 JSON 对象' }] };
+  if (!isObj(parsed)) return { ok: false, errors: [{ field: '', message: t('settings.import.notObject') }] };
   const warnings: string[] = [];
   const v = parsed.schemaVersion;
   if (v === undefined) {
-    warnings.push('缺少 schemaVersion，按当前版本处理');
+    warnings.push(t('settings.import.missingSchema'));
   } else if (typeof v !== 'number' || !Number.isFinite(v)) {
-    warnings.push(`schemaVersion 非法（${JSON.stringify(v) ?? 'null'}），按当前版本处理`);
+    warnings.push(t('settings.import.badSchema', { value: JSON.stringify(v) ?? 'null' }));
   } else if (v > SETTINGS_SCHEMA_VERSION) {
     warnings.push(
-      `导入文件版本更新（schemaVersion ${v} > ${SETTINGS_SCHEMA_VERSION}），将尽力合并，可能存在兼容风险`
+      t('settings.import.newerSchema', { version: v, current: SETTINGS_SCHEMA_VERSION })
     );
   }
   const rawSettings = parsed.settings;
   if (!isObj(rawSettings)) {
-    return { ok: false, errors: [{ field: 'settings', message: '导入文件缺少 settings 对象' }] };
+    return { ok: false, errors: [{ field: 'settings', message: t('settings.import.missingSettings') }] };
   }
   const unknownPaths = new Set(collectUnknownPaths(rawSettings));
   const issues = validateSettings(rawSettings);
   const errors = issues.filter((i) => !unknownPaths.has(i.field));
-  for (const p of unknownPaths) warnings.push(`${p}：未知字段（白名单外，不落盘）`);
+  for (const p of unknownPaths) warnings.push(t('settings.import.unknownFieldWarn', { path: p }));
   if (errors.length > 0) return { ok: false, errors };
   return { ok: true, settings: rawSettings, warnings };
 }

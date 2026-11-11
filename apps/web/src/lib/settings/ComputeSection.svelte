@@ -4,6 +4,7 @@
   // 同 schema 字段同绑定语义（draft.computePolicy），三态 auto/local/remote。
   // 改动写 draft 后调 touch()——落盘与生效时机由 SettingsCenter 统一决定
   // （下次高亮/渲染调用即生效：router 每次实时读 settings）。
+  import { t } from '../i18n/index.svelte';
   import type { Settings } from '../stores/settings';
 
   let { draft, touch }: { draft: Settings; touch(): void } = $props();
@@ -17,14 +18,14 @@
 
 <section class="vv-sc-section">
   <label class="vv-settings-theme-row">
-    <span>计算策略</span>
-    <select value={draft.computePolicy} onchange={onPolicyChange} aria-label="计算策略" title="计算策略：决定高亮等计算在本地还是服务器执行">
-      <option value="auto">计算: 自动</option>
-      <option value="local">计算: 本地</option>
-      <option value="remote">计算: 远程</option>
+    <span>{t('settings.compute.row')}</span>
+    <select value={draft.computePolicy} onchange={onPolicyChange} aria-label={t('settings.compute.selectAria')} title={t('settings.compute.selectTitle')}>
+      <option value="auto">{t('settings.compute.auto')}</option>
+      <option value="local">{t('settings.compute.local')}</option>
+      <option value="remote">{t('settings.compute.remote')}</option>
     </select>
   </label>
   <div class="vv-settings-hint">
-    决定高亮等计算在本地还是服务器执行：自动 = 远程文件优先远程计算（失败回退本地）；本地/远程显式指定。下次计算调用即生效。
+    {t('settings.compute.hint')}
   </div>
 </section>

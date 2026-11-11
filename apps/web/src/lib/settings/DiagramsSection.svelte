@@ -10,11 +10,12 @@
   // 注入）。krokiProxy 组件挂载时读会话缓存（loadCapabilities try/catch 对 SSR/
   // 无记录安全，RemoteSourceModal loadLastServer 同款先例）。
  // spec 2026-10-23 §9.1（Task 6）：多渲染器类型第二列渲染器 select（注册表
- // t.renderers 门控=graphviz: viz-js/hpcc；缺省显示注册表首项 viz-js）。
- // 模式档位按注册表能力门控（本地=t.local、Kroki=t.krokiType，同「服务端」
- // t.server 先例只列实际可用的档位）；遗留脏档经 displayMode 按回落链如实显示。
+ // dt.renderers 门控=graphviz: viz-js/hpcc；缺省显示注册表首项 viz-js）。
+ // 模式档位按注册表能力门控（本地=dt.local、Kroki=dt.krokiType，同「服务端」
+ // dt.server 先例只列实际可用的档位）；遗留脏档经 displayMode 按回落链如实显示。
   import { DIAGRAM_TYPES, type DiagramMode, type DiagramType } from '@bhxch/vviewer-render-diagram';
   import { loadCapabilities } from '../openFlow.svelte';
+  import { t } from '../i18n/index.svelte';
   import type { Settings } from '../stores/settings';
 
   let { draft, touch }: { draft: Settings; touch(): void } = $props();
@@ -43,19 +44,19 @@
   }
 
   /** 模式下拉的显示值：注册表不支持的档位不渲染 option（本地/Kroki 门控与
-   * 「服务端」t.server、「官方服务器」t.officialServer 同款先例），遗留脏档
+   * 「服务端」dt.server、「官方服务器」dt.officialServer 同款先例），遗留脏档
    * （旧版本地为不可本地语言存过 local、手改 JSON 为 math 存过 kroki/official 等）
    * 按管线 effectiveModeOf 的回落链如实显示，避免选中值落在隐藏 option 上显示成空。 */
-  function displayMode(t: DiagramType): DiagramMode {
-    const stored = draft.diagrams.modes[t.id] ?? t.defaultMode;
-    if (stored === 'local' && !t.local) return t.krokiType ? 'kroki' : 'source';
-    if (stored === 'kroki' && !t.krokiType) return 'source';
-    if (stored === 'server' && !t.server) return t.local ? 'local' : t.krokiType ? 'kroki' : 'source';
-    if (stored === 'official' && !t.officialServer) return t.local ? 'local' : t.krokiType ? 'kroki' : 'source';
+  function displayMode(dt: DiagramType): DiagramMode {
+    const stored = draft.diagrams.modes[dt.id] ?? dt.defaultMode;
+    if (stored === 'local' && !dt.local) return dt.krokiType ? 'kroki' : 'source';
+    if (stored === 'kroki' && !dt.krokiType) return 'source';
+    if (stored === 'server' && !dt.server) return dt.local ? 'local' : dt.krokiType ? 'kroki' : 'source';
+    if (stored === 'official' && !dt.officialServer) return dt.local ? 'local' : dt.krokiType ? 'kroki' : 'source';
     return stored;
   }
 
-  /** 按语言模式切换：键恒为注册表类型 id（t.id，不用别名）——已打开文档不回溯
+  /** 按语言模式切换：键恒为注册表类型 id（dt.id，不用别名）——已打开文档不回溯
    * 重渲，重新打开后生效。 */
   function onDiagramModeChange(id: string, e: Event): void {
     draft.diagrams.modes = { ...draft.diagrams.modes, [id]: (e.currentTarget as HTMLSelectElement).value as DiagramMode };
@@ -71,74 +72,71 @@
 </script>
 
 <section class="vv-sc-section">
-  <div class="vv-settings-label">图表</div>
+  <div class="vv-settings-label">{t('settings.diagrams.label')}</div>
   <label class="vv-settings-theme-row">
-    <span>Kroki 服务</span>
+    <span>{t('settings.diagrams.krokiRow')}</span>
     <input
       type="text"
       placeholder="https://kroki.io"
       value={draft.diagrams.krokiHost}
       oninput={onKrokiHostInput}
-      aria-label="Kroki 服务地址"
+      aria-label={t('settings.diagrams.krokiAria')}
       spellcheck="false"
     />
   </label>
-  <div class="vv-settings-hint">http(s):// 开头地址；留空用默认 https://kroki.io。默认服务失败时 plantuml/C4 自动回落 PlantUML 官方服务器，自建地址不回落。</div>
+  <div class="vv-settings-hint">{t('settings.diagrams.krokiHint')}</div>
   <label class="vv-settings-theme-row">
-    <span>Kroki 通道</span>
-    <select value={draft.diagrams.krokiVia} onchange={onKrokiViaChange} aria-label="Kroki 通道">
-      <option value="client">前端直连</option>
-      <option value="server" disabled={!krokiProxy}>服务端代发</option>
+    <span>{t('settings.diagrams.viaRow')}</span>
+    <select value={draft.diagrams.krokiVia} onchange={onKrokiViaChange} aria-label={t('settings.diagrams.viaAria')}>
+      <option value="client">{t('settings.diagrams.viaClient')}</option>
+      <option value="server" disabled={!krokiProxy}>{t('settings.diagrams.viaServer')}</option>
     </select>
   </label>
-  <div class="vv-settings-hint">「服务端代发」需部署侧启用 kroki 转发：未连接或能力缺失时该选项禁用，已选也会回落「前端直连」。</div>
+  <div class="vv-settings-hint">{t('settings.diagrams.viaHint')}</div>
   <label class="vv-settings-theme-row">
-    <span>Mermaid 主题</span>
-    <select value={draft.diagrams.mermaidTheme} onchange={onMermaidThemeChange} aria-label="Mermaid 主题">
-      <option value="auto">自动（跟随亮暗）</option>
-      <option value="default">默认</option>
-      <option value="neutral">中性</option>
-      <option value="dark">暗色</option>
-      <option value="forest">森林</option>
-      <option value="base">基础</option>
+    <span>{t('settings.diagrams.mermaidRow')}</span>
+    <select value={draft.diagrams.mermaidTheme} onchange={onMermaidThemeChange} aria-label={t('settings.diagrams.mermaidAria')}>
+      <option value="auto">{t('settings.diagrams.mermaidAuto')}</option>
+      <option value="default">{t('settings.diagrams.mermaidDefault')}</option>
+      <option value="neutral">{t('settings.diagrams.mermaidNeutral')}</option>
+      <option value="dark">{t('settings.diagrams.mermaidDark')}</option>
+      <option value="forest">{t('settings.diagrams.mermaidForest')}</option>
+      <option value="base">{t('settings.diagrams.mermaidBase')}</option>
     </select>
   </label>
-  <div class="vv-settings-hint">「自动」跟随外观亮暗；显式主题立即重画已打开文档。</div>
+  <div class="vv-settings-hint">{t('settings.diagrams.mermaidHint')}</div>
   <div class="vv-settings-diagram-modes">
-    <span>渲染模式</span>
+    <span>{t('settings.diagrams.modesRow')}</span>
     <div class="vv-diagram-mode-grid">
-      {#each DIAGRAM_TYPES as t (t.id)}
+      {#each DIAGRAM_TYPES as dt (dt.id)}
         <label class="vv-diagram-mode-item">
-          <span class="vv-diagram-mode-lang">{t.id}</span>
-          {#if t.renderers?.length}
+          <span class="vv-diagram-mode-lang">{dt.id}</span>
+          {#if dt.renderers?.length}
             <select
               class="vv-diagram-renderer"
-              value={draft.diagrams.renderers[t.id] ?? t.renderers[0]}
-              onchange={(e) => onDiagramRendererChange(t.id, e)}
-              aria-label="{t.id} 渲染器"
+              value={draft.diagrams.renderers[dt.id] ?? dt.renderers[0]}
+              onchange={(e) => onDiagramRendererChange(dt.id, e)}
+              aria-label={t('settings.diagrams.rendererAria', { id: dt.id })}
             >
-              {#each t.renderers as r (r)}<option value={r}>{r}</option>{/each}
+              {#each dt.renderers as r (r)}<option value={r}>{r}</option>{/each}
             </select>
           {/if}
           <select
-            value={displayMode(t)}
-            onchange={(e) => onDiagramModeChange(t.id, e)}
-            aria-label="{t.id} 渲染模式"
+            value={displayMode(dt)}
+            onchange={(e) => onDiagramModeChange(dt.id, e)}
+            aria-label={t('settings.diagrams.modeAria', { id: dt.id })}
           >
-            {#if t.local}<option value="local">本地</option>{/if}
-            {#if t.server}<option value="server">服务端</option>{/if}
-            {#if t.krokiType}<option value="kroki">Kroki</option>{/if}
-            {#if t.officialServer}<option value="official">官方服务器</option>{/if}
-            <option value="source">源码</option>
+            {#if dt.local}<option value="local">{t('settings.diagrams.modeLocal')}</option>{/if}
+            {#if dt.server}<option value="server">{t('settings.diagrams.modeServer')}</option>{/if}
+            {#if dt.krokiType}<option value="kroki">Kroki</option>{/if}
+            {#if dt.officialServer}<option value="official">{t('settings.diagrams.modeOfficial')}</option>{/if}
+            <option value="source">{t('settings.diagrams.modeSource')}</option>
           </select>
         </label>
       {/each}
     </div>
   </div>
   <div class="vv-settings-hint">
-    每种语言只列出其实际支持的档位（无对应引擎/通道的选项不出现）。
-    本地引擎按需经 CDN 加载（d2 引擎较重，默认走 Kroki）；「服务端」把图交给所连服务器渲染，未连接或不支持时自动回落本地/Kroki；
-    「官方服务器」（plantuml/C4 专属）直连 PlantUML 官方服务器渲染，失败自动回落 Kroki。
-    graphviz 可选渲染器（viz-js 默认 / hpcc）；除 Mermaid 主题即时重画外，其余改动对已打开文档重新打开后生效。
+    {t('settings.diagrams.gridHint')}
   </div>
 </section>
