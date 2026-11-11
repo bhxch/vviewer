@@ -126,7 +126,10 @@
    * 生效）与 onSettingsChanged 订阅内双通道共用。
    */
   function applyLocaleAndReduceMotion(s: Settings): void {
-    setLocale(s.locale);
+    setLocale(s.locale); // 内部含 document 守卫
+    // SSR/构建期（kit preview 服务端渲染管线）无 DOM——init 期调用链到此处必须守卫
+    // （既有 DOM 触点全在 onMount/事件回调内，本函数是首个 init 期触点）
+    if (typeof document === 'undefined') return;
     if (s.reduceMotion === 'system') delete document.documentElement.dataset.reduceMotion;
     else document.documentElement.dataset.reduceMotion = s.reduceMotion;
   }
