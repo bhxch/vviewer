@@ -7,6 +7,7 @@
  * i18n 三条纪律（CJK 字面量 / 裸 Intl / 直读 catalogs）激活时，其必命中样例与断言在此扩展。
  */
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -79,6 +80,45 @@ function lintFixture(file: string): LintRun {
   return { exitCode, messages: reports.flatMap((report) => report.messages) };
 }
 
+/**
+ * stdin 驱动（i18n 三纪律专用）：把 fixtures 样例内容以**虚拟路径**喂给 eslint。
+ * 三规则的挂载块只作用 apps/web/src/lib 子集，而 fixtures 目录在全局 ignores 且
+ * 不落该子集——--stdin-filename 让样例按 lib 路径形态匹配规则块，同时验证
+ * 「块真的挂上了」与「内容真的命中」；同一内容换虚拟路径（如 i18n/format.ts）
+ * 即可双向验证豁免面。
+ */
+function lintStdin(file: string, virtualPath: string): LintRun {
+  const content = readFileSync(path.join(FIXTURES, file), 'utf8');
+  let exitCode = 0;
+  let stdout: string;
+  let stderr = '';
+  try {
+    stdout = execFileSync(
+      ESLINT,
+      ['--no-ignore', '--stdin', '--stdin-filename', path.join(REPO, virtualPath), '--format', 'json'],
+      { cwd: REPO, encoding: 'utf8', input: content, stdio: ['pipe', 'pipe', 'pipe'], timeout: ESLINT_TIMEOUT }
+    );
+  } catch (error) {
+    const failure = error as { status?: number | null; signal?: string | null; stdout?: string; stderr?: string };
+    if (failure.signal) {
+      throw new Error(
+        `eslint 子进程 ${ESLINT_TIMEOUT}ms 内未结束，已被 ${failure.signal} 终止（stdin 样例：${file} → ${virtualPath}）`,
+        { cause: error }
+      );
+    }
+    exitCode = failure.status ?? -1;
+    stdout = failure.stdout ?? '';
+    stderr = failure.stderr ?? '';
+  }
+  let reports: Array<{ messages: LintMessage[] }>;
+  try {
+    reports = JSON.parse(stdout) as Array<{ messages: LintMessage[] }>;
+  } catch (parseError) {
+    throw new Error(`eslint 未产出 JSON 报告（exit ${exitCode}）：${stderr || stdout}`, { cause: parseError });
+  }
+  return { exitCode, messages: reports.flatMap((report) => report.messages) };
+}
+
 describe('eslint 机检样例（规则自身被机检）', () => {
   it('a11y 必命中：带 onclick 的静态 div 被 svelte/valid-compile 以 error 拦下（无键盘可达 + 缺 role）', () => {
     const { exitCode, messages } = lintFixture('sample.markup.svelte');
@@ -145,5 +185,94 @@ describe('eslint 机检样例（规则自身被机检）', () => {
     const { exitCode, messages } = lintFixture('sample.clean.ts');
     expect(messages, '合法样例被误报').toEqual([]);
     expect(exitCode).toBe(0);
+  }, LINT_TIMEOUT);
+
+  // ---------- i18n 三纪律（D6，Task 10 激活）----------
+  // 三规则块只挂 apps/web/src/lib 子集，样例内容经 --stdin --stdin-filename 以
+  // lib 路径形态驱动（lintStdin）——「块挂上了」与「内容命中了」同时被验。
+
+  it('i18n 必命中（stdin→lib 路径）：CJK 字面量/模板静态段/裸 toLocale*/直读 catalogs/console.log/未用实参全数拦下', () => {
+    const { exitCode, messages } = lintStdin('sample.script.ts', 'apps/web/src/lib/sample.script.ts');
+    const errors = messages.filter((m) => m.severity === 2);
+    const hit = (ruleId: string, marker: string): boolean =>
+      errors.some((m) => m.ruleId === ruleId && m.message.includes(marker));
+    expect(hit('no-restricted-syntax', '字符串字面量含 CJK'), 'CJK 字面量未命中').toBe(true);
+    expect(hit('no-restricted-syntax', '模板串静态段含 CJK'), 'CJK 模板静态段未命中').toBe(true);
+    expect(hit('no-restricted-syntax', '裸 Intl'), '裸 toLocale* 未命中').toBe(true);
+    expect(hit('no-restricted-imports', '直读 catalogs'), '直读 catalogs 未命中').toBe(true);
+    expect(hit('no-console', 'Unexpected console statement'), 'console.log 未命中（no-console 双向化）').toBe(true);
+    expect(
+      errors.some((m) => m.ruleId === '@typescript-eslint/no-unused-vars'),
+      '未用实参未命中'
+    ).toBe(true);
+    // 门面导入（对照行）不命中：拦的只是 catalogs 直读
+    expect(
+      errors.filter((m) => m.ruleId === 'no-restricted-imports').length,
+      '门面导入被误拦（只应 catalogs 一条）'
+    ).toBe(1);
+    expect(exitCode, 'eslint 应以 lint error 收场').toBe(1);
+  }, LINT_TIMEOUT);
+
+  it('i18n 合法面（stdin→lib 路径）：\\u 转义正则/转义数据值串/i18n 门面导入与 t() 调用零误伤', () => {
+    const { exitCode, messages } = lintStdin('sample.clean.ts', 'apps/web/src/lib/sample.clean.ts');
+    expect(messages, 'i18n 合法面被误报').toEqual([]);
+    expect(exitCode).toBe(0);
+  }, LINT_TIMEOUT);
+
+  it('SvelteText 必命中（stdin→lib 路径）：标记文本 CJK 与 a11y 同文件双规则各自命中', () => {
+    const { exitCode, messages } = lintStdin('sample.markup.svelte', 'apps/web/src/lib/sample.markup.svelte');
+    const errors = messages.filter((m) => m.severity === 2);
+    expect(
+      errors.some((m) => m.ruleId === 'no-restricted-syntax' && m.message.includes('标记文本')),
+      'SvelteText 标记文本 CJK 未命中'
+    ).toBe(true);
+    // 同文件旧规则并存：块覆盖语义下 valid-compile 的 a11y 面不得被顶掉
+    expect(
+      errors.some((m) => m.ruleId === 'svelte/valid-compile' && m.message.includes('a11y_click_events_have_key_events')),
+      'a11y 面被子集块覆盖顶掉'
+    ).toBe(true);
+    expect(exitCode).toBe(1);
+  }, LINT_TIMEOUT);
+
+  it('子集覆盖探针（stdin→lib 路径）：lib 子集块的 no-restricted-syntax 必须同时含退 runes 与 CJK 条目', () => {
+    const { exitCode, messages } = lintStdin('sample.libprobe.svelte', 'apps/web/src/lib/sample.libprobe.svelte');
+    const errors = messages.filter((m) => m.ruleId === 'no-restricted-syntax' && m.severity === 2);
+    expect(
+      errors.some((m) => m.message.includes('逐组件退出 runes')),
+      'runesOptOut 条目被子集块顶掉（后块覆盖前块未展开）——静默防线的洞'
+    ).toBe(true);
+    expect(
+      errors.some((m) => m.message.includes('标记文本')),
+      '子集块未挂上（CJK 条目缺失）'
+    ).toBe(true);
+    expect(exitCode).toBe(1);
+  }, LINT_TIMEOUT);
+
+  it('裸 Intl 双向探针：lib 普通路径必命中、i18n/format.ts 虚拟路径零报（唯一豁免点）', () => {
+    const hitRun = lintStdin('sample.intl.ts', 'apps/web/src/lib/sample.intl.ts');
+    expect(
+      hitRun.messages.some(
+        (m) => m.ruleId === 'no-restricted-syntax' && m.severity === 2 && m.message.includes('裸 Intl')
+      ),
+      '裸 Intl 在 lib 普通路径未命中'
+    ).toBe(true);
+    expect(hitRun.exitCode).toBe(1);
+
+    const exemptRun = lintStdin('sample.intl.ts', 'apps/web/src/lib/i18n/format.ts');
+    expect(exemptRun.messages, 'format.ts 豁免面被误报').toEqual([]);
+    expect(exemptRun.exitCode).toBe(0);
+  }, LINT_TIMEOUT);
+
+  it('runesOptOut 全局块仍挂载（fixtures 路径常规驱动）：子集块化后旧块防线不丢', () => {
+    // sample.optout.svelte 的既有断言（上文）已覆盖旧块；此处补验「lib 之外」的
+    // svelte 文件仍被旧块覆盖——fixtures 路径不落 lib 子集块，退 runes 命中
+    // 只能来自全局旧块，恰好证明两条块并存互不顶掉
+    const { exitCode, messages } = lintFixture('sample.optout.svelte');
+    expect(
+      messages.some(
+        (m) => m.ruleId === 'no-restricted-syntax' && m.severity === 2 && m.message.includes('逐组件退出 runes')
+      )
+    ).toBe(true);
+    expect(exitCode).toBe(1);
   }, LINT_TIMEOUT);
 });

@@ -10,3 +10,16 @@ export function report(message: string, _reserved?: unknown): void {
   console.error(message);
   console.debug(message);
 }
+
+// —— i18n 三纪律合法面增补（Task 10）：以下形态在 lib 子集规则块下也不得命中
+// （lint-config.test.ts 以 --stdin（lib 路径形态）驱动本文件断言零报错）——
+// \u 转义正则与数据值串（raw 形态无 CJK 字符，D8 审计数据值裁决）、i18n 门面
+// 导入与 t() 调用（非直读 catalogs）。
+import { t } from './i18n/index.svelte'; // i18n 门面导入（对照：直读 catalogs 才拦）
+
+export const ESCAPE_RE = /[\u4e00-\u9fff]+/g; // \u 转义正则：合法
+export const FAMILY_NAME = '\u5fae\u8f6f\u96c5\u9ed1'; // \u 转义数据值串（family 名）：合法
+
+export function translated(): string {
+  return t('shell.empty.title'); // 门面 t() 调用：合法
+}

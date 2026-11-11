@@ -8,3 +8,8 @@
 </script>
 
 <div onclick={() => (count += 1)}>{count}</div>
+
+<!-- i18n 三纪律样例（Task 10）：SvelteText 标记文本 CJK——常规 lint 不扫本目录且
+     规则块只挂 lib 子集，由 lint-config.test.ts 经 --stdin（lib 路径形态）驱动断言命中
+     （下方静态 div 的 a11y 必命中断言不受影响） -->
+<div class="cjk-marker">标记中文文本</div>

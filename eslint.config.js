@@ -5,10 +5,10 @@
 // 机检自身被机检：tools/lint-selfcheck/test/lint-config.test.ts 以 --no-ignore 驱动真实
 // eslint 扫 tools/lint-selfcheck/lint-fixtures/ 的必命中/合法样例，断言规则真的在拦。
 //
-// 分期激活预留（D6）：i18n 三条纪律——CJK 字面量禁令（Literal/TemplateElement/SvelteText）、
-// 禁裸 Intl.* / toLocale*、禁直读 catalogs——本文件暂不落，随文案抽取收尾任务同 commit
-// 激活（抽取完成前的中间 commit 必须保持 lint 绿）；届时必命中样例与断言同步补进
-// lint-selfcheck。
+// 分期激活（D6，Task 10 落地）：i18n 三条纪律——CJK 字面量禁令（Literal/
+// TemplateElement/SvelteText 三形态）、禁裸 Intl.* / toLocale*、禁直读 catalogs——
+// 随文案抽取收尾任务同 commit 激活；必命中/合法样例与断言见
+// tools/lint-selfcheck/lint-fixtures/ 与 lint-config.test.ts（机检自身被机检）。
 import eslint from '@eslint/js';
 import { defineConfig, globalIgnores } from 'eslint/config';
 import svelte from 'eslint-plugin-svelte';
@@ -27,6 +27,47 @@ const runesOptOut = {
     'SvelteElement[name.name="svelte:options"] SvelteAttribute[key.name="runes"] Literal[value=false]',
   message:
     '禁止用 <svelte:options runes={false}> 逐组件退出 runes 模式：全局强制 runes，任何位置不得关闭（AGENTS.md）'
+};
+
+// ---------- i18n 三条纪律（D6 分期激活，Task 10 落地） ----------
+// CJK 三形态按**源码形态（raw）**匹配而非解码值：`\u 转义`是 D8 审计认可的
+// 「非翻译数据值」合法形态（family 名/字形样张/storeId 标识段——运行时值含 CJK
+// 但非文案，不随 locale），raw 形态无 CJK 字符即不拦；正则字面量（如
+// /[\u4e00-\u9fff]/ 的 source）同此不误伤。esquery 的 value 是解码后字符串，
+// 会把转义形态也拦掉（实测），故必须用 raw。
+const CJK_RANGE = /[\u4e00-\u9fff]/.source; // 与 i18n 收口扫描同一码位区间
+const cjkLiteral = {
+  selector: `Literal[raw=/${CJK_RANGE}/]`,
+  message:
+    '禁止字符串字面量含 CJK：用户可见文案一律走 t()（i18n/index.svelte 响应式 / i18n/core 纯层）；非翻译数据值用 \\u 转义形态（D8 审计）'
+};
+const cjkTemplateElement = {
+  // TemplateElement 的 raw 在 value.raw 嵌套（AST 实测），非顶层属性
+  selector: `TemplateElement[value.raw=/${CJK_RANGE}/]`,
+  message:
+    '禁止模板串静态段含 CJK：插值文案改目录键 + 占位符 t(key, {…})；非翻译数据值用 \\u 转义形态（D8 审计）'
+};
+// Svelte 模板面(SvelteText 文本 / SvelteLiteral 静态属性值)用 **value** 匹配:
+// 这两类节点无 raw 属性(实测 AST 只有解码后的 value),且模板文本/静态属性值
+// 天然是显示面——不存在「转义数据值」形态(HTML 实体等绕写恰恰要拦,防绕过)。
+// 非文案的动态值一律走表达式({expr} / title={…}),不入这两类节点。
+// :not(SvelteStyleElement SvelteText) 排除 <style> 块内容——parser 把 style 内
+// 全文(含中文 CSS 注释)作 SvelteText,而 CSS 注释是开发者面注释(与 // /*
+// 同口径),不是用户可见文案;组件样式中文注释不入目录(实测缺此排除即 14 文件
+// style 块整块误报)。
+const cjkSvelteText = {
+  selector: `SvelteText[value=/${CJK_RANGE}/]:not(SvelteStyleElement SvelteText), SvelteLiteral[value=/${CJK_RANGE}/]`,
+  message:
+    '禁止 Svelte 标记文本/静态属性值含 CJK：用户可见文案一律 t() 目录键（{{t("domain.key")}}）；aria-label/title/placeholder 用 {t(…)} 表达式形态'
+};
+// 禁裸 Intl / toLocale*（apps/web 全域）：日期/数字/列表格式化单点 i18n/format.ts
+// （组内集中切 locale、单测直测面），散用 Intl 会在 locale 切换时按浏览器 locale
+// 而非应用 locale 渲染（D3 双写机制的旁路）。
+const bareIntl = {
+  selector:
+    "MemberExpression[object.name='Intl'], NewExpression[callee.object.name='Intl'], CallExpression[callee.property.name=/^(toLocaleString|toLocaleDateString|toLocaleTimeString|toLocaleLowerCase|toLocaleUpperCase)$/]",
+  message:
+    '禁止裸 Intl.* / toLocale*：格式化单点 i18n/format.ts（应用 locale 而非浏览器 locale；新增格式化能力在 format.ts 扩展并单测）'
 };
 
 export default defineConfig(
@@ -181,6 +222,44 @@ export default defineConfig(
     files: ['*.config.js', '*.config.ts', '**/*.mjs'],
     languageOptions: {
       globals: { ...globals.node }
+    }
+  },
+  // ---------- i18n 三条纪律（D6 分期激活落地，Task 10）----------
+  // 块 A：apps/web/src/lib 子集——CJK 三形态 + bareIntl + 禁直读 catalogs。
+  // i18n/** 整体豁免（catalog 本体与 core/index 门面即「直读」的合法点，D6：
+  // 豁免 i18n/index.svelte.ts 与 i18n/core.ts 的实现面）；*.test.ts 豁免（目录值
+  // 双锁断言直读 catalogs 是 S5 锚改写的既定形态）。svelte 面必须把 runesOptOut
+  // 一并展开（Task 1 裁决：no-restricted-syntax 后块整体覆盖前块不合并——本块
+  // 在 runesOptOut 旧块之后，漏展开即 lib 内 .svelte 的逐组件退 runes 防线被
+  // 静默顶掉；runesOptOut 选择器对 .ts 无匹配，双侧共用无副作用）。
+  {
+    files: ['apps/web/src/lib/**/*.{svelte,ts}'],
+    ignores: ['apps/web/src/lib/i18n/**', 'apps/web/src/lib/**/*.test.ts'],
+    rules: {
+      'no-restricted-syntax': ['error', runesOptOut, cjkLiteral, cjkTemplateElement, cjkSvelteText, bareIntl],
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/i18n/catalogs', '**/i18n/catalogs/**'],
+              message:
+                '禁止直读 catalogs：消费方一律经 i18n/index.svelte（响应式 t）或 i18n/core（纯 translate）门面——直读绕过 locale 状态与聚合机检的单一入口'
+            }
+          ]
+        }
+      ]
+    }
+  },
+  // 块 B：apps/web 全域（lib 除外，其由块 A 承担）——bareIntl + runesOptOut。
+  // 同样的覆盖展开纪律：本块在旧 runesOptOut 块之后，.svelte 面漏展开 runesOptOut
+  // 即 routes 层的退 runes 防线被顶掉。bareIntl 对 test/e2e 不豁免（存量零命中：
+  // 格式化断言一律经 format.ts 出口，散用 Intl 无正当面）。
+  {
+    files: ['apps/web/**/*.{svelte,ts}'],
+    ignores: ['apps/web/src/lib/**', 'apps/web/src/lib/i18n/format.ts'],
+    rules: {
+      'no-restricted-syntax': ['error', runesOptOut, bareIntl]
     }
   }
 );
