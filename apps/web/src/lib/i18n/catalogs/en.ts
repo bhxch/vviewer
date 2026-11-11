@@ -8,6 +8,7 @@ import { messages as tree } from './en/tree';
 import { messages as quickopen } from './en/quickopen';
 import { messages as viewer } from './en/viewer';
 import { messages as errors } from './en/errors';
+import { messages as mounts } from './en/mounts';
 
 /** domain→pack 记录（聚合机检逐域面；与 zh 同构） */
 export const MESSAGE_PACKS = {
@@ -18,7 +19,8 @@ export const MESSAGE_PACKS = {
   tree,
   quickopen,
   viewer,
-  errors
+  errors,
+  mounts
 } as const;
 
 export const messages = {
@@ -29,5 +31,6 @@ export const messages = {
   ...tree,
   ...quickopen,
   ...viewer,
-  ...errors
+  ...errors,
+  ...mounts
 } as const;
