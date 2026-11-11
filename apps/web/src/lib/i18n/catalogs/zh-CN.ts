@@ -10,6 +10,8 @@ import { messages as shell } from './zh-CN/shell';
 import { messages as tabs } from './zh-CN/tabs';
 import { messages as tree } from './zh-CN/tree';
 import { messages as quickopen } from './zh-CN/quickopen';
+import { messages as viewer } from './zh-CN/viewer';
+import { messages as errors } from './zh-CN/errors';
 
 /** domain→pack 记录（聚合机检逐域面；键序即注册序，无运行时注入层——单 app 直读目录） */
 export const MESSAGE_PACKS = {
@@ -18,7 +20,18 @@ export const MESSAGE_PACKS = {
   shell,
   tabs,
   tree,
-  quickopen
+  quickopen,
+  viewer,
+  errors
 } as const;
 
-export const messages = { ...settings, ...a11y, ...shell, ...tabs, ...tree, ...quickopen } as const;
+export const messages = {
+  ...settings,
+  ...a11y,
+  ...shell,
+  ...tabs,
+  ...tree,
+  ...quickopen,
+  ...viewer,
+  ...errors
+} as const;

@@ -6,6 +6,8 @@ import { messages as shell } from './en/shell';
 import { messages as tabs } from './en/tabs';
 import { messages as tree } from './en/tree';
 import { messages as quickopen } from './en/quickopen';
+import { messages as viewer } from './en/viewer';
+import { messages as errors } from './en/errors';
 
 /** domain→pack 记录（聚合机检逐域面；与 zh 同构） */
 export const MESSAGE_PACKS = {
@@ -14,7 +16,18 @@ export const MESSAGE_PACKS = {
   shell,
   tabs,
   tree,
-  quickopen
+  quickopen,
+  viewer,
+  errors
 } as const;
 
-export const messages = { ...settings, ...a11y, ...shell, ...tabs, ...tree, ...quickopen } as const;
+export const messages = {
+  ...settings,
+  ...a11y,
+  ...shell,
+  ...tabs,
+  ...tree,
+  ...quickopen,
+  ...viewer,
+  ...errors
+} as const;
