@@ -165,7 +165,9 @@ async function mutedPlay(page: Page, selector: string): Promise<number> {
  * good.mp4 起播推进断言，对「伪 error 卡片干扰」自愈：快速连续开 tab 时，前一个
  * ArtPlayer 实例销毁期的伪 error 事件（video.error 为空 →「无法播放此媒体：未知错误」）
  * 可能落在新挂载的播放器上（app 侧已知脆弱点，见文件头注）。此时重新激活 tab 触发
- * 全新渲染——滞留事件已落定，新渲染不再受干扰。重试至多 3 次。
+ * 全新渲染——滞留事件已落定，新渲染不再受干扰。重试至多 5 次；play() 以 8s 竞速
+ * 封顶（慢 runner 上销毁期伪 error 可致 play() 长时间挂起吃光测试预算，视为本轮
+ * 未起播走重试；CI run 43132698433 实证）。
  */
 async function expectGoodPlaying(page: Page): Promise<void> {
   for (let attempt = 0; ; attempt++) {
@@ -174,8 +176,12 @@ async function expectGoodPlaying(page: Page): Promise<void> {
       .evaluate(async (el) => {
         const m = el as HTMLMediaElement;
         m.muted = true;
-        await m.play();
-        return true;
+        // 竞速护栏须写在 evaluate 内部（序列化边界外无法引用页面侧 play promise）：
+        // 8s 未 resolve 视为本轮未起播，走重试
+        return await Promise.race([
+          m.play().then(() => true),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 8_000))
+        ]);
       })
       .catch(() => false);
     if (started) {
@@ -191,11 +197,11 @@ async function expectGoodPlaying(page: Page): Promise<void> {
         .catch(() => false);
       if (advanced) return;
     }
-    if (attempt >= 2) throw new Error('good.mp4 反复被伪 error 卡片干扰，无法起播推进');
+    if (attempt >= 4) throw new Error('good.mp4 反复被伪 error 卡片干扰，无法起播推进');
     await page.locator('.vv-tab', { hasText: 'broken.mp4' }).click();
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(1_000);
     await page.locator('.vv-tab', { hasText: 'good.mp4' }).click();
-    await page.waitForTimeout(1_200);
+    await page.waitForTimeout(1_500);
   }
 }
 
@@ -419,7 +425,10 @@ test('MEDIA-07：6 页 PDF 翻页页码随动、200% 缩放、canvas 懒渲染',
 test('MEDIA-11/BUG-14：截断 mp4 与截断 PDF 出统一错误卡片（含重试/降级按钮），不阻塞其他 tab', async ({
   page
 }) => {
-  test.setTimeout(90_000);
+  // 150s：慢 runner 上 ArtPlayer 销毁期伪 error 卡更频，expectGoodPlaying 自愈重试
+  // （至多 5 轮 ×≈12s）+ 后续 5 段断言需更宽预算（CI run 43132698433 慢 runner 实证
+  // 90s 耗尽超时，先例：PERF-LAZY 预算 CI×4、IO-08 窗口 90/180s）
+  test.setTimeout(150_000);
   const mp4 = new Uint8Array(readFileSync(`${repoRoot}/samples/m4/sample.mp4`));
   const pdf = new Uint8Array(readFileSync(`${repoRoot}/samples/m4/sample.pdf`));
   await page.goto('/');
