@@ -22,8 +22,10 @@ import { goodPng } from './png-fixture';
  * 【顺带发现（非本批 4 缺陷，未修）】快速连续切换 av tab 时，前一个 ArtPlayer 实例
  * 销毁会触发一次 video 伪 error 事件（video.error 为空），av 渲染器将其升级为
  * 「无法播放此媒体：未知错误」卡片并落入共享 host——可覆盖新挂载的播放器。本套件
- * 以「正常件先开 + expectGoodPlaying 自愈重开 tab」规避；人为点击节奏下影响有限，
- * 复现路径：broken.mp4 → broken.pdf → good.mp4 快速连开，good.mp4 pane 被拆除。
+ * 以「正常件先开 + expectGoodPlaying 自愈（卡在位就地点「重试」重挂播放器）」规避；
+ * 人为点击节奏下影响有限，复现路径：broken.mp4 → broken.pdf → good.mp4 快速连开，
+ * good.mp4 pane 被拆除。（自愈循环曾用 broken↔good 双向 tab 切换，CI run
+ * 43132698433 / 43139576544 连续两轮 [mobile] 实证其会使伪 error 自续，已就地化。）
  */
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
 
@@ -162,42 +164,95 @@ async function mutedPlay(page: Page, selector: string): Promise<number> {
 }
 
 /**
- * good.mp4 起播推进断言，对「伪 error 卡片干扰」自愈：快速连续开 tab 时，前一个
- * ArtPlayer 实例销毁期的伪 error 事件（video.error 为空 →「无法播放此媒体：未知错误」）
- * 可能落在新挂载的播放器上（app 侧已知脆弱点，见文件头注）。此时重新激活 tab 触发
- * 全新渲染——滞留事件已落定，新渲染不再受干扰。重试至多 5 次；play() 以 8s 竞速
- * 封顶（慢 runner 上销毁期伪 error 可致 play() 长时间挂起吃光测试预算，视为本轮
- * 未起播走重试；CI run 43132698433 实证）。
+ * good.mp4 起播推进断言，对「伪 error 卡片干扰 / 渲染在飞不完成」自愈：快速连续开
+ * tab 时，前一个 ArtPlayer 实例销毁期的伪 error 事件（video.error 为空 →「无法播放
+ * 此媒体：未知错误」）可能落在新挂载的播放器上（app 侧已知脆弱点，见文件头注）。
+ * 断言语义不变：good.mp4 可起播推进 = 不阻塞其它 tab 的基准面。
+ *
+ * 两轮 CI 取证（run 43132698433 / 43139576544 连续 [mobile] 同点位 150s 超时）根因：
+ * ① 伪 error 卡在位时错误卡替换播放器，.vv-artplayer video 元素不存在，而
+ * locator.evaluate 等元素挂载无超时选项（Locator.evaluate 类型签名无 options）、
+ * 默认无限等——首轮即挂到 test 超时（8s play 竞速只护 play()、护不住元素解析）；
+ * ② 原自愈 broken↔good 双向 tab 切换每轮切回 broken.mp4 重建损坏播放器，其销毁期
+ * 真实 error 再落点 → 伪 error 自续，慢 runner 上 5 轮不收敛（快机本机 3 轮全绿 =
+ * 窗口差异）。本地复现另证第三形态：host 空置（卡与 video 双缺、dispatch 渲染在飞），
+ * video.evaluate 同样无限等挂死循环（trace 实证）。循环体两分支，每次进尝试先
+ * isVisible 快速分派（防挂起主闸）：
+ * - 卡在位分支（主路径）：不切 tab，点卡上「重试」就地重挂播放器——av 渲染器重跑
+ *   本渲染器 render，挂载期无损坏实例参与，不使伪 error 自续；click 显式 3s 短超时
+ *   （分派到点击间卡可被应用侧自发挂载完成清除，实测发生），等 ~1s 进下一轮。
+ * - 无卡分支（原路径保留，维持 broken↔good 切换，覆盖「video 在但无推进」形态）：
+ *   video.waitFor attached 3s 门 + play/推进 evaluate 各套 Promise.race 限时（9s/4s）
+ *   ——任何挂起由计时器判负进自愈；切 tab 重触发渲染 effect（cleanup abort 在飞读），
+ *   空置形态随之重挂。悬挂 evaluate 已就地 catch，不成 unhandled rejection。
+ * 重试至多 8 轮（attempt >= 7 抛出）。预算自检：卡路径轮 ≤4s、video 路径轮 ≤14.5s
+ * （3s 门 + 9s race + ~2.5s 切换），8 轮 ≈ 116s + 前置断言 ~6s < 150s test 超时。
  */
 async function expectGoodPlaying(page: Page): Promise<void> {
   for (let attempt = 0; ; attempt++) {
-    const video = page.locator('.vv-artplayer video');
-    const started = await video
-      .evaluate(async (el) => {
-        const m = el as HTMLMediaElement;
-        m.muted = true;
-        // 竞速护栏须写在 evaluate 内部（序列化边界外无法引用页面侧 play promise）：
-        // 8s 未 resolve 视为本轮未起播，走重试
-        return await Promise.race([
-          m.play().then(() => true),
-          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 8_000))
-        ]);
-      })
+    // 每次进尝试先 isVisible 快速分派：卡在位时 video 元素不存在，而 locator.evaluate
+    // 等元素挂载无超时选项、默认无限等（两轮 CI 根因① + 本地空置形态同洞），绝不裸等
+    const cardStuck = await page
+      .locator('.vv-error-card')
+      .isVisible()
       .catch(() => false);
-    if (started) {
-      const advanced = await video
-        .evaluate(
-          (v) =>
-            new Promise<boolean>((resolve) => {
-              const m = v as HTMLMediaElement;
-              const t0 = m.currentTime;
-              setTimeout(() => resolve(m.currentTime > t0 || m.ended), 1_200);
-            })
-        )
-        .catch(() => false);
-      if (advanced) return;
+    if (cardStuck) {
+      // 主路径（两轮 CI 根因②的就地化）：不切 tab——切回 broken.mp4 会重建损坏播放器，
+      // 其销毁期 error 再落点使伪 error 自续；点「重试」就地重挂播放器。click 须显式
+      // 短超时：locator 自动等待默认吃满 test 预算——分派到点击间卡若被应用侧自发
+      // 挂载完成清除（本轮窗口实测发生），无超时 click 会挂到 150s 超时
+      if (attempt >= 7) throw new Error('good.mp4 反复被伪 error 卡片干扰，无法起播推进');
+      await page
+        .locator('.vv-error-card:visible')
+        .locator('.vv-error-action')
+        .nth(0) // 「重试」按钮（nth(1) 为「以 hex 打开」降级，不属本自愈路径）
+        .click({ timeout: 3_000 })
+        .catch(() => false); // 卡已消失（点击落空）→ 直接进下一轮，分派自会转 video 路径
+      await page.waitForTimeout(1_000);
+      continue;
     }
-    if (attempt >= 4) throw new Error('good.mp4 反复被伪 error 卡片干扰，无法起播推进');
+    // video 尝试全链限时：waitFor 门先封「元素解析无限等」主洞（空置形态 3s 判负），
+    // 外层 race 再封 waitFor 后 evaluate 前 detach 的残余窗口（计时器获胜即本轮判负，
+    // 悬挂 evaluate 已就地 catch 不成 unhandled rejection）
+    const video = page.locator('.vv-artplayer video');
+    const attached = await video
+      .waitFor({ state: 'attached', timeout: 3_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (attached) {
+      const started = await Promise.race([
+        video
+          .evaluate(async (el) => {
+            const m = el as HTMLMediaElement;
+            m.muted = true;
+            // 竞速护栏须写在 evaluate 内部（序列化边界外无法引用页面侧 play promise）：
+            // 8s 未 resolve 视为本轮未起播，走重试（run 43132698433 慢 runner 实证）
+            return await Promise.race([
+              m.play().then(() => true),
+              new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 8_000))
+            ]);
+          })
+          .catch(() => false),
+        page.waitForTimeout(9_000).then(() => false)
+      ]);
+      if (started) {
+        const advanced = await Promise.race([
+          video
+            .evaluate(
+              (v) =>
+                new Promise<boolean>((resolve) => {
+                  const m = v as HTMLMediaElement;
+                  const t0 = m.currentTime;
+                  setTimeout(() => resolve(m.currentTime > t0 || m.ended), 1_200);
+                })
+            )
+            .catch(() => false),
+          page.waitForTimeout(4_000).then(() => false)
+        ]);
+        if (advanced) return;
+      }
+    }
+    if (attempt >= 7) throw new Error('good.mp4 反复被伪 error 卡片干扰，无法起播推进');
     await page.locator('.vv-tab', { hasText: 'broken.mp4' }).click();
     await page.waitForTimeout(1_000);
     await page.locator('.vv-tab', { hasText: 'good.mp4' }).click();
@@ -426,8 +481,8 @@ test('MEDIA-11/BUG-14：截断 mp4 与截断 PDF 出统一错误卡片（含重�
   page
 }) => {
   // 150s：慢 runner 上 ArtPlayer 销毁期伪 error 卡更频，expectGoodPlaying 自愈重试
-  // （至多 5 轮 ×≈12s）+ 后续 5 段断言需更宽预算（CI run 43132698433 慢 runner 实证
-  // 90s 耗尽超时，先例：PERF-LAZY 预算 CI×4、IO-08 窗口 90/180s）
+  // （至多 8 轮，预算自检 ≈116s 见 helper 注）+ 后续 5 段断言需更宽预算（CI run
+  // 43132698433 / 43139576544 慢 runner 实证，先例：PERF-LAZY 预算 CI×4、IO-08 窗口 90/180s）
   test.setTimeout(150_000);
   const mp4 = new Uint8Array(readFileSync(`${repoRoot}/samples/m4/sample.mp4`));
   const pdf = new Uint8Array(readFileSync(`${repoRoot}/samples/m4/sample.pdf`));
