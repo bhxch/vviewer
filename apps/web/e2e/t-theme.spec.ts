@@ -758,7 +758,12 @@ test('BUG-50 转正: 数字/布尔/存储类关键字 token 归约着色并随�
 });
 
 // BUG-51 首帧采样探针：document-start 起 rAF 逐帧记录 body 背景 + html
-// data-theme-mode（原复现探针同口径；body 未解析出的帧跳过，保证帧 0 必有背景值）。
+// data-theme-mode（原复现探针同口径；body 未解析出的帧跳过）。另在采样侧过滤
+// goto 后 CSS 尚未应用的无样式窗帧（root vitest 13b 记档 styleSheets 0→2 窗口
+// ~60ms；GitHub CI run 43124096444 e2e job 6 六败实证）：该窗内 body 计算背景
+// 为 rgba(0, 0, 0, 0)——既非亮闪也非暗闪，不承载 FOUC 断言语义，记入会把
+// 「首帧」错落成透明帧。过滤后首个采样帧即首个有样式帧，「首帧即暗/亮」与
+// 「全程无暗色闪烁」断言意图不变（过滤只删透明帧，有样式暗帧仍会被记录）。
 async function sampleFirstFrames(page: Page, settings: Record<string, unknown> | null): Promise<void> {
   await page.addInitScript((s) => {
     if (s !== null) localStorage.setItem('vviewer:settings', JSON.stringify(s));
@@ -766,10 +771,13 @@ async function sampleFirstFrames(page: Page, settings: Record<string, unknown> |
     w.__vvFrames = [];
     const sample = (): void => {
       if (document.body) {
-        w.__vvFrames!.push({
-          bg: getComputedStyle(document.body).backgroundColor,
-          mode: document.documentElement.getAttribute('data-theme-mode')
-        });
+        const bg = getComputedStyle(document.body).backgroundColor;
+        if (bg !== 'rgba(0, 0, 0, 0)') {
+          w.__vvFrames!.push({
+            bg,
+            mode: document.documentElement.getAttribute('data-theme-mode')
+          });
+        }
       }
       requestAnimationFrame(sample);
     };
@@ -777,7 +785,20 @@ async function sampleFirstFrames(page: Page, settings: Record<string, unknown> |
   }, settings);
 }
 
-function firstFrames(page: Page): Promise<{ bg: string; mode: string | null }[]> {
+// 读取侧等首个有样式帧落地（poll 数组非空）再取前 3 帧：.vv-tabbar visible 只证
+// JS 挂载完成、不证 CSS 已应用——本机探针实测 tabbar 挂载早于 CSS 生效数百 ms
+// （styleSheets 0→4），visible 后立即读会拿到空数组/纯透明帧序列，与 CI run
+// 43124096444 六败（Expected rgb(13,17,23) Received rgba(0,0,0,0)）同源。
+async function firstFrames(page: Page): Promise<{ bg: string; mode: string | null }[]> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () => (window as unknown as { __vvFrames: { bg: string; mode: string | null }[] }).__vvFrames.length
+        ),
+      { timeout: 15_000 } // CSS 应用本机实测可迟至 ~330ms，共享负载下放宽到 15s
+    )
+    .toBeGreaterThan(0);
   return page.evaluate(() =>
     (window as unknown as { __vvFrames: { bg: string; mode: string | null }[] }).__vvFrames.slice(0, 3)
   );
