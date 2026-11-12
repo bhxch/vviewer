@@ -2,7 +2,12 @@
 <html lang="zh-CN">
   <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
   <!-- axe document-title（wcag2a）真修：单页查看器无路由级 svelte:head，静态兜底
-       标题；%sveltekit.head% 内若未来注入 title 则以注入序后者胜出，不冲突 -->
+       标题；下方 head 占位符内若未来注入 title 则以注入序后者胜出，不冲突。
+       警示：head/body 占位符字面量全模板各只能出现这一次（真占位符本体）——
+       kit 生成运行时模板用字符串 replace 仅替换首次出现（write_server.js），
+       注释等任何位置再写一遍即真占位符漏替换：泄漏为页面顶部可见文本，且
+       kit 注入的壳 stylesheet 整体落进 HTML 注释被吞（49bc813 曾中招，kit 的
+       load_template 只查存在性不查唯一性）。src/app-html.test.ts 执法。 -->
   <title>vviewer</title>
   <link rel="manifest" href="%sveltekit.assets%/manifest.webmanifest" />
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
