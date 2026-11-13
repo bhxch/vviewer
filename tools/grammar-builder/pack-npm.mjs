@@ -293,17 +293,22 @@ export function packNpmSplit({
   const licenseBytes = fs.statSync(licenseFile).size;
   const readmeBytes = fs.statSync(path.join(here, 'GRAMMARS-NPM-README.md')).size;
   const manifestBytesOf = (langSet) =>
-    JSON.stringify(
-      {
-        ...manifest,
-        grammars: Object.fromEntries(
-          Object.entries(manifestEntries)
-            .filter(([lang]) => langSet.has(lang))
-            .map(([lang, e]) => [lang, { ...e, base: MANIFEST_ENTRY_BASE }]),
-        ),
-      },
-      null,
-      2,
+    // UTF-8 字节数（Buffer）：manifest 顶层 note 等含多字节中文字符——UTF-16 code
+    // unit 数低估（每中文字符差 1B），与第 2 段真实字节复核口径对齐（de1b262 意图）
+    Buffer.from(
+      JSON.stringify(
+        {
+          ...manifest,
+          grammars: Object.fromEntries(
+            Object.entries(manifestEntries)
+              .filter(([lang]) => langSet.has(lang))
+              .map(([lang, e]) => [lang, { ...e, base: MANIFEST_ENTRY_BASE }]),
+          ),
+        },
+        null,
+        2,
+      ),
+      'utf8',
     ).length + 1;
   const bins = []; // { langs: Set<string>, load: Σ载荷 }
   for (const it of items) {
