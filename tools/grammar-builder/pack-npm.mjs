@@ -285,20 +285,38 @@ export function packNpmSplit({
       );
     }
   }
-  // first-fit-decreasing：载荷降序放入首个能容纳的子包（bin.used 初值含包级固定开销——license+README+manifest 顶层
-  // 每包一份，计入预算使均衡更贴近真实解包体积；manifest 条目字节随语言数小幅增长，由写盘后复核兜底）
-  const overhead =
-    fs.statSync(licenseFile).size +
-    fs.statSync(path.join(here, 'GRAMMARS-NPM-README.md')).size +
-    JSON.stringify({ ...manifest, grammars: {} }).length;
-  const bins = [];
+  // first-fit-decreasing：载荷降序放入首个能容纳的子包。放置判断按**真实构造口径**——
+  // 包解包字节 = license + README + manifest（与 packNpmCore 写盘同构：键序=manifest 原序、
+  // null,2 缩进 + 尾换行）+ Σ语言载荷。预算与第 2 段复核口径一致，压线时 FFD 自动开新包
+  // 而非复核抛错；manifest 构造开销 O(语言数×包数) 次序列化（全量集 ~2000 次 × 60KB），
+  // 发布链一次性成本可接受
+  const licenseBytes = fs.statSync(licenseFile).size;
+  const readmeBytes = fs.statSync(path.join(here, 'GRAMMARS-NPM-README.md')).size;
+  const manifestBytesOf = (langSet) =>
+    JSON.stringify(
+      {
+        ...manifest,
+        grammars: Object.fromEntries(
+          Object.entries(manifestEntries)
+            .filter(([lang]) => langSet.has(lang))
+            .map(([lang, e]) => [lang, { ...e, base: MANIFEST_ENTRY_BASE }]),
+        ),
+      },
+      null,
+      2,
+    ).length + 1;
+  const bins = []; // { langs: Set<string>, load: Σ载荷 }
   for (const it of items) {
-    const bin = bins.find((b) => b.used + it.load <= packLimitBytes);
+    const bin = bins.find((b) => {
+      const trial = new Set(b.langs);
+      trial.add(it.lang);
+      return licenseBytes + readmeBytes + manifestBytesOf(trial) + b.load + it.load <= packLimitBytes;
+    });
     if (bin) {
-      bin.langs.push(it.lang);
-      bin.used += it.load;
+      bin.langs.add(it.lang);
+      bin.load += it.load;
     } else {
-      bins.push({ langs: [it.lang], used: overhead + it.load });
+      bins.push({ langs: new Set([it.lang]), load: it.load });
     }
   }
   // outDir fail-fast（ledger H8 拆分同口径）：根目录已含拆分子包（p* 目录）或单包产物时拒跑——
@@ -325,13 +343,13 @@ export function packNpmSplit({
       version,
       repoPkgJson,
       licenseFile,
-      langs: new Set(bin.langs),
+      langs: bin.langs,
       description: `vviewer grammar wasm 拆分子包 ${i + 1}/${bins.length}（体积均衡装箱，manifest+queries）`,
     });
     results.push({ outDir: subOut, name: subName, contentHash: r.contentHash, bytes: r.bytes, langs: [...bin.langs].sort() });
   }
   // 门禁第 2 段：每包解包总字节（wasm+queries+manifest+license+README；package.json 元数据不在
-  // 门禁口径）≤ packLimitBytes——写盘后实走复核（FFD 预算不含 manifest 条目字节增长，此处兜底硬门）
+  // 门禁口径）≤ packLimitBytes——写盘后实走复核（FFD 预算与复核同口径，此为防御性硬门兜底）
   for (const [i, bin] of bins.entries()) {
     const subOut = path.join(outDir, `p${i + 1}`);
     const packedTotal = walkFiles(subOut).reduce(
@@ -340,7 +358,7 @@ export function packNpmSplit({
     );
     if (packedTotal > packLimitBytes) {
       throw new Error(
-        `packNpmSplit: 装箱门禁超限（第 2 段）：p${i + 1}（${bin.langs.join(', ')}）解包 ${mb(packedTotal)} > 每包门禁 ${mb(packLimitBytes)}`,
+        `packNpmSplit: 装箱门禁超限（第 2 段）：p${i + 1}（${[...bin.langs].join(', ')}）解包 ${mb(packedTotal)} > 每包门禁 ${mb(packLimitBytes)}`,
       );
     }
   }
