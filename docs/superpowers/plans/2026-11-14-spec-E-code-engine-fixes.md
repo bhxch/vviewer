@@ -95,7 +95,8 @@ git add packages/vviewer-core && git commit -m "fix(dispatcher): override 分支
 - Modify: `apps/web/src/lib/highlightClient.ts`（导出 `hasGrammar(lang)`；withDebug 包装加 `hasLocalGrammar` 方法 + localFn 清单门）
 - Modify: `packages/vviewer-render-text/src/code/client.ts`（`EngineNote` 类型 + `CodeFileMeta.engineNote?` + `CodeHighlightClient.hasLocalGrammar?`）
 - Modify: `packages/vviewer-render-text/src/code/renderCode.ts`（全量 start() tree-sitter 分支与 lazy chunk 路径的就地原因计算 + getMeta 透出）
-- Test: `packages/vviewer-render-text/test/code.test.ts`（note 两态 + 门跳过 worker 用例）
+- Modify: `packages/vviewer-render-text/src/code/renderCodeWindowed.ts`（窗口 chunk 路径同款注记 + getMeta 透出，评审 F2 同面覆盖）
+- Test: `packages/vviewer-render-text/test/code.test.ts`（note 两态 + 门跳过 worker 用例）+ `packages/vviewer-render-text/test/code-window-pump.test.ts`（窗口注记用例）
 - Modify: `apps/web/src/lib/ViewerPane.svelte`（watchMeta 读 engineNote → 状态栏注记段）
 - Modify: `apps/web/src/lib/MetaPanel.svelte`（langNames grammar 前置单次排序）+ `apps/web/src/lib/metaPanelLang.test.ts`（契约 ② 同步）
 - Modify: `apps/web/src/lib/i18n/catalogs/{zh-CN,en}/viewer.ts`（2 新键）
@@ -128,14 +129,22 @@ git add packages/vviewer-core && git commit -m "fix(dispatcher): override 分支
 - **renderCode 就地原因计算（裁量落定：不走 onEngineNote 回调——hasLocal + computeWhere + 结果分支足以判定，契约面最小化）**：实例闭包增 `engineNote: EngineNote | null = null`；全量 start() tree-sitter 分支（:479-538）在 client 就绪后 `const hasLocal = client.hasLocalGrammar?.(lang) ?? true;`：
   - 成功（engine='tree-sitter'）且 `!hasLocal && computeWhere === 'remote'` → note `{ kind: 'no-grammar-remote', lang }`（本地无 grammar，已用远程）；
   - catch 非 cancel 非 RemoteComputeError 且 `!hasLocal` → note `{ kind: 'no-grammar-hljs', lang }` 后 `hljsWholeFile(lang)`（本地与远程均无 grammar；RemoteComputeError 显式远程失败仍走既有错误卡、无注记）；hasLocal=true 的 catch 语义逐字节不变；
-  - lazy chunk 路径：chunk 请求前一次性取 `hasLocal`；远程 chunk 命中（getHighlightRouter :351-355）且 `!hasLocal` → note no-grammar-remote；chunk catch 且 `!hasLocal` → note no-grammar-hljs（置一次即可）；chunk 远程路径经注入 router 不经包装门（router 自有硬护栏），零改动；
+  - **lazy chunk 路径 hasLocal 获取点（评审 F1 落定——router 分支 ：351-355 先于 client 等待 ：410-414 执行、作用域内无 client，原「请求前一次性取」不成立）**：①本地 worker 分支——client 等待（:410-414）之后、client.highlight 调用前取 `hasLocal = client.hasLocalGrammar?.(lang) ?? true`，chunk catch 且 `!hasLocal` → note no-grammar-hljs（置一次即可）；②远程 chunk 分支（getHighlightRouter :351-355，经注入 router 不经包装门、router 自有硬护栏零改动）——**注记为尽力而为**：router 命中成功点非阻塞读 `getHighlightClient()?.hasLocalGrammar?.(lang)`，仅 client 已 attach 时可判 `!hasLocal` → note no-grammar-remote；**记档窗口**：attach 竞态窗口内（getHighlightClient() 返回 null）远程 chunk 成功不注记——不为此提前等待 client（动既有竞态语义代价不成比例），窗口自愈于后续本地 chunk/重渲染，状态栏「执行: 远程」段已有位置指示兜底。
   - `getMeta()` 返回值增 `engineNote`（:573-580）。
+- **窗口流式模式同面覆盖（评审 F2 落定——renderCodeWindowed.ts 有同构 chunk 选择链（:44-49 import、:485-500 router→等待 client→本地 worker→hljs）与独立 getMeta（:1236-1244），且同样消费 withDebug 包装 client（清单门对其生效），不补则清单外 >2MB 文件（手动或自动路径）降级仍无声，违 spec §6 第 3 条覆盖面）**：`renderCodeWindowed.ts` 同款三处——chunk 本地分支 client 等待后取 hasLocal + catch 注记 no-grammar-hljs、远程 chunk 命中点非阻塞读注记 no-grammar-remote（同上记档 attach 窗口）、`getMeta()`（:1236-1244）返回值增 `engineNote`；降级转投全量实例分支（`fullInst !== null`）直接透传全量实例的 engineNote，零改动。**记档：e2e 不加窗口专项锚**——spec §4 锚面无此项，窗口注记由单测（code-window-pump.test.ts 装置先例 :64-73：renderCode+ctx+getMeta 断言同款）承接，ENG-N1 全量路径已钉状态栏可见面。
 - ViewerPane：watchMeta 读 `m.engineNote` → `engineNoteLabel = m.engineNote ? t(key, { lang }) : ''`（键映射 noteNoGrammarRemote/noteNoGrammarHljs）；状态栏在 computeWhere 段后追加 `{#if engineNoteLabel}&nbsp;·&nbsp;<span class="vv-status-engine-note" title={engineNoteLabel}>{engineNoteLabel}</span>{/if}`——**裁量落定：可见短文案 + 同文案 hover title，不做 toast**（降级非失败，spec 反目标边缘；无新交互元素，axe 域 b-a11y-axe 预期零翻转）。
-- MetaPanel：`const langNames = detectableLanguageNames()` → grammar 前置单次排序（保持顶层 const 契约）：`const grammarFirst: string[] = [], rest: string[] = []; langNames.forEach((n) => (hasGrammar(n) ? grammarFirst : rest).push(n)); const langNames = [...grammarFirst, ...rest];`（组内字典序不变；datalist 无富文本能力，**不做文字标注**——任何后缀都会污染提交值，裁量落定排序置前即终态；清单未就绪时退化为原字典序，无害）。`hasGrammar` 从 `./highlightClient` import（组件侧，无环）。
+- MetaPanel：grammar 前置单次排序（保持顶层 const 契约；**评审 F3 落定：引入中间名 `all`——在 `const langNames = [...grammarFirst, ...rest]` 前引用 `langNames` 是 TDZ 自引编译错，且 `const langNames = detectableLanguageNames();` 原行（MetaPanel.svelte:100）保留则重复声明，metaPanelLang.test.ts:46 契约②按原字面 `/const langNames = detectableLanguageNames\(\);/` 断言必红**）：
+  ```ts
+  const all = detectableLanguageNames();
+  const grammarFirst: string[] = [], rest: string[] = [];
+  all.forEach((n) => (hasGrammar(n) ? grammarFirst : rest).push(n));
+  const langNames = [...grammarFirst, ...rest]; // 组内字典序不变
+  ```
+  （datalist 无富文本能力，**不做文字标注**——任何后缀都会污染提交值，裁量落定排序置前即终态；清单未就绪时退化为原字典序，无害）。`hasGrammar` 从 `./highlightClient` import（组件侧，无环）。metaPanelLang.test.ts 契约②同步：字面改 `/const all = detectableLanguageNames\(\);/`，防回归三断言（非 $derived/$state 包裹）保留。
 - i18n（zh 定稿 → en 对译，占位符一致）：
   - `viewer.engine.noteNoGrammarRemote`：zh `语言 {lang} 本地无 grammar，已用远程 tree-sitter`；en `No local grammar for {lang}; used remote tree-sitter`
   - `viewer.engine.noteNoGrammarHljs`：zh `语言 {lang} 无 tree-sitter grammar（当前资源清单），已用 hljs 兜底`；en `No tree-sitter grammar for {lang} in current asset manifest; fell back to hljs`
-- **验收锚**：grammarLayers.test.ts grammarTableHas（canonical/别名/null fail-open/空表 false）+ code.test.ts note 用例 + metaPanelLang 契约同步 + 聚合机检绿；所触 e2e 锚文件=`apps/web/e2e/b-code-engine-recovery.spec.ts`（ENG-N1/N2，Task 4 落）、`apps/web/e2e/b-override-lang.spec.ts`（LANG-01/02/04 回归，hasLocal=true 门不触发）、`apps/web/e2e/t-hl.spec.ts`（HL 域回归）。
+- **验收锚**：grammarLayers.test.ts grammarTableHas（canonical/别名/null fail-open/空表 false）+ code.test.ts note 用例（两态/零回归/真失败不注记）+ code-window-pump.test.ts 窗口注记用例（评审 F2）+ metaPanelLang 契约②同步（评审 F3 字面）+ 聚合机检绿；所触 e2e 锚文件=`apps/web/e2e/b-code-engine-recovery.spec.ts`（ENG-N1/N2，Task 4 落）、`apps/web/e2e/b-override-lang.spec.ts`（LANG-01/02/04 回归，hasLocal=true 门不触发）、`apps/web/e2e/t-hl.spec.ts`（HL 域回归）。
 
 - [ ] **Step 1: TDD grammarTableHas（RED→GREEN）**
 
@@ -143,11 +152,11 @@ grammarLayers.test.ts 扩展：canonical 命中 / 别名命中 / null true / 空
 
 - [ ] **Step 2: TDD renderCode note 两态（RED）**
 
-code.test.ts 新用例（attachHighlightClient fake 注入先例 :356-464）：①fake `{ highlight: reject(普通 Error), hasLocalGrammar: () => false }` + lang='haskell' → getMeta().engineNote == {kind:'no-grammar-hljs', lang:'haskell'} 且 engine 'hljs'；②fake `{ highlight: resolve(intervals) 且 onWhere('remote'), hasLocalGrammar: () => false }` + computeSrc → engineNote {kind:'no-grammar-remote'} 且 engine 'tree-sitter'；③fake 无 hasLocalGrammar（旧形态 fake）+ highlight reject → engineNote undefined 且既有 hljs 兜底行为逐字节不变（零回归锚）；④hasLocalGrammar true + reject → engineNote undefined（worker 真失败静默语义不变——只注记清单外，不注记运行期失败）。Run: `pnpm vitest run packages/vviewer-render-text` → Expected: FAIL。
+code.test.ts 新用例（attachHighlightClient fake 注入先例 :356-464）：①fake `{ highlight: reject(普通 Error), hasLocalGrammar: () => false }` + lang='haskell' → getMeta().engineNote == {kind:'no-grammar-hljs', lang:'haskell'} 且 engine 'hljs'；②fake `{ highlight: resolve(intervals) 且 onWhere('remote'), hasLocalGrammar: () => false }` + computeSrc → engineNote {kind:'no-grammar-remote'} 且 engine 'tree-sitter'；③fake 无 hasLocalGrammar（旧形态 fake）+ highlight reject → engineNote undefined 且既有 hljs 兜底行为逐字节不变（零回归锚）；④hasLocalGrammar true + reject → engineNote undefined（worker 真失败静默语义不变——只注记清单外，不注记运行期失败）；⑤窗口模式（code-window-pump.test.ts 装置先例 :64-73：renderCode(buffer, host, {ctx, …})+getMeta 断言同款）fake 同① → 窗口实例 getMeta().engineNote {kind:'no-grammar-hljs'}（评审 F2 窗口注记锚）。Run: `pnpm vitest run packages/vviewer-render-text` → Expected: FAIL。
 
-- [ ] **Step 3: 实装 render-text 契约与 renderCode 门消费**
+- [ ] **Step 3: 实装 render-text 契约与 renderCode/renderCodeWindowed 门消费**
 
-按 Interfaces 落 client.ts 类型、renderCode 就地计算与 getMeta 透出。Run: Step 2 命令 → GREEN。
+按 Interfaces 落 client.ts 类型、renderCode 就地计算与 getMeta 透出、renderCodeWindowed 同款三处（chunk 本地分支注记 / 远程命中非阻塞读 / getMeta 透出）。Run: Step 2 命令 → GREEN。
 
 - [ ] **Step 4: app 侧注入面（hasGrammar + 包装门 + hasLocalGrammar）**
 
@@ -173,7 +182,7 @@ git add apps/web/src/lib packages/vviewer-render-text && git commit -m "feat(cod
 - Create: `apps/web/src/lib/highlightRecreate.ts`（neutral hook + 门控纯谓词，纯 .ts vitest 直测）+ `apps/web/src/lib/highlightRecreate.test.ts`
 - Modify: `apps/web/src/lib/highlightClient.ts`（creationFailed 标志 + `recreateHighlightClient(opts?: { force?: boolean })` + hook 注册；`rebuildHighlightClient` 更名——调用面仅 AppShell :59/:803 一处）
 - Modify: `apps/web/src/lib/AppShell.svelte`（:803 CDN 档位改 `recreateHighlightClient({ force: true })`）
-- Modify: `apps/web/src/lib/tabsModel.svelte.ts`（setHighlightLang :505 / setRendererOverride :490 写入成功后 `requestHighlightRecreate()`——unchanged 早退之后，rev++ 同段）
+- Modify: `apps/web/src/lib/tabsModel.svelte.ts`（setHighlightLang :505 / setRendererOverride :487 写入成功后 `requestHighlightRecreate()`——unchanged 早退之后，rev++ 同段）
 
 **Interfaces:**
 - `HighlightClient.isInitFailed(): boolean`（返回私有 initFailed；只读视图，无副作用——failWorker/dispose 语义零改动；dispose 后新建实例天然全新状态，即「destroy 清除」语义）。
@@ -196,6 +205,7 @@ git add apps/web/src/lib packages/vviewer-render-text && git commit -m "feat(cod
   - `rebuildHighlightClient` 更名为 `recreateHighlightClient`（AppShell :59/:803 同步 `{ force: true }`；仓库内无其它引用——rg 实查 2 文件）；模块尾 `registerRecreateHighlightClient(recreateHighlightClient)`；
   - **hook 反转记档（裁量）**：tabsModel 不直 import highlightClient——导入环 tabsModel→highlightClient:26→openFlow.svelte:42→tabsModel 实查成立，neutral hook 是唯一无环单点接线（5 个显式动作调用点收口为 store 内 2 处）。
 - **兼容红线**：worker.ts 零改动；client.ts 除只读访问器外零改动（init-ok ack/init-progress/看门狗路径不动）；BUG-34/35/37 既有锚（client.test.ts:142/:180/:353 describe、t-hl.spec.ts:584）不翻转。
+- **单测覆盖面记档（评审 F4 落定——spec §4 单测锚「client destroy/recreate 代际（failWorker 后显式动作重建成功，单飞/代际用例）」无 highlightClient 直测兑现，属知情策略延续而非缺漏）**：highlightClient.ts 依赖 `$app/env`/`$app/paths`/`openFlow.svelte`（runes 模块）不可 vitest 直测（根 vitest 无 svelte 插件）；既有 rebuildHighlightClient 同样零单测、由 b-cdn-profiles e2e 承接（策略先例）。故重建成功/单飞（门即限流器——健康态显式动作 no-op）/代际防旧实例回魂的行为面由三层拼合覆盖：e2e ENG-R1/R2/R3（Task 4）钉端到端行为 + highlightRecreate.test.ts 钉门控判定面（纯函数）+ client.test.ts 钉 isInitFailed 状态面；全量 review 按 spec §4 字面核时以本记档为口径，不按缺漏开 M。
 - **验收锚**：client.test.ts（isInitFailed 初始 false / failWorker 后 true / dispose 不复活已终态实例）+ highlightRecreate.test.ts（谓词四态 + hook 注册/请求/no-op）+ 既有 client.test.ts 全绿；所触 e2e 锚文件=`apps/web/e2e/b-code-engine-recovery.spec.ts`（ENG-R1/R2/R3，Task 4 落）、`apps/web/e2e/t-hl.spec.ts`（BUG-35 红线）。
 
 - [ ] **Step 1: TDD client.test.ts isInitFailed（RED→GREEN）**
@@ -227,7 +237,7 @@ git add packages/vviewer-highlight packages/vviewer-render-text apps/web/src/lib
 
 - [ ] **Step 1: OWX-E1——extless shebang 文件 open-as code → ts-\*（spec §4 ①，RED 现状=hljs）**
 
-装置：`__vvOpenDirImpl` 注入无扩展名文件，内容 = `#!/usr/bin/env python\n` + 含 NUL 的正文（NUL 判非文本 → looksTextual false → 自动落 hex，magic.ts:32 口径）→ 打开 tab（hex 视图）→ MetaPanel `.meta-openwith` selectOption('code')（override 重派）→ `expect.poll` `.vv-code-pre span[class^="ts-"]` count > 0（修 1 回填 python → tree-sitter；现状 RED=ts-* 恒 0 走 hljsAuto）。断言不写 overrideRenderer（open-as 临时查看语义，b-error-card-open-as 先例）。
+装置：`__vvOpenDirImpl` 注入无扩展名文件，内容 = `#!/usr/bin/env python\n` + 含 NUL 的正文（NUL 判非文本 → looksTextual false → 自动落 hex，magic.ts:55 NUL 即二进制口径、looksTextual :49）→ 打开 tab（hex 视图）→ MetaPanel `.meta-openwith` selectOption('code')（override 重派）→ `expect.poll` `.vv-code-pre span[class^="ts-"]` count > 0（修 1 回填 python → tree-sitter；现状 RED=ts-* 恒 0 走 hljsAuto）。断言不写 overrideRenderer（open-as 临时查看语义，b-error-card-open-as 先例）。
 
 - [ ] **Step 2: ENG-N1/N2——清单外降级原因可见 / 清单内无注记**
 
@@ -235,7 +245,7 @@ ENG-N1：注入 .txt（rust 样例内容）→ setLang（fill+blur，b-override-
 
 - [ ] **Step 3: ENG-R1/R2——worker 毒化 → 显式切语言恢复 tree-sitter（spec §4 ④⑤）**
 
-装置：`page.route('**/ts-worker*', …)` 先 goto 前安装，首个 worker 请求 abort（onerror → failWorker 毒化，秒级不候 15s 看门狗）、确认毒化后 `page.unroute`。ENG-R1：毒化页开 .py 文件 → ts-* 恒 0（hljs 兜底；worker 不可用全链降级现状）；同 tab 开 .txt（rust 内容）→ setLang 'rust' → 门控重建（clientInitFailed=true）→ ts-* > 0（恢复 tree-sitter；route 已解除，新 worker 正常加载）。ENG-R2：续 ENG-R1 页面再开第二个 .py 文件 → ts-* > 0（毒化不再全会话永久——重建后新实例服务新 tab）。
+装置：`page.route('**/ts-worker*', …)` 先 goto 前安装，首个 worker 请求 abort（onerror → failWorker 毒化，秒级不候 15s 看门狗）、确认毒化后 `page.unroute`——worker 构建产物实为 `_app/immutable/workers/ts-worker-<hash>.js`（vite worker 产物，glob `**/ts-worker*` 匹配成立；vite.config.ts:237 纯哈希备案仅限 client chunks，不波及 worker 产物）。ENG-R1：毒化页开 .py 文件 → ts-* 恒 0（hljs 兜底；worker 不可用全链降级现状）；同 tab 开 .txt（rust 内容）→ setLang 'rust' → 门控重建（clientInitFailed=true）→ ts-* > 0（恢复 tree-sitter；route 已解除，新 worker 正常加载）。ENG-R2：续 ENG-R1 页面再开第二个 .py 文件 → ts-* > 0（毒化不再全会话永久——重建后新实例服务新 tab）。
 
 - [ ] **Step 4: ENG-R3——worker 健康、清单全空 → 显式动作仍可恢复（spec §6 第 2 条）**
 
@@ -254,8 +264,9 @@ git add apps/web/e2e && git commit -m "test(e2e): 代码引擎修复批 ENG 域�
 
 - [ ] `node tools/fetch-e2e-corpus.mjs`（语料）→ `pnpm lint && pnpm run typecheck && pnpm vitest run`（仓库根全量）→ `pnpm --filter web build:e2e` → playwright 全量双 project（`pnpm --filter web exec playwright test`；对比基线：新增 b-code-engine-recovery ENG 域外零回归）→ `pnpm --filter web exec playwright test --config playwright.server.config.ts`（server 档零翻转）→ `git status --porcelain` 净空。
 - [ ] 全量 review（superpowers:requesting-code-review，范围=本计划全部 commit），修复全部 C/I/M 后复审；**不 push**。
-- [ ] 台账汇总（实施期记档项随任务报告归集；本计划规划期无 deferred 项——spec §5 五项裁量与 §6 三条落定已全部内联落定于上文 Interfaces/Global Constraints，无悬置决策）。
+- [ ] 台账汇总（实施期记档项随任务报告归集；本计划规划期无 deferred 项——spec §5 五项裁量与 §6 三条落定已全部内联落定于上文 Interfaces/Global Constraints；计划内显式记档的知情裁量三处：远程 chunk 注记 attach 窗口缺失（评审 F1，Task 2 Interfaces）、窗口模式 e2e 不加专项锚——单测承接（评审 F2，Task 2 Interfaces）、重建成功/单飞/代际无 highlightClient 直测——e2e+谓词拼合（评审 F4，Task 3 Interfaces））。
 
 ## Errata（执行期勘误）
 
-- 2026-11-14 初版（规划师 E 基于 HEAD 0baaf92 编写；规划期关键实查已内联：override 分支 dispatcher.ts:496-501 / 唯一 det.lang 写点 :345-355 / 路由折叠 router.ts:103-124 / 合并表快照 highlightClient.ts:66,347 / lite manifest 34 语言无 haskell / 重建调用面仅 AppShell:803 / 导入环 openFlow.svelte.ts:42）。无执行期勘误——执行期发现失配时在此登记。
+- 2026-11-14 初版（规划师 E 基于 HEAD 0baaf92 编写；规划期关键实查已内联：override 分支 dispatcher.ts:496-501 / 唯一 det.lang 写点 :345-355 / 路由折叠 router.ts:103-124 / 合并表快照 highlightClient.ts:66,347 / lite manifest 34 语言无 haskell / 重建调用面仅 AppShell:803 / 导入环 openFlow.svelte.ts:42）。
+- 2026-11-14 计划评审修订（5 条意见，全部实查复现后内联落定）：①F1 chunk 路径 hasLocal 获取点明写——router 分支 renderCode.ts:351-355 先于 client 等待 :410-414、作用域内无 client，原「chunk 请求前一次性取」自相矛盾；落定=本地分支取点在 client 等待后、远程分支命中点非阻塞读 + attach 窗口不注记记档；②F2 窗口流式模式覆盖面补齐——renderCodeWindowed.ts 同构 chunk 链（:44-49/:485-500）与独立 getMeta（:1236-1244）纳入 Task 2 Files/Steps + code-window-pump.test.ts 窗口注记用例（装置先例 :64-73）；e2e 不加窗口专项锚记档（spec §4 锚面无此项）；③F3 MetaPanel 排序伪代码 TDZ 自引 + 与 metaPanelLang.test.ts:46 契约②字面断言 `/const langNames = detectableLanguageNames\(\);/` 的重复声明冲突——改中间名 `all`，契约②字面同步 `/const all = …/`；④F4 spec §4 重建单飞/代际单测锚无 highlightClient 直测兑现——记档知情策略延续（$app/openFlow 依赖不可 vitest 直测、b-cdn-profiles 先例），e2e ENG-R1/R2/R3 + 谓词/状态面单测三层拼合，review 口径以记档为准；⑤F5 行号锚订正——NUL 判定 magic.ts:32→:55（looksTextual 函数 :49 起，:32 为 ico 签名行）、setRendererOverride :490→:487；worker 构建产物形态补记 `_app/immutable/workers/ts-worker-<hash>.js`（route glob `**/ts-worker*` 匹配成立）。
