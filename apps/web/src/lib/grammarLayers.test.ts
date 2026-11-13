@@ -216,6 +216,15 @@ describe('grammarTableHas（清单感知判定，spec E 修 2）', () => {
     expect(grammarTableHas(TABLE, 'haskell')).toBe(false);
     expect(grammarTableHas(TABLE, '')).toBe(false);
   });
+
+  it('大小写归一：大写变体与 worker 链 canonicalLang 同口径命中（BUG-42 回归锚）', () => {
+    // markdown 围栏 lang 原样透传（如 ```Rust），worker 链 canonicalLang 已归一命中——
+    // 清单门判定不归一即门比 worker 链严格（误杀已归一语言 → 错误 hljs 降级注记）
+    expect(grammarTableHas(TABLE, 'Rust')).toBe(true);
+    expect(grammarTableHas(TABLE, 'RUST')).toBe(true);
+    expect(grammarTableHas(TABLE, 'CSharp')).toBe(true);
+    expect(grammarTableHas(TABLE, 'Haskell')).toBe(false);
+  });
 });
 
 describe('grammarWarmUrl（wasm 预热 URL 拼接，防 grammars/ 双拼回归）', () => {

@@ -30,12 +30,19 @@ export function grammarWarmUrl(entry: { base: string; file: string }): string {
  * worker 能否解析该语言的判据快照（worker manifest 与本表同源，ok:false 必然时
  * 调用方可提前跳过 doomed 往返）。table null（create 在途/rebuild 清窗）→ true
  * fail-open：不拦，交 worker 链既有裁决（清单未就绪不是拒绝理由）。
+ *
+ * 大小写归一（BUG-42 回归锚，T4 定向回归捕获）：输入 lang 可能原样透传自 markdown
+ * 围栏标识（```Rust）或用户手输——worker 链 canonicalLang/buildAliasTable 已双侧
+ * toLowerCase 归一（core-parse.ts），门判定不归一即「门比 worker 链严格」，会把
+ * worker 本可解析的语言误判清单外（错误 hljs 降级注记）。键与别名双侧归一，与
+ * worker 链同口径。
  */
 export function grammarTableHas(table: MergedGrammarTable | null, lang: string): boolean {
   if (table === null) return true; // fail-open
-  if (table[lang]) return true;
-  for (const entry of Object.values(table)) {
-    if (entry.aliases?.includes(lang)) return true;
+  const key = lang.toLowerCase();
+  for (const [name, entry] of Object.entries(table)) {
+    if (name.toLowerCase() === key) return true;
+    if (entry.aliases?.some((a) => a.toLowerCase() === key)) return true;
   }
   return false;
 }
