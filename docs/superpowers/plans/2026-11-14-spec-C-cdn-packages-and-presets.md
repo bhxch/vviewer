@@ -62,7 +62,7 @@
 
 fixture 扩展（假 wasm 字节可任意放大，pack-npm.test.ts:25 fixture() 先例）：多语言 + 大小悬殊的 wasm，`VV_NPM_SPLIT_LIMIT_MB=40` 注入小阈值，断言：
 1. **单件超限抛错**：`{60,30,0.1}` @40MB → `packNpmSplit` reject（60MB 单语言 > 阈值，不产任何包——门禁第 1 段语义）；
-2. **装箱均衡**：`{35,30,0.1}` @40MB → 2 包（35 独占 + 30+0.1 同包），且**每包总字节 ≤ 阈值**（门禁第 2 段语义——全部包逐一断言，无例外）；
+2. **装箱均衡**：`{35,30,0.1}` @40MB → N=2，且**每包总字节 ≤ 阈值**（门禁第 2 段语义——全部包逐一断言，无例外）；成员分布断言按 **FFD 确定性真实产出**书写：包1={35,0.1}（0.1 按升序遍历回填首个能容纳的包，35+0.1=35.1≤40）、包2={30}——**勿写「大件独占」反期望**（FFD 的回填语义必然把后续小件塞进首个能容纳的包，上轮评审推演口径）；
 3. 每包 manifest 键集 == 包内 wasm 文件集（dangling 断言，单包先例 pack-npm.mjs:125-126 同源）；
 4. queries `<lang>/` 跟随语言所在子包（跨包无该语言目录）；
 5. 聚合 hash 稳定：同输入两次运行全包 contentHash 序列逐字节相等；单语言内容变化仅影响其所在包 hash；
@@ -253,3 +253,4 @@ git add apps/web/e2e && git commit -m "test(e2e): CDN 拆包多域锚批——gr
 ## Errata（执行期勘误）
 
 - 2026-11-14 计划评审修订（12 条意见，全部实查复现后内联落定）：①Task 1 单件超限拍板=整体抛错（门禁两段语义，测试断言改写）；②Task 2 补 highlight 包 queriesBaseResolver 多基路由（standalone 非首子包语言 queries 缺口）+ 包数一致性 fail-fast + pages 探测超限 warn + 首发版本 TODO 占位闭环归台账④；③Task 3 foreign 切档拍板=保存后刷新生效（装配级快照实锚 foreignRenderers.ts:132/:164-168）+ AppShell :766 订阅与 ：775 diff 捕获集扩 cdn.engines 两字段入 Files/Steps；④playwright 命令口径改 `pnpm --filter web exec`（根无 playwright devDep）；⑤client.ts dispose 行号订正 ：196；⑥Task 5 补启停翻转锚；⑦命名 outDir 对齐/基线 HEAD 75cc652/「不依赖应用侧代码」措辞。无模板原文作废项——执行期发现新失配时在此登记。
+- 2026-11-14 复审修订（唯一遗留）：Task 1 Step 1 断言 2 成员分布与 FFD 算法定义相反（「35 独占」不可能成立——FFD 回填语义把 0.1 塞进首个能容纳的包）——改为锁「N=2 + 每包总字节≤阈值」核心门禁，成员分布按 FFD 确定性真实产出（包1={35,0.1}、包2={30}）书写并注勿写反期望。
