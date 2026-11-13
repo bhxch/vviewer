@@ -633,6 +633,124 @@ describe('renderCode（tree-sitter 主路径，fake client）', () => {
   });
 });
 
+// ---------- spec E 修 2：引擎降级两态结构化注记（CodeFileMeta.engineNote） ----------
+//
+// 清单感知降级（apps/web 注入 hasLocalGrammar）：本地无 grammar 时结构化上报原因
+// （状态栏可见），不再无声。两态：no-grammar-remote（本地无、远程兜住）/
+// no-grammar-hljs（本地与远程均无，hljs 兜底）。hasLocalGrammar 缺席（旧形态 fake）
+// 或为 true 时零行为变化（运行期真失败不注记——只注记清单外）。
+
+describe('renderCode 引擎注记（spec E 修 2：清单感知降级两态）', () => {
+  afterEach(() => {
+    attachHighlightClient(null);
+    attachHighlightRouter(null);
+    document.body.innerHTML = '';
+    vi.unstubAllGlobals();
+  });
+
+  function stubResizeObserver(): void {
+    vi.stubGlobal('ResizeObserver', class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    });
+  }
+
+  it('① hasLocalGrammar=false + highlight reject → engineNote no-grammar-hljs 且 engine hljs', async () => {
+    stubResizeObserver();
+    attachHighlightClient({
+      highlight: async () => {
+        throw new Error('boom');
+      },
+      hasLocalGrammar: () => false
+    });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(new TextEncoder().encode('main = putStrLn "hi"'), host, {
+      ext: 'hs',
+      lang: 'haskell'
+    });
+    await vi.waitFor(() => expect(handle.getEngine()).not.toBe('pending'));
+    expect(handle.getEngine()).toBe('hljs');
+    expect(handle.getMeta().engineNote).toEqual({ kind: 'no-grammar-hljs', lang: 'haskell' });
+    handle.destroy();
+  });
+
+  it('② hasLocalGrammar=false + onWhere remote 成功 → engineNote no-grammar-remote 且 engine tree-sitter', async () => {
+    stubResizeObserver();
+    attachHighlightClient({
+      highlight: async (_t, _l, ctx) => {
+        ctx?.onWhere?.('remote');
+        return [{ start: 0, end: 3, capture: 'keyword' }];
+      },
+      hasLocalGrammar: () => false
+    });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(new TextEncoder().encode('let x'), host, {
+      ext: 'rs',
+      lang: 'rust',
+      computeSrc: { path: 'a.rs' }
+    });
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('tree-sitter'));
+    expect(handle.getComputeWhere()).toBe('remote');
+    expect(handle.getMeta().engineNote).toEqual({ kind: 'no-grammar-remote', lang: 'rust' });
+    handle.destroy();
+  });
+
+  it('③ 旧形态 fake（无 hasLocalGrammar）+ reject → engineNote undefined（hljs 兜底零回归锚）', async () => {
+    stubResizeObserver();
+    attachHighlightClient({
+      highlight: async () => {
+        throw new Error('boom');
+      }
+    });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(new TextEncoder().encode('const a = 1'), host, { ext: 'js', lang: 'javascript' });
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('hljs'));
+    expect(handle.getMeta().engineNote).toBeUndefined();
+  });
+
+  it('④ hasLocalGrammar=true + reject → engineNote undefined（运行期真失败静默语义不变）', async () => {
+    stubResizeObserver();
+    attachHighlightClient({
+      highlight: async () => {
+        throw new Error('boom');
+      },
+      hasLocalGrammar: () => true
+    });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(new TextEncoder().encode('const a = 1'), host, { ext: 'js', lang: 'javascript' });
+    await vi.waitFor(() => expect(handle.getEngine()).toBe('hljs'));
+    expect(handle.getMeta().engineNote).toBeUndefined();
+  });
+
+  it('⑤ 窗口流式：chunk 本地失败 + hasLocalGrammar=false → 窗口实例 engineNote no-grammar-hljs', async () => {
+    stubResizeObserver();
+    attachHighlightClient({
+      highlight: async () => {
+        throw new Error('boom');
+      },
+      hasLocalGrammar: () => false
+    });
+    const content = enc(codeLines(40)); // 60KB：单块窗口
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handle = renderCode(content.slice(0, 8192), host, {
+      ext: 'js',
+      lang: 'javascript',
+      ctx: streamCtx({ size: content.length, content, head: content.slice(0, 8192) })
+    });
+    // 挂载即首屏 onRange → scheduleChunks → highlightChunk（本地 worker 分支 reject → hljs 兜底 + 注记）
+    await vi.waitFor(() =>
+      expect(handle.getMeta().engineNote).toEqual({ kind: 'no-grammar-hljs', lang: 'javascript' })
+    );
+    handle.destroy();
+  });
+});
+
 // ---------- BUG-04：getMeta 元数据快照 ----------
 
 describe('renderCode getMeta（BUG-04：状态栏/属性面板元数据）', () => {

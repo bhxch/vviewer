@@ -49,6 +49,7 @@ import {
 import {
   type CodeEngine,
   type CodeRenderOptions,
+  type EngineNote,
   type LargeFileHighlightChunk,
   type RenderCodeHandle,
   getHighlightClient,
@@ -139,6 +140,10 @@ export function renderCode(
   // 高亮计算执行位置（M6）：null = 未发生计算路由（纯文本/lazy 首 chunk 前）；
   // tree-sitter 主路径等路由结果回填；lazy 按 chunk 来源回填 remote/local。状态栏指示读这里。
   let computeWhere: ComputeWhere | null = null;
+  // 引擎降级结构化注记（spec E 修 2）：清单感知降级两态原因，getMeta 透出、状态栏
+  // 渲染。置位一次即终值（先到先得不翻转——混合 chunk 场景远程先成功后本地失败时
+  // 保留 remote 注记，避免同一实例注记来回抖动）；hasLocalGrammar 缺席按 true（零行为）
+  let engineNote: EngineNote | null = null;
   // 文件内搜索状态（BUG-18/23）：query×caseSensitive 双键缓存 + 行→命中偏移索引
   //（fillRows 据此渲染词级 mark 与全部命中行的行级背景，虚拟滚动重绘天然保持）
   let lastQuery: string | null = null;
@@ -395,6 +400,15 @@ export function renderCode(
         evictChunksByLines(chunkCache, CHUNK_CACHE_MAX_LINES);
         engine = 'tree-sitter';
         computeWhere = 'remote';
+        // spec E 修 2：远程 chunk 命中点的清单注记（尽力而为）——非阻塞读 attach 面，
+        // 仅 client 已 attach 时可判清单外 → note no-grammar-remote；attach 竞态窗口内
+        // （getHighlightClient() 返回 null）不注记也不为此提前等待 client（动既有竞态
+        // 语义代价不成比例，状态栏「执行: 远程」段已有位置指示兜底；窗口自愈于后续
+        // 本地 chunk/重渲染）
+        const attached = getHighlightClient();
+        if (engineNote === null && attached !== null && attached.hasLocalGrammar?.(lang) === false) {
+          engineNote = { kind: 'no-grammar-remote', lang };
+        }
         return;
       }
       // router null（auto 门/失败回退，注入侧已 warn）：该 chunk 行级 hljs——
@@ -413,6 +427,9 @@ export function renderCode(
       if (destroyed) return;
     }
     if (client && lang !== null) {
+      // spec E 修 2：hasLocal 获取点在 client 等待之后、highlight 调用之前（router
+      // 分支先于本段执行且作用域内无 client——评审 F1 落定）。缺席按 true 零行为。
+      const hasLocal = client.hasLocalGrammar?.(lang) ?? true;
       try {
         // 本地 worker chunk：区间相对子文本，mergeChunkLines 平移 +startLine
         const intervals = await client.highlight(chunkText, lang, {
@@ -429,6 +446,10 @@ export function renderCode(
           chunkCanceled = true; // 取消≠失败：仅逐出在-flight，不落 hljs 兜底
           return;
         }
+        // 清单外语言（本地无 grammar，worker manifest 同表 ok:false 必然）→ 注记
+        // no-grammar-hljs（本地与远程均无；先到先得，已有 remote 注记不覆盖）。
+        // 运行期真失败（hasLocal=true）不注记——只注记清单外，不注记运行期失败。
+        if (engineNote === null && !hasLocal) engineNote = { kind: 'no-grammar-hljs', lang };
         // chunk 失败（413/网络/超时/解析错误）→ 该 chunk 行级 hljs 兜底
         await hljsChunk(startLine, lineCount, subLines);
         return;
@@ -486,6 +507,8 @@ export function renderCode(
         await hljsWholeFile(lang);
         return;
       }
+      // spec E 修 2：清单感知判定（client 就绪后取；缺席按 true 零行为变化）
+      const hasLocal = client.hasLocalGrammar?.(lang) ?? true;
       try {
         const intervals = await client.highlight(text, lang, {
           src: opts.computeSrc,
@@ -495,6 +518,9 @@ export function renderCode(
         });
         if (destroyed) return;
         engine = 'tree-sitter';
+        // 本地无 grammar 且远程兜住 → 注记 no-grammar-remote（computeWhere 由 onWhere
+        // 回调先行回填，成功 resolve 时已是终值）
+        if (!hasLocal && computeWhere === 'remote') engineNote = { kind: 'no-grammar-remote', lang };
         lineSegs = new Map(assignIntervalsToLines(intervals, lineOffsets).map((a) => [a.line, a.segs]));
         scroller?.refresh(true);
         // 大纲（code-outline Task 2）：parse 成功完成后一次性 fire-and-forget——
@@ -533,6 +559,11 @@ export function renderCode(
           showErrorCard(target, err.message, { name: opts.ext ? `.${opts.ext}` : '代码' });
           return;
         }
+        // spec E 修 2：清单外语言（本地无 grammar）+ 非 cancel 非 RemoteComputeError
+        // 的失败 → 注记 no-grammar-hljs 后 hljs 整文件兜底（本地与远程均无）。
+        // RemoteComputeError 显式远程失败仍走既有错误卡、无注记（真失败非降级）；
+        // hasLocal=true 的 catch 语义逐字节不变（运行期失败不注记）
+        if (!hasLocal) engineNote = { kind: 'no-grammar-hljs', lang };
         await hljsWholeFile(lang); // 解析失败 → hljs 整文件兜底
       }
       return;
@@ -575,7 +606,9 @@ export function renderCode(
         encoding: opts.encoding ?? 'utf-8',
         lang, // 与 start() 实际高亮语言同源（评审③：本地 .js 也显示「语言: javascript」）
         size: buffer.byteLength,
-        lines: lines.length
+        lines: lines.length,
+        // 引擎降级注记（spec E 修 2）：null → 字段缺席（消费方真值判断零歧义）
+        ...(engineNote !== null ? { engineNote } : {})
       };
     },
     search(query, opts?: { caseSensitive?: boolean }) {

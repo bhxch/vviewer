@@ -19,6 +19,7 @@ import {
 import { resolveHighlightResult } from './computeResult';
 import {
   assembleGrammarLayers,
+  grammarTableHas,
   grammarWarmUrl,
   type MergedGrammarTable
 } from './grammarLayers';
@@ -64,6 +65,16 @@ let remoteAbort: AbortController | null = null;
 
 /** grammar manifest（create() 三层合并后缓存）：主线程预热 grammar wasm 查条目用（base 标来源层）。 */
 let grammarManifest: MergedGrammarTable | null = null;
+
+/**
+ * 清单感知判定（spec E 修 2）：lang 是否在当前 grammar 合并表快照内（canonical 键
+ * 或条目别名）。清单门消费方：withDebug 包装（hasLocalGrammar 注入面 + localFn
+ * 门）与 MetaPanel 候选前置排序。manifest 未就绪（create 在途/rebuild 清窗）→
+ * true fail-open——不拦，交 worker 链既有裁决（grammarTableHas 契约）。
+ */
+export function hasGrammar(lang: string): boolean {
+  return grammarTableHas(grammarManifest, lang);
+}
 
 /** 已预热资产 URL：同一资产仅首个调用触发预热（控制权交接前监听/定时器不随调用累积） */
 const warmedUrls = new Set<string>();
@@ -275,19 +286,31 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
       // 结果身份收敛进 resolveHighlightResult：取消重建 HighlightCanceledError
       //（render-text 以该类型静默丢弃），显式 remote 失败抛 RemoteComputeError
       //（render-text 以该类型显示错误卡，不降级 hljs）。
+      // 清单感知门（spec E 修 2）落在 localFn 闭包内：routeHighlight 裁决先于门
+      // ——远程可用不拦（远程优先），门只拦本地 worker 链的 doomed 往返。
+      const localFn = (): Promise<HighlightInterval[]> => {
+        // ctx.chunk 透传（spec §5.1 子文本窗口语义标注）：lazy chunk 调用的
+        // text 即该窗口子文本，worker 侧仅作 debug 语义标注，区间仍相对 text
+        if (!hasGrammar(lang)) {
+          // 清单外：跳过注定失败的 worker 往返（worker manifest=同一合并表，
+          // ok:false 必然）——折叠为普通本地失败 → resolveHighlightResult 抛普通
+          // Error → renderCode 捕获走 hljs 兜底（并按 hasLocalGrammar 置降级注记）
+          return Promise.reject(
+            new Error(`[vviewer] lang '${lang}' not in grammar manifest, skipping local worker (manifest-aware gate)`)
+          );
+        }
+        return client
+          .highlight(text, lang, ctx?.chunk ? { chunk: ctx.chunk } : undefined)
+          .catch((err: unknown) => {
+            if (err instanceof Error && err.name === 'HighlightCanceled') throw encodeCanceled(err);
+            throw err;
+          });
+      };
       return computeRouter
         .routeHighlight(
           src ? { ...src, text } : { text },
           lang,
-          () =>
-            // ctx.chunk 透传（spec §5.1 子文本窗口语义标注）：lazy chunk 调用的
-            // text 即该窗口子文本，worker 侧仅作 debug 语义标注，区间仍相对 text
-            client
-              .highlight(text, lang, ctx?.chunk ? { chunk: ctx.chunk } : undefined)
-              .catch((err: unknown) => {
-                if (err instanceof Error && err.name === 'HighlightCanceled') throw encodeCanceled(err);
-                throw err;
-              }),
+          localFn,
           // 服务端已接线 injections（阶段 1），auto 不再豁免注入语言：
           // remoteAttempted 即装配 remoteFn，无注入语言豁免。
           remoteAttempted ? (s, l) => remoteHighlight(s, l) : undefined
@@ -313,6 +336,12 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
     },
     cancelOutline(lang) {
       client.cancelOutline(lang);
+    },
+    // 清单感知判定注入口（spec E 修 2）：renderCode/renderCodeWindowed 经此取
+    // 「本地 worker 能否解析 lang」——降级两态结构化注记（no-grammar-remote /
+    // no-grammar-hljs）的判定基准；manifest 未就绪 fail-open（零行为变化）
+    hasLocalGrammar(lang) {
+      return hasGrammar(lang);
     }
   };
 }

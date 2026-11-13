@@ -17,6 +17,7 @@
   import { MORE_RENDERER_ID, LESS_RENDERER_ID, rendererCandidatesOfTab } from './RendererPickerMenu';
   import { detectableLanguageNames } from '@bhxch/vviewer-highlight';
   import { registry } from './viewer';
+  import { hasGrammar } from './highlightClient';
   import { t } from './i18n/index.svelte';
   import {
     collectExportHtml,
@@ -95,9 +96,16 @@
   // 不随 meta 实例出现/消失）；提交走 setHighlightLang（'' = null 清除回自动检测，
   // rev++ 复用渲染 effect 重跑通道）。highlightAuto 嗅探结果不回写本行（既有现状，
   // spec 注记不动）——fileMeta.lang 仅作 placeholder 回显自动检测值。
+  // spec E 修 2：候选 grammar 前置（中间名 all，防 TDZ 自引与重复声明——评审 F3）：
+  // 当前资产清单内语言排前（手动切到清单内语言即 tree-sitter 可用），清单外在后；
+  // 两组各保字典序。清单未就绪（hasGrammar fail-open 恒 true）退化为原字典序。
 
   /** datalist 候选集（一次性）：语言表静态，无响应式需求 */
-  const langNames = detectableLanguageNames();
+  const all = detectableLanguageNames();
+  const grammarFirst: string[] = [];
+  const rest: string[] = [];
+  all.forEach((n) => (hasGrammar(n) ? grammarFirst : rest).push(n));
+  const langNames = [...grammarFirst, ...rest]; // 组内字典序不变
 
   /** 语言行显示值/徽标（激活 tab 侧派生，openWithUi 同款）：无 override 时 input
    * 留空，placeholder 回显自动检测语言（fileMeta.lang，嗅探不回写面） */

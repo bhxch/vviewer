@@ -42,11 +42,18 @@ describe('MetaPanel 语言行（Task 5 源码契约锚）', () => {
     expect(src).toContain('<datalist id="vv-lang-datalist">');
   });
 
-  it('langNames 一次性取值：顶层 const 直调 detectableLanguageNames（非 $derived/$state）', () => {
-    expect(src).toMatch(/const langNames = detectableLanguageNames\(\);/);
+  it('langNames 一次性取值：顶层 const 直调 detectableLanguageNames（非 $derived/$state）+ grammar 前置两组拼装（spec E 修 2）', () => {
+    // 契约②（spec E 评审 F3 字面同步）：中间名 all 防 TDZ 自引与原行重复声明
+    expect(src).toMatch(/const all = detectableLanguageNames\(\);/);
     // 防回归：候选集静态，不得裹进响应式包装（每次派生重算无意义）
     expect(src).not.toMatch(/\$derived[^;]*detectableLanguageNames/);
     expect(src).not.toMatch(/\$state[^;]*detectableLanguageNames/);
+    // 排序形态源码契约（spec E 修 2）：grammar 前置两组拼装——grammarFirst/rest
+    // 分桶 + hasGrammar 判定消费 + langNames 拼装行（组内字典序不变）
+    expect(src).toMatch(/const grammarFirst: string\[\] = \[\];/);
+    expect(src).toMatch(/const rest: string\[\] = \[\];/);
+    expect(src).toMatch(/hasGrammar\(n\) \? grammarFirst : rest\)\.push\(n\)/);
+    expect(src).toMatch(/const langNames = \[\.\.\.grammarFirst, \.\.\.rest\]/);
   });
 
   it('onLangCommit 提交语义：trim 判空 → null 清除，否则原值宽松透传（单点走 setHighlightLang）', () => {

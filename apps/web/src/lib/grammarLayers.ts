@@ -25,6 +25,21 @@ export function grammarWarmUrl(entry: { base: string; file: string }): string {
   return `${entry.base}${entry.file}`;
 }
 
+/**
+ * 清单感知判定（spec E 修 2）：lang（canonical 键或条目别名）在合并表内——本地
+ * worker 能否解析该语言的判据快照（worker manifest 与本表同源，ok:false 必然时
+ * 调用方可提前跳过 doomed 往返）。table null（create 在途/rebuild 清窗）→ true
+ * fail-open：不拦，交 worker 链既有裁决（清单未就绪不是拒绝理由）。
+ */
+export function grammarTableHas(table: MergedGrammarTable | null, lang: string): boolean {
+  if (table === null) return true; // fail-open
+  if (table[lang]) return true;
+  for (const entry of Object.values(table)) {
+    if (entry.aliases?.includes(lang)) return true;
+  }
+  return false;
+}
+
 /** 依序合并各层（first-wins）：每条目写全 base，别名表随条目原样并入。 */
 export function mergeGrammarLayers(layers: GrammarLayer[]): MergedGrammarTable {
   const out: MergedGrammarTable = {};

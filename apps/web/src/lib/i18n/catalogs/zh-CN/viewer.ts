@@ -59,6 +59,11 @@ export const messages = {
   'viewer.engine.mdLocal': '渲染: 本地',
   'viewer.engine.mdRemote': '渲染: 远程',
 
+  // —— 引擎降级注记（viewer.engine.note*，spec E 修 2 状态栏被动文本段；降级非
+  // 失败，不进错误卡）——
+  'viewer.engine.noteNoGrammarRemote': '语言 {lang} 本地无 grammar，已用远程 tree-sitter',
+  'viewer.engine.noteNoGrammarHljs': '语言 {lang} 无 tree-sitter grammar（当前资源清单），已用 hljs 兜底',
+
   // —— 计算执行位置（viewer.compute.*，M6 状态栏段）——
   'viewer.compute.remote': '远程',
   'viewer.compute.local': '本地',

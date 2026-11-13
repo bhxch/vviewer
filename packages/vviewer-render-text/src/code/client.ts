@@ -36,7 +36,19 @@ export interface CodeHighlightClient {
   outline?(text: string, lang: string): Promise<OutlineEntry[]>;
   /** 按 lang 取消在飞 outline 请求（destroy 撤销消费；缺省 fake 无在飞可撤） */
   cancelOutline?(lang: string): void;
+  /** 清单感知判定（spec E 修 2，可选鸭子面）：lang 在本地 grammar 清单内？
+   * 应用侧注入（apps/web withDebug 包装读 grammarManifest 快照）；缺省（旧形态
+   * fake/未注入）消费方按 true 处理——零行为变化，清单判定面只是附加注记。 */
+  hasLocalGrammar?(lang: string): boolean;
 }
+
+/** 引擎降级结构化注记（spec E 修 2）：本地无 grammar 的两态原因——renderCode/
+ * renderCodeWindowed 就地计算、getMeta 透出，状态栏经既有 250ms 轮询通道渲染。
+ * kind 语义：no-grammar-remote = 本地无 grammar、远程 tree-sitter 兜住；
+ * no-grammar-hljs = 本地与远程均无 grammar、hljs 兜底（降级非失败，不进错误卡）。 */
+export type EngineNote =
+  | { kind: 'no-grammar-remote'; lang: string }
+  | { kind: 'no-grammar-hljs'; lang: string };
 
 let attachedClient: CodeHighlightClient | null = null;
 
@@ -157,6 +169,8 @@ export interface CodeFileMeta {
   size: number;
   /** 内容行数（与 wc -l 同口径）：以 \n 结尾的 301 行文件报 301，非 split 产物的 302 */
   lines: number;
+  /** 引擎降级注记（spec E 修 2，可选）：清单感知降级两态原因；无降级缺省缺席 */
+  engineNote?: EngineNote;
 }
 
 export interface RenderCodeHandle {

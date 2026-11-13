@@ -56,6 +56,11 @@ export const messages = {
   'viewer.engine.mdLocal': 'Render: local',
   'viewer.engine.mdRemote': 'Render: remote',
 
+  // —— Engine degradation note (viewer.engine.note*, spec E; passive statusbar
+  // span — degradation is not a failure, never enters the error card) ——
+  'viewer.engine.noteNoGrammarRemote': 'No local grammar for {lang}; used remote tree-sitter',
+  'viewer.engine.noteNoGrammarHljs': 'No tree-sitter grammar for {lang} in current asset manifest; fell back to hljs',
+
   // —— 计算执行位置 ——
   'viewer.compute.remote': 'remote',
   'viewer.compute.local': 'local',

@@ -3,7 +3,7 @@
   import type { RenderedInstance, TocEntry, ComputeWhere } from '@bhxch/vviewer-core';
   import { getRemoteBase, showErrorCard, extractExtension, type ReadProgressEvent } from '@bhxch/vviewer-core';
   import { isAbortError, TREE_SITTER_MAX_BYTES } from '@bhxch/vviewer-render-text';
-  import type { CodeEngine, CodeFileMeta } from '@bhxch/vviewer-render-text';
+  import type { CodeEngine, CodeFileMeta, EngineNote } from '@bhxch/vviewer-render-text';
   import type { OutlineEntry } from '@bhxch/vviewer-highlight';
   import type { MarkdownEngineState } from '@bhxch/vviewer-render-text/markdown/markdownRenderer';
   import type { MermaidTheme } from '@bhxch/vviewer-render-diagram';
@@ -82,6 +82,13 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
     remote: 'viewer.engine.mdRemote'
   } as const satisfies Record<MarkdownEngineState, MessageKey>;
 
+  /** 引擎降级注记目录键（spec E 修 2）：CodeFileMeta.engineNote 两态 → 状态栏注记
+   * 段文案（`{lang}` 占位符经 t() 传参，语种名透传现值） */
+  const ENGINE_NOTE_KEYS = {
+    'no-grammar-remote': 'viewer.engine.noteNoGrammarRemote',
+    'no-grammar-hljs': 'viewer.engine.noteNoGrammarHljs'
+  } as const satisfies Record<EngineNote['kind'], MessageKey>;
+
   let host = $state<HTMLElement | null>(null);
   /** UI 镜像（SearchPanel 模板读取）。注意：渲染 effect 体内不得读它——
    * effect 依赖自身写入的 state 会无限重渲染，生命周期一律走非响应式的 live。 */
@@ -101,6 +108,10 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
    * 的实例经 startWatchMeta 首读 + 250ms 周期重读——窗口流式实例的行数/大小随加载
    * 动态增长，终审 M-3 同族；错误卡片/无 meta 实例为空段） */
   let metaLabel = $state('');
+  /** 引擎降级注记文案（spec E 修 2）：CodeFileMeta.engineNote 两态翻译值（'' = 无
+   * 降级/非 code 实例）。状态栏 computeWhere 段后被动文本段（可见短文案 + 同文案
+   * hover title，降级非失败不进错误卡） */
+  let engineNoteLabel = $state('');
   /** code 渲染器的内部滚动容器（.vv-code-pre）；其余渲染器为 null（滚动在外层 .vv-viewer-scroll） */
   let scrollHost: HTMLElement | null = null;
   /** 引擎轮询句柄：高亮结果异步到达（pending→tree-sitter/hljs），轻量轮询反映最新值 */
@@ -661,6 +672,7 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
     engineLabel = '';
     computeWhereLabel = '';
     metaLabel = '';
+    engineNoteLabel = '';
   }
 
   function stopWatchMeta(): void {
@@ -686,6 +698,7 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
     const readMeta = (inst as { getMeta?: () => CodeFileMeta }).getMeta;
     if (typeof readMeta !== 'function') {
       metaLabel = '';
+      engineNoteLabel = '';
       setFileMeta({ name: tabName, sourceLabel, openWith });
       return;
     }
@@ -698,6 +711,11 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
     // 行段仅 code 实例提供（markdown/html 渲染视图无行概念）
     if (m.lines !== undefined) parts.push(t('viewer.statusMeta.lines', { lines: m.lines }));
     metaLabel = parts.join(' · ');
+    // 引擎降级注记（spec E 修 2）：两态结构化原因 → 目录键翻译（lang 现值透传）；
+    // 缺席 = 无降级/非 code 实例，注记段隐藏
+    engineNoteLabel = m.engineNote
+      ? t(ENGINE_NOTE_KEYS[m.engineNote.kind], { lang: m.engineNote.lang })
+      : '';
     setFileMeta({
       name: tabName,
       sourceLabel,
@@ -726,8 +744,12 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
     readInstanceMeta(inst, tabName, sourceLabel, openWith);
     const readMeta = (inst as { getMeta?: () => CodeFileMeta }).getMeta;
     if (typeof readMeta !== 'function') return;
+    // 快照键含 engineNote（spec E 修 2）：注记在首个高亮结果落定后追加（lazy 远程/
+    // 本地 chunk 到达晚于首读），不入键则注记后到不触发重读——状态栏注记段永不显示
     const keyOf = (m: CodeFileMeta): string =>
-      `${m.encoding ?? ''}:${m.lang ?? ''}:${m.size}:${m.lines}`;
+      `${m.encoding ?? ''}:${m.lang ?? ''}:${m.size}:${m.lines}:${m.engineNote?.kind ?? ''}:${
+        m.engineNote?.lang ?? ''
+      }`;
     let lastKey = keyOf(readMeta.call(inst));
     metaTimer = setInterval(() => {
       const key = keyOf(readMeta.call(inst));
@@ -1266,7 +1288,7 @@ import DownloadConfirmCard from './DownloadConfirmCard.svelte';
            「打开方式: {渲染器}（{检出扩展名}）」含于 accessible name——label 与
            可见值逐 token 等值（&nbsp; 归一空白）；候选浮层 role=menu 的
            aria-label=「打开方式」不受影响（menu 无可见文本） -->
-      {#if rendererLabel}<button type="button" class="vv-status-openwith" bind:this={pickerBtn} aria-haspopup="menu" aria-expanded={pickerOpen} aria-label={detLabel === '' ? t('viewer.statusbar.openwithAria', { label: rendererLabel }) : t('viewer.statusbar.openwithAriaExt', { label: rendererLabel, ext: detLabel })} title={t('viewer.statusbar.openwithTitle')} onclick={togglePicker}>{t('viewer.statusbar.openwithLabel')}: {rendererLabel}{#if detLabel}&nbsp;（{detLabel}）{/if}</button>{/if}{#if engineLabel}{#if rendererLabel}&nbsp;·&nbsp;{/if}{engineLabel}{#if computeWhereLabel}&nbsp;· {t('viewer.statusbar.exec', { where: computeWhereLabel })}{/if}{/if}{#if metaLabel}{#if engineLabel || rendererLabel}&nbsp;·&nbsp;{/if}{metaLabel}{/if}{#if wrapCapable}&nbsp;·&nbsp;<button type="button" class="vv-status-wrap" aria-pressed={codeWordWrap} title={t('viewer.statusbar.wrapTitle')} onclick={toggleWordWrap}>{codeWordWrap ? t('viewer.statusbar.wrapOn') : t('viewer.statusbar.wrapOff')}</button>{/if}{#if watchLabel}{#if engineLabel || metaLabel || rendererLabel}&nbsp;·{/if} {watchLabel}{/if}{#if statusNotice.text}{#if engineLabel || metaLabel || rendererLabel || watchLabel}&nbsp;·{/if} {statusNotice.text}{/if}
+      {#if rendererLabel}<button type="button" class="vv-status-openwith" bind:this={pickerBtn} aria-haspopup="menu" aria-expanded={pickerOpen} aria-label={detLabel === '' ? t('viewer.statusbar.openwithAria', { label: rendererLabel }) : t('viewer.statusbar.openwithAriaExt', { label: rendererLabel, ext: detLabel })} title={t('viewer.statusbar.openwithTitle')} onclick={togglePicker}>{t('viewer.statusbar.openwithLabel')}: {rendererLabel}{#if detLabel}&nbsp;（{detLabel}）{/if}</button>{/if}{#if engineLabel}{#if rendererLabel}&nbsp;·&nbsp;{/if}{engineLabel}{#if computeWhereLabel}&nbsp;· {t('viewer.statusbar.exec', { where: computeWhereLabel })}{/if}{/if}{#if engineNoteLabel}&nbsp;·&nbsp;<span class="vv-status-engine-note" title={engineNoteLabel}>{engineNoteLabel}</span>{/if}{#if metaLabel}{#if engineLabel || rendererLabel}&nbsp;·&nbsp;{/if}{metaLabel}{/if}{#if wrapCapable}&nbsp;·&nbsp;<button type="button" class="vv-status-wrap" aria-pressed={codeWordWrap} title={t('viewer.statusbar.wrapTitle')} onclick={toggleWordWrap}>{codeWordWrap ? t('viewer.statusbar.wrapOn') : t('viewer.statusbar.wrapOff')}</button>{/if}{#if watchLabel}{#if engineLabel || metaLabel || rendererLabel}&nbsp;·{/if} {watchLabel}{/if}{#if statusNotice.text}{#if engineLabel || metaLabel || rendererLabel || watchLabel}&nbsp;·{/if} {statusNotice.text}{/if}
     </div>
   {/if}
   {#if pickerOpen}

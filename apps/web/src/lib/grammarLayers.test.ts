@@ -3,6 +3,7 @@ import type { GrammarTable } from '@bhxch/vviewer-highlight';
 import {
   assembleGrammarLayers,
   fetchGrammarManifest,
+  grammarTableHas,
   grammarWarmUrl,
   mergeGrammarLayers
 } from './grammarLayers';
@@ -178,6 +179,42 @@ describe('assembleGrammarLayers（三层编排）', () => {
       'https://cdn.example.com/g/manifest.json'
     ]);
     expect(layers).toEqual([]); // 全部 404 → 无命中层
+  });
+});
+
+describe('grammarTableHas（清单感知判定，spec E 修 2）', () => {
+  const TABLE = mergeGrammarLayers([
+    {
+      base: '/grammars/',
+      table: table({
+        rust: { file: 'tree-sitter-rust.wasm' },
+        csharp: { file: 'tree-sitter-c-sharp.wasm', aliases: ['c-sharp', 'cs'] }
+      })
+    }
+  ]);
+
+  it('canonical 键命中 → true', () => {
+    expect(grammarTableHas(TABLE, 'rust')).toBe(true);
+  });
+
+  it('别名命中 → true（lang 为别名时同样可本地解析）', () => {
+    expect(grammarTableHas(TABLE, 'c-sharp')).toBe(true);
+    expect(grammarTableHas(TABLE, 'cs')).toBe(true);
+  });
+
+  it('table null（create 在途/rebuild 清窗）→ true fail-open：不拦，交 worker 链既有裁决', () => {
+    expect(grammarTableHas(null, 'rust')).toBe(true);
+    expect(grammarTableHas(null, 'haskell')).toBe(true);
+  });
+
+  it('空表（三层 manifest 全失败）→ 任何 lang 均 false', () => {
+    expect(grammarTableHas({}, 'rust')).toBe(false);
+    expect(grammarTableHas({}, 'haskell')).toBe(false);
+  });
+
+  it('未知语言（清单外）→ false', () => {
+    expect(grammarTableHas(TABLE, 'haskell')).toBe(false);
+    expect(grammarTableHas(TABLE, '')).toBe(false);
   });
 });
 

@@ -40,6 +40,7 @@ import {
 import {
   type CodeEngine,
   type CodeRenderOptions,
+  type EngineNote,
   type LargeFileHighlightChunk,
   type RenderCodeHandle,
   getHighlightClient,
@@ -216,6 +217,10 @@ export function renderCodeWindowed(
   // 产出后保持主导引擎）
   let engine: CodeEngine = strategy === 'plain' || limitReached ? 'plain' : 'pending';
   let computeWhere: ComputeWhere | null = null;
+  // 引擎降级结构化注记（spec E 修 2，全量路径同款三处同面覆盖——评审 F2）：清单感知
+  // 降级两态原因，getMeta 透出。置位一次即终值（先到先得不翻转）；hasLocalGrammar
+  // 缺席按 true（零行为）
+  let engineNote: EngineNote | null = null;
   // 文件内搜索状态（BUG-18/23 同构）。窗口模式 = 后台全文扫描（Task 5，见下方
   // 扫描段注释）——SearchPanel 挂载/消费面零变更
   let lastQuery: string | null = null;
@@ -479,6 +484,13 @@ export function renderCodeWindowed(
         evictChunksByLines(chunkCache, CHUNK_CACHE_MAX_LINES);
         engine = 'tree-sitter';
         computeWhere = 'remote';
+        // spec E 修 2：远程 chunk 命中点的清单注记（尽力而为，全量路径同款）——
+        // 非阻塞读 attach 面，仅 client 已 attach 时可判清单外；attach 竞态窗口内
+        // 不注记（记档：不为此提前等待 client，状态栏「执行: 远程」段兜底）
+        const attached = getHighlightClient();
+        if (engineNote === null && attached !== null && attached.hasLocalGrammar?.(lang) === false) {
+          engineNote = { kind: 'no-grammar-remote', lang };
+        }
         return;
       }
       // router null（auto 门/失败回退）：该 chunk 行级 hljs——不回落本地 wasm
@@ -494,6 +506,9 @@ export function renderCodeWindowed(
       if (destroyed) return;
     }
     if (client && lang !== null) {
+      // spec E 修 2：hasLocal 获取点在 client 等待之后、highlight 调用之前（全量路径
+      // 评审 F1 同款）。缺席按 true 零行为。
+      const hasLocal = client.hasLocalGrammar?.(lang) ?? true;
       try {
         const intervals = await client.highlight(chunkText, lang, {
           chunk: { startLine, lineCount }
@@ -511,6 +526,8 @@ export function renderCodeWindowed(
           chunkCanceled = true; // 取消≠失败：仅逐出在-flight，不落 hljs 兜底
           return;
         }
+        // 清单外语言 → 注记 no-grammar-hljs（先到先得；运行期真失败不注记）
+        if (engineNote === null && !hasLocal) engineNote = { kind: 'no-grammar-hljs', lang };
         await hljsChunk(startLine, lineCount, subLines); // chunk 失败 → 行级 hljs 兜底
         return;
       }
@@ -1239,7 +1256,9 @@ export function renderCodeWindowed(
         encoding: opts.encoding ?? 'utf-8',
         lang, // 与实际高亮语言同源（评审③同口径）
         size: ctx.size ?? bs.confirmedBytes,
-        lines: rows()
+        lines: rows(),
+        // 引擎降级注记（spec E 修 2）：null → 字段缺席；fullInst 在场即透传全量实例
+        ...(engineNote !== null ? { engineNote } : {})
       };
     },
     search(query, searchOpts?: { caseSensitive?: boolean }) {
