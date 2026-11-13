@@ -363,3 +363,80 @@ describe.skipIf(!grammarAssetsReady)('TreeSitterEngine.outline（tags 查询 →
     expect(r.error).toContain('__no_such_lang__');
   }, 30_000);
 });
+
+/**
+ * queriesBaseResolver 多基拆包路由（spec C Task 2）：单 http 伺服双路径段（/q1/、/q2/）
+ * 模拟两子包——resolver 按 lang 返回该语言所在子包的 queries base，断言各语言 queries
+ * fetch URL 恰落其子包段（修「queries fetch 用引擎级闭包 base、不走 entry.base」的缺口：
+ * 多基合并后非首子包语言必须路由回其所在子包，否则 404 → highlights.scm 缺失 → 降级）。
+ * 对照组锁缺省语义：resolver 缺省 undefined 时单值 queriesBase 行为不变（两语言同落单值段）。
+ * wasm 仍走本地路径（Node 端 Language.load 仅支持文件路径，URL 加载属浏览器行为——同既有口径）。
+ */
+describe.skipIf(!grammarAssetsReady)('TreeSitterEngine（queriesBaseResolver 多基拆包路由）', () => {
+  it('resolver 传参生效：各语言 queries fetch 落其子包段；缺省 undefined 时单值语义不变', async () => {
+    const hits: string[] = [];
+    const server = http.createServer((req, res) => {
+      const url = (req.url ?? '/').split('?')[0]!;
+      hits.push(url);
+      const m = /^\/q[12]\/(.+)$/.exec(url);
+      const file = m ? path.join(queriesAssetDir, m[1]!) : path.join(staticDir, url);
+      try {
+        const body = readFileSync(file);
+        res.writeHead(200, { 'content-type': url.endsWith('.scm') ? 'text/plain' : 'application/octet-stream' });
+        res.end(body);
+      } catch {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    const base = `http://127.0.0.1:${port}`;
+    const manifest = JSON.parse(readFileSync(path.join(staticDir, 'grammars', 'manifest.json'), 'utf8')) as {
+      grammars: GrammarTable;
+    };
+    // 两子包形态（bash 落 p1、python 落 p2——语义由 resolver 表达；wasm 走本地路径）
+    const grammars: GrammarTable = { bash: manifest.grammars.bash!, python: manifest.grammars.python! };
+    let engine: TreeSitterEngine | undefined;
+    try {
+      engine = await TreeSitterEngine.create({
+        queriesBase: `${base}/q0/`, // 启用远程查询的开关值；resolver 全覆盖时实际不被使用
+        queriesBaseResolver: (lang) => (lang === 'bash' ? `${base}/q1/` : `${base}/q2/`),
+        grammars,
+        grammarsDir: path.join(staticDir, 'grammars'),
+        runtimeDir: staticDir,
+      });
+      // 首子包语言（bash）→ /q1/；非首子包语言（python）→ /q2/——恰落各自子包
+      const r = await engine.highlight('echo "hello"', 'bash');
+      expect(r.ok).toBe(true);
+      expect(hits.filter((u) => u.startsWith('/q1/bash/')).length).toBeGreaterThanOrEqual(1);
+      expect(hits.filter((u) => u.startsWith('/q0/')), 'resolver 全覆盖时开关值不得被实际使用').toEqual([]);
+      const o = await engine.outline('CONST = 1\n', 'python');
+      expect(o.ok).toBe(true);
+      expect(hits.filter((u) => u.startsWith('/q2/python/')).length).toBeGreaterThanOrEqual(1);
+      expect(hits.filter((u) => u.startsWith('/q1/python/'))).toEqual([]);
+    } finally {
+      engine?.dispose();
+    }
+    // 对照（缺省 undefined 零变化）：单值 queriesBase——两语言都落单值段（原语义逐字节不变）
+    hits.length = 0;
+    let engine2: TreeSitterEngine | undefined;
+    try {
+      engine2 = await TreeSitterEngine.create({
+        queriesBase: `${base}/q1/`,
+        grammars,
+        grammarsDir: path.join(staticDir, 'grammars'),
+        runtimeDir: staticDir,
+      });
+      const r = await engine2.highlight('echo "hello"', 'bash');
+      expect(r.ok).toBe(true);
+      const o = await engine2.outline('CONST = 1\n', 'python');
+      expect(o.ok).toBe(true);
+      expect(hits.filter((u) => u.startsWith('/q1/bash/')).length).toBeGreaterThanOrEqual(1);
+      expect(hits.filter((u) => u.startsWith('/q1/python/')).length).toBeGreaterThanOrEqual(1);
+    } finally {
+      engine2?.dispose();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 60_000);
+});

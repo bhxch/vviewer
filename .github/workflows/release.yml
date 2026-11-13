@@ -7,10 +7,12 @@
 #           x86_64 分产物 / Windows NSIS）——server sidecar per-target 构建复制为
 #           externalBin 命名、web job dist 复用为 resources、tauri CLI 打包；未签名
 #           直出（Gatekeeper/SmartScreen 注记见 README 桌面端章节）
-#   publish-npm：grammar-wasm artifact → npm <scope>/vviewer-grammars-full（scope
-#           variable 门控、内容哈希去重（contentHash 对比线上 latest——前端-only 变更
-#           零发包、已解析版本下发 outputs.version）；scope 未配置则 npm 分发与 CDN
-#           env 均不启用；--provenance 签名需 job 级 id-token: write）
+#   publish-npm：grammar-wasm artifact → npm <scope>/vviewer-grammars-full 全量包 +
+#           <scope>/vviewer-grammars-full-p1..pN 拆分子包（spec C：每包 ≤50MB、
+#           聚合 hash 单门去重 + 全量包 contentHash 并列、包数一致性 fail-fast、
+#           N 包同 tag 同版本、已解析版本与子包名 JSON 数组下发 outputs.version/packages；
+#           scope 未配置则 npm 分发与 CDN env 均不启用；--provenance 签名需
+#           job 级 id-token: write）
 #   publish-packages：源码包（vviewer-detect/sanitize/markdown-engine/markdown/
 #           markdown-highlight-worker/lightbox/highlight/render-diagram 八个）随 tag
 #           逐包上 npm：清单单一来源 = tools/pack-packages.mjs 的 PACKAGES 常量
@@ -66,16 +68,19 @@ jobs:
       - uses: ./.github/actions/setup-grammars
         with:
           languages: lite
-      # 第 3 层 CDN base 构建期烙入：版本取 publish-npm 已解析版本（内容变化 → 新 tag
-      # 版本；内容零变化 → 复用线上 latest，CDN URL 稳定）。scope 未配置（publish-npm
-      # 跳过、version 输出为空）则不注入 env——第 3 层整体缺席，而非注入畸形 URL
-      - name: 计算 CDN 资产 base（publish-npm 产出已解析版本时）
+      # 第 3 层 CDN base 构建期烙入：多基（spec C 拆包子包）——读 publish-npm outputs.packages
+      # （子包名 JSON 数组）逐包拼 jsdelivr URL，`|` 分隔（解析器兼容无分隔符单值）。
+      # 版本取 publish-npm 已解析版本（内容变化 → 新 tag 版本；内容零变化 → 复用线上
+      # latest，CDN URL 稳定）。scope 未配置（publish-npm 跳过、version 输出为空）则不
+      # 注入 env——第 3 层整体缺席，而非注入畸形 URL
+      - name: 计算 CDN 资产 base（publish-npm 产出已解析版本时，子包多基）
         if: needs['publish-npm'].outputs.version != ''
         env:
-          NPM_SCOPE: ${{ vars.NPM_SCOPE }}
           VERSION: ${{ needs['publish-npm'].outputs.version }}
+          PACKAGES: ${{ needs['publish-npm'].outputs.packages }}
         run: |
-          echo "VV_GRAMMAR_CDN=https://cdn.jsdelivr.net/npm/${NPM_SCOPE}/vviewer-grammars-full@${VERSION}/grammars/" >> "$GITHUB_ENV"
+          BASES=$(node -p "JSON.parse(process.argv[1]).map((p) => 'https://cdn.jsdelivr.net/npm/' + p + '@${VERSION}/grammars/').join('|')" "$PACKAGES")
+          echo "VV_GRAMMAR_CDN=${BASES}" >> "$GITHUB_ENV"
       # —— svgbob wasm glue 不入库（spec §7）：构建期生成。v0.1.0 时代 svbob 走 kroki
       # 无此需求，P2 引入 wasm glue 后 ci.yml web job / pages-deploy 均已接线、本 job
       # 漏接——v0.1.1 首个踩中的 release（vite 静态解析动态 import，缺产物即构建失败）。
@@ -256,21 +261,27 @@ jobs:
           if-no-files-found: error
 
   publish-npm:
-    name: npm 资产包发布（grammars-full）
+    name: npm 资产包发布（grammars-full 全量 + 拆分子包 p1..pN）
     runs-on: ubuntu-latest
     # scope 未配置（repo variable）则整个包分发未启用：job 跳过，web 侧 CDN env
     # 同门控不注入（三层解析链的第 3 层整体缺席）。发布走 OIDC trusted publishing
     # 免长驻 NPM_TOKEN：id-token: write 供 npm 换短时发布凭据与 provenance 签名，
     # npm 侧须在包页配 Trusted Publisher（bhxch/vviewer/release.yml + 允许 npm publish）。
+    # 拆分子包（spec C）：jsdelivr 按包 150MB 准入 403 → 全量包 228MB 拆 p1..pN 子包
+    # （每包 ≤50MB，pack-npm.mjs 拆分模式 first-fit-decreasing 装箱）+ 全量包照旧发布
+    # （存量 standalone 兼容）。N 包同 tag 同版本（版本对齐简单化）。
     if: vars.NPM_SCOPE != ''
     needs: [grammar]
     permissions:
       contents: read
       id-token: write
     # 版本下发给 web job（CDN env）与 release 触发 pages 的 input：
-    # 内容变化 → 新 tag 版本；内容零变化 → 复用线上 latest（CDN URL 稳定、缓存继续命中）
+    # 内容变化 → 新 tag 版本；内容零变化 → 复用线上 latest（CDN URL 稳定、缓存继续命中）。
+    # packages 下发子包名 JSON 数组（["<scope>/vviewer-grammars-full-p1", … "-pN"]），
+    # web job 直接消费拼多基 CDN URL
     outputs:
       version: ${{ steps.gate.outputs.version }}
+      packages: ${{ steps.gate.outputs.packages }}
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -294,40 +305,87 @@ jobs:
           echo "VV_NPM_PACKAGE_NAME=${NPM_SCOPE}/vviewer-grammars-full" >> "$GITHUB_ENV"
           echo "VV_NPM_OUT=$GITHUB_WORKSPACE/dist-npm" >> "$GITHUB_ENV"
           echo "VV_GRAMMARS_OUT=$GITHUB_WORKSPACE/artifacts/grammar-wasm" >> "$GITHUB_ENV"
-      - name: 打包 npm 资产包
-        run: node tools/grammar-builder/pack-npm.mjs
-      - name: 内容去重门（contentHash 对比线上 latest）
+          # 拆分子包数（spec C Task 2）：须与 pack-npm.mjs 拆分装箱的实际产出一致——publish 前
+          # 有包数一致性 fail-fast 校验兜底，漂移即 fail 而非静默缺包。当前值 = spec §1.1 全量
+          # 228MB → 预计 5-6 包取 6 的占位（实施期全量集未构建、真实 N 首发时定）：
+          # 首发若 fail-fast 即按实际装箱结果修正此值，npm 侧 Trusted Publisher 逐包配置同步对齐
+          echo "VV_NPM_PACKAGE_COUNT=6" >> "$GITHUB_ENV"
+      # 打包顺序约束（pack-npm 双产物同落 dist-npm）：拆分先行、全量后置——packNpmSplit 的
+      # outDir fail-fast 会拒「根目录已含单包打包产物（package.json）」，反向顺序必失败
+      - name: 打包 npm 资产包（拆分子包 p1..pN 先行 + 全量包后置）
+        run: |
+          VV_NPM_SPLIT=1 node tools/grammar-builder/pack-npm.mjs
+          node tools/grammar-builder/pack-npm.mjs
+      - name: 包数一致性 fail-fast（workflow N 与实际装箱漂移 → 缺包/漏包发布，publish 前拦截）
+        run: |
+          ACTUAL=$(find dist-npm -maxdepth 1 -type d -name 'p*' | wc -l)
+          if [ "$ACTUAL" -ne "$VV_NPM_PACKAGE_COUNT" ]; then
+            echo "::error::拆分子包数漂移：实际 ${ACTUAL} ≠ VV_NPM_PACKAGE_COUNT=${VV_NPM_PACKAGE_COUNT}——按实际装箱结果修正 env，npm 侧 Trusted Publisher 逐包配置同步对齐"
+            exit 1
+          fi
+          echo "子包数一致：p1..p${ACTUAL}"
+      # 内容去重门（spec C §3.1 落定——聚合 hash 单门）：聚合 hash =
+      # sha256(逐包 contentHash 按包名 p1..pN 序拼接换行) 前 16 hex，与全量包 contentHash
+      # 并列判据——任一子包内容变化即整包集重发（N 包同版本）。线上侧逐包 npm view 缺包时
+      # 以 'missing' 行参与聚合（首发必不等 → 发布）。SKIP_PUBLISH 三分支语义保留：
+      # ① 内容零变化复用线上 latest / ② 同版本已存在 tag 重跑幂等 / ③ 否则发布
+      - name: 内容去重门（聚合 hash 单门 + 全量包 contentHash 并列）
         id: gate
         env:
           NPM_SCOPE: ${{ vars.NPM_SCOPE }}
         run: |
           PKG="${NPM_SCOPE}/vviewer-grammars-full"
-          H_NEW=$(node -p "require('$GITHUB_WORKSPACE/dist-npm/package.json').contentHash")
-          H_LATEST=$(npm view "$PKG" contentHash 2>/dev/null || true)
+          N="$VV_NPM_PACKAGE_COUNT"
+          agg_local=$(i=1; while [ $i -le $N ]; do node -p "require('./dist-npm/p${i}/package.json').contentHash"; i=$((i+1)); done | sha256sum | cut -c1-16)
+          H_FULL_NEW=$(node -p "require('./dist-npm/package.json').contentHash")
+          agg_remote=$(i=1; while [ $i -le $N ]; do npm view "${PKG}-p${i}" contentHash 2>/dev/null || echo missing; i=$((i+1)); done | sha256sum | cut -c1-16)
+          H_FULL_LATEST=$(npm view "$PKG" contentHash 2>/dev/null || true)
           VER_LATEST=$(npm view "$PKG" version 2>/dev/null || true)
-          if [ -n "$H_LATEST" ] && [ "$H_NEW" = "$H_LATEST" ]; then
+          if [ "$agg_local" = "$agg_remote" ] && [ -n "$H_FULL_LATEST" ] && [ "$H_FULL_NEW" = "$H_FULL_LATEST" ]; then
             echo "SKIP_PUBLISH=1" >> "$GITHUB_ENV"
             echo "version=${VER_LATEST}" >> "$GITHUB_OUTPUT"
-            echo "内容未变化（${H_NEW}）：跳过发布，复用已发布版本 ${VER_LATEST}"
+            echo "内容未变化（聚合 ${agg_local} + 全量 ${H_FULL_NEW}）：跳过发布，复用已发布版本 ${VER_LATEST}"
           elif npm view "$PKG@$VV_NPM_PACKAGE_VERSION" version >/dev/null 2>&1; then
             echo "SKIP_PUBLISH=1" >> "$GITHUB_ENV"
             echo "version=${VV_NPM_PACKAGE_VERSION}" >> "$GITHUB_OUTPUT"
             echo "同版本已存在：跳过发布（tag 重跑）"
           else
             echo "version=${VV_NPM_PACKAGE_VERSION}" >> "$GITHUB_OUTPUT"
-            echo "内容变化（${H_NEW} ≠ 线上 ${H_LATEST:-无}）：发布 ${VV_NPM_PACKAGE_VERSION}"
+            echo "内容变化（聚合 ${agg_local} ≠ 线上 ${agg_remote:-无} 或全量变化）：发布 ${VV_NPM_PACKAGE_VERSION}"
           fi
-      - name: npm publish（OIDC trusted publishing，免长驻 token）
+          echo "packages=$(node -p "JSON.stringify(Array.from({length: $N}, (_, i) => '${NPM_SCOPE}/vviewer-grammars-full-p' + (i + 1)))")" >> "$GITHUB_OUTPUT"
+      - name: npm publish（逐子包 + 全量包，OIDC trusted publishing，免长驻 token）
         if: env.SKIP_PUBLISH != '1'
         # OIDC 发布要求 npm CLI ≥ 11.5.1（node 22 自带 10.x，须显式升级）；
         # 凭据由 npm 以 id-token: write 的 OIDC 自动换取，不设 NODE_AUTH_TOKEN。
         # --provenance：供应链签名，发布页展示 "Published with provenance"；
-        # npm 侧 Trusted Publisher（bhxch/vviewer/release.yml）须勾选允许 npm publish
-        # ——2026-09-03 后新建配置默认仅允许 stage publish，漏勾发布即被拒
+        # npm 侧 Trusted Publisher（bhxch/vviewer/release.yml）须逐包勾选允许 npm publish
+        # ——2026-09-03 后新建配置默认仅允许 stage publish，漏勾发布即被拒。
+        # 单包 publish 失败时先查该包该版本是否已在线上（上一轮部分发布成功的 tag 重跑
+        # 幂等补发；不在则真失败）——防 N 包中途失败重跑被 EP409 卡死
         run: |
           npm install -g npm@^11.5.1
           npm --version
-          npm publish ./dist-npm --access public --provenance
+          publish_or_skip() {
+            local P="$1"
+            if npm publish "$P" --access public --provenance; then
+              echo "发布成功：$(node -p "require('./${P#./}/package.json').name")"
+              return 0
+            fi
+            local PN PV
+            PN=$(node -p "require('./${P#./}/package.json').name")
+            PV=$(node -p "require('./${P#./}/package.json').version")
+            if npm view "$PN@$PV" version >/dev/null 2>&1; then
+              echo "$PN@$PV 已存在（tag 重跑幂等），跳过"
+            else
+              echo "::error::$PN@$PV 发布失败且线上无此版本"
+              return 1
+            fi
+          }
+          for i in $(seq 1 "$VV_NPM_PACKAGE_COUNT"); do
+            publish_or_skip "./dist-npm/p${i}" || exit 1
+          done
+          publish_or_skip "./dist-npm" || exit 1
 
   publish-packages:
     name: npm 源码包发布（清单动态）

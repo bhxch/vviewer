@@ -65,6 +65,7 @@ export {
   createDefaultHighlightFence,
   normalizeGrammarsBase,
   deriveQueriesBase,
+  parseMultiGrammarsBases,
   DEFAULT_GRAMMARS_BASE_URL,
   DEFAULT_RUNTIME_DIR,
   DEFAULT_LITE_LANGUAGES,

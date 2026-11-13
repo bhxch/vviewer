@@ -81,21 +81,36 @@ jobs:
           else
             echo "path=/$repo" >> "$GITHUB_OUTPUT"
           fi
-      # 第 3 层 CDN base 构建期烙入：npm 版本自解析（npm view 取 latest——方案 B 下
-      # 版本是资产内容的属性：内容变化经发布才更新 latest，内容零变化时 latest 不动、
-      # CDN URL 稳定）。包未首发（npm view 失败）或 scope 未配置 → 不注入 env，第 3 层
-      # 整体缺席而非注入畸形 URL
-      - name: 计算 CDN 资产 base（npm latest 自解析）
+      # 第 3 层 CDN base 构建期烙入：子包多基自解析（spec C 拆包）。pages 独立 checkout
+      # 无 release outputs 可读——逐包 `npm view <scope>/vviewer-grammars-full-p<i> version`
+      # 探测，i 自 1 递增至首个 404（npm view 失败），逐包以各自解析到的版本拼 jsdelivr
+      # URL、`|` 分隔（解析器兼容无分隔符单值）。探测上限 8 防漂移死循环：p8 仍可达时显式
+      # warn「包数超探测上限，pages 注入面不完整」（预计 5-6 包留余量，超限不得静默缺席）。
+      # 全 404（p1 即失败）→ 不注入 env，第 3 层整体缺席而非注入畸形 URL（缺席 warn 语义
+      # 保留；子包未首发的全量包旧版本不再注入——jsdelivr 对全量包 150MB 准入 403，注入
+      # 即坏层）
+      - name: 计算 CDN 资产 base（子包多基 npm 自解析）
         if: vars.NPM_SCOPE != ''
         env:
           NPM_SCOPE: ${{ vars.NPM_SCOPE }}
         run: |
-          VERSION=$(npm view "${NPM_SCOPE}/vviewer-grammars-full" version 2>/dev/null || true)
-          if [ -z "$VERSION" ]; then
-            echo "npm 尚无已发布版本，跳过 CDN 注入（第 3 层缺席；首发后自动恢复）"
+          BASES=""
+          i=1
+          while [ "$i" -le 8 ]; do
+            V=$(npm view "${NPM_SCOPE}/vviewer-grammars-full-p${i}" version 2>/dev/null || true)
+            if [ -z "$V" ]; then break; fi
+            BASES="${BASES}${BASES:+|}https://cdn.jsdelivr.net/npm/${NPM_SCOPE}/vviewer-grammars-full-p${i}@${V}/grammars/"
+            i=$((i+1))
+          done
+          if [ "$i" -eq 1 ]; then
+            echo "npm 尚无已发布子包，跳过 CDN 注入（第 3 层缺席；子包首发后自动恢复）"
             exit 0
           fi
-          echo "VV_GRAMMAR_CDN=https://cdn.jsdelivr.net/npm/${NPM_SCOPE}/vviewer-grammars-full@${VERSION}/grammars/" >> "$GITHUB_ENV"
+          if [ "$i" -gt 8 ]; then
+            echo "::warning::包数超探测上限（p8 仍可达），pages 注入面不完整——按实际装箱结果上调本步探测上限"
+          fi
+          echo "VV_GRAMMAR_CDN=${BASES}" >> "$GITHUB_ENV"
+          echo "CDN 多基注入（p1..p$((i-1))）：${BASES}"
       - name: 构建前端（注入子路径 base）
         run: pnpm --filter web build
         env:

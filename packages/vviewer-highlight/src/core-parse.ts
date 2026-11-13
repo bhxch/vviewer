@@ -44,6 +44,17 @@ export interface EngineOptions {
   queriesDir?: string | VirtualQueries;
   /** 查询按需加载基础 URL（如 '/queries/'，目录布局同 assets/queries）——Worker 端 fetch 加载；queriesDir/queries 未给时生效。 */
   queriesBase?: string;
+  /**
+   * queries base 逐语言解析器（多基拆包子包路由，spec C Task 2）：给定语言与其 grammar
+   * 清单条目，返回该语言 queries 目录的 base URL——非首子包语言的 queries 从其所在子包取
+   * （queries fetch 用引擎级闭包 base、不走 entry.base 的缺口改造，Task 1 builder check
+   * 结论承接）。缺省 undefined 时单值 queriesBase 语义逐字节不变（应用侧不传）。
+   * 仅 queriesBase 在场（远程查询形态）时生效；resolver 返回值完全接管该语言的 queries
+   * base（queriesBase 本体此时仅作启用开关与 resolver 未覆盖语言的降级）。
+   * 结构化克隆不可经 Worker 握手携带函数（worker.ts 注记）——本选项不进 WorkerInit 契约，
+   * 供主线程直驱形态（markdown 包 highlightDefault createEngine）与测试注入。
+   */
+  queriesBaseResolver?: (lang: string, entry: { file: string; base?: string }) => string;
   /** grammar wasm 目录（含 manifest.json），Node 文件系统路径。 */
   grammarsDir?: string;
   /** 直接给 grammar 清单（浏览器端跳过 manifest 读取）。 */
@@ -156,12 +167,25 @@ export class TreeSitterEngine {
 
   private constructor(assets: QueryAssets, grammarTable: GrammarTable, opts: EngineOptions) {
     this.assets = assets;
-    this.remoteQueries = opts.queriesBase ? remoteQueryLoader(opts.queriesBase, opts.onQueryLoaded) : null;
     this.grammarTable = grammarTable;
     this.grammarsBase = opts.grammarsBase ?? opts.grammarsDir ?? '';
     this.aliasToLang = buildAliasTable(grammarTable);
     this.maxInjectionDepth = opts.maxInjectionDepth ?? 3;
     this.parser = new Parser();
+    // queriesBaseResolver（spec C Task 2 多基拆包路由）：resolver 在场时以 lang → entry
+    // 逐语言解析 queries base（resolveGrammarEntry 需 grammarTable/aliasToLang 就绪——
+    // 故置于字段赋值后）；缺省 undefined 走单值 queriesBase 原路径，语义逐字节不变
+    this.remoteQueries = opts.queriesBase
+      ? remoteQueryLoader(
+          opts.queriesBaseResolver
+            ? (lang) => {
+                const entry = this.resolveGrammarEntry(lang);
+                return opts.queriesBaseResolver!(lang, entry ?? { file: '' });
+              }
+            : opts.queriesBase,
+          opts.onQueryLoaded,
+        )
+      : null;
   }
 
   /**
@@ -442,16 +466,19 @@ function shebangLanguage(text: string): string | null {
  * fetch 版查询来源（浏览器 Worker 端）：按需请求 `${base}${lang}/highlights.scm`、
  * `injections.scm` 与 `tags.scm`（tags 为大纲查询，缺失时 undefined，不阻断高亮）。
  * 目录布局与 assets/queries 一致；请求结果（含 404 的 null）按语言缓存，语言不变则只请求一次。
+ * base 形态：字符串单值（单基），或逐语言解析函数（多基拆包路由——spec C Task 2，lang →
+ * 该语言 queries 目录 base；在 per-lang 缓存键的 miss 分支内解析，各语言互不冲突）。
  * onLoaded（可选，Task 4 细口径）：每份文件 fetch 完成上报一次（`${lang}/${name}`，含
  * 404/SPA 兜底缺失/网络失败——帧语义是「fetch 已完成」，缺席才是悬挂）；缺省 undefined
  * 零调用（非 debug 链路不注入，行为与既有签名逐字节一致）。
  */
-function remoteQueryLoader(base: string, onLoaded?: (file: string) => void): AsyncQuerySource {
+function remoteQueryLoader(base: string | ((lang: string) => string), onLoaded?: (file: string) => void): AsyncQuerySource {
   const cache = new Map<string, Promise<QueryFile | null>>();
   return (lang) => {
     let p = cache.get(lang);
     if (!p) {
-      const dir = joinPath(base, lang);
+      const resolved = typeof base === 'function' ? base(lang) : base;
+      const dir = joinPath(resolved, lang);
       const read = async (name: string): Promise<string | undefined> => {
         try {
           const res = await fetch(`${dir}/${name}`);

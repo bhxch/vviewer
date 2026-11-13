@@ -3,11 +3,15 @@
 // worker——应用侧有自己的 worker client 时经 options.highlightFence / 模块级
 // setHighlightFence 注入覆盖本默认实现（依赖倒置与 render-text attach 注入同构）。
 //
-// grammar wasm 来源可配置（默认 jsdelivr CDN 的 @bhxch/vviewer-grammars-full），
-// 布局契约：`${base}manifest.json` 与 `${base}${file}` 同 base（grammarLayers.ts
-// 同款；发布包内 manifest 与 wasm 同目录）。查询资产不在 /grammars/ 目录——发布
-// 布局的 queries/ 与 grammars/ 为发布包根下的兄弟目录，默认由 baseUrl 推导
-// （/grammars/ → /queries/），可用 options.queriesUrl 显式指定。
+// grammar wasm 来源可配置（默认 jsdelivr CDN 的 @bhxch/vviewer-grammars-full 拆分子包
+// 多基），布局契约：`${base}manifest.json` 与 `${base}${file}` 同 base（grammarLayers.ts
+// 同款；发布包内 manifest 与 wasm 同目录）。默认值为 `|` 分隔多基（每基以 /grammars/
+// 结尾，逐基即一个拆分子包层，first-wins 合并 + 层失败 warn 跳层）；解析器兼容无分隔符
+// 单值（单基=单层，行为与拆包前一致）。查询资产不在 /grammars/ 目录——发布布局的
+// queries/ 与 grammars/ 为发布包根下的兄弟目录：单基缺省由 baseUrl 推导（/grammars/ →
+// /queries/）；多基时经 queriesBaseResolver 按语言所在子包推导（queries fetch 用引擎级
+// 闭包 base、不走 entry.base——非首子包语言必须路由回其所在子包，spec C Task 1 builder
+// check 缺口结论），可用 options.queriesUrl 显式指定单值覆盖。
 //
 // 失败降级链保留：引擎初始化失败 / 未知语言 / tree-sitter 解析失败 → 返回 null
 // → 管线内 hljs 动态 import 兜底 → hljs 也失败保留原文（与 pipeline.runHighlight
@@ -15,9 +19,24 @@
 import { TreeSitterEngine, assignIntervalsToLines, renderLineHtml, type GrammarTable, type VirtualQueries } from '@bhxch/vviewer-highlight';
 import type { HighlightFence } from './types';
 
-/** 默认 grammar 资产 URL：jsdelivr 的 npm 发布包，/grammars/ 结尾为布局契约。 */
-export const DEFAULT_GRAMMARS_BASE_URL =
-  'https://cdn.jsdelivr.net/npm/@bhxch/vviewer-grammars-full@0.1.0/grammars/';
+/**
+ * 默认 grammar 资产 URL：jsdelivr 拆分子包多基（`|` 分隔，逐基 /grammars/ 结尾——
+ * 全量包 228MB 超 jsdelivr 150MB 按包准入 403，拆 p1..pN 每包 ≤50MB 恢复默认全球档可用）。
+ *
+ * TODO(first-tag): 版本段 0.0.0-FIRST-TAG 为显式占位（首发 tag 定稿后同步校准全部子包
+ * 版本段与层数——错位即全子包 404、缺层即缺语言，校准闭环归实施计划 Task 6 台账④）。
+ * npm 实查全量包 latest=0.1.1 已占版、首发 tag 必然 >0.1.1，实施期不可实查、不臆造版本号。
+ * 层数按 workflow VV_NPM_PACKAGE_COUNT=6 占位对齐（首发以实际装箱结果为准，fail-fast
+ * 防线在 release.yml）；多余层 404 仅 warn 跳层（无碍），缺层则该层语言缺失（校准点）。
+ */
+export const DEFAULT_GRAMMARS_BASE_URL = [
+  'https://cdn.jsdelivr.net/npm/@bhxch/vviewer-grammars-full-p1@0.0.0-FIRST-TAG/grammars/',
+  'https://cdn.jsdelivr.net/npm/@bhxch/vviewer-grammars-full-p2@0.0.0-FIRST-TAG/grammars/',
+  'https://cdn.jsdelivr.net/npm/@bhxch/vviewer-grammars-full-p3@0.0.0-FIRST-TAG/grammars/',
+  'https://cdn.jsdelivr.net/npm/@bhxch/vviewer-grammars-full-p4@0.0.0-FIRST-TAG/grammars/',
+  'https://cdn.jsdelivr.net/npm/@bhxch/vviewer-grammars-full-p5@0.0.0-FIRST-TAG/grammars/',
+  'https://cdn.jsdelivr.net/npm/@bhxch/vviewer-grammars-full-p6@0.0.0-FIRST-TAG/grammars/',
+].join('|');
 
 /** 默认 web-tree-sitter runtime（tree-sitter.wasm）目录：0.25 系运行时文件名仍为
  * tree-sitter.wasm（0.27 起更名 web-tree-sitter.wasm，见 @bhxch/vviewer-highlight 注记）。 */
@@ -65,9 +84,25 @@ export function normalizeGrammarsBase(baseUrl: string): string {
 /**
  * 由 grammar base 推导查询资产 base：发布包布局中 queries/ 与 grammars/ 为包根下
  * 兄弟目录（pack-npm.mjs 布局），同版本号替换目录段即得同源查询 URL。
+ * 单基语义——多基下的 per-子包推导在 createEngine 内经 queriesBaseResolver 逐语言完成。
  */
 export function deriveQueriesBase(baseUrl: string): string {
   return normalizeGrammarsBase(baseUrl).replace(/grammars\/$/, 'queries/');
+}
+
+/**
+ * 多基解析（spec C 拆包子包）：`|` 分隔 + trim + 逐基 /grammars/ 结尾契约校验
+ * （normalizeGrammarsBase 同款）。无分隔符单值 = 单元素数组（单基兼容锚——
+ * build:e2e/ci.yml 等大量既有 spec 依赖单基注入，零回归）。无有效基（空串）抛错。
+ */
+export function parseMultiGrammarsBases(value: string): string[] {
+  const bases = value
+    .split('|')
+    .map((s) => s.trim())
+    .filter((s) => s !== '')
+    .map(normalizeGrammarsBase);
+  if (bases.length === 0) throw new Error(`grammars base 多基解析为空（至少一个以 /grammars/ 结尾的 base）: ${value}`);
+  return bases;
 }
 
 /**
@@ -98,30 +133,66 @@ export function createDefaultHighlightFence(options: DefaultHighlighterOptions =
 }
 
 async function createEngine(options: DefaultHighlighterOptions): Promise<TreeSitterEngine> {
-  const base = normalizeGrammarsBase(options.baseUrl ?? DEFAULT_GRAMMARS_BASE_URL);
-  let manifest = options.table;
-  if (!manifest) {
-    const res = await fetch(`${base}manifest.json`);
-    // SPA-fallback 防御（core-parse remoteQueryLoader 同款）：200 text/html 兜底视为缺失
-    if (!res.ok || (res.headers.get('content-type') ?? '').includes('text/html')) {
-      throw new Error(`grammar manifest 加载失败: HTTP ${res.status} ${base}manifest.json`);
-    }
-    const json = (await res.json()) as { grammars?: GrammarTable };
-    if (!json.grammars) throw new Error(`grammar manifest 缺 grammars 字段: ${base}manifest.json`);
-    manifest = json.grammars;
-  }
-  // 条目 base 以资产 URL 前缀覆写（manifest 内 base 字段仅供包独立消费可读，
-  // grammarLayers 装配语义同款）；单层来源本实现只支持一份（多层合并属应用侧
-  // 资产链职责，宿主需要时自行装配后经 options.table 直传）。
+  const bases = parseMultiGrammarsBases(options.baseUrl ?? DEFAULT_GRAMMARS_BASE_URL);
+  const base = bases[0]!;
   const table: GrammarTable = {};
-  for (const [lang, entry] of Object.entries(manifest)) {
-    table[lang] = { ...entry, base };
+  const baseByLang = new Map<string, string>();
+  if (options.table) {
+    // 直传表（自托管/离线形态）：保持单源语义——条目 base 统一覆写为首基（单基时首基=
+    // 唯一基，与改造前逐字节一致；多基直传为病态组合，wasm/queries 统一按首基解析）
+    for (const [lang, entry] of Object.entries(options.table)) {
+      table[lang] = { ...entry, base };
+    }
+  } else {
+    // 多基逐层 fetch + first-wins 合并（应用侧 grammarLayers mergeGrammarLayers 同语义
+    // 就地实现，不引依赖）：同名语言以先命中层为准；每条目 base 记其所在子包（wasm
+    // per-entry 加载 + queries 路由依据）。层失败（非 2xx / 200 text/html SPA fallback /
+    // 网络错）仅 warn 跳层，不阻塞其余层；全部层不可用才抛错（引擎初始化失败 → hljs 兜底）
+    for (const layerBase of bases) {
+      let layerTable: GrammarTable | null = null;
+      try {
+        const res = await fetch(`${layerBase}manifest.json`);
+        // SPA-fallback 防御（core-parse remoteQueryLoader 同款）：200 text/html 兜底视为缺失
+        if (!res.ok || (res.headers.get('content-type') ?? '').includes('text/html')) {
+          console.warn(`[markdown] grammar manifest HTTP ${res.status}，跳过该子包层: ${layerBase}manifest.json`);
+          continue;
+        }
+        const json = (await res.json()) as { grammars?: GrammarTable };
+        layerTable = json.grammars ?? null;
+        if (!layerTable) console.warn(`[markdown] grammar manifest 缺 grammars 字段，跳过该子包层: ${layerBase}manifest.json`);
+      } catch (e) {
+        console.warn(`[markdown] grammar manifest 加载失败，跳过该子包层: ${layerBase}manifest.json`, e);
+      }
+      if (!layerTable) continue;
+      for (const [lang, entry] of Object.entries(layerTable)) {
+        if (lang in table) continue; // first-wins：先命中层（更近/更靠前的子包）为准
+        table[lang] = { ...entry, base: layerBase };
+        baseByLang.set(lang, layerBase);
+      }
+    }
+    if (Object.keys(table).length === 0) {
+      throw new Error(
+        `grammar manifest 加载失败：全部 ${bases.length} 个子包层不可用（${bases.map((b) => `${b}manifest.json`).join(', ')}）`,
+      );
+    }
   }
+  // queries base 解析：queries 显式直传 → undefined（离线形态）；显式 queriesUrl → 单值
+  // （跨子包共享时由宿主自行决定，单值覆盖优先）；多基且无显式 queries 来源 →
+  // queriesBaseResolver 按语言所在子包派生 deriveQueriesBase（Task 1 builder check 缺口
+  // 改造——非首子包语言从其所在子包取 queries，不再落错误 base 404）；单基 → 单值推导
+  // （原语义逐字节不变，resolver 不传）。
+  const fallbackQueriesBase = options.queriesUrl ?? deriveQueriesBase(base);
+  const useResolver = !options.queries && !options.queriesUrl && bases.length > 1;
   return TreeSitterEngine.create({
     grammars: table,
     grammarsBase: base,
     queriesDir: options.queries,
-    queriesBase: options.queries ? undefined : (options.queriesUrl ?? deriveQueriesBase(base)),
+    queriesBase: options.queries ? undefined : fallbackQueriesBase,
+    ...(useResolver
+      ? {
+          queriesBaseResolver: (lang: string) => deriveQueriesBase(baseByLang.get(lang) ?? base),
+        }
+      : {}),
     runtimeDir: options.runtimeDir ?? DEFAULT_RUNTIME_DIR
   });
 }
