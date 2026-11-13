@@ -295,6 +295,10 @@ export async function setEnabledFont(id: string, enabled: boolean): Promise<void
   if (!enabled) {
     const face = faceCache.get(id);
     if (face) document.fonts.delete(face);
+    // 停用即逐出缓存（spec C Task 5 e2e 启停翻转锚实证：从 document.fonts delete 的
+    // FontFace 不可再次 add——「缓存保留免重解析」的假设在 Chromium 不成立，同页
+    // 重启用必须重建；负缓存不固化语义不变，重建失败可重试）
+    faceCache.delete(id);
     return;
   }
   document.fonts.add(await ensureFontFace(rec));

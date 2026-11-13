@@ -246,14 +246,14 @@ describe('CRUD 与门禁', () => {
 });
 
 describe('启停与 document.fonts 交互', () => {
-  it('停用：enabled 落库 + document.fonts.delete；再启用：缓存复用不重建', async () => {
+  it('停用：enabled 落库 + document.fonts.delete + 缓存逐出；再启用：重建新 Face（deleted Face 不可复用——spec C Task 5 e2e 启停翻转锚实证 Chromium 行为，行为有意翻转）', async () => {
     const rec = await addFontFromFile(fileOf([1], 'A.ttf'));
     await setEnabledFont(rec.id, false);
     expect(fontSet.removed).toEqual([faces[0]]);
     expect((await listFontRecords())[0]!.enabled).toBe(false);
     await setEnabledFont(rec.id, true);
-    expect(faces).toHaveLength(1); // 缓存命中，未重建
-    expect(fontSet.added).toEqual([faces[0], faces[0]]);
+    expect(faces).toHaveLength(2); // 停用已逐出缓存：重启用重建新 Face
+    expect(fontSet.added).toEqual([faces[0], faces[1]]);
     expect((await listFontRecords())[0]!.enabled).toBe(true);
   });
 
