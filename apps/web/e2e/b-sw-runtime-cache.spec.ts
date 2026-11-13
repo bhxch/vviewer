@@ -366,6 +366,9 @@ function parseRoutes(sw: string): RouteRow[] {
     }
     let k = j + 1;
     let source = '';
+    // 字符类 [..] 内的 '/' 不是正则结束符（评审修复引入的排除正则含 [^/]+）——
+    // 提取循环补字符类状态，类内 '/' 不截断
+    let inClass = false;
     while (k < sw.length) {
       const ch = sw[k] as string;
       if (ch === '\\') {
@@ -373,7 +376,9 @@ function parseRoutes(sw: string): RouteRow[] {
         k += 2;
         continue;
       }
-      if (ch === '/') break;
+      if (ch === '[' && !inClass) inClass = true;
+      else if (ch === ']' && inClass) inClass = false;
+      else if (ch === '/' && !inClass) break;
       source += ch;
       k += 1;
     }
@@ -735,6 +740,33 @@ test.describe('b-sw-runtime-cache SW 运行时缓存路由（自建静态伺服�
     expect(r.status).toBe(200);
     await page.waitForTimeout(3_000); // 留出潜在误路由入缓存的窗口
     expect(await vvHolders(page, url), '非 jsdelivr 域资源不得入 vv-* 运行时缓存（在线直取边界）').toEqual([]);
+  });
+
+  test('SWR-ROUTE-10: css 型预置字体切片 URL 不入 vv-cdn-engines-*（spec §7 负向前瞻排除——断网回退缺省全域成立 + 引擎 LRU 配额不被挤占，真网）', async ({
+    page
+  }) => {
+    test.setTimeout(120_000);
+    // spec §7 落定「切片走普通网络请求不入库不进 SW 缓存」——预置 css 字体
+    // （@fontsource/noto-sans-sc、lxgw-wenkai-webfont 等）的切片 URL 命中 jsdelivr
+    // 通配前先被负向前瞻排除（vite.config CDN_ENGINES_PATTERN，排除集
+    // fontPresets.cssPresetFontPackExclusions 单一来源派生）。真网可达（200+ACAO，
+    // builder 实测），skipIf 不可达；缓存面硬断言（可到达面稳定，与 SWR-ROUTE-08
+    // 不同——本锚断言「不进缓存」而非「进缓存」，put 不发生即稳定成立）
+    const url = 'https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/index.css';
+    await page.goto(fixture.base);
+    await waitSwActivated(page);
+    const r = await probe(page, url);
+    if (r.status !== 200) {
+      test.skip(
+        true,
+        `jsdelivr 不可达或页面 fetch 被 CORS 拒绝（status=${r.status}, error=${r.error ?? '-'}）：SWR-ROUTE-10 依赖真网 jsdelivr`
+      );
+    }
+    await page.waitForTimeout(3_000); // 留出潜在误路由入缓存的窗口
+    expect(
+      await vvHolders(page, url),
+      'css 型预置字体切片不得入 vv-cdn-engines-*（断网回退缺省全域成立，LRU 配额不被挤占）'
+    ).toEqual([]);
   });
 
   test(

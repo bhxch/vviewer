@@ -129,8 +129,13 @@ describe('SW 注册面源码锚（vite.config runtimeCaching + BUG-60 清理 + c
     expect(foreignAt, '缺 foreign 资产 CDN 前缀 CacheFirst 规则').toBeGreaterThan(-1);
     const sameOriginAt = src.indexOf('/\\/file-viewer-assets\\//');
     expect(sameOriginAt, '缺同源预留槽 CacheFirst 规则').toBeGreaterThan(-1);
-    const cdnEnginesAt = src.indexOf('/^https:\\/\\/cdn\\.jsdelivr\\.net\\/npm\\/.*/');
-    expect(cdnEnginesAt).toBeGreaterThan(-1);
+    // 评审修复（spec §7）：jsdelivr 通配改负向前瞻正则（排除 css 型预置字体包——
+    // fontPresets.cssPresetFontPackExclusions 派生），正则字面经 CDN_ENGINES_PATTERN
+    // 常量注入——先匹配先赢锚改按常量定位 + 排除集构造式在场断言
+    const cdnEnginesAt = src.indexOf('urlPattern: CDN_ENGINES_PATTERN');
+    expect(cdnEnginesAt, '缺 vv-cdn-engines jsdelivr 通配路由（CDN_ENGINES_PATTERN 注入形态）').toBeGreaterThan(-1);
+    const cssExclusionAt = src.indexOf('cssPresetFontPackExclusions()');
+    expect(cssExclusionAt, '缺 css 型预置字体排除集派生（spec §7 css 切片不入缓存）').toBeGreaterThan(-1);
     expect(foreignAt, 'foreign 规则必须先于 vv-cdn-engines 通配（否则被吞）').toBeLessThan(cdnEnginesAt);
     expect(src, 'CacheFirst handler').toContain("handler: 'CacheFirst'");
     expect(src).toContain('vv-foreign-assets-${BUILD_REVISION}');

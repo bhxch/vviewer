@@ -6,6 +6,7 @@ import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, rmSync, 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { cssPresetFontPackExclusions } from './src/lib/fontPresets';
 
 // 子路径托管（GitHub Pages 项目站点 /<repo>/ 等）：VV_BASE_PATH 注入（如 /vviewer）。
 // 默认空 = 根路径，本地 dev/e2e/自建服务器部署行为不变。同名值供下方 sveltekit()
@@ -26,6 +27,14 @@ const QUERIES_DEST = fileURLToPath(new URL('./static/queries', import.meta.url))
 // expiration 清理，修复语法 wasm/查询跨版本陈旧。同时经 define 注入
 // __BUILD_REVISION__ 供运行时（调试/诊断）读取。
 const pkg = JSON.parse(readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf8')) as { version: string };
+// spec §7 落定（评审修复）：css 型预置字体切片不入 SW 运行时缓存——vv-cdn-engines
+// 通配 CacheFirst 会把预置字体 jsdelivr 源的 index.css/style.css 与相对路径切片 woff2
+// 全部收进 vv-cdn-engines-*（拍板「断网回退缺省」仅对 unpkg/npmmirror 源成立；中文字体
+// 上百切片占满 maxEntries 48 的 LRU，把 bpmn 35 片等引擎分片逐出，构成图表二次加载
+// 性能回归）。排除集从 fontPresets.ts 派生（清单加包自动跟随，单一来源）；single 型
+// 条目不排除（入库离线语义下 SW 命中无害，每包 1 文件）。
+const CSS_FONT_PACKS = cssPresetFontPackExclusions();
+
 const BUILD_REVISION = `${pkg.version}-${Math.floor(Date.now() / 60_000).toString(36)}`;
 
 // 残余 A8：foreign 资产 env 镜像域（VV_FOREIGN_ASSETS，构建期定型——SW 规则在
@@ -43,6 +52,16 @@ const FOREIGN_ASSETS_ENV_MIRROR =
     : '';
 // RegExp 字面量转义（镜像 base 拼进 urlPattern——'.' 等元字符须字面匹配）
 const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// spec §7 落定（评审修复）：vv-cdn-engines 通配排除 css 型预置字体包（fontPresets
+// cssPresetFontPackExclusions 派生——清单加包自动跟随，单一来源）——切片 css/woff2
+// 不进 vv-cdn-engines-*（spec §7「css 型不做离线」拍板全域成立 + 引擎 LRU 配额不被
+// 字体切片挤占）。escapeRegExp 复用上方镜像域同款。
+const CDN_ENGINES_PATTERN = new RegExp(
+  // 排除项带可选版本段：URL 形态 `包名@版本/`（index.css 与切片均在 `包名@ver/`
+  // 之下）——裸 `包名/` 前瞻对 `包名@ver/` 不匹配（排除击穿，首轮 e2e 实证）
+  `^https://cdn\\.jsdelivr\\.net/npm/(?!(?:${CSS_FONT_PACKS.map((p) => `${escapeRegExp(p)}(?:@[^/]+)?`).join('|')})/)`,
+);
 
 // A8 镜像路由预构造（类型取自 VitePWAOptions 推导，不直引 workbox-build）：env 为空
 // 空数组。独立常量而非内联条件展开——TS 6 对「上下文类型数组字面量内的条件展开」
@@ -798,7 +817,10 @@ export default defineConfig({
             // spec C §3.2 边界（Task 3 落定注记）：engines 两档无 unpkg/cn 预设族
             //（jsdelivr +esm 转换端点无兼容替代）；settings.cdn.engines custom 域
             // 在线直取不入运行时缓存（host 锚定构建期不可知），档位变更提示刷新。
-            urlPattern: /^https:\/\/cdn\.jsdelivr\.net\/npm\/.*/,
+            // 评审修复（spec §7 落定）：负向前瞻排除 css 型预置字体包（fontPresets
+            // cssPresetFontPackExclusions 派生）——切片 css/woff2 不入本缓存（断网
+            // 回退缺省拍板语义全域成立 + 引擎分片 LRU 配额不被字体切片挤占）。
+            urlPattern: CDN_ENGINES_PATTERN,
             handler: 'CacheFirst',
             options: {
               cacheName: `vv-cdn-engines-${BUILD_REVISION}`,

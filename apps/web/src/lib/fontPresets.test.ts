@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { FONT_PRESETS } from './fontPresets';
+import { cssPresetFontPackExclusions, FONT_PRESETS } from './fontPresets';
 
 const sourceText = readFileSync(
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), './fontPresets.ts'),
@@ -64,5 +64,21 @@ describe('FONT_PRESETS 预设清单（spec C §3.3 builder 实测选定终版）
     // 运行时值含 CJK（霞鹜文楷）：转义后解码正确
     expect(FONT_PRESETS[0]!.displayName).toContain('LXGW WenKai');
     expect(FONT_PRESETS[0]!.displayName).toMatch(/[\u4e00-\u9fff]/);
+  });
+});
+
+describe('cssPresetFontPackExclusions（SW 排除集——spec §7 css 型切片不入缓存）', () => {
+  it('css 型 jsdelivr 包全名集合（含 scope 段）；single 型包不在集；无裸 scope 段（防单段捕获误排整个 scope）', () => {
+    expect(cssPresetFontPackExclusions().sort()).toEqual([
+      '@fontsource/noto-sans-sc',
+      '@fontsource/noto-serif-sc',
+      'lxgw-wenkai-webfont'
+    ]);
+    // single 型（@fontsource/jetbrains-mono 等）不在排除集——SW 命中无害（每包 1 文件）
+    for (const p of FONT_PRESETS.filter((x) => x.kind === 'single')) {
+      const scopePack = /npm\/((?:@[^/]+\/)?[^/]+)\//.exec(p.sources[0]!.url)?.[1];
+      expect(scopePack, `${p.family} 不应入排除集`).not.toBe(cssPresetFontPackExclusions().includes(scopePack as string));
+      expect(cssPresetFontPackExclusions()).not.toContain(scopePack!);
+    }
   });
 });

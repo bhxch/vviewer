@@ -89,3 +89,28 @@ export const FONT_PRESETS: readonly WebFontPreset[] = [
   fontsourceSingle('@fontsource/iosevka', '5.3.0', 'Iosevka'),
   fontsourceSingle('@fontsource/inter', '5.3.0', 'Inter')
 ] as const;
+
+// ---------- SW 缓存排除集（spec §7 落定：css 型切片不入 SW 运行时缓存） ----------
+
+/**
+ * css 型预置字体在 jsdelivr 源上的 npm 包名集合（切片 css 与相对路径切片 woff2 同包，
+ * 排除包前缀即全包覆盖）。消费面：vite.config.ts 的 vv-cdn-engines 通配路由以此构造
+ * 排除正则——spec §7「css 型不做离线：切片走普通网络请求不入库不进 SW 缓存」被该
+ * 通配 CacheFirst 击穿的修复面（清单加包自动跟随，单一来源）。
+ * single 型条目（@fontsource 西文 woff2 单文件）不排除：入库离线语义下 SW 缓存命中
+ * 无语义收益但也无害（每包 1 文件，不构成 LRU 危害）。
+ */
+export function cssPresetFontPackExclusions(): string[] {
+  return [
+    ...new Set(
+      FONT_PRESETS.filter((p) => p.kind === 'css').flatMap((p) =>
+        p.sources
+          .filter((s) => s.url.includes('cdn.jsdelivr.net/'))
+          // 包名捕获须含 scope 段（@fontsource/noto-sans-sc 全名；单段捕获会漏成
+          // '@fontsource' 而误排整个 scope——single 型条目同 scope 将被连带排除）
+          .map((s) => /npm\/((?:@[^/@]+\/)?[^/@]+)(?:@[^/]+)?\//.exec(s.url)?.[1])
+          .filter((v): v is string => v !== undefined)
+      )
+    )
+  ];
+}
