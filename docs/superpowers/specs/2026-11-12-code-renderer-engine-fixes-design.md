@@ -49,3 +49,9 @@
 ## 5. 留给 builder 的裁量
 
 - det 探测链抽取的函数边界；原因提示的具体通道（状态栏 title vs toast vs 两者）；hasGrammar 查询口的暴露层（client vs grammarLayers）；重建触发面是否含「手动重试」按钮（错误卡片无——降级面不用错误卡）；MetaPanel 候选排序的最终形态。
+
+## 6. builder check 订正与落定（2026-11-13）
+
+- **hasGrammar 门只作用本地 worker 链，远程可用时远程优先**（落定）：合并清单是 create() 时快照（服务端层为连接时快照，新建连服务器的清单外语言远程明明可用）——清单外+远程 compute 可用 → 走远程（不拦）；清单外+无远程 → 直接 hljs + 原因。降级原因分两态：「本地无 grammar，已用远程 tree-sitter」「本地与远程均无 grammar，已用 hljs 兜底」。
+- **重建通道 API 形态**（落定）：`recreate({ force? })`——spec③ CDN 档位变更传 `force`（无条件重建，manifest 快照语义）；本 spec 的切渲染器/切语言走 failed-态门控。**「worker 健康、清单全空」（三层 manifest 全失败不 reject 的形态）纳入 failed-态判定**——spec③ 落地前 CDN 坏期这是常态，显式动作应给重试机会，限流保留。
+- **自动路径降级原因同样可见化**（落定）：det.lang 清单外的自动降级（open-as/extless）与手动 langOverride 同样注记原因——用户原始 bug 正是自动路径静默，只覆盖手动面等于没修全。

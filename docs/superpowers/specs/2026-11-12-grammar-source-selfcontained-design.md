@@ -40,10 +40,12 @@
 `tools/grammar-builder/helix-pin.json`（入库，唯一新源清单）：
 
 ```json
-{ "tag": "25.07.1", "commit": "<该 tag 的 commit sha>", "refreshedAt": "2026-11-12T…" }
+{ "ref": "<tag 或 commit>", "commit": "<解析后的 commit sha>", "release": "<release tag 名，可空>", "refreshedAt": "…" }
 ```
 
-- 初始生成：GitHub API `releases/latest` 解析 tag → `git/refs/tags/<tag>` 解析 commit（或 raw 重定向/commits API，builder 选可靠路径），写 pin。
+- **pin 目标终拍（用户 2026-11-14）：master commit 锚定**（替代 2026-11-13 的 release tag 拍板）。决策链：builder check 实测最新 release 25.07.1 仅 247 条 [[grammar]]（release 滞后 master 16 个月）→ 用户初选 release pin → tree-house 调查发现 tags.scm 覆盖面 20(release) vs 77(master) 且扩张整体发生在 release 之后（合并时间线实证，非上游 bug）→ 用户改拍「语言和 tags 都 pin 到 master HEAD，从按 release 锚定变为按 commit 锚定」。**单一 commit 锚点同时供 languages.toml 与 tags.scm，天然消除节点名漂移**。
+- 初始 pin = 实施时 origin/master HEAD（2026-11-14 实测 a714a818a，303 [[grammar]]/342 [[language]]——与现入库 vendored 计数一致，语言集零回退，301 门禁语义当前成立）。
+- `--refresh` 语义：fetch origin/master → HEAD commit 更新 pin → 全量重生成 + 差异报告（语言集 ±、rev 变更、queries/tags 差异）；release 信息不再作为锚（可选参考展示）。
 - 所有下游生成都以 pin 为准（可复现）；网络失败显式报错不静默。
 
 ### 3.2 新生成器脚本 `tools/grammar-builder/gen-sources.mjs`
@@ -52,10 +54,10 @@
 
 1. **languages.toml@tag**：`raw.githubusercontent.com/helix-editor/helix/<tag>/languages.toml` 下载解析（smol-toml 已是 devDep），产出：
    - `build-list.json` 等价物（name/source/rev/subpath + parser.c 探测改为**拉取后探测**或信任上游——裁量：保持探测（浅取 grammar 源后验）会把 build-list 生成推迟到 fetch 之后；替代=信任 helix 清单不探测，`--fetch` 失败即暴露。倾向后者+fetch 层失败清单既有机制）；
-   - `server/grammars-manifest.json`（301 门禁集合派生，<301 报错语义保留）；
+   - `server/grammars-manifest.json`（集合派生 = [[grammar]] 全集 − use-grammars.except − vendored 特例；**门禁改动态**：manifest 携带期望条目数，server 测试断言 registry 数==manifest 数，不再硬编码 301——当前值恰 301，refresh 后随上游增长）；
    - languages.json 派生（**builder 必查**：现 languages.json 的字段消费面——detect/highlight/registry 三处消费的具体字段与 helix languages.toml 字段的映射关系；若现文件含 Markpad 增补字段需在派生时保留注入）；
    - `generated-extensions.ts`（gen-code-extensions 逻辑并入，源=languages.json）。
-2. **queries@tag**：helix `runtime/queries/<lang>/*.scm` 按语言清单拉取（git trees API recursive 一次列全 + raw 逐文件，tools/fetch-e2e-corpus.mjs:1-35 算法现成）→ `packages/vviewer-highlight/assets/queries/`；QUERY_PATCHES 应用（唯一命中替换，命中≠1 抛错）；tags.scm 补源逻辑并入（TAGS_SOURCES 改 pin tag）。
+2. **queries@pin**：helix `runtime/queries/<lang>/*.scm` 按语言清单拉取（git trees API recursive 一次列全 + raw 逐文件，tools/fetch-e2e-corpus.mjs:1-35 算法现成）→ `packages/vviewer-highlight/assets/queries/`；QUERY_PATCHES 应用（唯一命中替换，命中≠1 抛错）；**tags.scm 补源同一 pin commit**（TAGS_SOURCES 不再独立 pin——用户 2026-11-14 拍板单一 commit 锚点，语言与 tags 同 commit 消除节点漂移）；**helix 变体目录映射**（`_javascript`/`_typescript`/`gjs`/`gts`/`php-only` 等共享 grammar 变体目录）在 tags 补源时归一映射到对应语言或按 vviewer outline 管线消费形态处理（builder 核对现行 outline 目录名→语言映射逻辑后定）。
 3. **themes@tag**：helix `runtime/themes` → `themes.json`（现 themes.json 结构/消费面 builder 核对后保持等价输出）。
 4. **GRAMMAR_LICENSES.md**：在 `--fetch` 落地 out/grammars 源树后生成（现逻辑不变，仅时序后移到 fetch 后；pack-npm 前置依赖不变）。
 5. 全部产物写盘前打印变更摘要（语言集 ±、rev 变更数、queries 差异文件数）。
@@ -85,7 +87,8 @@
 - **queries 体积与拉取时长**：960 文件全量拉取入 CI 冷缓存——trees API 单次 + raw 并发，量级同 e2e 语料 fetch（实测可承受）；缓存 key 不含 queries 内容，pin 不变即命中。
 - **languages.json 字段映射**是最大不确定性（Markpad 增补字段若存在需显式注入）；themes.json 同理。
 - **出库导致 build 顺序硬依赖 gen**：本地首跑/CI 冷缓存都必须先 gen——错误提示要明确（gen 缺产物时各消费端报错指向 gen 命令）。
-- 全量门禁不变：`full_registry_count_is_301`、manifest ≥264 断言、vitest 24 项 grammar-builder 单测迁移改写。
+- 全量门禁形态（随 commit 锚定更新）：`full_registry_count_is_301` 与 grammar.yml manifest ≥264 断言改**动态期望数**（断言 registry/manifest 自身一致，gen-sources 产出即真相）；vitest 24 项 grammar-builder 单测迁移改写。
+- **master HEAD 锚定的固有代价**（替代原 release 回退风险项）：master 是移动前沿，refresh 间隔内上游 breaking 变化（查询语法/grammar rev 失配）直接进 pin——防线=refresh 差异报告人工审阅 + QUERY_PATCHES 机制 + CI 编译门禁（编译失败清单机制既有）；refresh 不做任何自动静默升级。
 
 ## 6. 验收锚点
 
@@ -97,3 +100,10 @@
 ## 7. 留给 builder 的裁量
 
 - gen-sources 的子命令拆分（gen/refresh/fetch-probe）与产物落盘原子性（临时目录+rename）；queries 拉取并发度与失败重试；languages.json/themes.json 映射实现；CI gen 步的缓存层次（gen 产物单独缓存 vs 并入 setup-grammars 现有 paths）；旧脚本退役的过渡提交切分。
+
+## 8. builder check 订正与落定（2026-11-13）
+
+- **pin 目标**：两轮拍板后终定 master commit 锚定（release tag 拍板被 tree-house/tags 时间线调查推翻），见 §3.1；其余设计两案通用，不受影响。
+- **cSymbol 字段派生**（builder check 抓出的缺失面，落定）：server build.rs 的 cSymbol 是 Markpad 静态表专有字段，helix languages.toml 没有——按规约推导 `tree_sitter_<name，-→_>` + fetch 后从 parser.c 的 TSLanguage 函数名交叉验证，不一致报错进失败清单（builder 实测现 301 条全部符合规约，无需例外表）。
+- **publish-npm 的 queries/license 供给断链**（builder check 抓出，落定）：出库后 publish-npm job（只 checkout+解包 wasm artifact）拿不到 queries/GRAMMAR_LICENSES.md——**扩展 artifact 契约**：grammar 构建 job 上传时附带 queries/ + GRAMMAR_LICENSES.md + manifest（pack-npm 改从 artifact 解包目录读全部输入，VV_QUERIES_DIR 等指向解包路径），publish-npm 不跑 gen。
+- **303→301 派生集合的唯一来源**（builder check 抓出，落定）：新清单集合 = helix `[[grammar]]` 全集 − helix `use-grammars.except`（wren/gemini 语义照抄）− vendored 特例（vue 走 fixtures 不入清单）；`[[language]]` 与 grammar 段的差集以 grammar 段为准（languages.json 由 [[language]] 派生但 registry 键集随 grammar 段门禁）；aliases.json 引用的 wasm 名与新清单一致性校验进 gen 门禁（含 lite 选择面完整性）。

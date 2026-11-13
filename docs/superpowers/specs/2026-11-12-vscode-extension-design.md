@@ -68,3 +68,11 @@
 ## 6. 留给 builder 的裁量
 
 - 打包器选型与 chunk 策略；serializer/panel 复用策略；archive 渲染器取舍（libarchive wasm 打包成本 vs 价值）；theme JSON 精确注入的实现时机；扩展名清单的生成脚本形态（复用 gen-code-extensions 派生面）；双渠道 workflow 与 release.yml 的编排关系；i18n 文案集。
+
+## 7. builder check 订正与落定（2026-11-13）
+
+- **相对链接导航在 MVP 接线**（落定，builder check 指出不接线=核心交互死链）：webview 侧注入 workspace 版 `resolveRelativeLink`（`Uri.joinPath` + `vscode.workspace.fs.readFile` 探测）；**相对图片一并解析**（sibling bytes → blob URL，比 web 端简单——§4.3「相对图片 MVP 不解析」作废）。数据通道相应加「按路径读文件」的 host 往返消息面。
+- **导出 HTML 保留在 MVP**（落定）：数据通道补 webview→host 写盘面（showSaveDialog + fs.writeFile）；katex 字体内联走 collectExportHtml 既有形态。
+- **设置/主题变更实时生效**（落定）：`onDidChangeConfiguration`（vviewer 作用域过滤）+ `onDidChangeActiveColorTheme` → postMessage 推送到已打开 webview → 包 applyTheme/重渲染面应用，不要求重开文件。
+- **大文件上限**（落定）：全量通道 200MB 上限（对齐 web PLAIN_MAX_BYTES 口径），超限 webview 显示引导占位（回退 VSCode 原生编辑器）。
+- **技术订正**：CSP 需 `script-src 'wasm-unsafe-eval'`（tree-sitter wasm 实例化必需）+ `font-src` 覆盖 asWebviewUri（katex 字体）；pdfjs worker 经 `pdfWorkerUrl` 的 `import.meta.url` 资产化（pdf.ts:128-132）需 esbuild asset 处理；toc 数据面实际导出名 `extractToc`/`TocEntry`（vviewer-markdown index.ts:26）与 `pairsToOutline`（highlight index.ts:45）。

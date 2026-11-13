@@ -71,4 +71,12 @@
 
 ## 6. 留给 builder 的裁量
 
-- github/gitlab 双实现 vs 单 provider 抽象；清单缓存刷新策略（手动刷新按钮 vs 打开时自动）；raw vs API 内容通道的最终选择（限速 vs 一致性权衡）；凭据区块在目录管理页的落位；prefix 过滤在前端树层还是清单层；Range 实测后是否开启。
+- github/gitlab 双实现 vs 单 provider 抽象；清单缓存刷新策略（手动刷新按钮 vs 打开时自动）；凭据区块在目录管理页的落位；prefix 过滤在前端树层还是清单层；Range 实测后是否开启。
+
+## 7. builder check 订正与落定（2026-11-13）
+
+- **GitHub raw 域 Bearer 未实测**（builder check 正确指出 CORS 实测≠认证实测）：内容通道落定为 **raw 优先 + API `repository/contents` 兜底**——raw 命中 401/403（private repo/fine-grained PAT 对 raw 域行为不确定）时自动走 API contents（api.github.com Bearer 是标准契约，已实测 CORS）；API 命中比例注记限速预算（5000/h）。builder 实施时先实测 raw+PAT，成立则兜底退化为纯降级路径。
+- **凭据库引用模型**（落定，builder check 两案择后）：凭据库按 host+owner 独立条目；`DirectMountRecord` 存 `credentialKey`（owner 键引用）而非 token 本体（token 留空场景）；`createDirectMountStore` 重建时按 credentialKey 查库——**轮换凭据=改库条目即生效**（releaseDirectMountStore 凭据轮换先例同型），恢复链在 createDirectMountStore 内查库（一处改动，「恢复链零改动」断言修正为「四点插拔面 + createDirectMountStore 查库一处」）。显式填 token 的记录直接存 token（不建库条目）。
+- **ref 输入形态落定**：纯文本输入 + 「测试连接」（refs 解析探测）；不做 branches/tags 下拉列表（额外 API 面）。测试连接在匿名模式提示烧限速额度。
+- **GitLab 树清单分页**（落定）：per_page=100 顺序拉 + 进度提示 + 条目上限（默认 2 万条目后提示截断，数值裁量）；不用 offset 深分页并发。
+- **锚点勘误**：mountsSync 在 `apps/web/src/lib/mountsSync.ts`（非 packages/vviewer-core）。

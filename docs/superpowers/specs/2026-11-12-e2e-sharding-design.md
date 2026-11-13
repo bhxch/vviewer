@@ -51,4 +51,9 @@
 
 ## 6. 留给 builder 的裁量
 
-- prep job vs 首 leg 内联；浏览器安装放 prep 还是各 shard；blob reporter 对本地 `pnpm test:e2e` 工作流的影响（本地保持 line/html 即可，config 按 CI 分支）；merge job 的 artifact 命名与保留期。
+- 浏览器安装放 prep 还是各 shard；blob reporter 对本地 `pnpm test:e2e` 工作流的影响（本地保持 line/html 即可，config 按 CI 分支）；merge job 的 artifact 命名与保留期。
+
+## 7. builder check 落定（2026-11-13）
+
+- **prep job 不保留 `needs: web` 串行门**（落定，builder check 指出的时长账开关）：prep 与 web/rust 并行起跑（e2e-prep 独立 job），shards `needs: [web, e2e-prep]`——否则总 wall ≈ web+prep+shard ≈ 30m+，§1 目标不可达；代价=web 门失败时 prep 白跑一个 runner 的构建成本，知情接受。
+- blob 报告每 shard `if: always()` 上传（merge job 聚合依赖），与 trace 分 shard 上传并存。

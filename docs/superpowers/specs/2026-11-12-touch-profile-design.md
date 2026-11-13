@@ -23,15 +23,15 @@
 ### 3.1 检测与生效态
 
 - 新单源响应式模块 `apps/web/src/lib/touchProfile.svelte.ts`（runes）：
-  - `touchMode: 'auto'|'touch'|'desktop'`（来自 settings）；
-  - 感知：`matchMedia('(pointer: coarse)').matches` 且 `navigator.maxTouchPoints > 0` → coarse 主动输入；监听 pointercoarse/pointerfine 变化（外接键鼠切换热更新）；
+  - `touchMode: 'auto'|'touch'|'desktop'`（来自 settings，落定归 layout 节）；
+  - 感知：`matchMedia('(any-pointer: coarse)').matches` 且 `navigator.maxTouchPoints > 0` → 触屏输入可用；监听 matchMedia change（外接键鼠切换热更新）。**落定用 `any-pointer`**：动机点名触屏笔记本（primary pointer 是 fine 的触摸板/鼠标 + coarse 触屏），`pointer:` 检测会漏报该核心场景；带触摸屏的台式机误报由「强制桌面」档兜底；
   - `isTouchActive = mode==='touch' ? true : mode==='desktop' ? false : coarse`（auto）。
 - 反目标：不做 UA 嗅探、不做触摸事件首次命中启发（pointer:coarse 已足够且可热切换）。
 
 ### 3.2 设置面
 
-- `settings.touch.mode: 'auto'|'touch'|'desktop'`，默认 `'auto'`。
-- 归属节（裁量）：**layout 节**（布局与交互近邻，避免新组）；`layout.ts` 的 `LayoutSettings/DEFAULT_LAYOUT/sanitizeLayout` 同步（先例 zen 字段）；`settingsDraft.ts` layout 节走 `sanitizeLayout` 复用（零 allowed 表改动——选 layout 节的关键收益）。
+- `layout.touchMode: 'auto'|'touch'|'desktop'`（**落定：layout 节内字段**，非新顶层节——settingsDraft layout 节 allowed 表由 `sanitizeLayout` 输出派生，字段进 LayoutSettings 即零 allowed 改动；builder check 指出的两种归属矛盾以此为准）。
+- `layout.ts` 的 `LayoutSettings/DEFAULT_LAYOUT/sanitizeLayout` 同步（先例 zen 字段）。
 - UI：LayoutSection 加三态控件（对齐 themeMode 三态控件先例）；i18n 双目录补键（zh-CN/en settings）。
 
 ### 3.3 触屏档案行为清单（本期落地面）
@@ -54,4 +54,8 @@
 
 ## 5. 留给 builder 的裁量
 
-- body 级 data 属性 vs 各组件内订阅的传导方式（推荐 data 属性单点，CSS 集中）；触屏档案下各 hover 控件的具体常显样式归并；设置归属节的最终决定（若离开 layout 节需同步补 settingsDraft allowed 表）；SCRL 箭头触屏形态。
+- body 级 data 属性 vs 各组件内订阅的传导方式（推荐 data 属性单点，CSS 集中）；触屏档案下各 hover 控件的具体常显样式归并；SCRL 箭头触屏形态。
+
+## 6. builder check 订正（2026-11-13）
+
+- mobile project（playwright.config.ts 仅 viewport+hasTouch+UA，无设备描述符）下 `(any-pointer: coarse)` 模拟值未验证——e2e 验收锚②若模拟不出 coarse，允许用 `page.emulateMedia({pointer:'coarse'})` 作为 auto 档吃档案的用例证据（真机行为另列真机补测，沿 BUG-26 先例）。

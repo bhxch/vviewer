@@ -65,6 +65,15 @@
 
 - 默认档取 `manual`（推荐，体验优先）还是 `blocked`（保守，BUG-17 防线零回退）——**倾向 manual，需在设置文案与 release notes 标注防线语义变化**；白名单归一细节（端口/大小写）；manual 档同 src 免确认的会话范围；接管点击的事件委托落点（容器级委托 vs 逐链接绑定）；posixJoin 复用 vs 新解析函数；目录 tab 打开的 store 通道选型。
 
+## 6. builder check 订正与落定（2026-11-13）
+
+- **manual 档实现机制落定**（builder check 指出「src 保留+不加载」在 DOM 层面矛盾）：外域 img 的 src **迁入 `data-vv-external-src`**（DOM 无 src 即不发请求，BUG-17 防线真实维持），占位呈现=该 img 包占位容器（img 隐藏）；「加载图片」点击=src 回填+标记转已加载。e2e 断言基准=src 缺失 + data 属性存在（断言形态由此确定）。
+- **媒体扩展名交点落定**：enrich 的 img→video/audio 转换发生在 sanitize 后渲染时，manual 档下 src 已迁 data 属性 → 转换不发生 → 「加载图片」按钮文案按目标扩展名区分（.mp4/.webm 等→「加载视频」），点击放行时按扩展名创建 video/audio 元素（preload=none，MD-13 语义）替换占位，而非回填进 img。
+- **html/docx 直调点同步注入**（落定）：`packages/vviewer-render-text/src/html.ts:41` 与 `packages/vviewer-render-doc/src/docx.ts:47` 直调 `sanitizeHtml` 不在 markdown 管线内——同样注入档位 opts（体验一致），两处装配从 app 侧 settings 取值。
+- **跨文件 fragment**（落定）：`./other.md#section` 打开目标文件后 MVP **不自动定位**（hash 丢弃，注记）；打开通道加锚点定位列为后续增强。
+- **音视频/poster 维持剥除是定案**（修 §3.1 引用指向错误）：AV/poster 任何档位（含白名单）都不放行，白名单作用面=img 与 srcset。
+- **锚点勘误**：TreeStore 接口无 `exists`（types.ts:39-65）——存在性探测仿 `markdownImages.ts` 的 `resolveImageBlobUrl` 用 `listChildren(dir).find(...)`，平铺 store 退化按 read 失败兜底。
+
 ## 6. 验收锚点
 
 - 单测：sanitize 选项矩阵（三档 × 白名单命中/未命中 × srcset）；解析式用例（同目录/上级/URL 编码/query-hash）。

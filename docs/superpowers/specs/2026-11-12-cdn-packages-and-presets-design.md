@@ -38,13 +38,21 @@ jsdelivr 对 `@bhxch/vviewer-grammars-full@0.1.0` 返回 403，错误体 `Packag
 
 ### 3.2 CDN 档位设置（运行时切换）
 
-- 新设置节（裁量归组：**新组「网络资源」或并入既有存储与数据组**）：`settings.cdn: { grammars: 'default'|'unpkg'|'cn'|'custom', grammarsCustom: string, engines: 同四值, foreign: 同四值 }`（三作用面独立：grammar wasm / 图表 CDN 引擎 / foreign 资产；default=jsdelivr 子包现行）。
+- 作用面与档位值集（**落定，builder check：engines 的 jsdelivr `+esm` 转换端点与 unpkg/npmmirror 不兼容**——bpmn/wavedrom 等是 CJS 包依赖 jsdelivr 转换，且 foreign 10 包是第三方 @file-viewer 包白名单不可控）：
+  - `grammars`：四档 `default|unpkg|cn|custom` + 自定义输入（cn=npmmirror files 通道，**本仓子包白名单申请中**）；
+  - `engines`（图表 CDN 引擎）：两档 `default|custom`（不提供 unpkg/cn 预设——`+esm` 转换端点无兼容替代，除非 builder 实测 esm.sh 可行后另行增强）；
+  - `foreign`（资产 10 包）：两档 `default|custom`。
+- 新设置节（裁量归组：**新组「网络资源」或并入既有存储与数据组**）：`settings.cdn: { grammars, grammarsCustom, engines, enginesCustom, foreign, foreignCustom }`。
 - **运行时消费改造**：现三处均为构建期 define/env——改为运行时：
-  - grammar：highlightClient create() 的 cdnBase 从 settings 读（构建 env 仅作 `default` 档的缺省注入），变更后重建 HighlightClient（单例重建通道恰是 spec⑤ 修 3 的接缝，两 spec 协同）；
+  - grammar：highlightClient create() 的 cdnBase 从 settings 读（构建 env 仅作 `default` 档的缺省注入），变更后**无条件重建** HighlightClient（档位变更语义：manifest 是 create() 快照，不重建不生效；与 spec⑤ 的 failed-态门控重建是两个独立入口，共享 destroy/create 单例原语，无先后依赖——builder check 顺序耦合问题以此消解）；
   - 图表引擎：cdnEngines.ts 的 host 常量改参数化（diagramOptions 注入缝现成 setDiagramOptions）；
   - foreign：foreignAssets 三层链 CDN 层 base 参数化。
 - **SW 缓存一致性**（关键接缝）：runtimeCaching 是构建期静态规则，运行时换 host 后新域请求不命中既有 CacheFirst 规则。方案（裁量）：复用 env 镜像域机制（:51-66）在构建期注入各档位已知 host 正则（jsdelivr/unpkg/npmmirror 三族全量注册，量小），自定义域走 **SW message 通道动态注册**（或最简：档位变更提示刷新页面使 SW 重注册——推荐起步，message 通道列为增强项）。
-- 档位预设值：`unpkg=https://unpkg.com/@scope/vviewer-grammars-full@<latest>/grammars/`（latest 解析与现行 pages 缺版 warn 语义对齐）；`cn=https://registry.npmmirror.com/@scope/.../files/grammars/`（**标注：包白名单申请中，落地前不可用**；npmmirror 布局契约核实点：files 通道路径即包内路径，manifest 同目录契约成立——builder 用任一白名单包实测确认）；`custom` 用户填完整 base（以 `/grammars/` 结尾校验）。
+- 档位预设值（**落定：三档统一指向新子包多基**，形态同构）：
+  - `default`：构建期注入（release/pages 拼 jsdelivr 子包 URL，已知精确版本）；
+  - `unpkg`：`https://unpkg.com/@scope/vviewer-grammars-full-p1/grammars/|…p2/grammars/`（不带版本=unpkg 缺省 latest 重定向）——**版本解析固化策略**：启用档位时经 unpkg meta API 解析一次精确版本并显示/固化（可手动重解析），避免重定向不确定性与缓存键漂移；builder 实测重定向链 CORS 后可改直用缺省重定向；
+  - `cn`：`https://registry.npmmirror.com/@scope/.../files/grammars/`（同固化策略；**标注：包白名单申请中，落地前不可用**；npmmirror 布局契约核实点：files 通道路径即包内路径，manifest 同目录契约成立——builder 用任一白名单包实测确认）；
+  - `custom`：用户填完整多基（以 `/grammars/` 结尾校验）。
 - 设置中心 UI：三作用面各一行档位选择 + 自定义输入框；i18n 双目录。
 - 反目标：不做 CDN 健康探测自动选路；不为 kroki/plantuml/open-vsx 提供档位。
 
@@ -74,4 +82,10 @@ jsdelivr 对 `@bhxch/vviewer-grammars-full@0.1.0` 返回 403，错误体 `Packag
 
 ## 6. 留给 builder 的裁量
 
-- 子包切分算法（按语言字母段 vs 体积均衡装箱）与包名；outputs 版本聚合口径；SW 自定义域通道（message 动态注册 vs 提示刷新）；档位节归属组；css 型字体的记录结构与撤销路径；预置清单最终条目与来源 URL 实测选定。
+- 子包切分算法（按语言字母段 vs 体积均衡装箱）；outputs 版本聚合口径；SW 自定义域通道（message 动态注册 vs 提示刷新）；档位节归属组；css 型字体的记录结构与撤销路径；预置清单最终条目与来源 URL 实测选定。
+
+## 7. builder check 订正与落定（2026-11-13）
+
+- **包名定稿**（消除与 Trusted Publisher 前置的顺序矛盾）：`@bhxch/vviewer-grammars-full-p1` / `-p2`（若三包则 `-p3`）。**仓外前置（用户操作，首发硬门）**：npm 包页逐包配置 Trusted Publisher（owner=bhxch/repo=vviewer/workflow=release.yml，勾选 npm publish）——OIDC 首发 absence 即 E403/E404，v0.1.0 首发 same pattern。
+- **css 型字体不做离线**（落定）：切片走普通网络请求不入库不进 SW 缓存，断网时该字体回退缺省；single 型维持现有入库离线语义。UI 上 css 型条目标注「在线字体」。
+- **engines/foreign 档位收窄、cn 档仅 grammars**：见 §3.2 落定注记（白名单申请范围仅本仓子包）。

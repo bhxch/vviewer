@@ -73,3 +73,9 @@ aside (flex column, 不滚动)
 ## 7. 留给 builder 的裁量
 
 - 左栏 header 行内切换器与折叠钮的排布；zen 浮钮具体视觉与位置（避开 `.vv-zen-exit` 与状态栏）；zen 打开栏的宽度策略；FileTree 隐藏 vs 卸载；共享目录组件的拆出形态（新组件文件 vs 复用现有 Toc/OutlineView 直挂）。
+
+## 8. builder check 订正与落定（2026-11-13）
+
+- **移动端（≤900px）zen 目录入口**（builder check 提出，落定）：复用抽屉状态机通道——zen 下浮钮点击=打开对应侧抽屉，抽屉内锁定目录视图（树/属性/Git 隐藏）；`zenPopAction` 新档=先关抽屉再退 zen，zenGuard 在抽屉关闭后重新 arm。桌面通道（§4.2 flex 放行）与移动通道按既有断点分流。
+- **zen 浮钮显隐门**（落定）：与右栏切换器目录钮同语义——`tocEntries/outlineDefinitions` 皆空时两侧浮钮都不显示（无目录数据不开空栏）。
+- **zen 打开的栏内折叠钮**（落定）：隐藏——避免 zen 临时栏触发 `leftCollapsed/rightCollapsed` 持久化写入造成退出 zen 后栏不可达。
