@@ -14,11 +14,33 @@ vviewer 语法高亮的完整 grammar wasm 资产包：≥264 语言的 tree-sit
 - vendored 语言（上游 C scanner，如 yaml）在 manifest 中以 `vendored` 标注
 - 门禁口径：manifest 键数 ≥264
 
+## 拆分子包
+
+jsdelivr 对 npm 包按包准入（150MB 上限），全量包超限即整包 403。发布链因此
+同时产出**体积均衡拆分子包** `@bhxch/vviewer-grammars-full-p1..pN`
+（first-fit-decreasing 装箱，每包解包体积 ≤50MB；N 随全量集体积定稿）：
+
+- 子包布局与本包同构：`grammars/manifest.json` 仅含本包语言条目 +
+  `grammars/*.wasm` 仅本包 wasm + `queries/<lang>/` 仅本包语言目录
+- 语言条目与其 wasm、queries 恒落**同一子包**（queries 跟随语言所在子包，
+  跨包引用不成立）
+- 子包间无共享文件（license 聚合与 README 每包自带一份）
+
 ## CDN 引用
+
+全量包：
 
 ```text
 https://cdn.jsdelivr.net/npm/@bhxch/vviewer-grammars-full@<版本>/grammars/
 https://cdn.jsdelivr.net/npm/@bhxch/vviewer-grammars-full@<版本>/queries/
+```
+
+拆分子包（多基 `|` 分隔，逐子包一层 base）：
+
+```text
+https://cdn.jsdelivr.net/npm/@bhxch/vviewer-grammars-full-p1@<版本>/grammars/
+|https://cdn.jsdelivr.net/npm/@bhxch/vviewer-grammars-full-p2@<版本>/grammars/
+|…pN@<版本>/grammars/
 ```
 
 版本号内嵌于 URL（jsdelivr 精确版本钉死）；manifest 各条目自带 `base` 字段，

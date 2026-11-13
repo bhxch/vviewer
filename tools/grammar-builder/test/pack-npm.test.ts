@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, writeFileSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync, mkdirSync, readFileSync, readdirSync, statSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { packNpm, main, NPM_FILES_FIELD, MANIFEST_ENTRY_BASE } from '../pack-npm.mjs';
+import { packNpm, packNpmSplit, main, NPM_FILES_FIELD, MANIFEST_ENTRY_BASE, DEFAULT_PACK_LIMIT_BYTES } from '../pack-npm.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../..');
@@ -254,5 +254,194 @@ describe('packNpm contentHash（发布去重门的内容寻址哈希）', () => 
     writeFileSync(path.join(f2.grammars, 'javascript.wasm'), Buffer.from([1, 2, 3, 4, 255]));
     const r2 = packNpm(ARGS(f2));
     expect(r2.contentHash).not.toBe(r1.contentHash);
+  });
+});
+
+/* ---------------------------------- 拆分模式 ---------------------------------- */
+
+const MB = 1024 * 1024;
+
+interface SplitResult {
+  outDir: string;
+  name: string;
+  contentHash: string;
+  bytes: number;
+  langs: string[];
+}
+
+/**
+ * 定长 wasm fixture（拆分用）：sizes lang→wasm 字节数（大件任意放大，单包 fixture() 先例），
+ * 每语言 queries/<lang>/highlights.scm 一个小 .scm。同一临时目录，用例尾清理。
+ */
+function fixtureSized(sizes: Record<string, number>) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'vv-gb-split-'));
+  const grammars = path.join(dir, 'grammars-src');
+  mkdirSync(grammars);
+  const entries: Record<string, { file: string; abi: null; sha256: string; aliases: string[] }> = {};
+  for (const [lang, size] of Object.entries(sizes)) {
+    writeFileSync(path.join(grammars, `${lang}.wasm`), Buffer.alloc(size, 1));
+    entries[lang] = { file: `${lang}.wasm`, abi: null, sha256: 'a'.repeat(64), aliases: [] };
+  }
+  writeFileSync(
+    path.join(grammars, 'manifest.json'),
+    JSON.stringify({
+      note: 'fixture manifest',
+      generatedAt: '2026-10-10T00:00:00.000Z',
+      source: 'self-built',
+      grammars: entries,
+    }),
+  );
+  const queries = path.join(dir, 'queries-src');
+  for (const lang of Object.keys(sizes)) {
+    mkdirSync(path.join(queries, lang), { recursive: true });
+    writeFileSync(path.join(queries, lang, 'highlights.scm'), '; q; q; q; q');
+  }
+  const repoPkgJson = path.join(dir, 'repo-pkg.json');
+  writeFileSync(repoPkgJson, JSON.stringify({ name: 'vviewer', repository: 'https://github.com/x/vviewer' }));
+  const licenseFile = path.join(dir, 'GRAMMAR_LICENSES.md');
+  writeFileSync(licenseFile, '# Grammar Licenses\n\nfixture license text\n');
+  return { dir, grammars, queries, repoPkgJson, licenseFile, outDir: path.join(dir, 'dist-npm') };
+}
+
+const SPLIT_ARGS = (f: ReturnType<typeof fixtureSized>, packLimitBytes?: number) => ({
+  grammarsDir: f.grammars,
+  queriesDir: f.queries,
+  outDir: f.outDir,
+  name: '@scope/vviewer-grammars-full',
+  version: '1.2.3',
+  repoPkgJson: f.repoPkgJson,
+  licenseFile: f.licenseFile,
+  ...(packLimitBytes !== undefined ? { packLimitBytes } : {}),
+});
+
+describe('packNpmSplit（拆分模式：FFD 体积均衡装箱，门禁两段语义）', () => {
+  it('门禁第 1 段——单件前提：单语言载荷（wasm+queries）> packLimitBytes 整体抛错，不产任何包（{60,30,0.1}MB @40MB）', () => {
+    const f = fixtureSized({ langA: 60 * MB, langB: 30 * MB, langC: 100 * 1024 });
+    try {
+      expect(() => packNpmSplit(SPLIT_ARGS(f, 40 * MB) as never)).toThrow(/单语言载荷.*langA/);
+      // fail-fast：装箱前预检，未触任何写盘
+      expect(existsSync(f.outDir)).toBe(false);
+    } finally {
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('门禁第 2 段——装箱门禁 + FFD 均衡：{35,30,0.1}MB @40MB → N=2，每包总字节 ≤ 阈值，成员分布=FFD 真实产出', () => {
+    const f = fixtureSized({ langA: 35 * MB, langB: 30 * MB, langC: 100 * 1024 });
+    try {
+      const results = packNpmSplit(SPLIT_ARGS(f, 40 * MB) as never) as SplitResult[];
+      expect(results).toHaveLength(2);
+      // 每包解包总字节 ≤ 阈值——门禁第 2 段全部包逐一断言，无例外（walkOut 实测含 package.json 的保守口径）
+      for (const r of results) {
+        const walked = walkOut(r.outDir);
+        expect(walked.reduce((s, x) => s + x.bytes, 0)).toBeLessThanOrEqual(40 * MB);
+      }
+      // 成员分布按 FFD 确定性真实产出：35MB 开包 1，30MB 放不下开包 2，0.1MB 回填首个能容纳的包（35+0.1=35.1≤40）
+      // ——勿写「大件独占」反期望（FFD 回填语义必然把后续小件塞进首个能容纳的包）
+      expect(results[0].langs).toEqual(['langA', 'langC']);
+      expect(results[1].langs).toEqual(['langB']);
+    } finally {
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('每包布局与单包契约同构：manifest 键集==包内 wasm 文件集 + 顶层元数据/base 同源 + 包根条目同单包 + queries 跟随语言所在子包', () => {
+    const f = fixtureSized({ langA: 35 * MB, langB: 30 * MB, langC: 100 * 1024 });
+    try {
+      const results = packNpmSplit(SPLIT_ARGS(f, 40 * MB) as never) as SplitResult[];
+      for (const r of results) {
+        // manifest 在 grammars/ 内（与 wasm 同目录布局契约），键集与包内 wasm 文件集一致（dangling 断言，单包先例同源）
+        expect(existsSync(path.join(r.outDir, 'grammars', 'manifest.json'))).toBe(true);
+        expect(existsSync(path.join(r.outDir, 'manifest.json'))).toBe(false);
+        const m = JSON.parse(readFileSync(path.join(r.outDir, 'grammars', 'manifest.json'), 'utf8')) as PackedManifest;
+        const wasmFiles = readdirSync(path.join(r.outDir, 'grammars')).filter((x) => x.endsWith('.wasm')).sort();
+        expect(Object.keys(m.grammars).sort()).toEqual(wasmFiles.map((x) => x.replace(/\.wasm$/, '')).sort());
+        // 顶层元数据与单包同源同值；每条 entry 注 base "./"
+        expect(m.note).toBe('fixture manifest');
+        for (const g of Object.values(m.grammars)) expect(g.base, `${r.name} entry.base`).toBe('./');
+        // 包根条目同单包布局
+        expect(readdirSync(r.outDir).sort()).toEqual(['GRAMMAR_LICENSES.md', 'README.md', 'grammars', 'package.json', 'queries']);
+      }
+      // queries/<lang>/ 跟随语言所在子包（包1={langA,langC} 包2={langB}；跨包无该语言目录）
+      expect(readdirSync(path.join(results[0].outDir, 'queries')).sort()).toEqual(['langA', 'langC']);
+      expect(readdirSync(path.join(results[1].outDir, 'queries')).sort()).toEqual(['langB']);
+      expect(existsSync(path.join(results[0].outDir, 'queries', 'langB'))).toBe(false);
+      expect(existsSync(path.join(results[1].outDir, 'queries', 'langA'))).toBe(false);
+      // queries 内容逐字节一致
+      expect(readFileSync(path.join(results[1].outDir, 'queries', 'langB', 'highlights.scm'))).toEqual(Buffer.from('; q; q; q; q'));
+    } finally {
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('聚合 hash 稳定：同输入两次运行全包 contentHash 序列逐字节相等；单语言内容变化仅影响其所在包 hash', () => {
+    const f = fixtureSized({ langA: 35 * MB, langB: 30 * MB, langC: 100 * 1024 });
+    try {
+      const r1 = packNpmSplit(SPLIT_ARGS(f, 40 * MB) as never) as SplitResult[];
+      rmSync(f.outDir, { recursive: true, force: true });
+      const r2 = packNpmSplit(SPLIT_ARGS(f, 40 * MB) as never) as SplitResult[];
+      expect(r2.map((x) => x.contentHash)).toEqual(r1.map((x) => x.contentHash));
+      // 单语言内容变化（langA=35MB 件 → 包1）：仅其所在包 hash 变
+      writeFileSync(path.join(f.grammars, 'langA.wasm'), Buffer.alloc(35 * MB, 2));
+      rmSync(f.outDir, { recursive: true, force: true });
+      const r3 = packNpmSplit(SPLIT_ARGS(f, 40 * MB) as never) as SplitResult[];
+      expect(r3[0].contentHash).not.toBe(r1[0].contentHash);
+      expect(r3[1].contentHash).toBe(r1[1].contentHash);
+    } finally {
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('包名 p1..pN 连续、版本同 tag；contentHash 落各包 package.json', () => {
+    const f = fixtureSized({ langA: 35 * MB, langB: 30 * MB, langC: 100 * 1024 });
+    try {
+      const results = packNpmSplit(SPLIT_ARGS(f, 40 * MB) as never) as SplitResult[];
+      expect(results.map((r) => r.name)).toEqual(['@scope/vviewer-grammars-full-p1', '@scope/vviewer-grammars-full-p2']);
+      for (const r of results) {
+        const pkg = JSON.parse(readFileSync(path.join(r.outDir, 'package.json'), 'utf8')) as PkgJson & { contentHash: string };
+        expect(pkg.version).toBe('1.2.3');
+        expect(pkg.private).toBe(false);
+        expect(pkg.contentHash).toMatch(/^[0-9a-f]{16}$/);
+        expect(pkg.contentHash).toBe(r.contentHash);
+      }
+    } finally {
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('outDir fail-fast（H8 拆分同口径）：根目录已含 p* 子目录或单包产物 package.json 时拒跑', () => {
+    const f = fixtureSized({ langA: 1024, langB: 1024 });
+    try {
+      mkdirSync(path.join(f.outDir, 'p1'), { recursive: true });
+      expect(() => packNpmSplit(SPLIT_ARGS(f, 40 * MB) as never)).toThrow(/outDir 非空/);
+      const f2 = fixtureSized({ langA: 1024, langB: 1024 });
+      mkdirSync(f2.outDir, { recursive: true });
+      writeFileSync(path.join(f2.outDir, 'package.json'), '{"stale":true}');
+      expect(() => packNpmSplit(SPLIT_ARGS(f2, 40 * MB) as never)).toThrow(/outDir 非空/);
+    } finally {
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('生产缺省 packLimitBytes=50MB（DEFAULT_PACK_LIMIT_BYTES）；main() 经 VV_NPM_SPLIT=1 + VV_NPM_SPLIT_LIMIT_MB env 驱动拆分', async () => {
+    expect(DEFAULT_PACK_LIMIT_BYTES).toBe(50 * 1024 * 1024);
+    const f = fixtureSized({ langA: 35 * MB, langB: 30 * MB, langC: 100 * 1024 });
+    try {
+      const results = (await main({
+        VV_NPM_PACKAGE_NAME: '@scope/vviewer-grammars-full',
+        VV_NPM_PACKAGE_VERSION: '1.2.3',
+        VV_NPM_OUT: f.outDir,
+        VV_GRAMMARS_OUT: f.grammars,
+        VV_QUERIES_DIR: f.queries,
+        VV_NPM_SPLIT: '1',
+        VV_NPM_SPLIT_LIMIT_MB: '40',
+      })) as SplitResult[];
+      expect(results).toHaveLength(2);
+      expect(existsSync(path.join(f.outDir, 'p1', 'package.json'))).toBe(true);
+      expect(existsSync(path.join(f.outDir, 'p2', 'package.json'))).toBe(true);
+      expect(existsSync(path.join(f.outDir, 'package.json'))).toBe(false);
+    } finally {
+      rmSync(f.dir, { recursive: true, force: true });
+    }
   });
 });
