@@ -150,6 +150,10 @@ export function ensureHighlightClient(): Promise<HighlightClient> | null {
 export function rebuildHighlightClient(): void {
   if (!browser) return;
   generation += 1;
+  // 在途远程高亮一并中止（与 cancelHighlight 的 tab 切换同语义——销毁路径对称）：
+  // 切档重建时在途的远程 fetch 跑完后响应只会落入已被替换的旧渲染管线（无主连接）
+  remoteAbort?.abort();
+  remoteAbort = null;
   const prevPromise = clientPromise;
   clientPromise = null;
   clientSettled = false;
