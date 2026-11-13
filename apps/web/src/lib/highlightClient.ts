@@ -22,6 +22,7 @@ import {
   grammarWarmUrl,
   type MergedGrammarTable
 } from './grammarLayers';
+import { resolveGrammarCdnBases } from './cdnProfiles';
 import { loadCapabilities, loadComputeLanguages, loadLastServer } from './openFlow.svelte';
 import { translate as t } from './i18n/core';
 import { loadSettings } from './stores/settings';
@@ -42,11 +43,21 @@ import { loadSettings } from './stores/settings';
  * fetch 并 first-wins 合并（grammarLayers.ts），条目 base 标明 wasm 来源层。
  * 服务端层为连接时快照——create() 随首次调用只跑一次，会话中新连接的服务器
  * 不会进入资产链，需刷新页面生效（compute 路由则实时读取，与此不同）。
+ * CDN 层档位（spec C §3.2 Task 3）：settings.cdn.grammars 运行时解析（default 档
+ * 回构建期 env 多基注入）——档位变更经 rebuildHighlightClient() 重建（AppShell
+ * 订阅 diff 接线；代际计数防在途旧 promise 落袋），服务端层仍为连接时快照。
  */
 
 let clientPromise: Promise<HighlightClient> | null = null;
 /** clientPromise 是否已落定（成功或失败）：cancelHighlight 的「迟到 cancelAll」防护开关 */
 let clientSettled = false;
+/** 代际计数（spec C §3.2 档位变更重建，Review Focus 2 竞态防线）：rebuild 时代递增，
+ * 旧代际 create 的落定路径发现代际不符即废弃产物（dispose 不落袋）——防在途旧
+ * promise 覆盖新 client 的 attach 面/语法清单。 */
+let generation = 0;
+/** 当前存活 client 实例（rebuild 时同步 dispose 旧实例；在途 promise 的产物由
+ * 代际守卫废弃）。 */
+let currentClient: HighlightClient | null = null;
 
 /** 在途远程高亮的中止控制器（cancelHighlight 随 tab 切换一并 abort，不等无主响应）。 */
 let remoteAbort: AbortController | null = null;
@@ -84,16 +95,37 @@ function warmHighlightAsset(url: string): void {
     .catch(() => {});
 }
 
-/** 惰性创建/获取单例；SSR 下返回 null（Worker 仅存在于浏览器端）。 */
+/**
+ * 惰性创建/获取单例；SSR 下返回 null（Worker 仅存在于浏览器端）。
+ * 代际守卫（spec C §3.2 rebuild）：创建时刻的代际号捕获进 promise 闭包——rebuild
+ * 后旧代际落定的产物废弃（dispose 不落袋不写状态），成功路径转发新代际 promise。
+ */
 export function ensureHighlightClient(): Promise<HighlightClient> | null {
   if (!browser) return null;
   if (!clientPromise) {
-    clientPromise = create()
+    const gen = generation;
+    clientPromise = create(gen)
       .then((c) => {
+        if (gen !== generation) {
+          // 旧代际产物（rebuild 已发）：废弃不落袋——dispose 并转发新代际 client
+          //（预热等旧持有者自然续接，不拿到废弃实例）
+          try {
+            c.dispose();
+          } catch {
+            /* 废弃路径 dispose 失败静默 */
+          }
+          return ensureHighlightClient() as Promise<HighlightClient>;
+        }
         clientSettled = true;
         return c;
       })
       .catch((e: unknown) => {
+        if (gen !== generation) {
+          // 旧代际失败：新代际 create 已接管，不再走「attach null 解绑」通道
+          //（会污染新代际的 attach 面）——warn 留痕后 rethrow 由既有持有者自接
+          console.warn('[vviewer] stale highlight client creation failed (superseded by rebuild)', e);
+          throw e;
+        }
         // BUG-06 可观测：创建期失败（worker 创建等；manifest 各层失败已在 grammarLayers
         // 跳层折叠，不再走到这里）同样显式上报，不再零提示静默降级 hljs；
         // rethrow 保持既有 rejected 语义（不重试）
@@ -106,6 +138,34 @@ export function ensureHighlightClient(): Promise<HighlightClient> | null {
       });
   }
   return clientPromise;
+}
+
+/**
+ * 档位变更重建（spec C §3.2）：dispose 旧 client（cancelAll+worker.terminate）+
+ * 重置单例 + ensureHighlightClient() 重 create。AppShell 单订阅点在 cdn.grammars/
+ * grammarsCustom 两字段 diff 变化时调用（manifest 是 create() 快照，不重建不生效）。
+ * 代际计数防在途旧 promise 落袋覆盖新 client（HL-09 前科同族的竞态面——CDN 层
+ * 构建秒级创建窗口内二次切档/旧 create 落定均被代际守卫废弃）。
+ */
+export function rebuildHighlightClient(): void {
+  if (!browser) return;
+  generation += 1;
+  const prevPromise = clientPromise;
+  clientPromise = null;
+  clientSettled = false;
+  grammarManifest = null;
+  if (currentClient) {
+    try {
+      currentClient.dispose(); // cancelAll + worker.terminate（client.ts dispose）
+    } catch (e: unknown) {
+      console.warn('[vviewer] stale highlight client dispose failed', e);
+    }
+    currentClient = null;
+  }
+  // 在途旧 promise：落定路径由代际守卫废弃（成功产物 dispose / 失败静默），此处
+  // 仅消费防 unhandled rejection
+  void prevPromise?.catch(() => {});
+  void ensureHighlightClient();
 }
 
 /**
@@ -253,21 +313,32 @@ function withDebug(client: HighlightClient): CodeHighlightClient {
   };
 }
 
-async function create(): Promise<HighlightClient> {
+async function create(gen: number): Promise<HighlightClient> {
   // 三层资产解析链（spec §3）：同源 → 服务端（连接时快照，会话中新连接需刷新
   // 页面才进入资产链）→ CDN。各层失败跳层不阻塞；同名语言 first-wins 归更近层。
-  // 环境变量经 vite define 静态替换，构建时定型。
-  const cdnBase = import.meta.env.VV_GRAMMAR_CDN || null;
+  // CDN 层 base 改运行时解析（spec C §3.2 Task 3）：settings.cdn 档位（default 档
+  // 回构建期 env 注入值——vite define 静态替换；多基 `|` 分隔逐基展开为 cdn-p<i>
+  // 子包层）。档位变更经 rebuildHighlightClient() 重建（本函数以新代际号重跑）。
+  const cdnBases = resolveGrammarCdnBases(loadSettings(), import.meta.env.VV_GRAMMAR_CDN ?? '');
+  if (cdnBases === null) {
+    // custom 档校验失败：CDN 层缺席 + warn 留痕（不静默吞——UI 错误态在设置节）
+    console.warn('[vviewer] custom grammar CDN bases failed validation; CDN layer omitted');
+  }
   const serverBase = loadLastServer()?.baseUrl ?? null;
   const { grammars, layers } = await assembleGrammarLayers({
     sameOriginBase: `${baseUrl}grammars/`,
     serverBase,
-    cdnBase
+    cdnBase: cdnBases && cdnBases.length > 0 ? cdnBases : null
   });
   if (layers.length === 0) {
     // BUG-06 可观测：三层全部失败时本地 tree-sitter 必然全链不可用，显式留痕
     // （create 单例只跑一次，此 error 天然一次性；不 reject——hljs 降级仍可用）
     console.error('[vviewer] all three grammar asset layers failed (same-origin/server/CDN); local highlighting will fall back to hljs');
+  }
+  // 代际守卫（assemble 完成后、任何状态写入前）：rebuild 已发生即废弃本产物
+  //（dispose 不 attach 不写 manifest——防旧 create 覆盖新代际的 attach 面与语法清单）
+  if (gen !== generation) {
+    throw new Error('highlight client creation superseded by rebuild');
   }
   grammarManifest = grammars;
   const worker = new Worker(new URL('./ts-worker.ts', import.meta.url), { type: 'module' });
@@ -292,6 +363,7 @@ async function create(): Promise<HighlightClient> {
       console.error(`[vviewer] tree-sitter worker failed to load: ${reason}`);
     }
   );
+  currentClient = client;
   attachHighlightClient(withDebug(client));
   // 预热 runtime wasm：同上，worker 内 fetch 不经 SW，主线程预热使其进 vv-runtime-*
   // CacheFirst（离线重开代码文件的 runtime 来源）

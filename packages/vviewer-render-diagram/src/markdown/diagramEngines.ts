@@ -71,7 +71,7 @@ async function renderSvgbob(source: string): Promise<string> {
 export async function renderDiagramEngine(
   engine: DiagramEngineId,
   source: string,
-  opts?: { mermaidTheme?: MermaidTheme; renderer?: string }
+  opts?: { mermaidTheme?: MermaidTheme; renderer?: string; host?: string }
 ): Promise<string> {
   switch (engine) {
     case 'mermaid':
@@ -84,21 +84,25 @@ export async function renderDiagramEngine(
       return renderMathFence(source);
     case 'svgbob':
       return renderSvgbob(source);
+    // CDN 直链引擎族（spec C §3.2，Task 3）：host 透传（缺省 jsdelivr；custom 档经
+    // diagramOptions.cdnEnginesHost 注入，settings.cdn.engines 两字段 diff 派发的
+    // 重画通道触发即时生效）。本地引擎族（mermaid/graphviz/nomnoml/math/svgbob）
+    // 不受 host 影响。
     case 'excalidraw':
-      return (await import('./cdnEngines')).renderExcalidrawCdn(source);
+      return (await import('./cdnEngines')).renderExcalidrawCdn(source, opts?.host);
     case 'bpmn':
-      return (await import('./cdnEngines')).renderBpmnCdn(source);
+      return (await import('./cdnEngines')).renderBpmnCdn(source, opts?.host);
     case 'vega':
     case 'vegalite':
-      return (await import('./cdnEngines')).renderVegaCdn(source);
+      return (await import('./cdnEngines')).renderVegaCdn(source, opts?.host);
     case 'wavedrom':
-      return (await import('./cdnEngines')).renderWavedromCdn(source);
+      return (await import('./cdnEngines')).renderWavedromCdn(source, opts?.host);
     case 'bytefield':
-      return (await import('./cdnEngines')).renderBytefieldCdn(source);
+      return (await import('./cdnEngines')).renderBytefieldCdn(source, opts?.host);
     case 'dbml':
-      return (await import('./cdnEngines')).renderDbmlCdn(source);
+      return (await import('./cdnEngines')).renderDbmlCdn(source, opts?.host);
     case 'd2':
-      return (await import('./cdnEngines')).renderD2Cdn(source);
+      return (await import('./cdnEngines')).renderD2Cdn(source, opts?.host);
   }
 }
 

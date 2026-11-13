@@ -24,6 +24,7 @@ function baseSettings(fonts?: Partial<Settings['fonts']>): Settings {
     iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } },
     layout: { ...DEFAULT_LAYOUT },
     storage: { remoteDownloadConfirmMb: 512 },
+    cdn: { grammars: 'default', grammarsCustom: '', engines: 'default', enginesCustom: '', foreign: 'default', foreignCustom: '' },
     rendererDefaults: {},
     locale: 'zh-CN',
     reduceMotion: 'system'

@@ -14,8 +14,7 @@ import {
   deriveQueriesBase,
   normalizeGrammarsBase,
   parseMultiGrammarsBases,
-  DEFAULT_GRAMMARS_BASE_URL,
-  DEFAULT_RUNTIME_DIR
+  DEFAULT_GRAMMARS_BASE_URL
 } from '../src/highlightDefault';
 import { TreeSitterEngine, type EngineOptions } from '@bhxch/vviewer-highlight';
 

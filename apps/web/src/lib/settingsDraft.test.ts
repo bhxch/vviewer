@@ -714,3 +714,64 @@ describe('校验文案目录双锁（域 C 抽取 Task 6）：上层子串断言
     expect(zhSettings['settings.issue.outOfRange']).toBe('超出范围 {min}–{max}，将截断为 {clamped}');
   });
 });
+
+
+describe('cdn 设置节白名单镜像（网络资源 spec C §3.2，Task 3）', () => {
+  it('合法档位与 custom 值应用落位（normalizeSettings 同口径归一）', () => {
+    const draft = openDraft(aSettings({}));
+    const r = applyJson(
+      draft,
+      JSON.stringify({
+        cdn: {
+          grammars: 'custom',
+          grammarsCustom: 'https://a.test/grammars/|https://b.test/grammars/',
+          engines: 'custom',
+          enginesCustom: 'https://cdn.example.com/npm/',
+          foreign: 'custom',
+          foreignCustom: 'https://mirror.test/fv/'
+        }
+      })
+    );
+    expect(r).toEqual({ ok: true });
+    expect(draft.cdn.grammars).toBe('custom');
+    expect(draft.cdn.grammarsCustom).toBe('https://a.test/grammars/|https://b.test/grammars/');
+    expect(draft.cdn.enginesCustom).toBe('https://cdn.example.com/npm/');
+    expect(draft.cdn.foreignCustom).toBe('https://mirror.test/fv/');
+  });
+
+  it('枚举脏值标红（grammars 四值 / engines·foreign 两值）；custom 非空非法标红（grammarsBase/host 双消息）', () => {
+    const draft = openDraft(aSettings({}));
+    const r = applyJson(
+      draft,
+      JSON.stringify({
+        cdn: { grammars: 'bogus', engines: 'unpkg', foreign: 'cn', grammarsCustom: 'https://a.test/wasm/', enginesCustom: 'http://x.test/', foreignCustom: 'no-slash' }
+      })
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      const byField = new Map(r.errors.map((e) => [e.field, e.message]));
+      expect(byField.get('cdn.grammars')).toContain('default');
+      expect(byField.get('cdn.engines')).toContain('default');
+      expect(byField.get('cdn.foreign')).toContain('default');
+      expect(byField.get('cdn.grammarsCustom')).toContain('/grammars/');
+      expect(byField.get('cdn.enginesCustom')).toContain('https');
+      expect(byField.get('cdn.foreignCustom')).toContain('https');
+    }
+    expect(draft.cdn.grammars).toBe('default'); // 阻断：draft 未被部分应用
+  });
+
+  it('节内未知字段标红；空串 custom = 未启用合法通过；导入侧未知键降级警告', () => {
+    const draft = openDraft(aSettings({}));
+    const r = applyJson(draft, JSON.stringify({ cdn: { typo: 1 } }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.map((e) => e.field)).toContain('cdn.typo');
+    // 空串合法（未启用走缺省）
+    expect(applyJson(openDraft(aSettings({})), JSON.stringify({ cdn: { engines: 'custom', enginesCustom: '' } }))).toEqual({ ok: true });
+    // 导入侧：cdn 未知键降级警告不阻断
+    const parsed = parseImportFile(
+      JSON.stringify({ schemaVersion: 1, settings: { cdn: { typo: 1 } } })
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.warnings.some((w) => w.includes('cdn.typo'))).toBe(true);
+  });
+});

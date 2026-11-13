@@ -22,6 +22,7 @@ export const messages = {
   'settings.nav.autorefresh': '自动刷新',
   'settings.nav.compute': '计算',
   'settings.nav.storage': '存储与数据',
+  'settings.nav.cdn': '网络资源',
   'settings.nav.about': '关于',
 
   // —— 中心骨架（settings.center.*）——
@@ -86,6 +87,8 @@ export const messages = {
   'settings.issue.rendererDefaultsShape': '应为对象（扩展名 → 渲染器 id）',
   'settings.issue.rendererExt': '键须为小写扩展名（不含点）',
   'settings.issue.rendererId': "值须为渲染器 id（'' = 内置默认）",
+  'settings.issue.cdnGrammarsBase': '须为以 /grammars/ 结尾的地址，多段以 | 分隔',
+  'settings.issue.cdnHost': '须为以 / 结尾的 https 地址',
 
   // —— 导入文件解析（settings.import.*，settingsDraft.parseImportFile）——
   'settings.import.notObject': '导入文件必须是 JSON 对象',
@@ -434,5 +437,33 @@ export const messages = {
   'settings.about.requestPersist': '申请持久化存储',
   'settings.about.persistGranted': '已授予持久化存储：字体/主题/会话快照/离线缓存不再被磁盘压力驱逐',
   'settings.about.persistDenied':
-    '未获授予：浏览器按启发式判定（站点互动/通知/装为 PWA 可提高授予率）——安装为 PWA 通常自动持久化'
+    '未获授予：浏览器按启发式判定（站点互动/通知/装为 PWA 可提高授予率）——安装为 PWA 通常自动持久化',
+  // —— 网络资源节（spec C §3.2，Task 3）：三作用面 CDN 档位 ——
+  'settings.cdn.grammarsLabel': '语法高亮（grammar CDN）',
+  'settings.cdn.enginesLabel': '图表引擎（CDN 直链）',
+  'settings.cdn.foreignLabel': '外部文档资产（foreign）',
+  'settings.cdn.profileDefault': '默认（全球 CDN）',
+  'settings.cdn.profileUnpkg': 'unpkg',
+  'settings.cdn.profileCn': '中国源（npmmirror）',
+  'settings.cdn.profileCustom': '自定义',
+  'settings.cdn.grammarsSelectLabel': '语法高亮 CDN 档位',
+  'settings.cdn.enginesSelectLabel': '图表引擎 CDN 档位',
+  'settings.cdn.foreignSelectLabel': '外部文档资产 CDN 档位',
+  'settings.cdn.customLabel': '自定义地址',
+  'settings.cdn.grammarsInputLabel': '语法高亮自定义地址',
+  'settings.cdn.enginesInputLabel': '图表引擎自定义地址',
+  'settings.cdn.foreignInputLabel': '外部文档资产自定义地址',
+  'settings.cdn.grammarsPlaceholder': 'https://…/grammars/|https://…/grammars/（多段以 | 分隔）',
+  'settings.cdn.hostPlaceholder': 'https://…/',
+  'settings.cdn.grammarsError': '地址不合法：每段需以 /grammars/ 结尾，多段以 | 分隔',
+  'settings.cdn.hostError': '地址不合法：需为以 / 结尾的 https 地址',
+  'settings.cdn.grammarsHint': '语法高亮切档保存后立即重建，当前已打开文档在下次渲染时生效',
+  'settings.cdn.foreignHint': '外部文档资产基座为装配级快照：保存后刷新页面生效',
+  'settings.cdn.swHint': '自定义域资源在线直取、不进入离线缓存；档位变更后建议刷新页面',
+  'settings.cdn.cnWarn': '中国源需 npmmirror 白名单（申请中），落地前不可用',
+  'settings.cdn.versionLabel': '子包版本',
+  'settings.cdn.versionUnknown': '解析中…',
+  'settings.cdn.versionFailed': '解析失败（运行中使用缺省重定向地址）',
+  'settings.cdn.versionRefresh': '重新解析',
+  'settings.cdn.versionRefreshed': '已解析子包版本'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;

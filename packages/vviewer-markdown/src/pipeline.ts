@@ -536,7 +536,8 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
   try {
     const html = await renderDiagramEngine(type.engine!, source, {
       mermaidTheme: ctx.diagram?.mermaidTheme ?? 'default',
-      renderer: ctx.diagram?.rendererOf?.(type.id)
+      renderer: ctx.diagram?.rendererOf?.(type.id),
+      host: ctx.diagram?.cdnEnginesHost
     });
     view.innerHTML = html;
   } catch {

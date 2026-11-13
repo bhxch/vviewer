@@ -2,7 +2,15 @@
 // 版本钉死与 spec §10 勘定版本对齐（2026-10-23 实测）；
 // 加载/渲染失败抛错由 pipeline local 分支错误卡片兜底，负结果不缓存（可重试）。
 // 注意：URL 必须运行时模板字符串构造，配 @vite-ignore 防 Vite 静态分析打包。
-const CDN = 'https://cdn.jsdelivr.net/npm';
+const CDN_DEFAULT = 'https://cdn.jsdelivr.net/npm';
+
+/**
+ * CDN 引擎 host 参数化（spec C §3.2，Task 3）：缺省 jsdelivr（+esm 转换端点，bpmn/
+ * wavedrom 等 CJS 包依赖，无兼容替代——两档 default|custom 不提供 unpkg/cn 预设）；
+ * custom 档经 diagramOptions.cdnEnginesHost 注入覆盖（以 / 结尾的 https URL）。
+ * custom 域起步语义=在线直取不入运行时缓存 + 档位变更提示刷新（SW 规则 host 锚定
+ * 构建期不可知，vite.config.ts :795 注记同源）。 */
+export type CdnEnginesHost = string | undefined;
 
 type CdnLoader = (url: string) => Promise<unknown>;
 let loader: CdnLoader = (url) => import(/* @vite-ignore */ url);
@@ -15,8 +23,8 @@ export function __setCdnLoaderForTest(fn: CdnLoader | null): void {
 /** excalidraw（@excalidraw/utils@0.1.5）：exportToSvg({ data }) 签名（≥0.1.4），
  * elements/appState/files 包在 data 里——扁平结构包内读 data.appState 即抛错
  *（markpad 实证），故按 markpad 归一化重组并补导出背景默认值。 */
-export async function renderExcalidrawCdn(source: string): Promise<string> {
-  const mod = (await loader(`${CDN}/@excalidraw/utils@0.1.5/+esm`)) as {
+export async function renderExcalidrawCdn(source: string, host?: CdnEnginesHost): Promise<string> {
+  const mod = (await loader(`${host ?? CDN_DEFAULT}/@excalidraw/utils@0.1.5/+esm`)) as {
     exportToSvg: (opts: { data: unknown }) => Promise<SVGSVGElement>;
   };
   const data = JSON.parse(source) as {
@@ -41,8 +49,8 @@ export async function renderExcalidrawCdn(source: string): Promise<string> {
 
 /** bpmn（bpmn-js@18.31.0 lib/NavigatedViewer.js 子路径 +esm）：不传 container 由
  * viewer 自建；importXML → saveSVG → destroy（markpad 同款调用序）。 */
-export async function renderBpmnCdn(source: string): Promise<string> {
-  const mod = (await loader(`${CDN}/bpmn-js@18.31.0/lib/NavigatedViewer.js/+esm`)) as {
+export async function renderBpmnCdn(source: string, host?: CdnEnginesHost): Promise<string> {
+  const mod = (await loader(`${host ?? CDN_DEFAULT}/bpmn-js@18.31.0/lib/NavigatedViewer.js/+esm`)) as {
     default: new () => {
       importXML: (xml: string) => Promise<unknown>;
       saveSVG: () => Promise<{ svg: string }>;
@@ -60,8 +68,8 @@ export async function renderBpmnCdn(source: string): Promise<string> {
 }
 
 /** vega/vega-lite（vega-embed@7.3.0）：svg renderer 直出字符串，容器不入文档。 */
-export async function renderVegaCdn(source: string): Promise<string> {
-  const mod = (await loader(`${CDN}/vega-embed@7.3.0/+esm`)) as {
+export async function renderVegaCdn(source: string, host?: CdnEnginesHost): Promise<string> {
+  const mod = (await loader(`${host ?? CDN_DEFAULT}/vega-embed@7.3.0/+esm`)) as {
     default: (el: HTMLElement, spec: unknown, opts?: { renderer: string; actions?: boolean }) => Promise<unknown>;
   };
   const el = document.createElement('div');
@@ -75,8 +83,8 @@ export async function renderVegaCdn(source: string): Promise<string> {
  *（wasm 内嵌单文件，jsdelivr +esm 直链可用——2026-10-23 HEAD 200 实证；spec §9.1
  * 的「wasm-graphograf」为笔误，计划已勘误）。Graphviz.load() 拿实例后
  * layout(source, 'svg', 'dot')，finally dispose 释放 wasm 实例（失败同样释放）。 */
-export async function renderGraphvizHpcc(source: string): Promise<string> {
-  const mod = (await loader(`${CDN}/@hpcc-js/wasm-graphviz@1.30.0/+esm`)) as {
+export async function renderGraphvizHpcc(source: string, host?: CdnEnginesHost): Promise<string> {
+  const mod = (await loader(`${host ?? CDN_DEFAULT}/@hpcc-js/wasm-graphviz@1.30.0/+esm`)) as {
     Graphviz: { load: () => Promise<{ layout: (src: string, fmt?: string, engine?: string) => Promise<string>; dispose: () => void }> };
   };
   const g = await mod.Graphviz.load();
@@ -101,8 +109,8 @@ export async function renderGraphvizHpcc(source: string): Promise<string> {
  * 走回退链（kroki 服务端兜底）；非 signal/assign/reg 源 renderAny 不抛错而回落
  * ['div'] 树，须显式守卫根标签为 svg。 */
 let wavedromSeq = 0;
-export async function renderWavedromCdn(source: string): Promise<string> {
-  const mod = (await loader(`${CDN}/wavedrom@3.7.0/+esm`)) as {
+export async function renderWavedromCdn(source: string, host?: CdnEnginesHost): Promise<string> {
+  const mod = (await loader(`${host ?? CDN_DEFAULT}/wavedrom@3.7.0/+esm`)) as {
     renderAny: (index: number, source: unknown, waveSkin: unknown) => unknown[];
     waveSkin: unknown;
     onml: { stringify: (tree: unknown[]) => string };
@@ -116,8 +124,8 @@ export async function renderWavedromCdn(source: string): Promise<string> {
  * <?xml?> 序言直出 <svg>（HTML 内联注入同 vega/bpmn 产物口径）。1.x 语法注意：
  * draw-box 宽度须属性表 {:span 4} 形态（实测 "(draw-box "A" 4)" 报
  * Invalid attribute spec；kroki 服务端同款语义，spec §10 已注）。 */
-export async function renderBytefieldCdn(source: string): Promise<string> {
-  const mod = (await loader(`${CDN}/bytefield-svg@1.11.0/+esm`)) as {
+export async function renderBytefieldCdn(source: string, host?: CdnEnginesHost): Promise<string> {
+  const mod = (await loader(`${host ?? CDN_DEFAULT}/bytefield-svg@1.11.0/+esm`)) as {
     default: (src: string, opts?: { embedded?: boolean }) => string;
   };
   return mod.default(source, { embedded: true });
@@ -126,8 +134,8 @@ export async function renderBytefieldCdn(source: string): Promise<string> {
 /** dbml（@softwaretechnik/dbml-renderer@1.0.31）：run(source, 'svg') 同步直出
  * 字符串（实测非 Promise）；产物带头 <?xml?> 序言且无 embedded 选项，正则剥离
  * 对齐 bytefield embedded 口径。语法错误抛错走回退链（kroki 兜底）。 */
-export async function renderDbmlCdn(source: string): Promise<string> {
-  const mod = (await loader(`${CDN}/@softwaretechnik/dbml-renderer@1.0.31/+esm`)) as {
+export async function renderDbmlCdn(source: string, host?: CdnEnginesHost): Promise<string> {
+  const mod = (await loader(`${host ?? CDN_DEFAULT}/@softwaretechnik/dbml-renderer@1.0.31/+esm`)) as {
     run: (src: string, format: string) => string;
   };
   return mod.run(source, 'svg').replace(/^<\?xml[^?]*\?>\s*/, '');
@@ -140,8 +148,8 @@ export async function renderDbmlCdn(source: string): Promise<string> {
  *（README 钦定「直接 HTML 嵌入」选项）；dispose 释放 backing worker（finally，
  * 官方声明重复调用安全，失败同样释放）。11.5MB 太重不做默认本地档（spec §10，
  * 注册表 defaultMode=kroki）。 */
-export async function renderD2Cdn(source: string): Promise<string> {
-  const mod = (await loader(`${CDN}/@d2lang/d2@0.1.34/+esm`)) as {
+export async function renderD2Cdn(source: string, host?: CdnEnginesHost): Promise<string> {
+  const mod = (await loader(`${host ?? CDN_DEFAULT}/@d2lang/d2@0.1.34/+esm`)) as {
     D2: new () => {
       compile: (src: string) => Promise<{ diagram: unknown; renderOptions?: Record<string, unknown> }>;
       render: (diagram: unknown, opts?: Record<string, unknown>) => Promise<string>;

@@ -349,7 +349,8 @@ async function renderDiagramFileBuffer(
   async function localEngineHtml(): Promise<string> {
     const html = await renderDiagramEngine(diagram.engine!, text, {
       mermaidTheme: dOpts?.mermaidTheme ?? 'default',
-      renderer: dOpts?.rendererOf?.(diagram.id)
+      renderer: dOpts?.rendererOf?.(diagram.id),
+      host: dOpts?.cdnEnginesHost
     });
     if (!html) throw new Error('图表引擎返回空结果');
     return sanitizeDiagramFragment(doc, html);

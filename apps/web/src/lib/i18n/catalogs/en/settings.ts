@@ -22,6 +22,7 @@ export const messages = {
   'settings.nav.autorefresh': 'Auto-refresh',
   'settings.nav.compute': 'Compute',
   'settings.nav.storage': 'Storage & data',
+  'settings.nav.cdn': 'Network resources',
   'settings.nav.about': 'About',
 
   // —— 中心骨架（settings.center.*）——
@@ -88,6 +89,8 @@ export const messages = {
   'settings.issue.rendererDefaultsShape': 'Must be an object (extension → renderer id)',
   'settings.issue.rendererExt': 'Keys must be lowercase extensions (no dot)',
   'settings.issue.rendererId': "Values must be renderer ids ('' = built-in default)",
+  'settings.issue.cdnGrammarsBase': 'Each segment must end with /grammars/, multiple segments separated by |',
+  'settings.issue.cdnHost': 'Must be an https URL ending with /',
 
   // —— 导入文件解析（settings.import.*）——
   'settings.import.notObject': 'The import file must be a JSON object',
@@ -470,5 +473,33 @@ export const messages = {
   'settings.about.persistGranted':
     'Persistent storage granted: fonts/themes/session snapshots/offline cache are no longer evicted under disk pressure',
   'settings.about.persistDenied':
-    'Not granted: the browser decides heuristically (site engagement/notifications/installing as a PWA raise the grant rate) — installing as a PWA usually persists automatically'
+    'Not granted: the browser decides heuristically (site engagement/notifications/installing as a PWA raise the grant rate) — installing as a PWA usually persists automatically',
+  // —— Network resources (spec C §3.2, Task 3): CDN profiles for three surfaces ——
+  'settings.cdn.grammarsLabel': 'Syntax highlighting (grammar CDN)',
+  'settings.cdn.enginesLabel': 'Diagram engines (CDN direct)',
+  'settings.cdn.foreignLabel': 'Foreign document assets (foreign)',
+  'settings.cdn.profileDefault': 'Default (global CDN)',
+  'settings.cdn.profileUnpkg': 'unpkg',
+  'settings.cdn.profileCn': 'China mirror (npmmirror)',
+  'settings.cdn.profileCustom': 'Custom',
+  'settings.cdn.grammarsSelectLabel': 'Syntax highlighting CDN profile',
+  'settings.cdn.enginesSelectLabel': 'Diagram engines CDN profile',
+  'settings.cdn.foreignSelectLabel': 'Foreign assets CDN profile',
+  'settings.cdn.customLabel': 'Custom URL',
+  'settings.cdn.grammarsInputLabel': 'Custom syntax highlighting URL',
+  'settings.cdn.enginesInputLabel': 'Custom diagram engines URL',
+  'settings.cdn.foreignInputLabel': 'Custom foreign assets URL',
+  'settings.cdn.grammarsPlaceholder': 'https://…/grammars/|https://…/grammars/ (segments separated by |)',
+  'settings.cdn.hostPlaceholder': 'https://…/',
+  'settings.cdn.grammarsError': 'Invalid URL: each segment must end with /grammars/, multiple segments separated by |',
+  'settings.cdn.hostError': 'Invalid URL: must be an https URL ending with /',
+  'settings.cdn.grammarsHint': 'Switching saves and rebuilds highlighting immediately; already-open documents apply on next render',
+  'settings.cdn.foreignHint': 'Foreign asset base is an assembly snapshot: takes effect after saving and reloading the page',
+  'settings.cdn.swHint': 'Custom domains are fetched online and not cached offline; consider reloading after switching',
+  'settings.cdn.cnWarn': 'The China mirror requires npmmirror whitelisting (in progress); unavailable until granted',
+  'settings.cdn.versionLabel': 'Pack versions',
+  'settings.cdn.versionUnknown': 'Resolving…',
+  'settings.cdn.versionFailed': 'Resolution failed (default redirect URLs are used at runtime)',
+  'settings.cdn.versionRefresh': 'Re-resolve',
+  'settings.cdn.versionRefreshed': 'Pack versions resolved'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;

@@ -26,7 +26,7 @@ describe('vv:diagram-settings-applied 派发（spec §9.2，Task 7）', () => {
 
   it("detail.mermaidTheme 为生效主题：auto 解析为当前亮暗映射（resolveMermaidTheme(effectiveMode)），显式值原样", () => {
     expect(src).toMatch(
-      /mermaidTheme:\s*\w+ === 'auto'\s*\?\s*resolveMermaidTheme\(effectiveMode\(s\.themeMode\)\)\s*:\s*\w+/
+      /mermaidTheme:\s*[\w.]+ === 'auto'\s*\?\s*resolveMermaidTheme\(effectiveMode\(s\.themeMode\)\)\s*:\s*[\w.]+/
     );
   });
 

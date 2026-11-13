@@ -38,6 +38,7 @@ import { routeLargeFileHighlight } from './highlightRouter';
 import { resolveImageBlobUrl } from './markdownImages';
 import { hasNonDiagramFence } from './markdownFence';
 import { loadSettings } from './stores/settings';
+import { resolveEnginesHost } from './cdnProfiles';
 import { loadCapabilities, loadDiagramCapabilities } from './serverCapsCache';
 import { effectiveMode, resolveMermaidTheme } from './theme';
 
@@ -303,6 +304,10 @@ if (browser) {
       // 的显式变更经 vv:diagram-settings-applied 即时重画（AppShell 派发）。
       mermaidTheme: s.diagrams.mermaidTheme === 'auto' ? resolveMermaidTheme(mode) : s.diagrams.mermaidTheme,
       krokiVia: s.diagrams.krokiVia,
+      // CDN 引擎 host 覆写（spec C §3.2，Task 3）：settings.cdn.engines custom 档解析
+      // （resolveEnginesHost，两档）；engines 两字段 diff 变化经 AppShell 派发 +
+      // rev++ 重渲染触发本注入器现读（getDiagramOptions 每次 render 调用）。
+      cdnEnginesHost: resolveEnginesHost(s),
       serverDiagramOf: (lang) => loadDiagramCapabilities().includes(resolveDiagramType(lang)?.id ?? lang),
       krokiProxy: loadCapabilities().includes('kroki-proxy'),
       remoteCall: (path) => computeRouter.remoteCall(path),

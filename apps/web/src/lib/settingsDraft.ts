@@ -9,10 +9,11 @@
 // （同一白名单单源），此处只负责「报告」；三类问题同为阻断错误（校验失败不部分
 // 应用，spec §4 导入同纪律），修复后应用时经 normalizeSettings 规范化落值。
 import { resolveDiagramType } from '@bhxch/vviewer-render-diagram';
-import { CODE_SIZE_RANGE, DEFAULTS, ICON_THEME_SCOPE_KEYS, MERMAID_THEME_VALUES, normalizeSettings, REDUCE_MOTION_VALUES, RENDERER_DEFAULT_EXT_RE, RENDERER_DEFAULT_ID_RE, saveSettings, STORAGE_MB_RANGE, UI_SIZE_RANGE, type Settings } from './stores/settings';
+import { CODE_SIZE_RANGE, DEFAULTS, ENGINE_CDN_PROFILES, GRAMMAR_CDN_PROFILES, ICON_THEME_SCOPE_KEYS, MERMAID_THEME_VALUES, normalizeSettings, REDUCE_MOTION_VALUES, RENDERER_DEFAULT_EXT_RE, RENDERER_DEFAULT_ID_RE, saveSettings, STORAGE_MB_RANGE, UI_SIZE_RANGE, type Settings } from './stores/settings';
 import type { MermaidTheme } from '@bhxch/vviewer-render-diagram';
 import { LOCALES, translate as t, type Locale } from './i18n/core';
 import { sanitizeLayout } from './layout';
+import { enginesHostOk, grammarsMultiBaseOk } from './cdnProfiles';
 
 /** 校验问题（field 为顶层字段名或 `节.字段` 点径；'' = JSON 整体语法/形态错误） */
 export interface SettingsIssue {
@@ -277,6 +278,37 @@ export function validateSettings(raw: unknown): SettingsIssue[] {
       checkClampedNumber(issues, 'storage.remoteDownloadConfirmMb', st.remoteDownloadConfirmMb, STORAGE_MB_RANGE);
     }
   }
+  // cdn 白名单镜像（spec C §3.2，Task 3）：grammars 四档 / engines·foreign 两档枚举；
+  // custom 值非空时形态校验（grammarsCustom 多基逐基 /grammars/ 结尾；engines·foreign
+  // Custom 以 / 结尾 https URL）——与 normalizeSettings 归位闸同源单表（cdnProfiles
+  // 校验函数）裁决，脏值标红阻断
+  if (raw.cdn !== undefined) {
+    if (!isObj(raw.cdn)) {
+      issues.push({ field: 'cdn', message: t('settings.issue.mustBeObject') });
+    } else {
+      const cd = raw.cdn;
+      for (const k of Object.keys(cd)) {
+        if (k !== 'grammars' && k !== 'grammarsCustom' && k !== 'engines' && k !== 'enginesCustom' && k !== 'foreign' && k !== 'foreignCustom') {
+          issues.push({ field: `cdn.${k}`, message: t('settings.issue.unknownField') });
+        }
+      }
+      if (cd.grammars !== undefined && !(GRAMMAR_CDN_PROFILES as readonly string[]).includes(cd.grammars as string)) {
+        issues.push({ field: 'cdn.grammars', message: t('settings.issue.mustBeOneOf', { values: GRAMMAR_CDN_PROFILES.join(' / ') }) });
+      }
+      if (cd.engines !== undefined && !(ENGINE_CDN_PROFILES as readonly string[]).includes(cd.engines as string)) {
+        issues.push({ field: 'cdn.engines', message: t('settings.issue.mustBeOneOf', { values: ENGINE_CDN_PROFILES.join(' / ') }) });
+      }
+      if (cd.foreign !== undefined && !(ENGINE_CDN_PROFILES as readonly string[]).includes(cd.foreign as string)) {
+        issues.push({ field: 'cdn.foreign', message: t('settings.issue.mustBeOneOf', { values: ENGINE_CDN_PROFILES.join(' / ') }) });
+      }
+      for (const [k, ok] of [['grammarsCustom', grammarsMultiBaseOk], ['enginesCustom', enginesHostOk], ['foreignCustom', enginesHostOk]] as const) {
+        const v = cd[k];
+        if (v !== undefined && v !== '' && !(typeof v === 'string' && ok(v))) {
+          issues.push({ field: `cdn.${k}`, message: k === 'grammarsCustom' ? t('settings.issue.cdnGrammarsBase') : t('settings.issue.cdnHost') });
+        }
+      }
+    }
+  }
   // rendererDefaults 白名单镜像（与 normalizeSettings 同源形态正则）：键小写扩展名、
   // 值渲染器 id 或 ''（内置默认）；候选合法性由注册表消费时裁决，此处不查注册表
   if (raw.rendererDefaults !== undefined) {
@@ -513,7 +545,8 @@ function collectUnknownPaths(raw: Record<string, unknown>): string[] {
     fonts: ['uiFamily', 'uiSize', 'codeFamily', 'codeSize'],
     iconThemes: ['theme', 'scopes'],
     layout: Object.keys(sanitizeLayout({})),
-    storage: ['remoteDownloadConfirmMb']
+    storage: ['remoteDownloadConfirmMb'],
+    cdn: ['grammars', 'grammarsCustom', 'engines', 'enginesCustom', 'foreign', 'foreignCustom']
   };
   for (const [sec, keys] of Object.entries(allowed)) {
     const v = raw[sec];

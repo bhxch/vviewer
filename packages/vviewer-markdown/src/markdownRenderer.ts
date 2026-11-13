@@ -174,6 +174,12 @@ export interface DiagramRenderOptions {
    */
   rendererOf?: (lang: string) => string | undefined;
   /**
+   * CDN 直链引擎 host 覆写（spec C §3.2，Task 3）：settings.cdn.engines custom 档注入
+   * （以 / 结尾的 https URL）；缺省 undefined = jsdelivr 缺省形态。管线透传给
+   * renderDiagramEngine 的 CDN 引擎族（excalidraw/bpmn/vega/wavedrom/bytefield/dbml/d2）。
+   */
+  cdnEnginesHost?: string;
+  /**
    * 服务端单图渲染能力（health diagrams 子集归一后的类型 id 集合，spec §8.3）：
    * server 模式的生效裁决依据；缺省=无能力，server 模式按降级链走 local/kroki。
    */

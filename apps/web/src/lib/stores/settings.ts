@@ -3,6 +3,7 @@ import { resolveDiagramType, type DiagramMode } from '@bhxch/vviewer-render-diag
 import { MERMAID_THEMES, type MermaidTheme } from '@bhxch/vviewer-render-diagram';
 import { DEFAULT_LAYOUT, sanitizeLayout, type LayoutSettings } from '../layout';
 import { LOCALES, type Locale } from '../i18n/core';
+import { enginesHostOk, grammarsMultiBaseOk } from '../cdnProfiles';
 
 /** mermaid 主题设置白名单（spec 2026-10-23 §9.2）：'auto' 跟随外观亮暗（现状语义，
  * 消费侧 viewer.ts 注入器/AppShell 派发经 resolveMermaidTheme 解析），其余为 mermaid
@@ -60,6 +61,30 @@ export interface StorageSettings {
   remoteDownloadConfirmMb: number;
 }
 
+/** grammars CDN 档位白名单（spec C §3.2 落定）：default=构建期 env 注入（jsdelivr 子包
+ * 多基）；unpkg=缺省重定向形态；cn=npmmirror files 通道（白名单申请中，落地前不可用）；
+ * custom=用户多基输入（逐基 /grammars/ 结尾校验）。normalizeSettings 与 settingsDraft
+ * 校验同源消费。 */
+export const GRAMMAR_CDN_PROFILES = ['default', 'unpkg', 'cn', 'custom'] as const;
+export type GrammarCdnProfile = (typeof GRAMMAR_CDN_PROFILES)[number];
+/** engines/foreign CDN 档位白名单（spec C §3.2 落定：两档——jsdelivr +esm 转换端点与
+ * unpkg/npmmirror 不兼容，不提供 unpkg/cn 预设）。 */
+export const ENGINE_CDN_PROFILES = ['default', 'custom'] as const;
+export type EngineCdnProfile = (typeof ENGINE_CDN_PROFILES)[number];
+
+/** 网络资源 CDN 节（spec C §3.2 落定字段集，6 键）：grammars 四档 + engines/foreign
+ * 两档，各自 custom 值（空串 = 未启用走缺省）。档位解析纯函数在 cdnProfiles.ts。
+ * foreign 生效语义=切档保存后刷新页面生效（装配级快照）；grammars 切档经 AppShell
+ * 订阅 diff 触发 highlightClient 重建；engines 切档经重画派发触发即时生效。 */
+export interface CdnSettings {
+  grammars: GrammarCdnProfile;
+  grammarsCustom: string;
+  engines: EngineCdnProfile;
+  enginesCustom: string;
+  foreign: EngineCdnProfile;
+  foreignCustom: string;
+}
+
 export interface Settings {
   themeMode: 'light' | 'dark' | 'system';
   /** 亮/暗模式下各自记忆的外观主题（'default' | 'vscode:…' 内置名 | 'imported:<id>'）；
@@ -87,6 +112,10 @@ export interface Settings {
   /** 存储与数据节（远端下载确认门 spec §6.4，计划 2 Task 5）：远端下载确认阈值。
    * UI 在 SettingsCenter「存储与数据」节；ViewerPane 泵启动前消费。 */
   storage: StorageSettings;
+  /** 网络资源 CDN 节（spec C §3.2，Task 3）：三作用面档位 + custom 值 6 键。
+   * UI 在 SettingsCenter「网络资源」节（存储与数据之后）；消费面 highlightClient
+   * 重建 / cdnEngines host / foreignAssets 覆写（cdnProfiles.ts 解析）。 */
+  cdn: CdnSettings;
   /** 默认渲染器偏好（同一扩展名有多个可用渲染器时）：小写扩展名 → 渲染器 id，
    * '' 或缺省 = 内置默认（注册表扩展名所有者）。改回默认写 ''（mergeDraftOnto 删键
    * 不传播）。UI 在 SettingsCenter「打开方式」节；viewer.ts 注入
@@ -123,6 +152,7 @@ export const DEFAULTS: Settings = {
   iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } },
   layout: DEFAULT_LAYOUT,
   storage: { remoteDownloadConfirmMb: 512 },
+  cdn: { grammars: 'default', grammarsCustom: '', engines: 'default', enginesCustom: '', foreign: 'default', foreignCustom: '' },
   rendererDefaults: {},
   locale: 'zh-CN',
   reduceMotion: 'system'
@@ -154,6 +184,7 @@ function defaults(): Settings {
     iconThemes: { theme: DEFAULTS.iconThemes.theme, scopes: { ...DEFAULTS.iconThemes.scopes } },
     layout: { ...DEFAULTS.layout },
     storage: { ...DEFAULTS.storage },
+    cdn: { ...DEFAULTS.cdn },
     rendererDefaults: { ...DEFAULTS.rendererDefaults }
   };
 }
@@ -257,6 +288,21 @@ export function normalizeSettings(partial: Record<string, unknown>): Settings {
   s.storage = {
     remoteDownloadConfirmMb: clampSize(st.remoteDownloadConfirmMb, STORAGE_MB_RANGE, DEFAULTS.storage.remoteDownloadConfirmMb)
   };
+  // cdn 节白名单（spec C §3.2，Task 3）：grammars 四档 / engines·foreign 两档枚举
+  // 归位 default（现状语义=构建期 env 注入）；custom 值非字符串归空串，字符串值
+  // 形态校验（grammarsCustom 多基逐基 /grammars/ 结尾 / engines·foreignCustom 以 /
+  // 结尾 https URL）失败归空串（=未启用走缺省，防手改 localStorage 注入畸形 URL）——
+  // 校验单源 cdnProfiles（grammarsMultiBaseOk/enginesHostOk，可单测）。UI 错误态与
+  // settingsDraft 白名单镜像同口径。
+  const cd = typeof s.cdn === 'object' && s.cdn !== null ? s.cdn : DEFAULTS.cdn;
+  s.cdn = {
+    grammars: GRAMMAR_CDN_PROFILES.includes(cd.grammars) ? cd.grammars : DEFAULTS.cdn.grammars,
+    grammarsCustom: typeof cd.grammarsCustom === 'string' && grammarsMultiBaseOk(cd.grammarsCustom) ? cd.grammarsCustom : '',
+    engines: ENGINE_CDN_PROFILES.includes(cd.engines) ? cd.engines : DEFAULTS.cdn.engines,
+    enginesCustom: typeof cd.enginesCustom === 'string' && enginesHostOk(cd.enginesCustom) ? cd.enginesCustom : '',
+    foreign: ENGINE_CDN_PROFILES.includes(cd.foreign) ? cd.foreign : DEFAULTS.cdn.foreign,
+    foreignCustom: typeof cd.foreignCustom === 'string' && enginesHostOk(cd.foreignCustom) ? cd.foreignCustom : ''
+  };
   // rendererDefaults 白名单：只挡形态（键小写扩展名、值渲染器 id 或 ''），不查注册表——
   // 该 id 能否渲染该扩展名由 registry.byExtension 消费时裁决（非候选回落所有者），
   // settings 不依赖渲染器装配；节脏值回落空表，不拖垮其余字段
@@ -312,6 +358,7 @@ function notify(s: Settings): void {
       iconThemes: { theme: s.iconThemes.theme, scopes: { ...s.iconThemes.scopes } },
       layout: { ...s.layout },
       storage: { ...s.storage },
+      cdn: { ...s.cdn },
       rendererDefaults: { ...s.rendererDefaults }
     });
   }

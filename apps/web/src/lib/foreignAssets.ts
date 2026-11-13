@@ -79,13 +79,17 @@ export function foreignAssetBaseChain(env?: string): ForeignAssetBaseChain {
 
 /**
  * 解析 foreign 资产基座（链首非空层，尾斜杠归一）：env 显式 →（同源预留槽，
- * plan 4）→ 缺省 CDN。缺省返回 assets-standard 基座——word/spreadsheet/presentation
- * (pptx 系) 资产直接可用；chm/hangul/iwork/wordperfect/ppt 组经
- * resolveForeignAssetPackageBase 取各自包基座。
+ * plan 4）→ 运行时覆写（settings.cdn.foreign custom 档，spec C §3.2 Task 3——
+ * 覆写插在缺省 CDN 前，空串=未启用走缺省）→ 缺省 CDN。缺省返回 assets-standard
+ * 基座——word/spreadsheet/presentation (pptx 系) 资产直接可用；chm/hangul/
+ * iwork/wordperfect/ppt 组经 resolveForeignAssetPackageBase 取各自包基座。
+ * 生效语义：foreign 基座是装配级快照（foreignRenderers 装配级幂等护栏）——
+ * 运行时改 settings 后刷新页面重新装配即读到新档（切档刷新语义，拍板项）。
  */
-export function resolveForeignAssetBase(env?: string): string {
+export function resolveForeignAssetBase(env?: string, runtimeBase?: string): string {
   const chain = foreignAssetBaseChain(env);
-  return chain.env || chain.sameOrigin || chain.cdn;
+  const runtime = normalizeBaseDir(runtimeBase ?? '');
+  return chain.env || chain.sameOrigin || runtime || chain.cdn;
 }
 
 /**

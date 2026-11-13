@@ -747,6 +747,9 @@ export default defineConfig({
             // 承接（残余 A8 双路由），同源路径形态由 /file-viewer-assets/ 预留槽承接
             //（SW 规则构建期定型，运行时 env 值不可预知——缺省 CDN 前缀 + env 镜像
             // 前缀 + 预留前缀覆盖）。
+            // spec C §3.2 边界（Task 3 落定注记）：settings.cdn.foreign custom 档的
+            // 自定义域构建期不可知——在线直取不入运行时缓存，档位变更提示刷新页面
+            //（CdnSection hint 同源文案；本规则 host 锚定 jsdelivr 缺省档）。
             urlPattern: /^https:\/\/cdn\.jsdelivr\.net\/npm\/@file-viewer\/assets-/,
             handler: 'CacheFirst',
             options: {
@@ -791,7 +794,10 @@ export default defineConfig({
             // 精确版本动态 import，新 CDN 类型同吃此规则）：CacheFirst 后二次访问
             // 近似离线；版本进 URL，跨版本陈旧天然免疫（修订号仅缓存名换代用）。
             // bpmn-js 子路径 +esm 会级联拉取数十个依赖分片（每片均精确版本化，实测
-            // bpmn 依赖图 35 片），maxEntries 48 覆盖常用集不半途 LRU 逐出打折扣
+            // bpmn 依赖图 35 片），maxEntries 48 覆盖常用集不半途 LRU 逐出打折扣。
+            // spec C §3.2 边界（Task 3 落定注记）：engines 两档无 unpkg/cn 预设族
+            //（jsdelivr +esm 转换端点无兼容替代）；settings.cdn.engines custom 域
+            // 在线直取不入运行时缓存（host 锚定构建期不可知），档位变更提示刷新。
             urlPattern: /^https:\/\/cdn\.jsdelivr\.net\/npm\/.*/,
             handler: 'CacheFirst',
             options: {
@@ -822,6 +828,10 @@ export default defineConfig({
     // 计划 3 Task 3（spec §6.2）：foreign 渲染资产三层链的 env 显式层（自托管
     // asset-installer 合并树根，尾斜杠归一在 resolveForeignAssetBase；空 = 缺省
     // CDN 层）。foreignAssets.ts 消费，VV_GRAMMAR_CDN 同款注入先例。
-    'import.meta.env.VV_FOREIGN_ASSETS': JSON.stringify(process.env.VV_FOREIGN_ASSETS ?? '')
+    'import.meta.env.VV_FOREIGN_ASSETS': JSON.stringify(process.env.VV_FOREIGN_ASSETS ?? ''),
+    // spec C §3.2（Task 3）：settings.cdn.grammars unpkg/cn 档的子包数（grammarProfiles
+    // 的 unpkg/cnGrammarsBases 按 p1..pN 展开多基）。缺省 '1' = 单基兼容锚；release
+    // 链首发装箱定稿后经 CI env 注入真实包数。
+    'import.meta.env.VV_GRAMMAR_PACK_COUNT': JSON.stringify(process.env.VV_GRAMMAR_PACK_COUNT ?? '1')
   }
 });

@@ -56,6 +56,7 @@
   } from './stores/session';
   import { migrateLegacyTabs, workspaceStore, type WorkspaceSnapshotItem, type WorkspaceSource } from './workspaceStore';
   import { loadSettings, onSettingsChanged, saveSettings, type Settings } from './stores/settings';
+  import { rebuildHighlightClient } from './highlightClient';
   // i18n/reduceMotion 接线（i18n 基建 D3/D11）：启动 + 设置订阅双通道应用
   import { setLocale, t } from './i18n/index.svelte';
   // 大纲滚动跟随句柄（code-outline Task 3）：ViewerPane 上行 firstVisibleLine 命令式快照
@@ -767,12 +768,20 @@
       // locale/reduceMotion 接线（i18n 基建 D3/D11）：「语言与辅助功能」节应用后
       // 经本订阅生效——html[lang] 与 data-reduce-motion 同步打标
       applyLocaleAndReduceMotion(s);
-      // mermaid 主题即时生效（spec 2026-10-23 §9.2，Task 7）：仅 diagrams.mermaidTheme
-      // 实际变化才派发 vv:diagram-settings-applied（无关设置保存零重画）；detail 恒
-      // 为已解析具体主题（'auto' 按当前亮暗映射，与 viewer.ts 注入器同公式），挂载的
-      // markdown 实例据此就地重画（markdownRenderer per-instance 监听）。auto 态的
+      // mermaid 主题即时生效（spec 2026-10-23 §9.2，Task 7）+ CDN engines 档位即时
+      // 重画（spec C §3.2，Task 3）：两者实际变化才派发 vv:diagram-settings-applied
+      // （无关设置保存零重画）；detail 恒为已解析具体主题（'auto' 按当前亮暗映射，
+      // 与 viewer.ts 注入器同公式），挂载的 markdown 实例据此就地重画 [data-mermaid]
+      // （ViewerPane applyTheme 桥接）。engines 档（cdnEnginesHost）经 setDiagramOptions
+      // 闭包现读——但挂载实例不重渲染则不触发，故 engines 两字段变化时同步 rev++
+      // 整篇重渲染（cdn 引擎图命中新 host 的实际通道，fonts/icons 同款注入）；
+      // mermaid 就地重画先行无害（重渲染随后整篇替换，同主题重画幂等）。auto 态的
       // 亮暗联动走 vv:appearance-applied 既有路径（theme.ts），此处不重复派发。
       const prevMermaidTheme = settings.diagrams.mermaidTheme; // 旧值捕获须先于副本赋值
+      const prevGrammarsProfile = settings.cdn.grammars;
+      const prevGrammarsCustom = settings.cdn.grammarsCustom;
+      const prevEnginesProfile = settings.cdn.engines;
+      const prevEnginesCustom = settings.cdn.enginesCustom;
       settings = s;
       document.documentElement.dataset.themeMode = s.themeMode;
       // 注入通道（spec 2026-10-12 §2.4）：diff 四元组、槽相关变化才注入
@@ -786,13 +795,25 @@
       // 完成由 iconThemeState.runtime $state 写入驱动响应式消费面，rev++ 回调
       // 与 fonts 同款注入
       void reactToIconsChange(s, () => tabStore.touchActiveTab());
-      if (s.diagrams.mermaidTheme !== prevMermaidTheme) {
-        const t = s.diagrams.mermaidTheme;
+      // grammars CDN 档位变更（spec C §3.2 Task 3）：manifest 是 create() 快照，
+      // 两字段（档位/自定义多基）diff 变化即重建 highlightClient（代际计数防在途
+      // 旧 promise 落袋；档位未变零触发）。重建后高亮在下次渲染生效（新 tab/
+      // rev++ 重渲染时走新 CDN 层）。
+      if (s.cdn.grammars !== prevGrammarsProfile || s.cdn.grammarsCustom !== prevGrammarsCustom) {
+        rebuildHighlightClient();
+      }
+      if (s.diagrams.mermaidTheme !== prevMermaidTheme || s.cdn.engines !== prevEnginesProfile || s.cdn.enginesCustom !== prevEnginesCustom) {
         document.dispatchEvent(
           new CustomEvent('vv:diagram-settings-applied', {
-            detail: { mermaidTheme: t === 'auto' ? resolveMermaidTheme(effectiveMode(s.themeMode)) : t }
+            detail: { mermaidTheme: s.diagrams.mermaidTheme === 'auto' ? resolveMermaidTheme(effectiveMode(s.themeMode)) : s.diagrams.mermaidTheme }
           })
         );
+        // engines 两字段 diff → rev++ 重渲染（cdn 引擎图/excalidraw 等命中新 host——
+        // vv:diagram-settings-applied 的消费面仅 mermaid 就地重画，cdn 引擎图的重画
+        // 靠整篇重渲染；CDNP-03 e2e 锚的验证对象）
+        if (s.cdn.engines !== prevEnginesProfile || s.cdn.enginesCustom !== prevEnginesCustom) {
+          tabStore.touchActiveTab();
+        }
       }
     });
     // themeMode=system：OS 亮暗切换不经 saveSettings（BUG-49）——matchMedia 非响应式

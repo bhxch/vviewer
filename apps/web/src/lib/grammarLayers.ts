@@ -65,19 +65,24 @@ export async function fetchGrammarManifest(url: string): Promise<GrammarTable | 
 
 /**
  * 装配三层候选并合并：same-origin 恒在；server 层（连接时快照，见下）拼
- * `${serverBase}/grammars/`；cdn 层直接用 cdnBase。逐层串行 fetch，命中的层
- * 以层名（same-origin/server/cdn）回报于 layers。
+ * `${serverBase}/grammars/`；cdn 层直接用 cdnBase——spec C 拆包多基（Task 3）：
+ * `|` 分隔多基逐基展开为独立 cdn 子包层（层名 cdn-p1..pN，单基时层名 'cdn'
+ * 不变——既有 e2e 层名锚零回归），first-wins 合并同语义。逐层串行 fetch，
+ * 命中的层以层名回报于 layers。
  */
 export async function assembleGrammarLayers(opts: {
   sameOriginBase: string;
   serverBase?: string | null;
-  cdnBase?: string | null;
+  cdnBase?: string | string[] | null;
 }): Promise<{ grammars: MergedGrammarTable; layers: string[] }> {
   const candidates: Array<{ name: string; base: string }> = [
     { name: 'same-origin', base: opts.sameOriginBase }
   ];
   if (opts.serverBase) candidates.push({ name: 'server', base: `${opts.serverBase.replace(/\/+$/, '')}/grammars/` });
-  if (opts.cdnBase) candidates.push({ name: 'cdn', base: opts.cdnBase });
+  const cdnBases = Array.isArray(opts.cdnBase) ? opts.cdnBase : opts.cdnBase ? [opts.cdnBase] : [];
+  cdnBases.forEach((base, i) => {
+    candidates.push({ name: cdnBases.length > 1 ? `cdn-p${i + 1}` : 'cdn', base });
+  });
   const layers: GrammarLayer[] = [];
   const hit: string[] = [];
   for (const c of candidates) {

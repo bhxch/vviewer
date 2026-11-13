@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadSettings, onSettingsChanged, saveSettings, type Settings } from './settings';
+import { DEFAULTS, loadSettings, normalizeSettings, onSettingsChanged, saveSettings, type Settings } from './settings';
 import { DEFAULT_LAYOUT } from '../layout';
 
 const BASE: Settings = {
@@ -17,6 +17,7 @@ const BASE: Settings = {
   iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } },
   layout: { ...DEFAULT_LAYOUT },
   storage: { remoteDownloadConfirmMb: 512 },
+  cdn: { grammars: 'default', grammarsCustom: '', engines: 'default', enginesCustom: '', foreign: 'default', foreignCustom: '' },
   rendererDefaults: {},
   locale: 'zh-CN',
   reduceMotion: 'system'
@@ -421,5 +422,49 @@ describe('locale/reduceMotion 枚举白名单（i18n 基建 D3/D11）', () => {
     expect(s.reduceMotion).toBe('system');
     expect(s.excludedPatterns).toEqual(['.git']); // 整体回落 defaults() 则必炸
     expect(s.autoRefresh).toBe(false);
+  });
+});
+
+
+describe('cdn 设置节白名单（网络资源 spec C §3.2，Task 3）', () => {
+  it('默认全 default / custom 全空串（DEFAULTS 与 normalizeSettings({}) 一致）', () => {
+    const expected = { grammars: 'default', grammarsCustom: '', engines: 'default', enginesCustom: '', foreign: 'default', foreignCustom: '' };
+    expect(DEFAULTS.cdn).toEqual(expected);
+    expect(normalizeSettings({}).cdn).toEqual(expected);
+  });
+
+  it('枚举白名单：grammars 四档合法原样、脏值归位 default；engines/foreign 两档同口径', () => {
+    expect(normalizeSettings({ cdn: { grammars: 'unpkg' } }).cdn.grammars).toBe('unpkg');
+    expect(normalizeSettings({ cdn: { grammars: 'cn' } }).cdn.grammars).toBe('cn');
+    expect(normalizeSettings({ cdn: { grammars: 'custom' } }).cdn.grammars).toBe('custom');
+    expect(normalizeSettings({ cdn: { grammars: 'bogus' } }).cdn.grammars).toBe('default');
+    expect(normalizeSettings({ cdn: { engines: 'custom' } }).cdn.engines).toBe('custom');
+    expect(normalizeSettings({ cdn: { engines: 'unpkg' } }).cdn.engines).toBe('default');
+    expect(normalizeSettings({ cdn: { foreign: 'custom' } }).cdn.foreign).toBe('custom');
+    expect(normalizeSettings({ cdn: { foreign: 'cn' } }).cdn.foreign).toBe('default');
+  });
+
+  it('custom 值形态校验（同 cdnProfiles 单表）：grammarsCustom 多基 /grammars/ 结尾、engines·foreignCustom 尾斜杠 https；非法归空串=未启用', () => {
+    expect(normalizeSettings({ cdn: { grammars: 'custom', grammarsCustom: 'https://a.test/grammars/|https://b.test/grammars/' } }).cdn.grammarsCustom).toBe(
+      'https://a.test/grammars/|https://b.test/grammars/'
+    );
+    expect(normalizeSettings({ cdn: { grammars: 'custom', grammarsCustom: 'https://a.test/wasm/' } }).cdn.grammarsCustom).toBe('');
+    expect(normalizeSettings({ cdn: { engines: 'custom', enginesCustom: 'https://cdn.example.com/npm/' } }).cdn.enginesCustom).toBe(
+      'https://cdn.example.com/npm/'
+    );
+    expect(normalizeSettings({ cdn: { engines: 'custom', enginesCustom: 'http://x.test/' } }).cdn.enginesCustom).toBe('');
+    expect(normalizeSettings({ cdn: { foreign: 'custom', foreignCustom: 'https://mirror.test/fv/' } }).cdn.foreignCustom).toBe(
+      'https://mirror.test/fv/'
+    );
+    expect(normalizeSettings({ cdn: { foreign: 'custom', foreignCustom: 'https://mirror.test/fv' } }).cdn.foreignCustom).toBe('');
+    // 非字符串脏值归空串（JSON 手改 localStorage 防线）
+    expect(normalizeSettings({ cdn: { grammarsCustom: 42 } }).cdn.grammarsCustom).toBe('');
+  });
+
+  it('loadSettings 路径：localStorage 脏 cdn 节整体回落默认形态，不拖垮其余字段', () => {
+    localStorage.setItem('vviewer:settings', JSON.stringify({ cdn: 42, computePolicy: 'local' }));
+    const s = loadSettings();
+    expect(s.cdn).toEqual({ grammars: 'default', grammarsCustom: '', engines: 'default', enginesCustom: '', foreign: 'default', foreignCustom: '' });
+    expect(s.computePolicy).toBe('local');
   });
 });

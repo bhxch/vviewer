@@ -42,6 +42,7 @@
   import AutoRefreshSection from './settings/AutoRefreshSection.svelte';
   import ComputeSection from './settings/ComputeSection.svelte';
   import StorageSection from './settings/StorageSection.svelte';
+  import CdnSection from './settings/CdnSection.svelte';
   import AboutSection from './settings/AboutSection.svelte';
   import { SETTINGS_NAV_KEY } from './settings/nav';
   import { t } from './i18n/index.svelte';
@@ -72,6 +73,7 @@
     { id: 'autorefresh', label: t('settings.nav.autorefresh'), content: AutoRefreshSection },
     { id: 'compute', label: t('settings.nav.compute'), content: ComputeSection },
     { id: 'storage', label: t('settings.nav.storage'), content: StorageSection },
+    { id: 'cdn', label: t('settings.nav.cdn'), content: CdnSection },
     { id: 'about', label: t('settings.nav.about'), content: AboutSection }
   ];
 

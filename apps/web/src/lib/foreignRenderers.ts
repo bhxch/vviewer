@@ -30,7 +30,9 @@ import {
   type ForeignMountResult,
   type NestedDispatch
 } from '@bhxch/vviewer-render-foreign';
-import { resolveForeignAssetBase, resolveForeignAssetPackageBase, type ForeignAssetPackage } from './foreignAssets';
+import { resolveForeignAssetPackageBase, type ForeignAssetPackage } from './foreignAssets';
+import { resolveForeignBase } from './cdnProfiles';
+import { loadSettings } from './stores/settings';
 import { wireForeignZoom } from './foreignZoom';
 // 纯层 i18n（Task 7 域 D）：registry label 消费点读取时现 t()（getter 派生显示，
 // 见 FOREIGN_LABEL_KEYS 注）；调用时刻取当下 locale，非响应式。
@@ -163,8 +165,10 @@ function pluginMount(load: () => Promise<ForeignPlugin>, groupId: string): Forei
       const [core, plugin] = await Promise.all([import('@file-viewer/core'), load()]);
       coreModule = core;
       if (appliedAssetBase === null) {
-        // 装配级一次（幂等护栏）：链首层基座（env 显式 → 同源预留槽 → 缺省 CDN）
-        appliedAssetBase = resolveForeignAssetBase();
+        // 装配级一次（幂等护栏）：链首层基座（env 显式 → 同源预留槽 → 运行时覆写 →
+        // 缺省 CDN）——装配时读当下 settings（spec C §3.2 foreign 切档拍板：保存后
+        // 刷新页面生效，重新装配即读到新档）
+        appliedAssetBase = resolveForeignBase(loadSettings());
         core.setDefaultFileViewerAssetBaseUrl(appliedAssetBase);
       }
       const registry = core.createRendererRegistry((plugin.definitions ?? []) as readonly RendererDefinition[]);
@@ -179,7 +183,7 @@ function pluginMount(load: () => Promise<ForeignPlugin>, groupId: string): Forei
     // 同步块执行（顶层任务由队列保证无交叉，见「mount 串行队列」注）
     const pkg = foreignGroupAssetPackage(groupId, ext);
     const savedBase = appliedAssetBase;
-    if (pkg) applyForeignAssetBase(resolveForeignAssetPackageBase(pkg));
+    if (pkg) applyForeignAssetBase(resolveForeignAssetPackageBase(pkg, resolveForeignBase(loadSettings())));
     const context: FileRenderContext = {
       filename: args.name,
       sourceFile: args.file,
@@ -218,7 +222,7 @@ function pluginMount(load: () => Promise<ForeignPlugin>, groupId: string): Forei
     } finally {
       // 基座恢复：嵌套内联任务交还祖先基座；顶层任务恢复进入前值（下一 mount
       // 自带切换，resting 值无消费面）
-      if (pkg) applyForeignAssetBase(savedBase ?? resolveForeignAssetBase());
+      if (pkg) applyForeignAssetBase(savedBase ?? resolveForeignBase(loadSettings()));
     }
   };
   return (args: ForeignMountArgs): Promise<ForeignMountResult> => {
