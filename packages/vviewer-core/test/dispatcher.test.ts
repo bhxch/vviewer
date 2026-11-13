@@ -622,6 +622,61 @@ describe('dispatch rendererOverride (C 项)', () => {
     );
     expect(rendererId).toBe('image');
   });
+
+  // spec E 修 1：override=code（open-as「以纯文本打开」）补 det.lang shebang 回填——
+  // code 无 sniff 字段，override 重派时 det 全新构建、det.lang 恒 undefined → code
+  // 渲染器 lang null 走 hljsAuto（用户 bug 主诉：extless 文件从其他渲染器切到 code
+  // 恒 hljs）。复用文本探测链同源探测；范围门=仅 override.id === 'code' 回填。
+  describe('override=code det.lang shebang 回填（spec E 修 1）', () => {
+    const PYTHON = '#!/usr/bin/env python\nprint(1)\n';
+
+    it('① extless shebang head + override=code → det.lang 回填 python', async () => {
+      const reg = createRegistry();
+      reg.install(mk('code', ['txt']));
+      const target = document.createElement('div');
+      const { rendererId, det } = await createDispatcher(reg).dispatch(
+        source('script'), new TextEncoder().encode(PYTHON), target,
+        { rendererOverride: 'code' },
+      );
+      expect(rendererId).toBe('code');
+      expect(det.lang).toBe('python');
+    });
+
+    it('② override=code 无 shebang head → det.lang 仍 undefined（不误报）', async () => {
+      const reg = createRegistry();
+      reg.install(mk('code', ['txt']));
+      const target = document.createElement('div');
+      const { det } = await createDispatcher(reg).dispatch(
+        source('script'), new TextEncoder().encode('print(1)\n'), target,
+        { rendererOverride: 'code' },
+      );
+      expect(det.lang).toBeUndefined();
+    });
+
+    it('③ override=非 code 渲染器（markdown）+ shebang head → det.lang 不回填（范围门）', async () => {
+      const reg = createRegistry();
+      reg.install(mk('markdown', ['md']));
+      const target = document.createElement('div');
+      const { rendererId, det } = await createDispatcher(reg).dispatch(
+        source('script'), new TextEncoder().encode(PYTHON), target,
+        { rendererOverride: 'markdown' },
+      );
+      expect(rendererId).toBe('markdown');
+      expect(det.lang).toBeUndefined();
+    });
+
+    it('④ auto 路径回归：extless shebang 直开（无 override）→ det.lang python 与既有值相等（helper 抽取等价性锚）', async () => {
+      const reg = createRegistry();
+      reg.install(mk('code', ['txt']));
+      const target = document.createElement('div');
+      const { rendererId, det } = await createDispatcher(reg).dispatch(
+        source('script'), new TextEncoder().encode(PYTHON), target,
+      );
+      expect(rendererId).toBe('code');
+      expect(det.lang).toBe('python');
+      expect(det.extless).toBe(true);
+    });
+  });
 });
 
 describe('dispatch opts.lineMetrics 透传（字体系统 Task 2 协议，opts.signal 第 6 参先例）', () => {

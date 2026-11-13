@@ -313,6 +313,11 @@ function buildRoutingErrorActions(
   return actions;
 }
 
+/** shebang 语言探测（文本探测链 ：354 与 override 回填共用）：head 解码后取 shebang 语言；无命中 undefined。 */
+function shebangLangOfHead(head: Uint8Array): string | undefined {
+  return shebangLangOf(new TextDecoder().decode(head)) ?? undefined;
+}
+
 /**
  * 统一选路：扩展名主路由 → 内容探测回退链（签名改派 → 文本性探测 + shebang，BUG-07
  * 原生无扩展名；C 项放宽为未知扩展名同样探测，链尾追加 hex 兜底）
@@ -351,7 +356,7 @@ function resolveInitialRenderer(
         } else {
           det.reclassifiedFrom = originalExt;
         }
-        det.lang = shebangLangOf(new TextDecoder().decode(head)) ?? undefined;
+        det.lang = shebangLangOfHead(head);
       }
     }
     // ③ hex 兜底（C 项）：签名/文本皆不命中的未知扩展名（或无扩展名）内容落 hex 查看器
@@ -499,6 +504,13 @@ export function createDispatcher(registry: Registry): Dispatcher {
         // sniff 仅作元数据补齐（ooxml 族依赖），返回的改派建议被忽略——显式选择不被推翻
         renderer = override;
         if (override.sniff) await override.sniff(head, det);
+        // spec E 修 1：code 渲染器 override（open-as）补 det.lang shebang 回填——code 无
+        // sniff 字段，override 重派时 det 全新构建、det.lang 恒 undefined → lang null 走
+        // hljsAuto（用户 bug 主诉：从其他渲染器切到 code 恒 hljs）。复用文本探测链同源
+        // 探测；只补 lang 不做签名/扩展名重判（BUG-13 预检跳过语义维持）；不加
+        // looksTextual 门——shebang 首行 `#!` 本身是强信号，且「NUL 内容落 hex 后
+        // open-as code」是 extless 主诉求的真实到达路径（裁量落定，e2e OWX-E1 依赖）。
+        if (override.id === 'code' && det.lang === undefined) det.lang = shebangLangOfHead(head);
       } else {
         renderer = resolveInitialRenderer(registry.byExtension(det.ext), det, head, registry);
         if (!renderer) {
