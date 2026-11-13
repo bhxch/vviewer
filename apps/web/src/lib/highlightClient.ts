@@ -6,7 +6,12 @@ import { browser } from '$app/env';
 // URL（grammars/queries/runtime wasm）由它拼接，语义与 kit2 的 `${base}/...` 一致。
 const baseUrl = resolve('/');
 import { HighlightClient } from '@bhxch/vviewer-highlight';
-import { attachHighlightClient, type CodeHighlightClient, type HighlightCallContext } from '@bhxch/vviewer-render-text';
+import {
+  attachHighlightClient,
+  detachHighlightClient,
+  type CodeHighlightClient,
+  type HighlightCallContext
+} from '@bhxch/vviewer-render-text';
 import {
   createComputeRouter,
   decodeHighlightResponse,
@@ -27,6 +32,10 @@ import { resolveGrammarCdnBases } from './cdnProfiles';
 import { loadCapabilities, loadComputeLanguages, loadLastServer } from './openFlow.svelte';
 import { translate as t } from './i18n/core';
 import { loadSettings } from './stores/settings';
+import {
+  registerRecreateHighlightClient,
+  shouldRecreateHighlightClient
+} from './highlightRecreate';
 
 /**
  * 应用级 HighlightClient 单例：随首个调用方惰性创建（viewer.ts 启动时预热），
@@ -45,13 +54,17 @@ import { loadSettings } from './stores/settings';
  * 服务端层为连接时快照——create() 随首次调用只跑一次，会话中新连接的服务器
  * 不会进入资产链，需刷新页面生效（compute 路由则实时读取，与此不同）。
  * CDN 层档位（spec C §3.2 Task 3）：settings.cdn.grammars 运行时解析（default 档
- * 回构建期 env 多基注入）——档位变更经 rebuildHighlightClient() 重建（AppShell
+ * 回构建期 env 多基注入）——档位变更经 recreateHighlightClient({ force: true }) 重建（AppShell
  * 订阅 diff 接线；代际计数防在途旧 promise 落袋），服务端层仍为连接时快照。
  */
 
 let clientPromise: Promise<HighlightClient> | null = null;
 /** clientPromise 是否已落定（成功或失败）：cancelHighlight 的「迟到 cancelAll」防护开关 */
 let clientSettled = false;
+/** 创建期失败标志（spec E 修 3，重建门控三源之一）：ensureHighlightClient catch 置
+ * true（attach null 终态）、成功落定置 false。显式动作（切渲染器/切语言）经 failed-态
+ * 门控判定时读它——创建失败过门重建，健康态 no-op。 */
+let creationFailed = false;
 /** 代际计数（spec C §3.2 档位变更重建，Review Focus 2 竞态防线）：rebuild 时代递增，
  * 旧代际 create 的落定路径发现代际不符即废弃产物（dispose 不落袋）——防在途旧
  * promise 覆盖新 client 的 attach 面/语法清单。 */
@@ -128,6 +141,7 @@ export function ensureHighlightClient(): Promise<HighlightClient> | null {
           return ensureHighlightClient() as Promise<HighlightClient>;
         }
         clientSettled = true;
+        creationFailed = false; // 成功落定：清除创建期失败标志（重建门控三源之一归零）
         return c;
       })
       .catch((e: unknown) => {
@@ -144,6 +158,7 @@ export function ensureHighlightClient(): Promise<HighlightClient> | null {
         // 同步放行渲染端 attach 等待者（render-text waitForAttachedClient）：
         // 创建失败即解绑，降级 hljs 路径不必等超时（attachHighlightClient(null) 语义）
         clientSettled = true;
+        creationFailed = true; // 创建期失败标志（重建门控三源之一）：显式动作可过门重建
         attachHighlightClient(null);
         throw e;
       });
@@ -152,14 +167,36 @@ export function ensureHighlightClient(): Promise<HighlightClient> | null {
 }
 
 /**
- * 档位变更重建（spec C §3.2）：dispose 旧 client（cancelAll+worker.terminate）+
- * 重置单例 + ensureHighlightClient() 重 create。AppShell 单订阅点在 cdn.grammars/
- * grammarsCustom 两字段 diff 变化时调用（manifest 是 create() 快照，不重建不生效）。
- * 代际计数防在途旧 promise 落袋覆盖新 client（HL-09 前科同族的竞态面——CDN 层
- * 构建秒级创建窗口内二次切档/旧 create 落定均被代际守卫废弃）。
+ * 重建单点（spec E 修 3，原 rebuildHighlightClient 更名扩门）：CDN 档位变更传
+ * { force: true }（manifest 是 create() 快照，档位变更无条件重建）；切渲染器/切语言
+ * 的显式动作（neutral hook 触发面，highlightRecreate.ts 反转导入环）经 failed-态
+ * 门控——健康 client + 显式动作 = no-op（门即限流器），任一 failed 态过门重建：
+ * creationFailed（创建期失败，attach null 终态）/ currentClient 毒化（isInitFailed，
+ * 无 client 视为 false）/ grammarManifest 空表（worker 健康、三层 manifest 全失败的
+ * 不 reject 形态，spec §6 第 2 条；manifest null（在途/rebuild 清窗）不算空表）。
+ *
+ * 过门后先 detach 相位回 pending（dispose 之前——HL-09 族竞态防线，Review Focus 3）：
+ * 重渲染的 waitForAttachedClient 挂起等**新** client，不拿已 dispose 旧实例；create
+ * 失败经 ensureHighlightClient 既有 catch → attach(null) → failed 相位放行 → hljs。
+ * 既有 rebuild 主体原样保留：dispose 旧 client（cancelAll+worker.terminate）+ 重置
+ * 单例 + ensureHighlightClient() 重 create；代际计数防在途旧 promise 落袋覆盖新
+ * client（CDN 层构建秒级创建窗口内二次切档/旧 create 落定均被代际守卫废弃）。
  */
-export function rebuildHighlightClient(): void {
+export function recreateHighlightClient(opts?: { force?: boolean }): void {
   if (!browser) return;
+  if (
+    !shouldRecreateHighlightClient({
+      force: opts?.force === true,
+      creationFailed,
+      clientInitFailed: currentClient?.isInitFailed() ?? false,
+      grammarTableEmpty: grammarManifest !== null && Object.keys(grammarManifest).length === 0
+    })
+  ) {
+    return; // 健康 client + 显式动作：no-op（门即限流器）
+  }
+  // 相位回 pending（在 dispose 前）：重渲染的 attach 等待者等新 client——不放行
+  // waiters 本身，attach 成功时统一放行（超时放行/失败 failed 放行走既有兜底）
+  detachHighlightClient();
   generation += 1;
   // 在途远程高亮一并中止（与 cancelHighlight 的 tab 切换同语义——销毁路径对称）：
   // 切档重建时在途的远程 fetch 跑完后响应只会落入已被替换的旧渲染管线（无主连接）
@@ -403,3 +440,8 @@ async function create(gen: number): Promise<HighlightClient> {
   warmHighlightAsset(`${baseUrl}tree-sitter.wasm`);
   return client;
 }
+
+// neutral hook 注册（spec E 修 3，模块加载时单点接线）：tabsModel 的 setRendererOverride/
+// setHighlightLang 经 requestHighlightRecreate() 触发显式动作重建——不直 import 本模块
+//（导入环 tabsModel→highlightClient→openFlow.svelte→tabsModel 实查成立，hook 反转）
+registerRecreateHighlightClient(recreateHighlightClient);

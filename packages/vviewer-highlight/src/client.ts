@@ -135,6 +135,16 @@ export class HighlightClient {
   }
 
   /**
+   * 毒化状态只读视图（spec E 修 3，重建门控判定面）：initFailed 由 failWorker 置位
+   * （onerror/onmessageerror/看门狗超时）——true = 当前实例已不可用，后续请求短路。
+   * 无副作用：不改任何状态、不清看门狗（failWorker/dispose 语义零改动）；「destroy
+   * 清除」语义由 dispose 后新建实例的全新状态承载（本实例终态不复活）。
+   */
+  isInitFailed(): boolean {
+    return this.initFailed;
+  }
+
+  /**
    * worker 致命失败（onerror/onmessageerror/看门狗超时）统一收敛：
    * 上报应用层 → 短路后续请求 → reject 全部在途请求（普通 Error，渲染端接 hljs 兜底）。
    * 幂等：首次失败即清看门狗，避免超时与错误双报。

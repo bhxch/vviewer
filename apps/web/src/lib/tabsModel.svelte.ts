@@ -25,6 +25,9 @@ import {
 } from './tabOrder';
 import { displayLabelForStore } from './mountsSync';
 import { neighborAfterClose, neighborAfterBatch } from './tabNeighbors';
+// spec E 修 3：切渲染器/切语言的显式动作 → 门控重建触发面（neutral hook，无环——
+// 直 import highlightClient 成环 tabsModel→highlightClient→openFlow→tabsModel，实查成立）
+import { requestHighlightRecreate } from './highlightRecreate';
 // i18n（Task 4 域 A 抽取）：占位 tab 恢复文案/SSE 变更提示入 tabs.model.* 目录
 // （runes 模块消费响应式 t；错误 message 为显示面——ViewerPane 错误卡渲染 err.message）
 import { t } from './i18n/index.svelte';
@@ -495,6 +498,10 @@ class TabCollection {
     if (rendererId === null) delete tab.overrideRenderer;
     else tab.overrideRenderer = rendererId;
     tab.rev = (tab.rev ?? 0) + 1;
+    // spec E 修 3：切渲染器显式动作 → 门控重建（neutral hook 触发面，不直 import
+    // highlightClient——导入环 tabsModel→highlightClient→openFlow→tabsModel 经
+    // highlightRecreate 反转）。健康 client 时实现侧门控 no-op（限流器）
+    requestHighlightRecreate();
     void persist(); // 与 persistScroll 同款落盘入口（saveWorkspaces 快照）
   }
 
@@ -513,6 +520,8 @@ class TabCollection {
     if (lang === null) delete tab.overrideLang;
     else tab.overrideLang = lang;
     tab.rev = (tab.rev ?? 0) + 1;
+    // spec E 修 3：切语言显式动作 → 门控重建（同 setRendererOverride，neutral hook 触发面）
+    requestHighlightRecreate();
     void persist(); // 与 setRendererOverride 同款落盘入口（saveWorkspaces 快照）
   }
 

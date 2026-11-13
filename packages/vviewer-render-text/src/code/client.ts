@@ -81,6 +81,21 @@ export function attachHighlightClient(client: CodeHighlightClient | null): void 
 }
 
 /**
+ * 显式重建通道的相位回退（spec E 修 3，render-text 契约新增）：attachedClient =
+ * null + attachPhase 回 pending——**不放行** attachWaiters（等新 client attach 时
+ * 统一放行）。区别于 attachHighlightClient(null) 的 failed 终态：重建窗口内
+ * waitForAttachedClient 挂起的渲染实例等到的是**新** client（HL-09 族竞态防线——
+ * 若相位落 failed/dispose 后放行，在途重渲染会拿到已 dispose 旧实例或即刻 null
+ * 锁 hljs）；≤10s 超时放行既有兜底防永久挂起，create 失败经 ensureHighlightClient
+ * 既有 catch → attachHighlightClient(null) → failed 相位放行 → hljs。
+ * __resetAttachPhaseForTest 保留不动（测试装置另用）。
+ */
+export function detachHighlightClient(): void {
+  attachedClient = null;
+  attachPhase = { phase: 'pending' };
+}
+
+/**
  * 等待高亮客户端注入（P2 CDN 层引入的 attach 竞态修复）：client 由 apps/web
  * 启动预热创建，但 create() 需先走 grammar 资产三层解析链——CDN 层注入后含一次
  * 真实网络 fetch（CI 假域名快速失败，本地/代理环境可耗秒级），「启动预热早于

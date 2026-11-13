@@ -231,6 +231,40 @@ describe('HighlightClient', () => {
       client.dispose();
     });
   });
+
+  // spec E 修 3：isInitFailed 只读访问器（重建门控的毒化判定面）。只读视图零副作用
+  // ——failWorker/dispose 语义零改动；「dispose 后新建实例天然全新状态」即 destroy 清除语义。
+  describe('isInitFailed（spec E 修 3：毒化状态只读面）', () => {
+    it('初始（未毒化）为 false', () => {
+      const { client } = fake();
+      expect(client.isInitFailed()).toBe(false);
+      client.dispose();
+    });
+
+    it('failWorker（onerror 帧）后为 true（当前实例不可用语义）', async () => {
+      const worker = new FakeWorker();
+      worker.responder = () => {};
+      const client = new HighlightClient(worker as unknown as Worker);
+      const p = client.highlight('a=1', 'bash').catch(() => {});
+      await vi.waitFor(() => expect(worker.requests).toHaveLength(1));
+      worker.onerror?.({ message: 'script 404' } as ErrorEvent);
+      await p; // 在途请求已 reject（毒化收敛既有语义）
+      expect(client.isInitFailed()).toBe(true);
+      client.dispose();
+    });
+
+    it('dispose 后仍为 true（终态不复活；重建面靠新建实例的全新状态）', async () => {
+      const worker = new FakeWorker();
+      worker.responder = () => {};
+      const client = new HighlightClient(worker as unknown as Worker);
+      const p = client.highlight('a=1', 'bash').catch(() => {});
+      await vi.waitFor(() => expect(worker.requests).toHaveLength(1));
+      worker.onerror?.({ message: 'script 404' } as ErrorEvent);
+      await p;
+      client.dispose();
+      expect(client.isInitFailed()).toBe(true);
+    });
+  });
 });
 
 /** serveWorker 桥接 Worker：postMessage 喂 worker 侧 ctx.onmessage（微任务异步，贴近真实消息时序）。 */

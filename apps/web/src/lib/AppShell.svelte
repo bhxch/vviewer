@@ -56,7 +56,7 @@
   } from './stores/session';
   import { migrateLegacyTabs, workspaceStore, type WorkspaceSnapshotItem, type WorkspaceSource } from './workspaceStore';
   import { loadSettings, onSettingsChanged, saveSettings, type Settings } from './stores/settings';
-  import { rebuildHighlightClient } from './highlightClient';
+  import { recreateHighlightClient } from './highlightClient';
   // i18n/reduceMotion 接线（i18n 基建 D3/D11）：启动 + 设置订阅双通道应用
   import { setLocale, t } from './i18n/index.svelte';
   // 大纲滚动跟随句柄（code-outline Task 3）：ViewerPane 上行 firstVisibleLine 命令式快照
@@ -800,7 +800,8 @@
       // 旧 promise 落袋；档位未变零触发）。重建后高亮在下次渲染生效（新 tab/
       // rev++ 重渲染时走新 CDN 层）。
       if (s.cdn.grammars !== prevGrammarsProfile || s.cdn.grammarsCustom !== prevGrammarsCustom) {
-        rebuildHighlightClient();
+        // spec E 修 3：CDN 档位变更传 force——manifest 快照语义，无条件过门重建
+        recreateHighlightClient({ force: true });
       }
       if (s.diagrams.mermaidTheme !== prevMermaidTheme || s.cdn.engines !== prevEnginesProfile || s.cdn.enginesCustom !== prevEnginesCustom) {
         document.dispatchEvent(
