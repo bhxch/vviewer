@@ -53,7 +53,7 @@ function exportFileBuffer(settings: Record<string, unknown>): Buffer {
 }
 
 test.describe('b-settings-center 统一设置中心', () => {
-  test('SC-01 骨架与双入口：融合菜单「设置」/Ctrl+, 开合、十二组定稿序、切组、Esc 关闭', async ({ page }) => {
+  test('SC-01 骨架与双入口：融合菜单「设置」/Ctrl+, 开合、十三组定稿序、切组、Esc 关闭', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('.vv-tabbar')).toBeVisible();
 
@@ -66,7 +66,8 @@ test.describe('b-settings-center 统一设置中心', () => {
 
     // 定稿序（spec §2）+「代码视图」（自动换行）插在字体之后、「打开方式」（默认渲染器
     // 偏好）插在图表之后、「语言与辅助功能」（i18n 基建，i18n-locale spec）插在
-    // 外观之后 + 默认外观组激活
+    // 外观之后、「网络资源」（spec C §3.2，Task 3——十二→十三组为 D20 明示翻转）插在
+    // 存储与数据之后 + 默认外观组激活
     const labels = await page.locator('.vv-sc-navitem').allTextContents();
     expect(labels).toEqual([
       '外观',
@@ -80,6 +81,7 @@ test.describe('b-settings-center 统一设置中心', () => {
       '自动刷新',
       '计算',
       '存储与数据',
+      '网络资源',
       '关于'
     ]);
     await expect(page.locator('.vv-sc-navitem.active')).toHaveText('外观');

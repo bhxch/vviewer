@@ -1,5 +1,6 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
+import { setGrammarCdnCustom } from './settings-center';
 
 /**
  * b-grammar-layers E2E（P2 资产三层解析链，spec §3）：grammar manifest 按
@@ -72,14 +73,15 @@ async function openFile(page: Page, name: string): Promise<void> {
  * 结尾）会同时命中 CDN manifest（双星吞掉 scheme 与 host），这里按 origin 分流。
  * 注意：块注释内不得出现星号紧跟斜杠的序列（会提前闭合注释），描述 glob 时用文字。
  */
-async function mockOriginManifestWithoutJava(
+async function mockOriginManifestWithout(
   page: Page,
-  request: APIRequestContext
+  request: APIRequestContext,
+  langs: string[]
 ): Promise<void> {
   const res = await request.get('/grammars/manifest.json');
   expect(res.ok()).toBeTruthy();
   const manifest = (await res.json()) as { grammars: Record<string, unknown> };
-  delete manifest.grammars.java;
+  for (const lang of langs) delete manifest.grammars[lang];
   await page.route(
     /\/\/(?!cdn\.grammars\.test).*\/grammars\/manifest\.json$/,
     (route) =>
@@ -89,6 +91,13 @@ async function mockOriginManifestWithoutJava(
         body: JSON.stringify(manifest)
       })
   );
+}
+
+async function mockOriginManifestWithoutJava(
+  page: Page,
+  request: APIRequestContext
+): Promise<void> {
+  return mockOriginManifestWithout(page, request, ['java']);
 }
 
 test('分层链用例 1：同源缺失 java（lite 场景）→ CDN 层兜底，tree-sitter 高亮生效', async ({
@@ -196,4 +205,168 @@ test('分层链用例 2：CDN manifest 不可达 → 跳层 console.warn 一条�
   await expect(page.locator('.vv-code-pre')).toContainText('greet', { timeout: 20_000 });
   await expect(page.locator('.vv-error-card')).toHaveCount(0);
   expect(pageErrors).toEqual([]);
+});
+
+
+// ---------- 多基拆包（spec C §3.2，Task 5）：settings.cdn custom 档运行时多基 ----------
+// 既有两用例为构建期单基注入（VV_GRAMMAR_CDN env）零改动；以下用例经设置中心
+// custom 档运行时注入两子包 base（| 分隔）——AppShell 订阅 diff 触发
+// rebuildHighlightClient（代际守卫），assembleGrammarLayers 按 cdn-p1..pN 逐层
+// fetch + first-wins 合并。queries 恒同源（分层链契约在多基下不变）。
+
+const RUST_SRC = ['pub fn greet(name: &str) -> String {', '    format!("hello {name}")', '}', ''].join('\n');
+
+/** CDN 子包 mock 路由（子包域 → manifest 与 wasm 各自伺服；命中记录供断言） */
+async function mockSubPack(
+  page: Page,
+  host: string,
+  lang: string,
+  wasmBytes: Buffer,
+  hits: string[],
+  opts: { manifestStatus?: number } = {}
+): Promise<void> {
+  await page.route(`**/${host}/**`, (route) => {
+    const url = route.request().url();
+    hits.push(url);
+    if (url.endsWith('/grammars/manifest.json')) {
+      const status = opts.manifestStatus ?? 200;
+      return route.fulfill({
+        status,
+        contentType: 'application/json',
+        headers: { 'access-control-allow-origin': '*' },
+        body: status === 200 ? JSON.stringify({ grammars: { [lang]: { file: `${lang}.wasm`, aliases: [] } } }) : 'forbidden'
+      });
+    }
+    if (url.endsWith(`/grammars/${lang}.wasm`)) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/wasm',
+        headers: { 'access-control-allow-origin': '*' },
+        body: wasmBytes
+      });
+    }
+    return route.abort();
+  });
+}
+
+test('分层链用例 3：custom 档两 mock 子包多基合并——java 落 p1、rust 落 p2 各取其 base 的 wasm，tree-sitter 生效', async ({
+  page,
+  request
+}) => {
+  test.setTimeout(90_000);
+  const p1Hits: string[] = [];
+  const p2Hits: string[] = [];
+  // 两语言只能来自 custom 多基 CDN 层（同源 manifest 剥离 java+rust）
+  await mockOriginManifestWithout(page, request, ['java', 'rust']);
+  const javaWasm = await (await request.get('/grammars/java.wasm')).body();
+  const rustWasm = await (await request.get('/grammars/rust.wasm')).body();
+  await mockSubPack(page, 'cdn-p1.grammars.test', 'java', javaWasm, p1Hits);
+  await mockSubPack(page, 'cdn-p2.grammars.test', 'rust', rustWasm, p2Hits);
+
+  await page.goto('/');
+  await setGrammarCdnCustom(page, 'https://cdn-p1.grammars.test/grammars/|https://cdn-p2.grammars.test/grammars/');
+
+  // java（p1）：tree-sitter 生效，wasm 确实来自 p1 子包
+  await openDir(page, [
+    { name: 'Hello.java', type: 'text/x-java-source', content: JAVA_SRC },
+    { name: 'main.rs', type: 'text/rust', content: RUST_SRC }
+  ]);
+  await openFile(page, 'Hello.java');
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 30_000 });
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const dbg = window as unknown as { __vvLastHighlightOk?: boolean; __vvLastHighlightLang?: string };
+          return { ok: dbg.__vvLastHighlightOk, lang: dbg.__vvLastHighlightLang };
+        }),
+      { timeout: 30_000, message: '等待 java 高亮成功（p1 子包 wasm）' }
+    )
+    .toEqual({ ok: true, lang: 'java' });
+  expect(p1Hits.some((u) => u.endsWith('/grammars/java.wasm')), 'java.wasm 命中 p1 子包').toBe(true);
+  expect(p2Hits.some((u) => u.endsWith('/grammars/java.wasm')), 'java 不得跨包落 p2（queries 跟随语义的 wasm 面）').toBe(false);
+
+  // rust（p2）：非首子包语言 tree-sitter 生效，wasm 确实来自 p2 子包
+  await openFile(page, 'main.rs');
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 30_000 });
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const dbg = window as unknown as { __vvLastHighlightOk?: boolean; __vvLastHighlightLang?: string };
+          return { ok: dbg.__vvLastHighlightOk, lang: dbg.__vvLastHighlightLang };
+        }),
+      { timeout: 30_000, message: '等待 rust 高亮成功（p2 子包 wasm——非首子包语言）' }
+    )
+    .toEqual({ ok: true, lang: 'rust' });
+  expect(p2Hits.some((u) => u.endsWith('/grammars/rust.wasm')), 'rust.wasm 命中 p2 子包').toBe(true);
+  await expect(page.locator('.vv-error-card')).toHaveCount(0);
+});
+
+test('分层链用例 4：p2 子包 manifest 403 → 跳层 console.warn 一条，p1 语言 tree-sitter 生效（多基跳层语义）', async ({
+  page,
+  request
+}) => {
+  test.setTimeout(90_000);
+  const layerSkips: string[] = [];
+  page.on('console', (msg) => {
+    // 精确锁 p2 子包层 warn（初始 client 的构建缺省层 warn 不入计数——skipping 文案
+    // 含 manifest URL，按 p2 host 分流）
+    if (
+      msg.type() === 'warning' &&
+      msg.text().includes('skipping this asset layer') &&
+      msg.text().includes('cdn-p2.grammars.test')
+    ) {
+      layerSkips.push(msg.text());
+    }
+  });
+  const p1Hits: string[] = [];
+  await mockOriginManifestWithout(page, request, ['java', 'rust']);
+  const javaWasm = await (await request.get('/grammars/java.wasm')).body();
+  await mockSubPack(page, 'cdn-p1.grammars.test', 'java', javaWasm, p1Hits);
+  // p2 manifest 403（跳层语义：仅 warn 一条，不阻塞 p1 层）
+  const p2Hits: string[] = [];
+  await mockSubPack(page, 'cdn-p2.grammars.test', 'rust', Buffer.alloc(0), p2Hits, { manifestStatus: 403 });
+
+  await page.goto('/');
+  await setGrammarCdnCustom(page, 'https://cdn-p1.grammars.test/grammars/|https://cdn-p2.grammars.test/grammars/');
+
+  await openDir(page, [{ name: 'Hello.java', type: 'text/x-java-source', content: JAVA_SRC }]);
+  await openFile(page, 'Hello.java');
+  // p1 语言照常生效（可用性优先于完整性），p2 仅一条 warn
+  await expect(page.locator('.vv-statusbar')).toContainText('高亮: tree-sitter', { timeout: 30_000 });
+  await expect
+    .poll(() => layerSkips.length, { timeout: 20_000, message: '等待 p2 子包跳层的 console.warn（恰一条）' })
+    .toBe(1);
+  expect(p1Hits.some((u) => u.endsWith('/grammars/java.wasm')), 'p1 wasm 正常伺服').toBe(true);
+  await expect(page.locator('.vv-error-card')).toHaveCount(0);
+});
+
+test('分层链真网锚：jsdelivr/unpkg 子包 manifest 可达且为 JSON（子包未首发 404 → skip 不假红）', async ({ request }) => {
+  test.setTimeout(60_000);
+  const targets = [
+    'https://cdn.jsdelivr.net/npm/@bhxch/vviewer-grammars-full-p1/grammars/manifest.json',
+    'https://unpkg.com/@bhxch/vviewer-grammars-full-p1/grammars/manifest.json'
+  ];
+  const probes: { url: string; status: number }[] = [];
+  for (const url of targets) {
+    try {
+      const res = await request.get(url, { maxRedirects: 3 });
+      probes.push({ url, status: res.status() });
+    } catch {
+      probes.push({ url, status: -1 });
+    }
+  }
+  const reachable = probes.filter((p) => p.status === 200);
+  test.skip(
+    reachable.length === 0,
+    `子包未首发或网络不可达（${probes.map((p) => `${new URL(p.url).host}=${p.status}`).join(', ')}）：真网锚 skip 不假红`
+  );
+  for (const p of reachable) {
+    const res = await request.get(p.url, { maxRedirects: 3 });
+    expect(res.status(), p.url).toBe(200);
+    // manifest 为 JSON 且含 grammars 键（布局契约面）
+    const json = (await res.json()) as { grammars?: Record<string, unknown> };
+    expect(json.grammars, `${p.url} 应含 grammars 键`).toBeDefined();
+  }
 });

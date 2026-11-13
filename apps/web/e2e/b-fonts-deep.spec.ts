@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { injectDir, openTreeFile } from './b-markdown-html-docs-helpers';
 import { WOFF2_B64 } from './font-fixture';
+import { FONT_PRESETS } from '../src/lib/fontPresets';
 import { applySettings, closeSettings, gotoGroup, openSettings } from './settings-center';
 
 /**
@@ -589,5 +590,36 @@ test.describe('b-fonts-deep 字体系统补强', () => {
     // 记录不落库：无正常行、FontFace 未注册、列表非空态由错误态行承担
     await expect(page.locator('.vv-settings-font:not(.vv-settings-font-failed)')).toHaveCount(0);
     await expect.poll(() => hasFontFace(page, 'quota'), { timeout: 20_000 }).toBe(false);
+  });
+});
+
+
+test.describe('b-fonts-deep css 预设在线语义（spec C §3.3，Task 5）', () => {
+  // 同 b-fonts 预设 describe：mock 源屏蔽 SW（route 拦截确定性）
+  test.use({ serviceWorkers: 'block' });
+
+  test('FNT-11 css 预设断网回退缺省（自然语义）：css 源 404 → 添加成功、link 在位、零 FontFace 注册、在线标注', async ({
+    page
+  }) => {
+    test.setTimeout(60_000);
+    // css 源不可达（404）——css 型不做离线（无 FontFace 装载验证面），添加成功且
+    // link 在位；@font-face 注册不发生（css 拉不到）→ 字形回退缺省栈（自然语义）
+    const serifSource = FONT_PRESETS.find((p) => p.family === 'Noto Serif SC')!.sources[0]!.url;
+    await page.route(serifSource, (route) =>
+      route.fulfill({ status: 404, headers: { 'access-control-allow-origin': '*' }, body: 'not found' })
+    );
+    await page.goto('/');
+    await openSettings(page);
+    await gotoGroup(page, '字体');
+    const presetRow = page.locator('.vv-settings-preset-font', { hasText: 'Noto Serif SC' });
+    await presetRow.locator('button', { hasText: 'jsdelivr' }).click();
+    await expect(page.locator('.vv-settings-note', { hasText: '已添加在线字体' })).toBeVisible();
+    await expect(page.locator('head link[href*="noto-serif-sc"]')).toHaveCount(1);
+    await expect.poll(() => hasFontFace(page, 'Noto Serif SC')).toBe(false);
+    // 管理列表条目体积位为「在线字体」标注（size 恒 0 不显示 0 B）
+    const recRow = page
+      .locator('.vv-settings-font', { has: page.locator('.vv-settings-font-name', { hasText: /^Noto Serif SC$/ }) })
+      .filter({ has: page.locator('input[type="checkbox"]') });
+    await expect(recRow.getByText('在线字体')).toBeVisible();
   });
 });

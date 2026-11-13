@@ -17,6 +17,7 @@ import { openMenu, MENU_POP } from './tabbar-menu';
  *
  * 状态矩阵（≥7 态，设计 §4.3）：空壳 / markdown 样例 / code 语料 / 设置中心 /
  * 设置中心「语言与辅助功能」组（Task 6 补扫，域 C 抽取的 aria 复核面）/
+ * 设置中心「网络资源」组（spec C Task 5 新节态，A11Y-09 同法）/
  * QuickOpen / 目录管理 / 全局搜索 / TabBarMenu 融合菜单展开。双 project（桌面
  * + mobile 375×667）各跑一遍：抽屉/触屏形态若引出额外违规，按 D9 真修；
  * 确属移动形态固有且桌面已覆盖的，允许用例级 test.skip 限定 project 并注明
@@ -109,6 +110,17 @@ test.describe('b-a11y-axe 全页可达性扫描（wcag2a+wcag21a 零违规）', 
     // A11Y-04 只扫默认激活组「外观」；本用例切到 i18n 基建新节（Task 3 披露项），
     // 并覆盖域 C 全部 11 节抽取后的左导航组名 aria（组名 init 期 t()）与新节控件
     await gotoGroup(page, '语言与辅助功能');
+    await expect(page.locator('.vv-sc-section').first()).toBeVisible();
+    await expectNoAxeViolations(page);
+  });
+
+  test('A11Y-10 设置中心「网络资源」组（spec C Task 3 新节——A11Y-09 同法的组态扩展位）', async ({
+    page
+  }) => {
+    await page.goto('/');
+    await waitAppMounted(page);
+    await openSettings(page);
+    await gotoGroup(page, '网络资源');
     await expect(page.locator('.vv-sc-section').first()).toBeVisible();
     await expectNoAxeViolations(page);
   });

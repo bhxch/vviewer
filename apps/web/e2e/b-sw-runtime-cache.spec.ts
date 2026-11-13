@@ -685,6 +685,58 @@ test.describe('b-sw-runtime-cache SW 运行时缓存路由（自建静态伺服�
     ).toMatch(/^vv-cdn-engines-/);
   });
 
+  // spec C §3.2（Task 5）：路径型覆盖的运行期锚 + custom 域在线直取边界——
+  // grammars 两规则（/grammars/*\*.wasm 与 /queries/）不锚 host，unpkg 形态 URL 天然
+  // 命中；foreign/engines 规则 host 锚定 jsdelivr，custom 域（起步语义=在线直取不入
+  // 运行时缓存）以「非 jsdelivr 域非 grammars 路径 → 不入缓存」的同构证据锁定。
+
+  test('SWR-ROUTE-08: grammars wasm 路径型规则不锚 host——产物路由字面断言 + 真网 unpkg 可达软锚（spec C 拆包档位形态）', async ({
+    page
+  }) => {
+    test.setTimeout(120_000);
+    // 路径型覆盖的证据链（spec C §3.2）：①产物 sw.js 的 grammars wasm 路由正则字面
+    // 无 https host 锚（构建期硬证据——unpkg/custom 任何域的 /grammars/*.wasm 均命中；
+    // 运行期跨域命中面由 SWR-ROUTE-06 的 jsdelivr 通配跨域入缓存同构证明）；②真网
+    // unpkg 形态 URL 可达性软锚（skipIf——wasm 恒 200+ACAO，拆包档位（unpkg preset）
+    // 的 wasm 即此形态）。真网跨域缓存写入面在本环境不稳定（curl 实证 200+ACAO+
+    // application/wasm 而 vvHolders=0，记台账 Task 5④），不做硬断言。
+    const swSource = readFileSync(join(BUILD_DIR, 'sw.js'), 'utf8');
+    // grammars wasm 路由正则字面无 host 锚（相对路径型）
+    expect(swSource).toContain('registerRoute(/\\/grammars\\/.*\\.wasm$/');
+    const url = 'https://unpkg.com/@bhxch/vviewer-grammars-full@0.1.1/grammars/bash.wasm';
+    await page.goto(fixture.base);
+    await waitSwActivated(page);
+    const r = await probe(page, url);
+    test.skip(
+      r.status !== 200,
+      `unpkg 不可达或页面 fetch 被 CORS 拒绝（status=${r.status}, error=${r.error ?? '-'}）：软锚依赖真网 unpkg`
+    );
+    expect(r.status).toBe(200);
+  });
+
+  test('SWR-ROUTE-09: 非 jsdelivr 域（unpkg）非 grammars 路径资源在线直取不入 vv-* 缓存（foreign/engines custom 域无缓存族的同构证据，真网）', async ({
+    page
+  }) => {
+    test.setTimeout(120_000);
+    // foreign/engines 的 custom 档自定义域构建期不可知（SW 规则 host 锚定 jsdelivr）——
+    // 起步语义=在线直取不入运行时缓存。以 unpkg 域（非 jsdelivr）非 /grammars/ 路径
+    // 资源作同构证据：fetch 200 但不命中任何路由 → 恒不入 vv-* 族
+    const url = 'https://unpkg.com/lodash@4.17.21/package.json';
+    await page.goto(fixture.base);
+    await waitSwActivated(page);
+    const r = await probe(page, url);
+    if (r.status !== 200) {
+      test.skip(
+        true,
+        `unpkg 不可达或页面 fetch 被 CORS 拒绝（status=${r.status}, error=${r.error ?? '-'}）：SWR-ROUTE-09 依赖真网 unpkg`
+      );
+    }
+    // 直取成功（200 到页面）但不入任何 vv-* 运行时缓存
+    expect(r.status).toBe(200);
+    await page.waitForTimeout(3_000); // 留出潜在误路由入缓存的窗口
+    expect(await vvHolders(page, url), '非 jsdelivr 域资源不得入 vv-* 运行时缓存（在线直取边界）').toEqual([]);
+  });
+
   test(
     'SWR-ROUTE-07 [SWR-DEF-01 已修: 服务端 fallback 收窄后未知资产 404 不入 foreign 资产缓存]: /file-viewer-assets/ 下未知资产应答不得入运行时缓存',
     async ({ page }) => {

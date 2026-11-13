@@ -54,3 +54,38 @@ export async function setComputePolicy(
   await applySettings(page);
   await closeSettings(page);
 }
+
+// ---------- CDN 档位装置（spec C §3.2，Task 5 CDNP 域共用） ----------
+
+/** 打开设置中心并切到「网络资源」组（CDNP 各用例公共前缀） */
+export async function openCdnGroup(page: Page): Promise<void> {
+  await openSettings(page);
+  await gotoGroup(page, '网络资源');
+}
+
+/** grammars 档位切 custom 并填多基值（应用+关闭——AppShell diff 触发 highlightClient 重建） */
+export async function setGrammarCdnCustom(page: Page, value: string): Promise<void> {
+  await openCdnGroup(page);
+  await page.getByLabel('语法高亮 CDN 档位').selectOption('custom');
+  await page.getByLabel('语法高亮自定义地址').fill(value);
+  await applySettings(page);
+  await closeSettings(page);
+}
+
+/** engines 档位切 custom 并填 host（应用+关闭——rev++ 重渲染触发图引擎新 host） */
+export async function setEnginesCdnCustom(page: Page, host: string): Promise<void> {
+  await openCdnGroup(page);
+  await page.getByLabel('图表引擎 CDN 档位').selectOption('custom');
+  await page.getByLabel('图表引擎自定义地址').fill(host);
+  await applySettings(page);
+  await closeSettings(page);
+}
+
+/** foreign 档位切 custom 并填 base（应用——刷新后重新装配生效，CDNP-04 刷新语义） */
+export async function setForeignCdnCustom(page: Page, base: string): Promise<void> {
+  await openCdnGroup(page);
+  await page.getByLabel('外部文档资产 CDN 档位').selectOption('custom');
+  await page.getByLabel('外部文档资产自定义地址').fill(base);
+  await applySettings(page);
+  await closeSettings(page);
+}

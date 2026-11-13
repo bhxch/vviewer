@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { injectDir, openTreeFile } from './b-markdown-html-docs-helpers';
 import { WOFF2_B64 } from './font-fixture';
+import { FONT_PRESETS } from '../src/lib/fontPresets';
 import { applySettings, closeSettings, gotoGroup, openSettings } from './settings-center';
 
 /**
@@ -229,5 +230,134 @@ test.describe('b-fonts 字体系统', () => {
     // 悬空不失控：document.fonts 已注销，CSS 回退栈兜住渲染（"x", 默认栈 形态保留）
     await expect.poll(() => hasFontFace(page, 'x')).toBe(false);
     await expect.poll(() => fontCss(page)).toContain('--vv-code-font: "x", ui-monospace');
+  });
+});
+
+
+test.describe('b-fonts 预设字体（spec C §3.3，Task 5）', () => {
+  // SW 激活后 page.route 对 fetch 的拦截不可靠（b-grammar-layers 已知边界：SW fetch
+  // handler 放行/转发的请求不进页面网络栈）——预设 mock 源屏蔽 SW 求确定性
+  test.use({ serviceWorkers: 'block' });
+
+  test('预设一键添加：single（mock woff2）FontFace/下拉生效 → 启停翻转 → 删除回落；css（mock 切片）link 在位 → 启停=节点插拔 → 删除移除', async ({
+    page
+  }) => {
+    test.setTimeout(120_000);
+    // mock 预设源（真实预设 URL 字面逐条绑定——清单 URL 变更即本锚同步红；字节用
+    // 夹具，锚定「真实 URL 走真实添加管线」而非字节源）
+    const jbSource = FONT_PRESETS.find((p) => p.family === 'JetBrains Mono')!.sources[0]!.url;
+    const interSource = FONT_PRESETS.find((p) => p.family === 'Inter')!.sources[0]!.url;
+    const notoSource = FONT_PRESETS.find((p) => p.family === 'Noto Sans SC')!.sources[0]!.url;
+    await page.route(interSource, (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'font/woff2', 'access-control-allow-origin': '*' },
+        body: Buffer.from(WOFF2_B64, 'base64')
+      })
+    );
+    await page.route(jbSource, (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'font/woff2', 'access-control-allow-origin': '*' },
+        body: Buffer.from(WOFF2_B64, 'base64')
+      })
+    );
+    // css 切片源：mock css 内 @font-face src 指向 mock woff2（模拟切片相对引用被
+    // 同域解析后的产物面——link 加载即注册 @font-face）
+    await page.route(notoSource, (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'text/css', 'access-control-allow-origin': '*' },
+        body: "@font-face { font-family: 'Noto Sans SC'; src: url('https://fonts.mock/preset-css.woff2') format('woff2'); }"
+      })
+    );
+    await page.route('https://fonts.mock/preset-css.woff2', (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'font/woff2', 'access-control-allow-origin': '*' },
+        body: Buffer.from(WOFF2_B64, 'base64')
+      })
+    );
+    await page.goto('/');
+    await openSettings(page);
+    await gotoGroup(page, '字体');
+
+    // 预设区块在位（预设行=含来源按钮；与管理记录行以 checkbox 特征区分）
+    const jbPresetRow = page.locator('.vv-settings-preset-font', { hasText: 'JetBrains Mono' });
+    const notoPresetRow = page.locator('.vv-settings-preset-font', { hasText: 'Noto Sans SC' });
+    await expect(notoPresetRow.getByText('在线字体')).toBeVisible(); // css 条目「在线字体」标注（spec §7 落定）
+
+    // —— single 一键添加（jsdelivr 源）：FontFace 注册 + 槽位下拉出现 + 已添加禁用态
+    await jbPresetRow.locator('button', { hasText: 'jsdelivr' }).click();
+    await expect(page.locator('.vv-settings-note', { hasText: '已添加 JetBrains Mono' })).toBeVisible();
+    // 诊断：faces 全集 + hasFontFace 同口径判定（同 evaluate）
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const faces = [...document.fonts].map((f) => ({ fam: f.family, st: f.status }));
+            return { faces, some: faces.some((x) => x.fam === '"JetBrains Mono"') };
+          }),
+        { timeout: 8_000, message: '首次添加后 faces 全集 + some' }
+      )
+      .toEqual({ faces: expect.arrayContaining([expect.objectContaining({ fam: '"JetBrains Mono"', st: 'loaded' })]), some: true });
+    await expect(jbPresetRow.locator('button', { hasText: 'jsdelivr' })).toBeDisabled();
+    await expect(jbPresetRow.getByText('已添加')).toBeVisible();
+    // 下拉生效断言用 Inter（非本机预设——JetBrains Mono/Fira Code 与 fonts.ts
+    // CODE_FONT_PRESETS 撞车，mergedFamilyOptions 过滤不重复加「（网络）」项，FNT-08 语义）
+    const codeSelect = page.locator('select[aria-label="代码字体族"]');
+    const interPresetRow = page.locator('.vv-settings-preset-font', { hasText: 'Inter' });
+    await interPresetRow.locator('button', { hasText: 'jsdelivr' }).click();
+    await expect(page.locator('.vv-settings-note', { hasText: '已添加 Inter' })).toBeVisible();
+    await expect(codeSelect.locator('option', { hasText: 'Inter（网络）' })).toHaveCount(1);
+    // 启停翻转（管理列表记录行——checkbox 特征定位）：停用注销 → 启用回归
+    const jbRecRow = page
+      .locator('.vv-settings-font', { has: page.locator('.vv-settings-font-name', { hasText: /^JetBrains Mono$/ }) })
+      .filter({ has: page.locator('input[type="checkbox"]') });
+    await jbRecRow.locator('input[type="checkbox"]').uncheck();
+    await expect.poll(() => hasFontFace(page, 'JetBrains Mono')).toBe(false);
+    await jbRecRow.locator('input[type="checkbox"]').check();
+    // 重建链（IndexedDB 读回→new FontFace→load→add）异步完成，poll 窗口放宽到 10s。
+    // faces 全集与 some 判定同一 evaluate 内算——分离「face 在场」与「hasFontFace
+    // 传参面」两个嫌疑（诊断轮实证 face loaded 在场而 poll false）
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const faces = [...document.fonts].map((f) => ({ fam: f.family, st: f.status }));
+            return { faces, some: faces.some((x) => x.fam === '"JetBrains Mono"') };
+          }),
+        { timeout: 10_000, message: 'faces 全集 + some 判定（同 evaluate）' }
+      )
+      .toEqual({ faces: expect.arrayContaining([expect.objectContaining({ fam: '"JetBrains Mono"', st: 'loaded' })]), some: true });
+
+    // —— css 一键添加：link 节点在 head + css @font-face 注册（字形面）——
+    await notoPresetRow.locator('button', { hasText: 'jsdelivr' }).click();
+    await expect(page.locator('.vv-settings-note', { hasText: '已添加在线字体' })).toBeVisible();
+    const cssLink = page.locator('head link[href*="noto-sans-sc"]');
+    await expect(cssLink).toHaveCount(1);
+    // css @font-face 的 family 无引号（CSSOM 原文形态）——与 JS FontFace 的
+    // quotedFamily 带引号形态不同，faces 全集按原样匹配
+    await expect
+      .poll(() =>
+        page.evaluate(() => [...document.fonts].some((f) => f.family === 'Noto Sans SC'))
+      )
+      .toBe(true);
+    // 管理列表 css 条目体积位显示「在线字体」标注
+    const notoRecRow = page
+      .locator('.vv-settings-font', { has: page.locator('.vv-settings-font-name', { hasText: /^Noto Sans SC$/ }) })
+      .filter({ has: page.locator('input[type="checkbox"]') });
+    await expect(notoRecRow.getByText('在线字体')).toBeVisible();
+    // css 启停=link 节点插拔（不走 FontFace 面——停用仅移除节点）
+    await notoRecRow.locator('input[type="checkbox"]').uncheck();
+    await expect(cssLink).toHaveCount(0);
+    await notoRecRow.locator('input[type="checkbox"]').check();
+    await expect(cssLink).toHaveCount(1);
+
+    // —— 删除回落（沿 FONT 既有通道）：css 记录删除=link 移除+记录移除，预设按钮恢复可添加
+    page.on('dialog', (d) => void d.accept());
+    await page.locator('button[aria-label="删除网络字体 Noto Sans SC"]').click();
+    await expect(cssLink).toHaveCount(0);
+    await expect(notoPresetRow.locator('button', { hasText: 'jsdelivr' })).toBeEnabled();
   });
 });
