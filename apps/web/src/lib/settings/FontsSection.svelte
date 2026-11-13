@@ -23,6 +23,7 @@
   import { DEFAULT_CODE_FONT_STACK, DEFAULT_UI_FONT_STACK, fontFamilyValue } from '../theme';
   import { t } from '../i18n/index.svelte';
   import {
+    addCssFont,
     addFontFromFile,
     addFontFromUrl,
     deleteFont,
@@ -31,6 +32,7 @@
     stemOf,
     type FontRecord
   } from '../stores/fontsStore';
+  import { FONT_PRESETS, type WebFontPreset, type WebFontPresetSource } from '../fontPresets';
 
   let { draft, touch }: { draft: Settings; touch(): void } = $props();
 
@@ -137,6 +139,35 @@
     if (slot === 'ui') draft.fonts.uiSize = clamped;
     else draft.fonts.codeSize = clamped;
     touch();
+  }
+
+  // ---------- 预设网络字体（spec C §3.3，Task 4）：一键添加 ----------
+  // 已添加态判定键 = 记录 family（css 型 name=family=css 内 font-family；single 型
+  // name=显式传入的 preset.family）——按钮禁用 + 行尾「已添加」标注。
+  const presetAdded = $derived(new Set(fontRecords.map((r) => r.family)));
+
+  /** 预设一键添加（single=addFontFromUrl 复用既有门禁管线；css=addCssFont link 通道）
+   *：失败注记 fontNote（既有 role="status" 行），成功追加列表；不自动写槽位（与
+   * URL 添加同语义——槽位由用户自选）。 */
+  async function addPreset(preset: WebFontPreset, source: WebFontPresetSource): Promise<void> {
+    if (fontBusy || presetAdded.has(preset.family)) return;
+    fontBusy = true;
+    fontNote = '';
+    try {
+      const rec =
+        preset.kind === 'css'
+          ? await addCssFont(source.url, preset.family, source.label)
+          : await addFontFromUrl(source.url, preset.family);
+      fontRecords = [...fontRecords, rec];
+      fontNote = t(
+        preset.kind === 'css' ? 'settings.fonts.presetWeb.addedCss' : 'settings.fonts.presetWeb.addedSingle',
+        { name: preset.displayName }
+      );
+    } catch (err) {
+      fontNote = err instanceof Error ? err.message : String(err);
+    } finally {
+      fontBusy = false;
+    }
   }
 
   // ---------- 网络字体管理（字体系统 spec §5 下半） ----------
@@ -343,6 +374,33 @@
     />
   </label>
   <div class="vv-settings-hint">{t('settings.fonts.sizeHint')}</div>
+  <div class="vv-settings-label">{t('settings.fonts.presetWeb.label')}</div>
+  <div class="vv-settings-hint">{t('settings.fonts.presetWeb.hint')}</div>
+  <ul class="vv-settings-fonts">
+    {#each FONT_PRESETS as preset (preset.family)}
+      <li class="vv-settings-font">
+        <div class="vv-settings-font-head">
+          <span class="vv-settings-font-name" style={`font-family: ${fontFamilyValue(preset.family, DEFAULT_UI_FONT_STACK)}`}
+            >{preset.displayName}</span
+          >
+          {#if preset.kind === 'css'}
+            <span class="vv-settings-font-size">{t('settings.fonts.presetWeb.onlineTag')}</span>
+          {/if}
+          {#if presetAdded.has(preset.family)}
+            <span class="vv-settings-font-size">{t('settings.fonts.presetWeb.added')}</span>
+          {/if}
+          {#each preset.sources as source (source.label)}
+            <button
+              type="button"
+              disabled={fontBusy || presetAdded.has(preset.family)}
+              aria-label={t('settings.fonts.presetWeb.addAria', { name: preset.displayName, label: source.label })}
+              onclick={() => void addPreset(preset, source)}>{source.label}</button
+            >
+          {/each}
+        </div>
+      </li>
+    {/each}
+  </ul>
   <div class="vv-settings-label">{t('settings.fonts.webLabel')}</div>
   <div class="vv-settings-hint">
     {t('settings.fonts.webHint')}
@@ -386,7 +444,7 @@
               />
               <span class="vv-settings-font-name" title={rec.name}>{rec.name}</span>
             </label>
-            <span class="vv-settings-font-size">{formatFontSize(rec.size)}</span>
+            <span class="vv-settings-font-size">{rec.kind === 'css' ? t('settings.fonts.presetWeb.onlineTag') : formatFontSize(rec.size)}</span>
             <button
               type="button"
               class="vv-settings-remove"

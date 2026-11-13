@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import {
   MAX_FONT_BYTES,
+  addCssFont,
   addFontFromFile,
   addFontFromUrl,
   deleteFont,
@@ -78,6 +79,8 @@ beforeEach(() => {
   failLoads = false;
   vi.stubGlobal('indexedDB', new IDBFactory()); // 每用例全新库（迁移用例不受他例升版污染）
   stubFontWorld();
+  // css 通道的 link 节点在共享 jsdom head 上——跨用例清残留（库换新但 DOM 不换）
+  document.querySelectorAll('[id^="vv-font-css-"]').forEach((el) => el.remove());
 });
 
 afterEach(() => {
@@ -329,5 +332,70 @@ describe('配额错误引导（settings center spec §2.2，评审 M-1）', () =
     const boom = new Error('boom');
     expect(withQuotaGuidance(boom)).toBe(boom);
     expect((withQuotaGuidance(new DOMException('未授权', 'InvalidStateError')) as Error).message).not.toContain('设置');
+  });
+});
+
+
+describe('css 切片字体通道（spec C §3.3，Task 4；css 型不做离线——不入库二进制不进 SW 缓存）', () => {
+  it('添加：https 门禁 → 落库（kind/css、无 data、size 0、cssUrl/sourceLabel 随记录）→ <link> 插入 document.head', async () => {
+    const rec = await addCssFont('https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.css', 'LXGW WenKai', 'jsdelivr');
+    expect(rec.kind).toBe('css');
+    expect(rec.data).toBeUndefined(); // 切片不入库二进制（css 通道核心语义）
+    expect(rec.size).toBe(0);
+    expect(rec.cssUrl).toBe('https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.css');
+    expect(rec.sourceLabel).toBe('jsdelivr');
+    expect(rec.name).toBe('LXGW WenKai');
+    expect(rec.enabled).toBe(true);
+    const link = document.getElementById(`vv-font-css-${rec.id}`);
+    expect(link).not.toBeNull();
+    expect(link!.getAttribute('rel')).toBe('stylesheet');
+    expect(link!.getAttribute('href')).toBe(rec.cssUrl);
+    // 断网回退缺省是自然语义（无 FontFace 注入，css 拉不到即无字形）——零 FontFace 产出
+    expect(faces).toEqual([]);
+  });
+
+  it('http cssUrl 拒收（mixed content 防线同 single 门禁）且不落库不插节点', async () => {
+    await expect(addCssFont('http://cdn.example.com/x.css', 'X')).rejects.toThrow(/https/i);
+    expect((await listFontRecords()).length).toBe(0);
+    expect(document.querySelectorAll('[id^="vv-font-css-"]').length).toBe(0);
+  });
+
+  it('重名拒收（css↔css 与 css↔url 同名比对）；名称含逗号拒收；拒收路径零节点插入', async () => {
+    await addCssFont('https://a.test/f.css', 'Dup');
+    await expect(addCssFont('https://b.test/g.css', 'Dup')).rejects.toThrow(/Dup/);
+    await expect(addCssFont('https://c.test/h.css', 'a,b')).rejects.toThrow(/,/);
+    await expect(addCssFont('https://c.test/h.css', 'Dup')).rejects.toThrow(/Dup/);
+    expect((await listFontRecords()).length).toBe(1);
+    expect(document.querySelectorAll('[id^="vv-font-css-"]').length).toBe(1);
+  });
+
+  it('启停=link 节点插拔：停用移除、再启用回归（幂等不重复）；css 分支不走 FontFace 缓存', async () => {
+    const rec = await addCssFont('https://a.test/f.css', 'Css');
+    await setEnabledFont(rec.id, false);
+    expect(document.getElementById(`vv-font-css-${rec.id}`)).toBeNull();
+    await setEnabledFont(rec.id, true);
+    expect(document.querySelectorAll(`[id="vv-font-css-${rec.id}"]`).length).toBe(1);
+    expect(faces).toEqual([]); // css 分支不走 faceCache/FontFace
+  });
+
+  it('删除=移除节点+删记录；返回被删记录（槽位回落信号同 single 通道）', async () => {
+    const rec = await addCssFont('https://a.test/f.css', 'Css');
+    const removed = await deleteFont(rec.id);
+    expect(removed?.name).toBe('Css');
+    expect(document.getElementById(`vv-font-css-${rec.id}`)).toBeNull();
+    expect((await listFontRecords()).length).toBe(0);
+  });
+
+  it('启动恢复：enabled css 项 link 重建（幂等）；停用项不插；损坏面不适用（无 FontFace 装载）', async () => {
+    const rec = await addCssFont('https://a.test/f.css', 'Css');
+    await setEnabledFont(rec.id, false);
+    const rec2 = await addCssFont('https://b.test/g.css', 'CssOn');
+    document.getElementById(`vv-font-css-${rec.id}`)?.remove(); // 模拟半截状态
+    await loadEnabledFontFaces();
+    expect(document.getElementById(`vv-font-css-${rec.id}`)).toBeNull(); // 停用项不恢复
+    expect(document.getElementById(`vv-font-css-${rec2.id}`)).not.toBeNull();
+    // 幂等：重复恢复不产生重复节点
+    await loadEnabledFontFaces();
+    expect(document.querySelectorAll(`[id="vv-font-css-${rec2.id}"]`).length).toBe(1);
   });
 });

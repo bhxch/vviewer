@@ -245,6 +245,15 @@ export const messages = {
   'settings.fonts.preset.default': '默认',
   'settings.fonts.preset.custom': '自定义…',
   'settings.fonts.preset.network': '{name}（网络）',
+  // —— 预设网络字体（spec C §3.3，Task 4）——
+  'settings.fonts.presetWeb.label': '预设字体',
+  'settings.fonts.presetWeb.hint':
+    '一键添加开源网络字体：单文件字体（西文等宽/UI）入库离线可用；标注「在线字体」的中文切片字体经 css 加载，断网回退缺省、不占存储',
+  'settings.fonts.presetWeb.onlineTag': '在线字体',
+  'settings.fonts.presetWeb.addAria': '添加 {name}（来源 {label}）',
+  'settings.fonts.presetWeb.added': '已添加',
+  'settings.fonts.presetWeb.addedCss': '已添加在线字体 {name}（切片 css，断网回退缺省）',
+  'settings.fonts.presetWeb.addedSingle': '已添加 {name}（入库离线可用）',
 
   // —— 「代码视图」节（settings.code.*）——
   'settings.code.wordWrap': '自动换行',

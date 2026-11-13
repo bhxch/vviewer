@@ -257,6 +257,15 @@ export const messages = {
   'settings.fonts.preset.default': 'Default',
   'settings.fonts.preset.custom': 'Custom…',
   'settings.fonts.preset.network': '{name} (network)',
+  // —— Preset web fonts (spec C §3.3, Task 4) ——
+  'settings.fonts.presetWeb.label': 'Preset web fonts',
+  'settings.fonts.presetWeb.hint':
+    'One-click open-source web fonts: single-file fonts (Western monospace/UI) are stored for offline use; Chinese fonts tagged "Online" load via css slices and fall back to default when offline, without consuming storage',
+  'settings.fonts.presetWeb.onlineTag': 'Online',
+  'settings.fonts.presetWeb.addAria': 'Add {name} (source {label})',
+  'settings.fonts.presetWeb.added': 'Added',
+  'settings.fonts.presetWeb.addedCss': 'Added online font {name} (css slices; falls back to default when offline)',
+  'settings.fonts.presetWeb.addedSingle': 'Added {name} (stored for offline use)',
 
   // —— 「代码视图」节（settings.code.*）——
   'settings.code.wordWrap': 'Word wrap',

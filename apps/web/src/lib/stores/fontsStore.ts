@@ -10,9 +10,13 @@
  *   fontFamilyValue 的单段引号语义同源，槽位引用按 name 经 fontFamilyValue 解析；
  * - 解析失败负缓存不固化（faceCache 不写入，重试可重建——mermaid 失败缓存先例）；
  * - deleteFont 返回被删记录作为引用回落信号：uiFamily/codeFamily 槽位是否回落默认
- *   由消费方（Task 5）比对处理，本模块不写 settings。
+ *   由消费方（Task 5）比对处理，本模块不写 settings；
+ * - css 切片型通道（spec C §3.3，Task 4；落定：css 型不做离线）：kind 扩 'css'——
+ *   无 data 字段（切片不入库二进制不进 SW 缓存，断网回退缺省是自然语义），落库
+ *   size=0 + cssUrl/sourceLabel，<link rel="stylesheet"> 插拔 document.head 承接
+ *   启停/删除/启动恢复（不进 faceCache/FontFace）；重名/逗号/https 门禁沿用。
  * 测试形态：fake-indexeddb + mock FontFace/document.fonts 桩（jsdom 均缺失，
- * fontsStore.test.ts 同文件说明）。
+ * fontsStore.test.ts 同文件说明；css 通道 link 面走真 jsdom DOM）。
  */
 import { db, FONTS } from './session';
 import { translate as t } from '../i18n/core';
@@ -25,12 +29,19 @@ export interface FontRecord {
   id: string;
   name: string;
   family: string;
-  kind: 'url' | 'file';
-  data: ArrayBuffer;
+  /** 'css' = 切片 css 型（spec C §3.3 落定：不做离线——无 data，启停=link 插拔） */
+  kind: 'url' | 'file' | 'css';
+  /** 二进制（IndexedDB 入库面）；css 型无 data（切片不入库） */
+  data?: ArrayBuffer;
   url?: string;
+  /** css 型恒 0（无入库二进制，体积面由列表「在线字体」标注替代） */
   size: number;
   enabled: boolean;
   addedAt: number;
+  /** css 型：切片 css 入口 URL（<link href>） */
+  cssUrl?: string;
+  /** css 型：来源标签（预设源 label——jsdelivr/unpkg/npmmirror） */
+  sourceLabel?: string;
 }
 
 /** 单文件体积上限（spec §5.2：>30MB 拒收） */
@@ -106,6 +117,10 @@ function quotedFamily(name: string): string {
  * （非字体内容/损坏文件）抛错误态且不写缓存（允许重试）。
  */
 async function ensureFontFace(rec: FontRecord): Promise<FontFace> {
+  if (rec.kind === 'css' || rec.data === undefined) {
+    // css 型不走 FontFace（link 插拔通道承接）；防御路径抛错不静默
+    throw new Error(`css font "${rec.name}" has no binary data; use the <link> channel`);
+  }
   const hit = faceCache.get(rec.id);
   if (hit) return hit;
   const face = new FontFace(quotedFamily(rec.name), rec.data);
@@ -200,6 +215,68 @@ export async function addFontFromFile(file: File): Promise<FontRecord> {
   return addFromBuffer(await file.arrayBuffer(), { kind: 'file', name: stemOf(file.name) });
 }
 
+// ---------- css 切片型通道（spec C §3.3，Task 4） ----------
+
+/** css 型 <link> 节点 id（document.head 插拔锚；getElementById 精确匹配，冒号 id 合法） */
+function cssLinkId(id: string): string {
+  return `vv-font-css-${id}`;
+}
+
+/** link 插入（幂等：先移除旧节点防重复——启动恢复/重复启用两路径共用）。 */
+function insertCssLink(rec: FontRecord): void {
+  if (rec.cssUrl === undefined) return;
+  removeCssLink(rec.id);
+  const link = document.createElement('link');
+  link.id = cssLinkId(rec.id);
+  link.rel = 'stylesheet';
+  link.href = rec.cssUrl;
+  document.head.append(link);
+}
+
+function removeCssLink(id: string): void {
+  document.getElementById(cssLinkId(id))?.remove();
+}
+
+/**
+ * css 切片型添加（spec C §3.3 落定：css 型不做离线）：重名/逗号门禁沿用（name 经
+ * 槽位进 fontFamilyValue 同语义）→ https 门禁（cssUrl，mixed content 防线同 single）
+ * → 落库（无 data、size=0、cssUrl/sourceLabel 随记录）→ <link> 插入 document.head。
+ * 不做装载验证（无 FontFace——css 拉不到即无字形，断网回退缺省是自然语义）；
+ * 切片不入库不进 SW 缓存（vite.config SW 规则锚定 host 面，css 型自定义无预置族）。
+ */
+export async function addCssFont(cssUrl: string, name: string, sourceLabel?: string): Promise<FontRecord> {
+  const trimmed = name.trim();
+  if (trimmed.includes(',')) {
+    throw new Error(t('errors.fonts.nameComma', { name: trimmed }));
+  }
+  if ((await listFontRecords()).some((r) => r.name === trimmed)) {
+    throw new Error(t('errors.fonts.nameExists', { name: trimmed }));
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(cssUrl);
+  } catch {
+    throw new Error(t('errors.fonts.badUrl', { url: cssUrl }));
+  }
+  if (parsed.protocol !== 'https:') throw new Error(t('errors.fonts.httpsOnly'));
+  const rec: FontRecord = {
+    id: newFontId(),
+    name: trimmed,
+    family: trimmed,
+    kind: 'css',
+    size: 0,
+    enabled: true,
+    addedAt: Date.now(),
+    cssUrl,
+    ...(sourceLabel !== undefined ? { sourceLabel } : {})
+  };
+  await putFontRecord(rec);
+  insertCssLink(rec);
+  // 记录本身也占 IndexedDB（几十字节）——持久化申请与其他添加路径一致（静默）
+  tryRequestPersistentSilent();
+  return rec;
+}
+
 /**
  * 启停（spec §5.2）：enabled 即时落库。停用注销 document.fonts（缓存保留——重启用
  * 免重解析）；启用从缓存或 store buffer 重建并注册，重建失败抛错（记录已置 enabled，
@@ -209,6 +286,12 @@ export async function setEnabledFont(id: string, enabled: boolean): Promise<void
   const rec = await getFontRecord(id);
   if (!rec) throw new Error(t('errors.fonts.recordMissing', { id }));
   await putFontRecord({ ...rec, enabled });
+  if (rec.kind === 'css') {
+    // css 型启停=link 插拔（不走 faceCache/FontFace）
+    if (!enabled) removeCssLink(id);
+    else insertCssLink(rec);
+    return;
+  }
   if (!enabled) {
     const face = faceCache.get(id);
     if (face) document.fonts.delete(face);
@@ -232,6 +315,10 @@ export async function deleteFont(id: string): Promise<FontRecord | null> {
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'));
   });
+  if (rec.kind === 'css') {
+    removeCssLink(id); // css 型删除=移除节点+删记录（无 face/缓存面）
+    return rec;
+  }
   const face = faceCache.get(id);
   if (face) {
     document.fonts.delete(face);
@@ -247,6 +334,14 @@ export async function deleteFont(id: string): Promise<FontRecord | null> {
 export async function loadEnabledFontFaces(): Promise<void> {
   for (const rec of await listFontRecords()) {
     if (!rec.enabled) continue;
+    if (rec.kind === 'css') {
+      try {
+        insertCssLink(rec); // 幂等（先移除旧节点）——link 重建无装载失败面
+      } catch (err) {
+        console.warn(`[vviewer] fonts: failed to restore css link "${rec.name}"`, err);
+      }
+      continue;
+    }
     try {
       document.fonts.add(await ensureFontFace(rec));
     } catch (err) {
