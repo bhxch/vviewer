@@ -29,10 +29,10 @@ jsdelivr 对 `@bhxch/vviewer-grammars-full@0.1.0` 返回 403，错误体 `Packag
 
 ### 3.1 grammar 拆包（恢复默认全球档）
 
-- pack-npm.mjs 增拆分模式：按语言分 2-3 个子包，每包解包体积 <140MB（留余量），目标包名（裁量）`@scope/vviewer-grammars-full-p1/p2(/p3)`；每包自带 `grammars/manifest.json`（仅本包语言条目）+ 本包 wasm + 本包 queries（queries 按 `<lang>/` 目录跟随语言所在子包）。
+- pack-npm.mjs 增拆分模式：按语言体积均衡装箱切 N 个子包，**每包解包体积门禁 50MB**（用户 2026-11-14 拍板——jsdelivr 150MB 之外，镜像站可能限制更低，50MB 留 3 倍余量；N=装箱结果，全量 228MB 下预计 5-6 包），包名 `@scope/vviewer-grammars-full-p1..pN`；每包自带 `grammars/manifest.json`（仅本包语言条目）+ 本包 wasm + 本包 queries（queries 按 `<lang>/` 目录跟随语言所在子包）。
 - **worker 端 queries 路径核实点**（builder 必查）：现 worker 按 entry.base 拼 wasm 与 queries 路径的具体拼法（highlight worker doPrepare / queries fetch 面），确认每包 base 下 queries/<lang>/ 可达即兼容；若 queries 有全局共享路径假设，改为按语言条目 base 解析。
 - release.yml publish-npm：发 N 包（逐包 contentHash 门 + OIDC provenance 同款）；outputs 下发**已解析版本**（N 包同 tag 同版本号，版本对齐简单化——单包 SKIP 语义改为「全包集 hash 比对」，裁量：取全部子包 hash 聚合单门）。
-- 注入默认档变多基：`VV_GRAMMAR_CDN` 值改为**多基分号/管道分隔**（如 `https://cdn.jsdelivr.net/npm/@scope/vviewer-grammars-full-p1@v/grammars/|…p2@v/grammars/`），grammarLayers 直接消费多基（多层合并现成，逐层独立 manifest fetch 失败跳层 warn 语义不变）。
+- 注入默认档变多基：`VV_GRAMMAR_CDN` 值改为**多基分号/管道分隔**（`https://cdn.jsdelivr.net/npm/@scope/vviewer-grammars-full-p1@v/grammars/|…p2@v/…|…pN@v/grammars/`），grammarLayers 直接消费多基（多层合并现成，逐层独立 manifest fetch 失败跳层 warn 语义不变）。
 - 旧单包 `vviewer-grammars-full` 保留发布（存量 0.1.0 用户/standalone 包兼容），highlightDefault.ts 缺省 URL 改为子包多基。
 - 兼容性红线：`manifest.json 与 *.wasm 同目录`布局契约、`/grammars/` 结尾 env 约定、contentHash 归一化规则不破坏；b-grammar-layers 分层用例与 CDN-01 真网锚随新包更新。
 
@@ -50,7 +50,7 @@ jsdelivr 对 `@bhxch/vviewer-grammars-full@0.1.0` 返回 403，错误体 `Packag
 - **SW 缓存一致性**（关键接缝）：runtimeCaching 是构建期静态规则，运行时换 host 后新域请求不命中既有 CacheFirst 规则。方案（裁量）：复用 env 镜像域机制（:51-66）在构建期注入各档位已知 host 正则（jsdelivr/unpkg/npmmirror 三族全量注册，量小），自定义域走 **SW message 通道动态注册**（或最简：档位变更提示刷新页面使 SW 重注册——推荐起步，message 通道列为增强项）。
 - 档位预设值（**落定：三档统一指向新子包多基**，形态同构）：
   - `default`：构建期注入（release/pages 拼 jsdelivr 子包 URL，已知精确版本）；
-  - `unpkg`：`https://unpkg.com/@scope/vviewer-grammars-full-p1/grammars/|…p2/grammars/`（不带版本=unpkg 缺省 latest 重定向）——**版本解析固化策略**：启用档位时经 unpkg meta API 解析一次精确版本并显示/固化（可手动重解析），避免重定向不确定性与缓存键漂移；builder 实测重定向链 CORS 后可改直用缺省重定向；
+  - `unpkg`：`https://unpkg.com/@scope/vviewer-grammars-full-p1/grammars/|…p2/…|…pN/grammars/`（不带版本=unpkg 缺省 latest 重定向）——**版本解析固化策略**：启用档位时经 unpkg meta API 解析一次精确版本并显示/固化（可手动重解析），避免重定向不确定性与缓存键漂移；builder 实测重定向链 CORS 后可改直用缺省重定向；
   - `cn`：`https://registry.npmmirror.com/@scope/.../files/grammars/`（同固化策略；**标注：包白名单申请中，落地前不可用**；npmmirror 布局契约核实点：files 通道路径即包内路径，manifest 同目录契约成立——builder 用任一白名单包实测确认）；
   - `custom`：用户填完整多基（以 `/grammars/` 结尾校验）。
 - 设置中心 UI：三作用面各一行档位选择 + 自定义输入框；i18n 双目录。
@@ -77,7 +77,7 @@ jsdelivr 对 `@bhxch/vviewer-grammars-full@0.1.0` 返回 403，错误体 `Packag
 ## 5. 验收锚点
 
 - e2e：①b-grammar-layers 多基合并（两子包 manifest 合并、某层失败跳层）；②档位切换 → grammar CDN 层 URL 断言（custom 档输入校验）；③CDN-01 真网锚更新至子包 URL；④SW 缓存锚（SWR-ROUTE 系）随多域规则更新；⑤字体预设一键添加（single+css 两型）、启停/删除回落。
-- 门禁：pack-npm 单测拆分模式（包体积断言 <140MB、manifest 键集与 wasm 文件一致）；release.yml dry 逻辑单测（若有）。
+- 门禁：pack-npm 单测拆分模式（**包体积断言 <50MB**、manifest 键集与 wasm 文件一致）；release.yml dry 逻辑单测（若有）。
 - 本机实测门（前置）：unpkg/npmmirror 各拉一个子包 manifest+wasm 成功（CORS 头核对）。
 
 ## 6. 留给 builder 的裁量
@@ -86,6 +86,6 @@ jsdelivr 对 `@bhxch/vviewer-grammars-full@0.1.0` 返回 403，错误体 `Packag
 
 ## 7. builder check 订正与落定（2026-11-13）
 
-- **包名定稿**（消除与 Trusted Publisher 前置的顺序矛盾）：`@bhxch/vviewer-grammars-full-p1` / `-p2`（若三包则 `-p3`）。**仓外前置（用户操作，首发硬门）**：npm 包页逐包配置 Trusted Publisher（owner=bhxch/repo=vviewer/workflow=release.yml，勾选 npm publish）——OIDC 首发 absence 即 E403/E404，v0.1.0 首发 same pattern。
+- **包名定稿**（消除与 Trusted Publisher 前置的顺序矛盾）：`@bhxch/vviewer-grammars-full-p1..pN`（**50MB 门禁装箱，预计 5-6 包**，N 与语言分组随 pack-npm 实现落定，Trusted Publisher 配置随首发包数对齐）。**仓外前置（用户操作，首发硬门）**：npm 包页逐包配置 Trusted Publisher（owner=bhxch/repo=vviewer/workflow=release.yml，勾选 npm publish）——OIDC 首发 absence 即 E403/E404，v0.1.0 首发 same pattern。
 - **css 型字体不做离线**（落定）：切片走普通网络请求不入库不进 SW 缓存，断网时该字体回退缺省；single 型维持现有入库离线语义。UI 上 css 型条目标注「在线字体」。
 - **engines/foreign 档位收窄、cn 档仅 grammars**：见 §3.2 落定注记（白名单申请范围仅本仓子包）。
