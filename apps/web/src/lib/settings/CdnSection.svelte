@@ -1,8 +1,8 @@
 <script lang="ts">
   // CdnSection.svelte — 设置中心「网络资源」节（spec C §3.2，Task 3）：三作用面 CDN
   // 档位（grammars 四档 / engines·foreign 两档）+ custom 输入（实时校验错误态，复用
-  // 节内 role="status" 行通道——FontsSection.svelte:373/422 先例；表 1 新增点同步登记
-  // semantic-components.md）+ 提示行三处（foreign 装配级快照刷新语义 / custom 域 SW
+  // 节内 role="status" 行通道——FontsSection.svelte:373/422 先例；新增 3 行已同步
+  // 登记 semantic-components.md §4 表 1）+ 提示行三处（foreign 装配级快照刷新语义 / custom 域 SW
   // 在线直取 / cn 白名单申请中警示行）。版本解析为信息面（resolveCdnPackVersions +
   // 重解析钮，缓存独立 localStorage 键——不扩 settings.cdn 6 字段集，运行时 URL 恒
   // 重定向形态）。组件形态沿三层纪律（draft + touch 回调上行，无副作用——节先例）。

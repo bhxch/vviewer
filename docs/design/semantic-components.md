@@ -89,7 +89,7 @@
 | **确认卡** | `.vv-dl-confirm`（role=alertdialog，DownloadConfirmCard.svelte:33）；`.vv-sc-confirm`（设置中心脏态条，z 31）；`.vv-storage-confirm`（role=alertdialog 危险确认面板，StorageSection.svelte:271-275，accent/danger 描边） | 不可逆/大代价动作前置确认 | 组件卡三形态（下载确认门 / 设置脏态关闭确认 / 存储七分类清除与恢复出厂确认面板）+ 原生轻确认 8 处（表 2） |
 | **状态条** | `.vv-statusbar`（role=status，ViewerPane.svelte:1263）；`.vv-toast`（zen 进入提示，z 60，AppShell.svelte:1506 role=status）；各面板内 `role="status"` 行 | 一次性非阻断反馈 | `showStatusNotice`（AppShell/serverConnect 出口）+ `showZenToast`（AppShell.svelte:494-498）；读屏可达行 23 处穷举见表 1 |
 
-**表 1：读屏可达通道成员（`role="status"` 21 处 + `aria-live="polite"` 2 处；rg 2026-11-12 穷举，新增点同步登记本表）**
+**表 1：读屏可达通道成员（`role="status"` 24 处 + `aria-live="polite"` 2 处；rg 2026-11-12 穷举 + spec C Task 3 新增点 2026-11-14 同步登记，新增点同步登记本表）**
 
 | 成员（文件:行） | 语义 |
 |---|---|
@@ -104,6 +104,7 @@
 | SettingsCenter.svelte:362 / :438 | 脏态提示 / JSON 视图校验警示 |
 | AppearanceSection.svelte:440 / :454 / :480 | 亮槽警示 / 暗槽警示 / 导入错误摘要 |
 | FontsSection.svelte:373 / :422 | 字体操作提示（note）/ 网络字体错误行 |
+| CdnSection.svelte:98 / :142 / :167 | 网络资源节 custom 地址实时校验错误行（grammars / engines / foreign 三处同文案双用） |
 | StorageSection.svelte:285 / :295 | 清除操作提示 / 用量统计中 |
 | AboutSection.svelte:96 / :174 / :190 | 版本不一致警示 / 用量行 / 持久化结果 |
 | LayoutSection.svelte:101 | 布局 zen 说明（note） |
