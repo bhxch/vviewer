@@ -473,6 +473,5 @@ export const messages = {
   'settings.cdn.versionLabel': '子包版本',
   'settings.cdn.versionUnknown': '解析中…',
   'settings.cdn.versionFailed': '解析失败（运行中使用缺省重定向地址）',
-  'settings.cdn.versionRefresh': '重新解析',
-  'settings.cdn.versionRefreshed': '已解析子包版本'
+  'settings.cdn.versionRefresh': '重新解析'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;

@@ -509,6 +509,5 @@ export const messages = {
   'settings.cdn.versionLabel': 'Pack versions',
   'settings.cdn.versionUnknown': 'Resolving…',
   'settings.cdn.versionFailed': 'Resolution failed (default redirect URLs are used at runtime)',
-  'settings.cdn.versionRefresh': 'Re-resolve',
-  'settings.cdn.versionRefreshed': 'Pack versions resolved'
+  'settings.cdn.versionRefresh': 'Re-resolve'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;
