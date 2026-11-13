@@ -376,18 +376,18 @@
   <div class="vv-settings-hint">{t('settings.fonts.sizeHint')}</div>
   <div class="vv-settings-label">{t('settings.fonts.presetWeb.label')}</div>
   <div class="vv-settings-hint">{t('settings.fonts.presetWeb.hint')}</div>
-  <ul class="vv-settings-fonts">
+  <ul class="vv-settings-preset-fonts">
     {#each FONT_PRESETS as preset (preset.family)}
-      <li class="vv-settings-font">
-        <div class="vv-settings-font-head">
-          <span class="vv-settings-font-name" style={`font-family: ${fontFamilyValue(preset.family, DEFAULT_UI_FONT_STACK)}`}
+      <li class="vv-settings-preset-font">
+        <div class="vv-settings-preset-head">
+          <span class="vv-settings-preset-name" style={`font-family: ${fontFamilyValue(preset.family, DEFAULT_UI_FONT_STACK)}`}
             >{preset.displayName}</span
           >
           {#if preset.kind === 'css'}
-            <span class="vv-settings-font-size">{t('settings.fonts.presetWeb.onlineTag')}</span>
+            <span class="vv-settings-preset-tag">{t('settings.fonts.presetWeb.onlineTag')}</span>
           {/if}
           {#if presetAdded.has(preset.family)}
-            <span class="vv-settings-font-size">{t('settings.fonts.presetWeb.added')}</span>
+            <span class="vv-settings-preset-tag">{t('settings.fonts.presetWeb.added')}</span>
           {/if}
           {#each preset.sources as source (source.label)}
             <button

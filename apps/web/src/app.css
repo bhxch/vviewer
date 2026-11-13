@@ -941,6 +941,15 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
   display: flex; flex-direction: column; gap: var(--vv-sp-8); }
 .vv-settings-font { display: flex; flex-direction: column; gap: var(--vv-sp-4); font-size: var(--vv-fs-xs); }
 .vv-settings-font-head { display: flex; align-items: center; gap: var(--vv-sp-6); min-width: 0; }
+/* 预设字体区块（spec C §3.3）：类族独立于 .vv-settings-font（管理列表 e2e 锚不被
+   预设条目污染——FNT-06/07/10 的行 count/name 定位器），布局样式同源复用 */
+.vv-settings-preset-fonts { list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: var(--vv-sp-4); }
+.vv-settings-preset-font { display: flex; flex-direction: column; gap: var(--vv-sp-2); font-size: var(--vv-fs-xs); }
+.vv-settings-preset-head { display: flex; align-items: center; gap: var(--vv-sp-4); min-width: 0; flex-wrap: wrap; }
+.vv-settings-preset-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vv-settings-preset-tag { flex: none; color: var(--ui-fg-muted); }
+.vv-settings-preset-head button { font-size: var(--vv-fs-xs); }
 .vv-settings-font-toggle { display: flex; align-items: center; gap: var(--vv-sp-4); flex: 1;
   min-width: 0; cursor: pointer; }
 .vv-settings-font-name { min-width: 0; overflow: hidden; text-overflow: ellipsis;

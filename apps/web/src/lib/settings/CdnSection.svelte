@@ -71,100 +71,102 @@
   });
 </script>
 
-<!-- grammars：四档 + custom 多基输入 -->
-<label class="vv-settings-theme-row">
-  <span>{t('settings.cdn.grammarsLabel')}</span>
-  <select value={draft.cdn.grammars} onchange={onGrammarsProfileChange} aria-label={t('settings.cdn.grammarsSelectLabel')}>
-    <option value="default">{t('settings.cdn.profileDefault')}</option>
-    <option value="unpkg">{t('settings.cdn.profileUnpkg')}</option>
-    <option value="cn">{t('settings.cdn.profileCn')}</option>
-    <option value="custom">{t('settings.cdn.profileCustom')}</option>
-  </select>
-</label>
-{#if draft.cdn.grammars === 'custom'}
+<section class="vv-sc-section">
+  <!-- grammars：四档 + custom 多基输入 -->
   <label class="vv-settings-theme-row">
-    <span>{t('settings.cdn.customLabel')}</span>
-    <input
-      type="text"
-      value={draft.cdn.grammarsCustom}
-      placeholder={t('settings.cdn.grammarsPlaceholder')}
-      oninput={onGrammarsCustomInput}
-      aria-label={t('settings.cdn.grammarsInputLabel')}
-      aria-invalid={grammarsInvalid}
-    />
+    <span>{t('settings.cdn.grammarsLabel')}</span>
+    <select value={draft.cdn.grammars} onchange={onGrammarsProfileChange} aria-label={t('settings.cdn.grammarsSelectLabel')}>
+      <option value="default">{t('settings.cdn.profileDefault')}</option>
+      <option value="unpkg">{t('settings.cdn.profileUnpkg')}</option>
+      <option value="cn">{t('settings.cdn.profileCn')}</option>
+      <option value="custom">{t('settings.cdn.profileCustom')}</option>
+    </select>
   </label>
-  {#if grammarsInvalid}
-    <div class="vv-settings-note" role="status">{t('settings.cdn.grammarsError')}</div>
-  {/if}
-{/if}
-{#if draft.cdn.grammars === 'cn'}
-  <div class="vv-settings-hint">{t('settings.cdn.cnWarn')}</div>
-{/if}
-{#if draft.cdn.grammars === 'unpkg' || draft.cdn.grammars === 'cn'}
-  <div class="vv-settings-hint">
-    {t('settings.cdn.versionLabel')}：
-    {#if resolving || versionState === null || versionState.profile !== draft.cdn.grammars}
-      {t('settings.cdn.versionUnknown')}
-    {:else if versionState.value === null}
-      {t('settings.cdn.versionFailed')}
-    {:else}
-      {versionState.value.join(' / ')}
+  {#if draft.cdn.grammars === 'custom'}
+    <label class="vv-settings-theme-row">
+      <span>{t('settings.cdn.customLabel')}</span>
+      <input
+        type="text"
+        value={draft.cdn.grammarsCustom}
+        placeholder={t('settings.cdn.grammarsPlaceholder')}
+        oninput={onGrammarsCustomInput}
+        aria-label={t('settings.cdn.grammarsInputLabel')}
+        aria-invalid={grammarsInvalid}
+      />
+    </label>
+    {#if grammarsInvalid}
+      <div class="vv-settings-note" role="status">{t('settings.cdn.grammarsError')}</div>
     {/if}
-    <button type="button" onclick={() => draft.cdn.grammars === 'unpkg' || draft.cdn.grammars === 'cn' ? resolveVersions(draft.cdn.grammars) : undefined} disabled={resolving}>
-      {t('settings.cdn.versionRefresh')}
-    </button>
-  </div>
-{/if}
-<div class="vv-settings-hint">{t('settings.cdn.grammarsHint')}</div>
-
-<!-- engines：两档 + custom host 输入 -->
-<label class="vv-settings-theme-row">
-  <span>{t('settings.cdn.enginesLabel')}</span>
-  <select value={draft.cdn.engines} onchange={onEnginesProfileChange} aria-label={t('settings.cdn.enginesSelectLabel')}>
-    <option value="default">{t('settings.cdn.profileDefault')}</option>
-    <option value="custom">{t('settings.cdn.profileCustom')}</option>
-  </select>
-</label>
-{#if draft.cdn.engines === 'custom'}
-  <label class="vv-settings-theme-row">
-    <span>{t('settings.cdn.customLabel')}</span>
-    <input
-      type="text"
-      value={draft.cdn.enginesCustom}
-      placeholder={t('settings.cdn.hostPlaceholder')}
-      oninput={onEnginesCustomInput}
-      aria-label={t('settings.cdn.enginesInputLabel')}
-      aria-invalid={enginesInvalid}
-    />
-  </label>
-  {#if enginesInvalid}
-    <div class="vv-settings-note" role="status">{t('settings.cdn.hostError')}</div>
   {/if}
-{/if}
-
-<!-- foreign：两档 + custom base 输入 + 刷新语义 hint（拍板：切档保存后刷新生效） -->
-<label class="vv-settings-theme-row">
-  <span>{t('settings.cdn.foreignLabel')}</span>
-  <select value={draft.cdn.foreign} onchange={onForeignProfileChange} aria-label={t('settings.cdn.foreignSelectLabel')}>
-    <option value="default">{t('settings.cdn.profileDefault')}</option>
-    <option value="custom">{t('settings.cdn.profileCustom')}</option>
-  </select>
-</label>
-{#if draft.cdn.foreign === 'custom'}
-  <label class="vv-settings-theme-row">
-    <span>{t('settings.cdn.customLabel')}</span>
-    <input
-      type="text"
-      value={draft.cdn.foreignCustom}
-      placeholder={t('settings.cdn.hostPlaceholder')}
-      oninput={onForeignCustomInput}
-      aria-label={t('settings.cdn.foreignInputLabel')}
-      aria-invalid={foreignInvalid}
-    />
-  </label>
-  {#if foreignInvalid}
-    <div class="vv-settings-note" role="status">{t('settings.cdn.hostError')}</div>
+  {#if draft.cdn.grammars === 'cn'}
+    <div class="vv-settings-hint">{t('settings.cdn.cnWarn')}</div>
   {/if}
-{/if}
-<div class="vv-settings-hint">{t('settings.cdn.foreignHint')}</div>
-<div class="vv-settings-hint">{t('settings.cdn.swHint')}</div>
+  {#if draft.cdn.grammars === 'unpkg' || draft.cdn.grammars === 'cn'}
+    <div class="vv-settings-hint">
+      {t('settings.cdn.versionLabel')}：
+      {#if resolving || versionState === null || versionState.profile !== draft.cdn.grammars}
+        {t('settings.cdn.versionUnknown')}
+      {:else if versionState.value === null}
+        {t('settings.cdn.versionFailed')}
+      {:else}
+        {versionState.value.join(' / ')}
+      {/if}
+      <button type="button" onclick={() => draft.cdn.grammars === 'unpkg' || draft.cdn.grammars === 'cn' ? resolveVersions(draft.cdn.grammars) : undefined} disabled={resolving}>
+        {t('settings.cdn.versionRefresh')}
+      </button>
+    </div>
+  {/if}
+  <div class="vv-settings-hint">{t('settings.cdn.grammarsHint')}</div>
+
+  <!-- engines：两档 + custom host 输入 -->
+  <label class="vv-settings-theme-row">
+    <span>{t('settings.cdn.enginesLabel')}</span>
+    <select value={draft.cdn.engines} onchange={onEnginesProfileChange} aria-label={t('settings.cdn.enginesSelectLabel')}>
+      <option value="default">{t('settings.cdn.profileDefault')}</option>
+      <option value="custom">{t('settings.cdn.profileCustom')}</option>
+    </select>
+  </label>
+  {#if draft.cdn.engines === 'custom'}
+    <label class="vv-settings-theme-row">
+      <span>{t('settings.cdn.customLabel')}</span>
+      <input
+        type="text"
+        value={draft.cdn.enginesCustom}
+        placeholder={t('settings.cdn.hostPlaceholder')}
+        oninput={onEnginesCustomInput}
+        aria-label={t('settings.cdn.enginesInputLabel')}
+        aria-invalid={enginesInvalid}
+      />
+    </label>
+    {#if enginesInvalid}
+      <div class="vv-settings-note" role="status">{t('settings.cdn.hostError')}</div>
+    {/if}
+  {/if}
+
+  <!-- foreign：两档 + custom base 输入 + 刷新语义 hint（拍板：切档保存后刷新生效） -->
+  <label class="vv-settings-theme-row">
+    <span>{t('settings.cdn.foreignLabel')}</span>
+    <select value={draft.cdn.foreign} onchange={onForeignProfileChange} aria-label={t('settings.cdn.foreignSelectLabel')}>
+      <option value="default">{t('settings.cdn.profileDefault')}</option>
+      <option value="custom">{t('settings.cdn.profileCustom')}</option>
+    </select>
+  </label>
+  {#if draft.cdn.foreign === 'custom'}
+    <label class="vv-settings-theme-row">
+      <span>{t('settings.cdn.customLabel')}</span>
+      <input
+        type="text"
+        value={draft.cdn.foreignCustom}
+        placeholder={t('settings.cdn.hostPlaceholder')}
+        oninput={onForeignCustomInput}
+        aria-label={t('settings.cdn.foreignInputLabel')}
+        aria-invalid={foreignInvalid}
+      />
+    </label>
+    {#if foreignInvalid}
+      <div class="vv-settings-note" role="status">{t('settings.cdn.hostError')}</div>
+    {/if}
+  {/if}
+  <div class="vv-settings-hint">{t('settings.cdn.foreignHint')}</div>
+  <div class="vv-settings-hint">{t('settings.cdn.swHint')}</div>
+</section>
