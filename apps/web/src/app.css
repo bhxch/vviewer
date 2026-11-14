@@ -356,15 +356,17 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
   .vv-strip[data-side='right'] { border-right: 0; border-left: 1px solid var(--ui-border); }
   .vv-strip-expand { width: 22px; padding: 2px 0; font-size: var(--vv-fs-xs); line-height: 1.4; }
   .vv-strip-icon { font-size: 14px; color: var(--ui-fg-muted); line-height: 1; }
-  /* 面板折叠钮：面板右上角浮置（不占布局流），默认低透明度 hover 实起。
-     双栏统一右上角（VS Code 侧栏动作位惯例）：右栏若放左上角会压住 MetaPanel
-     首行「属性」标题（均为 ~6px 锚点的浮层/文本叠放），右上角是标题行右侧空白 */
-  .vv-collapse-btn { position: absolute; top: 6px; z-index: 5;
+  /* 面板折叠钮：入流按钮（spec A §4.3 固定 header 行 + 滚动体重排——absolute 浮置
+     在滚动容器内随列表滚动，浮置/锚位/z-index 全部退役），落 aside 固定 header 行
+     右端（margin-left:auto 推右；上下 6px margin 与 24px 钮体自撑 36px 行高，即原
+     top:6/right:6 锚点的入流等距），默认低透明度 hover 实起。双栏统一右上角（VS Code
+     侧栏动作位惯例）：header 行在滚动体外，不再压 MetaPanel 首行「属性」标题/树源行
+     移除钮——FileTree 源行 34px 与切换器 34px 让位随之退役（让位由 header 行承担） */
+  .vv-collapse-btn { margin: 6px 6px 6px auto;
     width: 24px; height: 24px; padding: 0; font-size: var(--vv-fs-xs); line-height: 1; opacity: .35; }
   .vv-collapse-btn:hover { opacity: 1; }
   /* hover 揭示的键盘等价（§7/§10-G1）：否则键盘聚焦恒 0.35 近乎不可见 */
   .vv-collapse-btn:focus-visible { opacity: 1; }
-  .vv-collapse-left, .vv-collapse-right { right: 6px; }
 }
 @media (min-width: 901px) {
   .vv-strip { display: flex; }
@@ -725,9 +727,10 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .toc .level-4 { padding-left: 24px; }
 .toc-empty { margin: 0; padding: .25rem .5rem; font-size: var(--vv-fs-xs); color: var(--ui-fg-muted); }
 /* 右面板「目录|属性」分段切换器（code-outline Task 3）：AppShell 门控（目录数据
-   非空才渲染）；右侧留白避开 .vv-collapse-right 绝对定位钮（top 6 right 6 24px 宽），
+   非空才渲染）；落右栏固定 header 行（spec A §4.3 重排），flex:1 占满行内余宽把
+   折叠钮推至右端——右侧 34px 让位 padding 退役（钮已入流，不再绝对定位浮置），
    active 段与 .toc button.active 同色语义（§7/§10-G2 --ui-hover-bg） */
-.vv-right-switch { display: flex; flex: none; gap: 4px; padding: 6px 34px 6px 10px;
+.vv-right-switch { display: flex; flex: 1; gap: 4px; padding: 6px 6px 6px 10px;
   border-bottom: 1px solid var(--ui-border); }
 .vv-right-switch-btn { flex: 1; font-size: var(--vv-fs-xs); padding: 3px 8px;
   border-radius: 4px; color: var(--ui-fg-muted); }

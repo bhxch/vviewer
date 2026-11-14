@@ -1346,36 +1346,47 @@
         <span class="vv-strip-icon" aria-hidden="true">{t('shell.strip.treeIcon')}</span>
       </div>
     {/if}
-    <aside class="vv-side" class:vv-side-off={layout.leftCollapsed} class:vv-side-blank={sources.length === 0} style="--vv-side-w: {leftW}px">
-      <!-- 抽屉头部「专注模式」入口（spec §3.1 移动端回落挂点：iOS Safari 不派发
-           contextmenu，长按布局菜单在 iOS 不可达）：桌面隐藏（媒体查询）；点击切
-           zen 不动抽屉开合态——zen 隐抽屉本体，退出还原进入前开合（spec「恢复原
-           开合状态」）；与桌面 chrome 菜单同源 toggleZen -->
-      <div class="vv-drawer-head">
-        <button type="button" class="vv-drawer-zen" onclick={() => toggleZen()}>{t('shell.drawer.zen')}</button>
-      </div>
-      <button type="button" class="vv-collapse-btn vv-collapse-left" aria-label={t('shell.strip.collapseTree')}
-        title={t('shell.strip.collapseTree')} onclick={() => updateLayout({ leftCollapsed: true })}>‹</button>
-      {#if sources.length > 0}
-        <!-- 整树重建 key：源数量 | 各源数据版本 storeRevisions | 排除规则（BUG-05 通道，T4 多源化，M-2 修正，T7 分桶） -->
-        {#key treeKey}
-          <FileTree {sources} excludedPatterns={settings.excludedPatterns} iconTree={settings.iconThemes.scopes.tree} onopen={onTreeOpen} onremove={removeSource} />
-        {/key}
-      {:else}
-        <!-- 0 目录空态引导区（spec §2.3）：三入口动作与标签栏动作簇同源（openFlow façade
-             现有函数），不新建打开通道；按钮不加禁用态（打开文件夹 fallback 恒可用） -->
-        <div class="vv-side-empty">
-          <p class="vv-side-empty-title">{t('shell.empty.title')}</p>
-          <button type="button" onclick={() => void openDirectoryViaPicker()}>{t('shell.empty.openFolder')}</button>
-          <button type="button" aria-expanded={emptyServerOpen} onclick={() => (emptyServerOpen = !emptyServerOpen)}>{t('shell.empty.connectServer')}</button>
-          {#if emptyServerOpen}<ServerConnectForm onconnected={() => (emptyServerOpen = false)} />{/if}
-          <form class="vv-side-empty-url" onsubmit={submitEmptyUrl}>
-            <input placeholder={t('shell.empty.urlPlaceholder')} bind:value={emptyUrl} aria-label={t('shell.empty.urlAria')} />
-            <button type="submit">{t('shell.empty.open')}</button>
-          </form>
-          <p class="vv-side-empty-hint">{t('shell.empty.dragHint')}</p>
+    <!-- aside 固定 header 行 + 滚动体（spec A §4.3 拍板形态）：折叠钮入流落 header
+         行右端（不随列表滚动——absolute 浮置于滚动容器内的随滚根因消除，app.css
+         position:absolute/top:6/right:6 退役），滚动体承接 FileTree/空态引导区并
+         承担滚动；FileTree 源行 34px 让位随之退役（让位由 header 行承担） -->
+    <aside class="vv-side" class:vv-side-off={layout.leftCollapsed} style="--vv-side-w: {leftW}px">
+      <!-- header 行（spec A §4.3）：桌面=折叠钮独占（margin-left:auto 推右，Task 3
+           左栏切换器挂其左——切换器 flex:1 占满余宽后 auto 归零）；≤900px 抽屉
+           断点内纵向堆叠（抽屉头首行，Task 3 切换器独立行挂其下） -->
+      <div class="vv-side-head">
+        <!-- 抽屉头部「专注模式」入口（spec §3.1 移动端回落挂点：iOS Safari 不派发
+             contextmenu，长按布局菜单在 iOS 不可达）：桌面隐藏（媒体查询）；点击切
+             zen 不动抽屉开合态——zen 隐抽屉本体，退出还原进入前开合（spec「恢复原
+             开合状态」）；与桌面 chrome 菜单同源 toggleZen -->
+        <div class="vv-drawer-head">
+          <button type="button" class="vv-drawer-zen" onclick={() => toggleZen()}>{t('shell.drawer.zen')}</button>
         </div>
-      {/if}
+        <button type="button" class="vv-collapse-btn vv-collapse-left" aria-label={t('shell.strip.collapseTree')}
+          title={t('shell.strip.collapseTree')} onclick={() => updateLayout({ leftCollapsed: true })}>‹</button>
+      </div>
+      <div class="vv-side-scroll" class:vv-side-blank={sources.length === 0}>
+        {#if sources.length > 0}
+          <!-- 整树重建 key：源数量 | 各源数据版本 storeRevisions | 排除规则（BUG-05 通道，T4 多源化，M-2 修正，T7 分桶） -->
+          {#key treeKey}
+            <FileTree {sources} excludedPatterns={settings.excludedPatterns} iconTree={settings.iconThemes.scopes.tree} onopen={onTreeOpen} onremove={removeSource} />
+          {/key}
+        {:else}
+          <!-- 0 目录空态引导区（spec §2.3）：三入口动作与标签栏动作簇同源（openFlow façade
+               现有函数），不新建打开通道；按钮不加禁用态（打开文件夹 fallback 恒可用） -->
+          <div class="vv-side-empty">
+            <p class="vv-side-empty-title">{t('shell.empty.title')}</p>
+            <button type="button" onclick={() => void openDirectoryViaPicker()}>{t('shell.empty.openFolder')}</button>
+            <button type="button" aria-expanded={emptyServerOpen} onclick={() => (emptyServerOpen = !emptyServerOpen)}>{t('shell.empty.connectServer')}</button>
+            {#if emptyServerOpen}<ServerConnectForm onconnected={() => (emptyServerOpen = false)} />{/if}
+            <form class="vv-side-empty-url" onsubmit={submitEmptyUrl}>
+              <input placeholder={t('shell.empty.urlPlaceholder')} bind:value={emptyUrl} aria-label={t('shell.empty.urlAria')} />
+              <button type="submit">{t('shell.empty.open')}</button>
+            </form>
+            <p class="vv-side-empty-hint">{t('shell.empty.dragHint')}</p>
+          </div>
+        {/if}
+      </div>
     </aside>
     {#if !layout.leftCollapsed}
       <!-- 中缝调宽把手（spec §2）：6px 热区，拖动实时预览、松手落盘、双击重置默认宽 -->
@@ -1422,85 +1433,92 @@
       ></div>
     {/if}
     <aside class="vv-right" class:vv-right-off={layout.rightCollapsed} style="--vv-right-w: {rightW}px">
-      <button type="button" class="vv-collapse-btn vv-collapse-right" aria-label={t('shell.strip.collapseMeta')}
-        title={t('shell.strip.collapseMeta')} onclick={() => updateLayout({ rightCollapsed: true })}>›</button>
-      {#if tocEntries.length > 0 || outlineDefinitions.length > 0 || gitInfo !== null}
-        <!-- 「目录 | 属性 | Git」分段切换器（code-outline Task 3 二元 + git-panel
-             Task 2 扩三元）：目录数据非空或 git 探测可用时渲染（均无维持纯属性现状
-             ——spec §4 显隐合并）；aria-pressed 表激活段。**段级显隐各自独立**：
-             目录钮 = 有目录数据（有大纲文件才有，无大纲文件的 [属性|Git] 双钮形态
-             不出现空目录段）；Git 钮 = gitInfo 非 null（后台 probe 可用才出现）；
-             激活任一段置 rightViewTouched（用户显式选择），默认落位 effect 永不选
-             'git'（下方注释）。 -->
-        <div class="vv-right-switch" role="group" aria-label={t('shell.right.switchAria')}>
-          {#if tocEntries.length > 0 || outlineDefinitions.length > 0}
+      <!-- header 行（spec A §4.3）：切换器 + 折叠钮同行——折叠钮入流（原 absolute
+           top/right:6 浮置随 aside 滚动容器滚动，退役），切换器 flex:1 占满行内
+           余宽、34px 让位 padding 随之退役；DOM 序=视觉序（切换器先、折叠钮右端） -->
+      <div class="vv-right-head">
+        {#if tocEntries.length > 0 || outlineDefinitions.length > 0 || gitInfo !== null}
+          <!-- 「目录 | 属性 | Git」分段切换器（code-outline Task 3 二元 + git-panel
+               Task 2 扩三元）：目录数据非空或 git 探测可用时渲染（均无维持纯属性现状
+               ——spec §4 显隐合并）；aria-pressed 表激活段。**段级显隐各自独立**：
+               目录钮 = 有目录数据（有大纲文件才有，无大纲文件的 [属性|Git] 双钮形态
+               不出现空目录段）；Git 钮 = gitInfo 非 null（后台 probe 可用才出现）；
+               激活任一段置 rightViewTouched（用户显式选择），默认落位 effect 永不选
+               'git'（下方注释）。落 header 行（spec A §4.3 重排，不随列表滚动）。 -->
+          <div class="vv-right-switch" role="group" aria-label={t('shell.right.switchAria')}>
+            {#if tocEntries.length > 0 || outlineDefinitions.length > 0}
+              <button
+                type="button"
+                class="vv-right-switch-btn"
+                class:active={rightView === 'toc'}
+                aria-pressed={rightView === 'toc'}
+                onclick={() => {
+                  rightViewTouched = true;
+                  rightView = 'toc';
+                }}>{t('shell.right.toc')}</button
+              >
+            {/if}
             <button
               type="button"
               class="vv-right-switch-btn"
-              class:active={rightView === 'toc'}
-              aria-pressed={rightView === 'toc'}
+              class:active={rightView === 'meta'}
+              aria-pressed={rightView === 'meta'}
               onclick={() => {
                 rightViewTouched = true;
-                rightView = 'toc';
-              }}>{t('shell.right.toc')}</button
+                rightView = 'meta';
+              }}>{t('shell.right.meta')}</button
             >
+            {#if gitInfo !== null}
+              <button
+                type="button"
+                class="vv-right-switch-btn"
+                class:active={rightView === 'git'}
+                aria-pressed={rightView === 'git'}
+                onclick={() => {
+                  rightViewTouched = true;
+                  rightView = 'git';
+                }}>Git</button
+              >
+            {/if}
+          </div>
+        {/if}
+        <button type="button" class="vv-collapse-btn vv-collapse-right" aria-label={t('shell.strip.collapseMeta')}
+          title={t('shell.strip.collapseMeta')} onclick={() => updateLayout({ rightCollapsed: true })}>›</button>
+      </div>
+      <div class="vv-right-scroll">
+        {#if rightView === 'toc'}
+          <!-- 目录视图互斥渲染（code-outline Task 3）：实例互斥保证 md TOC 与代码
+              大纲不同时有数据——outlineDefinitions 在场渲染大纲（引用已过滤的显示
+               集），否则 md TOC；两者皆空（用户点过切换器后切到无数据文件）回落属性
+               面板兜底空态（右栏校正 effect 随即归位 'meta'，见其注释）。 -->
+          {#if outlineDefinitions.length > 0}
+            <OutlineView
+              entries={outlineDisplayed}
+              activeLine={activeOutlineLine ?? undefined}
+              onclick={onOutlineJump}
+              truncated={outlineTruncated}
+              onexpandall={expandOutlineAll}
+            />
+          {:else if tocEntries.length > 0}
+            <Toc entries={tocEntries} />
+          {:else}
+            <MetaPanel />
           {/if}
-          <button
-            type="button"
-            class="vv-right-switch-btn"
-            class:active={rightView === 'meta'}
-            aria-pressed={rightView === 'meta'}
-            onclick={() => {
-              rightViewTouched = true;
-              rightView = 'meta';
-            }}>{t('shell.right.meta')}</button
-          >
-          {#if gitInfo !== null}
-            <button
-              type="button"
-              class="vv-right-switch-btn"
-              class:active={rightView === 'git'}
-              aria-pressed={rightView === 'git'}
-              onclick={() => {
-                rightViewTouched = true;
-                rightView = 'git';
-              }}>Git</button
-            >
-          {/if}
-        </div>
-      {/if}
-      {#if rightView === 'toc'}
-        <!-- 目录视图互斥渲染（code-outline Task 3）：实例互斥保证 md TOC 与代码
-            大纲不同时有数据——outlineDefinitions 在场渲染大纲（引用已过滤的显示
-             集），否则 md TOC；两者皆空（用户点过切换器后切到无数据文件）回落属性
-             面板兜底空态（右栏校正 effect 随即归位 'meta'，见其注释）。 -->
-        {#if outlineDefinitions.length > 0}
-          <OutlineView
-            entries={outlineDisplayed}
-            activeLine={activeOutlineLine ?? undefined}
-            onclick={onOutlineJump}
-            truncated={outlineTruncated}
-            onexpandall={expandOutlineAll}
+        {:else if rightView === 'git' && gitInfo !== null && gitStore !== null}
+          <!-- Git 段（git-panel Task 2）：探测可用才渲染（gitInfo null 时即使
+               rightView 停留 'git'——用户选过 Git 后切到无 git 文件、touched 台账
+               语义保持选择——也回落属性面板兜底，与 toc 空态回落同款形态）；probe
+               竞态兜底窗口（清空后新探测未上行）同此门。 -->
+          <GitSection
+            repoDir={gitInfo.repoDir}
+            store={gitStore}
+            filePath={gitPath}
+            rev={gitRev}
           />
-        {:else if tocEntries.length > 0}
-          <Toc entries={tocEntries} />
         {:else}
           <MetaPanel />
         {/if}
-      {:else if rightView === 'git' && gitInfo !== null && gitStore !== null}
-        <!-- Git 段（git-panel Task 2）：探测可用才渲染（gitInfo null 时即使
-             rightView 停留 'git'——用户选过 Git 后切到无 git 文件、touched 台账
-             语义保持选择——也回落属性面板兜底，与 toc 空态回落同款形态）；probe
-             竞态兜底窗口（清空后新探测未上行）同此门。 -->
-        <GitSection
-          repoDir={gitInfo.repoDir}
-          store={gitStore}
-          filePath={gitPath}
-          rev={gitRev}
-        />
-      {:else}
-        <MetaPanel />
-      {/if}
+      </div>
     </aside>
     {#if layout.rightCollapsed}
       <div class="vv-strip" data-side="right">
@@ -1582,10 +1600,14 @@
   }
   .vv-side {
     /* 宽度经 CSS 变量（内联 --vv-side-w / --vv-right-w 供值，拖拽实时预览与持久值
-       同一通道）；≤900px 媒体查询在本文件更后处覆写 width（抽屉机制不动） */
+       同一通道）；≤900px 媒体查询在本文件更后处覆写 width（抽屉机制不动）。
+       spec A §4.3 重排：本体改 flex column 不滚动（overflow hidden），滚动下放
+       .vv-side-scroll；position:relative 随折叠钮 absolute 浮置退役一并退役
+       （钮入流落 .vv-side-head，header 行不需 relative 锚） */
     width: var(--vv-side-w, 260px);
-    position: relative;
-    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     border-right: 1px solid var(--ui-border);
     background: var(--ui-side-bg);
   }
@@ -1596,14 +1618,44 @@
     flex-direction: column;
   }
   .vv-right {
+    /* spec A §4.3 重排：overflow auto→hidden（滚动下放 .vv-right-scroll），
+       position:relative 随折叠钮入流退役（同 .vv-side 注） */
     width: var(--vv-right-w, 230px);
     flex: none;
-    position: relative;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-left: 1px solid var(--ui-border);
+    background: var(--ui-side-bg);
+  }
+  /* 固定 header 行（spec A §4.3）：收纳折叠钮/切换器（右栏）与抽屉头/折叠钮（左栏），
+     flex:none 不随列表滚动。折叠钮 24px+上下 6px margin 自撑 36px 行高（原 absolute
+     top:6/right:6 锚点的入流等距，SRC-03/TOC-07 几何锚依赖的「钮不与滚动体首行
+     重叠」由此保证）；≤900px 左栏抽屉内 header 纵向堆叠（抽屉头独立首行，Task 3
+     切换器行挂其下） */
+  .vv-side-head,
+  .vv-right-head {
+    display: flex;
+    align-items: center;
+    flex: none;
+  }
+  @media (max-width: 900px) {
+    .vv-side-head {
+      flex-direction: column;
+      align-items: stretch;
+    }
+  }
+  /* 滚动体（spec A §4.3）：承接 FileTree/空态引导区（左）与目录视图/MetaPanel/Git
+     （右），本体 flex:1 吃掉 header 以下余高。flex column 容器是既有点位语义的
+     承载面——.toc/.vv-outline flex:1 自滚动、.meta-panel/.vv-git flex:none（Review
+     Focus 1：非 flex column 则 Git diff 滚动区/TOC/大纲滚动区布局静默变形） */
+  .vv-side-scroll,
+  .vv-right-scroll {
+    flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     overflow: auto;
-    border-left: 1px solid var(--ui-border);
-    background: var(--ui-side-bg);
   }
   /* 折叠态隐藏本体（残留竖条由 .vv-strip 承担）。左栏 off 规则限定桌面断点——
      ≤900px 左栏是抽屉，不受折叠影响；右栏 off 覆盖桌面 + 平板段（601–900px 右栏
@@ -1619,15 +1671,13 @@
       display: none;
     }
   }
-  /* 0 目录空态引导区（侧栏多根 spec §2.3）：竖排居中——aside 空态加 .vv-side-blank
-     （flex column），引导区 flex:1 撑满余高精确垂直居中（桌面无头部、≤900px 抽屉
-     头部占位均自适应，免 min-height calc 魔数）；间距/字号走 ui-design-system
-     令牌（字阶 §3.2），hint 用 muted 层级；按钮复用 app.css 全局 button 基座，
-     「打开文件夹」恒可用不加禁用态（openDirectoryViaPicker 内建 input fallback） */
-  .vv-side-blank {
-    display: flex;
-    flex-direction: column;
-  }
+  /* 0 目录空态引导区（侧栏多根 spec §2.3）：竖排居中——.vv-side-blank 移挂滚动体
+     （spec A §4.3 重排：滚动体本身即 flex column，本类保留为空态标记不再承载布局，
+     原 display/flex-direction 声明退役），引导区 flex:1 撑满余高精确垂直居中
+     （桌面无头部、≤900px 抽屉头部占位均自适应，免 min-height calc 魔数）；间距/
+     字号走 ui-design-system 令牌（字阶 §3.2），hint 用 muted 层级；按钮复用
+     app.css 全局 button 基座，「打开文件夹」恒可用不加禁用态（openDirectoryViaPicker
+     内建 input fallback） */
   .vv-side-empty {
     flex: 1;
     display: flex;

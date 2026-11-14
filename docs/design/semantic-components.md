@@ -53,7 +53,6 @@
 | 档 | 值 | 成员（文件:行） | 语义 |
 |---|---|---|---|
 | 行内盖 | 1 | `.vv-tabbar-arrow`（app.css:552）；tab 滚动渐隐上的箭头（app.css:549-552） | 容器内局部盖序 |
-| 竖条钮 | 5 | `.vv-collapse-btn`（app.css:362） | 折叠竖条展开钮 |
 | 抽屉带 | 20 | `.vv-side` 抽屉态（AppShell.svelte:1656）、`.vv-right` ≤600px 抽屉态（:1690）、`.vv-drawer-toggle`（:1668）、`.vv-right-toggle`（:1702）、`.vv-dl-progress` / `.vv-dl-confirm`（app.css:168/195，查看器内 absolute） | 压过 ArtPlayer `.art-video`（上游 absolute z-index:10）——PWA-09/2、MEDIA-11 修复口径 |
 | zen 退出钮 | 25 | `.vv-zen-exit`（AppShell.svelte:1773） | 刻意低于面板层 30：面板在场时返回键先关面板的视觉一致 |
 | 面板层 | 30 | overlay 族：`.vv-settings-center`（SettingsCenter.svelte:520）、`.vv-mounts-manager`（MountsManager.svelte:657）、`.vv-gsearch`（GlobalSearchPanel.svelte:325）、`.vv-quickopen`（QuickOpenPanel.svelte:208）、`.vv-wscreate-panel`（app.css:474-477）、`.vv-wspanel`（app.css:484）、`.vv-status-picker`（app.css:680）、`.vv-git-blame-pop`（app.css:799） | 同位面板/浮层/拾取器基准档 |
@@ -62,6 +61,8 @@
 | 通知/搜索 | 60 | `.vv-toast`（AppShell.svelte:1724）、`.vv-search-panel`（app.css:329） | 瞬态告知与搜索条 |
 | 菜单 | 90 | `.vv-tabctx`（app.css:650）、`.vv-chromemenu`（app.css:420）、`.vv-tbmenu-pop`（app.css:579） | 瞬态操作面，不被任何浮层压住 |
 | 灯箱 | 100 | `.md-lightbox-overlay`（packages/vviewer-markdown/src/markdown.css:78；`css.ts` `RUNTIME_LIGHTBOX_CSS` 运行时同值） | markdown 包承载，全站最高 |
+
+> **退役档 5（竖条钮）**：`.vv-collapse-btn` 随 spec A §4.3 折叠钮固定重排（2026-11-14）改入 aside 固定 header 行流内（AppShell.svelte scoped header 行规则 + app.css 尺寸/透明度规则），`position:absolute; top:6px`/`right:6px` 与 `z-index:5` 声明全部退役——本表为现状实测档位，退役档不保留占位行（登记表与代码同步是义务，§1 规则 2 同源）。
 
 **机检载体**：无通用机检（CSS 值盘点性规则）；档位核对落 PR 必查清单第 3 条。既有档位间关系有行为面机检：zen 返回键分层（b-layout-zen-deep LZ-12）、灯箱画廊（markdown e2e）。
 

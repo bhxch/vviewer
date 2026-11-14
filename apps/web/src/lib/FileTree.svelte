@@ -111,11 +111,9 @@
     align-items: center;
     gap: var(--vv-sp-4);
     padding: var(--vv-sp-4) var(--vv-sp-6) var(--vv-sp-2);
-    /* 行右让位（本 spec 重叠修复本体）：侧栏折叠钮 .vv-collapse-left 在 app.css
-       为 absolute top:6 right:6 24×24，浮置于本行右上——右缘 6px 偏移的
-       24px 命中区，命中区左缘距行右缘 30px，34px 让位留 4px 余量，
-       行内内容（移除钮）不再压进其命中区 */
-    padding-right: 34px;
+    /* 行右让位已退役（spec A §4.3 折叠钮固定重排）：折叠钮改入 aside 固定 header
+       行（不随列表滚动），不再浮置于本行右上——右缘回归常规 var(--vv-sp-6)，
+       与钮的重叠防护改由 header 行/滚动体的垂直分离承担（SRC-03 锚维持） */
     font-size: var(--vv-fs-xs);
     color: var(--ui-fg-muted);
   }
