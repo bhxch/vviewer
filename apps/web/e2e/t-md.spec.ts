@@ -489,5 +489,9 @@ test('BUG-40 [探索]: markdown 渲染视图净化放行五类等价加载向量
   const img = md.locator('img[alt="plain"]');
   await expect(img).not.toHaveAttribute('src');
   await expect(img).toHaveAttribute('data-vv-blocked-external', '1');
+  // spec D 默认 manual 语义钉子（Task 6）：src 迁 data 属性在场 + 加载按钮占位承接
+  // （blocked 档不产 data-vv-external-src——钉住 manual 语义，防未来静默退化回 blocked）
+  await expect(img).toHaveAttribute('data-vv-external-src', `${V}/plain.jpg`);
+  await expect(md.locator('.md-ext-media-load')).toHaveCount(1);
   await expect(page.locator('.vv-error-card')).toHaveCount(0);
 });
