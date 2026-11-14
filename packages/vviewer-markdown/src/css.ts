@@ -176,8 +176,11 @@ export const RUNTIME_ALERT_FOLD_CSS = `.markdown-alert-foldable > .markdown-aler
 
 // ---------- wikilink / 锚点 / 外域占位 / 搜索命中 ----------
 
-/** 跨文件 wikilink 降级（不可点原文，虚线下划线悬停提示）。 */
-export const WIKILINK_CSS = `.vv-markdown .md-wikilink-dead { border-bottom: 1px dashed var(--ui-border, #d0d7de); cursor: default; }`;
+/** 跨文件 wikilink 降级（不可点原文，虚线下划线悬停提示）+ 站内升级链接形态
+ * （spec D §3.2：渲染出口双缝在场时 span.md-wikilink-dead 升级为 a.md-wikilink）。 */
+export const WIKILINK_CSS = `.vv-markdown .md-wikilink-dead { border-bottom: 1px dashed var(--ui-border, #d0d7de); cursor: default; }
+/* 站内升级链接形态（spec D §3.2：渲染出口双缝在场时 span.md-wikilink-dead 升级） */
+.vv-markdown a.md-wikilink { color: var(--ui-accent, #0969da); cursor: pointer; }`;
 
 /** 标题锚点（引擎自产 a.anchor，空内容 0 宽）：交互段（焦点揭示）运行时专有。 */
 export const RUNTIME_ANCHOR_CSS = `.vv-markdown a.anchor { color: var(--ui-accent, #0969da); text-decoration: none; }

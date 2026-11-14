@@ -128,3 +128,25 @@ describe('enrichMarkdownDom——manual 档外链媒体占位构建（spec D §3
     expect(blocked.getAttribute('data-vv-blocked-external')).toBe('1');
   });
 });
+
+describe('buildWikilink 死链 data-wikilink-path 元数据（spec D §3.2：纯属性零行为变化）', () => {
+  it('死链 span 恒写 data-wikilink-path=路径首段（裸名/带别名/子路径+hash 三形态，保序）', () => {
+    const doc = docOf('<p>[[Other.md]] [[b|别名]] [[sub/deep#Setup]]</p>');
+    enrichMarkdownDom(doc);
+    const spans = Array.from(doc.querySelectorAll('span.md-wikilink-dead'));
+    expect(spans).toHaveLength(3);
+    expect(spans.map((s) => s.getAttribute('data-wikilink-path'))).toEqual(['Other.md', 'b', 'sub/deep#Setup']);
+    // 纯元数据：title/textContent 既有形态零变化
+    expect(spans[0]!.getAttribute('title')).toBe('跨文件 wikilink 不支持');
+    expect(spans[1]!.textContent).toBe('[[b|别名]]');
+  });
+
+  it('外域嵌入降级 span 同写 path（出口 isRelativeLinkHref 不升级）；页内锚 a[data-wikilink] 不带该属性', () => {
+    const doc = docOf('<p>![[https://e.example/p.png]] [[#slug]]</p>');
+    enrichMarkdownDom(doc);
+    const span = doc.querySelector('span.md-wikilink-dead')!;
+    expect(span.getAttribute('data-wikilink-path')).toBe('https://e.example/p.png');
+    const anchor = doc.querySelector('a[data-wikilink="anchor"]')!;
+    expect(anchor.hasAttribute('data-wikilink-path')).toBe(false);
+  });
+});

@@ -38,7 +38,17 @@ export {
   setMarkdownImageResolver,
   getMarkdownImageResolver,
   setDiagramOptions,
-  getDiagramOptions
+  getDiagramOptions,
+  // 相对链接站内导航（spec D §3.2）：双注入缝 + 分类/接管纯函数与契约类型
+  setRelativeLinkResolver,
+  getRelativeLinkResolver,
+  setRelativeLinkOpener,
+  getRelativeLinkOpener,
+  isRelativeLinkHref,
+  wireRelativeLinks,
+  type RelativeLinkTarget,
+  type RelativeLinkResolver,
+  type RelativeLinkOpener
 } from './markdownRenderer';
 export {
   runPipeline,

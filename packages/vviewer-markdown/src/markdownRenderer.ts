@@ -19,6 +19,7 @@ import {
 import { sanitizeHtml } from '@bhxch/vviewer-sanitize';
 import { renderMermaidInto, resolveDiagramType, DEFAULT_KROKI_HOST, type DiagramMode, type MermaidTheme } from '@bhxch/vviewer-render-diagram';
 import { enrichMarkdownDom } from './enrich';
+import { wireRelativeLinks, type RelativeLinkOpener, type RelativeLinkResolver } from './relativeLinks';
 import { runPipeline, removeLightboxOverlay, LIGHTBOX_OVERLAY_ID, type PipelineUiTexts } from './pipeline';
 import { decodeText } from './decodeText';
 import { makePreview, type SearchMatchWithPreview } from './search';
@@ -144,6 +145,45 @@ export function setMarkdownImageResolver(fn: MarkdownImageResolver | null): void
 /** 读取已注入的相对图片解析器（测试断言用）。 */
 export function getMarkdownImageResolver(): MarkdownImageResolver | null {
   return markdownImageResolver;
+}
+
+// ---------- 相对链接站内导航注入（spec D §3.2） ----------
+
+// 类型与 wireRelativeLinks/isRelativeLinkHref 本体在 relativeLinks.ts（纯 .ts 可
+// 单测）；此处落模块缝与装配（setMarkdownImageResolver 同款先例形态）。
+export { wireRelativeLinks, isRelativeLinkHref } from './relativeLinks';
+export type { RelativeLinkTarget, RelativeLinkResolver, RelativeLinkOpener } from './relativeLinks';
+
+/**
+ * 相对链接解析器（模块缝）：相对 href + 当前文件来源 → RelativeLinkTarget；
+ * null=resolver 显式弃权。reject（store 读抛错）由 wireRelativeLinks 的 .then 无
+ * 第二参吞掉=当次点击无动作。store 读取能力在宿主侧组装；缺省 null（不接管=
+ * 原生导航语义维持，standalone 安全缺省）。
+ */
+let relativeLinkResolver: RelativeLinkResolver | null = null;
+
+/** 注入相对链接解析器（启动时调用；传 null 解绑回不接管）。 */
+export function setRelativeLinkResolver(fn: RelativeLinkResolver | null): void {
+  relativeLinkResolver = fn;
+}
+
+/** 读取已注入的相对链接解析器（测试断言用）。 */
+export function getRelativeLinkResolver(): RelativeLinkResolver | null {
+  return relativeLinkResolver;
+}
+
+/** 相对链接打开与提示通道（file→新 tab、directory→目录 tab、missing→状态提示由
+ * 装配方一体承接）；与 resolver 双缝同时在场渲染出口才绑定 wireRelativeLinks。 */
+let relativeLinkOpener: RelativeLinkOpener | null = null;
+
+/** 注入相对链接打开通道（启动时调用；传 null 解绑回不接管）。 */
+export function setRelativeLinkOpener(fn: RelativeLinkOpener | null): void {
+  relativeLinkOpener = fn;
+}
+
+/** 读取已注入的相对链接打开通道（测试断言用）。 */
+export function getRelativeLinkOpener(): RelativeLinkOpener | null {
+  return relativeLinkOpener;
 }
 
 /** 绝对地址形态：scheme（http:/data:/blob:）、根相对（/…、//host）、页内片段（#…）不进 resolver。 */
@@ -517,6 +557,10 @@ interface RenderRunOptions {
   sourceInfo: { storeId: string; path: string };
   /** FileSourceLike 透传给 imageResolver（视图路径缺省合成空来源） */
   fileSource?: FileSourceLike;
+  /** 相对链接站内解析器（spec D §3.2；与 opener 双缝同时在场才绑定 wireRelativeLinks） */
+  resolveRelativeLink?: RelativeLinkResolver | null;
+  /** 相对链接打开与提示通道（与 resolver 双缝同时在场才生效） */
+  openRelativeLink?: RelativeLinkOpener | null;
   /** 元数据快照（getMeta） */
   meta: MarkdownFileMeta;
 }
@@ -584,6 +628,17 @@ async function renderMarkdownInto(
     galleryScope: target
   });
   if (aborted()) return null;
+  // 相对链接站内导航接管（spec D §3.2）：resolver+opener 双缝同时在场才绑定
+  //（standalone 安全缺省=原生导航）；监听随节点收养/销毁（灯箱同款生命周期）
+  const relResolver = opts.resolveRelativeLink ?? null;
+  const relOpener = opts.openRelativeLink ?? null;
+  if (relResolver !== null && relOpener !== null) {
+    wireRelativeLinks(doc, {
+      resolver: relResolver,
+      opener: relOpener,
+      source: opts.fileSource ?? { storeId: opts.sourceInfo.storeId, storeLabel: '', path: opts.sourceInfo.path, name: '' }
+    });
+  }
   // 相对图片 → 同 store 文件 URL（未注入 resolver 时原样保留，404 现状）
   const resolvedUrls = await resolveRelativeImages(doc, opts.fileSource, opts.imageResolver);
   if (aborted()) {
@@ -766,6 +821,8 @@ export const markdownRenderer: MarkdownRenderer = {
         imageResolver: markdownImageResolver,
         backend: markdownBackend,
         remoteBase: resolveRemoteBaseImpl,
+        resolveRelativeLink: relativeLinkResolver,
+        openRelativeLink: relativeLinkOpener,
         sourceInfo: { storeId: source.storeId, path: source.path },
         fileSource: source,
         meta: { encoding: det.encoding, size: buffer.byteLength }
@@ -838,6 +895,13 @@ export interface MarkdownViewOptions {
   /** 相对图片解析器（按 src 返回可用 URL，null=保留原 src；缺省=src 原样）。
    * blob: URL 登记由视图托管，destroy/重渲时 revoke。 */
   resolveImage?: (src: string) => Promise<string | null>;
+  /** 相对链接站内解析器（spec D §3.2：返回 RelativeLinkTarget 或 null 弃权）；
+   * 缺省顺序=本选项 → setRelativeLinkResolver 模块注入，仍未注入不接管
+   * （与 openRelativeLink 双缝同时在场才绑定，原生导航语义维持）。 */
+  resolveRelativeLink?: RelativeLinkResolver;
+  /** 相对链接打开与提示通道（file→新 tab、directory→目录 tab、missing→状态提示由
+   * 装配方一体承接）；缺省顺序=本选项 → setRelativeLinkOpener 模块注入。 */
+  openRelativeLink?: RelativeLinkOpener;
   /**
    * 图表分发选项（可部分注入：krokiHost 缺省 DEFAULT_KROKI_HOST、mermaidTheme
    * 缺省 'default'、modeOf 缺省按注册表 defaultMode）；完全不传=注册表语义。
@@ -950,6 +1014,8 @@ export function createMarkdownView(container: HTMLElement, options: MarkdownView
           imageResolver: options.resolveImage ?? null,
           backend: options.markdownBackend ?? markdownBackend,
           remoteBase: options.resolveRemoteBase ?? null,
+          resolveRelativeLink: options.resolveRelativeLink ?? relativeLinkResolver,
+          openRelativeLink: options.openRelativeLink ?? relativeLinkOpener,
           sourceInfo: { storeId: options.source?.storeId ?? '', path: options.source?.path ?? '' },
           meta: { encoding: 'utf-8', size: byteSize }
         },

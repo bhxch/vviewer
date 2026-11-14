@@ -248,6 +248,7 @@ function buildWikilink(root: Document, embed: boolean, content: string, raw: str
   // 跨文件 wikilink / 外域嵌入降级：不可点原文
   const span = root.createElement('span');
   span.className = 'md-wikilink-dead';
+  span.setAttribute('data-wikilink-path', (content.split('|')[0] ?? '').trim()); // spec D §3.2：路径元数据恒写（渲染出口 wikilink 升级消费；纯属性零行为变化）
   span.setAttribute('title', '跨文件 wikilink 不支持');
   span.textContent = raw;
   return span;

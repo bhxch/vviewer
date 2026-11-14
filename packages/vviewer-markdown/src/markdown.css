@@ -115,6 +115,8 @@
 .markdown-alert-collapsed > .markdown-alert-title::after { content: '▸'; }
 .markdown-alert-collapsed > :not(.markdown-alert-title) { display: none; }
 .vv-markdown .md-wikilink-dead { border-bottom: 1px dashed var(--ui-border, #d0d7de); cursor: default; }
+/* 站内升级链接形态（spec D §3.2：渲染出口双缝在场时 span.md-wikilink-dead 升级） */
+.vv-markdown a.md-wikilink { color: var(--ui-accent, #0969da); cursor: pointer; }
 .vv-markdown a.anchor { color: var(--ui-accent, #0969da); text-decoration: none; }
 /* 0 宽盒上焦点环左右边缘重合无从辨识——键盘聚焦时揭示链接字符。平时零内容零视觉 */
 .vv-markdown a.anchor:focus-visible::before { content: '#'; }
