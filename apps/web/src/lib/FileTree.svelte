@@ -149,11 +149,12 @@
   }
   .vv-tree-src:hover .vv-tree-src-remove,
   .vv-tree-src:focus-within .vv-tree-src-remove { opacity: 1; }
-  /* 触屏无 hover（评审 Minor 2）：hover 媒介查询不触发的环境恒显，
-     hover 设备仍走上方 hover/focus-within 揭示 */
-  @media (hover: none) {
-    .vv-tree-src-remove { opacity: 1; }
-  }
+  /* 触屏档案恒显（spec B §3.3.1）：替代原 @media(hover:none)（评审 Minor 2 块）——
+     强制桌面档需在 coarse 设备回收常显，媒介查询挡死回收路径；触屏笔记本
+     （primary pointer fine、hover:none 不触发）正由 data-touch 覆盖。hover 设备
+     仍走上方 hover/focus-within 揭示。祖先打标在 html 上必须 :global 包裹——裸
+     html[...] 祖先被判 css_unused_selector 死代码（规划评审 F1 编译探针实证） */
+  :global(html[data-touch='on']) .vv-tree-src-remove { opacity: 1; }
   .vv-tree-src-remove:hover {
     color: var(--ui-fg);
     background: var(--ui-hover-bg); /* 与树行 hover 同语义（亮暗均与 side-bg 同值，零漂移） */

@@ -1955,6 +1955,13 @@
       }
     }
   }
+  /* 触屏档案浮钮触控目标（spec B §3.3.2，32→40px 升档；WCAG 2.2 2.5.8 AAA 44px
+     档——.vv-zen-exit 已 44px 零改动，抽屉浮钮取 40px 档位与 §3.3.2 拍板下限一致）：
+     基态 display:none 不受影响——>900px 触屏设备浮钮不出现（spec 反目标红线），
+     规则只作用于断点内已可见实例；祖先在 html 上须 :global 包裹（裸形态编译
+     死代码 css_unused_selector，评审 F1 探针实证） */
+  :global(html[data-touch='on']) .vv-drawer-toggle,
+  :global(html[data-touch='on']) .vv-right-toggle { min-width: 40px; min-height: 40px; }
   /* zen 移动端（spec §3.1，Task 4）：退出浮钮 + 抽屉头部「专注模式」入口——基线
      display:none（桌面无此钮/无此项，spec「桌面无此钮」），≤900px 抽屉断点
      （与 isDrawerBreakpoint 同一条件，改断点两处同步）内才渲染视觉 */

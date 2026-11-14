@@ -474,6 +474,11 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .vv-ws-actions { display: inline-flex; gap: 2px; opacity: 0; transition: opacity var(--vv-dur-fast); }
 .vv-ws-item:hover .vv-ws-actions, .vv-ws-item:focus-within .vv-ws-actions { opacity: 1; }
 @media (max-width: 600px) { .vv-ws-actions { opacity: 1; } }
+/* 触屏档案常显（spec B §3.3.1）：≤600px 媒介查询的 data-touch 等价通道——
+   触屏笔记本（>600px 视口）与强制触屏档（任意视口）同吃；强制桌面档
+   （data-touch 缺席）走 hover 语义零新增。全局层裸属性选择器免 :global
+   （scoped 才有 css_unused_selector 死代码问题，评审 F1） */
+html[data-touch='on'] .vv-ws-actions { opacity: 1; }
 .vv-ws-act { border: 0; background: none; padding: 2px 5px; color: var(--ui-fg-muted); font-size: var(--vv-fs-xs); cursor: pointer; border-radius: 4px; }
 .vv-ws-act:hover { color: var(--ui-fg); }
 .vv-ws-new { margin-top: 2px; border-top: 1px solid var(--ui-border); border-radius: 0; background: none;
@@ -526,6 +531,8 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .vv-wspanel-row:hover .vv-wspanel-close, .vv-wspanel-row:focus-within .vv-wspanel-close { opacity: 1; }
 .vv-wspanel-close:hover { color: var(--ui-danger); }
 @media (max-width: 600px) { .vv-wspanel-close { opacity: 1; } }
+/* 触屏档案常显（spec B §3.3.1）：同 .vv-ws-actions 侧注释（data-touch 等价通道） */
+html[data-touch='on'] .vv-wspanel-close { opacity: 1; }
 .vv-wspanel-empty { padding: 4px 10px 6px 20px; color: var(--ui-fg-muted); font-size: var(--vv-fs-xs); }
 .vv-wspanel-addbtn { display: block; margin: 2px 10px 4px 20px; background: none; border: 0; border-radius: 4px;
   text-align: left; padding: 3px 6px; font: inherit; font-size: var(--vv-fs-xs); color: var(--ui-accent); cursor: pointer; }
@@ -618,6 +625,11 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
   .vv-tabbar-menu .vv-tbmenu-trigger,
   .vv-tbmenu-item { padding-block: 8px; }
 }
+/* 触屏档案触控目标（spec B §3.3.2）：菜单触发钮/条目 padding-block 8px 档
+   （§6.4/§10-G1 同款）在触屏档案下全视口生效（>600px 视口的触屏笔记本与
+   强制触屏档同吃；强制桌面档走桌面断点语义零新增） */
+html[data-touch='on'] .vv-tabbar-menu .vv-tbmenu-trigger,
+html[data-touch='on'] .vv-tbmenu-item { padding-block: 8px; }
 /* .vv-tab 为 presentation 壳（a11y Task 2：role=tab 落内层 .vv-tab-hit，close 字形
    为 aria-hidden span——axe nested-interactive 真修）；cursor 与 font-size 需自带
    （span 化后无全局 button 规则兜底；§3.2 「tab 名」归 --vv-fs-sm 档，走查 medium）。
