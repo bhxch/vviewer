@@ -367,6 +367,35 @@ describe('sanitizeHtml——spec D 三档（外链图片 blocked/manual/auto + �
     expect(img.getAttribute('data-vv-external-src')).toBe(EXT);
   });
 
+  it('⑥组合面：src 白名单命中保留 + srcset 含未放行候选——srcset 迁移但不得打拦截标记（img 有可用加载源在场）', () => {
+    // manual：src 命中保留、srcset 整串迁 data-vv-external-srcset——src 在场即有
+    // 可用加载源，补标记会让白名单放行图显示占位框（标记语义矛盾）
+    const manual = sanitizeHtml(
+      `<img src="${EXT}" srcset="https://evil.example.net/b.png 1x">`,
+      { externalImage: { policy: 'manual', allowlist: ['external.example.com'] } },
+    );
+    const manualImg = elOf(manual);
+    expect(manualImg.getAttribute('src')).toBe(EXT);
+    expect(manualImg.hasAttribute('data-vv-external-srcset')).toBe(true);
+    expect(manualImg.hasAttribute('data-vv-blocked-external')).toBe(false);
+    expect(manualImg.hasAttribute('title')).toBe(false);
+    // blocked：src 命中保留、srcset 全部未放行剥除——同口径不打标记
+    const blocked = sanitizeHtml(
+      `<img src="${EXT}" srcset="https://evil.example.net/b.png 1x, https://evil2.example.net/c.png 2x">`,
+      { externalImage: { policy: 'blocked', allowlist: ['external.example.com'] } },
+    );
+    const blockedImg = elOf(blocked);
+    expect(blockedImg.getAttribute('src')).toBe(EXT);
+    expect(blockedImg.hasAttribute('srcset')).toBe(false);
+    expect(blockedImg.hasAttribute('data-vv-blocked-external')).toBe(false);
+    // 对照：src 未命中已迁/已剥（无可用加载源）时补标记语义维持
+    const stillMarked = sanitizeHtml(
+      '<img srcset="https://evil.example.net/b.png 1x">',
+      { externalImage: { policy: 'manual', allowlist: ['external.example.com'] } },
+    );
+    expect(elOf(stillMarked).getAttribute('data-vv-blocked-external')).toBe('1');
+  });
+
   it('⑦缺省（无 opts 无 provider）= blocked 现行逐字节（既有输出串全等断言）', () => {
     const dirty = '<img src="https://tracker.example.com/track.png" alt="x"><img src="photo.png">';
     expect(sanitizeHtml(dirty)).toBe(

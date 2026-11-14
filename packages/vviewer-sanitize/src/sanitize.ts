@@ -441,10 +441,10 @@ function registerSanitizeHooks(): void {
           if (candidates.some(unallowed)) {
             el.setAttribute('data-vv-external-srcset', srcset);
             el.removeAttribute('srcset');
-            if (src === null || srcExternal) {
-              // 无可用加载源（src 缺失，或 src 同为未放行外域已拦）补标记——现行
-              // blocked 分支补标记语义对齐
-              let firstBlockedHost = srcExternal ? hostOf(trimmed) : '';
+            if (src === null || (srcExternal && !allowSrc)) {
+              // 无可用加载源（src 缺失，或 src 外域且未放行已迁）补标记——白名单
+              // 命中保留的 src 在场即有加载源，不得打标记（allowSrc 区分）
+              let firstBlockedHost = srcExternal && !allowSrc ? hostOf(trimmed) : '';
               if (firstBlockedHost === '') {
                 for (const c of candidates) {
                   if (unallowed(c)) {
@@ -469,7 +469,9 @@ function registerSanitizeHooks(): void {
           if (kept.length !== candidates.length) {
             if (kept.length === 0) el.removeAttribute('srcset');
             else el.setAttribute('srcset', kept.join(', '));
-            if (kept.length === 0 && (src === null || srcExternal)) {
+            if (kept.length === 0 && (src === null || (srcExternal && !allowSrc))) {
+              // 无可用加载源：src 缺失，或 src 外域且未放行已剥——白名单命中保留
+              // 的 src 在场不得打标记（allowSrc 区分，组合面语义对齐）
               markBlockedExternal(el, firstBlockedHost);
             }
           }
