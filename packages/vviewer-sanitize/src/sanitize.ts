@@ -48,6 +48,67 @@ export function hostOf(url: string): string {
   }
 }
 
+// ---------- spec D §3.1：外链图片三档 + 域名白名单 ----------
+
+/** 外链图片三档（spec D §3.1；与 apps/web settings 的 MARKDOWN_EXTERNAL_IMAGE_POLICIES
+ * 字面一致——包零 app 依赖，两侧各自单测锁字面）。 */
+export const EXTERNAL_IMAGE_POLICIES = ['blocked', 'manual', 'auto'] as const;
+export type ExternalImagePolicy = (typeof EXTERNAL_IMAGE_POLICIES)[number];
+
+/** 当次生效档位配置：三档 policy + 域名白名单（条目形态见 isExternalImageAllowlisted） */
+export interface ExternalImagePolicyConfig {
+  policy: ExternalImagePolicy;
+  allowlist: readonly string[];
+}
+
+/**
+ * 白名单命中判定（纯函数，spec D §3.1）：host 取 hostname（端口不参与——URL.hostname
+ * 已剥端口），大小写不敏感；条目三形态——`example.com` 精确（host 逐字相等）、
+ * `.example.com` 与 `*.example.com` 通配（host===base 或 host 以 '.'+base 结尾=
+ * apex 与全部子域）；解析失败/空表返回 false。外域性判定（isExternalMediaSrc）由
+ * 调用点组合——本函数只回答「host 是否命中白名单」。
+ */
+export function isExternalImageAllowlisted(src: string, allowlist: readonly string[]): boolean {
+  if (allowlist.length === 0) return false;
+  let host: string;
+  try {
+    host = new URL(src, 'https://vviewer.invalid').hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  for (const raw of allowlist) {
+    const entry = raw.trim().toLowerCase();
+    if (entry === '') continue;
+    if (entry.startsWith('*.') || entry.startsWith('.')) {
+      const base = entry.replace(/^[*.]+/, '');
+      if (base !== '' && (host === base || host.endsWith(`.${base}`))) return true;
+    } else if (host === entry) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// provider 缝（setDiagramOptions provider 形态先例——render-text markdownRenderer
+// 一次装配统一服务多消费面）：模块级注入当次档位提供器，sanitizeHtml 每调用现读
+// （settings 变更下一渲染即时生效）；未注入时缺省 blocked=现行行为（兼容锚）。
+let externalImagePolicyProvider: (() => ExternalImagePolicyConfig | null) | null = null;
+
+/** 注入外链图片档位提供器（启动时调用；每次 sanitize 现读——设置变更下一渲染即时生效；
+ * 传 null 解绑回缺省 blocked）。 */
+export function setExternalImagePolicyProvider(fn: (() => ExternalImagePolicyConfig | null) | null): void {
+  externalImagePolicyProvider = fn;
+}
+
+export function getExternalImagePolicyProvider(): typeof externalImagePolicyProvider {
+  return externalImagePolicyProvider;
+}
+
+/** 当次生效档位：provider() 非空取之，否则缺省 { policy: 'blocked', allowlist: [] }（=现行行为）。 */
+export function currentExternalImagePolicy(): ExternalImagePolicyConfig {
+  return externalImagePolicyProvider?.() ?? { policy: 'blocked', allowlist: [] };
+}
+
 function markBlockedExternal(el: Element, host: string): void {
   el.setAttribute('data-vv-blocked-external', '1');
   el.setAttribute('title', `已拦截外部图片：${host}`);
@@ -235,8 +296,15 @@ const SERVER_DIAGRAM_CONFIG_KEY = '__vvServerDiagramContract';
 // 返回——mermaid 保持 strict 安全级不降级，BUG-40 防线不松动（vviewer 出口行为零变化）。
 const SANITIZE_SCOPE_CONFIG_KEY = '__vvSanitizeScope';
 
+// spec D §3.1：外链图片档位随当次 sanitize 的 config 注入（SERVER_DIAGRAM_CONFIG_KEY
+// 同款机制——逐调用透传，钩子侧不持模块级可变状态）。缺省值在 config 组装点取
+// currentExternalImagePolicy()（provider 现读，未装配时=blocked 现行行为）；
+// opts.externalImage 显式传入优先（standalone 消费者自传通道）。
+const EXTERNAL_IMAGE_CONFIG_KEY = '__vvExternalImagePolicy';
+
 type SanitizeConfig = Config &
   Record<typeof SERVER_DIAGRAM_CONFIG_KEY, { attr: string; value: string }> &
+  Record<typeof EXTERNAL_IMAGE_CONFIG_KEY, ExternalImagePolicyConfig> &
   Record<typeof SANITIZE_SCOPE_CONFIG_KEY, true>;
 
 /** 钩子侧读回当次契约：config 未携带（防御性兜底）时回落默认字面量 */
@@ -325,38 +393,85 @@ function registerSanitizeHooks(): void {
     // 向外域发起网络请求（跟踪像素拿不到 IP）；title 保留域名供占位悬停提示。
     // 相对路径与 data:/blob: 不受影响（markdown 相对图片解析为 blob 的链路发生在
     // 净化之后，同样不受影响）；链接 <a href> 外链不拦（用户主动导航型外泄）。
+    // spec D §3.1 三档：档位随当次 config 注入（EXTERNAL_IMAGE_CONFIG_KEY，缺省
+    // blocked=本注释原始语义）。blocked=现行（剥除+占位+title）；manual=src 迁
+    // data-vv-external-src（§6 落定 1：DOM 无 src 即不发请求，BUG-17 防线真实维持，
+    // 点击放行由渲染管线层 enrich 按标记承接——sanitize 纯函数无交互）+占位标记；
+    // auto=放行。白名单优先于档位（§3.1 拍板）：命中域名任意档（含 blocked）按 auto。
     if (node.nodeType === 1) {
       const el = node as Element;
       const tag = el.tagName;
       if (tag === 'IMG') {
+        const policyCfg =
+          (config as SanitizeConfig | undefined)?.[EXTERNAL_IMAGE_CONFIG_KEY] ??
+          ({ policy: 'blocked', allowlist: [] } satisfies ExternalImagePolicyConfig);
         const src = el.getAttribute('src');
-      const srcExternal = src !== null && isExternalMediaSrc(src.trim());
-      if (srcExternal) {
+      const trimmed = src?.trim() ?? '';
+      const srcExternal = src !== null && isExternalMediaSrc(trimmed);
+      // 白名单优先于档位（spec §3.1 拍板）：命中按 auto；auto 档全放行；
+      // blocked/manual 档未命中才拦
+      const allowSrc = !srcExternal || isExternalImageAllowlisted(trimmed, policyCfg.allowlist) || policyCfg.policy === 'auto';
+      if (!allowSrc) {
+        if (policyCfg.policy === 'manual') {
+          // spec §6 落定 1：src 迁 data-vv-external-src——DOM 无 src 即不发请求，
+          // BUG-17 防线真实维持；点击放行由渲染管线层（enrich）按标记承接（sanitize
+          // 纯函数无交互）
+          el.setAttribute('data-vv-external-src', src!);
+        }
         el.removeAttribute('src');
-        markBlockedExternal(el, hostOf(src!.trim()));
+        markBlockedExternal(el, hostOf(trimmed));
       }
       // srcset 是同等的图片加载源（无 src 时浏览器按 srcset 加载；markdown 渲染
-      // 视图把净化后 DOM 挂主文档、无 CSP 兜底）：逐候选过滤——srcset 语法上逗号
-      // 不出现在 URL 内，候选首段（首个空白前）即其 URL。外域候选移除、其余保留；
-      // 过滤后无任何可用加载源（src 缺失或同为外域已拦）时补拦截标记。
+      // 视图把净化后 DOM 挂主文档、无 CSP 兜底）。三档分流（spec D §3.1，白名单
+      // 作用面=img 与 srcset——命中白名单的外域候选视同放行）：
+      //   auto（或候选全部放行）：原样保留（零改动）；
+      //   manual：存在未放行外域候选 → 整串迁 data-vv-external-srcset（裁量落定：
+      //     混合候选罕见且占位语义本就是整图待确认——整串迁移使点击回填无需候选
+      //     重组，含相对候选一并延迟到点击后）+ 移除 srcset（DOM 无 srcset 即不
+      //     发请求）；无未放行外域候选则原样；
+      //   blocked：现行逐候选过滤——未放行外域候选剔除、其余保留；过滤后无任何
+      //     可用加载源（src 缺失或同为外域已拦）时补拦截标记。
       const srcset = el.getAttribute('srcset');
       if (srcset !== null) {
         const candidates = srcset.split(',').map((c) => c.trim()).filter((c) => c !== '');
-        const kept: string[] = [];
-        let firstBlockedHost = srcExternal ? hostOf(src!.trim()) : '';
-        for (const c of candidates) {
-          const url = (c.split(/\s+/)[0] ?? '').trim();
-          if (isExternalMediaSrc(url)) {
-            if (firstBlockedHost === '') firstBlockedHost = hostOf(url);
-            continue;
+        const candidateUrl = (c: string): string => (c.split(/\s+/)[0] ?? '').trim();
+        const unallowed = (c: string): boolean =>
+          isExternalMediaSrc(candidateUrl(c)) && !isExternalImageAllowlisted(candidateUrl(c), policyCfg.allowlist);
+        if (policyCfg.policy === 'manual') {
+          if (candidates.some(unallowed)) {
+            el.setAttribute('data-vv-external-srcset', srcset);
+            el.removeAttribute('srcset');
+            if (src === null || srcExternal) {
+              // 无可用加载源（src 缺失，或 src 同为未放行外域已拦）补标记——现行
+              // blocked 分支补标记语义对齐
+              let firstBlockedHost = srcExternal ? hostOf(trimmed) : '';
+              if (firstBlockedHost === '') {
+                for (const c of candidates) {
+                  if (unallowed(c)) {
+                    firstBlockedHost = hostOf(candidateUrl(c));
+                    break;
+                  }
+                }
+              }
+              markBlockedExternal(el, firstBlockedHost);
+            }
           }
-          kept.push(c);
-        }
-        if (kept.length !== candidates.length) {
-          if (kept.length === 0) el.removeAttribute('srcset');
-          else el.setAttribute('srcset', kept.join(', '));
-          if (kept.length === 0 && (src === null || srcExternal)) {
-            markBlockedExternal(el, firstBlockedHost);
+        } else if (policyCfg.policy !== 'auto') {
+          const kept: string[] = [];
+          let firstBlockedHost = srcExternal ? hostOf(trimmed) : '';
+          for (const c of candidates) {
+            if (unallowed(c)) {
+              if (firstBlockedHost === '') firstBlockedHost = hostOf(candidateUrl(c));
+              continue;
+            }
+            kept.push(c);
+          }
+          if (kept.length !== candidates.length) {
+            if (kept.length === 0) el.removeAttribute('srcset');
+            else el.setAttribute('srcset', kept.join(', '));
+            if (kept.length === 0 && (src === null || srcExternal)) {
+              markBlockedExternal(el, firstBlockedHost);
+            }
           }
         }
       }
@@ -366,6 +481,8 @@ function registerSanitizeHooks(): void {
     // 不剥 src——用户点播放属主动行为（与 <a href> 外链不拦同口径），改强制
     // preload="none" 并去 autoplay，保证不点不发请求；<source> 是候选列表语义
     // 无法延迟加载，外域候选直接剥除 src。
+    // spec D §6 落定 5：白名单作用面=img 与 srcset，本分支不放行（AV 防线任何
+    // 档位不变）。
     else if (tag === 'VIDEO' || tag === 'AUDIO' || tag === 'SOURCE') {
       const src = el.getAttribute('src');
       if (src !== null && isExternalMediaSrc(src.trim())) {
@@ -386,8 +503,9 @@ function registerSanitizeHooks(): void {
     }
     // BUG-40②③④⑤：SVG 引用元素 / 遗留 background 属性 / input type=image / 行内
     // style url()——五类等价加载向量，全部与 img src 同权（移除加载源 + 拦截标记）。
-    // 注：text/html 解析下 SVG 元素 tagName 为小写（image/use）；<svg> 外的 <image>
-    // 会被 HTML 解析器改写为 img（上方 IMG 分支已覆盖）。
+    // spec D §6 落定 5：白名单作用面=img 与 srcset，本分支不放行（三档/白名单下
+    // 行为不变）。注：text/html 解析下 SVG 元素 tagName 为小写（image/use）；
+    // <svg> 外的 <image> 会被 HTML 解析器改写为 img（上方 IMG 分支已覆盖）。
     const svgTag = tag.toLowerCase();
     if (svgTag === 'image' || svgTag === 'use') {
       // SVG image/use 的 href 与 xlink:href（解析器二选一出现，双剥保险）
@@ -440,6 +558,11 @@ export interface SanitizeOptions {
   wholeDocument?: boolean;
   /** 服务端图表容器契约：style 豁免钩子的容器识别字面量，默认 data-vv-diagram="server"（见 ServerDiagramContract） */
   serverDiagram?: ServerDiagramContract;
+  /** 外链图片档位（spec D §3.1）：逐调用显式传入优先于 provider 缝（standalone 包
+   * 消费者自传通道）；缺省经 currentExternalImagePolicy() 现读——provider 未装配
+   * 时 = { policy: 'blocked', allowlist: [] }，IMG/srcset 分支产出与三档落地前
+   * 逐字节一致（兼容锚）。 */
+  externalImage?: ExternalImagePolicyConfig;
 }
 
 /**
@@ -482,6 +605,7 @@ export function sanitizeHtml(dirty: string | Document, opts: SanitizeOptions = {
     ...MARKDOWN_SANITIZE_CONFIG,
     ...(opts.wholeDocument ? { WHOLE_DOCUMENT: true } : {}),
     [SERVER_DIAGRAM_CONFIG_KEY]: normalizeServerDiagramContract(opts.serverDiagram),
+    [EXTERNAL_IMAGE_CONFIG_KEY]: opts.externalImage ?? currentExternalImagePolicy(),
     [SANITIZE_SCOPE_CONFIG_KEY]: true,
   };
   // 无 RETURN_DOM/RETURN_DOM_FRAGMENT 的重载返回 string

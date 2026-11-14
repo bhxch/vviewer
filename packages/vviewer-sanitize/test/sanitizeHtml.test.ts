@@ -1,6 +1,16 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import DOMPurify from 'dompurify';
-import { ALLOWED_URI_REGEXP, hostOf, isExternalMediaSrc, sanitizeHtml } from '../src/sanitize';
+import {
+  ALLOWED_URI_REGEXP,
+  currentExternalImagePolicy,
+  getExternalImagePolicyProvider,
+  hostOf,
+  isExternalImageAllowlisted,
+  isExternalMediaSrc,
+  sanitizeHtml,
+  setExternalImagePolicyProvider,
+  type ExternalImagePolicyConfig
+} from '../src/sanitize';
 
 function docOf(html: string): Document {
   return new DOMParser().parseFromString(html, 'text/html');
@@ -106,6 +116,50 @@ describe('isExternalMediaSrc / hostOf——外域判定与域提示', () => {
   });
 });
 
+describe('isExternalImageAllowlisted——域名白名单命中判定（spec D §3.1 纯函数）', () => {
+  it('精确命中：host 逐字相等（端口不参与——src 带端口命中无端口条目）', () => {
+    expect(isExternalImageAllowlisted('https://external.example.com/pic.png', ['external.example.com'])).toBe(true);
+    expect(isExternalImageAllowlisted('https://external.example.com:8443/pic.png', ['external.example.com'])).toBe(true);
+  });
+
+  it('精确不碰子域：example.com 不匹配 sub.example.com', () => {
+    expect(isExternalImageAllowlisted('https://sub.example.com/p.png', ['example.com'])).toBe(false);
+  });
+
+  it('.x.com 与 *.x.com 通配：命中 apex 与全部子域', () => {
+    for (const entry of ['.example.com', '*.example.com']) {
+      expect(isExternalImageAllowlisted('https://example.com/p.png', [entry]), entry).toBe(true);
+      expect(isExternalImageAllowlisted('https://sub.example.com/p.png', [entry]), entry).toBe(true);
+      expect(isExternalImageAllowlisted('https://deep.sub.example.com/p.png', [entry]), entry).toBe(true);
+    }
+    // 通配不外溢同后缀域：notexample.com 不命中
+    expect(isExternalImageAllowlisted('https://notexample.com/p.png', ['.example.com'])).toBe(false);
+  });
+
+  it('大小写不敏感：src host 与条目两侧归一', () => {
+    expect(isExternalImageAllowlisted('https://EXTERNAL.Example.COM/p.png', ['external.example.com'])).toBe(true);
+    expect(isExternalImageAllowlisted('https://external.example.com/p.png', [' EXTERNAL.EXAMPLE.COM '])).toBe(true);
+  });
+
+  it('协议相对（//host/…）与 http 形态同口径命中', () => {
+    expect(isExternalImageAllowlisted('//external.example.com/p.gif', ['external.example.com'])).toBe(true);
+    expect(isExternalImageAllowlisted('http://external.example.com/p.gif', ['external.example.com'])).toBe(true);
+  });
+
+  it('空表 false；条目全空串 false', () => {
+    expect(isExternalImageAllowlisted('https://external.example.com/p.png', [])).toBe(false);
+    expect(isExternalImageAllowlisted('https://external.example.com/p.png', ['', '   '])).toBe(false);
+  });
+
+  it('非法 src false：URL 解析失败（特殊 scheme 空 host 残串）', () => {
+    expect(isExternalImageAllowlisted('http://', ['example.com'])).toBe(false);
+  });
+
+  it('未命中任一条目 false', () => {
+    expect(isExternalImageAllowlisted('https://tracker.example.net/p.png', ['external.example.com', '.other.org'])).toBe(false);
+  });
+});
+
 describe('sanitizeHtml——URI 白名单与 data: 按属性收窄', () => {
   it('URI 白名单：http/https/mailto/相对路径/data:image 保留', () => {
     const out = sanitizeHtml(
@@ -203,6 +257,183 @@ describe('sanitizeHtml——外域图片拦截（BUG-17）', () => {
     const out = sanitizeHtml('<a href="https://external.example/x">外链</a>');
     expect(out).toContain('href="https://external.example/x"');
     expect(out).not.toContain('data-vv-blocked-external');
+  });
+});
+
+describe('sanitizeHtml——spec D 三档（外链图片 blocked/manual/auto + 域名白名单）', () => {
+  const EXT = 'https://external.example.com/pic.png';
+
+  /** 断言辅具：净化串解析回 DOM 逐属性断言（BUG-17 describe 的串包含断言在
+   * data-vv-external-src 原值面上可读性差，jsdom 直析更精确） */
+  function elOf(html: string, selector = 'img'): Element {
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    return div.querySelector(selector)!;
+  }
+
+  afterEach(() => {
+    setExternalImagePolicyProvider(null); // 模块缝状态隔离：不泄漏到其他 describe
+  });
+
+  it('①manual：外域 src 迁 data-vv-external-src 原值（DOM 无 src=不发请求，BUG-17 防线真实维持）+拦截标记+title 域名', () => {
+    const out = sanitizeHtml(`<img src="${EXT}" alt="x">`, { externalImage: { policy: 'manual', allowlist: [] } });
+    const img = elOf(out);
+    expect(img.hasAttribute('src')).toBe(false); // not.toHaveAttribute('src') 断言基准（Review Focus 1）
+    expect(img.getAttribute('data-vv-external-src')).toBe(EXT); // 原值（未 trim）
+    expect(img.getAttribute('data-vv-blocked-external')).toBe('1');
+    expect(img.getAttribute('title')).toBe('已拦截外部图片：external.example.com');
+    expect(img.getAttribute('alt')).toBe('x');
+  });
+
+  it('②manual srcset 外域候选：整串迁移 data-vv-external-srcset + srcset 移除', () => {
+    const srcset = `${EXT} 1x, /local-c.png 2x`;
+    const out = sanitizeHtml(`<img srcset="${srcset}">`, { externalImage: { policy: 'manual', allowlist: [] } });
+    const img = elOf(out);
+    expect(img.hasAttribute('srcset')).toBe(false);
+    expect(img.getAttribute('data-vv-external-srcset')).toBe(srcset); // 整串（含相对候选一并延迟，Errata ⑧）
+    expect(img.getAttribute('data-vv-blocked-external')).toBe('1'); // 无可用加载源（src 缺失）补标记
+  });
+
+  it('②manual srcset 候选全部放行（相对/白名单）：srcset 原样保留零迁移', () => {
+    const out = sanitizeHtml(
+      `<img srcset="local.png 1x, https://allowlisted.example.com/a.png 2x">`,
+      { externalImage: { policy: 'manual', allowlist: ['allowlisted.example.com'] } },
+    );
+    const img = elOf(out);
+    expect(img.getAttribute('srcset')).toBe('local.png 1x, https://allowlisted.example.com/a.png 2x');
+    expect(img.hasAttribute('data-vv-external-srcset')).toBe(false);
+    expect(img.hasAttribute('data-vv-blocked-external')).toBe(false);
+  });
+
+  it('③auto：src/srcset 原样零标记零 data 属性', () => {
+    const out = sanitizeHtml(
+      `<img src="${EXT}" srcset="${EXT} 1x, local.png 2x" alt="x">`,
+      { externalImage: { policy: 'auto', allowlist: [] } },
+    );
+    const img = elOf(out);
+    expect(img.getAttribute('src')).toBe(EXT);
+    expect(img.getAttribute('srcset')).toBe(`${EXT} 1x, local.png 2x`);
+    expect(img.hasAttribute('data-vv-external-src')).toBe(false);
+    expect(img.hasAttribute('data-vv-blocked-external')).toBe(false);
+    expect(img.hasAttribute('title')).toBe(false);
+  });
+
+  it('④blocked 显式传入 = 现行：剥除+标记+无 data-vv-external-src', () => {
+    const out = sanitizeHtml(`<img src="${EXT}" alt="x">`, { externalImage: { policy: 'blocked', allowlist: [] } });
+    expect(out).not.toContain(EXT);
+    expect(out).toContain('data-vv-blocked-external="1"');
+    expect(out).toContain('已拦截外部图片：external.example.com');
+    expect(out).not.toContain('data-vv-external-src');
+    const img = elOf(out);
+    expect(img.hasAttribute('src')).toBe(false);
+  });
+
+  it('⑤白名单优先于档位：blocked 档命中 src 保留（精确与子域通配各一例）', () => {
+    const exact = sanitizeHtml(`<img src="${EXT}">`, {
+      externalImage: { policy: 'blocked', allowlist: ['external.example.com'] },
+    });
+    expect(elOf(exact).getAttribute('src')).toBe(EXT);
+    expect(exact).not.toContain('data-vv-blocked-external');
+    const sub = sanitizeHtml('<img src="https://cdn.external.example.com/p.png">', {
+      externalImage: { policy: 'blocked', allowlist: ['.external.example.com'] },
+    });
+    expect(elOf(sub).getAttribute('src')).toBe('https://cdn.external.example.com/p.png');
+    expect(sub).not.toContain('data-vv-blocked-external');
+  });
+
+  it('⑤白名单对 srcset 候选同样生效：blocked 档命中候选保留、未命中候选照剥', () => {
+    const out = sanitizeHtml(`<img srcset="${EXT} 1x, https://other.example.net/b.png 2x, local.png">`, {
+      externalImage: { policy: 'blocked', allowlist: ['external.example.com'] },
+    });
+    const img = elOf(out);
+    expect(img.getAttribute('srcset')).toBe(`${EXT} 1x, local.png`); // 命中候选+相对候选保留、未命中剥除
+    // 过滤后仍有可用加载源（kept 非空）→ 不置标记（现行 BUG-17 语义：全部候选
+    // 被剥且无 src 才补标记，既有锚「有内域候选时保留其余、不置标记」同口径）
+    expect(out).not.toContain('data-vv-blocked-external');
+    // 对照：全部候选未放行外域 → 移除 srcset + 补标记（现行语义不因白名单存在而变）
+    const allBlocked = sanitizeHtml('<img srcset="https://x.example.net/a.png 1x, https://y.example.net/b.png 2x">', {
+      externalImage: { policy: 'blocked', allowlist: ['external.example.com'] },
+    });
+    expect(elOf(allBlocked).hasAttribute('srcset')).toBe(false);
+    expect(allBlocked).toContain('data-vv-blocked-external="1"');
+  });
+
+  it('⑥白名单未命中 manual 照迁', () => {
+    const out = sanitizeHtml(`<img src="${EXT}">`, {
+      externalImage: { policy: 'manual', allowlist: ['other.example.net'] },
+    });
+    const img = elOf(out);
+    expect(img.hasAttribute('src')).toBe(false);
+    expect(img.getAttribute('data-vv-external-src')).toBe(EXT);
+  });
+
+  it('⑦缺省（无 opts 无 provider）= blocked 现行逐字节（既有输出串全等断言）', () => {
+    const dirty = '<img src="https://tracker.example.com/track.png" alt="x"><img src="photo.png">';
+    expect(sanitizeHtml(dirty)).toBe(
+      sanitizeHtml(dirty, { externalImage: { policy: 'blocked', allowlist: [] } }),
+    );
+    // 与现行基线逐字节：剥除+标记+title，无 manual 迁移面
+    expect(sanitizeHtml(dirty)).toBe(
+      '<img alt="x" data-vv-blocked-external="1" title="已拦截外部图片：tracker.example.com"><img src="photo.png">',
+    );
+  });
+
+  it('⑧五类等价向量在 manual/auto/白名单下仍剥除（白名单作用面=img 与 srcset，spec §6 落定 5）', () => {
+    for (const cfg of [
+      { policy: 'manual', allowlist: [] },
+      { policy: 'auto', allowlist: [] },
+      { policy: 'auto', allowlist: ['evil.example.com'] },
+    ] as const) {
+      const html = sanitizeHtml(
+        '<video controls poster="https://evil.example.com/p.jpg" src="local.mp4"></video>' +
+          '<svg><image href="https://evil.example.com/s.png"></image></svg>' +
+          '<div style="background:url(https://evil.example.com/bg.png)">x</div>' +
+          '<table background="https://evil.example.com/tbg.png"><tr><td>a</td></tr></table>' +
+          '<input type="image" src="https://evil.example.com/i.png">',
+        { externalImage: cfg },
+      );
+      expect(html, `policy=${cfg.policy} allowlist=${cfg.allowlist.join()}`).not.toContain('poster=');
+      expect(html, `policy=${cfg.policy}`).not.toContain('evil.example.com/s.png');
+      expect(html, `policy=${cfg.policy}`).not.toContain('evil.example.com/bg.png');
+      expect(html, `policy=${cfg.policy}`).not.toContain('evil.example.com/tbg.png');
+      expect(html, `policy=${cfg.policy}`).not.toContain('evil.example.com/i.png');
+      expect(html, `policy=${cfg.policy}`).toContain('data-vv-blocked-external="1"');
+    }
+  });
+
+  it('⑨AV preload=none 在 auto 档维持（MD-13 防线任何档位不变，spec §6 落定 5）', () => {
+    const html = sanitizeHtml(
+      '<video controls autoplay src="https://evil.example.com/clip.mp4"></video>',
+      { externalImage: { policy: 'auto', allowlist: ['evil.example.com'] } },
+    );
+    const video = elOf(html, 'video');
+    expect(video.getAttribute('src')).toBe('https://evil.example.com/clip.mp4'); // 点播放才请求语义保留
+    expect(video.getAttribute('preload')).toBe('none');
+    expect(video.hasAttribute('autoplay')).toBe(false);
+  });
+
+  it('provider 缝：注入后缺省 opts 调用吃档位；null 解绑回 blocked；显式 opts 优先于 provider', () => {
+    setExternalImagePolicyProvider(() => ({ policy: 'auto', allowlist: [] }));
+    const autoOut = sanitizeHtml(`<img src="${EXT}">`); // 无 opts——provider 现读
+    expect(elOf(autoOut).getAttribute('src')).toBe(EXT);
+    expect(autoOut).not.toContain('data-vv-blocked-external');
+    const explicit = sanitizeHtml(`<img src="${EXT}">`, { externalImage: { policy: 'blocked', allowlist: [] } });
+    expect(elOf(explicit).hasAttribute('src')).toBe(false); // 显式 opts 覆盖 provider（逐调用优先）
+    setExternalImagePolicyProvider(null);
+    const backToBlocked = sanitizeHtml(`<img src="${EXT}">`);
+    expect(elOf(backToBlocked).hasAttribute('src')).toBe(false); // 解绑回缺省 blocked
+    expect(backToBlocked).not.toContain('data-vv-external-src');
+  });
+
+  it('provider 缝 getter 与 currentExternalImagePolicy 缺省形态', () => {
+    expect(getExternalImagePolicyProvider()).toBeNull();
+    expect(currentExternalImagePolicy()).toEqual({ policy: 'blocked', allowlist: [] });
+    const cfg: ExternalImagePolicyConfig = { policy: 'manual', allowlist: ['a.example'] };
+    setExternalImagePolicyProvider(() => cfg);
+    expect(getExternalImagePolicyProvider()).not.toBeNull();
+    expect(currentExternalImagePolicy()).toEqual(cfg);
+    setExternalImagePolicyProvider(null);
+    expect(currentExternalImagePolicy()).toEqual({ policy: 'blocked', allowlist: [] });
   });
 });
 
