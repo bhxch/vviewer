@@ -18,7 +18,8 @@ import { closeDrawerIfOpened, isDrawerViewport, openDrawerIfNarrow } from './dra
  * SRC-05..08（测绘差距新增锚，docs/e2e/sidebar-shell-actions.md §2.2）：徽标消歧
  * 真实渲染层（同名跨源才显 / title 属性 / url 未登记形态不对称 / 同名目录 tab 跨源
  * 参与消歧 / 大小写敏感）、单源统一形态（chevron + hover ✕ + 折叠）、hover 揭示
- * 完整链（显 1 / 移出回 0 / 触屏 hover:none 恒显）。remote 面走共享单根假服务
+ * 完整链（显 1 / 移出回 0 / 触屏档案恒显——原 hover:none 媒介查询驱动已随触屏
+ * 适配 spec B Task 3 迁移为 html data-touch 传导面，SRC-08 ③ 探针同步订正）。remote 面走共享单根假服务
  * fake-file-server；url 语料 route 定态化（外网面禁入）。
  */
 
@@ -283,7 +284,7 @@ test.describe('侧栏多根测绘差距（SRC-05..08）', () => {
     await closeDrawerIfOpened(page, drawer);
   });
 
-  test('SRC-08：hover 揭示完整链——悬停显 1、移出回 0、触屏形态（hover:none）恒显', async ({
+  test('SRC-08：hover 揭示完整链——悬停显 1、移出回 0、触屏档案（data-touch 传导）恒显', async ({
     page
   }) => {
     await waitAppMounted(page);
@@ -300,21 +301,25 @@ test.describe('侧栏多根测绘差距（SRC-05..08）', () => {
     expect(vp).not.toBeNull();
     await page.mouse.move(vp!.width - 6, vp!.height - 6);
     await expect(removeBtn).toHaveCSS('opacity', '0');
-    // ③ 触屏形态 @media(hover:none) 恒显（:151-153）：desktop chromium 默认 hover:hover
-    //    断言不到——CDP setEmulatedMedia 的 hover 特征模拟对 Blink 静默无效（探针实证
-    //    matchMedia 不翻转），触屏模拟通道 setTouchEmulationEnabled 才翻转 hover/pointer
-    //    媒介特征；不支持的环境 skip 备案（真 skip 先例 SRC-03，本文件 :100；
-    //    FTSRC :55-56 为注释口径无 skip 实装）。skip 判定置于 ①② 之后：环境缺失
-    //    只豁免 ③，揭示/回零主链照常受锚
+    // ③ 触屏档案恒显（spec B §3.3.1 迁移后传导面）：desktop chromium 默认 fine
+    //    pointer 不吃档案断言不到——emulateMedia({pointer}) 对 any-pointer 翻不动
+    //    （1.64.0 探针实证 3，弃用），触屏模拟通道 setTouchEmulationEnabled 全翻
+    //    any-pointer 特征（探针实证 2）；驱动信号自原 @media(hover:none)（FileTree
+    //    媒介查询块已删）迁移为 touchProfile auto 档判定（any-pointer:coarse 且
+    //    maxTouchPoints>0）打 html data-touch='on' → FileTree
+    //    :global(html[data-touch='on']) 常显规则生效（spec B Task 3 替代形态）；
+    //    不支持的环境 skip 备案（真 skip 先例 SRC-03，本文件 :100）。
+    //    skip 判定置于 ①② 之后：环境缺失只豁免 ③，揭示/回零主链照常受锚
     let touchForm: boolean;
     try {
       const cdp = await page.context().newCDPSession(page);
       await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
-      touchForm = await page.evaluate(() => window.matchMedia('(hover: none)').matches);
+      touchForm = await page.evaluate(() => window.matchMedia('(any-pointer: coarse)').matches);
     } catch {
       touchForm = false;
     }
-    test.skip(!touchForm, '当前环境不支持触屏模拟，hover:none 恒显形态断言不到——备案');
+    test.skip(!touchForm, '当前环境不支持触屏模拟，any-pointer:coarse 档案断言不到——备案');
+    await expect(page.locator('html')).toHaveAttribute('data-touch', 'on'); // 打标面（新传导直证）
     await expect(removeBtn).toHaveCSS('opacity', '1'); // 无 hover（指针在右下空白）仍恒显
   });
 });
