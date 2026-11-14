@@ -149,8 +149,10 @@ test.describe('b-syntax-deep 扩展语法补强', () => {
     await expect(md.locator('h2#user-content-落点')).toBeInViewport();
   });
 
-  // wikilink 四形态的上下文混排面：A 祖先豁免字面、降级 span 的 title 注记
-  test('SY-05 wikilink 上下文混排：列表锚可点、引用跨文件降级注记、链接内字面不改写', async ({
+  // wikilink 四形态的上下文混排面：A 祖先豁免字面、引用跨文件 wikilink 站内升级、
+  // 链接内字面不改写（SY-05 重定基：spec D §3.2 双缝在场后引用内 [[Ref.md]] 由
+  // 死链 span 升级为 a.md-wikilink——原「降级注记」语义被升级取代，MC-32 同因翻转）
+  test('SY-05 wikilink 上下文混排：列表锚可点、引用跨文件 wikilink 升级可点、链接内字面不改写', async ({
     page
   }) => {
     test.setTimeout(60_000);
@@ -174,11 +176,13 @@ test.describe('b-syntax-deep 扩展语法补强', () => {
     await expect(liLink).toHaveAttribute('href', '#user-content-列表落点');
     await liLink.click();
     await expect(md.locator('h2#user-content-列表落点')).toBeInViewport();
-    // 引用块内跨文件 wikilink：降级 dead span 且带 title 注记，块内不产 a
-    const dead = md.locator('blockquote .md-wikilink-dead');
-    await expect(dead).toHaveCount(1);
-    await expect(dead).toHaveText('[[Ref.md]]');
-    await expect(dead).toHaveAttribute('title', '跨文件 wikilink 不支持');
+    // 引用块内跨文件 wikilink：站内升级 a.md-wikilink（raw 文本维持 + path 元数据
+    // 恒写；存在性在点击时才探测——目标不在场不翻转升级形态）
+    const upgraded = md.locator('blockquote a.md-wikilink');
+    await expect(upgraded).toHaveCount(1);
+    await expect(upgraded).toHaveText('[[Ref.md]]');
+    await expect(upgraded).toHaveAttribute('data-wikilink-path', 'Ref.md');
+    await expect(md.locator('span.md-wikilink-dead')).toHaveCount(0);
     await expect(md.locator('blockquote a[data-wikilink]')).toHaveCount(0);
     // 已有链接文本内的 [[#内部]]：A 祖先豁免，字面保留不嵌套造链接
     const existing = md.locator('a', { hasText: '字面' });
