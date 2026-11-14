@@ -55,6 +55,13 @@ describe('resolveRelativeLinkPath——解析式（decode/剥 query-hash/resolve
     expect(resolveRelativeLinkPath('a/b/c.md', '')).toBeNull();
   });
 
+  it('前导 / = store 根相对（spec §3.2 拍板，评审 I2）：子目录文件出发 /top.md → 根下 top.md（非当前目录相对）', () => {
+    expect(resolveRelativeLinkPath('sub/a.md', '/top.md')).toBe('top.md');
+    expect(resolveRelativeLinkPath('a.md', '/top.md')).toBe('top.md'); // 根文件出发同口径
+    expect(resolveRelativeLinkPath('sub/a.md', '/sub/../top.md')).toBe('top.md'); // 根基逐段规范
+    expect(resolveRelativeLinkPath('sub/a.md', '/')).toBeNull(); // 纯根非站内目标
+  });
+
   it('越根（../ 弹空）返回 null（探测后 missing，非站内目标——markdownImages.ts:27-29 `..` 弹空）；非法百分号序列保留原串', () => {
     // 根文件（无目录）出发 ../ 弹空越根 → null；a/b/c.md 弹两级仅到根（x.md 合法）
     expect(resolveRelativeLinkPath('a.md', '../x.md')).toBeNull();

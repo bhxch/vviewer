@@ -8,8 +8,11 @@ import { resolveInStorePath } from './markdownImages';
 /**
  * 相对 href → store 内路径（spec D §3.2 解析式）：query/hash 剥离（跨文件 fragment
  * hash 丢弃——§6 落定 4 MVP 不自动定位）→ URL 解码（markdown-it 对 CJK href 百分号
- * 编码，decode 失败保留原串）→ resolveInStorePath（`./`/`../` 逐段规范、越 store 根
- * 返回 null、前导 `/` 归 store 根相对——img 相对图片同款 join 语义单源）。
+ * 编码，decode 失败保留原串）→ resolveInStorePath join。`./`/`../` 逐段规范、越
+ * store 根返回 null。前导 `/` = store 根相对（spec §3.2 拍板，与图片面 isAbsoluteSrc
+ * 的「根相对不进 resolver」刻意不同权）：resolveInStorePath 以当前文件目录为基会把
+ * 前导 `/` 当空段吞掉（`sub/a.md`+`/top.md` → `sub/top.md`），此处以空基（store 根）
+ * 显式归一。
  */
 export function resolveRelativeLinkPath(sourcePath: string, href: string): string | null {
   const stripped = href.replace(/[?#][\s\S]*$/, '');
@@ -20,8 +23,9 @@ export function resolveRelativeLinkPath(sourcePath: string, href: string): strin
   } catch {
     /* 非法百分号序列：保留原串 */
   }
-  const p = resolveInStorePath(sourcePath, decoded);
-  return p === '' ? null : p; // 空结果（'./' 弹空等）非站内目标
+  const base = decoded.startsWith('/') ? '' : sourcePath;
+  const p = resolveInStorePath(base, decoded);
+  return p === '' ? null : p; // 空结果（'./' 弹空、纯根 '/' 等）非站内目标
 }
 
 /** 存在性探测（§6 落定 6）：listChildren(dir).find(path) 命中按 TreeNode.kind 返回；
