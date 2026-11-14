@@ -33,6 +33,7 @@ function settings(over: Partial<Settings> = {}): Settings {
     rendererDefaults: {},
     locale: 'zh-CN',
     reduceMotion: 'system',
+    markdown: { externalImages: 'manual', externalImagesAllowlist: [] },
     ...over
   };
 }

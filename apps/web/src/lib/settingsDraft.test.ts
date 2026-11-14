@@ -725,6 +725,60 @@ describe('校验文案目录双锁（域 C 抽取 Task 6）：上层子串断言
   });
 });
 
+describe('markdown 设置节白名单镜像（spec D §3.1）', () => {
+  it('合法输入零报告：三档枚举 + trim/大小写归一形态条目（单条归一前后一致不报）', () => {
+    expect(validateSettings({ markdown: { externalImages: 'blocked', externalImagesAllowlist: [] } })).toEqual([]);
+    expect(validateSettings({ markdown: { externalImages: 'manual', externalImagesAllowlist: ['example.com'] } })).toEqual([]);
+    expect(validateSettings({ markdown: { externalImages: 'auto', externalImagesAllowlist: [' Example.com ', '.EXAMPLE.COM'] } })).toEqual([]);
+  });
+
+  it('脏枚举/脏条目报告（field 点径记法 markdown.externalImages / markdown.externalImagesAllowlist[i]）', () => {
+    const r = validateSettings({ markdown: { externalImages: 'always', externalImagesAllowlist: ['a b'] } });
+    expect(r.map((i) => i.field).sort()).toEqual(['markdown.externalImages', 'markdown.externalImagesAllowlist[0]']);
+    // 枚举 issue 列三枚举值；条目 issue 文案含「域名」（目录双锁另锚）
+    expect(r.find((i) => i.field === 'markdown.externalImages')!.message).toContain('manual');
+    expect(r.find((i) => i.field === 'markdown.externalImagesAllowlist[0]')!.message).toContain('域名');
+    // 含 / 与 : 与空串条目同口径报告（逐条下标点径）
+    const entries = validateSettings({ markdown: { externalImagesAllowlist: ['bad/../x', 'x:8443', ''] } });
+    expect(entries.map((i) => i.field)).toEqual([
+      'markdown.externalImagesAllowlist[0]',
+      'markdown.externalImagesAllowlist[1]',
+      'markdown.externalImagesAllowlist[2]'
+    ]);
+  });
+
+  it('节整体脏值/节内未知键/非字符串数组报告，不抛异常', () => {
+    expect(validateSettings({ markdown: 42 }).map((i) => i.field)).toEqual(['markdown']);
+    expect(validateSettings({ markdown: { typo: 1 } }).map((i) => i.field)).toEqual(['markdown.typo']);
+    expect(validateSettings({ markdown: { externalImagesAllowlist: 'x' } }).map((i) => i.field)).toEqual(['markdown.externalImagesAllowlist']);
+    expect(validateSettings({ markdown: { externalImagesAllowlist: [42] } }).map((i) => i.field)).toEqual(['markdown.externalImagesAllowlist']);
+  });
+
+  it('applyJson：合法 markdown 节应用落位（normalizeSettings 归一同口径）；脏值阻断不部分应用', () => {
+    const draft = openDraft(aSettings({}));
+    expect(applyJson(draft, JSON.stringify({ markdown: { externalImages: 'auto', externalImagesAllowlist: ['Example.com'] } }))).toEqual({ ok: true });
+    expect(draft.markdown).toEqual({ externalImages: 'auto', externalImagesAllowlist: ['example.com'] });
+    const blocked = openDraft(aSettings({}));
+    const r = applyJson(blocked, JSON.stringify({ markdown: { externalImages: 'always', externalImagesAllowlist: ['bad/../x'] } }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errors.map((e) => e.field)).toContain('markdown.externalImages');
+      expect(r.errors.map((e) => e.field)).toContain('markdown.externalImagesAllowlist[0]');
+    }
+    expect(blocked.markdown).toEqual({ externalImages: 'manual', externalImagesAllowlist: [] }); // 阻断：draft 未被部分应用
+  });
+
+  it('导出导入 round-trip：markdown 节深度保形；导入侧节内未知键降级警告不阻断', () => {
+    const src = aSettings({ markdown: { externalImages: 'blocked', externalImagesAllowlist: ['example.com'] } });
+    const parsed = parseImportFile(JSON.stringify(buildExportFile(src, '2026-11-14T00:00:00.000Z')));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(replaceImported(parsed.settings).markdown).toEqual(src.markdown);
+    const warned = parseImportFile(JSON.stringify({ schemaVersion: 1, settings: { markdown: { typo: 1 } } }));
+    expect(warned.ok).toBe(true);
+    if (warned.ok) expect(warned.warnings.some((w) => w.includes('markdown.typo'))).toBe(true);
+  });
+});
+
 
 describe('cdn 设置节白名单镜像（网络资源 spec C §3.2，Task 3）', () => {
   it('合法档位与 custom 值应用落位（normalizeSettings 同口径归一）', () => {

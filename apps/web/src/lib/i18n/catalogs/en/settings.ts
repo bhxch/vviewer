@@ -17,6 +17,7 @@ export const messages = {
   'settings.nav.code': 'Code view',
   'settings.nav.diagrams': 'Diagrams',
   'settings.nav.renderers': 'Open with',
+  'settings.nav.markdown': 'Markdown',
   'settings.nav.layout': 'Layout',
   'settings.nav.search': 'Search & exclusions',
   'settings.nav.autorefresh': 'Auto-refresh',
@@ -91,6 +92,8 @@ export const messages = {
   'settings.issue.rendererId': "Values must be renderer ids ('' = built-in default)",
   'settings.issue.cdnGrammarsBase': 'Each segment must end with /grammars/, multiple segments separated by |',
   'settings.issue.cdnHost': 'Must be an https URL ending with /',
+  'settings.issue.externalImages': 'External image policy must be one of: {values}',
+  'settings.issue.allowlistEntry': 'Allowlist entries must be domain names (no paths, whitespace or ports)',
 
   // —— 导入文件解析（settings.import.*）——
   'settings.import.notObject': 'The import file must be a JSON object',
@@ -313,6 +316,21 @@ export const messages = {
   'settings.renderers.emptyHint': 'No formats with multiple renderers available.',
   'settings.renderers.hint':
     'Only formats with multiple renderers are listed. Changes apply to files opened afterwards; a single tab can still switch temporarily via the status bar or the tab context menu "Open with".',
+
+  // —— "Markdown" section (settings.markdown.*, spec D §3.1): external image policy + domain allowlist ——
+  'settings.markdown.extImagesRow': 'External images',
+  'settings.markdown.extImagesAria': 'External image loading policy',
+  'settings.markdown.extImagesBlocked': 'Blocked',
+  'settings.markdown.extImagesManual': 'Ask each time',
+  'settings.markdown.extImagesAuto': 'Auto load',
+  'settings.markdown.extImagesHint':
+    'Default "ask each time": external images do not load automatically; click the load button per image (same source skips re-confirmation this session). "Blocked" keeps stripping; "auto load" allows directly. Allowlisted domains load regardless of the policy. Note: the default changed from always-block to per-image confirmation; the tracker-pixel defense semantics changed accordingly.',
+  'settings.markdown.allowlistRow': 'Domain allowlist',
+  'settings.markdown.allowlistAria': 'Allowlist domain input',
+  'settings.markdown.allowlistAdd': 'Add',
+  'settings.markdown.allowlistRemove': 'Remove {domain}',
+  'settings.markdown.allowlistHint':
+    'Allowlisted domains load regardless of the policy. example.com matches exactly; .example.com or *.example.com covers the domain and all its subdomains. Ports are not matched.',
 
   // —— 「布局」节（settings.layout.*）——
   'settings.layout.label': 'Layout',

@@ -4,7 +4,7 @@
   // SettingsPanel 弹层（TopBar ⚙ 与 Ctrl+, 双入口均指向本页，AppShell 挂载）。
 // 分组由注册表数组驱动（{ id, label, content }，content 为节组件）——定稿序
 // （外观/语言与辅助功能/字体/图表/布局/搜索与排除/自动刷新/计算/存储与数据/关于
-// 等十二组）+ 左导航底部导入/导出动作区；后续分组以注册项插入，零骨架改动。
+// 等十四组）+ 左导航底部导入/导出动作区；后续分组以注册项插入，零骨架改动。
   // 草稿语义（spec §3）：打开即 openDraft 深拷贝生效 settings；表单节组件只改
   // draft 并调 touch()（仅使 JSON 派生失效，不落盘）；「应用」统一经
   // commit(mergeDraftOnto(最新值, 出发快照, draft))→saveSettings 走集中订阅链
@@ -36,6 +36,7 @@
   import FontsSection from './settings/FontsSection.svelte';
   import CodeSection from './settings/CodeSection.svelte';
   import DiagramsSection from './settings/DiagramsSection.svelte';
+  import MarkdownSection from './settings/MarkdownSection.svelte';
   import RenderersSection from './settings/RenderersSection.svelte';
   import LayoutSection from './settings/LayoutSection.svelte';
   import SearchSection from './settings/SearchSection.svelte';
@@ -58,9 +59,11 @@
 
   // 组序（spec §2 定稿序：外观/字体/图表/布局/搜索与排除/自动刷新/计算/存储与数据/关于；
   // 「代码视图」（自动换行）插在字体之后，「打开方式」（默认渲染器偏好）插在图表之后，
-  // 「语言与辅助功能」（i18n 基建 D3/D11）插在外观之后）。组名走 t()（域 C 抽取，
-  // Task 6）——挂载期取当下 locale（与 Task 3 languageA11y 先例同形：持久化 locale
-  // 重载后随启动接线翻英；会话中切语言组名不就地重渲，节内容模板 t() 响应式）
+  // 「语言与辅助功能」（i18n 基建 D3/D11）插在外观之后，「Markdown」（spec D §3.1，
+  // 十三→十四组为 spec D 明示翻转——D20「网络资源」十二→十三先例同款）插在打开方式
+  // 之后）。组名走 t()（域 C 抽取，Task 6）——挂载期取当下 locale（与 Task 3
+  // languageA11y 先例同形：持久化 locale 重载后随启动接线翻英；会话中切语言组名不
+  // 就地重渲，节内容模板 t() 响应式）
   const groups: SettingsGroup[] = [
     { id: 'appearance', label: t('settings.nav.appearance'), content: AppearanceSection },
     { id: 'languageA11y', label: t('settings.nav.languageA11y'), content: LanguageA11ySection },
@@ -68,6 +71,7 @@
     { id: 'code', label: t('settings.nav.code'), content: CodeSection },
     { id: 'diagrams', label: t('settings.nav.diagrams'), content: DiagramsSection },
     { id: 'renderers', label: t('settings.nav.renderers'), content: RenderersSection },
+    { id: 'markdown', label: t('settings.nav.markdown'), content: MarkdownSection },
     { id: 'layout', label: t('settings.nav.layout'), content: LayoutSection },
     { id: 'search', label: t('settings.nav.search'), content: SearchSection },
     { id: 'autorefresh', label: t('settings.nav.autorefresh'), content: AutoRefreshSection },

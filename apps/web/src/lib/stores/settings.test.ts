@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULTS, loadSettings, normalizeSettings, onSettingsChanged, saveSettings, type Settings } from './settings';
+import {
+  DEFAULTS,
+  loadSettings,
+  normalizeMarkdownAllowlist,
+  normalizeSettings,
+  onSettingsChanged,
+  saveSettings,
+  type Settings
+} from './settings';
 import { DEFAULT_LAYOUT } from '../layout';
 
 const BASE: Settings = {
@@ -20,7 +28,8 @@ const BASE: Settings = {
   cdn: { grammars: 'default', grammarsCustom: '', engines: 'default', enginesCustom: '', foreign: 'default', foreignCustom: '' },
   rendererDefaults: {},
   locale: 'zh-CN',
-  reduceMotion: 'system'
+  reduceMotion: 'system',
+  markdown: { externalImages: 'manual', externalImagesAllowlist: [] }
 };
 
 function aSettings(overrides: Partial<Settings>): Settings {
@@ -468,5 +477,64 @@ describe('cdn 设置节白名单（网络资源 spec C §3.2，Task 3）', () =>
     const s = loadSettings();
     expect(s.cdn).toEqual({ grammars: 'default', grammarsCustom: '', engines: 'default', enginesCustom: '', foreign: 'default', foreignCustom: '' });
     expect(s.computePolicy).toBe('local');
+  });
+});
+
+describe('markdown 设置节白名单（spec D §3.1：外链图片三档 + 域名白名单）', () => {
+  it('默认：externalImages manual + allowlist 空（DEFAULTS 与 normalizeSettings({}) 一致）', () => {
+    localStorage.removeItem('vviewer:settings');
+    expect(DEFAULTS.markdown).toEqual({ externalImages: 'manual', externalImagesAllowlist: [] });
+    expect(normalizeSettings({}).markdown).toEqual({ externalImages: 'manual', externalImagesAllowlist: [] });
+    expect(loadSettings().markdown).toEqual({ externalImages: 'manual', externalImagesAllowlist: [] });
+  });
+
+  it('三合法值原样通过（blocked / manual / auto）', () => {
+    for (const v of ['blocked', 'manual', 'auto'] as const) {
+      expect(normalizeSettings({ markdown: { externalImages: v, externalImagesAllowlist: [] } }).markdown.externalImages).toBe(v);
+    }
+  });
+
+  it('脏枚举归位 manual：字符串枚举外与非字符串脏值同口径，不拖垮同节其余字段', () => {
+    expect(normalizeSettings({ markdown: { externalImages: 'always', externalImagesAllowlist: ['example.com'] } }).markdown).toEqual({
+      externalImages: 'manual',
+      externalImagesAllowlist: ['example.com']
+    });
+    expect(normalizeSettings({ markdown: { externalImages: 42, externalImagesAllowlist: ['example.com'] } }).markdown).toEqual({
+      externalImages: 'manual',
+      externalImagesAllowlist: ['example.com']
+    });
+  });
+
+  it('allowlist 归一（normalizeMarkdownAllowlist 单源）：trim、大小写、去重、拒空/含空白/含 / /含 : 条目，保序', () => {
+    expect(normalizeMarkdownAllowlist([' Example.com ', 'example.com', 'bad/../x', '', '.EXAMPLE.COM'])).toEqual([
+      'example.com',
+      '.example.com'
+    ]);
+    // 含空白与端口字符（:）拒——端口不参与匹配（spec D §6 落定口径）
+    expect(normalizeMarkdownAllowlist(['a b', 'x:8443', 'ok.example.com'])).toEqual(['ok.example.com']);
+    // 非数组与数组内非字符串项防御
+    expect(normalizeMarkdownAllowlist(42)).toEqual([]);
+    expect(normalizeMarkdownAllowlist(['ok.example.com', 42, null])).toEqual(['ok.example.com']);
+  });
+
+  it('loadSettings 路径：markdown 节脏值回落默认形态，不拖垮其余字段', () => {
+    // excludedPatterns/autoRefresh 刻意非默认：若整体回落 defaults() 则断言必炸
+    localStorage.setItem(
+      'vviewer:settings',
+      JSON.stringify({ markdown: 42, excludedPatterns: ['.git'], autoRefresh: false })
+    );
+    const s = loadSettings();
+    expect(s.markdown).toEqual({ externalImages: 'manual', externalImagesAllowlist: [] });
+    expect(s.excludedPatterns).toEqual(['.git']);
+    expect(s.autoRefresh).toBe(false);
+  });
+
+  it('订阅回调收到 markdown 副本：allowlist 数组拷贝，误改不回灌', () => {
+    const off = onSettingsChanged((s) => {
+      s.markdown.externalImagesAllowlist.push('polluted.example.com'); // 订阅方误改引用
+    });
+    saveSettings(aSettings({ markdown: { externalImages: 'manual', externalImagesAllowlist: ['example.com'] } }));
+    off();
+    expect(loadSettings().markdown.externalImagesAllowlist).toEqual(['example.com']);
   });
 });

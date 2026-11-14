@@ -17,6 +17,13 @@ export const MERMAID_THEME_VALUES: readonly (MermaidTheme | 'auto')[] = ['auto',
 export const REDUCE_MOTION_VALUES = ['system', 'on', 'off'] as const;
 export type ReduceMotion = (typeof REDUCE_MOTION_VALUES)[number];
 
+/** 外链图片三档白名单（spec D §3.1）：blocked=剥除占位（BUG-17 现行）；manual=src 迁
+ * data 属性+占位「加载图片」点击放行（默认档——相较旧版默认拦截为放行诉求的知情
+ * 取舍，hint 文案标注防线语义变化）；auto=直接放行。与 vviewer-sanitize 包的
+ * EXTERNAL_IMAGE_POLICIES 字面一致（包零 app 依赖，两侧各自单测锁字面）。 */
+export const MARKDOWN_EXTERNAL_IMAGE_POLICIES = ['blocked', 'manual', 'auto'] as const;
+export type MarkdownExternalImagePolicy = (typeof MARKDOWN_EXTERNAL_IMAGE_POLICIES)[number];
+
 /** 图表渲染设置（spec 2026-10-19 §2.1）：krokiHost 空串 = 用注册表 DEFAULT_KROKI_HOST；
  * modes 键 = 图表类型 id/别名，值覆盖注册表 defaultMode（Task 7 面板消费）；
  * krokiVia 为 kroki 消费通道（spec 2026-10-23 §8.3）：client=前端直连 kroki img，
@@ -85,6 +92,15 @@ export interface CdnSettings {
   foreignCustom: string;
 }
 
+/** Markdown 渲染节（spec D §3.1）：externalImages 外链图片三档（白名单任意档按
+ * auto，判定在 sanitize 包 T2 落地）；externalImagesAllowlist 域名白名单（条目
+ * 归一纯函数 normalizeMarkdownAllowlist 单源——trim/lowercase/拒空、空白、`/`、
+ * `:`/去重保序，端口不参与匹配）。 */
+export interface MarkdownSettings {
+  externalImages: MarkdownExternalImagePolicy;
+  externalImagesAllowlist: string[];
+}
+
 export interface Settings {
   themeMode: 'light' | 'dark' | 'system';
   /** 亮/暗模式下各自记忆的外观主题（'default' | 'vscode:…' 内置名 | 'imported:<id>'）；
@@ -128,6 +144,9 @@ export interface Settings {
   /** 减少动效（i18n 基建 D11）：三态白名单见 REDUCE_MOTION_VALUES。AppShell 接线
    * 写 html data-reduce-motion（system=移除属性，CSS media 块承接）。 */
   reduceMotion: ReduceMotion;
+  /** Markdown 渲染节（spec D §3.1）：外链图片三档 + 域名白名单。UI 在设置中心
+   * 「Markdown」节；消费面 sanitize 档位 provider 每渲染现读 loadSettings（T5 装配）。 */
+  markdown: MarkdownSettings;
 }
 
 const KEY = 'vviewer:settings';
@@ -155,7 +174,8 @@ export const DEFAULTS: Settings = {
   cdn: { grammars: 'default', grammarsCustom: '', engines: 'default', enginesCustom: '', foreign: 'default', foreignCustom: '' },
   rendererDefaults: {},
   locale: 'zh-CN',
-  reduceMotion: 'system'
+  reduceMotion: 'system',
+  markdown: { externalImages: 'manual', externalImagesAllowlist: [] }
 };
 
 const POLICIES: readonly ComputePolicy[] = ['auto', 'local', 'remote'];
@@ -185,7 +205,11 @@ function defaults(): Settings {
     layout: { ...DEFAULTS.layout },
     storage: { ...DEFAULTS.storage },
     cdn: { ...DEFAULTS.cdn },
-    rendererDefaults: { ...DEFAULTS.rendererDefaults }
+    rendererDefaults: { ...DEFAULTS.rendererDefaults },
+    markdown: {
+      externalImages: DEFAULTS.markdown.externalImages,
+      externalImagesAllowlist: [...DEFAULTS.markdown.externalImagesAllowlist]
+    }
   };
 }
 
@@ -194,6 +218,24 @@ function defaults(): Settings {
 export function clampSize(v: unknown, range: readonly [number, number] | readonly number[], dflt: number): number {
   if (typeof v !== 'number' || !Number.isFinite(v)) return dflt;
   return Math.min(range[1]!, Math.max(range[0]!, Math.round(v)));
+}
+
+/**
+ * markdown 域名白名单归一（spec D §3.1 程序化判定单源，不用单一正则）：入参数组
+ * 逐条 string → trim → lowercase → 拒空串/含空白/含 `/`/含 `:`（端口不参与匹配，
+ * 见 sanitize 包 T2 判定）→ 去重保序。消费方：normalizeSettings、settingsDraft
+ * validateSettings（逐条归一前后一致性裁决）与 MarkdownSection 添加条目预归一。
+ */
+export function normalizeMarkdownAllowlist(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  for (const item of v) {
+    if (typeof item !== 'string') continue;
+    const t = item.trim().toLowerCase();
+    if (t === '' || /\s/.test(t) || t.includes('/') || t.includes(':')) continue;
+    if (!out.includes(t)) out.push(t);
+  }
+  return out;
 }
 
 /**
@@ -312,6 +354,17 @@ export function normalizeSettings(partial: Record<string, unknown>): Settings {
       RENDERER_DEFAULT_EXT_RE.test(k) && typeof v === 'string' && RENDERER_DEFAULT_ID_RE.test(v) ? [[k, v]] : []
     )
   );
+  // markdown 节白名单（spec D §3.1）：externalImages 三档枚举（枚举外/脏类型归位
+  // 'manual'=逐张确认现状语义，字段级归位不拖垮同节其余字段）；allowlist 逐条
+  // normalizeMarkdownAllowlist（trim→lowercase→拒空/空白/':'/'/'→去重保序），
+  // 归一纯函数单源（settingsDraft 校验镜像与 MarkdownSection 输入预归一同源消费）
+  const md = typeof s.markdown === 'object' && s.markdown !== null ? s.markdown : DEFAULTS.markdown;
+  s.markdown = {
+    externalImages: MARKDOWN_EXTERNAL_IMAGE_POLICIES.includes(md.externalImages)
+      ? md.externalImages
+      : DEFAULTS.markdown.externalImages,
+    externalImagesAllowlist: normalizeMarkdownAllowlist(md.externalImagesAllowlist)
+  };
   return s;
 }
 
@@ -359,7 +412,8 @@ function notify(s: Settings): void {
       layout: { ...s.layout },
       storage: { ...s.storage },
       cdn: { ...s.cdn },
-      rendererDefaults: { ...s.rendererDefaults }
+      rendererDefaults: { ...s.rendererDefaults },
+      markdown: { ...s.markdown, externalImagesAllowlist: [...s.markdown.externalImagesAllowlist] }
     });
   }
 }

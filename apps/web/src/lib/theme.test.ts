@@ -273,7 +273,8 @@ describe('applyAppearanceFromSettings（订阅触发入口，spec 2026-10-12 §2
     cdn: { grammars: 'default', grammarsCustom: '', engines: 'default', enginesCustom: '', foreign: 'default', foreignCustom: '' },
     rendererDefaults: {},
     locale: 'zh-CN',
-    reduceMotion: 'system'
+    reduceMotion: 'system',
+    markdown: { externalImages: 'manual', externalImagesAllowlist: [] }
   });
 
   it('diff 命中必注入（哨兵先行把签名推离目标）', async () => {

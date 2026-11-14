@@ -68,9 +68,10 @@ describe('session store', () => {
       cdn: { grammars: 'default', grammarsCustom: '', engines: 'default', enginesCustom: '', foreign: 'default', foreignCustom: '' },
       rendererDefaults: {},
       locale: 'zh-CN',
-      reduceMotion: 'system'
+      reduceMotion: 'system',
+      markdown: { externalImages: 'manual', externalImagesAllowlist: [] }
     });
-    saveSettings({ themeMode: 'dark', appearanceLight: 'default', appearanceDark: 'default', codeThemeLight: 'onelight', codeThemeDark: 'serika-dark', excludedPatterns: ['node_modules'], autoRefresh: false, codeWordWrap: false, computePolicy: 'remote', diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} }, fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 }, iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } }, layout: DEFAULT_LAYOUT, storage: { remoteDownloadConfirmMb: 512 }, cdn: { grammars: 'default', grammarsCustom: '', engines: 'default', enginesCustom: '', foreign: 'default', foreignCustom: '' }, rendererDefaults: {}, locale: 'zh-CN', reduceMotion: 'system' });
+    saveSettings({ themeMode: 'dark', appearanceLight: 'default', appearanceDark: 'default', codeThemeLight: 'onelight', codeThemeDark: 'serika-dark', excludedPatterns: ['node_modules'], autoRefresh: false, codeWordWrap: false, computePolicy: 'remote', diagrams: { krokiHost: '', krokiVia: 'client', mermaidTheme: 'auto', modes: {}, renderers: {} }, fonts: { uiFamily: '', uiSize: 16, codeFamily: '', codeSize: 13 }, iconThemes: { theme: 'none', scopes: { tree: true, tabs: false, quickOpen: false, search: false } }, layout: DEFAULT_LAYOUT, storage: { remoteDownloadConfirmMb: 512 }, cdn: { grammars: 'default', grammarsCustom: '', engines: 'default', enginesCustom: '', foreign: 'default', foreignCustom: '' }, rendererDefaults: {}, locale: 'zh-CN', reduceMotion: 'system', markdown: { externalImages: 'manual', externalImagesAllowlist: [] } });
     expect(loadSettings().themeMode).toBe('dark');
     expect(loadSettings().computePolicy).toBe('remote');
   });

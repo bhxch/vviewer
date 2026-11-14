@@ -30,20 +30,27 @@ describe('SettingsCenter 分组注册表（spec §2 定稿序的在 Task 1 在�
     expect(src).toMatch(/const groups: SettingsGroup\[\] = \[/);
   });
 
-  it('组序（spec §2 定稿序，Task 1 在场组）：外观→字体→图表→搜索与排除→自动刷新→计算（域 C 抽取：组名走 t()，键序 + 目录值双锁）', () => {
-    const ids = ['appearance', 'fonts', 'diagrams', 'search', 'autorefresh', 'compute'];
+  it('组序（spec §2 定稿序，Task 1 在场组）：外观→字体→图表→Markdown→搜索与排除→自动刷新→计算（域 C 抽取：组名走 t()，键序 + 目录值双锁；markdown 组为 spec D §3.1 十三→十四组明示翻转，插在打开方式之后）', () => {
+    const ids = ['appearance', 'fonts', 'diagrams', 'markdown', 'search', 'autorefresh', 'compute'];
     const pos = ids.map((id) => src.indexOf(`id: '${id}'`));
     for (const p of pos) expect(p).toBeGreaterThan(-1);
     expect([...pos].sort((a, b) => a - b)).toEqual(pos);
     // 组名锚改 t() 键形态（原 label: '<组名>' 字面量不再在源码），目录键序对应原组名序
-    const navKeys = ['appearance', 'fonts', 'diagrams', 'search', 'autorefresh', 'compute'];
+    const navKeys = ['appearance', 'fonts', 'diagrams', 'markdown', 'search', 'autorefresh', 'compute'];
     const kpos = navKeys.map((k) => src.indexOf(`t('settings.nav.${k}')`));
     for (const p of kpos) expect(p).toBeGreaterThan(-1);
     expect([...kpos].sort((a, b) => a - b)).toEqual(kpos);
+    // markdown 组插在打开方式（renderers）之后、布局（layout）之前（spec D §3.1）
+    const renderersPos = src.indexOf("id: 'renderers'");
+    const markdownPos = src.indexOf("id: 'markdown'");
+    const layoutPos = src.indexOf("id: 'layout'");
+    expect(markdownPos).toBeGreaterThan(renderersPos);
+    expect(markdownPos).toBeLessThan(layoutPos);
     // 目录 zh 值双锁：原组名字面量逐字节保留于目录
     expect(zhSettings['settings.nav.appearance']).toBe('外观');
     expect(zhSettings['settings.nav.fonts']).toBe('字体');
     expect(zhSettings['settings.nav.diagrams']).toBe('图表');
+    expect(zhSettings['settings.nav.markdown']).toBe('Markdown');
     expect(zhSettings['settings.nav.search']).toBe('搜索与排除');
     expect(zhSettings['settings.nav.autorefresh']).toBe('自动刷新');
     expect(zhSettings['settings.nav.compute']).toBe('计算');
@@ -143,6 +150,55 @@ describe('五节组件契约（既有 SettingsPanel 五节片段组件化，统�
       for (const [key, value] of catalogLocks) expect(zhSettings[key as keyof typeof zhSettings]).toBe(value);
     });
   }
+});
+
+describe('MarkdownSection 契约（spec D §3.1：外链图片三档 + 域名白名单）', () => {
+  const src = readSrc('src/lib/settings/MarkdownSection.svelte');
+
+  it('draft/touch props 契约 + 三档 select（option 枚举字面）+ 白名单 chip 列表（文案走 t() 键 + 目录 zh 值双锁）', () => {
+    expect(src).toMatch(/draft: Settings; touch\(\): void/);
+    expect(src).toMatch(/touch\(\)/);
+    for (const key of [
+      'settings.markdown.extImagesRow',
+      'settings.markdown.extImagesAria',
+      'settings.markdown.extImagesBlocked',
+      'settings.markdown.extImagesManual',
+      'settings.markdown.extImagesAuto',
+      'settings.markdown.extImagesHint',
+      'settings.markdown.allowlistRow',
+      'settings.markdown.allowlistAria',
+      'settings.markdown.allowlistAdd',
+      'settings.markdown.allowlistRemove',
+      'settings.markdown.allowlistHint'
+    ]) {
+      expect(src).toContain(`t('${key}'`);
+    }
+    expect(src).toContain("t('settings.markdown.allowlistRemove', { domain: entry })");
+    // 三档 option 枚举字面 + handler 写 draft.markdown.externalImages
+    expect(src).toContain('value={draft.markdown.externalImages}');
+    for (const v of ['blocked', 'manual', 'auto']) expect(src).toContain(`value="${v}"`);
+    expect(src).toMatch(/function onExternalImagesChange[\s\S]*?touch\(\)/);
+    // 白名单 chip 列表镜像 SearchSection 形态 + 添加走 normalizeMarkdownAllowlist 归一
+    expect(src).toContain('vv-settings-patterns');
+    expect(src).toContain('vv-settings-pattern');
+    expect(src).toContain('normalizeMarkdownAllowlist');
+    expect(src).toMatch(/function removeEntry[\s\S]*?touch\(\)/);
+    // 目录 zh 值双锁（zh 定稿逐字节）
+    expect(zhSettings['settings.markdown.extImagesRow']).toBe('外链图片');
+    expect(zhSettings['settings.markdown.extImagesAria']).toBe('外链图片加载策略');
+    expect(zhSettings['settings.markdown.extImagesBlocked']).toBe('禁止');
+    expect(zhSettings['settings.markdown.extImagesManual']).toBe('手动确认');
+    expect(zhSettings['settings.markdown.extImagesAuto']).toBe('自动加载');
+    expect(zhSettings['settings.markdown.allowlistRow']).toBe('域名白名单');
+    expect(zhSettings['settings.markdown.allowlistAria']).toBe('白名单域名输入');
+    expect(zhSettings['settings.markdown.allowlistAdd']).toBe('添加');
+    expect(zhSettings['settings.markdown.allowlistRemove']).toBe('移除 {domain}');
+  });
+
+  it('issue 文案双锁（settingsDraft 报告面同源键）', () => {
+    expect(zhSettings['settings.issue.externalImages']).toBe('外链图片档位必须是：{values}');
+    expect(zhSettings['settings.issue.allowlistEntry']).toBe('白名单条目必须是域名（不含路径、空白或端口）');
+  });
 });
 
 describe('DiagramsSection 渲染器第二列（spec 2026-10-23 §9.1，Task 6；域 C 抽取后循环变量 t→dt 让位 + aria 走 t() 键）', () => {

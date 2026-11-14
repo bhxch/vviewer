@@ -10,13 +10,14 @@ export const messages = {
   // —— 通用（settings.common.*）——
   'settings.common.listSep': '、',
 
-  // —— 左导航组名（settings.nav.*，SC-01 十二组定稿序）——
+  // —— 左导航组名（settings.nav.*，SC-01 十四组定稿序）——
   'settings.nav.appearance': '外观',
   'settings.nav.languageA11y': '语言与辅助功能',
   'settings.nav.fonts': '字体',
   'settings.nav.code': '代码视图',
   'settings.nav.diagrams': '图表',
   'settings.nav.renderers': '打开方式',
+  'settings.nav.markdown': 'Markdown',
   'settings.nav.layout': '布局',
   'settings.nav.search': '搜索与排除',
   'settings.nav.autorefresh': '自动刷新',
@@ -89,6 +90,8 @@ export const messages = {
   'settings.issue.rendererId': "值须为渲染器 id（'' = 内置默认）",
   'settings.issue.cdnGrammarsBase': '须为以 /grammars/ 结尾的地址，多段以 | 分隔',
   'settings.issue.cdnHost': '须为以 / 结尾的 https 地址',
+  'settings.issue.externalImages': '外链图片档位必须是：{values}',
+  'settings.issue.allowlistEntry': '白名单条目必须是域名（不含路径、空白或端口）',
 
   // —— 导入文件解析（settings.import.*，settingsDraft.parseImportFile）——
   'settings.import.notObject': '导入文件必须是 JSON 对象',
@@ -298,6 +301,21 @@ export const messages = {
   'settings.renderers.emptyHint': '当前没有可选多个渲染器的格式。',
   'settings.renderers.hint':
     '只列出有多个渲染器可用的格式。改动对之后打开的文件生效；单个标签页仍可经状态栏或标签右键「打开方式」临时改选。',
+
+  // —— 「Markdown」节（settings.markdown.*，spec D §3.1）：外链图片三档 + 域名白名单——
+  'settings.markdown.extImagesRow': '外链图片',
+  'settings.markdown.extImagesAria': '外链图片加载策略',
+  'settings.markdown.extImagesBlocked': '禁止',
+  'settings.markdown.extImagesManual': '手动确认',
+  'settings.markdown.extImagesAuto': '自动加载',
+  'settings.markdown.extImagesHint':
+    '默认「手动确认」：外链图片不自动加载，占位框内点「加载图片」逐张放行，同一地址本次会话免重复确认；「禁止」维持拦截占位；「自动加载」直接放行。白名单中的域名不受档位限制直接加载。注意：默认档由旧版的拦截改为逐张确认，跟踪像素防线的语义随之变化。',
+  'settings.markdown.allowlistRow': '域名白名单',
+  'settings.markdown.allowlistAria': '白名单域名输入',
+  'settings.markdown.allowlistAdd': '添加',
+  'settings.markdown.allowlistRemove': '移除 {domain}',
+  'settings.markdown.allowlistHint':
+    '白名单域名不受上方档位限制直接加载。example.com 精确匹配；.example.com 或 *.example.com 含该域与其全部子域。端口不参与匹配。',
 
   // —— 「布局」节（settings.layout.*）——
   'settings.layout.label': '布局',

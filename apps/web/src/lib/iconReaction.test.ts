@@ -43,7 +43,8 @@ function baseSettings(iconThemes?: Partial<Settings['iconThemes']>): Settings {
     cdn: { grammars: 'default', grammarsCustom: '', engines: 'default', enginesCustom: '', foreign: 'default', foreignCustom: '' },
     rendererDefaults: {},
     locale: 'zh-CN',
-    reduceMotion: 'system'
+    reduceMotion: 'system',
+    markdown: { externalImages: 'manual', externalImagesAllowlist: [] }
   };
 }
 

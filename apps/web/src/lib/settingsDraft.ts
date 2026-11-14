@@ -9,7 +9,7 @@
 // （同一白名单单源），此处只负责「报告」；三类问题同为阻断错误（校验失败不部分
 // 应用，spec §4 导入同纪律），修复后应用时经 normalizeSettings 规范化落值。
 import { resolveDiagramType } from '@bhxch/vviewer-render-diagram';
-import { CODE_SIZE_RANGE, DEFAULTS, ENGINE_CDN_PROFILES, GRAMMAR_CDN_PROFILES, ICON_THEME_SCOPE_KEYS, MERMAID_THEME_VALUES, normalizeSettings, REDUCE_MOTION_VALUES, RENDERER_DEFAULT_EXT_RE, RENDERER_DEFAULT_ID_RE, saveSettings, STORAGE_MB_RANGE, UI_SIZE_RANGE, type Settings } from './stores/settings';
+import { CODE_SIZE_RANGE, DEFAULTS, ENGINE_CDN_PROFILES, GRAMMAR_CDN_PROFILES, ICON_THEME_SCOPE_KEYS, MARKDOWN_EXTERNAL_IMAGE_POLICIES, MERMAID_THEME_VALUES, normalizeMarkdownAllowlist, normalizeSettings, REDUCE_MOTION_VALUES, RENDERER_DEFAULT_EXT_RE, RENDERER_DEFAULT_ID_RE, saveSettings, STORAGE_MB_RANGE, UI_SIZE_RANGE, type Settings } from './stores/settings';
 import type { MermaidTheme } from '@bhxch/vviewer-render-diagram';
 import { LOCALES, translate as t, type Locale } from './i18n/core';
 import { sanitizeLayout } from './layout';
@@ -324,6 +324,41 @@ export function validateSettings(raw: unknown): SettingsIssue[] {
       }
     }
   }
+  // markdown 白名单镜像（spec D §3.1）：externalImages 三档枚举（与 normalizeSettings
+  // 同源单表 MARKDOWN_EXTERNAL_IMAGE_POLICIES 裁决）；allowlist mustBeStringArray 后
+  // 逐条经 normalizeMarkdownAllowlist 单条归一——归一前后一致（仅 trim/大小写归一）
+  // 不报，含空白/`/`/`:`/空串报（field 下标点径 markdown.externalImagesAllowlist[i]），
+  // 与 normalizeSettings 归位闸同源单函数裁决
+  if (raw.markdown !== undefined) {
+    if (!isObj(raw.markdown)) {
+      issues.push({ field: 'markdown', message: t('settings.issue.mustBeObject') });
+    } else {
+      const md = raw.markdown;
+      for (const k of Object.keys(md)) {
+        if (k !== 'externalImages' && k !== 'externalImagesAllowlist') {
+          issues.push({ field: `markdown.${k}`, message: t('settings.issue.unknownField') });
+        }
+      }
+      if (md.externalImages !== undefined && !(MARKDOWN_EXTERNAL_IMAGE_POLICIES as readonly string[]).includes(md.externalImages as string)) {
+        issues.push({
+          field: 'markdown.externalImages',
+          message: t('settings.issue.externalImages', { values: MARKDOWN_EXTERNAL_IMAGE_POLICIES.join(' / ') })
+        });
+      }
+      if (md.externalImagesAllowlist !== undefined) {
+        if (!Array.isArray(md.externalImagesAllowlist) || !md.externalImagesAllowlist.every((p) => typeof p === 'string')) {
+          issues.push({ field: 'markdown.externalImagesAllowlist', message: t('settings.issue.mustBeStringArray') });
+        } else {
+          for (const [i, entry] of md.externalImagesAllowlist.entries()) {
+            const normalized = normalizeMarkdownAllowlist([entry]);
+            if (normalized.length !== 1 || normalized[0] !== (entry as string).trim().toLowerCase()) {
+              issues.push({ field: `markdown.externalImagesAllowlist[${i}]`, message: t('settings.issue.allowlistEntry') });
+            }
+          }
+        }
+      }
+    }
+  }
   return issues;
 }
 
@@ -546,7 +581,8 @@ function collectUnknownPaths(raw: Record<string, unknown>): string[] {
     iconThemes: ['theme', 'scopes'],
     layout: Object.keys(sanitizeLayout({})),
     storage: ['remoteDownloadConfirmMb'],
-    cdn: ['grammars', 'grammarsCustom', 'engines', 'enginesCustom', 'foreign', 'foreignCustom']
+    cdn: ['grammars', 'grammarsCustom', 'engines', 'enginesCustom', 'foreign', 'foreignCustom'],
+    markdown: ['externalImages', 'externalImagesAllowlist']
   };
   for (const [sec, keys] of Object.entries(allowed)) {
     const v = raw[sec];
