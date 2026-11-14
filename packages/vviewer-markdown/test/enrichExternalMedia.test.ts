@@ -113,6 +113,25 @@ describe('enrichMarkdownDom——manual 档外链媒体占位构建（spec D §3
     expect(doc.querySelectorAll('button.md-ext-media-load')).toHaveLength(1);
   });
 
+  it('⑤a 免确认 AV 分流（评审 I3）：.mp4 点击放行后重开同文档——免确认路径换 video 替换（与点击路径同口径，不回填 img 破图）', () => {
+    const mp4 = 'https://e.example/clip.mp4';
+    const first = docOf(`<img data-vv-external-src="${mp4}" data-vv-blocked-external="1" alt="演示">`);
+    enrichMarkdownDom(first);
+    first.querySelector('button.md-ext-media-load')!.dispatchEvent(new Event('click'));
+    expect(first.querySelector('video')!.getAttribute('src')).toBe(mp4); // 首次点击呈 video
+    // 第二个渲染实例（新 doc）：同 src 免确认——AV 扩展名换 video 替换（不回填 img）
+    const second = docOf(`<img data-vv-external-src="${mp4}" data-vv-blocked-external="1" alt="演示">`);
+    enrichMarkdownDom(second);
+    const video = second.querySelector('video')!;
+    expect(video).not.toBeNull();
+    expect(video.getAttribute('src')).toBe(mp4);
+    expect(video.getAttribute('preload')).toBe('none');
+    expect(video.hasAttribute('autoplay')).toBe(false);
+    expect(second.querySelector('img')).toBeNull(); // img 随替换消失（无破图 img）
+    expect(second.querySelector('span.md-ext-media')).toBeNull();
+    expect(second.querySelector('button.md-ext-media-load')).toBeNull();
+  });
+
   it('⑦无 data-vv-external-src 标记的 img 零改动（blocked 占位/相对图片不构建）', () => {
     const doc = docOf(
       `<img src="photo.png" alt="相对图">` +

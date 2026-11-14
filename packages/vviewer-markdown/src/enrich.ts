@@ -348,6 +348,26 @@ function restoreExternalMedia(img: Element, src: string, srcset: string | null):
 }
 
 /**
+ * 按扩展名创建 video/audio 放行元素（§6 落定 2：controls+preload=none+无 autoplay=
+ * MD-13 语义，maxWidth 100% 对齐 convertMediaElements；alt→aria-label、title 继承）。
+ * 点击路径与免确认回填路径共用（两路径行为不分叉——评审 I3：免确认路径若回填
+ * img，AV 扩展名会成破图（convertMediaElements 先行且对无 src img 跳过，回填不再
+ * 触发转换），故 AV 一律换元素替换）。
+ */
+function createExternalMediaElement(root: Document, img: Element, src: string, isVideo: boolean): HTMLElement {
+  const media = root.createElement(isVideo ? 'video' : 'audio');
+  media.setAttribute('controls', '');
+  media.setAttribute('preload', 'none');
+  media.setAttribute('src', src);
+  (media as HTMLElement).style.maxWidth = '100%';
+  const alt = img.getAttribute('alt');
+  if (alt) media.setAttribute('aria-label', alt);
+  const title = img.getAttribute('title');
+  if (title) media.setAttribute('title', title);
+  return media;
+}
+
+/**
  * manual 档占位构建：每 img[data-vv-external-src]（sanitize 三档分流 manual 档产出
  * 的待确认标记）包 span.md-ext-media（虚线框语义沿用 BLOCKED_EXTERNAL_CSS 档）——
  * img 由 CSS 隐藏（DOM 无 src 即不发请求，BUG-17 防线真实维持），button.md-ext-media-load
@@ -355,9 +375,10 @@ function restoreExternalMedia(img: Element, src: string, srcset: string | null):
  * 转换在 manual 档不发生——src 已迁 data 属性，convertMediaElements 对无 src img
  * 天然跳过；.mp4/.webm/.ogg→「加载视频」，.mp3/.wav/.flac/.m4a→「加载音频」，
  * 其余→「加载图片」；文案为包内中文常量，与 DEFAULT_UI_TEXTS 缺省中文同源形态）。
- * 点击按扩展名创建 video/audio 元素（controls+preload=none+无 autoplay=MD-13 语义）
- * 替换占位，img 分支回填进原 img。幂等：已处理的挂 data-md-ext-media 代币防二次命中
- * （runCopyCode 代币先例形态）；同 src 已在会话免确认集时跳过交互直接回填。
+ * 点击按扩展名创建 video/audio 元素替换占位，img 分支回填进原 img。幂等：已处理的
+ * 挂 data-md-ext-media 代币防二次命中（runCopyCode 代币先例形态）；同 src 已在会话
+ * 免确认集时跳过交互直接放行——AV 扩展名换元素替换（与点击路径同口径，评审 I3），
+ * 图片回填进原 img。
  */
 function buildExternalMediaPlaceholders(root: Document): void {
   for (const img of Array.from(root.querySelectorAll('img[data-vv-external-src]'))) {
@@ -365,13 +386,19 @@ function buildExternalMediaPlaceholders(root: Document): void {
     img.setAttribute('data-md-ext-media', '');
     const src = img.getAttribute('data-vv-external-src')!;
     const srcset = img.getAttribute('data-vv-external-srcset');
-    if (loadedExternalSrcs.has(src)) {
-      restoreExternalMedia(img, src, srcset); // 会话免确认：直接回填
-      continue;
-    }
     const ext = mediaExtension(src);
     const isVideo = ext !== null && VIDEO_EXTS.has(ext);
     const isAudio = ext !== null && AUDIO_EXTS.has(ext);
+    if (loadedExternalSrcs.has(src)) {
+      // 会话免确认：直接放行——AV 扩展名换 video/audio 替换原 img（与点击路径
+      // 同口径；回填 img 会成破图），图片回填进原 img
+      if (isVideo || isAudio) {
+        img.replaceWith(createExternalMediaElement(root, img, src, isVideo));
+      } else {
+        restoreExternalMedia(img, src, srcset);
+      }
+      continue;
+    }
     // §6 落定 2：按钮文案按扩展名——加载视频/加载音频/加载图片（包内中文常量）
     const label = isVideo ? '加载视频' : isAudio ? '加载音频' : '加载图片';
     const wrap = root.createElement('span');
@@ -390,17 +417,7 @@ function buildExternalMediaPlaceholders(root: Document): void {
       btn.disabled = true; // 双击防抖：回填是幂等的但按钮先禁
       loadedExternalSrcs.add(src);
       if (isVideo || isAudio) {
-        // §6 落定 2：按扩展名创建 video/audio（controls+preload=none+无 autoplay=
-        // MD-13 语义，maxWidth 100% 对齐 convertMediaElements），替换占位 wrapper
-        const media = root.createElement(isVideo ? 'video' : 'audio');
-        media.setAttribute('controls', '');
-        media.setAttribute('preload', 'none');
-        media.setAttribute('src', src);
-        (media as HTMLElement).style.maxWidth = '100%';
-        const alt = img.getAttribute('alt');
-        if (alt) media.setAttribute('aria-label', alt);
-        if (title) media.setAttribute('title', title);
-        wrap.replaceWith(media);
+        wrap.replaceWith(createExternalMediaElement(root, img, src, isVideo));
       } else {
         restoreExternalMedia(img, src, srcset); // img src/srcset 回填 + 标记转已加载
         wrap.replaceWith(img); // 解包（点击路径）
