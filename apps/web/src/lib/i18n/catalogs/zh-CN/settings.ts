@@ -310,6 +310,13 @@ export const messages = {
   'settings.layout.leftWidthAria': '左栏宽度（px）',
   'settings.layout.rightWidthRow': '右栏宽度（px，{min}–{max}）',
   'settings.layout.rightWidthAria': '右栏宽度（px）',
+  'settings.layout.touchRow': '触屏适配',
+  'settings.layout.touchAria': '触屏适配模式',
+  'settings.layout.touchAuto': '自动感应',
+  'settings.layout.touchOn': '强制触屏',
+  'settings.layout.touchOff': '强制桌面',
+  'settings.layout.touchHint':
+    '自动：检测到触屏输入时常显悬浮控件并加大触控目标，布局仍按宽度断点判定；强制触屏/强制桌面覆盖自动检测。外接鼠标为主的混合设备选强制桌面，触屏笔记本保持自动。',
   'settings.layout.zenLabel': '专注模式（zen）',
   'settings.layout.zenNote': '当前草稿为专注模式（覆盖标签栏/双栏显示），其余布局字段保持原值。',
   'settings.layout.zenResetAria': '重置专注模式',

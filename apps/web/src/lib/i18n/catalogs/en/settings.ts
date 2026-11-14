@@ -325,6 +325,13 @@ export const messages = {
   'settings.layout.leftWidthAria': 'Left pane width (px)',
   'settings.layout.rightWidthRow': 'Right pane width (px, {min}–{max})',
   'settings.layout.rightWidthAria': 'Right pane width (px)',
+  'settings.layout.touchRow': 'Touch adaptation',
+  'settings.layout.touchAria': 'Touch adaptation mode',
+  'settings.layout.touchAuto': 'Auto detect',
+  'settings.layout.touchOn': 'Force touch',
+  'settings.layout.touchOff': 'Force desktop',
+  'settings.layout.touchHint':
+    'Auto: detected touch input keeps floating controls visible and enlarges touch targets; layout still follows width breakpoints. Force touch / force desktop override auto detection. Choose force desktop for mouse-first hybrid devices; touch-screen laptops can stay on auto.',
   'settings.layout.zenLabel': 'Zen mode',
   'settings.layout.zenNote':
     'The current draft is in Zen mode (overrides tab bar/two-pane display); other layout fields keep their values.',

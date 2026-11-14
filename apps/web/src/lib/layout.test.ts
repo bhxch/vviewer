@@ -3,6 +3,7 @@ import {
   DEFAULT_LAYOUT,
   LEFT_WIDTH_RANGE,
   RIGHT_WIDTH_RANGE,
+  TOUCH_MODES,
   chromeVisible,
   clampWidth,
   enterZen,
@@ -20,7 +21,8 @@ describe('layout 纯函数（spec 2026-10-19 布局自由化 §2）', () => {
       leftWidth: 260,
       rightWidth: 230,
       tabBarVisible: true,
-      zen: false
+      zen: false,
+      touchMode: 'auto'
     });
   });
 
@@ -56,7 +58,8 @@ describe('layout 纯函数（spec 2026-10-19 布局自由化 §2）', () => {
       leftWidth: 400,
       rightWidth: 200,
       tabBarVisible: true,
-      zen: true
+      zen: true,
+      touchMode: 'auto'
     };
     expect(sanitizeLayout(l)).toEqual(l);
   });
@@ -92,6 +95,26 @@ describe('layout 纯函数（spec 2026-10-19 布局自由化 §2）', () => {
     expect(l.leftWidth).toBe(360);
     expect(l.rightWidth).toBe(DEFAULT_LAYOUT.rightWidth);
     expect(l.zen).toBe(false);
+  });
+
+  it('sanitizeLayout：touchMode 三合法值原样通过（TOUCH_MODES 枚举单源，spec B §3.2）', () => {
+    expect(TOUCH_MODES).toEqual(['auto', 'touch', 'desktop']);
+    for (const mode of TOUCH_MODES) {
+      expect(sanitizeLayout({ ...DEFAULT_LAYOUT, touchMode: mode }).touchMode).toBe(mode);
+    }
+  });
+
+  it('sanitizeLayout：touchMode 脏枚举字段级归位 auto，其余字段原值（镜像布尔脏值用例口径）', () => {
+    const l = sanitizeLayout({ ...DEFAULT_LAYOUT, leftWidth: 400, zen: true, touchMode: 'finger' });
+    expect(l.touchMode).toBe(DEFAULT_LAYOUT.touchMode);
+    expect(l.leftWidth).toBe(400);
+    expect(l.zen).toBe(true);
+    expect(sanitizeLayout({ ...DEFAULT_LAYOUT, touchMode: 42 }).touchMode).toBe(DEFAULT_LAYOUT.touchMode); // 非字符串脏值同口径
+  });
+
+  it('sanitizeLayout：入参无 touchMode 键回落 DEFAULT_LAYOUT.touchMode（旧版本 localStorage 前向兼容）', () => {
+    expect(sanitizeLayout({ leftWidth: 360 }).touchMode).toBe(DEFAULT_LAYOUT.touchMode);
+    expect(sanitizeLayout({}).touchMode).toBe('auto');
   });
 });
 

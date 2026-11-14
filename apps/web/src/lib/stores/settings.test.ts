@@ -299,7 +299,8 @@ describe('layout 设置节白名单/clamp（spec 2026-10-19 布局自由化 §2�
         leftWidth: 400,
         rightWidth: 200,
         tabBarVisible: true,
-        zen: false
+        zen: false,
+        touchMode: 'auto'
       }
     }));
     expect(loadSettings().layout).toEqual({
@@ -308,7 +309,8 @@ describe('layout 设置节白名单/clamp（spec 2026-10-19 布局自由化 §2�
       leftWidth: 400,
       rightWidth: 200,
       tabBarVisible: true,
-      zen: false
+      zen: false,
+      touchMode: 'auto'
     });
   });
 

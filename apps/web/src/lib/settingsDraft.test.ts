@@ -135,6 +135,16 @@ describe('applyJson 校验错误分类（spec §3：未知字段/类型不符/cl
     expect(draft.fonts.uiSize).toBe(14); // 应用 = 白名单规范化（clampSize 取整）
   });
 
+  it('layout.touchMode 三态（spec B §3.2）：合法枚举零报告；脏枚举报 layoutSanitized（目标值即归位默认）', () => {
+    // 枚举归位在 sanitizeLayout（layout.ts TOUCH_MODES 白名单），校验层只镜像差异
+    expect(validateSettings({ layout: { touchMode: 'auto', leftWidth: 260 } })).toEqual([]);
+    expect(validateSettings({ layout: { touchMode: 'touch' } })).toEqual([]);
+    expect(validateSettings({ layout: { touchMode: 'desktop' } })).toEqual([]);
+    const r = validateSettings({ layout: { touchMode: 'finger', leftWidth: 260 } });
+    expect(r.map((i) => i.field)).toEqual(['layout.touchMode']);
+    expect(r[0]!.message).toContain('auto');
+  });
+
   it('节整体脏值（fonts: 42）按类型不符报告，不抛异常', () => {
     const draft = openDraft(aSettings({}));
     const r = applyJson(draft, JSON.stringify({ fonts: 42 }));

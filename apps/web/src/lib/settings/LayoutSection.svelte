@@ -38,6 +38,13 @@
     draft.layout.zen = false;
     touch();
   }
+
+  /** 触屏适配三态（spec B §3.2）：写 draft + touch——生效判定由 touchProfile 模块
+   * 消费 layout.touchMode（本 task 只落设置面，零行为变化） */
+  function onTouchModeChange(e: Event): void {
+    draft.layout.touchMode = (e.currentTarget as HTMLSelectElement).value as Settings['layout']['touchMode'];
+    touch();
+  }
 </script>
 
 <section class="vv-sc-section">
@@ -96,6 +103,15 @@
       aria-label={t('settings.layout.rightWidthAria')}
     />
   </label>
+  <label class="vv-settings-theme-row">
+    <span>{t('settings.layout.touchRow')}</span>
+    <select value={draft.layout.touchMode} onchange={onTouchModeChange} aria-label={t('settings.layout.touchAria')}>
+      <option value="auto">{t('settings.layout.touchAuto')}</option>
+      <option value="touch">{t('settings.layout.touchOn')}</option>
+      <option value="desktop">{t('settings.layout.touchOff')}</option>
+    </select>
+  </label>
+  <div class="vv-settings-hint">{t('settings.layout.touchHint')}</div>
   <div class="vv-settings-label">{t('settings.layout.zenLabel')}</div>
   {#if draft.layout.zen}
     <div class="vv-settings-note" role="status">{t('settings.layout.zenNote')}</div>

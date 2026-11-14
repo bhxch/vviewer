@@ -5,6 +5,13 @@
  * 渲染语义（折叠竖条/拖拽把手/zen 覆盖）在 AppShell.svelte 消费。
  */
 
+/** 触屏适配三态（spec B §3.2）：'auto'=any-pointer:coarse + maxTouchPoints>0 感知
+ * （判定消费面为 touchProfile 模块，spec B Task 2），'touch'=强制启用，'desktop'=
+ * 强制回收（spec §3.4）。枚举单源在本模块：设置面 select、sanitizeLayout 归位与
+ * settingsDraft 校验报告（layout 分支按 sanitizeLayout 差异自动镜像）共用。 */
+export const TOUCH_MODES = ['auto', 'touch', 'desktop'] as const;
+export type TouchMode = (typeof TOUCH_MODES)[number];
+
 /** 布局设置节（spec §2；顶栏退役 Task 3 删顶栏显隐字段——顶栏整行随 TopBar
  * 组件退役，标签栏显隐仍归此节）。宽度为 px；折叠态栏宽归零残留 28px 竖条；
  * zen 与其余字段正交（只做视觉覆盖，不改底层字段，见 chromeVisible）。 */
@@ -15,6 +22,7 @@ export interface LayoutSettings {
   rightWidth: number;
   tabBarVisible: boolean;
   zen: boolean;
+  touchMode: TouchMode;
 }
 
 export const DEFAULT_LAYOUT: LayoutSettings = {
@@ -23,7 +31,8 @@ export const DEFAULT_LAYOUT: LayoutSettings = {
   leftWidth: 260,
   rightWidth: 230,
   tabBarVisible: true,
-  zen: false
+  zen: false,
+  touchMode: 'auto'
 };
 
 /** 栏宽 clamp 范围（spec §2：left 180–480 / right 160–420） */
@@ -57,7 +66,11 @@ export function sanitizeLayout(v: unknown): LayoutSettings {
     leftWidth: clampWidth('left', typeof o.leftWidth === 'number' ? o.leftWidth : NaN),
     rightWidth: clampWidth('right', typeof o.rightWidth === 'number' ? o.rightWidth : NaN),
     tabBarVisible: boolOr(o.tabBarVisible, DEFAULT_LAYOUT.tabBarVisible),
-    zen: boolOr(o.zen, DEFAULT_LAYOUT.zen)
+    zen: boolOr(o.zen, DEFAULT_LAYOUT.zen),
+    // 枚举白名单（spec B §3.2）：TOUCH_MODES 外脏值（含非字符串）字段级归位默认
+    touchMode: (TOUCH_MODES as readonly string[]).includes(o.touchMode as string)
+      ? (o.touchMode as TouchMode)
+      : DEFAULT_LAYOUT.touchMode
   };
 }
 

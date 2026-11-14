@@ -363,22 +363,40 @@ describe('新分组补全（settings center spec §2 定稿序，Task 4）', () 
 });
 
 describe('Task 4 新节组件契约', () => {
-  it('LayoutSection：draft/touch 契约 + 四布尔/两宽度/zen 重置（clampWidth 同口径；域 C 抽取：文案走 t() + 目录值双锁）', () => {
+  it('LayoutSection：draft/touch 契约 + 四布尔/两宽度/touchMode 三态 select/zen 重置（clampWidth 同口径；域 C 抽取：文案走 t() + 目录值双锁）', () => {
     const src = readSrc('src/lib/settings/LayoutSection.svelte');
     expect(src).toMatch(/draft: Settings; touch\(\): void/);
     expect(src).toMatch(/touch\(\)/);
     for (const key of [
       'settings.layout.tabBar',
       'settings.layout.leftCollapse',
-      'settings.layout.rightCollapse'
+      'settings.layout.rightCollapse',
+      'settings.layout.touchRow',
+      'settings.layout.touchAria',
+      'settings.layout.touchAuto',
+      'settings.layout.touchOn',
+      'settings.layout.touchOff',
+      'settings.layout.touchHint'
     ]) {
       expect(src).toContain(`t('${key}')`);
     }
     expect(zhSettings['settings.layout.tabBar']).toBe('显示标签栏');
     expect(zhSettings['settings.layout.leftCollapse']).toBe('折叠文件树（左栏）');
     expect(zhSettings['settings.layout.rightCollapse']).toBe('折叠属性面板（右栏）');
+    expect(zhSettings['settings.layout.touchRow']).toBe('触屏适配');
+    expect(zhSettings['settings.layout.touchAria']).toBe('触屏适配模式');
+    expect(zhSettings['settings.layout.touchAuto']).toBe('自动感应');
+    expect(zhSettings['settings.layout.touchOn']).toBe('强制触屏');
+    expect(zhSettings['settings.layout.touchOff']).toBe('强制桌面');
+    expect(zhSettings['settings.layout.touchHint']).toBe(
+      '自动：检测到触屏输入时常显悬浮控件并加大触控目标，布局仍按宽度断点判定；强制触屏/强制桌面覆盖自动检测。外接鼠标为主的混合设备选强制桌面，触屏笔记本保持自动。'
+    );
     expect(src).toContain('clampWidth');
     expect(src).toContain('resetZen');
+    // 触屏适配 select 三态（spec B §3.2）：option value 枚举字面 + handler 写 draft.layout.touchMode
+    expect(src).toContain("value={draft.layout.touchMode}");
+    for (const v of ['auto', 'touch', 'desktop']) expect(src).toContain(`value="${v}"`);
+    expect(src).toMatch(/onTouchModeChange/);
   });
 
   it('StorageSection：七分类行 + 挂载配置禁用态 + 确认面板门 + 设置/出厂后重载（域 C 抽取：文案走 t() + 目录值双锁）', () => {
