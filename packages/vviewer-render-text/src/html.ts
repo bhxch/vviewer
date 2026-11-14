@@ -27,9 +27,11 @@ import {
  * 资源加载纵深（作者文档可含行内样式）。BUG-17 基线：img-src/media-src 不含
  * http: https:——外域图片/媒体在沙箱内被浏览器拦截且不发请求（外域 img 另经共享
  * 净化策略分流，双保险）。三档联动：auto 档 img-src 加 https: http:；白名单条目
- * 任意档逐条加 `https://<host>`（通配条目发 `https://<base>` 与 `https://*.<base>`
- * 双条——CSP `*.` 不覆盖 apex）；media-src 不动=AV/poster 任何档位不放行
- * （spec §6 落定 5）。
+ * 任意档逐条加 `https://<host>` 与 `http://<host>` 双协议（评审 M5：白名单命中与
+ * 协议无关——sanitize 层 http:// 域名放行 src，CSP 只发 https 会在网络栈之前拦死
+ * http 形态，与 auto 档 img-src 含 http: 口径不对称；通配条目另发 `https://<base>`
+ * 与 `https://*.<base>` 双条——CSP `*.` 不覆盖 apex）；media-src 不动=AV/poster
+ * 任何档位不放行（spec §6 落定 5）。
  */
 function buildCspContent(policy: ExternalImagePolicyConfig): string {
   const imgSrc = ['data:', 'blob:'];
@@ -41,7 +43,7 @@ function buildCspContent(policy: ExternalImagePolicyConfig): string {
       const base = entry.replace(/^[*.]+/, '');
       if (base !== '') imgSrc.push(`https://${base}`, `https://*.${base}`); // CSP *.{base} 不含 apex——双条
     } else {
-      imgSrc.push(`https://${entry}`);
+      imgSrc.push(`https://${entry}`, `http://${entry}`); // 双协议：白名单命中与协议无关
     }
   }
   return `default-src 'none'; img-src ${imgSrc.join(' ')}; media-src data: blob:; style-src 'unsafe-inline'; font-src data:`;
