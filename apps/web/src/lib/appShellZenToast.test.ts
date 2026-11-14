@@ -34,7 +34,12 @@ describe('zen 进入提示 Toast（退出通道发现性）', () => {
   });
 
   it('退出 zen 立即收回 toast（dismissZenToast）——提示语义只属于 zen 在场期间，不残留盖在恢复的 chrome 上', () => {
-    expect(src).toMatch(/else \{\s*clearTempTimers\(\);\s*dismissZenToast\(\);\s*\}/);
+    // spec A Task 4：退出分支体前置 zenSide = 'none' 重置（中性动作零回滚 drawers，
+    // 契约锚在 appShellZenMobile「退出中性」）——toast 收回语义本体零变化，锚随
+    // 分支体扩展同步（bounded gap 上界容纳分支注释）
+    expect(src).toMatch(
+      /else \{[\s\S]{0,600}zenSide = 'none';\s*clearTempTimers\(\);\s*dismissZenToast\(\);\s*\}/
+    );
   });
 
   it('reload 落 zen 同样提示（恢复态用户与首次进入同样需要发现性）', () => {

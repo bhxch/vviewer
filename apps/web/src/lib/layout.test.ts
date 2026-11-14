@@ -131,49 +131,70 @@ describe('zen 覆盖语义（spec 2026-10-19 布局自由化 §3）', () => {
   });
 
   it('zenEscAction 状态机三态：overlay 开 → closeOverlay（优先级最高）', () => {
-    expect(zenEscAction({ overlaysOpen: true, zen: true })).toBe('closeOverlay');
-    expect(zenEscAction({ overlaysOpen: true, zen: false })).toBe('closeOverlay');
+    expect(zenEscAction({ overlaysOpen: true, zenSideOpen: false, zen: true })).toBe('closeOverlay');
+    expect(zenEscAction({ overlaysOpen: true, zenSideOpen: false, zen: false })).toBe('closeOverlay');
   });
 
   it('zenEscAction：无 overlay 且 zen → exitZen；否则 none', () => {
-    expect(zenEscAction({ overlaysOpen: false, zen: true })).toBe('exitZen');
-    expect(zenEscAction({ overlaysOpen: false, zen: false })).toBe('none');
+    expect(zenEscAction({ overlaysOpen: false, zenSideOpen: false, zen: true })).toBe('exitZen');
+    expect(zenEscAction({ overlaysOpen: false, zenSideOpen: false, zen: false })).toBe('none');
+  });
+
+  // spec A §4.2/§8 Task 4 新档：zen 打开的栏（目录入口）——插在 overlay 与 zen 之间
+  // （面板在场先关面板的 LZ-05/LZ-12 优先级不变；其次关栏、再退 zen 两段退出）
+  it('zenEscAction 新档 closeZenSide：zenSideOpen 插在 overlay 与 zen 之间（三态插位断言）', () => {
+    // overlay 仍最高：面板在场先关面板，侧开不改变面板优先
+    expect(zenEscAction({ overlaysOpen: true, zenSideOpen: true, zen: true })).toBe('closeOverlay');
+    // zenSideOpen 优先于 zen：先关 zen 打开的栏，再退 zen（Esc 两段退出第一段）
+    expect(zenEscAction({ overlaysOpen: false, zenSideOpen: true, zen: true })).toBe('closeZenSide');
+    // 纯侧开态（zen 在场才可能有侧开——防御性输入亦分派 closeZenSide）
+    expect(zenEscAction({ overlaysOpen: false, zenSideOpen: true, zen: false })).toBe('closeZenSide');
   });
 });
 
 describe('zenPopAction 返回键分派（spec 2026-10-19 §3.1：同一状态机双触发源）', () => {
   it('双触发源等价性：产生实际动作的各态与桌面 Esc（zenEscAction）一致', () => {
     // 面板开 → closeOverlay；无面板且 zen → exitZen（两态两触发源同分派）
-    expect(zenPopAction({ guardArmed: true, overlaysOpen: true, zen: true })).toBe(
-      zenEscAction({ overlaysOpen: true, zen: true })
+    expect(zenPopAction({ guardArmed: true, overlaysOpen: true, zenSideOpen: false, zen: true })).toBe(
+      zenEscAction({ overlaysOpen: true, zenSideOpen: false, zen: true })
     );
-    expect(zenPopAction({ guardArmed: true, overlaysOpen: true, zen: false })).toBe(
-      zenEscAction({ overlaysOpen: true, zen: false })
+    expect(zenPopAction({ guardArmed: true, overlaysOpen: true, zenSideOpen: false, zen: false })).toBe(
+      zenEscAction({ overlaysOpen: true, zenSideOpen: false, zen: false })
     );
-    expect(zenPopAction({ guardArmed: true, overlaysOpen: false, zen: true })).toBe(
-      zenEscAction({ overlaysOpen: false, zen: true })
+    expect(zenPopAction({ guardArmed: true, overlaysOpen: false, zenSideOpen: false, zen: true })).toBe(
+      zenEscAction({ overlaysOpen: false, zenSideOpen: false, zen: true })
     );
     // 刻意差异：空闲态（守卫在场、无面板、非 zen）Esc 侧 none，返回键侧 ignore
     // ——popstate 的 no-op 还承担「不劫持正常导航」（放行原生回退）
-    expect(zenPopAction({ guardArmed: true, overlaysOpen: false, zen: false })).toBe('ignore');
+    expect(zenPopAction({ guardArmed: true, overlaysOpen: false, zenSideOpen: false, zen: false })).toBe('ignore');
+    // spec A Task 4 等价性扩展：侧开态两触发源同分派 closeZenSide（先关栏再退 zen）
+    expect(zenPopAction({ guardArmed: true, overlaysOpen: false, zenSideOpen: true, zen: true })).toBe(
+      zenEscAction({ overlaysOpen: false, zenSideOpen: true, zen: true })
+    );
   });
 
   it('popstate 分派：面板开 → closeOverlay（返回键承接「Esc 先关面板」）', () => {
-    expect(zenPopAction({ guardArmed: true, overlaysOpen: true, zen: true })).toBe('closeOverlay');
-    expect(zenPopAction({ guardArmed: true, overlaysOpen: true, zen: false })).toBe('closeOverlay');
+    expect(zenPopAction({ guardArmed: true, overlaysOpen: true, zenSideOpen: false, zen: true })).toBe('closeOverlay');
+    expect(zenPopAction({ guardArmed: true, overlaysOpen: true, zenSideOpen: false, zen: false })).toBe('closeOverlay');
   });
 
   it('popstate 分派：无面板且 zen → exitZen', () => {
-    expect(zenPopAction({ guardArmed: true, overlaysOpen: false, zen: true })).toBe('exitZen');
+    expect(zenPopAction({ guardArmed: true, overlaysOpen: false, zenSideOpen: false, zen: true })).toBe('exitZen');
   });
 
-  it('守卫不在场恒 ignore：正常导航不劫持（含面板开着但不经 zen 的回退不误退）', () => {
-    expect(zenPopAction({ guardArmed: false, overlaysOpen: true, zen: true })).toBe('ignore');
-    expect(zenPopAction({ guardArmed: false, overlaysOpen: true, zen: false })).toBe('ignore');
-    expect(zenPopAction({ guardArmed: false, overlaysOpen: false, zen: false })).toBe('ignore');
+  // spec A Task 4 新档：返回键先关 zen 打开的栏（抽屉断点含关抽屉），zen 保持
+  it('popstate 分派新档 closeZenSide：guardArmed + zenSideOpen → closeZenSide（插在 overlay 与 exitZen 之间）', () => {
+    expect(zenPopAction({ guardArmed: true, overlaysOpen: false, zenSideOpen: true, zen: true })).toBe('closeZenSide');
+  });
+
+  it('守卫不在场恒 ignore：正常导航不劫持（含面板开着但不经 zen 的回退不误退；侧开不改变守卫门）', () => {
+    expect(zenPopAction({ guardArmed: false, overlaysOpen: true, zenSideOpen: false, zen: true })).toBe('ignore');
+    expect(zenPopAction({ guardArmed: false, overlaysOpen: true, zenSideOpen: false, zen: false })).toBe('ignore');
+    expect(zenPopAction({ guardArmed: false, overlaysOpen: false, zenSideOpen: false, zen: false })).toBe('ignore');
+    expect(zenPopAction({ guardArmed: false, overlaysOpen: false, zenSideOpen: true, zen: true })).toBe('ignore');
   });
 
   it('zen 已退但守卫残留（跨标签同步退出等边缘）：ignore 不误动作', () => {
-    expect(zenPopAction({ guardArmed: true, overlaysOpen: false, zen: false })).toBe('ignore');
+    expect(zenPopAction({ guardArmed: true, overlaysOpen: false, zenSideOpen: false, zen: false })).toBe('ignore');
   });
 });

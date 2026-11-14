@@ -162,12 +162,20 @@
   /** 左栏视图（spec A §4.1）：'tree'=文件树（默认），'toc'=目录视图（TocView 共享件）。
    * 会话态不持久化、不进快照、不进 layout.ts（零 settings/schema）。 */
   let leftView = $state<'tree' | 'toc'>('tree');
-  /** 有效视图派生（spec A Task 3）：本 task 恒等（zen 覆盖项 Task 4 加入）——消费点
-   * 三处：左栏渲染分支（leftViewEff）/ 滚动跟随门 / gitRepoDir 透传门（rightViewEff，
-   * 右值）。zen 打开的栏锁目录视图时经派生注入（Task 4），不改写用户会话态（关闭
-   * 侧零污染）；写点只在切换器点击与校正 effect。 */
-  const leftViewEff = $derived(leftView);
-  const rightViewEff = $derived(rightView);
+  /** zen 目录入口打开侧（spec A §4.2 Task 4）：'none'=未开，'left'/'right'=对应栏
+   * 锁目录视图。UI 会话态不入 settings/快照/layout.ts（spec §4.2 拍板形态）；CSS
+   * 按 .vv-shell 的 data-zen-side 条件放行对应 aside（app.css zen 块旁），关闭态置
+   * undefined 不出属性。toggleZen 退出只重置本态不关抽屉（中性动作零回滚——混合
+   * 场景规划评审 F4 落定，见 toggleZen 注释）。 */
+  let zenSide = $state<'none' | 'left' | 'right'>('none');
+  /** 有效视图派生（spec A Task 3 恒等引入，Task 4 加 zen 项）——消费点：左栏渲染
+   * 分支（leftViewEff）/ 右栏渲染分支与 gitRepoDir 透传门（rightViewEff）/ 滚动
+   * 跟随门。zen 打开的栏锁目录视图经派生注入，不改写用户会话态（关闭侧零污染，
+   * 零散写点为零）；写点只在切换器点击、校正 effect 与 zen 浮钮通道。zen 项读
+   * settings.layout.zen（layout 派生声明在脚本后段，此处直读同一 $state 跟踪面，
+   * 与 layout.zen 语义等价）。 */
+  const leftViewEff = $derived(settings.layout.zen && zenSide === 'left' ? 'toc' : leftView);
+  const rightViewEff = $derived(settings.layout.zen && zenSide === 'right' ? 'toc' : rightView);
   /**
    * git 可用性（git-panel Task 2）：ViewerPane ongitAvailable 上行的 per-tab 探测
    * 结果（repoDir；null = 不可用/未探测到）。语义随激活 tab——tab 身份变化
@@ -540,10 +548,54 @@
         isDrawerBreakpoint() ? t('shell.zen.toastMobile') : t('shell.zen.toastDesktop')
       );
     } else {
+      // 退出只重置 zenSide 不关抽屉（spec A Task 4，混合场景规划评审 F4 落定）：
+      // ✕/菜单/Ctrl+Alt+Z 可在侧开时直退 zen——残留 zenSide 会让非 zen 态命中
+      // data-zen-side 放行规则；而退出是中性动作不回滚任何 drawers 开合位（进 zen
+      // 前左抽屉已开 → zen 期浮钮开侧 → 直退 zen：按「退出关抽屉」实现会关掉进
+      // zen 前就开着的抽屉，违反 mLZ-04「进入前开态还原」语义；实现上也无法区分
+      // 开合来源，本落定绕开该不可行面——mLZ-04 与「浮钮开的抽屉退出后保持」两面
+      // 同时成立）
+      zenSide = 'none';
       clearTempTimers();
       dismissZenToast();
     }
     zenGuard.update(zen, viaPopstate, isDrawerBreakpoint());
+  }
+
+  // ---------- zen 目录入口（spec A §4.2/§8 Task 4）：双浮钮 + zenSide 单开 ----------
+
+  /** 浮钮点击（显隐门=目录数据非空，spec §8 落定 2，渲染侧 {#if}）：同侧再点=关
+   * （closeZenSide）；异侧=关旧开新（zenSide 单值天然单开语义）。开=置侧且按断点
+   * 分流（spec §8 落定 1）：左栏抽屉断点（≤900px）→ 复用抽屉状态机开左抽屉
+   * （shell .drawer 类既有通道——移动端仅加 zenSide 不开抽屉 = 栏停在屏外可见
+   * 不可达）；右栏手机断点（≤600px）→ 开右抽屉；桌面断点仅置 zenSide（data-zen-side
+   * flex 放行通道）。置位非切换（已开保持开——openRightDrawerForMetaLang 同形）。 */
+  function toggleZenSide(side: 'left' | 'right'): void {
+    if (zenSide === side) {
+      closeZenSide();
+      return;
+    }
+    zenSide = side;
+    if (side === 'left' && isDrawerBreakpoint()) {
+      drawers = { ...drawers, leftOpen: true };
+    } else if (side === 'right' && window.matchMedia('(max-width: 600px)').matches) {
+      drawers = { ...drawers, rightOpen: true };
+    }
+  }
+
+  /** 显式关闭动作（浮钮再点 / Esc / 返回键）：zenSide 归位 + 断点下关对应侧抽屉。
+   * 不做开合来源区分（混合场景规划评审 F4 落定）——抽屉是该动作链的载体，随之
+   * 关闭与 ☰ toggle 翻转语义同族；「进 zen 前抽屉已开、zen 期浮钮关闭」属用户对
+   * 目录栏的显式关闭请求，不视为回滚。Esc 通道无 history 面；返回键通道在
+   * onPopstate 分支消费守卫后重 arm（镜像 closeOverlay 分支不变式）。 */
+  function closeZenSide(): void {
+    const side = zenSide;
+    zenSide = 'none';
+    if (side === 'left' && isDrawerBreakpoint()) {
+      drawers = { ...drawers, leftOpen: false };
+    } else if (side === 'right' && window.matchMedia('(max-width: 600px)').matches) {
+      drawers = { ...drawers, rightOpen: false };
+    }
   }
 
   // ---------- zen 移动端（spec §3.1，Task 4）：返回键拦截 / 浮钮 / 抽屉入口 ----------
@@ -599,16 +651,25 @@
   }
 
   function onPopstate(): void {
-    // chromeMenu 不在 OVERLAY_SELECTOR（AppShell Esc 分支同序：菜单 > overlay > zen）
+    // chromeMenu 不在 OVERLAY_SELECTOR（AppShell Esc 分支同序：菜单 > overlay > 侧开 > zen）
     const action = zenPopAction({
       guardArmed: zenGuard.isArmed,
       overlaysOpen: anyOverlayOpen() || chromeMenu !== null,
+      zenSideOpen: zenSide !== 'none',
       zen: layout.zen
     });
     if (action === 'ignore') return; // 守卫不在场：正常导航，放行
     if (action === 'exitZen') {
       zenGuard.consume(); // 本次回退已弹出守卫项，toggleZen 不再 history.back
       toggleZen(true);
+      return;
+    }
+    if (action === 'closeZenSide') {
+      // spec A Task 4 新档：返回键先关 zen 打开的栏（closeZenSide 含断点关抽屉）、
+      // zen 保持；守卫项已被本次回退消费，关侧后重新压入——镜像 closeOverlay 分支
+      // 维持「zen 在场即守卫在顶」不变式，下次返回继续承接（否则下一次返回键直接离页）
+      closeZenSide();
+      zenGuard.arm();
       return;
     }
     // closeOverlay：返回键先关面板、zen 保持；守卫项已被本次回退消费，关面板后
@@ -1197,10 +1258,20 @@
           chromeMenu = null;
           return;
         }
-        const action = zenEscAction({ overlaysOpen: escOverlayAtStart, zen: layout.zen });
+        const action = zenEscAction({
+          overlaysOpen: escOverlayAtStart,
+          zenSideOpen: zenSide !== 'none',
+          zen: layout.zen
+        });
         if (action === 'exitZen') {
           e.preventDefault();
           toggleZen();
+        } else if (action === 'closeZenSide') {
+          // spec A Task 4 新档：Esc 先关 zen 打开的栏（AppShell 自有动作，无 history
+          // 面）——两段退出第一段，第二段 Esc 才退 zen；面板在场时 closeOverlay 仍由
+          // 面板自带 handler 承接（此处不动作，优先级不变）
+          e.preventDefault();
+          closeZenSide();
         }
         return;
       }
@@ -1316,7 +1387,7 @@
   {/snippet}
   <!-- svelte-ignore a11y_no_static_element_interactions --><!-- contextmenu 为 chrome
      布局菜单入口（shell 级代理，按 target 归属分流），shell 容器无 AT 交互角色 -->
-  <div class="vv-shell" class:drawer={drawers.leftOpen} class:rightopen={drawers.rightOpen} class:zen={layout.zen} oncontextmenu={onShellContextMenu}>
+  <div class="vv-shell" class:drawer={drawers.leftOpen} class:rightopen={drawers.rightOpen} class:zen={layout.zen} data-zen-side={zenSide !== 'none' ? zenSide : undefined} oncontextmenu={onShellContextMenu}>
   <!-- 标签栏：hidden=zen 或显式隐藏（chromeVisible 覆盖语义）；temp=顶边悬停
        临时条（半透覆盖形态）。组件保持挂载——Ctrl+, 设置中心入口（AppShell 自有
        状态）与外观/字体订阅注入链（AppShell onMount）不因隐藏失效（spec §2 全件
@@ -1551,14 +1622,15 @@
           title={t('shell.strip.collapseMeta')} onclick={() => updateLayout({ rightCollapsed: true })}>›</button>
       </div>
       <div class="vv-right-scroll">
-        {#if rightView === 'toc'}
+        {#if rightViewEff === 'toc'}
           <!-- 目录视图互斥渲染（code-outline Task 3）：实例互斥保证 md TOC 与代码
               大纲不同时有数据——outlineDefinitions 在场渲染大纲（引用已过滤的显示
                集），否则 md TOC；两者皆空（用户点过切换器后切到无数据文件）回落属性
                面板兜底空态（右栏校正 effect 随即归位 'meta'，见其注释）。
                装配抽共享组件 TocView（spec A Task 2）：三分支装配原样迁入组件
                （行为零变化），左栏目录 tab（Task 3）/zen 目录视图（Task 4）复用
-               同一装配件。 -->
+               同一装配件。条件走 rightViewEff（Task 4）：zen 打开右栏时派生注入
+               'toc' 锁目录视图，不改写 rightView 会话态（关闭侧零污染）。 -->
           <TocView
             {tocEntries}
             {outlineDisplayed}
@@ -1567,7 +1639,7 @@
             outlineTruncated={outlineTruncated}
             onExpandAll={expandOutlineAll}
           />
-        {:else if rightView === 'git' && gitInfo !== null && gitStore !== null}
+        {:else if rightViewEff === 'git' && gitInfo !== null && gitStore !== null}
           <!-- Git 段（git-panel Task 2）：探测可用才渲染（gitInfo null 时即使
                rightView 停留 'git'——用户选过 Git 后切到无 git 文件、touched 台账
                语义保持选择——也回落属性面板兜底，与 toc 空态回落同款形态）；probe
@@ -1600,6 +1672,24 @@
          返回键先关面板，浮钮被压住即「面板优先」的视觉一致 -->
     <button type="button" class="vv-zen-exit" aria-label={t('shell.zen.exit')} title={t('shell.zen.exit')}
       onclick={() => toggleZen()}>✕</button>
+  {/if}
+  {#if layout.zen && (tocEntries.length > 0 || outlineDefinitions.length > 0)}
+    <!-- zen 目录入口双浮钮（spec A §4.2/§8 Task 4）：内容区左右缘中部，开对应栏
+         锁目录视图（再点/Esc/返回键关，toggleZenSide 状态机）。显隐门=layout.zen &&
+         目录数据非空（spec §8 落定 2——tocEntries/outlineDefinitions 皆空不开空栏，
+         合并条件独立成块与计划 Interfaces 同形）；aria-pressed 表开合态；可见文本
+         复用 shell.left.toc（同语义面「目录视图」标签，§3.1 shell.empty.title 跨
+         组件复用先例同族；aria 含可见文本词形，label-content-name-mismatch 两
+         locale 均满足）；z-index 25 与 .vv-zen-exit 同档（semantic-components §2
+         档 25——低于面板层 30 的「面板优先」视觉一致）。桌面/移动通吃：桌面
+         data-zen-side flex 放行，移动端复用抽屉通道（toggleZenSide 断点分流），
+         中部边缘天然避开 .vv-zen-exit（右下 bottom:34px）与状态栏 -->
+    <button type="button" class="vv-zen-toc-btn vv-zen-toc-left" aria-label={t('shell.zen.tocLeftAria')}
+      title={t('shell.zen.tocLeftAria')} aria-pressed={zenSide === 'left'}
+      onclick={() => toggleZenSide('left')}>{t('shell.left.toc')}</button>
+    <button type="button" class="vv-zen-toc-btn vv-zen-toc-right" aria-label={t('shell.zen.tocRightAria')}
+      title={t('shell.zen.tocRightAria')} aria-pressed={zenSide === 'right'}
+      onclick={() => toggleZenSide('right')}>{t('shell.left.toc')}</button>
   {/if}
   {#if zenToast}
     <!-- zen 进入提示（Toast）：退出通道告知——zen 覆盖全部 chrome，无此提示
@@ -1880,6 +1970,39 @@
       opacity: 1;
       transform: translate(-50%, 0);
     }
+  }
+  /* zen 目录入口双浮钮（spec A §4.2/§8 Task 4）：全断点通用（桌面 flex 放行、移动
+     抽屉通道都经此钮进入，样式不分断）。左右缘垂直居中 44×44 触控标准（§4 a11y/
+     WCAG 2.2 触控档）；视觉对齐 .vv-zen-exit 先例（半透 0.55、hover/focus-visible
+     提亮 1、圆角 50%、边框/背景 token 同款）；z-index 25 与 .vv-zen-exit 同档
+     （semantic-components §2 档 25，低于面板层 30——「面板优先」视觉一致）；
+     无 transition 属性（reduceMotion 无 JS 驱动动画面，§6 A1 无需手工核） */
+  .vv-zen-toc-btn {
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 25;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 1px solid var(--ui-border);
+    background: var(--ui-tab-active-bg);
+    color: var(--ui-fg);
+    /* 字阶 token（ui-design-system §3.2）：可见文本钮随切换器小钮档 --vv-fs-xs */
+    font-size: var(--vv-fs-xs);
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.55;
+  }
+  .vv-zen-toc-left {
+    left: 12px;
+  }
+  .vv-zen-toc-right {
+    right: 12px;
+  }
+  .vv-zen-toc-btn:hover,
+  .vv-zen-toc-btn:focus-visible {
+    opacity: 1;
   }
   @media (max-width: 900px) {
     .vv-drawer-head {

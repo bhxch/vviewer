@@ -97,35 +97,46 @@ export function chromeVisible(l: LayoutSettings): ChromeVisibility {
   };
 }
 
-export type ZenEscAction = 'closeOverlay' | 'exitZen' | 'none';
+export type ZenEscAction = 'closeOverlay' | 'closeZenSide' | 'exitZen' | 'none';
 
 /**
  * Esc 优先级状态机（spec §3）：设置/搜索/快速打开等 overlay 打开时 Esc 只关
- * overlay（面板自带 Esc 处理器，AppShell 侧不动作）；无 overlay 时 Esc 退 zen；
- * 平时 Esc 无事。同一状态机双触发源（桌面 Esc / 移动端返回键，spec §3.1）——
- * 触发源只负责算出 overlaysOpen，分派语义集中在此纯函数。
+ * overlay（面板自带 Esc 处理器，AppShell 侧不动作）；zen 目录入口打开的栏其次
+ * 关闭（spec A §4.2/§8 Task 4 新档 closeZenSide——先关栏再退 zen 两段退出）；
+ * 无 overlay 无侧开时 Esc 退 zen；平时 Esc 无事。同一状态机双触发源（桌面 Esc /
+ * 移动端返回键，spec §3.1）——触发源只负责算出 overlaysOpen/zenSideOpen，分派
+ * 语义集中在此纯函数。
  * overlaysOpen 的判定信号：AppShell 实时查 overlay 面板 DOM（各面板为 {#if}
  * 条件挂载，在 DOM 即开——比镜像多份 $state 布尔更准，见 AppShell anyOverlayOpen）。
+ * zenSideOpen 的判定信号：AppShell zenSide !== 'none'（zen 目录浮钮开的侧）。
  */
-export function zenEscAction(state: { overlaysOpen: boolean; zen: boolean }): ZenEscAction {
-  if (state.overlaysOpen) return 'closeOverlay';
+export function zenEscAction(state: { overlaysOpen: boolean; zenSideOpen: boolean; zen: boolean }): ZenEscAction {
+  if (state.overlaysOpen) return 'closeOverlay'; // 面板优先不变（LZ-05/LZ-12 锚）
+  if (state.zenSideOpen) return 'closeZenSide'; // 新档：先关 zen 打开的栏
   if (state.zen) return 'exitZen';
   return 'none';
 }
 
-export type ZenPopAction = 'closeOverlay' | 'exitZen' | 'ignore';
+export type ZenPopAction = 'closeOverlay' | 'closeZenSide' | 'exitZen' | 'ignore';
 
 /**
  * 返回键 popstate 分派（spec §3.1）：zenEscAction 的第二触发源（Android 返回键 /
  * PWA standalone 手势），语义逐态一致（guardArmed=true 时等价，layout.test 锁定）。
  * 差异只在守卫门：guardArmed=当前历史项是 AppShell 压入的 zen 守卫（{vvZen:1}）——
  * 守卫不在场一律 ignore 放行原生回退（不劫持正常导航，含「面板开着但不经 zen」的
- * 回退不误退）；守卫在场则面板开=closeOverlay（承接桌面「Esc 先关面板」）、无面板
+ * 回退不误退）；守卫在场则面板开=closeOverlay（承接桌面「Esc 先关面板」）、侧开=
+ * closeZenSide（spec A Task 4 新档，插在 overlay 与 exitZen 之间）、无面板无侧开
  * 且 zen=exitZen，余皆 ignore（如跨标签同步退 zen 后的残留守卫）。
  */
-export function zenPopAction(state: { guardArmed: boolean; overlaysOpen: boolean; zen: boolean }): ZenPopAction {
+export function zenPopAction(state: {
+  guardArmed: boolean;
+  overlaysOpen: boolean;
+  zenSideOpen: boolean;
+  zen: boolean;
+}): ZenPopAction {
   if (!state.guardArmed) return 'ignore';
   if (state.overlaysOpen) return 'closeOverlay';
+  if (state.zenSideOpen) return 'closeZenSide';
   if (state.zen) return 'exitZen';
   return 'ignore';
 }

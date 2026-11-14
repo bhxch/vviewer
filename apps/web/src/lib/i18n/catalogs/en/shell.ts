@@ -8,6 +8,9 @@ export const messages = {
   'shell.zen.toastDesktop': 'Entered Zen mode: press Esc or Ctrl+Alt+Z to exit',
   'shell.zen.toastMobile': 'Entered Zen mode: tap ✕ in the bottom-right corner or press Back to exit',
   'shell.zen.exit': 'Exit Zen mode',
+  // zen 目录入口双浮钮（spec A §4.2/§8 Task 4）：aria/title same value (visible label reuses shell.left.toc)
+  'shell.zen.tocLeftAria': 'Open TOC in left panel',
+  'shell.zen.tocRightAria': 'Open TOC in right panel',
 
   // —— chrome 右键菜单（shell.chrome.*）——
   'shell.chrome.hideTabbar': 'Hide tab bar',

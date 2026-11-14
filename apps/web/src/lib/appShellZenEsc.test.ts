@@ -28,11 +28,27 @@ describe('Esc 优先级快照（spec §3：面板优先只关面板，Svelte 5 �
   });
 
   it('onKey 的 zenEscAction 消费快照而非实时 DOM 查询（同步 flush 下后者恒 false）', () => {
-    expect(src).toContain(
-      'const action = zenEscAction({ overlaysOpen: escOverlayAtStart, zen: layout.zen })'
+    // spec A Task 4：入参扩 zenSideOpen（closeZenSide 新档，layout.ts 签名同源）
+    expect(src).toMatch(
+      /const action = zenEscAction\(\{\s*overlaysOpen: escOverlayAtStart,\s*zenSideOpen: zenSide !== 'none',\s*zen: layout\.zen\s*\}\)/
     );
     // onKey 冒泡相内不再实时查面板（chromeMenu 直读状态除外——其无自有 Esc handler）
     expect(src).toMatch(/if \(e\.key === 'Escape'\)[\s\S]{0,400}?escOverlayAtStart/);
+  });
+
+  it('closeZenSide 新档（spec A §4.2/§8 Task 4）：Esc 先关 zen 打开的栏（自有动作 preventDefault，无 history 面），面板在场优先级不变', () => {
+    expect(src).toMatch(
+      /else if \(action === 'closeZenSide'\)[\s\S]{0,200}e\.preventDefault\(\);\s*closeZenSide\(\)/
+    );
+    // exitZen 分支保持在 closeZenSide 之后（两段退出：第一段关栏、第二段退 zen）
+    expect(src).toMatch(/if \(action === 'exitZen'\)[\s\S]{0,200}toggleZen\(\)/);
+  });
+
+  it('zen 目录浮钮 aria-pressed 接线（spec A Task 4）：开合态经 zenSide 表达、点击 toggleZenSide（同侧再点=关）', () => {
+    expect(src).toMatch(/vv-zen-toc-btn vv-zen-toc-left"[\s\S]{0,300}aria-pressed=\{zenSide === 'left'\}/);
+    expect(src).toMatch(/vv-zen-toc-btn vv-zen-toc-right"[\s\S]{0,300}aria-pressed=\{zenSide === 'right'\}/);
+    expect(src).toMatch(/aria-pressed=\{zenSide === 'left'\}[\s\S]{0,120}onclick=\{\(\) => toggleZenSide\('left'\)\}/);
+    expect(src).toMatch(/aria-pressed=\{zenSide === 'right'\}[\s\S]{0,120}onclick=\{\(\) => toggleZenSide\('right'\)\}/);
   });
 
   it('快照监听随 effect 卸载清理（capture 标记与注册对称）', () => {

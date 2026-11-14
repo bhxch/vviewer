@@ -54,7 +54,7 @@
 |---|---|---|---|
 | 行内盖 | 1 | `.vv-tabbar-arrow`（app.css:552）；tab 滚动渐隐上的箭头（app.css:549-552） | 容器内局部盖序 |
 | 抽屉带 | 20 | `.vv-side` 抽屉态（AppShell.svelte:1656）、`.vv-right` ≤600px 抽屉态（:1690）、`.vv-drawer-toggle`（:1668）、`.vv-right-toggle`（:1702）、`.vv-dl-progress` / `.vv-dl-confirm`（app.css:168/195，查看器内 absolute） | 压过 ArtPlayer `.art-video`（上游 absolute z-index:10）——PWA-09/2、MEDIA-11 修复口径 |
-| zen 退出钮 | 25 | `.vv-zen-exit`（AppShell.svelte:1773） | 刻意低于面板层 30：面板在场时返回键先关面板的视觉一致 |
+| zen 浮钮 | 25 | `.vv-zen-exit`（AppShell.svelte:2025，≤900px 断点块内）、`.vv-zen-toc-btn`（AppShell.svelte:1979，全断点通用） | 刻意低于面板层 30：面板在场时返回键先关面板的视觉一致；zen 目录入口浮钮（spec A Task 4）与退出钮语义同层，禁新开档位 |
 | 面板层 | 30 | overlay 族：`.vv-settings-center`（SettingsCenter.svelte:520）、`.vv-mounts-manager`（MountsManager.svelte:657）、`.vv-gsearch`（GlobalSearchPanel.svelte:325）、`.vv-quickopen`（QuickOpenPanel.svelte:208）、`.vv-wscreate-panel`（app.css:474-477）、`.vv-wspanel`（app.css:484）、`.vv-status-picker`（app.css:680）、`.vv-git-blame-pop`（app.css:799） | 同位面板/浮层/拾取器基准档 |
 | 确认/模态 | 31 / 32 | `.vv-sc-confirm` 31（SettingsCenter.svelte:727）、`.vv-sc-modal` 32（:745） | 面板层之上的次级弹层 |
 | chrome 条 | 50 | `.vv-chrome-off` / `.vv-chrome-temp`（app.css:392/397） | 标签栏隐藏后的临时条 |

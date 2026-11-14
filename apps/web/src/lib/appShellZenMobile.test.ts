@@ -81,3 +81,46 @@ describe('移动端 zen 入口（spec §3.1：布局菜单项 + ☰ 抽屉头部
     expect(src).not.toMatch(/vv-drawer-zen"[\s\S]{0,200}drawerOpen/); // 退出还原进入前开合（spec）
   });
 });
+
+describe('zen 目录入口（spec A §4.2/§8 Task 4）：data-zen-side 放行 + closeZenSide 新档 + 退出中性', () => {
+  const src = readSrc('src/lib/AppShell.svelte');
+  const css = readSrc('src/app.css');
+
+  it('data-zen-side 属性绑定 .vv-shell：关闭态 undefined 不出属性（app.css 放行规则不命中）', () => {
+    expect(src).toMatch(
+      /class:zen=\{layout\.zen\} data-zen-side=\{zenSide !== 'none' \? zenSide : undefined\}/
+    );
+  });
+
+  it('onPopstate closeZenSide 分支：关侧后 zenGuard.arm() 重压（镜像 closeOverlay「zen 在场即守卫在顶」不变式，否则下次返回键直接离页）', () => {
+    expect(src).toMatch(
+      /action === 'closeZenSide'[\s\S]{0,300}closeZenSide\(\);[\s\S]{0,80}zenGuard\.arm\(\)/
+    );
+  });
+
+  it('toggleZen 退出只重置 zenSide 不关抽屉（中性动作零回滚 drawers 开合位——mLZ-04「进入前开态还原」与浮钮开的抽屉退出后保持两面同时成立，混合场景 F4 落定）', () => {
+    const body = src.match(/function toggleZen\(viaPopstate = false\): void \{[\s\S]*?\n[ ]{2}\}/)?.[0] ?? '';
+    expect(body).toContain("zenSide = 'none'");
+    expect(body).not.toMatch(/drawers\s*=/); // 退出分支体无任何抽屉开合写入
+  });
+
+  it('浮钮显隐门=目录数据非空（spec §8 落定 2）+ 断点分流接线（≤900 左抽屉 / ≤600 右抽屉，置位非切换）', () => {
+    expect(src).toMatch(
+      /\{#if layout\.zen && \(tocEntries\.length > 0 \|\| outlineDefinitions\.length > 0\)\}[\s\S]{0,900}vv-zen-toc-btn/
+    );
+    expect(src).toMatch(/side === 'left' && isDrawerBreakpoint\(\)[\s\S]{0,120}leftOpen: true/);
+    expect(src).toMatch(/side === 'right' && window\.matchMedia\('\(max-width: 600px\)'\)[\s\S]{0,120}rightOpen: true/);
+  });
+
+  it('zen 条件放行规则（app.css）：0,4,0 只放行 aside 本体，栏内切换器隐藏，折叠钮不在放行面（spec §8 落定 3——避免持久化写入）', () => {
+    expect(css).toContain(".vv-shell.zen[data-zen-side='left'] .vv-side { display: flex; }");
+    expect(css).toContain(".vv-shell.zen[data-zen-side='right'] .vv-right { display: flex; }");
+    expect(css).toContain(".vv-shell.zen[data-zen-side='left'] .vv-left-switch { display: none; }");
+    expect(css).toContain(".vv-shell.zen[data-zen-side='right'] .vv-right-switch { display: none; }");
+  });
+
+  it('i18n：zen 浮钮 aria 双键 zh 值（en 键集==zh 键集由聚合机检锁）', () => {
+    expect(zhShell['shell.zen.tocLeftAria']).toBe('打开左栏目录');
+    expect(zhShell['shell.zen.tocRightAria']).toBe('打开右栏目录');
+  });
+});

@@ -9,6 +9,9 @@ export const messages = {
   'shell.zen.toastDesktop': '已进入专注模式：按 Esc 或 Ctrl+Alt+Z 退出',
   'shell.zen.toastMobile': '已进入专注模式：点右下角 ✕ 或按返回键退出',
   'shell.zen.exit': '退出专注模式',
+  // zen 目录入口双浮钮（spec A §4.2/§8 Task 4）：aria/title 同值（可见文本复用 shell.left.toc）
+  'shell.zen.tocLeftAria': '打开左栏目录',
+  'shell.zen.tocRightAria': '打开右栏目录',
 
   // —— chrome 右键菜单（shell.chrome.*）——
   'shell.chrome.hideTabbar': '隐藏标签栏',
