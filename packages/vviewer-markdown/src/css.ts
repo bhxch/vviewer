@@ -188,6 +188,22 @@ export const RUNTIME_ANCHOR_CSS = `.vv-markdown a.anchor { color: var(--ui-accen
 export const BLOCKED_EXTERNAL_CSS = `.vv-markdown img[data-vv-blocked-external] { display: inline-block; min-width: 96px; min-height: 40px;
   border: 1px dashed #b58900; border-radius: 4px; background: rgb(181 137 0 / 8%); }`;
 
+/** 外链媒体 manual 档占位（spec D §3.1）：sanitize 迁 src 入 data 属性后的待确认
+ * 形态——img 隐藏不发请求（BUG-17 防线），按钮承接逐张放行。框样式值沿用
+ * BLOCKED_EXTERNAL_CSS 既有档，零新 token（焦点环遵循 §5 全局环之外的显式
+ * :focus-visible 提示——与全局 :where 环同值档位，box 内 inset 无从辨识故外置）。 */
+export const EXT_MEDIA_CSS = `/* 外链媒体 manual 档占位（spec D §3.1）：sanitize 迁 src 入 data 属性后的待确认
+   形态——img 隐藏不发请求（BUG-17 防线），按钮承接逐张放行。框样式值沿用
+   BLOCKED_EXTERNAL_CSS 既有档，零新 token（焦点环遵循 §5 全局环之外的显式
+   :focus-visible 提示——与全局 :where 环同值档位，box 内 inset 无从辨识故外置）。 */
+.vv-markdown .md-ext-media { display: inline-block; min-width: 96px; min-height: 40px;
+  border: 1px dashed #b58900; border-radius: 4px; background: rgb(181 137 0 / 8%); padding: 4px 8px; }
+.vv-markdown .md-ext-media img { display: none; }
+.vv-markdown .md-ext-media-load { font: inherit; font-size: .85em; color: var(--ui-fg, #1f2328);
+  background: transparent; border: 1px solid var(--ui-border, #d0d7de); border-radius: 3px;
+  padding: 2px 8px; cursor: pointer; }
+.vv-markdown .md-ext-media-load:focus-visible { outline: 2px solid var(--ui-accent, #0969da); outline-offset: 1px; }`;
+
 /** 文件内搜索命中 mark（独立使用 search() 的完整效果所需；app 侧该段仍单源自持）。 */
 export const SEARCH_HIT_CSS = `mark.vv-search-hit { background: var(--vv-hit-bg, rgb(255 213 0 / 45%)); color: inherit; }
 mark.vv-search-hit-active { background: var(--vv-hit-active, rgb(255 160 0 / 80%)); }`;
@@ -207,5 +223,6 @@ export const MARKDOWN_CSS = [
   WIKILINK_CSS,
   RUNTIME_ANCHOR_CSS,
   BLOCKED_EXTERNAL_CSS,
+  EXT_MEDIA_CSS,
   SEARCH_HIT_CSS
 ].join('\n');

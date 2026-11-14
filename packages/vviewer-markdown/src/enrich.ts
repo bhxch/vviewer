@@ -321,10 +321,98 @@ function normalizeTaskLists(root: Document): void {
   }
 }
 
+// ---------- spec D §3.1：manual 档外链媒体占位构建（sanitize data-vv-external-src 标记承接） ----------
+
+// 会话免确认集（spec §5 裁量落定：包内模块级，页面生命周期——不持久化、不随渲染
+// 实例销毁/重渲清空；同 src 跨 tab/跨重渲一次确认，点击回填时登记）。
+const loadedExternalSrcs = new Set<string>();
+
+/** 测试专用：清空会话免确认集（render-text __resetAttachPhaseForTest 同款命名形态）。 */
+export function __resetExternalMediaSessionForTest(): void {
+  loadedExternalSrcs.clear();
+}
+
+/**
+ * manual 档 img src/srcset 回填 + 标记转已加载：占位 CSS（data-vv-blocked-external）
+ * 与本次构建代币一并移除。点击路径的 wrapper 解包由调用方闭包持 wrap 引用完成
+ * （会话免确认路径构建时 img 尚未被包裹，直接回填即可）。
+ */
+function restoreExternalMedia(img: Element, src: string, srcset: string | null): void {
+  img.setAttribute('src', src);
+  if (srcset) img.setAttribute('srcset', srcset);
+  img.removeAttribute('data-vv-external-src');
+  img.removeAttribute('data-vv-external-srcset');
+  img.removeAttribute('data-vv-blocked-external'); // 标记转已加载：占位 CSS 不再命中
+  img.removeAttribute('data-md-ext-media');
+}
+
+/**
+ * manual 档占位构建：每 img[data-vv-external-src]（sanitize 三档分流 manual 档产出
+ * 的待确认标记）包 span.md-ext-media（虚线框语义沿用 BLOCKED_EXTERNAL_CSS 档）——
+ * img 由 CSS 隐藏（DOM 无 src 即不发请求，BUG-17 防线真实维持），button.md-ext-media-load
+ * 承接逐张放行。按钮文案按目标扩展名区分（§6 落定 2：enrich 的 img→video/audio
+ * 转换在 manual 档不发生——src 已迁 data 属性，convertMediaElements 对无 src img
+ * 天然跳过；.mp4/.webm/.ogg→「加载视频」，.mp3/.wav/.flac/.m4a→「加载音频」，
+ * 其余→「加载图片」；文案为包内中文常量，与 DEFAULT_UI_TEXTS 缺省中文同源形态）。
+ * 点击按扩展名创建 video/audio 元素（controls+preload=none+无 autoplay=MD-13 语义）
+ * 替换占位，img 分支回填进原 img。幂等：已处理的挂 data-md-ext-media 代币防二次命中
+ * （runCopyCode 代币先例形态）；同 src 已在会话免确认集时跳过交互直接回填。
+ */
+function buildExternalMediaPlaceholders(root: Document): void {
+  for (const img of Array.from(root.querySelectorAll('img[data-vv-external-src]'))) {
+    if (img.hasAttribute('data-md-ext-media')) continue;
+    img.setAttribute('data-md-ext-media', '');
+    const src = img.getAttribute('data-vv-external-src')!;
+    const srcset = img.getAttribute('data-vv-external-srcset');
+    if (loadedExternalSrcs.has(src)) {
+      restoreExternalMedia(img, src, srcset); // 会话免确认：直接回填
+      continue;
+    }
+    const ext = mediaExtension(src);
+    const isVideo = ext !== null && VIDEO_EXTS.has(ext);
+    const isAudio = ext !== null && AUDIO_EXTS.has(ext);
+    // §6 落定 2：按钮文案按扩展名——加载视频/加载音频/加载图片（包内中文常量）
+    const label = isVideo ? '加载视频' : isAudio ? '加载音频' : '加载图片';
+    const wrap = root.createElement('span');
+    wrap.className = 'md-ext-media';
+    const btn = root.createElement('button');
+    btn.type = 'button';
+    btn.className = 'md-ext-media-load';
+    btn.textContent = label;
+    btn.setAttribute('aria-label', `${label}：${hostOf(src)}`);
+    const title = img.getAttribute('title');
+    if (title) wrap.setAttribute('title', title); // wrapper 继承 img 的域名 title（悬停提示）
+    img.parentNode!.insertBefore(wrap, img);
+    wrap.append(img, btn);
+    btn.addEventListener('click', () => {
+      if (btn.disabled) return;
+      btn.disabled = true; // 双击防抖：回填是幂等的但按钮先禁
+      loadedExternalSrcs.add(src);
+      if (isVideo || isAudio) {
+        // §6 落定 2：按扩展名创建 video/audio（controls+preload=none+无 autoplay=
+        // MD-13 语义，maxWidth 100% 对齐 convertMediaElements），替换占位 wrapper
+        const media = root.createElement(isVideo ? 'video' : 'audio');
+        media.setAttribute('controls', '');
+        media.setAttribute('preload', 'none');
+        media.setAttribute('src', src);
+        (media as HTMLElement).style.maxWidth = '100%';
+        const alt = img.getAttribute('alt');
+        if (alt) media.setAttribute('aria-label', alt);
+        if (title) media.setAttribute('title', title);
+        wrap.replaceWith(media);
+      } else {
+        restoreExternalMedia(img, src, srcset); // img src/srcset 回填 + 标记转已加载
+        wrap.replaceWith(img); // 解包（点击路径）
+      }
+    });
+  }
+}
+
 /** 净化后 DOM 的展示性增强入口（幂等：callout/媒体替换后原元素已不复存在；
  * wikilink 扫描跳过 A/降级 span 祖先，已处理文本不二次改写）。 */
 export function enrichMarkdownDom(root: Document): void {
   convertMediaElements(root);
+  buildExternalMediaPlaceholders(root); // spec D §3.1：manual 档外域媒体占位（sanitize data-vv-external-src 标记承接）
   convertCallouts(root);
   convertWikilinks(root); // Task 6：注册在 callout 之后（折叠卡片标题内的 wikilink 同获改写）
   normalizeTaskLists(root);
