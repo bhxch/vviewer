@@ -58,6 +58,9 @@
   import { recreateHighlightClient } from './highlightClient';
   // i18n/reduceMotion 接线（i18n 基建 D3/D11）：启动 + 设置订阅双通道应用
   import { setLocale, t } from './i18n/index.svelte';
+  // 触屏档案接线（spec B §3.1，Task 2）：启动 + 设置订阅 + $effect 热更新三通道，
+  // 全部只调单写点 applyTouchDataset（touchProfileState 不直引——读面经其内聚）
+  import { applyTouchDataset, initTouchProfileProbe, syncTouchProfile } from './touchProfile.svelte';
   // 大纲滚动跟随句柄（code-outline Task 3）：ViewerPane 上行 firstVisibleLine 命令式快照
   import { firstOutlineVisibleLine } from './metaStore.svelte';
   import { VV_FOCUS_META_LANG } from './metaLangFocus';
@@ -137,6 +140,15 @@
   // 触发 state_referenced_locally 警（编译器不知此处只取初值），闭包形态即取当下值
   const applyLocalePrefsAtStartup = (): void => applyLocaleAndReduceMotion(settings);
   applyLocalePrefsAtStartup();
+  // 触屏档案启动通道（spec B §3.1，Task 2）：探测初始化 + 设置初值同步 + 首帧前
+  // 打标（镜像上方 locale 初值通道「首帧前生效」口径）；闭包形态同源——init 期
+  // 脚本体直读 $state 即 state_referenced_locally 警（applyLocalePrefsAtStartup 同款）
+  const applyTouchProfileAtStartup = (): void => {
+    initTouchProfileProbe();
+    syncTouchProfile(settings);
+    applyTouchDataset();
+  };
+  applyTouchProfileAtStartup();
   /** 移动端双抽屉开合（状态机在 shellDrawers.ts 纯模块，FE-2 抽出）：左=文件树
    *（≤900px 抽屉断点，shell .drawer 类）、右=MetaPanel/TOC（≤600px，.rightopen
    * 类，见样式媒体查询）——双抽屉独立开合（e937d05 钉死语义），断点门在事件侧
@@ -773,6 +785,14 @@
     gitInfo = null;
   });
 
+  // 触屏档案热更新（spec B §3.1，Task 2）：matchMedia change → coarse/touchPoints
+  // 翻转 → 本 effect 重跑重打标（mode 同步亦经 touchProfileState 响应式抵达）；
+  // 读面在 isTouchActive 内（touchProfileState 三字段），零自读自写环（写点
+  // documentElement 非响应式）。
+  $effect(() => {
+    applyTouchDataset();
+  });
+
   /** Git 段消费面（git-panel Task 2）：激活 tab 的 store/path——gitInfo 与本派生
    *  同源同代（上行/清空/消费都锚定激活 tab），渲染分支再以 gitStore 非 null 门控
    *  双保险（防御式，激活 tab 缺席时 GitSection 不上屏）。 */
@@ -850,6 +870,9 @@
       // locale/reduceMotion 接线（i18n 基建 D3/D11）：「语言与辅助功能」节应用后
       // 经本订阅生效——html[lang] 与 data-reduce-motion 同步打标
       applyLocaleAndReduceMotion(s);
+      // 触屏档案同步（spec B §3.1，Task 2）：布局节 touchMode 应用后经订阅链抵达，
+      // 打标由下方 $effect 响应式重跑承担（本行只写 mode 不直接动 DOM）
+      syncTouchProfile(s);
       // mermaid 主题即时生效（spec 2026-10-23 §9.2，Task 7）+ CDN engines 档位即时
       // 重画（spec C §3.2，Task 3）：两者实际变化才派发 vv:diagram-settings-applied
       // （无关设置保存零重画）；detail 恒为已解析具体主题（'auto' 按当前亮暗映射，
