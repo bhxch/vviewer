@@ -48,7 +48,7 @@
 1. **BUG-17 防线真实维持（T2 最大风险面）**：manual 档下 DOM 必须无 `src` 属性（src 值迁 `data-vv-external-src`）——若任何路径把 src 留在 DOM（哪怕 hidden img），浏览器照发请求，防线形同虚设。单测断言形态固定为「`not.toHaveAttribute('src')` + `toHaveAttribute('data-vv-external-src', …)`」（§6 落定 1 的断言基准）；e2e 以 `page.on('request')` 监听外域请求为终极判据（占位态零请求）。srcset 同口径：manual 下外域候选不得留在 DOM srcset（整串迁 `data-vv-external-srcset`）。
 2. **三档对既有锚零翻转的兑现**：默认档 manual 下，既有 BUG-40 基线护栏（t-md.spec.ts:487-494 `not.toHaveAttribute('src')`+`data-vv-blocked-external`）与 b-markdown-html 的 MD-11/BUG-17 markdown 断言（blocked count/title/`img[src^=http]` count 0）**字面全部继续成立**（manual 也产 data-vv-blocked-external 标记 + title，src 同样缺失）——规划期逐条核对成立；T6 必须实跑两文件兑现并在 t-md 基线护栏补 `data-vv-external-src` 在场断言（钉住 manual 语义，防未来悄悄退化回 blocked）。五类向量断言（五类 img/svg/style/poster/input 剥除 + 零外域请求）三档不变。
 3. **接管条件双注入（standalone 安全缺省）**：`resolveRelativeLink` 与 `openRelativeLink` **任一缺席即不接管**（wire pass 整体跳过，原生导航语义维持）——spec「解析器未注入/返回 null → 不接管」落定为双缝同时在场才绑定点击；resolver 返回 null → 当次点击放行原生行为。
-4. **wikilink 升级的幂等与降级**：enrich 侧死链 span 恒写 `data-wikilink-path`（纯元数据，零行为变化——resolver 不在场的 standalone 消费者维持不可点死链原样）；出口升级仅当 resolver+opener 在场且路径分类为站内相对（`isRelativeLinkHref`，外域嵌入 `![[https://…]]` 的 path 不升级）；升级换元素后原 span 的「已处理跳过」契约（convertWikilinks walker 对 `.md-wikilink-dead` 的 FILTER_REJECT，enrich.ts:260）不破坏——升级发生在 enrich 之后，`[[` 文本已定型无二次改写面。
+4. **wikilink 升级的幂等与降级**：enrich 侧死链 span 恒写 `data-wikilink-path`（纯元数据，零行为变化——resolver 不在场的 standalone 消费者维持不可点死链原样）；出口升级仅当 resolver+opener 在场且路径分类为站内相对（`isRelativeLinkHref`，外域嵌入 `![[https://…]]` 的 path 不升级）；升级换元素后原 span 的「已处理跳过」契约（convertWikilinks walker 对 `.md-wikilink-dead` 的 FILTER_REJECT，enrich.ts:260）不破坏——升级发生在 enrich 之后，`[[` 文本已定型无二次改写面。**既有死链 e2e 锚两处随升级翻转（计划评审 ①）**：b-md-corpus-markpad.spec.ts:351（MC-32，`span.md-wikilink-dead` count 3——L323 裸名/L324 带别名/L406 `[[sub/deep#Setup]]` 按 isRelativeLinkHref 全为站内相对→全部升级）与 b-md-syntax.spec.ts:66（`[[Other.md]]` 死链 span 不存活）——重定基认领=**Task 5**（装配后 app 内双缝恒在场才发生翻转；T4 落地时模块缝缺省 null、wire 不绑定，两锚零翻转），Task 6 Step 7 回归清单覆盖。
 5. **点击代理生命周期**：逐元素绑定（灯箱 runLightbox/复制徽标 runCopyCode 同款先例——监听随节点在挂载收养时保留、随 `destroy()` 的 `target.replaceChildren()` 与节点同灭），**不引入容器级委托**（裁量落定：委托需在 target 上挂监听并处理重渲解绑簿记，BUG-52 收口语义更重；spec §5 两形态中取逐链接绑定）。
 6. **设置面零漂移**：Settings 顶层新键 `markdown` **追加在 reduceMotion 之后**（键序尾部追加——DEFAULTS 注释 :135-138 的「键序与手工清单逐键一致、落盘字节面零漂移」契约维持）；notify() 深拷贝清单（:351-364）必须同步加 markdown 节（allowlist 数组拷贝），否则订阅方拿到共享数组引用回灌。
 
@@ -66,7 +66,7 @@
 - Create: `apps/web/src/lib/settings/MarkdownSection.svelte`（三态 select + 白名单 chip 列表编辑）
 - Modify: `apps/web/src/lib/SettingsCenter.svelte`（groups 注册 `{ id: 'markdown', label: t('settings.nav.markdown'), content: MarkdownSection }`，插在 renderers :70 之后、layout :71 之前）
 - Test: `apps/web/src/lib/settingsCenter.test.ts`（:33 组序契约的 nav 键序扩展 + MarkdownSection 契约：键字面 + zh 目录值双锁）
-- Modify: `apps/web/src/lib/i18n/catalogs/zh-CN/settings.ts`、`apps/web/src/lib/i18n/catalogs/en/settings.ts`（`settings.nav.markdown` + `settings.markdown.*` 7 键 + `settings.issue.*` 2 键）
+- Modify: `apps/web/src/lib/i18n/catalogs/zh-CN/settings.ts`、`apps/web/src/lib/i18n/catalogs/en/settings.ts`（**14 键**：`settings.nav.markdown` 1 + `settings.markdown.*` 11 + `settings.issue.*` 2——逐键清单见下方 Interfaces，计划评审 ③ 统一口径）
 - Modify: `apps/web/e2e/b-settings-center.spec.ts`（SC-01 十三→十四组明示翻转：labels 列表 :69-83 插 'Markdown' + 测试名/注释订正）
 
 **Interfaces:**
@@ -135,7 +135,7 @@ settingsDraft.test.ts：`validateSettings({ markdown: { externalImages: 'always'
 
 - [ ] **Step 3: MarkdownSection 组件 + 组注册 + i18n 双目录 + SC-01 翻转**
 
-按 Interfaces 落组件/组注册/13 个 i18n 键（zh 先定稿 → en 对译）；settingsCenter.test.ts 契约扩展（组序键序 + 组件键字面 + zh 值锁）；b-settings-center.spec.ts SC-01 labels 列表插 `'Markdown'`（renderers 打开方式之后）+ 测试名「十三组定稿序」改「十四组定稿序」+ 注释追加「markdown 组插在打开方式之后（spec D §3.1，十三→十四组为 spec D 明示翻转——D20 先例同款）」。Run: `pnpm vitest run apps/web/src/lib && pnpm run typecheck && pnpm lint` → 全绿（聚合机检含新键）。
+按 Interfaces 落组件/组注册/**14 个 i18n 键**（`settings.nav.markdown` 1 + `settings.markdown.*` 11 + `settings.issue.*` 2——与上方 Files/Interfaces 清单同一口径，计划评审 ③；zh 先定稿 → en 对译）；settingsCenter.test.ts 契约扩展（组序键序 + 组件键字面 + zh 值锁）；b-settings-center.spec.ts SC-01 labels 列表插 `'Markdown'`（renderers 打开方式之后）+ 测试名「十三组定稿序」改「十四组定稿序」+ 注释追加「markdown 组插在打开方式之后（spec D §3.1，十三→十四组为 spec D 明示翻转——D20 先例同款）」。Run: `pnpm vitest run apps/web/src/lib && pnpm run typecheck && pnpm lint` → 全绿（聚合机检含新键）。
 
 - [ ] **Step 4: 定向 e2e + 提交**
 
@@ -455,7 +455,7 @@ git add packages/vviewer-markdown && git commit -m "feat(markdown): manual 档�
   span.textContent = raw;
   ```
 - CSS：WIKILINK_CSS（css.ts:180）扩展 `.vv-markdown a.md-wikilink { color: var(--ui-accent, #0969da); cursor: pointer; }`（markdown.css 镜像同步）。
-- **验收锚**：relativeLinks.test.ts 全绿（分类矩阵：`./x`/`../x`/`x.md`/`/x`/裸名接管；`#a`/`http(s)`/`mailto:`/`data:`/`blob:`/`//host`/空串不接管；wire 后 a 有 data-vv-rel-link + click preventDefault + resolver fake file/directory/missing/null 四态 opener 调用面；resolver reject 无动作；wikilink span 升级为 a.md-wikilink + 外域 path 不升级；双缝缺一不绑定）+ enrichExternalMedia.test.ts wikilink path 属性用例绿 + cssMirror 绿 + markdown 包既有测试零回归；typecheck+lint 绿。所触 e2e 锚文件=`apps/web/e2e/t-md.spec.ts`（链接面回归—— wikilink 死链形态在 app 内 resolver 装配后变可点，既有死链断言若有须按新形态核对，Task 6 定向）。
+- **验收锚**：relativeLinks.test.ts 全绿（分类矩阵：`./x`/`../x`/`x.md`/`/x`/裸名接管；`#a`/`http(s)`/`mailto:`/`data:`/`blob:`/`//host`/空串不接管；wire 后 a 有 data-vv-rel-link + click preventDefault + resolver fake file/directory/missing/null 四态 opener 调用面；resolver reject 无动作；wikilink span 升级为 a.md-wikilink + 外域 path 不升级；双缝缺一不绑定）+ enrichExternalMedia.test.ts wikilink path 属性用例绿 + cssMirror 绿 + markdown 包既有测试零回归；typecheck+lint 绿。所触 e2e 锚文件=`apps/web/e2e/b-md-corpus-markpad.spec.ts`、`apps/web/e2e/b-md-syntax.spec.ts`（**本 task 落地时零翻转**——模块缝缺省 null、wire 不绑定，死链 span 存活；两锚重定基认领=Task 5 装配 commit，Review Focus 4）、`apps/web/e2e/t-md.spec.ts`（链接面回归，Task 6 定向）。
 
 - [ ] **Step 1: TDD isRelativeLinkHref 分类矩阵（RED→GREEN）**
 
@@ -489,6 +489,8 @@ git add packages/vviewer-markdown && git commit -m "feat(markdown): 相对链接
 - Modify: `packages/vviewer-render-text/src/html.ts`（sanitizeHtml 显式传档位 + CSP img-src 联动）
 - Test: `packages/vviewer-render-text/test/htmlRenderer.test.ts`（CSP 三态 + manual 迁移断言扩展）
 - Modify: `packages/vviewer-render-doc/src/docx.ts`（sanitizeHtml 显式传档位）+ `packages/vviewer-render-doc/test/office.test.ts`（档位透传用例）
+- Modify: `apps/web/e2e/b-md-corpus-markpad.spec.ts`（MC-32 死链锚重定基——装配后 wikilink 升级翻转，计划评审 ①）
+- Modify: `apps/web/e2e/b-md-syntax.spec.ts`（`[[Other.md]]` 死链锚重定基，同因）
 
 **Interfaces:**
 - markdownLinks.ts（纯 .ts；`resolveInStorePath` 复用自 ./markdownImages——链接与图片同一 join 语义单源）：
@@ -562,7 +564,7 @@ git add packages/vviewer-markdown && git commit -m "feat(markdown): 相对链接
   ```
   buildSandboxedSrcdoc 内 `const policy = currentExternalImagePolicy();` 一次取值同时喂 sanitizeHtml 与 CSP（同渲染帧一致性）。
 - i18n：`notice.openflow.relativeMissing`：zh `目标不存在：{path}`；en `Target not found: {path}`（占位符两侧一致；openflow 域键序追加）。
-- **验收锚**：markdownLinks.test.ts 全绿（同目录 `a/b/c.md`+`./d.md`→`a/b/d.md`；上级 `../d/e.md`→`a/d/e.md`；URL 编码 `%20`/CJK；query/hash 剥离与纯 `#` 不达此函数——分类在包侧；越根 `../../x`→null 探测后 missing；file/dir/missing/`.md` 变体/read 兜底五态）+ htmlRenderer.test.ts CSP 三态（auto 加 https:http: / blocked 无 allowlist 维持 `img-src data: blob:` / 白名单条目双条）+ manual 迁移断言 + office.test.ts 档位透传绿 + 聚合机检绿 + typecheck+lint 绿。所触 e2e 锚文件=`apps/web/e2e/t-md.spec.ts`、`apps/web/e2e/b-markdown-html-docs-bug-regressions.spec.ts`（装配后全行为面生效，Task 6 定向实跑）。
+- **验收锚**：markdownLinks.test.ts 全绿（同目录 `a/b/c.md`+`./d.md`→`a/b/d.md`；上级 `../d/e.md`→`a/d/e.md`；URL 编码 `%20`/CJK；query/hash 剥离与纯 `#` 不达此函数——分类在包侧；越根 `../../x`→null 探测后 missing；file/dir/missing/`.md` 变体/read 兜底五态）+ htmlRenderer.test.ts CSP 三态（auto 加 https:http: / blocked 无 allowlist 维持 `img-src data: blob:` / 白名单条目双条）+ manual 迁移断言 + office.test.ts 档位透传绿 + 聚合机检绿 + typecheck+lint 绿。所触 e2e 锚文件=`apps/web/e2e/t-md.spec.ts`、`apps/web/e2e/b-markdown-html-docs-bug-regressions.spec.ts`（装配后全行为面生效，Task 6 定向实跑）、`apps/web/e2e/b-md-corpus-markpad.spec.ts` 与 `apps/web/e2e/b-md-syntax.spec.ts`（**本 task 装配即翻转、本 commit 内重定基**——计划评审 ①：双缝恒在场后 MC-32 死链 count 3 → span count 0 + a.md-wikilink count 3、`[[Other.md]]` 死链 span → a.md-wikilink，Step 4 落）。
 
 - [ ] **Step 1: TDD markdownLinks 解析式（RED→GREEN）**
 
@@ -576,10 +578,14 @@ markdownLinks.test.ts（resolveInStorePath 既有用例先例 markdownImages.tes
 
 html.ts 构造函数化 CSP + 显式传参；docx.ts 显式传参；htmlRenderer.test.ts/office.test.ts 扩展（CSP 三态断言 `meta[http-equiv=Content-Security-Policy]` content 字面 + manual img 迁移）。Run: `pnpm vitest run packages/vviewer-render-text packages/vviewer-render-doc && pnpm run typecheck && pnpm lint` → 全绿。
 
-- [ ] **Step 4: 提交**
+- [ ] **Step 4: 既有 wikilink 死链锚重定基（计划评审 ①——装配即翻转，随本 commit 落）**
+
+b-md-corpus-markpad.spec.ts（MC-32，测试名 :335）：测试名与 :339 注释订正「跨文件死链 span」→「跨文件 wikilink 升级可点（spec D §3.2：双缝在场后三条均升级为 a.md-wikilink——存在性在点击时才探测，升级判据 isRelativeLinkHref 不含存在性）」；:351 改 `await expect(md.locator('span.md-wikilink-dead')).toHaveCount(0);` + 增 `await expect(md.locator('a.md-wikilink')).toHaveCount(3);`（:352 `a[data-wikilink]` count 2 为页内锚形态不受影响——实查）。b-md-syntax.spec.ts：:65 注释改「跨文件 wikilink 站内升级为可点 a.md-wikilink（spec D §3.2）」；:66 改 `await expect(md.locator('a.md-wikilink', { hasText: '[[Other.md]]' })).toBeVisible();` + 增 `toHaveAttribute('data-wikilink-path', 'Other.md')`（textContent=raw 维持——enrich 升级保原文）。Run: `pnpm --filter web build:e2e && pnpm --filter web exec playwright test b-md-corpus-markpad b-md-syntax` → 全绿（两文件本域其余断言零翻转——MC-32 其余元素计数/MD-33 锚跳与嵌入 img 断言不涉升级面）。
+
+- [ ] **Step 5: 提交**
 
 ```bash
-git add apps/web/src/lib/markdownLinks.ts apps/web/src/lib/markdownLinks.test.ts apps/web/src/lib/viewer.ts apps/web/src/lib/i18n packages/vviewer-render-text packages/vviewer-render-doc && git commit -m "feat(web): markdown 链接/外链档位装配——provider 现读 settings+相对链接 resolver/opener（addTab/addDirStoreTab/showStatusNotice 通道）+html/docx 直调注入（html CSP img-src 三档联动）"
+git add apps/web/src/lib/markdownLinks.ts apps/web/src/lib/markdownLinks.test.ts apps/web/src/lib/viewer.ts apps/web/src/lib/i18n packages/vviewer-render-text packages/vviewer-render-doc apps/web/e2e/b-md-corpus-markpad.spec.ts apps/web/e2e/b-md-syntax.spec.ts && git commit -m "feat(web): markdown 链接/外链档位装配——provider 现读 settings+相对链接 resolver/opener（addTab/addDirStoreTab/showStatusNotice 通道）+html/docx 直调注入（html CSP img-src 三档联动）+wikilink 死链锚重定基"
 ```
 
 ---
@@ -594,7 +600,7 @@ git add apps/web/src/lib/markdownLinks.ts apps/web/src/lib/markdownLinks.test.ts
 
 - [ ] **Step 1: MDX-01——默认 manual 档占位与防线（spec §4 ①⑤）**
 
-injectDir 注入含外域 img（`http://external.example.com/pic.png`）+ 五类向量的 md → 外域请求监听先于装载（t-md BUG-40 同款）→ 断言：外域请求 0 条（观察窗 1.5s）；`.md-ext-media` 占位可见 + `.md-ext-media-load` 按钮在 + img `not.toHaveAttribute('src')` + `toHaveAttribute('data-vv-external-src', …)` + `data-vv-blocked-external` + title 域名；五类向量元素照旧剥除（poster/SVG/style/bg/input 断言沿用 t-md 形态）。
+injectDir 注入含外域 img（`http://external.example.com/pic.png`）+ 五类向量的 md → 外域请求监听先于装载（t-md BUG-40 同款：`page.on('request')` :478 + 观察窗 :485）→ 断言：外域请求 0 条（观察窗 1.5s——五类向量在 manual 档下的网络层判据，与 t-md 同口径）；`.md-ext-media` 占位可见 + `.md-ext-media-load` 按钮在 + img `not.toHaveAttribute('src')` + `toHaveAttribute('data-vv-external-src', …)` + `data-vv-blocked-external` + title 域名。**五类向量的元素级剥除断言不在本锚展开**（计划评审 ④：t-md BUG-40 e2e 实况只有请求零判据 :478-487 与 img 基线护栏 :488-492，无五类元素级断言——元素级剥除矩阵由单测承接：sanitizeHtml.test.ts:246 与 markdownSanitize.test.ts:464 两个 describe 在 T2 矩阵中按三档扩展，e2e 不重复落笔）。
 
 - [ ] **Step 2: MDX-02——点击「加载图片」放行（spec §4 ②）**
 
@@ -604,13 +610,13 @@ injectDir 注入含外域 img（`http://external.example.com/pic.png`）+ 五类
 
 设置 JSON 应用（openSettings→JSON 视图或 applySettings 装置）：①blocked 档 → 占位仍在（BLOCKED_EXTERNAL_CSS 虚线 img）+ 按钮 count 0 + 零请求；②blocked + allowlist `['external.example.com']`（route fulfill）→ img src 在场直接可见（白名单优先于档位）；③auto 档 → src 在场零按钮零占位。每档独立 test（applySettings 后重开文件重渲染）。
 
-- [ ] **Step 4: MDL-01/05——同目录互链与上级链接新 tab 打开（spec §4 ③）**
+- [ ] **Step 4: MDL-01/05——同目录互链与上级链接新 tab 打开（spec §4 ③；装置按计划评审 ② 修正——链接须从子目录文件出发才能命中）**
 
-injectDir 注入 `a.md`（`[b](./b.md)`、`[up](../sub/b.md)`、`[c](c.md#frag)`）+ `sub/b.md` + `sub/a.md` → 打开 a.md → 点 `[b](./b.md)` → 新 tab 激活且渲染 b.md 内容（tab 计数 +1/激活 tab 名 b.md）；hash 形态 `c.md#frag` 打开后 hash 不定位（§6 落定 4——断言打开即成、无锚滚动行为断言仅记档不硬断）。
+injectDir 注入 `sub/a.md`（正文含三链接：`[b](./b.md)`、`[up](../sub/b.md)`、`[c](c.md#frag)`；标题区分内容）+ `sub/b.md` + `sub/c.md`（三文件正文各异）→ 打开 sub/a.md → 解析面实推（`resolveInStorePath('sub/a.md', …)`，markdownImages.ts:22-35）：`./b.md`→`sub/b.md` ✓、`../sub/b.md`→`sub/b.md` ✓（`..` 弹回根再入 sub）、`c.md#frag`→`sub/c.md`（hash 丢弃）✓——自根文件 `a.md`+`../` 弹空越根返回 null（:27-29），故**必须打开子目录文件** → 点 `[b](./b.md)` → 新 tab 激活且渲染 b.md 内容（tab 计数 +1/激活 tab 名 b.md）；`[up](../sub/b.md)` 点击 → 激活 tab 复用/新建均按 addTab 语义断言其内容为 b.md；hash 形态 `c.md#frag` 打开后 hash 不定位（§6 落定 4——断言打开即成、无锚滚动行为断言仅记档不硬断）。
 
 - [ ] **Step 5: MDL-02/03——缺失目标提示与不接管面（spec §4 ③）**
 
-缺失：`[x](./missing.md)` 点击 → `.vv-statusbar` `toContainText('目标不存在：missing.md')`（showStatusNotice BUG-24 通道）。不接管：外域 `a[href^="http"]` 与页内锚 `a[href^="#"]` 无 `data-vv-rel-link` 属性（分类分类面断言，不实点外域防导航离场）。
+缺失：打开 sub/a.md（同 Step 4 装置）→ `[x](./missing.md)` 点击 → `.vv-statusbar` `toContainText('目标不存在：missing.md')`（showStatusNotice BUG-24 通道；解析路径 `sub/missing.md` 的 missing.target.path 末段为提示文案来源）。不接管：外域 `a[href^="http"]` 与页内锚 `a[href^="#"]` 无 `data-vv-rel-link` 属性（分类面断言，不实点外域防导航离场）。
 
 - [ ] **Step 6: MDL-04——wikilink 可点打开（spec §4 ④）**
 
@@ -618,7 +624,7 @@ injectDir 注入含 `[[b]]` 与 `[[b|别名]]` 的 md + b.md → 死链 span 升
 
 - [ ] **Step 7: 既有锚重定基 + 定向回归 + 提交**
 
-t-md 基线护栏补断言（Files 注记）；Run: `pnpm --filter web build:e2e && pnpm --filter web exec playwright test b-markdown-links-media t-md b-markdown-html-docs-bug-regressions b-settings-center` → 全绿（manual 档下既有 BUG-17/BUG-40/MD-11 断言零翻转——Review Focus 2 兑现）。
+t-md 基线护栏补断言（Files 注记）；Run: `pnpm --filter web build:e2e && pnpm --filter web exec playwright test b-markdown-links-media t-md b-markdown-html-docs-bug-regressions b-settings-center b-md-corpus-markpad b-md-syntax` → 全绿（manual 档下既有 BUG-17/BUG-40/MD-11 断言零翻转——Review Focus 2 兑现；wikilink 升级后 MC-32 与 b-md-syntax 死链锚按 Task 5 重定基形态绿——计划评审 ① 认领面收口）。
 
 ```bash
 git add apps/web/e2e && git commit -m "test(e2e): markdown 外链媒体/相对链接批 MDX+MDL 域锚——manual 占位与防线时序/点击放行/三档+白名单分流/站内导航新 tab/缺失提示/不接管面/wikilink 可点（t-md 基线护栏补 manual 语义断言）"
@@ -634,5 +640,6 @@ git add apps/web/e2e && git commit -m "test(e2e): markdown 外链媒体/相对�
 
 ## Errata（执行期勘误）
 
+- 2026-11-14 计划评审修订（4 条意见，规划师 D 逐条实查复现后同文件落定，基于 HEAD d2908cd=初版计划 commit，代码基线 38e17bf 不变）：①【阻塞】死链升级翻转两既有 e2e 锚而无任务认领——实查确认 b-md-corpus-markpad.spec.ts:351（MC-32 测试名 :335，`span.md-wikilink-dead` count 3；:339 注释三形态 L323 裸名/L324 带别名/L406 `[[sub/deep#Setup]]` 按 isRelativeLinkHref 全为站内相对→全部升级；:352 `a[data-wikilink]` count 2 为页内锚形态不受影响）与 b-md-syntax.spec.ts:66（`[[Other.md]]` 死链 span 不存活；:65 注释同须订正）——翻转时点=T5 装配（双缝恒在场），T4 落地时模块缝缺省 null 零翻转；落定=Task 5 Files/新增 Step 4 承接两文件重定基（span count 0 + a.md-wikilink count 3 / a.md-wikilink hasText+data-wikilink-path），Task 5 commit 收编、Task 6 Step 7 回归清单加两文件、Review Focus 4 补认领句。②【装置自相矛盾】T6 MDL-01 原装置（打开根 a.md + `[b](./b.md)`/`[up](../sub/b.md)`/`[c](c.md#frag)`）三链接全部 missing——实推 resolveInStorePath：根文件 `../` 弹空越根返回 null（markdownImages.ts:27-29）、b.md/c.md 未注入——Step 4/5 装置改「打开 sub/a.md + 注入 sub/b.md/sub/c.md」（`./b.md`→sub/b.md ✓、`../sub/b.md`→sub/b.md ✓、`c.md#frag`→sub/c.md ✓，missing 用例改 `./missing.md`）。③【轻】Task 1 i18n 键数三处漂移（Files「7+2」/Step 3「13」/Interfaces 实列 14）——统一为 **14 键**（nav.markdown 1 + settings.markdown.* 11 + settings.issue.* 2，逐键清单完整无漏，三处同口径）。④【轻】MDX-01「五类向量断言沿用 t-md 形态」描述失真——实查 t-md BUG-40 e2e 只有请求零判据（:478 page.on request、:485 观察窗、:488-492 img 基线护栏）无五类元素级断言，元素级矩阵在单测（sanitizeHtml.test.ts:246、markdownSanitize.test.ts:464 两个五类 describe）——改述为「网络层判据沿用 t-md、元素级矩阵由 T2 单测承接，e2e 不重复落笔」。⑤评审确认不需修的知情偏离两项原样保留（errata 见初版 ⑦⑨ 与 Global Constraints 实查 2）：standalone 降级由单测承接、resolver 增 source 形参为 spec §3.2 签名的机制必要扩展。
 - 2026-11-14 初版（规划师 D 基于 HEAD 38e17bf 编写；规划期关键实查已内联：sanitizeHtml 已有 opts 第二参与钩子 config 透传机制 sanitize.ts:476/:227-251/:316-319 / IMG 分支 ：331-362、srcset :342-362、AV :369-378、五类向量 :381-416、markBlockedExternal :51-54 / enrich convertMediaElements :48-68（a[href] 分支 ：70-84）、VIDEO/AUDIO_EXTS :44-45、applyExternalMediaGuard :25-30、wikilink 死链 ：248-253、callout closest('a') 豁免 ：170-171 / pipeline PipelineCtx :23-56、runLightbox :752-774、五步注册 ：779-787 / markdownRenderer sanitize 调用点 ：574、enrich :575、runPipeline :576-585、resolveRelativeImages :588、isAbsoluteSrc :150-152、五组缝 ：115-207、Renderer 装配 ：762-771、ViewOptions :822-854 / index.ts re-export :31-41 / css.ts WIKILINK_CSS :180、BLOCKED_EXTERNAL_CSS :188-189、MARKDOWN_CSS 数组 ：197-211 / render-text 依赖 vviewer-markdown（package.json:11）、enrich shim、html.ts buildSandboxedSrcdoc :40-73+CSP :27-28+占位样式 ：62-67 / docx.ts sanitizeHtml :47 / settings.ts Settings :88-131、DEFAULTS :140-159、defaults() :172-190、normalizeSettings diagrams 块 ：232-251、notify :351-364 / settingsDraft SETTINGS_KEYS :36、diagrams 镜像 ：153-196、isObj :52 / SettingsCenter groups :64-79 / nav 组序契约 settingsCenter.test.ts:33 / SC-01 labels b-settings-center.spec.ts:55-90（十三组 ：69-83，D20 翻转注释 ：66-68）/ TreeStore core types.ts:39-63（无 exists）、TreeNode.kind types.ts:3-5、Kind='file'|'dir' types.ts:1 / resolveInStorePath markdownImages.ts:22-35、resolveImageBlobUrl :43-63 / viewer.ts resolver 装配 ：276-283、registry.install :138 / addTab tabsModel.svelte.ts:696（openFlow façade）、addDirStoreTab :785 / showStatusNotice serverConnect.svelte.ts:56、statusbar ViewerPane.svelte:1285 / posixJoin render-foreign bridge.ts:204（A4 拒 ../）/ markdownExport.ts:31-33 外域不强拉 / e2e 装置 b-markdown-html-docs-helpers.ts:36/:54、t-md BUG-40 基线护栏 ：487-494、CSP 实证注释 :445-448）。
 - ①**spec §3.1 引用指向订正**：spec §2「五组 setter 先例 vviewer-markdown/src/index.ts:31-41」实为 re-export 面，setter 本体在 markdownRenderer.ts:115-207——本计划按本体行号引用。②**机制订正（spec §3.1「新 PipelineCtx 字段」）**：sanitize 先于 runPipeline（markdownRenderer.ts:574-585），PipelineCtx 是管线入参非上游——档位与链接两注入面落定为模块级 provider/setter（sanitize 包 provider + markdown 包 setter 双缝），`SanitizeOptions.externalImage` 逐调用显式优先；行为面（settings 现读即时生效、standalone 自传/缺省安全）与 spec 一致。③**html/docx manual 档知情差异**：占位按钮仅 markdown 面（enrich 不在 html srcdoc/docx innerHTML 两面）；auto/白名单/blocked 三态完整一致（html 面经 CSP 联动兑现「体验一致」的加载语义）；后续增强可复用 T3 占位构建器。④**枚举双单源**：`MARKDOWN_EXTERNAL_IMAGE_POLICIES`（app settings.ts）与 `EXTERNAL_IMAGE_POLICIES`（sanitize 包）字面一致由两侧单测锁——settings.ts 不 import sanitize 包（避免设置域对净化包新增依赖边；包零 app 依赖方向不变）。⑤**sanitizeDiagramFragment 同吃 provider**：图表产物 sanitize 走同 provider，auto 档下产物内 img 外链放行——产物来源为已配置引擎，知情接受；白名单/三档对 SVG image/use 向量不生效（落定 5 不放行）。⑥**目录 tab 打开=store 根**（spec §5 裁量落定）：`addDirStoreTab(store)` 现有通道只开根（tabsModel.svelte.ts:785-796 `addTab(store, '', …)`）——子目录直达 tab 为后续增强，MVP 目录链接开 store 目录 tab（目标目录树内可达）。⑦**占位按钮文案包内中文常量**（与 DEFAULT_UI_TEXTS 缺省同源形态）：app 的 Renderer 路径不传 ui、复制徽标等既有包内文案同为中文缺省（viewer.ts 无 ui 装配实查）；如需 i18n 参数化，后续经 enrichMarkdownDom 可选参扩展（本批无消费面不做）。⑧**manual srcset 整串迁移**（裁量落定）：混合候选（相对+外域）罕见且占位语义本就是整图待确认——整串迁 `data-vv-external-srcset` 使点击回填无需候选重组，相对候选一并延迟到点击后（知情接受）。⑨**resolver reject 吞错**：`.then` 无第二参——store 读抛错当次点击无动作（resolveRelativeImages :231-233 抛错视同找不到同口径）。⑩**规划期无 deferred 项**：spec §5 六项裁量（默认档/白名单归一/会话范围/委托落点/posixJoin/目录通道）与 §6 六条落定全部内联于上文 Interfaces/Global Constraints/Errata。
