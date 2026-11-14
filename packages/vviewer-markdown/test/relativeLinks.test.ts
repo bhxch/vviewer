@@ -120,7 +120,9 @@ describe('wireRelativeLinks——接管绑定（fake resolver/opener）', () => 
     expect(openerAbstain).not.toHaveBeenCalled(); // t=null=弃权：本次点击无动作
   });
 
-  it('resolver reject 无动作（.then 无第二参吞掉——resolveRelativeImages 抛错视同找不到同口径，Errata ⑨）', async () => {
+  it('resolver reject 无动作且无未处理 rejection（显式 catch——resolveRelativeImages try/catch await 同语义）', async () => {
+    const onRejection = vi.fn();
+    process.on('unhandledRejection', onRejection);
     const reject = vi.fn(async () => {
       throw new Error('store read failed');
     });
@@ -131,6 +133,9 @@ describe('wireRelativeLinks——接管绑定（fake resolver/opener）', () => 
     await new Promise((r) => setTimeout(r, 0));
     expect(opener).not.toHaveBeenCalled();
     expect(reject).toHaveBeenCalledTimes(1);
+    // 显式 catch 兜底：不产生 unhandled rejection（vitest 全量 Errors 段/退出码 0 的保证面）
+    expect(onRejection).not.toHaveBeenCalled();
+    process.off('unhandledRejection', onRejection);
   });
 
   it('幂等代币：二次 wire 不重复绑定（data-vv-rel-link 已在场跳过）', () => {
@@ -171,6 +176,17 @@ describe('wireRelativeLinks——接管绑定（fake resolver/opener）', () => 
     expect(spans).toHaveLength(2); // 两者均维持死链形态
     expect(doc.querySelector('a.md-wikilink')).toBeNull();
     expect(w.resolver).not.toHaveBeenCalled();
+  });
+
+  it('升级产物幂等代币：a.md-wikilink 挂 data-vv-rel-link，二次 wire 不重复绑定', () => {
+    const w = makeWire();
+    const doc = docOf('<span class="md-wikilink-dead" data-wikilink-path="Other.md">[[Other.md]]</span>');
+    w.call(doc);
+    const a = doc.querySelector('a.md-wikilink')!;
+    expect(a.hasAttribute('data-vv-rel-link')).toBe(true); // 与普通 a 分支代币对称
+    w.call(doc); // 二次 wire：升级产物命中第一循环 a[href] 但代币在场跳过
+    click(a);
+    expect(w.resolver).toHaveBeenCalledTimes(1); // 单监听（双重绑定会调两次）
   });
 });
 

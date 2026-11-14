@@ -66,12 +66,18 @@ export function wireRelativeLinks(
     a.setAttribute('data-vv-rel-link', '');
     a.addEventListener('click', (ev) => {
       ev.preventDefault(); // 接管：原生导航让位站内解析
-      void opts.resolver(href, opts.source).then((t) => {
-        // preventDefault 已同步生效（接管即拦原生导航）；t=null=resolver 显式弃权
-        // →本次点击无动作（app 装配恒返回 target：失败=missing 不产 null，null 仅
-        // standalone 契约形态）；reject 同口径（.then 无第二参吞掉，Errata ⑨）
-        if (t !== null) opts.opener(t, href, opts.source);
-      });
+      void opts
+        .resolver(href, opts.source)
+        .then((t) => {
+          // preventDefault 已同步生效（接管即拦原生导航）；t=null=resolver 显式弃权
+          // →本次点击无动作（app 装配恒返回 target：失败=missing 不产 null，null 仅
+          // standalone 契约形态）
+          if (t !== null) opts.opener(t, href, opts.source);
+        })
+        .catch(() => {
+          // resolver reject（store 读抛错）= 当次点击无动作——resolveRelativeImages
+          // 的 try/catch await 同语义（抛错视同找不到），显式 catch 防未处理 rejection
+        });
     });
   }
   // wikilink 升级（Review Focus 4）：enrich 死链 span 恒写 data-wikilink-path，
@@ -84,13 +90,21 @@ export function wireRelativeLinks(
     a.className = 'md-wikilink';
     a.setAttribute('href', path);
     a.setAttribute('data-wikilink-path', path);
+    // 幂等代币与 a[href] 分支对称：升级产物 a.md-wikilink[href] 也会命中上方第一
+    // 循环 a[href] 选择器，同 doc 二次 wire 时代币在场跳过（防双重绑定）
+    a.setAttribute('data-vv-rel-link', '');
     a.textContent = span.textContent ?? ''; // raw 维持（enrich 升级保原文）
     span.replaceWith(a);
     a.addEventListener('click', (ev) => {
       ev.preventDefault();
-      void opts.resolver(path, opts.source).then((t) => {
-        if (t !== null) opts.opener(t, path, opts.source);
-      });
+      void opts
+        .resolver(path, opts.source)
+        .then((t) => {
+          if (t !== null) opts.opener(t, path, opts.source);
+        })
+        .catch(() => {
+          // resolver reject 同 a[href] 分支：当次点击无动作（防未处理 rejection）
+        });
     });
   }
 }
