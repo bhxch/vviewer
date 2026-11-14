@@ -332,12 +332,14 @@ test('MC-31 · stress-test.md 121KB 大文档：脚注编组回链 / 3 图表 / 
   await expect(page.locator('.vv-error-card')).toHaveCount(0);
 });
 
-test('MC-32 · markdown-syntax.md wikilink 分流与脚注：跨文件死链 span、页内锚 a、脚注编组', async ({
+test('MC-32 · markdown-syntax.md wikilink 分流与脚注：跨文件 wikilink 升级可点、页内锚 a、脚注编组', async ({
   page
 }) => {
   // 语料实有（正文裸语法，行内码/表格内的同款字样豁免）：跨文件 wikilink ×3
-  // （L323 裸 + L324 带别名 + L406 [[sub/deep#Setup]] → span.md-wikilink-dead，
-  // enrich.ts:221；目标文件不在注入会话中）、页内锚 wikilink ×2（L325 [[#1. Text]] /
+  // （L323 裸 + L324 带别名 + L406 [[sub/deep#Setup]] 按 isRelativeLinkHref 全为
+  // 站内相对——spec D §3.2：双缝在场后全部升级为 a.md-wikilink——存在性在点击时
+  // 才探测，升级判据不含存在性；目标文件不在注入会话中，点击面由 MDL-02 域承接）、
+  // 页内锚 wikilink ×2（L325 [[#1. Text]] /
   // L333 [[#^demo-block]] → a[data-wikilink]，enrich.ts:245）、
   // 定义脚注 [^ref]×2 + 行内脚注 ^[...]×1（markdown-it-footnote 编组进 section.footnotes）、
   // mermaid ×4（flowchart/sequence/pie/gantt 全合法图型，本地渲染 svg）。
@@ -348,7 +350,8 @@ test('MC-32 · markdown-syntax.md wikilink 分流与脚注：跨文件死链 spa
   await openCorpus(page, rel, 30_000);
   const md = page.locator('.vv-markdown');
 
-  await expect(md.locator('span.md-wikilink-dead')).toHaveCount(3);
+  await expect(md.locator('span.md-wikilink-dead')).toHaveCount(0);
+  await expect(md.locator('a.md-wikilink')).toHaveCount(3);
   await expect(md.locator('a[data-wikilink]')).toHaveCount(2);
   await expect(md.locator('sup.footnote-ref')).toHaveCount(3);
   await expect(md.locator('section.footnotes')).toHaveCount(1);

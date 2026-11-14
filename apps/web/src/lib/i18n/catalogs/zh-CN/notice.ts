@@ -11,5 +11,6 @@ export const messages = {
   'notice.openflow.grantExpired': '文件夹授权已失效，请重新选择',
   'notice.openflow.emptyFolder': '所选文件夹为空',
   'notice.openflow.tabsClosed': '已关闭 {n} 个标签页（挂载已释放）',
-  'notice.openflow.urlIsDirectory': 'URL 以 / 结尾：指向目录而非文件，未打开'
+  'notice.openflow.urlIsDirectory': 'URL 以 / 结尾：指向目录而非文件，未打开',
+  'notice.openflow.relativeMissing': '目标不存在：{path}'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;

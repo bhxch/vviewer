@@ -9,7 +9,7 @@
 // 系，保留分页/字体/表格版式）；本渲染器转语义 HTML（丢版式、纯本地离线），以
 // altExtensions 作为候选——设置「打开方式」或单标签「打开方式」可改用。
 import type { Detection, FileSource, RenderedInstance, Renderer } from '@bhxch/vviewer-core';
-import { sanitizeHtml } from '@bhxch/vviewer-sanitize';
+import { currentExternalImagePolicy, sanitizeHtml } from '@bhxch/vviewer-sanitize';
 import { assertZipSignature, sniffOoxml } from './ooxml';
 
 type MammothModule = typeof import('mammoth');
@@ -44,7 +44,11 @@ export const docxRenderer: Renderer = {
     root.className = 'vv-docx';
     const content = document.createElement('div');
     content.className = 'vv-docx-content';
-    content.innerHTML = sanitizeHtml(result.value);
+    // spec D §6 落定 3：docx 直调 sanitizeHtml 同样消费外链图片档位（不经 markdown
+    // 管线，currentExternalImagePolicy() 现读——provider 未装配缺省 blocked=现行）。
+    // manual 档 img src 迁 data 属性后呈无 src img（Errata ③：占位按钮仅 markdown 面，
+    // docx 面知情差异）。
+    content.innerHTML = sanitizeHtml(result.value, { externalImage: currentExternalImagePolicy() });
     root.append(content);
     target.replaceChildren(root);
 

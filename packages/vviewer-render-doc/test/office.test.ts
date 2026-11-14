@@ -3,10 +3,17 @@
 // 三件套，实测可被 mammoth 解析，无需入库真实 fixture）；xlsx：SheetJS 在测试内
 // 构造 workbook 后 XLSX.write 造真实 xlsx buffer；pptx：手工 zip 造 slide XML
 // （降级路径为文本提取，见 pptxText）。渲染类断言在 jsdom 下直接跑 render()。
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as JsZipNs from 'jszip';
 import * as XlsxNs from 'xlsx';
 import type { Detection, FileSource } from '@bhxch/vviewer-core';
+// spec D §6 落定 3 档位透传断言面：sanitizeHtml 保真 wrap spy（真实实现兜底，仅
+// 记录调用面）——docx 直调不经 markdown 管线，显式传参形态在此锁定。
+vi.mock('@bhxch/vviewer-sanitize', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@bhxch/vviewer-sanitize')>();
+  return { ...actual, sanitizeHtml: vi.fn(actual.sanitizeHtml) };
+});
+import { sanitizeHtml, setExternalImagePolicyProvider } from '@bhxch/vviewer-sanitize';
 import { docxRenderer } from '../src/docx';
 import { xlsxRenderer } from '../src/xlsx';
 import { pptxRenderer } from '../src/pptx';
@@ -81,6 +88,11 @@ async function renderInto(
 }
 
 describe('docxRenderer', () => {
+  afterEach(() => {
+    setExternalImagePolicyProvider(null); // 模块缝状态隔离
+    vi.mocked(sanitizeHtml).mockClear();
+  });
+
   it('段落渲染为 .vv-docx-content 内的 p', async () => {
     const buf = await buildMinimalDocx(['Hello vviewer', '第二段中文']);
     const target = await renderInto(docxRenderer, buf);
@@ -93,6 +105,22 @@ describe('docxRenderer', () => {
     const target = await renderInto(docxRenderer, buf);
     const p = target.querySelector('.vv-docx-content p');
     expect(p?.textContent).toBe('a & b <c>');
+  });
+
+  it('spec D §6 落定 3 档位透传：sanitizeHtml 显式收 currentExternalImagePolicy()（provider manual 注入 → 第 2 参 externalImage 同值；缺省=blocked）', async () => {
+    const buf = await buildMinimalDocx(['x']);
+    // 缺省（provider 未装配）= blocked 透传
+    await renderInto(docxRenderer, buf);
+    expect(vi.mocked(sanitizeHtml).mock.calls.length).toBeGreaterThan(0);
+    expect(vi.mocked(sanitizeHtml).mock.calls.at(-1)![1]).toEqual({
+      externalImage: { policy: 'blocked', allowlist: [] }
+    });
+    // provider 注入 manual + 白名单 → 透传同值
+    setExternalImagePolicyProvider(() => ({ policy: 'manual', allowlist: ['external.example.com'] }));
+    await renderInto(docxRenderer, buf);
+    expect(vi.mocked(sanitizeHtml).mock.calls.at(-1)![1]).toEqual({
+      externalImage: { policy: 'manual', allowlist: ['external.example.com'] }
+    });
   });
 
   it('destroy 移除渲染 DOM', async () => {

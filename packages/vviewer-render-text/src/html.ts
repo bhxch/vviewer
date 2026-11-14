@@ -12,7 +12,7 @@
 // 超大输入（>20MB）：净化/DOM 遍历无分块能力，跳过沙箱管线降级为源码视图
 // + 提示卡（renderDegradedCode；降级而非拒绝）。
 import type { Renderer, RenderedInstance, RenderOptions, Detection, FileSource, SearchMatch, StreamCtx } from '@bhxch/vviewer-core';
-import { ALLOWED_URI_REGEXP, sanitizeHtml } from '@bhxch/vviewer-sanitize';
+import { ALLOWED_URI_REGEXP, currentExternalImagePolicy, sanitizeHtml, type ExternalImagePolicyConfig } from '@bhxch/vviewer-sanitize';
 import { decodeText } from './decodeText';
 import {
   MARKUP_MAX_BYTES,
@@ -21,11 +21,31 @@ import {
   type RenderCodeHandle
 } from './code';
 
-/** srcdoc 文档的 CSP：脚本面已被 sandbox 封死，CSP 管资源加载纵深（作者文档可含
- * 行内样式）。BUG-17：img-src/media-src 移除 http: https:——外域图片/媒体在沙箱内
- * 被浏览器拦截且不发请求（外域 img 另经共享净化策略移除 src，双保险）。 */
-const CSP_CONTENT =
-  "default-src 'none'; img-src data: blob:; media-src data: blob:; style-src 'unsafe-inline'; font-src data:";
+/**
+ * srcdoc 文档的 CSP 构造（spec D §6 落定 3 + 规划期实查 4：CSP 不联动则 auto/白名单
+ * 在 html 沙箱被网络栈之前拦死，「体验一致」空转）：脚本面已被 sandbox 封死，CSP 管
+ * 资源加载纵深（作者文档可含行内样式）。BUG-17 基线：img-src/media-src 不含
+ * http: https:——外域图片/媒体在沙箱内被浏览器拦截且不发请求（外域 img 另经共享
+ * 净化策略分流，双保险）。三档联动：auto 档 img-src 加 https: http:；白名单条目
+ * 任意档逐条加 `https://<host>`（通配条目发 `https://<base>` 与 `https://*.<base>`
+ * 双条——CSP `*.` 不覆盖 apex）；media-src 不动=AV/poster 任何档位不放行
+ * （spec §6 落定 5）。
+ */
+function buildCspContent(policy: ExternalImagePolicyConfig): string {
+  const imgSrc = ['data:', 'blob:'];
+  if (policy.policy === 'auto') imgSrc.push('https:', 'http:');
+  for (const e of policy.allowlist) {
+    const entry = e.trim().toLowerCase();
+    if (entry === '') continue;
+    if (entry.startsWith('*.') || entry.startsWith('.')) {
+      const base = entry.replace(/^[*.]+/, '');
+      if (base !== '') imgSrc.push(`https://${base}`, `https://*.${base}`); // CSP *.{base} 不含 apex——双条
+    } else {
+      imgSrc.push(`https://${entry}`);
+    }
+  }
+  return `default-src 'none'; img-src ${imgSrc.join(' ')}; media-src data: blob:; style-src 'unsafe-inline'; font-src data:`;
+}
 
 /** URI 属性白名单复核（与共享净化策略同一正则；不匹配即剥属性） */
 function uriAllowed(value: string): boolean {
@@ -38,7 +58,11 @@ function uriAllowed(value: string): boolean {
  * 纯字符串进出，便于单测。
  */
 export function buildSandboxedSrcdoc(raw: string): string {
-  const clean = sanitizeHtml(raw, { wholeDocument: true });
+  // 档位一次取值同时喂 sanitizeHtml 显式传参与 CSP 联动（同渲染帧一致性，spec D
+  // §6 落定 3：html/docx 直调点同步注入——直调不经 markdown 管线，档位不经
+  // provider 兜底路径的组装点，显式传参保证与 CSP 同源取值）
+  const policy = currentExternalImagePolicy();
+  const clean = sanitizeHtml(raw, { wholeDocument: true, externalImage: policy });
   const doc = new DOMParser().parseFromString(clean, 'text/html');
   // 第二层防御：独立于 DOMPurify 复核（净化结果之上再走一遍规则）
   for (const el of Array.from(doc.querySelectorAll('*'))) {
@@ -67,7 +91,7 @@ export function buildSandboxedSrcdoc(raw: string): string {
   }
   const meta = doc.createElement('meta');
   meta.setAttribute('http-equiv', 'Content-Security-Policy');
-  meta.setAttribute('content', CSP_CONTENT);
+  meta.setAttribute('content', buildCspContent(policy));
   (doc.head ?? doc.documentElement).prepend(meta);
   return `<!DOCTYPE html>\n${doc.documentElement.outerHTML}`;
 }

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { Detection, FileSource, RenderedInstance, SearchMatch } from '@bhxch/vviewer-core';
+import { setExternalImagePolicyProvider } from '@bhxch/vviewer-sanitize';
 import { htmlRenderer, buildSandboxedSrcdoc } from '../src/html';
 
 const SOURCE: FileSource = {
@@ -78,6 +79,66 @@ describe('buildSandboxedSrcdoc——双层防御', () => {
     const srcdoc = buildSandboxedSrcdoc('<p>x</p>');
     expect(srcdoc).toContain('http-equiv="Content-Security-Policy"');
     expect(srcdoc).toContain("default-src 'none'");
+  });
+});
+
+describe('buildSandboxedSrcdoc——spec D 外链图片三档（直调注入 + CSP img-src 联动，§6 落定 3）', () => {
+  afterEach(() => {
+    setExternalImagePolicyProvider(null); // 模块缝状态隔离
+  });
+
+  function cspContentOf(srcdoc: string): string {
+    const doc = parseSrcdoc(srcdoc);
+    return doc.querySelector('meta[http-equiv="Content-Security-Policy"]')!.getAttribute('content')!;
+  }
+
+  it('缺省（provider 未装配）= blocked：CSP 维持 img-src data: blob:（现行基线逐字），外域 img 剥除+占位标记', () => {
+    const srcdoc = buildSandboxedSrcdoc('<img src="https://evil.example/p.png" alt="x">');
+    expect(cspContentOf(srcdoc)).toBe(
+      "default-src 'none'; img-src data: blob:; media-src data: blob:; style-src 'unsafe-inline'; font-src data:",
+    );
+    const doc = parseSrcdoc(srcdoc);
+    const img = doc.querySelector('img')!;
+    expect(img.hasAttribute('src')).toBe(false);
+    expect(img.getAttribute('data-vv-blocked-external')).toBe('1');
+    expect(srcdoc).not.toContain('evil.example/p.png');
+  });
+
+  it('manual 档：img src 迁 data-vv-external-src（DOM 无 src 不发请求）+ CSP 维持基线（沙箱不放行未确认外域）', () => {
+    setExternalImagePolicyProvider(() => ({ policy: 'manual', allowlist: [] }));
+    const srcdoc = buildSandboxedSrcdoc('<img src="https://external.example.com/pic.png" alt="x">');
+    expect(cspContentOf(srcdoc)).toBe(
+      "default-src 'none'; img-src data: blob:; media-src data: blob:; style-src 'unsafe-inline'; font-src data:",
+    );
+    const img = parseSrcdoc(srcdoc).querySelector('img')!;
+    expect(img.hasAttribute('src')).toBe(false);
+    expect(img.getAttribute('data-vv-external-src')).toBe('https://external.example.com/pic.png');
+    expect(img.getAttribute('data-vv-blocked-external')).toBe('1');
+  });
+
+  it('auto 档：CSP img-src 加 https: http:（网络栈之前不拦死，「体验一致」联动，规划期实查 4）+ img src 放行', () => {
+    setExternalImagePolicyProvider(() => ({ policy: 'auto', allowlist: [] }));
+    const srcdoc = buildSandboxedSrcdoc('<img src="https://external.example.com/pic.png"><video poster="https://evil.example/p.jpg" src="local.mp4"></video>');
+    expect(cspContentOf(srcdoc)).toBe(
+      "default-src 'none'; img-src data: blob: https: http:; media-src data: blob:; style-src 'unsafe-inline'; font-src data:",
+    );
+    // img src 放行；media-src 不动=AV/poster 任何档位不放行（§6 落定 5）
+    expect(parseSrcdoc(srcdoc).querySelector('img')!.getAttribute('src')).toBe('https://external.example.com/pic.png');
+    const video = parseSrcdoc(srcdoc).querySelector('video')!;
+    expect(video.hasAttribute('poster')).toBe(false);
+  });
+
+  it('白名单条目任意档：精确条目加 https://<host>；通配条目发 apex 与 *.base 双条（CSP *.<base> 不含 apex）', () => {
+    setExternalImagePolicyProvider(() => ({
+      policy: 'blocked',
+      allowlist: ['external.example.com', '.cdn.example.net']
+    }));
+    const srcdoc = buildSandboxedSrcdoc('<img src="https://external.example.com/pic.png">');
+    expect(cspContentOf(srcdoc)).toBe(
+      "default-src 'none'; img-src data: blob: https://external.example.com https://cdn.example.net https://*.cdn.example.net; media-src data: blob:; style-src 'unsafe-inline'; font-src data:",
+    );
+    // 白名单优先于档位：blocked 下命中条目 src 保留（spec §3.1 拍板）
+    expect(parseSrcdoc(srcdoc).querySelector('img')!.getAttribute('src')).toBe('https://external.example.com/pic.png');
   });
 });
 

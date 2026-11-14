@@ -8,6 +8,8 @@ import {
   markdownRenderer,
   setMarkdownBackend,
   setMarkdownImageResolver,
+  setRelativeLinkResolver,
+  setRelativeLinkOpener,
   setDiagramOptions,
   setHighlightFence,
   setResolveRemoteBase,
@@ -32,10 +34,14 @@ import { jsonlRenderer } from '@bhxch/vviewer-render-text/jsonl';
 import { downloadNestedAttachment, markForeignNestedDepth, FOREIGN_NESTED_DEPTH_LIMIT, type NestedDispatch } from '@bhxch/vviewer-render-foreign';
 import { browser } from '$app/env';
 import { setRenderFailedText } from '@bhxch/vviewer-core';
+import { setExternalImagePolicyProvider } from '@bhxch/vviewer-sanitize';
 import { translate as t } from './i18n/core';
 import { ensureHighlightClient, computeRouter } from './highlightClient';
 import { routeLargeFileHighlight } from './highlightRouter';
 import { resolveImageBlobUrl } from './markdownImages';
+import { resolveRelativeLinkTarget } from './markdownLinks';
+import { addTab, showStatusNotice } from './openFlow.svelte';
+import { addDirStoreTab } from './tabsModel.svelte';
 import { hasNonDiagramFence } from './markdownFence';
 import { loadSettings } from './stores/settings';
 import { resolveEnginesHost } from './cdnProfiles';
@@ -281,6 +287,25 @@ if (browser) {
     // 路径透传的实参恒为完整 FileSource（含 store），收窄取用。
     resolveImageBlobUrl((source as FileSource).store, source.path, src)
   );
+
+  // spec D §3.1：外链图片档位 provider（loadSettings 现读——设置保存后下一渲染生效，
+  // getDiagramOptions 同款口径；normalizeSettings 已归一 allowlist）
+  setExternalImagePolicyProvider(() => {
+    const s = loadSettings();
+    return { policy: s.markdown.externalImages, allowlist: s.markdown.externalImagesAllowlist };
+  });
+
+  // spec D §3.2：相对链接解析 + 打开通道（source 窄取 FileSource.store——markdownImages
+  // 同款收窄；resolver reject 由组合包 .then 无第二参吞掉=当次点击无动作）。
+  setRelativeLinkResolver(async (href, source) =>
+    resolveRelativeLinkTarget((source as FileSource).store, source.path, href)
+  );
+  setRelativeLinkOpener((target, href, source) => {
+    const store = (source as FileSource).store;
+    if (target.kind === 'file') addTab(store, target.path, target.path.split('/').pop() ?? target.path);
+    else if (target.kind === 'directory') addDirStoreTab(store); // 目录 tab（根）——子目录定位 MVP 不做（§5 裁量记档）
+    else showStatusNotice(t('notice.openflow.relativeMissing', { path: target.path ?? href })); // 提示文案含完整解析路径（不取 basename——sub/missing.md 形态，T6 MDL-02 断言同口径；计划评审二轮 ① 落定）
+  });
 }
 
 // ---------- markdown 图表渲染选项注入（spec 2026-10-19 §2.1/§2.3，Task 6） ----------

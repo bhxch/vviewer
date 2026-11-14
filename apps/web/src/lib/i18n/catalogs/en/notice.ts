@@ -10,5 +10,7 @@ export const messages = {
   'notice.openflow.grantExpired': 'Folder grant has expired, please select again',
   'notice.openflow.emptyFolder': 'The selected folder is empty',
   'notice.openflow.tabsClosed': 'Closed {n} tabs (mount released)',
-  'notice.openflow.urlIsDirectory': 'URL ends with /: it points to a directory, not a file — not opened'
+  'notice.openflow.urlIsDirectory':
+    'URL ends with /: it points to a directory, not a file — not opened',
+  'notice.openflow.relativeMissing': 'Target not found: {path}'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;

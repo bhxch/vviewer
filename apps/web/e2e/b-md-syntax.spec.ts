@@ -62,8 +62,11 @@ test.describe('b-md-syntax 扩展语法', () => {
     const link = md.locator('a[data-wikilink="anchor"]');
     await expect(link).toHaveCount(1);
     await expect(link).toHaveAttribute('href', '#user-content-目标');
-    // 跨文件 wikilink 降级不可点原文（span 而非 a）
-    await expect(md.locator('.md-wikilink-dead', { hasText: '[[Other.md]]' })).toBeVisible();
+    // 跨文件 wikilink 站内升级为可点 a.md-wikilink（spec D §3.2：双缝在场后升级——
+    // 存在性在点击时才探测；textContent=raw 维持）
+    const wiki = md.locator('a.md-wikilink', { hasText: '[[Other.md]]' });
+    await expect(wiki).toBeVisible();
+    await expect(wiki).toHaveAttribute('data-wikilink-path', 'Other.md');
     // ![[img|120]] → img 元素（src 原文相对路径，样例库无该文件不解析——仅断言元素契约）
     const embed = md.locator('img[src="syntax-sampler-embed.png"]');
     await expect(embed).toHaveCount(1);

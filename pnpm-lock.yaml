@@ -94,6 +94,9 @@ importers:
       '@bhxch/vviewer-render-text':
         specifier: workspace:*
         version: link:../../packages/vviewer-render-text
+      '@bhxch/vviewer-sanitize':
+        specifier: workspace:*
+        version: link:../../packages/vviewer-sanitize
       '@file-viewer/capability-drawio-official':
         specifier: 3.3.3
         version: 3.3.3
