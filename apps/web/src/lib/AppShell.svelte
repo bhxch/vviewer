@@ -6,8 +6,7 @@
   import TabBar from './TabBar.svelte';
   import ViewerPane from './ViewerPane.svelte';
   import FileTree from './FileTree.svelte';
-  import Toc from './Toc.svelte';
-  import OutlineView from './OutlineView.svelte';
+  import TocView from './TocView.svelte';
   import MetaPanel from './MetaPanel.svelte';
   import GitSection from './GitSection.svelte';
   import GlobalSearchPanel from './GlobalSearchPanel.svelte';
@@ -1490,20 +1489,18 @@
           <!-- 目录视图互斥渲染（code-outline Task 3）：实例互斥保证 md TOC 与代码
               大纲不同时有数据——outlineDefinitions 在场渲染大纲（引用已过滤的显示
                集），否则 md TOC；两者皆空（用户点过切换器后切到无数据文件）回落属性
-               面板兜底空态（右栏校正 effect 随即归位 'meta'，见其注释）。 -->
-          {#if outlineDefinitions.length > 0}
-            <OutlineView
-              entries={outlineDisplayed}
-              activeLine={activeOutlineLine ?? undefined}
-              onclick={onOutlineJump}
-              truncated={outlineTruncated}
-              onexpandall={expandOutlineAll}
-            />
-          {:else if tocEntries.length > 0}
-            <Toc entries={tocEntries} />
-          {:else}
-            <MetaPanel />
-          {/if}
+               面板兜底空态（右栏校正 effect 随即归位 'meta'，见其注释）。
+               装配抽共享组件 TocView（spec A Task 2）：三分支装配原样迁入组件
+               （行为零变化），左栏目录 tab（Task 3）/zen 目录视图（Task 4）复用
+               同一装配件。 -->
+          <TocView
+            {tocEntries}
+            {outlineDisplayed}
+            activeLine={activeOutlineLine ?? undefined}
+            onOutlineJump={onOutlineJump}
+            outlineTruncated={outlineTruncated}
+            onExpandAll={expandOutlineAll}
+          />
         {:else if rightView === 'git' && gitInfo !== null && gitStore !== null}
           <!-- Git 段（git-panel Task 2）：探测可用才渲染（gitInfo null 时即使
                rightView 停留 'git'——用户选过 Git 后切到无 git 文件、touched 台账
