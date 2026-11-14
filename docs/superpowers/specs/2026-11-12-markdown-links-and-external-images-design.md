@@ -48,7 +48,7 @@
 
 **管线侧**：渲染出口（enrich 后、灯箱接线同代）对内容区 `a[href]` 逐个分类：
 - `#` 锚、绝对 URL（http/https/mailto/协议）、`data:`/`blob:` → 不接管（浏览器原生/既有语义）；
-- 相对路径（`./x`、`../x`、`x.md`、`/` 开头视为站点根相对——**按当前文件所在 store 的根解析**而非站点 URL）→ 接管点击：调 `resolveRelativeLink` → 命中 file：新 tab 打开（openFiles 通道，渲染器自选）；directory：打开目录 tab；missing：状态提示「目标不存在：<路径>」（BUG-24 showStatusNotice 通道）；解析器未注入/返回 null → 不接管（standalone 包安全缺省）。
+- 相对路径（`./x`、`../x`、`x.md`、`/` 开头视为站点根相对——**按当前文件所在 store 的根解析**而非站点 URL）→ 接管点击：调 `resolveRelativeLink` → 命中 file：新 tab 打开（openFiles 通道，渲染器自选）；directory：打开目录 tab；missing：状态提示「目标不存在：<路径>」（BUG-24 showStatusNotice 通道）；解析器未注入 → 不接管（standalone 包安全缺省）；返回 null → **当次点击无动作**（实现执行期订正，评审 M6：preventDefault 随接管同步先行，异步解析返回后原生导航不可恢复——null 语义落「无动作」而非「放行原生」，无动作优于导航 404）。
 - 解析式：基于**当前 md 文件的 store 路径**做 posix 语义 join（`a/b/c.md` + `../d/e.md` → `a/d/e.md`；URL 解码 `%xx` 后处理；query/hash 剥离后解析、hash 保留为页内锚判定先行）。
 - **wikilink 升级**（顺带）：`[[file]]` 死链 `span.md-wikilink-dead` 改走同一 resolveRelativeLink 通道，可点打开（enrich.ts:248-253 改造）；解析器未注入时维持降级死链形态。
 - 视图切换/销毁清理：点击代理随渲染实例生命周期（复用现有管线事件绑定/解绑模式，BUG-52 装置收口先例）。
