@@ -48,5 +48,10 @@ export const messages = {
   'shell.right.toc': 'Contents',
   'shell.right.meta': 'Properties',
   'shell.drawerToggle.aria': 'Toggle sidebar',
-  'shell.rightToggle.aria': 'Toggle contents and properties panels'
+  'shell.rightToggle.aria': 'Toggle contents and properties panels',
+
+  // —— 左栏视图切换器（shell.left.*，spec A §4.1 Task 3；en 值按计划定稿 'TOC'）——
+  'shell.left.switchAria': 'Left panel view switch',
+  'shell.left.tree': 'Tree',
+  'shell.left.toc': 'TOC'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;

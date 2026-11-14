@@ -49,5 +49,11 @@ export const messages = {
   'shell.right.toc': '目录',
   'shell.right.meta': '属性',
   'shell.drawerToggle.aria': '切换侧栏',
-  'shell.rightToggle.aria': '切换目录与属性面板'
+  'shell.rightToggle.aria': '切换目录与属性面板',
+
+  // —— 左栏视图切换器（shell.left.*，spec A §4.1 Task 3）——
+  // 「树」「目录」与 shell.strip.treeIcon / shell.right.toc 同值不同模块语义——各落各键（防同义双键漂移与防误并键双向，§3.1 先例）
+  'shell.left.switchAria': '左栏视图切换',
+  'shell.left.tree': '树',
+  'shell.left.toc': '目录'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;

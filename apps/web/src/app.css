@@ -726,16 +726,18 @@ mark.vv-search-hit-active { background: var(--vv-hit-active); }
 .toc .level-3 { padding-left: 12px; }
 .toc .level-4 { padding-left: 24px; }
 .toc-empty { margin: 0; padding: .25rem .5rem; font-size: var(--vv-fs-xs); color: var(--ui-fg-muted); }
-/* 右面板「目录|属性」分段切换器（code-outline Task 3）：AppShell 门控（目录数据
-   非空才渲染）；落右栏固定 header 行（spec A §4.3 重排），flex:1 占满行内余宽把
-   折叠钮推至右端——右侧 34px 让位 padding 退役（钮已入流，不再绝对定位浮置），
+/* 面板分段切换器（右「目录|属性|Git」code-outline Task 3 / 左「树|目录」spec A
+   §4.1 Task 3）：AppShell 门控（目录数据非空才渲染）；落各自 aside 固定 header 行
+   （spec A §4.3 重排），flex:1 占满行内余宽把折叠钮推至右端——右侧 34px 让位
+   padding 退役（钮已入流，不再绝对定位浮置）；左栏 ≤900px 抽屉断点内在抽屉头
+   下方独立行（header column 堆叠，auto 高容器无竖向自由空间 flex:1 即内容高）。
    active 段与 .toc button.active 同色语义（§7/§10-G2 --ui-hover-bg） */
-.vv-right-switch { display: flex; flex: 1; gap: 4px; padding: 6px 6px 6px 10px;
+.vv-right-switch, .vv-left-switch { display: flex; flex: 1; gap: 4px; padding: 6px 6px 6px 10px;
   border-bottom: 1px solid var(--ui-border); }
-.vv-right-switch-btn { flex: 1; font-size: var(--vv-fs-xs); padding: 3px 8px;
+.vv-right-switch-btn, .vv-left-switch-btn { flex: 1; font-size: var(--vv-fs-xs); padding: 3px 8px;
   border-radius: 4px; color: var(--ui-fg-muted); }
-.vv-right-switch-btn:hover { color: var(--ui-fg); background: var(--ui-hover-bg); }
-.vv-right-switch-btn.active { color: var(--ui-accent); background: var(--ui-hover-bg); }
+.vv-right-switch-btn:hover, .vv-left-switch-btn:hover { color: var(--ui-fg); background: var(--ui-hover-bg); }
+.vv-right-switch-btn.active, .vv-left-switch-btn.active { color: var(--ui-accent); background: var(--ui-hover-bg); }
 /* Git 信息段（git-panel Task 2 GitSection）：信息卡形态对齐 MetaPanel（.meta-panel
    同款 padding/标题小字），dl 两列 dt/dd；三态徽标圆点——clean 绿/modified 黄/
    untracked 灰（§10-G2 语义色令牌，亮暗主题自动跟随）；容器 flex:none（信息卡

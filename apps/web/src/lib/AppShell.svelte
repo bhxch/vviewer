@@ -159,6 +159,15 @@
   let rightView = $state<'toc' | 'meta' | 'git'>('meta');
   /** 用户是否手动点过切换器（含子视图内语义性选择；轮询/重渲染不置位） */
   let rightViewTouched = $state(false);
+  /** 左栏视图（spec A §4.1）：'tree'=文件树（默认），'toc'=目录视图（TocView 共享件）。
+   * 会话态不持久化、不进快照、不进 layout.ts（零 settings/schema）。 */
+  let leftView = $state<'tree' | 'toc'>('tree');
+  /** 有效视图派生（spec A Task 3）：本 task 恒等（zen 覆盖项 Task 4 加入）——消费点
+   * 三处：左栏渲染分支（leftViewEff）/ 滚动跟随门 / gitRepoDir 透传门（rightViewEff，
+   * 右值）。zen 打开的栏锁目录视图时经派生注入（Task 4），不改写用户会话态（关闭
+   * 侧零污染）；写点只在切换器点击与校正 effect。 */
+  const leftViewEff = $derived(leftView);
+  const rightViewEff = $derived(rightView);
   /**
    * git 可用性（git-panel Task 2）：ViewerPane ongitAvailable 上行的 per-tab 探测
    * 结果（repoDir；null = 不可用/未探测到）。语义随激活 tab——tab 身份变化
@@ -257,6 +266,17 @@
     rightView = 'meta';
   });
 
+  // 左栏目录视图空态校正（spec A Task 3，镜像右栏校正同族）：leftView 停留 'toc' 而
+  // 目录数据消失（切换器随数据消失）时归位 'tree'。不置 touched 台账（记档：spec
+  // 「镜像 rightView 语义」取会话态+不持久化本体——leftView 无「有数据默认落位」
+  // effect，默认恒 'tree'，touched 旗标无消费面故不设；rightView 的 touched/默认
+  // 落位机制服务于「有数据默认目录」落位，语义面不同）。写值即出条件，无自读自写环。
+  $effect(() => {
+    if (leftViewEff !== 'toc') return;
+    if (tocEntries.length > 0 || outlineDefinitions.length > 0) return;
+    leftView = 'tree'; // 数据消失归位（写值即出条件，无自读自写环）
+  });
+
   // 滚动跟随节流循环（code-outline Task 3）：激活实例为 code 全量模式时 metaStore
   // 总线持有 firstVisibleLine 句柄（窗口路径缺席 → 静默不启用，spec §3）。节流取
   // 200ms interval 而非 rAF 滚动监听：实例句柄无滚动事件上行面（命令式快照读数），
@@ -267,12 +287,14 @@
   $effect(() => {
     const defs = outlineDisplayed;
     if (defs.length === 0) return;
-    // 目录视图门（终审 Minor）：'toc' 是大纲唯一在场视图——旧 'meta' 门在 spec ⑤
-    // 引入 'git' 视图后放行了 Git 视图（OutlineView 不在场，高亮值无人消费，读句
-    // 柄+二分约 200ms/次空转）；翻回目录视图由本 effect 对 rightView 的依赖重启
-    // 轮询（cleanup 归零 activeOutlineLine，首 tick 内恢复），读 state 写 state 无
-    // 自读自写环。
-    if (rightView !== 'toc') return;
+    // 目录视图门（终审 Minor；spec A Task 3 扩左右任一在场）：'toc' 是大纲唯一在场
+    // 视图——旧 'meta' 门在 spec ⑤ 引入 'git' 视图后放行了 Git 视图（OutlineView
+    // 不在场，高亮值无人消费，读句柄+二分约 200ms/次空转）；spec A 起左栏目录视图
+    // 同消费大纲渲染（TocView 共享件），左右任一目录视图在场即跟随（activeLine 为
+    // 共享单值，双视图同显时同高亮，无害）；翻回目录视图由本 effect 对 eff 派生的
+    // 依赖重启轮询（cleanup 归零 activeOutlineLine，首 tick 内恢复），读 state 写
+    // state 无自读自写环。
+    if (rightViewEff !== 'toc' && leftViewEff !== 'toc') return;
     const timer = setInterval(() => {
       const line = firstOutlineVisibleLine();
       if (line === null) return;
@@ -1350,9 +1372,9 @@
          position:absolute/top:6/right:6 退役），滚动体承接 FileTree/空态引导区并
          承担滚动；FileTree 源行 34px 让位随之退役（让位由 header 行承担） -->
     <aside class="vv-side" class:vv-side-off={layout.leftCollapsed} style="--vv-side-w: {leftW}px">
-      <!-- header 行（spec A §4.3）：桌面=折叠钮独占（margin-left:auto 推右，Task 3
-           左栏切换器挂其左——切换器 flex:1 占满余宽后 auto 归零）；≤900px 抽屉
-           断点内纵向堆叠（抽屉头首行，Task 3 切换器独立行挂其下） -->
+      <!-- header 行（spec A §4.3）：桌面=[切换器 flex:1（Task 3，数据门控）][折叠钮
+           margin-left:auto]；≤900px 抽屉断点内纵向堆叠（抽屉头首行、切换器独立行
+           次之，折叠钮断点显隐现状维持——移动端无折叠语义不显示） -->
       <div class="vv-side-head">
         <!-- 抽屉头部「专注模式」入口（spec §3.1 移动端回落挂点：iOS Safari 不派发
              contextmenu，长按布局菜单在 iOS 不可达）：桌面隐藏（媒体查询）；点击切
@@ -1361,18 +1383,48 @@
         <div class="vv-drawer-head">
           <button type="button" class="vv-drawer-zen" onclick={() => toggleZen()}>{t('shell.drawer.zen')}</button>
         </div>
+        {#if tocEntries.length > 0 || outlineDefinitions.length > 0}
+          <!-- 左栏视图切换器（spec A §4.1 Task 3）：形态对齐右栏 .vv-right-switch
+               （segmented 两钮，非浮层不入 OVERLAY 册——semantic-components §6）；
+               显隐门与右栏目录钮同源（目录数据非空才渲染，无数据左栏保持纯树）。
+               leftView 会话态直接写（不置 touched——空态校正 effect 见脚本注释），
+               aria-pressed 表激活段 -->
+          <div class="vv-left-switch" role="group" aria-label={t('shell.left.switchAria')}>
+            <button
+              type="button"
+              class="vv-left-switch-btn"
+              class:active={leftView === 'tree'}
+              aria-pressed={leftView === 'tree'}
+              onclick={() => (leftView = 'tree')}>{t('shell.left.tree')}</button
+            >
+            <button
+              type="button"
+              class="vv-left-switch-btn"
+              class:active={leftView === 'toc'}
+              aria-pressed={leftView === 'toc'}
+              onclick={() => (leftView = 'toc')}>{t('shell.left.toc')}</button
+            >
+          </div>
+        {/if}
         <button type="button" class="vv-collapse-btn vv-collapse-left" aria-label={t('shell.strip.collapseTree')}
           title={t('shell.strip.collapseTree')} onclick={() => updateLayout({ leftCollapsed: true })}>‹</button>
       </div>
       <div class="vv-side-scroll" class:vv-side-blank={sources.length === 0}>
         {#if sources.length > 0}
-          <!-- 整树重建 key：源数量 | 各源数据版本 storeRevisions | 排除规则（BUG-05 通道，T4 多源化，M-2 修正，T7 分桶） -->
-          {#key treeKey}
-            <FileTree {sources} excludedPatterns={settings.excludedPatterns} iconTree={settings.iconThemes.scopes.tree} onopen={onTreeOpen} onremove={removeSource} />
-          {/key}
-        {:else}
+          <!-- FileTree 容器（spec A §4.1 裁量落定）：hidden 保留实例——树展开态
+               （组件内 collapsed map）与快照恢复面跨视图切换保留，快照与
+               {#key treeKey} 整树重建通道零改动；目录视图在场时整树隐藏不卸载 -->
+          <div hidden={leftViewEff !== 'tree'}>
+            <!-- 整树重建 key：源数量 | 各源数据版本 storeRevisions | 排除规则（BUG-05 通道，T4 多源化，M-2 修正，T7 分桶） -->
+            {#key treeKey}
+              <FileTree {sources} excludedPatterns={settings.excludedPatterns} iconTree={settings.iconThemes.scopes.tree} onopen={onTreeOpen} onremove={removeSource} />
+            {/key}
+          </div>
+        {:else if leftViewEff !== 'toc'}
           <!-- 0 目录空态引导区（spec §2.3）：三入口动作与标签栏动作簇同源（openFlow façade
-               现有函数），不新建打开通道；按钮不加禁用态（打开文件夹 fallback 恒可用） -->
+               现有函数），不新建打开通道；按钮不加禁用态（打开文件夹 fallback 恒可用）。
+               leftView='toc' 时让位目录视图（URL 打开 md/code tab 可无 sources 而有
+               目录数据——空态引导与目录视图不并显） -->
           <div class="vv-side-empty">
             <p class="vv-side-empty-title">{t('shell.empty.title')}</p>
             <button type="button" onclick={() => void openDirectoryViaPicker()}>{t('shell.empty.openFolder')}</button>
@@ -1384,6 +1436,20 @@
             </form>
             <p class="vv-side-empty-hint">{t('shell.empty.dragHint')}</p>
           </div>
+        {/if}
+        {#if leftViewEff === 'toc'}
+          <!-- 左栏目录视图（spec A §4.1）：TocView 共享装配件消费（入参与右栏同源
+               同值——数据互斥/同源由 AppShell 单值下行保证）；目录数据门在切换器
+               （tocEntries/outlineDefinitions），不在 sources——URL 打开路径
+               （无 sources 有目录数据）同样可达 -->
+          <TocView
+            {tocEntries}
+            {outlineDisplayed}
+            activeLine={activeOutlineLine ?? undefined}
+            onOutlineJump={onOutlineJump}
+            outlineTruncated={outlineTruncated}
+            onExpandAll={expandOutlineAll}
+          />
         {/if}
       </div>
     </aside>
@@ -1411,7 +1477,7 @@
         ontoc={(entries) => (tocEntries = entries)}
         onoutline={pushOutlineEntries}
         ongitAvailable={pushGitInfo}
-        gitRepoDir={rightView === 'git' && gitInfo !== null ? gitInfo.repoDir : null}
+        gitRepoDir={rightViewEff === 'git' && gitInfo !== null ? gitInfo.repoDir : null}
       />
     </main>
     {#if !layout.rightCollapsed}
