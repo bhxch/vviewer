@@ -367,16 +367,17 @@ describe('sanitizeHtml——spec D 三档（外链图片 blocked/manual/auto + �
     expect(img.getAttribute('data-vv-external-src')).toBe(EXT);
   });
 
-  it('⑥组合面：src 白名单命中保留 + srcset 含未放行候选——srcset 迁移但不得打拦截标记（img 有可用加载源在场）', () => {
-    // manual：src 命中保留、srcset 整串迁 data-vv-external-srcset——src 在场即有
-    // 可用加载源，补标记会让白名单放行图显示占位框（标记语义矛盾）
+  it('⑥组合面：src 白名单命中保留 + srcset 含未放行候选——manual src 可用时 srcset 走过滤（评审 M4：无死数据）且不打拦截标记', () => {
+    // manual：src 命中保留（img 可加载）→ srcset 与 blocked 同口径逐候选过滤——
+    // 不整串迁移（迁移会留 data-vv-external-srcset 死数据且候选无承接面）
     const manual = sanitizeHtml(
-      `<img src="${EXT}" srcset="https://evil.example.net/b.png 1x">`,
+      `<img src="${EXT}" srcset="https://evil.example.net/b.png 1x, https://external.example.com/c.png 2x">`,
       { externalImage: { policy: 'manual', allowlist: ['external.example.com'] } },
     );
     const manualImg = elOf(manual);
     expect(manualImg.getAttribute('src')).toBe(EXT);
-    expect(manualImg.hasAttribute('data-vv-external-srcset')).toBe(true);
+    expect(manualImg.getAttribute('srcset')).toBe('https://external.example.com/c.png 2x'); // 命中候选保留
+    expect(manualImg.hasAttribute('data-vv-external-srcset')).toBe(false); // 无死数据
     expect(manualImg.hasAttribute('data-vv-blocked-external')).toBe(false);
     expect(manualImg.hasAttribute('title')).toBe(false);
     // blocked：src 命中保留、srcset 全部未放行剥除——同口径不打标记
@@ -388,6 +389,12 @@ describe('sanitizeHtml——spec D 三档（外链图片 blocked/manual/auto + �
     expect(blockedImg.getAttribute('src')).toBe(EXT);
     expect(blockedImg.hasAttribute('srcset')).toBe(false);
     expect(blockedImg.hasAttribute('data-vv-blocked-external')).toBe(false);
+    // 对照：src 待确认（占位场景）时 srcset 整串迁移语义维持（Errata ⑧ 口径）
+    const migrated = sanitizeHtml(
+      `<img srcset="${EXT} 1x, /local.png 2x">`,
+      { externalImage: { policy: 'manual', allowlist: [] } },
+    );
+    expect(elOf(migrated).hasAttribute('data-vv-external-srcset')).toBe(true);
     // 对照：src 未命中已迁/已剥（无可用加载源）时补标记语义维持
     const stillMarked = sanitizeHtml(
       '<img srcset="https://evil.example.net/b.png 1x">',

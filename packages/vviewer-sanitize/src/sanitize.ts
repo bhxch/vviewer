@@ -425,26 +425,31 @@ function registerSanitizeHooks(): void {
       // 视图把净化后 DOM 挂主文档、无 CSP 兜底）。三档分流（spec D §3.1，白名单
       // 作用面=img 与 srcset——命中白名单的外域候选视同放行）：
       //   auto（或候选全部放行）：原样保留（零改动）；
-      //   manual：存在未放行外域候选 → 整串迁 data-vv-external-srcset（裁量落定：
-      //     混合候选罕见且占位语义本就是整图待确认——整串迁移使点击回填无需候选
-      //     重组，含相对候选一并延迟到点击后）+ 移除 srcset（DOM 无 srcset 即不
-      //     发请求）；无未放行外域候选则原样；
-      //   blocked：现行逐候选过滤——未放行外域候选剔除、其余保留；过滤后无任何
-      //     可用加载源（src 缺失或同为外域已拦）时补拦截标记。
+      //   manual：src 待确认（未放行外域已迁 data-vv-external-src，img 无可用加载
+      //     源）时 srcset 整串迁 data-vv-external-srcset（裁量落定：占位语义本就是
+      //     整图待确认——整串迁移使点击回填无需候选重组，含相对候选一并延迟到点击
+      //     后）；src 可用（白名单命中/内域保留）时 srcset 与 blocked 同口径逐候选
+      //     过滤（评审 M4：src 在场即图可加载，srcset 不迁——整串迁会留死数据且
+      //     候选无承接面）；
+      //   blocked/auto：auto 原样保留；blocked 现行逐候选过滤——未放行外域候选剔除、
+      //     其余保留；过滤后无任何可用加载源（src 缺失或同为外域已拦）时补拦截标记。
       const srcset = el.getAttribute('srcset');
       if (srcset !== null) {
         const candidates = srcset.split(',').map((c) => c.trim()).filter((c) => c !== '');
         const candidateUrl = (c: string): string => (c.split(/\s+/)[0] ?? '').trim();
         const unallowed = (c: string): boolean =>
           isExternalMediaSrc(candidateUrl(c)) && !isExternalImageAllowlisted(candidateUrl(c), policyCfg.allowlist);
-        if (policyCfg.policy === 'manual') {
+        if (policyCfg.policy === 'manual' && (src === null || (srcExternal && !allowSrc))) {
+          // src 无可用加载源（缺失，或外域未放行已迁）＝占位场景：srcset 整串迁移
+          // ——DOM 无 srcset 即不发请求（src=null 时 allowSrc 恒 true，不能用
+          // !allowSrc 判占位场景）
           if (candidates.some(unallowed)) {
             el.setAttribute('data-vv-external-srcset', srcset);
             el.removeAttribute('srcset');
-            if (src === null || (srcExternal && !allowSrc)) {
-              // 无可用加载源（src 缺失，或 src 外域且未放行已迁）补标记——白名单
-              // 命中保留的 src 在场即有加载源，不得打标记（allowSrc 区分）
-              let firstBlockedHost = srcExternal && !allowSrc ? hostOf(trimmed) : '';
+            if (src === null || srcExternal) {
+              // 无可用加载源（src 缺失，或 src 外域未放行已迁）补标记——blocked
+              // 分支补标记语义对齐（!allowSrc 下 srcExternal 必为已迁 src）
+              let firstBlockedHost = srcExternal ? hostOf(trimmed) : '';
               if (firstBlockedHost === '') {
                 for (const c of candidates) {
                   if (unallowed(c)) {
