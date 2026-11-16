@@ -12,7 +12,7 @@
 
 ## 基线与实施顺序
 
-- **基线**：当前 HEAD `f673b42`（main；工作树 clean——spec C/E/A/B/D/I 已全部落地含评审修订）。spec F 此前零落地（`tools/grammar-builder/` 无 gen-sources.mjs、无 helix-pin.json 实查）；本计划全部工作基于该 HEAD 展开。
+- **基线**：当前 HEAD `15327cd`（main；工作树 clean——本计划文档自身以 15327cd 提交于 f673b42 之上，相对 f673b42 仅 docs-only 差异、源码面等价；实施者核基线以 15327cd 为准，F5）。spec C/E/A/B/D/I 已全部落地含评审修订；spec F 此前零落地（`tools/grammar-builder/` 无 gen-sources.mjs、无 helix-pin.json 实查）；本计划全部工作基于该 HEAD 展开。
 - **实施顺序**：Task 1 → Task 2 → Task 3 → Task 4 → Task 5 → Task 6，**严格串行**。理由：**gen-sources 与 `build.mjs --fetch` 是 cargo 编译的先行步骤**（spec F 指令明载）——server/core/build.rs 的 include_str(manifest)/copy_queries(assets/queries)/cc 编译（out/grammars 源树）三个输入在 T2 gen 实跑 + `--fetch` 后才在盘；T3（server 门禁动态化）的 cargo test 依赖该盘面；T4（CI）把 T1/T2 的本地链重排进 workflow；T5 收 e2e 锚与文档；T6 全量门禁收尾。
 - **触及 server/（Rust）**：`server/core/src/compute/queries.rs`（301 硬门禁 → manifest 动态对齐，:299-306）与 `server/core/build.rs`（生成物缺失显式报错指向 gen 命令 + 头注释/警告文案订正）。build.rs 的 serde 结构零改动（manifest 形态保持）。
 - **UI 文案/i18n/交互组件/a11y 触及面**：**零**——本计划无任何 `.svelte` 组件、i18n 目录键、浮层/菜单/确认通道或样式 token 改动，无 `docs/design/frontend-conventions.md`/`docs/design/semantic-components.md` 前置阅读项（唯一位近 UI 的文件是 `apps/web/e2e/b-code-outline.spec.ts` 的注释级溯源更新，无断言/文案变化）。
@@ -41,7 +41,7 @@
 3. **动态门禁防双计**：grammar.yml 断言落定 `wasm manifest 键数 + self-build 失败清单数 == server/grammars-manifest.json 条目数`（fetch 失败被 self-build 的 parser.c-missing 失败条目吸收，单门收敛；fetch-failures 仅打印不参与等式）；Rust 侧 `generated_count() == manifest.grammars.len()`（partial 跳过形态保持）。
 4. **gen 缺产物报错指向 gen 命令**（§5）：build.mjs `--fetch`/`--self-build` 读 build-list.json/languages.toml 前置存在性检查；build.rs 对 manifest 与 assets/queries 各显式检查——报错文案统一指向 `pnpm gen:sources`（本地首跑/CI 冷缓存漏 gen 即确定性报错，不静默 ENOENT）。
 5. **aliases 一致性门禁边界（Errata ③）**：gen 校验 aliases 每键 ∈ manifest 名集 ∪ `_`/`-` 变体命中；未命中即报错，**白名单 `ALIASES_KNOWN_MISSING = ['objc','systemrdl']` 告警放行**（现状合法差异，硬 fail 会翻转既有 README 记录的行为）。单测锁白名单内外两态。
-6. **盘态守门测试迁移后仍咬合**：ecma/injections.scm O(n²) 锚点守门、typescript inherits 头声明、queries 目录数基线、tags 目录数基线、_javascript tags 死资产不复活——从 tools/helix-assets/test/generate.test.ts 原断言迁至 gen-sources.test.ts（对 gen 后资产盘面继续生效），T2 删旧文件后断言面不断档。
+6. **盘态守门测试迁移后仍咬合**：ecma/injections.scm O(n²) 锚点守门、typescript inherits 头声明、queries 目录数基线（≥280）、tags 目录数基线（**≥56 一层 readdirSync 口径**——原断言 `tagsBaseline = 56` 语义，总数 58 含 2 嵌套目录，F4）、**javascript/_javascript tags 继承链一致性**（F1 订正：上游已把 javascript tags 实体迁入 `_javascript/tags.scm` 且 `javascript/tags.scm` 改纯继承声明 `; inherits: _javascript,ecma`——原「_javascript 死资产不复活」断言前提反转，整树拉取必入盘；迁移断言落**双形态**：tags.scm 头部声明 inherits _javascript → `_javascript/tags.scm` 必在盘（活资产），否则（现盘旧形态自含实体）仅锁其存在——T1 现盘绿、T2 regen 后锁定新形态）——从 tools/helix-assets/test/generate.test.ts 原断言迁至 gen-sources.test.ts（订正后对两代盘面均生效），T2 删旧文件后断言面不断档；TAGS_SOURCES.langs 相关断言（死资产锁/langs 清单锁）随机制整体退役不迁移（Errata ⑨/⑬）。
 
 ---
 
@@ -89,7 +89,7 @@
   - `--refresh`：`resolveMasterHead` → 与 pin.commit 对比 → 写新 pin（refreshedAt 更新）→ 同缺省流程 → 差异报告（pin 缺失时自动初始化）。
 - 产物路径常量：`tools/grammar-builder/languages.toml`（=build.mjs PATHS.languagesToml 同路径，出库后由 gen 写）、`tools/grammar-builder/build-list.json`、`packages/vviewer-highlight/assets/{languages.json,themes.json}`、`server/grammars-manifest.json`、`packages/vviewer-core/src/registry/generated-extensions.ts`。
 
-**验收锚**：`pnpm vitest run tools/grammar-builder/test/gen-sources`（仓库根）全绿——①pin 校验（缺字段/40hex/报错指向 --refresh）；②[[grammar]] 多形态解析 fixture（subpath 有无、except 剔除 wren/gemini、**manifest 含 vue**——Review Focus 1）；③cSymbol 规约（`c-sharp→tree_sitter_c_sharp` 等）；④build-list 形态逐字段锚（name/subpath/parserCExists/helixLang）；⑤languages.json/generated-extensions/manifest 快照锚（fixture 派生输出断言）；⑥QUERY_PATCHES 命中≠1 抛错（迁移用例）；⑦parseTheme/collectThemes inherits 链（迁移用例）；⑧盘态守门迁移断言全绿（现盘资产：queries 目录数 ≥280、ecma O(n²) 锚点、typescript inherits 头、tags 目录数 ≥58、_javascript tags 死资产不复活、bash @definition.function 抽查）；⑨diffReport 三计数；⑩aliases 白名单内外两态；⑪网络面 mock（trees truncated 抛错、raw 失败清单抛错、refresh 写 pin）。+ 旧脚本测试仍全绿（过渡并存）+ `pnpm run typecheck && pnpm lint` 绿。所触 e2e 锚文件=无（工具层）。
+**验收锚**：`pnpm vitest run tools/grammar-builder/test/gen-sources`（仓库根）全绿——①pin 校验（缺字段/40hex/报错指向 --refresh）；②[[grammar]] 多形态解析 fixture（subpath 有无、except 剔除 wren/gemini、**manifest 含 vue**——Review Focus 1）；③cSymbol 规约（`c-sharp→tree_sitter_c_sharp` 等）；④build-list 形态逐字段锚（name/subpath/parserCExists/helixLang）；⑤languages.json/generated-extensions/manifest 快照锚（fixture 派生输出断言）；⑥QUERY_PATCHES 命中≠1 抛错（迁移用例）；⑦parseTheme/collectThemes inherits 链（迁移用例）；⑧盘态守门迁移断言全绿（现盘资产：queries 目录数 ≥280、ecma O(n²) 锚点、typescript inherits 头+父目录 _typescript 实体、tags 目录数 ≥56（一层 readdirSync 口径——原 tagsBaseline=56 语义；总数 58 含 2 嵌套，F4）、javascript/_javascript tags 继承链双形态一致性（F1：现盘旧形态=javascript/tags.scm 99 行自含实体零 inherits 命中→仅锁存在；regen 后新形态=javascript 头部 `; inherits: _javascript,ecma` → `_javascript/tags.scm` 必在盘；_javascript 目录 highlights/locals 活资产存在性断言保留）、bash @definition.function 抽查；TAGS_SOURCES.langs 死资产/langs 清单断言随机制退役不迁移）；⑨diffReport 三计数；⑩aliases 白名单内外两态；⑪网络面 mock（trees truncated 抛错、raw 失败清单抛错、refresh 写 pin）。+ 旧脚本测试仍全绿（过渡并存）+ `pnpm run typecheck && pnpm lint` 绿。所触 e2e 锚文件=无（工具层）。
 
 - [ ] **Step 1: TDD 纯函数与派生面（RED→GREEN）**
 
@@ -97,7 +97,7 @@ fixture toml 落位（subpath 有无/except 段/[[language]]×[[grammar]] 差集
 
 - [ ] **Step 2: 盘态守门迁移 + themes/tags 断言（GREEN on 现盘）**
 
-⑧ 盘态断言按 generate.test.ts:124-245 原语义迁入（路径不改，对现入库资产跑）→ GREEN。
+⑧ 盘态断言迁入（路径不改，对现入库资产跑）：tags 基线按 **≥56 一层口径**、javascript/_javascript 按 **双形态一致性**落（F1/F4 订正——原「≥58」「死资产不复活」断言在 T2 regen 后必红，不迁移）；_typescript/bash/typescript 抽查原样 → GREEN。
 
 - [ ] **Step 3: 网络面 + 主流程 + --refresh（mock 注入）**
 
@@ -143,7 +143,7 @@ git add tools/grammar-builder/gen-sources.mjs tools/grammar-builder/test && git 
   "gen:grammars": "pnpm gen:sources && node tools/grammar-builder/build.mjs --fetch --lite && node tools/grammar-builder/build.mjs --self-build"
   ```
   build.mjs 头注释与 PATHS 注释同步（「vendored languages.toml」→「gen-sources 产物 languages.toml@helix-pin」）。
-- **gen 实跑（本 task 核心，spec §3.5 验证步骤）**：`node tools/grammar-builder/gen-sources.mjs --refresh`（首跑自动初始化 pin）→ 差异报告对照预期锚（Errata ⑦，2026-11-17 实测）：语言集 ±0、[[grammar]] 303/[[language]] 342、rev 变更 3（yaml→ikatyang 仓指回 / haskell / qmljs）、languages.json 值域 6 字段零增补；随后 `node tools/grammar-builder/build.mjs --fetch`（**全量源树落地——cargo 编译依赖生成物，T3 前置步骤**）；`pnpm gen:grammars`（新链）冒烟 lite 自建。
+- **gen 实跑（本 task 核心，spec §3.5 验证步骤）**：`node tools/grammar-builder/gen-sources.mjs --refresh`（首跑自动初始化 pin）→ 差异报告对照预期锚（Errata ⑦，2026-11-17 实测）：语言集 ±0、[[grammar]] 303/[[language]] 342、rev 变更 3（yaml→ikatyang 仓指回 / haskell / qmljs）、languages.json 值域 6 字段零增补；随后 `node tools/grammar-builder/build.mjs --fetch`（**全量源树落地——cargo 编译依赖生成物，T3 前置步骤**）→ `node tools/grammar-builder/gen-licenses.mjs`（全量源树在手再生 GRAMMAR_LICENSES.md——工作树副本与 manifest 同代际，spec §3.2.4 时序后移语义，F2）；`pnpm gen:grammars`（新链）冒烟 lite 自建。
 - 出库后 README 计数面最小订正（tools/grammar-builder/README.md 头部退役提示一段——全面重写归 T5）：「build-list/gen-server-manifest/gen-code-extensions 与 tools/helix-assets 已退役，源清单再生见 gen-sources.mjs」。
 
 **验收锚**：`pnpm vitest run`（仓库根，tools+packages+apps 全量）绿（退役后测试面 = build.test + gen-sources.test + pack-npm.test + highlight 域既有）；`pnpm install` 收敛（tools/* 非 workspace 成员，pnpm-workspace.yaml 实查仅 packages/*、apps/*——lockfile 零变化预期，若变化如实记录）；`git status --porcelain` 暂存面恰为 T2 清单（生成物不在 untracked 区——.gitignore 生效核验）；`rg -n "/share/rw/repo/markpad-aio|/share/rw/repo/github/helix-editor" --hidden -g '!.git' -g '!docs/superpowers/**'` **零命中（grep 门达成）**；`pnpm run typecheck && pnpm lint` 绿（generated-extensions.ts 工作树在位）；gen 差异报告与 Errata ⑦ 预期逐项对齐（超出预期即停，人工复核后更新 Errata 再继续）。所触 e2e 锚文件=无。
@@ -158,7 +158,7 @@ ensureGenProducts/cSymbol 校验/脚本链/头注释。
 
 - [ ] **Step 3: gen 实跑 + 全量 --fetch + 门禁**
 
-`node tools/grammar-builder/gen-sources.mjs --refresh` → 差异报告对照 Errata ⑦ → `node tools/grammar-builder/build.mjs --fetch`（全量）→ `pnpm gen:grammars` 冒烟 → `pnpm vitest run && pnpm run typecheck && pnpm lint` → grep 门复跑。
+`node tools/grammar-builder/gen-sources.mjs --refresh` → 差异报告对照 Errata ⑦ → `node tools/grammar-builder/build.mjs --fetch`（全量）→ `node tools/grammar-builder/gen-licenses.mjs`（fetch 后再生，F2）→ `pnpm gen:grammars` 冒烟 → `pnpm vitest run && pnpm run typecheck && pnpm lint` → grep 门复跑。
 
 - [ ] **Step 4: 提交**
 
@@ -268,6 +268,12 @@ git add server/core && git commit -m "feat(server): grammar 门禁动态化—�
   if (count + buildFails.length !== expected) { console.error(`动态门禁不通过：wasm ${count} + build 失败 ${buildFails.length} ≠ manifest ${expected}（gen-sources 产出即真相）`); process.exit(1); }
   ```
   fetch-failures 恒打印；`≥264` 硬编码退役。
+- grammar.yml self-build job **gen-licenses 步**（F2——spec §3.2.4 落实缺口；setup-grammars 之后、门禁摘要/artifact staging 之前）：
+  ```yaml
+  - name: GRAMMAR_LICENSES.md 再生（fetch 全量源树后；出库不入库）
+    run: node tools/grammar-builder/gen-licenses.mjs
+  ```
+  **不入 setup-grammars**：lite/子集档源树残缺会产出「(源未取)」残缺 license 并被缓存（gen-licenses.mjs:15 模块顶读 server/grammars-manifest.json + 逐 grammar 扫源树，源不在即残缺行）——只在 languages=all 的 self-build job 落；server-full fetch-only 档与 ci.yml 各子集档无消费端，该文件缺席合法（缓存保存对缺席路径零副作用）。
 - grammar.yml server-full job：`cargo test … full_registry_count_is_301`（:79）→ `full_registry_count_matches_manifest`。
 - grammar.yml artifact 契约（§8）：
   ```yaml
@@ -293,15 +299,15 @@ git add server/core && git commit -m "feat(server): grammar 门禁动态化—�
 - release.yml publish-packages job：逐包构建步（:440-444）之前加 `node tools/grammar-builder/gen-sources.mjs`（highlight npm 源码包 assets 整目录复制含 queries/——Errata ④；gen 无 wasm 依赖、网络面 1-2 次 API + raw 拉取，量级可承受）。
 - pack-npm.mjs `resolvePathsFrom`（:54-61）：`licenseFile: env.VV_LICENSE_FILE ?? path.join(repoRoot, 'server/GRAMMAR_LICENSES.md')`；:132 报错文案补「或设 VV_LICENSE_FILE（publish-npm artifact 解包路径）」。
 
-**验收锚**：本地链模拟 `pnpm gen:sources && node tools/grammar-builder/build.mjs --fetch --lite && node tools/grammar-builder/build.mjs --self-build` 绿（=新 setup-grammars 行为的本地等价物）；pack-npm.test.ts 全绿（VV_LICENSE_FILE 注入一例新锚）；全部改动 YAML 经解析器静态自查（`node -e` + 无 js-yaml 依赖时用 `python3 -c "import yaml; yaml.safe_load(open(f))"`）+ 步序走查（gen 在 fetch/self-build 与 typecheck/build 前、cache-hit 跳 gen、pin 不在 cache paths）；**GitHub Actions 真跑验证不在本计划内（不 push）——如实标注待 CI**。所触 e2e 锚文件=无。
+**验收锚**：本地链模拟 `pnpm gen:sources && node tools/grammar-builder/build.mjs --fetch --lite && node tools/grammar-builder/build.mjs --self-build` 绿（=新 setup-grammars 行为的本地等价物）；pack-npm.test.ts 全绿（VV_LICENSE_FILE 注入一例新锚）；全部改动 YAML 经解析器静态自查（`node -e` + 无 js-yaml 依赖时用 `python3 -c "import yaml; yaml.safe_load(open(f))"`）+ 步序走查（gen 在 fetch/self-build 与 typecheck/build 前、cache-hit 跳 gen、pin 不在 cache paths、gen-licenses 在 self-build job staging 前且不在 setup-grammars/ci 子集档——F2）；**GitHub Actions 真跑验证不在本计划内（不 push）——如实标注待 CI**。所触 e2e 锚文件=无。
 
 - [ ] **Step 1: pack-npm VV_LICENSE_FILE 缝（TDD 小步）**
 
 pack-npm.test.ts 加 env 注入用例 → RED → 落 resolvePathsFrom/env 文案 → GREEN。
 
-- [ ] **Step 2: setup-grammars action 重排 + grammar.yml 两改**
+- [ ] **Step 2: setup-grammars action 重排 + grammar.yml 三改**
 
-cache id/paths/key + gen 步 + 动态门禁 + server-full 测试名 + artifact staging。
+cache id/paths/key + gen 步 + 动态门禁 + server-full 测试名 + gen-licenses 步（F2）+ artifact staging。步序走查：gen-licenses 在 setup-grammars 后、staging 前。
 
 - [ ] **Step 3: ci.yml --check 步退役 + release.yml publish 链两供链**
 
@@ -323,16 +329,21 @@ git add .github tools/grammar-builder/pack-npm.mjs tools/grammar-builder/test/pa
 - Modify: `tools/grammar-builder/README.md`（重写：gen-sources 单源 + pin + refresh 流程、生成物出库清单、退役脚本说明、:117「292 条」→ 动态计数、:16/:27/:45-55 服务端集 301→manifest 动态表述、QUERY_PATCHES 溯源迁移自 helix-assets）
 - Modify: `docs/spec-deviations.md`（§10 :109-113「vendored languages.toml pinned rev」→「helix-pin commit 派生 gen-sources 产物」表述订正）
 - Modify: `tools/grammar-builder/GRAMMARS-NPM-README.md`（若提及 gen-code-extensions/gen-licenses 时序——实查后最小订正）
+- Modify: `packages/vviewer-highlight/assets/LICENSE-README.md`（**MPL-2.0 合规声明与实际来源一致化——非可选**，F3：①生成/溯源引用 `tools/helix-assets/README.md`|`generate.mjs` 随 T2 删除悬空 → 改指 `tools/grammar-builder/gen-sources.mjs`；②「经 markpad 同源副本」「queries/ vendored 原样拷贝」「214 主题」在出库+helix@pin 直拉后失真 → 来源表述改 helix@pin 直拉（master 实测 runtime/themes flat toml 218 个、queries 顶层 341 目录），格式转换修改列保留）
+- Modify: `THIRD_PARTY_NOTICES.md`（:57 helix 行溯源链表述同步——`tools/helix-assets/README.md` 引用改 gen-sources.mjs、214 计数对齐 gen 实产物）
+- Modify: `server/README.md`（:304 「GENERATED_COUNT==301 门禁收口（full_registry_count_is_301）」→ `full_registry_count_matches_manifest` 动态门禁名与 manifest 对齐表述）
+- Modify: `docs/e2e/extension-bindings.md`（:116 「由 gen-code-extensions.mjs 生成，CI --check 校验」→ gen-sources.mjs 生成、产物不入库——注释级）
+- Modify: `apps/web/e2e/t-hl.spec.ts`（:724-726 同上溯源注释订正——注释级）
 
 **Interfaces:** 无代码面——本 task 全为注释/文档/数字对齐。
 
-**验收锚**：`pnpm --filter web exec playwright test b-code-outline` 全绿（OUT 域零翻转——`pnpm --filter web build:e2e` 先行）；文档数字与 gen 实产物一致（`node -p "Object.keys(require('./packages/vviewer-highlight/assets/languages.json')).length"` 等对照）；grep 门两条字面量零命中复跑（T5 后仍零）；`pnpm run typecheck && pnpm lint` 绿。所触 e2e 锚文件=`apps/web/e2e/b-code-outline.spec.ts`。
+**验收锚**：`pnpm --filter web exec playwright test b-code-outline` 全绿（OUT 域零翻转——`pnpm --filter web build:e2e` 先行）；文档数字与 gen 实产物一致（`node -p "Object.keys(require('./packages/vviewer-highlight/assets/languages.json')).length"` 等对照）；**悬空引用 rg 核查**（F3）：`rg -n "helix-assets|gen-code-extensions|full_registry_count_is_301" README.md THIRD_PARTY_NOTICES.md server/README.md docs/e2e apps/web/e2e packages/vviewer-highlight/assets -g '!docs/superpowers/**'` 失真面零命中（LICENSE-README/THIRD_PARTY_NOTICES 不再引用已删路径、门禁名已订正、两处溯源注释已更新）；grep 门两条字面量零命中复跑（T5 后仍零）；`pnpm run typecheck && pnpm lint` 绿。所触 e2e 锚文件=`apps/web/e2e/b-code-outline.spec.ts`、`apps/web/e2e/t-hl.spec.ts`（仅注释级溯源订正，断言零改动——定向回归随 b-code-outline 批跑）。
 
 - [ ] **Step 1: build:e2e + b-code-outline 定向跑（改前基线）→ 注释溯源更新 → 复跑零翻转**
 - [ ] **Step 2: 文档四处同步（README 计数对齐 gen 实产物）+ grep 门复跑**
 
 ```bash
-git add apps/web/e2e/b-code-outline.spec.ts README.md tools/grammar-builder/README.md docs/spec-deviations.md tools/grammar-builder/GRAMMARS-NPM-README.md && git commit -m "docs(tools): 构建源头化文档同步——grammar-builder README 重写（gen-sources/pin/refresh 流程+退役说明+计数动态化）/README 功能行计数对齐/spec-deviations §10 表述订正/b-code-outline OUT-05 注释补新 pin 溯源（ocaml 无 tags 载体不变）"
+git add apps/web/e2e/b-code-outline.spec.ts apps/web/e2e/t-hl.spec.ts README.md tools/grammar-builder/README.md tools/grammar-builder/GRAMMARS-NPM-README.md docs/spec-deviations.md docs/e2e/extension-bindings.md server/README.md THIRD_PARTY_NOTICES.md packages/vviewer-highlight/assets/LICENSE-README.md && git commit -m "docs(tools): 构建源头化文档同步——grammar-builder README 重写（gen-sources/pin/refresh 流程+退役说明+计数动态化）/README 功能行计数对齐/spec-deviations §10 表述订正/LICENSE-README MPL-2.0 合规声明与 helix@pin 直拉来源一致化+THIRD_PARTY_NOTICES 溯源链/server README 门禁名订正/gen-code-extensions 溯源注释两处（extension-bindings/t-hl）/b-code-outline OUT-05 注释补新 pin 溯源（ocaml 无 tags 载体不变）"
 ```
 
 ---
@@ -356,7 +367,13 @@ git add apps/web/e2e/b-code-outline.spec.ts README.md tools/grammar-builder/READ
 - ⑥**OUT-05 载体命运实证（真网探针）**：helix master HEAD `49986e6674e5658164a88f599ec8c822e62ad0db`（2026-11-17 实测 api.github.com）`runtime/queries/ocaml/tags.scm` HTTP 404——b-code-outline.spec.ts OUT-05「无 tags 语言」载体在新 pin 下依然成立，断言零改动仅注释溯源；zig tags.scm HTTP 200（整树拉取后 tags 覆盖扩张面真实）。
 - ⑦**gen 实跑预期差异报告锚（真网实测预演 spec §3.5 验证步骤）**：master languages.toml（2026-11-17 下载比对）vs vendored：[[grammar]] 303/[[language]] 342 计数一致、语言集 ±0、rev 变更恰 3 处（yaml → `ikatyang/tree-sitter-yaml`@0e36bed1 仓指回、haskell、qmljs——逐行 diff 23 行）；languages.json 值域字段集 = `{fileTypes, globFileTypes, grammar, injections, scope, shebangs}`（无 aliases 字段、**零 Markpad 增补字段**——spec §3.2.1 builder 必查项落定：派生即真相零注入面）。T2 实跑差异超出此锚即停人工复核。
 - ⑧**parserC 探测裁量落定**（spec §3.2.1 两案取后者）：信任 helix 清单不预探测——build-list.json 形态保持 `{name, subpath, parserCExists, helixLang}`（parserCExists 恒 true 语义改注、helixLang=name），build.mjs `resolveTargets`/`planFetch`/`fetchOneGrammar` 零改动（fetchOneGrammar:397/:407 既有 parser.c 探测 + fetch-failures 承接实探）。
-- ⑨**tags.scm 同 pin 收编**：现资产树 tags 覆盖 58 目录（find 实测）来自 markpad 转载 + TAGS_SOURCES 8 语补源两层；queries 整树拉取后单层同 pin 覆盖（master ~77 目录），`copyTags`/`TAGS_SOURCES` 机制整体退役；highlight 域 tags 消费用例（queries-remote.test.ts:342 typescript inherits 链）在新树仍成立。
+- ⑨**tags.scm 同 pin 收编**：现资产树 tags 覆盖 58 目录（find 实测）来自 markpad 转载 + TAGS_SOURCES 8 语补源两层；queries 整树拉取后单层同 pin 覆盖（master ~77 目录），`copyTags`/`TAGS_SOURCES` 机制整体退役；highlight 域 tags 消费用例（queries-remote.test.ts:342 typescript inherits 链）在新树仍成立（死资产前提反转与双形态断言见 ⑬——F1 评审订正）。
 - ⑩**退役零 lockfile 波动 + build.test 依赖面**：pnpm-workspace.yaml 仅 `packages/*`、`apps/*`（tools/* 非 workspace 成员）——删 tools/helix-assets/package.json 不动 pnpm-lock.yaml；build.test.ts:11 `import { buildList, detectParserC, SOURCES } from '../build-list.mjs'`——退役时同步剥离该 import 与对应 describe（build.mjs 侧用例全保留）。
 - ⑪**CI 真跑验证边界**：本计划对 workflow 改动仅静态自查（YAML 解析 + 步序走查）；GitHub Actions 真跑（gen 前置冷缓存首跑绿/命中跳 gen——spec §6 CI 锚）须 push 后验证，不 push 纪律下如实标注待 CI，不造假通过。
 - ⑫**规划期未跑门禁声明**：本计划为规划产物，vitest/typecheck/cargo/playwright/build:e2e 门禁本体均未运行（规划阶段实查为读文件 + 只读探针 + /tmp 网络探针）；各 task 验收锚在实施期逐 task 兑现。
+- 2026-11-17 计划评审修订（评审员 5 条意见：F1/F2 门禁必红 + F3 合规漏面 + F4 数字口径 + F5 基线表述；规划师 F 逐条独立实查复现后同文件落定，代码基线不变；评审员「已验证通过面」的串行顺序/grep 门 4 文件命中/Errata ⑦ 复算/公式逐位/行号锚抽查/形态锚与本文正文互证一致）：
+- ⑬【F1·门禁必红】**_javascript tags 死资产断言前提反转**：真网实测 master HEAD 49986e66（trees API recursive，truncated:false）`runtime/queries/_javascript/tags.scm` HTTP 200 在树、`javascript/tags.scm` 已为纯继承声明（头部 `; See runtime/queries/ecma/README.md…` + `; inherits: _javascript,ecma`）、`ecma/tags.scm` HTTP 404——上游把 javascript tags 实体迁入 `_javascript/tags.scm` 并令其成为继承链必需活资产（generate.mjs:213-216「零消费者死资产」前提反转）。Errata ⑤ 整树拉取必把该文件入盘 → 原「死资产不复活」迁移断言（generate.test.ts:211-218 `existsSync(.../_javascript/tags.scm)===false` + `TAGS_SOURCES.langs` 锁）在 T2 regen 后必红。落定：迁移断言改**双形态一致性**（javascript/tags.scm 头部声明 inherits _javascript → `_javascript/tags.scm` 必在盘；否则——现盘旧形态 99 行自含实体零 inherits 命中实查——仅锁其存在），T1 现盘绿、T2 regen 后锁定新形态；运行时无虞依据=queries.ts `expandQuery` 缺父目录 warn+跳过该父支（typescript 声明 `; inherits: _typescript,ecma` 而 ecma/tags.scm 既有缺席先例同型）；TAGS_SOURCES.langs 断言随机制整体退役（Errata ⑨ 扩充）。
+- ⑭【F2·CI 门禁必红】**GRAMMAR_LICENSES.md 再生链落实缺口**：spec §3.2.4「--fetch 落地源树后生成」在计划原稿无归属（gen-sources 职责清单不含 licenses、build.mjs:460-488 无 gen-licenses 调用、setup-grammars/grammar.yml 零命中实查）——T2 git rm --cached 后 CI 干净 checkout 无该文件 → T4 artifact staging `cp server/GRAMMAR_LICENSES.md` 确定性失败（grammar job 红、publish-npm VV_LICENSE_FILE 落空；本地开发机因工作树残留旧文件静默掩盖、T6 worktree 链不消费该文件测不出）。落定：grammar.yml self-build job setup-grammars 后补 `node tools/grammar-builder/gen-licenses.mjs` 步（**不入 setup-grammars**——lite/子集档源树残缺会产出「(源未取)」残缺 license 并入缓存；server-full fetch-only/ci 各子集档无消费端缺席合法）；T2 Step 3 本地全量 --fetch 后同步再生。
+- ⑮【F3·合规漏面】T5 文档同步补五处失真面：`packages/vviewer-highlight/assets/LICENSE-README.md`（**MPL-2.0 合规声明**——`tools/helix-assets/README.md|generate.mjs` 引用随 T2 删除悬空 +「经 markpad 同源副本/vendored 原样拷贝/214 主题」出库+pin 直拉后全部失真，master 实测 runtime/themes flat toml 218 个全 flat 无子目录；合规声明必须与实际来源一致，非可选）、`THIRD_PARTY_NOTICES.md:57`（同溯源链+214 计数）、`server/README.md:304`（full_registry_count_is_301 门禁名随 T3 悬空）、`docs/e2e/extension-bindings.md:116` 与 `apps/web/e2e/t-hl.spec.ts:724-726`（gen-code-extensions 溯源注释过时——注释级随手）；T5 验收锚补悬空引用 rg 核查、e2eFiles 增 t-hl.spec.ts（注释级）。
+- ⑯【F4·数字口径】tags 基线口径订正：generate.test.ts:201 `tagsBaseline = 56`（**一层 readdirSync 口径**；总数 58 含 2 嵌套目录系 generate.test.ts:194-200 注释明载）——原稿「≥58」按一层口径落 T1 即红（56<58）；落定 **≥56（一层）**；master 顶层 tags 77（trees API 实测）两口径均绿不构成后续风险（master 无嵌套 tags 目录实查）。
+- ⑰【F5·基线表述】基线 HEAD 订正 f673b42 → **15327cd**（计划文档提交其上，docs-only 差异源码面等价；git log 实查）——实施者核基线以 15327cd 为准。
