@@ -1,14 +1,18 @@
 # grammar wasm 资产生成（产物不入库，构建期生成）：
-#   --fetch（vendored languages.toml 浅取 pinned rev → tools/grammar-builder/out/grammars）
+#   gen-sources（helix-pin 缓存未命中时从源再生源清单与查询/主题资产——spec F 构建源头化）
+#   → --fetch（gen-sources 产物 languages.toml@helix-pin 浅取 pinned rev → out/grammars）
 #   → --self-build（tree-sitter-cli 免 emcc 自建，写 apps/web/static/grammars + manifest，
 #     运行时 tree-sitter.wasm 一并就位）。
 # languages 输入：all = 全量 build-list（Grammar 门禁 / release）；
 # lite = aliases.json 36 键 → 产出 34（objc/systemrdl 无源不产出，见 grammar-builder README）
 # （release web 包）；逗号分隔名 = 显式集合（CI 单测/e2e 的最小集）。
-# 缓存三层：wasi-sdk/binaryen 工具链（~/.cache/tree-sitter）、浅取源树、生成产物——
-# 命中时 self-build 全部 skip(cached)，秒级完成。
+# 缓存三层：wasi-sdk/binaryen 工具链（~/.cache/tree-sitter）、浅取源树、gen-sources 产物与
+# 生成产物——命中时 gen 跳过、self-build 全部 skip(cached)，秒级完成。
+# helix-pin.json 与 aliases.json 为入库文件，不进缓存 paths（被缓存版本覆盖 checkout 版本
+# 即失效——spec F 红线）；gen-sources 产物（languages.toml/build-list/queries/themes/
+# manifest/licenses/generated-extensions）随缓存下发。
 name: 'Setup grammar 资产'
-description: '浅取 grammar 源并用 tree-sitter-cli 自建 wasm 到 apps/web/static（构建期生成，不入库）'
+description: 'gen-sources 再生源清单后浅取 grammar 源并用 tree-sitter-cli 自建 wasm 到 apps/web/static（构建期生成，不入库）'
 inputs:
   languages:
     description: '语言选择面：all | lite | 逗号分隔语言名'
@@ -29,17 +33,32 @@ runs:
       # 表达式无 split/replace 可用（join 有、split 无），经 shell tr 归一；
       # all/lite 等无逗号输入原样透传，既有缓存键不受影响
       run: echo "languages=$(printf '%s' "$LANGS" | tr ',' '-')" >> "$GITHUB_OUTPUT"
-    - name: 缓存 grammar 工具链/源树/产物
+    - name: 缓存 grammar 工具链/源树/gen 产物/生成物
+      id: grammars-cache
       uses: actions/cache@v6
       with:
         path: |
           ~/.cache/tree-sitter
           tools/grammar-builder/out/grammars
+          tools/grammar-builder/languages.toml
+          tools/grammar-builder/build-list.json
+          packages/vviewer-highlight/assets/languages.json
+          packages/vviewer-highlight/assets/themes.json
+          packages/vviewer-highlight/assets/queries
+          server/grammars-manifest.json
+          server/GRAMMAR_LICENSES.md
+          packages/vviewer-core/src/registry/generated-extensions.ts
           apps/web/static/grammars
           apps/web/static/tree-sitter.wasm
         # key 追加 fetch-only（I2）：fetch-only 产的「无 wasm」缓存与 self-build 缓存
-        # 同键互踩——self-build 恢复到空产物缓存后重建再回写同键，双 job 竞争抖动
-        key: grammars-${{ runner.os }}-${{ steps.key.outputs.languages }}-${{ inputs.fetch-only }}-${{ hashFiles('pnpm-lock.yaml', 'tools/grammar-builder/languages.toml', 'tools/grammar-builder/build-list.json') }}
+        # 同键互踩——self-build 恢复到空产物缓存后重建再回写同键，双 job 竞争抖动。
+        # hash 段换 helix-pin hash（spec F）：pin 不变即缓存命中（languages.toml/build-list
+        # 已出库不入库，旧 key 的 hashFiles 引用恒空）。
+        key: grammars-${{ runner.os }}-${{ steps.key.outputs.languages }}-${{ inputs.fetch-only }}-${{ hashFiles('pnpm-lock.yaml', 'tools/grammar-builder/helix-pin.json', 'tools/grammar-builder/aliases.json', 'tools/grammar-builder/gen-sources.mjs', 'tools/grammar-builder/build.mjs') }}
+    - name: gen-sources（缓存未命中时从 helix pin 重生成；命中跳）
+      if: steps.grammars-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: node tools/grammar-builder/gen-sources.mjs
     - name: fetch + self-build
       shell: bash
       run: |

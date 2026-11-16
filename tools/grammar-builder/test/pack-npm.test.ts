@@ -222,6 +222,19 @@ describe('main()（CLI 入口：Task 5 publish job 经 env 驱动）', () => {
     expect(p.grammarsDir).toBe(path.join(repoRoot, 'apps/web/static/grammars'));
     expect(p.queriesDir).toBe(path.join(repoRoot, 'packages/vviewer-highlight/assets/queries'));
     expect(p.repoPkgJson).toBe(path.join(repoRoot, 'package.json'));
+    expect(p.licenseFile).toBe(path.join(repoRoot, 'server/GRAMMAR_LICENSES.md'));
+  });
+
+  it('env 注入覆写（publish-npm artifact 解包路径：VV_GRAMMARS_OUT/VV_QUERIES_DIR/VV_LICENSE_FILE，spec F §8）', async () => {
+    const { resolvePathsFrom } = await import('../pack-npm.mjs');
+    const p = resolvePathsFrom({
+      VV_GRAMMARS_OUT: '/art/grammars',
+      VV_QUERIES_DIR: '/art/queries',
+      VV_LICENSE_FILE: '/art/GRAMMAR_LICENSES.md',
+    }) as Record<string, string>;
+    expect(p.grammarsDir).toBe('/art/grammars');
+    expect(p.queriesDir).toBe('/art/queries');
+    expect(p.licenseFile).toBe('/art/GRAMMAR_LICENSES.md');
   });
 });
 

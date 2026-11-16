@@ -48,14 +48,16 @@ export const MANIFEST_ENTRY_BASE = './';
 /** 拆分模式每包解包体积门禁缺省：50MB（spec C 2026-11-14 拍板——jsdelivr 150MB 之外镜像站可能限制更低，50MB 留 3 倍余量） */
 export const DEFAULT_PACK_LIMIT_BYTES = 50 * 1024 * 1024;
 
-/** 按 env 解析输入/输出路径（与 build.mjs 的 env 名对齐；main(env) 可注入测试） */
+/** 按 env 解析输入/输出路径（与 build.mjs 的 env 名对齐；main(env) 可注入测试）。
+ * licenseFile 支持 VV_LICENSE_FILE 覆写：publish-npm job 不跑 gen（spec F §8），
+ * GRAMMAR_LICENSES.md 随 grammar-wasm artifact 下发，指向解包路径。 */
 export function resolvePathsFrom(env = process.env) {
   return {
     grammarsDir: env.VV_GRAMMARS_OUT ?? path.join(repoRoot, 'apps/web/static/grammars'),
     queriesDir: env.VV_QUERIES_DIR ?? path.join(repoRoot, 'packages/vviewer-highlight/assets/queries'),
     outDir: env.VV_NPM_OUT,
     repoPkgJson: path.join(repoRoot, 'package.json'),
-    licenseFile: path.join(repoRoot, 'server/GRAMMAR_LICENSES.md'),
+    licenseFile: env.VV_LICENSE_FILE ?? path.join(repoRoot, 'server/GRAMMAR_LICENSES.md'),
   };
 }
 
@@ -129,7 +131,7 @@ function probeInputs({ grammarsDir, queriesDir, licenseFile }) {
   if (!queriesDir || !fs.existsSync(queriesDir)) throw new Error(`packNpm: queriesDir 不存在: ${queriesDir}`);
   // license 聚合是打包前置（SEE LICENSE IN 指向必须随包）
   if (!licenseFile || !fs.existsSync(licenseFile)) {
-    throw new Error(`packNpm: GRAMMAR_LICENSES.md 缺失: ${licenseFile}（先跑 gen-licenses.mjs？）`);
+    throw new Error(`packNpm: GRAMMAR_LICENSES.md 缺失: ${licenseFile}（先跑 gen-licenses.mjs？或设 VV_LICENSE_FILE（publish-npm artifact 解包路径））`);
   }
   return { allWasmFiles, manifest, manifestEntries };
 }

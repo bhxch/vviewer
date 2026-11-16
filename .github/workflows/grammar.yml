@@ -1,12 +1,15 @@
-# Grammar self-build 门禁与产物（spec 承诺的 ≥264 语言覆盖路径）：
-# --fetch（vendored languages.toml 浅取 pinned rev）→ tree-sitter-cli 全量 self-build
-# （免 emcc，工具链自动下载并经 composite action 缓存）→ artifact。
+# Grammar self-build 门禁与产物（spec F：全语言覆盖路径，动态门禁）：
+# gen-sources（helix-pin 缓存未命中时再生源清单）→ --fetch（languages.toml@pin 浅取
+# pinned rev）→ tree-sitter-cli 全量 self-build（免 emcc，工具链自动下载并经 composite
+# action 缓存）→ artifact（wasm+manifest+queries+GRAMMAR_LICENSES.md 同根布局，spec F §8）。
 # 门禁语义：workflow_dispatch 手动触发（PR 可选跑，默认不跑——约 290 次浅取 + 全量编译
 # 太重）；发布经 workflow_call 供 release.yml 复用为发布唯一入口（I2：删 push tags
 # 触发器，与 release.yml 双跑且各自缓存键竞争）。
-# 门禁阈值：manifest 键数 ≥ 264（spec 验收口径），不足即 fail（失败清单随日志输出）。
-# 产物不入库：wasm/manifest 仅存在于 artifact（release 的 grammar-wasm.tar.zst 与 web
-# 包的 lite 集由各 job 自行生成）。
+# 门禁阈值（spec F §5 动态化，防双计单门）：wasm manifest 键数 + self-build 失败清单数 ==
+# server/grammars-manifest.json 条目数（gen-sources 产出即真相，随 pin refresh 自然增长）；
+# fetch 失败被 self-build 的 parser.c-missing 失败条目吸收（fetch-failures 仅打印不参与等式）。
+# 产物不入库：wasm/manifest/queries/licenses 仅存在于 artifact（release 的
+# grammar-wasm.tar.zst 与 web 包的 lite 集由各 job 自行生成）。
 name: Grammar
 
 on:
@@ -36,27 +39,45 @@ jobs:
       - uses: ./.github/actions/setup-grammars
         with:
           languages: all
-      - name: 门禁摘要与 ≥264 断言（fetch/self-build 失败清单入日志）
+      # GRAMMAR_LICENSES.md 再生（F2/spec F §3.2.4）：fetch 全量源树后生成（出库不入库），
+      # 随 grammar-wasm artifact 下发供 publish-npm 消费。不入 setup-grammars——lite/子集档
+      # 源树残缺会产出「(源未取)」残缺 license 并被缓存；本 job languages=all 全量在手。
+      - name: GRAMMAR_LICENSES.md 再生（fetch 全量源树后；出库不入库）
+        run: node tools/grammar-builder/gen-licenses.mjs
+      - name: 门禁摘要与动态等式断言（spec F §5：wasm + build 失败 == manifest 条目数）
         run: |
           node -e "
             const fs = require('node:fs');
             const fetchFails = JSON.parse(fs.readFileSync('tools/grammar-builder/out/fetch-failures.json', 'utf8'));
             const buildFails = JSON.parse(fs.readFileSync('tools/grammar-builder/out/failure-list.json', 'utf8'));
             const manifest = JSON.parse(fs.readFileSync('apps/web/static/grammars/manifest.json', 'utf8'));
+            const expected = JSON.parse(fs.readFileSync('server/grammars-manifest.json', 'utf8')).grammars.length;
             const count = Object.keys(manifest.grammars).length;
-            console.log('fetch failures:', fetchFails.length);
+            console.log('fetch failures:', fetchFails.length, '（不参与等式——被 self-build 的 parser.c-missing 失败条目吸收）');
             console.log('self-build failures:', buildFails.length);
             console.log('manifest entries:', count);
-            if (count < 264) { console.error('门禁不通过：manifest 覆盖 < 264（spec 验收口径）'); process.exit(1); }
+            console.log('expected (gen-sources manifest):', expected);
+            // 单门防双计：等式只算 build 失败清单（fetch 失败已被 parser.c-missing 失败条目吸收）
+            if (count + buildFails.length !== expected) {
+              console.error('动态门禁不通过：wasm ' + count + ' + build 失败 ' + buildFails.length + ' ≠ manifest ' + expected + '（gen-sources 产出即真相）');
+              process.exit(1);
+            }
           "
+      - name: 归集 artifact（grammars + queries + GRAMMAR_LICENSES.md 同根布局）
+        run: |
+          mkdir -p artifacts/grammar-wasm
+          cp -r apps/web/static/grammars/. artifacts/grammar-wasm/
+          cp -r packages/vviewer-highlight/assets/queries artifacts/grammar-wasm/queries
+          cp server/GRAMMAR_LICENSES.md artifacts/grammar-wasm/
+      # 多路径直传 upload-artifact 会按 LCA 重排根结构破坏 publish-npm 解包假设——staging 保布局
       - uses: actions/upload-artifact@v7
         with:
           name: grammar-wasm
-          path: apps/web/static/grammars/
+          path: artifacts/grammar-wasm
           if-no-files-found: error
 
   server-full:
-    name: server 全量 301 门禁
+    name: server 全量 manifest 对齐门禁
     runs-on: ubuntu-latest
     timeout-minutes: 240  # 全量 301 编译+测试上限（ledger H7：默认 360 兜底不显式；self-build 为 120）
     steps:
@@ -75,5 +96,5 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: server
-      - name: 全量构建 + 301 门禁
-        run: cargo test --manifest-path server/Cargo.toml full_registry_count_is_301 -- --nocapture
+      - name: 全量构建 + manifest 对齐门禁（spec F 动态化）
+        run: cargo test --manifest-path server/Cargo.toml full_registry_count_matches_manifest -- --nocapture

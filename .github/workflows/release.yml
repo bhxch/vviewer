@@ -263,6 +263,8 @@ jobs:
   publish-npm:
     name: npm 资产包发布（grammars-full 全量 + 拆分子包 p1..pN）
     runs-on: ubuntu-latest
+    # publish-npm 不跑 gen：queries/GRAMMAR_LICENSES.md 随 grammar-wasm artifact 下发
+    # （spec F §8 artifact 契约扩展，pack-npm 经 VV_QUERIES_DIR/VV_LICENSE_FILE 解包路径消费）。
     # scope 未配置（repo variable）则整个包分发未启用：job 跳过，web 侧 CDN env
     # 同门控不注入（三层解析链的第 3 层整体缺席）。发布走 OIDC trusted publishing
     # 免长驻 NPM_TOKEN：id-token: write 供 npm 换短时发布凭据与 provenance 签名，
@@ -294,7 +296,9 @@ jobs:
           name: grammar-wasm
           path: artifacts/grammar-wasm
       # 版本归一与 web job 同法同值（tag v1.2.3 → npm 版本 1.2.3，无 v 前缀）；
-      # VV_GRAMMARS_OUT 指向 artifact 解包目录（pack-npm 默认读构建产物路径，本 job 无构建）
+      # VV_GRAMMARS_OUT/VV_QUERIES_DIR/VV_LICENSE_FILE 指向 artifact 解包目录
+      # （pack-npm 默认读构建产物路径与仓库生成物路径，本 job 无构建、不跑 gen——
+      # queries/GRAMMAR_LICENSES.md 随 grammar-wasm artifact 下发，spec F §8）
       # GITHUB_ENV 仅对后续 step 生效：归一与打包必须分两步，pack-npm 才读得到变量
       - name: 归一版本号
         env:
@@ -305,6 +309,8 @@ jobs:
           echo "VV_NPM_PACKAGE_NAME=${NPM_SCOPE}/vviewer-grammars-full" >> "$GITHUB_ENV"
           echo "VV_NPM_OUT=$GITHUB_WORKSPACE/dist-npm" >> "$GITHUB_ENV"
           echo "VV_GRAMMARS_OUT=$GITHUB_WORKSPACE/artifacts/grammar-wasm" >> "$GITHUB_ENV"
+          echo "VV_QUERIES_DIR=$GITHUB_WORKSPACE/artifacts/grammar-wasm/queries" >> "$GITHUB_ENV"
+          echo "VV_LICENSE_FILE=$GITHUB_WORKSPACE/artifacts/grammar-wasm/GRAMMAR_LICENSES.md" >> "$GITHUB_ENV"
           # 拆分子包数（spec C Task 2）：须与 pack-npm.mjs 拆分装箱的实际产出一致——publish 前
           # 有包数一致性 fail-fast 校验兜底，漂移即 fail 而非静默缺包。当前值 = spec §1.1 全量
           # 228MB → 预计 5-6 包取 6 的占位（实施期全量集未构建、真实 N 首发时定）：
@@ -437,6 +443,11 @@ jobs:
       # dist/index.d.ts——tsc d.ts emit 会丢弃该指令、render-diagram svgbob gen 产物）、
       # 相对 specifier 补显式扩展名（node 原生 ESM 可解析）并产出发布版 package.json
       # （private:false、files 白名单按 dist 实际布局、contentHash=sha256 前 16 hex）
+      # spec F Errata ④：highlight 源码包复制 assets/ 整目录（含 queries/）——出库后
+      # clean checkout 无 queries/，pack 静默残缺且 contentHash 漂移无门可拦，逐包构建前
+      # 先 gen（无 wasm 依赖；网络面 1-2 次 API + raw 拉取，量级可承受）
+      - name: gen-sources（highlight 包 queries/ 资产供链，spec F Errata ④）
+        run: node tools/grammar-builder/gen-sources.mjs
       - name: 逐包构建（tsc emit dist）
         run: |
           for pkg in $(node tools/pack-packages.mjs --list); do
