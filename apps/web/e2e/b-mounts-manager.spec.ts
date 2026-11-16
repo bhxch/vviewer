@@ -5,7 +5,8 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
 /**
  * b-mounts-manager 目录管理页（目录挂载 spec §5 阶段四；plan Task 2 冒烟兜底 +
  * Task 3 深矩阵收口；b-filetree-src-remove.spec.ts 先例形态）：
- * - MM-01 双入口与骨架：📁/Ctrl+Alt+M 开合、三组渲染、Esc 关闭
+ * - MM-01 双入口与骨架：📁/Ctrl+Alt+M 开合、四组渲染（Git 凭据组随 spec I Task 3
+ *   纯增量——GIT 域锚见 b-git-remote-mounts.spec.ts）、Esc 关闭
  * - MM-02 新增表单：L1 endpoint userinfo 拒绝 → 修正保存 → 列表落库（刷新存活）
  *   → 删除联动；凭据警示双处可见（表单 + 列表详情，spec §6）
  * - MM-03 测试连接：route 拦截 S3 ListObjectsV2（免验签 mock）成功回显条目数与
@@ -25,6 +26,8 @@ import { closeDrawerIfOpened, openDrawerIfNarrow } from './drawer';
  *   获取失败+组②本地行留存）→恢复后连接服务器同 base 重连——connectServer 清扫
  *   重建（台账 3-21 状态栏提示「已关闭 N 个旧标签页」）+ 重连对账 POST + 挂载行
  *   恢复（已注册徽标/行打开全链再通）+ tab 内容可读
+ * - GIT-01~05 git 直连挂载域（spec I Task 4）：GitHub/GitLab 全链/凭据库重提覆盖
+ *   轮换/限速与认证特征化/自建域 CORS/快照恢复查库——见 b-git-remote-mounts.spec.ts
  *
  * mock 纪律（Task 2 报告坑注记）：S3 mock XML 符合 delimiter=/ 语义（次级 key/
  * 嵌套前缀会被直连 store 越层防御丢弃）；CORS 失败面用「从未成功过」的端点。
@@ -239,18 +242,20 @@ async function fillS3Form(
 }
 
 test.describe('b-mounts-manager 目录管理页', () => {
-  test('MM-01 双入口与骨架：📁/Ctrl+Alt+M 开合、三组渲染、Esc 关闭', async ({ page }) => {
+  test('MM-01 双入口与骨架：📁/Ctrl+Alt+M 开合、四组渲染、Esc 关闭', async ({ page }) => {
     await openManager(page);
     const root = page.locator('.vv-mounts-manager');
     await expect(root).toHaveAttribute('aria-label', '目录管理');
-    // 三组标题（role=heading——组②标题含「新增挂载」按钮文案，getByText 会与
-    // 空态段落「暂无前端配置挂载」子串双命中）
+    // 四组标题（role=heading——组②标题含「新增挂载」按钮文案，getByText 会与
+    // 空态段落「暂无前端配置挂载」子串双命中；组④「Git 凭据」随 spec I Task 3 纯增量）
     await expect(root.getByRole('heading', { name: '服务端根与挂载' })).toBeVisible();
     await expect(root.getByRole('heading', { name: /前端配置挂载/ })).toBeVisible();
     await expect(root.getByRole('heading', { name: /本机授权来源/ })).toBeVisible();
-    // 未连接降级（组①）与空态（组②③）
+    await expect(root.getByRole('heading', { name: /Git 凭据/ })).toBeVisible();
+    // 未连接降级（组①）与空态（组②③④）
     await expect(root.getByText(/未连接服务器/)).toBeVisible();
     await expect(root.getByText('暂无前端配置挂载。')).toBeVisible();
+    await expect(root.getByText('暂无 Git 凭据。')).toBeVisible();
     // Esc 关闭（面板优先——无 zen 态时直接关面板）
     await page.keyboard.press('Escape');
     await expect(page.locator('.vv-mounts-manager')).toHaveCount(0);
@@ -268,8 +273,9 @@ test.describe('b-mounts-manager 目录管理页', () => {
     const form = page.locator('.vv-mm-form');
     await expect(form).toBeVisible();
 
-    // spec §6：凭据警示双处固定（列表详情 + 新增表单）
-    await expect(page.getByText(/明文保存在浏览器 IndexedDB/)).toHaveCount(2);
+    // spec §6：凭据警示三处固定（列表详情 + 新增表单 + 组④ Git 凭据区块——
+    // spec I Task 3 组④纯增量，双处→三处订正）
+    await expect(page.getByText(/明文保存在浏览器 IndexedDB/)).toHaveCount(3);
 
     // L1：endpoint 带 userinfo → 保存被拦并提示（不落库）
     await fillS3Form(page, {
