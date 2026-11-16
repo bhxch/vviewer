@@ -1,0 +1,2 @@
+# gen-sources 单测 fixture：helix 源元文件（collectThemes 规则内跳过，不得进产物）。
+"theme-toml-entry" = "fg"

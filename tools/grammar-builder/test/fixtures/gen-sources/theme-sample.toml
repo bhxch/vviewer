@@ -1,0 +1,10 @@
+# gen-sources 单测 fixture：单主题解析片段（palette 引用/内置 palette 兜底/misses 丢弃）。
+"comment" = { fg = "grey2", modifiers = ["italic"] }
+"function" = "green"
+"ui.background" = { bg = "bg0" }
+"punctuation" = "white"
+
+[palette]
+grey2 = "#646669"
+green = "#bcd5a8"
+bg0 = "#323437"

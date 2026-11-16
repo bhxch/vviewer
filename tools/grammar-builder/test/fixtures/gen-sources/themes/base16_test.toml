@@ -1,0 +1,2 @@
+# gen-sources 单测 fixture：base16 前缀主题（collectThemes 规则内跳过，不得进产物）。
+"base16-entry" = "fg"

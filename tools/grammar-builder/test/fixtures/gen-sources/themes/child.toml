@@ -1,0 +1,3 @@
+# gen-sources 单测 fixture：子主题（inherits 引用父 palette）。
+inherits = "parent"
+"function" = "fg"

@@ -1,0 +1,5 @@
+# gen-sources 单测 fixture：父主题（palette 定义者）。
+"keyword" = "fg"
+
+[palette]
+fg = "#abcdef"

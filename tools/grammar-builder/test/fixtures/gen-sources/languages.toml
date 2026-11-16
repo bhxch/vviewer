@@ -1,0 +1,66 @@
+# gen-sources 单测 fixture：helix languages.toml 多形态最小片段（合成数据，非真实上游）。
+# 形态覆盖：use-grammars.except 剔除段、[[language]] 与 [[grammar]] 双差集（language 无
+# grammar / grammar 无 language）、subpath 有/无、glob file-types、aliases 字段、
+# vue 特例（Review Focus 1：manifest 含 vue——server 从源码编译 vue，wasm 通道走 fixtures
+# 短路与本清单无关）。
+use-grammars = { except = [ "wren", "gemini" ] }
+
+[[language]]
+name = "rust"
+scope = "source.rust"
+injection-regex = "rs|rust"
+file-types = ["rs", { glob = "Cargo.lock" }]
+shebangs = ["rust-script"]
+grammar = "rust"
+
+[[language]]
+name = "typescript"
+scope = "source.ts"
+injection-regex = "^(ts|typescript)"
+file-types = ["ts", "mts", "cts"]
+grammar = "typescript"
+
+[[language]]
+name = "vue"
+scope = "source.vue"
+injection-regex = "vue"
+file-types = ["vue"]
+
+[[language]]
+name = "no-grammar-lang"
+scope = "source.no-grammar"
+file-types = ["ngl"]
+
+[[language]]
+name = "alias-lang"
+scope = "source.alias"
+file-types = ["alng"]
+aliases = ["alias-one", "alias-two"]
+
+[[grammar]]
+name = "rust"
+source = { git = "https://github.com/tree-sitter/tree-sitter-rust", rev = "1111111111111111111111111111111111111111" }
+
+[[grammar]]
+name = "typescript"
+source = { git = "https://github.com/tree-sitter/tree-sitter-typescript", rev = "2222222222222222222222222222222222222222", subpath = "typescript" }
+
+[[grammar]]
+name = "vue"
+source = { git = "https://github.com/ikatyang/tree-sitter-vue", rev = "3333333333333333333333333333333333333333" }
+
+[[grammar]]
+name = "c-sharp"
+source = { git = "https://github.com/tree-sitter/tree-sitter-c-sharp", rev = "4444444444444444444444444444444444444444" }
+
+[[grammar]]
+name = "wren"
+source = { git = "https://github.com/example/tree-sitter-wren", rev = "5555555555555555555555555555555555555555" }
+
+[[grammar]]
+name = "gemini"
+source = { git = "https://github.com/example/tree-sitter-gemini", rev = "6666666666666666666666666666666666666666" }
+
+[[grammar]]
+name = "orphan-grammar"
+source = { git = "https://github.com/example/tree-sitter-orphan", rev = "7777777777777777777777777777777777777777", subpath = "crates/tree-sitter-orphan" }
