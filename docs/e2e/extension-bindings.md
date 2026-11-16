@@ -113,7 +113,7 @@
 - 属性面板「打开方式」下拉：`.meta-openwith`（`MetaPanel.svelte:238-246`），候选由 `rendererCandidatesOfTab` → `openWithOf`（`apps/web/src/lib/openWith.ts:13-33`）构造：`['', dispatch 渲染器, 扩展名注册渲染器…, code, markdown, hex]`，`Set` 去重；`MetaPanel.svelte:47-57` 用激活 tab 的 `lastRendererId`/`lastDetExt` 计算（未渲染成功时 `lastDetExt` 缺省 → 由文件名派生扩展名，`RendererPickerMenu.ts:42-46`（扩展名派生）、`:53-70`（候选组装））；折叠面另追加 UI 哨兵 `__more__`（`MetaPanel.svelte:76-79`，id 定义 `RendererPickerMenu.ts:15-17`）。
 - 派发链与改派：`dispatcher.ts:301-360`（`resolveInitialRenderer`）、`:162-185`（`SIGNATURE_ROUTES`：`zip→archive/zip` 等）；`magic.ts`（嗅探表 + `looksTextual`）。
 - 绑定清单：hex `hex.ts:788`；av `av.ts:34/44/360`；archive `zipStore.ts:24/31/17/51`；foreign 组 `foreignRenderers.ts`（spreadsheet 组 `tsv`/`csv`、data 组 `sqlite`/`wasm`）。
-- 补空位语义：`registry.ts:33-52`（`installFallbackExtensions`：已占即 skipped，只填空位）；冲突面 `registry.ts:26-27`（重复扩展名抛 `RegistryError`）；生成物清单 `packages/vviewer-core/src/registry/generated-extensions.ts`（670 项，由 `tools/grammar-builder/gen-code-extensions.mjs` 生成，CI `--check` 校验）。
+- 补空位语义：`registry.ts:33-52`（`installFallbackExtensions`：已占即 skipped，只填空位）；冲突面 `registry.ts:26-27`（重复扩展名抛 `RegistryError`）；生成物清单 `packages/vviewer-core/src/registry/generated-extensions.ts`（670 项，由 `tools/grammar-builder/gen-sources.mjs` 生成——spec F 构建源头化后产物不入库，CI `--check` 步随 gen 成功性退役）。
 - 资产三层链：`foreignAssets.ts:17/21/72-79/86/103`（缺省 CDN / 同源槽 / 链对象 / 链首非空层解析 / per-package 派生）；构建期 env 注入 `vite.config.ts:819`；组→包映射 `foreignRenderers.ts:206-227`（`foreign-data → assets-data`）；SQL wasm 资产路径 `viewer/wasm/data/sql-wasm.wasm`（包内基座相对派生）。
 
 ### 4.3 既有锚承接（不重复造锚）

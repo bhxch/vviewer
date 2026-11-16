@@ -301,7 +301,8 @@ node tools/grammar-builder/build.mjs --fetch
 - 源树位置可用环境变量 `VV_GRAMMAR_SOURCES` 覆盖（绝对路径或相对 server crate 路径）。
 - **partial 构建语义**：源缺失的语言跳过编译、不阻塞构建（本地开发友好），但对应语言
   运行时 `/api/compute/*` 请求返回 400 unsupported language；CI 全源环境以
-  `GENERATED_COUNT==301` 门禁收口（`full_registry_count_is_301`）。
+  `GENERATED_COUNT==manifest 条目数` 门禁收口（`full_registry_count_matches_manifest`，
+  spec F 构建源头化后期望数随 helix pin refresh 自然增长）。
 
 ## 构建说明
 

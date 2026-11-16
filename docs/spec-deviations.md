@@ -110,7 +110,8 @@
   与 CI composite action 构建期生成，release web 包继续内置 lite 集、全量集随
   `grammar-wasm.tar.zst` 分发（开箱可用语义不变）。
 - **理由**：tree-sitter-wasms 0.1.13 上游停滞一年，预编译产物是唯一不受控环节；cli 0.27
-  免 emcc 自建使产物可从锁定的源清单（vendored `languages.toml` pinned rev）再生，入库
+  免 emcc 自建使产物可从锁定的源清单（spec F 构建源头化起为 helix-pin commit 锚派生的
+  gen-sources 产物 `languages.toml`，见 `tools/grammar-builder/helix-pin.json`）再生，入库
   只剩 50MB 历史 object 成本与升级时的全量 diff。lite 集 36 → 34：objc/systemrdl 无查询
   资产（原预编译集死产物）剔除；yaml/vue 因 cli wasm 工具链不支持 C++ 外置 scanner 以
   vendored 遗留产物保留（`tools/grammar-builder/fixtures/`，manifest 标 `vendored`）。
@@ -118,7 +119,8 @@
   实测 0.25 可加载），维持 0.25 为 API 稳定性选择；历史 commit 中的 wasm blob 经
   filter-repo 移除（体积回收）。
 - **理由**：tree-sitter-wasms 0.1.13 上游停滞一年，预编译产物是唯一不受控环节；cli 0.27
-  免 emcc 自建使产物可从锁定的源清单（vendored `languages.toml` pinned rev）再生，入库
+  免 emcc 自建使产物可从锁定的源清单（spec F 构建源头化起为 helix-pin commit 锚派生的
+  gen-sources 产物 `languages.toml`，见 `tools/grammar-builder/helix-pin.json`）再生，入库
   只剩 50MB 历史 object 成本与升级时的全量 diff。lite 集 36 → 34：objc/systemrdl 无查询
   资产（原预编译集死产物）剔除；yaml/vue 因 cli wasm 工具链不支持 C++ 外置 scanner 以
   vendored 遗留产物保留（`tools/grammar-builder/fixtures/`，manifest 标 `vendored`）。

@@ -721,8 +721,9 @@ test('BUG-34 [探索]: codeRenderer 扩展名白名单未跟随 301 语言全量
   // resolveInitialRenderer 放宽（未知扩展名不再直接报错，与无扩展名同走内容探测链，
   // looksTextual → code 渲染器，链尾 hex 兜底）；② 注册层——viewer.ts 装配
   // installFallbackExtensions('code', GENERATED_EXTENSIONS)，packages/vviewer-core/src/registry/
-  // generated-extensions.ts（tools/grammar-builder/gen-code-extensions.mjs 从
-  // languages.json 342 条 fileTypes 生成的全集，CI --check 校验新鲜度）把手工清单
+  // generated-extensions.ts（tools/grammar-builder/gen-sources.mjs 从
+  // languages.json 342 条 fileTypes 生成的全集；spec F 构建源头化后产物不入库，
+  // CI --check 步随 gen 成功性退役）把手工清单
   // 之外的语法类扩展名全部补注册到 code（专有渲染器冲突跳过）。7 类缺口扩展名两步
   // 均已覆盖（zig/hs/ex/erl/clj/scala/dj/djot 全在生成物内），识别与高亮资产路
   // （服务端 x-vv-lang 7/7 正确、languages.json 各条目 fileTypes 齐备、构建产物

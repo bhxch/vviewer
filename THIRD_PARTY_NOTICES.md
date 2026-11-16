@@ -54,7 +54,7 @@
 | @file-viewer/renderer-media | Apache-2.0 | 原生音视频渲染宿主（媒体扩展名本仓不注册——vviewer av 链占优；MIDI 检视经 capability-midi） | file-viewer 批 W2-T1 |
 | @file-viewer/renderer-signature | Apache-2.0 | 数字签名/证据容器结构检视（CMS/CAdES/时间戳/ASiC/JWS/OpenPGP；依赖 jszip 为 MIT） | file-viewer 批 W2-T1 |
 | @file-viewer/renderer-typst | Apache-2.0 | Typst 排版渲染（浏览器 WASM 编译+渲染；依赖 @myriaddreamin/typst-ts-* 均 Apache-2.0） | file-viewer 批 W2-T1 |
-| helix-editor/helix | MPL-2.0 | `packages/vviewer-highlight/assets/themes.json`（214 主题派生自 `runtime/themes`，格式转换修改）与 `languages.json`（派生自 `languages.toml`）、`packages/vviewer-highlight/assets/queries/`（vendored 拷贝）；溯源见 `tools/helix-assets/README.md` | M2 |
+| helix-editor/helix | MPL-2.0 | `packages/vviewer-highlight/assets/themes.json`（214 主题派生自 `runtime/themes`，格式转换修改）与 `languages.json`（派生自 `languages.toml`）、`packages/vviewer-highlight/assets/queries/`（helix@pin 直拉原样拷贝）；溯源见 `tools/grammar-builder/gen-sources.mjs`（helix-pin commit 锚再生，spec F） | M2 |
 | microsoft/vscode | MIT | `packages/vviewer-highlight/assets/vscode/dark_modern.json`、`light_modern.json`（theme-defaults 扩展主题，JSONC 规范化与 include 内联后 vendor，色值未改动） | B |
 | microsoft/vscode（extensions/theme-seti） | MIT | `packages/vviewer-highlight/assets/vscode-icons/seti/`（Seti 图标主题，清单 JSONC 规范化与格式改写后 vendor、`seti.woff` 原样拷贝；字形上游 jesseweed/seti-ui 同 MIT），溯源与修改明细见 `packages/vviewer-highlight/assets/vscode-icons/README.md` | 图标主题 T4 |
 

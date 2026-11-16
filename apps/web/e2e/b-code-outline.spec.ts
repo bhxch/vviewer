@@ -16,7 +16,9 @@ import { ensureRightDrawer } from './drawer';
  *   + interface_declaration/abstract_class/module + reference.type——ts 实现体
  *   （function_declaration/method_definition）不在捕获内，接口签名面即 API 面（T1 实测）；
  *   ocaml 有 wasm（static/grammars 34 语集）但 queries/ocaml/ 无 tags.scm → 真实
- *   tree-sitter parse 路径零大纲（OUT-05 的「无 tags 语言」载体）；perl（.pl）无 wasm
+ *   tree-sitter parse 路径零大纲（OUT-05 的「无 tags 语言」载体——spec F 后资产树来自
+ *   helix-pin master@49986e6 整树直拉，ocaml/tags.scm 真网仍 404（Errata ⑥ 探针）+ 盘面
+ *   实证缺盘，载体不变）；perl（.pl）无 wasm
  *   → hljs 兜底路径（OUT-04 的降级载体）；javascript tags.scm = 具名 function_expression /
  *   function_declaration / class / method 等 definition.* + reference.call（锚整个
  *   call_expression，调用实参内的具名函数表达式即「被过滤 ref 内存活 def」——OUT-12 载体）。
@@ -338,7 +340,8 @@ test('OUT-04 · >2MB 窗口路径与 hljs 兜底路径均不出大纲（鸭子�
 test('OUT-05 · 无 tags 语言（ocaml：wasm 可用、queries 无 tags.scm）真实 parse 路径零大纲', async ({ page }) => {
   test.setTimeout(120_000);
   // 载体实况：static/grammars 34 语集含 ocaml.wasm（真实 tree-sitter parse），
-  // assets/queries/ocaml/ 仅有 highlights/locals 无 tags.scm（写作时 ls 实证）→
+  // assets/queries/ocaml/ 仅有 highlights/locals 无 tags.scm（spec F helix-pin
+  // master@49986e6 整树直拉后盘面实证仍缺——上游真网 404，Errata ⑥ 探针一致）→
   // 大纲 []，无正则兜底（Global Constraints）。
   await openCodeFile(page, { name: 'lang.ml', content: 'let greet () = "hi"\n\nlet () = print_endline (greet ())\n' }, 'lang.ml');
   // 先锚「高亮: tree-sitter」：证明不是 hljs 降级凑出的 []（否则断言空洞）
