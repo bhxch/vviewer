@@ -16,4 +16,5 @@ export * from './tree/localFiles';
 export * from './tree/remote';
 export * from './tree/directS3';
 export * from './tree/directDav';
+export * from './tree/directGit';
 export * from './virtualScroller';
