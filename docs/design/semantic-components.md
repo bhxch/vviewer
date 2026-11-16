@@ -117,6 +117,7 @@
 | 成员（文件:行） | 确认动作 |
 |---|---|
 | MountsManager.svelte:354 | 挂载记录删除（含异地提示拼合） |
+| MountsManager.svelte removeCredential | Git 凭据删除（spec I 评审 minor ④：token 明文不可找回+引用挂载降级匿名——删除后果声明，键 mounts.cred.deleteConfirm） |
 | MountsManager.svelte:410 | 本机授权来源清除 |
 | TabBar.svelte:206 | 远端文件另存为阈值确认（saveAsTab confirm 回调） |
 | FileTree.svelte:67 | 树源行移除（裸 `confirm(` 形态，语义同 window.confirm） |

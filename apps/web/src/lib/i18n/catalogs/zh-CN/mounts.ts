@@ -213,7 +213,7 @@ export const messages = {
   'mounts.form.ref': 'ref（分支/tag/commit）',
   'mounts.form.gitToken': '访问令牌（PAT，可空）',
   'mounts.form.gitTokenHint':
-    '留空按 owner 匹配凭据库（精确 → 通配 → 匿名）；显式填入则随本挂载存储。匿名使用 GitHub 时限速 60 次/小时，测试连接也消耗额度。',
+    '留空按 owner 匹配凭据库（精确 → 通配 → 匿名）；显式填入则随本挂载存储。GitLab 凭据条目的主机须与本表单 host 逐字一致（含 scheme 与尾斜杠）。匿名使用 GitHub 时限速 60 次/小时，测试连接也消耗额度。',
   'mounts.form.refHint':
     'branch 型 ref 在每次打开/恢复会话时重新解析指向最新 commit，属预期行为。',
   'mounts.form.gitProxyBlock': 'GitHub/GitLab 挂载仅支持浏览器直连',
@@ -228,5 +228,7 @@ export const messages = {
   'mounts.cred.token': '访问令牌（PAT）',
   'mounts.cred.note': '备注（可空）',
   'mounts.cred.wildcard': '通配',
-  'mounts.cred.save': '保存凭据'
+  'mounts.cred.save': '保存凭据',
+  'mounts.cred.deleteConfirm':
+    '删除 Git 凭据「{host}:{owner}」？引用它的挂载将降级为匿名（下次访问报认证失败），重新添加同主机与 owner 即可恢复。'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;

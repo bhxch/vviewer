@@ -494,10 +494,15 @@
     }
   }
 
-  /** 组④删除：直接落 deleteMount 漏斗（镜像跟随）；挂载记录的 credentialKey 引用
-   * 降级匿名（401 文案在使用面可见，重提同键即恢复）。 */
-  async function removeCredential(key: string): Promise<void> {
-    await deleteMount(key);
+  /** 组④删除（评审 minor ④：window.confirm 轻量确认——token 明文一经删除不可
+   * 找回且被 credentialKey 引用的挂载静默降级匿名，与同面板挂载记录删除的确认
+   * 口径对称；表 2 新增成员已在 semantic-components.md 登记）。确认后落
+   * deleteMount 漏斗（镜像跟随）。 */
+  async function removeCredential(row: { key: string; host: string; owner: string }): Promise<void> {
+    if (!window.confirm(t('mounts.cred.deleteConfirm', { host: row.host, owner: row.owner }))) {
+      return;
+    }
+    await deleteMount(row.key);
     await reloadRecords();
   }
 
@@ -804,7 +809,7 @@
               <span class="vv-mm-name" title={`${row.host}:${row.owner}`}>{row.host}:{row.owner}</span>
               <span class="vv-mm-meta">{row.note ?? ''}</span>
               <span class="vv-mm-actions">
-                <button type="button" onclick={() => void removeCredential(row.key)}>{t('mounts.delete')}</button>
+                <button type="button" onclick={() => void removeCredential(row)}>{t('mounts.delete')}</button>
               </span>
             </li>
           {/each}

@@ -54,9 +54,9 @@ describe('MountsManager 骨架（全屏 overlay，SettingsCenter 同形态）', 
     expect(src).toMatch(/assembleGitCredentialRows/);
   });
 
-  it('凭据警示双处固定（spec §6：新增表单 + 列表详情；credentialWarning() 单一出处渲染两次）', () => {
+  it('凭据警示三处固定（spec §6：新增表单 + 列表详情 + 组④ Git 凭据区块——spec I Task 3 纯增量；credentialWarning() 单一出处渲染三次，评审 minor ⑧ 用例名随订正）', () => {
     // Task 8：常量改函数（Task 7 saveDeniedNotice 先例——装载时刻取值钉死 locale）
-    expect(src.match(/\{credentialWarning\(\)\}/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(src.match(/\{credentialWarning\(\)\}/g)?.length).toBe(3);
     expect(zhMounts['mounts.warn.credential']).toContain('明文');
     expect(zhMounts['mounts.warn.credential']).toContain('同源脚本');
     expect(zhMounts['mounts.warn.credential']).toContain('本机用户');
@@ -185,7 +185,7 @@ describe('组④ Git 凭据区块 + git 表单扩支（spec I Task 3）', () => 
     expect(src).toMatch(/\{#each credRows as row \(row\.key\)\}/);
   });
 
-  it('重提同键覆盖=编辑（评审 ③）：id=gitcred:<host>:<owner> 构造 + saveMount 漏斗（recordCache 镜像即时生效——轮换即改库条目）+ 无独立编辑钮', () => {
+  it('重提同键覆盖=编辑（评审 ③）：id=gitcred:<host>:<owner> 构造 + saveMount 漏斗（recordCache 镜像即时生效——轮换即改库条目）+ 无独立编辑钮；删除走 confirm 轻量确认（评审 minor ④——表 2 新增成员）', () => {
     expect(src).toMatch(/id: `gitcred:\$\{host\}:\$\{owner\}`/);
     expect(src).toMatch(/saveMount\(\{\s*id: `gitcred:/);
     // 同键重提沿用既有 createdAt（put 键覆盖=更新语义）
@@ -193,6 +193,12 @@ describe('组④ Git 凭据区块 + git 表单扩支（spec I Task 3）', () => 
     // 行形态无编辑钮（只有删除）——通配徽标 data-kind 稳定标识符
     expect(src).toMatch(/data-kind="wildcard"/);
     expect(zhMounts['mounts.cred.wildcard']).toBe('通配');
+    // 删除确认（评审 minor ④）：window.confirm + 目录键 + 行主文本插值（host/owner）
+    expect(src).toMatch(
+      /removeCredential\(row: \{ key: string; host: string; owner: string \}\): Promise<void> \{[\s\S]{0,200}window\.confirm\(t\('mounts\.cred\.deleteConfirm', \{ host: row\.host, owner: row\.owner \}\)\)/
+    );
+    expect(zhMounts['mounts.cred.deleteConfirm']).toContain('降级为匿名');
+    expect(zhMounts['mounts.cred.deleteConfirm']).toContain('重新添加同主机与 owner');
   });
 
   it('backend select 四 option + git 时 mode select disabled 强制 direct（git 无代理面——切 backend 联动强制 direct）', () => {
@@ -228,6 +234,7 @@ describe('组④ Git 凭据区块 + git 表单扩支（spec I Task 3）', () => 
     expect(zhMounts['mounts.form.gitProxyBlock']).toBe('GitHub/GitLab 挂载仅支持浏览器直连');
     expect(zhMounts['mounts.form.gitTokenHint']).toContain('60 次/小时');
     expect(zhMounts['mounts.form.gitTokenHint']).toContain('凭据库');
+    expect(zhMounts['mounts.form.gitTokenHint']).toContain('逐字一致'); // 评审 minor ⑤：host 形态一致性提示
     expect(zhMounts['mounts.form.refHint']).toContain('重新解析指向最新 commit');
     expect(zhMounts['mounts.cred.add']).toBe('＋ 添加凭据');
     expect(zhMounts['mounts.cred.empty']).toBe('暂无 Git 凭据。');

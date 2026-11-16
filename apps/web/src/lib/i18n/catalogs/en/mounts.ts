@@ -208,7 +208,7 @@ export const messages = {
   'mounts.form.ref': 'ref (branch/tag/commit)',
   'mounts.form.gitToken': 'Access token (PAT, optional)',
   'mounts.form.gitTokenHint':
-    'Leave empty to match the credential store by owner (exact → wildcard → anonymous); a filled-in token is stored with this mount. Anonymous GitHub access is rate-limited to 60 requests/hour, and Test connection also consumes quota.',
+    "Leave empty to match the credential store by owner (exact → wildcard → anonymous); a filled-in token is stored with this mount. For GitLab, the credential entry's host must match this form's host verbatim (scheme and trailing slash included). Anonymous GitHub access is rate-limited to 60 requests/hour, and Test connection also consumes quota.",
   'mounts.form.refHint':
     'Branch-type refs are re-resolved to the latest commit on every session open/restore; this is expected behavior.',
   'mounts.form.gitProxyBlock': 'GitHub/GitLab mounts only support browser-direct connections',
@@ -222,5 +222,7 @@ export const messages = {
   'mounts.cred.token': 'Access token (PAT)',
   'mounts.cred.note': 'Note (optional)',
   'mounts.cred.wildcard': 'wildcard',
-  'mounts.cred.save': 'Save credential'
+  'mounts.cred.save': 'Save credential',
+  'mounts.cred.deleteConfirm':
+    'Delete Git credential "{host}:{owner}"? Mounts referencing it will fall back to anonymous access (authentication failure on next visit); re-adding the same host and owner restores them.'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;
