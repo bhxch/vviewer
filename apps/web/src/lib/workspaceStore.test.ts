@@ -335,6 +335,11 @@ describe('sourceKindOf（目录挂载 spec §4 阶段三：直连挂载类别，
     expect(sourceKindOf('davdirect:1a2b3c4d')).toBe('direct');
   });
 
+  it('githubdirect:/gitlabdirect: 前缀 → direct（spec I 插拔点①：git 直连挂载类别一行扩列）', () => {
+    expect(sourceKindOf('githubdirect:1a2b3c4d')).toBe('direct');
+    expect(sourceKindOf('gitlabdirect:1a2b3c4d')).toBe('direct');
+  });
+
   it('既有前缀零变化（remote/localfs/localfiles/url/single）', () => {
     expect(sourceKindOf('localfs:docs')).toBe('localfs');
     expect(sourceKindOf('localfiles:docs')).toBe('localfiles');

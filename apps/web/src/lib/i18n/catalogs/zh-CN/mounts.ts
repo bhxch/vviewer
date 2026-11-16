@@ -185,5 +185,24 @@ export const messages = {
   'mounts.err.httpFailed': '{label}请求失败: HTTP {status}{detail}',
   'mounts.err.davHttpFailed': 'WebDAV 请求失败: HTTP {status}{detail}',
   'mounts.err.davCors': 'WebDAV 直连失败：服务器 CORS 未配置或网络不可达',
-  'mounts.err.davAuth': '（认证失败：检查用户名/密码）'
+  'mounts.err.davAuth': '（认证失败：检查用户名/密码）',
+
+  // —— git 直连错误特征化（core directGit 注入缝 9 setter 消费——spec I Task 2；
+  //   404 hint 双平台共用单键；zh 定稿=计划 Task 1 Interfaces 文案）——
+  'mounts.err.githubHttpFailed': 'GitHub 请求失败: HTTP {status}{detail}',
+  'mounts.err.gitlabHttpFailed': 'GitLab 请求失败: HTTP {status}{detail}',
+  'mounts.err.githubAuth': '（认证失败：令牌无效或无权访问该资源）',
+  'mounts.err.gitlabAuth': '（认证失败：令牌无效或无权访问该资源）',
+  'mounts.err.gitNotFound': '（仓库、ref 或路径不存在：检查 owner/repo/ref/prefix）',
+  'mounts.err.githubRateLimit':
+    'GitHub API 限速：额度已用尽（匿名 60 次/小时，配置访问令牌 PAT 后 5000 次/小时），请配置令牌后重试',
+  'mounts.err.gitlabRateLimit': 'GitLab 请求限速：请稍后重试或配置访问令牌',
+  'mounts.err.githubCors': 'GitHub 直连失败：网络不可达（api.github.com 恒支持 CORS）',
+  'mounts.err.gitlabCors':
+    'GitLab 直连失败：实例 CORS 未配置或网络不可达（自建实例需管理员放行本站来源与 GET 方法）',
+
+  // —— git 测试连接回显（probeWith git 分派——spec I Task 2 评审 ① 前移收编；
+  //   sha 回显 8 位、truncated 为 GitHub 大仓首响应采样注记 Errata ⑩）——
+  'mounts.probe.okGit': '连接成功：{entries} 个文件，ref {sha}，延迟 {ms} ms',
+  'mounts.probe.truncated': '（清单已截断，以上为部分计数）'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;

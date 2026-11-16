@@ -5,25 +5,37 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { webcrypto } from 'node:crypto';
-import { createS3DirectStore, s3DirectStoreId, type S3DirectConfig } from '@bhxch/vviewer-core';
+import {
+  createS3DirectStore,
+  s3DirectStoreId,
+  type GitlabDirectConfig,
+  type GithubDirectConfig,
+  type S3DirectConfig
+} from '@bhxch/vviewer-core';
 import {
   deleteDirectMount,
   directConfigOf,
   displayEndpoint,
+  displayEndpointForStore,
   displayLabelForStore,
+  gitCredentialTokenByKey,
   listDirectMounts,
+  listMounts,
   listProxyMounts,
   mountFingerprintOf,
   probeMountRoot,
   registerProxyMount,
   resetMountRecordCacheForTests,
+  resolveGitCredential,
   rewriteSourceForMigration,
   rewriteStoreIdRootIndex,
   saveDirectMount,
+  saveMount,
   saveProxyMount,
   syncMountsOnConnect,
   unregisterProxyMount,
   type DirectMountRecord,
+  type GitCredentialRecord,
   type MountManifestEntry,
   type ProxyMountRecord,
   type RootIndexMove
@@ -908,6 +920,16 @@ describe('isMountRootStoreId（fsRoots 边界：≥ fsRoots = 挂载根；direct
     expect(isMountRootStoreId('davdirect:abcd1234')).toBe(true);
   });
 
+  it('git 直连前缀（githubdirect:/gitlabdirect:）恒 true（spec I 插拔点①：一行扩列，搜索补扫/per-source watch 提示自动生效）', () => {
+    setHealth(2);
+    expect(isMountRootStoreId('githubdirect:abcd1234')).toBe(true);
+    expect(isMountRootStoreId('gitlabdirect:abcd1234')).toBe(true);
+    setHealth(null);
+    expect(isMountRootStoreId('githubdirect:abcd1234')).toBe(true);
+    sessionStorage.removeItem(KEY);
+    expect(isMountRootStoreId('gitlabdirect:abcd1234')).toBe(true);
+  });
+
   it('placeholder: 包装的 direct id 不识别（占位 tab 走既有错误卡片链）', () => {
     setHealth(1);
     expect(isMountRootStoreId('placeholder:s3direct:abcd1234')).toBe(false);
@@ -1039,5 +1061,160 @@ describe('registerProxyMount/unregisterProxyMount', () => {
       return undefined;
     });
     await expect(unregisterProxyMount(recordOf(), 'tok', 3)).rejects.toThrow(/HTTP 405/);
+  });
+});
+
+// ---------- git 直连记录与凭据库（spec I，plan Task 2：分 host+owner 条目化
+// GitCredentialRecord + git 记录 directConfigOf 映射 + recordCache 同步镜像纪律） ----------
+
+describe('git 直连记录与凭据库（spec I）', () => {
+  beforeEach(() => {
+    // 镜像为模块级状态（跨用例存活）：清空隔离（IndexedDB 已由文件级 beforeEach 换新库）
+    resetMountRecordCacheForTests();
+  });
+
+  /** gitcred 凭据条目构造（id = `gitcred:<host>:<owner>`，owner '*'=通配）。 */
+  function credOf(overrides: Partial<GitCredentialRecord> = {}): GitCredentialRecord {
+    return {
+      id: 'gitcred:github.com:alice',
+      kind: 'gitcred',
+      host: 'github.com',
+      owner: 'alice',
+      token: 'T1',
+      createdAt: 1,
+      ...overrides
+    };
+  }
+
+  /** github direct 记录构造（backend 扩支 Task 2；owner/repo/ref 新字段）。 */
+  function ghRecOf(overrides: Partial<DirectMountRecord> = {}): DirectMountRecord {
+    return {
+      id: 'githubdirect:abcd1234',
+      kind: 'direct',
+      backend: 'github',
+      label: '示例仓',
+      endpoint: 'https://github.com/octo/repo',
+      prefix: '',
+      owner: 'octo',
+      repo: 'repo',
+      ref: 'main',
+      createdAt: 1,
+      ...overrides
+    };
+  }
+
+  /** gitlab direct 记录构造（host 原文、repo=项目路径/数字 id 文本）。 */
+  function glRecOf(overrides: Partial<DirectMountRecord> = {}): DirectMountRecord {
+    return {
+      id: 'gitlabdirect:abcd1234',
+      kind: 'direct',
+      backend: 'gitlab',
+      label: '示例项目',
+      endpoint: 'https://gitlab.example.com',
+      prefix: '',
+      host: 'gitlab.example.com',
+      repo: 'grp/rp',
+      ref: 'main',
+      createdAt: 1,
+      ...overrides
+    };
+  }
+
+  it('resolveGitCredential 三态：精确 owner → 通配 * → 未命中 undefined（owner 空串仅通配可命中——数字 id 项目）', async () => {
+    await saveMount(credOf());
+    expect(resolveGitCredential('github.com', 'alice')).toBe('github.com:alice');
+    expect(resolveGitCredential('github.com', 'bob')).toBeUndefined();
+    await saveMount(credOf({ id: 'gitcred:github.com:*', owner: '*', token: 'TW' }));
+    expect(resolveGitCredential('github.com', 'bob')).toBe('github.com:*');
+    expect(resolveGitCredential('github.com', 'alice')).toBe('github.com:alice'); // 精确优先于通配
+    expect(resolveGitCredential('other.example.com', 'alice')).toBeUndefined(); // host 不相交
+    expect(resolveGitCredential('gitlab.example.com', '')).toBeUndefined(); // owner 空串无精确面
+    await saveMount(
+      credOf({ id: 'gitcred:gitlab.example.com:*', host: 'gitlab.example.com', owner: '*', token: 'TG' })
+    );
+    expect(resolveGitCredential('gitlab.example.com', '')).toBe('gitlab.example.com:*');
+  });
+
+  it('gitCredentialTokenByKey：credentialKey → 库条目 token；未命中 undefined（重建降级匿名）', async () => {
+    await saveMount(credOf());
+    expect(gitCredentialTokenByKey('github.com:alice')).toBe('T1');
+    expect(gitCredentialTokenByKey('github.com:ghost')).toBeUndefined();
+    expect(gitCredentialTokenByKey('')).toBeUndefined();
+  });
+
+  it('轮换即生效（spec §7-2）：saveMount 同 id 覆写（重提同键覆盖）→ directConfigOf 产出 token 变化——改库条目即生效', async () => {
+    await saveMount(credOf());
+    const rec = ghRecOf({ credentialKey: 'github.com:alice' }); // token 留空 = 库引用
+    expect((directConfigOf(rec) as GithubDirectConfig).token).toBe('T1');
+    await saveMount(credOf({ token: 'T2' }));
+    expect(gitCredentialTokenByKey('github.com:alice')).toBe('T2');
+    expect((directConfigOf(rec) as GithubDirectConfig).token).toBe('T2');
+  });
+
+  it('查库失败降级：credentialKey 指向条目已删 → token 缺省匿名（不抛错——重建降级安全）', async () => {
+    const rec = ghRecOf({ credentialKey: 'github.com:ghost' });
+    expect((directConfigOf(rec) as GithubDirectConfig).token).toBeUndefined();
+  });
+
+  it('gitcred 混存隔离（Review Focus 2）：listDirectMounts/listProxyMounts kind 过滤隔离；displayLabelForStore/displayEndpointForStore 对 gitcred id 未命中回落', async () => {
+    const s3rec: DirectMountRecord = {
+      id: 's3direct:abcd1234',
+      kind: 'direct',
+      backend: 's3',
+      label: '直连桶',
+      endpoint: 'http://127.0.0.1:9000',
+      bucket: 'b1',
+      prefix: '',
+      username: 'ak',
+      secret: 'sk',
+      pathStyle: true,
+      createdAt: 1
+    };
+    await saveMount(credOf());
+    await saveMount(s3rec);
+    expect((await listMounts()).length).toBe(2); // 全量混存（displayLabel 查询走同一镜像）
+    const directs = await listDirectMounts();
+    expect(directs.map((r) => r.kind)).toEqual(['direct']);
+    expect(directs.some((r) => r.id.startsWith('gitcred:'))).toBe(false);
+    expect((await listProxyMounts()).length).toBe(0);
+    expect(displayLabelForStore('gitcred:github.com:alice')).toBeUndefined();
+    expect(displayEndpointForStore('gitcred:github.com:alice')).toBeUndefined();
+    expect(displayLabelForStore(s3rec.id)).toBe('直连桶'); // direct 精确命中零破坏
+  });
+
+  it('directConfigOf github：token 优先级 = 显式 secret > credentialKey 查库 > 匿名（token 不入 config）', async () => {
+    await saveMount(credOf());
+    // 显式 secret 优先
+    expect(directConfigOf(ghRecOf({ secret: 'TX' }))).toEqual({
+      owner: 'octo',
+      repo: 'repo',
+      ref: 'main',
+      token: 'TX',
+      label: '示例仓'
+    });
+    // credentialKey 查库
+    expect(directConfigOf(ghRecOf({ credentialKey: 'github.com:alice' }))).toEqual({
+      owner: 'octo',
+      repo: 'repo',
+      ref: 'main',
+      token: 'T1',
+      label: '示例仓'
+    });
+    // 两者皆缺 = 匿名（prefix 空不入 config——core 工厂 normalizeMountPrefix 兜底）
+    expect(directConfigOf(ghRecOf())).toEqual({ owner: 'octo', repo: 'repo', ref: 'main', label: '示例仓' });
+  });
+
+  it('directConfigOf gitlab：host 原文透传（含尾斜杠/无 scheme 原样——Errata ⑨：归一由 core gitlabDirectStoreId/工厂单源承担，本面预归一会断恢复链 id 一致性）+ project=repo 字段', async () => {
+    await saveMount(credOf({ id: 'gitcred:gitlab.example.com:grp', host: 'gitlab.example.com', owner: 'grp' }));
+    const cfg = directConfigOf(
+      glRecOf({ host: 'https://gitlab.example.com/', credentialKey: 'gitlab.example.com:grp' })
+    ) as GitlabDirectConfig;
+    expect(cfg.host).toBe('https://gitlab.example.com/'); // 原文（尾斜杠保留）
+    expect(cfg.project).toBe('grp/rp');
+    expect(cfg.ref).toBe('main');
+    expect(cfg.token).toBe('T1');
+    expect(cfg.label).toBe('示例项目');
+    const cfgNoScheme = directConfigOf(glRecOf({ host: 'gitlab.example.com' })) as GitlabDirectConfig;
+    expect(cfgNoScheme.host).toBe('gitlab.example.com'); // 无 scheme 原样
   });
 });

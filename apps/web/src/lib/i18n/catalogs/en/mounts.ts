@@ -181,5 +181,23 @@ export const messages = {
   'mounts.err.httpFailed': '{label} request failed: HTTP {status}{detail}',
   'mounts.err.davHttpFailed': 'WebDAV request failed: HTTP {status}{detail}',
   'mounts.err.davCors': 'WebDAV direct mount failed: server CORS not configured or network unreachable',
-  'mounts.err.davAuth': ' (authentication failed: check username/password)'
+  'mounts.err.davAuth': ' (authentication failed: check username/password)',
+
+  // —— git 直连错误特征化（core directGit 注入缝 9 setter 消费——spec I Task 2；
+  //   en 对译，占位符与 zh 一致）——
+  'mounts.err.githubHttpFailed': 'GitHub request failed: HTTP {status}{detail}',
+  'mounts.err.gitlabHttpFailed': 'GitLab request failed: HTTP {status}{detail}',
+  'mounts.err.githubAuth': ' (authentication failed: token invalid or unauthorized)',
+  'mounts.err.gitlabAuth': ' (authentication failed: token invalid or unauthorized)',
+  'mounts.err.gitNotFound': ' (repo, ref or path not found: check owner/repo/ref/prefix)',
+  'mounts.err.githubRateLimit':
+    'GitHub API rate limit exceeded: quota used up (anonymous 60 req/h; 5000 req/h with a PAT), configure a token and retry',
+  'mounts.err.gitlabRateLimit': 'GitLab request rate limited: retry later or configure a token',
+  'mounts.err.githubCors': 'GitHub direct mount failed: network unreachable (api.github.com always supports CORS)',
+  'mounts.err.gitlabCors':
+    'GitLab direct mount failed: instance CORS not configured or network unreachable (self-hosted instance requires the admin to allow this origin and the GET method)',
+
+  // —— git 测试连接回显（probeWith git 分派——spec I Task 2 评审 ① 前移收编）——
+  'mounts.probe.okGit': 'Connected: {entries} files, ref {sha}, {ms} ms',
+  'mounts.probe.truncated': '(listing truncated; partial count above)'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;

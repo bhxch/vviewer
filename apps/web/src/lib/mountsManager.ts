@@ -11,9 +11,13 @@
 import {
   createS3DirectStore,
   createDavDirectStore,
+  probeGithubDirect,
+  probeGitlabDirect,
   s3DirectStoreId,
   davDirectStoreId,
   type DavDirectConfig,
+  type GitlabDirectConfig,
+  type GithubDirectConfig,
   type S3DirectConfig
 } from '@bhxch/vviewer-core';
 import { translate as t } from './i18n/core';
@@ -49,19 +53,21 @@ export function webdavCorsHint(): string {
  * 新增/编辑表单草稿（kind→字段集切换；mode 切直连/代理）。username/secret 为
  * 双 kind 通用字段名（S3 = access_key_id/secret_access_key，WebDAV = username/
  * password——POST body 的展开在 mountsSync.postBodyOf / core 工厂配置映射）。
+ * backend 类型四联合（spec I Task 2 类型连带：DirectMountRecord.backend 扩四后
+ * draftFromRecord git 回环赋值闭合——git 表单必填校验/字段组/落记录逻辑 Task 3 落）。
  */
 export interface MountFormDraft {
   mode: 'direct' | 'proxy';
-  backend: 's3' | 'webdav';
+  backend: 's3' | 'webdav' | 'github' | 'gitlab';
   label: string;
   endpoint: string;
   bucket: string;
   prefix: string;
   /** S3 = access_key_id；WebDAV = username。 */
   username: string;
-  /** S3 = secret_access_key；WebDAV = password。 */
+  /** S3 = secret_access_key；WebDAV = password；git = 显式 PAT（可空——凭据库匹配）。 */
   secret: string;
-  /** S3 path-style（缺省 true）；WebDAV 忽略。 */
+  /** S3 path-style（缺省 true）；WebDAV/git 忽略。 */
   pathStyle: boolean;
   /** proxy 模式的注册目标服务器（UI 以 loadLastServer().baseUrl 注入）。 */
   serverBase: string;
@@ -160,9 +166,15 @@ export function draftToDirectRecord(d: MountFormDraft, existing?: DirectMountRec
 /**
  * 草稿 → 代理记录：id 与 fingerprint 均由配置指纹派生（`mount:<fingerprint>`——
  * 不含凭据，同目标重存幂等覆盖、凭据轮换不产生第二条）。serverBase 为注册目标
- * 服务器（对账作用域，见 mountsSync 注）。
+ * 服务器（对账作用域，见 mountsSync 注）。git backend 拒绝（spec I：git 挂载仅
+ * 支持浏览器直连、无代理面——mountFormIssues 的 mode issue 分派 Task 3 落，本
+ * throw 为类型收窄与损坏防御双保险；防御错误为内部身份面不上屏，英文化同日志串
+ * 口径——directConfigOf Unknown backend 同款）。
  */
 export function draftToProxyRecord(d: MountFormDraft, existing?: ProxyMountRecord): ProxyMountRecord {
+  if (d.backend === 'github' || d.backend === 'gitlab') {
+    throw new Error(`proxy mode does not support git backend: ${d.backend}`);
+  }
   const endpoint = d.endpoint.trim();
   const label = d.label.trim();
   const prefix = d.prefix.trim();
@@ -186,6 +198,9 @@ export function draftToProxyRecord(d: MountFormDraft, existing?: ProxyMountRecor
 
 /** 记录 → 表单草稿（编辑预填；凭据回填明文——管理页即凭据管理面）。 */
 export function draftFromRecord(rec: MountRecord): MountFormDraft {
+  // gitcred 不是挂载表单对象（组④凭据区块专管——Task 3 落地）：MountRecord 联合
+  // 扩列（Task 2）的类型连带防御早退——凭据条目不进挂载表单（编辑面=重提同键覆盖）
+  if (rec.kind === 'gitcred') return emptyDraft();
   const common = {
     label: rec.label,
     endpoint: rec.endpoint,
@@ -287,7 +302,8 @@ export type MountRowState =
  * 判别面一律走 record.kind / state.code 稳定标识符（i18n Task 8 D8：原模板
  * `modeLabel === '直连'` 的显示串比较已改 record.kind，locale 切换不再影响判别）。 */
 export interface MountRow {
-  record: MountRecord;
+  /** 挂载记录（gitcred 已在装配入口过滤——恒 proxy/direct 两 kind，spec I Review Focus 2）。 */
+  record: ProxyMountRecord | DirectMountRecord;
   modeLabel: string;
   backendLabel: 'S3' | 'WebDAV';
   /** 凭据已存指示（spec §5 组②）。 */
@@ -314,12 +330,17 @@ export function proxyOffsiteOf(rec: MountRecord, currentBase: string | null): bo
  * 状态机按对账字段派生——pendingRetry=true 优先（待注册/重试失败态带原因），
  * 其次 registeredRootIndex（已注册；与 currentBase 不一致时为 offsite「注册于
  * 他机」），否则未注册。currentBase = 当前连接 serverBase（last?.baseUrl ?? null）。
+ * **gitcred 过滤**（spec I Review Focus 2——MountRecord 联合扩列 Task 2 的类型
+ * 连带闭合面，Task 3 该点零改动）：凭据条目不是挂载行（backendLabel 判空/endpoint
+ * 缺失会当挂载渲染）——`gitcred:` id 与组④凭据区块（Task 3）衔接。
  */
 export function assembleMountRows(
   records: readonly MountRecord[],
   currentBase: string | null
 ): MountRow[] {
-  return records.map((record) => {
+  return records
+    .filter((record): record is Exclude<MountRecord, { kind: 'gitcred' }> => record.kind !== 'gitcred')
+    .map((record) => {
     const backendLabel = record.backend === 's3' ? ('S3' as const) : ('WebDAV' as const);
     const base = {
       record,
@@ -389,8 +410,14 @@ export function assembleLocalRows(
 
 // ---------- 测试连接 ----------
 
-/** 测试连接结果（表单/列表回显态）。 */
-export type ProbeResult = { ok: true; entries: number; ms: number } | { ok: false; error: string };
+/**
+ * 测试连接结果（表单/列表回显态；git 扩支 spec I Task 2 评审 ① 前移收编）：
+ * git 支路经 core probe 函数回显 ref 解析 sha（8 位展示）与 truncated 注记
+ *（GitHub 大仓首响应采样——Errata ⑩；GitLab 无上游截断标记恒缺省）。
+ */
+export type ProbeResult =
+  | { ok: true; entries: number; ms: number; sha?: string; truncated?: boolean }
+  | { ok: false; error: string };
 
 /**
  * 测试连接（spec §5：实际发一次 list_dir 探测并回显根条目数与延迟）。S3 走
@@ -399,10 +426,32 @@ export type ProbeResult = { ok: true; entries: number; ms: number } | { ok: fals
  * 浏览器侧探测：验证目标可达与凭据有效（服务器出口连通性在保存注册后由对账
  * 健康探测覆盖）。错误原样回显——含 CORS 特征化文案与 http 部署 WebCrypto
  * 缺失文案（core subtle() 入口，Task 1 疑虑①的覆盖面）。
+ * git 分派（spec I Task 2 评审 ①：directConfigOf 注解扩四联合的本文件类型连带——
+ * probeWith 同 commit 收宽）：`'owner' in cfg` 收窄出 GithubDirectConfig 转 core
+ * probeGithubDirect（独立函数不建 store 实例——免缓存副作用）；`'project' in cfg`
+ * 收窄出 GitlabDirectConfig 转 probeGitlabDirect；两平台均只取首页采样（spec §3.3
+ * 拍板：GitHub recursive=1 单响应、GitLab per_page=100 不翻页）。四联合 `in` 收窄
+ * 下字面传参类型成立（无 as 断言）。S3/DAV 分支零改动（既有探测文案逐字节兼容锚）。
  */
-async function probeWith(cfg: S3DirectConfig | DavDirectConfig): Promise<ProbeResult> {
+async function probeWith(
+  cfg: S3DirectConfig | DavDirectConfig | GithubDirectConfig | GitlabDirectConfig
+): Promise<ProbeResult> {
   const started = Date.now();
   try {
+    if ('owner' in cfg) {
+      const r = await probeGithubDirect(cfg);
+      return {
+        ok: true,
+        entries: r.files,
+        sha: r.sha,
+        ...(r.truncated ? { truncated: true } : {}),
+        ms: Date.now() - started
+      };
+    }
+    if ('project' in cfg) {
+      const r = await probeGitlabDirect(cfg);
+      return { ok: true, entries: r.files, sha: r.sha, ms: Date.now() - started };
+    }
     const store = 'bucket' in cfg ? createS3DirectStore(cfg) : createDavDirectStore(cfg);
     const entries = await store.listChildren('');
     return { ok: true, entries: entries.length, ms: Date.now() - started };
@@ -421,11 +470,19 @@ export async function probeRecord(rec: DirectMountRecord): Promise<ProbeResult> 
   return probeWith(directConfigOf(rec));
 }
 
-/** 测试连接结果回显文案（spec §5：条目数 + 延迟）。 */
+/**
+ * 测试连接结果回显文案（spec §5：条目数 + 延迟）。git 分支（spec I Task 2）：
+ * `sha` 在场 = git 支路产物——`mounts.probe.okGit`（sha 8 位展示）+ truncated
+ * 置位时拼接 `mounts.probe.truncated`（GitHub 大仓首响应采样注记——Errata ⑩）；
+ * 非 git 分支（sha 缺省）既有 ok 文案**逐字节不变**（s3/dav 兼容锚）。
+ */
 export function formatProbeResult(r: ProbeResult): string {
-  return r.ok
-    ? t('mounts.probe.ok', { entries: r.entries, ms: r.ms })
-    : t('mounts.probe.fail', { error: r.error });
+  if (!r.ok) return t('mounts.probe.fail', { error: r.error });
+  if (r.sha !== undefined) {
+    const base = t('mounts.probe.okGit', { entries: r.entries, sha: r.sha.slice(0, 8), ms: r.ms });
+    return r.truncated === true ? `${base}${t('mounts.probe.truncated')}` : base;
+  }
+  return t('mounts.probe.ok', { entries: r.entries, ms: r.ms });
 }
 
 // ---------- 删除联动 ----------

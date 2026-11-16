@@ -32,6 +32,25 @@ describe('openFlow 直连 store 创建分派（带入①创建链路）', () => 
     expect(src).toContain('createDavDirectStore');
   });
 
+  it('spec I 四支分派：git 记录经 gitCredentialTokenByKey 查库（directConfigOf 内）→ createGithubDirectStore/createGitlabDirectStore（判别链独有字段名收窄）', () => {
+    // 四支判别链（'bucket' → 'username' → 'owner' → gitlab 兜底）字符串锚
+    expect(src).toMatch(
+      /'bucket' in cfg\s*\?\s*createS3DirectStore\(cfg\)\s*:\s*'username' in cfg\s*\?\s*createDavDirectStore\(cfg\)\s*:\s*'owner' in cfg\s*\?\s*createGithubDirectStore\(cfg\)\s*:\s*createGitlabDirectStore\(cfg\)/
+    );
+    expect(src).toContain('createGithubDirectStore');
+    expect(src).toContain('createGitlabDirectStore');
+    // 凭据查库收敛在 directConfigOf（mountsSync）内——gitCredentialTokenByKey 调用面
+    const msSrc = readSrc('src/lib/mountsSync.ts');
+    expect(msSrc).toMatch(/gitCredentialTokenByKey\(rec\.credentialKey/);
+    // 恢复链零改动锚（机制零改动——AppShell restore 直连分支仍走 createDirectMountStore
+    // 单点分派，git 凭据查库在分派内闭合；AppShell 不出现 git 分派/查库散点）
+    const shell = readSrc('src/lib/AppShell.svelte');
+    expect(shell).not.toContain('createGithubDirectStore');
+    expect(shell).not.toContain('createGitlabDirectStore');
+    expect(shell).not.toContain('gitCredentialTokenByKey');
+    expect(shell).toContain('createDirectMountStore(');
+  });
+
   it('watch 接线（终审 I-1）：DirectStore.watch 立即 onError 只走 console 诊断——不写 watchHealth 全局标志（per-source 文案由 isMountRootStoreId 派生，本不依赖）', () => {
     // 函数体窗口（至首个行首 `}`）内不得出现任何 watchHealth 写点/复位点：
     // 立即 onError 置位会污染健康 remote fs 根等非挂载来源 tab，创建期复位同理

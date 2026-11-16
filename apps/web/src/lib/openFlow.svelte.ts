@@ -21,6 +21,8 @@ import {
   createRemoteStore,
   createS3DirectStore,
   createDavDirectStore,
+  createGithubDirectStore,
+  createGitlabDirectStore,
   ensurePermission,
   isAbortError,
   normalizeServerBase
@@ -255,7 +257,17 @@ export function openRemoteSource(
  */
 export function createDirectMountStore(rec: DirectMountRecord): DirectStore {
   const cfg = directConfigOf(rec);
-  const store = 'bucket' in cfg ? createS3DirectStore(cfg) : createDavDirectStore(cfg);
+  // 四支判别（spec I Task 2：git 扩支——判别键取各配置接口的独有字段名，类型
+  // 收窄自然成立）：'bucket'=S3 / 'username'=Dav / 'owner'=Github / 其余=Gitlab。
+  // 凭据解析在 directConfigOf 内同步完成（gitCredentialTokenByKey 经 recordCache
+  // 镜像——同步签名维持，AppShell 恢复链/本打开链零 async 改动）。
+  const store = 'bucket' in cfg
+    ? createS3DirectStore(cfg)
+    : 'username' in cfg
+      ? createDavDirectStore(cfg)
+      : 'owner' in cfg
+        ? createGithubDirectStore(cfg)
+        : createGitlabDirectStore(cfg);
   store.watch(
     (paths) => {
       if (!loadSettings().autoRefresh) return;

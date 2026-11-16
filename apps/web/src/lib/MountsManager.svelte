@@ -202,7 +202,9 @@
   // ----- 新增/编辑表单（kind→字段集切换→测试连接→保存） -----
 
   let formOpen = $state(false);
-  let editing = $state<MountRecord | null>(null);
+  // 编辑目标（gitcred 恒不进表单——openEdit 守卫早退，spec I Task 2 类型连带收窄：
+  // 模板 editing.label 等访问面闭合；组④凭据区块 Task 3 以独立通道管理 gitcred）
+  let editing = $state<Exclude<MountRecord, { kind: 'gitcred' }> | null>(null);
   let draft = $state<MountFormDraft>(emptyDraft());
   let formIssues = $state<Partial<Record<keyof MountFormDraft, string>> | null>(null);
   let formError = $state('');
@@ -220,6 +222,12 @@
   }
 
   function openEdit(rec: MountRecord): void {
+    // gitcred 不是挂载表单对象（组④凭据区块专管——Task 3）；git direct 的表单
+    // 扩支（条件字段组/必填分派/draftToDirectRecord git 分支）Task 3 落——本阶段
+    // git 编辑入口阻断（防御：mountFormIssues 尚无 per-backend 分派，git 草稿
+    // 会落 username/secret 误必填）。类型守卫使 rec 收窄至 proxy/s3 direct。
+    if (rec.kind === 'gitcred') return;
+    if (rec.kind === 'direct' && (rec.backend === 'github' || rec.backend === 'gitlab')) return;
     editing = rec;
     draft = draftFromRecord(rec);
     resetFormFeedback();
@@ -336,6 +344,9 @@
   }
 
   async function removeRecord(rec: MountRecord): Promise<void> {
+    // gitcred 不进挂载删除链（spec I：凭据条目编辑面=重提同键覆盖，删除钮归组④
+    // 凭据区块——Task 3 落；本守卫使联合收窄至 proxy/direct，Record 字段访问闭合）
+    if (rec.kind === 'gitcred') return;
     // 删除引用回落提示（mountUsageOf）：运行中 tab 不中断（store 随最后持有者
     // 释放），会话快照恢复将因记录缺失落占位——确认弹窗声明该后果。
     // 评审 M1：offsite proxy 走「强制本地删除」逃生口——注销请求以当前连接令牌

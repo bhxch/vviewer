@@ -28,7 +28,18 @@ import {
   setDavHttpFailedText,
   setDavCorsFailureText,
   setDavAuthHintText,
+  setGithubHttpFailedText,
+  setGitlabHttpFailedText,
+  setGithubAuthHintText,
+  setGitlabAuthHintText,
+  setGitNotFoundHintText,
+  setGithubRateLimitText,
+  setGitlabRateLimitText,
+  setGithubCorsFailureText,
+  setGitlabCorsFailureText,
   type DavDirectConfig,
+  type GitlabDirectConfig,
+  type GithubDirectConfig,
   type S3DirectConfig
 } from '@bhxch/vviewer-core';
 import { translate as t } from './i18n/core';
@@ -48,6 +59,17 @@ setHttpFailedText((label, status, detail) => t('mounts.err.httpFailed', { label,
 setDavHttpFailedText((status, detail) => t('mounts.err.davHttpFailed', { status, detail }));
 setDavCorsFailureText(() => t('mounts.err.davCors'));
 setDavAuthHintText(() => t('mounts.err.davAuth'));
+// git 直连错误特征化注入缝（spec I Task 2：9 setter 追加——directGit.ts 同款消费
+// 语义；404 hint 双平台共用单键 mounts.err.gitNotFound）
+setGithubHttpFailedText((status, detail) => t('mounts.err.githubHttpFailed', { status, detail }));
+setGitlabHttpFailedText((status, detail) => t('mounts.err.gitlabHttpFailed', { status, detail }));
+setGithubAuthHintText(() => t('mounts.err.githubAuth'));
+setGitlabAuthHintText(() => t('mounts.err.gitlabAuth'));
+setGitNotFoundHintText(() => t('mounts.err.gitNotFound'));
+setGithubRateLimitText(() => t('mounts.err.githubRateLimit'));
+setGitlabRateLimitText(() => t('mounts.err.gitlabRateLimit'));
+setGithubCorsFailureText(() => t('mounts.err.githubCors'));
+setGitlabCorsFailureText(() => t('mounts.err.gitlabCors'));
 
 /**
  * 代理挂载记录（brief 接口 schema + 实施扩展，扩展面记录任务报告）：
@@ -82,20 +104,32 @@ export interface ProxyMountRecord {
 }
 
 /**
- * 直连挂载记录（目录挂载 spec §4 阶段四，plan Task 1）：浏览器直连 S3/WebDAV
- * 的前端持久化。要点：
+ * 直连挂载记录（目录挂载 spec §4 阶段四，plan Task 1；git 扩支 spec I，plan Task 2）：
+ * 浏览器直连 S3/WebDAV/GitHub/GitLab 的前端持久化。要点：
  * - 凭据（username/secret）IndexedDB **明文**存储（spec §4 拍板；管理页在新增
  *   表单与列表详情双处固定警示面）；
- * - id = core 直连 store 的 storeId（`s3direct:`/`davdirect:` + hash8(挂载目标
- *   身份)，@bhxch/vviewer-core s3DirectStoreId/davDirectStoreId 产出）——同配置天然
+ * - id = core 直连 store 的 storeId（`s3direct:`/`davdirect:`/`githubdirect:`/
+ *   `gitlabdirect:` + hash8(挂载目标身份)，@bhxch/vviewer-core s3DirectStoreId/
+ *   davDirectStoreId/githubDirectStoreId/gitlabDirectStoreId 产出）——同配置天然
  *   去重，凭据轮换/改名不换 id（hash 不含凭据与 label，与 proxy 指纹同口径）；
- * - 与 proxy 记录同住 v4 `mounts` store，kind 判别（'proxy' | 'direct'）；
+ * - 与 proxy 记录同住 v4 `mounts` store，kind 判别（'proxy' | 'direct' | 'gitcred'）；
  *   直连记录不参与服务端对账（不经服务器，无注册面）。
+ * git 扩支字段（spec I §3.2/§7-2，Task 2）：
+ * - endpoint 为展示面：github = `https://github.com/{owner}/{repo}`（dlAddressText
+ *   下载地址展示；真实内容面为 raw.githubusercontent/{sha}/——Errata ⑦，不参与
+ *   storeId hash）；gitlab = host 原值；
+ * - secret 复用既有「该记录的敏感凭据」语义，git 直译为 PAT（显式填 token 的
+ *   记录直存本字段——覆盖库匹配；明文警示沿用）；token 留空场景存 credentialKey
+ *   （库条目键），轮换=改库条目即生效（gitCredentialTokenByKey 经 recordCache
+ *   同步镜像查询——directConfigOf 同步签名维持）；
+ * - host：gitlab = 实例基址原文（github 恒空——平台域名固定）。**host 归一由 core
+ *   gitlabDirectStoreId/工厂统一承担（Errata ⑨），本记录与 directConfigOf 均不
+ *   预归一**——预归一会使 rec.id=hash(原文) ≠ store.id=hash(归一) 断恢复链。
  */
 export interface DirectMountRecord {
   id: string;
   kind: 'direct';
-  backend: 's3' | 'webdav';
+  backend: 's3' | 'webdav' | 'github' | 'gitlab';
   label: string;
   endpoint: string;
   /** S3 挂载的桶名；WebDAV 挂载缺省。 */
@@ -103,15 +137,51 @@ export interface DirectMountRecord {
   prefix: string;
   /** S3 = access_key_id；WebDAV = username。 */
   username?: string;
-  /** S3 = secret_access_key；WebDAV = password。明文存储（spec §4 拍板：管理页警示面）。 */
+  /** S3 = secret_access_key；WebDAV = password；git = 显式 PAT（覆盖库匹配；明文警示沿用）。 */
   secret?: string;
-  /** S3 path-style（缺省 true）；WebDAV 缺省。 */
+  /** S3 path-style（缺省 true）；WebDAV/git 缺省。 */
   pathStyle?: boolean;
+  /** github = 仓库 owner；gitlab = 凭据匹配用 namespace（项目路径剥末段；数字 id 项目为 ''）。 */
+  owner?: string;
+  /** github = 仓库名；gitlab = 项目（路径或数字 id 文本——core 配置的 project 槽）。 */
+  repo?: string;
+  /** git = 任意 ref 文本（branch/tag/commit）。 */
+  ref?: string;
+  /** gitlab = 实例基址原文（github 恒空——平台域名固定；归一由 core 单源承担，Errata ⑨）。 */
+  host?: string;
+  /** token 留空场景：凭据库条目键（`'github.com:<owner>'` / `'<host>:<namespace>'`；
+   *  owner 通配条目为 `'<host>:*'`）。显式 token 记录不写本字段。 */
+  credentialKey?: string;
   createdAt: number;
 }
 
-/** mounts store 记录全体（kind 判别联合）。 */
-export type MountRecord = ProxyMountRecord | DirectMountRecord;
+/**
+ * Git 凭据条目（spec I §3.2：分 host+owner 条目化的凭据库，plan Task 2）：与
+ * 挂载记录同住 `mounts` store 的第三 kind 'gitcred'——按 **host+owner 独立条目**，
+ * token 留空的挂载记录经 credentialKey 引用本条目（匹配顺序精确 owner → 通配
+ * '*' → 匿名）。**编辑面 = 重提同键覆盖**（评审 ③）：`put(rec, rec.id)` 键覆盖
+ * 语义下同 host+owner 再保存一次即更新 token/note（saveMount 漏斗，无独立编辑钮）。
+ * 消费面天然隔离：`gitcred:` 前缀 id 与直连 storeId 恒不相交（displayLabelForStore/
+ * displayEndpointForStore 精确 id 命中不受干扰），listProxyMounts/listDirectMounts
+ * kind 过滤隔离——组②装配需显式过滤（assembleMountRows，Review Focus 2）。
+ * token IndexedDB 明文存储（既有 spec §4 拍板沿袭；credentialWarning 双处警示）。
+ */
+export interface GitCredentialRecord {
+  /** `gitcred:<host>:<owner>`——host+owner 复合键即天然去重键（重提同键覆盖=更新）。 */
+  id: string;
+  kind: 'gitcred';
+  /** 实例 host（组④表单原文落盘——匹配面 resolveGitCredential 同原文 trim 比对）。 */
+  host: string;
+  /** owner/namespace；'*' = 通配条目（匹配该 host 全部 owner）。 */
+  owner: string;
+  /** PAT 明文（同 direct 记录凭据口径）。 */
+  token: string;
+  note?: string;
+  createdAt: number;
+}
+
+/** mounts store 记录全体（kind 判别联合；spec I Task 2 扩列第三 kind 'gitcred'）。 */
+export type MountRecord = ProxyMountRecord | DirectMountRecord | GitCredentialRecord;
 
 /** `GET /api/mounts` 清单条目（server MountEntry HTTP 形态，凭据不在结构面）。 */
 export interface MountManifestEntry {
@@ -287,7 +357,7 @@ export function displayLabelForStore(storeId: string, opts?: { storeBase?: strin
   const parts = parseRemoteStoreId(storeId);
   if (parts === null) return undefined;
   const candidates = [...recordCache.values()].filter(
-    (r) =>
+    (r): r is ProxyMountRecord =>
       r.kind === 'proxy' &&
       r.registeredRootIndex === parts.rootIndex &&
       (opts?.storeBase === undefined || r.serverBase === opts.storeBase)
@@ -314,13 +384,66 @@ export function resetMountRecordCacheForTests(): void {
 }
 
 /**
- * 直连记录 → core 直连 store 配置（评审带入①：openFlow 创建分派与管理页测试
- * 连接共用的单一映射面）。字段按 backend 展开为 S3DirectConfig/DavDirectConfig
- * （username→accessKeyId/secret→secretAccessKey 或 username/password；prefix 与
- * pathStyle 直传——归一在工厂内）。缺失字段回退空串（记录损坏防御：工厂/探测
- * 面报错而非崩溃）；backend 不识别抛错。
+ * Git 凭据解析（spec I §7-2）：按 host+owner 匹配凭据库条目，返回命中条目的
+ * credentialKey（`'<host>:<owner>'` 形态）；匹配顺序 **精确 owner → 通配 '*' →
+ * 未命中 undefined**（未命中=匿名，挂载记录两字段都缺省）。owner 空串（gitlab
+ * 数字 id 项目）无精确面——仅通配可命中。查询走 recordCache 同步镜像（list/save/
+ * delete 三漏斗维护——mountsManager draftToDirectRecord 表单面同步消费）。
+ * host 按原文 trim 比对（组④条目与 mount 表单 host 输入形态一致性由用户保证；
+ * Errata ⑨ 的 scheme/尾斜杠归一只钉 storeId/工厂 hash 输入，凭据匹配面不预归一）。
  */
-export function directConfigOf(rec: DirectMountRecord): S3DirectConfig | DavDirectConfig {
+export function resolveGitCredential(host: string, owner: string): string | undefined {
+  const h = host.trim();
+  const o = owner.trim();
+  if (o !== '') {
+    const exact = recordCache.get(`gitcred:${h}:${o}`);
+    if (exact?.kind === 'gitcred') return `${h}:${o}`;
+  }
+  const wildcard = recordCache.get(`gitcred:${h}:*`);
+  return wildcard?.kind === 'gitcred' ? `${h}:*` : undefined;
+}
+
+/**
+ * 按凭据库条目键取 token（spec I §7-2 重建查库通道）：directConfigOf 内消费
+ *（credentialKey 引用 → token 现值）——**轮换凭据=改库条目即生效**（saveMount
+ * 重提同键覆盖后镜像即时刷新）。key 形态 `'<host>:<owner>'`（resolveGitCredential
+ * 返回值 / 组④条目键）；未命中（条目已删）返回 undefined = 匿名降级（不抛错——
+ * 重建安全，401/限速文案在使用面可见）。查询走 recordCache 同步镜像——
+ * createDirectMountStore 同步签名维持（AppShell 恢复链/openFlow 打开链零 async
+ * 改动；冷启动极快点击窗口退化为匿名，Errata ③ 知情接受）。
+ */
+export function gitCredentialTokenByKey(key: string): string | undefined {
+  const rec = recordCache.get(`gitcred:${key}`);
+  return rec?.kind === 'gitcred' ? rec.token : undefined;
+}
+
+/**
+ * git 记录的 token 解析（spec I §7-2）：显式 secret（PAT 直存记录）优先 →
+ * credentialKey 查库（gitCredentialTokenByKey 经 recordCache 同步镜像——**轮换
+ * 凭据=改库条目即生效**）→ 两者皆缺 = undefined（匿名）。查库失败（credentialKey
+ * 指向条目已删）token 缺省匿名不抛错——重建降级安全，401/限速文案在使用面可见。
+ */
+function gitTokenOf(rec: DirectMountRecord): string | undefined {
+  if (rec.secret !== undefined && rec.secret !== '') return rec.secret;
+  const viaKey = gitCredentialTokenByKey(rec.credentialKey ?? '');
+  return viaKey !== undefined && viaKey !== '' ? viaKey : undefined;
+}
+
+/**
+ * 直连记录 → core 直连 store 配置（评审带入①：openFlow 创建分派与管理页测试
+ * 连接共用的单一映射面）。字段按 backend 展开为 S3DirectConfig/DavDirectConfig/
+ * GithubDirectConfig/GitlabDirectConfig（四联合——probeWith 收宽的类型前提，评审 ①
+ * 同 commit 闭合；username→accessKeyId/secret→secretAccessKey 或 username/password；
+ * prefix 与 pathStyle 直传——归一在工厂内）。缺失字段回退空串（记录损坏防御：
+ * 工厂/探测面报错而非崩溃）；backend 不识别抛错。
+ * git 两分支（spec I Task 2）：github owner/repo/ref + token（gitTokenOf 优先级）；
+ * gitlab host **原文透传**（归一由 core gitlabDirectStoreId/工厂单源承担——
+ * Errata ⑨，本面预归一会使 rec.id=hash(原文) ≠ store.id=hash(归一) 断恢复链）+
+ * project=rec.repo。prefix 空串不入配置（core 工厂 normalizeMountPrefix 兜底空档）。
+ */
+export function directConfigOf(
+  rec: DirectMountRecord
+): S3DirectConfig | DavDirectConfig | GithubDirectConfig | GitlabDirectConfig {
   if (rec.backend === 's3') {
     const cfg: S3DirectConfig = {
       endpoint: rec.endpoint,
@@ -339,6 +462,26 @@ export function directConfigOf(rec: DirectMountRecord): S3DirectConfig | DavDire
       prefix: rec.prefix,
       username: rec.username ?? '',
       password: rec.secret ?? '',
+      label: rec.label
+    };
+  }
+  if (rec.backend === 'github') {
+    return {
+      owner: rec.owner ?? '',
+      repo: rec.repo ?? '',
+      ref: rec.ref ?? '',
+      ...(rec.prefix !== '' ? { prefix: rec.prefix } : {}),
+      ...(gitTokenOf(rec) !== undefined ? { token: gitTokenOf(rec) } : {}),
+      label: rec.label
+    };
+  }
+  if (rec.backend === 'gitlab') {
+    return {
+      host: rec.host ?? '',
+      project: rec.repo ?? '',
+      ref: rec.ref ?? '',
+      ...(rec.prefix !== '' ? { prefix: rec.prefix } : {}),
+      ...(gitTokenOf(rec) !== undefined ? { token: gitTokenOf(rec) } : {}),
       label: rec.label
     };
   }

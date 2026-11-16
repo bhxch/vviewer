@@ -574,3 +574,124 @@ describe('mountUsageOf（删除确认的引用面提示）', () => {
     expect(mountUsageOf('s3direct:none', ws).sources).toBe(0);
   });
 });
+
+// ---------- git 探测分派（spec I Task 2 评审 ① 前移收编：probeWith 四联合 +
+// git 支路转 core probe 函数——sha/truncated 回显） ----------
+
+describe('probeWith git 分派（spec I：probeRecord github/gitlab 记录 → probeGithubDirect/probeGitlabDirect）', () => {
+  const GH_SHA = 'a'.repeat(40);
+  const GL_COMMIT = 'e'.repeat(40);
+
+  /** github 直连记录（directConfigOf git 分支映射面——Task 2 mountsSync 已扩）。 */
+  function ghRec(): DirectMountRecord {
+    return {
+      id: 'githubdirect:abcd1234',
+      kind: 'direct',
+      backend: 'github',
+      label: '示例仓',
+      endpoint: 'https://github.com/octo/repo',
+      prefix: '',
+      owner: 'octo',
+      repo: 'repo',
+      ref: 'main',
+      createdAt: 1
+    };
+  }
+
+  function glRec(): DirectMountRecord {
+    return {
+      id: 'gitlabdirect:abcd1234',
+      kind: 'direct',
+      backend: 'gitlab',
+      label: '示例项目',
+      endpoint: 'https://gitlab.example.com',
+      prefix: '',
+      host: 'https://gitlab.example.com',
+      repo: 'grp/rp',
+      ref: 'main',
+      createdAt: 1
+    };
+  }
+
+  function jsonRes(body: unknown, status = 200, headers: Record<string, string> = {}): unknown {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+      arrayBuffer: async () => new TextEncoder().encode(JSON.stringify(body)).buffer as ArrayBuffer,
+      headers: { get: (name: string) => (headers[name.toLowerCase()] ?? null) }
+    };
+  }
+
+  it('github 记录探测：probeGithubDirect 域内 fetch——sha/truncated 回显（Errata ⑩ 采样语义）', async () => {
+    const urls: string[] = [];
+    stubFetch((_m, url) => {
+      urls.push(url);
+      if (url === 'https://api.github.com/repos/octo/repo/commits/main') {
+        return jsonRes({ sha: GH_SHA });
+      }
+      if (url === `https://api.github.com/repos/octo/repo/git/trees/${GH_SHA}?recursive=1`) {
+        return jsonRes({
+          sha: GH_SHA,
+          truncated: true,
+          tree: [
+            { path: 'a.md', type: 'blob', size: 1, sha: 'b1' },
+            { path: 'b.md', type: 'blob', size: 2, sha: 'b2' },
+            { path: 'c', type: 'tree', sha: 't1' }
+          ]
+        });
+      }
+      return undefined; // BFS 若发生即未模拟异常显式暴露（Errata ⑩：probe 不 BFS）
+    });
+    const r = await probeRecord(ghRec());
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.entries).toBe(2); // 首响应 blob 部分计数
+      expect(r.sha).toBe(GH_SHA);
+      expect(r.truncated).toBe(true);
+      expect(r.ms).toBeGreaterThanOrEqual(0);
+    }
+    expect(urls.some((u) => u.includes('/commits/main'))).toBe(true);
+    expect(urls.filter((u) => u.includes('/git/trees/')).length).toBe(1); // 恰止于 recursive 单响应
+    // 回显文案（formatProbeResult git 分支：okGit + truncated 注记）
+    expect(formatProbeResult(r)).toBe(
+      `连接成功：2 个文件，ref aaaaaaaa，延迟 ${r.ok ? r.ms : 0} ms（清单已截断，以上为部分计数）`
+    );
+  });
+
+  it('gitlab 记录探测：probeGitlabDirect 域内 fetch——项目解析 + commits + tree 首页（恰 1 页）', async () => {
+    const urls: string[] = [];
+    stubFetch((_m, url) => {
+      urls.push(url);
+      if (url === 'https://gitlab.example.com/api/v4/projects/grp%2Frp') return jsonRes({ id: 42 });
+      if (url === 'https://gitlab.example.com/api/v4/projects/42/repository/commits/main') {
+        return jsonRes({ id: GL_COMMIT });
+      }
+      if (url === 'https://gitlab.example.com/api/v4/projects/42/repository/tree?ref=main&recursive=true&per_page=100') {
+        return jsonRes(
+          Array.from({ length: 3 }, (_, i) => ({ id: `g${i}`, name: `f${i}.txt`, type: 'blob', path: `f${i}.txt` })),
+          200,
+          { link: '<https://gitlab.example.com/api/v4/projects/42/repository/tree?page=2>; rel="next"' }
+        );
+      }
+      return undefined; // Link 在场也不翻页（spec §3.3 首页采样——page=2 未模拟即暴露）
+    });
+    const r = await probeRecord(glRec());
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.entries).toBe(3);
+      expect(r.sha).toBe(GL_COMMIT);
+      expect(r.truncated).toBeUndefined(); // GitLab 无上游截断标记
+    }
+    expect(urls.filter((u) => u.includes('/repository/tree')).length).toBe(1);
+    expect(formatProbeResult(r)).toBe(`连接成功：3 个文件，ref eeeeeeee，延迟 ${r.ok ? r.ms : 0} ms`);
+  });
+
+  it('formatProbeResult git 分支：非 git 记录（无 sha）既有 ok 文案逐字节不变（s3/dav 兼容锚）', () => {
+    expect(formatProbeResult({ ok: true, entries: 3, ms: 12 })).toBe(
+      '连接成功：根目录 3 个条目，延迟 12 ms'
+    );
+    expect(formatProbeResult({ ok: false, error: 'boom' })).toBe('连接失败：boom');
+  });
+});

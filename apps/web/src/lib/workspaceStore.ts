@@ -17,8 +17,9 @@ import type { TabSnapshot } from './stores/session';
  */
 const DEFAULT_WORKSPACE_NAME = '\u9ed8\u8ba4';
 
-/** 工作区来源类别：由 storeId 前缀推导（sourceKindOf）。'direct' = S3/WebDAV
- * 浏览器直连挂载（目录挂载 spec §4 阶段三——s3direct:/davdirect: 前缀）。 */
+/** 工作区来源类别：由 storeId 前缀推导（sourceKindOf）。'direct' = S3/WebDAV/
+ * GitHub/GitLab 浏览器直连挂载（目录挂载 spec §4 阶段三——s3direct:/davdirect:
+ * 前缀；spec I 插拔点①——githubdirect:/gitlabdirect: 前缀一行扩列）。 */
 export type WorkspaceSourceKind = 'localfs' | 'localfiles' | 'remote' | 'direct' | 'single' | 'url';
 
 /**
@@ -69,7 +70,14 @@ export function sourceKindOf(storeId: string): WorkspaceSourceKind {
   if (storeId.startsWith('localfs:')) return 'localfs';
   if (storeId.startsWith('localfiles:')) return 'localfiles';
   if (storeId.startsWith('remote:')) return 'remote';
-  if (storeId.startsWith('s3direct:') || storeId.startsWith('davdirect:')) return 'direct';
+  if (
+    storeId.startsWith('s3direct:') ||
+    storeId.startsWith('davdirect:') ||
+    storeId.startsWith('githubdirect:') ||
+    storeId.startsWith('gitlabdirect:')
+  ) {
+    return 'direct';
+  }
   if (storeId.startsWith('url:')) return 'url';
   return 'single';
 }

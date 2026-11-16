@@ -73,7 +73,17 @@ export function saveServerHealth(health: unknown): void {
  * 搜索同口径走浏览器内补扫，而非全局 watch-error 降级语义）。
  */
 export function isMountRootStoreId(storeId: string): boolean {
-  if (storeId.startsWith('s3direct:') || storeId.startsWith('davdirect:')) return true;
+  // spec I 插拔点①：git 直连前缀（githubdirect:/gitlabdirect:）一行扩列——
+  // 恒挂载来源（per-source「此源不支持变更推送」/「该根不可服务端搜索」/
+  // 浏览器内补扫提示自动生效，globalSearch/downloadProgress 单源派生零改动）
+  if (
+    storeId.startsWith('s3direct:') ||
+    storeId.startsWith('davdirect:') ||
+    storeId.startsWith('githubdirect:') ||
+    storeId.startsWith('gitlabdirect:')
+  ) {
+    return true;
+  }
   const fsRoots = loadServerHealth()?.fsRoots ?? null;
   if (fsRoots === null) return false;
   const parts = parseRemoteStoreId(storeId);
