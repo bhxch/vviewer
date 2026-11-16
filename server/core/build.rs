@@ -1,12 +1,14 @@
 //! core/build.rs：源码编译全部 grammar + 生成 grammar_entries.rs（多端发布
 //! 阶段二 Task 3 随 tree-sitter 高亮域自 server/build.rs 迁入，工程手法不变）。
-//! 语言清单来自入库的 grammars-manifest.json（Markpad 301 验收集合）；
+//! 语言清单来自 gen-sources 从 helix pin 派生的 grammars-manifest.json（期望
+//! 条目数=manifest 数组长度，动态门禁 full_registry_count_matches_manifest——
+//! spec F 构建源头化后生成物不入库，缺失时报错指向 pnpm gen:sources）；
 //! grammar 源树由 tools/grammar-builder fetch 管线产出（VV_GRAMMAR_SOURCES，
 //! 缺省 ../tools/grammar-builder/out/grammars——解析锚定 server crate，与本
 //! build.rs 迁入前的相对语义逐字节一致，见 sources_root 构造处注记）。源缺失
 //! 的语言跳过编译（partial 构建，本地开发友好）；CI 全量门禁以
-//! GENERATED_COUNT==301 收口。工程手法移植自 Markpad build.rs（C++ scanner
-//! 手动 g++/ar/objcopy、-std=gnu11、vue 符号 localize），见 spec §2.2。
+//! GENERATED_COUNT==manifest 条目数收口。工程手法移植自 Markpad build.rs
+//! （C++ scanner 手动 g++/ar/objcopy、-std=gnu11、vue 符号 localize），见 spec §2.2。
 
 use std::env;
 use std::fs;
@@ -36,8 +38,19 @@ fn main() {
     println!("cargo:rerun-if-changed=../grammars-manifest.json");
     println!("cargo:rerun-if-env-changed=VV_GRAMMAR_SOURCES");
 
+    // manifest 生成物不入库（spec F 构建源头化）：运行时读取 + 缺失显式 panic
+    // 指向 gen——include_str! 的编译期失败文案无指向性，且会使下方存在性检查
+    // 沦为死代码（宏先炸），故必须运行时读取（cargo:rerun-if-changed 语义不变）。
+    let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../grammars-manifest.json");
+    if !manifest_path.exists() {
+        panic!(
+            "grammars-manifest.json 缺失（构建源头化后不入库）：先跑 pnpm gen:sources（或 node tools/grammar-builder/gen-sources.mjs --refresh）"
+        );
+    }
     let manifest: Vec<GrammarEntry> =
-        serde_json::from_str::<ManifestFile>(include_str!("../grammars-manifest.json")).expect("grammars-manifest.json").grammars;
+        serde_json::from_str::<ManifestFile>(&fs::read_to_string(&manifest_path).expect("grammars-manifest.json 可读"))
+            .expect("grammars-manifest.json")
+            .grammars;
     // 源树解析锚定 server crate（本 crate 的父目录）而非 build script cwd：
     // VV_GRAMMAR_SOURCES 的相对路径语义与默认值同迁入前（build.rs 位于 server/
     // 时 cwd=server/）逐字节一致——README「相对 server crate 路径」契约不变；
@@ -48,7 +61,7 @@ fn main() {
             .unwrap_or_else(|_| "../tools/grammar-builder/out/grammars".into()));
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
-    copy_queries(&out_dir);
+    copy_queries(&out_dir, &manifest);
 
     let mut built: Vec<&GrammarEntry> = Vec::new();
     let mut missing: Vec<&str> = Vec::new();
@@ -69,7 +82,7 @@ fn main() {
     }
     if !missing.is_empty() {
         println!(
-            "cargo:warning=grammar 源缺失 {}/{}（partial 构建）：缺 [{}, ...]；全量获取：pnpm gen:grammars --fetch 或 node tools/grammar-builder/build.mjs --fetch",
+            "cargo:warning=grammar 源缺失 {}/{}（partial 构建）：缺 [{}, ...]；全量获取：先 pnpm gen:sources（源清单再生）再 node tools/grammar-builder/build.mjs --fetch",
             built.len(),
             manifest.len(),
             missing.iter().take(8).cloned().collect::<Vec<_>>().join(","),
@@ -100,8 +113,19 @@ fn main() {
 /// （此前不存在的 injections/locals.scm 落盘或移除时目录 mtime 变化，逐文件指令
 /// 对新出现/已消失的路径无从追踪）；逐文件指令感知深层内容修改（目录级指令
 /// 不感知）。双层并存，cargo 对重复路径去重。
-fn copy_queries(out_dir: &Path) {
+/// assets/queries 为 gen-sources 产物不入库（spec F）：目录缺失显式 panic 指向
+/// pnpm gen:sources。manifest 语言的缺失目录在此物化空串三件套（master 实测
+/// 17 语言上游仅保留 [[grammar]] 而删除查询目录，如 requirements/robots-txt）——
+/// 与上方「缺失文件物化空串」同一设计语义，保证 generate_entries 的 include_str!
+/// 恒可解析（spec F T3 实测订正）。
+fn copy_queries(out_dir: &Path, manifest: &[GrammarEntry]) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/vviewer-highlight/assets/queries");
+    if !root.exists() {
+        panic!(
+            "queries 资产目录缺失（构建源头化后不入库）：{}——先跑 pnpm gen:sources（或 node tools/grammar-builder/gen-sources.mjs --refresh）",
+            root.display()
+        );
+    }
     for dir in fs::read_dir(&root).expect("queries 资产目录") {
         let dir = dir.unwrap().path();
         if !dir.is_dir() {
@@ -120,6 +144,16 @@ fn copy_queries(out_dir: &Path) {
             }
             let text = fs::read_to_string(&src).unwrap_or_default();
             fs::write(dest.join(kind), text).unwrap();
+        }
+    }
+    for e in manifest {
+        let dest = out_dir.join("queries").join(&e.dir);
+        if dest.is_dir() {
+            continue;
+        }
+        fs::create_dir_all(&dest).unwrap();
+        for kind in ["highlights.scm", "injections.scm", "locals.scm"] {
+            fs::write(dest.join(kind), "").unwrap();
         }
     }
 }

@@ -295,14 +295,30 @@ mod tests {
     }
 
     /// CI 全量门禁（grammar.yml 全源环境断言；partial 本地构建跳过）。
+    /// 期望数动态化（spec F §5）：gen-sources 产出即真相——registry 数 ==
+    /// grammars-manifest.json 条目数（不再硬编码 301，随 pin refresh 自然增长）。
+    /// manifest 经运行时读取（构建源头化后不入库）：缺失时报错指向 pnpm gen:sources，
+    /// 与 build.rs 生成物缺失报错文案同源。
     #[test]
-    fn full_registry_count_is_301() {
-        if generated_count() < 301 {
-            eprintln!("partial 构建（{}/301），跳过全量门禁", generated_count());
+    fn full_registry_count_matches_manifest() {
+        let manifest_text = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../grammars-manifest.json"),
+        )
+        .expect(
+            "grammars-manifest.json 缺失（构建源头化后不入库）：先跑 pnpm gen:sources（或 node tools/grammar-builder/gen-sources.mjs --refresh）",
+        );
+        let manifest: serde_json::Value =
+            serde_json::from_str(&manifest_text).expect("grammars-manifest.json 可解析");
+        let expected = manifest["grammars"]
+            .as_array()
+            .expect("grammars 数组")
+            .len();
+        if generated_count() < expected {
+            eprintln!("partial 构建（{}/{expected}），跳过全量门禁", generated_count());
             return;
         }
-        assert_eq!(supported_languages().len(), 301);
-        assert_eq!(generated_count(), 301);
+        assert_eq!(supported_languages().len(), expected);
+        assert_eq!(generated_count(), expected);
     }
 
     #[test]
