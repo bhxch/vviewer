@@ -196,6 +196,9 @@ export const messages = {
   'mounts.err.githubCors': 'GitHub direct mount failed: network unreachable (api.github.com always supports CORS)',
   'mounts.err.gitlabCors':
     'GitLab direct mount failed: instance CORS not configured or network unreachable (self-hosted instance requires the admin to allow this origin and the GET method)',
+  'mounts.err.githubDirTruncated': 'GitHub tree listing incomplete: directory-level truncated (listing cut off, cannot continue)',
+  'mounts.err.githubBfsLimit': 'GitHub tree listing incomplete: BFS directory requests exceeded 1000 (listing cut off, cannot continue)',
+  'mounts.err.gitlabTruncated': 'GitLab tree listing exceeds 20000 entries (listing cut off, cannot continue)',
 
   // —— git 测试连接回显（probeWith git 分派——spec I Task 2 评审 ① 前移收编）——
   'mounts.probe.okGit': 'Connected: {entries} files, ref {sha}, {ms} ms',

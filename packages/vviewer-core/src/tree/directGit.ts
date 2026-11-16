@@ -89,7 +89,9 @@ const GITLAB_MAX_ENTRIES = 20_000;
 /** GitHub truncated BFS 分层的目录请求上限（plan Review Focus 6 数值裁量落定）。 */
 const GITHUB_MAX_BFS_REQUESTS = 1000;
 
-// ---------- 错误特征化文案注入缝（9 setter——directS3.ts:74-166 模式逐条镜像：
+// ---------- 错误特征化文案注入缝（12 setter——directS3.ts:74-166 模式逐条镜像：
+// 9 缝=评审基线 + 3 缝=截断/超限文案常量升缝（评审 ⑥ minor，装配面 mountsSync
+// 12 行 t() 注入——apps/web 恒注入故直连错误面恒走目录 zh 值）：
 // 本包保持零 i18n 依赖（依赖方向 apps/web → core 不反转），apps/web 装配时
 //（mountsSync.ts）注入目录 getter——错误抛出时刻现取当下 locale。缺省英文供包内
 // 独立消费。可变态私有、经稳定访问函数导出，避免可变导出面。 ----------

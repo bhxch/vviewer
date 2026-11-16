@@ -34,6 +34,9 @@ import { messages as zhMounts } from './i18n/catalogs/zh-CN/mounts';
 import {
   githubDirectStoreId,
   gitlabDirectStoreId,
+  githubDirTruncatedText,
+  githubBfsLimitText,
+  gitlabTruncatedText,
   httpFailedText,
   davHttpFailedText
 } from '@bhxch/vviewer-core';
@@ -808,6 +811,12 @@ describe('git 表单与凭据库（spec I Task 3）', () => {
     const s3 = { ...emptyDraft(), label: 'x', endpoint: 'http://h', bucket: 'b', username: 'ak', secret: 'sk' };
     expect(mountFormIssues(s3)).toEqual({});
     expect(mountFormIssues({ ...s3, bucket: '' }).bucket).toBe('必填');
+  });
+
+  it('git 截断三缝经 mountsSync 注入链恒 zh 目录值（评审修复批回归锚——装配面零注入时 app 内退化为 en 缺省，本锚使该形态必红）', () => {
+    expect(githubDirTruncatedText()).toBe('GitHub 树清单不完整：tree API 目录级 truncated（清单截断，无法继续拉取）');
+    expect(githubBfsLimitText()).toBe('GitHub 树清单不完整：BFS 逐目录请求超过 1000 次上限（清单截断，无法继续拉取）');
+    expect(gitlabTruncatedText()).toBe('GitLab 树清单超过 20000 条目上限（清单截断，无法继续拉取）');
   });
 
   // ---- draftToDirectRecord git 两分支 ----

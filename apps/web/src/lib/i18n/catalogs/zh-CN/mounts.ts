@@ -200,6 +200,9 @@ export const messages = {
   'mounts.err.githubCors': 'GitHub 直连失败：网络不可达（api.github.com 恒支持 CORS）',
   'mounts.err.gitlabCors':
     'GitLab 直连失败：实例 CORS 未配置或网络不可达（自建实例需管理员放行本站来源与 GET 方法）',
+  'mounts.err.githubDirTruncated': 'GitHub 树清单不完整：tree API 目录级 truncated（清单截断，无法继续拉取）',
+  'mounts.err.githubBfsLimit': 'GitHub 树清单不完整：BFS 逐目录请求超过 1000 次上限（清单截断，无法继续拉取）',
+  'mounts.err.gitlabTruncated': 'GitLab 树清单超过 20000 条目上限（清单截断，无法继续拉取）',
 
   // —— git 测试连接回显（probeWith git 分派——spec I Task 2 评审 ① 前移收编；
   //   sha 回显 8 位、truncated 为 GitHub 大仓首响应采样注记 Errata ⑩）——

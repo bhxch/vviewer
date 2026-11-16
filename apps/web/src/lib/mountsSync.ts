@@ -37,6 +37,9 @@ import {
   setGitlabRateLimitText,
   setGithubCorsFailureText,
   setGitlabCorsFailureText,
+  setGithubDirTruncatedText,
+  setGithubBfsLimitText,
+  setGitlabTruncatedText,
   type DavDirectConfig,
   type GitlabDirectConfig,
   type GithubDirectConfig,
@@ -70,6 +73,11 @@ setGithubRateLimitText(() => t('mounts.err.githubRateLimit'));
 setGitlabRateLimitText(() => t('mounts.err.gitlabRateLimit'));
 setGithubCorsFailureText(() => t('mounts.err.githubCors'));
 setGitlabCorsFailureText(() => t('mounts.err.gitlabCors'));
+// git 截断/超限特征化（评审 ⑥ minor：常量升缝的装配面补齐——上一评审批遗漏，
+// zh 主 locale 由原中文硬编码退化为 en 缺省的回归在此收敛）
+setGithubDirTruncatedText(() => t('mounts.err.githubDirTruncated'));
+setGithubBfsLimitText(() => t('mounts.err.githubBfsLimit'));
+setGitlabTruncatedText(() => t('mounts.err.gitlabTruncated'));
 
 /**
  * 代理挂载记录（brief 接口 schema + 实施扩展，扩展面记录任务报告）：
