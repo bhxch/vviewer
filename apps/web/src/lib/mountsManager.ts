@@ -15,6 +15,8 @@ import {
   probeGitlabDirect,
   s3DirectStoreId,
   davDirectStoreId,
+  githubDirectStoreId,
+  gitlabDirectStoreId,
   type DavDirectConfig,
   type GitlabDirectConfig,
   type GithubDirectConfig,
@@ -25,7 +27,9 @@ import {
   directConfigOf,
   displayEndpoint,
   mountFingerprintOf,
+  resolveGitCredential,
   type DirectMountRecord,
+  type GitCredentialRecord,
   type MountManifestEntry,
   type MountRecord,
   type MountsManifest,
@@ -53,8 +57,9 @@ export function webdavCorsHint(): string {
  * 新增/编辑表单草稿（kind→字段集切换；mode 切直连/代理）。username/secret 为
  * 双 kind 通用字段名（S3 = access_key_id/secret_access_key，WebDAV = username/
  * password——POST body 的展开在 mountsSync.postBodyOf / core 工厂配置映射）。
- * backend 类型四联合（spec I Task 2 类型连带：DirectMountRecord.backend 扩四后
- * draftFromRecord git 回环赋值闭合——git 表单必填校验/字段组/落记录逻辑 Task 3 落）。
+ * backend 四联合（spec I）：git 两类表单的字段复用——gitlab host 复用 endpoint
+ * 字段、git token 复用 secret 字段（PAT 可空=凭据库匹配）；owner/repo/ref 为
+ * git 专属新字段（github：owner/repo；gitlab：repo=项目路径或数字 id 文本）。
  */
 export interface MountFormDraft {
   mode: 'direct' | 'proxy';
@@ -71,6 +76,12 @@ export interface MountFormDraft {
   pathStyle: boolean;
   /** proxy 模式的注册目标服务器（UI 以 loadLastServer().baseUrl 注入）。 */
   serverBase: string;
+  /** github = 仓库所有者。 */
+  owner: string;
+  /** github = 仓库名；gitlab = 项目（group/repo 或数字 ID 文本）。 */
+  repo: string;
+  /** git = 任意 ref 文本（branch/tag/commit）。 */
+  ref: string;
 }
 
 /** 新增表单初始草稿（path-style 缺省 true——spec path-style 语义）。 */
@@ -85,7 +96,10 @@ export function emptyDraft(serverBase = ''): MountFormDraft {
     username: '',
     secret: '',
     pathStyle: true,
-    serverBase
+    serverBase,
+    owner: '',
+    repo: '',
+    ref: ''
   };
 }
 
@@ -106,14 +120,36 @@ export function endpointIssue(endpoint: string): string | null {
 }
 
 /**
- * 表单必填校验：镜像 server `build_mount` per-kind 必填（S3：endpoint/bucket/
- * access_key_id/secret_access_key；WebDAV：endpoint/username/password；label
- * 两侧均必填——显示名入 storeId/指纹），另加 endpoint userinfo（L1）与 proxy
- * 模式的 serverBase 要求。错误消息含字段定位、不含凭据值（spec §6 纪律）。
+ * 表单必填校验（per-backend 分派；spec I Task 3 git 分派扩展）：
+ * - S3（镜像 server build_mount）：endpoint/bucket/access_key_id/secret_access_key；
+ * - WebDAV：endpoint/username/password；
+ * - github：label/owner/repo/ref 四必填（endpoint 为展示面派生不入表单、PAT 可空
+ *   ——留空按凭据库匹配）；
+ * - gitlab：label/endpoint(host)/repo(项目)/ref 四必填 + endpoint userinfo 拒绝
+ *   照走（host 不携带凭据）；
+ * - 共用：label 必填（显示名入 storeId/指纹）；proxy 模式 + git backend → mode
+ *   issue（git 无代理面——仅支持浏览器直连）。
+ * s3/webdav 分支逐字节不变（既有用例零改动=兼容锚）。错误消息含字段定位、不含
+ * 凭据值（spec §6 纪律）。
  */
 export function mountFormIssues(d: MountFormDraft): Partial<Record<keyof MountFormDraft, string>> {
   const issues: Partial<Record<keyof MountFormDraft, string>> = {};
   if (d.label.trim() === '') issues.label = t('mounts.form.required');
+  if (d.backend === 'github' || d.backend === 'gitlab') {
+    if (d.backend === 'github') {
+      if (d.owner.trim() === '') issues.owner = t('mounts.form.required');
+    } else {
+      if (d.endpoint.trim() === '') issues.endpoint = t('mounts.form.required');
+      else {
+        const ui = endpointIssue(d.endpoint.trim());
+        if (ui !== null) issues.endpoint = ui;
+      }
+    }
+    if (d.repo.trim() === '') issues.repo = t('mounts.form.required');
+    if (d.ref.trim() === '') issues.ref = t('mounts.form.required');
+    if (d.mode === 'proxy') issues.mode = t('mounts.form.gitProxyBlock');
+    return issues;
+  }
   if (d.endpoint.trim() === '') issues.endpoint = t('mounts.form.required');
   else {
     const ui = endpointIssue(d.endpoint.trim());
@@ -131,16 +167,75 @@ export function mountFormIssues(d: MountFormDraft): Partial<Record<keyof MountFo
 // ---------- 草稿 ↔ 记录 ----------
 
 /**
- * 草稿 → 直连记录：id = core 直连 storeId（s3DirectStoreId/davDirectStoreId——
- * 同配置天然去重，凭据轮换/改名不换 id）；trim 落盘（secret 原样——空格可能是
- * 凭据本体）；pathStyle 仅在 false 时写入（缺省 true）。createdAt 沿用既有记录
- * （编辑不改入库序）。
+ * 草稿 → 直连记录（spec I Task 3 git 两分支扩展）：id = core 直连 storeId（同配置
+ * 天然去重，凭据轮换/改名不换 id）；trim 落盘（secret 原样——空格可能是凭据本体）；
+ * pathStyle 仅在 false 时写入（缺省 true）。createdAt 沿用既有记录（编辑不改入库序）。
+ * git 分支的凭据解析（spec §7-2）：token 填写 → 存 secret 不建库条目；token 留空 →
+ * resolveGitCredential(host, owner) 命中存 credentialKey、未命中 = 匿名（两字段都
+ * 缺省）。
+ * - github：id = githubDirectStoreId(owner/repo/ref/prefix)（hash 不含凭据）；endpoint
+ *   为展示面派生 `https://github.com/{owner}/{repo}`（Errata ⑦——不参与 hash）；
+ *   host 恒 'github.com'（平台域名固定——凭据库匹配键）。
+ * - gitlab：host 原文参与 storeId 且记录不预归一（Errata ⑨——尾斜杠/无 scheme 原文
+ *   进 endpoint/host 两字段，id 闭环由 core gitlabDirectStoreId hash 输入内归一单源
+ *   保证；s3/dav 的 :136 尾斜杠剥除先例在此不适用——剥尾斜杠属 core 归一职责）；
+ *   endpoint = host 原值（Errata ⑦）；credentialKey 匹配用 namespace = 项目路径剥
+ *   末段（数字 id 项目 → '' 仅通配可命中）。
  */
 export function draftToDirectRecord(d: MountFormDraft, existing?: DirectMountRecord): DirectMountRecord {
+  const label = d.label.trim();
+  if (d.backend === 'github') {
+    const owner = d.owner.trim();
+    const repo = d.repo.trim();
+    const ref = d.ref.trim();
+    const prefix = d.prefix.trim();
+    const id = githubDirectStoreId({ owner, repo, ref, prefix });
+    const token = d.secret !== '' ? d.secret : undefined;
+    const credKey = token === undefined ? resolveGitCredential('github.com', owner) : undefined;
+    return {
+      id,
+      kind: 'direct',
+      backend: 'github',
+      label,
+      endpoint: `https://github.com/${owner}/${repo}`,
+      prefix,
+      owner,
+      repo,
+      ref,
+      ...(token !== undefined ? { secret: token } : {}),
+      ...(credKey !== undefined ? { credentialKey: credKey } : {}),
+      createdAt: existing?.createdAt ?? Date.now()
+    };
+  }
+  if (d.backend === 'gitlab') {
+    const host = d.endpoint.trim();
+    const project = d.repo.trim();
+    const ref = d.ref.trim();
+    const prefix = d.prefix.trim();
+    const namespace = project.includes('/') ? project.slice(0, project.lastIndexOf('/')) : '';
+    const id = gitlabDirectStoreId({ host, project, ref, prefix });
+    const token = d.secret !== '' ? d.secret : undefined;
+    const credKey = token === undefined ? resolveGitCredential(host, namespace) : undefined;
+    return {
+      id,
+      kind: 'direct',
+      backend: 'gitlab',
+      label,
+      endpoint: host,
+      prefix,
+      host,
+      owner: namespace,
+      repo: project,
+      ref,
+      ...(token !== undefined ? { secret: token } : {}),
+      ...(credKey !== undefined ? { credentialKey: credKey } : {}),
+      createdAt: existing?.createdAt ?? Date.now()
+    };
+  }
+  // s3/webdav 既有路径（逐字节不变）
   // endpoint 尾斜杠归一（core 工厂 bucketBase 同款；storeId hash 入参是 trim 后
   // 原串——归一后存储使「同配置 → 同 id」在带尾斜杠输入下仍成立）
   const endpoint = d.endpoint.trim().replace(/\/+$/, '');
-  const label = d.label.trim();
   const prefix = d.prefix.trim();
   const bucket = d.bucket.trim();
   const username = d.username.trim();
@@ -198,8 +293,8 @@ export function draftToProxyRecord(d: MountFormDraft, existing?: ProxyMountRecor
 
 /** 记录 → 表单草稿（编辑预填；凭据回填明文——管理页即凭据管理面）。 */
 export function draftFromRecord(rec: MountRecord): MountFormDraft {
-  // gitcred 不是挂载表单对象（组④凭据区块专管——Task 3 落地）：MountRecord 联合
-  // 扩列（Task 2）的类型连带防御早退——凭据条目不进挂载表单（编辑面=重提同键覆盖）
+  // gitcred 不是挂载表单对象（组④凭据区块专管）：MountRecord 联合扩列（Task 2）
+  // 的类型连带防御早退——凭据条目不进挂载表单（编辑面=重提同键覆盖）
   if (rec.kind === 'gitcred') return emptyDraft();
   const common = {
     label: rec.label,
@@ -209,12 +304,31 @@ export function draftFromRecord(rec: MountRecord): MountFormDraft {
     secret: rec.secret ?? ''
   };
   if (rec.kind === 'direct') {
+    // git 回环预填（spec I Task 3）：git 字段回填；credentialKey 引用形态 secret
+    // 不回填（token 留空=库匹配语义维持——重开编辑即再次匹配当下库条目，轮换
+    // 生效语义）；endpoint（github 展示面派生 / gitlab host 原文）原样回填
+    if (rec.backend === 'github' || rec.backend === 'gitlab') {
+      return {
+        mode: 'direct',
+        backend: rec.backend,
+        ...common,
+        bucket: '',
+        pathStyle: true,
+        owner: rec.owner ?? '',
+        repo: rec.repo ?? '',
+        ref: rec.ref ?? '',
+        serverBase: ''
+      };
+    }
     return {
       mode: 'direct',
       backend: rec.backend,
       ...common,
       bucket: rec.bucket ?? '',
       pathStyle: rec.pathStyle !== false,
+      owner: '',
+      repo: '',
+      ref: '',
       serverBase: ''
     };
   }
@@ -224,6 +338,9 @@ export function draftFromRecord(rec: MountRecord): MountFormDraft {
     ...common,
     bucket: rec.bucket ?? '',
     pathStyle: true,
+    owner: '',
+    repo: '',
+    ref: '',
     serverBase: rec.serverBase
   };
 }
@@ -305,7 +422,7 @@ export interface MountRow {
   /** 挂载记录（gitcred 已在装配入口过滤——恒 proxy/direct 两 kind，spec I Review Focus 2）。 */
   record: ProxyMountRecord | DirectMountRecord;
   modeLabel: string;
-  backendLabel: 'S3' | 'WebDAV';
+  backendLabel: 'S3' | 'WebDAV' | 'GitHub' | 'GitLab';
   /** 凭据已存指示（spec §5 组②）。 */
   hasCredential: boolean;
   /** 展示面 endpoint（本端保存的记录可能含 userinfo 形态，剥除后展示）。 */
@@ -341,13 +458,24 @@ export function assembleMountRows(
   return records
     .filter((record): record is Exclude<MountRecord, { kind: 'gitcred' }> => record.kind !== 'gitcred')
     .map((record) => {
-    const backendLabel = record.backend === 's3' ? ('S3' as const) : ('WebDAV' as const);
-    const base = {
-      record,
-      backendLabel,
-      hasCredential: record.secret !== undefined && record.secret !== '',
-      displayEndpointText: displayEndpoint(record.endpoint)
-    };
+      const backendLabel =
+        record.backend === 's3'
+          ? ('S3' as const)
+          : record.backend === 'github'
+            ? ('GitHub' as const)
+            : record.backend === 'gitlab'
+              ? ('GitLab' as const)
+              : ('WebDAV' as const);
+      const base = {
+        record,
+        backendLabel,
+        // hasCredential：secret 非空（proxy/s3/dav/git 显式 PAT 通用）或 git direct
+        // 的 credentialKey 在场（库引用形态——spec I Task 3）
+        hasCredential:
+          (record.secret !== undefined && record.secret !== '') ||
+          (record.kind === 'direct' && record.credentialKey !== undefined),
+        displayEndpointText: displayEndpoint(record.endpoint)
+      };
     if (record.kind === 'direct') {
       return { ...base, modeLabel: t('mounts.mode.direct'), state: { code: 'direct' } as const };
     }
@@ -361,6 +489,38 @@ export function assembleMountRows(
           : { code: 'unregistered' };
     return { ...base, modeLabel: t('mounts.mode.proxy'), state };
   });
+}
+
+// ---------- 组④装配：Git 凭据区块（spec I Task 3） ----------
+
+/** Git 凭据行（组④视图模型）。 */
+export interface GitCredentialRow {
+  /** 记录 id（`gitcred:<host>:<owner>`）——each key 稳定标识符 + 删除/重提同键锚。 */
+  key: string;
+  host: string;
+  owner: string;
+  /** owner '*' = 通配条目（命中该 host 全部 owner）。 */
+  wildcard: boolean;
+  note?: string;
+}
+
+/**
+ * 组④装配：gitcred 记录 → 凭据行（createdAt 升序 = 入库序，listMounts 漏斗排序
+ * 的显式锚定）；token 不入行形态（明文不显示——凭据管理经重提同键覆盖更新）。
+ * 编辑面=重提同键覆盖（评审 ③）：组④新增表单以同 host+owner 再保存一次即更新
+ *（saveMount `put(rec, rec.id)` 键覆盖语义），无独立编辑钮。
+ */
+export function assembleGitCredentialRows(records: readonly MountRecord[]): GitCredentialRow[] {
+  return records
+    .filter((r): r is GitCredentialRecord => r.kind === 'gitcred')
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .map((r) => ({
+      key: r.id,
+      host: r.host,
+      owner: r.owner,
+      wildcard: r.owner === '*',
+      ...(r.note !== undefined && r.note !== '' ? { note: r.note } : {})
+    }));
 }
 
 /** 组③行（本机授权来源视图模型）。 */

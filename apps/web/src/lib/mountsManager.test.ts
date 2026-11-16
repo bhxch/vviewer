@@ -4,9 +4,11 @@
 // 三组数据装配（服务端根与挂载/前端配置挂载/本机授权来源）、测试连接探测（S3
 // ListObjectsV2 / WebDAV PROPFIND 条目数+延迟回显；CORS 特征化与 WebCrypto 缺失
 // 错误回显——Task 1 疑虑①）。组件骨架/接线为源码契约断言（mountsManagerUi.test.ts）。
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { IDBFactory } from 'fake-indexeddb';
 import { webcrypto } from 'node:crypto';
 import {
+  assembleGitCredentialRows,
   assembleLocalRows,
   assembleMountRows,
   assembleServerMountRows,
@@ -29,8 +31,20 @@ import {
 import { messages as zhMounts } from './i18n/catalogs/zh-CN/mounts';
 // 注入缝访问函数（评审 I-1 测试锁）：本文件 import 链经 mountsSync 顶层注入目录
 // getter，core 访问函数在测试进程内恒返回 zh 目录值——锁直连错误文案的 zh 渲染形态
-import { httpFailedText, davHttpFailedText } from '@bhxch/vviewer-core';
-import type { DirectMountRecord, MountsManifest, ProxyMountRecord } from './mountsSync';
+import {
+  githubDirectStoreId,
+  gitlabDirectStoreId,
+  httpFailedText,
+  davHttpFailedText
+} from '@bhxch/vviewer-core';
+import {
+  resetMountRecordCacheForTests,
+  saveMount,
+  type DirectMountRecord,
+  type GitCredentialRecord,
+  type MountsManifest,
+  type ProxyMountRecord
+} from './mountsSync';
 import type { WorkspaceSource } from './workspaceStore';
 
 // ---------- 桩 ----------
@@ -174,7 +188,10 @@ describe('draftToDirectRecord/draftToProxyRecord/draftFromRecord', () => {
     username: ' AK ',
     secret: 'SK',
     pathStyle: false,
-    serverBase: ''
+    serverBase: '',
+    owner: '',
+    repo: '',
+    ref: ''
   };
 
   it('直连记录：id = s3DirectStoreId（同配置去重、凭据轮换不换 id）；trim 落盘；createdAt 沿用既有', () => {
@@ -695,3 +712,306 @@ describe('probeWith git 分派（spec I：probeRecord github/gitlab 记录 → p
     expect(formatProbeResult({ ok: false, error: 'boom' })).toBe('连接失败：boom');
   });
 });
+
+// ---------- git 表单与凭据库装配（spec I Task 3：git 两类表单 + 组④ Git 凭据区块） ----------
+
+describe('git 表单与凭据库（spec I Task 3）', () => {
+  /** github 表单草稿（MountFormDraft git 字段 Task 3 落——RED 期 as 断言构造）。 */
+  function ghDraftOf(overrides: Partial<MountFormDraft> = {}): MountFormDraft {
+    return {
+      ...emptyDraft(),
+      backend: 'github',
+      label: '示例仓',
+      owner: 'octo',
+      repo: 'repo',
+      ref: 'main',
+      prefix: '',
+      secret: '',
+      ...overrides
+    } as MountFormDraft;
+  }
+
+  function glDraftOf(overrides: Partial<MountFormDraft> = {}): MountFormDraft {
+    return {
+      ...emptyDraft(),
+      backend: 'gitlab',
+      label: '示例项目',
+      endpoint: 'https://gitlab.example.com',
+      repo: 'grp/rp',
+      ref: 'main',
+      prefix: '',
+      secret: '',
+      ...overrides
+    } as MountFormDraft;
+  }
+
+  function credOf(overrides: Partial<GitCredentialRecord> = {}): GitCredentialRecord {
+    return {
+      id: 'gitcred:github.com:octo',
+      kind: 'gitcred',
+      host: 'github.com',
+      owner: 'octo',
+      token: 'T1',
+      createdAt: 1,
+      ...overrides
+    };
+  }
+
+  beforeEach(() => {
+    // credentialKey 解析走 recordCache 镜像——saveMount(gitcred) 漏斗建库（mountsSync.test 先例）
+    vi.stubGlobal('indexedDB', new IDBFactory());
+    resetMountRecordCacheForTests();
+  });
+
+  afterEach(() => {
+    resetMountRecordCacheForTests();
+    vi.unstubAllGlobals();
+  });
+
+  // ---- 必填矩阵（per-backend 分派）----
+
+  it('github 必填矩阵：label/owner/repo/ref 四必填；username/secret 不校验（PAT 可空——凭据库匹配）；全填零错误', () => {
+    expect(mountFormIssues({ ...ghDraftOf(), owner: '', repo: '', ref: '' })).toEqual({
+      owner: '必填',
+      repo: '必填',
+      ref: '必填'
+    });
+    expect(mountFormIssues({ ...ghDraftOf(), label: '' })).toMatchObject({ label: '必填' });
+    const full = mountFormIssues(ghDraftOf());
+    expect(full.username).toBeUndefined();
+    expect(full.secret).toBeUndefined();
+    expect(full).toEqual({});
+  });
+
+  it('gitlab 必填矩阵：label/endpoint(host)/repo(项目)/ref 四必填 + endpoint userinfo 拒绝照走；全填零错误', () => {
+    expect(mountFormIssues({ ...glDraftOf(), endpoint: '', repo: '', ref: '' })).toEqual({
+      endpoint: '必填',
+      repo: '必填',
+      ref: '必填'
+    });
+    expect(mountFormIssues({ ...glDraftOf(), endpoint: 'https://u:p@gitlab.example.com' }).endpoint).toBe(
+      '请使用不含凭据的 endpoint，凭据在下方字段填写'
+    );
+    expect(mountFormIssues(glDraftOf())).toEqual({});
+  });
+
+  it('proxy 模式 + git backend → mode issue（git 无代理面——仅支持浏览器直连）', () => {
+    expect(mountFormIssues({ ...ghDraftOf(), mode: 'proxy', serverBase: 'http://srv:8321' }).mode).toBe(
+      'GitHub/GitLab 挂载仅支持浏览器直连'
+    );
+    expect(mountFormIssues({ ...glDraftOf(), mode: 'proxy', serverBase: 'http://srv:8321' }).mode).toBe(
+      'GitHub/GitLab 挂载仅支持浏览器直连'
+    );
+  });
+
+  it('s3/webdav 分支逐字节不变（兼容锚——既有用例零改动通过的镜像断言）', () => {
+    const s3 = { ...emptyDraft(), label: 'x', endpoint: 'http://h', bucket: 'b', username: 'ak', secret: 'sk' };
+    expect(mountFormIssues(s3)).toEqual({});
+    expect(mountFormIssues({ ...s3, bucket: '' }).bucket).toBe('必填');
+  });
+
+  // ---- draftToDirectRecord git 两分支 ----
+
+  it('github 显式 token：id=githubDirectStoreId 字面闭环 + endpoint 展示面派生（Errata ⑦）+ secret 直存不建库条目', async () => {
+    const d = ghDraftOf({ prefix: 'docs', secret: 'T1' });
+    const rec = draftToDirectRecord(d);
+    expect(rec.id).toBe(githubDirectStoreId({ owner: 'octo', repo: 'repo', ref: 'main', prefix: 'docs' }));
+    expect(rec).toMatchObject({
+      kind: 'direct',
+      backend: 'github',
+      label: '示例仓',
+      endpoint: 'https://github.com/octo/repo',
+      prefix: 'docs',
+      secret: 'T1'
+    });
+    expect(rec.credentialKey).toBeUndefined();
+    expect(rec.username).toBeUndefined();
+    // 编辑不改入库序（createdAt 沿用既有记录）
+    expect(draftToDirectRecord(d, { ...rec, createdAt: 42 }).createdAt).toBe(42);
+  });
+
+  it('credentialKey 精确命中存储：token 留空 + 库条目精确 owner → rec.credentialKey=键、无 secret；显式 token 不写 key', async () => {
+    await saveMount(credOf());
+    const rec = draftToDirectRecord(ghDraftOf()); // token 留空
+    expect(rec.credentialKey).toBe('github.com:octo');
+    expect(rec.secret).toBeUndefined();
+    // 显式 token 优先——不建库引用
+    const rec2 = draftToDirectRecord(ghDraftOf({ secret: 'TX' }));
+    expect(rec2.credentialKey).toBeUndefined();
+    expect(rec2.secret).toBe('TX');
+  });
+
+  it('credentialKey 通配命中：库条目 owner=* → 精确未命中时回落通配键；库空 = 匿名双缺省（credentialKey/secret 都不入记录）', async () => {
+    await saveMount(credOf({ id: 'gitcred:github.com:*', owner: '*', token: 'TW' }));
+    const rec = draftToDirectRecord(ghDraftOf({ owner: 'other', repo: 'repo2' })); // 精确未命中
+    expect(rec.credentialKey).toBe('github.com:*');
+    expect(rec.secret).toBeUndefined();
+    // 库空（条目已删）：匿名双缺省
+    resetMountRecordCacheForTests();
+    const recClean = draftToDirectRecord(ghDraftOf({ owner: 'other', repo: 'repo2' }));
+    expect(recClean.credentialKey).toBeUndefined();
+    expect(recClean.secret).toBeUndefined();
+  });
+
+  it('gitlab：host 原文参与 storeId 且记录不预归一（Errata ⑨——尾斜杠/无 scheme 原文进 endpoint/host 两字段，id 闭环由 core 归一单源保证）+ namespace 剥末段命中凭据库', async () => {
+    const rawHost = 'gitlab.example.com/'; // 无 scheme + 尾斜杠原文
+    const d = glDraftOf({ endpoint: rawHost, secret: 'TG' });
+    const rec = draftToDirectRecord(d);
+    expect(rec.id).toBe(gitlabDirectStoreId({ host: rawHost, project: 'grp/rp', ref: 'main', prefix: '' }));
+    expect(rec.endpoint).toBe(rawHost); // 原文逐字（不剥尾斜杠、不补 scheme——Errata ⑦ host 原值）
+    expect(rec.host).toBe(rawHost);
+    expect(rec.repo).toBe('grp/rp');
+    expect(rec.ref).toBe('main');
+    expect(rec.secret).toBe('TG');
+    // namespace 剥末段：grp/rp → grp（凭据库精确命中存键——host 形态一致时）
+    await saveMount(
+      credOf({ id: 'gitcred:https://gitlab.example.com:grp', host: 'https://gitlab.example.com', owner: 'grp' })
+    );
+    const recKey = draftToDirectRecord(glDraftOf({ endpoint: 'https://gitlab.example.com', secret: '' }));
+    expect(recKey.credentialKey).toBe('https://gitlab.example.com:grp');
+    expect(recKey.host).toBe('https://gitlab.example.com'); // 原文（本次输入无尾斜杠）
+    // host 形态不一致（条目无 scheme / 表单带 scheme）→ miss → 匿名双缺省
+    //（Task 2 口径：匹配面不预归一——Errata ⑨ 归一单源钉 storeId/工厂 hash 输入）
+    resetMountRecordCacheForTests();
+    await saveMount(
+      credOf({ id: 'gitcred:gitlab.example.com:grp', host: 'gitlab.example.com', owner: 'grp' })
+    );
+    const recMiss = draftToDirectRecord(glDraftOf({ endpoint: 'https://gitlab.example.com', secret: '' }));
+    expect(recMiss.credentialKey).toBeUndefined();
+    expect(recMiss.secret).toBeUndefined();
+  });
+
+  // ---- draftFromRecord git 回环 ----
+
+  it('draftFromRecord github/gitlab 回环预填：git 字段回填 + secret 明文回填（管理页即凭据管理面）+ s3/dav 回环零变化（兼容锚）', () => {
+    const ghRec: DirectMountRecord = {
+      id: 'githubdirect:abcd1234',
+      kind: 'direct',
+      backend: 'github',
+      label: '示例仓',
+      endpoint: 'https://github.com/octo/repo',
+      prefix: 'docs',
+      owner: 'octo',
+      repo: 'repo',
+      ref: 'main',
+      secret: 'T1',
+      createdAt: 1
+    };
+    expect(draftFromRecord(ghRec)).toMatchObject({
+      mode: 'direct',
+      backend: 'github',
+      label: '示例仓',
+      endpoint: 'https://github.com/octo/repo',
+      prefix: 'docs',
+      owner: 'octo',
+      repo: 'repo',
+      ref: 'main',
+      secret: 'T1'
+    });
+    const glRec: DirectMountRecord = {
+      id: 'gitlabdirect:abcd1234',
+      kind: 'direct',
+      backend: 'gitlab',
+      label: '示例项目',
+      endpoint: 'gitlab.example.com/',
+      prefix: '',
+      host: 'gitlab.example.com/',
+      repo: 'grp/rp',
+      ref: 'main',
+      credentialKey: 'gitlab.example.com:grp',
+      createdAt: 1
+    };
+    expect(draftFromRecord(glRec)).toMatchObject({
+      mode: 'direct',
+      backend: 'gitlab',
+      endpoint: 'gitlab.example.com/', // host 原文回环（不预归一）
+      repo: 'grp/rp',
+      ref: 'main',
+      secret: '' // credentialKey 引用形态：secret 不回填（token 留空=库匹配语义维持）
+    });
+    const s3Rec: DirectMountRecord = {
+      id: 's3direct:abcd1234',
+      kind: 'direct',
+      backend: 's3',
+      label: '桶',
+      endpoint: 'http://127.0.0.1:9000',
+      bucket: 'b1',
+      prefix: '',
+      username: 'ak',
+      secret: 'sk',
+      pathStyle: true,
+      createdAt: 1
+    };
+    expect(draftFromRecord(s3Rec)).toMatchObject({ backend: 's3', bucket: 'b1', username: 'ak', secret: 'sk' });
+  });
+
+  // ---- assembleMountRows（gitcred 过滤/徽标/hasCredential git 形态）----
+
+  it('assembleMountRows：gitcred 过滤（Review Focus 2）+ GitHub/GitLab 徽标 + hasCredential git 两形态（secret 或 credentialKey 在场）', () => {
+    const ghRec: DirectMountRecord = {
+      id: 'githubdirect:abcd1234',
+      kind: 'direct',
+      backend: 'github',
+      label: '示例仓',
+      endpoint: 'https://github.com/octo/repo',
+      prefix: '',
+      owner: 'octo',
+      repo: 'repo',
+      ref: 'main',
+      createdAt: 1
+    };
+    const glRec: DirectMountRecord = {
+      id: 'gitlabdirect:abcd1234',
+      kind: 'direct',
+      backend: 'gitlab',
+      label: '示例项目',
+      endpoint: 'gitlab.example.com',
+      prefix: '',
+      host: 'gitlab.example.com',
+      repo: 'grp/rp',
+      ref: 'main',
+      credentialKey: 'gitlab.example.com:grp',
+      createdAt: 2
+    };
+    const rows = assembleMountRows([ghRec, glRec, credOf()], null);
+    expect(rows).toHaveLength(2); // gitcred 过滤
+    expect(rows[0]).toMatchObject({ backendLabel: 'GitHub', hasCredential: false });
+    expect(rows[0]!.record.kind).toBe('direct');
+    expect(rows[1]).toMatchObject({ backendLabel: 'GitLab', hasCredential: true }); // credentialKey 在场=有凭据
+    expect(assembleMountRows([{ ...ghRec, secret: 'TX' }], null)[0]).toMatchObject({ hasCredential: true }); // secret 形态
+  });
+
+  // ---- assembleGitCredentialRows（组④装配）----
+
+  it('assembleGitCredentialRows：行形态（key=记录 id/host/owner/wildcard/note）+ createdAt 升序 + 空库空行；重提同键覆盖=更新（saveMount put 语义漏斗）', async () => {
+    expect(assembleGitCredentialRows([])).toEqual([]);
+    await saveMount(credOf({ note: 'first' }));
+    await saveMount(
+      credOf({ id: 'gitcred:github.com:*', host: 'github.com', owner: '*', createdAt: 0, note: 'wild' })
+    );
+    await saveMount(
+      credOf({ id: 'gitcred:gitlab.example.com:grp', host: 'gitlab.example.com', owner: 'grp', createdAt: 2 })
+    );
+    const rows = assembleGitCredentialRows(await listMountsForRows());
+    expect(rows.map((r) => r.key)).toEqual([
+      'gitcred:github.com:*',
+      'gitcred:github.com:octo',
+      'gitcred:gitlab.example.com:grp'
+    ]); // createdAt 升序（0/1/2）
+    expect(rows[0]).toMatchObject({ host: 'github.com', owner: '*', wildcard: true, note: 'wild' });
+    expect(rows[1]).toMatchObject({ host: 'github.com', owner: 'octo', wildcard: false, note: 'first' });
+    expect(rows[2]).toMatchObject({ host: 'gitlab.example.com', owner: 'grp', wildcard: false });
+    expect(rows[2]!.note).toBeUndefined();
+    // 重提同键覆盖=更新（saveMount put(rec, rec.id) 键覆盖——note 刷新可见，行数不增）
+    await saveMount(credOf({ note: 'rotated' }));
+    const after = assembleGitCredentialRows(await listMountsForRows());
+    expect(after).toHaveLength(3);
+    expect(after.find((r) => r.key === 'gitcred:github.com:octo')?.note).toBe('rotated');
+  });
+});
+
+/** 组④装配的输入=全量混存记录（listMounts）——测试 helper 免类型导入噪声。 */
+async function listMountsForRows(): Promise<import('./mountsSync').MountRecord[]> {
+  const { listMounts } = await import('./mountsSync');
+  return listMounts();
+}

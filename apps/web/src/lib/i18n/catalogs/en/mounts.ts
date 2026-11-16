@@ -199,5 +199,28 @@ export const messages = {
 
   // —— git 测试连接回显（probeWith git 分派——spec I Task 2 评审 ① 前移收编）——
   'mounts.probe.okGit': 'Connected: {entries} files, ref {sha}, {ms} ms',
-  'mounts.probe.truncated': '(listing truncated; partial count above)'
+  'mounts.probe.truncated': '(listing truncated; partial count above)',
+
+  // —— git 表单族（spec I Task 3：git 两类表单；en 对译，无占位符）——
+  'mounts.form.owner': 'Repository owner',
+  'mounts.form.repo': 'Repository',
+  'mounts.form.repoProject': 'Project (group/repo or numeric ID)',
+  'mounts.form.ref': 'ref (branch/tag/commit)',
+  'mounts.form.gitToken': 'Access token (PAT, optional)',
+  'mounts.form.gitTokenHint':
+    'Leave empty to match the credential store by owner (exact → wildcard → anonymous); a filled-in token is stored with this mount. Anonymous GitHub access is rate-limited to 60 requests/hour, and Test connection also consumes quota.',
+  'mounts.form.refHint':
+    'Branch-type refs are re-resolved to the latest commit on every session open/restore; this is expected behavior.',
+  'mounts.form.gitProxyBlock': 'GitHub/GitLab mounts only support browser-direct connections',
+
+  // —— git 凭据区块族（组④「Git 凭据」——编辑面=重提同键覆盖）——
+  'mounts.cred.group': 'Git credentials',
+  'mounts.cred.add': '＋ Add credential',
+  'mounts.cred.empty': 'No Git credentials yet.',
+  'mounts.cred.host': 'Host (e.g. github.com)',
+  'mounts.cred.owner': 'owner/namespace (* matches all)',
+  'mounts.cred.token': 'Access token (PAT)',
+  'mounts.cred.note': 'Note (optional)',
+  'mounts.cred.wildcard': 'wildcard',
+  'mounts.cred.save': 'Save credential'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;

@@ -38,17 +38,20 @@ describe('MountsManager 骨架（全屏 overlay，SettingsCenter 同形态）', 
     expect(src).toMatch(/onRootKeydown[\s\S]{0,400}formOpen/);
   });
 
-  it('三组 sections：服务端根与挂载 / 前端配置挂载 / 本机授权来源（装配纯函数接线）', () => {
+  it('四组 sections：服务端根与挂载 / 前端配置挂载 / 本机授权来源 / Git 凭据（装配纯函数接线；spec I Task 3 组④纯增量）', () => {
     // i18n Task 8：组标题迁目录——键形态 + zh 值逐字节双锁
     expect(src).toContain("t('mounts.group.server')");
     expect(src).toContain("t('mounts.group.configured')");
     expect(src).toContain("t('mounts.group.local')");
+    expect(src).toContain("t('mounts.cred.group')");
     expect(zhMounts['mounts.group.server']).toBe('服务端根与挂载');
     expect(zhMounts['mounts.group.configured']).toBe('前端配置挂载');
     expect(zhMounts['mounts.group.local']).toBe('本机授权来源');
+    expect(zhMounts['mounts.cred.group']).toBe('Git 凭据');
     expect(src).toMatch(/assembleServerMountRows/);
     expect(src).toMatch(/assembleMountRows/);
     expect(src).toMatch(/assembleLocalRows/);
+    expect(src).toMatch(/assembleGitCredentialRows/);
   });
 
   it('凭据警示双处固定（spec §6：新增表单 + 列表详情；credentialWarning() 单一出处渲染两次）', () => {
@@ -167,5 +170,73 @@ describe('AppShell/标签栏动作簇接线（Ctrl+Alt+M + 📁 双入口 + over
     expect(zhTabs['tabs.menu.mounts']).toBe('目录管理');
     expect(zhTabs['tabs.menu.mountsTitle']).toMatch(/Ctrl\+Alt\+M/);
     expect(shell).toMatch(/onmounts=\{\(\) => toggleMountsManager\(\)\}/);
+  });
+});
+
+describe('组④ Git 凭据区块 + git 表单扩支（spec I Task 3）', () => {
+  const src = readSrc('src/lib/MountsManager.svelte');
+
+  it('组④ section 在册（组③之后 body 内新增 section——既有全屏 overlay 内 section，非新浮层/菜单/确认通道）+ 装配/保存/删除接线', () => {
+    expect(src).toContain("aria-label={t('mounts.cred.group')}");
+    expect(src).toMatch(/credRows = \$derived\(assembleGitCredentialRows\(records\)\)/);
+    expect(src).toMatch(/async function submitCredForm/);
+    expect(src).toMatch(/async function removeCredential/);
+    // each key 稳定标识符（row.key = 记录 id）
+    expect(src).toMatch(/\{#each credRows as row \(row\.key\)\}/);
+  });
+
+  it('重提同键覆盖=编辑（评审 ③）：id=gitcred:<host>:<owner> 构造 + saveMount 漏斗（recordCache 镜像即时生效——轮换即改库条目）+ 无独立编辑钮', () => {
+    expect(src).toMatch(/id: `gitcred:\$\{host\}:\$\{owner\}`/);
+    expect(src).toMatch(/saveMount\(\{\s*id: `gitcred:/);
+    // 同键重提沿用既有 createdAt（put 键覆盖=更新语义）
+    expect(src).toMatch(/kind: 'gitcred',[\s\S]*?createdAt: existing\?\.createdAt \?\? Date\.now\(\)/);
+    // 行形态无编辑钮（只有删除）——通配徽标 data-kind 稳定标识符
+    expect(src).toMatch(/data-kind="wildcard"/);
+    expect(zhMounts['mounts.cred.wildcard']).toBe('通配');
+  });
+
+  it('backend select 四 option + git 时 mode select disabled 强制 direct（git 无代理面——切 backend 联动强制 direct）', () => {
+    expect(src).toContain('<option value="github">GitHub</option>');
+    expect(src).toContain('<option value="gitlab">GitLab</option>');
+    expect(src).toMatch(/disabled=\{last === null \|\| isGitBackend\}/);
+    expect(src).toMatch(/draft\.mode = 'direct'/);
+  });
+
+  it('git 条件字段 id 契约（Task 4 fillGithubForm/fillGitlabForm 装置镜像面）：#vv-mm-owner/#vv-mm-repo/#vv-mm-ref + gitlab endpoint 字段复用（placeholder gitlab 形态）+ owner 输入仅 github', () => {
+    expect(src).toContain('id="vv-mm-owner"');
+    expect(src).toContain('id="vv-mm-repo"');
+    expect(src).toContain('id="vv-mm-ref"');
+    expect(src).toContain('id="vv-mm-cred-host"');
+    expect(src).toContain('id="vv-mm-cred-owner"');
+    expect(src).toContain('id="vv-mm-cred-token"');
+    expect(src).toContain('id="vv-mm-cred-note"');
+    expect(src).toMatch(
+      /placeholder=\{draft\.backend === 'gitlab' \? 'https:\/\/gitlab\.example\.com' : 'https:\/\/s3\.example\.com'\}/
+    );
+    // owner 输入仅 github（gitlab owner 由项目路径剥末段派生——表单不显示）
+    expect(src).toMatch(/\{#if draft\.backend === 'github'\}[\s\S]*?id="vv-mm-owner"/);
+    // repo label 双形态（github=仓库 / gitlab=项目）
+    expect(src).toMatch(/draft\.backend === 'gitlab' \? t\('mounts\.form\.repoProject'\) : t\('mounts\.form\.repo'\)/);
+  });
+
+  it('git 表单/凭据文案目录双锁（zh 定稿=计划 Task 3 Interfaces；hint 两语义 §7-3）', () => {
+    expect(zhMounts['mounts.form.owner']).toBe('仓库所有者（owner）');
+    expect(zhMounts['mounts.form.repo']).toBe('仓库（repo）');
+    expect(zhMounts['mounts.form.repoProject']).toBe('项目（group/repo 或数字 ID）');
+    expect(zhMounts['mounts.form.ref']).toBe('ref（分支/tag/commit）');
+    expect(zhMounts['mounts.form.gitToken']).toBe('访问令牌（PAT，可空）');
+    expect(zhMounts['mounts.form.gitProxyBlock']).toBe('GitHub/GitLab 挂载仅支持浏览器直连');
+    expect(zhMounts['mounts.form.gitTokenHint']).toContain('60 次/小时');
+    expect(zhMounts['mounts.form.gitTokenHint']).toContain('凭据库');
+    expect(zhMounts['mounts.form.refHint']).toContain('重新解析指向最新 commit');
+    expect(zhMounts['mounts.cred.add']).toBe('＋ 添加凭据');
+    expect(zhMounts['mounts.cred.empty']).toBe('暂无 Git 凭据。');
+    expect(zhMounts['mounts.cred.save']).toBe('保存凭据');
+    expect(zhMounts['mounts.cred.host']).toContain('github.com');
+  });
+
+  it('Esc 逐层退出扩 credFormOpen（凭据表单在场先关——表单逐层退出既有语义扩列）', () => {
+    expect(src).toMatch(/if \(credFormOpen\) \{\s*closeCredForm\(\);\s*return;/);
+    expect(src).toMatch(/export function requestClose\(\): void \{[\s\S]{0,200}if \(credFormOpen\)/);
   });
 });

@@ -26,10 +26,12 @@
     saveDirectMount,
     saveMount,
     unregisterProxyMount,
+    type GitCredentialRecord,
     type MountRecord,
     type MountsManifest
   } from './mountsSync';
   import {
+    assembleGitCredentialRows,
     assembleLocalRows,
     assembleMountRows,
     assembleServerMountRows,
@@ -94,7 +96,11 @@
   function onRootKeydown(e: KeyboardEvent): void {
     if (e.key === 'Escape') {
       e.preventDefault();
-      // 逐层退出：表单在场时 Esc 先关表单（设置中心导入弹层同语义）
+      // 逐层退出：凭据/挂载表单在场时 Esc 先关表单（设置中心导入弹层同语义）
+      if (credFormOpen) {
+        closeCredForm();
+        return;
+      }
       if (formOpen) {
         closeForm();
         return;
@@ -106,6 +112,10 @@
   /** 关闭请求（✕/Esc 统一入口）：表单在场先关表单，否则关整页。AppShell 经
    * bind:this 调用（设置中心 requestClose 先例）。 */
   export function requestClose(): void {
+    if (credFormOpen) {
+      closeCredForm();
+      return;
+    }
     if (formOpen) {
       closeForm();
       return;
@@ -206,6 +216,9 @@
   // 模板 editing.label 等访问面闭合；组④凭据区块 Task 3 以独立通道管理 gitcred）
   let editing = $state<Exclude<MountRecord, { kind: 'gitcred' }> | null>(null);
   let draft = $state<MountFormDraft>(emptyDraft());
+  // git backend（spec I）：mode select disabled + 强制 direct（git 无代理面）+
+  // 表单条件字段组切换
+  let isGitBackend = $derived(draft.backend === 'github' || draft.backend === 'gitlab');
   let formIssues = $state<Partial<Record<keyof MountFormDraft, string>> | null>(null);
   let formError = $state('');
   let saving = $state(false);
@@ -222,12 +235,9 @@
   }
 
   function openEdit(rec: MountRecord): void {
-    // gitcred 不是挂载表单对象（组④凭据区块专管——Task 3）；git direct 的表单
-    // 扩支（条件字段组/必填分派/draftToDirectRecord git 分支）Task 3 落——本阶段
-    // git 编辑入口阻断（防御：mountFormIssues 尚无 per-backend 分派，git 草稿
-    // 会落 username/secret 误必填）。类型守卫使 rec 收窄至 proxy/s3 direct。
+    // gitcred 不是挂载表单对象（组④凭据区块专管——编辑面=重提同键覆盖）：
+    // 凭据条目不进挂载表单（Task 2 类型连带守卫维持）
     if (rec.kind === 'gitcred') return;
-    if (rec.kind === 'direct' && (rec.backend === 'github' || rec.backend === 'gitlab')) return;
     editing = rec;
     draft = draftFromRecord(rec);
     resetFormFeedback();
@@ -426,6 +436,71 @@
     showStatusNotice(t('mounts.local.cleared'));
   }
 
+  // ---------- 组④：Git 凭据区块（spec I Task 3——分 host+owner 条目化，评审 ③
+  // 编辑面=重提同键覆盖：组④新增表单以同 host+owner 再保存一次即更新 token/note
+  //（saveMount put(rec, rec.id) 键覆盖语义），无独立编辑钮；删除直接落 deleteMount
+  // 无 confirm——凭据条目无下游引用面（挂载记录 credentialKey 引用降级匿名可重提
+  // 恢复），不新增表 2 原生轻确认成员） ----------
+
+  let credRows = $derived(assembleGitCredentialRows(records));
+  let credFormOpen = $state(false);
+  let credDraft = $state({ host: '', owner: '', token: '', note: '' });
+  let credIssues = $state<Partial<Record<'host' | 'owner' | 'token', string>> | null>(null);
+  let credFormError = $state('');
+
+  function openCredForm(): void {
+    credDraft = { host: '', owner: '', token: '', note: '' };
+    credIssues = null;
+    credFormError = '';
+    credFormOpen = true;
+  }
+
+  function closeCredForm(): void {
+    credFormOpen = false;
+    credIssues = null;
+    credFormError = '';
+  }
+
+  /** 组④新增/重提（host/owner/token 必填——提示复用既有 mounts.form.required，不
+   * 另立键；note 可空）。保存走 saveMount 漏斗——recordCache 镜像即时生效（轮换
+   * 凭据=改库条目即生效，spec §7-2）。 */
+  async function submitCredForm(e: SubmitEvent): Promise<void> {
+    e.preventDefault();
+    const issues: Partial<Record<'host' | 'owner' | 'token', string>> = {};
+    if (credDraft.host.trim() === '') issues.host = t('mounts.form.required');
+    if (credDraft.owner.trim() === '') issues.owner = t('mounts.form.required');
+    if (credDraft.token === '') issues.token = t('mounts.form.required');
+    credIssues = Object.keys(issues).length > 0 ? issues : null;
+    if (credIssues !== null) return;
+    try {
+      const host = credDraft.host.trim();
+      const owner = credDraft.owner.trim();
+      const existing = records.find(
+        (r): r is GitCredentialRecord => r.kind === 'gitcred' && r.id === `gitcred:${host}:${owner}`
+      );
+      await saveMount({
+        id: `gitcred:${host}:${owner}`,
+        kind: 'gitcred',
+        host,
+        owner,
+        token: credDraft.token,
+        ...(credDraft.note.trim() !== '' ? { note: credDraft.note.trim() } : {}),
+        createdAt: existing?.createdAt ?? Date.now()
+      });
+      closeCredForm();
+      await reloadRecords();
+    } catch (err) {
+      credFormError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  /** 组④删除：直接落 deleteMount 漏斗（镜像跟随）；挂载记录的 credentialKey 引用
+   * 降级匿名（401 文案在使用面可见，重提同键即恢复）。 */
+  async function removeCredential(key: string): Promise<void> {
+    await deleteMount(key);
+    await reloadRecords();
+  }
+
   onMount(() => {
     void initServer();
     void reloadRecords();
@@ -544,19 +619,32 @@
           <h3>{editing === null ? t('mounts.form.titleCreate') : t('mounts.form.titleEdit', { label: editing.label })}</h3>
           <div class="vv-mm-field">
             <label for="vv-mm-mode">{t('mounts.form.mode')}</label>
-            <select id="vv-mm-mode" bind:value={draft.mode} disabled={last === null}>
+            <select id="vv-mm-mode" bind:value={draft.mode} disabled={last === null || isGitBackend}>
               <option value="direct">{t('mounts.form.modeDirect')}</option>
               <option value="proxy">{t('mounts.form.modeProxy')}</option>
             </select>
             {#if draft.mode === 'proxy' && last === null}
               <span class="vv-mm-issue">{t('mounts.form.serverBaseRequired')}</span>
             {/if}
+            {#if isGitBackend}
+              <span class="vv-mm-hint">{t('mounts.form.gitProxyBlock')}</span>
+            {/if}
           </div>
           <div class="vv-mm-field">
             <label for="vv-mm-backend">{t('mounts.form.backend')}</label>
-            <select id="vv-mm-backend" bind:value={draft.backend}>
+            <select
+              id="vv-mm-backend"
+              bind:value={draft.backend}
+              onchange={() => {
+                // git 无代理面（spec I）——切至 git backend 强制直连模式（mode
+                // select 同步 disabled）
+                if (draft.backend === 'github' || draft.backend === 'gitlab') draft.mode = 'direct';
+              }}
+            >
               <option value="s3">S3</option>
               <option value="webdav">WebDAV</option>
+              <option value="github">GitHub</option>
+              <option value="gitlab">GitLab</option>
             </select>
           </div>
           <div class="vv-mm-field">
@@ -564,11 +652,18 @@
             <input id="vv-mm-label" bind:value={draft.label} spellcheck="false" />
             {#if formIssues?.label}<span class="vv-mm-issue">{formIssues.label}</span>{/if}
           </div>
-          <div class="vv-mm-field">
-            <label for="vv-mm-endpoint">endpoint</label>
-            <input id="vv-mm-endpoint" bind:value={draft.endpoint} placeholder="https://s3.example.com" spellcheck="false" />
-            {#if formIssues?.endpoint}<span class="vv-mm-issue" role="alert">{formIssues.endpoint}</span>{/if}
-          </div>
+          {#if draft.backend !== 'github'}
+            <div class="vv-mm-field">
+              <label for="vv-mm-endpoint">endpoint</label>
+              <input
+                id="vv-mm-endpoint"
+                bind:value={draft.endpoint}
+                placeholder={draft.backend === 'gitlab' ? 'https://gitlab.example.com' : 'https://s3.example.com'}
+                spellcheck="false"
+              />
+              {#if formIssues?.endpoint}<span class="vv-mm-issue" role="alert">{formIssues.endpoint}</span>{/if}
+            </div>
+          {/if}
           {#if draft.backend === 's3'}
             <div class="vv-mm-field">
               <label for="vv-mm-bucket">{t('mounts.form.bucket')}</label>
@@ -581,20 +676,50 @@
               <span class="vv-mm-hint">{t('mounts.form.pathStyleHint')}</span>
             </div>
           {/if}
+          {#if draft.backend === 'github' || draft.backend === 'gitlab'}
+            <!-- git 条件字段组（spec I Task 3）：github = owner/repo；gitlab 复用
+              endpoint 字段为实例 host + repo=项目；公共 ref；PAT 复用 secret 字段
+              （可空——凭据库匹配，§7-3 hint 两语义） -->
+            {#if draft.backend === 'github'}
+              <div class="vv-mm-field">
+                <label for="vv-mm-owner">{t('mounts.form.owner')}</label>
+                <input id="vv-mm-owner" bind:value={draft.owner} spellcheck="false" />
+                {#if formIssues?.owner}<span class="vv-mm-issue">{formIssues.owner}</span>{/if}
+              </div>
+            {/if}
+            <div class="vv-mm-field">
+              <label for="vv-mm-repo">{draft.backend === 'gitlab' ? t('mounts.form.repoProject') : t('mounts.form.repo')}</label>
+              <input id="vv-mm-repo" bind:value={draft.repo} spellcheck="false" />
+              {#if formIssues?.repo}<span class="vv-mm-issue">{formIssues.repo}</span>{/if}
+            </div>
+            <div class="vv-mm-field">
+              <label for="vv-mm-ref">{t('mounts.form.ref')}</label>
+              <input id="vv-mm-ref" bind:value={draft.ref} spellcheck="false" />
+              {#if formIssues?.ref}<span class="vv-mm-issue">{formIssues.ref}</span>{/if}
+              <span class="vv-mm-hint">{t('mounts.form.refHint')}</span>
+            </div>
+            <div class="vv-mm-field">
+              <label for="vv-mm-secret">{t('mounts.form.gitToken')}</label>
+              <input id="vv-mm-secret" type="password" bind:value={draft.secret} autocomplete="off" />
+              <span class="vv-mm-hint">{t('mounts.form.gitTokenHint')}</span>
+            </div>
+          {/if}
           <div class="vv-mm-field">
             <label for="vv-mm-prefix">{t('mounts.form.prefix')}</label>
             <input id="vv-mm-prefix" bind:value={draft.prefix} spellcheck="false" />
           </div>
-          <div class="vv-mm-field">
-            <label for="vv-mm-username">{draft.backend === 's3' ? 'Access Key ID' : t('mounts.form.username')}</label>
-            <input id="vv-mm-username" bind:value={draft.username} autocomplete="off" spellcheck="false" />
-            {#if formIssues?.username}<span class="vv-mm-issue">{formIssues.username}</span>{/if}
-          </div>
-          <div class="vv-mm-field">
-            <label for="vv-mm-secret">{draft.backend === 's3' ? 'Secret Access Key' : t('mounts.form.secret')}</label>
-            <input id="vv-mm-secret" type="password" bind:value={draft.secret} autocomplete="off" />
-            {#if formIssues?.secret}<span class="vv-mm-issue">{formIssues.secret}</span>{/if}
-          </div>
+          {#if draft.backend === 's3' || draft.backend === 'webdav'}
+            <div class="vv-mm-field">
+              <label for="vv-mm-username">{draft.backend === 's3' ? 'Access Key ID' : t('mounts.form.username')}</label>
+              <input id="vv-mm-username" bind:value={draft.username} autocomplete="off" spellcheck="false" />
+              {#if formIssues?.username}<span class="vv-mm-issue">{formIssues.username}</span>{/if}
+            </div>
+            <div class="vv-mm-field">
+              <label for="vv-mm-secret">{draft.backend === 's3' ? 'Secret Access Key' : t('mounts.form.secret')}</label>
+              <input id="vv-mm-secret" type="password" bind:value={draft.secret} autocomplete="off" />
+              {#if formIssues?.secret}<span class="vv-mm-issue">{formIssues.secret}</span>{/if}
+            </div>
+          {/if}
           {#if draft.backend === 'webdav'}
             <p class="vv-mm-hint" role="note">⚠ {webdavCorsHint()}</p>
           {/if}
@@ -656,6 +781,65 @@
             </li>
           {/each}
         </ul>
+      {/if}
+    </section>
+
+    <!-- 组④：Git 凭据（spec I Task 3——分 host+owner 条目化；编辑面=重提同键覆盖，
+      评审 ③：同 host+owner 再保存一次即更新 token/note，无独立编辑钮） -->
+    <section class="vv-mm-group" aria-label={t('mounts.cred.group')}>
+      <h2>
+        {t('mounts.cred.group')}
+        <button type="button" class="vv-mm-add" onclick={openCredForm}>{t('mounts.cred.add')}</button>
+      </h2>
+      <p class="vv-mm-warning" role="note">⚠ {credentialWarning()}</p>
+      {#if credRows.length === 0}
+        <p class="vv-mm-empty">{t('mounts.cred.empty')}</p>
+      {:else}
+        <ul class="vv-mm-list">
+          {#each credRows as row (row.key)}
+            <li class="vv-mm-item">
+              {#if row.wildcard}
+                <span class="vv-mm-badge" data-kind="wildcard">{t('mounts.cred.wildcard')}</span>
+              {/if}
+              <span class="vv-mm-name" title={`${row.host}:${row.owner}`}>{row.host}:{row.owner}</span>
+              <span class="vv-mm-meta">{row.note ?? ''}</span>
+              <span class="vv-mm-actions">
+                <button type="button" onclick={() => void removeCredential(row.key)}>{t('mounts.delete')}</button>
+              </span>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      {#if credFormOpen}
+        <form class="vv-mm-form" onsubmit={submitCredForm}>
+          <h3>{t('mounts.cred.add')}</h3>
+          <div class="vv-mm-field">
+            <label for="vv-mm-cred-host">{t('mounts.cred.host')}</label>
+            <input id="vv-mm-cred-host" bind:value={credDraft.host} placeholder="github.com" spellcheck="false" />
+            {#if credIssues?.host}<span class="vv-mm-issue">{credIssues.host}</span>{/if}
+          </div>
+          <div class="vv-mm-field">
+            <label for="vv-mm-cred-owner">{t('mounts.cred.owner')}</label>
+            <input id="vv-mm-cred-owner" bind:value={credDraft.owner} placeholder="alice" spellcheck="false" />
+            {#if credIssues?.owner}<span class="vv-mm-issue">{credIssues.owner}</span>{/if}
+          </div>
+          <div class="vv-mm-field">
+            <label for="vv-mm-cred-token">{t('mounts.cred.token')}</label>
+            <input id="vv-mm-cred-token" type="password" bind:value={credDraft.token} autocomplete="off" />
+            {#if credIssues?.token}<span class="vv-mm-issue">{credIssues.token}</span>{/if}
+          </div>
+          <div class="vv-mm-field">
+            <label for="vv-mm-cred-note">{t('mounts.cred.note')}</label>
+            <input id="vv-mm-cred-note" bind:value={credDraft.note} spellcheck="false" />
+          </div>
+          {#if credFormError !== ''}
+            <p class="vv-mm-error" role="alert">{credFormError}</p>
+          {/if}
+          <div class="vv-mm-form-actions">
+            <button type="submit">{t('mounts.cred.save')}</button>
+            <button type="button" onclick={closeCredForm}>{t('mounts.cancel')}</button>
+          </div>
+        </form>
       {/if}
     </section>
   </div>

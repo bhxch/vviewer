@@ -204,5 +204,29 @@ export const messages = {
   // —— git 测试连接回显（probeWith git 分派——spec I Task 2 评审 ① 前移收编；
   //   sha 回显 8 位、truncated 为 GitHub 大仓首响应采样注记 Errata ⑩）——
   'mounts.probe.okGit': '连接成功：{entries} 个文件，ref {sha}，延迟 {ms} ms',
-  'mounts.probe.truncated': '（清单已截断，以上为部分计数）'
+  'mounts.probe.truncated': '（清单已截断，以上为部分计数）',
+
+  // —— git 表单族（spec I Task 3：git 两类表单；zh 定稿=计划 Task 3 Interfaces）——
+  'mounts.form.owner': '仓库所有者（owner）',
+  'mounts.form.repo': '仓库（repo）',
+  'mounts.form.repoProject': '项目（group/repo 或数字 ID）',
+  'mounts.form.ref': 'ref（分支/tag/commit）',
+  'mounts.form.gitToken': '访问令牌（PAT，可空）',
+  'mounts.form.gitTokenHint':
+    '留空按 owner 匹配凭据库（精确 → 通配 → 匿名）；显式填入则随本挂载存储。匿名使用 GitHub 时限速 60 次/小时，测试连接也消耗额度。',
+  'mounts.form.refHint':
+    'branch 型 ref 在每次打开/恢复会话时重新解析指向最新 commit，属预期行为。',
+  'mounts.form.gitProxyBlock': 'GitHub/GitLab 挂载仅支持浏览器直连',
+
+  // —— git 凭据区块族（组④「Git 凭据」——编辑面=重提同键覆盖，评审 ③；
+  //   必填提示复用既有 mounts.form.required 不另立键）——
+  'mounts.cred.group': 'Git 凭据',
+  'mounts.cred.add': '＋ 添加凭据',
+  'mounts.cred.empty': '暂无 Git 凭据。',
+  'mounts.cred.host': '主机（如 github.com）',
+  'mounts.cred.owner': 'owner/namespace（* 通配全部）',
+  'mounts.cred.token': '访问令牌（PAT）',
+  'mounts.cred.note': '备注（可空）',
+  'mounts.cred.wildcard': '通配',
+  'mounts.cred.save': '保存凭据'
 } as const satisfies Record<`${typeof domain}.${string}`, string>;
