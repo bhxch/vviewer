@@ -7,8 +7,10 @@ import {
   createGithubDirectStore,
   createGitlabDirectStore,
   githubAuthHintText,
+  githubBfsLimitText,
   githubCorsFailureText,
   githubDirectStoreId,
+  githubDirTruncatedText,
   githubHttpFailedText,
   githubRateLimitText,
   gitlabAuthHintText,
@@ -16,17 +18,21 @@ import {
   gitlabDirectStoreId,
   gitlabHttpFailedText,
   gitlabRateLimitText,
+  gitlabTruncatedText,
   gitNotFoundHintText,
   probeGithubDirect,
   probeGitlabDirect,
   setGithubAuthHintText,
+  setGithubBfsLimitText,
   setGithubCorsFailureText,
+  setGithubDirTruncatedText,
   setGithubHttpFailedText,
   setGithubRateLimitText,
   setGitlabAuthHintText,
   setGitlabCorsFailureText,
   setGitlabHttpFailedText,
   setGitlabRateLimitText,
+  setGitlabTruncatedText,
   setGitNotFoundHintText,
   type GitlabDirectConfig,
   type GithubDirectConfig
@@ -88,7 +94,10 @@ const ALL_SETTERS = [
   setGithubRateLimitText,
   setGitlabRateLimitText,
   setGithubCorsFailureText,
-  setGitlabCorsFailureText
+  setGitlabCorsFailureText,
+  setGithubDirTruncatedText,
+  setGithubBfsLimitText,
+  setGitlabTruncatedText
 ];
 
 afterEach(() => {
@@ -205,6 +214,25 @@ describe('错误特征化注入缝（9 setter——directS3.ts:74-166 模式镜�
     expect(githubRateLimitText()).not.toBe('GHRL');
     expect(gitlabCorsFailureText()).not.toBe('GLCORS');
     expect(gitlabRateLimitText()).toBe('GLRL'); // 未恢复的缝保持注入
+  });
+
+  it('截断三缝（评审 minor ⑥：常量升注入缝——en 缺省/注入/恢复缺省）', () => {
+    setGithubDirTruncatedText(() => 'GHDTRUNC');
+    setGithubBfsLimitText(() => 'GHBLIMIT');
+    setGitlabTruncatedText(() => 'GLTRUNC');
+    expect(githubDirTruncatedText()).toBe('GHDTRUNC');
+    expect(githubBfsLimitText()).toBe('GHBLIMIT');
+    expect(gitlabTruncatedText()).toBe('GLTRUNC');
+    setGithubDirTruncatedText(null);
+    setGithubBfsLimitText(null);
+    setGitlabTruncatedText(null);
+    expect(githubDirTruncatedText()).not.toBe('GHDTRUNC');
+    expect(githubBfsLimitText()).not.toBe('GHBLIMIT');
+    expect(gitlabTruncatedText()).not.toBe('GLTRUNC');
+    // 缺省英文含稳定判定片段（既有行为断言 /truncated/、/1000/、/20000/ 的锚基）
+    expect(githubDirTruncatedText()).toContain('truncated');
+    expect(githubBfsLimitText()).toContain('1000');
+    expect(gitlabTruncatedText()).toContain('20000');
   });
 });
 
@@ -455,11 +483,27 @@ describe('GitHub 内容通道（read 五态——验收锚 ⑥）', () => {
     expect(new TextDecoder().decode(r.bytes)).toBe('fallback via git/blobs');
   });
 
-  it('raw 404 → notFound 文案（共用 404 缝）', async () => {
+  it('raw 404 → blobs 兜底（伪装面闭合——fine-grained PAT 缺 raw 权限时私有仓 raw 404 与匿名同形态，spec §7-1 真网实测实锤）', async () => {
+    const content = btoa('via blobs after raw 404');
+    const r = await readWith(
+      (url) => {
+        if (url.startsWith(RAW_BASE)) return jsonResponse({ message: 'Not Found' }, 404);
+        if (url === `https://api.github.com/repos/octo/repo/git/blobs/${GH_B_GUIDE}`) {
+          return jsonResponse({ content, encoding: 'base64' });
+        }
+        return jsonResponse({ message: 'miss' }, 404);
+      },
+      'docs/guide.md'
+    );
+    expect(r.url).toBe(`https://api.github.com/repos/octo/repo/git/blobs/${GH_B_GUIDE}`);
+    expect(new TextDecoder().decode(r.bytes)).toBe('via blobs after raw 404');
+  });
+
+  it('raw 404 → blobs 兜底也 404 → notFound 文案（双通道俱 404 收敛共用 404 缝）', async () => {
     setGitNotFoundHintText(() => '（NF）');
     await expect(
       readWith(
-        (url) => (url.startsWith(RAW_BASE) ? jsonResponse({ message: 'Not Found' }, 404) : jsonResponse({ message: 'miss' }, 404)),
+        (url) => jsonResponse({ message: 'Not Found' }, 404),
         'docs/guide.md'
       )
     ).rejects.toThrow(/HTTP 404（NF）/);
@@ -676,6 +720,20 @@ describe('GitLab 全链（清单分页/内容/错误族——验收锚 ⑦）', 
     });
     const store = gitlabStore();
     await expect(store.listChildren('')).rejects.toThrow(/20000/);
+  });
+
+  it('满页 gate 形态：第 200 页整页后第 201 页短页未拉 → throw 截断文案（评审 minor ③ 裁定：per_page=100 固定下跨限点恒在满页 hasMore gate——「末页短页跨限不抛」场景数学不可达，实现与 plan Review Focus 5 字面一致；第 201 页 99 条未拉即真截断，throw 丢弃半份清单=绝不静默截断纪律）', async () => {
+    let pageN = 0;
+    installProjectMock((url) => {
+      if (url.startsWith(GL_TREE_BASE)) {
+        pageN++;
+        return jsonResponse(glBlobs(null, pageN <= 200 ? 100 : 99, `g${pageN}_`));
+      }
+      return jsonResponse({ message: 'miss' }, 404);
+    });
+    const store = gitlabStore();
+    await expect(store.listChildren('')).rejects.toThrow(/20000/);
+    expect(pageN).toBe(200); // 第 201 页未发（gate 即停）
   });
 
   it('host 归一运行时面：无 scheme + 尾斜杠原文 → 请求基址归一（Errata ⑨ 与 storeId 同源）', async () => {

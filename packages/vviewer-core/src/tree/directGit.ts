@@ -89,20 +89,6 @@ const GITLAB_MAX_ENTRIES = 20_000;
 /** GitHub truncated BFS 分层的目录请求上限（plan Review Focus 6 数值裁量落定）。 */
 const GITHUB_MAX_BFS_REQUESTS = 1000;
 
-/**
- * GitHub 目录级 truncated 特征化文案（模块内常量，无注入缝——计划 9 缝钉死不含
- * 此条；FileTree SUSP-07 状态栏呈现，zh 主面硬编码，core 中文文案先例 types.ts
- * '读取已取消'）：corpus「绝不静默截断」纪律——下钻中间树与 BFS 目录级同语义。
- */
-const GITHUB_DIR_TRUNCATED_TEXT =
-  'GitHub 树清单不完整：tree API 目录级 truncated（清单截断，无法继续拉取）';
-
-/** GitHub BFS 请求超限特征化文案（同上——模块内常量）。 */
-const GITHUB_BFS_LIMIT_TEXT = `GitHub 树清单不完整：BFS 逐目录请求超过 ${GITHUB_MAX_BFS_REQUESTS} 次上限（清单截断，无法继续拉取）`;
-
-/** GitLab 树清单条目超限特征化文案（§7-4 落定 2 万上限；同上——模块内常量）。 */
-const GITLAB_TRUNCATED_TEXT = `GitLab 树清单超过 ${GITLAB_MAX_ENTRIES} 条目上限（清单截断，无法继续拉取）`;
-
 // ---------- 错误特征化文案注入缝（9 setter——directS3.ts:74-166 模式逐条镜像：
 // 本包保持零 i18n 依赖（依赖方向 apps/web → core 不反转），apps/web 装配时
 //（mountsSync.ts）注入目录 getter——错误抛出时刻现取当下 locale。缺省英文供包内
@@ -244,6 +230,56 @@ export function setGitlabCorsFailureText(getter: (() => string) | null): void {
     getter ??
     (() =>
       'GitLab direct mount failed: instance CORS not configured or network unreachable (self-hosted instance requires the admin to allow this origin and the GET method)');
+}
+
+let githubDirTruncatedTextImpl: () => string = () =>
+  'GitHub tree listing incomplete: directory-level truncated (listing cut off, cannot continue)';
+
+/** GitHub 目录级 truncated 特征化文案（评审 minor ⑥ 修复：常量升注入缝——双语面
+ *  与同模块 9 缝对齐；FileTree SUSP-07 状态栏呈现；corpus「绝不静默截断」纪律——
+ *  下钻中间树与 BFS 目录级同语义，目录名动态段剥离统一双调用点形态）。 */
+export function githubDirTruncatedText(): string {
+  return githubDirTruncatedTextImpl();
+}
+
+/** 注入 GitHub 目录级 truncated 文案 getter（apps/web 装配点消费；传 null 恢复缺省）。 */
+export function setGithubDirTruncatedText(getter: (() => string) | null): void {
+  githubDirTruncatedTextImpl =
+    getter ??
+    (() =>
+      'GitHub tree listing incomplete: directory-level truncated (listing cut off, cannot continue)');
+}
+
+let githubBfsLimitTextImpl: () => string = () =>
+  `GitHub tree listing incomplete: BFS directory requests exceeded ${GITHUB_MAX_BFS_REQUESTS} (listing cut off, cannot continue)`;
+
+/** GitHub BFS 请求超限特征化文案（评审 minor ⑥ 修复：常量升注入缝）。 */
+export function githubBfsLimitText(): string {
+  return githubBfsLimitTextImpl();
+}
+
+/** 注入 GitHub BFS 超限文案 getter（apps/web 装配点消费；传 null 恢复缺省）。 */
+export function setGithubBfsLimitText(getter: (() => string) | null): void {
+  githubBfsLimitTextImpl =
+    getter ??
+    (() =>
+      `GitHub tree listing incomplete: BFS directory requests exceeded ${GITHUB_MAX_BFS_REQUESTS} (listing cut off, cannot continue)`);
+}
+
+let gitlabTruncatedTextImpl: () => string = () =>
+  `GitLab tree listing exceeds ${GITLAB_MAX_ENTRIES} entries (listing cut off, cannot continue)`;
+
+/** GitLab 树清单条目超限特征化文案（评审 minor ⑥ 修复：常量升注入缝）。 */
+export function gitlabTruncatedText(): string {
+  return gitlabTruncatedTextImpl();
+}
+
+/** 注入 GitLab 超限文案 getter（apps/web 装配点消费；传 null 恢复缺省）。 */
+export function setGitlabTruncatedText(getter: (() => string) | null): void {
+  gitlabTruncatedTextImpl =
+    getter ??
+    (() =>
+      `GitLab tree listing exceeds ${GITLAB_MAX_ENTRIES} entries (listing cut off, cannot continue)`);
 }
 
 // ---------- 归一与 storeId ----------
@@ -532,7 +568,7 @@ async function githubDrillSubtree(
   for (const seg of mountPrefix.replace(/\/+$/, '').split('/')) {
     const t = await githubFetchTree(owner, repo, sha, false, token, signal);
     if (t.truncated === true) {
-      throw new Error(GITHUB_DIR_TRUNCATED_TEXT);
+      throw new Error(githubDirTruncatedText());
     }
     const entry = (t.tree ?? []).find((e) => e.path === seg);
     if (entry === undefined || entry.type !== 'tree' || typeof entry.sha !== 'string') {
@@ -564,12 +600,12 @@ async function githubBfsCollect(
     const { sha, dir } = queue.shift() as { sha: string; dir: string };
     requests += 1;
     if (requests > GITHUB_MAX_BFS_REQUESTS) {
-      throw new Error(GITHUB_BFS_LIMIT_TEXT);
+      throw new Error(githubBfsLimitText());
     }
     const t = await githubFetchTree(owner, repo, sha, false, token, signal);
     if (t.truncated === true) {
       throw new Error(
-        `${GITHUB_DIR_TRUNCATED_TEXT}（目录：${dir === '' ? '<root>' : dir}）`
+        githubDirTruncatedText()
       );
     }
     for (const e of t.tree ?? []) {
@@ -735,10 +771,12 @@ export function createGithubDirectStore(cfg: GithubDirectConfig): DirectStore {
       if (rel === '') throw new Error(`github: empty path（${path}）`);
       const sha = await resolveRefCached(readOpts?.signal);
       // 内容通道只服务清单代际（快照一致性）：blob sha 取自清单，清单未拉则现拉
+      //（signal 透传——read 契约「destroy 时取消在飞读」覆盖惰性清单面，评审
+      // minor ② 修复：truncated 大仓 BFS 至多 1000 请求可取消）
       if (currentManifest === null) {
         const key = `${ref}\u001f${sha}`;
         const cached = manifestCache.get(key);
-        currentManifest = cached ?? (await fetchManifest(sha));
+        currentManifest = cached ?? (await fetchManifest(sha, readOpts?.signal));
         if (cached === undefined) manifestCache.set(key, currentManifest);
       }
       const repoPath = `${mountPrefix}${rel}`;
@@ -758,19 +796,21 @@ export function createGithubDirectStore(cfg: GithubDirectConfig): DirectStore {
         githubCorsFailureText()
       );
       // raw 响应判定：限速优先（429 / 403+remaining:0——限速下兜底无意义）→
-      // 404 notFound → 401/403 兜底 blobs（Errata ①）→ 其余 ensureGitOk
+      // 401/403/404 全走 blobs 兜底 → 其余 ensureGitOk。404 进兜底（评审 important
+      // 修复）：path 存在性已由清单保证（read 前置 find）——raw 404 = 权限伪装/
+      // 异常面（fine-grained PAT 缺 raw 权限时私有仓 raw 回 404 与匿名同形态，
+      // spec §7-1 真网实测实锤）而非「真不存在」，notFound 直抛会使私有仓每读必
+      // 误导且兜底永不触发；blobs（api.github.com Bearer 标准契约）探测失败
+      //（含 404）由 ensureGitOk 落 notFound 收敛。
       if (
         res.status === 429 ||
         (res.status === 403 && res.headers.get('x-ratelimit-remaining') === '0')
       ) {
         throw new Error(githubRateLimitText());
       }
-      if (res.status === 404) {
-        throw new Error(githubNotFoundText());
-      }
-      if (res.status === 401 || res.status === 403) {
+      if (res.status === 401 || res.status === 403 || res.status === 404) {
         // 兜底 git/blobs（Bearer 标准契约；blob sha 清单在手零额外寻址）：
-        // raw 命中不计 API 限速，兜底为 401/403 少数面——命中比例不放大预算。
+        // raw 命中不计 API 限速，兜底为认证异常少数面——命中比例不放大预算。
         const bres = await rawFetch(
           `${GITHUB_API}/repos/${owner}/${repo}/git/blobs/${entry.sha}`,
           { headers: githubHeaders(token), signal: readOpts?.signal },
@@ -855,7 +895,7 @@ export function createGitlabDirectStore(cfg: GitlabDirectConfig): DirectStore {
       const hasMore = next !== null || batch.length === GITLAB_PER_PAGE;
       if (!hasMore) break;
       if (entries.length >= GITLAB_MAX_ENTRIES) {
-        throw new Error(GITLAB_TRUNCATED_TEXT);
+        throw new Error(gitlabTruncatedText());
       }
       url = next ?? gitlabTreeUrl(host, pid, ref, mountPrefix, page + 1);
     }
