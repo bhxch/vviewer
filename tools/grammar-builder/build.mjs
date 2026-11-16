@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // grammar wasm 资产构建器（自建主路径，tree-sitter-cli ≥0.26 免 emcc——首次构建自动下载
 // wasi-sdk/binaryen 到 ~/.cache/tree-sitter）。两种模式：
-//   --fetch        源获取：目标语言集合 join vendored languages.toml（[[grammar]] git+rev+subpath）
+//   --fetch        源获取：目标语言集合 join gen-sources 产物 languages.toml@helix-pin
+//                  （[[grammar]] git+rev+subpath）
 //                  逐个浅取源仓（git init+fetch --depth 1 <rev>，服务端需支持按 SHA 取；并发 8，
 //                  单仓失败记 fetch-failures.json 继续）→ 拷贝 <subpath>/ 树（判据 src/parser.c）
 //                  到 out/grammars/<name>/<subpath>/（与 markpad 目录同构，作 --self-build 输入）。
@@ -12,7 +13,7 @@
 //                  可解析补充；--languages a,b 显式点名。已存在的 wasm 跳过（--force 重建）。
 // 语言解析顺序（aliases 键 → grammar）：build-list 的 helixLang/name（含 _- 变体）→
 // languages.toml 同名条目 → aliases.json wasm 字段去掉 tree-sitter- 前缀后的条目。
-// swift/objc/systemrdl 等 markpad build-list 快照缺失的语言靠后两级兜底；objc/systemrdl
+// swift/objc/systemrdl 等 build-list 快照缺失的语言靠后两级兜底；objc/systemrdl
 // 无查询资产（assets/queries 无目录）且 helix 未收录，lite 集不产出（差异记录在 README）。
 // 用法：node build.mjs --fetch [--lite|--languages x,y]
 //       node build.mjs --self-build [--all|--languages x,y] [--force]
@@ -33,6 +34,8 @@ const repoRoot = path.resolve(here, '../..');
 export const PATHS = {
   aliasesJson: path.join(here, 'aliases.json'),
   buildListJson: path.join(here, 'build-list.json'),
+  // gen-sources 产物 languages.toml@helix-pin（spec F 构建源头化，不入库）；
+  // 缺失时报错指向 pnpm gen:sources（见 ensureGenProducts）
   languagesToml: process.env.VV_LANGUAGES_TOML ?? path.join(here, 'languages.toml'),
   outDir: process.env.VV_GRAMMARS_OUT ?? path.join(repoRoot, 'apps/web/static/grammars'),
   failureOut: process.env.VV_FAILURE_OUT ?? path.join(here, 'out/failure-list.json'),
@@ -47,6 +50,24 @@ export const PATHS = {
 // 单文件告警阈值：产物不再入库（体积不构成仓库约束），超限仅提示。历史 8MB 上限为
 // tree-sitter-wasms 入库时代（M2）的裁定，随产物出库一并废除。
 export const WARN_FILE_BYTES = 8 * 1024 * 1024;
+
+/**
+ * gen 产物前置检查（spec F §5 缝①）：--fetch 与 --self-build 两分支入口各一次，
+ * gen-sources 产物缺失显式报错指向 gen（本地首跑/CI 冷缓存漏 gen 即确定性报错，不静默 ENOENT）。
+ * paths 可注入供单测（缺省 PATHS 两产物）。
+ */
+export function ensureGenProducts(paths = { buildListJson: PATHS.buildListJson, languagesToml: PATHS.languagesToml }) {
+  for (const p of [paths.buildListJson, paths.languagesToml]) {
+    if (!fs.existsSync(p)) {
+      throw new Error(`gen 产物缺失: ${p}——先跑 pnpm gen:sources（或 node tools/grammar-builder/gen-sources.mjs --refresh）`);
+    }
+  }
+}
+
+/** cSymbol 派生规约（spec F §8）：tree_sitter_<name，-→_>（与 gen-sources.deriveServerManifest 单源同式）。 */
+export function cSymbolOf(name) {
+  return `tree_sitter_${name.replace(/-/g, '_')}`;
+}
 
 export function loadAliases() {
   return JSON.parse(fs.readFileSync(PATHS.aliasesJson, 'utf8'));
@@ -439,8 +460,22 @@ export async function fetchGrammarSources({
       const entry = plan[i];
       try {
         const r = await fetchOneGrammar(entry, { tmpRoot: path.join(outDir, '.tmp'), outDir });
-        if (r === 'fetched') fetched++;
-        else skipped++;
+        if (r === 'fetched') {
+          fetched++;
+          // spec F §8 缝② cSymbol 交叉验证：gen-sources 的 manifest cSymbol 按
+          // tree_sitter_<name，-→_> 规约派生，此处对成功落盘的源树反向验证 parser.c 实际
+          // 符号，不符进 fetch-failures 失败清单（显式可见不静默；源树保留供人工复核，
+          // self-build 侧符号检查的构建失败清单二次承接）。
+          const parserC = path.join(outDir, entry.name, entry.subpath, 'src', 'parser.c');
+          const sym = cSymbolOf(entry.name);
+          if (!fs.readFileSync(parserC, 'utf8').includes(sym)) {
+            failures.push({
+              name: entry.name,
+              subpath: entry.subpath,
+              reason: `cSymbol mismatch: 期望 ${sym} 未见于 parser.c（spec F §8 交叉验证）`,
+            });
+          }
+        } else skipped++;
       } catch (err) {
         failures.push({
           name: entry.name,
@@ -469,6 +504,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (argv.includes('--lite') && languagesFlag) throw new Error('--lite 与 --languages 互斥');
 
   if (argv.includes('--fetch')) {
+    ensureGenProducts();
     const buildList = JSON.parse(fs.readFileSync(PATHS.buildListJson, 'utf8')).filter((e) => e.parserCExists);
     const grammarSources = parseGrammarSources(fs.readFileSync(PATHS.languagesToml, 'utf8'));
     const { targets, unresolved } = resolveTargets(buildList, selection ?? 'all', loadAliases(), grammarSources);
@@ -481,6 +517,7 @@ export async function main(argv = process.argv.slice(2)) {
     return { fetched, skipped, failures, missing };
   }
   if (argv.includes('--self-build')) {
+    ensureGenProducts();
     return selfBuild({ selection: selection ?? 'lite', force: argv.includes('--force') });
   }
   console.error('usage: node build.mjs --fetch [--lite|--languages x,y] | --self-build [--all|--languages x,y] [--force]');

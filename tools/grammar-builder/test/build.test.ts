@@ -6,7 +6,6 @@ import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildList, detectParserC, SOURCES } from '../build-list.mjs';
 import {
   resolveTargets,
   selfBuild,
@@ -16,6 +15,7 @@ import {
   parseGrammarSources,
   planFetch,
   fetchGrammarSources,
+  ensureGenProducts,
   PATHS,
 } from '../build.mjs';
 
@@ -80,75 +80,6 @@ describe('aliases.json（lite 集键表：helix 语言名 → grammar 名/别名
 
   it('键序 = 高频优先：javascript 居首', () => {
     expect(Object.keys(aliases)[0]).toBe('javascript');
-  });
-});
-
-describe('build-list（markpad grammar 源判据 src/parser.c）', () => {
-  // 数据源在仓库外（markpad grammars，随上游漂移且 fresh clone 必然缺失）：
-  // 断言只依赖稳定部分——入库快照断结构、live 计算断幂等与 wiring、判据逻辑用合成
-  // fixture 验证。快照与 live 源的严格一致不属测试契约（再生成由 build-list.mjs 手动跑）。
-  const markpadAvailable = existsSync(SOURCES.grammarInfoJson) && existsSync(SOURCES.grammarsDir);
-
-  it('入库 build-list.json 结构稳定：按 name 排序、条目形状正确、可建数 ≥250（生成时点快照）', () => {
-    const onDisk = JSON.parse(
-      readFileSync(path.join(repoRoot, 'tools/grammar-builder/build-list.json'), 'utf8'),
-    ) as BuildListEntry[];
-    expect(onDisk.length).toBeGreaterThanOrEqual(250);
-    const names = onDisk.map((e) => e.name);
-    expect(names).toEqual([...names].sort());
-    for (const e of onDisk) {
-      expect(typeof e.name).toBe('string');
-      expect(typeof e.subpath).toBe('string');
-      expect(typeof e.parserCExists).toBe('boolean');
-      expect(e.helixLang === null || typeof e.helixLang === 'string').toBe(true);
-    }
-    expect(onDisk.filter((e) => e.parserCExists).length).toBeGreaterThanOrEqual(250);
-  });
-
-  it.skipIf(!markpadAvailable)(
-    'buildList 对当前源幂等且结构正确（与入库快照解耦，上游漂移不致失败）',
-    () => {
-      const first = buildList(SOURCES) as BuildListEntry[];
-      const second = buildList(SOURCES) as BuildListEntry[];
-      expect(second).toEqual(first); // 幂等：同源两次计算一致
-      const names = first.map((e) => e.name);
-      expect(names).toEqual([...names].sort());
-      // 条目覆盖 grammar_info 全部键；flag 与判据函数一致（wiring 正确，不预设源文件存在与否）
-      const grammarInfo = JSON.parse(readFileSync(SOURCES.grammarInfoJson, 'utf8')) as Record<
-        string,
-        unknown
-      >;
-      expect(first.length).toBe(Object.keys(grammarInfo).length);
-      for (const e of first) {
-        expect(e.helixLang === null || typeof e.helixLang === 'string').toBe(true);
-        expect(e.parserCExists).toBe(detectParserC(SOURCES.grammarsDir, e.name, e.subpath));
-      }
-    },
-  );
-
-  it('subpath 判据用合成 fixture 验证：顶层 src 命中、subpath 指向子目录命中、无 src 不命中', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'vv-gb-bl-'));
-    const grammars = path.join(dir, 'grammars');
-    // tsx：markpad 形态——顶层目录无 src，仅子目录 grammars/tsx/tsx/src 有 parser.c
-    mkdirSync(path.join(grammars, 'tsx', 'tsx', 'src'), { recursive: true });
-    writeFileSync(path.join(grammars, 'tsx', 'tsx', 'src', 'parser.c'), 'int main(void){return 0;}');
-    mkdirSync(path.join(grammars, 'top', 'src'), { recursive: true });
-    writeFileSync(path.join(grammars, 'top', 'src', 'parser.c'), 'int main(void){return 0;}');
-    mkdirSync(path.join(grammars, 'bare')); // 无 src → 不命中
-    const grammarInfoJson = path.join(dir, 'grammar_info.json');
-    writeFileSync(grammarInfoJson, JSON.stringify({ tsx: { subpath: 'tsx' }, top: {}, bare: {} }));
-    const entries = buildList({
-      languagesJson: SOURCES.languagesJson,
-      grammarInfoJson,
-      grammarsDir: grammars,
-    }) as BuildListEntry[];
-    const byName = new Map(entries.map((e) => [e.name, e]));
-    expect(byName.get('tsx')).toMatchObject({ subpath: 'tsx', parserCExists: true });
-    expect(byName.get('top')).toMatchObject({ subpath: '', parserCExists: true });
-    expect(byName.get('bare')).toMatchObject({ subpath: '', parserCExists: false });
-    for (const e of entries) {
-      expect(e.parserCExists).toBe(detectParserC(grammars, e.name, e.subpath));
-    }
   });
 });
 
@@ -417,18 +348,23 @@ describe('parseGrammarSources / planFetch（vendored languages.toml 与目标的
 });
 
 describe('fetchGrammarSources（本地 git fixture 验证 clone/copy 逻辑，不依赖网络）', () => {
-  it('浅取源仓并按 subpath 同构落盘：顶层与子目录两形态 + parser.c 判据 + 失败清单继续', async () => {
+  it('浅取源仓并按 subpath 同构落盘：顶层与子目录两形态 + parser.c 判据 + cSymbol 交叉验证 + 失败清单继续', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'vv-gb-fetch-'));
-    // fixture 仓库：顶层 src/parser.c 的 top 与子目录 tsx/src/parser.c 的 tsx 同仓两形态
+    // fixture 仓库：顶层 src/parser.c 的 top 与子目录 tsx/src/parser.c 的 tsx 同仓两形态；
+    // parser.c 含 cSymbolOf(name) 符号（通过缝②交叉验证）；repoC 无符号（触发 cSymbol mismatch）
     const repoA = path.join(dir, 'repoA');
     const repoB = path.join(dir, 'repoB');
+    const repoC = path.join(dir, 'repoC');
     for (const [repo, layout] of [
       [repoA, 'top'],
       [repoB, 'tsx'],
+      [repoC, 'badsym'],
     ] as const) {
-      const base = layout === 'top' ? path.join(repo, 'src') : path.join(repo, 'tsx', 'src');
+      const base = layout === 'badsym' ? path.join(repo, 'src') : layout === 'top' ? path.join(repo, 'src') : path.join(repo, 'tsx', 'src');
       mkdirSync(base, { recursive: true });
-      writeFileSync(path.join(base, 'parser.c'), 'int main(void){return 0;}');
+      // badsym 仓 parser.c 不含 tree_sitter_badsym → 缝②记入失败清单
+      const body = layout === 'badsym' ? 'int main(void){return 0;}' : `int tree_sitter_${layout}(void) { return 0; }\n`;
+      writeFileSync(path.join(base, 'parser.c'), body);
       writeFileSync(path.join(repo, '.gitignore'), '');
       await exec('git', ['init', '-q', repo]);
       await exec('git', ['-C', repo, 'add', '-A']);
@@ -438,6 +374,7 @@ describe('fetchGrammarSources（本地 git fixture 验证 clone/copy 逻辑，�
     const plan = [
       { name: 'top', subpath: '', git: repoA, rev: revA },
       { name: 'tsx', subpath: 'tsx', git: repoB, rev: (await exec('git', ['-C', repoB, 'rev-parse', 'HEAD'])).stdout.trim() },
+      { name: 'badsym', subpath: '', git: repoC, rev: (await exec('git', ['-C', repoC, 'rev-parse', 'HEAD'])).stdout.trim() },
       { name: 'nope', subpath: '', git: repoA, rev: 'f'.repeat(40) }, // 仓库无此 rev → 失败继续
     ];
     const outDir = path.join(dir, 'grammars');
@@ -447,8 +384,9 @@ describe('fetchGrammarSources（本地 git fixture 验证 clone/copy 逻辑，�
       failuresOut: path.join(dir, 'fetch-failures.json'),
       concurrency: 2,
     });
-    expect(fetched).toBe(2);
-    expect(failures.map((f) => f.name)).toEqual(['nope']);
+    expect(fetched).toBe(3); // badsym 源树已落盘（cSymbol mismatch 不删源树，供人工复核）
+    expect(failures.map((f) => f.name).sort()).toEqual(['badsym', 'nope']);
+    expect(failures.find((f) => f.name === 'badsym')?.reason).toContain('cSymbol mismatch');
     // 同构源树：outDir/<name>/<subpath>/src/parser.c（--self-build 的探测路径）
     expect(existsSync(path.join(outDir, 'top', 'src', 'parser.c'))).toBe(true);
     expect(existsSync(path.join(outDir, 'tsx', 'tsx', 'src', 'parser.c'))).toBe(true);
@@ -456,7 +394,7 @@ describe('fetchGrammarSources（本地 git fixture 验证 clone/copy 逻辑，�
     expect(existsSync(path.join(outDir, 'top', '.git'))).toBe(false);
     // 失败清单落盘
     const recorded = JSON.parse(readFileSync(path.join(dir, 'fetch-failures.json'), 'utf8')) as { name: string }[];
-    expect(recorded.map((f) => f.name)).toEqual(['nope']);
+    expect(recorded.map((f) => f.name).sort()).toEqual(['badsym', 'nope']);
     // 幂等重跑：已就位的源树跳过
     const second = await fetchGrammarSources({
       plan,
@@ -465,6 +403,31 @@ describe('fetchGrammarSources（本地 git fixture 验证 clone/copy 逻辑，�
       concurrency: 2,
     });
     expect(second.fetched).toBe(0);
-    expect(second.skipped).toBe(2);
+    expect(second.skipped).toBe(3);
   }, 30_000);
+});
+
+describe('ensureGenProducts（spec F 缝①：gen 产物前置检查）', () => {
+  it('build-list.json / languages.toml 缺失 → 显式报错指向 pnpm gen:sources', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'vv-gb-gen-'));
+    mkdirSync(path.join(dir, 'tools/grammar-builder'), { recursive: true });
+    const paths = {
+      buildListJson: path.join(dir, 'tools/grammar-builder/build-list.json'),
+      languagesToml: path.join(dir, 'tools/grammar-builder/languages.toml'),
+    };
+    const err = (() => {
+      try {
+        ensureGenProducts(paths);
+        return null;
+      } catch (e) {
+        return e as Error;
+      }
+    })();
+    expect(err?.message).toContain('pnpm gen:sources');
+    expect(err?.message).toContain('build-list.json');
+    // 两产物齐备 → 通过
+    writeFileSync(paths.buildListJson, '[]');
+    writeFileSync(paths.languagesToml, '');
+    expect(ensureGenProducts(paths)).toBeUndefined();
+  });
 });

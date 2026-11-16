@@ -20,13 +20,25 @@ apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/binaries/vviewer-server-*
 apps/desktop/src-tauri/gen/
 
-# grammar wasm 资产（构建产物，不入库）：源清单 languages.toml、aliases.json、build-list.json
-# 与构建器入库；产物由 `pnpm gen:grammars` 生成（tree-sitter-cli 自建，vendored 例外见
-# tools/grammar-builder/fixtures/）。tools/grammar-builder/grammars 与 out 为源缓存/失败清单。
+# grammar wasm 资产（构建产物，不入库）：构建器、aliases.json（自有资产）与 helix-pin.json
+# 入库；产物由 `pnpm gen:sources`（源清单再生）+ `pnpm gen:grammars`（tree-sitter-cli 自建，
+# vendored 例外见 tools/grammar-builder/fixtures/）生成。
+# tools/grammar-builder/grammars 与 out 为源缓存/失败清单。
 tools/grammar-builder/grammars/
 tools/grammar-builder/out/
 *.wasm
 !tools/grammar-builder/fixtures/*.wasm
+
+# 构建源头化（spec F）：gen-sources 产物不入库——源清单再生见
+# node tools/grammar-builder/gen-sources.mjs（消费端缺失报错指向 pnpm gen:sources）
+tools/grammar-builder/languages.toml
+tools/grammar-builder/build-list.json
+packages/vviewer-highlight/assets/languages.json
+packages/vviewer-highlight/assets/themes.json
+packages/vviewer-highlight/assets/queries/
+server/grammars-manifest.json
+server/GRAMMAR_LICENSES.md
+packages/vviewer-core/src/registry/generated-extensions.ts
 # static/grammars 整目录（*.wasm 与生成的 manifest.json，构建产物）
 apps/web/static/grammars/
 # tree-sitter 查询静态资产（构建期由 vite 插件从 packages/vviewer-highlight/assets/queries 拷贝，不入库）

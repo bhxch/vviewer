@@ -1,8 +1,16 @@
 # @bhxch/vviewer-grammar-builder
 
+> **退役提示（spec F 构建源头化，2026-11-17）**：`build-list.mjs` / `gen-server-manifest.mjs`
+> / `gen-code-extensions.mjs` 与 `tools/helix-assets/` 已退役——源清单再生统一走
+> `gen-sources.mjs`（helix-pin commit 锚 → languages.toml / build-list.json / languages.json
+> / themes.json / queries/ / grammars-manifest.json / generated-extensions.ts 一次生成；
+> `--refresh` 一键刷新带差异报告）。生成物不入库（`.gitignore`），消费端缺失时报错指向
+> `pnpm gen:sources`。本 README 其余段落为退役前口径，全面重写见 spec F T5。
+
 grammar wasm 资产管线：为语法高亮生成 `apps/web/static/grammars/{manifest.json, *.wasm}`
 与 runtime `apps/web/static/tree-sitter.wasm`。**产物一律不入库**（构建期生成，
-`.gitignore`），由 `pnpm gen:grammars`（= `--fetch --lite` + `--self-build`）一键生成。
+`.gitignore`），由 `pnpm gen:grammars`（= `pnpm gen:sources` + `--fetch --lite` +
+`--self-build`）一键生成。
 
 ## 两种模式
 
