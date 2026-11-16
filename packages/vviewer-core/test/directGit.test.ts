@@ -502,10 +502,7 @@ describe('GitHub 内容通道（read 五态——验收锚 ⑥）', () => {
   it('raw 404 → blobs 兜底也 404 → notFound 文案（双通道俱 404 收敛共用 404 缝）', async () => {
     setGitNotFoundHintText(() => '（NF）');
     await expect(
-      readWith(
-        (url) => jsonResponse({ message: 'Not Found' }, 404),
-        'docs/guide.md'
-      )
+      readWith(() => jsonResponse({ message: 'Not Found' }, 404), 'docs/guide.md')
     ).rejects.toThrow(/HTTP 404（NF）/);
   });
 
