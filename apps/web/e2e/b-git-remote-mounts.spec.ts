@@ -541,6 +541,80 @@ test.describe('b-git-remote-mounts Git 直连挂载', () => {
     );
   });
 
+  test('GIT-06 行删除 UI 链（spec §5 删除步）：打开挂载→面板行删除 confirm→行消失/已开 tab 存活可读→刷新落占位', async ({ page }) => {
+    test.setTimeout(60_000);
+    const recId = `githubdirect:${hash8(['github', 'octo', 'repo', 'main', ''].join('\u001f'))}`;
+    await mockGithub(page, { tree: GH_TREE, files: { 'a.txt': 'delete chain body\n' } });
+
+    await page.goto('/');
+    await expect(page.locator('.vv-tabbar')).toBeVisible();
+    await seedMountRecord(page, {
+      id: recId,
+      kind: 'direct',
+      backend: 'github',
+      label: '删除链挂载',
+      endpoint: 'https://github.com/octo/repo',
+      prefix: '',
+      owner: 'octo',
+      repo: 'repo',
+      ref: 'main',
+      createdAt: 1700000000000
+    });
+    await seedSnapshot(page, {
+      activeId: 'w1',
+      workspaces: [
+        {
+          id: 'w1',
+          name: '默认',
+          createdAt: 1700000000000,
+          sources: [{ kind: 'direct', storeId: recId, storeLabel: '删除链挂载' }],
+          tabs: [
+            { id: 't1', storeId: recId, storeLabel: '删除链挂载', path: '', name: '删除链挂载', kind: 'rename-only', scrollTop: 0, active: false },
+            { id: 't2', storeId: recId, storeLabel: '删除链挂载', path: 'a.txt', name: 'a.txt', kind: 'rename-only', scrollTop: 0, active: true }
+          ],
+          activeTabId: 't2'
+        }
+      ]
+    });
+
+    // restore 打开（记录在场——git 记录恢复链 MM-08 形态复用）
+    await page.reload();
+    await expect(page.locator('.vv-tab.active', { hasText: 'a.txt' })).toBeVisible();
+    await seeTreeRow(page, 'a.txt');
+
+    // 面板行删除：confirm 文案断言（挂载删除后果声明 + 引用计数）→ 接受 → 行消失
+    await openMountsPanel(page);
+    const row = page.locator('.vv-mm-item', { hasText: '删除链挂载' });
+    await expect(row.getByText('GitHub', { exact: true })).toBeVisible();
+    const dialogText = page
+      .waitForEvent('dialog')
+      .then((d) => {
+        const t = d.message();
+        void d.accept();
+        return t;
+      });
+    await row.getByRole('button', { name: '删除' }).click();
+    expect(await dialogText).toContain('删除挂载「删除链挂载」');
+    expect(await dialogText).toContain('相关标签页将无法自动恢复');
+    await expect(page.getByText('暂无前端配置挂载。')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.vv-mounts-manager')).toHaveCount(0);
+
+    // 已开 tab 存活可读（removeRecord 语义：运行中 tab 不中断——store 随最后持有
+    // 者释放；删除只摘记录面）
+    await expect(page.locator('.vv-tab', { hasText: '删除链挂载' })).toBeVisible();
+    const drawer = await openDrawerIfNarrow(page);
+    await page.locator('.vv-tree-row', { hasText: 'a.txt' }).click();
+    await closeDrawerIfOpened(page, drawer);
+    await expect(page.locator('.vv-tab.active', { hasText: 'a.txt' })).toBeVisible();
+    await expect(page.locator('.vv-code-pre')).toContainText('delete chain body');
+
+    // 刷新 → 记录已删 → 占位（MM-08 降级链的 git 记录 UI 删除形态）
+    await page.reload();
+    await expect(page.locator('.vv-error-card')).toBeVisible();
+    await expect(page.locator('.vv-error-card')).toContainText('需要重新打开');
+  });
+
   test('GIT-05 快照恢复链：记录+凭据库条目 → reload 重建（请求带凭据库 token）；记录删除 → 占位', async ({ page }) => {
     test.setTimeout(60_000);
     // storeId = 记录 id（core githubDirectStoreId 闭环——identity 五段 join，prefix 空 = 尾分隔符）
