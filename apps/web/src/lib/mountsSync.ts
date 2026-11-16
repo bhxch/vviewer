@@ -465,25 +465,18 @@ export function directConfigOf(
       label: rec.label
     };
   }
-  if (rec.backend === 'github') {
-    return {
-      owner: rec.owner ?? '',
-      repo: rec.repo ?? '',
+  if (rec.backend === 'github' || rec.backend === 'gitlab') {
+    const token = gitTokenOf(rec);
+    const gitBase = {
       ref: rec.ref ?? '',
       ...(rec.prefix !== '' ? { prefix: rec.prefix } : {}),
-      ...(gitTokenOf(rec) !== undefined ? { token: gitTokenOf(rec) } : {}),
+      ...(token !== undefined ? { token } : {}),
       label: rec.label
     };
-  }
-  if (rec.backend === 'gitlab') {
-    return {
-      host: rec.host ?? '',
-      project: rec.repo ?? '',
-      ref: rec.ref ?? '',
-      ...(rec.prefix !== '' ? { prefix: rec.prefix } : {}),
-      ...(gitTokenOf(rec) !== undefined ? { token: gitTokenOf(rec) } : {}),
-      label: rec.label
-    };
+    if (rec.backend === 'github') {
+      return { owner: rec.owner ?? '', repo: rec.repo ?? '', ...gitBase };
+    }
+    return { host: rec.host ?? '', project: rec.repo ?? '', ...gitBase };
   }
   throw new Error(`Unknown direct backend: ${String((rec as { backend?: unknown }).backend)}`);
 }

@@ -694,6 +694,14 @@ export function createGithubDirectStore(cfg: GithubDirectConfig): DirectStore {
     return sha;
   }
 
+  /** ref 解析（强制重解析面）：根 listChildren 消费——branch 跟踪（重解析语义，
+   *  解析后写缓存供 read 复用；40 位 sha ref 零请求）。 */
+  async function resolveRefFresh(): Promise<string> {
+    const sha = await githubResolveRef(owner, repo, ref, token);
+    refShaCache.set(ref, sha);
+    return sha;
+  }
+
   return {
     id,
     displayName: () => cfg.label,
@@ -785,14 +793,6 @@ export function createGithubDirectStore(cfg: GithubDirectConfig): DirectStore {
       return () => {};
     }
   };
-
-  /** ref 解析（强制重解析面）：根 listChildren 消费——branch 跟踪（重解析语义，
-   *  解析后写缓存供 read 复用；40 位 sha ref 零请求）。 */
-  async function resolveRefFresh(): Promise<string> {
-    const sha = await githubResolveRef(owner, repo, ref, token);
-    refShaCache.set(ref, sha);
-    return sha;
-  }
 }
 
 export function createGitlabDirectStore(cfg: GitlabDirectConfig): DirectStore {
