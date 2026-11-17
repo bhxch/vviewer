@@ -3,7 +3,10 @@
 # 自建，免 emcc；工具链/源树/产物三层缓存）。全量门禁触发链：tag → release.yml →
 # workflow_call 复用 grammar.yml（I2 后其自身无 push 触发器）。
 # E2E 依赖 Playwright 浏览器下载：用 actions/cache 按 lockfile 哈希缓存 ms-playwright 目录。
-# E2E 分片（spec G）：e2e-prep 一次构建/语料 → 4 分片 artifact 共享 → e2e-report 聚合 HTML；workers=1 维持（2026-10-14 裁决）。
+# E2E 分片（spec G）：e2e-prep 一次构建/语料/生成物/server 二进制 → 4 分片 artifact 共享
+# （仓库树消费面 + 构建产物 + 预编译二进制三类「spec 进程直读面」均随 artifact 下发，
+# 见 tools/check-e2e-surfaces.mjs 清单）→ e2e-report 聚合 HTML；workers=1 维持
+# （2026-10-14 裁决）。
 name: CI
 
 on:
@@ -124,7 +127,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   e2e-prep:
-    name: e2e-prep（构建 + 语料，供分片共享）
+    name: e2e-prep（构建 + 语料 + 生成物 + server 二进制，供分片共享）
     runs-on: ubuntu-latest
     # spec G §7 落定：无 needs——与 web/rust 并行起跑；代价=web 失败时白跑一个
     # runner 的构建成本，知情接受
@@ -164,6 +167,19 @@ jobs:
       - run: pnpm --filter web build
         env:
           VV_GRAMMAR_CDN: https://cdn.grammars.test/grammars/
+      # server 二进制预编译（分片内零 Rust 编译，spec G §5 前置共享语义）：grammar
+      # 源树全量 1.9GB 不过 artifact——改由 prep 侧一次编译成二进制后下发。编译输入
+      # （server/grammars-manifest.json + assets/queries + 11 语言源树）皆在 prep 侧
+      # 在位（上方 setup-grammars --fetch 已产出源树），源集/profile 与旧单 e2e job
+      # 内「serverHarness 的 cargo build」逐字一致（11 语言 partial 构建，build.rs
+      # 语义不变）——故分片零编译即等价于旧单 job 面。
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+          # 与 rust job 的 cache key 分开（rust job 为 15 语言集，e2e-prep 为 11
+          # 语言集，target 目录不可混存）；key 仍按 Cargo.lock 哈希失效
+          key: rust-e2e-server
+      - run: cargo build --manifest-path server/Cargo.toml
       # 多源渲染语料不入库（避免上游许可证问题）：经下载脚本按 SOURCES 表拉取各上游
       # 仓固定 commit 的文件到 apps/web/e2e/fixtures/corpus/<source-id>/（幂等，失败清单记
       # manifest）；github.token 提升 API 限流（匿名 60 → 1000 req/h）
@@ -175,6 +191,10 @@ jobs:
       # PDF-RANGE-01/02/03/05/06/07 会 skip（spec existsSync 守卫），此处保证 CI 真跑非 skip
       - uses: astral-sh/setup-uv@v6
       - run: uv run tools/gen-e2e-pdf-linearized.py
+      # 产出面自检（与分片侧同一份清单，tools/check-e2e-surfaces.mjs）：prep 侧缺件
+      # 即在上传前红——避免把缺件 artifact 发给 4 个分片再各自红。
+      - name: 仓库树消费面自检（产出面）
+        run: node tools/check-e2e-surfaces.mjs --stage=producer
       # artifact ①：preview 伺服面——kit 3 vite preview 伺服 .svelte-kit/output/{client,server}
       #（adapter 部署产物 build/ 非输入）；wasm/引擎产物已随 client 树（build 期 static/ 拷贝）。
       # include-hidden-files：v4+ 引擎默认排除 dotfiles（output/{client,server}/.vite/manifest.json
@@ -199,6 +219,72 @@ jobs:
           include-hidden-files: true
           retention-days: 1
           if-no-files-found: error
+      # artifact ③：adapter-static 部署产物（apps/web/build）——「构建产物消费面」：
+      # b-sw-runtime-cache 读 sw.js 与 _app/immutable（产物层断言 + 构建期 env 反查）、
+      # b-ext-bindings 反查构建期 env 镜像域、m5/m6/b-git-panel 以其作 server --web-dist。
+      # plan Review Focus 5 漏盘此类消费面（只盘了 corpus 运行时消费面）→ 分片侧
+      # 目录缺失即 ENOENT/404 整域红。build/ 与 .svelte-kit/output/client 内容高度
+      # 重叠但语义不同（build/ 是部署产物，含 adapter 的 fallback index.html）。
+      - uses: actions/upload-artifact@v7
+        with:
+          name: e2e-web-static
+          path: apps/web/build
+          retention-days: 1
+          if-no-files-found: error
+      # artifact ④：仓库树生成物（「仓库树消费面」）——spec 进程在模块求值期直读的
+      # 生成物（spec F 出库不入库）：@bhxch/vviewer-core barrel 的 generated-extensions
+      # （9 个 spec 顶层 import）、themes.json（t-theme 顶层 readFileSync）、
+      # languages.json（highlight 包 langdetect 静态 JSON import）。
+      # 刻意**不下发** server/grammars-manifest.json 与 assets/queries：二者是 cargo
+      # build.rs 的编译期输入，分片内不编译 Rust——下发而无 grammar 源树会让误触发的
+      # cargo build 静默产出「0 grammar」partial 构建（无声降级），缺件时 build.rs 的
+      # panic（显式指向 pnpm gen:sources）才是正确形态。
+      - name: 汇集仓库树生成物（分片进程直读面）
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/e2e-repo-tree"
+          rm -rf "$stage"
+          mkdir -p "$stage/packages/vviewer-core/src/registry" "$stage/packages/vviewer-highlight/assets"
+          cp packages/vviewer-core/src/registry/generated-extensions.ts "$stage/packages/vviewer-core/src/registry/"
+          cp packages/vviewer-highlight/assets/themes.json "$stage/packages/vviewer-highlight/assets/"
+          cp packages/vviewer-highlight/assets/languages.json "$stage/packages/vviewer-highlight/assets/"
+          find "$stage" -type f | sort
+      - uses: actions/upload-artifact@v7
+        with:
+          name: e2e-repo-tree
+          path: ${{ runner.temp }}/e2e-repo-tree
+          retention-days: 1
+          if-no-files-found: error
+      # artifact ⑤：预编译 server 二进制（分片零 cargo 编译）——grammar 源树 1.9GB
+      # 不过 artifact，故 prep 侧编译后下发；分片侧 serverHarness 见
+      # VV_SERVER_BIN_PREBUILT=1 即跳过 cargo build 直接 spawn。
+      - uses: actions/upload-artifact@v7
+        with:
+          name: e2e-server-bin
+          path: server/target/debug/vviewer
+          retention-days: 1
+          if-no-files-found: error
+      # artifact ⑥：用例清单基线（spec G §5「用例守恒」锚的自动化）——全量与四分片的
+      # `--list` 计数在 prep 侧一次采齐，断言 Σ(分片)==全量，分片侧逐项比对。
+      # `--list` 会加载全部 spec 文件：任一 spec 模块加载失败（生成物/资产表缺失）
+      # 在此步即确定性报错——把「整文件用例集体 error」挡在用例执行之前。
+      - name: 采集用例清单基线（全量 + 四分片，断言守恒）
+        run: |
+          set -euo pipefail
+          list_dir="$RUNNER_TEMP/e2e-list"
+          mkdir -p "$list_dir"
+          export PLAYWRIGHT_BLOB_OUTPUT_DIR="$list_dir/blob-list"
+          pnpm --filter web exec playwright test --list > "$list_dir/list-full.txt"
+          for s in 1 2 3 4; do
+            pnpm --filter web exec playwright test --list --shard=$s/4 > "$list_dir/list-shard-$s.txt"
+          done
+          node tools/e2e-list-guard.mjs baseline "$list_dir"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: e2e-list-baseline
+          path: ${{ runner.temp }}/e2e-list/list-baseline.json
+          retention-days: 1
+          if-no-files-found: error
 
   e2e:
     name: e2e（Playwright chromium ${{ matrix.shard }}）
@@ -217,18 +303,56 @@ jobs:
       # matrix.shard 值含 '/' 不合法于 artifact name——归一 SHARD_NAME（1/4→1-4）
       - name: 归一分片名（artifact name 合法化）
         run: echo "SHARD_NAME=$(printf '%s' '${{ matrix.shard }}' | tr '/' '-')" >> "$GITHUB_ENV"
-      # 分片共享前置产物（分片内零 setup-grammars/零 build/零语料步）：wasm 与引擎
-      # 产物已随 .svelte-kit/output/client 下发（build 期 static/ 拷贝），语料运行时
-      # 消费面为 spec 进程读 apps/web/e2e/fixtures/corpus/ 相对路径——双侧同路径保
-      # artifact 根布局约定无关
+      # 分片共享前置产物（分片内零 setup-grammars/零 build/零语料步/零 cargo 编译）：
+      # 五类「spec 进程消费面」逐一下发，缺一即整文件用例 error（非断言红）——
+      #   ① e2e-web-build  = preview 伺服面（kit 3 vite preview 读 .svelte-kit/output；
+      #      wasm/引擎产物已随 client 树下发，build 期 static/ 拷贝）
+      #   ② e2e-web-static = adapter-static 部署产物（apps/web/build：产物层断言面 +
+      #      构建期 env 反查面 + server --web-dist 面）
+      #   ③ e2e-corpus     = 多源渲染语料 + PDF 夹具（spec 进程读相对路径，双侧同
+      #      路径保 artifact 根布局约定无关）
+      #   ④ e2e-repo-tree  = 仓库树生成物（Node 侧 barrel/资产表，模块求值期直读）
+      #   ⑤ e2e-server-bin = 预编译 server 二进制（grammar 源树 1.9GB 不过 artifact，
+      #      分片内零 Rust 编译即等价于旧单 e2e job 的 cargo build 面）
       - uses: actions/download-artifact@v8
         with:
           name: e2e-web-build
           path: apps/web/.svelte-kit/output
       - uses: actions/download-artifact@v8
         with:
+          name: e2e-web-static
+          path: apps/web/build
+      - uses: actions/download-artifact@v8
+        with:
           name: e2e-corpus
           path: apps/web/e2e/fixtures/corpus
+      - uses: actions/download-artifact@v8
+        with:
+          name: e2e-repo-tree
+          path: ${{ github.workspace }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: e2e-server-bin
+          path: server/target/debug
+      # artifact 打包可能丢 unix mode 位——显式补可执行位（spawn 直依赖）
+      - name: server 二进制可执行位
+        run: chmod +x server/target/debug/vviewer
+      - uses: actions/download-artifact@v8
+        with:
+          name: e2e-list-baseline
+          path: ${{ runner.temp }}/e2e-list
+      # 消费面自检（与 prep 侧同一份清单）：缺件即在跑用例前红，而非 190 个用例集体 error
+      - name: 仓库树消费面自检（消费面）
+        run: node tools/check-e2e-surfaces.mjs --stage=consumer
+      # 用例清单守恒（spec G §5 锚的自动化）：`--list` 会加载全部 spec 文件——生成物/
+      # 资产表缺失即此步确定性报错；计数与 prep 侧基线逐项比对（--list 模式不启动
+      # webServer，playwright listMode 任务表不含 plugin setup——实测 runner 内安全）
+      - name: 分片用例清单采集与守恒校验
+        run: |
+          set -euo pipefail
+          export PLAYWRIGHT_BLOB_OUTPUT_DIR="$RUNNER_TEMP/blob-list"
+          pnpm --filter web exec playwright test --list --shard=${{ matrix.shard }} > "$RUNNER_TEMP/list-shard.txt"
+          node tools/e2e-list-guard.mjs check "$RUNNER_TEMP/list-shard.txt" "$RUNNER_TEMP/e2e-list/list-baseline.json" '${{ matrix.shard }}'
       # Playwright 浏览器缓存（chromium ~150MB，按 lockfile 哈希失效；key 与原单
       # e2e job 逐字一致）——系统级 apt 依赖不过 artifact，--with-deps 每分片必装
       - uses: actions/cache@v6
@@ -242,7 +366,11 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ripgrep
       # playwright.config 的 webServer 在 CI 下自行启动 vite preview（CI 环境变量内置），
       # 每 shard 独立实例伺服下载的 .svelte-kit/output（config 零改动）
+      # VV_SERVER_BIN_PREBUILT=1：serverHarness 跳过 cargo build 直 spawn 下发的
+      # 预编译二进制（分片内零 Rust 编译）
       - run: pnpm --filter web exec playwright test --shard=${{ matrix.shard }}
+        env:
+          VV_SERVER_BIN_PREBUILT: '1'
       # blob 每 shard always 上传（e2e-report 聚合依赖，失败也传供分诊）；硬失败无
       # blob 时 ignore 防红噪声（T1 实锚：空跑分片亦产合法空 zip）
       - uses: actions/upload-artifact@v7
@@ -288,11 +416,14 @@ jobs:
         run: pnpm --filter web exec playwright merge-reports --reporter=html blob-report
         env:
           PLAYWRIGHT_HTML_OUTPUT_DIR: ${{ github.workspace }}/apps/web/playwright-report
-      # HTML 报告为失败分诊主载体（比 trace 7 天长）：合并失败也上传已合成面
+      # HTML 报告为失败分诊主载体（比 trace 7 天长）：合并失败也上传已合成面。
+      # if-no-files-found: warn（不 error）——合并步失败即无 playwright-report 目录，
+      # 用 error 会以「No files were found」二次翻红（与「合并失败也上传已合成面」的
+      # 兜底意图相反：兜底不该制造第二个错误）；合并失败的真信号在合并步本身。
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: e2e-html-report
           path: apps/web/playwright-report
           retention-days: 14
-          if-no-files-found: error
+          if-no-files-found: warn

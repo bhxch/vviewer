@@ -1,4 +1,5 @@
 import { execSync, spawn, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
 
 /**
  * m5/m6 spec 共享的 server 生命周期 harness（终审批次 C 抽取）：
@@ -7,6 +8,13 @@ import { execSync, spawn, type ChildProcess } from 'node:child_process';
  *   原来表现为 spawn 后 os error 98 bind 失败，信息晦涩）；
  * - 停止：SIGTERM 宽限 5s 后 SIGKILL 兜底（终审 M2/M5：某些挂起态下 SIGTERM
  *   不达，遗留进程会占住端口毒化下一轮 E2E）。
+ *
+ * CI 分片形态（spec G §5 前置共享语义）：VV_SERVER_BIN_PREBUILT=1 时**跳过**
+ * cargo build 直 spawn 下发的预编译二进制——grammar 源树（11 语言全量 1.9GB）
+ * 不过 artifact，分片内若各自 cargo build 即 4 片全量 Rust 编译（冲掉
+ * 「e2e job wall ≤10m」锚）；二进制改由 e2e-prep 一次编译后经 artifact 下发
+ * （与旧单 e2e job 内「cargo build + spawn」同源集同 profile）。
+ * 缺省（本地开发）仍走 cargo 增量编译，语义不变。
  */
 
 export interface ServerOptions {
@@ -53,7 +61,17 @@ export async function assertPortFree(url: string): Promise<void> {
 
 /** 编译并启动 server（root 由调用方指向临时 fixture 目录） */
 export function startVviewerServer(opts: ServerOptions): ChildProcess {
-  execSync('cargo build --manifest-path server/Cargo.toml', { cwd: opts.repoRoot, stdio: 'inherit' });
+  if (process.env.VV_SERVER_BIN_PREBUILT === '1') {
+    // 预编译二进制形态（CI 分片）：不再 cargo build，只校验二进制在位——缺件即
+    // 显式报错（否则 spawn 报 ENOENT，错误信息不指向根因）
+    if (!existsSync(opts.binPath)) {
+      throw new Error(
+        `预编译 server 二进制缺失：${opts.binPath}（CI 分片应由 e2e-prep 编译并经 artifact 下发）`
+      );
+    }
+  } else {
+    execSync('cargo build --manifest-path server/Cargo.toml', { cwd: opts.repoRoot, stdio: 'inherit' });
+  }
   const server = spawn(
     opts.binPath,
     [
