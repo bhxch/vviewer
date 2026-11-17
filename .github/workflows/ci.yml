@@ -3,6 +3,7 @@
 # 自建，免 emcc；工具链/源树/产物三层缓存）。全量门禁触发链：tag → release.yml →
 # workflow_call 复用 grammar.yml（I2 后其自身无 push 触发器）。
 # E2E 依赖 Playwright 浏览器下载：用 actions/cache 按 lockfile 哈希缓存 ms-playwright 目录。
+# E2E 分片（spec G）：e2e-prep 一次构建/语料 → 4 分片 artifact 共享 → e2e-report 聚合 HTML；workers=1 维持（2026-10-14 裁决）。
 name: CI
 
 on:
@@ -122,23 +123,18 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-  e2e:
-    name: e2e（Playwright chromium）
+  e2e-prep:
+    name: e2e-prep（构建 + 语料，供分片共享）
     runs-on: ubuntu-latest
-    needs: web
+    # spec G §7 落定：无 needs——与 web/rust 并行起跑；代价=web 失败时白跑一个
+    # runner 的构建成本，知情接受
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
+        with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      # Playwright 浏览器缓存（chromium ~150MB，按 lockfile 哈希失效）
-      - uses: actions/cache@v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      # 与原单 e2e job 逐字一致的 11 语言输入（缓存键不变=仍命中）；用例资产理由：
       # e2e 高亮断言依赖真实 wasm（m1 js / m2 ts+rs / m3 围栏 ts+bash）；
       # java 供 b-grammar-layers 分层链用例（同源缺失 → CDN 层兜底）的资产来源；
       # yaml 供 t-hl BUG-37 用例（yaml 外置 scanner 修复后需真 yaml wasm）；
@@ -147,8 +143,6 @@ jobs:
       - uses: ./.github/actions/setup-grammars
         with:
           languages: javascript,typescript,bash,html,css,json,python,rust,java,yaml,ocaml
-      # b-grammar-layers 用例要求构建期注入 CDN 层 base（mock CDN，不依赖外网）；
-      # 与 spec 内 mock 的路由前缀严格一致（base 同时容纳 manifest.json 与 *.wasm）
       # wasm-bindgen CLI 供给缓存（同 web job：脚本自供给官方预编译二进制，此处仅承载缓存）
       - uses: actions/cache@v6
         with:
@@ -164,32 +158,132 @@ jobs:
         with:
           workspaces: packages/vviewer-render-diagram/tools/svgbob-wasm
       - run: pnpm gen:svgbob-wasm
+      # b-grammar-layers 用例要求构建期注入 CDN 层 base（mock CDN，不依赖外网）；
+      # 与 spec 内 mock 的路由前缀严格一致（base 同时容纳 manifest.json 与 *.wasm）；
+      # env 内联形态与原单 e2e job 逐字一致（CI prep 不走本地 build:e2e 包装，等值）
       - run: pnpm --filter web build
         env:
           VV_GRAMMAR_CDN: https://cdn.grammars.test/grammars/
-      # m6 远程 rg 通道断言依赖 runner 提供 ripgrep（health searchEngine=rg）：新
-      # runner 镜像不再预装（2026-10-14 CI 实证降级 grep），显式安装保通道真实
-      - run: sudo apt-get update && sudo apt-get install -y ripgrep
-      - run: pnpm --filter web exec playwright install --with-deps chromium
-      # 多源渲染语料不入库（避免上游许可证问题）：e2e 前经下载脚本按 SOURCES 表拉取各上游
+      # 多源渲染语料不入库（避免上游许可证问题）：经下载脚本按 SOURCES 表拉取各上游
       # 仓固定 commit 的文件到 apps/web/e2e/fixtures/corpus/<source-id>/（幂等，失败清单记
       # manifest）；github.token 提升 API 限流（匿名 60 → 1000 req/h）
       - run: node tools/fetch-e2e-corpus.mjs
         env:
           GITHUB_TOKEN: ${{ github.token }}
-      # plan5 pdf-range 域夹具（linearized PDF，corpus 惯例 binary 不入库）：e2e 前由库内
+      # plan5 pdf-range 域夹具（linearized PDF，corpus 惯例 binary 不入库）：由库内
       # 生成器确定性再生（PEP-723 inline 依赖 pikepdf，uv run 免 --with）；缺失时
       # PDF-RANGE-01/02/03/05/06/07 会 skip（spec existsSync 守卫），此处保证 CI 真跑非 skip
       - uses: astral-sh/setup-uv@v6
       - run: uv run tools/gen-e2e-pdf-linearized.py
-      # playwright.config 的 webServer 在 CI 下自行启动 vite preview（CI 环境变量内置）
-      - run: pnpm --filter web exec playwright test
+      # artifact ①：preview 伺服面——kit 3 vite preview 伺服 .svelte-kit/output/{client,server}
+      #（adapter 部署产物 build/ 非输入）；wasm/引擎产物已随 client 树（build 期 static/ 拷贝）
+      - uses: actions/upload-artifact@v7
+        with:
+          name: e2e-web-build
+          path: apps/web/.svelte-kit/output
+          retention-days: 1
+          if-no-files-found: error
+      # artifact ②：语料 + PDF 夹具（pdf-linearized 在 corpus 树内一并覆盖）
+      - uses: actions/upload-artifact@v7
+        with:
+          name: e2e-corpus
+          path: apps/web/e2e/fixtures/corpus
+          retention-days: 1
+          if-no-files-found: error
+
+  e2e:
+    name: e2e（Playwright chromium ${{ matrix.shard }}）
+    runs-on: ubuntu-latest
+    needs: [web, e2e-prep]
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ['1/4', '2/4', '3/4', '4/4']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      # matrix.shard 值含 '/' 不合法于 artifact name——归一 SHARD_NAME（1/4→1-4）
+      - name: 归一分片名（artifact name 合法化）
+        run: echo "SHARD_NAME=$(printf '%s' '${{ matrix.shard }}' | tr '/' '-')" >> "$GITHUB_ENV"
+      # 分片共享前置产物（分片内零 setup-grammars/零 build/零语料步）：wasm 与引擎
+      # 产物已随 .svelte-kit/output/client 下发（build 期 static/ 拷贝），语料运行时
+      # 消费面为 spec 进程读 apps/web/e2e/fixtures/corpus/ 相对路径——双侧同路径保
+      # artifact 根布局约定无关
+      - uses: actions/download-artifact@v8
+        with:
+          name: e2e-web-build
+          path: apps/web/.svelte-kit/output
+      - uses: actions/download-artifact@v8
+        with:
+          name: e2e-corpus
+          path: apps/web/e2e/fixtures/corpus
+      # Playwright 浏览器缓存（chromium ~150MB，按 lockfile 哈希失效；key 与原单
+      # e2e job 逐字一致）——系统级 apt 依赖不过 artifact，--with-deps 每分片必装
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm --filter web exec playwright install --with-deps chromium
+      # m6 远程 rg 通道断言依赖 runner 提供 ripgrep（health searchEngine=rg）：新
+      # runner 镜像不再预装（2026-10-14 CI 实证降级 grep），显式安装保通道真实——
+      # 系统级前置不过 artifact，每分片自装
+      - run: sudo apt-get update && sudo apt-get install -y ripgrep
+      # playwright.config 的 webServer 在 CI 下自行启动 vite preview（CI 环境变量内置），
+      # 每 shard 独立实例伺服下载的 .svelte-kit/output（config 零改动）
+      - run: pnpm --filter web exec playwright test --shard=${{ matrix.shard }}
+      # blob 每 shard always 上传（e2e-report 聚合依赖，失败也传供分诊）；硬失败无
+      # blob 时 ignore 防红噪声（T1 实锚：空跑分片亦产合法空 zip）
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: blob-report-${{ env.SHARD_NAME }}
+          path: apps/web/blob-report
+          retention-days: 1
+          if-no-files-found: ignore
       # 失败用例 trace 取证（config 的 trace: retain-on-failure）：真实 fetch 时序
-      # 类缺陷的远程复现证据（网络面板/DOM 快照），本地不落盘仅 CI 收集
+      # 类缺陷的远程复现证据（网络面板/DOM 快照），本地不落盘仅 CI 收集；名称分片化防覆盖
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: playwright-traces
+          name: playwright-traces-${{ env.SHARD_NAME }}
           path: apps/web/test-results/
           retention-days: 7
           if-no-files-found: ignore
+
+  e2e-report:
+    name: e2e 报告合并（merge-reports HTML）
+    runs-on: ubuntu-latest
+    needs: [e2e]
+    # spec §3.3「失败也聚合」意图的形式细化：failure 也跑，skipped/cancelled 不跑
+    #（always() 在上游 skip/cancel 时仍起跑聚合 job，无 blob 可下载必翻红添噪声）
+    if: ${{ !cancelled() && needs.e2e.result != 'skipped' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      # 四分片 blob 合流入一目录（pattern + merge-multiple：v4+ 能力，release.yml
+      # 已有 download-artifact@v8 先例）
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: blob-report-*
+          merge-multiple: true
+          path: apps/web/blob-report
+      # cwd=apps/web（--filter exec）——dir 参数相对 cwd；html 输出 env 钉绝对路径
+      #（playwright lib/runner/index.js:3684）
+      - name: 合并分片 blob 报告为 HTML
+        run: pnpm --filter web exec playwright merge-reports --reporter=html blob-report
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: ${{ github.workspace }}/apps/web/playwright-report
+      # HTML 报告为失败分诊主载体（比 trace 7 天长）：合并失败也上传已合成面
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: e2e-html-report
+          path: apps/web/playwright-report
+          retention-days: 14
+          if-no-files-found: error
