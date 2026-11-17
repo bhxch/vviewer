@@ -7,6 +7,11 @@ export default defineConfig({
   // 类时序断言系统性漂红（2026-10-14 CI 首跑 28 failed，2 核受限本地复现同病）——
   // CI 收敛单 worker：页面前后台节流与 CPU 争抢面消除，时长换确定性
   workers: process.env.CI ? 1 : 3,
+  // spec G §3.3：CI 双 reporter——blob 供 e2e-report job merge-reports 聚合（每分片
+  // 落 apps/web/blob-report/report-0X.zip，随分片 artifact 上传），line 保留实时可读
+  // 输出（原 CI 缺省为 dot，playwright lib/runner/index.js:573）；本地维持缺省 list
+  // 不产 blob——blob 落盘/上传是纯 CI 消费面（spec §6 裁量：本地不承担合并供体）。
+  reporter: process.env.CI ? [['blob'], ['line']] : [['list']],
   // 共享机器存在外部负载波动（实测一轮总时长 35s ↔ 3.1m），瞬态失败重试一次
   retries: 1,
   use: {
