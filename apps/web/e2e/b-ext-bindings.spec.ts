@@ -217,7 +217,8 @@ const DATA_SQL_WASM_REL_PATH = 'wasm/data/sql-wasm.wasm';
  * 构建期 env 层（VV_FOREIGN_ASSETS 镜像域）的实际注入值：vite define 以字符串字面量
  * 注入（apps/web/vite.config.ts:819），e2e 跑的是构建产物 → 从产物反查。
  * 构建目录缺失 / 候选不唯一 → 按「未注入」处理（CI 的 e2e 构建只注入
- * VV_GRAMMAR_CDN，ci.yml:163-165 → 链首层 = 同源槽或缺省 CDN 层）。
+ * VV_GRAMMAR_CDN——e2e-prep job 的 build 步，ci.yml:167-169 → 链首层 = 同源槽或
+ * 缺省 CDN 层；产物随 e2e-web-static artifact 下发到分片 runner）。
  */
 function buildEnvMirrorBase(): string | null {
   const buildDir = `${repoRoot}/apps/web/build`;

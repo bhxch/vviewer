@@ -35,8 +35,9 @@ import type { AddressInfo } from 'node:net';
  * - SW 缓存一律用 caches API 断言（page.route 对经 SW 的请求恒为 0——请求由 SW 的
  *   fetch 事件发起，不进页面网络栈）。
  * - 不写死注册面数量；路由归属用「族前缀 + 恰好一个持有者」表达。
- * - 产物层断言（路由表 / 清理正则）读 apps/web/build 产物——CI 在 e2e 前跑
- *   `pnpm --filter web build`（.github/workflows/ci.yml:163），产物为当次构建。
+ * - 产物层断言（路由表 / 清理正则）读 apps/web/build 产物——CI 由 e2e-prep job 的
+ *   `pnpm --filter web build` 步产出（.github/workflows/ci.yml:167-169），随
+ *   e2e-web-static artifact 下发到分片 runner，产物为当次构建。
  *
  * 真实产品缺陷已修、锚转正式断言（docs/e2e/README.md §3.2 第 4 条口径）：
  * - SWR-CLEAN-01 / SWR-CLEAN-02：genSwCleanup 的 current 清单含 vv-worker-wasm

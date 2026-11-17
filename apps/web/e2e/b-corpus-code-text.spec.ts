@@ -54,7 +54,7 @@ import { injectDir, openTreeFile, type TextFileSpec } from './b-markdown-html-do
  * （helpers 对非 md 给 text/html）：分派链只消费 name+字节（core detect/index.ts:17-28），
  * MIME 不在链上。
  * 容错：manifest.json 不可读 → 单守卫用例跳过；逐用例 fs.existsSync 对清单文件容错 skip。
- * 环境去噪：grammar-CDN（ci.yml:99 注入 VV_GRAMMAR_CDN=cdn.grammars.test）/favicon/kroki
+ * 环境去噪：grammar-CDN（e2e-prep job 的 build 步，ci.yml:167-169 注入 VV_GRAMMAR_CDN=cdn.grammars.test）/favicon/kroki
  * route fulfill（b-md-corpus-markpad mockExternalNoise 同款，须先于 goto 注册）。
  */
 
@@ -149,7 +149,7 @@ function collectPageErrors(page: Page): string[] {
 
 /** 环境去噪 route（b-md-corpus-markpad mockExternalNoise 同款）：须在 goto 前注册。
  *  grammar-CDN 层：门禁构建注入 VV_GRAMMAR_CDN=https://cdn.grammars.test/grammars/
- *  （ci.yml:99），每次页面加载都会发 CDN manifest 请求——fulfill 合法空清单（
+ *  （e2e-prep job 的 build 步，ci.yml:167-169），每次页面加载都会发 CDN manifest 请求——fulfill 合法空清单（
  *  b-grammar-spa-fallback GRF-05 同惯例）：语言跳层 hljs 兜底，无资源级错误。
  *  favicon fulfill 204；kroki fulfill svg（本组 md 语料理论上可含 kroki 型围栏，
  *  防御性保留同款遮罩——img 加载成功不产资源级 console error）。 */

@@ -85,7 +85,7 @@
 ### 3.3 已知边界与现状保护项（非缺陷，备查）
 
 - **BND-07 的同源层断言是「现状保护锚」且当前不入判据**：`FOREIGN_ASSETS_SAME_ORIGIN_PREFIX` 当前为空串（`foreignAssets.ts:21`，plan 4 待接线），产品不可能发出该前缀的请求 → 写「零请求」是恒真断言，故本域改为：同源层未接线时明确标注「该层不在本次判据内」（控制台说明），接线后（源常量非空）断言「请求落同源前缀」。拦截面不再硬编码 `**/file-viewer-assets/**`（产品源码里根本不存在的路径约定）。
-- **BND-07 的 env 层（构建期 define）已可判**：env 层由 `vite.config.ts:819` 以字符串字面量注入，e2e 跑的是构建产物 → spec 从构建产物反查该字面量（foreignAssets 模块 chunk 内除 CDN 默认基座外的唯一 URL 字面量），据此把链首层期望切到镜像域；构建目录缺失或候选不唯一时按「未注入」处理（CI 的 e2e 构建只注入 `VV_GRAMMAR_CDN`，`ci.yml:163-165`）。
+- **BND-07 的 env 层（构建期 define）已可判**：env 层由 `vite.config.ts:819` 以字符串字面量注入，e2e 跑的是构建产物 → spec 从构建产物反查该字面量（foreignAssets 模块 chunk 内除 CDN 默认基座外的唯一 URL 字面量），据此把链首层期望切到镜像域；构建目录缺失或候选不唯一时按「未注入」处理（CI 的 e2e 构建只注入 `VV_GRAMMAR_CDN`——e2e-prep job 的 build 步，`.github/workflows/ci.yml:167-169`；产物随 `e2e-web-static` artifact 下发到分片 runner，目录缺失即落此处的「未注入」兜底分支）。
 - **BND-07 的资产请求与产品行为耦合**：sql-wasm 的拉取发生在 `initSqlJs({locateFile})` 之前、DB 解析之后（上游 dist 实码），故任意 `.sqlite` 载荷都会触发该请求；若上游改为「先校验 sqlite 头再加载 wasm」，本锚的「命中 mock」计数会归零而红（属产品行为变更信号，非测试缺陷）。
 - **av 的视频/音频形态断言口径**：媒体运行期解码失败时，av 渲染器自办错误卡（`av.ts` `showMediaError`，文案「无法播放此媒体：…」）并摘除媒体元素——媒体元素是**短命面**，故 BND-02/03 以「渲染器归属（状态栏 + 候选面）+ hex/code 面缺席」为判据，不断言媒体元素的存活时长。
 - **4 字节 zstd 魔数会被判为文本**（实测）：`looksTextual`（`magic.ts`）以「无 NUL 且控制字符占比 ≤5%」判文本，4 字节 `28 B5 2F FD` 无 NUL → 判文本 → 未绑定扩展名落 **code** 面而非 hex 面。BND-10 的 `inner.zst` 载荷因此补了 NUL 尾字节（8 字节），使其与顶层 `.zst`（BND-05，32 字节带 NUL）同机制落 hex 兜底。此为探测链现状（不是缺陷登记项），但会影响任何以 zstd 魔数构造的小载荷用例。

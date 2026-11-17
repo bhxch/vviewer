@@ -27,7 +27,7 @@ import { setComputePolicy } from './settings-center';
  * - HL-11/2：解析期 rAF 帧率观测（既有 HL-11 只断交互 dispatch 耗时）。
  *
  * 构建形态前提（HL-02 依赖）：CI e2e 构建注入 VV_GRAMMAR_CDN=https://cdn.grammars.test/grammars/
- * （.github/workflows/ci.yml:88，假域名 DNS 必败 → CDN 层跳过）；本地 `pnpm build` 未注入时
+ * （e2e-prep job 的 build 步，.github/workflows/ci.yml:167-169，假域名 DNS 必败 → CDN 层跳过）；本地 `pnpm build` 未注入时
  * vite define 置空串（apps/web/vite.config.ts:222）→ CDN 层不发起。两种形态下 perl 均不在
  * lite 内嵌集（apps/web/static/grammars/manifest.json 34 项无 perl）→ hljs 兜底。
  * 若本地以可达 CDN 构建，HL-02 会以 tree-sitter 到达而失败——属环境不符，非产品缺陷。

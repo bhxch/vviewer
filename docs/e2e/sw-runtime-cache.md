@@ -78,7 +78,7 @@
 | SWR-ROUTE-05 | 真网可达（**用页面 fetch 探可达性**，非 200/失败即 `test.skip`——CDN-01/CDN-04 同策略） | ① no-cors fetch（opaque 应答）；② cors fetch（200 应答） | ① opaque（status 0）**不入**任何 `vv-*` 缓存（`statuses:[200]` 拒收 status 0）；② 恰好被 1 个 `vv-*` 缓存持有且族为 `vv-foreign-assets-*`（**不被 jsdelivr 通配路由截胡**） | 缺口 2（跨域侧）+ 跨域应答形态 |
 | SWR-ROUTE-06 | 真网可达（同上，页面 fetch 口径） | fetch `https://cdn.jsdelivr.net/npm/lodash@4.17.21/package.json` | 恰好被 1 个 `vv-*` 缓存持有且族为 `vv-cdn-engines-*`（不被 foreign 路由截胡） | 缺口 2（跨域侧） |
 | SWR-ROUTE-07 | 同上（**已转正式断言**） | fetch `/file-viewer-assets/swr-spa.js`（服务端 404——修复后契约：非导航 fetch 的未知资产由 Accept 收窄回 404）；再 fetch 同族 200 wasm 探针并等其入缓存 | 未知资产 fetch 应答 404；同族 wasm 探针入缓存（put 通道已跑通）；**404 不入 `vv-foreign-assets` 缓存**（`cacheableResponse` 只收 200，拒收 404） | **SWR-DEF-01（已修）** |
-| SWR-TABLE-01 | `apps/web/build/sw.js` 存在（CI 在 e2e 前 `pnpm --filter web build`，`.github/workflows/ci.yml:163`） | 解析产物 `registerRoute` 调用表（含 plugins 段与 method 参数），按 workbox 匹配语义（正则对完整 URL 匹配；跨域须从头匹配）解析 9 条代表 URL | 每条 URL 首个命中路由：族归属符合预期（先匹配先赢）、处理器为 `CacheFirst`、方法为 `GET`、`statuses` 恰为 `[200]`、配 `maxEntries>0` 与 `purgeOnQuotaError`；`vv-runtime` 族两条路由共用同一 cacheName 且同一 maxEntries | 缺口 2/3（离线可验面）+ 路由表全参契约 |
+| SWR-TABLE-01 | `apps/web/build/sw.js` 存在（CI 由 e2e-prep job 的 `pnpm --filter web build` 步产出并随 `e2e-web-static` artifact 下发到分片 runner，`.github/workflows/ci.yml:167-169`） | 解析产物 `registerRoute` 调用表（含 plugins 段与 method 参数），按 workbox 匹配语义（正则对完整 URL 匹配；跨域须从头匹配）解析 9 条代表 URL | 每条 URL 首个命中路由：族归属符合预期（先匹配先赢）、处理器为 `CacheFirst`、方法为 `GET`、`statuses` 恰为 `[200]`、配 `maxEntries>0` 与 `purgeOnQuotaError`；`vv-runtime` 族两条路由共用同一 cacheName 且同一 maxEntries | 缺口 2/3（离线可验面）+ 路由表全参契约 |
 | SWR-TABLE-02 | 同上 | 解析产物 `importScripts` 路径与 `manifest.webmanifest` 的 scope；解析客户端产物的 SW 注册 URL/scope | 清理脚本 importScripts 目录与 manifest scope 目录一致（base 接线正确）；importScripts 目标为 `vv-sw-cleanup.js`；SW 注册 URL 为相对路径或带 base 前缀、scope 为 `./` 或与 manifest scope 一致 | VV_BASE_PATH 子路径部署面 |
 | SWR-MIRROR-01 | 同上；从构建产物注入字面量读出构建期 `VV_FOREIGN_ASSETS` 值 | 解析产物路由表，按 env 值推导期望的绝对 URL 路由条数（env 空⇒2、env 非空且 http(s)⇒3） | 绝对 URL 路由条数 == env 推导值；每条绝对 URL 路由：字面前缀可命中 + 元字符已转义（按字面匹配）+ 归属 foreign 族或 cdn-engines 族；env 非空时镜像路由字面前缀恰为 env base 且归 foreign 族；env 空时跨域主机集合恰为 `{cdn.jsdelivr.net}` | 残余 A8 零锚（双态） |
 | SWR-EXP-01 | 同上；应用启动会预热 `/tree-sitter.wasm` 并入 `vv-runtime` 族（`highlightClient.ts:297`），故族内基线非零 | 经 **tree-sitter 与 libarchive 两条不同路由**写入 6 条不同 URL 到 `vv-runtime` 族 | 族内条目数 ≤ maxEntries(4)；本用例写入的 6 条中至少 2 条被逐出（无过期插件则全留→红）；逐出非全清（族内仍有条目） | expiration 配额（maxEntries）+ 共用族挤占 |
@@ -203,8 +203,9 @@ harness**（cargo build + spawn vviewer 二进制 + `/api/health` 轮询），�
 
 ### 4.2 数据与环境依赖
 
-- **构建产物依赖**：`apps/web/build/` 必须存在且为当次构建（CI 在 e2e 前跑
-  `pnpm --filter web build`，`.github/workflows/ci.yml:163`）。产物陈旧时
+- **构建产物依赖**：`apps/web/build/` 必须存在且为当次构建（CI 由 e2e-prep job 的
+  `pnpm --filter web build` 步产出，随 `e2e-web-static` artifact 下发到分片 runner，
+  `.github/workflows/ci.yml:167-169`）。产物陈旧时
   SWR-TABLE-01/02、SWR-MIRROR-01、SWR-CLEAN-02/03 会因产物与源码不同步而红——先重跑 build。
 - **网络依赖**：仅 SWR-ROUTE-05/06 需要真网 jsdelivr（不可达即 skip，见 §2.1）。
 - **SW 默认开启**：本域不设 `serviceWorkers: 'block'`（阻断 SW 会使运行时缓存路由整体失效，

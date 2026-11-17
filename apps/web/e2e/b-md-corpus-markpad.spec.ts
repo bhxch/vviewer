@@ -112,7 +112,7 @@ async function openCorpus(page: Page, rel: string, visibleTimeout = 30_000): Pro
  *  kroki 围栏随渲染即发起；CDN 直链引擎的 jsdelivr +esm 模块图动辄百级请求，
  *  vega-embed 实测 27s+，语料锚不做真网测速——真网语义由 b-cdn-diagram-engines
  *  CDN-01 专锚承接）。
- *  CDN 层：门禁构建注入 VV_GRAMMAR_CDN=https://cdn.grammars.test/grammars/（ci.yml:99），三层链
+ *  CDN 层：门禁构建注入 VV_GRAMMAR_CDN=https://cdn.grammars.test/grammars/（e2e-prep job 的 build 步，ci.yml:167-169），三层链
  *  每次页面加载都会发 CDN manifest 请求——不 mock 会打真实 socket，资源级 console error
  *  （net::ERR_CONNECTION_CLOSED）污染 MC-34~36 汇总锚。fulfill 合法空清单（b-grammar-spa-fallback
  *  GRF-05 同惯例）：CDN 层成功返回空表，语言跳层 hljs 兜底，无 warn 无资源错误。

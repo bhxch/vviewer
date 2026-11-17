@@ -338,7 +338,7 @@ function collectConsoleErrors(page: Page): string[] {
 /**
  * 外部噪音 route：须在 goto 前注册。kroki（防御性预留，三源实测无 kroki 围栏）、
  * favicon 204、grammar-CDN 合法空清单（门禁构建注入 VV_GRAMMAR_CDN=https://cdn.grammars.test/
- * grammars/（ci.yml:99），三层链每次页面加载都发 CDN manifest 请求，不 mock 打真实
+ * grammars/（e2e-prep job 的 build 步，ci.yml:167-169），三层链每次页面加载都发 CDN manifest 请求，不 mock 打真实
  * socket 产生资源级 console error 污染汇总面——MC 系同款装置）、jsdelivr 外链 CSS 空
  * 文件（support_table/supported 上游原生 <link>）。
  */
