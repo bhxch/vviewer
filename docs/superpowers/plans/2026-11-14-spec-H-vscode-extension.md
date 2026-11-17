@@ -12,7 +12,7 @@
 
 ## 基线与实施顺序
 
-- **基线**：当前 HEAD `61d2e17`（main；= `eed783c` + 本计划初版 docs commit）。spec A/B/C/D/E/F/G/I 已全部落地（7 个 spec 的 commit 均在 HEAD）；**spec H 此前零落地**——实查 `rg "vviewer-vscode" .`（排除 node_modules）零命中，`apps/` 下仅 `desktop/`（Tauri 薄壳）与 `web/`（SvelteKit）两个目录，无 `apps/vscode`。本计划全部工作基于该 HEAD 展开。
+- **基线**：当前 HEAD `9e4ef1c`（main；= `eed783c` + 本计划初版 docs commit `61d2e17` + 第一轮评审修订 `9e4ef1c`；工作树 clean，源码面等价）。spec A/B/C/D/E/F/G/I 已全部落地（7 个 spec 的 commit 均在 HEAD）；**spec H 此前零落地**——实查 `rg "vviewer-vscode" .`（排除 node_modules）零命中，`apps/` 下仅 `desktop/`（Tauri 薄壳）与 `web/`（SvelteKit）两个目录，无 `apps/vscode`。本计划全部工作基于该 HEAD 展开。
 - **实施顺序**：Task 1 → Task 2 → Task 3 → Task 4 → Task 5 → Task 6 → Task 7，**严格串行**。理由：T1 的 workspace 包 + 构建链 + 资产脚本是 T2~T6 全部源码的宿主与门禁（无 `apps/vscode/tsconfig.json` 则后续任务无法 typecheck）；T2 的 custom editor 注册、文件字节通道与**扩展 i18n 目录/ESLint 纪律前置**是 T3 装配层的输入面（webview 拿不到字节即无渲染；首个用户可见文案即在 T2，故 i18n 纪律必须先于它落地）；T3 的注入缝、样式注入面与 CSP 是 T4 高亮链路与 T5 toc/导出的挂载点（缝一次性注入，重复注入即语义漂移）；T4 的 tree-sitter worker 与资产 URI 依赖 T1 的资产脚本产物；T5 的 toc/导出依赖 T3 的渲染实例面（`getToc`/`getOutline` 鸭子面）；T6 的设置面与实时生效依赖 T3/T4/T5 已有的消费面（配置项逐项对应既有消费点，不先有消费面则设置无处生效）；T7 收尾（发布 workflow + 全量门禁 + 台账）。
 - **grammar 构建链条件核查（本计划与 C/I 两份计划相反——本计划**依赖** grammar 链）**：扩展要打包 lite grammar 集，wasm 产物**不入库**（`.gitignore`：`tools/grammar-builder/out/`、`apps/web/static/grammars/`、`*.wasm` 全局规则），来源链为 `pnpm gen:sources`（spec F 源头化：产 `languages.toml`/`build-list.json`/`packages/vviewer-highlight/assets/{languages.json,themes.json,queries}` 与 `packages/vviewer-core/src/registry/generated-extensions.ts`）→ `node tools/grammar-builder/build.mjs --fetch --lite` → `node tools/grammar-builder/build.mjs --self-build`（wasm 直写 `apps/web/static/grammars/` + `manifest.json`，runtime wasm 落 `apps/web/static/tree-sitter.wasm`，`build.mjs:40/:347-348`）。**故扩展构建前必须先跑该链**（CI 侧复用现成 composite action `.github/actions/setup-grammars`，默认 `languages: lite` 即 34 语言集）。**附带依赖**：`packages/vviewer-core/src/registry/generated-extensions.ts`（生成物、不入库）被扩展名清单生成消费——缺失即 fail-fast 并提示 `pnpm gen:sources`（`tools/e2e-list-guard.mjs:15` 同款纪律）。
 - **不触及 server/（Rust）**：本计划零 `server/` 文件改动——扩展是纯 TS 前端产物，扩展内不做任何服务端依赖（spec §3 反目标：compute/watch/mounts 全部不适用）；`rg -i "vscode" server/` 仅命中 markdown 渲染语义比对注释，无相关实现面。（T7 的门禁会 `cargo build` 出 server 二进制供 server 档 e2e 用——那是**构建产物**，非源码改动。）
@@ -25,7 +25,17 @@
   - **MVP 范围**（spec §4.4 逐项）：markdown / code / image / av / pdf / html / text / jsonl / hex 九类渲染器 + archive **裁剪**（裁量落定，见下）。**foreign 20 组渲染器、Office 三件套（docx/xlsx/pptx）、目录树/多 tab/全局搜索/设置中心/另存为/挂载体系、移动端形态、webview 内编辑一律不做**（spec §3 非目标）。
   - **注册协议**：custom editor（`contributes.customEditors`，viewType `vviewer.viewer`，`priority: "default"`）——「打开文件时直接渲染」；用户可切回 VSCode 原生编辑器（custom editor 自带切换）。
   - **零外网 CDN 依赖**（约束②）：grammar wasm / queries / tree-sitter runtime / **pdfjs worker** / katex 字体**全部打进扩展本地资源**，运行期经 `webview.asWebviewUri` 映射；kroki/plantuml 等外联图表服务默认关闭（`vviewer.diagrams.allowRemoteServices` 默认 `false`）。
-  - **打包体积 <100MB**（约束③）：门禁脚本断言 **`.vsix` 实包字节** <100MB（spec §5 口径：`vsce package` 产物）+ `dist/` 递归字节预检同门；lite grammar 集实测 46.4MiB（`du -sh apps/web/static/grammars` = 47M，34 个 wasm + manifest.json）。
+  - **打包体积 <100MB**（约束③）：门禁脚本断言 **`.vsix` 实包字节** <100MB（spec §5 口径：`vsce package` 产物）+ `dist/` 递归字节预检同门；lite grammar 集实测 46.4MiB（`du -sh apps/web/static/grammars` = 47M，34 个 wasm + manifest.json）；pdfjs worker 双分支各 ~1.3MB（合计 ~2.6MB，均有消费面——注入按能力选支，见「VSIX manifest 与 vsce 硬校验」条）。
+  - **VSIX manifest 与 vsce 硬校验（新增硬约束——评审订正①，本轮）**：VSIX 侧 manifest = 构建产物 `dist/package.json`（**不是** workspace 源 manifest），vsce 4.1.1 在 `validateManifestForPackaging`（package.js:1001-1044，由 `readManifest(...).then(validateManifestForPackaging)` package.js:1120 进入）逐条硬校验：
+    | 校验 | 源码锚 | 对本计划的约束 |
+    |---|---|---|
+    | `name` 必须匹配 `/^[a-z0-9][a-z0-9\-]*$/i` | validation.js:45 / :55-61 | **workspace 包名 `@bhxch/vviewer-vscode` 不合法**（首字符 `@`、含 `/`）→ 合并产物 `name` 重写为无 scope 的 `vviewer-vscode`；marketplace 标识 = `publisher.name` = `bhxch.vviewer-vscode` |
+    | `version` 必填且合法 semver | validation.js:64-70 / package.js:1007 | 源 manifest 补 `version`（`0.1.0` 起，随发布递增） |
+    | `engines.vscode` 与 `devDependencies['@types/vscode']` 按 major.minor 比大小 | package.js:1043-1044 / validation.js:100-137 | `engines.vscode: "^1.90.0"` ⇒ devDep 钉 `@types/vscode: "~1.90.0"`（不钉则取最新版 1.1xx → 抛「greater than engines.vscode 1.90.0」） |
+    | `main`/`browser` 与激活事件 | package.js:1012-1041 | `engines.vscode ≥1.74` 且 `contributes.customEditors` 在场（隐式激活事件来源，package.js:1014-1021）→ `main` 必填即合法；**不得删 `contributes.customEditors`** |
+    | `icon` | package.js:857 / :870-871 / :1046-1047 | **缺 `icon` 字段不报错**；**指定了 `icon` 而文件不在包内才报错**（`The specified icon '...' wasn't found in the extension.`）；SVG 图标被禁 → 若填 `icon` 必须把 PNG 复制进 VSIX 打包根 |
+    | `.vscodeignore` 读取位置 | vsce 从**包根**读 | 包根 = `dist/` → **`.vscodeignore` 由构建脚本写进 `dist/`**，源侧 `apps/vscode/.vscodeignore` 不建（否则成死资产、排除规则不生效） |
+  **源 manifest 与 VSIX manifest 解耦（名字与 scope 的分家）**：workspace 源 manifest 保留 `@bhxch/vviewer-vscode`（pnpm workspace 契约 + ask 硬要求）**且不得标 `private: true`**（Marketplace/OVSX 发布要求；仓内其余包皆 private 是 npm 侧纪律，扩展走 marketplace 通道不适用；`pnpm publish` 不涉及——发布面是 vsce/ovsx，`tools/pack-packages.mjs:53` 的 PACKAGES 显式清单不含扩展，零交叉）；**VSIX 侧 manifest 由构建脚本生成**（`dist/package.json`：`name: "vviewer-vscode"` + `version` + `publisher: "bhxch"` + `main: "./extension.js"` + `engines.vscode` + `contributes`），marketplace 标识 = `bhxch.vviewer-vscode`。**vsce 的三条硬校验只作用于 VSIX 侧**——workspace 名带 scope 不构成问题，但**不得**把 workspace 名原样写进 VSIX manifest。
   - **发布只落文件不实跑**（约束④）：`ovsx`/`vsce` 双渠道**上传**workflow 落文件即止——**无 secrets**（OVSX_PAT/VSCE_PAT 由用户在仓外配置），上传首跑实测属**仓外 deferred**（台账①）。**注意区分**：`vsce package`（本地打包 + 体积门）**在仓内实跑**（devDep 声明 + T1/T7 构建步），`vsce publish`（上传）不实跑。
   - **CSP**（约束⑤ + spec §7）：`script-src` 必须含 `'wasm-unsafe-eval'`（tree-sitter wasm 实例化必需）**且含 `${webview.cspSource}`**（webview 入口是外链 ESM 脚本、动态 chunk 亦为外链——nonce 只覆盖宿主 HTML 内的联脚本，覆盖不到 `import()` 的 chunk）；`font-src` 必须覆盖 `asWebviewUri` 源（katex 字体）；`media-src` 必须显式列（`default-src 'none'` 下回落即拦死 `<audio>`/`<video>`——av 渲染器的主功能面）；`worker-src`（webview 内 worker）+ `connect-src`（worker 内 fetch wasm，`default-src 'none'` 下回落即断）。
   - **设置面走 `contributes.configuration`**（约束⑥）：六项设置（toc.side / toc.defaultCollapsed / code.highlightEngine / markdown.diagramMode / diagrams.allowRemoteServices / markdown.externalImages）+ 外链图片白名单；per-language 覆盖用 VSCode 原生机制——host 侧 `workspace.getConfiguration('vviewer', { languageId })` 读取即天然支持，**声明 scope 必须是 `language-overridable`**（否则 VSCode 拒绝 per-language 覆盖——原生机制前提，非自研）。
@@ -37,6 +47,8 @@
   **动态令牌**（`--vv-ts-*` 等随主题变的部分）走 webview 侧 `<style>` 元素更新面（主题变更时整体替换），不混进宿主内联块。
 - **webview 必需选项（新增硬约束——评审订正④）**：`createWebviewPanel(..., { enableScripts: true }, ...)`（**不开则 webview 内脚本不执行 → 白屏**）；`localResourceRoots` 必须覆盖扩展的 `dist/` 目录（**资源不在 roots 内则 asWebviewUri 资源 404**——wasm/字体/grammar 全部依赖它）。二者叠加的失败面在无 console 回传的 webview 里近乎静默，与 RF 3「可见失败面」原则冲突，故单测硬断言。
 - **包内 seam 纪律（新增硬约束——评审订正③）**：`packages/vviewer-render-doc`（pdf worker URL）与 `packages/vviewer-render-binary`（hex worker URL）需要注入缝（esbuild 不做 vite 的 `new URL(裸说明符, import.meta.url)` 资产化——pdf.ts:124-127 注释明说该能力是 vite 特有），**扩展必须自带对应 worker 文件**并经 `asWebviewUri` 注入：pdfjs worker（modern `pdfjs-dist/build/pdf.worker.min.mjs` + legacy `pdfjs-dist/legacy/build/pdf.worker.min.mjs`，各 ~1.3MB，随 T1 资产采集入 `dist/webview/pdf/`）+ hex worker（`packages/vviewer-render-binary/src/binary.worker.ts` 由 T1 单独打成 `dist/webview/binary-worker.js`）。
+  **两个 provider 必须被接线（评审订正③·本轮）**：不注入即走默认路径——pdf 侧 `new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url)` 在 webview chunk URL 下 404 → pdfjs 无 workerSrc → **pdf 渲染死**；hex 侧 `new Worker(new URL('./binary.worker.ts', import.meta.url), {type:'module'})`（hex.ts:805）的 try/catch **只兜同步抛错**，404 是异步事件 → worker 永不应答 → **渲染挂死**。故 T3 装配层必须调用 `setPdfWorkerUrlProvider(...)` 与 `setHexWorkerUrlProvider(() => assets.binaryWorkerUrl)`；**pdf 双分支的消费面 = 按能力选支**（复用包内导出的 `preferModernBuild()`，render-doc/src/pdf.ts:96 → **webview 侧**从 `@bhxch/vviewer-render-doc` 根导入：`preferModernBuild() ? assets.pdfWorkerModernUrl : assets.pdfWorkerLegacyUrl`；host 侧只发两个 URL、不引 pdfjs）——两文件都有消费面，无死重，worker 与主模块构建分支必然一致。
+- **svgbob glue 的构建前置（新增硬约束——评审订正②·本轮）**：`packages/vviewer-markdown/src/pipeline.ts:20` 静态 import `@bhxch/vviewer-render-diagram` 的 `renderDiagramEngine`，其实现 `packages/vviewer-render-diagram/src/markdown/diagramEngines.ts:64` 为 `import('./svgbob-wasm-gen/svbob_wasm.js')`；该生成目录**不入库**（.gitignore:56-57 排除 `svgbob-wasm-gen/*.js` 与 `*.wasm`）→ esbuild 打包时须静态解析该 dynamic import，**新 checkout 上必然构建失败**（本仓因已有生成产物而侥幸通过，属假绿）。**落定**：T1 构建脚本对该路径做**条件桩**——文件存在 → 正常打包（完整 svgbob 能力）；**文件不存在 → esbuild 插件桩模块**（`default()` 抛错 → 管线 diagram 步失败 → **svgbob 围栏回落源码块**，可见降级，不静默空白）。故**扩展构建不强制 Rust 工具链**；CI 发布 workflow 仍跑 `pnpm gen:svgbob-wasm`（ci.yml:160 同款，需 wasm32 target + wasm-bindgen）取完整能力——「缺 glue 时 svgbob 围栏降级为源码块」记台账⑧。
 - **扩展 i18n 纪律（前置硬约束——评审订正⑤）**：扩展文案**一律走自有目录**（`apps/vscode/src/i18n/catalogs/{zh-CN,en}.ts`），**禁裸 CJK 字面量**。目录与 ESLint 覆盖块在 **T2 首批用户可见文案之前**落地（T2 的 200MB 超限提示是扩展第一句用户可见文案）：ESLint 覆盖块 `files: ['apps/vscode/src/**/*.{svelte,ts}']` + **`ignores: ['apps/vscode/src/i18n/**', 'apps/vscode/src/**/*.test.ts']`**（catalog 本体豁免——apps/web 同款纪律，eslint.config.js:243 块 A 的 ignores；测试豁免——目录值双锁断言直读是既定形态），rules 挂 `runesOptOut` + CJK 三形态 + `bareIntl` + 禁直读 catalogs。**T3/T5 的新增文案同样走目录**（不得先裸写后迁移）。
 - **本仓纪律对扩展面的映射**：
   - **runes 纪律**：apps/vscode 零 `.svelte` 文件（裁量 2），无适用面；**若实施期引入 `.svelte` 则一律 runes 写法**（AGENTS.md 全局强制，不得逐组件退出）。
@@ -70,33 +82,37 @@
 
 ---
 
-### Task 1: 扩展工程骨架 + esbuild 构建链 + 资产采集（grammar/queries/runtime/pdf worker/katex）+ 样式常量 + 体积门 + 打包门
+### Task 1: 扩展工程骨架 + esbuild 构建链（含 svgbob 条件桩）+ 资产采集（grammar/queries/runtime/pdf worker/katex/icon）+ 样式常量 + VSIX manifest 生成 + 体积门 + 打包门
 
 **Files:**
-- Create: `apps/vscode/package.json`（`@bhxch/vviewer-vscode`；**非 private**；`publisher: "bhxch"`、`engines.vscode`、`main`、`contributes` 占位、`scripts.build`）
+- Create: `apps/vscode/package.json`（**workspace 源 manifest**：`name: "@bhxch/vviewer-vscode"`；**非 private**；`version: "0.1.0"`（vsce 必填）；`publisher: "bhxch"`、`engines.vscode: "^1.90.0"`、`main: "./dist/extension.js"`、`contributes` 占位、`scripts.build`）
 - Create: `apps/vscode/tsconfig.json`（`extends ../../tsconfig.base.json`，`include: ["src", "test"]`，`types: ["node"]`）
-- Create: `apps/vscode/build.mjs`（esbuild 编排：host CJS / webview ESM+splitting / worker IIFE×2（tree-sitter worker、hex worker）；资产拷贝；合并 manifest；metafile 产出）
-- Create: `apps/vscode/scripts/collect-assets.mjs`（grammar lite 集 + queries 过滤 + runtime wasm + **pdf worker（modern+legacy）** + 两条主题表 + katex css/fonts 采集）
+- Create: `apps/vscode/build.mjs`（esbuild 编排：host CJS / webview ESM+splitting / worker IIFE×2（tree-sitter worker、hex worker）；**svgbob glue 条件桩插件**；资产拷贝；**VSIX manifest 生成（name/main/version 重写）**；**`dist/.vscodeignore` 写出**；metafile 产出）
+- Create: `apps/vscode/scripts/collect-assets.mjs`（grammar lite 集 + queries 过滤 + runtime wasm + **pdf worker（modern+legacy）** + 两条主题表 + katex css/fonts + **icon** 采集）
 - Create: `apps/vscode/scripts/gen-manifest.mjs`（扩展名清单生成：esbuild 打包 TS 入口跑真实注册表 → 写 `contributes.customEditors[].selector`）
 - Create: `apps/vscode/scripts/check-size.mjs`（体积门：`dist/` 递归字节 <100MB 预检 + `.vsix` 字节 <100MB 实包断言）
 - Create: `apps/vscode/scripts/check-unresolved-imports.mjs`（**spec §5「esbuild 产物无未解析 import」检查**：metafile 扫描 `outputs[].imports`，断言无 `external: true` 残留（host bundle 的 `vscode` 为唯一豁免））
 - Create: `apps/vscode/src/webview/shellCss.ts`（`SHELL_CSS` 常量——壳布局样式，`var(--token, 默认值)` 形态，零新 token）
 - Create: `apps/vscode/README.md`（骨架：功能概述 + 构建/本地调试说明；冒烟清单与设置示例在 T6 补全）
 - Create: `apps/vscode/LICENSE` + `apps/vscode/CHANGELOG.md`（Apache-2.0 副本 / vsce 要求项）
-- Create: `apps/vscode/.vscodeignore`（排除 src/scripts/node_modules）
+- Create: `apps/vscode/media/icon.png`（扩展图标 ≥128×128 PNG——**vsce 禁用 SVG**（package.js:1046-1047）；**缺 `icon` 字段不报错，但填了就必须在包内**（package.js:857/:870-871）→ 填 `icon` 即必须把 PNG 复制进 VSIX 打包根 `dist/media/icon.png`，manifest 的 `icon` 字段为 `"media/icon.png"`（相对包根））
 - Modify: `package.json`（根）：`typecheck` 脚本纳入 `tsc -b apps/vscode/tsconfig.json`；新增 `build:vscode` 便捷脚本
 - Modify: `vitest.config.ts`：include 增 `apps/vscode/src/**/*.test.ts` 与 `apps/vscode/test/**/*.test.ts`
 - Modify: `.gitignore`：新增 `apps/vscode/dist/`、`apps/vscode/out/`（VSIX 产物）
 - Modify: `pnpm-lock.yaml`（`pnpm install` 产物）
+- **不建** `apps/vscode/.vscodeignore`：vsce 从**包根**（= `dist/`）读该文件——放源侧即死资产且排除规则不生效（评审订正⑥）；改由 `build.mjs` 写 `dist/.vscodeignore`（内容针对 dist 内容，如 `**/*.map`）。
 
 **Interfaces:**
-- `apps/vscode/package.json` 关键字段：`name: "@bhxch/vviewer-vscode"`、`displayName: "VViewer"`、`publisher: "bhxch"`、`engines.vscode: "^1.90.0"`、`main: "./dist/extension.js"`（**源 manifest 口径**；合并产物 `dist/package.json` 的 `main` 重写为 `"./extension.js"`——见下）、`categories`、`contributes`（`customEditors` + `configuration` 的生成前占位）、`scripts.build: "node build.mjs"`；devDeps：`@types/vscode`、`esbuild`、`@types/node`、**`@vscode/vsce`**（本地打包体积门的 CLI）、**`ovsx`**（上传 CLI，发布 workflow 用）；deps：workspace 包 `@bhxch/vviewer-{core,detect,highlight,markdown,lightbox,render-text,render-media,render-doc,render-binary,render-diagram,sanitize}` + `katex`。
+- **源 manifest（`apps/vscode/package.json`）关键字段**：`name: "@bhxch/vviewer-vscode"`（**workspace 名，带 scope——合法**；vsce 校验只作用于 VSIX 侧）、`version: "0.1.0"`、`displayName: "VViewer"`、`publisher: "bhxch"`、`engines.vscode: "^1.90.0"`、`main: "./dist/extension.js"`（源口径；**VSIX 侧重写为 `./extension.js`**）、`categories`、`icon: "media/icon.png"`（相对**打包根**——VSIX 侧同路径）、`contributes`（`customEditors` + `configuration` 的生成前占位；**`customEditors` 必留**——它是 vsce 判定的隐式激活事件来源，engines ≥1.74 下与 `main` 组合合法，package.js:1014-1041）、`scripts.build: "node build.mjs"`；devDeps：**`@types/vscode: "~1.90.0"`**（**必须钉版**——vsce 按 major.minor 校验其与 `engines.vscode` 的大小关系，package.js:1043-1044；不钉则取最新版 1.1xx → 抛「greater than engines.vscode 1.90.0」）、`esbuild`、`@types/node`、**`@vscode/vsce`**（本地打包体积门的 CLI）、**`ovsx`**（上传 CLI，发布 workflow 用）；deps：workspace 包 `@bhxch/vviewer-{core,detect,highlight,markdown,lightbox,render-text,render-media,render-doc,render-binary,render-diagram,sanitize}` + `katex`。
+- **VSIX manifest（`apps/vscode/dist/package.json`，构建产物）**：`name: "vviewer-vscode"`（**无 scope**——vsce `nameRegex = /^[a-z0-9][a-z0-9\-]*$/i`（validation.js:45）拒绝 `@` 与 `/`，故 workspace 名 `@bhxch/vviewer-vscode` **不能**原样进 VSIX manifest）、`publisher: "bhxch"`（marketplace 标识 = `bhxch.vviewer-vscode`）、`version`（源 manifest 透传）、`main: "./extension.js"`、其余字段透传。
 - 构建产物布局（`apps/vscode/dist/`——**同时是 VSIX 的打包根**）：
   ```
   dist/
-  ├── package.json            # 合并产物（源 manifest + 生成的 selector；main 重写为 './extension.js'）
+  ├── package.json            # VSIX manifest（name 无 scope / main 重写 / version）
   ├── extension.js            # host bundle（CJS，external vscode）
   ├── README.md  LICENSE  CHANGELOG.md   # 复制进包根（vsce 要求项）
+  ├── media/icon.png          # 复制进包根（manifest 的 icon 字段 = "media/icon.png"，相对包根）
+  ├── .vscodeignore           # 构建脚本写出（vsce 从包根读）
   └── webview/
       ├── main.js             # webview bundle（ESM，splitting → chunk-*.js 同目录）
       ├── chunk-*.js          # 动态 import 产物（mermaid/katex/pdfjs 等按需取）
@@ -113,29 +129,30 @@
           ├── tree-sitter.wasm
           └── themes.json     # 裁剪为 onelight + serika-dark 两条
   ```
-- 资产采集契约（`collect-assets.mjs`）：grammar 源 = `apps/web/static/grammars`（lite 集，`manifest.json` 的 `grammars` 键集即语言集）；queries 源 = `packages/vviewer-highlight/assets/queries/<lang>/`（**仅** manifest 语言集命中项——canonical 语言名即查询目录名，alias 不另取：引擎按 canonical lang 取查询，core-parse.ts:484）；runtime 源 = `apps/web/static/tree-sitter.wasm`；**pdf worker 源 = `packages/vviewer-render-doc/node_modules/pdfjs-dist/build/pdf.worker.min.mjs` 与 `.../legacy/build/pdf.worker.min.mjs`**（评审订正③：esbuild 不做 vite 的裸说明符资产化，pdfjs 无 workerSrc 即 pdf 渲染死）；主题源 = `packages/vviewer-highlight/assets/themes.json` 的 `onelight`/`serika-dark` 两键；katex 源 = `node_modules/katex/dist/katex.min.css` + `dist/fonts/*.woff2`（20 个 woff2，woff/ttf 不取——web 端同款取舍）。**任一源缺失即 fail-fast 并打印可执行修复命令**（`pnpm gen:sources` / `node tools/grammar-builder/build.mjs --fetch --lite` / `--self-build` / `pnpm gen:svgbob-wasm`）——不做静默降级（缺 grammar = 扩展无高亮，属构建期必须暴露的失败）。
+- 资产采集契约（`collect-assets.mjs`）：grammar 源 = `apps/web/static/grammars`（lite 集，`manifest.json` 的 `grammars` 键集即语言集）；queries 源 = `packages/vviewer-highlight/assets/queries/<lang>/`（**仅** manifest 语言集命中项——canonical 语言名即查询目录名，alias 不另取：引擎按 canonical lang 取查询，core-parse.ts:484）；runtime 源 = `apps/web/static/tree-sitter.wasm`；**pdf worker 源 = `packages/vviewer-render-doc/node_modules/pdfjs-dist/build/pdf.worker.min.mjs` 与 `.../legacy/build/pdf.worker.min.mjs`**（评审订正③：esbuild 不做 vite 的裸说明符资产化，pdfjs 无 workerSrc 即 pdf 渲染死；**两支都有消费面**——注入按 `preferModernBuild()` 能力选支，见 Global Constraints「包内 seam 纪律」条）；主题源 = `packages/vviewer-highlight/assets/themes.json` 的 `onelight`/`serika-dark` 两键；katex 源 = `node_modules/katex/dist/katex.min.css` + `dist/fonts/*.woff2`（20 个 woff2，woff/ttf 不取——web 端同款取舍）；icon 源 = `apps/vscode/media/icon.png`（复制进打包根）。**任一源缺失即 fail-fast 并打印可执行修复命令**（`pnpm gen:sources` / `node tools/grammar-builder/build.mjs --fetch --lite` / `--self-build`）——不做静默降级（缺 grammar = 扩展无高亮，属构建期必须暴露的失败）。
+- **svgbob glue 条件桩（构建期，评审订正②）**：`build.mjs` 挂 esbuild 插件拦截 `svgbob-wasm-gen/svbob_wasm.js` 的解析——**文件存在** → 正常打包（完整 svgbob 围栏渲染）；**文件不存在**（新 checkout 的常态，.gitignore:56-57 出库）→ 返回**桩模块**（`export default async function init(){ throw new Error('svgbob glue 未生成：需 pnpm gen:svgbob-wasm'); }`）→ 运行期 `import()` 成功但 `default()` 抛错 → 管线 diagram 步失败 → **svgbob 围栏回落源码块**（可见降级，与 kroki 外联默认回落源码块同语义）。故扩展构建**不强制 Rust 工具链**；CI 发布 workflow 仍跑 `pnpm gen:svgbob-wasm`（ci.yml:160 同款）取完整能力。
 - **spec §5 打包门双锚承接**：
-  1. **「esbuild 产物无未解析 import」**：构建期 esbuild 默认对未解析 import 直接报错（**唯一 external 白名单 = host bundle 的 `vscode`**）；另落 `check-unresolved-imports.mjs` 扫 metafile `outputs[].imports`，断言无 `external: true` 残留（除 `vscode`）——把「构建期不炸」升级为「产物图可审计」。
-  2. **「vsce package 体积 <100MB」**：`vsce package --no-dependencies` 以 `dist/` 为根产出 `.vsix`，断言 **`.vsix` 实包字节 <100MB**（spec 口径）；`dist/` 递归字节 <100MB 作快速预检（两者同门，前者是准）。
-- **合并 manifest 的 `main` 重写 + VSIX 组装步**：`build.mjs` 产出的 `dist/package.json` 是**独立可打包根**——`main` 由源 manifest 的 `./dist/extension.js` **重写为 `./extension.js`**（否则合并产物指向不存在的 `dist/dist/extension.js` → 404）；README/LICENSE/CHANGELOG 复制进 `dist/` 根。VSIX 组装步 = 在 `apps/vscode/dist/` 目录内执行 `vsce package --no-dependencies --out ../out`（cwd 即包根）。
+  1. **「esbuild 产物无未解析 import」**：构建期 esbuild 默认对未解析 import 直接报错（**唯一 external 白名单 = host bundle 的 `vscode`**；svgbob 路径走上面的条件桩，不进 external 名单）；另落 `check-unresolved-imports.mjs` 扫 metafile `outputs[].imports`，断言无 `external: true` 残留（除 `vscode`）——把「构建期不炸」升级为「产物图可审计」。
+  2. **「vsce package 体积 <100MB」**：`vsce package --no-dependencies` 以 `dist/` 为根产出 `.vsix`，断言 **`.vsix` 实包字节 <100MB**（spec 口径）；`dist/` 递归字节 <100MB 作快速预检（两者同门，前者是准）。**体积构成说明**：lite grammar 集 46.4MiB + pdfjs worker 双支 ~2.6MiB（均有消费面，非死重）+ queries ~1MiB + runtime 0.2MiB + 代码/图表引擎 ~10MiB 量级 → 远低于 100MB 门。
+- **VSIX 组装步与打包根纪律**：`build.mjs` 产出的 `dist/` 是**独立可打包根**——`package.json` 的 `name` 重写为 `vviewer-vscode`、`main` 重写为 `./extension.js`（否则合并产物指向不存在的 `dist/dist/extension.js` → 404）、`version` 透传；README/LICENSE/CHANGELOG/**media/icon.png** 复制进 `dist/` 根；`dist/.vscodeignore` 由构建脚本写出。VSIX 组装步 = 在 `apps/vscode/dist/` 目录内执行 `vsce package --no-dependencies --out ../out`（cwd 即包根）。
 
 - **验收锚 / e2e**：验收 = `apps/vscode/test/assets.test.ts` + `apps/vscode/test/shellCss.test.ts` 绿 + `pnpm run typecheck` 绿 + **构建步通过**（三 bundle 产出 + 资产齐备 + 无未解析 import + `.vsix` <100MB）；**所触 e2e 锚文件：无**（扩展面）。
 
 - [ ] **Step 1: 骨架文件 + 根脚本纳入（vitest include / typecheck / gitignore）**
   建 `apps/vscode/{package.json,tsconfig.json,.vscodeignore,LICENSE,CHANGELOG.md}`；`pnpm install`（新 workspace 包入锁 + devDep 装齐）；改根 `package.json` 的 `typecheck` 为 `tsc -b packages/*/tsconfig.json apps/vscode/tsconfig.json apps/web/tsconfig.e2e.json --noEmit && pnpm --filter web typecheck`；改 `vitest.config.ts` include；`.gitignore` 加 `apps/vscode/dist/`、`apps/vscode/out/`。Run: `pnpm run typecheck` → Expected: PASS（空工程零报错；证明 `tsc -b` 纳入新工程不破既有链）。
 
-- [ ] **Step 2: 资产采集脚本 + 壳样式常量（TDD 最小面）**
-  先写 `apps/vscode/test/assets.test.ts`（纯函数：queries 语言过滤——按 manifest 语言集取目录、缺目录跳过；**pdf worker 采集清单——modern/legacy 两文件均需存在且非空**；katex 字体清单——20 个 woff2 名单与体积；主题裁剪——输出只含两键；缺件时错误信息含修复命令）与 `shellCss.test.ts`（`SHELL_CSS` 非空；含壳类名；**全部颜色/尺寸走 `var(--token, 默认值)` 形态、不出现 `:root` 令牌定义**——与 markdown.css 的 token 契约同族）。再落 `collect-assets.mjs`/`build.mjs`/`check-size.mjs`/`check-unresolved-imports.mjs`。
-  **前置**：`node tools/grammar-builder/gen-sources.mjs`（若 `apps/web/static/grammars/manifest.json` 缺失则先 `--fetch --lite` + `--self-build`）——资产脚本的源缺失路径必须 fail-fast（单测用临时目录构造缺件场景）。
+- [ ] **Step 2: 资产采集脚本 + 壳样式常量 + svgbob 条件桩（TDD 最小面）**
+  先写 `apps/vscode/test/assets.test.ts`（纯函数：queries 语言过滤——按 manifest 语言集取目录、缺目录跳过；**pdf worker 采集清单——modern/legacy 两文件均需存在且非空**；katex 字体清单——20 个 woff2 名单与体积；主题裁剪——输出只含两键；icon 存在性；缺件时错误信息含修复命令）与 `shellCss.test.ts`（`SHELL_CSS` 非空；含壳类名；**全部颜色/尺寸走 `var(--token, 默认值)` 形态、不出现 `:root` 令牌定义**——与 markdown.css 的 token 契约同族）。再落 `collect-assets.mjs`/`build.mjs`/`check-size.mjs`/`check-unresolved-imports.mjs`，并落 **svgbob 条件桩插件**（文件在 → 正常打包；文件不在 → 桩模块抛错，运行期围栏回落源码块——评审订正②）。
+  **前置**：`node tools/grammar-builder/gen-sources.mjs`（若 `apps/web/static/grammars/manifest.json` 缺失则先 `--fetch --lite` + `--self-build`）——资产脚本的源缺失路径必须 fail-fast（单测用临时目录构造缺件场景）。**svgbob glue 不列入前置**（条件桩兜住；CI 发布链另跑 `pnpm gen:svgbob-wasm` 取完整能力）。
   Run: `pnpm vitest run apps/vscode` → RED→GREEN。
 
 - [ ] **Step 3: 扩展名清单生成脚本（真实注册表实跑）**
   `gen-manifest.mjs`：esbuild 打包 `apps/vscode/scripts/collect-extensions.ts`（import `@bhxch/vviewer-core` 的 `createRegistry` + MVP 渲染器 + `GENERATED_EXTENSIONS`）→ 在 Node 执行 → 得有效认领扩展名全集 → 写 `contributes.customEditors[0].selector`。单测：断言 markdown 类扩展名（md/markdown）由 markdown 认领（非 code）、generated 兜底扩展名在集内、集合非空且与渲染器 extensions 并集一致（RF 8）。
 
 - [ ] **Step 4: 构建门 + 打包门 + 提交**
-  Run: `pnpm vitest run apps/vscode && pnpm run typecheck && pnpm lint` → 全绿；`pnpm --filter @bhxch/vviewer-vscode build` → 断言：①三 bundle 产出（`dist/extension.js`、`dist/webview/main.js`、`dist/webview/highlight-worker.js`、`dist/webview/binary-worker.js`）；②**`dist/webview/pdf/pdf.worker.min.mjs` 与 `pdf.worker.legacy.min.mjs` 存在且非空**（评审订正③的构建断言）；③`dist/webview/katex.min.css` + `fonts/` 20 个 woff2 存在；④`dist/package.json` 的 `main` === `./extension.js`；⑤`check-unresolved-imports` 零 external 残留；⑥`vsce package` 产 `.vsix` 且 **字节 <100MB**。
+  Run: `pnpm vitest run apps/vscode && pnpm run typecheck && pnpm lint` → 全绿；`pnpm --filter @bhxch/vviewer-vscode build` → 断言：①四 bundle 产出（`dist/extension.js`、`dist/webview/main.js`、`dist/webview/highlight-worker.js`、`dist/webview/binary-worker.js`）；②**`dist/webview/pdf/pdf.worker.min.mjs` 与 `pdf.worker.legacy.min.mjs` 存在且非空**（评审订正③的构建断言）；③`dist/webview/katex.min.css` + `fonts/` 20 个 woff2 存在；④**`dist/package.json` 的 `name` === `vviewer-vscode`（无 scope）、`main` === `./extension.js`、`version` 存在且 semver**（vsce 三校验的预断言，评审订正①）；⑤**`dist/media/icon.png` 存在且 manifest 的 `icon`（`"media/icon.png"`）指向它**（填了 icon 就必须在包内，package.js:870-871）；⑥**`dist/.vscodeignore` 存在**（vsce 从包根读，评审订正⑥）；⑦`check-unresolved-imports` 零 external 残留；⑧`vsce package` 产 `.vsix` 且 **字节 <100MB**（**vsce 侧三条硬校验实跑即断言：name 合法 / version 合法 / `@types/vscode` 与 engines 兼容**）。
   ```bash
-  git add apps/vscode package.json vitest.config.ts .gitignore pnpm-lock.yaml && git status --porcelain 自查后 commit -m "feat(vscode): 扩展工程骨架——@bhxch/vviewer-vscode workspace 包 + esbuild 三产物构建链（host CJS/webview ESM splitting/worker IIFE）+ 资产采集（grammar lite 集/queries/runtime/pdfjs worker 双分支/katex 字体/两条主题表）+ 壳样式常量 + 扩展名清单实跑注册表生成 + 打包门（无未解析 import + vsce .vsix <100MB）"
+  git add apps/vscode package.json vitest.config.ts .gitignore pnpm-lock.yaml && git status --porcelain 自查后 commit -m "feat(vscode): 扩展工程骨架——@bhxch/vviewer-vscode workspace 包（源 manifest 带 scope/带 version/@types/vscode 钉版）+ esbuild 四产物构建链（host CJS/webview ESM splitting/worker IIFE×2）+ 资产采集（grammar lite 集/queries/runtime/pdfjs worker 双分支/katex 字体/两条主题表/icon）+ svgbob glue 条件桩 + 壳样式常量 + 扩展名清单实跑注册表生成 + VSIX manifest 生成（name 无 scope/main 重写/dist 侧 .vscodeignore）+ 打包门（无未解析 import + vsce .vsix <100MB）"
   ```
 
 ---
@@ -147,7 +164,8 @@
 **Files:**
 - Create: `apps/vscode/src/extension.ts`（`activate`/`deactivate`；custom editor provider 注册；命令注册）
 - Create: `apps/vscode/src/host/editorProvider.ts`（`CustomReadonlyEditorProvider` 实现）
-- Create: `apps/vscode/src/host/webviewPanel.ts`（panel 创建/复用/reveal；HTML 模板生成；**CSP 七 directive**；**样式内联**；`asWebviewUri` 资源映射；**`enableScripts` + `localResourceRoots`**）
+- Create: `apps/vscode/src/host/webviewPanel.ts`（panel 创建/复用/reveal；**`enableScripts` + `localResourceRoots`**；`asWebviewUri` 资源映射；调用纯模板模块生成 HTML）
+- Create: `apps/vscode/src/host/webviewHtml.ts`（**HTML 模板纯模块——零 `vscode` import**（`import * as vscode from 'vscode'` 在运行时不存在，vitest 直解析会红——评审订正⑧）：入参 = `{ cspSource, nonce, scriptUri, styleText }`，出参 = HTML 字符串；**CSP 七 directive** 与**样式内联**在此模块内成形 → 可被 `webviewHtml.test.ts` 直测）
 - Create: `apps/vscode/src/host/fileChannel.ts`（读文件字节 + 大小上限）
 - Create: `apps/vscode/src/host/protocol.ts`（host↔webview 消息类型——**纯 .ts，vitest 直测**）
 - Create: `apps/vscode/src/host/settings.ts`（配置读取 + per-language 解析——**纯 .ts**，注入 `vscode` API 便于单测）
@@ -183,7 +201,7 @@
   connect-src ${webview.cspSource} data: blob: https:;
   ```
   逐条依据：`script-src` 的 **`${webview.cspSource}` 必需**——webview 入口 `main.js` 与动态 chunk `chunk-*.js` 都是外链脚本（ESM 入口 + code splitting），nonce 只覆盖宿主内联脚本、**覆盖不到 `import()` 的 chunk**；`'wasm-unsafe-eval'` 供 tree-sitter wasm 实例化；`media-src` 缺失则回落 `default-src 'none'` → `<audio>`/`<video>` 被拦（av 渲染器主功能死）；`connect-src` 缺失则 worker 内 fetch wasm 被拦；`font-src` 覆盖 asWebviewUri（katex 字体）；`style-src 'unsafe-inline'` 供包内导出/运行时样式（宿主内联块用 nonce）。
-- **样式内联（评审订正①）**：webview HTML 头部内联**单一** `<style nonce="${nonce}">`，内容 = `MARKDOWN_CSS`（`@bhxch/vviewer-markdown` 导出，css.ts:216）+ `SHELL_CSS`（扩展壳样式常量，T1 Step 2 落）拼接——**markdown 排版/`.ts-*` 着色映射/图表/灯箱/表格/alert 段与壳布局一次到位**；动态令牌（`--vv-ts-*`）不进此块（主题变更时由 webview 侧 `<style>` 元素替换，见 T3/T6）。单测断言：内联块非空且含 `.vv-markdown`、`.ts-keyword`、`.md-lightbox` 与壳类名。
+- **样式内联（评审订正①）**：webview HTML 头部内联**单一** `<style nonce="${nonce}">`，内容 = `MARKDOWN_CSS`（`@bhxch/vviewer-markdown` 导出，css.ts:216）+ `SHELL_CSS`（扩展壳样式常量，T1 Step 2 落）拼接——**markdown 排版/`.ts-*` 着色映射/图表/灯箱/表格/alert 段与壳布局一次到位**；动态令牌（`--vv-ts-*`）不进此块（主题变更时由 webview 侧 `<style>` 元素替换，见 T3/T6）。该拼接与 CSP 成形都在 **vscode-free 纯模块 `webviewHtml.ts`** 内完成（单测直测该模块，禁在测试里 import `vscode`）。单测断言：内联块非空且含 `.vv-markdown`、`.ts-keyword`、`.md-lightbox` 与壳类名。
 - 消息协议（`protocol.ts`，host↔webview 双向）：
   ```ts
   export type HostToWebview =
@@ -202,7 +220,7 @@
     | { kind: 'open-external'; url: string }
     | { kind: 'report'; level: 'warn' | 'error'; message: string };  // webview 无 console 出口 → 走 host 通道
   ```
-- `AssetUris`：`{ grammarsBase: string; queriesBase: string; runtimeDir: string; grammars: GrammarTable; workerUrl: string; binaryWorkerUrl: string; pdfWorkerUrl: string; fontsBase: string; katexCssUrl: string; highlightWorkerSourceUrl: string }`——**全部为 `webview.asWebviewUri` 绝对 URL**（RF 5）。
+- `AssetUris`：`{ grammarsBase: string; queriesBase: string; runtimeDir: string; grammars: GrammarTable; workerUrl: string; binaryWorkerUrl: string; pdfWorkerModernUrl: string; pdfWorkerLegacyUrl: string; fontsBase: string; katexCssUrl: string; highlightWorkerSourceUrl: string }`——**全部为 `webview.asWebviewUri` 绝对 URL**（RF 5）；**pdfjs worker 两支都在其中**（选支在 webview 侧做，见下条——host 不引 pdfjs，避免把 pdfjs 打进 host bundle）。
 - 大文件上限（spec §7 ⑤）：`MAX_BYTES = 200 * 1024 * 1024`（对齐 web `PLAIN_MAX_BYTES`，render-text/src/code/strategy.ts:92）；超限 → **不读文件**，webview 显示引导占位（**文案走扩展 i18n 目录**，如「文件超过 200MB，建议改用 VSCode 原生编辑器打开」）——host 侧 `fileChannel.ts` 读 `vscode.workspace.fs.stat` 拿 size 后判定（`fs.readFile` 前置判定，避免大文件全量入内存）。
 - panel 复用（裁量 5）：`Map<documentUri.toString(), WebviewPanel>`；同文档再次打开 → `reveal()` 既有 panel（不重开）；文档关闭 → `onDidDispose` 清映射。
 - 设置读取（`settings.ts`）：`workspace.getConfiguration('vviewer', { languageId })` → 归一为 `WebviewSettings`：
@@ -238,7 +256,7 @@
   先建 `apps/vscode/src/i18n/catalogs/{zh-CN,en}.ts` 与 `core.ts`（含 T2 自己的文案键，如 `viewer.tooLarge`）；改 `eslint.config.js` 加覆盖块（**ignores 含 i18n 目录**）；`protocol.test.ts`（消息判别 `kind` 穷尽、`read-file`/`export-html` 的 id 单调性、`WebviewSettings` 归一）、`settings.test.ts`（`getConfiguration('vviewer', {languageId })` 桩 → 语言级覆盖 > 窗口级 > 缺省，RF 9）、`i18n.test.ts`（zh==en 键集、占位符集合相等、locale 选择）。Run: `pnpm vitest run apps/vscode` → Expected: RED（模块不存在）。**同任务内用 `pnpm exec eslint --stdin --stdin-filename apps/vscode/src/probe.ts` 验证 CJK 拦截生效（探针不入库）。**
 
 - [ ] **Step 2: host 侧实现（provider / panel / 文件通道 / HTML 模板）**
-  按 Interfaces 落地：`extension.ts` 激活注册 provider + 命令（`vviewer.openWithNative`（打开原生编辑器）/`vviewer.reload`（重渲染））；`webviewPanel.ts` 生成 HTML（nonce + **CSP 七 directive** + **样式内联** + `enableScripts` + `localResourceRoots` + `asWebviewUri` 资源映射）；`fileChannel.ts` 实现 200MB 判定与字节读。**所有用户可见文案走 i18n 目录**（`t()`）——禁裸 CJK 字面量。
+  按 Interfaces 落地：`extension.ts` 激活注册 provider + 命令（`vviewer.openWithNative`（打开原生编辑器）/`vviewer.reload`（重渲染））；`webviewPanel.ts` 建 panel（**`enableScripts: true` + `localResourceRoots: [dist]`**）+ `asWebviewUri` 资源映射，HTML 交 `webviewHtml.ts` 纯模块生成（nonce + **CSP 七 directive** + **样式内联**）；`fileChannel.ts` 实现 200MB 判定与字节读。**所有用户可见文案走 i18n 目录**（`t()`）——禁裸 CJK 字面量。
 - [ ] **Step 3: 门禁 + 提交**
   Run: `pnpm vitest run apps/vscode && pnpm run typecheck && pnpm lint` → 全绿。
   ```bash
@@ -247,7 +265,7 @@
 
 ---
 
-### Task 3: webview 装配层——渲染器注册 + 九注入缝 + 动态令牌 + 包内 worker URL 缝新增
+### Task 3: webview 装配层——渲染器注册 + 十一处 setter 接线 + 动态令牌 + 包内 worker URL 缝新增
 
 **前置阅读（触发词条款，开工前全文加载）：** `docs/design/frontend-conventions.md`（§3 i18n 纪律 + §4 a11y 基线 + §6 评审必查 A/B 组）、`docs/design/semantic-components.md`（**核对面**：本任务无新浮层/菜单/确认通道）、`docs/design/ui-design-system.md`（令牌口径：零新 token）。
 
@@ -266,20 +284,32 @@
 **Interfaces:**
 - `assemble.ts`（装配层，**零 `$app`/`import.meta.env`/store 依赖**）：
   - 注册表：`createRegistry()` → 按 web 端同序安装 MVP 渲染器（code → markdown → html → image → av → pdf → hex → jsonl；**archive/foreign/docx-xlsx-pptx 不装**——裁量 3；与 web 端 `viewer.ts:143-156` 的差别仅是跳过 diagram/foreign/Office 三块）；末段 `installFallbackExtensions('code', GENERATED_EXTENSIONS)` 补空位（generated 遇已认领扩展名跳过——`md`/`markdown`/`html`/`htm` 由 code 渲染器显式不认领，归 markdown/html 渲染器）。
-  - **九个注入缝（计数口径订正⑩）——逐一断言全部注入**：
-    | # | 缝 | 归属 | 位置 |
-    |---|---|---|---|
-    | 1 | `setHighlightFence` | markdown 组合包 | markdownRenderer.ts:64 |
-    | 2 | `setMarkdownBackend` | markdown 组合包 | markdownRenderer.ts:98 |
-    | 3 | `setResolveRemoteBase` | markdown 组合包 | markdownRenderer.ts:119 |
-    | 4 | `setMarkdownImageResolver` | markdown 组合包 | markdownRenderer.ts:141 |
-    | 5 | `setRelativeLinkResolver` | markdown 组合包 | markdownRenderer.ts:166 |
-    | 6 | `setRelativeLinkOpener` | markdown 组合包 | markdownRenderer.ts:180 |
-    | 7 | `setDiagramOptions` | markdown 组合包 | markdownRenderer.ts:240 |
-    | 8 | `setExternalImagePolicyProvider` | **@bhxch/vviewer-sanitize** | sanitize.ts:99 |
-    | 9 | `setRenderFailedText` | **@bhxch/vviewer-core** | dispatch/errors.ts:44 |
-    （①②③…⑦属 markdown 组合包；⑧属 sanitize 包；⑨属 core 包——分组如上，**总计 9**。）
-    接线：`setHighlightFence(fenceToHtml)`（围栏桥来自 `@bhxch/vviewer-render-text/markdown/markdownRenderer`，签名 `(code, lang) => Promise<string | null>`）；`setMarkdownBackend(恒本地)`（扩展无服务端——`renderMarkdownBody`）；`setResolveRemoteBase(() => null)`；`setMarkdownImageResolver(...)`（相对图片 → blob URL，§7 ②）；`setRelativeLinkResolver(...)` + `setRelativeLinkOpener(...)`（§7 ①）；`setDiagramOptions(...)`（local/kroki/off + allowRemoteServices 闸）；`setExternalImagePolicyProvider(...)`（三档 + 白名单，映射 spec D）；`setRenderFailedText(() => t('errors.renderFailed'))`。
+  - **十一处 setter 接线（计数口径订正⑩ + 本轮订正③·接线补齐）——逐一断言全部注入**：
+    | # | setter | 归属 | 位置 | 断言形态 |
+    |---|---|---|---|---|
+    | 1 | `setHighlightFence` | markdown 组合包 | markdownRenderer.ts:64 | `getHighlightFence()` === 注入值 |
+    | 2 | `setMarkdownBackend` | markdown 组合包 | markdownRenderer.ts:98 | `getMarkdownBackend()` === 注入值 |
+    | 3 | `setResolveRemoteBase` | markdown 组合包 | markdownRenderer.ts:119 | `getResolveRemoteBase()` === 注入值 |
+    | 4 | `setMarkdownImageResolver` | markdown 组合包 | markdownRenderer.ts:141 | `getMarkdownImageResolver()` === 注入值 |
+    | 5 | `setRelativeLinkResolver` | markdown 组合包 | markdownRenderer.ts:166 | `getRelativeLinkResolver()` === 注入值 |
+    | 6 | `setRelativeLinkOpener` | markdown 组合包 | markdownRenderer.ts:180 | `getRelativeLinkOpener()` === 注入值 |
+    | 7 | `setDiagramOptions` | markdown 组合包 | markdownRenderer.ts:240 | `getDiagramOptions()` 返回注入值 |
+    | 8 | `setExternalImagePolicyProvider` | **@bhxch/vviewer-sanitize** | sanitize.ts:99 | `getExternalImagePolicyProvider()` === 注入值 |
+    | 9 | `setRenderFailedText` | **@bhxch/vviewer-core** | dispatch/errors.ts:44 | 错误文案走注入值（触发一次失败取文案断言） |
+    | 10 | `setPdfWorkerUrlProvider` | **@bhxch/vviewer-render-doc** | T3 Step 1 新增 | 注入后取到 worker URL（**不注入即 pdf 渲染死**——评审订正③） |
+    | 11 | `setHexWorkerUrlProvider` | **@bhxch/vviewer-render-binary** | T3 Step 1 新增 | 注入后取到 worker URL（**不注入即 404 异步失败 → 渲染挂死**——评审订正③） |
+    （①~⑦属 markdown 组合包（7）；⑧属 sanitize 包；⑨属 core 包；⑩⑪属两个渲染包——**总计 11 处 setter**。）
+    接线：
+    `setHighlightFence(fenceToHtml)`（围栏桥来自 `@bhxch/vviewer-render-text/markdown/markdownRenderer`，签名 `(code, lang) => Promise<string | null>`；**唯一注入点=T3，T4 不重复注入**——见 T4 的口径统一条）；
+    `setMarkdownBackend(恒本地)`（扩展无服务端——`renderMarkdownBody`）；
+    `setResolveRemoteBase(() => null)`；
+    `setMarkdownImageResolver(...)`（相对图片 → blob URL，§7 ②）；
+    `setRelativeLinkResolver(...)` + `setRelativeLinkOpener(...)`（§7 ①）；
+    `setDiagramOptions(...)`（local/kroki/off + allowRemoteServices 闸）；
+    `setExternalImagePolicyProvider(...)`（三档 + 白名单，映射 spec D）；
+    `setRenderFailedText(() => t('errors.renderFailed'))`；
+    **`setPdfWorkerUrlProvider(() => preferModernBuild() ? assets.pdfWorkerModernUrl : assets.pdfWorkerLegacyUrl)`**——**选支在 webview 侧做**：`preferModernBuild` 从 `@bhxch/vviewer-render-doc` 根导入（该包已在 webview bundle 内，host 侧不引 pdfjs）；能力判定与 pdfjs 主模块同环境，worker 与主模块构建分支必然一致（Global Constraints「包内 seam 纪律」条）；
+    **`setHexWorkerUrlProvider(() => assets.binaryWorkerUrl)`**。
   - 数据面：`createSingleFileStore(file)` 注入 dispatcher 的 `FileSource.store`（core singleFile 先例，`packages/vviewer-core/src/tree/singleFile.ts`）——webview 内以 `new File([bytes], name)` 构造。
 - **包内新增缝（跨包最小改动，默认零行为变化）**：
   ```ts
@@ -295,14 +325,15 @@
   // hexRenderer.render 的 createWorker：provider 返回非 null → new Worker(url, {type:'module'})；否则逐字节回退 new URL('./binary.worker.ts', import.meta.url)。
   ```
   **apps/web 零改动**（不注入 → 默认路径逐字节等价），三处 e2e 回归锚零翻转（RF 1）。
+  **扩展侧必须接线**（本轮订正③）：T3 的装配层调用这两个 setter（见上表 ⑩⑪）；**pdf 双分支的消费面 = 按能力选支**——**选支在 webview 侧**（webview bundle 已含 pdfjs 主模块，host 侧不引 pdfjs）：`preferModernBuild` 从 `@bhxch/vviewer-render-doc` 根导入（render-doc/src/pdf.ts:96 导出；包 `exports["."]` = `src/pdf.ts`）→ `preferModernBuild() ? assets.pdfWorkerModernUrl : assets.pdfWorkerLegacyUrl`——两文件都有消费面，无死重，worker 与主模块构建分支必然一致，不绕开 pdf.ts 的能力分支。
 - **动态令牌面（`theme.ts`）**：kind → `--ui-bg/--ui-fg/--ui-border/--code-*` 缺省值（**沿 `packages/vviewer-markdown/src/css.ts` 内既默认值，不引入新 token**——markdown.css 的 `var(--token, 默认值)` 契约自带缺省）；capture 色 → `themeToCssVars(table, CODE_CAPTURES)`（`@bhxch/vviewer-highlight`）注入 `--vv-ts-*`；表源 = 打包的两条主题（onelight/serika-dark，按 kind 选，裁量 4）；注入方式 = webview 侧 `<style id="vv-tokens">` 元素整体替换（**不进宿主的静态内联块**——主题变更时需整体替换）。
 - **katex CSS 注入面**：webview 启动时 fetch `asWebviewUri(dist/webview/katex.min.css)` → `<style>` 注入（字体 URL 已是绝对 asWebviewUri，`font-src` 覆盖即生效）——包内 `pipeline.ts:643` 的动态 import 在 esbuild 下不注入样式，漏做即公式无排印（RF 7）。
-- **验收锚 / e2e**：验收 = `packages/vviewer-render-doc` / `packages/vviewer-render-binary` 新增单测绿 + **既有包单测零回归** + `apps/vscode/test/{assemble,shell}.test.ts` 绿（**九缝逐一断言**——`assemble.test.ts` 对每个缝断言注入后 `getXxx()` 返回注入值）+ `pnpm run typecheck` 绿；**所触 e2e 锚文件（回归锚，不改断言）**：`e2e/b-pdf-range.spec.ts`、`e2e/b-pdf-range-2.spec.ts`、`e2e/b-binary-hex-archive.spec.ts`。
+- **验收锚 / e2e**：验收 = `packages/vviewer-render-doc` / `packages/vviewer-render-binary` 新增单测绿 + **既有包单测零回归** + `apps/vscode/test/{assemble,shell}.test.ts` 绿（**十一处 setter 逐一断言**——`assemble.test.ts` 对上表 11 项全覆盖：9 个 getter 形态断言 + 2 个 worker provider 断言「注入后取到 URL」）+ `pnpm run typecheck` 绿；**所触 e2e 锚文件（回归锚，不改断言）**：`e2e/b-pdf-range.spec.ts`、`e2e/b-pdf-range-2.spec.ts`、`e2e/b-binary-hex-archive.spec.ts`。
 
 - [ ] **Step 1: 包内两缝（TDD RED→GREEN，默认路径锁死）**
   先写 `pdfWorkerUrl.test.ts`（未注入 → URL 形态与现表达式等价（`pdfjs-dist/build/pdf.worker.min.mjs` 或 legacy 分支）；注入 → 返回注入值）与 `hexWorkerUrl.test.ts`（未注入 → `new URL('./binary.worker.ts', import.meta.url)` 形态；注入 → 注入值；provider 返回 null → 回退默认）。Run: `pnpm vitest run packages/vviewer-render-doc packages/vviewer-render-binary` → RED → 落缝 → GREEN（**既有用例零回归** = 默认路径兼容锚）。
 - [ ] **Step 2: webview 装配层 + 壳（RED→GREEN）**
-  `assemble.test.ts`：注册表安装序（code → markdown → …；`md` 归 markdown）、**九个注入缝逐一断言**（上表 9 项全覆盖）、dispatcher 对单文件 source 选中预期渲染器。`shell.test.ts`（jsdom）：壳 DOM 契约 + a11y（toc 面板 `role="complementary"`/`aria-label`、折叠钮 `aria-expanded` 同步、**顶部提示条 `role="status"`**、toc 头部徽标有可读名称、图标钮 aria-label 含可见文本词形）。Run: `pnpm vitest run apps/vscode` → RED → GREEN。
+  `assemble.test.ts`：注册表安装序（code → markdown → …；`md` 归 markdown）、**十一处 setter 逐一断言**（上表 11 项全覆盖——含 `setPdfWorkerUrlProvider` / `setHexWorkerUrlProvider` 两条**必须接线**的缝：断言注入后取到 worker URL，**不接即 pdf 渲染死 / hex 挂死**）、dispatcher 对单文件 source 选中预期渲染器。`shell.test.ts`（jsdom）：壳 DOM 契约 + a11y（toc 面板 `role="complementary"`/`aria-label`、折叠钮 `aria-expanded` 同步、**顶部提示条 `role="status"`**、toc 头部徽标有可读名称、图标钮 aria-label 含可见文本词形）。Run: `pnpm vitest run apps/vscode` → RED → GREEN。
 - [ ] **Step 3: 动态令牌 + katex CSS 注入面**
   动态令牌 `<style id="vv-tokens">` 替换面（亮/暗两套，主题变更时整体替换）；katex CSS 自备注入面（RF 7）。两者均为 webview 侧运行时注入。
 - [ ] **Step 4: 回归 + 门禁 + 提交**
@@ -316,7 +347,7 @@
 ### Task 4: tree-sitter 离线高亮链路——blob worker + 本地 grammar/queries 资产 + 引擎档位
 
 **Files:**
-- Create: `apps/vscode/src/webview/highlight.ts`（worker 起活 + `HighlightClient` + `CodeHighlightClient` 适配 + `attachHighlightClient` + `setHighlightFence`）
+- Create: `apps/vscode/src/webview/highlight.ts`（worker 起活 + `HighlightClient` + `CodeHighlightClient` 适配 + `attachHighlightClient`；**不注入 `setHighlightFence`**——围栏桥由 T3 装配层统一注入，缝只注入一次）
 - Create: `apps/vscode/src/webview/highlightWorker.ts`（**worker 入口**：import `serveWorker` 并自启——包内 `serveWorker`（worker.ts:109）已含 WorkerGlobalScope 自启语义）
 - Create: `apps/vscode/src/webview/assets.ts`（资产 URI 解析 + manifest → GrammarTable + 缺件可见降级）
 - Create: `apps/vscode/src/webview/engineBadge.ts`（当前高亮引擎态的可见指示——**顶部提示条 + toc 面板头部徽标**，不设状态栏）
@@ -334,7 +365,7 @@
 - [ ] **Step 1: 引擎档位与降级矩阵（TDD RED）**
   `highlight.test.ts`：档位裁决三态、缺件降级（worker 失败 → hljs；语言不在清单 → hljs；plain 不起 worker）、manifest → GrammarTable 构造（条目 base 恒 undefined）、queriesBase/runtimeDir 尾斜杠与绝对性断言。Run: `pnpm vitest run apps/vscode` → RED。
 - [ ] **Step 2: worker 入口 + 资产解析 + client 适配**
-  落 `highlightWorker.ts`（`import { serveWorker } from '@bhxch/vviewer-highlight/worker'; serveWorker();`）、`assets.ts`（读 manifest → GrammarTable；组装三段 base URL）、`highlight.ts`（blob worker 起活 → `new HighlightClient(worker, init)` → 适配 `CodeHighlightClient`（highlight/outline/cancelOutline/hasLocalGrammar——render-text 的鸭子面，`packages/vviewer-render-text/src/code/client.ts:34`）→ `attachHighlightClient(adapter)`；围栏桥 `setHighlightFence(fenceToHtml)`）。**不发 compute 路由**（扩展无服务端——`computeRouter` 不装配，调用恒本地）。
+  落 `highlightWorker.ts`（`import { serveWorker } from '@bhxch/vviewer-highlight/worker'; serveWorker();`）、`assets.ts`（读 manifest → GrammarTable；组装三段 base URL）、`highlight.ts`（blob worker 起活 → `new HighlightClient(worker, init)` → 适配 `CodeHighlightClient`（highlight/outline/cancelOutline/hasLocalGrammar——render-text 的鸭子面，`packages/vviewer-render-text/src/code/client.ts:34`）→ `attachHighlightClient(adapter)`）。**口径统一（评审订正⑨·本轮）**：围栏桥 `setHighlightFence(fenceToHtml)` **只在 T3 装配层注入一次**，本任务**不重复注入**（T3 的缝表 ① 与本任务共同构成 11 处 setter 的分工：T3 注入 11 处，T4 只做 client 适配与 attach——「缝一次性注入，重复注入即语义漂移」的纪律）。**不发 compute 路由**（扩展无服务端——`computeRouter` 不装配，调用恒本地）。
 - [ ] **Step 3: 引擎态可见 + 门禁 + 提交**
   `engineBadge.ts`：顶部提示条 + toc 面板头部徽标显示当前引擎（tree-sitter / hljs（降级）/ plain），降级时附原因短语（RF 3）。Run: `pnpm vitest run apps/vscode && pnpm run typecheck && pnpm lint` → 全绿。
   ```bash
@@ -458,23 +489,35 @@
       # vsce publish --pat … --no-dependencies
   ```
   **纪律**：①**上传**步以 `secrets` 存在性为守卫——本仓无 secrets，job 恒跳过（workflow 文件落库即止）；**本地 `vsce package` 体积门在 T1/T7 实跑，不受此守卫影响**；②版本号来源 = tag（`v*` 去前缀）；③双渠道任一失败须可见（不设 `continue-on-error`）；④**不得把发布写权限授予 build job**（`contents: read` 兜底）。CI 验证边界：workflow YAML 只能本地静态自查（YAML 解析 + 步序走查），真跑须用户配 secrets 后手动触发（台账①）。
-- 发布元数据：`publisher: "bhxch"`、`displayName`、`description`、`repository`（仓 URL）、`license: "Apache-2.0"`、`icon`（vsce 要求 ≥128×128 PNG——落地时若仓内无可用图标则按最小尺寸生成一枚并入库，**不得留空**（缺图标 vsce 直接报错），生成物形态与体积记台账）、`categories`、`keywords`、`galleryBanner`（可选）。
+- **build job 的构建前置（评审订正②·本轮）**：`setup-grammars`（lite，34 语言）→ **`pnpm gen:svgbob-wasm`**（wasm32 target + wasm-bindgen；缺则扩展构建走 T1 的**条件桩**——svgbob 围栏降级为源码块，见 Global Constraints「svgbob glue 的构建前置」条）→ `pnpm --filter @bhxch/vviewer-vscode build`（含 `vsce package` 体积门 + `.vsix` 产出）→ 上传 artifact（`.vsix` + `dist/`）供两个上传 job 消费。**发布链取完整 svgbob 能力**（非桩）。
+- 发布元数据：`publisher: "bhxch"`、`displayName`、`description`、`repository`（仓 URL）、`license: "Apache-2.0"`、`icon: "media/icon.png"`（**icon 事实订正⑥·本轮**：vsce 4.1.1 **缺 `icon` 字段不报错**（package.js:857 仅在有 icon 时处理）；**指定了 `icon` 而文件不在包内才报错**（package.js:870-871 `The specified icon '...' wasn't found in the extension.`）；**SVG 图标被禁**（package.js:1046-1047）→ 填 `icon` 就必须把 PNG 复制进 VSIX 打包根 `dist/`（T1 的复制清单已含 `icon.png`））、`categories`、`keywords`、`galleryBanner`（可选）。
 
 - [ ] **Step 1: 发布 workflow + 发布元数据**
   落 `publish-vscode.yml`（按上 Interface）+ `package.json` 发布字段；本地静态自查：YAML 可解析（`python3 -c "import yaml;yaml.safe_load(open('.github/workflows/publish-vscode.yml'))"`）+ 步序/权限走查（build job `contents: read`；两上传 job 以 secrets 守卫跳过）。**不实跑上传**。
-- [ ] **Step 2: 全量门禁（控制器执行）——含四项必要前置**
+- [ ] **Step 2: 全量门禁（控制器执行）——含五项必要前置**
   **前置（缺任一即大面积 skip → 「零翻转」成假绿；逐项产出并校验存在）**：
   1. `node tools/grammar-builder/gen-sources.mjs` + `node tools/grammar-builder/build.mjs --fetch --lite` + `node tools/grammar-builder/build.mjs --self-build`（grammar 资产；**扩展构建与 e2e 共同依赖**）
-  2. `pnpm gen:svgbob-wasm`（svgbob wasm 引擎产物；缺则图表相关用例 skip——ci.yml e2e-prep 同款必做步）
+  2. `pnpm gen:svgbob-wasm`（svgbob wasm 引擎产物；缺则图表相关用例 skip——ci.yml e2e-prep 同款必做步；**扩展构建侧另有条件桩兜底**——本前置是 e2e 侧的必做步）
   3. `node tools/fetch-e2e-corpus.mjs`（多源渲染语料，不入库；缺则 corpus 域用例 skip）
   4. `uv run tools/gen-e2e-pdf-linearized.py`（PDF 夹具；缺则 PDF-RANGE-01/02/03/05/06/07 skip——`existsSync` 守卫）
-  5. `cargo build --manifest-path server/Cargo.toml`（server 档 e2e 的 webServer 直执行 `server/target/release/vviewer`——`apps/web/playwright.server.config.ts:22/:33`；缺则 server 档整组无法起服）
+  5. **`cargo build --release --manifest-path server/Cargo.toml`**（server 档 e2e 的 webServer 直执行 `server/target/release/vviewer`——`apps/web/playwright.server.config.ts:22/:33`；**必须 `--release`**——dev profile 产 `server/target/debug/vviewer`，仓内无 `.cargo/config.toml` 故无 profile 重定向；`apps/web/e2e-server/fixtures.mjs:18-19` 的 fail-fast 提示原文即「请先执行: cargo build --release --manifest-path …」；等价写法 `pnpm build:all`（package.json:14）——缺 release 二进制则 server 档整组无法起服）
   门禁序列：`pnpm lint && pnpm run typecheck && pnpm vitest run`（仓库根全量——扩展用例已由 vitest include 纳入）→ `pnpm --filter web build:e2e`（产出 `apps/web/build`，server 档 webServer 的 WEB_DIST 依赖它）→ `pnpm --filter web exec playwright test`（全量双 project）→ `pnpm --filter web exec playwright test --config playwright.server.config.ts`（server 档；**零翻转 = 本计划零 server/ 改动的一致性兑现**）→ `pnpm --filter @bhxch/vviewer-vscode build`（体积门：`.vsix` <100MB + 无未解析 import）→ `git status --porcelain` 净空。
   **skip 计数纪律**：全量 playwright 输出的 **skip 数须与基线一致**（或逐条列出差异并说明）——**skip 不是「零翻转」证据**（前置缺件时用例整组 skip，表面全绿实则未跑）；报告须同时给出 passed/failed/skipped 三元计数。
 - [ ] **Step 3: review + 台账汇总**
-  全量 review（superpowers:requesting-code-review，范围=本计划全部 commit），修复全部 C/I/M 后复审；**不 push**。台账汇总（实施期记档项随任务报告归集）：①**上传发布 deferred**——OVSX_PAT/VSCE_PAT 由用户在仓外配置，workflow 已落文件但未实跑（约束④；**本地 vsce package 体积门已实跑**）；②**VSCode 活动主题 JSON 精确注入列为增强**（spec §4.2 裁量 4，highlight 包已备件）；③**扩展真机行为无自动化门**——custom editor 接管/CSP 生效/worker 起活/**样式生效**靠 README 冒烟清单人工验收（spec §5 定 e2e 非门禁）；④**大文件字节通道内存翻倍**——postMessage 的 `Uint8Array` 为结构化克隆拷贝，>32MB 文件在 host 与 webview 各存一份（阈值化临时文件通道列为后续优化）；⑤**katex 导出 CSS 双实现**——扩展构建期自实现 data URI 内联（与 apps/web `katexExportCss.ts` 同源不同实现），两侧需随 katex 版本同步核对；⑥**扩展名清单依赖生成物**——`generated-extensions.ts` 不入库，扩展构建前须跑 `pnpm gen:sources`（缺件 fail-fast 已落）；⑦**扩展图标**——vsce 要求 ≥128×128 PNG，若需新生成则记形态与体积。
+  全量 review（superpowers:requesting-code-review，范围=本计划全部 commit），修复全部 C/I/M 后复审；**不 push**。台账汇总（实施期记档项随任务报告归集）：①**上传发布 deferred**——OVSX_PAT/VSCE_PAT 由用户在仓外配置，workflow 已落文件但未实跑（约束④；**本地 vsce package 体积门已实跑**）；②**VSCode 活动主题 JSON 精确注入列为增强**（spec §4.2 裁量 4，highlight 包已备件）；③**扩展真机行为无自动化门**——custom editor 接管/CSP 生效/worker 起活/**样式生效**靠 README 冒烟清单人工验收（spec §5 定 e2e 非门禁）；④**大文件字节通道内存翻倍**——postMessage 的 `Uint8Array` 为结构化克隆拷贝，>32MB 文件在 host 与 webview 各存一份（阈值化临时文件通道列为后续优化）；⑤**katex 导出 CSS 双实现**——扩展构建期自实现 data URI 内联（与 apps/web `katexExportCss.ts` 同源不同实现），两侧需随 katex 版本同步核对；⑥**扩展名清单依赖生成物**——`generated-extensions.ts` 不入库，扩展构建前须跑 `pnpm gen:sources`（缺件 fail-fast 已落）；⑦**扩展图标**——填 `icon` 即必须把 PNG 复制进 VSIX 打包根（vsce 缺 icon 不报错、填了缺文件才报错，package.js:857/:870-871）；若需新生成则记形态与体积；⑧**svgbob glue 条件桩**——未跑 `pnpm gen:svgbob-wasm` 时扩展构建走桩，**svgbob 围栏降级为源码块**（可见降级，非静默空白）；发布链跑 `pnpm gen:svgbob-wasm` 取完整能力——**本地开发若长期只跑桩，svgbob 围栏能力与 web 端不一致，记档**。
 
 ## Errata（执行期勘误）
+
+- 2026-11-18 计划评审**第二轮**修订（9 条意见，逐条内联落定；基线由 `61d2e17` 前进至 `9e4ef1c`（上轮修订 commit），源码面等价）：**本轮的 vsce 结论均为「源码级核对」——只读检视 npm 包 `@vscode/vsce@4.1.1` 的 `out/validation.js` 与 `out/package.js`（未执行其代码；未实跑 `vsce package`，因 apps/vscode 尚不存在）**：
+  ①【高·构建门必红】**VSIX manifest 与计划字段不兼容（三处硬校验）**——`validateManifestForPackaging`（package.js:1001-1044，由 `readManifest(...).then(validateManifestForPackaging)` package.js:1120 进入）：`name` 须匹配 `/^[a-z0-9][a-z0-9\-]*$/i`（validation.js:45）→ 拒 `@bhxch/vviewer-vscode`（`Invalid extension "name"`，validation.js:55-61）；`version` 必填且合法 semver（validation.js:64-70）→ 计划字段清单**未列 version**；`engines.vscode` 与 `devDependencies['@types/vscode']` 按 major.minor 比大小（package.js:1043-1044 / validation.js:100-137）→ `^1.90.0` 配未钉版的 `@types/vscode`（取最新版 1.1xx）即抛「greater than engines.vscode 1.90.0」。**落定**：**源 manifest（workspace 名 `@bhxch/vviewer-vscode`，带 scope）与 VSIX manifest 解耦**——构建产物 `dist/package.json` 重写 `name: "vviewer-vscode"`（无 scope）+ `publisher: "bhxch"`（marketplace 标识 `bhxch.vviewer-vscode`）+ `version` 透传 + `main: "./extension.js"`；源 manifest 补 `version`；devDep 钉 `@types/vscode: "~1.90.0"`。另记：`contributes.customEditors` 必留（vsce 的隐式激活事件来源，package.js:1014-1021；engines ≥1.74 下与 `main` 组合合法，package.js:1012-1041）。
+  ②【高·构建门必红】**扩展构建缺 `pnpm gen:svgbob-wasm` 前置**——`packages/vviewer-markdown/src/pipeline.ts:20` 静态 import `@bhxch/vviewer-render-diagram` 的 `renderDiagramEngine`，其实现 `packages/vviewer-render-diagram/src/markdown/diagramEngines.ts:64` 为 `import('./svgbob-wasm-gen/svbob_wasm.js')`，该生成目录不入库（.gitignore:56-57）→ esbuild 须静态解析该 dynamic import，**新 checkout 必构建失败**（本仓因已有生成产物而侥幸通过＝假绿）。**落定**：T1 构建脚本加 **svgbob 条件桩插件**（文件在 → 正常打包；不在 → 桩模块 `default()` 抛错 → 运行期 svgbob 围栏**回落源码块**（可见降级））；扩展构建因此**不强制 Rust 工具链**，CI 发布 workflow 另跑 `pnpm gen:svgbob-wasm`（ci.yml:160 同款）取完整能力——「桩态下 svgbob 围栏降级」记台账⑧。
+  ③【高·主功能断链】**两个 worker URL 注入缝无任何调用点**（grep 证实只有定义/改动行）→ 不注入即 pdf 渲染死（pdf.ts:128-132 在 webview chunk URL 下 404 → pdfjs 无 workerSrc）与 hex 挂死（hex.ts:805 的 try/catch 只兜同步抛错，404 是异步事件 → worker 永不应答）。**落定**：T3 装配层接线 `setPdfWorkerUrlProvider(() => assets.pdfWorkerUrl)` / `setHexWorkerUrlProvider(() => assets.binaryWorkerUrl)`；缝计数口径由「9」改为 **11 处 setter**（9 渲染/文案缝 + 2 worker provider），T3 验收锚逐一断言 11 项。
+  ④【中高·门禁红】**T7 前置 #5 的 cargo profile 写错**——dev profile 产 `server/target/debug/vviewer`，而 `apps/web/playwright.server.config.ts:22` 的 BIN 是 `server/target/release/vviewer`（仓内无 `.cargo/config.toml` 故无 profile 重定向；`apps/web/e2e-server/fixtures.mjs:18-19` 的 fail-fast 提示原文即 `cargo build --release --manifest-path …`）。**落定**：改为 **`cargo build --release --manifest-path server/Cargo.toml`**（等价 `pnpm build:all`，package.json:14）。
+  ⑤【中】**icon 事实判断错 + 未列入复制清单**——vsce 4.1.1：**缺 `icon` 字段不报错**（package.js:857 仅在有 icon 时处理）；**指定了 icon 而文件不在包内才报错**（package.js:870-871）；**SVG 被禁**（package.js:1046-1047）。**落定**：事实更正写入 T7 发布元数据条；`icon.png` 进 T1 的 dist 复制清单（源 `apps/vscode/media/icon.png` → 复制为 `dist/media/icon.png`，两处 manifest 的 `icon` 字段统一为 `"media/icon.png"`）；台账⑦改写。
+  ⑥【中】**`.vscodeignore` 位置错**——vsce 从**包根**（= `dist/`）读该文件，放源侧 `apps/vscode/.vscodeignore` 即死资产且排除规则不生效。**落定**：**不建源侧 `.vscodeignore`**；改由 `build.mjs` 写 `dist/.vscodeignore`（内容针对 dist 产物，如 `**/*.map`）。
+  ⑦【低】**legacy pdf worker 无消费面**——`AssetUris` 只有一个 `pdfWorkerUrl`、seam 只返回单值 → 未定义注入哪一支。**落定**：注入策略 = **按能力选支**——复用包内导出的 `preferModernBuild()`（render-doc/src/pdf.ts:96，包 `exports["."]` = `src/pdf.ts`）→ modern/legacy 两文件**都有消费面**，无死重，也不绕开 pdf.ts 的能力分支；体积门说明含两支合计 ~2.6MiB。
+  ⑧【低】**`webviewHtml.test.ts` 需要 vscode-free 模块**——`webviewPanel.ts` 必然 `import * as vscode from 'vscode'`（运行时无此模块），若 HTML 模板函数与其同文件则 vitest 直解析即红。**落定**：HTML 模板函数拆到 **`apps/vscode/src/host/webviewHtml.ts`（零 vscode 依赖）**，入参 = `{ cspSource, nonce, scriptUri, styleText }`，单测直测该纯模块（与 `settings.ts`/`protocol.ts` 同款「纯 .ts」纪律）。
+  ⑨【低】**`setHighlightFence` 在 T3/T4 重复注入**（与计划自订「缝一次性注入」相抵）。**落定**：**T3 装配层统一注入 11 处 setter**；T4 只做 client 适配与 `attachHighlightClient`，**不重复注入围栏桥**（T4 的 Files/Step 2 描述同步）。
 
 - 2026-11-18 计划评审修订（10 条意见，逐条内联落定；基线由 `eed783c` 前进至 `61d2e17`（本文件初版 docs commit），源码面等价）：
   ①【高·主功能缺失】**样式供给面缺失**——初版把 `MARKDOWN_CSS` 只当「token 契约」，并在 Errata 写下「扩展零 CSS 构建处理」，推论错误（无 CSS 构建步骤 ≠ 无需 CSS）。事实：`createMarkdownView` 自身不注入样式（markdownRenderer.ts:958-961 明写「CSS 由消费方引入 markdown.css（或 MARKDOWN_CSS 常量注入 <style>）」；963-1050 无 style 注入），apps/web 侧供给面是 `app.css:7` 的 `@import`。**落定**：Global Constraints 新增「样式供给面」硬约束 + T1 落 `SHELL_CSS` 常量 + **T2 落样式内联**（`MARKDOWN_CSS` + `SHELL_CSS` 合成为一个 `<style nonce>`，单测断言含 `.vv-markdown`/`.ts-keyword`/`.md-lightbox` 与壳类名）；T3 落动态令牌 `<style>` 替换面与 katex CSS 自备注入面。
