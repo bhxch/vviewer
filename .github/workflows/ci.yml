@@ -176,18 +176,27 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv run tools/gen-e2e-pdf-linearized.py
       # artifact ①：preview 伺服面——kit 3 vite preview 伺服 .svelte-kit/output/{client,server}
-      #（adapter 部署产物 build/ 非输入）；wasm/引擎产物已随 client 树（build 期 static/ 拷贝）
+      #（adapter 部署产物 build/ 非输入）；wasm/引擎产物已随 client 树（build 期 static/ 拷贝）。
+      # include-hidden-files：v4+ 引擎默认排除 dotfiles（output/{client,server}/.vite/manifest.json
+      # 为隐藏件）——review 定损 preview 不读 .vite（只读 output/server/manifest.js），仍传保
+      # artifact=build 产物完整等值
       - uses: actions/upload-artifact@v7
         with:
           name: e2e-web-build
           path: apps/web/.svelte-kit/output
+          include-hidden-files: true
           retention-days: 1
           if-no-files-found: error
-      # artifact ②：语料 + PDF 夹具（pdf-linearized 在 corpus 树内一并覆盖）
+      # artifact ②：语料 + PDF 夹具（pdf-linearized 在 corpus 树内一并覆盖）。
+      # include-hidden-files 必需：manifest files 清单含 4 条点开头条目
+      #（markpad-md/.github/PULL_REQUEST_TEMPLATE.md 与 linguist-samples 的
+      # .php/.eslintrc.json/.oxlintrc.json——v4+ 引擎默认排除 dotfiles，漏配即分片
+      # runner 语料缺件、LCD/MRP 批量用例假红，违反分片=现单 job 同面承诺）
       - uses: actions/upload-artifact@v7
         with:
           name: e2e-corpus
           path: apps/web/e2e/fixtures/corpus
+          include-hidden-files: true
           retention-days: 1
           if-no-files-found: error
 
