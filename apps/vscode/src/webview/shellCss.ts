@@ -17,6 +17,10 @@
  * - 无 transition/animation：动效义务（reduced-motion 双块门控）在 apps/web 的
  *   app.css 内，本扩展壳零动效，无门控义务。
  *
+ * CSS 载荷内的注释一律 ASCII：扩展 ESLint 覆盖块（apps/vscode/src/**）禁模板串静态段的
+ * CJK（cjkTemplateElement——模板串静态段被当作潜在显示文案）→ 中文说明留在本文件的
+ * TS 注释面（不受该规则约束），CSS 内只留 ASCII 段落标记。
+ *
  * 类名契约（T3 的 webview 壳按此建 DOM；勿改名——改名即视觉漂移）：
  * - `.vv-shell` 壳根（flex 行）
  * - `.vv-shell__main` 内容区（滚动面）
@@ -26,7 +30,7 @@
  * - `.vv-shell__toc-list` / `__item`（`__item--depth-1..4` 缩进档）面板条目
  * - `.vv-shell__notice` 顶部提示条（宿主挂 `role="status"`；`--warn`/`--error` 变体）
  */
-export const SHELL_CSS = `/* 扩展壳样式（spec H）：布局骨架 + 面板 + 提示条；令牌全走 var(--token, 默认值) */
+export const SHELL_CSS = `/* Extension shell styles (spec H): layout skeleton + toc panel + notice bar. */
 html, body { height: 100%; }
 body {
   margin: 0;
@@ -37,7 +41,7 @@ body {
   background: var(--ui-bg, #ffffff);
 }
 
-/* 壳布局：内容区与 toc 面板同行；停靠侧由类切换（left 用 order 提前，不改 DOM 序） */
+/* Shell layout: content area and toc panel in one row; side switched by class. */
 .vv-shell { display: flex; flex-direction: row; align-items: stretch; height: 100vh; overflow: hidden; }
 .vv-shell__main { flex: 1 1 auto; min-width: 0; overflow: auto; padding: var(--vv-sp-12, 12px) var(--vv-sp-16, 16px); }
 .vv-shell__toc {
@@ -52,7 +56,7 @@ body {
 .vv-shell__toc--left { order: -1; border-left: none; border-right: 1px solid var(--ui-border, #d0d7de); }
 .vv-shell__toc[data-collapsed="true"] { display: none; }
 
-/* 面板头部：标题 + 引擎徽标 + 折叠钮 */
+/* Panel head: title + engine badge + collapse toggle. */
 .vv-shell__toc-head { display: flex; align-items: center; gap: var(--vv-sp-4, 4px); margin-bottom: var(--vv-sp-8, 8px); }
 .vv-shell__toc-title { font-size: var(--vv-fs-md, 14px); font-weight: 600; color: var(--ui-fg, #1f2328); }
 .vv-shell__toc-badge {
@@ -76,7 +80,7 @@ body {
 }
 .vv-shell__toc-toggle:hover { background: var(--ui-hover-bg, #f6f8fa); }
 
-/* 面板条目：目录项（heading / symbol 两类共用） */
+/* Panel items: outline entries (heading / symbol share this row). */
 .vv-shell__toc-list { list-style: none; margin: 0; padding: 0; }
 .vv-shell__toc-item {
   display: block;
@@ -97,7 +101,7 @@ body {
 .vv-shell__toc-item--depth-3 { padding-left: var(--vv-sp-12, 12px); }
 .vv-shell__toc-item--depth-4 { padding-left: var(--vv-sp-16, 16px); }
 
-/* 顶部提示条（宿主挂 role="status"；降级/大文件/导出反馈走此面） */
+/* Top notice bar (host mounts role="status"; degraded / too-large / export feedback). */
 .vv-shell__notice {
   display: flex;
   align-items: center;
@@ -114,5 +118,5 @@ body {
 .vv-shell__notice--warn { color: var(--ui-warning, #9a6700); border-color: var(--ui-warning, #9a6700); }
 .vv-shell__notice--error { color: var(--ui-danger, #cf222e); border-color: var(--ui-danger, #cf222e); }
 
-/* 焦点环（apps/web 基础层同款口径：2px accent + 负 offset 防贴边裁剪） */
+/* Focus ring (same shape as apps/web base layer: 2px accent + negative offset). */
 :where(button, [tabindex], a[href]):focus-visible { outline: 2px solid var(--ui-accent, #0969da); outline-offset: -1px; }`;

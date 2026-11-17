@@ -281,5 +281,33 @@ export default defineConfig(
     rules: {
       'no-restricted-syntax': ['error', runesOptOut, bareIntl]
     }
+  },
+  // 块 C：apps/vscode/src 子集（spec H T2）——扩展自有 i18n 纪律前置：CJK 三形态 +
+  // bareIntl + 禁直读 catalogs。
+  // 扩展是独立运行时（不共用 apps/web 的组件库，semantic-components.md 的登记表不覆盖
+  // 扩展面），但 i18n 纪律同族沿用（frontend-conventions.md §3）：扩展自有目录
+  // （src/i18n/catalogs/{zh-CN,en}.ts），消费方一律经 src/i18n/core 门面。
+  // ignores：i18n 目录本体（catalog 含 CJK 键值是合法直读点，与块 A 同款口径）+
+  // src 下的 *.test.ts（目录值双锁断言直读 catalogs 是既定形态）。
+  // 覆盖展开纪律同前：runesOptOut 一并展开（apps/vscode 零 .svelte 文件，选择器无匹配，
+  // 纪律形状保持）。
+  {
+    files: ['apps/vscode/src/**/*.{svelte,ts}'],
+    ignores: ['apps/vscode/src/i18n/**', 'apps/vscode/src/**/*.test.ts'],
+    rules: {
+      'no-restricted-syntax': ['error', runesOptOut, cjkLiteral, cjkTemplateElement, cjkSvelteText, cjkSvelteLiteral, bareIntl],
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/i18n/catalogs', '**/i18n/catalogs/**'],
+              message:
+                '禁止直读 catalogs：消费方一律经 i18n/core 门面（locale 状态与键集单一入口）'
+            }
+          ]
+        }
+      ]
+    }
   }
 );

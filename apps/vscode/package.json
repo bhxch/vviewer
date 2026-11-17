@@ -38,6 +38,18 @@
         "selector": []
       }
     ],
+    "commands": [
+      {
+        "command": "vviewer.openWithNative",
+        "title": "Open with Native Editor",
+        "category": "VViewer"
+      },
+      {
+        "command": "vviewer.reload",
+        "title": "Reload",
+        "category": "VViewer"
+      }
+    ],
     "configuration": {
       "title": "VViewer",
       "properties": {}
