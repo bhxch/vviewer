@@ -83,6 +83,8 @@ export default defineConfig(
   globalIgnores([
     '**/node_modules/**',
     '**/dist/**',
+    // VSCode 扩展构建缓存（esbuild 打包的临时产物，非本仓源码）
+    'apps/vscode/out/**',
     '**/build/**',
     '**/.svelte-kit/**',
     '**/.temp/**',

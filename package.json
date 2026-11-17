@@ -16,7 +16,8 @@
     "gen:grammars": "pnpm gen:sources && node tools/grammar-builder/build.mjs --fetch --lite && node tools/grammar-builder/build.mjs --self-build",
     "gen:svgbob-wasm": "node packages/vviewer-render-diagram/tools/build-svgbob-wasm.mjs",
     "lint": "eslint .",
-    "typecheck": "tsc -b packages/*/tsconfig.json apps/web/tsconfig.e2e.json --noEmit && pnpm --filter web typecheck",
+    "typecheck": "tsc -b packages/*/tsconfig.json apps/vscode/tsconfig.json apps/web/tsconfig.e2e.json --noEmit && pnpm --filter web typecheck",
+    "build:vscode": "pnpm --filter @bhxch/vviewer-vscode build",
     "server:dev": "cargo run --manifest-path server/Cargo.toml -- serve --root . --port 8321"
   },
   "devDependencies": {
@@ -39,6 +40,7 @@
       "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
     },
     "onlyBuiltDependencies": [
+      "esbuild",
       "tree-sitter-cli"
     ],
     "patchedDependencies": {

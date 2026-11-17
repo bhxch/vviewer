@@ -1,0 +1,67 @@
+{
+  "name": "@bhxch/vviewer-vscode",
+  "version": "0.1.0",
+  "displayName": "VViewer",
+  "description": "在 VSCode 内以 webview 只读渲染 markdown / 代码 / 图片 / 音视频 / PDF / HTML / JSONL / hex",
+  "publisher": "bhxch",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "main": "./dist/extension.js",
+  "icon": "media/icon.png",
+  "categories": [
+    "Other",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "markdown",
+    "preview",
+    "viewer",
+    "pdf",
+    "hex"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bhxch/vviewer.git"
+  },
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "vviewer.viewer",
+        "displayName": "VViewer",
+        "priority": "default",
+        "selector": []
+      }
+    ],
+    "configuration": {
+      "title": "VViewer",
+      "properties": {}
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "@types/vscode": "~1.90.0",
+    "@vscode/vsce": "^4.1.1",
+    "esbuild": "^0.28.2",
+    "ovsx": "^1.4.0"
+  },
+  "dependencies": {
+    "@bhxch/vviewer-core": "workspace:*",
+    "@bhxch/vviewer-detect": "workspace:*",
+    "@bhxch/vviewer-highlight": "workspace:*",
+    "@bhxch/vviewer-lightbox": "workspace:*",
+    "@bhxch/vviewer-markdown": "workspace:*",
+    "@bhxch/vviewer-render-binary": "workspace:*",
+    "@bhxch/vviewer-render-diagram": "workspace:*",
+    "@bhxch/vviewer-render-doc": "workspace:*",
+    "@bhxch/vviewer-render-media": "workspace:*",
+    "@bhxch/vviewer-render-text": "workspace:*",
+    "@bhxch/vviewer-sanitize": "workspace:*",
+    "katex": "^0.19.0"
+  }
+}

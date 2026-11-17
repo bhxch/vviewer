@@ -13,6 +13,10 @@ apps/web/blob-report/
 packages/*/dist/
 *.tsbuildinfo
 
+# VSCode 扩展（spec H）：dist/ 是 VSIX 的打包根（构建产物），out/ 放 .vsix 实包
+apps/vscode/dist/
+apps/vscode/out/
+
 # Rust
 server/target/
 # 桌面壳（Tauri）：cargo 目标目录、sidecar 落位产物与构建期生成的 ACL schema
