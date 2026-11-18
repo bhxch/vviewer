@@ -13,15 +13,8 @@
  * 本文件是 esbuild 打包后在 Node 中实跑的入口（gen-manifest.mjs 消费其 stdout JSON）；
  * 同时导出 `collectClaimedExtensions` 供单测直测。
  */
-import { createRegistry, GENERATED_EXTENSIONS } from '@bhxch/vviewer-core';
-import { codeRenderer } from '@bhxch/vviewer-render-text';
-import { markdownRenderer } from '@bhxch/vviewer-markdown';
-import { htmlRenderer } from '@bhxch/vviewer-render-text/html';
-import { imageRenderer } from '@bhxch/vviewer-render-media';
-import { avRenderer } from '@bhxch/vviewer-render-media/av';
-import { pdfRenderer } from '@bhxch/vviewer-render-doc';
-import { hexRenderer } from '@bhxch/vviewer-render-binary';
-import { jsonlRenderer } from '@bhxch/vviewer-render-text/jsonl';
+import { GENERATED_EXTENSIONS } from '@bhxch/vviewer-core';
+import { createMvpRegistry } from '../src/webview/renderers';
 
 /** 有效认领扩展名与其所有者渲染器 id */
 export interface ClaimedExtensions {
@@ -39,18 +32,8 @@ export interface ClaimedExtensions {
  * 渲染器自身扩展名，逐个查其是否被有效认领），不能只读 `renderer.extensions`。
  */
 export function collectClaimedExtensions(): ClaimedExtensions {
-  const registry = createRegistry();
-
-  // 装序：专有渲染器先注册（generated 兜底只补空位）
-  registry.install(codeRenderer);
-  registry.install(markdownRenderer);
-  registry.install(htmlRenderer);
-  registry.install(imageRenderer);
-  registry.install(avRenderer);
-  registry.install(pdfRenderer);
-  registry.install(hexRenderer);
-  registry.install(jsonlRenderer);
-  registry.installFallbackExtensions('code', GENERATED_EXTENSIONS);
+  // 渲染器安装序单源（src/webview/renderers.ts）——与 webview 装配层共用
+  const registry = createMvpRegistry();
 
   const candidates = new Set<string>();
   for (const renderer of registry.all()) {

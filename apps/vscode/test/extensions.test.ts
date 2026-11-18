@@ -8,17 +8,39 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { codeRenderer } from '@bhxch/vviewer-render-text';
-import { markdownRenderer } from '@bhxch/vviewer-markdown';
-import { htmlRenderer } from '@bhxch/vviewer-render-text/html';
-import { imageRenderer } from '@bhxch/vviewer-render-media';
-import { avRenderer } from '@bhxch/vviewer-render-media/av';
-import { pdfRenderer } from '@bhxch/vviewer-render-doc';
-import { hexRenderer } from '@bhxch/vviewer-render-binary';
-import { jsonlRenderer } from '@bhxch/vviewer-render-text/jsonl';
 import { GENERATED_EXTENSIONS } from '@bhxch/vviewer-core';
 import { collectClaimedExtensions } from '../scripts/collect-extensions';
+import { MVP_RENDERERS } from '../src/webview/renderers';
+import { assembleViewer, type AssembleDeps } from '../src/webview/assemble';
+import { DEFAULT_WEBVIEW_SETTINGS } from '../src/host/protocol';
 import { GENERATED_EXTENSIONS_PATH, REPO_ROOT, toSelector } from '../scripts/gen-manifest.mjs';
+
+/** 装配入参夹具（与 assemble.test.ts 同款——跨文件守卫需真实装配层注册表） */
+function makeDeps(overrides: Partial<AssembleDeps> = {}): AssembleDeps {
+  return {
+    settings: DEFAULT_WEBVIEW_SETTINGS,
+    assets: {
+      grammarsBase: 'https://webview/assets/grammars/',
+      queriesBase: 'https://webview/assets/queries/',
+      runtimeDir: 'https://webview/assets/',
+      grammars: {},
+      binaryWorkerUrl: 'https://webview/binary-worker.js',
+      pdfWorkerModernUrl: 'https://webview/pdf/pdf.worker.min.mjs',
+      pdfWorkerLegacyUrl: 'https://webview/pdf/pdf.worker.legacy.min.mjs',
+      fontsBase: 'https://webview/fonts/',
+      katexCssUrl: 'https://webview/katex.min.css',
+      katexExportCssUrl: 'https://webview/katex.export.css',
+      themesUrl: 'https://webview/assets/themes.json',
+      highlightWorkerSourceUrl: 'https://webview/highlight-worker.js'
+    },
+    themeKind: 'light',
+    resolveImage: async () => null,
+    resolveLink: async () => ({ kind: 'missing' as const }),
+    openLink: () => undefined,
+    text: (key) => key,
+    ...overrides
+  };
+}
 
 /** 生成物缺失即 fail-fast 并给出修复命令（生成物不入库） */
 function assertGeneratedFile(): void {
@@ -60,21 +82,27 @@ describe('扩展名清单 · 注册表实跑', () => {
     expect(owners['ndjson']).toBe('jsonl');
   });
 
+  it('**跨文件守卫**：selector（生成脚本输出）与运行时认领面（装配层实际注册表）同源', () => {
+    // 认领面 > selector → 用户双击不接管；< selector → 接管后无渲染器。两面必须逐项
+    // 相等——若只在装配层加渲染器而生成脚本未同步，本断言即红（Review Focus 8）。
+    const claimed = collectClaimedExtensions().extensions;
+    const { registry } = assembleViewer(makeDeps());
+    const runtime = new Set<string>();
+    for (const renderer of registry.all()) {
+      for (const ext of renderer.extensions) runtime.add(ext.toLowerCase());
+    }
+    for (const ext of GENERATED_EXTENSIONS) {
+      if (registry.byExtension(ext)) runtime.add(ext.toLowerCase());
+    }
+    expect([...runtime].sort()).toEqual([...claimed].sort());
+  });
+
   it('generated 兜底扩展名在集内（装序铁律：generated 只补空位，不覆盖专有认领）', () => {
     assertGeneratedFile();
     const { extensions, owners } = collectClaimedExtensions();
     const set = new Set(extensions);
     const dedicated = new Set(
-      [
-        codeRenderer,
-        markdownRenderer,
-        htmlRenderer,
-        imageRenderer,
-        avRenderer,
-        pdfRenderer,
-        hexRenderer,
-        jsonlRenderer
-      ].flatMap((r) => r.extensions.map((e) => e.toLowerCase()))
+      MVP_RENDERERS.flatMap((r) => r.extensions.map((e) => e.toLowerCase()))
     );
     // generated 中未被任何专有渲染器认领的项 → 兜底归 code（全集断言，不取样）
     const fallbackOnly = GENERATED_EXTENSIONS.filter((e) => !dedicated.has(e.toLowerCase()));
@@ -94,17 +122,7 @@ describe('扩展名清单 · 注册表实跑', () => {
     assertGeneratedFile();
     const { extensions } = collectClaimedExtensions();
     const set = new Set(extensions);
-    const renderers = [
-      codeRenderer,
-      markdownRenderer,
-      htmlRenderer,
-      imageRenderer,
-      avRenderer,
-      pdfRenderer,
-      hexRenderer,
-      jsonlRenderer
-    ];
-    for (const renderer of renderers) {
+    for (const renderer of MVP_RENDERERS) {
       for (const ext of renderer.extensions) {
         expect(set.has(ext.toLowerCase()), `渲染器 ${renderer.id} 的扩展名 ${ext} 缺失`).toBe(true);
       }

@@ -11,20 +11,9 @@
 // **十一处 setter 逐一接线**（计划 T3 缝表；缝只注入一次，重复注入即语义漂移）：
 // ①~⑦ markdown 组合包（7）｜⑧ sanitize 包｜⑨ core 包｜⑩⑪ 两个渲染包的 worker URL 缝。
 // 返回值里的 `seams` 暴露本层注入的函数，供单测逐条断言（getter 形态比对）。
-import {
-  createDispatcher,
-  createRegistry,
-  GENERATED_EXTENSIONS,
-  setRenderFailedText,
-  type Dispatcher,
-  type Registry
-} from '@bhxch/vviewer-core';
-import { codeRenderer } from '@bhxch/vviewer-render-text';
-import { htmlRenderer } from '@bhxch/vviewer-render-text/html';
-import { jsonlRenderer } from '@bhxch/vviewer-render-text/jsonl';
+import { createDispatcher, setRenderFailedText, type Dispatcher, type Registry } from '@bhxch/vviewer-core';
 import { fenceToHtml } from '@bhxch/vviewer-render-text/markdown/markdownRenderer';
 import {
-  markdownRenderer,
   renderMarkdownBody,
   setDiagramOptions,
   setHighlightFence,
@@ -41,12 +30,11 @@ import {
   type RelativeLinkResolver,
   type ResolveRemoteBase
 } from '@bhxch/vviewer-markdown';
-import { imageRenderer } from '@bhxch/vviewer-render-media';
-import { avRenderer } from '@bhxch/vviewer-render-media/av';
-import { pdfRenderer, preferModernBuild, setPdfWorkerUrlProvider } from '@bhxch/vviewer-render-doc';
-import { hexRenderer, setHexWorkerUrlProvider } from '@bhxch/vviewer-render-binary';
 import { setExternalImagePolicyProvider } from '@bhxch/vviewer-sanitize';
+import { preferModernBuild, setPdfWorkerUrlProvider } from '@bhxch/vviewer-render-doc';
+import { setHexWorkerUrlProvider } from '@bhxch/vviewer-render-binary';
 import { allowRemoteOf, resolveDiagramMode, resolveDiagramRenderer } from './diagramGate';
+import { createMvpRegistry } from './renderers';
 import type { AssetUris, WebviewSettings } from '../host/protocol';
 import type { MessageKey } from '../i18n/core';
 
@@ -115,19 +103,9 @@ export function diagramOptionsOf(deps: AssembleDeps): DiagramRenderOptions {
 
 /** 装配 webview 渲染层（注册表 + 十一处 setter + dispatcher） */
 export function assembleViewer(deps: AssembleDeps): Assembled {
-  const registry = createRegistry();
-
-  // 装序铁律：专有渲染器先于 generated 兜底安装（installFallbackExtensions 遇已认领
-  // 扩展名即跳过——md/markdown 归 markdown 渲染器、html/htm 归 html 渲染器）
-  registry.install(codeRenderer);
-  registry.install(markdownRenderer);
-  registry.install(htmlRenderer);
-  registry.install(imageRenderer);
-  registry.install(avRenderer);
-  registry.install(pdfRenderer);
-  registry.install(hexRenderer);
-  registry.install(jsonlRenderer);
-  registry.installFallbackExtensions('code', GENERATED_EXTENSIONS);
+  // 渲染器安装序单源（webview/renderers.ts）——与 selector 生成脚本共用（认领面与
+  // selector 同源，评审 important ③）
+  const registry = createMvpRegistry();
 
   // ① 围栏高亮桥（唯一注入点=T3；T4 只做 client 适配与 attach，不重复注入）
   setHighlightFence(fenceToHtml);
