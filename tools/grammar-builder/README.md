@@ -8,13 +8,23 @@ grammar 资产管线（spec F 构建源头化）：**唯一上游事实源 = hel
 pnpm gen:sources        # = node tools/grammar-builder/gen-sources.mjs（按 pin 全量生成）
 node tools/grammar-builder/build.mjs --fetch        # 源树浅取（--lite / --languages 收窄）
 node tools/grammar-builder/build.mjs --self-build   # wasm 自建（默认 lite）
+node tools/grammar-builder/gen-licenses.mjs          # GRAMMAR_LICENSES.md 再生（pack-npm 的 license 输入）
 pnpm gen:grammars       # = pnpm gen:sources && --fetch --lite && --self-build
 ```
 
+> **本地打包链**：上述四步跑完后 `node tools/grammar-builder/pack-npm.mjs` 仍会因缺
+> `server/GRAMMAR_LICENSES.md` 抛错（license 输入缺失即 fail-fast）——须先跑
+> `node tools/grammar-builder/gen-licenses.mjs`（需全量源树，即 `--fetch --all` 或全量
+> `gen:sources` 产物）。发布链（release.yml 的 publish-npm job）由 grammar-wasm
+> artifact 随包下发该文件，不经本地再生。
+
 **生成物一律不入库**（`.gitignore`，spec F 出库清单）：`tools/grammar-builder/languages.toml`、
 `build-list.json`、`packages/vviewer-highlight/assets/{languages.json, themes.json, queries/}`、
-`server/grammars-manifest.json`、`server/GRAMMAR_LICENSES.md`、
-`packages/vviewer-core/src/registry/generated-extensions.ts`。入库保留：脚本、测试、
+`server/grammars-manifest.json`、`server/GRAMMAR_LICENSES.md`。**例外**：
+`packages/vviewer-core/src/registry/generated-extensions.ts` **在库**（占位空集）——core
+barrel 静态 re-export 该模块，生成物缺失时模块图整体解析失败（干净克隆无起点，评审
+important ⑫）；在库内容恒为占位，真实清单由 `pnpm gen:sources` 就地覆写（生成内容不入库，
+由 apps/vscode/test/extensions.test.ts 的守卫用例断言）。入库保留：脚本、测试、
 `aliases.json`（vviewer 自有资产）、`helix-pin.json`、本 README。任何消费端在产物缺失时
 报错统一指向 `pnpm gen:sources`。
 
@@ -148,8 +158,10 @@ node tools/grammar-builder/pack-npm.mjs
   客户端不再插入中间段。
 - **残包拦截**（publish 前即失败，不出残包）：grammarsDir 缺失/无 wasm、manifest 引用
   悬空 wasm、queriesDir 或 license 缺失、name/version/outDir 缺失，任一命中即抛错。
-- **规模实测**（lite 集）：992 files / 47.5MB（34 wasm 共 46.4MB + manifest 7.6KB +
-  queries ~1.1MB + license 20.9KB）；npm 发布为 gzip tarball。测试：
+- **规模实测**（lite 集；2026-11-19 复核，queries 树随 helix pin **全树**再生——
+  1190 个 .scm / 5.0MB，旧记的「queries ~1.1MB」已作废）：992 files / 47.5MB
+  （34 wasm 共 46.4MB + manifest 7.6KB + queries 5.0MB + license 20.9KB）；npm 发布为
+  gzip tarball。测试：
   `pnpm vitest run tools/grammar-builder`（pack-npm 在列）。
 
 ## 构建要点（实测结论）

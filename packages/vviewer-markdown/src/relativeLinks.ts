@@ -18,8 +18,9 @@ export type RelativeLinkTarget =
 /**
  * 相对链接解析器：相对 href + 当前文件来源 → RelativeLinkTarget；null=resolver
  * 显式弃权（当次点击无动作——app 装配恒返回 target：失败=missing 不产 null，null
- * 仅 standalone 契约形态）。reject（store 读抛错）由 wireRelativeLinks 的 .then
- * 无第二参吞掉=当次点击无动作（resolveRelativeImages 抛错视同找不到同口径）。
+ * 仅 standalone 契约形态）。reject（store 读抛错）由 wireRelativeLinks 的**显式
+ * `.catch`** 吞掉=当次点击无动作（resolveRelativeImages 抛错视同找不到同口径；
+ * 评审 C1 已把「.then 无第二参」改为显式 catch——三处注释据此订正）。
  */
 export type RelativeLinkResolver = (
   href: string,

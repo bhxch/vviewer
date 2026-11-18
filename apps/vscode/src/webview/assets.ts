@@ -71,16 +71,3 @@ export function hasLocalGrammar(table: GrammarTable, lang: string): boolean {
   return false;
 }
 
-/** 资产可用性（缺件 → 可见降级的判定依据） */
-export interface AssetAvailability {
-  /** grammar 资产是否可用（清单非空） */
-  grammarsOk: boolean;
-  /** 缺失的资产种类（稳定标识符） */
-  missing: string[];
-}
-
-/** 资产可用性判定（grammar 清单为空 = grammar 资产缺失） */
-export function resolveAssetAvailability(table: GrammarTable): AssetAvailability {
-  const missing = Object.keys(table).length === 0 ? ['grammars'] : [];
-  return { grammarsOk: missing.length === 0, missing };
-}

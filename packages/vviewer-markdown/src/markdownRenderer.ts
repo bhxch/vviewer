@@ -156,9 +156,9 @@ export type { RelativeLinkTarget, RelativeLinkResolver, RelativeLinkOpener } fro
 
 /**
  * 相对链接解析器（模块缝）：相对 href + 当前文件来源 → RelativeLinkTarget；
- * null=resolver 显式弃权。reject（store 读抛错）由 wireRelativeLinks 的 .then 无
- * 第二参吞掉=当次点击无动作。store 读取能力在宿主侧组装；缺省 null（不接管=
- * 原生导航语义维持，standalone 安全缺省）。
+ * null=resolver 显式弃权。reject（store 读抛错）由 wireRelativeLinks 的**显式
+ * `.catch`** 吞掉=当次点击无动作（评审 C1 订正）。store 读取能力在宿主侧组装；
+ * 缺省 null（不接管=原生导航语义维持，standalone 安全缺省）。
  */
 let relativeLinkResolver: RelativeLinkResolver | null = null;
 

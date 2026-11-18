@@ -16,7 +16,6 @@ export const zhCN = {
   'shell.panel.engineBadge': '高亮引擎：{engine}',
   'shell.engine.workerFailed': '高亮引擎不可用，已降级为 hljs（{reason}）',
   'shell.engine.initTimeout': '高亮引擎初始化超时，已降级为 hljs',
-  'shell.engine.noGrammar': '语言 {lang} 无本地 grammar，已降级为 hljs',
 
   // viewer —— 文档渲染面
   'viewer.document.tooLarge': '文件超过 {limit}，建议改用 VSCode 原生编辑器打开',

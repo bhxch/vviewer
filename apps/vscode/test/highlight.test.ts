@@ -14,7 +14,6 @@ import {
 import { waitForAttachedClient } from '@bhxch/vviewer-render-text';
 import {
   hasLocalGrammar,
-  resolveAssetAvailability,
   resolveAssetBases,
   toGrammarTable
 } from '../src/webview/assets';
@@ -176,13 +175,6 @@ describe('高亮 · 资产三段自洽（RF 5）', () => {
     expect(bases.grammarsBase.endsWith('/')).toBe(true);
   });
 
-  it('grammar 清单为空 → 资产缺件（可见降级的判定依据）', () => {
-    expect(resolveAssetAvailability({})).toEqual({ grammarsOk: false, missing: ['grammars'] });
-    expect(resolveAssetAvailability({ bash: { file: 'bash.wasm' } })).toEqual({
-      grammarsOk: true,
-      missing: []
-    });
-  });
 });
 
 describe('高亮 · 缝纪律', () => {

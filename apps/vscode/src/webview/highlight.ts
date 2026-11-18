@@ -32,7 +32,7 @@ import { hasLocalGrammar, resolveAssetBases } from './assets';
 export type HighlightEngineTier = 'tree-sitter' | 'hljs' | 'plain';
 
 /** 降级码（稳定标识符——非显示串；显示文案走 i18n 目录） */
-export type DegradationCode = 'worker-failed' | 'init-timeout' | 'no-grammar';
+export type DegradationCode = 'worker-failed' | 'init-timeout';
 
 /** 引擎态（可见面的唯一数据源） */
 export interface EngineState {

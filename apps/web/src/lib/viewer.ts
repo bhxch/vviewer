@@ -296,7 +296,8 @@ if (browser) {
   });
 
   // spec D §3.2：相对链接解析 + 打开通道（source 窄取 FileSource.store——markdownImages
-  // 同款收窄；resolver reject 由组合包 .then 无第二参吞掉=当次点击无动作）。
+  // 同款收窄；resolver reject 由组合包的**显式 .catch** 吞掉=当次点击无动作——评审
+  // C1 已把「.then 无第二参」改为显式 catch，此处注释同步订正）。
   setRelativeLinkResolver(async (href, source) =>
     resolveRelativeLinkTarget((source as FileSource).store, source.path, href)
   );

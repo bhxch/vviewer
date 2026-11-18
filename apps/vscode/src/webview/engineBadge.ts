@@ -14,8 +14,7 @@ import type { DegradationCode, EngineState, HighlightEngineTier } from './highli
 /** 降级码 → i18n 目录键 */
 export const DEGRADATION_KEYS: Record<DegradationCode, MessageKey> = {
   'worker-failed': 'shell.engine.workerFailed',
-  'init-timeout': 'shell.engine.initTimeout',
-  'no-grammar': 'shell.engine.noGrammar'
+  'init-timeout': 'shell.engine.initTimeout'
 };
 
 /** 引擎徽标可见文本（稳定标识符） */
@@ -27,9 +26,6 @@ export function engineBadgeText(engine: HighlightEngineTier): string {
 export function engineNoticeText(state: EngineState): string | null {
   if (!state.degraded || !state.code) return null;
   const key = DEGRADATION_KEYS[state.code];
-  if (state.code === 'no-grammar') {
-    return t(key, { lang: state.detail ?? '' });
-  }
   return t(key, { reason: state.detail ?? '' });
 }
 
