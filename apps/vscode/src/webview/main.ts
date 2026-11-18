@@ -90,6 +90,27 @@ window.addEventListener('message', (event: MessageEvent) => {
   void handleHostMessage(message);
 });
 
+/**
+ * 就绪握手（评审 important ⑨）：webview 脚本加载即上报 `ready`，宿主据此投递 init。
+ *
+ * 此前宿主「设完 webview.html 立刻 postMessage(init)」——webview 的消息监听器尚未
+ * 注册时该消息即丢 → 面板内容区空白且无任何提示（协议里预留的握手面本可消除该风险
+ * 却两侧都没接线）。本侧在收到 init 前**定时重发 ready**（投递不保证不丢：宿主侧
+ * 那次 postMessage 也可能丢），收到 init 即停表；重发有上限（宿主恒不应答时的兜底
+ * ——避免无界刷消息）。
+ */
+const READY_RETRY_MS = 200;
+const READY_MAX_ATTEMPTS = 50; // 10s 上限：宿主恒不应答即停（面板空白仍是宿主侧问题，非本侧可解）
+let hostInitialized = false;
+let readyAttempts = 0;
+const readyTimer: ReturnType<typeof setInterval> = setInterval(() => {
+  if (hostInitialized) return;
+  readyAttempts += 1;
+  if (readyAttempts >= READY_MAX_ATTEMPTS) {
+    clearInterval(readyTimer);
+    return;
+  }
+  bridge.ready();
 }, READY_RETRY_MS);
 bridge.ready();
 
@@ -118,6 +139,9 @@ async function handleHostMessage(message: HostToWebview): Promise<void> {
 }
 
 async function onInit(message: Extract<HostToWebview, { kind: 'init' }>): Promise<void> {
+  // 握手完成：停掉 ready 重发（宿主已投递 init——重复 ready 会触发宿主重推 init）
+  hostInitialized = true;
+  clearInterval(readyTimer);
   doc = {
     name: message.doc.name,
     path: message.doc.path,

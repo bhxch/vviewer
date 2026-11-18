@@ -7,9 +7,10 @@
 // - HostToWebview：host → webview（init / 设置 / 主题 / 按路径读文件的结果 / 导出结果）
 // - WebviewToHost：webview → host（就绪 / 按路径读文件 / 导出 HTML / 打开外链 / 报告）
 //
-// id 纪律：`read-file` 与 `export-html` 的请求 id 由 host 侧单调递增分配（`createRequestIdFactory`），
-// 响应按 id 配对——webview 无 console 出口（webview console 不回传 host），故一切异常
-// 反馈走 `report` 通道。
+// id 纪律：`read-file` 与 `export-html` 的请求 id 由 **webview 侧**单调递增分配
+// （dispatchHost.ts 的 `createRequestIdFactory`，每个 webview 一个实例），响应按 id
+// 配对——webview 无 console 出口（webview console 不回传 host），故一切异常反馈走
+// `report` 通道。
 import type { GrammarTable } from '@bhxch/vviewer-highlight';
 
 /** 扩展设置面（归一后的形态——脏值回落缺省，见 settings.ts） */
@@ -138,6 +139,11 @@ export type HostToWebview =
 
 /** webview → host */
 export type WebviewToHost =
+  /**
+   * 就绪握手：webview 脚本加载即上报，宿主据此投递 init——「设完 html 立刻
+   * postMessage」在 webview 监听器注册前投递即丢（面板空白且无任何提示）。
+   * webview 侧在收到 init 前定时重发（投递不保证不丢）。
+   */
   | { kind: 'ready' }
   | { kind: 'read-file'; id: number; path: string }
   | { kind: 'export-html'; id: number; html: string; suggestedName: string }

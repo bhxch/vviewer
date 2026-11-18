@@ -19,7 +19,6 @@ import { errorMessage, readDocumentBytes } from './fileChannel';
 import { composeStyleText, renderWebviewHtml } from './webviewHtml';
 import { SETTING_KEYS, hasLanguageOverride, readWebviewSettings } from './settings';
 import {
-  createRequestIdFactory,
   isWebviewToHost,
   type AssetUris,
   type HostToWebview,
@@ -150,7 +149,6 @@ export class PanelHost implements vscode.Disposable {
   private readonly panelMeta = new Map<vscode.WebviewPanel, { uri: vscode.Uri; languageId?: string }>();
   /** 资产根（安装态 = 扩展根；开发态 = `<ext>/dist`）——首次 attach 时探测并缓存 */
   private assetRoot: vscode.Uri | null = null;
-  private readonly nextRequestId = createRequestIdFactory();
   private activeKey: string | null = null;
 
   constructor(
@@ -203,6 +201,14 @@ export class PanelHost implements vscode.Disposable {
     const webview = panel.webview;
     webview.options = buildWebviewOptions(assetRoot);
     const nonce = createNonce();
+
+    // 消息通道**先于** HTML 装配注册（就绪握手的前提）：webview 脚本加载即上报
+    // `ready`，宿主据此投递 init——「设完 html 立刻 postMessage」在 webview 监听器
+    // 注册前投递即丢 → 面板内容区空白且无任何提示（评审 important ⑨）。
+    webview.onDidReceiveMessage((message: unknown) => {
+      void this.handleMessage(this.panelMeta.get(panel)?.uri ?? document.uri, panel, message);
+    });
+
     webview.html = renderWebviewHtml({
       cspSource: webview.cspSource,
       nonce,
@@ -214,11 +220,9 @@ export class PanelHost implements vscode.Disposable {
       lang: this.vscode.env.language
     });
 
-    webview.onDidReceiveMessage((message: unknown) => {
-      void this.handleMessage(this.panelMeta.get(panel)?.uri ?? document.uri, panel, message);
-    });
-
-    await this.sendInit(document.uri, panel);
+    // init 不再即时投递：等 webview 的 `ready` 握手（webview 侧在收到 init 前定时重发
+    // ready，宿主侧丢失亦可恢复）。重开同一面板（existing === panel）走 reload 语义，
+    // 直接重推 init（webview 已在运行，无握手必要）。
   }
 
   /** 折叠态持久化键（workspaceState——spec §4.2「折叠态记忆 workspaceState」） */
@@ -442,6 +446,11 @@ export class PanelHost implements vscode.Disposable {
     if (!isWebviewToHost(message)) return;
     switch (message.kind) {
       case 'ready':
+        // 就绪握手（评审 important ⑨）：webview 脚本加载即上报 ready，宿主据此投递
+        // init——「设完 html 立刻 postMessage」在 webview 监听器注册前投递即丢 →
+        // 面板内容区空白且无任何提示。webview 侧在收到 init 前定时重发 ready，
+        // 故本路径幂等（重复 ready → 重推 init，webview 侧按 init 重装配）。
+        await this.sendInit(this.panelMeta.get(panel)?.uri ?? documentUri, panel);
         return;
       case 'read-file':
         await this.handleReadFile(documentUri, panel, message.id, message.path);

@@ -500,6 +500,10 @@ describe('实时生效 · 面板生命周期（评审 critical ③ / minor ⑥ /
     const panel = makeFakePanel(fake.posted);
     host.watchChanges();
     await host.attach({ uri: fakeUri('/x/a.md') } as never, panel as never);
+    // 就绪握手：webview 上报 ready → 宿主投递 init（评审 important ⑨：此前 init 在
+    // webview 监听器注册前投递即丢 → 面板空白且无提示）
+    panel.fireMessage({ kind: 'ready' });
+    await new Promise((r) => setTimeout(r, 0));
     const init = fake.posted.find(
       (m): m is { kind: string; toc: { collapsed: boolean } } =>
         typeof m === 'object' && m !== null && (m as { kind?: string }).kind === 'init'
@@ -517,4 +521,30 @@ describe('实时生效 · 面板生命周期（评审 critical ③ / minor ⑥ /
     expect(state.store['vviewer.toc.collapsed']).toBeUndefined();
   });
 
+  it('就绪握手：attach 不即时投递 init；webview 上报 ready 后宿主才投递 init（评审 important ⑨）', async () => {
+    const fake = makeFakeHost();
+    const { PanelHost } = await import('../src/host/webviewPanel');
+    const host = new PanelHost(
+      fake.vscode as never,
+      { extensionUri: fakeUri('/ext'), workspaceState: makeFakeWorkspaceState() } as never
+    );
+    const panel = makeFakePanel(fake.posted);
+    await host.attach({ uri: fakeUri('/x/a.md') } as never, panel as never);
+    // attach 后无 init（webview 监听器尚未注册时投递即丢）
+    expect(
+      fake.posted.filter((m) => (m as { kind?: string })?.kind === 'init')
+    ).toHaveLength(0);
+    // webview 上报 ready → 宿主投递 init
+    panel.fireMessage({ kind: 'ready' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(
+      fake.posted.filter((m) => (m as { kind?: string })?.kind === 'init')
+    ).toHaveLength(1);
+    // 重复 ready 幂等（重推 init，webview 侧按 init 重装配）
+    panel.fireMessage({ kind: 'ready' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(
+      fake.posted.filter((m) => (m as { kind?: string })?.kind === 'init')
+    ).toHaveLength(2);
+  });
 });

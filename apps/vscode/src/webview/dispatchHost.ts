@@ -44,6 +44,12 @@ export class HostBridge {
     this.nextId = options.nextId ?? createRequestIdFactory();
   }
 
+  /** 上报就绪（宿主据此投递 init——就绪握手，见 protocol.ts 的 ready 约定） */
+  ready(): void {
+    const message: WebviewToHost = { kind: 'ready' };
+    this.api.postMessage(message);
+  }
+
   /** 按路径读文件（相对链接/相对图片探测面，spec §7 ①②） */
   readFile(path: string): Promise<Uint8Array | null> {
     const id = this.nextId();
