@@ -882,7 +882,12 @@ describe('装配序锚（Task 5：viewer.ts 语句序）', () => {
     // 转移至 file-viewer spreadsheet 桥接——本镜像无桥接块，故未认领；归属锚在
     // apps/web/src/lib/foreignRenderers.test.ts「byExtension 41 项逐字」）
     expect(registry.byExtension('tsv')).toBeUndefined();
-    expect(registry.byExtension('csv')?.id).toBe('code');
+    // csv 由**生成物兜底**认领（installFallbackExtensions）——生成物未生成时（干净克隆
+    // 未跑 pnpm gen:sources，仓内为提交面占位空集）该认领面缺席，故按生成物在位与否
+    // 条件断言（CI 恒有生成物 → 断言恒生效）
+    if (GENERATED_EXTENSIONS.length > 0) {
+      expect(registry.byExtension('csv')?.id).toBe('code');
+    }
     expect(registry.byExtension('md')?.id).toBe('markdown');
     expect(registry.byExtension('html')?.id).toBe('html');
     expect(registry.byExtension('jsonl')?.id).toBe('jsonl');

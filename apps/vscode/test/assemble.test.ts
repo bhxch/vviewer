@@ -5,7 +5,7 @@
 // 两条**必须接线**的缝：断言注入后取到 worker URL，**不接即 pdf 渲染死 / hex 挂死**）、
 // dispatcher 对单文件 source 选中预期渲染器。
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { errorMessageOf } from '@bhxch/vviewer-core';
+import { errorMessageOf, GENERATED_EXTENSIONS } from '@bhxch/vviewer-core';
 import {
   getDiagramOptions,
   getHighlightFence,
@@ -97,11 +97,16 @@ describe('装配层 · 注册表', () => {
     expect(registry.byExtension('jsonl')?.id).toBe('jsonl');
   });
 
-  it('generated 兜底补空位（未被专有渲染器认领的语法类扩展名归 code）', () => {
-    const { registry } = assembleViewer(makeDeps());
-    expect(registry.byExtension('zig')?.id).toBe('code');
-    expect(registry.byExtension('nim')?.id).toBe('code');
-  });
+  it.skipIf(GENERATED_EXTENSIONS.length === 0)(
+    'generated 兜底补空位（未被专有渲染器认领的语法类扩展名归 code）',
+    () => {
+      // 生成物未生成时（干净克隆未跑 pnpm gen:sources，仓内为提交面占位空集）该认领面
+      // 缺席 → 本例跳过（CI 恒有生成物 → 断言恒生效）
+      const { registry } = assembleViewer(makeDeps());
+      expect(registry.byExtension('zig')?.id).toBe('code');
+      expect(registry.byExtension('nim')?.id).toBe('code');
+    }
+  );
 
   it('archive/foreign/Office 渲染器未装（裁量 3：MVP 裁剪）', () => {
     const { registry } = assembleViewer(makeDeps());
