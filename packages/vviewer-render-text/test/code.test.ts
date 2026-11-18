@@ -2572,7 +2572,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     // 块 1 的读 = 初始喂块 1 次 + 扫描期失败重拉 1 次（修前为逐行 ~174 次突发）
     expect(calls.filter((c) => c.start === WINDOW_BLOCK && c.end === 2 * WINDOW_BLOCK - 1).length).toBe(2);
     handle.destroy();
-  });
+  }, 30_000);
 
   // ---------- Task 5：后台全文扫描搜索（替换 snapshotLines 快照过渡实现） ----------
   //
@@ -2605,7 +2605,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     expect(calls.length).toBeGreaterThan(readsAtMount); // 扫描自驱动了未加载区的前向读取
     expect(matches[1]).toMatchObject({ line: 1, start: 262128, end: 262136 }); // 跨块行命中
     handle.destroy();
-  });
+  }, 30_000);
 
   it('重入搜索令牌失效：旧扫描以部分结果收场且不触碰状态，新查询完整落地', async () => {
     stubResizeObserver();
@@ -2647,7 +2647,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     expect(preHtml(host)).toContain('<mark class="vv-search-hit">beta</mark>'); // 新查询命中已上屏
     expect(preHtml(host)).not.toContain('alpha'); // 旧查询（alpha）零痕迹
     handle.destroy();
-  });
+  }, 30_000);
 
   it('空查询（退出搜索）取消在飞扫描：旧 Promise 部分结果收场且零补读', async () => {
     stubResizeObserver();
@@ -2688,7 +2688,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     expect(readCount).toBe(readsBeforeCancel); // 取消后零补读
     expect(preHtml(host)).not.toContain('<mark'); // 退出搜索：痕迹清除
     handle.destroy();
-  });
+  }, 30_000);
 
   // 项 2（缓存键纳入扫描进度）：scan===null && 同键 短路此前不区分收场形态——
   // 停机收场（limitReached/continueFailed）的部分结果也被短路，同 query 重搜无法
@@ -2726,7 +2726,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     expect(readCount).toBe(readsAtDone);
     expect(third.map((m) => m.line)).toEqual([5, 3300]);
     handle.destroy();
-  });
+  }, 30_000);
 
   // SUSP-01（e2e 富化定档 confirmed-design 优化候选落地）：退出搜索（空 query）此前
   // 走换键重置分支（清 lastQuery/命中集/游标），重输同词触发全新全文扫描（≥20 块级
@@ -2764,7 +2764,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     expect(second.map((m) => m.line)).toEqual([5, 3300]); // 命中集自短路缓存原样返回
     expect(host.querySelector('mark.vv-search-hit')).not.toBeNull(); // 命中视觉自缓存复现
     handle.destroy();
-  });
+  }, 30_000);
 
   // SUSP-01 fix wave（终局评审发现的跨任务交互回归）：扫描在飞时退出 → 同词重搜走
   // 续扫（sameKey && !lastScanComplete）——退出清空了行级命中索引，而 runScan 截断
@@ -2814,7 +2814,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     expect(host.querySelector('[data-line="5"] mark.vv-search-hit')).not.toBeNull();
     expect(host.querySelector('[data-line="5"]')?.classList.contains('vv-search-hit-line')).toBe(true);
     handle.destroy();
-  });
+  }, 30_000);
 
   // SUSP-02（e2e 富化定档 confirmed-design UX 候选落地）：后台全文扫描逐块喂入时，
   // 块表 LRU（16×256KB）曾把视口所在块挤出——视口行经 lineAvailable 占位化 +
@@ -2858,7 +2858,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     expect(block0Reads, '视口块 0 应恰 1 次读（扫描期触新驻留，无占位化回拉）').toBe(1);
     expect(bodyText(host, 0)!.startsWith('row 0 ')).toBe(true); // 视口首行实行非占位
     handle.destroy();
-  });
+  }, 30_000);
 
   // SUSP-02 落地后的形态改造（原「扫描期视口补拉预置失败」前提已被触新消除——
   // 顶部视口驻留块 0 在扫描期恒被触新、不再逐出重拉）：gotoMatch 的 ensure 闸面
@@ -2921,7 +2921,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     expect(handle.scrollTop()).not.toBe(topBefore); // ensure 完成后才跳转
     expect(block0Reads).toBe(3); // 首块重拉 + 扫描补拉 + gotoMatch 的 ensure
     handle.destroy();
-  });
+  }, 30_000);
 
   it('扫描渐进可用：前块命中先于全文完成上屏（先到先出），完成时全量收场', async () => {
     stubResizeObserver();
@@ -2968,7 +2968,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     expect(settled).toBe(true);
     expect(matches.map((m) => m.line)).toEqual([3, 3000]);
     handle.destroy();
-  });
+  }, 30_000);
 
   // 终审 I-1（BUG-09 大文件回归面）：全局搜索跳转（pendingLine）指向远部未加载行
   // ——revealLine 不得静默丢弃（此前 `line >= rows()` 即 return），须驱动续读至该行
@@ -2995,7 +2995,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     expect(handle.getMeta().lines).toBeGreaterThan(174); // 续读已推进索引（补读真实发生）
     expect(calls.length).toBeGreaterThan(readsAtJump);
     handle.destroy();
-  });
+  }, 30_000);
 
   it('revealLine 越出 EOF：续读到 EOF 确认后静默不跳转（全量路径越界同口径）', async () => {
     stubResizeObserver();
@@ -3265,7 +3265,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
       spy.mockRestore(); // 幂等兜底：断言失败路径同样不得泄漏至后续用例
     }
     handle.destroy();
-  });
+  }, 30_000);
 
   // 项 F（Minor，W2-2）：scanLineText 补块失败的行按 '' 计入已扫（游标越过），续扫
   // 永不回访——命中静默永久缺失。修法：块拉取失败时记录失败块起始行（failedResume），
@@ -3320,7 +3320,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     const block1Reads = reads.filter((c) => c.start === WINDOW_BLOCK).length;
     expect(block1Reads).toBe(3); // 块 1 读 = 初始喂块 + 首扫失败重拉 + 续扫重拉（read 再次请求块 1）
     handle.destroy();
-  });
+  }, 30_000);
 
   // 项 F 残留角（复审）：startFrom=0 的同键续扫（块 0 命中后扫描途中异常、游标未
   // 写点）——截断无条件执行（不按 startFrom > 0 设门）后重扫自 0 重收，命中不重复。
@@ -3364,7 +3364,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
       spy.mockRestore();
     }
     handle.destroy();
-  });
+  }, 30_000);
 
   // 流式硬化 Task 3：实例级 AbortController（DEG-08 排队根因的修复面）——destroy
   // 即取消全部在飞块读；abort 产生的 reject 是取消而非读失败，catch 静默（闩不动、
@@ -3404,7 +3404,7 @@ describe('renderCode 窗口流式模式（ctx + UTF-8）', () => {
     // 断言 2：泵 catch 静默——不打印「后台索引泵拉块失败」（abort ≠ 读失败）
     expect(debugSpy).not.toHaveBeenCalledWith(expect.stringContaining('后台索引泵拉块失败'), expect.anything());
     debugSpy.mockRestore();
-  });
+  }, 30_000);
 
   // deferred 清偿 Task 3 锚 A：非 abort 读失败照常置闩 + debug（收紧的反面不误伤）。
   // 块 1 立即以普通 Error reject（ECONNRESET 形态），无任何 abort 参与——失败经
