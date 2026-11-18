@@ -41,7 +41,13 @@ function buildCspContent(policy: ExternalImagePolicyConfig): string {
     if (entry === '') continue;
     if (entry.startsWith('*.') || entry.startsWith('.')) {
       const base = entry.replace(/^[*.]+/, '');
-      if (base !== '') imgSrc.push(`https://${base}`, `https://*.${base}`); // CSP *.{base} 不含 apex——双条
+      // CSP *.{base} 不含 apex——apex 与子域各一条；**双协议**（与精确条目分支同口径）：
+      // 白名单命中与协议无关（sanitize 侧 isExternalImageAllowlisted 只取 hostname），
+      // 通配条目只发 https 会让 http:// 的通配白名单域图片在网络栈之前被 CSP 拦死
+      // （评审 important ⑤：两条分支口径不对称）
+      if (base !== '') {
+        imgSrc.push(`https://${base}`, `https://*.${base}`, `http://${base}`, `http://*.${base}`);
+      }
     } else {
       imgSrc.push(`https://${entry}`, `http://${entry}`); // 双协议：白名单命中与协议无关
     }

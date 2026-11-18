@@ -128,20 +128,38 @@ describe('buildSandboxedSrcdoc——spec D 外链图片三档（直调注入 + C
     expect(video.hasAttribute('poster')).toBe(false);
   });
 
-  it('白名单条目任意档：精确条目发 https/http 双协议（评审 M5：命中与协议无关）；通配条目发 apex 与 *.base 双条（CSP *.<base> 不含 apex）', () => {
+  it('白名单条目任意档：精确条目发 https/http 双协议（评审 M5：命中与协议无关）；通配条目发 apex 与 *.base 双条 + 双协议（CSP *.<base> 不含 apex）', () => {
     setExternalImagePolicyProvider(() => ({
       policy: 'blocked',
       allowlist: ['external.example.com', '.cdn.example.net']
     }));
     const srcdoc = buildSandboxedSrcdoc('<img src="https://external.example.com/pic.png">');
     expect(cspContentOf(srcdoc)).toBe(
-      "default-src 'none'; img-src data: blob: https://external.example.com http://external.example.com https://cdn.example.net https://*.cdn.example.net; media-src data: blob:; style-src 'unsafe-inline'; font-src data:",
+      "default-src 'none'; img-src data: blob: https://external.example.com http://external.example.com " +
+        'https://cdn.example.net https://*.cdn.example.net http://cdn.example.net http://*.cdn.example.net; ' +
+        "media-src data: blob:; style-src 'unsafe-inline'; font-src data:",
     );
     // 白名单优先于档位：blocked 下命中条目 src 保留（spec §3.1 拍板）
     expect(parseSrcdoc(srcdoc).querySelector('img')!.getAttribute('src')).toBe('https://external.example.com/pic.png');
     // http:// 形态命中同一白名单条目：src 放行且 CSP 侧不再拦死（双协议对齐）
     const httpSrcdoc = buildSandboxedSrcdoc('<img src="http://external.example.com/pic.png">');
     expect(parseSrcdoc(httpSrcdoc).querySelector('img')!.getAttribute('src')).toBe('http://external.example.com/pic.png');
+  });
+
+  it('通配白名单条目的 http 形态在 CSP 侧放行（评审 important ⑤：两条分支口径对称——净化层按 hostname 判命中，协议无关）', () => {
+    setExternalImagePolicyProvider(() => ({
+      policy: 'blocked',
+      allowlist: ['.cdn.example.net']
+    }));
+    // 子域 + http 形态：净化层放行 src（白名单命中，协议无关）
+    const srcdoc = buildSandboxedSrcdoc('<img src="http://img.cdn.example.net/pic.png">');
+    expect(parseSrcdoc(srcdoc).querySelector('img')!.getAttribute('src')).toBe(
+      'http://img.cdn.example.net/pic.png'
+    );
+    // CSP 侧不得拦死该形态（否则图片静默不显示：净化放行但网络栈之前被 CSP 拦死）
+    const csp = cspContentOf(srcdoc);
+    expect(csp).toContain('http://cdn.example.net');
+    expect(csp).toContain('http://*.cdn.example.net');
   });
 });
 
