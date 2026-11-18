@@ -63,6 +63,8 @@ describe('enrichMarkdownDom——manual 档外链媒体占位构建（spec D §3
     expect(img.hasAttribute('data-vv-blocked-external')).toBe(false);
     expect(img.hasAttribute('data-md-ext-media')).toBe(false);
     expect(doc.querySelector('span.md-ext-media')).toBeNull(); // 解包
+    // 放行加载后不得留着「已拦截外部图片」title（评审 minor：已加载的事实与悬停提示相悖）
+    expect(img.hasAttribute('title')).toBe(false);
   });
 
   it('④点击 video 分支：.mp4 创建 video（controls/preload=none/无 autoplay/src/maxWidth）替换 wrapper（MD-13 语义）', () => {

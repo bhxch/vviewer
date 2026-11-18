@@ -345,6 +345,10 @@ function restoreExternalMedia(img: Element, src: string, srcset: string | null):
   img.removeAttribute('data-vv-external-srcset');
   img.removeAttribute('data-vv-blocked-external'); // 标记转已加载：占位 CSS 不再命中
   img.removeAttribute('data-md-ext-media');
+  // 拦截提示 title 一并移除（评审 minor）：title 由 sanitize 的 markBlockedExternal
+  // 写入「已拦截外部图片：host」——manual 档放行加载成功后仍留着该 title，悬停仍显示
+  // 「已拦截」（与实际已加载的事实相悖）
+  img.removeAttribute('title');
 }
 
 /**
