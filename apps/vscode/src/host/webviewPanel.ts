@@ -455,6 +455,9 @@ export class PanelHost implements vscode.Disposable {
       case 'read-file':
         await this.handleReadFile(documentUri, panel, message.id, message.path);
         return;
+      case 'stat-file':
+        await this.handleStatFile(documentUri, panel, message.id, message.path);
+        return;
       case 'export-html':
         await this.handleExportHtml(
           documentUri,
@@ -492,6 +495,31 @@ export class PanelHost implements vscode.Disposable {
       ? { kind: 'file-bytes', id, bytes: outcome.bytes }
       : { kind: 'file-bytes', id, bytes: null, error: outcome.reason };
     await panel.webview.postMessage(message);
+  }
+
+  /**
+   * 存在性探测（**只 stat 不读字节**）——相对链接解析通道（评审 minor：原实现整文件
+   * 读入内存判存在，≤200MB 大文件点击即一次全量读）。
+   */
+  private async handleStatFile(
+    documentUri: vscode.Uri,
+    panel: vscode.WebviewPanel,
+    id: number,
+    path: string
+  ): Promise<void> {
+    const target = this.resolveRelative(documentUri, path);
+    const message: HostToWebview = { kind: 'file-stat', id, exists: await this.documentExists(target) };
+    await panel.webview.postMessage(message);
+  }
+
+  /** 文档是否存在（stat 判定；不读字节） */
+  private async documentExists(uri: vscode.Uri): Promise<boolean> {
+    try {
+      await this.vscode.workspace.fs.stat(uri);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** 导出 HTML 写盘（showSaveDialog + fs.writeFile → export-result 回执） */
@@ -538,9 +566,10 @@ export class PanelHost implements vscode.Disposable {
     path: string
   ): Promise<void> {
     const target = this.resolveRelative(documentUri, path);
-    const outcome = await readDocumentBytes(this.vscode.workspace.fs, target);
-    if (!outcome.ok) {
-      // 缺件/超限 → 可见失败面（提示条由 webview 侧呈现；此处走 host 错误通道）
+    // 存在性判定走 stat（**不读字节**——评审 minor：原实现整文件读入内存判存在）
+    const exists = await this.documentExists(target);
+    if (!exists) {
+      // 缺件 → 可见失败面（提示条由 webview 侧呈现；此处走 host 错误通道）
       void this.vscode.window.showErrorMessage(t('notice.file.missing', { path }));
       return;
     }

@@ -508,6 +508,36 @@ describe('sanitizeHtml——外域媒体自动加载防线（BUG-17/MD-13 延伸
     expect(sources[0]!.getAttribute('src')).toBeNull();
     expect(sources[1]!.getAttribute('src')).toBe('local.mp4');
   });
+
+  it('picture 内 source 的外域 srcset 候选剥除；内部候选保留（评审 minor：三档均放行 → manual 档防线在 picture 形态下失效）', () => {
+    const html = sanitizeHtml(
+      '<picture><source srcset="https://evil.example.com/x.png 2x"><source srcset="local.png 2x"></picture>',
+    );
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    const sources = Array.from(div.querySelectorAll('source'));
+    expect(sources).toHaveLength(2);
+    expect(sources[0]!.getAttribute('srcset')).toBeNull();
+    expect(sources[1]!.getAttribute('srcset')).toBe('local.png 2x');
+  });
+
+  it('track 的外域 src 剥除并打标记（字幕轨随媒体元素自动请求——评审 minor：此前无分支，三档均放行）', () => {
+    const html = sanitizeHtml(
+      '<video controls><track src="https://evil.example.com/t.vtt" kind="captions"></video>',
+    );
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    const track = div.querySelector('track')!;
+    expect(track.getAttribute('src')).toBeNull();
+    expect(track.getAttribute('data-vv-blocked-external')).toBe('1');
+  });
+
+  it('track 的内域 src 保留（不误伤本地字幕轨）', () => {
+    const html = sanitizeHtml('<video controls><track src="local.vtt" kind="captions"></video>');
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    expect(div.querySelector('track')!.getAttribute('src')).toBe('local.vtt');
+  });
 });
 
 describe('sanitizeHtml——五类等价加载向量外域拦截（BUG-40）', () => {

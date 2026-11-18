@@ -38,6 +38,7 @@ export class HostBridge {
   private readonly nextId: () => number;
   private readonly pendingFiles = new Map<number, (result: FileReadResult) => void>();
   private readonly pendingExports = new Map<number, (result: ExportResult) => void>();
+  private readonly pendingStats = new Map<number, (exists: boolean) => void>();
 
   constructor(options: HostBridgeOptions) {
     this.api = options.api;
@@ -59,6 +60,17 @@ export class HostBridge {
     const message: WebviewToHost = { kind: 'read-file', id, path };
     this.api.postMessage(message);
     return promise.then((result) => result.bytes);
+  }
+
+  /** 存在性探测（**只 stat 不读字节**）——相对链接解析用（避免整文件读入判存在） */
+  statFile(path: string): Promise<boolean> {
+    const id = this.nextId();
+    const promise = new Promise<boolean>((resolve) => {
+      this.pendingStats.set(id, resolve);
+    });
+    const message: WebviewToHost = { kind: 'stat-file', id, path };
+    this.api.postMessage(message);
+    return promise;
   }
 
   /** 导出 HTML（宿主 showSaveDialog + 写盘；返回落盘路径，未落盘为 null） */
@@ -104,6 +116,13 @@ export class HostBridge {
         if (!resolve) return;
         this.pendingFiles.delete(message.id);
         resolve({ bytes: message.bytes, error: message.error });
+        return;
+      }
+      case 'file-stat': {
+        const resolve = this.pendingStats.get(message.id);
+        if (!resolve) return;
+        this.pendingStats.delete(message.id);
+        resolve(message.exists);
         return;
       }
       case 'export-result': {

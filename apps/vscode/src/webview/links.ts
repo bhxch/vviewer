@@ -18,6 +18,11 @@ import type {
 export interface LinkBridge {
   /** 按路径读文件（相对路径，相对当前文档） */
   readFile(path: string): Promise<Uint8Array | null>;
+  /**
+   * 存在性探测（**只 stat 不读字节**）——相对链接解析只需判存在（评审 minor：原实现
+   * 整文件读入内存判存在，点击大文件链接即一次全量读）。
+   */
+  statFile(path: string): Promise<boolean>;
   /** 请求宿主把当前文档切到该相对路径 */
   navigate(path: string): void;
 }
@@ -32,13 +37,13 @@ export function createImageResolver(bridge: LinkBridge): MarkdownImageResolver {
 }
 
 /**
- * 相对链接解析器：读文件成功即视为命中（扩展无多 store 语义——目录与文件的区分在
- * MVP 不做，命中即按文件打开）。
+ * 相对链接解析器：探测命中即视为存在（扩展无多 store 语义——目录与文件的区分在
+ * MVP 不做，命中即按文件打开）。探测走 stat 通道（**不读字节**）。
  */
 export function createLinkResolver(bridge: LinkBridge): RelativeLinkResolver {
   return async (href: string) => {
-    const bytes = await bridge.readFile(href);
-    if (!bytes) return { kind: 'missing', path: href };
+    const exists = await bridge.statFile(href);
+    if (!exists) return { kind: 'missing', path: href };
     return { kind: 'file', storeId: 'single', path: href };
   };
 }

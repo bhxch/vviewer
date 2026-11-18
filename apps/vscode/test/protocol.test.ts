@@ -30,6 +30,7 @@ describe('协议 · kind 穷尽', () => {
       { kind: 'settings', settings: DEFAULT_WEBVIEW_SETTINGS },
       { kind: 'theme', theme: { kind: 'dark', cssVars: {} } },
       { kind: 'file-bytes', id: 1, bytes: null },
+      { kind: 'file-stat', id: 1, exists: true },
       { kind: 'export-request' },
       { kind: 'export-result', id: 1, ok: true }
     ];
@@ -41,6 +42,7 @@ describe('协议 · kind 穷尽', () => {
     const samples: WebviewToHost[] = [
       { kind: 'ready' },
       { kind: 'read-file', id: 1, path: 'sub/other.md' },
+      { kind: 'stat-file', id: 1, path: 'sub/other.md' },
       { kind: 'export-html', id: 2, html: '<p>x</p>', suggestedName: 'a.html' },
       { kind: 'open-external', url: 'https://example.com' },
       { kind: 'navigate', path: 'sub/other.md' },

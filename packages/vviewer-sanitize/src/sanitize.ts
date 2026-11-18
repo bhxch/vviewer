@@ -500,12 +500,34 @@ function registerSanitizeHooks(): void {
           el.removeAttribute('autoplay');
         }
       }
+      // <picture> 内 <source srcset> 候选列表随元素渲染即加载（外域即回传 IP/会话）——
+      // 与 <source src> 同权剥除外域候选（评审 minor：此前 srcset 不在防线内 → 三档
+      // 均放行，manual 档的「DOM 无加载源即不发请求」防线在 picture 形态下失效）
+      const sourceSrcset = el.getAttribute('srcset');
+      if (tag === 'SOURCE' && sourceSrcset !== null) {
+        const kept = sourceSrcset
+          .split(',')
+          .map((c) => c.trim())
+          .filter((c) => c !== '')
+          .filter((c) => !isExternalMediaSrc((c.split(/\s+/)[0] ?? '').trim()));
+        if (kept.length === 0) el.removeAttribute('srcset');
+        else el.setAttribute('srcset', kept.join(', '));
+      }
       // BUG-40①：poster 图随元素渲染即拉取（与 preload 无关，preload=none 拦不住），
       // 与 src 的「点播放才请求」语义不同权——直接移除（同 img 剥 src 口径）。
       const poster = el.getAttribute('poster');
       if (poster !== null && isExternalMediaSrc(poster.trim())) {
         el.removeAttribute('poster');
         markBlockedExternal(el, hostOf(poster.trim()));
+      }
+    }
+    // <track src>（WebVTT 字幕轨）随媒体元素自动请求（外域即回传 IP/会话）——
+    // 与 AV 外域 src 同权：直接剥除（评审 minor：此前 track 无任何分支 → 三档均放行）。
+    else if (tag === 'TRACK') {
+      const src = el.getAttribute('src');
+      if (src !== null && isExternalMediaSrc(src.trim())) {
+        el.removeAttribute('src');
+        markBlockedExternal(el, hostOf(src.trim()));
       }
     }
     // BUG-40②③④⑤：SVG 引用元素 / 遗留 background 属性 / input type=image / 行内

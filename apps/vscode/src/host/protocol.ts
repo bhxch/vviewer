@@ -134,6 +134,11 @@ export type HostToWebview =
     }
   | { kind: 'theme'; theme: ThemePayload }
   | { kind: 'file-bytes'; id: number; bytes: Uint8Array | null; error?: string }
+  /**
+   * 存在性探测（**不读字节**）：相对链接解析只需判存在（评审 minor：原实现整文件读入
+   * 内存判存在——点击一个大文件链接即产生一次全量读，≤200MB 上限内亦然）。
+   */
+  | { kind: 'file-stat'; id: number; exists: boolean }
   | { kind: 'export-request' }
   | { kind: 'export-result'; id: number; ok: boolean; path?: string; error?: string };
 
@@ -146,6 +151,8 @@ export type WebviewToHost =
    */
   | { kind: 'ready' }
   | { kind: 'read-file'; id: number; path: string }
+  /** 存在性探测请求（对应 file-stat 回执）——只 stat 不读字节 */
+  | { kind: 'stat-file'; id: number; path: string }
   | { kind: 'export-html'; id: number; html: string; suggestedName: string }
   | { kind: 'open-external'; url: string }
   /** toc 折叠态变更（宿主持久化到 workspaceState——spec §4.2「折叠态记忆 workspaceState」） */
@@ -160,6 +167,7 @@ export const HOST_TO_WEBVIEW_KINDS = [
   'settings',
   'theme',
   'file-bytes',
+  'file-stat',
   'export-request',
   'export-result'
 ] as const;
@@ -168,6 +176,7 @@ export const HOST_TO_WEBVIEW_KINDS = [
 export const WEBVIEW_TO_HOST_KINDS = [
   'ready',
   'read-file',
+  'stat-file',
   'export-html',
   'open-external',
   'navigate',

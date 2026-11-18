@@ -30,7 +30,9 @@ function makeBridge(readFile: (path: string) => Promise<Uint8Array | null>): Lin
   navigate: ReturnType<typeof vi.fn>;
 } {
   const navigate = vi.fn();
-  return { readFile: vi.fn(readFile), navigate };
+  // 存在性探测面（只 stat 不读字节）：命中性随 readFile 夹具派生，测试语义不变
+  const statFile = vi.fn(async (path: string) => (await readFile(path)) !== null);
+  return { readFile: vi.fn(readFile), statFile, navigate };
 }
 
 describe('相对图片解析', () => {
@@ -68,6 +70,14 @@ describe('相对链接解析', () => {
     const resolver = createLinkResolver(bridge);
     const target = await resolver('sub/other.md', SOURCE);
     expect(target).toEqual({ kind: 'missing', path: 'sub/other.md' });
+  });
+
+  it('存在性判定走 stat 通道（**不读字节**——评审 minor：原实现整文件读入判存在）', async () => {
+    const bridge = makeBridge(async () => new Uint8Array([1]));
+    const resolver = createLinkResolver(bridge);
+    await resolver('sub/other.md', SOURCE);
+    expect(bridge.statFile).toHaveBeenCalledWith('sub/other.md');
+    expect(bridge.readFile).not.toHaveBeenCalled();
   });
 });
 
