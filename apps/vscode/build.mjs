@@ -196,6 +196,19 @@ async function main() {
 
   // VSIX manifest（name 去 scope / main 重写 / selector 实跑注册表生成）
   const sourceManifest = readSourceManifest(REPO_ROOT);
+  // 生成物占位检测（构建源头化 spec F + 评审 important ⑫）：扩展名清单在库恒为**占位
+  // 空集**（模块图可解析用），真实清单由 `pnpm gen:sources` 就地覆写生成——未跑该步
+  // 时 selector 只含专有渲染器扩展名（认领面静默缩水）→ 构建期显式告警 + 修复命令
+  const generatedExt = path.join(
+    REPO_ROOT,
+    'packages/vviewer-core/src/registry/generated-extensions.ts'
+  );
+  if (fs.readFileSync(generatedExt, 'utf8').includes('GENERATED_EXTENSIONS: readonly string[] = []')) {
+    console.warn(
+      '[vscode] 警告：扩展名清单生成物为占位空集——selector 只含专有渲染器扩展名（认领面缩水）。' +
+        '\n修复命令：pnpm gen:sources（构建源头化，需联网）'
+    );
+  }
   const claimed = await runRegistryCollection(REPO_ROOT);
   const vsixManifest = buildVsixManifest(sourceManifest, claimed);
   fs.writeFileSync(
