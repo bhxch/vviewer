@@ -133,6 +133,21 @@ export function nestedDispatchName(type: string, rawName?: string): string {
 let coreModule: typeof import('@file-viewer/core') | null = null;
 let appliedAssetBase: string | null = null;
 
+/**
+ * 装配级 foreign 基座**快照**（spec C §3.2「绑旧值」拍板：切档保存后刷新页面生效）。
+ *
+ * 此前 mount 期直读当下 settings → per-package 基座在「保存后的下一次 mount」即生效，
+ * 而全局缺省基座仍是装配时的旧值——同一设置两套生效时机，且与设置面「保存后刷新页面
+ * 生效」的文案相悖（评审 minor）。此处改为：装配期读一次并冻结，mount 期一律用快照。
+ */
+let foreignBaseSnapshot: string | null = null;
+
+/** 装配级 foreign 基座快照（首次调用时读当下 settings 并冻结） */
+function assemblyForeignBase(): string {
+  foreignBaseSnapshot ??= resolveForeignBase(loadSettings());
+  return foreignBaseSnapshot;
+}
+
 function applyForeignAssetBase(base: string): void {
   if (!coreModule || appliedAssetBase === base) return;
   coreModule.setDefaultFileViewerAssetBaseUrl(base);
@@ -168,7 +183,7 @@ function pluginMount(load: () => Promise<ForeignPlugin>, groupId: string): Forei
         // 装配级一次（幂等护栏）：链首层基座（env 显式 → 同源预留槽 → 运行时覆写 →
         // 缺省 CDN）——装配时读当下 settings（spec C §3.2 foreign 切档拍板：保存后
         // 刷新页面生效，重新装配即读到新档）
-        appliedAssetBase = resolveForeignBase(loadSettings());
+        appliedAssetBase = assemblyForeignBase();
         core.setDefaultFileViewerAssetBaseUrl(appliedAssetBase);
       }
       const registry = core.createRendererRegistry((plugin.definitions ?? []) as readonly RendererDefinition[]);
@@ -183,7 +198,7 @@ function pluginMount(load: () => Promise<ForeignPlugin>, groupId: string): Forei
     // 同步块执行（顶层任务由队列保证无交叉，见「mount 串行队列」注）
     const pkg = foreignGroupAssetPackage(groupId, ext);
     const savedBase = appliedAssetBase;
-    if (pkg) applyForeignAssetBase(resolveForeignAssetPackageBase(pkg, resolveForeignBase(loadSettings())));
+    if (pkg) applyForeignAssetBase(resolveForeignAssetPackageBase(pkg, assemblyForeignBase()));
     const context: FileRenderContext = {
       filename: args.name,
       sourceFile: args.file,
@@ -222,7 +237,7 @@ function pluginMount(load: () => Promise<ForeignPlugin>, groupId: string): Forei
     } finally {
       // 基座恢复：嵌套内联任务交还祖先基座；顶层任务恢复进入前值（下一 mount
       // 自带切换，resting 值无消费面）
-      if (pkg) applyForeignAssetBase(savedBase ?? resolveForeignBase(loadSettings()));
+      if (pkg) applyForeignAssetBase(savedBase ?? assemblyForeignBase());
     }
   };
   return (args: ForeignMountArgs): Promise<ForeignMountResult> => {
