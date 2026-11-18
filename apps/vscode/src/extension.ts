@@ -17,6 +17,7 @@ import { pickLocale, setLocale } from './i18n/core';
 /** 命令 id（与 contributes.commands 声明同值） */
 export const COMMAND_OPEN_WITH_NATIVE = 'vviewer.openWithNative';
 export const COMMAND_RELOAD = 'vviewer.reload';
+export const COMMAND_EXPORT_HTML = 'vviewer.exportHtml';
 
 /** 扩展激活 */
 export function activate(context: vscode.ExtensionContext): void {
@@ -43,6 +44,12 @@ export function activate(context: vscode.ExtensionContext): void {
       const uri = host.activeDocumentUri();
       if (!uri) return;
       await host.reload(uri);
+    }),
+    // 「导出 HTML」：宿主命令 → webview 组装自包含 HTML → 回到宿主 showSaveDialog 写盘
+    vscode.commands.registerCommand(COMMAND_EXPORT_HTML, async () => {
+      const uri = host.activeDocumentUri();
+      if (!uri) return;
+      await host.requestExport(uri);
     }),
     host
   );

@@ -29,6 +29,7 @@ describe('协议 · kind 穷尽', () => {
       { kind: 'settings', settings: DEFAULT_WEBVIEW_SETTINGS },
       { kind: 'theme', theme: { kind: 'dark', cssVars: {} } },
       { kind: 'file-bytes', id: 1, bytes: null },
+      { kind: 'export-request' },
       { kind: 'export-result', id: 1, ok: true }
     ];
     expect(new Set(samples.map((m) => m.kind))).toEqual(new Set(HOST_TO_WEBVIEW_KINDS));
@@ -113,6 +114,7 @@ describe('协议 · 资产 URI 族', () => {
         'grammarsBase',
         'highlightWorkerSourceUrl',
         'katexCssUrl',
+        'katexExportCssUrl',
         'pdfWorkerLegacyUrl',
         'pdfWorkerModernUrl',
         'queriesBase',
@@ -134,6 +136,7 @@ function emptyAssets(): AssetUris {
     pdfWorkerLegacyUrl: 'https://webview/pdf/pdf.worker.legacy.min.mjs',
     fontsBase: 'https://webview/fonts/',
     katexCssUrl: 'https://webview/katex.min.css',
+    katexExportCssUrl: 'https://webview/katex.export.css',
     themesUrl: 'https://webview/assets/themes.json',
     highlightWorkerSourceUrl: 'https://webview/highlight-worker.js'
   };

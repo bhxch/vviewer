@@ -108,6 +108,10 @@ describe('资产 URI 映射（RF 5）', () => {
     expect(assets.themesUrl).toBe('https://webview.internal/ext/dist/webview/assets/themes.json');
   });
 
+  it('katex 导出样式 URL 在场（自包含产物——字体 data URI 内联）', () => {
+    expect(assets.katexExportCssUrl).toBe('https://webview.internal/ext/dist/webview/katex.export.css');
+  });
+
   it('katex 样式与字体族齐备', () => {
     expect(assets.katexCssUrl).toBe('https://webview.internal/ext/dist/webview/katex.min.css');
     expect(assets.fontsBase.endsWith('/fonts/')).toBe(true);

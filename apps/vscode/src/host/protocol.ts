@@ -72,6 +72,11 @@ export interface AssetUris {
   /** katex 排印样式 URL */
   katexCssUrl: string;
   /**
+   * **自包含** katex 导出样式 URL（woff2 字体已转 data URI 内联、woff/ttf 回退段已
+   * 移除）——导出单文件无相对资产可引，字体必须内联（构建期产物）。
+   */
+  katexExportCssUrl: string;
+  /**
    * 打包主题表 URL（裁剪为 onelight + serika-dark 两条）——webview 侧按活动主题 kind
    * 取一条，经 `themeToCssVars` 算出 `--vv-ts-*` 捕获色（裁量 4：MVP 按 kind 注入，
    * 读 VSCode 活动主题 JSON 精确注入列为增强）。
@@ -108,6 +113,7 @@ export type HostToWebview =
   | { kind: 'settings'; settings: WebviewSettings }
   | { kind: 'theme'; theme: ThemePayload }
   | { kind: 'file-bytes'; id: number; bytes: Uint8Array | null; error?: string }
+  | { kind: 'export-request' }
   | { kind: 'export-result'; id: number; ok: boolean; path?: string; error?: string };
 
 /** webview → host */
@@ -121,7 +127,14 @@ export type WebviewToHost =
   | { kind: 'report'; level: 'warn' | 'error'; message: string };
 
 /** host → webview 的消息 kind 全集（穷举面——新增 kind 须同步） */
-export const HOST_TO_WEBVIEW_KINDS = ['init', 'settings', 'theme', 'file-bytes', 'export-result'] as const;
+export const HOST_TO_WEBVIEW_KINDS = [
+  'init',
+  'settings',
+  'theme',
+  'file-bytes',
+  'export-request',
+  'export-result'
+] as const;
 
 /** webview → host 的消息 kind 全集（穷举面——新增 kind 须同步） */
 export const WEBVIEW_TO_HOST_KINDS = [

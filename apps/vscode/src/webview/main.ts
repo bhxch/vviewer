@@ -1,6 +1,6 @@
-// main.ts — webview 侧入口（spec H T3）。
+// main.ts — webview 侧入口（spec H T3/T5）。
 //
-// 职责：消息协议接线 + 装配 + 渲染调度。
+// 职责：消息协议接线 + 装配 + 渲染调度 + toc 面板 + 相对链接/图片 + 导出。
 //
 // 运行期形态：webview 内无 Node、无服务端、无 localStorage——一切外部输入经宿主消息
 // 通道进来（文件字节 / 设置 / 主题 / 资产 URI），一切需要宿主能力的动作经消息通道出去
@@ -13,12 +13,15 @@
 import { assembleViewer, type Assembled } from './assemble';
 import { HostBridge } from './dispatchHost';
 import { applyEngineState } from './engineBadge';
+import { buildExportHtml, exportFileName } from './exportHtml';
 import {
   resolveHighlightEngine,
   startHighlightRuntime,
   type HighlightRuntime
 } from './highlight';
+import { createImageResolver, createLinkOpener, createLinkResolver } from './links';
 import { Shell } from './shell';
+import { bindTocClicks, scrollToHeadingIn, tocEntriesOf } from './toc';
 import { applyTokenCss, buildTokenCss, injectKatexCss, kindCssVars, loadCaptureCss } from './theme';
 import { createSingleFileSource } from './store';
 import {
@@ -30,7 +33,6 @@ import {
   type WebviewSettings
 } from '../host/protocol';
 import { pickLocale, setLocale, t } from '../i18n/core';
-import type { MarkdownImageResolver, RelativeLinkOpener, RelativeLinkResolver } from '@bhxch/vviewer-markdown';
 
 declare function acquireVsCodeApi<T = unknown>(): T;
 
@@ -63,6 +65,11 @@ let doc: { name: string; path: string; size: number; bytes: Uint8Array } | null 
 let assembled: Assembled | null = null;
 let highlight: HighlightRuntime | null = null;
 let currentInstance: { destroy(): void } | null = null;
+/** 动态令牌当前值（导出主题变量块用） */
+let themeVars: Record<string, string> = {};
+
+/** 代码行高（渲染器固定行高档——render-text/src/code/strategy.ts 的 LINE_HEIGHT=20） */
+const CODE_LINE_HEIGHT_PX = 20;
 
 window.addEventListener('message', (event: MessageEvent) => {
   const message = event.data as HostToWebview;
@@ -92,6 +99,9 @@ async function handleHostMessage(message: HostToWebview): Promise<void> {
       await applyTheme();
       await rerender();
       return;
+    case 'export-request':
+      await exportCurrentDocument();
+      return;
     case 'file-bytes':
     case 'export-result':
       bridge.handleMessage(message);
@@ -119,7 +129,38 @@ async function onInit(message: Extract<HostToWebview, { kind: 'init' }>): Promis
   await startHighlight(settings);
   assemble(settings);
 
+  // toc 面板：条目点击 → 滚动到目标（markdown heading id / code 符号行号）
+  bindTocClicks(shell, {
+    scrollToHeading: (id) => {
+      scrollToHeadingIn(shell.elements.main, id);
+    },
+    scrollToLine: (line) => {
+      const scrollHost = (currentInstance as { getScrollHost?(): HTMLElement } | null)?.getScrollHost?.();
+      if (scrollHost) {
+        scrollHost.scrollTop = line * CODE_LINE_HEIGHT_PX;
+        return;
+      }
+      shell.elements.main.scrollTop = line * CODE_LINE_HEIGHT_PX;
+    }
+  });
+
   await rerender();
+}
+
+/** 装配渲染层（设置变更时重装——缝捕获装配期的设置） */
+function assemble(current: WebviewSettings): void {
+  if (!assets || !theme) return;
+  assembled = assembleViewer({
+    settings: current,
+    assets,
+    themeKind: theme.kind,
+    resolveImage: createImageResolver(bridge),
+    resolveLink: createLinkResolver(bridge),
+    openLink: createLinkOpener(bridge, (path) => {
+      shell.setNotice(t('notice.file.missing', { path }), 'warn');
+    }),
+    text: (key) => t(key)
+  });
 }
 
 /** 起高亮运行时（worker 起活 + client attach + 引擎态可见） */
@@ -134,26 +175,16 @@ async function startHighlight(current: WebviewSettings): Promise<void> {
   applyEngineState(shell, highlight.state);
 }
 
-/** 装配渲染层（设置变更时重装——缝捕获装配期的设置） */
-function assemble(current: WebviewSettings): void {
-  if (!assets || !theme) return;
-  assembled = assembleViewer({
-    settings: current,
-    assets,
-    themeKind: theme.kind,
-    resolveImage,
-    resolveLink,
-    openLink,
-    text: (key) => t(key)
-  });
-}
-
 /** 应用动态令牌（`--ui-*` + `--vv-ts-*`）——整体替换面 */
 async function applyTheme(): Promise<void> {
   if (!theme || !assets) return;
-  const uiVars = { ...kindCssVars(theme.kind), ...theme.cssVars };
+  themeVars = { ...kindCssVars(theme.kind), ...theme.cssVars };
   const captureCss = await loadCaptureCss(assets.themesUrl, theme.kind);
-  applyTokenCss(document, buildTokenCss(uiVars, captureCss));
+  for (const line of captureCss.split('\n')) {
+    const [name, ...rest] = line.split(':');
+    if (name && rest.length > 0) themeVars[name.trim()] = rest.join(':').replace(/;$/, '').trim();
+  }
+  applyTokenCss(document, buildTokenCss(themeVars, captureCss));
 }
 
 /** 渲染调度（装配 → dispatch → toc 归一） */
@@ -183,48 +214,36 @@ async function rerender(): Promise<void> {
   }
 }
 
-/** toc 归一（markdown heading 与 code symbol 合流） */
-function tocEntriesOf(instance: {
-  getToc?(): Array<{ level: number; text: string; id: string }>;
-  getOutline?(): Array<{ name: string; startRow?: number }>;
-}): Array<{ id: string; label: string; level: number; kind: 'heading' | 'symbol' }> {
-  const toc = instance.getToc?.() ?? [];
-  if (toc.length > 0) {
-    return toc.map((entry) => ({
-      id: entry.id,
-      label: entry.text,
-      level: entry.level,
-      kind: 'heading' as const
-    }));
+/** 导出当前文档（宿主命令触发 → 自包含 HTML → 宿主写盘 → 提示条反馈） */
+async function exportCurrentDocument(): Promise<void> {
+  if (!doc || !assets) return;
+  try {
+    const katexCss = await fetchText(assets.katexExportCssUrl);
+    const html = await buildExportHtml(shell.elements.main, {
+      title: doc.name,
+      themeCss: buildTokenCss(themeVars),
+      katexCss
+    });
+    const path = await bridge.exportHtml(html, exportFileName(doc.name));
+    shell.setNotice(
+      path ? t('notice.export.saved', { path }) : t('notice.export.cancelled'),
+      path ? 'info' : 'warn'
+    );
+  } catch (e: unknown) {
+    shell.setNotice(
+      t('notice.export.failed', { reason: e instanceof Error ? e.message : String(e) }),
+      'error'
+    );
   }
-  const outline = instance.getOutline?.() ?? [];
-  return outline.map((entry, index) => ({
-    id: String(index),
-    label: entry.name,
-    level: 1,
-    kind: 'symbol' as const
-  }));
 }
 
-/** 相对图片 → blob URL（spec §7 ②；blob 生命周期由包内视图托管 revoke） */
-const resolveImage: MarkdownImageResolver = async (src) => {
-  const bytes = await bridge.readFile(src);
-  if (!bytes) return null;
-  return URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>]));
-};
-
-/** 相对链接解析（spec §7 ①；经宿主往返探测） */
-const resolveLink: RelativeLinkResolver = async (href) => {
-  const bytes = await bridge.readFile(href);
-  if (!bytes) return { kind: 'missing', path: href };
-  return { kind: 'file', storeId: 'single', path: href };
-};
-
-/** 相对链接打开（file → 请求宿主切文档；missing → 顶部提示条） */
-const openLink: RelativeLinkOpener = (target, href) => {
-  if (target.kind === 'file') {
-    bridge.navigate(target.path);
-    return;
+/** 读文本资源（失败返回空串——排印样式缺失不阻断导出） */
+async function fetchText(url: string): Promise<string> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return '';
+    return await response.text();
+  } catch {
+    return '';
   }
-  shell.setNotice(t('notice.file.missing', { path: target.path ?? href }), 'warn');
-};
+}

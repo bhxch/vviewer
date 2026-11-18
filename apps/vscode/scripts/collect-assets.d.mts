@@ -53,6 +53,7 @@ export declare function selectQueryLanguages(
 ): { selected: string[]; missing: string[] };
 export declare function planPdfWorkers(pdfjsDir: PathLike): PdfWorkerPlan[];
 export declare function listKatexFonts(katexDistDir: PathLike): string[];
+export declare function buildKatexExportCss(katexDistDir: PathLike): string;
 export declare function trimThemes(
   themes: Record<string, unknown>,
   keys?: readonly string[]

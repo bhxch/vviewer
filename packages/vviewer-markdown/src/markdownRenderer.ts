@@ -232,6 +232,13 @@ export interface DiagramRenderOptions {
    * 按降级链回退。
    */
   remoteCall?: (path: string) => { url: string; headers: Record<string, string> } | null;
+  /**
+   * 外联闸（spec H T5，additive 缝）：false = **禁止一切外联图表渲染**（kroki /
+   * 官方服务器 / 服务端代发）——kroki 模式分支与 local 引擎失败的降级**直接落源码块**，
+   * 不把用户源码外发第三方。缺省 undefined = 现有行为逐字节不变（apps/web 不注入 →
+   * 零改动，RF 1 兼容锚）。
+   */
+  allowRemote?: boolean;
 }
 
 let diagramOptions: (() => DiagramRenderOptions) | null = null;

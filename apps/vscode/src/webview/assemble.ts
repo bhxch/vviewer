@@ -46,6 +46,7 @@ import { avRenderer } from '@bhxch/vviewer-render-media/av';
 import { pdfRenderer, preferModernBuild, setPdfWorkerUrlProvider } from '@bhxch/vviewer-render-doc';
 import { hexRenderer, setHexWorkerUrlProvider } from '@bhxch/vviewer-render-binary';
 import { setExternalImagePolicyProvider } from '@bhxch/vviewer-sanitize';
+import { allowRemoteOf, resolveDiagramMode, resolveDiagramRenderer } from './diagramGate';
 import type { AssetUris, WebviewSettings } from '../host/protocol';
 import type { MessageKey } from '../i18n/core';
 
@@ -90,20 +91,25 @@ export interface Assembled {
 }
 
 /**
- * 图表渲染选项（T3 的粗粒度版本）。
+ * 图表渲染选项（**逐语言外联闸**——spec H T5）。
  *
- * T5 将其替换为**逐语言**的外联闸映射（`diagramGate.ts`：闸关时仅离线引擎族给
- * 'local'，其余 'source'；'off' → 'source'）。本版只做「设置枚举 → 模式」的直映射，
- * 图表外联闸的逐语言判定留 T5。
+ * - `modeOf` 经 `diagramGate.resolveDiagramMode`：**闸关**（默认）时仅离线引擎族
+ *   （mermaid/graphviz/nomnoml/math/svgbob）给 'local'，其余（17 个 kroki-only 类型 +
+ *   8 个 CDN 引擎族 + 未知语言）一律 'source'（源码块，零外联）；闸开时与 web 端同语义。
+ * - `rendererOf` 恒 undefined——**禁选 'hpcc'**（graphviz 的 CDN 外联渲染器）。
+ * - `allowRemote` 经 `allowRemoteOf`：闸关 → false（包内降级链不经 kroki）。
  */
 export function diagramOptionsOf(deps: AssembleDeps): DiagramRenderOptions {
-  const mode = deps.settings.diagramMode;
+  const gate = {
+    diagramMode: deps.settings.diagramMode,
+    allowRemoteServices: deps.settings.allowRemoteServices
+  };
   return {
     krokiHost: DEFAULT_KROKI_HOST,
     mermaidTheme: deps.themeKind === 'dark' ? 'dark' : 'default',
-    modeOf: () => (mode === 'off' ? 'source' : mode === 'kroki' ? 'kroki' : 'local'),
-    // graphviz 默认 viz-js（离线）；'hpcc' 走 CDN 外联渲染器——恒不选（T5 的闸口径）
-    rendererOf: () => undefined
+    modeOf: (lang: string) => resolveDiagramMode(lang, gate),
+    rendererOf: (lang: string) => resolveDiagramRenderer(lang, gate),
+    allowRemote: allowRemoteOf(gate)
   };
 }
 

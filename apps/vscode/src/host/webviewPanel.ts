@@ -100,6 +100,7 @@ export function buildAssetUris(params: AssetUrisParams): AssetUris {
     pdfWorkerLegacyUrl: asset('pdf', 'pdf.worker.legacy.min.mjs'),
     fontsBase: base('fonts'),
     katexCssUrl: asset('katex.min.css'),
+    katexExportCssUrl: asset('katex.export.css'),
     themesUrl: asset('assets', 'themes.json'),
     highlightWorkerSourceUrl: asset('highlight-worker.js')
   };
@@ -184,6 +185,15 @@ export class PanelHost implements vscode.Disposable {
     const panel = this.panels.get(uri.toString());
     if (!panel) return false;
     await this.sendInit(uri, panel);
+    return true;
+  }
+
+  /** 请求宿主触发导出（宿主命令面 → webview 组装自包含 HTML → 回到宿主写盘） */
+  async requestExport(uri: vscode.Uri): Promise<boolean> {
+    const panel = this.panels.get(uri.toString());
+    if (!panel) return false;
+    const message: HostToWebview = { kind: 'export-request' };
+    await panel.webview.postMessage(message);
     return true;
   }
 

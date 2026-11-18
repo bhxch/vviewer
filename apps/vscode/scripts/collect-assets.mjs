@@ -62,6 +62,31 @@ export const PACKAGED_THEMES = ['onelight', 'serika-dark'];
 /** katex 字体清单（woff2 20 个；woff/ttf 不取——web 端同款取舍） */
 export const KATEX_FONT_EXT = '.woff2';
 
+/**
+ * 自包含 katex 导出样式：woff2 字体逐个转 data URI 内联 + 移除 woff/ttf 回退段。
+ *
+ * 导出单文件无相对资产可引（apps/web 的 katexExportCss.ts 同款形态，扩展侧自实现——
+ * 台账⑤：两侧需随 katex 版本同步核对）。移除回退段的理由：现代浏览器 woff2 全覆盖，
+ * 留着即死链（相对 URL 在导出文件里必然 404）。
+ *
+ * @param {string} katexDistDir katex 包的 dist 目录
+ * @returns {string} 自包含的 katex.min.css 文本
+ */
+export function buildKatexExportCss(katexDistDir) {
+  const cssPath = path.join(katexDistDir, 'katex.min.css');
+  assertFile(cssPath, 'katex.min.css', FIX_COMMANDS.packages);
+  const css = fs.readFileSync(cssPath, 'utf8');
+  return css
+    .replace(/url\(fonts\/(KaTeX_[\w-]+\.woff2)\)/g, (whole, file) => {
+      const fontPath = path.join(katexDistDir, 'fonts', file);
+      if (!fs.existsSync(fontPath)) return whole; // 未知字体保留原样（清单漂移由构建暴露）
+      const dataUri = `data:font/woff2;base64,${fs.readFileSync(fontPath).toString('base64')}`;
+      return `url(${dataUri})`;
+    })
+    .replace(/,?url\(fonts\/KaTeX_[\w-]+\.woff\) format\("woff"\)/g, '')
+    .replace(/,?url\(fonts\/KaTeX_[\w-]+\.ttf\) format\("truetype"\)/g, '');
+}
+
 /** 资产源缺失错误（message 内含可执行修复命令） */
 export function missingSourceError(what, fix) {
   return new Error(`[vscode] 资产源缺失：${what}\n修复命令：${fix}`);
@@ -249,6 +274,12 @@ export function collectAssets(options = {}) {
   const katexCss = path.join(katexDistDir, 'katex.min.css');
   assertFile(katexCss, 'katex.min.css', FIX_COMMANDS.packages);
   copyFile(katexCss, path.join(webviewDir, 'katex.min.css'));
+  // 自包含导出样式（woff2 字体 data URI 内联）——导出单文件用
+  fs.writeFileSync(
+    path.join(webviewDir, 'katex.export.css'),
+    buildKatexExportCss(katexDistDir),
+    'utf8'
+  );
   const fonts = listKatexFonts(katexDistDir);
   for (const font of fonts) {
     copyFile(path.join(katexDistDir, 'fonts', font), path.join(webviewDir, 'fonts', font));

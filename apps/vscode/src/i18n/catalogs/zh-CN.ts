@@ -27,6 +27,7 @@ export const zhCN = {
   // notice —— 一次性反馈（顶部提示条）
   'notice.export.saved': '已导出到 {path}',
   'notice.export.failed': '导出失败：{reason}',
+  'notice.export.cancelled': '已取消导出',
   'notice.file.missing': '找不到文件：{path}',
 
   // errors —— 错误面

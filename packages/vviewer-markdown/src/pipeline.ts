@@ -386,6 +386,35 @@ function wrapServerDiagrams(root: Document, ctx: PipelineCtx): void {
  * local/kroki/server 模式带，source 模式无（未渲染无需重渲染锚）；local 失败态同样
  * 保留——旧实现语义，渲染成功与否不影响锚存在。
  */
+/**
+ * 落源码块（source 模式语义：视图隐藏、源码面板展开、无 toggle 钮）。
+ *
+ * 两处消费：①source 模式分支；②外联闸关（`allowRemote === false`）时 local 引擎
+ * 失败的降级——此时 wrapper 已按 withToggle=true 构造（toggle 存在），移除之避免
+ * 「图」钮点开空视图条的假交互（与 source 模式的构造口径同款）。
+ */
+async function showSourceBlock(
+  w: {
+    toggle: HTMLButtonElement | null;
+    view: HTMLElement;
+    sourcePane: HTMLElement;
+    sourceCode: HTMLElement;
+  },
+  type: DiagramType,
+  source: string,
+  ctx: PipelineCtx
+): Promise<void> {
+  w.toggle?.remove();
+  w.view.setAttribute('hidden', '');
+  w.sourcePane.removeAttribute('hidden');
+  if (type.highlightLang) {
+    try {
+      const spanHtml = await ctx.highlightFence(source, type.highlightLang);
+      if (spanHtml) w.sourceCode.innerHTML = spanHtml;
+    } catch { /* 取消等：保留纯文本 */ }
+  }
+}
+
 async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: PipelineCtx): Promise<void> {
   const source = (code.textContent ?? '').replace(/\n$/, '');
   const host = code.closest('pre') ?? code;
@@ -393,6 +422,11 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
   const ui = resolveUiTexts(ctx);
   // let：server fetch 失败的降级会改写生效模式重走分支（spec §8.3 server→local→kroki）
   let mode = effectiveModeOf(type, ctx);
+  // 外联闸（spec H T5，allowRemote=false）：外联分支（kroki / official / server）
+  // 一律落源码块——不把用户源码外发第三方。'local'（离线引擎渲染）与 'source' 不受影响。
+  if (ctx.diagram?.allowRemote === false && mode !== 'source' && mode !== 'local') {
+    mode = 'source';
+  }
   const w = buildDiagramWrapper(doc, ctx, {
     langLabel: type.id,
     highlightLang: type.highlightLang,
@@ -405,14 +439,7 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
   // 源码面板直接展开、视图隐藏（空 view 容器有 padding 不隐藏仍占空条）；否则
   //「图」钮点击后只能展示约一行高的空视图条，纯假交互
   if (mode === 'source') {
-    w.view.setAttribute('hidden', '');
-    w.sourcePane.removeAttribute('hidden');
-    if (type.highlightLang) {
-      try {
-        const spanHtml = await ctx.highlightFence(source, type.highlightLang);
-        if (spanHtml) w.sourceCode.innerHTML = spanHtml;
-      } catch { /* 取消等：保留纯文本 */ }
-    }
+    await showSourceBlock(w, type, source, ctx);
     return;
   }
 
@@ -541,6 +568,11 @@ async function renderDiagramBlock(code: HTMLElement, type: DiagramType, ctx: Pip
     });
     view.innerHTML = html;
   } catch {
+    if (ctx.diagram?.allowRemote === false) {
+      // 外联闸关：直接落源码块（不外发源码给 kroki / 官方服务器）
+      await showSourceBlock(w, type, source, ctx);
+      return;
+    }
     if (type.krokiType) {
       await appendKrokiImg();
     } else {

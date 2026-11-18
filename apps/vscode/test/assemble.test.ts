@@ -33,6 +33,7 @@ const ASSETS: AssetUris = {
   pdfWorkerLegacyUrl: 'https://webview/pdf/pdf.worker.legacy.min.mjs',
   fontsBase: 'https://webview/fonts/',
   katexCssUrl: 'https://webview/katex.min.css',
+  katexExportCssUrl: 'https://webview/katex.export.css',
   themesUrl: 'https://webview/assets/themes.json',
   highlightWorkerSourceUrl: 'https://webview/highlight-worker.js'
 };
