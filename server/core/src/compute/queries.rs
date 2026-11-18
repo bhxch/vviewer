@@ -30,9 +30,23 @@ include!(concat!(env!("OUT_DIR"), "/grammar_entries.rs"));
 
 /// sanitize 逐文件降级（spec §2.2）：highlights 失败才剔除语言，
 /// injections/locals 失败置空保底（用 tree_sitter::Query 预编译校验）。
+///
+/// **缺查询资产即剔除**（评审 important ②）：上游 helix master 删了 17 个语言的
+/// runtime/queries 目录（commonlisp/drools/ql/proto/…，见 gen-sources 的
+/// annotateManifestQueries）——这些语言仍有 grammar 源，build.rs 为缺失目录物化
+/// **空串**，而空 query 编译通过（空 query 合法）→ 语言被注册 → 服务端返回
+/// 200 + **空区间** → 客户端 `[]` 判成功 → 完全无高亮且**不降级 hljs**（本地 worker
+/// 侧同一语言无查询即降级 hljs → 两侧行为分叉）。
+/// 口径对齐本地 worker：无可用查询 = 该语言不受支持 → 请求侧 400 unsupported
+/// language；且 health 的 computeLanguages 不含该语言 → 客户端 auto 策略零远程请求
+/// 直落本地 → hljs 兜底。
 static ENTRIES: Lazy<Vec<LanguageEntry>> = Lazy::new(|| {
     let mut entries = Vec::new();
     for (name, language, highlights, injections, locals) in generated_entries() {
+        if highlights.trim().is_empty() {
+            tracing::warn!("language {name} 缺 highlights.scm（上游查询资产缺失），剔除（客户端走 hljs 兜底）");
+            continue;
+        }
         let lang = Language::from(language);
         let compile = |text: &'static str| tree_sitter::Query::new(&lang, text).is_ok();
         if !compile(highlights) {
@@ -297,6 +311,9 @@ mod tests {
     /// CI 全量门禁（grammar.yml 全源环境断言；partial 本地构建跳过）。
     /// 期望数动态化（spec F §5）：gen-sources 产出即真相——registry 数 ==
     /// grammars-manifest.json 条目数（不再硬编码 301，随 pin refresh 自然增长）。
+    /// **口径精确化**（评审 important ②）：注册数按「**有查询资产**的语言数」计——
+    /// 上游已删 queries 目录的语言（gen-sources 的 `queries:false` 标注）不注册
+    /// （queries.rs：空 highlights 剔除），故 manifest 条目数 ≠ 注册数。
     /// manifest 经运行时读取（构建源头化后不入库）：缺失时报错指向 pnpm gen:sources，
     /// 与 build.rs 生成物缺失报错文案同源。
     #[test]
@@ -309,16 +326,34 @@ mod tests {
         );
         let manifest: serde_json::Value =
             serde_json::from_str(&manifest_text).expect("grammars-manifest.json 可解析");
-        let expected = manifest["grammars"]
-            .as_array()
-            .expect("grammars 数组")
-            .len();
-        if generated_count() < expected {
-            eprintln!("partial 构建（{}/{expected}），跳过全量门禁", generated_count());
+        let entries = manifest["grammars"].as_array().expect("grammars 数组");
+        let manifest_len = entries.len();
+        assert_eq!(
+            entries.iter().filter(|e| e.get("queries").is_some()).count(),
+            manifest_len,
+            "manifest 缺 queries 标注（gen-sources 产物过期）——重跑 pnpm gen:sources"
+        );
+        let expected = entries
+            .iter()
+            .filter(|e| e["queries"].as_bool() == Some(true))
+            .count();
+        if generated_count() < manifest_len {
+            eprintln!(
+                "partial 构建（{}/{manifest_len}），跳过全量门禁",
+                generated_count()
+            );
             return;
         }
-        assert_eq!(supported_languages().len(), expected);
-        assert_eq!(generated_count(), expected);
+        assert_eq!(
+            supported_languages().len(),
+            expected,
+            "有查询资产的语言应全部注册（缺查询资产的语言不注册）"
+        );
+        assert_eq!(
+            generated_count(),
+            manifest_len,
+            "全量构建：编译数 == manifest 条目数"
+        );
     }
 
     #[test]

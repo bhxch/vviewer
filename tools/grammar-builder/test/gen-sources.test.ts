@@ -30,6 +30,7 @@ import {
   collectThemes,
   deriveBuildList,
   deriveServerManifest,
+  annotateManifestQueries,
   diffReport,
   exceptGrammars,
   fetchHelixTree,
@@ -145,6 +146,40 @@ describe('deriveBuildList / deriveServerManifest（[[grammar]] 派生：全集 �
       { name: 'typescript', dir: 'typescript', subpath: 'typescript', cSymbol: 'tree_sitter_typescript' },
       { name: 'vue', dir: 'vue', subpath: '', cSymbol: 'tree_sitter_vue' },
     ]);
+  });
+});
+
+describe('annotateManifestQueries（server manifest 查询资产存在性标注）', () => {
+  // 上游 helix master 删了 17 个语言的 runtime/queries 目录 → 这些语言「注册但无
+  // highlights」→ 服务端返回 200 + 空区间（客户端判成功 → 完全无高亮且不降级 hljs）。
+  // 标注后服务端注册表按此过滤，动态门禁的期望注册数亦按此计。
+  it('有 highlights.scm 标 true；缺目录/空文件标 false（纯函数，入参不改）', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'vv-annotate-'));
+    mkdirSync(path.join(dir, 'rust'), { recursive: true });
+    writeFileSync(path.join(dir, 'rust', 'highlights.scm'), '(x) @k\n');
+    mkdirSync(path.join(dir, 'blank'), { recursive: true });
+    writeFileSync(path.join(dir, 'blank', 'highlights.scm'), '');
+    const manifest = {
+      note: 'n',
+      generatedAt: '2026-01-01T00:00:00.000Z',
+      grammars: [
+        { name: 'rust', dir: 'rust', subpath: '', cSymbol: 'tree_sitter_rust' },
+        { name: 'blank', dir: 'blank', subpath: '', cSymbol: 'tree_sitter_blank' },
+        { name: 'missing', dir: 'missing', subpath: '', cSymbol: 'tree_sitter_missing' },
+      ],
+    };
+    const out = annotateManifestQueries(manifest, dir);
+    expect(out.grammars.map((g: { queries: boolean }) => g.queries)).toEqual([true, false, false]);
+    // 其余字段逐字保留
+    expect(out.grammars[0]).toEqual({
+      name: 'rust',
+      dir: 'rust',
+      subpath: '',
+      cSymbol: 'tree_sitter_rust',
+      queries: true,
+    });
+    // 入参未被改写（纯函数）
+    expect((manifest.grammars[0] as { queries?: boolean }).queries).toBeUndefined();
   });
 });
 

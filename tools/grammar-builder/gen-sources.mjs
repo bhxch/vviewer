@@ -428,12 +428,39 @@ export function deriveServerManifest(grammarDoc, exceptList = []) {
     cSymbol: cSymbolOf(e.name),
   }));
   return {
-    note: '由 gen-sources.mjs 从 helix pin 派生（node tools/grammar-builder/gen-sources.mjs）；server/core/build.rs 的编译与 FFI 输入，期望条目数=grammars 数组长度（动态门禁真相源，spec F §5）',
+    note: '由 gen-sources.mjs 从 helix pin 派生（node tools/grammar-builder/gen-sources.mjs）；server/core/build.rs 的编译与 FFI 输入，期望条目数=grammars 数组长度（动态门禁真相源，spec F §5）；grammars[].queries = 该语言在上游 pin 是否有 highlights 查询资产（false = 上游已删该语言 queries 目录 → 服务端不注册该语言，见 annotateManifestQueries）',
     generatedAt: new Date().toISOString(),
     grammars,
   };
 }
 
+/**
+ * 标注 server manifest 各语言的**查询资产存在性**（`queries: true|false`）。
+ *
+ * 上游 helix master 删除了部分语言的 runtime/queries 目录（pin 49986e66 起 17 个：
+ * commonlisp/drools/embedded-template/gitattributes/gitcommit/gitignore/
+ * glimmer-javascript/glimmer-typescript/janet-simple/jinja2/markdown_inline/proto/
+ * ql/qmljs/query/requirements/robots-txt）——这些语言**仍有 grammar 源却无 highlights
+ * 查询**。此前服务端照单全收：build.rs 为缺失目录物化空串 → 空 highlights 编译通过
+ * （空 query 合法）→ 语言被注册 → 服务端返回 200 + **空区间** → 客户端 `[]` 判成功
+ * → 完全无高亮且**不降级 hljs**（本地 worker 侧同一语言无查询即降级 hljs → 两侧分叉）。
+ *
+ * 标注后：① 服务端注册表按「有查询资产」过滤（queries.rs：空 highlights 剔除）；
+ * ② 动态门禁的期望数按「有查询资产的语言数」计（spec F §5 的动态化口径随本标注精确化——
+ * 否则 301 ≠ 284 恒红）。
+ *
+ * @param {object} manifest deriveServerManifest 产物
+ * @param {string} queriesDir queries 根目录（assets/queries）
+ * @returns {object} 标注后的 manifest（不改入参）
+ */
+export function annotateManifestQueries(manifest, queriesDir) {
+  const grammars = manifest.grammars.map((g) => {
+    const hl = path.join(queriesDir, g.dir, 'highlights.scm');
+    const has = fs.existsSync(hl) && fs.statSync(hl).size > 0;
+    return { ...g, queries: has };
+  });
+  return { ...manifest, grammars };
+}
 
 /**
  * 新旧产物差异报告：
@@ -810,10 +837,13 @@ export async function main(argv = process.argv.slice(2), opts = {}) {
   const themeCount = await pullThemes(treeFiles, commit, P.assetsDir, { fetchImpl });
 
   // 单文件产物原子落盘
+  // server manifest 标注查询资产存在性（判据 = 刚落盘的 queries 树——上游已删 queries
+  // 目录的语言标 queries:false，服务端据此不注册（避免「注册但无高亮」的空区间假成功）
+  const annotatedManifest = annotateManifestQueries(manifest, P.queriesDir);
   atomicWrite(P.languagesToml, tomlText);
   atomicWrite(P.buildListJson, `${JSON.stringify(buildList, null, 2)}\n`);
   atomicWrite(P.languagesJson, `${JSON.stringify(languages, null, 2)}\n`);
-  atomicWrite(P.serverManifest, `${JSON.stringify(manifest, null, 2)}\n`);
+  atomicWrite(P.serverManifest, `${JSON.stringify(annotatedManifest, null, 2)}\n`);
   atomicWrite(P.generatedExtensions, generatedExtensions);
 
   // aliases 一致性校验（Review Focus 5）：入库资产，缺席即显式报错
@@ -850,6 +880,7 @@ export async function main(argv = process.argv.slice(2), opts = {}) {
   console.log(
     `[gen-sources] 生成完成: languages=${Object.keys(languages).length} ` +
       `build-list=${buildList.length} manifest=${manifest.grammars.length} ` +
+      `（有查询资产 ${annotatedManifest.grammars.filter((g) => g.queries).length}） ` +
       `themes=${themeCount} queries=${queryFiles} -> commit ${commit.slice(0, 7)}`,
   );
   return {
