@@ -4,7 +4,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build-list": "node build-list.mjs",
     "fetch": "node build.mjs --fetch --lite",
     "self-build": "node build.mjs --self-build",
     "test": "vitest run"

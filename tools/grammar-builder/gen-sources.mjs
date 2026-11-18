@@ -553,8 +553,8 @@ export function readPin(pinPath = PATHS.pinPath) {
 }
 
 /** 写 pin（原子落盘）：master commit 锚 + refreshedAt。返回写入的 pin 对象。 */
-export function writePin(pinPath = PATHS.pinPath, commit) {
-  const pin = { ref: 'master', commit, release: '', refreshedAt: new Date().toISOString() };
+export function writePin(pinPath = PATHS.pinPath, commit, refreshedAt = new Date().toISOString()) {
+  const pin = { ref: 'master', commit, release: '', refreshedAt };
   atomicWrite(pinPath, `${JSON.stringify(pin, null, 2)}\n`);
   return pin;
 }
@@ -678,8 +678,26 @@ export async function pullQueries(treeFiles, commit, outDir, { fetchImpl = fetch
     });
     if (failures.length > 0) failWithList('queries', failures, files.length);
     applyQueryPatches(tmp, patches);
-    fs.rmSync(outDir, { recursive: true, force: true });
-    swapDirIntoPlace(tmp, outDir);
+    // 换入失败时**保留旧树**（评审 minor）：此前先 rmSync(outDir) 再换入，且 finally
+    // 无条件删 tmp——换入因非 EXDEV 原因失败即「旧树已删 + 临时树被 finally 删掉」
+    // → 资产不可恢复。改为：先把旧树移到备份位，换入成功后删备份；失败则还原旧树。
+    const backup = `${outDir}.bak-${process.pid}`;
+    let swapped = false;
+    try {
+      if (fs.existsSync(outDir)) fs.renameSync(outDir, backup);
+      swapDirIntoPlace(tmp, outDir);
+      swapped = true;
+    } finally {
+      if (!swapped) {
+        // 换入失败 → 还原旧树（备份在则移回；不在则旧树本就未被删）
+        if (fs.existsSync(backup)) {
+          fs.rmSync(outDir, { recursive: true, force: true });
+          fs.renameSync(backup, outDir);
+        }
+      } else {
+        fs.rmSync(backup, { recursive: true, force: true });
+      }
+    }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -802,14 +820,30 @@ export async function main(argv = process.argv.slice(2), opts = {}) {
   let commit;
   if (refresh) {
     commit = await resolveMasterHead({ fetchImpl });
-    const oldPin = fs.existsSync(P.pinPath) ? readPin(P.pinPath) : null;
-    writePin(P.pinPath, commit);
+    // pin 读取容错（评审 minor）：损坏的 pin 不应形成死胡同——readPin 的报错文案指向
+    // 「执行 --refresh」，而 --refresh 此前先读 pin 即抛 → 照做仍同错（真实出路是手动
+    // 删文件）。此处读失败即按「无 pin」处理并重建（--refresh 的语义本就是「重解析
+    // master HEAD 锚定」），并打印自愈提示。
+    let oldPin = null;
+    if (fs.existsSync(P.pinPath)) {
+      try {
+        oldPin = readPin(P.pinPath);
+      } catch (err) {
+        console.log(
+          `[gen-sources] pin 不可读（${err instanceof Error ? err.message : String(err)}）——按 --refresh 语义重建`
+        );
+      }
+    }
+    // refreshedAt 只在 commit 变化时刷新：commit 未变则 pin 内容逐字不变
+    // （setup-grammars 的缓存键含 hashFiles(helix-pin.json)——每次刷新都改写时间戳
+    // 会让缓存必失效，与「pin 不变即命中」失真）
+    writePin(P.pinPath, commit, oldPin && oldPin.commit === commit ? oldPin.refreshedAt : undefined);
     if (oldPin && oldPin.commit !== commit) {
       console.log(`[gen-sources] pin 更新: ${oldPin.commit.slice(0, 7)} -> ${commit.slice(0, 7)}`);
     } else if (!oldPin) {
       console.log(`[gen-sources] pin 初始化: master@${commit.slice(0, 7)}（首跑自动初始化）`);
     } else {
-      console.log(`[gen-sources] pin 未变: master@${commit.slice(0, 7)}（refreshedAt 已更新）`);
+      console.log(`[gen-sources] pin 未变: master@${commit.slice(0, 7)}（pin 内容逐字不变，缓存键稳定）`);
     }
   } else {
     commit = readPin(P.pinPath).commit;

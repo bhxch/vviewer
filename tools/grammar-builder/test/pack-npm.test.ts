@@ -268,6 +268,22 @@ describe('packNpm contentHash（发布去重门的内容寻址哈希）', () => 
     const r2 = packNpm(ARGS(f2));
     expect(r2.contentHash).not.toBe(r1.contentHash);
   });
+
+  it('敏感性：manifest 侧变化（条目 sha256/aliases）→ 哈希变化（评审 minor：数组 replacer 逐层过滤致条目未进哈希，manifest-only 变更被误判为零变化）', () => {
+    const f1 = fixture();
+    const r1 = packNpm(ARGS(f1));
+    const f2 = fixture();
+    const m2 = path.join(f2.grammars, 'manifest.json');
+    const parsed = JSON.parse(readFileSync(m2, 'utf8')) as {
+      grammars: Record<string, { sha256?: string; aliases?: string[] }>;
+    };
+    // 条目级变更（wasm 字节不变，仅 manifest 侧的 sha256 变化）
+    const first = Object.keys(parsed.grammars)[0]!;
+    parsed.grammars[first]!.sha256 = 'f'.repeat(64);
+    writeFileSync(m2, JSON.stringify(parsed));
+    const r2 = packNpm(ARGS(f2));
+    expect(r2.contentHash).not.toBe(r1.contentHash);
+  });
 });
 
 /* ---------------------------------- 拆分模式 ---------------------------------- */

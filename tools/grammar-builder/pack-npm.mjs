@@ -109,9 +109,28 @@ function contentHashOf(outDir) {
   delete manifest.generatedAt;
   h.update('grammars/manifest.json');
   h.update('\0');
-  h.update(JSON.stringify(manifest, Object.keys(manifest).sort()));
+  h.update(stableStringify(manifest));
   h.update('\0');
   return h.digest('hex').slice(0, 16);
+}
+
+/**
+ * 稳定序列化（键递归排序）——内容哈希的 manifest 归一用。
+ *
+ * 此前用 `JSON.stringify(manifest, Object.keys(manifest).sort())`（数组 replacer）——
+ * 数组 replacer 是**逐层**属性白名单：顶层键之外的嵌套对象的属性全部被过滤 →
+ * manifest 的 grammars 条目实得 `{}`（条目内容根本没进哈希）→ manifest 侧变更被误判
+ * 为「零变化」跳过发包，CDN 侧 manifest 陈旧（评审 minor）。
+ */
+export function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
 }
 
 /**
