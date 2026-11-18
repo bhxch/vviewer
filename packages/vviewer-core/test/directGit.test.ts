@@ -1,7 +1,8 @@
 // directGit.test.ts — GitHub/GitLab 直连 TreeStore 双工厂（spec I，plan Task 1）。
 // fetch mock 形态照 directS3.test.ts 先例（vi.stubGlobal + json/bytes 响应桩）。
 // 断言锚=plan Task 1 验收锚 ①-⑧：storeId 凭据隔离（快照恢复红线）/ref 解析缓存/
-// 清单切片/truncated BFS 分层/prefix 下钻/read 五态/GitLab 全链/probe 采样语义。
+// 清单切片/truncated BFS 分层/prefix 下钻（GitHub：逐段取子树 sha——见「GitHub prefix 下钻」
+// 域；GitLab：path 参数下钻——见「GitLab 清单链」域）/read 五态/GitLab 全链/probe 采样语义。
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createGithubDirectStore,
@@ -409,6 +410,120 @@ describe('GitHub 清单链（ref 解析/recursive 清单/切片）', () => {
     });
     const store = githubStore();
     await expect(store.listChildren('')).rejects.toThrow(/1000/);
+  });
+});
+
+describe('GitHub prefix 下钻（清单层：逐段取子树 sha——plan Task 1 验收锚⑤）', () => {
+  /** 直连仓工厂（与「GitHub 清单链」域同形——该域的工厂是 describe 内局部作用域） */
+  function githubStore(cfg: Partial<GithubDirectConfig> = {}) {
+    return createGithubDirectStore({
+      owner: 'octo',
+      repo: 'repo',
+      ref: 'main',
+      label: '样例仓',
+      ...cfg
+    });
+  }
+
+  // 下钻响应：逐段非递归 tree（docs → api），末段递归清单。
+  const DRILL_TREES: Record<string, unknown> = {
+    [GH_SHA]: {
+      sha: GH_SHA,
+      truncated: false,
+      tree: [{ path: 'docs', type: 'tree', sha: GH_T_DOCS }]
+    },
+    [GH_T_DOCS]: {
+      sha: GH_T_DOCS,
+      truncated: false,
+      tree: [{ path: 'api', type: 'tree', sha: GH_T_API }]
+    },
+    [GH_T_API]: {
+      sha: GH_T_API,
+      truncated: false,
+      tree: [{ path: 'x.md', type: 'blob', size: 5, sha: GH_B_X }]
+    }
+  };
+
+  it('逐段请求序列断言：commits → trees/{根 sha}（非递归）→ trees/{段 sha}（非递归）→ trees/{末段}?recursive=1', async () => {
+    const fn = installFetch((url) => {
+      if (url === 'https://api.github.com/repos/octo/repo/commits/main') {
+        return jsonResponse({ sha: GH_SHA });
+      }
+      const m = /\/git\/trees\/([0-9a-f]+)(\?recursive=1)?$/.exec(url);
+      if (m) {
+        const tree = DRILL_TREES[m[1]!];
+        if (tree) return jsonResponse(tree);
+      }
+      return jsonResponse({ message: 'miss' }, 404);
+    });
+    const store = githubStore({ prefix: 'docs/api' });
+    const root = await store.listChildren('');
+    expect(root.map((n) => n.name)).toEqual(['x.md']);
+    // 逐段下钻两段（各一次非递归请求）+ 末段递归清单一次——顺序即下钻序
+    expect(calledUrls(fn).filter((u) => u.includes('/git/trees/'))).toEqual([
+      `https://api.github.com/repos/octo/repo/git/trees/${GH_SHA}`,
+      `https://api.github.com/repos/octo/repo/git/trees/${GH_T_DOCS}`,
+      `https://api.github.com/repos/octo/repo/git/trees/${GH_T_API}?recursive=1`
+    ]);
+  });
+
+  it('段缺失（该层 tree 无此段）→ throw notFound 文案（不静默降级为空清单）', async () => {
+    installFetch((url) => {
+      if (url === 'https://api.github.com/repos/octo/repo/commits/main') {
+        return jsonResponse({ sha: GH_SHA });
+      }
+      if (url === `https://api.github.com/repos/octo/repo/git/trees/${GH_SHA}`) {
+        return jsonResponse({
+          sha: GH_SHA,
+          truncated: false,
+          tree: [{ path: 'other', type: 'tree', sha: GH_T_DOCS }]
+        });
+      }
+      return jsonResponse({ message: 'miss' }, 404);
+    });
+    const store = githubStore({ prefix: 'docs' });
+    await expect(store.listChildren('')).rejects.toThrow(/not found|HTTP 404/i);
+  });
+
+  it('段非 tree（同名 blob）→ throw notFound（段类型不符即停）', async () => {
+    installFetch((url) => {
+      if (url === 'https://api.github.com/repos/octo/repo/commits/main') {
+        return jsonResponse({ sha: GH_SHA });
+      }
+      if (url === `https://api.github.com/repos/octo/repo/git/trees/${GH_SHA}`) {
+        return jsonResponse({
+          sha: GH_SHA,
+          truncated: false,
+          tree: [{ path: 'docs', type: 'blob', sha: GH_B_GUIDE }]
+        });
+      }
+      return jsonResponse({ message: 'miss' }, 404);
+    });
+    const store = githubStore({ prefix: 'docs' });
+    await expect(store.listChildren('')).rejects.toThrow(/not found|HTTP 404/i);
+  });
+
+  it('下钻后路径回补：清单切片为挂载相对（剥 prefix），read 请求回补仓库相对路径（prefix + rel）', async () => {
+    const fn = installFetch((url) => {
+      if (url === 'https://api.github.com/repos/octo/repo/commits/main') {
+        return jsonResponse({ sha: GH_SHA });
+      }
+      const m = /\/git\/trees\/([0-9a-f]+)(\?recursive=1)?$/.exec(url);
+      if (m) {
+        const tree = DRILL_TREES[m[1]!];
+        if (tree) return jsonResponse(tree);
+      }
+      return jsonResponse({ message: 'miss' }, 404);
+    });
+    const store = githubStore({ prefix: 'docs/api' });
+    const root = await store.listChildren('');
+    expect(root.map((n) => n.name)).toEqual(['x.md']);
+    expect(root.map((n) => n.path)).toEqual(['x.md']); // 挂载相对（剥 prefix）
+    // read 面：仓库相对路径回补（mountPrefix + rel）——raw URL 含完整前缀
+    await store.read('x.md').catch(() => undefined);
+    const rawUrl = calledUrls(fn).find((u) => u.includes('raw.githubusercontent.com'));
+    expect(rawUrl, 'read 未发起 raw 请求').toBeTruthy();
+    expect(rawUrl).toContain('docs/api/x.md');
   });
 });
 
