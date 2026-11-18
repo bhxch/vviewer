@@ -211,7 +211,7 @@ test('分层链用例 2：CDN manifest 不可达 → 跳层 console.warn 一条�
 // ---------- 多基拆包（spec C §3.2，Task 5）：settings.cdn custom 档运行时多基 ----------
 // 既有两用例为构建期单基注入（VV_GRAMMAR_CDN env）零改动；以下用例经设置中心
 // custom 档运行时注入两子包 base（| 分隔）——AppShell 订阅 diff 触发
-// rebuildHighlightClient（代际守卫），assembleGrammarLayers 按 cdn-p1..pN 逐层
+// recreateHighlightClient（代际守卫），assembleGrammarLayers 按 cdn-p1..pN 逐层
 // fetch + first-wins 合并。queries 恒同源（分层链契约在多基下不变）。
 
 const RUST_SRC = ['pub fn greet(name: &str) -> String {', '    format!("hello {name}")', '}', ''].join('\n');

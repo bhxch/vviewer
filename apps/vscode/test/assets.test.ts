@@ -198,7 +198,10 @@ describe('资产采集 · 真实仓内源齐备（构建前置可见性）', () 
     expect(languages.length).toBeGreaterThan(0);
     const { selected, missing } = selectQueryLanguages(languages, queriesDir);
     expect(selected.length).toBeGreaterThan(0);
-    expect(missing.every((lang) => !selected.includes(lang))).toBe(true);
+    // selected 与 missing 互斥（构造面互斥）——此前断言恒真（missing 空时 every 恒真），
+    // 改为判别力断言：两者无交集，且并集 == manifest 语言集（评审 minor）
+    expect(selected.filter((lang) => missing.includes(lang))).toEqual([]);
+    expect([...selected, ...missing].sort()).toEqual([...languages].sort());
   });
 });
 

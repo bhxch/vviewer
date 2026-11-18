@@ -148,8 +148,11 @@ describe('主题令牌缺省（裁量 4：按 activeColorTheme.kind 注入）', 
     const light = themeCssVars('light');
     const dark = themeCssVars('dark');
     for (const key of ['--ui-bg', '--ui-fg', '--ui-fg-muted', '--ui-border', '--ui-accent']) {
-      expect(light[key], `亮色缺 ${key}`).toBeTruthy();
-      expect(dark[key], `暗色缺 ${key}`).toBeTruthy();
+      // 值形态约束（评审 minor：此前仅 toBeTruthy —— 令牌被改成非法 CSS 值也不报警）：
+      // 必须是合法 CSS 颜色字面量（#rgb / #rrggbb / rgb() / hsl() 形态）
+      const valueRe = /^(#[0-9a-f]{3,8}|rgba?\([^)]*\)|hsla?\([^)]*\))$/i;
+      expect(light[key], `亮色缺 ${key}`).toMatch(valueRe);
+      expect(dark[key], `暗色缺 ${key}`).toMatch(valueRe);
       expect(light[key]).not.toBe(dark[key]);
     }
   });

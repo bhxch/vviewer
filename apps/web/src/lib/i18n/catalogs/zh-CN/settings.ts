@@ -10,7 +10,8 @@ export const messages = {
   // —— 通用（settings.common.*）——
   'settings.common.listSep': '、',
 
-  // —— 左导航组名（settings.nav.*，SC-01 十四组定稿序）——
+  // —— 左导航组名（settings.nav.*，十四组定稿序：spec C 十二→十三、spec D 十三→十四——
+  //     「Markdown」组插在「打开方式」之后，SettingsCenter.svelte:59-64 同口径）——
   'settings.nav.appearance': '外观',
   'settings.nav.languageA11y': '语言与辅助功能',
   'settings.nav.fonts': '字体',

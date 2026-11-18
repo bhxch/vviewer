@@ -211,7 +211,7 @@ export const messages = {
   'mounts.form.ref': 'ref (branch/tag/commit)',
   'mounts.form.gitToken': 'Access token (PAT, optional)',
   'mounts.form.gitTokenHint':
-    "Leave empty to match the credential store by owner (exact → wildcard → anonymous); a filled-in token is stored with this mount. For GitLab, the credential entry's host must match this form's host verbatim (scheme and trailing slash included). Anonymous GitHub access is rate-limited to 60 requests/hour, and Test connection also consumes quota.",
+    "Leave empty to match the credential store by owner (exact → wildcard → anonymous); a filled-in token is stored with this mount. For GitLab, the credential entry's host must match this form's host verbatim (scheme and trailing slash included); for GitHub, the credential entry's host must be exactly github.com (any other spelling never matches and falls back to anonymous). Anonymous GitHub access is rate-limited to 60 requests/hour, and Test connection also consumes quota.",
   'mounts.form.refHint':
     'Branch-type refs are re-resolved to the latest commit on every session open/restore; this is expected behavior.',
   'mounts.form.gitProxyBlock': 'GitHub/GitLab mounts only support browser-direct connections',
@@ -219,6 +219,7 @@ export const messages = {
   // —— git 凭据区块族（组④「Git 凭据」——编辑面=重提同键覆盖）——
   'mounts.cred.group': 'Git credentials',
   'mounts.cred.add': '＋ Add credential',
+  'mounts.cred.update': 'Update existing credential (same host + owner overwrites)',
   'mounts.cred.empty': 'No Git credentials yet.',
   'mounts.cred.host': 'Host (e.g. github.com)',
   'mounts.cred.owner': 'owner/namespace (* matches all)',

@@ -216,7 +216,7 @@ export const messages = {
   'mounts.form.ref': 'ref（分支/tag/commit）',
   'mounts.form.gitToken': '访问令牌（PAT，可空）',
   'mounts.form.gitTokenHint':
-    '留空按 owner 匹配凭据库（精确 → 通配 → 匿名）；显式填入则随本挂载存储。GitLab 凭据条目的主机须与本表单 host 逐字一致（含 scheme 与尾斜杠）。匿名使用 GitHub 时限速 60 次/小时，测试连接也消耗额度。',
+    '留空按 owner 匹配凭据库（精确 → 通配 → 匿名）；显式填入则随本挂载存储。GitLab 凭据条目的主机须与本表单 host 逐字一致（含 scheme 与尾斜杠）；GitHub 凭据条目的主机须逐字为 github.com（其他写法不命中，恒匿名）。匿名使用 GitHub 时限速 60 次/小时，测试连接也消耗额度。',
   'mounts.form.refHint':
     'branch 型 ref 在每次打开/恢复会话时重新解析指向最新 commit，属预期行为。',
   'mounts.form.gitProxyBlock': 'GitHub/GitLab 挂载仅支持浏览器直连',
@@ -225,6 +225,7 @@ export const messages = {
   //   必填提示复用既有 mounts.form.required 不另立键）——
   'mounts.cred.group': 'Git 凭据',
   'mounts.cred.add': '＋ 添加凭据',
+  'mounts.cred.update': '更新既有凭据（同 host+owner 覆盖）',
   'mounts.cred.empty': '暂无 Git 凭据。',
   'mounts.cred.host': '主机（如 github.com）',
   'mounts.cred.owner': 'owner/namespace（* 通配全部）',

@@ -41,7 +41,7 @@ describe('FONT_PRESETS 预设清单（spec C §3.3 builder 实测选定终版）
     }
   });
 
-  it('URL 形态：全部 https 且以 / 结尾（css=.css / single=.woff2）；版本段为精确版本（钉死纪律，禁 @5 浮动段）', () => {
+  it('URL 形态：全部 https 且**不以** / 结尾（css=.css / single=.woff2）；版本段为精确版本（钉死纪律，禁 @5 浮动段）', () => {
     for (const p of FONT_PRESETS) {
       for (const s of p.sources) {
         expect(s.url.startsWith('https://'), `${p.family} ${s.label}`).toBe(true);

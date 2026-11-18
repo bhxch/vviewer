@@ -167,7 +167,7 @@ export function ensureHighlightClient(): Promise<HighlightClient> | null {
 }
 
 /**
- * 重建单点（spec E 修 3，原 rebuildHighlightClient 更名扩门）：CDN 档位变更传
+ * 重建单点（spec E 修 3，原名 rebuildHighlightClient，更名 recreateHighlightClient 扩门）：CDN 档位变更传
  * { force: true }（manifest 是 create() 快照，档位变更无条件重建）；切渲染器/切语言
  * 的显式动作（neutral hook 触发面，highlightRecreate.ts 反转导入环）经 failed-态
  * 门控——健康 client + 显式动作 = no-op（门即限流器），任一 failed 态过门重建：
@@ -388,7 +388,7 @@ async function create(gen: number): Promise<HighlightClient> {
   // 页面才进入资产链）→ CDN。各层失败跳层不阻塞；同名语言 first-wins 归更近层。
   // CDN 层 base 改运行时解析（spec C §3.2 Task 3）：settings.cdn 档位（default 档
   // 回构建期 env 注入值——vite define 静态替换；多基 `|` 分隔逐基展开为 cdn-p<i>
-  // 子包层）。档位变更经 rebuildHighlightClient() 重建（本函数以新代际号重跑）。
+  // 子包层）。档位变更经 recreateHighlightClient() 重建（本函数以新代际号重跑）。
   const cdnBases = resolveGrammarCdnBases(loadSettings(), import.meta.env.VV_GRAMMAR_CDN ?? '');
   if (cdnBases === null) {
     // custom 档校验失败：CDN 层缺席 + warn 留痕（不静默吞——UI 错误态在设置节）

@@ -115,7 +115,7 @@ test.describe('b-cdn-profiles 档位切换（spec C §3.2 CDNP 域）', () => {
 
     await page.goto('/');
     await waitAppMounted(page);
-    // 切档（应用）→ rebuildHighlightClient → 新 client 以 custom base 装配
+    // 切档（应用）→ recreateHighlightClient → 新 client 以 custom base 装配
     await setGrammarCdnCustom(page, 'https://cdn-c1.grammars.test/grammars/');
     await openDirText(page, 'cdnp1', 'Hello.java', JAVA_SRC);
     await openTreeFile(page, 'Hello.java');
@@ -125,7 +125,8 @@ test.describe('b-cdn-profiles 档位切换（spec C §3.2 CDNP 域）', () => {
       { ok: true, lang: 'java' },
       '等待 java 高亮成功（custom 档新 origin wasm）'
     );
-    // CDN 层请求 URL 断言：新 origin 命中（manifest+wasm），旧构建期 origin 零命中
+    // CDN 层请求 URL 断言：新 origin 命中（manifest+wasm）——旧构建期 origin 未 route，
+    // 故不作「零命中」断言（对未拦截请求的空断言恒真，无判别力；评审 minor）
     expect(c1Hits.some((u) => u.endsWith('/grammars/manifest.json')), 'custom origin manifest 命中').toBe(true);
     expect(c1Hits.some((u) => u.endsWith('/grammars/java.wasm')), 'custom origin wasm 命中').toBe(true);
     await expect(page.locator('.vv-error-card')).toHaveCount(0);

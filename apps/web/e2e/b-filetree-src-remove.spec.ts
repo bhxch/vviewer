@@ -52,8 +52,9 @@ async function removeSource(page: Page, label: string, accept: boolean): Promise
     void (accept ? d.accept() : d.dismiss());
   });
   const drawer = await openDrawerIfNarrow(page);
-  // hover 揭示显式锚（SRC 域 Task 4 补断言）：桌面 hover/focus-within 揭示、触屏
-  // @media(hover:none) 恒显；toBeVisible 判定不含 opacity 恒真，揭示须断 computed opacity
+  // hover 揭示显式锚（SRC 域 Task 4 补断言）：桌面 hover/focus-within 揭示、触屏档案恒显
+  // （spec B §3.3.1：原 @media(hover:none) 已迁为 html[data-touch='on'] 传导——媒介查询
+  // 挡死桌面档回收路径）；toBeVisible 判定不含 opacity 恒真，揭示须断 computed opacity
   const srcRow = page.locator('.vv-tree-src', { hasText: label });
   await srcRow.hover();
   await expect(srcRow.locator('.vv-tree-src-remove')).toHaveCSS('opacity', '1');

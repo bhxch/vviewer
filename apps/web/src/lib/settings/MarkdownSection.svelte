@@ -18,11 +18,20 @@
     touch();
   }
 
+  /** 非法条目提示（评审 minor：非法条目此前被静默丢弃、用户零反馈）——复用既有目录键
+   * settings.issue.allowlistEntry（目录里已有该键，此前未被本节消费）。 */
+  let issue = $state('');
+
   /** 白名单添加：normalizeMarkdownAllowlist 同口径预归一（trim+lowercase+拒非法），
-   * 归一后空串（非法条目）与重复条目不加。 */
+   * 归一后空串（非法条目）与重复条目不加——**非法条目给出可见提示**（不静默丢弃）。 */
   function addEntry(raw: string): void {
     const [v] = normalizeMarkdownAllowlist([raw]);
-    if (v === undefined || entries.includes(v)) return;
+    if (v === undefined) {
+      issue = t('settings.issue.allowlistEntry');
+      return;
+    }
+    issue = '';
+    if (entries.includes(v)) return;
     draft.markdown.externalImagesAllowlist = [...entries, v];
     touch();
   }
@@ -35,7 +44,8 @@
   function submit(e: SubmitEvent): void {
     e.preventDefault();
     addEntry(value);
-    value = '';
+    // 非法条目：保留输入（便于改写）；合法条目（含重复）：清空
+    if (issue === '') value = '';
   }
 </script>
 
@@ -75,5 +85,6 @@
     />
     <button type="submit" disabled={value.trim() === ''}>{t('settings.markdown.allowlistAdd')}</button>
   </form>
+  {#if issue}<div class="vv-settings-note" role="status">{issue}</div>{/if}
   <div class="vv-settings-hint">{t('settings.markdown.allowlistHint')}</div>
 </section>

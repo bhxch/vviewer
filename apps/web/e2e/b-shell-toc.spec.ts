@@ -305,6 +305,13 @@ test.describe('折叠钮几何（TOC-06/07，桌面）', () => {
       el.scrollTop = el.scrollHeight / 2;
     });
 
+    // 滚动**确已发生**（评审 minor：此前只断言折叠钮包围盒前后相等——若滚动体退化为
+    // 不可滚（overflow 失效/内容变短），该锚仍绿（假绿面））。断言 scrollTop > 0。
+    const leftScrollTop = await page.locator('.vv-side-scroll').evaluate((el) => el.scrollTop);
+    const tocScrollTop = await page.locator('.vv-right .toc').evaluate((el) => el.scrollTop);
+    expect(leftScrollTop, '左栏滚动体未滚动（overflow 失效或内容不足）').toBeGreaterThan(0);
+    expect(tocScrollTop, '右栏目录未滚动（overflow 失效或内容不足）').toBeGreaterThan(0);
+
     const leftBox2 = await page.locator('.vv-collapse-btn.vv-collapse-left').boundingBox();
     const rightBox2 = await page.locator('.vv-collapse-btn.vv-collapse-right').boundingBox();
     // 包围盒逐值相等（x/y/width/height）

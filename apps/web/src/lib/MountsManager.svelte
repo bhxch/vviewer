@@ -438,15 +438,26 @@
 
   // ---------- 组④：Git 凭据区块（spec I Task 3——分 host+owner 条目化，评审 ③
   // 编辑面=重提同键覆盖：组④新增表单以同 host+owner 再保存一次即更新 token/note
-  //（saveMount put(rec, rec.id) 键覆盖语义），无独立编辑钮；删除直接落 deleteMount
-  // 无 confirm——凭据条目无下游引用面（挂载记录 credentialKey 引用降级匿名可重提
-  // 恢复），不新增表 2 原生轻确认成员） ----------
+  //（saveMount put(rec, rec.id) 键覆盖语义），无独立编辑钮；删除落 deleteMount，
+  // **经 window.confirm 轻确认**（评审 minor ④：token 明文不可找回 + 被引用的挂载
+  // 静默降级匿名——删除后果须声明；表 2 已登记该成员，键 mounts.cred.deleteConfirm；
+  // 凭据条目被引用时降级匿名可重提恢复，故确认为轻量档而非阻断卡） ----------
 
   let credRows = $derived(assembleGitCredentialRows(records));
   let credFormOpen = $state(false);
   let credDraft = $state({ host: '', owner: '', token: '', note: '' });
   let credIssues = $state<Partial<Record<'host' | 'owner' | 'token', string>> | null>(null);
   let credFormError = $state('');
+  /** 同键覆盖判定（评审 minor）：host+owner 命中既有条目 → 本次保存为**更新**而非新增
+   * （saveMount put(rec, rec.id) 键覆盖语义）——标题据此外显，用户从文案上可区分。 */
+  let credOverwrite = $derived(
+    credDraft.host.trim() !== '' &&
+      credDraft.owner.trim() !== '' &&
+      records.some(
+        (r): r is GitCredentialRecord =>
+          r.kind === 'gitcred' && r.id === `gitcred:${credDraft.host.trim()}:${credDraft.owner.trim()}`
+      )
+  );
 
   function openCredForm(): void {
     credDraft = { host: '', owner: '', token: '', note: '' };
@@ -817,7 +828,7 @@
       {/if}
       {#if credFormOpen}
         <form class="vv-mm-form" onsubmit={submitCredForm}>
-          <h3>{t('mounts.cred.add')}</h3>
+          <h3>{credOverwrite ? t('mounts.cred.update') : t('mounts.cred.add')}</h3>
           <div class="vv-mm-field">
             <label for="vv-mm-cred-host">{t('mounts.cred.host')}</label>
             <input id="vv-mm-cred-host" bind:value={credDraft.host} placeholder="github.com" spellcheck="false" />

@@ -77,10 +77,19 @@ describe('registerRecreateHighlightClient / requestHighlightRecreate（neutral h
     expect(fn).toHaveBeenCalledTimes(2);
   });
 
-  it('未注册 no-op 不抛（SSR/测试环境缺省安全）', () => {
-    // 依赖模块内 impl 初始 null：新开模块实例的路径由上方用例顺序覆盖——此处直接
-    // 调用不抛即可（重复注册/重置后的状态由下方用例钉住）
-    expect(() => requestHighlightRecreate()).not.toThrow();
+  it('未注册 no-op 不抛（SSR/测试环境缺省安全）——真覆盖「未注册」态（新开模块实例）', async () => {
+    // 此前本例在同文件前序用例已 register 过实现（模块级 impl 非 null）→ 断言对
+    // 「已注册时误抛」有效，但「impl===null 时不调实现」语义无保护（评审 minor：
+    // 假绿面）。此处经 vi.resetModules() + 动态 import 造**新模块实例**（impl 初始
+    // null），并断言不抛且不产生任何调用。
+    vi.resetModules();
+    const fresh = (await import('./highlightRecreate')) as typeof import('./highlightRecreate');
+    expect(() => fresh.requestHighlightRecreate()).not.toThrow();
+    // 未注册态不调任何实现（新实例内 impl 恒 null——注册后再断言其生效即可证）
+    const fn = vi.fn();
+    fresh.registerRecreateHighlightClient(fn);
+    fresh.requestHighlightRecreate();
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 
   it('重复注册后签者生效（防御面：hook 单点只挂最新实现）', () => {
