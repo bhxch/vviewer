@@ -6,7 +6,7 @@
   "configuration.vviewer.toc.side.title": "目录面板停靠侧",
   "configuration.vviewer.toc.side.description": "目录面板停靠在左侧还是右侧。",
   "configuration.vviewer.toc.defaultCollapsed.title": "默认收起目录面板",
-  "configuration.vviewer.toc.defaultCollapsed.description": "打开文档时默认收起目录面板。",
+  "configuration.vviewer.toc.defaultCollapsed.description": "打开文档时默认收起目录面板。你最近一次手动切换优先；修改本设置会清除该手动状态。",
   "configuration.vviewer.code.highlightEngine.title": "高亮引擎",
   "configuration.vviewer.code.highlightEngine.description": "代码文件的高亮引擎（tree-sitter / hljs / plain）。可按语言覆盖，如 \"[python]\"。",
   "configuration.vviewer.markdown.diagramMode.title": "图表渲染模式",

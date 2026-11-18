@@ -62,7 +62,7 @@ dist/
 | 键 | 类型 | 取值 | 缺省 | 作用域 | 说明 |
 |---|---|---|---|---|---|
 | `vviewer.toc.side` | string | `left` / `right` | `right` | window | 目录面板停靠侧 |
-| `vviewer.toc.defaultCollapsed` | boolean | — | `true` | window | 目录面板默认收起 |
+| `vviewer.toc.defaultCollapsed` | boolean | — | `true` | window | 目录面板默认收起（你最近一次手动切换优先；修改本设置会清除该手动状态） |
 | `vviewer.code.highlightEngine` | string | `tree-sitter` / `hljs` / `plain` | `tree-sitter` | **language-overridable** | 代码高亮引擎 |
 | `vviewer.markdown.diagramMode` | string | `local` / `kroki` / `off` | `local` | **language-overridable** | 图表渲染模式（`off` = 落源码块） |
 | `vviewer.diagrams.allowRemoteServices` | boolean | — | `false` | window | 是否允许外联图表服务（kroki / PlantUML） |
