@@ -2,7 +2,7 @@ import { menuConnectServer } from '../e2e/tabbar-menu';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 import { stopServer, waitHealthy } from '../e2e/serverHarness';
 
@@ -13,8 +13,10 @@ import { stopServer, waitHealthy } from '../e2e/serverHarness';
  *
  * - CMP-01/2：/api/health 的 computeLanguages 宣告端到端锚点——设计文档
  *   （2026-10-09-full-grammar-alignment-design.md L56/L125）阶段 1 验收「health 宣告
- *   301」，此前仅 server 单测覆盖（queries.rs:288 长度 301、health.rs:152 排序+抽样），
- *   两个 e2e 套件零断言。compute 实例断言 301 条 + canonical 排序 + 集内抽样；
+ *   全量语言集」，此前仅 server 单测覆盖（queries.rs 排序+抽样、health.rs 排序+抽样），
+ *   两个 e2e 套件零断言。compute 实例断言**宣告集长度 == server manifest 的「有查询
+ *   资产」条目数**（不硬编码具体数字——服务端「无查询资产的语言不注册」修复后宣告集
+ *   由 301 降为 284，硬编码即必红；评审 important ①）+ canonical 排序 + 集内抽样；
  *   无 --compute 对照实例断言字段整体省略（health.rs:58 单测同口径）。
  * - CMP-02/2：BUG-10 验收 2「关标签重开二次打开可观测更快」——服务端响应缓存
  *   （highlight.rs 64 条 LRU）+ cacheId 会话校验协议（2026-10-17 spec 未决 #6
@@ -134,9 +136,27 @@ async function openFile(page: Page, name: string): Promise<void> {
   await expect(page.locator('.vv-tab.active', { hasText: name })).toBeVisible({ timeout: 10_000 });
 }
 
-test('CMP-01/2: --compute 实例 health computeLanguages 宣告 301 条（排序+集内抽样），无 --compute 实例字段整体省略', async () => {
+/**
+ * 服务端应宣告的语言集长度期望值：**server manifest 中「有查询资产」的条目数**
+ * （服务端按此注册语言——无查询资产的语言不注册，见 server/core/src/compute/queries.rs
+ * 的空 highlights 剔除）。manifest 缺失（未跑 pnpm gen:sources）→ null（不断言长度）。
+ */
+function expectedComputeLanguageCount(): number | null {
+  const manifestPath = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    '../../../server/grammars-manifest.json'
+  );
+  if (!existsSync(manifestPath)) return null;
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+    grammars?: Array<{ queries?: boolean }>;
+  };
+  const withQueries = (manifest.grammars ?? []).filter((g) => g.queries === true).length;
+  return withQueries > 0 ? withQueries : null;
+}
+
+test('CMP-01/2: --compute 实例 health computeLanguages 宣告全量可高亮语言集（长度按 server manifest 有查询资产条目数 + 排序 + 集内抽样），无 --compute 实例字段整体省略', async () => {
   test.setTimeout(60_000);
-  // ① compute 实例（:4181）：capabilities 尾部追加 + computeLanguages 301
+  // ① compute 实例（:4181）：capabilities 尾部追加 + computeLanguages 全量可高亮语言集
   const withCompute = (await (await fetch(`${COMPUTE_BASE}/api/health`)).json()) as {
     capabilities: string[];
     computeLanguages?: string[];
@@ -144,7 +164,16 @@ test('CMP-01/2: --compute 实例 health computeLanguages 宣告 301 条（排序
   expect(withCompute.capabilities).toEqual(['file-server', 'kroki-proxy', 'compute']);
   const langs = withCompute.computeLanguages;
   expect(Array.isArray(langs)).toBe(true);
-  expect(langs).toHaveLength(301); // 与 server/src/compute/queries.rs:288 单测同源锚定（设计文档 L125）
+  // 长度断言以 **server manifest 的「有查询资产」条目数**为准（评审 important ①）：
+  // 服务端按「有查询资产」注册语言（无查询资产的语言不注册——上游 helix 删了 17 个
+  // 语言的 queries 目录，宣告集随之缩小），硬编码具体数字必随 pin 漂移而红。
+  const expected = expectedComputeLanguageCount();
+  if (expected === null) {
+    // manifest 缺失（未跑 pnpm gen:sources）→ 不断言具体数量（其余断言照常）
+    expect(langs!.length).toBeGreaterThan(0);
+  } else {
+    expect(langs).toHaveLength(expected);
+  }
   expect(JSON.stringify(langs)).toBe(JSON.stringify([...langs!].sort())); // canonical 排序（health.rs:156 同口径）
   for (const name of ['rust', 'python', 'go', 'cpp', 'java', 'sql']) {
     expect(langs).toContain(name);
