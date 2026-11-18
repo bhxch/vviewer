@@ -14,7 +14,8 @@ import {
   deriveQueriesBase,
   normalizeGrammarsBase,
   parseMultiGrammarsBases,
-  DEFAULT_GRAMMARS_BASE_URL
+  DEFAULT_GRAMMARS_BASE_URL,
+  GRAMMAR_PACK_COUNT
 } from '../src/highlightDefault';
 import { TreeSitterEngine, type EngineOptions } from '@bhxch/vviewer-highlight';
 
@@ -48,8 +49,21 @@ describe('grammar base 归一与布局契约', () => {
     expect(bases.length).toBeGreaterThanOrEqual(2);
     for (const base of bases) expect(base.endsWith('/grammars/')).toBe(true);
     // 子包命名形态（p1..pN 连续自 1）：首基 -p1、次基 -p2
-    expect(bases[0]).toMatch(/vviewer-grammars-full-p1@[^/]+\/grammars\/$/);
-    expect(bases[1]).toMatch(/vviewer-grammars-full-p2@[^/]+\/grammars\/$/);
+    expect(bases[0]).toMatch(/vviewer-grammars-full-p1\/grammars\/$/);
+    expect(bases[1]).toMatch(/vviewer-grammars-full-p2\/grammars\/$/);
+  });
+
+  it('默认 base 不含钉死版本段（评审 critical ①）：占位版本永不可发布 → 层全 404 静默降级 hljs', () => {
+    // 版本段钉死即「发布即失效」的静默面：npm 版本不可变，占位版本号不存在于线上。
+    // 本仓取**不带版本段**形态（jsdelivr latest 重定向），子包一经发布即命中。
+    expect(DEFAULT_GRAMMARS_BASE_URL).not.toMatch(/FIRST-TAG|0\.0\.0-|@latest/);
+    const bases = parseMultiGrammarsBases(DEFAULT_GRAMMARS_BASE_URL);
+    for (const base of bases) {
+      // 包名段后直接跟 /grammars/（无 @version 段）
+      expect(base).toMatch(/^https:\/\/cdn\.jsdelivr\.net\/npm\/@bhxch\/vviewer-grammars-full-p\d+\/grammars\/$/);
+    }
+    // 层数与发布链子包数同源常量（跨仓比对由 tools/release-wiring 门禁承担）
+    expect(bases.length).toBe(GRAMMAR_PACK_COUNT);
   });
 
   it('normalizeGrammarsBase：补尾斜杠；非 /grammars/ 结尾抛错（防错插中间段）', () => {

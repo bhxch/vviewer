@@ -79,6 +79,9 @@ export {
   DEFAULT_GRAMMARS_BASE_URL,
   DEFAULT_RUNTIME_DIR,
   DEFAULT_LITE_LANGUAGES,
+  GRAMMAR_PACK_SCOPE,
+  GRAMMAR_PACK_NAME,
+  GRAMMAR_PACK_COUNT,
   type DefaultHighlighterOptions
 } from './highlightDefault';
 // markdown 引擎转出口（@bhxch/vviewer-markdown-engine 原样透传）

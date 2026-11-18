@@ -20,23 +20,36 @@ import { TreeSitterEngine, assignIntervalsToLines, renderLineHtml, type GrammarT
 import type { HighlightFence } from './types';
 
 /**
+ * grammar 拆分子包的 npm scope 与包名（spec C 拆包面）。
+ *
+ * 与发布链的单一事实源对齐：release.yml 的 `VV_NPM_PACKAGE_NAME` =
+ * `${NPM_SCOPE}/vviewer-grammars-full`（NPM_SCOPE 取仓库变量 vars.NPM_SCOPE，缺省
+ * @bhxch）；层数 = release.yml 的 `VV_NPM_PACKAGE_COUNT`（当前 6，fail-fast 校验
+ * 以实际装箱结果为准）。二者的漂移由 tools/release-wiring 的门禁单测锁死
+ * （跨仓读 workflow 文本比对，评审 critical ① 的「无门禁校准」面已补）。
+ */
+export const GRAMMAR_PACK_SCOPE = '@bhxch';
+export const GRAMMAR_PACK_NAME = `${GRAMMAR_PACK_SCOPE}/vviewer-grammars-full`;
+/** 拆分子包层数（p1..pN）——与 release.yml 的 VV_NPM_PACKAGE_COUNT 同值。 */
+export const GRAMMAR_PACK_COUNT = 6;
+
+/**
  * 默认 grammar 资产 URL：jsdelivr 拆分子包多基（`|` 分隔，逐基 /grammars/ 结尾——
  * 全量包 228MB 超 jsdelivr 150MB 按包准入 403，拆 p1..pN 每包 ≤50MB 恢复默认全球档可用）。
  *
- * TODO(first-tag): 版本段 0.0.0-FIRST-TAG 为显式占位（首发 tag 定稿后同步校准全部子包
- * 版本段与层数——错位即全子包 404、缺层即缺语言，校准闭环归实施计划 Task 6 台账④）。
- * npm 实查全量包 latest=0.1.1 已占版、首发 tag 必然 >0.1.1，实施期不可实查、不臆造版本号。
- * 层数按 workflow VV_NPM_PACKAGE_COUNT=6 占位对齐（首发以实际装箱结果为准，fail-fast
- * 防线在 release.yml）；多余层 404 仅 warn 跳层（无碍），缺层则该层语言缺失（校准点）。
+ * **版本段不钉死**（评审 critical ①）：此前钉死占位版本 `0.0.0-FIRST-TAG`——npm 版本
+ * 不可变，该版本永不存在（占位不是可发布版本）→ 6 层 manifest 全 404 → 引擎初始化
+ * 异常被 createEngine 外层 catch 吞掉 → 外部消费者静默降级 hljs，且全仓无任何
+ * CI/release 门禁校准该版本号（首发 tag 定稿也需改源码，漏改即永久失效）。
+ * 改为**不带版本段**（jsdelivr latest 重定向形态，与 apps/web 的 unpkg 档同款既定
+ * 形态）：子包一经发布即命中，版本随发布推进自动跟随，无需改源码即不可能指死。
+ * 层数漂移（层数 ≠ 实际发布子包数）由 tools/release-wiring 门禁比对 release.yml 的
+ * VV_NPM_PACKAGE_COUNT；多余层 404 仅 warn 跳层（无碍），缺层则该层语言缺失。
  */
-export const DEFAULT_GRAMMARS_BASE_URL = [
-  'https://cdn.jsdelivr.net/npm/@bhxch/vviewer-grammars-full-p1@0.0.0-FIRST-TAG/grammars/',
-  'https://cdn.jsdelivr.net/npm/@bhxch/vviewer-grammars-full-p2@0.0.0-FIRST-TAG/grammars/',
-  'https://cdn.jsdelivr.net/npm/@bhxch/vviewer-grammars-full-p3@0.0.0-FIRST-TAG/grammars/',
-  'https://cdn.jsdelivr.net/npm/@bhxch/vviewer-grammars-full-p4@0.0.0-FIRST-TAG/grammars/',
-  'https://cdn.jsdelivr.net/npm/@bhxch/vviewer-grammars-full-p5@0.0.0-FIRST-TAG/grammars/',
-  'https://cdn.jsdelivr.net/npm/@bhxch/vviewer-grammars-full-p6@0.0.0-FIRST-TAG/grammars/',
-].join('|');
+export const DEFAULT_GRAMMARS_BASE_URL = Array.from(
+  { length: GRAMMAR_PACK_COUNT },
+  (_, i) => `https://cdn.jsdelivr.net/npm/${GRAMMAR_PACK_NAME}-p${i + 1}/grammars/`
+).join('|');
 
 /** 默认 web-tree-sitter runtime（tree-sitter.wasm）目录：0.25 系运行时文件名仍为
  * tree-sitter.wasm（0.27 起更名 web-tree-sitter.wasm，见 @bhxch/vviewer-highlight 注记）。 */
