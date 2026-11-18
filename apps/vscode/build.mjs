@@ -133,7 +133,9 @@ async function buildBundles() {
 
 /** 复制 vsce 要求项与图标进打包根 */
 function copyPackagingFiles() {
-  for (const name of ['README.md', 'LICENSE', 'CHANGELOG.md']) {
+  // nls 文件随包走：打包根的 package.json 保留 %key% 占位（VSCode 客户端按 locale
+  // 替换）→ package.nls.json（源语言/缺省）+ package.nls.zh-cn.json（中文）须在包内。
+  for (const name of ['README.md', 'LICENSE', 'CHANGELOG.md', 'package.nls.json', 'package.nls.zh-cn.json']) {
     fs.copyFileSync(path.join(APP_DIR, name), path.join(DIST_DIR, name));
   }
 }

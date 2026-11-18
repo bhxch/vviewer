@@ -1,0 +1,20 @@
+{
+  "command.vviewer.openWithNative.title": "Open with Native Editor",
+  "command.vviewer.reload.title": "Reload",
+  "command.vviewer.exportHtml.title": "Export as HTML",
+  "configuration.title": "VViewer",
+  "configuration.vviewer.toc.side.title": "Outline panel side",
+  "configuration.vviewer.toc.side.description": "Which side the outline panel is docked to (left / right).",
+  "configuration.vviewer.toc.defaultCollapsed.title": "Collapse outline panel by default",
+  "configuration.vviewer.toc.defaultCollapsed.description": "Collapse the outline panel when a document is opened.",
+  "configuration.vviewer.code.highlightEngine.title": "Highlight engine",
+  "configuration.vviewer.code.highlightEngine.description": "Highlight engine for code files (tree-sitter / hljs / plain). Can be overridden per language, e.g. \"[python]\".",
+  "configuration.vviewer.markdown.diagramMode.title": "Diagram rendering mode",
+  "configuration.vviewer.markdown.diagramMode.description": "How diagrams are rendered (local / kroki / off). Can be overridden per language, e.g. \"[markdown]\".",
+  "configuration.vviewer.diagrams.allowRemoteServices.title": "Allow remote diagram services",
+  "configuration.vviewer.diagrams.allowRemoteServices.description": "Allow remote diagram services (kroki / PlantUML). Off by default: the extension makes no external requests.",
+  "configuration.vviewer.markdown.externalImages.title": "External image policy",
+  "configuration.vviewer.markdown.externalImages.description": "Policy for images loaded from external hosts (blocked / manual / auto).",
+  "configuration.vviewer.markdown.externalImageAllowlist.title": "External image allowlist",
+  "configuration.vviewer.markdown.externalImageAllowlist.description": "Host allowlist for external images (used when the policy is \"manual\")."
+}

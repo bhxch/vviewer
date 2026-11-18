@@ -42,22 +42,22 @@
     "commands": [
       {
         "command": "vviewer.openWithNative",
-        "title": "Open with Native Editor",
+        "title": "%command.vviewer.openWithNative.title%",
         "category": "VViewer"
       },
       {
         "command": "vviewer.reload",
-        "title": "Reload",
+        "title": "%command.vviewer.reload.title%",
         "category": "VViewer"
       },
       {
         "command": "vviewer.exportHtml",
-        "title": "Export as HTML",
+        "title": "%command.vviewer.exportHtml.title%",
         "category": "VViewer"
       }
     ],
     "configuration": {
-      "title": "VViewer",
+      "title": "%configuration.title%",
       "properties": {
         "vviewer.toc.side": {
           "type": "string",
@@ -67,13 +67,15 @@
           ],
           "default": "right",
           "scope": "window",
-          "description": "Side the outline panel is docked to (left / right)."
+          "description": "%configuration.vviewer.toc.side.description%",
+          "title": "%configuration.vviewer.toc.side.title%"
         },
         "vviewer.toc.defaultCollapsed": {
           "type": "boolean",
           "default": true,
           "scope": "window",
-          "description": "Collapse the outline panel by default."
+          "description": "%configuration.vviewer.toc.defaultCollapsed.description%",
+          "title": "%configuration.vviewer.toc.defaultCollapsed.title%"
         },
         "vviewer.code.highlightEngine": {
           "type": "string",
@@ -84,7 +86,8 @@
           ],
           "default": "tree-sitter",
           "scope": "language-overridable",
-          "description": "Highlight engine for code files (tree-sitter / hljs / plain). Can be overridden per language, e.g. \"[python]\"."
+          "description": "%configuration.vviewer.code.highlightEngine.description%",
+          "title": "%configuration.vviewer.code.highlightEngine.title%"
         },
         "vviewer.markdown.diagramMode": {
           "type": "string",
@@ -95,13 +98,15 @@
           ],
           "default": "local",
           "scope": "language-overridable",
-          "description": "Diagram rendering mode (local / kroki / off). Can be overridden per language, e.g. \"[markdown]\"."
+          "description": "%configuration.vviewer.markdown.diagramMode.description%",
+          "title": "%configuration.vviewer.markdown.diagramMode.title%"
         },
         "vviewer.diagrams.allowRemoteServices": {
           "type": "boolean",
           "default": false,
           "scope": "window",
-          "description": "Allow remote diagram services (kroki / PlantUML). Off by default: the extension makes no external requests."
+          "description": "%configuration.vviewer.diagrams.allowRemoteServices.description%",
+          "title": "%configuration.vviewer.diagrams.allowRemoteServices.title%"
         },
         "vviewer.markdown.externalImages": {
           "type": "string",
@@ -112,7 +117,8 @@
           ],
           "default": "blocked",
           "scope": "window",
-          "description": "Policy for images loaded from external hosts (blocked / manual / auto)."
+          "description": "%configuration.vviewer.markdown.externalImages.description%",
+          "title": "%configuration.vviewer.markdown.externalImages.title%"
         },
         "vviewer.markdown.externalImageAllowlist": {
           "type": "array",
@@ -121,7 +127,8 @@
           },
           "default": [],
           "scope": "window",
-          "description": "Host allowlist for external images (used when the policy is \"manual\")."
+          "description": "%configuration.vviewer.markdown.externalImageAllowlist.description%",
+          "title": "%configuration.vviewer.markdown.externalImageAllowlist.title%"
         }
       }
     }
