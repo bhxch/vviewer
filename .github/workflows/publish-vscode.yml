@@ -1,0 +1,146 @@
+# 发布 VSCode 扩展（Open VSX + MS Marketplace 双渠道）。
+#
+# 纪律（spec H 约束④ + 计划裁量 8）：
+# - **上传**步以 secrets 存在性为守卫——本仓无 secrets，两个上传 job 恒跳过（workflow
+#   文件落库即止，**不实跑上传**；上传首跑实测属仓外 deferred——台账①）。
+#   本地 `vsce package` 体积门在 T1/T7 实跑，不受此守卫影响。
+# - build job **不得**持发布写权限（`contents: read` 兜底）——上传面只在两个发布 job。
+# - 双渠道任一失败须可见（不设 `continue-on-error`）。
+# - 版本号来源 = tag（`v*` 去前缀）；tag 版本与扩展 manifest 版本不一致即 fail-fast
+#   （否则发布出去的版本号与 tag 不符）。
+# - 与 release.yml **不并入**（裁量 8）：主发布链的成败判定不挂扩展上传。
+#
+# build job 的构建前置：
+#   setup-grammars(lite, 34 语言) → Rust 工具链两步（wasm32 target + cargo 缓存）
+#   → wasm-bindgen CLI 缓存 → `pnpm gen:svgbob-wasm`（取**完整** svgbob 能力；缺产物时
+#   扩展构建走 T1 的条件桩——构建不红但围栏能力降级，故发布链必须跑这一步）
+#   → `pnpm --filter @bhxch/vviewer-vscode build`（含 vsce package + 体积门）
+#   → 上传 artifact（.vsix + dist/）供两个上传 job 消费。
+name: Publish VSCode Extension
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build（扩展构建 + 体积门 + 产物上传）
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      # pnpm 版本读 package.json 的 packageManager 字段（pnpm@10）
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # 版本号：tag 去前缀；workflow_dispatch（手工跑）时取扩展 manifest 的版本
+      - name: 解析版本号（tag 去前缀 / 手工跑取 manifest）
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(node -p "require('./apps/vscode/package.json').version")" >> "$GITHUB_OUTPUT"
+          fi
+      - name: tag 版本与扩展 manifest 版本一致性门（fail-fast）
+        run: |
+          manifest=$(node -p "require('./apps/vscode/package.json').version")
+          if [ "$manifest" != "${{ steps.version.outputs.version }}" ]; then
+            echo "版本漂移：tag=${{ steps.version.outputs.version }} 与 manifest=$manifest 不一致" >&2
+            exit 1
+          fi
+      # grammar 资产（lite 集 34 语言——扩展打包的 grammar wasm 集）
+      - uses: ./.github/actions/setup-grammars
+        with:
+          languages: lite
+      # Rust 工具链两步：wasm32 target + cargo 编译缓存（缺任一即 pnpm gen:svgbob-wasm 失败）
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/vviewer-render-diagram/tools/svgbob-wasm
+      # wasm-bindgen CLI 供给缓存（runner 不预装 CLI；构建脚本自供给下载官方预编译二进制
+      # 到 ~/.cache/svgbob/wasm-bindgen-cli，键按 crate Cargo.toml 失效）
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/svgbob/wasm-bindgen-cli
+          key: wasm-bindgen-cli-${{ runner.os }}-${{ hashFiles('packages/vviewer-render-diagram/tools/svgbob-wasm/Cargo.toml') }}
+      # 完整 svgbob 能力（发布链必须跑：否则扩展走 T1 条件桩，围栏渲染能力降级）
+      - run: pnpm gen:svgbob-wasm
+      # 扩展构建（esbuild 四产物 + 资产采集 + VSIX manifest 生成 + vsce package + 体积门）
+      - run: pnpm --filter @bhxch/vviewer-vscode build
+      # 体积门复检（.vsix 实包 <100MB；构建步内已断言一次，此处对上传的 artifact 再断言）
+      - run: node apps/vscode/scripts/check-size.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vscode-extension
+          path: |
+            apps/vscode/out/vviewer-vscode.vsix
+            apps/vscode/dist
+          retention-days: 7
+
+  publish-openvsx:
+    name: publish（Open VSX）
+    needs: build
+    # secrets 缺失即跳过——本仓无 secrets，job 恒跳过（上传不实跑）
+    if: ${{ secrets.OVSX_PAT != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: vscode-extension
+          path: artifact
+      - name: 上传 Open VSX（PAT 走环境变量）
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: >-
+          pnpm --filter @bhxch/vviewer-vscode exec ovsx publish
+          --packagePath artifact/apps/vscode/out/vviewer-vscode.vsix
+
+  publish-marketplace:
+    name: publish（MS Marketplace）
+    needs: build
+    # secrets 缺失即跳过——本仓无 secrets，job 恒跳过（上传不实跑）
+    if: ${{ secrets.VSCE_PAT != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: vscode-extension
+          path: artifact
+      - name: 上传 MS Marketplace（PAT 走环境变量）
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: >-
+          pnpm --filter @bhxch/vviewer-vscode exec vsce publish
+          --packagePath artifact/apps/vscode/out/vviewer-vscode.vsix
+          --no-dependencies
