@@ -84,6 +84,33 @@ jobs:
       # 第三方声明完整性辅助检查（warning-only，恒 exit 0；新依赖忘登记时在日志可见）
       - run: node tools/check-notices/check-notices.mjs
 
+  vscode:
+    name: vscode（扩展构建 + 打包门）
+    runs-on: ubuntu-latest
+    # 扩展面此前**无 PR 门禁**：两道打包门（产物无未解析 import / .vsix <100MB）只在
+    # tag 触发的 publish-vscode.yml 跑 → 扩展构建/打包坏掉要到打 tag 才暴露（评审
+    # important ⑭）。本 job 把同一构建脚本（build.mjs 内含两道 fail-fast 门）在 PR
+    # 阶段跑一遍。
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # 扩展资产（grammar lite 集 / queries / runtime wasm / 扩展名清单）取自生成物
+      # （构建源头化：随 helix pin 再生，不入库）——setup-grammars 跑 gen:sources +
+      # lite 自建（缓存命中即跳过）
+      - uses: ./.github/actions/setup-grammars
+        with:
+          languages: lite
+      # 扩展构建（内含两道门禁：① esbuild 产物无未解析 import ② vsce 实包 .vsix
+      # <100MB；另有 dist/ 递归字节预检）。svgbob wasm 引擎产物由发布链生成
+      # （publish-vscode.yml 跑 gen:svgbob-wasm 取完整能力）——PR 门不强制 Rust
+      # 工具链（构建走条件桩按设计降级，采集面另有单测覆盖）。
+      - run: pnpm build:vscode
+
   rust:
     name: rust（cargo test）
     runs-on: ubuntu-latest

@@ -97,4 +97,7 @@ jobs:
         with:
           workspaces: server
       - name: 全量构建 + manifest 对齐门禁（spec F 动态化）
-        run: cargo test --manifest-path server/Cargo.toml full_registry_count_matches_manifest -- --nocapture
+        # --workspace 必需：server/ 为 workspace 根（vviewer + vviewer-storage），
+        # 单包默认不含成员 crate 的测试二进制 → 过滤器匹配 0 个测试即 exit 0（假绿，
+        # 评审 important ⑬：此前无 --workspace，该门禁在任何 CI 位置都从未真正断言）
+        run: cargo test --manifest-path server/Cargo.toml --workspace full_registry_count_matches_manifest -- --nocapture

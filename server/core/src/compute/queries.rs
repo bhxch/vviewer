@@ -338,8 +338,20 @@ mod tests {
             .filter(|e| e["queries"].as_bool() == Some(true))
             .count();
         if generated_count() < manifest_len {
+            // partial 构建（CI rust job 只取 15 语言）：全量门禁不适用，但**逐条自洽**
+            // 仍须成立——注册数 == 已构建且有查询资产的语言数（评审 important ⑬：
+            // 此前 partial 分支直接 return，CI 侧该门禁零强制力）。
+            let built_with_queries = generated_entries()
+                .iter()
+                .filter(|(_, _, highlights, _, _)| !highlights.trim().is_empty())
+                .count();
+            assert_eq!(
+                supported_languages().len(),
+                built_with_queries,
+                "partial 构建：注册数 == 已构建且有查询资产的语言数"
+            );
             eprintln!(
-                "partial 构建（{}/{manifest_len}），跳过全量门禁",
+                "partial 构建（{}/{manifest_len}）：已断言逐条自洽；全量门禁见 grammar.yml 的 server-full job",
                 generated_count()
             );
             return;
