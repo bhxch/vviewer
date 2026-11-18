@@ -55,7 +55,7 @@
 | 行内盖 | 1 | `.vv-tabbar-arrow`（app.css:552）；tab 滚动渐隐上的箭头（app.css:549-552） | 容器内局部盖序 |
 | 抽屉带 | 20 | `.vv-side` 抽屉态（AppShell.svelte:1656）、`.vv-right` ≤600px 抽屉态（:1690）、`.vv-drawer-toggle`（:1668）、`.vv-right-toggle`（:1702）、`.vv-dl-progress` / `.vv-dl-confirm`（app.css:168/195，查看器内 absolute） | 压过 ArtPlayer `.art-video`（上游 absolute z-index:10）——PWA-09/2、MEDIA-11 修复口径 |
 | zen 浮钮 | 25 | `.vv-zen-exit`（AppShell.svelte:2025，≤900px 断点块内）、`.vv-zen-toc-btn`（AppShell.svelte:1979，全断点通用） | 刻意低于面板层 30：面板在场时返回键先关面板的视觉一致；zen 目录入口浮钮（spec A Task 4）与退出钮语义同层，禁新开档位 |
-| 面板层 | 30 | overlay 族：`.vv-settings-center`（SettingsCenter.svelte:520）、`.vv-mounts-manager`（MountsManager.svelte:657）、`.vv-gsearch`（GlobalSearchPanel.svelte:325）、`.vv-quickopen`（QuickOpenPanel.svelte:208）、`.vv-wscreate-panel`（app.css:474-477）、`.vv-wspanel`（app.css:484）、`.vv-status-picker`（app.css:680）、`.vv-git-blame-pop`（app.css:799） | 同位面板/浮层/拾取器基准档 |
+| 面板层 | 30 | overlay 族：`.vv-settings-center`（SettingsCenter.svelte:526）、`.vv-mounts-manager`（MountsManager.svelte:868）、`.vv-gsearch`（GlobalSearchPanel.svelte:325）、`.vv-quickopen`（QuickOpenPanel.svelte:208）、`.vv-wscreate-panel`（app.css:474-477）、`.vv-wspanel`（app.css:484）、`.vv-status-picker`（app.css:680）、`.vv-git-blame-pop`（app.css:799） | 同位面板/浮层/拾取器基准档 |
 | 确认/模态 | 31 / 32 | `.vv-sc-confirm` 31（SettingsCenter.svelte:727）、`.vv-sc-modal` 32（:745） | 面板层之上的次级弹层 |
 | chrome 条 | 50 | `.vv-chrome-off` / `.vv-chrome-temp`（app.css:392/397） | 标签栏隐藏后的临时条 |
 | 通知/搜索 | 60 | `.vv-toast`（AppShell.svelte:1724）、`.vv-search-panel`（app.css:329） | 瞬态告知与搜索条 |
@@ -88,20 +88,20 @@
 |---|---|---|---|
 | **错误卡** | `.vv-error-card`（title/detail/meta/actions 四段，app.css:154-164） | 渲染失败/加载失败等阻断性错误 | core dispatcher `showErrorCard`（packages/vviewer-core/src/dispatch/errorRenderer.ts:41-52）+ `errorRenderer` 兜底渲染器（:71-82）+ svelte:boundary failed 片段（AppShell.svelte:1264-1273 复用 `.vv-error-*` 视觉 + 「重载」） |
 | **确认卡** | `.vv-dl-confirm`（role=alertdialog，DownloadConfirmCard.svelte:33）；`.vv-sc-confirm`（设置中心脏态条，z 31）；`.vv-storage-confirm`（role=alertdialog 危险确认面板，StorageSection.svelte:271-275，accent/danger 描边） | 不可逆/大代价动作前置确认 | 组件卡三形态（下载确认门 / 设置脏态关闭确认 / 存储七分类清除与恢复出厂确认面板）+ 原生轻确认 8 处（表 2） |
-| **状态条** | `.vv-statusbar`（role=status，ViewerPane.svelte:1285）；`.vv-toast`（zen 进入提示，z 60，AppShell.svelte:1730 role=status）；各面板内 `role="status"` 行 | 一次性非阻断反馈 | `showStatusNotice`（AppShell/serverConnect 出口）+ `showZenToast`（AppShell.svelte:494-498）；读屏可达行 27 处穷举见表 1 |
+| **状态条** | `.vv-statusbar`（role=status，ViewerPane.svelte:1285）；`.vv-toast`（zen 进入提示，z 60，AppShell.svelte:1734 role=status）；各面板内 `role="status"` 行 | 一次性非阻断反馈 | `showStatusNotice`（AppShell/serverConnect 出口）+ `showZenToast`（AppShell.svelte:494-498）；读屏可达行 27 处穷举见表 1 |
 
 **表 1：读屏可达通道成员（`role="status"` 25 处 + `aria-live="polite"` 2 处；rg 2026-11-19 复核穷举 + spec C Task 3 新增点 2026-11-14 同步登记 + spec D 评审 minor 新增点 2026-11-19 同步登记，新增点同步登记本表）**
 
 | 成员（文件:行） | 语义 |
 |---|---|
 | ViewerPane.svelte:1285 | 状态栏（含引擎指示/通知面） |
-| AppShell.svelte:1730 | zen 进入 toast（`.vv-toast`） |
+| AppShell.svelte:1734 | zen 进入 toast（`.vv-toast`） |
 | WorkspaceCreateModal.svelte:203 | 创建流提示（note） |
 | MetaPanel.svelte:320 | 导出结果回显 |
 | DownloadProgressCard.svelte:39 / :53 | 下载完成/进行中双态（另经 aria-label 双通道） |
 | GlobalSearchPanel.svelte:252 | 全局搜索计数（aria-live="polite"） |
 | QuickOpenPanel.svelte:164 | 快开状态行（aria-live="polite"） |
-| MountsManager.svelte:612 / :750 | 组① 挂载行探测回显 / 组② 直连探测回显 |
+| MountsManager.svelte:623 / :761 | 组① 挂载行探测回显 / 组② 直连探测回显 |
 | SettingsCenter.svelte:368 / :444 | 脏态提示 / JSON 视图校验警示 |
 | AppearanceSection.svelte:440 / :454 / :480 | 亮槽警示 / 暗槽警示 / 导入错误摘要 |
 | FontsSection.svelte:431 / :480 | 字体操作提示（note）/ 网络字体错误行 |
@@ -118,7 +118,7 @@
 | 成员（文件:行） | 确认动作 |
 |---|---|
 | MountsManager.svelte:375 | 挂载记录删除（含异地提示拼合） |
-| MountsManager.svelte:502 | Git 凭据删除（spec I 评审 minor ④：token 明文不可找回+引用挂载降级匿名——删除后果声明，键 mounts.cred.deleteConfirm） |
+| MountsManager.svelte:513 | Git 凭据删除（spec I 评审 minor ④：token 明文不可找回+引用挂载降级匿名——删除后果声明，键 mounts.cred.deleteConfirm） |
 | MountsManager.svelte:431 | 本机授权来源清除 |
 | TabBar.svelte:206 | 远端文件另存为阈值确认（saveAsTab confirm 回调） |
 | FileTree.svelte:67 | 树源行移除（裸 `confirm(` 形态，语义同 window.confirm） |
