@@ -1511,7 +1511,7 @@
         <button type="button" class="vv-collapse-btn vv-collapse-left" aria-label={t('shell.strip.collapseTree')}
           title={t('shell.strip.collapseTree')} onclick={() => updateLayout({ leftCollapsed: true })}>‹</button>
       </div>
-      <div class="vv-side-scroll" class:vv-side-blank={sources.length === 0}>
+      <div class="vv-side-scroll">
         {#if sources.length > 0}
           <!-- FileTree 容器（spec A §4.1 裁量落定）：hidden 保留实例——树展开态
                （组件内 collapsed map）与快照恢复面跨视图切换保留，快照与
@@ -1855,9 +1855,9 @@
       display: none;
     }
   }
-  /* 0 目录空态引导区（侧栏多根 spec §2.3）：竖排居中——.vv-side-blank 移挂滚动体
-     （spec A §4.3 重排：滚动体本身即 flex column，本类保留为空态标记不再承载布局，
-     原 display/flex-direction 声明退役），引导区 flex:1 撑满余高精确垂直居中
+  /* 0 目录空态引导区（侧栏多根 spec §2.3）：竖排居中——空态引导区挂滚动体
+     （spec A §4.3 重排：滚动体本身即 flex column；原 .vv-side-blank 空态标记类与
+     其 display/flex-direction 声明一并退役——无消费方），引导区 flex:1 撑满余高精确垂直居中
      （桌面无头部、≤900px 抽屉头部占位均自适应，免 min-height calc 魔数）；间距/
      字号走 ui-design-system 令牌（字阶 §3.2），hint 用 muted 层级；按钮复用
      app.css 全局 button 基座，「打开文件夹」恒可用不加禁用态（openDirectoryViaPicker
