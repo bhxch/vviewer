@@ -57,7 +57,72 @@
     ],
     "configuration": {
       "title": "VViewer",
-      "properties": {}
+      "properties": {
+        "vviewer.toc.side": {
+          "type": "string",
+          "enum": [
+            "left",
+            "right"
+          ],
+          "default": "right",
+          "scope": "window",
+          "description": "Side the outline panel is docked to (left / right)."
+        },
+        "vviewer.toc.defaultCollapsed": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Collapse the outline panel by default."
+        },
+        "vviewer.code.highlightEngine": {
+          "type": "string",
+          "enum": [
+            "tree-sitter",
+            "hljs",
+            "plain"
+          ],
+          "default": "tree-sitter",
+          "scope": "language-overridable",
+          "description": "Highlight engine for code files (tree-sitter / hljs / plain). Can be overridden per language, e.g. \"[python]\"."
+        },
+        "vviewer.markdown.diagramMode": {
+          "type": "string",
+          "enum": [
+            "local",
+            "kroki",
+            "off"
+          ],
+          "default": "local",
+          "scope": "language-overridable",
+          "description": "Diagram rendering mode (local / kroki / off). Can be overridden per language, e.g. \"[markdown]\"."
+        },
+        "vviewer.diagrams.allowRemoteServices": {
+          "type": "boolean",
+          "default": false,
+          "scope": "window",
+          "description": "Allow remote diagram services (kroki / PlantUML). Off by default: the extension makes no external requests."
+        },
+        "vviewer.markdown.externalImages": {
+          "type": "string",
+          "enum": [
+            "blocked",
+            "manual",
+            "auto"
+          ],
+          "default": "blocked",
+          "scope": "window",
+          "description": "Policy for images loaded from external hosts (blocked / manual / auto)."
+        },
+        "vviewer.markdown.externalImageAllowlist": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "window",
+          "description": "Host allowlist for external images (used when the policy is \"manual\")."
+        }
+      }
     }
   },
   "devDependencies": {

@@ -20,6 +20,7 @@ import {
   type HighlightRuntime
 } from './highlight';
 import { createImageResolver, createLinkOpener, createLinkResolver } from './links';
+import { applySettingsChange, applyThemeChange, type LiveUpdateDeps } from './liveUpdate';
 import { Shell } from './shell';
 import { bindTocClicks, scrollToHeadingIn, tocEntriesOf } from './toc';
 import { applyTokenCss, buildTokenCss, injectKatexCss, kindCssVars, loadCaptureCss } from './theme';
@@ -67,6 +68,8 @@ let highlight: HighlightRuntime | null = null;
 let currentInstance: { destroy(): void } | null = null;
 /** 动态令牌当前值（导出主题变量块用） */
 let themeVars: Record<string, string> = {};
+/** 当前文档的 languageId（语言级覆盖提示用） */
+let currentLanguageId: string | undefined;
 
 /** 代码行高（渲染器固定行高档——render-text/src/code/strategy.ts 的 LINE_HEIGHT=20） */
 const CODE_LINE_HEIGHT_PX = 20;
@@ -82,22 +85,12 @@ async function handleHostMessage(message: HostToWebview): Promise<void> {
     case 'init':
       await onInit(message);
       return;
-    case 'settings': {
-      const previousTier = settings ? resolveHighlightEngine(settings) : null;
-      settings = message.settings;
-      if (settings && assets && theme) {
-        // 引擎档位变了才重启 worker（否则每次设置变更都重拉 worker 源，浪费）
-        if (resolveHighlightEngine(settings) !== previousTier) await startHighlight(settings);
-        // 重新装配：十一处缝捕获的是装配期的设置 → 设置变更须重装缝（而非只重渲）
-        assemble(settings);
-      }
-      await rerender();
+    case 'settings':
+      settings = await applySettingsChange(liveUpdateDeps(), settings, message);
       return;
-    }
     case 'theme':
       theme = message.theme;
-      await applyTheme();
-      await rerender();
+      await applyThemeChange(liveUpdateDeps());
       return;
     case 'export-request':
       await exportCurrentDocument();
@@ -121,6 +114,7 @@ async function onInit(message: Extract<HostToWebview, { kind: 'init' }>): Promis
   settings = message.settings;
   theme = message.theme;
   assets = message.assets;
+  currentLanguageId = message.doc.languageId;
 
   await applyTheme();
   await injectKatexCss(document, assets.katexCssUrl, assets.fontsBase);
@@ -145,6 +139,32 @@ async function onInit(message: Extract<HostToWebview, { kind: 'init' }>): Promis
   });
 
   await rerender();
+}
+
+/** 实时生效的动作面（liveUpdate.ts 消费——便于单测） */
+function liveUpdateDeps(): LiveUpdateDeps {
+  return {
+    assets,
+    theme,
+    currentLanguageId,
+    applyTheme,
+    applyMermaidTheme,
+    reAssemble: (next) => assemble(next),
+    engineTier: resolveHighlightEngine,
+    restartHighlight: startHighlight,
+    reRender: rerender,
+    notice: (text, level) => shell.setNotice(text, level),
+    text: (key, params) => t(key, params)
+  };
+}
+
+/** mermaid 主题就地重画（markdown 实例面 applyTheme——鸭子探测，缺席即无动作） */
+function applyMermaidTheme(): void {
+  const mermaidTheme = theme?.kind === 'dark' ? 'dark' : 'default';
+  const instance = currentInstance as
+    | { applyTheme?: (opts: { mermaidTheme?: string }) => void }
+    | null;
+  instance?.applyTheme?.({ mermaidTheme });
 }
 
 /** 装配渲染层（设置变更时重装——缝捕获装配期的设置） */

@@ -110,7 +110,15 @@ export type HostToWebview =
       settings: WebviewSettings;
       assets: AssetUris;
     }
-  | { kind: 'settings'; settings: WebviewSettings }
+  | {
+      kind: 'settings';
+      settings: WebviewSettings;
+      /**
+       * 该文档是否存在**语言级**设置覆盖在生效（`inspect()` 的语言维度）——
+       * 可见面用（提示条告知「语言专属设置已生效」）；缺省 undefined = 未知/无。
+       */
+      languageOverride?: boolean;
+    }
   | { kind: 'theme'; theme: ThemePayload }
   | { kind: 'file-bytes'; id: number; bytes: Uint8Array | null; error?: string }
   | { kind: 'export-request' }

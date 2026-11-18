@@ -28,6 +28,8 @@ export const zhCN = {
   'notice.export.saved': '已导出到 {path}',
   'notice.export.failed': '导出失败：{reason}',
   'notice.export.cancelled': '已取消导出',
+  'notice.settings.applied': '设置已应用',
+  'notice.settings.languageOverride': '语言 {lang} 的专属设置已生效',
   'notice.file.missing': '找不到文件：{path}',
 
   // errors —— 错误面

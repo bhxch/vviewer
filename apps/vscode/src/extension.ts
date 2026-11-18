@@ -51,6 +51,8 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!uri) return;
       await host.requestExport(uri);
     }),
+    // 配置/主题变更 → 实时生效（spec H T6：不要求重开文件；订阅面在 PanelHost 内）
+    ...host.watchChanges(),
     host
   );
 }

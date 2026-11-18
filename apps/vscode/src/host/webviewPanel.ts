@@ -17,7 +17,7 @@ import type * as vscode from 'vscode';
 import type { GrammarTable } from '@bhxch/vviewer-highlight';
 import { errorMessage, readDocumentBytes } from './fileChannel';
 import { composeStyleText, renderWebviewHtml } from './webviewHtml';
-import { readWebviewSettings } from './settings';
+import { SETTING_KEYS, hasLanguageOverride, readWebviewSettings } from './settings';
 import {
   createRequestIdFactory,
   isWebviewToHost,
@@ -122,8 +122,8 @@ export function createNonce(): string {
 /** panel 宿主：面板复用 + 消息通道 + init 推送 */
 export class PanelHost implements vscode.Disposable {
   private readonly panels = new Map<string, vscode.WebviewPanel>();
-  /** panel → 当前文档 URI（相对链接导航后基准随之切换——消息面按 panel 取当前文档） */
-  private readonly panelUris = new Map<vscode.WebviewPanel, vscode.Uri>();
+  /** panel → 当前文档元信息（相对链接导航后基准随之切换；languageId 供 per-language 设置解析） */
+  private readonly panelMeta = new Map<vscode.WebviewPanel, { uri: vscode.Uri; languageId?: string }>();
   private readonly nextRequestId = createRequestIdFactory();
   private activeKey: string | null = null;
 
@@ -146,11 +146,11 @@ export class PanelHost implements vscode.Disposable {
       return;
     }
     this.panels.set(key, panel);
-    this.panelUris.set(panel, document.uri);
+    this.panelMeta.set(panel, { uri: document.uri });
     this.activeKey = key;
     panel.onDidDispose(() => {
       if (this.panels.get(key) === panel) this.panels.delete(key);
-      this.panelUris.delete(panel);
+      this.panelMeta.delete(panel);
       if (this.activeKey === key) this.activeKey = null;
     });
     panel.onDidChangeViewState(() => {
@@ -174,7 +174,7 @@ export class PanelHost implements vscode.Disposable {
     });
 
     webview.onDidReceiveMessage((message: unknown) => {
-      void this.handleMessage(this.panelUris.get(panel) ?? document.uri, panel, message);
+      void this.handleMessage(this.panelMeta.get(panel)?.uri ?? document.uri, panel, message);
     });
 
     await this.sendInit(document.uri, panel);
@@ -186,6 +186,56 @@ export class PanelHost implements vscode.Disposable {
     if (!panel) return false;
     await this.sendInit(uri, panel);
     return true;
+  }
+
+  /**
+   * 订阅设置与主题变更（spec H T6 实时生效——不要求重开文件）。
+   *
+   * 订阅面收敛在本方法内（宿主入口只登记 disposable）→ 订阅行为可单测（注入假
+   * vscode 运行时触发事件即可断言推送路径）。
+   */
+  watchChanges(): vscode.Disposable[] {
+    return [
+      this.vscode.workspace.onDidChangeConfiguration((event) => {
+        if (!event.affectsConfiguration('vviewer')) return;
+        void this.pushSettings();
+      }),
+      this.vscode.window.onDidChangeActiveColorTheme(() => {
+        void this.pushTheme();
+      })
+    ];
+  }
+
+  /**
+   * 向所有已开 panel 推送设置（spec H T6 实时生效：配置变更 → 不要求重开文件）。
+   *
+   * 每个 panel 按**各自文档的 languageId** 解析 per-language 覆盖（RF 9）——
+   * 不同语言的文件可同时持有不同的引擎/图表档位。
+   */
+  async pushSettings(): Promise<void> {
+    for (const [panel, meta] of this.panelMeta) {
+      const configuration = this.vscode.workspace.getConfiguration(
+        'vviewer',
+        meta.languageId ? { languageId: meta.languageId } : undefined
+      );
+      const settings = readWebviewSettings(this.vscode.workspace, meta.languageId);
+      const languageOverride = hasLanguageOverride(
+        configuration,
+        SETTING_KEYS.highlightEngine,
+        meta.languageId
+      );
+      const message: HostToWebview = { kind: 'settings', settings, languageOverride };
+      await panel.webview.postMessage(message);
+    }
+  }
+
+  /** 向所有已开 panel 推送主题令牌（VSCode 活动主题变化 → 动态令牌整体替换 + mermaid 重画） */
+  async pushTheme(): Promise<void> {
+    const theme = this.currentTheme();
+    const message: HostToWebview = { kind: 'theme', theme };
+    for (const panel of this.panelMeta.keys()) {
+      await panel.webview.postMessage(message);
+    }
   }
 
   /** 请求宿主触发导出（宿主命令面 → webview 组装自包含 HTML → 回到宿主写盘） */
@@ -223,6 +273,9 @@ export class PanelHost implements vscode.Disposable {
       settings: readWebviewSettings(this.vscode.workspace, languageId),
       assets: await this.buildAssets(panel.webview)
     };
+    // 记 languageId——设置变更推送时按各自文档的语言解析 per-language 覆盖
+    const meta = this.panelMeta.get(panel);
+    if (meta) meta.languageId = languageId;
     await panel.webview.postMessage(message);
   }
 
@@ -377,7 +430,7 @@ export class PanelHost implements vscode.Disposable {
     const previousKey = documentUri.toString();
     this.panels.delete(previousKey);
     this.panels.set(target.toString(), panel);
-    this.panelUris.set(panel, target);
+    this.panelMeta.set(panel, { uri: target });
     panel.title = documentName(target);
     await this.sendInit(target, panel);
   }

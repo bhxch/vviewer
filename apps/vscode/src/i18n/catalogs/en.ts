@@ -28,6 +28,8 @@ export const en: EnMessages = {
   'notice.export.saved': 'Exported to {path}',
   'notice.export.failed': 'Export failed: {reason}',
   'notice.export.cancelled': 'Export cancelled',
+  'notice.settings.applied': 'Settings applied',
+  'notice.settings.languageOverride': 'Language-specific settings for {lang} are in effect',
   'notice.file.missing': 'File not found: {path}',
 
   // errors

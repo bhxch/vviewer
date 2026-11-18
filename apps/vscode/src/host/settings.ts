@@ -37,6 +37,18 @@ export const EXTERNAL_IMAGE_POLICIES = ['blocked', 'manual', 'auto'] as const;
 /** vscode.Configuration 的最小结构面（注入用） */
 export interface ConfigurationLike {
   get<T>(section: string): T | undefined;
+  /** 语言维度取值（inspect）——语言级覆盖检测用；缺省 = 不可判定（按「无覆盖」处理） */
+  inspect?(
+    section: string
+  ):
+    | {
+        languageIds?: string[];
+        defaultLanguageValue?: unknown;
+        globalLanguageValue?: unknown;
+        workspaceLanguageValue?: unknown;
+        workspaceFolderLanguageValue?: unknown;
+      }
+    | undefined;
 }
 
 /** vscode.ConfigurationScope 的最小结构面（`languageId` 必填——对齐 vscode 真实签名） */
@@ -111,6 +123,33 @@ export function normalizeSettings(raw: RawSettings): WebviewSettings {
     externalImages: normalizeExternalImages(raw[SETTING_KEYS.externalImages]),
     externalImageAllowlist: normalizeAllowlist(raw[SETTING_KEYS.externalImageAllowlist])
   };
+}
+
+/**
+ * 该语言的**语言级覆盖**是否在生效。
+ *
+ * VSCode 原生机制：`"[markdown]": { "vviewer.code.highlightEngine": … }` 这类语言级
+ * 覆盖**仅在设置项 scope 声明为 `language-overridable`（或 resource）时生效**——否则
+ * VSCode 静默忽略（RF 9 的真前提）。本函数读 `inspect()` 的语言维度字段
+ * （`languageIds` 与 `*LanguageValue`）判定覆盖是否在生效，供可见面提示。
+ *
+ * `inspect` 缺席或形态未知 → 按「无覆盖」处理（退化不崩）。
+ */
+export function hasLanguageOverride(
+  configuration: ConfigurationLike,
+  key: string,
+  languageId: string | undefined
+): boolean {
+  if (!languageId || typeof configuration.inspect !== 'function') return false;
+  const inspected = configuration.inspect(key);
+  if (!inspected) return false;
+  if (inspected.languageIds?.includes(languageId)) return true;
+  return (
+    inspected.defaultLanguageValue !== undefined ||
+    inspected.globalLanguageValue !== undefined ||
+    inspected.workspaceLanguageValue !== undefined ||
+    inspected.workspaceFolderLanguageValue !== undefined
+  );
 }
 
 /**
