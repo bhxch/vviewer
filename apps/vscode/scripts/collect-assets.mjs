@@ -36,7 +36,14 @@ export const ASSET_SOURCES = {
   runtimeWasm: 'apps/web/static/tree-sitter.wasm',
   queries: 'packages/vviewer-highlight/assets/queries',
   themes: 'packages/vviewer-highlight/assets/themes.json',
-  icon: 'apps/vscode/media/icon.png'
+  icon: 'apps/vscode/media/icon.png',
+  // svgbob wasm 引擎（glue JS 与 wasm 同目录——glue 经 new URL('svgbob_wasm_bg.wasm',
+  // import.meta.url) 相对定位 wasm；构建产物里 glue 在 webview/ 根的 chunk 内，故 wasm
+  // 亦须落 webview/ 根（评审 important ⑦：此前只对 glue JS 做条件桩、wasm 从未进包
+  // → 运行期 404 → glue init 抛错 → svgbob 围栏在扩展里必然降级）
+  svgbobWasm: 'packages/vviewer-render-diagram/src/markdown/svgbob-wasm-gen',
+  svgbobWasmFile: 'svgbob_wasm_bg.wasm',
+  svgbobGlueFile: 'svgbob_wasm.js'
 };
 
 /** 缺件修复命令（构建期报错原文附此，可直接复制执行） */
@@ -47,7 +54,8 @@ export const FIX_COMMANDS = {
   runtimeWasm: 'pnpm gen:grammars',
   themes: 'pnpm gen:sources',
   icon: '重新生成 apps/vscode/media/icon.png（PNG，≥128×128；vsce 禁 SVG）',
-  packages: 'pnpm install'
+  packages: 'pnpm install',
+  svgbobWasm: 'pnpm gen:svgbob-wasm'
 };
 
 /** pdfjs worker 双分支采集清单（modern / legacy 各 ~1.3MB，均有消费面） */
@@ -229,6 +237,37 @@ function copyDir(src, dest) {
 }
 
 /**
+ * svgbob wasm 引擎资产采集（评审 important ⑦）。
+ *
+ * glue JS（wasm-bindgen 产物，构建期生成、不入库）内以
+ * `new URL('svgbob_wasm_bg.wasm', import.meta.url)` 相对定位 wasm——esbuild 不做
+ * vite 的资产改写，故 wasm 须**原样落到 glue 所在目录**（webview/ 根：glue 在该目录
+ * 的 chunk 内，`import.meta.url` 即 chunk 的 URL）。
+ *
+ * 形态纪律：
+ * - glue 与 wasm 都在 → 复制 wasm 进包（扩展获得完整 svgbob 能力）；
+ * - glue 在、wasm 缺 → **fail-fast**（半产物状态：init 必抛，扩展静默降级）；
+ * - glue 缺（未跑 `pnpm gen:svgbob-wasm`，构建走条件桩）→ 不采集，扩展按设计降级
+ *   （构建不强制 Rust 工具链——评审订正②的既定取舍）。
+ *
+ * @param {string} genDir svgbob-wasm-gen 目录
+ * @param {string} webviewDir 采集目标目录（webview 根）
+ * @returns {{packaged: boolean, bytes: number}} 是否入包与字节数
+ */
+export function collectSvgbobWasm(genDir, webviewDir) {
+  const glue = path.join(genDir, ASSET_SOURCES.svgbobGlueFile);
+  const wasm = path.join(genDir, ASSET_SOURCES.svgbobWasmFile);
+  if (!fs.existsSync(glue)) {
+    // 条件桩形态（无 glue）：构建不强制 Rust 工具链——按设计降级
+    return { packaged: false, bytes: 0 };
+  }
+  assertFile(wasm, 'svgbob wasm（glue 已生成，wasm 缺失＝半产物）', FIX_COMMANDS.svgbobWasm);
+  const bytes = fs.statSync(wasm).size;
+  copyFile(wasm, path.join(webviewDir, ASSET_SOURCES.svgbobWasmFile));
+  return { packaged: true, bytes };
+}
+
+/**
  * 采集全部资产到 dist/webview（+ dist/media/icon.png）。
  * 返回采集摘要（供构建日志与单测断言）。
  */
@@ -289,6 +328,12 @@ export function collectAssets(options = {}) {
   const icon = assertIcon(path.join(repoRoot, ASSET_SOURCES.icon));
   copyFile(icon.path, path.join(outDir, 'media/icon.png'));
 
+  // svgbob wasm 引擎（glue 在 webview/ 根的 chunk 内 → wasm 同目录）
+  const svgbob = collectSvgbobWasm(
+    path.join(repoRoot, ASSET_SOURCES.svgbobWasm),
+    webviewDir
+  );
+
   return {
     outDir,
     webviewDir,
@@ -297,7 +342,8 @@ export function collectAssets(options = {}) {
     queryMissing: missing,
     pdfWorkers: pdfWorkers.map((w) => ({ id: w.id, outRel: w.outRel, bytes: w.bytes })),
     fonts: fonts.length,
-    themes: Object.keys(trimmed)
+    themes: Object.keys(trimmed),
+    svgbob
   };
 }
 

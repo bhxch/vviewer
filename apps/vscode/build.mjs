@@ -219,6 +219,7 @@ async function main() {
   console.log(
     `[vscode] 构建完成：扩展名 ${claimed.extensions.length} 个｜grammar ${assets.languages} 语言｜` +
       `queries ${assets.queryLanguages} 语言｜katex 字体 ${assets.fonts} 个｜` +
+      `svgbob ${assets.svgbob.packaged ? `已入包 ${(assets.svgbob.bytes / 1024).toFixed(0)}KiB` : '未生成（围栏降级：需 pnpm gen:svgbob-wasm）'}｜` +
       `dist ${(distBytes / 1048576).toFixed(1)}MiB｜vsix ${(vsixBytes / 1048576).toFixed(1)}MiB`
   );
 }

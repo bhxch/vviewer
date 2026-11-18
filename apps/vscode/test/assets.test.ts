@@ -18,6 +18,7 @@ import {
   PACKAGED_THEMES,
   REPO_ROOT,
   assertIcon,
+  collectSvgbobWasm,
   listKatexFonts,
   missingSourceError,
   planPdfWorkers,
@@ -209,6 +210,34 @@ describe('资产采集 · 错误信息形态', () => {
   });
 });
 
+describe('资产采集 · svgbob wasm 引擎（评审 important ⑦：wasm 从未进包 → 扩展内 svgbob 必降级）', () => {
+  it('glue 与 wasm 都在 → wasm 复制进 webview 根（glue 的 import.meta.url 相对定位面）', () => {
+    const gen = tmpDir('svgbob');
+    const out = tmpDir('svgbob-out');
+    writeFile(path.join(gen, 'svgbob_wasm.js'), 'export default async function init() {}');
+    writeFile(path.join(gen, 'svgbob_wasm_bg.wasm'), 'wasm-bytes');
+    const res = collectSvgbobWasm(gen, out);
+    expect(res.packaged).toBe(true);
+    expect(res.bytes).toBeGreaterThan(0);
+    expect(fs.existsSync(path.join(out, 'svgbob_wasm_bg.wasm'))).toBe(true);
+  });
+
+  it('glue 缺（未跑 gen:svgbob-wasm）→ 不采集不报错（构建走条件桩，按设计降级）', () => {
+    const gen = tmpDir('svgbob-noglue');
+    const out = tmpDir('svgbob-noglue-out');
+    const res = collectSvgbobWasm(gen, out);
+    expect(res.packaged).toBe(false);
+    expect(fs.existsSync(path.join(out, 'svgbob_wasm_bg.wasm'))).toBe(false);
+  });
+
+  it('glue 在、wasm 缺（半产物）→ fail-fast 并指修复命令（不静默降级）', () => {
+    const gen = tmpDir('svgbob-half');
+    const out = tmpDir('svgbob-half-out');
+    writeFile(path.join(gen, 'svgbob_wasm.js'), 'export default async function init() {}');
+    expect(() => collectSvgbobWasm(gen, out)).toThrow(/svgbob wasm/);
+    expect(() => collectSvgbobWasm(gen, out)).toThrow(/pnpm gen:svgbob-wasm/);
+  });
+});
 
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

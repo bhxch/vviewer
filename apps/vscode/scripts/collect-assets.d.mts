@@ -20,6 +20,8 @@ export interface CollectAssetsSummary {
   pdfWorkers: Array<{ id: string; outRel: string; bytes: number }>;
   fonts: number;
   themes: string[];
+  /** svgbob wasm 引擎资产：packaged=false = 未跑 gen:svgbob-wasm（构建走条件桩，按设计降级） */
+  svgbob: { packaged: boolean; bytes: number };
 }
 
 export declare const REPO_ROOT: string;
@@ -29,6 +31,9 @@ export declare const ASSET_SOURCES: {
   queries: string;
   themes: string;
   icon: string;
+  svgbobWasm: string;
+  svgbobWasmFile: string;
+  svgbobGlueFile: string;
 };
 export declare const FIX_COMMANDS: {
   grammars: string;
@@ -37,6 +42,7 @@ export declare const FIX_COMMANDS: {
   themes: string;
   icon: string;
   packages: string;
+  svgbobWasm: string;
 };
 export declare const PDF_WORKERS: ReadonlyArray<{ id: string; pkgRel: string; outRel: string }>;
 export declare const PACKAGED_THEMES: string[];
@@ -59,6 +65,10 @@ export declare function trimThemes(
   keys?: readonly string[]
 ): Record<string, unknown>;
 export declare function assertIcon(iconPath: PathLike): { path: string; bytes: number };
+export declare function collectSvgbobWasm(
+  genDir: PathLike,
+  webviewDir: PathLike
+): { packaged: boolean; bytes: number };
 export declare function resolvePkgDir(
   pkgName: string,
   fromDir: PathLike | PathLike[],
