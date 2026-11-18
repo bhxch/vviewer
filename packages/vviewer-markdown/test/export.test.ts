@@ -49,6 +49,10 @@ describe('collectExportHtml——自包含 HTML 装配', () => {
     const out = new DOMParser().parseFromString(html, 'text/html');
     expect(out.querySelector('.md-diagram-toggle')).toBeNull();
     expect(out.querySelector('.md-lightbox-overlay')).toBeNull();
+    // 外链图片 manual 档占位壳整体剥离（评审 minor：导出 HTML 里不得留下静态文件中
+    // 完全不可用的「加载图片」按钮）
+    expect(out.querySelector('.md-ext-media')).toBeNull();
+    expect(out.querySelector('.md-ext-media-load')).toBeNull();
     // 正文与高亮成品不动
     expect(out.querySelector('pre code .ts-keyword')?.textContent).toBe('const');
     expect(out.querySelector('#mermaid-svg')).not.toBeNull();

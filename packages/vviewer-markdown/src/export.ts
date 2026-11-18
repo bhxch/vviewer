@@ -110,7 +110,14 @@ export interface ExportHtmlOptions {
  * 「data-md-copy|md-lightbox|md-diagram-toggle」为语义列举（属性/类混称），
  * 实际剥离面以类名选择器为准，data-* 属性无行为不剥离。
  */
-const STRIP_SELECTORS = ['.md-diagram-toggle', `.${LIGHTBOX_OVERLAY_ID}`] as const;
+const STRIP_SELECTORS = [
+  '.md-diagram-toggle',
+  `.${LIGHTBOX_OVERLAY_ID}`,
+  // 外链图片 manual 档占位壳（评审 minor：spec D 的默认档改为 manual 后，导出 HTML 里
+  // 留下一个在静态文件中完全不可用的「加载图片」按钮，且该壳无对应样式）——壳整体
+  // 剥离（壳内只有被拦的 img 与加载钮：静态导出本就无法加载外链图）
+  '.md-ext-media'
+] as const;
 
 /** 语言徽标 button→span 定向转换：语言词（类名含主题前缀变体）与文本保留，title 等交互属性消失。 */
 function flattenCodeLangBadge(root: Document): void {
