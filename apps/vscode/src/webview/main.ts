@@ -12,6 +12,12 @@
 // 是 vite 专属形态）。
 import { assembleViewer, type Assembled } from './assemble';
 import { HostBridge } from './dispatchHost';
+import { applyEngineState } from './engineBadge';
+import {
+  resolveHighlightEngine,
+  startHighlightRuntime,
+  type HighlightRuntime
+} from './highlight';
 import { Shell } from './shell';
 import { applyTokenCss, buildTokenCss, injectKatexCss, kindCssVars, loadCaptureCss } from './theme';
 import { createSingleFileSource } from './store';
@@ -55,6 +61,7 @@ let theme: ThemePayload | null = null;
 let assets: AssetUris | null = null;
 let doc: { name: string; path: string; size: number; bytes: Uint8Array } | null = null;
 let assembled: Assembled | null = null;
+let highlight: HighlightRuntime | null = null;
 let currentInstance: { destroy(): void } | null = null;
 
 window.addEventListener('message', (event: MessageEvent) => {
@@ -68,12 +75,18 @@ async function handleHostMessage(message: HostToWebview): Promise<void> {
     case 'init':
       await onInit(message);
       return;
-    case 'settings':
+    case 'settings': {
+      const previousTier = settings ? resolveHighlightEngine(settings) : null;
       settings = message.settings;
-      // 重新装配：十一处缝捕获的是装配期的设置 → 设置变更须重装缝（而非只重渲）
-      if (settings && assets && theme) assemble(settings);
+      if (settings && assets && theme) {
+        // 引擎档位变了才重启 worker（否则每次设置变更都重拉 worker 源，浪费）
+        if (resolveHighlightEngine(settings) !== previousTier) await startHighlight(settings);
+        // 重新装配：十一处缝捕获的是装配期的设置 → 设置变更须重装缝（而非只重渲）
+        assemble(settings);
+      }
       await rerender();
       return;
+    }
     case 'theme':
       theme = message.theme;
       await applyTheme();
@@ -102,9 +115,23 @@ async function onInit(message: Extract<HostToWebview, { kind: 'init' }>): Promis
   await applyTheme();
   await injectKatexCss(document, assets.katexCssUrl, assets.fontsBase);
 
+  // 高亮链路先起（代码渲染器的首次渲染即用得上 tree-sitter）
+  await startHighlight(settings);
   assemble(settings);
 
   await rerender();
+}
+
+/** 起高亮运行时（worker 起活 + client attach + 引擎态可见） */
+async function startHighlight(current: WebviewSettings): Promise<void> {
+  if (!assets) return;
+  highlight?.dispose();
+  highlight = await startHighlightRuntime({
+    assets,
+    settings: current,
+    onDegraded: (state) => applyEngineState(shell, state)
+  });
+  applyEngineState(shell, highlight.state);
 }
 
 /** 装配渲染层（设置变更时重装——缝捕获装配期的设置） */

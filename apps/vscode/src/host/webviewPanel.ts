@@ -27,6 +27,7 @@ import {
 } from './protocol';
 import { t } from '../i18n/core';
 import { kindCssVars } from '../webview/theme';
+import { toGrammarTable } from '../webview/assets';
 
 /** vscode 运行时（注入面——整命名空间注入，测试可换假实现） */
 export type VscodeRuntime = typeof vscode;
@@ -244,14 +245,10 @@ export class PanelHost implements vscode.Disposable {
     );
     try {
       const bytes = await this.vscode.workspace.fs.readFile(uri);
-      const manifest = JSON.parse(new TextDecoder().decode(bytes)) as {
-        grammars?: Record<string, { file: string; aliases?: string[] }>;
-      };
-      const table: GrammarTable = {};
-      for (const [lang, entry] of Object.entries(manifest.grammars ?? {})) {
-        table[lang] = entry.aliases ? { file: entry.file, aliases: entry.aliases } : { file: entry.file };
-      }
-      return table;
+      const manifest = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+      // 映射单源：manifest → GrammarTable 的规则只在 webview/assets.ts 一处实现
+      // （条目显式丢弃 base——带 base 会绕开 grammarsBase 打到错误源）
+      return toGrammarTable(manifest);
     } catch {
       return {};
     }

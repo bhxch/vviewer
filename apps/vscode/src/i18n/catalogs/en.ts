@@ -14,6 +14,9 @@ export const en: EnMessages = {
   'shell.panel.tocToggle': 'Outline panel',
   'shell.panel.tocEmpty': 'This document has no outline',
   'shell.panel.engineBadge': 'Highlight engine: {engine}',
+  'shell.engine.workerFailed': 'Highlight engine unavailable, fell back to hljs ({reason})',
+  'shell.engine.initTimeout': 'Highlight engine init timed out, fell back to hljs',
+  'shell.engine.noGrammar': 'No local grammar for {lang}, fell back to hljs',
 
   // viewer
   'viewer.document.tooLarge': 'File exceeds {limit}; open it with the native VSCode editor instead',
