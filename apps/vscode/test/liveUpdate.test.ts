@@ -433,6 +433,25 @@ describe('实时生效 · 面板生命周期（评审 critical ③ / minor ⑥ /
     expect((open!.args[0] as { path: string }).path).toContain('b.md');
   });
 
+  it('评审场景链：导航到 b.md 后再从资源管理器打开 b.md → 新面板拿到 HTML（无白屏）', async () => {
+    const fake = makeFakeHost();
+    const { PanelHost } = await import('../src/host/webviewPanel');
+    const host = new PanelHost(
+      fake.vscode as never,
+      { extensionUri: fakeUri('/ext'), workspaceState: makeFakeWorkspaceState() } as never
+    );
+    const first = makeFakePanel(fake.posted);
+    await host.attach({ uri: fakeUri('/x/a.md') } as never, first as never);
+    // 导航（相对链接）→ 宿主发 vscode.open 打开 b.md
+    first.fireMessage({ kind: 'navigate', path: 'b.md' });
+    await new Promise((r) => setTimeout(r, 0));
+    // VSCode 随后为 b.md 新建 editor → attach(b.md, 新面板)
+    const second = makeFakePanel(fake.posted);
+    await host.attach({ uri: fakeUri('/x/b.md') } as never, second as never);
+    expect(second.webview.html).not.toBe('');
+    expect(second.webview.options).toBeTruthy();
+  });
+
   it('面板仍存活时 attach 新面板 → 新面板必须拿到 HTML（不得白屏且无提示）', async () => {
     const fake = makeFakeHost();
     const { PanelHost } = await import('../src/host/webviewPanel');
