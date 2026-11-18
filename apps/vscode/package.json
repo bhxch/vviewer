@@ -36,7 +36,11 @@
         "viewType": "vviewer.viewer",
         "displayName": "VViewer",
         "priority": "default",
-        "selector": []
+        "selector": [
+          {
+            "filenamePattern": "*"
+          }
+        ]
       }
     ],
     "commands": [

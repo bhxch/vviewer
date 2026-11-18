@@ -47,6 +47,12 @@ dist/
 2. 在 VSCode 中打开本仓的 `apps/vscode` 目录（作为扩展开发宿主），按 `F5` 启动 Extension Development Host。
 3. 在开发宿主中打开受支持的文件（如 `README.md`、任意 `.py`、`.png`、`.pdf`），应直接进入 VViewer 渲染视图。
 
+> **认领面（selector）两态**：源清单 `apps/vscode/package.json` 的
+> `contributes.customEditors[].selector` 是**开发态通配**（`*`）——F5 开发宿主据此接管
+> 任何文件（否则开发宿主不接管任何文件，本节步骤与下方人工冒烟清单均无法执行）；构建
+> 产物清单（`dist/package.json`，进 VSIX 的那份）由 `scripts/gen-manifest.mjs` 用**实跑
+> 真实注册表**的认领清单覆写（约 700 个扩展名，与渲染器安装序同源）。
+
 ## 命令
 
 | 命令 | 作用 |

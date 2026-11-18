@@ -61,3 +61,26 @@ describe('清单 · nls 本地化', () => {
     }
   });
 });
+
+describe('清单 · custom editor selector（F5 开发宿主须能接管文件）', () => {
+  it('源清单的 customEditors[].selector 非空（评审 important ⑧：selector 只在构建产物清单生成 → F5 宿主不接管任何文件，README 调试步骤与人工冒烟清单无法执行）', () => {
+    const editors = (manifest as { contributes?: { customEditors?: Array<{ selector?: unknown[] }> } })
+      .contributes?.customEditors ?? [];
+    expect(editors.length).toBeGreaterThan(0);
+    for (const editor of editors) {
+      expect(Array.isArray(editor.selector), 'selector 必须是数组').toBe(true);
+      expect(editor.selector!.length, 'selector 不得为空（开发宿主据此认领文件）').toBeGreaterThan(0);
+    }
+  });
+
+  it('selector 条目形如 { filenamePattern }（VSCode 认领面的唯一形态）', () => {
+    const editors = (manifest as { contributes?: { customEditors?: Array<{ selector?: Array<Record<string, unknown>> }> } })
+      .contributes?.customEditors ?? [];
+    for (const editor of editors) {
+      for (const entry of editor.selector ?? []) {
+        expect(typeof entry.filenamePattern).toBe('string');
+        expect((entry.filenamePattern as string).length).toBeGreaterThan(0);
+      }
+    }
+  });
+});
