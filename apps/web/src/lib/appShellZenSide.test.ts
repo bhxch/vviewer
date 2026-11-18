@@ -55,25 +55,31 @@ describe('zen 目录浮钮随侧栏收边（评审 important ⑪：position:fixe
 
   it('桌面档（>900px，两栏在流内）：对应侧开启即外移该侧浮钮（外移量=栏宽）', () => {
     expect(css).toMatch(
-      /@media \(min-width: 901px\)[\s\S]{0,400}?\.vv-shell\.zen\[data-zen-side='left'\] ~ \.vv-zen-toc-left \{\s*left: calc\(var\(--vv-side-w, 260px\) \+ 12px\);/
+      /@media \(min-width: 901px\)[\s\S]{0,400}?\.vv-zen-toc-left\[data-zen-open='1'\] \{\s*left: calc\(var\(--vv-side-w, 260px\) \+ 12px\);/
     );
     expect(css).toMatch(
-      /@media \(min-width: 901px\)[\s\S]{0,600}?\.vv-shell\.zen\[data-zen-side='right'\] ~ \.vv-zen-toc-right \{\s*right: calc\(var\(--vv-right-w, 230px\) \+ 12px\);/
+      /@media \(min-width: 901px\)[\s\S]{0,600}?\.vv-zen-toc-right\[data-zen-open='1'\] \{\s*right: calc\(var\(--vv-right-w, 230px\) \+ 12px\);/
     );
   });
 
-  it('抽屉档（≤900px 左栏 / ≤600px 右栏）：覆盖式抽屉 → 外移量=抽屉宽，且仅该侧抽屉开着时', () => {
+  it('抽屉档（≤900px 左栏 / ≤600px 右栏）：覆盖式抽屉 → 外移量=抽屉宽', () => {
     expect(css).toMatch(
-      /\.vv-shell\.zen\.drawer\[data-zen-side='left'\] ~ \.vv-zen-toc-left \{\s*left: calc\(min\(80vw, 300px\) \+ 12px\);/
+      /@media \(max-width: 900px\)[\s\S]{0,300}?\.vv-zen-toc-left\[data-zen-open='1'\] \{\s*left: calc\(min\(80vw, 300px\) \+ 12px\);/
     );
     expect(css).toMatch(
-      /\.vv-shell\.zen\.rightopen\[data-zen-side='right'\] ~ \.vv-zen-toc-right \{\s*right: calc\(min\(80vw, 300px\) \+ 12px\);/
+      /@media \(max-width: 600px\)[\s\S]{0,300}?\.vv-zen-toc-right\[data-zen-open='1'\] \{\s*right: calc\(min\(80vw, 300px\) \+ 12px\);/
     );
   });
 
-  it('栏宽变量挂到 shell（浮钮是 shell 的兄弟节点——aside 上的变量取不到）', () => {
+  it('开关态经按钮自属性 data-zen-open 表达（**不用兄弟选择器 `~`**——Svelte 的 css_unused_selector 分析判其未用并从产物剪除，实测规则消失）', () => {
+    expect(src).toMatch(/vv-zen-toc-left[^>]*data-zen-open=\{zenSide === 'left' \? '1' : undefined\}/);
+    expect(src).toMatch(/vv-zen-toc-right[^>]*data-zen-open=\{zenSide === 'right' \? '1' : undefined\}/);
+    expect(css).not.toMatch(/~\s*\.vv-zen-toc-(left|right)/);
+  });
+
+  it('栏宽变量内联在浮钮上（浮钮与 aside 是兄弟节点——aside 上的变量取不到）', () => {
     expect(src).toMatch(
-      /class="vv-shell"[^>]*style="--vv-side-w: \{leftW\}px; --vv-right-w: \{rightW\}px"/
+      /class="vv-zen-toc-btn vv-zen-toc-left"[^>]*style="--vv-side-w: \{leftW\}px; --vv-right-w: \{rightW\}px"/s
     );
   });
 });

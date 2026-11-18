@@ -11,7 +11,10 @@
     // kit 生成的父配置将 types 收窄为 ['$app/types']；此处补回 @types/node，
     // 否则 include 进来的 vite.config.ts 等根文件解析不了 node 内建模块；
     // vite/client 提供 ?raw/?inline 资产导入模块声明（md-export Task 2b katexExportCss）
-    "types": ["node", "$app/types", "vite/client"]
+    "types": ["node", "$app/types", "vite/client"],
+    // vite.config.ts 显式带 .ts 扩展名导入（Vite 未来 native config loader 兼容面——
+    // 无扩展名 import 在 native loader 下无法解析；kit 父配置已设 noEmit，故本选项合法）
+    "allowImportingTsExtensions": true
   },
   // render-text 留守的 vendor ambient 声明（katex-dist-css：pipeline 动态 import
   // 'katex/dist/katex.min.css' 无类型）；markdown-it 五插件垫片已随引擎迁

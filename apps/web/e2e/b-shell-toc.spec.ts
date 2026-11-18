@@ -216,6 +216,14 @@ test.describe('zen 目录入口（TOC-04/05，桌面）', () => {
     await expect(page.locator('.vv-right .toc')).toBeVisible();
     await expect(rightBtn).toHaveAttribute('aria-pressed', 'true');
 
+    // 浮钮不压住所开栏（评审 important ⑪：浮钮原锚视口缘 → 压在目录条目上）
+    const rightBox = await page.locator('.vv-right').boundingBox();
+    const btnBox = await rightBtn.boundingBox();
+    expect(rightBox).not.toBeNull();
+    expect(btnBox).not.toBeNull();
+    // 右浮钮在右栏**左侧**（内容区一侧）→ 其右缘不得越入右栏
+    expect(btnBox!.x + btnBox!.width, '右浮钮压住右栏').toBeLessThanOrEqual(rightBox!.x);
+
     // Esc 两段退出：第一段 closeZenSide（栏隐、zen 保持），第二段 exitZen
     await page.keyboard.press('Escape');
     await expect(page.locator('.vv-shell.zen[data-zen-side="right"]')).toHaveCount(0);
@@ -242,6 +250,14 @@ test.describe('zen 目录入口（TOC-04/05，桌面）', () => {
     await expect(tree).toBeHidden();
     await expect(tree).toHaveCount(1);
     await expect(page.locator('.vv-side .toc')).toBeVisible();
+
+    // 浮钮不压住所开栏（评审 important ⑪：浮钮原锚视口缘 → 压在目录条目上）
+    const sideBox = await page.locator('.vv-side').boundingBox();
+    const btnBox = await leftBtn.boundingBox();
+    expect(sideBox).not.toBeNull();
+    expect(btnBox).not.toBeNull();
+    // 左浮钮在左栏**右侧**（内容区一侧）→ 其左缘不得越入左栏
+    expect(btnBox!.x, '左浮钮压住左栏').toBeGreaterThanOrEqual(sideBox!.x + sideBox!.width);
 
     await page.keyboard.press('Escape');
     await expect(page.locator('.vv-shell.zen[data-zen-side="left"]')).toHaveCount(0);

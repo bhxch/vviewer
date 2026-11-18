@@ -6,7 +6,7 @@ import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, rmSync, 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { cssPresetFontPackExclusions } from './src/lib/fontPresets';
+import { cssPresetFontPackExclusions } from './src/lib/fontPresets.ts';
 
 // 子路径托管（GitHub Pages 项目站点 /<repo>/ 等）：VV_BASE_PATH 注入（如 /vviewer）。
 // 默认空 = 根路径，本地 dev/e2e/自建服务器部署行为不变。同名值供下方 sveltekit()

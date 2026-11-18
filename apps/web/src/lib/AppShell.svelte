@@ -1717,9 +1717,13 @@
          中部边缘天然避开 .vv-zen-exit（右下 bottom:34px）与状态栏 -->
     <button type="button" class="vv-zen-toc-btn vv-zen-toc-left" aria-label={t('shell.zen.tocLeftAria')}
       title={t('shell.zen.tocLeftAria')} aria-pressed={zenSide === 'left'}
+      data-zen-open={zenSide === 'left' ? '1' : undefined}
+      style="--vv-side-w: {leftW}px; --vv-right-w: {rightW}px"
       onclick={() => toggleZenSide('left')}>{t('shell.left.toc')}</button>
     <button type="button" class="vv-zen-toc-btn vv-zen-toc-right" aria-label={t('shell.zen.tocRightAria')}
       title={t('shell.zen.tocRightAria')} aria-pressed={zenSide === 'right'}
+      data-zen-open={zenSide === 'right' ? '1' : undefined}
+      style="--vv-side-w: {leftW}px; --vv-right-w: {rightW}px"
       onclick={() => toggleZenSide('right')}>{t('shell.left.toc')}</button>
   {/if}
   {#if zenToast}
@@ -2045,28 +2049,31 @@
      - 桌面（>900px）两栏在流内 → 该栏宽度（--vv-side-w / --vv-right-w，挂 shell 上）；
      - 抽屉档（≤900px 左栏、≤600px 右栏）该栏是**覆盖式**抽屉 → 抽屉宽
        （min(80vw,300px)），且仅在该侧抽屉**开着**时（.drawer / .rightopen）；
-     外移后浮钮落在内容区一侧，不再压住目录条目。 */
+     外移后浮钮落在内容区一侧，不再压住目录条目。
+     实现面用**按钮自选择器**（data-zen-open）+ 栏宽变量内联在按钮上——兄弟选择器
+     `~` 会被 Svelte 的 css_unused_selector 分析判为未用并**从产物中剪除**（实测：
+     构建产物内该规则消失，故不用 `~`）。 */
   @media (min-width: 901px) {
-    .vv-shell.zen[data-zen-side='left'] ~ .vv-zen-toc-left {
+    .vv-zen-toc-left[data-zen-open='1'] {
       left: calc(var(--vv-side-w, 260px) + 12px);
     }
-    .vv-shell.zen[data-zen-side='right'] ~ .vv-zen-toc-right {
+    .vv-zen-toc-right[data-zen-open='1'] {
       right: calc(var(--vv-right-w, 230px) + 12px);
     }
   }
   @media (min-width: 601px) and (max-width: 900px) {
     /* 平板档：左栏抽屉、右栏在流内 */
-    .vv-shell.zen[data-zen-side='right'] ~ .vv-zen-toc-right {
+    .vv-zen-toc-right[data-zen-open='1'] {
       right: calc(var(--vv-right-w, 230px) + 12px);
     }
   }
   @media (max-width: 900px) {
-    .vv-shell.zen.drawer[data-zen-side='left'] ~ .vv-zen-toc-left {
+    .vv-zen-toc-left[data-zen-open='1'] {
       left: calc(min(80vw, 300px) + 12px);
     }
   }
   @media (max-width: 600px) {
-    .vv-shell.zen.rightopen[data-zen-side='right'] ~ .vv-zen-toc-right {
+    .vv-zen-toc-right[data-zen-open='1'] {
       right: calc(min(80vw, 300px) + 12px);
     }
   }
