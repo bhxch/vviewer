@@ -15,6 +15,7 @@
     "gen:sources": "node tools/grammar-builder/gen-sources.mjs",
     "gen:grammars": "pnpm gen:sources && node tools/grammar-builder/build.mjs --fetch --lite && node tools/grammar-builder/build.mjs --self-build",
     "gen:svgbob-wasm": "node packages/vviewer-render-diagram/tools/build-svgbob-wasm.mjs",
+    "check:release-wiring": "node tools/check-release-wiring/check-release-wiring.mjs",
     "lint": "eslint .",
     "typecheck": "tsc -b packages/*/tsconfig.json apps/vscode/tsconfig.json apps/web/tsconfig.e2e.json --noEmit && pnpm --filter web typecheck",
     "build:vscode": "pnpm --filter @bhxch/vviewer-vscode build",

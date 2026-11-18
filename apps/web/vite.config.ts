@@ -854,6 +854,11 @@ export default defineConfig({
     // spec C §3.2（Task 3）：settings.cdn.grammars unpkg/cn 档的子包数（grammarProfiles
     // 的 unpkg/cnGrammarsBases 按 p1..pN 展开多基）。缺省 '1' = 单基兼容锚；release
     // 链首发装箱定稿后经 CI env 注入真实包数。
-    'import.meta.env.VV_GRAMMAR_PACK_COUNT': JSON.stringify(process.env.VV_GRAMMAR_PACK_COUNT ?? '1')
+    'import.meta.env.VV_GRAMMAR_PACK_COUNT': JSON.stringify(process.env.VV_GRAMMAR_PACK_COUNT ?? '1'),
+    // grammar 拆包子包的 npm scope（与发布链 vars.NPM_SCOPE 同源——评审 important ④：
+    // cdnProfiles 此前把 scope 写死 @bhxch，与发布变量不连通）。缺省 @bhxch 与
+    // packages/vviewer-markdown 的 GRAMMAR_PACK_SCOPE 同值（tools/check-release-wiring
+    // 门禁跨仓比对）。
+    'import.meta.env.VV_NPM_SCOPE': JSON.stringify(process.env.VV_NPM_SCOPE ?? '@bhxch')
   }
 });

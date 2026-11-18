@@ -12,7 +12,18 @@
 // settings.cdn 钉死 6 字段集），解析失败回退重定向形态提示。
 import { resolveForeignAssetBase } from './foreignAssets';
 
-export const GRAMMAR_PACK_NAME = '@bhxch/vviewer-grammars-full';
+/**
+ * grammar 拆包子包的 npm scope（构建期注入 VV_NPM_SCOPE，缺省 @bhxch）。
+ *
+ * 与发布链同源：release.yml / pages-deploy.yml 注入 `vars.NPM_SCOPE`（仓库变量未配置
+ * 时回落缺省 @bhxch）——此前本文件把 scope 写死 @bhxch，与发布变量互不连通：发布换
+ * scope 后 unpkg/cn 两档 URL 全 404，且缺层仅 console.warn（用户只见「没高亮」）。
+ */
+export const GRAMMAR_PACK_SCOPE =
+  (import.meta as { env?: { VV_NPM_SCOPE?: string } }).env?.VV_NPM_SCOPE ?? '@bhxch';
+
+/** 拆分子包包名（scope + 全量包名）——与发布链 VV_NPM_PACKAGE_NAME 同形。 */
+export const GRAMMAR_PACK_NAME = `${GRAMMAR_PACK_SCOPE}/vviewer-grammars-full`;
 
 /** unpkg/npmmirror 子包版本解析结果的独立缓存键（不扩 settings.cdn 6 字段集——裁量记档）。 */
 export const CDN_VERSIONS_CACHE_KEY = 'vviewer:cdn-versions';

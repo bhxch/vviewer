@@ -38,6 +38,14 @@ on:
 permissions:
   contents: read
 
+# 拆分子包数（spec C Task 2）：**单一来源**——publish-npm job 的装箱 fail-fast 与
+# web job 的 VV_GRAMMAR_PACK_COUNT 注入同读此值（此前两处各写一份字面量，漂移无人
+# 报警：web 侧恒为 1 → unpkg/cn 两档在生产构建中只展开 p1，静默丢掉 5/6 语言）。
+# 与 packages/vviewer-markdown 的 GRAMMAR_PACK_COUNT 同值（tools/check-release-wiring
+# 门禁跨仓比对：三层口径漂移即红）。
+env:
+  VV_NPM_PACKAGE_COUNT: '6'
+
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -81,6 +89,17 @@ jobs:
         run: |
           BASES=$(node -p "JSON.parse(process.argv[1]).map((p) => 'https://cdn.jsdelivr.net/npm/' + p + '@${VERSION}/grammars/').join('|')" "$PACKAGES")
           echo "VV_GRAMMAR_CDN=${BASES}" >> "$GITHUB_ENV"
+      # unpkg/cn 两档的展开参数（评审 important ④）：子包数与 npm scope。
+      # 二者与 CDN base 层**独立**——CDN base 层缺席（scope 未配置）时，用户在设置面
+      # 切 unpkg/cn 档仍须展开正确的 p1..pN 与 scope，否则该档恒只展开 p1（静默丢掉
+      # 5/6 语言，缺层仅 console.warn）。
+      - name: 注入 unpkg/cn 档展开参数（子包数 + scope）
+        env:
+          NPM_SCOPE: ${{ vars.NPM_SCOPE || '@bhxch' }}
+        run: |
+          echo "VV_GRAMMAR_PACK_COUNT=${VV_NPM_PACKAGE_COUNT}" >> "$GITHUB_ENV"
+          echo "VV_NPM_SCOPE=${NPM_SCOPE}" >> "$GITHUB_ENV"
+          echo "unpkg/cn 档展开参数：${NPM_SCOPE} × ${VV_NPM_PACKAGE_COUNT} 包"
       # —— svgbob wasm glue 不入库（spec §7）：构建期生成。v0.1.0 时代 svbob 走 kroki
       # 无此需求，P2 引入 wasm glue 后 ci.yml web job / pages-deploy 均已接线、本 job
       # 漏接——v0.1.1 首个踩中的 release（vite 静态解析动态 import，缺产物即构建失败）。
@@ -314,8 +333,9 @@ jobs:
           # 拆分子包数（spec C Task 2）：须与 pack-npm.mjs 拆分装箱的实际产出一致——publish 前
           # 有包数一致性 fail-fast 校验兜底，漂移即 fail 而非静默缺包。当前值 = spec §1.1 全量
           # 228MB → 预计 5-6 包取 6 的占位（实施期全量集未构建、真实 N 首发时定）：
-          # 首发若 fail-fast 即按实际装箱结果修正此值，npm 侧 Trusted Publisher 逐包配置同步对齐
-          echo "VV_NPM_PACKAGE_COUNT=6" >> "$GITHUB_ENV"
+          # 首发若 fail-fast 即按实际装箱结果修正此值，npm 侧 Trusted Publisher 逐包配置同步对齐。
+          # 值源 = workflow 级 env（单一来源，web job 的 VV_GRAMMAR_PACK_COUNT 注入同读）。
+          echo "VV_NPM_PACKAGE_COUNT=${VV_NPM_PACKAGE_COUNT}" >> "$GITHUB_ENV"
       # 打包顺序约束（pack-npm 双产物同落 dist-npm）：拆分先行、全量后置——packNpmSplit 的
       # outDir fail-fast 会拒「根目录已含单包打包产物（package.json）」，反向顺序必失败
       - name: 打包 npm 资产包（拆分子包 p1..pN 先行 + 全量包后置）

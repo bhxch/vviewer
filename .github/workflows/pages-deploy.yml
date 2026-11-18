@@ -31,6 +31,12 @@ on:
 permissions:
   contents: read
 
+# 拆分子包数（与 release.yml workflow 级 env 同值同源）：unpkg/cn 两档按 p1..pN 展开
+# 多基，层数须与实际发布子包集一致——此前本 workflow 未注入 VV_GRAMMAR_PACK_COUNT，
+# 生产构建恒按缺省 1 展开（切这两档即静默丢掉 5/6 语言，缺层仅 console.warn）。
+env:
+  VV_NPM_PACKAGE_COUNT: '6'
+
 concurrency:
   group: pages-deploy-${{ github.ref }}
   cancel-in-progress: true
@@ -89,6 +95,15 @@ jobs:
       # 全 404（p1 即失败）→ 不注入 env，第 3 层整体缺席而非注入畸形 URL（缺席 warn 语义
       # 保留；子包未首发的全量包旧版本不再注入——jsdelivr 对全量包 150MB 准入 403，注入
       # 即坏层）
+      - name: 注入 unpkg/cn 档展开参数（子包数 + scope）
+        # 与 CDN base 层独立：CDN base 层缺席（scope 未配置/子包未首发）时，用户在设置面
+        # 切 unpkg/cn 档仍须展开正确的 p1..pN 与 scope（评审 important ④）。
+        env:
+          NPM_SCOPE: ${{ vars.NPM_SCOPE || '@bhxch' }}
+        run: |
+          echo "VV_NPM_SCOPE=${NPM_SCOPE}" >> "$GITHUB_ENV"
+          echo "VV_GRAMMAR_PACK_COUNT=${VV_NPM_PACKAGE_COUNT}" >> "$GITHUB_ENV"
+          echo "unpkg/cn 档展开参数：${NPM_SCOPE} × ${VV_NPM_PACKAGE_COUNT} 包"
       - name: 计算 CDN 资产 base（子包多基 npm 自解析）
         if: vars.NPM_SCOPE != ''
         env:
@@ -110,6 +125,8 @@ jobs:
             echo "::warning::包数超探测上限（p8 仍可达），pages 注入面不完整——按实际装箱结果上调本步探测上限"
           fi
           echo "VV_GRAMMAR_CDN=${BASES}" >> "$GITHUB_ENV"
+          # 实探子包数覆盖声明值（npm 侧真相）：unpkg/cn 两档按此层数展开
+          echo "VV_GRAMMAR_PACK_COUNT=$((i-1))" >> "$GITHUB_ENV"
           echo "CDN 多基注入（p1..p$((i-1))）：${BASES}"
       - name: 构建前端（注入子路径 base）
         run: pnpm --filter web build
