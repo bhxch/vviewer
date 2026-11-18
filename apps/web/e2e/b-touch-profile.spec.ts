@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openDrawerIfNarrow } from './drawer';
 import { applySettings, closeSettings, gotoGroup, openSettings } from './settings-center';
-import { openMenu } from './tabbar-menu';
+import { openMenu, openSubmenu } from './tabbar-menu';
 
 /**
  * 触屏档案 e2e 锚（TP-01..05，触屏适配 spec B §4，Task 4）：
@@ -14,6 +14,10 @@ import { openMenu } from './tabbar-menu';
  *   通道实证）+ 抽屉浮钮 ≥40px（32→40 升档实证）
  * - TP-05：FileTree 删除钮 mobile 恒显（spec §4 ③——既有 hover:none 断言迁移后
  *   保持的 mobile 直证版）
+ * - TP-06：工作区面常显变体（.vv-ws-actions / .vv-wspanel-close）——spec §3.3.1 同批
+ *   落地的两个常显变体此前零 e2e 直证锚（评审 minor）
+ * - TP-07：matchMedia change 热更新（外接键鼠切换 → data-touch 档案即时翻转）——
+ *   spec §3.1 的运行时面（评审 minor：此前只证初始态）
  *
  * 装置复用（不新造）：目录注入 openLocalDir（b-filetree-src-remove/b-sidebar-roots
  * 同款 __vvOpenDirImpl + webkitRelativePath 通道——先例均为文件内局部函数未导出，
@@ -64,7 +68,7 @@ async function selectTouchMode(page: Page, mode: 'auto' | 'touch' | 'desktop'): 
   await closeSettings(page);
 }
 
-test.describe('触屏档案（TP-01..05，spec B §4）', () => {
+test.describe('触屏档案（TP-01..07，spec B §4）', () => {
   test('TP-01：auto 档双 project 分流——chromium fine 不吃档案 / mobile hasTouch 吃档案', async ({
     page
   }, testInfo) => {
@@ -180,4 +184,68 @@ test.describe('触屏档案（TP-01..05，spec B §4）', () => {
     const srcRow = page.locator('.vv-tree-src', { hasText: 'src-a' });
     await expect(srcRow.locator('.vv-tree-src-remove')).toHaveCSS('opacity', '1'); // 无 hover 恒显
   });
+});
+
+test('TP-06：工作区面常显变体——触屏档案下 .vv-ws-actions / .vv-wspanel-close 恒显（spec §3.3.1 同批落地，此前零直证锚）', async ({
+  page
+}, testInfo) => {
+  testInfo.skip(
+    testInfo.project.name !== 'chromium',
+    'chromium 专属：fine pointer 下强制触屏档对照（mobile 天然 coarse，恒显无对照面）'
+  );
+  await waitAppMounted(page);
+  await openLocalDir(page, [{ name: 'solo.txt', content: 'solo body\n' }], 'src-a');
+  // 强制触屏档（TP-02 装置复用）
+  await selectTouchMode(page, 'touch');
+  await expect(page.locator('html')).toHaveAttribute('data-touch', 'on');
+  // 指针移出内容区（避免 hover 揭示混入断言——常显须由触屏档案规则本身给出）
+  const vp = page.viewportSize();
+  expect(vp).not.toBeNull();
+  const parkPointer = async (): Promise<void> => {
+    await page.mouse.move(vp!.width - 6, vp!.height - 6);
+  };
+  // ① 工作区行操作簇（.vv-ws-actions）：融合菜单「工作区」子菜单内（WorkspaceList）
+  await openMenu(page);
+  await openSubmenu(page, '工作区');
+  await parkPointer();
+  await expect(page.locator('.vv-ws-actions').first()).toHaveCSS('opacity', '1');
+  await page.keyboard.press('Escape');
+  // ② 工作区面板行关闭钮（.vv-wspanel-close）：管理面板内（Alt+W——t-workspace WS-03 同款）
+  await page.keyboard.press('Alt+w');
+  const panel = page.locator('.vv-wspanel');
+  await expect(panel).toBeVisible();
+  await parkPointer();
+  await expect(panel.locator('.vv-wspanel-close').first()).toHaveCSS('opacity', '1');
+  // 回收档（desktop）：无 hover 时回 0（证明断言非恒真）
+  await selectTouchMode(page, 'desktop');
+  await expect(page.locator('html')).not.toHaveAttribute('data-touch');
+  // 设置中心开合会带走管理面板（浮层互斥）→ 需要时重开再断言
+  if (!(await panel.isVisible())) {
+    await page.keyboard.press('Alt+w');
+    await expect(panel).toBeVisible();
+  }
+  await parkPointer();
+  await expect(panel.locator('.vv-wspanel-close').first()).toHaveCSS('opacity', '0');
+});
+
+test('TP-07：matchMedia change 热更新——外接键鼠切换后 data-touch 档案即时翻转（spec §3.1 运行时面）', async ({
+  page
+}, testInfo) => {
+  testInfo.skip(
+    testInfo.project.name !== 'chromium',
+    'chromium 专属：CDP 触摸模拟通道（mobile project 天然 coarse，无「外接键鼠」对照面）'
+  );
+  // goto 前安装 CDP 触摸模拟（TP-03 同款口径：独立 page 隔离，enable 不 disable）
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  await waitAppMounted(page);
+  // 初始态：coarse 在场 → auto 档吃档案（打标在 mount 期完成）
+  await expect(page.locator('html')).toHaveAttribute('data-touch', 'on');
+  // 运行时翻转：关掉触摸模拟 → matchMedia change → data-touch 档案即时回收
+  // （touchProfile.svelte.ts 的 mq.addEventListener('change', sync) 路径）
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+  await expect(page.locator('html')).not.toHaveAttribute('data-touch');
+  // 再开 → 档案回归（双向热更新）
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  await expect(page.locator('html')).toHaveAttribute('data-touch', 'on');
 });

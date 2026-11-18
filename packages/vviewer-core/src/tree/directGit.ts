@@ -871,6 +871,8 @@ export function createGitlabDirectStore(cfg: GitlabDirectConfig): DirectStore {
   async function loadManifest(signal?: AbortSignal): Promise<GitManifestEntry[]> {
     const pid = await resolveProjectId(signal);
     const entries: GitManifestEntry[] = [];
+    /** 已处理条目总数（blob + tree）——上限判定口径（2 万条目上限按条目数计）。 */
+    let seenEntries = 0;
     let url = gitlabTreeUrl(host, pid, ref, mountPrefix);
     for (let page = 1; ; page += 1) {
       const res = await rawFetch(
@@ -884,6 +886,10 @@ export function createGitlabDirectStore(cfg: GitlabDirectConfig): DirectStore {
         throw new Error('GitLab tree API 响应非数组');
       }
       for (const e of batch) {
+        // 上限按**条目总数**计（blob + tree）——评审 minor：此前只计 blob，tree 条目
+        // 被 skip 不计 → 实际拉取条目数可远超 2 万（保护意图偏差）。计数在类型过滤
+        // 之前（tree 条目亦计入）。
+        seenEntries += 1;
         if (e.type !== 'blob' || typeof e.path !== 'string') continue;
         // 归一为仓库相对：GitLab 带 path 参数的条目 path 两实现形态并存（相对
         // prefix / 仓库相对全路径）——startsWith 剥前缀 / 原样回补两形态兼容
@@ -896,7 +902,7 @@ export function createGitlabDirectStore(cfg: GitlabDirectConfig): DirectStore {
       const next = parseLinkNext(res.headers.get('link'));
       const hasMore = next !== null || batch.length === GITLAB_PER_PAGE;
       if (!hasMore) break;
-      if (entries.length >= GITLAB_MAX_ENTRIES) {
+      if (seenEntries >= GITLAB_MAX_ENTRIES) {
         throw new Error(gitlabTruncatedText());
       }
       url = next ?? gitlabTreeUrl(host, pid, ref, mountPrefix, page + 1);

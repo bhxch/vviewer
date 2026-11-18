@@ -125,6 +125,19 @@ test.describe('b-a11y-axe 全页可达性扫描（wcag2a+wcag21a 零违规）', 
     await expectNoAxeViolations(page);
   });
 
+  test('A11Y-11 设置中心「Markdown」组（spec D 新增节——A11Y-09/10 同法的组态扩展位）', async ({
+    page
+  }) => {
+    await page.goto('/');
+    await waitAppMounted(page);
+    await openSettings(page);
+    // spec D 新增「Markdown」组（外链图片三档 + 白名单 chip 编辑），此前无 axe 扫描态
+    // （评审 minor：仓内有「每个新增设置组各补一态」的先例）
+    await gotoGroup(page, 'Markdown');
+    await expect(page.locator('.vv-sc-section').first()).toBeVisible();
+    await expectNoAxeViolations(page);
+  });
+
   test('A11Y-05 QuickOpen 开启', async ({ page }) => {
     await page.goto('/');
     await waitAppMounted(page);

@@ -834,6 +834,28 @@ describe('GitLab 全链（清单分页/内容/错误族——验收锚 ⑦）', 
     await expect(store.listChildren('')).rejects.toThrow(/20000/);
   });
 
+  it('上限按条目总数计（blob + tree 同计——评审 minor：此前只计 blob，tree 条目被 skip 不计 → 实际拉取条目数可远超 2 万）', async () => {
+    let pageN = 0;
+    installProjectMock((url) => {
+      if (url.startsWith(GL_TREE_BASE)) {
+        pageN++;
+        // 每页 100 条：50 blob（入清单）+ 50 tree（不入清单但计入上限）
+        const blobs = glBlobs(null, 50, `w${pageN}_`);
+        const trees = Array.from({ length: 50 }, (_, i) => ({
+          id: `t${pageN}_${i}`,
+          name: `d${i}`,
+          type: 'tree',
+          path: `d${i}`
+        }));
+        return jsonResponse([...blobs, ...trees]);
+      }
+      return jsonResponse({ message: 'miss' }, 404);
+    });
+    const store = gitlabStore();
+    await expect(store.listChildren('')).rejects.toThrow(/20000/);
+    expect(pageN).toBe(200); // 200 页 × 100 条 = 2 万条目（半数 tree）→ 同样在 2 万处截断
+  });
+
   it('满页 gate 形态：第 200 页整页后第 201 页短页未拉 → throw 截断文案（评审 minor ③ 裁定：per_page=100 固定下跨限点恒在满页 hasMore gate——「末页短页跨限不抛」场景数学不可达，实现与 plan Review Focus 5 字面一致；第 201 页 99 条未拉即真截断，throw 丢弃半份清单=绝不静默截断纪律）', async () => {
     let pageN = 0;
     installProjectMock((url) => {
