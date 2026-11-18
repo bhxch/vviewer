@@ -94,6 +94,9 @@ export default defineConfig(
     'apps/web/test-results/**',
     'apps/web/playwright-report/**',
     'packages/vviewer-render-diagram/src/markdown/svgbob-wasm-gen/**',
+    // svgbob wasm 构建产物（wasm-bindgen 输出目录；包内 .gitignore 已排除 /out，
+    // ESLint 不读 .gitignore 须显式列——否则跑过 pnpm gen:svgbob-wasm 后 lint 必红）
+    'packages/vviewer-render-diagram/tools/svgbob-wasm/out/**',
     'tools/grammar-builder/out/**',
     'server/worker/.wrangler/**',
     'tools/lint-selfcheck/lint-fixtures/**',
