@@ -1,31 +1,203 @@
-/**
- * main.ts — webview 侧入口（spec H）。
- *
- * T1（骨架）：落最小壳挂载，使 esbuild 的 webview bundle（ESM + code splitting）有真实
- * entry point。渲染器注册、注入缝接线、host↔webview 消息协议、壳的完整 DOM（含
- * toc 面板头部、条目与顶部提示条文案）与渲染调度在 T3 填充——**用户可见文案一律走扩展
- * i18n 目录**（T2 建目录、T3/T5 接线），本骨架不含任何可见文案。
- *
- * 样式供给：壳样式由 host 侧合成为单个 `<style nonce>` 内联进 webview HTML
- * （MARKDOWN_CSS + SHELL_CSS，T2 落）；本文件不注入任何样式（markdown 排版样式由
- * MARKDOWN_CSS 提供，katex 排印样式由 T3 的 katex CSS 注入面提供）。
- */
+// main.ts — webview 侧入口（spec H T3）。
+//
+// 职责：消息协议接线 + 装配 + 渲染调度。
+//
+// 运行期形态：webview 内无 Node、无服务端、无 localStorage——一切外部输入经宿主消息
+// 通道进来（文件字节 / 设置 / 主题 / 资产 URI），一切需要宿主能力的动作经消息通道出去
+// （相对文件读 / 导出写盘 / 外链打开 / 相对链接导航 / 错误报告）。
+//
+// 样式供给：markdown 排版 + 壳样式由**宿主**内联进 HTML（单一 `<style nonce>`，T2 落）；
+// 动态令牌（`--ui-*` / `--vv-ts-*`）与 katex 排印样式由**本侧**注入（主题变更需整体
+// 替换；katex 样式在 esbuild 下不会自动注入——包内 `pipeline.ts:643` 的动态 CSS import
+// 是 vite 专属形态）。
+import { assembleViewer, type Assembled } from './assemble';
+import { HostBridge } from './dispatchHost';
+import { Shell } from './shell';
+import { applyTokenCss, buildTokenCss, injectKatexCss, kindCssVars, loadCaptureCss } from './theme';
+import { createSingleFileSource } from './store';
+import {
+  isHostToWebview,
+  MAX_BYTES,
+  type AssetUris,
+  type HostToWebview,
+  type ThemePayload,
+  type WebviewSettings
+} from '../host/protocol';
+import { pickLocale, setLocale, t } from '../i18n/core';
+import type { MarkdownImageResolver, RelativeLinkOpener, RelativeLinkResolver } from '@bhxch/vviewer-markdown';
 
-/** 壳根容器 id（host 侧 HTML 模板与本文件约定） */
-const MOUNT_ID = 'vv-root';
+declare function acquireVsCodeApi<T = unknown>(): T;
 
-/** 挂载壳骨架：内容区 + toc 面板 + 顶部提示条（占位） */
-function mountShell(): HTMLElement {
-  const root = document.getElementById(MOUNT_ID) ?? document.body;
-  root.className = 'vv-shell';
-  root.innerHTML = `
-    <div class="vv-shell__notice" role="status" hidden></div>
-    <div class="vv-shell__main" id="vv-content"></div>
-    <aside class="vv-shell__toc vv-shell__toc--right" role="complementary" data-collapsed="true"></aside>
-  `;
-  return root;
+interface WebviewApi {
+  postMessage(message: unknown): void;
 }
 
-if (typeof document !== 'undefined') {
-  mountShell();
+/** VSCode webview API（**只能取一次**——重复取用抛错） */
+const api = acquireVsCodeApi<WebviewApi>();
+
+// locale：webview 的 navigator.language 跟随 VSCode 显示语言（zh* → zh-CN，其余 → en）
+setLocale(pickLocale(typeof navigator === 'undefined' ? undefined : navigator.language));
+
+const shell = new Shell({
+  root: document.getElementById('vv-root') ?? document.body,
+  labels: {
+    tocTitle: t('shell.panel.tocTitle'),
+    tocToggle: t('shell.panel.tocToggle'),
+    tocEmpty: t('shell.panel.tocEmpty'),
+    engineBadge: t('shell.panel.engineBadge')
+  }
+});
+
+const bridge = new HostBridge({ api });
+
+let settings: WebviewSettings | null = null;
+let theme: ThemePayload | null = null;
+let assets: AssetUris | null = null;
+let doc: { name: string; path: string; size: number; bytes: Uint8Array } | null = null;
+let assembled: Assembled | null = null;
+let currentInstance: { destroy(): void } | null = null;
+
+window.addEventListener('message', (event: MessageEvent) => {
+  const message = event.data as HostToWebview;
+  if (!isHostToWebview(message)) return;
+  void handleHostMessage(message);
+});
+
+async function handleHostMessage(message: HostToWebview): Promise<void> {
+  switch (message.kind) {
+    case 'init':
+      await onInit(message);
+      return;
+    case 'settings':
+      settings = message.settings;
+      // 重新装配：十一处缝捕获的是装配期的设置 → 设置变更须重装缝（而非只重渲）
+      if (settings && assets && theme) assemble(settings);
+      await rerender();
+      return;
+    case 'theme':
+      theme = message.theme;
+      await applyTheme();
+      await rerender();
+      return;
+    case 'file-bytes':
+    case 'export-result':
+      bridge.handleMessage(message);
+      return;
+    default:
+      return;
+  }
 }
+
+async function onInit(message: Extract<HostToWebview, { kind: 'init' }>): Promise<void> {
+  doc = {
+    name: message.doc.name,
+    path: message.doc.path,
+    size: message.doc.size,
+    bytes: message.doc.bytes
+  };
+  settings = message.settings;
+  theme = message.theme;
+  assets = message.assets;
+
+  await applyTheme();
+  await injectKatexCss(document, assets.katexCssUrl, assets.fontsBase);
+
+  assemble(settings);
+
+  await rerender();
+}
+
+/** 装配渲染层（设置变更时重装——缝捕获装配期的设置） */
+function assemble(current: WebviewSettings): void {
+  if (!assets || !theme) return;
+  assembled = assembleViewer({
+    settings: current,
+    assets,
+    themeKind: theme.kind,
+    resolveImage,
+    resolveLink,
+    openLink,
+    text: (key) => t(key)
+  });
+}
+
+/** 应用动态令牌（`--ui-*` + `--vv-ts-*`）——整体替换面 */
+async function applyTheme(): Promise<void> {
+  if (!theme || !assets) return;
+  const uiVars = { ...kindCssVars(theme.kind), ...theme.cssVars };
+  const captureCss = await loadCaptureCss(assets.themesUrl, theme.kind);
+  applyTokenCss(document, buildTokenCss(uiVars, captureCss));
+}
+
+/** 渲染调度（装配 → dispatch → toc 归一） */
+async function rerender(): Promise<void> {
+  if (!doc || !assembled || !settings) return;
+  currentInstance?.destroy();
+  currentInstance = null;
+  shell.elements.main.replaceChildren();
+
+  // 大文件闸：超限不渲染（宿主侧亦不读文件），显示引导占位
+  if (doc.size > MAX_BYTES) {
+    shell.setNotice(t('viewer.document.tooLarge', { limit: '200MB' }), 'warn');
+    return;
+  }
+
+  try {
+    const source = createSingleFileSource(doc.bytes, doc.name, doc.path);
+    const result = await assembled.dispatcher.dispatch(
+      source,
+      doc.bytes as Uint8Array<ArrayBuffer>,
+      shell.elements.main
+    );
+    currentInstance = result.instance;
+    shell.setToc(tocEntriesOf(result.instance));
+  } catch (e: unknown) {
+    shell.setNotice(e instanceof Error ? e.message : t('errors.common.unknown'), 'error');
+  }
+}
+
+/** toc 归一（markdown heading 与 code symbol 合流） */
+function tocEntriesOf(instance: {
+  getToc?(): Array<{ level: number; text: string; id: string }>;
+  getOutline?(): Array<{ name: string; startRow?: number }>;
+}): Array<{ id: string; label: string; level: number; kind: 'heading' | 'symbol' }> {
+  const toc = instance.getToc?.() ?? [];
+  if (toc.length > 0) {
+    return toc.map((entry) => ({
+      id: entry.id,
+      label: entry.text,
+      level: entry.level,
+      kind: 'heading' as const
+    }));
+  }
+  const outline = instance.getOutline?.() ?? [];
+  return outline.map((entry, index) => ({
+    id: String(index),
+    label: entry.name,
+    level: 1,
+    kind: 'symbol' as const
+  }));
+}
+
+/** 相对图片 → blob URL（spec §7 ②；blob 生命周期由包内视图托管 revoke） */
+const resolveImage: MarkdownImageResolver = async (src) => {
+  const bytes = await bridge.readFile(src);
+  if (!bytes) return null;
+  return URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>]));
+};
+
+/** 相对链接解析（spec §7 ①；经宿主往返探测） */
+const resolveLink: RelativeLinkResolver = async (href) => {
+  const bytes = await bridge.readFile(href);
+  if (!bytes) return { kind: 'missing', path: href };
+  return { kind: 'file', storeId: 'single', path: href };
+};
+
+/** 相对链接打开（file → 请求宿主切文档；missing → 顶部提示条） */
+const openLink: RelativeLinkOpener = (target, href) => {
+  if (target.kind === 'file') {
+    bridge.navigate(target.path);
+    return;
+  }
+  shell.setNotice(t('notice.file.missing', { path: target.path ?? href }), 'warn');
+};

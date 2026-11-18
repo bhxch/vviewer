@@ -71,6 +71,12 @@ export interface AssetUris {
   fontsBase: string;
   /** katex 排印样式 URL */
   katexCssUrl: string;
+  /**
+   * 打包主题表 URL（裁剪为 onelight + serika-dark 两条）——webview 侧按活动主题 kind
+   * 取一条，经 `themeToCssVars` 算出 `--vv-ts-*` 捕获色（裁量 4：MVP 按 kind 注入，
+   * 读 VSCode 活动主题 JSON 精确注入列为增强）。
+   */
+  themesUrl: string;
   /** tree-sitter 高亮 worker 源 URL（blob worker 源） */
   highlightWorkerSourceUrl: string;
 }
@@ -110,13 +116,22 @@ export type WebviewToHost =
   | { kind: 'read-file'; id: number; path: string }
   | { kind: 'export-html'; id: number; html: string; suggestedName: string }
   | { kind: 'open-external'; url: string }
+  /** 相对链接导航（spec §7 ①）：请求宿主把当前文档切到该相对路径 */
+  | { kind: 'navigate'; path: string }
   | { kind: 'report'; level: 'warn' | 'error'; message: string };
 
 /** host → webview 的消息 kind 全集（穷举面——新增 kind 须同步） */
 export const HOST_TO_WEBVIEW_KINDS = ['init', 'settings', 'theme', 'file-bytes', 'export-result'] as const;
 
 /** webview → host 的消息 kind 全集（穷举面——新增 kind 须同步） */
-export const WEBVIEW_TO_HOST_KINDS = ['ready', 'read-file', 'export-html', 'open-external', 'report'] as const;
+export const WEBVIEW_TO_HOST_KINDS = [
+  'ready',
+  'read-file',
+  'export-html',
+  'open-external',
+  'navigate',
+  'report'
+] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;

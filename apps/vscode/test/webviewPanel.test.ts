@@ -104,6 +104,10 @@ describe('资产 URI 映射（RF 5）', () => {
     expect(assets.pdfWorkerModernUrl).not.toBe(assets.pdfWorkerLegacyUrl);
   });
 
+  it('打包主题表 URL 在场（动态令牌面按 kind 取两条主题）', () => {
+    expect(assets.themesUrl).toBe('https://webview.internal/ext/dist/webview/assets/themes.json');
+  });
+
   it('katex 样式与字体族齐备', () => {
     expect(assets.katexCssUrl).toBe('https://webview.internal/ext/dist/webview/katex.min.css');
     expect(assets.fontsBase.endsWith('/fonts/')).toBe(true);

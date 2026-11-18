@@ -13,6 +13,7 @@ export const en: EnMessages = {
   'shell.panel.tocTitle': 'Outline',
   'shell.panel.tocToggle': 'Outline panel',
   'shell.panel.tocEmpty': 'This document has no outline',
+  'shell.panel.engineBadge': 'Highlight engine: {engine}',
 
   // viewer
   'viewer.document.tooLarge': 'File exceeds {limit}; open it with the native VSCode editor instead',

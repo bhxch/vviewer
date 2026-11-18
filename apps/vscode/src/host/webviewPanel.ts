@@ -26,6 +26,7 @@ import {
   type ThemePayload
 } from './protocol';
 import { t } from '../i18n/core';
+import { kindCssVars } from '../webview/theme';
 
 /** vscode 运行时（注入面——整命名空间注入，测试可换假实现） */
 export type VscodeRuntime = typeof vscode;
@@ -40,49 +41,13 @@ export const VIEW_TYPE = 'vviewer.viewer';
  */
 export const LANGUAGE_PROBE_MAX_BYTES = 10 * 1024 * 1024;
 
-/** 亮色 UI 令牌缺省值（沿 apps/web/src/app.css 亮色块） */
-const LIGHT_UI_VARS: Record<string, string> = {
-  '--ui-bg': '#ffffff',
-  '--ui-fg': '#1f2328',
-  '--ui-fg-muted': '#656d76',
-  '--ui-border': '#d0d7de',
-  '--ui-accent': '#0969da',
-  '--ui-side-bg': '#f6f8fa',
-  '--ui-tab-bg': '#f6f8fa',
-  '--ui-tab-active-bg': '#ffffff',
-  '--ui-input-bg': '#ffffff',
-  '--ui-hover-bg': '#f6f8fa',
-  '--ui-selection-bg': '#add6ff',
-  '--ui-statusbar-bg': '#f6f8fa',
-  '--ui-danger': '#cf222e',
-  '--ui-warning': '#9a6700',
-  '--ui-success': '#1a7f37',
-  '--ui-accent-2': '#8250df'
-};
-
-/** 暗色 UI 令牌缺省值（沿 apps/web/src/app.css 暗色块） */
-const DARK_UI_VARS: Record<string, string> = {
-  '--ui-bg': '#0d1117',
-  '--ui-fg': '#e6edf3',
-  '--ui-fg-muted': '#8b949e',
-  '--ui-border': '#30363d',
-  '--ui-accent': '#2f81f7',
-  '--ui-side-bg': '#161b22',
-  '--ui-tab-bg': '#161b22',
-  '--ui-tab-active-bg': '#0d1117',
-  '--ui-input-bg': '#0d1117',
-  '--ui-hover-bg': '#161b22',
-  '--ui-selection-bg': '#264f78',
-  '--ui-statusbar-bg': '#161b22',
-  '--ui-danger': '#f85149',
-  '--ui-warning': '#d29922',
-  '--ui-success': '#3fb950',
-  '--ui-accent-2': '#a371f7'
-};
-
-/** 主题令牌快照（按 VSCode 活动主题的 kind 选亮/暗缺省值） */
+/** 主题令牌快照（按 VSCode 活动主题的 kind 选亮/暗缺省值）
+ *
+ * 令牌表单源于 webview 侧的动态令牌面（`src/webview/theme.ts` 的 `kindCssVars`）——host 与
+ * webview 共用同一份缺省值，避免两侧各抄一份而产生漂移。
+ */
 export function themeCssVars(kind: 'dark' | 'light'): Record<string, string> {
-  return { ...(kind === 'dark' ? DARK_UI_VARS : LIGHT_UI_VARS) };
+  return kindCssVars(kind);
 }
 
 /**
@@ -134,6 +99,7 @@ export function buildAssetUris(params: AssetUrisParams): AssetUris {
     pdfWorkerLegacyUrl: asset('pdf', 'pdf.worker.legacy.min.mjs'),
     fontsBase: base('fonts'),
     katexCssUrl: asset('katex.min.css'),
+    themesUrl: asset('assets', 'themes.json'),
     highlightWorkerSourceUrl: asset('highlight-worker.js')
   };
 }
@@ -154,6 +120,8 @@ export function createNonce(): string {
 /** panel 宿主：面板复用 + 消息通道 + init 推送 */
 export class PanelHost implements vscode.Disposable {
   private readonly panels = new Map<string, vscode.WebviewPanel>();
+  /** panel → 当前文档 URI（相对链接导航后基准随之切换——消息面按 panel 取当前文档） */
+  private readonly panelUris = new Map<vscode.WebviewPanel, vscode.Uri>();
   private readonly nextRequestId = createRequestIdFactory();
   private activeKey: string | null = null;
 
@@ -176,9 +144,11 @@ export class PanelHost implements vscode.Disposable {
       return;
     }
     this.panels.set(key, panel);
+    this.panelUris.set(panel, document.uri);
     this.activeKey = key;
     panel.onDidDispose(() => {
       if (this.panels.get(key) === panel) this.panels.delete(key);
+      this.panelUris.delete(panel);
       if (this.activeKey === key) this.activeKey = null;
     });
     panel.onDidChangeViewState(() => {
@@ -202,7 +172,7 @@ export class PanelHost implements vscode.Disposable {
     });
 
     webview.onDidReceiveMessage((message: unknown) => {
-      void this.handleMessage(document.uri, panel, message);
+      void this.handleMessage(this.panelUris.get(panel) ?? document.uri, panel, message);
     });
 
     await this.sendInit(document.uri, panel);
@@ -332,6 +302,9 @@ export class PanelHost implements vscode.Disposable {
       case 'open-external':
         await this.handleOpenExternal(message.url);
         return;
+      case 'navigate':
+        await this.handleNavigate(documentUri, panel, message.path);
+        return;
       case 'report':
         this.handleReport(message.level, message.message);
         return;
@@ -379,6 +352,27 @@ export class PanelHost implements vscode.Disposable {
         error: errorMessage(e)
       });
     }
+  }
+
+  /** 相对链接导航（spec §7 ①）：切到目标文档并重推 init（面板复用，不新开） */
+  private async handleNavigate(
+    documentUri: vscode.Uri,
+    panel: vscode.WebviewPanel,
+    path: string
+  ): Promise<void> {
+    const target = this.resolveRelative(documentUri, path);
+    const outcome = await readDocumentBytes(this.vscode.workspace.fs, target);
+    if (!outcome.ok) {
+      // 缺件/超限 → 可见失败面（提示条由 webview 侧呈现；此处走 host 错误通道）
+      void this.vscode.window.showErrorMessage(t('notice.file.missing', { path }));
+      return;
+    }
+    const previousKey = documentUri.toString();
+    this.panels.delete(previousKey);
+    this.panels.set(target.toString(), panel);
+    this.panelUris.set(panel, target);
+    panel.title = documentName(target);
+    await this.sendInit(target, panel);
   }
 
   /** 打开外部链接（走 VSCode 原生 open——不经 webview 导航） */

@@ -117,6 +117,7 @@ describe('SHELL_CSS · 契约', () => {
     expect(SHELL_CSS.length).toBeGreaterThan(0);
     for (const cls of [
       '.vv-shell',
+      '.vv-shell__body',
       '.vv-shell__main',
       '.vv-shell__toc',
       '.vv-shell__toc--left',

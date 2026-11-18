@@ -121,11 +121,34 @@ async function importPdfjs(): Promise<Pdfjs> {
   return preferModernBuild() ? import('pdfjs-dist') : import('pdfjs-dist/legacy/build/pdf.mjs');
 }
 
+/**
+ * pdfjs worker URL 注入缝（spec H T3，评审订正③）。
+ *
+ * 存在理由：esbuild **不做** vite 的 `new URL(裸说明符, import.meta.url)` 资产化
+ * （vite 特有能力——pdf.ts 原文注释已明说）→ 非 vite 宿主（VSCode 扩展的 webview）
+ * 下默认表达式解析到**不存在的相对路径** → pdfjs 无 workerSrc → **pdf 渲染死**。
+ * 故宿主（扩展 webview 侧）注入 worker 的真实 URL。
+ *
+ * 缺省不变：未注入（或 provider 返回 null）时逐字节回退默认表达式——apps/web 不注入
+ * → 行为零变化（RF 1 兼容锚）。
+ */
+let pdfWorkerUrlProvider: (() => string | null) | null = null;
+
+/** 注入 pdfjs worker URL 提供器（宿主装配时调用；传 null 解绑回默认表达式）。 */
+export function setPdfWorkerUrlProvider(fn: (() => string | null) | null): void {
+  pdfWorkerUrlProvider = fn;
+}
+
 /** worker 资产 URL 与主模块同一判定：worker 跑在独立全局（WorkerGlobalScope），
  * 主线程的 polyfill 带不过去，两份产物须同构建。vite 对 new URL(裸说明符,
  * import.meta.url) 的资产化只识别字面量实参——三元合成的条件串不会被处理（运行期
- * fetch 到未打包的原始路径，e2e 实证），两个分支各自保持完整调用形态。 */
-function pdfWorkerUrl(): string {
+ * fetch 到未打包的原始路径，e2e 实证），两个分支各自保持完整调用形态。
+ *
+ * 注入优先：provider 存在且返回非 null 时取该值（宿主资产 URL）；否则逐字节回退
+ * 默认表达式。 */
+export function getPdfWorkerUrl(): string {
+  const injected = pdfWorkerUrlProvider?.() ?? null;
+  if (injected !== null) return injected;
   return preferModernBuild()
     ? new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
     : new URL('pdfjs-dist/legacy/build/pdf.worker.min.mjs', import.meta.url).toString();
@@ -149,7 +172,7 @@ function loadPdfjs(): Promise<Pdfjs> {
   if (pdfjsPromise === null) {
     const loading = (async () => {
       const pdfjs = await importPdfjs();
-      pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl();
+      pdfjs.GlobalWorkerOptions.workerSrc = getPdfWorkerUrl();
       return pdfjs;
     })();
     pdfjsPromise = loading;

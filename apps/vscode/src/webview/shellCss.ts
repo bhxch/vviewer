@@ -23,6 +23,7 @@
  *
  * 类名契约（T3 的 webview 壳按此建 DOM；勿改名——改名即视觉漂移）：
  * - `.vv-shell` 壳根（flex 行）
+ * - `.vv-shell__body` 主体行容器（内容区 + toc 面板的横向行）
  * - `.vv-shell__main` 内容区（滚动面）
  * - `.vv-shell__toc` toc 面板（停靠侧由 `--left`/`--right` 类切换，折叠态由
  *   `data-collapsed="true"` 表达）
@@ -41,8 +42,9 @@ body {
   background: var(--ui-bg, #ffffff);
 }
 
-/* Shell layout: content area and toc panel in one row; side switched by class. */
-.vv-shell { display: flex; flex-direction: row; align-items: stretch; height: 100vh; overflow: hidden; }
+/* Shell layout: notice bar on top, content area and toc panel in one row below. */
+.vv-shell { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+.vv-shell__body { display: flex; flex-direction: row; align-items: stretch; flex: 1 1 auto; min-height: 0; }
 .vv-shell__main { flex: 1 1 auto; min-width: 0; overflow: auto; padding: var(--vv-sp-12, 12px) var(--vv-sp-16, 16px); }
 .vv-shell__toc {
   flex: 0 0 auto;

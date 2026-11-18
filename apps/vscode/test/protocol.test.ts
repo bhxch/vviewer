@@ -41,6 +41,7 @@ describe('协议 · kind 穷尽', () => {
       { kind: 'read-file', id: 1, path: 'sub/other.md' },
       { kind: 'export-html', id: 2, html: '<p>x</p>', suggestedName: 'a.html' },
       { kind: 'open-external', url: 'https://example.com' },
+      { kind: 'navigate', path: 'sub/other.md' },
       { kind: 'report', level: 'warn', message: 'boom' }
     ];
     expect(new Set(samples.map((m) => m.kind))).toEqual(new Set(WEBVIEW_TO_HOST_KINDS));
@@ -115,7 +116,8 @@ describe('协议 · 资产 URI 族', () => {
         'pdfWorkerLegacyUrl',
         'pdfWorkerModernUrl',
         'queriesBase',
-        'runtimeDir'
+        'runtimeDir',
+        'themesUrl'
       ].sort()
     );
   });
@@ -132,6 +134,7 @@ function emptyAssets(): AssetUris {
     pdfWorkerLegacyUrl: 'https://webview/pdf/pdf.worker.legacy.min.mjs',
     fontsBase: 'https://webview/fonts/',
     katexCssUrl: 'https://webview/katex.min.css',
+    themesUrl: 'https://webview/assets/themes.json',
     highlightWorkerSourceUrl: 'https://webview/highlight-worker.js'
   };
 }

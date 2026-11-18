@@ -13,6 +13,7 @@ export const zhCN = {
   'shell.panel.tocTitle': '目录',
   'shell.panel.tocToggle': '目录面板',
   'shell.panel.tocEmpty': '本文档没有目录',
+  'shell.panel.engineBadge': '高亮引擎：{engine}',
 
   // viewer —— 文档渲染面
   'viewer.document.tooLarge': '文件超过 {limit}，建议改用 VSCode 原生编辑器打开',

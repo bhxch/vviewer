@@ -779,6 +779,30 @@ export function renderHex(
   };
 }
 
+/**
+ * hex 解析 worker URL 注入缝（spec H T3，评审订正③）。
+ *
+ * 存在理由：esbuild **不做** vite 的 `new URL(裸说明符, import.meta.url)` 资产化
+ * （vite 特有能力）→ 非 vite 宿主（VSCode 扩展的 webview）下默认表达式解析到**不存在
+ * 的相对路径** → 404 是**异步事件**，而下方 createWorker 的 try/catch **只兜同步抛错**
+ * → worker 永不应答 → **hex 渲染挂死**（比 pdf 的「渲染死」更隐蔽）。
+ * 故宿主（扩展 webview 侧）注入 worker 的真实 URL。
+ *
+ * 缺省不变：未注入（或 provider 返回 null）时逐字节回退默认表达式——apps/web 不注入
+ * → 行为零变化（RF 1 兼容锚）。
+ */
+let hexWorkerUrlProvider: (() => string | null) | null = null;
+
+/** 注入 hex worker URL 提供器（宿主装配时调用；传 null 解绑回默认表达式）。 */
+export function setHexWorkerUrlProvider(fn: (() => string | null) | null): void {
+  hexWorkerUrlProvider = fn;
+}
+
+/** 当前注入的 hex worker URL（未注入或 provider 返回 null → null = 走默认表达式）。 */
+export function getHexWorkerUrl(): string | null {
+  return hexWorkerUrlProvider?.() ?? null;
+}
+
 export const hexRenderer: Renderer = {
   id: 'hex',
   label: '二进制',
@@ -802,6 +826,9 @@ export const hexRenderer: Renderer = {
     const instance = renderHex(buffer, target, {
       createWorker: () => {
         try {
+          // 注入优先（宿主资产 URL）；缺省逐字节回退默认表达式（apps/web 不注入 → 零变化）
+          const injected = getHexWorkerUrl();
+          if (injected !== null) return new Worker(injected, { type: 'module' });
           return new Worker(new URL('./binary.worker.ts', import.meta.url), { type: 'module' });
         } catch {
           return null;
