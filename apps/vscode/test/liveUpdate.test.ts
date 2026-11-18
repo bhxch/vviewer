@@ -42,6 +42,7 @@ function makeDeps(overrides: Partial<LiveUpdateDeps> = {}): LiveUpdateDeps & {
     assets: ASSETS,
     theme: { kind: 'light', cssVars: {} },
     currentLanguageId: 'markdown',
+    currentSettings: () => DEFAULT_WEBVIEW_SETTINGS,
     applyTheme: vi.fn(async () => undefined),
     applyMermaidTheme: vi.fn(),
     reAssemble: vi.fn(),
@@ -125,6 +126,26 @@ describe('实时生效 · webview 消费面（主题变更）', () => {
     await applyThemeChange(deps);
     expect(deps.applyTheme).toHaveBeenCalledTimes(1);
     expect(deps.applyMermaidTheme).toHaveBeenCalledTimes(1);
+    expect(deps.reRender).toHaveBeenCalledTimes(1);
+  });
+
+  it('主题变更 → 重装装配层（评审 important ⑥：图表选项的 mermaidTheme 取装配期 themeKind，不重装则重渲用旧主题）', async () => {
+    const deps = makeDeps();
+    await applyThemeChange(deps);
+    expect(deps.reAssemble).toHaveBeenCalledTimes(1);
+    expect(deps.reAssemble).toHaveBeenCalledWith(DEFAULT_WEBVIEW_SETTINGS);
+    // 顺序：重装在重渲之前（否则重渲仍用旧 diagramOptions）
+    const order = (deps.reAssemble as { mock: { invocationCallOrder: number[] } }).mock
+      .invocationCallOrder[0]!;
+    const renderOrder = (deps.reRender as { mock: { invocationCallOrder: number[] } }).mock
+      .invocationCallOrder[0]!;
+    expect(order).toBeLessThan(renderOrder);
+  });
+
+  it('未初始化（无资产/无主题）→ 不重装（避免半初始化态重装出错）', async () => {
+    const deps = makeDeps({ assets: null, theme: null });
+    await applyThemeChange(deps);
+    expect(deps.reAssemble).not.toHaveBeenCalled();
     expect(deps.reRender).toHaveBeenCalledTimes(1);
   });
 });
@@ -495,4 +516,5 @@ describe('实时生效 · 面板生命周期（评审 critical ③ / minor ⑥ /
     await new Promise((r) => setTimeout(r, 0));
     expect(state.store['vviewer.toc.collapsed']).toBeUndefined();
   });
+
 });

@@ -22,6 +22,8 @@ export interface LiveUpdateDeps {
   theme: ThemePayload | null;
   /** 当前文档的 languageId（语言级覆盖提示用） */
   currentLanguageId?: string;
+  /** 当前设置（主题变更路径重装装配层用——重装须带当前设置，非上次变更值） */
+  currentSettings: () => WebviewSettings | null;
   /** 应用动态令牌（主题面：整体替换 `<style id="vv-tokens">`） */
   applyTheme: () => Promise<void>;
   /** mermaid 就地重画（markdown 实例面 applyTheme——鸭子探测，缺席即无动作） */
@@ -72,10 +74,18 @@ export async function applySettingsChange(
 }
 
 /**
- * 主题变更的实时生效消费面：动态令牌整体替换 + mermaid 重画 + 重渲。
+ * 主题变更的实时生效消费面：动态令牌整体替换 + **重装装配层** + mermaid 重画 + 重渲。
+ *
+ * 重装是必需环节（评审 important ⑥）：图表选项的 `mermaidTheme` 取**装配期**的
+ * themeKind（assemble.ts 的 `cachedDiagramOptions` 冻结）——只做「applyMermaidTheme（旧
+ * 实例）+ 全量重渲」的话，重渲用的是旧主题的 diagramOptions，净效果是把刚设成新主题
+ * 的 mermaid 覆盖回旧主题（主题切换后图不跟随）。
  */
 export async function applyThemeChange(deps: LiveUpdateDeps): Promise<void> {
   await deps.applyTheme();
+  // 重装须带**当前**设置（主题变更不改设置，但重装面要完整设置才不丢其他缝的取值）
+  const current = deps.currentSettings();
+  if (current && deps.assets && deps.theme) deps.reAssemble(current);
   deps.applyMermaidTheme();
   await deps.reRender();
 }

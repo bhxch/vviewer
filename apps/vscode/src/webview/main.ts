@@ -90,6 +90,9 @@ window.addEventListener('message', (event: MessageEvent) => {
   void handleHostMessage(message);
 });
 
+}, READY_RETRY_MS);
+bridge.ready();
+
 async function handleHostMessage(message: HostToWebview): Promise<void> {
   switch (message.kind) {
     case 'init':
@@ -166,6 +169,7 @@ function liveUpdateDeps(): LiveUpdateDeps {
     assets,
     theme,
     currentLanguageId,
+    currentSettings: () => settings,
     applyTheme,
     applyMermaidTheme,
     reAssemble: (next) => {
