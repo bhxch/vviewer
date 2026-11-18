@@ -86,6 +86,12 @@ export interface AssetUris {
   highlightWorkerSourceUrl: string;
 }
 
+/** toc 面板状态（宿主侧持久化面） */
+export interface TocState {
+  /** 折叠态（true = 收起） */
+  collapsed: boolean;
+}
+
 /** 主题载荷（kind + `--ui-*` 令牌快照） */
 export interface ThemePayload {
   kind: 'dark' | 'light';
@@ -109,6 +115,12 @@ export type HostToWebview =
       theme: ThemePayload;
       settings: WebviewSettings;
       assets: AssetUris;
+      /**
+       * toc 面板状态（spec §4.2：折叠态记忆 workspaceState）——宿主侧解析后下发：
+       * `workspaceState['vviewer.toc.collapsed']` 优先，缺省回落设置的
+       * `tocDefaultCollapsed`。
+       */
+      toc: TocState;
     }
   | {
       kind: 'settings';
@@ -130,6 +142,8 @@ export type WebviewToHost =
   | { kind: 'read-file'; id: number; path: string }
   | { kind: 'export-html'; id: number; html: string; suggestedName: string }
   | { kind: 'open-external'; url: string }
+  /** toc 折叠态变更（宿主持久化到 workspaceState——spec §4.2「折叠态记忆 workspaceState」） */
+  | { kind: 'toc-collapsed'; collapsed: boolean }
   /** 相对链接导航（spec §7 ①）：请求宿主把当前文档切到该相对路径 */
   | { kind: 'navigate'; path: string }
   | { kind: 'report'; level: 'warn' | 'error'; message: string };
@@ -151,6 +165,7 @@ export const WEBVIEW_TO_HOST_KINDS = [
   'export-html',
   'open-external',
   'navigate',
+  'toc-collapsed',
   'report'
 ] as const;
 

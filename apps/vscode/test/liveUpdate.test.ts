@@ -184,6 +184,93 @@ interface FakeRuntime {
   setConfigValue(key: string, value: unknown): void;
 }
 
+/** 假 workspaceState（折叠态持久化面——spec §4.2「折叠态记忆 workspaceState」） */
+function makeFakeWorkspaceState(): {
+  get<T>(key: string): T | undefined;
+  update(key: string, value: unknown): Promise<void>;
+  store: Record<string, unknown>;
+} {
+  const store: Record<string, unknown> = {};
+  return {
+    store,
+    get<T>(key: string): T | undefined {
+      return store[key] as T | undefined;
+    },
+    async update(key: string, value: unknown): Promise<void> {
+      store[key] = value;
+    }
+  };
+}
+
+/** 假 panel（捕获 dispose / 消息回调，供面板生命周期用例驱动） */
+interface FakePanel {
+  title: string;
+  active: boolean;
+  revealCount: number;
+  disposed: boolean;
+  webview: {
+    options: unknown;
+    html: string;
+    cspSource: string;
+    asWebviewUri(uri: { path: string }): { toString(): string };
+    onDidReceiveMessage(cb: (message: unknown) => void): { dispose(): void };
+    postMessage(message: unknown): Promise<void>;
+  };
+  onDidDispose(cb: () => void): { dispose(): void };
+  onDidChangeViewState(cb: () => void): { dispose(): void };
+  reveal(): void;
+  dispose(): void;
+  /** 触发 dispose 回调（模拟用户关闭面板） */
+  fireDispose(): void;
+  /** 触发宿主消息回调（模拟 webview → host 消息） */
+  fireMessage(message: unknown): void;
+}
+
+function makeFakePanel(posted: unknown[]): FakePanel {
+  let disposeCb: (() => void) | null = null;
+  let messageCb: ((message: unknown) => void) | null = null;
+  const panel: FakePanel = {
+    title: 'a.md',
+    active: true,
+    revealCount: 0,
+    disposed: false,
+    webview: {
+      options: {},
+      html: '',
+      cspSource: 'vscode-webview://x',
+      asWebviewUri: (uri) => ({ toString: () => `https://webview${uri.path}` }),
+      onDidReceiveMessage(cb) {
+        messageCb = cb;
+        return { dispose: () => undefined };
+      },
+      async postMessage(message: unknown) {
+        posted.push(message);
+      }
+    },
+    onDidDispose(cb) {
+      disposeCb = cb;
+      return { dispose: () => undefined };
+    },
+    onDidChangeViewState() {
+      return { dispose: () => undefined };
+    },
+    reveal() {
+      panel.revealCount++;
+    },
+    dispose() {
+      panel.disposed = true;
+    },
+    fireDispose() {
+      panel.disposed = true;
+      disposeCb?.();
+    },
+    fireMessage(message: unknown) {
+      messageCb?.(message);
+    }
+  };
+  return panel;
+}
+
 /** 构造注入假 vscode 运行时的 PanelHost（订阅与推送路径可实跑） */
 function makeFakeHost(): FakeRuntime {
   const posted: unknown[] = [];
@@ -222,7 +309,8 @@ function makeFakeHost(): FakeRuntime {
     ColorThemeKind: { Light: 1, Dark: 2 },
     Uri: {
       joinPath: (base: FakeUri, ...segments: string[]) =>
-        fakeUri([base.path.replace(/\/+$/, ''), ...segments].join('/'))
+        fakeUri([base.path.replace(/\/+$/, ''), ...segments].join('/')),
+      parse: (value: string) => fakeUri(value.replace(/^file:\/\//, ''))
     },
     commands: { executeCommand: async () => undefined },
     env: { language: 'en' }
@@ -249,28 +337,14 @@ describe('实时生效 · 宿主侧推送路径', () => {
     const { PanelHost } = await import('../src/host/webviewPanel');
     const host = new PanelHost(
       fake.vscode as never,
-      { extensionUri: fakeUri('/ext') } as never
+      {
+        extensionUri: fakeUri('/ext'),
+        workspaceState: makeFakeWorkspaceState()
+      } as never
     );
     host.watchChanges();
 
-    const panel = {
-      title: 'a.md',
-      active: true,
-      reveal: () => undefined,
-      dispose: () => undefined,
-      onDidDispose: () => ({ dispose: () => undefined }),
-      onDidChangeViewState: () => ({ dispose: () => undefined }),
-      webview: {
-        options: {} as unknown,
-        html: '',
-        cspSource: 'vscode-webview://x',
-        asWebviewUri: (uri: FakeUri) => ({ toString: () => `https://webview${uri.path}` }),
-        onDidReceiveMessage: () => ({ dispose: () => undefined }),
-        postMessage: async (message: unknown) => {
-          fake.posted.push(message);
-        }
-      }
-    };
+    const panel = makeFakePanel(fake.posted);
     await host.attach({ uri: fakeUri('/x/a.md') } as never, panel as never);
 
     const before = fake.posted.length;
@@ -291,27 +365,13 @@ describe('实时生效 · 宿主侧推送路径', () => {
   it('主题变更 → 推 theme 给已开 webview', async () => {
     const fake = makeFakeHost();
     const { PanelHost } = await import('../src/host/webviewPanel');
-    const host = new PanelHost(fake.vscode as never, { extensionUri: fakeUri('/ext') } as never);
+    const host = new PanelHost(
+      fake.vscode as never,
+      { extensionUri: fakeUri('/ext'), workspaceState: makeFakeWorkspaceState() } as never
+    );
     host.watchChanges();
 
-    const panel = {
-      title: 'a.md',
-      active: true,
-      reveal: () => undefined,
-      dispose: () => undefined,
-      onDidDispose: () => ({ dispose: () => undefined }),
-      onDidChangeViewState: () => ({ dispose: () => undefined }),
-      webview: {
-        options: {} as unknown,
-        html: '',
-        cspSource: 'vscode-webview://x',
-        asWebviewUri: (uri: FakeUri) => ({ toString: () => `https://webview${uri.path}` }),
-        onDidReceiveMessage: () => ({ dispose: () => undefined }),
-        postMessage: async (message: unknown) => {
-          fake.posted.push(message);
-        }
-      }
-    };
+    const panel = makeFakePanel(fake.posted);
     await host.attach({ uri: fakeUri('/x/a.md') } as never, panel as never);
 
     fake.fireThemeChange();
@@ -322,5 +382,60 @@ describe('实时生效 · 宿主侧推送路径', () => {
     );
     expect(themes).toHaveLength(1);
     expect(themes[0]!.theme.kind).toBe('light');
+  });
+});
+
+describe('实时生效 · 面板生命周期（评审 critical ③ / minor ⑥ / important ②）', () => {
+  it('面板关闭后再打开同文档 → 用新面板（旧的已 dispose，不得 reveal 它）', async () => {
+    const fake = makeFakeHost();
+    const { PanelHost } = await import('../src/host/webviewPanel');
+    const host = new PanelHost(
+      fake.vscode as never,
+      { extensionUri: fakeUri('/ext'), workspaceState: makeFakeWorkspaceState() } as never
+    );
+    const old = makeFakePanel(fake.posted);
+    await host.attach({ uri: fakeUri('/x/a.md') } as never, old as never);
+    old.fireDispose();
+    const fresh = makeFakePanel(fake.posted);
+    await host.attach({ uri: fakeUri('/x/a.md') } as never, fresh as never);
+    expect(old.revealCount).toBe(0);
+    expect(fresh.webview.html).not.toBe('');
+  });
+
+  it('相对链接导航后 activeKey 跟随切换（Reload / Open with Native 按当前文档）', async () => {
+    const fake = makeFakeHost();
+    const { PanelHost } = await import('../src/host/webviewPanel');
+    const host = new PanelHost(
+      fake.vscode as never,
+      { extensionUri: fakeUri('/ext'), workspaceState: makeFakeWorkspaceState() } as never
+    );
+    const panel = makeFakePanel(fake.posted);
+    await host.attach({ uri: fakeUri('/x/a.md') } as never, panel as never);
+    panel.fireMessage({ kind: 'navigate', path: 'b.md' });
+    await new Promise((r) => setTimeout(r, 0));
+    const active = host.activeDocumentUri();
+    expect(active?.path).toContain('b.md');
+  });
+
+  it('init 消息带 toc 折叠态（workspaceState 持久值优先，缺省回落设置缺省）', async () => {
+    const fake = makeFakeHost();
+    const { PanelHost } = await import('../src/host/webviewPanel');
+    const state = makeFakeWorkspaceState();
+    const host = new PanelHost(
+      fake.vscode as never,
+      { extensionUri: fakeUri('/ext'), workspaceState: state } as never
+    );
+    const panel = makeFakePanel(fake.posted);
+    await host.attach({ uri: fakeUri('/x/a.md') } as never, panel as never);
+    const init = fake.posted.find(
+      (m): m is { kind: string; toc: { collapsed: boolean } } =>
+        typeof m === 'object' && m !== null && (m as { kind?: string }).kind === 'init'
+    );
+    expect(init?.toc.collapsed).toBe(true); // 设置缺省（defaultCollapsed=true）
+
+    // webview 上报折叠态 → 宿主持久化 → 下次 init 用持久值
+    panel.fireMessage({ kind: 'toc-collapsed', collapsed: false });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(state.store['vviewer.toc.collapsed']).toBe(false);
   });
 });

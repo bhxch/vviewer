@@ -11,6 +11,7 @@ import {
   buildWebviewOptions,
   createNonce,
   documentName,
+  resolveAssetRoot,
   themeCssVars
 } from '../src/host/webviewPanel';
 
@@ -42,12 +43,12 @@ const EXTENSION_URI = fakeUri('/ext');
 
 describe('panel 选项 · webview 必需选项（评审订正④）', () => {
   it('enableScripts 为 true（不开则 webview 内脚本不执行 → 白屏）', () => {
-    const options = buildWebviewOptions(EXTENSION_URI as never, fakeJoinPath as never);
+    const options = buildWebviewOptions(EXTENSION_URI as never);
     expect(options.enableScripts).toBe(true);
   });
 
-  it('localResourceRoots 覆盖 dist/（asWebviewUri 资源不在 roots 内即 404）', () => {
-    const options = buildWebviewOptions(EXTENSION_URI as never, fakeJoinPath as never);
+  it('localResourceRoots 覆盖资产根（asWebviewUri 资源不在 roots 内即 404）', () => {
+    const options = buildWebviewOptions(fakeUri('/ext/dist') as never);
     expect(options.localResourceRoots).toHaveLength(1);
     expect((options.localResourceRoots![0] as FakeUri).path).toBe('/ext/dist');
   });
@@ -60,10 +61,30 @@ describe('panel 选项 · webview 必需选项（评审订正④）', () => {
   });
 });
 
+describe('资产根解析（评审 critical ①：安装态全 404 → 白屏）', () => {
+  it('安装态（VSIX 打包根 = dist/ 本身，产物在扩展根下）→ 资产根 = 扩展根', async () => {
+    const root = await resolveAssetRoot(
+      EXTENSION_URI as never,
+      fakeJoinPath as never,
+      async () => false
+    );
+    expect((root as FakeUri).path).toBe('/ext');
+  });
+
+  it('开发态（产物在 <ext>/dist 下）→ 资产根 = <ext>/dist', async () => {
+    const root = await resolveAssetRoot(
+      EXTENSION_URI as never,
+      fakeJoinPath as never,
+      async (uri) => (uri as FakeUri).path === '/ext/dist/webview/main.js'
+    );
+    expect((root as FakeUri).path).toBe('/ext/dist');
+  });
+});
+
 describe('资产 URI 映射（RF 5）', () => {
   const assets = buildAssetUris({
     webview: fakeWebview,
-    extensionUri: EXTENSION_URI as never,
+    assetRoot: fakeUri('/ext/dist') as never,
     joinPath: fakeJoinPath as never,
     grammars: { bash: { file: 'bash.wasm', aliases: ['sh'] } }
   });

@@ -24,7 +24,8 @@ describe('协议 · kind 穷尽', () => {
         doc: { name: 'a.md', path: '/a.md', size: 3, bytes: new Uint8Array([1, 2, 3]) },
         theme: { kind: 'light', cssVars: {} },
         settings: DEFAULT_WEBVIEW_SETTINGS,
-        assets: emptyAssets()
+        assets: emptyAssets(),
+        toc: { collapsed: true }
       },
       { kind: 'settings', settings: DEFAULT_WEBVIEW_SETTINGS },
       { kind: 'theme', theme: { kind: 'dark', cssVars: {} } },
@@ -43,6 +44,7 @@ describe('协议 · kind 穷尽', () => {
       { kind: 'export-html', id: 2, html: '<p>x</p>', suggestedName: 'a.html' },
       { kind: 'open-external', url: 'https://example.com' },
       { kind: 'navigate', path: 'sub/other.md' },
+      { kind: 'toc-collapsed', collapsed: true },
       { kind: 'report', level: 'warn', message: 'boom' }
     ];
     expect(new Set(samples.map((m) => m.kind))).toEqual(new Set(WEBVIEW_TO_HOST_KINDS));

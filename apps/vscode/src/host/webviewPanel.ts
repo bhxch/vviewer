@@ -52,20 +52,43 @@ export function themeCssVars(kind: 'dark' | 'light'): Record<string, string> {
 }
 
 /**
- * webview 必需选项（评审订正④的回归锚：`enableScripts: true` + `localResourceRoots` 含 dist）。
+ * 资产根解析（评审 critical ①：安装态全 404 → webview 白屏）。
+ *
+ * 两种布局并存：
+ * - **安装态**：VSIX 的打包根**就是**构建产物 `dist/` 本身（build.mjs：「dist/ 同时是
+ *   .vsix 的打包根」，`vsce package` 的 cwd = dist/）→ 安装后产物落在**扩展根**下
+ *   （`<ext>/extension.js`、`<ext>/webview/…`），**没有 dist/ 一层**。
+ * - **开发态**（F5 以 apps/vscode 为扩展根）：产物在 `<ext>/dist/webview/…`。
+ *
+ * 硬编码任一层 → 另一层全部资源 404（入口脚本、wasm、字体、grammar 全挂）→ 白屏。
+ * 故按「哪一层存在入口脚本」探测（入口脚本是必然存在的那一个产物）。
  *
  * @param extensionUri 扩展根 URI
  * @param joinPath `vscode.Uri.joinPath`（注入，便于单测）
+ * @param exists 资源存在性探测（注入——宿主侧走 `workspace.fs.stat`）
  */
-export function buildWebviewOptions(
+export async function resolveAssetRoot(
   extensionUri: vscode.Uri,
-  joinPath: (base: vscode.Uri, ...segments: string[]) => vscode.Uri
-): vscode.WebviewOptions {
+  joinPath: (base: vscode.Uri, ...segments: string[]) => vscode.Uri,
+  exists: (uri: vscode.Uri) => Promise<boolean>
+): Promise<vscode.Uri> {
+  const nested = joinPath(extensionUri, 'dist');
+  if (await exists(joinPath(nested, 'webview', 'main.js'))) return nested;
+  return extensionUri;
+}
+
+/**
+ * webview 必需选项（评审订正④的回归锚：`enableScripts: true` + `localResourceRoots` 含
+ * 资产根）。
+ *
+ * @param assetRoot 资产根（安装态 = 扩展根；开发态 = `<ext>/dist`——见 resolveAssetRoot）
+ */
+export function buildWebviewOptions(assetRoot: vscode.Uri): vscode.WebviewOptions {
   return {
     // 不开则 webview 内脚本不执行 → 白屏
     enableScripts: true,
     // asWebviewUri 资源必须落在 roots 内，否则 wasm/字体/grammar/worker 全 404
-    localResourceRoots: [joinPath(extensionUri, 'dist')]
+    localResourceRoots: [assetRoot]
   };
 }
 
@@ -77,7 +100,8 @@ export function buildProviderWebviewOptions(): vscode.WebviewPanelOptions {
 /** 资产 URI 映射的入参 */
 export interface AssetUrisParams {
   webview: vscode.Webview;
-  extensionUri: vscode.Uri;
+  /** 资产根（安装态 = 扩展根；开发态 = `<ext>/dist`——见 resolveAssetRoot） */
+  assetRoot: vscode.Uri;
   joinPath: (base: vscode.Uri, ...segments: string[]) => vscode.Uri;
   grammars: GrammarTable;
 }
@@ -86,9 +110,9 @@ export interface AssetUrisParams {
  * 资产 URI 映射（RF 5：全为 `asWebviewUri` 绝对 URL，三段基址与三个 worker 同族）。
  */
 export function buildAssetUris(params: AssetUrisParams): AssetUris {
-  const { webview, extensionUri, joinPath, grammars } = params;
+  const { webview, assetRoot, joinPath, grammars } = params;
   const asset = (...segments: string[]): string =>
-    webview.asWebviewUri(joinPath(extensionUri, 'dist', 'webview', ...segments)).toString();
+    webview.asWebviewUri(joinPath(assetRoot, 'webview', ...segments)).toString();
   const base = (...segments: string[]): string => `${asset(...segments)}/`;
   return {
     grammarsBase: base('assets', 'grammars'),
@@ -124,6 +148,8 @@ export class PanelHost implements vscode.Disposable {
   private readonly panels = new Map<string, vscode.WebviewPanel>();
   /** panel → 当前文档元信息（相对链接导航后基准随之切换；languageId 供 per-language 设置解析） */
   private readonly panelMeta = new Map<vscode.WebviewPanel, { uri: vscode.Uri; languageId?: string }>();
+  /** 资产根（安装态 = 扩展根；开发态 = `<ext>/dist`）——首次 attach 时探测并缓存 */
+  private assetRoot: vscode.Uri | null = null;
   private readonly nextRequestId = createRequestIdFactory();
   private activeKey: string | null = null;
 
@@ -142,31 +168,35 @@ export class PanelHost implements vscode.Disposable {
     const key = document.uri.toString();
     const existing = this.panels.get(key);
     if (existing && existing !== panel) {
-      existing.reveal();
-      return;
+      try {
+        existing.reveal();
+        return; // 复用既有面板（不重开）
+      } catch {
+        // 既有面板已 dispose（@types/vscode：dispose 后使用面板抛错）→ 清理后继续装配新面板
+        this.forgetPanel(existing);
+      }
     }
     this.panels.set(key, panel);
     this.panelMeta.set(panel, { uri: document.uri });
     this.activeKey = key;
     panel.onDidDispose(() => {
-      if (this.panels.get(key) === panel) this.panels.delete(key);
-      this.panelMeta.delete(panel);
-      if (this.activeKey === key) this.activeKey = null;
+      // **按面板身份清理**（不按捕获的键）：相对链接导航会改写 panels 的键，捕获键随即
+      // 失效 → 旧键永不清除 → 目标文档再打开时取到已 dispose 的面板（评审 critical ③）
+      this.forgetPanel(panel);
     });
     panel.onDidChangeViewState(() => {
-      if (panel.active) this.activeKey = key;
+      if (panel.active) this.activeKey = this.panelMeta.get(panel)?.uri.toString() ?? this.activeKey;
     });
 
+    const assetRoot = await this.resolveAssetRootCached();
     const webview = panel.webview;
-    webview.options = buildWebviewOptions(this.context.extensionUri, (base, ...segments) =>
-      this.vscode.Uri.joinPath(base, ...segments)
-    );
+    webview.options = buildWebviewOptions(assetRoot);
     const nonce = createNonce();
     webview.html = renderWebviewHtml({
       cspSource: webview.cspSource,
       nonce,
       scriptUri: webview
-        .asWebviewUri(this.vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview', 'main.js'))
+        .asWebviewUri(this.vscode.Uri.joinPath(assetRoot, 'webview', 'main.js'))
         .toString(),
       styleText: composeStyleText(),
       title: documentName(document.uri),
@@ -178,6 +208,46 @@ export class PanelHost implements vscode.Disposable {
     });
 
     await this.sendInit(document.uri, panel);
+  }
+
+  /** 折叠态持久化键（workspaceState——spec §4.2「折叠态记忆 workspaceState」） */
+  private static readonly TOC_COLLAPSED_KEY = 'vviewer.toc.collapsed';
+
+  /** 读持久化折叠态（未存过 → undefined＝回落设置缺省） */
+  private readCollapsedState(): boolean | undefined {
+    const value = this.context.workspaceState.get<boolean>(PanelHost.TOC_COLLAPSED_KEY);
+    return typeof value === 'boolean' ? value : undefined;
+  }
+
+  /** 写持久化折叠态 */
+  private async writeCollapsedState(collapsed: boolean): Promise<void> {
+    await this.context.workspaceState.update(PanelHost.TOC_COLLAPSED_KEY, collapsed);
+  }
+
+  /** 面板离场清理（按面板身份——键可被导航改写，身份不变） */
+  private forgetPanel(panel: vscode.WebviewPanel): void {
+    for (const [key, value] of [...this.panels]) {
+      if (value === panel) this.panels.delete(key);
+    }
+    this.panelMeta.delete(panel);
+    if (this.activeKey !== null && !this.panels.has(this.activeKey)) this.activeKey = null;
+  }
+
+  /** 资产根解析（安装态/开发态两布局——见 resolveAssetRoot；首次探测后缓存） */
+  private async resolveAssetRootCached(): Promise<vscode.Uri> {
+    this.assetRoot ??= await resolveAssetRoot(
+      this.context.extensionUri,
+      (base, ...segments) => this.vscode.Uri.joinPath(base, ...segments),
+      async (uri) => {
+        try {
+          await this.vscode.workspace.fs.stat(uri);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+    );
+    return this.assetRoot;
   }
 
   /** 重渲染（`vviewer.reload` 命令面）：向该文档的 panel 重推 init */
@@ -266,12 +336,16 @@ export class PanelHost implements vscode.Disposable {
     const size = outcome.ok ? outcome.size : outcome.reason === 'too-large' ? outcome.size : 0;
     const bytes = outcome.ok ? outcome.bytes : new Uint8Array(0);
     const languageId = await this.resolveLanguageId(uri, size);
+    const settings = readWebviewSettings(this.vscode.workspace, languageId);
     const message: HostToWebview = {
       kind: 'init',
       doc: { name: documentName(uri), path: uri.path, size, bytes, languageId },
       theme: this.currentTheme(),
-      settings: readWebviewSettings(this.vscode.workspace, languageId),
-      assets: await this.buildAssets(panel.webview)
+      settings,
+      assets: await this.buildAssets(panel.webview),
+      // 折叠态记忆 workspaceState（spec §4.2）：持久值优先，缺省回落设置的
+      // `tocDefaultCollapsed`
+      toc: { collapsed: this.readCollapsedState() ?? settings.tocDefaultCollapsed }
     };
     // 记 languageId——设置变更推送时按各自文档的语言解析 per-language 覆盖
     const meta = this.panelMeta.get(panel);
@@ -288,9 +362,10 @@ export class PanelHost implements vscode.Disposable {
 
   /** 资产 URI（含 grammar 清单读取） */
   private async buildAssets(webview: vscode.Webview): Promise<AssetUris> {
+    const assetRoot = await this.resolveAssetRootCached();
     return buildAssetUris({
       webview,
-      extensionUri: this.context.extensionUri,
+      assetRoot,
       joinPath: (base, ...segments) => this.vscode.Uri.joinPath(base, ...segments),
       grammars: await this.readGrammarTable()
     });
@@ -298,9 +373,9 @@ export class PanelHost implements vscode.Disposable {
 
   /** 读 grammar 清单（manifest 的 grammars 键集）——缺件即空表（webview 侧可见降级） */
   private async readGrammarTable(): Promise<GrammarTable> {
+    const assetRoot = await this.resolveAssetRootCached();
     const uri = this.vscode.Uri.joinPath(
-      this.context.extensionUri,
-      'dist',
+      assetRoot,
       'webview',
       'assets',
       'grammars',
@@ -364,6 +439,9 @@ export class PanelHost implements vscode.Disposable {
         return;
       case 'navigate':
         await this.handleNavigate(documentUri, panel, message.path);
+        return;
+      case 'toc-collapsed':
+        await this.writeCollapsedState(message.collapsed);
         return;
       case 'report':
         this.handleReport(message.level, message.message);
@@ -431,6 +509,8 @@ export class PanelHost implements vscode.Disposable {
     this.panels.delete(previousKey);
     this.panels.set(target.toString(), panel);
     this.panelMeta.set(panel, { uri: target });
+    // 活动文档随导航切换（否则 Reload / Open with Native 仍指向原文档——评审 minor ⑥）
+    this.activeKey = target.toString();
     panel.title = documentName(target);
     await this.sendInit(target, panel);
   }
