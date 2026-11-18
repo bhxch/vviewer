@@ -260,6 +260,9 @@ jobs:
         with:
           name: e2e-web-static
           path: apps/web/build
+          # include-hidden-files：与 e2e-web-build / e2e-corpus 同款处置（评审 minor：
+          # v4+ 引擎默认排除点开头条目，将来 adapter/PWA 产出点开头文件即静默缺件）
+          include-hidden-files: true
           retention-days: 1
           if-no-files-found: error
       # artifact ④：仓库树生成物（「仓库树消费面」）——spec 进程在模块求值期直读的
