@@ -43,7 +43,10 @@ packages/vviewer-highlight/assets/themes.json
 packages/vviewer-highlight/assets/queries/
 server/grammars-manifest.json
 server/GRAMMAR_LICENSES.md
-packages/vviewer-core/src/registry/generated-extensions.ts
+# packages/vviewer-core/src/registry/generated-extensions.ts：**在库**（占位空集）——
+# core barrel 静态 re-export 该模块，生成物缺失时模块图整体解析失败（干净克隆无起点）。
+# 在库内容恒为占位（生成内容不入库）；真实清单由 pnpm gen:sources 就地覆写生成，
+# 勿提交生成内容（apps/vscode/test/extensions.test.ts 的「生成物不入库」守卫断言）。
 # static/grammars 整目录（*.wasm 与生成的 manifest.json，构建产物）
 apps/web/static/grammars/
 # tree-sitter 查询静态资产（构建期由 vite 插件从 packages/vviewer-highlight/assets/queries 拷贝，不入库）

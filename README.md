@@ -126,6 +126,15 @@ server/             Rust axum：tree/file/events SSE/ticket/search/compute（高
 
 ## 开发
 
+**首次拉取必做**（构建源头化：grammar 生态源清单与查询/主题资产随 helix pin 再生，
+**不入库**；该步需联网——CI 亦跑同一步）：
+
+```bash
+pnpm gen:sources              # 再生源清单产物（languages.toml / build-list / queries / themes /
+                              #   server manifest / 扩展名清单）——缺它则构建报错、部分用例跳过
+                              #   （消费端缺失一律指向本命令）
+```
+
 ```bash
 pnpm test                     # vitest 全仓单元测试
 cargo test --manifest-path server/Cargo.toml   # Rust 单元/集成测试

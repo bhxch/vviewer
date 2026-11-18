@@ -87,9 +87,20 @@ const FOREIGN_MIRROR_RUNTIME_CACHING: NonNullable<
 /**
  * tree-sitter 查询静态资产：Worker 端按需 fetch /queries/{lang}/*.scm，
  * 286 目录 752 文件不入库（.gitignore），dev/build 启动时从 highlight 包全量同步拷贝。
+ *
+ * 缺源处置（评审 important ⑫）：查询树随 gen-sources 产出（构建源头化，不入库）——
+ * 干净克隆上该目录不存在，此前 cpSync 抛裸 ENOENT（无修复指引）。按仓内既定口径
+ * （server/core/build.rs 与 apps/vscode/scripts/collect-assets.mjs 同款）**fail-fast
+ * 并给出可执行修复命令**：`pnpm gen:sources`（构建源头化，源清单再生；需联网）。
  */
 function copyTsQueries(): Plugin {
   const copy = (): void => {
+    if (!existsSync(QUERIES_SRC)) {
+      throw new Error(
+        `[web] tree-sitter 查询资产缺失：${QUERIES_SRC}\n` +
+          '修复命令：pnpm gen:sources（构建源头化：queries 树随 helix pin 再生，不入库；需联网）'
+      );
+    }
     rmSync(QUERIES_DEST, { recursive: true, force: true });
     cpSync(QUERIES_SRC, QUERIES_DEST, { recursive: true });
   };

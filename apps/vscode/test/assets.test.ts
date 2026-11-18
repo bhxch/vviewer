@@ -185,13 +185,17 @@ describe('资产采集 · icon', () => {
 });
 
 describe('资产采集 · 真实仓内源齐备（构建前置可见性）', () => {
-  it('grammar manifest 的语言集非空且 queries 命中大部分语言', () => {
-    const { languages } = readGrammarManifest(path.join(REPO_ROOT, 'apps/web/static/grammars'));
+  // 生成物不入库（构建源头化 spec F）：干净克隆上 grammar 资产与 queries 树均不在场
+  // ——本组断言「仓内源齐备」，缺源即跳过（不使根 vitest 变红；评审 important ⑫：
+  // 无条件读出库生成物使干净克隆的 `pnpm vitest run` 直接红）。
+  const grammarsDir = path.join(REPO_ROOT, 'apps/web/static/grammars');
+  const queriesDir = path.join(REPO_ROOT, 'packages/vviewer-highlight/assets/queries');
+  const sourcesReady = fs.existsSync(path.join(grammarsDir, 'manifest.json')) && fs.existsSync(queriesDir);
+
+  it.skipIf(!sourcesReady)('grammar manifest 的语言集非空且 queries 命中大部分语言', () => {
+    const { languages } = readGrammarManifest(grammarsDir);
     expect(languages.length).toBeGreaterThan(0);
-    const { selected, missing } = selectQueryLanguages(
-      languages,
-      path.join(REPO_ROOT, 'packages/vviewer-highlight/assets/queries')
-    );
+    const { selected, missing } = selectQueryLanguages(languages, queriesDir);
     expect(selected.length).toBeGreaterThan(0);
     expect(missing.every((lang) => !selected.includes(lang))).toBe(true);
   });
@@ -204,6 +208,7 @@ describe('资产采集 · 错误信息形态', () => {
     expect(err.message).toContain('pnpm gen:sources');
   });
 });
+
 
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

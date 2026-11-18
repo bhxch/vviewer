@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { GENERATED_EXTENSIONS } from '@bhxch/vviewer-core';
 import { collectClaimedExtensions } from '../scripts/collect-extensions';
 import { MVP_RENDERERS } from '../src/webview/renderers';
@@ -42,7 +43,16 @@ function makeDeps(overrides: Partial<AssembleDeps> = {}): AssembleDeps {
   };
 }
 
-/** 生成物缺失即 fail-fast 并给出修复命令（生成物不入库） */
+/**
+ * 生成物**在位**判定（构建源头化 spec F + 评审 important ⑫）：
+ * 仓内该文件恒为**提交面占位**（空集——保证模块图可解析：core barrel 静态
+ * re-export 本模块，缺失则整个 barrel 的导入方全红）；真实清单由
+ * `pnpm gen:sources` 就地覆写生成。清单为空 = 生成物未生成（干净克隆未跑该步）
+ * → 本域用例**跳过**（不使根 vitest 变红），修复命令见跳过原因。
+ */
+const GENERATED_READY = GENERATED_EXTENSIONS.length > 0;
+
+/** 生成物文件缺失即 fail-fast 并给出修复命令（生成物不入库） */
 function assertGeneratedFile(): void {
   const file = path.join(REPO_ROOT, GENERATED_EXTENSIONS_PATH);
   if (!fs.existsSync(file)) {
@@ -51,11 +61,11 @@ function assertGeneratedFile(): void {
 }
 
 describe('扩展名清单 · 注册表实跑', () => {
-  it('生成物存在（缺失即 fail-fast，提示 pnpm gen:sources）', () => {
+  it('生成物文件在位（占位空集即生成物未生成——本域其余用例据此跳过）', () => {
     assertGeneratedFile();
   });
 
-  it('集合非空且升序、无重复', () => {
+  it.skipIf(!GENERATED_READY)('集合非空且升序、无重复', () => {
     assertGeneratedFile();
     const { extensions } = collectClaimedExtensions();
     expect(extensions.length).toBeGreaterThan(0);
@@ -63,14 +73,14 @@ describe('扩展名清单 · 注册表实跑', () => {
     expect([...extensions].sort()).toEqual(extensions);
   });
 
-  it('markdown 类扩展名（md/markdown）由 markdown 认领（非 code）', () => {
+  it.skipIf(!GENERATED_READY)('markdown 类扩展名（md/markdown）由 markdown 认领（非 code）', () => {
     assertGeneratedFile();
     const { owners } = collectClaimedExtensions();
     expect(owners['md']).toBe('markdown');
     expect(owners['markdown']).toBe('markdown');
   });
 
-  it('专有渲染器的扩展名各归其主（html/htm→html、pdf→pdf、png→image、mp4→av、jsonl→jsonl）', () => {
+  it.skipIf(!GENERATED_READY)('专有渲染器的扩展名各归其主（html/htm→html、pdf→pdf、png→image、mp4→av、jsonl→jsonl）', () => {
     assertGeneratedFile();
     const { owners } = collectClaimedExtensions();
     expect(owners['html']).toBe('html');
@@ -82,7 +92,7 @@ describe('扩展名清单 · 注册表实跑', () => {
     expect(owners['ndjson']).toBe('jsonl');
   });
 
-  it('**跨文件守卫**：selector（生成脚本输出）与运行时认领面（装配层实际注册表）同源', () => {
+  it.skipIf(!GENERATED_READY)('**跨文件守卫**：selector（生成脚本输出）与运行时认领面（装配层实际注册表）同源', () => {
     // 认领面 > selector → 用户双击不接管；< selector → 接管后无渲染器。两面必须逐项
     // 相等——若只在装配层加渲染器而生成脚本未同步，本断言即红（Review Focus 8）。
     const claimed = collectClaimedExtensions().extensions;
@@ -97,7 +107,7 @@ describe('扩展名清单 · 注册表实跑', () => {
     expect([...runtime].sort()).toEqual([...claimed].sort());
   });
 
-  it('generated 兜底扩展名在集内（装序铁律：generated 只补空位，不覆盖专有认领）', () => {
+  it.skipIf(!GENERATED_READY)('generated 兜底扩展名在集内（装序铁律：generated 只补空位，不覆盖专有认领）', () => {
     assertGeneratedFile();
     const { extensions, owners } = collectClaimedExtensions();
     const set = new Set(extensions);
@@ -118,8 +128,7 @@ describe('扩展名清单 · 注册表实跑', () => {
     expect(owners['md']).toBe('markdown');
   });
 
-  it('集合与渲染器 extensions 并集一致（每个渲染器的每个扩展名都在集内）', () => {
-    assertGeneratedFile();
+  it.skipIf(!GENERATED_READY)('集合与渲染器 extensions 并集一致（每个渲染器的每个扩展名都在集内）', () => {
     const { extensions } = collectClaimedExtensions();
     const set = new Set(extensions);
     for (const renderer of MVP_RENDERERS) {
@@ -129,8 +138,7 @@ describe('扩展名清单 · 注册表实跑', () => {
     }
   });
 
-  it('selector glob 形态为「*.<ext>」且与清单一一对应', () => {
-    assertGeneratedFile();
+  it.skipIf(!GENERATED_READY)('selector glob 形态为「*.<ext>」且与清单一一对应', () => {
     const { extensions } = collectClaimedExtensions();
     const selector = toSelector(extensions);
     expect(selector).toHaveLength(extensions.length);
@@ -139,5 +147,23 @@ describe('扩展名清单 · 注册表实跑', () => {
     expect(selector.every((g) => g.startsWith('*.') && g.length > 2)).toBe(true);
     // glob 元字符不得出现在扩展名里（否则 selector 语义漂移）
     expect(selector.filter((g) => /[*?[\]{}]/.test(g.slice(2)))).toEqual([]);
+  });
+});
+
+describe('生成物入库纪律（构建源头化 spec F：生成内容不入库）', () => {
+  it('在库版本恒为提交面占位（生成内容入库即与 helix pin 漂移，且绕过构建源头化）', () => {
+    // 仓内该文件在库内容恒为空集占位（模块图可解析用）；真实清单由 pnpm gen:sources
+    // 就地覆写生成（不入库）。误提交生成内容 → 本断言红。
+    let head: string;
+    try {
+      head = execFileSync('git', ['show', `HEAD:${GENERATED_EXTENSIONS_PATH}`], {
+        cwd: REPO_ROOT,
+        encoding: 'utf8'
+      });
+    } catch {
+      return; // 非 git 环境（浅克隆/打包件）→ 无 HEAD 版本可比，不作断言
+    }
+    expect(head).toContain('提交面占位');
+    expect(head).toContain('export const GENERATED_EXTENSIONS: readonly string[] = [];');
   });
 });
