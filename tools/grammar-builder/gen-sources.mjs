@@ -272,6 +272,68 @@ export function applyQueryPatches(destDir, patches) {
   }
 }
 
+/**
+ * grammar 源覆盖（[[grammar]] source 段文本级覆盖）。
+ *
+ * **yaml**：helix master 的 yaml 源为 ikatyang/tree-sitter-yaml（归档仓，C++ 外置
+ * scanner `scanner.cc`）——cli ≥0.26 的 wasm 工具链 `get_scanner_path` 只认
+ * `scanner.c`，C++ scanner 不可编译 → **yaml.wasm 不产出** → 2026-10-16 落地的
+ * BUG-37 修复（yaml 本地 wasm 高亮）被静默回退，yaml 恒降级 hljs（且无任何日志：
+ * wasm 缺失即「该语言无产物」，问题面藏在构建产物里）。
+ * 覆盖为 tree-sitter-grammars 维护 fork v0.7.2（**C 外置 scanner.c**，cli 0.27 自建
+ * 成功）——即 BUG-37 清偿所用的同一源（docs/spec-deviations.md §10 回补条件部分达成）。
+ *
+ * 纪律：命中数必须为 1（否则抛错要求人工复核——上游改源即须复核覆盖是否仍适用）；
+ * 已覆盖形态幂等跳过（重复跑 gen-sources 不报错）。
+ */
+export const GRAMMAR_SOURCE_OVERRIDES = [
+  {
+    grammar: 'yaml',
+    reason:
+      'ikatyang 源的 C++ 外置 scanner（scanner.cc）不可被 cli wasm 工具链编译 → yaml.wasm 不产出（BUG-37 回退，yaml 恒降级 hljs）',
+    find: 'source = { git = "https://github.com/ikatyang/tree-sitter-yaml", rev = "0e36bed171768908f331ff7dff9d956bae016efb" }',
+    replace:
+      'source = { git = "https://github.com/tree-sitter-grammars/tree-sitter-yaml", rev = "7708026449bed86239b1cd5bce6e3c34dbca6415" }',
+  },
+];
+
+/**
+ * 应用 grammar 源覆盖到 languages.toml 文本（导出供测试）。
+ *
+ * 判定口径：① 已是覆盖形态 → 幂等跳过；② 命中 find 恰 1 次 → 覆盖；③ 清单里**没有**
+ * 该 grammar 块（如测试夹具/精简清单）→ 跳过（无覆盖需求）；④ 有该 grammar 块但
+ * 源文本与已知形态不符（上游改源）→ **抛错**要求人工复核，不静默放过（否则 yaml
+ * 悄悄回到不可编译的源，wasm 不产出且无日志）。
+ *
+ * @param {string} tomlText 上游 languages.toml 原文
+ * @param {Array<{grammar: string, reason: string, find: string, replace: string}>} overrides 覆盖表
+ * @returns {string} 覆盖后的文本
+ */
+export function applyGrammarSourceOverrides(tomlText, overrides = GRAMMAR_SOURCE_OVERRIDES) {
+  let out = tomlText;
+  for (const { grammar, reason, find, replace } of overrides) {
+    if (out.includes(replace)) continue; // 已覆盖（幂等）
+    const hits = out.split(find).length - 1;
+    if (hits === 1) {
+      out = out.replace(find, replace);
+      continue;
+    }
+    if (hits > 1) {
+      throw new Error(
+        `grammar 源覆盖失配（命中 ${hits} 次，期望 1 次）: ${grammar} — ${reason}，请人工复核 GRAMMAR_SOURCE_OVERRIDES`,
+      );
+    }
+    // 未命中：清单里没有该 grammar 块 → 无需覆盖；有块但源形态变了 → 抛错复核
+    const hasBlock = new RegExp(`\\[\\[grammar\\]\\]\\s*name\\s*=\\s*"${grammar}"`).test(out);
+    if (hasBlock) {
+      throw new Error(
+        `grammar 源覆盖失配（源文本与已知形态不符）: ${grammar} — ${reason}，请人工复核 GRAMMAR_SOURCE_OVERRIDES`,
+      );
+    }
+  }
+  return out;
+}
+
 // ---------- 纯函数面（自 gen-code-extensions.mjs 迁，toModule 头注释按出库语义改） ----------
 
 /** normalize→过滤→去重→升序。可作扩展名的 token 才收（glob 形排除）。 */
@@ -371,6 +433,7 @@ export function deriveServerManifest(grammarDoc, exceptList = []) {
     grammars,
   };
 }
+
 
 /**
  * 新旧产物差异报告：
@@ -727,7 +790,9 @@ export async function main(argv = process.argv.slice(2), opts = {}) {
   console.log(`[gen-sources] 源锚: helix master@${commit}（${P.pinPath}）`);
 
   // ① languages.toml@pin → 四产物派生
-  const tomlText = await fetchPinLanguagesToml(commit, { fetchImpl });
+  const tomlText = applyGrammarSourceOverrides(
+    await fetchPinLanguagesToml(commit, { fetchImpl })
+  );
   const grammarDoc = parseToml(tomlText);
   const exceptList = exceptGrammars(grammarDoc);
   const languages = parseLanguages(tomlText);

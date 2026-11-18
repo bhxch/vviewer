@@ -24,6 +24,7 @@ import {
   BUILTIN_PALETTE,
   QUERY_PATCHES,
   applyQueryPatches,
+  applyGrammarSourceOverrides,
   cSymbolOf,
   collectExtensions,
   collectThemes,
@@ -147,8 +148,31 @@ describe('deriveBuildList / deriveServerManifest（[[grammar]] 派生：全集 �
   });
 });
 
-// ③ cSymbol 派生规约（spec F §8）----------------------------------------------------
+describe('applyGrammarSourceOverrides（grammar 源覆盖：yaml → C 外置 scanner 源）', () => {
+  // helix master 的 yaml 源是 ikatyang（C++ scanner.cc）→ cli wasm 工具链不可编译 →
+  // yaml.wasm 不产出（BUG-37 回退，yaml 恒降级 hljs）。覆盖为 tree-sitter-grammars
+  // fork v0.7.2（C scanner.c，cli 0.27 自建成功）。
+  it('yaml 源被覆盖为 tree-sitter-grammars fork；已覆盖形态幂等；失配抛错要求人工复核', () => {
+    const toml =
+      '[[grammar]]\nname = "yaml"\n' +
+      'source = { git = "https://github.com/ikatyang/tree-sitter-yaml", rev = "0e36bed171768908f331ff7dff9d956bae016efb" }\n';
+    const out = applyGrammarSourceOverrides(toml);
+    expect(out).toContain('https://github.com/tree-sitter-grammars/tree-sitter-yaml');
+    expect(out).not.toContain('ikatyang');
+    // 幂等：重复应用不报错、文本不变
+    expect(applyGrammarSourceOverrides(out)).toBe(out);
+    // 清单里无该 grammar 块（夹具/精简清单）→ 跳过，不抛错
+    expect(applyGrammarSourceOverrides('[[grammar]]\nname = "rust"\nsource = { git = "x", rev = "y" }\n')).toBe(
+      '[[grammar]]\nname = "rust"\nsource = { git = "x", rev = "y" }\n'
+    );
+    // 有 yaml 块但源形态变了（上游改源）→ 抛错要求人工复核，不静默放过
+    expect(() =>
+      applyGrammarSourceOverrides('[[grammar]]\nname = "yaml"\nsource = { git = "https://other/yaml", rev = "deadbeef" }\n')
+    ).toThrow(/grammar 源覆盖失配/);
+  });
+});
 
+// ③ cSymbol 派生规约（spec F §8）----------------------------------------------------
 describe('cSymbolOf（tree_sitter_<name，-→_> 派生规约）', () => {
   it('-→_ 变换', () => {
     expect(cSymbolOf('c-sharp')).toBe('tree_sitter_c_sharp');
