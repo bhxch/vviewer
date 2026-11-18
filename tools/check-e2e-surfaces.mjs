@@ -16,7 +16,8 @@
 // 用法：node tools/check-e2e-surfaces.mjs --stage=consumer|producer
 //   consumer = e2e 分片 runner 必备面（artifact 下发后自检）
 //   producer = e2e-prep 产出面（consumer 全部 + grammar 源树/清单/queries 等生成物）
-import { existsSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -125,6 +126,61 @@ export function checkSurface(root, surface) {
   return { ok: true, reason: '' };
 }
 
+/**
+ * 语料完整性校验（评审 important ⑯）：语料缺件时受影响用例走
+ * `test.skip(!existsSync(...))` 静默跳过、用例守恒锚（--list 计数）对缺件不敏感
+ * ——CI 全绿但覆盖已缩。manifest 逐条列了 path/size/sha256（fetch 脚本产出），
+ * 故逐条比对成本极低（407 文件 / 6.4MB）。
+ *
+ * 判定：① 缺文件 → 红；② size 不符 → 红（内容被截断/换版）；③ sha256 不符 → 红
+ * （内容漂移）。sha256 校验可关闭（`verifyHash: false`——仅比对存在性与体积）。
+ *
+ * @param {string} root 仓库根
+ * @param {{verifyHash?: boolean}} options 校验开关
+ * @returns {{ok: boolean, checked: number, missing: string[], sizeMismatch: string[], hashMismatch: string[], reason?: string}}
+ */
+export function checkCorpusIntegrity(root, options = {}) {
+  const verifyHash = options.verifyHash !== false;
+  const corpusRoot = path.join(root, 'apps/web/e2e/fixtures/corpus');
+  const manifestPath = path.join(corpusRoot, 'manifest.json');
+  if (!existsSync(manifestPath)) {
+    return { ok: false, checked: 0, missing: [], sizeMismatch: [], hashMismatch: [], reason: 'manifest 缺失' };
+  }
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  const missing = [];
+  const sizeMismatch = [];
+  const hashMismatch = [];
+  let checked = 0;
+  for (const source of manifest.sources ?? []) {
+    for (const file of source.files ?? []) {
+      checked += 1;
+      const abs = path.join(corpusRoot, source.id, file.path);
+      if (!existsSync(abs)) {
+        missing.push(`${source.id}/${file.path}`);
+        continue;
+      }
+      const size = statSync(abs).size;
+      if (typeof file.size === 'number' && size !== file.size) {
+        sizeMismatch.push(`${source.id}/${file.path}（期望 ${file.size} 实际 ${size}）`);
+        continue;
+      }
+      if (verifyHash && typeof file.sha256 === 'string') {
+        const digest = createHash('sha256').update(readFileSync(abs)).digest('hex');
+        if (digest !== file.sha256) {
+          hashMismatch.push(`${source.id}/${file.path}`);
+        }
+      }
+    }
+  }
+  return {
+    ok: missing.length === 0 && sizeMismatch.length === 0 && hashMismatch.length === 0,
+    checked,
+    missing,
+    sizeMismatch,
+    hashMismatch
+  };
+}
+
 /** 解析 --stage 参数（缺省 consumer）：支持 `--stage=producer` 与 `--stage producer` 两形态 */
 export function parseStage(argv) {
   const inline = argv.find((a) => a.startsWith('--stage='));
@@ -160,6 +216,30 @@ function main(argv) {
     return 1;
   }
   console.log(`\n[check-e2e-surfaces] stage=${stage}：${surfaces.length} 项消费面齐备。`);
+
+  // 语料逐条完整性（评审 important ⑯）：语料缺件时受影响用例走 test.skip 静默跳过、
+  // 用例守恒锚（--list 计数）对缺件不敏感 → CI 全绿但覆盖已缩。manifest 逐条列了
+  // path/size/sha256 → 逐条比对（成本极低）。
+  const corpus = checkCorpusIntegrity(repoRoot);
+  if (!corpus.ok) {
+    if (corpus.reason) {
+      console.error(`✗ 语料完整性 —— ${corpus.reason}：apps/web/e2e/fixtures/corpus/manifest.json`);
+    } else {
+      console.error(
+        `✗ 语料完整性 —— 缺件 ${corpus.missing.length}／体积不符 ${corpus.sizeMismatch.length}／` +
+          `内容漂移 ${corpus.hashMismatch.length}（共校验 ${corpus.checked} 条）：`
+      );
+      for (const m of corpus.missing.slice(0, 10)) console.error(`  · 缺失：${m}`);
+      for (const m of corpus.sizeMismatch.slice(0, 10)) console.error(`  · 体积不符：${m}`);
+      for (const m of corpus.hashMismatch.slice(0, 10)) console.error(`  · 内容漂移：${m}`);
+    }
+    console.error(
+      '\n[check-e2e-surfaces] 语料逐条完整性不通过——受影响用例会静默 skip（CI 全绿但覆盖已缩）。' +
+        '修复：重跑 node tools/fetch-e2e-corpus.mjs（语料下载脚本，幂等）。'
+    );
+    return 1;
+  }
+  console.log(`✓ 语料完整性：${corpus.checked} 条逐条比对通过（path/size/sha256）。`);
   return 0;
 }
 
