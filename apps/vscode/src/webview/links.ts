@@ -44,6 +44,27 @@ export function createLinkResolver(bridge: LinkBridge): RelativeLinkResolver {
 }
 
 /**
+ * 外链点击拦截（webview 内导航会丢掉整个应用 → 交宿主原生 open）。
+ *
+ * 相对链接由包内 `wireRelativeLinks` 接管（scheme 相对/页内锚不进本通道）；本通道只拦
+ * `http(s)://` 的绝对外链——否则 webview 直接导航走，扩展 UI 消失。
+ */
+export function bindExternalLinkInterceptor(
+  doc: Document,
+  openExternal: (url: string) => void
+): void {
+  doc.addEventListener('click', (event: Event) => {
+    const target = event.target as HTMLElement | null;
+    const anchor = target?.closest('a[href]') as HTMLAnchorElement | null;
+    if (!anchor) return;
+    const href = anchor.getAttribute('href') ?? '';
+    if (!/^https?:/i.test(href)) return;
+    event.preventDefault();
+    openExternal(href);
+  });
+}
+
+/**
  * 相对链接打开通道：命中文件 → 请求宿主切文档；缺件 → 提示回调（顶部提示条）。
  */
 export function createLinkOpener(

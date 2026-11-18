@@ -83,24 +83,6 @@ export function decideEngineStartup(
   return { startWorker: true, engine: 'tree-sitter', degraded: false, code: null };
 }
 
-/**
- * 逐语言降级（清单感知门）：base 非 tree-sitter 时不二次降级；tree-sitter 但语言不在
- * 本地 grammar 清单 → 该语言落 hljs（避免注定失败的 worker 往返）。
- */
-export function resolveLanguageEngine(
-  base: HighlightEngineTier,
-  lang: string,
-  hasGrammar: boolean
-): { engine: HighlightEngineTier; degraded: boolean; code: DegradationCode | null; detail: string | null } {
-  if (base !== 'tree-sitter') {
-    return { engine: base, degraded: false, code: null, detail: null };
-  }
-  if (!hasGrammar) {
-    return { engine: 'hljs', degraded: true, code: 'no-grammar', detail: lang };
-  }
-  return { engine: 'tree-sitter', degraded: false, code: null, detail: null };
-}
-
 /** 起活入参 */
 export interface StartHighlightOptions {
   /** 资产 URI（worker 源 + 三段基址 + grammar 清单） */
@@ -121,8 +103,16 @@ export interface HighlightRuntime {
   dispose(): void;
 }
 
-/** 不起 worker 的运行时（plain / hljs 档位） */
+/**
+ * 不起 worker 的运行时（plain / hljs 档位）。
+ *
+ * **必须显式 `attachHighlightClient(null)`**：render-text 的 attach 相位默认停在
+ * `pending`，`waitForAttachedClient` 会等满默认超时（10s）才放行 null —— 逐个代码围栏
+ * 各等一次（markdown 的 runHighlight 是串行 for 循环）→ hljs 档渲染含围栏的文档阻塞
+ * 数十秒。解绑后相位落到 `failed` 终态 → 等待者立即放行 → 走 hljs 兜底（毫秒级）。
+ */
 function inertRuntime(engine: HighlightEngineTier): HighlightRuntime {
+  attachHighlightClient(null);
   return {
     client: null,
     state: { engine, degraded: false, code: null, detail: null },

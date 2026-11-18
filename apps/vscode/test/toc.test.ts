@@ -5,6 +5,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Shell, type ShellLabels } from '../src/webview/shell';
 import { bindTocClicks, scrollToHeadingIn, tocEntriesOf } from '../src/webview/toc';
+import { bindExternalLinkInterceptor } from '../src/webview/links';
 
 const LABELS: ShellLabels = {
   tocTitle: '目录',
@@ -109,5 +110,32 @@ describe('toc · 按 id 滚动（markdown 面）', () => {
   it('id 含特殊字符时按 CSS 转义查询（不抛错）', () => {
     const container = document.createElement('div');
     expect(scrollToHeadingIn(container, 'a.b#c')).toBe(false);
+  });
+});
+
+describe('toc · 绑定幂等与外链拦截（评审 minor ①②）', () => {
+  it('bindTocClicks 重复调用只绑一次（一次点击触发一次滚动）', () => {
+    const shell = makeShell();
+    const scrollToHeading = vi.fn();
+    bindTocClicks(shell, { scrollToHeading, scrollToLine: vi.fn() });
+    bindTocClicks(shell, { scrollToHeading, scrollToLine: vi.fn() });
+    shell.setToc([{ id: 'h-1', label: '标题', level: 1, kind: 'heading' }]);
+    (shell.elements.tocList.querySelector('button.vv-shell__toc-item') as HTMLElement).click();
+    expect(scrollToHeading).toHaveBeenCalledTimes(1);
+  });
+
+  it('外链点击 → 交宿主原生 open（webview 内导航会丢掉整个应用）', () => {
+    const openExternal = vi.fn();
+    const doc = document.implementation.createHTMLDocument('');
+    doc.body.innerHTML = '<p><a id="ext" href="https://example.com/x">外链</a></p><a id="rel" href="./a.md">相对</a>';
+    bindExternalLinkInterceptor(doc, openExternal);
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+    doc.getElementById('ext')!.dispatchEvent(event);
+    expect(openExternal).toHaveBeenCalledWith('https://example.com/x');
+    expect(event.defaultPrevented).toBe(true);
+    // 相对链接不进本通道（包内 wireRelativeLinks 接管）
+    openExternal.mockClear();
+    doc.getElementById('rel')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(openExternal).not.toHaveBeenCalled();
   });
 });

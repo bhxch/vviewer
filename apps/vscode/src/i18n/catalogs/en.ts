@@ -20,9 +20,6 @@ export const en: EnMessages = {
 
   // viewer
   'viewer.document.tooLarge': 'File exceeds {limit}; open it with the native VSCode editor instead',
-  'viewer.document.loading': 'Loading…',
-  'viewer.document.reload': 'Reload',
-  'viewer.document.openWithNative': 'Open with the native VSCode editor',
 
   // notice
   'notice.export.saved': 'Exported to {path}',
@@ -34,8 +31,6 @@ export const en: EnMessages = {
 
   // errors
   'errors.render.failed': 'Rendering failed',
-  'errors.file.readFailed': 'Failed to read the file',
-  'errors.export.failed': 'Export failed',
   'errors.link.openExternalFailed': 'Failed to open the external link',
   'errors.common.unknown': 'An unknown error occurred'
 };

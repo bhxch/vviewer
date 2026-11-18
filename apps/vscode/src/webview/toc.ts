@@ -57,11 +57,19 @@ export interface TocNavigator {
   scrollToLine(line: number): void;
 }
 
+/** 已绑定的列表容器（幂等——重复绑定会让一次点击触发 N 次滚动） */
+const boundLists = new WeakSet<HTMLElement>();
+
 /**
  * 绑定 toc 条目点击（事件委托——条目随渲染重建，绑定在列表容器上不需重挂）。
+ *
+ * **幂等**：同一列表容器重复调用只绑一次（init 消息每次都到，若无幂等则监听器累积）。
  */
 export function bindTocClicks(shell: Shell, navigator: TocNavigator): void {
-  shell.elements.tocList.addEventListener('click', (event: Event) => {
+  const list = shell.elements.tocList;
+  if (boundLists.has(list)) return;
+  boundLists.add(list);
+  list.addEventListener('click', (event: Event) => {
     const target = event.target as HTMLElement | null;
     const button = target?.closest('button.vv-shell__toc-item') as HTMLElement | null;
     if (!button) return;

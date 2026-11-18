@@ -56,7 +56,14 @@ body {
   border-left: 1px solid var(--ui-border, #d0d7de);
 }
 .vv-shell__toc--left { order: -1; border-left: none; border-right: 1px solid var(--ui-border, #d0d7de); }
-.vv-shell__toc[data-collapsed="true"] { display: none; }
+/* Collapsed: keep the header (the toggle lives there) visible and shrink to the button
+   width -- hiding the whole panel would hide the toggle with it, leaving no way to
+   expand it again. */
+.vv-shell__toc[data-collapsed="true"] { width: auto; padding: 0; }
+.vv-shell__toc[data-collapsed="true"] .vv-shell__toc-head { margin-bottom: 0; }
+.vv-shell__toc[data-collapsed="true"] .vv-shell__toc-title,
+.vv-shell__toc[data-collapsed="true"] .vv-shell__toc-badge,
+.vv-shell__toc[data-collapsed="true"] .vv-shell__toc-list { display: none; }
 
 /* Panel head: title + engine badge + collapse toggle. */
 .vv-shell__toc-head { display: flex; align-items: center; gap: var(--vv-sp-4, 4px); margin-bottom: var(--vv-sp-8, 8px); }

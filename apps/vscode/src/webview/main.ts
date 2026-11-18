@@ -19,7 +19,12 @@ import {
   startHighlightRuntime,
   type HighlightRuntime
 } from './highlight';
-import { createImageResolver, createLinkOpener, createLinkResolver } from './links';
+import {
+  bindExternalLinkInterceptor,
+  createImageResolver,
+  createLinkOpener,
+  createLinkResolver
+} from './links';
 import { applySettingsChange, applyThemeChange, type LiveUpdateDeps } from './liveUpdate';
 import { Shell } from './shell';
 import { bindTocClicks, scrollToHeadingIn, tocEntriesOf } from './toc';
@@ -58,6 +63,11 @@ const shell = new Shell({
 });
 
 const bridge = new HostBridge({ api });
+
+// 折叠态变更 → 上报宿主（workspaceState 持久化——spec §4.2）
+shell.onToggle = (collapsed) => {
+  bridge.setTocCollapsed(collapsed);
+};
 
 let settings: WebviewSettings | null = null;
 let theme: ThemePayload | null = null;
@@ -123,23 +133,32 @@ async function onInit(message: Extract<HostToWebview, { kind: 'init' }>): Promis
   await startHighlight(settings);
   assemble(settings);
 
-  // toc 面板：条目点击 → 滚动到目标（markdown heading id / code 符号行号）
-  bindTocClicks(shell, {
-    scrollToHeading: (id) => {
-      scrollToHeadingIn(shell.elements.main, id);
-    },
-    scrollToLine: (line) => {
-      const scrollHost = (currentInstance as { getScrollHost?(): HTMLElement } | null)?.getScrollHost?.();
-      if (scrollHost) {
-        scrollHost.scrollTop = line * CODE_LINE_HEIGHT_PX;
-        return;
-      }
-      shell.elements.main.scrollTop = line * CODE_LINE_HEIGHT_PX;
-    }
-  });
+  // toc 面板：停靠侧（`vviewer.toc.side`）+ 折叠态（宿主持久化值优先于设置缺省）
+  shell.setSide(settings.tocSide);
+  shell.setCollapsed(message.toc.collapsed);
 
   await rerender();
 }
+
+// toc 面板：条目点击 → 滚动到目标（markdown heading id / code 符号行号）。
+// **模块级绑定一次**——每次 init 消息都绑一次会让监听器累积（一次点击触发 N 次滚动）。
+bindTocClicks(shell, {
+  scrollToHeading: (id) => {
+    scrollToHeadingIn(shell.elements.main, id);
+  },
+  scrollToLine: (line) => {
+    const scrollHost = (currentInstance as { getScrollHost?(): HTMLElement } | null)?.getScrollHost?.();
+    if (scrollHost) {
+      scrollHost.scrollTop = line * CODE_LINE_HEIGHT_PX;
+      return;
+    }
+    shell.elements.main.scrollTop = line * CODE_LINE_HEIGHT_PX;
+  }
+});
+
+// 外链点击拦截：webview 内导航会丢掉整个应用 → 交宿主原生 open（相对链接由包内
+// wireRelativeLinks 接管，绝对外链走本通道）
+bindExternalLinkInterceptor(document, (url) => bridge.openExternal(url));
 
 /** 实时生效的动作面（liveUpdate.ts 消费——便于单测） */
 function liveUpdateDeps(): LiveUpdateDeps {
@@ -149,7 +168,11 @@ function liveUpdateDeps(): LiveUpdateDeps {
     currentLanguageId,
     applyTheme,
     applyMermaidTheme,
-    reAssemble: (next) => assemble(next),
+    reAssemble: (next) => {
+      assemble(next);
+      // toc 停靠侧随设置即时生效（`vviewer.toc.side`）
+      shell.setSide(next.tocSide);
+    },
     engineTier: resolveHighlightEngine,
     restartHighlight: startHighlight,
     reRender: rerender,

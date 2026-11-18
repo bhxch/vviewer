@@ -20,9 +20,6 @@ export const zhCN = {
 
   // viewer —— 文档渲染面
   'viewer.document.tooLarge': '文件超过 {limit}，建议改用 VSCode 原生编辑器打开',
-  'viewer.document.loading': '正在加载…',
-  'viewer.document.reload': '重新渲染',
-  'viewer.document.openWithNative': '用 VSCode 原生编辑器打开',
 
   // notice —— 一次性反馈（顶部提示条）
   'notice.export.saved': '已导出到 {path}',
@@ -34,8 +31,6 @@ export const zhCN = {
 
   // errors —— 错误面
   'errors.render.failed': '渲染失败',
-  'errors.file.readFailed': '读取文件失败',
-  'errors.export.failed': '导出失败',
   'errors.link.openExternalFailed': '无法打开外部链接',
   'errors.common.unknown': '发生未知错误'
 } as const;

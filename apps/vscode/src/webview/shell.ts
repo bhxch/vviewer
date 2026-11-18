@@ -72,7 +72,8 @@ export class Shell {
   readonly elements: ShellElements;
   private readonly labels: ShellLabels;
   private collapsedState: boolean;
-  private readonly onToggle: ((collapsed: boolean) => void) | undefined;
+  /** 折叠态变更回调（宿主装配后挂载——上报 workspaceState 持久化） */
+  onToggle?: (collapsed: boolean) => void;
 
   constructor(options: ShellOptions) {
     this.labels = options.labels;
@@ -138,6 +139,16 @@ export class Shell {
   /** 当前折叠态 */
   get collapsed(): boolean {
     return this.collapsedState;
+  }
+
+  /**
+   * 停靠侧切换（`vviewer.toc.side` 设置项——左右可选，spec §4.2）。
+   * 面板的方位类随之切换（`.vv-shell__toc--left` / `--right`）。
+   */
+  setSide(side: 'left' | 'right'): void {
+    const next = side === 'left' ? 'left' : 'right';
+    this.elements.toc.classList.remove('vv-shell__toc--left', 'vv-shell__toc--right');
+    this.elements.toc.classList.add(`vv-shell__toc--${next}`);
   }
 
   /** 折叠态切换（`aria-expanded` 与 `data-collapsed` 同步） */

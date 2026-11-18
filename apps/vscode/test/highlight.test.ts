@@ -9,8 +9,9 @@ import { fileURLToPath } from 'node:url';
 import {
   decideEngineStartup,
   resolveHighlightEngine,
-  resolveLanguageEngine
+  startHighlightRuntime
 } from '../src/webview/highlight';
+import { waitForAttachedClient } from '@bhxch/vviewer-render-text';
 import {
   hasLocalGrammar,
   resolveAssetAvailability,
@@ -87,27 +88,26 @@ describe('高亮 · 起活决策与降级矩阵', () => {
     expect(startup.code).toBe('worker-failed');
   });
 
-  it('逐语言降级：清单外的语言落 hljs（清单感知门）', () => {
-    const miss = resolveLanguageEngine('tree-sitter', 'nim', false);
-    expect(miss.engine).toBe('hljs');
-    expect(miss.degraded).toBe(true);
-    expect(miss.code).toBe('no-grammar');
-    expect(miss.detail).toBe('nim');
-
-    const hit = resolveLanguageEngine('tree-sitter', 'bash', true);
-    expect(hit.engine).toBe('tree-sitter');
-    expect(hit.degraded).toBe(false);
+  it('逐语言降级：清单外的语言落 hljs（清单感知门——由 hasLocalGrammar 承担）', () => {
+    const table = { bash: { file: 'bash.wasm', aliases: ['sh'] } };
+    expect(hasLocalGrammar(table, 'bash')).toBe(true);
+    expect(hasLocalGrammar(table, 'sh')).toBe(true);
+    expect(hasLocalGrammar(table, 'nim')).toBe(false);
   });
+});
 
-  it('逐语言降级：base 非 tree-sitter 时不二次降级', () => {
-    expect(resolveLanguageEngine('hljs', 'nim', false)).toMatchObject({
-      engine: 'hljs',
-      degraded: false
+describe('高亮 · hljs/plain 档的 attach 解绑（评审 important ①）', () => {
+  it('档位非 tree-sitter → 显式解绑 attach（否则围栏逐块阻塞 10s 看门狗）', async () => {
+    const startedAt = Date.now();
+    const runtime = await startHighlightRuntime({
+      assets: ASSETS,
+      settings: { ...DEFAULT_WEBVIEW_SETTINGS, highlightEngine: 'hljs' }
     });
-    expect(resolveLanguageEngine('plain', 'nim', false)).toMatchObject({
-      engine: 'plain',
-      degraded: false
-    });
+    expect(runtime.client).toBeNull();
+    // 未解绑时 waitForAttachedClient 会等满 10s 默认超时（render-text 的 pending 相位）
+    const client = await waitForAttachedClient();
+    expect(client).toBeNull();
+    expect(Date.now() - startedAt).toBeLessThan(1000);
   });
 });
 

@@ -200,3 +200,32 @@ describe('SHELL_CSS · 契约', () => {
     expect(CSS).toContain('.vv-shell__notice--error');
   });
 });
+
+describe('壳样式 · 折叠态不得藏掉折叠钮（评审 critical ②）', () => {
+  /** 取所有含 data-collapsed 的规则块 */
+  function collapsedRules(): string[] {
+    return CSS.split('}').filter((block) => block.includes('[data-collapsed="true"]'));
+  }
+
+  it('折叠态不得把面板整体 display:none（否则面板内的折叠钮一起消失 → 永久不可展开）', () => {
+    const rules = collapsedRules();
+    expect(rules.length).toBeGreaterThan(0);
+    for (const rule of rules) {
+      const selector = rule.split('{')[0]!.trim();
+      // 面板自身的规则允许改宽度/内边距，但不得整体隐藏
+      if (selector === '.vv-shell__toc[data-collapsed="true"]') {
+        expect(rule).not.toMatch(/display\s*:\s*none/);
+      }
+    }
+  });
+
+  it('折叠态隐藏的子项清单不含折叠钮（.vv-shell__toc-toggle 必须留在可见面上）', () => {
+    const hidden = collapsedRules()
+      .filter((rule) => /display\s*:\s*none/.test(rule))
+      .flatMap((rule) => rule.split('{')[0]!.trim().split(','))
+      .map((selector) => selector.trim());
+    for (const selector of hidden) {
+      expect(selector, `折叠态隐藏了折叠钮：${selector}`).not.toContain('.vv-shell__toc-toggle');
+    }
+  });
+});

@@ -78,6 +78,12 @@ export class HostBridge {
     this.api.postMessage(message);
   }
 
+  /** 上报 toc 折叠态（宿主持久化到 workspaceState——spec §4.2） */
+  setTocCollapsed(collapsed: boolean): void {
+    const message: WebviewToHost = { kind: 'toc-collapsed', collapsed };
+    this.api.postMessage(message);
+  }
+
   /** 上报（webview 无 console 出口 → 走 host 通道） */
   report(level: 'warn' | 'error', message: string): void {
     const payload: WebviewToHost = { kind: 'report', level, message };

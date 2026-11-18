@@ -78,8 +78,8 @@ describe('i18n · 取值', () => {
 
   it('t() 走当前 locale', () => {
     setLocale('zh-CN');
-    expect(t('errors.file.readFailed')).toBe('读取文件失败');
+    expect(t('errors.common.unknown')).toBe('发生未知错误');
     setLocale('en');
-    expect(t('errors.file.readFailed')).toBe('Failed to read the file');
+    expect(t('errors.common.unknown')).toBe('An unknown error occurred');
   });
 });

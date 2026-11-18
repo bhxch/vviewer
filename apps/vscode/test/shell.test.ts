@@ -34,6 +34,16 @@ describe('壳 · DOM 契约', () => {
     expect(shell.elements.root.querySelector('[role="statusbar"]')).toBeNull();
   });
 
+  it('setSide 切换停靠侧（`vviewer.toc.side` 设置项生效面）', () => {
+    const shell = makeShell();
+    shell.setSide('left');
+    expect(shell.elements.toc.classList.contains('vv-shell__toc--left')).toBe(true);
+    expect(shell.elements.toc.classList.contains('vv-shell__toc--right')).toBe(false);
+    shell.setSide('right');
+    expect(shell.elements.toc.classList.contains('vv-shell__toc--right')).toBe(true);
+    expect(shell.elements.toc.classList.contains('vv-shell__toc--left')).toBe(false);
+  });
+
   it('toc 面板停靠侧可切（左/右）', () => {
     const left = makeShell({ side: 'left' });
     expect(left.elements.toc.classList.contains('vv-shell__toc--left')).toBe(true);
