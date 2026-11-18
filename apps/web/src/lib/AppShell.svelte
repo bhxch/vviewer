@@ -889,6 +889,11 @@
       const prevEnginesCustom = settings.cdn.enginesCustom;
       settings = s;
       document.documentElement.dataset.themeMode = s.themeMode;
+      // zen 退出的**非 toggleZen 路径**复位（评审 important ⑩）：设置中心「重置专注
+      // 模式」同样退出 zen，但不经 toggleZen 的退出分支 → zenSide 残留 → 非 zen 态
+      // 仍带 data-zen-side（重进 zen 自发开目录栏；非 zen 态首个 Esc 被 closeZenSide
+      // 吞掉）。与 toggleZen 退出分支同口径：只复位本态，不关抽屉（中性动作零回滚）。
+      if (!s.layout.zen && zenSide !== 'none') zenSide = 'none';
       // 注入通道（spec 2026-10-12 §2.4）：diff 四元组、槽相关变化才注入
       applyAppearanceFromSettings(s);
       // fonts 变更 → style#vv-font 重注入 + 激活 tab rev++ 重渲染（行高联动，
@@ -1410,7 +1415,10 @@
   {/snippet}
   <!-- svelte-ignore a11y_no_static_element_interactions --><!-- contextmenu 为 chrome
      布局菜单入口（shell 级代理，按 target 归属分流），shell 容器无 AT 交互角色 -->
-  <div class="vv-shell" class:drawer={drawers.leftOpen} class:rightopen={drawers.rightOpen} class:zen={layout.zen} data-zen-side={zenSide !== 'none' ? zenSide : undefined} oncontextmenu={onShellContextMenu}>
+  <!-- 侧栏宽度变量同时挂到 shell（--vv-side-w / --vv-right-w）：zen 目录浮钮是 shell
+       的兄弟节点（position:fixed 锚视口缘），需按「对应侧开启时的栏宽」外移才不压住
+       目录条目（评审 important ⑪）——栏宽值只在 aside 上时兄弟节点取不到 -->
+  <div class="vv-shell" class:drawer={drawers.leftOpen} class:rightopen={drawers.rightOpen} class:zen={layout.zen} data-zen-side={zenSide !== 'none' ? zenSide : undefined} style="--vv-side-w: {leftW}px; --vv-right-w: {rightW}px" oncontextmenu={onShellContextMenu}>
   <!-- 标签栏：hidden=zen 或显式隐藏（chromeVisible 覆盖语义）；temp=顶边悬停
        临时条（半透覆盖形态）。组件保持挂载——Ctrl+, 设置中心入口（AppShell 自有
        状态）与外观/字体订阅注入链（AppShell onMount）不因隐藏失效（spec §2 全件
@@ -2029,6 +2037,38 @@
   }
   .vv-zen-toc-right {
     right: 12px;
+  }
+  /* zen 目录浮钮随侧栏收边移动（评审 important ⑪）：浮钮为 position:fixed 锚视口缘，
+     侧栏打开后不随内容区收边 → 直接压在所开栏的目录条目上（移动端整条目录标签被盖住
+     且点击命中浮钮而非条目；桌面端压住行右端 44px）。此处按「对应侧开启 → 该侧浮钮
+     外移」修正，外移量=该侧在位时的占位宽：
+     - 桌面（>900px）两栏在流内 → 该栏宽度（--vv-side-w / --vv-right-w，挂 shell 上）；
+     - 抽屉档（≤900px 左栏、≤600px 右栏）该栏是**覆盖式**抽屉 → 抽屉宽
+       （min(80vw,300px)），且仅在该侧抽屉**开着**时（.drawer / .rightopen）；
+     外移后浮钮落在内容区一侧，不再压住目录条目。 */
+  @media (min-width: 901px) {
+    .vv-shell.zen[data-zen-side='left'] ~ .vv-zen-toc-left {
+      left: calc(var(--vv-side-w, 260px) + 12px);
+    }
+    .vv-shell.zen[data-zen-side='right'] ~ .vv-zen-toc-right {
+      right: calc(var(--vv-right-w, 230px) + 12px);
+    }
+  }
+  @media (min-width: 601px) and (max-width: 900px) {
+    /* 平板档：左栏抽屉、右栏在流内 */
+    .vv-shell.zen[data-zen-side='right'] ~ .vv-zen-toc-right {
+      right: calc(var(--vv-right-w, 230px) + 12px);
+    }
+  }
+  @media (max-width: 900px) {
+    .vv-shell.zen.drawer[data-zen-side='left'] ~ .vv-zen-toc-left {
+      left: calc(min(80vw, 300px) + 12px);
+    }
+  }
+  @media (max-width: 600px) {
+    .vv-shell.zen.rightopen[data-zen-side='right'] ~ .vv-zen-toc-right {
+      right: calc(min(80vw, 300px) + 12px);
+    }
   }
   .vv-zen-toc-btn:hover,
   .vv-zen-toc-btn:focus-visible {
