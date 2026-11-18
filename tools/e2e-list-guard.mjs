@@ -20,6 +20,7 @@
 //   node tools/e2e-list-guard.mjs check <listFile> <baselineFile> <shard>   # shard 形如 1/4
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const SHARD_COUNT = 4;
 
@@ -116,4 +117,8 @@ function main(argv) {
   }
 }
 
-process.exitCode = main(process.argv.slice(2));
+// 仅在被直接执行时跑 main（导出面供单测消费——此前顶层无条件执行 main，导入即触发
+// CLI 分支并改写 process.exitCode，单测无法导入该模块）
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  process.exitCode = main(process.argv.slice(2));
+}

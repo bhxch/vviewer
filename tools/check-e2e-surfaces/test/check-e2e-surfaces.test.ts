@@ -118,6 +118,30 @@ describe('仓内实况 · 消费面清单与真实语料', () => {
     }
   });
 
+  it('消费面清单的**路径集合**锁定（评审 minor：此前只校验条目形状，不校验集合 → 清单漂移无报警面）', () => {
+    // 新增/移除/改名消费面必须在此登记（登记即 diff 可核对）——「spec 进程直读仓库树/
+    // 构建产物」的面靠人工盘点，集合锁定后盘点漏项即红。
+    expect(CONSUMER_SURFACES.map((s) => s.path)).toEqual([
+      'packages/vviewer-core/src/registry/generated-extensions.ts',
+      'packages/vviewer-highlight/assets/themes.json',
+      'packages/vviewer-highlight/assets/languages.json',
+      'apps/web/.svelte-kit/output/server/manifest.js',
+      'apps/web/.svelte-kit/output/client',
+      'apps/web/build/index.html',
+      'apps/web/build/sw.js',
+      'apps/web/build/_app/immutable',
+      'server/target/debug/vviewer',
+      'apps/web/e2e/fixtures/corpus/manifest.json'
+    ]);
+    expect(PRODUCER_ONLY_SURFACES.map((s) => s.path)).toEqual([
+      'server/grammars-manifest.json',
+      'packages/vviewer-highlight/assets/queries',
+      'tools/grammar-builder/out/grammars',
+      'apps/web/static/grammars',
+      'apps/web/static/tree-sitter.wasm'
+    ]);
+  });
+
   it('真实语料逐条比对通过（语料在位时）', () => {
     const manifest = path.join(REPO_ROOT, 'apps/web/e2e/fixtures/corpus/manifest.json');
     if (!fs.existsSync(manifest)) return; // 语料未下载（干净克隆）→ 跳过
