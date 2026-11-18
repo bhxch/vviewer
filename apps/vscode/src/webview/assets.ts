@@ -60,9 +60,13 @@ export function resolveAssetBases(assets: AssetUris): AssetBases {
  */
 export function hasLocalGrammar(table: GrammarTable, lang: string): boolean {
   if (!lang) return false;
-  if (table[lang]) return true;
-  for (const entry of Object.values(table)) {
-    if (entry.aliases?.includes(lang)) return true;
+  // 大小写归一（评审 minor：web 侧 grammarLayers 已按 BUG-42 归一，vscode 侧此前大小写
+  // 敏感 → 两侧判定口径分叉，如 'Python' 在 web 侧命中、扩展侧不命中）
+  const key = lang.toLowerCase();
+  if (table[key]) return true;
+  for (const [name, entry] of Object.entries(table)) {
+    if (name.toLowerCase() === key) return true;
+    if (entry.aliases?.some((a) => a.toLowerCase() === key)) return true;
   }
   return false;
 }

@@ -62,6 +62,10 @@ describe('HTML 模板 · CSP 七 directive', () => {
     expect(csp).toMatch(/connect-src [^;]*blob:/);
     expect(csp).toMatch(/font-src [^;]*data:/);
     expect(csp).toMatch(/img-src [^;]*data:/);
+    // img-src 含 http:：http 外链图片否则在网络栈之前被 CSP 静默拦死（与仓内 html
+    // 渲染器同款契约——评审 minor）
+    expect(csp).toMatch(/img-src [^;]*https:/);
+    expect(csp).toMatch(/img-src [^;]*http:/);
     expect(csp).toMatch(/style-src [^;]*'unsafe-inline'/);
   });
 

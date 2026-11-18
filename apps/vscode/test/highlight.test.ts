@@ -93,6 +93,10 @@ describe('高亮 · 起活决策与降级矩阵', () => {
     expect(hasLocalGrammar(table, 'bash')).toBe(true);
     expect(hasLocalGrammar(table, 'sh')).toBe(true);
     expect(hasLocalGrammar(table, 'nim')).toBe(false);
+    // 大小写归一（与 web 侧 grammarLayers 同口径——BUG-42 已修 web 侧，扩展侧此前分叉）
+    expect(hasLocalGrammar(table, 'BASH')).toBe(true);
+    expect(hasLocalGrammar(table, 'SH')).toBe(true);
+    expect(hasLocalGrammar(table, 'Nim')).toBe(false);
   });
 });
 

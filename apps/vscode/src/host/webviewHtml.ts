@@ -67,7 +67,9 @@ export function composeStyleText(): string {
 export function buildCsp(cspSource: string, nonce: string): string {
   return [
     `default-src 'none'`,
-    `img-src ${cspSource} data: blob: https:`,
+    // img-src 含 http:：与仓内 html 渲染器同款契约（packages/vviewer-render-text/src/html.ts
+    // 「auto 档 img-src 加 https: http:」）——http 外链图片否则在网络栈之前被 CSP 拦死
+    `img-src ${cspSource} data: blob: https: http:`,
     `style-src ${cspSource} 'unsafe-inline'`,
     `script-src ${cspSource} 'nonce-${nonce}' 'wasm-unsafe-eval'`,
     `worker-src ${cspSource} blob:`,
