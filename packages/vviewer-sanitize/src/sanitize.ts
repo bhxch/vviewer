@@ -406,21 +406,21 @@ function registerSanitizeHooks(): void {
           (config as SanitizeConfig | undefined)?.[EXTERNAL_IMAGE_CONFIG_KEY] ??
           ({ policy: 'blocked', allowlist: [] } satisfies ExternalImagePolicyConfig);
         const src = el.getAttribute('src');
-      const trimmed = src?.trim() ?? '';
-      const srcExternal = src !== null && isExternalMediaSrc(trimmed);
-      // 白名单优先于档位（spec §3.1 拍板）：命中按 auto；auto 档全放行；
-      // blocked/manual 档未命中才拦
-      const allowSrc = !srcExternal || isExternalImageAllowlisted(trimmed, policyCfg.allowlist) || policyCfg.policy === 'auto';
-      if (!allowSrc) {
-        if (policyCfg.policy === 'manual') {
-          // spec §6 落定 1：src 迁 data-vv-external-src——DOM 无 src 即不发请求，
-          // BUG-17 防线真实维持；点击放行由渲染管线层（enrich）按标记承接（sanitize
-          // 纯函数无交互）
-          el.setAttribute('data-vv-external-src', src!);
+        const trimmed = src?.trim() ?? '';
+        const srcExternal = src !== null && isExternalMediaSrc(trimmed);
+        // 白名单优先于档位（spec §3.1 拍板）：命中按 auto；auto 档全放行；
+        // blocked/manual 档未命中才拦
+        const allowSrc = !srcExternal || isExternalImageAllowlisted(trimmed, policyCfg.allowlist) || policyCfg.policy === 'auto';
+        if (!allowSrc) {
+          if (policyCfg.policy === 'manual') {
+            // spec §6 落定 1：src 迁 data-vv-external-src——DOM 无 src 即不发请求，
+            // BUG-17 防线真实维持；点击放行由渲染管线层（enrich）按标记承接（sanitize
+            // 纯函数无交互）
+            el.setAttribute('data-vv-external-src', src!);
+          }
+          el.removeAttribute('src');
+          markBlockedExternal(el, hostOf(trimmed));
         }
-        el.removeAttribute('src');
-        markBlockedExternal(el, hostOf(trimmed));
-      }
       // srcset 是同等的图片加载源（无 src 时浏览器按 srcset 加载；markdown 渲染
       // 视图把净化后 DOM 挂主文档、无 CSP 兜底）。三档分流（spec D §3.1，白名单
       // 作用面=img 与 srcset——命中白名单的外域候选视同放行）：
