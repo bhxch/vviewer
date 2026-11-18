@@ -532,6 +532,14 @@
 
 ## Errata（执行期勘误）
 
+- 2026-11-18 **实施期勘误（评审整改轮，六条决策）**：评审对 T1~T7 落地提出 12 条发现（3 critical / 3 important / 6 minor），全部处置；其中六项**实施期决策/口径变更**登记如下（不改计划目标，只记落地事实）：
+  ①**资产根双布局探测（口径变更）**：本计划 Global Constraints 写「`localResourceRoots` 必须覆盖扩展的 `dist/` 目录」，但同一计划又写「`dist/` 同时是 .vsix 的打包根」——两者不可同时成立（VSIX 内产物落在**扩展根**下，`<ext>/dist/` 不存在）。落地按**探测**实现（`resolveAssetRoot`：入口脚本 `<ext>/dist/webview/main.js` 在 → 资产根=`<ext>/dist`（开发态）；不在 → 资产根=`<ext>`（安装态）），开发态与安装态同一份代码路径。
+  ②**清单文案本地化走 VSCode 自身的 nls 机制**：命令标题与设置项 title/description 改 `%key%` 占位 + `package.nls.json`（源语言）+ `package.nls.zh-cn.json`（中文变体），两个 nls 文件随包进 VSIX。与扩展运行时 i18n 目录（`src/i18n/catalogs/`）是两套独立机制：前者服务设置界面/命令面板，后者服务 webview 内运行时文案，键空间互不替代。
+  ③**折叠态持久化优先级**：持久化值（`workspaceState['vviewer.toc.collapsed']`）优先于设置 `vviewer.toc.defaultCollapsed`；**设置变更时清持久化覆盖**（否则用户手动切换一次后该设置永久失效且无提示）。
+  ④**外链点击拦截通道**：webview 内导航会丢掉整个应用 → webview 侧拦截 `http(s)://` 绝对外链 → 交宿主原生 `vscode.open`；相对链接仍归包内 `wireRelativeLinks` 接管。
+  ⑤**相对链接导航改走 `vscode.open`**（口径变更）：原计划「同一 custom editor 内切换文档」若就地改写面板内容，会让 editor 与其 CustomDocument 的绑定漂移（标题/文档身份不一致），且从资源管理器再打开目标文档时出现「两个 editor 显示同一文档」与「新 editor 未装配 → 白屏」。落地改由宿主 `vscode.open` 打开目标 → VSCode 正常路由到本扩展（新 editor 的装配走常规 `attach` 路径）。
+  ⑥**attach 复用分支处置口径**：同一面板（VSCode 复用同一 editor，`supportsMultipleEditorsPerDocument:false`）→ reveal + 重推 init（**不重置 HTML**，保住滚动位置）；**新面板**（VSCode 新建 editor）→ 既有面板从映射摘除后**继续装配新面板**（早退即白屏且无提示）。
+
 - 2026-11-18 **实施期勘误（T1~T6 落地实测，11 条）**：以下为按本计划实施时的实际形态与计划书的差异，逐条登记（不改计划语义，只记落地事实）：
   ①**i18n 键段数**：本计划 Interfaces 段写「key 三段 `{域}.{模块}.{语义}`」，但同段示例键 `viewer.tooLarge` 是**两段**。落地按**规范条款**（三段，且 frontend-conventions §3.1 同款）执行 → `viewer.document.tooLarge`；扩展自有四域（shell/viewer/notice/errors）不变。
   ②**`AssetUris` 增两项**：T2 定义的字段清单缺 `themesUrl`（webview 侧算 `--vv-ts-*` 需读打包的两条主题表）与 `katexExportCssUrl`（导出用的自包含 katex CSS 产物）——T4/T5 落地时补入（additive）。
