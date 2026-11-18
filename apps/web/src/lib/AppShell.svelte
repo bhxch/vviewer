@@ -1717,14 +1717,14 @@
          中部边缘天然避开 .vv-zen-exit（右下 bottom:34px）与状态栏 -->
     <button type="button" class="vv-zen-toc-btn vv-zen-toc-left" aria-label={t('shell.zen.tocLeftAria')}
       title={t('shell.zen.tocLeftAria')} aria-pressed={zenSide === 'left'}
+      onclick={() => toggleZenSide('left')}
       data-zen-open={zenSide === 'left' ? '1' : undefined}
-      style="--vv-side-w: {leftW}px; --vv-right-w: {rightW}px"
-      onclick={() => toggleZenSide('left')}>{t('shell.left.toc')}</button>
+      style="--vv-side-w: {leftW}px; --vv-right-w: {rightW}px">{t('shell.left.toc')}</button>
     <button type="button" class="vv-zen-toc-btn vv-zen-toc-right" aria-label={t('shell.zen.tocRightAria')}
       title={t('shell.zen.tocRightAria')} aria-pressed={zenSide === 'right'}
+      onclick={() => toggleZenSide('right')}
       data-zen-open={zenSide === 'right' ? '1' : undefined}
-      style="--vv-side-w: {leftW}px; --vv-right-w: {rightW}px"
-      onclick={() => toggleZenSide('right')}>{t('shell.left.toc')}</button>
+      style="--vv-side-w: {leftW}px; --vv-right-w: {rightW}px">{t('shell.left.toc')}</button>
   {/if}
   {#if zenToast}
     <!-- zen 进入提示（Toast）：退出通道告知——zen 覆盖全部 chrome，无此提示

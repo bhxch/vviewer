@@ -72,14 +72,14 @@ describe('zen 目录浮钮随侧栏收边（评审 important ⑪：position:fixe
   });
 
   it('开关态经按钮自属性 data-zen-open 表达（**不用兄弟选择器 `~`**——Svelte 的 css_unused_selector 分析判其未用并从产物剪除，实测规则消失）', () => {
-    expect(src).toMatch(/vv-zen-toc-left[^>]*data-zen-open=\{zenSide === 'left' \? '1' : undefined\}/);
-    expect(src).toMatch(/vv-zen-toc-right[^>]*data-zen-open=\{zenSide === 'right' \? '1' : undefined\}/);
+    expect(src).toMatch(/vv-zen-toc-left[\s\S]{0,400}?data-zen-open=\{zenSide === 'left' \? '1' : undefined\}/);
+    expect(src).toMatch(/vv-zen-toc-right[\s\S]{0,400}?data-zen-open=\{zenSide === 'right' \? '1' : undefined\}/);
     expect(css).not.toMatch(/~\s*\.vv-zen-toc-(left|right)/);
   });
 
   it('栏宽变量内联在浮钮上（浮钮与 aside 是兄弟节点——aside 上的变量取不到）', () => {
     expect(src).toMatch(
-      /class="vv-zen-toc-btn vv-zen-toc-left"[^>]*style="--vv-side-w: \{leftW\}px; --vv-right-w: \{rightW\}px"/s
+      /class="vv-zen-toc-btn vv-zen-toc-left"[\s\S]{0,400}?style="--vv-side-w: \{leftW\}px; --vv-right-w: \{rightW\}px"/
     );
   });
 });
