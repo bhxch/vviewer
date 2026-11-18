@@ -163,18 +163,29 @@ export class PanelHost implements vscode.Disposable {
     return this.context.extensionUri;
   }
 
-  /** 面板复用：同文档再次打开 → reveal 既有 panel（不重开）；文档关闭 → 清映射 */
+  /**
+   * 装配面板（custom editor 的 resolveCustomEditor 入口）。
+   *
+   * 分支纪律（评审 important：早退分支遗弃新面板 → 新 editor 永远拿不到 HTML → 白屏且
+   * 无任何提示）：
+   * - `existing === panel`：VSCode 复用同一 editor（`supportsMultipleEditorsPerDocument:
+   *   false`）→ 只 reveal + 重推 init，**不重置 HTML**（保住滚动位置与展开态）。
+   * - `existing !== panel`（VSCode 新建的 editor）：**不得早退**——必须继续装配传入的
+   *   面板；既有面板从映射摘除（不再被 reload 命令寻址），其 editor 生命周期仍由 VSCode
+   *   侧管理。
+   */
   async attach(document: vscode.CustomDocument, panel: vscode.WebviewPanel): Promise<void> {
     const key = document.uri.toString();
     const existing = this.panels.get(key);
-    if (existing && existing !== panel) {
-      try {
-        existing.reveal();
-        return; // 复用既有面板（不重开）
-      } catch {
-        // 既有面板已 dispose（@types/vscode：dispose 后使用面板抛错）→ 清理后继续装配新面板
-        this.forgetPanel(existing);
-      }
+    if (existing === panel) {
+      panel.reveal();
+      await this.sendInit(document.uri, panel);
+      return;
+    }
+    if (existing) {
+      // 既有面板仍活着但传入的是新面板 → 摘除映射后**继续装配新面板**（不 reveal 既有：
+      // 用户刚点开的新 editor 不该被旧 editor 顶掉）
+      this.forgetPanel(existing);
     }
     this.panels.set(key, panel);
     this.panelMeta.set(panel, { uri: document.uri });
@@ -224,6 +235,11 @@ export class PanelHost implements vscode.Disposable {
     await this.context.workspaceState.update(PanelHost.TOC_COLLAPSED_KEY, collapsed);
   }
 
+  /** 清持久化折叠态（设置变更时用——让「默认折叠态」设置重新生效） */
+  private async clearCollapsedState(): Promise<void> {
+    await this.context.workspaceState.update(PanelHost.TOC_COLLAPSED_KEY, undefined);
+  }
+
   /** 面板离场清理（按面板身份——键可被导航改写，身份不变） */
   private forgetPanel(panel: vscode.WebviewPanel): void {
     for (const [key, value] of [...this.panels]) {
@@ -268,6 +284,11 @@ export class PanelHost implements vscode.Disposable {
     return [
       this.vscode.workspace.onDidChangeConfiguration((event) => {
         if (!event.affectsConfiguration('vviewer')) return;
+        // 「默认折叠态」设置变更 → 清持久化覆盖：否则用户手动切换过一次后该设置永久失效
+        // （评审 minor ②：设置静默死掉）
+        if (event.affectsConfiguration('vviewer.toc.defaultCollapsed')) {
+          void this.clearCollapsedState();
+        }
         void this.pushSettings();
       }),
       this.vscode.window.onDidChangeActiveColorTheme(() => {
@@ -492,10 +513,19 @@ export class PanelHost implements vscode.Disposable {
     }
   }
 
-  /** 相对链接导航（spec §7 ①）：切到目标文档并重推 init（面板复用，不新开） */
+  /**
+   * 相对链接导航（spec §7 ①）。
+   *
+   * **交 VSCode 原生 `vscode.open` 打开目标**（而非就地改写当前面板的内容）：
+   * custom editor 的 editor 与其 CustomDocument 绑定，就地换内容会让 editor 的文档
+   * 绑定与实际显示不一致（标题/文档身份漂移），且从资源管理器再打开目标文档时会出现
+   * 「两个 editor 显示同一文档」与「新 editor 未装配 → 白屏」。走原生 open 后：目标文档
+   * 由 VSCode 正常路由到本扩展（selector 认领的扩展名）或默认文本编辑器，新 editor 的
+   * 装配走常规 `attach` 路径。
+   */
   private async handleNavigate(
     documentUri: vscode.Uri,
-    panel: vscode.WebviewPanel,
+    _panel: vscode.WebviewPanel,
     path: string
   ): Promise<void> {
     const target = this.resolveRelative(documentUri, path);
@@ -505,14 +535,7 @@ export class PanelHost implements vscode.Disposable {
       void this.vscode.window.showErrorMessage(t('notice.file.missing', { path }));
       return;
     }
-    const previousKey = documentUri.toString();
-    this.panels.delete(previousKey);
-    this.panels.set(target.toString(), panel);
-    this.panelMeta.set(panel, { uri: target });
-    // 活动文档随导航切换（否则 Reload / Open with Native 仍指向原文档——评审 minor ⑥）
-    this.activeKey = target.toString();
-    panel.title = documentName(target);
-    await this.sendInit(target, panel);
+    await this.vscode.commands.executeCommand('vscode.open', target);
   }
 
   /** 打开外部链接（走 VSCode 原生 open——不经 webview 导航） */

@@ -179,6 +179,7 @@ function fakeUri(path: string): FakeUri {
 interface FakeRuntime {
   vscode: unknown;
   posted: unknown[];
+  commands: Array<{ command: string; args: unknown[] }>;
   fireConfigChange(section: string): void;
   fireThemeChange(): void;
   setConfigValue(key: string, value: unknown): void;
@@ -277,6 +278,7 @@ function makeFakeHost(): FakeRuntime {
   const configListeners: Array<(event: { affectsConfiguration(section: string): boolean }) => void> = [];
   const themeListeners: Array<() => void> = [];
   const configValues: Record<string, unknown> = {};
+  const commands: Array<{ command: string; args: unknown[] }> = [];
 
   const configuration = (): ConfigurationLike => ({
     get: (key: string) => configValues[key] as never,
@@ -312,15 +314,28 @@ function makeFakeHost(): FakeRuntime {
         fakeUri([base.path.replace(/\/+$/, ''), ...segments].join('/')),
       parse: (value: string) => fakeUri(value.replace(/^file:\/\//, ''))
     },
-    commands: { executeCommand: async () => undefined },
+    commands: {
+      executeCommand: async (command: string, ...args: unknown[]) => {
+        commands.push({ command, args });
+        return undefined;
+      }
+    },
     env: { language: 'en' }
   };
 
   return {
     vscode,
     posted,
-    fireConfigChange: (section: string) => {
-      for (const cb of configListeners) cb({ affectsConfiguration: (s: string) => s === section });
+    commands,
+    fireConfigChange: (changed: string) => {
+      // VSCode 语义：变更 'vviewer.toc.defaultCollapsed' 时，
+      // affectsConfiguration('vviewer') 亦为真（变更节是查询节的前缀）
+      for (const cb of configListeners) {
+        cb({
+          affectsConfiguration: (queried: string) =>
+            changed === queried || changed.startsWith(`${queried}.`)
+        });
+      }
     },
     fireThemeChange: () => {
       for (const cb of themeListeners) cb();
@@ -402,7 +417,7 @@ describe('实时生效 · 面板生命周期（评审 critical ③ / minor ⑥ /
     expect(fresh.webview.html).not.toBe('');
   });
 
-  it('相对链接导航后 activeKey 跟随切换（Reload / Open with Native 按当前文档）', async () => {
+  it('相对链接导航 → 宿主发 vscode.open 打开目标（不就地改写当前面板 → 无文档绑定漂移）', async () => {
     const fake = makeFakeHost();
     const { PanelHost } = await import('../src/host/webviewPanel');
     const host = new PanelHost(
@@ -413,8 +428,25 @@ describe('实时生效 · 面板生命周期（评审 critical ③ / minor ⑥ /
     await host.attach({ uri: fakeUri('/x/a.md') } as never, panel as never);
     panel.fireMessage({ kind: 'navigate', path: 'b.md' });
     await new Promise((r) => setTimeout(r, 0));
-    const active = host.activeDocumentUri();
-    expect(active?.path).toContain('b.md');
+    const open = fake.commands.find((c) => c.command === 'vscode.open');
+    expect(open, '未发出 vscode.open').toBeTruthy();
+    expect((open!.args[0] as { path: string }).path).toContain('b.md');
+  });
+
+  it('面板仍存活时 attach 新面板 → 新面板必须拿到 HTML（不得白屏且无提示）', async () => {
+    const fake = makeFakeHost();
+    const { PanelHost } = await import('../src/host/webviewPanel');
+    const host = new PanelHost(
+      fake.vscode as never,
+      { extensionUri: fakeUri('/ext'), workspaceState: makeFakeWorkspaceState() } as never
+    );
+    const first = makeFakePanel(fake.posted);
+    await host.attach({ uri: fakeUri('/x/a.md') } as never, first as never);
+    // 同一文档的**新**面板（VSCode 新建 editor）→ 既有面板仍活着
+    const second = makeFakePanel(fake.posted);
+    await host.attach({ uri: fakeUri('/x/a.md') } as never, second as never);
+    expect(second.webview.html).not.toBe('');
+    expect(second.webview.options).toBeTruthy();
   });
 
   it('init 消息带 toc 折叠态（workspaceState 持久值优先，缺省回落设置缺省）', async () => {
@@ -426,6 +458,7 @@ describe('实时生效 · 面板生命周期（评审 critical ③ / minor ⑥ /
       { extensionUri: fakeUri('/ext'), workspaceState: state } as never
     );
     const panel = makeFakePanel(fake.posted);
+    host.watchChanges();
     await host.attach({ uri: fakeUri('/x/a.md') } as never, panel as never);
     const init = fake.posted.find(
       (m): m is { kind: string; toc: { collapsed: boolean } } =>
@@ -437,5 +470,10 @@ describe('实时生效 · 面板生命周期（评审 critical ③ / minor ⑥ /
     panel.fireMessage({ kind: 'toc-collapsed', collapsed: false });
     await new Promise((r) => setTimeout(r, 0));
     expect(state.store['vviewer.toc.collapsed']).toBe(false);
+
+    // 「默认折叠态」设置变更 → 清持久化覆盖（否则该设置永久失效——评审 minor ②）
+    fake.fireConfigChange('vviewer.toc.defaultCollapsed');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(state.store['vviewer.toc.collapsed']).toBeUndefined();
   });
 });
