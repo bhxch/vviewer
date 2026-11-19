@@ -247,3 +247,19 @@ describe('组④ Git 凭据区块 + git 表单扩支（spec I Task 3）', () => 
     expect(src).toMatch(/export function requestClose\(\): void \{[\s\S]{0,200}if \(credFormOpen\)/);
   });
 });
+
+describe('MountsManager 组④凭据轮换即生效（评审 minor：轮换不影响已打开的挂载实例）', () => {
+  const src = readSrc('src/lib/MountsManager.svelte');
+
+  it('凭据保存后释放引用该条目的直连存活实例（凭据键形态 <host>:<owner>）', () => {
+    // token 在建实例时解析一次、openDirectMount 复用存活实例 → 轮换后旧 token 持续；
+    // 修复口径与直连挂载保存同款（终审 I-3 先例：保存后释放实例，关闭去向由状态栏
+    // 既有 notice 告知——不新增提示通道）
+    expect(src).toMatch(
+      /const credKey = `\$\{host\}:\$\{owner\}`;/
+    );
+    expect(src).toMatch(
+      /rec\.kind === 'direct' && rec\.credentialKey === credKey[\s\S]{0,120}releaseDirectMountStore\(rec\.id\)/
+    );
+  });
+});

@@ -489,6 +489,7 @@
       const existing = records.find(
         (r): r is GitCredentialRecord => r.kind === 'gitcred' && r.id === `gitcred:${host}:${owner}`
       );
+      const credKey = `${host}:${owner}`;
       await saveMount({
         id: `gitcred:${host}:${owner}`,
         kind: 'gitcred',
@@ -498,6 +499,18 @@
         ...(credDraft.note.trim() !== '' ? { note: credDraft.note.trim() } : {}),
         createdAt: existing?.createdAt ?? Date.now()
       });
+      // 凭据轮换即生效（与直连挂载保存同款口径——终审 I-3 先例：保存后释放持旧凭据
+      // 的存活实例，关闭去向由状态栏既有 notice 告知）：引用该凭据条目的直连记录，其
+      // 存活实例仍持**旧** token（token 在建实例时解析一次，openDirectMount 复用存活
+      // 实例）→ 释放实例（关闭持有 tab），下次「打开」新建即持新凭据。此前该面缺失：
+      // 轮换后旧 token 持续到重存该挂载/刷新页面，且 UI 无任何提示（评审 minor）。
+      // 凭据键形态 `<host>:<owner>`（组④条目键；通配条目为 `<host>:*`——两形态各自命中
+      // 引用它的直连记录）。
+      for (const rec of records) {
+        if (rec.kind === 'direct' && rec.credentialKey === credKey) {
+          releaseDirectMountStore(rec.id);
+        }
+      }
       closeCredForm();
       await reloadRecords();
     } catch (err) {
