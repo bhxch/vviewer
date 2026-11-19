@@ -55,7 +55,7 @@
 | 行内盖 | 1 | `.vv-tabbar-arrow`（app.css:552）；tab 滚动渐隐上的箭头（app.css:549-552） | 容器内局部盖序 |
 | 抽屉带 | 20 | `.vv-side` 抽屉态（AppShell.svelte:1656）、`.vv-right` ≤600px 抽屉态（:1690）、`.vv-drawer-toggle`（:1668）、`.vv-right-toggle`（:1702）、`.vv-dl-progress` / `.vv-dl-confirm`（app.css:168/195，查看器内 absolute） | 压过 ArtPlayer `.art-video`（上游 absolute z-index:10）——PWA-09/2、MEDIA-11 修复口径 |
 | zen 浮钮 | 25 | `.vv-zen-exit`（AppShell.svelte:2025，≤900px 断点块内）、`.vv-zen-toc-btn`（AppShell.svelte:1979，全断点通用） | 刻意低于面板层 30：面板在场时返回键先关面板的视觉一致；zen 目录入口浮钮（spec A Task 4）与退出钮语义同层，禁新开档位 |
-| 面板层 | 30 | overlay 族：`.vv-settings-center`（SettingsCenter.svelte:526）、`.vv-mounts-manager`（MountsManager.svelte:868）、`.vv-gsearch`（GlobalSearchPanel.svelte:325）、`.vv-quickopen`（QuickOpenPanel.svelte:208）、`.vv-wscreate-panel`（app.css:474-477）、`.vv-wspanel`（app.css:484）、`.vv-status-picker`（app.css:680）、`.vv-git-blame-pop`（app.css:799） | 同位面板/浮层/拾取器基准档 |
+| 面板层 | 30 | overlay 族：`.vv-settings-center`（SettingsCenter.svelte:526）、`.vv-mounts-manager`（MountsManager.svelte:881）、`.vv-gsearch`（GlobalSearchPanel.svelte:325）、`.vv-quickopen`（QuickOpenPanel.svelte:208）、`.vv-wscreate-panel`（app.css:474-477）、`.vv-wspanel`（app.css:484）、`.vv-status-picker`（app.css:680）、`.vv-git-blame-pop`（app.css:799） | 同位面板/浮层/拾取器基准档 |
 | 确认/模态 | 31 / 32 | `.vv-sc-confirm` 31（SettingsCenter.svelte:727）、`.vv-sc-modal` 32（:745） | 面板层之上的次级弹层 |
 | chrome 条 | 50 | `.vv-chrome-off` / `.vv-chrome-temp`（app.css:392/397） | 标签栏隐藏后的临时条 |
 | 通知/搜索 | 60 | `.vv-toast`（AppShell.svelte:1724）、`.vv-search-panel`（app.css:329） | 瞬态告知与搜索条 |
@@ -101,7 +101,7 @@
 | DownloadProgressCard.svelte:39 / :53 | 下载完成/进行中双态（另经 aria-label 双通道） |
 | GlobalSearchPanel.svelte:252 | 全局搜索计数（aria-live="polite"） |
 | QuickOpenPanel.svelte:164 | 快开状态行（aria-live="polite"） |
-| MountsManager.svelte:623 / :761 | 组① 挂载行探测回显 / 组② 直连探测回显 |
+| MountsManager.svelte:636 / :774 | 组① 挂载行探测回显 / 组② 直连探测回显 |
 | SettingsCenter.svelte:368 / :444 | 脏态提示 / JSON 视图校验警示 |
 | AppearanceSection.svelte:440 / :454 / :480 | 亮槽警示 / 暗槽警示 / 导入错误摘要 |
 | FontsSection.svelte:431 / :480 | 字体操作提示（note）/ 网络字体错误行 |
@@ -118,7 +118,7 @@
 | 成员（文件:行） | 确认动作 |
 |---|---|
 | MountsManager.svelte:375 | 挂载记录删除（含异地提示拼合） |
-| MountsManager.svelte:513 | Git 凭据删除（spec I 评审 minor ④：token 明文不可找回+引用挂载降级匿名——删除后果声明，键 mounts.cred.deleteConfirm） |
+| MountsManager.svelte:526 | Git 凭据删除（spec I 评审 minor ④：token 明文不可找回+引用挂载降级匿名——删除后果声明，键 mounts.cred.deleteConfirm） |
 | MountsManager.svelte:431 | 本机授权来源清除 |
 | TabBar.svelte:206 | 远端文件另存为阈值确认（saveAsTab confirm 回调） |
 | FileTree.svelte:67 | 树源行移除（裸 `confirm(` 形态，语义同 window.confirm） |
