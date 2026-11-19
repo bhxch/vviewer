@@ -68,6 +68,8 @@ interface ExportProbe {
   blobImg: number;
   dataImg: number;
   blockedTitle: string;
+  mediaShell: number;
+  mediaLoadBtn: number;
   mermaidSvg: number;
   katex: number;
   katexFonts: number;
@@ -99,6 +101,11 @@ async function probeExportHtml(page: Page, html: string): Promise<ExportProbe> {
       blobImg: doc.querySelectorAll('img[src^="blob:"]').length,
       dataImg: doc.querySelectorAll('img[src^="data:image/png;base64,"]').length,
       blockedTitle: doc.querySelector('img[data-vv-blocked-external]')?.getAttribute('title') ?? '',
+      // 外链图片 manual 档占位壳（span.md-ext-media + button.md-ext-media-load）：
+      // 导出为静态文件——壳内的加载钮在静态文件里完全不可用（无脚本），故导出面剥净
+      // （导出契约=剥交互壳；评审 important ⑦ 的连带面：导出 HTML 不得留死按钮）
+      mediaShell: doc.querySelectorAll('.md-ext-media').length,
+      mediaLoadBtn: doc.querySelectorAll('.md-ext-media-load').length,
       mermaidSvg: doc.querySelectorAll('.md-diagram-view svg').length,
       katex: doc.querySelectorAll('.katex').length,
       katexFonts: (all.match(/data:font\/woff2;base64,/g) ?? []).length,
@@ -138,7 +145,11 @@ test.describe('b-md-export 导出链路', () => {
     // 图片：相对图 blob→data URI 内联（无 blob: 残留）；外域图保持管线拦截形态（无 src）
     expect(probe.blobImg).toBe(0);
     expect(probe.dataImg).toBe(1);
-    expect(probe.blockedTitle).toContain('example.com');
+    // 外域图的 manual 占位壳整体剥净（静态导出无脚本 → 加载钮是死按钮；壳内 img 亦随之
+    // 不在导出产物中——被拦的图本就没有可导出的字节）
+    expect(probe.mediaShell).toBe(0);
+    expect(probe.mediaLoadBtn).toBe(0);
+    expect(probe.blockedTitle).toBe('');
     // mermaid 图为 svg 成品（本地引擎渲染结果原样内联，非源码/占位）
     expect(probe.mermaidSvg).toBe(1);
     // KaTeX 公式成品 + 排印样式全嵌（Task 2b：20 个 woff2 data URI，fonts/ 相对引用归零）

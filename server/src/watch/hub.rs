@@ -125,6 +125,7 @@ mod tests {
     use notify::event::{CreateKind, EventKind};
     use notify::Error as NotifyError;
 
+    use super::super::recovery::{Opener, RawEvent};
     use super::super::testkit::{
         ev, factory, make_root_with_escape_symlink, next_frame, scripted_opener,
     };
@@ -201,13 +202,29 @@ mod tests {
     async fn poll_fallback_marks_degraded_and_keeps_changed_flow() {
         let rec_fails = Arc::new(AtomicUsize::new(0));
         let (txp, rxp) = std::sync::mpsc::channel();
+        // 降级帧与订阅之间的竞态消除（终局门禁失败面：快机器上本用例必红——后台重建
+        // 线程在 subscribe 之前就发出 watch-degraded 帧，broadcast 不回放 → 订阅者永等
+        // 不到）。装置：**降级成功方（poll opener）阻塞至测试订阅就绪**再放行，使
+        // 「降级帧」必在订阅之后发出。
+        let (gate_tx, gate_rx) = std::sync::mpsc::channel::<()>();
+        // 会话通道：接收端移入 opener（不可克隆），发送端留测试侧发事件（保活句柄用克隆）
+        let mut poll_session: Option<(std::sync::mpsc::Sender<RawEvent>, std::sync::mpsc::Receiver<RawEvent>)> =
+            Some((txp.clone(), rxp));
+        let poll_opener: Opener = Box::new(move || {
+            let _ = gate_rx.recv(); // 阻塞至测试订阅就绪（竞态消除闸）
+            match poll_session.take() {
+                Some((keep, rx)) => Ok((Box::new(keep) as Box<dyn Send>, rx, "mock-poll".to_string())),
+                None => Err(NotifyError::io(std::io::Error::other("mock poll session exhausted"))),
+            }
+        });
         let factory = factory(
             scripted_opener(vec![], rec_fails.clone()),
-            scripted_opener(vec![(txp.clone(), rxp, "mock-poll")], Arc::new(AtomicUsize::new(0))),
+            poll_opener,
         );
         let hub = ChangeHub::spawn_with(&[PathBuf::from("/srv/root")], vec![factory]);
         assert_ne!(hub.health(), WatchHealth::Ok, "首建失败不应为 Ok");
         let mut sub = hub.subscribe();
+        gate_tx.send(()).unwrap(); // 订阅就绪 → 放行降级
 
         // 重建：recommended 3 连败 → PollWatcher 降级成功 → watch-degraded 帧
         let f1 = next_frame(&mut sub).await;
