@@ -1,0 +1,1 @@
+var e=new URL(`../assets/seti.BYvugthT.woff`,import.meta.url).href;export{e as default};

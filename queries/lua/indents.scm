@@ -1,0 +1,26 @@
+[
+  (function_definition)
+  (function_declaration)
+  (method_index_expression)
+  (field)
+  (if_statement)
+  (for_statement)
+  (repeat_statement)
+  (while_statement)
+  (table_constructor)
+  (arguments)
+  (do_statement)
+] @indent
+
+[
+  "end"
+  "until"
+  "else"
+  "elseif"
+  "}"
+  ")"
+] @outdent
+
+; Handle partially typed code.
+(ERROR "then" @indent @extend)
+(ERROR "do" @indent @extend)
