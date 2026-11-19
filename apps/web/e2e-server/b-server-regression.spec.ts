@@ -1,4 +1,4 @@
-import { menuConnectServer } from '../e2e/tabbar-menu';
+import { menuConnectServer, openMenu } from '../e2e/tabbar-menu';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 import { applySettings, closeSettings, gotoGroup, openSettings } from '../e2e/settings-center';
@@ -165,7 +165,10 @@ test('BUG-05/SRV-07：关自动刷新后 SSE 不自动重读，手动刷新 ↻ 
   await page.waitForTimeout(3_500);
   await expect(page.locator('.vv-code-pre')).not.toContainText('marker-v2-manual');
 
-  // 手动刷新 ↻ → 新内容出现（BUG-05 验收 4，修复前无任何 UI 手段）
+  // 手动刷新 ↻ → 新内容出现（BUG-05 验收 4，修复前无任何 UI 手段）——该动作现为
+  // **融合菜单条目**（TabBarMenu「刷新当前文件」；aria-label/title 逐字沿用为 e2e 锚面）
+  // → 先开菜单再点
+  await openMenu(page);
   await page.locator('button[aria-label="刷新当前文件"]').click();
   await expect(page.locator('.vv-code-pre')).toContainText('marker-v2-manual', { timeout: 10_000 });
 });

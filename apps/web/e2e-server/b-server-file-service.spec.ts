@@ -1,4 +1,4 @@
-import { menuConnectServer } from '../e2e/tabbar-menu';
+import { menuConnectServer, openMenu } from '../e2e/tabbar-menu';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { appendFileSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -350,8 +350,11 @@ test.describe('SRV-07/BUG-05 手动刷新', () => {
     await applySettings(page);
     await closeSettings(page);
 
-    // 手动刷新按钮恒可用（BUG-05 验收 2 的 UI 前提）
+    // 手动刷新按钮恒可用（BUG-05 验收 2 的 UI 前提）——该动作现为**融合菜单条目**
+    // （TabBarMenu「刷新当前文件」；aria-label/title 逐字沿用为 e2e 锚面）→ 先开菜单
+    await openMenu(page);
     await expect(page.locator('button[aria-label="刷新当前文件"]')).toBeVisible();
+    await page.keyboard.press('Escape');
 
     // 服务端追加：手动模式下不自动出现（现状基线：追加 2.5s 后页面不含新行）
     const marker = `manual marker ${Date.now()}`;
@@ -359,7 +362,8 @@ test.describe('SRV-07/BUG-05 手动刷新', () => {
     await page.waitForTimeout(2_500);
     await expect(pre).not.toContainText(marker);
 
-    // 手动刷新 → 新行出现（BUG-05 验收 2 行为级）
+    // 手动刷新 → 新行出现（BUG-05 验收 2 行为级）——菜单条目：先开融合菜单
+    await openMenu(page);
     await page.locator('button[aria-label="刷新当前文件"]').click();
     await expect(pre).toContainText(marker, { timeout: 5_000 });
   });
