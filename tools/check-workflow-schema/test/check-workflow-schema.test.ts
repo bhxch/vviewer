@@ -51,7 +51,7 @@ describe('纯函数面', () => {
   });
 
   it('非 secrets 的 context 表达式不误报（vars/inputs/github 在 if 中合法）', () => {
-    const text = "    if: \${{ vars.NPM_SCOPE != '' && inputs.dry_run == 'false' }}\n";
+    const text = "    if: ${{ vars.NPM_SCOPE != '' && inputs.dry_run == 'false' }}\n";
     expect(scanWorkflowText('x.yml', text)).toHaveLength(0);
   });
 
