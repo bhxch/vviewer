@@ -58,6 +58,12 @@ runs:
     - name: gen-sources（缓存未命中时从 helix pin 重生成；命中跳）
       if: steps.grammars-cache.outputs.cache-hit != 'true'
       shell: bash
+      # GITHUB_TOKEN 传 github.token（内置只读令牌，限速 1000/h/小时）：gen-sources
+      # 拉 helix 树走 api.github.com，**匿名 60/h 在多 job 并发同打时必然 403**
+      # （实测 macOS 探针 job 即因此失败）。token 为可选增强——无 token 时脚本
+      # 仍可跑，但并发场景必受限速。
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       run: node tools/grammar-builder/gen-sources.mjs
     - name: fetch + self-build
       shell: bash

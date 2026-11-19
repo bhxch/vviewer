@@ -207,8 +207,12 @@ describe('main()（CLI 入口：Task 5 publish job 经 env 驱动）', () => {
       VV_NPM_OUT: f.outDir,
       VV_GRAMMARS_OUT: f.grammars,
       VV_QUERIES_DIR: f.queries,
+      // license 走 env 覆写（自足夹具）——**不依赖仓库根 server/GRAMMAR_LICENSES.md**：
+      // 该文件是 gen-licenses 生成物（spec F 出库不入库），干净 clone 里不存在，
+      // 依赖它会让本用例在「无生成物」环境（CI 冷缓存 / 本地 clean 后）抛错。
+      VV_LICENSE_FILE: f.licenseFile,
     })) as { files: number; bytes: number };
-    expect(r.files).toBe(9); // README 参与打包（GRAMMARS-NPM-README.md）；license 文件走默认路径（仓库根 server/GRAMMAR_LICENSES.md，入库稳定存在）
+    expect(r.files).toBe(9); // README 参与打包（GRAMMARS-NPM-README.md）+ license + package.json + manifest + 2 wasm + 3 scm
     const pkg = JSON.parse(readFileSync(path.join(f.outDir, 'package.json'), 'utf8')) as PkgJson;
     expect(pkg.name).toBe('@scope/vviewer-grammars-full');
     expect(pkg.version).toBe('1.2.3');
@@ -464,6 +468,8 @@ describe('packNpmSplit（拆分模式：FFD 体积均衡装箱，门禁两段语
         VV_QUERIES_DIR: f.queries,
         VV_NPM_SPLIT: '1',
         VV_NPM_SPLIT_LIMIT_MB: '40',
+        // license 走 env 覆写（同上：生成物不入库，默认路径在干净 clone 缺失）
+        VV_LICENSE_FILE: f.licenseFile,
       })) as SplitResult[];
       expect(results).toHaveLength(2);
       expect(existsSync(path.join(f.outDir, 'p1', 'package.json'))).toBe(true);

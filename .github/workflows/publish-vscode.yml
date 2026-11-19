@@ -93,8 +93,9 @@ jobs:
   publish-openvsx:
     name: publish（Open VSX）
     needs: build
-    # secrets 缺失即跳过——本仓无 secrets，job 恒跳过（上传不实跑）
-    if: ${{ secrets.OVSX_PAT != '' }}
+    # **守卫置于 step 级而非 job 级**：job 级 `if` 的可用 context 不含 secrets
+    # （GitHub 校验期直接拒绝整个 workflow 文件 → 0 job 失败，见本文件历史修复
+    # 记录）；step 级 `if` 允许 secrets，语义等价——secrets 缺失时上传步不执行。
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -111,6 +112,7 @@ jobs:
           name: vscode-extension
           path: artifact
       - name: 上传 Open VSX（PAT 走环境变量）
+        if: ${{ secrets.OVSX_PAT != '' }}
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: >-
@@ -120,8 +122,7 @@ jobs:
   publish-marketplace:
     name: publish（MS Marketplace）
     needs: build
-    # secrets 缺失即跳过——本仓无 secrets，job 恒跳过（上传不实跑）
-    if: ${{ secrets.VSCE_PAT != '' }}
+    # 守卫同样置于 step 级（job 级 if 不可用 secrets context）。
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -138,6 +139,7 @@ jobs:
           name: vscode-extension
           path: artifact
       - name: 上传 MS Marketplace（PAT 走环境变量）
+        if: ${{ secrets.VSCE_PAT != '' }}
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: >-

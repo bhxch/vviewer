@@ -42,6 +42,11 @@ jobs:
       - uses: ./.github/actions/setup-grammars
         with:
           languages: javascript,typescript,bash,html,css,json,python,rust
+      # GRAMMAR_LICENSES.md 出库不入库（spec F）：由 gen-licenses 从 setup-grammars
+      # 已落地的源树再生。**必须在 vitest 之前**——pack-npm 的默认路径用例读仓库根
+      # server/GRAMMAR_LICENSES.md，干净 clone 里缺失即抛错（与 grammar.yml
+      # self-build 的 gen-licenses 步同款义务；此处补的是 web job 的缺口）。
+      - run: node tools/grammar-builder/gen-licenses.mjs
       - run: pnpm typecheck
       # spec F §3.4 裁量：gen-code-extensions 的 CI --check 步退役——generated-extensions.ts
       # 已出库不入库（setup-grammars gen 步生成/缓存下发），门禁语义并入 gen 成功性
