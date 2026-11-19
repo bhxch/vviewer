@@ -37,6 +37,10 @@ import {
   githubDirTruncatedText,
   githubBfsLimitText,
   gitlabTruncatedText,
+  gitlabProjectIdMissingText,
+  githubCommitShaMissingText,
+  gitlabTreeNotArrayText,
+  gitlabCommitIdMissingText,
   httpFailedText,
   davHttpFailedText
 } from '@bhxch/vviewer-core';
@@ -817,6 +821,13 @@ describe('git 表单与凭据库（spec I Task 3）', () => {
     expect(githubDirTruncatedText()).toBe('GitHub 树清单不完整：tree API 目录级 truncated（清单截断，无法继续拉取）');
     expect(githubBfsLimitText()).toBe('GitHub 树清单不完整：BFS 逐目录请求超过 1000 次上限（清单截断，无法继续拉取）');
     expect(gitlabTruncatedText()).toBe('GitLab 树清单超过 20000 条目上限（清单截断，无法继续拉取）');
+  });
+
+  it('git 响应形态异常四缝经 mountsSync 注入链恒 zh 目录值（评审 minor：包内 4 处中文硬编码 → en 缺省 + 注入缝；zh 值与被替换的字面量逐字节等价）', () => {
+    expect(gitlabProjectIdMissingText('group/repo')).toBe('GitLab 项目响应缺少数字 id（project=group/repo）');
+    expect(githubCommitShaMissingText('main')).toBe('GitHub commits API 响应缺少 sha（ref=main）');
+    expect(gitlabTreeNotArrayText()).toBe('GitLab tree API 响应非数组');
+    expect(gitlabCommitIdMissingText('main')).toBe('GitLab commits API 响应缺少 id（ref=main）');
   });
 
   // ---- draftToDirectRecord git 两分支 ----

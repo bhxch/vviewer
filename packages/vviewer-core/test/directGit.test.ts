@@ -34,6 +34,10 @@ import {
   setGitlabHttpFailedText,
   setGitlabRateLimitText,
   setGitlabTruncatedText,
+  setGitlabProjectIdMissingText,
+  setGithubCommitShaMissingText,
+  setGitlabTreeNotArrayText,
+  setGitlabCommitIdMissingText,
   setGitNotFoundHintText,
   type GitlabDirectConfig,
   type GithubDirectConfig
@@ -98,7 +102,11 @@ const ALL_SETTERS = [
   setGitlabCorsFailureText,
   setGithubDirTruncatedText,
   setGithubBfsLimitText,
-  setGitlabTruncatedText
+  setGitlabTruncatedText,
+  setGitlabProjectIdMissingText,
+  setGithubCommitShaMissingText,
+  setGitlabTreeNotArrayText,
+  setGitlabCommitIdMissingText
 ];
 
 afterEach(() => {
@@ -719,6 +727,45 @@ describe('GitLab 全链（清单分页/内容/错误族——验收锚 ⑦）', 
       return extra(url, init);
     });
   }
+
+  it('响应形态异常文案：包内缺省英文（en locale 不见中文——评审 minor：4 处中文硬编码退化为注入缝 + en 缺省）', async () => {
+    // ① GitLab 项目响应缺数字 id
+    installFetch((url) => {
+      if (url === GL_PROJECT_URL) return jsonResponse({ id: 'not-a-number' });
+      return jsonResponse({ message: 'miss' }, 404);
+    });
+    await expect(gitlabStore().listChildren('')).rejects.toThrow(
+      'GitLab project response missing numeric id (project=group/repo)'
+    );
+    // ② GitLab tree 响应非数组
+    installFetch((url) => {
+      if (url === GL_PROJECT_URL) return jsonResponse({ id: GL_PID });
+      if (url.startsWith(GL_TREE_BASE)) return jsonResponse({ nope: true });
+      return jsonResponse({ message: 'miss' }, 404);
+    });
+    await expect(gitlabStore().listChildren('')).rejects.toThrow(
+      'GitLab tree API response is not an array'
+    );
+  });
+
+  it('响应形态异常文案：注入缝覆盖（apps/web 装配点注入目录 getter——setter 形态与既有 9 缝同款）', async () => {
+    setGitlabProjectIdMissingText((project) => `ZH-PROJECT(${project})`);
+    setGitlabTreeNotArrayText(() => 'ZH-TREE');
+    installFetch((url) => {
+      if (url === GL_PROJECT_URL) return jsonResponse({ id: 'not-a-number' });
+      return jsonResponse({ message: 'miss' }, 404);
+    });
+    await expect(gitlabStore().listChildren('')).rejects.toThrow('ZH-PROJECT(group/repo)');
+    installFetch((url) => {
+      if (url === GL_PROJECT_URL) return jsonResponse({ id: GL_PID });
+      if (url.startsWith(GL_TREE_BASE)) return jsonResponse({ nope: true });
+      return jsonResponse({ message: 'miss' }, 404);
+    });
+    await expect(gitlabStore().listChildren('')).rejects.toThrow('ZH-TREE');
+    // 恢复缺省（避免污染后续用例）
+    setGitlabProjectIdMissingText(null);
+    setGitlabTreeNotArrayText(null);
+  });
 
   it('项目解析一次缓存：两次根 listChildren 恰 1 次 /projects 请求 + tree 重拉 2 次（验收锚 ⑦）', async () => {
     const fn = installProjectMock((url) => {

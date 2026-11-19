@@ -203,6 +203,12 @@ export const messages = {
   'mounts.err.githubDirTruncated': 'GitHub 树清单不完整：tree API 目录级 truncated（清单截断，无法继续拉取）',
   'mounts.err.githubBfsLimit': 'GitHub 树清单不完整：BFS 逐目录请求超过 1000 次上限（清单截断，无法继续拉取）',
   'mounts.err.gitlabTruncated': 'GitLab 树清单超过 20000 条目上限（清单截断，无法继续拉取）',
+  // —— git 响应形态异常（spec E 评审 minor：4 处包内中文硬编码 → 注入缝 + 目录值；
+  //   zh 值与被替换的字面量逐字节等价，frontend-conventions §3.2）——
+  'mounts.err.gitlabProjectIdMissing': 'GitLab 项目响应缺少数字 id（project={project}）',
+  'mounts.err.githubCommitShaMissing': 'GitHub commits API 响应缺少 sha（ref={ref}）',
+  'mounts.err.gitlabTreeNotArray': 'GitLab tree API 响应非数组',
+  'mounts.err.gitlabCommitIdMissing': 'GitLab commits API 响应缺少 id（ref={ref}）',
 
   // —— git 测试连接回显（probeWith git 分派——spec I Task 2 评审 ① 前移收编；
   //   sha 回显 8 位、truncated 为 GitHub 大仓首响应采样注记 Errata ⑩）——

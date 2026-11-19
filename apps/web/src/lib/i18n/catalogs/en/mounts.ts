@@ -199,6 +199,11 @@ export const messages = {
   'mounts.err.githubDirTruncated': 'GitHub tree listing incomplete: directory-level truncated (listing cut off, cannot continue)',
   'mounts.err.githubBfsLimit': 'GitHub tree listing incomplete: BFS directory requests exceeded 1000 (listing cut off, cannot continue)',
   'mounts.err.gitlabTruncated': 'GitLab tree listing exceeds 20000 entries (listing cut off, cannot continue)',
+  // —— git 响应形态异常（spec E 评审 minor：4 处包内中文硬编码 → 注入缝 + 目录值）——
+  'mounts.err.gitlabProjectIdMissing': 'GitLab project response missing numeric id (project={project})',
+  'mounts.err.githubCommitShaMissing': 'GitHub commits API response missing sha (ref={ref})',
+  'mounts.err.gitlabTreeNotArray': 'GitLab tree API response is not an array',
+  'mounts.err.gitlabCommitIdMissing': 'GitLab commits API response missing id (ref={ref})',
 
   // —— git 测试连接回显（probeWith git 分派——spec I Task 2 评审 ① 前移收编）——
   'mounts.probe.okGit': 'Connected: {entries} files, ref {sha}, {ms} ms',

@@ -40,6 +40,10 @@ import {
   setGithubDirTruncatedText,
   setGithubBfsLimitText,
   setGitlabTruncatedText,
+  setGitlabProjectIdMissingText,
+  setGithubCommitShaMissingText,
+  setGitlabTreeNotArrayText,
+  setGitlabCommitIdMissingText,
   type DavDirectConfig,
   type GitlabDirectConfig,
   type GithubDirectConfig,
@@ -78,6 +82,12 @@ setGitlabCorsFailureText(() => t('mounts.err.gitlabCors'));
 setGithubDirTruncatedText(() => t('mounts.err.githubDirTruncated'));
 setGithubBfsLimitText(() => t('mounts.err.githubBfsLimit'));
 setGitlabTruncatedText(() => t('mounts.err.gitlabTruncated'));
+// git 响应形态异常（spec E 评审 minor：包内 4 处中文硬编码 → en 缺省 + 注入缝——
+// 与上组错误特征化文案同款：apps/web 恒注入故直连面恒走目录值，en locale 不再见中文）
+setGitlabProjectIdMissingText((project) => t('mounts.err.gitlabProjectIdMissing', { project }));
+setGithubCommitShaMissingText((ref) => t('mounts.err.githubCommitShaMissing', { ref }));
+setGitlabTreeNotArrayText(() => t('mounts.err.gitlabTreeNotArray'));
+setGitlabCommitIdMissingText((ref) => t('mounts.err.gitlabCommitIdMissing', { ref }));
 
 /**
  * 代理挂载记录（brief 接口 schema + 实施扩展，扩展面记录任务报告）：

@@ -113,6 +113,69 @@ export function setGithubHttpFailedText(
     getter ?? ((status, detail) => `GitHub request failed: HTTP ${status}${detail}`);
 }
 
+// ---------- 响应形态异常文案（spec E 评审 minor：4 处中文硬编码 → en 缺省 + 注入缝）——
+// 与既有错误特征化文案缝同款：包内缺省英文（包零 i18n 依赖），apps/web 装配点注入
+// 目录 getter（错误抛出时刻取当下 locale）。此前 4 条为中文硬编码字面量——en locale
+// 用户在这些错误路径见中文，且与 directS3/directDav 家族零 CJK 字面量先例不一致。
+
+let gitlabProjectIdMissingTextImpl: (project: string) => string = (project) =>
+  `GitLab project response missing numeric id (project=${project})`;
+
+/** GitLab 项目响应缺数字 id 文案（注入缝消费面同上）。 */
+export function gitlabProjectIdMissingText(project: string): string {
+  return gitlabProjectIdMissingTextImpl(project);
+}
+
+/** 注入 GitLab 项目响应缺数字 id 文案 getter（传 null 恢复缺省）。 */
+export function setGitlabProjectIdMissingText(
+  getter: ((project: string) => string) | null
+): void {
+  gitlabProjectIdMissingTextImpl =
+    getter ?? ((project) => `GitLab project response missing numeric id (project=${project})`);
+}
+
+let githubCommitShaMissingTextImpl: (ref: string) => string = (ref) =>
+  `GitHub commits API response missing sha (ref=${ref})`;
+
+/** GitHub commits API 响应缺 sha 文案（注入缝消费面同上）。 */
+export function githubCommitShaMissingText(ref: string): string {
+  return githubCommitShaMissingTextImpl(ref);
+}
+
+/** 注入 GitHub commits API 响应缺 sha 文案 getter（传 null 恢复缺省）。 */
+export function setGithubCommitShaMissingText(getter: ((ref: string) => string) | null): void {
+  githubCommitShaMissingTextImpl =
+    getter ?? ((ref) => `GitHub commits API response missing sha (ref=${ref})`);
+}
+
+let gitlabTreeNotArrayTextImpl: () => string = () =>
+  'GitLab tree API response is not an array';
+
+/** GitLab tree API 响应非数组文案（注入缝消费面同上）。 */
+export function gitlabTreeNotArrayText(): string {
+  return gitlabTreeNotArrayTextImpl();
+}
+
+/** 注入 GitLab tree API 响应非数组文案 getter（传 null 恢复缺省）。 */
+export function setGitlabTreeNotArrayText(getter: (() => string) | null): void {
+  gitlabTreeNotArrayTextImpl =
+    getter ?? (() => 'GitLab tree API response is not an array');
+}
+
+let gitlabCommitIdMissingTextImpl: (ref: string) => string = (ref) =>
+  `GitLab commits API response missing id (ref=${ref})`;
+
+/** GitLab commits API 响应缺 id 文案（注入缝消费面同上）。 */
+export function gitlabCommitIdMissingText(ref: string): string {
+  return gitlabCommitIdMissingTextImpl(ref);
+}
+
+/** 注入 GitLab commits API 响应缺 id 文案 getter（传 null 恢复缺省）。 */
+export function setGitlabCommitIdMissingText(getter: ((ref: string) => string) | null): void {
+  gitlabCommitIdMissingTextImpl =
+    getter ?? ((ref) => `GitLab commits API response missing id (ref=${ref})`);
+}
+
 let gitlabHttpFailedTextImpl: (status: number, detail: string) => string = (status, detail) =>
   `GitLab request failed: HTTP ${status}${detail}`;
 
@@ -472,7 +535,7 @@ async function gitlabResolveProjectId(
   await ensureGitOk(res, 'gitlab');
   const data = (await res.json()) as GitlabProjectResponse;
   if (typeof data.id !== 'number') {
-    throw new Error(`GitLab 项目响应缺少数字 id（project=${project}）`);
+    throw new Error(gitlabProjectIdMissingText(project));
   }
   return data.id;
 }
@@ -519,7 +582,7 @@ async function githubResolveRef(
   const data = (await res.json()) as GithubCommitResponse;
   const sha = typeof data.sha === 'string' ? data.sha : '';
   if (sha === '') {
-    throw new Error(`GitHub commits API 响应缺少 sha（ref=${ref}）`);
+    throw new Error(githubCommitShaMissingText(ref));
   }
   return sha;
 }
@@ -883,7 +946,7 @@ export function createGitlabDirectStore(cfg: GitlabDirectConfig): DirectStore {
       await ensureGitOk(res, 'gitlab');
       const batch = (await res.json()) as GitlabTreeItem[];
       if (!Array.isArray(batch)) {
-        throw new Error('GitLab tree API 响应非数组');
+        throw new Error(gitlabTreeNotArrayText());
       }
       for (const e of batch) {
         // 上限按**条目总数**计（blob + tree）——评审 minor：此前只计 blob，tree 条目
@@ -1001,7 +1064,7 @@ export async function probeGitlabDirect(cfg: GitlabDirectConfig): Promise<GitPro
   const commitData = (await commitRes.json()) as GitlabCommitResponse;
   const sha = typeof commitData.id === 'string' ? commitData.id : '';
   if (sha === '') {
-    throw new Error(`GitLab commits API 响应缺少 id（ref=${ref}）`);
+    throw new Error(gitlabCommitIdMissingText(ref));
   }
   const treeRes = await rawFetch(
     gitlabTreeUrl(host, pid, ref, mountPrefix),
