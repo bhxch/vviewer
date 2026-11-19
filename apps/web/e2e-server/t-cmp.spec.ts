@@ -230,7 +230,13 @@ test(
       await expect(page.locator('.vv-statusbar')).toContainText('执行: 远程', { timeout: 120_000 });
       await expect.poll(postCount, { timeout: 10_000 }).toBeGreaterThan(before);
       // 关标签重开（复现验收「同文件关标签重开」口径；关闭钮 aria-label 见 TabBar.svelte:31）
-      await page.getByRole('button', { name: '关闭 tcmp-code-3mb.js' }).click();
+      // 关闭钮：2026-11-11 a11y 真修（49bc813「tab role 落位」）后为 **aria-hidden 纯指针
+      // 字形 span**（键盘关闭走 Delete/右键菜单）——旧的 button+aria-label 锚已失效，
+      // 定位器恒空 → 本用例 300s 超时（server 档不在 CI，该漂移长期未被发现）
+      await page
+        .locator('.vv-tab', { hasText: 'tcmp-code-3mb.js' })
+        .locator('.vv-tab-close')
+        .click();
       await expect(page.locator('.vv-tab', { hasText: 'tcmp-code-3mb.js' })).toHaveCount(0);
     }
 
