@@ -4,6 +4,8 @@
 # - **上传**步以 secrets 存在性为守卫——本仓无 secrets，两个上传 job 恒跳过（workflow
 #   文件落库即止，**不实跑上传**；上传首跑实测属仓外 deferred——台账①）。
 #   本地 `vsce package` 体积门在 T1/T7 实跑，不受此守卫影响。
+#   守卫实现：上传步 run 脚本内判空（**不可**写进 `if` 表达式——`secrets` context
+#   在 job/step 级 `if` 的可用 context 中均不存在，GitHub 校验期会拒绝整个文件）。
 # - build job **不得**持发布写权限（`contents: read` 兜底）——上传面只在两个发布 job。
 # - 双渠道任一失败须可见（不设 `continue-on-error`）。
 # - 版本号来源 = tag（`v*` 去前缀）；tag 版本与扩展 manifest 版本不一致即 fail-fast
@@ -93,9 +95,11 @@ jobs:
   publish-openvsx:
     name: publish（Open VSX）
     needs: build
-    # **守卫置于 step 级而非 job 级**：job 级 `if` 的可用 context 不含 secrets
-    # （GitHub 校验期直接拒绝整个 workflow 文件 → 0 job 失败，见本文件历史修复
-    # 记录）；step 级 `if` 允许 secrets，语义等价——secrets 缺失时上传步不执行。
+    # **守卫置于上传步的 run 脚本内**：`secrets` context 在 job 级 `if` 与 step 级
+    # `if` 的可用 context 中均**不存在**（GitHub 校验期直接拒绝整个 workflow 文件
+    # → 0 job 失败，报 "Unrecognized named-value: 'secrets'"——本地 yaml.safe_load
+    # 通过，故静态 YAML 校验抓不到）；但 step 的 `env` 里取 secrets 合法。故：
+    # env 注入 PAT → 脚本内判空 → 空则跳过上传（不实跑）。
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -112,17 +116,24 @@ jobs:
           name: vscode-extension
           path: artifact
       - name: 上传 Open VSX（PAT 走环境变量）
-        if: ${{ secrets.OVSX_PAT != '' }}
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
-        run: >-
-          pnpm --filter @bhxch/vviewer-vscode exec ovsx publish
-          --packagePath artifact/apps/vscode/out/vviewer-vscode.vsix
+        run: |
+          # **守卫在脚本内做**——`secrets` context 在 job 级 `if` 与 step 级 `if` 均
+          # 不可用（GitHub 校验期直接拒绝整个 workflow 文件 → 0 job 失败，
+          # "Unrecognized named-value: 'secrets'"）；但 step 的 `env` 里取
+          # secrets 合法。故：env 注入 → 脚本内判空 → 空则跳过上传（不实跑）。
+          if [ -z "${OVSX_PAT}" ]; then
+            echo "[publish] OVSX_PAT 未配置——跳过 Open VSX 上传（发布属仓外操作）"
+            exit 0
+          fi
+          pnpm --filter @bhxch/vviewer-vscode exec ovsx publish \
+            --packagePath artifact/apps/vscode/out/vviewer-vscode.vsix
 
   publish-marketplace:
     name: publish（MS Marketplace）
     needs: build
-    # 守卫同样置于 step 级（job 级 if 不可用 secrets context）。
+    # 守卫同样置于上传步的 run 脚本内（同上：secrets context 在 if 表达式中不可用）。
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -139,10 +150,14 @@ jobs:
           name: vscode-extension
           path: artifact
       - name: 上传 MS Marketplace（PAT 走环境变量）
-        if: ${{ secrets.VSCE_PAT != '' }}
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: >-
-          pnpm --filter @bhxch/vviewer-vscode exec vsce publish
-          --packagePath artifact/apps/vscode/out/vviewer-vscode.vsix
-          --no-dependencies
+        run: |
+          # 守卫在脚本内做（同上：secrets context 在 if 表达式中不可用）。
+          if [ -z "${VSCE_PAT}" ]; then
+            echo "[publish] VSCE_PAT 未配置——跳过 MS Marketplace 上传（发布属仓外操作）"
+            exit 0
+          fi
+          pnpm --filter @bhxch/vviewer-vscode exec vsce publish \
+            --packagePath artifact/apps/vscode/out/vviewer-vscode.vsix \
+            --no-dependencies

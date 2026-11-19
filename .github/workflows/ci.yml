@@ -38,6 +38,12 @@ jobs:
       # 子包数（release workflow 级 env）、包内默认层数与 scope、两个构建面的注入
       # 三处口径一致——纯文本比对，无生成物依赖，可置于早失败位。
       - run: node tools/check-release-wiring/check-release-wiring.mjs
+      # workflow schema 门禁（2026-11-19 CI-only 事故的产品化修复）：
+      # `if` 表达式内用 secrets context → GitHub 校验期拒绝**整个 workflow 文件**
+      # （0 job 失败、workflow 名回落为文件路径）。本地 yaml.safe_load 只验语法不验
+      # schema，故此类缺陷本地全绿、GitHub 整文件拒——本门禁把该规则前置为本地可跑
+      # 的文本门禁（纯文本解析，无 yaml 依赖）。
+      - run: node tools/check-workflow-schema/check-workflow-schema.mjs
       # highlight 单测用真实 wasm（bash/html/css/javascript/typescript）
       - uses: ./.github/actions/setup-grammars
         with:
