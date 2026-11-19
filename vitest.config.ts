@@ -1,5 +1,15 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 export default defineConfig({
+  // SvelteKit 虚拟模块桩（$app/env / $app/paths）：根 vitest 无 svelte 插件，二者不可
+  // 求值——apps/web 中仅 highlightClient.ts 与 viewer.ts 引用（此前两者零直测面）。
+  // 桩值取浏览器构建语义（browser=true；base=''）。
+  resolve: {
+    alias: {
+      '$app/env': fileURLToPath(new URL('./tools/vitest-stubs/app-env.ts', import.meta.url)),
+      '$app/paths': fileURLToPath(new URL('./tools/vitest-stubs/app-paths.ts', import.meta.url))
+    }
+  },
   test: {
     include: [
       'packages/*/test/**/*.test.ts',
