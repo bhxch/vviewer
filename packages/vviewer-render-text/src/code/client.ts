@@ -116,6 +116,12 @@ export function waitForAttachedClient(timeoutMs = 10_000): Promise<CodeHighlight
       },
       timer: setTimeout(() => {
         attachWaiters = attachWaiters.filter((w) => w !== waiter);
+        // 超时放行留痕（评审 minor：重建慢于 10s 上限时本次渲染永久落 hljs 兜底，
+        // 而该路径原**零日志**——排查面全无，只剩状态栏「高亮: hljs 兜底」看不出
+        // 成因）。console.warn 记明超时与放行结果；用户侧可见面仍为状态栏兜底提示。
+        console.warn('[vviewer] highlight client attach timed out; falling back to hljs', {
+          timeoutMs
+        });
         resolve(attachedClient); // 超时放行：仍为 null → 调用方走既有 hljs 兜底
       }, timeoutMs)
     };

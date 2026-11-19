@@ -79,6 +79,18 @@ describe('高亮 client 注入相位（attach / detach / waiters）', () => {
     await expect(waitForAttachedClient(1_000)).resolves.toBeNull();
   });
 
+  it('⑤ 超时放行留痕：10s 上限到点 → console.warn 记明成因（评审 minor：超时路径原零日志——重建慢于上限时本次渲染永久落 hljs 兜底，排查面全无）', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const waiter = waitForAttachedClient(10_000);
+    vi.advanceTimersByTime(10_000);
+    await expect(waiter).resolves.toBeNull(); // 超时放行：仍为 null → 调用方走 hljs 兜底
+    expect(warn).toHaveBeenCalled();
+    expect(String(warn.mock.calls[0]![0])).toContain('highlight client attach timed out');
+    warn.mockRestore();
+    vi.useRealTimers();
+  });
+
   it('④ 相位语义的对照：attach(null) 放行 vs detach 不放行（重建与失败终态成对区分）', async () => {
     const failed = waitForAttachedClient(1_000);
     attachHighlightClient(null);
